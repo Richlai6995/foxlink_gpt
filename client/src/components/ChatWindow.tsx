@@ -1,0 +1,271 @@
+import { useEffect, useRef } from 'react'
+import { Copy, Check, RefreshCw, Download, Cpu, User } from 'lucide-react'
+import { useState } from 'react'
+import MarkdownRenderer from './MarkdownRenderer'
+import type { ChatMessage, GeneratedFile } from '../types'
+
+interface Props {
+  messages: ChatMessage[]
+  streaming: boolean
+  streamingContent: string
+  streamingStatus?: string
+  onCopy: (text: string) => void
+  onRegenerate?: () => void
+}
+
+function GeneratedFileLinks({ files }: { files: GeneratedFile[] }) {
+  if (!files || files.length === 0) return null
+  const imageFiles = files.filter((f) => f.type === 'image')
+  const otherFiles = files.filter((f) => f.type !== 'image')
+  return (
+    <div className="mt-3 space-y-2">
+      {imageFiles.length > 0 && (
+        <div className="flex flex-wrap gap-3">
+          {imageFiles.map((f, i) => (
+            <div key={i} className="flex flex-col gap-1.5">
+              <img
+                src={f.publicUrl}
+                alt={f.filename}
+                className="max-w-sm max-h-64 rounded-xl border border-slate-200 shadow-sm object-contain"
+              />
+              <a
+                href={f.publicUrl}
+                download={f.filename}
+                className="inline-flex items-center gap-1.5 bg-blue-50 border border-blue-200 hover:bg-blue-100 text-blue-700 rounded-lg px-3 py-1.5 text-xs font-medium transition self-start"
+              >
+                <Download size={12} />
+                {f.filename}
+              </a>
+            </div>
+          ))}
+        </div>
+      )}
+      {otherFiles.length > 0 && (
+        <div className="flex flex-wrap gap-2">
+          {otherFiles.map((f, i) => (
+            <a
+              key={i}
+              href={f.publicUrl}
+              download={f.filename}
+              className="inline-flex items-center gap-1.5 bg-blue-50 border border-blue-200 hover:bg-blue-100 text-blue-700 rounded-lg px-3 py-1.5 text-xs font-medium transition"
+            >
+              <Download size={12} />
+              {f.filename}
+            </a>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function markdownToPlainText(md: string): string {
+  return md
+    .replace(/```[\w]*\n([\s\S]*?)```/g, '$1')   // fenced code blocks → content only
+    .replace(/`([^`]+)`/g, '$1')                   // inline code
+    .replace(/^#{1,6}\s+/gm, '')                   // headings
+    .replace(/\*\*\*([^*]+)\*\*\*/g, '$1')         // bold+italic
+    .replace(/\*\*([^*]+)\*\*/g, '$1')             // bold
+    .replace(/\*([^*\n]+)\*/g, '$1')               // italic
+    .replace(/__([^_]+)__/g, '$1')
+    .replace(/_([^_\n]+)_/g, '$1')
+    .replace(/!\[([^\]]*)\]\([^)]+\)/g, '$1')      // images
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')       // links
+    .replace(/^>\s+/gm, '')                         // blockquotes
+    .replace(/^[-*+]\s+/gm, '• ')                  // unordered lists
+    .replace(/^\d+\.\s+/gm, (m) => m)              // ordered lists (keep as-is)
+    .replace(/^[-_*]{3,}$/gm, '')                  // hr
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+}
+
+function MessageBubble({
+  msg,
+  onCopy,
+  onRegenerate,
+  isLast,
+}: {
+  msg: ChatMessage
+  onCopy: (text: string) => void
+  onRegenerate?: () => void
+  isLast?: boolean
+}) {
+  const [copied, setCopied] = useState(false)
+  const [hover, setHover] = useState(false)
+
+  const handleCopy = () => {
+    const text = msg.role === 'assistant' ? markdownToPlainText(msg.content) : msg.content
+    onCopy(text)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
+
+  if (msg.role === 'user') {
+    return (
+      <div
+        className="flex justify-end gap-3 group"
+        onMouseEnter={() => setHover(true)}
+        onMouseLeave={() => setHover(false)}
+      >
+        <div className="flex flex-col items-end max-w-[70%] gap-1">
+          {/* Files */}
+          {msg.files && msg.files.length > 0 && (
+            <div className="flex flex-wrap gap-1 justify-end mb-1">
+              {msg.files.map((f, i) => (
+                <span
+                  key={i}
+                  className="bg-blue-100 text-blue-700 text-xs px-2 py-0.5 rounded-full"
+                >
+                  📎 {f.name}
+                </span>
+              ))}
+            </div>
+          )}
+          <div className="bg-blue-600 text-white px-4 py-3 rounded-2xl rounded-tr-sm text-sm leading-relaxed whitespace-pre-wrap">
+            {msg.content}
+          </div>
+          {hover && (
+            <button
+              onClick={handleCopy}
+              className="text-slate-400 hover:text-slate-600 transition text-xs flex items-center gap-1"
+            >
+              {copied ? <Check size={12} className="text-green-500" /> : <Copy size={12} />}
+              {copied ? '已複製' : '複製'}
+            </button>
+          )}
+        </div>
+        <div className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center flex-shrink-0 mt-1">
+          <User size={14} className="text-white" />
+        </div>
+      </div>
+    )
+  }
+
+  // Assistant
+  return (
+    <div
+      className="flex gap-3 group"
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+    >
+      <div className="w-8 h-8 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-full flex items-center justify-center flex-shrink-0 mt-1 shadow-sm">
+        <Cpu size={14} className="text-white" />
+      </div>
+      <div className="flex-1 max-w-[85%]">
+        <div className="bg-white border border-slate-200 rounded-2xl rounded-tl-sm px-5 py-4 shadow-sm overflow-hidden break-words">
+          <MarkdownRenderer content={msg.content} />
+          <GeneratedFileLinks files={msg.generated_files || []} />
+        </div>
+        {hover && (
+          <div className="flex items-center gap-2 mt-1.5">
+            <button
+              onClick={handleCopy}
+              className="text-slate-400 hover:text-slate-600 transition text-xs flex items-center gap-1"
+            >
+              {copied ? <Check size={12} className="text-green-500" /> : <Copy size={12} />}
+              {copied ? '已複製' : '複製'}
+            </button>
+            {isLast && onRegenerate && (
+              <button
+                onClick={onRegenerate}
+                className="text-slate-400 hover:text-slate-600 transition text-xs flex items-center gap-1"
+              >
+                <RefreshCw size={12} />
+                重新生成
+              </button>
+            )}
+            {msg.input_tokens !== undefined && msg.output_tokens !== undefined && (
+              <span className="text-slate-300 text-xs ml-auto">
+                ↑{msg.input_tokens} ↓{msg.output_tokens} tokens
+              </span>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function StreamingBubble({ content, status }: { content: string; status?: string }) {
+  return (
+    <div className="flex gap-3">
+      <div className="w-8 h-8 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-full flex items-center justify-center flex-shrink-0 mt-1 shadow-sm">
+        <Cpu size={14} className="text-white animate-pulse" />
+      </div>
+      <div className="flex-1 max-w-[85%]">
+        <div className="bg-white border border-blue-200 rounded-2xl rounded-tl-sm px-5 py-4 shadow-sm overflow-hidden break-words">
+          {content ? (
+            <MarkdownRenderer content={content} />
+          ) : (
+            <div className="flex gap-1 items-center h-5">
+              <span className="w-2 h-2 bg-blue-400 rounded-full animate-bounce [animation-delay:0ms]" />
+              <span className="w-2 h-2 bg-blue-400 rounded-full animate-bounce [animation-delay:150ms]" />
+              <span className="w-2 h-2 bg-blue-400 rounded-full animate-bounce [animation-delay:300ms]" />
+            </div>
+          )}
+          {status && (
+            <div className="mt-2 flex items-center gap-2 text-xs text-blue-500 border-t border-blue-100 pt-2">
+              <span className="w-3 h-3 border-2 border-blue-400 border-t-transparent rounded-full animate-spin flex-shrink-0" />
+              {status}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+export default function ChatWindow({ messages, streaming, streamingContent, streamingStatus, onCopy, onRegenerate }: Props) {
+  const bottomRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [messages, streamingContent])
+
+  if (messages.length === 0 && !streaming) {
+    return (
+      <div className="flex-1 flex items-center justify-center bg-slate-50">
+        <div className="text-center">
+          <div className="w-16 h-16 bg-blue-100 rounded-2xl flex items-center justify-center mx-auto mb-4">
+            <Cpu size={32} className="text-blue-600" />
+          </div>
+          <h2 className="text-xl font-semibold text-slate-700 mb-2">FOXLINK GPT</h2>
+          <p className="text-slate-400 text-sm">開始一個新的對話吧</p>
+          <div className="mt-6 flex flex-wrap justify-center gap-2 max-w-md">
+            {[
+              '幫我撰寫一份工作報告',
+              '分析上傳的 Excel 數據',
+              '生成一份 PowerPoint 簡報',
+              '解釋這份文件的重點',
+            ].map((hint) => (
+              <span
+                key={hint}
+                className="bg-white border border-slate-200 text-slate-500 text-xs px-3 py-1.5 rounded-full cursor-default"
+              >
+                {hint}
+              </span>
+            ))}
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex-1 overflow-y-auto bg-slate-50 px-4 py-6">
+      <div className="max-w-3xl mx-auto space-y-6">
+        {messages.map((msg, i) => (
+          <MessageBubble
+            key={msg.id}
+            msg={msg}
+            onCopy={onCopy}
+            onRegenerate={onRegenerate}
+            isLast={i === messages.length - 1 && msg.role === 'assistant'}
+          />
+        ))}
+        {streaming && <StreamingBubble content={streamingContent} status={streamingStatus} />}
+        <div ref={bottomRef} />
+      </div>
+    </div>
+  )
+}

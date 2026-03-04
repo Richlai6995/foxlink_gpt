@@ -1,0 +1,43 @@
+# ─── Never include in Docker build context ────────────────────────────────────
+
+# Dependencies (re-installed inside container)
+node_modules
+*/node_modules
+server/node_modules
+client/node_modules
+
+# Environment (injected at runtime via env_file / -e)
+.env
+*.env
+server/.env
+!server/.env.example
+
+# Git
+.git
+.gitignore
+
+# Build outputs (rebuilt inside container)
+client/dist
+dist
+
+# Runtime data (mounted as volumes)
+data/
+uploads/
+logs/
+backups/
+fonts/
+server/uploads/
+server/system.db
+server/system.db.tmp
+
+# Reference project (not needed in image)
+refrence_project/
+
+# Dev / IDE
+.vscode/
+.idea/
+*.log
+
+# OS
+.DS_Store
+Thumbs.db

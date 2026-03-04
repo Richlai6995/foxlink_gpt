@@ -1,0 +1,41 @@
+services:
+  app:
+    build: .
+    container_name: foxlink_gpt
+    ports:
+      - "3007:3007"
+    volumes:
+      # ── Persistent data (MUST survive container rebuilds) ──────────────────
+      # SQLite database
+      - ./data:/app/data
+      # Uploaded files & AI-generated files
+      - ./uploads:/app/uploads
+      # Log files
+      - ./logs:/app/logs
+      # DB backups → E:\backup_file\foxlink_gpt_db_backup (Windows E: = /mnt/e on Linux host)
+      - /mnt/e/backup_file/foxlink_gpt_db_backup:/app/backups
+      # CJK fonts for Chinese PDF generation
+      # Place NotoSansTC-Regular.ttf (or kaiu.ttf) here if needed
+      - ./fonts:/app/fonts
+      # ── Oracle Instant Client (Thick Mode for ERP DB) ─────────────────────
+      # Host path: /mnt/e/oracle_client_linux/instantclient_19_29
+      # Container path must match ORACLE_HOME in Dockerfile (/opt/oracle/instantclient_19_26)
+      - /mnt/e/oracle_client_linux/instantclient_19_29:/opt/oracle/instantclient_19_26
+    environment:
+      - PORT=3007
+      - TZ=Asia/Taipei
+      - NODE_ENV=production
+      - DB_PATH=/app/data/system.db
+      - UPLOAD_DIR=/app/uploads
+      # Oracle Instant Client (overrides .env — must match volume target path above)
+      - ORACLE_HOME=/opt/oracle/instantclient_19_26
+      - LD_LIBRARY_PATH=/opt/oracle/instantclient_19_26
+    env_file:
+      - server/.env
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3007/api/auth/status", "||", "exit", "1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s

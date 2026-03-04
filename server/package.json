@@ -1,0 +1,33 @@
+{
+  "name": "foxlink-gpt-server",
+  "version": "1.0.0",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch --watch-path=./server.js --watch-path=./database.js --watch-path=./routes --watch-path=./services server.js"
+  },
+  "dependencies": {
+    "@google/generative-ai": "^0.21.0",
+    "@mozilla/readability": "^0.6.0",
+    "archiver": "^7.0.1",
+    "cors": "^2.8.5",
+    "docx": "^9.6.0",
+    "dotenv": "^16.4.5",
+    "exceljs": "^4.4.0",
+    "express": "^4.19.2",
+    "jsdom": "^28.1.0",
+    "jszip": "^3.10.1",
+    "ldapjs": "^3.0.7",
+    "mammoth": "^1.8.0",
+    "multer": "^1.4.5-lts.1",
+    "node-cron": "^3.0.3",
+    "nodemailer": "^6.9.14",
+    "oracledb": "^6.10.0",
+    "pdf-parse": "^1.1.1",
+    "pdfkit": "^0.17.2",
+    "pptxgenjs": "^3.12.0",
+    "sql.js": "^1.11.0",
+    "uuid": "^9.0.1",
+    "xlsx": "^0.18.5"
+  }
+}

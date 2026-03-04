@@ -1,0 +1,76 @@
+# ─── Node ─────────────────────────────────────────────────────────────────────
+node_modules/
+*/node_modules/
+server/node_modules/
+client/node_modules/
+
+# ─── Environment / Secrets ────────────────────────────────────────────────────
+.env
+*.env
+.env.local
+.env.*.local
+# Keep .env.example
+!server/.env.example
+
+# ─── Build Outputs ────────────────────────────────────────────────────────────
+dist/
+build/
+client/dist/
+
+# ─── Database & Storage ───────────────────────────────────────────────────────
+*.db
+*.sqlite
+*.db.tmp
+server/system.db
+server/system.db.bak
+server/uploads/
+data/
+uploads/
+backups/
+logs/
+
+# ─── Fonts (binary files, add your own to server/fonts/) ──────────────────────
+server/fonts/*.ttf
+server/fonts/*.otf
+server/fonts/*.ttc
+server/fonts/*.woff
+server/fonts/*.woff2
+# Docker host-mounted fonts dir
+fonts/
+
+# ─── Reference Project (read-only, do not commit) ────────────────────────────
+refrence_project/
+
+# ─── OS ───────────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ─── IDE ──────────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+
+# ─── Logs ─────────────────────────────────────────────────────────────────────
+*.log
+npm-debug.log*
+yarn-debug.log*
+
+# ─── Temp ─────────────────────────────────────────────────────────────────────
+temp/
+tmp/
+*.tmp
+
+# ─── Server logs dir ──────────────────────────────────────────────────────────
+server/logs/
+
+# ─── pnpm ─────────────────────────────────────────────────────────────────────
+pnpm-debug.log*
+
+# ─── Claude AI assistant files ────────────────────────────────────────────────
+.claude/
+
+# ─── Coverage ─────────────────────────────────────────────────────────────────
+coverage/
+.nyc_output/
