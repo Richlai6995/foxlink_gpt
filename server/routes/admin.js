@@ -1157,4 +1157,136 @@ router.put('/skills/:id', (req, res) => {
   }
 });
 
+// ── Code Skill Runners (/api/admin/skill-runners) ────────────────────────────
+const skillRunner = require('../services/skillRunner');
+
+// GET /api/admin/skill-runners — all code skills with runtime status
+router.get('/skill-runners', (req, res) => {
+  try {
+    const db = require('../database').db;
+    const skills = db.prepare(`SELECT id, name, icon, code_status, code_port, code_pid, code_error, code_packages FROM skills WHERE type='code' ORDER BY id ASC`).all();
+    const result = skills.map((s) => {
+      const rt = skillRunner.getStatus(s.id);
+      return {
+        ...s,
+        code_packages: (() => { try { return JSON.parse(s.code_packages || '[]'); } catch { return []; } })(),
+        runtime_running: rt.running,
+        runtime_port: rt.port,
+        runtime_pid: rt.pid,
+      };
+    });
+    res.json(result);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/admin/skill-runners/:id/start
+router.post('/skill-runners/:id/start', async (req, res) => {
+  try {
+    const db = require('../database').db;
+    const skill = db.prepare('SELECT * FROM skills WHERE id=? AND type=?').get(req.params.id, 'code');
+    if (!skill) return res.status(404).json({ error: '找不到 code skill' });
+    if (!skill.code_snippet) return res.status(400).json({ error: '尚未儲存程式碼，請先儲存 code_snippet' });
+    skillRunner.saveCode(skill.id, skill.code_snippet);
+    const { port, pid } = await skillRunner.spawnRunner(skill, db);
+    res.json({ success: true, port, pid });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/admin/skill-runners/:id/stop
+router.post('/skill-runners/:id/stop', (req, res) => {
+  try {
+    const db = require('../database').db;
+    const killed = skillRunner.killRunner(parseInt(req.params.id), db);
+    res.json({ success: true, killed });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/admin/skill-runners/:id/restart
+router.post('/skill-runners/:id/restart', async (req, res) => {
+  try {
+    const db = require('../database').db;
+    const skill = db.prepare('SELECT * FROM skills WHERE id=? AND type=?').get(req.params.id, 'code');
+    if (!skill) return res.status(404).json({ error: '找不到 code skill' });
+    if (!skill.code_snippet) return res.status(400).json({ error: '尚未儲存程式碼' });
+    skillRunner.saveCode(skill.id, skill.code_snippet);
+    const { port, pid } = await skillRunner.restartRunner(skill, db);
+    res.json({ success: true, port, pid });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/admin/skill-runners/:id/install — npm install with SSE log stream
+router.post('/skill-runners/:id/install', async (req, res) => {
+  try {
+    const db = require('../database').db;
+    const skill = db.prepare('SELECT * FROM skills WHERE id=? AND type=?').get(req.params.id, 'code');
+    if (!skill) return res.status(404).json({ error: '找不到 code skill' });
+
+    // Request body can override DB packages (for one-off install without editing skill)
+    let packages;
+    if (req.body && Array.isArray(req.body.packages)) {
+      packages = req.body.packages.filter(p => typeof p === 'string' && p.trim());
+      // Persist to DB so next install also uses the updated list
+      if (packages.length > 0) {
+        db.prepare(`UPDATE skills SET code_packages=? WHERE id=?`)
+          .run(JSON.stringify(packages), skill.id);
+      }
+    } else {
+      packages = (() => { try { return JSON.parse(skill.code_packages || '[]'); } catch { return []; } })();
+    }
+
+    // SSE stream
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.flushHeaders?.();
+
+    const send = (line) => {
+      res.write(`data: ${JSON.stringify({ line })}\n\n`);
+    };
+
+    skillRunner.ensureRunnerDir(skill.id);
+    if (skill.code_snippet) skillRunner.saveCode(skill.id, skill.code_snippet);
+
+    try {
+      await skillRunner.installPackages(skill.id, packages, send);
+      res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+    } catch (e) {
+      res.write(`data: ${JSON.stringify({ error: e.message })}\n\n`);
+    }
+    res.end();
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/admin/skill-runners/:id/logs — SSE live stdout/stderr
+router.get('/skill-runners/:id/logs', (req, res) => {
+  const skillId = parseInt(req.params.id);
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders?.();
+
+  // Send existing buffered lines
+  const existing = skillRunner.getLogs(skillId);
+  for (const line of existing) {
+    res.write(`data: ${JSON.stringify({ line })}\n\n`);
+  }
+  res.write(`data: ${JSON.stringify({ line: '--- subscribing to live log ---' })}\n\n`);
+
+  skillRunner.subscribeLog(skillId, res);
+
+  req.on('close', () => {
+    skillRunner.unsubscribeLog(skillId, res);
+  });
+});
+
 module.exports = router;

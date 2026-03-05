@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Plus, Trash2, Edit2, Star, StarOff, Plug, Zap, Check, FileText, Mic, Image, CalendarClock } from 'lucide-react'
+import { Plus, Trash2, Edit2, Star, StarOff, Plug, Zap, Check, FileText, Mic, Image, CalendarClock, Code2 } from 'lucide-react'
 import api from '../../lib/api'
 
 interface Role {
@@ -22,6 +22,7 @@ interface Role {
   allow_scheduled_tasks: number
   allow_create_skill: number
   allow_external_skill: number
+  allow_code_skill: number
 }
 
 interface McpServer {
@@ -56,6 +57,7 @@ const emptyForm = {
   allow_scheduled_tasks: false,
   allow_create_skill: false,
   allow_external_skill: false,
+  allow_code_skill: false,
 }
 
 export default function RoleManagement() {
@@ -116,6 +118,7 @@ export default function RoleManagement() {
       allow_scheduled_tasks: role.allow_scheduled_tasks === 1,
       allow_create_skill: role.allow_create_skill === 1,
       allow_external_skill: role.allow_external_skill === 1,
+      allow_code_skill: role.allow_code_skill === 1,
     })
     setError('')
     setShowModal(true)
@@ -288,6 +291,11 @@ export default function RoleManagement() {
                 {role.allow_scheduled_tasks === 1 && (
                   <span className="flex items-center gap-1 text-xs bg-blue-50 text-blue-700 border border-blue-200 px-2 py-0.5 rounded-full">
                     <CalendarClock size={10} /> 排程
+                  </span>
+                )}
+                {role.allow_code_skill === 1 && (
+                  <span className="flex items-center gap-1 text-xs bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded-full">
+                    <Code2 size={10} /> 程式Skill
                   </span>
                 )}
               </div>
@@ -468,6 +476,16 @@ export default function RoleManagement() {
                       className="w-4 h-4 rounded border-slate-300 text-blue-600"
                     />
                     <span className="text-sm text-slate-700">🌐 允許建立外部 Skill</span>
+                  </label>
+                  <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={(form as any).allow_code_skill}
+                      onChange={e => setForm({ ...form, allow_code_skill: e.target.checked } as any)}
+                      className="w-4 h-4 rounded border-slate-300 text-blue-600"
+                    />
+                    <Code2 size={13} />
+                    <span className="text-sm text-slate-700">允許建立內部程式 Skill（資訊部門專用）</span>
                   </label>
                 </div>
               </div>

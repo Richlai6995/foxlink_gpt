@@ -39,6 +39,7 @@ export default function ChatPage() {
   const [skillSearch, setSkillSearch] = useState('')
   const [pickedIds, setPickedIds] = useState<Set<number>>(new Set())    // draft selection
   const [skillSaving, setSkillSaving] = useState(false)
+  const [pendingSkillIds, setPendingSkillIds] = useState<Set<number>>(new Set())
   const skillPanelRef = useRef<HTMLDivElement>(null)
 
   interface BudgetPeriod { limit: number; spent: number; remaining: number; exceeded: boolean }
@@ -257,11 +258,17 @@ export default function ChatPage() {
   }, [])
 
   const saveSkills = useCallback(async () => {
-    if (!currentSessionId) return
+    if (!currentSessionId) {
+      // No session yet — store as pending, show in UI from allSkills
+      setPendingSkillIds(new Set(pickedIds))
+      const pending = allSkills.filter(s => pickedIds.has(s.id))
+      setSessionSkills(pending)
+      setShowSkillPanel(false)
+      return
+    }
     setSkillSaving(true)
     try {
       await api.put(`/chat/sessions/${currentSessionId}/skills`, { skill_ids: [...pickedIds] })
-      // reload attached list
       const res = await api.get(`/chat/sessions/${currentSessionId}`)
       const attached: Skill[] = res.data.skills || []
       setSessionSkills(attached)
@@ -272,7 +279,7 @@ export default function ChatPage() {
     } finally {
       setSkillSaving(false)
     }
-  }, [currentSessionId, pickedIds])
+  }, [currentSessionId, pickedIds, allSkills])
 
   const togglePick = (id: number) => setPickedIds(prev => {
     const next = new Set(prev)
@@ -310,6 +317,13 @@ export default function ChatPage() {
           }
           setSessions((prev) => [newSession, ...prev])
           setCurrentSessionId(sessionId)
+          // Apply pending skills to the new session
+          if (pendingSkillIds.size > 0) {
+            try {
+              await api.put(`/chat/sessions/${sessionId}/skills`, { skill_ids: [...pendingSkillIds] })
+              setPendingSkillIds(new Set())
+            } catch { }
+          }
         } catch (e) {
           console.error('Create session error:', e)
           return
@@ -477,7 +491,7 @@ export default function ChatPage() {
         abortRef.current = null
       }
     },
-    [streaming, currentSessionId, model, loadSessions]
+    [streaming, currentSessionId, model, loadSessions, pendingSkillIds]
   )
 
   const handleCopy = useCallback((text: string) => {
@@ -532,8 +546,7 @@ export default function ChatPage() {
               : 'FOXLINK GPT'}
           </span>
           {/* Skills button + badges */}
-          {currentSessionId && (
-            <div className="flex items-center gap-1.5 relative" ref={skillPanelRef}>
+          <div className="flex items-center gap-1.5 relative" ref={skillPanelRef}>
               {/* Attached skill badges */}
               {sessionSkills.map(sk => (
                 <span key={sk.id} className="inline-flex items-center gap-1 text-xs px-2 py-0.5 bg-purple-100 text-purple-700 border border-purple-200 rounded-full font-medium">
@@ -621,7 +634,6 @@ export default function ChatPage() {
                 </div>
               )}
             </div>
-          )}
 
           {/* Share button — only when a session is loaded and not streaming */}
           {currentSessionId && messages.length > 0 && !streaming && (

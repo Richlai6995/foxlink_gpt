@@ -398,8 +398,9 @@ router.put('/sessions/:id/skills', (req, res) => {
     if (!session) return res.status(404).json({ error: '找不到對話' });
     const skillIds = Array.isArray(req.body.skill_ids) ? req.body.skill_ids : [];
     db.prepare('DELETE FROM session_skills WHERE session_id=?').run(req.params.id);
-    const insert = db.prepare('INSERT INTO session_skills (session_id, skill_id, sort_order) VALUES (?,?,?)');
-    skillIds.forEach((id, idx) => insert.run(req.params.id, id, idx));
+    skillIds.forEach((id, idx) =>
+      db.prepare('INSERT INTO session_skills (session_id, skill_id, sort_order) VALUES (?,?,?)').run(req.params.id, id, idx)
+    );
     res.json({ success: true, skill_ids: skillIds });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -899,9 +900,10 @@ router.post('/sessions/:id/messages', upload.array('files', 10), async (req, res
     let externalAnswerSkill = null;
 
     for (const sk of sessionSkills) {
+      console.log(`[Skill] id=${sk.id} name="${sk.name}" type=${sk.type} mode=${sk.endpoint_mode} url=${sk.endpoint_url}`);
       if (sk.type === 'builtin' && sk.system_prompt) {
         skillSystemPrompts.push(`# Skill: ${sk.name}\n${sk.system_prompt}`);
-      } else if (sk.type === 'external' && sk.endpoint_url) {
+      } else if ((sk.type === 'external' || sk.type === 'code') && sk.endpoint_url) {
         if (sk.endpoint_mode === 'answer') {
           externalAnswerSkill = sk;
         } else {
@@ -913,7 +915,6 @@ router.post('/sessions/:id/messages', upload.array('files', 10), async (req, res
     // External inject: call endpoints and collect additional system prompts
     for (const sk of externalInjectSkills) {
       try {
-        const fetch = require('node-fetch');
         const resp = await Promise.race([
           fetch(sk.endpoint_url, {
             method: 'POST',
@@ -928,7 +929,11 @@ router.post('/sessions/:id/messages', upload.array('files', 10), async (req, res
         ]);
         if (resp.ok) {
           const data = await resp.json();
+          console.log(`[Skill] inject response for "${sk.name}":`, JSON.stringify(data).slice(0, 300));
           if (data.system_prompt) skillSystemPrompts.push(`# Skill: ${sk.name}\n${data.system_prompt}`);
+          else if (data.content) skillSystemPrompts.push(`# Skill: ${sk.name}\n${data.content}`);
+        } else {
+          console.warn(`[Skill] inject HTTP ${resp.status} for "${sk.name}"`);
         }
       } catch (e) {
         console.warn(`[Skill] External inject failed for "${sk.name}": ${e.message} — skipping`);
@@ -940,7 +945,6 @@ router.post('/sessions/:id/messages', upload.array('files', 10), async (req, res
       const sk = externalAnswerSkill;
       sendEvent({ type: 'status', message: `Skill: ${sk.name} 處理中...` });
       try {
-        const fetch = require('node-fetch');
         const resp = await Promise.race([
           fetch(sk.endpoint_url, {
             method: 'POST',
@@ -986,6 +990,8 @@ router.post('/sessions/:id/messages', upload.array('files', 10), async (req, res
     const skillExtraInstruction = skillSystemPrompts.length > 0
       ? '\n\n---\n' + skillSystemPrompts.join('\n\n')
       : '';
+    // Disable Google Search when inject skills have provided data (avoid Gemini overriding with Search)
+    const disableSearchForSkill = externalInjectSkills.length > 0 && skillSystemPrompts.length > 0;
 
     console.log(`[Chat] Calling Gemini (model=${chosenModel} → ${apiModel}, imageOutput=${imageOutput}, skills=${sessionSkills.length}) parts=${userParts.length} history=${history.length}`);
     const t0 = Date.now();
@@ -1192,7 +1198,8 @@ router.post('/sessions/:id/messages', upload.array('files', 10), async (req, res
               aiText += chunk;
               sendEvent({ type: 'chunk', content: chunk });
             },
-            skillExtraInstruction
+            skillExtraInstruction,
+            disableSearchForSkill
           ));
         } finally {
           clearInterval(keepAliveInterval);

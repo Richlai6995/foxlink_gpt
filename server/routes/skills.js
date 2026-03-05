@@ -26,6 +26,7 @@ function serializeSkill(s, maskSecret = true) {
         mcp_tool_ids: parseJsonField(s.mcp_tool_ids),
         dify_kb_ids: parseJsonField(s.dify_kb_ids),
         tags: parseJsonField(s.tags),
+        code_packages: parseJsonField(s.code_packages),
         endpoint_secret: maskSecret ? (s.endpoint_secret ? '****' : '') : s.endpoint_secret,
     };
 }
@@ -60,15 +61,20 @@ router.post('/', (req, res) => {
             return res.status(403).json({ error: '無建立 Skill 的權限，請聯絡管理員' });
         }
         const { name, description, icon, type, system_prompt, endpoint_url, endpoint_secret,
-            endpoint_mode, model_key, mcp_tool_mode, mcp_tool_ids, dify_kb_ids, tags } = req.body;
+            endpoint_mode, model_key, mcp_tool_mode, mcp_tool_ids, dify_kb_ids, tags,
+            code_snippet, code_packages } = req.body;
         if (!name) return res.status(400).json({ error: 'name 必填' });
         if (type === 'external' && !hasSkillPerm(db, req.user.id, 'allow_external_skill') && req.user.role !== 'admin') {
             return res.status(403).json({ error: '無建立外部 Skill 的權限' });
         }
+        if (type === 'code' && !hasSkillPerm(db, req.user.id, 'allow_code_skill') && req.user.role !== 'admin') {
+            return res.status(403).json({ error: '無建立內部程式 Skill 的權限' });
+        }
         const result = db.prepare(`
       INSERT INTO skills (name, description, icon, type, system_prompt, endpoint_url, endpoint_secret,
-        endpoint_mode, model_key, mcp_tool_mode, mcp_tool_ids, dify_kb_ids, tags, owner_user_id)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        endpoint_mode, model_key, mcp_tool_mode, mcp_tool_ids, dify_kb_ids, tags, owner_user_id,
+        code_snippet, code_packages)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     `).run(
             name, description || null, icon || '🤖',
             type || 'builtin', system_prompt || null,
@@ -78,7 +84,9 @@ router.post('/', (req, res) => {
             JSON.stringify(mcp_tool_ids || []),
             JSON.stringify(dify_kb_ids || []),
             JSON.stringify(tags || []),
-            req.user.id
+            req.user.id,
+            code_snippet || null,
+            JSON.stringify(code_packages || [])
         );
         const skill = db.prepare('SELECT * FROM skills WHERE id=?').get(result.lastInsertRowid);
         res.json(serializeSkill(skill, false));
@@ -114,16 +122,21 @@ router.put('/:id', (req, res) => {
             return res.status(403).json({ error: '只有建立者或管理員可以編輯' });
         }
         const { name, description, icon, type, system_prompt, endpoint_url, endpoint_secret,
-            endpoint_mode, model_key, mcp_tool_mode, mcp_tool_ids, dify_kb_ids, tags } = req.body;
+            endpoint_mode, model_key, mcp_tool_mode, mcp_tool_ids, dify_kb_ids, tags,
+            code_snippet, code_packages } = req.body;
         if (type === 'external' && !hasSkillPerm(db, req.user.id, 'allow_external_skill') && req.user.role !== 'admin') {
             return res.status(403).json({ error: '無建立外部 Skill 的權限' });
+        }
+        if (type === 'code' && !hasSkillPerm(db, req.user.id, 'allow_code_skill') && req.user.role !== 'admin') {
+            return res.status(403).json({ error: '無建立內部程式 Skill 的權限' });
         }
         // Keep old secret if masked value passed
         const newSecret = (endpoint_secret && endpoint_secret !== '****') ? endpoint_secret : s.endpoint_secret;
         db.prepare(`
       UPDATE skills SET name=?, description=?, icon=?, type=?, system_prompt=?,
         endpoint_url=?, endpoint_secret=?, endpoint_mode=?, model_key=?,
-        mcp_tool_mode=?, mcp_tool_ids=?, dify_kb_ids=?, tags=?, updated_at=CURRENT_TIMESTAMP
+        mcp_tool_mode=?, mcp_tool_ids=?, dify_kb_ids=?, tags=?,
+        code_snippet=?, code_packages=?, updated_at=CURRENT_TIMESTAMP
       WHERE id=?
     `).run(
             name ?? s.name, description ?? s.description, icon ?? s.icon,
@@ -134,6 +147,8 @@ router.put('/:id', (req, res) => {
             JSON.stringify(mcp_tool_ids ?? parseJsonField(s.mcp_tool_ids)),
             JSON.stringify(dify_kb_ids ?? parseJsonField(s.dify_kb_ids)),
             JSON.stringify(tags ?? parseJsonField(s.tags)),
+            code_snippet !== undefined ? (code_snippet || null) : s.code_snippet,
+            JSON.stringify(code_packages ?? parseJsonField(s.code_packages)),
             req.params.id
         );
         const updated = db.prepare('SELECT * FROM skills WHERE id=?').get(req.params.id);

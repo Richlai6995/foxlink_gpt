@@ -18,6 +18,7 @@ router.get('/', (req, res) => {
         `SELECT u.id, u.username, u.name, u.employee_id, u.email, u.role, u.start_date, u.end_date, u.status,
                 u.allow_text_upload, u.text_max_mb, u.allow_audio_upload, u.audio_max_mb,
                 u.allow_image_upload, u.image_max_mb, u.allow_scheduled_tasks,
+                u.allow_create_skill, u.allow_external_skill, u.allow_code_skill,
                 u.role_id, r.name AS role_name, u.creation_method,
                 u.budget_daily, u.budget_weekly, u.budget_monthly,
                 ${ORG_COLS}
@@ -112,6 +113,7 @@ router.put('/:id', async (req, res) => {
     allow_text_upload, text_max_mb, allow_audio_upload, audio_max_mb,
     allow_image_upload, image_max_mb, allow_scheduled_tasks, role_id,
     budget_daily, budget_weekly, budget_monthly,
+    allow_create_skill, allow_external_skill, allow_code_skill,
     // allow manual override of org fields from UI
     dept_code, dept_name, profit_center, profit_center_name,
     org_section, org_section_name, org_group_name, factory_code, org_end_date,
@@ -125,6 +127,7 @@ router.put('/:id', async (req, res) => {
     }
 
     const parseBudget = (v) => (v != null && v !== '') ? Number(v) : null;
+    const resolveSkillPerm = (v) => v === null ? null : (v ? 1 : 0);
     const permParams = [
       allow_text_upload !== undefined ? (allow_text_upload ? 1 : 0) : 1,
       text_max_mb || 10,
@@ -135,6 +138,9 @@ router.put('/:id', async (req, res) => {
       allow_scheduled_tasks ? 1 : 0,
       role_id || null,
       parseBudget(budget_daily), parseBudget(budget_weekly), parseBudget(budget_monthly),
+      resolveSkillPerm(allow_create_skill !== undefined ? allow_create_skill : null),
+      resolveSkillPerm(allow_external_skill !== undefined ? allow_external_skill : null),
+      resolveSkillPerm(allow_code_skill !== undefined ? allow_code_skill : null),
     ];
 
     const orgParams = [
@@ -154,7 +160,8 @@ router.put('/:id', async (req, res) => {
     const baseSet = `name=?, employee_id=?, email=?, role=?, start_date=?, end_date=?, status=?,
              allow_text_upload=?, text_max_mb=?, allow_audio_upload=?, audio_max_mb=?,
              allow_image_upload=?, image_max_mb=?, allow_scheduled_tasks=?, role_id=?,
-             budget_daily=?, budget_weekly=?, budget_monthly=?`;
+             budget_daily=?, budget_weekly=?, budget_monthly=?,
+             allow_create_skill=?, allow_external_skill=?, allow_code_skill=?`;
     const orgSet = hasOrgOverride
       ? `, dept_code=?, dept_name=?, profit_center=?, profit_center_name=?,
            org_section=?, org_section_name=?, org_group_name=?, factory_code=?, org_end_date=?`

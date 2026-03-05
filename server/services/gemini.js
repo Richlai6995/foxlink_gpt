@@ -173,14 +173,16 @@ function buildSearchNotice(queries, sources) {
   return notice;
 }
 
-async function streamChat(apiModel, history, userParts, onChunk, extraSystemInstruction = '') {
+async function streamChat(apiModel, history, userParts, onChunk, extraSystemInstruction = '', disableSearch = false) {
   // apiModel is the resolved API model string (e.g. 'gemini-3-pro-preview')
   console.log(`[Gemini] streamChat model=${apiModel} history=${history.length} userParts=${userParts.length}`);
 
   // Disable Google Search grounding when inline file data is present
   // (Gemini API does not allow mixing googleSearch tool with inlineData parts)
+  // Also disable when caller explicitly requests it (e.g. inject skill already provides data)
   const hasInlineData = userParts.some((p) => p.inlineData);
-  console.log(`[Gemini] hasInlineData=${hasInlineData}, googleSearch=${!hasInlineData}`);
+  const useSearch = !hasInlineData && !disableSearch;
+  console.log(`[Gemini] hasInlineData=${hasInlineData}, googleSearch=${useSearch}`);
 
   const fullInstruction = extraSystemInstruction
     ? getSystemInstruction() + '\n\n---\n' + extraSystemInstruction
@@ -192,7 +194,7 @@ async function streamChat(apiModel, history, userParts, onChunk, extraSystemInst
     generationConfig: {
       maxOutputTokens: 65536,
     },
-    tools: hasInlineData ? undefined : [{ googleSearch: {} }],
+    tools: useSearch ? [{ googleSearch: {} }] : undefined,
   });
 
   const chat = model.startChat({ history });

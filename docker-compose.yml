@@ -1,6 +1,8 @@
 services:
   app:
-    build: .
+    build:
+      context: .
+      network: host
     container_name: foxlink_gpt
     ports:
       - "3007:3007"
@@ -17,6 +19,8 @@ services:
       # CJK fonts for Chinese PDF generation
       # Place NotoSansTC-Regular.ttf (or kaiu.ttf) here if needed
       - ./fonts:/app/fonts
+      # Code skill runners (user_code.js + node_modules per skill — must persist)
+      - ./skill_runners:/app/skill_runners
       # ── Oracle Instant Client (Thick Mode for ERP DB) ─────────────────────
       # Host path: /mnt/e/oracle_client_linux/instantclient_19_29
       # Container path must match ORACLE_HOME in Dockerfile (/opt/oracle/instantclient_19_26)

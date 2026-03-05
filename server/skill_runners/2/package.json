@@ -1,0 +1,9 @@
+{
+  "name": "skill-runner-2",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "axios": "*",
+    "express": "^4.18.0"
+  }
+}

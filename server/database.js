@@ -539,12 +539,29 @@ function initSchema(db) {
     db.exec(`ALTER TABLE roles ADD COLUMN allow_create_skill   INTEGER DEFAULT 0`);
     db.exec(`ALTER TABLE roles ADD COLUMN allow_external_skill INTEGER DEFAULT 0`);
   }
+  if (!rolesColsSkill.includes('allow_code_skill')) {
+    db.exec(`ALTER TABLE roles ADD COLUMN allow_code_skill INTEGER DEFAULT 0`);
+  }
 
   // Migration: allow_create_skill / allow_external_skill on users (NULL = inherit from role)
   const userColsSkill = db.prepare('PRAGMA table_info(users)').all().map((r) => r.name);
   if (!userColsSkill.includes('allow_create_skill')) {
     db.exec(`ALTER TABLE users ADD COLUMN allow_create_skill   INTEGER`);
     db.exec(`ALTER TABLE users ADD COLUMN allow_external_skill INTEGER`);
+  }
+  if (!userColsSkill.includes('allow_code_skill')) {
+    db.exec(`ALTER TABLE users ADD COLUMN allow_code_skill INTEGER`);
+  }
+
+  // Migration: code skill columns on skills table
+  const skillCols = db.prepare('PRAGMA table_info(skills)').all().map((r) => r.name);
+  if (!skillCols.includes('code_snippet')) {
+    db.exec(`ALTER TABLE skills ADD COLUMN code_snippet TEXT`);
+    db.exec(`ALTER TABLE skills ADD COLUMN code_packages TEXT DEFAULT '[]'`);
+    db.exec(`ALTER TABLE skills ADD COLUMN code_status TEXT DEFAULT 'stopped'`);
+    db.exec(`ALTER TABLE skills ADD COLUMN code_port INTEGER`);
+    db.exec(`ALTER TABLE skills ADD COLUMN code_pid INTEGER`);
+    db.exec(`ALTER TABLE skills ADD COLUMN code_error TEXT`);
   }
 
   // Seed default admin

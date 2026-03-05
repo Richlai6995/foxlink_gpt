@@ -5,7 +5,7 @@ import {
   User, Users, CalendarClock, BarChart3, DollarSign, Shield,
   AlertTriangle, Database, Mail, Cpu, Zap, Settings, BookOpen,
   ChevronRight, Info, Lightbulb, Terminal, Globe, RefreshCw,
-  Wand2, ImageIcon, Clock, Share2, GitFork, Lock, Sparkles,
+  Wand2, ImageIcon, Clock, Share2, GitFork, Lock, Sparkles, Code2, Package, Play, Square,
 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 
@@ -596,7 +596,7 @@ function UserManual() {
         </Para>
 
         <SubSection title="技能類型">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div className="border border-blue-200 rounded-xl p-4 bg-blue-50">
               <div className="flex items-center gap-2 mb-2">
                 <span className="text-lg">🧠</span>
@@ -604,7 +604,7 @@ function UserManual() {
               </div>
               <p className="text-xs text-blue-600 leading-5">
                 透過 System Prompt 給 AI 加上角色設定或指引。不需要外部服務，建立簡單。
-                適合：翻譯貨第、行業專家、內部 SOP 助手等。
+                適合：翻譯腔調、行業專家、內部 SOP 助手等。
               </p>
             </div>
             <div className="border border-purple-200 rounded-xl p-4 bg-purple-50">
@@ -617,7 +617,29 @@ function UserManual() {
                 適合：時刻查詢、即時庫存、外部知識庫對接等。
               </p>
             </div>
+            <div className="border border-emerald-200 rounded-xl p-4 bg-emerald-50">
+              <div className="flex items-center gap-2 mb-2">
+                <Code2 size={16} className="text-emerald-600" />
+                <span className="font-semibold text-emerald-700 text-sm">內部程式技能（Code）</span>
+              </div>
+              <p className="text-xs text-emerald-600 leading-5">
+                在平台內直接撰寫 Node.js 程式碼，以獨立子程序運行。
+                適合：即時股價查詢、ERP 資料對接、自動計算等需要程式邏輯的場景。
+                需要管理員授予「允許程式技能」權限。
+              </p>
+            </div>
           </div>
+        </SubSection>
+
+        <SubSection title="端點模式（外部 / 程式技能適用）">
+          <Table
+            headers={['模式', '行為說明']}
+            rows={[
+              ['inject（注入）', 'Skill 執行後，將回傳的資料注入 AI 的 System Prompt，AI 再根據這份資料回答。AI 仍擁有思考空間，適合「提供背景資訊」的場景（如即時股價、庫存數據）。'],
+              ['answer（直接回答）', 'Skill 執行結果直接作為最終回覆，完全略過 AI。適合需要精準固定格式輸出的場景。'],
+            ]}
+          />
+          <TipBox>inject 模式：若使用者訊息中沒有觸發條件（如找不到股票代號），Skill 可回傳空 system_prompt，AI 會正常以 Google 搜尋或自身知識回答。</TipBox>
         </SubSection>
 
         <SubSection title="如何將技能掛載到對話">
@@ -697,6 +719,7 @@ const adminSections = [
   { id: 'a-mcp', label: 'MCP 伺服器', icon: <Globe size={18} /> },
   { id: 'a-dify', label: 'DIFY 知識庫', icon: <Zap size={18} /> },
   { id: 'a-skill', label: '技能市集管理', icon: <Sparkles size={18} /> },
+  { id: 'a-code-runners', label: 'Code Runners', icon: <Code2 size={18} /> },
   { id: 'a-llm', label: 'LLM 模型管理', icon: <Cpu size={18} /> },
   { id: 'a-system', label: '系統設定', icon: <Settings size={18} /> },
 ]
@@ -889,15 +912,16 @@ function AdminManual() {
         </SubSection>
 
         <SubSection title="角色技能權限設定">
-          <Para>在「角色管理」中，可针對每個角色設定技能權限：</Para>
+          <Para>在「角色管理」中，可針對每個角色設定技能權限：</Para>
           <Table
             headers={['權限項目', '說明']}
             rows={[
               ['允許建立 Skill', '開啟後，此角色的使用者可建立自定義技能'],
-              ['允許外部 Skill', '開啟後，可建立拥有外部 Endpoint URL 的技能'],
+              ['允許外部 Skill', '開啟後，可建立擁有外部 Endpoint URL 的技能'],
+              ['允許程式技能', '開啟後，可建立 type=code 的內部程式技能（需搭配 Code Runners 管理）'],
             ]}
           />
-          <NoteBox>使用者頁面可對個別帳號覆載角色預設值。設為 null 表示繼承角色設定。</NoteBox>
+          <NoteBox>使用者頁面可對個別帳號覆蓋角色預設值。設為「沿用角色」（null）表示繼承角色設定。</NoteBox>
         </SubSection>
 
         <SubSection title="直接管理公開技能">
@@ -908,6 +932,84 @@ function AdminManual() {
               ['公開技能', '後台 → 技能管理 → 找到目標技能 → 點 Approve'],
               ['設為私人', '找到目標 → 點 Reject 或直接編輯 is_public=0'],
               ['建立官方技能', '管理員建立後可直接設為公開，不需經申請流程'],
+            ]}
+          />
+        </SubSection>
+      </Section>
+
+      <Section id="a-code-runners" icon={<Code2 size={22} />} iconColor="text-emerald-500" title="Code Runners（內部程式技能管理）">
+        <Para>
+          Code Runners 讓 IT / 開發人員直接在平台內撰寫 Node.js 程式碼，作為獨立 HTTP 子程序運行，
+          供 AI 對話時呼叫取得即時資料或執行計算。管理員可在後台「Code Runners」頁籤進行生命週期管理。
+        </Para>
+
+        <SubSection title="運作架構">
+          <Table
+            headers={['元件', '說明']}
+            rows={[
+              ['user_code.js', '使用者在技能市集「程式碼」欄位撰寫的 Node.js handler，接收 { user_message, session_id, user_id }，回傳 { system_prompt } 或 { content }'],
+              ['runner.js', '平台自動產生的 Express wrapper，將 user_code.js 包裝成 HTTP Server（127.0.0.1:4xxxx）'],
+              ['skillRunner 服務', '主 server 管理所有子程序的啟動 / 停止 / 重啟，並在 server 重啟時自動恢復運行中的 runner'],
+            ]}
+          />
+        </SubSection>
+
+        <SubSection title="Code Runner 生命週期操作">
+          <div className="space-y-3">
+            <StepItem num={1} title="在技能市集建立 type=code 技能" desc="填寫技能名稱、描述、端點模式（inject/answer），並在「程式碼」區塊撰寫 Node.js handler" />
+            <StepItem num={2} title="前往後台 → Code Runners，找到剛建立的技能" />
+            <StepItem num={3} title="點「安裝套件」（📦）" desc="確認或新增 NPM 套件後按「執行安裝」，日誌視窗顯示安裝進度" />
+            <StepItem num={4} title="安裝完成後點「啟動」（▶）" desc="runner 狀態變為「運行中 :port」即代表成功" />
+            <StepItem num={5} title="在對話中掛載該技能即可使用" />
+          </div>
+          <TipBox>Server 重啟後，狀態為「運行中」的 runner 會自動恢復，無需手動重啟。</TipBox>
+        </SubSection>
+
+        <SubSection title="user_code.js 撰寫規範">
+          <Para>handler 函式必須是 async function，接收 body 物件，回傳以下格式之一：</Para>
+          <Table
+            headers={['回傳格式', '適用模式', '說明']}
+            rows={[
+              ['{ system_prompt: "..." }', 'inject 模式', 'AI 收到此字串作為背景資料後自行回答；回傳空字串代表本次不注入，AI 正常回覆'],
+              ['{ content: "..." }', 'answer 模式', '此字串直接作為 AI 最終回覆，完全略過 Gemini'],
+            ]}
+          />
+          <CodeBlock>{`// 範例：inject 模式 — 根據股票代號查詢即時股價
+const axios = require('axios');
+
+module.exports = async function handler(body) {
+  const { user_message } = body;
+
+  // 抽出 4-6 位數字股票代號
+  const codes = [...new Set((user_message.match(/\\b\\d{4,6}\\b/g) || []))];
+
+  if (codes.length === 0) {
+    return { system_prompt: '' }; // 無代號 → 不注入，讓 AI 自行回答
+  }
+
+  // 查詢 Yahoo Finance
+  const res = await axios.get(
+    \`https://query1.finance.yahoo.com/v8/finance/chart/\${codes[0]}.TW\`,
+    { timeout: 5000, headers: { 'User-Agent': 'Mozilla/5.0' } }
+  );
+  const meta = res.data?.chart?.result?.[0]?.meta;
+  const price = meta?.regularMarketPrice;
+
+  return {
+    system_prompt: \`即時股價資料：\${codes[0]} 現價 \${price} 元。請根據此數據回答使用者問題。\`
+  };
+};`}</CodeBlock>
+          <NoteBox>NPM 套件需先在 Code Runners 面板安裝後才能 require。每個 skill 有獨立的 node_modules 目錄，互不干擾。</NoteBox>
+        </SubSection>
+
+        <SubSection title="常見問題排查">
+          <Table
+            headers={['狀況', '可能原因', '解決方式']}
+            rows={[
+              ['啟動失敗 / 錯誤狀態', 'user_code.js 語法錯誤或 require 的套件未安裝', '先執行「安裝套件」，再查看 Terminal 日誌確認錯誤訊息'],
+              ['HTTP 500 注入失敗', 'handler 拋出例外或回傳格式錯誤', '查看 Terminal 日誌中的 [runner] handler error 行'],
+              ['安裝套件後仍找不到模組', '安裝在舊目錄或 package.json 未更新', '重新安裝套件，確認對話框中有顯示該套件名稱'],
+              ['重啟 server 後 runner 消失', 'skill_runners 目錄未掛載 volume（Docker）', '確認 docker-compose.yml 有 skill_runners volume 設定'],
             ]}
           />
         </SubSection>

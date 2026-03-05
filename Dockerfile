@@ -5,7 +5,7 @@ WORKDIR /app/client
 
 # Install deps first (layer cache)
 COPY client/package*.json ./
-RUN npm install
+RUN --network=host npm install
 
 # Build Vite/React app
 COPY client ./
@@ -51,7 +51,7 @@ COPY server ./
 COPY --from=builder /app/client/dist ./public
 
 # Create runtime directories
-RUN mkdir -p uploads data logs backups fonts
+RUN mkdir -p uploads data logs backups fonts skill_runners
 
 # CJK fonts for Chinese PDF generation
 # Priority: bundled font in server/fonts/ → apt fonts-noto-cjk → wget fallback

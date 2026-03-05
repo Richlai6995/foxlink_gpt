@@ -209,6 +209,7 @@ router.post('/login', async (req, res) => {
 });
 
 const createSession = (res, user) => {
+  const db = require('../database').db;
   const token = uuidv4();
   sessions.set(token, {
     id: user.id,
@@ -219,6 +220,19 @@ const createSession = (res, user) => {
     email: user.email,
   });
   const { password: _, ...userWithoutPassword } = user;
+  // Resolve effective skill permissions (user setting overrides role default)
+  let rolePerms = null;
+  if (user.role_id) {
+    rolePerms = db.prepare('SELECT allow_create_skill, allow_external_skill, allow_code_skill FROM roles WHERE id=?').get(user.role_id);
+  }
+  const resolveEffective = (userVal, roleVal) => {
+    if (userVal !== null && userVal !== undefined) return userVal === 1;
+    if (roleVal !== null && roleVal !== undefined) return roleVal === 1;
+    return false;
+  };
+  userWithoutPassword.effective_allow_create_skill = user.role === 'admin' || resolveEffective(user.allow_create_skill, rolePerms?.allow_create_skill);
+  userWithoutPassword.effective_allow_external_skill = user.role === 'admin' || resolveEffective(user.allow_external_skill, rolePerms?.allow_external_skill);
+  userWithoutPassword.effective_allow_code_skill = user.role === 'admin' || resolveEffective(user.allow_code_skill, rolePerms?.allow_code_skill);
   res.json({ token, user: userWithoutPassword });
 };
 
@@ -345,6 +359,18 @@ router.get('/me', (req, res) => {
     const user = db.prepare('SELECT * FROM users WHERE id=?').get(session.id);
     if (!user) return res.status(404).json({ error: '使用者不存在' });
     const { password: _, ...userWithoutPassword } = user;
+    let rolePerms = null;
+    if (user.role_id) {
+      rolePerms = db.prepare('SELECT allow_create_skill, allow_external_skill, allow_code_skill FROM roles WHERE id=?').get(user.role_id);
+    }
+    const resolveEff = (uv, rv) => {
+      if (uv !== null && uv !== undefined) return uv === 1;
+      if (rv !== null && rv !== undefined) return rv === 1;
+      return false;
+    };
+    userWithoutPassword.effective_allow_create_skill = user.role === 'admin' || resolveEff(user.allow_create_skill, rolePerms?.allow_create_skill);
+    userWithoutPassword.effective_allow_external_skill = user.role === 'admin' || resolveEff(user.allow_external_skill, rolePerms?.allow_external_skill);
+    userWithoutPassword.effective_allow_code_skill = user.role === 'admin' || resolveEff(user.allow_code_skill, rolePerms?.allow_code_skill);
     res.json(userWithoutPassword);
   } catch (e) {
     res.status(500).json({ error: e.message });

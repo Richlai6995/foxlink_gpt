@@ -52,6 +52,15 @@ app.get('/api/health', (req, res) => res.json({ status: 'ok', timestamp: new Dat
     app.use('/api/skills', require('./routes/skills'));
     console.log('[Route] /api/skills OK');
 
+    // Auto-restore code skill runners
+    try {
+      const { db } = require('./database');
+      const { autoRestoreRunners } = require('./services/skillRunner');
+      autoRestoreRunners(db);
+    } catch (e) {
+      console.error('[SkillRunner] autoRestoreRunners failed:', e.message);
+    }
+
     // Serve frontend in production
     const staticPath = path.join(__dirname, 'public');
     if (fs.existsSync(staticPath)) {

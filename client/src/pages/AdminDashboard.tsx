@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Users, BarChart3, Shield, AlertTriangle, Database, Mail, ArrowLeft, Cpu, DollarSign, CalendarClock, Plug, Zap, UserCog, Sparkles } from 'lucide-react'
+import { Users, BarChart3, Shield, AlertTriangle, Database, Mail, ArrowLeft, Cpu, DollarSign, CalendarClock, Plug, Zap, UserCog, Sparkles, Code2 } from 'lucide-react'
 import UserManagement from '../components/admin/UserManagement'
 import TokenUsagePanel from '../components/admin/TokenUsage'
 import AuditLogs from '../components/admin/AuditLogs'
@@ -14,8 +14,9 @@ import MCPServersPanel from '../components/admin/MCPServersPanel'
 import DifyKnowledgeBasesPanel from '../components/admin/DifyKnowledgeBasesPanel'
 import RoleManagement from '../components/admin/RoleManagement'
 import SkillManagement from '../components/admin/SkillManagement'
+import CodeRunnersPanel from '../components/admin/CodeRunnersPanel'
 
-type Tab = 'users' | 'roles' | 'tokens' | 'audit' | 'keywords' | 'db' | 'mail' | 'llm' | 'cost' | 'scheduled' | 'mcp' | 'dify' | 'skills'
+type Tab = 'users' | 'roles' | 'tokens' | 'audit' | 'keywords' | 'db' | 'mail' | 'llm' | 'cost' | 'scheduled' | 'mcp' | 'dify' | 'skills' | 'code-runners'
 
 const tabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
   { id: 'users', label: '使用者管理', icon: <Users size={16} /> },
@@ -28,6 +29,7 @@ const tabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
   { id: 'mcp', label: 'MCP 伺服器', icon: <Plug size={16} /> },
   { id: 'dify', label: 'DIFY 知識庫', icon: <Zap size={16} /> },
   { id: 'skills', label: '技能管理', icon: <Sparkles size={16} /> },
+  { id: 'code-runners', label: 'Code Runners', icon: <Code2 size={16} /> },
   { id: 'db', label: '資料庫維護', icon: <Database size={16} /> },
   { id: 'mail', label: '郵件設定', icon: <Mail size={16} /> },
   { id: 'llm', label: 'LLM 模型設定', icon: <Cpu size={16} /> },
@@ -89,6 +91,7 @@ export default function AdminDashboard() {
           {activeTab === 'mcp' && <MCPServersPanel />}
           {activeTab === 'dify' && <DifyKnowledgeBasesPanel />}
           {activeTab === 'skills' && <SkillManagement />}
+          {activeTab === 'code-runners' && <CodeRunnersPanel />}
         </main>
       </div>
     </div>

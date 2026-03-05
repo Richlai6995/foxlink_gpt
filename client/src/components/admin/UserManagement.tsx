@@ -38,6 +38,7 @@ interface UserForm {
   allow_scheduled_tasks: boolean
   allow_create_skill: boolean | null  // null = inherit from role
   allow_external_skill: boolean | null
+  allow_code_skill: boolean | null
   role_id: number | null
   budget_daily: string
   budget_weekly: string
@@ -62,6 +63,7 @@ const empty: UserForm = {
   allow_scheduled_tasks: false,
   allow_create_skill: null,
   allow_external_skill: null,
+  allow_code_skill: null,
   role_id: null,
   budget_daily: '', budget_weekly: '', budget_monthly: '',
   dept_code: '', dept_name: '', profit_center: '', profit_center_name: '',
@@ -98,6 +100,7 @@ export default function UserManagement() {
       const q = search.trim().toLowerCase()
       const u2 = u as any
       return (
+        u.username?.toLowerCase().includes(q) ||
         u.name?.toLowerCase().includes(q) ||
         (u.employee_id || '').toLowerCase().includes(q) ||
         (u.email || '').toLowerCase().includes(q) ||
@@ -150,6 +153,7 @@ export default function UserManagement() {
       org_end_date: u2.org_end_date || '',
       allow_create_skill: u2.allow_create_skill == null ? null : u2.allow_create_skill === 1,
       allow_external_skill: u2.allow_external_skill == null ? null : u2.allow_external_skill === 1,
+      allow_code_skill: u2.allow_code_skill == null ? null : u2.allow_code_skill === 1,
     })
     setEditId(u.id)
     setError('')

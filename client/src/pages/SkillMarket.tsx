@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Plus, Search, Globe, Lock, GitFork, Send, Pencil, Trash2, Clock, X, ChevronDown, Zap, ArrowLeft, MessageSquare } from 'lucide-react'
+import { useAuth } from '../context/AuthContext'
+import { Plus, Search, Globe, Lock, GitFork, Send, Pencil, Trash2, Clock, X, ChevronDown, Zap, ArrowLeft, MessageSquare, Code2, Eye } from 'lucide-react'
 import api from '../lib/api'
 
 interface Skill {
@@ -8,7 +9,7 @@ interface Skill {
     name: string
     description: string
     icon: string
-    type: 'builtin' | 'external'
+    type: 'builtin' | 'external' | 'code'
     system_prompt?: string
     endpoint_url?: string
     endpoint_secret?: string
@@ -23,6 +24,9 @@ interface Skill {
     is_public: number
     is_admin_approved: number
     pending_approval: number
+    code_snippet?: string
+    code_packages?: string[]
+    code_status?: string
     created_at: string
 }
 
@@ -31,14 +35,16 @@ interface Model { key: string; name: string }
 const ICONS = ['🤖', '🧠', '📝', '💡', '🔍', '📊', '🎯', '🛠️', '📚', '🌐', '⚡', '🔬', '💬', '🎨', '🔧', '📋', '🚀', '🏭']
 
 const EMPTY_FORM = {
-    name: '', description: '', icon: '🤖', type: 'builtin' as 'builtin' | 'external',
+    name: '', description: '', icon: '🤖', type: 'builtin' as 'builtin' | 'external' | 'code',
     system_prompt: '', endpoint_url: '', endpoint_secret: '', endpoint_mode: 'inject' as 'inject' | 'answer',
     model_key: '', mcp_tool_mode: 'append' as 'append' | 'exclusive' | 'disable',
     mcp_tool_ids: [] as number[], dify_kb_ids: [] as number[], tags: [] as string[],
+    code_snippet: '', code_packages: [] as string[],
 }
 
 export default function SkillMarket() {
     const navigate = useNavigate()
+    const { user: currentUser } = useAuth()
     const [skills, setSkills] = useState<Skill[]>([])
     const [models, setModels] = useState<Model[]>([])
     const [loading, setLoading] = useState(false)
@@ -50,6 +56,11 @@ export default function SkillMarket() {
     const [form, setForm] = useState({ ...EMPTY_FORM })
     const [saving, setSaving] = useState(false)
     const [tagInput, setTagInput] = useState('')
+    const [pkgInput, setPkgInput] = useState('')
+
+    const canCodeSkill = currentUser?.role === 'admin' || (currentUser as any)?.effective_allow_code_skill === true
+    const canCreateSkill = currentUser?.role === 'admin' || (currentUser as any)?.effective_allow_create_skill === true
+    const [viewingSkill, setViewingSkill] = useState<Skill | null>(null)
 
     const load = useCallback(async () => {
         setLoading(true)
@@ -84,8 +95,11 @@ export default function SkillMarket() {
             mcp_tool_ids: sk.mcp_tool_ids || [],
             dify_kb_ids: sk.dify_kb_ids || [],
             tags: sk.tags || [],
+            code_snippet: sk.code_snippet || '',
+            code_packages: sk.code_packages || [],
         })
         setTagInput('')
+        setPkgInput('')
         setShowEditor(true)
     }
 
@@ -127,9 +141,14 @@ export default function SkillMarket() {
         setTagInput('')
     }
 
+    const addPkg = () => {
+        const t = pkgInput.trim()
+        if (t && !form.code_packages.includes(t)) setForm(p => ({ ...p, code_packages: [...p.code_packages, t] }))
+        setPkgInput('')
+    }
+
     const isOwner = (sk: Skill) => {
-        const user = JSON.parse(localStorage.getItem('user') || '{}')
-        return sk.owner_user_id === user.id || user.role === 'admin'
+        return sk.owner_user_id === currentUser?.id || currentUser?.role === 'admin'
     }
 
     const mySkills = skills.filter(s => isOwner(s))
@@ -149,9 +168,11 @@ export default function SkillMarket() {
                             <p className="text-sm text-slate-500 mt-0.5">建立並分享 AI Skill，讓對話更強大</p>
                         </div>
                     </div>
-                    <button onClick={openCreate} className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 transition">
-                        <Plus size={15} />建立技能
-                    </button>
+                    {canCreateSkill && (
+                        <button onClick={openCreate} className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 transition">
+                            <Plus size={15} />建立技能
+                        </button>
+                    )}
                 </div>
 
                 {/* Filters */}
@@ -166,6 +187,7 @@ export default function SkillMarket() {
                         <option value="">全部類型</option>
                         <option value="builtin">內建</option>
                         <option value="external">外部</option>
+                        <option value="code">內部程式</option>
                     </select>
                 </div>
 
@@ -188,7 +210,7 @@ export default function SkillMarket() {
                     <section>
                         <h2 className="text-sm font-semibold text-slate-600 mb-3 uppercase tracking-wide">公開技能</h2>
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                            {publicSkills.map(sk => <SkillCard key={sk.id} skill={sk} onFork={() => fork(sk)} onUse={() => navigate(`/chat?skillId=${sk.id}`)} isOwner={false} />)}
+                            {publicSkills.map(sk => <SkillCard key={sk.id} skill={sk} onFork={() => fork(sk)} onUse={() => navigate(`/chat?skillId=${sk.id}`)} onView={() => setViewingSkill(sk)} isOwner={false} />)}
                         </div>
                     </section>
                 )}
@@ -236,13 +258,19 @@ export default function SkillMarket() {
                                 {/* Type */}
                                 <div>
                                     <label className="block text-xs font-medium text-slate-600 mb-1">類型</label>
-                                    <div className="flex gap-2">
+                                    <div className="flex gap-2 flex-wrap">
                                         {(['builtin', 'external'] as const).map(t => (
                                             <button key={t} onClick={() => setForm(p => ({ ...p, type: t }))}
                                                 className={`px-4 py-1.5 rounded-lg text-sm border transition ${form.type === t ? 'bg-blue-600 text-white border-blue-600' : 'border-slate-200 text-slate-600 hover:border-blue-300'}`}>
                                                 {t === 'builtin' ? '內建 Prompt' : '外部 Endpoint'}
                                             </button>
                                         ))}
+                                        {canCodeSkill && (
+                                            <button onClick={() => setForm(p => ({ ...p, type: 'code' }))}
+                                                className={`px-4 py-1.5 rounded-lg text-sm border transition flex items-center gap-1 ${form.type === 'code' ? 'bg-emerald-600 text-white border-emerald-600' : 'border-slate-200 text-slate-600 hover:border-emerald-300'}`}>
+                                                <Code2 size={13} />內部程式
+                                            </button>
+                                        )}
                                     </div>
                                 </div>
 
@@ -253,7 +281,7 @@ export default function SkillMarket() {
                                             placeholder="輸入給 AI 的角色設定與指令..."
                                             className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-300 resize-y" />
                                     </div>
-                                ) : (
+                                ) : form.type === 'external' ? (
                                     <div className="space-y-3">
                                         <div>
                                             <label className="block text-xs font-medium text-slate-600 mb-1">Endpoint URL</label>
@@ -271,6 +299,48 @@ export default function SkillMarket() {
                                             <div className="flex gap-2">
                                                 {(['inject', 'answer'] as const).map(m => (
                                                     <button key={m} onClick={() => setForm(p => ({ ...p, endpoint_mode: m }))}
+                                                        className={`px-3 py-1.5 rounded-lg text-xs border transition ${form.endpoint_mode === m ? 'bg-indigo-600 text-white border-indigo-600' : 'border-slate-200 text-slate-600 hover:border-indigo-300'}`}>
+                                                        {m === 'inject' ? 'Inject（補充 Prompt）' : 'Answer（直接回答）'}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    </div>
+                                ) : (
+                                    /* code type */
+                                    <div className="space-y-3">
+                                        <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-700">
+                                            儲存後請至後台「Code Runners」頁簽啟動此 Skill。handler 需 export 一個 async function，回傳 {'{ system_prompt }'} 或 {'{ content }'}。
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs font-medium text-slate-600 mb-1">Node.js Handler 程式碼</label>
+                                            <textarea value={form.code_snippet} rows={12}
+                                                onChange={e => setForm(p => ({ ...p, code_snippet: e.target.value }))}
+                                                placeholder={`// 範例\nmodule.exports = async function handler(body) {\n  const { user_message } = body;\n  // 可 require 已安裝的 npm 套件\n  return { system_prompt: '相關資訊：' + user_message };\n};`}
+                                                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-emerald-300 resize-y bg-slate-950 text-emerald-300" />
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs font-medium text-slate-600 mb-1">NPM 套件（安裝後才可 require）</label>
+                                            <div className="flex flex-wrap gap-1 mb-2">
+                                                {form.code_packages.map(p => (
+                                                    <span key={p} className="inline-flex items-center gap-1 px-2 py-0.5 bg-emerald-100 rounded text-xs text-emerald-700">
+                                                        {p}<button type="button" onClick={() => setForm(f => ({ ...f, code_packages: f.code_packages.filter(x => x !== p) }))}><X size={10} /></button>
+                                                    </span>
+                                                ))}
+                                            </div>
+                                            <div className="flex gap-2">
+                                                <input value={pkgInput} onChange={e => setPkgInput(e.target.value)}
+                                                    onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), addPkg())}
+                                                    placeholder="axios, mssql... 後按 Enter"
+                                                    className="flex-1 border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-300" />
+                                                <button type="button" onClick={addPkg} className="px-3 py-1.5 border border-slate-200 rounded-lg text-sm text-slate-600 hover:border-emerald-300">新增</button>
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs font-medium text-slate-600 mb-1">回應模式</label>
+                                            <div className="flex gap-2">
+                                                {(['inject', 'answer'] as const).map(m => (
+                                                    <button key={m} type="button" onClick={() => setForm(p => ({ ...p, endpoint_mode: m }))}
                                                         className={`px-3 py-1.5 rounded-lg text-xs border transition ${form.endpoint_mode === m ? 'bg-indigo-600 text-white border-indigo-600' : 'border-slate-200 text-slate-600 hover:border-indigo-300'}`}>
                                                         {m === 'inject' ? 'Inject（補充 Prompt）' : 'Answer（直接回答）'}
                                                     </button>
@@ -321,18 +391,74 @@ export default function SkillMarket() {
                         </div>
                     </div>
                 )}
+
+                {/* Read-only view modal for public skills */}
+                {viewingSkill && (
+                    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 overflow-y-auto p-4">
+                        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl my-8">
+                            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
+                                <div className="flex items-center gap-2">
+                                    <Eye size={16} className="text-blue-500" />
+                                    <h3 className="font-semibold text-slate-800">技能詳情（唯讀）</h3>
+                                </div>
+                                <button onClick={() => setViewingSkill(null)} className="p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100"><X size={16} /></button>
+                            </div>
+                            <div className="p-6 space-y-4 text-sm">
+                                <div className="flex items-center gap-3">
+                                    <span className="text-3xl">{viewingSkill.icon}</span>
+                                    <div>
+                                        <p className="font-semibold text-slate-800 text-base">{viewingSkill.name}</p>
+                                        <p className="text-slate-500 text-xs">{viewingSkill.description}</p>
+                                    </div>
+                                </div>
+                                <div className="grid grid-cols-2 gap-3">
+                                    <div><span className="text-xs text-slate-400 block">類型</span><p className="text-slate-700">{viewingSkill.type === 'builtin' ? '內建 Prompt' : viewingSkill.type === 'external' ? '外部 Endpoint' : '內部程式'}</p></div>
+                                    <div><span className="text-xs text-slate-400 block">端點模式</span><p className="text-slate-700">{viewingSkill.endpoint_mode}</p></div>
+                                    {viewingSkill.model_key && <div><span className="text-xs text-slate-400 block">指定模型</span><p className="text-slate-700">{viewingSkill.model_key}</p></div>}
+                                    <div><span className="text-xs text-slate-400 block">MCP 工具模式</span><p className="text-slate-700">{viewingSkill.mcp_tool_mode}</p></div>
+                                </div>
+                                {viewingSkill.system_prompt && (
+                                    <div>
+                                        <p className="text-xs text-slate-400 mb-1">System Prompt</p>
+                                        <pre className="bg-slate-50 border border-slate-200 rounded-lg p-3 text-xs text-slate-700 whitespace-pre-wrap font-mono max-h-48 overflow-y-auto">{viewingSkill.system_prompt}</pre>
+                                    </div>
+                                )}
+                                {viewingSkill.endpoint_url && (
+                                    <div><span className="text-xs text-slate-400 block">Endpoint URL</span><p className="text-slate-700 font-mono text-xs break-all">{viewingSkill.endpoint_url}</p></div>
+                                )}
+                                {viewingSkill.type === 'code' && viewingSkill.code_snippet && (
+                                    <div>
+                                        <p className="text-xs text-slate-400 mb-1">程式碼</p>
+                                        <pre className="bg-slate-950 rounded-lg p-3 text-xs text-emerald-300 whitespace-pre-wrap font-mono max-h-64 overflow-y-auto">{viewingSkill.code_snippet}</pre>
+                                    </div>
+                                )}
+                                {viewingSkill.tags && viewingSkill.tags.length > 0 && (
+                                    <div className="flex flex-wrap gap-1">
+                                        {viewingSkill.tags.map(t => <span key={t} className="px-2 py-0.5 bg-slate-100 text-slate-600 rounded-full text-xs">{t}</span>)}
+                                    </div>
+                                )}
+                                <p className="text-xs text-slate-400">建立者：{viewingSkill.owner_name || '—'}</p>
+                            </div>
+                            <div className="flex justify-end gap-2 px-6 py-4 border-t border-slate-100">
+                                <button onClick={() => { fork(viewingSkill); setViewingSkill(null) }} className="px-4 py-2 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 flex items-center gap-1.5"><GitFork size={14} />Fork 一份</button>
+                                <button onClick={() => setViewingSkill(null)} className="px-4 py-2 bg-slate-100 text-slate-700 rounded-lg text-sm hover:bg-slate-200">關閉</button>
+                            </div>
+                        </div>
+                    </div>
+                )}
             </div>
         </div>
     )
 }
 
-function SkillCard({ skill, onEdit, onDelete, onFork, onRequestPublic, onUse, isOwner }: {
+function SkillCard({ skill, onEdit, onDelete, onFork, onRequestPublic, onUse, onView, isOwner }: {
     skill: Skill
     onEdit?: () => void
     onDelete?: () => void
     onFork: () => void
     onRequestPublic?: () => void
     onUse?: () => void
+    onView?: () => void
     isOwner: boolean
 }) {
     const statusBadge = skill.is_public && skill.is_admin_approved
@@ -348,9 +474,14 @@ function SkillCard({ skill, onEdit, onDelete, onFork, onRequestPublic, onUse, is
                 <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
                         <h3 className="font-semibold text-slate-800 text-sm truncate">{skill.name}</h3>
-                        <span className={`shrink-0 text-xs px-1.5 py-0.5 rounded font-medium ${skill.type === 'external' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>
-                            {skill.type === 'external' ? '外部' : '內建'}
+                        <span className={`shrink-0 text-xs px-1.5 py-0.5 rounded font-medium ${skill.type === 'external' ? 'bg-purple-100 text-purple-700' : skill.type === 'code' ? 'bg-emerald-100 text-emerald-700' : 'bg-blue-100 text-blue-700'}`}>
+                            {skill.type === 'external' ? '外部' : skill.type === 'code' ? '程式' : '內建'}
                         </span>
+                        {skill.type === 'code' && skill.code_status && (
+                            <span className={`shrink-0 text-xs px-1.5 py-0.5 rounded ${skill.code_status === 'running' ? 'bg-emerald-50 text-emerald-600' : skill.code_status === 'error' ? 'bg-red-50 text-red-600' : 'bg-slate-100 text-slate-500'}`}>
+                                {skill.code_status === 'running' ? '運行中' : skill.code_status === 'error' ? '錯誤' : '已停止'}
+                            </span>
+                        )}
                     </div>
                     <p className="text-xs text-slate-500 mt-0.5 line-clamp-2">{skill.description || '—'}</p>
                 </div>
@@ -371,6 +502,11 @@ function SkillCard({ skill, onEdit, onDelete, onFork, onRequestPublic, onUse, is
                     {onUse && (
                         <button onClick={onUse} title="在對話中使用" className="p-1 rounded hover:bg-purple-50 text-slate-400 hover:text-purple-600 transition">
                             <MessageSquare size={13} />
+                        </button>
+                    )}
+                    {!isOwner && onView && (
+                        <button onClick={onView} title="檢視內容" className="p-1 rounded hover:bg-blue-50 text-slate-400 hover:text-blue-600 transition">
+                            <Eye size={13} />
                         </button>
                     )}
                     {!isOwner && (
