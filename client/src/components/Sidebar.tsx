@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Plus, MessageSquare, Trash2, ChevronDown, ChevronRight, LogOut, Settings, Cpu, Zap, CalendarClock, HelpCircle, Plug, BookOpen, Wrench, KeyRound, X, Eye, EyeOff, GitFork } from 'lucide-react'
+import { Plus, MessageSquare, Trash2, ChevronDown, ChevronRight, LogOut, Settings, Cpu, Zap, CalendarClock, HelpCircle, Plug, BookOpen, Wrench, KeyRound, X, Eye, EyeOff, GitFork, Sparkles } from 'lucide-react'
 import type { ChatSession, ModelType, LlmModel } from '../types'
 import { useAuth } from '../context/AuthContext'
 import { useNavigate } from 'react-router-dom'
@@ -118,9 +118,9 @@ export default function Sidebar({
   }
 
   useEffect(() => {
-    api.get('/chat/models').then((r) => setLlmModels(r.data)).catch(() => {})
-    api.get('/mcp-servers/active-servers').then((r) => setMcpServers(r.data || [])).catch(() => {})
-    api.get('/dify-kb/active').then((r) => setDifyKbs(r.data || [])).catch(() => {})
+    api.get('/chat/models').then((r) => setLlmModels(r.data)).catch(() => { })
+    api.get('/mcp-servers/active-servers').then((r) => setMcpServers(r.data || [])).catch(() => { })
+    api.get('/dify-kb/active').then((r) => setDifyKbs(r.data || [])).catch(() => { })
   }, [])
 
   const currentModelInfo = llmModels.find((m) => m.key === model)
@@ -175,11 +175,10 @@ export default function Sidebar({
                 <button
                   key={m.key}
                   onClick={() => { onModelChange(m.key); setShowModelMenu(false) }}
-                  className={`w-full flex items-center gap-2 px-3 py-2.5 text-xs transition hover:bg-slate-700 ${
-                    model === m.key
-                      ? m.key === 'flash' ? 'text-yellow-400' : 'text-blue-400'
-                      : 'text-slate-300'
-                  }`}
+                  className={`w-full flex items-center gap-2 px-3 py-2.5 text-xs transition hover:bg-slate-700 ${model === m.key
+                    ? m.key === 'flash' ? 'text-yellow-400' : 'text-blue-400'
+                    : 'text-slate-300'
+                    }`}
                 >
                   {m.key === 'flash' ? (
                     <Zap size={14} className="text-yellow-400 flex-shrink-0" />
@@ -280,11 +279,10 @@ export default function Sidebar({
               {group.items.map((s) => (
                 <div
                   key={s.id}
-                  className={`relative mx-2 rounded-lg transition cursor-pointer ${
-                    currentSessionId === s.id
-                      ? 'bg-slate-700 text-white'
-                      : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
-                  }`}
+                  className={`relative mx-2 rounded-lg transition cursor-pointer ${currentSessionId === s.id
+                    ? 'bg-slate-700 text-white'
+                    : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
+                    }`}
                   onMouseEnter={() => setHoveredId(s.id)}
                   onMouseLeave={() => setHoveredId(null)}
                   onClick={() => onSelectSession(s.id)}
@@ -331,6 +329,13 @@ export default function Sidebar({
             排程任務
           </button>
         )}
+        <button
+          onClick={() => navigate('/skills')}
+          className="w-full flex items-center gap-2 text-purple-400 hover:text-purple-200 hover:bg-slate-800 px-3 py-2 rounded-lg text-xs transition font-medium"
+        >
+          <Sparkles size={14} />
+          技能市集
+        </button>
         <button
           onClick={() => navigate('/help')}
           className="w-full flex items-center gap-2 text-emerald-400 hover:text-emerald-200 hover:bg-slate-800 px-3 py-2 rounded-lg text-xs transition font-medium"

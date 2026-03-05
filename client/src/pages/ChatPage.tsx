@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { Square, AlertTriangle, Share2, Copy, Check, X } from 'lucide-react'
+import { Square, AlertTriangle, Share2, Copy, Check, X, Sparkles, Search, Plus } from 'lucide-react'
 import Sidebar from '../components/Sidebar'
 import ChatWindow from '../components/ChatWindow'
 import MessageInput, { type MessageInputHandle } from '../components/MessageInput'
@@ -30,6 +30,16 @@ export default function ChatPage() {
   const [shareLink, setShareLink] = useState<string | null>(null)
   const [sharing, setSharing] = useState(false)
   const [shareCopied, setShareCopied] = useState(false)
+
+  // ── Skill panel state ──────────────────────────────────────────────────────
+  interface Skill { id: number; name: string; icon: string; description: string; type: string; model_key?: string | null }
+  const [sessionSkills, setSessionSkills] = useState<Skill[]>([])       // currently attached
+  const [allSkills, setAllSkills] = useState<Skill[]>([])               // available to pick
+  const [showSkillPanel, setShowSkillPanel] = useState(false)
+  const [skillSearch, setSkillSearch] = useState('')
+  const [pickedIds, setPickedIds] = useState<Set<number>>(new Set())    // draft selection
+  const [skillSaving, setSkillSaving] = useState(false)
+  const skillPanelRef = useRef<HTMLDivElement>(null)
 
   interface BudgetPeriod { limit: number; spent: number; remaining: number; exceeded: boolean }
   interface BudgetInfo { isAdmin: boolean; daily: BudgetPeriod | null; weekly: BudgetPeriod | null; monthly: BudgetPeriod | null }
@@ -109,6 +119,9 @@ export default function ChatPage() {
       const res = await api.get(`/chat/sessions/${id}`)
       setCurrentSessionId(id)
       setMessages(res.data.messages || [])
+      const attached: Skill[] = res.data.skills || []
+      setSessionSkills(attached)
+      setPickedIds(new Set(attached.map((s: Skill) => s.id)))
       // Sync model selector to the session's model (important for image-gen sessions)
       if (res.data.session?.model) {
         setModel(res.data.session.model as ModelType)
@@ -132,6 +145,36 @@ export default function ChatPage() {
       setSearchParams({}, { replace: true })
     }
   }, [searchParams, setSearchParams, loadSession, loadSessions])
+
+  // Auto-mount skill from ?skillId= param (e.g., from Skill Market "use" button)
+  useEffect(() => {
+    const skillIdParam = searchParams.get('skillId')
+    if (!skillIdParam) return
+    setSearchParams({}, { replace: true })
+      ; (async () => {
+        try {
+          // Create a new session
+          const res = await api.post('/chat/sessions', { model })
+          const newSessionId: string = res.data.id
+          setSessions(prev => [{
+            id: newSessionId, title: '新對話', model,
+            created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+          }, ...prev])
+          setCurrentSessionId(newSessionId)
+          setMessages([])
+          // Mount the skill
+          await api.put(`/chat/sessions/${newSessionId}/skills`, { skill_ids: [Number(skillIdParam)] })
+          // Reload to get skill info
+          const sessionRes = await api.get(`/chat/sessions/${newSessionId}`)
+          const attached: Skill[] = sessionRes.data.skills || []
+          setSessionSkills(attached)
+          setPickedIds(new Set(attached.map((s: Skill) => s.id)))
+          await loadSessions()
+        } catch (e) {
+          console.error('Auto-mount skill error:', e)
+        }
+      })()
+  }, [searchParams]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleShare = useCallback(async () => {
     if (!currentSessionId || sharing) return
@@ -202,6 +245,51 @@ export default function ChatPage() {
     setModel(m)
     localStorage.setItem('model', m)
   }, [])
+
+  // ── Skill panel helpers ────────────────────────────────────────────────────
+  const openSkillPanel = useCallback(async () => {
+    try {
+      const res = await api.get('/skills')
+      setAllSkills(res.data)
+    } catch { }
+    setSkillSearch('')
+    setShowSkillPanel(true)
+  }, [])
+
+  const saveSkills = useCallback(async () => {
+    if (!currentSessionId) return
+    setSkillSaving(true)
+    try {
+      await api.put(`/chat/sessions/${currentSessionId}/skills`, { skill_ids: [...pickedIds] })
+      // reload attached list
+      const res = await api.get(`/chat/sessions/${currentSessionId}`)
+      const attached: Skill[] = res.data.skills || []
+      setSessionSkills(attached)
+      setPickedIds(new Set(attached.map((s: Skill) => s.id)))
+      setShowSkillPanel(false)
+    } catch (e: any) {
+      alert(e.response?.data?.error || '儲存失敗')
+    } finally {
+      setSkillSaving(false)
+    }
+  }, [currentSessionId, pickedIds])
+
+  const togglePick = (id: number) => setPickedIds(prev => {
+    const next = new Set(prev)
+    next.has(id) ? next.delete(id) : next.add(id)
+    return next
+  })
+
+  // Close panel on outside click
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (skillPanelRef.current && !skillPanelRef.current.contains(e.target as Node)) {
+        setShowSkillPanel(false)
+      }
+    }
+    if (showSkillPanel) document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [showSkillPanel])
 
   const handleSend = useCallback(
     async (message: string, files: File[]) => {
@@ -443,6 +531,98 @@ export default function ChatPage() {
               ? sessions.find((s) => s.id === currentSessionId)?.title || '對話中'
               : 'FOXLINK GPT'}
           </span>
+          {/* Skills button + badges */}
+          {currentSessionId && (
+            <div className="flex items-center gap-1.5 relative" ref={skillPanelRef}>
+              {/* Attached skill badges */}
+              {sessionSkills.map(sk => (
+                <span key={sk.id} className="inline-flex items-center gap-1 text-xs px-2 py-0.5 bg-purple-100 text-purple-700 border border-purple-200 rounded-full font-medium">
+                  {sk.icon} {sk.name}
+                </span>
+              ))}
+              <button
+                onClick={openSkillPanel}
+                className={`inline-flex items-center gap-1.5 text-xs border rounded-lg px-2.5 py-1 transition ${sessionSkills.length > 0
+                  ? 'text-purple-600 border-purple-300 bg-purple-50 hover:bg-purple-100'
+                  : 'text-slate-500 border-slate-200 hover:text-purple-600 hover:border-purple-300'
+                  }`}
+                title="掛載 Skill"
+              >
+                <Sparkles size={13} />
+                {sessionSkills.length > 0 ? `技能 (${sessionSkills.length})` : '技能'}
+              </button>
+
+              {/* Skill selection dropdown panel */}
+              {showSkillPanel && (
+                <div className="absolute top-full right-0 mt-1 w-80 bg-white border border-slate-200 rounded-xl shadow-2xl z-50">
+                  <div className="p-3 border-b border-slate-100">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-sm font-semibold text-slate-800 flex items-center gap-1.5"><Sparkles size={14} className="text-purple-500" />選擇技能</span>
+                      <button onClick={() => setShowSkillPanel(false)} className="text-slate-400 hover:text-slate-600"><X size={14} /></button>
+                    </div>
+                    <div className="relative">
+                      <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                      <input
+                        value={skillSearch} onChange={e => setSkillSearch(e.target.value)}
+                        placeholder="搜尋技能..."
+                        className="w-full pl-7 pr-3 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-300"
+                        autoFocus
+                      />
+                    </div>
+                  </div>
+
+                  <div className="max-h-64 overflow-y-auto p-2 space-y-1">
+                    {allSkills
+                      .filter(sk => !skillSearch || sk.name.includes(skillSearch) || (sk.description || '').includes(skillSearch))
+                      .map(sk => {
+                        const picked = pickedIds.has(sk.id)
+                        return (
+                          <button
+                            key={sk.id}
+                            onClick={() => togglePick(sk.id)}
+                            className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-left transition ${picked ? 'bg-purple-50 border border-purple-200' : 'hover:bg-slate-50 border border-transparent'
+                              }`}
+                          >
+                            <div className={`w-4 h-4 rounded border flex items-center justify-center flex-shrink-0 transition ${picked ? 'bg-purple-600 border-purple-600' : 'border-slate-300'
+                              }`}>
+                              {picked && <Check size={10} className="text-white" />}
+                            </div>
+                            <span className="text-lg leading-none">{sk.icon}</span>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-xs font-medium text-slate-800 truncate">{sk.name}</p>
+                              {sk.description && <p className="text-xs text-slate-400 truncate">{sk.description}</p>}
+                            </div>
+                            {sk.model_key && <span className="text-xs text-indigo-500 shrink-0">{sk.model_key}</span>}
+                          </button>
+                        )
+                      })
+                    }
+                    {allSkills.length === 0 && (
+                      <div className="text-center py-6 text-slate-400">
+                        <Sparkles size={24} className="mx-auto mb-2 opacity-30" />
+                        <p className="text-xs">尚無技能</p>
+                        <a href="/skills" className="text-xs text-purple-500 hover:underline flex items-center justify-center gap-1 mt-1"><Plus size={10} />前往建立</a>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="p-3 border-t border-slate-100 flex justify-between items-center">
+                    <span className="text-xs text-slate-500">已選 {pickedIds.size} 項</span>
+                    <div className="flex gap-2">
+                      <button onClick={() => setShowSkillPanel(false)} className="px-3 py-1.5 text-xs text-slate-500 hover:bg-slate-100 rounded-lg">取消</button>
+                      <button
+                        onClick={saveSkills} disabled={skillSaving}
+                        className="px-3 py-1.5 text-xs bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50"
+                      >
+                        {skillSaving ? '儲存中...' : '確認掛載'}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Share button — only when a session is loaded and not streaming */}
           {currentSessionId && messages.length > 0 && !streaming && (
             <button

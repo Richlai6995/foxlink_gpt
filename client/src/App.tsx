@@ -6,6 +6,7 @@ import AdminDashboard from './pages/AdminDashboard'
 import ScheduledTasksPage from './pages/ScheduledTasksPage'
 import HelpPage from './pages/HelpPage'
 import ResetPasswordPage from './pages/ResetPasswordPage'
+import SkillMarket from './pages/SkillMarket'
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated } = useAuth()
@@ -54,6 +55,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <HelpPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/skills"
+        element={
+          <ProtectedRoute>
+            <SkillMarket />
           </ProtectedRoute>
         }
       />

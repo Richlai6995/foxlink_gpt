@@ -20,6 +20,8 @@ interface Role {
   allow_image_upload: number
   image_max_mb: number
   allow_scheduled_tasks: number
+  allow_create_skill: number
+  allow_external_skill: number
 }
 
 interface McpServer {
@@ -52,6 +54,8 @@ const emptyForm = {
   allow_image_upload: true,
   image_max_mb: 10,
   allow_scheduled_tasks: false,
+  allow_create_skill: false,
+  allow_external_skill: false,
 }
 
 export default function RoleManagement() {
@@ -110,6 +114,8 @@ export default function RoleManagement() {
       allow_image_upload: role.allow_image_upload !== 0,
       image_max_mb: role.image_max_mb || 10,
       allow_scheduled_tasks: role.allow_scheduled_tasks === 1,
+      allow_create_skill: role.allow_create_skill === 1,
+      allow_external_skill: role.allow_external_skill === 1,
     })
     setError('')
     setShowModal(true)
@@ -407,9 +413,9 @@ export default function RoleManagement() {
                 <label className="block text-sm font-medium text-slate-700 mb-2">上傳權限預設值</label>
                 <div className="space-y-2">
                   {[
-                    { label: '文字檔', icon: <FileText size={13}/>, field: 'allow_text_upload', mbField: 'text_max_mb' },
-                    { label: '聲音檔', icon: <Mic size={13}/>,      field: 'allow_audio_upload', mbField: 'audio_max_mb' },
-                    { label: '圖片檔', icon: <Image size={13}/>,    field: 'allow_image_upload', mbField: 'image_max_mb' },
+                    { label: '文字檔', icon: <FileText size={13} />, field: 'allow_text_upload', mbField: 'text_max_mb' },
+                    { label: '聲音檔', icon: <Mic size={13} />, field: 'allow_audio_upload', mbField: 'audio_max_mb' },
+                    { label: '圖片檔', icon: <Image size={13} />, field: 'allow_image_upload', mbField: 'image_max_mb' },
                   ].map(({ label, icon, field, mbField }) => (
                     <div key={field} className="flex items-center gap-3">
                       <label className="flex items-center gap-1.5 w-28 cursor-pointer select-none">
@@ -444,6 +450,24 @@ export default function RoleManagement() {
                     />
                     <CalendarClock size={13} />
                     <span className="text-sm text-slate-700">允許排程任務</span>
+                  </label>
+                  <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={(form as any).allow_create_skill}
+                      onChange={e => setForm({ ...form, allow_create_skill: e.target.checked } as any)}
+                      className="w-4 h-4 rounded border-slate-300 text-blue-600"
+                    />
+                    <span className="text-sm text-slate-700">✨ 允許建立 Skill</span>
+                  </label>
+                  <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={(form as any).allow_external_skill}
+                      onChange={e => setForm({ ...form, allow_external_skill: e.target.checked } as any)}
+                      className="w-4 h-4 rounded border-slate-300 text-blue-600"
+                    />
+                    <span className="text-sm text-slate-700">🌐 允許建立外部 Skill</span>
                   </label>
                 </div>
               </div>

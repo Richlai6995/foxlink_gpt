@@ -173,7 +173,7 @@ function buildSearchNotice(queries, sources) {
   return notice;
 }
 
-async function streamChat(apiModel, history, userParts, onChunk) {
+async function streamChat(apiModel, history, userParts, onChunk, extraSystemInstruction = '') {
   // apiModel is the resolved API model string (e.g. 'gemini-3-pro-preview')
   console.log(`[Gemini] streamChat model=${apiModel} history=${history.length} userParts=${userParts.length}`);
 
@@ -182,9 +182,13 @@ async function streamChat(apiModel, history, userParts, onChunk) {
   const hasInlineData = userParts.some((p) => p.inlineData);
   console.log(`[Gemini] hasInlineData=${hasInlineData}, googleSearch=${!hasInlineData}`);
 
+  const fullInstruction = extraSystemInstruction
+    ? getSystemInstruction() + '\n\n---\n' + extraSystemInstruction
+    : getSystemInstruction();
+
   const model = genAI.getGenerativeModel({
     model: apiModel,
-    systemInstruction: getSystemInstruction(),
+    systemInstruction: fullInstruction,
     generationConfig: {
       maxOutputTokens: 65536,
     },
@@ -466,10 +470,13 @@ async function generateTextSync(apiModel, history, prompt) {
  * @param {Function} toolHandler        - async (toolName, args) => string result
  * @returns {Promise<{text, inputTokens, outputTokens, toolCallCount}>}
  */
-async function generateWithTools(apiModel, history, userParts, functionDeclarations, toolHandler) {
+async function generateWithTools(apiModel, history, userParts, functionDeclarations, toolHandler, extraSystemInstruction = '') {
+  const fullInstruction = extraSystemInstruction
+    ? getSystemInstruction() + '\n\n---\n' + extraSystemInstruction
+    : getSystemInstruction();
   const model = genAI.getGenerativeModel({
     model: apiModel,
-    systemInstruction: getSystemInstruction(),
+    systemInstruction: fullInstruction,
     tools: functionDeclarations.length > 0 ? [{ functionDeclarations }] : [],
   });
 

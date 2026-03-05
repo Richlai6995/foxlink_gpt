@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Users, BarChart3, Shield, AlertTriangle, Database, Mail, ArrowLeft, Cpu, DollarSign, CalendarClock, Plug, Zap, UserCog } from 'lucide-react'
+import { Users, BarChart3, Shield, AlertTriangle, Database, Mail, ArrowLeft, Cpu, DollarSign, CalendarClock, Plug, Zap, UserCog, Sparkles } from 'lucide-react'
 import UserManagement from '../components/admin/UserManagement'
 import TokenUsagePanel from '../components/admin/TokenUsage'
 import AuditLogs from '../components/admin/AuditLogs'
@@ -13,8 +13,9 @@ import ScheduledTasksPanel from '../components/admin/ScheduledTasksPanel'
 import MCPServersPanel from '../components/admin/MCPServersPanel'
 import DifyKnowledgeBasesPanel from '../components/admin/DifyKnowledgeBasesPanel'
 import RoleManagement from '../components/admin/RoleManagement'
+import SkillManagement from '../components/admin/SkillManagement'
 
-type Tab = 'users' | 'roles' | 'tokens' | 'audit' | 'keywords' | 'db' | 'mail' | 'llm' | 'cost' | 'scheduled' | 'mcp' | 'dify'
+type Tab = 'users' | 'roles' | 'tokens' | 'audit' | 'keywords' | 'db' | 'mail' | 'llm' | 'cost' | 'scheduled' | 'mcp' | 'dify' | 'skills'
 
 const tabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
   { id: 'users', label: '使用者管理', icon: <Users size={16} /> },
@@ -26,6 +27,7 @@ const tabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
   { id: 'scheduled', label: '排程任務', icon: <CalendarClock size={16} /> },
   { id: 'mcp', label: 'MCP 伺服器', icon: <Plug size={16} /> },
   { id: 'dify', label: 'DIFY 知識庫', icon: <Zap size={16} /> },
+  { id: 'skills', label: '技能管理', icon: <Sparkles size={16} /> },
   { id: 'db', label: '資料庫維護', icon: <Database size={16} /> },
   { id: 'mail', label: '郵件設定', icon: <Mail size={16} /> },
   { id: 'llm', label: 'LLM 模型設定', icon: <Cpu size={16} /> },
@@ -62,8 +64,8 @@ export default function AdminDashboard() {
               key={t.id}
               onClick={() => setActiveTab(t.id)}
               className={`w-full flex items-center gap-2.5 px-4 py-2.5 text-sm transition ${activeTab === t.id
-                  ? 'text-blue-600 bg-blue-50 border-r-2 border-blue-600 font-medium'
-                  : 'text-slate-600 hover:bg-slate-50'
+                ? 'text-blue-600 bg-blue-50 border-r-2 border-blue-600 font-medium'
+                : 'text-slate-600 hover:bg-slate-50'
                 }`}
             >
               {t.icon}
@@ -86,6 +88,7 @@ export default function AdminDashboard() {
           {activeTab === 'scheduled' && <ScheduledTasksPanel />}
           {activeTab === 'mcp' && <MCPServersPanel />}
           {activeTab === 'dify' && <DifyKnowledgeBasesPanel />}
+          {activeTab === 'skills' && <SkillManagement />}
         </main>
       </div>
     </div>

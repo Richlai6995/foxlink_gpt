@@ -36,6 +36,8 @@ interface UserForm {
   allow_image_upload: boolean
   image_max_mb: number
   allow_scheduled_tasks: boolean
+  allow_create_skill: boolean | null  // null = inherit from role
+  allow_external_skill: boolean | null
   role_id: number | null
   budget_daily: string
   budget_weekly: string
@@ -58,6 +60,8 @@ const empty: UserForm = {
   allow_text_upload: true, text_max_mb: 10, allow_audio_upload: false, audio_max_mb: 10,
   allow_image_upload: true, image_max_mb: 10,
   allow_scheduled_tasks: false,
+  allow_create_skill: null,
+  allow_external_skill: null,
   role_id: null,
   budget_daily: '', budget_weekly: '', budget_monthly: '',
   dept_code: '', dept_name: '', profit_center: '', profit_center_name: '',
@@ -144,6 +148,8 @@ export default function UserManagement() {
       org_group_name: u2.org_group_name || '',
       factory_code: u2.factory_code || '',
       org_end_date: u2.org_end_date || '',
+      allow_create_skill: u2.allow_create_skill == null ? null : u2.allow_create_skill === 1,
+      allow_external_skill: u2.allow_external_skill == null ? null : u2.allow_external_skill === 1,
     })
     setEditId(u.id)
     setError('')
@@ -499,6 +505,35 @@ export default function UserManagement() {
                       placeholder="無限制"
                     />
                   </div>
+                </div>
+              </div>
+
+              {/* Skill permission override */}
+              <div className="px-5 pb-4 border-t pt-3">
+                <p className="label mb-2 flex items-center gap-1.5">✨ Skill 權限（個人覆蓋，null=沿用角色設定）</p>
+                <div className="flex gap-4">
+                  <label className="flex items-center gap-2 cursor-pointer select-none">
+                    <select
+                      value={form.allow_create_skill === null ? '' : form.allow_create_skill ? '1' : '0'}
+                      onChange={e => setForm(p => ({ ...p, allow_create_skill: e.target.value === '' ? null : e.target.value === '1' }))}
+                      className="input py-1 text-sm"
+                    >
+                      <option value="">沿用角色</option>
+                      <option value="1">允許建立 Skill</option>
+                      <option value="0">禁止建立 Skill</option>
+                    </select>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer select-none">
+                    <select
+                      value={form.allow_external_skill === null ? '' : form.allow_external_skill ? '1' : '0'}
+                      onChange={e => setForm(p => ({ ...p, allow_external_skill: e.target.value === '' ? null : e.target.value === '1' }))}
+                      className="input py-1 text-sm"
+                    >
+                      <option value="">沿用角色</option>
+                      <option value="1">允許外部 Skill</option>
+                      <option value="0">禁止外部 Skill</option>
+                    </select>
+                  </label>
                 </div>
               </div>
 

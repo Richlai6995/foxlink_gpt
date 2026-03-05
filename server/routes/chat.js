@@ -377,7 +377,30 @@ router.get('/sessions/:id', (req, res) => {
       }
     });
 
-    res.json({ session, messages });
+    // Include attached skills
+    const skills = db.prepare(`
+      SELECT s.id, s.name, s.icon, s.type, s.description, s.model_key, ss.sort_order
+      FROM session_skills ss JOIN skills s ON s.id = ss.skill_id
+      WHERE ss.session_id = ? ORDER BY ss.sort_order ASC
+    `).all(req.params.id);
+
+    res.json({ session, messages, skills });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// PUT /api/chat/sessions/:id/skills — 更新 session 掛載的 skills（array of skill ids）
+router.put('/sessions/:id/skills', (req, res) => {
+  try {
+    const db = require('../database').db;
+    const session = db.prepare('SELECT id FROM chat_sessions WHERE id=? AND user_id=?').get(req.params.id, req.user.id);
+    if (!session) return res.status(404).json({ error: '找不到對話' });
+    const skillIds = Array.isArray(req.body.skill_ids) ? req.body.skill_ids : [];
+    db.prepare('DELETE FROM session_skills WHERE session_id=?').run(req.params.id);
+    const insert = db.prepare('INSERT INTO session_skills (session_id, skill_id, sort_order) VALUES (?,?,?)');
+    skillIds.forEach((id, idx) => insert.run(req.params.id, id, idx));
+    res.json({ success: true, skill_ids: skillIds });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -861,13 +884,110 @@ router.post('/sessions/:id/messages', upload.array('files', 10), async (req, res
     // Audit check
     await checkSensitiveKeywords(db, req.user, sessionId, combinedUserText);
 
+    // ── Load & Apply Session Skills ────────────────────────────────────────────
+    const sessionSkills = db.prepare(`
+      SELECT s.* FROM session_skills ss
+      JOIN skills s ON s.id = ss.skill_id
+      WHERE ss.session_id = ? ORDER BY ss.sort_order ASC
+    `).all(sessionId);
+
+    // Collect system prompts from builtin skills
+    const skillSystemPrompts = [];
+    // Track which skills need external-inject calls
+    const externalInjectSkills = [];
+    // Check for direct-answer external skill
+    let externalAnswerSkill = null;
+
+    for (const sk of sessionSkills) {
+      if (sk.type === 'builtin' && sk.system_prompt) {
+        skillSystemPrompts.push(`# Skill: ${sk.name}\n${sk.system_prompt}`);
+      } else if (sk.type === 'external' && sk.endpoint_url) {
+        if (sk.endpoint_mode === 'answer') {
+          externalAnswerSkill = sk;
+        } else {
+          externalInjectSkills.push(sk);
+        }
+      }
+    }
+
+    // External inject: call endpoints and collect additional system prompts
+    for (const sk of externalInjectSkills) {
+      try {
+        const fetch = require('node-fetch');
+        const resp = await Promise.race([
+          fetch(sk.endpoint_url, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Source': 'foxlink-gpt',
+              ...(sk.endpoint_secret ? { Authorization: `Bearer ${sk.endpoint_secret}` } : {}),
+            },
+            body: JSON.stringify({ user_message: combinedUserText, session_id: sessionId, user_id: req.user.id }),
+          }),
+          new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 5000)),
+        ]);
+        if (resp.ok) {
+          const data = await resp.json();
+          if (data.system_prompt) skillSystemPrompts.push(`# Skill: ${sk.name}\n${data.system_prompt}`);
+        }
+      } catch (e) {
+        console.warn(`[Skill] External inject failed for "${sk.name}": ${e.message} — skipping`);
+      }
+    }
+
+    // External answer: bypass Gemini entirely
+    if (externalAnswerSkill) {
+      const sk = externalAnswerSkill;
+      sendEvent({ type: 'status', message: `Skill: ${sk.name} 處理中...` });
+      try {
+        const fetch = require('node-fetch');
+        const resp = await Promise.race([
+          fetch(sk.endpoint_url, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Source': 'foxlink-gpt',
+              ...(sk.endpoint_secret ? { Authorization: `Bearer ${sk.endpoint_secret}` } : {}),
+            },
+            body: JSON.stringify({ user_message: combinedUserText, session_id: sessionId, user_id: req.user.id }),
+          }),
+          new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 10000)),
+        ]);
+        let answerContent = `[Skill "${sk.name}" 無法取得回應]`;
+        if (resp.ok) {
+          const data = await resp.json();
+          answerContent = data.content || answerContent;
+        }
+        sendEvent({ type: 'chunk', content: answerContent });
+        sendEvent({ type: 'done' });
+        // Record 0-token usage for tracing
+        const today = new Date().toISOString().slice(0, 10);
+        upsertTokenUsage(db, req.user.id, today, 'external-skill', 0, 0, 0);
+        db.prepare(`INSERT INTO chat_messages (session_id, role, content) VALUES (?, 'assistant', ?)`)
+          .run(sessionId, answerContent);
+        db.prepare(`UPDATE chat_sessions SET updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(sessionId);
+        return res.end();
+      } catch (e) {
+        console.error(`[Skill] External answer failed for "${sk.name}":`, e.message);
+        // Fall through to normal Gemini path
+      }
+    }
+
+    // Determine model (skill's model_key takes priority if set)
+    const skillModelKey = sessionSkills.find(sk => sk.model_key)?.model_key;
+
     // Stream AI response
     let aiText = '';
-    const chosenModel = model || session.model || 'pro';
+    const chosenModel = skillModelKey || model || session.model || 'pro';
     const { apiModel, imageOutput } = resolveApiModel(db, chosenModel);
     const history = sanitizeHistory(buildHistory(historyMessages, imageOutput));
 
-    console.log(`[Chat] Calling Gemini (model=${chosenModel} → ${apiModel}, imageOutput=${imageOutput}) parts=${userParts.length} history=${history.length}`);
+    // Inject skill system prompts into Gemini instruction
+    const skillExtraInstruction = skillSystemPrompts.length > 0
+      ? '\n\n---\n' + skillSystemPrompts.join('\n\n')
+      : '';
+
+    console.log(`[Chat] Calling Gemini (model=${chosenModel} → ${apiModel}, imageOutput=${imageOutput}, skills=${sessionSkills.length}) parts=${userParts.length} history=${history.length}`);
     const t0 = Date.now();
 
     let text, inputTokens, outputTokens;
@@ -926,13 +1046,85 @@ router.post('/sessions/:id/messages', upload.array('files', 10), async (req, res
       const roleId = userRoleRow?.role_id || null;
       const { functionDeclarations: allMcpDecls, serverMap } = mcpClient.getActiveToolDeclarations(db, roleId);
       const { declarations: difyDecls, kbMap } = getDifyFunctionDeclarations(db, roleId);
+
+      // ── Apply Skill MCP tool mode filtering ─────────────────────────────
+      // Resolve mcp_tool_ids from each skill (stored as JSON string in DB)
+      const skillMcpRules = sessionSkills
+        .filter(sk => sk.mcp_tool_mode && sk.mcp_tool_mode !== 'append' || (sk.mcp_tool_ids && sk.mcp_tool_ids !== '[]' && sk.mcp_tool_ids !== 'null'))
+        .map(sk => ({
+          mode: sk.mcp_tool_mode || 'append',
+          serverIds: (() => {
+            try { return JSON.parse(sk.mcp_tool_ids || '[]'); } catch { return []; }
+          })(),
+        }))
+        .filter(r => r.mode !== 'append' || r.serverIds.length > 0);
+
+      let filteredAllMcpDecls = allMcpDecls;
+
+      if (skillMcpRules.length > 0) {
+        // If ANY skill says disable → clear all MCP tools
+        const hasDisable = skillMcpRules.some(r => r.mode === 'disable');
+        if (hasDisable) {
+          filteredAllMcpDecls = [];
+          console.log('[Skill] MCP tool mode=disable → all MCP tools removed');
+        } else {
+          // Collect exclusive server id sets (union across exclusive skills)
+          const exclusiveServerIds = new Set();
+          const appendServerIds = new Set();
+          let hasExclusive = false;
+
+          for (const rule of skillMcpRules) {
+            if (rule.mode === 'exclusive') {
+              hasExclusive = true;
+              rule.serverIds.forEach(id => exclusiveServerIds.add(id));
+            } else if (rule.mode === 'append') {
+              rule.serverIds.forEach(id => appendServerIds.add(id));
+            }
+          }
+
+          if (hasExclusive) {
+            // exclusive: only keep tools from exclusiveServerIds ∪ appendServerIds
+            const allowedServerIds = new Set([...exclusiveServerIds, ...appendServerIds]);
+            filteredAllMcpDecls = allMcpDecls.filter(decl => {
+              const entry = serverMap[decl.name];
+              return entry && allowedServerIds.has(entry.server.id);
+            });
+            console.log(`[Skill] MCP tool mode=exclusive, allowed servers=${[...allowedServerIds].join(',')}, tools=${filteredAllMcpDecls.length}`);
+          } else if (appendServerIds.size > 0) {
+            // append: forced-include servers even if role didn't assign them
+            const alreadyIncluded = new Set(allMcpDecls.map(d => serverMap[d.name]?.server.id));
+            const toForceAdd = [...appendServerIds].filter(id => !alreadyIncluded.has(id));
+            if (toForceAdd.length > 0) {
+              // load those extra servers directly
+              const extraDecls = [];
+              for (const sid of toForceAdd) {
+                const srv = db.prepare(`SELECT * FROM mcp_servers WHERE id=? AND is_active=1`).get(sid);
+                if (!srv || !srv.tools_json) continue;
+                try {
+                  const tools = JSON.parse(srv.tools_json);
+                  for (const tool of tools) {
+                    if (!tool.name) continue;
+                    const safeName = tool.name.replace(/[^a-zA-Z0-9_]/g, '_');
+                    extraDecls.push({ name: safeName, description: tool.description || tool.name, parameters: tool.inputSchema || { type: 'object', properties: {} } });
+                    serverMap[safeName] = { server: srv, originalName: tool.name };
+                  }
+                } catch (_) { }
+              }
+              filteredAllMcpDecls = [...allMcpDecls, ...extraDecls];
+              console.log(`[Skill] MCP tool mode=append, force-added ${extraDecls.length} tools from ${toForceAdd.length} servers`);
+            }
+          }
+        }
+      }
+      // ── End Skill MCP filtering ──────────────────────────────────────────
+
       // Pass last 4 messages (2 turns) as context so follow-up replies are handled correctly
       const recentCtx = historyMessages.slice(-4)
         .map(m => `${m.role === 'user' ? '使用者' : 'AI'}: ${m.content.slice(0, 300)}`)
         .join('\n');
       // Intent-filter both MCP tools and DIFY KBs before passing to LLM
       const [mcpDecls, filteredDifyDecls] = await Promise.all([
-        filterMcpDeclsByIntent(combinedUserText, allMcpDecls, recentCtx),
+        filterMcpDeclsByIntent(combinedUserText, filteredAllMcpDecls, recentCtx),
         filterDifyDeclsByIntent(combinedUserText, difyDecls, recentCtx),
       ]);
       const allDeclarations = [...mcpDecls, ...filteredDifyDecls];
@@ -965,7 +1157,7 @@ router.post('/sessions/:id/messages', upload.array('files', 10), async (req, res
         };
 
         ({ text, inputTokens, outputTokens } = await generateWithTools(
-          apiModel, history, userParts, allDeclarations, toolHandler
+          apiModel, history, userParts, allDeclarations, toolHandler, skillExtraInstruction
         ));
         if (text) {
           aiText = text;
@@ -999,7 +1191,8 @@ router.post('/sessions/:id/messages', upload.array('files', 10), async (req, res
               firstChunkReceived = true;
               aiText += chunk;
               sendEvent({ type: 'chunk', content: chunk });
-            }
+            },
+            skillExtraInstruction
           ));
         } finally {
           clearInterval(keepAliveInterval);

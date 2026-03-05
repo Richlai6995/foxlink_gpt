@@ -1084,4 +1084,77 @@ router.put('/settings/scheduled-tasks', (req, res) => {
   }
 });
 
+// ── Admin: Skill Management ───────────────────────────────────────────────────
+// GET /api/admin/skills
+router.get('/skills', (req, res) => {
+  try {
+    const db = require('../database').db;
+    const rows = db.prepare(`
+      SELECT s.*, u.name AS owner_name, u.username AS owner_username
+      FROM skills s LEFT JOIN users u ON u.id = s.owner_user_id
+      ORDER BY s.pending_approval DESC, s.created_at DESC
+    `).all();
+    const parse = (v, d = []) => { try { return JSON.parse(v) || d; } catch { return d; } };
+    res.json(rows.map(s => ({ ...s, mcp_tool_ids: parse(s.mcp_tool_ids), dify_kb_ids: parse(s.dify_kb_ids), tags: parse(s.tags), endpoint_secret: s.endpoint_secret ? '****' : '' })));
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// PUT /api/admin/skills/:id/approve
+router.put('/skills/:id/approve', (req, res) => {
+  try {
+    const db = require('../database').db;
+    db.prepare('UPDATE skills SET is_public=1, is_admin_approved=1, pending_approval=0, updated_at=CURRENT_TIMESTAMP WHERE id=?').run(req.params.id);
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// PUT /api/admin/skills/:id/reject
+router.put('/skills/:id/reject', (req, res) => {
+  try {
+    const db = require('../database').db;
+    db.prepare('UPDATE skills SET is_public=0, is_admin_approved=0, pending_approval=0, updated_at=CURRENT_TIMESTAMP WHERE id=?').run(req.params.id);
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// PUT /api/admin/skills/:id — admin 可以直接編輯任何 skill
+router.put('/skills/:id', (req, res) => {
+  try {
+    const db = require('../database').db;
+    const s = db.prepare('SELECT * FROM skills WHERE id=?').get(req.params.id);
+    if (!s) return res.status(404).json({ error: '找不到 skill' });
+    const { name, description, icon, type, system_prompt, endpoint_url, endpoint_secret,
+      endpoint_mode, model_key, mcp_tool_mode, mcp_tool_ids, dify_kb_ids, tags, is_public, is_admin_approved } = req.body;
+    const newSecret = (endpoint_secret && endpoint_secret !== '****') ? endpoint_secret : s.endpoint_secret;
+    const parse = (v, d = []) => { try { return JSON.parse(v) || d; } catch { return d; } };
+    db.prepare(`
+      UPDATE skills SET name=?, description=?, icon=?, type=?, system_prompt=?,
+        endpoint_url=?, endpoint_secret=?, endpoint_mode=?, model_key=?,
+        mcp_tool_mode=?, mcp_tool_ids=?, dify_kb_ids=?, tags=?,
+        is_public=?, is_admin_approved=?, updated_at=CURRENT_TIMESTAMP
+      WHERE id=?
+    `).run(
+      name ?? s.name, description ?? s.description, icon ?? s.icon,
+      type ?? s.type, system_prompt ?? s.system_prompt,
+      endpoint_url ?? s.endpoint_url, newSecret,
+      endpoint_mode ?? s.endpoint_mode, model_key ?? s.model_key,
+      mcp_tool_mode ?? s.mcp_tool_mode,
+      JSON.stringify(mcp_tool_ids ?? parse(s.mcp_tool_ids)),
+      JSON.stringify(dify_kb_ids ?? parse(s.dify_kb_ids)),
+      JSON.stringify(tags ?? parse(s.tags)),
+      is_public ?? s.is_public, is_admin_approved ?? s.is_admin_approved,
+      req.params.id
+    );
+    res.json(db.prepare('SELECT * FROM skills WHERE id=?').get(req.params.id));
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 module.exports = router;

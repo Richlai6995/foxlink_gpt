@@ -1,0 +1,405 @@
+import { useState, useEffect, useCallback } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { Plus, Search, Globe, Lock, GitFork, Send, Pencil, Trash2, Clock, X, ChevronDown, Zap, ArrowLeft, MessageSquare } from 'lucide-react'
+import api from '../lib/api'
+
+interface Skill {
+    id: number
+    name: string
+    description: string
+    icon: string
+    type: 'builtin' | 'external'
+    system_prompt?: string
+    endpoint_url?: string
+    endpoint_secret?: string
+    endpoint_mode: 'inject' | 'answer'
+    model_key?: string | null
+    mcp_tool_mode: 'append' | 'exclusive' | 'disable'
+    mcp_tool_ids: number[]
+    dify_kb_ids: number[]
+    tags: string[]
+    owner_user_id: number
+    owner_name?: string
+    is_public: number
+    is_admin_approved: number
+    pending_approval: number
+    created_at: string
+}
+
+interface Model { key: string; name: string }
+
+const ICONS = ['🤖', '🧠', '📝', '💡', '🔍', '📊', '🎯', '🛠️', '📚', '🌐', '⚡', '🔬', '💬', '🎨', '🔧', '📋', '🚀', '🏭']
+
+const EMPTY_FORM = {
+    name: '', description: '', icon: '🤖', type: 'builtin' as 'builtin' | 'external',
+    system_prompt: '', endpoint_url: '', endpoint_secret: '', endpoint_mode: 'inject' as 'inject' | 'answer',
+    model_key: '', mcp_tool_mode: 'append' as 'append' | 'exclusive' | 'disable',
+    mcp_tool_ids: [] as number[], dify_kb_ids: [] as number[], tags: [] as string[],
+}
+
+export default function SkillMarket() {
+    const navigate = useNavigate()
+    const [skills, setSkills] = useState<Skill[]>([])
+    const [models, setModels] = useState<Model[]>([])
+    const [loading, setLoading] = useState(false)
+    const [error, setError] = useState('')
+    const [q, setQ] = useState('')
+    const [typeFilter, setTypeFilter] = useState('')
+    const [showEditor, setShowEditor] = useState(false)
+    const [editingSkill, setEditingSkill] = useState<Skill | null>(null)
+    const [form, setForm] = useState({ ...EMPTY_FORM })
+    const [saving, setSaving] = useState(false)
+    const [tagInput, setTagInput] = useState('')
+
+    const load = useCallback(async () => {
+        setLoading(true)
+        try {
+            const params: Record<string, string> = {}
+            if (q) params.q = q
+            if (typeFilter) params.type = typeFilter
+            const [skillsRes, modelsRes] = await Promise.all([
+                api.get('/skills', { params }),
+                api.get('/chat/models'),
+            ])
+            setSkills(skillsRes.data)
+            setModels(modelsRes.data)
+        } catch (e: any) {
+            setError(e.response?.data?.error || '載入失敗')
+        } finally {
+            setLoading(false)
+        }
+    }, [q, typeFilter])
+
+    useEffect(() => { load() }, [load])
+
+    const openCreate = () => { setEditingSkill(null); setForm({ ...EMPTY_FORM }); setTagInput(''); setShowEditor(true) }
+    const openEdit = async (sk: Skill) => {
+        setEditingSkill(sk)
+        setForm({
+            name: sk.name, description: sk.description || '', icon: sk.icon || '🤖',
+            type: sk.type, system_prompt: sk.system_prompt || '',
+            endpoint_url: sk.endpoint_url || '', endpoint_secret: sk.endpoint_secret || '',
+            endpoint_mode: sk.endpoint_mode || 'inject', model_key: sk.model_key || '',
+            mcp_tool_mode: sk.mcp_tool_mode || 'append',
+            mcp_tool_ids: sk.mcp_tool_ids || [],
+            dify_kb_ids: sk.dify_kb_ids || [],
+            tags: sk.tags || [],
+        })
+        setTagInput('')
+        setShowEditor(true)
+    }
+
+    const save = async () => {
+        if (!form.name.trim()) return setError('名稱必填')
+        setSaving(true)
+        setError('')
+        try {
+            if (editingSkill) {
+                await api.put(`/skills/${editingSkill.id}`, form)
+            } else {
+                await api.post('/skills', form)
+            }
+            setShowEditor(false)
+            load()
+        } catch (e: any) {
+            setError(e.response?.data?.error || '儲存失敗')
+        } finally {
+            setSaving(false)
+        }
+    }
+
+    const del = async (sk: Skill) => {
+        if (!confirm(`確定刪除 "${sk.name}"？`)) return
+        try { await api.delete(`/skills/${sk.id}`); load() } catch (e: any) { setError(e.response?.data?.error || '刪除失敗') }
+    }
+
+    const fork = async (sk: Skill) => {
+        try { await api.post(`/skills/${sk.id}/fork`); load() } catch (e: any) { setError(e.response?.data?.error || 'Fork 失敗') }
+    }
+
+    const requestPublic = async (sk: Skill) => {
+        try { await api.post(`/skills/${sk.id}/request-public`); load() } catch (e: any) { setError(e.response?.data?.error || '申請失敗') }
+    }
+
+    const addTag = () => {
+        const t = tagInput.trim()
+        if (t && !form.tags.includes(t)) setForm(p => ({ ...p, tags: [...p.tags, t] }))
+        setTagInput('')
+    }
+
+    const isOwner = (sk: Skill) => {
+        const user = JSON.parse(localStorage.getItem('user') || '{}')
+        return sk.owner_user_id === user.id || user.role === 'admin'
+    }
+
+    const mySkills = skills.filter(s => isOwner(s))
+    const publicSkills = skills.filter(s => !isOwner(s) && s.is_public && s.is_admin_approved)
+
+    return (
+        <div className="min-h-screen bg-slate-50">
+            <div className="max-w-6xl mx-auto p-6">
+                {/* Header */}
+                <div className="flex items-center justify-between mb-6">
+                    <div className="flex items-center gap-3">
+                        <button onClick={() => navigate('/chat')} className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition">
+                            <ArrowLeft size={18} />
+                        </button>
+                        <div>
+                            <h1 className="text-2xl font-bold text-slate-800 flex items-center gap-2"><Zap size={22} className="text-blue-500" />技能市集</h1>
+                            <p className="text-sm text-slate-500 mt-0.5">建立並分享 AI Skill，讓對話更強大</p>
+                        </div>
+                    </div>
+                    <button onClick={openCreate} className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 transition">
+                        <Plus size={15} />建立技能
+                    </button>
+                </div>
+
+                {/* Filters */}
+                <div className="flex gap-2 mb-6">
+                    <div className="relative flex-1 max-w-sm">
+                        <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                        <input value={q} onChange={e => setQ(e.target.value)} placeholder="搜尋技能名稱..."
+                            className="pl-8 pr-3 py-2 border border-slate-200 rounded-lg text-sm w-full focus:outline-none focus:ring-2 focus:ring-blue-300" />
+                    </div>
+                    <select value={typeFilter} onChange={e => setTypeFilter(e.target.value)}
+                        className="border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-300">
+                        <option value="">全部類型</option>
+                        <option value="builtin">內建</option>
+                        <option value="external">外部</option>
+                    </select>
+                </div>
+
+                {error && <div className="mb-4 p-3 bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg">{error}<button className="ml-2 text-red-400 hover:text-red-600" onClick={() => setError('')}><X size={13} /></button></div>}
+
+                {loading && <div className="text-center py-12 text-slate-400">載入中...</div>}
+
+                {/* My Skills */}
+                {mySkills.length > 0 && (
+                    <section className="mb-8">
+                        <h2 className="text-sm font-semibold text-slate-600 mb-3 uppercase tracking-wide">我的技能</h2>
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                            {mySkills.map(sk => <SkillCard key={sk.id} skill={sk} onEdit={() => openEdit(sk)} onDelete={() => del(sk)} onFork={() => fork(sk)} onRequestPublic={() => requestPublic(sk)} onUse={() => navigate(`/chat?skillId=${sk.id}`)} isOwner />)}
+                        </div>
+                    </section>
+                )}
+
+                {/* Public Skills */}
+                {publicSkills.length > 0 && (
+                    <section>
+                        <h2 className="text-sm font-semibold text-slate-600 mb-3 uppercase tracking-wide">公開技能</h2>
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                            {publicSkills.map(sk => <SkillCard key={sk.id} skill={sk} onFork={() => fork(sk)} onUse={() => navigate(`/chat?skillId=${sk.id}`)} isOwner={false} />)}
+                        </div>
+                    </section>
+                )}
+
+                {!loading && skills.length === 0 && (
+                    <div className="text-center py-20 text-slate-400">
+                        <Zap size={40} className="mx-auto mb-3 opacity-30" />
+                        <p>還沒有技能，點擊「建立技能」開始</p>
+                    </div>
+                )}
+
+                {/* Editor modal */}
+                {showEditor && (
+                    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 overflow-y-auto p-4">
+                        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl my-8">
+                            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
+                                <h3 className="font-semibold text-slate-800">{editingSkill ? '編輯技能' : '建立技能'}</h3>
+                                <button onClick={() => setShowEditor(false)} className="p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100"><X size={16} /></button>
+                            </div>
+                            <div className="p-6 space-y-4">
+                                {/* Basic */}
+                                <div className="flex gap-3">
+                                    <div>
+                                        <label className="block text-xs font-medium text-slate-600 mb-1">圖示</label>
+                                        <div className="relative">
+                                            <select value={form.icon} onChange={e => setForm(p => ({ ...p, icon: e.target.value }))}
+                                                className="appearance-none w-16 text-center text-xl border border-slate-200 rounded-lg py-2 focus:outline-none focus:ring-2 focus:ring-blue-300">
+                                                {ICONS.map(i => <option key={i} value={i}>{i}</option>)}
+                                            </select>
+                                            <ChevronDown size={10} className="absolute right-1 bottom-3 text-slate-400 pointer-events-none" />
+                                        </div>
+                                    </div>
+                                    <div className="flex-1">
+                                        <label className="block text-xs font-medium text-slate-600 mb-1">名稱 *</label>
+                                        <input value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))}
+                                            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300" />
+                                    </div>
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-medium text-slate-600 mb-1">描述</label>
+                                    <textarea value={form.description} rows={2} onChange={e => setForm(p => ({ ...p, description: e.target.value }))}
+                                        className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 resize-none" />
+                                </div>
+
+                                {/* Type */}
+                                <div>
+                                    <label className="block text-xs font-medium text-slate-600 mb-1">類型</label>
+                                    <div className="flex gap-2">
+                                        {(['builtin', 'external'] as const).map(t => (
+                                            <button key={t} onClick={() => setForm(p => ({ ...p, type: t }))}
+                                                className={`px-4 py-1.5 rounded-lg text-sm border transition ${form.type === t ? 'bg-blue-600 text-white border-blue-600' : 'border-slate-200 text-slate-600 hover:border-blue-300'}`}>
+                                                {t === 'builtin' ? '內建 Prompt' : '外部 Endpoint'}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+
+                                {form.type === 'builtin' ? (
+                                    <div>
+                                        <label className="block text-xs font-medium text-slate-600 mb-1">System Prompt</label>
+                                        <textarea value={form.system_prompt} rows={6} onChange={e => setForm(p => ({ ...p, system_prompt: e.target.value }))}
+                                            placeholder="輸入給 AI 的角色設定與指令..."
+                                            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-300 resize-y" />
+                                    </div>
+                                ) : (
+                                    <div className="space-y-3">
+                                        <div>
+                                            <label className="block text-xs font-medium text-slate-600 mb-1">Endpoint URL</label>
+                                            <input value={form.endpoint_url} onChange={e => setForm(p => ({ ...p, endpoint_url: e.target.value }))}
+                                                placeholder="https://your-service.com/skill"
+                                                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300" />
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs font-medium text-slate-600 mb-1">Bearer Token（選填）</label>
+                                            <input type="password" value={form.endpoint_secret} onChange={e => setForm(p => ({ ...p, endpoint_secret: e.target.value }))}
+                                                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300" />
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs font-medium text-slate-600 mb-1">回應模式</label>
+                                            <div className="flex gap-2">
+                                                {(['inject', 'answer'] as const).map(m => (
+                                                    <button key={m} onClick={() => setForm(p => ({ ...p, endpoint_mode: m }))}
+                                                        className={`px-3 py-1.5 rounded-lg text-xs border transition ${form.endpoint_mode === m ? 'bg-indigo-600 text-white border-indigo-600' : 'border-slate-200 text-slate-600 hover:border-indigo-300'}`}>
+                                                        {m === 'inject' ? 'Inject（補充 Prompt）' : 'Answer（直接回答）'}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* Model */}
+                                <div>
+                                    <label className="block text-xs font-medium text-slate-600 mb-1">綁定模型（不設定則跟隨使用者選擇）</label>
+                                    <select value={form.model_key} onChange={e => setForm(p => ({ ...p, model_key: e.target.value }))}
+                                        className="border border-slate-200 rounded-lg px-3 py-2 text-sm w-full focus:outline-none focus:ring-2 focus:ring-blue-300">
+                                        <option value="">不綁定</option>
+                                        {models.map(m => <option key={m.key} value={m.key}>{m.name}</option>)}
+                                    </select>
+                                </div>
+
+                                {/* Tags */}
+                                <div>
+                                    <label className="block text-xs font-medium text-slate-600 mb-1">標籤</label>
+                                    <div className="flex gap-2 flex-wrap mb-2">
+                                        {form.tags.map(t => (
+                                            <span key={t} className="inline-flex items-center gap-1 px-2 py-0.5 bg-slate-100 rounded text-xs text-slate-600">
+                                                {t}<button onClick={() => setForm(p => ({ ...p, tags: p.tags.filter(x => x !== t) }))}><X size={10} /></button>
+                                            </span>
+                                        ))}
+                                    </div>
+                                    <div className="flex gap-2">
+                                        <input value={tagInput} onChange={e => setTagInput(e.target.value)}
+                                            onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), addTag())}
+                                            placeholder="輸入標籤後按 Enter"
+                                            className="flex-1 border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300" />
+                                        <button onClick={addTag} className="px-3 py-1.5 border border-slate-200 rounded-lg text-sm text-slate-600 hover:border-blue-300">新增</button>
+                                    </div>
+                                </div>
+
+                                {error && <p className="text-sm text-red-600">{error}</p>}
+                            </div>
+                            <div className="flex justify-end gap-2 px-6 py-4 border-t border-slate-100">
+                                <button onClick={() => setShowEditor(false)} className="px-4 py-2 rounded-lg text-sm text-slate-600 hover:bg-slate-100">取消</button>
+                                <button onClick={save} disabled={saving}
+                                    className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 disabled:opacity-50">
+                                    {saving ? '儲存中...' : '儲存'}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                )}
+            </div>
+        </div>
+    )
+}
+
+function SkillCard({ skill, onEdit, onDelete, onFork, onRequestPublic, onUse, isOwner }: {
+    skill: Skill
+    onEdit?: () => void
+    onDelete?: () => void
+    onFork: () => void
+    onRequestPublic?: () => void
+    onUse?: () => void
+    isOwner: boolean
+}) {
+    const statusBadge = skill.is_public && skill.is_admin_approved
+        ? <span className="flex items-center gap-1 text-xs text-emerald-600"><Globe size={10} />公開</span>
+        : skill.pending_approval
+            ? <span className="flex items-center gap-1 text-xs text-amber-600"><Clock size={10} />審核中</span>
+            : <span className="flex items-center gap-1 text-xs text-slate-400"><Lock size={10} />私人</span>
+
+    return (
+        <div className="bg-white border border-slate-200 rounded-xl p-4 hover:shadow-md transition group">
+            <div className="flex items-start gap-3 mb-3">
+                <div className="text-3xl leading-none mt-0.5">{skill.icon}</div>
+                <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                        <h3 className="font-semibold text-slate-800 text-sm truncate">{skill.name}</h3>
+                        <span className={`shrink-0 text-xs px-1.5 py-0.5 rounded font-medium ${skill.type === 'external' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>
+                            {skill.type === 'external' ? '外部' : '內建'}
+                        </span>
+                    </div>
+                    <p className="text-xs text-slate-500 mt-0.5 line-clamp-2">{skill.description || '—'}</p>
+                </div>
+            </div>
+
+            {skill.tags.length > 0 && (
+                <div className="flex flex-wrap gap-1 mb-3">
+                    {skill.tags.slice(0, 4).map(t => <span key={t} className="text-xs px-1.5 py-0.5 bg-slate-100 rounded text-slate-500">{t}</span>)}
+                </div>
+            )}
+
+            <div className="flex items-center justify-between text-xs text-slate-400 border-t border-slate-100 pt-3">
+                <div className="flex items-center gap-2">
+                    {statusBadge}
+                    {skill.model_key && <span className="text-xs text-indigo-500">🔗{skill.model_key}</span>}
+                </div>
+                <div className="flex items-center gap-1">
+                    {onUse && (
+                        <button onClick={onUse} title="在對話中使用" className="p-1 rounded hover:bg-purple-50 text-slate-400 hover:text-purple-600 transition">
+                            <MessageSquare size={13} />
+                        </button>
+                    )}
+                    {!isOwner && (
+                        <button onClick={onFork} title="Fork 一份" className="p-1 rounded hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition">
+                            <GitFork size={13} />
+                        </button>
+                    )}
+                    {isOwner && onEdit && (
+                        <button onClick={onEdit} title="編輯" className="p-1 rounded hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition">
+                            <Pencil size={13} />
+                        </button>
+                    )}
+                    {isOwner && !skill.is_public && !skill.pending_approval && onRequestPublic && (
+                        <button onClick={onRequestPublic} title="申請公開" className="p-1 rounded hover:bg-slate-100 text-slate-400 hover:text-emerald-600 transition">
+                            <Send size={13} />
+                        </button>
+                    )}
+                    {isOwner && onDelete && (
+                        <button onClick={onDelete} title="刪除" className="p-1 rounded hover:bg-red-50 text-slate-400 hover:text-red-500 transition">
+                            <Trash2 size={13} />
+                        </button>
+                    )}
+                    {isOwner && (
+                        <button onClick={onFork} title="複製一份" className="p-1 rounded hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition">
+                            <GitFork size={13} />
+                        </button>
+                    )}
+                </div>
+            </div>
+        </div>
+    )
+}

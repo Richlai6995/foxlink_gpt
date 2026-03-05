@@ -5,7 +5,7 @@ import {
   User, Users, CalendarClock, BarChart3, DollarSign, Shield,
   AlertTriangle, Database, Mail, Cpu, Zap, Settings, BookOpen,
   ChevronRight, Info, Lightbulb, Terminal, Globe, RefreshCw,
-  Wand2, ImageIcon, Clock, Share2, GitFork, Lock,
+  Wand2, ImageIcon, Clock, Share2, GitFork, Lock, Sparkles,
 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 
@@ -69,11 +69,11 @@ function CodeBlock({ children }: { children: React.ReactNode }) {
 
 function Tag({ color, children }: { color: string; children: React.ReactNode }) {
   const styles: Record<string, string> = {
-    blue:   'bg-blue-100 text-blue-700 border-blue-200',
-    green:  'bg-green-100 text-green-700 border-green-200',
+    blue: 'bg-blue-100 text-blue-700 border-blue-200',
+    green: 'bg-green-100 text-green-700 border-green-200',
     purple: 'bg-purple-100 text-purple-700 border-purple-200',
     orange: 'bg-orange-100 text-orange-700 border-orange-200',
-    gray:   'bg-slate-100 text-slate-600 border-slate-200',
+    gray: 'bg-slate-100 text-slate-600 border-slate-200',
   }
   return (
     <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${styles[color] || styles.gray} mr-1.5`}>
@@ -123,19 +123,20 @@ function Table({ headers, rows }: { headers: string[]; rows: string[][] }) {
 // ── User Manual content ───────────────────────────────────────────────────────
 
 const userSections = [
-  { id: 'u-intro',   label: '系統介紹',       icon: <BookOpen size={18} /> },
-  { id: 'u-login',   label: '登入與登出',     icon: <User size={18} /> },
-  { id: 'u-ui',      label: '介面導覽',       icon: <Settings size={18} /> },
-  { id: 'u-chat',    label: '開始對話',       icon: <MessageSquare size={18} /> },
-  { id: 'u-model',   label: '選擇 AI 模型',  icon: <Cpu size={18} /> },
-  { id: 'u-upload',  label: '上傳檔案',       icon: <Upload size={18} /> },
-  { id: 'u-history',  label: '對話歷史',       icon: <History size={18} /> },
-  { id: 'u-tools',    label: '可用工具',       icon: <Terminal size={18} /> },
-  { id: 'u-schedule', label: '自動排程功能',  icon: <Clock size={18} /> },
-  { id: 'u-image',    label: '圖片生成與修圖', icon: <ImageIcon size={18} /> },
-  { id: 'u-output',   label: '複製與下載',    icon: <Download size={18} /> },
-  { id: 'u-share',    label: '分享對話',      icon: <Share2 size={18} /> },
-  { id: 'u-budget',   label: '使用金額提示',  icon: <DollarSign size={18} /> },
+  { id: 'u-intro', label: '系統介紹', icon: <BookOpen size={18} /> },
+  { id: 'u-login', label: '登入與登出', icon: <User size={18} /> },
+  { id: 'u-ui', label: '介面導覽', icon: <Settings size={18} /> },
+  { id: 'u-chat', label: '開始對話', icon: <MessageSquare size={18} /> },
+  { id: 'u-model', label: '選擇 AI 模型', icon: <Cpu size={18} /> },
+  { id: 'u-upload', label: '上傳檔案', icon: <Upload size={18} /> },
+  { id: 'u-history', label: '對話歷史', icon: <History size={18} /> },
+  { id: 'u-tools', label: '可用工具', icon: <Terminal size={18} /> },
+  { id: 'u-schedule', label: '自動排程功能', icon: <Clock size={18} /> },
+  { id: 'u-image', label: '圖片生成與修圖', icon: <ImageIcon size={18} /> },
+  { id: 'u-output', label: '複製與下載', icon: <Download size={18} /> },
+  { id: 'u-share', label: '分享對話', icon: <Share2 size={18} /> },
+  { id: 'u-skill', label: '技能 Skill', icon: <Sparkles size={18} /> },
+  { id: 'u-budget', label: '使用金額提示', icon: <DollarSign size={18} /> },
 ]
 
 function UserManual() {
@@ -588,6 +589,68 @@ function UserManual() {
         </SubSection>
       </Section>
 
+      <Section id="u-skill" icon={<Sparkles size={22} />} iconColor="text-purple-500" title="技能 Skill">
+        <Para>
+          技能（Skill）是可以掌載到對話的自訂模組，能讓 AI 具備特定領域的專業知識、固定指令或對接外部服務的能力。
+          例如，掛載「專業術語翻譯」技能後，每次對話 AI 會自動以該行業的標準用語進行翻譯。
+        </Para>
+
+        <SubSection title="技能類型">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="border border-blue-200 rounded-xl p-4 bg-blue-50">
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-lg">🧠</span>
+                <span className="font-semibold text-blue-700 text-sm">內建 Prompt 技能</span>
+              </div>
+              <p className="text-xs text-blue-600 leading-5">
+                透過 System Prompt 給 AI 加上角色設定或指引。不需要外部服務，建立簡單。
+                適合：翻譯貨第、行業專家、內部 SOP 助手等。
+              </p>
+            </div>
+            <div className="border border-purple-200 rounded-xl p-4 bg-purple-50">
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-lg">🌐</span>
+                <span className="font-semibold text-purple-700 text-sm">外部 Endpoint 技能</span>
+              </div>
+              <p className="text-xs text-purple-600 leading-5">
+                呼叫外部 API，取得即時資料再供給 AI。
+                適合：時刻查詢、即時庫存、外部知識庫對接等。
+              </p>
+            </div>
+          </div>
+        </SubSection>
+
+        <SubSection title="如何將技能掛載到對話">
+          <div className="space-y-3">
+            <StepItem num={1} title="前往左側邊欄的「技能市集」" desc="個人技能與公開技能均可在此瀏覽" />
+            <StepItem num={2} title="點選技能卡片右下角的「💬」訿(在對話中使用)" desc="系統自動建立新對話並掛載此技能" />
+            <StepItem num={3} title="或圖開對話後，點選頂部工具列的「✨ 技能」按鈕" desc="選擇要掛載的技能後點「確認掛載」" />
+            <StepItem num={4} title="頂部工具列出現紫色 Badge 確認掛載成功" desc="此對話之後每次發訊都會自動套用此技能" />
+          </div>
+          <TipBox>可以對同一個對話掛載多個技能，效果會叠加。再次點「技能」按鈕即可修改或移除已掛載的技能。</TipBox>
+        </SubSection>
+
+        <SubSection title="建立與分享技能">
+          <div className="space-y-3">
+            <StepItem num={1} title="進入技能市集，點選「建立技能」" />
+            <StepItem num={2} title="自行建立內建或外部技能，共享給同事" desc="廳此技能預設為私人，點選「申請公開」將申請送對管理員審核" />
+            <StepItem num={3} title="審核通過後，全體員工可在公開技能區看到並使用" />
+            <StepItem num={4} title="對於公開技能，可點選 Fork 則複製一份到自己帳號，再根據需要修改" />
+          </div>
+        </SubSection>
+
+        <SubSection title="技能上的 MCP 工具模式">
+          <Table
+            headers={['模式', '說明']}
+            rows={[
+              ['append（追加）', '在角色已授權的工具基礎上，加入技能指定的額外伺服器工具（預設）'],
+              ['exclusive（雙展）', '仅限定使用技能指定的 MCP 伺服器，角色其他工具暂時停用'],
+              ['disable（停用）', '對話期間禁用全部 MCP 工具，適合純文字對話場景'],
+            ]}
+          />
+        </SubSection>
+      </Section>
+
       <Section id="u-budget" icon={<DollarSign size={22} />} iconColor="text-emerald-500" title="使用金額提示">
         <Para>
           若系統管理員為您的帳號設定了使用金額上限，對話頁面頂部工具列會出現金額指示器，
@@ -623,18 +686,19 @@ function UserManual() {
 // ── Admin Manual content ──────────────────────────────────────────────────────
 
 const adminSections = [
-  { id: 'a-users',     label: '使用者管理',     icon: <Users size={18} /> },
-  { id: 'a-roles',     label: '角色管理',       icon: <Lock size={18} /> },
-  { id: 'a-schedule',  label: '排程任務',       icon: <CalendarClock size={18} /> },
-  { id: 'a-prompt',    label: '排程 Prompt 語法', icon: <Terminal size={18} /> },
-  { id: 'a-generate',  label: '檔案生成語法',   icon: <Download size={18} /> },
-  { id: 'a-example',   label: '完整 Prompt 範例', icon: <BookOpen size={18} /> },
-  { id: 'a-tokens',    label: 'Token 與費用統計', icon: <BarChart3 size={18} /> },
-  { id: 'a-audit',     label: '稽核與敏感詞',   icon: <Shield size={18} /> },
-  { id: 'a-mcp',       label: 'MCP 伺服器',    icon: <Globe size={18} /> },
-  { id: 'a-dify',      label: 'DIFY 知識庫',   icon: <Zap size={18} /> },
-  { id: 'a-llm',       label: 'LLM 模型管理',  icon: <Cpu size={18} /> },
-  { id: 'a-system',    label: '系統設定',       icon: <Settings size={18} /> },
+  { id: 'a-users', label: '使用者管理', icon: <Users size={18} /> },
+  { id: 'a-roles', label: '角色管理', icon: <Lock size={18} /> },
+  { id: 'a-schedule', label: '排程任務', icon: <CalendarClock size={18} /> },
+  { id: 'a-prompt', label: '排程 Prompt 語法', icon: <Terminal size={18} /> },
+  { id: 'a-generate', label: '檔案生成語法', icon: <Download size={18} /> },
+  { id: 'a-example', label: '完整 Prompt 範例', icon: <BookOpen size={18} /> },
+  { id: 'a-tokens', label: 'Token 與費用統計', icon: <BarChart3 size={18} /> },
+  { id: 'a-audit', label: '稽核與敏感詞', icon: <Shield size={18} /> },
+  { id: 'a-mcp', label: 'MCP 伺服器', icon: <Globe size={18} /> },
+  { id: 'a-dify', label: 'DIFY 知識庫', icon: <Zap size={18} /> },
+  { id: 'a-skill', label: '技能市集管理', icon: <Sparkles size={18} /> },
+  { id: 'a-llm', label: 'LLM 模型管理', icon: <Cpu size={18} /> },
+  { id: 'a-system', label: '系統設定', icon: <Settings size={18} /> },
 ]
 
 function AdminManual() {
@@ -807,6 +871,45 @@ function AdminManual() {
             AI 只能存取這些已授權的工具，未勾選的工具不會出現在其對話中。
           </Para>
           <NoteBox>若角色未綁定任何 MCP / DIFY，系統預設讓所有已啟用的工具對使用者可見。建議明確綁定，以避免機密知識庫意外對不相關部門開放。</NoteBox>
+        </SubSection>
+      </Section>
+
+      <Section id="a-skill" icon={<Sparkles size={22} />} iconColor="text-purple-500" title="技能市集管理">
+        <Para>
+          管理員可在後台「技能管理」頁簽查看所有使用者建立的技能、審核公開申請，並控制委審策略。
+        </Para>
+
+        <SubSection title="技能公開申請審核">
+          <div className="space-y-3">
+            <StepItem num={1} title="使用者點選技能卡片的「→」申請公開" desc="卡片狀態變為「審核中」" />
+            <StepItem num={2} title="管理員在後台「系統管理 → 技能管理」對申請進行審核" />
+            <StepItem num={3} title="連線 Approve 內常對全體員工可見" desc="或點選 Reject 拒絕并處為私人" />
+          </div>
+          <NoteBox>審核制度是防止不適當素材流入的騷提，建議管理員審閱內容承設定實際測試後再公開。</NoteBox>
+        </SubSection>
+
+        <SubSection title="角色技能權限設定">
+          <Para>在「角色管理」中，可针對每個角色設定技能權限：</Para>
+          <Table
+            headers={['權限項目', '說明']}
+            rows={[
+              ['允許建立 Skill', '開啟後，此角色的使用者可建立自定義技能'],
+              ['允許外部 Skill', '開啟後，可建立拥有外部 Endpoint URL 的技能'],
+            ]}
+          />
+          <NoteBox>使用者頁面可對個別帳號覆載角色預設值。設為 null 表示繼承角色設定。</NoteBox>
+        </SubSection>
+
+        <SubSection title="直接管理公開技能">
+          <Para>管理員可以不經申請，直接將任何技能新增或修改為公開 / 私人、常用技能（建立官方推薦探面）。</Para>
+          <Table
+            headers={['操作', '步驟']}
+            rows={[
+              ['公開技能', '後台 → 技能管理 → 找到目標技能 → 點 Approve'],
+              ['設為私人', '找到目標 → 點 Reject 或直接編輯 is_public=0'],
+              ['建立官方技能', '管理員建立後可直接設為公開，不需經申請流程'],
+            ]}
+          />
         </SubSection>
       </Section>
 
@@ -1309,11 +1412,10 @@ export default function HelpPage() {
         <div className="ml-auto flex bg-slate-100 rounded-xl p-1 gap-1">
           <button
             onClick={() => setRole('user')}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition ${
-              role === 'user'
-                ? 'bg-white text-blue-700 shadow-sm'
-                : 'text-slate-500 hover:text-slate-700'
-            }`}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition ${role === 'user'
+              ? 'bg-white text-blue-700 shadow-sm'
+              : 'text-slate-500 hover:text-slate-700'
+              }`}
           >
             <User size={15} />
             一般使用者
@@ -1321,11 +1423,10 @@ export default function HelpPage() {
           {isAdmin && (
             <button
               onClick={() => setRole('admin')}
-              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition ${
-                role === 'admin'
-                  ? 'bg-white text-indigo-700 shadow-sm'
-                  : 'text-slate-500 hover:text-slate-700'
-              }`}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition ${role === 'admin'
+                ? 'bg-white text-indigo-700 shadow-sm'
+                : 'text-slate-500 hover:text-slate-700'
+                }`}
             >
               <Settings size={15} />
               系統管理員
@@ -1359,11 +1460,10 @@ export default function HelpPage() {
         >
           <div className="max-w-3xl mx-auto px-8 py-8">
             {/* Role badge */}
-            <div className={`inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium mb-8 ${
-              role === 'admin'
-                ? 'bg-indigo-100 text-indigo-700 border border-indigo-200'
-                : 'bg-blue-100 text-blue-700 border border-blue-200'
-            }`}>
+            <div className={`inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium mb-8 ${role === 'admin'
+              ? 'bg-indigo-100 text-indigo-700 border border-indigo-200'
+              : 'bg-blue-100 text-blue-700 border border-blue-200'
+              }`}>
               {role === 'admin' ? <Settings size={15} /> : <User size={15} />}
               {role === 'admin' ? '系統管理員操作手冊' : '一般使用者操作手冊'}
             </div>

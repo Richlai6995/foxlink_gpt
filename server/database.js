@@ -502,6 +502,51 @@ function initSchema(db) {
     db.exec(`ALTER TABLE roles ADD COLUMN allow_scheduled_tasks INTEGER DEFAULT 0`);
   }
 
+  // ── Skills System ───────────────────────────────────────────────────────────
+  db.exec(`CREATE TABLE IF NOT EXISTS skills (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    name              TEXT NOT NULL,
+    description       TEXT,
+    icon              TEXT DEFAULT '🤖',
+    type              TEXT DEFAULT 'builtin',
+    system_prompt     TEXT,
+    endpoint_url      TEXT,
+    endpoint_secret   TEXT,
+    endpoint_mode     TEXT DEFAULT 'inject',
+    model_key         TEXT,
+    mcp_tool_mode     TEXT DEFAULT 'append',
+    mcp_tool_ids      TEXT DEFAULT '[]',
+    dify_kb_ids       TEXT DEFAULT '[]',
+    tags              TEXT DEFAULT '[]',
+    owner_user_id     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    is_public         INTEGER DEFAULT 0,
+    is_admin_approved INTEGER DEFAULT 0,
+    pending_approval  INTEGER DEFAULT 0,
+    created_at        DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at        DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`);
+
+  db.exec(`CREATE TABLE IF NOT EXISTS session_skills (
+    session_id  TEXT REFERENCES chat_sessions(id) ON DELETE CASCADE,
+    skill_id    INTEGER REFERENCES skills(id) ON DELETE CASCADE,
+    sort_order  INTEGER DEFAULT 0,
+    PRIMARY KEY (session_id, skill_id)
+  )`);
+
+  // Migration: allow_create_skill / allow_external_skill on roles
+  const rolesColsSkill = db.prepare('PRAGMA table_info(roles)').all().map((r) => r.name);
+  if (!rolesColsSkill.includes('allow_create_skill')) {
+    db.exec(`ALTER TABLE roles ADD COLUMN allow_create_skill   INTEGER DEFAULT 0`);
+    db.exec(`ALTER TABLE roles ADD COLUMN allow_external_skill INTEGER DEFAULT 0`);
+  }
+
+  // Migration: allow_create_skill / allow_external_skill on users (NULL = inherit from role)
+  const userColsSkill = db.prepare('PRAGMA table_info(users)').all().map((r) => r.name);
+  if (!userColsSkill.includes('allow_create_skill')) {
+    db.exec(`ALTER TABLE users ADD COLUMN allow_create_skill   INTEGER`);
+    db.exec(`ALTER TABLE users ADD COLUMN allow_external_skill INTEGER`);
+  }
+
   // Seed default admin
   const adminAccount = process.env.DEFAULT_ADMIN_ACCOUNT || 'admin';
   const adminPassword = process.env.DEFAULT_ADMIN_PASSWORD || 'admin@foxlink';

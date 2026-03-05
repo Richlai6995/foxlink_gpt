@@ -49,6 +49,8 @@ app.get('/api/health', (req, res) => res.json({ status: 'ok', timestamp: new Dat
     console.log('[Route] /api/roles OK');
     app.use('/api/share', require('./routes/share'));
     console.log('[Route] /api/share OK');
+    app.use('/api/skills', require('./routes/skills'));
+    console.log('[Route] /api/skills OK');
 
     // Serve frontend in production
     const staticPath = path.join(__dirname, 'public');
