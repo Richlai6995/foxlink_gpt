@@ -87,9 +87,10 @@ class OracleStatementWrapper {
     try {
       let result;
       if (isInsert) {
-        // Try RETURNING id first; if column 'id' doesn't exist, fallback to plain insert
+        // Try RETURNING id first — use positional placeholder to avoid mixing named/positional
         try {
-          const sqlWithRet = `${this.sql} RETURNING id INTO :__ret_id`;
+          const retIdx = bindParams.length + 1;
+          const sqlWithRet = `${this.sql} RETURNING id INTO :${retIdx}`;
           const bpWithRet  = [...bindParams, { dir: oracledb.BIND_OUT, type: oracledb.NUMBER }];
           result = await conn.execute(sqlWithRet, bpWithRet, { autoCommit: true });
           const retVal = result.outBinds?.[result.outBinds.length - 1];
@@ -118,7 +119,8 @@ class OracleStatementWrapper {
     const bindParams = this._bindParams(params);
     const conn = await this.pool.getConnection();
     try {
-      const result = await conn.execute(this.sql, bindParams, { maxRows: 1 });
+      const result = await conn.execute(this.sql, bindParams,
+        { maxRows: 1, outFormat: oracledb.OUT_FORMAT_OBJECT });
       return lowercaseKeys(result.rows?.[0] ?? null);
     } catch (e) {
       normaliseError(e);
@@ -132,7 +134,8 @@ class OracleStatementWrapper {
     const bindParams = this._bindParams(params);
     const conn = await this.pool.getConnection();
     try {
-      const result = await conn.execute(this.sql, bindParams);
+      const result = await conn.execute(this.sql, bindParams,
+        { outFormat: oracledb.OUT_FORMAT_OBJECT });
       return lowercaseKeys(result.rows ?? []);
     } catch (e) {
       normaliseError(e);
