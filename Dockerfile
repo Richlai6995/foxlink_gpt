@@ -18,11 +18,11 @@ RUN mkdir -p dist && npm run build
 FROM node:20-slim AS runner
 
 # Install Oracle Client dependency + utilities
+# node:20-slim = Debian Bookworm (glibc 2.36) → libaio1t64 (not libaio1)
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-       libaio1 \
+       libaio1t64 \
        tzdata \
-       wget \
        fontconfig \
     && rm -rf /var/lib/apt/lists/*
 
@@ -30,7 +30,8 @@ RUN apt-get update \
 ENV TZ=Asia/Taipei
 
 # Oracle environment variables (path must match docker-compose volume mount target)
-ENV ORACLE_HOME=/opt/oracle/instantclient_19_26
+# Using Instant Client 23.26 (requires glibc >= 2.28, Bookworm has 2.36 ✓)
+ENV ORACLE_HOME=/opt/oracle/instantclient_23_26
 ENV LD_LIBRARY_PATH=${ORACLE_HOME}
 ENV PATH=${ORACLE_HOME}:${PATH}
 
