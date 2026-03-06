@@ -37,7 +37,11 @@ async function syncOrgToUsers(db, employeeNos = null) {
   let synced = 0;
 
   for (const r of rows) {
-    const now = new Date().toISOString();
+    // Pass Date objects directly — node-oracledb binds them as Oracle DATE/TIMESTAMP.
+    // String(Date) produces locale strings Oracle's NLS can't parse (ORA-01843).
+    const endDate = r.END_DATE
+      ? (r.END_DATE instanceof Date ? r.END_DATE : new Date(r.END_DATE))
+      : null;
     await db.prepare(`
       UPDATE users SET
         dept_code=?, dept_name=?,
@@ -55,8 +59,8 @@ async function syncOrgToUsers(db, employeeNos = null) {
       r.ORG_SECTION_NAME || null,
       r.ORG_GROUP_NAME || null,
       r.FACTORY_CODE || null,
-      r.END_DATE ? String(r.END_DATE) : null,
-      now,
+      endDate,
+      new Date(),
       r.EMPLOYEE_NO,
     );
     synced++;
@@ -92,12 +96,15 @@ async function runOrgSync(db) {
 
   for (const r of rows) {
     const existing = await db.prepare('SELECT employee_no FROM org_cache WHERE employee_no=?').get(r.EMPLOYEE_NO);
+    const endDate = r.END_DATE
+      ? (r.END_DATE instanceof Date ? r.END_DATE : new Date(r.END_DATE))
+      : null;
     const vals = [
       r.C_NAME || null, r.EMAIL || null, r.DEPT_CODE || null, r.DEPT_NAME || null,
       r.PROFIT_CENTER || null, r.PROFIT_CENTER_NAME || null,
       r.ORG_SECTION || null, r.ORG_SECTION_NAME || null, r.ORG_GROUP_NAME || null,
-      r.FACTORY_CODE || null, r.END_DATE ? String(r.END_DATE) : null,
-      new Date().toISOString(), r.EMPLOYEE_NO,
+      r.FACTORY_CODE || null, endDate,
+      new Date(), r.EMPLOYEE_NO,
     ];
     if (existing) {
       await db.prepare(`UPDATE org_cache SET c_name=?,email=?,dept_code=?,dept_name=?,

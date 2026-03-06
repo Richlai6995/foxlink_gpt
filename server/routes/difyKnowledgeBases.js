@@ -85,7 +85,7 @@ router.put('/:id', async (req, res) => {
 
     const { name, api_server, api_key, description, is_active, sort_order } = req.body;
     await db.prepare(
-      `UPDATE dify_knowledge_bases SET name=?, api_server=?, api_key=?, description=?, is_active=?, sort_order=?, updated_at=? WHERE id=?`
+      `UPDATE dify_knowledge_bases SET name=?, api_server=?, api_key=?, description=?, is_active=?, sort_order=?, updated_at=SYSTIMESTAMP WHERE id=?`
     ).run(
       name ?? kb.name,
       api_server ? api_server.replace(/\/$/, '') : kb.api_server,
@@ -93,7 +93,6 @@ router.put('/:id', async (req, res) => {
       description !== undefined ? (description || null) : kb.description,
       is_active !== undefined ? (is_active ? 1 : 0) : kb.is_active,
       sort_order !== undefined ? sort_order : kb.sort_order,
-      twTimestamp(),
       req.params.id
     );
 
@@ -126,8 +125,8 @@ router.post('/:id/toggle', async (req, res) => {
     const kb = await db.prepare(`SELECT * FROM dify_knowledge_bases WHERE id=?`).get(req.params.id);
     if (!kb) return res.status(404).json({ error: '找不到 DIFY 知識庫設定' });
     const newActive = kb.is_active ? 0 : 1;
-    await db.prepare(`UPDATE dify_knowledge_bases SET is_active=?, updated_at=? WHERE id=?`)
-      .run(newActive, twTimestamp(), req.params.id);
+    await db.prepare(`UPDATE dify_knowledge_bases SET is_active=?, updated_at=SYSTIMESTAMP WHERE id=?`)
+      .run(newActive, req.params.id);
     res.json({ is_active: newActive });
   } catch (e) {
     res.status(500).json({ error: e.message });

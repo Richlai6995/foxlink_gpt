@@ -320,7 +320,7 @@ export default function TokenUsagePanel() {
     if (hasCost) cols.push(`費用(${currency})`)
     const header = cols.join(',')
     const lines = rows.map((r) => {
-      const base: (string | number)[] = [r.date, r.name || r.username, r.employee_id || '', r.model, r.input_tokens, r.output_tokens, r.input_tokens + r.output_tokens]
+      const base: (string | number)[] = [r.usage_date, r.name || r.username, r.employee_id || '', r.model, r.input_tokens, r.output_tokens, r.input_tokens + r.output_tokens]
       if (hasImages) base.push(r.image_count || 0)
       if (hasCost) base.push(r.cost != null ? r.cost : '')
       return base.join(',')
@@ -409,18 +409,23 @@ export default function TokenUsagePanel() {
 
       {/* Table */}
       <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+        <div className="overflow-x-auto" style={{ overflowX: 'auto' }}>
+          <table className="text-sm" style={{ minWidth: '1200px', width: 'max-content' }}>
             <thead className="bg-slate-50 border-b border-slate-200">
               <tr>
-                {['日期', '使用者', '工號', '模型', '輸入 Tokens', '輸出 Tokens',
-                  ...(hasImages ? ['圖片數'] : []),
-                  '合計',
-                  ...(hasCost ? [`費用 (${currency})`] : []),
-                  '部門名稱', '利潤中心名稱', '事業處名稱', '事業群名稱',
-                ].map((h) => (
-                  <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-slate-600">{h}</th>
-                ))}
+                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600 whitespace-nowrap" style={{ minWidth: '100px' }}>日期</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600 whitespace-nowrap" style={{ minWidth: '80px' }}>使用者</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600 whitespace-nowrap" style={{ minWidth: '70px' }}>工號</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600 whitespace-nowrap" style={{ minWidth: '120px' }}>模型</th>
+                <th className="px-4 py-3 text-right text-xs font-semibold text-slate-600 whitespace-nowrap" style={{ minWidth: '90px' }}>輸入 Tokens</th>
+                <th className="px-4 py-3 text-right text-xs font-semibold text-slate-600 whitespace-nowrap" style={{ minWidth: '90px' }}>輸出 Tokens</th>
+                {hasImages && <th className="px-4 py-3 text-right text-xs font-semibold text-slate-600 whitespace-nowrap" style={{ minWidth: '70px' }}>圖片數</th>}
+                <th className="px-4 py-3 text-right text-xs font-semibold text-slate-600 whitespace-nowrap" style={{ minWidth: '80px' }}>合計</th>
+                {hasCost && <th className="px-4 py-3 text-right text-xs font-semibold text-slate-600 whitespace-nowrap" style={{ minWidth: '90px' }}>{`費用 (${currency})`}</th>}
+                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600 whitespace-nowrap" style={{ minWidth: '140px' }}>部門名稱</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600 whitespace-nowrap" style={{ minWidth: '140px' }}>利潤中心名稱</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600 whitespace-nowrap" style={{ minWidth: '140px' }}>事業處名稱</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600 whitespace-nowrap" style={{ minWidth: '140px' }}>事業群名稱</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -428,29 +433,29 @@ export default function TokenUsagePanel() {
                 const r2 = r as any
                 return (
                   <tr key={r.id} className="hover:bg-slate-50 transition">
-                    <td className="px-4 py-3 text-slate-500">{r.date}</td>
-                    <td className="px-4 py-3 font-medium">{r.name || r.username}</td>
-                    <td className="px-4 py-3 text-slate-500">{r.employee_id || '-'}</td>
-                    <td className="px-4 py-3">
+                    <td className="px-4 py-3 text-slate-500 whitespace-nowrap">{r.usage_date}</td>
+                    <td className="px-4 py-3 font-medium whitespace-nowrap">{r.name || r.username}</td>
+                    <td className="px-4 py-3 text-slate-500 whitespace-nowrap">{r.employee_id || '-'}</td>
+                    <td className="px-4 py-3 whitespace-nowrap">
                       <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${r.model === 'flash' ? 'bg-yellow-100 text-yellow-700' : 'bg-blue-100 text-blue-700'}`}>
                         {llmModels.find((m) => m.key === r.model)?.name || r.model}
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-right">{r.input_tokens.toLocaleString()}</td>
-                    <td className="px-4 py-3 text-right">{r.output_tokens.toLocaleString()}</td>
+                    <td className="px-4 py-3 text-right whitespace-nowrap">{r.input_tokens.toLocaleString()}</td>
+                    <td className="px-4 py-3 text-right whitespace-nowrap">{r.output_tokens.toLocaleString()}</td>
                     {hasImages && (
-                      <td className="px-4 py-3 text-right text-purple-600">{(r.image_count || 0).toLocaleString()}</td>
+                      <td className="px-4 py-3 text-right text-purple-600 whitespace-nowrap">{(r.image_count || 0).toLocaleString()}</td>
                     )}
-                    <td className="px-4 py-3 text-right font-medium">{(r.input_tokens + r.output_tokens).toLocaleString()}</td>
+                    <td className="px-4 py-3 text-right font-medium whitespace-nowrap">{(r.input_tokens + r.output_tokens).toLocaleString()}</td>
                     {hasCost && (
-                      <td className="px-4 py-3 text-right text-green-700 font-medium">
+                      <td className="px-4 py-3 text-right text-green-700 font-medium whitespace-nowrap">
                         {fmt(r.cost)}
                       </td>
                     )}
-                    <td className="px-4 py-3 text-xs text-slate-500">{r2.dept_name || '-'}</td>
-                    <td className="px-4 py-3 text-xs text-slate-500">{r2.profit_center_name || '-'}</td>
-                    <td className="px-4 py-3 text-xs text-slate-500">{r2.org_section_name || '-'}</td>
-                    <td className="px-4 py-3 text-xs text-slate-500">{r2.org_group_name || '-'}</td>
+                    <td className="px-4 py-3 text-xs text-slate-500" style={{ minWidth: '140px' }}>{r2.dept_name || '-'}</td>
+                    <td className="px-4 py-3 text-xs text-slate-500" style={{ minWidth: '140px' }}>{r2.profit_center_name || '-'}</td>
+                    <td className="px-4 py-3 text-xs text-slate-500" style={{ minWidth: '140px' }}>{r2.org_section_name || '-'}</td>
+                    <td className="px-4 py-3 text-xs text-slate-500" style={{ minWidth: '140px' }}>{r2.org_group_name || '-'}</td>
                   </tr>
                 )
               })}

@@ -288,8 +288,9 @@ async function runTask(db, taskId) {
 
       // Update token_usage (upsert pattern)
       const today = twDateStr();
+      const DI = `TO_DATE(?, 'YYYY-MM-DD')`;
       const existing = await db.prepare(
-        'SELECT id FROM token_usage WHERE user_id=? AND usage_date=? AND model=?'
+        `SELECT id FROM token_usage WHERE user_id=? AND usage_date=${DI} AND model=?`
       ).get(task.user_id, today, task.model);
       if (existing) {
         await db.prepare(
@@ -297,7 +298,7 @@ async function runTask(db, taskId) {
         ).run(inputTokens, outputTokens, existing.id);
       } else {
         await db.prepare(
-          'INSERT INTO token_usage (user_id, usage_date, model, input_tokens, output_tokens) VALUES (?,?,?,?,?)'
+          `INSERT INTO token_usage (user_id, usage_date, model, input_tokens, output_tokens) VALUES (?,${DI},?,?,?)`
         ).run(task.user_id, today, task.model, inputTokens, outputTokens);
       }
 
@@ -327,7 +328,7 @@ async function runTask(db, taskId) {
     responseText = result.text;
 
     // Update session updated_at
-    await db.prepare(`UPDATE chat_sessions SET updated_at=? WHERE id=?`).run(twTimestamp(), sessionId);
+    await db.prepare(`UPDATE chat_sessions SET updated_at=SYSTIMESTAMP WHERE id=?`).run(sessionId);
 
   } catch (e) {
     runStatus = 'fail';
@@ -375,10 +376,9 @@ async function runTask(db, taskId) {
   await db.prepare(
     `INSERT INTO scheduled_task_runs
       (task_id, run_at, status, attempt, session_id, response_preview, generated_files_json, email_sent_to, error_msg, duration_ms)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+     VALUES (?, SYSTIMESTAMP, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     task.id,
-    twTimestamp(),
     runStatus,
     attemptNum,
     sessionId,
@@ -390,12 +390,11 @@ async function runTask(db, taskId) {
   );
 
   // ── Update task stats ───────────────────────────────────────────────────────
-  const twNow_ = twTimestamp();
   await db.prepare(
     `UPDATE scheduled_tasks
-     SET run_count=run_count+1, last_run_at=?, last_run_status=?, updated_at=?
+     SET run_count=run_count+1, last_run_at=SYSTIMESTAMP, last_run_status=?, updated_at=SYSTIMESTAMP
      WHERE id=?`
-  ).run(twNow_, runStatus, twNow_, task.id);
+  ).run(runStatus, task.id);
 
   console.log(`[Scheduled] Task ${task.id} "${task.name}" done — status=${runStatus} duration=${durationMs}ms`);
 }

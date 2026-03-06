@@ -403,7 +403,7 @@ function HistoryRow({ taskId }: { taskId: number }) {
 
 // ── GlobalSettings ─────────────────────────────────────────────────────────
 function GlobalSettings() {
-  const [enabled, setEnabled] = useState(false)
+  const [enabled, setEnabled] = useState(true)
   const [maxPerUser, setMaxPerUser] = useState(10)
   const [saving, setSaving] = useState(false)
   const [dirty, setDirty] = useState(false)

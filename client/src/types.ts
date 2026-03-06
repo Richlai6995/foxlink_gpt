@@ -55,7 +55,7 @@ export interface ChatMessage {
 
 export interface TokenUsage {
   id: number
-  date: string
+  usage_date: string
   model: string
   input_tokens: number
   output_tokens: number

@@ -7,7 +7,8 @@ router.use(verifyAdmin);
 
 const ORG_COLS = `u.dept_code, u.dept_name, u.profit_center, u.profit_center_name,
                   u.org_section, u.org_section_name, u.org_group_name, u.factory_code,
-                  u.org_end_date, u.org_synced_at`;
+                  TO_CHAR(u.org_end_date, 'YYYY-MM-DD') AS org_end_date,
+                  u.org_synced_at`;
 
 // GET /api/users
 router.get('/', async (req, res) => {
@@ -15,7 +16,10 @@ router.get('/', async (req, res) => {
     const db = require('../database-oracle').db;
     const users = await db
       .prepare(
-        `SELECT u.id, u.username, u.name, u.employee_id, u.email, u.role, u.start_date, u.end_date, u.status,
+        `SELECT u.id, u.username, u.name, u.employee_id, u.email, u.role,
+                TO_CHAR(u.start_date, 'YYYY-MM-DD') AS start_date,
+                TO_CHAR(u.end_date, 'YYYY-MM-DD') AS end_date,
+                u.status,
                 u.allow_text_upload, u.text_max_mb, u.allow_audio_upload, u.audio_max_mb,
                 u.allow_image_upload, u.image_max_mb, u.allow_scheduled_tasks,
                 u.allow_create_skill, u.allow_external_skill, u.allow_code_skill,
@@ -60,13 +64,14 @@ router.post('/', async (req, res) => {
       explicit !== undefined ? (explicit ? 1 : 0) : (roleVal ?? def);
 
     const parseBudget = (v) => (v != null && v !== '') ? Number(v) : null;
+    const DI = `TO_DATE(?, 'YYYY-MM-DD')`;
     const result = await db
       .prepare(
         `INSERT INTO users (username, password, name, employee_id, email, role, start_date, end_date, status,
                             allow_text_upload, text_max_mb, allow_audio_upload, audio_max_mb,
                             allow_image_upload, image_max_mb, allow_scheduled_tasks, role_id, creation_method,
                             budget_daily, budget_weekly, budget_monthly)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+         VALUES (?, ?, ?, ?, ?, ?, ${DI}, ${DI}, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         username, password, name,
@@ -157,14 +162,15 @@ router.put('/:id', async (req, res) => {
     const hasOrgOverride = orgParams.some(v => v !== undefined);
 
     let sql, params;
-    const baseSet = `name=?, employee_id=?, email=?, role=?, start_date=?, end_date=?, status=?,
+    const D = `TO_DATE(?, 'YYYY-MM-DD')`;
+    const baseSet = `name=?, employee_id=?, email=?, role=?, start_date=${D}, end_date=${D}, status=?,
              allow_text_upload=?, text_max_mb=?, allow_audio_upload=?, audio_max_mb=?,
              allow_image_upload=?, image_max_mb=?, allow_scheduled_tasks=?, role_id=?,
              budget_daily=?, budget_weekly=?, budget_monthly=?,
              allow_create_skill=?, allow_external_skill=?, allow_code_skill=?`;
     const orgSet = hasOrgOverride
       ? `, dept_code=?, dept_name=?, profit_center=?, profit_center_name=?,
-           org_section=?, org_section_name=?, org_group_name=?, factory_code=?, org_end_date=?`
+           org_section=?, org_section_name=?, org_group_name=?, factory_code=?, org_end_date=${D}`
       : '';
     const orgVals = hasOrgOverride ? orgParams.map(v => v === undefined ? null : v) : [];
 

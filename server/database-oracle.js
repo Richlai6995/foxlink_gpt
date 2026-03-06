@@ -36,11 +36,12 @@ function convertPlaceholders(sql) {
 }
 
 // Oracle returns column names UPPERCASE — normalise to lowercase
+// Also convert Date objects to ISO strings to avoid JSON serialization surprises
 function lowercaseKeys(obj) {
   if (!obj) return obj;
   if (Array.isArray(obj)) return obj.map(lowercaseKeys);
   return Object.fromEntries(
-    Object.entries(obj).map(([k, v]) => [k.toLowerCase(), v])
+    Object.entries(obj).map(([k, v]) => [k.toLowerCase(), v instanceof Date ? v.toISOString() : v])
   );
 }
 
@@ -87,15 +88,18 @@ class OracleStatementWrapper {
     try {
       let result;
       if (isInsert) {
-        // Try RETURNING id first — use positional placeholder to avoid mixing named/positional
+        // Try RETURNING id — STRING bind works for both NUMBER and VARCHAR2 PKs
         try {
           const retIdx = bindParams.length + 1;
           const sqlWithRet = `${this.sql} RETURNING id INTO :${retIdx}`;
-          const bpWithRet  = [...bindParams, { dir: oracledb.BIND_OUT, type: oracledb.NUMBER }];
+          const bpWithRet  = [...bindParams, { dir: oracledb.BIND_OUT, type: oracledb.STRING, maxSize: 100 }];
           result = await conn.execute(sqlWithRet, bpWithRet, { autoCommit: true });
           const retVal = result.outBinds?.[result.outBinds.length - 1];
+          const raw = Array.isArray(retVal) ? retVal[0] : retVal;
+          // Coerce to Number for auto-increment tables, keep as-is for UUID tables
+          const numeric = raw != null && raw !== '' && !isNaN(Number(raw)) ? Number(raw) : null;
           return {
-            lastInsertRowid: Array.isArray(retVal) ? retVal[0] : retVal,
+            lastInsertRowid: numeric ?? raw,
             changes: result.rowsAffected || 0,
           };
         } catch (retErr) {

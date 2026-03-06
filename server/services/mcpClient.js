@@ -122,17 +122,17 @@ async function callTool(db, server, sessionId, userId, toolName, args) {
  * Returns { functionDeclarations, serverMap }
  * serverMap: { toolName → server row }
  */
-function getActiveToolDeclarations(db, roleId = null) {
+async function getActiveToolDeclarations(db, roleId = null) {
   let servers;
   try {
     if (roleId) {
-      servers = db.prepare(
+      servers = await db.prepare(
         `SELECT m.* FROM mcp_servers m
          JOIN role_mcp_servers rm ON rm.mcp_server_id = m.id
          WHERE rm.role_id=? AND m.is_active=1`
       ).all(roleId);
     } else {
-      servers = db.prepare(`SELECT * FROM mcp_servers WHERE is_active=1`).all();
+      servers = await db.prepare(`SELECT * FROM mcp_servers WHERE is_active=1`).all();
     }
   } catch (_) {
     return { functionDeclarations: [], serverMap: {} };

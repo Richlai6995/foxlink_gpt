@@ -66,14 +66,13 @@ router.put('/:id', async (req, res) => {
 
     const { name, url, api_key, description, is_active } = req.body;
     await db.prepare(
-      `UPDATE mcp_servers SET name=?, url=?, api_key=?, description=?, is_active=?, updated_at=? WHERE id=?`
+      `UPDATE mcp_servers SET name=?, url=?, api_key=?, description=?, is_active=?, updated_at=SYSTIMESTAMP WHERE id=?`
     ).run(
       name ?? server.name,
       url ?? server.url,
       api_key !== undefined ? (api_key || null) : server.api_key,
       description !== undefined ? (description || null) : server.description,
       is_active !== undefined ? (is_active ? 1 : 0) : server.is_active,
-      twTimestamp(),
       req.params.id,
     );
 
@@ -106,8 +105,8 @@ router.post('/:id/toggle', async (req, res) => {
     if (!server) return res.status(404).json({ error: '找不到 MCP 伺服器' });
 
     const newActive = server.is_active ? 0 : 1;
-    await db.prepare(`UPDATE mcp_servers SET is_active=?, updated_at=? WHERE id=?`)
-      .run(newActive, twTimestamp(), req.params.id);
+    await db.prepare(`UPDATE mcp_servers SET is_active=?, updated_at=SYSTIMESTAMP WHERE id=?`)
+      .run(newActive, req.params.id);
 
     res.json({ is_active: newActive });
   } catch (e) {

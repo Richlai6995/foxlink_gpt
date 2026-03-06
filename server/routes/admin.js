@@ -22,12 +22,13 @@ router.get('/users', async (req, res) => {
     const users = await db
       .prepare(
         `SELECT u.id, u.username, u.name, u.employee_id, u.email, u.role, u.status,
-                u.start_date, u.end_date,
+                TO_CHAR(u.start_date, 'YYYY-MM-DD') AS start_date,
+                TO_CHAR(u.end_date, 'YYYY-MM-DD') AS end_date,
                 u.allow_text_upload, u.text_max_mb, u.allow_audio_upload, u.audio_max_mb,
                 u.allow_image_upload, u.image_max_mb, u.allow_scheduled_tasks,
                 u.dept_code, u.dept_name, u.profit_center, u.profit_center_name,
                 u.org_section, u.org_section_name, u.org_group_name, u.factory_code,
-                u.org_end_date, u.org_synced_at,
+                TO_CHAR(u.org_end_date, 'YYYY-MM-DD') AS org_end_date, u.org_synced_at,
                 COUNT(DISTINCT cs.id) as session_count
          FROM users u
          LEFT JOIN chat_sessions cs ON cs.user_id = u.id
@@ -89,7 +90,8 @@ router.get('/token-usage', async (req, res) => {
     const { startDate, endDate, userId, model } = req.query;
 
     let sql = `
-      SELECT tu.id, tu.usage_date, tu.model, tu.input_tokens, tu.output_tokens,
+      SELECT tu.id, TO_CHAR(tu.usage_date, 'YYYY-MM-DD') AS usage_date, tu.model,
+             tu.input_tokens, tu.output_tokens,
              COALESCE(tu.image_count, 0) as image_count,
              ROUND(tu.cost, 6) as cost, tu.currency,
              u.username, u.name, u.employee_id, u.email as user_email,
@@ -100,8 +102,8 @@ router.get('/token-usage', async (req, res) => {
       WHERE 1=1
     `;
     const params = [];
-    if (startDate) { sql += ' AND tu.usage_date >= ?'; params.push(startDate); }
-    if (endDate) { sql += ' AND tu.usage_date <= ?'; params.push(endDate); }
+    if (startDate) { sql += ` AND tu.usage_date >= TO_DATE(?, 'YYYY-MM-DD')`; params.push(startDate); }
+    if (endDate) { sql += ` AND tu.usage_date <= TO_DATE(?, 'YYYY-MM-DD')`; params.push(endDate); }
     if (userId) { sql += ' AND tu.user_id = ?'; params.push(userId); }
     if (model) { sql += ' AND tu.model = ?'; params.push(model); }
     sql += ' ORDER BY tu.usage_date DESC, u.username ASC';
@@ -132,8 +134,9 @@ router.post('/token-prices', async (req, res) => {
     if (!model || price_input == null || price_output == null || !start_date) {
       return res.status(400).json({ error: '請填寫必填欄位' });
     }
+    const DI = `TO_DATE(?, 'YYYY-MM-DD')`;
     const result = await db.prepare(
-      `INSERT INTO token_prices (model, price_input, price_output, tier_threshold, price_input_tier2, price_output_tier2, price_image_output, currency, start_date, end_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO token_prices (model, price_input, price_output, tier_threshold, price_input_tier2, price_output_tier2, price_image_output, currency, start_date, end_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ${DI}, ${DI})`
     ).run(
       model, parseFloat(price_input), parseFloat(price_output),
       tier_threshold ? parseInt(tier_threshold) : null,
@@ -153,8 +156,9 @@ router.put('/token-prices/:id', async (req, res) => {
   try {
     const db = require('../database-oracle').db;
     const { model, price_input, price_output, tier_threshold, price_input_tier2, price_output_tier2, price_image_output, currency, start_date, end_date } = req.body;
+    const DI = `TO_DATE(?, 'YYYY-MM-DD')`;
     await db.prepare(
-      `UPDATE token_prices SET model=?, price_input=?, price_output=?, tier_threshold=?, price_input_tier2=?, price_output_tier2=?, price_image_output=?, currency=?, start_date=?, end_date=? WHERE id=?`
+      `UPDATE token_prices SET model=?, price_input=?, price_output=?, tier_threshold=?, price_input_tier2=?, price_output_tier2=?, price_image_output=?, currency=?, start_date=${DI}, end_date=${DI} WHERE id=?`
     ).run(
       model, parseFloat(price_input), parseFloat(price_output),
       tier_threshold ? parseInt(tier_threshold) : null,
@@ -250,11 +254,11 @@ router.get('/audit-logs', async (req, res) => {
       WHERE 1=1
     `;
     const params = [];
-    if (startDate) { sql += ` AND date(al.created_at) >= ?`; params.push(startDate); }
-    if (endDate) { sql += ` AND date(al.created_at) <= ?`; params.push(endDate); }
+    if (startDate) { sql += ` AND TRUNC(al.created_at) >= TO_DATE(?, 'YYYY-MM-DD')`; params.push(startDate); }
+    if (endDate) { sql += ` AND TRUNC(al.created_at) <= TO_DATE(?, 'YYYY-MM-DD')`; params.push(endDate); }
     if (userId) { sql += ' AND al.user_id = ?'; params.push(userId); }
     if (sensitive === '1') { sql += ' AND al.has_sensitive = 1'; }
-    sql += ' ORDER BY al.created_at DESC LIMIT 500';
+    sql += ' ORDER BY al.created_at DESC FETCH FIRST 500 ROWS ONLY';
 
     const rows = await db.prepare(sql).all(...params);
     res.json(rows);
@@ -596,7 +600,7 @@ async function getCostRows(db, startDate, endDate) {
   try {
     return await db.prepare(`
       SELECT tu.user_id, u.employee_id, u.name AS user_name, u.email AS user_email,
-             tu.usage_date, tu.model,
+             TO_CHAR(tu.usage_date, 'YYYY-MM-DD') AS usage_date, tu.model,
              COALESCE(tu.input_tokens, 0)  AS input_tokens,
              COALESCE(tu.output_tokens, 0) AS output_tokens,
              COALESCE(tu.cost, 0)          AS cost,
@@ -605,7 +609,7 @@ async function getCostRows(db, startDate, endDate) {
              u.org_section, u.org_section_name, u.org_group_name, u.factory_code
       FROM token_usage tu
       JOIN users u ON tu.user_id = u.id
-      WHERE tu.usage_date BETWEEN ? AND ?
+      WHERE tu.usage_date BETWEEN TO_DATE(?, 'YYYY-MM-DD') AND TO_DATE(?, 'YYYY-MM-DD')
       ORDER BY tu.usage_date
     `).all(startDate, endDate);
   } catch (e) {

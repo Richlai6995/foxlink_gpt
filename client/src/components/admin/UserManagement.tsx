@@ -88,8 +88,8 @@ export default function UserManagement() {
       api.get('/users'),
       api.get('/roles'),
     ])
-    setUsers(usersRes.data)
-    setRoles(rolesRes.data)
+    setUsers(Array.isArray(usersRes.data) ? usersRes.data : [])
+    setRoles(Array.isArray(rolesRes.data) ? rolesRes.data : [])
   }
 
   useEffect(() => { load() }, [])
@@ -129,8 +129,8 @@ export default function UserManagement() {
       email: u.email || '',
       role: u.role,
       status: u.status,
-      start_date: u.start_date || '',
-      end_date: u.end_date || '',
+      start_date: u.start_date ? String(u.start_date).slice(0, 10) : '',
+      end_date: u.end_date ? String(u.end_date).slice(0, 10) : '',
       allow_text_upload: u2.allow_text_upload !== 0,
       text_max_mb: u2.text_max_mb || 10,
       allow_audio_upload: u2.allow_audio_upload === 1,
@@ -150,7 +150,7 @@ export default function UserManagement() {
       org_section_name: u2.org_section_name || '',
       org_group_name: u2.org_group_name || '',
       factory_code: u2.factory_code || '',
-      org_end_date: u2.org_end_date || '',
+      org_end_date: u2.org_end_date ? String(u2.org_end_date).slice(0, 10) : '',
       allow_create_skill: u2.allow_create_skill == null ? null : u2.allow_create_skill === 1,
       allow_external_skill: u2.allow_external_skill == null ? null : u2.allow_external_skill === 1,
       allow_code_skill: u2.allow_code_skill == null ? null : u2.allow_code_skill === 1,
@@ -175,8 +175,8 @@ export default function UserManagement() {
       } else {
         await api.post('/users', payload)
       }
-      await load()
       setShowForm(false)
+      await load()
     } catch (e: unknown) {
       setError((e as { response?: { data?: { error?: string } } })?.response?.data?.error || '儲存失敗')
     } finally {

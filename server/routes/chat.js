@@ -517,10 +517,11 @@ router.post('/sessions/:id/messages', upload.array('files', 10), async (req, res
         return (images || 0) * 0.04;
       };
 
+      const D = `TO_DATE(?, 'YYYY-MM-DD')`;
       if (limitD != null) {
         const row = await db.prepare(
           `SELECT COALESCE(SUM(cost),0) AS total, COALESCE(SUM(image_count),0) AS images
-           FROM token_usage WHERE user_id=? AND usage_date=?`
+           FROM token_usage WHERE user_id=? AND usage_date=${D}`
         ).get(req.user.id, todayStr);
         const spent = sumCost(row);
         console.log(`[Budget] daily spent=${spent} limit=${limitD}`);
@@ -536,7 +537,7 @@ router.post('/sessions/:id/messages', upload.array('files', 10), async (req, res
         const mondayStr = monday.toISOString().slice(0, 10);
         const row = await db.prepare(
           `SELECT COALESCE(SUM(cost),0) AS total, COALESCE(SUM(image_count),0) AS images
-           FROM token_usage WHERE user_id=? AND usage_date>=? AND usage_date<=?`
+           FROM token_usage WHERE user_id=? AND usage_date>=${D} AND usage_date<=${D}`
         ).get(req.user.id, mondayStr, todayStr);
         const spent = sumCost(row);
         console.log(`[Budget] weekly spent=${spent} limit=${limitW}`);
@@ -549,7 +550,7 @@ router.post('/sessions/:id/messages', upload.array('files', 10), async (req, res
         const firstOfMonth = `${todayStr.slice(0, 7)}-01`;
         const row = await db.prepare(
           `SELECT COALESCE(SUM(cost),0) AS total, COALESCE(SUM(image_count),0) AS images
-           FROM token_usage WHERE user_id=? AND usage_date>=? AND usage_date<=?`
+           FROM token_usage WHERE user_id=? AND usage_date>=${D} AND usage_date<=${D}`
         ).get(req.user.id, firstOfMonth, todayStr);
         const spent = sumCost(row);
         console.log(`[Budget] monthly spent=${spent} limit=${limitM}`);
@@ -1250,7 +1251,7 @@ router.post('/sessions/:id/messages', upload.array('files', 10), async (req, res
       const currentTitleRow = await db.prepare('SELECT title FROM chat_sessions WHERE id=?').get(sessionId);
       const currentTitle = currentTitleRow?.title;
       if (!currentTitle || currentTitle === '新對話') {
-        await db.prepare(`UPDATE chat_sessions SET title=?, model=?, updated_at=datetime('now') WHERE id=?`).run(
+        await db.prepare(`UPDATE chat_sessions SET title=?, model=?, updated_at=SYSTIMESTAMP WHERE id=?`).run(
           quickTitle, chosenModel, sessionId
         );
         sendEvent({ type: 'title', title: quickTitle });
@@ -1269,7 +1270,7 @@ router.post('/sessions/:id/messages', upload.array('files', 10), async (req, res
         }
       }).catch(() => { });
     } else {
-      await db.prepare(`UPDATE chat_sessions SET updated_at=datetime('now') WHERE id=?`).run(sessionId);
+      await db.prepare(`UPDATE chat_sessions SET updated_at=SYSTIMESTAMP WHERE id=?`).run(sessionId);
     }
 
     // Update token usage (upsert via SELECT+UPDATE/INSERT)
@@ -1370,8 +1371,9 @@ router.put('/messages/:id', async (req, res) => {
 // Calculate cost for a single API call based on per-request input tokens (Gemini tier logic)
 async function calcCallCost(db, model, date, inputTokens, outputTokens, imageCount) {
   try {
+    const DI = `TO_DATE(?, 'YYYY-MM-DD')`;
     const price = await db.prepare(
-      `SELECT * FROM token_prices WHERE model=? AND start_date<=? AND (end_date IS NULL OR end_date>=?) ORDER BY start_date DESC LIMIT 1`
+      `SELECT * FROM token_prices WHERE model=? AND start_date<=${DI} AND (end_date IS NULL OR end_date>=${DI}) ORDER BY start_date DESC FETCH FIRST 1 ROWS ONLY`
     ).get(model, date, date);
     if (!price) return { cost: null, currency: null };
 

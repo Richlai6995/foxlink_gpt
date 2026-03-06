@@ -16,9 +16,9 @@ async function checkPermission(req, res) {
   if (!user) { res.status(403).json({ error: '使用者不存在' }); return false; }
   if (user.role === 'admin') return true;
 
-  // Global feature toggle
+  // Global feature toggle (null/missing = default enabled)
   const globalEnabled = await db.prepare(`SELECT value FROM system_settings WHERE key='scheduled_tasks_enabled'`).get();
-  if (globalEnabled?.value !== '1') { res.status(403).json({ error: '排程功能未開放' }); return false; }
+  if (globalEnabled && globalEnabled.value === '0') { res.status(403).json({ error: '排程功能未開放' }); return false; }
   // Per-user toggle
   if (!user.allow_scheduled_tasks) { res.status(403).json({ error: '您的帳號未開放排程功能，請聯絡管理員' }); return false; }
   return true;
