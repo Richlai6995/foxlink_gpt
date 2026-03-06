@@ -22,7 +22,7 @@ async function syncOrgToUsers(db, employeeNos = null) {
 
   let empNos = employeeNos;
   if (!empNos) {
-    const users = db
+    const users = await db
       .prepare(`SELECT employee_id FROM users WHERE employee_id IS NOT NULL AND employee_id != '' AND status = 'active'`)
       .all();
     empNos = [...new Set(users.map((u) => String(u.employee_id)).filter(Boolean))];
@@ -38,7 +38,7 @@ async function syncOrgToUsers(db, employeeNos = null) {
 
   for (const r of rows) {
     const now = new Date().toISOString();
-    db.prepare(`
+    await db.prepare(`
       UPDATE users SET
         dept_code=?, dept_name=?,
         profit_center=?, profit_center_name=?,
@@ -77,7 +77,7 @@ async function runOrgSync(db) {
     return { synced: 0, skipped: true };
   }
 
-  const users = db
+  const users = await db
     .prepare(`SELECT employee_id FROM users WHERE employee_id IS NOT NULL AND employee_id != '' AND status = 'active'`)
     .all();
 
@@ -91,7 +91,7 @@ async function runOrgSync(db) {
   let updated = 0;
 
   for (const r of rows) {
-    const existing = db.prepare('SELECT employee_no FROM org_cache WHERE employee_no=?').get(r.EMPLOYEE_NO);
+    const existing = await db.prepare('SELECT employee_no FROM org_cache WHERE employee_no=?').get(r.EMPLOYEE_NO);
     const vals = [
       r.C_NAME || null, r.EMAIL || null, r.DEPT_CODE || null, r.DEPT_NAME || null,
       r.PROFIT_CENTER || null, r.PROFIT_CENTER_NAME || null,
@@ -100,11 +100,11 @@ async function runOrgSync(db) {
       new Date().toISOString(), r.EMPLOYEE_NO,
     ];
     if (existing) {
-      db.prepare(`UPDATE org_cache SET c_name=?,email=?,dept_code=?,dept_name=?,
+      await db.prepare(`UPDATE org_cache SET c_name=?,email=?,dept_code=?,dept_name=?,
         profit_center=?,profit_center_name=?,org_section=?,org_section_name=?,
         org_group_name=?,factory_code=?,end_date=?,cached_at=? WHERE employee_no=?`).run(...vals);
     } else {
-      db.prepare(`INSERT INTO org_cache (c_name,email,dept_code,dept_name,profit_center,
+      await db.prepare(`INSERT INTO org_cache (c_name,email,dept_code,dept_name,profit_center,
         profit_center_name,org_section,org_section_name,org_group_name,factory_code,
         end_date,cached_at,employee_no) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(...vals);
     }
@@ -116,11 +116,11 @@ async function runOrgSync(db) {
 
   // Persist last run time
   const now = new Date().toISOString();
-  const existsSetting = db.prepare(`SELECT key FROM system_settings WHERE key='org_sync_last_run'`).get();
+  const existsSetting = await db.prepare(`SELECT key FROM system_settings WHERE key='org_sync_last_run'`).get();
   if (existsSetting) {
-    db.prepare(`UPDATE system_settings SET value=? WHERE key='org_sync_last_run'`).run(now);
+    await db.prepare(`UPDATE system_settings SET value=? WHERE key='org_sync_last_run'`).run(now);
   } else {
-    db.prepare(`INSERT INTO system_settings (key, value) VALUES ('org_sync_last_run', ?)`).run(now);
+    await db.prepare(`INSERT INTO system_settings (key, value) VALUES ('org_sync_last_run', ?)`).run(now);
   }
 
   console.log(`[OrgSync] Done: ${updated} records updated.`);

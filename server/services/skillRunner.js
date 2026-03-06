@@ -254,7 +254,7 @@ async function restartRunner(skill, db) {
 // ── Auto-restore on server start ──────────────────────────────────────────────
 async function autoRestoreRunners(db) {
   try {
-    const skills = db.prepare(
+    const skills = await db.prepare(
       `SELECT * FROM skills WHERE type='code' AND code_status='running'`
     ).all();
     console.log(`[skillRunner] Auto-restoring ${skills.length} code skill(s)...`);

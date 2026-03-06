@@ -158,13 +158,13 @@ BEGIN EXECUTE IMMEDIATE '
 CREATE TABLE token_prices (
   id                  NUMBER GENERATED AS IDENTITY PRIMARY KEY,
   model               VARCHAR2(100) NOT NULL,
-  price_input         NUMBER NOT NULL DEFAULT 0,
-  price_output        NUMBER NOT NULL DEFAULT 0,
+  price_input         NUMBER DEFAULT 0 NOT NULL,
+  price_output        NUMBER DEFAULT 0 NOT NULL,
   tier_threshold      NUMBER,
   price_input_tier2   NUMBER,
   price_output_tier2  NUMBER,
   price_image_output  NUMBER,
-  currency            VARCHAR2(10) NOT NULL DEFAULT ''USD'',
+  currency            VARCHAR2(10) DEFAULT ''USD'' NOT NULL,
   start_date          DATE NOT NULL,
   end_date            DATE,
   created_at          TIMESTAMP DEFAULT SYSTIMESTAMP
@@ -241,20 +241,20 @@ CREATE TABLE scheduled_tasks (
   id                NUMBER GENERATED AS IDENTITY PRIMARY KEY,
   user_id           NUMBER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   name              VARCHAR2(200) NOT NULL,
-  schedule_type     VARCHAR2(20) NOT NULL DEFAULT ''daily'',
-  schedule_hour     NUMBER NOT NULL DEFAULT 8,
-  schedule_minute   NUMBER NOT NULL DEFAULT 0,
+  schedule_type     VARCHAR2(20) DEFAULT ''daily'' NOT NULL,
+  schedule_hour     NUMBER DEFAULT 8 NOT NULL,
+  schedule_minute   NUMBER DEFAULT 0 NOT NULL,
   schedule_weekday  NUMBER DEFAULT 1,
   schedule_monthday NUMBER DEFAULT 1,
-  model             VARCHAR2(100) NOT NULL DEFAULT ''pro'',
+  model             VARCHAR2(100) DEFAULT ''pro'' NOT NULL,
   prompt            CLOB NOT NULL,
-  output_type       VARCHAR2(20) NOT NULL DEFAULT ''text'',
+  output_type       VARCHAR2(20) DEFAULT ''text'' NOT NULL,
   file_type         VARCHAR2(20),
   filename_template VARCHAR2(500),
   recipients_json   CLOB DEFAULT ''[]'',
   email_subject     VARCHAR2(500),
   email_body        CLOB,
-  status            VARCHAR2(20) NOT NULL DEFAULT ''active'',
+  status            VARCHAR2(20) DEFAULT ''active'' NOT NULL,
   expire_at         TIMESTAMP,
   max_runs          NUMBER DEFAULT 0,
   run_count         NUMBER DEFAULT 0,
@@ -271,7 +271,7 @@ CREATE TABLE scheduled_task_runs (
   id                    NUMBER GENERATED AS IDENTITY PRIMARY KEY,
   task_id               NUMBER NOT NULL REFERENCES scheduled_tasks(id) ON DELETE CASCADE,
   run_at                TIMESTAMP DEFAULT SYSTIMESTAMP,
-  status                VARCHAR2(20) NOT NULL DEFAULT ''ok'',
+  status                VARCHAR2(20) DEFAULT ''ok'' NOT NULL,
   attempt               NUMBER DEFAULT 1,
   session_id            VARCHAR2(36),
   response_preview      VARCHAR2(2000),
@@ -515,7 +515,8 @@ CREATE TABLE kb_chunks (
 BEGIN EXECUTE IMMEDIATE '
   CREATE VECTOR INDEX kb_chunks_vidx ON kb_chunks(embedding)
   ORGANIZATION NEIGHBOR PARTITIONS
-  WITH DISTANCE COSINE ACCURACY 90
+  WITH DISTANCE COSINE
+  WITH TARGET ACCURACY 90
 '; EXCEPTION WHEN OTHERS THEN IF SQLCODE = -955 OR SQLCODE = -1408 THEN NULL; ELSE RAISE; END IF; END;
 /
 

@@ -221,23 +221,23 @@ async function runTask(db, taskId) {
   const { processGenerateBlocks } = require('./fileGenerator');
   const { sendMail } = require('./mailService');
 
-  const task = db.prepare('SELECT * FROM scheduled_tasks WHERE id = ?').get(taskId);
+  const task = await db.prepare('SELECT * FROM scheduled_tasks WHERE id = ?').get(taskId);
   if (!task) { console.error(`[Scheduled] Task ${taskId} not found`); return; }
 
   // Check expiry
   if (task.expire_at && new Date(task.expire_at) < new Date()) {
     console.log(`[Scheduled] Task ${task.id} "${task.name}" expired, pausing`);
-    db.prepare(`UPDATE scheduled_tasks SET status='paused' WHERE id=?`).run(task.id);
+    await db.prepare(`UPDATE scheduled_tasks SET status='paused' WHERE id=?`).run(task.id);
     return;
   }
   // Check max_runs
   if (task.max_runs > 0 && task.run_count >= task.max_runs) {
     console.log(`[Scheduled] Task ${task.id} "${task.name}" reached max_runs, pausing`);
-    db.prepare(`UPDATE scheduled_tasks SET status='paused' WHERE id=?`).run(task.id);
+    await db.prepare(`UPDATE scheduled_tasks SET status='paused' WHERE id=?`).run(task.id);
     return;
   }
 
-  const user = db.prepare('SELECT * FROM users WHERE id = ?').get(task.user_id);
+  const user = await db.prepare('SELECT * FROM users WHERE id = ?').get(task.user_id);
   if (!user) { console.error(`[Scheduled] User ${task.user_id} not found`); return; }
 
   const UPLOAD_DIR = process.env.UPLOAD_DIR
@@ -259,7 +259,7 @@ async function runTask(db, taskId) {
       // Resolve model API id
       let apiModel = task.model;
       try {
-        const row = db.prepare('SELECT api_model FROM llm_models WHERE key=? AND is_active=1').get(task.model);
+        const row = await db.prepare('SELECT api_model FROM llm_models WHERE key=? AND is_active=1').get(task.model);
         if (row?.api_model) apiModel = row.api_model;
       } catch (_) {}
 
@@ -269,12 +269,12 @@ async function runTask(db, taskId) {
       // Create session
       const sid = uuidv4();
       sessionId = sid;
-      db.prepare(
+      await db.prepare(
         `INSERT INTO chat_sessions (id, user_id, title, model, source) VALUES (?, ?, ?, ?, 'scheduled')`
       ).run(sid, task.user_id, task.name + ' — ' + twDateStr(), task.model);
 
       // Insert user message
-      db.prepare(
+      await db.prepare(
         `INSERT INTO chat_messages (session_id, role, content) VALUES (?, 'user', ?)`
       ).run(sid, renderedPrompt);
 
@@ -282,29 +282,29 @@ async function runTask(db, taskId) {
       const { text, inputTokens, outputTokens } = await generateTextSync(apiModel, [], renderedPrompt);
 
       // Insert AI response
-      db.prepare(
+      await db.prepare(
         `INSERT INTO chat_messages (session_id, role, content, input_tokens, output_tokens) VALUES (?, 'assistant', ?, ?, ?)`
       ).run(sid, text, inputTokens, outputTokens);
 
       // Update token_usage (upsert pattern)
       const today = twDateStr();
-      const existing = db.prepare(
-        'SELECT id FROM token_usage WHERE user_id=? AND date=? AND model=?'
+      const existing = await db.prepare(
+        'SELECT id FROM token_usage WHERE user_id=? AND usage_date=? AND model=?'
       ).get(task.user_id, today, task.model);
       if (existing) {
-        db.prepare(
+        await db.prepare(
           'UPDATE token_usage SET input_tokens=input_tokens+?, output_tokens=output_tokens+? WHERE id=?'
         ).run(inputTokens, outputTokens, existing.id);
       } else {
-        db.prepare(
-          'INSERT INTO token_usage (user_id, date, model, input_tokens, output_tokens) VALUES (?,?,?,?,?)'
+        await db.prepare(
+          'INSERT INTO token_usage (user_id, usage_date, model, input_tokens, output_tokens) VALUES (?,?,?,?,?)'
         ).run(task.user_id, today, task.model, inputTokens, outputTokens);
       }
 
       // Update session title
       try {
         const title = await generateTitle(renderedPrompt, text);
-        db.prepare('UPDATE chat_sessions SET title=? WHERE id=?').run(title, sid);
+        await db.prepare('UPDATE chat_sessions SET title=? WHERE id=?').run(title, sid);
       } catch (_) {}
 
       // Process file generation blocks
@@ -327,7 +327,7 @@ async function runTask(db, taskId) {
     responseText = result.text;
 
     // Update session updated_at
-    db.prepare(`UPDATE chat_sessions SET updated_at=? WHERE id=?`).run(twTimestamp(), sessionId);
+    await db.prepare(`UPDATE chat_sessions SET updated_at=? WHERE id=?`).run(twTimestamp(), sessionId);
 
   } catch (e) {
     runStatus = 'fail';
@@ -372,7 +372,7 @@ async function runTask(db, taskId) {
   }
 
   // ── Write run record ────────────────────────────────────────────────────────
-  db.prepare(
+  await db.prepare(
     `INSERT INTO scheduled_task_runs
       (task_id, run_at, status, attempt, session_id, response_preview, generated_files_json, email_sent_to, error_msg, duration_ms)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
@@ -391,7 +391,7 @@ async function runTask(db, taskId) {
 
   // ── Update task stats ───────────────────────────────────────────────────────
   const twNow_ = twTimestamp();
-  db.prepare(
+  await db.prepare(
     `UPDATE scheduled_tasks
      SET run_count=run_count+1, last_run_at=?, last_run_status=?, updated_at=?
      WHERE id=?`
@@ -439,9 +439,9 @@ function unscheduleTask(taskId) {
 }
 
 /** Called on server start — load all active tasks from DB */
-function initScheduler(db) {
+async function initScheduler(db) {
   try {
-    const tasks = db.prepare(`SELECT * FROM scheduled_tasks WHERE status='active'`).all();
+    const tasks = await db.prepare(`SELECT * FROM scheduled_tasks WHERE status='active'`).all();
     tasks.forEach(t => scheduleTask(db, t));
     console.log(`[Scheduled] Loaded ${tasks.length} active task(s)`);
   } catch (e) {
