@@ -24,11 +24,11 @@ function setDifyConvId(sessionId, kbId, conversationId) {
 }
 
 // Load active DIFY KBs for a user (role-filtered) and return as Gemini function declarations
-function getDifyFunctionDeclarations(db, roleId) {
+async function getDifyFunctionDeclarations(db, roleId) {
   let kbs;
   try {
     if (roleId) {
-      kbs = db.prepare(
+      kbs = await db.prepare(
         `SELECT d.id, d.name, d.api_server, d.api_key, d.description
          FROM dify_knowledge_bases d
          JOIN role_dify_kbs rd ON rd.dify_kb_id = d.id
@@ -36,7 +36,7 @@ function getDifyFunctionDeclarations(db, roleId) {
          ORDER BY d.sort_order ASC`
       ).all(roleId);
     } else {
-      kbs = db.prepare(
+      kbs = await db.prepare(
         `SELECT id, name, api_server, api_key, description FROM dify_knowledge_bases WHERE is_active=1 ORDER BY sort_order ASC`
       ).all();
     }
@@ -185,7 +185,7 @@ async function executeDifyQuery(db, kb, query, sessionId, userId) {
       if (data.conversation_id) setDifyConvId(sessionId, kb.id, data.conversation_id);
       const answer = (data.answer || '').trim();
       try {
-        db.prepare(
+        await db.prepare(
           `INSERT INTO dify_call_logs (kb_id, session_id, user_id, query_preview, response_preview, status, duration_ms) VALUES (?,?,?,?,?,?,?)`
         ).run(kb.id, sessionId, userId, query.slice(0, 200), answer.slice(0, 300), 'ok', duration);
       } catch (_) { }
@@ -195,7 +195,7 @@ async function executeDifyQuery(db, kb, query, sessionId, userId) {
       const errText = await difyRes.text().catch(() => '');
       const msg = `HTTP ${difyRes.status}`;
       try {
-        db.prepare(
+        await db.prepare(
           `INSERT INTO dify_call_logs (kb_id, session_id, user_id, query_preview, status, error_msg, duration_ms) VALUES (?,?,?,?,?,?,?)`
         ).run(kb.id, sessionId, userId, query.slice(0, 200), 'error', msg, duration);
       } catch (_) { }
@@ -205,7 +205,7 @@ async function executeDifyQuery(db, kb, query, sessionId, userId) {
   } catch (e) {
     const duration = Date.now() - t0;
     try {
-      db.prepare(
+      await db.prepare(
         `INSERT INTO dify_call_logs (kb_id, session_id, user_id, query_preview, status, error_msg, duration_ms) VALUES (?,?,?,?,?,?,?)`
       ).run(kb.id, sessionId, userId, query.slice(0, 200), 'error', e.message.slice(0, 200), duration);
     } catch (_) { }
@@ -234,9 +234,9 @@ router.use(verifyToken);
 
 // Resolve API model info from DB (with env fallback)
 // Returns { apiModel: string, imageOutput: boolean }
-function resolveApiModel(db, modelKey) {
+async function resolveApiModel(db, modelKey) {
   try {
-    const row = db.prepare('SELECT api_model, image_output FROM llm_models WHERE key=? AND is_active=1').get(modelKey);
+    const row = await db.prepare('SELECT api_model, image_output FROM llm_models WHERE key=? AND is_active=1').get(modelKey);
     if (row?.api_model) return { apiModel: row.api_model, imageOutput: !!row.image_output };
   } catch (e) { }
   if (modelKey === 'flash') return { apiModel: process.env.GEMINI_MODEL_FLASH || 'gemini-3-flash-preview', imageOutput: false };
@@ -245,10 +245,10 @@ function resolveApiModel(db, modelKey) {
 }
 
 // GET /api/chat/models — active models for frontend selector
-router.get('/models', (req, res) => {
+router.get('/models', async (req, res) => {
   try {
-    const db = require('../database').db;
-    const models = db.prepare(
+    const db = require('../database-oracle').db;
+    const models = await db.prepare(
       'SELECT key, name, api_model, description, image_output FROM llm_models WHERE is_active=1 ORDER BY sort_order ASC, id ASC'
     ).all();
     if (models.length) return res.json(models);
@@ -263,10 +263,10 @@ router.get('/models', (req, res) => {
 });
 
 // GET /api/chat/budget — returns effective limits + today/week/month spent for current user
-router.get('/budget', (req, res) => {
+router.get('/budget', async (req, res) => {
   try {
-    const db = require('../database').db;
-    const budgetRow = db.prepare(
+    const db = require('../database-oracle').db;
+    const budgetRow = await db.prepare(
       `SELECT u.budget_daily, u.budget_weekly, u.budget_monthly,
               r.budget_daily AS role_daily, r.budget_weekly AS role_weekly, r.budget_monthly AS role_monthly
        FROM users u LEFT JOIN roles r ON r.id = u.role_id WHERE u.id = ?`
@@ -279,15 +279,15 @@ router.get('/budget', (req, res) => {
     const now = new Date();
     const todayStr = now.toISOString().slice(0, 10);
 
-    const getSpent = (sql, ...params) => {
-      const row = db.prepare(sql).get(...params);
+    const getSpent = async (sql, ...params) => {
+      const row = await db.prepare(sql).get(...params);
       const total = row?.total || 0;
       const images = row?.images || 0;
       return total > 0 ? total : images * 0.04;
     };
 
-    const spentD = getSpent(
-      `SELECT COALESCE(SUM(cost),0) AS total, COALESCE(SUM(image_count),0) AS images FROM token_usage WHERE user_id=? AND date=?`,
+    const spentD = await getSpent(
+      `SELECT COALESCE(SUM(cost),0) AS total, COALESCE(SUM(image_count),0) AS images FROM token_usage WHERE user_id=? AND usage_date=?`,
       req.user.id, todayStr
     );
 
@@ -295,14 +295,14 @@ router.get('/budget', (req, res) => {
     const monday = new Date(now);
     monday.setDate(now.getDate() + (dow === 0 ? -6 : 1 - dow));
     const mondayStr = monday.toISOString().slice(0, 10);
-    const spentW = getSpent(
-      `SELECT COALESCE(SUM(cost),0) AS total, COALESCE(SUM(image_count),0) AS images FROM token_usage WHERE user_id=? AND date>=? AND date<=?`,
+    const spentW = await getSpent(
+      `SELECT COALESCE(SUM(cost),0) AS total, COALESCE(SUM(image_count),0) AS images FROM token_usage WHERE user_id=? AND usage_date>=? AND usage_date<=?`,
       req.user.id, mondayStr, todayStr
     );
 
     const firstOfMonth = `${todayStr.slice(0, 7)}-01`;
-    const spentM = getSpent(
-      `SELECT COALESCE(SUM(cost),0) AS total, COALESCE(SUM(image_count),0) AS images FROM token_usage WHERE user_id=? AND date>=? AND date<=?`,
+    const spentM = await getSpent(
+      `SELECT COALESCE(SUM(cost),0) AS total, COALESCE(SUM(image_count),0) AS images FROM token_usage WHERE user_id=? AND usage_date>=? AND usage_date<=?`,
       req.user.id, firstOfMonth, todayStr
     );
 
@@ -318,10 +318,10 @@ router.get('/budget', (req, res) => {
 });
 
 // GET /api/chat/sessions
-router.get('/sessions', (req, res) => {
+router.get('/sessions', async (req, res) => {
   try {
-    const db = require('../database').db;
-    const sessions = db
+    const db = require('../database-oracle').db;
+    const sessions = await db
       .prepare(
         `SELECT id, title, model, created_at, updated_at
          FROM chat_sessions WHERE user_id = ? AND (source IS NULL OR source != 'scheduled')
@@ -335,12 +335,12 @@ router.get('/sessions', (req, res) => {
 });
 
 // POST /api/chat/sessions
-router.post('/sessions', (req, res) => {
+router.post('/sessions', async (req, res) => {
   try {
-    const db = require('../database').db;
+    const db = require('../database-oracle').db;
     const id = uuidv4();
     const model = req.body.model || 'pro';
-    db.prepare(
+    await db.prepare(
       `INSERT INTO chat_sessions (id, user_id, title, model) VALUES (?, ?, ?, ?)`
     ).run(id, req.user.id, '新對話', model);
     res.json({ id, title: '新對話', model });
@@ -350,15 +350,15 @@ router.post('/sessions', (req, res) => {
 });
 
 // GET /api/chat/sessions/:id
-router.get('/sessions/:id', (req, res) => {
+router.get('/sessions/:id', async (req, res) => {
   try {
-    const db = require('../database').db;
-    const session = db
+    const db = require('../database-oracle').db;
+    const session = await db
       .prepare(`SELECT * FROM chat_sessions WHERE id = ? AND user_id = ?`)
       .get(req.params.id, req.user.id);
     if (!session) return res.status(404).json({ error: '找不到對話' });
 
-    const messages = db
+    const messages = await db
       .prepare(`SELECT * FROM chat_messages WHERE session_id = ? ORDER BY created_at ASC`)
       .all(req.params.id);
 
@@ -378,7 +378,7 @@ router.get('/sessions/:id', (req, res) => {
     });
 
     // Include attached skills
-    const skills = db.prepare(`
+    const skills = await db.prepare(`
       SELECT s.id, s.name, s.icon, s.type, s.description, s.model_key, ss.sort_order
       FROM session_skills ss JOIN skills s ON s.id = ss.skill_id
       WHERE ss.session_id = ? ORDER BY ss.sort_order ASC
@@ -391,16 +391,16 @@ router.get('/sessions/:id', (req, res) => {
 });
 
 // PUT /api/chat/sessions/:id/skills — 更新 session 掛載的 skills（array of skill ids）
-router.put('/sessions/:id/skills', (req, res) => {
+router.put('/sessions/:id/skills', async (req, res) => {
   try {
-    const db = require('../database').db;
-    const session = db.prepare('SELECT id FROM chat_sessions WHERE id=? AND user_id=?').get(req.params.id, req.user.id);
+    const db = require('../database-oracle').db;
+    const session = await db.prepare('SELECT id FROM chat_sessions WHERE id=? AND user_id=?').get(req.params.id, req.user.id);
     if (!session) return res.status(404).json({ error: '找不到對話' });
     const skillIds = Array.isArray(req.body.skill_ids) ? req.body.skill_ids : [];
-    db.prepare('DELETE FROM session_skills WHERE session_id=?').run(req.params.id);
-    skillIds.forEach((id, idx) =>
-      db.prepare('INSERT INTO session_skills (session_id, skill_id, sort_order) VALUES (?,?,?)').run(req.params.id, id, idx)
-    );
+    await db.prepare('DELETE FROM session_skills WHERE session_id=?').run(req.params.id);
+    for (const [idx, id] of skillIds.entries()) {
+      await db.prepare('INSERT INTO session_skills (session_id, skill_id, sort_order) VALUES (?,?,?)').run(req.params.id, id, idx);
+    }
     res.json({ success: true, skill_ids: skillIds });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -408,16 +408,16 @@ router.put('/sessions/:id/skills', (req, res) => {
 });
 
 // DELETE /api/chat/sessions/:id
-router.delete('/sessions/:id', (req, res) => {
+router.delete('/sessions/:id', async (req, res) => {
   try {
-    const db = require('../database').db;
-    const session = db
+    const db = require('../database-oracle').db;
+    const session = await db
       .prepare(`SELECT id FROM chat_sessions WHERE id = ? AND user_id = ?`)
       .get(req.params.id, req.user.id);
     if (!session) return res.status(404).json({ error: '找不到對話' });
 
-    db.prepare(`DELETE FROM chat_messages WHERE session_id = ?`).run(req.params.id);
-    db.prepare(`DELETE FROM chat_sessions WHERE id = ?`).run(req.params.id);
+    await db.prepare(`DELETE FROM chat_messages WHERE session_id = ?`).run(req.params.id);
+    await db.prepare(`DELETE FROM chat_sessions WHERE id = ?`).run(req.params.id);
     res.json({ success: true });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -426,11 +426,11 @@ router.delete('/sessions/:id', (req, res) => {
 
 // POST /api/chat/sessions/:id/messages  (SSE streaming)
 router.post('/sessions/:id/messages', upload.array('files', 10), async (req, res) => {
-  const db = require('../database').db;
+  const db = require('../database-oracle').db;
   const sessionId = req.params.id;
 
   // Verify session ownership
-  const session = db
+  const session = await db
     .prepare(`SELECT * FROM chat_sessions WHERE id = ? AND user_id = ?`)
     .get(sessionId, req.user.id);
   if (!session) {
@@ -441,7 +441,7 @@ router.post('/sessions/:id/messages', upload.array('files', 10), async (req, res
   const uploadedFiles = req.files || [];
 
   // Load per-user upload permissions
-  const userPerms = db.prepare(
+  const userPerms = await db.prepare(
     `SELECT allow_text_upload, text_max_mb, allow_audio_upload, audio_max_mb,
             allow_image_upload, image_max_mb FROM users WHERE id = ?`
   ).get(req.user.id) || { allow_text_upload: 1, text_max_mb: 10, allow_audio_upload: 0, audio_max_mb: 10, allow_image_upload: 1, image_max_mb: 10 };
@@ -491,7 +491,7 @@ router.post('/sessions/:id/messages', upload.array('files', 10), async (req, res
   // NOTE: requires token prices configured in admin panel for cost to be non-null.
   // cost=NULL rows (unconfigured model) are treated as $0 by SQL SUM; budget still enforces on non-null rows.
   if (req.user.role !== 'admin') {
-    const budgetRow = db.prepare(
+    const budgetRow = await db.prepare(
       `SELECT u.budget_daily, u.budget_weekly, u.budget_monthly,
               r.budget_daily AS role_daily, r.budget_weekly AS role_weekly, r.budget_monthly AS role_monthly
        FROM users u LEFT JOIN roles r ON r.id = u.role_id WHERE u.id = ?`
@@ -517,9 +517,9 @@ router.post('/sessions/:id/messages', upload.array('files', 10), async (req, res
       };
 
       if (limitD != null) {
-        const row = db.prepare(
+        const row = await db.prepare(
           `SELECT COALESCE(SUM(cost),0) AS total, COALESCE(SUM(image_count),0) AS images
-           FROM token_usage WHERE user_id=? AND date=?`
+           FROM token_usage WHERE user_id=? AND usage_date=?`
         ).get(req.user.id, todayStr);
         const spent = sumCost(row);
         console.log(`[Budget] daily spent=${spent} limit=${limitD}`);
@@ -533,9 +533,9 @@ router.post('/sessions/:id/messages', upload.array('files', 10), async (req, res
         const monday = new Date(now);
         monday.setDate(now.getDate() + (dow === 0 ? -6 : 1 - dow));
         const mondayStr = monday.toISOString().slice(0, 10);
-        const row = db.prepare(
+        const row = await db.prepare(
           `SELECT COALESCE(SUM(cost),0) AS total, COALESCE(SUM(image_count),0) AS images
-           FROM token_usage WHERE user_id=? AND date>=? AND date<=?`
+           FROM token_usage WHERE user_id=? AND usage_date>=? AND usage_date<=?`
         ).get(req.user.id, mondayStr, todayStr);
         const spent = sumCost(row);
         console.log(`[Budget] weekly spent=${spent} limit=${limitW}`);
@@ -546,9 +546,9 @@ router.post('/sessions/:id/messages', upload.array('files', 10), async (req, res
 
       if (limitM != null) {
         const firstOfMonth = `${todayStr.slice(0, 7)}-01`;
-        const row = db.prepare(
+        const row = await db.prepare(
           `SELECT COALESCE(SUM(cost),0) AS total, COALESCE(SUM(image_count),0) AS images
-           FROM token_usage WHERE user_id=? AND date>=? AND date<=?`
+           FROM token_usage WHERE user_id=? AND usage_date>=? AND usage_date<=?`
         ).get(req.user.id, firstOfMonth, todayStr);
         const spent = sumCost(row);
         console.log(`[Budget] monthly spent=${spent} limit=${limitM}`);
@@ -637,7 +637,7 @@ router.post('/sessions/:id/messages', upload.array('files', 10), async (req, res
           // Plan B: record transcription tokens as a separate flash entry
           if (transcribeResult.inputTokens > 0 || transcribeResult.outputTokens > 0) {
             const today = new Date().toISOString().slice(0, 10);
-            upsertTokenUsage(db, req.user.id, today, 'flash',
+            await upsertTokenUsage(db, req.user.id, today, 'flash',
               transcribeResult.inputTokens, transcribeResult.outputTokens, 0);
           }
         } catch (e) {
@@ -758,7 +758,7 @@ router.post('/sessions/:id/messages', upload.array('files', 10), async (req, res
     }
 
     // Load history (include files_json for image continuity)
-    const historyMessages = db
+    const historyMessages = await db
       .prepare(
         `SELECT role, content, files_json FROM chat_messages
          WHERE session_id = ? ORDER BY created_at ASC`
@@ -876,7 +876,7 @@ router.post('/sessions/:id/messages', upload.array('files', 10), async (req, res
     };
 
     // Save user message first
-    const userMsgResult = db
+    const userMsgResult = await db
       .prepare(
         `INSERT INTO chat_messages (session_id, role, content, files_json) VALUES (?, 'user', ?, ?)`
       )
@@ -886,7 +886,7 @@ router.post('/sessions/:id/messages', upload.array('files', 10), async (req, res
     await checkSensitiveKeywords(db, req.user, sessionId, combinedUserText);
 
     // ── Load & Apply Session Skills ────────────────────────────────────────────
-    const sessionSkills = db.prepare(`
+    const sessionSkills = await db.prepare(`
       SELECT s.* FROM session_skills ss
       JOIN skills s ON s.id = ss.skill_id
       WHERE ss.session_id = ? ORDER BY ss.sort_order ASC
@@ -966,10 +966,10 @@ router.post('/sessions/:id/messages', upload.array('files', 10), async (req, res
         sendEvent({ type: 'done' });
         // Record 0-token usage for tracing
         const today = new Date().toISOString().slice(0, 10);
-        upsertTokenUsage(db, req.user.id, today, 'external-skill', 0, 0, 0);
-        db.prepare(`INSERT INTO chat_messages (session_id, role, content) VALUES (?, 'assistant', ?)`)
+        await upsertTokenUsage(db, req.user.id, today, 'external-skill', 0, 0, 0);
+        await db.prepare(`INSERT INTO chat_messages (session_id, role, content) VALUES (?, 'assistant', ?)`)
           .run(sessionId, answerContent);
-        db.prepare(`UPDATE chat_sessions SET updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(sessionId);
+        await db.prepare(`UPDATE chat_sessions SET updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(sessionId);
         return res.end();
       } catch (e) {
         console.error(`[Skill] External answer failed for "${sk.name}":`, e.message);
@@ -983,7 +983,7 @@ router.post('/sessions/:id/messages', upload.array('files', 10), async (req, res
     // Stream AI response
     let aiText = '';
     const chosenModel = skillModelKey || model || session.model || 'pro';
-    const { apiModel, imageOutput } = resolveApiModel(db, chosenModel);
+    const { apiModel, imageOutput } = await resolveApiModel(db, chosenModel);
     const history = sanitizeHistory(buildHistory(historyMessages, imageOutput));
 
     // Inject skill system prompts into Gemini instruction
@@ -1048,10 +1048,10 @@ router.post('/sessions/:id/messages', upload.array('files', 10), async (req, res
       console.log(`[Chat] Image gen done in ${Date.now() - t0}ms, images=${imgResult.images.length} in=${inputTokens} out=${outputTokens}`);
     } else {
       // ── Get user role and build combined MCP + DIFY tool declarations ────
-      const userRoleRow = db.prepare(`SELECT role_id FROM users WHERE id=?`).get(req.user.id);
+      const userRoleRow = await db.prepare(`SELECT role_id FROM users WHERE id=?`).get(req.user.id);
       const roleId = userRoleRow?.role_id || null;
-      const { functionDeclarations: allMcpDecls, serverMap } = mcpClient.getActiveToolDeclarations(db, roleId);
-      const { declarations: difyDecls, kbMap } = getDifyFunctionDeclarations(db, roleId);
+      const { functionDeclarations: allMcpDecls, serverMap } = await mcpClient.getActiveToolDeclarations(db, roleId);
+      const { declarations: difyDecls, kbMap } = await getDifyFunctionDeclarations(db, roleId);
 
       // ── Apply Skill MCP tool mode filtering ─────────────────────────────
       // Resolve mcp_tool_ids from each skill (stored as JSON string in DB)
@@ -1104,7 +1104,7 @@ router.post('/sessions/:id/messages', upload.array('files', 10), async (req, res
               // load those extra servers directly
               const extraDecls = [];
               for (const sid of toForceAdd) {
-                const srv = db.prepare(`SELECT * FROM mcp_servers WHERE id=? AND is_active=1`).get(sid);
+                const srv = await db.prepare(`SELECT * FROM mcp_servers WHERE id=? AND is_active=1`).get(sid);
                 if (!srv || !srv.tools_json) continue;
                 try {
                   const tools = JSON.parse(srv.tools_json);
@@ -1236,7 +1236,7 @@ router.post('/sessions/:id/messages', upload.array('files', 10), async (req, res
       // Object format (image-output): { generated, historyParts }
       return JSON.stringify(allGeneratedFiles);
     })();
-    db.prepare(
+    await db.prepare(
       `INSERT INTO chat_messages (session_id, role, content, input_tokens, output_tokens, files_json)
        VALUES (?, 'assistant', ?, ?, ?, ?)`
     ).run(sessionId, displayText, inputTokens, outputTokens, filesJsonToStore);
@@ -1246,10 +1246,10 @@ router.post('/sessions/:id/messages', upload.array('files', 10), async (req, res
       // 1. Immediately set a quick title from user message so the sidebar updates right away
       const quickTitle = combinedUserText.trim().replace(/\s+/g, ' ').slice(0, 50);
       // 防止重複或不必要的 title 事件：只有當會話目前的 title 為預設值時才更新
-      const currentTitleRow = db.prepare('SELECT title FROM chat_sessions WHERE id=?').get(sessionId);
+      const currentTitleRow = await db.prepare('SELECT title FROM chat_sessions WHERE id=?').get(sessionId);
       const currentTitle = currentTitleRow?.title;
       if (!currentTitle || currentTitle === '新對話') {
-        db.prepare(`UPDATE chat_sessions SET title=?, model=?, updated_at=datetime('now') WHERE id=?`).run(
+        await db.prepare(`UPDATE chat_sessions SET title=?, model=?, updated_at=datetime('now') WHERE id=?`).run(
           quickTitle, chosenModel, sessionId
         );
         sendEvent({ type: 'title', title: quickTitle });
@@ -1262,19 +1262,19 @@ router.post('/sessions/:id/messages', upload.array('files', 10), async (req, res
       console.log(`[Chat] Title event sent: "${quickTitle}" for session ${sessionId}`);
 
       // 2. Fire-and-forget: refine with LLM semantic title (no await, won't block done event)
-      generateTitle(combinedUserText, text).then((llmTitle) => {
+      generateTitle(combinedUserText, text).then(async (llmTitle) => {
         if (llmTitle && llmTitle !== quickTitle) {
-          db.prepare(`UPDATE chat_sessions SET title=? WHERE id=?`).run(llmTitle, sessionId);
+          await db.prepare(`UPDATE chat_sessions SET title=? WHERE id=?`).run(llmTitle, sessionId);
         }
       }).catch(() => { });
     } else {
-      db.prepare(`UPDATE chat_sessions SET updated_at=datetime('now') WHERE id=?`).run(sessionId);
+      await db.prepare(`UPDATE chat_sessions SET updated_at=datetime('now') WHERE id=?`).run(sessionId);
     }
 
     // Update token usage (upsert via SELECT+UPDATE/INSERT)
     const today = new Date().toISOString().split('T')[0];
     const imageCount = imageOutput ? (imgResult?.images?.length || 0) : 0;
-    upsertTokenUsage(db, req.user.id, today, chosenModel, inputTokens, outputTokens, imageCount);
+    await upsertTokenUsage(db, req.user.id, today, chosenModel, inputTokens, outputTokens, imageCount);
 
     sendEvent({ type: 'usage', inputTokens, outputTokens });
     sendEvent({ type: 'done' });
@@ -1315,14 +1315,14 @@ router.post('/sessions/:id/messages', upload.array('files', 10), async (req, res
 // POST /api/chat/sessions/:id/export
 router.post('/sessions/:id/export', async (req, res) => {
   try {
-    const db = require('../database').db;
+    const db = require('../database-oracle').db;
     const { format = 'txt' } = req.body;
-    const session = db
+    const session = await db
       .prepare(`SELECT * FROM chat_sessions WHERE id = ? AND user_id = ?`)
       .get(req.params.id, req.user.id);
     if (!session) return res.status(404).json({ error: '找不到對話' });
 
-    const messages = db
+    const messages = await db
       .prepare(`SELECT * FROM chat_messages WHERE session_id = ? ORDER BY created_at ASC`)
       .all(req.params.id);
 
@@ -1343,12 +1343,12 @@ router.post('/sessions/:id/export', async (req, res) => {
 });
 
 // PUT /api/chat/messages/:id
-router.put('/messages/:id', (req, res) => {
+router.put('/messages/:id', async (req, res) => {
   try {
-    const db = require('../database').db;
+    const db = require('../database-oracle').db;
     const { content } = req.body;
     // Verify ownership via session
-    const msg = db
+    const msg = await db
       .prepare(
         `SELECT m.id FROM chat_messages m
          JOIN chat_sessions s ON m.session_id = s.id
@@ -1357,7 +1357,7 @@ router.put('/messages/:id', (req, res) => {
       .get(req.params.id, req.user.id);
     if (!msg) return res.status(404).json({ error: '找不到訊息' });
 
-    db.prepare(`UPDATE chat_messages SET content = ? WHERE id = ?`).run(content, req.params.id);
+    await db.prepare(`UPDATE chat_messages SET content = ? WHERE id = ?`).run(content, req.params.id);
     res.json({ success: true });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -1367,9 +1367,9 @@ router.put('/messages/:id', (req, res) => {
 // Helpers
 
 // Calculate cost for a single API call based on per-request input tokens (Gemini tier logic)
-function calcCallCost(db, model, date, inputTokens, outputTokens, imageCount) {
+async function calcCallCost(db, model, date, inputTokens, outputTokens, imageCount) {
   try {
-    const price = db.prepare(
+    const price = await db.prepare(
       `SELECT * FROM token_prices WHERE model=? AND start_date<=? AND (end_date IS NULL OR end_date>=?) ORDER BY start_date DESC LIMIT 1`
     ).get(model, date, date);
     if (!price) return { cost: null, currency: null };
@@ -1387,24 +1387,24 @@ function calcCallCost(db, model, date, inputTokens, outputTokens, imageCount) {
   }
 }
 
-function upsertTokenUsage(db, userId, date, model, inputTokens, outputTokens, imageCount = 0) {
+async function upsertTokenUsage(db, userId, date, model, inputTokens, outputTokens, imageCount = 0) {
   try {
-    const { cost, currency } = calcCallCost(db, model, date, inputTokens, outputTokens, imageCount);
-    const existing = db
-      .prepare(`SELECT id FROM token_usage WHERE user_id=? AND date=? AND model=?`)
+    const { cost, currency } = await calcCallCost(db, model, date, inputTokens, outputTokens, imageCount);
+    const existing = await db
+      .prepare(`SELECT id FROM token_usage WHERE user_id=? AND usage_date=? AND model=?`)
       .get(userId, date, model);
     if (existing) {
-      db.prepare(
+      await db.prepare(
         `UPDATE token_usage
          SET input_tokens=input_tokens+?, output_tokens=output_tokens+?,
              image_count=COALESCE(image_count,0)+?,
              cost=CASE WHEN ? IS NOT NULL THEN COALESCE(cost,0)+? ELSE cost END,
              currency=COALESCE(?, currency)
-         WHERE user_id=? AND date=? AND model=?`
+         WHERE user_id=? AND usage_date=? AND model=?`
       ).run(inputTokens, outputTokens, imageCount, cost, cost, currency, userId, date, model);
     } else {
-      db.prepare(
-        `INSERT INTO token_usage (user_id, date, model, input_tokens, output_tokens, image_count, cost, currency)
+      await db.prepare(
+        `INSERT INTO token_usage (user_id, usage_date, model, input_tokens, output_tokens, image_count, cost, currency)
          VALUES (?,?,?,?,?,?,?,?)`
       ).run(userId, date, model, inputTokens, outputTokens, imageCount, cost, currency);
     }
@@ -1415,7 +1415,7 @@ function upsertTokenUsage(db, userId, date, model, inputTokens, outputTokens, im
 
 async function checkSensitiveKeywords(db, user, sessionId, content) {
   try {
-    const keywords = db.prepare(`SELECT keyword FROM sensitive_keywords`).all();
+    const keywords = await db.prepare(`SELECT keyword FROM sensitive_keywords`).all();
 
     const lowerContent = content.toLowerCase();
     const matched = keywords
@@ -1424,7 +1424,7 @@ async function checkSensitiveKeywords(db, user, sessionId, content) {
 
     const hasSensitive = matched.length > 0 ? 1 : 0;
 
-    db.prepare(
+    await db.prepare(
       `INSERT INTO audit_logs (user_id, session_id, content, has_sensitive, sensitive_keywords)
        VALUES (?, ?, ?, ?, ?)`
     ).run(user.id, sessionId, content, hasSensitive, matched.length ? JSON.stringify(matched) : null);
@@ -1432,8 +1432,8 @@ async function checkSensitiveKeywords(db, user, sessionId, content) {
     if (hasSensitive) {
       // Notify admin async (don't await to not block stream)
       notifyAdminSensitiveKeyword({ user, content, keywords: matched, sessionId })
-        .then(() => {
-          db.prepare(
+        .then(async () => {
+          await db.prepare(
             `UPDATE audit_logs SET notified=1 WHERE id = (
                SELECT id FROM audit_logs WHERE user_id=? AND session_id=? ORDER BY id DESC LIMIT 1
              )`

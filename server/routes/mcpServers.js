@@ -7,7 +7,7 @@ const mcpClient = require('../services/mcpClient');
 
 router.use(verifyToken);
 
-function getDb() { return require('../database').db; }
+function getDb() { return require('../database-oracle').db; }
 
 function requireAdmin(req, res) {
   if (req.user.role !== 'admin') {
@@ -26,11 +26,11 @@ function twTimestamp(d = twNow()) {
 }
 
 // GET /api/mcp-servers
-router.get('/', (req, res) => {
+router.get('/', async (req, res) => {
   if (!requireAdmin(req, res)) return;
   const db = getDb();
   try {
-    const servers = db.prepare(`SELECT * FROM mcp_servers ORDER BY created_at DESC`).all();
+    const servers = await db.prepare(`SELECT * FROM mcp_servers ORDER BY created_at DESC`).all();
     res.json(servers);
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -38,18 +38,18 @@ router.get('/', (req, res) => {
 });
 
 // POST /api/mcp-servers
-router.post('/', (req, res) => {
+router.post('/', async (req, res) => {
   if (!requireAdmin(req, res)) return;
   const db = getDb();
   try {
     const { name, url, api_key, description, is_active } = req.body;
     if (!name || !url) return res.status(400).json({ error: '名稱和 URL 為必填' });
 
-    const result = db.prepare(
+    const result = await db.prepare(
       `INSERT INTO mcp_servers (name, url, api_key, description, is_active) VALUES (?, ?, ?, ?, ?)`
     ).run(name, url, api_key || null, description || null, is_active !== false ? 1 : 0);
 
-    const server = db.prepare(`SELECT * FROM mcp_servers WHERE id=?`).get(result.lastInsertRowid);
+    const server = await db.prepare(`SELECT * FROM mcp_servers WHERE id=?`).get(result.lastInsertRowid);
     res.json(server);
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -57,15 +57,15 @@ router.post('/', (req, res) => {
 });
 
 // PUT /api/mcp-servers/:id
-router.put('/:id', (req, res) => {
+router.put('/:id', async (req, res) => {
   if (!requireAdmin(req, res)) return;
   const db = getDb();
   try {
-    const server = db.prepare(`SELECT * FROM mcp_servers WHERE id=?`).get(req.params.id);
+    const server = await db.prepare(`SELECT * FROM mcp_servers WHERE id=?`).get(req.params.id);
     if (!server) return res.status(404).json({ error: '找不到 MCP 伺服器' });
 
     const { name, url, api_key, description, is_active } = req.body;
-    db.prepare(
+    await db.prepare(
       `UPDATE mcp_servers SET name=?, url=?, api_key=?, description=?, is_active=?, updated_at=? WHERE id=?`
     ).run(
       name ?? server.name,
@@ -77,20 +77,20 @@ router.put('/:id', (req, res) => {
       req.params.id,
     );
 
-    res.json(db.prepare(`SELECT * FROM mcp_servers WHERE id=?`).get(req.params.id));
+    res.json(await db.prepare(`SELECT * FROM mcp_servers WHERE id=?`).get(req.params.id));
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
 });
 
 // DELETE /api/mcp-servers/:id
-router.delete('/:id', (req, res) => {
+router.delete('/:id', async (req, res) => {
   if (!requireAdmin(req, res)) return;
   const db = getDb();
   try {
-    const server = db.prepare(`SELECT * FROM mcp_servers WHERE id=?`).get(req.params.id);
+    const server = await db.prepare(`SELECT * FROM mcp_servers WHERE id=?`).get(req.params.id);
     if (!server) return res.status(404).json({ error: '找不到 MCP 伺服器' });
-    db.prepare(`DELETE FROM mcp_servers WHERE id=?`).run(req.params.id);
+    await db.prepare(`DELETE FROM mcp_servers WHERE id=?`).run(req.params.id);
     res.json({ success: true });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -98,15 +98,15 @@ router.delete('/:id', (req, res) => {
 });
 
 // POST /api/mcp-servers/:id/toggle
-router.post('/:id/toggle', (req, res) => {
+router.post('/:id/toggle', async (req, res) => {
   if (!requireAdmin(req, res)) return;
   const db = getDb();
   try {
-    const server = db.prepare(`SELECT * FROM mcp_servers WHERE id=?`).get(req.params.id);
+    const server = await db.prepare(`SELECT * FROM mcp_servers WHERE id=?`).get(req.params.id);
     if (!server) return res.status(404).json({ error: '找不到 MCP 伺服器' });
 
     const newActive = server.is_active ? 0 : 1;
-    db.prepare(`UPDATE mcp_servers SET is_active=?, updated_at=? WHERE id=?`)
+    await db.prepare(`UPDATE mcp_servers SET is_active=?, updated_at=? WHERE id=?`)
       .run(newActive, twTimestamp(), req.params.id);
 
     res.json({ is_active: newActive });
@@ -120,7 +120,7 @@ router.post('/:id/sync', async (req, res) => {
   if (!requireAdmin(req, res)) return;
   const db = getDb();
   try {
-    const server = db.prepare(`SELECT * FROM mcp_servers WHERE id=?`).get(req.params.id);
+    const server = await db.prepare(`SELECT * FROM mcp_servers WHERE id=?`).get(req.params.id);
     if (!server) return res.status(404).json({ error: '找不到 MCP 伺服器' });
 
     const tools = await mcpClient.listTools(db, server);
@@ -131,15 +131,15 @@ router.post('/:id/sync', async (req, res) => {
 });
 
 // GET /api/mcp-servers/:id/logs
-router.get('/:id/logs', (req, res) => {
+router.get('/:id/logs', async (req, res) => {
   if (!requireAdmin(req, res)) return;
   const db = getDb();
   try {
-    const server = db.prepare(`SELECT id FROM mcp_servers WHERE id=?`).get(req.params.id);
+    const server = await db.prepare(`SELECT id FROM mcp_servers WHERE id=?`).get(req.params.id);
     if (!server) return res.status(404).json({ error: '找不到 MCP 伺服器' });
 
     const limit = Math.min(parseInt(req.query.limit || '50'), 200);
-    const logs = db.prepare(
+    const logs = await db.prepare(
       `SELECT l.*, u.name as user_name FROM mcp_call_logs l
        LEFT JOIN users u ON u.id = l.user_id
        WHERE l.server_id=? ORDER BY l.called_at DESC LIMIT ?`
@@ -151,10 +151,10 @@ router.get('/:id/logs', (req, res) => {
 });
 
 // GET /api/mcp-servers/active-servers  — sidebar display (name + description only)
-router.get('/active-servers', (req, res) => {
+router.get('/active-servers', async (req, res) => {
   const db = getDb();
   try {
-    const servers = db.prepare(
+    const servers = await db.prepare(
       `SELECT name, description FROM mcp_servers WHERE is_active=1 ORDER BY created_at DESC`
     ).all();
     res.json(servers);
@@ -164,7 +164,7 @@ router.get('/active-servers', (req, res) => {
 });
 
 // GET /api/mcp-servers/active-tools  — used by chat route
-router.get('/active-tools', (req, res) => {
+router.get('/active-tools', async (req, res) => {
   const db = getDb();
   try {
     const { functionDeclarations, serverMap } = mcpClient.getActiveToolDeclarations(db);

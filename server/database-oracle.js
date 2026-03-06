@@ -1,16 +1,33 @@
 /**
  * Oracle 23 AI Database Layer
  * Async API mirror of database.js (sql.js wrapper)
- * All prepare().run/get/all() return Promises
+ *
+ * Compatibility shims built in:
+ *   - LIMIT n        → FETCH FIRST n ROWS ONLY
+ *   - LIMIT n OFFSET m → OFFSET m ROWS FETCH NEXT n ROWS ONLY
+ *   - INSERT auto-RETURNING id → result.lastInsertRowid
+ *   - ORA-00001 (unique violation) → re-thrown as 'UNIQUE constraint failed'
  */
 require('dotenv').config();
 const oracledb = require('oracledb');
 
-// Return rows as plain objects; fetch CLOB/NCLOB as string
 oracledb.outFormat = oracledb.OUT_FORMAT_OBJECT;
 oracledb.fetchAsString = [oracledb.CLOB];
 
 let pool = null;
+
+// ─── SQL Normalization ────────────────────────────────────────────────────────
+
+function normalizeSql(sql) {
+  // LIMIT n OFFSET m  →  OFFSET m ROWS FETCH NEXT n ROWS ONLY
+  sql = sql.replace(/\bLIMIT\s+(\d+)\s+OFFSET\s+(\d+)/gi,
+    'OFFSET $2 ROWS FETCH NEXT $1 ROWS ONLY');
+  // LIMIT n  →  FETCH FIRST n ROWS ONLY
+  sql = sql.replace(/\bLIMIT\s+(\d+)/gi,
+    'FETCH FIRST $1 ROWS ONLY');
+  // CURRENT_TIMESTAMP is valid in Oracle too — no change needed
+  return sql;
+}
 
 // Convert SQLite-style ? placeholders → Oracle :1 :2 ...
 function convertPlaceholders(sql) {
@@ -18,7 +35,7 @@ function convertPlaceholders(sql) {
   return sql.replace(/\?/g, () => `:${++i}`);
 }
 
-// Oracle returns column names in UPPERCASE — normalise to lowercase
+// Oracle returns column names UPPERCASE — normalise to lowercase
 function lowercaseKeys(obj) {
   if (!obj) return obj;
   if (Array.isArray(obj)) return obj.map(lowercaseKeys);
@@ -27,83 +44,98 @@ function lowercaseKeys(obj) {
   );
 }
 
-// Normalise bind params array
 function normaliseParams(params) {
   const bp = params.length === 1 && Array.isArray(params[0]) ? params[0] : params;
   return bp.map((p) => (p === undefined ? null : p));
 }
 
+// Wrap Oracle errors so upstream code keeps working unchanged
+function normaliseError(e) {
+  if (e.errorNum === 1) {
+    // ORA-00001: unique constraint violated
+    const err = new Error('UNIQUE constraint failed: ' + (e.message || ''));
+    err.originalError = e;
+    throw err;
+  }
+  throw e;
+}
+
 // ─── Statement Wrapper ────────────────────────────────────────────────────────
 class OracleStatementWrapper {
-  constructor(pool, sql) {
+  constructor(pool, rawSql) {
     this.pool = pool;
-    this.sql = convertPlaceholders(sql);
+    this.rawSql = rawSql;
+    // Apply normalization and placeholder conversion once
+    this.sql = convertPlaceholders(normalizeSql(rawSql));
+  }
+
+  _bindParams(params) {
+    const bp = params.length === 1 && Array.isArray(params[0]) ? params[0] : params;
+    return bp.map((p) => (p === undefined ? null : p));
   }
 
   /**
-   * Execute INSERT / UPDATE / DELETE
-   * For INSERT with GENERATED AS IDENTITY, pass returningCol to get the new ID.
-   * e.g. stmt.run([val1, val2], 'id')
+   * Execute INSERT / UPDATE / DELETE.
+   * For INSERT into tables with GENERATED AS IDENTITY 'id' column,
+   * automatically appends RETURNING id INTO :__ret to get lastInsertRowid.
    */
   async run(...params) {
-    // Allow: run(p1, p2, ...) or run([p1, p2])
-    // Also allow: run([p1, p2], 'returningCol') — last string arg = returning col
-    let returningCol = null;
-    let rawParams = params;
-    if (params.length >= 1 && typeof params[params.length - 1] === 'string' &&
-        !this.sql.trim().toUpperCase().startsWith('SELECT')) {
-      // only treat last string as returning col if it looks like a column name (no spaces)
-      const last = params[params.length - 1];
-      if (/^\w+$/.test(last)) {
-        returningCol = last;
-        rawParams = params.slice(0, -1);
-      }
-    }
-    const bindParams = normaliseParams(rawParams);
+    const bindParams = this._bindParams(params);
+    const isInsert = /^\s*INSERT\s+/i.test(this.sql);
 
     const conn = await this.pool.getConnection();
     try {
-      let sqlToRun = this.sql;
-      let options = { autoCommit: true };
-
-      if (returningCol) {
-        sqlToRun = `${this.sql} RETURNING ${returningCol} INTO :__ret_id`;
-        bindParams.push({ dir: oracledb.BIND_OUT, type: oracledb.NUMBER });
+      let result;
+      if (isInsert) {
+        // Try RETURNING id first; if column 'id' doesn't exist, fallback to plain insert
+        try {
+          const sqlWithRet = `${this.sql} RETURNING id INTO :__ret_id`;
+          const bpWithRet  = [...bindParams, { dir: oracledb.BIND_OUT, type: oracledb.NUMBER }];
+          result = await conn.execute(sqlWithRet, bpWithRet, { autoCommit: true });
+          const retVal = result.outBinds?.[result.outBinds.length - 1];
+          return {
+            lastInsertRowid: Array.isArray(retVal) ? retVal[0] : retVal,
+            changes: result.rowsAffected || 0,
+          };
+        } catch (retErr) {
+          // ORA-00904: invalid identifier → table has no 'id' column; run plain
+          if (retErr.errorNum !== 904) normaliseError(retErr);
+          result = await conn.execute(this.sql, bindParams, { autoCommit: true });
+        }
+      } else {
+        result = await conn.execute(this.sql, bindParams, { autoCommit: true });
       }
-
-      const result = await conn.execute(sqlToRun, bindParams, options);
-      const lastInsertRowid = returningCol
-        ? result.outBinds?.[result.outBinds.length - 1]?.[0] ?? null
-        : null;
-
-      return {
-        lastInsertRowid,
-        changes: result.rowsAffected || 0,
-      };
+      return { lastInsertRowid: null, changes: result.rowsAffected || 0 };
+    } catch (e) {
+      normaliseError(e);
     } finally {
       await conn.close();
     }
   }
 
-  /** Execute SELECT, return first row or null */
+  /** SELECT first row or null */
   async get(...params) {
-    const bindParams = normaliseParams(params);
+    const bindParams = this._bindParams(params);
     const conn = await this.pool.getConnection();
     try {
       const result = await conn.execute(this.sql, bindParams, { maxRows: 1 });
       return lowercaseKeys(result.rows?.[0] ?? null);
+    } catch (e) {
+      normaliseError(e);
     } finally {
       await conn.close();
     }
   }
 
-  /** Execute SELECT, return all rows */
+  /** SELECT all rows */
   async all(...params) {
-    const bindParams = normaliseParams(params);
+    const bindParams = this._bindParams(params);
     const conn = await this.pool.getConnection();
     try {
       const result = await conn.execute(this.sql, bindParams);
       return lowercaseKeys(result.rows ?? []);
+    } catch (e) {
+      normaliseError(e);
     } finally {
       await conn.close();
     }
@@ -120,36 +152,25 @@ class OracleDatabaseWrapper {
     return new OracleStatementWrapper(this.pool, sql);
   }
 
-  /**
-   * Execute raw SQL (DDL or multi-statement).
-   * Statements separated by ; are run individually.
-   */
+  /** Execute raw SQL block(s), split by semicolons */
   async exec(sql) {
-    const statements = sql
-      .split(';')
-      .map((s) => s.trim())
-      .filter(Boolean);
-
+    const statements = sql.split(';').map((s) => s.trim()).filter(Boolean);
     const conn = await this.pool.getConnection();
     try {
       for (const stmt of statements) {
-        await conn.execute(stmt, [], { autoCommit: true });
+        await conn.execute(normalizeSql(stmt), [], { autoCommit: true });
       }
     } finally {
       await conn.close();
     }
   }
 
-  /**
-   * Execute DDL and silently ignore ORA-00955 (table/index already exists).
-   * Useful for idempotent schema init.
-   */
+  /** DDL exec — silently ignore ORA-00955/1408 (already exists) */
   async execDDL(sql) {
     const conn = await this.pool.getConnection();
     try {
       await conn.execute(sql, [], { autoCommit: true });
     } catch (e) {
-      // ORA-00955: name is already used  |  ORA-01408: index already indexed col
       if (e.errorNum === 955 || e.errorNum === 1408 || e.errorNum === 1430) return;
       throw e;
     } finally {
@@ -157,17 +178,9 @@ class OracleDatabaseWrapper {
     }
   }
 
-  /** Convenience: execute single SELECT and return all rows */
-  async query(sql, params = []) {
-    return this.prepare(sql).all(...params);
-  }
+  async query(sql, params = [])    { return this.prepare(sql).all(...params); }
+  async queryOne(sql, params = []) { return this.prepare(sql).get(...params); }
 
-  /** Convenience: execute single SELECT and return first row */
-  async queryOne(sql, params = []) {
-    return this.prepare(sql).get(...params);
-  }
-
-  /** Check whether a column exists in a table (Oracle data dictionary) */
   async columnExists(table, column) {
     const row = await this.queryOne(
       `SELECT COUNT(*) AS cnt FROM user_tab_columns
@@ -177,7 +190,6 @@ class OracleDatabaseWrapper {
     return (row?.cnt ?? 0) > 0;
   }
 
-  /** Check whether a table exists */
   async tableExists(table) {
     const row = await this.queryOne(
       `SELECT COUNT(*) AS cnt FROM user_tables WHERE UPPER(table_name)=UPPER(?)`,
@@ -197,9 +209,8 @@ async function initializeOracleDB() {
       oracledb.initOracleClient({ libDir: oracleHome });
       console.log('[Oracle] Thick mode, libDir:', oracleHome);
     } catch (e) {
-      if (!e.message?.includes('already been called')) {
+      if (!e.message?.includes('already been called'))
         console.warn('[Oracle] initOracleClient:', e.message);
-      }
     }
   }
 
@@ -217,28 +228,21 @@ async function initializeOracleDB() {
     poolTimeout:   60,
   });
 
-  console.log('[Oracle] Connection pool created →', connectString);
+  console.log('[Oracle] Pool created →', connectString);
   return new OracleDatabaseWrapper(pool);
 }
 
 // ─── Exports (same shape as database.js) ─────────────────────────────────────
 const oracleDbExports = {
   db: null,
-
   init: async () => {
     const wrapper = await initializeOracleDB();
     oracleDbExports.db = wrapper;
     return wrapper;
   },
-
   close: async () => {
-    if (pool) {
-      await pool.close(10);
-      pool = null;
-      oracleDbExports.db = null;
-    }
+    if (pool) { await pool.close(10); pool = null; oracleDbExports.db = null; }
   },
-
   getPool: () => pool,
 };
 

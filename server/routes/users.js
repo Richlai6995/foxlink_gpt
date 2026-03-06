@@ -10,10 +10,10 @@ const ORG_COLS = `u.dept_code, u.dept_name, u.profit_center, u.profit_center_nam
                   u.org_end_date, u.org_synced_at`;
 
 // GET /api/users
-router.get('/', (req, res) => {
+router.get('/', async (req, res) => {
   try {
-    const db = require('../database').db;
-    const users = db
+    const db = require('../database-oracle').db;
+    const users = await db
       .prepare(
         `SELECT u.id, u.username, u.name, u.employee_id, u.email, u.role, u.start_date, u.end_date, u.status,
                 u.allow_text_upload, u.text_max_mb, u.allow_audio_upload, u.audio_max_mb,
@@ -43,24 +43,24 @@ router.post('/', async (req, res) => {
     return res.status(400).json({ error: '帳號、密碼、姓名為必填' });
   }
   try {
-    const db = require('../database').db;
+    const db = require('../database-oracle').db;
 
     // Resolve role_id: explicit value > default role
     let resolvedRoleId = role_id || null;
     if (!resolvedRoleId) {
-      const defaultRole = db.prepare(`SELECT id FROM roles WHERE is_default=1 LIMIT 1`).get();
+      const defaultRole = await db.prepare(`SELECT id FROM roles WHERE is_default=1 LIMIT 1`).get();
       if (defaultRole) resolvedRoleId = defaultRole.id;
     }
 
     // Inherit permissions from role when admin hasn't explicitly set them
     const rolePerms = resolvedRoleId
-      ? db.prepare(`SELECT * FROM roles WHERE id=?`).get(resolvedRoleId)
+      ? await db.prepare(`SELECT * FROM roles WHERE id=?`).get(resolvedRoleId)
       : null;
     const resolveP = (explicit, roleVal, def) =>
       explicit !== undefined ? (explicit ? 1 : 0) : (roleVal ?? def);
 
     const parseBudget = (v) => (v != null && v !== '') ? Number(v) : null;
-    const result = db
+    const result = await db
       .prepare(
         `INSERT INTO users (username, password, name, employee_id, email, role, start_date, end_date, status,
                             allow_text_upload, text_max_mb, allow_audio_upload, audio_max_mb,
@@ -119,8 +119,8 @@ router.put('/:id', async (req, res) => {
     org_section, org_section_name, org_group_name, factory_code, org_end_date,
   } = req.body;
   try {
-    const db = require('../database').db;
-    const specificUser = db.prepare('SELECT username, employee_id FROM users WHERE id = ?').get(id);
+    const db = require('../database-oracle').db;
+    const specificUser = await db.prepare('SELECT username, employee_id FROM users WHERE id = ?').get(id);
     const adminAccount = (process.env.DEFAULT_ADMIN_ACCOUNT || 'admin').toUpperCase();
     if (specificUser?.username?.toUpperCase() === adminAccount && role !== 'admin') {
       return res.status(400).json({ error: '不能移除預設管理員的管理員角色' });
@@ -177,7 +177,7 @@ router.put('/:id', async (req, res) => {
       params = [name, employee_id || null, email || null, role, start_date || null, end_date || null, status,
         ...permParams, ...orgVals, id];
     }
-    const result = db.prepare(sql).run(...params);
+    const result = await db.prepare(sql).run(...params);
 
     // If employee_id changed (or newly set), auto-sync org from ERP
     const prevEmpId = specificUser?.employee_id;
@@ -196,16 +196,16 @@ router.put('/:id', async (req, res) => {
 });
 
 // DELETE /api/users/:id
-router.delete('/:id', (req, res) => {
+router.delete('/:id', async (req, res) => {
   const { id } = req.params;
   try {
-    const db = require('../database').db;
-    const user = db.prepare('SELECT username FROM users WHERE id = ?').get(id);
+    const db = require('../database-oracle').db;
+    const user = await db.prepare('SELECT username FROM users WHERE id = ?').get(id);
     const adminAccount = (process.env.DEFAULT_ADMIN_ACCOUNT || 'admin').toUpperCase();
     if (user?.username?.toUpperCase() === adminAccount) {
       return res.status(403).json({ error: '不能刪除預設管理員' });
     }
-    const result = db.prepare('DELETE FROM users WHERE id = ?').run(id);
+    const result = await db.prepare('DELETE FROM users WHERE id = ?').run(id);
     res.json({ changes: result.changes, success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });

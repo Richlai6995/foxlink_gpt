@@ -4,7 +4,7 @@ const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
-const { init } = require('./database');
+const { init } = require('./database-oracle');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -54,7 +54,7 @@ app.get('/api/health', (req, res) => res.json({ status: 'ok', timestamp: new Dat
 
     // Auto-restore code skill runners
     try {
-      const { db } = require('./database');
+      const { db } = require('./database-oracle');
       const { autoRestoreRunners } = require('./services/skillRunner');
       autoRestoreRunners(db);
     } catch (e) {
@@ -73,62 +73,61 @@ app.get('/api/health', (req, res) => res.json({ status: 'ok', timestamp: new Dat
 
     app.listen(PORT, () => {
       console.log(`FOXLINK GPT Server running on http://localhost:${PORT}`);
-
-      // Start cleanup scheduler if configured
-      try {
-        const { db } = require('./database');
-        const enabledRow = db.prepare(`SELECT value FROM system_settings WHERE key = 'cleanup_auto_enabled'`).get();
-        if (enabledRow?.value === '1') {
-          const hourRow = db.prepare(`SELECT value FROM system_settings WHERE key = 'cleanup_auto_hour'`).get();
-          const { startScheduler } = require('./services/cleanupService');
-          startScheduler(db, parseInt(hourRow?.value || '2'));
-        }
-      } catch (e) {
-        console.error('[Cleanup] Failed to start scheduler:', e.message);
-      }
-
-      // Start backup scheduler if configured
-      try {
-        const { db } = require('./database');
-        const rows = db.prepare(
-          `SELECT key, value FROM system_settings WHERE key IN ('backup_schedule_enabled','backup_schedule_type','backup_schedule_hour','backup_schedule_weekday')`
-        ).all();
-        const map = Object.fromEntries(rows.map((r) => [r.key, r.value]));
-        if (map.backup_schedule_enabled === '1') {
-          const { startBackupScheduler } = require('./services/backupService');
-          startBackupScheduler(
-            db,
-            map.backup_schedule_type || 'daily',
-            parseInt(map.backup_schedule_hour ?? '2'),
-            parseInt(map.backup_schedule_weekday ?? '1')
-          );
-        }
-      } catch (e) {
-        console.error('[Backup] Failed to start scheduler:', e.message);
-      }
-
-      // Start org sync scheduler if configured
-      try {
-        const { db } = require('./database');
-        const enabledRow = db.prepare(`SELECT value FROM system_settings WHERE key='org_sync_enabled'`).get();
-        if (enabledRow?.value === '1') {
-          const hourRow = db.prepare(`SELECT value FROM system_settings WHERE key='org_sync_hour'`).get();
-          const { startScheduler } = require('./services/orgSyncService');
-          startScheduler(db, parseInt(hourRow?.value ?? '2'));
-        }
-      } catch (e) {
-        console.error('[OrgSync] Failed to start scheduler:', e.message);
-      }
-
-      // Init scheduled tasks (load all active tasks from DB)
-      try {
-        const { db } = require('./database');
-        const { initScheduler } = require('./services/scheduledTaskService');
-        initScheduler(db);
-      } catch (e) {
-        console.error('[ScheduledTasks] Failed to init scheduler:', e.message);
-      }
     });
+
+    // Start post-listen async schedulers
+    const { db } = require('./database-oracle');
+
+    // Cleanup scheduler
+    try {
+      const enabledRow = await db.prepare(`SELECT value FROM system_settings WHERE key = 'cleanup_auto_enabled'`).get();
+      if (enabledRow?.value === '1') {
+        const hourRow = await db.prepare(`SELECT value FROM system_settings WHERE key = 'cleanup_auto_hour'`).get();
+        const { startScheduler } = require('./services/cleanupService');
+        startScheduler(db, parseInt(hourRow?.value || '2'));
+      }
+    } catch (e) {
+      console.error('[Cleanup] Failed to start scheduler:', e.message);
+    }
+
+    // Backup scheduler (Oracle mode: schedule-settings preserved, actual backup disabled)
+    try {
+      const rows = await db.prepare(
+        `SELECT key, value FROM system_settings WHERE key IN ('backup_schedule_enabled','backup_schedule_type','backup_schedule_hour','backup_schedule_weekday')`
+      ).all();
+      const map = Object.fromEntries(rows.map((r) => [r.key, r.value]));
+      if (map.backup_schedule_enabled === '1') {
+        const { startBackupScheduler } = require('./services/backupService');
+        startBackupScheduler(
+          db,
+          map.backup_schedule_type || 'daily',
+          parseInt(map.backup_schedule_hour ?? '2'),
+          parseInt(map.backup_schedule_weekday ?? '1')
+        );
+      }
+    } catch (e) {
+      console.error('[Backup] Failed to start scheduler:', e.message);
+    }
+
+    // Org sync scheduler
+    try {
+      const enabledRow = await db.prepare(`SELECT value FROM system_settings WHERE key='org_sync_enabled'`).get();
+      if (enabledRow?.value === '1') {
+        const hourRow = await db.prepare(`SELECT value FROM system_settings WHERE key='org_sync_hour'`).get();
+        const { startScheduler } = require('./services/orgSyncService');
+        startScheduler(db, parseInt(hourRow?.value ?? '2'));
+      }
+    } catch (e) {
+      console.error('[OrgSync] Failed to start scheduler:', e.message);
+    }
+
+    // Init scheduled tasks
+    try {
+      const { initScheduler } = require('./services/scheduledTaskService');
+      initScheduler(db);
+    } catch (e) {
+      console.error('[ScheduledTasks] Failed to init scheduler:', e.message);
+    }
   } catch (error) {
     console.error('Failed to initialize:', error);
     process.exit(1);

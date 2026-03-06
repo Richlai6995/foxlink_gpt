@@ -124,7 +124,7 @@ router.post('/login', async (req, res) => {
   }
 
   try {
-    const db = require('../database').db;
+    const db = require('../database-oracle').db;
     const isAdmin = username.toUpperCase() === (process.env.DEFAULT_ADMIN_ACCOUNT || 'admin').toUpperCase();
 
     // Try LDAP for non-admin
@@ -132,17 +132,17 @@ router.post('/login', async (req, res) => {
       try {
         const ldapUser = await authenticateLDAP(username, password);
         if (ldapUser) {
-          let dbUser = db.prepare('SELECT * FROM users WHERE username = ?').get(ldapUser.account);
+          let dbUser = await db.prepare('SELECT * FROM users WHERE username = ?').get(ldapUser.account);
           if (dbUser) {
             // Existing user (may have been manually created) — sync AD info and mark as LDAP managed
-            db.prepare(
+            await db.prepare(
               'UPDATE users SET name=?, email=?, employee_id=?, password=?, creation_method=? WHERE id=?'
             ).run(ldapUser.name, ldapUser.email, ldapUser.employeeId, password, 'ldap', dbUser.id);
 
             if (dbUser.status !== 'active') {
               return res.status(403).json({ error: '帳號已停用，請聯絡系統管理員' });
             }
-            dbUser = db.prepare('SELECT * FROM users WHERE id=?').get(dbUser.id);
+            dbUser = await db.prepare('SELECT * FROM users WHERE id=?').get(dbUser.id);
             // Auto-sync org if employee_id available
             if (ldapUser.employeeId) {
               try {
@@ -150,11 +150,11 @@ router.post('/login', async (req, res) => {
                 syncOrgToUsers(db, [String(ldapUser.employeeId)]).catch(() => { });
               } catch (e) { /* ERP not configured */ }
             }
-            return createSession(res, dbUser);
+            return await createSession(res, dbUser);
           } else {
             // First LDAP login — auto-activate with default role permissions
-            const defaultRole = db.prepare(`SELECT * FROM roles WHERE is_default=1 LIMIT 1`).get();
-            const result = db.prepare(
+            const defaultRole = await db.prepare(`SELECT * FROM roles WHERE is_default=1 LIMIT 1`).get();
+            const result = await db.prepare(
               `INSERT INTO users (username, name, email, role, status, password, employee_id, creation_method,
                 role_id, allow_text_upload, text_max_mb, allow_audio_upload, audio_max_mb,
                 allow_image_upload, image_max_mb, allow_scheduled_tasks)
@@ -170,7 +170,7 @@ router.post('/login', async (req, res) => {
               defaultRole?.image_max_mb ?? 10,
               defaultRole?.allow_scheduled_tasks ?? 0
             );
-            const newUser = db.prepare('SELECT * FROM users WHERE id=?').get(result.lastInsertRowid);
+            const newUser = await db.prepare('SELECT * FROM users WHERE id=?').get(result.lastInsertRowid);
             // Auto-sync org after first LDAP login
             if (ldapUser.employeeId) {
               try {
@@ -178,7 +178,7 @@ router.post('/login', async (req, res) => {
                 syncOrgToUsers(db, [String(ldapUser.employeeId)]).catch(() => { });
               } catch (e) { /* ERP not configured */ }
             }
-            return createSession(res, newUser);
+            return await createSession(res, newUser);
           }
         }
       } catch (ldapErr) {
@@ -187,7 +187,7 @@ router.post('/login', async (req, res) => {
     }
 
     // Local DB fallback (case-insensitive username)
-    const user = db.prepare('SELECT * FROM users WHERE UPPER(username) = UPPER(?) AND password = ?').get(username, password);
+    const user = await db.prepare('SELECT * FROM users WHERE UPPER(username) = UPPER(?) AND password = ?').get(username, password);
     if (!user) {
       return res.status(401).json({ error: '帳號或密碼錯誤' });
     }
@@ -201,15 +201,15 @@ router.post('/login', async (req, res) => {
     if (user.end_date && new Date(user.end_date) < now) {
       return res.status(403).json({ error: '帳號已過期' });
     }
-    return createSession(res, user);
+    return await createSession(res, user);
   } catch (error) {
     console.error('Login error:', error);
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
 
-const createSession = (res, user) => {
-  const db = require('../database').db;
+const createSession = async (res, user) => {
+  const db = require('../database-oracle').db;
   const token = uuidv4();
   sessions.set(token, {
     id: user.id,
@@ -223,7 +223,7 @@ const createSession = (res, user) => {
   // Resolve effective skill permissions (user setting overrides role default)
   let rolePerms = null;
   if (user.role_id) {
-    rolePerms = db.prepare('SELECT allow_create_skill, allow_external_skill, allow_code_skill FROM roles WHERE id=?').get(user.role_id);
+    rolePerms = await db.prepare('SELECT allow_create_skill, allow_external_skill, allow_code_skill FROM roles WHERE id=?').get(user.role_id);
   }
   const resolveEffective = (userVal, roleVal) => {
     if (userVal !== null && userVal !== undefined) return userVal === 1;
@@ -241,8 +241,8 @@ router.post('/forgot-password', async (req, res) => {
   const { username } = req.body;
   if (!username) return res.status(400).json({ error: '請輸入帳號' });
   try {
-    const db = require('../database').db;
-    const user = db.prepare(
+    const db = require('../database-oracle').db;
+    const user = await db.prepare(
       `SELECT * FROM users WHERE UPPER(username)=UPPER(?) AND (creation_method IS NULL OR creation_method='manual')`
     ).get(username);
 
@@ -252,11 +252,11 @@ router.post('/forgot-password', async (req, res) => {
     }
 
     // Invalidate old tokens for this user
-    db.prepare(`DELETE FROM password_reset_tokens WHERE user_id=?`).run(user.id);
+    await db.prepare(`DELETE FROM password_reset_tokens WHERE user_id=?`).run(user.id);
 
     const token = uuidv4();
     const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString(); // 1hr
-    db.prepare(
+    await db.prepare(
       `INSERT INTO password_reset_tokens (user_id, token, expires_at) VALUES (?,?,?)`
     ).run(user.id, token, expiresAt);
 
@@ -291,13 +291,13 @@ router.post('/forgot-password', async (req, res) => {
 });
 
 // POST /api/auth/reset-password  (token from email)
-router.post('/reset-password', (req, res) => {
+router.post('/reset-password', async (req, res) => {
   const { token, password } = req.body;
   if (!token || !password) return res.status(400).json({ error: '參數不完整' });
   if (password.length < 6) return res.status(400).json({ error: '密碼至少 6 個字元' });
   try {
-    const db = require('../database').db;
-    const record = db.prepare(
+    const db = require('../database-oracle').db;
+    const record = await db.prepare(
       `SELECT * FROM password_reset_tokens WHERE token=? AND used=0`
     ).get(token);
 
@@ -306,8 +306,8 @@ router.post('/reset-password', (req, res) => {
       return res.status(400).json({ error: '重置連結已過期，請重新申請' });
     }
 
-    db.prepare(`UPDATE users SET password=? WHERE id=?`).run(password, record.user_id);
-    db.prepare(`UPDATE password_reset_tokens SET used=1 WHERE id=?`).run(record.id);
+    await db.prepare(`UPDATE users SET password=? WHERE id=?`).run(password, record.user_id);
+    await db.prepare(`UPDATE password_reset_tokens SET used=1 WHERE id=?`).run(record.id);
 
     res.json({ message: '密碼已成功重置，請重新登入' });
   } catch (e) {
@@ -316,7 +316,7 @@ router.post('/reset-password', (req, res) => {
 });
 
 // POST /api/auth/change-password  (authenticated, manual accounts only)
-router.post('/change-password', (req, res) => {
+router.post('/change-password', async (req, res) => {
   const token = req.headers.authorization?.split(' ')[1];
   if (!token || !sessions.has(token)) return res.status(401).json({ error: 'Unauthorized' });
   const session = sessions.get(token);
@@ -326,8 +326,8 @@ router.post('/change-password', (req, res) => {
   if (new_password.length < 6) return res.status(400).json({ error: '新密碼至少 6 個字元' });
 
   try {
-    const db = require('../database').db;
-    const user = db.prepare(`SELECT * FROM users WHERE id=?`).get(session.id);
+    const db = require('../database-oracle').db;
+    const user = await db.prepare(`SELECT * FROM users WHERE id=?`).get(session.id);
     if (!user) return res.status(404).json({ error: '使用者不存在' });
     if (user.creation_method === 'ldap') {
       return res.status(403).json({ error: '本系統無法進行AD密碼變更，請由AD管理介面進行密碼變更' });
@@ -335,7 +335,7 @@ router.post('/change-password', (req, res) => {
     if (user.password !== old_password) {
       return res.status(400).json({ error: '舊密碼錯誤' });
     }
-    db.prepare(`UPDATE users SET password=? WHERE id=?`).run(new_password, user.id);
+    await db.prepare(`UPDATE users SET password=? WHERE id=?`).run(new_password, user.id);
     res.json({ message: '密碼已成功更新' });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -350,18 +350,18 @@ router.post('/logout', (req, res) => {
 });
 
 // GET /api/auth/me  — refresh current user profile
-router.get('/me', (req, res) => {
+router.get('/me', async (req, res) => {
   const token = req.headers.authorization?.split(' ')[1];
   if (!token || !sessions.has(token)) return res.status(401).json({ error: 'Unauthorized' });
   try {
-    const db = require('../database').db;
+    const db = require('../database-oracle').db;
     const session = sessions.get(token);
-    const user = db.prepare('SELECT * FROM users WHERE id=?').get(session.id);
+    const user = await db.prepare('SELECT * FROM users WHERE id=?').get(session.id);
     if (!user) return res.status(404).json({ error: '使用者不存在' });
     const { password: _, ...userWithoutPassword } = user;
     let rolePerms = null;
     if (user.role_id) {
-      rolePerms = db.prepare('SELECT allow_create_skill, allow_external_skill, allow_code_skill FROM roles WHERE id=?').get(user.role_id);
+      rolePerms = await db.prepare('SELECT allow_create_skill, allow_external_skill, allow_code_skill FROM roles WHERE id=?').get(user.role_id);
     }
     const resolveEff = (uv, rv) => {
       if (uv !== null && uv !== undefined) return uv === 1;

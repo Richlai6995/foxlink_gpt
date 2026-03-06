@@ -6,7 +6,7 @@ const { verifyToken } = require('./auth');
 
 router.use(verifyToken);
 
-function getDb() { return require('../database').db; }
+function getDb() { return require('../database-oracle').db; }
 
 function requireAdmin(req, res) {
   if (req.user.role !== 'admin') {
@@ -25,11 +25,11 @@ function twTimestamp(d = twNow()) {
 }
 
 // GET /api/dify-kb  — list all (admin only)
-router.get('/', (req, res) => {
+router.get('/', async (req, res) => {
   if (!requireAdmin(req, res)) return;
   const db = getDb();
   try {
-    const kbs = db.prepare(`SELECT * FROM dify_knowledge_bases ORDER BY sort_order ASC, created_at DESC`).all();
+    const kbs = await db.prepare(`SELECT * FROM dify_knowledge_bases ORDER BY sort_order ASC, created_at DESC`).all();
     // Mask api_key in response (show only last 8 chars)
     const masked = kbs.map(kb => ({
       ...kb,
@@ -42,10 +42,10 @@ router.get('/', (req, res) => {
 });
 
 // GET /api/dify-kb/active  — used by chat route (no admin check, only token required)
-router.get('/active', (req, res) => {
+router.get('/active', async (req, res) => {
   const db = getDb();
   try {
-    const kbs = db.prepare(
+    const kbs = await db.prepare(
       `SELECT id, name, api_server, api_key, description FROM dify_knowledge_bases WHERE is_active=1 ORDER BY sort_order ASC`
     ).all();
     res.json(kbs);
@@ -55,7 +55,7 @@ router.get('/active', (req, res) => {
 });
 
 // POST /api/dify-kb
-router.post('/', (req, res) => {
+router.post('/', async (req, res) => {
   if (!requireAdmin(req, res)) return;
   const db = getDb();
   try {
@@ -63,12 +63,12 @@ router.post('/', (req, res) => {
     if (!name || !api_server || !api_key) {
       return res.status(400).json({ error: '名稱、API Server 和 API Key 為必填' });
     }
-    const result = db.prepare(
+    const result = await db.prepare(
       `INSERT INTO dify_knowledge_bases (name, api_server, api_key, description, is_active, sort_order)
        VALUES (?, ?, ?, ?, ?, ?)`
     ).run(name, api_server.replace(/\/$/, ''), api_key, description || null, is_active !== false ? 1 : 0, sort_order || 0);
 
-    const kb = db.prepare(`SELECT * FROM dify_knowledge_bases WHERE id=?`).get(result.lastInsertRowid);
+    const kb = await db.prepare(`SELECT * FROM dify_knowledge_bases WHERE id=?`).get(result.lastInsertRowid);
     res.json({ ...kb, api_key_masked: '***' + kb.api_key.slice(-8) });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -76,15 +76,15 @@ router.post('/', (req, res) => {
 });
 
 // PUT /api/dify-kb/:id
-router.put('/:id', (req, res) => {
+router.put('/:id', async (req, res) => {
   if (!requireAdmin(req, res)) return;
   const db = getDb();
   try {
-    const kb = db.prepare(`SELECT * FROM dify_knowledge_bases WHERE id=?`).get(req.params.id);
+    const kb = await db.prepare(`SELECT * FROM dify_knowledge_bases WHERE id=?`).get(req.params.id);
     if (!kb) return res.status(404).json({ error: '找不到 DIFY 知識庫設定' });
 
     const { name, api_server, api_key, description, is_active, sort_order } = req.body;
-    db.prepare(
+    await db.prepare(
       `UPDATE dify_knowledge_bases SET name=?, api_server=?, api_key=?, description=?, is_active=?, sort_order=?, updated_at=? WHERE id=?`
     ).run(
       name ?? kb.name,
@@ -97,7 +97,7 @@ router.put('/:id', (req, res) => {
       req.params.id
     );
 
-    const updated = db.prepare(`SELECT * FROM dify_knowledge_bases WHERE id=?`).get(req.params.id);
+    const updated = await db.prepare(`SELECT * FROM dify_knowledge_bases WHERE id=?`).get(req.params.id);
     res.json({ ...updated, api_key_masked: '***' + updated.api_key.slice(-8) });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -105,13 +105,13 @@ router.put('/:id', (req, res) => {
 });
 
 // DELETE /api/dify-kb/:id
-router.delete('/:id', (req, res) => {
+router.delete('/:id', async (req, res) => {
   if (!requireAdmin(req, res)) return;
   const db = getDb();
   try {
-    const kb = db.prepare(`SELECT id FROM dify_knowledge_bases WHERE id=?`).get(req.params.id);
+    const kb = await db.prepare(`SELECT id FROM dify_knowledge_bases WHERE id=?`).get(req.params.id);
     if (!kb) return res.status(404).json({ error: '找不到 DIFY 知識庫設定' });
-    db.prepare(`DELETE FROM dify_knowledge_bases WHERE id=?`).run(req.params.id);
+    await db.prepare(`DELETE FROM dify_knowledge_bases WHERE id=?`).run(req.params.id);
     res.json({ success: true });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -119,14 +119,14 @@ router.delete('/:id', (req, res) => {
 });
 
 // POST /api/dify-kb/:id/toggle
-router.post('/:id/toggle', (req, res) => {
+router.post('/:id/toggle', async (req, res) => {
   if (!requireAdmin(req, res)) return;
   const db = getDb();
   try {
-    const kb = db.prepare(`SELECT * FROM dify_knowledge_bases WHERE id=?`).get(req.params.id);
+    const kb = await db.prepare(`SELECT * FROM dify_knowledge_bases WHERE id=?`).get(req.params.id);
     if (!kb) return res.status(404).json({ error: '找不到 DIFY 知識庫設定' });
     const newActive = kb.is_active ? 0 : 1;
-    db.prepare(`UPDATE dify_knowledge_bases SET is_active=?, updated_at=? WHERE id=?`)
+    await db.prepare(`UPDATE dify_knowledge_bases SET is_active=?, updated_at=? WHERE id=?`)
       .run(newActive, twTimestamp(), req.params.id);
     res.json({ is_active: newActive });
   } catch (e) {
@@ -139,7 +139,7 @@ router.post('/:id/test', async (req, res) => {
   if (!requireAdmin(req, res)) return;
   const db = getDb();
   try {
-    const kb = db.prepare(`SELECT * FROM dify_knowledge_bases WHERE id=?`).get(req.params.id);
+    const kb = await db.prepare(`SELECT * FROM dify_knowledge_bases WHERE id=?`).get(req.params.id);
     if (!kb) return res.status(404).json({ error: '找不到 DIFY 知識庫設定' });
 
     const query = req.body.query || '你好，請說明你能回答哪些問題？';
@@ -181,15 +181,15 @@ router.post('/:id/test', async (req, res) => {
 });
 
 // GET /api/dify-kb/:id/logs
-router.get('/:id/logs', (req, res) => {
+router.get('/:id/logs', async (req, res) => {
   if (!requireAdmin(req, res)) return;
   const db = getDb();
   try {
-    const kb = db.prepare(`SELECT id FROM dify_knowledge_bases WHERE id=?`).get(req.params.id);
+    const kb = await db.prepare(`SELECT id FROM dify_knowledge_bases WHERE id=?`).get(req.params.id);
     if (!kb) return res.status(404).json({ error: '找不到 DIFY 知識庫設定' });
 
     const limit = Math.min(parseInt(req.query.limit || '50'), 200);
-    const logs = db.prepare(
+    const logs = await db.prepare(
       `SELECT l.*, u.name as user_name FROM dify_call_logs l
        LEFT JOIN users u ON u.id = l.user_id
        WHERE l.kb_id=? ORDER BY l.called_at DESC LIMIT ?`

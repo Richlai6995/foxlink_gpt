@@ -4,6 +4,7 @@ const path = require('path');
 const fs = require('fs');
 const { v4: uuidv4 } = require('uuid');
 const { verifyToken } = require('./auth');
+const db = require('../database-oracle').db;
 
 const UPLOAD_DIR = process.env.UPLOAD_DIR
   ? path.resolve(process.env.UPLOAD_DIR)
@@ -109,10 +110,9 @@ function buildSnapshotMessages(rawMessages, sharedDir, token) {
 }
 
 // ── GET /api/share  — list my shared sessions ─────────────────────────────
-router.get('/', (req, res) => {
+router.get('/', async (req, res) => {
   try {
-    const db = require('../database').db;
-    const rows = db.prepare(
+    const rows = await db.prepare(
       `SELECT id, session_id, title, model, created_at FROM share_snapshots
        WHERE created_by=? ORDER BY created_at DESC`
     ).all(req.user.id);
@@ -125,16 +125,15 @@ router.get('/', (req, res) => {
 // ── POST /api/share  — create share snapshot ──────────────────────────────
 router.post('/', async (req, res) => {
   try {
-    const db = require('../database').db;
     const { sessionId } = req.body;
     if (!sessionId) return res.status(400).json({ error: 'sessionId 為必填' });
 
-    const session = db.prepare(
+    const session = await db.prepare(
       `SELECT * FROM chat_sessions WHERE id=? AND user_id=?`
     ).get(sessionId, req.user.id);
     if (!session) return res.status(404).json({ error: '找不到對話' });
 
-    const rawMessages = db.prepare(
+    const rawMessages = await db.prepare(
       `SELECT id, role, content, files_json, created_at FROM chat_messages
        WHERE session_id=? ORDER BY created_at ASC`
     ).all(sessionId);
@@ -145,7 +144,7 @@ router.post('/', async (req, res) => {
 
     const snapshotMessages = buildSnapshotMessages(rawMessages, sharedDir, token);
 
-    db.prepare(
+    await db.prepare(
       `INSERT INTO share_snapshots (id, created_by, session_id, title, model, messages_json)
        VALUES (?, ?, ?, ?, ?, ?)`
     ).run(token, req.user.id, sessionId, session.title || '未命名對話', session.model, JSON.stringify(snapshotMessages));
@@ -157,10 +156,9 @@ router.post('/', async (req, res) => {
 });
 
 // ── GET /api/share/:token  — view share ───────────────────────────────────
-router.get('/:token', (req, res) => {
+router.get('/:token', async (req, res) => {
   try {
-    const db = require('../database').db;
-    const snap = db.prepare(
+    const snap = await db.prepare(
       `SELECT s.id, s.title, s.model, s.created_at, s.messages_json,
               u.name AS creator_name, u.username AS creator_username
        FROM share_snapshots s JOIN users u ON u.id = s.created_by
@@ -215,8 +213,7 @@ router.get('/:token', (req, res) => {
 // ── POST /api/share/:token/fork  — fork into new session ─────────────────
 router.post('/:token/fork', async (req, res) => {
   try {
-    const db = require('../database').db;
-    const snap = db.prepare(
+    const snap = await db.prepare(
       `SELECT id, title, model, messages_json, created_by FROM share_snapshots WHERE id=?`
     ).get(req.params.token);
     if (!snap) return res.status(404).json({ error: '找不到分享' });
@@ -232,7 +229,7 @@ router.post('/:token/fork', async (req, res) => {
 
     // Create new session
     const newSessionId = uuidv4();
-    db.prepare(
+    await db.prepare(
       `INSERT INTO chat_sessions (id, user_id, title, model) VALUES (?, ?, ?, ?)`
     ).run(newSessionId, req.user.id, `[Fork] ${snap.title || '分享對話'}`, snap.model || 'pro');
 
@@ -300,7 +297,7 @@ router.post('/:token/fork', async (req, res) => {
         }
       }
 
-      db.prepare(
+      await db.prepare(
         `INSERT INTO chat_messages (session_id, role, content, files_json, created_at)
          VALUES (?, ?, ?, ?, ?)`
       ).run(newSessionId, m.role, m.content || '', newFilesJson, m.created_at || new Date().toISOString());
@@ -313,10 +310,9 @@ router.post('/:token/fork', async (req, res) => {
 });
 
 // ── DELETE /api/share/:token  — delete share (owner only) ─────────────────
-router.delete('/:token', (req, res) => {
+router.delete('/:token', async (req, res) => {
   try {
-    const db = require('../database').db;
-    const snap = db.prepare(
+    const snap = await db.prepare(
       `SELECT id, created_by FROM share_snapshots WHERE id=?`
     ).get(req.params.token);
     if (!snap) return res.status(404).json({ error: '找不到分享' });
@@ -324,7 +320,7 @@ router.delete('/:token', (req, res) => {
       return res.status(403).json({ error: '無刪除權限' });
     }
     rmDirSafe(path.join(UPLOAD_DIR, 'shared', snap.id));
-    db.prepare(`DELETE FROM share_snapshots WHERE id=?`).run(snap.id);
+    await db.prepare(`DELETE FROM share_snapshots WHERE id=?`).run(snap.id);
     res.json({ success: true });
   } catch (e) {
     res.status(500).json({ error: e.message });

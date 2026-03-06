@@ -7,17 +7,17 @@ const { scheduleTask, unscheduleTask, runTask, enqueue } = require('../services/
 
 router.use(verifyToken);
 
-function getDb() { return require('../database').db; }
+function getDb() { return require('../database-oracle').db; }
 
 // Guard: check user permission (or admin)
-function checkPermission(req, res) {
+async function checkPermission(req, res) {
   const db = getDb();
-  const user = db.prepare('SELECT role, allow_scheduled_tasks FROM users WHERE id=?').get(req.user.id);
+  const user = await db.prepare('SELECT role, allow_scheduled_tasks FROM users WHERE id=?').get(req.user.id);
   if (!user) { res.status(403).json({ error: '使用者不存在' }); return false; }
   if (user.role === 'admin') return true;
 
   // Global feature toggle
-  const globalEnabled = db.prepare(`SELECT value FROM system_settings WHERE key='scheduled_tasks_enabled'`).get();
+  const globalEnabled = await db.prepare(`SELECT value FROM system_settings WHERE key='scheduled_tasks_enabled'`).get();
   if (globalEnabled?.value !== '1') { res.status(403).json({ error: '排程功能未開放' }); return false; }
   // Per-user toggle
   if (!user.allow_scheduled_tasks) { res.status(403).json({ error: '您的帳號未開放排程功能，請聯絡管理員' }); return false; }
@@ -25,15 +25,15 @@ function checkPermission(req, res) {
 }
 
 // ── GET /api/scheduled-tasks ──────────────────────────────────────────────────
-router.get('/', (req, res) => {
-  if (!checkPermission(req, res)) return;
+router.get('/', async (req, res) => {
+  if (!await checkPermission(req, res)) return;
   const db = getDb();
   try {
     const isAdmin = req.user.role === 'admin';
     const tasks = isAdmin
-      ? db.prepare(`SELECT t.*, u.name as user_name, u.username FROM scheduled_tasks t
+      ? await db.prepare(`SELECT t.*, u.name as user_name, u.username FROM scheduled_tasks t
                     LEFT JOIN users u ON u.id=t.user_id ORDER BY t.updated_at DESC`).all()
-      : db.prepare(`SELECT * FROM scheduled_tasks WHERE user_id=? ORDER BY updated_at DESC`).all(req.user.id);
+      : await db.prepare(`SELECT * FROM scheduled_tasks WHERE user_id=? ORDER BY updated_at DESC`).all(req.user.id);
     res.json(tasks);
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -41,15 +41,15 @@ router.get('/', (req, res) => {
 });
 
 // ── POST /api/scheduled-tasks ─────────────────────────────────────────────────
-router.post('/', (req, res) => {
-  if (!checkPermission(req, res)) return;
+router.post('/', async (req, res) => {
+  if (!await checkPermission(req, res)) return;
   const db = getDb();
   try {
     // Per-user limit check
-    const limitRow = db.prepare(`SELECT value FROM system_settings WHERE key='scheduled_tasks_max_per_user'`).get();
+    const limitRow = await db.prepare(`SELECT value FROM system_settings WHERE key='scheduled_tasks_max_per_user'`).get();
     const limit = parseInt(limitRow?.value || '10');
-    const count = db.prepare('SELECT COUNT(*) as n FROM scheduled_tasks WHERE user_id=?').get(req.user.id).n;
-    if (count >= limit) return res.status(400).json({ error: `每人最多 ${limit} 個排程任務` });
+    const countRow = await db.prepare('SELECT COUNT(*) as n FROM scheduled_tasks WHERE user_id=?').get(req.user.id);
+    if (countRow.n >= limit) return res.status(400).json({ error: `每人最多 ${limit} 個排程任務` });
 
     const {
       name, schedule_type, schedule_hour, schedule_minute,
@@ -61,7 +61,7 @@ router.post('/', (req, res) => {
 
     if (!name || !prompt) return res.status(400).json({ error: '名稱和 Prompt 為必填' });
 
-    const result = db.prepare(
+    const result = await db.prepare(
       `INSERT INTO scheduled_tasks
         (user_id, name, schedule_type, schedule_hour, schedule_minute, schedule_weekday, schedule_monthday,
          model, prompt, output_type, file_type, filename_template,
@@ -81,7 +81,7 @@ router.post('/', (req, res) => {
       max_runs ?? 0,
     );
 
-    const task = db.prepare('SELECT * FROM scheduled_tasks WHERE id=?').get(result.lastInsertRowid);
+    const task = await db.prepare('SELECT * FROM scheduled_tasks WHERE id=?').get(result.lastInsertRowid);
     if (task.status === 'active') scheduleTask(db, task);
     res.json(task);
   } catch (e) {
@@ -90,11 +90,11 @@ router.post('/', (req, res) => {
 });
 
 // ── PUT /api/scheduled-tasks/:id ──────────────────────────────────────────────
-router.put('/:id', (req, res) => {
-  if (!checkPermission(req, res)) return;
+router.put('/:id', async (req, res) => {
+  if (!await checkPermission(req, res)) return;
   const db = getDb();
   try {
-    const task = db.prepare('SELECT * FROM scheduled_tasks WHERE id=?').get(req.params.id);
+    const task = await db.prepare('SELECT * FROM scheduled_tasks WHERE id=?').get(req.params.id);
     if (!task) return res.status(404).json({ error: '找不到任務' });
     if (task.user_id !== req.user.id && req.user.role !== 'admin')
       return res.status(403).json({ error: '無權限' });
@@ -107,7 +107,7 @@ router.put('/:id', (req, res) => {
       status, expire_at, max_runs,
     } = req.body;
 
-    db.prepare(
+    await db.prepare(
       `UPDATE scheduled_tasks SET
         name=?, schedule_type=?, schedule_hour=?, schedule_minute=?,
         schedule_weekday=?, schedule_monthday=?,
@@ -130,7 +130,7 @@ router.put('/:id', (req, res) => {
       req.params.id,
     );
 
-    const updated = db.prepare('SELECT * FROM scheduled_tasks WHERE id=?').get(req.params.id);
+    const updated = await db.prepare('SELECT * FROM scheduled_tasks WHERE id=?').get(req.params.id);
     // Re-schedule
     unscheduleTask(parseInt(req.params.id));
     if (updated.status === 'active') scheduleTask(db, updated);
@@ -141,17 +141,17 @@ router.put('/:id', (req, res) => {
 });
 
 // ── DELETE /api/scheduled-tasks/:id ──────────────────────────────────────────
-router.delete('/:id', (req, res) => {
-  if (!checkPermission(req, res)) return;
+router.delete('/:id', async (req, res) => {
+  if (!await checkPermission(req, res)) return;
   const db = getDb();
   try {
-    const task = db.prepare('SELECT * FROM scheduled_tasks WHERE id=?').get(req.params.id);
+    const task = await db.prepare('SELECT * FROM scheduled_tasks WHERE id=?').get(req.params.id);
     if (!task) return res.status(404).json({ error: '找不到任務' });
     if (task.user_id !== req.user.id && req.user.role !== 'admin')
       return res.status(403).json({ error: '無權限' });
 
     unscheduleTask(parseInt(req.params.id));
-    db.prepare('DELETE FROM scheduled_tasks WHERE id=?').run(req.params.id);
+    await db.prepare('DELETE FROM scheduled_tasks WHERE id=?').run(req.params.id);
     res.json({ success: true });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -159,20 +159,20 @@ router.delete('/:id', (req, res) => {
 });
 
 // ── POST /api/scheduled-tasks/:id/toggle ─────────────────────────────────────
-router.post('/:id/toggle', (req, res) => {
-  if (!checkPermission(req, res)) return;
+router.post('/:id/toggle', async (req, res) => {
+  if (!await checkPermission(req, res)) return;
   const db = getDb();
   try {
-    const task = db.prepare('SELECT * FROM scheduled_tasks WHERE id=?').get(req.params.id);
+    const task = await db.prepare('SELECT * FROM scheduled_tasks WHERE id=?').get(req.params.id);
     if (!task) return res.status(404).json({ error: '找不到任務' });
     if (task.user_id !== req.user.id && req.user.role !== 'admin')
       return res.status(403).json({ error: '無權限' });
 
     const newStatus = task.status === 'active' ? 'paused' : 'active';
-    db.prepare(`UPDATE scheduled_tasks SET status=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`)
+    await db.prepare(`UPDATE scheduled_tasks SET status=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`)
       .run(newStatus, req.params.id);
 
-    const updated = db.prepare('SELECT * FROM scheduled_tasks WHERE id=?').get(req.params.id);
+    const updated = await db.prepare('SELECT * FROM scheduled_tasks WHERE id=?').get(req.params.id);
     unscheduleTask(parseInt(req.params.id));
     if (newStatus === 'active') scheduleTask(db, updated);
     res.json({ status: newStatus });
@@ -182,11 +182,11 @@ router.post('/:id/toggle', (req, res) => {
 });
 
 // ── POST /api/scheduled-tasks/:id/run-now ────────────────────────────────────
-router.post('/:id/run-now', (req, res) => {
-  if (!checkPermission(req, res)) return;
+router.post('/:id/run-now', async (req, res) => {
+  if (!await checkPermission(req, res)) return;
   const db = getDb();
   try {
-    const task = db.prepare('SELECT * FROM scheduled_tasks WHERE id=?').get(req.params.id);
+    const task = await db.prepare('SELECT * FROM scheduled_tasks WHERE id=?').get(req.params.id);
     if (!task) return res.status(404).json({ error: '找不到任務' });
     if (task.user_id !== req.user.id && req.user.role !== 'admin')
       return res.status(403).json({ error: '無權限' });
@@ -206,17 +206,17 @@ router.post('/:id/run-now', (req, res) => {
 });
 
 // ── GET /api/scheduled-tasks/:id/history ─────────────────────────────────────
-router.get('/:id/history', (req, res) => {
-  if (!checkPermission(req, res)) return;
+router.get('/:id/history', async (req, res) => {
+  if (!await checkPermission(req, res)) return;
   const db = getDb();
   try {
-    const task = db.prepare('SELECT * FROM scheduled_tasks WHERE id=?').get(req.params.id);
+    const task = await db.prepare('SELECT * FROM scheduled_tasks WHERE id=?').get(req.params.id);
     if (!task) return res.status(404).json({ error: '找不到任務' });
     if (task.user_id !== req.user.id && req.user.role !== 'admin')
       return res.status(403).json({ error: '無權限' });
 
     const limit = parseInt(req.query.limit || '30');
-    const runs = db.prepare(
+    const runs = await db.prepare(
       `SELECT * FROM scheduled_task_runs WHERE task_id=? ORDER BY run_at DESC LIMIT ?`
     ).all(req.params.id, limit);
     res.json(runs);
