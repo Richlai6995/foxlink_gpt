@@ -235,12 +235,35 @@ async function initializeOracleDB() {
   return new OracleDatabaseWrapper(pool);
 }
 
+// ─── Ensure default admin user exists ────────────────────────────────────────
+async function ensureDefaultAdmin(db) {
+  const account  = (process.env.DEFAULT_ADMIN_ACCOUNT  || 'admin').toUpperCase();
+  const password = process.env.DEFAULT_ADMIN_PASSWORD  || '123456';
+  try {
+    const existing = await db.prepare('SELECT id FROM users WHERE UPPER(username)=?').get(account);
+    if (!existing) {
+      await db.prepare(
+        `INSERT INTO users (username, password, name, role, status, creation_method)
+         VALUES (?,?,?,'admin','active','manual')`
+      ).run(account, password, account);
+      console.log(`[Oracle] Default admin '${account}' created`);
+    } else {
+      // Reset password to env value on every startup so it's always recoverable
+      await db.prepare(`UPDATE users SET password=?, role='admin', status='active' WHERE UPPER(username)=?`)
+        .run(password, account);
+    }
+  } catch (e) {
+    console.error('[Oracle] ensureDefaultAdmin error:', e.message);
+  }
+}
+
 // ─── Exports (same shape as database.js) ─────────────────────────────────────
 const oracleDbExports = {
   db: null,
   init: async () => {
     const wrapper = await initializeOracleDB();
     oracleDbExports.db = wrapper;
+    await ensureDefaultAdmin(wrapper);
     return wrapper;
   },
   close: async () => {

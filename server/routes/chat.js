@@ -286,8 +286,9 @@ router.get('/budget', async (req, res) => {
       return total > 0 ? total : images * 0.04;
     };
 
+    const D = `TO_DATE(?, 'YYYY-MM-DD')`;
     const spentD = await getSpent(
-      `SELECT COALESCE(SUM(cost),0) AS total, COALESCE(SUM(image_count),0) AS images FROM token_usage WHERE user_id=? AND usage_date=?`,
+      `SELECT COALESCE(SUM(cost),0) AS total, COALESCE(SUM(image_count),0) AS images FROM token_usage WHERE user_id=? AND usage_date=${D}`,
       req.user.id, todayStr
     );
 
@@ -296,13 +297,13 @@ router.get('/budget', async (req, res) => {
     monday.setDate(now.getDate() + (dow === 0 ? -6 : 1 - dow));
     const mondayStr = monday.toISOString().slice(0, 10);
     const spentW = await getSpent(
-      `SELECT COALESCE(SUM(cost),0) AS total, COALESCE(SUM(image_count),0) AS images FROM token_usage WHERE user_id=? AND usage_date>=? AND usage_date<=?`,
+      `SELECT COALESCE(SUM(cost),0) AS total, COALESCE(SUM(image_count),0) AS images FROM token_usage WHERE user_id=? AND usage_date>=${D} AND usage_date<=${D}`,
       req.user.id, mondayStr, todayStr
     );
 
     const firstOfMonth = `${todayStr.slice(0, 7)}-01`;
     const spentM = await getSpent(
-      `SELECT COALESCE(SUM(cost),0) AS total, COALESCE(SUM(image_count),0) AS images FROM token_usage WHERE user_id=? AND usage_date>=? AND usage_date<=?`,
+      `SELECT COALESCE(SUM(cost),0) AS total, COALESCE(SUM(image_count),0) AS images FROM token_usage WHERE user_id=? AND usage_date>=${D} AND usage_date<=${D}`,
       req.user.id, firstOfMonth, todayStr
     );
 
@@ -1390,8 +1391,9 @@ async function calcCallCost(db, model, date, inputTokens, outputTokens, imageCou
 async function upsertTokenUsage(db, userId, date, model, inputTokens, outputTokens, imageCount = 0) {
   try {
     const { cost, currency } = await calcCallCost(db, model, date, inputTokens, outputTokens, imageCount);
+    const D = `TO_DATE(?, 'YYYY-MM-DD')`;
     const existing = await db
-      .prepare(`SELECT id FROM token_usage WHERE user_id=? AND usage_date=? AND model=?`)
+      .prepare(`SELECT id FROM token_usage WHERE user_id=? AND usage_date=${D} AND model=?`)
       .get(userId, date, model);
     if (existing) {
       await db.prepare(
@@ -1400,12 +1402,12 @@ async function upsertTokenUsage(db, userId, date, model, inputTokens, outputToke
              image_count=COALESCE(image_count,0)+?,
              cost=CASE WHEN ? IS NOT NULL THEN COALESCE(cost,0)+? ELSE cost END,
              currency=COALESCE(?, currency)
-         WHERE user_id=? AND usage_date=? AND model=?`
+         WHERE user_id=? AND usage_date=${D} AND model=?`
       ).run(inputTokens, outputTokens, imageCount, cost, cost, currency, userId, date, model);
     } else {
       await db.prepare(
         `INSERT INTO token_usage (user_id, usage_date, model, input_tokens, output_tokens, image_count, cost, currency)
-         VALUES (?,?,?,?,?,?,?,?)`
+         VALUES (?,${D},?,?,?,?,?,?)`
       ).run(userId, date, model, inputTokens, outputTokens, imageCount, cost, currency);
     }
   } catch (e) {
