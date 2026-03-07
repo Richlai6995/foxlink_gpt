@@ -34,40 +34,74 @@ const VECTOR_TOP_K    = parseInt(process.env.DASHBOARD_VECTOR_TOP_K || '10');
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
-// ─── ERP 連線（唯讀查詢用）──────────────────────────────────────────────────
-let erpPool = null;
+// ─── ERP SQL 唯讀保護 ─────────────────────────────────────────────────────────
+// 在連線層攔截，所有對 ERP 的 execute() 皆經過此驗證（防禦縱深）
+const ERP_FORBIDDEN = /\b(INSERT|UPDATE|DELETE|DROP|CREATE|ALTER|TRUNCATE|MERGE|UPSERT|GRANT|REVOKE|EXECUTE|DBMS_\w+|UTL_\w+)\b/i;
+
+function assertErpReadOnly(sql) {
+  // 移除行注解與區塊注解後再檢查，防止注入繞過
+  const stripped = sql
+    .replace(/--[^\n]*/g, ' ')
+    .replace(/\/\*[\s\S]*?\*\//g, ' ')
+    .trim();
+
+  if (!/^\s*SELECT\b/i.test(stripped)) {
+    const preview = stripped.substring(0, 80).replace(/\s+/g, ' ');
+    throw new Error(`[ERP 唯讀保護] 僅允許 SELECT，已拒絕: ${preview}`);
+  }
+  if (ERP_FORBIDDEN.test(stripped)) {
+    throw new Error('[ERP 唯讀保護] SQL 含有禁止關鍵字，已拒絕執行');
+  }
+  // 禁止多語句（分號後接非空內容）
+  if (/;\s*\S/.test(stripped)) {
+    throw new Error('[ERP 唯讀保護] 禁止多語句，已拒絕執行');
+  }
+}
+
+// ── ReadOnlyConnectionProxy：包裝 Oracle 連線，execute 前強制驗證 ────────────
+class ReadOnlyConnectionProxy {
+  constructor(conn) { this._conn = conn; }
+
+  async execute(sql, binds = [], opts = {}) {
+    assertErpReadOnly(sql);
+    return this._conn.execute(sql, binds, opts);
+  }
+
+  async close() { return this._conn.close(); }
+}
+
+// ── ReadOnlyPoolProxy：getConnection() 回傳 proxy 連線 ───────────────────────
+class ReadOnlyPoolProxy {
+  constructor(rawPool) { this._pool = rawPool; }
+  async getConnection() {
+    const conn = await this._pool.getConnection();
+    return new ReadOnlyConnectionProxy(conn);
+  }
+}
+
+// ─── ERP 連線（唯讀，透過 ReadOnlyPoolProxy 強制保護）───────────────────────
+let _rawErpPool = null;
+let _erpPoolProxy = null;
+
 async function getErpPool() {
-  if (erpPool) return erpPool;
+  if (_erpPoolProxy) return _erpPoolProxy;
   if (!process.env.ERP_DB_HOST) throw new Error('ERP_DB_HOST 未設定');
-  erpPool = await oracledb.createPool({
+  _rawErpPool = await oracledb.createPool({
     user:          process.env.ERP_DB_USER,
     password:      process.env.ERP_DB_USER_PASSWORD,
     connectString: `${process.env.ERP_DB_HOST}:${process.env.ERP_DB_PORT}/${process.env.ERP_DB_SERVICE_NAME}`,
     poolMin: 1, poolMax: 5, poolIncrement: 1, poolTimeout: 60,
   });
-  return erpPool;
+  _erpPoolProxy = new ReadOnlyPoolProxy(_rawErpPool);
+  console.log('[ERP] 唯讀連線池已建立（ReadOnlyPoolProxy）');
+  return _erpPoolProxy;
 }
 
-// ─── SQL 安全審查 ─────────────────────────────────────────────────────────────
-const FORBIDDEN_SQL = [
-  /\b(INSERT|UPDATE|DELETE|DROP|CREATE|ALTER|TRUNCATE|MERGE|UPSERT|GRANT|REVOKE)\b/i,
-  /\bDBMS_\w+\b/i,
-  /\bUTL_\w+\b/i,
-  /\/\*[\s\S]*?\*\//,    // block comments (injection vector)
-  /;\s*\w/,              // multiple statements
-];
-
+// ─── SQL 安全審查（AI 生成 SQL 的 route-level 驗證）──────────────────────────
+// 與 assertErpReadOnly 相輔相成：此為 route 層快速檢查，proxy 為最後防線
 function validateSql(sql) {
-  const trimmed = sql.trim();
-  if (!/^\s*SELECT\b/i.test(trimmed)) {
-    throw new Error('AI 生成的 SQL 不是 SELECT 語句，已拒絕執行');
-  }
-  for (const re of FORBIDDEN_SQL) {
-    if (re.test(trimmed)) {
-      throw new Error(`SQL 包含不允許的語法：${re.source}`);
-    }
-  }
-  return trimmed;
+  assertErpReadOnly(sql);   // 共用同一套規則，確保一致
+  return sql.trim();
 }
 
 // ─── Cache ────────────────────────────────────────────────────────────────────
@@ -360,7 +394,8 @@ async function runEtlJob(jobId) {
         ? new Date(job.last_run_at)
         : new Date(0);
 
-      const sql = job.source_sql;
+      // ETL source_sql 也過唯讀驗證（雖然 proxy 會再擋，提前報清楚錯誤）
+      const sql = validateSql(job.source_sql);
       const result = await erpConn.execute(
         sql,
         job.is_incremental ? { last_run: lastRun } : {},
@@ -503,4 +538,6 @@ module.exports = {
   runEtlJob,
   initEtlScheduler,
   scheduleEtlJob,
+  getErpPool,       // 供 dashboard.js import-oracle 路由使用（同一保護層）
+  assertErpReadOnly, // 供其他模組需要時直接呼叫
 };

@@ -319,7 +319,9 @@ router.post('/designer/schemas/import-oracle', requireDesigner, async (req, res)
     return res.status(400).json({ error: 'table_names 格式不合法' });
 
   try {
-    const { erpPool, db } = require('../database-oracle');
+    const { db } = require('../database-oracle');
+    // 使用 dashboardService 的 ReadOnlyPoolProxy，確保只能 SELECT
+    const erpPool = await require('../services/dashboardService').getErpPool();
 
     // 單一 SQL 查所有 table 的欄位（含 Oracle comment）
     const inList = safeTables.map(t => `'${t}'`).join(',');
