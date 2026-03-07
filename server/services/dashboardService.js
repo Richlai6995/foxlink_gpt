@@ -461,7 +461,13 @@ async function runEtlJob(jobId) {
 
           const conn = await pool.getConnection();
           try {
-            const vecStr = `[${embedding.join(',')}]`;
+            // 同 vectorSearch — 驗證每個 float 元素，防止 Gemini API 異常值注入系統 DB
+            const safeEmbed = embedding.map(v => {
+              const n = Number(v);
+              if (!isFinite(n)) throw new Error(`embedding 含非數值元素: ${v}`);
+              return n;
+            });
+            const vecStr = `[${safeEmbed.join(',')}]`;
             await conn.execute(
               `INSERT INTO ai_vector_store
                  (etl_job_id, source_table, source_pk, field_name, field_value, metadata, embedding)
