@@ -37,12 +37,14 @@ const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 // ─── ERP SQL 唯讀保護 ─────────────────────────────────────────────────────────
 // 在連線層攔截，所有對 ERP 的 execute() 皆經過此驗證（防禦縱深）
 const ERP_FORBIDDEN = /\b(INSERT|UPDATE|DELETE|DROP|CREATE|ALTER|TRUNCATE|MERGE|UPSERT|GRANT|REVOKE|EXECUTE|DBMS_\w+|UTL_\w+)\b/i;
+// FOR UPDATE 鎖定行為雖非資料修改，但在 ERP 環境下會造成表鎖，一律禁止
+const ERP_FORBIDDEN_FOR_UPDATE = /\bFOR\s+UPDATE\b/i;
 
 function assertErpReadOnly(sql) {
   // 移除行注解與區塊注解後再檢查，防止注入繞過
   const stripped = sql
-    .replace(/--[^\n]*/g, ' ')
-    .replace(/\/\*[\s\S]*?\*\//g, ' ')
+    .replace(/--[^\r\n]*/g, ' ')        // 處理 CR+LF 換行
+    .replace(/\/\*[\s\S]*?\*\//g, ' ')  // 移除區塊注解
     .trim();
 
   if (!/^\s*SELECT\b/i.test(stripped)) {
@@ -50,7 +52,10 @@ function assertErpReadOnly(sql) {
     throw new Error(`[ERP 唯讀保護] 僅允許 SELECT，已拒絕: ${preview}`);
   }
   if (ERP_FORBIDDEN.test(stripped)) {
-    throw new Error('[ERP 唯讀保護] SQL 含有禁止關鍵字，已拒絕執行');
+    throw new Error('[ERP 唯讀保護] SQL 含有禁止關鍵字（DML/DDL/系統 Package），已拒絕執行');
+  }
+  if (ERP_FORBIDDEN_FOR_UPDATE.test(stripped)) {
+    throw new Error('[ERP 唯讀保護] 禁止 FOR UPDATE（會鎖定 ERP 資料列），已拒絕執行');
   }
   // 禁止多語句（分號後接非空內容）
   if (/;\s*\S/.test(stripped)) {
@@ -155,7 +160,15 @@ async function vectorSearch(db, jobIds, queryEmbedding, topK = VECTOR_TOP_K) {
   const pool = require('../database-oracle').getPool();
   const conn = await pool.getConnection();
   try {
-    const vecStr = `[${queryEmbedding.join(',')}]`;
+    // 嚴格驗證每個 embedding 元素為有限數值，防止 Gemini API 回傳異常值時 SQL 注入系統 DB
+    if (!Array.isArray(queryEmbedding) || queryEmbedding.length === 0)
+      throw new Error('queryEmbedding 必須是非空陣列');
+    const safeFloats = queryEmbedding.map(v => {
+      const n = Number(v);
+      if (!isFinite(n)) throw new Error(`embedding 含非數值元素: ${v}`);
+      return n;
+    });
+    const vecStr = `[${safeFloats.join(',')}]`;
     const inClause = jobIds.map((_, i) => `:j${i}`).join(',');
     const binds = {};
     jobIds.forEach((id, i) => { binds[`j${i}`] = id; });

@@ -309,12 +309,14 @@ router.post('/designer/schemas/import-oracle', requireDesigner, async (req, res)
   const { table_names, owner = 'APPS', db_connection = 'erp' } = req.body;
   if (!Array.isArray(table_names) || table_names.length === 0)
     return res.status(400).json({ error: 'table_names 為必填陣列' });
+  if (table_names.length > 50)
+    return res.status(400).json({ error: '單次最多匯入 50 個 table' });
 
   // 驗證 table names：只允許大寫英數字母、底線、$（Oracle 規範）
   const NAME_RE = /^[A-Z0-9_$]+$/i;
   const safeTables = table_names
     .map(t => t.trim().toUpperCase())
-    .filter(t => NAME_RE.test(t));
+    .filter(t => NAME_RE.test(t) && t.length <= 128); // Oracle identifier 上限 128 chars
   if (safeTables.length === 0)
     return res.status(400).json({ error: 'table_names 格式不合法' });
 

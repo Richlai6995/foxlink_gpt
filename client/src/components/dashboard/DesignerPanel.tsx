@@ -132,7 +132,7 @@ function SchemaManager() {
                   placeholder={"FL_MRP_FG_PEGGING_SUMMARY\nWO_ABNORMAL_V\nBOM_HEADER\n..."}
                   value={importText} onChange={e => setImportText(e.target.value)} />
                 <p className="text-[11px] text-gray-400 mt-1">
-                  {importText.split('\n').filter(l => l.trim()).length} 個 table
+                  {importText.split('\n').filter(l => l.trim()).length} 個 table（上限 50）
                 </p>
               </div>
               {importResult && (
