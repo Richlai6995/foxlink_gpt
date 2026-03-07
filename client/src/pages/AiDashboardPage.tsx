@@ -253,14 +253,14 @@ export default function AiDashboardPage() {
 
   if (showDesigner && (canDesignAiSelect || isAdmin)) {
     return (
-      <div className="h-screen bg-slate-950 flex flex-col">
-        <div className="flex items-center gap-3 px-4 py-3 border-b border-slate-800 bg-slate-900 flex-shrink-0">
+      <div className="h-screen bg-gray-50 flex flex-col">
+        <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-200 bg-white flex-shrink-0">
           <button onClick={() => { setShowDesigner(false); loadTopics() }}
-            className="flex items-center gap-1 text-slate-400 hover:text-slate-200 text-sm transition">
+            className="flex items-center gap-1 text-gray-500 hover:text-gray-800 text-sm transition">
             <ArrowLeft size={14} /> 返回
           </button>
           <BarChart3 size={16} className="text-orange-400" />
-          <span className="text-sm font-medium text-slate-200">AI 戰情設計介面</span>
+          <span className="text-sm font-medium text-gray-800">AI 戰情設計介面</span>
         </div>
         <div className="flex-1 overflow-hidden">
           <DesignerPanel />
@@ -270,23 +270,23 @@ export default function AiDashboardPage() {
   }
 
   return (
-    <div className="h-screen bg-slate-950 flex">
+    <div className="h-screen bg-gray-50 flex">
       {/* 左側欄 — 主題/任務 */}
-      <div className="w-64 bg-slate-900 border-r border-slate-800 flex flex-col flex-shrink-0">
-        <div className="p-4 border-b border-slate-800 flex items-center justify-between">
+      <div className="w-64 bg-white border-r border-gray-200 flex flex-col flex-shrink-0">
+        <div className="p-4 border-b border-gray-200 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <BarChart3 size={16} className="text-orange-400" />
-            <span className="text-sm font-semibold text-slate-200">AI 戰情</span>
+            <span className="text-sm font-semibold text-gray-800">AI 戰情</span>
           </div>
           <button onClick={() => navigate('/chat')}
-            className="text-slate-500 hover:text-slate-300 text-xs transition">
+            className="text-gray-400 hover:text-gray-700 text-xs transition">
             <ArrowLeft size={14} />
           </button>
         </div>
 
         <div className="flex-1 overflow-y-auto py-2">
           {topics.length === 0 && (
-            <p className="text-slate-600 text-xs text-center py-8 px-4">
+            <p className="text-gray-400 text-xs text-center py-8 px-4">
               {canDesignAiSelect || isAdmin ? '尚未建立查詢主題，請進入設計介面' : '尚無可用的查詢設計'}
             </p>
           )}
@@ -294,7 +294,7 @@ export default function AiDashboardPage() {
             <div key={t.id} className="mb-1">
               <button
                 onClick={() => toggleTopic(t.id)}
-                className="w-full flex items-center gap-2 px-3 py-2 text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition text-xs font-medium"
+                className="w-full flex items-center gap-2 px-3 py-2 text-gray-500 hover:text-gray-800 hover:bg-gray-50 transition text-xs font-medium"
               >
                 {expandedTopics.has(t.id)
                   ? <ChevronDown size={12} className="flex-shrink-0" />
@@ -310,8 +310,8 @@ export default function AiDashboardPage() {
                       onClick={() => selectDesign(d)}
                       className={`w-full flex items-center gap-2 px-3 py-1.5 text-xs transition rounded-lg mx-1 mb-0.5 ${
                         selectedDesign?.id === d.id
-                          ? 'bg-orange-600/20 text-orange-300 border border-orange-700/50'
-                          : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800'
+                          ? 'bg-orange-50 text-orange-700 border border-orange-200'
+                          : 'text-gray-400 hover:text-gray-700 hover:bg-gray-50'
                       }`}
                     >
                       <BarChart2 size={11} className="flex-shrink-0" />
@@ -322,7 +322,7 @@ export default function AiDashboardPage() {
                     </button>
                   ))}
                   {(t.designs || []).length === 0 && (
-                    <p className="text-slate-700 text-xs px-4 py-1">無任務</p>
+                    <p className="text-gray-400 text-xs px-4 py-1">無任務</p>
                   )}
                 </div>
               )}
@@ -331,10 +331,10 @@ export default function AiDashboardPage() {
         </div>
 
         {(canDesignAiSelect || isAdmin) && (
-          <div className="p-3 border-t border-slate-800">
+          <div className="p-3 border-t border-gray-200">
             <button
               onClick={() => setShowDesigner(true)}
-              className="w-full flex items-center gap-2 text-slate-400 hover:text-orange-400 hover:bg-slate-800 px-3 py-2 rounded-lg text-xs transition"
+              className="w-full flex items-center gap-2 text-gray-500 hover:text-orange-400 hover:bg-gray-50 px-3 py-2 rounded-lg text-xs transition"
             >
               <Settings2 size={13} /> 設計介面
             </button>
@@ -345,23 +345,23 @@ export default function AiDashboardPage() {
       {/* 主要區域 */}
       <div className="flex-1 flex flex-col overflow-hidden">
         {/* 頂部：選中的設計 + 開發模式 toggle */}
-        <div className="px-6 py-3 border-b border-slate-800 bg-slate-900 flex items-center justify-between flex-shrink-0">
+        <div className="px-6 py-3 border-b border-gray-200 bg-white flex items-center justify-between flex-shrink-0">
           <div>
             {selectedDesign ? (
               <div>
-                <span className="text-sm font-medium text-slate-200">{selectedDesign.name}</span>
+                <span className="text-sm font-medium text-gray-800">{selectedDesign.name}</span>
                 {selectedDesign.description && (
-                  <span className="ml-2 text-xs text-slate-500">{selectedDesign.description}</span>
+                  <span className="ml-2 text-xs text-gray-400">{selectedDesign.description}</span>
                 )}
               </div>
             ) : (
-              <span className="text-sm text-slate-500">請從左側選擇查詢設計</span>
+              <span className="text-sm text-gray-400">請從左側選擇查詢設計</span>
             )}
           </div>
           {(canDesignAiSelect || isAdmin) && selectedDesign && (
             <button
               onClick={() => setDevMode(v => !v)}
-              className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg transition ${devMode ? 'bg-slate-700 text-slate-200' : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800'}`}
+              className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg transition ${devMode ? 'bg-gray-200 text-gray-800' : 'text-gray-400 hover:text-gray-700 hover:bg-gray-50'}`}
             >
               <Code size={12} /> 開發模式
             </button>
@@ -371,10 +371,10 @@ export default function AiDashboardPage() {
         <div className="flex-1 overflow-y-auto p-6 space-y-4">
           {/* 查詢輸入框 */}
           {selectedDesign && (
-            <div className="bg-slate-900 border border-slate-700 rounded-2xl p-4">
+            <div className="bg-white border border-gray-200 rounded-2xl p-4">
               <div className="flex gap-3">
                 <textarea
-                  className="flex-1 bg-transparent text-sm text-slate-200 placeholder-slate-600 resize-none outline-none min-h-[60px]"
+                  className="flex-1 bg-transparent text-sm text-gray-800 placeholder-gray-400 resize-none outline-none min-h-[60px]"
                   placeholder={`用自然語言描述您想查詢的內容...`}
                   value={question}
                   onChange={e => setQuestion(e.target.value)}
@@ -393,7 +393,7 @@ export default function AiDashboardPage() {
                 </button>
               </div>
               {statusMsg && (
-                <p className="text-xs text-slate-500 mt-2 flex items-center gap-1.5">
+                <p className="text-xs text-gray-400 mt-2 flex items-center gap-1.5">
                   {loading && <RefreshCw size={11} className="animate-spin" />}
                   {statusMsg}
                 </p>
@@ -406,18 +406,18 @@ export default function AiDashboardPage() {
             <div className="space-y-3">
               {/* View mode toggle */}
               <div className="flex items-center gap-2">
-                <div className="flex bg-slate-800 rounded-lg p-0.5">
+                <div className="flex bg-gray-100 rounded-lg p-0.5">
                   {charts.length > 0 && (
                     <button
                       onClick={() => setViewMode('chart')}
-                      className={`flex items-center gap-1 px-3 py-1.5 text-xs rounded-md transition ${viewMode === 'chart' ? 'bg-slate-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}
+                      className={`flex items-center gap-1 px-3 py-1.5 text-xs rounded-md transition ${viewMode === 'chart' ? 'bg-blue-600 text-white' : 'text-gray-500 hover:text-gray-800'}`}
                     >
                       <BarChart2 size={12} /> 圖表
                     </button>
                   )}
                   <button
                     onClick={() => setViewMode('table')}
-                    className={`flex items-center gap-1 px-3 py-1.5 text-xs rounded-md transition ${viewMode === 'table' ? 'bg-slate-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}
+                    className={`flex items-center gap-1 px-3 py-1.5 text-xs rounded-md transition ${viewMode === 'table' ? 'bg-blue-600 text-white' : 'text-gray-500 hover:text-gray-800'}`}
                   >
                     <Table size={12} /> 資料表
                   </button>
@@ -428,14 +428,14 @@ export default function AiDashboardPage() {
                   <div className="flex gap-1">
                     {charts.map((c, i) => (
                       <button key={i} onClick={() => setActiveChartIdx(i)}
-                        className={`text-xs px-2.5 py-1.5 rounded-lg transition ${activeChartIdx === i ? 'bg-orange-600/20 text-orange-400 border border-orange-700/40' : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800'}`}>
+                        className={`text-xs px-2.5 py-1.5 rounded-lg transition ${activeChartIdx === i ? 'bg-orange-600/20 text-orange-400 border border-orange-700/40' : 'text-gray-400 hover:text-gray-700 hover:bg-gray-50'}`}>
                         {c.title || c.type}
                       </button>
                     ))}
                   </div>
                 )}
 
-                <span className="ml-auto text-xs text-slate-600">
+                <span className="ml-auto text-xs text-gray-400">
                   {result.cached && <span className="text-teal-600 mr-2">快取命中</span>}
                   {result.row_count} 筆
                 </span>
@@ -443,14 +443,14 @@ export default function AiDashboardPage() {
 
               {/* Chart */}
               {viewMode === 'chart' && activeChart && (
-                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4">
+                <div className="bg-white border border-gray-200 rounded-2xl p-4">
                   <AiChart chartDef={activeChart} rows={result.rows} />
                 </div>
               )}
 
               {/* Table */}
               {(viewMode === 'table' || !activeChart) && (
-                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4">
+                <div className="bg-white border border-gray-200 rounded-2xl p-4">
                   <ResultTable rows={result.rows} columns={result.columns} />
                 </div>
               )}
@@ -460,28 +460,28 @@ export default function AiDashboardPage() {
           {/* 開發模式 Panel */}
           {devMode && (canDesignAiSelect || isAdmin) && (devSql || devVectorResults.length > 0) && (
             <div className="bg-slate-900 border border-slate-700 rounded-2xl p-4 space-y-3">
-              <p className="text-xs font-medium text-slate-400 flex items-center gap-1.5">
+              <p className="text-xs font-medium text-gray-500 flex items-center gap-1.5">
                 <Code size={12} /> 開發者資訊
               </p>
-              <div className="grid grid-cols-3 gap-3 text-xs text-slate-500">
+              <div className="grid grid-cols-3 gap-3 text-xs text-gray-400">
                 {devCached && <span className="text-teal-500">快取命中</span>}
                 {devTokens && <span>Prompt {devTokens.prompt} / Output {devTokens.output} tokens</span>}
                 {devDuration !== null && <span>執行 {devDuration}ms</span>}
               </div>
               {devSql && (
                 <div>
-                  <p className="text-xs text-slate-600 mb-1">生成 SQL</p>
-                  <pre className="bg-slate-800 text-green-400 text-xs p-3 rounded-lg overflow-x-auto font-mono whitespace-pre-wrap">{devSql}</pre>
+                  <p className="text-xs text-gray-400 mb-1">生成 SQL</p>
+                  <pre className="bg-gray-900 text-green-400 text-xs p-3 rounded-lg overflow-x-auto font-mono whitespace-pre-wrap">{devSql}</pre>
                 </div>
               )}
               {devVectorResults.length > 0 && (
                 <div>
-                  <p className="text-xs text-slate-600 mb-1">語意搜尋結果（top {devVectorResults.length}）</p>
+                  <p className="text-xs text-gray-400 mb-1">語意搜尋結果（top {devVectorResults.length}）</p>
                   <div className="space-y-1">
                     {devVectorResults.slice(0, 5).map((r, i) => (
-                      <div key={i} className="bg-slate-800 rounded-lg px-3 py-2 text-xs text-slate-400">
-                        <span className="text-slate-500">[{r.source_table}]</span> {r.field_name}: {String(r.field_value).slice(0, 100)}
-                        <span className="ml-2 text-slate-600">score: {r.score?.toFixed(4)}</span>
+                      <div key={i} className="bg-gray-100 rounded-lg px-3 py-2 text-xs text-gray-500">
+                        <span className="text-gray-400">[{r.source_table}]</span> {r.field_name}: {String(r.field_value).slice(0, 100)}
+                        <span className="ml-2 text-gray-400">score: {r.score?.toFixed(4)}</span>
                       </div>
                     ))}
                   </div>
@@ -492,7 +492,7 @@ export default function AiDashboardPage() {
 
           {/* 空白提示 */}
           {!selectedDesign && (
-            <div className="flex flex-col items-center justify-center h-64 text-slate-600">
+            <div className="flex flex-col items-center justify-center h-64 text-gray-400">
               <BarChart3 size={48} className="mb-4 opacity-30" />
               <p className="text-sm">請從左側選擇一個查詢設計</p>
               {(canDesignAiSelect || isAdmin) && (

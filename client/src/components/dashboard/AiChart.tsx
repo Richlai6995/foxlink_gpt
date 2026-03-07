@@ -29,13 +29,13 @@ function mkGradient(color: string) {
 
 const BASE_OPTION = {
   backgroundColor: 'transparent',
-  textStyle: { color: '#94a3b8', fontFamily: 'inherit' },
+  textStyle: { color: '#374151', fontFamily: 'inherit' },
   tooltip: {
-    backgroundColor: '#1e293b',
-    borderColor: '#334155',
-    textStyle: { color: '#e2e8f0' },
+    backgroundColor: '#ffffff',
+    borderColor: '#e5e7eb',
+    textStyle: { color: '#374151' },
   },
-  legend: { textStyle: { color: '#94a3b8' } },
+  legend: { textStyle: { color: '#6b7280' } },
   grid: { left: 60, right: 20, top: 40, bottom: 40, containLabel: true },
 }
 
@@ -52,18 +52,18 @@ export default function AiChart({ chartDef, rows }: Props) {
 
     option = {
       ...BASE_OPTION,
-      title: title ? { text: title, textStyle: { color: '#cbd5e1', fontSize: 13 } } : undefined,
+      title: title ? { text: title, textStyle: { color: '#374151', fontSize: 13 } } : undefined,
       xAxis: horizontal
-        ? { type: 'value', axisLine: { lineStyle: { color: '#334155' } }, splitLine: { lineStyle: { color: '#1e293b' } }, axisLabel: { color: '#64748b' } }
-        : { type: 'category', data: xData, axisLine: { lineStyle: { color: '#334155' } }, axisLabel: { color: '#64748b', rotate: xData.length > 8 ? 30 : 0 } },
+        ? { type: 'value', axisLine: { lineStyle: { color: '#e5e7eb' } }, splitLine: { lineStyle: { color: '#f3f4f6' } }, axisLabel: { color: '#6b7280' } }
+        : { type: 'category', data: xData, axisLine: { lineStyle: { color: '#e5e7eb' } }, axisLabel: { color: '#6b7280', rotate: xData.length > 8 ? 30 : 0 } },
       yAxis: horizontal
-        ? { type: 'category', data: xData, axisLabel: { color: '#64748b' } }
-        : { type: 'value', axisLine: { lineStyle: { color: '#334155' } }, splitLine: { lineStyle: { color: '#1e293b' } }, axisLabel: { color: '#64748b' } },
+        ? { type: 'category', data: xData, axisLabel: { color: '#6b7280' } }
+        : { type: 'value', axisLine: { lineStyle: { color: '#e5e7eb' } }, splitLine: { lineStyle: { color: '#f3f4f6' } }, axisLabel: { color: '#6b7280' } },
       series: [{
         type: 'bar',
         data: yData,
         itemStyle: { color, borderRadius: [4, 4, 0, 0] },
-        label: show_label ? { show: true, position: 'top', color: '#94a3b8', fontSize: 11 } : { show: false },
+        label: show_label ? { show: true, position: 'top', color: '#6b7280', fontSize: 11 } : { show: false },
         barMaxWidth: 48,
       }],
     }
@@ -72,9 +72,9 @@ export default function AiChart({ chartDef, rows }: Props) {
     const yData = rows.map(r => Number(r[y_field || ''] ?? 0))
     option = {
       ...BASE_OPTION,
-      title: title ? { text: title, textStyle: { color: '#cbd5e1', fontSize: 13 } } : undefined,
-      xAxis: { type: 'category', data: xData, axisLine: { lineStyle: { color: '#334155' } }, axisLabel: { color: '#64748b', rotate: xData.length > 8 ? 30 : 0 } },
-      yAxis: { type: 'value', axisLine: { lineStyle: { color: '#334155' } }, splitLine: { lineStyle: { color: '#1e293b' } }, axisLabel: { color: '#64748b' } },
+      title: title ? { text: title, textStyle: { color: '#374151', fontSize: 13 } } : undefined,
+      xAxis: { type: 'category', data: xData, axisLine: { lineStyle: { color: '#e5e7eb' } }, axisLabel: { color: '#6b7280', rotate: xData.length > 8 ? 30 : 0 } },
+      yAxis: { type: 'value', axisLine: { lineStyle: { color: '#e5e7eb' } }, splitLine: { lineStyle: { color: '#f3f4f6' } }, axisLabel: { color: '#6b7280' } },
       series: [{
         type: 'line',
         data: yData,
@@ -84,7 +84,7 @@ export default function AiChart({ chartDef, rows }: Props) {
         lineStyle: { color: PBI_COLORS[0], width: 2.5 },
         itemStyle: { color: PBI_COLORS[0] },
         areaStyle: area ? { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: PBI_COLORS[0] + '60' }, { offset: 1, color: PBI_COLORS[0] + '00' }] } } : undefined,
-        label: show_label ? { show: true, color: '#94a3b8', fontSize: 11 } : { show: false },
+        label: show_label ? { show: true, color: '#6b7280', fontSize: 11 } : { show: false },
       }],
     }
   } else if (type === 'pie') {
@@ -96,14 +96,14 @@ export default function AiChart({ chartDef, rows }: Props) {
     option = {
       ...BASE_OPTION,
       grid: undefined,
-      title: title ? { text: title, textStyle: { color: '#cbd5e1', fontSize: 13 }, left: 'center' } : undefined,
+      title: title ? { text: title, textStyle: { color: '#374151', fontSize: 13 }, left: 'center' } : undefined,
       series: [{
         type: 'pie',
         radius: donut ? ['40%', '70%'] : '65%',
         center: ['50%', '55%'],
         data: pieData,
-        label: { color: '#94a3b8', fontSize: 11 },
-        labelLine: { lineStyle: { color: '#475569' } },
+        label: { color: '#6b7280', fontSize: 11 },
+        labelLine: { lineStyle: { color: '#d1d5db' } },
         emphasis: { itemStyle: { shadowBlur: 10, shadowColor: 'rgba(0,0,0,0.5)' } },
       }],
     }
@@ -111,9 +111,9 @@ export default function AiChart({ chartDef, rows }: Props) {
     const scatterData = rows.map(r => [Number(r[x_field || ''] ?? 0), Number(r[y_field || ''] ?? 0)])
     option = {
       ...BASE_OPTION,
-      title: title ? { text: title, textStyle: { color: '#cbd5e1', fontSize: 13 } } : undefined,
-      xAxis: { type: 'value', axisLine: { lineStyle: { color: '#334155' } }, splitLine: { lineStyle: { color: '#1e293b' } }, axisLabel: { color: '#64748b' } },
-      yAxis: { type: 'value', axisLine: { lineStyle: { color: '#334155' } }, splitLine: { lineStyle: { color: '#1e293b' } }, axisLabel: { color: '#64748b' } },
+      title: title ? { text: title, textStyle: { color: '#374151', fontSize: 13 } } : undefined,
+      xAxis: { type: 'value', axisLine: { lineStyle: { color: '#e5e7eb' } }, splitLine: { lineStyle: { color: '#f3f4f6' } }, axisLabel: { color: '#6b7280' } },
+      yAxis: { type: 'value', axisLine: { lineStyle: { color: '#e5e7eb' } }, splitLine: { lineStyle: { color: '#f3f4f6' } }, axisLabel: { color: '#6b7280' } },
       series: [{ type: 'scatter', data: scatterData, itemStyle: { color: PBI_COLORS[0], opacity: 0.8 }, symbolSize: 8 }],
     }
   } else if (type === 'gauge') {
@@ -121,17 +121,17 @@ export default function AiChart({ chartDef, rows }: Props) {
     option = {
       ...BASE_OPTION,
       grid: undefined,
-      title: title ? { text: title, textStyle: { color: '#cbd5e1', fontSize: 13 }, left: 'center' } : undefined,
+      title: title ? { text: title, textStyle: { color: '#374151', fontSize: 13 }, left: 'center' } : undefined,
       series: [{
         type: 'gauge',
         data: [{ value: val, name: label_field || '' }],
         axisLine: { lineStyle: { width: 16, color: [[0.3, '#E66C37'], [0.7, '#D9B300'], [1, '#118DFF']] } },
-        axisTick: { lineStyle: { color: '#475569' } },
-        splitLine: { lineStyle: { color: '#475569' } },
+        axisTick: { lineStyle: { color: '#d1d5db' } },
+        splitLine: { lineStyle: { color: '#d1d5db' } },
         axisLabel: { color: '#64748b' },
         pointer: { itemStyle: { color: '#118DFF' } },
-        title: { color: '#94a3b8' },
-        detail: { color: '#e2e8f0', fontSize: 20, fontWeight: 'bold' },
+        title: { color: '#6b7280' },
+        detail: { color: '#111827', fontSize: 20, fontWeight: 'bold' },
       }],
     }
   }
@@ -140,7 +140,7 @@ export default function AiChart({ chartDef, rows }: Props) {
     <ReactECharts
       option={option}
       style={{ height: 320, width: '100%' }}
-      theme="dark"
+      theme="light"
       opts={{ renderer: 'canvas' }}
     />
   )
