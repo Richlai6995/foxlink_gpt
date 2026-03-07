@@ -11,6 +11,8 @@ interface AuthContextType {
   isAdmin: boolean
   canSchedule: boolean
   canCreateKb: boolean
+  canUseDashboard: boolean
+  canDesignAiSelect: boolean
 }
 
 const AuthContext = createContext<AuthContextType | null>(null)
@@ -60,9 +62,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setUser(null)
   }, [])
 
-  const isAdmin     = user?.role === 'admin'
-  const canSchedule = isAdmin || (user as any)?.allow_scheduled_tasks === 1
-  const canCreateKb = isAdmin || (user as any)?.effective_can_create_kb === true
+  const isAdmin          = user?.role === 'admin'
+  const canSchedule      = isAdmin || (user as any)?.allow_scheduled_tasks === 1
+  const canCreateKb      = isAdmin || (user as any)?.effective_can_create_kb === true
+  const canUseDashboard  = isAdmin || (user as any)?.effective_can_use_ai_dashboard === true
+  const canDesignAiSelect = isAdmin || (user as any)?.effective_can_design_ai_select === true
 
   return (
     <AuthContext.Provider
@@ -75,6 +79,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         isAdmin,
         canSchedule,
         canCreateKb,
+        canUseDashboard,
+        canDesignAiSelect,
       }}
     >
       {children}

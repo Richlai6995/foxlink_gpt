@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Plus, MessageSquare, Trash2, ChevronDown, LogOut, Settings, Cpu, Zap, CalendarClock, HelpCircle, KeyRound, X, Eye, EyeOff, GitFork, Sparkles, Database, Menu, ChevronUp } from 'lucide-react'
+import { Plus, MessageSquare, Trash2, ChevronDown, LogOut, Settings, Cpu, Zap, CalendarClock, HelpCircle, KeyRound, X, Eye, EyeOff, GitFork, Sparkles, Database, Menu, ChevronUp, BarChart3 } from 'lucide-react'
 import type { ChatSession, ModelType, LlmModel } from '../types'
 import { useAuth } from '../context/AuthContext'
 import { useNavigate } from 'react-router-dom'
@@ -48,7 +48,7 @@ export default function Sidebar({
   onDeleteSession,
   onModelChange,
 }: Props) {
-  const { user, logout, isAdmin, canSchedule, canCreateKb } = useAuth()
+  const { user, logout, isAdmin, canSchedule, canCreateKb, canUseDashboard } = useAuth()
   const navigate = useNavigate()
   const [hoveredId, setHoveredId] = useState<string | null>(null)
   const [showModelMenu, setShowModelMenu] = useState(false)
@@ -267,6 +267,12 @@ export default function Sidebar({
                 <button onClick={() => { setShowMenu(false); navigate('/kb') }}
                   className="w-full flex items-center gap-2 text-teal-400 hover:bg-slate-700 px-3 py-2.5 text-xs transition font-medium">
                   <Database size={13} /> 知識庫市集
+                </button>
+              )}
+              {(canUseDashboard || isAdmin) && (
+                <button onClick={() => { setShowMenu(false); navigate('/dashboard') }}
+                  className="w-full flex items-center gap-2 text-orange-400 hover:bg-slate-700 px-3 py-2.5 text-xs transition font-medium">
+                  <BarChart3 size={13} /> AI 戰情
                 </button>
               )}
               <button onClick={() => { setShowMenu(false); navigate('/help') }}
