@@ -234,6 +234,7 @@ async function initializeOracleDB() {
     `${process.env.SYSTEM_DB_HOST}:${process.env.SYSTEM_DB_PORT}/${process.env.SYSTEM_DB_SERVICE_NAME}`;
 
   pool = await oracledb.createPool({
+    poolAlias:     'system_db',   // 明確命名，避免與 ERP pool alias 衝突
     user:          process.env.SYSTEM_DB_USER,
     password:      process.env.SYSTEM_DB_USER_PASSWORD,
     connectString,

@@ -64,15 +64,43 @@ function assertErpReadOnly(sql) {
 }
 
 // ── ReadOnlyConnectionProxy：包裝 Oracle 連線，execute 前強制驗證 ────────────
+// 白名單策略：只暴露 execute（驗證後）、queryStream（驗證後）、close
+// 其餘所有可執行 SQL / 變更狀態的方法一律拒絕
 class ReadOnlyConnectionProxy {
   constructor(conn) { this._conn = conn; }
 
+  // ✅ 允許：驗證後 SELECT 才過
   async execute(sql, binds = [], opts = {}) {
     assertErpReadOnly(sql);
     return this._conn.execute(sql, binds, opts);
   }
 
+  // ✅ 允許：串流 SELECT，同樣驗證
+  queryStream(sql, binds = [], opts = {}) {
+    assertErpReadOnly(sql);
+    return this._conn.queryStream(sql, binds, opts);
+  }
+
+  // ✅ 允許：關閉連線
   async close() { return this._conn.close(); }
+
+  // ❌ 以下全部封鎖 ─────────────────────────────────────────────────────────
+  async executeMany()    { throw new Error('[ERP 唯讀保護] 禁止 executeMany'); }
+  async commit()         { throw new Error('[ERP 唯讀保護] 禁止 commit（無 DML 不應有 commit）'); }
+  async rollback()       { throw new Error('[ERP 唯讀保護] 禁止 rollback'); }
+  async changePassword() { throw new Error('[ERP 唯讀保護] 禁止 changePassword'); }
+  async shutdown()       { throw new Error('[ERP 唯讀保護] 禁止 shutdown'); }
+  async startup()        { throw new Error('[ERP 唯讀保護] 禁止 startup'); }
+  getSodaDatabase()      { throw new Error('[ERP 唯讀保護] 禁止 getSodaDatabase'); }
+  async getQueue()       { throw new Error('[ERP 唯讀保護] 禁止 getQueue（AQ 可寫入）'); }
+  async subscribe()      { throw new Error('[ERP 唯讀保護] 禁止 subscribe'); }
+  async createLob()      { throw new Error('[ERP 唯讀保護] 禁止 createLob'); }
+  async beginSessionlessTransaction()   { throw new Error('[ERP 唯讀保護] 禁止 transaction 操作'); }
+  async resumeSessionlessTransaction()  { throw new Error('[ERP 唯讀保護] 禁止 transaction 操作'); }
+  async suspendSessionlessTransaction() { throw new Error('[ERP 唯讀保護] 禁止 transaction 操作'); }
+  async tpcBegin()    { throw new Error('[ERP 唯讀保護] 禁止 TPC 操作'); }
+  async tpcCommit()   { throw new Error('[ERP 唯讀保護] 禁止 TPC 操作'); }
+  async tpcRollback() { throw new Error('[ERP 唯讀保護] 禁止 TPC 操作'); }
 }
 
 // ── ReadOnlyPoolProxy：getConnection() 回傳 proxy 連線 ───────────────────────
@@ -92,6 +120,7 @@ async function getErpPool() {
   if (_erpPoolProxy) return _erpPoolProxy;
   if (!process.env.ERP_DB_HOST) throw new Error('ERP_DB_HOST 未設定');
   _rawErpPool = await oracledb.createPool({
+    poolAlias:     'erp_db',      // 明確命名，避免與 system_db pool alias 衝突
     user:          process.env.ERP_DB_USER,
     password:      process.env.ERP_DB_USER_PASSWORD,
     connectString: `${process.env.ERP_DB_HOST}:${process.env.ERP_DB_PORT}/${process.env.ERP_DB_SERVICE_NAME}`,
