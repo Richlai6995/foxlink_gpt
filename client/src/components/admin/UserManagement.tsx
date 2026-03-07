@@ -39,6 +39,10 @@ interface UserForm {
   allow_create_skill: boolean | null  // null = inherit from role
   allow_external_skill: boolean | null
   allow_code_skill: boolean | null
+  can_create_kb: boolean | null
+  can_deep_research: boolean | null
+  kb_max_size_mb: string
+  kb_max_count: string
   role_id: number | null
   budget_daily: string
   budget_weekly: string
@@ -64,6 +68,10 @@ const empty: UserForm = {
   allow_create_skill: null,
   allow_external_skill: null,
   allow_code_skill: null,
+  can_create_kb: null,
+  can_deep_research: null,
+  kb_max_size_mb: '',
+  kb_max_count: '',
   role_id: null,
   budget_daily: '', budget_weekly: '', budget_monthly: '',
   dept_code: '', dept_name: '', profit_center: '', profit_center_name: '',
@@ -154,6 +162,10 @@ export default function UserManagement() {
       allow_create_skill: u2.allow_create_skill == null ? null : u2.allow_create_skill === 1,
       allow_external_skill: u2.allow_external_skill == null ? null : u2.allow_external_skill === 1,
       allow_code_skill: u2.allow_code_skill == null ? null : u2.allow_code_skill === 1,
+      can_create_kb: u2.can_create_kb == null ? null : u2.can_create_kb === 1,
+      can_deep_research: u2.can_deep_research == null ? null : u2.can_deep_research === 1,
+      kb_max_size_mb: u2.kb_max_size_mb != null ? String(u2.kb_max_size_mb) : '',
+      kb_max_count: u2.kb_max_count != null ? String(u2.kb_max_count) : '',
     })
     setEditId(u.id)
     setError('')
@@ -169,6 +181,8 @@ export default function UserManagement() {
         budget_daily: form.budget_daily !== '' ? Number(form.budget_daily) : null,
         budget_weekly: form.budget_weekly !== '' ? Number(form.budget_weekly) : null,
         budget_monthly: form.budget_monthly !== '' ? Number(form.budget_monthly) : null,
+        kb_max_size_mb: form.kb_max_size_mb !== '' ? Number(form.kb_max_size_mb) : null,
+        kb_max_count: form.kb_max_count !== '' ? Number(form.kb_max_count) : null,
       }
       if (editId) {
         await api.put(`/users/${editId}`, payload)
@@ -321,7 +335,7 @@ export default function UserManagement() {
                 </div>
                 <div>
                   <label className="label">密碼 {editId && '(留空不改)'}</label>
-                  <input {...F('password')} type="password" className="input" />
+                  <input {...F('password')} type="password" autoComplete="new-password" className="input" />
                 </div>
                 <div>
                   <label className="label">姓名 *</label>
@@ -538,6 +552,57 @@ export default function UserManagement() {
                       <option value="0">禁止外部 Skill</option>
                     </select>
                   </label>
+                </div>
+              </div>
+
+              {/* KB permission */}
+              <div className="px-5 pb-4 border-t pt-3">
+                <p className="label mb-2 flex items-center gap-1.5">📚 知識庫 / 深度研究權限（個人覆蓋，null=沿用角色設定）</p>
+                <div className="grid grid-cols-4 gap-3">
+                  <div>
+                    <label className="text-xs text-slate-500 mb-1 block">建立知識庫</label>
+                    <select
+                      value={form.can_create_kb === null ? '' : form.can_create_kb ? '1' : '0'}
+                      onChange={e => setForm(p => ({ ...p, can_create_kb: e.target.value === '' ? null : e.target.value === '1' }))}
+                      className="input py-1 text-sm"
+                    >
+                      <option value="">沿用角色</option>
+                      <option value="1">允許建立</option>
+                      <option value="0">禁止建立</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-xs text-slate-500 mb-1 block">深度研究</label>
+                    <select
+                      value={form.can_deep_research === null ? '' : form.can_deep_research ? '1' : '0'}
+                      onChange={e => setForm(p => ({ ...p, can_deep_research: e.target.value === '' ? null : e.target.value === '1' }))}
+                      className="input py-1 text-sm"
+                    >
+                      <option value="">沿用角色設定</option>
+                      <option value="1">強制允許</option>
+                      <option value="0">強制禁止</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-xs text-slate-500 mb-1 block">最大容量 (MB，空白=沿用角色)</label>
+                    <input
+                      type="number" min={1} step={1}
+                      value={form.kb_max_size_mb}
+                      onChange={e => setForm(p => ({ ...p, kb_max_size_mb: e.target.value }))}
+                      className="input py-1.5 text-sm"
+                      placeholder="500"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs text-slate-500 mb-1 block">最多知識庫數量（空白=沿用角色）</label>
+                    <input
+                      type="number" min={1} step={1}
+                      value={form.kb_max_count}
+                      onChange={e => setForm(p => ({ ...p, kb_max_count: e.target.value }))}
+                      className="input py-1.5 text-sm"
+                      placeholder="5"
+                    />
+                  </div>
                 </div>
               </div>
 

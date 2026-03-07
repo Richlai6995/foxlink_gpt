@@ -42,10 +42,19 @@ function InlineForm({ form, setForm, llmModels, onSave, onCancel }: {
   return (
     <div className="bg-blue-50 border-b border-blue-200 px-4 py-3 space-y-3">
       <div className="flex flex-wrap gap-3 items-end">
-        <F label="模型">
-          <select value={form.model} onChange={(e) => setForm((p) => ({ ...p, model: e.target.value }))} className="input py-1">
+        <F label="模型 (key 或自訂名稱)">
+          <input
+            list="price-model-list"
+            value={form.model}
+            onChange={(e) => setForm((p) => ({ ...p, model: e.target.value }))}
+            placeholder="pro / flash / gemini-embedding-001"
+            className="input py-1 w-52 font-mono text-xs"
+          />
+          <datalist id="price-model-list">
             {llmModels.map((m) => <option key={m.key} value={m.key}>{m.name}</option>)}
-          </select>
+            <option value="gemini-embedding-001">Gemini Embedding 001</option>
+            <option value="gemini-embedding-exp-03-07">Gemini Embedding Exp</option>
+          </datalist>
         </F>
         <F label="輸入價格/1M (第1段)">
           <input type="number" step="0.01" placeholder="0.00" value={form.price_input}
@@ -107,6 +116,7 @@ function PriceSettings({ llmModels }: { llmModels: LlmModel[] }) {
   const [prices, setPrices] = useState<TokenPrice[]>([])
   const [loading, setLoading] = useState(false)
   const [editId, setEditId] = useState<number | null>(null)
+  const [saveError, setSaveError] = useState('')
 
   const emptyForm = () => ({
     model: llmModels[0]?.key || 'pro',
@@ -150,11 +160,19 @@ function PriceSettings({ llmModels }: { llmModels: LlmModel[] }) {
   })
 
   const handleAdd = async () => {
-    if (!form.start_date || !form.price_input || !form.price_output) return
-    await api.post('/admin/token-prices', buildPayload())
-    setForm(emptyForm())
-    setAdding(false)
-    load()
+    setSaveError('')
+    if (!form.model.trim()) return setSaveError('請填寫模型名稱')
+    if (!form.start_date) return setSaveError('請填寫生效日期')
+    if (!form.price_input) return setSaveError('請填寫輸入價格')
+    if (!form.price_output && form.price_output !== '0') return setSaveError('請填寫輸出價格（純 embedding 填 0）')
+    try {
+      await api.post('/admin/token-prices', buildPayload())
+      setForm(emptyForm())
+      setAdding(false)
+      load()
+    } catch (e: unknown) {
+      setSaveError((e as any)?.response?.data?.error || '儲存失敗')
+    }
   }
 
   const handleDelete = async (id: number) => {
@@ -182,9 +200,14 @@ function PriceSettings({ llmModels }: { llmModels: LlmModel[] }) {
 
   const handleSaveEdit = async () => {
     if (!editId) return
-    await api.put(`/admin/token-prices/${editId}`, buildPayload())
-    setEditId(null)
-    load()
+    setSaveError('')
+    try {
+      await api.put(`/admin/token-prices/${editId}`, buildPayload())
+      setEditId(null)
+      load()
+    } catch (e: unknown) {
+      setSaveError((e as any)?.response?.data?.error || '儲存失敗')
+    }
   }
 
   return (
@@ -203,7 +226,8 @@ function PriceSettings({ llmModels }: { llmModels: LlmModel[] }) {
         </div>
       </div>
 
-      {adding && <InlineForm form={form} setForm={setForm} llmModels={llmModels} onSave={handleAdd} onCancel={() => setAdding(false)} />}
+      {saveError && <div className="px-4 py-2 text-xs text-red-600 bg-red-50 border-b border-red-200">{saveError}</div>}
+      {adding && <InlineForm form={form} setForm={setForm} llmModels={llmModels} onSave={handleAdd} onCancel={() => { setAdding(false); setSaveError('') }} />}
 
       <table className="w-full text-sm">
         <thead className="bg-slate-50 border-b border-slate-200">

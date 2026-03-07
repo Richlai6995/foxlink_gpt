@@ -14,23 +14,28 @@ const ORG_COLS = `u.dept_code, u.dept_name, u.profit_center, u.profit_center_nam
 router.get('/', async (req, res) => {
   try {
     const db = require('../database-oracle').db;
-    const users = await db
-      .prepare(
-        `SELECT u.id, u.username, u.name, u.employee_id, u.email, u.role,
+    const { search } = req.query;
+    let sql = `SELECT u.id, u.username, u.name, u.employee_id, u.email, u.role,
                 TO_CHAR(u.start_date, 'YYYY-MM-DD') AS start_date,
                 TO_CHAR(u.end_date, 'YYYY-MM-DD') AS end_date,
                 u.status,
                 u.allow_text_upload, u.text_max_mb, u.allow_audio_upload, u.audio_max_mb,
                 u.allow_image_upload, u.image_max_mb, u.allow_scheduled_tasks,
                 u.allow_create_skill, u.allow_external_skill, u.allow_code_skill,
+                u.can_create_kb, u.kb_max_size_mb, u.kb_max_count, u.can_deep_research,
                 u.role_id, r.name AS role_name, u.creation_method,
                 u.budget_daily, u.budget_weekly, u.budget_monthly,
                 ${ORG_COLS}
          FROM users u
-         LEFT JOIN roles r ON r.id = u.role_id
-         ORDER BY u.id ASC`
-      )
-      .all();
+         LEFT JOIN roles r ON r.id = u.role_id`;
+    const params = [];
+    if (search) {
+      const like = `%${search}%`;
+      sql += ` WHERE (UPPER(u.name) LIKE UPPER(?) OR UPPER(u.username) LIKE UPPER(?) OR u.employee_id LIKE ?)`;
+      params.push(like, like, like);
+    }
+    sql += ` ORDER BY u.id ASC`;
+    const users = await db.prepare(sql).all(...params);
     res.json(users);
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -119,6 +124,8 @@ router.put('/:id', async (req, res) => {
     allow_image_upload, image_max_mb, allow_scheduled_tasks, role_id,
     budget_daily, budget_weekly, budget_monthly,
     allow_create_skill, allow_external_skill, allow_code_skill,
+    can_create_kb, kb_max_size_mb, kb_max_count,
+    can_deep_research,
     // allow manual override of org fields from UI
     dept_code, dept_name, profit_center, profit_center_name,
     org_section, org_section_name, org_group_name, factory_code, org_end_date,
@@ -146,6 +153,10 @@ router.put('/:id', async (req, res) => {
       resolveSkillPerm(allow_create_skill !== undefined ? allow_create_skill : null),
       resolveSkillPerm(allow_external_skill !== undefined ? allow_external_skill : null),
       resolveSkillPerm(allow_code_skill !== undefined ? allow_code_skill : null),
+      resolveSkillPerm(can_create_kb !== undefined ? can_create_kb : null),
+      kb_max_size_mb != null ? Number(kb_max_size_mb) : null,
+      kb_max_count   != null ? Number(kb_max_count)   : null,
+      can_deep_research !== undefined ? resolveSkillPerm(can_deep_research) : null,
     ];
 
     const orgParams = [
@@ -167,7 +178,8 @@ router.put('/:id', async (req, res) => {
              allow_text_upload=?, text_max_mb=?, allow_audio_upload=?, audio_max_mb=?,
              allow_image_upload=?, image_max_mb=?, allow_scheduled_tasks=?, role_id=?,
              budget_daily=?, budget_weekly=?, budget_monthly=?,
-             allow_create_skill=?, allow_external_skill=?, allow_code_skill=?`;
+             allow_create_skill=?, allow_external_skill=?, allow_code_skill=?,
+             can_create_kb=?, kb_max_size_mb=?, kb_max_count=?, can_deep_research=?`;
     const orgSet = hasOrgOverride
       ? `, dept_code=?, dept_name=?, profit_center=?, profit_center_name=?,
            org_section=?, org_section_name=?, org_group_name=?, factory_code=?, org_end_date=${D}`

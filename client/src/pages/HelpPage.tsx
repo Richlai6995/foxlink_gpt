@@ -136,6 +136,7 @@ const userSections = [
   { id: 'u-output', label: '複製與下載', icon: <Download size={18} /> },
   { id: 'u-share', label: '分享對話', icon: <Share2 size={18} /> },
   { id: 'u-skill', label: '技能 Skill', icon: <Sparkles size={18} /> },
+  { id: 'u-kb', label: '知識庫市集', icon: <Database size={18} /> },
   { id: 'u-budget', label: '使用金額提示', icon: <DollarSign size={18} /> },
 ]
 
@@ -673,6 +674,107 @@ function UserManual() {
         </SubSection>
       </Section>
 
+      <Section id="u-kb" icon={<Database size={22} />} iconColor="text-teal-500" title="知識庫市集">
+        <Para>
+          知識庫市集讓您可以將企業內部文件向量化，建立專屬的語意搜尋資料庫。
+          對話時掛載知識庫，AI 會先從知識庫檢索最相關的段落，再結合自身能力回答，
+          大幅提升對特定領域文件（如 SOP、技術手冊、規格書）的回答準確度。
+        </Para>
+
+        <SubSection title="前提條件">
+          <Para>需要系統管理員授予「允許建立知識庫」權限，以及設定容量與數量上限後，才會在側邊欄「更多功能」選單看到「知識庫市集」入口。</Para>
+          <TipBox>若無建立權限，仍可使用管理員或其他人共享（permission = use）給您的知識庫進行對話，無需建立自己的知識庫。</TipBox>
+        </SubSection>
+
+        <SubSection title="建立知識庫">
+          <div className="space-y-3">
+            <StepItem num={1} title="點選「知識庫市集」→「+ 建立知識庫」" />
+            <StepItem num={2} title="填寫名稱、描述（必填名稱）" />
+            <StepItem num={3} title="選擇 Embedding 維度" desc="768 維適合大多數情況；1536 / 3072 精度更高但費用也較高，且建立後無法更改" />
+            <StepItem num={4} title="選擇分塊策略" desc="「常規分段」：依段落切分，適合一般文件；「父子分塊」：大塊作背景、小塊用來檢索，適合長篇技術文件" />
+            <StepItem num={5} title="選擇檢索模式" desc="「向量檢索」：語意相似度；「全文檢索」：關鍵字比對；「混合檢索」：兩者結合（建議）" />
+            <StepItem num={6} title="選擇 OCR 模型（選填）" desc="上傳文件時用來解析圖片/PDF 內圖片的 Gemini 模型，預設使用系統設定的 Flash 模型" />
+            <StepItem num={7} title="點選「建立」，進入知識庫詳情頁" />
+          </div>
+        </SubSection>
+
+        <SubSection title="上傳文件">
+          <Para>
+            進入知識庫後，點選「文件」頁籤，拖曳或點選上傳區域選擇檔案。
+            支援格式：<strong>PDF · DOCX · PPTX · XLSX · TXT · CSV · JPG · PNG · GIF · WEBP</strong>（單檔最大 200 MB）。
+          </Para>
+          <div className="space-y-2">
+            <StepItem num={1} title="選取一或多個檔案上傳" desc="多檔會循序處理，避免同時佔用 AI 配額" />
+            <StepItem num={2} title="系統自動解析文字並進行 Embedding 向量化" desc="圖片與 PDF 中的圖片會先 OCR 轉文字，再一起向量化" />
+            <StepItem num={3} title="狀態變為綠色勾選代表處理完成" desc="若出現紅色 ✗ 請查看錯誤訊息，常見原因：檔案格式不符或 AI 服務暫時中斷" />
+          </div>
+          <NoteBox>大型文件（如含大量圖片的 DOCX）處理時間可能較長，頁面每隔幾秒會自動重新整理狀態，請耐心等待。</NoteBox>
+        </SubSection>
+
+        <SubSection title="在對話中使用知識庫">
+          <div className="space-y-3">
+            <StepItem num={1} title="開啟或新建一個對話" />
+            <StepItem num={2} title="點選頂部工具列的「知識庫」按鈕（綠色）" />
+            <StepItem num={3} title="在下拉選單中勾選一或多個要使用的知識庫，點「確認」" />
+            <StepItem num={4} title="發送訊息，AI 會先檢索知識庫再組合回答" desc="回覆中如有引用文件段落，AI 通常會說明來源文件名稱" />
+          </div>
+          <TipBox>可以同時掛載「自建知識庫」＋「DIFY 知識庫」＋「MCP 工具」，AI 會綜合所有來源回答。</TipBox>
+        </SubSection>
+
+        <SubSection title="召回測試（檢索測試）">
+          <Para>
+            進入知識庫詳情 → 點選「召回測試」頁籤，輸入任意問題，系統會模擬真實對話的檢索流程，
+            顯示前幾名相關段落、相似度分數及比對方式（向量 / 全文 / 混合），幫助您調整設定參數。
+          </Para>
+        </SubSection>
+
+        <SubSection title="共享知識庫">
+          <Para>
+            進入知識庫詳情 → 點選「共享設定」頁籤，可將知識庫共享給特定使用者、角色、部門或組織單位。
+          </Para>
+          <Table
+            headers={['共享方式', '對象']}
+            rows={[
+              ['使用者', '指定單一帳號'],
+              ['角色', '系統管理員定義的角色群組（如研發部）'],
+              ['部門', '依 ERP 組織同步的部門代碼'],
+              ['利潤中心', '依利潤中心共享'],
+              ['組織課室', '依課室共享'],
+            ]}
+          />
+          <Table
+            headers={['共享權限', '說明']}
+            rows={[
+              ['use（僅使用）', '被共享者可在對話中掛載此知識庫，但無法在知識庫市集列表中看到或進入設定頁'],
+              ['edit（可編輯）', '被共享者可在市集中看到並進入此知識庫，可上傳文件、修改設定'],
+            ]}
+          />
+        </SubSection>
+
+        <SubSection title="申請公開">
+          <Para>
+            若希望全體員工都能看到並使用此知識庫，可在「共享設定」頁籤點選「申請設為公開」，
+            送出申請後需等待系統管理員審核通過，審核後知識庫會對所有人開放（唯讀使用，不可編輯）。
+          </Para>
+        </SubSection>
+
+        <SubSection title="分段與檢索設定調整">
+          <Para>進入知識庫詳情 → 點選「分塊與檢索設定」頁籤，可隨時調整以下參數（調整後不需重新上傳文件，下次對話立即生效）：</Para>
+          <Table
+            headers={['參數', '說明', '建議值']}
+            rows={[
+              ['分段識別符號', '用來切分段落的符號', '\\n\\n（空白行）'],
+              ['分段最大長度', '每個 chunk 的字元上限', '512–1024'],
+              ['重疊長度', '前後 chunk 共享的字元數，避免重要資訊被截斷', '50–100'],
+              ['初始擷取 Top K', '向量/全文各抓幾條候選結果', '10–20'],
+              ['最終返回 Top K', '重排序後送給 AI 的最終條數', '3–5'],
+              ['Score 閾值', '相似度低於此值的結果會被丟棄（0–1）', '0.3–0.5'],
+              ['OCR 模型', '處理圖片的 Gemini 模型', 'Flash（快速省成本）'],
+            ]}
+          />
+        </SubSection>
+      </Section>
+
       <Section id="u-budget" icon={<DollarSign size={22} />} iconColor="text-emerald-500" title="使用金額提示">
         <Para>
           若系統管理員為您的帳號設定了使用金額上限，對話頁面頂部工具列會出現金額指示器，
@@ -718,6 +820,7 @@ const adminSections = [
   { id: 'a-audit', label: '稽核與敏感詞', icon: <Shield size={18} /> },
   { id: 'a-mcp', label: 'MCP 伺服器', icon: <Globe size={18} /> },
   { id: 'a-dify', label: 'DIFY 知識庫', icon: <Zap size={18} /> },
+  { id: 'a-kb', label: '自建知識庫管理', icon: <Database size={18} /> },
   { id: 'a-skill', label: '技能市集管理', icon: <Sparkles size={18} /> },
   { id: 'a-code-runners', label: 'Code Runners', icon: <Code2 size={18} /> },
   { id: 'a-llm', label: 'LLM 模型管理', icon: <Cpu size={18} /> },
@@ -894,6 +997,85 @@ function AdminManual() {
             AI 只能存取這些已授權的工具，未勾選的工具不會出現在其對話中。
           </Para>
           <NoteBox>若角色未綁定任何 MCP / DIFY，系統預設讓所有已啟用的工具對使用者可見。建議明確綁定，以避免機密知識庫意外對不相關部門開放。</NoteBox>
+        </SubSection>
+      </Section>
+
+      <Section id="a-kb" icon={<Database size={22} />} iconColor="text-teal-500" title="自建知識庫管理">
+        <Para>
+          管理員可在後台管控全體使用者自建的知識庫，包含審核公開申請、調整使用者建立權限與配額、
+          以及瀏覽、刪除任何知識庫。
+        </Para>
+
+        <SubSection title="使用者知識庫權限設定">
+          <Para>在「使用者管理」或「角色管理」中設定：</Para>
+          <Table
+            headers={['欄位', '說明', '預設值']}
+            rows={[
+              ['允許建立知識庫', '開啟後使用者才能在側邊欄看到知識庫市集入口並建立知識庫', '繼承角色設定'],
+              ['最大容量 (MB)', '該使用者所有知識庫文件的總容量上限', '500 MB'],
+              ['最大數量', '該使用者可建立的知識庫數量上限', '5 個'],
+            ]}
+          />
+          <TipBox>使用者層級的設定優先於角色設定。例如角色允許建立，但使用者明確設為「否」，則以使用者設定為準。若使用者設為「繼承」，才會套用角色的設定。</TipBox>
+          <NoteBox>管理員帳號不受任何配額限制，可建立無限數量與容量的知識庫。</NoteBox>
+        </SubSection>
+
+        <SubSection title="審核公開申請">
+          <Para>
+            當使用者在知識庫共享設定中點選「申請設為公開」，管理員會在後台「知識庫管理」看到待審核項目。
+          </Para>
+          <div className="space-y-3">
+            <StepItem num={1} title="進入系統管理 → 知識庫管理頁籤" />
+            <StepItem num={2} title="找到 public_status = 'pending' 的知識庫" />
+            <StepItem num={3} title="審查內容是否適合公開（無敏感資訊、無著作權疑慮等）" />
+            <StepItem num={4} title="點選「核准公開」或「拒絕」" desc="核准後 is_public = 1，所有使用者可在對話中看到並掛載此知識庫" />
+          </div>
+          <NoteBox>公開知識庫對所有人開放「僅使用（use）」權限，不開放編輯。若要撤銷公開，可將 is_public 改回 0。</NoteBox>
+        </SubSection>
+
+        <SubSection title="知識庫全覽與管理">
+          <Para>管理員在知識庫市集可看到所有使用者的知識庫，並可執行以下操作：</Para>
+          <Table
+            headers={['操作', '說明']}
+            rows={[
+              ['查看文件', '進入任意知識庫，查看已上傳的文件、分塊狀態及錯誤訊息'],
+              ['召回測試', '測試知識庫的檢索效果，調整分段與 Score 閾值'],
+              ['修改設定', '調整分段策略、檢索模式、OCR 模型等參數'],
+              ['共享管理', '新增或移除共享對象，調整 use / edit 權限'],
+              ['刪除知識庫', '刪除後所有文件及向量資料一併清除，不可恢復'],
+            ]}
+          />
+        </SubSection>
+
+        <SubSection title="Token 費用說明">
+          <Para>知識庫產生的 Token 費用記錄在建立者帳號下，分兩類：</Para>
+          <Table
+            headers={['類型', '模型', '計費時機']}
+            rows={[
+              ['Embedding 費用', 'gemini-embedding-001（或設定值）', '每次文件上傳向量化時，按輸入 Token 計費'],
+              ['OCR 費用', '知識庫設定的 OCR 模型（預設 Flash）', '文件含圖片或 PDF 時，按輸入 + 輸出 Token 計費'],
+            ]}
+          />
+          <TipBox>可在「Token 與費用統計」頁面篩選 model = gemini-embedding-001 或 OCR 模型，查看各使用者的知識庫建立成本。</TipBox>
+        </SubSection>
+
+        <SubSection title="系統預設值（.env 設定）">
+          <Table
+            headers={['環境變數', '說明', '預設值']}
+            rows={[
+              ['KB_EMBEDDING_MODEL', '向量化使用的 Embedding 模型', 'gemini-embedding-001'],
+              ['KB_EMBEDDING_DIMS', '預設 Embedding 維度', '768'],
+              ['KB_OCR_MODEL', '圖片 / PDF OCR 使用的 Gemini 模型（可被每個 KB 的設定覆蓋）', 'gemini-3-flash-preview'],
+              ['KB_PDF_OCR_MAX_MB', 'PDF 以 Gemini 解析的最大檔案大小，超過則 fallback 純文字層', '18 MB'],
+              ['KB_RERANK_MODEL', '混合檢索重排序模型', 'gemini-2.0-flash'],
+              ['KB_RERANK_TOP_K_FETCH', '初始擷取 Top K', '10'],
+              ['KB_RERANK_TOP_K_RETURN', '最終返回 Top K', '3'],
+              ['KB_RERANK_SCORE_THRESHOLD', 'Score 閾值', '0.5'],
+              ['KB_ALLOW_ADMIN_CREATE', '管理員是否可建立知識庫', 'true'],
+              ['KB_ALLOW_USER_CREATE', '一般使用者預設是否可建立', 'false'],
+            ]}
+          />
+          <NoteBox>KB_ALLOW_USER_CREATE=false 只是系統預設值，管理員仍可個別為使用者或角色開啟「允許建立知識庫」。</NoteBox>
         </SubSection>
       </Section>
 

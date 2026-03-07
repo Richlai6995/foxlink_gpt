@@ -473,6 +473,7 @@ CREATE TABLE kb_access (
   grantee_id      VARCHAR2(200) NOT NULL,
   granted_by_type VARCHAR2(10) NOT NULL,   -- creator | admin
   granted_by_uid  NUMBER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  permission      VARCHAR2(10) DEFAULT 'use' NOT NULL,  -- use | edit
   granted_at      TIMESTAMP DEFAULT SYSTIMESTAMP,
   CONSTRAINT kb_access_uk UNIQUE (kb_id, grantee_type, grantee_id)
 )'; EXCEPTION WHEN OTHERS THEN IF SQLCODE = -955 THEN NULL; ELSE RAISE; END IF; END;
@@ -488,6 +489,7 @@ CREATE TABLE kb_documents (
   file_size    NUMBER,
   content      CLOB,
   word_count   NUMBER,
+  chunk_count  NUMBER DEFAULT 0,
   status       VARCHAR2(20) DEFAULT ''processing'',
   error_msg    CLOB,
   created_at   TIMESTAMP DEFAULT SYSTIMESTAMP,
@@ -498,16 +500,17 @@ CREATE TABLE kb_documents (
 -- ─── KB CHUNKS (with VECTOR for semantic search) ──────────────────────────────
 BEGIN EXECUTE IMMEDIATE '
 CREATE TABLE kb_chunks (
-  id          VARCHAR2(36) PRIMARY KEY,
-  doc_id      VARCHAR2(36) NOT NULL REFERENCES kb_documents(id) ON DELETE CASCADE,
-  kb_id       VARCHAR2(36) NOT NULL REFERENCES knowledge_bases(id) ON DELETE CASCADE,
-  parent_id   VARCHAR2(36),   -- NULL = self is parent (regular / parent-chunk)
-  chunk_type  VARCHAR2(10) DEFAULT ''regular'',  -- regular | parent | child
-  content     CLOB NOT NULL,
-  position    NUMBER NOT NULL,
-  token_count NUMBER,
-  embedding   VECTOR(768, FLOAT32),  -- default 768; migration needed if dims change
-  created_at  TIMESTAMP DEFAULT SYSTIMESTAMP
+  id             VARCHAR2(36) PRIMARY KEY,
+  doc_id         VARCHAR2(36) NOT NULL REFERENCES kb_documents(id) ON DELETE CASCADE,
+  kb_id          VARCHAR2(36) NOT NULL REFERENCES knowledge_bases(id) ON DELETE CASCADE,
+  parent_id      VARCHAR2(36),   -- NULL = self is parent (regular / parent-chunk)
+  chunk_type     VARCHAR2(10) DEFAULT ''regular'',  -- regular | parent | child
+  content        CLOB NOT NULL,
+  parent_content CLOB,
+  position       NUMBER NOT NULL,
+  token_count    NUMBER,
+  embedding      VECTOR(*, FLOAT32),     -- wildcard dims: supports 768 / 1536 / 3072
+  created_at     TIMESTAMP DEFAULT SYSTIMESTAMP
 )'; EXCEPTION WHEN OTHERS THEN IF SQLCODE = -955 THEN NULL; ELSE RAISE; END IF; END;
 /
 

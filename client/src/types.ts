@@ -150,6 +150,25 @@ export interface ScheduledTask {
   username?: string
 }
 
+export interface ResearchJob {
+  id: string
+  title: string
+  question?: string
+  plan_json?: string
+  status: 'pending' | 'running' | 'done' | 'failed'
+  progress_step: number
+  progress_total: number
+  progress_label: string | null
+  use_web_search: number
+  output_formats: string
+  result_summary: string | null
+  result_files_json: string | null
+  error_msg: string | null
+  is_notified: number
+  created_at: string
+  completed_at: string | null
+}
+
 export interface TaskRun {
   id: number
   task_id: number

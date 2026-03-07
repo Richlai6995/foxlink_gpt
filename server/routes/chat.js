@@ -10,6 +10,142 @@ const { processGenerateBlocks } = require('../services/fileGenerator');
 const { notifyAdminSensitiveKeyword } = require('../services/mailService');
 const mcpClient = require('../services/mcpClient');
 
+// ── Self-Built Knowledge Base — function-calling approach ────────────────────
+
+/** Load accessible self-built KBs for a user and return Gemini function declarations. */
+async function getSelfKbDeclarations(db, userId) {
+  try {
+    const user = await db.prepare(
+      'SELECT role, dept_code, profit_center, org_section, org_group_name, role_id FROM users WHERE id=?'
+    ).get(userId);
+    if (!user) return { declarations: [], kbMap: {} };
+
+    let kbs;
+    if (user.role === 'admin') {
+      kbs = await db.prepare(
+        `SELECT id, name, description, retrieval_mode, embedding_dims, top_k_return, score_threshold
+         FROM knowledge_bases WHERE chunk_count > 0 ORDER BY name ASC`
+      ).all();
+    } else {
+      kbs = await db.prepare(`
+        SELECT kb.id, kb.name, kb.description, kb.retrieval_mode, kb.embedding_dims, kb.top_k_return, kb.score_threshold
+        FROM knowledge_bases kb
+        WHERE kb.chunk_count > 0 AND (
+          kb.creator_id=?
+          OR kb.is_public=1
+          OR EXISTS (
+            SELECT 1 FROM kb_access ka WHERE ka.kb_id=kb.id AND (
+              (ka.grantee_type='user'         AND ka.grantee_id=TO_CHAR(?))
+              OR (ka.grantee_type='role'      AND ka.grantee_id=TO_CHAR(?))
+              OR (ka.grantee_type='dept'      AND ka.grantee_id=? AND ? IS NOT NULL)
+              OR (ka.grantee_type='profit_center' AND ka.grantee_id=? AND ? IS NOT NULL)
+              OR (ka.grantee_type='org_section'   AND ka.grantee_id=? AND ? IS NOT NULL)
+              OR (ka.grantee_type='org_group'     AND ka.grantee_id=? AND ? IS NOT NULL)
+            )
+          )
+        )
+        ORDER BY kb.name ASC
+      `).all(
+        userId,
+        userId, user.role_id,
+        user.dept_code, user.dept_code,
+        user.profit_center, user.profit_center,
+        user.org_section, user.org_section,
+        user.org_group_name, user.org_group_name,
+      );
+    }
+
+    const declarations = [];
+    const kbMap = {};
+    for (const kb of kbs) {
+      const safeName = `selfkb_${kb.id.replace(/-/g, '_')}`;
+      const scopeText = kb.description ? `適用範疇：${kb.description}` : `企業自建知識庫「${kb.name}」`;
+      declarations.push({
+        name: safeName,
+        description: `自建知識庫查詢「${kb.name}」。${scopeText}。呼叫規則：(1) 使用者問題核心意圖必須明確屬於上述範疇才呼叫；(2) 每次對話此工具只呼叫一次，已呼叫後不得重複呼叫。`,
+        parameters: {
+          type: 'object',
+          properties: { query: { type: 'string', description: '要查詢的問題' } },
+          required: ['query'],
+        },
+      });
+      kbMap[safeName] = kb;
+    }
+    return { declarations, kbMap };
+  } catch (e) {
+    console.warn('[SelfKB] Failed to load KBs:', e.message);
+    return { declarations: [], kbMap: {} };
+  }
+}
+
+/** Execute a search against a self-built KB and return formatted result text. */
+async function executeSelfKbSearch(db, kb, query) {
+  const t0 = Date.now();
+  try {
+    const { embedText, toVectorStr } = require('../services/kbEmbedding');
+    const mode   = kb.retrieval_mode || 'hybrid';
+    const topK   = Math.min(Number(kb.top_k_return) || 5, 20);
+    const dims   = kb.embedding_dims || 768;
+    const thresh = Number(kb.score_threshold) || 0;
+
+    let results = [];
+
+    if (mode === 'vector' || mode === 'hybrid') {
+      const qEmb    = await embedText(query, { dims });
+      const qVecStr = toVectorStr(qEmb);
+      const fetchK  = Math.min(topK * 3, 60);
+      const rows = await db.prepare(`
+        SELECT c.id, c.content, c.parent_content, d.filename,
+               VECTOR_DISTANCE(c.embedding, TO_VECTOR(?), COSINE) AS vector_score
+        FROM kb_chunks c JOIN kb_documents d ON d.id = c.doc_id
+        WHERE c.kb_id=? AND c.chunk_type != 'parent'
+        ORDER BY vector_score ASC FETCH FIRST ? ROWS ONLY
+      `).all(qVecStr, kb.id, fetchK);
+      results = rows.map((r) => ({ ...r, score: 1 - (r.vector_score || 0), match_type: 'vector' }));
+    }
+
+    if (mode === 'fulltext' || mode === 'hybrid') {
+      const likeQ = `%${query.replace(/[%_]/g, '\\$&')}%`;
+      const ftRows = await db.prepare(`
+        SELECT c.id, c.content, c.parent_content, d.filename, 1 AS vector_score
+        FROM kb_chunks c JOIN kb_documents d ON d.id = c.doc_id
+        WHERE c.kb_id=? AND c.chunk_type != 'parent' AND UPPER(c.content) LIKE UPPER(?)
+        FETCH FIRST ? ROWS ONLY
+      `).all(kb.id, likeQ, topK * 2);
+
+      if (mode === 'fulltext') {
+        results = ftRows.map((r) => ({ ...r, score: 0.5, match_type: 'fulltext' }));
+      } else {
+        const vecIds = new Set(results.map((r) => r.id));
+        for (const r of ftRows) {
+          if (vecIds.has(r.id)) {
+            const ex = results.find((x) => x.id === r.id);
+            if (ex) { ex.score = Math.min(1, ex.score + 0.15); ex.match_type = 'hybrid'; }
+          } else {
+            results.push({ ...r, score: 0.4, match_type: 'fulltext' });
+          }
+        }
+      }
+    }
+
+    results = results.filter((r) => r.score >= thresh).sort((a, b) => b.score - a.score).slice(0, topK);
+
+    const elapsed = Date.now() - t0;
+    console.log(`[SelfKB] KB "${kb.name}" search done in ${elapsed}ms, results=${results.length}`);
+
+    if (results.length === 0) return `[知識庫「${kb.name}」未找到相關內容]`;
+
+    const chunks = results.map((r, i) => {
+      const context = r.parent_content ? `上下文：${r.parent_content.slice(0, 300)}\n\n片段：` : '';
+      return `[${i + 1}] 來源: ${r.filename} (相關度 ${(r.score * 100).toFixed(0)}%)\n${context}${r.content}`;
+    });
+    return `【來自知識庫「${kb.name}」的相關內容】\n\n${chunks.join('\n\n---\n\n')}`;
+  } catch (e) {
+    console.error(`[SelfKB] Search failed for KB "${kb.name}":`, e.message);
+    return `[知識庫「${kb.name}」查詢失敗: ${e.message}]`;
+  }
+}
+
 // ── DIFY Knowledge Base — function-calling approach ──────────────────────────
 // Per-session conversation_id cache: Map<sessionId, Map<kbId, conversationId>>
 const difyConvIds = new Map();
@@ -439,6 +575,17 @@ router.post('/sessions/:id/messages', upload.array('files', 10), async (req, res
   }
 
   const { message = '', model } = req.body;
+
+  // Explicit tool selection sent by the UI (JSON arrays or undefined)
+  // When present (even as '[]'), skip auto-discovery + intent filtering for that category.
+  function parseIds(raw) {
+    if (raw === undefined || raw === null) return null;
+    try { const v = JSON.parse(raw); return Array.isArray(v) ? v : null; } catch { return null; }
+  }
+  const userMcpIds   = parseIds(req.body.mcp_server_ids);  // number[] | null
+  const userDifyIds  = parseIds(req.body.dify_kb_ids);      // number[] | null
+  const userSelfKbIds = parseIds(req.body.self_kb_ids);     // string[] | null
+  const explicitMode = userMcpIds !== null || userDifyIds !== null || userSelfKbIds !== null;
   const uploadedFiles = req.files || [];
 
   // Load per-user upload permissions
@@ -1049,129 +1196,221 @@ router.post('/sessions/:id/messages', upload.array('files', 10), async (req, res
       displayText = text || (savedImages.length > 0 ? `已生成 ${savedImages.length} 張圖片` : '圖片生成失敗');
       console.log(`[Chat] Image gen done in ${Date.now() - t0}ms, images=${imgResult.images.length} in=${inputTokens} out=${outputTokens}`);
     } else {
-      // ── Get user role and build combined MCP + DIFY tool declarations ────
+      // ── Get user role ─────────────────────────────────────────────────────
       const userRoleRow = await db.prepare(`SELECT role_id FROM users WHERE id=?`).get(req.user.id);
       const roleId = userRoleRow?.role_id || null;
-      const { functionDeclarations: allMcpDecls, serverMap } = await mcpClient.getActiveToolDeclarations(db, roleId);
-      const { declarations: difyDecls, kbMap } = await getDifyFunctionDeclarations(db, roleId);
 
-      // ── Apply Skill MCP tool mode filtering ─────────────────────────────
-      // Resolve mcp_tool_ids from each skill (stored as JSON string in DB)
-      const skillMcpRules = sessionSkills
-        .filter(sk => sk.mcp_tool_mode && sk.mcp_tool_mode !== 'append' || (sk.mcp_tool_ids && sk.mcp_tool_ids !== '[]' && sk.mcp_tool_ids !== 'null'))
-        .map(sk => ({
-          mode: sk.mcp_tool_mode || 'append',
-          serverIds: (() => {
-            try { return JSON.parse(sk.mcp_tool_ids || '[]'); } catch { return []; }
-          })(),
-        }))
-        .filter(r => r.mode !== 'append' || r.serverIds.length > 0);
+      // Shared maps for toolHandler (populated below regardless of mode)
+      let serverMap = {}, kbMap = {}, selfKbMap = {};
+      let allDeclarations = [];
 
-      let filteredAllMcpDecls = allMcpDecls;
-
-      if (skillMcpRules.length > 0) {
-        // If ANY skill says disable → clear all MCP tools
-        const hasDisable = skillMcpRules.some(r => r.mode === 'disable');
-        if (hasDisable) {
-          filteredAllMcpDecls = [];
-          console.log('[Skill] MCP tool mode=disable → all MCP tools removed');
-        } else {
-          // Collect exclusive server id sets (union across exclusive skills)
-          const exclusiveServerIds = new Set();
-          const appendServerIds = new Set();
-          let hasExclusive = false;
-
-          for (const rule of skillMcpRules) {
-            if (rule.mode === 'exclusive') {
-              hasExclusive = true;
-              rule.serverIds.forEach(id => exclusiveServerIds.add(id));
-            } else if (rule.mode === 'append') {
-              rule.serverIds.forEach(id => appendServerIds.add(id));
-            }
-          }
-
-          if (hasExclusive) {
-            // exclusive: only keep tools from exclusiveServerIds ∪ appendServerIds
-            const allowedServerIds = new Set([...exclusiveServerIds, ...appendServerIds]);
-            filteredAllMcpDecls = allMcpDecls.filter(decl => {
-              const entry = serverMap[decl.name];
-              return entry && allowedServerIds.has(entry.server.id);
+      if (explicitMode) {
+        // ── Explicit selection mode: user chose tools manually, skip intent filtering ──
+        if (userMcpIds && userMcpIds.length > 0) {
+          const { functionDeclarations: allMcpDecls, serverMap: sm } = await mcpClient.getActiveToolDeclarations(db, roleId);
+          serverMap = sm;
+          // Apply Skill MCP disable rule (safety constraint)
+          const hasSkillDisable = sessionSkills.some(sk => sk.mcp_tool_mode === 'disable');
+          if (!hasSkillDisable) {
+            const selectedIds = userMcpIds.map(Number);
+            const selected = allMcpDecls.filter(d => {
+              const entry = sm[d.name];
+              return entry && selectedIds.includes(Number(entry.server.id));
             });
-            console.log(`[Skill] MCP tool mode=exclusive, allowed servers=${[...allowedServerIds].join(',')}, tools=${filteredAllMcpDecls.length}`);
-          } else if (appendServerIds.size > 0) {
-            // append: forced-include servers even if role didn't assign them
-            const alreadyIncluded = new Set(allMcpDecls.map(d => serverMap[d.name]?.server.id));
-            const toForceAdd = [...appendServerIds].filter(id => !alreadyIncluded.has(id));
-            if (toForceAdd.length > 0) {
-              // load those extra servers directly
-              const extraDecls = [];
-              for (const sid of toForceAdd) {
-                const srv = await db.prepare(`SELECT * FROM mcp_servers WHERE id=? AND is_active=1`).get(sid);
-                if (!srv || !srv.tools_json) continue;
-                try {
-                  const tools = JSON.parse(srv.tools_json);
-                  for (const tool of tools) {
-                    if (!tool.name) continue;
-                    const safeName = tool.name.replace(/[^a-zA-Z0-9_]/g, '_');
-                    extraDecls.push({ name: safeName, description: tool.description || tool.name, parameters: tool.inputSchema || { type: 'object', properties: {} } });
-                    serverMap[safeName] = { server: srv, originalName: tool.name };
-                  }
-                } catch (_) { }
+            allDeclarations.push(...selected);
+          }
+        }
+        if (userDifyIds && userDifyIds.length > 0) {
+          const { declarations, kbMap: km } = await getDifyFunctionDeclarations(db, roleId);
+          kbMap = km;
+          const selectedIds = userDifyIds.map(Number);
+          const selected = declarations.filter(d => {
+            const kb = km[d.name];
+            return kb && selectedIds.includes(Number(kb.id));
+          });
+          allDeclarations.push(...selected);
+        }
+        if (userSelfKbIds && userSelfKbIds.length > 0) {
+          const { declarations, kbMap: km } = await getSelfKbDeclarations(db, req.user.id);
+          selfKbMap = km;
+          const selected = declarations.filter(d => {
+            const kb = km[d.name];
+            return kb && userSelfKbIds.includes(String(kb.id));
+          });
+          allDeclarations.push(...selected);
+        }
+        console.log(`[Chat] Explicit tool mode: mcp=${userMcpIds?.length||0} dify=${userDifyIds?.length||0} selfkb=${userSelfKbIds?.length||0} → ${allDeclarations.length} tools`);
+      } else {
+        // ── Auto mode: load all accessible tools + intent filtering ───────────
+        const { functionDeclarations: allMcpDecls, serverMap: sm } = await mcpClient.getActiveToolDeclarations(db, roleId);
+        serverMap = sm;
+        const { declarations: difyDecls, kbMap: km } = await getDifyFunctionDeclarations(db, roleId);
+        kbMap = km;
+        const { declarations: selfKbDecls, kbMap: skm } = await getSelfKbDeclarations(db, req.user.id);
+        selfKbMap = skm;
+
+        // ── Apply Skill MCP tool mode filtering ─────────────────────────────
+        const skillMcpRules = sessionSkills
+          .filter(sk => sk.mcp_tool_mode && sk.mcp_tool_mode !== 'append' || (sk.mcp_tool_ids && sk.mcp_tool_ids !== '[]' && sk.mcp_tool_ids !== 'null'))
+          .map(sk => ({
+            mode: sk.mcp_tool_mode || 'append',
+            serverIds: (() => { try { return JSON.parse(sk.mcp_tool_ids || '[]'); } catch { return []; } })(),
+          }))
+          .filter(r => r.mode !== 'append' || r.serverIds.length > 0);
+
+        let filteredAllMcpDecls = allMcpDecls;
+        if (skillMcpRules.length > 0) {
+          const hasDisable = skillMcpRules.some(r => r.mode === 'disable');
+          if (hasDisable) {
+            filteredAllMcpDecls = [];
+            console.log('[Skill] MCP tool mode=disable → all MCP tools removed');
+          } else {
+            const exclusiveServerIds = new Set();
+            const appendServerIds = new Set();
+            let hasExclusive = false;
+            for (const rule of skillMcpRules) {
+              if (rule.mode === 'exclusive') { hasExclusive = true; rule.serverIds.forEach(id => exclusiveServerIds.add(id)); }
+              else if (rule.mode === 'append') { rule.serverIds.forEach(id => appendServerIds.add(id)); }
+            }
+            if (hasExclusive) {
+              const allowedServerIds = new Set([...exclusiveServerIds, ...appendServerIds]);
+              filteredAllMcpDecls = allMcpDecls.filter(decl => { const e = sm[decl.name]; return e && allowedServerIds.has(e.server.id); });
+              console.log(`[Skill] MCP tool mode=exclusive, allowed servers=${[...allowedServerIds].join(',')}, tools=${filteredAllMcpDecls.length}`);
+            } else if (appendServerIds.size > 0) {
+              const alreadyIncluded = new Set(allMcpDecls.map(d => sm[d.name]?.server.id));
+              const toForceAdd = [...appendServerIds].filter(id => !alreadyIncluded.has(id));
+              if (toForceAdd.length > 0) {
+                const extraDecls = [];
+                for (const sid of toForceAdd) {
+                  const srv = await db.prepare(`SELECT * FROM mcp_servers WHERE id=? AND is_active=1`).get(sid);
+                  if (!srv || !srv.tools_json) continue;
+                  try {
+                    const tools = JSON.parse(srv.tools_json);
+                    for (const tool of tools) {
+                      if (!tool.name) continue;
+                      const safeName = tool.name.replace(/[^a-zA-Z0-9_]/g, '_');
+                      extraDecls.push({ name: safeName, description: tool.description || tool.name, parameters: tool.inputSchema || { type: 'object', properties: {} } });
+                      sm[safeName] = { server: srv, originalName: tool.name };
+                    }
+                  } catch (_) { }
+                }
+                filteredAllMcpDecls = [...allMcpDecls, ...extraDecls];
+                console.log(`[Skill] MCP tool mode=append, force-added ${extraDecls.length} tools from ${toForceAdd.length} servers`);
               }
-              filteredAllMcpDecls = [...allMcpDecls, ...extraDecls];
-              console.log(`[Skill] MCP tool mode=append, force-added ${extraDecls.length} tools from ${toForceAdd.length} servers`);
             }
           }
         }
-      }
-      // ── End Skill MCP filtering ──────────────────────────────────────────
+        // ── End Skill MCP filtering ──────────────────────────────────────────
 
-      // Pass last 4 messages (2 turns) as context so follow-up replies are handled correctly
-      const recentCtx = historyMessages.slice(-4)
-        .map(m => `${m.role === 'user' ? '使用者' : 'AI'}: ${m.content.slice(0, 300)}`)
-        .join('\n');
-      // Intent-filter both MCP tools and DIFY KBs before passing to LLM
-      const [mcpDecls, filteredDifyDecls] = await Promise.all([
-        filterMcpDeclsByIntent(combinedUserText, filteredAllMcpDecls, recentCtx),
-        filterDifyDeclsByIntent(combinedUserText, difyDecls, recentCtx),
-      ]);
-      const allDeclarations = [...mcpDecls, ...filteredDifyDecls];
+        // Intent-filter MCP tools, DIFY KBs, and self-built KBs before passing to LLM
+        const recentCtx = historyMessages.slice(-4)
+          .map(m => `${m.role === 'user' ? '使用者' : 'AI'}: ${m.content.slice(0, 300)}`).join('\n');
+        const [mcpDecls, filteredDifyDecls, filteredSelfKbDecls] = await Promise.all([
+          filterMcpDeclsByIntent(combinedUserText, filteredAllMcpDecls, recentCtx),
+          filterDifyDeclsByIntent(combinedUserText, difyDecls, recentCtx),
+          filterDifyDeclsByIntent(combinedUserText, selfKbDecls, recentCtx),
+        ]);
+        allDeclarations = [...mcpDecls, ...filteredDifyDecls, ...filteredSelfKbDecls];
+      }
+      // ── End tool loading ─────────────────────────────────────────────────
 
       if (allDeclarations.length > 0) {
-        // ── Tool-calling path (MCP and/or DIFY as function declarations) ──
-        const toolCount = mcpDecls.length + filteredDifyDecls.length;
-        sendEvent({ type: 'status', message: `已載入 ${mcpDecls.length} 個 MCP 工具、${filteredDifyDecls.length} 個知識庫` });
+        const mcpCount = allDeclarations.filter(d => !d.name.startsWith('selfkb_') && !kbMap[d.name]).length;
+        const kbTotal  = allDeclarations.length - mcpCount;
 
-        // Track which DIFY KBs have already been queried this turn (prevent double-call)
-        const calledDifyKbs = new Set();
+        // ── Fast path: pure SelfKB only (no MCP, no DIFY) → pre-fetch + stream ──
+        const pureSelfKb = mcpCount === 0 && allDeclarations.every(d => selfKbMap[d.name]);
 
-        const toolHandler = async (toolName, args) => {
-          // DIFY KB call
-          if (kbMap[toolName]) {
-            if (calledDifyKbs.has(toolName)) {
-              console.warn(`[DIFY] Duplicate call prevented for ${toolName}`);
-              return `[知識庫已在本輪查詢過，請直接使用先前的查詢結果]`;
-            }
-            calledDifyKbs.add(toolName);
-            const kb = kbMap[toolName];
-            sendEvent({ type: 'status', message: `查詢知識庫：${kb.name}` });
-            return await executeDifyQuery(db, kb, args.query || combinedUserText, sessionId, req.user.id);
+        if (pureSelfKb) {
+          sendEvent({ type: 'status', message: `查詢 ${kbTotal} 個知識庫...` });
+
+          // Run all KB searches in parallel
+          const kbContextParts = await Promise.all(
+            allDeclarations.map(async (decl) => {
+              const kb = selfKbMap[decl.name];
+              if (!kb) return null;
+              const t1 = Date.now();
+              const result = await executeSelfKbSearch(db, kb, combinedUserText);
+              console.log(`[SelfKB] "${kb.name}" prefetch done in ${Date.now() - t1}ms`);
+              if (!result?.trim()) return null;
+              return `## 知識庫：${kb.name}\n\n${result}`;
+            })
+          );
+
+          const kbContext = kbContextParts.filter(Boolean).join('\n\n---\n\n');
+          const kbInstruction = kbContext
+            ? `以下是從知識庫檢索到的相關資料，請優先根據這些資料回答問題：\n\n${kbContext}`
+            : '';
+
+          sendEvent({ type: 'status', message: 'AI 思考中...' });
+
+          const finalInstruction = [skillExtraInstruction, kbInstruction].filter(Boolean).join('\n\n---\n\n');
+          let firstChunkReceived = false;
+          const keepAliveInterval = setInterval(() => {
+            if (!firstChunkReceived && !clientDisconnected) sendEvent({ type: 'status', message: 'AI 思考中...' });
+            else clearInterval(keepAliveInterval);
+          }, 15000);
+
+          try {
+            ({ text, inputTokens, outputTokens } = await streamChat(
+              apiModel, history, userParts,
+              (chunk) => {
+                if (clientDisconnected) throw new Error('CLIENT_DISCONNECTED');
+                firstChunkReceived = true;
+                aiText += chunk;
+                sendEvent({ type: 'chunk', content: chunk });
+              },
+              finalInstruction,
+              kbContext ? true : disableSearchForSkill  // disable Google Search when KB context injected
+            ));
+          } finally {
+            clearInterval(keepAliveInterval);
           }
-          // MCP tool call
-          const entry = serverMap[toolName];
-          if (!entry) return `[未知工具: ${toolName}]`;
-          sendEvent({ type: 'status', message: `呼叫工具：${toolName}` });
-          return await mcpClient.callTool(db, entry.server, sessionId, req.user.id, entry.originalName, args);
-        };
+          console.log(`[Chat] SelfKB fast-path done in ${Date.now() - t0}ms, kbs=${kbTotal} hasCtx=${!!kbContext} in=${inputTokens} out=${outputTokens} tokens`);
 
-        ({ text, inputTokens, outputTokens } = await generateWithTools(
-          apiModel, history, userParts, allDeclarations, toolHandler, skillExtraInstruction
-        ));
-        if (text) {
-          aiText = text;
-          sendEvent({ type: 'chunk', content: text });
+        } else {
+          // ── Tool-calling path (MCP and/or DIFY mixed) ──────────────────────
+          sendEvent({ type: 'status', message: `已載入 ${mcpCount} 個 MCP 工具、${kbTotal} 個知識庫` });
+
+          const calledDifyKbs = new Set();
+          const calledSelfKbs = new Set();
+
+          const toolHandler = async (toolName, args) => {
+            if (selfKbMap[toolName]) {
+              if (calledSelfKbs.has(toolName)) {
+                console.warn(`[SelfKB] Duplicate call prevented for ${toolName}`);
+                return `[知識庫已在本輪查詢過，請直接使用先前的查詢結果]`;
+              }
+              calledSelfKbs.add(toolName);
+              const kb = selfKbMap[toolName];
+              sendEvent({ type: 'status', message: `查詢知識庫：${kb.name}` });
+              return await executeSelfKbSearch(db, kb, args.query || combinedUserText);
+            }
+            if (kbMap[toolName]) {
+              if (calledDifyKbs.has(toolName)) {
+                console.warn(`[DIFY] Duplicate call prevented for ${toolName}`);
+                return `[知識庫已在本輪查詢過，請直接使用先前的查詢結果]`;
+              }
+              calledDifyKbs.add(toolName);
+              const kb = kbMap[toolName];
+              sendEvent({ type: 'status', message: `查詢知識庫：${kb.name}` });
+              return await executeDifyQuery(db, kb, args.query || combinedUserText, sessionId, req.user.id);
+            }
+            const entry = serverMap[toolName];
+            if (!entry) return `[未知工具: ${toolName}]`;
+            sendEvent({ type: 'status', message: `呼叫工具：${toolName}` });
+            return await mcpClient.callTool(db, entry.server, sessionId, req.user.id, entry.originalName, args);
+          };
+
+          ({ text, inputTokens, outputTokens } = await generateWithTools(
+            apiModel, history, userParts, allDeclarations, toolHandler, skillExtraInstruction
+          ));
+          if (text) {
+            aiText = text;
+            sendEvent({ type: 'chunk', content: text });
+          }
+          console.log(`[Chat] Tools+Gemini done in ${Date.now() - t0}ms, tools=${allDeclarations.length} in=${inputTokens} out=${outputTokens} tokens`);
         }
-        console.log(`[Chat] Tools+Gemini done in ${Date.now() - t0}ms, tools=${toolCount} in=${inputTokens} out=${outputTokens} tokens`);
       } else {
         // ── Standard streaming chat (no tools) ───────────────────────────
         // Send an initial status event so the proxy knows the connection is alive
@@ -1368,54 +1607,7 @@ router.put('/messages/:id', async (req, res) => {
 
 // Helpers
 
-// Calculate cost for a single API call based on per-request input tokens (Gemini tier logic)
-async function calcCallCost(db, model, date, inputTokens, outputTokens, imageCount) {
-  try {
-    const DI = `TO_DATE(?, 'YYYY-MM-DD')`;
-    const price = await db.prepare(
-      `SELECT * FROM token_prices WHERE model=? AND start_date<=${DI} AND (end_date IS NULL OR end_date>=${DI}) ORDER BY start_date DESC FETCH FIRST 1 ROWS ONLY`
-    ).get(model, date, date);
-    if (!price) return { cost: null, currency: null };
-
-    // Gemini tier threshold is based on input tokens per request
-    const useT2 = price.tier_threshold && price.price_input_tier2 != null && inputTokens > price.tier_threshold;
-    const priceIn = useT2 ? price.price_input_tier2 : price.price_input;
-    const priceOut = useT2 ? (price.price_output_tier2 ?? price.price_output) : price.price_output;
-    const tokenCost = (inputTokens * priceIn + outputTokens * priceOut) / 1_000_000;
-    const imageCost = (imageCount || 0) * (price.price_image_output || 0);
-    return { cost: tokenCost + imageCost, currency: price.currency };
-  } catch (e) {
-    console.error('[Chat] calcCallCost error:', e.message);
-    return { cost: null, currency: null };
-  }
-}
-
-async function upsertTokenUsage(db, userId, date, model, inputTokens, outputTokens, imageCount = 0) {
-  try {
-    const { cost, currency } = await calcCallCost(db, model, date, inputTokens, outputTokens, imageCount);
-    const D = `TO_DATE(?, 'YYYY-MM-DD')`;
-    const existing = await db
-      .prepare(`SELECT id FROM token_usage WHERE user_id=? AND usage_date=${D} AND model=?`)
-      .get(userId, date, model);
-    if (existing) {
-      await db.prepare(
-        `UPDATE token_usage
-         SET input_tokens=input_tokens+?, output_tokens=output_tokens+?,
-             image_count=COALESCE(image_count,0)+?,
-             cost=CASE WHEN ? IS NOT NULL THEN COALESCE(cost,0)+? ELSE cost END,
-             currency=COALESCE(?, currency)
-         WHERE user_id=? AND usage_date=${D} AND model=?`
-      ).run(inputTokens, outputTokens, imageCount, cost, cost, currency, userId, date, model);
-    } else {
-      await db.prepare(
-        `INSERT INTO token_usage (user_id, usage_date, model, input_tokens, output_tokens, image_count, cost, currency)
-         VALUES (?,${D},?,?,?,?,?,?)`
-      ).run(userId, date, model, inputTokens, outputTokens, imageCount, cost, currency);
-    }
-  } catch (e) {
-    console.error('[Chat] Token upsert error:', e.message);
-  }
-}
+const { upsertTokenUsage } = require('../services/tokenService');
 
 async function checkSensitiveKeywords(db, user, sessionId, content) {
   try {

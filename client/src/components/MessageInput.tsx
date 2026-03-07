@@ -1,10 +1,12 @@
 import { useState, useRef, useCallback, useImperativeHandle, forwardRef } from 'react'
-import { Send, Paperclip, X, FileText, Image, Music, AlertCircle } from 'lucide-react'
+import { Send, Paperclip, X, FileText, Image, Music, AlertCircle, Search } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 
 interface Props {
   onSend: (message: string, files: File[]) => void
+  onResearch?: () => void
   disabled?: boolean
+  canResearch?: boolean
 }
 
 export interface MessageInputHandle {
@@ -40,7 +42,7 @@ function getFileIcon(type: string) {
   return <FileText size={14} className="text-slate-400" />
 }
 
-const MessageInput = forwardRef<MessageInputHandle, Props>(function MessageInput({ onSend, disabled }, ref) {
+const MessageInput = forwardRef<MessageInputHandle, Props>(function MessageInput({ onSend, onResearch, disabled, canResearch }, ref) {
   const { user } = useAuth()
   const [message, setMessage] = useState('')
   const [files, setFiles] = useState<File[]>([])
@@ -192,6 +194,18 @@ const MessageInput = forwardRef<MessageInputHandle, Props>(function MessageInput
         >
           <Paperclip size={18} />
         </button>
+
+        {/* Deep Research */}
+        {canResearch && (
+          <button
+            onClick={onResearch}
+            disabled={disabled}
+            className="text-slate-400 hover:text-purple-500 transition p-1 flex-shrink-0 mb-0.5 disabled:opacity-50"
+            title="深度研究"
+          >
+            <Search size={18} />
+          </button>
+        )}
         <input
           ref={fileInputRef}
           type="file"

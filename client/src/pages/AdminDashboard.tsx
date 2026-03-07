@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Users, BarChart3, Shield, AlertTriangle, Database, Mail, ArrowLeft, Cpu, DollarSign, CalendarClock, Plug, Zap, UserCog, Sparkles, Code2 } from 'lucide-react'
+import { Users, BarChart3, Shield, AlertTriangle, Database, Mail, ArrowLeft, Cpu, DollarSign, CalendarClock, Plug, Zap, UserCog, Sparkles, Code2, Search, KeyRound } from 'lucide-react'
 import UserManagement from '../components/admin/UserManagement'
 import TokenUsagePanel from '../components/admin/TokenUsage'
 import AuditLogs from '../components/admin/AuditLogs'
@@ -15,8 +15,11 @@ import DifyKnowledgeBasesPanel from '../components/admin/DifyKnowledgeBasesPanel
 import RoleManagement from '../components/admin/RoleManagement'
 import SkillManagement from '../components/admin/SkillManagement'
 import CodeRunnersPanel from '../components/admin/CodeRunnersPanel'
+import KbAdminPanel from '../components/admin/KbAdminPanel'
+import ResearchLogsPanel from '../components/admin/ResearchLogsPanel'
+import ApiKeysPanel from '../components/admin/ApiKeysPanel'
 
-type Tab = 'users' | 'roles' | 'tokens' | 'audit' | 'keywords' | 'db' | 'mail' | 'llm' | 'cost' | 'scheduled' | 'mcp' | 'dify' | 'skills' | 'code-runners'
+type Tab = 'users' | 'roles' | 'tokens' | 'audit' | 'keywords' | 'db' | 'mail' | 'llm' | 'cost' | 'scheduled' | 'mcp' | 'dify' | 'kb' | 'skills' | 'code-runners' | 'research' | 'api-keys'
 
 const tabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
   { id: 'users', label: '使用者管理', icon: <Users size={16} /> },
@@ -25,9 +28,12 @@ const tabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
   { id: 'cost', label: '費用統計及分析', icon: <DollarSign size={16} /> },
   { id: 'audit', label: '稽核日誌', icon: <Shield size={16} /> },
   { id: 'keywords', label: '敏感詞彙', icon: <AlertTriangle size={16} /> },
+  { id: 'research', label: '深度研究紀錄', icon: <Search size={16} /> },
+  { id: 'api-keys', label: 'API 金鑰管理', icon: <KeyRound size={16} /> },
   { id: 'scheduled', label: '排程任務', icon: <CalendarClock size={16} /> },
   { id: 'mcp', label: 'MCP 伺服器', icon: <Plug size={16} /> },
   { id: 'dify', label: 'DIFY 知識庫', icon: <Zap size={16} /> },
+  { id: 'kb', label: '知識庫管理', icon: <Database size={16} /> },
   { id: 'skills', label: '技能管理', icon: <Sparkles size={16} /> },
   { id: 'code-runners', label: 'Code Runners', icon: <Code2 size={16} /> },
   { id: 'db', label: '資料庫維護', icon: <Database size={16} /> },
@@ -90,8 +96,11 @@ export default function AdminDashboard() {
           {activeTab === 'scheduled' && <ScheduledTasksPanel />}
           {activeTab === 'mcp' && <MCPServersPanel />}
           {activeTab === 'dify' && <DifyKnowledgeBasesPanel />}
+          {activeTab === 'kb' && <KbAdminPanel />}
           {activeTab === 'skills' && <SkillManagement />}
           {activeTab === 'code-runners' && <CodeRunnersPanel />}
+          {activeTab === 'research' && <ResearchLogsPanel />}
+          {activeTab === 'api-keys' && <ApiKeysPanel />}
         </main>
       </div>
     </div>

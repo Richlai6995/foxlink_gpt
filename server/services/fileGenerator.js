@@ -996,4 +996,4 @@ async function generateFoxlinkPptx(content, outputPath) {
   return outputPath;
 }
 
-module.exports = { processGenerateBlocks };
+module.exports = { processGenerateBlocks, generateFile };

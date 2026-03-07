@@ -7,6 +7,8 @@ import ScheduledTasksPage from './pages/ScheduledTasksPage'
 import HelpPage from './pages/HelpPage'
 import ResetPasswordPage from './pages/ResetPasswordPage'
 import SkillMarket from './pages/SkillMarket'
+import KnowledgeBasePage from './pages/KnowledgeBasePage'
+import KnowledgeBaseDetailPage from './pages/KnowledgeBaseDetailPage'
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated } = useAuth()
@@ -66,6 +68,8 @@ function AppRoutes() {
           </ProtectedRoute>
         }
       />
+      <Route path="/kb" element={<ProtectedRoute><KnowledgeBasePage /></ProtectedRoute>} />
+      <Route path="/kb/:id" element={<ProtectedRoute><KnowledgeBaseDetailPage /></ProtectedRoute>} />
       <Route path="/reset-password" element={<ResetPasswordPage />} />
       <Route path="*" element={<Navigate to={isAuthenticated ? '/chat' : '/login'} replace />} />
     </Routes>

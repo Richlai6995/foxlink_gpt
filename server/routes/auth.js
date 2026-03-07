@@ -132,7 +132,7 @@ router.post('/login', async (req, res) => {
       try {
         const ldapUser = await authenticateLDAP(username, password);
         if (ldapUser) {
-          let dbUser = await db.prepare('SELECT * FROM users WHERE username = ?').get(ldapUser.account);
+          let dbUser = await db.prepare('SELECT * FROM users WHERE UPPER(username) = UPPER(?)').get(ldapUser.account);
           if (dbUser) {
             // Existing user (may have been manually created) — sync AD info and mark as LDAP managed
             await db.prepare(
@@ -223,16 +223,27 @@ const createSession = async (res, user) => {
   // Resolve effective skill permissions (user setting overrides role default)
   let rolePerms = null;
   if (user.role_id) {
-    rolePerms = await db.prepare('SELECT allow_create_skill, allow_external_skill, allow_code_skill FROM roles WHERE id=?').get(user.role_id);
+    rolePerms = await db.prepare(
+      'SELECT allow_create_skill, allow_external_skill, allow_code_skill, can_create_kb, kb_max_size_mb, kb_max_count, can_deep_research FROM roles WHERE id=?'
+    ).get(user.role_id);
   }
   const resolveEffective = (userVal, roleVal) => {
     if (userVal !== null && userVal !== undefined) return userVal === 1;
     if (roleVal !== null && roleVal !== undefined) return roleVal === 1;
     return false;
   };
-  userWithoutPassword.effective_allow_create_skill = user.role === 'admin' || resolveEffective(user.allow_create_skill, rolePerms?.allow_create_skill);
+  const resolveNum = (uv, rv, def) => {
+    if (uv !== null && uv !== undefined) return Number(uv);
+    if (rv !== null && rv !== undefined) return Number(rv);
+    return def;
+  };
+  userWithoutPassword.effective_allow_create_skill   = user.role === 'admin' || resolveEffective(user.allow_create_skill,   rolePerms?.allow_create_skill);
   userWithoutPassword.effective_allow_external_skill = user.role === 'admin' || resolveEffective(user.allow_external_skill, rolePerms?.allow_external_skill);
-  userWithoutPassword.effective_allow_code_skill = user.role === 'admin' || resolveEffective(user.allow_code_skill, rolePerms?.allow_code_skill);
+  userWithoutPassword.effective_allow_code_skill     = user.role === 'admin' || resolveEffective(user.allow_code_skill,     rolePerms?.allow_code_skill);
+  userWithoutPassword.effective_can_create_kb        = user.role === 'admin' || resolveEffective(user.can_create_kb,        rolePerms?.can_create_kb);
+  userWithoutPassword.effective_kb_max_size_mb       = user.role === 'admin' ? 99999 : resolveNum(user.kb_max_size_mb, rolePerms?.kb_max_size_mb, 500);
+  userWithoutPassword.effective_kb_max_count         = user.role === 'admin' ? 99999 : resolveNum(user.kb_max_count,   rolePerms?.kb_max_count,   5);
+  userWithoutPassword.effective_can_deep_research    = user.role === 'admin' || resolveEffective(user.can_deep_research, rolePerms?.can_deep_research ?? 1);
   res.json({ token, user: userWithoutPassword });
 };
 
@@ -361,16 +372,27 @@ router.get('/me', async (req, res) => {
     const { password: _, ...userWithoutPassword } = user;
     let rolePerms = null;
     if (user.role_id) {
-      rolePerms = await db.prepare('SELECT allow_create_skill, allow_external_skill, allow_code_skill FROM roles WHERE id=?').get(user.role_id);
+      rolePerms = await db.prepare(
+        'SELECT allow_create_skill, allow_external_skill, allow_code_skill, can_create_kb, kb_max_size_mb, kb_max_count, can_deep_research FROM roles WHERE id=?'
+      ).get(user.role_id);
     }
     const resolveEff = (uv, rv) => {
       if (uv !== null && uv !== undefined) return uv === 1;
       if (rv !== null && rv !== undefined) return rv === 1;
       return false;
     };
-    userWithoutPassword.effective_allow_create_skill = user.role === 'admin' || resolveEff(user.allow_create_skill, rolePerms?.allow_create_skill);
-    userWithoutPassword.effective_allow_external_skill = user.role === 'admin' || resolveEff(user.allow_external_skill, rolePerms?.allow_external_skill);
-    userWithoutPassword.effective_allow_code_skill = user.role === 'admin' || resolveEff(user.allow_code_skill, rolePerms?.allow_code_skill);
+    const resolveNum = (uv, rv, def) => {
+      if (uv !== null && uv !== undefined) return Number(uv);
+      if (rv !== null && rv !== undefined) return Number(rv);
+      return def;
+    };
+    userWithoutPassword.effective_allow_create_skill    = user.role === 'admin' || resolveEff(user.allow_create_skill,    rolePerms?.allow_create_skill);
+    userWithoutPassword.effective_allow_external_skill  = user.role === 'admin' || resolveEff(user.allow_external_skill,  rolePerms?.allow_external_skill);
+    userWithoutPassword.effective_allow_code_skill      = user.role === 'admin' || resolveEff(user.allow_code_skill,      rolePerms?.allow_code_skill);
+    userWithoutPassword.effective_can_create_kb         = user.role === 'admin' || resolveEff(user.can_create_kb,         rolePerms?.can_create_kb);
+    userWithoutPassword.effective_kb_max_size_mb        = user.role === 'admin' ? 99999 : resolveNum(user.kb_max_size_mb,  rolePerms?.kb_max_size_mb, 500);
+    userWithoutPassword.effective_kb_max_count          = user.role === 'admin' ? 99999 : resolveNum(user.kb_max_count,    rolePerms?.kb_max_count,   5);
+    userWithoutPassword.effective_can_deep_research     = user.role === 'admin' || resolveEff(user.can_deep_research, rolePerms?.can_deep_research ?? 1);
     res.json(userWithoutPassword);
   } catch (e) {
     res.status(500).json({ error: e.message });

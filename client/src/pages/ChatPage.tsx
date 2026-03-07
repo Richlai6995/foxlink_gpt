@@ -1,14 +1,17 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { Square, AlertTriangle, Share2, Copy, Check, X, Sparkles, Search, Plus } from 'lucide-react'
+import { Square, AlertTriangle, Share2, Copy, Check, X, Sparkles, Search, Plus, Plug, Zap, Database, CheckCircle } from 'lucide-react'
 import Sidebar from '../components/Sidebar'
 import ChatWindow from '../components/ChatWindow'
 import MessageInput, { type MessageInputHandle } from '../components/MessageInput'
+import ResearchModal from '../components/ResearchModal'
 import type { ChatSession, ChatMessage, ModelType, GeneratedFile } from '../types'
 import api from '../lib/api'
 import { copyText } from '../lib/clipboard'
+import { useAuth } from '../context/AuthContext'
 
 export default function ChatPage() {
+  const { user } = useAuth()
   const [searchParams, setSearchParams] = useSearchParams()
   const [sessions, setSessions] = useState<ChatSession[]>([])
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null)
@@ -31,6 +34,13 @@ export default function ChatPage() {
   const [sharing, setSharing] = useState(false)
   const [shareCopied, setShareCopied] = useState(false)
 
+  // ── Deep Research state ────────────────────────────────────────────────────
+  const [showResearchModal, setShowResearchModal] = useState(false)
+  const [researchBanner,   setResearchBanner]   = useState<{ id: string; title: string }[]>([])
+  const seenResearchIds = useRef<Set<string>>(new Set())
+
+  const canResearch = (user as any)?.effective_can_deep_research === true
+
   // ── Skill panel state ──────────────────────────────────────────────────────
   interface Skill { id: number; name: string; icon: string; description: string; type: string; model_key?: string | null }
   const [sessionSkills, setSessionSkills] = useState<Skill[]>([])       // currently attached
@@ -41,6 +51,50 @@ export default function ChatPage() {
   const [skillSaving, setSkillSaving] = useState(false)
   const [pendingSkillIds, setPendingSkillIds] = useState<Set<number>>(new Set())
   const skillPanelRef = useRef<HTMLDivElement>(null)
+
+  // ── Explicit tool selection panels ────────────────────────────────────────
+  interface ToolItem { id: number | string; name: string; description: string | null; is_active?: number; chunk_count?: number }
+  const [selectedMcpIds,  setSelectedMcpIds]  = useState<Set<number>>(new Set())
+  const [selectedDifyIds, setSelectedDifyIds] = useState<Set<number>>(new Set())
+  const [selectedKbIds,   setSelectedKbIds]   = useState<Set<string>>(new Set())
+  const [showMcpPanel,    setShowMcpPanel]    = useState(false)
+  const [showDifyPanel,   setShowDifyPanel]   = useState(false)
+  const [showKbPanel,     setShowKbPanel]     = useState(false)
+  const [allMcpServers,   setAllMcpServers]   = useState<ToolItem[]>([])
+  const [allDifyKbs,      setAllDifyKbs]      = useState<ToolItem[]>([])
+  const [allSelfKbs,      setAllSelfKbs]      = useState<ToolItem[]>([])
+  const mcpPanelRef      = useRef<HTMLDivElement>(null)
+  const difyPanelRef     = useRef<HTMLDivElement>(null)
+  const kbPanelRef       = useRef<HTMLDivElement>(null)
+  const researchPanelRef = useRef<HTMLDivElement>(null)
+
+  const [researchJobs,       setResearchJobs]       = useState<any[]>([])
+  const [showResearchPanel,  setShowResearchPanel]  = useState(false)
+
+  const openMcpPanel = useCallback(async () => {
+    try { const r = await api.get('/mcp-servers'); setAllMcpServers((r.data || []).filter((s: any) => s.is_active)) } catch {}
+    setShowMcpPanel(true); setShowDifyPanel(false); setShowKbPanel(false)
+  }, [])
+  const openDifyPanel = useCallback(async () => {
+    try { const r = await api.get('/dify-kb'); setAllDifyKbs((r.data || []).filter((k: any) => k.is_active)) } catch {}
+    setShowDifyPanel(true); setShowMcpPanel(false); setShowKbPanel(false)
+  }, [])
+  const openKbPanel = useCallback(async () => {
+    try { const r = await api.get('/kb'); setAllSelfKbs((r.data || []).filter((k: any) => (k.chunk_count ?? 0) > 0)) } catch {}
+    setShowKbPanel(true); setShowMcpPanel(false); setShowDifyPanel(false)
+  }, [])
+
+  // Close tool panels on outside click
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (mcpPanelRef.current      && !mcpPanelRef.current.contains(e.target as Node))      setShowMcpPanel(false)
+      if (difyPanelRef.current     && !difyPanelRef.current.contains(e.target as Node))     setShowDifyPanel(false)
+      if (kbPanelRef.current       && !kbPanelRef.current.contains(e.target as Node))       setShowKbPanel(false)
+      if (researchPanelRef.current && !researchPanelRef.current.contains(e.target as Node)) setShowResearchPanel(false)
+    }
+    if (showMcpPanel || showDifyPanel || showKbPanel || showResearchPanel) document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [showMcpPanel, showDifyPanel, showKbPanel, showResearchPanel])
 
   interface BudgetPeriod { limit: number; spent: number; remaining: number; exceeded: boolean }
   interface BudgetInfo { isAdmin: boolean; daily: BudgetPeriod | null; weekly: BudgetPeriod | null; monthly: BudgetPeriod | null }
@@ -136,6 +190,34 @@ export default function ChatPage() {
     loadSessions()
     loadBudget()
   }, [loadSessions, loadBudget])
+
+  const initialResearchLoad = useRef(true)
+  // Poll all research jobs every 5 s (for top-bar panel + completion banner)
+  useEffect(() => {
+    if (!canResearch) return
+    const poll = async () => {
+      try {
+        const res = await api.get('/research/jobs')
+        const all: any[] = res.data || []
+        setResearchJobs(all)
+        if (initialResearchLoad.current) {
+          // First load: mark all existing done jobs as seen so they don't trigger banner
+          all.filter((j) => j.status === 'done').forEach((j) => seenResearchIds.current.add(j.id))
+          initialResearchLoad.current = false
+          return
+        }
+        // Banner: only newly completed jobs (not seen before)
+        const done = all.filter((j) => j.status === 'done' && !seenResearchIds.current.has(j.id))
+        if (done.length > 0) {
+          done.forEach((j) => seenResearchIds.current.add(j.id))
+          setResearchBanner((prev) => [...prev, ...done])
+        }
+      } catch { /* ignore */ }
+    }
+    poll()
+    const t = setInterval(poll, 5000)
+    return () => clearInterval(t)
+  }, [canResearch])
 
   // Auto-select session from ?session= query param (e.g., after fork)
   useEffect(() => {
@@ -349,6 +431,10 @@ export default function ChatPage() {
       formData.append('message', message)
       formData.append('model', model)
       files.forEach((f) => formData.append('files', f))
+      // Explicit tool selection — always send even if empty (tells backend to skip auto-discover)
+      formData.append('mcp_server_ids', JSON.stringify([...selectedMcpIds]))
+      formData.append('dify_kb_ids',    JSON.stringify([...selectedDifyIds]))
+      formData.append('self_kb_ids',    JSON.stringify([...selectedKbIds]))
 
       // ── AbortController 在 fetch 之前設好，停止按鈕可立即生效 ──
       const controller = new AbortController()
@@ -491,7 +577,7 @@ export default function ChatPage() {
         abortRef.current = null
       }
     },
-    [streaming, currentSessionId, model, loadSessions, pendingSkillIds]
+    [streaming, currentSessionId, model, loadSessions, pendingSkillIds, selectedMcpIds, selectedDifyIds, selectedKbIds]
   )
 
   const handleCopy = useCallback((text: string) => {
@@ -538,6 +624,25 @@ export default function ChatPage() {
       />
 
       <div className="flex-1 flex flex-col min-w-0">
+        {/* Research completion banner */}
+        {researchBanner.length > 0 && (
+          <div className="bg-green-600 text-white px-4 py-2 flex items-center gap-3 text-sm">
+            <CheckCircle size={16} className="flex-shrink-0" />
+            <span className="flex-1">
+              {researchBanner.length === 1
+                ? `深度研究完成：${researchBanner[0].title}`
+                : `${researchBanner.length} 個深度研究已完成`
+              }
+            </span>
+            <button
+              onClick={() => setResearchBanner([])}
+              className="hover:bg-green-700 rounded p-0.5 transition"
+            >
+              <X size={14} />
+            </button>
+          </div>
+        )}
+
         {/* Top bar */}
         <div className="h-12 bg-white border-b border-slate-200 flex items-center px-4 gap-3">
           <span className="text-slate-600 text-sm font-medium truncate flex-1">
@@ -545,6 +650,135 @@ export default function ChatPage() {
               ? sessions.find((s) => s.id === currentSessionId)?.title || '對話中'
               : 'FOXLINK GPT'}
           </span>
+          {/* ── MCP button ── */}
+          <div className="relative" ref={mcpPanelRef}>
+            <button
+              onClick={openMcpPanel}
+              className={`inline-flex items-center gap-1.5 text-xs border rounded-lg px-2.5 py-1 transition ${selectedMcpIds.size > 0 ? 'text-cyan-600 border-cyan-300 bg-cyan-50 hover:bg-cyan-100' : 'text-slate-500 border-slate-200 hover:text-cyan-600 hover:border-cyan-300'}`}
+              title="選擇 MCP 工具"
+            >
+              <Plug size={13} />
+              {selectedMcpIds.size > 0 ? `MCP (${selectedMcpIds.size})` : 'MCP'}
+            </button>
+            {showMcpPanel && (
+              <div className="absolute top-full right-0 mt-1 w-72 bg-white border border-slate-200 rounded-xl shadow-2xl z-50">
+                <div className="p-3 border-b border-slate-100 flex items-center justify-between">
+                  <span className="text-sm font-semibold text-slate-800 flex items-center gap-1.5"><Plug size={14} className="text-cyan-500" />MCP 工具伺服器</span>
+                  <button onClick={() => setShowMcpPanel(false)} className="text-slate-400 hover:text-slate-600"><X size={14} /></button>
+                </div>
+                <div className="max-h-56 overflow-y-auto overflow-x-auto p-2 space-y-1">
+                  {allMcpServers.length === 0 ? (
+                    <div className="text-center py-6 text-slate-400 text-xs">無可用 MCP 伺服器</div>
+                  ) : allMcpServers.map(s => {
+                    const picked = selectedMcpIds.has(s.id as number)
+                    return (
+                      <button key={s.id} onClick={() => setSelectedMcpIds(prev => { const n = new Set(prev); picked ? n.delete(s.id as number) : n.add(s.id as number); return n })}
+                        className={`min-w-full w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-left transition ${picked ? 'bg-cyan-50 border border-cyan-200' : 'hover:bg-slate-50 border border-transparent'}`}>
+                        <div className={`w-4 h-4 rounded border flex items-center justify-center flex-shrink-0 ${picked ? 'bg-cyan-600 border-cyan-600' : 'border-slate-300'}`}>
+                          {picked && <Check size={10} className="text-white" />}
+                        </div>
+                        <div className="flex-shrink-0">
+                          <p className="text-xs font-medium text-slate-800 whitespace-nowrap">{s.name}</p>
+                          {s.description && <p className="text-xs text-slate-400 whitespace-nowrap">{s.description}</p>}
+                        </div>
+                      </button>
+                    )
+                  })}
+                </div>
+                <div className="p-2 border-t border-slate-100 flex justify-between items-center">
+                  <button onClick={() => setSelectedMcpIds(new Set())} className="text-xs text-slate-400 hover:text-red-500 px-2 py-1">清除</button>
+                  <button onClick={() => setShowMcpPanel(false)} className="px-3 py-1.5 text-xs bg-cyan-600 text-white rounded-lg hover:bg-cyan-700">確認</button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* ── DIFY KB button ── */}
+          <div className="relative" ref={difyPanelRef}>
+            <button
+              onClick={openDifyPanel}
+              className={`inline-flex items-center gap-1.5 text-xs border rounded-lg px-2.5 py-1 transition ${selectedDifyIds.size > 0 ? 'text-amber-600 border-amber-300 bg-amber-50 hover:bg-amber-100' : 'text-slate-500 border-slate-200 hover:text-amber-600 hover:border-amber-300'}`}
+              title="選擇 DIFY 知識庫"
+            >
+              <Zap size={13} />
+              {selectedDifyIds.size > 0 ? `DIFY (${selectedDifyIds.size})` : 'DIFY'}
+            </button>
+            {showDifyPanel && (
+              <div className="absolute top-full right-0 mt-1 w-72 bg-white border border-slate-200 rounded-xl shadow-2xl z-50">
+                <div className="p-3 border-b border-slate-100 flex items-center justify-between">
+                  <span className="text-sm font-semibold text-slate-800 flex items-center gap-1.5"><Zap size={14} className="text-amber-500" />DIFY 知識庫</span>
+                  <button onClick={() => setShowDifyPanel(false)} className="text-slate-400 hover:text-slate-600"><X size={14} /></button>
+                </div>
+                <div className="max-h-56 overflow-y-auto overflow-x-auto p-2 space-y-1">
+                  {allDifyKbs.length === 0 ? (
+                    <div className="text-center py-6 text-slate-400 text-xs">無可用 DIFY 知識庫</div>
+                  ) : allDifyKbs.map(k => {
+                    const picked = selectedDifyIds.has(k.id as number)
+                    return (
+                      <button key={k.id} onClick={() => setSelectedDifyIds(prev => { const n = new Set(prev); picked ? n.delete(k.id as number) : n.add(k.id as number); return n })}
+                        className={`min-w-full w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-left transition ${picked ? 'bg-amber-50 border border-amber-200' : 'hover:bg-slate-50 border border-transparent'}`}>
+                        <div className={`w-4 h-4 rounded border flex items-center justify-center flex-shrink-0 ${picked ? 'bg-amber-500 border-amber-500' : 'border-slate-300'}`}>
+                          {picked && <Check size={10} className="text-white" />}
+                        </div>
+                        <div className="flex-shrink-0">
+                          <p className="text-xs font-medium text-slate-800 whitespace-nowrap">{k.name}</p>
+                          {k.description && <p className="text-xs text-slate-400 whitespace-nowrap">{k.description}</p>}
+                        </div>
+                      </button>
+                    )
+                  })}
+                </div>
+                <div className="p-2 border-t border-slate-100 flex justify-between items-center">
+                  <button onClick={() => setSelectedDifyIds(new Set())} className="text-xs text-slate-400 hover:text-red-500 px-2 py-1">清除</button>
+                  <button onClick={() => setShowDifyPanel(false)} className="px-3 py-1.5 text-xs bg-amber-500 text-white rounded-lg hover:bg-amber-600">確認</button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* ── Self-built KB button ── */}
+          <div className="relative" ref={kbPanelRef}>
+            <button
+              onClick={openKbPanel}
+              className={`inline-flex items-center gap-1.5 text-xs border rounded-lg px-2.5 py-1 transition ${selectedKbIds.size > 0 ? 'text-emerald-600 border-emerald-300 bg-emerald-50 hover:bg-emerald-100' : 'text-slate-500 border-slate-200 hover:text-emerald-600 hover:border-emerald-300'}`}
+              title="選擇自建知識庫"
+            >
+              <Database size={13} />
+              {selectedKbIds.size > 0 ? `知識庫 (${selectedKbIds.size})` : '知識庫'}
+            </button>
+            {showKbPanel && (
+              <div className="absolute top-full right-0 mt-1 w-72 bg-white border border-slate-200 rounded-xl shadow-2xl z-50">
+                <div className="p-3 border-b border-slate-100 flex items-center justify-between">
+                  <span className="text-sm font-semibold text-slate-800 flex items-center gap-1.5"><Database size={14} className="text-emerald-500" />自建知識庫</span>
+                  <button onClick={() => setShowKbPanel(false)} className="text-slate-400 hover:text-slate-600"><X size={14} /></button>
+                </div>
+                <div className="max-h-56 overflow-y-auto overflow-x-auto p-2 space-y-1">
+                  {allSelfKbs.length === 0 ? (
+                    <div className="text-center py-6 text-slate-400 text-xs">無可用知識庫（需先建立並上傳文件）</div>
+                  ) : allSelfKbs.map(k => {
+                    const picked = selectedKbIds.has(String(k.id))
+                    return (
+                      <button key={k.id} onClick={() => setSelectedKbIds(prev => { const n = new Set(prev); picked ? n.delete(String(k.id)) : n.add(String(k.id)); return n })}
+                        className={`min-w-full w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-left transition ${picked ? 'bg-emerald-50 border border-emerald-200' : 'hover:bg-slate-50 border border-transparent'}`}>
+                        <div className={`w-4 h-4 rounded border flex items-center justify-center flex-shrink-0 ${picked ? 'bg-emerald-600 border-emerald-600' : 'border-slate-300'}`}>
+                          {picked && <Check size={10} className="text-white" />}
+                        </div>
+                        <div className="flex-shrink-0">
+                          <p className="text-xs font-medium text-slate-800 whitespace-nowrap">{k.name}</p>
+                          {k.description && <p className="text-xs text-slate-400 whitespace-nowrap">{k.description}</p>}
+                        </div>
+                      </button>
+                    )
+                  })}
+                </div>
+                <div className="p-2 border-t border-slate-100 flex justify-between items-center">
+                  <button onClick={() => setSelectedKbIds(new Set())} className="text-xs text-slate-400 hover:text-red-500 px-2 py-1">清除</button>
+                  <button onClick={() => setShowKbPanel(false)} className="px-3 py-1.5 text-xs bg-emerald-600 text-white rounded-lg hover:bg-emerald-700">確認</button>
+                </div>
+              </div>
+            )}
+          </div>
+
           {/* Skills button + badges */}
           <div className="flex items-center gap-1.5 relative" ref={skillPanelRef}>
               {/* Attached skill badges */}
@@ -584,7 +818,7 @@ export default function ChatPage() {
                     </div>
                   </div>
 
-                  <div className="max-h-64 overflow-y-auto p-2 space-y-1">
+                  <div className="max-h-64 overflow-y-auto overflow-x-auto p-2 space-y-1">
                     {allSkills
                       .filter(sk => !skillSearch || sk.name.includes(skillSearch) || (sk.description || '').includes(skillSearch))
                       .map(sk => {
@@ -593,19 +827,19 @@ export default function ChatPage() {
                           <button
                             key={sk.id}
                             onClick={() => togglePick(sk.id)}
-                            className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-left transition ${picked ? 'bg-purple-50 border border-purple-200' : 'hover:bg-slate-50 border border-transparent'
+                            className={`min-w-full w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-left transition ${picked ? 'bg-purple-50 border border-purple-200' : 'hover:bg-slate-50 border border-transparent'
                               }`}
                           >
                             <div className={`w-4 h-4 rounded border flex items-center justify-center flex-shrink-0 transition ${picked ? 'bg-purple-600 border-purple-600' : 'border-slate-300'
                               }`}>
                               {picked && <Check size={10} className="text-white" />}
                             </div>
-                            <span className="text-lg leading-none">{sk.icon}</span>
-                            <div className="flex-1 min-w-0">
-                              <p className="text-xs font-medium text-slate-800 truncate">{sk.name}</p>
-                              {sk.description && <p className="text-xs text-slate-400 truncate">{sk.description}</p>}
+                            <span className="text-lg leading-none flex-shrink-0">{sk.icon}</span>
+                            <div className="flex-shrink-0">
+                              <p className="text-xs font-medium text-slate-800 whitespace-nowrap">{sk.name}</p>
+                              {sk.description && <p className="text-xs text-slate-400 whitespace-nowrap">{sk.description}</p>}
                             </div>
-                            {sk.model_key && <span className="text-xs text-indigo-500 shrink-0">{sk.model_key}</span>}
+                            {sk.model_key && <span className="text-xs text-indigo-500 flex-shrink-0 ml-2">{sk.model_key}</span>}
                           </button>
                         )
                       })
@@ -663,6 +897,105 @@ export default function ChatPage() {
               </button>
             </div>
           )}
+          {/* Research jobs panel */}
+          {canResearch && researchJobs.length > 0 && (() => {
+            const running = researchJobs.filter((j) => j.status === 'pending' || j.status === 'running')
+            return (
+              <div className="relative" ref={researchPanelRef}>
+                <button
+                  onClick={() => setShowResearchPanel((v) => !v)}
+                  className={`inline-flex items-center gap-1.5 text-xs border rounded-lg px-2.5 py-1 transition ${
+                    running.length > 0
+                      ? 'text-blue-600 border-blue-300 bg-blue-50 hover:bg-blue-100'
+                      : 'text-slate-500 border-slate-200 hover:text-blue-600 hover:border-blue-300'
+                  }`}
+                  title="研究任務"
+                >
+                  {running.length > 0
+                    ? <><Sparkles size={13} className="animate-pulse" />研究中 ({running.length})</>
+                    : <><Search size={13} />研究任務</>
+                  }
+                </button>
+                {showResearchPanel && (
+                  <div className="absolute top-full right-0 mt-1 w-80 bg-white border border-slate-200 rounded-xl shadow-2xl z-50">
+                    <div className="p-3 border-b border-slate-100 flex items-center justify-between">
+                      <span className="text-sm font-semibold text-slate-800 flex items-center gap-1.5">
+                        <Search size={14} className="text-blue-500" />研究任務
+                      </span>
+                      <button onClick={() => setShowResearchPanel(false)} className="text-slate-400 hover:text-slate-600"><X size={14} /></button>
+                    </div>
+                    <div className="max-h-72 overflow-y-auto p-2 space-y-2">
+                      {researchJobs.slice(0, 10).map((j) => {
+                        const pct = j.progress_total > 0 ? Math.round((j.progress_step / j.progress_total) * 100) : 0
+                        const isRunning = j.status === 'pending' || j.status === 'running'
+                        return (
+                          <div key={j.id} className={`rounded-xl border p-3 text-xs ${
+                            j.status === 'done'   ? 'border-green-200 bg-green-50' :
+                            j.status === 'failed' ? 'border-red-200 bg-red-50'    :
+                            'border-blue-200 bg-blue-50'
+                          }`}>
+                            <div className="flex items-start gap-2">
+                              {isRunning && <Sparkles size={13} className="text-blue-500 animate-pulse flex-shrink-0 mt-0.5" />}
+                              {j.status === 'done'   && <CheckCircle size={13} className="text-green-500 flex-shrink-0 mt-0.5" />}
+                              {j.status === 'failed' && <AlertTriangle size={13} className="text-red-500 flex-shrink-0 mt-0.5" />}
+                              <div className="flex-1 min-w-0">
+
+                                <p className="font-medium text-slate-800 truncate">{j.title || '研究中...'}</p>
+                                {isRunning && (
+                                  <div className="mt-1.5 space-y-1">
+                                    <p className="text-slate-500">{j.progress_label || '準備中...'}</p>
+                                    <div className="h-1.5 bg-blue-100 rounded-full overflow-hidden">
+                                      <div className="h-full bg-blue-500 rounded-full transition-all duration-700" style={{ width: `${pct}%` }} />
+                                    </div>
+                                    {j.progress_total > 0 && <p className="text-slate-400">{j.progress_step}/{j.progress_total} 步驟</p>}
+                                  </div>
+                                )}
+                                {j.status === 'done' && (
+                                  <div className="mt-1 space-y-1">
+                                    <p className="text-green-600">完成 · {j.completed_at?.slice(0, 16)}</p>
+                                    {j.result_files_json && (() => {
+                                      try {
+                                        const files: { name: string; url: string; type: string }[] = JSON.parse(j.result_files_json)
+                                        return files.length > 0 ? (
+                                          <div className="flex flex-wrap gap-1">
+                                            {files.map((f) => (
+                                              <a key={f.name} href={f.url} download={f.name}
+                                                className="flex items-center gap-1 px-2 py-0.5 bg-white border border-green-300 text-green-700 rounded-lg hover:bg-green-50 transition"
+                                              >
+                                                ↓ {f.type.toUpperCase()}
+                                              </a>
+                                            ))}
+                                          </div>
+                                        ) : null
+                                      } catch { return null }
+                                    })()}
+                                  </div>
+                                )}
+                                {j.status === 'failed' && <p className="text-red-500 mt-0.5 truncate">{j.error_msg || '發生錯誤'}</p>}
+                              </div>
+                              {!isRunning && (
+                                <button
+                                  onClick={async () => {
+                                    try { await api.delete(`/research/jobs/${j.id}`) } catch { /* ignore */ }
+                                    setResearchJobs((prev) => prev.filter((x) => x.id !== j.id))
+                                  }}
+                                  className="text-slate-300 hover:text-red-400 flex-shrink-0 transition ml-1"
+                                  title="刪除"
+                                >
+                                  <X size={13} />
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )
+          })()}
+
           {/* Budget indicator — show whenever any limit is configured */}
           {budget && !budget.isAdmin && (budget.daily || budget.weekly || budget.monthly) && (
             <div className="flex items-center gap-1.5">
@@ -706,8 +1039,50 @@ export default function ChatPage() {
           onRegenerate={handleRegenerate}
         />
 
-        <MessageInput ref={messageInputRef} onSend={handleSend} disabled={streaming} />
+        <MessageInput
+          ref={messageInputRef}
+          onSend={handleSend}
+          disabled={streaming}
+          canResearch={canResearch}
+          onResearch={() => setShowResearchModal(true)}
+        />
       </div>
+
+      {/* Deep Research modal */}
+      {showResearchModal && (
+        <ResearchModal
+          sessionId={currentSessionId}
+          onClose={() => setShowResearchModal(false)}
+          onJobCreated={async (jobId) => {
+            seenResearchIds.current.add(jobId)
+            let sid = currentSessionId
+            // If no session, auto-create one so the progress card is visible
+            if (!sid) {
+              try {
+                const res = await api.post('/chat/sessions', { model })
+                sid = res.data.id
+                const newSession: ChatSession = {
+                  id: sid!, title: '深度研究', model,
+                  created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+                }
+                setSessions((prev) => [newSession, ...prev])
+                setCurrentSessionId(sid)
+                setMessages([])
+              } catch { /* ignore */ }
+            }
+            if (sid) {
+              const placeholder: ChatMessage = {
+                id: Date.now(),
+                session_id: sid,
+                role: 'assistant',
+                content: `__RESEARCH_JOB__:${jobId}`,
+                created_at: new Date().toISOString(),
+              }
+              setMessages((prev) => [...prev, placeholder])
+            }
+          }}
+        />
+      )}
 
       {/* Share link modal */}
       {shareLink && (

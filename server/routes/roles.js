@@ -32,7 +32,8 @@ router.post('/', async (req, res) => {
     budget_daily, budget_weekly, budget_monthly,
     allow_text_upload, text_max_mb, allow_audio_upload, audio_max_mb,
     allow_image_upload, image_max_mb, allow_scheduled_tasks,
-    allow_create_skill, allow_external_skill, allow_code_skill } = req.body;
+    allow_create_skill, allow_external_skill, allow_code_skill,
+    can_create_kb, kb_max_size_mb, kb_max_count, can_deep_research } = req.body;
   if (!name) return res.status(400).json({ error: 'name 為必填' });
   try {
     if (is_default) {
@@ -44,8 +45,9 @@ router.post('/', async (req, res) => {
                   budget_daily, budget_weekly, budget_monthly,
                   allow_text_upload, text_max_mb, allow_audio_upload, audio_max_mb,
                   allow_image_upload, image_max_mb, allow_scheduled_tasks,
-                  allow_create_skill, allow_external_skill, allow_code_skill)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+                  allow_create_skill, allow_external_skill, allow_code_skill,
+                  can_create_kb, kb_max_size_mb, kb_max_count, can_deep_research)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .run(name, description || null, is_default ? 1 : 0,
         parseBudget(budget_daily), parseBudget(budget_weekly), parseBudget(budget_monthly),
         allow_text_upload !== undefined ? (allow_text_upload ? 1 : 0) : 1,
@@ -57,7 +59,11 @@ router.post('/', async (req, res) => {
         allow_scheduled_tasks ? 1 : 0,
         allow_create_skill ? 1 : 0,
         allow_external_skill ? 1 : 0,
-        allow_code_skill ? 1 : 0);
+        allow_code_skill ? 1 : 0,
+        can_create_kb ? 1 : 0,
+        kb_max_size_mb != null ? Number(kb_max_size_mb) : 500,
+        kb_max_count   != null ? Number(kb_max_count)   : 5,
+        can_deep_research !== undefined ? (can_deep_research ? 1 : 0) : 1);
     const roleId = result.lastInsertRowid;
     await _syncAssignments(db, roleId, mcp_server_ids, dify_kb_ids);
     res.json({ id: roleId, success: true });
@@ -76,7 +82,8 @@ router.put('/:id', async (req, res) => {
     budget_daily, budget_weekly, budget_monthly,
     allow_text_upload, text_max_mb, allow_audio_upload, audio_max_mb,
     allow_image_upload, image_max_mb, allow_scheduled_tasks,
-    allow_create_skill, allow_external_skill, allow_code_skill } = req.body;
+    allow_create_skill, allow_external_skill, allow_code_skill,
+    can_create_kb, kb_max_size_mb, kb_max_count, can_deep_research } = req.body;
   if (!name) return res.status(400).json({ error: 'name 為必填' });
   try {
     if (is_default) {
@@ -89,6 +96,7 @@ router.put('/:id', async (req, res) => {
          allow_text_upload=?, text_max_mb=?, allow_audio_upload=?, audio_max_mb=?,
          allow_image_upload=?, image_max_mb=?, allow_scheduled_tasks=?,
          allow_create_skill=?, allow_external_skill=?, allow_code_skill=?,
+         can_create_kb=?, kb_max_size_mb=?, kb_max_count=?, can_deep_research=?,
          updated_at=CURRENT_TIMESTAMP
        WHERE id=?`
     ).run(name, description || null, is_default ? 1 : 0,
@@ -103,6 +111,10 @@ router.put('/:id', async (req, res) => {
       allow_create_skill ? 1 : 0,
       allow_external_skill ? 1 : 0,
       allow_code_skill ? 1 : 0,
+      can_create_kb ? 1 : 0,
+      kb_max_size_mb != null ? Number(kb_max_size_mb) : 500,
+      kb_max_count   != null ? Number(kb_max_count)   : 5,
+      can_deep_research !== undefined ? (can_deep_research ? 1 : 0) : 1,
       id);
     await _syncAssignments(db, id, mcp_server_ids, dify_kb_ids);
     res.json({ success: true });

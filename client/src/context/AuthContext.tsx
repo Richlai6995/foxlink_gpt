@@ -10,6 +10,7 @@ interface AuthContextType {
   isAuthenticated: boolean
   isAdmin: boolean
   canSchedule: boolean
+  canCreateKb: boolean
 }
 
 const AuthContext = createContext<AuthContextType | null>(null)
@@ -29,7 +30,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const u = r.data
       localStorage.setItem('user', JSON.stringify(u))
       setUser(u)
-    }).catch(() => {})
+    }).catch((e) => {
+      // session expired (e.g. server restart) → force logout
+      if (e.response?.status === 401) {
+        localStorage.removeItem('token')
+        localStorage.removeItem('user')
+        setToken(null)
+        setUser(null)
+      }
+    })
   }, [])
 
   const login = useCallback(async (username: string, password: string) => {
@@ -51,8 +60,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setUser(null)
   }, [])
 
-  const isAdmin = user?.role === 'admin'
+  const isAdmin     = user?.role === 'admin'
   const canSchedule = isAdmin || (user as any)?.allow_scheduled_tasks === 1
+  const canCreateKb = isAdmin || (user as any)?.effective_can_create_kb === true
 
   return (
     <AuthContext.Provider
@@ -64,6 +74,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         isAuthenticated: !!token && !!user,
         isAdmin,
         canSchedule,
+        canCreateKb,
       }}
     >
       {children}

@@ -51,6 +51,14 @@ app.get('/api/health', (req, res) => res.json({ status: 'ok', timestamp: new Dat
     console.log('[Route] /api/share OK');
     app.use('/api/skills', require('./routes/skills'));
     console.log('[Route] /api/skills OK');
+    app.use('/api/kb', require('./routes/knowledgeBase'));
+    console.log('[Route] /api/kb OK');
+    app.use('/api/research', require('./routes/research'));
+    console.log('[Route] /api/research OK');
+    app.use('/api/api-keys', require('./routes/apiKeys'));
+    console.log('[Route] /api/api-keys OK');
+    app.use('/api/v1', require('./routes/externalKb'));
+    console.log('[Route] /api/v1 OK');
 
     // Auto-restore code skill runners
     try {

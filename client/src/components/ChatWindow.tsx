@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react'
 import { Copy, Check, RefreshCw, Download, Cpu, User } from 'lucide-react'
 import { useState } from 'react'
 import MarkdownRenderer from './MarkdownRenderer'
+import ResearchProgressCard from './ResearchProgressCard'
 import type { ChatMessage, GeneratedFile } from '../types'
 
 interface Props {
@@ -153,8 +154,10 @@ function MessageBubble({
       </div>
       <div className="flex-1 max-w-[85%]">
         <div className="bg-white border border-slate-200 rounded-2xl rounded-tl-sm px-5 py-4 shadow-sm overflow-hidden break-words">
-          <MarkdownRenderer content={msg.content} />
-          <GeneratedFileLinks files={msg.generated_files || []} />
+          {msg.content.startsWith('__RESEARCH_JOB__:')
+            ? <ResearchProgressCard jobId={msg.content.slice('__RESEARCH_JOB__:'.length)} />
+            : <><MarkdownRenderer content={msg.content} /><GeneratedFileLinks files={msg.generated_files || []} /></>
+          }
         </div>
         {hover && (
           <div className="flex items-center gap-2 mt-1.5">

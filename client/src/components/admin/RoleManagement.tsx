@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Plus, Trash2, Edit2, Star, StarOff, Plug, Zap, Check, FileText, Mic, Image, CalendarClock, Code2 } from 'lucide-react'
+import { Plus, Trash2, Edit2, Star, StarOff, Plug, Zap, Check, FileText, Mic, Image, CalendarClock, Code2, Database } from 'lucide-react'
 import api from '../../lib/api'
 
 interface Role {
@@ -23,6 +23,10 @@ interface Role {
   allow_create_skill: number
   allow_external_skill: number
   allow_code_skill: number
+  can_create_kb: number
+  kb_max_size_mb: number | null
+  kb_max_count: number | null
+  can_deep_research: number
 }
 
 interface McpServer {
@@ -58,6 +62,10 @@ const emptyForm = {
   allow_create_skill: false,
   allow_external_skill: false,
   allow_code_skill: false,
+  can_create_kb: false,
+  kb_max_size_mb: 500,
+  kb_max_count: 5,
+  can_deep_research: true,
 }
 
 export default function RoleManagement() {
@@ -119,6 +127,10 @@ export default function RoleManagement() {
       allow_create_skill: role.allow_create_skill === 1,
       allow_external_skill: role.allow_external_skill === 1,
       allow_code_skill: role.allow_code_skill === 1,
+      can_create_kb: role.can_create_kb === 1,
+      kb_max_size_mb: role.kb_max_size_mb ?? 500,
+      kb_max_count: role.kb_max_count ?? 5,
+      can_deep_research: role.can_deep_research !== 0,
     })
     setError('')
     setShowModal(true)
@@ -180,6 +192,9 @@ export default function RoleManagement() {
         allow_image_upload: role.allow_image_upload,
         image_max_mb: role.image_max_mb,
         allow_scheduled_tasks: role.allow_scheduled_tasks,
+        can_create_kb: role.can_create_kb,
+        kb_max_size_mb: role.kb_max_size_mb,
+        kb_max_count: role.kb_max_count,
       })
       load()
     } catch (e: any) {
@@ -487,6 +502,55 @@ export default function RoleManagement() {
                     <Code2 size={13} />
                     <span className="text-sm text-slate-700">允許建立內部程式 Skill（資訊部門專用）</span>
                   </label>
+                </div>
+              </div>
+
+              {/* KB Permissions */}
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-2 flex items-center gap-1.5">
+                  <Database size={14} /> 知識庫權限
+                </label>
+                <div className="space-y-2">
+                  <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={(form as any).can_deep_research}
+                      onChange={e => setForm({ ...form, can_deep_research: e.target.checked } as any)}
+                      className="w-4 h-4 rounded border-slate-300 text-blue-600"
+                    />
+                    <span className="text-sm text-slate-700">允許深度研究</span>
+                  </label>
+                  <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={(form as any).can_create_kb}
+                      onChange={e => setForm({ ...form, can_create_kb: e.target.checked } as any)}
+                      className="w-4 h-4 rounded border-slate-300 text-blue-600"
+                    />
+                    <span className="text-sm text-slate-700">允許建立自建知識庫</span>
+                  </label>
+                  {(form as any).can_create_kb && (
+                    <div className="flex gap-4 pl-6">
+                      <div className="flex items-center gap-1.5">
+                        <input
+                          type="number" min={1} max={99999}
+                          value={(form as any).kb_max_size_mb ?? 500}
+                          onChange={e => setForm({ ...form, kb_max_size_mb: Number(e.target.value) } as any)}
+                          className="w-20 border border-slate-300 rounded-lg px-2 py-1 text-sm"
+                        />
+                        <span className="text-xs text-slate-500">MB 總容量上限</span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <input
+                          type="number" min={1} max={999}
+                          value={(form as any).kb_max_count ?? 5}
+                          onChange={e => setForm({ ...form, kb_max_count: Number(e.target.value) } as any)}
+                          className="w-16 border border-slate-300 rounded-lg px-2 py-1 text-sm"
+                        />
+                        <span className="text-xs text-slate-500">個數上限</span>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>

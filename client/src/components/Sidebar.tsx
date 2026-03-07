@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Plus, MessageSquare, Trash2, ChevronDown, ChevronRight, LogOut, Settings, Cpu, Zap, CalendarClock, HelpCircle, Plug, BookOpen, Wrench, KeyRound, X, Eye, EyeOff, GitFork, Sparkles } from 'lucide-react'
+import { Plus, MessageSquare, Trash2, ChevronDown, LogOut, Settings, Cpu, Zap, CalendarClock, HelpCircle, KeyRound, X, Eye, EyeOff, GitFork, Sparkles, Database, Menu, ChevronUp } from 'lucide-react'
 import type { ChatSession, ModelType, LlmModel } from '../types'
 import { useAuth } from '../context/AuthContext'
 import { useNavigate } from 'react-router-dom'
@@ -48,14 +48,12 @@ export default function Sidebar({
   onDeleteSession,
   onModelChange,
 }: Props) {
-  const { user, logout, isAdmin, canSchedule } = useAuth()
+  const { user, logout, isAdmin, canSchedule, canCreateKb } = useAuth()
   const navigate = useNavigate()
   const [hoveredId, setHoveredId] = useState<string | null>(null)
   const [showModelMenu, setShowModelMenu] = useState(false)
   const [llmModels, setLlmModels] = useState<LlmModel[]>([])
-  const [showTools, setShowTools] = useState(false)
-  const [mcpServers, setMcpServers] = useState<{ name: string; description: string | null }[]>([])
-  const [difyKbs, setDifyKbs] = useState<{ id: number; name: string; description: string | null }[]>([])
+  const [showMenu, setShowMenu] = useState(false)
 
   // Import share modal
   const [showImport, setShowImport] = useState(false)
@@ -119,8 +117,6 @@ export default function Sidebar({
 
   useEffect(() => {
     api.get('/chat/models').then((r) => setLlmModels(r.data)).catch(() => { })
-    api.get('/mcp-servers/active-servers').then((r) => setMcpServers(r.data || [])).catch(() => { })
-    api.get('/dify-kb/active').then((r) => setDifyKbs(r.data || [])).catch(() => { })
   }, [])
 
   const currentModelInfo = llmModels.find((m) => m.key === model)
@@ -141,13 +137,6 @@ export default function Sidebar({
         >
           <Plus size={16} />
           新對話
-        </button>
-        <button
-          onClick={() => { setShowImport(true); setImportError('') }}
-          className="w-full flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-slate-200 px-4 py-2 rounded-xl text-xs font-medium transition mt-2"
-        >
-          <GitFork size={14} />
-          匯入分享對話
         </button>
       </div>
 
@@ -196,78 +185,6 @@ export default function Sidebar({
         </div>
       </div>
 
-      {/* Available Tools Panel */}
-      {(mcpServers.length > 0 || difyKbs.length > 0) && (
-        <div className="border-b border-slate-800">
-          <button
-            onClick={() => setShowTools(v => !v)}
-            className="w-full flex items-center justify-between px-4 py-2.5 text-slate-400 hover:text-slate-300 transition"
-          >
-            <div className="flex items-center gap-2">
-              <Wrench size={13} className="text-slate-500" />
-              <span className="text-xs font-medium">可用工具</span>
-              <div className="flex items-center gap-1">
-                {mcpServers.length > 0 && (
-                  <span className="text-xs px-1.5 py-0.5 bg-cyan-900/60 text-cyan-400 rounded-full">
-                    MCP {mcpServers.length}
-                  </span>
-                )}
-                {difyKbs.length > 0 && (
-                  <span className="text-xs px-1.5 py-0.5 bg-yellow-900/60 text-yellow-400 rounded-full">
-                    DIFY {difyKbs.length}
-                  </span>
-                )}
-              </div>
-            </div>
-            {showTools ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-          </button>
-
-          {showTools && (
-            <div className="px-3 pb-3 space-y-2 max-h-52 overflow-y-auto">
-              {/* MCP Servers */}
-              {mcpServers.length > 0 && (
-                <div>
-                  <div className="flex items-center gap-1.5 mb-1.5">
-                    <Plug size={11} className="text-cyan-500" />
-                    <span className="text-xs text-cyan-400 font-medium">MCP 工具</span>
-                  </div>
-                  <div className="space-y-1">
-                    {mcpServers.map(s => (
-                      <div key={s.name} className="bg-slate-800/60 rounded-lg px-2.5 py-1.5">
-                        <p className="text-xs text-cyan-300 font-medium">{s.name}</p>
-                        {s.description && (
-                          <p className="text-xs text-slate-500 mt-0.5 leading-4 line-clamp-2">{s.description}</p>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* DIFY KBs */}
-              {difyKbs.length > 0 && (
-                <div>
-                  <div className="flex items-center gap-1.5 mb-1.5 mt-1">
-                    <BookOpen size={11} className="text-yellow-500" />
-                    <span className="text-xs text-yellow-400 font-medium">知識庫</span>
-                  </div>
-                  <div className="space-y-1">
-                    {difyKbs.map(kb => (
-                      <div key={kb.id} className="bg-slate-800/60 rounded-lg px-2.5 py-1.5">
-                        <p className="text-xs text-yellow-300 font-medium">{kb.name}</p>
-                        {kb.description && (
-                          <p className="text-xs text-slate-500 mt-0.5 leading-4 line-clamp-2">{kb.description}</p>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-      )}
-
       {/* Sessions List */}
       <div className="flex-1 overflow-y-auto py-2">
         {sessions.length === 0 ? (
@@ -311,38 +228,55 @@ export default function Sidebar({
 
       {/* Footer */}
       <div className="p-4 border-t border-slate-800 space-y-2">
-        {isAdmin && (
+        {/* More menu */}
+        <div className="relative">
           <button
-            onClick={() => navigate('/admin')}
-            className="w-full flex items-center gap-2 text-amber-500 hover:text-amber-300 hover:bg-slate-800 px-3 py-2 rounded-lg text-xs transition font-medium"
+            onClick={() => setShowMenu(v => !v)}
+            className="w-full flex items-center gap-2 text-slate-400 hover:text-slate-200 hover:bg-slate-800 px-3 py-2 rounded-lg text-xs transition"
           >
-            <Settings size={14} />
-            系統管理
+            <Menu size={14} />
+            <span className="flex-1 text-left">更多功能</span>
+            {showMenu ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
           </button>
-        )}
-        {canSchedule && (
-          <button
-            onClick={() => navigate('/scheduled-tasks')}
-            className="w-full flex items-center gap-2 text-cyan-400 hover:text-cyan-200 hover:bg-slate-800 px-3 py-2 rounded-lg text-xs transition font-medium"
-          >
-            <CalendarClock size={14} />
-            排程任務
-          </button>
-        )}
-        <button
-          onClick={() => navigate('/skills')}
-          className="w-full flex items-center gap-2 text-purple-400 hover:text-purple-200 hover:bg-slate-800 px-3 py-2 rounded-lg text-xs transition font-medium"
-        >
-          <Sparkles size={14} />
-          技能市集
-        </button>
-        <button
-          onClick={() => navigate('/help')}
-          className="w-full flex items-center gap-2 text-emerald-400 hover:text-emerald-200 hover:bg-slate-800 px-3 py-2 rounded-lg text-xs transition font-medium"
-        >
-          <HelpCircle size={14} />
-          使用說明書
-        </button>
+          {showMenu && (
+            <div className="absolute bottom-full left-0 right-0 mb-2 bg-slate-800 border border-slate-700 rounded-xl overflow-hidden shadow-2xl z-10">
+              <button
+                onClick={() => { setShowMenu(false); setShowImport(true); setImportError('') }}
+                className="w-full flex items-center gap-2 text-slate-300 hover:bg-slate-700 px-3 py-2.5 text-xs transition"
+              >
+                <GitFork size={13} className="text-blue-400" />
+                匯入分享對話
+              </button>
+              {isAdmin && (
+                <button onClick={() => { setShowMenu(false); navigate('/admin') }}
+                  className="w-full flex items-center gap-2 text-amber-400 hover:bg-slate-700 px-3 py-2.5 text-xs transition font-medium">
+                  <Settings size={13} /> 系統管理
+                </button>
+              )}
+              {canSchedule && (
+                <button onClick={() => { setShowMenu(false); navigate('/scheduled-tasks') }}
+                  className="w-full flex items-center gap-2 text-cyan-400 hover:bg-slate-700 px-3 py-2.5 text-xs transition font-medium">
+                  <CalendarClock size={13} /> 排程任務
+                </button>
+              )}
+              <button onClick={() => { setShowMenu(false); navigate('/skills') }}
+                className="w-full flex items-center gap-2 text-purple-400 hover:bg-slate-700 px-3 py-2.5 text-xs transition font-medium">
+                <Sparkles size={13} /> 技能市集
+              </button>
+              {(canCreateKb || isAdmin) && (
+                <button onClick={() => { setShowMenu(false); navigate('/kb') }}
+                  className="w-full flex items-center gap-2 text-teal-400 hover:bg-slate-700 px-3 py-2.5 text-xs transition font-medium">
+                  <Database size={13} /> 知識庫市集
+                </button>
+              )}
+              <button onClick={() => { setShowMenu(false); navigate('/help') }}
+                className="w-full flex items-center gap-2 text-emerald-400 hover:bg-slate-700 px-3 py-2.5 text-xs transition font-medium">
+                <HelpCircle size={13} /> 使用說明書
+              </button>
+            </div>
+          )}
+        </div>
+
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <div className="w-7 h-7 bg-blue-700 rounded-full flex items-center justify-center text-white text-xs font-bold">

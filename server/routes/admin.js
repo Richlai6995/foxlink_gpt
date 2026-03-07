@@ -239,6 +239,55 @@ router.delete('/llm-models/:id', async (req, res) => {
   }
 });
 
+// ── KB Public Requests ─────────────────────────────────────────────────────
+
+// GET /api/admin/kb-public-requests — list all KBs that have requested public (pending or approved/rejected)
+router.get('/kb-public-requests', async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const { status } = req.query; // 'pending' | 'public' | 'private' | all
+    let sql = `
+      SELECT kb.id, kb.name, kb.description, kb.public_status, kb.is_public,
+             kb.chunk_count, kb.doc_count, kb.total_size_bytes,
+             TO_CHAR(kb.created_at, 'YYYY-MM-DD HH24:MI') AS created_at,
+             TO_CHAR(kb.updated_at, 'YYYY-MM-DD HH24:MI') AS updated_at,
+             u.username AS creator_username, u.name AS creator_name, u.employee_id AS creator_emp
+      FROM knowledge_bases kb
+      JOIN users u ON u.id = kb.creator_id
+      WHERE kb.public_status IS NOT NULL
+    `;
+    const params = [];
+    if (status) { sql += ` AND kb.public_status = ?`; params.push(status); }
+    sql += ` ORDER BY kb.updated_at DESC`;
+    const rows = await db.prepare(sql).all(...params);
+    res.json(rows);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// PUT /api/admin/kb-public-requests/:id — approve or reject a KB public request
+router.put('/kb-public-requests/:id', async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const { action } = req.body; // 'approve' | 'reject'
+    if (!['approve', 'reject'].includes(action)) {
+      return res.status(400).json({ error: 'action 必須是 approve 或 reject' });
+    }
+    const kb = await db.prepare('SELECT id, public_status FROM knowledge_bases WHERE id=?').get(req.params.id);
+    if (!kb) return res.status(404).json({ error: '知識庫不存在' });
+
+    if (action === 'approve') {
+      await db.prepare(`UPDATE knowledge_bases SET is_public=1, public_status='public', updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(req.params.id);
+    } else {
+      await db.prepare(`UPDATE knowledge_bases SET is_public=0, public_status='private', updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(req.params.id);
+    }
+    res.json({ ok: true, action });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // GET /api/admin/audit-logs
 router.get('/audit-logs', async (req, res) => {
   try {

@@ -72,7 +72,15 @@ class OracleStatementWrapper {
 
   _bindParams(params) {
     const bp = params.length === 1 && Array.isArray(params[0]) ? params[0] : params;
-    return bp.map((p) => (p === undefined ? null : p));
+    return bp.map((p) => {
+      if (p === undefined) return null;
+      // Strings > 32000 bytes must be bound as CLOB; otherwise Oracle raises ORA-01461.
+      // This applies to content / parent_content / any large text column.
+      if (typeof p === 'string' && Buffer.byteLength(p, 'utf8') > 32000) {
+        return { val: p, type: oracledb.DB_TYPE_CLOB };
+      }
+      return p;
+    });
   }
 
   /**
@@ -261,6 +269,140 @@ async function ensureDefaultAdmin(db) {
   }
 }
 
+// ─── Runtime Schema Migrations ────────────────────────────────────────────────
+async function runMigrations(db) {
+  const addCol = async (table, column, definition) => {
+    try {
+      const exists = await db.columnExists(table, column);
+      if (!exists) {
+        await db.prepare(`ALTER TABLE ${table} ADD ${column} ${definition}`).run();
+        console.log(`[Migration] Added ${table}.${column}`);
+      }
+    } catch (e) {
+      console.warn(`[Migration] ${table}.${column}: ${e.message}`);
+    }
+  };
+
+  // kb_documents missing chunk_count
+  await addCol('KB_DOCUMENTS', 'CHUNK_COUNT', 'NUMBER DEFAULT 0');
+  // kb_chunks missing parent_content
+  await addCol('KB_CHUNKS', 'PARENT_CONTENT', 'CLOB');
+  // kb_chunks.embedding: Oracle 23ai does not support MODIFY on VECTOR columns.
+  // Detect if embedding is still fixed-dim (VECTOR(768,*)) by checking vector_precision in data dict.
+  // If so: drop and re-add as VECTOR(*, FLOAT32) (safe only when table is empty).
+  try {
+    const conn = await pool.getConnection();
+    try {
+      // Check if embedding column has a fixed dimension (indicated by data_length != 0 or check user_tab_cols)
+      const dimRow = await conn.execute(
+        `SELECT vector_dimensions FROM user_tab_columns WHERE table_name='KB_CHUNKS' AND column_name='EMBEDDING'`,
+        [], { outFormat: oracledb.OUT_FORMAT_OBJECT }
+      );
+      const dim = dimRow.rows?.[0]?.VECTOR_DIMENSIONS;
+      // null or 0 means wildcard; non-null fixed dim means we need to migrate
+      if (dim != null && dim !== 0) {
+        // Only safe to drop+add when table is empty
+        const cntRow = await conn.execute(`SELECT COUNT(*) AS CNT FROM KB_CHUNKS`, [], { outFormat: oracledb.OUT_FORMAT_OBJECT });
+        const cnt = cntRow.rows?.[0]?.CNT ?? 1;
+        if (cnt === 0) {
+          await conn.execute(`DROP INDEX kb_chunks_vidx`, [], { autoCommit: true }).catch(() => {});
+          await conn.execute(`ALTER TABLE KB_CHUNKS DROP COLUMN EMBEDDING`, [], { autoCommit: true });
+          await conn.execute(`ALTER TABLE KB_CHUNKS ADD EMBEDDING VECTOR(*, FLOAT32)`, [], { autoCommit: true });
+          await conn.execute(
+            `CREATE VECTOR INDEX kb_chunks_vidx ON kb_chunks(embedding) ORGANIZATION NEIGHBOR PARTITIONS WITH DISTANCE COSINE WITH TARGET ACCURACY 90`,
+            [], { autoCommit: true }
+          ).catch(() => {});
+          console.log('[Migration] Rebuilt KB_CHUNKS.EMBEDDING as VECTOR(*, FLOAT32)');
+        } else {
+          console.warn('[Migration] KB_CHUNKS.EMBEDDING is fixed-dim but table has data — manual migration needed');
+        }
+      }
+    } catch (e) {
+      console.warn('[Migration] KB_CHUNKS.EMBEDDING check:', e.message);
+    } finally {
+      await conn.close();
+    }
+  } catch (e) {
+    console.warn('[Migration] KB_CHUNKS.EMBEDDING pool error:', e.message);
+  }
+  // llm_models image_output flag (for gemini-*-image-preview models)
+  await addCol('LLM_MODELS', 'IMAGE_OUTPUT', 'NUMBER(1) DEFAULT 0');
+  // kb_access permission level (use = chat-only, edit = can edit + visible in marketplace)
+  await addCol('KB_ACCESS', 'PERMISSION', "VARCHAR2(10) DEFAULT 'use'");
+
+  // knowledge_bases stats columns (in case old deployment missing them)
+  await addCol('KNOWLEDGE_BASES', 'DOC_COUNT',        'NUMBER DEFAULT 0');
+  await addCol('KNOWLEDGE_BASES', 'CHUNK_COUNT',       'NUMBER DEFAULT 0');
+  await addCol('KNOWLEDGE_BASES', 'TOTAL_SIZE_BYTES',  'NUMBER DEFAULT 0');
+  await addCol('KNOWLEDGE_BASES', 'TOP_K_FETCH',       'NUMBER DEFAULT 20');
+  await addCol('KNOWLEDGE_BASES', 'TOP_K_RETURN',      'NUMBER DEFAULT 5');
+  await addCol('KNOWLEDGE_BASES', 'SCORE_THRESHOLD',   'NUMBER DEFAULT 0');
+  await addCol('KNOWLEDGE_BASES', 'OCR_MODEL',          "VARCHAR2(100)");
+  await addCol('KNOWLEDGE_BASES', 'PARSE_MODE',         "VARCHAR2(20) DEFAULT 'text_only'");
+  await addCol('KB_DOCUMENTS',    'PARSE_MODE',         "VARCHAR2(20)");
+
+  // ── Deep Research ──────────────────────────────────────────────────────────
+  await addCol('USERS',  'CAN_DEEP_RESEARCH', 'NUMBER(1)');
+  await addCol('ROLES',  'CAN_DEEP_RESEARCH', 'NUMBER(1) DEFAULT 1');
+
+  const createTable = async (name, ddl) => {
+    try {
+      const exists = await db.tableExists(name);
+      if (!exists) {
+        await db.prepare(ddl).run();
+        console.log(`[Migration] Created table ${name}`);
+      }
+    } catch (e) {
+      console.warn(`[Migration] createTable ${name}: ${e.message}`);
+    }
+  };
+
+  // ── External API Keys ──────────────────────────────────────────────────────
+  await createTable('API_KEYS', `CREATE TABLE api_keys (
+    id              VARCHAR2(36)  PRIMARY KEY,
+    name            VARCHAR2(200) NOT NULL,
+    key_hash        VARCHAR2(64)  NOT NULL,
+    key_prefix      VARCHAR2(20),
+    description     CLOB,
+    accessible_kbs  CLOB DEFAULT '["*"]',
+    is_active       NUMBER(1)     DEFAULT 1,
+    last_used_at    TIMESTAMP,
+    expires_at      TIMESTAMP,
+    created_by      NUMBER        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at      TIMESTAMP     DEFAULT SYSTIMESTAMP,
+    CONSTRAINT api_keys_hash_uk UNIQUE (key_hash)
+  )`);
+  // Ensure columns exist for tables created by older schema versions
+  await addCol('API_KEYS', 'KEY_PREFIX',    'VARCHAR2(20)');
+  await addCol('API_KEYS', 'ACCESSIBLE_KBS','CLOB DEFAULT \'["*"]\'');
+  await addCol('API_KEYS', 'DESCRIPTION',   'CLOB');
+  await addCol('API_KEYS', 'IS_ACTIVE',     'NUMBER(1) DEFAULT 1');
+  await addCol('API_KEYS', 'LAST_USED_AT',  'TIMESTAMP');
+  await addCol('API_KEYS', 'EXPIRES_AT',    'TIMESTAMP');
+
+  await createTable('RESEARCH_JOBS', `CREATE TABLE research_jobs (
+    id             VARCHAR2(36)  PRIMARY KEY,
+    user_id        NUMBER        NOT NULL,
+    session_id     VARCHAR2(36),
+    title          VARCHAR2(500),
+    question       CLOB,
+    plan_json      CLOB,
+    status         VARCHAR2(20)  DEFAULT 'pending',
+    progress_step  NUMBER        DEFAULT 0,
+    progress_total NUMBER        DEFAULT 0,
+    progress_label VARCHAR2(300),
+    use_web_search NUMBER(1)     DEFAULT 0,
+    output_formats VARCHAR2(200) DEFAULT 'docx',
+    result_summary CLOB,
+    result_files_json CLOB,
+    error_msg      VARCHAR2(1000),
+    is_notified    NUMBER(1)     DEFAULT 0,
+    created_at     TIMESTAMP     DEFAULT SYSTIMESTAMP,
+    updated_at     TIMESTAMP     DEFAULT SYSTIMESTAMP,
+    completed_at   TIMESTAMP
+  )`);
+}
+
 // ─── Exports (same shape as database.js) ─────────────────────────────────────
 const oracleDbExports = {
   db: null,
@@ -268,6 +410,7 @@ const oracleDbExports = {
     const wrapper = await initializeOracleDB();
     oracleDbExports.db = wrapper;
     await ensureDefaultAdmin(wrapper);
+    await runMigrations(wrapper);
     return wrapper;
   },
   close: async () => {
