@@ -46,6 +46,14 @@ function SchemaManager() {
   const [form, setForm] = useState({ table_name: '', display_name: '', db_connection: 'erp', business_notes: '', join_hints: '' })
   const [loading, setLoading] = useState(false)
 
+  // Oracle 批次匯入
+  const [showImport, setShowImport] = useState(false)
+  const [importText, setImportText] = useState('')
+  const [importOwner, setImportOwner] = useState('APPS')
+  const [importConn, setImportConn] = useState('erp')
+  const [importLoading, setImportLoading] = useState(false)
+  const [importResult, setImportResult] = useState<{ imported: {table:string,columns:number}[], skipped: string[] } | null>(null)
+
   const load = () => api.get('/dashboard/designer/schemas').then(r => setSchemas(r.data)).catch(() => {})
   useEffect(() => { load() }, [])
 
@@ -73,8 +81,85 @@ function SchemaManager() {
     load()
   }
 
+  const runImport = async () => {
+    const table_names = importText.split('\n').map(l => l.trim().toUpperCase()).filter(Boolean)
+    if (!table_names.length) return
+    setImportLoading(true)
+    setImportResult(null)
+    try {
+      const r = await api.post('/dashboard/designer/schemas/import-oracle', {
+        table_names, owner: importOwner, db_connection: importConn
+      })
+      setImportResult(r.data)
+      load()
+    } catch (e: any) {
+      alert(e?.response?.data?.error || '匯入失敗')
+    } finally {
+      setImportLoading(false)
+    }
+  }
+
   return (
     <div className="space-y-4">
+      {/* Oracle 批次匯入 Modal */}
+      {showImport && (
+        <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50">
+          <div className="bg-white rounded-2xl shadow-xl p-6 w-[480px] space-y-4">
+            <div className="flex items-center justify-between">
+              <p className="text-sm font-semibold text-gray-800">從 Oracle ERP 批次匯入 Schema</p>
+              <button onClick={() => { setShowImport(false); setImportResult(null) }}
+                className="text-gray-400 hover:text-gray-600">✕</button>
+            </div>
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-gray-500 mb-1 block">Oracle Owner</label>
+                  <input className="input py-1.5 text-sm" value={importOwner}
+                    onChange={e => setImportOwner(e.target.value.toUpperCase())} placeholder="APPS" />
+                </div>
+                <div>
+                  <label className="text-xs text-gray-500 mb-1 block">DB 連線</label>
+                  <select className="input py-1.5 text-sm" value={importConn}
+                    onChange={e => setImportConn(e.target.value)}>
+                    <option value="erp">ERP (Oracle)</option>
+                    <option value="system">系統 DB</option>
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label className="text-xs text-gray-500 mb-1 block">資料表清單（每行一個，不含 Owner 前綴）</label>
+                <textarea className="input text-sm font-mono resize-none" rows={8}
+                  placeholder={"FL_MRP_FG_PEGGING_SUMMARY\nWO_ABNORMAL_V\nBOM_HEADER\n..."}
+                  value={importText} onChange={e => setImportText(e.target.value)} />
+                <p className="text-[11px] text-gray-400 mt-1">
+                  {importText.split('\n').filter(l => l.trim()).length} 個 table
+                </p>
+              </div>
+              {importResult && (
+                <div className="bg-gray-50 rounded-lg p-3 text-xs space-y-1">
+                  <p className="font-medium text-gray-700">匯入結果</p>
+                  {importResult.imported.map(i => (
+                    <p key={i.table} className="text-green-600">✓ {i.table} — {i.columns} 欄</p>
+                  ))}
+                  {importResult.skipped.map(t => (
+                    <p key={t} className="text-red-500">✗ {t} — 查無此 table（請確認 Owner/名稱）</p>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div className="flex justify-end gap-2">
+              <button onClick={() => { setShowImport(false); setImportResult(null) }}
+                className="text-xs text-gray-500 hover:text-gray-700 px-3">關閉</button>
+              <button onClick={runImport} disabled={importLoading || !importText.trim()}
+                className="btn-primary text-xs py-1.5 px-4 flex items-center gap-1">
+                <RefreshCw size={12} className={importLoading ? 'animate-spin' : ''} />
+                {importLoading ? '匯入中...' : '開始匯入'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="bg-gray-100 rounded-xl p-4 space-y-3">
         <p className="text-xs text-gray-500 font-medium">{editId ? '編輯 Schema' : '新增 Schema'}</p>
         <div className="grid grid-cols-2 gap-3">
@@ -117,6 +202,14 @@ function SchemaManager() {
           {editId && <button onClick={() => { setEditId(null); setForm({ table_name: '', display_name: '', db_connection: 'erp', business_notes: '', join_hints: '' }) }}
             className="text-xs text-gray-500 hover:text-gray-800 px-2">取消</button>}
         </div>
+      </div>
+
+      <div className="flex items-center justify-between">
+        <span className="text-xs text-gray-400 font-medium">Schema 清單（{schemas.length}）</span>
+        <button onClick={() => { setShowImport(true); setImportResult(null) }}
+          className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700 transition">
+          <RefreshCw size={12} /> 從 Oracle ERP 批次匯入
+        </button>
       </div>
 
       <div className="space-y-2">

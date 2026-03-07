@@ -303,6 +303,106 @@ router.delete('/designer/schemas/:id', requireDesigner, async (req, res) => {
   }
 });
 
+// POST /api/dashboard/designer/schemas/import-oracle
+// 從 Oracle ERP ALL_TAB_COLUMNS 批次匯入多個 table 的欄位定義
+router.post('/designer/schemas/import-oracle', requireDesigner, async (req, res) => {
+  const { table_names, owner = 'APPS', db_connection = 'erp' } = req.body;
+  if (!Array.isArray(table_names) || table_names.length === 0)
+    return res.status(400).json({ error: 'table_names 為必填陣列' });
+
+  // 驗證 table names：只允許大寫英數字母、底線、$（Oracle 規範）
+  const NAME_RE = /^[A-Z0-9_$]+$/i;
+  const safeTables = table_names
+    .map(t => t.trim().toUpperCase())
+    .filter(t => NAME_RE.test(t));
+  if (safeTables.length === 0)
+    return res.status(400).json({ error: 'table_names 格式不合法' });
+
+  try {
+    const { erpPool, db } = require('../database-oracle');
+
+    // 單一 SQL 查所有 table 的欄位（含 Oracle comment）
+    const inList = safeTables.map(t => `'${t}'`).join(',');
+    const sql = `
+      SELECT c.TABLE_NAME, c.COLUMN_NAME, c.DATA_TYPE,
+             c.DATA_LENGTH, c.DATA_PRECISION, c.DATA_SCALE,
+             c.NULLABLE, cc.COMMENTS
+      FROM   ALL_TAB_COLUMNS c
+      LEFT JOIN ALL_COL_COMMENTS cc
+             ON cc.OWNER = c.OWNER
+            AND cc.TABLE_NAME = c.TABLE_NAME
+            AND cc.COLUMN_NAME = c.COLUMN_NAME
+      WHERE  c.OWNER = :owner
+        AND  c.TABLE_NAME IN (${inList})
+      ORDER BY c.TABLE_NAME, c.COLUMN_ID
+    `;
+
+    const conn = await erpPool.getConnection();
+    let rows;
+    try {
+      const result = await conn.execute(sql, { owner: owner.toUpperCase() });
+      rows = result.rows;
+    } finally {
+      await conn.close();
+    }
+
+    // 依 TABLE_NAME 分組
+    const byTable = {};
+    for (const r of rows) {
+      const [tname, colName, dataType, dataLen, dataPre, dataSca, nullable, comments] = r;
+      if (!byTable[tname]) byTable[tname] = [];
+      // 組合完整型態字串 e.g. NUMBER(10,2) / VARCHAR2(200)
+      let typeStr = dataType;
+      if (dataType === 'NUMBER' && dataPre != null) typeStr = `NUMBER(${dataPre}${dataSca ? ',' + dataSca : ''})`;
+      else if (dataType === 'VARCHAR2' || dataType === 'CHAR') typeStr = `${dataType}(${dataLen})`;
+      byTable[tname].push({ column_name: colName, data_type: typeStr, description: comments || null });
+    }
+
+    const imported = [];
+    const skipped = [];
+
+    for (const tname of safeTables) {
+      if (!byTable[tname]) { skipped.push(tname); continue; }
+
+      // Upsert ai_schema_definitions（若已存在則取既有 id）
+      let existing = await db.prepare(
+        `SELECT id FROM ai_schema_definitions WHERE table_name=? AND db_connection=?`
+      ).get(tname, db_connection);
+
+      let schemaId;
+      if (existing) {
+        schemaId = existing.id;
+        // 更新 updated_at
+        await db.prepare(
+          `UPDATE ai_schema_definitions SET updated_at=SYSTIMESTAMP WHERE id=?`
+        ).run(schemaId);
+      } else {
+        const r = await db.prepare(
+          `INSERT INTO ai_schema_definitions (table_name, display_name, db_connection, created_by)
+           VALUES (?, ?, ?, ?)`
+        ).run(tname, tname, db_connection, req.user.id);
+        schemaId = r.lastInsertRowid;
+      }
+
+      // 清除舊欄位，整批重建
+      await db.prepare(`DELETE FROM ai_schema_columns WHERE schema_id=?`).run(schemaId);
+
+      for (const col of byTable[tname]) {
+        await db.prepare(
+          `INSERT INTO ai_schema_columns (schema_id, column_name, data_type, description)
+           VALUES (?, ?, ?, ?)`
+        ).run(schemaId, col.column_name, col.data_type, col.description);
+      }
+
+      imported.push({ table: tname, columns: byTable[tname].length, schema_id: schemaId });
+    }
+
+    res.json({ imported, skipped, total_tables: safeTables.length });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ─── ETL Jobs ─────────────────────────────────────────────────────────────────
 
 // GET /api/dashboard/etl/jobs
