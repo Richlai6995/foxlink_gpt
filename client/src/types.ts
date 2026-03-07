@@ -101,6 +101,8 @@ export interface SensitiveKeyword {
   created_at: string
 }
 
+export type LlmProviderType = 'gemini' | 'azure_openai'
+
 export interface LlmModel {
   id?: number
   key: string
@@ -111,6 +113,13 @@ export interface LlmModel {
   sort_order?: number
   image_output?: number
   created_at?: string
+  // Multi-provider fields
+  provider_type?: LlmProviderType
+  has_api_key?: number       // 1 = encrypted key exists in DB
+  endpoint_url?: string
+  api_version?: string
+  deployment_name?: string
+  base_model?: string
 }
 
 export interface MailSettings {
@@ -167,6 +176,109 @@ export interface ResearchJob {
   is_notified: number
   created_at: string
   completed_at: string | null
+}
+
+// ── AI 戰情 ──────────────────────────────────────────────────────────────────
+export interface AiSchemaDef {
+  id: number
+  table_name: string
+  display_name?: string
+  db_connection: string
+  business_notes?: string
+  join_hints?: string
+  is_active: number
+  columns?: AiSchemaColumn[]
+}
+
+export interface AiSchemaColumn {
+  id?: number
+  schema_id?: number
+  column_name: string
+  data_type?: string
+  description?: string
+  is_vectorized: number
+  value_mapping?: string
+  sample_values?: string
+}
+
+export interface AiSelectTopic {
+  id: number
+  name: string
+  description?: string
+  icon?: string
+  sort_order: number
+  is_active: number
+  designs?: AiSelectDesign[]
+}
+
+export interface AiSelectDesign {
+  id: number
+  topic_id: number
+  name: string
+  description?: string
+  target_schema_ids?: string
+  vector_search_enabled: number
+  system_prompt?: string
+  few_shot_examples?: string
+  chart_config?: string
+  cache_ttl_minutes: number
+  is_public: number
+}
+
+export interface AiEtlJob {
+  id: number
+  name: string
+  source_sql: string
+  source_connection: string
+  vectorize_fields?: string
+  metadata_fields?: string
+  embedding_dimension: number
+  cron_expression?: string
+  is_incremental: number
+  last_run_at?: string
+  status: string
+  run_count?: number
+}
+
+export interface AiEtlRunLog {
+  id: number
+  job_id: number
+  started_at?: string
+  finished_at?: string
+  rows_fetched: number
+  rows_vectorized: number
+  error_message?: string
+  status: string
+}
+
+export interface AiQueryResult {
+  rows: Record<string, unknown>[]
+  columns: string[]
+  row_count: number
+  chart_config?: AiChartConfig | null
+  cached?: boolean
+}
+
+export interface AiChartConfig {
+  default_chart: string
+  allow_table?: boolean
+  allow_export?: boolean
+  charts: AiChartDef[]
+}
+
+export interface AiChartDef {
+  type: 'bar' | 'line' | 'pie' | 'scatter' | 'radar' | 'gauge'
+  title?: string
+  x_field?: string
+  y_field?: string
+  label_field?: string
+  value_field?: string
+  horizontal?: boolean
+  smooth?: boolean
+  area?: boolean
+  gradient?: boolean
+  donut?: boolean
+  show_label?: boolean
 }
 
 export interface TaskRun {

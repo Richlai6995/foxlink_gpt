@@ -345,6 +345,14 @@ async function runMigrations(db) {
   await addCol('USERS',  'CAN_DEEP_RESEARCH', 'NUMBER(1)');
   await addCol('ROLES',  'CAN_DEEP_RESEARCH', 'NUMBER(1) DEFAULT 1');
 
+  // ── LLM Models — multi-provider (Gemini + Azure OpenAI) ────────────────────
+  await addCol('LLM_MODELS', 'PROVIDER_TYPE',    "VARCHAR2(20) DEFAULT 'gemini'");
+  await addCol('LLM_MODELS', 'API_KEY_ENC',       'VARCHAR2(600)');
+  await addCol('LLM_MODELS', 'ENDPOINT_URL',      'VARCHAR2(1000)');
+  await addCol('LLM_MODELS', 'API_VERSION',       'VARCHAR2(50)');
+  await addCol('LLM_MODELS', 'DEPLOYMENT_NAME',   'VARCHAR2(200)');
+  await addCol('LLM_MODELS', 'BASE_MODEL',        'VARCHAR2(100)');
+
   const createTable = async (name, ddl) => {
     try {
       const exists = await db.tableExists(name);
@@ -400,6 +408,129 @@ async function runMigrations(db) {
     created_at     TIMESTAMP     DEFAULT SYSTIMESTAMP,
     updated_at     TIMESTAMP     DEFAULT SYSTIMESTAMP,
     completed_at   TIMESTAMP
+  )`);
+
+  // ── AI 戰情 ─────────────────────────────────────────────────────────────────
+  await addCol('USERS', 'CAN_DESIGN_AI_SELECT', 'NUMBER(1) DEFAULT 0');
+  await addCol('USERS', 'CAN_USE_AI_DASHBOARD',  'NUMBER(1) DEFAULT 0');
+
+  await createTable('AI_SCHEMA_DEFINITIONS', `CREATE TABLE ai_schema_definitions (
+    id            NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    table_name    VARCHAR2(200) NOT NULL,
+    display_name  VARCHAR2(200),
+    db_connection VARCHAR2(20) DEFAULT 'erp',
+    business_notes CLOB,
+    join_hints     CLOB,
+    is_active      NUMBER(1) DEFAULT 1,
+    created_by     NUMBER,
+    updated_at     TIMESTAMP DEFAULT SYSTIMESTAMP
+  )`);
+
+  await createTable('AI_SCHEMA_COLUMNS', `CREATE TABLE ai_schema_columns (
+    id               NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    schema_id        NUMBER REFERENCES ai_schema_definitions(id) ON DELETE CASCADE,
+    column_name      VARCHAR2(100) NOT NULL,
+    data_type        VARCHAR2(50),
+    description      VARCHAR2(500),
+    is_vectorized    NUMBER(1) DEFAULT 0,
+    value_mapping    CLOB,
+    sample_values    CLOB,
+    vector_table_ref VARCHAR2(100)
+  )`);
+
+  await createTable('AI_SELECT_TOPICS', `CREATE TABLE ai_select_topics (
+    id          NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    name        VARCHAR2(100) NOT NULL,
+    description VARCHAR2(500),
+    icon        VARCHAR2(50),
+    sort_order  NUMBER DEFAULT 0,
+    is_active   NUMBER(1) DEFAULT 1,
+    created_by  NUMBER,
+    created_at  TIMESTAMP DEFAULT SYSTIMESTAMP
+  )`);
+
+  await createTable('AI_SELECT_DESIGNS', `CREATE TABLE ai_select_designs (
+    id                    NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    topic_id              NUMBER REFERENCES ai_select_topics(id) ON DELETE CASCADE,
+    name                  VARCHAR2(100) NOT NULL,
+    description           VARCHAR2(500),
+    target_schema_ids     CLOB,
+    vector_search_enabled NUMBER(1) DEFAULT 0,
+    system_prompt         CLOB,
+    few_shot_examples     CLOB,
+    chart_config          CLOB,
+    cache_ttl_minutes     NUMBER DEFAULT 30,
+    is_public             NUMBER(1) DEFAULT 0,
+    created_by            NUMBER,
+    updated_at            TIMESTAMP DEFAULT SYSTIMESTAMP
+  )`);
+
+  await createTable('AI_ETL_JOBS', `CREATE TABLE ai_etl_jobs (
+    id                  NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    name                VARCHAR2(100) NOT NULL,
+    source_sql          CLOB NOT NULL,
+    source_connection   VARCHAR2(20) DEFAULT 'erp',
+    vectorize_fields    CLOB,
+    metadata_fields     CLOB,
+    embedding_dimension NUMBER DEFAULT 768,
+    vector_table        VARCHAR2(100) DEFAULT 'AI_VECTOR_STORE',
+    cron_expression     VARCHAR2(50),
+    is_incremental      NUMBER(1) DEFAULT 1,
+    last_run_at         TIMESTAMP,
+    status              VARCHAR2(20) DEFAULT 'active',
+    created_by          NUMBER,
+    created_at          TIMESTAMP DEFAULT SYSTIMESTAMP
+  )`);
+
+  await createTable('AI_ETL_RUN_LOGS', `CREATE TABLE ai_etl_run_logs (
+    id              NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    job_id          NUMBER REFERENCES ai_etl_jobs(id) ON DELETE CASCADE,
+    started_at      TIMESTAMP,
+    finished_at     TIMESTAMP,
+    rows_fetched    NUMBER DEFAULT 0,
+    rows_vectorized NUMBER DEFAULT 0,
+    error_message   CLOB,
+    status          VARCHAR2(20)
+  )`);
+
+  await createTable('AI_VECTOR_STORE', `CREATE TABLE ai_vector_store (
+    id           NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    etl_job_id   NUMBER REFERENCES ai_etl_jobs(id) ON DELETE CASCADE,
+    source_table VARCHAR2(100),
+    source_pk    VARCHAR2(500),
+    field_name   VARCHAR2(100),
+    field_value  CLOB,
+    metadata     CLOB,
+    embedding    VECTOR(*, FLOAT32),
+    created_at   TIMESTAMP DEFAULT SYSTIMESTAMP
+  )`);
+
+  // Vector index for AI_VECTOR_STORE (Oracle 23 AI)
+  try {
+    const idxRow = await db.queryOne(
+      `SELECT COUNT(*) AS cnt FROM user_indexes WHERE UPPER(index_name)='AI_VECTOR_STORE_VIDX'`
+    );
+    if (!idxRow?.cnt || Number(idxRow.cnt) === 0) {
+      await db.execDDL(
+        `CREATE VECTOR INDEX ai_vector_store_vidx ON ai_vector_store(embedding)
+         ORGANIZATION NEIGHBOR PARTITIONS WITH DISTANCE COSINE WITH TARGET ACCURACY 90`
+      );
+      console.log('[Migration] Created ai_vector_store vector index');
+    }
+  } catch (e) {
+    console.warn('[Migration] ai_vector_store vector index:', e.message);
+  }
+
+  await createTable('AI_QUERY_CACHE', `CREATE TABLE ai_query_cache (
+    id            NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    design_id     NUMBER REFERENCES ai_select_designs(id) ON DELETE CASCADE,
+    question_hash VARCHAR2(64) NOT NULL,
+    generated_sql CLOB,
+    result_json   CLOB,
+    row_count     NUMBER,
+    created_at    TIMESTAMP DEFAULT SYSTIMESTAMP,
+    expires_at    TIMESTAMP,
+    CONSTRAINT ai_query_cache_uq UNIQUE (design_id, question_hash)
   )`);
 }
 

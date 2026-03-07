@@ -41,6 +41,8 @@ interface UserForm {
   allow_code_skill: boolean | null
   can_create_kb: boolean | null
   can_deep_research: boolean | null
+  can_design_ai_select: boolean | null
+  can_use_ai_dashboard: boolean | null
   kb_max_size_mb: string
   kb_max_count: string
   role_id: number | null
@@ -70,6 +72,8 @@ const empty: UserForm = {
   allow_code_skill: null,
   can_create_kb: null,
   can_deep_research: null,
+  can_design_ai_select: null,
+  can_use_ai_dashboard: null,
   kb_max_size_mb: '',
   kb_max_count: '',
   role_id: null,
@@ -164,6 +168,8 @@ export default function UserManagement() {
       allow_code_skill: u2.allow_code_skill == null ? null : u2.allow_code_skill === 1,
       can_create_kb: u2.can_create_kb == null ? null : u2.can_create_kb === 1,
       can_deep_research: u2.can_deep_research == null ? null : u2.can_deep_research === 1,
+      can_design_ai_select: u2.can_design_ai_select == null ? null : u2.can_design_ai_select === 1,
+      can_use_ai_dashboard: u2.can_use_ai_dashboard == null ? null : u2.can_use_ai_dashboard === 1,
       kb_max_size_mb: u2.kb_max_size_mb != null ? String(u2.kb_max_size_mb) : '',
       kb_max_count: u2.kb_max_count != null ? String(u2.kb_max_count) : '',
     })
@@ -581,6 +587,30 @@ export default function UserManagement() {
                       <option value="">沿用角色設定</option>
                       <option value="1">強制允許</option>
                       <option value="0">強制禁止</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-xs text-slate-500 mb-1 block">AI 戰情設計</label>
+                    <select
+                      value={form.can_design_ai_select === null ? '' : form.can_design_ai_select ? '1' : '0'}
+                      onChange={e => setForm(p => ({ ...p, can_design_ai_select: e.target.value === '' ? null : e.target.value === '1' }))}
+                      className="input py-1 text-sm"
+                    >
+                      <option value="">預設禁止</option>
+                      <option value="1">允許設計</option>
+                      <option value="0">禁止</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-xs text-slate-500 mb-1 block">AI 戰情查詢</label>
+                    <select
+                      value={form.can_use_ai_dashboard === null ? '' : form.can_use_ai_dashboard ? '1' : '0'}
+                      onChange={e => setForm(p => ({ ...p, can_use_ai_dashboard: e.target.value === '' ? null : e.target.value === '1' }))}
+                      className="input py-1 text-sm"
+                    >
+                      <option value="">預設禁止</option>
+                      <option value="1">允許使用</option>
+                      <option value="0">禁止</option>
                     </select>
                   </div>
                   <div>

@@ -218,6 +218,8 @@ const createSession = async (res, user) => {
     name: user.name,
     employee_id: user.employee_id,
     email: user.email,
+    can_design_ai_select: user.can_design_ai_select,
+    can_use_ai_dashboard:  user.can_use_ai_dashboard,
   });
   const { password: _, ...userWithoutPassword } = user;
   // Resolve effective skill permissions (user setting overrides role default)
@@ -243,7 +245,9 @@ const createSession = async (res, user) => {
   userWithoutPassword.effective_can_create_kb        = user.role === 'admin' || resolveEffective(user.can_create_kb,        rolePerms?.can_create_kb);
   userWithoutPassword.effective_kb_max_size_mb       = user.role === 'admin' ? 99999 : resolveNum(user.kb_max_size_mb, rolePerms?.kb_max_size_mb, 500);
   userWithoutPassword.effective_kb_max_count         = user.role === 'admin' ? 99999 : resolveNum(user.kb_max_count,   rolePerms?.kb_max_count,   5);
-  userWithoutPassword.effective_can_deep_research    = user.role === 'admin' || resolveEffective(user.can_deep_research, rolePerms?.can_deep_research ?? 1);
+  userWithoutPassword.effective_can_deep_research      = user.role === 'admin' || resolveEffective(user.can_deep_research, rolePerms?.can_deep_research ?? 1);
+  userWithoutPassword.effective_can_design_ai_select   = user.role === 'admin' || (user.can_design_ai_select == 1);
+  userWithoutPassword.effective_can_use_ai_dashboard   = user.role === 'admin' || (user.can_use_ai_dashboard == 1);
   res.json({ token, user: userWithoutPassword });
 };
 
@@ -392,7 +396,9 @@ router.get('/me', async (req, res) => {
     userWithoutPassword.effective_can_create_kb         = user.role === 'admin' || resolveEff(user.can_create_kb,         rolePerms?.can_create_kb);
     userWithoutPassword.effective_kb_max_size_mb        = user.role === 'admin' ? 99999 : resolveNum(user.kb_max_size_mb,  rolePerms?.kb_max_size_mb, 500);
     userWithoutPassword.effective_kb_max_count          = user.role === 'admin' ? 99999 : resolveNum(user.kb_max_count,    rolePerms?.kb_max_count,   5);
-    userWithoutPassword.effective_can_deep_research     = user.role === 'admin' || resolveEff(user.can_deep_research, rolePerms?.can_deep_research ?? 1);
+    userWithoutPassword.effective_can_deep_research      = user.role === 'admin' || resolveEff(user.can_deep_research, rolePerms?.can_deep_research ?? 1);
+    userWithoutPassword.effective_can_design_ai_select   = user.role === 'admin' || (user.can_design_ai_select == 1);
+    userWithoutPassword.effective_can_use_ai_dashboard   = user.role === 'admin' || (user.can_use_ai_dashboard == 1);
     res.json(userWithoutPassword);
   } catch (e) {
     res.status(500).json({ error: e.message });

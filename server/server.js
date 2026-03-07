@@ -59,6 +59,8 @@ app.get('/api/health', (req, res) => res.json({ status: 'ok', timestamp: new Dat
     console.log('[Route] /api/api-keys OK');
     app.use('/api/v1', require('./routes/externalKb'));
     console.log('[Route] /api/v1 OK');
+    app.use('/api/dashboard', require('./routes/dashboard'));
+    console.log('[Route] /api/dashboard OK');
 
     // Auto-restore code skill runners
     try {
@@ -135,6 +137,14 @@ app.get('/api/health', (req, res) => res.json({ status: 'ok', timestamp: new Dat
       initScheduler(db);
     } catch (e) {
       console.error('[ScheduledTasks] Failed to init scheduler:', e.message);
+    }
+
+    // Init AI 戰情 ETL Scheduler
+    try {
+      const { initEtlScheduler } = require('./services/dashboardService');
+      initEtlScheduler(db);
+    } catch (e) {
+      console.error('[ETL Scheduler] Failed to init:', e.message);
     }
   } catch (error) {
     console.error('Failed to initialize:', error);

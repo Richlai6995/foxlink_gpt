@@ -23,6 +23,7 @@ router.get('/', async (req, res) => {
                 u.allow_image_upload, u.image_max_mb, u.allow_scheduled_tasks,
                 u.allow_create_skill, u.allow_external_skill, u.allow_code_skill,
                 u.can_create_kb, u.kb_max_size_mb, u.kb_max_count, u.can_deep_research,
+                u.can_design_ai_select, u.can_use_ai_dashboard,
                 u.role_id, r.name AS role_name, u.creation_method,
                 u.budget_daily, u.budget_weekly, u.budget_monthly,
                 ${ORG_COLS}
@@ -126,6 +127,7 @@ router.put('/:id', async (req, res) => {
     allow_create_skill, allow_external_skill, allow_code_skill,
     can_create_kb, kb_max_size_mb, kb_max_count,
     can_deep_research,
+    can_design_ai_select, can_use_ai_dashboard,
     // allow manual override of org fields from UI
     dept_code, dept_name, profit_center, profit_center_name,
     org_section, org_section_name, org_group_name, factory_code, org_end_date,
@@ -157,6 +159,8 @@ router.put('/:id', async (req, res) => {
       kb_max_size_mb != null ? Number(kb_max_size_mb) : null,
       kb_max_count   != null ? Number(kb_max_count)   : null,
       can_deep_research !== undefined ? resolveSkillPerm(can_deep_research) : null,
+      can_design_ai_select !== undefined ? (can_design_ai_select ? 1 : 0) : 0,
+      can_use_ai_dashboard  !== undefined ? (can_use_ai_dashboard  ? 1 : 0) : 0,
     ];
 
     const orgParams = [
@@ -179,7 +183,8 @@ router.put('/:id', async (req, res) => {
              allow_image_upload=?, image_max_mb=?, allow_scheduled_tasks=?, role_id=?,
              budget_daily=?, budget_weekly=?, budget_monthly=?,
              allow_create_skill=?, allow_external_skill=?, allow_code_skill=?,
-             can_create_kb=?, kb_max_size_mb=?, kb_max_count=?, can_deep_research=?`;
+             can_create_kb=?, kb_max_size_mb=?, kb_max_count=?, can_deep_research=?,
+             can_design_ai_select=?, can_use_ai_dashboard=?`;
     const orgSet = hasOrgOverride
       ? `, dept_code=?, dept_name=?, profit_center=?, profit_center_name=?,
            org_section=?, org_section_name=?, org_group_name=?, factory_code=?, org_end_date=${D}`
