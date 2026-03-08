@@ -232,9 +232,35 @@ function SchemaManager() {
                   className="text-gray-400 hover:text-red-400"><Trash2 size={12} /></button>
               </div>
             </div>
-            {expanded === s.id && s.business_notes && (
-              <div className="px-4 pb-3 text-xs text-gray-500 border-t border-gray-200 pt-2">
-                {s.business_notes}
+            {expanded === s.id && (
+              <div className="px-4 pb-3 border-t border-gray-200 pt-2 space-y-2">
+                {s.business_notes && (
+                  <p className="text-xs text-gray-500">{s.business_notes}</p>
+                )}
+                {(s as any).columns?.length > 0 ? (
+                  <div className="overflow-auto max-h-64 rounded border border-gray-200">
+                    <table className="w-full text-xs">
+                      <thead className="sticky top-0 bg-gray-200">
+                        <tr>
+                          <th className="px-2 py-1 text-left text-gray-500 font-medium">欄位名稱</th>
+                          <th className="px-2 py-1 text-left text-gray-500 font-medium">型態</th>
+                          <th className="px-2 py-1 text-left text-gray-500 font-medium">說明</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(s as any).columns.map((col: any, i: number) => (
+                          <tr key={col.id ?? i} className={i % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                            <td className="px-2 py-1 font-mono text-gray-700 whitespace-nowrap">{col.column_name}</td>
+                            <td className="px-2 py-1 text-gray-400 whitespace-nowrap">{col.data_type || '-'}</td>
+                            <td className="px-2 py-1 text-gray-500">{col.description || ''}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <p className="text-xs text-gray-400">無欄位定義</p>
+                )}
               </div>
             )}
           </div>
