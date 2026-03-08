@@ -344,16 +344,24 @@ router.post('/designer/schemas/import-oracle', requireDesigner, async (req, res)
     const conn = await erpPool.getConnection();
     let rows;
     try {
-      const result = await conn.execute(sql, { owner: owner.toUpperCase() });
-      rows = result.rows;
+      // 明確指定 OUT_FORMAT_OBJECT，因 database-oracle.js 設了全域 outFormat
+      const result = await conn.execute(sql, { owner: owner.toUpperCase() },
+        { outFormat: require('oracledb').OUT_FORMAT_OBJECT });
+      rows = result.rows || [];
     } finally {
       await conn.close();
     }
 
-    // 依 TABLE_NAME 分組
+    // 依 TABLE_NAME 分組（使用物件屬性，Oracle 回傳大寫欄名）
     const byTable = {};
     for (const r of rows) {
-      const [tname, colName, dataType, dataLen, dataPre, dataSca, nullable, comments] = r;
+      const tname    = r.TABLE_NAME;
+      const colName  = r.COLUMN_NAME;
+      const dataType = r.DATA_TYPE;
+      const dataLen  = r.DATA_LENGTH;
+      const dataPre  = r.DATA_PRECISION;
+      const dataSca  = r.DATA_SCALE;
+      const comments = r.COMMENTS;
       if (!byTable[tname]) byTable[tname] = [];
       // 組合完整型態字串 e.g. NUMBER(10,2) / VARCHAR2(200)
       let typeStr = dataType;
