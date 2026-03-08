@@ -326,15 +326,12 @@ router.post('/designer/schemas/import-oracle', requireDesigner, async (req, res)
     const erpPool = await require('../services/dashboardService').getErpPool();
 
     // 單一 SQL 查所有 table 的欄位（含 Oracle comment）
-    // CONVERT(x, 'AL32UTF8', USERENV('CHARACTERSET'))：
-    //   動態偵測 ERP DB 字元集（ZHT16BIG5/ZHS16GBK 等）並轉為 UTF-8
-    //   避免 Windows Oracle Instant Client 不讀 NLS_LANG env var 的問題
+    // DB 為 UTF8，NLS_LANG 在 server.js 第一行強制設為 AL32UTF8 確保正確傳輸
     const inList = safeTables.map(t => `'${t}'`).join(',');
     const sql = `
       SELECT c.TABLE_NAME, c.COLUMN_NAME, c.DATA_TYPE,
              c.DATA_LENGTH, c.DATA_PRECISION, c.DATA_SCALE,
-             c.NULLABLE,
-             CONVERT(cc.COMMENTS, 'AL32UTF8', USERENV('CHARACTERSET')) AS COMMENTS
+             c.NULLABLE, cc.COMMENTS
       FROM   ALL_TAB_COLUMNS c
       LEFT JOIN ALL_COL_COMMENTS cc
              ON cc.OWNER = c.OWNER

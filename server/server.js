@@ -1,3 +1,8 @@
+// NLS_LANG 必須在 require('oracledb') 之前設定，確保 Oracle Instant Client
+// 知道 client charset = UTF-8，不會對已是 UTF-8 的 ERP DB 做多餘的轉換
+// (.env 的設定有時在 Windows 上不夠早，所以在這裡強制覆蓋)
+process.env.NLS_LANG = 'AMERICAN_AMERICA.AL32UTF8';
+
 require('dotenv').config();
 require('./services/logger'); // File-based logging + process lifecycle tracking
 const express = require('express');
