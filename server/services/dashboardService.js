@@ -64,35 +64,37 @@ function assertErpReadOnly(sql) {
 }
 
 // ── ReadOnlyConnectionProxy：包裝 Oracle 連線，execute 前強制驗證 ────────────
+// 使用 JS 私有欄位（#）確保 raw conn 無法從外部存取，防止 proxy._conn 繞過攻擊
 // 白名單策略：只暴露 execute（驗證後）、queryStream（驗證後）、close
-// 其餘所有可執行 SQL / 變更狀態的方法一律拒絕
 class ReadOnlyConnectionProxy {
-  constructor(conn) { this._conn = conn; }
+  #conn  // 私有欄位，外部無法存取
+
+  constructor(conn) { this.#conn = conn; }
 
   // ✅ 允許：驗證後 SELECT 才過
   async execute(sql, binds = [], opts = {}) {
     assertErpReadOnly(sql);
-    return this._conn.execute(sql, binds, opts);
+    return this.#conn.execute(sql, binds, opts);
   }
 
   // ✅ 允許：串流 SELECT，同樣驗證
   queryStream(sql, binds = [], opts = {}) {
     assertErpReadOnly(sql);
-    return this._conn.queryStream(sql, binds, opts);
+    return this.#conn.queryStream(sql, binds, opts);
   }
 
   // ✅ 允許：關閉連線
-  async close() { return this._conn.close(); }
+  async close() { return this.#conn.close(); }
 
   // ❌ 以下全部封鎖 ─────────────────────────────────────────────────────────
   async executeMany()    { throw new Error('[ERP 唯讀保護] 禁止 executeMany'); }
-  async commit()         { throw new Error('[ERP 唯讀保護] 禁止 commit（無 DML 不應有 commit）'); }
+  async commit()         { throw new Error('[ERP 唯讀保護] 禁止 commit'); }
   async rollback()       { throw new Error('[ERP 唯讀保護] 禁止 rollback'); }
   async changePassword() { throw new Error('[ERP 唯讀保護] 禁止 changePassword'); }
   async shutdown()       { throw new Error('[ERP 唯讀保護] 禁止 shutdown'); }
   async startup()        { throw new Error('[ERP 唯讀保護] 禁止 startup'); }
   getSodaDatabase()      { throw new Error('[ERP 唯讀保護] 禁止 getSodaDatabase'); }
-  async getQueue()       { throw new Error('[ERP 唯讀保護] 禁止 getQueue（AQ 可寫入）'); }
+  async getQueue()       { throw new Error('[ERP 唯讀保護] 禁止 getQueue'); }
   async subscribe()      { throw new Error('[ERP 唯讀保護] 禁止 subscribe'); }
   async createLob()      { throw new Error('[ERP 唯讀保護] 禁止 createLob'); }
   async beginSessionlessTransaction()   { throw new Error('[ERP 唯讀保護] 禁止 transaction 操作'); }
@@ -104,30 +106,41 @@ class ReadOnlyConnectionProxy {
 }
 
 // ── ReadOnlyPoolProxy：getConnection() 回傳 proxy 連線 ───────────────────────
+// 使用 JS 私有欄位（#）確保 raw pool 無法從外部存取
 class ReadOnlyPoolProxy {
-  constructor(rawPool) { this._pool = rawPool; }
+  #pool  // 私有欄位，防止 proxy._pool 直接存取 raw pool
+
+  constructor(rawPool) { this.#pool = rawPool; }
   async getConnection() {
-    const conn = await this._pool.getConnection();
+    const conn = await this.#pool.getConnection();
     return new ReadOnlyConnectionProxy(conn);
   }
 }
 
 // ─── ERP 連線（唯讀，透過 ReadOnlyPoolProxy 強制保護）───────────────────────
-let _rawErpPool = null;
+// poolAlias 使用隨機 token，防止外部透過 oracledb.getPool('erp_db') 取得 raw pool
+const ERP_POOL_ALIAS = `erp_${crypto.randomBytes(8).toString('hex')}`;
 let _erpPoolProxy = null;
+let _erpPoolInitPromise = null;  // 防止並發初始化競爭條件
 
 async function getErpPool() {
   if (_erpPoolProxy) return _erpPoolProxy;
-  if (!process.env.ERP_DB_HOST) throw new Error('ERP_DB_HOST 未設定');
-  _rawErpPool = await oracledb.createPool({
-    poolAlias:     'erp_db',      // 明確命名，避免與 system_db pool alias 衝突
-    user:          process.env.ERP_DB_USER,
-    password:      process.env.ERP_DB_USER_PASSWORD,
-    connectString: `${process.env.ERP_DB_HOST}:${process.env.ERP_DB_PORT}/${process.env.ERP_DB_SERVICE_NAME}`,
-    poolMin: 1, poolMax: 5, poolIncrement: 1, poolTimeout: 60,
-  });
-  _erpPoolProxy = new ReadOnlyPoolProxy(_rawErpPool);
-  console.log('[ERP] 唯讀連線池已建立（ReadOnlyPoolProxy）');
+  // 單例 Promise：多個並發請求只建立一次 pool
+  if (!_erpPoolInitPromise) {
+    _erpPoolInitPromise = (async () => {
+      if (!process.env.ERP_DB_HOST) throw new Error('ERP_DB_HOST 未設定');
+      const rawPool = await oracledb.createPool({
+        poolAlias:     ERP_POOL_ALIAS,  // 隨機 alias，無法透過 oracledb.getPool() 猜到
+        user:          process.env.ERP_DB_USER,
+        password:      process.env.ERP_DB_USER_PASSWORD,
+        connectString: `${process.env.ERP_DB_HOST}:${process.env.ERP_DB_PORT}/${process.env.ERP_DB_SERVICE_NAME}`,
+        poolMin: 1, poolMax: 5, poolIncrement: 1, poolTimeout: 60,
+      });
+      _erpPoolProxy = new ReadOnlyPoolProxy(rawPool);
+      console.log('[ERP] 唯讀連線池已建立（ReadOnlyPoolProxy, alias 隱藏）');
+    })();
+  }
+  await _erpPoolInitPromise;
   return _erpPoolProxy;
 }
 
@@ -160,12 +173,14 @@ async function getCachedResult(db, designId, question) {
 
 async function setCachedResult(db, designId, question, sql, result, ttlMinutes) {
   const hash = hashQuestion(designId, question);
+  // parseInt 確保 ttlMinutes 是整數，防止字串插值時 SQL 注入；clamp 到合理範圍
+  const safeTtl = Math.max(1, Math.min(1440, parseInt(ttlMinutes, 10) || 30));
   try {
     await db.prepare(`DELETE FROM ai_query_cache WHERE design_id=? AND question_hash=?`)
       .run(designId, hash);
     await db.prepare(
       `INSERT INTO ai_query_cache (design_id, question_hash, generated_sql, result_json, row_count, expires_at)
-       VALUES (?, ?, ?, ?, ?, SYSTIMESTAMP + INTERVAL '${ttlMinutes}' MINUTE)`
+       VALUES (?, ?, ?, ?, ?, SYSTIMESTAMP + INTERVAL '${safeTtl}' MINUTE)`
     ).run(designId, hash, sql, JSON.stringify(result), result.length);
   } catch (e) {
     console.warn('[Dashboard] Cache write error:', e.message);
