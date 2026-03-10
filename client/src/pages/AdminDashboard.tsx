@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Users, BarChart3, Shield, AlertTriangle, Database, Mail, ArrowLeft, Cpu, DollarSign, CalendarClock, Plug, Zap, UserCog, Sparkles, Code2, Search, KeyRound } from 'lucide-react'
+import { Users, BarChart3, Shield, AlertTriangle, Database, Mail, ArrowLeft, Cpu, DollarSign, CalendarClock, Plug, Zap, UserCog, Sparkles, Code2, Search, KeyRound, MonitorPlay } from 'lucide-react'
 import UserManagement from '../components/admin/UserManagement'
 import TokenUsagePanel from '../components/admin/TokenUsage'
 import AuditLogs from '../components/admin/AuditLogs'
@@ -18,8 +18,9 @@ import CodeRunnersPanel from '../components/admin/CodeRunnersPanel'
 import KbAdminPanel from '../components/admin/KbAdminPanel'
 import ResearchLogsPanel from '../components/admin/ResearchLogsPanel'
 import ApiKeysPanel from '../components/admin/ApiKeysPanel'
+import AiDashboardAdmin from '../components/admin/AiDashboardAdmin'
 
-type Tab = 'users' | 'roles' | 'tokens' | 'audit' | 'keywords' | 'db' | 'mail' | 'llm' | 'cost' | 'scheduled' | 'mcp' | 'dify' | 'kb' | 'skills' | 'code-runners' | 'research' | 'api-keys'
+type Tab = 'users' | 'roles' | 'tokens' | 'audit' | 'keywords' | 'db' | 'mail' | 'llm' | 'cost' | 'scheduled' | 'mcp' | 'dify' | 'kb' | 'skills' | 'code-runners' | 'research' | 'api-keys' | 'ai-dashboard'
 
 const tabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
   { id: 'users', label: '使用者管理', icon: <Users size={16} /> },
@@ -36,6 +37,7 @@ const tabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
   { id: 'kb', label: '知識庫管理', icon: <Database size={16} /> },
   { id: 'skills', label: '技能管理', icon: <Sparkles size={16} /> },
   { id: 'code-runners', label: 'Code Runners', icon: <Code2 size={16} /> },
+  { id: 'ai-dashboard', label: 'AI 戰情室', icon: <MonitorPlay size={16} /> },
   { id: 'db', label: '資料庫維護', icon: <Database size={16} /> },
   { id: 'mail', label: '郵件設定', icon: <Mail size={16} /> },
   { id: 'llm', label: 'LLM 模型設定', icon: <Cpu size={16} /> },
@@ -101,6 +103,7 @@ export default function AdminDashboard() {
           {activeTab === 'code-runners' && <CodeRunnersPanel />}
           {activeTab === 'research' && <ResearchLogsPanel />}
           {activeTab === 'api-keys' && <ApiKeysPanel />}
+          {activeTab === 'ai-dashboard' && <AiDashboardAdmin />}
         </main>
       </div>
     </div>

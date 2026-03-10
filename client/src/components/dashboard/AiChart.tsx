@@ -15,6 +15,36 @@ const PBI_COLORS = [
 interface Props {
   chartDef: AiChartDef
   rows: Record<string, unknown>[]
+  columnLabels?: Record<string, string>
+}
+
+/** 解析 chart config 欄位名稱 → 實際 row 值
+ *  支援: 直接匹配 / lowercase / 去掉表別名前綴 / 透過 column_labels reverse lookup */
+function resolveField(
+  field: string | undefined,
+  row: Record<string, unknown>,
+  columnLabels: Record<string, string> = {}
+): unknown {
+  if (!field) return undefined
+  // 1. exact match
+  if (field in row) return row[field]
+  // 2. lowercase
+  const lower = field.toLowerCase()
+  if (lower in row) return row[lower]
+  // 3. strip table alias prefix  e.g. ps.PLAN_NAME → plan_name
+  const bare = lower.replace(/^[a-z0-9_]+\./, '')
+  if (bare in row) return row[bare]
+  // 4. column_labels reverse: bare → 中文說明 → actual row key
+  const desc = columnLabels[bare]
+  if (desc) {
+    if (desc in row) return row[desc]
+    const descLower = desc.toLowerCase()
+    if (descLower in row) return row[descLower]
+  }
+  // 5. case-insensitive scan of row keys
+  const found = Object.keys(row).find(k => k.toLowerCase() === bare)
+  if (found) return row[found]
+  return undefined
 }
 
 function mkGradient(color: string) {
@@ -39,15 +69,18 @@ const BASE_OPTION = {
   grid: { left: 60, right: 20, top: 40, bottom: 40, containLabel: true },
 }
 
-export default function AiChart({ chartDef, rows }: Props) {
+export default function AiChart({ chartDef, rows, columnLabels = {} }: Props) {
   const { type, title, x_field, y_field, label_field, value_field,
     horizontal, smooth, area, gradient, donut, show_label } = chartDef
+
+  const rf = (field: string | undefined, row: Record<string, unknown>) =>
+    resolveField(field, row, columnLabels)
 
   let option: object = {}
 
   if (type === 'bar') {
-    const xData = rows.map(r => String(r[x_field || ''] ?? ''))
-    const yData = rows.map(r => Number(r[y_field || ''] ?? 0))
+    const xData = rows.map(r => String(rf(x_field, r) ?? ''))
+    const yData = rows.map(r => Number(rf(y_field, r) ?? 0))
     const color = gradient ? mkGradient(PBI_COLORS[0]) : PBI_COLORS[0]
 
     option = {
@@ -68,8 +101,8 @@ export default function AiChart({ chartDef, rows }: Props) {
       }],
     }
   } else if (type === 'line') {
-    const xData = rows.map(r => String(r[x_field || ''] ?? ''))
-    const yData = rows.map(r => Number(r[y_field || ''] ?? 0))
+    const xData = rows.map(r => String(rf(x_field, r) ?? ''))
+    const yData = rows.map(r => Number(rf(y_field, r) ?? 0))
     option = {
       ...BASE_OPTION,
       title: title ? { text: title, textStyle: { color: '#374151', fontSize: 13 } } : undefined,
@@ -89,8 +122,8 @@ export default function AiChart({ chartDef, rows }: Props) {
     }
   } else if (type === 'pie') {
     const pieData = rows.map((r, i) => ({
-      name: String(r[label_field || ''] ?? `項目${i + 1}`),
-      value: Number(r[value_field || ''] ?? 0),
+      name: String(rf(label_field, r) ?? `項目${i + 1}`),
+      value: Number(rf(value_field, r) ?? 0),
       itemStyle: { color: PBI_COLORS[i % PBI_COLORS.length] },
     }))
     option = {
@@ -108,7 +141,7 @@ export default function AiChart({ chartDef, rows }: Props) {
       }],
     }
   } else if (type === 'scatter') {
-    const scatterData = rows.map(r => [Number(r[x_field || ''] ?? 0), Number(r[y_field || ''] ?? 0)])
+    const scatterData = rows.map(r => [Number(rf(x_field, r) ?? 0), Number(rf(y_field, r) ?? 0)])
     option = {
       ...BASE_OPTION,
       title: title ? { text: title, textStyle: { color: '#374151', fontSize: 13 } } : undefined,
@@ -117,7 +150,7 @@ export default function AiChart({ chartDef, rows }: Props) {
       series: [{ type: 'scatter', data: scatterData, itemStyle: { color: PBI_COLORS[0], opacity: 0.8 }, symbolSize: 8 }],
     }
   } else if (type === 'gauge') {
-    const val = rows.length > 0 ? Number(rows[0][value_field || ''] ?? 0) : 0
+    const val = rows.length > 0 ? Number(rf(value_field, rows[0]) ?? 0) : 0
     option = {
       ...BASE_OPTION,
       grid: undefined,

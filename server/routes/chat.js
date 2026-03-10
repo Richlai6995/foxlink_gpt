@@ -6,6 +6,7 @@ const fs = require('fs');
 const { v4: uuidv4 } = require('uuid');
 const { verifyToken } = require('./auth');
 const { streamChat, generateWithImage, generateWithTools, transcribeAudio, extractTextFromFile, fileToGeminiPart, generateTitle } = require('../services/gemini');
+const { streamChatAoai } = require('../services/llmService');
 const { processGenerateBlocks } = require('../services/fileGenerator');
 const { notifyAdminSensitiveKeyword } = require('../services/mailService');
 const mcpClient = require('../services/mcpClient');
@@ -369,15 +370,24 @@ const upload = multer({
 router.use(verifyToken);
 
 // Resolve API model info from DB (with env fallback)
-// Returns { apiModel: string, imageOutput: boolean }
+// Returns { apiModel, imageOutput, providerType, modelRow }
 async function resolveApiModel(db, modelKey) {
   try {
-    const row = await db.prepare('SELECT api_model, image_output FROM llm_models WHERE key=? AND is_active=1').get(modelKey);
-    if (row?.api_model) return { apiModel: row.api_model, imageOutput: !!row.image_output };
+    const row = await db.prepare(
+      `SELECT api_model, image_output, provider_type, api_key_enc,
+              endpoint_url, api_version, deployment_name, base_model, key
+       FROM llm_models WHERE key=? AND is_active=1`
+    ).get(modelKey);
+    if (row?.api_model) return {
+      apiModel:     row.api_model,
+      imageOutput:  !!row.image_output,
+      providerType: row.provider_type || 'gemini',
+      modelRow:     row,
+    };
   } catch (e) { }
-  if (modelKey === 'flash') return { apiModel: process.env.GEMINI_MODEL_FLASH || 'gemini-3-flash-preview', imageOutput: false };
-  if (modelKey === 'pro') return { apiModel: process.env.GEMINI_MODEL_PRO || 'gemini-3-pro-preview', imageOutput: false };
-  return { apiModel: modelKey, imageOutput: false };
+  if (modelKey === 'flash') return { apiModel: process.env.GEMINI_MODEL_FLASH || 'gemini-2.0-flash',   imageOutput: false, providerType: 'gemini', modelRow: null };
+  if (modelKey === 'pro')   return { apiModel: process.env.GEMINI_MODEL_PRO   || 'gemini-1.5-pro',     imageOutput: false, providerType: 'gemini', modelRow: null };
+  return { apiModel: modelKey, imageOutput: false, providerType: 'gemini', modelRow: null };
 }
 
 // GET /api/chat/models — active models for frontend selector
@@ -385,7 +395,7 @@ router.get('/models', async (req, res) => {
   try {
     const db = require('../database-oracle').db;
     const models = await db.prepare(
-      'SELECT key, name, api_model, description, image_output FROM llm_models WHERE is_active=1 ORDER BY sort_order ASC, id ASC'
+      'SELECT key, name, api_model, description, image_output, provider_type, deployment_name FROM llm_models WHERE is_active=1 ORDER BY sort_order ASC, id ASC'
     ).all();
     if (models.length) return res.json(models);
     // Fallback if table empty
@@ -1132,7 +1142,7 @@ router.post('/sessions/:id/messages', upload.array('files', 10), async (req, res
     // Stream AI response
     let aiText = '';
     const chosenModel = skillModelKey || model || session.model || 'pro';
-    const { apiModel, imageOutput } = await resolveApiModel(db, chosenModel);
+    const { apiModel, imageOutput, providerType, modelRow } = await resolveApiModel(db, chosenModel);
     const history = sanitizeHistory(buildHistory(historyMessages, imageOutput));
 
     // Inject skill system prompts into Gemini instruction
@@ -1352,17 +1362,16 @@ router.post('/sessions/:id/messages', upload.array('files', 10), async (req, res
           }, 15000);
 
           try {
-            ({ text, inputTokens, outputTokens } = await streamChat(
-              apiModel, history, userParts,
-              (chunk) => {
-                if (clientDisconnected) throw new Error('CLIENT_DISCONNECTED');
-                firstChunkReceived = true;
-                aiText += chunk;
-                sendEvent({ type: 'chunk', content: chunk });
-              },
-              finalInstruction,
-              kbContext ? true : disableSearchForSkill  // disable Google Search when KB context injected
-            ));
+            const _onChunk = (chunk) => {
+              if (clientDisconnected) throw new Error('CLIENT_DISCONNECTED');
+              firstChunkReceived = true; aiText += chunk;
+              sendEvent({ type: 'chunk', content: chunk });
+            };
+            if (providerType === 'azure_openai' && modelRow) {
+              ({ text, inputTokens, outputTokens } = await streamChatAoai(modelRow, history, userParts, _onChunk, finalInstruction));
+            } else {
+              ({ text, inputTokens, outputTokens } = await streamChat(apiModel, history, userParts, _onChunk, finalInstruction, kbContext ? true : disableSearchForSkill));
+            }
           } finally {
             clearInterval(keepAliveInterval);
           }
@@ -1429,23 +1438,20 @@ router.post('/sessions/:id/messages', upload.array('files', 10), async (req, res
         }, 15000);
 
         try {
-          ({ text, inputTokens, outputTokens } = await streamChat(
-            apiModel,
-            history,
-            userParts,
-            (chunk) => {
-              if (clientDisconnected) throw new Error('CLIENT_DISCONNECTED');
-              firstChunkReceived = true;
-              aiText += chunk;
-              sendEvent({ type: 'chunk', content: chunk });
-            },
-            skillExtraInstruction,
-            disableSearchForSkill
-          ));
+          const _onChunk = (chunk) => {
+            if (clientDisconnected) throw new Error('CLIENT_DISCONNECTED');
+            firstChunkReceived = true; aiText += chunk;
+            sendEvent({ type: 'chunk', content: chunk });
+          };
+          if (providerType === 'azure_openai' && modelRow) {
+            ({ text, inputTokens, outputTokens } = await streamChatAoai(modelRow, history, userParts, _onChunk, skillExtraInstruction));
+          } else {
+            ({ text, inputTokens, outputTokens } = await streamChat(apiModel, history, userParts, _onChunk, skillExtraInstruction, disableSearchForSkill));
+          }
         } finally {
           clearInterval(keepAliveInterval);
         }
-        console.log(`[Chat] Gemini done in ${Date.now() - t0}ms, in=${inputTokens} out=${outputTokens} tokens`);
+        console.log(`[Chat] ${providerType === 'azure_openai' ? 'AOAI' : 'Gemini'} done in ${Date.now() - t0}ms, in=${inputTokens} out=${outputTokens} tokens`);
       }
 
       // Debug: check if response contains generate blocks

@@ -7,9 +7,15 @@
 async function calcCallCost(db, model, date, inputTokens, outputTokens, imageCount) {
   try {
     const DI = `TO_DATE(?, 'YYYY-MM-DD')`;
+    // 同時比對 key（直接）或 llm_models.name（管理員用顯示名稱設定時也能命中）
     const price = await db.prepare(
-      `SELECT * FROM token_prices WHERE model=? AND start_date<=${DI} AND (end_date IS NULL OR end_date>=${DI}) ORDER BY start_date DESC FETCH FIRST 1 ROWS ONLY`
-    ).get(model, date, date);
+      `SELECT tp.* FROM token_prices tp
+       WHERE (tp.model=? OR EXISTS (
+         SELECT 1 FROM llm_models lm WHERE lm.key=? AND lm.name=tp.model
+       ))
+       AND tp.start_date<=${DI} AND (tp.end_date IS NULL OR tp.end_date>=${DI})
+       ORDER BY tp.start_date DESC FETCH FIRST 1 ROWS ONLY`
+    ).get(model, model, date, date);
     if (!price) return { cost: null, currency: null };
 
     const useT2 = price.tier_threshold && price.price_input_tier2 != null && inputTokens > price.tier_threshold;

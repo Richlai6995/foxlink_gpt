@@ -10,14 +10,14 @@ import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   BarChart3, ChevronRight, ChevronDown, Send, RefreshCw,
-  Table, BarChart2, Settings2, Code, ArrowLeft, Layers
+  Table, BarChart2, Settings2, Code, ArrowLeft, Layers, History, Trash2, X
 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import api from '../lib/api'
 import AiChart from '../components/dashboard/AiChart'
 import ResultTable from '../components/dashboard/ResultTable'
 import DesignerPanel from '../components/dashboard/DesignerPanel'
-import type { AiSelectTopic, AiSelectDesign, AiQueryResult, AiChartConfig, AiChartDef } from '../types'
+import type { AiSelectTopic, AiSelectDesign, AiQueryResult, AiChartConfig, AiChartDef, AiDashboardHistory } from '../types'
 
 type ViewMode = 'chart' | 'table'
 
@@ -36,6 +36,45 @@ export default function AiDashboardPage() {
   const [result, setResult] = useState<AiQueryResult | null>(null)
   const [viewMode, setViewMode] = useState<ViewMode>('chart')
   const [activeChartIdx, setActiveChartIdx] = useState(0)
+
+  // 歷史記錄
+  const [sidebarTab, setSidebarTab] = useState<'topics' | 'history'>('topics')
+  const [history, setHistory] = useState<AiDashboardHistory[]>([])
+  const [historyLoading, setHistoryLoading] = useState(false)
+  const [expandedHistory, setExpandedHistory] = useState<number | null>(null)
+
+  useEffect(() => { if (sidebarTab === 'history') loadHistory() }, [sidebarTab])
+
+  const loadHistory = async () => {
+    setHistoryLoading(true)
+    try { setHistory((await api.get('/dashboard/history?limit=100')).data) } catch { } finally { setHistoryLoading(false) }
+  }
+  const deleteHistory = async (id: number, e: React.MouseEvent) => {
+    e.stopPropagation()
+    await api.delete(`/dashboard/history/${id}`)
+    setHistory(p => p.filter(h => h.id !== id))
+  }
+  const clearHistory = async () => {
+    if (!confirm('清除所有查詢歷史？')) return
+    await api.delete('/dashboard/history')
+    setHistory([])
+  }
+
+  // LLM model 選擇
+  const [models, setModels] = useState<{ key: string; name: string; description?: string }[]>([])
+  const [selectedModelKey, setSelectedModelKey] = useState<string>('')
+  useEffect(() => {
+    api.get('/chat/models').then(r => {
+      const list = (r.data || []).filter((m: any) => !m.image_output)
+      setModels(list)
+      if (!selectedModelKey && list.length) setSelectedModelKey(list[0].key)
+    }).catch(() => {})
+  }, [])
+
+  // 向量搜尋覆蓋參數（查詢時可調整）
+  const [showVectorAdv, setShowVectorAdv] = useState(false)
+  const [advTopK, setAdvTopK] = useState('')
+  const [advThreshold, setAdvThreshold] = useState('')
 
   // 開發模式 panel
   const [devMode, setDevMode] = useState(false)
@@ -79,6 +118,9 @@ export default function AiDashboardPage() {
     setDevDuration(null)
     setDevVectorResults([])
     setQuestion('')
+    // 帶入任務設定的向量搜尋預設值
+    setAdvTopK(d.vector_top_k != null ? String(d.vector_top_k) : '')
+    setAdvThreshold(d.vector_similarity_threshold != null ? String(d.vector_similarity_threshold) : '')
   }
 
   const handleQuery = async () => {
@@ -103,7 +145,13 @@ export default function AiDashboardPage() {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${localStorage.getItem('token')}`,
         },
-        body: JSON.stringify({ design_id: selectedDesign.id, question: question.trim() }),
+        body: JSON.stringify({
+          design_id: selectedDesign.id,
+          question: question.trim(),
+          ...(selectedModelKey ? { model_key: selectedModelKey } : {}),
+          ...(advTopK ? { vector_top_k: Number(advTopK) } : {}),
+          ...(advThreshold ? { vector_similarity_threshold: advThreshold } : {}),
+        }),
         signal: ctrl.signal,
       })
 
@@ -131,6 +179,7 @@ export default function AiDashboardPage() {
     } finally {
       setLoading(false)
       if (!result) setStatusMsg('')
+      loadHistory()
     }
   }
 
@@ -153,6 +202,7 @@ export default function AiDashboardPage() {
       setResult({
         rows: data.rows,
         columns: data.columns || (data.rows.length > 0 ? Object.keys(data.rows[0]) : []),
+        column_labels: data.column_labels || {},
         row_count: data.row_count,
         chart_config: data.chart_config ? (typeof data.chart_config === 'string' ? JSON.parse(data.chart_config) : data.chart_config) : null,
       })
@@ -186,7 +236,13 @@ export default function AiDashboardPage() {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${localStorage.getItem('token')}`,
         },
-        body: JSON.stringify({ design_id: selectedDesign.id, question: question.trim() }),
+        body: JSON.stringify({
+          design_id: selectedDesign.id,
+          question: question.trim(),
+          ...(selectedModelKey ? { model_key: selectedModelKey } : {}),
+          ...(advTopK ? { vector_top_k: Number(advTopK) } : {}),
+          ...(advThreshold ? { vector_similarity_threshold: advThreshold } : {}),
+        }),
         signal: ctrl.signal,
       })
 
@@ -222,6 +278,7 @@ export default function AiDashboardPage() {
             setResult({
               rows: data.rows,
               columns: data.columns || (data.rows.length > 0 ? Object.keys(data.rows[0]) : []),
+              column_labels: data.column_labels || {},
               row_count: data.row_count,
               chart_config: cfg,
             })
@@ -244,6 +301,7 @@ export default function AiDashboardPage() {
       if (e.name !== 'AbortError') setStatusMsg('查詢錯誤：' + (e.message || ''))
     } finally {
       setLoading(false)
+      loadHistory()
     }
   }
 
@@ -284,51 +342,131 @@ export default function AiDashboardPage() {
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto py-2">
-          {topics.length === 0 && (
-            <p className="text-gray-400 text-xs text-center py-8 px-4">
-              {canDesignAiSelect || isAdmin ? '尚未建立查詢主題，請進入設計介面' : '尚無可用的查詢設計'}
-            </p>
-          )}
-          {topics.map(t => (
-            <div key={t.id} className="mb-1">
-              <button
-                onClick={() => toggleTopic(t.id)}
-                className="w-full flex items-center gap-2 px-3 py-2 text-gray-500 hover:text-gray-800 hover:bg-gray-50 transition text-xs font-medium"
-              >
-                {expandedTopics.has(t.id)
-                  ? <ChevronDown size={12} className="flex-shrink-0" />
-                  : <ChevronRight size={12} className="flex-shrink-0" />}
-                <Layers size={12} className="text-orange-400 flex-shrink-0" />
-                <span className="truncate">{t.name}</span>
-              </button>
-              {expandedTopics.has(t.id) && (
-                <div className="ml-4">
-                  {(t.designs || []).map(d => (
-                    <button
-                      key={d.id}
-                      onClick={() => selectDesign(d)}
-                      className={`w-full flex items-center gap-2 px-3 py-1.5 text-xs transition rounded-lg mx-1 mb-0.5 ${
-                        selectedDesign?.id === d.id
-                          ? 'bg-orange-50 text-orange-700 border border-orange-200'
-                          : 'text-gray-400 hover:text-gray-700 hover:bg-gray-50'
-                      }`}
-                    >
-                      <BarChart2 size={11} className="flex-shrink-0" />
-                      <span className="truncate text-left">{d.name}</span>
-                      {d.vector_search_enabled === 1 && (
-                        <span className="ml-auto text-purple-400 text-[10px]">語意</span>
-                      )}
-                    </button>
-                  ))}
-                  {(t.designs || []).length === 0 && (
-                    <p className="text-gray-400 text-xs px-4 py-1">無任務</p>
-                  )}
-                </div>
+        {/* Tab 切換 */}
+        <div className="flex border-b border-gray-200 flex-shrink-0">
+          <button onClick={() => setSidebarTab('topics')}
+            className={`flex-1 flex items-center justify-center gap-1 py-2 text-xs transition ${sidebarTab === 'topics' ? 'text-orange-600 border-b-2 border-orange-400 font-medium' : 'text-gray-400 hover:text-gray-700'}`}>
+            <Layers size={11} /> 查詢
+          </button>
+          <button onClick={() => setSidebarTab('history')}
+            className={`flex-1 flex items-center justify-center gap-1 py-2 text-xs transition ${sidebarTab === 'history' ? 'text-orange-600 border-b-2 border-orange-400 font-medium' : 'text-gray-400 hover:text-gray-700'}`}>
+            <History size={11} /> 歷史
+          </button>
+        </div>
+
+        {/* 查詢主題 */}
+        {sidebarTab === 'topics' && (
+          <div className="flex-1 overflow-y-auto py-2">
+            {topics.length === 0 && (
+              <p className="text-gray-400 text-xs text-center py-8 px-4">
+                {canDesignAiSelect || isAdmin ? '尚未建立查詢主題，請進入設計介面' : '尚無可用的查詢設計'}
+              </p>
+            )}
+            {topics.map(t => (
+              <div key={t.id} className="mb-1">
+                <button
+                  onClick={() => toggleTopic(t.id)}
+                  className="w-full flex items-center gap-2 px-3 py-2 text-gray-500 hover:text-gray-800 hover:bg-gray-50 transition text-xs font-medium"
+                >
+                  {expandedTopics.has(t.id)
+                    ? <ChevronDown size={12} className="flex-shrink-0" />
+                    : <ChevronRight size={12} className="flex-shrink-0" />}
+                  <Layers size={12} className="text-orange-400 flex-shrink-0" />
+                  <span className="truncate">{t.name}</span>
+                </button>
+                {expandedTopics.has(t.id) && (
+                  <div className="ml-4">
+                    {(t.designs || []).map(d => (
+                      <button
+                        key={d.id}
+                        onClick={() => selectDesign(d)}
+                        className={`w-full flex items-center gap-2 px-3 py-1.5 text-xs transition rounded-lg mx-1 mb-0.5 ${
+                          selectedDesign?.id === d.id
+                            ? 'bg-orange-50 text-orange-700 border border-orange-200'
+                            : 'text-gray-400 hover:text-gray-700 hover:bg-gray-50'
+                        }`}
+                      >
+                        <BarChart2 size={11} className="flex-shrink-0" />
+                        <span className="truncate text-left">{d.name}</span>
+                        {d.vector_search_enabled === 1 && (
+                          <span className="ml-auto text-purple-400 text-[10px]">語意</span>
+                        )}
+                      </button>
+                    ))}
+                    {(t.designs || []).length === 0 && (
+                      <p className="text-gray-400 text-xs px-4 py-1">無任務</p>
+                    )}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* 查詢歷史 */}
+        {sidebarTab === 'history' && (
+          <div className="flex-1 overflow-y-auto flex flex-col">
+            <div className="flex items-center justify-between px-3 py-2 border-b border-gray-100">
+              <span className="text-xs text-gray-400">{history.length} 筆</span>
+              {history.length > 0 && (
+                <button onClick={clearHistory} className="text-xs text-gray-400 hover:text-red-400 flex items-center gap-1">
+                  <Trash2 size={10} /> 全部清除
+                </button>
               )}
             </div>
-          ))}
-        </div>
+            {historyLoading && <p className="text-xs text-gray-400 text-center py-4">載入中...</p>}
+            {!historyLoading && history.length === 0 && (
+              <p className="text-xs text-gray-400 text-center py-8">尚無查詢歷史</p>
+            )}
+            <div className="flex-1 overflow-y-auto">
+              {history.map(h => (
+                <div key={h.id} className="border-b border-gray-100">
+                  <button
+                    onClick={() => setExpandedHistory(expandedHistory === h.id ? null : h.id)}
+                    className="w-full text-left px-3 py-2 hover:bg-gray-50 transition group"
+                  >
+                    <div className="flex items-start justify-between gap-1">
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs text-gray-700 truncate">{h.question}</p>
+                        <p className="text-[10px] text-gray-400 mt-0.5">
+                          {h.topic_name && <span className="mr-1">{h.topic_name} /</span>}
+                          {h.design_name}
+                        </p>
+                        <p className="text-[10px] text-gray-300">{h.created_at}</p>
+                      </div>
+                      <div className="flex items-center gap-1 flex-shrink-0 opacity-0 group-hover:opacity-100 transition">
+                        <button onClick={e => deleteHistory(h.id, e)} className="text-gray-300 hover:text-red-400 p-0.5">
+                          <X size={11} />
+                        </button>
+                      </div>
+                    </div>
+                  </button>
+                  {expandedHistory === h.id && (
+                    <div className="bg-gray-50 px-3 py-2 space-y-2">
+                      {h.generated_sql && (
+                        <div>
+                          <p className="text-[10px] text-gray-400 mb-1 flex items-center justify-between">
+                            <span>生成 SQL</span>
+                            <span className="text-gray-300">{h.row_count} 筆</span>
+                          </p>
+                          <pre className="text-[10px] text-gray-600 bg-white border border-gray-200 rounded p-2 overflow-x-auto whitespace-pre-wrap max-h-40">
+                            {h.generated_sql}
+                          </pre>
+                        </div>
+                      )}
+                      <button
+                        onClick={() => { setQuestion(h.question); setSidebarTab('topics') }}
+                        className="text-xs text-blue-500 hover:text-blue-700"
+                      >
+                        重新查詢 →
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {(canDesignAiSelect || isAdmin) && (
           <div className="p-3 border-t border-gray-200">
@@ -392,6 +530,54 @@ export default function AiDashboardPage() {
                   {loading ? '查詢中' : '查詢'}
                 </button>
               </div>
+              {/* Model 選擇器 */}
+              {models.length > 0 && (
+                <div className="flex items-center gap-2 mt-2">
+                  <span className="text-xs text-gray-400">模型</span>
+                  <select
+                    value={selectedModelKey}
+                    onChange={e => setSelectedModelKey(e.target.value)}
+                    className="text-xs border border-gray-200 rounded-lg px-2 py-1 text-gray-700 bg-white focus:outline-none focus:border-blue-400"
+                  >
+                    {models.map(m => (
+                      <option key={m.key} value={m.key}>{m.name}{m.description ? ` — ${m.description}` : ''}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              {/* 向量進階設定（僅語意搜尋任務顯示） */}
+              {selectedDesign.vector_search_enabled === 1 && (
+                <div className="mt-2 border-t border-gray-100 pt-2">
+                  <button onClick={() => setShowVectorAdv(p => !p)}
+                    className="text-xs text-gray-400 hover:text-blue-500 flex items-center gap-1">
+                    <Settings2 size={11} />
+                    語意搜尋參數 {showVectorAdv ? '▲' : '▼'}
+                  </button>
+                  {showVectorAdv && (
+                    <div className="flex items-center gap-4 mt-2">
+                      <div>
+                        <label className="text-xs text-gray-400 block mb-1">Top K</label>
+                        <input type="number" min={1} max={50} className="input py-1 text-xs w-20"
+                          placeholder={String(selectedDesign.vector_top_k ?? 10)}
+                          value={advTopK}
+                          onChange={e => setAdvTopK(e.target.value)} />
+                      </div>
+                      <div>
+                        <label className="text-xs text-gray-400 block mb-1">相似度門檻</label>
+                        <input type="number" min={0} max={2} step={0.05} className="input py-1 text-xs w-24"
+                          placeholder={String(selectedDesign.vector_similarity_threshold ?? '0.50')}
+                          value={advThreshold}
+                          onChange={e => setAdvThreshold(e.target.value)} />
+                      </div>
+                      <p className="text-xs text-gray-400 self-end pb-1">留空使用任務預設值</p>
+                      {(advTopK || advThreshold) && (
+                        <button onClick={() => { setAdvTopK(''); setAdvThreshold('') }}
+                          className="text-xs text-gray-400 hover:text-red-400 self-end pb-1">重置</button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
               {statusMsg && (
                 <p className="text-xs text-gray-400 mt-2 flex items-center gap-1.5">
                   {loading && <RefreshCw size={11} className="animate-spin" />}
@@ -444,14 +630,14 @@ export default function AiDashboardPage() {
               {/* Chart */}
               {viewMode === 'chart' && activeChart && (
                 <div className="bg-white border border-gray-200 rounded-2xl p-4">
-                  <AiChart chartDef={activeChart} rows={result.rows} />
+                  <AiChart chartDef={activeChart} rows={result.rows} columnLabels={result.column_labels} />
                 </div>
               )}
 
               {/* Table */}
               {(viewMode === 'table' || !activeChart) && (
                 <div className="bg-white border border-gray-200 rounded-2xl p-4">
-                  <ResultTable rows={result.rows} columns={result.columns} />
+                  <ResultTable rows={result.rows} columns={result.columns} column_labels={result.column_labels} />
                 </div>
               )}
             </div>

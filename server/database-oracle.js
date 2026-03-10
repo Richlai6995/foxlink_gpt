@@ -354,6 +354,27 @@ async function runMigrations(db) {
   await addCol('LLM_MODELS', 'DEPLOYMENT_NAME',   'VARCHAR2(200)');
   await addCol('LLM_MODELS', 'BASE_MODEL',        'VARCHAR2(100)');
 
+  // AI Schema Source 擴充欄位
+  await addCol('AI_SCHEMA_DEFINITIONS', 'ALIAS',            "VARCHAR2(50)");
+  await addCol('AI_SCHEMA_DEFINITIONS', 'SOURCE_TYPE',      "VARCHAR2(20) DEFAULT 'table'");
+  await addCol('AI_SCHEMA_DEFINITIONS', 'SOURCE_SQL',       'CLOB');
+  await addCol('AI_SCHEMA_DEFINITIONS', 'BASE_CONDITIONS',  'CLOB');  // JSON [{col,op,val}]
+  await addCol('AI_SCHEMA_DEFINITIONS', 'VECTOR_ETL_JOB_ID', 'NUMBER');
+
+  // AI Select Design 加入 join 選擇
+  await addCol('AI_SELECT_DESIGNS', 'TARGET_JOIN_IDS', 'CLOB');
+
+  // ── AI ETL Jobs 擴充 ────────────────────────────────────────────────────────
+  await addCol('AI_ETL_JOBS', 'JOB_TYPE',       "VARCHAR2(20) DEFAULT 'vector'");
+  await addCol('AI_ETL_JOBS', 'TARGET_TABLE',    'VARCHAR2(200)');
+  await addCol('AI_ETL_JOBS', 'TARGET_MODE',     "VARCHAR2(20) DEFAULT 'truncate_insert'");
+  await addCol('AI_ETL_JOBS', 'UPSERT_KEY',      'VARCHAR2(500)');
+  await addCol('AI_ETL_JOBS', 'DELETE_SQL',      'CLOB');
+  await addCol('AI_ETL_JOBS', 'SCHEDULE_TYPE',   "VARCHAR2(20) DEFAULT 'cron'");
+  await addCol('AI_ETL_JOBS', 'SCHEDULE_CONFIG', 'CLOB');
+  await addCol('AI_ETL_RUN_LOGS', 'ROWS_INSERTED', 'NUMBER DEFAULT 0');
+  await addCol('AI_ETL_RUN_LOGS', 'ROWS_UPDATED',  'NUMBER DEFAULT 0');
+
   const createTable = async (name, ddl) => {
     try {
       const exists = await db.tableExists(name);
@@ -533,6 +554,109 @@ async function runMigrations(db) {
     expires_at    TIMESTAMP,
     CONSTRAINT ai_query_cache_uq UNIQUE (design_id, question_hash)
   )`);
+
+  await createTable('AI_SCHEMA_JOINS', `CREATE TABLE ai_schema_joins (
+    id               NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    name             VARCHAR2(100) NOT NULL,
+    left_schema_id   NUMBER REFERENCES ai_schema_definitions(id) ON DELETE CASCADE,
+    right_schema_id  NUMBER REFERENCES ai_schema_definitions(id) ON DELETE CASCADE,
+    join_type        VARCHAR2(10) DEFAULT 'LEFT',
+    conditions_json  CLOB,
+    created_by       NUMBER,
+    created_at       TIMESTAMP DEFAULT SYSTIMESTAMP
+  )`);
+
+  await createTable('AI_DASHBOARD_SHARES', `CREATE TABLE ai_dashboard_shares (
+    id           NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    design_id    NUMBER NOT NULL REFERENCES ai_select_designs(id) ON DELETE CASCADE,
+    share_type   VARCHAR2(20) DEFAULT 'use',
+    grantee_type VARCHAR2(20) NOT NULL,
+    grantee_id   VARCHAR2(100) NOT NULL,
+    granted_by   NUMBER,
+    created_at   TIMESTAMP DEFAULT SYSTIMESTAMP
+  )`);
+
+  // ── AI Dashboard sharing & suspend ────────────────────────────────────────
+  await addCol('AI_SELECT_DESIGNS', 'SHARE_TYPE',   "VARCHAR2(20) DEFAULT 'none'");
+  await addCol('AI_SELECT_DESIGNS', 'IS_SUSPENDED',  'NUMBER(1) DEFAULT 0');
+  await addCol('AI_SELECT_TOPICS',  'IS_SUSPENDED',  'NUMBER(1) DEFAULT 0');
+  await addCol('AI_SELECT_TOPICS',  'ICON_URL',      'VARCHAR2(500)');
+
+  // ── Role permissions for AI dashboard ─────────────────────────────────────
+  await addCol('ROLES', 'CAN_DESIGN_AI_SELECT', 'NUMBER(1) DEFAULT 0');
+  await addCol('ROLES', 'CAN_USE_AI_DASHBOARD',  'NUMBER(1) DEFAULT 0');
+
+  // ── Project layer ─────────────────────────────────────────────────────────
+  await createTable('AI_SELECT_PROJECTS', `CREATE TABLE ai_select_projects (
+    id           NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    name         VARCHAR2(100) NOT NULL,
+    description  CLOB,
+    is_public    NUMBER(1) DEFAULT 0,
+    is_suspended NUMBER(1) DEFAULT 0,
+    created_by   NUMBER,
+    created_at   TIMESTAMP DEFAULT SYSTIMESTAMP
+  )`);
+
+  await addCol('AI_SELECT_TOPICS',      'PROJECT_ID', 'NUMBER');
+  await addCol('AI_SCHEMA_DEFINITIONS', 'PROJECT_ID', 'NUMBER');
+  await addCol('AI_SCHEMA_DEFINITIONS', 'ALIAS',      'VARCHAR2(100)');
+  await addCol('AI_SCHEMA_DEFINITIONS', 'SOURCE_TYPE','VARCHAR2(20)');
+  await addCol('AI_SCHEMA_DEFINITIONS', 'SOURCE_SQL', 'CLOB');
+  await addCol('AI_SCHEMA_DEFINITIONS', 'BASE_CONDITIONS', 'CLOB');
+  await addCol('AI_SCHEMA_DEFINITIONS', 'VECTOR_ETL_JOB_ID', 'NUMBER');
+  await addCol('AI_SELECT_DESIGNS',     'TARGET_JOIN_IDS', 'CLOB');
+  await addCol('AI_ETL_JOBS',           'PROJECT_ID', 'NUMBER');
+  await addCol('AI_ETL_JOBS',           'JOB_TYPE',   "VARCHAR2(20) DEFAULT 'vector'");
+  await addCol('AI_ETL_JOBS',           'TARGET_TABLE','VARCHAR2(100)');
+  await addCol('AI_ETL_JOBS',           'TARGET_MODE', "VARCHAR2(20) DEFAULT 'truncate_insert'");
+  await addCol('AI_ETL_JOBS',           'UPSERT_KEY',  'VARCHAR2(100)');
+  await addCol('AI_ETL_JOBS',           'DELETE_SQL',  'CLOB');
+  await addCol('AI_ETL_JOBS',           'SCHEDULE_TYPE', 'VARCHAR2(20)');
+  await addCol('AI_ETL_JOBS',           'SCHEDULE_CONFIG', 'CLOB');
+  await addCol('AI_ETL_JOBS',           'RUN_COUNT',   'NUMBER DEFAULT 0');
+  await addCol('AI_ETL_RUN_LOGS',       'ROWS_INSERTED','NUMBER DEFAULT 0');
+  await addCol('AI_ETL_RUN_LOGS',       'ROWS_UPDATED', 'NUMBER DEFAULT 0');
+  await addCol('AI_ETL_RUN_LOGS',       'STATUS_MESSAGE', 'VARCHAR2(200)');
+  await addCol('AI_ETL_RUN_LOGS',       'ROWS_DELETED', 'NUMBER DEFAULT 0');
+  await addCol('AI_SCHEMA_JOINS',       'PROJECT_ID',  'NUMBER');
+
+  await createTable('AI_PROJECT_SHARES', `CREATE TABLE ai_project_shares (
+    id           NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    project_id   NUMBER NOT NULL,
+    share_type   VARCHAR2(20) DEFAULT 'use',
+    grantee_type VARCHAR2(20) NOT NULL,
+    grantee_id   VARCHAR2(100) NOT NULL,
+    granted_by   NUMBER,
+    created_at   TIMESTAMP DEFAULT SYSTIMESTAMP
+  )`);
+
+  // AI 戰情查詢歷史
+  await createTable('AI_DASHBOARD_HISTORY', `CREATE TABLE ai_dashboard_history (
+    id            NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    user_id       NUMBER NOT NULL,
+    design_id     NUMBER,
+    design_name   VARCHAR2(200),
+    topic_name    VARCHAR2(200),
+    question      CLOB,
+    generated_sql CLOB,
+    row_count     NUMBER DEFAULT 0,
+    created_at    TIMESTAMP DEFAULT SYSTIMESTAMP
+  )`);
+
+  // 向量搜尋參數（設計層級預設值）
+  await addCol('AI_SELECT_DESIGNS', 'VECTOR_TOP_K', 'NUMBER DEFAULT 10');
+  await addCol('AI_SELECT_DESIGNS', 'VECTOR_SIMILARITY_THRESHOLD', "VARCHAR2(10) DEFAULT '0.50'");
+  // 欄位有明確值時跳過向量搜尋的欄位清單（JSON array of column names）
+  await addCol('AI_SELECT_DESIGNS', 'VECTOR_SKIP_FIELDS', 'CLOB');
+
+  // Schema 欄位：計算欄位（虛擬欄位）
+  await addCol('AI_SCHEMA_COLUMNS', 'IS_VIRTUAL',  'NUMBER(1) DEFAULT 0');
+  await addCol('AI_SCHEMA_COLUMNS', 'EXPRESSION',  'CLOB');
+
+  // 公開專案需管理員核准
+  await addCol('AI_SELECT_PROJECTS', 'PUBLIC_APPROVED', 'NUMBER(1) DEFAULT 0');
+  await addCol('AI_SELECT_PROJECTS', 'PUBLIC_APPROVED_BY', 'NUMBER');
+  await addCol('AI_SELECT_PROJECTS', 'PUBLIC_APPROVED_AT', 'TIMESTAMP');
 }
 
 // ─── Exports (same shape as database.js) ─────────────────────────────────────

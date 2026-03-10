@@ -27,6 +27,8 @@ interface Role {
   kb_max_size_mb: number | null
   kb_max_count: number | null
   can_deep_research: number
+  can_design_ai_select: number
+  can_use_ai_dashboard: number
 }
 
 interface McpServer {
@@ -66,6 +68,8 @@ const emptyForm = {
   kb_max_size_mb: 500,
   kb_max_count: 5,
   can_deep_research: true,
+  can_design_ai_select: false,
+  can_use_ai_dashboard: false,
 }
 
 export default function RoleManagement() {
@@ -131,6 +135,8 @@ export default function RoleManagement() {
       kb_max_size_mb: role.kb_max_size_mb ?? 500,
       kb_max_count: role.kb_max_count ?? 5,
       can_deep_research: role.can_deep_research !== 0,
+      can_design_ai_select: role.can_design_ai_select === 1,
+      can_use_ai_dashboard: role.can_use_ai_dashboard === 1,
     })
     setError('')
     setShowModal(true)
@@ -519,6 +525,24 @@ export default function RoleManagement() {
                       className="w-4 h-4 rounded border-slate-300 text-blue-600"
                     />
                     <span className="text-sm text-slate-700">允許深度研究</span>
+                  </label>
+                  <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={(form as any).can_use_ai_dashboard}
+                      onChange={e => setForm({ ...form, can_use_ai_dashboard: e.target.checked } as any)}
+                      className="w-4 h-4 rounded border-slate-300 text-blue-600"
+                    />
+                    <span className="text-sm text-slate-700">允許 AI 戰情查詢</span>
+                  </label>
+                  <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={(form as any).can_design_ai_select}
+                      onChange={e => setForm({ ...form, can_design_ai_select: e.target.checked } as any)}
+                      className="w-4 h-4 rounded border-slate-300 text-blue-600"
+                    />
+                    <span className="text-sm text-slate-700">允許 AI 戰情設計</span>
                   </label>
                   <label className="flex items-center gap-1.5 cursor-pointer select-none">
                     <input

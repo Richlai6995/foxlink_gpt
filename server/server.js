@@ -86,7 +86,30 @@ app.get('/api/health', (req, res) => res.json({ status: 'ok', timestamp: new Dat
       });
     }
 
-    app.listen(PORT, () => {
+    const http = require('http');
+    const server = http.createServer(app);
+    server.on('error', (err) => {
+      if (err.code === 'EADDRINUSE') {
+        console.error(`[WARN] Port ${PORT} in use, trying to kill old process...`);
+        const { execSync } = require('child_process');
+        try {
+          if (process.platform === 'win32') {
+            const out = execSync(`powershell -Command "Get-NetTCPConnection -LocalPort ${PORT} | Select-Object -ExpandProperty OwningProcess | Sort-Object -Unique"`).toString().trim();
+            out.split('\n').map(s => s.trim()).filter(Boolean).forEach(pid => {
+              if (Number(pid) > 0) { execSync(`powershell -Command "Stop-Process -Id ${pid} -Force"`); }
+            });
+          } else {
+            execSync(`fuser -k ${PORT}/tcp`);
+          }
+          console.log(`[INFO] Freed port ${PORT}, restarting...`);
+          setTimeout(() => server.listen(PORT), 1000);
+        } catch (e2) {
+          console.error(`[FATAL] Could not free port ${PORT}:`, e2.message);
+          process.exit(1);
+        }
+      }
+    });
+    server.listen(PORT, () => {
       console.log(`FOXLINK GPT Server running on http://localhost:${PORT}`);
     });
 

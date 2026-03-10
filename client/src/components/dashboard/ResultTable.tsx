@@ -6,10 +6,11 @@ import { Download } from 'lucide-react'
 interface Props {
   rows: Record<string, unknown>[]
   columns: string[]
+  column_labels?: Record<string, string>  // col_lower → 中文說明
 }
 
-function exportCsv(rows: Record<string, unknown>[], columns: string[]) {
-  const header = columns.join(',')
+function exportCsv(rows: Record<string, unknown>[], columns: string[], labels: Record<string, string>) {
+  const header = columns.map(c => labels[c] || c).join(',')
   const body = rows.map(r => columns.map(c => {
     const v = String(r[c] ?? '')
     return v.includes(',') || v.includes('"') ? `"${v.replace(/"/g, '""')}"` : v
@@ -23,7 +24,7 @@ function exportCsv(rows: Record<string, unknown>[], columns: string[]) {
   URL.revokeObjectURL(url)
 }
 
-export default function ResultTable({ rows, columns }: Props) {
+export default function ResultTable({ rows, columns, column_labels = {} }: Props) {
   if (!rows.length) return <p className="text-gray-400 text-sm py-4 text-center">無資料</p>
 
   return (
@@ -31,7 +32,7 @@ export default function ResultTable({ rows, columns }: Props) {
       <div className="flex items-center justify-between">
         <span className="text-xs text-gray-400">共 {rows.length} 筆</span>
         <button
-          onClick={() => exportCsv(rows, columns)}
+          onClick={() => exportCsv(rows, columns, column_labels)}
           className="flex items-center gap-1 text-xs text-blue-400 hover:text-blue-300 transition"
         >
           <Download size={12} /> 匯出 CSV
@@ -42,7 +43,9 @@ export default function ResultTable({ rows, columns }: Props) {
           <thead className="sticky top-0 bg-gray-100 border-b border-gray-200">
             <tr>
               {columns.map(c => (
-                <th key={c} className="px-3 py-2 text-gray-500 font-medium whitespace-nowrap">{c}</th>
+                <th key={c} className="px-3 py-2 text-gray-600 font-medium whitespace-nowrap" title={c}>
+                  {column_labels[c] || c}
+                </th>
               ))}
             </tr>
           </thead>

@@ -19,6 +19,13 @@ const upload = multer({ dest: path.join(UPLOAD_DIR, 'tmp') });
 router.get('/users', async (req, res) => {
   try {
     const db = require('../database-oracle').db;
+    const { search } = req.query;
+    const searchFilter = search
+      ? `AND (UPPER(u.name) LIKE UPPER(?) OR UPPER(u.username) LIKE UPPER(?) OR u.employee_id LIKE ?)`
+      : '';
+    const searchBinds = search
+      ? [`%${search}%`, `%${search}%`, `%${search}%`]
+      : [];
     const users = await db
       .prepare(
         `SELECT u.id, u.username, u.name, u.employee_id, u.email, u.role, u.status,
@@ -32,6 +39,7 @@ router.get('/users', async (req, res) => {
                 COUNT(DISTINCT cs.id) as session_count
          FROM users u
          LEFT JOIN chat_sessions cs ON cs.user_id = u.id
+         WHERE 1=1 ${searchFilter}
          GROUP BY u.id, u.username, u.name, u.employee_id, u.email, u.role, u.status,
                 u.start_date, u.end_date,
                 u.allow_text_upload, u.text_max_mb, u.allow_audio_upload, u.audio_max_mb,
@@ -41,7 +49,7 @@ router.get('/users', async (req, res) => {
                 u.org_end_date, u.org_synced_at
          ORDER BY u.id ASC`
       )
-      .all();
+      .all(...searchBinds);
     res.json(users);
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -184,11 +192,80 @@ router.delete('/token-prices/:id', async (req, res) => {
   }
 });
 
+// POST /api/admin/llm-models/test — test a model connection (no DB save required)
+router.post('/llm-models/test', async (req, res) => {
+  const db = require('../database-oracle').db;
+  const { decryptKey } = require('../services/llmKeyService');
+  const {
+    id,                      // if provided, load existing row from DB (api_key may be empty)
+    provider_type = 'gemini',
+    api_key,                 // plaintext — used if provided; otherwise fall back to DB
+    api_model,
+    endpoint_url,
+    api_version,
+    deployment_name,
+  } = req.body;
+
+  try {
+    let resolvedApiKey = api_key?.trim() || null;
+    // If testing an existing saved model and no new key submitted, decrypt from DB
+    if (!resolvedApiKey && id) {
+      const row = await db.prepare('SELECT api_key_enc FROM llm_models WHERE id=?').get(id);
+      if (row?.api_key_enc) resolvedApiKey = decryptKey(row.api_key_enc);
+    }
+
+    const pt = (provider_type || 'gemini').toLowerCase();
+
+    if (pt === 'azure_openai') {
+      if (!resolvedApiKey)  return res.status(400).json({ ok: false, error: 'API Key 未設定' });
+      if (!endpoint_url)    return res.status(400).json({ ok: false, error: 'Endpoint URL 未設定' });
+      if (!deployment_name) return res.status(400).json({ ok: false, error: 'Deployment Name 未設定' });
+
+      const { AzureOpenAI } = require('openai');
+      const client = new AzureOpenAI({
+        endpoint:   endpoint_url.trim(),
+        apiKey:     resolvedApiKey,
+        apiVersion: api_version?.trim() || '2024-08-01-preview',
+        deployment: deployment_name.trim(),
+      });
+      // o1/o3 series don't support max_tokens; use max_completion_tokens
+      const isO1 = /^o\d/i.test(deployment_name.trim());
+      const resp = await client.chat.completions.create({
+        model:    deployment_name.trim(),
+        messages: [{ role: 'user', content: 'Reply with the single word: OK' }],
+        ...(isO1 ? { max_completion_tokens: 10 } : { max_tokens: 10 }),
+      });
+      const reply = resp.choices?.[0]?.message?.content?.trim() || '(no reply)';
+      return res.json({ ok: true, reply, model: deployment_name });
+    }
+
+    // Gemini
+    const geminiKey = resolvedApiKey || process.env.GEMINI_API_KEY;
+    if (!geminiKey) return res.status(400).json({ ok: false, error: 'Gemini API Key 未設定（DB 及 env 皆無）' });
+    const { GoogleGenerativeAI } = require('@google/generative-ai');
+    const genAI  = new GoogleGenerativeAI(geminiKey);
+    const model  = genAI.getGenerativeModel({ model: api_model?.trim() || process.env.GEMINI_MODEL_FLASH || 'gemini-2.0-flash' });
+    const result = await model.generateContent('Reply with the single word: OK');
+    const reply  = result.response.text()?.trim() || '(no reply)';
+    return res.json({ ok: true, reply, model: api_model });
+
+  } catch (e) {
+    console.error('[LLM Test]', e.message);
+    return res.json({ ok: false, error: e.message });
+  }
+});
+
 // GET /api/admin/llm-models
 router.get('/llm-models', async (req, res) => {
   try {
     const db = require('../database-oracle').db;
-    const rows = await db.prepare('SELECT * FROM llm_models ORDER BY sort_order ASC, id ASC').all();
+    const rows = await db.prepare(
+      `SELECT id, key, name, api_model, description, is_active, sort_order, image_output, created_at,
+              provider_type, endpoint_url, api_version, deployment_name, base_model,
+              CASE WHEN api_key_enc IS NOT NULL THEN 1 ELSE 0 END AS has_api_key
+       FROM llm_models ORDER BY sort_order ASC, id ASC`
+    ).all();
+    // Never return the encrypted key — just flag if it's set
     res.json(rows);
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -199,13 +276,30 @@ router.get('/llm-models', async (req, res) => {
 router.post('/llm-models', async (req, res) => {
   try {
     const db = require('../database-oracle').db;
-    const { key, name, api_model, description, is_active, sort_order, image_output } = req.body;
-    if (!key?.trim() || !name?.trim() || !api_model?.trim()) {
-      return res.status(400).json({ error: '請填寫 key、名稱及 API 模型字串' });
+    const { encryptKey } = require('../services/llmKeyService');
+    const {
+      key, name, api_model, description, is_active, sort_order, image_output,
+      provider_type = 'gemini', api_key, endpoint_url, api_version, deployment_name, base_model,
+    } = req.body;
+    if (!key?.trim() || !name?.trim()) {
+      return res.status(400).json({ error: '請填寫 key 及名稱' });
     }
+    const pt = provider_type || 'gemini';
+    if (pt === 'azure_openai' && (!endpoint_url?.trim() || !deployment_name?.trim())) {
+      return res.status(400).json({ error: 'Azure OpenAI 需填寫 Endpoint URL 及 Deployment Name' });
+    }
+    const apiKeyEnc = api_key?.trim() ? encryptKey(api_key.trim()) : null;
     const result = await db.prepare(
-      `INSERT INTO llm_models (key, name, api_model, description, is_active, sort_order, image_output) VALUES (?, ?, ?, ?, ?, ?, ?)`
-    ).run(key.trim(), name.trim(), api_model.trim(), description || null, is_active ? 1 : 0, sort_order || 0, image_output ? 1 : 0);
+      `INSERT INTO llm_models
+         (key, name, api_model, description, is_active, sort_order, image_output,
+          provider_type, api_key_enc, endpoint_url, api_version, deployment_name, base_model)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`
+    ).run(
+      key.trim(), name.trim(), (api_model || deployment_name || '').trim(),
+      description || null, is_active ? 1 : 0, sort_order || 0, image_output ? 1 : 0,
+      pt, apiKeyEnc, endpoint_url?.trim() || null,
+      api_version?.trim() || null, deployment_name?.trim() || null, base_model?.trim() || null,
+    );
     res.json({ id: result.lastInsertRowid });
   } catch (e) {
     if (e.message?.includes('UNIQUE')) return res.status(400).json({ error: 'Key 已存在' });
@@ -217,10 +311,35 @@ router.post('/llm-models', async (req, res) => {
 router.put('/llm-models/:id', async (req, res) => {
   try {
     const db = require('../database-oracle').db;
-    const { key, name, api_model, description, is_active, sort_order, image_output } = req.body;
+    const { encryptKey } = require('../services/llmKeyService');
+    const {
+      key, name, api_model, description, is_active, sort_order, image_output,
+      provider_type, api_key, endpoint_url, api_version, deployment_name, base_model,
+    } = req.body;
+    const pt = provider_type || 'gemini';
+
+    // Only update api_key_enc if a new key was provided
+    let apiKeyEnc;
+    if (api_key?.trim()) {
+      apiKeyEnc = encryptKey(api_key.trim());
+    } else {
+      // Preserve existing encrypted key
+      const existing = await db.prepare('SELECT api_key_enc FROM llm_models WHERE id=?').get(req.params.id);
+      apiKeyEnc = existing?.api_key_enc ?? null;
+    }
+
     await db.prepare(
-      `UPDATE llm_models SET key=?, name=?, api_model=?, description=?, is_active=?, sort_order=?, image_output=? WHERE id=?`
-    ).run(key.trim(), name.trim(), api_model.trim(), description || null, is_active ? 1 : 0, sort_order || 0, image_output ? 1 : 0, req.params.id);
+      `UPDATE llm_models SET
+         key=?, name=?, api_model=?, description=?, is_active=?, sort_order=?, image_output=?,
+         provider_type=?, api_key_enc=?, endpoint_url=?, api_version=?, deployment_name=?, base_model=?
+       WHERE id=?`
+    ).run(
+      key.trim(), name.trim(), (api_model || deployment_name || '').trim(),
+      description || null, is_active ? 1 : 0, sort_order || 0, image_output ? 1 : 0,
+      pt, apiKeyEnc, endpoint_url?.trim() || null,
+      api_version?.trim() || null, deployment_name?.trim() || null, base_model?.trim() || null,
+      req.params.id,
+    );
     res.json({ ok: true });
   } catch (e) {
     if (e.message?.includes('UNIQUE')) return res.status(400).json({ error: 'Key 已存在' });

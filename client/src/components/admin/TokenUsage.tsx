@@ -51,7 +51,13 @@ function InlineForm({ form, setForm, llmModels, onSave, onCancel }: {
             className="input py-1 w-52 font-mono text-xs"
           />
           <datalist id="price-model-list">
-            {llmModels.map((m) => <option key={m.key} value={m.key}>{m.name}</option>)}
+            {llmModels.map((m) => (
+              <option key={m.key} value={m.key}>
+                {m.provider_type === 'azure_openai'
+                  ? `${m.name} [Azure: ${m.deployment_name || m.api_model}]`
+                  : m.name}
+              </option>
+            ))}
             <option value="gemini-embedding-001">Gemini Embedding 001</option>
             <option value="gemini-embedding-exp-03-07">Gemini Embedding Exp</option>
           </datalist>

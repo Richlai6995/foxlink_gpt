@@ -137,6 +137,8 @@ const userSections = [
   { id: 'u-share', label: '分享對話', icon: <Share2 size={18} /> },
   { id: 'u-skill', label: '技能 Skill', icon: <Sparkles size={18} /> },
   { id: 'u-kb', label: '知識庫市集', icon: <Database size={18} /> },
+  { id: 'u-research', label: '深度研究', icon: <GitFork size={18} /> },
+  { id: 'u-toolbar-toggles', label: '頂端列功能開關', icon: <Zap size={18} /> },
   { id: 'u-budget', label: '使用金額提示', icon: <DollarSign size={18} /> },
 ]
 
@@ -772,6 +774,108 @@ function UserManual() {
               ['OCR 模型', '處理圖片的 Gemini 模型', 'Flash（快速省成本）'],
             ]}
           />
+        </SubSection>
+
+        <SubSection title="知識庫格式感知">
+          <Para>
+            系統會根據上傳文件的格式自動選擇最佳的解析方式，確保內容被完整擷取並向量化。
+          </Para>
+          <Table
+            headers={['格式', '解析方式', '備註']}
+            rows={[
+              ['PDF', 'pdf-parse 文字層 + Gemini OCR（有圖片時）', '掃描件需 OCR，速度較慢'],
+              ['DOCX / PPTX', 'JSZip 解壓縮 XML → 提取段落文字', '保留標題層級與段落結構'],
+              ['XLSX / CSV', '逐列讀取，保留欄標頭', '大型表格建議先分頁再上傳'],
+              ['TXT / MD', '直接讀取純文字', '保留換行結構'],
+              ['JPG / PNG / WEBP / GIF', 'Gemini Vision OCR → 轉為文字 chunk', '圖片需設定 OCR 模型才會處理'],
+            ]}
+          />
+          <TipBox>
+            含大量圖表的 PDF 或 PPTX，建議在知識庫設定中指定 OCR 模型（Flash 即可），
+            系統會自動對圖片頁面進行視覺理解，再合併到同一文件的文字 chunk 中。
+          </TipBox>
+          <NoteBox>
+            XLSX 中的公式只會保留計算結果值，不保留公式本身。若需讓 AI 理解公式邏輯，請先將說明另存為 TXT 或 MD 一起上傳。
+          </NoteBox>
+        </SubSection>
+      </Section>
+
+      <Section id="u-research" icon={<GitFork size={22} />} iconColor="text-indigo-500" title="深度研究">
+        <Para>
+          「深度研究」功能讓 AI 針對複雜問題自動規劃多步驟調查流程：先生成研究計劃、逐步執行，
+          最後整合所有發現產出完整的研究報告（可選 PDF / DOCX / TXT 格式）。
+          適合需要跨文件比較、多角度分析的場景，如競品分析、技術評估、市場調查等。
+        </Para>
+
+        <SubSection title="啟動深度研究">
+          <div className="space-y-3">
+            <StepItem num={1} title="點選左側邊欄「更多功能」→「深度研究」" desc="或從主介面頂部工具列找到望遠鏡圖示" />
+            <StepItem num={2} title="輸入您要研究的問題或主題" desc="問題越具體，研究計劃越精準，例如：「分析 2024–2025 年全球 PCB 供應鏈風險與機會」" />
+            <StepItem num={3} title="選擇是否啟用「網路搜尋」" desc="啟用後 AI 會透過 MCP 搜尋工具查詢最新資訊（需先設定 MCP 搜尋伺服器）" />
+            <StepItem num={4} title="選擇輸出格式：TXT / DOCX / PDF" desc="多選時會同時生成並打包，完成後可一次下載" />
+            <StepItem num={5} title="點選「開始研究」，AI 自動執行多步驟調查" desc="進度條顯示目前執行到哪個步驟，可隨時查看即時日誌" />
+            <StepItem num={6} title="完成後在「深度研究」清單找到此任務，下載報告" />
+          </div>
+          <TipBox>
+            深度研究會在背景非同步執行，您可以關閉頁面或切換到其他對話，
+            完成後系統會在側邊欄顯示通知（若有啟用 Email 通知，也會發送 Email）。
+          </TipBox>
+        </SubSection>
+
+        <SubSection title="研究計劃預覽與調整">
+          <Para>
+            AI 生成研究計劃後，系統會先暫停並讓您預覽計劃內容（各步驟標題與預計執行內容）。
+            您可以直接編輯計劃，刪除不需要的步驟，或補充更多調查方向，確認後再點「執行計劃」。
+          </Para>
+          <NoteBox>若直接點「執行計劃」不修改，AI 會依自動生成的計劃全部執行。研究步驟越多，耗時與 Token 消耗越大，建議適當精簡。</NoteBox>
+        </SubSection>
+
+        <SubSection title="查看研究記錄">
+          <Para>
+            所有深度研究任務都保存在「深度研究」頁面的清單中，包含建立時間、狀態（執行中 / 完成 / 失敗）及輸出檔案連結，可隨時重新下載。
+          </Para>
+          <Table
+            headers={['狀態', '說明']}
+            rows={[
+              ['pending（等待中）', 'AI 尚未開始，通常在數秒內轉為執行中'],
+              ['running（執行中）', '正在逐步執行研究計劃，進度條顯示完成百分比'],
+              ['done（完成）', '報告已生成，可點選下載'],
+              ['failed（失敗）', '執行過程發生錯誤，錯誤訊息顯示於備註欄，可重新嘗試'],
+            ]}
+          />
+        </SubSection>
+      </Section>
+
+      <Section id="u-toolbar-toggles" icon={<Zap size={22} />} iconColor="text-amber-500" title="頂端列功能開關">
+        <Para>
+          對話頁面頂端工具列提供四個快速開關，讓您按需求啟用或停用各項輔助功能，
+          每個開關的狀態僅影響當前及後續的新訊息，不會回溯修改已完成的對話。
+        </Para>
+
+        <Table
+          headers={['開關', '圖示', '說明', '停用時行為']}
+          rows={[
+            ['技能 (Skill)', 'Sparkles ✦', '啟用後，AI 回覆前會先查詢符合的技能 Prompt 並套用', '跳過技能注入，AI 以原始模型回答'],
+            ['知識庫', 'Database 🗄️', '啟用後，AI 回覆前會從已掛載的自建知識庫檢索相關段落', '不做知識庫檢索，直接回答'],
+            ['DIFY 知識庫', 'Zap ⚡', '啟用後，AI 回覆前會從已掛載的 DIFY 知識庫查詢', '跳過 DIFY 檢索'],
+            ['MCP 工具', 'Globe 🌐', '啟用後，AI 可呼叫已設定的 MCP 伺服器（搜尋、程式執行等）', '停用所有 MCP 工具呼叫'],
+          ]}
+        />
+
+        <SubSection title="操作方式">
+          <div className="space-y-3">
+            <StepItem num={1} title="開啟任意對話後，查看頂部工具列" desc="工具列位於對話標題下方，包含各功能圖示按鈕" />
+            <StepItem num={2} title="點選對應圖示即可切換開 / 關" desc="亮色（藍色/綠色）= 啟用；灰色 = 停用" />
+            <StepItem num={3} title="下次發送訊息即生效" desc="無需重新整理頁面，狀態會記憶在瀏覽器 Session 中" />
+          </div>
+          <TipBox>
+            若您只想進行純文字對話且不需要任何外部資料，建議關閉所有開關以降低延遲與 Token 消耗。
+            若對話主題切換（如從「查 SOP」改為「寫程式」），也可即時調整開關組合。
+          </TipBox>
+          <NoteBox>
+            各開關僅在對應功能已設定的情況下才有效果：知識庫開關需先在下拉選單中掛載知識庫；
+            MCP 開關需管理員已設定並啟用 MCP 伺服器；DIFY 知識庫開關需管理員已設定 DIFY API。
+          </NoteBox>
         </SubSection>
       </Section>
 
@@ -1608,20 +1712,75 @@ generate_txt:供應商週報_{{date}}.txt
 
       <Section id="a-llm" icon={<Cpu size={22} />} iconColor="text-violet-500" title="LLM 模型管理">
         <Para>
-          在「LLM 模型設定」頁籤，管理員可新增、編輯或停用 AI 模型選項，讓使用者在對話和排程中可選擇。
+          在「LLM 模型設定」頁籤，管理員可新增、編輯或停用 AI 模型選項，支援 Google Gemini 及 Azure OpenAI 兩種供應商，讓使用者在對話和排程中可自由選擇。
         </Para>
-        <Table
-          headers={['欄位', '說明']}
-          rows={[
-            ['識別鍵 (key)', '系統內部識別碼，用於對應 Prompt 設定（如 pro、flash）'],
-            ['顯示名稱', '使用者看到的模型名稱（如 Gemini 2.0 Pro）'],
-            ['API 模型 ID', 'Google Gemini 的實際 API 模型代號'],
-            ['說明文字', '顯示於模型選單下方的小字說明'],
-            ['啟用', '關閉後使用者無法選擇此模型，但歷史記錄不受影響'],
-            ['輸入定價', '每百萬 Token 的費用（USD），用於費用統計'],
-            ['輸出定價', '每百萬 Token 的費用（USD），用於費用統計'],
-          ]}
-        />
+
+        <SubSection title="通用欄位">
+          <Table
+            headers={['欄位', '說明']}
+            rows={[
+              ['識別鍵 (key)', '系統內部識別碼，用於對應 Prompt 設定（如 pro、flash）'],
+              ['顯示名稱', '使用者看到的模型名稱（如 Gemini 2.0 Pro）'],
+              ['說明文字', '顯示於模型選單下方的小字說明'],
+              ['排序', '數字越小排越前，影響選單顯示順序'],
+              ['啟用', '關閉後使用者無法選擇此模型，但歷史記錄不受影響'],
+              ['輸入定價', '每百萬 Token 的費用（USD），用於費用統計'],
+              ['輸出定價', '每百萬 Token 的費用（USD），用於費用統計'],
+            ]}
+          />
+        </SubSection>
+
+        <SubSection title="Gemini 模型設定">
+          <Para>選擇供應商「Google Gemini」後，需填寫以下欄位：</Para>
+          <Table
+            headers={['欄位', '說明', '範例']}
+            rows={[
+              ['API 模型 ID', 'Google Gemini API 的實際模型代號', 'gemini-2.0-flash、gemini-1.5-pro'],
+              ['API Key（選填）', '若留空則使用伺服器環境變數 GEMINI_API_KEY；填入後加密儲存於 DB，優先使用', 'AIza...'],
+              ['支援圖片輸出', '開啟後此模型支援 Imagen 圖片生成（需模型本身支援）', ''],
+            ]}
+          />
+          <TipBox>多數情況下 API Key 留空即可，由伺服器統一管理 GEMINI_API_KEY 環境變數。若需區分不同部門使用不同計費帳號，才需個別填入。</TipBox>
+        </SubSection>
+
+        <SubSection title="Azure OpenAI 模型設定">
+          <Para>選擇供應商「Azure OpenAI」後，需填寫以下欄位：</Para>
+          <Table
+            headers={['欄位', '說明', '範例']}
+            rows={[
+              ['Deployment Name', 'Azure Portal 中建立的部署名稱（非模型名稱）', 'gpt-4o、o1-preview'],
+              ['Endpoint URL', 'Azure OpenAI 資源的基礎 URL（不含路徑）', 'https://my-resource.openai.azure.com'],
+              ['API Version', 'Azure OpenAI API 版本', '2024-08-01-preview'],
+              ['Base Model（選填）', '底層模型識別，供定價查詢及顯示使用', 'gpt-4o、o1'],
+              ['API Key', '必填；Azure OpenAI 的 API Key，AES-256-GCM 加密後存入 DB，系統永不明文傳回前端', ''],
+            ]}
+          />
+          <NoteBox>
+            Endpoint URL 請填入基礎位址即可，例如 <code className="bg-slate-100 px-1 rounded text-xs">https://fl-aoai-eus.openai.azure.com</code>，
+            系統會自動組合完整的 <code className="bg-slate-100 px-1 rounded text-xs">/openai/deployments/&#123;deployment&#125;/chat/completions?api-version=...</code> 路徑。
+          </NoteBox>
+        </SubSection>
+
+        <SubSection title="o1 / o3 系列特別說明">
+          <Para>Azure OpenAI 的 o1、o3 系列推理模型有以下限制，系統會自動偵測並處理：</Para>
+          <Table
+            headers={['限制', '系統處理方式']}
+            rows={[
+              ['不支援串流輸出', '系統改用一次性請求，收到完整回應後一次推送給使用者'],
+              ['不支援 system 訊息角色', '系統自動過濾 system 訊息，將指示合併至 user 訊息中'],
+              ['使用 max_completion_tokens 而非 max_tokens', '系統自動切換參數，上限設為 8192'],
+            ]}
+          />
+          <TipBox>判斷規則：Deployment Name 以 <code className="bg-slate-100 px-1 rounded text-xs">o</code> 加數字開頭（如 <code className="bg-slate-100 px-1 rounded text-xs">o1</code>、<code className="bg-slate-100 px-1 rounded text-xs">o3-mini</code>）即視為推理模型，無需額外設定。</TipBox>
+        </SubSection>
+
+        <SubSection title="測試連線">
+          <Para>
+            新增或編輯模型後，點選對話框底部的「測試連線」按鈕，系統會向目標模型發送一則測試訊息並顯示回應，
+            確認 API Key、Endpoint、Deployment 設定均正確後再儲存。
+          </Para>
+          <NoteBox>測試時使用的 API Key 優先使用表單中填入的值；若表單留空，則使用 DB 中已加密儲存的 Key。</NoteBox>
+        </SubSection>
       </Section>
 
       <Section id="a-system" icon={<Settings size={22} />} iconColor="text-slate-500" title="系統設定">

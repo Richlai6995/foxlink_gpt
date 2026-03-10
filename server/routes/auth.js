@@ -220,6 +220,10 @@ const createSession = async (res, user) => {
     email: user.email,
     can_design_ai_select: user.can_design_ai_select,
     can_use_ai_dashboard:  user.can_use_ai_dashboard,
+    role_id:       user.role_id,
+    dept_code:     user.dept_code,
+    profit_center: user.profit_center,
+    org_section:   user.org_section,
   });
   const { password: _, ...userWithoutPassword } = user;
   // Resolve effective skill permissions (user setting overrides role default)

@@ -183,11 +183,27 @@ export interface AiSchemaDef {
   id: number
   table_name: string
   display_name?: string
+  alias?: string
+  source_type?: 'table' | 'view' | 'sql'
+  source_sql?: string
   db_connection: string
   business_notes?: string
   join_hints?: string
+  base_conditions?: string
+  vector_etl_job_id?: number
   is_active: number
+  project_id?: number
   columns?: AiSchemaColumn[]
+}
+
+export interface AiSchemaJoin {
+  id: number
+  name: string
+  left_schema_id: number
+  right_schema_id: number
+  join_type: 'LEFT' | 'RIGHT' | 'INNER' | 'FULL'
+  conditions_json: string   // JSON: [{left,op,right}]
+  created_at?: string
 }
 
 export interface AiSchemaColumn {
@@ -201,13 +217,39 @@ export interface AiSchemaColumn {
   sample_values?: string
 }
 
+export interface AiSelectProject {
+  id: number
+  name: string
+  description?: string
+  is_public?: number
+  public_approved?: number
+  is_suspended?: number
+  created_by?: number
+  creator_name?: string
+  topic_count?: number
+  created_at?: string
+}
+
+export interface AiProjectShare {
+  id: number
+  project_id: number
+  share_type: 'use' | 'develop'
+  grantee_type: string
+  grantee_id: string
+  granted_by?: number
+  created_at?: string
+}
+
 export interface AiSelectTopic {
   id: number
   name: string
   description?: string
   icon?: string
+  icon_url?: string
   sort_order: number
   is_active: number
+  is_suspended?: number
+  project_id?: number
   designs?: AiSelectDesign[]
 }
 
@@ -216,13 +258,38 @@ export interface AiSelectDesign {
   topic_id: number
   name: string
   description?: string
-  target_schema_ids?: string
+  target_schema_ids?: string | number[]
+  target_join_ids?: string | number[]
   vector_search_enabled: number
+  vector_top_k?: number
+  vector_similarity_threshold?: string
   system_prompt?: string
   few_shot_examples?: string
   chart_config?: string
   cache_ttl_minutes: number
   is_public: number
+  is_suspended?: number
+  created_by?: number
+}
+
+export interface AiDashboardHistory {
+  id: number
+  design_id?: number
+  design_name?: string
+  topic_name?: string
+  question: string
+  generated_sql?: string
+  row_count?: number
+  created_at: string
+}
+
+export interface AiDashboardShare {
+  id: number
+  design_id: number
+  share_type: 'use' | 'develop'
+  grantee_type: string
+  grantee_id: string
+  created_at?: string
 }
 
 export interface AiEtlJob {
@@ -230,14 +297,22 @@ export interface AiEtlJob {
   name: string
   source_sql: string
   source_connection: string
-  vectorize_fields?: string
-  metadata_fields?: string
+  vectorize_fields?: string | string[]
+  metadata_fields?: string | string[]
   embedding_dimension: number
   cron_expression?: string
   is_incremental: number
   last_run_at?: string
   status: string
   run_count?: number
+  job_type?: 'vector' | 'table_copy'
+  target_table?: string
+  target_mode?: string
+  upsert_key?: string
+  delete_sql?: string
+  schedule_type?: string
+  schedule_config?: string | Record<string, any>
+  project_id?: number
 }
 
 export interface AiEtlRunLog {
@@ -247,6 +322,10 @@ export interface AiEtlRunLog {
   finished_at?: string
   rows_fetched: number
   rows_vectorized: number
+  rows_inserted?: number
+  rows_updated?: number
+  rows_deleted?: number
+  status_message?: string
   error_message?: string
   status: string
 }
@@ -254,6 +333,7 @@ export interface AiEtlRunLog {
 export interface AiQueryResult {
   rows: Record<string, unknown>[]
   columns: string[]
+  column_labels?: Record<string, string>   // col_lower → 中文說明
   row_count: number
   chart_config?: AiChartConfig | null
   cached?: boolean
