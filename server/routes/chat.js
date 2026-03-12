@@ -129,7 +129,35 @@ async function executeSelfKbSearch(db, kb, query) {
       }
     }
 
-    results = results.filter((r) => r.score >= thresh).sort((a, b) => b.score - a.score).slice(0, topK);
+    results = results.filter((r) => r.score >= thresh).sort((a, b) => b.score - a.score);
+
+    // ── Rerank ────────────────────────────────────────────────────────────
+    try {
+      const rerankKey = kb.rerank_model;
+      const rerankRow = rerankKey
+        ? await db.prepare(`SELECT api_model, extra_config_enc FROM llm_models WHERE key=? AND model_role='rerank' AND is_active=1`).get(rerankKey)
+        : await db.prepare(`SELECT api_model, extra_config_enc FROM llm_models WHERE model_role='rerank' AND is_active=1 AND ROWNUM=1`).get();
+
+      if (rerankRow?.extra_config_enc && results.length > 1) {
+        const { decryptKey } = require('../services/llmKeyService');
+        const creds = JSON.parse(decryptKey(rerankRow.extra_config_enc));
+        const { rerankOci } = require('../services/ociAi');
+        const docs = results.map((r) => r.content || '');
+        const rerankResp = await rerankOci(creds, rerankRow.api_model, query, docs, results.length);
+        const ranked = rerankResp?.results || rerankResp?.rankings || [];
+        if (ranked.length > 0) {
+          results = ranked.map((item) => {
+            const orig = results[item.index ?? item.resultIndex ?? 0];
+            return { ...orig, rerank_score: item.relevanceScore ?? item.score ?? 0 };
+          }).sort((a, b) => b.rerank_score - a.rerank_score);
+          console.log(`[SelfKB] Rerank applied for KB "${kb.name}"`);
+        }
+      }
+    } catch (e) {
+      console.warn(`[SelfKB] Rerank skipped for KB "${kb.name}":`, e.message);
+    }
+
+    results = results.slice(0, topK);
 
     const elapsed = Date.now() - t0;
     console.log(`[SelfKB] KB "${kb.name}" search done in ${elapsed}ms, results=${results.length}`);
@@ -137,8 +165,9 @@ async function executeSelfKbSearch(db, kb, query) {
     if (results.length === 0) return `[知識庫「${kb.name}」未找到相關內容]`;
 
     const chunks = results.map((r, i) => {
+      const displayScore = r.rerank_score != null ? r.rerank_score.toFixed(3) : `${(r.score * 100).toFixed(0)}%`;
       const context = r.parent_content ? `上下文：${r.parent_content.slice(0, 300)}\n\n片段：` : '';
-      return `[${i + 1}] 來源: ${r.filename} (相關度 ${(r.score * 100).toFixed(0)}%)\n${context}${r.content}`;
+      return `[${i + 1}] 來源: ${r.filename} (相關度 ${displayScore})\n${context}${r.content}`;
     });
     return `【來自知識庫「${kb.name}」的相關內容】\n\n${chunks.join('\n\n---\n\n')}`;
   } catch (e) {
@@ -395,7 +424,7 @@ router.get('/models', async (req, res) => {
   try {
     const db = require('../database-oracle').db;
     const models = await db.prepare(
-      'SELECT key, name, api_model, description, image_output, provider_type, deployment_name FROM llm_models WHERE is_active=1 ORDER BY sort_order ASC, id ASC'
+      "SELECT key, name, api_model, description, image_output, provider_type, deployment_name FROM llm_models WHERE is_active=1 AND (model_role IS NULL OR model_role='chat') ORDER BY sort_order ASC, id ASC"
     ).all();
     if (models.length) return res.json(models);
     // Fallback if table empty
@@ -1114,12 +1143,12 @@ router.post('/sessions/:id/messages', upload.array('files', 10), async (req, res
             },
             body: JSON.stringify({ user_message: combinedUserText, session_id: sessionId, user_id: req.user.id }),
           }),
-          new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 10000)),
+          new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 30000)),
         ]);
         let answerContent = `[Skill "${sk.name}" 無法取得回應]`;
         if (resp.ok) {
           const data = await resp.json();
-          answerContent = data.content || answerContent;
+          answerContent = data.content || data.system_prompt || answerContent;
         }
         sendEvent({ type: 'chunk', content: answerContent });
         sendEvent({ type: 'done' });

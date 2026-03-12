@@ -107,12 +107,20 @@ export default function SkillMarket() {
         if (!form.name.trim()) return setError('名稱必填')
         setSaving(true)
         setError('')
+        // Auto-flush any pending tag/package input before save
+        const pendingTag = tagInput.trim()
+        const pendingPkg = pkgInput.trim()
+        const finalTags = pendingTag && !form.tags.includes(pendingTag) ? [...form.tags, pendingTag] : form.tags
+        const finalPkgs = pendingPkg && !form.code_packages.includes(pendingPkg) ? [...form.code_packages, pendingPkg] : form.code_packages
+        const payload = { ...form, tags: finalTags, code_packages: finalPkgs }
         try {
             if (editingSkill) {
-                await api.put(`/skills/${editingSkill.id}`, form)
+                await api.put(`/skills/${editingSkill.id}`, payload)
             } else {
-                await api.post('/skills', form)
+                await api.post('/skills', payload)
             }
+            setTagInput('')
+            setPkgInput('')
             setShowEditor(false)
             load()
         } catch (e: any) {

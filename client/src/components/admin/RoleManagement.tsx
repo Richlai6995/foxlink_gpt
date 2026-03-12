@@ -1,6 +1,12 @@
 import { useEffect, useState } from 'react'
-import { Plus, Trash2, Edit2, Star, StarOff, Plug, Zap, Check, FileText, Mic, Image, CalendarClock, Code2, Database } from 'lucide-react'
+import { Plus, Trash2, Edit2, Star, StarOff, Plug, Zap, Check, FileText, Mic, Image, CalendarClock, Code2, Database, ShieldCheck } from 'lucide-react'
 import api from '../../lib/api'
+
+interface Policy {
+  id: number
+  name: string
+  description: string | null
+}
 
 interface Role {
   id: number
@@ -76,24 +82,36 @@ export default function RoleManagement() {
   const [roles, setRoles] = useState<Role[]>([])
   const [mcpServers, setMcpServers] = useState<McpServer[]>([])
   const [difyKbs, setDifyKbs] = useState<DifyKb[]>([])
+  const [policies, setPolicies] = useState<Policy[]>([])
+  const [roleAssignments, setRoleAssignments] = useState<Record<string, number | null>>({}) // roleId → policyId
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
   const [editing, setEditing] = useState<Role | null>(null)
   const [form, setForm] = useState(emptyForm)
+  const [formPolicyId, setFormPolicyId] = useState<number | null>(null)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
   const load = async () => {
     try {
       setLoading(true)
-      const [rolesRes, mcpRes, difyRes] = await Promise.all([
+      const [rolesRes, mcpRes, difyRes, policiesRes, assignRes] = await Promise.all([
         api.get('/roles'),
         api.get('/mcp-servers'),
         api.get('/dify-kb'),
+        api.get('/data-permissions/policies').catch(() => ({ data: [] })),
+        api.get('/data-permissions/assignments').catch(() => ({ data: [] })),
       ])
       setRoles(rolesRes.data)
       setMcpServers(mcpRes.data)
       setDifyKbs(difyRes.data)
+      setPolicies(policiesRes.data)
+      // build role → policyId map
+      const map: Record<string, number | null> = {}
+      for (const a of (assignRes.data as any[])) {
+        if (a.grantee_type === 'role') map[String(a.grantee_id)] = a.policy_id
+      }
+      setRoleAssignments(map)
     } catch (e: any) {
       console.error(e)
     } finally {
@@ -106,12 +124,14 @@ export default function RoleManagement() {
   const openCreate = () => {
     setEditing(null)
     setForm(emptyForm)
+    setFormPolicyId(null)
     setError('')
     setShowModal(true)
   }
 
   const openEdit = (role: Role) => {
     setEditing(role)
+    setFormPolicyId(roleAssignments[String(role.id)] ?? null)
     setForm({
       name: role.name,
       description: role.description || '',
@@ -156,11 +176,16 @@ export default function RoleManagement() {
         budget_weekly: form.budget_weekly !== '' ? Number(form.budget_weekly) : null,
         budget_monthly: form.budget_monthly !== '' ? Number(form.budget_monthly) : null,
       }
+      let roleId: number
       if (editing) {
         await api.put(`/roles/${editing.id}`, payload)
+        roleId = editing.id
       } else {
-        await api.post('/roles', payload)
+        const r = await api.post('/roles', payload)
+        roleId = r.data.id
       }
+      // sync policy assignment
+      await api.put(`/data-permissions/assignments/role/${roleId}`, { policy_id: formPolicyId })
       setShowModal(false)
       load()
     } catch (e: any) {
@@ -576,6 +601,24 @@ export default function RoleManagement() {
                     </div>
                   )}
                 </div>
+              </div>
+
+              {/* Data Policy */}
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-2 flex items-center gap-1.5">
+                  <ShieldCheck size={14} /> 資料權限政策
+                </label>
+                <select
+                  value={formPolicyId ?? ''}
+                  onChange={e => setFormPolicyId(e.target.value ? Number(e.target.value) : null)}
+                  className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                >
+                  <option value="">— 不套用政策（無資料限制）—</option>
+                  {policies.map(p => (
+                    <option key={p.id} value={p.id}>{p.name}{p.description ? ` — ${p.description}` : ''}</option>
+                  ))}
+                </select>
+                <p className="text-xs text-slate-400 mt-1">套用後，此角色的使用者查詢資料時將受政策規則過濾</p>
               </div>
             </div>
 

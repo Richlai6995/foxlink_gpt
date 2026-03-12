@@ -409,24 +409,29 @@ function SettingsTab({ kb, onSaved, isOwner }: { kb: KnowledgeBase; onSaved: () 
   const [topKFetch,  setTopKFetch]  = useState(String(kb.top_k_fetch ?? 10))
   const [topKReturn, setTopKReturn] = useState(String(kb.top_k_return ?? 5))
   const [scoreThr,   setScoreThr]   = useState(String(kb.score_threshold ?? 0))
-  const [ocrModel,   setOcrModel]   = useState(kb.ocr_model ?? '')
-  const [parseMode,  setParseMode]  = useState(kb.parse_mode ?? 'text_only')
-  const [llmModels,  setLlmModels]  = useState<{ key: string; name: string; api_model: string }[]>([])
-  const [saving,     setSaving]     = useState(false)
-  const [msg,        setMsg]        = useState('')
+  const [ocrModel,      setOcrModel]      = useState(kb.ocr_model ?? '')
+  const [parseMode,     setParseMode]     = useState(kb.parse_mode ?? 'text_only')
+  const [useRerank,     setUseRerank]     = useState(kb.rerank_model !== 'disabled')
+  const [rerankModel,   setRerankModel]   = useState(kb.rerank_model === 'disabled' ? '' : (kb.rerank_model ?? ''))
+  const [llmModels,     setLlmModels]     = useState<{ key: string; name: string; api_model: string; model_role: string | null }[]>([])
+  const [saving,        setSaving]        = useState(false)
+  const [msg,           setMsg]           = useState('')
 
   useEffect(() => {
     api.get('/admin/llm-models').then((res) => {
-      const nonImage = (res.data as { key: string; name: string; api_model: string; image_output: number; is_active: number }[])
-        .filter((m) => !m.image_output && m.is_active)
-      setLlmModels(nonImage)
-      // Set default to flash model if not already set
+      const all = (res.data as { key: string; name: string; api_model: string; image_output: number; is_active: number; model_role: string | null }[])
+        .filter((m) => m.is_active)
+      setLlmModels(all)
+      // Set default OCR to flash model if not already set
+      const nonImage = all.filter((m) => !m.image_output)
       if (!ocrModel && nonImage.length > 0) {
         const flash = nonImage.find((m) => m.key.includes('flash') || m.name.toLowerCase().includes('flash'))
         setOcrModel(flash?.api_model ?? nonImage[0].api_model)
       }
     }).catch(() => {})
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const rerankModels = llmModels.filter((m) => m.model_role === 'rerank')
 
   const setCfgField = (k: string, v: unknown) => setCfg((p) => ({ ...p, [k]: v }))
 
@@ -437,6 +442,7 @@ function SettingsTab({ kb, onSaved, isOwner }: { kb: KnowledgeBase; onSaved: () 
         chunk_strategy:   strategy,
         chunk_config:     cfg,
         retrieval_mode:   retMode,
+        rerank_model:     useRerank ? (rerankModel || null) : 'disabled',
         top_k_fetch:      Number(topKFetch),
         top_k_return:     Number(topKReturn),
         score_threshold:  Number(scoreThr),
@@ -560,6 +566,44 @@ function SettingsTab({ kb, onSaved, isOwner }: { kb: KnowledgeBase; onSaved: () 
                 </label>
               ))}
             </div>
+          </div>
+
+          {/* Rerank */}
+          <div className="border border-slate-100 rounded-xl p-3 space-y-2.5 bg-slate-50">
+            <div className="flex items-center justify-between">
+              <div>
+                <span className="text-xs font-medium text-slate-700">重排序 (Rerank)</span>
+                {rerankModels.length === 0 && (
+                  <span className="ml-2 text-xs text-amber-500">（尚未設定 Rerank 模型）</span>
+                )}
+              </div>
+              <label className={`flex items-center gap-2 ${!isOwner ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}`}>
+                <span className="text-xs text-slate-500">{useRerank ? '啟用' : '停用'}</span>
+                <div
+                  onClick={() => isOwner && setUseRerank((p) => !p)}
+                  className={`relative w-9 h-5 rounded-full transition-colors ${useRerank ? 'bg-blue-600' : 'bg-slate-300'}`}
+                >
+                  <div className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${useRerank ? 'translate-x-4' : ''}`} />
+                </div>
+              </label>
+            </div>
+            {useRerank && (
+              <div>
+                <label className="block text-xs text-slate-500 mb-1">Rerank 模型</label>
+                <select
+                  value={rerankModel}
+                  disabled={!isOwner}
+                  onChange={(e) => setRerankModel(e.target.value)}
+                  className="w-full border border-slate-300 rounded-lg px-2.5 py-1.5 text-sm disabled:bg-slate-50 bg-white"
+                >
+                  <option value="">— 自動 (使用任一啟用的 Rerank 模型) —</option>
+                  {rerankModels.map((m) => (
+                    <option key={m.key} value={m.key}>{m.name} ({m.api_model})</option>
+                  ))}
+                </select>
+                <p className="mt-1 text-xs text-slate-400">選擇 "自動" 時，系統自動使用已啟用的 Rerank 模型。</p>
+              </div>
+            )}
           </div>
 
           <div className="grid grid-cols-3 gap-3">

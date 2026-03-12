@@ -7,7 +7,7 @@
  *   底部     — 開發模式 panel（設計者專用）
  */
 import { useState, useEffect, useRef } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
   BarChart3, ChevronRight, ChevronDown, Send, RefreshCw,
   Table, BarChart2, Settings2, Code, ArrowLeft, Layers, History, Trash2, X
@@ -24,6 +24,7 @@ type ViewMode = 'chart' | 'table'
 export default function AiDashboardPage() {
   const { isAdmin, canUseDashboard, canDesignAiSelect } = useAuth()
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
 
   const [topics, setTopics] = useState<AiSelectTopic[]>([])
   const [expandedTopics, setExpandedTopics] = useState<Set<number>>(new Set())
@@ -95,10 +96,24 @@ export default function AiDashboardPage() {
   }, [])
 
   const loadTopics = () => {
+    const targetTopicId = Number(searchParams.get('topic'))
+    const targetDesignId = Number(searchParams.get('design'))
     api.get('/dashboard/topics').then(r => {
-      setTopics(r.data)
-      // auto-expand first topic
-      if (r.data.length > 0) setExpandedTopics(new Set([r.data[0].id]))
+      const data: AiSelectTopic[] = r.data
+      setTopics(data)
+      // auto-select from URL params
+      if (targetDesignId) {
+        for (const topic of data) {
+          const d = topic.designs?.find((d: AiSelectDesign) => d.id === targetDesignId)
+          if (d) { selectDesign(d); setExpandedTopics(new Set([topic.id])); return }
+        }
+      }
+      // auto-expand by topicId or first topic
+      if (targetTopicId) {
+        setExpandedTopics(new Set([targetTopicId]))
+      } else if (data.length > 0) {
+        setExpandedTopics(new Set([data[0].id]))
+      }
     }).catch(() => {})
   }
 
@@ -246,7 +261,11 @@ export default function AiDashboardPage() {
         signal: ctrl.signal,
       })
 
-      if (!resp.ok || !resp.body) throw new Error(`請求失敗 ${resp.status}`)
+      if (!resp.ok) {
+        const errBody = await resp.json().catch(() => ({}))
+        throw new Error(errBody.error || `請求失敗 ${resp.status}`)
+      }
+      if (!resp.body) throw new Error('請求失敗')
 
       const reader = resp.body.getReader()
       const decoder = new TextDecoder()

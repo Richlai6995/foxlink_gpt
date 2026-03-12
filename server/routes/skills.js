@@ -1,6 +1,88 @@
 const express = require('express');
-const router = express.Router();
+const path    = require('path');
+const fs      = require('fs');
+const router  = express.Router();
 const { verifyToken } = require('./auth');
+
+// ── Service key middleware（供外部 skill handler 呼叫，不走 user token）──────
+function verifyServiceKey(req, res, next) {
+  const serviceKey = process.env.SKILL_SERVICE_KEY;
+  const provided   = req.headers['x-service-key'] || req.query.service_key;
+  if (serviceKey && provided === serviceKey) return next();
+  verifyToken(req, res, next);
+}
+
+// TTS endpoint 用 service key 或 user token 皆可
+router.post('/tts/synthesize', verifyServiceKey, async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const { decryptKey } = require('../services/llmKeyService');
+    const { text, voice_name, speaking_rate = 1.0, pitch = 0.0, user_id } = req.body;
+
+    if (!text?.trim()) return res.status(400).json({ error: '請提供 text' });
+
+    const model = await db.prepare(
+      `SELECT api_model, api_key_enc FROM llm_models WHERE model_role='tts' AND is_active=1 ORDER BY sort_order LIMIT 1`
+    ).get();
+    if (!model) return res.status(404).json({ error: '尚未設定 TTS 模型，請至管理後台新增 model_role=tts 的模型' });
+
+    const apiKey = model.api_key_enc ? decryptKey(model.api_key_enc) : null;
+    if (!apiKey) return res.status(500).json({ error: 'TTS API Key 未設定' });
+
+    const selectedVoice = voice_name?.trim() || model.api_model || 'cmn-TW-Wavenet-A';
+    const langCode = selectedVoice.split('-').slice(0, 2).join('-');
+
+    const ttsRes = await fetch(
+      `https://texttospeech.googleapis.com/v1/text:synthesize?key=${apiKey}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          input: { text: text.trim() },
+          voice: { languageCode: langCode, name: selectedVoice },
+          audioConfig: { audioEncoding: 'MP3', speakingRate: speaking_rate, pitch },
+        }),
+      }
+    );
+    if (!ttsRes.ok) {
+      const err = await ttsRes.json();
+      return res.status(ttsRes.status).json({ error: err.error?.message || `TTS API 錯誤 ${ttsRes.status}` });
+    }
+
+    const { audioContent } = await ttsRes.json();
+
+    // 存成實體 MP3，回傳 URL（避免 base64 過長造成前端渲染問題）
+    const UPLOAD_DIR = process.env.UPLOAD_DIR
+      ? path.resolve(process.env.UPLOAD_DIR)
+      : path.join(__dirname, '../uploads');
+    const genDir = path.join(UPLOAD_DIR, 'generated');
+    if (!fs.existsSync(genDir)) fs.mkdirSync(genDir, { recursive: true });
+    const fname = `tts_${Date.now()}.mp3`;
+    fs.writeFileSync(path.join(genDir, fname), Buffer.from(audioContent, 'base64'));
+
+    // 記錄用量：Google TTS 按字元計費，input_tokens = 字元數
+    const charCount = text.trim().length;
+    const effectiveUserId = user_id || req.user?.id;
+    if (effectiveUserId && charCount > 0) {
+      const { upsertTokenUsage } = require('../services/tokenService');
+      const today      = new Date().toISOString().slice(0, 10);
+      const ttsModel   = await db.prepare(
+        `SELECT key FROM llm_models WHERE model_role='tts' AND is_active=1 ORDER BY sort_order LIMIT 1`
+      ).get();
+      const modelKey = ttsModel?.key || 'google-tts';
+      await upsertTokenUsage(db, effectiveUserId, today, modelKey, charCount, 0, 0);
+    }
+
+    res.json({
+      audio_url:  `/uploads/generated/${fname}`,
+      voice_used: selectedVoice,
+      language:   langCode,
+      char_count: charCount,
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
 
 router.use(verifyToken);
 
@@ -132,7 +214,9 @@ router.put('/:id', async (req, res) => {
         }
         // Keep old secret if masked value passed
         const newSecret = (endpoint_secret && endpoint_secret !== '****') ? endpoint_secret : s.endpoint_secret;
-        await db.prepare(`
+        const tagsJson = JSON.stringify(tags ?? parseJsonField(s.tags));
+        console.log(`[Skill PUT] id=${req.params.id} tags_received=${JSON.stringify(tags)} tags_json=${tagsJson}`);
+        const updateResult = await db.prepare(`
       UPDATE skills SET name=?, description=?, icon=?, type=?, system_prompt=?,
         endpoint_url=?, endpoint_secret=?, endpoint_mode=?, model_key=?,
         mcp_tool_mode=?, mcp_tool_ids=?, dify_kb_ids=?, tags=?,
@@ -146,12 +230,14 @@ router.put('/:id', async (req, res) => {
             mcp_tool_mode ?? s.mcp_tool_mode,
             JSON.stringify(mcp_tool_ids ?? parseJsonField(s.mcp_tool_ids)),
             JSON.stringify(dify_kb_ids ?? parseJsonField(s.dify_kb_ids)),
-            JSON.stringify(tags ?? parseJsonField(s.tags)),
+            tagsJson,
             code_snippet !== undefined ? (code_snippet || null) : s.code_snippet,
             JSON.stringify(code_packages ?? parseJsonField(s.code_packages)),
             req.params.id
         );
+        console.log(`[Skill PUT] UPDATE rowsAffected=${updateResult?.changes}`);
         const updated = await db.prepare('SELECT * FROM skills WHERE id=?').get(req.params.id);
+        console.log(`[Skill PUT] SELECT after update: tags=${updated?.tags}`);
         res.json(serializeSkill(updated, req.user.role !== 'admin' && updated.owner_user_id !== req.user.id));
     } catch (e) {
         res.status(500).json({ error: e.message });

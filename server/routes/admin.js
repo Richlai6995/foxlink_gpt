@@ -197,24 +197,81 @@ router.post('/llm-models/test', async (req, res) => {
   const db = require('../database-oracle').db;
   const { decryptKey } = require('../services/llmKeyService');
   const {
-    id,                      // if provided, load existing row from DB (api_key may be empty)
+    id,
     provider_type = 'gemini',
-    api_key,                 // plaintext — used if provided; otherwise fall back to DB
+    api_key,
     api_model,
     endpoint_url,
     api_version,
     deployment_name,
+    // OCI plaintext fields for test (when not yet saved)
+    oci_user, oci_fingerprint, oci_tenancy, oci_region, oci_compartment_id, oci_private_key,
   } = req.body;
 
   try {
     let resolvedApiKey = api_key?.trim() || null;
-    // If testing an existing saved model and no new key submitted, decrypt from DB
-    if (!resolvedApiKey && id) {
-      const row = await db.prepare('SELECT api_key_enc FROM llm_models WHERE id=?').get(id);
-      if (row?.api_key_enc) resolvedApiKey = decryptKey(row.api_key_enc);
+    let resolvedOciCreds = null;
+
+    // Load from DB if testing a saved model
+    if (id) {
+      const row = await db.prepare('SELECT api_key_enc, extra_config_enc FROM llm_models WHERE id=?').get(id);
+      if (!resolvedApiKey && row?.api_key_enc) resolvedApiKey = decryptKey(row.api_key_enc);
+      if (row?.extra_config_enc) {
+        try { resolvedOciCreds = JSON.parse(decryptKey(row.extra_config_enc)); } catch {}
+      }
     }
 
     const pt = (provider_type || 'gemini').toLowerCase();
+
+    if (pt === 'oci') {
+      // Prefer form fields (for new / key rotation), fall back to decrypted DB config
+      const creds = {
+        user:           oci_user?.trim()          || resolvedOciCreds?.user,
+        fingerprint:    oci_fingerprint?.trim()   || resolvedOciCreds?.fingerprint,
+        tenancy:        oci_tenancy?.trim()        || resolvedOciCreds?.tenancy,
+        region:         oci_region?.trim()         || resolvedOciCreds?.region || 'ap-tokyo-1',
+        compartment_id: oci_compartment_id?.trim() || resolvedOciCreds?.compartment_id,
+        private_key:    oci_private_key?.trim()    || resolvedOciCreds?.private_key,
+      };
+      if (!creds.user || !creds.tenancy || !creds.fingerprint || !creds.private_key) {
+        return res.json({ ok: false, error: 'OCI 憑證不完整（需 user、tenancy、fingerprint、private_key）' });
+      }
+      if (!creds.compartment_id) creds.compartment_id = creds.tenancy;
+      const { testOciConnection } = require('../services/ociAi');
+      const result = await testOciConnection(creds);
+      const modelCount = result?.items?.length ?? 0;
+      return res.json({ ok: true, reply: `OCI GenAI 連線成功，找到 ${modelCount} 個模型`, model: 'oci' });
+    }
+
+    if (pt === 'cohere') {
+      if (!resolvedApiKey) return res.json({ ok: false, error: 'Cohere API Key 未設定' });
+      const modelName = api_model?.trim() || 'rerank-multilingual-v3';
+      const role      = req.body.model_role || 'rerank';
+      // Use Cohere REST API directly — no SDK needed
+      const https = require('https');
+      const testBody = role === 'embedding'
+        ? JSON.stringify({ texts: ['test'], model: modelName, input_type: 'search_document' })
+        : JSON.stringify({ query: 'test', documents: ['hello world'], model: modelName, top_n: 1 });
+      const endpoint = role === 'embedding' ? '/v1/embed' : '/v1/rerank';
+      const reply = await new Promise((resolve, reject) => {
+        const req2 = https.request({
+          hostname: 'api.cohere.com', path: endpoint, method: 'POST',
+          headers: { 'Authorization': `Bearer ${resolvedApiKey}`, 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(testBody) },
+        }, (r) => {
+          let d = ''; r.on('data', c => d += c);
+          r.on('end', () => {
+            try {
+              const j = JSON.parse(d);
+              if (r.statusCode >= 400) reject(new Error(j.message || j.detail || JSON.stringify(j)));
+              else resolve(role === 'embedding' ? `Embedding 成功，維度：${j.embeddings?.[0]?.length ?? 0}` : `Rerank 成功，relevance_score：${j.results?.[0]?.relevance_score?.toFixed(4) ?? 'N/A'}`);
+            } catch { reject(new Error(`HTTP ${r.statusCode}`)); }
+          });
+        });
+        req2.on('error', reject);
+        req2.write(testBody); req2.end();
+      });
+      return res.json({ ok: true, reply, model: modelName });
+    }
 
     if (pt === 'azure_openai') {
       if (!resolvedApiKey)  return res.status(400).json({ ok: false, error: 'API Key 未設定' });
@@ -228,7 +285,6 @@ router.post('/llm-models/test', async (req, res) => {
         apiVersion: api_version?.trim() || '2024-08-01-preview',
         deployment: deployment_name.trim(),
       });
-      // o1/o3 series don't support max_tokens; use max_completion_tokens
       const isO1 = /^o\d/i.test(deployment_name.trim());
       const resp = await client.chat.completions.create({
         model:    deployment_name.trim(),
@@ -243,8 +299,53 @@ router.post('/llm-models/test', async (req, res) => {
     const geminiKey = resolvedApiKey || process.env.GEMINI_API_KEY;
     if (!geminiKey) return res.status(400).json({ ok: false, error: 'Gemini API Key 未設定（DB 及 env 皆無）' });
     const { GoogleGenerativeAI } = require('@google/generative-ai');
-    const genAI  = new GoogleGenerativeAI(geminiKey);
-    const model  = genAI.getGenerativeModel({ model: api_model?.trim() || process.env.GEMINI_MODEL_FLASH || 'gemini-2.0-flash' });
+    const genAI     = new GoogleGenerativeAI(geminiKey);
+    const modelName = api_model?.trim() || process.env.GEMINI_MODEL_FLASH || 'gemini-2.0-flash';
+    const model_role = req.body.model_role || 'chat';
+
+    if (model_role === 'rerank') {
+      return res.json({ ok: false, error: 'Google Gemini 不支援 Rerank，請改用 OCI (Cohere Rerank)' });
+    }
+
+    if (model_role === 'embedding') {
+      const embModel = genAI.getGenerativeModel({ model: modelName });
+      const result   = await embModel.embedContent('test');
+      const dims     = result.embedding?.values?.length ?? 0;
+      return res.json({ ok: true, reply: `Embedding 成功，維度：${dims}`, model: modelName });
+    }
+
+    if (model_role === 'tts') {
+      // Google Cloud TTS API (different from Gemini — uses texttospeech.googleapis.com)
+      const ttsKey = resolvedApiKey;
+      if (!ttsKey) return res.json({ ok: false, error: 'TTS API Key 未設定（需填入 Google Cloud TTS API Key）' });
+      const voiceName = modelName; // api_model 存放預設聲音名稱，如 zh-TW-Wavenet-A
+      const langCode  = voiceName.split('-').slice(0, 2).join('-') || 'zh-TW';
+      const ttsRes = await fetch(
+        `https://texttospeech.googleapis.com/v1/text:synthesize?key=${ttsKey}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            input: { text: 'test' },
+            voice: { languageCode: langCode, name: voiceName },
+            audioConfig: { audioEncoding: 'MP3' },
+          }),
+        }
+      );
+      if (!ttsRes.ok) {
+        const err = await ttsRes.json();
+        return res.json({ ok: false, error: err.error?.message || `HTTP ${ttsRes.status}` });
+      }
+      const ttsData = await ttsRes.json();
+      const hasAudio = !!ttsData.audioContent;
+      return res.json({ ok: hasAudio, reply: hasAudio ? `TTS 連線成功，聲音：${voiceName}` : 'TTS 回應無音訊', model: voiceName });
+    }
+
+    if (model_role === 'stt') {
+      return res.json({ ok: true, reply: 'STT 設定已儲存（測試需實際音訊檔案，跳過自動測試）', model: modelName });
+    }
+
+    const model  = genAI.getGenerativeModel({ model: modelName });
     const result = await model.generateContent('Reply with the single word: OK');
     const reply  = result.response.text()?.trim() || '(no reply)';
     return res.json({ ok: true, reply, model: api_model });
@@ -261,11 +362,11 @@ router.get('/llm-models', async (req, res) => {
     const db = require('../database-oracle').db;
     const rows = await db.prepare(
       `SELECT id, key, name, api_model, description, is_active, sort_order, image_output, created_at,
-              provider_type, endpoint_url, api_version, deployment_name, base_model,
-              CASE WHEN api_key_enc IS NOT NULL THEN 1 ELSE 0 END AS has_api_key
+              provider_type, model_role, endpoint_url, api_version, deployment_name, base_model,
+              CASE WHEN api_key_enc IS NOT NULL THEN 1 ELSE 0 END AS has_api_key,
+              CASE WHEN extra_config_enc IS NOT NULL THEN 1 ELSE 0 END AS has_extra_config
        FROM llm_models ORDER BY sort_order ASC, id ASC`
     ).all();
-    // Never return the encrypted key — just flag if it's set
     res.json(rows);
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -279,7 +380,10 @@ router.post('/llm-models', async (req, res) => {
     const { encryptKey } = require('../services/llmKeyService');
     const {
       key, name, api_model, description, is_active, sort_order, image_output,
-      provider_type = 'gemini', api_key, endpoint_url, api_version, deployment_name, base_model,
+      provider_type = 'gemini', model_role = 'chat', api_key,
+      endpoint_url, api_version, deployment_name, base_model,
+      // OCI fields
+      oci_user, oci_fingerprint, oci_tenancy, oci_region, oci_compartment_id, oci_private_key,
     } = req.body;
     if (!key?.trim() || !name?.trim()) {
       return res.status(400).json({ error: '請填寫 key 及名稱' });
@@ -288,17 +392,32 @@ router.post('/llm-models', async (req, res) => {
     if (pt === 'azure_openai' && (!endpoint_url?.trim() || !deployment_name?.trim())) {
       return res.status(400).json({ error: 'Azure OpenAI 需填寫 Endpoint URL 及 Deployment Name' });
     }
+    if (pt === 'oci' && (!oci_user?.trim() || !oci_tenancy?.trim() || !oci_fingerprint?.trim() || !oci_private_key?.trim())) {
+      return res.status(400).json({ error: 'OCI 需填寫 User OCID、Tenancy OCID、Fingerprint 及 Private Key' });
+    }
     const apiKeyEnc = api_key?.trim() ? encryptKey(api_key.trim()) : null;
+    let extraConfigEnc = null;
+    if (pt === 'oci') {
+      const ociConfig = JSON.stringify({
+        user: oci_user?.trim(), fingerprint: oci_fingerprint?.trim(),
+        tenancy: oci_tenancy?.trim(), region: (oci_region || 'ap-tokyo-1').trim(),
+        compartment_id: oci_compartment_id?.trim() || oci_tenancy?.trim(),
+        private_key: oci_private_key?.trim(),
+      });
+      extraConfigEnc = encryptKey(ociConfig);
+    }
     const result = await db.prepare(
       `INSERT INTO llm_models
          (key, name, api_model, description, is_active, sort_order, image_output,
-          provider_type, api_key_enc, endpoint_url, api_version, deployment_name, base_model)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`
+          provider_type, model_role, api_key_enc, extra_config_enc,
+          endpoint_url, api_version, deployment_name, base_model)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
     ).run(
       key.trim(), name.trim(), (api_model || deployment_name || '').trim(),
       description || null, is_active ? 1 : 0, sort_order || 0, image_output ? 1 : 0,
-      pt, apiKeyEnc, endpoint_url?.trim() || null,
-      api_version?.trim() || null, deployment_name?.trim() || null, base_model?.trim() || null,
+      pt, model_role || 'chat', apiKeyEnc, extraConfigEnc,
+      endpoint_url?.trim() || null, api_version?.trim() || null,
+      deployment_name?.trim() || null, base_model?.trim() || null,
     );
     res.json({ id: result.lastInsertRowid });
   } catch (e) {
@@ -314,30 +433,42 @@ router.put('/llm-models/:id', async (req, res) => {
     const { encryptKey } = require('../services/llmKeyService');
     const {
       key, name, api_model, description, is_active, sort_order, image_output,
-      provider_type, api_key, endpoint_url, api_version, deployment_name, base_model,
+      provider_type, model_role, api_key,
+      endpoint_url, api_version, deployment_name, base_model,
+      oci_user, oci_fingerprint, oci_tenancy, oci_region, oci_compartment_id, oci_private_key,
     } = req.body;
     const pt = provider_type || 'gemini';
 
-    // Only update api_key_enc if a new key was provided
-    let apiKeyEnc;
-    if (api_key?.trim()) {
-      apiKeyEnc = encryptKey(api_key.trim());
-    } else {
-      // Preserve existing encrypted key
-      const existing = await db.prepare('SELECT api_key_enc FROM llm_models WHERE id=?').get(req.params.id);
-      apiKeyEnc = existing?.api_key_enc ?? null;
+    const existing = await db.prepare('SELECT api_key_enc, extra_config_enc FROM llm_models WHERE id=?').get(req.params.id);
+
+    let apiKeyEnc = api_key?.trim() ? encryptKey(api_key.trim()) : (existing?.api_key_enc ?? null);
+
+    let extraConfigEnc = existing?.extra_config_enc ?? null;
+    if (pt === 'oci' && oci_private_key?.trim()) {
+      // New OCI config provided — rebuild and encrypt
+      const ociConfig = JSON.stringify({
+        user: oci_user?.trim(), fingerprint: oci_fingerprint?.trim(),
+        tenancy: oci_tenancy?.trim(), region: (oci_region || 'ap-tokyo-1').trim(),
+        compartment_id: oci_compartment_id?.trim() || oci_tenancy?.trim(),
+        private_key: oci_private_key?.trim(),
+      });
+      extraConfigEnc = encryptKey(ociConfig);
+    } else if (pt !== 'oci') {
+      extraConfigEnc = null;
     }
 
     await db.prepare(
       `UPDATE llm_models SET
          key=?, name=?, api_model=?, description=?, is_active=?, sort_order=?, image_output=?,
-         provider_type=?, api_key_enc=?, endpoint_url=?, api_version=?, deployment_name=?, base_model=?
+         provider_type=?, model_role=?, api_key_enc=?, extra_config_enc=?,
+         endpoint_url=?, api_version=?, deployment_name=?, base_model=?
        WHERE id=?`
     ).run(
       key.trim(), name.trim(), (api_model || deployment_name || '').trim(),
       description || null, is_active ? 1 : 0, sort_order || 0, image_output ? 1 : 0,
-      pt, apiKeyEnc, endpoint_url?.trim() || null,
-      api_version?.trim() || null, deployment_name?.trim() || null, base_model?.trim() || null,
+      pt, model_role || 'chat', apiKeyEnc, extraConfigEnc,
+      endpoint_url?.trim() || null, api_version?.trim() || null,
+      deployment_name?.trim() || null, base_model?.trim() || null,
       req.params.id,
     );
     res.json({ ok: true });
@@ -729,6 +860,49 @@ router.post('/db/cleanup', async (req, res) => {
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
+});
+
+// GET /api/admin/settings/vector-defaults
+router.get('/settings/vector-defaults', async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const { SETTING_KEY, ENV_FALLBACK } = require('../services/llmDefaults');
+    const keys = Object.values(SETTING_KEY);
+    const rows = await db.prepare(
+      `SELECT key, value FROM system_settings WHERE key IN (${keys.map(() => '?').join(',')})`
+    ).all(...keys);
+    const map = Object.fromEntries(rows.map(r => [r.key, r.value]));
+    res.json({
+      embedding_model_key: map[SETTING_KEY.embedding] || '',
+      rerank_model_key:    map[SETTING_KEY.rerank]    || '',
+      ocr_model_key:       map[SETTING_KEY.ocr]       || '',
+      env_fallback: {
+        embedding: ENV_FALLBACK.embedding(),
+        rerank:    ENV_FALLBACK.rerank(),
+        ocr:       ENV_FALLBACK.ocr(),
+      },
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// PUT /api/admin/settings/vector-defaults
+router.put('/settings/vector-defaults', async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const { SETTING_KEY } = require('../services/llmDefaults');
+    const { embedding_model_key, rerank_model_key, ocr_model_key } = req.body;
+    const updates = [
+      [SETTING_KEY.embedding, embedding_model_key || ''],
+      [SETTING_KEY.rerank,    rerank_model_key    || ''],
+      [SETTING_KEY.ocr,       ocr_model_key       || ''],
+    ];
+    for (const [key, value] of updates) {
+      const ex = await db.prepare(`SELECT key FROM system_settings WHERE key=?`).get(key);
+      if (ex) await db.prepare(`UPDATE system_settings SET value=? WHERE key=?`).run(value, key);
+      else     await db.prepare(`INSERT INTO system_settings (key, value) VALUES (?,?)`).run(key, value);
+    }
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // GET /api/admin/chat-sessions (all users, for admin view)

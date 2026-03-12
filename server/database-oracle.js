@@ -353,6 +353,9 @@ async function runMigrations(db) {
   await addCol('LLM_MODELS', 'API_VERSION',       'VARCHAR2(50)');
   await addCol('LLM_MODELS', 'DEPLOYMENT_NAME',   'VARCHAR2(200)');
   await addCol('LLM_MODELS', 'BASE_MODEL',        'VARCHAR2(100)');
+  // OCI provider + model role
+  await addCol('LLM_MODELS', 'MODEL_ROLE',        "VARCHAR2(20) DEFAULT 'chat'");
+  await addCol('LLM_MODELS', 'EXTRA_CONFIG_ENC',  'CLOB');
 
   // AI Schema Source 擴充欄位
   await addCol('AI_SCHEMA_DEFINITIONS', 'ALIAS',            "VARCHAR2(50)");
@@ -657,6 +660,295 @@ async function runMigrations(db) {
   await addCol('AI_SELECT_PROJECTS', 'PUBLIC_APPROVED', 'NUMBER(1) DEFAULT 0');
   await addCol('AI_SELECT_PROJECTS', 'PUBLIC_APPROVED_BY', 'NUMBER');
   await addCol('AI_SELECT_PROJECTS', 'PUBLIC_APPROVED_AT', 'TIMESTAMP');
+
+  // ── 資料權限管理 ─────────────────────────────────────────────────────────────
+  // 政策主表
+  await createTable('AI_DATA_POLICIES', `CREATE TABLE ai_data_policies (
+    id           NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    name         VARCHAR2(100) NOT NULL,
+    description  CLOB,
+    created_by   NUMBER,
+    created_at   TIMESTAMP DEFAULT SYSTIMESTAMP,
+    updated_at   TIMESTAMP DEFAULT SYSTIMESTAMP
+  )`);
+
+  // 政策規則明細（多條，每條 include/exclude 一個值）
+  await createTable('AI_DATA_POLICY_RULES', `CREATE TABLE ai_data_policy_rules (
+    id           NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    policy_id    NUMBER NOT NULL REFERENCES ai_data_policies(id) ON DELETE CASCADE,
+    layer        NUMBER(1) NOT NULL,
+    include_type VARCHAR2(10) DEFAULT 'include',
+    value_type   VARCHAR2(50) NOT NULL,
+    value_id     VARCHAR2(200),
+    value_name   VARCHAR2(200),
+    sort_order   NUMBER DEFAULT 0,
+    created_at   TIMESTAMP DEFAULT SYSTIMESTAMP
+  )`);
+
+  // 政策指派（role 或 user）
+  await createTable('AI_POLICY_ASSIGNMENTS', `CREATE TABLE ai_policy_assignments (
+    id           NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    policy_id    NUMBER REFERENCES ai_data_policies(id) ON DELETE SET NULL,
+    grantee_type VARCHAR2(10) NOT NULL,
+    grantee_id   NUMBER NOT NULL,
+    override_role NUMBER(1) DEFAULT 1,
+    created_at   TIMESTAMP DEFAULT SYSTIMESTAMP,
+    CONSTRAINT ai_policy_assignments_uq UNIQUE (grantee_type, grantee_id)
+  )`);
+
+  // Schema 欄位過濾對應欄位
+  await addCol('AI_SCHEMA_COLUMNS', 'IS_FILTER_KEY',  'NUMBER(1) DEFAULT 0');
+  await addCol('AI_SCHEMA_COLUMNS', 'FILTER_LAYER',   'VARCHAR2(30)');
+  await addCol('AI_SCHEMA_COLUMNS', 'FILTER_SOURCE',  'VARCHAR2(50)');
+
+  // ── Skills 表欄位補齊（防止 create-schema.sql 版本落差）──────────────────────
+  await addCol('SKILLS', 'TAGS',          "CLOB DEFAULT '[]'");
+  await addCol('SKILLS', 'CODE_SNIPPET',  'CLOB');
+  await addCol('SKILLS', 'CODE_PACKAGES', "CLOB DEFAULT '[]'");
+  await addCol('SKILLS', 'CODE_STATUS',   "VARCHAR2(20) DEFAULT 'stopped'");
+  await addCol('SKILLS', 'CODE_PORT',     'NUMBER');
+  await addCol('SKILLS', 'CODE_PID',      'NUMBER');
+  await addCol('SKILLS', 'CODE_ERROR',    'CLOB');
+
+  // ── Vector table partitioning ───────────────────────────────────────────────
+  await migrateAiVectorStoreToPartitioned();
+  await migrateKbChunksToPartitioned();
+}
+
+// ─── Partition migration helpers ───────────────────────────────────────────────
+
+/** 遷移 AI_VECTOR_STORE 為 LIST PARTITION by etl_job_id（idempotent） */
+async function migrateAiVectorStoreToPartitioned() {
+  console.log('[Migration] Checking AI_VECTOR_STORE partition status...');
+  if (!pool) { console.warn('[Migration] pool not ready, skip AI_VECTOR_STORE partition'); return; }
+  let conn;
+  try {
+    conn = await pool.getConnection();
+    const r = await conn.execute(
+      `SELECT COUNT(*) AS CNT FROM user_part_tables WHERE UPPER(table_name)='AI_VECTOR_STORE'`,
+      [], { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
+    if (Number(r.rows[0].CNT) > 0) {
+      console.log('[Migration] AI_VECTOR_STORE already partitioned ✓');
+      return;
+    }
+
+    console.log('[Migration] AI_VECTOR_STORE → LIST PARTITION by etl_job_id...');
+    const jobRows = await conn.execute(
+      `SELECT DISTINCT etl_job_id FROM ai_vector_store WHERE etl_job_id IS NOT NULL ORDER BY etl_job_id`,
+      [], { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
+    const jobIds = (jobRows.rows || []).map(r2 => r2.ETL_JOB_ID);
+    console.log(`[Migration] AI_VECTOR_STORE: found ${jobIds.length} existing job IDs`);
+
+    await conn.execute(`DROP INDEX ai_vector_store_vidx`, [], { autoCommit: true }).catch(() => {});
+    await conn.execute(`ALTER TABLE ai_vector_store RENAME TO ai_vector_store_old`, [], { autoCommit: true });
+
+    const partDefs = jobIds.map(id => `PARTITION P_JOB_${id} VALUES (${id})`);
+    partDefs.push('PARTITION P_DEFAULT VALUES (DEFAULT)');
+    await conn.execute(`
+      CREATE TABLE ai_vector_store (
+        id           NUMBER GENERATED ALWAYS AS IDENTITY,
+        etl_job_id   NUMBER REFERENCES ai_etl_jobs(id) ON DELETE CASCADE,
+        source_table VARCHAR2(100),
+        source_pk    VARCHAR2(500),
+        field_name   VARCHAR2(100),
+        field_value  CLOB,
+        metadata     CLOB,
+        embedding    VECTOR(*, FLOAT32),
+        created_at   TIMESTAMP DEFAULT SYSTIMESTAMP
+      ) PARTITION BY LIST (etl_job_id) (${partDefs.join(', ')})
+    `, [], { autoCommit: true });
+
+    const ins = await conn.execute(`
+      INSERT INTO ai_vector_store
+        (etl_job_id, source_table, source_pk, field_name, field_value, metadata, embedding, created_at)
+      SELECT etl_job_id, source_table, source_pk, field_name, field_value, metadata, embedding, created_at
+      FROM ai_vector_store_old
+    `, [], { autoCommit: true });
+    console.log(`[Migration] AI_VECTOR_STORE: copied ${ins.rowsAffected} rows`);
+
+    await conn.execute(`DROP TABLE ai_vector_store_old PURGE`, [], { autoCommit: true });
+    await conn.execute(`
+      CREATE VECTOR INDEX ai_vector_store_vidx ON ai_vector_store(embedding)
+      ORGANIZATION NEIGHBOR PARTITIONS WITH DISTANCE COSINE WITH TARGET ACCURACY 90
+    `, [], { autoCommit: true }).catch(e => console.warn('[Migration] ai_vector_store_vidx rebuild:', e.message));
+
+    console.log(`[Migration] AI_VECTOR_STORE partitioned ✓ (${jobIds.length} job partitions + DEFAULT)`);
+  } catch (e) {
+    console.error('[Migration] migrateAiVectorStoreToPartitioned ERROR:', e.message);
+    if (conn) await conn.execute(`ALTER TABLE ai_vector_store_old RENAME TO ai_vector_store`, [], { autoCommit: true }).catch(() => {});
+  } finally {
+    if (conn) await conn.close();
+  }
+}
+
+/** 遷移 KB_CHUNKS 為 LIST PARTITION by kb_id（idempotent） */
+async function migrateKbChunksToPartitioned() {
+  console.log('[Migration] Checking KB_CHUNKS partition status...');
+  if (!pool) { console.warn('[Migration] pool not ready, skip KB_CHUNKS partition'); return; }
+  let conn;
+  try {
+    conn = await pool.getConnection();
+    const r = await conn.execute(
+      `SELECT COUNT(*) AS CNT FROM user_part_tables WHERE UPPER(table_name)='KB_CHUNKS'`,
+      [], { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
+    if (Number(r.rows[0].CNT) > 0) {
+      console.log('[Migration] KB_CHUNKS already partitioned ✓');
+      return;
+    }
+
+    console.log('[Migration] KB_CHUNKS → LIST PARTITION by kb_id...');
+    const kbRows = await conn.execute(
+      `SELECT DISTINCT kb_id FROM kb_chunks WHERE kb_id IS NOT NULL`,
+      [], { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
+    const kbIds = (kbRows.rows || []).map(r2 => r2.KB_ID);
+    console.log(`[Migration] KB_CHUNKS: found ${kbIds.length} existing kb IDs`);
+
+    await conn.execute(`DROP INDEX kb_chunks_vidx`, [], { autoCommit: true }).catch(() => {});
+    await conn.execute(`DROP INDEX kb_chunks_ftx`,  [], { autoCommit: true }).catch(() => {});
+    await conn.execute(`ALTER TABLE kb_chunks RENAME TO kb_chunks_old`, [], { autoCommit: true });
+
+    const partDefs = kbIds.map(id => `PARTITION ${_kbPartName(id)} VALUES ('${id.replace(/'/g, "''")}')`);
+    partDefs.push('PARTITION P_DEFAULT VALUES (DEFAULT)');
+    await conn.execute(`
+      CREATE TABLE kb_chunks (
+        id             VARCHAR2(36) NOT NULL,
+        doc_id         VARCHAR2(36) NOT NULL,
+        kb_id          VARCHAR2(36) NOT NULL REFERENCES knowledge_bases(id) ON DELETE CASCADE,
+        parent_id      VARCHAR2(36),
+        chunk_type     VARCHAR2(10) DEFAULT 'regular',
+        content        CLOB NOT NULL,
+        parent_content CLOB,
+        position       NUMBER NOT NULL,
+        token_count    NUMBER,
+        embedding      VECTOR(*, FLOAT32),
+        created_at     TIMESTAMP DEFAULT SYSTIMESTAMP,
+        CONSTRAINT kb_chunks_pk PRIMARY KEY (id, kb_id)
+      ) PARTITION BY LIST (kb_id) (${partDefs.join(', ')})
+    `, [], { autoCommit: true });
+
+    const ins = await conn.execute(`
+      INSERT INTO kb_chunks
+        (id, doc_id, kb_id, parent_id, chunk_type, content, parent_content, position, token_count, embedding, created_at)
+      SELECT id, doc_id, kb_id, parent_id, chunk_type, content, parent_content, position, token_count, embedding, created_at
+      FROM kb_chunks_old
+    `, [], { autoCommit: true });
+    console.log(`[Migration] KB_CHUNKS: copied ${ins.rowsAffected} rows`);
+
+    await conn.execute(`DROP TABLE kb_chunks_old PURGE`, [], { autoCommit: true });
+    await conn.execute(`
+      CREATE VECTOR INDEX kb_chunks_vidx ON kb_chunks(embedding)
+      ORGANIZATION NEIGHBOR PARTITIONS WITH DISTANCE COSINE WITH TARGET ACCURACY 90
+    `, [], { autoCommit: true }).catch(e => console.warn('[Migration] kb_chunks_vidx rebuild:', e.message));
+    await conn.execute(`
+      CREATE INDEX kb_chunks_ftx ON kb_chunks(content)
+      INDEXTYPE IS CTXSYS.CONTEXT PARAMETERS ('sync (on commit)') LOCAL
+    `, [], { autoCommit: true }).catch(e => console.warn('[Migration] kb_chunks_ftx rebuild:', e.message));
+
+    console.log(`[Migration] KB_CHUNKS partitioned ✓ (${kbIds.length} kb partitions + DEFAULT)`);
+  } catch (e) {
+    console.error('[Migration] migrateKbChunksToPartitioned ERROR:', e.message);
+    if (conn) await conn.execute(`ALTER TABLE kb_chunks_old RENAME TO kb_chunks`, [], { autoCommit: true }).catch(() => {});
+  } finally {
+    if (conn) await conn.close();
+  }
+}
+
+// ─── Partition management (ETL & KB) ──────────────────────────────────────────
+
+function _kbPartName(kbId) {
+  return 'P_KB_' + kbId.replace(/-/g, '').toUpperCase();
+}
+
+async function _partitionExists(conn, tableName, partName) {
+  const r = await conn.execute(
+    `SELECT COUNT(*) AS CNT FROM user_tab_partitions WHERE UPPER(table_name)=? AND UPPER(partition_name)=?`,
+    [tableName.toUpperCase(), partName.toUpperCase()],
+    { outFormat: oracledb.OUT_FORMAT_OBJECT }
+  );
+  return Number(r.rows[0].CNT) > 0;
+}
+
+async function _isPartitioned(conn, tableName) {
+  const r = await conn.execute(
+    `SELECT COUNT(*) AS CNT FROM user_part_tables WHERE UPPER(table_name)=?`,
+    [tableName.toUpperCase()], { outFormat: oracledb.OUT_FORMAT_OBJECT }
+  );
+  return Number(r.rows[0].CNT) > 0;
+}
+
+/** ETL Job 新增後呼叫 — 為該 job 加 AI_VECTOR_STORE partition */
+async function addVectorStorePartition(jobId) {
+  if (!pool) return;
+  const conn = await pool.getConnection();
+  try {
+    if (!await _isPartitioned(conn, 'AI_VECTOR_STORE')) return;
+    const pName = `P_JOB_${jobId}`;
+    if (await _partitionExists(conn, 'AI_VECTOR_STORE', pName)) return;
+    await conn.execute(`ALTER TABLE ai_vector_store ADD PARTITION ${pName} VALUES (${jobId})`, [], { autoCommit: true });
+    console.log(`[Partition] AI_VECTOR_STORE +${pName}`);
+  } catch (e) {
+    console.warn(`[Partition] addVectorStorePartition(${jobId}):`, e.message);
+  } finally {
+    await conn.close();
+  }
+}
+
+/** ETL Job 刪除前呼叫 — 先 DROP PARTITION（比 cascade delete 快） */
+async function dropVectorStorePartition(jobId) {
+  if (!pool) return;
+  const conn = await pool.getConnection();
+  try {
+    if (!await _isPartitioned(conn, 'AI_VECTOR_STORE')) return;
+    const pName = `P_JOB_${jobId}`;
+    if (!await _partitionExists(conn, 'AI_VECTOR_STORE', pName)) return;
+    await conn.execute(`ALTER TABLE ai_vector_store DROP PARTITION ${pName}`, [], { autoCommit: true });
+    console.log(`[Partition] AI_VECTOR_STORE -${pName}`);
+  } catch (e) {
+    console.warn(`[Partition] dropVectorStorePartition(${jobId}):`, e.message);
+  } finally {
+    await conn.close();
+  }
+}
+
+/** KB 新增後呼叫 — 為該 kb 加 KB_CHUNKS partition */
+async function addKbChunksPartition(kbId) {
+  if (!pool) return;
+  const conn = await pool.getConnection();
+  try {
+    if (!await _isPartitioned(conn, 'KB_CHUNKS')) return;
+    const pName = _kbPartName(kbId);
+    if (await _partitionExists(conn, 'KB_CHUNKS', pName)) return;
+    await conn.execute(
+      `ALTER TABLE kb_chunks ADD PARTITION ${pName} VALUES ('${kbId.replace(/'/g, "''")}')`,
+      [], { autoCommit: true }
+    );
+    console.log(`[Partition] KB_CHUNKS +${pName}`);
+  } catch (e) {
+    console.warn(`[Partition] addKbChunksPartition(${kbId}):`, e.message);
+  } finally {
+    await conn.close();
+  }
+}
+
+/** KB 刪除前呼叫 — 先 DROP PARTITION */
+async function dropKbChunksPartition(kbId) {
+  if (!pool) return;
+  const conn = await pool.getConnection();
+  try {
+    if (!await _isPartitioned(conn, 'KB_CHUNKS')) return;
+    const pName = _kbPartName(kbId);
+    if (!await _partitionExists(conn, 'KB_CHUNKS', pName)) return;
+    await conn.execute(`ALTER TABLE kb_chunks DROP PARTITION ${pName}`, [], { autoCommit: true });
+    console.log(`[Partition] KB_CHUNKS -${pName}`);
+  } catch (e) {
+    console.warn(`[Partition] dropKbChunksPartition(${kbId}):`, e.message);
+  } finally {
+    await conn.close();
+  }
 }
 
 // ─── Exports (same shape as database.js) ─────────────────────────────────────
@@ -673,6 +965,10 @@ const oracleDbExports = {
     if (pool) { await pool.close(10); pool = null; oracleDbExports.db = null; }
   },
   getPool: () => pool,
+  addVectorStorePartition,
+  dropVectorStorePartition,
+  addKbChunksPartition,
+  dropKbChunksPartition,
 };
 
 module.exports = oracleDbExports;

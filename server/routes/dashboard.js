@@ -648,15 +648,19 @@ router.put('/designer/schemas/:id/columns', requireDesigner, async (req, res) =>
       for (const col of columns) {
         await db.prepare(
           `INSERT INTO ai_schema_columns
-             (schema_id, column_name, data_type, description, is_vectorized, value_mapping, sample_values, is_virtual, expression)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+             (schema_id, column_name, data_type, description, is_vectorized, value_mapping, sample_values, is_virtual, expression,
+              is_filter_key, filter_layer, filter_source)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         ).run(
           req.params.id, col.column_name, col.data_type || null, col.description || null,
           col.is_vectorized ? 1 : 0,
           col.value_mapping ? JSON.stringify(col.value_mapping) : null,
           col.sample_values ? JSON.stringify(col.sample_values) : null,
           col.is_virtual ? 1 : 0,
-          col.expression || null
+          col.expression || null,
+          col.is_filter_key ? 1 : 0,
+          col.filter_layer || null,
+          col.filter_source || null
         );
       }
     }
@@ -996,6 +1000,11 @@ router.post('/etl/jobs', requireDesigner, async (req, res) => {
       project_id || null
     );
     const newId = r.lastInsertRowid;
+    // 為新 ETL job 加 AI_VECTOR_STORE partition（vector job 才需要）
+    if ((job_type || 'vector') === 'vector') {
+      const { addVectorStorePartition } = require('../database-oracle');
+      addVectorStorePartition(newId).catch(e => console.warn('[Partition] ETL create:', e.message));
+    }
     if (cronExpr) {
       const { scheduleEtlJob } = require('../services/dashboardService');
       scheduleEtlJob(newId, cronExpr);
@@ -1056,6 +1065,9 @@ router.put('/etl/jobs/:id', requireDesigner, async (req, res) => {
 router.delete('/etl/jobs/:id', requireDesigner, async (req, res) => {
   try {
     const db = require('../database-oracle').db;
+    const { dropVectorStorePartition } = require('../database-oracle');
+    // 先 DROP PARTITION（比等 cascade delete 快）
+    await dropVectorStorePartition(Number(req.params.id));
     await db.prepare(`DELETE FROM ai_etl_jobs WHERE id=?`).run(req.params.id);
     res.json({ ok: true });
   } catch (e) {
@@ -1116,6 +1128,21 @@ router.post('/query', requireDashboard, async (req, res) => {
     if (design.is_suspended == 1) return res.status(403).json({ error: '此查詢設計已暫停使用' });
     const ok = await canAccessDesign(db, design, req.user);
     if (!ok) return res.status(403).json({ error: '無此查詢設計的存取權限' });
+
+    // ── 資料權限前置檢查（非 admin）────────────────────────────────────────
+    if (req.user.role !== 'admin') {
+      const { getEffectivePolicy } = require('./dataPermissions');
+      const policy = await getEffectivePolicy(db, req.user.id);
+      if (policy?.rules?.length > 0) {
+        const forbidden = checkForbiddenInQuestion(question.trim(), policy.rules);
+        if (forbidden.length > 0) {
+          return res.status(403).json({
+            error: `⛔ 資料權限不足，無法執行此查詢。\n\n問題中包含未授權的條件：\n${forbidden.map(f => `• ${f}`).join('\n')}\n\n請確認您有權限查詢這些資料後再試。`,
+            forbidden,
+          });
+        }
+      }
+    }
   } catch (e) {
     return res.status(500).json({ error: e.message });
   }
@@ -1138,16 +1165,28 @@ router.post('/query', requireDashboard, async (req, res) => {
   };
 
   try {
+    // 取得有效政策（用於 SQL 層級過濾）
+    let effectivePolicy = null;
+    if (req.user.role !== 'admin') {
+      try {
+        const { getEffectivePolicy } = require('./dataPermissions');
+        const db = require('../database-oracle').db;
+        effectivePolicy = await getEffectivePolicy(db, req.user.id);
+      } catch (_) {}
+    }
+
     const { runDashboardQuery } = require('../services/dashboardService');
     await runDashboardQuery({
       designId: Number(design_id),
       question: question.trim(),
       userId: req.user.id,
+      user: req.user,
       isDesigner,
       send: sendWrapped,
       vectorTopK: vector_top_k ? Number(vector_top_k) : undefined,
       vectorSimilarityThreshold: vector_similarity_threshold ?? undefined,
       modelKey: model_key || null,
+      effectivePolicy,
     });
     const db = require('../database-oracle').db;
     await logDashboardAudit(db, req.user.id, design_id, question.trim(), lastSql);
@@ -1396,5 +1435,79 @@ router.get('/admin/shares', async (req, res) => {
     res.json(projects);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
+
+// ── 資料權限前置問題檢查 ──────────────────────────────────────────────────────
+/**
+ * 雙向檢查：
+ * 1. exclude 規則：問題中出現被排除的值 → 拒絕
+ * 2. include 規則：問題中出現不在允許清單的值 → 拒絕
+ *    （僅針對有明確代碼格式的 value_type：organization_code, dept_code, profit_center,
+ *      org_section；其他 ID 型只做 exclude 檢查）
+ *
+ * Returns array of { term, reason } 被拒絕的項目
+ */
+function checkForbiddenInQuestion(question, rules) {
+  const forbidden = [];
+  const qUpper = question.toUpperCase();
+  const qLower = question.toLowerCase();
+
+  // 依 value_type 分組計算 include / exclude
+  const groups = {};
+  for (const r of rules) {
+    const key = `${r.layer}_${r.value_type}`;
+    if (!groups[key]) groups[key] = { value_type: r.value_type, includes: [], excludes: [] };
+    if (r.include_type === 'include') groups[key].includes.push({ id: r.value_id, name: r.value_name });
+    else                              groups[key].excludes.push({ id: r.value_id, name: r.value_name });
+  }
+
+  for (const group of Object.values(groups)) {
+    const { value_type, includes, excludes } = group;
+
+    // ── 1. exclude 檢查：問題包含被排除的值 ──────────────────────────────
+    for (const item of excludes) {
+      const terms = [item.id, item.name].filter(Boolean);
+      if (terms.some(t => qLower.includes(t.toLowerCase()))) {
+        forbidden.push(`${item.name || item.id}（已排除）`);
+      }
+    }
+
+    // ── 2. include 反向檢查：問題包含不在允許清單的代碼值 ────────────────
+    // 只針對 code/name 型（不是 ID 型）做此檢查，避免數字誤判
+    const CODE_TYPES = new Set([
+      'organization_code', 'dept_code', 'profit_center',
+      'org_section', 'org_group_name',
+      'operating_unit_name', 'set_of_books_name',
+    ]);
+    if (includes.length > 0 && CODE_TYPES.has(value_type)) {
+      const allowedIds  = includes.map(i => (i.id  || '').toUpperCase()).filter(Boolean);
+      const allowedNames = includes.map(i => (i.name || '').toLowerCase()).filter(Boolean);
+
+      // 從問題中萃取「可能是代碼」的詞：大寫英數字母 2-6 碼
+      const codePattern = /\b[A-Z][A-Z0-9]{1,5}\b/g;
+      const detectedCodes = [...new Set([...qUpper.matchAll(codePattern)].map(m => m[0]))];
+
+      for (const code of detectedCodes) {
+        // 跳過常見保留字，避免誤判
+        const COMMON_WORDS = new Set([
+          'SELECT','FROM','WHERE','AND','OR','NOT','IN','IS','NULL','AS','BY',
+          'ORDER','GROUP','HAVING','JOIN','ON','LEFT','RIGHT','INNER','OUTER',
+          'WITH','CASE','WHEN','THEN','ELSE','END','LIKE','BETWEEN','EXISTS',
+          'DISTINCT','INTO','TOP','SET','UPDATE','INSERT','DELETE',
+          'SQL','ERP','ORG','BOM','MRP','PO','SO','WO','API','URL','UTC',
+        ]);
+        if (COMMON_WORDS.has(code)) continue;
+
+        // 如果這個代碼不在 allowedIds 且不是 allowedNames 的子字串 → 可疑
+        const isAllowed = allowedIds.includes(code) ||
+          allowedNames.some(n => n.includes(code.toLowerCase()) || code.toLowerCase().includes(n));
+        if (!isAllowed) {
+          forbidden.push(`${code}（無 ${value_type} 查詢權限，允許：${allowedIds.join(', ')}）`);
+        }
+      }
+    }
+  }
+
+  return [...new Set(forbidden)];
+}
 
 module.exports = router;

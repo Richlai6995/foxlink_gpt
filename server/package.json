@@ -4,7 +4,8 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "node --watch --watch-path=./server.js --watch-path=./database.js --watch-path=./routes --watch-path=./services server.js"
+    "predev": "node scripts/kill-port.js",
+    "dev": "nodemon --delay 2 --watch server.js --watch database-oracle.js --watch routes --watch services --ext js server.js"
   },
   "dependencies": {
     "@google/generative-ai": "^0.21.0",
@@ -30,5 +31,8 @@
     "sql.js": "^1.11.0",
     "uuid": "^9.0.1",
     "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.14"
   }
 }

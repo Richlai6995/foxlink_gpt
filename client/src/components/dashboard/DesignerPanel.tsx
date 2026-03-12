@@ -987,40 +987,108 @@ function SchemaManager({ projectId }: { projectId: number | null }) {
                 {/* 欄位列表 — 編輯模式 */}
                 {editingColsId === s.id ? (
                   <div className="space-y-2">
-                    <div className="overflow-auto max-h-96 rounded border border-blue-200">
+                    <div className="overflow-auto max-h-[600px] rounded border border-blue-200">
                       <table className="w-full text-xs">
-                        <thead className="sticky top-0 bg-blue-50">
+                        <thead className="sticky top-0 bg-blue-50 z-10">
                           <tr>
-                            <th className="px-2 py-1 text-left text-gray-500 font-medium w-40">欄位名稱</th>
-                            <th className="px-2 py-1 text-left text-gray-500 font-medium w-24">型態</th>
-                            <th className="px-2 py-1 text-left text-gray-500 font-medium">說明（可編輯）</th>
-                            <th className="px-2 py-1 w-6"></th>
+                            <th className="px-2 py-1.5 text-left text-gray-500 font-medium w-8 text-center" title="資料權限過濾">🔒</th>
+                            <th className="px-2 py-1.5 text-left text-gray-500 font-medium w-44">欄位名稱</th>
+                            <th className="px-2 py-1.5 text-left text-gray-500 font-medium w-24">型態</th>
+                            <th className="px-2 py-1.5 text-left text-gray-500 font-medium">說明</th>
+                            <th className="px-2 py-1.5 w-6"></th>
                           </tr>
                         </thead>
                         <tbody>
                           {editingCols.map((col, i) => (
-                            <tr key={i} className={col.is_virtual ? 'bg-purple-50' : (i % 2 === 0 ? 'bg-white' : 'bg-gray-50')}>
-                              <td className="px-2 py-1 font-mono text-gray-700 whitespace-nowrap">
-                                {col.column_name}
-                                {col.is_virtual ? <span className="ml-1 text-[10px] text-purple-500 bg-purple-100 px-1 rounded">計算</span> : null}
-                              </td>
-                              <td className="px-2 py-1 text-gray-400 whitespace-nowrap">
-                                {col.is_virtual
-                                  ? <span className="text-purple-400 font-mono text-[10px] truncate block max-w-[90px]" title={col.expression}>{col.expression}</span>
-                                  : col.data_type || '-'}
-                              </td>
-                              <td className="px-2 py-0.5">
-                                <input className="w-full border border-transparent hover:border-gray-300 focus:border-blue-400 rounded px-1 py-0.5 bg-transparent text-gray-700 focus:outline-none focus:bg-white"
-                                  value={col.description || ''}
-                                  onChange={e => setEditingCols(prev => prev.map((c, idx) => idx === i ? { ...c, description: e.target.value } : c))} />
-                              </td>
-                              <td className="px-1 py-1">
-                                {col.is_virtual && (
-                                  <button onClick={() => setEditingCols(prev => prev.filter((_, idx) => idx !== i))}
-                                    className="text-gray-300 hover:text-red-400"><X size={11} /></button>
-                                )}
-                              </td>
-                            </tr>
+                            <>
+                              <tr key={`row-${i}`} className={col.is_virtual ? 'bg-purple-50' : col.is_filter_key ? 'bg-orange-50' : (i % 2 === 0 ? 'bg-white' : 'bg-gray-50')}>
+                                {/* 過濾 checkbox */}
+                                <td className="px-2 py-1.5 text-center">
+                                  <input type="checkbox"
+                                    checked={!!col.is_filter_key}
+                                    onChange={e => setEditingCols(prev => prev.map((c, idx) => idx === i ? { ...c, is_filter_key: e.target.checked ? 1 : 0 } : c))}
+                                    className="w-3.5 h-3.5 rounded accent-orange-500 cursor-pointer"
+                                    title="勾選：此欄位作為資料權限 SQL 過濾條件"
+                                  />
+                                </td>
+                                <td className="px-2 py-1.5 font-mono text-gray-700 whitespace-nowrap">
+                                  {col.column_name}
+                                  {col.is_virtual ? <span className="ml-1 text-[10px] text-purple-500 bg-purple-100 px-1 rounded">計算</span> : null}
+                                </td>
+                                <td className="px-2 py-1.5 text-gray-400 whitespace-nowrap">
+                                  {col.is_virtual
+                                    ? <span className="text-purple-400 font-mono text-[10px] truncate block max-w-[90px]" title={col.expression}>{col.expression}</span>
+                                    : col.data_type || '-'}
+                                </td>
+                                <td className="px-2 py-1">
+                                  <input className="w-full border border-transparent hover:border-gray-300 focus:border-blue-400 rounded px-1 py-0.5 bg-transparent text-gray-700 focus:outline-none focus:bg-white"
+                                    value={col.description || ''}
+                                    onChange={e => setEditingCols(prev => prev.map((c, idx) => idx === i ? { ...c, description: e.target.value } : c))} />
+                                </td>
+                                <td className="px-1 py-1">
+                                  {col.is_virtual && (
+                                    <button onClick={() => setEditingCols(prev => prev.filter((_, idx) => idx !== i))}
+                                      className="text-gray-300 hover:text-red-400"><X size={11} /></button>
+                                  )}
+                                </td>
+                              </tr>
+                              {/* 展開子列：過濾層級 + 來源欄位 */}
+                              {col.is_filter_key && (
+                                <tr key={`filter-${i}`} className="bg-orange-50 border-b border-orange-100">
+                                  <td></td>
+                                  <td colSpan={4} className="px-3 py-2">
+                                    <div className="flex items-center gap-3">
+                                      <span className="text-orange-600 font-medium text-xs whitespace-nowrap">⚙ 過濾設定</span>
+                                      <div className="flex items-center gap-2 flex-1">
+                                        <div>
+                                          <label className="block text-[10px] text-gray-400 mb-0.5">過濾層級</label>
+                                          <select
+                                            value={col.filter_layer || ''}
+                                            onChange={e => setEditingCols(prev => prev.map((c, idx) => idx === i ? { ...c, filter_layer: e.target.value, filter_source: '' } : c))}
+                                            className="border border-orange-200 rounded px-2 py-1 text-xs bg-white outline-none focus:ring-1 focus:ring-orange-300 min-w-[140px]"
+                                          >
+                                            <option value="">-- 選層級 --</option>
+                                            <option value="layer3">第3層 組織過濾</option>
+                                            <option value="layer4">第4層 ERP Multi-Org</option>
+                                          </select>
+                                        </div>
+                                        {col.filter_layer && (
+                                          <div>
+                                            <label className="block text-[10px] text-gray-400 mb-0.5">對應來源欄位</label>
+                                            <select
+                                              value={col.filter_source || ''}
+                                              onChange={e => setEditingCols(prev => prev.map((c, idx) => idx === i ? { ...c, filter_source: e.target.value } : c))}
+                                              className="border border-orange-200 rounded px-2 py-1 text-xs bg-white outline-none focus:ring-1 focus:ring-orange-300 min-w-[200px]"
+                                            >
+                                              <option value="">-- 來源欄位 --</option>
+                                              {col.filter_layer === 'layer3' && <>
+                                                <option value="dept_code">部門代碼 (DEPT_CODE)</option>
+                                                <option value="profit_center">利潤中心 (PROFIT_CENTER)</option>
+                                                <option value="org_section">事業處 (ORG_SECTION)</option>
+                                                <option value="org_group_name">事業群名稱 (ORG_GROUP_NAME)</option>
+                                              </>}
+                                              {col.filter_layer === 'layer4' && <>
+                                                <option value="organization_id">製造組織 ID - 數字</option>
+                                                <option value="organization_code">製造組織 Code（如 Z4E）</option>
+                                                <option value="operating_unit">營運單位 ID - 數字</option>
+                                                <option value="operating_unit_name">營運單位名稱</option>
+                                                <option value="set_of_books_id">帳套 ID - 數字</option>
+                                                <option value="set_of_books_name">帳套名稱</option>
+                                              </>}
+                                            </select>
+                                          </div>
+                                        )}
+                                        {col.filter_source && (
+                                          <span className="text-xs text-orange-500 bg-orange-100 px-2 py-1 rounded-full whitespace-nowrap">
+                                            {col.column_name} → {col.filter_source}
+                                          </span>
+                                        )}
+                                      </div>
+                                    </div>
+                                  </td>
+                                </tr>
+                              )}
+                            </>
                           ))}
                         </tbody>
                       </table>
@@ -1090,6 +1158,7 @@ function SchemaManager({ projectId }: { projectId: number | null }) {
                             <th className="px-2 py-1 text-left text-gray-500 font-medium">欄位名稱</th>
                             <th className="px-2 py-1 text-left text-gray-500 font-medium">型態</th>
                             <th className="px-2 py-1 text-left text-gray-500 font-medium">說明</th>
+                            <th className="px-2 py-1 text-left text-gray-500 font-medium">資料權限</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -1105,6 +1174,13 @@ function SchemaManager({ projectId }: { projectId: number | null }) {
                                   : (col.data_type || '-')}
                               </td>
                               <td className="px-2 py-1 text-gray-500">{col.description || ''}</td>
+                              <td className="px-2 py-1">
+                                {col.is_filter_key ? (
+                                  <span className="inline-flex items-center gap-1 text-[10px] bg-orange-50 text-orange-600 border border-orange-200 px-1.5 py-0.5 rounded-full whitespace-nowrap">
+                                    🔒 {col.filter_layer === 'layer3' ? 'L3' : col.filter_layer === 'layer4' ? 'L4' : col.filter_layer}:{col.filter_source}
+                                  </span>
+                                ) : null}
+                              </td>
                             </tr>
                           ))}
                         </tbody>

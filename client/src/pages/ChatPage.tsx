@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { useSearchParams } from 'react-router-dom'
-import { Square, AlertTriangle, Share2, Copy, Check, X, Sparkles, Search, Plus, Plug, Zap, Database, CheckCircle } from 'lucide-react'
+import { useSearchParams, useNavigate } from 'react-router-dom'
+import { Square, AlertTriangle, Share2, Copy, Check, X, Sparkles, Search, Plus, Plug, Zap, Database, CheckCircle, BarChart3, ChevronDown } from 'lucide-react'
 import Sidebar from '../components/Sidebar'
 import ChatWindow from '../components/ChatWindow'
 import MessageInput, { type MessageInputHandle } from '../components/MessageInput'
@@ -12,6 +12,7 @@ import { useAuth } from '../context/AuthContext'
 
 export default function ChatPage() {
   const { user } = useAuth()
+  const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const [sessions, setSessions] = useState<ChatSession[]>([])
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null)
@@ -40,6 +41,26 @@ export default function ChatPage() {
   const seenResearchIds = useRef<Set<string>>(new Set())
 
   const canResearch = (user as any)?.effective_can_deep_research === true
+  const { canUseDashboard, isAdmin } = useAuth()
+
+  // ── AI 戰情快速入口 ─────────────────────────────────────────────────────────
+  interface DashTopic { id: number; name: string; designs: { id: number; name: string }[] }
+  const [dashTopics, setDashTopics] = useState<DashTopic[]>([])
+  const [showDashPanel, setShowDashPanel] = useState(false)
+  const dashPanelRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!canUseDashboard && !isAdmin) return
+    api.get('/dashboard/topics').then((r) => setDashTopics(r.data || [])).catch(() => {})
+  }, [canUseDashboard, isAdmin])
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (dashPanelRef.current && !dashPanelRef.current.contains(e.target as Node)) setShowDashPanel(false)
+    }
+    if (showDashPanel) document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [showDashPanel])
 
   // ── Skill panel state ──────────────────────────────────────────────────────
   interface Skill { id: number; name: string; icon: string; description: string; type: string; model_key?: string | null }
@@ -868,6 +889,57 @@ export default function ChatPage() {
                 </div>
               )}
             </div>
+
+          {/* ── AI 戰情快速入口 ── */}
+          {(canUseDashboard || isAdmin) && (
+            <div className="relative" ref={dashPanelRef}>
+              <button
+                onClick={() => setShowDashPanel((v) => !v)}
+                className="inline-flex items-center gap-1.5 text-xs border rounded-lg px-2.5 py-1 transition text-slate-500 border-slate-200 hover:text-orange-600 hover:border-orange-300"
+                title="AI 戰情"
+              >
+                <BarChart3 size={13} />
+                AI 戰情
+                <ChevronDown size={11} />
+              </button>
+              {showDashPanel && (
+                <div className="absolute top-full right-0 mt-1 w-60 bg-white border border-slate-200 rounded-xl shadow-2xl z-50">
+                  <div className="p-3 border-b border-slate-100 flex items-center justify-between">
+                    <span className="text-sm font-semibold text-slate-800 flex items-center gap-1.5">
+                      <BarChart3 size={14} className="text-orange-500" />AI 戰情室
+                    </span>
+                    <button onClick={() => setShowDashPanel(false)} className="text-slate-400 hover:text-slate-600"><X size={14} /></button>
+                  </div>
+                  <div className="max-h-72 overflow-y-auto p-2 space-y-1">
+                    <button
+                      onClick={() => { setShowDashPanel(false); navigate('/dashboard') }}
+                      className="w-full flex items-center gap-2 px-3 py-2 text-xs text-orange-600 font-medium rounded-lg hover:bg-orange-50 transition"
+                    >
+                      <BarChart3 size={13} /> 前往 AI 戰情主頁
+                    </button>
+                    {dashTopics.length > 0 && <div className="border-t border-slate-100 my-1" />}
+                    {dashTopics.map((topic) => (
+                      <div key={topic.id}>
+                        <div className="px-3 py-1 text-xs font-semibold text-slate-500 uppercase tracking-wider">{topic.name}</div>
+                        {topic.designs.map((d) => (
+                          <button
+                            key={d.id}
+                            onClick={() => { setShowDashPanel(false); navigate(`/dashboard?topic=${topic.id}&design=${d.id}`) }}
+                            className="w-full text-left px-4 py-1.5 text-xs text-slate-700 rounded-lg hover:bg-slate-50 transition truncate"
+                          >
+                            {d.name}
+                          </button>
+                        ))}
+                      </div>
+                    ))}
+                    {dashTopics.length === 0 && (
+                      <div className="text-center py-4 text-slate-400 text-xs">尚無可用戰情任務</div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Share button — only when a session is loaded and not streaming */}
           {currentSessionId && messages.length > 0 && !streaming && (

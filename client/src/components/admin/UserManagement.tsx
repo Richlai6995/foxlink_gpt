@@ -1,7 +1,13 @@
 import { useState, useEffect } from 'react'
-import { Plus, Edit, Trash2, Save, X, Check, Download, UserCog, FileText, Mic, Image, CalendarClock, RefreshCw, Building2, Search } from 'lucide-react'
+import { Plus, Edit, Trash2, Save, X, Check, Download, UserCog, FileText, Mic, Image, CalendarClock, RefreshCw, Building2, Search, ShieldCheck } from 'lucide-react'
 import type { User } from '../../types'
 import api from '../../lib/api'
+
+interface Policy {
+  id: number
+  name: string
+  description: string | null
+}
 
 interface Role {
   id: number
@@ -85,9 +91,12 @@ const empty: UserForm = {
 export default function UserManagement() {
   const [users, setUsers] = useState<User[]>([])
   const [roles, setRoles] = useState<Role[]>([])
+  const [policies, setPolicies] = useState<Policy[]>([])
+  const [userAssignments, setUserAssignments] = useState<Record<string, number | null>>({}) // userId → policyId
   const [showForm, setShowForm] = useState(false)
   const [editId, setEditId] = useState<number | null>(null)
   const [form, setForm] = useState<UserForm>(empty)
+  const [formPolicyId, setFormPolicyId] = useState<number | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [syncingId, setSyncingId] = useState<number | null>(null)
@@ -96,12 +105,20 @@ export default function UserManagement() {
   const [search, setSearch] = useState('')
 
   const load = async () => {
-    const [usersRes, rolesRes] = await Promise.all([
+    const [usersRes, rolesRes, policiesRes, assignRes] = await Promise.all([
       api.get('/users'),
       api.get('/roles'),
+      api.get('/data-permissions/policies').catch(() => ({ data: [] })),
+      api.get('/data-permissions/assignments').catch(() => ({ data: [] })),
     ])
     setUsers(Array.isArray(usersRes.data) ? usersRes.data : [])
     setRoles(Array.isArray(rolesRes.data) ? rolesRes.data : [])
+    setPolicies(Array.isArray(policiesRes.data) ? policiesRes.data : [])
+    const map: Record<string, number | null> = {}
+    for (const a of (assignRes.data as any[])) {
+      if (a.grantee_type === 'user') map[String(a.grantee_id)] = a.policy_id
+    }
+    setUserAssignments(map)
   }
 
   useEffect(() => { load() }, [])
@@ -127,12 +144,14 @@ export default function UserManagement() {
   const openNew = () => {
     setForm(empty)
     setEditId(null)
+    setFormPolicyId(null)
     setError('')
     setShowForm(true)
   }
 
   const openEdit = (u: User) => {
     const u2 = u as any
+    setFormPolicyId(userAssignments[String(u.id)] ?? null)
     setForm({
       username: u.username,
       password: '',
@@ -190,11 +209,16 @@ export default function UserManagement() {
         kb_max_size_mb: form.kb_max_size_mb !== '' ? Number(form.kb_max_size_mb) : null,
         kb_max_count: form.kb_max_count !== '' ? Number(form.kb_max_count) : null,
       }
+      let userId: number
       if (editId) {
         await api.put(`/users/${editId}`, payload)
+        userId = editId
       } else {
-        await api.post('/users', payload)
+        const r = await api.post('/users', payload)
+        userId = r.data.id
       }
+      // sync policy assignment
+      await api.put(`/data-permissions/assignments/user/${userId}`, { policy_id: formPolicyId })
       setShowForm(false)
       await load()
     } catch (e: unknown) {
@@ -493,6 +517,24 @@ export default function UserManagement() {
                   ))}
                 </select>
                 <p className="text-xs text-slate-400 mt-1">決定此使用者可使用的 MCP 工具與 DIFY 知識庫</p>
+              </div>
+
+              {/* Data Policy */}
+              <div className="px-5 pb-4 border-t pt-3">
+                <label className="label mb-1.5 flex items-center gap-1.5">
+                  <ShieldCheck size={14} /> 資料權限政策（個人覆蓋角色設定）
+                </label>
+                <select
+                  value={formPolicyId ?? ''}
+                  onChange={e => setFormPolicyId(e.target.value ? Number(e.target.value) : null)}
+                  className="input w-full"
+                >
+                  <option value="">— 沿用角色政策（未設定則無限制）—</option>
+                  {policies.map(p => (
+                    <option key={p.id} value={p.id}>{p.name}{p.description ? ` — ${p.description}` : ''}</option>
+                  ))}
+                </select>
+                <p className="text-xs text-slate-400 mt-1">設定後此使用者的資料查詢將套用此政策，優先於角色政策</p>
               </div>
 
               {/* Budget override */}

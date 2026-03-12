@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Users, BarChart3, Shield, AlertTriangle, Database, Mail, ArrowLeft, Cpu, DollarSign, CalendarClock, Plug, Zap, UserCog, Sparkles, Code2, Search, KeyRound, MonitorPlay } from 'lucide-react'
+import { Users, BarChart3, Shield, AlertTriangle, Database, Mail, ArrowLeft, Cpu, DollarSign, CalendarClock, Plug, Zap, UserCog, Sparkles, Code2, Search, KeyRound, MonitorPlay, Lock } from 'lucide-react'
 import UserManagement from '../components/admin/UserManagement'
 import TokenUsagePanel from '../components/admin/TokenUsage'
 import AuditLogs from '../components/admin/AuditLogs'
@@ -8,6 +8,7 @@ import SensitiveKeywords from '../components/admin/SensitiveKeywords'
 import DbMaintenance from '../components/admin/DbMaintenance'
 import MailSettingsPanel from '../components/admin/MailSettings'
 import LlmModelsPanel from '../components/admin/LlmModels'
+import VectorDefaultsPanel from '../components/admin/VectorDefaultsPanel'
 import CostAnalysis from '../components/admin/CostAnalysis'
 import ScheduledTasksPanel from '../components/admin/ScheduledTasksPanel'
 import MCPServersPanel from '../components/admin/MCPServersPanel'
@@ -19,8 +20,9 @@ import KbAdminPanel from '../components/admin/KbAdminPanel'
 import ResearchLogsPanel from '../components/admin/ResearchLogsPanel'
 import ApiKeysPanel from '../components/admin/ApiKeysPanel'
 import AiDashboardAdmin from '../components/admin/AiDashboardAdmin'
+import DataPermissionsPanel from '../components/admin/DataPermissionsPanel'
 
-type Tab = 'users' | 'roles' | 'tokens' | 'audit' | 'keywords' | 'db' | 'mail' | 'llm' | 'cost' | 'scheduled' | 'mcp' | 'dify' | 'kb' | 'skills' | 'code-runners' | 'research' | 'api-keys' | 'ai-dashboard'
+type Tab = 'users' | 'roles' | 'tokens' | 'audit' | 'keywords' | 'db' | 'mail' | 'llm' | 'vector-defaults' | 'cost' | 'scheduled' | 'mcp' | 'dify' | 'kb' | 'skills' | 'code-runners' | 'research' | 'api-keys' | 'ai-dashboard' | 'data-permissions'
 
 const tabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
   { id: 'users', label: '使用者管理', icon: <Users size={16} /> },
@@ -38,9 +40,11 @@ const tabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
   { id: 'skills', label: '技能管理', icon: <Sparkles size={16} /> },
   { id: 'code-runners', label: 'Code Runners', icon: <Code2 size={16} /> },
   { id: 'ai-dashboard', label: 'AI 戰情室', icon: <MonitorPlay size={16} /> },
+  { id: 'data-permissions', label: '資料權限管理', icon: <Lock size={16} /> },
   { id: 'db', label: '資料庫維護', icon: <Database size={16} /> },
   { id: 'mail', label: '郵件設定', icon: <Mail size={16} /> },
   { id: 'llm', label: 'LLM 模型設定', icon: <Cpu size={16} /> },
+  { id: 'vector-defaults', label: '向量預設模型', icon: <Cpu size={16} /> },
 ]
 
 export default function AdminDashboard() {
@@ -94,6 +98,7 @@ export default function AdminDashboard() {
           {activeTab === 'db' && <DbMaintenance />}
           {activeTab === 'mail' && <MailSettingsPanel />}
           {activeTab === 'llm' && <LlmModelsPanel />}
+          {activeTab === 'vector-defaults' && <VectorDefaultsPanel />}
           {activeTab === 'cost' && <CostAnalysis />}
           {activeTab === 'scheduled' && <ScheduledTasksPanel />}
           {activeTab === 'mcp' && <MCPServersPanel />}
@@ -104,6 +109,7 @@ export default function AdminDashboard() {
           {activeTab === 'research' && <ResearchLogsPanel />}
           {activeTab === 'api-keys' && <ApiKeysPanel />}
           {activeTab === 'ai-dashboard' && <AiDashboardAdmin />}
+          {activeTab === 'data-permissions' && <DataPermissionsPanel />}
         </main>
       </div>
     </div>

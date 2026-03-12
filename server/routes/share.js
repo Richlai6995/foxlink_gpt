@@ -300,7 +300,7 @@ router.post('/:token/fork', async (req, res) => {
       await db.prepare(
         `INSERT INTO chat_messages (session_id, role, content, files_json, created_at)
          VALUES (?, ?, ?, ?, ?)`
-      ).run(newSessionId, m.role, m.content || '', newFilesJson, m.created_at || new Date().toISOString());
+      ).run(newSessionId, m.role, m.content || '', newFilesJson, new Date(m.created_at || Date.now()));
     }
 
     res.json({ sessionId: newSessionId });

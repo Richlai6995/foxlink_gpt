@@ -266,7 +266,7 @@ router.post('/', async (req, res) => {
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       id, req.user.id, name.trim(), description || null,
-      process.env.KB_EMBEDDING_MODEL || 'gemini-embedding-001',
+      await require('../services/llmDefaults').resolveDefaultModel(db, 'embedding'),
       Number(embedding_dims),
       chunk_strategy,
       typeof chunk_config === 'string' ? chunk_config : JSON.stringify(chunk_config),
@@ -276,6 +276,9 @@ router.post('/', async (req, res) => {
       ['text_only', 'format_aware'].includes(parse_mode) ? parse_mode : 'text_only',
     );
     const kb = await db.prepare('SELECT * FROM knowledge_bases WHERE id=?').get(id);
+    // 為新知識庫加 KB_CHUNKS partition
+    const { addKbChunksPartition } = require('../database-oracle');
+    addKbChunksPartition(id).catch(e => console.warn('[Partition] KB create:', e.message));
     res.status(201).json(kb);
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -421,6 +424,9 @@ router.delete('/:id', async (req, res) => {
     // Delete uploaded files
     const kbDir = path.join(UPLOAD_BASE, 'kb', req.params.id);
     if (fs.existsSync(kbDir)) fs.rmSync(kbDir, { recursive: true });
+    // 先 DROP KB_CHUNKS partition（比 cascade delete 快）
+    const { dropKbChunksPartition } = require('../database-oracle');
+    await dropKbChunksPartition(req.params.id);
     await db.prepare('DELETE FROM knowledge_bases WHERE id=?').run(req.params.id);
     res.json({ success: true });
   } catch (e) {
@@ -636,11 +642,43 @@ router.post('/:id/search', async (req, res) => {
       }
     }
 
-    // Filter by score threshold and limit
+    // Filter by score threshold
     results = results
       .filter((r) => r.score >= Number(score_threshold))
-      .sort((a, b) => b.score - a.score)
-      .slice(0, topK);
+      .sort((a, b) => b.score - a.score);
+
+    // ── Rerank ──────────────────────────────────────────────────────────────
+    // Use kb.rerank_model (llm_models key) if configured, otherwise try any active rerank model
+    // Special value 'disabled' = explicitly skip rerank
+    let rerankApplied = false;
+    try {
+      const rerankKey = kb.rerank_model;
+      if (rerankKey === 'disabled') throw Object.assign(new Error('rerank disabled'), { _skip: true });
+      const rerankRow = rerankKey
+        ? await db.prepare(`SELECT id, api_model, extra_config_enc FROM llm_models WHERE key=? AND model_role='rerank' AND is_active=1`).get(rerankKey)
+        : await db.prepare(`SELECT id, api_model, extra_config_enc FROM llm_models WHERE model_role='rerank' AND is_active=1 AND ROWNUM=1`).get();
+
+      if (rerankRow?.extra_config_enc && results.length > 1) {
+        const { decryptKey } = require('../services/llmKeyService');
+        const creds = JSON.parse(decryptKey(rerankRow.extra_config_enc));
+        const { rerankOci } = require('../services/ociAi');
+        const fetchForRerank = results.slice(0, Math.min(results.length, topK * 3));
+        const docs = fetchForRerank.map((r) => r.content || '');
+        const rerankResp = await rerankOci(creds, rerankRow.api_model, query.trim(), docs, fetchForRerank.length);
+        const ranked = rerankResp?.results || rerankResp?.rankings || [];
+        if (ranked.length > 0) {
+          results = ranked.map((item) => {
+            const orig = fetchForRerank[item.index ?? item.resultIndex ?? 0];
+            return { ...orig, rerank_score: item.relevanceScore ?? item.score ?? 0 };
+          }).sort((a, b) => b.rerank_score - a.rerank_score);
+          rerankApplied = true;
+        }
+      }
+    } catch (e) {
+      if (!e._skip) console.warn('[KB Search] Rerank failed, using original order:', e.message);
+    }
+
+    results = results.slice(0, topK);
 
     const elapsed = Date.now() - t0;
 
@@ -652,7 +690,7 @@ router.post('/:id/search', async (req, res) => {
       `).run(uuid(), req.params.id, req.user.id, query.slice(0, 500), mode, topK, score_threshold, JSON.stringify(results.map((r) => ({ id: r.id, score: r.score, content: r.content?.slice(0, 200) }))), elapsed);
     } catch (_) {}
 
-    res.json({ results, elapsed_ms: elapsed, mode, query });
+    res.json({ results, elapsed_ms: elapsed, mode, query, rerank_applied: rerankApplied });
   } catch (e) {
     console.error('[KB Search]', e);
     res.status(500).json({ error: e.message });
@@ -778,7 +816,7 @@ async function processDocument(db, kb, docId, filePath, fileType, parseMode = nu
     console.log(`[KB] Processing doc ${docId} (${fileType})`);
 
     // Parse document → text (may include OCR for embedded images)
-    const effectiveOcrModel = kb.ocr_model || process.env.KB_OCR_MODEL || process.env.GEMINI_MODEL_FLASH || 'gemini-2.0-flash';
+    const effectiveOcrModel = kb.ocr_model || await require('../services/llmDefaults').resolveDefaultModel(db, 'ocr');
     const effectiveParseMode = parseMode || kb.parse_mode || 'text_only';
     const { text: rawText, ocrInputTokens, ocrOutputTokens } = await parseDocument(filePath, fileType, effectiveOcrModel, effectiveParseMode);
     const wordCount = rawText.split(/\s+/).filter(Boolean).length;
@@ -846,7 +884,7 @@ async function processDocument(db, kb, docId, filePath, fileType, parseMode = nu
     // Record embedding token usage for billing
     const today = new Date().toISOString().slice(0, 10);
     if (totalEmbedTokens > 0 && kb.creator_id) {
-      const embedModel = kb.embedding_model || process.env.KB_EMBEDDING_MODEL || 'gemini-embedding-001';
+      const embedModel = kb.embedding_model || await require('../services/llmDefaults').resolveDefaultModel(db, 'embedding');
       await upsertEmbedTokenUsage(db, kb.creator_id, today, embedModel, totalEmbedTokens);
     }
 

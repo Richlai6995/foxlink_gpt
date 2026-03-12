@@ -20,9 +20,17 @@ const oracledb = require('oracledb');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 
 // ─── 常數 ─────────────────────────────────────────────────────────────────────
+// EMBEDDING_MODEL is resolved at runtime to support DB-configured defaults.
+// Use getEmbeddingModel(db) instead of this constant where db is available.
 const EMBEDDING_MODEL = process.env.DASHBOARD_EMBEDDING_MODEL
   || process.env.KB_EMBEDDING_MODEL
   || 'gemini-embedding-001';
+
+async function getEmbeddingModel(db) {
+  try {
+    return await require('./llmDefaults').resolveDefaultModel(db, 'embedding');
+  } catch { return EMBEDDING_MODEL; }
+}
 
 const DEFAULT_DIMS = parseInt(process.env.DASHBOARD_EMBEDDING_DIMS
   || process.env.KB_EMBEDDING_DIMS
@@ -136,6 +144,13 @@ async function getErpPool() {
         password:      process.env.ERP_DB_USER_PASSWORD,
         connectString: `${process.env.ERP_DB_HOST}:${process.env.ERP_DB_PORT}/${process.env.ERP_DB_SERVICE_NAME}`,
         poolMin: 1, poolMax: 5, poolIncrement: 1, poolTimeout: 60,
+        // 確保每個 ERP session NLS 一致
+        sessionCallback: async (conn, _requestedTag, callbackFn) => {
+          try {
+            await conn.execute(`ALTER SESSION SET NLS_LANGUAGE='AMERICAN' NLS_TERRITORY='AMERICA'`);
+          } catch (e) { /* ignore */ }
+          callbackFn();
+        },
       });
       _erpPoolProxy = new ReadOnlyPoolProxy(rawPool);
       console.log('[ERP] 唯讀連線池已建立（ReadOnlyPoolProxy, alias 隱藏）');
@@ -189,8 +204,8 @@ async function setCachedResult(db, designId, question, sql, result, ttlMinutes) 
 }
 
 // ─── Embedding ────────────────────────────────────────────────────────────────
-async function getEmbedding(text, dims = DEFAULT_DIMS) {
-  const model = genAI.getGenerativeModel({ model: EMBEDDING_MODEL });
+async function getEmbedding(text, dims = DEFAULT_DIMS, modelOverride = null) {
+  const model = genAI.getGenerativeModel({ model: modelOverride || EMBEDDING_MODEL });
   const result = await model.embedContent({
     content: { parts: [{ text }], role: 'user' },
     taskType: 'RETRIEVAL_QUERY',
@@ -202,8 +217,8 @@ async function getEmbedding(text, dims = DEFAULT_DIMS) {
 // 批次 embedding — 一次最多 100 筆（Gemini API 限制）
 // 回傳 { embeddings: number[][], tokenCount: number }
 const EMBED_BATCH_SIZE = 100;
-async function getBatchEmbeddings(texts, dims = DEFAULT_DIMS) {
-  const model = genAI.getGenerativeModel({ model: EMBEDDING_MODEL });
+async function getBatchEmbeddings(texts, dims = DEFAULT_DIMS, modelOverride = null) {
+  const model = genAI.getGenerativeModel({ model: modelOverride || EMBEDDING_MODEL });
   const result = await model.batchEmbedContents({
     requests: texts.map(text => ({
       content: { parts: [{ text }], role: 'user' },
@@ -556,11 +571,18 @@ async function buildPrompt(db, design, question, vectorResults, skipReason) {
     ? `\n## 必須加入的 WHERE 條件（每次都要包含）：\n\`\`\`sql\nWHERE ${allBaseWhere.join('\n  AND ')}\n\`\`\`\n`
     : '';
 
+  // 資料權限 WHERE 注入
+  const { dataPermWhere } = design._dataPermissionWhere || {};
+  const dataPermHint = dataPermWhere?.length
+    ? `\n## 資料權限必須加入的 WHERE 條件（使用者資料範圍限制，每次都要包含）：\n\`\`\`sql\n${dataPermWhere.join('\n  AND ')}\n\`\`\`\n`
+    : '';
+
   return `${systemPrompt}
 
 ${schemaContext}
 ${fromHint}
 ${whereHint}
+${dataPermHint}
 ${vectorContext}
 ${fewShotContext}
 ## 使用者問題：
@@ -570,7 +592,7 @@ ${question}
 }
 
 // ─── 主查詢 Pipeline ──────────────────────────────────────────────────────────
-async function runDashboardQuery({ designId, question, userId, isDesigner, send, vectorTopK, vectorSimilarityThreshold, modelKey }) {
+async function runDashboardQuery({ designId, question, userId, user, isDesigner, send, vectorTopK, vectorSimilarityThreshold, modelKey, effectivePolicy }) {
   const db = require('../database-oracle').db;
 
   // 解析 LLM model（從 llm_models 表查，fallback 到 env）
@@ -589,6 +611,11 @@ async function runDashboardQuery({ designId, question, userId, isDesigner, send,
   // 取得 design
   const design = await db.prepare(`SELECT * FROM ai_select_designs WHERE id=?`).get(designId);
   if (!design) throw new Error('查詢設計不存在');
+
+  // 1.5 資料權限 WHERE 計算（注入到 prompt）
+  if (effectivePolicy?.rules?.length > 0) {
+    design._dataPermissionWhere = await buildDataPermWhere(db, design, user, effectivePolicy.rules);
+  }
 
   // 2. 向量語意搜尋
   let vectorResults = [];
@@ -734,10 +761,12 @@ function cancelEtlJob(jobId) {
 }
 
 // ─── ETL Job 執行 ─────────────────────────────────────────────────────────────
+
 async function runEtlJob(jobId) {
   const db = require('../database-oracle').db;
   const job = await db.prepare(`SELECT * FROM ai_etl_jobs WHERE id=?`).get(jobId);
   if (!job) throw new Error(`ETL Job ${jobId} 不存在`);
+  const resolvedEmbedModel = await getEmbeddingModel(db);
 
   const logResult = await db.prepare(
     `INSERT INTO ai_etl_run_logs (job_id, started_at, status) VALUES (?, SYSTIMESTAMP, 'running')`
@@ -769,14 +798,31 @@ async function runEtlJob(jobId) {
       const result = await erpConn.execute(
         sql,
         hasLastRun ? { last_run: lastRun } : {},
-        { outFormat: oracledb.OUT_FORMAT_OBJECT, maxRows: ETL_MAX_ROWS }
+        {
+          outFormat: oracledb.OUT_FORMAT_OBJECT,
+          maxRows: ETL_MAX_ROWS,
+          // 強制 NCHAR/NVARCHAR2 欄位以 VARCHAR string 回傳，避免 thick mode 回 Buffer
+          fetchTypeHandler: (d) =>
+            (d.dbType === oracledb.DB_TYPE_NVARCHAR || d.dbType === oracledb.DB_TYPE_NCHAR)
+              ? { type: oracledb.DB_TYPE_VARCHAR }
+              : undefined,
+        }
       );
       sourceRows = (result.rows || []).map(r =>
         Object.fromEntries(
-          Object.entries(r).map(([k, v]) => [k.toLowerCase(), v instanceof Date ? v.toISOString() : v])
+          Object.entries(r).map(([k, v]) => [
+            k.toLowerCase(),
+            v instanceof Date ? v.toISOString()
+              : Buffer.isBuffer(v) ? v.toString('utf8')  // 防禦性 Buffer → string
+              : v,
+          ])
         )
       );
       rowsFetched = sourceRows.length;
+      // 診斷 log：印出第一筆資料確認中文是否在 JS 端已正常
+      if (sourceRows.length > 0) {
+        console.log('[ETL] sourceRows[0] sample:', JSON.stringify(sourceRows[0]).slice(0, 300));
+      }
     } finally {
       await erpConn.close();
     }
@@ -921,7 +967,7 @@ async function runEtlJob(jobId) {
         const batch = embedItems.slice(i, i + EMBED_BATCH_SIZE);
         let embeddings;
         try {
-          const batchResult = await getBatchEmbeddings(batch.map(it => it.fieldValue), embeddingDim);
+          const batchResult = await getBatchEmbeddings(batch.map(it => it.fieldValue), embeddingDim, resolvedEmbedModel);
           embeddings = batchResult.embeddings;
           totalEmbedTokens += batchResult.tokenCount;
         } catch (e) {
@@ -930,7 +976,7 @@ async function runEtlJob(jobId) {
           embeddings = [];
           for (const it of batch) {
             try {
-              embeddings.push(await getEmbedding(it.fieldValue, embeddingDim));
+              embeddings.push(await getEmbedding(it.fieldValue, embeddingDim, resolvedEmbedModel));
               // fallback 估算：每筆約 text.length / 4 tokens
               totalEmbedTokens += Math.ceil(it.fieldValue.length / 4);
             }
@@ -1117,6 +1163,89 @@ function scheduleEtlJob(jobId, cronExpr) {
   });
   etlCronJobs.set(jobId, task);
   console.log(`[ETL] Job ${jobId} scheduled: ${cronExpr}`);
+}
+
+// ── 資料權限 WHERE 計算 ────────────────────────────────────────────────────────
+/**
+ * 依使用者有效政策規則 + schema 欄位 filter mapping，生成 SQL WHERE 條件
+ * 正面表列：layer 有設定 include 才生成 IN 條件，include+exclude 混用時：
+ *   include → 生成 col IN (allowed values)
+ *   exclude → 生成 col NOT IN (forbidden values)
+ * 若某層只有 exclude 沒有 include → 只加 NOT IN
+ * 若某層只有 include → 只加 IN
+ */
+async function buildDataPermWhere(db, design, user, rules) {
+  if (!rules?.length) return {};
+  const schemaIds = design.target_schema_ids ? JSON.parse(design.target_schema_ids) : [];
+  if (!schemaIds.length) return {};
+
+  // 取出所有 filter key 欄位（含 schema alias 用於 column prefix）
+  const filterCols = [];
+  for (const sid of schemaIds) {
+    const schemaDef = await db.prepare(
+      `SELECT alias, table_name FROM ai_schema_definitions WHERE id=?`
+    ).get(sid);
+    const cols = await db.prepare(
+      `SELECT column_name, filter_layer, filter_source FROM ai_schema_columns
+       WHERE schema_id=? AND is_filter_key=1`
+    ).all(sid);
+    for (const col of cols) {
+      const tblAlias = schemaDef?.alias || (schemaDef?.table_name || 't').split('.').pop().toLowerCase();
+      filterCols.push({ ...col, tbl_alias: tblAlias });
+    }
+  }
+  if (!filterCols.length) return {};
+
+  // 取得使用者的組織資料（用於 layer 3 include 模式的自動值）
+  const u = user || {};
+
+  // Layer 3 對應：filter_source → user 的屬性
+  const layer3UserMap = {
+    dept_code: u.dept_code,
+    profit_center: u.profit_center,
+    org_section: u.org_section,
+    org_group_name: u.org_group_name,
+  };
+
+  const whereParts = [];
+
+  // 數字型 filter_source（不加引號）
+  const NUMERIC_SOURCES = new Set([
+    'organization_id', 'operating_unit', 'set_of_books_id', 'user_id', 'role_id'
+  ]);
+
+  function fmtVal(v, filterSource) {
+    if (NUMERIC_SOURCES.has(filterSource) && /^\d+$/.test(String(v))) {
+      return String(v); // number, no quotes
+    }
+    return `'${String(v).replace(/'/g, "''")}'`; // string, single-quoted
+  }
+
+  // 依 filter_source 分組規則
+  for (const fcol of filterCols) {
+    const { column_name, filter_layer, filter_source, tbl_alias } = fcol;
+    if (!filter_layer || !filter_source) continue;
+    const layerNum = filter_layer === 'layer3' ? 3 : filter_layer === 'layer4' ? 4 : null;
+    if (!layerNum) continue;
+
+    const layerRules = rules.filter(r => Number(r.layer) === layerNum && r.value_type === filter_source);
+    if (!layerRules.length) continue;
+
+    const includes = layerRules.filter(r => r.include_type === 'include').map(r => r.value_id).filter(Boolean);
+    const excludes = layerRules.filter(r => r.include_type === 'exclude').map(r => r.value_id).filter(Boolean);
+    const colRef = `${tbl_alias}.${column_name}`;
+
+    if (includes.length) {
+      const inList = includes.map(v => fmtVal(v, filter_source)).join(', ');
+      whereParts.push(`${colRef} IN (${inList})`);
+    }
+    if (excludes.length) {
+      const notInList = excludes.map(v => fmtVal(v, filter_source)).join(', ');
+      whereParts.push(`${colRef} NOT IN (${notInList})`);
+    }
+  }
+
+  return { dataPermWhere: whereParts };
 }
 
 module.exports = {

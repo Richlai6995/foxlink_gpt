@@ -101,7 +101,8 @@ export interface SensitiveKeyword {
   created_at: string
 }
 
-export type LlmProviderType = 'gemini' | 'azure_openai'
+export type LlmProviderType = 'gemini' | 'azure_openai' | 'oci' | 'cohere'
+export type LlmModelRole = 'chat' | 'embedding' | 'rerank' | 'tts' | 'stt'
 
 export interface LlmModel {
   id?: number
@@ -115,7 +116,9 @@ export interface LlmModel {
   created_at?: string
   // Multi-provider fields
   provider_type?: LlmProviderType
+  model_role?: LlmModelRole
   has_api_key?: number       // 1 = encrypted key exists in DB
+  has_extra_config?: number  // 1 = OCI extra config exists
   endpoint_url?: string
   api_version?: string
   deployment_name?: string

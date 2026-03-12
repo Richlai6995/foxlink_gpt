@@ -66,6 +66,8 @@ app.get('/api/health', (req, res) => res.json({ status: 'ok', timestamp: new Dat
     console.log('[Route] /api/v1 OK');
     app.use('/api/dashboard', require('./routes/dashboard'));
     console.log('[Route] /api/dashboard OK');
+    app.use('/api/data-permissions', require('./routes/dataPermissions'));
+    console.log('[Route] /api/data-permissions OK');
 
     // Auto-restore code skill runners
     try {
@@ -88,25 +90,34 @@ app.get('/api/health', (req, res) => res.json({ status: 'ok', timestamp: new Dat
 
     const http = require('http');
     const server = http.createServer(app);
+    let _portRetried = false;
     server.on('error', (err) => {
       if (err.code === 'EADDRINUSE') {
-        console.error(`[WARN] Port ${PORT} in use, trying to kill old process...`);
+        if (_portRetried) {
+          // Already retried once — give up and let the watcher restart us
+          console.error(`[FATAL] Port ${PORT} still in use after retry, exiting...`);
+          process.exit(1);
+          return;
+        }
+        _portRetried = true;
+        console.warn(`[WARN] Port ${PORT} in use, killing old process and retrying once...`);
         const { execSync } = require('child_process');
         try {
           if (process.platform === 'win32') {
-            const out = execSync(`powershell -Command "Get-NetTCPConnection -LocalPort ${PORT} | Select-Object -ExpandProperty OwningProcess | Sort-Object -Unique"`).toString().trim();
+            const out = execSync(
+              `powershell -Command "Get-NetTCPConnection -LocalPort ${PORT} -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess | Sort-Object -Unique"`
+            ).toString().trim();
             out.split('\n').map(s => s.trim()).filter(Boolean).forEach(pid => {
-              if (Number(pid) > 0) { execSync(`powershell -Command "Stop-Process -Id ${pid} -Force"`); }
+              if (Number(pid) > 0 && Number(pid) !== process.pid) {
+                try { execSync(`powershell -Command "Stop-Process -Id ${pid} -Force -ErrorAction SilentlyContinue"`); } catch {}
+              }
             });
           } else {
-            execSync(`fuser -k ${PORT}/tcp`);
+            try { execSync(`fuser -k ${PORT}/tcp`); } catch {}
           }
-          console.log(`[INFO] Freed port ${PORT}, restarting...`);
-          setTimeout(() => server.listen(PORT), 1000);
-        } catch (e2) {
-          console.error(`[FATAL] Could not free port ${PORT}:`, e2.message);
-          process.exit(1);
-        }
+        } catch {}
+        // Wait 2s for the killed process to release the socket, then retry exactly once
+        setTimeout(() => server.listen(PORT), 2000);
       }
     });
     server.listen(PORT, () => {
