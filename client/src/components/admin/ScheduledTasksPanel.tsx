@@ -1,15 +1,25 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import {
   CalendarClock, Plus, Play, Pause, Trash2, Edit2, History,
   RefreshCw, CheckCircle, XCircle, ChevronDown, ChevronUp,
   Clock, Mail, FileText, X, Save, TriangleAlert, Settings2,
+  Zap, BookOpen, Wrench,
 } from 'lucide-react'
 import api from '../../lib/api'
 import { useAuth } from '../../context/AuthContext'
 import type { ScheduledTask, TaskRun } from '../../types'
 
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六']
-const FILE_TYPES = ['xlsx', 'docx', 'pdf', 'pptx', 'foxlink_pptx', 'txt']
+const FILE_TYPES = ['xlsx', 'docx', 'pdf', 'pptx', 'foxlink_pptx', 'txt', 'mp3']
+const FILE_TYPE_LABELS: Record<string, string> = {
+  xlsx: 'XLSX', docx: 'DOCX', pdf: 'PDF', pptx: 'PPTX',
+  foxlink_pptx: 'Foxlink PPTX', txt: 'TXT', mp3: 'MP3 語音',
+}
+
+interface ToolCatalog {
+  skills: { id: number; name: string; icon: string; type: string; description?: string }[]
+  kbs: { id: number; name: string; description?: string }[]
+}
 const HOURS = Array.from({ length: 24 }, (_, i) => i)
 const MINUTES = [0, 5, 10, 15, 20, 30, 45]
 
@@ -57,10 +67,12 @@ function TaskFormModal({
 }) {
   const isEdit = !!task?.id
   const [form, setForm] = useState<Partial<ScheduledTask>>(task ?? emptyForm())
-  const [section, setSection] = useState<'basic' | 'schedule' | 'ai' | 'email'>('basic')
+  const [section, setSection] = useState<'basic' | 'schedule' | 'ai' | 'tools' | 'email'>('basic')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [recipientInput, setRecipientInput] = useState('')
+  const [catalog, setCatalog] = useState<ToolCatalog>({ skills: [], kbs: [] })
+  const promptRef = useRef<HTMLTextAreaElement>(null)
 
   // When models load and current model not in list, pick first available
   useEffect(() => {
@@ -68,6 +80,11 @@ function TaskFormModal({
       setForm((p) => ({ ...p, model: models[0].key }))
     }
   }, [models])
+
+  // Load tool catalog
+  useEffect(() => {
+    api.get('/scheduled-tasks/tools-catalog').then((r) => setCatalog(r.data)).catch(() => {})
+  }, [])
 
   const set = (k: keyof ScheduledTask, v: unknown) =>
     setForm((p) => ({ ...p, [k]: v }))
@@ -111,10 +128,27 @@ function TaskFormModal({
     }
   }
 
+  // Insert tool ref syntax at cursor position in prompt textarea
+  const insertToolRef = (syntax: string) => {
+    const ta = promptRef.current
+    if (!ta) { set('prompt', (form.prompt || '') + syntax); return }
+    const start = ta.selectionStart ?? (form.prompt || '').length
+    const end = ta.selectionEnd ?? start
+    const before = (form.prompt || '').slice(0, start)
+    const after = (form.prompt || '').slice(end)
+    set('prompt', before + syntax + after)
+    // Restore focus + cursor
+    setTimeout(() => {
+      ta.focus()
+      ta.setSelectionRange(start + syntax.length, start + syntax.length)
+    }, 10)
+  }
+
   const sectionBtns: { id: typeof section; label: string }[] = [
     { id: 'basic', label: '基本設定' },
     { id: 'schedule', label: '排程' },
     { id: 'ai', label: 'AI 設定' },
+    { id: 'tools', label: '工具引用' },
     { id: 'email', label: '郵件通知' },
   ]
 
@@ -237,16 +271,18 @@ function TaskFormModal({
               <div>
                 <label className="label">
                   Prompt *（支援變數：{'{{date}}'} {'{{weekday}}'} {'{{task_name}}'}；
-                  網頁爬取：{'{{fetch:https://...}}'}）
+                  工具引用：{'{{skill:名稱}}'}{'{{kb:名稱}}'}；
+                  網頁爬取：{'{{fetch:URL}}'}）
                 </label>
                 <textarea
-                  className="input w-full h-32 resize-y"
+                  ref={promptRef}
+                  className="input w-full h-36 resize-y font-mono text-xs"
                   value={form.prompt ?? ''}
                   onChange={(e) => set('prompt', e.target.value)}
-                  placeholder={`例：今天是 {{date}}，請分析以下台灣銀行最新匯率資料並整理成表格：\n{{fetch:https://rate.bot.com.tw/xrt?Lang=zh-tw}}`}
+                  placeholder={`例：今天是 {{date}}，先查詢知識庫：\n{{kb:月報知識庫 query="{{task_name}}"}}\n請根據以上內容撰寫摘要報告。`}
                 />
                 <p className="text-xs text-slate-400 mt-1">
-                  {'{{fetch:URL}}'} 會在執行時即時抓取網頁內容並傳給 AI 分析
+                  工具引用會在執行前自動展開。前往「工具引用」頁簽選擇工具並插入語法。
                 </p>
               </div>
               <div>
@@ -266,8 +302,12 @@ function TaskFormModal({
                 <div className="flex gap-3">
                   <div>
                     <label className="label">檔案格式</label>
-                    <select className="input" value={form.file_type ?? 'docx'} onChange={(e) => { set('file_type', e.target.value); set('filename_template', `{{task_name}}_{{date}}.${e.target.value}`) }}>
-                      {FILE_TYPES.map((t) => <option key={t} value={t}>{t.toUpperCase()}</option>)}
+                    <select className="input" value={form.file_type ?? 'docx'} onChange={(e) => {
+                      set('file_type', e.target.value)
+                      const ext = e.target.value
+                      set('filename_template', `{{task_name}}_{{date}}.${ext}`)
+                    }}>
+                      {FILE_TYPES.map((t) => <option key={t} value={t}>{FILE_TYPE_LABELS[t] || t.toUpperCase()}</option>)}
                     </select>
                   </div>
                   <div className="flex-1">
@@ -276,7 +316,107 @@ function TaskFormModal({
                   </div>
                 </div>
               )}
+              {form.output_type === 'file' && form.file_type === 'mp3' && (
+                <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded px-3 py-2">
+                  MP3 語音：AI 回應內容會自動透過 TTS 技能轉為語音檔。需先在管理後台設定 TTS 模型（model_role=tts）。
+                </p>
+              )}
             </>
+          )}
+
+          {/* ── Tools ── */}
+          {section === 'tools' && (
+            <div className="space-y-4">
+              <p className="text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded px-3 py-2">
+                點擊「插入」將語法加入 Prompt（光標位置）。技能/知識庫在執行時會自動被呼叫並將結果注入 Prompt 中，再一起傳給 AI 分析。
+              </p>
+
+              {/* Skills */}
+              <div>
+                <label className="label flex items-center gap-1.5">
+                  <Zap size={13} className="text-amber-500" /> 可用技能
+                </label>
+                {catalog.skills.length === 0 ? (
+                  <p className="text-xs text-slate-400">尚無可用技能</p>
+                ) : (
+                  <div className="space-y-1 max-h-48 overflow-y-auto">
+                    {catalog.skills.map((sk) => (
+                      <div key={sk.id} className="flex items-center gap-2 px-3 py-2 bg-white border border-slate-200 rounded-lg hover:border-blue-300 transition">
+                        <span className="text-base">{sk.icon}</span>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium text-slate-700 truncate">{sk.name}</p>
+                          {sk.description && <p className="text-xs text-slate-400 truncate">{sk.description}</p>}
+                        </div>
+                        <span className="text-xs text-slate-400 shrink-0">{sk.type}</span>
+                        <button
+                          onClick={() => insertToolRef(`{{skill:${sk.name}}}`)}
+                          className="shrink-0 text-xs px-2 py-1 bg-amber-50 text-amber-700 border border-amber-200 rounded hover:bg-amber-100 transition"
+                        >
+                          插入
+                        </button>
+                        <button
+                          onClick={() => insertToolRef(`{{skill:${sk.name} input=""}}`)}
+                          className="shrink-0 text-xs px-2 py-1 bg-slate-50 text-slate-600 border border-slate-200 rounded hover:bg-slate-100 transition"
+                          title="帶 input 參數"
+                        >
+                          帶參數
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Knowledge Bases */}
+              <div>
+                <label className="label flex items-center gap-1.5">
+                  <BookOpen size={13} className="text-blue-500" /> 可用知識庫
+                </label>
+                {catalog.kbs.length === 0 ? (
+                  <p className="text-xs text-slate-400">尚無可用知識庫</p>
+                ) : (
+                  <div className="space-y-1 max-h-48 overflow-y-auto">
+                    {catalog.kbs.map((kb) => (
+                      <div key={kb.id} className="flex items-center gap-2 px-3 py-2 bg-white border border-slate-200 rounded-lg hover:border-blue-300 transition">
+                        <BookOpen size={14} className="text-blue-400 shrink-0" />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium text-slate-700 truncate">{kb.name}</p>
+                          {kb.description && <p className="text-xs text-slate-400 truncate">{kb.description}</p>}
+                        </div>
+                        <button
+                          onClick={() => insertToolRef(`{{kb:${kb.name}}}`)}
+                          className="shrink-0 text-xs px-2 py-1 bg-blue-50 text-blue-700 border border-blue-200 rounded hover:bg-blue-100 transition"
+                        >
+                          插入
+                        </button>
+                        <button
+                          onClick={() => insertToolRef(`{{kb:${kb.name} query=""}}`)}
+                          className="shrink-0 text-xs px-2 py-1 bg-slate-50 text-slate-600 border border-slate-200 rounded hover:bg-slate-100 transition"
+                          title="帶查詢參數"
+                        >
+                          帶查詢
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Syntax Reference */}
+              <div className="bg-slate-50 border border-slate-200 rounded-lg p-3">
+                <p className="text-xs font-medium text-slate-600 mb-2 flex items-center gap-1">
+                  <Wrench size={12} /> 語法說明
+                </p>
+                <div className="space-y-1 text-xs font-mono text-slate-600">
+                  <p><span className="text-amber-600">{'{{skill:名稱}}'}</span> — 執行技能，以任務名稱為輸入</p>
+                  <p><span className="text-amber-600">{'{{skill:名稱 input="文字"}}'}</span> — 執行技能，指定輸入文字</p>
+                  <p><span className="text-blue-600">{'{{kb:名稱}}'}</span> — 查詢知識庫，以任務名稱為查詢詞</p>
+                  <p><span className="text-blue-600">{'{{kb:名稱 query="查詢詞"}}'}</span> — 查詢知識庫，指定查詢詞</p>
+                  <p><span className="text-slate-400">{'{{mcp:工具名}}'}</span> — MCP 工具（待支援）</p>
+                  <p><span className="text-slate-400">{'{{dify:名稱}}'}</span> — Dify 知識庫（待支援）</p>
+                </div>
+              </div>
+            </div>
           )}
 
           {/* ── Email ── */}
@@ -309,8 +449,9 @@ function TaskFormModal({
                 <input className="input w-full" value={form.email_subject ?? ''} onChange={(e) => set('email_subject', e.target.value)} />
               </div>
               <div>
-                <label className="label">郵件內文（支援以上變數 + {'{{ai_response}}'}）</label>
+                <label className="label">郵件內文（支援以上變數 + {'{{ai_response}}'} {'{{tools_used}}'}）</label>
                 <textarea className="input w-full h-36 resize-y" value={form.email_body ?? ''} onChange={(e) => set('email_body', e.target.value)} />
+                <p className="text-xs text-slate-400 mt-1">{'{{tools_used}}'} 會展開為本次呼叫的技能/知識庫清單</p>
               </div>
             </>
           )}
@@ -357,6 +498,7 @@ function HistoryRow({ taskId }: { taskId: number }) {
             <th className="text-left py-1.5 pr-3 font-medium">狀態</th>
             <th className="text-left py-1.5 pr-3 font-medium">嘗試</th>
             <th className="text-left py-1.5 pr-3 font-medium">耗時</th>
+            <th className="text-left py-1.5 pr-3 font-medium">工具</th>
             <th className="text-left py-1.5 pr-3 font-medium">郵件</th>
             <th className="text-left py-1.5 font-medium">AI 回應預覽</th>
           </tr>
@@ -364,8 +506,15 @@ function HistoryRow({ taskId }: { taskId: number }) {
         <tbody>
           {runs.map((r) => {
             const files: { filename: string; publicUrl: string }[] = (() => {
-              try { return JSON.parse(r.generated_files_json || '[]') } catch { return [] }
+              try { return JSON.parse((r as any).generated_files_json || '[]') } catch { return [] }
             })()
+            const toolsUsed: { skills?: {name:string}[]; kbs?: {name:string}[] } = (() => {
+              try { return JSON.parse((r as any).tools_used_json || '{}') } catch { return {} }
+            })()
+            const toolNames = [
+              ...(toolsUsed.skills?.map(s => s.name) || []),
+              ...(toolsUsed.kbs?.map(k => k.name) || []),
+            ]
             return (
               <tr key={r.id} className="border-b border-slate-50 hover:bg-slate-50">
                 <td className="py-1.5 pr-3 whitespace-nowrap text-slate-600">{r.run_at?.slice(0, 16)}</td>
@@ -376,6 +525,17 @@ function HistoryRow({ taskId }: { taskId: number }) {
                 </td>
                 <td className="py-1.5 pr-3 text-slate-500">{r.attempt}/3</td>
                 <td className="py-1.5 pr-3 text-slate-500">{r.duration_ms ? `${(r.duration_ms / 1000).toFixed(1)}s` : '-'}</td>
+                <td className="py-1.5 pr-3">
+                  {toolNames.length > 0
+                    ? <div className="flex flex-col gap-0.5">
+                        {toolNames.map(n => (
+                          <span key={n} className="inline-flex items-center gap-0.5 text-amber-600 text-xs">
+                            <Zap size={9} /> {n}
+                          </span>
+                        ))}
+                      </div>
+                    : <span className="text-slate-300">-</span>}
+                </td>
                 <td className="py-1.5 pr-3">
                   {r.email_sent_to
                     ? <span className="flex items-center gap-0.5 text-blue-500"><Mail size={11} /> 已寄</span>

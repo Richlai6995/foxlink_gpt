@@ -1087,10 +1087,22 @@ router.post('/sessions/:id/messages', upload.array('files', 10), async (req, res
     // Check for direct-answer external skill
     let externalAnswerSkill = null;
 
+    const { resolveToolRefs, hasToolRefs } = require('../services/promptResolver');
+
     for (const sk of sessionSkills) {
       console.log(`[Skill] id=${sk.id} name="${sk.name}" type=${sk.type} mode=${sk.endpoint_mode} url=${sk.endpoint_url}`);
       if (sk.type === 'builtin' && sk.system_prompt) {
-        skillSystemPrompts.push(`# Skill: ${sk.name}\n${sk.system_prompt}`);
+        // Resolve any {{skill:}} / {{kb:}} refs in the skill's own system_prompt
+        let resolvedSystemPrompt = sk.system_prompt;
+        if (hasToolRefs(sk.system_prompt)) {
+          try {
+            const r = await resolveToolRefs(sk.system_prompt, db, { userId: req.user.id, sessionId });
+            resolvedSystemPrompt = r.resolvedText;
+          } catch (e) {
+            console.warn(`[Skill] promptResolver failed for "${sk.name}": ${e.message}`);
+          }
+        }
+        skillSystemPrompts.push(`# Skill: ${sk.name}\n${resolvedSystemPrompt}`);
       } else if ((sk.type === 'external' || sk.type === 'code') && sk.endpoint_url) {
         if (sk.endpoint_mode === 'answer') {
           externalAnswerSkill = sk;

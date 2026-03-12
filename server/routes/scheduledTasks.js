@@ -56,7 +56,7 @@ router.post('/', async (req, res) => {
       schedule_weekday, schedule_monthday,
       model, prompt, output_type, file_type, filename_template,
       recipients_json, email_subject, email_body,
-      status, expire_at, max_runs,
+      status, expire_at, max_runs, tools_config_json,
     } = req.body;
 
     if (!name || !prompt) return res.status(400).json({ error: '名稱和 Prompt 為必填' });
@@ -65,8 +65,8 @@ router.post('/', async (req, res) => {
       `INSERT INTO scheduled_tasks
         (user_id, name, schedule_type, schedule_hour, schedule_minute, schedule_weekday, schedule_monthday,
          model, prompt, output_type, file_type, filename_template,
-         recipients_json, email_subject, email_body, status, expire_at, max_runs)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+         recipients_json, email_subject, email_body, status, expire_at, max_runs, tools_config_json)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
     ).run(
       req.user.id, name,
       schedule_type || 'daily',
@@ -79,6 +79,7 @@ router.post('/', async (req, res) => {
       status || 'active',
       expire_at || null,
       max_runs ?? 0,
+      JSON.stringify(tools_config_json || []),
     );
 
     const task = await db.prepare('SELECT * FROM scheduled_tasks WHERE id=?').get(result.lastInsertRowid);
@@ -104,7 +105,7 @@ router.put('/:id', async (req, res) => {
       schedule_weekday, schedule_monthday,
       model, prompt, output_type, file_type, filename_template,
       recipients_json, email_subject, email_body,
-      status, expire_at, max_runs,
+      status, expire_at, max_runs, tools_config_json,
     } = req.body;
 
     await db.prepare(
@@ -113,7 +114,7 @@ router.put('/:id', async (req, res) => {
         schedule_weekday=?, schedule_monthday=?,
         model=?, prompt=?, output_type=?, file_type=?, filename_template=?,
         recipients_json=?, email_subject=?, email_body=?,
-        status=?, expire_at=?, max_runs=?, updated_at=CURRENT_TIMESTAMP
+        status=?, expire_at=?, max_runs=?, tools_config_json=?, updated_at=CURRENT_TIMESTAMP
        WHERE id=?`
     ).run(
       name ?? task.name,
@@ -127,6 +128,7 @@ router.put('/:id', async (req, res) => {
       email_subject ?? task.email_subject, email_body ?? task.email_body,
       status ?? task.status, expire_at ?? task.expire_at,
       max_runs ?? task.max_runs,
+      tools_config_json ? JSON.stringify(tools_config_json) : (task.tools_config_json || '[]'),
       req.params.id,
     );
 
@@ -220,6 +222,31 @@ router.get('/:id/history', async (req, res) => {
       `SELECT * FROM scheduled_task_runs WHERE task_id=? ORDER BY run_at DESC LIMIT ?`
     ).all(req.params.id, limit);
     res.json(runs);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── GET /api/scheduled-tasks/tools-catalog — 可用工具清單 ─────────────────────
+router.get('/tools-catalog', async (req, res) => {
+  if (!await checkPermission(req, res)) return;
+  const db = getDb();
+  try {
+    const [skills, kbs] = await Promise.all([
+      db.prepare(
+        `SELECT id, name, icon, type, description FROM skills
+         WHERE owner_user_id=? OR (is_public=1 AND is_admin_approved=1)
+         ORDER BY name ASC`
+      ).all(req.user.id),
+      db.prepare(
+        `SELECT kb.id, kb.name, kb.description FROM knowledge_bases kb
+         LEFT JOIN kb_access ka ON ka.kb_id=kb.id AND ka.user_id=?
+         WHERE kb.is_active=1 AND (kb.is_public=1 OR ka.user_id IS NOT NULL
+           OR ? IN (SELECT id FROM users WHERE role='admin'))
+         ORDER BY kb.name ASC`
+      ).all(req.user.id, req.user.id),
+    ]);
+    res.json({ skills, kbs });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

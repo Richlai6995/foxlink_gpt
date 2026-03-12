@@ -220,6 +220,7 @@ async function runTask(db, taskId) {
   const { generateTextSync, generateTitle } = require('./gemini');
   const { processGenerateBlocks } = require('./fileGenerator');
   const { sendMail } = require('./mailService');
+  const { resolveToolRefs, hasToolRefs } = require('./promptResolver');
 
   const task = await db.prepare('SELECT * FROM scheduled_tasks WHERE id = ?').get(taskId);
   if (!task) { console.error(`[Scheduled] Task ${taskId} not found`); return; }
@@ -251,6 +252,7 @@ async function runTask(db, taskId) {
   let responseText = '';
   let generatedFiles = [];
   let attemptNum = 1;
+  let toolsUsed = { skills: [], kbs: [], mcp_tools: [], dify_kbs: [] };
 
   try {
     const { result, attempt } = await withRetry(async (tryNum) => {
@@ -264,7 +266,17 @@ async function runTask(db, taskId) {
       } catch (_) {}
 
       // Render prompt variables (+ fetch any {{fetch:URL}} placeholders)
-      const renderedPrompt = await substituteVarsAsync(task.prompt, task.name);
+      let renderedPrompt = await substituteVarsAsync(task.prompt, task.name);
+
+      // Resolve tool references {{skill:}}, {{kb:}}, {{mcp:}}, {{dify:}}
+      if (hasToolRefs(renderedPrompt)) {
+        const resolved = await resolveToolRefs(renderedPrompt, db, {
+          userId: task.user_id,
+          taskName: task.name,
+        });
+        renderedPrompt = resolved.resolvedText;
+        toolsUsed = resolved.toolsUsed;
+      }
 
       // Create session
       const sid = uuidv4();
@@ -322,6 +334,34 @@ async function runTask(db, taskId) {
       const blocks = await processGenerateBlocks(processableText, sid);
       generatedFiles = blocks.map(b => ({ filename: b.filename, publicUrl: b.publicUrl, filePath: b.filePath }));
 
+      // ── Audio output: call TTS skill if file_type is mp3/wav ──────────────
+      if (task.output_type === 'file' && (task.file_type === 'mp3' || task.file_type === 'wav')) {
+        try {
+          const FOXLINK_API = `http://127.0.0.1:${process.env.PORT || 3001}`;
+          const SERVICE_KEY = process.env.SKILL_SERVICE_KEY || '';
+          const ttsRes = await fetch(`${FOXLINK_API}/api/skills/tts/synthesize`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'x-service-key': SERVICE_KEY },
+            body: JSON.stringify({ text: text.slice(0, 5000), user_id: task.user_id }),
+            signal: AbortSignal.timeout(60000),
+          });
+          if (ttsRes.ok) {
+            const ttsData = await ttsRes.json();
+            const UPLOAD_DIR = process.env.UPLOAD_DIR
+              ? require('path').resolve(process.env.UPLOAD_DIR)
+              : require('path').join(__dirname, '../uploads');
+            const audioFilename = substituteVars(task.filename_template || `{{task_name}}_{{date}}.mp3`, task.name);
+            generatedFiles.push({
+              filename: audioFilename,
+              publicUrl: ttsData.audio_url,
+              filePath: require('path').join(UPLOAD_DIR, 'generated', require('path').basename(ttsData.audio_url)),
+            });
+          }
+        } catch (e) {
+          console.error(`[Scheduled] TTS failed for task ${task.id}: ${e.message}`);
+        }
+      }
+
       return { text, inputTokens, outputTokens };
     }, 3);
 
@@ -349,8 +389,18 @@ async function runTask(db, taskId) {
       const subject = substituteVars(task.email_subject || '排程任務執行完成：{{task_name}} ({{date}})', task.name);
       const bodyTemplate = task.email_body ||
         '您好，\n\n以下為 {{date}}（{{weekday}}）排程任務「{{task_name}}」的執行結果：\n\n{{ai_response}}\n\n如有附件請見附檔。\n\nFOXLINK GPT';
+      // Build tools used summary for email
+      const toolsSummary = (() => {
+        const parts = [];
+        if (toolsUsed.skills?.length) parts.push(`技能：${toolsUsed.skills.map(s => s.name).join('、')}`);
+        if (toolsUsed.kbs?.length) parts.push(`知識庫：${toolsUsed.kbs.map(k => k.name).join('、')}`);
+        if (toolsUsed.mcp_tools?.length) parts.push(`MCP：${toolsUsed.mcp_tools.join('、')}`);
+        return parts.length > 0 ? `使用工具：${parts.join('；')}` : '';
+      })();
+
       const bodyText = substituteVars(bodyTemplate, task.name)
-        .replace(/\{\{ai_response\}\}/g, stripMarkdownForEmail(responseText.slice(0, 4000)));
+        .replace(/\{\{ai_response\}\}/g, stripMarkdownForEmail(responseText.slice(0, 4000)))
+        .replace(/\{\{tools_used\}\}/g, toolsSummary);
 
       // Build attachments from generated files
       const attachments = generatedFiles
@@ -375,8 +425,8 @@ async function runTask(db, taskId) {
   // ── Write run record ────────────────────────────────────────────────────────
   await db.prepare(
     `INSERT INTO scheduled_task_runs
-      (task_id, run_at, status, attempt, session_id, response_preview, generated_files_json, email_sent_to, error_msg, duration_ms)
-     VALUES (?, SYSTIMESTAMP, ?, ?, ?, ?, ?, ?, ?, ?)`
+      (task_id, run_at, status, attempt, session_id, response_preview, generated_files_json, email_sent_to, error_msg, duration_ms, tools_used_json)
+     VALUES (?, SYSTIMESTAMP, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     task.id,
     runStatus,
@@ -387,6 +437,7 @@ async function runTask(db, taskId) {
     emailSentTo,
     runError,
     durationMs,
+    JSON.stringify(toolsUsed),
   );
 
   // ── Update task stats ───────────────────────────────────────────────────────

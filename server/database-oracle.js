@@ -710,6 +710,10 @@ async function runMigrations(db) {
   await addCol('SKILLS', 'CODE_PID',      'NUMBER');
   await addCol('SKILLS', 'CODE_ERROR',    'CLOB');
 
+  // ── Scheduled Tasks 工具引用支援 ─────────────────────────────────────────────
+  await addCol('SCHEDULED_TASKS',     'TOOLS_CONFIG_JSON', "CLOB DEFAULT '[]'");
+  await addCol('SCHEDULED_TASK_RUNS', 'TOOLS_USED_JSON',   'CLOB');
+
   // ── Vector table partitioning ───────────────────────────────────────────────
   await migrateAiVectorStoreToPartitioned();
   await migrateKbChunksToPartitioned();
