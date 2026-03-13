@@ -76,15 +76,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, [])
 
   const setLanguage = useCallback(async (lang: LangCode) => {
-    await api.put('/auth/language', { language_code: lang })
+    // Optimistic: update UI immediately, then persist to server
     i18n.changeLanguage(lang)
-    // Update cached user
     setUser((prev) => {
       if (!prev) return prev
-      const updated = { ...prev, preferred_language: lang, resolved_language: lang } as any
+      const updated = { ...prev, resolved_language: lang } as any
       localStorage.setItem('user', JSON.stringify(updated))
       return updated
     })
+    try {
+      await api.put('/auth/language', { language_code: lang })
+    } catch (e) {
+      console.warn('[i18n] Failed to persist language preference:', e)
+    }
   }, [])
 
   const isAdmin          = user?.role === 'admin'
