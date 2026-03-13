@@ -564,6 +564,19 @@ function initSchema(db) {
     db.exec(`ALTER TABLE skills ADD COLUMN code_error TEXT`);
   }
 
+  // ── i18n: Factory ↔ Language mapping ────────────────────────────────────────
+  db.exec(`CREATE TABLE IF NOT EXISTS factory_languages (
+    factory_code  TEXT PRIMARY KEY,
+    language_code TEXT NOT NULL DEFAULT 'zh-TW',
+    updated_at    TEXT DEFAULT CURRENT_TIMESTAMP
+  )`);
+
+  // Migration: preferred_language on users
+  const userColsLang = db.prepare('PRAGMA table_info(users)').all().map((r) => r.name);
+  if (!userColsLang.includes('preferred_language')) {
+    db.exec(`ALTER TABLE users ADD COLUMN preferred_language TEXT`);
+  }
+
   // Seed default admin
   const adminAccount = process.env.DEFAULT_ADMIN_ACCOUNT || 'admin';
   const adminPassword = process.env.DEFAULT_ADMIN_PASSWORD || 'admin@foxlink';

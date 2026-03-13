@@ -4,6 +4,7 @@ import { useState } from 'react'
 import MarkdownRenderer from './MarkdownRenderer'
 import ResearchProgressCard from './ResearchProgressCard'
 import type { ChatMessage, GeneratedFile } from '../types'
+import { useTranslation } from 'react-i18next'
 
 interface Props {
   messages: ChatMessage[]
@@ -91,6 +92,7 @@ function MessageBubble({
   onRegenerate?: () => void
   isLast?: boolean
 }) {
+  const { t } = useTranslation()
   const [copied, setCopied] = useState(false)
   const [hover, setHover] = useState(false)
 
@@ -131,7 +133,7 @@ function MessageBubble({
               className="text-slate-400 hover:text-slate-600 transition text-xs flex items-center gap-1"
             >
               {copied ? <Check size={12} className="text-green-500" /> : <Copy size={12} />}
-              {copied ? '已複製' : '複製'}
+              {copied ? t('common.copied') : t('common.copy')}
             </button>
           )}
         </div>
@@ -166,7 +168,7 @@ function MessageBubble({
               className="text-slate-400 hover:text-slate-600 transition text-xs flex items-center gap-1"
             >
               {copied ? <Check size={12} className="text-green-500" /> : <Copy size={12} />}
-              {copied ? '已複製' : '複製'}
+              {copied ? t('common.copied') : t('common.copy')}
             </button>
             {isLast && onRegenerate && (
               <button
@@ -174,7 +176,7 @@ function MessageBubble({
                 className="text-slate-400 hover:text-slate-600 transition text-xs flex items-center gap-1"
               >
                 <RefreshCw size={12} />
-                重新生成
+                {t('common.regenerate')}
               </button>
             )}
             {msg.input_tokens !== undefined && msg.output_tokens !== undefined && (
@@ -219,6 +221,7 @@ function StreamingBubble({ content, status }: { content: string; status?: string
 }
 
 export default function ChatWindow({ messages, streaming, streamingContent, streamingStatus, onCopy, onRegenerate }: Props) {
+  const { t } = useTranslation()
   const bottomRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -233,13 +236,13 @@ export default function ChatWindow({ messages, streaming, streamingContent, stre
             <Cpu size={32} className="text-blue-600" />
           </div>
           <h2 className="text-xl font-semibold text-slate-700 mb-2">FOXLINK GPT</h2>
-          <p className="text-slate-400 text-sm">開始一個新的對話吧</p>
+          <p className="text-slate-400 text-sm">{t('chat.startPrompt')}</p>
           <div className="mt-6 flex flex-wrap justify-center gap-2 max-w-md">
             {[
-              '幫我撰寫一份工作報告',
-              '分析上傳的 Excel 數據',
-              '生成一份 PowerPoint 簡報',
-              '解釋這份文件的重點',
+              t('chat.suggestion1'),
+              t('chat.suggestion2'),
+              t('chat.suggestion3'),
+              t('chat.suggestion4'),
             ].map((hint) => (
               <span
                 key={hint}

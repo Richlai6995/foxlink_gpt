@@ -2,8 +2,10 @@ import { useState, useEffect } from 'react'
 import { Shield, AlertTriangle, RefreshCw, Download, Search } from 'lucide-react'
 import type { AuditLog } from '../../types'
 import api from '../../lib/api'
+import { useTranslation } from 'react-i18next'
 
 export default function AuditLogs() {
+  const { t } = useTranslation()
   const [logs, setLogs] = useState<AuditLog[]>([])
   const [loading, setLoading] = useState(false)
   const [expanded, setExpanded] = useState<number | null>(null)
@@ -65,14 +67,14 @@ export default function AuditLogs() {
     <div>
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-lg font-semibold text-slate-800 flex items-center gap-2">
-          <Shield size={20} className="text-blue-500" /> 稽核日誌
+          <Shield size={20} className="text-blue-500" /> {t('audit.title')}
         </h2>
         <div className="flex gap-2">
           <button onClick={exportCsv} disabled={displayedLogs.length === 0} className="btn-ghost flex items-center gap-1.5">
-            <Download size={14} /> 匯出 CSV
+            <Download size={14} /> {t('audit.exportCsv')}
           </button>
           <button onClick={load} disabled={loading} className="btn-ghost flex items-center gap-1.5">
-            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} /> 重新整理
+            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} /> {t('audit.refresh')}
           </button>
         </div>
       </div>
@@ -80,29 +82,29 @@ export default function AuditLogs() {
       {sensitiveCount > 0 && (
         <div className="bg-red-50 border border-red-200 rounded-xl p-3 mb-4 flex items-center gap-2 text-red-700 text-sm">
           <AlertTriangle size={16} />
-          本次查詢發現 <strong>{sensitiveCount}</strong> 筆敏感詞彙記錄
+          {t('audit.sensitiveAlert', { count: sensitiveCount })}
         </div>
       )}
 
       {/* Filters */}
       <div className="flex flex-wrap gap-3 mb-4 bg-slate-50 rounded-xl p-4">
         <div>
-          <label className="label">開始日期</label>
+          <label className="label">{t('audit.startDate')}</label>
           <input type="date" value={filters.startDate} onChange={(e) => setFilters((p) => ({ ...p, startDate: e.target.value }))} className="input" />
         </div>
         <div>
-          <label className="label">結束日期</label>
+          <label className="label">{t('audit.endDate')}</label>
           <input type="date" value={filters.endDate} onChange={(e) => setFilters((p) => ({ ...p, endDate: e.target.value }))} className="input" />
         </div>
         <div>
-          <label className="label">類型</label>
+          <label className="label">{t('audit.type')}</label>
           <select value={filters.sensitive} onChange={(e) => setFilters((p) => ({ ...p, sensitive: e.target.value }))} className="input">
-            <option value="">全部</option>
-            <option value="1">僅敏感詞</option>
+            <option value="">{t('audit.typeAll')}</option>
+            <option value="1">{t('audit.typeSensitive')}</option>
           </select>
         </div>
         <div className="flex items-end">
-          <button onClick={load} className="btn-primary">查詢</button>
+          <button onClick={load} className="btn-primary">{t('audit.query')}</button>
         </div>
       </div>
 
@@ -113,7 +115,7 @@ export default function AuditLogs() {
           type="text"
           value={keyword}
           onChange={(e) => setKeyword(e.target.value)}
-          placeholder="搜尋對話內容關鍵字..."
+          placeholder={t('audit.contentSearch')}
           className="input pl-8 w-full"
         />
       </div>
@@ -139,7 +141,7 @@ export default function AuditLogs() {
               <span className="text-xs text-slate-400">{l.created_at?.slice(0, 16)}</span>
               {l.has_sensitive ? (
                 <span className="ml-auto text-xs bg-red-100 text-red-700 px-2 py-0.5 rounded-full">
-                  敏感詞: {JSON.parse(l.sensitive_keywords || '[]').join(', ')}
+                  {t('audit.sensitive', { keywords: JSON.parse(l.sensitive_keywords || '[]').join(', ') })}
                 </span>
               ) : (
                 <span className="ml-auto text-xs text-slate-300">正常</span>
@@ -147,7 +149,7 @@ export default function AuditLogs() {
             </div>
             {expanded === l.id && (
               <div className="px-4 pb-3 border-t border-slate-100">
-                <p className="text-xs text-slate-500 mt-2 mb-1">對話內容:</p>
+                <p className="text-xs text-slate-500 mt-2 mb-1">{t('audit.conversationContent')}</p>
                 <p className="text-sm text-slate-700 bg-slate-50 rounded-lg p-3 whitespace-pre-wrap max-h-48 overflow-y-auto">
                   {l.content}
                 </p>

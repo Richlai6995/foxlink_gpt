@@ -2,9 +2,11 @@ import { useState } from 'react'
 import { useAuth } from '../context/AuthContext'
 import { Eye, EyeOff, X, Mail } from 'lucide-react'
 import api from '../lib/api'
+import { useTranslation } from 'react-i18next'
 
 export default function Login() {
   const { login } = useAuth()
+  const { t } = useTranslation()
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [showPw, setShowPw] = useState(false)
@@ -28,7 +30,7 @@ export default function Login() {
       setForgotMsg(res.data.message)
     } catch (err: unknown) {
       setForgotError(
-        (err as { response?: { data?: { error?: string } } })?.response?.data?.error || '請求失敗，請稍後再試'
+        (err as { response?: { data?: { error?: string } } })?.response?.data?.error || t('login.requestFailed')
       )
     } finally {
       setForgotLoading(false)
@@ -51,7 +53,7 @@ export default function Login() {
     } catch (err: unknown) {
       const msg =
         (err as { response?: { data?: { error?: string } } })?.response?.data?.error ||
-        '登入失敗，請稍後再試'
+        t('login.loginFailed')
       setError(msg)
     } finally {
       setLoading(false)
@@ -67,34 +69,34 @@ export default function Login() {
             <img src="/favicon.png" alt="FOXLINK GPT" className="w-20 h-20 object-contain drop-shadow-lg" />
           </div>
           <h1 className="text-2xl font-bold text-white">FOXLINK GPT</h1>
-          <p className="text-slate-400 text-sm mt-1">企業智慧對話系統</p>
+          <p className="text-slate-400 text-sm mt-1">{t('login.title')}</p>
         </div>
 
         {/* Card */}
         <div className="bg-white/5 backdrop-blur-sm border border-white/10 rounded-2xl p-8 shadow-2xl">
           <form onSubmit={handleSubmit} className="space-y-5">
             <div>
-              <label className="block text-sm font-medium text-slate-300 mb-2">帳號</label>
+              <label className="block text-sm font-medium text-slate-300 mb-2">{t('login.username')}</label>
               <input
                 type="text"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
                 className="w-full bg-white/10 border border-white/20 rounded-xl px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition"
-                placeholder="請輸入帳號"
+                placeholder={t('login.usernamePlaceholder')}
                 required
                 autoFocus
               />
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-slate-300 mb-2">密碼</label>
+              <label className="block text-sm font-medium text-slate-300 mb-2">{t('login.password')}</label>
               <div className="relative">
                 <input
                   type={showPw ? 'text' : 'password'}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   className="w-full bg-white/10 border border-white/20 rounded-xl px-4 py-3 pr-12 text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition"
-                  placeholder="請輸入密碼"
+                  placeholder={t('login.passwordPlaceholder')}
                   required
                 />
                 <button
@@ -118,7 +120,7 @@ export default function Login() {
               disabled={loading}
               className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold py-3 rounded-xl transition shadow-lg shadow-blue-600/30"
             >
-              {loading ? '登入中...' : '登入'}
+              {loading ? t('login.submitting') : t('login.submit')}
             </button>
 
             <div className="text-center">
@@ -127,7 +129,7 @@ export default function Login() {
                 onClick={() => setShowForgot(true)}
                 className="text-slate-500 hover:text-slate-300 text-sm transition"
               >
-                忘記密碼？
+                {t('login.forgotPassword')}
               </button>
             </div>
           </form>
@@ -140,12 +142,12 @@ export default function Login() {
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-2 text-white font-semibold">
                   <Mail size={18} className="text-blue-400" />
-                  重置密碼
+                  {t('login.resetTitle')}
                 </div>
                 <button onClick={closeForgot} className="text-slate-400 hover:text-white"><X size={18} /></button>
               </div>
               <p className="text-slate-400 text-sm mb-4">
-                輸入您的帳號，系統將寄送重置連結至您的電子郵件（僅適用手動建立帳號）。
+                {t('login.resetDesc')}
               </p>
               {forgotMsg ? (
                 <div className="bg-green-500/20 border border-green-500/30 rounded-xl px-4 py-3 text-green-300 text-sm">
@@ -158,7 +160,7 @@ export default function Login() {
                     value={forgotUsername}
                     onChange={e => setForgotUsername(e.target.value)}
                     className="w-full bg-white/10 border border-white/20 rounded-xl px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 transition"
-                    placeholder="請輸入帳號"
+                    placeholder={t('login.resetUsernamePlaceholder')}
                     required
                     autoFocus
                   />
@@ -170,7 +172,7 @@ export default function Login() {
                     disabled={forgotLoading}
                     className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-semibold py-3 rounded-xl transition"
                   >
-                    {forgotLoading ? '寄送中...' : '寄送重置連結'}
+                    {forgotLoading ? t('login.resetSubmitting') : t('login.resetSubmit')}
                   </button>
                 </form>
               )}

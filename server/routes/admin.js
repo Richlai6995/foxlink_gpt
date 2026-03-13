@@ -1579,4 +1579,47 @@ router.get('/skill-runners/:id/logs', (req, res) => {
   });
 });
 
+// ── Factory Language Mapping ─────────────────────────────────────────────────
+router.get('/factory-languages', async (req, res) => {
+  try {
+    const db = require('../database').db;
+    const rows = db.prepare('SELECT factory_code, language_code, updated_at FROM factory_languages ORDER BY factory_code ASC').all();
+    res.json(rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post('/factory-languages', async (req, res) => {
+  const { factory_code, language_code } = req.body;
+  if (!factory_code || !language_code) return res.status(400).json({ error: '廠區碼與語言碼為必填' });
+  if (!['zh-TW', 'en', 'vi'].includes(language_code)) return res.status(400).json({ error: '不支援的語言碼' });
+  try {
+    const db = require('../database').db;
+    const existing = db.prepare('SELECT factory_code FROM factory_languages WHERE factory_code=?').get(factory_code);
+    if (existing) {
+      db.prepare('UPDATE factory_languages SET language_code=?, updated_at=datetime(\'now\') WHERE factory_code=?').run(language_code, factory_code);
+    } else {
+      db.prepare('INSERT INTO factory_languages (factory_code, language_code) VALUES (?,?)').run(factory_code, language_code);
+    }
+    res.json({ factory_code, language_code });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.put('/factory-languages/:code', async (req, res) => {
+  const { language_code } = req.body;
+  if (!language_code || !['zh-TW', 'en', 'vi'].includes(language_code)) return res.status(400).json({ error: '不支援的語言碼' });
+  try {
+    const db = require('../database').db;
+    db.prepare('UPDATE factory_languages SET language_code=?, updated_at=datetime(\'now\') WHERE factory_code=?').run(language_code, req.params.code);
+    res.json({ factory_code: req.params.code, language_code });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.delete('/factory-languages/:code', async (req, res) => {
+  try {
+    const db = require('../database').db;
+    db.prepare('DELETE FROM factory_languages WHERE factory_code=?').run(req.params.code);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 module.exports = router;

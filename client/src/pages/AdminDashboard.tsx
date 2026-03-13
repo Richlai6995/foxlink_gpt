@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Users, BarChart3, Shield, AlertTriangle, Database, Mail, ArrowLeft, Cpu, DollarSign, CalendarClock, Plug, Zap, UserCog, Sparkles, Code2, Search, KeyRound, MonitorPlay, Lock } from 'lucide-react'
+import { Users, BarChart3, Shield, AlertTriangle, Database, Mail, ArrowLeft, Cpu, DollarSign, CalendarClock, Plug, Zap, UserCog, Sparkles, Code2, Search, KeyRound, MonitorPlay, Lock, Globe } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import UserManagement from '../components/admin/UserManagement'
 import TokenUsagePanel from '../components/admin/TokenUsage'
 import AuditLogs from '../components/admin/AuditLogs'
@@ -21,35 +22,38 @@ import ResearchLogsPanel from '../components/admin/ResearchLogsPanel'
 import ApiKeysPanel from '../components/admin/ApiKeysPanel'
 import AiDashboardAdmin from '../components/admin/AiDashboardAdmin'
 import DataPermissionsPanel from '../components/admin/DataPermissionsPanel'
+import FactoryLanguagesPanel from '../components/admin/FactoryLanguagesPanel'
 
-type Tab = 'users' | 'roles' | 'tokens' | 'audit' | 'keywords' | 'db' | 'mail' | 'llm' | 'vector-defaults' | 'cost' | 'scheduled' | 'mcp' | 'dify' | 'kb' | 'skills' | 'code-runners' | 'research' | 'api-keys' | 'ai-dashboard' | 'data-permissions'
-
-const tabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
-  { id: 'users', label: '使用者管理', icon: <Users size={16} /> },
-  { id: 'roles', label: '角色管理', icon: <UserCog size={16} /> },
-  { id: 'tokens', label: 'Token 統計', icon: <BarChart3 size={16} /> },
-  { id: 'cost', label: '費用統計及分析', icon: <DollarSign size={16} /> },
-  { id: 'audit', label: '稽核日誌', icon: <Shield size={16} /> },
-  { id: 'keywords', label: '敏感詞彙', icon: <AlertTriangle size={16} /> },
-  { id: 'research', label: '深度研究紀錄', icon: <Search size={16} /> },
-  { id: 'api-keys', label: 'API 金鑰管理', icon: <KeyRound size={16} /> },
-  { id: 'scheduled', label: '排程任務', icon: <CalendarClock size={16} /> },
-  { id: 'mcp', label: 'MCP 伺服器', icon: <Plug size={16} /> },
-  { id: 'dify', label: 'DIFY 知識庫', icon: <Zap size={16} /> },
-  { id: 'kb', label: '知識庫管理', icon: <Database size={16} /> },
-  { id: 'skills', label: '技能管理', icon: <Sparkles size={16} /> },
-  { id: 'code-runners', label: 'Code Runners', icon: <Code2 size={16} /> },
-  { id: 'ai-dashboard', label: 'AI 戰情室', icon: <MonitorPlay size={16} /> },
-  { id: 'data-permissions', label: '資料權限管理', icon: <Lock size={16} /> },
-  { id: 'db', label: '資料庫維護', icon: <Database size={16} /> },
-  { id: 'mail', label: '郵件設定', icon: <Mail size={16} /> },
-  { id: 'llm', label: 'LLM 模型設定', icon: <Cpu size={16} /> },
-  { id: 'vector-defaults', label: '向量預設模型', icon: <Cpu size={16} /> },
-]
+type Tab = 'users' | 'roles' | 'tokens' | 'audit' | 'keywords' | 'db' | 'mail' | 'llm' | 'vector-defaults' | 'cost' | 'scheduled' | 'mcp' | 'dify' | 'kb' | 'skills' | 'code-runners' | 'research' | 'api-keys' | 'ai-dashboard' | 'data-permissions' | 'factory-languages'
 
 export default function AdminDashboard() {
   const [activeTab, setActiveTab] = useState<Tab>('users')
   const navigate = useNavigate()
+  const { t } = useTranslation()
+
+  const tabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
+    { id: 'users', label: t('admin.tabs.users'), icon: <Users size={16} /> },
+    { id: 'roles', label: t('admin.tabs.roles'), icon: <UserCog size={16} /> },
+    { id: 'tokens', label: t('admin.tabs.tokens'), icon: <BarChart3 size={16} /> },
+    { id: 'cost', label: t('admin.tabs.cost'), icon: <DollarSign size={16} /> },
+    { id: 'audit', label: t('admin.tabs.audit'), icon: <Shield size={16} /> },
+    { id: 'keywords', label: t('admin.tabs.keywords'), icon: <AlertTriangle size={16} /> },
+    { id: 'research', label: t('admin.tabs.research'), icon: <Search size={16} /> },
+    { id: 'api-keys', label: t('admin.tabs.apiKeys'), icon: <KeyRound size={16} /> },
+    { id: 'scheduled', label: t('admin.tabs.scheduled'), icon: <CalendarClock size={16} /> },
+    { id: 'mcp', label: t('admin.tabs.mcp'), icon: <Plug size={16} /> },
+    { id: 'dify', label: t('admin.tabs.dify'), icon: <Zap size={16} /> },
+    { id: 'kb', label: t('admin.tabs.kb'), icon: <Database size={16} /> },
+    { id: 'skills', label: t('admin.tabs.skills'), icon: <Sparkles size={16} /> },
+    { id: 'code-runners', label: t('admin.tabs.codeRunners'), icon: <Code2 size={16} /> },
+    { id: 'ai-dashboard', label: t('admin.tabs.aiDashboard'), icon: <MonitorPlay size={16} /> },
+    { id: 'data-permissions', label: t('admin.tabs.dataPermissions'), icon: <Lock size={16} /> },
+    { id: 'factory-languages', label: t('admin.tabs.factoryLanguages'), icon: <Globe size={16} /> },
+    { id: 'db', label: t('admin.tabs.db'), icon: <Database size={16} /> },
+    { id: 'mail', label: t('admin.tabs.mail'), icon: <Mail size={16} /> },
+    { id: 'llm', label: t('admin.tabs.llm'), icon: <Cpu size={16} /> },
+    { id: 'vector-defaults', label: t('admin.tabs.vectorDefaults'), icon: <Cpu size={16} /> },
+  ]
 
   return (
     <div className="min-h-screen bg-slate-100">
@@ -60,19 +64,19 @@ export default function AdminDashboard() {
             <Cpu size={14} className="text-white" />
           </div>
           <span className="font-bold">FOXLINK GPT</span>
-          <span className="text-slate-500 text-sm">/ 系統管理</span>
+          <span className="text-slate-500 text-sm">/ {t('admin.title')}</span>
         </div>
         <button
           onClick={() => navigate('/chat')}
           className="flex items-center gap-1.5 text-slate-400 hover:text-white text-sm transition"
         >
-          <ArrowLeft size={15} /> 返回聊天
+          <ArrowLeft size={15} /> {t('admin.backToChat')}
         </button>
       </header>
 
       <div className="flex h-[calc(100vh-52px)]">
         {/* Sidebar */}
-        <nav className="w-56 bg-white border-r border-slate-200 py-4">
+        <nav className="w-56 bg-white border-r border-slate-200 py-4 overflow-y-auto">
           {tabs.map((t) => (
             <button
               key={t.id}
@@ -110,6 +114,7 @@ export default function AdminDashboard() {
           {activeTab === 'api-keys' && <ApiKeysPanel />}
           {activeTab === 'ai-dashboard' && <AiDashboardAdmin />}
           {activeTab === 'data-permissions' && <DataPermissionsPanel />}
+          {activeTab === 'factory-languages' && <FactoryLanguagesPanel />}
         </main>
       </div>
     </div>

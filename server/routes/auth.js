@@ -403,10 +403,35 @@ router.get('/me', async (req, res) => {
     userWithoutPassword.effective_can_deep_research      = user.role === 'admin' || resolveEff(user.can_deep_research, rolePerms?.can_deep_research ?? 1);
     userWithoutPassword.effective_can_design_ai_select   = user.role === 'admin' || (user.can_design_ai_select == 1);
     userWithoutPassword.effective_can_use_ai_dashboard   = user.role === 'admin' || (user.can_use_ai_dashboard == 1);
+    // Resolve display language: preferred_language > factory_code mapping > 'zh-TW'
+    let resolvedLanguage = user.preferred_language || null;
+    if (!resolvedLanguage && user.factory_code) {
+      const dbSqlite = require('../database').db;
+      const fl = dbSqlite.prepare('SELECT language_code FROM factory_languages WHERE factory_code=?').get(user.factory_code);
+      if (fl) resolvedLanguage = fl.language_code;
+    }
+    userWithoutPassword.resolved_language = resolvedLanguage || 'zh-TW';
     res.json(userWithoutPassword);
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
+});
+
+// PUT /api/auth/language — self-service preferred_language update
+router.put('/language', (req, res, next) => {
+  // inline verifyToken (sessions not yet exported as middleware at this point)
+  const token = req.headers.authorization?.split(' ')[1];
+  if (!token || !sessions.has(token)) return res.status(401).json({ error: 'Unauthorized' });
+  req.user = sessions.get(token);
+  next();
+}, async (req, res) => {
+  const { language_code } = req.body;
+  if (!['zh-TW', 'en', 'vi'].includes(language_code)) return res.status(400).json({ error: '不支援的語言碼' });
+  try {
+    const db = require('../database').db;
+    db.prepare('UPDATE users SET preferred_language=? WHERE id=?').run(language_code, req.user.id);
+    res.json({ ok: true, language_code });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // Middleware

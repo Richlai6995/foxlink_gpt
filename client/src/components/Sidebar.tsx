@@ -1,9 +1,11 @@
 import { useState, useEffect } from 'react'
-import { Plus, MessageSquare, Trash2, ChevronDown, LogOut, Settings, Cpu, Zap, CalendarClock, HelpCircle, KeyRound, X, Eye, EyeOff, GitFork, Sparkles, Database, Menu, ChevronUp, BarChart3 } from 'lucide-react'
+import { Plus, MessageSquare, Trash2, ChevronDown, LogOut, Settings, Cpu, Zap, CalendarClock, HelpCircle, KeyRound, X, Eye, EyeOff, GitFork, Sparkles, Database, Menu, ChevronUp, BarChart3, Globe } from 'lucide-react'
 import type { ChatSession, ModelType, LlmModel } from '../types'
 import { useAuth } from '../context/AuthContext'
 import { useNavigate } from 'react-router-dom'
 import api from '../lib/api'
+import { useTranslation } from 'react-i18next'
+import { SUPPORTED_LANGUAGES, type LangCode } from '../i18n'
 
 interface Props {
   sessions: ChatSession[]
@@ -15,17 +17,17 @@ interface Props {
   onModelChange: (m: ModelType) => void
 }
 
-function groupSessions(sessions: ChatSession[]) {
+function groupSessions(sessions: ChatSession[], t: (k: string) => string) {
   const now = new Date()
   const today = now.toDateString()
   const yesterday = new Date(now.getTime() - 86400000).toDateString()
   const last7 = new Date(now.getTime() - 7 * 86400000)
 
   const groups: { label: string; items: ChatSession[] }[] = [
-    { label: '今天', items: [] },
-    { label: '昨天', items: [] },
-    { label: '過去 7 天', items: [] },
-    { label: '更早', items: [] },
+    { label: t('sidebar.today'), items: [] },
+    { label: t('sidebar.yesterday'), items: [] },
+    { label: t('sidebar.last7days'), items: [] },
+    { label: t('sidebar.earlier'), items: [] },
   ]
 
   sessions.forEach((s) => {
@@ -48,12 +50,14 @@ export default function Sidebar({
   onDeleteSession,
   onModelChange,
 }: Props) {
-  const { user, logout, isAdmin, canSchedule, canCreateKb, canUseDashboard } = useAuth()
+  const { user, logout, isAdmin, canSchedule, canCreateKb, canUseDashboard, setLanguage } = useAuth()
   const navigate = useNavigate()
+  const { t, i18n } = useTranslation()
   const [hoveredId, setHoveredId] = useState<string | null>(null)
   const [showModelMenu, setShowModelMenu] = useState(false)
   const [llmModels, setLlmModels] = useState<LlmModel[]>([])
   const [showMenu, setShowMenu] = useState(false)
+  const [showLangMenu, setShowLangMenu] = useState(false)
 
   // Import share modal
   const [showImport, setShowImport] = useState(false)
@@ -66,7 +70,7 @@ export default function Sidebar({
     setImportError('')
     const m = importUrl.match(/\/share\/([a-f0-9-]+)/i)
     const token = m ? m[1] : importUrl.trim()
-    if (!token) return setImportError('請輸入有效的分享連結或 token')
+    if (!token) return setImportError(t('sidebar.importInvalidToken'))
     setImporting(true)
     try {
       const res = await api.post(`/share/${token}/fork`)
@@ -74,7 +78,7 @@ export default function Sidebar({
       setImportUrl('')
       navigate(`/chat?session=${res.data.sessionId}`)
     } catch (err: unknown) {
-      setImportError((err as { response?: { data?: { error?: string } } })?.response?.data?.error || '匯入失敗，請確認連結是否正確')
+      setImportError((err as { response?: { data?: { error?: string } } })?.response?.data?.error || t('sidebar.importError'))
     } finally {
       setImporting(false)
     }
@@ -92,17 +96,17 @@ export default function Sidebar({
 
   const handleChangePw = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (pwForm.newPw !== pwForm.confirm) return setPwError('兩次密碼不一致')
-    if (pwForm.newPw.length < 6) return setPwError('新密碼至少 6 個字元')
+    if (pwForm.newPw !== pwForm.confirm) return setPwError(t('sidebar.passwordMismatch'))
+    if (pwForm.newPw.length < 6) return setPwError(t('sidebar.passwordTooShort'))
     setPwLoading(true)
     setPwError('')
     setPwMsg('')
     try {
       await api.post('/auth/change-password', { old_password: pwForm.old, new_password: pwForm.newPw })
-      setPwMsg('密碼已成功更新')
+      setPwMsg(t('sidebar.passwordUpdated'))
       setPwForm({ old: '', newPw: '', confirm: '' })
     } catch (err: unknown) {
-      setPwError((err as { response?: { data?: { error?: string } } })?.response?.data?.error || '更新失敗')
+      setPwError((err as { response?: { data?: { error?: string } } })?.response?.data?.error || t('sidebar.updateFailed'))
     } finally {
       setPwLoading(false)
     }
@@ -119,8 +123,13 @@ export default function Sidebar({
     api.get('/chat/models').then((r) => setLlmModels(r.data)).catch(() => { })
   }, [])
 
+  const handleLangChange = async (lang: LangCode) => {
+    setShowLangMenu(false)
+    await setLanguage(lang)
+  }
+
   const currentModelInfo = llmModels.find((m) => m.key === model)
-  const groups = groupSessions(sessions)
+  const groups = groupSessions(sessions, t)
 
   return (
     <div className="w-72 bg-slate-900 flex flex-col h-full border-r border-slate-800">
@@ -136,7 +145,7 @@ export default function Sidebar({
           className="w-full flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-xl text-sm font-medium transition"
         >
           <Plus size={16} />
-          新對話
+          {t('sidebar.newChat')}
         </button>
       </div>
 
@@ -188,7 +197,7 @@ export default function Sidebar({
       {/* Sessions List */}
       <div className="flex-1 overflow-y-auto py-2">
         {sessions.length === 0 ? (
-          <p className="text-slate-600 text-xs text-center py-8">還沒有對話紀錄</p>
+          <p className="text-slate-600 text-xs text-center py-8">{t('sidebar.noHistory')}</p>
         ) : (
           groups.map((group) => (
             <div key={group.label} className="mb-2">
@@ -206,7 +215,7 @@ export default function Sidebar({
                 >
                   <div className="flex items-center gap-2 px-3 py-2">
                     <MessageSquare size={14} className="flex-shrink-0 opacity-60" />
-                    <span className="text-xs truncate flex-1">{s.title || '新對話'}</span>
+                    <span className="text-xs truncate flex-1">{s.title || t('sidebar.newSession')}</span>
                     {hoveredId === s.id && (
                       <button
                         onClick={(e) => {
@@ -235,7 +244,7 @@ export default function Sidebar({
             className="w-full flex items-center gap-2 text-slate-400 hover:text-slate-200 hover:bg-slate-800 px-3 py-2 rounded-lg text-xs transition"
           >
             <Menu size={14} />
-            <span className="flex-1 text-left">更多功能</span>
+            <span className="flex-1 text-left">{t('sidebar.moreFeatures')}</span>
             {showMenu ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
           </button>
           {showMenu && (
@@ -245,40 +254,66 @@ export default function Sidebar({
                 className="w-full flex items-center gap-2 text-slate-300 hover:bg-slate-700 px-3 py-2.5 text-xs transition"
               >
                 <GitFork size={13} className="text-blue-400" />
-                匯入分享對話
+                {t('sidebar.importShare')}
               </button>
               {isAdmin && (
                 <button onClick={() => { setShowMenu(false); navigate('/admin') }}
                   className="w-full flex items-center gap-2 text-amber-400 hover:bg-slate-700 px-3 py-2.5 text-xs transition font-medium">
-                  <Settings size={13} /> 系統管理
+                  <Settings size={13} /> {t('sidebar.systemAdmin')}
                 </button>
               )}
               {canSchedule && (
                 <button onClick={() => { setShowMenu(false); navigate('/scheduled-tasks') }}
                   className="w-full flex items-center gap-2 text-cyan-400 hover:bg-slate-700 px-3 py-2.5 text-xs transition font-medium">
-                  <CalendarClock size={13} /> 排程任務
+                  <CalendarClock size={13} /> {t('sidebar.scheduledTasks')}
                 </button>
               )}
               <button onClick={() => { setShowMenu(false); navigate('/skills') }}
                 className="w-full flex items-center gap-2 text-purple-400 hover:bg-slate-700 px-3 py-2.5 text-xs transition font-medium">
-                <Sparkles size={13} /> 技能市集
+                <Sparkles size={13} /> {t('sidebar.skillMarket')}
               </button>
               {(canCreateKb || isAdmin) && (
                 <button onClick={() => { setShowMenu(false); navigate('/kb') }}
                   className="w-full flex items-center gap-2 text-teal-400 hover:bg-slate-700 px-3 py-2.5 text-xs transition font-medium">
-                  <Database size={13} /> 知識庫市集
+                  <Database size={13} /> {t('sidebar.kbMarket')}
                 </button>
               )}
               {(canUseDashboard || isAdmin) && (
                 <button onClick={() => { setShowMenu(false); navigate('/dashboard') }}
                   className="w-full flex items-center gap-2 text-orange-400 hover:bg-slate-700 px-3 py-2.5 text-xs transition font-medium">
-                  <BarChart3 size={13} /> AI 戰情
+                  <BarChart3 size={13} /> {t('sidebar.aiDashboard')}
                 </button>
               )}
               <button onClick={() => { setShowMenu(false); navigate('/help') }}
                 className="w-full flex items-center gap-2 text-emerald-400 hover:bg-slate-700 px-3 py-2.5 text-xs transition font-medium">
-                <HelpCircle size={13} /> 使用說明書
+                <HelpCircle size={13} /> {t('sidebar.helpDoc')}
               </button>
+            </div>
+          )}
+        </div>
+
+        {/* Language Switcher */}
+        <div className="relative">
+          <button
+            onClick={() => setShowLangMenu(v => !v)}
+            className="w-full flex items-center gap-2 text-slate-400 hover:text-slate-200 hover:bg-slate-800 px-3 py-2 rounded-lg text-xs transition"
+          >
+            <Globe size={14} />
+            <span className="flex-1 text-left">{t('lang.switchLang')} — {SUPPORTED_LANGUAGES.find(l => l.code === i18n.language)?.label || i18n.language}</span>
+            {showLangMenu ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+          </button>
+          {showLangMenu && (
+            <div className="absolute bottom-full left-0 right-0 mb-2 bg-slate-800 border border-slate-700 rounded-xl overflow-hidden shadow-2xl z-10">
+              {SUPPORTED_LANGUAGES.map((lang) => (
+                <button
+                  key={lang.code}
+                  onClick={() => handleLangChange(lang.code as LangCode)}
+                  className={`w-full flex items-center gap-2 px-3 py-2.5 text-xs transition hover:bg-slate-700 ${i18n.language === lang.code ? 'text-blue-400 font-medium' : 'text-slate-300'}`}
+                >
+                  {lang.label}
+                  {i18n.language === lang.code && <span className="ml-auto text-blue-400">✓</span>}
+                </button>
+              ))}
             </div>
           )}
         </div>
@@ -300,14 +335,14 @@ export default function Sidebar({
           <div className="flex items-center gap-1">
             <button
               onClick={() => setShowChangePw(true)}
-              title={isManualAccount ? '變更密碼' : 'AD 網域帳號密碼管理'}
+              title={isManualAccount ? t('sidebar.changePassword') : t('sidebar.adPasswordNote')}
               className="text-slate-500 hover:text-yellow-400 transition"
             >
               <KeyRound size={15} />
             </button>
             <button
               onClick={logout}
-              title="登出"
+              title={t('sidebar.logout')}
               className="text-slate-500 hover:text-red-400 transition"
             >
               <LogOut size={16} />
@@ -323,27 +358,27 @@ export default function Sidebar({
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-2 text-white font-semibold">
                 <GitFork size={16} className="text-blue-400" />
-                匯入分享對話
+                {t('sidebar.importShareTitle')}
               </div>
               <button onClick={() => setShowImport(false)} className="text-slate-400 hover:text-white"><X size={18} /></button>
             </div>
-            <p className="text-slate-400 text-xs mb-4">貼上收到的分享連結，系統將複製一份對話到您的帳號。</p>
+            <p className="text-slate-400 text-xs mb-4">{t('sidebar.importShareDesc')}</p>
             <form onSubmit={handleImport} className="space-y-3">
               <input
                 type="text"
                 value={importUrl}
                 onChange={e => setImportUrl(e.target.value)}
-                placeholder="貼上分享連結或 token"
+                placeholder={t('sidebar.importSharePlaceholder')}
                 className="w-full bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500 transition placeholder-slate-600"
                 autoFocus
               />
               {importError && <p className="text-red-400 text-xs">{importError}</p>}
               <div className="flex gap-2 pt-1">
                 <button type="button" onClick={() => setShowImport(false)} className="flex-1 py-2 rounded-lg text-slate-400 hover:text-white border border-white/10 text-sm transition">
-                  取消
+                  {t('common.cancel')}
                 </button>
                 <button type="submit" disabled={importing} className="flex-1 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm font-medium transition">
-                  {importing ? '匯入中...' : '匯入'}
+                  {importing ? t('sidebar.importing') : t('sidebar.importBtn')}
                 </button>
               </div>
             </form>
@@ -358,17 +393,17 @@ export default function Sidebar({
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-2 text-white font-semibold">
                 <KeyRound size={16} className="text-yellow-400" />
-                變更密碼
+                {t('sidebar.changePwTitle')}
               </div>
               <button onClick={closePwModal} className="text-slate-400 hover:text-white"><X size={18} /></button>
             </div>
             {!isManualAccount ? (
               <div className="space-y-3">
                 <div className="bg-amber-500/20 border border-amber-500/30 rounded-xl px-4 py-3 text-amber-300 text-sm">
-                  本系統無法進行AD密碼變更，請由AD管理介面進行密碼變更。
+                  {t('sidebar.adPwNote')}
                 </div>
                 <button type="button" onClick={closePwModal} className="w-full py-2 rounded-lg text-slate-400 hover:text-white border border-white/10 text-sm transition">
-                  關閉
+                  {t('common.close')}
                 </button>
               </div>
             ) : pwMsg ? (
@@ -378,7 +413,7 @@ export default function Sidebar({
             ) : null}
             {isManualAccount && <form onSubmit={handleChangePw} className="space-y-3">
               <div>
-                <label className="block text-xs font-medium text-slate-400 mb-1">舊密碼</label>
+                <label className="block text-xs font-medium text-slate-400 mb-1">{t('sidebar.oldPassword')}</label>
                 <input
                   type={showPw ? 'text' : 'password'}
                   value={pwForm.old}
@@ -388,14 +423,14 @@ export default function Sidebar({
                 />
               </div>
               <div>
-                <label className="block text-xs font-medium text-slate-400 mb-1">新密碼</label>
+                <label className="block text-xs font-medium text-slate-400 mb-1">{t('sidebar.newPassword')}</label>
                 <div className="relative">
                   <input
                     type={showPw ? 'text' : 'password'}
                     value={pwForm.newPw}
                     onChange={e => setPwForm(p => ({ ...p, newPw: e.target.value }))}
                     className="w-full bg-white/10 border border-white/20 rounded-lg px-3 py-2 pr-10 text-white text-sm focus:outline-none focus:border-blue-500 transition"
-                    placeholder="至少 6 個字元"
+                    placeholder={t('sidebar.newPasswordPlaceholder')}
                     required
                   />
                   <button
@@ -408,7 +443,7 @@ export default function Sidebar({
                 </div>
               </div>
               <div>
-                <label className="block text-xs font-medium text-slate-400 mb-1">確認新密碼</label>
+                <label className="block text-xs font-medium text-slate-400 mb-1">{t('sidebar.confirmNewPassword')}</label>
                 <input
                   type={showPw ? 'text' : 'password'}
                   value={pwForm.confirm}
@@ -420,10 +455,10 @@ export default function Sidebar({
               {pwError && <p className="text-red-400 text-xs">{pwError}</p>}
               <div className="flex gap-2 pt-1">
                 <button type="button" onClick={closePwModal} className="flex-1 py-2 rounded-lg text-slate-400 hover:text-white border border-white/10 text-sm transition">
-                  取消
+                  {t('common.cancel')}
                 </button>
                 <button type="submit" disabled={pwLoading} className="flex-1 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm font-medium transition">
-                  {pwLoading ? '更新中...' : '確認變更'}
+                  {pwLoading ? t('sidebar.updating') : t('sidebar.confirmChange')}
                 </button>
               </div>
             </form>}

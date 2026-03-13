@@ -1,6 +1,8 @@
 import React, { createContext, useContext, useState, useCallback, useEffect } from 'react'
 import type { User } from '../types'
 import api from '../lib/api'
+import i18n from '../i18n'
+import type { LangCode } from '../i18n'
 
 interface AuthContextType {
   user: User | null
@@ -13,9 +15,15 @@ interface AuthContextType {
   canCreateKb: boolean
   canUseDashboard: boolean
   canDesignAiSelect: boolean
+  setLanguage: (lang: LangCode) => Promise<void>
 }
 
 const AuthContext = createContext<AuthContextType | null>(null)
+
+function applyLanguage(u: any) {
+  const lang = (u?.resolved_language || u?.preferred_language || 'zh-TW') as LangCode
+  if (['zh-TW', 'en', 'vi'].includes(lang)) i18n.changeLanguage(lang)
+}
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(() => {
@@ -24,7 +32,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   })
   const [token, setToken] = useState<string | null>(() => localStorage.getItem('token'))
 
-  // Refresh user profile from server on startup (picks up permission changes without re-login)
+  // Apply language from cached user on initial load
+  useEffect(() => {
+    if (user) applyLanguage(user)
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Refresh user profile from server on startup (picks up permission/language changes without re-login)
   useEffect(() => {
     const t = localStorage.getItem('token')
     if (!t) return
@@ -32,8 +45,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const u = r.data
       localStorage.setItem('user', JSON.stringify(u))
       setUser(u)
+      applyLanguage(u)
     }).catch((e) => {
-      // session expired (e.g. server restart) → force logout
       if (e.response?.status === 401) {
         localStorage.removeItem('token')
         localStorage.removeItem('user')
@@ -50,16 +63,28 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     localStorage.setItem('user', JSON.stringify(u))
     setToken(t)
     setUser(u)
+    applyLanguage(u)
   }, [])
 
   const logout = useCallback(async () => {
-    try {
-      await api.post('/auth/logout')
-    } catch (_) {}
+    try { await api.post('/auth/logout') } catch (_) {}
     localStorage.removeItem('token')
     localStorage.removeItem('user')
     setToken(null)
     setUser(null)
+    i18n.changeLanguage('zh-TW')
+  }, [])
+
+  const setLanguage = useCallback(async (lang: LangCode) => {
+    await api.put('/auth/language', { language_code: lang })
+    i18n.changeLanguage(lang)
+    // Update cached user
+    setUser((prev) => {
+      if (!prev) return prev
+      const updated = { ...prev, preferred_language: lang, resolved_language: lang } as any
+      localStorage.setItem('user', JSON.stringify(updated))
+      return updated
+    })
   }, [])
 
   const isAdmin          = user?.role === 'admin'
@@ -81,6 +106,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         canCreateKb,
         canUseDashboard,
         canDesignAiSelect,
+        setLanguage,
       }}
     >
       {children}
