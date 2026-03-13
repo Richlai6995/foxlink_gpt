@@ -613,11 +613,45 @@ function TaskFormModal({
   )
 }
 
+// ── RunDetailModal ────────────────────────────────────────────────────────────
+function RunDetailModal({ run, onClose }: { run: TaskRun; onClose: () => void }) {
+  const [fullText, setFullText] = useState<string | null>(null)
+  const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    if (!run.session_id) { setFullText(run.response_preview || ''); return }
+    setLoading(true)
+    api.get(`/chat/sessions/${run.session_id}`)
+      .then((r) => {
+        const msgs: { role: string; content: string }[] = r.data.messages || []
+        const aiMsg = msgs.filter(m => m.role === 'assistant').pop()
+        setFullText(aiMsg?.content || run.response_preview || '')
+      })
+      .catch(() => setFullText(run.response_preview || ''))
+      .finally(() => setLoading(false))
+  }, [run.session_id, run.response_preview])
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[80vh] flex flex-col" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-5 py-3 border-b">
+          <span className="font-semibold text-slate-800 text-sm">執行結果 — {run.run_at?.slice(0, 16)}</span>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600"><X size={16} /></button>
+        </div>
+        <div className="overflow-y-auto p-5 flex-1 text-sm text-slate-700 whitespace-pre-wrap">
+          {loading ? '載入中...' : (fullText || '（無內容）')}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── HistoryRow ────────────────────────────────────────────────────────────────
 function HistoryRow({ taskId }: { taskId: number }) {
   const { t } = useTranslation()
   const [runs, setRuns] = useState<TaskRun[]>([])
   const [loading, setLoading] = useState(true)
+  const [detailRun, setDetailRun] = useState<TaskRun | null>(null)
 
   useEffect(() => {
     api.get(`/scheduled-tasks/${taskId}/history?limit=10`)
@@ -630,6 +664,8 @@ function HistoryRow({ taskId }: { taskId: number }) {
   if (runs.length === 0) return <div className="py-3 px-6 text-sm text-slate-400">{t('scheduledTask.noHistory')}</div>
 
   return (
+    <>
+    {detailRun && <RunDetailModal run={detailRun} onClose={() => setDetailRun(null)} />}
     <div className="px-6 pb-4">
       <table className="w-full text-xs">
         <thead>
@@ -684,13 +720,29 @@ function HistoryRow({ taskId }: { taskId: number }) {
                 <td className="py-1.5 max-w-xs">
                   {r.status === 'fail'
                     ? <span className="text-red-500">{r.error_msg?.slice(0, 80)}</span>
-                    : <span className="text-slate-600 line-clamp-2">{r.response_preview}</span>}
-                  {files.map((f) => (
-                    <a key={f.publicUrl} href={f.publicUrl} target="_blank" rel="noreferrer"
-                      className="flex items-center gap-1 text-blue-500 hover:underline mt-0.5">
-                      <FileText size={10} /> {f.filename}
-                    </a>
-                  ))}
+                    : (
+                      <button onClick={() => setDetailRun(r)}
+                        className="text-left text-slate-600 line-clamp-2 hover:text-blue-600 hover:underline cursor-pointer w-full">
+                        {r.response_preview || '（查看全文）'}
+                      </button>
+                    )}
+                  <div className="flex flex-col gap-1 mt-1">
+                    {files.map((f) => {
+                      const isAudio = /\.(mp3|wav|ogg|m4a)$/i.test(f.filename)
+                      if (isAudio) return (
+                        <div key={f.publicUrl} className="flex flex-col gap-0.5">
+                          <span className="text-slate-500 text-xs flex items-center gap-1"><FileText size={10} />{f.filename}</span>
+                          <audio controls src={f.publicUrl} className="h-7 w-48" />
+                        </div>
+                      )
+                      return (
+                        <a key={f.publicUrl} href={f.publicUrl} target="_blank" rel="noreferrer"
+                          className="flex items-center gap-1 text-blue-500 hover:underline">
+                          <FileText size={10} /> {f.filename}
+                        </a>
+                      )
+                    })}
+                  </div>
                 </td>
               </tr>
             )
@@ -698,6 +750,7 @@ function HistoryRow({ taskId }: { taskId: number }) {
         </tbody>
       </table>
     </div>
+    </>
   )
 }
 

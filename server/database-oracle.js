@@ -25,6 +25,8 @@ function normalizeSql(sql) {
   // LIMIT n  →  FETCH FIRST n ROWS ONLY
   sql = sql.replace(/\bLIMIT\s+(\d+)/gi,
     'FETCH FIRST $1 ROWS ONLY');
+  // LIMIT ?  →  FETCH FIRST ? ROWS ONLY (bind param)
+  sql = sql.replace(/\bLIMIT\s+\?/gi, 'FETCH FIRST ? ROWS ONLY');
   // CURRENT_TIMESTAMP is valid in Oracle too — no change needed
   return sql;
 }
@@ -731,6 +733,23 @@ async function runMigrations(db) {
     granted_by   NUMBER REFERENCES users(id),
     granted_at   TIMESTAMP DEFAULT SYSTIMESTAMP,
     CONSTRAINT skill_access_uq UNIQUE (skill_id, grantee_type, grantee_id)
+  )`);
+
+  // ── Scheduled Task Runs (execution history) ─────────────────────────────────
+  await createTable('SCHEDULED_TASK_RUNS', `CREATE TABLE scheduled_task_runs (
+    id                   NUMBER GENERATED AS IDENTITY PRIMARY KEY,
+    task_id              NUMBER NOT NULL,
+    run_at               TIMESTAMP DEFAULT SYSTIMESTAMP,
+    status               VARCHAR2(20) DEFAULT 'ok',
+    attempt              NUMBER DEFAULT 1,
+    session_id           VARCHAR2(36),
+    response_preview     CLOB,
+    generated_files_json CLOB DEFAULT '[]',
+    email_sent_to        VARCHAR2(500),
+    error_msg            VARCHAR2(2000),
+    duration_ms          NUMBER,
+    tools_used_json      CLOB,
+    pipeline_log_json    CLOB
   )`);
 
   // ── Scheduled Tasks 工具引用支援 ─────────────────────────────────────────────

@@ -289,7 +289,11 @@ router.get('/:id/history', async (req, res) => {
 
     const limit = parseInt(req.query.limit || '30');
     const runs = await db.prepare(
-      `SELECT * FROM scheduled_task_runs WHERE task_id=? ORDER BY run_at DESC LIMIT ?`
+      `SELECT id, task_id, TO_CHAR(run_at,'YYYY-MM-DD"T"HH24:MI:SS') AS run_at,
+              status, attempt, session_id, response_preview,
+              generated_files_json, email_sent_to, error_msg, duration_ms,
+              tools_used_json, pipeline_log_json
+       FROM scheduled_task_runs WHERE task_id=? ORDER BY run_at DESC FETCH FIRST ? ROWS ONLY`
     ).all(req.params.id, limit);
     res.json(runs);
   } catch (e) {
