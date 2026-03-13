@@ -219,7 +219,7 @@ router.get('/admin/jobs', async (req, res) => {
     const params = [];
     if (user_id) { conds.push('rj.user_id=?'); params.push(Number(user_id)); }
     if (status)  { conds.push('rj.status=?');  params.push(status); }
-    if (search)  { conds.push('(UPPER(rj.title) LIKE UPPER(?) OR UPPER(rj.question) LIKE UPPER(?))'); params.push(`%${search}%`, `%${search}%`); }
+    if (search)  { conds.push('(UPPER(rj.title) LIKE UPPER(?) OR UPPER(DBMS_LOB.SUBSTR(rj.question,2000,1)) LIKE UPPER(?))'); params.push(`%${search}%`, `%${search}%`); }
     const where = conds.length ? 'WHERE ' + conds.join(' AND ') : '';
     const jobs = await db.prepare(`
       SELECT rj.id, rj.title, rj.question, rj.status,

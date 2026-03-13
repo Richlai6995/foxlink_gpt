@@ -112,7 +112,8 @@ class OracleStatementWrapper {
           };
         } catch (retErr) {
           // ORA-00904: invalid identifier → table has no 'id' column; run plain
-          if (retErr.errorNum !== 904) normaliseError(retErr);
+          // ORA-22848: cannot use CLOB type with RETURNING clause; run plain
+          if (retErr.errorNum !== 904 && retErr.errorNum !== 22848) normaliseError(retErr);
           result = await conn.execute(this.sql, bindParams, { autoCommit: true });
         }
       } else {

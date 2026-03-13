@@ -344,9 +344,10 @@ async function runResearchJob(db, jobId) {
         `**📊 深度研究完成：${plan.title}**\n\n` +
         `${report.slice(0, 300)}${report.length > 300 ? '...' : ''}\n\n` +
         `${downloadLinks}`;
+      // content is CLOB in Oracle — cannot use = directly; use DBMS_LOB.SUBSTR for comparison
       await db.prepare(
-        `UPDATE chat_messages SET content=? WHERE session_id=? AND content='__RESEARCH_JOB__:${jobId}'`
-      ).run(msgContent, job.session_id);
+        `UPDATE chat_messages SET content=? WHERE session_id=? AND TO_CHAR(DBMS_LOB.SUBSTR(content,100,1))=?`
+      ).run(msgContent, job.session_id, `__RESEARCH_JOB__:${jobId}`);
     }
 
     console.log(`[Research] Job ${jobId} completed — ${files.length} files`);
@@ -359,8 +360,8 @@ async function runResearchJob(db, jobId) {
     // Update placeholder message with error
     if (job?.session_id) {
       await db.prepare(
-        `UPDATE chat_messages SET content=? WHERE session_id=? AND content='__RESEARCH_JOB__:${jobId}'`
-      ).run(`**❌ 深度研究失敗**\n\n${e.message}`, job.session_id).catch(() => {});
+        `UPDATE chat_messages SET content=? WHERE session_id=? AND TO_CHAR(DBMS_LOB.SUBSTR(content,100,1))=?`
+      ).run(`**❌ 深度研究失敗**\n\n${e.message}`, job.session_id, `__RESEARCH_JOB__:${jobId}`).catch(() => {});
     }
   }
 }
