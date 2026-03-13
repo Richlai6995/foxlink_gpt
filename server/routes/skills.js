@@ -113,17 +113,69 @@ function serializeSkill(s, maskSecret = true) {
     };
 }
 
-// ── GET /api/skills — 我的 + public approved ─────────────────────────────────
+// ── Helper: check if user can access skill (owner / admin / public / shared) ──
+async function canUserAccessSkill(db, skillId, user) {
+    const skill = await db.prepare('SELECT owner_user_id, is_public, is_admin_approved FROM skills WHERE id=?').get(skillId);
+    if (!skill) return false;
+    if (skill.owner_user_id === user.id) return true;
+    if (user.role === 'admin') return true;
+    if (skill.is_public === 1) return true;  // public = accessible to all
+    const access = await db.prepare(`
+        SELECT 1 FROM skill_access sa WHERE sa.skill_id=? AND (
+            (sa.grantee_type='user' AND sa.grantee_id=TO_CHAR(?))
+            OR (sa.grantee_type='role' AND sa.grantee_id=?)
+            OR (sa.grantee_type='dept' AND sa.grantee_id=? AND ? IS NOT NULL)
+            OR (sa.grantee_type='profit_center' AND sa.grantee_id=? AND ? IS NOT NULL)
+            OR (sa.grantee_type='org_section' AND sa.grantee_id=? AND ? IS NOT NULL)
+            OR (sa.grantee_type='org_group' AND sa.grantee_id=? AND ? IS NOT NULL)
+        )
+    `).get(
+        skillId,
+        user.id, user.role,
+        user.dept_code, user.dept_code,
+        user.profit_center, user.profit_center,
+        user.org_section, user.org_section,
+        user.org_group_name, user.org_group_name
+    );
+    return !!access;
+}
+
+// ── GET /api/skills — 我的 + public approved + shared ────────────────────────
 router.get('/', async (req, res) => {
     try {
         const db = require('../database-oracle').db;
         const { tag, type, q } = req.query;
+        const userProfile = await db.prepare(
+            'SELECT id, role, dept_code, profit_center, org_section, org_group_name FROM users WHERE id=?'
+        ).get(req.user.id);
+        if (!userProfile) return res.status(403).json({ error: '使用者不存在' });
+
         let sql = `
       SELECT s.*, u.name AS owner_name
       FROM skills s LEFT JOIN users u ON u.id = s.owner_user_id
-      WHERE (s.owner_user_id = ? OR (s.is_public = 1 AND s.is_admin_approved = 1))
+      WHERE (
+        s.owner_user_id = ?
+        OR s.is_public = 1
+        OR EXISTS (
+          SELECT 1 FROM skill_access sa WHERE sa.skill_id=s.id AND (
+            (sa.grantee_type='user' AND sa.grantee_id=TO_CHAR(?))
+            OR (sa.grantee_type='role' AND sa.grantee_id=?)
+            OR (sa.grantee_type='dept' AND sa.grantee_id=? AND ? IS NOT NULL)
+            OR (sa.grantee_type='profit_center' AND sa.grantee_id=? AND ? IS NOT NULL)
+            OR (sa.grantee_type='org_section' AND sa.grantee_id=? AND ? IS NOT NULL)
+            OR (sa.grantee_type='org_group' AND sa.grantee_id=? AND ? IS NOT NULL)
+          )
+        )
+      )
     `;
-        const params = [req.user.id];
+        const params = [
+            req.user.id,
+            req.user.id, userProfile.role,
+            userProfile.dept_code, userProfile.dept_code,
+            userProfile.profit_center, userProfile.profit_center,
+            userProfile.org_section, userProfile.org_section,
+            userProfile.org_group_name, userProfile.org_group_name,
+        ];
         if (type) { sql += ` AND s.type = ?`; params.push(type); }
         sql += ` ORDER BY s.is_admin_approved DESC, s.created_at DESC`;
         let rows = await db.prepare(sql).all(...params);
@@ -185,8 +237,12 @@ router.get('/:id', async (req, res) => {
         if (!s) return res.status(404).json({ error: '找不到 skill' });
         const isOwner = s.owner_user_id === req.user.id;
         const isAdmin = req.user.role === 'admin';
-        if (!isOwner && !isAdmin && !(s.is_public && s.is_admin_approved)) {
-            return res.status(403).json({ error: '無存取權限' });
+        if (!isOwner && !isAdmin && !s.is_public) {
+            const userProfile = await db.prepare(
+                'SELECT id, role, dept_code, profit_center, org_section, org_group_name FROM users WHERE id=?'
+            ).get(req.user.id);
+            const hasAccess = userProfile && await canUserAccessSkill(db, req.params.id, userProfile);
+            if (!hasAccess) return res.status(403).json({ error: '無存取權限' });
         }
         res.json(serializeSkill(s, !isOwner && !isAdmin));
     } catch (e) {
@@ -284,6 +340,76 @@ router.post('/:id/fork', async (req, res) => {
         );
         const forked = await db.prepare('SELECT * FROM skills WHERE id=?').get(result.lastInsertRowid);
         res.json(serializeSkill(forked, false));
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// ── GET /api/skills/:id/access ────────────────────────────────────────────────
+router.get('/:id/access', async (req, res) => {
+    try {
+        const db = require('../database-oracle').db;
+        const s = await db.prepare('SELECT owner_user_id FROM skills WHERE id=?').get(req.params.id);
+        if (!s) return res.status(404).json({ error: '找不到 skill' });
+        if (s.owner_user_id !== req.user.id && req.user.role !== 'admin') {
+            return res.status(403).json({ error: '只有建立者或管理員可查看共享設定' });
+        }
+        const grants = await db.prepare(`
+            SELECT sa.*, u.name AS granted_by_name
+            FROM skill_access sa
+            LEFT JOIN users u ON u.id = sa.granted_by
+            WHERE sa.skill_id = ?
+            ORDER BY sa.granted_at DESC
+        `).all(req.params.id);
+        res.json(grants);
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// ── POST /api/skills/:id/access ───────────────────────────────────────────────
+router.post('/:id/access', async (req, res) => {
+    try {
+        const db = require('../database-oracle').db;
+        const s = await db.prepare('SELECT owner_user_id FROM skills WHERE id=?').get(req.params.id);
+        if (!s) return res.status(404).json({ error: '找不到 skill' });
+        if (s.owner_user_id !== req.user.id && req.user.role !== 'admin') {
+            return res.status(403).json({ error: '只有建立者或管理員可設定共享' });
+        }
+        const { grantee_type, grantee_id } = req.body;
+        if (!grantee_type || !grantee_id) return res.status(400).json({ error: 'grantee_type 和 grantee_id 必填' });
+        const id = (typeof crypto !== 'undefined' && crypto.randomUUID)
+            ? crypto.randomUUID()
+            : require('crypto').randomUUID();
+        await db.prepare(`
+            INSERT INTO skill_access (id, skill_id, grantee_type, grantee_id, granted_by)
+            VALUES (?, ?, ?, ?, ?)
+        `).run(id, req.params.id, grantee_type, String(grantee_id), req.user.id);
+        const grant = await db.prepare(`
+            SELECT sa.*, u.name AS granted_by_name
+            FROM skill_access sa LEFT JOIN users u ON u.id = sa.granted_by
+            WHERE sa.id = ?
+        `).get(id);
+        res.json(grant);
+    } catch (e) {
+        if (e.message?.includes('UNIQUE') || e.message?.includes('unique') || e.errorNum === 1) {
+            return res.status(409).json({ error: '此對象已有共享設定' });
+        }
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// ── DELETE /api/skills/:id/access/:grantId ────────────────────────────────────
+router.delete('/:id/access/:grantId', async (req, res) => {
+    try {
+        const db = require('../database-oracle').db;
+        const s = await db.prepare('SELECT owner_user_id FROM skills WHERE id=?').get(req.params.id);
+        if (!s) return res.status(404).json({ error: '找不到 skill' });
+        if (s.owner_user_id !== req.user.id && req.user.role !== 'admin') {
+            return res.status(403).json({ error: '只有建立者或管理員可移除共享' });
+        }
+        await db.prepare('DELETE FROM skill_access WHERE id=? AND skill_id=?').run(req.params.grantId, req.params.id);
+        res.json({ success: true });
     } catch (e) {
         res.status(500).json({ error: e.message });
     }

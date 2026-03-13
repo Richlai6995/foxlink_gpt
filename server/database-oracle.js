@@ -378,6 +378,9 @@ async function runMigrations(db) {
   await addCol('AI_ETL_RUN_LOGS', 'ROWS_INSERTED', 'NUMBER DEFAULT 0');
   await addCol('AI_ETL_RUN_LOGS', 'ROWS_UPDATED',  'NUMBER DEFAULT 0');
 
+  // MCP Server response mode (inject = feed tool result to LLM, answer = return raw result directly)
+  await addCol('MCP_SERVERS', 'RESPONSE_MODE', "VARCHAR2(10) DEFAULT 'inject'");
+
   const createTable = async (name, ddl) => {
     try {
       const exists = await db.tableExists(name);
@@ -710,9 +713,24 @@ async function runMigrations(db) {
   await addCol('SKILLS', 'CODE_PID',      'NUMBER');
   await addCol('SKILLS', 'CODE_ERROR',    'CLOB');
 
+  // ── Skill access sharing table ───────────────────────────────────────────────
+  await createTable('SKILL_ACCESS', `CREATE TABLE skill_access (
+    id           VARCHAR2(36) PRIMARY KEY,
+    skill_id     NUMBER NOT NULL REFERENCES skills(id) ON DELETE CASCADE,
+    grantee_type VARCHAR2(20) NOT NULL,
+    grantee_id   VARCHAR2(100) NOT NULL,
+    granted_by   NUMBER REFERENCES users(id),
+    granted_at   TIMESTAMP DEFAULT SYSTIMESTAMP,
+    CONSTRAINT skill_access_uq UNIQUE (skill_id, grantee_type, grantee_id)
+  )`);
+
   // ── Scheduled Tasks 工具引用支援 ─────────────────────────────────────────────
   await addCol('SCHEDULED_TASKS',     'TOOLS_CONFIG_JSON', "CLOB DEFAULT '[]'");
   await addCol('SCHEDULED_TASK_RUNS', 'TOOLS_USED_JSON',   'CLOB');
+
+  // ── Scheduled Tasks Pipeline 支援 ───────────────────────────────────────────
+  await addCol('SCHEDULED_TASKS',     'PIPELINE_JSON',     'CLOB');
+  await addCol('SCHEDULED_TASK_RUNS', 'PIPELINE_LOG_JSON', 'CLOB');
 
   // ── Vector table partitioning ───────────────────────────────────────────────
   await migrateAiVectorStoreToPartitioned();

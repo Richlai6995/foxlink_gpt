@@ -472,7 +472,7 @@ async function generateTextSync(apiModel, history, prompt) {
  * @param {Function} toolHandler        - async (toolName, args) => string result
  * @returns {Promise<{text, inputTokens, outputTokens, toolCallCount}>}
  */
-async function generateWithTools(apiModel, history, userParts, functionDeclarations, toolHandler, extraSystemInstruction = '') {
+async function generateWithTools(apiModel, history, userParts, functionDeclarations, toolHandler, extraSystemInstruction = '', opts = {}) {
   const fullInstruction = extraSystemInstruction
     ? getSystemInstruction() + '\n\n---\n' + extraSystemInstruction
     : getSystemInstruction();
@@ -500,6 +500,7 @@ async function generateWithTools(apiModel, history, userParts, functionDeclarati
 
     // Call each tool and collect responses
     const fnResponses = [];
+    let directAnswerText = null;
     for (const call of fnCalls) {
       toolCallCount++;
       let toolResult;
@@ -508,12 +509,20 @@ async function generateWithTools(apiModel, history, userParts, functionDeclarati
       } catch (e) {
         toolResult = `[Tool error: ${e.message}]`;
       }
+      // Check if this tool is configured for direct-answer mode
+      if (opts.directAnswerTools?.has(call.name)) {
+        directAnswerText = String(toolResult);
+      }
       fnResponses.push({
         functionResponse: {
           name: call.name,
           response: { content: String(toolResult) },
         },
       });
+    }
+    // Direct answer: return raw tool result without feeding back to LLM
+    if (directAnswerText !== null) {
+      return { text: directAnswerText, inputTokens, outputTokens, toolCallCount, isDirectAnswer: true };
     }
 
     result = await chat.sendMessage(fnResponses);

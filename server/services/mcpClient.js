@@ -49,10 +49,10 @@ async function listTools(db, server) {
   const result = await jsonRpc(server.url, server.api_key, 'tools/list', {});
   const tools = result.tools || [];
 
-  const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
-  db.prepare(
-    `UPDATE mcp_servers SET tools_json=?, last_synced_at=?, updated_at=? WHERE id=?`
-  ).run(JSON.stringify(tools), now, now, server.id);
+  // Use SYSTIMESTAMP for Oracle TIMESTAMP columns; pass tools_json as only bind param
+  await db.prepare(
+    `UPDATE mcp_servers SET tools_json=?, last_synced_at=SYSTIMESTAMP, updated_at=SYSTIMESTAMP WHERE id=?`
+  ).run(JSON.stringify(tools), server.id);
 
   return tools;
 }
@@ -94,24 +94,27 @@ async function callTool(db, server, sessionId, userId, toolName, args) {
   }
 
   const durationMs = Date.now() - startMs;
-  const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
 
-  db.prepare(
-    `INSERT INTO mcp_call_logs
-      (server_id, session_id, user_id, tool_name, arguments_json, response_preview, status, error_msg, duration_ms, called_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(
-    server.id,
-    sessionId || null,
-    userId || null,
-    toolName,
-    JSON.stringify(args),
-    responsePreview,
-    status,
-    errorMsg,
-    durationMs,
-    now,
-  );
+  // Log call — use SYSTIMESTAMP for Oracle TIMESTAMP column
+  try {
+    await db.prepare(
+      `INSERT INTO mcp_call_logs
+        (server_id, session_id, user_id, tool_name, arguments_json, response_preview, status, error_msg, duration_ms, called_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, SYSTIMESTAMP)`
+    ).run(
+      server.id,
+      sessionId || null,
+      userId || null,
+      toolName,
+      JSON.stringify(args),
+      responsePreview,
+      status,
+      errorMsg,
+      durationMs,
+    );
+  } catch (logErr) {
+    console.error('[MCP] callTool log error:', logErr.message);
+  }
 
   return resultContent;
 }

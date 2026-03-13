@@ -221,6 +221,7 @@ async function runTask(db, taskId) {
   const { processGenerateBlocks } = require('./fileGenerator');
   const { sendMail } = require('./mailService');
   const { resolveToolRefs, hasToolRefs } = require('./promptResolver');
+  const { runPipeline } = require('./pipelineRunner');
 
   const task = await db.prepare('SELECT * FROM scheduled_tasks WHERE id = ?').get(taskId);
   if (!task) { console.error(`[Scheduled] Task ${taskId} not found`); return; }
@@ -253,6 +254,7 @@ async function runTask(db, taskId) {
   let generatedFiles = [];
   let attemptNum = 1;
   let toolsUsed = { skills: [], kbs: [], mcp_tools: [], dify_kbs: [] };
+  let pipelineLog = [];
 
   try {
     const { result, attempt } = await withRetry(async (tryNum) => {
@@ -339,10 +341,18 @@ async function runTask(db, taskId) {
         try {
           const FOXLINK_API = `http://127.0.0.1:${process.env.PORT || 3001}`;
           const SERVICE_KEY = process.env.SKILL_SERVICE_KEY || '';
+          // Strip code blocks (generate_pdf/xlsx/... blocks) and excess whitespace before TTS
+          const ttsText = text
+            .replace(/```[\s\S]*?```/g, '')   // remove fenced code blocks
+            .replace(/`[^`]+`/g, '')           // remove inline code
+            .replace(/\n{3,}/g, '\n\n')
+            .trim()
+            .slice(0, 4800);                   // Google TTS limit ~5000 bytes
+          console.log(`[Scheduled] TTS text length: ${ttsText.length} chars`);
           const ttsRes = await fetch(`${FOXLINK_API}/api/skills/tts/synthesize`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'x-service-key': SERVICE_KEY },
-            body: JSON.stringify({ text: text.slice(0, 5000), user_id: task.user_id }),
+            body: JSON.stringify({ text: ttsText, user_id: task.user_id }),
             signal: AbortSignal.timeout(60000),
           });
           if (ttsRes.ok) {
@@ -356,6 +366,9 @@ async function runTask(db, taskId) {
               publicUrl: ttsData.audio_url,
               filePath: require('path').join(UPLOAD_DIR, 'generated', require('path').basename(ttsData.audio_url)),
             });
+          } else {
+            const errBody = await ttsRes.json().catch(() => ({}));
+            console.error(`[Scheduled] TTS HTTP ${ttsRes.status}: ${errBody.error || ttsRes.statusText}`);
           }
         } catch (e) {
           console.error(`[Scheduled] TTS failed for task ${task.id}: ${e.message}`);
@@ -369,6 +382,31 @@ async function runTask(db, taskId) {
 
     // Update session updated_at
     await db.prepare(`UPDATE chat_sessions SET updated_at=SYSTIMESTAMP WHERE id=?`).run(sessionId);
+
+    // ── Pipeline execution ───────────────────────────────────────────────────
+    let pipelineNodes = [];
+    try { pipelineNodes = JSON.parse(task.pipeline_json || '[]'); } catch (_) {}
+    if (pipelineNodes.length > 0) {
+      console.log(`[Scheduled] Running pipeline (${pipelineNodes.length} nodes) for task ${task.id}`);
+      try {
+        const { generatedFiles: pFiles, nodeOutputs, log: pLog } = await runPipeline(
+          pipelineNodes,
+          responseText,
+          db,
+          { userId: task.user_id, sessionId, taskName: task.name }
+        );
+        generatedFiles.push(...pFiles);
+        pipelineLog = pLog;
+        // Merge any node outputs into response for email body
+        const extraText = Object.values(nodeOutputs)
+          .filter(v => v && !v.startsWith('[') && v.length > 10)
+          .join('\n\n---\n\n');
+        if (extraText) responseText = `${responseText}\n\n---\n\n${extraText}`;
+      } catch (e) {
+        console.error(`[Scheduled] Pipeline error for task ${task.id}:`, e.message);
+        pipelineLog = [{ status: 'error', error: e.message }];
+      }
+    }
 
   } catch (e) {
     runStatus = 'fail';
@@ -425,8 +463,8 @@ async function runTask(db, taskId) {
   // ── Write run record ────────────────────────────────────────────────────────
   await db.prepare(
     `INSERT INTO scheduled_task_runs
-      (task_id, run_at, status, attempt, session_id, response_preview, generated_files_json, email_sent_to, error_msg, duration_ms, tools_used_json)
-     VALUES (?, SYSTIMESTAMP, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      (task_id, run_at, status, attempt, session_id, response_preview, generated_files_json, email_sent_to, error_msg, duration_ms, tools_used_json, pipeline_log_json)
+     VALUES (?, SYSTIMESTAMP, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     task.id,
     runStatus,
@@ -438,6 +476,7 @@ async function runTask(db, taskId) {
     runError,
     durationMs,
     JSON.stringify(toolsUsed),
+    pipelineLog.length > 0 ? JSON.stringify(pipelineLog) : null,
   );
 
   // ── Update task stats ───────────────────────────────────────────────────────

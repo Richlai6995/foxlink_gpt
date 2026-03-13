@@ -1,13 +1,14 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import {
   CalendarClock, Plus, Play, Pause, Trash2, Edit2, History,
   RefreshCw, CheckCircle, XCircle, ChevronDown, ChevronUp,
   Clock, Mail, FileText, X, Save, TriangleAlert, Settings2,
-  Zap, BookOpen, Wrench,
+  Zap, BookOpen, Wrench, GitBranch,
 } from 'lucide-react'
 import api from '../../lib/api'
 import { useAuth } from '../../context/AuthContext'
 import type { ScheduledTask, TaskRun } from '../../types'
+import PipelineTab, { type PipelineNode } from './PipelineTab'
 
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六']
 const FILE_TYPES = ['xlsx', 'docx', 'pdf', 'pptx', 'foxlink_pptx', 'txt', 'mp3']
@@ -67,12 +68,35 @@ function TaskFormModal({
 }) {
   const isEdit = !!task?.id
   const [form, setForm] = useState<Partial<ScheduledTask>>(task ?? emptyForm())
-  const [section, setSection] = useState<'basic' | 'schedule' | 'ai' | 'tools' | 'email'>('basic')
+  const [section, setSection] = useState<'basic' | 'schedule' | 'ai' | 'tools' | 'pipeline' | 'email'>('basic')
+  const [pipelineNodes, setPipelineNodes] = useState<PipelineNode[]>(() => {
+    try { return JSON.parse((task as any)?.pipeline_json || '[]') } catch { return [] }
+  })
+  const [mcpServers, setMcpServers] = useState<{ id: number; name: string; tools_json?: string }[]>([])
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [recipientInput, setRecipientInput] = useState('')
   const [catalog, setCatalog] = useState<ToolCatalog>({ skills: [], kbs: [] })
   const promptRef = useRef<HTMLTextAreaElement>(null)
+  const [ac, setAc] = useState<{ show: boolean; trigger: string; query: string; idx: number }>(
+    { show: false, trigger: '', query: '', idx: 0 }
+  )
+
+  // Autocomplete items derived from catalog + current filter
+  const acItems = useMemo(() => {
+    const q = ac.query.toLowerCase()
+    const skills = ac.trigger === '{{kb:'
+      ? []
+      : catalog.skills
+          .filter((sk) => !q || sk.name.toLowerCase().includes(q))
+          .map((sk) => ({ type: 'skill' as const, id: sk.id, name: sk.name, icon: sk.icon || '⚡', desc: sk.description }))
+    const kbs = ac.trigger === '{{skill:'
+      ? []
+      : catalog.kbs
+          .filter((kb) => !q || kb.name.toLowerCase().includes(q))
+          .map((kb) => ({ type: 'kb' as const, id: kb.id, name: kb.name, icon: '📖', desc: kb.description }))
+    return [...skills, ...kbs]
+  }, [ac.query, ac.trigger, catalog])
 
   // When models load and current model not in list, pick first available
   useEffect(() => {
@@ -83,7 +107,16 @@ function TaskFormModal({
 
   // Load tool catalog
   useEffect(() => {
-    api.get('/scheduled-tasks/tools-catalog').then((r) => setCatalog(r.data)).catch(() => {})
+    api.get('/scheduled-tasks/tools-catalog')
+      .then((r) => setCatalog(r.data))
+      .catch((e) => console.error('[tools-catalog]', e?.response?.data?.error || e?.message))
+  }, [])
+
+  // Load MCP servers (for pipeline MCP nodes)
+  useEffect(() => {
+    api.get('/mcp-servers')
+      .then((r) => setMcpServers(r.data || []))
+      .catch(() => {})
   }, [])
 
   const set = (k: keyof ScheduledTask, v: unknown) =>
@@ -113,6 +146,7 @@ function TaskFormModal({
         recipients_json: recipients,
         max_runs: Number(form.max_runs ?? 0),
         expire_at: form.expire_at || null,
+        pipeline_json: pipelineNodes.length > 0 ? pipelineNodes : null,
       }
       const res = isEdit
         ? await api.put(`/scheduled-tasks/${task!.id}`, payload)
@@ -126,6 +160,55 @@ function TaskFormModal({
     } finally {
       setSaving(false)
     }
+  }
+
+  // Autocomplete: detect trigger on prompt change
+  const onPromptChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const val = e.target.value
+    set('prompt', val)
+    const beforeCursor = val.slice(0, e.target.selectionStart)
+    const skillMatch = beforeCursor.match(/\{\{skill:([^}\s]*)$/)
+    const kbMatch = beforeCursor.match(/\{\{kb:([^}\s]*)$/)
+    // slash trigger: / not preceded by : or another slash (avoids URLs)
+    const slashMatch = beforeCursor.match(/(?:^|[\s\n,;(])\/(\S*)$/)
+    if (skillMatch) {
+      setAc({ show: true, trigger: '{{skill:', query: skillMatch[1], idx: 0 })
+    } else if (kbMatch) {
+      setAc({ show: true, trigger: '{{kb:', query: kbMatch[1], idx: 0 })
+    } else if (slashMatch) {
+      setAc({ show: true, trigger: '/', query: slashMatch[1], idx: 0 })
+    } else {
+      setAc((p) => ({ ...p, show: false }))
+    }
+  }
+
+  // Autocomplete: keyboard navigation
+  const onPromptKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (!ac.show || acItems.length === 0) return
+    if (e.key === 'Escape') { setAc((p) => ({ ...p, show: false })); return }
+    if (e.key === 'ArrowDown') { e.preventDefault(); setAc((p) => ({ ...p, idx: Math.min(p.idx + 1, acItems.length - 1) })) }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); setAc((p) => ({ ...p, idx: Math.max(p.idx - 1, 0) })) }
+    else if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); acSelect(acItems[ac.idx]) }
+  }
+
+  // Autocomplete: select an item and insert syntax
+  const acSelect = (item: { type: 'skill' | 'kb'; name: string }) => {
+    const ta = promptRef.current
+    if (!ta) return
+    const val = ta.value
+    const cursor = ta.selectionStart
+    const beforeCursor = val.slice(0, cursor)
+    const replacement = item.type === 'skill' ? `{{skill:${item.name}}}` : `{{kb:${item.name}}}`
+    let triggerRe: RegExp
+    if (ac.trigger === '/') triggerRe = /\/\S*$/
+    else if (ac.trigger === '{{skill:') triggerRe = /\{\{skill:[^}\s]*$/
+    else triggerRe = /\{\{kb:[^}\s]*$/
+    const newBefore = beforeCursor.replace(triggerRe, replacement)
+    const newVal = newBefore + val.slice(cursor)
+    set('prompt', newVal)
+    setAc((p) => ({ ...p, show: false }))
+    const pos = newBefore.length
+    setTimeout(() => { ta.focus(); ta.setSelectionRange(pos, pos) }, 10)
   }
 
   // Insert tool ref syntax at cursor position in prompt textarea
@@ -144,11 +227,12 @@ function TaskFormModal({
     }, 10)
   }
 
-  const sectionBtns: { id: typeof section; label: string }[] = [
+  const sectionBtns: { id: typeof section; label: string; badge?: number }[] = [
     { id: 'basic', label: '基本設定' },
     { id: 'schedule', label: '排程' },
     { id: 'ai', label: 'AI 設定' },
     { id: 'tools', label: '工具引用' },
+    { id: 'pipeline', label: 'Pipeline', badge: pipelineNodes.length || undefined },
     { id: 'email', label: '郵件通知' },
   ]
 
@@ -172,13 +256,19 @@ function TaskFormModal({
             <button
               key={s.id}
               onClick={() => setSection(s.id)}
-              className={`px-3 py-2 text-sm font-medium border-b-2 transition ${
+              className={`px-3 py-2 text-sm font-medium border-b-2 transition flex items-center gap-1 ${
                 section === s.id
                   ? 'border-blue-600 text-blue-600'
                   : 'border-transparent text-slate-500 hover:text-slate-700'
               }`}
             >
+              {s.id === 'pipeline' && <GitBranch size={12} />}
               {s.label}
+              {s.badge ? (
+                <span className="ml-0.5 text-[10px] bg-blue-500 text-white rounded-full px-1.5 py-0 leading-4">
+                  {s.badge}
+                </span>
+              ) : null}
             </button>
           ))}
         </div>
@@ -274,15 +364,54 @@ function TaskFormModal({
                   工具引用：{'{{skill:名稱}}'}{'{{kb:名稱}}'}；
                   網頁爬取：{'{{fetch:URL}}'}）
                 </label>
-                <textarea
-                  ref={promptRef}
-                  className="input w-full h-36 resize-y font-mono text-xs"
-                  value={form.prompt ?? ''}
-                  onChange={(e) => set('prompt', e.target.value)}
-                  placeholder={`例：今天是 {{date}}，先查詢知識庫：\n{{kb:月報知識庫 query="{{task_name}}"}}\n請根據以上內容撰寫摘要報告。`}
-                />
+                <div className="relative">
+                  <textarea
+                    ref={promptRef}
+                    className="input w-full h-36 resize-y font-mono text-xs"
+                    value={form.prompt ?? ''}
+                    onChange={onPromptChange}
+                    onKeyDown={onPromptKeyDown}
+                    onBlur={() => setTimeout(() => setAc((p) => ({ ...p, show: false })), 150)}
+                    placeholder={`例：今天是 {{date}}，先查詢知識庫：\n{{kb:月報知識庫 query="{{task_name}}"}}\n請根據以上內容撰寫摘要報告。`}
+                  />
+                  {ac.show && (
+                    <div className="absolute left-0 top-full mt-1 z-50 w-full max-h-52 overflow-y-auto bg-white border border-slate-200 rounded-lg shadow-lg">
+                      <div className="px-3 py-1.5 text-xs text-slate-400 border-b border-slate-100 flex items-center justify-between">
+                        <span>
+                          {ac.trigger === '/' ? '/ 選擇技能 / 知識庫' : ac.trigger === '{{skill:' ? '選擇技能' : '選擇知識庫'}
+                          {ac.query && <> — 篩選：<span className="text-blue-500">{ac.query}</span></>}
+                        </span>
+                        <span className="text-slate-300">↑↓ Enter Esc</span>
+                      </div>
+                      {acItems.length === 0 ? (
+                        <p className="px-3 py-3 text-xs text-slate-400 text-center">
+                          {ac.query ? `無符合「${ac.query}」的工具` : '尚無可用技能或知識庫'}
+                        </p>
+                      ) : acItems.map((item, i) => (
+                        <button
+                          key={`${item.type}-${item.id}`}
+                          onMouseDown={(e) => { e.preventDefault(); acSelect(item) }}
+                          className={`w-full text-left flex items-center gap-2.5 px-3 py-2 transition ${
+                            i === ac.idx ? 'bg-blue-50' : 'hover:bg-slate-50'
+                          }`}
+                        >
+                          <span className="text-base shrink-0">{item.icon}</span>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium text-slate-700 truncate">{item.name}</p>
+                            {item.desc && <p className="text-xs text-slate-400 truncate">{item.desc}</p>}
+                          </div>
+                          <span className={`text-xs shrink-0 px-1.5 py-0.5 rounded-full font-medium ${
+                            item.type === 'skill' ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700'
+                          }`}>
+                            {item.type === 'skill' ? '技能' : '知識庫'}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
                 <p className="text-xs text-slate-400 mt-1">
-                  工具引用會在執行前自動展開。前往「工具引用」頁簽選擇工具並插入語法。
+                  輸入 <code className="bg-slate-100 px-1 rounded">/</code> 快速選擇工具，或前往「工具引用」頁簽插入語法。
                 </p>
               </div>
               <div>
@@ -417,6 +546,17 @@ function TaskFormModal({
                 </div>
               </div>
             </div>
+          )}
+
+          {/* ── Pipeline ── */}
+          {section === 'pipeline' && (
+            <PipelineTab
+              nodes={pipelineNodes}
+              onChange={setPipelineNodes}
+              catalog={catalog}
+              mcpServers={mcpServers}
+              taskName={form.name}
+            />
           )}
 
           {/* ── Email ── */}
@@ -789,8 +929,8 @@ export default function ScheduledTasksPanel() {
             </thead>
             <tbody>
               {tasks.map((t) => (
-                <>
-                  <tr key={t.id} className="border-b border-slate-100 hover:bg-slate-50">
+                <React.Fragment key={t.id}>
+                  <tr className="border-b border-slate-100 hover:bg-slate-50">
                     <td className="px-4 py-3">
                       <button
                         onClick={() => setExpanded(expanded === t.id ? null : t.id)}
@@ -885,7 +1025,7 @@ export default function ScheduledTasksPanel() {
                     </td>
                   </tr>
                   {expanded === t.id && (
-                    <tr key={`hist-${t.id}`} className="bg-slate-50 border-b border-slate-100">
+                    <tr className="bg-slate-50 border-b border-slate-100">
                       <td colSpan={isAdmin ? 9 : 8} className="px-0">
                         <div className="px-4 py-2 text-xs font-medium text-slate-500 flex items-center gap-1 border-b border-slate-100">
                           <History size={12} /> 執行歷史（最近 10 筆）
@@ -894,7 +1034,7 @@ export default function ScheduledTasksPanel() {
                       </td>
                     </tr>
                   )}
-                </>
+                </React.Fragment>
               ))}
             </tbody>
           </table>

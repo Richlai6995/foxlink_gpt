@@ -1,7 +1,7 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
-import { Plus, Search, Globe, Lock, GitFork, Send, Pencil, Trash2, Clock, X, ChevronDown, Zap, ArrowLeft, MessageSquare, Code2, Eye } from 'lucide-react'
+import { Plus, Search, Globe, Lock, GitFork, Send, Pencil, Trash2, Clock, X, ChevronDown, Zap, ArrowLeft, MessageSquare, Code2, Eye, Share2 } from 'lucide-react'
 import api from '../lib/api'
 
 interface Skill {
@@ -61,6 +61,7 @@ export default function SkillMarket() {
     const canCodeSkill = currentUser?.role === 'admin' || (currentUser as any)?.effective_allow_code_skill === true
     const canCreateSkill = currentUser?.role === 'admin' || (currentUser as any)?.effective_allow_create_skill === true
     const [viewingSkill, setViewingSkill] = useState<Skill | null>(null)
+    const [sharingSkill, setSharingSkill] = useState<Skill | null>(null)
 
     const load = useCallback(async () => {
         setLoading(true)
@@ -208,7 +209,7 @@ export default function SkillMarket() {
                     <section className="mb-8">
                         <h2 className="text-sm font-semibold text-slate-600 mb-3 uppercase tracking-wide">我的技能</h2>
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                            {mySkills.map(sk => <SkillCard key={sk.id} skill={sk} onEdit={() => openEdit(sk)} onDelete={() => del(sk)} onFork={() => fork(sk)} onRequestPublic={() => requestPublic(sk)} onUse={() => navigate(`/chat?skillId=${sk.id}`)} isOwner />)}
+                            {mySkills.map(sk => <SkillCard key={sk.id} skill={sk} onEdit={() => openEdit(sk)} onDelete={() => del(sk)} onFork={() => fork(sk)} onRequestPublic={() => requestPublic(sk)} onUse={() => navigate(`/chat?skillId=${sk.id}`)} onShare={() => setSharingSkill(sk)} isOwner />)}
                         </div>
                     </section>
                 )}
@@ -401,6 +402,10 @@ export default function SkillMarket() {
                 )}
 
                 {/* Read-only view modal for public skills */}
+                {sharingSkill && (
+                    <SkillShareModal skill={sharingSkill} onClose={() => setSharingSkill(null)} />
+                )}
+
                 {viewingSkill && (
                     <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 overflow-y-auto p-4">
                         <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl my-8">
@@ -459,7 +464,265 @@ export default function SkillMarket() {
     )
 }
 
-function SkillCard({ skill, onEdit, onDelete, onFork, onRequestPublic, onUse, onView, isOwner }: {
+// ── Grantee type labels ───────────────────────────────────────────────────────
+const GRANTEE_TYPE_LABELS: Record<string, string> = {
+    user: '使用者',
+    role: '角色',
+    dept: '部門',
+    profit_center: '利潤中心',
+    org_section: '事業處',
+    org_group: '事業群',
+}
+
+interface GrantRecord {
+    id: string
+    skill_id: number
+    grantee_type: string
+    grantee_id: string
+    granted_by: number | null
+    granted_by_name?: string
+    granted_at: string
+}
+
+interface UserOption {
+    id: number
+    username: string
+    name: string
+    employee_id?: string
+}
+
+function SkillShareModal({ skill, onClose }: { skill: Skill; onClose: () => void }) {
+    const [grants, setGrants] = useState<GrantRecord[]>([])
+    const [users, setUsers] = useState<UserOption[]>([])
+    const [loadingGrants, setLoadingGrants] = useState(false)
+    const [submitting, setSubmitting] = useState(false)
+    const [error, setError] = useState('')
+    const [granteeType, setGranteeType] = useState<string>('user')
+    const [granteeId, setGranteeId] = useState<string>('')
+    const [userSearch, setUserSearch] = useState<string>('')
+    const [showUserDropdown, setShowUserDropdown] = useState(false)
+    const [selectedUser, setSelectedUser] = useState<UserOption | null>(null)
+    const userSearchRef = useRef<HTMLDivElement>(null)
+
+    const loadGrants = useCallback(async () => {
+        setLoadingGrants(true)
+        try {
+            const res = await api.get(`/skills/${skill.id}/access`)
+            setGrants(res.data)
+        } catch (e: any) {
+            setError(e.response?.data?.error || '載入共享設定失敗')
+        } finally {
+            setLoadingGrants(false)
+        }
+    }, [skill.id])
+
+    useEffect(() => {
+        loadGrants()
+        api.get('/users').then(r => setUsers(r.data)).catch(() => {})
+    }, [loadGrants])
+
+    // Close dropdown on outside click
+    useEffect(() => {
+        const handler = (e: MouseEvent) => {
+            if (userSearchRef.current && !userSearchRef.current.contains(e.target as Node)) {
+                setShowUserDropdown(false)
+            }
+        }
+        document.addEventListener('mousedown', handler)
+        return () => document.removeEventListener('mousedown', handler)
+    }, [])
+
+    const filteredUsers = userSearch
+        ? users.filter(u =>
+            u.name?.toLowerCase().includes(userSearch.toLowerCase()) ||
+            u.username?.toLowerCase().includes(userSearch.toLowerCase()) ||
+            u.employee_id?.toLowerCase().includes(userSearch.toLowerCase())
+        ).slice(0, 10)
+        : []
+
+    const handleTypeChange = (t: string) => {
+        setGranteeType(t)
+        setGranteeId('')
+        setUserSearch('')
+        setSelectedUser(null)
+        setShowUserDropdown(false)
+    }
+
+    const handleAdd = async () => {
+        const finalId = granteeType === 'user' ? (selectedUser ? String(selectedUser.id) : '') : granteeId.trim()
+        if (!finalId) return setError('請填寫共享對象')
+        setSubmitting(true)
+        setError('')
+        try {
+            await api.post(`/skills/${skill.id}/access`, { grantee_type: granteeType, grantee_id: finalId })
+            setGranteeId('')
+            setUserSearch('')
+            setSelectedUser(null)
+            await loadGrants()
+        } catch (e: any) {
+            setError(e.response?.data?.error || '新增失敗')
+        } finally {
+            setSubmitting(false)
+        }
+    }
+
+    const handleDelete = async (grantId: string) => {
+        try {
+            await api.delete(`/skills/${skill.id}/access/${grantId}`)
+            setGrants(prev => prev.filter(g => g.id !== grantId))
+        } catch (e: any) {
+            setError(e.response?.data?.error || '刪除失敗')
+        }
+    }
+
+    const getUserDisplayName = (granteeId: string) => {
+        const u = users.find(u => String(u.id) === granteeId)
+        return u ? `${u.name} (${u.username})` : granteeId
+    }
+
+    const getGranteeDisplay = (grant: GrantRecord) => {
+        if (grant.grantee_type === 'user') return getUserDisplayName(grant.grantee_id)
+        if (grant.grantee_type === 'role') return grant.grantee_id === 'admin' ? '系統管理員' : '一般使用者'
+        return grant.grantee_id
+    }
+
+    return (
+        <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 overflow-y-auto p-4">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg my-8">
+                {/* Header */}
+                <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
+                    <div className="flex items-center gap-2">
+                        <Share2 size={16} className="text-blue-500" />
+                        <h3 className="font-semibold text-slate-800">共享設定 — {skill.name}</h3>
+                    </div>
+                    <button onClick={onClose} className="p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100"><X size={16} /></button>
+                </div>
+
+                <div className="p-6 space-y-5">
+                    {error && (
+                        <div className="p-3 bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg flex items-center justify-between">
+                            {error}
+                            <button onClick={() => setError('')}><X size={13} /></button>
+                        </div>
+                    )}
+
+                    {/* Add form */}
+                    <div className="space-y-3">
+                        <p className="text-xs font-medium text-slate-600 uppercase tracking-wide">新增共享對象</p>
+                        <div className="flex gap-2">
+                            <select
+                                value={granteeType}
+                                onChange={e => handleTypeChange(e.target.value)}
+                                className="border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 shrink-0"
+                            >
+                                {Object.entries(GRANTEE_TYPE_LABELS).map(([val, label]) => (
+                                    <option key={val} value={val}>{label}</option>
+                                ))}
+                            </select>
+
+                            {granteeType === 'user' ? (
+                                <div className="relative flex-1" ref={userSearchRef}>
+                                    <input
+                                        value={selectedUser ? `${selectedUser.name} (${selectedUser.username})` : userSearch}
+                                        onChange={e => {
+                                            if (selectedUser) { setSelectedUser(null); setUserSearch(e.target.value) }
+                                            else { setUserSearch(e.target.value) }
+                                            setShowUserDropdown(true)
+                                        }}
+                                        onFocus={() => setShowUserDropdown(true)}
+                                        placeholder="搜尋姓名、帳號、工號..."
+                                        className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
+                                    />
+                                    {showUserDropdown && filteredUsers.length > 0 && (
+                                        <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg z-10 max-h-48 overflow-y-auto">
+                                            {filteredUsers.map(u => (
+                                                <button
+                                                    key={u.id}
+                                                    type="button"
+                                                    onClick={() => { setSelectedUser(u); setUserSearch(''); setShowUserDropdown(false) }}
+                                                    className="w-full text-left px-3 py-2 text-sm hover:bg-slate-50 border-b border-slate-100 last:border-0"
+                                                >
+                                                    <span className="font-medium text-slate-700">{u.name}</span>
+                                                    <span className="text-slate-400 ml-2 text-xs">{u.username}{u.employee_id ? ` · ${u.employee_id}` : ''}</span>
+                                                </button>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            ) : granteeType === 'role' ? (
+                                <select
+                                    value={granteeId}
+                                    onChange={e => setGranteeId(e.target.value)}
+                                    className="flex-1 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
+                                >
+                                    <option value="">請選擇角色</option>
+                                    <option value="admin">系統管理員</option>
+                                    <option value="user">一般使用者</option>
+                                </select>
+                            ) : (
+                                <input
+                                    value={granteeId}
+                                    onChange={e => setGranteeId(e.target.value)}
+                                    placeholder={
+                                        granteeType === 'dept' ? '部門代碼' :
+                                        granteeType === 'profit_center' ? '利潤中心代碼' :
+                                        granteeType === 'org_section' ? '事業處名稱' :
+                                        '事業群名稱'
+                                    }
+                                    className="flex-1 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
+                                />
+                            )}
+
+                            <button
+                                onClick={handleAdd}
+                                disabled={submitting}
+                                className="px-3 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 disabled:opacity-50 shrink-0 flex items-center gap-1"
+                            >
+                                <Plus size={14} />{submitting ? '...' : '新增'}
+                            </button>
+                        </div>
+                    </div>
+
+                    {/* Grants list */}
+                    <div>
+                        <p className="text-xs font-medium text-slate-600 uppercase tracking-wide mb-2">已共享對象</p>
+                        {loadingGrants ? (
+                            <p className="text-sm text-slate-400 py-4 text-center">載入中...</p>
+                        ) : grants.length === 0 ? (
+                            <p className="text-sm text-slate-400 py-4 text-center">尚未設定任何共享對象</p>
+                        ) : (
+                            <div className="space-y-2 max-h-64 overflow-y-auto">
+                                {grants.map(g => (
+                                    <div key={g.id} className="flex items-center justify-between py-2 px-3 bg-slate-50 rounded-lg border border-slate-100">
+                                        <div className="flex items-center gap-2 min-w-0">
+                                            <span className="text-xs px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded font-medium shrink-0">
+                                                {GRANTEE_TYPE_LABELS[g.grantee_type] || g.grantee_type}
+                                            </span>
+                                            <span className="text-sm text-slate-700 truncate">{getGranteeDisplay(g)}</span>
+                                        </div>
+                                        <button
+                                            onClick={() => handleDelete(g.id)}
+                                            className="p-1 rounded hover:bg-red-50 text-slate-400 hover:text-red-500 transition shrink-0 ml-2"
+                                            title="移除共享"
+                                        >
+                                            <Trash2 size={13} />
+                                        </button>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+                </div>
+
+                <div className="flex justify-end px-6 py-4 border-t border-slate-100">
+                    <button onClick={onClose} className="px-4 py-2 bg-slate-100 text-slate-700 rounded-lg text-sm hover:bg-slate-200">關閉</button>
+                </div>
+            </div>
+        </div>
+    )
+}
+
+function SkillCard({ skill, onEdit, onDelete, onFork, onRequestPublic, onUse, onView, onShare, isOwner }: {
     skill: Skill
     onEdit?: () => void
     onDelete?: () => void
@@ -467,6 +730,7 @@ function SkillCard({ skill, onEdit, onDelete, onFork, onRequestPublic, onUse, on
     onRequestPublic?: () => void
     onUse?: () => void
     onView?: () => void
+    onShare?: () => void
     isOwner: boolean
 }) {
     const statusBadge = skill.is_public && skill.is_admin_approved
@@ -530,6 +794,11 @@ function SkillCard({ skill, onEdit, onDelete, onFork, onRequestPublic, onUse, on
                     {isOwner && !skill.is_public && !skill.pending_approval && onRequestPublic && (
                         <button onClick={onRequestPublic} title="申請公開" className="p-1 rounded hover:bg-slate-100 text-slate-400 hover:text-emerald-600 transition">
                             <Send size={13} />
+                        </button>
+                    )}
+                    {isOwner && onShare && (
+                        <button onClick={onShare} title="共享設定" className="p-1 rounded hover:bg-blue-50 text-slate-400 hover:text-blue-600 transition">
+                            <Share2 size={13} />
                         </button>
                     )}
                     {isOwner && onDelete && (

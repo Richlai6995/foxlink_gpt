@@ -68,8 +68,8 @@ function markdownToPlainText(md: string): string {
     .replace(/\*\*\*([^*]+)\*\*\*/g, '$1')         // bold+italic
     .replace(/\*\*([^*]+)\*\*/g, '$1')             // bold
     .replace(/\*([^*\n]+)\*/g, '$1')               // italic
-    .replace(/__([^_]+)__/g, '$1')
-    .replace(/_([^_\n]+)_/g, '$1')
+    .replace(/(?<!\w)__([^_]+)__(?!\w)/g, '$1')
+    .replace(/(?<!\w)_([^_\n]+)_(?!\w)/g, '$1')
     .replace(/!\[([^\]]*)\]\([^)]+\)/g, '$1')      // images
     .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')       // links
     .replace(/^>\s+/gm, '')                         // blockquotes

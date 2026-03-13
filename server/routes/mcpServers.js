@@ -42,12 +42,12 @@ router.post('/', async (req, res) => {
   if (!requireAdmin(req, res)) return;
   const db = getDb();
   try {
-    const { name, url, api_key, description, is_active } = req.body;
+    const { name, url, api_key, description, is_active, response_mode } = req.body;
     if (!name || !url) return res.status(400).json({ error: '名稱和 URL 為必填' });
 
     const result = await db.prepare(
-      `INSERT INTO mcp_servers (name, url, api_key, description, is_active) VALUES (?, ?, ?, ?, ?)`
-    ).run(name, url, api_key || null, description || null, is_active !== false ? 1 : 0);
+      `INSERT INTO mcp_servers (name, url, api_key, description, is_active, response_mode) VALUES (?, ?, ?, ?, ?, ?)`
+    ).run(name, url, api_key || null, description || null, is_active !== false ? 1 : 0, response_mode || 'inject');
 
     const server = await db.prepare(`SELECT * FROM mcp_servers WHERE id=?`).get(result.lastInsertRowid);
     res.json(server);
@@ -64,15 +64,16 @@ router.put('/:id', async (req, res) => {
     const server = await db.prepare(`SELECT * FROM mcp_servers WHERE id=?`).get(req.params.id);
     if (!server) return res.status(404).json({ error: '找不到 MCP 伺服器' });
 
-    const { name, url, api_key, description, is_active } = req.body;
+    const { name, url, api_key, description, is_active, response_mode } = req.body;
     await db.prepare(
-      `UPDATE mcp_servers SET name=?, url=?, api_key=?, description=?, is_active=?, updated_at=SYSTIMESTAMP WHERE id=?`
+      `UPDATE mcp_servers SET name=?, url=?, api_key=?, description=?, is_active=?, response_mode=?, updated_at=SYSTIMESTAMP WHERE id=?`
     ).run(
       name ?? server.name,
       url ?? server.url,
       api_key !== undefined ? (api_key || null) : server.api_key,
       description !== undefined ? (description || null) : server.description,
       is_active !== undefined ? (is_active ? 1 : 0) : server.is_active,
+      response_mode !== undefined ? (response_mode || 'inject') : (server.response_mode || 'inject'),
       req.params.id,
     );
 

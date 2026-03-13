@@ -1452,12 +1452,25 @@ router.post('/sessions/:id/messages', upload.array('files', 10), async (req, res
             return await mcpClient.callTool(db, entry.server, sessionId, req.user.id, entry.originalName, args);
           };
 
-          ({ text, inputTokens, outputTokens } = await generateWithTools(
-            apiModel, history, userParts, allDeclarations, toolHandler, skillExtraInstruction
+          // Build set of tool names that should bypass LLM and return raw result directly
+          const directAnswerTools = new Set(
+            Object.entries(serverMap)
+              .filter(([, entry]) => entry.server?.response_mode === 'answer')
+              .map(([toolName]) => toolName)
+          );
+
+          let isDirectAnswer = false;
+          ({ text, inputTokens, outputTokens, isDirectAnswer } = await generateWithTools(
+            apiModel, history, userParts, allDeclarations, toolHandler, skillExtraInstruction,
+            { directAnswerTools }
           ));
           if (text) {
-            aiText = text;
-            sendEvent({ type: 'chunk', content: text });
+            // Direct answer mode: ensure newlines render as markdown line breaks
+            const displayText = isDirectAnswer
+              ? text.replace(/\n/g, '  \n')  // trailing 2 spaces = markdown hard line break
+              : text;
+            aiText = displayText;
+            sendEvent({ type: 'chunk', content: displayText });
           }
           console.log(`[Chat] Tools+Gemini done in ${Date.now() - t0}ms, tools=${allDeclarations.length} in=${inputTokens} out=${outputTokens} tokens`);
         }

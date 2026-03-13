@@ -160,6 +160,8 @@ export interface ScheduledTask {
   updated_at: string
   user_name?: string
   username?: string
+  tools_config_json?: string
+  pipeline_json?: string
 }
 
 export interface ResearchJob {

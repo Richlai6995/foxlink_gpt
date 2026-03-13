@@ -12,6 +12,7 @@ interface McpServer {
   api_key: string | null
   description: string | null
   is_active: number
+  response_mode: 'inject' | 'answer' | null
   tools_json: string | null
   last_synced_at: string | null
   created_at: string
@@ -37,7 +38,7 @@ interface McpCallLog {
   session_id: string | null
 }
 
-const emptyForm = { name: '', url: '', api_key: '', description: '', is_active: true }
+const emptyForm = { name: '', url: '', api_key: '', description: '', is_active: true, response_mode: 'inject' as 'inject' | 'answer' }
 
 export default function MCPServersPanel() {
   const [servers, setServers] = useState<McpServer[]>([])
@@ -77,7 +78,7 @@ export default function MCPServersPanel() {
 
   const openEdit = (s: McpServer) => {
     setEditing(s)
-    setForm({ name: s.name, url: s.url, api_key: s.api_key || '', description: s.description || '', is_active: !!s.is_active })
+    setForm({ name: s.name, url: s.url, api_key: s.api_key || '', description: s.description || '', is_active: !!s.is_active, response_mode: (s.response_mode as 'inject' | 'answer') || 'inject' })
     setError('')
     setShowModal(true)
   }
@@ -87,7 +88,7 @@ export default function MCPServersPanel() {
     setSaving(true)
     setError('')
     try {
-      const payload = { ...form, api_key: form.api_key || null, description: form.description || null }
+      const payload = { ...form, api_key: form.api_key || null, description: form.description || null, response_mode: form.response_mode }
       if (editing) {
         await api.put(`/mcp-servers/${editing.id}`, payload)
       } else {
@@ -363,6 +364,30 @@ export default function MCPServersPanel() {
                   rows={2}
                   className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
                 />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">回應模式</label>
+                <div className="flex gap-2">
+                  {(['inject', 'answer'] as const).map(mode => (
+                    <button
+                      key={mode}
+                      type="button"
+                      onClick={() => setForm(p => ({ ...p, response_mode: mode }))}
+                      className={`px-3 py-1.5 rounded text-xs font-medium border transition-colors ${
+                        form.response_mode === mode
+                          ? 'bg-blue-600 text-white border-blue-600'
+                          : 'bg-white text-slate-600 border-slate-300 hover:border-blue-400'
+                      }`}
+                    >
+                      {mode === 'inject' ? 'Inject（補充 Prompt）' : 'Answer（直接回答）'}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-xs text-slate-400 mt-1">
+                  {form.response_mode === 'answer'
+                    ? 'MCP 工具結果直接輸出，不經 LLM 處理（保留原始資料）'
+                    : 'MCP 工具結果注入給 LLM 整理後回答'}
+                </p>
               </div>
               <label className="flex items-center gap-2 cursor-pointer">
                 <input

@@ -166,9 +166,15 @@ async function resolveToolRefs(text, db, opts = {}) {
       const skill = await db.prepare(
         `SELECT * FROM skills
          WHERE UPPER(name)=UPPER(?)
-           AND (owner_user_id=? OR (is_public=1 AND is_admin_approved=1))
+           AND (owner_user_id=? OR is_public=1
+                OR EXISTS (
+                  SELECT 1 FROM skill_access sa WHERE sa.skill_id=skills.id AND (
+                    (sa.grantee_type='user' AND sa.grantee_id=TO_CHAR(?))
+                    OR (sa.grantee_type='role' AND sa.grantee_id=(SELECT role FROM users WHERE id=?))
+                  )
+                ))
          FETCH FIRST 1 ROWS ONLY`
-      ).get(skillName, userId ?? 0);
+      ).get(skillName, userId ?? 0, userId ?? 0, userId ?? 0);
       if (!skill) {
         result = result.replace(placeholder, `[技能「${skillName}」不存在]`);
         continue;
