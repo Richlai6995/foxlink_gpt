@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Plus, Edit, Trash2, Save, X, Check, Download, UserCog, FileText, Mic, Image, CalendarClock, RefreshCw, Building2, Search, ShieldCheck } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import type { User } from '../../types'
 import api from '../../lib/api'
 
@@ -89,6 +90,7 @@ const empty: UserForm = {
 }
 
 export default function UserManagement() {
+  const { t } = useTranslation()
   const [users, setUsers] = useState<User[]>([])
   const [roles, setRoles] = useState<Role[]>([])
   const [policies, setPolicies] = useState<Policy[]>([])
@@ -222,19 +224,19 @@ export default function UserManagement() {
       setShowForm(false)
       await load()
     } catch (e: unknown) {
-      setError((e as { response?: { data?: { error?: string } } })?.response?.data?.error || '儲存失敗')
+      setError((e as { response?: { data?: { error?: string } } })?.response?.data?.error || t('users.saveFailed'))
     } finally {
       setLoading(false)
     }
   }
 
   const handleDelete = async (id: number, username: string) => {
-    if (!confirm(`確定刪除使用者 ${username}？`)) return
+    if (!confirm(t('users.deleteUserConfirm', { username }))) return
     try {
       await api.delete(`/users/${id}`)
       await load()
     } catch (e: unknown) {
-      alert((e as { response?: { data?: { error?: string } } })?.response?.data?.error || '刪除失敗')
+      alert((e as { response?: { data?: { error?: string } } })?.response?.data?.error || t('users.deleteFailed'))
     }
   }
 
@@ -243,10 +245,10 @@ export default function UserManagement() {
     setSyncMsg('')
     try {
       const res = await api.post(`/admin/users/${id}/sync-org`)
-      setSyncMsg(res.data.message || '同步完成')
+      setSyncMsg(res.data.message || t('users.syncOrg'))
       await load()
     } catch (e: unknown) {
-      const errMsg = (e as any)?.response?.data?.error || '同步失敗'
+      const errMsg = (e as any)?.response?.data?.error || t('users.syncOrg')
       setSyncMsg(errMsg)
     } finally {
       setSyncingId(null)
@@ -258,10 +260,10 @@ export default function UserManagement() {
     setSyncMsg('')
     try {
       const res = await api.post('/admin/users/sync-org-all')
-      setSyncMsg(res.data.message || '全部同步完成')
+      setSyncMsg(res.data.message || t('users.syncAllOrg'))
       await load()
     } catch (e: unknown) {
-      const errMsg = (e as any)?.response?.data?.error || '同步失敗'
+      const errMsg = (e as any)?.response?.data?.error || t('users.syncAllOrg')
       setSyncMsg(errMsg)
     } finally {
       setSyncingAll(false)
@@ -269,13 +271,13 @@ export default function UserManagement() {
   }
 
   const exportCsv = () => {
-    const header = '帳號,姓名,工號,Email,角色,狀態,部門代碼,部門名稱,利潤中心,利潤中心名稱,事業處代碼,事業處名稱,事業群名稱,廠區碼,離職日'
+    const header = `${t('users.cols.username')},${t('users.cols.name')},${t('users.cols.employeeId')},Email,${t('users.cols.systemRole')},${t('users.status.active')}/${t('users.status.inactive')},${t('users.cols.deptCode')},${t('users.cols.deptName')},${t('users.cols.profitCenter')},${t('users.cols.profitCenterName')},${t('users.cols.orgSection')},${t('users.cols.orgSectionName')},${t('users.cols.orgGroupName')},${t('users.cols.factoryCode')},${t('users.cols.endDate')}`
     const lines = users.map((u) => {
       const u2 = u as any
       return [
         u.username, u.name, u.employee_id || '', u.email || '',
-        u.role === 'admin' ? '管理員' : '一般使用者',
-        u.status === 'active' ? '啟用' : '停用',
+        u.role === 'admin' ? t('users.adminRole') : t('users.normalUser'),
+        u.status === 'active' ? t('users.status.active') : t('users.status.inactive'),
         u2.dept_code || '', u2.dept_name || '', u2.profit_center || '',
         u2.profit_center_name || '', u2.org_section || '', u2.org_section_name || '',
         u2.org_group_name || '', u2.factory_code || '', u2.org_end_date || '',
@@ -312,31 +314,31 @@ export default function UserManagement() {
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
-        <h2 className="text-lg font-semibold text-slate-800">使用者管理</h2>
+        <h2 className="text-lg font-semibold text-slate-800">{t('users.title')}</h2>
         <div className="flex gap-2 flex-wrap items-center">
           {syncMsg && <span className="text-xs text-blue-600 max-w-xs truncate">{syncMsg}</span>}
           <button onClick={handleSyncAll} disabled={syncingAll}
             className="btn-ghost flex items-center gap-1.5 text-sm">
             <RefreshCw size={14} className={syncingAll ? 'animate-spin' : ''} />
-            同步所有組織
+            {t('users.syncAllOrg')}
           </button>
           <button onClick={exportCsv} disabled={users.length === 0} className="btn-ghost flex items-center gap-1.5">
-            <Download size={14} /> 匯出 CSV
+            <Download size={14} /> {t('users.exportCsv')}
           </button>
           <button onClick={openNew} className="btn-primary flex items-center gap-1.5">
-            <Plus size={15} /> 新增使用者
+            <Plus size={15} /> {t('users.addUser')}
           </button>
         </div>
       </div>
 
-      {/* 搜尋列 */}
+      {/* Search bar */}
       <div className="mb-3 flex items-center gap-2 bg-slate-50 rounded-xl px-4 py-2.5 border border-slate-200">
         <Search size={15} className="text-slate-400 shrink-0" />
         <input
           type="text"
           value={search}
           onChange={e => setSearch(e.target.value)}
-          placeholder="搜尋 姓名 / 工號 / Email / 部門名稱 / 利潤中心名稱 / 事業處名稱 / 事業群名稱"
+          placeholder={t('users.searchPlaceholder')}
           className="flex-1 bg-transparent text-sm outline-none text-slate-700 placeholder:text-slate-400"
         />
         {search && (
@@ -354,56 +356,56 @@ export default function UserManagement() {
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl flex flex-col max-h-[90vh]">
             <div className="flex items-center justify-between p-5 border-b flex-shrink-0">
-              <h3 className="font-semibold">{editId ? '編輯使用者' : '新增使用者'}</h3>
+              <h3 className="font-semibold">{editId ? t('users.editUser') : t('users.addUser')}</h3>
               <button onClick={() => setShowForm(false)}><X size={18} /></button>
             </div>
             <div className="overflow-y-auto flex-1">
               <div className="p-5 grid grid-cols-2 gap-4">
                 <div>
-                  <label className="label">帳號 *</label>
+                  <label className="label">{t('users.form.accountRequired')}</label>
                   <input {...F('username')} className="input" disabled={!!editId} />
                 </div>
                 <div>
-                  <label className="label">密碼 {editId && '(留空不改)'}</label>
+                  <label className="label">{editId ? t('users.form.passwordNoChange') : t('users.form.password')}</label>
                   <input {...F('password')} type="password" autoComplete="new-password" className="input" />
                 </div>
                 <div>
-                  <label className="label">姓名 *</label>
+                  <label className="label">{t('users.form.nameRequired')}</label>
                   <input {...F('name')} className="input" />
                 </div>
                 <div>
-                  <label className="label">工號</label>
+                  <label className="label">{t('users.form.employeeId')}</label>
                   <input {...F('employee_id')} className="input" />
                 </div>
                 <div className="col-span-2">
-                  <label className="label">Email</label>
+                  <label className="label">{t('users.form.email')}</label>
                   <input {...F('email')} type="email" className="input" />
                 </div>
                 <div>
-                  <label className="label">角色</label>
+                  <label className="label">{t('users.form.role')}</label>
                   <select {...F('role')} className="input">
-                    <option value="user">一般使用者</option>
-                    <option value="admin">系統管理員</option>
+                    <option value="user">{t('users.role.user')}</option>
+                    <option value="admin">{t('users.role.admin')}</option>
                   </select>
                 </div>
                 <div>
-                  <label className="label">狀態</label>
+                  <label className="label">{t('users.form.status')}</label>
                   <select {...F('status')} className="input">
-                    <option value="active">啟用</option>
-                    <option value="inactive">停用</option>
+                    <option value="active">{t('users.status.active')}</option>
+                    <option value="inactive">{t('users.status.inactive')}</option>
                   </select>
                 </div>
                 <div>
-                  <label className="label">生效日期</label>
+                  <label className="label">{t('users.form.startDateLabel')}</label>
                   <input {...F('start_date')} type="date" className="input" />
                 </div>
                 <div>
-                  <label className="label">到期日期</label>
+                  <label className="label">{t('users.form.endDateLabel')}</label>
                   <input {...F('end_date')} type="date" className="input" />
                 </div>
                 {/* Upload permissions */}
                 <div className="col-span-2 border-t pt-3 mt-1">
-                  <p className="text-xs font-semibold text-slate-500 mb-2">上傳權限</p>
+                  <p className="text-xs font-semibold text-slate-500 mb-2">{t('users.form.uploadPerms')}</p>
                   <div className="grid grid-cols-2 gap-3">
                     <label className="flex items-center gap-2 text-sm cursor-pointer">
                       <input
@@ -412,10 +414,10 @@ export default function UserManagement() {
                         onChange={e => setForm(p => ({ ...p, allow_text_upload: e.target.checked }))}
                         className="w-4 h-4 accent-blue-600"
                       />
-                      文字類上傳
+                      {t('users.form.textUpload')}
                     </label>
                     <div className="flex items-center gap-2">
-                      <span className="text-sm text-slate-500">上限 (MB)</span>
+                      <span className="text-sm text-slate-500">{t('users.form.limitMb')}</span>
                       <input
                         type="number" min={1} max={200}
                         value={form.text_max_mb}
@@ -431,10 +433,10 @@ export default function UserManagement() {
                         onChange={e => setForm(p => ({ ...p, allow_audio_upload: e.target.checked }))}
                         className="w-4 h-4 accent-blue-600"
                       />
-                      聲音類上傳
+                      {t('users.form.audioUpload')}
                     </label>
                     <div className="flex items-center gap-2">
-                      <span className="text-sm text-slate-500">上限 (MB)</span>
+                      <span className="text-sm text-slate-500">{t('users.form.limitMb')}</span>
                       <input
                         type="number" min={1} max={500}
                         value={form.audio_max_mb}
@@ -450,10 +452,10 @@ export default function UserManagement() {
                         onChange={e => setForm(p => ({ ...p, allow_image_upload: e.target.checked }))}
                         className="w-4 h-4 accent-blue-600"
                       />
-                      圖片類上傳
+                      {t('users.form.imageUpload')}
                     </label>
                     <div className="flex items-center gap-2">
-                      <span className="text-sm text-slate-500">上限 (MB)</span>
+                      <span className="text-sm text-slate-500">{t('users.form.limitMb')}</span>
                       <input
                         type="number" min={1} max={200}
                         value={form.image_max_mb}
@@ -468,7 +470,7 @@ export default function UserManagement() {
 
               {/* Scheduled tasks permission */}
               <div className="px-5 pb-4">
-                <label className="label mb-1.5">功能權限</label>
+                <label className="label mb-1.5">{t('users.form.funcPerms')}</label>
                 <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
                   <input
                     type="checkbox"
@@ -476,14 +478,14 @@ export default function UserManagement() {
                     onChange={e => setForm(p => ({ ...p, allow_scheduled_tasks: e.target.checked }))}
                     className="w-4 h-4 accent-blue-600"
                   />
-                  允許使用排程任務功能
+                  {t('users.form.allowScheduledTasks')}
                 </label>
               </div>
 
               {/* Role assignment */}
               <div className="px-5 pb-4 border-t pt-3">
                 <label className="label mb-1.5 flex items-center gap-1.5">
-                  <UserCog size={14} /> MCP / DIFY 角色
+                  <UserCog size={14} /> {t('users.form.mcpDifyRole')}
                 </label>
                 <select
                   value={form.role_id ?? ''}
@@ -509,66 +511,66 @@ export default function UserManagement() {
                   }}
                   className="input w-full"
                 >
-                  <option value="">— 不指派角色 —</option>
+                  <option value="">{t('users.form.noRole')}</option>
                   {roles.map((r) => (
                     <option key={r.id} value={r.id}>
-                      {r.name}{r.is_default ? ' (預設)' : ''}
+                      {r.name}{r.is_default ? t('users.form.defaultRole') : ''}
                     </option>
                   ))}
                 </select>
-                <p className="text-xs text-slate-400 mt-1">決定此使用者可使用的 MCP 工具與 DIFY 知識庫</p>
+                <p className="text-xs text-slate-400 mt-1">{t('users.form.mcpDifyRoleNote')}</p>
               </div>
 
               {/* Data Policy */}
               <div className="px-5 pb-4 border-t pt-3">
                 <label className="label mb-1.5 flex items-center gap-1.5">
-                  <ShieldCheck size={14} /> 資料權限政策（個人覆蓋角色設定）
+                  <ShieldCheck size={14} /> {t('users.form.dataPolicy')}
                 </label>
                 <select
                   value={formPolicyId ?? ''}
                   onChange={e => setFormPolicyId(e.target.value ? Number(e.target.value) : null)}
                   className="input w-full"
                 >
-                  <option value="">— 沿用角色政策（未設定則無限制）—</option>
+                  <option value="">{t('users.form.followRolePolicy')}</option>
                   {policies.map(p => (
                     <option key={p.id} value={p.id}>{p.name}{p.description ? ` — ${p.description}` : ''}</option>
                   ))}
                 </select>
-                <p className="text-xs text-slate-400 mt-1">設定後此使用者的資料查詢將套用此政策，優先於角色政策</p>
+                <p className="text-xs text-slate-400 mt-1">{t('users.form.dataPolicyNote')}</p>
               </div>
 
               {/* Budget override */}
               <div className="px-5 pb-4 border-t pt-3">
-                <p className="label mb-2">使用金額限制（個人覆蓋，空白=沿用角色設定）</p>
+                <p className="label mb-2">{t('users.form.budgetOverride')}</p>
                 <div className="grid grid-cols-3 gap-3">
                   <div>
-                    <label className="text-xs text-slate-500 mb-1 block">當日上限 ($)</label>
+                    <label className="text-xs text-slate-500 mb-1 block">{t('users.form.dailyLimit')}</label>
                     <input
                       type="number" min={0} step="0.01"
                       value={form.budget_daily}
                       onChange={e => setForm(p => ({ ...p, budget_daily: e.target.value }))}
                       className="input py-1.5 text-sm"
-                      placeholder="無限制"
+                      placeholder={t('common.unlimited')}
                     />
                   </div>
                   <div>
-                    <label className="text-xs text-slate-500 mb-1 block">當週上限 ($)</label>
+                    <label className="text-xs text-slate-500 mb-1 block">{t('users.form.weeklyLimit')}</label>
                     <input
                       type="number" min={0} step="0.01"
                       value={form.budget_weekly}
                       onChange={e => setForm(p => ({ ...p, budget_weekly: e.target.value }))}
                       className="input py-1.5 text-sm"
-                      placeholder="無限制"
+                      placeholder={t('common.unlimited')}
                     />
                   </div>
                   <div>
-                    <label className="text-xs text-slate-500 mb-1 block">當月上限 ($)</label>
+                    <label className="text-xs text-slate-500 mb-1 block">{t('users.form.monthlyLimit')}</label>
                     <input
                       type="number" min={0} step="0.01"
                       value={form.budget_monthly}
                       onChange={e => setForm(p => ({ ...p, budget_monthly: e.target.value }))}
                       className="input py-1.5 text-sm"
-                      placeholder="無限制"
+                      placeholder={t('common.unlimited')}
                     />
                   </div>
                 </div>
@@ -576,7 +578,7 @@ export default function UserManagement() {
 
               {/* Skill permission override */}
               <div className="px-5 pb-4 border-t pt-3">
-                <p className="label mb-2 flex items-center gap-1.5">✨ Skill 權限（個人覆蓋，null=沿用角色設定）</p>
+                <p className="label mb-2 flex items-center gap-1.5">{t('users.form.skillPerms')}</p>
                 <div className="flex gap-4">
                   <label className="flex items-center gap-2 cursor-pointer select-none">
                     <select
@@ -584,9 +586,9 @@ export default function UserManagement() {
                       onChange={e => setForm(p => ({ ...p, allow_create_skill: e.target.value === '' ? null : e.target.value === '1' }))}
                       className="input py-1 text-sm"
                     >
-                      <option value="">沿用角色</option>
-                      <option value="1">允許建立 Skill</option>
-                      <option value="0">禁止建立 Skill</option>
+                      <option value="">{t('users.form.followRole')}</option>
+                      <option value="1">{t('users.form.allowCreateSkillOpt')}</option>
+                      <option value="0">{t('users.form.denyCreateSkill')}</option>
                     </select>
                   </label>
                   <label className="flex items-center gap-2 cursor-pointer select-none">
@@ -595,9 +597,9 @@ export default function UserManagement() {
                       onChange={e => setForm(p => ({ ...p, allow_external_skill: e.target.value === '' ? null : e.target.value === '1' }))}
                       className="input py-1 text-sm"
                     >
-                      <option value="">沿用角色</option>
-                      <option value="1">允許外部 Skill</option>
-                      <option value="0">禁止外部 Skill</option>
+                      <option value="">{t('users.form.followRole')}</option>
+                      <option value="1">{t('users.form.allowExternalSkill')}</option>
+                      <option value="0">{t('users.form.denyExternalSkill')}</option>
                     </select>
                   </label>
                 </div>
@@ -605,58 +607,58 @@ export default function UserManagement() {
 
               {/* KB permission */}
               <div className="px-5 pb-4 border-t pt-3">
-                <p className="label mb-2 flex items-center gap-1.5">📚 知識庫 / 深度研究權限（個人覆蓋，null=沿用角色設定）</p>
+                <p className="label mb-2 flex items-center gap-1.5">{t('users.form.kbPerms')}</p>
                 <div className="grid grid-cols-4 gap-3">
                   <div>
-                    <label className="text-xs text-slate-500 mb-1 block">建立知識庫</label>
+                    <label className="text-xs text-slate-500 mb-1 block">{t('users.form.createKb')}</label>
                     <select
                       value={form.can_create_kb === null ? '' : form.can_create_kb ? '1' : '0'}
                       onChange={e => setForm(p => ({ ...p, can_create_kb: e.target.value === '' ? null : e.target.value === '1' }))}
                       className="input py-1 text-sm"
                     >
-                      <option value="">沿用角色</option>
-                      <option value="1">允許建立</option>
-                      <option value="0">禁止建立</option>
+                      <option value="">{t('users.form.followRole')}</option>
+                      <option value="1">{t('users.form.allowCreate')}</option>
+                      <option value="0">{t('users.form.denyCreate')}</option>
                     </select>
                   </div>
                   <div>
-                    <label className="text-xs text-slate-500 mb-1 block">深度研究</label>
+                    <label className="text-xs text-slate-500 mb-1 block">{t('users.form.deepResearch')}</label>
                     <select
                       value={form.can_deep_research === null ? '' : form.can_deep_research ? '1' : '0'}
                       onChange={e => setForm(p => ({ ...p, can_deep_research: e.target.value === '' ? null : e.target.value === '1' }))}
                       className="input py-1 text-sm"
                     >
-                      <option value="">沿用角色設定</option>
-                      <option value="1">強制允許</option>
-                      <option value="0">強制禁止</option>
+                      <option value="">{t('users.form.followRoleSetting')}</option>
+                      <option value="1">{t('users.form.forceAllow')}</option>
+                      <option value="0">{t('users.form.forceDeny')}</option>
                     </select>
                   </div>
                   <div>
-                    <label className="text-xs text-slate-500 mb-1 block">AI 戰情設計</label>
+                    <label className="text-xs text-slate-500 mb-1 block">{t('users.form.aiDashboardDesign')}</label>
                     <select
                       value={form.can_design_ai_select === null ? '' : form.can_design_ai_select ? '1' : '0'}
                       onChange={e => setForm(p => ({ ...p, can_design_ai_select: e.target.value === '' ? null : e.target.value === '1' }))}
                       className="input py-1 text-sm"
                     >
-                      <option value="">預設禁止</option>
-                      <option value="1">允許設計</option>
-                      <option value="0">禁止</option>
+                      <option value="">{t('users.form.defaultDeny')}</option>
+                      <option value="1">{t('users.form.allowDesign')}</option>
+                      <option value="0">{t('users.form.deny')}</option>
                     </select>
                   </div>
                   <div>
-                    <label className="text-xs text-slate-500 mb-1 block">AI 戰情查詢</label>
+                    <label className="text-xs text-slate-500 mb-1 block">{t('users.form.aiDashboardQuery')}</label>
                     <select
                       value={form.can_use_ai_dashboard === null ? '' : form.can_use_ai_dashboard ? '1' : '0'}
                       onChange={e => setForm(p => ({ ...p, can_use_ai_dashboard: e.target.value === '' ? null : e.target.value === '1' }))}
                       className="input py-1 text-sm"
                     >
-                      <option value="">預設禁止</option>
-                      <option value="1">允許使用</option>
-                      <option value="0">禁止</option>
+                      <option value="">{t('users.form.defaultDeny')}</option>
+                      <option value="1">{t('users.form.allowUse')}</option>
+                      <option value="0">{t('users.form.deny')}</option>
                     </select>
                   </div>
                   <div>
-                    <label className="text-xs text-slate-500 mb-1 block">最大容量 (MB，空白=沿用角色)</label>
+                    <label className="text-xs text-slate-500 mb-1 block">{t('users.form.kbMaxSizeMb')}</label>
                     <input
                       type="number" min={1} step={1}
                       value={form.kb_max_size_mb}
@@ -666,7 +668,7 @@ export default function UserManagement() {
                     />
                   </div>
                   <div>
-                    <label className="text-xs text-slate-500 mb-1 block">最多知識庫數量（空白=沿用角色）</label>
+                    <label className="text-xs text-slate-500 mb-1 block">{t('users.form.kbMaxCount')}</label>
                     <input
                       type="number" min={1} step={1}
                       value={form.kb_max_count}
@@ -681,43 +683,43 @@ export default function UserManagement() {
               {/* Org fields (manual override) */}
               <div className="px-5 pb-4 border-t pt-3">
                 <p className="label mb-2 flex items-center gap-1.5">
-                  <Building2 size={13} /> 組織資料（可手動覆蓋；儲存工號時系統自動從 ERP 同步）
+                  <Building2 size={13} /> {t('users.form.orgData')}
                 </p>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="text-xs text-slate-500 mb-1 block">部門代碼</label>
+                    <label className="text-xs text-slate-500 mb-1 block">{t('users.form.deptCode')}</label>
                     <input {...F('dept_code')} className="input py-1.5 text-sm" />
                   </div>
                   <div>
-                    <label className="text-xs text-slate-500 mb-1 block">部門名稱</label>
+                    <label className="text-xs text-slate-500 mb-1 block">{t('users.form.deptName')}</label>
                     <input {...F('dept_name')} className="input py-1.5 text-sm" />
                   </div>
                   <div>
-                    <label className="text-xs text-slate-500 mb-1 block">利潤中心代碼</label>
+                    <label className="text-xs text-slate-500 mb-1 block">{t('users.form.profitCenterCode')}</label>
                     <input {...F('profit_center')} className="input py-1.5 text-sm" />
                   </div>
                   <div>
-                    <label className="text-xs text-slate-500 mb-1 block">利潤中心名稱</label>
+                    <label className="text-xs text-slate-500 mb-1 block">{t('users.form.profitCenterName')}</label>
                     <input {...F('profit_center_name')} className="input py-1.5 text-sm" />
                   </div>
                   <div>
-                    <label className="text-xs text-slate-500 mb-1 block">事業處代碼</label>
+                    <label className="text-xs text-slate-500 mb-1 block">{t('users.form.orgSectionCode')}</label>
                     <input {...F('org_section')} className="input py-1.5 text-sm" />
                   </div>
                   <div>
-                    <label className="text-xs text-slate-500 mb-1 block">事業處名稱</label>
+                    <label className="text-xs text-slate-500 mb-1 block">{t('users.form.orgSectionName')}</label>
                     <input {...F('org_section_name')} className="input py-1.5 text-sm" />
                   </div>
                   <div>
-                    <label className="text-xs text-slate-500 mb-1 block">事業群名稱</label>
+                    <label className="text-xs text-slate-500 mb-1 block">{t('users.form.orgGroupName')}</label>
                     <input {...F('org_group_name')} className="input py-1.5 text-sm" />
                   </div>
                   <div>
-                    <label className="text-xs text-slate-500 mb-1 block">廠區碼</label>
+                    <label className="text-xs text-slate-500 mb-1 block">{t('users.form.factoryCodeLabel')}</label>
                     <input {...F('factory_code')} className="input py-1.5 text-sm" />
                   </div>
                   <div>
-                    <label className="text-xs text-slate-500 mb-1 block">離職日</label>
+                    <label className="text-xs text-slate-500 mb-1 block">{t('users.form.orgEndDate')}</label>
                     <input {...F('org_end_date')} type="date" className="input py-1.5 text-sm" />
                   </div>
                 </div>
@@ -726,7 +728,7 @@ export default function UserManagement() {
               {/* Creation method (read-only, edit mode only) */}
               {editId && (
                 <div className="px-5 pb-4 border-t pt-3">
-                  <p className="label mb-1.5">產生方式</p>
+                  <p className="label mb-1.5">{t('users.form.creationMethod')}</p>
                   {(() => {
                     const method = (users.find(u => u.id === editId) as any)?.creation_method || 'manual'
                     return (
@@ -734,20 +736,20 @@ export default function UserManagement() {
                         ? 'bg-blue-100 text-blue-700'
                         : 'bg-slate-100 text-slate-600'
                         }`}>
-                        {method === 'ldap' ? '🔗 AD 網域同步 (LDAP)' : '✏️ 手動建立'}
+                        {method === 'ldap' ? t('users.form.ldapMethod') : t('users.form.manualMethod')}
                       </span>
                     )
                   })()}
-                  <p className="text-xs text-slate-400 mt-1">此欄位由系統自動記錄，LDAP 帳號密碼由 AD 管理</p>
+                  <p className="text-xs text-slate-400 mt-1">{t('users.form.creationMethodNote')}</p>
                 </div>
               )}
             </div>{/* end scrollable area */}
 
             {error && <p className="px-5 py-2 text-red-500 text-sm flex-shrink-0">{error}</p>}
             <div className="flex justify-end gap-2 p-5 border-t flex-shrink-0">
-              <button onClick={() => setShowForm(false)} className="btn-ghost">取消</button>
+              <button onClick={() => setShowForm(false)} className="btn-ghost">{t('common.cancel')}</button>
               <button onClick={handleSave} disabled={loading} className="btn-primary flex items-center gap-1.5">
-                <Save size={14} /> {loading ? '儲存中...' : '儲存'}
+                <Save size={14} /> {loading ? t('common.saving') : t('common.save')}
               </button>
             </div>
           </div>
@@ -760,31 +762,31 @@ export default function UserManagement() {
           <table className="w-full text-sm whitespace-nowrap">
             <thead className="bg-slate-50 border-b border-slate-200">
               <tr>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600">帳號</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600">姓名</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600">工號</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600">{t('users.cols.username')}</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600">{t('users.cols.name')}</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600">{t('users.cols.employeeId')}</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600">Email</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600">系統角色</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600">MCP/DIFY角色</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600 text-center" title="文字上傳"><FileText size={13} className="inline" /></th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600 text-center" title="聲音上傳"><Mic size={13} className="inline" /></th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600 text-center" title="圖片上傳"><Image size={13} className="inline" /></th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600 text-center" title="排程任務"><CalendarClock size={13} className="inline" /></th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600" title="日/週/月金額上限">限額</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600">產生方式</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600">狀態</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600">操作</th>
-                {/* Org columns — visible by scrolling right */}
-                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600 bg-green-50 border-l border-green-200">部門代碼</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600 bg-green-50">部門名稱</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600 bg-green-50">利潤中心</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600 bg-green-50">利潤中心名稱</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600 bg-green-50">事業處</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600 bg-green-50">事業處名稱</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600 bg-green-50">事業群名稱</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600 bg-green-50">廠區碼</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600 bg-green-50">離職日</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600 bg-green-50">最後同步</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600">{t('users.cols.systemRole')}</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600">{t('users.cols.mcpDifyRole')}</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600 text-center" title={t('users.form.textUpload')}><FileText size={13} className="inline" /></th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600 text-center" title={t('users.form.audioUpload')}><Mic size={13} className="inline" /></th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600 text-center" title={t('users.form.imageUpload')}><Image size={13} className="inline" /></th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600 text-center" title={t('users.form.allowSchedule')}><CalendarClock size={13} className="inline" /></th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600" title={t('users.cols.budget')}>{t('users.cols.budget')}</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600">{t('users.cols.creation')}</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600">{t('users.cols.status')}</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600">{t('users.cols.action')}</th>
+                {/* Org columns */}
+                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600 bg-green-50 border-l border-green-200">{t('users.cols.deptCode')}</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600 bg-green-50">{t('users.cols.deptName')}</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600 bg-green-50">{t('users.cols.profitCenter')}</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600 bg-green-50">{t('users.cols.profitCenterName')}</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600 bg-green-50">{t('users.cols.orgSection')}</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600 bg-green-50">{t('users.cols.orgSectionName')}</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600 bg-green-50">{t('users.cols.orgGroupName')}</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600 bg-green-50">{t('users.cols.factoryCode')}</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600 bg-green-50">{t('users.cols.endDate')}</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600 bg-green-50">{t('users.cols.lastSync')}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -802,7 +804,7 @@ export default function UserManagement() {
                     <td className="px-4 py-3 text-slate-500">{u.email || '-'}</td>
                     <td className="px-4 py-3">
                       <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${u.role === 'admin' ? 'bg-purple-100 text-purple-700' : 'bg-slate-100 text-slate-700'}`}>
-                        {u.role === 'admin' ? '管理員' : '一般使用者'}
+                        {u.role === 'admin' ? t('users.adminRole') : t('users.normalUser')}
                       </span>
                     </td>
                     <td className="px-4 py-3 text-slate-500 text-xs">
@@ -813,58 +815,58 @@ export default function UserManagement() {
                         </span>
                       ) : <span className="text-slate-300">—</span>}
                     </td>
-                    {/* 文字上傳 */}
+                    {/* Text upload */}
                     <td className="px-4 py-3 text-center">
                       {u2.allow_text_upload !== 0
                         ? <span className="text-green-600 text-xs font-medium">✓ {u2.text_max_mb}M</span>
                         : <span className="text-slate-300 text-xs">✗</span>}
                     </td>
-                    {/* 聲音上傳 */}
+                    {/* Audio upload */}
                     <td className="px-4 py-3 text-center">
                       {u2.allow_audio_upload === 1
                         ? <span className="text-green-600 text-xs font-medium">✓ {u2.audio_max_mb}M</span>
                         : <span className="text-slate-300 text-xs">✗</span>}
                     </td>
-                    {/* 圖片上傳 */}
+                    {/* Image upload */}
                     <td className="px-4 py-3 text-center">
                       {u2.allow_image_upload !== 0
                         ? <span className="text-green-600 text-xs font-medium">✓ {u2.image_max_mb}M</span>
                         : <span className="text-slate-300 text-xs">✗</span>}
                     </td>
-                    {/* 排程任務 */}
+                    {/* Scheduled tasks */}
                     <td className="px-4 py-3 text-center">
                       {u2.allow_scheduled_tasks === 1
                         ? <Check size={13} className="text-green-600 mx-auto" />
                         : <X size={13} className="text-slate-300 mx-auto" />}
                     </td>
-                    {/* 限額欄 */}
+                    {/* Budget */}
                     <td className="px-4 py-3 text-xs text-slate-500">
                       {hasBudget ? (
                         <div className="flex flex-col gap-0.5">
-                          {budgetD != null && <span className="text-orange-600">日 ${budgetD}</span>}
-                          {budgetW != null && <span className="text-blue-600">週 ${budgetW}</span>}
-                          {budgetM != null && <span className="text-purple-600">月 ${budgetM}</span>}
+                          {budgetD != null && <span className="text-orange-600">{t('roles.budgetDaily')} ${budgetD}</span>}
+                          {budgetW != null && <span className="text-blue-600">{t('roles.budgetWeekly')} ${budgetW}</span>}
+                          {budgetM != null && <span className="text-purple-600">{t('roles.budgetMonthly')} ${budgetM}</span>}
                         </div>
                       ) : <span className="text-slate-300">—</span>}
                     </td>
                     <td className="px-4 py-3">
                       {u2.creation_method === 'ldap'
-                        ? <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-700">LDAP</span>
-                        : <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-600">手動</span>
+                        ? <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-700">{t('users.ldapBadge')}</span>
+                        : <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-600">{t('users.manualBadge')}</span>
                       }
                     </td>
                     <td className="px-4 py-3">
                       <span className={`flex items-center gap-1 text-xs font-medium ${u.status === 'active' ? 'text-green-600' : 'text-slate-400'}`}>
                         {u.status === 'active' ? <Check size={12} /> : <X size={12} />}
-                        {u.status === 'active' ? '啟用' : '停用'}
+                        {u.status === 'active' ? t('users.status.active') : t('users.status.inactive')}
                       </span>
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex gap-1">
-                        <button onClick={() => openEdit(u)} className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-500 hover:text-blue-600 transition" title="編輯">
+                        <button onClick={() => openEdit(u)} className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-500 hover:text-blue-600 transition" title={t('common.edit')}>
                           <Edit size={14} />
                         </button>
-                        <button onClick={() => handleDelete(u.id, u.username)} className="p-1.5 hover:bg-red-50 rounded-lg text-slate-500 hover:text-red-600 transition" title="刪除">
+                        <button onClick={() => handleDelete(u.id, u.username)} className="p-1.5 hover:bg-red-50 rounded-lg text-slate-500 hover:text-red-600 transition" title={t('common.delete')}>
                           <Trash2 size={14} />
                         </button>
                         {u.employee_id && (
@@ -872,7 +874,7 @@ export default function UserManagement() {
                             onClick={() => handleSyncOne(u.id)}
                             disabled={syncingId === u.id}
                             className="p-1.5 hover:bg-green-50 rounded-lg text-slate-500 hover:text-green-600 transition"
-                            title="同步組織資料"
+                            title={t('users.syncOrg')}
                           >
                             <RefreshCw size={14} className={syncingId === u.id ? 'animate-spin' : ''} />
                           </button>
@@ -894,7 +896,7 @@ export default function UserManagement() {
                 )
               })}
               {filtered.length === 0 && (
-                <tr><td colSpan={24} className="px-4 py-8 text-center text-slate-400 text-sm">查無資料</td></tr>
+                <tr><td colSpan={24} className="px-4 py-8 text-center text-slate-400 text-sm">{t('common.noData')}</td></tr>
               )}
             </tbody>
           </table>

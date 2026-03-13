@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Plus, Trash2, Edit2, Star, StarOff, Plug, Zap, Check, FileText, Mic, Image, CalendarClock, Code2, Database, ShieldCheck } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import api from '../../lib/api'
 
 interface Policy {
@@ -79,6 +80,7 @@ const emptyForm = {
 }
 
 export default function RoleManagement() {
+  const { t } = useTranslation()
   const [roles, setRoles] = useState<Role[]>([])
   const [mcpServers, setMcpServers] = useState<McpServer[]>([])
   const [difyKbs, setDifyKbs] = useState<DifyKb[]>([])
@@ -166,7 +168,7 @@ export default function RoleManagement() {
     arr.includes(id) ? arr.filter((x) => x !== id) : [...arr, id]
 
   const save = async () => {
-    if (!form.name.trim()) { setError('角色名稱為必填'); return }
+    if (!form.name.trim()) { setError(t('roles.nameRequired')); return }
     setSaving(true)
     setError('')
     try {
@@ -189,19 +191,19 @@ export default function RoleManagement() {
       setShowModal(false)
       load()
     } catch (e: any) {
-      setError(e.response?.data?.error || '儲存失敗')
+      setError(e.response?.data?.error || t('roles.saveFailed'))
     } finally {
       setSaving(false)
     }
   }
 
   const deleteRole = async (role: Role) => {
-    if (!confirm(`確定刪除角色「${role.name}」？使用此角色的使用者將被取消綁定。`)) return
+    if (!confirm(t('roles.deleteConfirm', { name: role.name }))) return
     try {
       await api.delete(`/roles/${role.id}`)
       load()
     } catch (e: any) {
-      alert(e.response?.data?.error || '刪除失敗')
+      alert(e.response?.data?.error || t('roles.deleteFailed'))
     }
   }
 
@@ -229,7 +231,7 @@ export default function RoleManagement() {
       })
       load()
     } catch (e: any) {
-      alert(e.response?.data?.error || '設定失敗')
+      alert(e.response?.data?.error || t('roles.setDefaultFailed'))
     }
   }
 
@@ -239,25 +241,22 @@ export default function RoleManagement() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold text-slate-800">角色管理</h2>
+        <h2 className="text-lg font-semibold text-slate-800">{t('roles.title')}</h2>
         <button
           onClick={openCreate}
           className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700"
         >
-          <Plus size={15} /> 新增角色
+          <Plus size={15} /> {t('roles.addRole')}
         </button>
       </div>
 
-      <p className="text-xs text-slate-500">
-        將 MCP 伺服器 / DIFY 知識庫指派到角色，再將角色設定給使用者，該使用者即可使用對應的工具與知識庫。
-        標示 <Star size={12} className="inline text-yellow-500" /> 的為預設角色，新使用者建立時自動套用。
-      </p>
+      <p className="text-xs text-slate-500">{t('roles.desc')}</p>
 
       {loading ? (
-        <div className="text-slate-400 text-sm">載入中...</div>
+        <div className="text-slate-400 text-sm">{t('common.loading')}</div>
       ) : roles.length === 0 ? (
         <div className="text-slate-400 text-sm p-8 text-center border border-dashed rounded-lg">
-          尚無角色，請點擊「新增角色」
+          {t('roles.noRoles')}
         </div>
       ) : (
         <div className="space-y-3">
@@ -274,7 +273,7 @@ export default function RoleManagement() {
                     <div className="flex items-center gap-2">
                       <span className="font-medium text-slate-800">{role.name}</span>
                       {role.is_default && (
-                        <span className="text-xs bg-yellow-100 text-yellow-700 px-1.5 py-0.5 rounded">預設</span>
+                        <span className="text-xs bg-yellow-100 text-yellow-700 px-1.5 py-0.5 rounded">{t('roles.defaultBadge')}</span>
                       )}
                     </div>
                     {role.description && (
@@ -287,7 +286,7 @@ export default function RoleManagement() {
                     <button
                       onClick={() => setDefault(role)}
                       className="p-1.5 text-slate-400 hover:text-yellow-500 rounded hover:bg-slate-50"
-                      title="設為預設角色"
+                      title={t('roles.setAsDefault')}
                     >
                       <Star size={15} />
                     </button>
@@ -310,7 +309,7 @@ export default function RoleManagement() {
               {/* Assigned resources */}
               <div className="mt-3 flex flex-wrap gap-2">
                 {role.mcp_server_ids.length === 0 && role.dify_kb_ids.length === 0 && (
-                  <span className="text-xs text-slate-400 italic">尚未指派任何工具 / 知識庫</span>
+                  <span className="text-xs text-slate-400 italic">{t('roles.noResources')}</span>
                 )}
                 {role.mcp_server_ids.map((id) => (
                   <span key={`mcp-${id}`} className="flex items-center gap-1 text-xs bg-blue-50 text-blue-700 border border-blue-200 px-2 py-0.5 rounded-full">
@@ -326,22 +325,22 @@ export default function RoleManagement() {
               {/* Permission summary */}
               <div className="mt-2 flex flex-wrap gap-1.5">
                 <span className={`flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border ${role.allow_text_upload !== 0 ? 'bg-green-50 text-green-700 border-green-200' : 'bg-slate-50 text-slate-400 border-slate-200 line-through'}`}>
-                  <FileText size={10} /> 文字{role.allow_text_upload !== 0 ? ` ${role.text_max_mb}MB` : ''}
+                  <FileText size={10} /> {t('roles.permText')}{role.allow_text_upload !== 0 ? ` ${role.text_max_mb}MB` : ''}
                 </span>
                 <span className={`flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border ${role.allow_audio_upload === 1 ? 'bg-green-50 text-green-700 border-green-200' : 'bg-slate-50 text-slate-400 border-slate-200 line-through'}`}>
-                  <Mic size={10} /> 聲音{role.allow_audio_upload === 1 ? ` ${role.audio_max_mb}MB` : ''}
+                  <Mic size={10} /> {t('roles.permAudio')}{role.allow_audio_upload === 1 ? ` ${role.audio_max_mb}MB` : ''}
                 </span>
                 <span className={`flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border ${role.allow_image_upload !== 0 ? 'bg-green-50 text-green-700 border-green-200' : 'bg-slate-50 text-slate-400 border-slate-200 line-through'}`}>
-                  <Image size={10} /> 圖片{role.allow_image_upload !== 0 ? ` ${role.image_max_mb}MB` : ''}
+                  <Image size={10} /> {t('roles.permImage')}{role.allow_image_upload !== 0 ? ` ${role.image_max_mb}MB` : ''}
                 </span>
                 {role.allow_scheduled_tasks === 1 && (
                   <span className="flex items-center gap-1 text-xs bg-blue-50 text-blue-700 border border-blue-200 px-2 py-0.5 rounded-full">
-                    <CalendarClock size={10} /> 排程
+                    <CalendarClock size={10} /> {t('roles.permSchedule')}
                   </span>
                 )}
                 {role.allow_code_skill === 1 && (
                   <span className="flex items-center gap-1 text-xs bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded-full">
-                    <Code2 size={10} /> 程式Skill
+                    <Code2 size={10} /> {t('roles.permCodeSkill')}
                   </span>
                 )}
               </div>
@@ -349,13 +348,13 @@ export default function RoleManagement() {
               {(role.budget_daily != null || role.budget_weekly != null || role.budget_monthly != null) && (
                 <div className="mt-2 flex flex-wrap gap-2">
                   {role.budget_daily != null && (
-                    <span className="text-xs bg-orange-50 text-orange-700 border border-orange-200 px-2 py-0.5 rounded-full">日 ${role.budget_daily}</span>
+                    <span className="text-xs bg-orange-50 text-orange-700 border border-orange-200 px-2 py-0.5 rounded-full">{t('roles.budgetDaily')} ${role.budget_daily}</span>
                   )}
                   {role.budget_weekly != null && (
-                    <span className="text-xs bg-sky-50 text-sky-700 border border-sky-200 px-2 py-0.5 rounded-full">週 ${role.budget_weekly}</span>
+                    <span className="text-xs bg-sky-50 text-sky-700 border border-sky-200 px-2 py-0.5 rounded-full">{t('roles.budgetWeekly')} ${role.budget_weekly}</span>
                   )}
                   {role.budget_monthly != null && (
-                    <span className="text-xs bg-violet-50 text-violet-700 border border-violet-200 px-2 py-0.5 rounded-full">月 ${role.budget_monthly}</span>
+                    <span className="text-xs bg-violet-50 text-violet-700 border border-violet-200 px-2 py-0.5 rounded-full">{t('roles.budgetMonthly')} ${role.budget_monthly}</span>
                   )}
                 </div>
               )}
@@ -369,7 +368,7 @@ export default function RoleManagement() {
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[90vh] flex flex-col">
             <div className="p-5 border-b border-slate-100">
-              <h3 className="font-semibold text-slate-800">{editing ? '編輯角色' : '新增角色'}</h3>
+              <h3 className="font-semibold text-slate-800">{editing ? t('roles.editRole') : t('roles.newRole')}</h3>
             </div>
 
             <div className="p-5 space-y-4 overflow-y-auto flex-1">
@@ -380,22 +379,22 @@ export default function RoleManagement() {
               )}
 
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">角色名稱 *</label>
+                <label className="block text-sm font-medium text-slate-700 mb-1">{t('roles.form.roleName')}</label>
                 <input
                   className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   value={form.name}
                   onChange={(e) => setForm({ ...form, name: e.target.value })}
-                  placeholder="例：基本使用者"
+                  placeholder={t('roles.form.roleNamePlaceholder')}
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">描述</label>
+                <label className="block text-sm font-medium text-slate-700 mb-1">{t('roles.form.description')}</label>
                 <input
                   className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   value={form.description}
                   onChange={(e) => setForm({ ...form, description: e.target.value })}
-                  placeholder="選填說明"
+                  placeholder={t('roles.form.descPlaceholder')}
                 />
               </div>
 
@@ -406,16 +405,16 @@ export default function RoleManagement() {
                   onChange={(e) => setForm({ ...form, is_default: e.target.checked })}
                   className="w-4 h-4 rounded border-slate-300 text-blue-600"
                 />
-                <span className="text-sm text-slate-700">設為預設角色（新使用者自動套用，全系統唯一）</span>
+                <span className="text-sm text-slate-700">{t('roles.form.setDefault')}</span>
               </label>
 
               {/* MCP Servers */}
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-2 flex items-center gap-1.5">
-                  <Plug size={14} /> MCP 伺服器
+                  <Plug size={14} /> {t('roles.form.mcpServers')}
                 </label>
                 {mcpServers.length === 0 ? (
-                  <p className="text-xs text-slate-400">尚未設定 MCP 伺服器</p>
+                  <p className="text-xs text-slate-400">{t('roles.noMcpServers')}</p>
                 ) : (
                   <div className="space-y-1.5 max-h-36 overflow-y-auto border border-slate-200 rounded-lg p-2">
                     {mcpServers.map((s) => {
@@ -427,7 +426,7 @@ export default function RoleManagement() {
                             {checked && <Check size={10} className="text-white" />}
                           </div>
                           <span className="text-sm text-slate-700">{s.name}</span>
-                          {!s.is_active && <span className="text-xs text-slate-400">(停用)</span>}
+                          {!s.is_active && <span className="text-xs text-slate-400">{t('roles.disabled')}</span>}
                           {s.description && <span className="text-xs text-slate-400 truncate">{s.description}</span>}
                         </label>
                       )
@@ -439,10 +438,10 @@ export default function RoleManagement() {
               {/* DIFY KBs */}
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-2 flex items-center gap-1.5">
-                  <Zap size={14} /> DIFY 知識庫
+                  <Zap size={14} /> {t('roles.form.difyKbs')}
                 </label>
                 {difyKbs.length === 0 ? (
-                  <p className="text-xs text-slate-400">尚未設定 DIFY 知識庫</p>
+                  <p className="text-xs text-slate-400">{t('roles.noDifyKbs')}</p>
                 ) : (
                   <div className="space-y-1.5 max-h-36 overflow-y-auto border border-slate-200 rounded-lg p-2">
                     {difyKbs.map((k) => {
@@ -454,7 +453,7 @@ export default function RoleManagement() {
                             {checked && <Check size={10} className="text-white" />}
                           </div>
                           <span className="text-sm text-slate-700">{k.name}</span>
-                          {!k.is_active && <span className="text-xs text-slate-400">(停用)</span>}
+                          {!k.is_active && <span className="text-xs text-slate-400">{t('roles.disabled')}</span>}
                           {k.description && <span className="text-xs text-slate-400 truncate">{k.description}</span>}
                         </label>
                       )
@@ -464,12 +463,12 @@ export default function RoleManagement() {
               </div>
               {/* Upload & Function Permissions */}
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-2">上傳權限預設值</label>
+                <label className="block text-sm font-medium text-slate-700 mb-2">{t('roles.form.uploadPerms')}</label>
                 <div className="space-y-2">
                   {[
-                    { label: '文字檔', icon: <FileText size={13} />, field: 'allow_text_upload', mbField: 'text_max_mb' },
-                    { label: '聲音檔', icon: <Mic size={13} />, field: 'allow_audio_upload', mbField: 'audio_max_mb' },
-                    { label: '圖片檔', icon: <Image size={13} />, field: 'allow_image_upload', mbField: 'image_max_mb' },
+                    { label: t('roles.form.textFile'), icon: <FileText size={13} />, field: 'allow_text_upload', mbField: 'text_max_mb' },
+                    { label: t('roles.form.audioFile'), icon: <Mic size={13} />, field: 'allow_audio_upload', mbField: 'audio_max_mb' },
+                    { label: t('roles.form.imageFile'), icon: <Image size={13} />, field: 'allow_image_upload', mbField: 'image_max_mb' },
                   ].map(({ label, icon, field, mbField }) => (
                     <div key={field} className="flex items-center gap-3">
                       <label className="flex items-center gap-1.5 w-28 cursor-pointer select-none">
@@ -490,7 +489,7 @@ export default function RoleManagement() {
                             onChange={e => setForm({ ...form, [mbField]: Number(e.target.value) })}
                             className="w-20 border border-slate-300 rounded-lg px-2 py-1 text-sm"
                           />
-                          <span className="text-xs text-slate-500">MB 上限</span>
+                          <span className="text-xs text-slate-500">{t('roles.form.mbLimit')}</span>
                         </div>
                       )}
                     </div>
@@ -503,7 +502,7 @@ export default function RoleManagement() {
                       className="w-4 h-4 rounded border-slate-300 text-blue-600"
                     />
                     <CalendarClock size={13} />
-                    <span className="text-sm text-slate-700">允許排程任務</span>
+                    <span className="text-sm text-slate-700">{t('roles.form.allowSchedule')}</span>
                   </label>
                   <label className="flex items-center gap-1.5 cursor-pointer select-none">
                     <input
@@ -512,7 +511,7 @@ export default function RoleManagement() {
                       onChange={e => setForm({ ...form, allow_create_skill: e.target.checked } as any)}
                       className="w-4 h-4 rounded border-slate-300 text-blue-600"
                     />
-                    <span className="text-sm text-slate-700">✨ 允許建立 Skill</span>
+                    <span className="text-sm text-slate-700">{t('roles.form.allowCreateSkill')}</span>
                   </label>
                   <label className="flex items-center gap-1.5 cursor-pointer select-none">
                     <input
@@ -521,7 +520,7 @@ export default function RoleManagement() {
                       onChange={e => setForm({ ...form, allow_external_skill: e.target.checked } as any)}
                       className="w-4 h-4 rounded border-slate-300 text-blue-600"
                     />
-                    <span className="text-sm text-slate-700">🌐 允許建立外部 Skill</span>
+                    <span className="text-sm text-slate-700">{t('roles.form.allowExternalSkill')}</span>
                   </label>
                   <label className="flex items-center gap-1.5 cursor-pointer select-none">
                     <input
@@ -531,7 +530,7 @@ export default function RoleManagement() {
                       className="w-4 h-4 rounded border-slate-300 text-blue-600"
                     />
                     <Code2 size={13} />
-                    <span className="text-sm text-slate-700">允許建立內部程式 Skill（資訊部門專用）</span>
+                    <span className="text-sm text-slate-700">{t('roles.form.allowCodeSkill')}</span>
                   </label>
                 </div>
               </div>
@@ -539,7 +538,7 @@ export default function RoleManagement() {
               {/* KB Permissions */}
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-2 flex items-center gap-1.5">
-                  <Database size={14} /> 知識庫權限
+                  <Database size={14} /> {t('roles.form.kbPerms')}
                 </label>
                 <div className="space-y-2">
                   <label className="flex items-center gap-1.5 cursor-pointer select-none">
@@ -549,7 +548,7 @@ export default function RoleManagement() {
                       onChange={e => setForm({ ...form, can_deep_research: e.target.checked } as any)}
                       className="w-4 h-4 rounded border-slate-300 text-blue-600"
                     />
-                    <span className="text-sm text-slate-700">允許深度研究</span>
+                    <span className="text-sm text-slate-700">{t('roles.form.allowDeepResearch')}</span>
                   </label>
                   <label className="flex items-center gap-1.5 cursor-pointer select-none">
                     <input
@@ -558,7 +557,7 @@ export default function RoleManagement() {
                       onChange={e => setForm({ ...form, can_use_ai_dashboard: e.target.checked } as any)}
                       className="w-4 h-4 rounded border-slate-300 text-blue-600"
                     />
-                    <span className="text-sm text-slate-700">允許 AI 戰情查詢</span>
+                    <span className="text-sm text-slate-700">{t('roles.form.allowAiDashboard')}</span>
                   </label>
                   <label className="flex items-center gap-1.5 cursor-pointer select-none">
                     <input
@@ -567,7 +566,7 @@ export default function RoleManagement() {
                       onChange={e => setForm({ ...form, can_design_ai_select: e.target.checked } as any)}
                       className="w-4 h-4 rounded border-slate-300 text-blue-600"
                     />
-                    <span className="text-sm text-slate-700">允許 AI 戰情設計</span>
+                    <span className="text-sm text-slate-700">{t('roles.form.allowAiDesign')}</span>
                   </label>
                   <label className="flex items-center gap-1.5 cursor-pointer select-none">
                     <input
@@ -576,7 +575,7 @@ export default function RoleManagement() {
                       onChange={e => setForm({ ...form, can_create_kb: e.target.checked } as any)}
                       className="w-4 h-4 rounded border-slate-300 text-blue-600"
                     />
-                    <span className="text-sm text-slate-700">允許建立自建知識庫</span>
+                    <span className="text-sm text-slate-700">{t('roles.form.allowCreateKb')}</span>
                   </label>
                   {(form as any).can_create_kb && (
                     <div className="flex gap-4 pl-6">
@@ -587,7 +586,7 @@ export default function RoleManagement() {
                           onChange={e => setForm({ ...form, kb_max_size_mb: Number(e.target.value) } as any)}
                           className="w-20 border border-slate-300 rounded-lg px-2 py-1 text-sm"
                         />
-                        <span className="text-xs text-slate-500">MB 總容量上限</span>
+                        <span className="text-xs text-slate-500">{t('roles.form.kbMaxSizeMb')}</span>
                       </div>
                       <div className="flex items-center gap-1.5">
                         <input
@@ -596,7 +595,7 @@ export default function RoleManagement() {
                           onChange={e => setForm({ ...form, kb_max_count: Number(e.target.value) } as any)}
                           className="w-16 border border-slate-300 rounded-lg px-2 py-1 text-sm"
                         />
-                        <span className="text-xs text-slate-500">個數上限</span>
+                        <span className="text-xs text-slate-500">{t('roles.form.kbMaxCount')}</span>
                       </div>
                     </div>
                   )}
@@ -606,58 +605,58 @@ export default function RoleManagement() {
               {/* Data Policy */}
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-2 flex items-center gap-1.5">
-                  <ShieldCheck size={14} /> 資料權限政策
+                  <ShieldCheck size={14} /> {t('roles.form.dataPolicy')}
                 </label>
                 <select
                   value={formPolicyId ?? ''}
                   onChange={e => setFormPolicyId(e.target.value ? Number(e.target.value) : null)}
                   className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 >
-                  <option value="">— 不套用政策（無資料限制）—</option>
+                  <option value="">{t('roles.form.noPolicyOption')}</option>
                   {policies.map(p => (
                     <option key={p.id} value={p.id}>{p.name}{p.description ? ` — ${p.description}` : ''}</option>
                   ))}
                 </select>
-                <p className="text-xs text-slate-400 mt-1">套用後，此角色的使用者查詢資料時將受政策規則過濾</p>
+                <p className="text-xs text-slate-400 mt-1">{t('roles.form.dataPolicyNote')}</p>
               </div>
             </div>
 
             {/* Budget limits */}
             <div className="px-5 pb-5">
-              <label className="block text-sm font-medium text-slate-700 mb-2">使用金額限制（空白=無限制）</label>
+              <label className="block text-sm font-medium text-slate-700 mb-2">{t('roles.form.budgetTitle')}</label>
               <div className="grid grid-cols-3 gap-3">
                 <div>
-                  <label className="text-xs text-slate-500 mb-1 block">當日上限 ($)</label>
+                  <label className="text-xs text-slate-500 mb-1 block">{t('roles.form.dailyLimit')}</label>
                   <input
                     type="number" min={0} step="0.01"
                     value={form.budget_daily}
                     onChange={e => setForm({ ...form, budget_daily: e.target.value })}
                     className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    placeholder="無限制"
+                    placeholder={t('roles.form.unlimited')}
                   />
                 </div>
                 <div>
-                  <label className="text-xs text-slate-500 mb-1 block">當週上限 ($)</label>
+                  <label className="text-xs text-slate-500 mb-1 block">{t('roles.form.weeklyLimit')}</label>
                   <input
                     type="number" min={0} step="0.01"
                     value={form.budget_weekly}
                     onChange={e => setForm({ ...form, budget_weekly: e.target.value })}
                     className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    placeholder="無限制"
+                    placeholder={t('roles.form.unlimited')}
                   />
                 </div>
                 <div>
-                  <label className="text-xs text-slate-500 mb-1 block">當月上限 ($)</label>
+                  <label className="text-xs text-slate-500 mb-1 block">{t('roles.form.monthlyLimit')}</label>
                   <input
                     type="number" min={0} step="0.01"
                     value={form.budget_monthly}
                     onChange={e => setForm({ ...form, budget_monthly: e.target.value })}
                     className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    placeholder="無限制"
+                    placeholder={t('roles.form.unlimited')}
                   />
                 </div>
               </div>
-              <p className="text-xs text-slate-400 mt-1.5">週期為當日/週一至週日/當月。使用者個人設定可覆蓋角色設定。管理員不受限制。</p>
+              <p className="text-xs text-slate-400 mt-1.5">{t('roles.form.budgetNote')}</p>
             </div>
 
             <div className="p-5 border-t border-slate-100 flex justify-end gap-2">
@@ -666,14 +665,14 @@ export default function RoleManagement() {
                 className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-lg"
                 disabled={saving}
               >
-                取消
+                {t('common.cancel')}
               </button>
               <button
                 onClick={save}
                 disabled={saving}
                 className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
               >
-                {saving ? '儲存中...' : '儲存'}
+                {saving ? t('common.saving') : t('common.save')}
               </button>
             </div>
           </div>

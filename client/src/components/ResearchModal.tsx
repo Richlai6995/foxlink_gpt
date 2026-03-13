@@ -297,7 +297,7 @@ export default function ResearchModal({ sessionId, onClose, onJobCreated }: Prop
               </button>
               <button
                 onClick={handleStart}
-                disabled={starting || plan.sub_questions.some((sq) => !sq.question.trim())}
+                disabled={starting || !plan || plan.sub_questions.some((sq) => !sq.question.trim())}
                 className="flex items-center gap-2 px-5 py-2 bg-blue-600 text-white text-sm rounded-xl hover:bg-blue-700 disabled:opacity-50 transition"
               >
                 {starting

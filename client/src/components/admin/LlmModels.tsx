@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Cpu, Plus, Trash2, Pencil, Check, X, RefreshCw, ToggleLeft, ToggleRight, Eye, EyeOff, KeyRound, Zap, Loader2 } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import type { LlmModel, LlmProviderType, LlmModelRole } from '../../types'
 import api from '../../lib/api'
 
@@ -33,14 +34,6 @@ const PROVIDER_LABEL: Record<LlmProviderType, string> = {
   cohere:       'Cohere',
 }
 
-const MODEL_ROLE_LABEL: Record<LlmModelRole, string> = {
-  chat:      '對話 (Chat)',
-  embedding: '向量嵌入 (Embedding)',
-  rerank:    '重排序 (Rerank)',
-  tts:       '文字轉語音 (TTS)',
-  stt:       '語音轉文字 (STT)',
-}
-
 // ── Model Form Dialog ─────────────────────────────────────────────────────────
 interface ModelDialogProps {
   form: FormData
@@ -55,6 +48,7 @@ interface ModelDialogProps {
 }
 
 function ModelDialog({ form, editId, isEdit, hasApiKey, hasExtraConfig, onChange, onSave, onClose, error }: ModelDialogProps) {
+  const { t } = useTranslation()
   const [showKey,    setShowKey]    = useState(false)
   const [showPKey,   setShowPKey]   = useState(false)
   const [testing,    setTesting]    = useState(false)
@@ -62,6 +56,14 @@ function ModelDialog({ form, editId, isEdit, hasApiKey, hasExtraConfig, onChange
   const isAzure  = form.provider_type === 'azure_openai'
   const isOci    = form.provider_type === 'oci'
   const isCohere = form.provider_type === 'cohere'
+
+  const MODEL_ROLE_LABEL: Record<LlmModelRole, string> = {
+    chat:      t('llm.roles.chat'),
+    embedding: t('llm.roles.embedding'),
+    rerank:    t('llm.roles.rerank'),
+    tts:       t('llm.roles.tts'),
+    stt:       t('llm.roles.stt'),
+  }
 
   const handleTest = async () => {
     setTesting(true); setTestResult(null)
@@ -83,9 +85,9 @@ function ModelDialog({ form, editId, isEdit, hasApiKey, hasExtraConfig, onChange
         oci_private_key:    form.oci_private_key || undefined,
       })
       if (res.data.ok) {
-        setTestResult({ ok: true, msg: `連線成功！回應：${res.data.reply}` })
+        setTestResult({ ok: true, msg: t('llm.testOk', { reply: res.data.reply }) })
       } else {
-        setTestResult({ ok: false, msg: res.data.error || '測試失敗' })
+        setTestResult({ ok: false, msg: res.data.error || t('llm.testFailed') })
       }
     } catch (e: any) {
       setTestResult({ ok: false, msg: e.response?.data?.error || e.message })
@@ -100,7 +102,7 @@ function ModelDialog({ form, editId, isEdit, hasApiKey, hasExtraConfig, onChange
         {/* Header */}
         <div className="bg-slate-800 px-5 py-4 flex items-center justify-between">
           <div>
-            <p className="text-white font-semibold text-sm">{isEdit ? '編輯模型' : '新增模型'}</p>
+            <p className="text-white font-semibold text-sm">{isEdit ? t('llm.form.editTitle') : t('llm.form.addTitle')}</p>
             <p className="text-slate-400 text-xs mt-0.5">{PROVIDER_LABEL[form.provider_type || 'gemini']}</p>
           </div>
           <button onClick={onClose} className="text-slate-400 hover:text-white"><X size={18} /></button>
@@ -112,7 +114,7 @@ function ModelDialog({ form, editId, isEdit, hasApiKey, hasExtraConfig, onChange
           {/* Provider type */}
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="label">供應商類型 *</label>
+              <label className="label">{t('llm.form.providerType')} *</label>
               <select
                 value={form.provider_type}
                 onChange={(e) => onChange({ ...emptyForm(e.target.value as LlmProviderType), key: form.key, name: form.name })}
@@ -126,17 +128,17 @@ function ModelDialog({ form, editId, isEdit, hasApiKey, hasExtraConfig, onChange
               </select>
             </div>
             <div>
-              <label className="label">模型角色 *</label>
+              <label className="label">{t('llm.form.modelRole')} *</label>
               <select
                 value={form.model_role || 'chat'}
                 onChange={(e) => onChange({ ...form, model_role: e.target.value as LlmModelRole })}
                 className="input w-full"
               >
-                <option value="chat">對話 (Chat)</option>
-                <option value="embedding">向量嵌入 (Embedding)</option>
-                <option value="rerank">重排序 (Rerank)</option>
-                <option value="tts">文字轉語音 (TTS)</option>
-                <option value="stt">語音轉文字 (STT)</option>
+                <option value="chat">{MODEL_ROLE_LABEL.chat}</option>
+                <option value="embedding">{MODEL_ROLE_LABEL.embedding}</option>
+                <option value="rerank">{MODEL_ROLE_LABEL.rerank}</option>
+                <option value="tts">{MODEL_ROLE_LABEL.tts}</option>
+                <option value="stt">{MODEL_ROLE_LABEL.stt}</option>
               </select>
             </div>
           </div>
@@ -144,12 +146,12 @@ function ModelDialog({ form, editId, isEdit, hasApiKey, hasExtraConfig, onChange
           {/* Common: key + name */}
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="label">Key * <span className="text-slate-400 font-normal">（唯一識別碼）</span></label>
+              <label className="label">{t('llm.form.key')} * <span className="text-slate-400 font-normal">（{t('llm.form.keyDesc')}）</span></label>
               <input value={form.key} onChange={(e) => onChange({ ...form, key: e.target.value })}
                 placeholder="pro / gpt4o-eus" className="input w-full" disabled={isEdit} />
             </div>
             <div>
-              <label className="label">顯示名稱 *</label>
+              <label className="label">{t('llm.form.displayName')} *</label>
               <input value={form.name} onChange={(e) => onChange({ ...form, name: e.target.value })}
                 placeholder="Gemini Pro" className="input w-full" />
             </div>
@@ -158,12 +160,12 @@ function ModelDialog({ form, editId, isEdit, hasApiKey, hasExtraConfig, onChange
           {/* Gemini / OCI: api_model */}
           {!isAzure && (
             <div>
-              <label className="label">API Model 字串 *</label>
+              <label className="label">{t('llm.form.apiModel')} *</label>
               <input value={form.api_model || ''} onChange={(e) => onChange({ ...form, api_model: e.target.value })}
                 placeholder={isOci ? 'cohere.rerank-multilingual-v3.0 / cohere.embed-multilingual-v3.0' : isCohere ? 'rerank-multilingual-v3 / embed-multilingual-v3' : 'gemini-2.0-flash'}
                 className="input w-full font-mono text-sm" />
-              {isOci && <p className="text-xs text-slate-400 mt-0.5">OCI model OCID 或 model name，需與模型角色一致</p>}
-              {isCohere && <p className="text-xs text-slate-400 mt-0.5">Cohere model name，例：rerank-multilingual-v3、embed-multilingual-v3</p>}
+              {isOci && <p className="text-xs text-slate-400 mt-0.5">{t('llm.form.ociModelNote')}</p>}
+              {isCohere && <p className="text-xs text-slate-400 mt-0.5">{t('llm.form.cohereModelNote')}</p>}
             </div>
           )}
 
@@ -178,7 +180,7 @@ function ModelDialog({ form, editId, isEdit, hasApiKey, hasExtraConfig, onChange
               <label className="label">API Endpoint URL *</label>
               <input value={form.endpoint_url || ''} onChange={(e) => onChange({ ...form, endpoint_url: e.target.value })}
                 placeholder="https://fl-aoai-eus.openai.azure.com" className="input w-full font-mono text-sm" />
-              <p className="text-xs text-slate-400 mt-0.5">只填 base URL，不含 /openai/deployments/...</p>
+              <p className="text-xs text-slate-400 mt-0.5">{t('llm.form.azureEndpointNote')}</p>
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
@@ -187,7 +189,7 @@ function ModelDialog({ form, editId, isEdit, hasApiKey, hasExtraConfig, onChange
                   placeholder="2024-08-01-preview" className="input w-full font-mono text-sm" />
               </div>
               <div>
-                <label className="label">Base Model <span className="text-slate-400 font-normal">（參考）</span></label>
+                <label className="label">Base Model <span className="text-slate-400 font-normal">（{t('llm.form.reference')}）</span></label>
                 <input value={form.base_model || ''} onChange={(e) => onChange({ ...form, base_model: e.target.value })}
                   placeholder="gpt-4o" className="input w-full font-mono text-sm" />
               </div>
@@ -197,20 +199,20 @@ function ModelDialog({ form, editId, isEdit, hasApiKey, hasExtraConfig, onChange
           {/* OCI Credentials */}
           {isOci && (<>
             <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-xs text-amber-700">
-              OCI 憑證以 AES-256-GCM 加密存入 DB。
-              {isEdit && hasExtraConfig && ' 留空所有 OCI 欄位則保留現有憑證。'}
+              {t('llm.form.ociEncryptNote')}
+              {isEdit && hasExtraConfig && ' ' + t('llm.form.ociKeepNote')}
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="label">User OCID *</label>
                 <input value={form.oci_user} onChange={(e) => onChange({ ...form, oci_user: e.target.value })}
-                  placeholder={isEdit && hasExtraConfig ? '留空保留現有' : 'ocid1.user.oc1..xxx'}
+                  placeholder={isEdit && hasExtraConfig ? t('llm.form.keepExisting') : 'ocid1.user.oc1..xxx'}
                   className="input w-full font-mono text-xs" />
               </div>
               <div>
                 <label className="label">Tenancy OCID *</label>
                 <input value={form.oci_tenancy} onChange={(e) => onChange({ ...form, oci_tenancy: e.target.value })}
-                  placeholder={isEdit && hasExtraConfig ? '留空保留現有' : 'ocid1.tenancy.oc1..xxx'}
+                  placeholder={isEdit && hasExtraConfig ? t('llm.form.keepExisting') : 'ocid1.tenancy.oc1..xxx'}
                   className="input w-full font-mono text-xs" />
               </div>
             </div>
@@ -218,7 +220,7 @@ function ModelDialog({ form, editId, isEdit, hasApiKey, hasExtraConfig, onChange
               <div>
                 <label className="label">Fingerprint *</label>
                 <input value={form.oci_fingerprint} onChange={(e) => onChange({ ...form, oci_fingerprint: e.target.value })}
-                  placeholder={isEdit && hasExtraConfig ? '留空保留現有' : '8f:5b:a3:b6:...'}
+                  placeholder={isEdit && hasExtraConfig ? t('llm.form.keepExisting') : '8f:5b:a3:b6:...'}
                   className="input w-full font-mono text-xs" />
               </div>
               <div>
@@ -228,14 +230,14 @@ function ModelDialog({ form, editId, isEdit, hasApiKey, hasExtraConfig, onChange
               </div>
             </div>
             <div>
-              <label className="label">Compartment ID <span className="text-slate-400 font-normal">（選填，預設使用 Tenancy）</span></label>
+              <label className="label">Compartment ID <span className="text-slate-400 font-normal">（{t('llm.form.compartmentNote')}）</span></label>
               <input value={form.oci_compartment_id} onChange={(e) => onChange({ ...form, oci_compartment_id: e.target.value })}
-                placeholder="ocid1.compartment.oc1..xxx（留空使用 Tenancy OCID）" className="input w-full font-mono text-xs" />
+                placeholder={t('llm.form.compartmentPlaceholder')} className="input w-full font-mono text-xs" />
             </div>
             <div>
               <label className="label flex items-center gap-1.5">
                 <KeyRound size={12} /> Private Key (PEM) *
-                {isEdit && hasExtraConfig && <span className="text-green-600 font-normal text-xs">（已設定，留空保留）</span>}
+                {isEdit && hasExtraConfig && <span className="text-green-600 font-normal text-xs">（{t('llm.form.keySet')}，{t('llm.form.keepIfBlank')}）</span>}
               </label>
               <div className="relative">
                 <textarea
@@ -243,7 +245,7 @@ function ModelDialog({ form, editId, isEdit, hasApiKey, hasExtraConfig, onChange
                   value={showPKey ? form.oci_private_key : (form.oci_private_key ? '••••••••••••••••' : '')}
                   onChange={(e) => onChange({ ...form, oci_private_key: e.target.value })}
                   onFocus={() => setShowPKey(true)}
-                  placeholder={isEdit && hasExtraConfig ? '留空保留現有 Private Key' : '貼上 -----BEGIN PRIVATE KEY----- 區塊'}
+                  placeholder={isEdit && hasExtraConfig ? t('llm.form.keepPrivateKey') : t('llm.form.pastePem')}
                   className="input w-full font-mono text-xs pr-10 resize-none"
                 />
                 <button type="button" onClick={() => setShowPKey((v) => !v)}
@@ -259,14 +261,14 @@ function ModelDialog({ form, editId, isEdit, hasApiKey, hasExtraConfig, onChange
             <div>
               <label className="label flex items-center gap-1.5">
                 <KeyRound size={12} />
-                API Key {isEdit && hasApiKey && <span className="text-green-600 font-normal text-xs">（已設定，留空則保留原 key）</span>}
+                API Key {isEdit && hasApiKey && <span className="text-green-600 font-normal text-xs">（{t('llm.keySet')}，{t('llm.form.keepIfBlank')}）</span>}
               </label>
               <div className="relative">
                 <input
                   type={showKey ? 'text' : 'password'}
                   value={form.api_key}
                   onChange={(e) => onChange({ ...form, api_key: e.target.value })}
-                  placeholder={isEdit && hasApiKey ? '留空保留現有 key' : '輸入 API Key（加密存入 DB）'}
+                  placeholder={isEdit && hasApiKey ? t('llm.form.keepExistingKey') : t('llm.form.enterApiKey')}
                   className="input w-full pr-10 font-mono text-sm"
                 />
                 <button type="button" onClick={() => setShowKey((v) => !v)}
@@ -275,7 +277,7 @@ function ModelDialog({ form, editId, isEdit, hasApiKey, hasExtraConfig, onChange
                 </button>
               </div>
               {!isAzure && !isCohere && (
-                <p className="text-xs text-slate-400 mt-0.5">Gemini 可留空，自動使用 env GEMINI_API_KEY</p>
+                <p className="text-xs text-slate-400 mt-0.5">{t('llm.useEnv')}</p>
               )}
             </div>
           )}
@@ -283,12 +285,12 @@ function ModelDialog({ form, editId, isEdit, hasApiKey, hasExtraConfig, onChange
           {/* Description + sort */}
           <div className="grid grid-cols-3 gap-3">
             <div className="col-span-2">
-              <label className="label">描述 <span className="text-slate-400 font-normal">（選填）</span></label>
+              <label className="label">{t('llm.form.description')} <span className="text-slate-400 font-normal">（{t('llm.form.optional')}）</span></label>
               <input value={form.description || ''} onChange={(e) => onChange({ ...form, description: e.target.value })}
-                placeholder="簡短描述" className="input w-full" />
+                placeholder={t('llm.form.descriptionPlaceholder')} className="input w-full" />
             </div>
             <div>
-              <label className="label">排序</label>
+              <label className="label">{t('llm.form.sortOrder')}</label>
               <input type="number" value={form.sort_order ?? 0}
                 onChange={(e) => onChange({ ...form, sort_order: parseInt(e.target.value) || 0 })}
                 className="input w-full" />
@@ -301,7 +303,7 @@ function ModelDialog({ form, editId, isEdit, hasApiKey, hasExtraConfig, onChange
               <input type="checkbox" checked={!!form.image_output}
                 onChange={(e) => onChange({ ...form, image_output: e.target.checked ? 1 : 0 })}
                 className="w-4 h-4 accent-purple-600" />
-              啟用圖片輸出模式（gemini-*-image-preview）
+              {t('llm.form.imageOutput')}
             </label>
           )}
         </div>
@@ -318,12 +320,12 @@ function ModelDialog({ form, editId, isEdit, hasApiKey, hasExtraConfig, onChange
             className="flex items-center gap-1.5 px-3 py-2 text-sm border border-slate-300 rounded-lg hover:bg-slate-50 transition disabled:opacity-50"
           >
             {testing ? <Loader2 size={14} className="animate-spin" /> : <Zap size={14} className="text-yellow-500" />}
-            測試連線
+            {t('llm.testConnection')}
           </button>
           <div className="flex gap-2">
-            <button onClick={onClose} className="btn-ghost">取消</button>
+            <button onClick={onClose} className="btn-ghost">{t('common.cancel')}</button>
             <button onClick={onSave} className="btn-primary flex items-center gap-1.5">
-              <Check size={14} /> {isEdit ? '儲存' : '新增'}
+              <Check size={14} /> {isEdit ? t('common.save') : t('common.add')}
             </button>
           </div>
         </div>
@@ -334,6 +336,7 @@ function ModelDialog({ form, editId, isEdit, hasApiKey, hasExtraConfig, onChange
 
 // ── Main Panel ────────────────────────────────────────────────────────────────
 export default function LlmModelsPanel() {
+  const { t } = useTranslation()
   const [models,   setModels]   = useState<LlmModel[]>([])
   const [loading,  setLoading]  = useState(false)
   const [showForm, setShowForm] = useState(false)
@@ -391,12 +394,12 @@ export default function LlmModelsPanel() {
       }
       setShowForm(false); setError(''); load()
     } catch (e: any) {
-      setError(e.response?.data?.error || '儲存失敗')
+      setError(e.response?.data?.error || t('llm.saveFailed'))
     }
   }
 
   const handleDelete = async (id: number) => {
-    if (!confirm('確定刪除此模型設定？')) return
+    if (!confirm(t('llm.deleteConfirm'))) return
     await api.delete(`/admin/llm-models/${id}`); load()
   }
 
@@ -425,14 +428,14 @@ export default function LlmModelsPanel() {
     <div>
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-lg font-semibold text-slate-800 flex items-center gap-2">
-          <Cpu size={20} className="text-blue-500" /> LLM 模型設定
+          <Cpu size={20} className="text-blue-500" /> {t('llm.title')}
         </h2>
         <div className="flex gap-2">
           <button onClick={load} className="btn-ghost flex items-center gap-1.5">
-            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} /> 重新整理
+            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} /> {t('common.refresh')}
           </button>
           <button onClick={openAdd} className="btn-primary flex items-center gap-1.5">
-            <Plus size={14} /> 新增模型
+            <Plus size={14} /> {t('llm.addModel')}
           </button>
         </div>
       </div>
@@ -441,7 +444,7 @@ export default function LlmModelsPanel() {
         <table className="w-full text-sm">
           <thead className="bg-slate-50 border-b border-slate-200">
             <tr>
-              {['Key', '供應商', '角色', '顯示名稱', '模型 / Deployment', '描述', 'API Key', '排序', ''].map((h) => (
+              {[t('llm.cols.key'), t('llm.cols.provider'), t('llm.cols.role'), t('llm.cols.name'), t('llm.cols.model'), t('llm.cols.description'), t('llm.cols.apiKey'), t('llm.cols.sort'), ''].map((h) => (
                 <th key={h} className="px-3 py-3 text-left text-xs font-semibold text-slate-600">{h}</th>
               ))}
             </tr>
@@ -464,17 +467,17 @@ export default function LlmModelsPanel() {
                 <td className="px-3 py-3 text-xs">
                   {m.provider_type === 'oci'
                     ? (m.has_extra_config
-                        ? <span className="text-orange-600 flex items-center gap-1"><KeyRound size={11} />OCI 已設定</span>
-                        : <span className="text-red-400">未設定</span>)
+                        ? <span className="text-orange-600 flex items-center gap-1"><KeyRound size={11} />{t('llm.ociSet')}</span>
+                        : <span className="text-red-400">{t('llm.keyNotSet')}</span>)
                     : (m.has_api_key
-                        ? <span className="text-green-600 flex items-center gap-1"><KeyRound size={11} />已設定</span>
-                        : <span className="text-slate-400">使用 env</span>)
+                        ? <span className="text-green-600 flex items-center gap-1"><KeyRound size={11} />{t('llm.keySet')}</span>
+                        : <span className="text-slate-400">{t('llm.useEnv')}</span>)
                   }
                 </td>
                 <td className="px-3 py-3 text-slate-500">{m.sort_order ?? 0}</td>
                 <td className="px-3 py-3">
                   <div className="flex items-center gap-2">
-                    <button onClick={() => toggleActive(m)} title={m.is_active ? '停用' : '啟用'}
+                    <button onClick={() => toggleActive(m)} title={m.is_active ? t('common.disable') : t('common.enable')}
                       className={m.is_active ? 'text-green-500 hover:text-green-700' : 'text-slate-300 hover:text-green-500'}>
                       {m.is_active ? <ToggleRight size={18} /> : <ToggleLeft size={18} />}
                     </button>
@@ -489,18 +492,16 @@ export default function LlmModelsPanel() {
               </tr>
             ))}
             {models.length === 0 && !loading && (
-              <tr><td colSpan={9} className="px-4 py-8 text-center text-slate-400 text-sm">尚未設定任何模型</td></tr>
+              <tr><td colSpan={9} className="px-4 py-8 text-center text-slate-400 text-sm">{t('llm.noModels')}</td></tr>
             )}
           </tbody>
         </table>
       </div>
 
       <div className="mt-4 p-4 bg-blue-50 rounded-xl text-xs text-slate-500 space-y-1">
-        <p><strong className="text-slate-600">Gemini</strong>：API Key 可留空，自動使用 env <code>GEMINI_API_KEY</code>；填入後加密存 DB 優先使用</p>
-        <p><strong className="text-slate-600">Azure OpenAI</strong>：Endpoint 填 base URL（如 <code>https://fl-aoai-eus.openai.azure.com</code>），SDK 會自動組合完整路徑</p>
-        <p><strong className="text-slate-600">Oracle Cloud (OCI)</strong>：使用 RSA-SHA256 簽名認證，Private Key PEM 加密存入 DB。模型角色可選 Chat / Embedding / Rerank</p>
-        <p><strong className="text-slate-600">模型角色</strong>：Chat 供對話、Embedding/Rerank 供知識庫召回、TTS 供文字轉語音、STT 供語音轉文字</p>
-        <p><strong className="text-slate-600">API Key / OCI 憑證</strong>：以 AES-256-GCM 加密存入 DB，Server 端解密使用，前端永遠不顯示明文</p>
+        {t('llm.notes', { returnObjects: true }) instanceof Array
+          ? (t('llm.notes', { returnObjects: true }) as string[]).map((note, i) => <p key={i}>{note}</p>)
+          : null}
       </div>
 
       {showForm && (

@@ -5,6 +5,7 @@ import {
   Clock, Mail, FileText, X, Save, TriangleAlert, Settings2,
   Zap, BookOpen, Wrench, GitBranch,
 } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import api from '../../lib/api'
 import { useAuth } from '../../context/AuthContext'
 import type { ScheduledTask, TaskRun } from '../../types'
@@ -12,10 +13,6 @@ import PipelineTab, { type PipelineNode } from './PipelineTab'
 
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六']
 const FILE_TYPES = ['xlsx', 'docx', 'pdf', 'pptx', 'foxlink_pptx', 'txt', 'mp3']
-const FILE_TYPE_LABELS: Record<string, string> = {
-  xlsx: 'XLSX', docx: 'DOCX', pdf: 'PDF', pptx: 'PPTX',
-  foxlink_pptx: 'Foxlink PPTX', txt: 'TXT', mp3: 'MP3 語音',
-}
 
 interface ToolCatalog {
   skills: { id: number; name: string; icon: string; type: string; description?: string }[]
@@ -24,13 +21,13 @@ interface ToolCatalog {
 const HOURS = Array.from({ length: 24 }, (_, i) => i)
 const MINUTES = [0, 5, 10, 15, 20, 30, 45]
 
-function scheduleLabel(t: ScheduledTask) {
-  const hh = String(t.schedule_hour).padStart(2, '0')
-  const mm = String(t.schedule_minute).padStart(2, '0')
+function scheduleLabel(task: ScheduledTask) {
+  const hh = String(task.schedule_hour).padStart(2, '0')
+  const mm = String(task.schedule_minute).padStart(2, '0')
   const time = `${hh}:${mm}`
-  if (t.schedule_type === 'daily') return `每天 ${time}`
-  if (t.schedule_type === 'weekly') return `每週${WEEKDAYS[t.schedule_weekday ?? 1]} ${time}`
-  return `每月 ${t.schedule_monthday} 日 ${time}`
+  if (task.schedule_type === 'daily') return `每天 ${time}`
+  if (task.schedule_type === 'weekly') return `每週${WEEKDAYS[task.schedule_weekday ?? 1]} ${time}`
+  return `每月 ${task.schedule_monthday} 日 ${time}`
 }
 
 const emptyForm = (): Partial<ScheduledTask> => ({
@@ -66,6 +63,7 @@ function TaskFormModal({
   onClose: () => void
   onSaved: (t: ScheduledTask) => void
 }) {
+  const { t } = useTranslation()
   const isEdit = !!task?.id
   const [form, setForm] = useState<Partial<ScheduledTask>>(task ?? emptyForm())
   const [section, setSection] = useState<'basic' | 'schedule' | 'ai' | 'tools' | 'pipeline' | 'email'>('basic')
@@ -137,8 +135,9 @@ function TaskFormModal({
     set('recipients_json', JSON.stringify(recipients.filter((e) => e !== email)))
 
   const save = async () => {
-    if (!form.name?.trim()) { setError('請填寫任務名稱'); return }
-    if (!form.prompt?.trim()) { setError('請填寫 Prompt'); return }
+    if (!form.name?.trim()) { setError(t('scheduledTask.form.nameRequired')); return }
+    if (!form.prompt?.trim()) { setError(t('scheduledTask.form.promptRequired')); return }
+
     setSaving(true); setError('')
     try {
       const payload = {
@@ -155,7 +154,7 @@ function TaskFormModal({
     } catch (e: unknown) {
       const err = e as { response?: { status?: number; data?: { error?: string } }; message?: string }
       const status = err.response?.status
-      const msg = err.response?.data?.error || err.message || '儲存失敗'
+      const msg = err.response?.data?.error || err.message || t('scheduledTask.saveFailed')
       setError(status ? `[${status}] ${msg}` : msg)
     } finally {
       setSaving(false)
@@ -228,12 +227,12 @@ function TaskFormModal({
   }
 
   const sectionBtns: { id: typeof section; label: string; badge?: number }[] = [
-    { id: 'basic', label: '基本設定' },
-    { id: 'schedule', label: '排程' },
-    { id: 'ai', label: 'AI 設定' },
-    { id: 'tools', label: '工具引用' },
-    { id: 'pipeline', label: 'Pipeline', badge: pipelineNodes.length || undefined },
-    { id: 'email', label: '郵件通知' },
+    { id: 'basic', label: t('scheduledTask.sections.basic') },
+    { id: 'schedule', label: t('scheduledTask.sections.schedule') },
+    { id: 'ai', label: t('scheduledTask.sections.ai') },
+    { id: 'tools', label: t('scheduledTask.sections.tools') },
+    { id: 'pipeline', label: t('scheduledTask.sections.pipeline'), badge: pipelineNodes.length || undefined },
+    { id: 'email', label: t('scheduledTask.sections.email') },
   ]
 
   return (
@@ -243,7 +242,7 @@ function TaskFormModal({
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200">
           <h2 className="text-base font-semibold text-slate-800 flex items-center gap-2">
             <CalendarClock size={18} className="text-blue-500" />
-            {isEdit ? '編輯排程任務' : '新增排程任務'}
+            {isEdit ? t('scheduledTask.editTask') : t('scheduledTask.addTask')}
           </h2>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-600">
             <X size={18} />
@@ -279,26 +278,26 @@ function TaskFormModal({
           {section === 'basic' && (
             <>
               <div>
-                <label className="label">任務名稱 *</label>
-                <input className="input w-full" value={form.name ?? ''} onChange={(e) => set('name', e.target.value)} placeholder="e.g. 週報分析" />
+                <label className="label">{t('scheduledTask.form.taskName')}</label>
+                <input className="input w-full" value={form.name ?? ''} onChange={(e) => set('name', e.target.value)} placeholder={t('scheduledTask.form.taskNamePlaceholder')} />
               </div>
               <div className="flex gap-3">
                 <div className="flex-1">
-                  <label className="label">狀態</label>
+                  <label className="label">{t('scheduledTask.form.statusLabel')}</label>
                   <select className="input w-full" value={form.status ?? 'active'} onChange={(e) => set('status', e.target.value)}>
-                    <option value="active">啟用</option>
-                    <option value="paused">暫停</option>
-                    <option value="draft">草稿</option>
+                    <option value="active">{t('scheduledTask.form.statusActive')}</option>
+                    <option value="paused">{t('scheduledTask.form.statusPaused')}</option>
+                    <option value="draft">{t('scheduledTask.form.statusDraft')}</option>
                   </select>
                 </div>
                 <div className="flex-1">
-                  <label className="label">到期日（選填）</label>
+                  <label className="label">{t('scheduledTask.form.expireAt')}</label>
                   <input type="date" className="input w-full" value={form.expire_at ?? ''} onChange={(e) => set('expire_at', e.target.value)} />
                 </div>
                 <div className="w-28">
-                  <label className="label">最大執行次數</label>
+                  <label className="label">{t('scheduledTask.form.maxRuns')}</label>
                   <input type="number" min={0} className="input w-full" value={form.max_runs ?? 0} onChange={(e) => set('max_runs', Number(e.target.value))} />
-                  <p className="text-xs text-slate-400 mt-0.5">0 = 不限</p>
+                  <p className="text-xs text-slate-400 mt-0.5">{t('scheduledTask.form.maxRunsHint')}</p>
                 </div>
               </div>
             </>
@@ -308,19 +307,19 @@ function TaskFormModal({
           {section === 'schedule' && (
             <>
               <div>
-                <label className="label">頻率</label>
+                <label className="label">{t('scheduledTask.form.frequency')}</label>
                 <div className="flex gap-3">
                   {(['daily', 'weekly', 'monthly'] as const).map((v) => (
                     <label key={v} className="flex items-center gap-1.5 cursor-pointer text-sm">
                       <input type="radio" checked={form.schedule_type === v} onChange={() => set('schedule_type', v)} />
-                      {{ daily: '每天', weekly: '每週', monthly: '每月' }[v]}
+                      {{ daily: t('scheduledTask.form.freqDaily'), weekly: t('scheduledTask.form.freqWeekly'), monthly: t('scheduledTask.form.freqMonthly') }[v]}
                     </label>
                   ))}
                 </div>
               </div>
               <div className="flex gap-3 flex-wrap">
                 <div>
-                  <label className="label">執行時間</label>
+                  <label className="label">{t('scheduledTask.form.executeTime')}</label>
                   <div className="flex gap-1 items-center">
                     <select className="input" value={form.schedule_hour ?? 8} onChange={(e) => set('schedule_hour', Number(e.target.value))}>
                       {HOURS.map((h) => <option key={h} value={h}>{String(h).padStart(2, '0')}</option>)}
@@ -333,15 +332,15 @@ function TaskFormModal({
                 </div>
                 {form.schedule_type === 'weekly' && (
                   <div>
-                    <label className="label">星期</label>
+                    <label className="label">{t('scheduledTask.form.weekday')}</label>
                     <select className="input" value={form.schedule_weekday ?? 1} onChange={(e) => set('schedule_weekday', Number(e.target.value))}>
-                      {WEEKDAYS.map((d, i) => <option key={i} value={i}>星期{d}</option>)}
+                      {WEEKDAYS.map((d, i) => <option key={i} value={i}>{t('scheduledTask.form.weekdayPrefix')}{d}</option>)}
                     </select>
                   </div>
                 )}
                 {form.schedule_type === 'monthly' && (
                   <div>
-                    <label className="label">每月幾號</label>
+                    <label className="label">{t('scheduledTask.form.monthDay')}</label>
                     <input type="number" min={1} max={28} className="input w-20" value={form.schedule_monthday ?? 1} onChange={(e) => set('schedule_monthday', Number(e.target.value))} />
                   </div>
                 )}
@@ -353,17 +352,13 @@ function TaskFormModal({
           {section === 'ai' && (
             <>
               <div>
-                <label className="label">模型</label>
+                <label className="label">{t('scheduledTask.form.model')}</label>
                 <select className="input w-full" value={form.model ?? 'pro'} onChange={(e) => set('model', e.target.value)}>
                   {models.map((m) => <option key={m.key} value={m.key}>{m.name}</option>)}
                 </select>
               </div>
               <div>
-                <label className="label">
-                  Prompt *（支援變數：{'{{date}}'} {'{{weekday}}'} {'{{task_name}}'}；
-                  工具引用：{'{{skill:名稱}}'}{'{{kb:名稱}}'}；
-                  網頁爬取：{'{{fetch:URL}}'}）
-                </label>
+                <label className="label">Prompt *</label>
                 <div className="relative">
                   <textarea
                     ref={promptRef}
@@ -378,14 +373,18 @@ function TaskFormModal({
                     <div className="absolute left-0 top-full mt-1 z-50 w-full max-h-52 overflow-y-auto bg-white border border-slate-200 rounded-lg shadow-lg">
                       <div className="px-3 py-1.5 text-xs text-slate-400 border-b border-slate-100 flex items-center justify-between">
                         <span>
-                          {ac.trigger === '/' ? '/ 選擇技能 / 知識庫' : ac.trigger === '{{skill:' ? '選擇技能' : '選擇知識庫'}
-                          {ac.query && <> — 篩選：<span className="text-blue-500">{ac.query}</span></>}
+                          {ac.trigger === '/'
+                            ? t('scheduledTask.ac.selectSkillOrKb')
+                            : ac.trigger === '{{skill:'
+                            ? t('scheduledTask.ac.selectSkill')
+                            : t('scheduledTask.ac.selectKb')}
+                          {ac.query && <> — {t('scheduledTask.ac.filterLabel')}<span className="text-blue-500">{ac.query}</span></>}
                         </span>
                         <span className="text-slate-300">↑↓ Enter Esc</span>
                       </div>
                       {acItems.length === 0 ? (
                         <p className="px-3 py-3 text-xs text-slate-400 text-center">
-                          {ac.query ? `無符合「${ac.query}」的工具` : '尚無可用技能或知識庫'}
+                          {ac.query ? t('scheduledTask.ac.noMatch', { query: ac.query }) : t('scheduledTask.ac.noTools') }
                         </p>
                       ) : acItems.map((item, i) => (
                         <button
@@ -403,7 +402,7 @@ function TaskFormModal({
                           <span className={`text-xs shrink-0 px-1.5 py-0.5 rounded-full font-medium ${
                             item.type === 'skill' ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700'
                           }`}>
-                            {item.type === 'skill' ? '技能' : '知識庫'}
+                            {item.type === 'skill' ? t('scheduledTask.ac.skillBadge') : t('scheduledTask.ac.kbBadge')}
                           </span>
                         </button>
                       ))}
@@ -411,43 +410,43 @@ function TaskFormModal({
                   )}
                 </div>
                 <p className="text-xs text-slate-400 mt-1">
-                  輸入 <code className="bg-slate-100 px-1 rounded">/</code> 快速選擇工具，或前往「工具引用」頁簽插入語法。
+                  {t('scheduledTask.promptHint')}
                 </p>
               </div>
               <div>
-                <label className="label">輸出類型</label>
+                <label className="label">{t('scheduledTask.form.outputType')}</label>
                 <div className="flex gap-4">
                   <label className="flex items-center gap-1.5 cursor-pointer text-sm">
                     <input type="radio" checked={form.output_type === 'text'} onChange={() => set('output_type', 'text')} />
-                    純文字（不生成附件）
+                    {t('scheduledTask.form.outputText')}
                   </label>
                   <label className="flex items-center gap-1.5 cursor-pointer text-sm">
                     <input type="radio" checked={form.output_type === 'file'} onChange={() => set('output_type', 'file')} />
-                    生成檔案
+                    {t('scheduledTask.form.outputFile')}
                   </label>
                 </div>
               </div>
               {form.output_type === 'file' && (
                 <div className="flex gap-3">
                   <div>
-                    <label className="label">檔案格式</label>
+                    <label className="label">{t('scheduledTask.form.fileFormat')}</label>
                     <select className="input" value={form.file_type ?? 'docx'} onChange={(e) => {
                       set('file_type', e.target.value)
                       const ext = e.target.value
                       set('filename_template', `{{task_name}}_{{date}}.${ext}`)
                     }}>
-                      {FILE_TYPES.map((t) => <option key={t} value={t}>{FILE_TYPE_LABELS[t] || t.toUpperCase()}</option>)}
+                      {FILE_TYPES.map((ft) => <option key={ft} value={ft}>{ft === 'mp3' ? t('scheduledTask.mp3Label') : ft.toUpperCase()}</option>)}
                     </select>
                   </div>
                   <div className="flex-1">
-                    <label className="label">檔名範本</label>
+                    <label className="label">{t('scheduledTask.form.filenameTemplate')}</label>
                     <input className="input w-full" value={form.filename_template ?? ''} onChange={(e) => set('filename_template', e.target.value)} placeholder="{{task_name}}_{{date}}.docx" />
                   </div>
                 </div>
               )}
               {form.output_type === 'file' && form.file_type === 'mp3' && (
                 <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded px-3 py-2">
-                  MP3 語音：AI 回應內容會自動透過 TTS 技能轉為語音檔。需先在管理後台設定 TTS 模型（model_role=tts）。
+                  {t('scheduledTask.form.mp3Note')}
                 </p>
               )}
             </>
@@ -457,16 +456,16 @@ function TaskFormModal({
           {section === 'tools' && (
             <div className="space-y-4">
               <p className="text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded px-3 py-2">
-                點擊「插入」將語法加入 Prompt（光標位置）。技能/知識庫在執行時會自動被呼叫並將結果注入 Prompt 中，再一起傳給 AI 分析。
+                {t('scheduledTask.tools.hint')}
               </p>
 
               {/* Skills */}
               <div>
                 <label className="label flex items-center gap-1.5">
-                  <Zap size={13} className="text-amber-500" /> 可用技能
+                  <Zap size={13} className="text-amber-500" /> {t('scheduledTask.tools.availableSkills')}
                 </label>
                 {catalog.skills.length === 0 ? (
-                  <p className="text-xs text-slate-400">尚無可用技能</p>
+                  <p className="text-xs text-slate-400">{t('scheduledTask.tools.noSkills')}</p>
                 ) : (
                   <div className="space-y-1 max-h-48 overflow-y-auto">
                     {catalog.skills.map((sk) => (
@@ -481,14 +480,14 @@ function TaskFormModal({
                           onClick={() => insertToolRef(`{{skill:${sk.name}}}`)}
                           className="shrink-0 text-xs px-2 py-1 bg-amber-50 text-amber-700 border border-amber-200 rounded hover:bg-amber-100 transition"
                         >
-                          插入
+                          {t('scheduledTask.tools.insert')}
                         </button>
                         <button
                           onClick={() => insertToolRef(`{{skill:${sk.name} input=""}}`)}
                           className="shrink-0 text-xs px-2 py-1 bg-slate-50 text-slate-600 border border-slate-200 rounded hover:bg-slate-100 transition"
-                          title="帶 input 參數"
+                          title={t('scheduledTask.tools.withParams')}
                         >
-                          帶參數
+                          {t('scheduledTask.tools.withParams')}
                         </button>
                       </div>
                     ))}
@@ -499,10 +498,10 @@ function TaskFormModal({
               {/* Knowledge Bases */}
               <div>
                 <label className="label flex items-center gap-1.5">
-                  <BookOpen size={13} className="text-blue-500" /> 可用知識庫
+                  <BookOpen size={13} className="text-blue-500" /> {t('scheduledTask.tools.availableKbs')}
                 </label>
                 {catalog.kbs.length === 0 ? (
-                  <p className="text-xs text-slate-400">尚無可用知識庫</p>
+                  <p className="text-xs text-slate-400">{t('scheduledTask.tools.noKbs')}</p>
                 ) : (
                   <div className="space-y-1 max-h-48 overflow-y-auto">
                     {catalog.kbs.map((kb) => (
@@ -516,14 +515,14 @@ function TaskFormModal({
                           onClick={() => insertToolRef(`{{kb:${kb.name}}}`)}
                           className="shrink-0 text-xs px-2 py-1 bg-blue-50 text-blue-700 border border-blue-200 rounded hover:bg-blue-100 transition"
                         >
-                          插入
+                          {t('scheduledTask.tools.insert')}
                         </button>
                         <button
                           onClick={() => insertToolRef(`{{kb:${kb.name} query=""}}`)}
                           className="shrink-0 text-xs px-2 py-1 bg-slate-50 text-slate-600 border border-slate-200 rounded hover:bg-slate-100 transition"
-                          title="帶查詢參數"
+                          title={t('scheduledTask.tools.withQuery')}
                         >
-                          帶查詢
+                          {t('scheduledTask.tools.withQuery')}
                         </button>
                       </div>
                     ))}
@@ -534,15 +533,15 @@ function TaskFormModal({
               {/* Syntax Reference */}
               <div className="bg-slate-50 border border-slate-200 rounded-lg p-3">
                 <p className="text-xs font-medium text-slate-600 mb-2 flex items-center gap-1">
-                  <Wrench size={12} /> 語法說明
+                  <Wrench size={12} /> {t('scheduledTask.tools.syntaxTitle')}
                 </p>
                 <div className="space-y-1 text-xs font-mono text-slate-600">
-                  <p><span className="text-amber-600">{'{{skill:名稱}}'}</span> — 執行技能，以任務名稱為輸入</p>
-                  <p><span className="text-amber-600">{'{{skill:名稱 input="文字"}}'}</span> — 執行技能，指定輸入文字</p>
-                  <p><span className="text-blue-600">{'{{kb:名稱}}'}</span> — 查詢知識庫，以任務名稱為查詢詞</p>
-                  <p><span className="text-blue-600">{'{{kb:名稱 query="查詢詞"}}'}</span> — 查詢知識庫，指定查詢詞</p>
-                  <p><span className="text-slate-400">{'{{mcp:工具名}}'}</span> — MCP 工具（待支援）</p>
-                  <p><span className="text-slate-400">{'{{dify:名稱}}'}</span> — Dify 知識庫（待支援）</p>
+                  <p><span className="text-amber-600">{'{{skill:名稱}}'}</span> — 呼叫技能並注入結果</p>
+                  <p><span className="text-amber-600">{'{{skill:名稱 input="文字"}}'}</span> — 帶固定輸入呼叫技能</p>
+                  <p><span className="text-blue-600">{'{{kb:名稱}}'}</span> — 查詢知識庫並注入結果</p>
+                  <p><span className="text-blue-600">{'{{kb:名稱 query="查詢詞"}}'}</span> — 帶固定查詢詞</p>
+                  <p><span className="text-slate-400">{'{{mcp:工具名}}'}</span> — 呼叫 MCP 工具</p>
+                  <p><span className="text-slate-400">{'{{dify:名稱}}'}</span> — 呼叫 Dify 知識庫</p>
                 </div>
               </div>
             </div>
@@ -563,16 +562,16 @@ function TaskFormModal({
           {section === 'email' && (
             <>
               <div>
-                <label className="label">收件人（任務擁有者的信箱會自動加入）</label>
+                <label className="label">{t('scheduledTask.form.recipients')}</label>
                 <div className="flex gap-2 mb-2">
                   <input
                     className="input flex-1"
                     value={recipientInput}
                     onChange={(e) => setRecipientInput(e.target.value)}
                     onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), addRecipient())}
-                    placeholder="輸入 Email 後按 Enter"
+                    placeholder={t('scheduledTask.form.recipientPlaceholder')}
                   />
-                  <button className="btn-primary" onClick={addRecipient}>加入</button>
+                  <button className="btn-primary" onClick={addRecipient}>{t('scheduledTask.form.addRecipient')}</button>
                 </div>
                 <div className="flex flex-wrap gap-1.5">
                   {recipients.map((r) => (
@@ -581,17 +580,17 @@ function TaskFormModal({
                       <button onClick={() => removeRecipient(r)}><X size={10} /></button>
                     </span>
                   ))}
-                  {recipients.length === 0 && <p className="text-xs text-slate-400">未設定額外收件人，僅寄給帳號信箱</p>}
+                  {recipients.length === 0 && <p className="text-xs text-slate-400">{t('scheduledTask.form.noExtraRecipients')}</p>}
                 </div>
               </div>
               <div>
-                <label className="label">郵件主旨（支援 {'{{date}}'} {'{{weekday}}'} {'{{task_name}}'}）</label>
+                <label className="label">{t('scheduledTask.form.emailSubject')}</label>
                 <input className="input w-full" value={form.email_subject ?? ''} onChange={(e) => set('email_subject', e.target.value)} />
               </div>
               <div>
-                <label className="label">郵件內文（支援以上變數 + {'{{ai_response}}'} {'{{tools_used}}'}）</label>
+                <label className="label">{t('scheduledTask.form.emailBody')}</label>
                 <textarea className="input w-full h-36 resize-y" value={form.email_body ?? ''} onChange={(e) => set('email_body', e.target.value)} />
-                <p className="text-xs text-slate-400 mt-1">{'{{tools_used}}'} 會展開為本次呼叫的技能/知識庫清單</p>
+                <p className="text-xs text-slate-400 mt-1">{t('scheduledTask.form.toolsUsedHint')}</p>
               </div>
             </>
           )}
@@ -604,9 +603,9 @@ function TaskFormModal({
           </div>
         )}
         <div className="flex justify-end gap-2 px-6 py-4 border-t border-slate-200">
-          <button onClick={onClose} className="btn-ghost">取消</button>
+          <button onClick={onClose} className="btn-ghost">{t('common.cancel')}</button>
           <button onClick={save} disabled={saving} className="btn-primary flex items-center gap-1.5">
-            <Save size={14} /> {saving ? '儲存中...' : '儲存'}
+            <Save size={14} /> {saving ? t('common.saving') : t('common.save')}
           </button>
         </div>
       </div>
@@ -616,6 +615,7 @@ function TaskFormModal({
 
 // ── HistoryRow ────────────────────────────────────────────────────────────────
 function HistoryRow({ taskId }: { taskId: number }) {
+  const { t } = useTranslation()
   const [runs, setRuns] = useState<TaskRun[]>([])
   const [loading, setLoading] = useState(true)
 
@@ -626,21 +626,21 @@ function HistoryRow({ taskId }: { taskId: number }) {
       .finally(() => setLoading(false))
   }, [taskId])
 
-  if (loading) return <div className="py-3 px-6 text-sm text-slate-400">載入中...</div>
-  if (runs.length === 0) return <div className="py-3 px-6 text-sm text-slate-400">尚無執行紀錄</div>
+  if (loading) return <div className="py-3 px-6 text-sm text-slate-400">{t('common.loading')}</div>
+  if (runs.length === 0) return <div className="py-3 px-6 text-sm text-slate-400">{t('scheduledTask.noHistory')}</div>
 
   return (
     <div className="px-6 pb-4">
       <table className="w-full text-xs">
         <thead>
           <tr className="text-slate-500 border-b border-slate-100">
-            <th className="text-left py-1.5 pr-3 font-medium">時間</th>
-            <th className="text-left py-1.5 pr-3 font-medium">狀態</th>
-            <th className="text-left py-1.5 pr-3 font-medium">嘗試</th>
-            <th className="text-left py-1.5 pr-3 font-medium">耗時</th>
-            <th className="text-left py-1.5 pr-3 font-medium">工具</th>
-            <th className="text-left py-1.5 pr-3 font-medium">郵件</th>
-            <th className="text-left py-1.5 font-medium">AI 回應預覽</th>
+            <th className="text-left py-1.5 pr-3 font-medium">{t('scheduledTask.historyCol.time')}</th>
+            <th className="text-left py-1.5 pr-3 font-medium">{t('scheduledTask.historyCol.status')}</th>
+            <th className="text-left py-1.5 pr-3 font-medium">{t('scheduledTask.historyCol.attempt')}</th>
+            <th className="text-left py-1.5 pr-3 font-medium">{t('scheduledTask.historyCol.duration')}</th>
+            <th className="text-left py-1.5 pr-3 font-medium">{t('scheduledTask.historyCol.tools')}</th>
+            <th className="text-left py-1.5 pr-3 font-medium">{t('scheduledTask.historyCol.email')}</th>
+            <th className="text-left py-1.5 font-medium">{t('scheduledTask.historyCol.preview')}</th>
           </tr>
         </thead>
         <tbody>
@@ -660,8 +660,8 @@ function HistoryRow({ taskId }: { taskId: number }) {
                 <td className="py-1.5 pr-3 whitespace-nowrap text-slate-600">{r.run_at?.slice(0, 16)}</td>
                 <td className="py-1.5 pr-3">
                   {r.status === 'ok'
-                    ? <span className="flex items-center gap-1 text-green-600"><CheckCircle size={12} /> 成功</span>
-                    : <span className="flex items-center gap-1 text-red-500"><XCircle size={12} /> 失敗</span>}
+                    ? <span className="flex items-center gap-1 text-green-600"><CheckCircle size={12} /> {t('scheduledTask.runOk')}</span>
+                    : <span className="flex items-center gap-1 text-red-500"><XCircle size={12} /> {t('scheduledTask.runFail')}</span>}
                 </td>
                 <td className="py-1.5 pr-3 text-slate-500">{r.attempt}/3</td>
                 <td className="py-1.5 pr-3 text-slate-500">{r.duration_ms ? `${(r.duration_ms / 1000).toFixed(1)}s` : '-'}</td>
@@ -678,7 +678,7 @@ function HistoryRow({ taskId }: { taskId: number }) {
                 </td>
                 <td className="py-1.5 pr-3">
                   {r.email_sent_to
-                    ? <span className="flex items-center gap-0.5 text-blue-500"><Mail size={11} /> 已寄</span>
+                    ? <span className="flex items-center gap-0.5 text-blue-500"><Mail size={11} /> {t('scheduledTask.emailSent')}</span>
                     : <span className="text-slate-300">-</span>}
                 </td>
                 <td className="py-1.5 max-w-xs">
@@ -703,6 +703,7 @@ function HistoryRow({ taskId }: { taskId: number }) {
 
 // ── GlobalSettings ─────────────────────────────────────────────────────────
 function GlobalSettings() {
+  const { t } = useTranslation()
   const [enabled, setEnabled] = useState(true)
   const [maxPerUser, setMaxPerUser] = useState(10)
   const [saving, setSaving] = useState(false)
@@ -721,10 +722,10 @@ function GlobalSettings() {
     try {
       await api.put('/admin/settings/scheduled-tasks', { enabled, max_per_user: maxPerUser })
       setDirty(false)
-      setMsg('已儲存')
+      setMsg(t('scheduledTask.saved'))
       setTimeout(() => setMsg(''), 2000)
     } catch {
-      setMsg('儲存失敗')
+      setMsg(t('scheduledTask.saveFailed'))
     } finally {
       setSaving(false)
     }
@@ -733,7 +734,7 @@ function GlobalSettings() {
   return (
     <div className="bg-white border border-slate-200 rounded-xl px-5 py-4 mb-5 flex flex-wrap items-center gap-5">
       <div className="flex items-center gap-2 text-sm font-medium text-slate-700">
-        <Settings2 size={15} className="text-blue-500" /> 全域設定
+        <Settings2 size={15} className="text-blue-500" /> {t('scheduledTask.globalSettings')}
       </div>
       {/* Global toggle */}
       <label className="flex items-center gap-2 cursor-pointer select-none">
@@ -743,14 +744,14 @@ function GlobalSettings() {
         >
           <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${enabled ? 'translate-x-5' : 'translate-x-0.5'}`} />
         </div>
-        <span className="text-sm text-slate-700">開放排程功能</span>
+        <span className="text-sm text-slate-700">{t('scheduledTask.enableSchedule')}</span>
         <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${enabled ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'}`}>
-          {enabled ? '已開放' : '已關閉'}
+          {enabled ? t('scheduledTask.scheduleOpen') : t('scheduledTask.scheduleClosed')}
         </span>
       </label>
       {/* Max per user */}
       <label className="flex items-center gap-2 text-sm text-slate-700">
-        每人上限
+        {t('scheduledTask.maxPerUser')}
         <input
           type="number"
           min={1}
@@ -759,7 +760,7 @@ function GlobalSettings() {
           onChange={(e) => { setMaxPerUser(parseInt(e.target.value) || 1); setDirty(true) }}
           className="w-16 border border-slate-300 rounded px-2 py-1 text-sm text-center"
         />
-        個任務
+        {t('scheduledTask.tasksUnit')}
       </label>
       {/* Save */}
       <button
@@ -768,7 +769,7 @@ function GlobalSettings() {
         className={`ml-auto flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-lg font-medium transition
           ${dirty ? 'bg-blue-600 text-white hover:bg-blue-700' : 'bg-slate-100 text-slate-400 cursor-not-allowed'}`}
       >
-        <Save size={13} /> {saving ? '儲存中…' : '儲存設定'}
+        <Save size={13} /> {saving ? t('common.saving') : t('scheduledTask.saveSettings')}
       </button>
       {msg && <span className="text-xs text-blue-500">{msg}</span>}
     </div>
@@ -777,6 +778,7 @@ function GlobalSettings() {
 
 // ── Main Panel ────────────────────────────────────────────────────────────────
 export default function ScheduledTasksPanel() {
+  const { t } = useTranslation()
   const { isAdmin } = useAuth()
   const [tasks, setTasks] = useState<ScheduledTask[]>([])
   const [models, setModels] = useState<{ key: string; name: string }[]>([])
@@ -798,7 +800,7 @@ export default function ScheduledTasksPanel() {
       setTasks(tr.data)
     } catch (e: unknown) {
       const err = (e as { response?: { data?: { error?: string } } }).response?.data?.error
-      setMsg(err || '載入失敗')
+      setMsg(err || t('scheduledTask.loadFailed'))
     } finally {
       setLoading(false)
     }
@@ -815,34 +817,37 @@ export default function ScheduledTasksPanel() {
     return status ? `[${status}] ${msg}` : msg
   }
 
-  const toggle = async (t: ScheduledTask) => {
+  const toggle = async (task: ScheduledTask) => {
     try {
-      const r = await api.post(`/scheduled-tasks/${t.id}/toggle`)
-      setTasks((p) => p.map((x) => x.id === t.id ? { ...x, status: r.data.status } : x))
-      flash(`已${r.data.status === 'active' ? '啟用' : '暫停'}任務「${t.name}」`)
+      const r = await api.post(`/scheduled-tasks/${task.id}/toggle`)
+      setTasks((p) => p.map((x) => x.id === task.id ? { ...x, status: r.data.status } : x))
+      flash(t('scheduledTask.toggleEnabled', {
+        status: r.data.status === 'active' ? t('scheduledTask.enabled') : t('scheduledTask.paused'),
+        name: task.name,
+      }))
     } catch (e) { flash(errMsg(e)) }
   }
 
-  const runNow = async (t: ScheduledTask) => {
-    if (runningIds.has(t.id)) return
-    const prevRunAt = t.last_run_at
-    const prevStatus = t.status
-    setRunningIds((prev) => new Set(prev).add(t.id))
+  const runNow = async (task: ScheduledTask) => {
+    if (runningIds.has(task.id)) return
+    const prevRunAt = task.last_run_at
+    const prevStatus = task.status
+    setRunningIds((prev) => new Set(prev).add(task.id))
     try {
-      await api.post(`/scheduled-tasks/${t.id}/run-now`)
-      flash(`任務「${t.name}」執行中...`)
+      await api.post(`/scheduled-tasks/${task.id}/run-now`)
+      flash(t('scheduledTask.runningTask', { name: task.name }))
       let attempts = 0
       const poll = setInterval(async () => {
         attempts++
         if (attempts > 90) { // 3 min timeout
           clearInterval(poll)
-          setRunningIds((prev) => { const s = new Set(prev); s.delete(t.id); return s })
-          flash('執行逾時，請手動重新整理查看結果')
+          setRunningIds((prev) => { const s = new Set(prev); s.delete(task.id); return s })
+          flash(t('scheduledTask.runTimeout'))
           return
         }
         try {
           const r = await api.get('/scheduled-tasks')
-          const updated = (r.data as ScheduledTask[]).find((x) => x.id === t.id)
+          const updated = (r.data as ScheduledTask[]).find((x) => x.id === task.id)
           // Detect: last_run_at changed (normal completion) OR status changed (e.g. auto-paused)
           const done = updated && (
             updated.last_run_at !== prevRunAt ||
@@ -850,31 +855,31 @@ export default function ScheduledTasksPanel() {
           )
           if (done) {
             clearInterval(poll)
-            setRunningIds((prev) => { const s = new Set(prev); s.delete(t.id); return s })
+            setRunningIds((prev) => { const s = new Set(prev); s.delete(task.id); return s })
             setTasks(r.data)
             flash(updated!.last_run_status === 'ok'
-              ? `✓ 任務「${t.name}」執行完成`
-              : `✗ 任務「${t.name}」執行失敗，請查看歷史紀錄`)
+              ? t('scheduledTask.runComplete', { name: task.name })
+              : t('scheduledTask.runFailed', { name: task.name }))
             // Refresh history if already expanded
-            if (expanded === t.id) {
+            if (expanded === task.id) {
               setExpanded(null)
-              setTimeout(() => setExpanded(t.id), 100)
+              setTimeout(() => setExpanded(task.id), 100)
             }
           }
         } catch { /* ignore poll errors */ }
       }, 2000)
     } catch (e) {
-      setRunningIds((prev) => { const s = new Set(prev); s.delete(t.id); return s })
+      setRunningIds((prev) => { const s = new Set(prev); s.delete(task.id); return s })
       flash(errMsg(e))
     }
   }
 
-  const del = async (t: ScheduledTask) => {
-    if (!confirm(`確定刪除任務「${t.name}」及所有歷史紀錄？`)) return
+  const del = async (task: ScheduledTask) => {
+    if (!confirm(t('scheduledTask.deleteConfirm', { name: task.name }))) return
     try {
-      await api.delete(`/scheduled-tasks/${t.id}`)
-      setTasks((p) => p.filter((x) => x.id !== t.id))
-      flash('已刪除')
+      await api.delete(`/scheduled-tasks/${task.id}`)
+      setTasks((p) => p.filter((x) => x.id !== task.id))
+      flash(t('scheduledTask.deleted'))
     } catch (e) { flash(errMsg(e)) }
   }
 
@@ -884,7 +889,7 @@ export default function ScheduledTasksPanel() {
       return idx >= 0 ? p.map((x) => x.id === saved.id ? saved : x) : [saved, ...p]
     })
     setFormTask(null)
-    flash(`任務「${saved.name}」已儲存`)
+    flash(t('scheduledTask.taskSaved', { name: saved.name }))
   }
 
   return (
@@ -895,142 +900,154 @@ export default function ScheduledTasksPanel() {
       {/* Header */}
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-lg font-semibold text-slate-800 flex items-center gap-2">
-          <CalendarClock size={20} className="text-blue-500" /> 排程任務
+          <CalendarClock size={20} className="text-blue-500" /> {t('scheduledTask.title')}
         </h2>
         <div className="flex gap-2">
           {msg && <span className="text-sm text-blue-600 self-center">{msg}</span>}
           <button onClick={() => load()} disabled={loading} className="btn-ghost flex items-center gap-1.5">
-            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} /> 重新整理
+            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} /> {t('common.refresh')}
           </button>
           <button onClick={() => setFormTask(emptyForm())} className="btn-primary flex items-center gap-1.5">
-            <Plus size={14} /> 新增任務
+            <Plus size={14} /> {t('scheduledTask.addTask')}
           </button>
         </div>
       </div>
 
       {/* Table */}
       {tasks.length === 0 && !loading ? (
-        <p className="text-center text-slate-400 py-12 text-sm">尚無排程任務</p>
+        <p className="text-center text-slate-400 py-12 text-sm">{t('scheduledTask.noTasks')}</p>
       ) : (
         <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
           <table className="w-full text-sm">
             <thead className="bg-slate-50 border-b border-slate-200">
               <tr>
                 <th className="text-left px-4 py-3 font-medium text-slate-600 w-8"></th>
-                <th className="text-left px-4 py-3 font-medium text-slate-600">任務名稱</th>
-                {isAdmin && <th className="text-left px-4 py-3 font-medium text-slate-600">執行人</th>}
-                <th className="text-left px-4 py-3 font-medium text-slate-600">排程</th>
-                <th className="text-left px-4 py-3 font-medium text-slate-600">上次執行</th>
-                <th className="text-left px-4 py-3 font-medium text-slate-600">到期日</th>
-                <th className="text-left px-4 py-3 font-medium text-slate-600">執行次數</th>
-                <th className="text-left px-4 py-3 font-medium text-slate-600">狀態</th>
-                <th className="text-right px-4 py-3 font-medium text-slate-600">操作</th>
+                <th className="text-left px-4 py-3 font-medium text-slate-600">{t('scheduledTask.cols.taskName')}</th>
+                {isAdmin && <th className="text-left px-4 py-3 font-medium text-slate-600">{t('scheduledTask.cols.executor')}</th>}
+                <th className="text-left px-4 py-3 font-medium text-slate-600">{t('scheduledTask.cols.schedule')}</th>
+                <th className="text-left px-4 py-3 font-medium text-slate-600">{t('scheduledTask.cols.lastRun')}</th>
+                <th className="text-left px-4 py-3 font-medium text-slate-600">{t('scheduledTask.cols.expireAt')}</th>
+                <th className="text-left px-4 py-3 font-medium text-slate-600">{t('scheduledTask.cols.runCount')}</th>
+                <th className="text-left px-4 py-3 font-medium text-slate-600">{t('scheduledTask.cols.status')}</th>
+                <th className="text-right px-4 py-3 font-medium text-slate-600">{t('scheduledTask.cols.action')}</th>
               </tr>
             </thead>
             <tbody>
-              {tasks.map((t) => (
-                <React.Fragment key={t.id}>
+              {tasks.map((task) => (
+                <React.Fragment key={task.id}>
                   <tr className="border-b border-slate-100 hover:bg-slate-50">
                     <td className="px-4 py-3">
                       <button
-                        onClick={() => setExpanded(expanded === t.id ? null : t.id)}
+                        onClick={() => setExpanded(expanded === task.id ? null : task.id)}
                         className="text-slate-400 hover:text-blue-500 transition"
                       >
-                        {expanded === t.id ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
+                        {expanded === task.id ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
                       </button>
                     </td>
                     <td className="px-4 py-3">
-                      <p className="font-medium text-slate-800">{t.name}</p>
+                      <p className="font-medium text-slate-800">{task.name}</p>
                     </td>
                     {isAdmin && (
                       <td className="px-4 py-3">
-                        {t.user_name
-                          ? <><p className="text-sm text-slate-700">{t.user_name}</p>
-                              {t.username && <p className="text-xs text-slate-400">{t.username}</p>}</>
+                        {task.user_name
+                          ? <><p className="text-sm text-slate-700">{task.user_name}</p>
+                              {task.username && <p className="text-xs text-slate-400">{task.username}</p>}</>
                           : <span className="text-slate-300 text-xs">—</span>}
                       </td>
                     )}
                     <td className="px-4 py-3 text-slate-600">
                       <span className="flex items-center gap-1">
                         <Clock size={12} className="text-slate-400" />
-                        {scheduleLabel(t)}
+                        {scheduleLabel(task)}
                       </span>
                     </td>
                     <td className="px-4 py-3">
-                      {t.last_run_at ? (
+                      {task.last_run_at ? (
                         <span className="flex items-center gap-1">
-                          {t.last_run_status === 'ok'
+                          {task.last_run_status === 'ok'
                             ? <CheckCircle size={13} className="text-green-500" />
                             : <XCircle size={13} className="text-red-500" />}
-                          <span className="text-slate-600">{t.last_run_at.slice(0, 16)}</span>
+                          <span className="text-slate-600">{task.last_run_at.slice(0, 16)}</span>
                         </span>
                       ) : (
-                        <span className="text-slate-300">尚未執行</span>
+                        <span className="text-slate-300">{t('scheduledTask.notYetRun')}</span>
                       )}
                     </td>
                     <td className="px-4 py-3 text-slate-500 text-xs">
-                      {t.expire_at ? t.expire_at.slice(0, 10) : <span className="text-slate-300">不限</span>}
+                      {task.expire_at ? task.expire_at.slice(0, 10) : <span className="text-slate-300">{t('scheduledTask.noExpiry')}</span>}
                     </td>
                     <td className="px-4 py-3 text-slate-500 text-xs">
-                      {t.run_count}{t.max_runs > 0 ? ` / ${t.max_runs}` : ''}
+                      {task.run_count}{task.max_runs > 0 ? ` / ${task.max_runs}` : ''}
                     </td>
                     <td className="px-4 py-3">
-                      {runningIds.has(t.id) ? (
+                      {runningIds.has(task.id) ? (
                         <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full font-medium bg-blue-100 text-blue-700">
-                          <RefreshCw size={10} className="animate-spin" /> 執行中
+                          <RefreshCw size={10} className="animate-spin" /> {t('scheduledTask.running')}
                         </span>
                       ) : (
                         <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full font-medium ${
-                          t.status === 'active' ? 'bg-green-100 text-green-700' :
-                          t.status === 'paused' ? 'bg-amber-100 text-amber-700' :
+                          task.status === 'active' ? 'bg-green-100 text-green-700' :
+                          task.status === 'paused' ? 'bg-amber-100 text-amber-700' :
                           'bg-slate-100 text-slate-500'
                         }`}>
-                          {t.status === 'active' ? '啟用中' : t.status === 'paused' ? '已暫停' : '草稿'}
+                          {task.status === 'active'
+                            ? t('scheduledTask.enabled')
+                            : task.status === 'paused'
+                            ? t('scheduledTask.paused')
+                            : t('scheduledTask.draft')}
                         </span>
                       )}
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center justify-end gap-1">
                         <button
-                          title={runningIds.has(t.id) ? '執行中...' : '立即執行'}
-                          onClick={() => runNow(t)}
-                          disabled={runningIds.has(t.id)}
+                          title={runningIds.has(task.id) ? t('scheduledTask.running') : t('scheduledTask.runNow')}
+                          onClick={() => runNow(task)}
+                          disabled={runningIds.has(task.id)}
                           className={`p-1.5 rounded transition ${
-                            runningIds.has(t.id)
+                            runningIds.has(task.id)
                               ? 'text-green-500 cursor-not-allowed'
                               : 'hover:bg-green-50 text-slate-400 hover:text-green-600'
                           }`}
                         >
-                          {runningIds.has(t.id)
+                          {runningIds.has(task.id)
                             ? <RefreshCw size={14} className="animate-spin" />
                             : <Play size={14} />}
                         </button>
-                        <button title={t.status === 'active' ? '暫停' : '啟用'} onClick={() => toggle(t)}
+                        <button
+                          title={task.status === 'active' ? t('scheduledTask.pause') : t('scheduledTask.resume')}
+                          onClick={() => toggle(task)}
                           className="p-1.5 rounded hover:bg-amber-50 text-slate-400 hover:text-amber-600 transition">
-                          {t.status === 'active' ? <Pause size={14} /> : <Play size={14} className="text-green-500" />}
+                          {task.status === 'active' ? <Pause size={14} /> : <Play size={14} className="text-green-500" />}
                         </button>
-                        <button title="歷史紀錄" onClick={() => setExpanded(expanded === t.id ? null : t.id)}
+                        <button
+                          title={t('scheduledTask.history')}
+                          onClick={() => setExpanded(expanded === task.id ? null : task.id)}
                           className="p-1.5 rounded hover:bg-blue-50 text-slate-400 hover:text-blue-600 transition">
                           <History size={14} />
                         </button>
-                        <button title="編輯" onClick={() => setFormTask(t)}
+                        <button
+                          title={t('common.edit')}
+                          onClick={() => setFormTask(task)}
                           className="p-1.5 rounded hover:bg-blue-50 text-slate-400 hover:text-blue-600 transition">
                           <Edit2 size={14} />
                         </button>
-                        <button title="刪除" onClick={() => del(t)}
+                        <button
+                          title={t('common.delete')}
+                          onClick={() => del(task)}
                           className="p-1.5 rounded hover:bg-red-50 text-slate-400 hover:text-red-500 transition">
                           <Trash2 size={14} />
                         </button>
                       </div>
                     </td>
                   </tr>
-                  {expanded === t.id && (
+                  {expanded === task.id && (
                     <tr className="bg-slate-50 border-b border-slate-100">
                       <td colSpan={isAdmin ? 9 : 8} className="px-0">
                         <div className="px-4 py-2 text-xs font-medium text-slate-500 flex items-center gap-1 border-b border-slate-100">
-                          <History size={12} /> 執行歷史（最近 10 筆）
+                          <History size={12} /> {t('scheduledTask.historyTitle')}
                         </div>
-                        <HistoryRow taskId={t.id} />
+                        <HistoryRow taskId={task.id} />
                       </td>
                     </tr>
                   )}

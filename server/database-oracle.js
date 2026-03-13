@@ -704,6 +704,14 @@ async function runMigrations(db) {
   await addCol('AI_SCHEMA_COLUMNS', 'FILTER_LAYER',   'VARCHAR2(30)');
   await addCol('AI_SCHEMA_COLUMNS', 'FILTER_SOURCE',  'VARCHAR2(50)');
 
+  // ── i18n: 多語言支援 ──────────────────────────────────────────────────────────
+  await addCol('USERS', 'PREFERRED_LANGUAGE', "VARCHAR2(10)");
+  await createTable('FACTORY_LANGUAGES', `CREATE TABLE factory_languages (
+    factory_code   VARCHAR2(20)  PRIMARY KEY,
+    language_code  VARCHAR2(10)  NOT NULL,
+    updated_at     TIMESTAMP     DEFAULT SYSTIMESTAMP
+  )`);
+
   // ── Skills 表欄位補齊（防止 create-schema.sql 版本落差）──────────────────────
   await addCol('SKILLS', 'TAGS',          "CLOB DEFAULT '[]'");
   await addCol('SKILLS', 'CODE_SNIPPET',  'CLOB');

@@ -403,12 +403,10 @@ router.get('/me', async (req, res) => {
     userWithoutPassword.effective_can_deep_research      = user.role === 'admin' || resolveEff(user.can_deep_research, rolePerms?.can_deep_research ?? 1);
     userWithoutPassword.effective_can_design_ai_select   = user.role === 'admin' || (user.can_design_ai_select == 1);
     userWithoutPassword.effective_can_use_ai_dashboard   = user.role === 'admin' || (user.can_use_ai_dashboard == 1);
-    // Resolve display language: user_language_prefs (SQLite) > factory_code mapping > 'zh-TW'
-    const dbSqlite = require('../database').db;
-    const langPref = dbSqlite.prepare('SELECT language_code FROM user_language_prefs WHERE user_id=?').get(String(user.id));
-    let resolvedLanguage = langPref?.language_code || null;
+    // Resolve display language: USERS.preferred_language > factory_languages (Oracle) > 'zh-TW'
+    let resolvedLanguage = user.preferred_language || null;
     if (!resolvedLanguage && user.factory_code) {
-      const fl = dbSqlite.prepare('SELECT language_code FROM factory_languages WHERE factory_code=?').get(user.factory_code);
+      const fl = await db.prepare('SELECT language_code FROM factory_languages WHERE factory_code=?').get(user.factory_code);
       if (fl) resolvedLanguage = fl.language_code;
     }
     userWithoutPassword.resolved_language = resolvedLanguage || 'zh-TW';
@@ -429,14 +427,8 @@ router.put('/language', (req, res, next) => {
   const { language_code } = req.body;
   if (!['zh-TW', 'en', 'vi'].includes(language_code)) return res.status(400).json({ error: '不支援的語言碼' });
   try {
-    const db = require('../database').db;
-    const uid = String(req.user.id);
-    const existing = db.prepare('SELECT user_id FROM user_language_prefs WHERE user_id=?').get(uid);
-    if (existing) {
-      db.prepare("UPDATE user_language_prefs SET language_code=?, updated_at=datetime('now') WHERE user_id=?").run(language_code, uid);
-    } else {
-      db.prepare('INSERT INTO user_language_prefs (user_id, language_code) VALUES (?,?)').run(uid, language_code);
-    }
+    const db = require('../database-oracle').db;
+    await db.prepare('UPDATE users SET preferred_language=? WHERE id=?').run(language_code, req.user.id);
     res.json({ ok: true, language_code });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
