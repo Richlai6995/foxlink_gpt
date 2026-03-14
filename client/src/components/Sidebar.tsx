@@ -131,6 +131,12 @@ export default function Sidebar({
   const currentModelInfo = llmModels.find((m) => m.key === model)
   const groups = groupSessions(sessions, t)
 
+  const sessionTitle = (s: ChatSession) => {
+    if (i18n.language === 'en') return s.title_en || s.title
+    if (i18n.language === 'vi') return s.title_vi || s.title
+    return s.title_zh || s.title
+  }
+
   return (
     <div className="w-72 bg-slate-900 flex flex-col h-full border-r border-slate-800">
       {/* Header */}
@@ -215,7 +221,7 @@ export default function Sidebar({
                 >
                   <div className="flex items-center gap-2 px-3 py-2">
                     <MessageSquare size={14} className="flex-shrink-0 opacity-60" />
-                    <span className="text-xs truncate flex-1">{s.title || t('sidebar.newSession')}</span>
+                    <span className="text-xs truncate flex-1">{sessionTitle(s) || t('sidebar.newSession')}</span>
                     {hoveredId === s.id && (
                       <button
                         onClick={(e) => {

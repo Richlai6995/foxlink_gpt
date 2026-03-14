@@ -430,29 +430,38 @@ async function generateWithImage(apiModel, history, userParts) {
  * Generate a short semantic title for a chat session
  */
 async function generateTitle(userMessage, aiResponse) {
+  const fallback = userMessage.trim().slice(0, 30);
   try {
     const model = genAI.getGenerativeModel({ model: MODEL_FLASH });
+    const prompt =
+      `Based on the conversation below, generate a concise title in THREE languages.\n` +
+      `Reply ONLY with valid JSON — no markdown, no extra text:\n` +
+      `{"zh":"繁體中文標題（10字以內）","en":"English title (max 8 words)","vi":"tiêu đề tiếng Việt (tối đa 10 từ)"}\n\n` +
+      `User: ${userMessage.slice(0, 300)}\nAI: ${aiResponse.slice(0, 300)}`;
+    const result = await model.generateContent(prompt);
+    const raw = result.response.text().trim();
+    const usage = result.response.usageMetadata || {};
+    // Parse JSON — strip any accidental markdown fences
+    const jsonStr = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
+    let parsed;
+    try { parsed = JSON.parse(jsonStr); } catch (_) { parsed = {}; }
+    const clean = (s) => (s || '').replace(/^["「『]|["」』]$/g, '').slice(0, 50) || fallback;
+    const title_zh = clean(parsed.zh);
+    const title_en = clean(parsed.en);
+    const title_vi = clean(parsed.vi);
+    // Detect content language for the primary `title` field (used as fallback)
     const isZh = /[\u4e00-\u9fff\u3400-\u4dbf]/.test(userMessage);
     const isVi = !isZh && /[àáâãèéêìíòóôõùúýăđơư]/i.test(userMessage);
-    let prompt;
-    if (isZh) {
-      prompt = `根據以下對話內容，產生一個簡短的繁體中文標題（10字以內，不加引號、冒號或標點符號）：\n使用者: ${userMessage.slice(0, 300)}\nAI: ${aiResponse.slice(0, 300)}`;
-    } else if (isVi) {
-      prompt = `Dựa trên nội dung sau, tạo tiêu đề ngắn tiếng Việt (tối đa 10 từ, không dùng dấu ngoặc hay dấu câu):\nNgười dùng: ${userMessage.slice(0, 300)}\nAI: ${aiResponse.slice(0, 300)}`;
-    } else {
-      prompt = `Based on this conversation, generate a short English title (max 8 words, no quotes or punctuation):\nUser: ${userMessage.slice(0, 300)}\nAI: ${aiResponse.slice(0, 300)}`;
-    }
-    const result = await model.generateContent(prompt);
-    const title = result.response.text().trim().replace(/^["「『]|["」』]$/g, '').slice(0, 50);
-    const usage = result.response.usageMetadata || {};
+    const title = isZh ? title_zh : isVi ? title_vi : title_en;
     return {
-      title: title || userMessage.trim().slice(0, 30),
+      title, title_zh, title_en, title_vi,
       inputTokens: usage.promptTokenCount || 0,
       outputTokens: usage.candidatesTokenCount || 0,
       model: MODEL_FLASH,
     };
   } catch (e) {
-    return { title: userMessage.trim().slice(0, 30), inputTokens: 0, outputTokens: 0, model: MODEL_FLASH };
+    return { title: fallback, title_zh: fallback, title_en: fallback, title_vi: fallback,
+             inputTokens: 0, outputTokens: 0, model: MODEL_FLASH };
   }
 }
 

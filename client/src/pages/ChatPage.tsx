@@ -539,7 +539,13 @@ export default function ChatPage() {
               } else if (event.type === 'status') {
                 setStreamingStatus(event.message || '')
               } else if (event.type === 'title') {
-                setSessions((prev) => prev.map((s) => s.id === sessionId ? { ...s, title: event.title } : s))
+                setSessions((prev) => prev.map((s) => s.id === sessionId ? {
+                  ...s,
+                  title:    event.title    || s.title,
+                  title_zh: event.title_zh || s.title_zh,
+                  title_en: event.title_en || s.title_en,
+                  title_vi: event.title_vi || s.title_vi,
+                } : s))
               } else if (event.type === 'generated_files') {
                 generatedFiles.push(...event.files)
               } else if (event.type === 'error') {

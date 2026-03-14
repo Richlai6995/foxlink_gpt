@@ -518,7 +518,7 @@ router.get('/sessions', async (req, res) => {
     const db = require('../database-oracle').db;
     const sessions = await db
       .prepare(
-        `SELECT id, title, model, created_at, updated_at
+        `SELECT id, title, title_zh, title_en, title_vi, model, created_at, updated_at
          FROM chat_sessions
          WHERE user_id = ? AND (source IS NULL OR source != 'scheduled')
            AND EXISTS (SELECT 1 FROM chat_messages WHERE session_id = chat_sessions.id)
@@ -1617,9 +1617,13 @@ router.post('/sessions/:id/messages', upload.array('files', 10), async (req, res
       console.log(`[Chat] Title event sent: "${quickTitle}" for session ${sessionId}`);
 
       // 2. Fire-and-forget: refine with LLM semantic title (no await, won't block done event)
-      generateTitle(combinedUserText, text).then(async ({ title: llmTitle, inputTokens: tIn, outputTokens: tOut, model: tModel }) => {
-        if (llmTitle && llmTitle !== quickTitle) {
-          await db.prepare(`UPDATE chat_sessions SET title=? WHERE id=?`).run(llmTitle, sessionId);
+      generateTitle(combinedUserText, text).then(async ({ title: llmTitle, title_zh, title_en, title_vi, inputTokens: tIn, outputTokens: tOut, model: tModel }) => {
+        if (llmTitle) {
+          await db.prepare(
+            `UPDATE chat_sessions SET title=?, title_zh=?, title_en=?, title_vi=? WHERE id=?`
+          ).run(llmTitle, title_zh || llmTitle, title_en || llmTitle, title_vi || llmTitle, sessionId);
+          // Push updated multilingual titles to client via a title event (if SSE still open)
+          try { sendEvent({ type: 'title', title: llmTitle, title_zh, title_en, title_vi }); } catch (_) {}
         }
         if (tIn || tOut) {
           const tday = new Date().toISOString().split('T')[0];

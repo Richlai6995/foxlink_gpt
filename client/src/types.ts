@@ -23,6 +23,9 @@ export interface AuthState {
 export interface ChatSession {
   id: string
   title: string
+  title_zh?: string
+  title_en?: string
+  title_vi?: string
   model: ModelType
   created_at: string
   updated_at: string

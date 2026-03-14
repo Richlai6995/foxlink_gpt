@@ -346,6 +346,11 @@ async function runMigrations(db) {
   await addCol('KNOWLEDGE_BASES', 'PARSE_MODE',         "VARCHAR2(20) DEFAULT 'text_only'");
   await addCol('KB_DOCUMENTS',    'PARSE_MODE',         "VARCHAR2(20)");
 
+  // ── Chat session multilingual titles ───────────────────────────────────────
+  await addCol('CHAT_SESSIONS', 'TITLE_ZH', 'VARCHAR2(200)');
+  await addCol('CHAT_SESSIONS', 'TITLE_EN', 'VARCHAR2(200)');
+  await addCol('CHAT_SESSIONS', 'TITLE_VI', 'VARCHAR2(200)');
+
   // ── Deep Research ──────────────────────────────────────────────────────────
   await addCol('USERS',  'CAN_DEEP_RESEARCH', 'NUMBER(1)');
   await addCol('ROLES',  'CAN_DEEP_RESEARCH', 'NUMBER(1) DEFAULT 1');
