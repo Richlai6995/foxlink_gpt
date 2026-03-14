@@ -4,6 +4,7 @@ import {
   ArrowLeft, Plus, BookOpen, Cpu, Trash2, Search, FileText,
   Lock, Globe, Clock, ChevronRight, AlertCircle, Layers,
 } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import api from '../lib/api'
 import { useAuth } from '../context/AuthContext'
 import TranslationFields, { type TranslationData } from '../components/common/TranslationFields'
@@ -57,6 +58,7 @@ function formatBytes(bytes: number) {
 export default function KnowledgeBasePage() {
   const { user, isAdmin } = useAuth()
   const navigate = useNavigate()
+  const { t } = useTranslation()
   const canCreate = isAdmin || (user as any)?.effective_can_create_kb === true
 
   const [kbs, setKbs] = useState<KnowledgeBase[]>([])
@@ -76,7 +78,7 @@ export default function KnowledgeBasePage() {
       const res = await api.get('/kb')
       setKbs(Array.isArray(res.data) ? res.data : [])
     } catch (e: any) {
-      setError(e.response?.data?.error || '載入失敗')
+      setError(e.response?.data?.error || t('kb.loadFailed'))
     } finally {
       setLoading(false)
     }
@@ -94,7 +96,7 @@ export default function KnowledgeBasePage() {
   }, [])
 
   const handleCreate = async () => {
-    if (!form.name.trim()) { setError('請輸入知識庫名稱'); return }
+    if (!form.name.trim()) { setError(t('kb.createModal.nameRequired')); return }
     setCreating(true); setTranslating(true); setError('')
     try {
       const res = await api.post('/kb', { ...form, ...trans })
@@ -103,7 +105,7 @@ export default function KnowledgeBasePage() {
       setTrans({})
       navigate(`/kb/${res.data.id}`)
     } catch (e: any) {
-      setError(e.response?.data?.error || '建立失敗')
+      setError(e.response?.data?.error || t('kb.createFailed'))
     } finally {
       setCreating(false)
       setTranslating(false)
@@ -112,12 +114,12 @@ export default function KnowledgeBasePage() {
 
   const handleDelete = async (kb: KnowledgeBase, e: React.MouseEvent) => {
     e.stopPropagation()
-    if (!confirm(`確定刪除知識庫「${kb.name}」？所有文件與向量資料將一併刪除。`)) return
+    if (!confirm(t('kb.deleteConfirm', { name: kb.name }))) return
     try {
       await api.delete(`/kb/${kb.id}`)
       setKbs((prev) => prev.filter((k) => k.id !== kb.id))
     } catch (e: any) {
-      alert(e.response?.data?.error || '刪除失敗')
+      alert(e.response?.data?.error || t('kb.deleteFailed'))
     }
   }
 
@@ -131,10 +133,10 @@ export default function KnowledgeBasePage() {
 
   const statusBadge = (kb: KnowledgeBase) => {
     if (kb.is_public === 1 || kb.public_status === 'public')
-      return <span className="flex items-center gap-1 text-xs px-1.5 py-0.5 bg-green-100 text-green-700 rounded-full"><Globe size={10} />公開</span>
+      return <span className="flex items-center gap-1 text-xs px-1.5 py-0.5 bg-green-100 text-green-700 rounded-full"><Globe size={10} />{t('kb.statusPublic')}</span>
     if (kb.public_status === 'pending')
-      return <span className="flex items-center gap-1 text-xs px-1.5 py-0.5 bg-yellow-100 text-yellow-700 rounded-full"><Clock size={10} />審核中</span>
-    return <span className="flex items-center gap-1 text-xs px-1.5 py-0.5 bg-slate-100 text-slate-500 rounded-full"><Lock size={10} />私有</span>
+      return <span className="flex items-center gap-1 text-xs px-1.5 py-0.5 bg-yellow-100 text-yellow-700 rounded-full"><Clock size={10} />{t('kb.statusPending')}</span>
+    return <span className="flex items-center gap-1 text-xs px-1.5 py-0.5 bg-slate-100 text-slate-500 rounded-full"><Lock size={10} />{t('kb.statusPrivate')}</span>
   }
 
   return (
@@ -146,10 +148,10 @@ export default function KnowledgeBasePage() {
             <Cpu size={14} className="text-white" />
           </div>
           <span className="font-bold">FOXLINK GPT</span>
-          <span className="text-slate-500 text-sm">/ 知識庫</span>
+          <span className="text-slate-500 text-sm">/ {t('kb.pageTitle')}</span>
         </div>
         <button onClick={() => navigate('/chat')} className="flex items-center gap-1.5 text-slate-400 hover:text-white text-sm transition">
-          <ArrowLeft size={15} /> 返回聊天
+          <ArrowLeft size={15} /> {t('kb.backToChat')}
         </button>
       </header>
 
@@ -161,7 +163,7 @@ export default function KnowledgeBasePage() {
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="搜尋知識庫..."
+              placeholder={t('kb.searchPlaceholder')}
               className="w-full pl-9 pr-3 py-2 bg-white border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>
@@ -170,7 +172,7 @@ export default function KnowledgeBasePage() {
               onClick={() => { setShowCreate(true); setError(''); setForm(emptyForm()) }}
               className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 transition whitespace-nowrap"
             >
-              <Plus size={14} /> 建立知識庫
+              <Plus size={14} /> {t('kb.createKb')}
             </button>
           )}
         </div>
@@ -182,19 +184,19 @@ export default function KnowledgeBasePage() {
         )}
 
         {loading ? (
-          <div className="text-center py-16 text-slate-400 text-sm">載入中...</div>
+          <div className="text-center py-16 text-slate-400 text-sm">{t('kb.loading')}</div>
         ) : filtered.length === 0 ? (
           <div className="text-center py-20 border-2 border-dashed border-slate-200 rounded-xl">
             <BookOpen size={36} className="mx-auto mb-3 text-slate-300" />
             <p className="text-slate-400 text-sm">
-              {search ? '找不到符合的知識庫' : canCreate ? '尚無知識庫，點擊「建立知識庫」開始' : '目前沒有可存取的知識庫'}
+              {search ? t('kb.noKbMatch') : canCreate ? t('kb.noKbCanCreate') : t('kb.noKbNoAccess')}
             </p>
           </div>
         ) : (
           <>
             {myKbs.length > 0 && (
               <section>
-                <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">我的知識庫</h2>
+                <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">{t('kb.myKbs')}</h2>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   {myKbs.map((kb) => <KbCard key={kb.id} kb={kb} onDelete={handleDelete} statusBadge={statusBadge(kb)} onClick={() => navigate(`/kb/${kb.id}`)} />)}
                 </div>
@@ -202,7 +204,7 @@ export default function KnowledgeBasePage() {
             )}
             {sharedKbs.length > 0 && (
               <section>
-                <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">共享給我</h2>
+                <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">{t('kb.sharedKbs')}</h2>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   {sharedKbs.map((kb) => <KbCard key={kb.id} kb={kb} onDelete={handleDelete} statusBadge={statusBadge(kb)} onClick={() => navigate(`/kb/${kb.id}`)} />)}
                 </div>
@@ -216,25 +218,25 @@ export default function KnowledgeBasePage() {
       {showCreate && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6 space-y-4">
-            <h2 className="text-base font-semibold text-slate-800">建立知識庫</h2>
+            <h2 className="text-base font-semibold text-slate-800">{t('kb.createModal.title')}</h2>
 
             <div>
-              <label className="block text-xs font-medium text-slate-600 mb-1">名稱 *</label>
+              <label className="block text-xs font-medium text-slate-600 mb-1">{t('kb.createModal.nameLabel')}</label>
               <input
                 value={form.name}
                 onChange={(e) => setForm({ ...form, name: e.target.value })}
-                placeholder="例：產品技術手冊"
+                placeholder={t('kb.createModal.namePlaceholder')}
                 className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
 
             <div>
-              <label className="block text-xs font-medium text-slate-600 mb-1">描述（選填）</label>
+              <label className="block text-xs font-medium text-slate-600 mb-1">{t('kb.createModal.descLabel')}</label>
               <textarea
                 value={form.description}
                 onChange={(e) => setForm({ ...form, description: e.target.value })}
                 rows={2}
-                placeholder="說明此知識庫的用途與內容範疇"
+                placeholder={t('kb.createModal.descPlaceholder')}
                 className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
               />
             </div>
@@ -248,37 +250,37 @@ export default function KnowledgeBasePage() {
 
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="block text-xs font-medium text-slate-600 mb-1">Embedding 維度</label>
+                <label className="block text-xs font-medium text-slate-600 mb-1">{t('kb.createModal.embeddingDims')}</label>
                 <select
                   value={form.embedding_dims}
                   onChange={(e) => setForm({ ...form, embedding_dims: Number(e.target.value) })}
                   className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
-                  <option value={768}>768（標準）</option>
-                  <option value={1536}>1536（高精度）</option>
-                  <option value={3072}>3072（最高精度）</option>
+                  <option value={768}>{t('kb.createModal.dims768')}</option>
+                  <option value={1536}>{t('kb.createModal.dims1536')}</option>
+                  <option value={3072}>{t('kb.createModal.dims3072')}</option>
                 </select>
               </div>
               <div>
-                <label className="block text-xs font-medium text-slate-600 mb-1">分塊策略</label>
+                <label className="block text-xs font-medium text-slate-600 mb-1">{t('kb.createModal.chunkStrategy')}</label>
                 <select
                   value={form.chunk_strategy}
                   onChange={(e) => setForm({ ...form, chunk_strategy: e.target.value })}
                   className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
-                  <option value="regular">常規分段</option>
-                  <option value="parent_child">父子分塊</option>
+                  <option value="regular">{t('kb.createModal.strategyRegular')}</option>
+                  <option value="parent_child">{t('kb.createModal.strategyParentChild')}</option>
                 </select>
               </div>
             </div>
 
             <div>
-              <label className="block text-xs font-medium text-slate-600 mb-1">檢索模式</label>
+              <label className="block text-xs font-medium text-slate-600 mb-1">{t('kb.createModal.retrievalMode')}</label>
               <div className="grid grid-cols-3 gap-2">
                 {[
-                  { val: 'vector',   label: '向量檢索',   desc: '語意相似度' },
-                  { val: 'fulltext', label: '全文檢索',   desc: '關鍵字比對' },
-                  { val: 'hybrid',   label: '混合檢索',   desc: '兩者結合' },
+                  { val: 'vector',   label: t('kb.createModal.modeVector'),   desc: t('kb.createModal.modeVectorDesc') },
+                  { val: 'fulltext', label: t('kb.createModal.modeFulltext'), desc: t('kb.createModal.modeFulltextDesc') },
+                  { val: 'hybrid',   label: t('kb.createModal.modeHybrid'),   desc: t('kb.createModal.modeHybridDesc') },
                 ].map((opt) => (
                   <label key={opt.val} className={`cursor-pointer border rounded-lg p-2 text-center transition ${form.retrieval_mode === opt.val ? 'border-blue-500 bg-blue-50' : 'border-slate-200 hover:border-slate-300'}`}>
                     <input type="radio" className="sr-only" value={opt.val} checked={form.retrieval_mode === opt.val} onChange={() => setForm({ ...form, retrieval_mode: opt.val })} />
@@ -291,47 +293,47 @@ export default function KnowledgeBasePage() {
 
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="block text-xs font-medium text-slate-600 mb-1">圖片/PDF OCR 模型</label>
+                <label className="block text-xs font-medium text-slate-600 mb-1">{t('kb.createModal.ocrModel')}</label>
                 <select
                   value={form.ocr_model}
                   onChange={(e) => setForm({ ...form, ocr_model: e.target.value })}
                   className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
-                  <option value="">使用系統預設</option>
+                  <option value="">{t('kb.createModal.ocrModelDefault')}</option>
                   {llmModels.map((m) => (
                     <option key={m.key} value={m.api_model}>{m.name} ({m.api_model})</option>
                   ))}
                 </select>
               </div>
               <div>
-                <label className="block text-xs font-medium text-slate-600 mb-1">格式解析模式</label>
+                <label className="block text-xs font-medium text-slate-600 mb-1">{t('kb.createModal.parseMode')}</label>
                 <select
                   value={form.parse_mode}
                   onChange={(e) => setForm({ ...form, parse_mode: e.target.value })}
                   className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
-                  <option value="text_only">純文字</option>
-                  <option value="format_aware">格式感知</option>
+                  <option value="text_only">{t('kb.createModal.parseModeTextOnly')}</option>
+                  <option value="format_aware">{t('kb.createModal.parseModeFormatAware')}</option>
                 </select>
               </div>
             </div>
 
             <div className="bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 text-xs text-blue-600">
-              💡 維度設定建立後無法更改。768 維適合大多數情況；若需更高語意精確度請選 1536 或 3072（需模型支援）。
+              {t('kb.createModal.dimHint')}
             </div>
 
             {error && <p className="text-red-500 text-sm">{error}</p>}
 
             <div className="flex justify-end gap-2 pt-1">
               <button onClick={() => setShowCreate(false)} className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-lg transition">
-                取消
+                {t('kb.createModal.cancel')}
               </button>
               <button
                 onClick={handleCreate}
                 disabled={creating}
                 className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition disabled:opacity-50"
               >
-                {creating ? '建立中...' : '建立'}
+                {creating ? t('kb.createModal.creating') : t('kb.createModal.create')}
               </button>
             </div>
           </div>
@@ -349,6 +351,7 @@ function KbCard({
   statusBadge: React.ReactNode
   onClick: () => void
 }) {
+  const { t } = useTranslation()
   return (
     <div
       onClick={onClick}
@@ -383,8 +386,8 @@ function KbCard({
       )}
 
       <div className="flex items-center gap-3 text-xs text-slate-400 mt-2">
-        <span className="flex items-center gap-1"><FileText size={11} />{kb.doc_count} 文件</span>
-        <span className="flex items-center gap-1"><Layers size={11} />{kb.chunk_count} 分塊</span>
+        <span className="flex items-center gap-1"><FileText size={11} />{t('kb.docCount', { count: kb.doc_count })}</span>
+        <span className="flex items-center gap-1"><Layers size={11} />{t('kb.chunkCount', { count: kb.chunk_count })}</span>
         <span>{formatBytes(kb.total_size_bytes)}</span>
         <span className="ml-auto bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded-full">{kb.embedding_dims}d</span>
       </div>

@@ -6,6 +6,7 @@ import {
   AlertCircle, Globe, Lock, ChevronDown, ChevronUp, Plus, X,
   User, Building2, Layers, BookOpen, Save, Target, Image, History,
 } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import api from '../lib/api'
 import { useAuth } from '../context/AuthContext'
 import TranslationFields, { type TranslationData } from '../components/common/TranslationFields'
@@ -50,8 +51,9 @@ interface Grant {
 
 interface OrgOption { code?: string; name: string }
 
-const TABS = ['文件', '分塊與檢索設定', '共享設定', '召回測試', '呼叫歷史'] as const
-type TabName = typeof TABS[number]
+type TabKey = 'docs' | 'settings' | 'share' | 'search' | 'history'
+
+const TAB_KEYS: TabKey[] = ['docs', 'settings', 'share', 'search', 'history']
 
 function DocIcon({ type }: { type: string }) {
   const t = (type || '').toLowerCase()
@@ -75,10 +77,11 @@ export default function KnowledgeBaseDetailPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const { isAdmin } = useAuth()
+  const { t } = useTranslation()
 
   const [kb, setKb] = useState<KnowledgeBase | null>(null)
   const [loading, setLoading] = useState(true)
-  const [tab, setTab] = useState<TabName>('文件')
+  const [tab, setTab] = useState<TabKey>('docs')
   const [error, setError] = useState('')
   const [kbTrans, setKbTrans] = useState<TranslationData>({})
   const [savingTrans, setSavingTrans] = useState(false)
@@ -93,7 +96,7 @@ export default function KnowledgeBaseDetailPage() {
         desc_zh: (res.data as any).desc_zh || null, desc_en: (res.data as any).desc_en || null, desc_vi: (res.data as any).desc_vi || null,
       })
     } catch (e: any) {
-      setError(e.response?.data?.error || '載入失敗')
+      setError(e.response?.data?.error || t('kb.loadFailed'))
     } finally {
       setLoading(false)
     }
@@ -106,22 +109,32 @@ export default function KnowledgeBaseDetailPage() {
     setSavingTrans(true)
     try {
       await api.put(`/kb/${kb.id}`, kbTrans)
-      setTransMsg('✓ 已儲存')
+      setTransMsg(t('kb.detail.savedOk'))
       setTimeout(() => setTransMsg(''), 2000)
     } catch (e: any) {
-      setTransMsg(e.response?.data?.error || '儲存失敗')
+      setTransMsg(e.response?.data?.error || t('kb.detail.saveFailed'))
     } finally { setSavingTrans(false) }
   }
 
+  const tabLabel = (key: TabKey) => {
+    switch (key) {
+      case 'docs':     return t('kb.detail.tabDocs')
+      case 'settings': return t('kb.detail.tabSettings')
+      case 'share':    return t('kb.detail.tabShare')
+      case 'search':   return t('kb.detail.tabSearch')
+      case 'history':  return t('kb.detail.tabHistory')
+    }
+  }
+
   if (loading) return (
-    <div className="min-h-screen bg-slate-100 flex items-center justify-center text-slate-400">載入中...</div>
+    <div className="min-h-screen bg-slate-100 flex items-center justify-center text-slate-400">{t('kb.loading')}</div>
   )
   if (error || !kb) return (
     <div className="min-h-screen bg-slate-100 flex items-center justify-center">
       <div className="text-center">
         <AlertCircle size={32} className="mx-auto mb-3 text-red-400" />
-        <p className="text-slate-600">{error || '知識庫不存在'}</p>
-        <button onClick={() => navigate('/kb')} className="mt-4 text-blue-600 text-sm hover:underline">返回列表</button>
+        <p className="text-slate-600">{error || t('kb.detail.notFound')}</p>
+        <button onClick={() => navigate('/kb')} className="mt-4 text-blue-600 text-sm hover:underline">{t('kb.detail.backToList')}</button>
       </div>
     </div>
   )
@@ -135,11 +148,11 @@ export default function KnowledgeBaseDetailPage() {
             <Cpu size={14} className="text-white" />
           </div>
           <span className="font-bold">FOXLINK GPT</span>
-          <span className="text-slate-500 text-sm">/ 知識庫 /</span>
+          <span className="text-slate-500 text-sm">/ {t('kb.detail.breadcrumbKb')} /</span>
           <span className="text-white text-sm">{kb.name}</span>
         </div>
         <button onClick={() => navigate('/kb')} className="flex items-center gap-1.5 text-slate-400 hover:text-white text-sm transition">
-          <ArrowLeft size={15} /> 返回
+          <ArrowLeft size={15} /> {t('kb.detail.back')}
         </button>
       </header>
 
@@ -154,15 +167,15 @@ export default function KnowledgeBaseDetailPage() {
             {kb.description && <div className="text-sm text-slate-500 truncate">{kb.description}</div>}
           </div>
           <div className="hidden md:flex items-center gap-4 text-xs text-slate-500">
-            <span><span className="font-medium text-slate-700">{kb.doc_count}</span> 文件</span>
-            <span><span className="font-medium text-slate-700">{kb.chunk_count}</span> 分塊</span>
+            <span><span className="font-medium text-slate-700">{kb.doc_count}</span> {t('kb.detail.docCountLabel')}</span>
+            <span><span className="font-medium text-slate-700">{kb.chunk_count}</span> {t('kb.detail.chunkCountLabel')}</span>
             <span><span className="font-medium text-slate-700">{formatBytes(kb.total_size_bytes)}</span></span>
             <span className="bg-slate-100 px-2 py-0.5 rounded-full">{kb.embedding_dims}d · {kb.chunk_strategy}</span>
             {kb.is_public === 1 || kb.public_status === 'public'
-              ? <span className="flex items-center gap-1 bg-green-100 text-green-700 px-2 py-0.5 rounded-full"><Globe size={10} />公開</span>
+              ? <span className="flex items-center gap-1 bg-green-100 text-green-700 px-2 py-0.5 rounded-full"><Globe size={10} />{t('kb.statusPublic')}</span>
               : kb.public_status === 'pending'
-              ? <span className="flex items-center gap-1 bg-yellow-100 text-yellow-700 px-2 py-0.5 rounded-full"><Clock size={10} />審核中</span>
-              : <span className="flex items-center gap-1 bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full"><Lock size={10} />私有</span>
+              ? <span className="flex items-center gap-1 bg-yellow-100 text-yellow-700 px-2 py-0.5 rounded-full"><Clock size={10} />{t('kb.statusPending')}</span>
+              : <span className="flex items-center gap-1 bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full"><Lock size={10} />{t('kb.statusPrivate')}</span>
             }
           </div>
         </div>
@@ -182,40 +195,40 @@ export default function KnowledgeBaseDetailPage() {
                 disabled={savingTrans}
                 className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white text-xs rounded-lg hover:bg-blue-700 transition disabled:opacity-50"
               >
-                <Save size={12} /> {savingTrans ? '儲存中...' : '儲存多語言名稱'}
+                <Save size={12} /> {savingTrans ? t('kb.detail.savingTranslation') : t('kb.detail.saveTranslation')}
               </button>
-              {transMsg && <span className={`text-xs ${transMsg.includes('失敗') ? 'text-red-500' : 'text-green-600'}`}>{transMsg}</span>}
+              {transMsg && <span className={`text-xs ${transMsg.toLowerCase().includes('fail') || transMsg.includes('失') ? 'text-red-500' : 'text-green-600'}`}>{transMsg}</span>}
             </div>
           )}
         </div>
 
         {/* Tabs */}
         <div className="flex gap-1 border-b border-slate-200 bg-white rounded-t-xl px-4">
-          {TABS.map((t) => (
+          {TAB_KEYS.map((key) => (
             <button
-              key={t}
-              onClick={() => setTab(t)}
+              key={key}
+              onClick={() => setTab(key)}
               className={`px-4 py-3 text-sm font-medium border-b-2 transition -mb-px ${
-                tab === t ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-700'
+                tab === key ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-700'
               }`}
             >
-              {t === '文件' && <FileText size={14} className="inline mr-1.5" />}
-              {t === '分塊與檢索設定' && <Settings size={14} className="inline mr-1.5" />}
-              {t === '共享設定' && <Share2 size={14} className="inline mr-1.5" />}
-              {t === '召回測試' && <Search size={14} className="inline mr-1.5" />}
-              {t === '呼叫歷史' && <History size={14} className="inline mr-1.5" />}
-              {t}
+              {key === 'docs'     && <FileText  size={14} className="inline mr-1.5" />}
+              {key === 'settings' && <Settings  size={14} className="inline mr-1.5" />}
+              {key === 'share'    && <Share2    size={14} className="inline mr-1.5" />}
+              {key === 'search'   && <Search    size={14} className="inline mr-1.5" />}
+              {key === 'history'  && <History   size={14} className="inline mr-1.5" />}
+              {tabLabel(key)}
             </button>
           ))}
         </div>
 
         {/* Tab content */}
         <div className="bg-white border border-slate-200 rounded-xl -mt-4 rounded-t-none border-t-0">
-          {tab === '文件' && <DocumentsTab kb={kb} onRefresh={loadKb} isOwner={kb.is_owner || isAdmin} />}
-          {tab === '分塊與檢索設定' && <SettingsTab kb={kb} onSaved={loadKb} isOwner={kb.is_owner || isAdmin} />}
-          {tab === '共享設定' && <ShareTab kb={kb} isOwner={kb.is_owner || isAdmin} />}
-          {tab === '召回測試' && <SearchTab kb={kb} />}
-          {tab === '呼叫歷史' && <QueryHistoryTab kbId={kb.id} />}
+          {tab === 'docs'     && <DocumentsTab kb={kb} onRefresh={loadKb} isOwner={kb.is_owner || isAdmin} />}
+          {tab === 'settings' && <SettingsTab  kb={kb} onSaved={loadKb} isOwner={kb.is_owner || isAdmin} />}
+          {tab === 'share'    && <ShareTab     kb={kb} isOwner={kb.is_owner || isAdmin} />}
+          {tab === 'search'   && <SearchTab    kb={kb} />}
+          {tab === 'history'  && <QueryHistoryTab kbId={kb.id} />}
         </div>
       </div>
     </div>
@@ -225,6 +238,7 @@ export default function KnowledgeBaseDetailPage() {
 // ─── Documents Tab ─────────────────────────────────────────────────────────────
 
 function DocumentsTab({ kb, onRefresh, isOwner }: { kb: KnowledgeBase; onRefresh: () => void; isOwner: boolean }) {
+  const { t } = useTranslation()
   const [docs, setDocs] = useState<KbDocument[]>([])
   const [loading, setLoading] = useState(true)
   const [uploading, setUploading] = useState(false)
@@ -250,8 +264,8 @@ function DocumentsTab({ kb, onRefresh, isOwner }: { kb: KnowledgeBase; onRefresh
   useEffect(() => {
     const processing = docs.some((d) => d.status === 'processing')
     if (!processing) return
-    const t = setTimeout(loadDocs, 3000)
-    return () => clearTimeout(t)
+    const timer = setTimeout(loadDocs, 3000)
+    return () => clearTimeout(timer)
   }, [docs, loadDocs])
 
   const loadChunks = async (docId: string, page = 1) => {
@@ -281,7 +295,7 @@ function DocumentsTab({ kb, onRefresh, isOwner }: { kb: KnowledgeBase; onRefresh
       await loadDocs()
       onRefresh()
     } catch (e: any) {
-      alert(e.response?.data?.error || '上傳失敗')
+      alert(e.response?.data?.error || t('kb.docs.uploadFailed'))
     } finally {
       setUploading(false)
       if (fileInputRef.current) fileInputRef.current.value = ''
@@ -289,13 +303,13 @@ function DocumentsTab({ kb, onRefresh, isOwner }: { kb: KnowledgeBase; onRefresh
   }
 
   const handleDelete = async (doc: KbDocument) => {
-    if (!confirm(`確定刪除文件「${doc.filename}」及其所有分塊？`)) return
+    if (!confirm(t('kb.docs.deleteConfirm', { name: doc.filename }))) return
     try {
       await api.delete(`/kb/${kb.id}/documents/${doc.id}`)
       setDocs((p) => p.filter((d) => d.id !== doc.id))
       if (expandedId === doc.id) setExpandedId(null)
       onRefresh()
-    } catch (e: any) { alert(e.response?.data?.error || '刪除失敗') }
+    } catch (e: any) { alert(e.response?.data?.error || t('kb.docs.deleteFailed')) }
   }
 
   const statusIcon = (status: string) => {
@@ -304,21 +318,25 @@ function DocumentsTab({ kb, onRefresh, isOwner }: { kb: KnowledgeBase; onRefresh
     return <RefreshCw size={14} className="text-blue-500 animate-spin" />
   }
 
+  const parseModeLabel = kb.parse_mode === 'format_aware'
+    ? t('kb.docs.parseModeFormatAware')
+    : t('kb.docs.parseModeTextOnly')
+
   return (
     <div className="p-5 space-y-4">
       {isOwner && (
         <div className="space-y-2">
           {/* Per-upload parse mode override */}
           <div className="flex items-center gap-2">
-            <span className="text-xs text-slate-500 whitespace-nowrap">本次上傳格式解析：</span>
+            <span className="text-xs text-slate-500 whitespace-nowrap">{t('kb.docs.uploadParseLabel')}</span>
             <select
               value={uploadParseMode}
               onChange={(e) => setUploadParseMode(e.target.value)}
               className="text-xs border border-slate-200 rounded-lg px-2 py-1 bg-white focus:outline-none focus:ring-1 focus:ring-blue-500"
             >
-              <option value="">依知識庫預設（{kb.parse_mode === 'format_aware' ? '格式感知' : '純文字'}）</option>
-              <option value="text_only">純文字</option>
-              <option value="format_aware">格式感知</option>
+              <option value="">{t('kb.docs.uploadParseDefault', { mode: parseModeLabel })}</option>
+              <option value="text_only">{t('kb.docs.parseModeTextOnly')}</option>
+              <option value="format_aware">{t('kb.docs.parseModeFormatAware')}</option>
             </select>
           </div>
           <div
@@ -336,17 +354,17 @@ function DocumentsTab({ kb, onRefresh, isOwner }: { kb: KnowledgeBase; onRefresh
               onChange={(e) => handleUpload(e.target.files)}
             />
             <Upload size={24} className="mx-auto mb-2 text-slate-400" />
-            <p className="text-sm text-slate-500">拖曳或點擊上傳文件</p>
-            <p className="text-xs text-slate-400 mt-1">支援 PDF · DOCX · PPTX · XLSX · TXT · CSV · JPG · PNG · GIF · WEBP（最大 200 MB）</p>
-            {uploading && <p className="text-xs text-blue-500 mt-2 animate-pulse">上傳中...</p>}
+            <p className="text-sm text-slate-500">{t('kb.docs.dropZoneText')}</p>
+            <p className="text-xs text-slate-400 mt-1">{t('kb.docs.dropZoneHint')}</p>
+            {uploading && <p className="text-xs text-blue-500 mt-2 animate-pulse">{t('kb.docs.uploading')}</p>}
           </div>
         </div>
       )}
 
       {loading ? (
-        <div className="text-center py-8 text-slate-400 text-sm">載入中...</div>
+        <div className="text-center py-8 text-slate-400 text-sm">{t('kb.docs.loading')}</div>
       ) : docs.length === 0 ? (
-        <div className="text-center py-10 text-slate-400 text-sm">尚無文件</div>
+        <div className="text-center py-10 text-slate-400 text-sm">{t('kb.docs.empty')}</div>
       ) : (
         <div className="space-y-2">
           {docs.map((doc) => (
@@ -357,7 +375,7 @@ function DocumentsTab({ kb, onRefresh, isOwner }: { kb: KnowledgeBase; onRefresh
                   <div className="font-medium text-slate-800 text-sm truncate">{doc.filename}</div>
                   <div className="text-xs text-slate-400 flex items-center gap-2">
                     <span>{formatBytes(doc.file_size)}</span>
-                    <span>{doc.chunk_count} 分塊</span>
+                    <span>{doc.chunk_count} {t('kb.docs.chunksSuffix')}</span>
                     <span>{doc.created_at?.slice(0, 10)}</span>
                     {doc.status === 'error' && <span className="text-red-500">{doc.error_msg?.slice(0, 60)}</span>}
                   </div>
@@ -383,9 +401,9 @@ function DocumentsTab({ kb, onRefresh, isOwner }: { kb: KnowledgeBase; onRefresh
               {expandedId === doc.id && (
                 <div className="border-t border-slate-100 bg-slate-50 px-4 py-3">
                   {chunksLoading ? (
-                    <div className="text-xs text-slate-400 text-center py-4">載入分塊中...</div>
+                    <div className="text-xs text-slate-400 text-center py-4">{t('kb.docs.loadingChunks')}</div>
                   ) : chunks.length === 0 ? (
-                    <div className="text-xs text-slate-400 text-center py-4">無分塊資料</div>
+                    <div className="text-xs text-slate-400 text-center py-4">{t('kb.docs.noChunks')}</div>
                   ) : (
                     <>
                       <div className="space-y-2">
@@ -400,7 +418,7 @@ function DocumentsTab({ kb, onRefresh, isOwner }: { kb: KnowledgeBase; onRefresh
                             </div>
                             <p className="text-xs text-slate-600 leading-relaxed whitespace-pre-wrap">{c.content_preview}</p>
                             {c.parent_preview && (
-                              <p className="text-xs text-slate-400 mt-1 border-t border-slate-100 pt-1">父段落: {c.parent_preview}</p>
+                              <p className="text-xs text-slate-400 mt-1 border-t border-slate-100 pt-1">{t('kb.docs.parentChunkLabel')} {c.parent_preview}</p>
                             )}
                           </div>
                         ))}
@@ -411,13 +429,13 @@ function DocumentsTab({ kb, onRefresh, isOwner }: { kb: KnowledgeBase; onRefresh
                             disabled={chunkPage <= 1}
                             onClick={() => loadChunks(doc.id, chunkPage - 1)}
                             className="px-3 py-1 text-xs border border-slate-300 rounded disabled:opacity-40 hover:bg-slate-100"
-                          >上頁</button>
+                          >{t('kb.docs.prevPage')}</button>
                           <span className="text-xs text-slate-400">{chunkPage} / {Math.ceil(chunkTotal / 20)}</span>
                           <button
                             disabled={chunkPage >= Math.ceil(chunkTotal / 20)}
                             onClick={() => loadChunks(doc.id, chunkPage + 1)}
                             className="px-3 py-1 text-xs border border-slate-300 rounded disabled:opacity-40 hover:bg-slate-100"
-                          >下頁</button>
+                          >{t('kb.docs.nextPage')}</button>
                         </div>
                       )}
                     </>
@@ -435,6 +453,7 @@ function DocumentsTab({ kb, onRefresh, isOwner }: { kb: KnowledgeBase; onRefresh
 // ─── Settings Tab ──────────────────────────────────────────────────────────────
 
 function SettingsTab({ kb, onSaved, isOwner }: { kb: KnowledgeBase; onSaved: () => void; isOwner: boolean }) {
+  const { t } = useTranslation()
   const defaultCfg = {
     separator:        '\\n\\n',
     max_size:         1024,
@@ -466,7 +485,6 @@ function SettingsTab({ kb, onSaved, isOwner }: { kb: KnowledgeBase; onSaved: () 
       const all = (res.data as { key: string; name: string; api_model: string; image_output: number; is_active: number; model_role: string | null }[])
         .filter((m) => m.is_active)
       setLlmModels(all)
-      // Set default OCR to flash model if not already set
       const nonImage = all.filter((m) => !m.image_output)
       if (!ocrModel && nonImage.length > 0) {
         const flash = nonImage.find((m) => m.key.includes('flash') || m.name.toLowerCase().includes('flash'))
@@ -493,11 +511,11 @@ function SettingsTab({ kb, onSaved, isOwner }: { kb: KnowledgeBase; onSaved: () 
         ocr_model:        ocrModel || null,
         parse_mode:       parseMode || 'text_only',
       })
-      setMsg('設定已儲存')
+      setMsg(t('kb.settings.savedOk'))
       onSaved()
       setTimeout(() => setMsg(''), 2000)
     } catch (e: any) {
-      setMsg(e.response?.data?.error || '儲存失敗')
+      setMsg(e.response?.data?.error || t('kb.settings.saveFailed'))
     } finally { setSaving(false) }
   }
 
@@ -506,12 +524,12 @@ function SettingsTab({ kb, onSaved, isOwner }: { kb: KnowledgeBase; onSaved: () 
       {/* Chunk Strategy */}
       <div>
         <h3 className="text-sm font-semibold text-slate-700 mb-3 flex items-center gap-2">
-          <Layers size={15} className="text-blue-500" /> 分段設定
+          <Layers size={15} className="text-blue-500" /> {t('kb.settings.chunkSection')}
         </h3>
         <div className="grid grid-cols-2 gap-3 mb-4">
           {[
-            { val: 'regular',      label: '常規',  desc: '高級文本分塊模式，檢索和摘要的規則是相同的' },
-            { val: 'parent_child', label: '父子',  desc: '使用 parent-child 模式，child-chunk 用於檢索，parent-chunk 提供完整上下文' },
+            { val: 'regular',      label: t('kb.settings.strategyRegular'),      desc: t('kb.settings.strategyRegularDesc') },
+            { val: 'parent_child', label: t('kb.settings.strategyParentChild'),  desc: t('kb.settings.strategyParentChildDesc') },
           ].map((opt) => (
             <label key={opt.val} className={`cursor-pointer border rounded-xl p-3 transition ${!isOwner ? 'opacity-60 cursor-not-allowed' : ''} ${strategy === opt.val ? 'border-blue-500 bg-blue-50' : 'border-slate-200 hover:border-slate-300'}`}>
               <input type="radio" className="sr-only" value={opt.val} checked={strategy === opt.val} disabled={!isOwner} onChange={() => setStrategy(opt.val)} />
@@ -525,19 +543,19 @@ function SettingsTab({ kb, onSaved, isOwner }: { kb: KnowledgeBase; onSaved: () 
           <div className="border border-slate-200 rounded-xl p-4 space-y-3">
             <div className="grid grid-cols-3 gap-3">
               <div>
-                <label className="block text-xs font-medium text-slate-600 mb-1">分段識別符號</label>
+                <label className="block text-xs font-medium text-slate-600 mb-1">{t('kb.settings.separatorLabel')}</label>
                 <input value={String(cfg.separator ?? '\\n\\n')} disabled={!isOwner}
                   onChange={(e) => setCfgField('separator', e.target.value)}
                   className="w-full border border-slate-300 rounded-lg px-2.5 py-1.5 text-sm font-mono disabled:bg-slate-50" />
               </div>
               <div>
-                <label className="block text-xs font-medium text-slate-600 mb-1">分段最大長度（chars）</label>
+                <label className="block text-xs font-medium text-slate-600 mb-1">{t('kb.settings.maxSizeLabel')}</label>
                 <input type="number" value={Number(cfg.max_size ?? 1024)} disabled={!isOwner} min={100} max={4096}
                   onChange={(e) => setCfgField('max_size', Number(e.target.value))}
                   className="w-full border border-slate-300 rounded-lg px-2.5 py-1.5 text-sm disabled:bg-slate-50" />
               </div>
               <div>
-                <label className="block text-xs font-medium text-slate-600 mb-1">分段重疊長度（chars）</label>
+                <label className="block text-xs font-medium text-slate-600 mb-1">{t('kb.settings.overlapLabel')}</label>
                 <input type="number" value={Number(cfg.overlap ?? 50)} disabled={!isOwner} min={0} max={500}
                   onChange={(e) => setCfgField('overlap', Number(e.target.value))}
                   className="w-full border border-slate-300 rounded-lg px-2.5 py-1.5 text-sm disabled:bg-slate-50" />
@@ -545,22 +563,22 @@ function SettingsTab({ kb, onSaved, isOwner }: { kb: KnowledgeBase; onSaved: () 
             </div>
             <label className="flex items-center gap-2 text-sm text-slate-600 cursor-pointer">
               <input type="checkbox" disabled={!isOwner} checked={Boolean(cfg.remove_urls)} onChange={(e) => setCfgField('remove_urls', e.target.checked)} />
-              刪除所有 URL 和電子郵件地址
+              {t('kb.settings.removeUrls')}
             </label>
           </div>
         ) : (
           <div className="border border-slate-200 rounded-xl p-4 space-y-4">
             <div>
-              <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">父段落（背景）</div>
+              <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">{t('kb.settings.parentChunkSection')}</div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-medium text-slate-600 mb-1">分段識別符號</label>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">{t('kb.settings.separatorLabel')}</label>
                   <input value={String(cfg.parent_separator ?? '\\n\\n')} disabled={!isOwner}
                     onChange={(e) => setCfgField('parent_separator', e.target.value)}
                     className="w-full border border-slate-300 rounded-lg px-2.5 py-1.5 text-sm font-mono disabled:bg-slate-50" />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-slate-600 mb-1">分段最大長度（chars）</label>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">{t('kb.settings.maxSizeLabel')}</label>
                   <input type="number" value={Number(cfg.parent_max_size ?? 1024)} disabled={!isOwner} min={100} max={8192}
                     onChange={(e) => setCfgField('parent_max_size', Number(e.target.value))}
                     className="w-full border border-slate-300 rounded-lg px-2.5 py-1.5 text-sm disabled:bg-slate-50" />
@@ -568,16 +586,16 @@ function SettingsTab({ kb, onSaved, isOwner }: { kb: KnowledgeBase; onSaved: () 
               </div>
             </div>
             <div>
-              <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">用於檢索的 Child-chunk</div>
+              <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">{t('kb.settings.childChunkSection')}</div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-medium text-slate-600 mb-1">分段識別符號</label>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">{t('kb.settings.separatorLabel')}</label>
                   <input value={String(cfg.child_separator ?? '\\n')} disabled={!isOwner}
                     onChange={(e) => setCfgField('child_separator', e.target.value)}
                     className="w-full border border-slate-300 rounded-lg px-2.5 py-1.5 text-sm font-mono disabled:bg-slate-50" />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-slate-600 mb-1">分段最大長度（chars）</label>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">{t('kb.settings.maxSizeLabel')}</label>
                   <input type="number" value={Number(cfg.child_max_size ?? 512)} disabled={!isOwner} min={50} max={4096}
                     onChange={(e) => setCfgField('child_max_size', Number(e.target.value))}
                     className="w-full border border-slate-300 rounded-lg px-2.5 py-1.5 text-sm disabled:bg-slate-50" />
@@ -591,17 +609,17 @@ function SettingsTab({ kb, onSaved, isOwner }: { kb: KnowledgeBase; onSaved: () 
       {/* Retrieval Settings */}
       <div>
         <h3 className="text-sm font-semibold text-slate-700 mb-3 flex items-center gap-2">
-          <Search size={15} className="text-blue-500" /> 檢索設定
+          <Search size={15} className="text-blue-500" /> {t('kb.settings.retrievalSection')}
         </h3>
         <div className="border border-slate-200 rounded-xl p-4 space-y-4">
           {/* Retrieval mode */}
           <div>
-            <label className="block text-xs font-medium text-slate-600 mb-2">檢索方式</label>
+            <label className="block text-xs font-medium text-slate-600 mb-2">{t('kb.settings.retrievalModeLabel')}</label>
             <div className="grid grid-cols-3 gap-2">
               {[
-                { val: 'vector',   label: '向量檢索',   desc: '透過生成嵌入並與其向量表示最相似的文字分段' },
-                { val: 'fulltext', label: '全文檢索',   desc: '索引文件中的所有詞語，從而允許使用者查詢任意詞語' },
-                { val: 'hybrid',   label: '混合檢索',   desc: '同時執行全文檢索和向量檢索，並應用重排序步驟' },
+                { val: 'vector',   label: t('kb.settings.modeVector'),   desc: t('kb.settings.modeVectorDesc') },
+                { val: 'fulltext', label: t('kb.settings.modeFulltext'), desc: t('kb.settings.modeFulltextDesc') },
+                { val: 'hybrid',   label: t('kb.settings.modeHybrid'),   desc: t('kb.settings.modeHybridDesc') },
               ].map((opt) => (
                 <label key={opt.val} className={`cursor-pointer border rounded-xl p-3 transition ${!isOwner ? 'opacity-60 cursor-not-allowed' : ''} ${retMode === opt.val ? 'border-blue-500 bg-blue-50' : 'border-slate-200 hover:border-slate-300'}`}>
                   <input type="radio" className="sr-only" value={opt.val} checked={retMode === opt.val} disabled={!isOwner} onChange={() => setRetMode(opt.val)} />
@@ -616,13 +634,13 @@ function SettingsTab({ kb, onSaved, isOwner }: { kb: KnowledgeBase; onSaved: () 
           <div className="border border-slate-100 rounded-xl p-3 space-y-2.5 bg-slate-50">
             <div className="flex items-center justify-between">
               <div>
-                <span className="text-xs font-medium text-slate-700">重排序 (Rerank)</span>
+                <span className="text-xs font-medium text-slate-700">{t('kb.settings.rerankTitle')}</span>
                 {rerankModels.length === 0 && (
-                  <span className="ml-2 text-xs text-amber-500">（尚未設定 Rerank 模型）</span>
+                  <span className="ml-2 text-xs text-amber-500">{t('kb.settings.rerankNoModel')}</span>
                 )}
               </div>
               <label className={`flex items-center gap-2 ${!isOwner ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}`}>
-                <span className="text-xs text-slate-500">{useRerank ? '啟用' : '停用'}</span>
+                <span className="text-xs text-slate-500">{useRerank ? t('kb.settings.rerankEnabled') : t('kb.settings.rerankDisabled')}</span>
                 <div
                   onClick={() => isOwner && setUseRerank((p) => !p)}
                   className={`relative w-9 h-5 rounded-full transition-colors ${useRerank ? 'bg-blue-600' : 'bg-slate-300'}`}
@@ -633,38 +651,38 @@ function SettingsTab({ kb, onSaved, isOwner }: { kb: KnowledgeBase; onSaved: () 
             </div>
             {useRerank && (
               <div>
-                <label className="block text-xs text-slate-500 mb-1">Rerank 模型</label>
+                <label className="block text-xs text-slate-500 mb-1">{t('kb.settings.rerankModelLabel')}</label>
                 <select
                   value={rerankModel}
                   disabled={!isOwner}
                   onChange={(e) => setRerankModel(e.target.value)}
                   className="w-full border border-slate-300 rounded-lg px-2.5 py-1.5 text-sm disabled:bg-slate-50 bg-white"
                 >
-                  <option value="">— 自動 (使用任一啟用的 Rerank 模型) —</option>
+                  <option value="">{t('kb.settings.rerankModelAuto')}</option>
                   {rerankModels.map((m) => (
                     <option key={m.key} value={m.key}>{m.name} ({m.api_model})</option>
                   ))}
                 </select>
-                <p className="mt-1 text-xs text-slate-400">選擇 "自動" 時，系統自動使用已啟用的 Rerank 模型。</p>
+                <p className="mt-1 text-xs text-slate-400">{t('kb.settings.rerankAutoNote')}</p>
               </div>
             )}
           </div>
 
           <div className="grid grid-cols-3 gap-3">
             <div>
-              <label className="block text-xs font-medium text-slate-600 mb-1">初始擷取 Top K</label>
+              <label className="block text-xs font-medium text-slate-600 mb-1">{t('kb.settings.topKFetchLabel')}</label>
               <input type="number" value={topKFetch} disabled={!isOwner} min={1} max={100}
                 onChange={(e) => setTopKFetch(e.target.value)}
                 className="w-full border border-slate-300 rounded-lg px-2.5 py-1.5 text-sm disabled:bg-slate-50" />
             </div>
             <div>
-              <label className="block text-xs font-medium text-slate-600 mb-1">最終返回 Top K</label>
+              <label className="block text-xs font-medium text-slate-600 mb-1">{t('kb.settings.topKReturnLabel')}</label>
               <input type="number" value={topKReturn} disabled={!isOwner} min={1} max={50}
                 onChange={(e) => setTopKReturn(e.target.value)}
                 className="w-full border border-slate-300 rounded-lg px-2.5 py-1.5 text-sm disabled:bg-slate-50" />
             </div>
             <div>
-              <label className="block text-xs font-medium text-slate-600 mb-1">Score 閾值（0–1）</label>
+              <label className="block text-xs font-medium text-slate-600 mb-1">{t('kb.settings.scoreThresholdLabel')}</label>
               <input type="number" value={scoreThr} disabled={!isOwner} min={0} max={1} step={0.05}
                 onChange={(e) => setScoreThr(e.target.value)}
                 className="w-full border border-slate-300 rounded-lg px-2.5 py-1.5 text-sm disabled:bg-slate-50" />
@@ -676,30 +694,30 @@ function SettingsTab({ kb, onSaved, isOwner }: { kb: KnowledgeBase; onSaved: () 
       {/* OCR Model + Parse Mode */}
       <div>
         <h3 className="text-sm font-semibold text-slate-700 mb-3 flex items-center gap-2">
-          <Cpu size={15} className="text-blue-500" /> 解析設定
+          <Cpu size={15} className="text-blue-500" /> {t('kb.settings.parseSection')}
         </h3>
         <div className="border border-slate-200 rounded-xl p-4 space-y-4">
           <div>
-            <label className="block text-xs font-medium text-slate-600 mb-1">圖片/PDF OCR 模型</label>
+            <label className="block text-xs font-medium text-slate-600 mb-1">{t('kb.settings.ocrModelLabel')}</label>
             <select
               value={ocrModel}
               disabled={!isOwner}
               onChange={(e) => setOcrModel(e.target.value)}
               className="w-full border border-slate-300 rounded-lg px-2.5 py-1.5 text-sm disabled:bg-slate-50"
             >
-              <option value="">使用系統預設</option>
+              <option value="">{t('kb.settings.ocrModelDefault')}</option>
               {llmModels.map((m) => (
                 <option key={m.key} value={m.api_model}>{m.name} ({m.api_model})</option>
               ))}
             </select>
-            <p className="mt-1.5 text-xs text-slate-400">用於 PDF 全文理解及 Word/Excel/PPT 內嵌圖片 OCR 的 Gemini 模型。</p>
+            <p className="mt-1.5 text-xs text-slate-400">{t('kb.settings.ocrModelNote')}</p>
           </div>
           <div>
-            <label className="block text-xs font-medium text-slate-600 mb-1">格式解析模式（預設）</label>
+            <label className="block text-xs font-medium text-slate-600 mb-1">{t('kb.settings.parseModeLabel')}</label>
             <div className="grid grid-cols-2 gap-2">
               {[
-                { val: 'text_only',    label: '純文字',   desc: '只提取文字內容，忽略顏色/格式' },
-                { val: 'format_aware', label: '格式感知', desc: '標注顏色語義（異常/注意/待確認/正常/資訊）' },
+                { val: 'text_only',    label: t('kb.settings.parseModeTextOnly'),    desc: t('kb.settings.parseModeTextOnlyDesc') },
+                { val: 'format_aware', label: t('kb.settings.parseModeFormatAware'), desc: t('kb.settings.parseModeFormatAwareDesc') },
               ].map((opt) => (
                 <label key={opt.val} className={`cursor-pointer border rounded-lg p-2.5 transition ${!isOwner ? 'opacity-60 cursor-not-allowed' : ''} ${parseMode === opt.val ? 'border-blue-500 bg-blue-50' : 'border-slate-200 hover:border-slate-300'}`}>
                   <input type="radio" className="sr-only" value={opt.val} checked={parseMode === opt.val} disabled={!isOwner} onChange={() => setParseMode(opt.val)} />
@@ -708,7 +726,7 @@ function SettingsTab({ kb, onSaved, isOwner }: { kb: KnowledgeBase; onSaved: () 
                 </label>
               ))}
             </div>
-            <p className="mt-1.5 text-xs text-slate-400">適用 PDF · DOCX · XLSX。PPTX 與圖片固定為純文字模式。上傳時可個別覆蓋此設定。</p>
+            <p className="mt-1.5 text-xs text-slate-400">{t('kb.settings.parseModeNote')}</p>
           </div>
         </div>
       </div>
@@ -716,9 +734,9 @@ function SettingsTab({ kb, onSaved, isOwner }: { kb: KnowledgeBase; onSaved: () 
       {isOwner && (
         <div className="flex items-center gap-3">
           <button onClick={save} disabled={saving} className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 transition disabled:opacity-50">
-            <Save size={14} /> {saving ? '儲存中...' : '儲存設定'}
+            <Save size={14} /> {saving ? t('kb.settings.saving') : t('kb.settings.saveBtn')}
           </button>
-          {msg && <span className={`text-sm ${msg.includes('失敗') ? 'text-red-500' : 'text-green-600'}`}>{msg}</span>}
+          {msg && <span className={`text-sm ${msg.toLowerCase().includes('fail') || msg.includes('失') ? 'text-red-500' : 'text-green-600'}`}>{msg}</span>}
         </div>
       )}
     </div>
@@ -728,6 +746,7 @@ function SettingsTab({ kb, onSaved, isOwner }: { kb: KnowledgeBase; onSaved: () 
 // ─── Share Tab ─────────────────────────────────────────────────────────────────
 
 function ShareTab({ kb, isOwner }: { kb: KnowledgeBase; isOwner: boolean }) {
+  const { t } = useTranslation()
   const [grants, setGrants]       = useState<Grant[]>([])
   const [loading, setLoading]     = useState(true)
   const [orgs, setOrgs]           = useState<{ depts: OrgOption[]; profit_centers: OrgOption[]; org_sections: OrgOption[]; org_groups: OrgOption[] }>({ depts: [], profit_centers: [], org_sections: [], org_groups: [] })
@@ -756,26 +775,26 @@ function ShareTab({ kb, isOwner }: { kb: KnowledgeBase; isOwner: boolean }) {
 
   useEffect(() => {
     if (granteeType !== 'user' || userSearch.length < 1) { setUserOptions([]); return }
-    const t = setTimeout(async () => {
+    const timer = setTimeout(async () => {
       try {
         const res = await api.get(`/users?search=${encodeURIComponent(userSearch)}`)
         setUserOptions((res.data || []).slice(0, 10))
       } catch { setUserOptions([]) }
     }, 300)
-    return () => clearTimeout(t)
+    return () => clearTimeout(timer)
   }, [userSearch, granteeType])
 
   const addGrant = async () => {
-    if (!granteeId) { setMsg('請選擇共享對象'); return }
+    if (!granteeId) { setMsg(t('kb.share.granteeRequired')); return }
     setAdding(true); setMsg('')
     try {
       await api.post(`/kb/${kb.id}/access`, { grantee_type: granteeType, grantee_id: granteeId, permission })
       setGranteeId(''); setUserSearch('')
       await load()
-      setMsg('已新增共享')
+      setMsg(t('kb.share.addGrantOk'))
       setTimeout(() => setMsg(''), 2000)
     } catch (e: any) {
-      setMsg(e.response?.data?.error || '新增失敗')
+      setMsg(e.response?.data?.error || t('kb.share.addGrantFailed'))
     } finally { setAdding(false) }
   }
 
@@ -783,31 +802,37 @@ function ShareTab({ kb, isOwner }: { kb: KnowledgeBase; isOwner: boolean }) {
     try {
       await api.delete(`/kb/${kb.id}/access/${grantId}`)
       setGrants((p) => p.filter((g) => g.id !== grantId))
-    } catch (e: any) { alert(e.response?.data?.error || '移除失敗') }
+    } catch (e: any) { alert(e.response?.data?.error || t('kb.share.removeGrantFailed')) }
   }
 
   const requestPublic = async () => {
-    if (!confirm('確定申請將此知識庫公開？申請後需等待管理員審核。')) return
+    if (!confirm(t('kb.share.requestPublicConfirm'))) return
     setRequestingPublic(true)
     try {
       await api.post(`/kb/${kb.id}/request-public`)
-      setMsg('公開申請已送出')
+      setMsg(t('kb.share.requestPublicSent'))
     } catch (e: any) {
-      setMsg(e.response?.data?.error || '申請失敗')
+      setMsg(e.response?.data?.error || t('kb.share.requestPublicFailed'))
     } finally { setRequestingPublic(false) }
   }
 
   const granteeTypeLabel: Record<string, string> = {
-    user: '使用者', role: '角色', dept: '部門', profit_center: '利潤中心', org_section: '事業處', org_group: '事業群',
+    user:          t('kb.share.granteeTypeUser'),
+    role:          t('kb.share.granteeTypeRole'),
+    dept:          t('kb.share.granteeTypeDept'),
+    profit_center: t('kb.share.granteeTypeProfitCenter'),
+    org_section:   t('kb.share.granteeTypeOrgSection'),
+    org_group:     t('kb.share.granteeTypeOrgGroup'),
   }
+
   const typeIcon = (type: string) => {
     if (type === 'user') return <User size={12} />
     return <Building2 size={12} />
   }
 
   const getLabel = (g: Grant) => {
-    if (g.grantee_type === 'user') return `使用者 #${g.grantee_id}`
-    if (g.grantee_type === 'role') return `角色 #${g.grantee_id}`
+    if (g.grantee_type === 'user') return t('kb.share.granteeUser', { id: g.grantee_id })
+    if (g.grantee_type === 'role') return t('kb.share.granteeRole', { id: g.grantee_id })
     return `${granteeTypeLabel[g.grantee_type] || g.grantee_type}: ${g.grantee_id}`
   }
 
@@ -825,9 +850,9 @@ function ShareTab({ kb, isOwner }: { kb: KnowledgeBase; isOwner: boolean }) {
       {isOwner && kb.public_status !== 'public' && (
         <div className="border border-slate-200 rounded-xl p-4 flex items-center justify-between">
           <div>
-            <div className="text-sm font-medium text-slate-700">申請公開知識庫</div>
+            <div className="text-sm font-medium text-slate-700">{t('kb.share.requestPublicTitle')}</div>
             <div className="text-xs text-slate-400 mt-0.5">
-              {kb.public_status === 'pending' ? '申請已送出，等待管理員審核' : '公開後所有使用者皆可搜尋此知識庫的內容'}
+              {kb.public_status === 'pending' ? t('kb.share.requestPublicPending') : t('kb.share.requestPublicDesc')}
             </div>
           </div>
           {kb.public_status !== 'pending' && isOwner && (
@@ -836,7 +861,7 @@ function ShareTab({ kb, isOwner }: { kb: KnowledgeBase; isOwner: boolean }) {
               disabled={requestingPublic}
               className="flex items-center gap-1.5 px-3 py-1.5 text-sm border border-slate-300 rounded-lg hover:bg-slate-50 transition disabled:opacity-50"
             >
-              <Globe size={13} /> 申請公開
+              <Globe size={13} /> {t('kb.share.requestPublicBtn')}
             </button>
           )}
         </div>
@@ -845,7 +870,7 @@ function ShareTab({ kb, isOwner }: { kb: KnowledgeBase; isOwner: boolean }) {
       {/* Add grant */}
       {isOwner && (
         <div className="border border-slate-200 rounded-xl p-4 space-y-3">
-          <div className="text-sm font-semibold text-slate-700">新增共享對象</div>
+          <div className="text-sm font-semibold text-slate-700">{t('kb.share.addGrantTitle')}</div>
           <div className="flex gap-2 flex-wrap">
             <select value={granteeType} onChange={(e) => { setGranteeType(e.target.value); setGranteeId(''); setUserSearch('') }}
               className="border border-slate-300 rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
@@ -857,7 +882,7 @@ function ShareTab({ kb, isOwner }: { kb: KnowledgeBase; isOwner: boolean }) {
                 <input
                   value={userSearch}
                   onChange={(e) => { setUserSearch(e.target.value); setGranteeId('') }}
-                  placeholder="搜尋使用者姓名 / 帳號 / 工號"
+                  placeholder={t('kb.share.userSearchPlaceholder')}
                   className="w-full border border-slate-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
                 {userOptions.length > 0 && (
@@ -876,35 +901,32 @@ function ShareTab({ kb, isOwner }: { kb: KnowledgeBase; isOwner: boolean }) {
             ) : (
               <select value={granteeId} onChange={(e) => setGranteeId(e.target.value)}
                 className="flex-1 border border-slate-300 rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-                <option value="">請選擇...</option>
+                <option value="">{t('kb.share.orgSelectPlaceholder')}</option>
                 {getOrgOptions().map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
               </select>
             )}
 
             <select value={permission} onChange={(e) => setPermission(e.target.value as 'use' | 'edit')}
               className="border border-slate-300 rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-              <option value="use">使用權限</option>
-              <option value="edit">編輯權限</option>
+              <option value="use">{t('kb.share.permUse')}</option>
+              <option value="edit">{t('kb.share.permEdit')}</option>
             </select>
 
             <button onClick={addGrant} disabled={adding || !granteeId}
               className="flex items-center gap-1 px-3 py-1.5 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 disabled:opacity-50 transition">
-              <Plus size={13} /> 新增
+              <Plus size={13} /> {t('kb.share.addBtn')}
             </button>
           </div>
-          <p className="text-xs text-slate-400">
-            <strong>使用權限</strong>：可在對話中呼叫此知識庫，但不顯示於知識庫市集。
-            <strong>編輯權限</strong>：顯示於知識庫市集，可查看並編輯文件。
-          </p>
-          {msg && <span className={`text-sm ${msg.includes('失敗') ? 'text-red-500' : 'text-green-600'}`}>{msg}</span>}
+          <p className="text-xs text-slate-400">{t('kb.share.permDesc')}</p>
+          {msg && <span className={`text-sm ${msg.toLowerCase().includes('fail') || msg.includes('失') ? 'text-red-500' : 'text-green-600'}`}>{msg}</span>}
         </div>
       )}
 
       {/* Grant list */}
       {loading ? (
-        <div className="text-center py-8 text-slate-400 text-sm">載入中...</div>
+        <div className="text-center py-8 text-slate-400 text-sm">{t('kb.share.loading')}</div>
       ) : grants.length === 0 ? (
-        <div className="text-center py-8 text-slate-400 text-sm border-2 border-dashed border-slate-200 rounded-xl">尚無共享設定</div>
+        <div className="text-center py-8 text-slate-400 text-sm border-2 border-dashed border-slate-200 rounded-xl">{t('kb.share.noGrants')}</div>
       ) : (
         <div className="space-y-2">
           {grants.map((g) => (
@@ -914,10 +936,10 @@ function ShareTab({ kb, isOwner }: { kb: KnowledgeBase; isOwner: boolean }) {
                 <div className="flex items-center gap-2">
                   <span className="text-sm text-slate-700">{getLabel(g)}</span>
                   <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${g.permission === 'edit' ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-500'}`}>
-                    {g.permission === 'edit' ? '編輯' : '使用'}
+                    {g.permission === 'edit' ? t('kb.share.permEditBadge') : t('kb.share.permUseBadge')}
                   </span>
                 </div>
-                <div className="text-xs text-slate-400">由 {g.granted_by_name} 授權 · {g.granted_at?.slice(0, 10)}</div>
+                <div className="text-xs text-slate-400">{t('kb.share.grantedBy', { name: g.granted_by_name })} · {g.granted_at?.slice(0, 10)}</div>
               </div>
               {isOwner && (
                 <button onClick={() => removeGrant(g.id)} className="p-1 text-slate-300 hover:text-red-500 transition">
@@ -935,6 +957,7 @@ function ShareTab({ kb, isOwner }: { kb: KnowledgeBase; isOwner: boolean }) {
 // ─── Search Tab ────────────────────────────────────────────────────────────────
 
 function SearchTab({ kb }: { kb: KnowledgeBase }) {
+  const { t } = useTranslation()
   const [query, setQuery]       = useState('')
   const [mode,  setMode]        = useState(kb.retrieval_mode || 'hybrid')
   const [topK,  setTopK]        = useState(String(kb.top_k_return ?? 5))
@@ -957,7 +980,7 @@ function SearchTab({ kb }: { kb: KnowledgeBase }) {
       setResults(res.data.results)
       setElapsed(res.data.elapsed_ms)
     } catch (e: any) {
-      alert(e.response?.data?.error || '搜尋失敗')
+      alert(e.response?.data?.error || t('kb.search.searchFailed'))
       setResults([])
     } finally { setSearching(false) }
   }
@@ -973,37 +996,37 @@ function SearchTab({ kb }: { kb: KnowledgeBase }) {
       {/* Left: query + settings */}
       <div className="flex-1 space-y-4">
         <div>
-          <div className="text-sm font-semibold text-slate-700 mb-1">檢索測試</div>
-          <div className="text-xs text-slate-400 mb-3">基於給定的查詢文字測試知識庫的檢索效果</div>
+          <div className="text-sm font-semibold text-slate-700 mb-1">{t('kb.search.title')}</div>
+          <div className="text-xs text-slate-400 mb-3">{t('kb.search.subtitle')}</div>
           <textarea
             value={query}
             onChange={(e) => setQuery(e.target.value.slice(0, 200))}
             onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); search() } }}
             rows={5}
-            placeholder="請輸入文字，建議使用簡短的陳述句。"
+            placeholder={t('kb.search.placeholder')}
             className="w-full border border-slate-300 rounded-xl px-3 py-2.5 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
           <div className="flex items-center justify-between mt-1">
-            <span className="text-xs text-slate-400">{query.length} / 200</span>
+            <span className="text-xs text-slate-400">{t('kb.search.charCount', { count: query.length })}</span>
             <button
               onClick={search}
               disabled={searching || !query.trim()}
               className="flex items-center gap-1.5 px-4 py-1.5 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 transition disabled:opacity-50"
             >
               <Target size={13} className={searching ? 'animate-spin' : ''} />
-              {searching ? '搜尋中...' : '測試'}
+              {searching ? t('kb.search.searching') : t('kb.search.testBtn')}
             </button>
           </div>
         </div>
 
         {/* Settings */}
         <div className="border border-slate-200 rounded-xl p-4 space-y-3">
-          <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider">檢索設定</div>
+          <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider">{t('kb.search.settingsTitle')}</div>
           <div className="grid grid-cols-3 gap-3">
             {[
-              { val: 'vector',   label: '向量檢索',   icon: '⟐' },
-              { val: 'fulltext', label: '全文檢索',   icon: '≡' },
-              { val: 'hybrid',   label: '混合檢索',   icon: '⊕' },
+              { val: 'vector',   label: t('kb.search.modeVector'),   icon: '⟐' },
+              { val: 'fulltext', label: t('kb.search.modeFulltext'), icon: '≡' },
+              { val: 'hybrid',   label: t('kb.search.modeHybrid'),   icon: '⊕' },
             ].map((opt) => (
               <label key={opt.val} className={`cursor-pointer border rounded-lg p-2 text-center transition ${mode === opt.val ? 'border-blue-500 bg-blue-50' : 'border-slate-200 hover:border-slate-300'}`}>
                 <input type="radio" className="sr-only" value={opt.val} checked={mode === opt.val} onChange={() => setMode(opt.val)} />
@@ -1014,34 +1037,33 @@ function SearchTab({ kb }: { kb: KnowledgeBase }) {
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs font-medium text-slate-600 mb-1">Top K</label>
+              <label className="block text-xs font-medium text-slate-600 mb-1">{t('kb.search.topKLabel')}</label>
               <input type="number" value={topK} min={1} max={50} onChange={(e) => setTopK(e.target.value)}
                 className="w-full border border-slate-300 rounded-lg px-2.5 py-1.5 text-sm" />
             </div>
             <div>
-              <label className="block text-xs font-medium text-slate-600 mb-1">Score 閾值</label>
+              <label className="block text-xs font-medium text-slate-600 mb-1">{t('kb.search.scoreThresholdLabel')}</label>
               <input type="number" value={score} min={0} max={1} step={0.05} onChange={(e) => setScore(e.target.value)}
                 className="w-full border border-slate-300 rounded-lg px-2.5 py-1.5 text-sm" />
             </div>
           </div>
         </div>
 
-        {/* Records placeholder */}
         {searched && elapsed !== null && (
-          <div className="text-xs text-slate-400 text-right">耗時 {elapsed} ms · 找到 {results.length} 筆</div>
+          <div className="text-xs text-slate-400 text-right">{t('kb.search.elapsed', { ms: elapsed, count: results.length })}</div>
         )}
       </div>
 
       {/* Right: results */}
       <div className="w-96 space-y-3 flex flex-col">
         <div className="text-sm font-semibold text-slate-700">
-          {!searched ? '搜尋結果將在這裡展示' : results.length === 0 ? '未找到相關分塊' : `搜尋結果 (${results.length} 筆)`}
+          {!searched ? t('kb.search.resultsPlaceholder') : results.length === 0 ? t('kb.search.noResults') : t('kb.search.resultsTitle', { count: results.length })}
         </div>
         {!searched ? (
           <div className="flex-1 border-2 border-dashed border-slate-200 rounded-xl flex items-center justify-center text-slate-400 text-sm py-20">
             <div className="text-center">
               <Search size={28} className="mx-auto mb-2 opacity-30" />
-              <p>搜尋測試結果展示在這裡</p>
+              <p>{t('kb.search.resultsPlaceholderSub')}</p>
             </div>
           </div>
         ) : (
@@ -1059,7 +1081,7 @@ function SearchTab({ kb }: { kb: KnowledgeBase }) {
                 <p className="text-xs text-slate-600 leading-relaxed whitespace-pre-wrap">{r.content}</p>
                 {r.parent_content && r.parent_content !== r.content && (
                   <details className="mt-2">
-                    <summary className="text-xs text-slate-400 cursor-pointer hover:text-slate-600">查看父段落</summary>
+                    <summary className="text-xs text-slate-400 cursor-pointer hover:text-slate-600">{t('kb.search.parentChunkLabel')}</summary>
                     <p className="text-xs text-slate-500 mt-1 leading-relaxed whitespace-pre-wrap border-t border-slate-100 pt-1">
                       {r.parent_content}
                     </p>
@@ -1088,6 +1110,7 @@ interface QueryLog {
 }
 
 function QueryHistoryTab({ kbId }: { kbId: string }) {
+  const { t } = useTranslation()
   const [logs, setLogs] = useState<QueryLog[]>([])
   const [loading, setLoading] = useState(true)
 
@@ -1097,20 +1120,20 @@ function QueryHistoryTab({ kbId }: { kbId: string }) {
     }).catch(() => {}).finally(() => setLoading(false))
   }, [kbId])
 
-  if (loading) return <div className="p-6 text-center text-slate-400 text-sm">載入中...</div>
+  if (loading) return <div className="p-6 text-center text-slate-400 text-sm">{t('kb.history.loading')}</div>
   if (logs.length === 0) return (
     <div className="p-10 text-center text-slate-400">
       <History size={36} className="mx-auto mb-3 opacity-30" />
-      <p className="text-sm">尚無呼叫紀錄</p>
+      <p className="text-sm">{t('kb.history.empty')}</p>
     </div>
   )
 
-  const sourceLabel = (s: string) => s === 'chat' ? '對話' : '召回測試'
+  const sourceLabel = (s: string) => s === 'chat' ? t('kb.history.sourceChat') : t('kb.history.sourceTest')
   const sourceColor = (s: string) => s === 'chat' ? 'bg-blue-50 text-blue-600' : 'bg-slate-100 text-slate-500'
 
   return (
     <div className="p-4">
-      <p className="text-xs text-slate-400 mb-3">顯示最近 100 筆（含對話查詢及召回測試）</p>
+      <p className="text-xs text-slate-400 mb-3">{t('kb.history.hint')}</p>
       <div className="space-y-2">
         {logs.map((log) => (
           <div key={log.id} className="flex items-start gap-3 bg-slate-50 rounded-lg px-4 py-3 hover:bg-slate-100 transition">
