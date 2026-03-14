@@ -385,6 +385,50 @@ async function runMigrations(db) {
   // MCP Server response mode (inject = feed tool result to LLM, answer = return raw result directly)
   await addCol('MCP_SERVERS', 'RESPONSE_MODE', "VARCHAR2(10) DEFAULT 'inject'");
 
+  // ── token_usage model normalization (one-time data fix) ────────────────────
+  // Merge rows stored with raw API model IDs (e.g. 'gemini-3-pro-preview') or
+  // display names (e.g. 'Gemini 3 Pro') into the canonical llm_models.key.
+  try {
+    const badRows = await db.prepare(
+      `SELECT tu.id, tu.user_id, tu.usage_date, tu.model,
+              tu.input_tokens, tu.output_tokens, tu.image_count, tu.cost, tu.currency,
+              lm.key AS canonical_key
+       FROM token_usage tu
+       JOIN llm_models lm ON (LOWER(lm.api_model)=LOWER(tu.model) OR LOWER(lm.name)=LOWER(tu.model))
+       WHERE tu.model <> lm.key AND lm.is_active=1`
+    ).all();
+    for (const row of badRows) {
+      // Try to merge into existing canonical row
+      const D = `TO_DATE(?, 'YYYY-MM-DD')`;
+      const dateStr = typeof row.usage_date === 'string'
+        ? row.usage_date.slice(0, 10)
+        : new Date(row.usage_date).toISOString().slice(0, 10);
+      const canonical = await db.prepare(
+        `SELECT id FROM token_usage WHERE user_id=? AND usage_date=${D} AND model=?`
+      ).get(row.user_id, dateStr, row.canonical_key);
+      if (canonical) {
+        await db.prepare(
+          `UPDATE token_usage SET
+             input_tokens=input_tokens+?, output_tokens=output_tokens+?,
+             image_count=COALESCE(image_count,0)+?,
+             cost=CASE WHEN ? IS NOT NULL THEN COALESCE(cost,0)+? ELSE cost END
+           WHERE id=?`
+        ).run(row.input_tokens || 0, row.output_tokens || 0, row.image_count || 0,
+              row.cost, row.cost, canonical.id);
+      } else {
+        // Rename the row to use canonical key
+        await db.prepare('UPDATE token_usage SET model=? WHERE id=?').run(row.canonical_key, row.id);
+        continue;
+      }
+      // Delete the now-merged bad row
+      await db.prepare('DELETE FROM token_usage WHERE id=?').run(row.id);
+    }
+    if (badRows.length > 0)
+      console.log(`[Migration] token_usage: normalized ${badRows.length} rows to canonical model keys`);
+  } catch (e) {
+    console.warn('[Migration] token_usage normalization skipped:', e.message);
+  }
+
   const createTable = async (name, ddl) => {
     try {
       const exists = await db.tableExists(name);

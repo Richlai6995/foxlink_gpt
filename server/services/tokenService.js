@@ -4,6 +4,32 @@
  * Used by chat.js, researchService.js, and any other service that calls Gemini.
  */
 
+/**
+ * Normalize a raw API model ID (e.g. 'gemini-3-pro-preview') to the llm_models key
+ * (e.g. 'pro') so that all token_usage rows are keyed consistently, enabling
+ * correct cost calculation and a clean admin report.
+ * Falls back to the original value if no matching llm_models row is found.
+ */
+/**
+ * Normalize various model identifiers to the canonical llm_models key.
+ * Handles:
+ *   api_model  → key  (e.g. 'gemini-3-pro-preview'  → 'pro')
+ *   name       → key  (e.g. 'Gemini 3 Pro'           → 'pro')
+ *   key        → key  (passthrough, no DB match needed but safe)
+ */
+async function normalizeModelKey(db, model) {
+  if (!model) return model;
+  try {
+    const row = await db.prepare(
+      `SELECT key FROM llm_models
+       WHERE (LOWER(api_model)=LOWER(?) OR LOWER(name)=LOWER(?))
+       AND is_active=1 FETCH FIRST 1 ROWS ONLY`
+    ).get(model, model);
+    if (row?.key) return row.key;
+  } catch (_) {}
+  return model;
+}
+
 async function calcCallCost(db, model, date, inputTokens, outputTokens, imageCount) {
   try {
     const DI = `TO_DATE(?, 'YYYY-MM-DD')`;
@@ -33,6 +59,9 @@ async function calcCallCost(db, model, date, inputTokens, outputTokens, imageCou
 async function upsertTokenUsage(db, userId, date, model, inputTokens, outputTokens, imageCount = 0) {
   try {
     if (!inputTokens && !outputTokens) return;
+    // Normalize raw API model ID → llm_models key (e.g. 'gemini-3-pro-preview' → 'pro')
+    const normalizedModel = await normalizeModelKey(db, model);
+    model = normalizedModel;
     const { cost, currency } = await calcCallCost(db, model, date, inputTokens, outputTokens, imageCount);
     const D = `TO_DATE(?, 'YYYY-MM-DD')`;
     const existing = await db
