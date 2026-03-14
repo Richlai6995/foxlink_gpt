@@ -128,7 +128,7 @@ async function extractTextFromFile(filePath, mimeType, originalName) {
 /**
  * Transcribe audio file using Gemini
  */
-async function transcribeAudio(filePath, mimeType, timeoutMs = 10 * 60 * 1000) {
+async function transcribeAudio(filePath, mimeType, timeoutMs = 25 * 60 * 1000) {
   const model = genAI.getGenerativeModel({ model: MODEL_FLASH });
   const audioPart = await fileToGeminiPart(filePath, mimeType);
 
