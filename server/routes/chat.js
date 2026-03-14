@@ -535,10 +535,11 @@ router.post('/sessions', async (req, res) => {
     const db = require('../database-oracle').db;
     const id = uuidv4();
     const model = req.body.model || 'pro';
+    const title = req.body.title || '新對話';
     await db.prepare(
       `INSERT INTO chat_sessions (id, user_id, title, model) VALUES (?, ?, ?, ?)`
-    ).run(id, req.user.id, '新對話', model);
-    res.json({ id, title: '新對話', model });
+    ).run(id, req.user.id, title, model);
+    res.json({ id, title, model });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -1599,7 +1600,8 @@ router.post('/sessions/:id/messages', upload.array('files', 10), async (req, res
       // 防止重複或不必要的 title 事件：只有當會話目前的 title 為預設值時才更新
       const currentTitleRow = await db.prepare('SELECT title FROM chat_sessions WHERE id=?').get(sessionId);
       const currentTitle = currentTitleRow?.title;
-      if (!currentTitle || currentTitle === '新對話') {
+      const DEFAULT_TITLES = new Set(['新對話', 'New Chat', 'Cuộc trò chuyện mới']);
+      if (!currentTitle || DEFAULT_TITLES.has(currentTitle)) {
         await db.prepare(`UPDATE chat_sessions SET title=?, model=?, updated_at=SYSTIMESTAMP WHERE id=?`).run(
           quickTitle, chosenModel, sessionId
         );

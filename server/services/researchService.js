@@ -450,15 +450,20 @@ async function runResearchJob(db, jobId) {
                          : taskBinding.mcp_server_ids?.length ? taskBinding.mcp_server_ids
                          : [];
 
+      const isEn = language !== 'zh-TW';
+      const allKbLabel = isEn ? 'all KB' : '全部KB';
       const sourceLabel = [
-        selfKbIds ? `${selfKbIds.length}個KB` : '全部KB',
-        difyKbIds.length ? `${difyKbIds.length}個DifyKB` : '',
-        mcpServerIds.length ? `${mcpServerIds.length}個MCP` : '',
+        selfKbIds ? `${selfKbIds.length}KB` : allKbLabel,
+        difyKbIds.length ? `${difyKbIds.length}Dify` : '',
+        mcpServerIds.length ? `${mcpServerIds.length}MCP` : '',
       ].filter(Boolean).join('+');
+      const researchingLabel = isEn
+        ? `Researching: ${sq.question.slice(0, 60)} (${sourceLabel})`
+        : `正在研究：${sq.question.slice(0, 60)}（${sourceLabel}）`;
 
       await db.prepare(
         'UPDATE research_jobs SET progress_step=?, progress_label=?, updated_at=SYSTIMESTAMP WHERE id=?'
-      ).run(i + 1, `正在研究：${sq.question.slice(0, 60)}（${sourceLabel}）`, jobId);
+      ).run(i + 1, researchingLabel, jobId);
 
       // ── Self KB search ──────────────────────────────────────────────────────
       let kbContext = '';
@@ -499,7 +504,7 @@ async function runResearchJob(db, jobId) {
           addTokens(MODEL_PRO, sec.inputTokens, sec.outputTokens);
           break;
         } catch (e) {
-          if (attempt === 2) answer = `（研究此問題時發生錯誤：${e.message}）`;
+          if (attempt === 2) answer = isEn ? `(Error researching this topic: ${e.message})` : `（研究此問題時發生錯誤：${e.message}）`;
           else await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
         }
       }
@@ -508,15 +513,15 @@ async function runResearchJob(db, jobId) {
 
     // Synthesize
     await db.prepare(
-      "UPDATE research_jobs SET progress_label='正在整合報告...', updated_at=SYSTIMESTAMP WHERE id=?"
-    ).run(jobId);
+      'UPDATE research_jobs SET progress_label=?, updated_at=SYSTIMESTAMP WHERE id=?'
+    ).run(isEn ? 'Synthesizing report...' : '正在整合報告...', jobId);
     const { report, inputTokens: synIn, outputTokens: synOut } = await synthesizeReport(plan.title, sections, language);
     addTokens(MODEL_PRO, synIn, synOut);
 
     // Generate files
     await db.prepare(
-      "UPDATE research_jobs SET progress_label='正在生成文件...', updated_at=SYSTIMESTAMP WHERE id=?"
-    ).run(jobId);
+      'UPDATE research_jobs SET progress_label=?, updated_at=SYSTIMESTAMP WHERE id=?'
+    ).run(isEn ? 'Generating documents...' : '正在生成文件...', jobId);
     const files = await generateOutputFiles(jobId, plan.title, report, sections, job.output_formats || 'docx');
 
     // Flush token usage
@@ -530,16 +535,17 @@ async function runResearchJob(db, jobId) {
     const summary = report.slice(0, 800);
     await db.prepare(`
       UPDATE research_jobs
-      SET status='done', progress_step=?, progress_label='研究完成',
+      SET status='done', progress_step=?, progress_label=?,
           result_summary=?, result_files_json=?,
           completed_at=SYSTIMESTAMP, updated_at=SYSTIMESTAMP
       WHERE id=?
-    `).run(total, summary, JSON.stringify(files), jobId);
+    `).run(total, isEn ? 'Research complete' : '研究完成', summary, JSON.stringify(files), jobId);
 
     if (job.session_id) {
-      const downloadLinks = files.map((f) => `[📥 下載 ${f.type.toUpperCase()}](${f.url})`).join('  \n');
-      const msgContent = `**📊 深度研究完成：${plan.title}**\n\n` +
-        `${report.slice(0, 300)}${report.length > 300 ? '...' : ''}\n\n${downloadLinks}`;
+      const downloadLinks = files.map((f) => `[📥 ${isEn ? 'Download' : '下載'} ${f.type.toUpperCase()}](${f.url})`).join('  \n');
+      const msgContent = isEn
+        ? `**📊 Deep Research Complete: ${plan.title}**\n\n${report.slice(0, 300)}${report.length > 300 ? '...' : ''}\n\n${downloadLinks}`
+        : `**📊 深度研究完成：${plan.title}**\n\n${report.slice(0, 300)}${report.length > 300 ? '...' : ''}\n\n${downloadLinks}`;
       await db.prepare(
         `UPDATE chat_messages SET content=? WHERE session_id=? AND TO_CHAR(DBMS_LOB.SUBSTR(content,100,1))=?`
       ).run(msgContent, job.session_id, `__RESEARCH_JOB__:${jobId}`);
@@ -554,7 +560,7 @@ async function runResearchJob(db, jobId) {
     if (job?.session_id) {
       await db.prepare(
         `UPDATE chat_messages SET content=? WHERE session_id=? AND TO_CHAR(DBMS_LOB.SUBSTR(content,100,1))=?`
-      ).run(`**❌ 深度研究失敗**\n\n${e.message}`, job.session_id, `__RESEARCH_JOB__:${jobId}`)
+      ).run(isEn ? `**❌ Deep Research Failed**\n\n${e.message}` : `**❌ 深度研究失敗**\n\n${e.message}`, job.session_id, `__RESEARCH_JOB__:${jobId}`)
         .catch(() => {});
     }
   }

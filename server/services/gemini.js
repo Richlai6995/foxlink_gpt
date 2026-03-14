@@ -431,8 +431,17 @@ async function generateWithImage(apiModel, history, userParts) {
  */
 async function generateTitle(userMessage, aiResponse) {
   try {
-    const model = genAI.getGenerativeModel({ model: MODEL_FLASH }); // use Flash for speed/cost
-    const prompt = `根據以下對話內容，產生一個簡短的繁體中文標題（10字以內，不加引號、冒號或標點符號）：\n使用者: ${userMessage.slice(0, 300)}\nAI: ${aiResponse.slice(0, 300)}`;
+    const model = genAI.getGenerativeModel({ model: MODEL_FLASH });
+    const isZh = /[\u4e00-\u9fff\u3400-\u4dbf]/.test(userMessage);
+    const isVi = !isZh && /[àáâãèéêìíòóôõùúýăđơư]/i.test(userMessage);
+    let prompt;
+    if (isZh) {
+      prompt = `根據以下對話內容，產生一個簡短的繁體中文標題（10字以內，不加引號、冒號或標點符號）：\n使用者: ${userMessage.slice(0, 300)}\nAI: ${aiResponse.slice(0, 300)}`;
+    } else if (isVi) {
+      prompt = `Dựa trên nội dung sau, tạo tiêu đề ngắn tiếng Việt (tối đa 10 từ, không dùng dấu ngoặc hay dấu câu):\nNgười dùng: ${userMessage.slice(0, 300)}\nAI: ${aiResponse.slice(0, 300)}`;
+    } else {
+      prompt = `Based on this conversation, generate a short English title (max 8 words, no quotes or punctuation):\nUser: ${userMessage.slice(0, 300)}\nAI: ${aiResponse.slice(0, 300)}`;
+    }
     const result = await model.generateContent(prompt);
     const title = result.response.text().trim().replace(/^["「『]|["」』]$/g, '').slice(0, 50);
     const usage = result.response.usageMetadata || {};

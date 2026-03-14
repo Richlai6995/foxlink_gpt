@@ -271,10 +271,11 @@ export default function ChatPage() {
       ; (async () => {
         try {
           // Create a new session
-          const res = await api.post('/chat/sessions', { model })
+          const defaultTitle = t('sidebar.newChat')
+          const res = await api.post('/chat/sessions', { model, title: defaultTitle })
           const newSessionId: string = res.data.id
           setSessions(prev => [{
-            id: newSessionId, title: '新對話', model,
+            id: newSessionId, title: defaultTitle, model,
             created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
           }, ...prev])
           setCurrentSessionId(newSessionId)
@@ -316,10 +317,11 @@ export default function ChatPage() {
 
   const handleNewChat = useCallback(async () => {
     try {
-      const res = await api.post('/chat/sessions', { model })
+      const defaultTitle = t('sidebar.newChat')
+      const res = await api.post('/chat/sessions', { model, title: defaultTitle })
       const newSession: ChatSession = {
         id: res.data.id,
-        title: '新對話',
+        title: defaultTitle,
         model,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
@@ -330,7 +332,7 @@ export default function ChatPage() {
     } catch (e) {
       console.error('New chat error:', e)
     }
-  }, [model])
+  }, [model, t])
 
   const handleSelectSession = useCallback(
     (id: string) => {
@@ -422,11 +424,12 @@ export default function ChatPage() {
       let sessionId = currentSessionId
       if (!sessionId) {
         try {
-          const res = await api.post('/chat/sessions', { model })
+          const defaultTitle = t('sidebar.newChat')
+          const res = await api.post('/chat/sessions', { model, title: defaultTitle })
           sessionId = res.data.id
           const newSession: ChatSession = {
             id: res.data.id,
-            title: '新對話',
+            title: defaultTitle,
             model,
             created_at: new Date().toISOString(),
             updated_at: new Date().toISOString(),
