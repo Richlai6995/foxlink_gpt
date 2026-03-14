@@ -1514,7 +1514,8 @@ router.post('/topics/:id/icon', requireDesigner, async (req, res) => {
   try {
     const multer = require('multer');
     const path = require('path');
-    const uploadDir = path.join(__dirname, '../uploads/dashboard_icons');
+    const { UPLOAD_DIR: _ud } = require('../config/paths');
+    const uploadDir = require('path').join(_ud, 'dashboard_icons');
     require('fs').mkdirSync(uploadDir, { recursive: true });
     const storage = multer.diskStorage({
       destination: uploadDir,

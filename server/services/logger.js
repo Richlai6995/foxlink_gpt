@@ -80,13 +80,12 @@ console.log(`[Logger] ===== Process started (PID: ${process.pid}) =====`);
 console.log(`[Logger] Node ${process.version}, platform: ${process.platform}, arch: ${process.arch}`);
 console.log(`[Logger] Log directory: ${LOG_DIR}`);
 
-// Graceful shutdown signals
-function handleExit(signal) {
-    console.log(`[Logger] Received ${signal} — process shutting down`);
+// SIGTERM 由 server.js 的 graceful shutdown 處理（Oracle pool close 後才 exit）
+// SIGINT (Ctrl+C) 本地開發快速退出
+process.on('SIGINT', () => {
+    console.log('[Logger] Received SIGINT — process shutting down');
     process.exit(0);
-}
-process.on('SIGTERM', () => handleExit('SIGTERM'));
-process.on('SIGINT', () => handleExit('SIGINT'));
+});
 
 // Log on normal exit
 process.on('exit', (code) => {

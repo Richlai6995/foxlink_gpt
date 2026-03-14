@@ -128,13 +128,19 @@ async function extractTextFromFile(filePath, mimeType, originalName) {
 /**
  * Transcribe audio file using Gemini
  */
-async function transcribeAudio(filePath, mimeType) {
+async function transcribeAudio(filePath, mimeType, timeoutMs = 5 * 60 * 1000) {
   const model = genAI.getGenerativeModel({ model: MODEL_FLASH });
   const audioPart = await fileToGeminiPart(filePath, mimeType);
-  const result = await model.generateContent([
+
+  const transcribePromise = model.generateContent([
     audioPart,
     { text: '請完整轉錄這段音訊，只回傳轉錄文字，不要加任何說明。' },
   ]);
+  const timeoutPromise = new Promise((_, reject) =>
+    setTimeout(() => reject(new Error('Audio transcription timeout (5 min)')), timeoutMs)
+  );
+
+  const result = await Promise.race([transcribePromise, timeoutPromise]);
   const usage = result.response.usageMetadata || {};
   return {
     text: result.response.text(),

@@ -4,7 +4,7 @@ const path = require('path');
 
 let scheduledTask = null;
 
-const UPLOADS_DIR = path.join(__dirname, '..', 'uploads');
+const { UPLOAD_DIR: UPLOADS_DIR } = require('../config/paths');
 
 function isoDate(daysAgo) {
   return new Date(Date.now() - daysAgo * 86400000).toISOString();

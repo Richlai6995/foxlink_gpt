@@ -1,5 +1,6 @@
 const path = require('path');
 const fs = require('fs');
+const { Worker, isMainThread } = require('worker_threads');
 
 /**
  * Strip inline markdown symbols from a text line.
@@ -16,9 +17,37 @@ function stripInlineMarkdown(text) {
     .trim();
 }
 
-const UPLOAD_DIR = process.env.UPLOAD_DIR
-  ? path.resolve(process.env.UPLOAD_DIR)
-  : path.join(__dirname, '../uploads');
+const { UPLOAD_DIR } = require('../config/paths');
+
+// CPU-intensive types that should run in a worker thread
+const WORKER_TYPES = new Set(['pdf', 'pptx', 'docx', 'foxlink_pptx']);
+
+/**
+ * Run a CPU-intensive file generation in a dedicated worker thread.
+ * Returns a Promise that resolves with the output file path.
+ */
+function runInWorker(type, filename, content, sessionId) {
+  return new Promise((resolve, reject) => {
+    const worker = new Worker(path.join(__dirname, '../workers/fileGenWorker.js'), {
+      workerData: { type, filename, content, sessionId },
+    });
+    const timeout = setTimeout(() => {
+      worker.terminate();
+      reject(new Error(`[FileGen] Worker timeout for type=${type}`));
+    }, 5 * 60 * 1000); // 5 minutes max
+
+    worker.on('message', (msg) => {
+      clearTimeout(timeout);
+      if (msg.success) resolve(msg.outputPath);
+      else reject(new Error(msg.error));
+    });
+    worker.on('error', (err) => { clearTimeout(timeout); reject(err); });
+    worker.on('exit', (code) => {
+      clearTimeout(timeout);
+      if (code !== 0) reject(new Error(`Worker exited with code ${code}`));
+    });
+  });
+}
 
 /**
  * Parse generate blocks from AI response text
@@ -60,6 +89,11 @@ async function processGenerateBlocks(responseText, sessionId) {
 }
 
 async function generateFile(type, filename, content, sessionId) {
+  // Offload CPU-intensive generation to worker thread (main thread only)
+  if (isMainThread && WORKER_TYPES.has(type)) {
+    return runInWorker(type, filename, content, sessionId);
+  }
+
   const outputDir = path.join(UPLOAD_DIR, 'generated');
   if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
 
