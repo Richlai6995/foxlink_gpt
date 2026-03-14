@@ -6,10 +6,11 @@ services:
     container_name: foxlink_gpt
     ports:
       - "3007:3007"
+    depends_on:
+      redis:
+        condition: service_healthy
     volumes:
       # ── Persistent data (MUST survive container rebuilds) ──────────────────
-      # SQLite database
-      - ./data:/app/data
       # Uploaded files & AI-generated files
       - ./uploads:/app/uploads
       # Log files
@@ -17,29 +18,40 @@ services:
       # DB backups → E:\backup_file\foxlink_gpt_db_backup (Windows E: = /mnt/e on Linux host)
       - /mnt/e/backup_file/foxlink_gpt_db_backup:/app/backups
       # CJK fonts for Chinese PDF generation
-      # Place NotoSansTC-Regular.ttf (or kaiu.ttf) here if needed
       - ./fonts:/app/fonts
-      # Code skill runners (user_code.js + node_modules per skill — must persist)
+      # Code skill runners (must persist)
       - ./skill_runners:/app/skill_runners
-      # ── Oracle Instant Client (Thick Mode for ERP DB) ─────────────────────
-      # Host path: /mnt/e/oracle_client_linux/instantclient_19_29
-      # Container path must match ORACLE_HOME in Dockerfile (/opt/oracle/instantclient_19_26)
-      - /mnt/e/oracle_client_linux/instantclient_19_29:/opt/oracle/instantclient_19_26
+      # ── Oracle Instant Client (Thick Mode) ────────────────────────────────
+      # TODO: 確認版本後統一路徑
+      - /mnt/e/oracle_client_linux/instantclient_19_29:/opt/oracle/instantclient
     environment:
       - PORT=3007
       - TZ=Asia/Taipei
       - NODE_ENV=production
-      - DB_PATH=/app/data/system.db
       - UPLOAD_DIR=/app/uploads
-      # Oracle Instant Client (overrides .env — must match volume target path above)
-      - ORACLE_HOME=/opt/oracle/instantclient_19_26
-      - LD_LIBRARY_PATH=/opt/oracle/instantclient_19_26
+      - ORACLE_HOME=/opt/oracle/instantclient
+      - LD_LIBRARY_PATH=/opt/oracle/instantclient
+      - REDIS_URL=redis://redis:6379
     env_file:
       - server/.env
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:3007/api/auth/status", "||", "exit", "1"]
+      test: ["CMD", "wget", "-qO-", "http://localhost:3007/api/health"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 20s
+
+  redis:
+    image: redis:7-alpine
+    container_name: foxlink_redis
+    command: ["--save", "", "--loglevel", "warning"]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    # 不 expose port（只供 app 內部使用）
+    # ports:
+    #   - "6379:6379"
