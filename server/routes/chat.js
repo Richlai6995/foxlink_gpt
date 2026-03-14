@@ -519,7 +519,9 @@ router.get('/sessions', async (req, res) => {
     const sessions = await db
       .prepare(
         `SELECT id, title, model, created_at, updated_at
-         FROM chat_sessions WHERE user_id = ? AND (source IS NULL OR source != 'scheduled')
+         FROM chat_sessions
+         WHERE user_id = ? AND (source IS NULL OR source != 'scheduled')
+           AND EXISTS (SELECT 1 FROM chat_messages WHERE session_id = chat_sessions.id)
          ORDER BY updated_at DESC`
       )
       .all(req.user.id);

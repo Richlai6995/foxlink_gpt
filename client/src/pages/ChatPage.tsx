@@ -318,24 +318,13 @@ export default function ChatPage() {
     setTimeout(() => setShareCopied(false), 2000)
   }
 
-  const handleNewChat = useCallback(async () => {
-    try {
-      const defaultTitle = t('sidebar.newChat')
-      const res = await api.post('/chat/sessions', { model, title: defaultTitle })
-      const newSession: ChatSession = {
-        id: res.data.id,
-        title: defaultTitle,
-        model,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      }
-      setSessions((prev) => [newSession, ...prev])
-      setCurrentSessionId(res.data.id)
-      setMessages([])
-    } catch (e) {
-      console.error('New chat error:', e)
-    }
-  }, [model, t])
+  const handleNewChat = useCallback(() => {
+    // Lazy session creation: don't touch the DB until the first message is sent.
+    // This prevents empty sessions from cluttering the sidebar history.
+    setCurrentSessionId(null)
+    setMessages([])
+    setPendingSkillIds(new Set())
+  }, [])
 
   const handleSelectSession = useCallback(
     (id: string) => {
