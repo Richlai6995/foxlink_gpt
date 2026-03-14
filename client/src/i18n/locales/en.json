@@ -584,6 +584,9 @@
       "nextPage": "Next"
     },
     "settings": {
+      "basicSection": "Basic Information",
+      "nameLabel": "Knowledge Base Name",
+      "descLabel": "Description",
       "chunkSection": "Chunking Settings",
       "strategyRegular": "Regular",
       "strategyRegularDesc": "Advanced text chunking mode with consistent rules for retrieval and summarization",

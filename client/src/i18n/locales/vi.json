@@ -584,6 +584,9 @@
       "nextPage": "Tiếp"
     },
     "settings": {
+      "basicSection": "Thông tin cơ bản",
+      "nameLabel": "Tên kho tri thức",
+      "descLabel": "Mô tả",
       "chunkSection": "Cài đặt phân đoạn",
       "strategyRegular": "Thông thường",
       "strategyRegularDesc": "Chế độ phân đoạn văn bản nâng cao, quy tắc nhất quán cho truy xuất và tóm tắt",

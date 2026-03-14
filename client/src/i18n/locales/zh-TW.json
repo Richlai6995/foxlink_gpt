@@ -584,6 +584,9 @@
       "nextPage": "下頁"
     },
     "settings": {
+      "basicSection": "基本資訊",
+      "nameLabel": "知識庫名稱",
+      "descLabel": "說明",
       "chunkSection": "分段設定",
       "strategyRegular": "常規",
       "strategyRegularDesc": "高級文本分塊模式，檢索和摘要的規則是相同的",
