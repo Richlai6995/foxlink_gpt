@@ -3,6 +3,24 @@ const router = express.Router();
 const { v4: uuidv4 } = require('uuid');
 require('dotenv').config();
 
+/**
+ * Detect preferred language from browser Accept-Language header.
+ * Maps to supported codes: 'zh-TW' | 'en' | 'vi'
+ */
+function detectLangFromHeader(acceptLanguage) {
+  if (!acceptLanguage) return null;
+  const langs = acceptLanguage.split(',').map((part) => {
+    const [code, q] = part.trim().split(';q=');
+    return { code: code.trim().toLowerCase(), q: q ? parseFloat(q) : 1.0 };
+  }).sort((a, b) => b.q - a.q);
+  for (const { code } of langs) {
+    if (code.startsWith('zh')) return 'zh-TW';
+    if (code.startsWith('vi')) return 'vi';
+    if (code.startsWith('en')) return 'en';
+  }
+  return null;
+}
+
 const redis = require('../services/redisClient');
 
 // LDAP Config
@@ -402,13 +420,19 @@ router.get('/me', async (req, res) => {
     userWithoutPassword.effective_can_deep_research      = user.role === 'admin' || resolveEff(user.can_deep_research, rolePerms?.can_deep_research ?? 1);
     userWithoutPassword.effective_can_design_ai_select   = user.role === 'admin' || (user.can_design_ai_select == 1);
     userWithoutPassword.effective_can_use_ai_dashboard   = user.role === 'admin' || (user.can_use_ai_dashboard == 1);
-    // Resolve display language: USERS.preferred_language > factory_languages (Oracle) > 'zh-TW'
+    // Resolve display language: USERS.preferred_language > browser Accept-Language > 'zh-TW'
     let resolvedLanguage = user.preferred_language || null;
-    if (!resolvedLanguage && user.factory_code) {
-      const fl = await db.prepare('SELECT language_code FROM factory_languages WHERE factory_code=?').get(user.factory_code);
-      if (fl) resolvedLanguage = fl.language_code;
+    let is_first_lang_detect = false;
+    if (!resolvedLanguage) {
+      resolvedLanguage = detectLangFromHeader(req.headers['accept-language']) || 'zh-TW';
+      is_first_lang_detect = true;
+      // Auto-save detected language so subsequent requests (chat system prompt, etc.) can use it directly
+      try {
+        await db.prepare('UPDATE users SET preferred_language=? WHERE id=?').run(resolvedLanguage, user.id);
+      } catch (_) {}
     }
-    userWithoutPassword.resolved_language = resolvedLanguage || 'zh-TW';
+    userWithoutPassword.resolved_language = resolvedLanguage;
+    userWithoutPassword.is_first_lang_detect = is_first_lang_detect;
     res.json(userWithoutPassword);
   } catch (e) {
     res.status(500).json({ error: e.message });

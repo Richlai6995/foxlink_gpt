@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Users, BarChart3, Shield, AlertTriangle, Database, Mail, ArrowLeft, Cpu, DollarSign, CalendarClock, Plug, Zap, UserCog, Sparkles, Code2, Search, KeyRound, MonitorPlay, Lock, Globe } from 'lucide-react'
+import { Users, BarChart3, Shield, AlertTriangle, Database, Mail, ArrowLeft, Cpu, DollarSign, CalendarClock, Plug, Zap, UserCog, Sparkles, Code2, Search, KeyRound, MonitorPlay, Lock } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import UserManagement from '../components/admin/UserManagement'
 import TokenUsagePanel from '../components/admin/TokenUsage'
@@ -22,9 +22,7 @@ import ResearchLogsPanel from '../components/admin/ResearchLogsPanel'
 import ApiKeysPanel from '../components/admin/ApiKeysPanel'
 import AiDashboardAdmin from '../components/admin/AiDashboardAdmin'
 import DataPermissionsPanel from '../components/admin/DataPermissionsPanel'
-import FactoryLanguagesPanel from '../components/admin/FactoryLanguagesPanel'
-
-type Tab = 'users' | 'roles' | 'tokens' | 'audit' | 'keywords' | 'db' | 'mail' | 'llm' | 'vector-defaults' | 'cost' | 'scheduled' | 'mcp' | 'dify' | 'kb' | 'skills' | 'code-runners' | 'research' | 'api-keys' | 'ai-dashboard' | 'data-permissions' | 'factory-languages'
+type Tab = 'users' | 'roles' | 'tokens' | 'audit' | 'keywords' | 'db' | 'mail' | 'llm' | 'vector-defaults' | 'cost' | 'scheduled' | 'mcp' | 'dify' | 'kb' | 'skills' | 'code-runners' | 'research' | 'api-keys' | 'ai-dashboard' | 'data-permissions'
 
 export default function AdminDashboard() {
   const [activeTab, setActiveTab] = useState<Tab>('users')
@@ -48,7 +46,6 @@ export default function AdminDashboard() {
     { id: 'code-runners', label: t('admin.tabs.codeRunners'), icon: <Code2 size={16} /> },
     { id: 'ai-dashboard', label: t('admin.tabs.aiDashboard'), icon: <MonitorPlay size={16} /> },
     { id: 'data-permissions', label: t('admin.tabs.dataPermissions'), icon: <Lock size={16} /> },
-    { id: 'factory-languages', label: t('admin.tabs.factoryLanguages'), icon: <Globe size={16} /> },
     { id: 'db', label: t('admin.tabs.db'), icon: <Database size={16} /> },
     { id: 'mail', label: t('admin.tabs.mail'), icon: <Mail size={16} /> },
     { id: 'llm', label: t('admin.tabs.llm'), icon: <Cpu size={16} /> },
@@ -114,7 +111,6 @@ export default function AdminDashboard() {
           {activeTab === 'api-keys' && <ApiKeysPanel />}
           {activeTab === 'ai-dashboard' && <AiDashboardAdmin />}
           {activeTab === 'data-permissions' && <DataPermissionsPanel />}
-          {activeTab === 'factory-languages' && <FactoryLanguagesPanel />}
         </main>
       </div>
     </div>

@@ -1233,13 +1233,8 @@ router.post('/sessions/:id/messages', upload.array('files', 10), async (req, res
       : '';
 
     // Inject user language preference into system instruction
-    const userRow = await db.prepare('SELECT preferred_language, factory_code FROM users WHERE id=?').get(req.user.id);
-    let resolvedLang = userRow?.preferred_language || null;
-    if (!resolvedLang && userRow?.factory_code) {
-      const fl = await db.prepare('SELECT language_code FROM factory_languages WHERE factory_code=?').get(userRow.factory_code);
-      if (fl) resolvedLang = fl.language_code;
-    }
-    resolvedLang = resolvedLang || 'zh-TW';
+    const userRow = await db.prepare('SELECT preferred_language FROM users WHERE id=?').get(req.user.id);
+    const resolvedLang = userRow?.preferred_language || 'zh-TW';
     const LANG_NAMES = { 'zh-TW': '繁體中文', 'en': 'English', 'vi': 'Tiếng Việt' };
     const langInstruction = `\n\n---\n請使用 ${LANG_NAMES[resolvedLang] || '繁體中文'} 回答，除非使用者在問題中明確指定輸出語言（例如翻譯任務）。`;
     // Disable Google Search when inject skills have provided data (avoid Gemini overriding with Search)
