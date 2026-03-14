@@ -4,6 +4,7 @@ import {
   ToggleLeft, ToggleRight, AlertCircle, CheckCircle, Zap, Clock
 } from 'lucide-react'
 import api from '../../lib/api'
+import TranslationFields, { type TranslationData } from '../common/TranslationFields'
 
 interface DifyKb {
   id: number
@@ -48,6 +49,8 @@ export default function DifyKnowledgeBasesPanel() {
   const [error, setError] = useState('')
   const [expandedId, setExpandedId] = useState<number | null>(null)
   const [testingId, setTestingId] = useState<number | null>(null)
+  const [trans, setTrans] = useState<TranslationData>({})
+  const [translating, setTranslating] = useState(false)
   const [testMsg, setTestMsg] = useState<Record<number, { ok: boolean; text: string }>>({})
   const [selectedLogKb, setSelectedLogKb] = useState<DifyKb | null>(null)
   const [logs, setLogs] = useState<DifyCallLog[]>([])
@@ -71,6 +74,7 @@ export default function DifyKnowledgeBasesPanel() {
   const openAdd = () => {
     setEditing(null)
     setForm(emptyForm)
+    setTrans({})
     setError('')
     setShowModal(true)
   }
@@ -84,6 +88,10 @@ export default function DifyKnowledgeBasesPanel() {
       description: kb.description || '',
       is_active: !!kb.is_active,
       sort_order: kb.sort_order,
+    })
+    setTrans({
+      name_zh: (kb as any).name_zh || null, name_en: (kb as any).name_en || null, name_vi: (kb as any).name_vi || null,
+      desc_zh: (kb as any).desc_zh || null, desc_en: (kb as any).desc_en || null, desc_vi: (kb as any).desc_vi || null,
     })
     setError('')
     setShowModal(true)
@@ -99,6 +107,7 @@ export default function DifyKnowledgeBasesPanel() {
       return
     }
     setSaving(true)
+    setTranslating(true)
     setError('')
     try {
       const payload: any = {
@@ -107,19 +116,26 @@ export default function DifyKnowledgeBasesPanel() {
         description: form.description || null,
         is_active: form.is_active,
         sort_order: form.sort_order,
+        ...trans,
       }
       if (form.api_key.trim()) payload.api_key = form.api_key.trim()
+      let res: any
       if (editing) {
-        await api.put(`/dify-kb/${editing.id}`, payload)
+        res = await api.put(`/dify-kb/${editing.id}`, payload)
       } else {
-        await api.post('/dify-kb', payload)
+        res = await api.post('/dify-kb', payload)
       }
+      setTrans({
+        name_zh: res.data.name_zh || null, name_en: res.data.name_en || null, name_vi: res.data.name_vi || null,
+        desc_zh: res.data.desc_zh || null, desc_en: res.data.desc_en || null, desc_vi: res.data.desc_vi || null,
+      })
       setShowModal(false)
       await load()
     } catch (e: any) {
       setError(e.response?.data?.error || '儲存失敗')
     } finally {
       setSaving(false)
+      setTranslating(false)
     }
   }
 
@@ -408,6 +424,13 @@ export default function DifyKnowledgeBasesPanel() {
                   className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
                 />
               </div>
+              <TranslationFields
+                data={trans}
+                onChange={setTrans}
+                translateUrl={editing ? `/dify-kb/${editing.id}/translate` : undefined}
+                hasDescription
+                translating={translating}
+              />
               <div>
                 <label className="block text-xs font-medium text-slate-600 mb-1">排序順序（數字越小越優先）</label>
                 <input

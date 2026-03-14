@@ -6,6 +6,7 @@ import {
 } from 'lucide-react'
 import api from '../lib/api'
 import { useAuth } from '../context/AuthContext'
+import TranslationFields, { type TranslationData } from '../components/common/TranslationFields'
 
 interface KnowledgeBase {
   id: string
@@ -65,6 +66,8 @@ export default function KnowledgeBasePage() {
   const [form, setForm] = useState<CreateForm>(emptyForm())
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState('')
+  const [trans, setTrans] = useState<TranslationData>({})
+  const [translating, setTranslating] = useState(false)
   const [llmModels, setLlmModels] = useState<{ key: string; name: string; api_model: string }[]>([])
 
   const load = async () => {
@@ -92,16 +95,18 @@ export default function KnowledgeBasePage() {
 
   const handleCreate = async () => {
     if (!form.name.trim()) { setError('請輸入知識庫名稱'); return }
-    setCreating(true); setError('')
+    setCreating(true); setTranslating(true); setError('')
     try {
-      const res = await api.post('/kb', form)
+      const res = await api.post('/kb', { ...form, ...trans })
       setShowCreate(false)
       setForm(emptyForm())
+      setTrans({})
       navigate(`/kb/${res.data.id}`)
     } catch (e: any) {
       setError(e.response?.data?.error || '建立失敗')
     } finally {
       setCreating(false)
+      setTranslating(false)
     }
   }
 
@@ -233,6 +238,13 @@ export default function KnowledgeBasePage() {
                 className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
               />
             </div>
+
+            <TranslationFields
+              data={trans}
+              onChange={setTrans}
+              hasDescription
+              translating={translating}
+            />
 
             <div className="grid grid-cols-2 gap-3">
               <div>

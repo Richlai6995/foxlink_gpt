@@ -10,6 +10,7 @@
 const express = require('express');
 const router  = express.Router();
 const crypto  = require('crypto');
+const { upsertTokenUsage } = require('../services/tokenService');
 
 function getDb() {
   return require('../database-oracle').db;
@@ -261,6 +262,14 @@ ${context}
     const result = await geminiModel.generateContent(prompt);
     const answer = result.response.text();
     const usage  = result.response.usageMetadata || {};
+    const inTok  = usage.promptTokenCount || 0;
+    const outTok = usage.candidatesTokenCount || 0;
+
+    // Record token usage under KB owner
+    if ((inTok || outTok) && kb.created_by) {
+      const today = new Date().toISOString().split('T')[0];
+      upsertTokenUsage(getDb(), kb.created_by, today, modelName, inTok, outTok).catch(() => {});
+    }
 
     res.json({
       kb_id:         kb.id,
@@ -269,8 +278,8 @@ ${context}
       answer,
       sources:       results.map((r) => ({ filename: r.filename, score: parseFloat(r.score.toFixed(4)) })),
       usage: {
-        input_tokens:  usage.promptTokenCount || 0,
-        output_tokens: usage.candidatesTokenCount || 0,
+        input_tokens:  inTok,
+        output_tokens: outTok,
       },
     });
   } catch (e) {

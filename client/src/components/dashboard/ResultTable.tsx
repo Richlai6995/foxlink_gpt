@@ -2,6 +2,7 @@
  * ResultTable — 查詢結果資料表，支援匯出 CSV/Excel
  */
 import { Download } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 
 interface Props {
   rows: Record<string, unknown>[]
@@ -25,17 +26,18 @@ function exportCsv(rows: Record<string, unknown>[], columns: string[], labels: R
 }
 
 export default function ResultTable({ rows, columns, column_labels = {} }: Props) {
-  if (!rows.length) return <p className="text-gray-400 text-sm py-4 text-center">無資料</p>
+  const { t } = useTranslation()
+  if (!rows.length) return <p className="text-gray-400 text-sm py-4 text-center">{t('resultTable.noData')}</p>
 
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between">
-        <span className="text-xs text-gray-400">共 {rows.length} 筆</span>
+        <span className="text-xs text-gray-400">{t('resultTable.rowCount', { count: rows.length })}</span>
         <button
           onClick={() => exportCsv(rows, columns, column_labels)}
           className="flex items-center gap-1 text-xs text-blue-400 hover:text-blue-300 transition"
         >
-          <Download size={12} /> 匯出 CSV
+          <Download size={12} /> {t('resultTable.exportCsv')}
         </button>
       </div>
       <div className="overflow-auto max-h-96 rounded-lg border border-gray-200">

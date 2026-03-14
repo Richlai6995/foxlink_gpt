@@ -429,9 +429,15 @@ async function generateTitle(userMessage, aiResponse) {
     const prompt = `根據以下對話內容，產生一個簡短的繁體中文標題（10字以內，不加引號、冒號或標點符號）：\n使用者: ${userMessage.slice(0, 300)}\nAI: ${aiResponse.slice(0, 300)}`;
     const result = await model.generateContent(prompt);
     const title = result.response.text().trim().replace(/^["「『]|["」』]$/g, '').slice(0, 50);
-    return title || userMessage.trim().slice(0, 30);
+    const usage = result.response.usageMetadata || {};
+    return {
+      title: title || userMessage.trim().slice(0, 30),
+      inputTokens: usage.promptTokenCount || 0,
+      outputTokens: usage.candidatesTokenCount || 0,
+      model: MODEL_FLASH,
+    };
   } catch (e) {
-    return userMessage.trim().slice(0, 30);
+    return { title: userMessage.trim().slice(0, 30), inputTokens: 0, outputTokens: 0, model: MODEL_FLASH };
   }
 }
 

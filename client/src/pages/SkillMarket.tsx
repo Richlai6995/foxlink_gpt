@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
-import { Plus, Search, Globe, Lock, GitFork, Send, Pencil, Trash2, Clock, X, ChevronDown, Zap, ArrowLeft, MessageSquare, Code2, Eye, Share2 } from 'lucide-react'
+import { Plus, Search, Globe, Lock, GitFork, Send, Pencil, Trash2, Clock, X, ChevronDown, Zap, ArrowLeft, MessageSquare, Code2, Eye, Share2, History, CheckCircle, XCircle } from 'lucide-react'
 import api from '../lib/api'
+import TranslationFields, { type TranslationData } from '../components/common/TranslationFields'
 
 interface Skill {
     id: number
@@ -62,6 +63,9 @@ export default function SkillMarket() {
     const canCreateSkill = currentUser?.role === 'admin' || (currentUser as any)?.effective_allow_create_skill === true
     const [viewingSkill, setViewingSkill] = useState<Skill | null>(null)
     const [sharingSkill, setSharingSkill] = useState<Skill | null>(null)
+    const [editorTab, setEditorTab] = useState<'編輯' | '呼叫歷史'>('編輯')
+    const [trans, setTrans] = useState<TranslationData>({})
+    const [translating, setTranslating] = useState(false)
 
     const load = useCallback(async () => {
         setLoading(true)
@@ -84,7 +88,7 @@ export default function SkillMarket() {
 
     useEffect(() => { load() }, [load])
 
-    const openCreate = () => { setEditingSkill(null); setForm({ ...EMPTY_FORM }); setTagInput(''); setShowEditor(true) }
+    const openCreate = () => { setEditingSkill(null); setForm({ ...EMPTY_FORM }); setTagInput(''); setTrans({}); setEditorTab('編輯'); setShowEditor(true) }
     const openEdit = async (sk: Skill) => {
         setEditingSkill(sk)
         setForm({
@@ -99,8 +103,13 @@ export default function SkillMarket() {
             code_snippet: sk.code_snippet || '',
             code_packages: sk.code_packages || [],
         })
+        setTrans({
+            name_zh: (sk as any).name_zh || null, name_en: (sk as any).name_en || null, name_vi: (sk as any).name_vi || null,
+            desc_zh: (sk as any).desc_zh || null, desc_en: (sk as any).desc_en || null, desc_vi: (sk as any).desc_vi || null,
+        })
         setTagInput('')
         setPkgInput('')
+        setEditorTab('編輯')
         setShowEditor(true)
     }
 
@@ -113,12 +122,21 @@ export default function SkillMarket() {
         const pendingPkg = pkgInput.trim()
         const finalTags = pendingTag && !form.tags.includes(pendingTag) ? [...form.tags, pendingTag] : form.tags
         const finalPkgs = pendingPkg && !form.code_packages.includes(pendingPkg) ? [...form.code_packages, pendingPkg] : form.code_packages
-        const payload = { ...form, tags: finalTags, code_packages: finalPkgs }
+        const payload = { ...form, tags: finalTags, code_packages: finalPkgs, ...trans }
+        setTranslating(true)
         try {
             if (editingSkill) {
-                await api.put(`/skills/${editingSkill.id}`, payload)
+                const res = await api.put(`/skills/${editingSkill.id}`, payload)
+                setTrans({
+                    name_zh: res.data.name_zh || null, name_en: res.data.name_en || null, name_vi: res.data.name_vi || null,
+                    desc_zh: res.data.desc_zh || null, desc_en: res.data.desc_en || null, desc_vi: res.data.desc_vi || null,
+                })
             } else {
-                await api.post('/skills', payload)
+                const res = await api.post('/skills', payload)
+                setTrans({
+                    name_zh: res.data.name_zh || null, name_en: res.data.name_en || null, name_vi: res.data.name_vi || null,
+                    desc_zh: res.data.desc_zh || null, desc_en: res.data.desc_en || null, desc_vi: res.data.desc_vi || null,
+                })
             }
             setTagInput('')
             setPkgInput('')
@@ -128,6 +146,7 @@ export default function SkillMarket() {
             setError(e.response?.data?.error || '儲存失敗')
         } finally {
             setSaving(false)
+            setTranslating(false)
         }
     }
 
@@ -236,10 +255,25 @@ export default function SkillMarket() {
                     <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 overflow-y-auto p-4">
                         <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl my-8">
                             <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
-                                <h3 className="font-semibold text-slate-800">{editingSkill ? '編輯技能' : '建立技能'}</h3>
+                                <div className="flex items-center gap-4">
+                                    <h3 className="font-semibold text-slate-800">{editingSkill ? '編輯技能' : '建立技能'}</h3>
+                                    {editingSkill && (
+                                        <div className="flex gap-1 border border-slate-200 rounded-lg p-0.5">
+                                            {(['編輯', '呼叫歷史'] as const).map((t) => (
+                                                <button key={t} onClick={() => setEditorTab(t)}
+                                                    className={`px-3 py-1 rounded text-xs font-medium transition ${editorTab === t ? 'bg-blue-600 text-white' : 'text-slate-500 hover:text-slate-700'}`}>
+                                                    {t}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
                                 <button onClick={() => setShowEditor(false)} className="p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100"><X size={16} /></button>
                             </div>
-                            <div className="p-6 space-y-4">
+                            {editorTab === '呼叫歷史' && editingSkill ? (
+                                <SkillCallHistory skillId={editingSkill.id} />
+                            ) : null}
+                            <div className="p-6 space-y-4" style={editorTab === '呼叫歷史' ? { display: 'none' } : {}}>
                                 {/* Basic */}
                                 <div className="flex gap-3">
                                     <div>
@@ -263,6 +297,14 @@ export default function SkillMarket() {
                                     <textarea value={form.description} rows={2} onChange={e => setForm(p => ({ ...p, description: e.target.value }))}
                                         className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 resize-none" />
                                 </div>
+
+                                <TranslationFields
+                                    data={trans}
+                                    onChange={setTrans}
+                                    translateUrl={editingSkill ? `/skills/${editingSkill.id}/translate` : undefined}
+                                    hasDescription
+                                    translating={translating}
+                                />
 
                                 {/* Type */}
                                 <div>
@@ -390,6 +432,7 @@ export default function SkillMarket() {
 
                                 {error && <p className="text-sm text-red-600">{error}</p>}
                             </div>
+                            {editorTab === '編輯' && (
                             <div className="flex justify-end gap-2 px-6 py-4 border-t border-slate-100">
                                 <button onClick={() => setShowEditor(false)} className="px-4 py-2 rounded-lg text-sm text-slate-600 hover:bg-slate-100">取消</button>
                                 <button onClick={save} disabled={saving}
@@ -397,6 +440,7 @@ export default function SkillMarket() {
                                     {saving ? '儲存中...' : '儲存'}
                                 </button>
                             </div>
+                            )}
                         </div>
                     </div>
                 )}
@@ -812,6 +856,64 @@ function SkillCard({ skill, onEdit, onDelete, onFork, onRequestPublic, onUse, on
                         </button>
                     )}
                 </div>
+            </div>
+        </div>
+    )
+}
+
+// ── Skill Call History ─────────────────────────────────────────────────────────
+
+interface SkillCallLog {
+    id: number
+    user_id: number
+    session_id: string | null
+    query_preview: string | null
+    response_preview: string | null
+    status: string
+    error_msg: string | null
+    duration_ms: number | null
+    called_at: string
+    user_name: string | null
+}
+
+function SkillCallHistory({ skillId }: { skillId: number }) {
+    const [logs, setLogs] = useState<SkillCallLog[]>([])
+    const [loading, setLoading] = useState(true)
+
+    useEffect(() => {
+        api.get(`/skills/${skillId}/call-logs`).then((res) => {
+            setLogs(res.data)
+        }).catch(() => {}).finally(() => setLoading(false))
+    }, [skillId])
+
+    if (loading) return <div className="px-6 py-8 text-center text-slate-400 text-sm">載入中...</div>
+    if (logs.length === 0) return (
+        <div className="px-6 py-10 text-center text-slate-400">
+            <History size={32} className="mx-auto mb-3 opacity-30" />
+            <p className="text-sm">尚無呼叫紀錄</p>
+        </div>
+    )
+
+    return (
+        <div className="px-6 py-4 max-h-96 overflow-y-auto">
+            <p className="text-xs text-slate-400 mb-3">最近 100 筆呼叫紀錄</p>
+            <div className="space-y-2">
+                {logs.map((log) => (
+                    <div key={log.id} className={`rounded-lg px-4 py-3 border text-sm ${log.status === 'ok' ? 'bg-green-50 border-green-100' : 'bg-red-50 border-red-100'}`}>
+                        <div className="flex items-center justify-between gap-2 mb-1">
+                            <div className="flex items-center gap-2">
+                                {log.status === 'ok'
+                                    ? <CheckCircle size={13} className="text-green-500 shrink-0" />
+                                    : <XCircle size={13} className="text-red-500 shrink-0" />}
+                                <span className="text-xs text-slate-500">{log.user_name || `uid:${log.user_id}`}</span>
+                                {log.duration_ms && <span className="text-xs text-slate-400">{log.duration_ms}ms</span>}
+                            </div>
+                            <span className="text-xs text-slate-400 whitespace-nowrap">{log.called_at}</span>
+                        </div>
+                        {log.query_preview && <p className="text-xs text-slate-600 truncate">Q: {log.query_preview}</p>}
+                        {log.error_msg && <p className="text-xs text-red-600 truncate">錯誤: {log.error_msg}</p>}
+                    </div>
+                ))}
             </div>
         </div>
     )

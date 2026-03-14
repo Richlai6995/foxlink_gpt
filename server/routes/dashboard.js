@@ -10,6 +10,7 @@
 const express = require('express');
 const router = express.Router();
 const { verifyToken, verifyAdmin } = require('./auth');
+const { translateFields, translateDescription } = require('../services/translationService');
 
 router.use(verifyToken);
 
@@ -316,7 +317,8 @@ router.get('/topics', requireDashboard, async (req, res) => {
     const designs = await db.prepare(
       `SELECT id, topic_id, name, description, vector_search_enabled, chart_config,
               is_public, created_by, is_suspended,
-              vector_top_k, vector_similarity_threshold
+              vector_top_k, vector_similarity_threshold,
+              name_zh, name_en, name_vi, desc_zh, desc_en, desc_vi
        FROM ai_select_designs
        WHERE is_suspended=0
        ORDER BY id ASC`
@@ -374,13 +376,23 @@ router.get('/designer/topics', requireDesigner, async (req, res) => {
 router.post('/designer/topics', requireDesigner, async (req, res) => {
   try {
     const db = require('../database-oracle').db;
-    const { name, description, icon, sort_order, project_id } = req.body;
+    const { name, description, icon, sort_order, project_id,
+            name_zh, name_en, name_vi, desc_zh, desc_en, desc_vi } = req.body;
     if (!name) return res.status(400).json({ error: '主題名稱為必填' });
     if (project_id && !await canEditProject(db, project_id, req.user)) return res.status(403).json({ error: '無此專案權限' });
     const r = await db.prepare(
       `INSERT INTO ai_select_topics (name, description, icon, sort_order, created_by, project_id) VALUES (?,?,?,?,?,?)`
     ).run(name, description || null, icon || null, sort_order || 0, req.user.id, project_id || null);
-    res.json({ id: r.lastInsertRowid });
+    const newId = r.lastInsertRowid;
+    const trans = (name_zh !== undefined)
+      ? { name_zh: name_zh || null, name_en: name_en || null, name_vi: name_vi || null, desc_zh: desc_zh || null, desc_en: desc_en || null, desc_vi: desc_vi || null }
+      : await translateFields({ name, description }).catch(() => ({ name_zh: null, name_en: null, name_vi: null, desc_zh: null, desc_en: null, desc_vi: null }));
+    if (trans.name_zh !== undefined) {
+      await db.prepare(`UPDATE ai_select_topics SET name_zh=?,name_en=?,name_vi=?,desc_zh=?,desc_en=?,desc_vi=? WHERE id=?`)
+        .run(trans.name_zh, trans.name_en, trans.name_vi, trans.desc_zh, trans.desc_en, trans.desc_vi, newId);
+    }
+    const topic = await db.prepare(`SELECT * FROM ai_select_topics WHERE id=?`).get(newId);
+    res.json(topic || { id: newId, ...trans });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -390,16 +402,52 @@ router.post('/designer/topics', requireDesigner, async (req, res) => {
 router.put('/designer/topics/:id', requireDesigner, async (req, res) => {
   try {
     const db = require('../database-oracle').db;
-    const topic = await db.prepare(`SELECT created_by, project_id FROM ai_select_topics WHERE id=?`).get(req.params.id);
+    const topic = await db.prepare(`SELECT * FROM ai_select_topics WHERE id=?`).get(req.params.id);
     if (!topic) return res.status(404).json({ error: '不存在' });
     if (req.user.role !== 'admin' && topic.created_by !== req.user.id) {
       if (topic.project_id && !await canAccessProject(db, topic.project_id, req.user, 'develop')) return res.status(403).json({ error: '無權限' });
     }
-    const { name, description, icon, sort_order, is_active, project_id } = req.body;
+    const { name, description, icon, sort_order, is_active, project_id,
+            name_zh, name_en, name_vi, desc_zh, desc_en, desc_vi } = req.body;
+    const finalName = name ?? topic.name;
+    const finalDesc = description !== undefined ? (description || null) : topic.description;
     await db.prepare(
       `UPDATE ai_select_topics SET name=?, description=?, icon=?, sort_order=?, is_active=?, project_id=? WHERE id=?`
-    ).run(name, description || null, icon || null, sort_order ?? 0, is_active ?? 1, project_id || null, req.params.id);
-    res.json({ ok: true });
+    ).run(finalName, finalDesc, icon ?? topic.icon, sort_order ?? 0, is_active ?? 1, project_id || null, req.params.id);
+    if (name_zh !== undefined) {
+      await db.prepare(`UPDATE ai_select_topics SET name_zh=?,name_en=?,name_vi=?,desc_zh=?,desc_en=?,desc_vi=? WHERE id=?`)
+        .run(name_zh || null, name_en || null, name_vi || null, desc_zh || null, desc_en || null, desc_vi || null, req.params.id);
+    } else {
+      const nameChanged = name !== undefined && name !== topic.name;
+      const descChanged = description !== undefined && description !== topic.description;
+      if (nameChanged || descChanged) {
+        const trans = await translateFields({
+          name: nameChanged ? finalName : null,
+          description: descChanged ? finalDesc : null,
+        }).catch(() => ({}));
+        const setClauses = []; const params = [];
+        if (nameChanged && trans.name_zh !== undefined) { setClauses.push('name_zh=?,name_en=?,name_vi=?'); params.push(trans.name_zh, trans.name_en, trans.name_vi); }
+        if (descChanged && trans.desc_zh !== undefined) { setClauses.push('desc_zh=?,desc_en=?,desc_vi=?'); params.push(trans.desc_zh, trans.desc_en, trans.desc_vi); }
+        if (setClauses.length) await db.prepare(`UPDATE ai_select_topics SET ${setClauses.join(',')} WHERE id=?`).run(...params, req.params.id);
+      }
+    }
+    const updated = await db.prepare(`SELECT * FROM ai_select_topics WHERE id=?`).get(req.params.id);
+    res.json(updated || { ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/dashboard/designer/topics/:id/translate
+router.post('/designer/topics/:id/translate', requireDesigner, async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const topic = await db.prepare(`SELECT * FROM ai_select_topics WHERE id=?`).get(req.params.id);
+    if (!topic) return res.status(404).json({ error: '不存在' });
+    const trans = await translateFields({ name: topic.name, description: topic.description });
+    await db.prepare(`UPDATE ai_select_topics SET name_zh=?,name_en=?,name_vi=?,desc_zh=?,desc_en=?,desc_vi=? WHERE id=?`)
+      .run(trans.name_zh, trans.name_en, trans.name_vi, trans.desc_zh, trans.desc_en, trans.desc_vi, req.params.id);
+    res.json(trans);
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -442,7 +490,8 @@ router.post('/designer/designs', requireDesigner, async (req, res) => {
     const {
       topic_id, name, description, target_schema_ids, target_join_ids, vector_search_enabled,
       system_prompt, few_shot_examples, chart_config, cache_ttl_minutes, is_public,
-      vector_top_k, vector_similarity_threshold, vector_skip_fields
+      vector_top_k, vector_similarity_threshold, vector_skip_fields,
+      name_zh, name_en, name_vi, desc_zh, desc_en, desc_vi,
     } = req.body;
     if (!topic_id || !name) return res.status(400).json({ error: '主題與名稱為必填' });
     const r = await db.prepare(
@@ -466,7 +515,15 @@ router.post('/designer/designs', requireDesigner, async (req, res) => {
       vector_skip_fields || null,
       req.user.id
     );
-    res.json({ id: r.lastInsertRowid });
+    const newId = r.lastInsertRowid;
+    const trans = (name_zh !== undefined)
+      ? { name_zh: name_zh || null, name_en: name_en || null, name_vi: name_vi || null, desc_zh: desc_zh || null, desc_en: desc_en || null, desc_vi: desc_vi || null }
+      : await translateFields({ name, description }).catch(() => ({ name_zh: null, name_en: null, name_vi: null, desc_zh: null, desc_en: null, desc_vi: null }));
+    if (trans.name_zh !== undefined) {
+      await db.prepare(`UPDATE ai_select_designs SET name_zh=?,name_en=?,name_vi=?,desc_zh=?,desc_en=?,desc_vi=? WHERE id=?`)
+        .run(trans.name_zh, trans.name_en, trans.name_vi, trans.desc_zh, trans.desc_en, trans.desc_vi, newId);
+    }
+    res.json({ id: newId, ...trans });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -484,8 +541,10 @@ router.put('/designer/designs/:id', requireDesigner, async (req, res) => {
     const {
       topic_id, name, description, target_schema_ids, target_join_ids, vector_search_enabled,
       system_prompt, few_shot_examples, chart_config, cache_ttl_minutes, is_public,
-      vector_top_k, vector_similarity_threshold, vector_skip_fields
+      vector_top_k, vector_similarity_threshold, vector_skip_fields,
+      name_zh, name_en, name_vi, desc_zh, desc_en, desc_vi,
     } = req.body;
+    const existing = await db.prepare(`SELECT name, description FROM ai_select_designs WHERE id=?`).get(req.params.id);
     await db.prepare(
       `UPDATE ai_select_designs SET
          topic_id=?, name=?, description=?, target_schema_ids=?, target_join_ids=?, vector_search_enabled=?,
@@ -508,6 +567,23 @@ router.put('/designer/designs/:id', requireDesigner, async (req, res) => {
       vector_skip_fields || null,
       req.params.id
     );
+    if (name_zh !== undefined) {
+      await db.prepare(`UPDATE ai_select_designs SET name_zh=?,name_en=?,name_vi=?,desc_zh=?,desc_en=?,desc_vi=? WHERE id=?`)
+        .run(name_zh || null, name_en || null, name_vi || null, desc_zh || null, desc_en || null, desc_vi || null, req.params.id);
+    } else {
+      const nameChanged = name !== undefined && existing && name !== existing.name;
+      const descChanged = description !== undefined && existing && description !== existing.description;
+      if (nameChanged || descChanged) {
+        const trans = await translateFields({
+          name: nameChanged ? name : null,
+          description: descChanged ? (description || null) : null,
+        }).catch(() => ({}));
+        const setClauses = []; const params = [];
+        if (nameChanged && trans.name_zh !== undefined) { setClauses.push('name_zh=?,name_en=?,name_vi=?'); params.push(trans.name_zh, trans.name_en, trans.name_vi); }
+        if (descChanged && trans.desc_zh !== undefined) { setClauses.push('desc_zh=?,desc_en=?,desc_vi=?'); params.push(trans.desc_zh, trans.desc_en, trans.desc_vi); }
+        if (setClauses.length) await db.prepare(`UPDATE ai_select_designs SET ${setClauses.join(',')} WHERE id=?`).run(...params, req.params.id);
+      }
+    }
     res.json({ ok: true });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -649,8 +725,8 @@ router.put('/designer/schemas/:id/columns', requireDesigner, async (req, res) =>
         await db.prepare(
           `INSERT INTO ai_schema_columns
              (schema_id, column_name, data_type, description, is_vectorized, value_mapping, sample_values, is_virtual, expression,
-              is_filter_key, filter_layer, filter_source)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+              is_filter_key, filter_layer, filter_source, desc_en, desc_vi)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         ).run(
           req.params.id, col.column_name, col.data_type || null, col.description || null,
           col.is_vectorized ? 1 : 0,
@@ -660,11 +736,49 @@ router.put('/designer/schemas/:id/columns', requireDesigner, async (req, res) =>
           col.expression || null,
           col.is_filter_key ? 1 : 0,
           col.filter_layer || null,
-          col.filter_source || null
+          col.filter_source || null,
+          col.desc_en || null,
+          col.desc_vi || null
         );
       }
     }
     res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/dashboard/designer/schemas/:id/columns/translate — 批次自動翻譯欄位說明
+router.post('/designer/schemas/:id/columns/translate', requireDesigner, async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const cols = await db.prepare(
+      `SELECT id, description FROM ai_schema_columns WHERE schema_id=? AND description IS NOT NULL`
+    ).all(req.params.id);
+    let updated = 0;
+    for (const col of cols) {
+      const t = await translateDescription(col.description).catch(() => null);
+      if (t) {
+        await db.prepare(`UPDATE ai_schema_columns SET desc_en=?,desc_vi=? WHERE id=?`).run(t.desc_en, t.desc_vi, col.id);
+        updated++;
+      }
+    }
+    res.json({ ok: true, updated });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/dashboard/designer/designs/:id/translate — 重新翻譯
+router.post('/designer/designs/:id/translate', requireDesigner, async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const d = await db.prepare(`SELECT name, description FROM ai_select_designs WHERE id=?`).get(req.params.id);
+    if (!d) return res.status(404).json({ error: '不存在' });
+    const trans = await translateFields({ name: d.name, description: d.description });
+    await db.prepare(`UPDATE ai_select_designs SET name_zh=?,name_en=?,name_vi=?,desc_zh=?,desc_en=?,desc_vi=? WHERE id=?`)
+      .run(trans.name_zh, trans.name_en, trans.name_vi, trans.desc_zh, trans.desc_en, trans.desc_vi, req.params.id);
+    res.json(trans);
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -675,7 +789,7 @@ router.get('/designer/schemas/:id/columns/export-csv', requireDesigner, async (r
   try {
     const db = require('../database-oracle').db;
     const cols = await db.prepare(
-      `SELECT column_name, data_type, description, is_virtual, expression FROM ai_schema_columns WHERE schema_id=? ORDER BY id ASC`
+      `SELECT column_name, data_type, description, desc_en, desc_vi, is_virtual, expression FROM ai_schema_columns WHERE schema_id=? ORDER BY id ASC`
     ).all(req.params.id);
     const schema = await db.prepare(`SELECT table_name FROM ai_schema_definitions WHERE id=?`).get(req.params.id);
     const lines = ['column_name,data_type,description,is_virtual,expression'];
@@ -1114,7 +1228,7 @@ router.get('/etl/jobs/:id/logs', requireDesigner, async (req, res) => {
 
 // POST /api/dashboard/query
 router.post('/query', requireDashboard, async (req, res) => {
-  const { design_id, question, vector_top_k, vector_similarity_threshold, model_key } = req.body;
+  const { design_id, question, vector_top_k, vector_similarity_threshold, model_key, lang } = req.body;
   if (!design_id || !question?.trim()) {
     return res.status(400).json({ error: 'design_id 與 question 為必填' });
   }
@@ -1187,6 +1301,7 @@ router.post('/query', requireDashboard, async (req, res) => {
       vectorSimilarityThreshold: vector_similarity_threshold ?? undefined,
       modelKey: model_key || null,
       effectivePolicy,
+      lang: lang || 'zh-TW',
     });
     const db = require('../database-oracle').db;
     await logDashboardAudit(db, req.user.id, design_id, question.trim(), lastSql);

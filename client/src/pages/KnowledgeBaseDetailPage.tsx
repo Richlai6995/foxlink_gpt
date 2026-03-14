@@ -4,10 +4,11 @@ import {
   ArrowLeft, Cpu, FileText, Settings, Share2, Search,
   Upload, Trash2, RefreshCw, CheckCircle, XCircle, Clock,
   AlertCircle, Globe, Lock, ChevronDown, ChevronUp, Plus, X,
-  User, Building2, Layers, BookOpen, Save, Target, Image,
+  User, Building2, Layers, BookOpen, Save, Target, Image, History,
 } from 'lucide-react'
 import api from '../lib/api'
 import { useAuth } from '../context/AuthContext'
+import TranslationFields, { type TranslationData } from '../components/common/TranslationFields'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -49,7 +50,7 @@ interface Grant {
 
 interface OrgOption { code?: string; name: string }
 
-const TABS = ['文件', '分塊與檢索設定', '共享設定', '召回測試'] as const
+const TABS = ['文件', '分塊與檢索設定', '共享設定', '召回測試', '呼叫歷史'] as const
 type TabName = typeof TABS[number]
 
 function DocIcon({ type }: { type: string }) {
@@ -79,11 +80,18 @@ export default function KnowledgeBaseDetailPage() {
   const [loading, setLoading] = useState(true)
   const [tab, setTab] = useState<TabName>('文件')
   const [error, setError] = useState('')
+  const [kbTrans, setKbTrans] = useState<TranslationData>({})
+  const [savingTrans, setSavingTrans] = useState(false)
+  const [transMsg, setTransMsg] = useState('')
 
   const loadKb = useCallback(async () => {
     try {
       const res = await api.get(`/kb/${id}`)
       setKb(res.data)
+      setKbTrans({
+        name_zh: (res.data as any).name_zh || null, name_en: (res.data as any).name_en || null, name_vi: (res.data as any).name_vi || null,
+        desc_zh: (res.data as any).desc_zh || null, desc_en: (res.data as any).desc_en || null, desc_vi: (res.data as any).desc_vi || null,
+      })
     } catch (e: any) {
       setError(e.response?.data?.error || '載入失敗')
     } finally {
@@ -92,6 +100,18 @@ export default function KnowledgeBaseDetailPage() {
   }, [id])
 
   useEffect(() => { loadKb() }, [loadKb])
+
+  const saveTranslation = async () => {
+    if (!kb) return
+    setSavingTrans(true)
+    try {
+      await api.put(`/kb/${kb.id}`, kbTrans)
+      setTransMsg('✓ 已儲存')
+      setTimeout(() => setTransMsg(''), 2000)
+    } catch (e: any) {
+      setTransMsg(e.response?.data?.error || '儲存失敗')
+    } finally { setSavingTrans(false) }
+  }
 
   if (loading) return (
     <div className="min-h-screen bg-slate-100 flex items-center justify-center text-slate-400">載入中...</div>
@@ -147,6 +167,28 @@ export default function KnowledgeBaseDetailPage() {
           </div>
         </div>
 
+        {/* Translation Card */}
+        <div className="bg-white border border-slate-200 rounded-xl px-5 py-4 space-y-3">
+          <TranslationFields
+            data={kbTrans}
+            onChange={setKbTrans}
+            translateUrl={`/kb/${kb.id}/translate`}
+            hasDescription
+          />
+          {(kb.is_owner || isAdmin) && (
+            <div className="flex items-center gap-3">
+              <button
+                onClick={saveTranslation}
+                disabled={savingTrans}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white text-xs rounded-lg hover:bg-blue-700 transition disabled:opacity-50"
+              >
+                <Save size={12} /> {savingTrans ? '儲存中...' : '儲存多語言名稱'}
+              </button>
+              {transMsg && <span className={`text-xs ${transMsg.includes('失敗') ? 'text-red-500' : 'text-green-600'}`}>{transMsg}</span>}
+            </div>
+          )}
+        </div>
+
         {/* Tabs */}
         <div className="flex gap-1 border-b border-slate-200 bg-white rounded-t-xl px-4">
           {TABS.map((t) => (
@@ -161,6 +203,7 @@ export default function KnowledgeBaseDetailPage() {
               {t === '分塊與檢索設定' && <Settings size={14} className="inline mr-1.5" />}
               {t === '共享設定' && <Share2 size={14} className="inline mr-1.5" />}
               {t === '召回測試' && <Search size={14} className="inline mr-1.5" />}
+              {t === '呼叫歷史' && <History size={14} className="inline mr-1.5" />}
               {t}
             </button>
           ))}
@@ -172,6 +215,7 @@ export default function KnowledgeBaseDetailPage() {
           {tab === '分塊與檢索設定' && <SettingsTab kb={kb} onSaved={loadKb} isOwner={kb.is_owner || isAdmin} />}
           {tab === '共享設定' && <ShareTab kb={kb} isOwner={kb.is_owner || isAdmin} />}
           {tab === '召回測試' && <SearchTab kb={kb} />}
+          {tab === '呼叫歷史' && <QueryHistoryTab kbId={kb.id} />}
         </div>
       </div>
     </div>
@@ -1025,6 +1069,66 @@ function SearchTab({ kb }: { kb: KnowledgeBase }) {
             ))}
           </div>
         )}
+      </div>
+    </div>
+  )
+}
+
+// ─── Query History Tab ─────────────────────────────────────────────────────────
+
+interface QueryLog {
+  id: string
+  query_text: string
+  retrieval_mode: string
+  top_k: number
+  elapsed_ms: number
+  source: string
+  created_at: string
+  user_name: string | null
+}
+
+function QueryHistoryTab({ kbId }: { kbId: string }) {
+  const [logs, setLogs] = useState<QueryLog[]>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    api.get(`/kb/${kbId}/retrieval-tests`).then((res) => {
+      setLogs(res.data)
+    }).catch(() => {}).finally(() => setLoading(false))
+  }, [kbId])
+
+  if (loading) return <div className="p-6 text-center text-slate-400 text-sm">載入中...</div>
+  if (logs.length === 0) return (
+    <div className="p-10 text-center text-slate-400">
+      <History size={36} className="mx-auto mb-3 opacity-30" />
+      <p className="text-sm">尚無呼叫紀錄</p>
+    </div>
+  )
+
+  const sourceLabel = (s: string) => s === 'chat' ? '對話' : '召回測試'
+  const sourceColor = (s: string) => s === 'chat' ? 'bg-blue-50 text-blue-600' : 'bg-slate-100 text-slate-500'
+
+  return (
+    <div className="p-4">
+      <p className="text-xs text-slate-400 mb-3">顯示最近 100 筆（含對話查詢及召回測試）</p>
+      <div className="space-y-2">
+        {logs.map((log) => (
+          <div key={log.id} className="flex items-start gap-3 bg-slate-50 rounded-lg px-4 py-3 hover:bg-slate-100 transition">
+            <div className="flex-1 min-w-0">
+              <p className="text-sm text-slate-700 truncate">{log.query_text}</p>
+              <div className="flex items-center gap-2 mt-1 flex-wrap">
+                <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${sourceColor(log.source)}`}>
+                  {sourceLabel(log.source)}
+                </span>
+                <span className="text-xs text-slate-400">{log.retrieval_mode || '-'}</span>
+                <span className="text-xs text-slate-400">top_k={log.top_k}</span>
+                {log.elapsed_ms && <span className="text-xs text-slate-400">{log.elapsed_ms}ms</span>}
+                {log.user_name && <span className="text-xs text-slate-400">by {log.user_name}</span>}
+              </div>
+            </div>
+            <span className="text-xs text-slate-400 whitespace-nowrap">{log.created_at}</span>
+          </div>
+        ))}
       </div>
     </div>
   )

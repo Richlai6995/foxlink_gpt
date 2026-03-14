@@ -3,9 +3,10 @@
  * 僅 can_design_ai_select / admin 可見
  */
 import React, { useState, useEffect, useRef } from 'react'
-import { Plus, Save, Trash2, Play, RefreshCw, ChevronDown, ChevronRight, Eye, Link2, Edit3, Square, Pause, Share2, Copy, Upload, FolderOpen, Filter, X, Download, FileUp, PenLine, FunctionSquare } from 'lucide-react'
+import { Plus, Save, Trash2, Play, RefreshCw, ChevronDown, ChevronRight, Eye, Link2, Edit3, Square, Pause, Share2, Copy, Upload, FolderOpen, Filter, X, Download, FileUp, PenLine, FunctionSquare, Languages } from 'lucide-react'
 import api from '../../lib/api'
 import type { AiSchemaDef, AiSchemaJoin, AiSelectTopic, AiSelectDesign, AiEtlJob, AiEtlRunLog, AiDashboardShare, AiSelectProject, AiProjectShare } from '../../types'
+import TranslationFields, { type TranslationData } from '../common/TranslationFields'
 
 // ── Project Selector ──────────────────────────────────────────────────────────
 function ProjectSelector({
@@ -974,6 +975,24 @@ function SchemaManager({ projectId }: { projectId: number | null }) {
                     className="flex items-center gap-1 text-xs px-2 py-1 rounded border border-gray-300 text-gray-600 hover:border-blue-400 hover:text-blue-600">
                     <PenLine size={11} /> 編輯說明
                   </button>
+                  <button onClick={async () => {
+                    if (!confirm(`批次自動翻譯「${s.display_name || s.table_name}」所有欄位說明為英文和越文？`)) return
+                    try {
+                      const res = await api.post(`/dashboard/designer/schemas/${s.id}/columns/translate`)
+                      // 重新拉最新 schemas（含 desc_en/desc_vi）並更新 editingCols
+                      const qs = projectId ? `?project_id=${projectId}` : ''
+                      const schemasRes = await api.get(`/dashboard/designer/schemas${qs}`)
+                      const freshSchema = schemasRes.data.find((sc: any) => sc.id === s.id)
+                      if (freshSchema) {
+                        setSchemas(schemasRes.data)
+                        startEditCols(freshSchema)
+                      }
+                      alert(`翻譯完成，已更新 ${res.data.updated} 個欄位`)
+                    } catch (e: any) { alert(e?.response?.data?.error || '翻譯失敗') }
+                  }}
+                    className="flex items-center gap-1 text-xs px-2 py-1 rounded border border-gray-300 text-gray-600 hover:border-purple-400 hover:text-purple-600">
+                    <Languages size={11} /> 批次翻譯
+                  </button>
                   <button onClick={() => exportCsv(s.id)}
                     className="flex items-center gap-1 text-xs px-2 py-1 rounded border border-gray-300 text-gray-600 hover:border-green-400 hover:text-green-600">
                     <Download size={11} /> 匯出 CSV
@@ -994,7 +1013,9 @@ function SchemaManager({ projectId }: { projectId: number | null }) {
                             <th className="px-2 py-1.5 text-left text-gray-500 font-medium w-8 text-center" title="資料權限過濾">🔒</th>
                             <th className="px-2 py-1.5 text-left text-gray-500 font-medium w-44">欄位名稱</th>
                             <th className="px-2 py-1.5 text-left text-gray-500 font-medium w-24">型態</th>
-                            <th className="px-2 py-1.5 text-left text-gray-500 font-medium">說明</th>
+                            <th className="px-2 py-1.5 text-left text-gray-500 font-medium">說明 🇹🇼</th>
+                            <th className="px-2 py-1.5 text-left text-gray-500 font-medium">EN 🇺🇸</th>
+                            <th className="px-2 py-1.5 text-left text-gray-500 font-medium">VI 🇻🇳</th>
                             <th className="px-2 py-1.5 w-6"></th>
                           </tr>
                         </thead>
@@ -1024,6 +1045,18 @@ function SchemaManager({ projectId }: { projectId: number | null }) {
                                   <input className="w-full border border-transparent hover:border-gray-300 focus:border-blue-400 rounded px-1 py-0.5 bg-transparent text-gray-700 focus:outline-none focus:bg-white"
                                     value={col.description || ''}
                                     onChange={e => setEditingCols(prev => prev.map((c, idx) => idx === i ? { ...c, description: e.target.value } : c))} />
+                                </td>
+                                <td className="px-2 py-1">
+                                  <input className="w-full border border-transparent hover:border-gray-300 focus:border-blue-400 rounded px-1 py-0.5 bg-transparent text-gray-700 focus:outline-none focus:bg-white text-xs text-blue-700"
+                                    placeholder="English"
+                                    value={(col as any).desc_en || ''}
+                                    onChange={e => setEditingCols(prev => prev.map((c, idx) => idx === i ? { ...c, desc_en: e.target.value } : c))} />
+                                </td>
+                                <td className="px-2 py-1">
+                                  <input className="w-full border border-transparent hover:border-gray-300 focus:border-blue-400 rounded px-1 py-0.5 bg-transparent text-gray-700 focus:outline-none focus:bg-white text-xs text-green-700"
+                                    placeholder="Tiếng Việt"
+                                    value={(col as any).desc_vi || ''}
+                                    onChange={e => setEditingCols(prev => prev.map((c, idx) => idx === i ? { ...c, desc_vi: e.target.value } : c))} />
                                 </td>
                                 <td className="px-1 py-1">
                                   {col.is_virtual && (
@@ -1636,6 +1669,10 @@ function DesignManager({ projectId }: { projectId: number | null }) {
   const [allJoins, setAllJoins] = useState<AiSchemaJoin[]>([])
   const [editDesign, setEditDesign] = useState<AiSelectDesign | null>(null)
   const [showDesignForm, setShowDesignForm] = useState(false)
+  const [designTrans, setDesignTrans] = useState<TranslationData>({})
+  const [designTranslating, setDesignTranslating] = useState(false)
+  const [topicTrans, setTopicTrans] = useState<TranslationData>({})
+  const [topicTranslating, setTopicTranslating] = useState(false)
   const [designForm, setDesignForm] = useState({
     topic_id: '', name: '', description: '', system_prompt: '', few_shot_examples: '[]',
     chart_config: '', cache_ttl_minutes: '30', is_public: false, vector_search_enabled: false,
@@ -1666,21 +1703,35 @@ function DesignManager({ projectId }: { projectId: number | null }) {
   }, [projectId])
 
   const saveTopic = async () => {
-    const { form_project_id, ...rest } = topicForm
-    const payload = { ...rest, project_id: form_project_id ?? projectId ?? undefined }
-    if (editTopicId) {
-      await api.put(`/dashboard/designer/topics/${editTopicId}`, payload)
-      setEditTopicId(null)
-    } else {
-      await api.post('/dashboard/designer/topics', payload)
+    setTopicTranslating(true)
+    try {
+      const { form_project_id, ...rest } = topicForm
+      const payload = { ...rest, project_id: form_project_id ?? projectId ?? undefined, ...topicTrans }
+      if (editTopicId) {
+        await api.put(`/dashboard/designer/topics/${editTopicId}`, payload)
+        setEditTopicId(null)
+      } else {
+        const res = await api.post('/dashboard/designer/topics', payload)
+        setTopicTrans({
+          name_zh: res.data.name_zh || null, name_en: res.data.name_en || null, name_vi: res.data.name_vi || null,
+          desc_zh: res.data.desc_zh || null, desc_en: res.data.desc_en || null, desc_vi: res.data.desc_vi || null,
+        })
+      }
+      setTopicForm({ name: '', description: '', icon: '', sort_order: '0', form_project_id: projectId || undefined })
+      setTopicTrans({})
+      load()
+    } finally {
+      setTopicTranslating(false)
     }
-    setTopicForm({ name: '', description: '', icon: '', sort_order: '0', form_project_id: projectId || undefined })
-    load()
   }
 
   const startEditTopic = (t: AiSelectTopic) => {
     setEditTopicId(t.id)
     setTopicForm({ name: t.name, description: t.description || '', icon: t.icon || '', sort_order: String(t.sort_order ?? 0), form_project_id: t.project_id ?? projectId ?? undefined })
+    setTopicTrans({
+      name_zh: (t as any).name_zh || null, name_en: (t as any).name_en || null, name_vi: (t as any).name_vi || null,
+      desc_zh: (t as any).desc_zh || null, desc_en: (t as any).desc_en || null, desc_vi: (t as any).desc_vi || null,
+    })
     setTimeout(() => topicFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50)
   }
 
@@ -1736,6 +1787,7 @@ function DesignManager({ projectId }: { projectId: number | null }) {
 
   const saveDesign = async () => {
     setLoading(true)
+    setDesignTranslating(true)
     try {
       const payload = {
         ...designForm,
@@ -1745,12 +1797,17 @@ function DesignManager({ projectId }: { projectId: number | null }) {
         vector_similarity_threshold: designForm.vector_similarity_threshold || '0.50',
         vector_skip_fields: JSON.stringify(designForm.vector_skip_fields),
         target_schema_ids: designForm.target_schema_ids,
-        target_join_ids: designForm.target_join_ids
+        target_join_ids: designForm.target_join_ids,
+        ...designTrans,
       }
       if (editDesign) {
         await api.put(`/dashboard/designer/designs/${editDesign.id}`, payload)
       } else {
-        await api.post('/dashboard/designer/designs', payload)
+        const res = await api.post('/dashboard/designer/designs', payload)
+        setDesignTrans({
+          name_zh: res.data.name_zh || null, name_en: res.data.name_en || null, name_vi: res.data.name_vi || null,
+          desc_zh: res.data.desc_zh || null, desc_en: res.data.desc_en || null, desc_vi: res.data.desc_vi || null,
+        })
       }
       setShowDesignForm(false)
       setEditDesign(null)
@@ -1759,6 +1816,7 @@ function DesignManager({ projectId }: { projectId: number | null }) {
       alert(e?.response?.data?.error || '儲存失敗')
     } finally {
       setLoading(false)
+      setDesignTranslating(false)
     }
   }
 
@@ -1800,6 +1858,14 @@ function DesignManager({ projectId }: { projectId: number | null }) {
             </select>
           </div>
         </div>
+        {/* 多語言翻譯 */}
+        <TranslationFields
+          data={topicTrans}
+          onChange={setTopicTrans}
+          translateUrl={editTopicId ? `/dashboard/designer/topics/${editTopicId}/translate` : undefined}
+          hasDescription
+          translating={topicTranslating}
+        />
         {/* Icon upload (only in edit mode after topic created) */}
         {editTopicId && (
           <div className="flex items-center gap-2">
@@ -1818,7 +1884,7 @@ function DesignManager({ projectId }: { projectId: number | null }) {
             <Plus size={12} /> {editTopicId ? '儲存主題' : '新增主題'}
           </button>
           {editTopicId && (
-            <button onClick={() => { setEditTopicId(null); setTopicForm({ name: '', description: '', icon: '', sort_order: '0', form_project_id: projectId || undefined }) }}
+            <button onClick={() => { setEditTopicId(null); setTopicForm({ name: '', description: '', icon: '', sort_order: '0', form_project_id: projectId || undefined }); setTopicTrans({}) }}
               className="text-xs text-gray-500 hover:text-gray-800 px-2">取消</button>
           )}
         </div>
@@ -1834,7 +1900,7 @@ function DesignManager({ projectId }: { projectId: number | null }) {
               {t.is_suspended === 1 && <span className="text-xs bg-orange-100 text-orange-600 px-1.5 py-0.5 rounded">已暫停</span>}
             </div>
             <div className="flex items-center gap-1.5">
-              <button onClick={() => { setDesignForm(resetDesignForm(String(t.id))); setEditDesign(null); setShowDesignForm(true) }}
+              <button onClick={() => { setDesignForm(resetDesignForm(String(t.id))); setEditDesign(null); setDesignTrans({}); setShowDesignForm(true) }}
                 className="text-xs text-blue-400 hover:text-blue-300 flex items-center gap-1">
                 <Plus size={11} /> 新增任務
               </button>
@@ -1896,6 +1962,10 @@ function DesignManager({ projectId }: { projectId: number | null }) {
                           : [],
                         target_schema_ids: sids, target_join_ids: jids
                       })
+                      setDesignTrans({
+                        name_zh: (full as any).name_zh || null, name_en: (full as any).name_en || null, name_vi: (full as any).name_vi || null,
+                        desc_zh: (full as any).desc_zh || null, desc_en: (full as any).desc_en || null, desc_vi: (full as any).desc_vi || null,
+                      })
                       setShowDesignForm(true)
                     } catch { alert('載入失敗') }
                   }} className="text-xs text-gray-500 hover:text-blue-400">編輯</button>
@@ -1926,6 +1996,15 @@ function DesignManager({ projectId }: { projectId: number | null }) {
                 <label className="text-xs text-gray-400 mb-1 block">說明</label>
                 <input className="input py-1.5 text-sm" value={designForm.description}
                   onChange={e => setDesignForm(p => ({ ...p, description: e.target.value }))} />
+              </div>
+              <div className="col-span-2">
+                <TranslationFields
+                  data={designTrans}
+                  onChange={setDesignTrans}
+                  translateUrl={editDesign ? `/dashboard/designer/designs/${editDesign.id}/translate` : undefined}
+                  hasDescription
+                  translating={designTranslating}
+                />
               </div>
               <div>
                 <label className="text-xs text-gray-400 mb-1 block">快取時間（分鐘）</label>

@@ -12,6 +12,7 @@ import {
   BarChart3, ChevronRight, ChevronDown, Send, RefreshCw,
   Table, BarChart2, Settings2, Code, ArrowLeft, Layers, History, Trash2, X
 } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import { useAuth } from '../context/AuthContext'
 import api from '../lib/api'
 import AiChart from '../components/dashboard/AiChart'
@@ -24,7 +25,20 @@ type ViewMode = 'chart' | 'table'
 export default function AiDashboardPage() {
   const { isAdmin, canUseDashboard, canDesignAiSelect } = useAuth()
   const navigate = useNavigate()
+  const { t, i18n } = useTranslation()
   const [searchParams] = useSearchParams()
+
+  const localName = (item: any) => {
+    if (i18n.language === 'en') return item.name_en || item.name
+    if (i18n.language === 'vi') return item.name_vi || item.name
+    return item.name_zh || item.name
+  }
+
+  const localDesc = (item: any) => {
+    if (i18n.language === 'en') return item.desc_en || item.description
+    if (i18n.language === 'vi') return item.desc_vi || item.description
+    return item.desc_zh || item.description
+  }
 
   const [topics, setTopics] = useState<AiSelectTopic[]>([])
   const [expandedTopics, setExpandedTopics] = useState<Set<number>>(new Set())
@@ -56,7 +70,7 @@ export default function AiDashboardPage() {
     setHistory(p => p.filter(h => h.id !== id))
   }
   const clearHistory = async () => {
-    if (!confirm('清除所有查詢歷史？')) return
+    if (!confirm(t('aiDash.clearAllConfirm'))) return
     await api.delete('/dashboard/history')
     setHistory([])
   }
@@ -163,6 +177,7 @@ export default function AiDashboardPage() {
         body: JSON.stringify({
           design_id: selectedDesign.id,
           question: question.trim(),
+          lang: i18n.language,
           ...(selectedModelKey ? { model_key: selectedModelKey } : {}),
           ...(advTopK ? { vector_top_k: Number(advTopK) } : {}),
           ...(advThreshold ? { vector_similarity_threshold: advThreshold } : {}),
@@ -254,6 +269,7 @@ export default function AiDashboardPage() {
         body: JSON.stringify({
           design_id: selectedDesign.id,
           question: question.trim(),
+          lang: i18n.language,
           ...(selectedModelKey ? { model_key: selectedModelKey } : {}),
           ...(advTopK ? { vector_top_k: Number(advTopK) } : {}),
           ...(advThreshold ? { vector_similarity_threshold: advThreshold } : {}),
@@ -334,10 +350,10 @@ export default function AiDashboardPage() {
         <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-200 bg-white flex-shrink-0">
           <button onClick={() => { setShowDesigner(false); loadTopics() }}
             className="flex items-center gap-1 text-gray-500 hover:text-gray-800 text-sm transition">
-            <ArrowLeft size={14} /> 返回
+            <ArrowLeft size={14} /> {t('aiDash.back')}
           </button>
           <BarChart3 size={16} className="text-orange-400" />
-          <span className="text-sm font-medium text-gray-800">AI 戰情設計介面</span>
+          <span className="text-sm font-medium text-gray-800">{t('aiDash.designInterface')}</span>
         </div>
         <div className="flex-1 overflow-hidden">
           <DesignerPanel />
@@ -353,7 +369,7 @@ export default function AiDashboardPage() {
         <div className="p-4 border-b border-gray-200 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <BarChart3 size={16} className="text-orange-400" />
-            <span className="text-sm font-semibold text-gray-800">AI 戰情</span>
+            <span className="text-sm font-semibold text-gray-800">{t('aiDash.title')}</span>
           </div>
           <button onClick={() => navigate('/chat')}
             className="text-gray-400 hover:text-gray-700 text-xs transition">
@@ -365,11 +381,11 @@ export default function AiDashboardPage() {
         <div className="flex border-b border-gray-200 flex-shrink-0">
           <button onClick={() => setSidebarTab('topics')}
             className={`flex-1 flex items-center justify-center gap-1 py-2 text-xs transition ${sidebarTab === 'topics' ? 'text-orange-600 border-b-2 border-orange-400 font-medium' : 'text-gray-400 hover:text-gray-700'}`}>
-            <Layers size={11} /> 查詢
+            <Layers size={11} /> {t('aiDash.tabQuery')}
           </button>
           <button onClick={() => setSidebarTab('history')}
             className={`flex-1 flex items-center justify-center gap-1 py-2 text-xs transition ${sidebarTab === 'history' ? 'text-orange-600 border-b-2 border-orange-400 font-medium' : 'text-gray-400 hover:text-gray-700'}`}>
-            <History size={11} /> 歷史
+            <History size={11} /> {t('aiDash.tabHistory')}
           </button>
         </div>
 
@@ -378,24 +394,24 @@ export default function AiDashboardPage() {
           <div className="flex-1 overflow-y-auto py-2">
             {topics.length === 0 && (
               <p className="text-gray-400 text-xs text-center py-8 px-4">
-                {canDesignAiSelect || isAdmin ? '尚未建立查詢主題，請進入設計介面' : '尚無可用的查詢設計'}
+                {canDesignAiSelect || isAdmin ? t('aiDash.noTopicsAdmin') : t('aiDash.noTopicsUser')}
               </p>
             )}
-            {topics.map(t => (
-              <div key={t.id} className="mb-1">
+            {topics.map(topic => (
+              <div key={topic.id} className="mb-1">
                 <button
-                  onClick={() => toggleTopic(t.id)}
+                  onClick={() => toggleTopic(topic.id)}
                   className="w-full flex items-center gap-2 px-3 py-2 text-gray-500 hover:text-gray-800 hover:bg-gray-50 transition text-xs font-medium"
                 >
-                  {expandedTopics.has(t.id)
+                  {expandedTopics.has(topic.id)
                     ? <ChevronDown size={12} className="flex-shrink-0" />
                     : <ChevronRight size={12} className="flex-shrink-0" />}
                   <Layers size={12} className="text-orange-400 flex-shrink-0" />
-                  <span className="truncate">{t.name}</span>
+                  <span className="truncate">{localName(topic)}</span>
                 </button>
-                {expandedTopics.has(t.id) && (
+                {expandedTopics.has(topic.id) && (
                   <div className="ml-4">
-                    {(t.designs || []).map(d => (
+                    {(topic.designs || []).map(d => (
                       <button
                         key={d.id}
                         onClick={() => selectDesign(d)}
@@ -406,14 +422,14 @@ export default function AiDashboardPage() {
                         }`}
                       >
                         <BarChart2 size={11} className="flex-shrink-0" />
-                        <span className="truncate text-left">{d.name}</span>
+                        <span className="truncate text-left">{localName(d)}</span>
                         {d.vector_search_enabled === 1 && (
-                          <span className="ml-auto text-purple-400 text-[10px]">語意</span>
+                          <span className="ml-auto text-purple-400 text-[10px]">{t('aiDash.semanticBadge')}</span>
                         )}
                       </button>
                     ))}
-                    {(t.designs || []).length === 0 && (
-                      <p className="text-gray-400 text-xs px-4 py-1">無任務</p>
+                    {(topic.designs || []).length === 0 && (
+                      <p className="text-gray-400 text-xs px-4 py-1">{t('aiDash.noDesigns')}</p>
                     )}
                   </div>
                 )}
@@ -426,16 +442,16 @@ export default function AiDashboardPage() {
         {sidebarTab === 'history' && (
           <div className="flex-1 overflow-y-auto flex flex-col">
             <div className="flex items-center justify-between px-3 py-2 border-b border-gray-100">
-              <span className="text-xs text-gray-400">{history.length} 筆</span>
+              <span className="text-xs text-gray-400">{t('aiDash.historyCount', { count: history.length })}</span>
               {history.length > 0 && (
                 <button onClick={clearHistory} className="text-xs text-gray-400 hover:text-red-400 flex items-center gap-1">
-                  <Trash2 size={10} /> 全部清除
+                  <Trash2 size={10} /> {t('aiDash.clearAll')}
                 </button>
               )}
             </div>
-            {historyLoading && <p className="text-xs text-gray-400 text-center py-4">載入中...</p>}
+            {historyLoading && <p className="text-xs text-gray-400 text-center py-4">{t('aiDash.loading')}</p>}
             {!historyLoading && history.length === 0 && (
-              <p className="text-xs text-gray-400 text-center py-8">尚無查詢歷史</p>
+              <p className="text-xs text-gray-400 text-center py-8">{t('aiDash.noHistory')}</p>
             )}
             <div className="flex-1 overflow-y-auto">
               {history.map(h => (
@@ -477,7 +493,7 @@ export default function AiDashboardPage() {
                         onClick={() => { setQuestion(h.question); setSidebarTab('topics') }}
                         className="text-xs text-blue-500 hover:text-blue-700"
                       >
-                        重新查詢 →
+                        {t('aiDash.requery')}
                       </button>
                     </div>
                   )}
@@ -493,7 +509,7 @@ export default function AiDashboardPage() {
               onClick={() => setShowDesigner(true)}
               className="w-full flex items-center gap-2 text-gray-500 hover:text-orange-400 hover:bg-gray-50 px-3 py-2 rounded-lg text-xs transition"
             >
-              <Settings2 size={13} /> 設計介面
+              <Settings2 size={13} /> {t('aiDash.designerBtn')}
             </button>
           </div>
         )}
@@ -506,13 +522,13 @@ export default function AiDashboardPage() {
           <div>
             {selectedDesign ? (
               <div>
-                <span className="text-sm font-medium text-gray-800">{selectedDesign.name}</span>
+                <span className="text-sm font-medium text-gray-800">{localName(selectedDesign)}</span>
                 {selectedDesign.description && (
-                  <span className="ml-2 text-xs text-gray-400">{selectedDesign.description}</span>
+                  <span className="ml-2 text-xs text-gray-400">{localDesc(selectedDesign)}</span>
                 )}
               </div>
             ) : (
-              <span className="text-sm text-gray-400">請從左側選擇查詢設計</span>
+              <span className="text-sm text-gray-400">{t('aiDash.selectDesign')}</span>
             )}
           </div>
           {(canDesignAiSelect || isAdmin) && selectedDesign && (
@@ -520,7 +536,7 @@ export default function AiDashboardPage() {
               onClick={() => setDevMode(v => !v)}
               className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg transition ${devMode ? 'bg-gray-200 text-gray-800' : 'text-gray-400 hover:text-gray-700 hover:bg-gray-50'}`}
             >
-              <Code size={12} /> 開發模式
+              <Code size={12} /> {t('aiDash.devMode')}
             </button>
           )}
         </div>
@@ -532,7 +548,7 @@ export default function AiDashboardPage() {
               <div className="flex gap-3">
                 <textarea
                   className="flex-1 bg-transparent text-sm text-gray-800 placeholder-gray-400 resize-none outline-none min-h-[60px]"
-                  placeholder={`用自然語言描述您想查詢的內容...`}
+                  placeholder={t('aiDash.queryPlaceholder')}
                   value={question}
                   onChange={e => setQuestion(e.target.value)}
                   onKeyDown={e => {
@@ -546,13 +562,13 @@ export default function AiDashboardPage() {
                   className="self-end flex items-center gap-1.5 bg-orange-600 hover:bg-orange-500 disabled:opacity-40 text-white px-4 py-2 rounded-xl text-sm font-medium transition"
                 >
                   {loading ? <RefreshCw size={14} className="animate-spin" /> : <Send size={14} />}
-                  {loading ? '查詢中' : '查詢'}
+                  {loading ? t('aiDash.querying') : t('aiDash.queryBtn')}
                 </button>
               </div>
               {/* Model 選擇器 */}
               {models.length > 0 && (
                 <div className="flex items-center gap-2 mt-2">
-                  <span className="text-xs text-gray-400">模型</span>
+                  <span className="text-xs text-gray-400">{t('aiDash.modelLabel')}</span>
                   <select
                     value={selectedModelKey}
                     onChange={e => setSelectedModelKey(e.target.value)}
@@ -570,7 +586,7 @@ export default function AiDashboardPage() {
                   <button onClick={() => setShowVectorAdv(p => !p)}
                     className="text-xs text-gray-400 hover:text-blue-500 flex items-center gap-1">
                     <Settings2 size={11} />
-                    語意搜尋參數 {showVectorAdv ? '▲' : '▼'}
+                    {t('aiDash.vectorParams')} {showVectorAdv ? '▲' : '▼'}
                   </button>
                   {showVectorAdv && (
                     <div className="flex items-center gap-4 mt-2">
@@ -582,16 +598,16 @@ export default function AiDashboardPage() {
                           onChange={e => setAdvTopK(e.target.value)} />
                       </div>
                       <div>
-                        <label className="text-xs text-gray-400 block mb-1">相似度門檻</label>
+                        <label className="text-xs text-gray-400 block mb-1">{t('aiDash.threshold')}</label>
                         <input type="number" min={0} max={2} step={0.05} className="input py-1 text-xs w-24"
                           placeholder={String(selectedDesign.vector_similarity_threshold ?? '0.50')}
                           value={advThreshold}
                           onChange={e => setAdvThreshold(e.target.value)} />
                       </div>
-                      <p className="text-xs text-gray-400 self-end pb-1">留空使用任務預設值</p>
+                      <p className="text-xs text-gray-400 self-end pb-1">{t('aiDash.thresholdHint')}</p>
                       {(advTopK || advThreshold) && (
                         <button onClick={() => { setAdvTopK(''); setAdvThreshold('') }}
-                          className="text-xs text-gray-400 hover:text-red-400 self-end pb-1">重置</button>
+                          className="text-xs text-gray-400 hover:text-red-400 self-end pb-1">{t('aiDash.reset')}</button>
                       )}
                     </div>
                   )}
@@ -617,14 +633,14 @@ export default function AiDashboardPage() {
                       onClick={() => setViewMode('chart')}
                       className={`flex items-center gap-1 px-3 py-1.5 text-xs rounded-md transition ${viewMode === 'chart' ? 'bg-blue-600 text-white' : 'text-gray-500 hover:text-gray-800'}`}
                     >
-                      <BarChart2 size={12} /> 圖表
+                      <BarChart2 size={12} /> {t('aiDash.chartTab')}
                     </button>
                   )}
                   <button
                     onClick={() => setViewMode('table')}
                     className={`flex items-center gap-1 px-3 py-1.5 text-xs rounded-md transition ${viewMode === 'table' ? 'bg-blue-600 text-white' : 'text-gray-500 hover:text-gray-800'}`}
                   >
-                    <Table size={12} /> 資料表
+                    <Table size={12} /> {t('aiDash.tableTab')}
                   </button>
                 </div>
 
@@ -641,8 +657,8 @@ export default function AiDashboardPage() {
                 )}
 
                 <span className="ml-auto text-xs text-gray-400">
-                  {result.cached && <span className="text-teal-600 mr-2">快取命中</span>}
-                  {result.row_count} 筆
+                  {result.cached && <span className="text-teal-600 mr-2">{t('aiDash.cacheHit')}</span>}
+                  {t('aiDash.rowCount', { count: result.row_count })}
                 </span>
               </div>
 
@@ -666,22 +682,22 @@ export default function AiDashboardPage() {
           {devMode && (canDesignAiSelect || isAdmin) && (devSql || devVectorResults.length > 0) && (
             <div className="bg-slate-900 border border-slate-700 rounded-2xl p-4 space-y-3">
               <p className="text-xs font-medium text-gray-500 flex items-center gap-1.5">
-                <Code size={12} /> 開發者資訊
+                <Code size={12} /> {t('aiDash.devInfo')}
               </p>
               <div className="grid grid-cols-3 gap-3 text-xs text-gray-400">
-                {devCached && <span className="text-teal-500">快取命中</span>}
+                {devCached && <span className="text-teal-500">{t('aiDash.cacheHit')}</span>}
                 {devTokens && <span>Prompt {devTokens.prompt} / Output {devTokens.output} tokens</span>}
                 {devDuration !== null && <span>執行 {devDuration}ms</span>}
               </div>
               {devSql && (
                 <div>
-                  <p className="text-xs text-gray-400 mb-1">生成 SQL</p>
+                  <p className="text-xs text-gray-400 mb-1">{t('aiDash.generatedSql')}</p>
                   <pre className="bg-gray-900 text-green-400 text-xs p-3 rounded-lg overflow-x-auto font-mono whitespace-pre-wrap">{devSql}</pre>
                 </div>
               )}
               {devVectorResults.length > 0 && (
                 <div>
-                  <p className="text-xs text-gray-400 mb-1">語意搜尋結果（top {devVectorResults.length}）</p>
+                  <p className="text-xs text-gray-400 mb-1">{t('aiDash.vectorResults', { count: devVectorResults.length })}</p>
                   <div className="space-y-1">
                     {devVectorResults.slice(0, 5).map((r, i) => (
                       <div key={i} className="bg-gray-100 rounded-lg px-3 py-2 text-xs text-gray-500">
@@ -699,11 +715,11 @@ export default function AiDashboardPage() {
           {!selectedDesign && (
             <div className="flex flex-col items-center justify-center h-64 text-gray-400">
               <BarChart3 size={48} className="mb-4 opacity-30" />
-              <p className="text-sm">請從左側選擇一個查詢設計</p>
+              <p className="text-sm">{t('aiDash.selectDesign')}</p>
               {(canDesignAiSelect || isAdmin) && (
                 <button onClick={() => setShowDesigner(true)}
                   className="mt-3 text-xs text-orange-400 hover:text-orange-300 transition">
-                  或前往設計介面建立新查詢
+                  {t('aiDash.goToDesigner')}
                 </button>
               )}
             </div>

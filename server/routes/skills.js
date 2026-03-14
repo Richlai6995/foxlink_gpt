@@ -3,6 +3,7 @@ const path    = require('path');
 const fs      = require('fs');
 const router  = express.Router();
 const { verifyToken } = require('./auth');
+const { translateFields } = require('../services/translationService');
 
 // ── Service key middleware（供外部 skill handler 呼叫，不走 user token）──────
 function verifyServiceKey(req, res, next) {
@@ -204,6 +205,7 @@ router.post('/', async (req, res) => {
         if (type === 'code' && !await hasSkillPerm(db, req.user.id, 'allow_code_skill') && req.user.role !== 'admin') {
             return res.status(403).json({ error: '無建立內部程式 Skill 的權限' });
         }
+        const { name_zh, name_en, name_vi, desc_zh, desc_en, desc_vi } = req.body;
         const result = await db.prepare(`
       INSERT INTO skills (name, description, icon, type, system_prompt, endpoint_url, endpoint_secret,
         endpoint_mode, model_key, mcp_tool_mode, mcp_tool_ids, dify_kb_ids, tags, owner_user_id,
@@ -222,7 +224,16 @@ router.post('/', async (req, res) => {
             code_snippet || null,
             JSON.stringify(code_packages || [])
         );
-        const skill = await db.prepare('SELECT * FROM skills WHERE id=?').get(result.lastInsertRowid);
+        const newId = result.lastInsertRowid;
+        // Auto-translate (or use manually provided translations)
+        const trans = (name_zh !== undefined)
+          ? { name_zh: name_zh || null, name_en: name_en || null, name_vi: name_vi || null, desc_zh: desc_zh || null, desc_en: desc_en || null, desc_vi: desc_vi || null }
+          : await translateFields({ name, description }).catch(() => ({ name_zh: null, name_en: null, name_vi: null, desc_zh: null, desc_en: null, desc_vi: null }));
+        if (trans.name_zh !== undefined) {
+          await db.prepare(`UPDATE skills SET name_zh=?,name_en=?,name_vi=?,desc_zh=?,desc_en=?,desc_vi=? WHERE id=?`)
+            .run(trans.name_zh, trans.name_en, trans.name_vi, trans.desc_zh, trans.desc_en, trans.desc_vi, newId);
+        }
+        const skill = await db.prepare('SELECT * FROM skills WHERE id=?').get(newId);
         res.json(serializeSkill(skill, false));
     } catch (e) {
         res.status(500).json({ error: e.message });
@@ -261,7 +272,8 @@ router.put('/:id', async (req, res) => {
         }
         const { name, description, icon, type, system_prompt, endpoint_url, endpoint_secret,
             endpoint_mode, model_key, mcp_tool_mode, mcp_tool_ids, dify_kb_ids, tags,
-            code_snippet, code_packages } = req.body;
+            code_snippet, code_packages,
+            name_zh, name_en, name_vi, desc_zh, desc_en, desc_vi } = req.body;
         if (type === 'external' && !await hasSkillPerm(db, req.user.id, 'allow_external_skill') && req.user.role !== 'admin') {
             return res.status(403).json({ error: '無建立外部 Skill 的權限' });
         }
@@ -272,6 +284,9 @@ router.put('/:id', async (req, res) => {
         const newSecret = (endpoint_secret && endpoint_secret !== '****') ? endpoint_secret : s.endpoint_secret;
         const tagsJson = JSON.stringify(tags ?? parseJsonField(s.tags));
         console.log(`[Skill PUT] id=${req.params.id} tags_received=${JSON.stringify(tags)} tags_json=${tagsJson}`);
+        // Determine final name/desc for translation reference
+        const finalName = name ?? s.name;
+        const finalDesc = description ?? s.description;
         const updateResult = await db.prepare(`
       UPDATE skills SET name=?, description=?, icon=?, type=?, system_prompt=?,
         endpoint_url=?, endpoint_secret=?, endpoint_mode=?, model_key=?,
@@ -279,7 +294,7 @@ router.put('/:id', async (req, res) => {
         code_snippet=?, code_packages=?, updated_at=CURRENT_TIMESTAMP
       WHERE id=?
     `).run(
-            name ?? s.name, description ?? s.description, icon ?? s.icon,
+            finalName, finalDesc, icon ?? s.icon,
             type ?? s.type, system_prompt ?? s.system_prompt,
             endpoint_url ?? s.endpoint_url, newSecret,
             endpoint_mode ?? s.endpoint_mode, model_key ?? s.model_key,
@@ -292,6 +307,34 @@ router.put('/:id', async (req, res) => {
             req.params.id
         );
         console.log(`[Skill PUT] UPDATE rowsAffected=${updateResult?.changes}`);
+        // Update translations (use provided values or auto-translate if name/desc changed)
+        const nameChanged = name !== undefined && name !== s.name;
+        const descChanged = description !== undefined && description !== s.description;
+        if (name_zh !== undefined) {
+          // Manual translation values provided
+          await db.prepare(`UPDATE skills SET name_zh=?,name_en=?,name_vi=?,desc_zh=?,desc_en=?,desc_vi=? WHERE id=?`)
+            .run(name_zh || null, name_en || null, name_vi || null, desc_zh || null, desc_en || null, desc_vi || null, req.params.id);
+        } else if (nameChanged || descChanged) {
+          // Auto-translate changed fields
+          const trans = await translateFields({
+            name: nameChanged ? finalName : null,
+            description: descChanged ? finalDesc : null,
+          }).catch(() => ({}));
+          const setClauses = [];
+          const params = [];
+          if (nameChanged && trans.name_zh !== undefined) {
+            setClauses.push('name_zh=?,name_en=?,name_vi=?');
+            params.push(trans.name_zh, trans.name_en, trans.name_vi);
+          }
+          if (descChanged && trans.desc_zh !== undefined) {
+            setClauses.push('desc_zh=?,desc_en=?,desc_vi=?');
+            params.push(trans.desc_zh, trans.desc_en, trans.desc_vi);
+          }
+          if (setClauses.length) {
+            await db.prepare(`UPDATE skills SET ${setClauses.join(',')} WHERE id=?`)
+              .run(...params, req.params.id);
+          }
+        }
         const updated = await db.prepare('SELECT * FROM skills WHERE id=?').get(req.params.id);
         console.log(`[Skill PUT] SELECT after update: tags=${updated?.tags}`);
         res.json(serializeSkill(updated, req.user.role !== 'admin' && updated.owner_user_id !== req.user.id));
@@ -424,6 +467,51 @@ router.post('/:id/request-public', async (req, res) => {
         if (s.owner_user_id !== req.user.id) return res.status(403).json({ error: '只有建立者可申請公開' });
         await db.prepare('UPDATE skills SET pending_approval=1, updated_at=CURRENT_TIMESTAMP WHERE id=?').run(req.params.id);
         res.json({ success: true, message: '已送出公開申請，等待管理員審核' });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// GET /api/skills/:id/call-logs — 技能呼叫歷史紀錄
+router.get('/:id/call-logs', async (req, res) => {
+    try {
+        const db = require('../database-oracle').db;
+        const sk = await db.prepare('SELECT id, owner_user_id FROM skills WHERE id=?').get(req.params.id);
+        if (!sk) return res.status(404).json({ error: '找不到技能' });
+        // Only owner or admin can view
+        if (req.user.role !== 'admin' && sk.owner_user_id !== req.user.id) {
+            return res.status(403).json({ error: '無存取權限' });
+        }
+        const logs = await db.prepare(`
+            SELECT l.id, l.user_id, l.session_id, l.query_preview, l.response_preview,
+                   l.status, l.error_msg, l.duration_ms,
+                   TO_CHAR(l.called_at, 'YYYY-MM-DD HH24:MI:SS') AS called_at,
+                   u.name AS user_name
+            FROM skill_call_logs l
+            LEFT JOIN users u ON u.id = l.user_id
+            WHERE l.skill_id = ?
+            ORDER BY l.called_at DESC
+            FETCH FIRST 100 ROWS ONLY
+        `).all(req.params.id);
+        res.json(logs);
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// ── POST /api/skills/:id/translate — 重新翻譯 ─────────────────────────────────
+router.post('/:id/translate', async (req, res) => {
+    try {
+        const db = require('../database-oracle').db;
+        const s = await db.prepare('SELECT * FROM skills WHERE id=?').get(req.params.id);
+        if (!s) return res.status(404).json({ error: '找不到 skill' });
+        if (s.owner_user_id !== req.user.id && req.user.role !== 'admin') {
+            return res.status(403).json({ error: '無操作權限' });
+        }
+        const trans = await translateFields({ name: s.name, description: s.description });
+        await db.prepare(`UPDATE skills SET name_zh=?,name_en=?,name_vi=?,desc_zh=?,desc_en=?,desc_vi=? WHERE id=?`)
+            .run(trans.name_zh, trans.name_en, trans.name_vi, trans.desc_zh, trans.desc_en, trans.desc_vi, req.params.id);
+        res.json(trans);
     } catch (e) {
         res.status(500).json({ error: e.message });
     }

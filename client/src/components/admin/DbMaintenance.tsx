@@ -1,412 +1,243 @@
-import { useRef, useState, useEffect } from 'react'
-import { Database, Download, Upload, AlertTriangle, FolderOpen, Save, Play, Trash2, Clock, CalendarClock } from 'lucide-react'
-import { useTranslation } from 'react-i18next'
+import { useState, useEffect } from 'react'
+import { History, Trash2, Clock, Save, Play, ShieldAlert, MessageSquare, CalendarClock, Database, Zap, Search, FlaskConical, BarChart2 } from 'lucide-react'
 import api from '../../lib/api'
 
+interface CleanupSettings {
+  audit_days: number
+  audit_sensitive_days: number
+  llm_days: number
+  scheduled_task_days: number
+  dify_days: number
+  kb_query_days: number
+  skill_days: number
+  research_days: number
+  token_usage_days: number
+  auto_enabled: boolean
+  auto_hour: number
+}
+
 interface CleanupStats {
-  normal_sessions: number
-  sensitive_sessions: number
-  normal_audit: number
-  sensitive_audit: number
+  audit_normal: number
+  audit_sensitive: number
+  llm_sessions: number
+  scheduled_task_runs: number
+  dify_call_logs: number
+  kb_query_logs: number
+  skill_call_logs: number
+  research_jobs: number
   token_usage: number
 }
 
+const DEFAULT: CleanupSettings = {
+  audit_days: 90, audit_sensitive_days: 365,
+  llm_days: 90, scheduled_task_days: 90,
+  dify_days: 90, kb_query_days: 90,
+  skill_days: 90, research_days: 90,
+  token_usage_days: 365,
+  auto_enabled: false, auto_hour: 2,
+}
+
+function DaysInput({ label, value, onChange }: { label: string; value: number; onChange: (v: number) => void }) {
+  return (
+    <div>
+      <label className="block text-xs text-slate-500 mb-1">{label}</label>
+      <div className="flex items-center gap-1.5">
+        <input
+          type="number" min={1} max={3650} value={value}
+          onChange={(e) => onChange(Math.max(1, Number(e.target.value)))}
+          className="input w-20 py-1 text-sm"
+        />
+        <span className="text-xs text-slate-400">天</span>
+      </div>
+    </div>
+  )
+}
+
+interface SectionProps {
+  icon: React.ReactNode
+  title: string
+  desc: string
+  children: React.ReactNode
+}
+function Section({ icon, title, desc, children }: SectionProps) {
+  return (
+    <div className="bg-white border border-slate-200 rounded-xl p-5 mb-4">
+      <div className="flex items-center gap-2 mb-1">
+        {icon}
+        <h3 className="font-semibold text-slate-700 text-sm">{title}</h3>
+      </div>
+      <p className="text-xs text-slate-400 mb-4">{desc}</p>
+      {children}
+    </div>
+  )
+}
+
 export default function DbMaintenance() {
-  const { t } = useTranslation()
-  const fileRef = useRef<HTMLInputElement>(null)
-  const [importing, setImporting] = useState(false)
-  const [message, setMessage] = useState('')
-
-  // Auto-backup path
-  const [autoBackupPath, setAutoBackupPath] = useState('')
-  const [savingPath, setSavingPath] = useState(false)
-  const [backingUp, setBackingUp] = useState(false)
-
-  // Backup schedule
-  const [backupSchedEnabled, setBackupSchedEnabled] = useState(false)
-  const [backupSchedType, setBackupSchedType] = useState<'daily' | 'weekly'>('daily')
-  const [backupSchedHour, setBackupSchedHour] = useState(2)
-  const [backupSchedWeekday, setBackupSchedWeekday] = useState(1)
-  const [savingBackupSched, setSavingBackupSched] = useState(false)
-
-  // Cleanup settings
-  const [retentionDays, setRetentionDays] = useState(90)
-  const [sensitiveDays, setSensitiveDays] = useState(365)
-  const [autoCleanEnabled, setAutoCleanEnabled] = useState(false)
-  const [autoHour, setAutoHour] = useState(2)
-  const [savingCleanup, setSavingCleanup] = useState(false)
+  const [settings, setSettings] = useState<CleanupSettings>(DEFAULT)
+  const [saving, setSaving] = useState(false)
   const [cleaningUp, setCleaningUp] = useState(false)
   const [cleanupStats, setCleanupStats] = useState<CleanupStats | null>(null)
+  const [message, setMessage] = useState('')
 
   useEffect(() => {
-    api.get('/admin/settings/auto-backup-path').then((res) => {
-      setAutoBackupPath(res.data.path || '')
-    }).catch(() => {})
-
-    api.get('/admin/settings/auto-backup-schedule').then((res) => {
-      setBackupSchedEnabled(!!res.data.enabled)
-      setBackupSchedType(res.data.type || 'daily')
-      setBackupSchedHour(res.data.hour ?? 2)
-      setBackupSchedWeekday(res.data.weekday ?? 1)
-    }).catch(() => {})
-
     api.get('/admin/settings/cleanup').then((res) => {
-      setRetentionDays(res.data.retention_days || 90)
-      setSensitiveDays(res.data.sensitive_days || 365)
-      setAutoCleanEnabled(!!res.data.auto_enabled)
-      setAutoHour(res.data.auto_hour ?? 2)
+      setSettings((prev) => ({ ...prev, ...res.data }))
     }).catch(() => {})
   }, [])
 
-  const handleExport = () => {
-    const token = localStorage.getItem('token')
-    const a = document.createElement('a')
-    a.href = `/api/admin/db/export?token=${token}`
-    a.download = `foxlink_gpt_backup_${new Date().toISOString().slice(0, 10)}.db`
-    a.click()
-  }
+  const set = <K extends keyof CleanupSettings>(key: K, val: CleanupSettings[K]) =>
+    setSettings((prev) => ({ ...prev, [key]: val }))
 
-  const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-    if (!confirm(t('db.importConfirm'))) return
-
-    setImporting(true)
-    setMessage('')
-    const formData = new FormData()
-    formData.append('db_file', file)
-
-    try {
-      const res = await api.post('/admin/db/import', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      })
-      setMessage(`✅ ${res.data.message}`)
-    } catch (e: unknown) {
-      setMessage(`❌ ${(e as { response?: { data?: { error?: string } } })?.response?.data?.error || t('common.error')}`)
-    } finally {
-      setImporting(false)
-      if (fileRef.current) fileRef.current.value = ''
-    }
-  }
-
-  const handleSavePath = async () => {
-    setSavingPath(true)
+  const handleSave = async () => {
+    setSaving(true)
     setMessage('')
     try {
-      await api.put('/admin/settings/auto-backup-path', { path: autoBackupPath })
-      setMessage('✅ ' + t('db.backupPathSaved'))
+      await api.put('/admin/settings/cleanup', settings)
+      setMessage('✅ 設定已儲存' + (settings.auto_enabled ? `，每日 ${String(settings.auto_hour).padStart(2, '0')}:00 自動清除` : ''))
     } catch (e: unknown) {
-      setMessage(`❌ ${(e as { response?: { data?: { error?: string } } })?.response?.data?.error || t('db.saveFailed')}`)
+      setMessage(`❌ ${(e as { response?: { data?: { error?: string } } })?.response?.data?.error || '儲存失敗'}`)
     } finally {
-      setSavingPath(false)
-    }
-  }
-
-  const handleAutoBackup = async () => {
-    setBackingUp(true)
-    setMessage('')
-    try {
-      const res = await api.post('/admin/db/auto-backup')
-      setMessage('✅ ' + t('db.backupSuccess', { path: res.data.path }))
-    } catch (e: unknown) {
-      setMessage(`❌ ${(e as { response?: { data?: { error?: string } } })?.response?.data?.error || t('db.backupFailed')}`)
-    } finally {
-      setBackingUp(false)
-    }
-  }
-
-  const handleSaveBackupSched = async () => {
-    setSavingBackupSched(true)
-    setMessage('')
-    try {
-      await api.put('/admin/settings/auto-backup-schedule', {
-        enabled: backupSchedEnabled,
-        type: backupSchedType,
-        hour: backupSchedHour,
-        weekday: backupSchedWeekday,
-      })
-      const weekdayNames = ['日', '一', '二', '三', '四', '五', '六']
-      const timeStr = `${String(backupSchedHour).padStart(2, '0')}:00`
-      let schedStr: string
-      if (!backupSchedEnabled) {
-        schedStr = t('db.scheduleDisabled')
-      } else if (backupSchedType === 'weekly') {
-        schedStr = t('db.weeklySchedule', { weekday: weekdayNames[backupSchedWeekday], time: timeStr })
-      } else {
-        schedStr = t('db.dailySchedule', { time: timeStr })
-      }
-      setMessage('✅ ' + t('db.backupScheduleSaved', { schedule: schedStr }))
-    } catch (e: unknown) {
-      setMessage(`❌ ${(e as { response?: { data?: { error?: string } } })?.response?.data?.error || t('db.saveFailed')}`)
-    } finally {
-      setSavingBackupSched(false)
-    }
-  }
-
-  const handleSaveCleanup = async () => {
-    setSavingCleanup(true)
-    setMessage('')
-    try {
-      await api.put('/admin/settings/cleanup', {
-        retention_days: retentionDays,
-        sensitive_days: sensitiveDays,
-        auto_enabled: autoCleanEnabled,
-        auto_hour: autoHour,
-      })
-      if (autoCleanEnabled) {
-        setMessage('✅ ' + t('db.cleanupSettingsSaved', { hour: String(autoHour).padStart(2, '0') }))
-      } else {
-        setMessage('✅ ' + t('db.cleanupSettingsSavedOnly'))
-      }
-    } catch (e: unknown) {
-      setMessage(`❌ ${(e as { response?: { data?: { error?: string } } })?.response?.data?.error || t('db.saveFailed')}`)
-    } finally {
-      setSavingCleanup(false)
+      setSaving(false)
     }
   }
 
   const handleManualCleanup = async () => {
-    if (!confirm(t('db.cleanupConfirm', { retentionDays, sensitiveDays }))) return
+    if (!confirm('確定立即執行清除？此操作不可復原。')) return
     setCleaningUp(true)
     setMessage('')
     setCleanupStats(null)
     try {
       const res = await api.post('/admin/db/cleanup')
       setCleanupStats(res.data.stats)
-      const s = res.data.stats
-      const total = s.normal_sessions + s.sensitive_sessions + s.normal_audit + s.sensitive_audit + s.token_usage
-      setMessage('✅ ' + t('db.cleanupSuccess', { total }))
+      const s = res.data.stats as CleanupStats
+      const total = Object.values(s).reduce((a, b) => a + b, 0)
+      setMessage(`✅ 清除完成，共刪除 ${total} 筆資料`)
     } catch (e: unknown) {
-      setMessage(`❌ ${(e as { response?: { data?: { error?: string } } })?.response?.data?.error || t('db.cleanupFailed')}`)
+      setMessage(`❌ ${(e as { response?: { data?: { error?: string } } })?.response?.data?.error || '清除失敗'}`)
     } finally {
       setCleaningUp(false)
     }
   }
 
-  const weekdayOptions = ['日', '一', '二', '三', '四', '五', '六']
+  const statItems = cleanupStats ? [
+    { label: '稽核日誌（一般）', value: cleanupStats.audit_normal, color: 'text-slate-600' },
+    { label: '稽核日誌（敏感）', value: cleanupStats.audit_sensitive, color: 'text-orange-600' },
+    { label: 'LLM 對話', value: cleanupStats.llm_sessions, color: 'text-blue-600' },
+    { label: '排程任務執行', value: cleanupStats.scheduled_task_runs, color: 'text-indigo-600' },
+    { label: 'DIFY 呼叫', value: cleanupStats.dify_call_logs, color: 'text-purple-600' },
+    { label: 'KB 查詢', value: cleanupStats.kb_query_logs, color: 'text-teal-600' },
+    { label: '技能呼叫', value: cleanupStats.skill_call_logs, color: 'text-yellow-600' },
+    { label: '研究任務', value: cleanupStats.research_jobs, color: 'text-red-600' },
+    { label: 'Token 統計', value: cleanupStats.token_usage, color: 'text-cyan-600' },
+  ] : []
 
   return (
     <div className="overflow-y-auto max-h-[calc(100vh-120px)] pr-1">
-      <div className="flex items-center gap-2 mb-4">
-        <Database size={20} className="text-blue-500" />
-        <h2 className="text-lg font-semibold text-slate-800">{t('db.title')}</h2>
+      <div className="flex items-center gap-2 mb-5">
+        <History size={20} className="text-blue-500" />
+        <h2 className="text-lg font-semibold text-slate-800">歷史資料清除設定</h2>
       </div>
 
-      {/* Export / Import */}
-      <div className="grid grid-cols-2 gap-6 mb-6">
-        <div className="bg-white border border-slate-200 rounded-xl p-5">
-          <div className="flex items-center gap-2 mb-3">
-            <Download size={18} className="text-green-500" />
-            <h3 className="font-semibold text-slate-700">{t('db.exportDb')}</h3>
-          </div>
-          <p className="text-sm text-slate-500 mb-4">{t('db.exportDesc')}</p>
-          <button onClick={handleExport} className="btn-primary w-full flex items-center justify-center gap-2">
-            <Download size={15} /> {t('db.downloadBackup')}
-          </button>
+      {/* 稽核日誌 */}
+      <Section
+        icon={<ShieldAlert size={16} className="text-orange-500" />}
+        title="稽核日誌清除"
+        desc="超過保留天數的稽核對話將被刪除。敏感對話可設定更長保留時間。"
+      >
+        <div className="flex gap-6">
+          <DaysInput label="一般稽核對話保留天數" value={settings.audit_days} onChange={(v) => set('audit_days', v)} />
+          <DaysInput label="敏感稽核對話保留天數" value={settings.audit_sensitive_days} onChange={(v) => set('audit_sensitive_days', v)} />
         </div>
+      </Section>
 
-        <div className="bg-white border border-slate-200 rounded-xl p-5">
-          <div className="flex items-center gap-2 mb-3">
-            <Upload size={18} className="text-orange-500" />
-            <h3 className="font-semibold text-slate-700">{t('db.importDb')}</h3>
-          </div>
-          <div className="flex items-start gap-2 bg-orange-50 border border-orange-200 rounded-lg p-3 mb-4">
-            <AlertTriangle size={14} className="text-orange-500 mt-0.5 flex-shrink-0" />
-            <p className="text-xs text-orange-700">
-              {t('db.importWarning')}
-            </p>
-          </div>
-          <input ref={fileRef} type="file" accept=".db" className="hidden" onChange={handleImport} />
-          <button
-            onClick={() => fileRef.current?.click()}
-            disabled={importing}
-            className="w-full flex items-center justify-center gap-2 bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white font-medium py-2 px-4 rounded-lg transition text-sm"
-          >
-            <Upload size={15} /> {importing ? t('common.importing') : t('db.selectImport')}
-          </button>
-        </div>
-      </div>
+      {/* LLM 問答 */}
+      <Section
+        icon={<MessageSquare size={16} className="text-blue-500" />}
+        title="LLM 問答資料清除"
+        desc="清除 Sidebar 對話歷史及上傳附件，超過此天數的對話將被刪除。"
+      >
+        <DaysInput label="對話歷史保留天數" value={settings.llm_days} onChange={(v) => set('llm_days', v)} />
+      </Section>
 
-      {/* Auto-backup path */}
-      <div className="bg-white border border-slate-200 rounded-xl p-5 mb-6">
+      {/* 排程任務 */}
+      <Section
+        icon={<CalendarClock size={16} className="text-indigo-500" />}
+        title="排程任務歷史紀錄清除"
+        desc="清除排程任務執行歷史及產出附件，超過此天數的執行紀錄將被刪除。"
+      >
+        <DaysInput label="排程執行歷史保留天數" value={settings.scheduled_task_days} onChange={(v) => set('scheduled_task_days', v)} />
+      </Section>
+
+      {/* DIFY KB */}
+      <Section
+        icon={<Database size={16} className="text-purple-500" />}
+        title="DIFY 知識庫呼叫紀錄清除"
+        desc="清除早於此天數的 DIFY 知識庫呼叫紀錄。"
+      >
+        <DaysInput label="DIFY 呼叫紀錄保留天數" value={settings.dify_days} onChange={(v) => set('dify_days', v)} />
+      </Section>
+
+      {/* 自建 KB */}
+      <Section
+        icon={<Search size={16} className="text-teal-500" />}
+        title="自建知識庫呼叫紀錄清除"
+        desc="清除早於此天數的自建知識庫查詢紀錄（包含召回測試及對話查詢）。"
+      >
+        <DaysInput label="知識庫查詢紀錄保留天數" value={settings.kb_query_days} onChange={(v) => set('kb_query_days', v)} />
+      </Section>
+
+      {/* 技能 */}
+      <Section
+        icon={<Zap size={16} className="text-yellow-500" />}
+        title="技能呼叫紀錄清除"
+        desc="清除早於此天數的技能呼叫紀錄及附件。"
+      >
+        <DaysInput label="技能呼叫紀錄保留天數" value={settings.skill_days} onChange={(v) => set('skill_days', v)} />
+      </Section>
+
+      {/* 研究任務 */}
+      <Section
+        icon={<FlaskConical size={16} className="text-red-500" />}
+        title="研究任務資料清除"
+        desc="清除早於此天數的深度研究任務及產出附件。"
+      >
+        <DaysInput label="研究任務保留天數" value={settings.research_days} onChange={(v) => set('research_days', v)} />
+      </Section>
+
+      {/* Token 使用統計 */}
+      <Section
+        icon={<BarChart2 size={16} className="text-cyan-500" />}
+        title="Token 使用統計清除"
+        desc="清除早於此天數的 Token 使用量統計資料（token_usage 表）。"
+      >
+        <DaysInput label="Token 統計保留天數" value={settings.token_usage_days} onChange={(v) => set('token_usage_days', v)} />
+      </Section>
+
+      {/* Auto schedule + actions */}
+      <div className="bg-white border border-slate-200 rounded-xl p-5 mb-4">
         <div className="flex items-center gap-2 mb-3">
-          <FolderOpen size={18} className="text-blue-500" />
-          <h3 className="font-semibold text-slate-700">{t('db.backupPath')}</h3>
+          <Clock size={16} className="text-slate-500" />
+          <h3 className="font-semibold text-slate-700 text-sm">自動清除排程</h3>
         </div>
-        <p className="text-sm text-slate-500 mb-4">{t('db.backupPathDesc')}</p>
-        <div className="flex gap-2 mb-3">
-          <input
-            type="text"
-            value={autoBackupPath}
-            onChange={(e) => setAutoBackupPath(e.target.value)}
-            placeholder={t('db.backupPathPlaceholder')}
-            className="input flex-1"
-          />
-          <button onClick={handleSavePath} disabled={savingPath} className="btn-primary flex items-center gap-1.5 whitespace-nowrap">
-            <Save size={14} /> {savingPath ? t('common.saving') : t('db.savePath')}
-          </button>
-        </div>
-        <button
-          onClick={handleAutoBackup}
-          disabled={backingUp || !autoBackupPath.trim()}
-          className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed text-white font-medium py-2 px-4 rounded-lg transition text-sm"
-        >
-          <Play size={14} /> {backingUp ? t('db.backingUp') : t('db.backupNow')}
-        </button>
-      </div>
+        <p className="text-xs text-slate-400 mb-4">以上所有清除動作依此排程自動執行。</p>
 
-      {/* Backup Schedule */}
-      <div className="bg-white border border-slate-200 rounded-xl p-5 mb-6">
-        <div className="flex items-center gap-2 mb-3">
-          <CalendarClock size={18} className="text-indigo-500" />
-          <h3 className="font-semibold text-slate-700">{t('db.backupSchedule')}</h3>
-        </div>
-        <p className="text-sm text-slate-500 mb-4">{t('db.backupScheduleDesc')}</p>
-
-        <div className="flex items-center gap-4 mb-4 bg-slate-50 rounded-xl p-3">
-          <Clock size={16} className="text-slate-400 flex-shrink-0" />
+        <div className="flex items-center gap-4 bg-slate-50 rounded-xl p-3 mb-4">
           <label className="flex items-center gap-2 text-sm cursor-pointer">
             <input
               type="checkbox"
-              checked={backupSchedEnabled}
-              onChange={(e) => setBackupSchedEnabled(e.target.checked)}
-              className="w-4 h-4 accent-indigo-600"
-            />
-            {t('db.enableAutoBackup')}
-          </label>
-        </div>
-
-        {backupSchedEnabled && (
-          <div className="grid grid-cols-1 gap-3 mb-4">
-            <div className="flex items-center gap-3 flex-wrap">
-              <span className="text-sm text-slate-600 w-16">{t('db.frequency')}</span>
-              <label className="flex items-center gap-1.5 text-sm cursor-pointer">
-                <input
-                  type="radio"
-                  name="backupType"
-                  value="daily"
-                  checked={backupSchedType === 'daily'}
-                  onChange={() => setBackupSchedType('daily')}
-                  className="accent-indigo-600"
-                />
-                {t('db.daily')}
-              </label>
-              <label className="flex items-center gap-1.5 text-sm cursor-pointer">
-                <input
-                  type="radio"
-                  name="backupType"
-                  value="weekly"
-                  checked={backupSchedType === 'weekly'}
-                  onChange={() => setBackupSchedType('weekly')}
-                  className="accent-indigo-600"
-                />
-                {t('db.weekly')}
-              </label>
-            </div>
-
-            {backupSchedType === 'weekly' && (
-              <div className="flex items-center gap-3">
-                <span className="text-sm text-slate-600 w-16">{t('db.weekday')}</span>
-                <div className="flex gap-1">
-                  {weekdayOptions.map((label, idx) => (
-                    <button
-                      key={idx}
-                      onClick={() => setBackupSchedWeekday(idx)}
-                      className={`w-9 h-9 rounded-lg text-sm font-medium transition ${
-                        backupSchedWeekday === idx
-                          ? 'bg-indigo-600 text-white'
-                          : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                      }`}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            <div className="flex items-center gap-3">
-              <span className="text-sm text-slate-600 w-16">{t('db.executeTime')}</span>
-              <select
-                value={backupSchedHour}
-                onChange={(e) => setBackupSchedHour(Number(e.target.value))}
-                className="input py-1 w-24"
-              >
-                {Array.from({ length: 24 }, (_, i) => (
-                  <option key={i} value={i}>{String(i).padStart(2, '0')}:00</option>
-                ))}
-              </select>
-            </div>
-          </div>
-        )}
-
-        <button
-          onClick={handleSaveBackupSched}
-          disabled={savingBackupSched}
-          className="btn-primary flex items-center gap-1.5"
-        >
-          <Save size={14} /> {savingBackupSched ? t('common.saving') : t('db.saveSchedule')}
-        </button>
-      </div>
-
-      {/* Data Cleanup */}
-      <div className="bg-white border border-slate-200 rounded-xl p-5">
-        <div className="flex items-center gap-2 mb-3">
-          <Trash2 size={18} className="text-red-500" />
-          <h3 className="font-semibold text-slate-700">{t('db.dataCleanup')}</h3>
-        </div>
-        <p className="text-sm text-slate-500 mb-4">{t('db.dataCleanupDesc')}</p>
-
-        <div className="grid grid-cols-2 gap-4 mb-4">
-          <div>
-            <label className="label">{t('db.normalRetention')}</label>
-            <div className="flex items-center gap-2">
-              <input
-                type="number"
-                min={1}
-                max={3650}
-                value={retentionDays}
-                onChange={(e) => setRetentionDays(Number(e.target.value))}
-                className="input w-24"
-              />
-              <span className="text-sm text-slate-500">{t('common.days')}</span>
-            </div>
-          </div>
-          <div>
-            <label className="label">{t('db.sensitiveRetention')}</label>
-            <div className="flex items-center gap-2">
-              <input
-                type="number"
-                min={1}
-                max={3650}
-                value={sensitiveDays}
-                onChange={(e) => setSensitiveDays(Number(e.target.value))}
-                className="input w-24"
-              />
-              <span className="text-sm text-slate-500">{t('common.days')}</span>
-            </div>
-          </div>
-        </div>
-
-        {/* Auto schedule */}
-        <div className="flex items-center gap-4 mb-4 bg-slate-50 rounded-xl p-3">
-          <Clock size={16} className="text-slate-400 flex-shrink-0" />
-          <label className="flex items-center gap-2 text-sm cursor-pointer">
-            <input
-              type="checkbox"
-              checked={autoCleanEnabled}
-              onChange={(e) => setAutoCleanEnabled(e.target.checked)}
+              checked={settings.auto_enabled}
+              onChange={(e) => set('auto_enabled', e.target.checked)}
               className="w-4 h-4 accent-blue-600"
             />
-            {t('db.autoCleanup')}
+            每天自動清除
           </label>
-          {autoCleanEnabled && (
+          {settings.auto_enabled && (
             <div className="flex items-center gap-2">
-              <span className="text-sm text-slate-500">{t('db.executeTime')}</span>
+              <span className="text-sm text-slate-500">執行時間</span>
               <select
-                value={autoHour}
-                onChange={(e) => setAutoHour(Number(e.target.value))}
-                className="input py-1 w-20"
+                value={settings.auto_hour}
+                onChange={(e) => set('auto_hour', Number(e.target.value))}
+                className="input py-1 w-20 text-sm"
               >
                 {Array.from({ length: 24 }, (_, i) => (
                   <option key={i} value={i}>{String(i).padStart(2, '0')}:00</option>
@@ -418,43 +249,43 @@ export default function DbMaintenance() {
 
         <div className="flex gap-2">
           <button
-            onClick={handleSaveCleanup}
-            disabled={savingCleanup}
-            className="btn-primary flex items-center gap-1.5"
+            onClick={handleSave}
+            disabled={saving}
+            className="btn-primary flex items-center gap-1.5 text-sm"
           >
-            <Save size={14} /> {savingCleanup ? t('common.saving') : t('db.saveSettings')}
+            <Save size={14} /> {saving ? '儲存中...' : '儲存設定'}
           </button>
           <button
             onClick={handleManualCleanup}
             disabled={cleaningUp}
             className="flex items-center gap-1.5 bg-red-600 hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed text-white font-medium py-2 px-4 rounded-lg transition text-sm"
           >
-            <Trash2 size={14} /> {cleaningUp ? t('db.cleaningUp') : t('db.manualCleanup')}
+            <Play size={14} /> {cleaningUp ? '清除中...' : '立即手動清除'}
           </button>
         </div>
+      </div>
 
-        {/* Cleanup stats */}
-        {cleanupStats && (
-          <div className="mt-4 grid grid-cols-5 gap-3">
-            {[
-              { label: t('db.cleanupStats.normalSessions'), value: cleanupStats.normal_sessions, color: 'text-blue-600' },
-              { label: t('db.cleanupStats.sensitiveSessions'), value: cleanupStats.sensitive_sessions, color: 'text-red-600' },
-              { label: t('db.cleanupStats.normalAudit'), value: cleanupStats.normal_audit, color: 'text-slate-600' },
-              { label: t('db.cleanupStats.sensitiveAudit'), value: cleanupStats.sensitive_audit, color: 'text-orange-600' },
-              { label: t('db.cleanupStats.tokenUsage'), value: cleanupStats.token_usage, color: 'text-purple-600' },
-            ].map((s) => (
+      {/* Stats */}
+      {cleanupStats && (
+        <div className="bg-white border border-slate-200 rounded-xl p-5 mb-4">
+          <div className="flex items-center gap-2 mb-3">
+            <Trash2 size={16} className="text-red-500" />
+            <h3 className="font-semibold text-slate-700 text-sm">清除結果</h3>
+          </div>
+          <div className="grid grid-cols-3 gap-3">
+            {statItems.map((s) => (
               <div key={s.label} className="bg-slate-50 rounded-lg p-3 text-center">
-                <p className="text-xs text-slate-400 mb-1">{s.label}</p>
+                <p className="text-xs text-slate-400 mb-1 leading-tight">{s.label}</p>
                 <p className={`text-xl font-bold ${s.color}`}>{s.value}</p>
-                <p className="text-xs text-slate-400">{t('common.records')}</p>
+                <p className="text-xs text-slate-400">筆</p>
               </div>
             ))}
           </div>
-        )}
-      </div>
+        </div>
+      )}
 
       {message && (
-        <div className={`mt-4 p-3 rounded-xl text-sm ${message.startsWith('✅') ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-red-50 text-red-700 border border-red-200'}`}>
+        <div className={`p-3 rounded-xl text-sm ${message.startsWith('✅') ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-red-50 text-red-700 border border-red-200'}`}>
           {message}
         </div>
       )}

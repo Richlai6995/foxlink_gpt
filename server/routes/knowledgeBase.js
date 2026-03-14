@@ -33,6 +33,7 @@ const crypto   = require('crypto');
 const { verifyToken } = require('./auth');
 const { embedText, toVectorStr } = require('../services/kbEmbedding');
 const { parseDocument, chunkDocument } = require('../services/kbDocParser');
+const { translateFields } = require('../services/translationService');
 
 router.use(verifyToken);
 
@@ -247,6 +248,7 @@ router.post('/', async (req, res) => {
     score_threshold = 0,
     ocr_model      = null,
     parse_mode     = 'text_only',
+    name_zh, name_en, name_vi, desc_zh, desc_en, desc_vi,
   } = req.body;
 
   if (!name?.trim()) return res.status(400).json({ error: '知識庫名稱為必填' });
@@ -275,6 +277,14 @@ router.post('/', async (req, res) => {
       ocr_model || null,
       ['text_only', 'format_aware'].includes(parse_mode) ? parse_mode : 'text_only',
     );
+    // Auto-translate
+    const trans = (name_zh !== undefined)
+      ? { name_zh: name_zh || null, name_en: name_en || null, name_vi: name_vi || null, desc_zh: desc_zh || null, desc_en: desc_en || null, desc_vi: desc_vi || null }
+      : await translateFields({ name: name.trim(), description }).catch(() => ({ name_zh: null, name_en: null, name_vi: null, desc_zh: null, desc_en: null, desc_vi: null }));
+    if (trans.name_zh !== undefined) {
+      await db.prepare(`UPDATE knowledge_bases SET name_zh=?,name_en=?,name_vi=?,desc_zh=?,desc_en=?,desc_vi=? WHERE id=?`)
+        .run(trans.name_zh, trans.name_en, trans.name_vi, trans.desc_zh, trans.desc_en, trans.desc_vi, id);
+    }
     const kb = await db.prepare('SELECT * FROM knowledge_bases WHERE id=?').get(id);
     // 為新知識庫加 KB_CHUNKS partition
     const { addKbChunksPartition } = require('../database-oracle');
@@ -379,8 +389,11 @@ router.put('/:id', async (req, res) => {
       retrieval_mode, rerank_model,
       top_k_fetch, top_k_return, score_threshold,
       ocr_model, parse_mode,
+      name_zh, name_en, name_vi, desc_zh, desc_en, desc_vi,
     } = req.body;
 
+    const finalName = name ?? target.name;
+    const finalDesc = description !== undefined ? description : target.description;
     await db.prepare(`
       UPDATE knowledge_bases
       SET name=?, description=?,
@@ -391,8 +404,8 @@ router.put('/:id', async (req, res) => {
           updated_at=SYSTIMESTAMP
       WHERE id=?
     `).run(
-      name ?? target.name,
-      description !== undefined ? description : target.description,
+      finalName,
+      finalDesc,
       chunk_strategy ?? target.chunk_strategy,
       chunk_config !== undefined ? JSON.stringify(chunk_config) : target.chunk_config,
       retrieval_mode ?? target.retrieval_mode,
@@ -404,6 +417,25 @@ router.put('/:id', async (req, res) => {
       parse_mode !== undefined ? (['text_only','format_aware'].includes(parse_mode) ? parse_mode : 'text_only') : (target.parse_mode || 'text_only'),
       req.params.id,
     );
+
+    if (name_zh !== undefined) {
+      await db.prepare(`UPDATE knowledge_bases SET name_zh=?,name_en=?,name_vi=?,desc_zh=?,desc_en=?,desc_vi=? WHERE id=?`)
+        .run(name_zh || null, name_en || null, name_vi || null, desc_zh || null, desc_en || null, desc_vi || null, req.params.id);
+    } else {
+      const nameChanged = name !== undefined && name !== target.name;
+      const descChanged = description !== undefined && description !== target.description;
+      if (nameChanged || descChanged) {
+        const trans = await translateFields({
+          name: nameChanged ? finalName : null,
+          description: descChanged ? finalDesc : null,
+        }).catch(() => ({}));
+        const setClauses = []; const params = [];
+        if (nameChanged && trans.name_zh !== undefined) { setClauses.push('name_zh=?,name_en=?,name_vi=?'); params.push(trans.name_zh, trans.name_en, trans.name_vi); }
+        if (descChanged && trans.desc_zh !== undefined) { setClauses.push('desc_zh=?,desc_en=?,desc_vi=?'); params.push(trans.desc_zh, trans.desc_en, trans.desc_vi); }
+        if (setClauses.length) await db.prepare(`UPDATE knowledge_bases SET ${setClauses.join(',')} WHERE id=?`).run(...params, req.params.id);
+      }
+    }
+
     const updated = await db.prepare('SELECT * FROM knowledge_bases WHERE id=?').get(req.params.id);
     updated.chunk_config = (() => { try { return JSON.parse(updated.chunk_config || '{}'); } catch { return {}; } })();
     res.json(updated);
@@ -913,5 +945,21 @@ async function updateKbStats(db, kbId) {
     `).run(s?.doc_count || 0, s?.chunk_count || 0, s?.total_bytes || 0, kbId);
   } catch (_) {}
 }
+
+// ─── POST /api/kb/:id/translate — 重新翻譯 ────────────────────────────────────
+router.post('/:id/translate', async (req, res) => {
+  const db = getDb();
+  try {
+    const kb = await db.prepare('SELECT * FROM knowledge_bases WHERE id=?').get(req.params.id);
+    if (!kb) return res.status(404).json({ error: '找不到知識庫' });
+    if (kb.creator_id !== req.user.id && req.user.role !== 'admin') return res.status(403).json({ error: '無操作權限' });
+    const trans = await translateFields({ name: kb.name, description: kb.description });
+    await db.prepare(`UPDATE knowledge_bases SET name_zh=?,name_en=?,name_vi=?,desc_zh=?,desc_en=?,desc_vi=? WHERE id=?`)
+      .run(trans.name_zh, trans.name_en, trans.name_vi, trans.desc_zh, trans.desc_en, trans.desc_vi, req.params.id);
+    res.json(trans);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
 
 module.exports = router;

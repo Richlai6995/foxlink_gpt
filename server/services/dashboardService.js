@@ -18,6 +18,7 @@ const crypto = require('crypto');
 const cron = require('node-cron');
 const oracledb = require('oracledb');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
+const { upsertTokenUsage } = require('./tokenService');
 
 // ─── 常數 ─────────────────────────────────────────────────────────────────────
 // EMBEDDING_MODEL is resolved at runtime to support DB-configured defaults.
@@ -291,11 +292,10 @@ async function vectorSearch(db, jobIds, queryEmbedding, topK = VECTOR_TOP_K, sim
 // SQL 生成仍使用原始問句，僅 embedding 用翻譯版本
 async function translateQueryForEmbedding(question) {
   // 沒有中文字元就不翻
-  if (!/[\u4e00-\u9fff]/.test(question)) return question;
+  if (!/[\u4e00-\u9fff]/.test(question)) return { query: question, inputTokens: 0, outputTokens: 0 };
+  const flashModel = process.env.GEMINI_MODEL_FLASH || 'gemini-2.0-flash';
   try {
-    const model = genAI.getGenerativeModel({
-      model: process.env.GEMINI_MODEL_FLASH || 'gemini-2.0-flash',
-    });
+    const model = genAI.getGenerativeModel({ model: flashModel });
     const result = await model.generateContent(
       `Extract the key product/item description keywords from the following query and translate them to English.\n` +
       `Return ONLY the English keywords suitable for semantic search against an English product description database.\n` +
@@ -304,11 +304,17 @@ async function translateQueryForEmbedding(question) {
       `English keywords only:`
     );
     const translated = result.response.text().trim().replace(/^["']|["']$/g, '');
+    const usage = result.response.usageMetadata || {};
     console.log(`[Dashboard] Embedding query translation: "${question}" → "${translated}"`);
-    return translated || question;
+    return {
+      query: translated || question,
+      inputTokens: usage.promptTokenCount || 0,
+      outputTokens: usage.candidatesTokenCount || 0,
+      model: flashModel,
+    };
   } catch (e) {
     console.warn('[Dashboard] Query translation failed, using original:', e.message);
-    return question;
+    return { query: question, inputTokens: 0, outputTokens: 0, model: flashModel };
   }
 }
 
@@ -352,7 +358,7 @@ async function shouldSkipVector(db, design, question) {
 }
 
 // ─── Prompt 組裝 ──────────────────────────────────────────────────────────────
-async function buildPrompt(db, design, question, vectorResults, skipReason) {
+async function buildPrompt(db, design, question, vectorResults, skipReason, lang) {
   // 取得 schema 定義
   const schemaIds = design.target_schema_ids ? JSON.parse(design.target_schema_ids) : [];
   const schemaMap = {}; // id -> schema record with alias
@@ -537,6 +543,12 @@ async function buildPrompt(db, design, question, vectorResults, skipReason) {
     });
   }
 
+  const l = (lang || '').toLowerCase();
+  const aliasRule = l.startsWith('en')
+    ? '5. Use English column aliases (AS) for readability — use the English descriptions from the schema if available'
+    : l.startsWith('vi')
+      ? '5. Dùng bí danh cột tiếng Việt (AS) cho dễ đọc — dùng mô tả tiếng Việt trong schema nếu có'
+      : '5. 欄位名稱用中文別名（AS）方便閱讀 — 優先使用 schema 中的欄位中文說明';
   const systemPrompt = design.system_prompt || `你是一個 Oracle ERP 資料庫查詢助手。
 根據提供的資料表 schema 和使用者問題，生成正確的 Oracle SQL SELECT 語句。
 規則：
@@ -544,7 +556,7 @@ async function buildPrompt(db, design, question, vectorResults, skipReason) {
 2. 使用 Oracle SQL 語法（ROWNUM、FETCH FIRST 等）
 3. 日期格式使用 TO_DATE / TO_CHAR
 4. 回傳格式：只輸出 SQL，不加任何說明文字
-5. 欄位名稱用中文別名（AS）方便閱讀
+${aliasRule}
 6. 欄位引用須使用提供的資料表別名（alias.欄位名）
 7. 若 Prompt 中有「語意搜尋結果」區塊，必須將其 IN 條件加入 WHERE 子句`;
 
@@ -577,6 +589,13 @@ async function buildPrompt(db, design, question, vectorResults, skipReason) {
     ? `\n## 資料權限必須加入的 WHERE 條件（使用者資料範圍限制，每次都要包含）：\n\`\`\`sql\n${dataPermWhere.join('\n  AND ')}\n\`\`\`\n`
     : '';
 
+  // 強制 alias 語言指令（附加在 prompt 末尾，覆蓋任何自訂 system_prompt 的 alias 規則）
+  const aliasInstruction = l.startsWith('en')
+    ? '\n[MANDATORY: Column aliases (AS) MUST be in English. Use the English description from the schema as the alias. Do NOT use Chinese aliases.]'
+    : l.startsWith('vi')
+      ? '\n[BẮTBUỘC: Bí danh cột (AS) phải bằng tiếng Việt. Sử dụng mô tả tiếng Việt từ schema làm bí danh. Không dùng bí danh tiếng Trung.]'
+      : '';
+
   return `${systemPrompt}
 
 ${schemaContext}
@@ -587,12 +606,12 @@ ${vectorContext}
 ${fewShotContext}
 ## 使用者問題：
 ${question}
-
+${aliasInstruction}
 請生成對應的 Oracle SQL SELECT 語句：`;
 }
 
 // ─── 主查詢 Pipeline ──────────────────────────────────────────────────────────
-async function runDashboardQuery({ designId, question, userId, user, isDesigner, send, vectorTopK, vectorSimilarityThreshold, modelKey, effectivePolicy }) {
+async function runDashboardQuery({ designId, question, userId, user, isDesigner, send, vectorTopK, vectorSimilarityThreshold, modelKey, effectivePolicy, lang }) {
   const db = require('../database-oracle').db;
 
   // 解析 LLM model（從 llm_models 表查，fallback 到 env）
@@ -624,7 +643,11 @@ async function runDashboardQuery({ designId, question, userId, user, isDesigner,
       send('status', { message: '語意搜尋中...' });
       const dims = parseInt(process.env.DASHBOARD_EMBEDDING_DIMS || DEFAULT_DIMS);
       // 若問句含中文，先翻成英文再 embed（提升跨語言對齊品質）
-      const embeddingQuery = await translateQueryForEmbedding(question);
+      const { query: embeddingQuery, inputTokens: tqIn, outputTokens: tqOut, model: tqModel } = await translateQueryForEmbedding(question);
+      if ((tqIn || tqOut) && userId) {
+        const tqDay = new Date().toISOString().split('T')[0];
+        upsertTokenUsage(db, userId, tqDay, tqModel, tqIn, tqOut).catch(() => {});
+      }
       const queryVec = await getEmbedding(embeddingQuery, dims);
       // 從設計的 target_schemas 找出各 schema 綁定的 ETL Job
       // 同時建立 jobId → schemaAlias 對應表，供 buildPrompt 加 alias 前綴
@@ -659,7 +682,7 @@ async function runDashboardQuery({ designId, question, userId, user, isDesigner,
 
   // 3. 組裝 Prompt + 4. Gemini 生成 SQL
   send('status', { message: 'AI 生成 SQL 中...' });
-  const prompt = await buildPrompt(db, design, question, vectorResults, design._skipReason);
+  const prompt = await buildPrompt(db, design, question, vectorResults, design._skipReason, lang);
   const sqlModel = genAI.getGenerativeModel({ model: sqlApiModel });
   const genResult = await sqlModel.generateContent(prompt);
   let generatedSql = genResult.response.text().trim();
@@ -724,23 +747,39 @@ async function runDashboardQuery({ designId, question, userId, user, isDesigner,
        : design.chart_config)
     : null;
 
-  // 8. 從 schema 定義建立欄位中文標籤對照表 { col_lower: description }
+  // 8. 從 schema 定義建立欄位標籤對照表（依語言選 description/desc_en/desc_vi）
+  // 同時建立 中文description → 語言標籤 反向對應（應對 Gemini 生成中文 alias 的情況）
   const columnLabels = {};
   try {
     const schemaIds = design.target_schema_ids ? JSON.parse(design.target_schema_ids) : [];
+    const descToLabel = {}; // 中文 description → 語言標籤（反向）
+    const l = (lang || '').toLowerCase();
     for (const sid of schemaIds) {
-      const cols = await db.prepare(`SELECT column_name, description FROM ai_schema_columns WHERE schema_id=?`).all(sid);
+      const cols = await db.prepare(`SELECT column_name, description, desc_en, desc_vi FROM ai_schema_columns WHERE schema_id=?`).all(sid);
       for (const col of cols) {
-        if (col.description) columnLabels[col.column_name.toLowerCase()] = col.description;
+        let label = col.description;
+        if (l.startsWith('en') && col.desc_en) label = col.desc_en;
+        else if (l.startsWith('vi') && col.desc_vi) label = col.desc_vi;
+        else if ((l.startsWith('zh') || !l) && col.description) label = col.description;
+        if (label) columnLabels[col.column_name.toLowerCase()] = label;
+        // 反向：中文說明 → 語言標籤（Gemini 生成的 SQL 可能用中文 alias）
+        if (col.description && label && label !== col.description) {
+          descToLabel[col.description] = label;
+        }
       }
     }
-  } catch (_) {}
+    // 若查詢結果欄位名稱是中文 alias（不在 columnLabels 中），嘗試從反向表補齊
+    for (const c of columns) {
+      if (!columnLabels[c] && descToLabel[c]) {
+        columnLabels[c] = descToLabel[c];
+      }
+    }
+  } catch (e) { console.error('[columnLabels] ERROR:', e.message, e.stack); }
 
   send('result', { rows, columns, column_labels: columnLabels, row_count: rows.length, chart_config: chartConfig });
 
   // 9. Token 計費（SQL 生成 + embedding translation 用量）
   try {
-    const { upsertTokenUsage } = require('./tokenService');
     const today = new Date().toISOString().slice(0, 10);
     const sqlUsage = genResult.response.usageMetadata;
     const sqlIn  = sqlUsage?.promptTokenCount     || 0;

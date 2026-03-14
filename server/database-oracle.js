@@ -760,6 +760,84 @@ async function runMigrations(db) {
   await addCol('SCHEDULED_TASKS',     'PIPELINE_JSON',     'CLOB');
   await addCol('SCHEDULED_TASK_RUNS', 'PIPELINE_LOG_JSON', 'CLOB');
 
+  // ── Skill Call Logs ──────────────────────────────────────────────────────────
+  await createTable('SKILL_CALL_LOGS', `CREATE TABLE skill_call_logs (
+    id               NUMBER GENERATED AS IDENTITY PRIMARY KEY,
+    skill_id         NUMBER NOT NULL,
+    user_id          NUMBER,
+    session_id       VARCHAR2(36),
+    query_preview    VARCHAR2(1000),
+    response_preview VARCHAR2(1000),
+    status           VARCHAR2(20) DEFAULT 'ok',
+    error_msg        VARCHAR2(500),
+    duration_ms      NUMBER,
+    called_at        TIMESTAMP DEFAULT SYSTIMESTAMP
+  )`);
+
+  // ── DIFY Call Logs (ensure exists in Oracle) ─────────────────────────────────
+  await createTable('DIFY_CALL_LOGS', `CREATE TABLE dify_call_logs (
+    id               NUMBER GENERATED AS IDENTITY PRIMARY KEY,
+    kb_id            NUMBER NOT NULL,
+    session_id       VARCHAR2(36),
+    user_id          NUMBER,
+    query_preview    VARCHAR2(500),
+    response_preview CLOB,
+    status           VARCHAR2(20) DEFAULT 'ok',
+    error_msg        VARCHAR2(500),
+    duration_ms      NUMBER,
+    called_at        TIMESTAMP DEFAULT SYSTIMESTAMP
+  )`);
+
+  // ── KB Retrieval Tests: add source column ─────────────────────────────────────
+  await addCol('KB_RETRIEVAL_TESTS', 'SOURCE', "VARCHAR2(20) DEFAULT 'test'");
+
+  // ── Multilingual name / description columns ───────────────────────────────────
+  // Skills
+  await addCol('SKILLS', 'NAME_ZH',  'VARCHAR2(400)');
+  await addCol('SKILLS', 'NAME_EN',  'VARCHAR2(400)');
+  await addCol('SKILLS', 'NAME_VI',  'VARCHAR2(400)');
+  await addCol('SKILLS', 'DESC_ZH',  'CLOB');
+  await addCol('SKILLS', 'DESC_EN',  'CLOB');
+  await addCol('SKILLS', 'DESC_VI',  'CLOB');
+  // DIFY Knowledge Bases
+  await addCol('DIFY_KNOWLEDGE_BASES', 'NAME_ZH',  'VARCHAR2(400)');
+  await addCol('DIFY_KNOWLEDGE_BASES', 'NAME_EN',  'VARCHAR2(400)');
+  await addCol('DIFY_KNOWLEDGE_BASES', 'NAME_VI',  'VARCHAR2(400)');
+  await addCol('DIFY_KNOWLEDGE_BASES', 'DESC_ZH',  'CLOB');
+  await addCol('DIFY_KNOWLEDGE_BASES', 'DESC_EN',  'CLOB');
+  await addCol('DIFY_KNOWLEDGE_BASES', 'DESC_VI',  'CLOB');
+  // Self-built Knowledge Bases
+  await addCol('KNOWLEDGE_BASES', 'NAME_ZH',  'VARCHAR2(400)');
+  await addCol('KNOWLEDGE_BASES', 'NAME_EN',  'VARCHAR2(400)');
+  await addCol('KNOWLEDGE_BASES', 'NAME_VI',  'VARCHAR2(400)');
+  await addCol('KNOWLEDGE_BASES', 'DESC_ZH',  'CLOB');
+  await addCol('KNOWLEDGE_BASES', 'DESC_EN',  'CLOB');
+  await addCol('KNOWLEDGE_BASES', 'DESC_VI',  'CLOB');
+  // MCP Servers
+  await addCol('MCP_SERVERS', 'NAME_ZH',  'VARCHAR2(400)');
+  await addCol('MCP_SERVERS', 'NAME_EN',  'VARCHAR2(400)');
+  await addCol('MCP_SERVERS', 'NAME_VI',  'VARCHAR2(400)');
+  await addCol('MCP_SERVERS', 'DESC_ZH',  'CLOB');
+  await addCol('MCP_SERVERS', 'DESC_EN',  'CLOB');
+  await addCol('MCP_SERVERS', 'DESC_VI',  'CLOB');
+  // AI Dashboard Designs (AI戰情)
+  await addCol('AI_SELECT_DESIGNS', 'NAME_ZH',  'VARCHAR2(400)');
+  await addCol('AI_SELECT_DESIGNS', 'NAME_EN',  'VARCHAR2(400)');
+  await addCol('AI_SELECT_DESIGNS', 'NAME_VI',  'VARCHAR2(400)');
+  await addCol('AI_SELECT_DESIGNS', 'DESC_ZH',  'VARCHAR2(1000)');
+  await addCol('AI_SELECT_DESIGNS', 'DESC_EN',  'VARCHAR2(1000)');
+  await addCol('AI_SELECT_DESIGNS', 'DESC_VI',  'VARCHAR2(1000)');
+  // AI Select Topics (AI戰情 主題)
+  await addCol('AI_SELECT_TOPICS', 'NAME_ZH',  'VARCHAR2(400)');
+  await addCol('AI_SELECT_TOPICS', 'NAME_EN',  'VARCHAR2(400)');
+  await addCol('AI_SELECT_TOPICS', 'NAME_VI',  'VARCHAR2(400)');
+  await addCol('AI_SELECT_TOPICS', 'DESC_ZH',  'VARCHAR2(1000)');
+  await addCol('AI_SELECT_TOPICS', 'DESC_EN',  'VARCHAR2(1000)');
+  await addCol('AI_SELECT_TOPICS', 'DESC_VI',  'VARCHAR2(1000)');
+  // Schema Columns (AI戰情 欄位說明)
+  await addCol('AI_SCHEMA_COLUMNS', 'DESC_EN',  'VARCHAR2(1000)');
+  await addCol('AI_SCHEMA_COLUMNS', 'DESC_VI',  'VARCHAR2(1000)');
+
   // ── Vector table partitioning ───────────────────────────────────────────────
   await migrateAiVectorStoreToPartitioned();
   await migrateKbChunksToPartitioned();

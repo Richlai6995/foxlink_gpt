@@ -5,6 +5,7 @@ import {
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import api from '../../lib/api'
+import TranslationFields, { type TranslationData } from '../common/TranslationFields'
 
 interface McpServer {
   id: number
@@ -49,6 +50,8 @@ export default function MCPServersPanel() {
   const [editing, setEditing] = useState<McpServer | null>(null)
   const [form, setForm] = useState(emptyForm)
   const [saving, setSaving] = useState(false)
+  const [trans, setTrans] = useState<TranslationData>({})
+  const [translating, setTranslating] = useState(false)
   const [error, setError] = useState('')
   const [expandedId, setExpandedId] = useState<number | null>(null)
   const [syncingId, setSyncingId] = useState<number | null>(null)
@@ -74,6 +77,7 @@ export default function MCPServersPanel() {
   const openAdd = () => {
     setEditing(null)
     setForm(emptyForm)
+    setTrans({})
     setError('')
     setShowModal(true)
   }
@@ -81,6 +85,10 @@ export default function MCPServersPanel() {
   const openEdit = (s: McpServer) => {
     setEditing(s)
     setForm({ name: s.name, url: s.url, api_key: s.api_key || '', description: s.description || '', is_active: !!s.is_active, response_mode: (s.response_mode as 'inject' | 'answer') || 'inject' })
+    setTrans({
+      name_zh: (s as any).name_zh || null, name_en: (s as any).name_en || null, name_vi: (s as any).name_vi || null,
+      desc_zh: (s as any).desc_zh || null, desc_en: (s as any).desc_en || null, desc_vi: (s as any).desc_vi || null,
+    })
     setError('')
     setShowModal(true)
   }
@@ -88,20 +96,27 @@ export default function MCPServersPanel() {
   const save = async () => {
     if (!form.name.trim() || !form.url.trim()) { setError(t('mcp.nameUrlRequired')); return }
     setSaving(true)
+    setTranslating(true)
     setError('')
     try {
-      const payload = { ...form, api_key: form.api_key || null, description: form.description || null, response_mode: form.response_mode }
+      const payload = { ...form, api_key: form.api_key || null, description: form.description || null, response_mode: form.response_mode, ...trans }
+      let res: any
       if (editing) {
-        await api.put(`/mcp-servers/${editing.id}`, payload)
+        res = await api.put(`/mcp-servers/${editing.id}`, payload)
       } else {
-        await api.post('/mcp-servers', payload)
+        res = await api.post('/mcp-servers', payload)
       }
+      setTrans({
+        name_zh: res.data.name_zh || null, name_en: res.data.name_en || null, name_vi: res.data.name_vi || null,
+        desc_zh: res.data.desc_zh || null, desc_en: res.data.desc_en || null, desc_vi: res.data.desc_vi || null,
+      })
       setShowModal(false)
       await load()
     } catch (e: any) {
       setError(e.response?.data?.error || t('mcp.saveFailed'))
     } finally {
       setSaving(false)
+      setTranslating(false)
     }
   }
 
@@ -367,6 +382,13 @@ export default function MCPServersPanel() {
                   className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
                 />
               </div>
+              <TranslationFields
+                data={trans}
+                onChange={setTrans}
+                translateUrl={editing ? `/mcp-servers/${editing.id}/translate` : undefined}
+                hasDescription
+                translating={translating}
+              />
               <div>
                 <label className="block text-xs font-medium text-slate-600 mb-1">{t('mcp.form.responseMode')}</label>
                 <div className="flex gap-2">

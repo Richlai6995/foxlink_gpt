@@ -80,7 +80,7 @@ async function getSelfKbDeclarations(db, userId) {
 }
 
 /** Execute a search against a self-built KB and return formatted result text. */
-async function executeSelfKbSearch(db, kb, query) {
+async function executeSelfKbSearch(db, kb, query, { userId, sessionId } = {}) {
   const t0 = Date.now();
   try {
     const { embedText, toVectorStr } = require('../services/kbEmbedding');
@@ -162,6 +162,17 @@ async function executeSelfKbSearch(db, kb, query) {
     const elapsed = Date.now() - t0;
     console.log(`[SelfKB] KB "${kb.name}" search done in ${elapsed}ms, results=${results.length}`);
 
+    // Log to kb_retrieval_tests with source='chat'
+    if (userId) {
+      try {
+        const { v4: uuid } = require('uuid');
+        await db.prepare(`
+          INSERT INTO kb_retrieval_tests (id, kb_id, user_id, query_text, retrieval_mode, top_k, elapsed_ms, source)
+          VALUES (?, ?, ?, ?, ?, ?, ?, 'chat')
+        `).run(uuid(), kb.id, userId, query.slice(0, 500), kb.retrieval_mode || 'hybrid', topK, elapsed);
+      } catch (_) {}
+    }
+
     if (results.length === 0) return `[知識庫「${kb.name}」未找到相關內容]`;
 
     const chunks = results.map((r, i) => {
@@ -242,7 +253,7 @@ async function getDifyFunctionDeclarations(db, roleId) {
 
 // Pre-filter DIFY declarations by intent using a quick Flash classification call.
 // Removes irrelevant KBs BEFORE the main LLM sees them — most reliable guard.
-async function filterDifyDeclsByIntent(userMessage, difyDecls, recentContext = '') {
+async function filterDifyDeclsByIntent(userMessage, difyDecls, recentContext = '', { db, userId } = {}) {
   if (difyDecls.length === 0) return [];
   const { generateTextSync, MODEL_FLASH } = require('../services/gemini');
   const toolList = difyDecls
@@ -270,7 +281,11 @@ ${contextSection}
 請只回覆純 JSON，不要有其他文字，格式：{"call":["工具名稱"]} 或 {"call":[]}`;
 
   try {
-    const { text } = await generateTextSync(MODEL_FLASH, [], prompt);
+    const { text, inputTokens: iT, outputTokens: oT } = await generateTextSync(MODEL_FLASH, [], prompt);
+    if ((iT || oT) && db && userId) {
+      const today = new Date().toISOString().split('T')[0];
+      upsertTokenUsage(db, userId, today, MODEL_FLASH, iT, oT).catch(() => {});
+    }
     const m = text.match(/\{[\s\S]*?"call"\s*:\s*\[[\s\S]*?\]\s*\}/);
     if (!m) return [];
     const parsed = JSON.parse(m[0]);
@@ -286,7 +301,7 @@ ${contextSection}
 
 // Pre-filter MCP tool declarations by intent — prevents irrelevant tools from being called.
 // Falls back to passing ALL tools if classification fails (safe fallback).
-async function filterMcpDeclsByIntent(userMessage, mcpDecls, recentContext = '') {
+async function filterMcpDeclsByIntent(userMessage, mcpDecls, recentContext = '', { db, userId } = {}) {
   if (mcpDecls.length === 0) return [];
   const { generateTextSync, MODEL_FLASH } = require('../services/gemini');
   const toolList = mcpDecls
@@ -311,7 +326,11 @@ ${contextSection}
 請只回覆純 JSON，不要有其他文字，格式：{"call":["工具名稱"]} 或 {"call":[]}`;
 
   try {
-    const { text } = await generateTextSync(MODEL_FLASH, [], prompt);
+    const { text, inputTokens: iT, outputTokens: oT } = await generateTextSync(MODEL_FLASH, [], prompt);
+    if ((iT || oT) && db && userId) {
+      const today = new Date().toISOString().split('T')[0];
+      upsertTokenUsage(db, userId, today, MODEL_FLASH, iT, oT).catch(() => {});
+    }
     const m = text.match(/\{[\s\S]*?"call"\s*:\s*\[[\s\S]*?\]\s*\}/);
     if (!m) return [];
     const parsed = JSON.parse(m[0]);
@@ -1114,6 +1133,8 @@ router.post('/sessions/:id/messages', upload.array('files', 10), async (req, res
 
     // External inject: call endpoints and collect additional system prompts
     for (const sk of externalInjectSkills) {
+      const _t0 = Date.now();
+      let _status = 'ok', _errMsg = null, _respPreview = null;
       try {
         const resp = await Promise.race([
           fetch(sk.endpoint_url, {
@@ -1130,19 +1151,27 @@ router.post('/sessions/:id/messages', upload.array('files', 10), async (req, res
         if (resp.ok) {
           const data = await resp.json();
           console.log(`[Skill] inject response for "${sk.name}":`, JSON.stringify(data).slice(0, 300));
-          if (data.system_prompt) skillSystemPrompts.push(`# Skill: ${sk.name}\n${data.system_prompt}`);
-          else if (data.content) skillSystemPrompts.push(`# Skill: ${sk.name}\n${data.content}`);
+          const added = data.system_prompt || data.content || '';
+          if (added) { skillSystemPrompts.push(`# Skill: ${sk.name}\n${added}`); _respPreview = added.slice(0, 200); }
         } else {
+          _status = 'error'; _errMsg = `HTTP ${resp.status}`;
           console.warn(`[Skill] inject HTTP ${resp.status} for "${sk.name}"`);
         }
       } catch (e) {
+        _status = 'error'; _errMsg = e.message;
         console.warn(`[Skill] External inject failed for "${sk.name}": ${e.message} — skipping`);
       }
+      // Log skill call
+      try {
+        await db.prepare(`INSERT INTO skill_call_logs (skill_id, user_id, session_id, query_preview, response_preview, status, error_msg, duration_ms) VALUES (?,?,?,?,?,?,?,?)`)
+          .run(sk.id, req.user.id, sessionId, combinedUserText.slice(0, 200), _respPreview, _status, _errMsg, Date.now() - _t0);
+      } catch (_) {}
     }
 
     // External answer: bypass Gemini entirely
     if (externalAnswerSkill) {
       const sk = externalAnswerSkill;
+      const _ansT0 = Date.now();
       sendEvent({ type: 'status', message: `Skill: ${sk.name} 處理中...` });
       try {
         const resp = await Promise.race([
@@ -1170,9 +1199,18 @@ router.post('/sessions/:id/messages', upload.array('files', 10), async (req, res
         await db.prepare(`INSERT INTO chat_messages (session_id, role, content) VALUES (?, 'assistant', ?)`)
           .run(sessionId, answerContent);
         await db.prepare(`UPDATE chat_sessions SET updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(sessionId);
+        // Log skill call
+        try {
+          await db.prepare(`INSERT INTO skill_call_logs (skill_id, user_id, session_id, query_preview, response_preview, status, duration_ms) VALUES (?,?,?,?,?,?,?)`)
+            .run(sk.id, req.user.id, sessionId, combinedUserText.slice(0, 200), answerContent.slice(0, 200), 'ok', Date.now() - _ansT0);
+        } catch (_) {}
         return res.end();
       } catch (e) {
         console.error(`[Skill] External answer failed for "${sk.name}":`, e.message);
+        try {
+          await db.prepare(`INSERT INTO skill_call_logs (skill_id, user_id, session_id, query_preview, status, error_msg, duration_ms) VALUES (?,?,?,?,?,?,?)`)
+            .run(sk.id, req.user.id, sessionId, combinedUserText.slice(0, 200), 'error', e.message, Date.now() - _ansT0);
+        } catch (_) {}
         // Fall through to normal Gemini path
       }
     }
@@ -1367,10 +1405,11 @@ router.post('/sessions/:id/messages', upload.array('files', 10), async (req, res
         // Intent-filter MCP tools, DIFY KBs, and self-built KBs before passing to LLM
         const recentCtx = historyMessages.slice(-4)
           .map(m => `${m.role === 'user' ? '使用者' : 'AI'}: ${m.content.slice(0, 300)}`).join('\n');
+        const intentCtx = { db, userId: req.user.id };
         const [mcpDecls, filteredDifyDecls, filteredSelfKbDecls] = await Promise.all([
-          filterMcpDeclsByIntent(combinedUserText, filteredAllMcpDecls, recentCtx),
-          filterDifyDeclsByIntent(combinedUserText, difyDecls, recentCtx),
-          filterDifyDeclsByIntent(combinedUserText, selfKbDecls, recentCtx),
+          filterMcpDeclsByIntent(combinedUserText, filteredAllMcpDecls, recentCtx, intentCtx),
+          filterDifyDeclsByIntent(combinedUserText, difyDecls, recentCtx, intentCtx),
+          filterDifyDeclsByIntent(combinedUserText, selfKbDecls, recentCtx, intentCtx),
         ]);
         allDeclarations = [...mcpDecls, ...filteredDifyDecls, ...filteredSelfKbDecls];
       }
@@ -1392,7 +1431,7 @@ router.post('/sessions/:id/messages', upload.array('files', 10), async (req, res
               const kb = selfKbMap[decl.name];
               if (!kb) return null;
               const t1 = Date.now();
-              const result = await executeSelfKbSearch(db, kb, combinedUserText);
+              const result = await executeSelfKbSearch(db, kb, combinedUserText, { userId: req.user.id, sessionId });
               console.log(`[SelfKB] "${kb.name}" prefetch done in ${Date.now() - t1}ms`);
               if (!result?.trim()) return null;
               return `## 知識庫：${kb.name}\n\n${result}`;
@@ -1445,7 +1484,7 @@ router.post('/sessions/:id/messages', upload.array('files', 10), async (req, res
               calledSelfKbs.add(toolName);
               const kb = selfKbMap[toolName];
               sendEvent({ type: 'status', message: `查詢知識庫：${kb.name}` });
-              return await executeSelfKbSearch(db, kb, args.query || combinedUserText);
+              return await executeSelfKbSearch(db, kb, args.query || combinedUserText, { userId: req.user.id, sessionId });
             }
             if (kbMap[toolName]) {
               if (calledDifyKbs.has(toolName)) {
@@ -1574,9 +1613,13 @@ router.post('/sessions/:id/messages', upload.array('files', 10), async (req, res
       console.log(`[Chat] Title event sent: "${quickTitle}" for session ${sessionId}`);
 
       // 2. Fire-and-forget: refine with LLM semantic title (no await, won't block done event)
-      generateTitle(combinedUserText, text).then(async (llmTitle) => {
+      generateTitle(combinedUserText, text).then(async ({ title: llmTitle, inputTokens: tIn, outputTokens: tOut, model: tModel }) => {
         if (llmTitle && llmTitle !== quickTitle) {
           await db.prepare(`UPDATE chat_sessions SET title=? WHERE id=?`).run(llmTitle, sessionId);
+        }
+        if (tIn || tOut) {
+          const tday = new Date().toISOString().split('T')[0];
+          upsertTokenUsage(db, req.user.id, tday, tModel, tIn, tOut).catch(() => {});
         }
       }).catch(() => { });
     } else {

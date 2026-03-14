@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useSearchParams, useNavigate } from 'react-router-dom'
 import { Square, AlertTriangle, Share2, Copy, Check, X, Sparkles, Search, Plus, Plug, Zap, Database, CheckCircle, BarChart3, ChevronDown } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import Sidebar from '../components/Sidebar'
 import ChatWindow from '../components/ChatWindow'
 import MessageInput, { type MessageInputHandle } from '../components/MessageInput'
@@ -11,7 +12,19 @@ import { copyText } from '../lib/clipboard'
 import { useAuth } from '../context/AuthContext'
 
 export default function ChatPage() {
+  const { t, i18n } = useTranslation()
   const { user } = useAuth()
+
+  const localName = (item: any) => {
+    if (i18n.language === 'en') return item.name_en || item.name
+    if (i18n.language === 'vi') return item.name_vi || item.name
+    return item.name_zh || item.name
+  }
+  const localDesc = (item: any) => {
+    if (i18n.language === 'en') return item.desc_en || item.description
+    if (i18n.language === 'vi') return item.desc_vi || item.description
+    return item.desc_zh || item.description
+  }
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const [sessions, setSessions] = useState<ChatSession[]>([])
@@ -668,7 +681,7 @@ export default function ChatPage() {
         <div className="h-12 bg-white border-b border-slate-200 flex items-center px-4 gap-3">
           <span className="text-slate-600 text-sm font-medium truncate flex-1">
             {currentSessionId
-              ? sessions.find((s) => s.id === currentSessionId)?.title || '對話中'
+              ? sessions.find((s) => s.id === currentSessionId)?.title || t('chat.topbar.chatting')
               : 'FOXLINK GPT'}
           </span>
           {/* ── MCP button ── */}
@@ -676,20 +689,20 @@ export default function ChatPage() {
             <button
               onClick={openMcpPanel}
               className={`inline-flex items-center gap-1.5 text-xs border rounded-lg px-2.5 py-1 transition ${selectedMcpIds.size > 0 ? 'text-cyan-600 border-cyan-300 bg-cyan-50 hover:bg-cyan-100' : 'text-slate-500 border-slate-200 hover:text-cyan-600 hover:border-cyan-300'}`}
-              title="選擇 MCP 工具"
+              title={t('chat.topbar.mcp')}
             >
               <Plug size={13} />
-              {selectedMcpIds.size > 0 ? `MCP (${selectedMcpIds.size})` : 'MCP'}
+              {selectedMcpIds.size > 0 ? t('chat.topbar.mcpCount', { count: selectedMcpIds.size }) : t('chat.topbar.mcp')}
             </button>
             {showMcpPanel && (
               <div className="absolute top-full right-0 mt-1 w-72 bg-white border border-slate-200 rounded-xl shadow-2xl z-50">
                 <div className="p-3 border-b border-slate-100 flex items-center justify-between">
-                  <span className="text-sm font-semibold text-slate-800 flex items-center gap-1.5"><Plug size={14} className="text-cyan-500" />MCP 工具伺服器</span>
+                  <span className="text-sm font-semibold text-slate-800 flex items-center gap-1.5"><Plug size={14} className="text-cyan-500" />{t('chat.topbar.mcpPanelTitle')}</span>
                   <button onClick={() => setShowMcpPanel(false)} className="text-slate-400 hover:text-slate-600"><X size={14} /></button>
                 </div>
                 <div className="max-h-56 overflow-y-auto overflow-x-auto p-2 space-y-1">
                   {allMcpServers.length === 0 ? (
-                    <div className="text-center py-6 text-slate-400 text-xs">無可用 MCP 伺服器</div>
+                    <div className="text-center py-6 text-slate-400 text-xs">{t('chat.topbar.mcpEmpty')}</div>
                   ) : allMcpServers.map(s => {
                     const picked = selectedMcpIds.has(s.id as number)
                     return (
@@ -699,16 +712,16 @@ export default function ChatPage() {
                           {picked && <Check size={10} className="text-white" />}
                         </div>
                         <div className="flex-shrink-0">
-                          <p className="text-xs font-medium text-slate-800 whitespace-nowrap">{s.name}</p>
-                          {s.description && <p className="text-xs text-slate-400 whitespace-nowrap">{s.description}</p>}
+                          <p className="text-xs font-medium text-slate-800 whitespace-nowrap">{localName(s)}</p>
+                          {localDesc(s) && <p className="text-xs text-slate-400 whitespace-nowrap">{localDesc(s)}</p>}
                         </div>
                       </button>
                     )
                   })}
                 </div>
                 <div className="p-2 border-t border-slate-100 flex justify-between items-center">
-                  <button onClick={() => setSelectedMcpIds(new Set())} className="text-xs text-slate-400 hover:text-red-500 px-2 py-1">清除</button>
-                  <button onClick={() => setShowMcpPanel(false)} className="px-3 py-1.5 text-xs bg-cyan-600 text-white rounded-lg hover:bg-cyan-700">確認</button>
+                  <button onClick={() => setSelectedMcpIds(new Set())} className="text-xs text-slate-400 hover:text-red-500 px-2 py-1">{t('chat.topbar.clear')}</button>
+                  <button onClick={() => setShowMcpPanel(false)} className="px-3 py-1.5 text-xs bg-cyan-600 text-white rounded-lg hover:bg-cyan-700">{t('chat.topbar.confirm')}</button>
                 </div>
               </div>
             )}
@@ -719,20 +732,20 @@ export default function ChatPage() {
             <button
               onClick={openDifyPanel}
               className={`inline-flex items-center gap-1.5 text-xs border rounded-lg px-2.5 py-1 transition ${selectedDifyIds.size > 0 ? 'text-amber-600 border-amber-300 bg-amber-50 hover:bg-amber-100' : 'text-slate-500 border-slate-200 hover:text-amber-600 hover:border-amber-300'}`}
-              title="選擇 DIFY 知識庫"
+              title={t('chat.topbar.dify')}
             >
               <Zap size={13} />
-              {selectedDifyIds.size > 0 ? `DIFY (${selectedDifyIds.size})` : 'DIFY'}
+              {selectedDifyIds.size > 0 ? t('chat.topbar.difyCount', { count: selectedDifyIds.size }) : t('chat.topbar.dify')}
             </button>
             {showDifyPanel && (
               <div className="absolute top-full right-0 mt-1 w-72 bg-white border border-slate-200 rounded-xl shadow-2xl z-50">
                 <div className="p-3 border-b border-slate-100 flex items-center justify-between">
-                  <span className="text-sm font-semibold text-slate-800 flex items-center gap-1.5"><Zap size={14} className="text-amber-500" />DIFY 知識庫</span>
+                  <span className="text-sm font-semibold text-slate-800 flex items-center gap-1.5"><Zap size={14} className="text-amber-500" />{t('chat.topbar.difyPanelTitle')}</span>
                   <button onClick={() => setShowDifyPanel(false)} className="text-slate-400 hover:text-slate-600"><X size={14} /></button>
                 </div>
                 <div className="max-h-56 overflow-y-auto overflow-x-auto p-2 space-y-1">
                   {allDifyKbs.length === 0 ? (
-                    <div className="text-center py-6 text-slate-400 text-xs">無可用 DIFY 知識庫</div>
+                    <div className="text-center py-6 text-slate-400 text-xs">{t('chat.topbar.difyEmpty')}</div>
                   ) : allDifyKbs.map(k => {
                     const picked = selectedDifyIds.has(k.id as number)
                     return (
@@ -742,16 +755,16 @@ export default function ChatPage() {
                           {picked && <Check size={10} className="text-white" />}
                         </div>
                         <div className="flex-shrink-0">
-                          <p className="text-xs font-medium text-slate-800 whitespace-nowrap">{k.name}</p>
-                          {k.description && <p className="text-xs text-slate-400 whitespace-nowrap">{k.description}</p>}
+                          <p className="text-xs font-medium text-slate-800 whitespace-nowrap">{localName(k)}</p>
+                          {localDesc(k) && <p className="text-xs text-slate-400 whitespace-nowrap">{localDesc(k)}</p>}
                         </div>
                       </button>
                     )
                   })}
                 </div>
                 <div className="p-2 border-t border-slate-100 flex justify-between items-center">
-                  <button onClick={() => setSelectedDifyIds(new Set())} className="text-xs text-slate-400 hover:text-red-500 px-2 py-1">清除</button>
-                  <button onClick={() => setShowDifyPanel(false)} className="px-3 py-1.5 text-xs bg-amber-500 text-white rounded-lg hover:bg-amber-600">確認</button>
+                  <button onClick={() => setSelectedDifyIds(new Set())} className="text-xs text-slate-400 hover:text-red-500 px-2 py-1">{t('chat.topbar.clear')}</button>
+                  <button onClick={() => setShowDifyPanel(false)} className="px-3 py-1.5 text-xs bg-amber-500 text-white rounded-lg hover:bg-amber-600">{t('chat.topbar.confirm')}</button>
                 </div>
               </div>
             )}
@@ -762,20 +775,20 @@ export default function ChatPage() {
             <button
               onClick={openKbPanel}
               className={`inline-flex items-center gap-1.5 text-xs border rounded-lg px-2.5 py-1 transition ${selectedKbIds.size > 0 ? 'text-emerald-600 border-emerald-300 bg-emerald-50 hover:bg-emerald-100' : 'text-slate-500 border-slate-200 hover:text-emerald-600 hover:border-emerald-300'}`}
-              title="選擇自建知識庫"
+              title={t('chat.topbar.kb')}
             >
               <Database size={13} />
-              {selectedKbIds.size > 0 ? `知識庫 (${selectedKbIds.size})` : '知識庫'}
+              {selectedKbIds.size > 0 ? t('chat.topbar.kbCount', { count: selectedKbIds.size }) : t('chat.topbar.kb')}
             </button>
             {showKbPanel && (
               <div className="absolute top-full right-0 mt-1 w-72 bg-white border border-slate-200 rounded-xl shadow-2xl z-50">
                 <div className="p-3 border-b border-slate-100 flex items-center justify-between">
-                  <span className="text-sm font-semibold text-slate-800 flex items-center gap-1.5"><Database size={14} className="text-emerald-500" />自建知識庫</span>
+                  <span className="text-sm font-semibold text-slate-800 flex items-center gap-1.5"><Database size={14} className="text-emerald-500" />{t('chat.topbar.kbPanelTitle')}</span>
                   <button onClick={() => setShowKbPanel(false)} className="text-slate-400 hover:text-slate-600"><X size={14} /></button>
                 </div>
                 <div className="max-h-56 overflow-y-auto overflow-x-auto p-2 space-y-1">
                   {allSelfKbs.length === 0 ? (
-                    <div className="text-center py-6 text-slate-400 text-xs">無可用知識庫（需先建立並上傳文件）</div>
+                    <div className="text-center py-6 text-slate-400 text-xs">{t('chat.topbar.kbEmpty')}</div>
                   ) : allSelfKbs.map(k => {
                     const picked = selectedKbIds.has(String(k.id))
                     return (
@@ -785,16 +798,16 @@ export default function ChatPage() {
                           {picked && <Check size={10} className="text-white" />}
                         </div>
                         <div className="flex-shrink-0">
-                          <p className="text-xs font-medium text-slate-800 whitespace-nowrap">{k.name}</p>
-                          {k.description && <p className="text-xs text-slate-400 whitespace-nowrap">{k.description}</p>}
+                          <p className="text-xs font-medium text-slate-800 whitespace-nowrap">{localName(k)}</p>
+                          {localDesc(k) && <p className="text-xs text-slate-400 whitespace-nowrap">{localDesc(k)}</p>}
                         </div>
                       </button>
                     )
                   })}
                 </div>
                 <div className="p-2 border-t border-slate-100 flex justify-between items-center">
-                  <button onClick={() => setSelectedKbIds(new Set())} className="text-xs text-slate-400 hover:text-red-500 px-2 py-1">清除</button>
-                  <button onClick={() => setShowKbPanel(false)} className="px-3 py-1.5 text-xs bg-emerald-600 text-white rounded-lg hover:bg-emerald-700">確認</button>
+                  <button onClick={() => setSelectedKbIds(new Set())} className="text-xs text-slate-400 hover:text-red-500 px-2 py-1">{t('chat.topbar.clear')}</button>
+                  <button onClick={() => setShowKbPanel(false)} className="px-3 py-1.5 text-xs bg-emerald-600 text-white rounded-lg hover:bg-emerald-700">{t('chat.topbar.confirm')}</button>
                 </div>
               </div>
             )}
@@ -814,10 +827,10 @@ export default function ChatPage() {
                   ? 'text-purple-600 border-purple-300 bg-purple-50 hover:bg-purple-100'
                   : 'text-slate-500 border-slate-200 hover:text-purple-600 hover:border-purple-300'
                   }`}
-                title="掛載 Skill"
+                title={t('chat.topbar.skills')}
               >
                 <Sparkles size={13} />
-                {sessionSkills.length > 0 ? `技能 (${sessionSkills.length})` : '技能'}
+                {sessionSkills.length > 0 ? t('chat.topbar.skillsCount', { count: sessionSkills.length }) : t('chat.topbar.skills')}
               </button>
 
               {/* Skill selection dropdown panel */}
@@ -825,14 +838,14 @@ export default function ChatPage() {
                 <div className="absolute top-full right-0 mt-1 w-80 bg-white border border-slate-200 rounded-xl shadow-2xl z-50">
                   <div className="p-3 border-b border-slate-100">
                     <div className="flex items-center justify-between mb-2">
-                      <span className="text-sm font-semibold text-slate-800 flex items-center gap-1.5"><Sparkles size={14} className="text-purple-500" />選擇技能</span>
+                      <span className="text-sm font-semibold text-slate-800 flex items-center gap-1.5"><Sparkles size={14} className="text-purple-500" />{t('chat.topbar.skillsPanelTitle')}</span>
                       <button onClick={() => setShowSkillPanel(false)} className="text-slate-400 hover:text-slate-600"><X size={14} /></button>
                     </div>
                     <div className="relative">
                       <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
                       <input
                         value={skillSearch} onChange={e => setSkillSearch(e.target.value)}
-                        placeholder="搜尋技能..."
+                        placeholder={t('chat.topbar.searchSkills')}
                         className="w-full pl-7 pr-3 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-300"
                         autoFocus
                       />
@@ -857,8 +870,8 @@ export default function ChatPage() {
                             </div>
                             <span className="text-lg leading-none flex-shrink-0">{sk.icon}</span>
                             <div className="flex-shrink-0">
-                              <p className="text-xs font-medium text-slate-800 whitespace-nowrap">{sk.name}</p>
-                              {sk.description && <p className="text-xs text-slate-400 whitespace-nowrap">{sk.description}</p>}
+                              <p className="text-xs font-medium text-slate-800 whitespace-nowrap">{localName(sk)}</p>
+                              {localDesc(sk) && <p className="text-xs text-slate-400 whitespace-nowrap">{localDesc(sk)}</p>}
                             </div>
                             {sk.model_key && <span className="text-xs text-indigo-500 flex-shrink-0 ml-2">{sk.model_key}</span>}
                           </button>
@@ -868,21 +881,21 @@ export default function ChatPage() {
                     {allSkills.length === 0 && (
                       <div className="text-center py-6 text-slate-400">
                         <Sparkles size={24} className="mx-auto mb-2 opacity-30" />
-                        <p className="text-xs">尚無技能</p>
-                        <a href="/skills" className="text-xs text-purple-500 hover:underline flex items-center justify-center gap-1 mt-1"><Plus size={10} />前往建立</a>
+                        <p className="text-xs">{t('chat.topbar.skillsEmpty')}</p>
+                        <a href="/skills" className="text-xs text-purple-500 hover:underline flex items-center justify-center gap-1 mt-1"><Plus size={10} />{t('chat.topbar.createSkill')}</a>
                       </div>
                     )}
                   </div>
 
                   <div className="p-3 border-t border-slate-100 flex justify-between items-center">
-                    <span className="text-xs text-slate-500">已選 {pickedIds.size} 項</span>
+                    <span className="text-xs text-slate-500">{t('chat.topbar.selectedCount', { count: pickedIds.size })}</span>
                     <div className="flex gap-2">
-                      <button onClick={() => setShowSkillPanel(false)} className="px-3 py-1.5 text-xs text-slate-500 hover:bg-slate-100 rounded-lg">取消</button>
+                      <button onClick={() => setShowSkillPanel(false)} className="px-3 py-1.5 text-xs text-slate-500 hover:bg-slate-100 rounded-lg">{t('common.cancel')}</button>
                       <button
                         onClick={saveSkills} disabled={skillSaving}
                         className="px-3 py-1.5 text-xs bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50"
                       >
-                        {skillSaving ? '儲存中...' : '確認掛載'}
+                        {skillSaving ? t('common.saving') : t('chat.topbar.confirmMount')}
                       </button>
                     </div>
                   </div>
@@ -896,17 +909,17 @@ export default function ChatPage() {
               <button
                 onClick={() => setShowDashPanel((v) => !v)}
                 className="inline-flex items-center gap-1.5 text-xs border rounded-lg px-2.5 py-1 transition text-slate-500 border-slate-200 hover:text-orange-600 hover:border-orange-300"
-                title="AI 戰情"
+                title={t('chat.topbar.aiDashboard')}
               >
                 <BarChart3 size={13} />
-                AI 戰情
+                {t('chat.topbar.aiDashboard')}
                 <ChevronDown size={11} />
               </button>
               {showDashPanel && (
                 <div className="absolute top-full right-0 mt-1 w-60 bg-white border border-slate-200 rounded-xl shadow-2xl z-50">
                   <div className="p-3 border-b border-slate-100 flex items-center justify-between">
                     <span className="text-sm font-semibold text-slate-800 flex items-center gap-1.5">
-                      <BarChart3 size={14} className="text-orange-500" />AI 戰情室
+                      <BarChart3 size={14} className="text-orange-500" />{t('chat.topbar.dashPanelTitle')}
                     </span>
                     <button onClick={() => setShowDashPanel(false)} className="text-slate-400 hover:text-slate-600"><X size={14} /></button>
                   </div>
@@ -915,25 +928,25 @@ export default function ChatPage() {
                       onClick={() => { setShowDashPanel(false); navigate('/dashboard') }}
                       className="w-full flex items-center gap-2 px-3 py-2 text-xs text-orange-600 font-medium rounded-lg hover:bg-orange-50 transition"
                     >
-                      <BarChart3 size={13} /> 前往 AI 戰情主頁
+                      <BarChart3 size={13} /> {t('chat.topbar.aiDashHome')}
                     </button>
                     {dashTopics.length > 0 && <div className="border-t border-slate-100 my-1" />}
                     {dashTopics.map((topic) => (
                       <div key={topic.id}>
-                        <div className="px-3 py-1 text-xs font-semibold text-slate-500 uppercase tracking-wider">{topic.name}</div>
+                        <div className="px-3 py-1 text-xs font-semibold text-slate-500 uppercase tracking-wider">{localName(topic)}</div>
                         {topic.designs.map((d) => (
                           <button
                             key={d.id}
                             onClick={() => { setShowDashPanel(false); navigate(`/dashboard?topic=${topic.id}&design=${d.id}`) }}
                             className="w-full text-left px-4 py-1.5 text-xs text-slate-700 rounded-lg hover:bg-slate-50 transition truncate"
                           >
-                            {d.name}
+                            {localName(d)}
                           </button>
                         ))}
                       </div>
                     ))}
                     {dashTopics.length === 0 && (
-                      <div className="text-center py-4 text-slate-400 text-xs">尚無可用戰情任務</div>
+                      <div className="text-center py-4 text-slate-400 text-xs">{t('chat.topbar.noDesigns')}</div>
                     )}
                   </div>
                 </div>
@@ -947,25 +960,25 @@ export default function ChatPage() {
               onClick={handleShare}
               disabled={sharing}
               className="inline-flex items-center gap-1.5 text-xs text-slate-500 hover:text-blue-600 border border-slate-200 hover:border-blue-300 rounded-lg px-2.5 py-1 transition disabled:opacity-50"
-              title="分享對話"
+              title={t('chat.topbar.share')}
             >
               <Share2 size={13} />
-              {sharing ? '分享中...' : '分享'}
+              {sharing ? t('chat.topbar.sharing') : t('chat.topbar.share')}
             </button>
           )}
           {streaming && (
             <div className="flex items-center gap-2">
               <span className="text-xs text-blue-500 flex items-center gap-1">
                 <span className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-pulse" />
-                AI 回覆中...
+                {t('chat.topbar.aiReplying')}
               </span>
               <button
                 onClick={() => abortRef.current?.()}
                 className="flex items-center gap-1 text-xs text-red-500 hover:text-red-700 hover:bg-red-50 px-2 py-0.5 rounded-lg border border-red-200 transition"
-                title="停止生成"
+                title={t('chat.topbar.stop')}
               >
                 <Square size={10} fill="currentColor" />
-                停止
+                {t('chat.topbar.stop')}
               </button>
             </div>
           )}
@@ -981,18 +994,18 @@ export default function ChatPage() {
                       ? 'text-blue-600 border-blue-300 bg-blue-50 hover:bg-blue-100'
                       : 'text-slate-500 border-slate-200 hover:text-blue-600 hover:border-blue-300'
                   }`}
-                  title="研究任務"
+                  title={t('chat.topbar.research')}
                 >
                   {running.length > 0
-                    ? <><Sparkles size={13} className="animate-pulse" />研究中 ({running.length})</>
-                    : <><Search size={13} />研究任務</>
+                    ? <><Sparkles size={13} className="animate-pulse" />{t('chat.topbar.researchRunning', { count: running.length })}</>
+                    : <><Search size={13} />{t('chat.topbar.research')}</>
                   }
                 </button>
                 {showResearchPanel && (
                   <div className="absolute top-full right-0 mt-1 w-80 bg-white border border-slate-200 rounded-xl shadow-2xl z-50">
                     <div className="p-3 border-b border-slate-100 flex items-center justify-between">
                       <span className="text-sm font-semibold text-slate-800 flex items-center gap-1.5">
-                        <Search size={14} className="text-blue-500" />研究任務
+                        <Search size={14} className="text-blue-500" />{t('chat.topbar.research')}
                       </span>
                       <button onClick={() => setShowResearchPanel(false)} className="text-slate-400 hover:text-slate-600"><X size={14} /></button>
                     </div>
@@ -1012,19 +1025,19 @@ export default function ChatPage() {
                               {j.status === 'failed' && <AlertTriangle size={13} className="text-red-500 flex-shrink-0 mt-0.5" />}
                               <div className="flex-1 min-w-0">
 
-                                <p className="font-medium text-slate-800 truncate">{j.title || '研究中...'}</p>
+                                <p className="font-medium text-slate-800 truncate">{j.title || t('chat.topbar.researchJobRunning')}</p>
                                 {isRunning && (
                                   <div className="mt-1.5 space-y-1">
-                                    <p className="text-slate-500">{j.progress_label || '準備中...'}</p>
+                                    <p className="text-slate-500">{j.progress_label || t('chat.topbar.researchJobPreparing')}</p>
                                     <div className="h-1.5 bg-blue-100 rounded-full overflow-hidden">
                                       <div className="h-full bg-blue-500 rounded-full transition-all duration-700" style={{ width: `${pct}%` }} />
                                     </div>
-                                    {j.progress_total > 0 && <p className="text-slate-400">{j.progress_step}/{j.progress_total} 步驟</p>}
+                                    {j.progress_total > 0 && <p className="text-slate-400">{t('chat.topbar.researchJobSteps', { step: j.progress_step, total: j.progress_total })}</p>}
                                   </div>
                                 )}
                                 {j.status === 'done' && (
                                   <div className="mt-1 space-y-1">
-                                    <p className="text-green-600">完成 · {j.completed_at?.slice(0, 16)}</p>
+                                    <p className="text-green-600">{t('chat.topbar.researchJobDone', { time: j.completed_at?.slice(0, 16) })}</p>
                                     {j.result_files_json && (() => {
                                       try {
                                         const files: { name: string; url: string; type: string }[] = JSON.parse(j.result_files_json)
@@ -1043,7 +1056,7 @@ export default function ChatPage() {
                                     })()}
                                   </div>
                                 )}
-                                {j.status === 'failed' && <p className="text-red-500 mt-0.5 truncate">{j.error_msg || '發生錯誤'}</p>}
+                                {j.status === 'failed' && <p className="text-red-500 mt-0.5 truncate">{j.error_msg || t('chat.topbar.researchJobFailed')}</p>}
                               </div>
                               {!isRunning && (
                                 <button
@@ -1052,7 +1065,7 @@ export default function ChatPage() {
                                     setResearchJobs((prev) => prev.filter((x) => x.id !== j.id))
                                   }}
                                   className="text-slate-300 hover:text-red-400 flex-shrink-0 transition ml-1"
-                                  title="刪除"
+                                  title={t('chat.topbar.researchJobDelete')}
                                 >
                                   <X size={13} />
                                 </button>
