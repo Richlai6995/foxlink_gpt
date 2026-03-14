@@ -6,6 +6,7 @@ import {
   AlertTriangle, Database, Mail, Cpu, Zap, Settings, BookOpen,
   ChevronRight, Info, Lightbulb, Terminal, Globe, RefreshCw,
   Wand2, ImageIcon, Clock, Share2, GitFork, Lock, Sparkles, Code2, Package, Play, Square,
+  Paperclip, Search, Server, BookMarked, Wifi, WifiOff, CheckCircle, Loader2,
 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 
@@ -802,47 +803,210 @@ function UserManual() {
 
       <Section id="u-research" icon={<GitFork size={22} />} iconColor="text-indigo-500" title="深度研究">
         <Para>
-          「深度研究」功能讓 AI 針對複雜問題自動規劃多步驟調查流程：先生成研究計劃、逐步執行，
-          最後整合所有發現產出完整的研究報告（可選 PDF / DOCX / TXT 格式）。
-          適合需要跨文件比較、多角度分析的場景，如競品分析、技術評估、市場調查等。
+          「深度研究」讓 AI 針對複雜問題自動拆解成多個子問題、逐一深度調查後，整合產出完整報告。
+          適合競品分析、技術評估、市場調查、法規解析等需要多角度、多來源交叉比對的場景。
+          整個研究在背景非同步執行，不影響您繼續使用聊天。
         </Para>
 
-        <SubSection title="啟動深度研究">
-          <div className="space-y-3">
-            <StepItem num={1} title="點選左側邊欄「更多功能」→「深度研究」" desc="或從主介面頂部工具列找到望遠鏡圖示" />
-            <StepItem num={2} title="輸入您要研究的問題或主題" desc="問題越具體，研究計劃越精準，例如：「分析 2024–2025 年全球 PCB 供應鏈風險與機會」" />
-            <StepItem num={3} title="選擇是否啟用「網路搜尋」" desc="啟用後 AI 會透過 MCP 搜尋工具查詢最新資訊（需先設定 MCP 搜尋伺服器）" />
-            <StepItem num={4} title="選擇輸出格式：TXT / DOCX / PDF" desc="多選時會同時生成並打包，完成後可一次下載" />
-            <StepItem num={5} title="點選「開始研究」，AI 自動執行多步驟調查" desc="進度條顯示目前執行到哪個步驟，可隨時查看即時日誌" />
-            <StepItem num={6} title="完成後在「深度研究」清單找到此任務，下載報告" />
+        {/* ── 流程概覽 ── */}
+        <SubSection title="三步驟流程概覽">
+          <div className="grid grid-cols-1 gap-3">
+            {[
+              { step: 'Step 1', color: 'bg-blue-600',   label: '設定問題', desc: '輸入主題、選深度、設定全局附件與資料來源，AI 自動推薦相關知識庫' },
+              { step: 'Step 2', color: 'bg-violet-600', label: '確認計畫', desc: 'AI 生成子問題清單後，您可編輯問題文字、設定每個子問題的方向提示 / 附件 / 網搜開關 / 知識庫' },
+              { step: 'Step 3', color: 'bg-emerald-600', label: '即時預覽', desc: '每個子問題完成後立即顯示答案摘要，全部完成自動整合報告並生成下載檔' },
+            ].map((b) => (
+              <div key={b.step} className="flex gap-4 p-4 bg-slate-50 rounded-xl border border-slate-200">
+                <div className={`${b.color} text-white text-xs font-bold px-2.5 py-1 rounded-lg flex-shrink-0 h-fit mt-0.5`}>{b.step}</div>
+                <div>
+                  <p className="text-sm font-semibold text-slate-700">{b.label}</p>
+                  <p className="text-xs text-slate-500 mt-0.5 leading-5">{b.desc}</p>
+                </div>
+              </div>
+            ))}
           </div>
+        </SubSection>
+
+        {/* ── Step 1 詳細說明 ── */}
+        <SubSection title="Step 1：設定問題">
+          <Para>點選輸入框右側的 <Search size={13} className="inline text-purple-500" /> 深度研究按鈕開啟設定面板。若輸入框已輸入問題或附加了檔案，這些內容會自動帶入。</Para>
+          <Table
+            headers={['設定項目', '說明']}
+            rows={[
+              ['研究問題', '輸入您要深入調查的問題或主題，越具體越好'],
+              ['全局附件', '上傳檔案（PDF / Word / Excel / 圖片等）作為所有子問題的共用背景資料，拖放或點擊 + 附加'],
+              ['研究深度', '快速 2 個、標準 5 個、深入 8 個、全面 12 個子問題，深度越高耗時越長'],
+              ['輸出格式', '可多選 Word / PDF / PPT / Excel，完成後每種格式各生成一個下載連結'],
+              ['整體資料來源', '為所有子問題預設使用的資料來源：自建知識庫 / Dify 知識庫 / MCP 工具（子問題可個別覆蓋）'],
+              ['自動建議 KB', '輸入問題 1 秒後系統自動分析並預選相關知識庫（橘色「自動建議」標籤）'],
+              ['引用前次研究', '選擇已完成的研究，其摘要會自動作為本次研究的背景知識，可多選最多 3 筆'],
+            ]}
+          />
           <TipBox>
-            深度研究會在背景非同步執行，您可以關閉頁面或切換到其他對話，
-            完成後系統會在側邊欄顯示通知（若有啟用 Email 通知，也會發送 Email）。
+            輸入完問題後稍等 1 秒，系統會自動推薦相關知識庫並預勾選。若推薦不準確，可手動取消勾選。
           </TipBox>
         </SubSection>
 
-        <SubSection title="研究計劃預覽與調整">
+        {/* ── Step 2 詳細說明 ── */}
+        <SubSection title="Step 2：確認計畫與子問題設定">
           <Para>
-            AI 生成研究計劃後，系統會先暫停並讓您預覽計劃內容（各步驟標題與預計執行內容）。
-            您可以直接編輯計劃，刪除不需要的步驟，或補充更多調查方向，確認後再點「執行計劃」。
+            AI 生成研究計畫後進入確認頁，顯示研究主題、目標說明及自動拆解的子問題清單。
+            您可拖曳排序、編輯問題文字、新增或刪除子問題（最多 12 個）。
           </Para>
-          <NoteBox>若直接點「執行計劃」不修改，AI 會依自動生成的計劃全部執行。研究步驟越多，耗時與 Token 消耗越大，建議適當精簡。</NoteBox>
+          <Para>每個子問題展開後可設定：</Para>
+          <div className="space-y-2 pl-2">
+            <div className="flex gap-3 items-start">
+              <Lightbulb size={14} className="text-amber-500 flex-shrink-0 mt-0.5" />
+              <div>
+                <p className="text-sm font-medium text-slate-700">研究方向提示</p>
+                <p className="text-xs text-slate-500 leading-5">輸入提示文字，例如「只看台灣市場數據」、「聚焦 2024 年後的資料」，引導 AI 研究方向。</p>
+              </div>
+            </div>
+            <div className="flex gap-3 items-start">
+              <Paperclip size={14} className="text-blue-500 flex-shrink-0 mt-0.5" />
+              <div>
+                <p className="text-sm font-medium text-slate-700">子問題專屬附件</p>
+                <p className="text-xs text-slate-500 leading-5">為此子問題額外附加不同的參考文件，僅此子問題使用，不影響其他子問題。</p>
+              </div>
+            </div>
+            <div className="flex gap-3 items-start">
+              <Wifi size={14} className="text-blue-400 flex-shrink-0 mt-0.5" />
+              <div>
+                <p className="text-sm font-medium text-slate-700">網路搜尋開關</p>
+                <p className="text-xs text-slate-500 leading-5">
+                  為此子問題個別啟用或停用網路搜尋（覆蓋任務層級設定）。
+                  亮藍色 <Wifi size={11} className="inline text-blue-500" /> = 啟用，灰色 <WifiOff size={11} className="inline text-slate-400" /> = 停用。
+                  實際是否啟用網搜還受「無 KB 資料才觸發」的邏輯控制。
+                </p>
+              </div>
+            </div>
+            <div className="flex gap-3 items-start">
+              <Database size={14} className="text-blue-600 flex-shrink-0 mt-0.5" />
+              <div>
+                <p className="text-sm font-medium text-slate-700">子問題資料來源（覆蓋任務設定）</p>
+                <p className="text-xs text-slate-500 leading-5">為此子問題指定不同的自建 KB / Dify KB / MCP 工具，覆蓋 Step 1 設定的任務層級來源。</p>
+              </div>
+            </div>
+          </div>
+          <NoteBox>
+            子問題數量越多，Token 消耗越大。標準（5 個）適合大多數需求，若主題複雜才考慮深入（8 個）以上。
+          </NoteBox>
         </SubSection>
 
-        <SubSection title="查看研究記錄">
+        {/* ── Step 3 詳細說明 ── */}
+        <SubSection title="Step 3：即時串流預覽">
           <Para>
-            所有深度研究任務都保存在「深度研究」頁面的清單中，包含建立時間、狀態（執行中 / 完成 / 失敗）及輸出檔案連結，可隨時重新下載。
+            點「確認並開始研究」後立即進入預覽頁，研究在背景執行，畫面即時更新每個子問題的狀態：
           </Para>
+          <div className="space-y-2 pl-2">
+            <div className="flex gap-3 items-center">
+              <Loader2 size={14} className="text-blue-400 flex-shrink-0 animate-spin" />
+              <p className="text-xs text-slate-600">研究中（旋轉圖示）— AI 正在針對此子問題搜尋與生成答案</p>
+            </div>
+            <div className="flex gap-3 items-center">
+              <CheckCircle size={14} className="text-green-500 flex-shrink-0" />
+              <p className="text-xs text-slate-600">已完成（綠色勾選）— 顯示答案摘要前 300 字</p>
+            </div>
+          </div>
+          <Para>全部子問題完成後，AI 自動整合產出完整報告並生成下載檔，之後可在頂部欄位的研究面板下載。</Para>
+          <TipBox>
+            可以直接關閉此視窗，研究仍繼續在背景執行。完成後頂部的研究圖示會出現完成提示，
+            對話中也會自動插入研究摘要與下載連結。
+          </TipBox>
+        </SubSection>
+
+        {/* ── 資料來源與網路搜尋邏輯 ── */}
+        <SubSection title="資料來源選用邏輯">
+          <Para>系統依以下優先順序決定每個子問題使用哪些資料：</Para>
           <Table
-            headers={['狀態', '說明']}
+            headers={['層級', '優先', '說明']}
             rows={[
-              ['pending（等待中）', 'AI 尚未開始，通常在數秒內轉為執行中'],
-              ['running（執行中）', '正在逐步執行研究計劃，進度條顯示完成百分比'],
-              ['done（完成）', '報告已生成，可點選下載'],
-              ['failed（失敗）', '執行過程發生錯誤，錯誤訊息顯示於備註欄，可重新嘗試'],
+              ['子問題層級', '最高', '若子問題有設定個別 KB / Dify / MCP，以子問題設定為準'],
+              ['任務層級', '次高', '子問題未設定時，使用 Step 1 的整體任務資料來源'],
+              ['全部 KB', '預設', '任務層級也未設定時，自動搜尋您能存取的所有知識庫'],
+              ['網路搜尋', '補充', '知識庫無結果且無附件時自動觸發（需有可用的 MCP 搜尋工具）'],
             ]}
           />
+        </SubSection>
+
+        {/* ── 修改子問題重跑 ── */}
+        <SubSection title="修改子問題並重跑（Edit & Re-run）">
+          <Para>
+            研究完成後，若某些子問題的答案不理想，可以針對特定子問題修改後重跑，
+            <strong>不需要整個任務重頭來過</strong>，其餘子問題的答案原封不動保留。
+          </Para>
+          <div className="space-y-3">
+            <StepItem num={1} title="開啟頂部欄位的研究面板" desc="點選頂部欄位的望遠鏡／研究圖示，展開已完成的研究清單" />
+            <StepItem
+              num={2}
+              title={`點選 done 研究右側的「↺」按鈕`}
+              desc="這會開啟 ResearchModal 的「編輯重跑」模式，直接進入 Step 2"
+            />
+            <StepItem num={3} title="選擇要重跑的子問題" desc="預設全部為「保留」（灰底顯示舊答案摘要）；點「↺ 重跑」按鈕標記為橘色 = 此子問題將重新執行" />
+            <StepItem num={4} title="修改問題文字 / 方向提示 / 附件 / 網搜開關（選填）" desc="展開已標記的子問題，可修改研究方向或附加新文件" />
+            <StepItem num={5} title="點「確認並重跑」" desc="只執行被標記的子問題，完成後自動與原有答案合併、重新整合報告、更新下載檔" />
+          </div>
+          <TipBox>
+            重跑完成後，聊天記錄中的研究摘要會自動更新為最新版本，下載檔也會重新生成。
+          </TipBox>
+          <NoteBox>
+            正在執行中（pending / running）的研究無法重跑，請等待當前執行完成後再操作。
+          </NoteBox>
+        </SubSection>
+
+        {/* ── 前次研究引用 ── */}
+        <SubSection title="引用前次研究作為背景知識">
+          <Para>
+            在 Step 1 的「引用前次研究」區塊，可選擇已完成的研究（最近 20 筆）作為本次研究的背景知識。
+            系統會自動將舊研究的摘要（約 800 字）拼接到每個子問題的背景脈絡中，
+            適合「追蹤研究」場景，例如上季分析的延伸、議題的持續追蹤。
+          </Para>
+          <NoteBox>「引用前次研究」與「修改子問題重跑」是兩個不同功能：引用是把舊摘要當背景知識，讓新研究有延續性；重跑是直接修改舊研究中不滿意的子問題，在原有報告上更新。</NoteBox>
+        </SubSection>
+
+        {/* ── 研究歷史與下載 ── */}
+        <SubSection title="研究歷史與下載">
+          <Para>
+            點選頂部欄位的研究圖示可展開研究面板，顯示最近 10 筆研究任務的狀態與操作。
+          </Para>
+          <Table
+            headers={['狀態', '圖示', '說明']}
+            rows={[
+              ['pending', '藍色 Sparkles ✦', 'AI 尚未開始，通常在數秒內轉為執行中'],
+              ['running', '藍色進度條', '正在逐步研究子問題，進度條顯示 N/M 步'],
+              ['done', '綠色 ✓', '報告已生成，點連結即可下載各格式檔案'],
+              ['failed', '紅色 ⚠', '發生錯誤，錯誤訊息顯示於下方，可點 ↺ 重跑嘗試修復'],
+            ]}
+          />
+          <Para>每筆研究右側有兩個按鈕：</Para>
+          <div className="space-y-2 pl-2">
+            <div className="flex gap-3 items-center">
+              <RefreshCw size={14} className="text-orange-400 flex-shrink-0" />
+              <p className="text-xs text-slate-600">（橘色）↺ 編輯並重跑子問題 — 僅 done 狀態顯示</p>
+            </div>
+            <div className="flex gap-3 items-center">
+              <span className="text-slate-400 text-sm font-bold flex-shrink-0">✕</span>
+              <p className="text-xs text-slate-600">（灰色）刪除此研究任務及其下載檔</p>
+            </div>
+          </div>
+        </SubSection>
+
+        {/* ── Token 消耗提示 ── */}
+        <SubSection title="Token 消耗說明">
+          <Para>深度研究使用 Gemini Pro 模型，Token 消耗明顯高於一般對話，請依實際需求選擇研究深度：</Para>
+          <Table
+            headers={['深度', '子問題數', '預估 Token（僅供參考）', '適用場景']}
+            rows={[
+              ['快速', '2', '約 5 k–15 k', '簡單問題、快速了解概況'],
+              ['標準', '5', '約 15 k–40 k', '大多數一般調查需求'],
+              ['深入', '8', '約 30 k–70 k', '複雜議題、需多角度驗證'],
+              ['全面', '12', '約 50 k–120 k', '大型研究報告、需窮舉各面向'],
+            ]}
+          />
+          <NoteBox>
+            若有管理員設定的每日 / 每週 Token 使用上限，深度研究也受此限制。
+            上限剩餘量可在聊天頁面頂部的金額提示區查看。
+          </NoteBox>
         </SubSection>
       </Section>
 
