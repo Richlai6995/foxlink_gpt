@@ -1,8 +1,8 @@
 # FOXLINK GPT — K8s 正式環境部署規劃書
 
-> 版本：v1.0
+> 版本：v1.1
 > 日期：2026-03-14
-> 狀態：討論完成，待實作
+> 狀態：P0 實作完成，P1 YAML 備妥，待部署確認
 
 ---
 
@@ -432,6 +432,43 @@ Pod3 stdout/stderr ──┘
 | 🟢 P2 | Loki + Fluent Bit log 集中 | 上線後 debug 用 |
 | 🟢 P3 | worker_threads 檔案生成 | 視 CPU 負載決定 |
 | 🟢 P3 | Oracle Data Guard | 後期 HA 評估 |
+
+---
+
+---
+
+## 十五、實作進度
+
+### 已完成
+
+| 項目 | 檔案 | commit |
+|------|------|--------|
+| Redis token store | `server/services/redisClient.js` | a7e3e7f |
+| auth.js 改 Redis | `server/routes/auth.js` | a7e3e7f |
+| SIGTERM graceful shutdown | `server/server.js` | a7e3e7f |
+| Oracle pool 調整 (poolMax 25) | `server/database-oracle.js` | a7e3e7f |
+| Redis K8s YAML | `k8s/redis.yaml` | a7e3e7f |
+| NFS PVC YAML | `k8s/nfs-pvc.yaml` | a7e3e7f |
+| nginx-ingress YAML | `k8s/ingress.yaml` | a7e3e7f |
+| 主 app K8s deployment | `k8s/deployment.yaml` | 5355e40 |
+| Uptime Kuma K8s YAML | `k8s/uptime-kuma.yaml` | 5355e40 |
+| Loki + Fluent Bit + Grafana | `k8s/loki-stack.yaml` | 5355e40 |
+| docker-compose Redis + healthcheck | `docker-compose.yml` | 5355e40 |
+
+---
+
+## 十六、待確認後處理（部署前必填）
+
+| 優先 | 項目 | 負責確認 | 影響檔案 |
+|------|------|----------|---------|
+| 🔴 | Oracle Instant Client 版本（19 or 23） | 基礎設施 | `Dockerfile`, `docker-compose.yml`, `k8s/deployment.yaml` |
+| 🔴 | Oracle Instant Client 在 K8s 的掛載方式（NFS PVC or hostPath） | 基礎設施 | `k8s/deployment.yaml` |
+| 🔴 | Container image registry URL | DevOps | `k8s/deployment.yaml` |
+| 🟡 | Synology NAS IP 與共用資料夾路徑 | 基礎設施 | `k8s/nfs-pvc.yaml` |
+| 🟡 | 正式域名（app / monitor / logs） | 網路/DNS | `k8s/ingress.yaml`, `k8s/uptime-kuma.yaml`, `k8s/loki-stack.yaml` |
+| 🟡 | Grafana admin 密碼改為 K8s Secret | DevOps | `k8s/loki-stack.yaml` |
+| 🟡 | Oracle DB `PROCESSES` 參數確認（建議 150） | DBA | Oracle VM |
+| 🟢 | TLS 憑證（Let's Encrypt 或內部 CA） | 網路 | `k8s/ingress.yaml` |
 
 ---
 
