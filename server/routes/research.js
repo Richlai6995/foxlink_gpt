@@ -80,9 +80,10 @@ router.post('/jobs', async (req, res) => {
     const {
       question,
       plan,
-      session_id   = null,
+      session_id     = null,
       output_formats = 'docx',
       use_web_search = false,
+      kb_config      = null,  // { task: {self_kb_ids, dify_kb_ids, mcp_server_ids}, topics: {...} }
     } = req.body;
 
     if (!plan?.sub_questions?.length) return res.status(400).json({ error: '研究計畫格式錯誤' });
@@ -91,8 +92,8 @@ router.post('/jobs', async (req, res) => {
 
     await db.prepare(`
       INSERT INTO research_jobs
-        (id, user_id, session_id, title, question, plan_json, status, use_web_search, output_formats)
-      VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?)
+        (id, user_id, session_id, title, question, plan_json, status, use_web_search, output_formats, kb_config_json)
+      VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)
     `).run(
       jobId,
       req.user.id,
@@ -102,6 +103,7 @@ router.post('/jobs', async (req, res) => {
       JSON.stringify(plan),
       use_web_search ? 1 : 0,
       output_formats,
+      kb_config ? JSON.stringify(kb_config) : null,
     );
 
     // Insert placeholder chat message so research shows inline in history
@@ -121,6 +123,88 @@ router.post('/jobs', async (req, res) => {
     res.status(201).json({ id: jobId, status: 'pending' });
   } catch (e) {
     console.error('[Research] POST /jobs error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── GET /api/research/accessible-resources  (KBs/Dify/MCP user can bind) ──────
+router.get('/accessible-resources', async (req, res) => {
+  const db = getDb();
+  try {
+    const ok = await checkPermission(db, req.user);
+    if (!ok) return res.status(403).json({ error: '無權限' });
+
+    const userId = req.user.id;
+    const roleId = req.user.role_id;
+    const isAdmin = req.user.role === 'admin';
+
+    // Self-built KBs (same access logic as chat.js)
+    let selfKbs;
+    if (isAdmin) {
+      selfKbs = await db.prepare(
+        `SELECT id, name, chunk_count FROM knowledge_bases WHERE chunk_count > 0 ORDER BY name`
+      ).all();
+    } else {
+      selfKbs = await db.prepare(`
+        SELECT kb.id, kb.name, kb.chunk_count
+        FROM knowledge_bases kb
+        WHERE kb.chunk_count > 0 AND (
+          kb.creator_id=?
+          OR kb.is_public=1
+          OR EXISTS (
+            SELECT 1 FROM kb_access ka WHERE ka.kb_id=kb.id AND (
+              (ka.grantee_type='user' AND ka.grantee_id=TO_CHAR(?))
+              OR (ka.grantee_type='role' AND ka.grantee_id=TO_CHAR(?))
+            )
+          )
+        )
+        ORDER BY kb.name
+      `).all(userId, userId, roleId);
+    }
+
+    // Dify KBs (role-based)
+    let difyKbs;
+    if (isAdmin) {
+      difyKbs = await db.prepare(
+        `SELECT id, name FROM dify_knowledge_bases WHERE is_active=1 ORDER BY sort_order, name`
+      ).all();
+    } else if (roleId) {
+      difyKbs = await db.prepare(`
+        SELECT d.id, d.name FROM dify_knowledge_bases d
+        JOIN role_dify_kbs rd ON rd.dify_kb_id=d.id AND rd.role_id=?
+        WHERE d.is_active=1 ORDER BY d.sort_order, d.name
+      `).all(roleId);
+    } else {
+      difyKbs = [];
+    }
+
+    // MCP servers (role-based)
+    let mcpServers;
+    if (isAdmin) {
+      mcpServers = await db.prepare(
+        `SELECT id, name, tools_json FROM mcp_servers WHERE is_active=1 ORDER BY name`
+      ).all();
+    } else if (roleId) {
+      mcpServers = await db.prepare(`
+        SELECT m.id, m.name, m.tools_json FROM mcp_servers m
+        JOIN role_mcp_servers rm ON rm.mcp_server_id=m.id AND rm.role_id=?
+        WHERE m.is_active=1 ORDER BY m.name
+      `).all(roleId);
+    } else {
+      mcpServers = [];
+    }
+
+    res.json({
+      self_kbs: selfKbs.map((k) => ({ id: k.id, name: k.name, chunk_count: k.chunk_count })),
+      dify_kbs: difyKbs.map((k) => ({ id: k.id, name: k.name })),
+      mcp_servers: mcpServers.map((m) => ({
+        id: m.id,
+        name: m.name,
+        tools_count: JSON.parse(m.tools_json || '[]').length,
+      })),
+    });
+  } catch (e) {
+    console.error('[Research] /accessible-resources error:', e.message);
     res.status(500).json({ error: e.message });
   }
 });

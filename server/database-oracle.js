@@ -442,6 +442,9 @@ async function runMigrations(db) {
     completed_at   TIMESTAMP
   )`);
 
+  // ── Research KB binding ───────────────────────────────────────────────────
+  await addCol('RESEARCH_JOBS', 'KB_CONFIG_JSON', 'CLOB');
+
   // ── AI 戰情 ─────────────────────────────────────────────────────────────────
   await addCol('USERS', 'CAN_DESIGN_AI_SELECT', 'NUMBER(1) DEFAULT 0');
   await addCol('USERS', 'CAN_USE_AI_DASHBOARD',  'NUMBER(1) DEFAULT 0');

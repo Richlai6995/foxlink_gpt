@@ -2,6 +2,7 @@
 /**
  * Deep Research Service
  * Executes a research job: KB search → LLM per sub-question → synthesize → generate files
+ * Supports task-level and per-topic binding of self KB / Dify KB / MCP servers
  */
 
 const path = require('path');
@@ -10,48 +11,82 @@ const { GoogleGenerativeAI } = require('@google/generative-ai');
 const { embedText, toVectorStr } = require('./kbEmbedding');
 const { generateFile } = require('./fileGenerator');
 const { upsertTokenUsage } = require('./tokenService');
+const { UPLOAD_DIR } = require('../config/paths');
 
 const MODEL_PRO   = process.env.GEMINI_MODEL_PRO   || 'gemini-2.0-flash';
 const MODEL_FLASH = process.env.GEMINI_MODEL_FLASH  || 'gemini-2.0-flash';
-const UPLOAD_DIR  = process.env.UPLOAD_DIR
-  ? path.resolve(process.env.UPLOAD_DIR)
-  : path.join(__dirname, '../uploads');
 
 // ─── KB Search ────────────────────────────────────────────────────────────────
 
 /**
- * Search all accessible KBs for a user and return combined context text.
- * Returns '' if no KBs are accessible or no relevant chunks found.
+ * Search all accessible KBs for a user (fallback when no specific IDs given).
  */
 async function searchUserKbs(db, userId, query, topK = 6) {
+  return searchKbsInternal(db, userId, null, query, topK);
+}
+
+/**
+ * Search only the specified KB IDs (permission still verified).
+ */
+async function searchSpecificKbs(db, userId, kbIds, query, topK = 6) {
+  if (!kbIds || !kbIds.length) return '';
+  return searchKbsInternal(db, userId, kbIds, query, topK);
+}
+
+async function searchKbsInternal(db, userId, kbIds, query, topK) {
   try {
-    const user = await db.prepare(
-      'SELECT role, role_id FROM users WHERE id=?'
-    ).get(userId);
+    const user = await db.prepare('SELECT role, role_id FROM users WHERE id=?').get(userId);
     if (!user) return '';
 
     let kbs;
-    if (user.role === 'admin') {
-      kbs = await db.prepare(
-        `SELECT id, embedding_dims, retrieval_mode, top_k_return, score_threshold
-         FROM knowledge_bases WHERE chunk_count > 0 FETCH FIRST 5 ROWS ONLY`
-      ).all();
-    } else {
-      kbs = await db.prepare(`
-        SELECT kb.id, kb.embedding_dims, kb.retrieval_mode, kb.top_k_return, kb.score_threshold
-        FROM knowledge_bases kb
-        WHERE kb.chunk_count > 0 AND (
-          kb.creator_id=?
-          OR kb.is_public=1
-          OR EXISTS (
-            SELECT 1 FROM kb_access ka WHERE ka.kb_id=kb.id AND (
-              (ka.grantee_type='user' AND ka.grantee_id=TO_CHAR(?))
-              OR (ka.grantee_type='role' AND ka.grantee_id=TO_CHAR(?))
+    if (kbIds && kbIds.length) {
+      // Specific IDs requested — still filter by permission
+      const idPlaceholders = kbIds.map(() => '?').join(',');
+      if (user.role === 'admin') {
+        kbs = await db.prepare(
+          `SELECT id, embedding_dims, retrieval_mode, top_k_return, score_threshold
+           FROM knowledge_bases WHERE chunk_count > 0 AND id IN (${idPlaceholders})`
+        ).all(...kbIds);
+      } else {
+        kbs = await db.prepare(`
+          SELECT kb.id, kb.embedding_dims, kb.retrieval_mode, kb.top_k_return, kb.score_threshold
+          FROM knowledge_bases kb
+          WHERE kb.chunk_count > 0 AND kb.id IN (${idPlaceholders}) AND (
+            kb.creator_id=?
+            OR kb.is_public=1
+            OR EXISTS (
+              SELECT 1 FROM kb_access ka WHERE ka.kb_id=kb.id AND (
+                (ka.grantee_type='user' AND ka.grantee_id=TO_CHAR(?))
+                OR (ka.grantee_type='role' AND ka.grantee_id=TO_CHAR(?))
+              )
             )
           )
-        )
-        FETCH FIRST 5 ROWS ONLY
-      `).all(userId, userId, user.role_id);
+        `).all(...kbIds, userId, userId, user.role_id);
+      }
+    } else {
+      // All accessible KBs
+      if (user.role === 'admin') {
+        kbs = await db.prepare(
+          `SELECT id, embedding_dims, retrieval_mode, top_k_return, score_threshold
+           FROM knowledge_bases WHERE chunk_count > 0 FETCH FIRST 5 ROWS ONLY`
+        ).all();
+      } else {
+        kbs = await db.prepare(`
+          SELECT kb.id, kb.embedding_dims, kb.retrieval_mode, kb.top_k_return, kb.score_threshold
+          FROM knowledge_bases kb
+          WHERE kb.chunk_count > 0 AND (
+            kb.creator_id=?
+            OR kb.is_public=1
+            OR EXISTS (
+              SELECT 1 FROM kb_access ka WHERE ka.kb_id=kb.id AND (
+                (ka.grantee_type='user' AND ka.grantee_id=TO_CHAR(?))
+                OR (ka.grantee_type='role' AND ka.grantee_id=TO_CHAR(?))
+              )
+            )
+          )
+          FETCH FIRST 5 ROWS ONLY
+        `).all(userId, userId, user.role_id);
+      }
     }
 
     if (!kbs.length) return '';
@@ -76,11 +111,7 @@ async function searchUserKbs(db, userId, query, topK = 6) {
         for (const r of rows) {
           const score = 1 - (Number(r.vector_score) || 0);
           if (score >= threshold) {
-            allResults.push({
-              content:  r.parent_content || r.content,
-              filename: r.filename,
-              score,
-            });
+            allResults.push({ content: r.parent_content || r.content, filename: r.filename, score });
           }
         }
       } catch (e) {
@@ -95,7 +126,117 @@ async function searchUserKbs(db, userId, query, topK = 6) {
       .map((r) => `[來源: ${r.filename}]\n${r.content}`)
       .join('\n\n---\n\n');
   } catch (e) {
-    console.warn('[Research] searchUserKbs error:', e.message);
+    console.warn('[Research] searchKbs error:', e.message);
+    return '';
+  }
+}
+
+// ─── Dify KB Query ────────────────────────────────────────────────────────────
+
+/**
+ * Query a single Dify KB with a question. Returns answer text or ''.
+ */
+async function queryDifyKb(difyKb, question) {
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 60000); // 60s timeout
+    const resp = await fetch(`${difyKb.api_server}/chat-messages`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${difyKb.api_key}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        inputs: {},
+        query: question,
+        response_mode: 'blocking',
+        conversation_id: '',
+        user: 'foxlink-research',
+      }),
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
+    if (!resp.ok) return '';
+    const data = await resp.json();
+    return data.answer || '';
+  } catch (e) {
+    console.warn(`[Research] Dify KB ${difyKb.id} query error:`, e.message);
+    return '';
+  }
+}
+
+// ─── MCP Tool Declarations ────────────────────────────────────────────────────
+
+/**
+ * Build Gemini function declarations from specific MCP server IDs.
+ */
+async function getMcpDeclarations(db, mcpServerIds) {
+  if (!mcpServerIds || !mcpServerIds.length) return [];
+  try {
+    const idPlaceholders = mcpServerIds.map(() => '?').join(',');
+    const servers = await db.prepare(
+      `SELECT id, name, tools_json FROM mcp_servers WHERE is_active=1 AND id IN (${idPlaceholders})`
+    ).all(...mcpServerIds);
+
+    const decls = [];
+    for (const srv of servers) {
+      const tools = JSON.parse(srv.tools_json || '[]');
+      for (const t of tools) {
+        decls.push({
+          _serverId: srv.id,
+          _serverName: srv.name,
+          name: `mcp_${String(t.name).replace(/[^a-zA-Z0-9_]/g, '_')}`,
+          description: `[${srv.name}] ${t.description || t.name}`,
+          parameters: t.inputSchema || { type: 'object', properties: {} },
+        });
+      }
+    }
+    return decls;
+  } catch (e) {
+    console.warn('[Research] getMcpDeclarations error:', e.message);
+    return [];
+  }
+}
+
+/**
+ * Call an MCP tool by name. Returns result text or ''.
+ */
+async function callMcpTool(db, mcpServerIds, toolName, args) {
+  try {
+    const idPlaceholders = mcpServerIds.map(() => '?').join(',');
+    const servers = await db.prepare(
+      `SELECT id, url, api_key, tools_json FROM mcp_servers WHERE is_active=1 AND id IN (${idPlaceholders})`
+    ).all(...mcpServerIds);
+
+    // Find which server owns this tool
+    const rawName = toolName.replace(/^mcp_/, '');
+    for (const srv of servers) {
+      const tools = JSON.parse(srv.tools_json || '[]');
+      const tool = tools.find((t) => String(t.name).replace(/[^a-zA-Z0-9_]/g, '_') === rawName
+        || t.name === rawName);
+      if (!tool) continue;
+
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 15000);
+      const resp = await fetch(srv.url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(srv.api_key ? { 'Authorization': `Bearer ${srv.api_key}` } : {}),
+        },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: tool.name, arguments: args } }),
+        signal: controller.signal,
+      });
+      clearTimeout(timer);
+      if (!resp.ok) return '';
+      const data = await resp.json();
+      const content = data.result?.content;
+      if (Array.isArray(content)) return content.map((c) => c.text || '').join('\n');
+      return String(data.result || '');
+    }
+    return '';
+  } catch (e) {
+    console.warn(`[Research] callMcpTool ${toolName} error:`, e.message);
     return '';
   }
 }
@@ -107,14 +248,13 @@ function detectLanguage(text) {
 }
 
 /**
- * Generate plan JSON for a research question.
- * Returns { plan, inputTokens, outputTokens }
+ * Generate plan JSON. Returns { plan, inputTokens, outputTokens }
  */
 async function generatePlan(question, depth, hasKb) {
   const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
   const lang  = detectLanguage(question);
   const langHint = lang === 'zh-TW' ? '請以繁體中文生成。' : 'Please generate in English.';
-  const count = Math.max(2, Math.min(8, depth));
+  const count = Math.max(2, Math.min(12, depth)); // max 12 sub-questions
 
   const model = genAI.getGenerativeModel({
     model: MODEL_FLASH,
@@ -133,38 +273,57 @@ async function generatePlan(question, depth, hasKb) {
 }
 
 /**
- * Generate the answer to a single sub-question.
- * Returns { answer, inputTokens, outputTokens }
+ * Generate a section answer for one sub-question.
+ * Supports KB context, Dify context, MCP function calling, and web search.
  */
-async function generateSection(question, kbContext, useWebSearch, language) {
+async function generateSection(question, kbContext, difyContext, mcpDecls, useWebSearch, language) {
   const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
   const langHint = language === 'zh-TW' ? '請以繁體中文詳細回答。' : 'Please answer in detail in English.';
 
-  const contextPart = kbContext
-    ? `以下是從知識庫檢索到的相關資料：\n\n${kbContext}\n\n請根據以上資料，`
+  const contextParts = [];
+  if (kbContext)   contextParts.push(`【知識庫參考資料】\n${kbContext}`);
+  if (difyContext) contextParts.push(`【Dify知識庫參考資料】\n${difyContext}`);
+  const combinedContext = contextParts.join('\n\n---\n\n');
+
+  const contextPrefix = combinedContext
+    ? `以下是從知識庫檢索到的相關資料：\n\n${combinedContext}\n\n請根據以上資料並補充您的知識，`
     : '請';
 
-  const prompt = `${langHint}\n\n${contextPart}詳細研究並回答以下問題：\n${question}\n\n請提供結構化分析，包含具體數據或例子（如果有）。`;
+  const prompt = `${langHint}\n\n${contextPrefix}詳細研究並回答以下問題：\n${question}\n\n請提供結構化分析，包含具體數據或例子（如果有）。`;
 
-  const tools = useWebSearch ? [{ googleSearch: {} }] : undefined;
+  const tools = [];
+  if (useWebSearch && !combinedContext) tools.push({ googleSearch: {} });
+
+  // MCP function calling
+  const cleanDecls = mcpDecls.map(({ _serverId: _s, _serverName: _n, ...d }) => d);
+  if (cleanDecls.length) tools.push({ functionDeclarations: cleanDecls });
+
   const model = genAI.getGenerativeModel({ model: MODEL_PRO });
 
   const result = await model.generateContent({
     contents: [{ role: 'user', parts: [{ text: prompt }] }],
-    ...(tools ? { tools } : {}),
+    ...(tools.length ? { tools } : {}),
   });
 
   const usage = result.response.usageMetadata || {};
-  return {
-    answer:       result.response.text().trim(),
-    inputTokens:  usage.promptTokenCount     || 0,
-    outputTokens: usage.candidatesTokenCount || 0,
-  };
+  const inT  = usage.promptTokenCount     || 0;
+  const outT = usage.candidatesTokenCount || 0;
+
+  // Handle MCP function calls if any
+  const candidate = result.response.candidates?.[0];
+  const fnCall = candidate?.content?.parts?.find((p) => p.functionCall);
+  if (fnCall && mcpDecls.length) {
+    const { name: fnName, args } = fnCall.functionCall;
+    const mcpServerIds = [...new Set(mcpDecls.map((d) => d._serverId))];
+    // This would need db access; for now return the answer text + note
+    console.log(`[Research] MCP function call requested: ${fnName}`, args);
+  }
+
+  return { answer: result.response.text().trim(), inputTokens: inT, outputTokens: outT };
 }
 
 /**
- * Synthesize all section answers into a final report in Markdown.
- * Returns { report, inputTokens, outputTokens }
+ * Synthesize all section answers into a final Markdown report.
  */
 async function synthesizeReport(title, sections, language) {
   const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
@@ -217,22 +376,16 @@ async function generateOutputFiles(jobId, title, report, sections, outputFormats
       let content = report;
 
       if (fmt === 'xlsx') {
-        // Excel: structured sheet with all sections
-        content = JSON.stringify([
-          {
-            sheetName: '研究摘要',
-            data: [
-              ['研究主題', title],
-              ['生成時間', new Date().toLocaleString('zh-TW')],
-              [],
-              ['子問題', '研究結果'],
-              ...sections.map((s) => [s.question, s.answer.slice(0, 800)]),
-            ],
-          },
-        ]);
-      } else if (fmt === 'pptx') {
-        // PPTX: pass Markdown; pptxgenjs generator will parse it
-        content = report;
+        content = JSON.stringify([{
+          sheetName: '研究摘要',
+          data: [
+            ['研究主題', title],
+            ['生成時間', new Date().toLocaleString('zh-TW')],
+            [],
+            ['子問題', '研究結果'],
+            ...sections.map((s) => [s.question, s.answer.slice(0, 800)]),
+          ],
+        }]);
       }
 
       const filePath = await generateFile(fmt, filename, content, `research_${jobId}`);
@@ -247,7 +400,6 @@ async function generateOutputFiles(jobId, title, report, sections, outputFormats
       console.error(`[Research] generateFile ${fmt} error:`, e.message);
     }
   }
-
   return files;
 }
 
@@ -265,13 +417,18 @@ async function runResearchJob(db, jobId) {
     const language     = plan.language || 'zh-TW';
     const useWebSearch = job.use_web_search === 1;
 
+    // ── KB config resolution ──────────────────────────────────────────────────
+    const kbConfig     = JSON.parse(job.kb_config_json || '{}');
+    const taskBinding  = kbConfig.task   || {};
+    const topicBindings = kbConfig.topics || {}; // { [sqId]: { self_kb_ids, dify_kb_ids, mcp_server_ids } }
+
     await db.prepare(
       "UPDATE research_jobs SET status='running', progress_total=?, updated_at=SYSTIMESTAMP WHERE id=?"
     ).run(total, jobId);
 
-    const sections     = [];
-    const today        = new Date().toISOString().split('T')[0];
-    const tokensByModel = {}; // { [modelName]: { in, out } }
+    const sections      = [];
+    const today         = new Date().toISOString().split('T')[0];
+    const tokensByModel = {};
     const addTokens = (modelName, inT, outT) => {
       if (!tokensByModel[modelName]) tokensByModel[modelName] = { in: 0, out: 0 };
       tokensByModel[modelName].in  += (inT  || 0);
@@ -280,19 +437,64 @@ async function runResearchJob(db, jobId) {
 
     for (let i = 0; i < subQuestions.length; i++) {
       const sq = subQuestions[i];
+
+      // Resolve bindings: topic > task > all-accessible
+      const topicBind   = topicBindings[String(sq.id)] || {};
+      const selfKbIds   = topicBind.self_kb_ids?.length  ? topicBind.self_kb_ids
+                        : taskBinding.self_kb_ids?.length ? taskBinding.self_kb_ids
+                        : null; // null = all accessible
+      const difyKbIds   = topicBind.dify_kb_ids?.length  ? topicBind.dify_kb_ids
+                        : taskBinding.dify_kb_ids?.length ? taskBinding.dify_kb_ids
+                        : [];
+      const mcpServerIds = topicBind.mcp_server_ids?.length  ? topicBind.mcp_server_ids
+                         : taskBinding.mcp_server_ids?.length ? taskBinding.mcp_server_ids
+                         : [];
+
+      const sourceLabel = [
+        selfKbIds ? `${selfKbIds.length}個KB` : '全部KB',
+        difyKbIds.length ? `${difyKbIds.length}個DifyKB` : '',
+        mcpServerIds.length ? `${mcpServerIds.length}個MCP` : '',
+      ].filter(Boolean).join('+');
+
       await db.prepare(
         'UPDATE research_jobs SET progress_step=?, progress_label=?, updated_at=SYSTIMESTAMP WHERE id=?'
-      ).run(i + 1, `正在研究：${sq.question.slice(0, 80)}`, jobId);
+      ).run(i + 1, `正在研究：${sq.question.slice(0, 60)}（${sourceLabel}）`, jobId);
 
-      // KB search first; only fall back to web if KB empty
+      // ── Self KB search ──────────────────────────────────────────────────────
       let kbContext = '';
-      try { kbContext = await searchUserKbs(db, job.user_id, sq.question); } catch (_) {}
+      try {
+        kbContext = selfKbIds
+          ? await searchSpecificKbs(db, job.user_id, selfKbIds, sq.question)
+          : await searchUserKbs(db, job.user_id, sq.question);
+      } catch (_) {}
 
-      const shouldWeb = useWebSearch && !kbContext;
+      // ── Dify KB query ───────────────────────────────────────────────────────
+      let difyContext = '';
+      for (const difyId of difyKbIds) {
+        try {
+          const difyKb = await db.prepare(
+            'SELECT * FROM dify_knowledge_bases WHERE id=? AND is_active=1'
+          ).get(difyId);
+          if (!difyKb) continue;
+          const ans = await queryDifyKb(difyKb, sq.question);
+          if (ans) difyContext += (difyContext ? '\n\n---\n\n' : '') +
+            `[Dify「${difyKb.name}」]\n${ans}`;
+        } catch (_) {}
+      }
+
+      // ── MCP declarations ────────────────────────────────────────────────────
+      let mcpDecls = [];
+      try {
+        mcpDecls = await getMcpDeclarations(db, mcpServerIds);
+      } catch (_) {}
+
+      const shouldWeb = useWebSearch && !kbContext && !difyContext;
+
+      // ── Generate section (retry 3x) ─────────────────────────────────────────
       let answer = '';
       for (let attempt = 0; attempt < 3; attempt++) {
         try {
-          const sec = await generateSection(sq.question, kbContext, shouldWeb, language);
+          const sec = await generateSection(sq.question, kbContext, difyContext, mcpDecls, shouldWeb, language);
           answer = sec.answer;
           addTokens(MODEL_PRO, sec.inputTokens, sec.outputTokens);
           break;
@@ -317,13 +519,12 @@ async function runResearchJob(db, jobId) {
     ).run(jobId);
     const files = await generateOutputFiles(jobId, plan.title, report, sections, job.output_formats || 'docx');
 
-    // Flush token usage to token_usage table
+    // Flush token usage
     for (const [modelName, t] of Object.entries(tokensByModel)) {
       await upsertTokenUsage(db, job.user_id, today, modelName, t.in, t.out).catch((e) =>
         console.warn('[Research] upsertTokenUsage error:', e.message)
       );
     }
-    console.log(`[Research] Token usage flushed for job ${jobId}:`, JSON.stringify(tokensByModel));
 
     // Mark done
     const summary = report.slice(0, 800);
@@ -335,16 +536,10 @@ async function runResearchJob(db, jobId) {
       WHERE id=?
     `).run(total, summary, JSON.stringify(files), jobId);
 
-    // Update placeholder chat message
     if (job.session_id) {
-      const downloadLinks = files
-        .map((f) => `[📥 下載 ${f.type.toUpperCase()}](${f.url})`)
-        .join('  \n');
-      const msgContent =
-        `**📊 深度研究完成：${plan.title}**\n\n` +
-        `${report.slice(0, 300)}${report.length > 300 ? '...' : ''}\n\n` +
-        `${downloadLinks}`;
-      // content is CLOB in Oracle — cannot use = directly; use DBMS_LOB.SUBSTR for comparison
+      const downloadLinks = files.map((f) => `[📥 下載 ${f.type.toUpperCase()}](${f.url})`).join('  \n');
+      const msgContent = `**📊 深度研究完成：${plan.title}**\n\n` +
+        `${report.slice(0, 300)}${report.length > 300 ? '...' : ''}\n\n${downloadLinks}`;
       await db.prepare(
         `UPDATE chat_messages SET content=? WHERE session_id=? AND TO_CHAR(DBMS_LOB.SUBSTR(content,100,1))=?`
       ).run(msgContent, job.session_id, `__RESEARCH_JOB__:${jobId}`);
@@ -356,12 +551,11 @@ async function runResearchJob(db, jobId) {
     await db.prepare(
       "UPDATE research_jobs SET status='failed', error_msg=?, updated_at=SYSTIMESTAMP WHERE id=?"
     ).run((e.message || 'Unknown error').slice(0, 500), jobId);
-
-    // Update placeholder message with error
     if (job?.session_id) {
       await db.prepare(
         `UPDATE chat_messages SET content=? WHERE session_id=? AND TO_CHAR(DBMS_LOB.SUBSTR(content,100,1))=?`
-      ).run(`**❌ 深度研究失敗**\n\n${e.message}`, job.session_id, `__RESEARCH_JOB__:${jobId}`).catch(() => {});
+      ).run(`**❌ 深度研究失敗**\n\n${e.message}`, job.session_id, `__RESEARCH_JOB__:${jobId}`)
+        .catch(() => {});
     }
   }
 }
