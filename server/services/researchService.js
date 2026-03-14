@@ -3,6 +3,7 @@
  * Deep Research Service
  * Executes a research job: KB search → LLM per sub-question → synthesize → generate files
  * Supports task-level and per-topic binding of self KB / Dify KB / MCP servers
+ * Enhanced: global file context, per-SQ hint/files/web, streaming sections, prev research refs
  */
 
 const path = require('path');
@@ -11,6 +12,7 @@ const { GoogleGenerativeAI } = require('@google/generative-ai');
 const { embedText, toVectorStr } = require('./kbEmbedding');
 const { generateFile } = require('./fileGenerator');
 const { upsertTokenUsage } = require('./tokenService');
+const { extractTextFromFile } = require('./gemini');
 const { UPLOAD_DIR } = require('../config/paths');
 
 const MODEL_PRO   = process.env.GEMINI_MODEL_PRO   || 'gemini-2.0-flash';
@@ -241,6 +243,82 @@ async function callMcpTool(db, mcpServerIds, toolName, args) {
   }
 }
 
+// ─── File Context Extraction ──────────────────────────────────────────────────
+
+/**
+ * Extract text from a list of file objects [{name, path, mime_type}].
+ * Returns combined text context string.
+ */
+async function extractFilesContext(files) {
+  if (!files || !files.length) return '';
+  const parts = [];
+  for (const f of files) {
+    try {
+      if (!fs.existsSync(f.path)) continue;
+      const text = await extractTextFromFile(f.path, f.mime_type, f.name);
+      if (text?.trim()) parts.push(`【附件：${f.name}】\n${text.trim()}`);
+    } catch (e) {
+      console.warn(`[Research] extractFilesContext error for ${f.name}:`, e.message);
+    }
+  }
+  return parts.join('\n\n---\n\n');
+}
+
+// ─── KB Suggestion ─────────────────────────────────────────────────────────────
+
+/**
+ * Suggest relevant KB IDs for a question by doing a quick search and
+ * returning IDs that returned results above threshold.
+ */
+async function suggestKbs(db, userId, question) {
+  try {
+    const user = await db.prepare('SELECT role, role_id FROM users WHERE id=?').get(userId);
+    if (!user) return [];
+
+    let kbs;
+    if (user.role === 'admin') {
+      kbs = await db.prepare(
+        `SELECT id, embedding_dims, top_k_return, score_threshold
+         FROM knowledge_bases WHERE chunk_count > 0 ORDER BY name FETCH FIRST 20 ROWS ONLY`
+      ).all();
+    } else {
+      kbs = await db.prepare(`
+        SELECT kb.id, kb.embedding_dims, kb.top_k_return, kb.score_threshold
+        FROM knowledge_bases kb
+        WHERE kb.chunk_count > 0 AND (
+          kb.creator_id=? OR kb.is_public=1
+          OR EXISTS (SELECT 1 FROM kb_access ka WHERE ka.kb_id=kb.id AND (
+            (ka.grantee_type='user' AND ka.grantee_id=TO_CHAR(?))
+            OR (ka.grantee_type='role' AND ka.grantee_id=TO_CHAR(?))
+          ))
+        )
+        FETCH FIRST 20 ROWS ONLY
+      `).all(userId, userId, user.role_id || 0);
+    }
+
+    const embedding = await embedText(question, kbs[0]?.embedding_dims || 768);
+    const vecStr = toVectorStr(embedding);
+    const suggested = [];
+
+    for (const kb of kbs) {
+      try {
+        const topK = Math.max(1, kb.top_k_return || 3);
+        const threshold = kb.score_threshold || 0;
+        const chunks = await db.prepare(`
+          SELECT 1 FROM kb_chunks
+          WHERE kb_id=? AND VECTOR_DISTANCE(embedding_vec, TO_VECTOR(?, FLOAT32, ${kb.embedding_dims || 768}), COSINE) < ?
+          FETCH FIRST 1 ROWS ONLY
+        `).all(kb.id, vecStr, 1 - threshold);
+        if (chunks.length > 0) suggested.push(kb.id);
+      } catch (_) {}
+    }
+    return suggested;
+  } catch (e) {
+    console.warn('[Research] suggestKbs error:', e.message);
+    return [];
+  }
+}
+
 // ─── LLM Helpers ──────────────────────────────────────────────────────────────
 
 function detectLanguage(text) {
@@ -274,22 +352,33 @@ async function generatePlan(question, depth, hasKb) {
 
 /**
  * Generate a section answer for one sub-question.
- * Supports KB context, Dify context, MCP function calling, and web search.
+ * Supports KB context, Dify context, MCP function calling, web search,
+ * global file context, per-SQ file context, and research hints.
  */
-async function generateSection(question, kbContext, difyContext, mcpDecls, useWebSearch, language) {
+async function generateSection(question, kbContext, difyContext, mcpDecls, useWebSearch, language,
+  globalFileContext = '', sqFileContext = '', hint = '') {
   const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-  const langHint = language === 'zh-TW' ? '請以繁體中文詳細回答。' : 'Please answer in detail in English.';
+  const isZh = language === 'zh-TW';
+  const langHint = isZh ? '請以繁體中文詳細回答。' : 'Please answer in detail in English.';
 
   const contextParts = [];
-  if (kbContext)   contextParts.push(`【知識庫參考資料】\n${kbContext}`);
-  if (difyContext) contextParts.push(`【Dify知識庫參考資料】\n${difyContext}`);
+  if (globalFileContext) contextParts.push(isZh ? `【研究附件（全局）】\n${globalFileContext}` : `[Research Attachments (Global)]\n${globalFileContext}`);
+  if (sqFileContext)     contextParts.push(isZh ? `【本子議題附件】\n${sqFileContext}` : `[Sub-topic Attachments]\n${sqFileContext}`);
+  if (kbContext)         contextParts.push(isZh ? `【知識庫參考資料】\n${kbContext}` : `[Knowledge Base References]\n${kbContext}`);
+  if (difyContext)       contextParts.push(isZh ? `【Dify知識庫參考資料】\n${difyContext}` : `[Dify KB References]\n${difyContext}`);
   const combinedContext = contextParts.join('\n\n---\n\n');
 
-  const contextPrefix = combinedContext
-    ? `以下是從知識庫檢索到的相關資料：\n\n${combinedContext}\n\n請根據以上資料並補充您的知識，`
-    : '請';
+  const hintPart = hint?.trim()
+    ? (isZh ? `\n\n研究方向提示：${hint.trim()}` : `\n\nResearch direction hint: ${hint.trim()}`)
+    : '';
 
-  const prompt = `${langHint}\n\n${contextPrefix}詳細研究並回答以下問題：\n${question}\n\n請提供結構化分析，包含具體數據或例子（如果有）。`;
+  const contextPrefix = combinedContext
+    ? (isZh
+        ? `以下是參考資料與附件：\n\n${combinedContext}\n\n請根據以上資料並補充您的知識，`
+        : `Reference materials and attachments:\n\n${combinedContext}\n\nUsing the above and your knowledge, `)
+    : (isZh ? '請' : 'Please ');
+
+  const prompt = `${langHint}\n\n${contextPrefix}${isZh ? '詳細研究並回答以下問題' : 'research and answer in detail'}：\n${question}${hintPart}\n\n${isZh ? '請提供結構化分析，包含具體數據或例子（如果有）。' : 'Provide structured analysis with specific data or examples where available.'}`;
 
   const tools = [];
   if (useWebSearch && !combinedContext) tools.push({ googleSearch: {} });
@@ -407,26 +496,62 @@ async function generateOutputFiles(jobId, title, report, sections, outputFormats
 
 async function runResearchJob(db, jobId) {
   let job;
+  let isEn = false;
   try {
     job = await db.prepare('SELECT * FROM research_jobs WHERE id=?').get(jobId);
     if (!job) return;
 
-    const plan         = JSON.parse(job.plan_json || '{}');
-    const subQuestions = plan.sub_questions || [];
-    const total        = subQuestions.length;
-    const language     = plan.language || 'zh-TW';
-    const useWebSearch = job.use_web_search === 1;
+    const plan          = JSON.parse(job.plan_json || '{}');
+    const subQuestions  = plan.sub_questions || [];
+    const total         = subQuestions.length;
+    const language      = plan.language || 'zh-TW';
+    isEn                = language !== 'zh-TW';
+    const useWebSearch  = job.use_web_search === 1;
 
     // ── KB config resolution ──────────────────────────────────────────────────
-    const kbConfig     = JSON.parse(job.kb_config_json || '{}');
-    const taskBinding  = kbConfig.task   || {};
-    const topicBindings = kbConfig.topics || {}; // { [sqId]: { self_kb_ids, dify_kb_ids, mcp_server_ids } }
+    const kbConfig      = JSON.parse(job.kb_config_json || '{}');
+    const taskBinding   = kbConfig.task   || {};
+    const topicBindings = kbConfig.topics || {};
+
+    // ── Global file context (extract once, reuse for all sub-questions) ───────
+    const globalFiles   = JSON.parse(job.global_files_json || '[]');
+    let globalFileContext = '';
+    if (globalFiles.length) {
+      try {
+        globalFileContext = await extractFilesContext(globalFiles);
+      } catch (_) {}
+    }
+
+    // ── Previous research references ──────────────────────────────────────────
+    let prevResearchContext = '';
+    const refJobIds = JSON.parse(job.ref_job_ids_json || '[]');
+    for (const refId of refJobIds.slice(0, 3)) {
+      try {
+        const refJob = await db.prepare(
+          'SELECT title, result_summary FROM research_jobs WHERE id=? AND user_id=? AND status=\'done\''
+        ).get(refId, job.user_id);
+        if (refJob?.result_summary) {
+          prevResearchContext += (prevResearchContext ? '\n\n---\n\n' : '') +
+            (isEn
+              ? `[Previous Research: ${refJob.title}]\n${refJob.result_summary}`
+              : `【前次研究：${refJob.title}】\n${refJob.result_summary}`);
+        }
+      } catch (_) {}
+    }
+    if (prevResearchContext) {
+      globalFileContext = (globalFileContext
+        ? globalFileContext + '\n\n---\n\n'
+        : '') + (isEn
+          ? `[Previous Research Context]\n${prevResearchContext}`
+          : `【前次研究背景】\n${prevResearchContext}`);
+    }
 
     await db.prepare(
       "UPDATE research_jobs SET status='running', progress_total=?, updated_at=SYSTIMESTAMP WHERE id=?"
     ).run(total, jobId);
 
     const sections      = [];
+    const streamingSections = [];  // for real-time preview
     const today         = new Date().toISOString().split('T')[0];
     const tokensByModel = {};
     const addTokens = (modelName, inT, outT) => {
@@ -439,31 +564,46 @@ async function runResearchJob(db, jobId) {
       const sq = subQuestions[i];
 
       // Resolve bindings: topic > task > all-accessible
-      const topicBind   = topicBindings[String(sq.id)] || {};
-      const selfKbIds   = topicBind.self_kb_ids?.length  ? topicBind.self_kb_ids
-                        : taskBinding.self_kb_ids?.length ? taskBinding.self_kb_ids
-                        : null; // null = all accessible
-      const difyKbIds   = topicBind.dify_kb_ids?.length  ? topicBind.dify_kb_ids
-                        : taskBinding.dify_kb_ids?.length ? taskBinding.dify_kb_ids
-                        : [];
+      const topicBind    = topicBindings[String(sq.id)] || {};
+      const selfKbIds    = topicBind.self_kb_ids?.length  ? topicBind.self_kb_ids
+                         : taskBinding.self_kb_ids?.length ? taskBinding.self_kb_ids
+                         : null;
+      const difyKbIds    = topicBind.dify_kb_ids?.length  ? topicBind.dify_kb_ids
+                         : taskBinding.dify_kb_ids?.length ? taskBinding.dify_kb_ids
+                         : [];
       const mcpServerIds = topicBind.mcp_server_ids?.length  ? topicBind.mcp_server_ids
                          : taskBinding.mcp_server_ids?.length ? taskBinding.mcp_server_ids
                          : [];
 
-      const isEn = language !== 'zh-TW';
+      // Per-SQ web search override
+      const sqUseWeb  = sq.use_web_search !== undefined ? Boolean(sq.use_web_search) : useWebSearch;
+
+      // Per-SQ file context
+      let sqFileContext = '';
+      if (sq.files?.length) {
+        try { sqFileContext = await extractFilesContext(sq.files); } catch (_) {}
+      }
+
+      // Per-SQ hint
+      const hint = sq.hint || '';
+
       const allKbLabel = isEn ? 'all KB' : '全部KB';
+      const fileCount  = (globalFiles.length + (sq.files?.length || 0));
       const sourceLabel = [
         selfKbIds ? `${selfKbIds.length}KB` : allKbLabel,
         difyKbIds.length ? `${difyKbIds.length}Dify` : '',
         mcpServerIds.length ? `${mcpServerIds.length}MCP` : '',
+        fileCount ? `${fileCount}${isEn ? ' files' : '個附件'}` : '',
       ].filter(Boolean).join('+');
       const researchingLabel = isEn
         ? `Researching: ${sq.question.slice(0, 60)} (${sourceLabel})`
         : `正在研究：${sq.question.slice(0, 60)}（${sourceLabel}）`;
 
+      // Mark streaming section as in-progress
+      streamingSections[i] = { id: sq.id, question: sq.question, answer: '', done: false };
       await db.prepare(
-        'UPDATE research_jobs SET progress_step=?, progress_label=?, updated_at=SYSTIMESTAMP WHERE id=?'
-      ).run(i + 1, researchingLabel, jobId);
+        'UPDATE research_jobs SET progress_step=?, progress_label=?, sections_json=?, updated_at=SYSTIMESTAMP WHERE id=?'
+      ).run(i + 1, researchingLabel, JSON.stringify(streamingSections), jobId);
 
       // ── Self KB search ──────────────────────────────────────────────────────
       let kbContext = '';
@@ -489,17 +629,18 @@ async function runResearchJob(db, jobId) {
 
       // ── MCP declarations ────────────────────────────────────────────────────
       let mcpDecls = [];
-      try {
-        mcpDecls = await getMcpDeclarations(db, mcpServerIds);
-      } catch (_) {}
+      try { mcpDecls = await getMcpDeclarations(db, mcpServerIds); } catch (_) {}
 
-      const shouldWeb = useWebSearch && !kbContext && !difyContext;
+      const shouldWeb = sqUseWeb && !kbContext && !difyContext && !globalFileContext && !sqFileContext;
 
       // ── Generate section (retry 3x) ─────────────────────────────────────────
       let answer = '';
       for (let attempt = 0; attempt < 3; attempt++) {
         try {
-          const sec = await generateSection(sq.question, kbContext, difyContext, mcpDecls, shouldWeb, language);
+          const sec = await generateSection(
+            sq.question, kbContext, difyContext, mcpDecls, shouldWeb, language,
+            globalFileContext, sqFileContext, hint
+          );
           answer = sec.answer;
           addTokens(MODEL_PRO, sec.inputTokens, sec.outputTokens);
           break;
@@ -508,7 +649,13 @@ async function runResearchJob(db, jobId) {
           else await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
         }
       }
+
       sections.push({ question: sq.question, answer });
+      // Update streaming preview
+      streamingSections[i] = { id: sq.id, question: sq.question, answer, done: true };
+      await db.prepare(
+        'UPDATE research_jobs SET sections_json=?, updated_at=SYSTIMESTAMP WHERE id=?'
+      ).run(JSON.stringify(streamingSections), jobId);
     }
 
     // Synthesize
@@ -566,4 +713,4 @@ async function runResearchJob(db, jobId) {
   }
 }
 
-module.exports = { runResearchJob, generatePlan, searchUserKbs };
+module.exports = { runResearchJob, generatePlan, searchUserKbs, suggestKbs };

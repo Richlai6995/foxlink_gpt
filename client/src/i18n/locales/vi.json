@@ -1072,6 +1072,22 @@
     "close": "Đóng",
     "errorEmpty": "Vui lòng nhập câu hỏi nghiên cứu",
     "errorGenFail": "Tạo kế hoạch thất bại, vui lòng thử lại",
-    "errorStartFail": "Không thể bắt đầu nghiên cứu, vui lòng thử lại"
+    "errorStartFail": "Không thể bắt đầu nghiên cứu, vui lòng thử lại",
+    "globalFilesLabel": "Tệp đính kèm toàn cục (dùng chung cho tất cả câu hỏi phụ)",
+    "autoSuggestLabel": "Tự động gợi ý",
+    "prevResearchLabel": "Tham chiếu nghiên cứu trước",
+    "prevResearchHint": "Chọn nghiên cứu đã hoàn thành làm bối cảnh nền",
+    "globalFilesSummary": "{{n}} tệp đính kèm toàn cục",
+    "prevRefSummary": "Tham chiếu {{n}} nghiên cứu trước",
+    "sqHintLabel": "Gợi ý hướng nghiên cứu",
+    "sqHintPlaceholder": "Nhập gợi ý hoặc hướng cho câu hỏi phụ này...",
+    "sqFilesLabel": "Tệp đính kèm câu hỏi phụ",
+    "sqWebToggle": "Tìm kiếm web (câu hỏi phụ này)",
+    "progressTitle": "Đang nghiên cứu...",
+    "progressHint": "Bạn có thể xem báo cáo trong chat sau khi nghiên cứu hoàn thành",
+    "failedTitle": "Nghiên cứu thất bại",
+    "uploadingFiles": "Đang tải tệp đính kèm...",
+    "sectionDone": "Hoàn thành",
+    "sectionPending": "Đang nghiên cứu..."
   }
 }

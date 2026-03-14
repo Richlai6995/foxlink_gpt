@@ -50,6 +50,8 @@ export default function ChatPage() {
 
   // ── Deep Research state ────────────────────────────────────────────────────
   const [showResearchModal, setShowResearchModal] = useState(false)
+  const [researchInitialQuestion, setResearchInitialQuestion] = useState('')
+  const [researchInitialFiles,    setResearchInitialFiles]    = useState<File[]>([])
   const [researchBanner,   setResearchBanner]   = useState<{ id: string; title: string }[]>([])
   const seenResearchIds = useRef<Set<string>>(new Set())
 
@@ -1132,7 +1134,13 @@ export default function ChatPage() {
           onSend={handleSend}
           disabled={streaming}
           canResearch={canResearch}
-          onResearch={() => setShowResearchModal(true)}
+          onResearch={() => {
+            const q = messageInputRef.current?.getQuestion() || ''
+            const f = messageInputRef.current?.getFiles() || []
+            setResearchInitialQuestion(q)
+            setResearchInitialFiles(f)
+            setShowResearchModal(true)
+          }}
         />
       </div>
 
@@ -1140,6 +1148,8 @@ export default function ChatPage() {
       {showResearchModal && (
         <ResearchModal
           sessionId={currentSessionId}
+          initialQuestion={researchInitialQuestion}
+          initialFiles={researchInitialFiles}
           onClose={() => setShowResearchModal(false)}
           onJobCreated={async (jobId) => {
             seenResearchIds.current.add(jobId)

@@ -11,6 +11,8 @@ interface Props {
 
 export interface MessageInputHandle {
   addFiles: (files: File[]) => void
+  getQuestion: () => string
+  getFiles: () => File[]
 }
 
 const ALLOWED_TYPES = [
@@ -95,7 +97,9 @@ const MessageInput = forwardRef<MessageInputHandle, Props>(function MessageInput
 
   useImperativeHandle(ref, () => ({
     addFiles: (newFiles: File[]) => handleFiles(newFiles),
-  }), [handleFiles])
+    getQuestion: () => message,
+    getFiles: () => files,
+  }), [handleFiles, message, files])
 
   const handleDrop = useCallback(
     (e: React.DragEvent) => {

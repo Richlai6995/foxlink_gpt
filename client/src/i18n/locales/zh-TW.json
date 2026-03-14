@@ -1072,6 +1072,22 @@
     "close": "關閉",
     "errorEmpty": "請輸入研究問題",
     "errorGenFail": "計畫生成失敗，請稍後再試",
-    "errorStartFail": "無法啟動研究，請稍後再試"
+    "errorStartFail": "無法啟動研究，請稍後再試",
+    "globalFilesLabel": "全局附件（所有子議題共用）",
+    "autoSuggestLabel": "自動建議",
+    "prevResearchLabel": "引用前次研究",
+    "prevResearchHint": "選擇已完成的研究作為背景知識",
+    "globalFilesSummary": "{{n}} 個全局附件",
+    "prevRefSummary": "引用 {{n}} 個前次研究",
+    "sqHintLabel": "研究方向提示",
+    "sqHintPlaceholder": "輸入此子議題的研究方向或提醒...",
+    "sqFilesLabel": "子議題附件",
+    "sqWebToggle": "網路搜尋（此子議題）",
+    "progressTitle": "研究進行中...",
+    "progressHint": "研究完成後可在對話中查看報告",
+    "failedTitle": "研究失敗",
+    "uploadingFiles": "上傳附件中...",
+    "sectionDone": "已完成",
+    "sectionPending": "研究中..."
   }
 }

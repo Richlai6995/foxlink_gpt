@@ -1072,6 +1072,22 @@
     "close": "Close",
     "errorEmpty": "Please enter a research question",
     "errorGenFail": "Failed to generate plan, please try again",
-    "errorStartFail": "Failed to start research, please try again"
+    "errorStartFail": "Failed to start research, please try again",
+    "globalFilesLabel": "Global Attachments (shared across all sub-questions)",
+    "autoSuggestLabel": "Auto-suggest",
+    "prevResearchLabel": "Reference Previous Research",
+    "prevResearchHint": "Select completed research as background context",
+    "globalFilesSummary": "{{n}} global attachment(s)",
+    "prevRefSummary": "Referencing {{n}} previous research",
+    "sqHintLabel": "Research Direction Hint",
+    "sqHintPlaceholder": "Enter a hint or direction for this sub-question...",
+    "sqFilesLabel": "Sub-question Attachments",
+    "sqWebToggle": "Web Search (this sub-question)",
+    "progressTitle": "Research in Progress...",
+    "progressHint": "You can view the report in chat after research completes",
+    "failedTitle": "Research Failed",
+    "uploadingFiles": "Uploading attachments...",
+    "sectionDone": "Done",
+    "sectionPending": "Researching..."
   }
 }

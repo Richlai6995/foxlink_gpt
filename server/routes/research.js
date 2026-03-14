@@ -4,13 +4,23 @@
  */
 const express   = require('express');
 const router    = express.Router();
+const path      = require('path');
+const fs        = require('fs');
+const multer    = require('multer');
 const { v4: uuid } = require('uuid');
 const { verifyToken } = require('./auth');
-const { runResearchJob, generatePlan, searchUserKbs } = require('../services/researchService');
+const { runResearchJob, generatePlan, searchUserKbs, suggestKbs } = require('../services/researchService');
 const { upsertTokenUsage } = require('../services/tokenService');
+const { UPLOAD_DIR } = require('../config/paths');
 const MODEL_FLASH = process.env.GEMINI_MODEL_FLASH || 'gemini-2.0-flash';
 
 router.use(verifyToken);
+
+// Research file upload storage
+const researchUpload = multer({
+  dest: path.join(UPLOAD_DIR, 'tmp'),
+  limits: { fileSize: 200 * 1024 * 1024 },
+});
 
 function getDb() {
   const { db } = require('../database-oracle');
@@ -20,14 +30,31 @@ function getDb() {
 // ── Permission helper ──────────────────────────────────────────────────────────
 async function checkPermission(db, user) {
   if (user.role === 'admin') return true;
-  // user-level override
   if (user.can_deep_research === 1) return true;
   if (user.can_deep_research === 0) return false;
-  // fall back to role setting (default 1 = allowed)
   if (!user.role_id) return true;
   const role = await db.prepare('SELECT can_deep_research FROM roles WHERE id=?').get(user.role_id);
   return role ? (role.can_deep_research !== 0) : true;
 }
+
+// ── POST /api/research/upload-files  (upload attachments for research) ────────
+router.post('/upload-files', researchUpload.array('files', 10), async (req, res) => {
+  try {
+    const researchDir = path.join(UPLOAD_DIR, 'research_files');
+    fs.mkdirSync(researchDir, { recursive: true });
+
+    const saved = (req.files || []).map((f) => {
+      const ext  = path.extname(f.originalname) || '';
+      const dest = path.join(researchDir, `${uuid()}${ext}`);
+      fs.renameSync(f.path, dest);
+      return { name: f.originalname, path: dest, mime_type: f.mimetype, size: f.size };
+    });
+    res.json(saved);
+  } catch (e) {
+    console.error('[Research] upload-files error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
 
 // ── POST /api/research/plan  (generate plan, not persisted) ───────────────────
 router.post('/plan', async (req, res) => {
@@ -39,7 +66,6 @@ router.post('/plan', async (req, res) => {
     const { question, depth = 5 } = req.body;
     if (!question?.trim()) return res.status(400).json({ error: '請輸入研究問題' });
 
-    // Check if user has accessible KBs with content
     const kbRow = await db.prepare(`
       SELECT COUNT(*) AS cnt FROM knowledge_bases kb
       WHERE kb.chunk_count > 0 AND (
@@ -51,7 +77,6 @@ router.post('/plan', async (req, res) => {
 
     const { plan, inputTokens, outputTokens } = await generatePlan(question.trim(), depth, hasKb);
 
-    // Record plan-generation tokens (fire-and-forget)
     const today = new Date().toISOString().split('T')[0];
     upsertTokenUsage(db, req.user.id, today, MODEL_FLASH, inputTokens, outputTokens).catch(() => {});
 
@@ -69,7 +94,6 @@ router.post('/jobs', async (req, res) => {
     const ok = await checkPermission(db, req.user);
     if (!ok) return res.status(403).json({ error: '您沒有深度研究功能的使用權限' });
 
-    // Check concurrent job limit (max 3 running per user)
     const running = await db.prepare(
       "SELECT COUNT(*) AS cnt FROM research_jobs WHERE user_id=? AND status IN ('pending','running')"
     ).get(req.user.id);
@@ -83,7 +107,9 @@ router.post('/jobs', async (req, res) => {
       session_id     = null,
       output_formats = 'docx',
       use_web_search = false,
-      kb_config      = null,  // { task: {self_kb_ids, dify_kb_ids, mcp_server_ids}, topics: {...} }
+      kb_config      = null,
+      global_files   = [],   // [{name, path, mime_type}]
+      ref_job_ids    = [],   // [jobId, ...] previous research refs
     } = req.body;
 
     if (!plan?.sub_questions?.length) return res.status(400).json({ error: '研究計畫格式錯誤' });
@@ -92,8 +118,9 @@ router.post('/jobs', async (req, res) => {
 
     await db.prepare(`
       INSERT INTO research_jobs
-        (id, user_id, session_id, title, question, plan_json, status, use_web_search, output_formats, kb_config_json)
-      VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)
+        (id, user_id, session_id, title, question, plan_json, status, use_web_search, output_formats,
+         kb_config_json, global_files_json, ref_job_ids_json)
+      VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?)
     `).run(
       jobId,
       req.user.id,
@@ -103,17 +130,17 @@ router.post('/jobs', async (req, res) => {
       JSON.stringify(plan),
       use_web_search ? 1 : 0,
       output_formats,
-      kb_config ? JSON.stringify(kb_config) : null,
+      kb_config    ? JSON.stringify(kb_config)  : null,
+      global_files.length ? JSON.stringify(global_files) : null,
+      ref_job_ids.length  ? JSON.stringify(ref_job_ids)  : null,
     );
 
-    // Insert placeholder chat message so research shows inline in history
     if (session_id) {
       await db.prepare(
         `INSERT INTO chat_messages (session_id, role, content) VALUES (?, 'assistant', ?)`
       ).run(session_id, `__RESEARCH_JOB__:${jobId}`);
     }
 
-    // Start background execution
     setImmediate(() => {
       runResearchJob(db, jobId).catch((e) =>
         console.error('[Research] setImmediate runResearchJob error:', e.message)
@@ -127,7 +154,7 @@ router.post('/jobs', async (req, res) => {
   }
 });
 
-// ── GET /api/research/accessible-resources  (KBs/Dify/MCP user can bind) ──────
+// ── GET /api/research/accessible-resources  (KBs/Dify/MCP + completed jobs) ──
 router.get('/accessible-resources', async (req, res) => {
   const db = getDb();
   try {
@@ -138,7 +165,7 @@ router.get('/accessible-resources', async (req, res) => {
     const roleId = req.user.role_id;
     const isAdmin = req.user.role === 'admin';
 
-    // Self-built KBs (same access logic as chat.js)
+    // Self-built KBs
     let selfKbs;
     if (isAdmin) {
       selfKbs = await db.prepare(
@@ -162,7 +189,7 @@ router.get('/accessible-resources', async (req, res) => {
       `).all(userId, userId, roleId);
     }
 
-    // Dify KBs (role-based)
+    // Dify KBs
     let difyKbs;
     if (isAdmin) {
       difyKbs = await db.prepare(
@@ -178,7 +205,7 @@ router.get('/accessible-resources', async (req, res) => {
       difyKbs = [];
     }
 
-    // MCP servers (role-based)
+    // MCP servers
     let mcpServers;
     if (isAdmin) {
       mcpServers = await db.prepare(
@@ -194,19 +221,44 @@ router.get('/accessible-resources', async (req, res) => {
       mcpServers = [];
     }
 
+    // Completed research jobs (for "previous research as context")
+    const prevJobs = await db.prepare(`
+      SELECT id, title,
+             TO_CHAR(completed_at,'YYYY-MM-DD HH24:MI') AS completed_at
+      FROM research_jobs
+      WHERE user_id=? AND status='done'
+      ORDER BY completed_at DESC
+      FETCH FIRST 20 ROWS ONLY
+    `).all(userId);
+
     res.json({
       self_kbs: selfKbs.map((k) => ({ id: k.id, name: k.name, name_zh: k.name_zh, name_en: k.name_en, name_vi: k.name_vi, chunk_count: k.chunk_count })),
       dify_kbs: difyKbs.map((k) => ({ id: k.id, name: k.name, name_zh: k.name_zh, name_en: k.name_en, name_vi: k.name_vi })),
       mcp_servers: mcpServers.map((m) => ({
-        id: m.id,
-        name: m.name,
+        id: m.id, name: m.name,
         name_zh: m.name_zh, name_en: m.name_en, name_vi: m.name_vi,
         tools_count: JSON.parse(m.tools_json || '[]').length,
       })),
+      prev_jobs: prevJobs.map((j) => ({ id: j.id, title: j.title, completed_at: j.completed_at })),
     });
   } catch (e) {
     console.error('[Research] /accessible-resources error:', e.message);
     res.status(500).json({ error: e.message });
+  }
+});
+
+// ── GET /api/research/suggest-kbs  (auto-suggest relevant KBs) ────────────────
+router.get('/suggest-kbs', async (req, res) => {
+  const db = getDb();
+  try {
+    const { q } = req.query;
+    if (!q?.trim()) return res.json({ kb_ids: [] });
+    const ok = await checkPermission(db, req.user);
+    if (!ok) return res.json({ kb_ids: [] });
+    const suggested = await suggestKbs(db, req.user.id, q.trim());
+    res.json({ kb_ids: suggested });
+  } catch (e) {
+    res.json({ kb_ids: [] });
   }
 });
 
@@ -231,7 +283,7 @@ router.get('/jobs', async (req, res) => {
   }
 });
 
-// ── GET /api/research/jobs/unnotified  (jobs done but not yet notified) ────────
+// ── GET /api/research/jobs/unnotified  ────────────────────────────────────────
 router.get('/jobs/unnotified', async (req, res) => {
   const db = getDb();
   try {
@@ -242,21 +294,19 @@ router.get('/jobs/unnotified', async (req, res) => {
       WHERE user_id=? AND status='done' AND is_notified=0
     `).all(req.user.id);
 
-    // Mark as notified
     if (jobs.length > 0) {
       await db.prepare(
         `UPDATE research_jobs SET is_notified=1, updated_at=SYSTIMESTAMP
          WHERE user_id=? AND status='done' AND is_notified=0`
       ).run(req.user.id);
     }
-
     res.json(jobs);
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
 });
 
-// ── GET /api/research/jobs/:id  (single job detail) ───────────────────────────
+// ── GET /api/research/jobs/:id  (single job detail + streaming sections) ──────
 router.get('/jobs/:id', async (req, res) => {
   const db = getDb();
   try {
@@ -265,6 +315,7 @@ router.get('/jobs/:id', async (req, res) => {
              progress_step, progress_total, progress_label,
              use_web_search, output_formats,
              result_summary, result_files_json, error_msg, is_notified,
+             sections_json,
              TO_CHAR(created_at,'YYYY-MM-DD HH24:MI:SS') AS created_at,
              TO_CHAR(completed_at,'YYYY-MM-DD HH24:MI:SS') AS completed_at
       FROM research_jobs WHERE id=? AND user_id=?
@@ -276,7 +327,7 @@ router.get('/jobs/:id', async (req, res) => {
   }
 });
 
-// ── DELETE /api/research/jobs/:id  (cancel / delete) ─────────────────────────
+// ── DELETE /api/research/jobs/:id ─────────────────────────────────────────────
 router.delete('/jobs/:id', async (req, res) => {
   const db = getDb();
   try {
@@ -294,7 +345,7 @@ router.delete('/jobs/:id', async (req, res) => {
   }
 });
 
-// ── GET /api/research/admin/jobs  (admin only — all users' jobs) ───────────────
+// ── GET /api/research/admin/jobs  (admin only) ─────────────────────────────────
 router.get('/admin/jobs', async (req, res) => {
   if (req.user.role !== 'admin') return res.status(403).json({ error: '需要管理員權限' });
   const db = getDb();

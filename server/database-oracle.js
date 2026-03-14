@@ -443,7 +443,11 @@ async function runMigrations(db) {
   )`);
 
   // ── Research KB binding ───────────────────────────────────────────────────
-  await addCol('RESEARCH_JOBS', 'KB_CONFIG_JSON', 'CLOB');
+  await addCol('RESEARCH_JOBS', 'KB_CONFIG_JSON',      'CLOB');
+  // ── Research file attachments + streaming section results ────────────────
+  await addCol('RESEARCH_JOBS', 'GLOBAL_FILES_JSON',   'CLOB');  // [{name,path,mime_type}]
+  await addCol('RESEARCH_JOBS', 'SECTIONS_JSON',       'CLOB');  // [{sq_id,question,answer,done}] streaming
+  await addCol('RESEARCH_JOBS', 'REF_JOB_IDS_JSON',   'CLOB');  // [jobId, ...] previous research refs
 
   // ── AI 戰情 ─────────────────────────────────────────────────────────────────
   await addCol('USERS', 'CAN_DESIGN_AI_SELECT', 'NUMBER(1) DEFAULT 0');
