@@ -124,6 +124,22 @@ app.get('/api/health', (req, res) => res.json({ status: 'ok', timestamp: new Dat
       console.log(`FOXLINK GPT Server running on http://localhost:${PORT}`);
     });
 
+    // Graceful shutdown for K8s rolling update
+    process.on('SIGTERM', () => {
+      console.log('[Shutdown] SIGTERM received, closing gracefully...');
+      server.close(async () => {
+        try {
+          const { getPool } = require('./database-oracle');
+          const p = getPool();
+          if (p) await p.close(10);
+        } catch (e) { console.error('[Shutdown] Oracle pool close error:', e.message); }
+        console.log('[Shutdown] Clean exit');
+        process.exit(0);
+      });
+      // Force exit after 55s (K8s terminationGracePeriodSeconds: 60)
+      setTimeout(() => { console.error('[Shutdown] Force exit'); process.exit(1); }, 55000);
+    });
+
     // Start post-listen async schedulers
     const { db } = require('./database-oracle');
 

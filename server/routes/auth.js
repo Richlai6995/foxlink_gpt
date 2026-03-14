@@ -3,8 +3,7 @@ const router = express.Router();
 const { v4: uuidv4 } = require('uuid');
 require('dotenv').config();
 
-// In-memory session store
-const sessions = new Map();
+const redis = require('../services/redisClient');
 
 // LDAP Config
 let ldap = null;
@@ -211,7 +210,7 @@ router.post('/login', async (req, res) => {
 const createSession = async (res, user) => {
   const db = require('../database-oracle').db;
   const token = uuidv4();
-  sessions.set(token, {
+  await redis.setSession(token, {
     id: user.id,
     username: user.username,
     role: user.role,
@@ -337,8 +336,8 @@ router.post('/reset-password', async (req, res) => {
 // POST /api/auth/change-password  (authenticated, manual accounts only)
 router.post('/change-password', async (req, res) => {
   const token = req.headers.authorization?.split(' ')[1];
-  if (!token || !sessions.has(token)) return res.status(401).json({ error: 'Unauthorized' });
-  const session = sessions.get(token);
+  const session = token ? await redis.getSession(token) : null;
+  if (!session) return res.status(401).json({ error: 'Unauthorized' });
 
   const { old_password, new_password } = req.body;
   if (!old_password || !new_password) return res.status(400).json({ error: '請填寫舊密碼與新密碼' });
@@ -362,19 +361,19 @@ router.post('/change-password', async (req, res) => {
 });
 
 // POST /api/auth/logout
-router.post('/logout', (req, res) => {
+router.post('/logout', async (req, res) => {
   const token = req.headers.authorization?.split(' ')[1];
-  if (token) sessions.delete(token);
+  if (token) await redis.delSession(token);
   res.json({ success: true });
 });
 
 // GET /api/auth/me  — refresh current user profile
 router.get('/me', async (req, res) => {
   const token = req.headers.authorization?.split(' ')[1];
-  if (!token || !sessions.has(token)) return res.status(401).json({ error: 'Unauthorized' });
+  const session = token ? await redis.getSession(token) : null;
+  if (!session) return res.status(401).json({ error: 'Unauthorized' });
   try {
     const db = require('../database-oracle').db;
-    const session = sessions.get(token);
     const user = await db.prepare('SELECT * FROM users WHERE id=?').get(session.id);
     if (!user) return res.status(404).json({ error: '使用者不存在' });
     const { password: _, ...userWithoutPassword } = user;
@@ -417,11 +416,11 @@ router.get('/me', async (req, res) => {
 });
 
 // PUT /api/auth/language — self-service preferred_language update
-router.put('/language', (req, res, next) => {
-  // inline verifyToken (sessions not yet exported as middleware at this point)
+router.put('/language', async (req, res, next) => {
   const token = req.headers.authorization?.split(' ')[1];
-  if (!token || !sessions.has(token)) return res.status(401).json({ error: 'Unauthorized' });
-  req.user = sessions.get(token);
+  const session = token ? await redis.getSession(token) : null;
+  if (!session) return res.status(401).json({ error: 'Unauthorized' });
+  req.user = session;
   next();
 }, async (req, res) => {
   const { language_code } = req.body;
@@ -434,7 +433,7 @@ router.put('/language', (req, res, next) => {
 });
 
 // Middleware
-const verifyToken = (req, res, next) => {
+const verifyToken = async (req, res, next) => {
   let token = null;
   const authHeader = req.headers.authorization;
   if (authHeader?.startsWith('Bearer ')) {
@@ -443,7 +442,7 @@ const verifyToken = (req, res, next) => {
     token = req.query.token;
   }
   if (!token) return res.status(401).json({ error: 'No token provided' });
-  const session = sessions.get(token);
+  const session = await redis.getSession(token);
   if (!session) return res.status(401).json({ error: 'Invalid or expired token' });
   req.user = session;
   next();
@@ -456,4 +455,4 @@ const verifyAdmin = (req, res, next) => {
   next();
 };
 
-module.exports = { router, verifyToken, verifyAdmin, sessions };
+module.exports = { router, verifyToken, verifyAdmin };

@@ -1,0 +1,43 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: foxlink-gpt
+  namespace: foxlink
+  annotations:
+    # SSE streaming 必要設定
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-http-version: "1.1"
+    # 檔案上傳大小 (音訊/PDF 最大 60MB)
+    nginx.ingress.kubernetes.io/proxy-body-size: "60m"
+    # WebSocket / keepalive
+    nginx.ingress.kubernetes.io/proxy-set-headers: "foxlink/custom-headers"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: foxlink-gpt.example.com   # TODO: 替換為實際域名
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: foxlink-gpt
+                port:
+                  number: 3001
+  # TLS (有憑證時啟用)
+  # tls:
+  #   - hosts:
+  #       - foxlink-gpt.example.com
+  #     secretName: foxlink-tls
+---
+# Custom headers ConfigMap (upstream keepalive)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: custom-headers
+  namespace: foxlink
+data:
+  Connection: "keep-alive"
+  X-Accel-Buffering: "no"

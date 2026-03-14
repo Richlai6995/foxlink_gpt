@@ -241,10 +241,11 @@ async function initializeOracleDB() {
     user:          process.env.SYSTEM_DB_USER,
     password:      process.env.SYSTEM_DB_USER_PASSWORD,
     connectString,
-    poolMin:       2,
-    poolMax:       10,
-    poolIncrement: 2,
-    poolTimeout:   60,
+    poolMin:          5,
+    poolMax:          25,
+    poolIncrement:    5,
+    poolTimeout:      60,
+    poolPingInterval: 60,
   });
 
   console.log('[Oracle] Pool created →', connectString);
