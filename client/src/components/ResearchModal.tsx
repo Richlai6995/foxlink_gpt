@@ -227,9 +227,11 @@ export default function ResearchModal({ sessionId, onClose, onJobCreated }: Prop
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
           <div className="flex items-center gap-2">
             <Search size={18} className="text-blue-500" />
-            <span className="font-semibold text-slate-800">深度研究</span>
+            <span className="font-semibold text-slate-800">{t('research.title')}</span>
             <span className="text-xs text-slate-400 ml-1">
-              {step === 1 && '設定問題'}{step === 2 && '確認計畫'}{step === 3 && '研究已啟動'}
+              {step === 1 && t('research.stepQuestion')}
+              {step === 2 && t('research.stepPlan')}
+              {step === 3 && t('research.stepStarted')}
             </span>
           </div>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-600 transition">
@@ -243,20 +245,20 @@ export default function ResearchModal({ sessionId, onClose, onJobCreated }: Prop
           {step === 1 && (
             <div className="space-y-5">
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1.5">研究問題</label>
+                <label className="block text-sm font-medium text-slate-700 mb-1.5">{t('research.questionLabel')}</label>
                 <textarea
                   value={question}
                   onChange={(e) => setQuestion(e.target.value)}
                   onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) handleGenerate() }}
                   rows={3}
-                  placeholder="請輸入您想深入研究的問題或主題"
+                  placeholder={t('research.questionPlaceholder')}
                   className="w-full border border-slate-300 rounded-xl px-3.5 py-2.5 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
               </div>
 
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-2">
-                  研究深度：<span className="text-blue-600 font-semibold">{depth} 個子問題</span>
+                  {t('research.depthLabel')}<span className="text-blue-600 font-semibold">{depth} {t('research.depthUnit')}</span>
                 </label>
                 <input
                   type="range" min={2} max={12} value={depth}
@@ -264,12 +266,15 @@ export default function ResearchModal({ sessionId, onClose, onJobCreated }: Prop
                   className="w-full accent-blue-600"
                 />
                 <div className="flex justify-between text-xs text-slate-400 mt-1">
-                  <span>快速（2）</span><span>標準（5）</span><span>深入（8）</span><span>全面（12）</span>
+                  <span>{t('research.depthFast')}</span>
+                  <span>{t('research.depthNormal')}</span>
+                  <span>{t('research.depthDeep')}</span>
+                  <span>{t('research.depthFull')}</span>
                 </div>
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-2">輸出格式</label>
+                <label className="block text-sm font-medium text-slate-700 mb-2">{t('research.outputFormat')}</label>
                 <div className="flex flex-wrap gap-2">
                   {FORMAT_OPTIONS.map((opt) => (
                     <button
@@ -290,20 +295,21 @@ export default function ResearchModal({ sessionId, onClose, onJobCreated }: Prop
               {/* Task-level resource binding */}
               {!resLoading && hasAnyResource && (
                 <div className="border border-slate-200 rounded-xl p-4 space-y-3 bg-slate-50">
-                  <p className="text-sm font-medium text-slate-700">整體任務資料來源（選填）</p>
-                  <p className="text-xs text-slate-400">指定後，所有子議題預設使用這些來源；子議題可個別覆蓋</p>
+                  <p className="text-sm font-medium text-slate-700">{t('research.taskSourceTitle')}</p>
+                  <p className="text-xs text-slate-400">{t('research.taskSourceHint')}</p>
                   <ResourceSelect
-                    label="自建知識庫"
+                    label={t('research.selfKbLabel')}
                     icon={<Database size={11} />}
                     options={resources.self_kbs.map((k) => ({
-                      id: k.id, name: k.name, sub: k.chunk_count ? `${k.chunk_count}段` : undefined,
+                      id: k.id, name: k.name,
+                      sub: k.chunk_count ? t('research.chunksSuffix', { n: k.chunk_count }) : undefined,
                     }))}
                     selected={taskBinding.self_kb_ids}
                     onChange={(ids) => setTaskBinding((p) => ({ ...p, self_kb_ids: ids }))}
                     colorClass="bg-blue-600"
                   />
                   <ResourceSelect
-                    label="Dify 知識庫"
+                    label={t('research.difyKbLabel')}
                     icon={<BookOpen size={11} />}
                     options={resources.dify_kbs.map((k) => ({ id: k.id, name: k.name }))}
                     selected={taskBinding.dify_kb_ids}
@@ -311,10 +317,11 @@ export default function ResearchModal({ sessionId, onClose, onJobCreated }: Prop
                     colorClass="bg-violet-600"
                   />
                   <ResourceSelect
-                    label="MCP 工具"
+                    label={t('research.mcpLabel')}
                     icon={<Server size={11} />}
                     options={resources.mcp_servers.map((m) => ({
-                      id: m.id, name: m.name, sub: m.tools_count ? `${m.tools_count}工具` : undefined,
+                      id: m.id, name: m.name,
+                      sub: m.tools_count ? t('research.toolsSuffix', { n: m.tools_count }) : undefined,
                     }))}
                     selected={taskBinding.mcp_server_ids}
                     onChange={(ids) => setTaskBinding((p) => ({ ...p, mcp_server_ids: ids }))}
@@ -335,7 +342,7 @@ export default function ResearchModal({ sessionId, onClose, onJobCreated }: Prop
           {step === 2 && plan && (
             <div className="space-y-4">
               <div className="bg-slate-50 rounded-xl p-4 space-y-1.5">
-                <p className="text-xs text-slate-500 uppercase tracking-wide">研究主題</p>
+                <p className="text-xs text-slate-500 uppercase tracking-wide">{t('research.planTitle')}</p>
                 <p className="text-base font-semibold text-slate-800">{plan.title}</p>
                 <p className="text-sm text-slate-500">{plan.objective}</p>
               </div>
@@ -343,7 +350,8 @@ export default function ResearchModal({ sessionId, onClose, onJobCreated }: Prop
               {/* Task binding summary */}
               {bindingSummary(taskBinding) && (
                 <div className="flex items-center gap-2 text-xs px-3 py-2 rounded-lg bg-blue-50 border border-blue-200 text-blue-700">
-                  <Database size={12} /> 任務資料來源：{bindingSummary(taskBinding)}（子議題可個別覆蓋）
+                  <Database size={12} />
+                  {t('research.taskBindingSummary', { summary: bindingSummary(taskBinding) })}
                 </div>
               )}
 
@@ -355,8 +363,8 @@ export default function ResearchModal({ sessionId, onClose, onJobCreated }: Prop
                     : 'bg-blue-50 border border-blue-200 text-blue-700'
                 }`}>
                   {hasKb
-                    ? <><Database size={13} />將優先使用您的知識庫資料進行研究</>
-                    : <><Globe size={13} />將使用 Google 搜尋進行網路研究</>
+                    ? <><Database size={13} />{t('research.usingKb')}</>
+                    : <><Globe size={13} />{t('research.usingWeb')}</>
                   }
                 </div>
               )}
@@ -364,9 +372,7 @@ export default function ResearchModal({ sessionId, onClose, onJobCreated }: Prop
               {/* Sub-questions */}
               <div>
                 <div className="flex items-center justify-between mb-2">
-                  <p className="text-sm font-medium text-slate-700">
-                    研究子問題（可拖曳排序，最多 12 個）
-                  </p>
+                  <p className="text-sm font-medium text-slate-700">{t('research.subQuestionsLabel')}</p>
                   {plan.sub_questions.length < 12 && (
                     <button
                       onClick={() => {
@@ -376,7 +382,7 @@ export default function ResearchModal({ sessionId, onClose, onJobCreated }: Prop
                       }}
                       className="text-xs text-blue-600 hover:text-blue-700 flex items-center gap-1"
                     >
-                      <Plus size={13} /> 新增
+                      <Plus size={13} /> {t('research.addSubQuestion')}
                     </button>
                   )}
                 </div>
@@ -399,7 +405,6 @@ export default function ResearchModal({ sessionId, onClose, onJobCreated }: Prop
                           dragOver === i ? 'border-blue-400 bg-blue-50' : 'border-slate-200'
                         }`}
                       >
-                        {/* Topic row */}
                         <div className="flex items-start gap-2 p-3">
                           <GripVertical size={16} className="text-slate-300 mt-0.5 cursor-grab flex-shrink-0" />
                           <span className="text-xs font-semibold text-blue-500 mt-0.5 w-5 flex-shrink-0">{i + 1}</span>
@@ -412,7 +417,6 @@ export default function ResearchModal({ sessionId, onClose, onJobCreated }: Prop
                             }}
                             className="flex-1 text-sm text-slate-700 outline-none bg-transparent"
                           />
-                          {/* Per-topic binding toggle */}
                           {hasAnyResource && (
                             <button
                               onClick={() => toggleTopicExpand(sq.id)}
@@ -421,10 +425,9 @@ export default function ResearchModal({ sessionId, onClose, onJobCreated }: Prop
                                   ? 'bg-blue-50 border-blue-300 text-blue-600'
                                   : 'border-slate-200 text-slate-400 hover:text-slate-600'
                               }`}
-                              title="設定此子議題的資料來源"
                             >
                               <Database size={10} />
-                              {summary || '來源'}
+                              {summary || t('research.sourceBtn')}
                               {expanded ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
                             </button>
                           )}
@@ -441,12 +444,11 @@ export default function ResearchModal({ sessionId, onClose, onJobCreated }: Prop
                           )}
                         </div>
 
-                        {/* Per-topic resource selector (expanded) */}
                         {expanded && hasAnyResource && (
                           <div className="border-t border-slate-100 px-4 py-3 space-y-2.5 bg-slate-50 rounded-b-xl">
-                            <p className="text-xs text-slate-500">此子議題的資料來源（覆蓋任務設定）</p>
+                            <p className="text-xs text-slate-500">{t('research.topicSourceLabel')}</p>
                             <ResourceSelect
-                              label="自建知識庫"
+                              label={t('research.selfKbLabel')}
                               icon={<Database size={11} />}
                               options={resources.self_kbs.map((k) => ({ id: k.id, name: k.name }))}
                               selected={topicBind.self_kb_ids}
@@ -454,7 +456,7 @@ export default function ResearchModal({ sessionId, onClose, onJobCreated }: Prop
                               colorClass="bg-blue-600"
                             />
                             <ResourceSelect
-                              label="Dify 知識庫"
+                              label={t('research.difyKbLabel')}
                               icon={<BookOpen size={11} />}
                               options={resources.dify_kbs.map((k) => ({ id: k.id, name: k.name }))}
                               selected={topicBind.dify_kb_ids}
@@ -462,7 +464,7 @@ export default function ResearchModal({ sessionId, onClose, onJobCreated }: Prop
                               colorClass="bg-violet-600"
                             />
                             <ResourceSelect
-                              label="MCP 工具"
+                              label={t('research.mcpLabel')}
                               icon={<Server size={11} />}
                               options={resources.mcp_servers.map((m) => ({ id: m.id, name: m.name }))}
                               selected={topicBind.mcp_server_ids}
@@ -490,9 +492,9 @@ export default function ResearchModal({ sessionId, onClose, onJobCreated }: Prop
             <div className="text-center py-8 space-y-4">
               <CheckCircle size={48} className="mx-auto text-green-500" />
               <div>
-                <p className="text-base font-semibold text-slate-800">研究已在背景啟動</p>
-                <p className="text-sm text-slate-500 mt-1">您可以繼續使用聊天，研究完成後會在頂部顯示通知。</p>
-                <p className="text-sm text-slate-500 mt-1">研究進度也會顯示在對話中。</p>
+                <p className="text-base font-semibold text-slate-800">{t('research.successTitle')}</p>
+                <p className="text-sm text-slate-500 mt-1">{t('research.successMsg1')}</p>
+                <p className="text-sm text-slate-500 mt-1">{t('research.successMsg2')}</p>
               </div>
             </div>
           )}
@@ -503,7 +505,7 @@ export default function ResearchModal({ sessionId, onClose, onJobCreated }: Prop
           {step === 1 && (
             <>
               <button onClick={onClose} className="text-sm text-slate-500 hover:text-slate-700 px-3 py-2">
-                取消
+                {t('research.cancel')}
               </button>
               <button
                 onClick={handleGenerate}
@@ -511,8 +513,8 @@ export default function ResearchModal({ sessionId, onClose, onJobCreated }: Prop
                 className="flex items-center gap-2 px-5 py-2 bg-blue-600 text-white text-sm rounded-xl hover:bg-blue-700 disabled:opacity-50 transition"
               >
                 {generating
-                  ? <><Loader2 size={15} className="animate-spin" /> 生成計畫中...</>
-                  : <>生成研究計畫 <ChevronRight size={15} /></>
+                  ? <><Loader2 size={15} className="animate-spin" /> {t('research.generating')}</>
+                  : <>{t('research.generateBtn')} <ChevronRight size={15} /></>
                 }
               </button>
             </>
@@ -520,7 +522,7 @@ export default function ResearchModal({ sessionId, onClose, onJobCreated }: Prop
           {step === 2 && (
             <>
               <button onClick={() => setPlan(null)} className="text-sm text-slate-500 hover:text-slate-700 px-3 py-2">
-                ← 修改問題
+                {t('research.backBtn')}
               </button>
               <button
                 onClick={handleStart}
@@ -528,8 +530,8 @@ export default function ResearchModal({ sessionId, onClose, onJobCreated }: Prop
                 className="flex items-center gap-2 px-5 py-2 bg-blue-600 text-white text-sm rounded-xl hover:bg-blue-700 disabled:opacity-50 transition"
               >
                 {starting
-                  ? <><Loader2 size={15} className="animate-spin" /> 啟動中...</>
-                  : <>確認並開始研究 <ChevronRight size={15} /></>
+                  ? <><Loader2 size={15} className="animate-spin" /> {t('research.starting')}</>
+                  : <>{t('research.startBtn')} <ChevronRight size={15} /></>
                 }
               </button>
             </>
@@ -539,7 +541,7 @@ export default function ResearchModal({ sessionId, onClose, onJobCreated }: Prop
               onClick={onClose}
               className="ml-auto px-5 py-2 bg-slate-100 text-slate-700 text-sm rounded-xl hover:bg-slate-200 transition"
             >
-              關閉
+              {t('research.close')}
             </button>
           )}
         </div>
