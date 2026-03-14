@@ -20,8 +20,9 @@ interface Plan {
   language: string
   sub_questions: SubQuestion[]
 }
-interface KbOption   { id: number; name: string; chunk_count?: number }
-interface McpOption  { id: number; name: string; tools_count?: number }
+interface LocalizedItem { name: string; name_zh?: string; name_en?: string; name_vi?: string }
+interface KbOption   extends LocalizedItem { id: number; chunk_count?: number }
+interface McpOption  extends LocalizedItem { id: number; tools_count?: number }
 interface Resources  { self_kbs: KbOption[]; dify_kbs: KbOption[]; mcp_servers: McpOption[] }
 interface TopicBinding { self_kb_ids: number[]; dify_kb_ids: number[]; mcp_server_ids: number[] }
 
@@ -86,7 +87,13 @@ function ResourceSelect({
 }
 
 export default function ResearchModal({ sessionId, onClose, onJobCreated }: Props) {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
+
+  const localName = (item: LocalizedItem) => {
+    if (i18n.language === 'en') return item.name_en || item.name
+    if (i18n.language === 'vi') return item.name_vi || item.name
+    return item.name_zh || item.name
+  }
 
   // Step 1
   const [question,   setQuestion]   = useState('')
@@ -301,7 +308,7 @@ export default function ResearchModal({ sessionId, onClose, onJobCreated }: Prop
                     label={t('research.selfKbLabel')}
                     icon={<Database size={11} />}
                     options={resources.self_kbs.map((k) => ({
-                      id: k.id, name: k.name,
+                      id: k.id, name: localName(k),
                       sub: k.chunk_count ? t('research.chunksSuffix', { n: k.chunk_count }) : undefined,
                     }))}
                     selected={taskBinding.self_kb_ids}
@@ -311,7 +318,7 @@ export default function ResearchModal({ sessionId, onClose, onJobCreated }: Prop
                   <ResourceSelect
                     label={t('research.difyKbLabel')}
                     icon={<BookOpen size={11} />}
-                    options={resources.dify_kbs.map((k) => ({ id: k.id, name: k.name }))}
+                    options={resources.dify_kbs.map((k) => ({ id: k.id, name: localName(k) }))}
                     selected={taskBinding.dify_kb_ids}
                     onChange={(ids) => setTaskBinding((p) => ({ ...p, dify_kb_ids: ids }))}
                     colorClass="bg-violet-600"
@@ -320,7 +327,7 @@ export default function ResearchModal({ sessionId, onClose, onJobCreated }: Prop
                     label={t('research.mcpLabel')}
                     icon={<Server size={11} />}
                     options={resources.mcp_servers.map((m) => ({
-                      id: m.id, name: m.name,
+                      id: m.id, name: localName(m),
                       sub: m.tools_count ? t('research.toolsSuffix', { n: m.tools_count }) : undefined,
                     }))}
                     selected={taskBinding.mcp_server_ids}
@@ -450,7 +457,7 @@ export default function ResearchModal({ sessionId, onClose, onJobCreated }: Prop
                             <ResourceSelect
                               label={t('research.selfKbLabel')}
                               icon={<Database size={11} />}
-                              options={resources.self_kbs.map((k) => ({ id: k.id, name: k.name }))}
+                              options={resources.self_kbs.map((k) => ({ id: k.id, name: localName(k) }))}
                               selected={topicBind.self_kb_ids}
                               onChange={(ids) => setTopicBindings((p) => ({ ...p, [sq.id]: { ...topicBind, self_kb_ids: ids } }))}
                               colorClass="bg-blue-600"
@@ -458,7 +465,7 @@ export default function ResearchModal({ sessionId, onClose, onJobCreated }: Prop
                             <ResourceSelect
                               label={t('research.difyKbLabel')}
                               icon={<BookOpen size={11} />}
-                              options={resources.dify_kbs.map((k) => ({ id: k.id, name: k.name }))}
+                              options={resources.dify_kbs.map((k) => ({ id: k.id, name: localName(k) }))}
                               selected={topicBind.dify_kb_ids}
                               onChange={(ids) => setTopicBindings((p) => ({ ...p, [sq.id]: { ...topicBind, dify_kb_ids: ids } }))}
                               colorClass="bg-violet-600"
@@ -466,7 +473,7 @@ export default function ResearchModal({ sessionId, onClose, onJobCreated }: Prop
                             <ResourceSelect
                               label={t('research.mcpLabel')}
                               icon={<Server size={11} />}
-                              options={resources.mcp_servers.map((m) => ({ id: m.id, name: m.name }))}
+                              options={resources.mcp_servers.map((m) => ({ id: m.id, name: localName(m) }))}
                               selected={topicBind.mcp_server_ids}
                               onChange={(ids) => setTopicBindings((p) => ({ ...p, [sq.id]: { ...topicBind, mcp_server_ids: ids } }))}
                               colorClass="bg-emerald-600"

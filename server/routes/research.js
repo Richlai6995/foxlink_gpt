@@ -142,11 +142,11 @@ router.get('/accessible-resources', async (req, res) => {
     let selfKbs;
     if (isAdmin) {
       selfKbs = await db.prepare(
-        `SELECT id, name, chunk_count FROM knowledge_bases WHERE chunk_count > 0 ORDER BY name`
+        `SELECT id, name, name_zh, name_en, name_vi, chunk_count FROM knowledge_bases WHERE chunk_count > 0 ORDER BY name`
       ).all();
     } else {
       selfKbs = await db.prepare(`
-        SELECT kb.id, kb.name, kb.chunk_count
+        SELECT kb.id, kb.name, kb.name_zh, kb.name_en, kb.name_vi, kb.chunk_count
         FROM knowledge_bases kb
         WHERE kb.chunk_count > 0 AND (
           kb.creator_id=?
@@ -166,11 +166,11 @@ router.get('/accessible-resources', async (req, res) => {
     let difyKbs;
     if (isAdmin) {
       difyKbs = await db.prepare(
-        `SELECT id, name FROM dify_knowledge_bases WHERE is_active=1 ORDER BY sort_order, name`
+        `SELECT id, name, name_zh, name_en, name_vi FROM dify_knowledge_bases WHERE is_active=1 ORDER BY sort_order, name`
       ).all();
     } else if (roleId) {
       difyKbs = await db.prepare(`
-        SELECT d.id, d.name FROM dify_knowledge_bases d
+        SELECT d.id, d.name, d.name_zh, d.name_en, d.name_vi FROM dify_knowledge_bases d
         JOIN role_dify_kbs rd ON rd.dify_kb_id=d.id AND rd.role_id=?
         WHERE d.is_active=1 ORDER BY d.sort_order, d.name
       `).all(roleId);
@@ -182,11 +182,11 @@ router.get('/accessible-resources', async (req, res) => {
     let mcpServers;
     if (isAdmin) {
       mcpServers = await db.prepare(
-        `SELECT id, name, tools_json FROM mcp_servers WHERE is_active=1 ORDER BY name`
+        `SELECT id, name, name_zh, name_en, name_vi, tools_json FROM mcp_servers WHERE is_active=1 ORDER BY name`
       ).all();
     } else if (roleId) {
       mcpServers = await db.prepare(`
-        SELECT m.id, m.name, m.tools_json FROM mcp_servers m
+        SELECT m.id, m.name, m.name_zh, m.name_en, m.name_vi, m.tools_json FROM mcp_servers m
         JOIN role_mcp_servers rm ON rm.mcp_server_id=m.id AND rm.role_id=?
         WHERE m.is_active=1 ORDER BY m.name
       `).all(roleId);
@@ -195,11 +195,12 @@ router.get('/accessible-resources', async (req, res) => {
     }
 
     res.json({
-      self_kbs: selfKbs.map((k) => ({ id: k.id, name: k.name, chunk_count: k.chunk_count })),
-      dify_kbs: difyKbs.map((k) => ({ id: k.id, name: k.name })),
+      self_kbs: selfKbs.map((k) => ({ id: k.id, name: k.name, name_zh: k.name_zh, name_en: k.name_en, name_vi: k.name_vi, chunk_count: k.chunk_count })),
+      dify_kbs: difyKbs.map((k) => ({ id: k.id, name: k.name, name_zh: k.name_zh, name_en: k.name_en, name_vi: k.name_vi })),
       mcp_servers: mcpServers.map((m) => ({
         id: m.id,
         name: m.name,
+        name_zh: m.name_zh, name_en: m.name_en, name_vi: m.name_vi,
         tools_count: JSON.parse(m.tools_json || '[]').length,
       })),
     });
