@@ -46,6 +46,7 @@ interface Props {
   sessionId: string | null
   initialQuestion?: string
   initialFiles?: File[]
+  editJobId?: string          // edit & rerun mode: open an existing job
   onClose: () => void
   onJobCreated: (jobId: string) => void
 }
@@ -167,7 +168,7 @@ function FileAttachArea({ pendingFiles, onAdd, onRemove, uploadedFiles, onRemove
 
 // ── Main Component ─────────────────────────────────────────────────────────────
 
-export default function ResearchModal({ sessionId, initialQuestion = '', initialFiles = [], onClose, onJobCreated }: Props) {
+export default function ResearchModal({ sessionId, initialQuestion = '', initialFiles = [], editJobId, onClose, onJobCreated }: Props) {
   const { t, i18n } = useTranslation()
 
   const localName = (item: LocalizedItem) => {
@@ -220,7 +221,13 @@ export default function ResearchModal({ sessionId, initialQuestion = '', initial
   const [jobStatus,    setJobStatus]    = useState<string>('pending')
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
-  const step = jobId ? 3 : plan ? 2 : 1
+  // ── Edit mode state ────────────────────────────────────────────────────────
+  const editMode = !!editJobId
+  const [editJobLoading,   setEditJobLoading]   = useState(editMode)
+  const [rerunIds,         setRerunIds]         = useState<Set<number>>(new Set())
+  const [existingSections, setExistingSections] = useState<StreamingSection[]>([])
+
+  const step = jobId ? 3 : (plan || editMode) ? 2 : 1
 
   // Drag-to-sort
   const dragIdx  = useRef<number | null>(null)
@@ -233,6 +240,28 @@ export default function ResearchModal({ sessionId, initialQuestion = '', initial
       .catch(() => {})
       .finally(() => setResLoading(false))
   }, [])
+
+  // ── Load existing job in edit mode ────────────────────────────────────────
+  useEffect(() => {
+    if (!editJobId) return
+    api.get(`/research/jobs/${editJobId}`)
+      .then((r) => {
+        const j = r.data
+        try {
+          const p: Plan = JSON.parse(j.plan_json || '{}')
+          setPlan(p)
+          setHasKb(false)
+          const init: Record<number, TopicBinding> = {}
+          p.sub_questions?.forEach((sq: SubQuestion) => { init[sq.id] = emptyBinding() })
+          setTopicBindings(init)
+        } catch (_) {}
+        if (j.sections_json) {
+          try { setExistingSections(JSON.parse(j.sections_json)) } catch (_) {}
+        }
+      })
+      .catch(() => {})
+      .finally(() => setEditJobLoading(false))
+  }, [editJobId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Auto-suggest KB on question change ────────────────────────────────────
   useEffect(() => {
@@ -321,63 +350,105 @@ export default function ResearchModal({ sessionId, initialQuestion = '', initial
     }
   }
 
-  // ── Step 2: start job ─────────────────────────────────────────────────────
+  // ── Step 2: start / rerun ─────────────────────────────────────────────────
   const handleStart = async () => {
     if (!plan) return
+    if (editMode && rerunIds.size === 0) { setStartError(t('research.errorNoRerun')); return }
     setStarting(true); setStartError('')
     try {
-      // Upload global pending files
-      let allGlobalUploaded = [...globalUploaded]
-      if (globalPending.length) {
-        const newUploaded = await uploadFiles(globalPending)
-        allGlobalUploaded = [...allGlobalUploaded, ...newUploaded]
-        setGlobalUploaded(allGlobalUploaded)
-        setGlobalPending([])
-      }
-
-      // Upload per-SQ pending files and embed into plan
-      const updatedSqs = await Promise.all(plan.sub_questions.map(async (sq) => {
-        const pending = sqPending[sq.id] || []
-        let uploaded  = sqUploaded[sq.id] || []
-        if (pending.length) {
-          const newUp = await uploadFiles(pending)
-          uploaded = [...uploaded, ...newUp]
-          setSqUploaded((p) => ({ ...p, [sq.id]: uploaded }))
-          setSqPending((p) => ({ ...p, [sq.id]: [] }))
+      if (editMode && editJobId) {
+        // ── RERUN MODE ─────────────────────────────────────────────────────
+        // Upload per-SQ pending files for rerun IDs
+        const sq_overrides = await Promise.all(
+          plan.sub_questions
+            .filter((sq) => rerunIds.has(sq.id))
+            .map(async (sq) => {
+              const pending = sqPending[sq.id] || []
+              let uploaded  = sqUploaded[sq.id] || []
+              if (pending.length) {
+                const newUp = await uploadFiles(pending)
+                uploaded = [...uploaded, ...newUp]
+                setSqUploaded((p) => ({ ...p, [sq.id]: uploaded }))
+                setSqPending((p) => ({ ...p, [sq.id]: [] }))
+              }
+              return {
+                id:             sq.id,
+                question:       sq.question,
+                hint:           sqHints[sq.id] || undefined,
+                files:          uploaded.length ? uploaded : undefined,
+                use_web_search: sqWeb[sq.id] !== undefined ? sqWeb[sq.id] : undefined,
+              }
+            })
+        )
+        await api.post(`/research/jobs/${editJobId}/rerun-sections`, {
+          section_ids: Array.from(rerunIds),
+          sq_overrides,
+        })
+        // Merge rerunning sections into existing for display
+        const mergedSections = [...existingSections]
+        rerunIds.forEach((id) => {
+          const sq = plan.sub_questions.find((s) => s.id === id)
+          if (!sq) return
+          const idx = mergedSections.findIndex((s) => s.id === id)
+          const entry: StreamingSection = { id, question: sq.question, answer: '', done: false }
+          if (idx >= 0) mergedSections[idx] = entry
+          else mergedSections.push(entry)
+        })
+        setStreamSections(mergedSections)
+        setJobId(editJobId)
+        onJobCreated(editJobId)
+      } else {
+        // ── NEW JOB MODE ───────────────────────────────────────────────────
+        let allGlobalUploaded = [...globalUploaded]
+        if (globalPending.length) {
+          const newUploaded = await uploadFiles(globalPending)
+          allGlobalUploaded = [...allGlobalUploaded, ...newUploaded]
+          setGlobalUploaded(allGlobalUploaded)
+          setGlobalPending([])
         }
-        return {
-          ...sq,
-          hint:           sqHints[sq.id] || undefined,
-          files:          uploaded.length ? uploaded : undefined,
-          use_web_search: sqWeb[sq.id] !== undefined ? sqWeb[sq.id] : undefined,
-          ...(topicBindings[sq.id] || {}),
+
+        const updatedSqs = await Promise.all(plan.sub_questions.map(async (sq) => {
+          const pending = sqPending[sq.id] || []
+          let uploaded  = sqUploaded[sq.id] || []
+          if (pending.length) {
+            const newUp = await uploadFiles(pending)
+            uploaded = [...uploaded, ...newUp]
+            setSqUploaded((p) => ({ ...p, [sq.id]: uploaded }))
+            setSqPending((p) => ({ ...p, [sq.id]: [] }))
+          }
+          return {
+            ...sq,
+            hint:           sqHints[sq.id] || undefined,
+            files:          uploaded.length ? uploaded : undefined,
+            use_web_search: sqWeb[sq.id] !== undefined ? sqWeb[sq.id] : undefined,
+            ...(topicBindings[sq.id] || {}),
+          }
+        }))
+        const finalPlan = { ...plan, sub_questions: updatedSqs }
+
+        const topicsConfig: Record<string, TopicBinding> = {}
+        for (const [sqId, bind] of Object.entries(topicBindings)) {
+          if (bind.self_kb_ids.length || bind.dify_kb_ids.length || bind.mcp_server_ids.length)
+            topicsConfig[sqId] = bind
         }
-      }))
-      const finalPlan = { ...plan, sub_questions: updatedSqs }
+        const hasTaskBinding = taskBinding.self_kb_ids.length || taskBinding.dify_kb_ids.length || taskBinding.mcp_server_ids.length
+        const kb_config = (hasTaskBinding || Object.keys(topicsConfig).length)
+          ? { task: taskBinding, topics: topicsConfig }
+          : null
 
-      // Build kb_config
-      const topicsConfig: Record<string, TopicBinding> = {}
-      for (const [sqId, bind] of Object.entries(topicBindings)) {
-        if (bind.self_kb_ids.length || bind.dify_kb_ids.length || bind.mcp_server_ids.length)
-          topicsConfig[sqId] = bind
+        const res = await api.post('/research/jobs', {
+          question:       question.trim(),
+          plan:           finalPlan,
+          session_id:     sessionId,
+          output_formats: formats.join(','),
+          use_web_search: !hasKb && !kb_config && !allGlobalUploaded.length,
+          kb_config,
+          global_files:   allGlobalUploaded,
+          ref_job_ids:    refJobIds,
+        })
+        setJobId(res.data.id)
+        onJobCreated(res.data.id)
       }
-      const hasTaskBinding = taskBinding.self_kb_ids.length || taskBinding.dify_kb_ids.length || taskBinding.mcp_server_ids.length
-      const kb_config = (hasTaskBinding || Object.keys(topicsConfig).length)
-        ? { task: taskBinding, topics: topicsConfig }
-        : null
-
-      const res = await api.post('/research/jobs', {
-        question:       question.trim(),
-        plan:           finalPlan,
-        session_id:     sessionId,
-        output_formats: formats.join(','),
-        use_web_search: !hasKb && !kb_config && !allGlobalUploaded.length,
-        kb_config,
-        global_files:   allGlobalUploaded,
-        ref_job_ids:    refJobIds,
-      })
-      setJobId(res.data.id)
-      onJobCreated(res.data.id)
     } catch (e: any) {
       setStartError(e.response?.data?.error || t('research.errorStartFail'))
     } finally {
@@ -397,7 +468,7 @@ export default function ResearchModal({ sessionId, initialQuestion = '', initial
             <span className="font-semibold text-slate-800">{t('research.title')}</span>
             <span className="text-xs text-slate-400 ml-1">
               {step === 1 && t('research.stepQuestion')}
-              {step === 2 && t('research.stepPlan')}
+              {step === 2 && (editMode ? t('research.stepEditRerun') : t('research.stepPlan'))}
               {step === 3 && t('research.stepStarted')}
             </span>
           </div>
@@ -533,8 +604,16 @@ export default function ResearchModal({ sessionId, initialQuestion = '', initial
             </div>
           )}
 
+          {/* ── Edit mode loading ────────────────────────────────────────── */}
+          {step === 2 && editMode && editJobLoading && (
+            <div className="flex items-center justify-center py-12 gap-3 text-slate-400">
+              <Loader2 size={20} className="animate-spin" />
+              <span className="text-sm">{t('research.editLoading')}</span>
+            </div>
+          )}
+
           {/* ── Step 2 ───────────────────────────────────────────────────── */}
-          {step === 2 && plan && (
+          {step === 2 && plan && !editJobLoading && (
             <div className="space-y-4">
               {/* Plan summary */}
               <div className="bg-slate-50 rounded-xl p-4 space-y-1.5">
@@ -589,60 +668,103 @@ export default function ResearchModal({ sessionId, initialQuestion = '', initial
 
                 <div className="space-y-2">
                   {plan.sub_questions.map((sq, i) => {
-                    const topicBind = topicBindings[sq.id] || emptyBinding()
-                    const summary   = bindingSummary(topicBind)
-                    const expanded  = expandedTopics.has(sq.id)
+                    const topicBind   = topicBindings[sq.id] || emptyBinding()
+                    const summary     = bindingSummary(topicBind)
+                    const expanded    = expandedTopics.has(sq.id)
                     const sqFileCount = (sqPending[sq.id]?.length || 0) + (sqUploaded[sq.id]?.length || 0)
+                    const isRerun     = editMode && rerunIds.has(sq.id)
+                    const existingSec = editMode ? existingSections.find((s) => s.id === sq.id) : null
 
                     return (
-                      <div key={sq.id} draggable
-                        onDragStart={() => { dragIdx.current = i }}
-                        onDragOver={(e) => { e.preventDefault(); setDragOver(i) }}
-                        onDrop={() => { if (dragIdx.current !== null) moveItem(dragIdx.current, i); dragIdx.current = null; setDragOver(null) }}
+                      <div key={sq.id} draggable={!editMode}
+                        onDragStart={() => { if (!editMode) dragIdx.current = i }}
+                        onDragOver={(e) => { e.preventDefault(); if (!editMode) setDragOver(i) }}
+                        onDrop={() => { if (!editMode && dragIdx.current !== null) { moveItem(dragIdx.current, i); dragIdx.current = null; setDragOver(null) } }}
                         onDragEnd={() => { dragIdx.current = null; setDragOver(null) }}
-                        className={`border rounded-xl bg-white transition ${dragOver === i ? 'border-blue-400 bg-blue-50' : 'border-slate-200'}`}>
+                        className={`border rounded-xl transition ${
+                          editMode
+                            ? isRerun
+                              ? 'border-orange-300 bg-orange-50'
+                              : 'border-slate-200 bg-white opacity-70'
+                            : dragOver === i ? 'border-blue-400 bg-blue-50' : 'border-slate-200 bg-white'
+                        }`}>
 
                         {/* SQ header row */}
                         <div className="flex items-start gap-2 p-3">
-                          <GripVertical size={16} className="text-slate-300 mt-0.5 cursor-grab flex-shrink-0" />
+                          {!editMode && <GripVertical size={16} className="text-slate-300 mt-0.5 cursor-grab flex-shrink-0" />}
                           <span className="text-xs font-semibold text-blue-500 mt-0.5 w-5 flex-shrink-0">{i + 1}</span>
                           <input
                             value={sq.question}
                             onChange={(e) => {
+                              if (editMode && !isRerun) return
                               const sqs = [...plan.sub_questions]
                               sqs[i] = { ...sqs[i], question: e.target.value }
                               setPlan({ ...plan, sub_questions: sqs })
                             }}
-                            className="flex-1 text-sm text-slate-700 outline-none bg-transparent"
+                            readOnly={editMode && !isRerun}
+                            className={`flex-1 text-sm text-slate-700 outline-none bg-transparent ${editMode && !isRerun ? 'cursor-default' : ''}`}
                           />
                           <div className="flex items-center gap-1 flex-shrink-0">
-                            {/* Web toggle */}
-                            <button
-                              title={t('research.sqWebToggle')}
-                              onClick={() => setSqWeb((p) => ({ ...p, [sq.id]: !p[sq.id] }))}
-                              className={`p-1 rounded transition ${sqWeb[sq.id] ? 'text-blue-500' : 'text-slate-300 hover:text-slate-500'}`}>
-                              {sqWeb[sq.id] ? <Wifi size={13} /> : <WifiOff size={13} />}
-                            </button>
-                            {/* Source + expand */}
-                            {(hasAnyResource || true) && (
-                              <button onClick={() => toggleTopicExpand(sq.id)}
-                                className={`flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border transition ${(summary || sqFileCount) ? 'bg-blue-50 border-blue-300 text-blue-600' : 'border-slate-200 text-slate-400 hover:text-slate-600'}`}>
-                                <Database size={10} />
-                                {summary || (sqFileCount ? `${sqFileCount}f` : t('research.sourceBtn'))}
-                                {expanded ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
+                            {/* Edit mode: rerun toggle */}
+                            {editMode && (
+                              <button
+                                title={isRerun ? t('research.sqKeepOld') : t('research.sqMarkRerun')}
+                                onClick={() => setRerunIds((prev) => {
+                                  const n = new Set(prev)
+                                  n.has(sq.id) ? n.delete(sq.id) : n.add(sq.id)
+                                  return n
+                                })}
+                                className={`flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border transition ${
+                                  isRerun ? 'bg-orange-500 text-white border-transparent' : 'border-slate-200 text-slate-400 hover:border-orange-400 hover:text-orange-500'
+                                }`}>
+                                {isRerun ? '↺ 重跑' : '保留'}
                               </button>
                             )}
-                            {plan.sub_questions.length > 2 && (
-                              <button onClick={() => {
-                                setPlan({ ...plan, sub_questions: plan.sub_questions.filter((_, j) => j !== i) })
-                                setTopicBindings((p) => { const n = { ...p }; delete n[sq.id]; return n })
-                              }} className="text-slate-300 hover:text-red-400"><Trash2 size={14} /></button>
+                            {!editMode && (
+                              <>
+                                {/* Web toggle */}
+                                <button
+                                  title={t('research.sqWebToggle')}
+                                  onClick={() => setSqWeb((p) => ({ ...p, [sq.id]: !p[sq.id] }))}
+                                  className={`p-1 rounded transition ${sqWeb[sq.id] ? 'text-blue-500' : 'text-slate-300 hover:text-slate-500'}`}>
+                                  {sqWeb[sq.id] ? <Wifi size={13} /> : <WifiOff size={13} />}
+                                </button>
+                                {/* Source + expand */}
+                                <button onClick={() => toggleTopicExpand(sq.id)}
+                                  className={`flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border transition ${(summary || sqFileCount) ? 'bg-blue-50 border-blue-300 text-blue-600' : 'border-slate-200 text-slate-400 hover:text-slate-600'}`}>
+                                  <Database size={10} />
+                                  {summary || (sqFileCount ? `${sqFileCount}f` : t('research.sourceBtn'))}
+                                  {expanded ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
+                                </button>
+                                {plan.sub_questions.length > 2 && (
+                                  <button onClick={() => {
+                                    setPlan({ ...plan, sub_questions: plan.sub_questions.filter((_, j) => j !== i) })
+                                    setTopicBindings((p) => { const n = { ...p }; delete n[sq.id]; return n })
+                                  }} className="text-slate-300 hover:text-red-400"><Trash2 size={14} /></button>
+                                )}
+                              </>
+                            )}
+                            {/* Edit mode rerun: also show expand for hint/files */}
+                            {editMode && isRerun && (
+                              <button onClick={() => toggleTopicExpand(sq.id)}
+                                className={`flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border transition ${expanded ? 'bg-blue-50 border-blue-300 text-blue-600' : 'border-slate-200 text-slate-400 hover:text-slate-600'}`}>
+                                {expanded ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
+                              </button>
                             )}
                           </div>
                         </div>
 
+                        {/* Edit mode: existing answer preview (when NOT rerun) */}
+                        {editMode && !isRerun && existingSec?.answer && (
+                          <div className="px-4 pb-3">
+                            <p className="text-xs text-slate-400 line-clamp-2 whitespace-pre-wrap">
+                              {existingSec.answer.slice(0, 200)}{existingSec.answer.length > 200 ? '…' : ''}
+                            </p>
+                          </div>
+                        )}
+
                         {/* Expanded: hint + files + KB binding */}
-                        {expanded && (
+                        {expanded && (isRerun || !editMode) && (
                           <div className="border-t border-slate-100 px-4 py-3 space-y-3 bg-slate-50 rounded-b-xl">
                             {/* Hint */}
                             <div>
@@ -769,13 +891,26 @@ export default function ResearchModal({ sessionId, initialQuestion = '', initial
           )}
           {step === 2 && (
             <>
-              <button onClick={() => setPlan(null)} className="text-sm text-slate-500 hover:text-slate-700 px-3 py-2">{t('research.backBtn')}</button>
-              <button onClick={handleStart} disabled={starting || !plan || plan.sub_questions.some((sq) => !sq.question.trim())}
-                className="flex items-center gap-2 px-5 py-2 bg-blue-600 text-white text-sm rounded-xl hover:bg-blue-700 disabled:opacity-50 transition">
-                {starting
-                  ? <><Loader2 size={15} className="animate-spin" /> {t('research.starting')}</>
-                  : <>{t('research.startBtn')} <ChevronRight size={15} /></>}
-              </button>
+              {editMode
+                ? <button onClick={onClose} className="text-sm text-slate-500 hover:text-slate-700 px-3 py-2">{t('research.cancel')}</button>
+                : <button onClick={() => setPlan(null)} className="text-sm text-slate-500 hover:text-slate-700 px-3 py-2">{t('research.backBtn')}</button>
+              }
+              <div className="flex items-center gap-3">
+                {editMode && rerunIds.size > 0 && (
+                  <span className="text-xs text-orange-600">{t('research.rerunCount', { n: rerunIds.size })}</span>
+                )}
+                <button
+                  onClick={handleStart}
+                  disabled={starting || !plan || (!editMode && plan.sub_questions.some((sq) => !sq.question.trim())) || (editMode && rerunIds.size === 0)}
+                  className="flex items-center gap-2 px-5 py-2 bg-blue-600 text-white text-sm rounded-xl hover:bg-blue-700 disabled:opacity-50 transition">
+                  {starting
+                    ? <><Loader2 size={15} className="animate-spin" /> {t('research.starting')}</>
+                    : editMode
+                      ? <>{t('research.rerunBtn')} <ChevronRight size={15} /></>
+                      : <>{t('research.startBtn')} <ChevronRight size={15} /></>
+                  }
+                </button>
+              </div>
             </>
           )}
           {step === 3 && (

@@ -165,6 +165,7 @@
       "researchJobDone": "Done · {{time}}",
       "researchJobFailed": "An error occurred",
       "researchJobDelete": "Delete",
+      "researchJobRerun": "Edit & Re-run sub-questions",
       "share": "Share",
       "sharing": "Sharing...",
       "aiReplying": "AI replying...",
@@ -1088,6 +1089,13 @@
     "failedTitle": "Research Failed",
     "uploadingFiles": "Uploading attachments...",
     "sectionDone": "Done",
-    "sectionPending": "Researching..."
+    "sectionPending": "Researching...",
+    "stepEditRerun": "Select Sub-questions to Re-run",
+    "editLoading": "Loading research data...",
+    "sqMarkRerun": "Mark for re-run",
+    "sqKeepOld": "Cancel re-run, keep existing answer",
+    "rerunCount": "{{n}} sub-question(s) selected for re-run",
+    "rerunBtn": "Confirm & Re-run",
+    "errorNoRerun": "Please select at least one sub-question to re-run"
   }
 }

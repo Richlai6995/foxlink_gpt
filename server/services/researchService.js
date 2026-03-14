@@ -713,4 +713,229 @@ async function runResearchJob(db, jobId) {
   }
 }
 
-module.exports = { runResearchJob, generatePlan, searchUserKbs, suggestKbs };
+// ─────────────────────────────────────────────────────────────────────────────
+// rerunSections — re-run selected sub-questions of an existing done/failed job
+// sqOverrides: [{ id, question, hint, files, use_web_search }]
+// ─────────────────────────────────────────────────────────────────────────────
+async function rerunSections(db, jobId, sectionIds, sqOverrides = []) {
+  let job;
+  let isEn = false;
+  try {
+    job = await db.prepare('SELECT * FROM research_jobs WHERE id=?').get(jobId);
+    if (!job) throw new Error('Job not found');
+
+    const plan          = JSON.parse(job.plan_json || '{}');
+    const subQuestions  = plan.sub_questions || [];
+    const language      = plan.language || 'zh-TW';
+    isEn                = language !== 'zh-TW';
+    const useWebSearch  = job.use_web_search === 1;
+
+    // Load existing sections (to preserve non-rerun sections)
+    let streamingSections = [];
+    try { streamingSections = JSON.parse(job.sections_json || '[]'); } catch (_) {}
+
+    // Build override map
+    const overrideMap = {};
+    for (const ov of sqOverrides) overrideMap[String(ov.id)] = ov;
+
+    const kbConfig      = JSON.parse(job.kb_config_json || '{}');
+    const taskBinding   = kbConfig.task   || {};
+    const topicBindings = kbConfig.topics || {};
+
+    // Global file context
+    const globalFiles = JSON.parse(job.global_files_json || '[]');
+    let globalFileContext = '';
+    if (globalFiles.length) {
+      try { globalFileContext = await extractFilesContext(globalFiles); } catch (_) {}
+    }
+
+    // Previous research context
+    let prevResearchContext = '';
+    const refJobIds = JSON.parse(job.ref_job_ids_json || '[]');
+    for (const refId of refJobIds.slice(0, 3)) {
+      try {
+        const refJob = await db.prepare(
+          "SELECT title, result_summary FROM research_jobs WHERE id=? AND user_id=? AND status='done'"
+        ).get(refId, job.user_id);
+        if (refJob?.result_summary) {
+          prevResearchContext += (prevResearchContext ? '\n\n---\n\n' : '') +
+            (isEn ? `[Previous Research: ${refJob.title}]\n${refJob.result_summary}`
+                  : `【前次研究：${refJob.title}】\n${refJob.result_summary}`);
+        }
+      } catch (_) {}
+    }
+    if (prevResearchContext) {
+      globalFileContext = (globalFileContext ? globalFileContext + '\n\n---\n\n' : '') +
+        (isEn ? `[Previous Research Context]\n${prevResearchContext}`
+              : `【前次研究背景】\n${prevResearchContext}`);
+    }
+
+    const sectionIdSet = new Set(sectionIds.map(String));
+    const total = sectionIds.length;
+
+    await db.prepare(
+      "UPDATE research_jobs SET status='running', progress_step=0, progress_total=?, updated_at=SYSTIMESTAMP WHERE id=?"
+    ).run(total, jobId);
+
+    const today = new Date().toISOString().split('T')[0];
+    const tokensByModel = {};
+    const addTokens = (modelName, inT, outT) => {
+      if (!tokensByModel[modelName]) tokensByModel[modelName] = { in: 0, out: 0 };
+      tokensByModel[modelName].in  += (inT  || 0);
+      tokensByModel[modelName].out += (outT || 0);
+    };
+
+    let rerunCount = 0;
+    for (let i = 0; i < subQuestions.length; i++) {
+      const sq = subQuestions[i];
+      if (!sectionIdSet.has(String(sq.id))) continue;
+
+      rerunCount++;
+      const ov = overrideMap[String(sq.id)] || {};
+
+      // Apply overrides
+      const question     = ov.question  || sq.question;
+      const hint         = ov.hint      !== undefined ? ov.hint : (sq.hint || '');
+      const sqFiles      = ov.files     || sq.files || [];
+      const sqUseWeb     = ov.use_web_search !== undefined ? Boolean(ov.use_web_search)
+                         : (sq.use_web_search !== undefined ? Boolean(sq.use_web_search) : useWebSearch);
+
+      // If question changed, update in plan
+      if (ov.question && ov.question !== sq.question) {
+        subQuestions[i] = { ...sq, question };
+      }
+
+      // Resolve bindings
+      const topicBind    = topicBindings[String(sq.id)] || {};
+      const selfKbIds    = topicBind.self_kb_ids?.length  ? topicBind.self_kb_ids
+                         : taskBinding.self_kb_ids?.length ? taskBinding.self_kb_ids
+                         : null;
+      const difyKbIds    = topicBind.dify_kb_ids?.length  ? topicBind.dify_kb_ids
+                         : taskBinding.dify_kb_ids?.length ? taskBinding.dify_kb_ids
+                         : [];
+      const mcpServerIds = topicBind.mcp_server_ids?.length  ? topicBind.mcp_server_ids
+                         : taskBinding.mcp_server_ids?.length ? taskBinding.mcp_server_ids
+                         : [];
+
+      let sqFileContext = '';
+      if (sqFiles.length) {
+        try { sqFileContext = await extractFilesContext(sqFiles); } catch (_) {}
+      }
+
+      const researchingLabel = isEn
+        ? `Re-researching (${rerunCount}/${total}): ${question.slice(0, 50)}`
+        : `重跑中 (${rerunCount}/${total})：${question.slice(0, 50)}`;
+
+      // Update streaming section as in-progress
+      const existingIdx = streamingSections.findIndex((s) => String(s.id) === String(sq.id));
+      const updated = { id: sq.id, question, answer: '', done: false };
+      if (existingIdx >= 0) streamingSections[existingIdx] = updated;
+      else streamingSections.push(updated);
+
+      await db.prepare(
+        'UPDATE research_jobs SET progress_step=?, progress_label=?, sections_json=?, updated_at=SYSTIMESTAMP WHERE id=?'
+      ).run(rerunCount, researchingLabel, JSON.stringify(streamingSections), jobId);
+
+      let kbContext = '';
+      try {
+        kbContext = selfKbIds
+          ? await searchSpecificKbs(db, job.user_id, selfKbIds, question)
+          : await searchUserKbs(db, job.user_id, question);
+      } catch (_) {}
+
+      let difyContext = '';
+      for (const difyId of difyKbIds) {
+        try {
+          const difyKb = await db.prepare(
+            'SELECT * FROM dify_knowledge_bases WHERE id=? AND is_active=1'
+          ).get(difyId);
+          if (!difyKb) continue;
+          const ans = await queryDifyKb(difyKb, question);
+          if (ans) difyContext += (difyContext ? '\n\n---\n\n' : '') + `[Dify「${difyKb.name}」]\n${ans}`;
+        } catch (_) {}
+      }
+
+      let mcpDecls = [];
+      try { mcpDecls = await getMcpDeclarations(db, mcpServerIds); } catch (_) {}
+
+      const shouldWeb = sqUseWeb && !kbContext && !difyContext && !globalFileContext && !sqFileContext;
+
+      let answer = '';
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          const sec = await generateSection(question, kbContext, difyContext, mcpDecls, shouldWeb,
+            language, globalFileContext, sqFileContext, hint);
+          answer = sec.answer;
+          addTokens(MODEL_PRO, sec.inputTokens, sec.outputTokens);
+          break;
+        } catch (e) {
+          if (attempt === 2) answer = isEn
+            ? `(Error: ${e.message})` : `（錯誤：${e.message}）`;
+          else await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
+        }
+      }
+
+      const finIdx = streamingSections.findIndex((s) => String(s.id) === String(sq.id));
+      const finSec = { id: sq.id, question, answer, done: true };
+      if (finIdx >= 0) streamingSections[finIdx] = finSec;
+      else streamingSections.push(finSec);
+
+      await db.prepare(
+        'UPDATE research_jobs SET sections_json=?, updated_at=SYSTIMESTAMP WHERE id=?'
+      ).run(JSON.stringify(streamingSections), jobId);
+    }
+
+    // Re-synthesize with all sections (including untouched ones)
+    await db.prepare(
+      'UPDATE research_jobs SET progress_label=?, updated_at=SYSTIMESTAMP WHERE id=?'
+    ).run(isEn ? 'Re-synthesizing report...' : '重新整合報告...', jobId);
+
+    // Update plan_json if questions changed
+    plan.sub_questions = subQuestions;
+
+    const allSections = streamingSections
+      .filter((s) => s.done)
+      .map((s) => ({ question: s.question, answer: s.answer }));
+
+    const { report, inputTokens: synIn, outputTokens: synOut } = await synthesizeReport(plan.title, allSections, language);
+    addTokens(MODEL_PRO, synIn, synOut);
+
+    await db.prepare(
+      'UPDATE research_jobs SET progress_label=?, updated_at=SYSTIMESTAMP WHERE id=?'
+    ).run(isEn ? 'Generating documents...' : '正在生成文件...', jobId);
+    const files = await generateOutputFiles(jobId, plan.title, report, allSections, job.output_formats || 'docx');
+
+    for (const [modelName, t] of Object.entries(tokensByModel)) {
+      await upsertTokenUsage(db, job.user_id, today, modelName, t.in, t.out).catch(() => {});
+    }
+
+    const summary = report.slice(0, 800);
+    await db.prepare(`
+      UPDATE research_jobs
+      SET status='done', progress_step=?, progress_label=?,
+          plan_json=?, result_summary=?, result_files_json=?,
+          completed_at=SYSTIMESTAMP, updated_at=SYSTIMESTAMP
+      WHERE id=?
+    `).run(total, isEn ? 'Research complete' : '研究完成',
+      JSON.stringify(plan), summary, JSON.stringify(files), jobId);
+
+    if (job.session_id) {
+      const downloadLinks = files.map((f) => `[📥 ${isEn ? 'Download' : '下載'} ${f.type.toUpperCase()}](${f.url})`).join('  \n');
+      const msgContent = isEn
+        ? `**📊 Deep Research Updated: ${plan.title}**\n\n${report.slice(0, 300)}${report.length > 300 ? '...' : ''}\n\n${downloadLinks}`
+        : `**📊 深度研究已更新：${plan.title}**\n\n${report.slice(0, 300)}${report.length > 300 ? '...' : ''}\n\n${downloadLinks}`;
+      await db.prepare(
+        `UPDATE chat_messages SET content=? WHERE session_id=? AND TO_CHAR(DBMS_LOB.SUBSTR(content,100,1))=?`
+      ).run(msgContent, job.session_id, `__RESEARCH_JOB__:${jobId}`).catch(() => {});
+    }
+
+    console.log(`[Research] Job ${jobId} rerun completed — ${sectionIds.length} sections`);
+  } catch (e) {
+    console.error(`[Research] Job ${jobId} rerun failed:`, e.message);
+    await db.prepare(
+      "UPDATE research_jobs SET status='failed', error_msg=?, updated_at=SYSTIMESTAMP WHERE id=?"
+    ).run((e.message || 'Unknown error').slice(0, 500), jobId);
+  }
+}
+
+module.exports = { runResearchJob, rerunSections, generatePlan, searchUserKbs, suggestKbs };

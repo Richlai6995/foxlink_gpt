@@ -165,6 +165,7 @@
       "researchJobDone": "Xong · {{time}}",
       "researchJobFailed": "Đã xảy ra lỗi",
       "researchJobDelete": "Xóa",
+      "researchJobRerun": "Chỉnh sửa & Chạy lại câu hỏi phụ",
       "share": "Chia sẻ",
       "sharing": "Đang chia sẻ...",
       "aiReplying": "AI đang trả lời...",
@@ -1088,6 +1089,13 @@
     "failedTitle": "Nghiên cứu thất bại",
     "uploadingFiles": "Đang tải tệp đính kèm...",
     "sectionDone": "Hoàn thành",
-    "sectionPending": "Đang nghiên cứu..."
+    "sectionPending": "Đang nghiên cứu...",
+    "stepEditRerun": "Chọn câu hỏi phụ để chạy lại",
+    "editLoading": "Đang tải dữ liệu nghiên cứu...",
+    "sqMarkRerun": "Đánh dấu chạy lại",
+    "sqKeepOld": "Hủy chạy lại, giữ câu trả lời cũ",
+    "rerunCount": "Đã chọn {{n}} câu hỏi phụ để chạy lại",
+    "rerunBtn": "Xác nhận & Chạy lại",
+    "errorNoRerun": "Vui lòng chọn ít nhất một câu hỏi phụ để chạy lại"
   }
 }

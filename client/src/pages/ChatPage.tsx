@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useSearchParams, useNavigate } from 'react-router-dom'
-import { Square, AlertTriangle, Share2, Copy, Check, X, Sparkles, Search, Plus, Plug, Zap, Database, CheckCircle, BarChart3, ChevronDown } from 'lucide-react'
+import { Square, AlertTriangle, Share2, Copy, Check, X, Sparkles, Search, Plus, Plug, Zap, Database, CheckCircle, BarChart3, ChevronDown, RefreshCw } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import Sidebar from '../components/Sidebar'
 import ChatWindow from '../components/ChatWindow'
@@ -106,6 +106,7 @@ export default function ChatPage() {
 
   const [researchJobs,       setResearchJobs]       = useState<any[]>([])
   const [showResearchPanel,  setShowResearchPanel]  = useState(false)
+  const [editRerunJobId,     setEditRerunJobId]     = useState<string | null>(null)
 
   const openMcpPanel = useCallback(async () => {
     try { const r = await api.get('/mcp-servers'); setAllMcpServers((r.data || []).filter((s: any) => s.is_active)) } catch {}
@@ -1064,16 +1065,31 @@ export default function ChatPage() {
                                 {j.status === 'failed' && <p className="text-red-500 mt-0.5 truncate">{j.error_msg || t('chat.topbar.researchJobFailed')}</p>}
                               </div>
                               {!isRunning && (
-                                <button
-                                  onClick={async () => {
-                                    try { await api.delete(`/research/jobs/${j.id}`) } catch { /* ignore */ }
-                                    setResearchJobs((prev) => prev.filter((x) => x.id !== j.id))
-                                  }}
-                                  className="text-slate-300 hover:text-red-400 flex-shrink-0 transition ml-1"
-                                  title={t('chat.topbar.researchJobDelete')}
-                                >
-                                  <X size={13} />
-                                </button>
+                                <div className="flex items-center gap-1 flex-shrink-0 ml-1">
+                                  {j.status === 'done' && (
+                                    <button
+                                      onClick={() => {
+                                        setEditRerunJobId(j.id)
+                                        setShowResearchPanel(false)
+                                        setShowResearchModal(true)
+                                      }}
+                                      className="text-slate-300 hover:text-orange-400 transition"
+                                      title={t('chat.topbar.researchJobRerun')}
+                                    >
+                                      <RefreshCw size={13} />
+                                    </button>
+                                  )}
+                                  <button
+                                    onClick={async () => {
+                                      try { await api.delete(`/research/jobs/${j.id}`) } catch { /* ignore */ }
+                                      setResearchJobs((prev) => prev.filter((x) => x.id !== j.id))
+                                    }}
+                                    className="text-slate-300 hover:text-red-400 transition"
+                                    title={t('chat.topbar.researchJobDelete')}
+                                  >
+                                    <X size={13} />
+                                  </button>
+                                </div>
                               )}
                             </div>
                           </div>
@@ -1150,7 +1166,8 @@ export default function ChatPage() {
           sessionId={currentSessionId}
           initialQuestion={researchInitialQuestion}
           initialFiles={researchInitialFiles}
-          onClose={() => setShowResearchModal(false)}
+          editJobId={editRerunJobId || undefined}
+          onClose={() => { setShowResearchModal(false); setEditRerunJobId(null) }}
           onJobCreated={async (jobId) => {
             seenResearchIds.current.add(jobId)
             let sid = currentSessionId

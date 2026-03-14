@@ -9,7 +9,7 @@ const fs        = require('fs');
 const multer    = require('multer');
 const { v4: uuid } = require('uuid');
 const { verifyToken } = require('./auth');
-const { runResearchJob, generatePlan, searchUserKbs, suggestKbs } = require('../services/researchService');
+const { runResearchJob, rerunSections, generatePlan, searchUserKbs, suggestKbs } = require('../services/researchService');
 const { upsertTokenUsage } = require('../services/tokenService');
 const { UPLOAD_DIR } = require('../config/paths');
 const MODEL_FLASH = process.env.GEMINI_MODEL_FLASH || 'gemini-2.0-flash';
@@ -322,6 +322,32 @@ router.get('/jobs/:id', async (req, res) => {
     `).get(req.params.id, req.user.id);
     if (!job) return res.status(404).json({ error: '找不到研究任務' });
     res.json(job);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── POST /api/research/jobs/:id/rerun-sections ────────────────────────────────
+// Body: { section_ids: [1,3,...], sq_overrides: [{id,question,hint,files,use_web_search}] }
+router.post('/jobs/:id/rerun-sections', async (req, res) => {
+  const db = getDb();
+  try {
+    const job = await db.prepare(
+      "SELECT id, status, user_id FROM research_jobs WHERE id=?"
+    ).get(req.params.id);
+    if (!job) return res.status(404).json({ error: '找不到研究任務' });
+    if (job.user_id !== req.user.id && req.user.role !== 'admin')
+      return res.status(403).json({ error: '無權限' });
+    if (job.status === 'running' || job.status === 'pending')
+      return res.status(409).json({ error: '研究仍在進行中，無法重跑' });
+
+    const { section_ids = [], sq_overrides = [] } = req.body;
+    if (!section_ids.length) return res.status(400).json({ error: '請選擇至少一個子問題' });
+
+    // Respond immediately, run async
+    res.json({ ok: true, job_id: req.params.id });
+
+    setImmediate(() => rerunSections(db, req.params.id, section_ids, sq_overrides));
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

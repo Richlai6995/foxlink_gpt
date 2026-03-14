@@ -165,6 +165,7 @@
       "researchJobDone": "完成 · {{time}}",
       "researchJobFailed": "發生錯誤",
       "researchJobDelete": "刪除",
+      "researchJobRerun": "編輯並重跑子問題",
       "share": "分享",
       "sharing": "分享中...",
       "aiReplying": "AI 回覆中...",
@@ -1088,6 +1089,13 @@
     "failedTitle": "研究失敗",
     "uploadingFiles": "上傳附件中...",
     "sectionDone": "已完成",
-    "sectionPending": "研究中..."
+    "sectionPending": "研究中...",
+    "stepEditRerun": "選擇重跑子問題",
+    "editLoading": "載入研究資料中...",
+    "sqMarkRerun": "標記重跑",
+    "sqKeepOld": "取消重跑，保留舊答案",
+    "rerunCount": "已選 {{n}} 個子問題重跑",
+    "rerunBtn": "確認並重跑",
+    "errorNoRerun": "請至少選擇一個子問題重跑"
   }
 }
