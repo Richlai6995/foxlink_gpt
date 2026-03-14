@@ -160,7 +160,7 @@ export default function ResearchModal({ sessionId, onClose, onJobCreated }: Prop
 
   // ── Step 1: generate plan ───────────────────────────────────────────────────
   const handleGenerate = async () => {
-    if (!question.trim()) { setGenError('請輸入研究問題'); return }
+    if (!question.trim()) { setGenError(t('research.errorEmpty')); return }
     setGenerating(true); setGenError('')
     try {
       const res = await api.post('/research/plan', { question: question.trim(), depth })
@@ -171,7 +171,7 @@ export default function ResearchModal({ sessionId, onClose, onJobCreated }: Prop
       res.data.plan.sub_questions.forEach((sq: SubQuestion) => { init[sq.id] = emptyBinding() })
       setTopicBindings(init)
     } catch (e: any) {
-      setGenError(e.response?.data?.error || '計畫生成失敗，請稍後再試')
+      setGenError(e.response?.data?.error || t('research.errorGenFail'))
     } finally {
       setGenerating(false)
     }
@@ -205,7 +205,7 @@ export default function ResearchModal({ sessionId, onClose, onJobCreated }: Prop
       setJobId(res.data.id)
       onJobCreated(res.data.id)
     } catch (e: any) {
-      setStartError(e.response?.data?.error || '無法啟動研究，請稍後再試')
+      setStartError(e.response?.data?.error || t('research.errorStartFail'))
     } finally {
       setStarting(false)
     }
