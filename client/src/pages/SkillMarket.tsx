@@ -1,9 +1,10 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { Plus, Search, Globe, Lock, GitFork, Send, Pencil, Trash2, Clock, X, ChevronDown, Zap, ArrowLeft, MessageSquare, Code2, Eye, Share2, History, CheckCircle, XCircle } from 'lucide-react'
 import api from '../lib/api'
 import TranslationFields, { type TranslationData } from '../components/common/TranslationFields'
+import UserPicker from '../components/common/UserPicker'
 
 interface Skill {
     id: number
@@ -528,25 +529,14 @@ interface GrantRecord {
     granted_at: string
 }
 
-interface UserOption {
-    id: number
-    username: string
-    name: string
-    employee_id?: string
-}
-
 function SkillShareModal({ skill, onClose }: { skill: Skill; onClose: () => void }) {
     const [grants, setGrants] = useState<GrantRecord[]>([])
-    const [users, setUsers] = useState<UserOption[]>([])
     const [loadingGrants, setLoadingGrants] = useState(false)
     const [submitting, setSubmitting] = useState(false)
     const [error, setError] = useState('')
     const [granteeType, setGranteeType] = useState<string>('user')
     const [granteeId, setGranteeId] = useState<string>('')
-    const [userSearch, setUserSearch] = useState<string>('')
-    const [showUserDropdown, setShowUserDropdown] = useState(false)
-    const [selectedUser, setSelectedUser] = useState<UserOption | null>(null)
-    const userSearchRef = useRef<HTMLDivElement>(null)
+    const [userDisplay, setUserDisplay] = useState<string>('')
 
     const loadGrants = useCallback(async () => {
         setLoadingGrants(true)
@@ -560,48 +550,23 @@ function SkillShareModal({ skill, onClose }: { skill: Skill; onClose: () => void
         }
     }, [skill.id])
 
-    useEffect(() => {
-        loadGrants()
-        api.get('/users').then(r => setUsers(r.data)).catch(() => {})
-    }, [loadGrants])
-
-    // Close dropdown on outside click
-    useEffect(() => {
-        const handler = (e: MouseEvent) => {
-            if (userSearchRef.current && !userSearchRef.current.contains(e.target as Node)) {
-                setShowUserDropdown(false)
-            }
-        }
-        document.addEventListener('mousedown', handler)
-        return () => document.removeEventListener('mousedown', handler)
-    }, [])
-
-    const filteredUsers = userSearch
-        ? users.filter(u =>
-            u.name?.toLowerCase().includes(userSearch.toLowerCase()) ||
-            u.username?.toLowerCase().includes(userSearch.toLowerCase()) ||
-            u.employee_id?.toLowerCase().includes(userSearch.toLowerCase())
-        ).slice(0, 10)
-        : []
+    useEffect(() => { loadGrants() }, [loadGrants])
 
     const handleTypeChange = (t: string) => {
         setGranteeType(t)
         setGranteeId('')
-        setUserSearch('')
-        setSelectedUser(null)
-        setShowUserDropdown(false)
+        setUserDisplay('')
     }
 
     const handleAdd = async () => {
-        const finalId = granteeType === 'user' ? (selectedUser ? String(selectedUser.id) : '') : granteeId.trim()
+        const finalId = granteeType === 'user' ? granteeId : granteeId.trim()
         if (!finalId) return setError('請填寫共享對象')
         setSubmitting(true)
         setError('')
         try {
             await api.post(`/skills/${skill.id}/access`, { grantee_type: granteeType, grantee_id: finalId })
             setGranteeId('')
-            setUserSearch('')
-            setSelectedUser(null)
+            setUserDisplay('')
             await loadGrants()
         } catch (e: any) {
             setError(e.response?.data?.error || '新增失敗')
@@ -619,15 +584,9 @@ function SkillShareModal({ skill, onClose }: { skill: Skill; onClose: () => void
         }
     }
 
-    const getUserDisplayName = (granteeId: string) => {
-        const u = users.find(u => String(u.id) === granteeId)
-        return u ? `${u.name} (${u.username})` : granteeId
-    }
-
     const getGranteeDisplay = (grant: GrantRecord) => {
-        if (grant.grantee_type === 'user') return getUserDisplayName(grant.grantee_id)
         if (grant.grantee_type === 'role') return grant.grantee_id === 'admin' ? '系統管理員' : '一般使用者'
-        return grant.grantee_id
+        return grant.grantee_name || grant.grantee_id
     }
 
     return (
@@ -665,34 +624,12 @@ function SkillShareModal({ skill, onClose }: { skill: Skill; onClose: () => void
                             </select>
 
                             {granteeType === 'user' ? (
-                                <div className="relative flex-1" ref={userSearchRef}>
-                                    <input
-                                        value={selectedUser ? `${selectedUser.name} (${selectedUser.username})` : userSearch}
-                                        onChange={e => {
-                                            if (selectedUser) { setSelectedUser(null); setUserSearch(e.target.value) }
-                                            else { setUserSearch(e.target.value) }
-                                            setShowUserDropdown(true)
-                                        }}
-                                        onFocus={() => setShowUserDropdown(true)}
-                                        placeholder="搜尋姓名、帳號、工號..."
-                                        className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
-                                    />
-                                    {showUserDropdown && filteredUsers.length > 0 && (
-                                        <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg z-10 max-h-48 overflow-y-auto">
-                                            {filteredUsers.map(u => (
-                                                <button
-                                                    key={u.id}
-                                                    type="button"
-                                                    onClick={() => { setSelectedUser(u); setUserSearch(''); setShowUserDropdown(false) }}
-                                                    className="w-full text-left px-3 py-2 text-sm hover:bg-slate-50 border-b border-slate-100 last:border-0"
-                                                >
-                                                    <span className="font-medium text-slate-700">{u.name}</span>
-                                                    <span className="text-slate-400 ml-2 text-xs">{u.username}{u.employee_id ? ` · ${u.employee_id}` : ''}</span>
-                                                </button>
-                                            ))}
-                                        </div>
-                                    )}
-                                </div>
+                                <UserPicker
+                                    value={granteeId}
+                                    display={userDisplay}
+                                    onChange={(id, disp) => { setGranteeId(id); setUserDisplay(disp) }}
+                                    className="flex-1"
+                                />
                             ) : granteeType === 'role' ? (
                                 <select
                                     value={granteeId}

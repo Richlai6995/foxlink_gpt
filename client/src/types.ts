@@ -220,9 +220,16 @@ export interface AiSchemaColumn {
   column_name: string
   data_type?: string
   description?: string
+  name_zh?: string
+  name_en?: string
+  name_vi?: string
+  desc_en?: string
+  desc_vi?: string
   is_vectorized: number
   value_mapping?: string
   sample_values?: string
+  is_filter_key?: number
+  is_virtual?: number
 }
 
 export interface AiSelectProject {
@@ -352,7 +359,10 @@ export interface AiChartConfig {
   allow_table?: boolean
   allow_export?: boolean
   charts: AiChartDef[]
+  available_columns?: { key: string; label: string }[]  // 儲存時記錄欄位清單，供無 live data 時編輯
 }
+
+export type ChartColorPalette = 'blue' | 'green' | 'orange' | 'purple' | 'teal'
 
 export interface AiChartDef {
   type: 'bar' | 'line' | 'pie' | 'scatter' | 'radar' | 'gauge'
@@ -367,6 +377,32 @@ export interface AiChartDef {
   gradient?: boolean
   donut?: boolean
   show_label?: boolean
+  // 新增顯示設定
+  show_legend?: boolean
+  show_grid?: boolean
+  y_axis_name?: string
+  x_axis_name?: string
+  // 新增聚合設定（儲存至 chart_config，不再只是 ChartBuilder 本地狀態）
+  agg_fn?: 'SUM' | 'COUNT' | 'AVG' | 'MAX' | 'MIN' | 'COUNT_DISTINCT'
+  limit?: number
+  // 顏色設定
+  color_palette?: ChartColorPalette
+  colors?: string[]   // 自訂色票陣列
+  // 多維度設定
+  series_field?: string   // 分組維度 → 並排 (grouped)
+  stack_field?: string    // 堆疊維度 → 疊色 (stacked within series)
+  // 排序設定
+  sort_by?: 'none' | 'x' | 'y'
+  sort_order?: 'asc' | 'desc'
+  // 顯示篩選（client-side，apply 在 chart render 時）
+  min_value?: number   // 排除 y/value < 此值的資料列（BAR/LINE/PIE/SCATTER 皆支援）
+  // 多語言標題 / 軸名
+  title_en?: string
+  title_vi?: string
+  x_axis_name_en?: string
+  x_axis_name_vi?: string
+  y_axis_name_en?: string
+  y_axis_name_vi?: string
 }
 
 export interface TaskRun {
@@ -381,4 +417,125 @@ export interface TaskRun {
   email_sent_to?: string
   error_msg?: string
   duration_ms?: number
+}
+
+// ── AI 命名查詢（Saved Queries / Report Templates）────────────────────────────
+
+export type QueryParamInputType = 'select' | 'multiselect' | 'date_range' | 'number_range' | 'text' | 'dynamic_date'
+export type QueryParamInjectAs = 'where_in' | 'where_between' | 'where_like' | 'replace_text'
+
+export interface AiQueryParameter {
+  id: string                   // 唯一識別（uuid 或自訂）
+  label_zh: string
+  label_en?: string
+  label_vi?: string
+  schema_id?: number           // 從哪個 schema 拉資料
+  column_name?: string         // 對應的欄位名稱（自動 DISTINCT 查詢）
+  input_type: QueryParamInputType
+  required?: boolean
+  default_value?: string | null
+  fetch_values_sql?: string    // 自訂 DISTINCT 查詢 SQL（優先於自動生成）
+  inject_as?: QueryParamInjectAs
+  sql_placeholder?: string     // SQL 中對應的 placeholder（e.g. ":FACTORY_CODE"）
+}
+
+export interface AiSavedQuery {
+  id: number
+  user_id: number
+  name: string
+  name_en?: string | null
+  name_vi?: string | null
+  description?: string
+  category?: string
+  design_id?: number
+  question?: string
+  pinned_sql?: string
+  chart_config?: AiChartConfig | null
+  parameters_schema?: AiQueryParameter[] | null
+  auto_run?: number
+  sort_order?: number
+  is_active?: number
+  created_at?: string
+  updated_at?: string
+  last_run_at?: string
+  // joined fields
+  creator_name?: string
+  creator_emp_id?: string
+  design_name?: string
+  design_name_en?: string | null
+  design_name_vi?: string | null
+  topic_name?: string
+  topic_name_en?: string | null
+  topic_name_vi?: string | null
+  can_manage?: number
+}
+
+export interface AiSavedQueryShare {
+  id: number
+  query_id: number
+  share_type: 'use' | 'manage'
+  grantee_type: 'user' | 'role' | 'department' | 'cost_center' | 'division' | 'org_group'
+  grantee_id: string
+  granted_by?: number
+  created_at?: string
+  // UI-only display fields
+  grantee_name?: string
+}
+
+// ── AI 儀表板（Report Dashboards）────────────────────────────────────────────
+
+export interface AiDashboardItem {
+  query_id: number
+  chart_index: number          // 第幾張圖表（0-based）
+  title_override?: string
+  param_values?: Record<string, string | string[]>  // 持久化的參數值（含動態日期 token）
+  // react-grid-layout layout item
+  i: string                    // 唯一 key（通常 `${query_id}_${chart_index}`）
+  x: number
+  y: number
+  w: number
+  h: number
+}
+
+export interface AiReportDashboard {
+  id: number
+  user_id: number
+  name: string
+  name_en?: string
+  name_vi?: string
+  description?: string
+  description_en?: string
+  description_vi?: string
+  category?: string
+  category_en?: string
+  category_vi?: string
+  layout_config?: AiDashboardItem[] | null
+  sort_order?: number
+  auto_refresh_interval?: number | null   // 自動刷新間隔（分鐘），null = 手動
+  is_active?: number
+  created_at?: string
+  updated_at?: string
+  // joined
+  creator_name?: string
+  can_manage?: number
+}
+
+export interface AiReportDashboardShare {
+  id: number
+  dashboard_id: number
+  share_type: 'use' | 'manage'
+  grantee_type: 'user' | 'role' | 'department' | 'cost_center' | 'division' | 'org_group'
+  grantee_id: string
+  granted_by?: number
+  created_at?: string
+  grantee_name?: string
+}
+
+// ── 通用分享 Modal 的 grantee 搜尋結果 ────────────────────────────────────────
+
+export interface ShareGrantee {
+  type: 'user' | 'role' | 'department' | 'cost_center' | 'division' | 'org_group'
+  id: string
+  name: string
+  sub?: string    // 副標題（e.g. 工號、部門代碼）
 }

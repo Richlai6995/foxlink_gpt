@@ -194,9 +194,9 @@ export default function DataPermissionsPanel() {
       </div>
 
       {activeTab === 'policies' && (
-        <div className="flex gap-4 flex-1 min-h-0">
+        <div className="flex gap-4 flex-1 min-h-0 overflow-hidden">
           {/* Policy List */}
-          <div className="w-64 flex flex-col gap-2">
+          <div className="w-64 flex flex-col gap-2 min-h-0">
             <button
               onClick={startNew}
               className="flex items-center gap-2 text-sm bg-blue-600 text-white px-3 py-2 rounded-lg hover:bg-blue-700 transition"
@@ -234,7 +234,7 @@ export default function DataPermissionsPanel() {
           </div>
 
           {/* Editor / Detail */}
-          <div className="flex-1 min-w-0">
+          <div className="flex-1 min-w-0 min-h-0 overflow-y-auto">
             {editing ? (
               <PolicyEditor
                 form={editForm}
@@ -263,13 +263,15 @@ export default function DataPermissionsPanel() {
       )}
 
       {activeTab === 'assignments' && (
-        <AssignmentsPanel
-          policies={policies}
-          assignments={assignments}
-          users={users}
-          roles={roles}
-          onRefresh={load}
-        />
+        <div className="flex-1 overflow-y-auto">
+          <AssignmentsPanel
+            policies={policies}
+            assignments={assignments}
+            users={users}
+            roles={roles}
+            onRefresh={load}
+          />
+        </div>
       )}
     </div>
   )
@@ -365,7 +367,7 @@ function PolicyEditor({
   }
 
   return (
-    <div className="bg-white border border-slate-200 rounded-xl p-5 flex flex-col gap-4 h-full overflow-auto">
+    <div className="bg-white border border-slate-200 rounded-xl p-5 flex flex-col gap-4">
       <div className="flex items-center justify-between">
         <h3 className="font-semibold text-slate-800">政策設定</h3>
         <div className="flex gap-2">

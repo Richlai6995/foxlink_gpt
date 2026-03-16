@@ -40,7 +40,7 @@ export default function TranslationFields({
   translating = false,
   className = '',
 }: TranslationFieldsProps) {
-  const [open, setOpen] = useState(true)
+  const [open, setOpen] = useState(false)
   const [retranslating, setRetranslating] = useState(false)
 
   const handleRetranslate = async () => {

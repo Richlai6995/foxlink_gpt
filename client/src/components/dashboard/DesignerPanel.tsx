@@ -7,6 +7,7 @@ import { Plus, Save, Trash2, Play, RefreshCw, ChevronDown, ChevronRight, Eye, Li
 import api from '../../lib/api'
 import type { AiSchemaDef, AiSchemaJoin, AiSelectTopic, AiSelectDesign, AiEtlJob, AiEtlRunLog, AiDashboardShare, AiSelectProject, AiProjectShare } from '../../types'
 import TranslationFields, { type TranslationData } from '../common/TranslationFields'
+import UserPicker from '../common/UserPicker'
 
 // ── Project Selector ──────────────────────────────────────────────────────────
 function ProjectSelector({
@@ -104,26 +105,12 @@ function ShareFormBody({
   roles: {id:number;name:string}[]
   orgs: OrgData
 }) {
-  const [userSearch, setUserSearch] = useState('')
-  const [userOptions, setUserOptions] = useState<{id:number;name:string;username:string;employee_id:string}[]>([])
-
-  useEffect(() => {
-    if (form.grantee_type !== 'user' || userSearch.length < 1) { setUserOptions([]); return }
-    const t = setTimeout(async () => {
-      try {
-        const res = await api.get(`/users?search=${encodeURIComponent(userSearch)}`)
-        setUserOptions((res.data || []).slice(0, 10))
-      } catch { setUserOptions([]) }
-    }, 300)
-    return () => clearTimeout(t)
-  }, [userSearch, form.grantee_type])
-
+  const [userDisplay, setUserDisplay] = useState('')
   const lovOptions = getOrgLov(form.grantee_type, roles, orgs)
 
   const changeType = (t: string) => {
     setForm(p => ({ ...p, grantee_type: t, grantee_id: '' }))
-    setUserSearch('')
-    setUserOptions([])
+    setUserDisplay('')
   }
 
   return (
@@ -135,23 +122,12 @@ function ShareFormBody({
         </select>
 
         {form.grantee_type === 'user' ? (
-          <div className="relative flex-1 min-w-40">
-            <input className="input py-1.5 text-sm w-full" value={userSearch}
-              onChange={e => { setUserSearch(e.target.value); setForm(p => ({ ...p, grantee_id: '' })) }}
-              placeholder="搜尋姓名 / 帳號 / 工號" />
-            {userOptions.length > 0 && (
-              <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-20 overflow-hidden">
-                {userOptions.map(u => (
-                  <button key={u.id} type="button"
-                    className="w-full text-left px-3 py-2 text-xs hover:bg-gray-50 border-b border-gray-100 last:border-0"
-                    onClick={() => { setForm(p => ({ ...p, grantee_id: String(u.id) })); setUserSearch(`${u.name} (${u.username})`); setUserOptions([]) }}>
-                    <span className="font-medium">{u.name}</span>
-                    <span className="text-gray-400 ml-2">{u.username} · {u.employee_id}</span>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
+          <UserPicker
+            value={form.grantee_id}
+            display={userDisplay}
+            onChange={(id, disp) => { setForm(p => ({ ...p, grantee_id: id })); setUserDisplay(disp) }}
+            className="flex-1 min-w-40"
+          />
         ) : (
           <select className="input py-1.5 text-sm flex-1" value={form.grantee_id}
             onChange={e => setForm(p => ({ ...p, grantee_id: e.target.value }))}>
@@ -1678,7 +1654,8 @@ function DesignManager({ projectId }: { projectId: number | null }) {
     chart_config: '', cache_ttl_minutes: '30', is_public: false, vector_search_enabled: false,
     vector_top_k: '10', vector_similarity_threshold: '0.50',
     vector_skip_fields: [] as string[],
-    target_schema_ids: [] as number[], target_join_ids: [] as number[]
+    target_schema_ids: [] as number[], target_join_ids: [] as number[],
+    max_rows: '1000',
   })
   const [editTopicId, setEditTopicId] = useState<number | null>(null)
   const [topicForm, setTopicForm] = useState({ name: '', description: '', icon: '', sort_order: '0', form_project_id: undefined as number | undefined })
@@ -1793,6 +1770,7 @@ function DesignManager({ projectId }: { projectId: number | null }) {
         ...designForm,
         topic_id: Number(designForm.topic_id),
         cache_ttl_minutes: Number(designForm.cache_ttl_minutes),
+        max_rows: Number(designForm.max_rows) || 1000,
         vector_top_k: Number(designForm.vector_top_k) || 10,
         vector_similarity_threshold: designForm.vector_similarity_threshold || '0.50',
         vector_skip_fields: JSON.stringify(designForm.vector_skip_fields),
@@ -1825,7 +1803,8 @@ function DesignManager({ projectId }: { projectId: number | null }) {
     chart_config: '', cache_ttl_minutes: '30', is_public: false, vector_search_enabled: false,
     vector_top_k: '10', vector_similarity_threshold: '0.50',
     vector_skip_fields: [] as string[],
-    target_schema_ids: [] as number[], target_join_ids: [] as number[]
+    target_schema_ids: [] as number[], target_join_ids: [] as number[],
+    max_rows: '1000',
   })
 
   return (
@@ -1957,6 +1936,7 @@ function DesignManager({ projectId }: { projectId: number | null }) {
                         is_public: full.is_public === 1, vector_search_enabled: full.vector_search_enabled === 1,
                         vector_top_k: String(full.vector_top_k ?? 10),
                         vector_similarity_threshold: String(full.vector_similarity_threshold ?? '0.50'),
+                        max_rows: String(full.max_rows ?? full.MAX_ROWS ?? 1000),
                         vector_skip_fields: full.vector_skip_fields
                           ? (typeof full.vector_skip_fields === 'string' ? JSON.parse(full.vector_skip_fields) : full.vector_skip_fields)
                           : [],
@@ -2006,10 +1986,18 @@ function DesignManager({ projectId }: { projectId: number | null }) {
                   translating={designTranslating}
                 />
               </div>
-              <div>
-                <label className="text-xs text-gray-400 mb-1 block">快取時間（分鐘）</label>
-                <input className="input py-1.5 text-sm" type="number" value={designForm.cache_ttl_minutes}
-                  onChange={e => setDesignForm(p => ({ ...p, cache_ttl_minutes: e.target.value }))} />
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-gray-400 mb-1 block">快取時間（分鐘）</label>
+                  <input className="input py-1.5 text-sm" type="number" value={designForm.cache_ttl_minutes}
+                    onChange={e => setDesignForm(p => ({ ...p, cache_ttl_minutes: e.target.value }))} />
+                </div>
+                <div>
+                  <label className="text-xs text-gray-400 mb-1 block">最大回傳筆數</label>
+                  <input className="input py-1.5 text-sm" type="number" min={1} max={100000}
+                    value={designForm.max_rows}
+                    onChange={e => setDesignForm(p => ({ ...p, max_rows: e.target.value }))} />
+                </div>
               </div>
               <div className="flex items-center gap-4 pt-5">
                 <label className="flex items-center gap-2 text-xs text-gray-500 cursor-pointer">

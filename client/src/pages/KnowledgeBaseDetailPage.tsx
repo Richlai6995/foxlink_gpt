@@ -10,6 +10,7 @@ import { useTranslation } from 'react-i18next'
 import api from '../lib/api'
 import { useAuth } from '../context/AuthContext'
 import TranslationFields, { type TranslationData } from '../components/common/TranslationFields'
+import UserPicker from '../components/common/UserPicker'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -23,7 +24,7 @@ interface KnowledgeBase {
   parse_mode: string | null
   is_public: number; public_status: string
   doc_count: number; chunk_count: number; total_size_bytes: number
-  creator_id: number; creator_name: string; is_owner: boolean
+  creator_id: number; creator_name: string; is_owner: boolean; can_edit: boolean
   created_at: string; updated_at: string
 }
 
@@ -188,7 +189,7 @@ export default function KnowledgeBaseDetailPage() {
             translateUrl={`/kb/${kb.id}/translate`}
             hasDescription
           />
-          {(kb.is_owner || isAdmin) && (
+          {(kb.can_edit || isAdmin) && (
             <div className="flex items-center gap-3">
               <button
                 onClick={saveTranslation}
@@ -224,8 +225,8 @@ export default function KnowledgeBaseDetailPage() {
 
         {/* Tab content */}
         <div className="bg-white border border-slate-200 rounded-xl -mt-4 rounded-t-none border-t-0">
-          {tab === 'docs'     && <DocumentsTab kb={kb} onRefresh={loadKb} isOwner={kb.is_owner || isAdmin} />}
-          {tab === 'settings' && <SettingsTab  kb={kb} onSaved={loadKb} isOwner={kb.is_owner || isAdmin} />}
+          {tab === 'docs'     && <DocumentsTab kb={kb} onRefresh={loadKb} isOwner={kb.can_edit || isAdmin} />}
+          {tab === 'settings' && <SettingsTab  kb={kb} onSaved={loadKb} isOwner={kb.can_edit || isAdmin} />}
           {tab === 'share'    && <ShareTab     kb={kb} isOwner={kb.is_owner || isAdmin} />}
           {tab === 'search'   && <SearchTab    kb={kb} />}
           {tab === 'history'  && <QueryHistoryTab kbId={kb.id} />}
@@ -784,11 +785,11 @@ function ShareTab({ kb, isOwner }: { kb: KnowledgeBase; isOwner: boolean }) {
   const [grants, setGrants]       = useState<Grant[]>([])
   const [loading, setLoading]     = useState(true)
   const [orgs, setOrgs]           = useState<{ depts: OrgOption[]; profit_centers: OrgOption[]; org_sections: OrgOption[]; org_groups: OrgOption[] }>({ depts: [], profit_centers: [], org_sections: [], org_groups: [] })
+  const [roles, setRoles]         = useState<{ id: number; name: string }[]>([])
   const [granteeType, setGranteeType] = useState<string>('user')
   const [granteeId,   setGranteeId]   = useState<string>('')
-  const [userSearch,  setUserSearch]  = useState<string>('')
+  const [userDisplay, setUserDisplay] = useState<string>('')
   const [permission,  setPermission]  = useState<'use' | 'edit'>('use')
-  const [userOptions, setUserOptions] = useState<{ id: number; name: string; username: string; employee_id: string }[]>([])
   const [adding, setAdding]       = useState(false)
   const [msg, setMsg]             = useState('')
   const [requestingPublic, setRequestingPublic] = useState(false)
@@ -796,34 +797,26 @@ function ShareTab({ kb, isOwner }: { kb: KnowledgeBase; isOwner: boolean }) {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const [grantsRes, orgsRes] = await Promise.all([
+      const [grantsRes, orgsRes, rolesRes] = await Promise.all([
         api.get(`/kb/${kb.id}/access`),
         api.get('/kb/orgs'),
+        api.get('/roles'),
       ])
       setGrants(grantsRes.data)
       setOrgs(orgsRes.data)
+      setRoles(rolesRes.data || [])
     } finally { setLoading(false) }
   }, [kb.id])
 
   useEffect(() => { load() }, [load])
 
-  useEffect(() => {
-    if (granteeType !== 'user' || userSearch.length < 1) { setUserOptions([]); return }
-    const timer = setTimeout(async () => {
-      try {
-        const res = await api.get(`/users?search=${encodeURIComponent(userSearch)}`)
-        setUserOptions((res.data || []).slice(0, 10))
-      } catch { setUserOptions([]) }
-    }, 300)
-    return () => clearTimeout(timer)
-  }, [userSearch, granteeType])
 
   const addGrant = async () => {
     if (!granteeId) { setMsg(t('kb.share.granteeRequired')); return }
     setAdding(true); setMsg('')
     try {
       await api.post(`/kb/${kb.id}/access`, { grantee_type: granteeType, grantee_id: granteeId, permission })
-      setGranteeId(''); setUserSearch('')
+      setGranteeId(''); setUserDisplay('')
       await load()
       setMsg(t('kb.share.addGrantOk'))
       setTimeout(() => setMsg(''), 2000)
@@ -871,6 +864,7 @@ function ShareTab({ kb, isOwner }: { kb: KnowledgeBase; isOwner: boolean }) {
   }
 
   const getOrgOptions = (): { id: string; label: string }[] => {
+    if (granteeType === 'role') return roles.map((r) => ({ id: String(r.id), label: r.name }))
     if (granteeType === 'dept') return orgs.depts.map((d) => ({ id: d.code || '', label: `${d.code} ${d.name}` }))
     if (granteeType === 'profit_center') return orgs.profit_centers.map((d) => ({ id: d.code || '', label: `${d.code} ${d.name}` }))
     if (granteeType === 'org_section') return orgs.org_sections.map((d) => ({ id: d.code || '', label: `${d.code} ${d.name}` }))
@@ -912,26 +906,12 @@ function ShareTab({ kb, isOwner }: { kb: KnowledgeBase; isOwner: boolean }) {
             </select>
 
             {granteeType === 'user' ? (
-              <div className="relative flex-1 min-w-48">
-                <input
-                  value={userSearch}
-                  onChange={(e) => { setUserSearch(e.target.value); setGranteeId('') }}
-                  placeholder={t('kb.share.userSearchPlaceholder')}
-                  className="w-full border border-slate-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-                {userOptions.length > 0 && (
-                  <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg z-10 overflow-hidden">
-                    {userOptions.map((u) => (
-                      <button key={u.id} type="button"
-                        className="w-full text-left px-3 py-2 text-sm hover:bg-slate-50 border-b border-slate-100 last:border-0"
-                        onClick={() => { setGranteeId(String(u.id)); setUserSearch(`${u.name} (${u.username})`); setUserOptions([]) }}>
-                        <span className="font-medium">{u.name}</span>
-                        <span className="text-slate-400 ml-2">{u.username} · {u.employee_id}</span>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
+              <UserPicker
+                value={granteeId}
+                display={userDisplay}
+                onChange={(id, disp) => { setGranteeId(id); setUserDisplay(disp) }}
+                className="flex-1 min-w-48"
+              />
             ) : (
               <select value={granteeId} onChange={(e) => setGranteeId(e.target.value)}
                 className="flex-1 border border-slate-300 rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">

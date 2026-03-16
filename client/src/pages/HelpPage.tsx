@@ -141,6 +141,11 @@ const userSections = [
   { id: 'u-research', label: '深度研究', icon: <GitFork size={18} /> },
   { id: 'u-toolbar-toggles', label: '頂端列功能開關', icon: <Zap size={18} /> },
   { id: 'u-budget', label: '使用金額提示', icon: <DollarSign size={18} /> },
+  { id: 'u-ai-bi', label: 'AI 戰情室', icon: <BarChart3 size={18} /> },
+  { id: 'u-ai-bi-query', label: '命名查詢 / 報表範本', icon: <BookMarked size={18} /> },
+  { id: 'u-ai-bi-field', label: 'Schema 欄位選擇器', icon: <Server size={18} /> },
+  { id: 'u-ai-bi-chart', label: '即時圖表建構器', icon: <BarChart3 size={18} /> },
+  { id: 'u-ai-bi-dashboard', label: '儀表板 Dashboard', icon: <Share2 size={18} /> },
 ]
 
 function UserManual() {
@@ -1069,6 +1074,337 @@ function UserManual() {
             ]}
           />
           <NoteBox>金額計算基於 Token 用量乘以各模型定價，若管理員尚未設定模型定價，顯示金額可能為 $0.000，此情況請洽管理員確認。系統管理員帳號不受金額限制，不會顯示此指示器。</NoteBox>
+        </SubSection>
+      </Section>
+
+      {/* ═══════════════════════════════════════════════════ AI 戰情室 */}
+
+      <Section id="u-ai-bi" icon={<BarChart3 size={22} />} iconColor="text-orange-500" title="AI 戰情室">
+        <Para>
+          AI 戰情室是一套以自然語言驅動的企業 ERP 資料查詢與視覺化平台，
+          讓您無需懂 SQL 就能直接對 Oracle ERP 資料庫提問，即時取得報表、圖表，
+          並可儲存常用查詢組合成彈性的 BI 儀表板。
+        </Para>
+
+        <Table
+          headers={['功能模組', '說明']}
+          rows={[
+            ['自然語言查詢', '用中文提問，系統自動生成並執行 SQL，回傳結果與圖表'],
+            ['命名查詢 / 報表範本', '儲存常用問題為具名範本，可定義查詢參數與圖表設定'],
+            ['Schema 欄位選擇器', '從 ERP 資料表欄位清單選取並插入到提問輸入框'],
+            ['即時圖表建構器', '查詢結果出來後，自由拖拉設定長條圖、折線圖、圓餅圖等'],
+            ['儀表板 Board', '將多個命名查詢的圖表組合成一個可拖拉排版的儀表板'],
+            ['查詢參數化', '命名查詢可定義填值欄位（下拉選單、日期範圍等），執行時彈窗填入'],
+            ['分享', '命名查詢與儀表板可分享給指定使用者、角色、部門或組織單位'],
+          ]}
+        />
+
+        <SubSection title="進入 AI 戰情室">
+          <div className="space-y-3">
+            <StepItem num={1} title="點選左側邊欄的「AI 戰情室」圖示" desc="系統會導向 /dashboard 頁面，左側會顯示可用的主題（Topic）與查詢任務（Design）" />
+            <StepItem num={2} title="從左側選擇主題 → 查詢任務" desc="主題是大分類（例：生產異常），任務是具體查詢範圍（例：各廠異常工單統計）" />
+            <StepItem num={3} title="在輸入框輸入自然語言問題" desc="例：「請統計本月各廠區不良工單數量，依工廠由高到低排序」" />
+            <StepItem num={4} title="按 Enter 或點擊發送按鈕" desc="系統會顯示進度，依序完成向量語意搜尋 → SQL 生成 → ERP 查詢 → 結果呈現" />
+          </div>
+          <TipBox>
+            第一次使用請確認帳號已獲得「使用 AI 戰情室」權限，若未顯示入口請洽系統管理員開通。
+          </TipBox>
+        </SubSection>
+
+        <SubSection title="查詢結果解讀">
+          <Para>查詢完成後，主區域會顯示：</Para>
+          <Table
+            headers={['元素', '說明']}
+            rows={[
+              ['圖表頁籤', '若 Design 有預設圖表設定，會自動呈現 ECharts 視覺化圖表'],
+              ['表格頁籤', '原始查詢結果，欄位標題使用中文說明，支援分頁'],
+              ['資料筆數', '右上角顯示總筆數（最多回傳 500 筆）'],
+              ['快取標示', '若顯示「快取命中」代表此問題結果來自快取，回應速度更快'],
+            ]}
+          />
+        </SubSection>
+
+        <SubSection title="模型選擇">
+          <Para>輸入框下方可切換 AI 模型，不同模型影響 SQL 生成品質與回應速度。建議使用預設模型（Gemini Pro），
+            複雜查詢可嘗試切換至 Flash（速度較快但精準度略低）。</Para>
+        </SubSection>
+
+        <SubSection title="語意搜尋參數（進階）">
+          <Para>若查詢任務已啟用向量語意搜尋，輸入框下方會出現「向量搜尋參數」展開區，可調整：</Para>
+          <Table
+            headers={['參數', '說明', '預設值']}
+            rows={[
+              ['Top K', '取語意最相近的 K 筆向量資料補充至 AI 提示詞', '10'],
+              ['相似度閾值', '低於此分數的結果不納入（0~1，越大越嚴格）', '0.50'],
+            ]}
+          />
+          <NoteBox>
+            通常無需調整，使用設計師設定的預設值即可。若查詢結果不符預期，可嘗試降低閾值至 0.30~0.40。
+          </NoteBox>
+        </SubSection>
+      </Section>
+
+      {/* ═══════════════════════════════════════════════════ 命名查詢 / 報表範本 */}
+
+      <Section id="u-ai-bi-query" icon={<BookMarked size={22} />} iconColor="text-blue-600" title="命名查詢 / 報表範本">
+        <Para>
+          命名查詢讓您把常用的自然語言問題、SQL、圖表設定存下來，
+          下次只需從「我的查詢」清單一鍵載入，省去重複輸入。
+          進階功能可定義查詢參數，執行前彈窗讓您輸入工廠代碼、日期範圍等條件，
+          讓同一份範本適用不同情境。
+        </Para>
+
+        <SubSection title="儲存目前查詢">
+          <div className="space-y-3">
+            <StepItem num={1} title="執行查詢並取得結果" desc="確認查詢結果正確後，頂端工具列的「💾 儲存」按鈕會亮起" />
+            <StepItem num={2} title="點擊「💾 儲存」按鈕" desc="開啟「儲存為命名查詢」對話框" />
+            <StepItem num={3} title="填寫基本資訊" desc="輸入名稱（必填）、說明（選填）、分類（選填，支援自由輸入或從已有分類選取）" />
+            <StepItem num={4} title="勾選「載入後自動執行」（選用）" desc="勾選後，下次載入此查詢時系統會立即執行，不需再按發送" />
+            <StepItem num={5} title="（選用）切換至「查詢參數」頁籤定義參數" desc="詳見下方「查詢參數設定」說明" />
+            <StepItem num={6} title="點擊「儲存」完成" desc="查詢範本儲存成功後，可在左側「我的查詢」頁籤看到" />
+          </div>
+          <NoteBox>
+            儲存時系統會自動帶入目前生成的 SQL（鎖定 SQL）、圖表設定及自然語言問題。
+            下次執行時直接使用鎖定的 SQL，不會重新呼叫 AI，速度更快也更穩定。
+          </NoteBox>
+        </SubSection>
+
+        <SubSection title="載入並執行命名查詢">
+          <div className="space-y-3">
+            <StepItem num={1} title="點擊左側邊欄的「我的查詢」頁籤（書籤圖示）" desc="顯示所有您建立或他人分享給您的命名查詢，依分類分組展示" />
+            <StepItem num={2} title="點擊要載入的查詢名稱" desc="系統自動切換至對應 Design，並將問題帶入輸入框" />
+            <StepItem num={3} title="若查詢有定義參數 → 自動彈出參數填值對話框" desc="填入工廠代碼、日期範圍等條件後點「執行查詢」" />
+            <StepItem num={4} title="查詢執行，結果與圖表呈現" desc="若有設定圖表，會直接顯示圖表頁籤" />
+          </div>
+          <TipBox>
+            滑鼠移到查詢項目上會出現「編輯」「分享」「刪除」三個操作按鈕，可快速管理查詢。
+          </TipBox>
+        </SubSection>
+
+        <SubSection title="編輯命名查詢">
+          <Para>
+            在「我的查詢」清單中，滑鼠移到查詢名稱上，點擊「編輯」即可修改名稱、說明、分類、鎖定 SQL 及參數定義。
+            也可以直接修改鎖定 SQL 欄位中的 SQL 語法，儲存後立即生效。
+          </Para>
+        </SubSection>
+
+        <SubSection title="查詢參數設定">
+          <Para>
+            在儲存或編輯命名查詢時，切換至「查詢參數」頁籤可新增執行前填值的參數：
+          </Para>
+          <Table
+            headers={['欄位', '說明']}
+            rows={[
+              ['參數標籤（中文）', '顯示在填值對話框的標籤文字，例如「工廠代碼」'],
+              ['輸入類型', '單選下拉、多選下拉、日期範圍、數值範圍、自由輸入'],
+              ['來源 Schema / 來源欄位', '指定從哪個資料表的哪個欄位自動拉取可選值（執行時會查詢 DISTINCT 值）'],
+              ['注入方式', 'WHERE IN / BETWEEN / LIKE / 直接取代文字 — 決定參數如何嵌入到 SQL'],
+              ['SQL Placeholder', 'SQL 中對應的替換標記，例如 :FACTORY_CODE'],
+              ['必填', '勾選後，若未填值則阻止執行'],
+            ]}
+          />
+          <TipBox>
+            日期範圍類型的參數支援「今天」「本月」「上月」快捷按鈕，使用者不必手動輸入。
+            多選下拉會生成 IN (val1, val2, ...) 語法注入 SQL。
+          </TipBox>
+        </SubSection>
+
+        <SubSection title="分享命名查詢">
+          <div className="space-y-3">
+            <StepItem num={1} title="滑鼠移到查詢名稱，點擊「分享」圖示" desc="開啟分享設定對話框" />
+            <StepItem num={2} title="選擇分享對象類型" desc="可選：使用者 / 角色 / 部門 / 利潤中心 / 事業處 / 事業群" />
+            <StepItem num={3} title="搜尋並選取對象" desc="輸入姓名、帳號或工號搜尋使用者；部門等類型直接從下拉清單選擇" />
+            <StepItem num={4} title="設定權限等級後點「+ 新增」" />
+          </div>
+          <Table
+            headers={['權限等級', '可做的事']}
+            rows={[
+              ['使用權限', '可載入執行此查詢、另存為自己的版本，但無法修改原始設定'],
+              ['管理權限', '可修改查詢設定、管理分享名單（等同擁有者）'],
+            ]}
+          />
+          <NoteBox>
+            被分享使用者若想修改查詢，點「編輯」時系統會提示「另存為自己的版本」而非覆蓋原版，避免影響其他使用者。
+          </NoteBox>
+        </SubSection>
+      </Section>
+
+      {/* ═══════════════════════════════════════════════════ Schema 欄位選擇器 */}
+
+      <Section id="u-ai-bi-field" icon={<Server size={22} />} iconColor="text-violet-500" title="Schema 欄位選擇器">
+        <Para>
+          Schema 欄位選擇器讓您直接從目前查詢任務的資料表欄位清單中勾選欄位，
+          點一下即可將欄位名稱或中文說明插入到輸入框的游標位置，
+          不必記住英文欄位名稱，提問更精確。
+        </Para>
+
+        <SubSection title="開啟欄位選擇器">
+          <div className="space-y-3">
+            <StepItem num={1} title="先從左側選擇一個查詢任務（Design）" desc="欄位清單會根據該任務綁定的 Schema 資料表自動載入" />
+            <StepItem num={2} title="點擊頂端工具列的「⊞ 欄位」按鈕" desc="右側欄位名稱旁出現 Popover 浮動面板" />
+            <StepItem num={3} title="在搜尋框輸入關鍵字篩選欄位（選用）" desc="支援中文說明或英文欄位名稱搜尋" />
+            <StepItem num={4} title="勾選一或多個欄位" desc="已勾選的欄位顯示藍底，底部出現「插入游標位置」按鈕" />
+            <StepItem num={5} title="選擇插入方式" desc="「中文說明」插入欄位的業務語意名稱（推薦）；「欄位名稱」插入英文欄位代碼（適合需要精確指定時）" />
+            <StepItem num={6} title="點擊「插入游標位置」" desc="所選欄位以頓號連接，插入到輸入框目前的游標位置" />
+          </div>
+          <TipBox>
+            插入後可直接接著輸入問題，例如：先插入「工廠代碼、不良數量」後，加上「，請統計本月各廠的合計不良數量由高到低排序」。
+          </TipBox>
+        </SubSection>
+
+        <SubSection title="欄位清單說明">
+          <Table
+            headers={['欄位資訊', '說明']}
+            rows={[
+              ['中文說明（左側）', '業務語意名稱，以當前 UI 語言（中 / 英 / 越）顯示'],
+              ['英文代碼（右側灰色）', '資料庫實際欄位名稱（column_name）'],
+              ['資料表分組', '欄位依所屬資料表分組，標題顯示資料表顯示名稱'],
+            ]}
+          />
+        </SubSection>
+      </Section>
+
+      {/* ═══════════════════════════════════════════════════ 即時圖表建構器 */}
+
+      <Section id="u-ai-bi-chart" icon={<BarChart3 size={22} />} iconColor="text-purple-600" title="即時圖表建構器">
+        <Para>
+          查詢出結果後，您可以使用圖表建構器即時設定圖表類型與欄位對應，
+          系統在瀏覽器端直接聚合計算，不需要重新查詢 ERP，切換維度幾乎即時。
+          設定完成後可儲存到命名查詢，下次直接呈現您自訂的圖表。
+        </Para>
+
+        <SubSection title="開啟圖表建構器">
+          <div className="space-y-3">
+            <StepItem num={1} title="執行查詢並取得結果" desc="有結果後，頂端工具列的「📐 圖表」按鈕才會可用" />
+            <StepItem num={2} title="點擊「📐 圖表」按鈕" desc="右側滑出圖表建構器面板，查詢結果和圖表左右並排顯示" />
+          </div>
+        </SubSection>
+
+        <SubSection title="設定圖表">
+          <Table
+            headers={['設定項目', '說明']}
+            rows={[
+              ['圖表類型', '📊 長條圖 / 📈 折線圖 / 🍕 圓餅圖 / ⚫ 散佈圖 / 🕸 雷達圖，點擊圖示切換'],
+              ['X 軸 / 類別欄位', '選擇要作為橫軸（或圓餅標籤）的欄位，通常是代碼類欄位'],
+              ['Y 軸 / 數值欄位', '選擇要聚合計算的數值欄位'],
+              ['聚合函數', 'SUM（加總）、COUNT（計數）、AVG（平均）、MAX（最大值）、MIN（最小值）、COUNT_DISTINCT（相異計數）'],
+              ['顯示前幾筆', '依 Y 軸值由大到小排序後，取前 N 筆，預設 20 筆'],
+              ['圖表標題', '顯示在圖表上方的標題文字'],
+            ]}
+          />
+          <TipBox>
+            聚合計算在瀏覽器端執行（Client-side），不需重跑 SQL。切換不同欄位或聚合方式後，點「即時預覽」即可看到效果。
+          </TipBox>
+        </SubSection>
+
+        <SubSection title="樣式選項">
+          <Table
+            headers={['圖表類型', '可用樣式']}
+            rows={[
+              ['長條圖', '水平長條（Horizontal）'],
+              ['折線圖', '圓滑曲線（Smooth）、面積填滿（Area）'],
+              ['圓餅圖', '甜甜圈樣式（Donut）'],
+              ['全部', '顯示數值標籤（Show Label）'],
+            ]}
+          />
+        </SubSection>
+
+        <SubSection title="多圖表">
+          <Para>
+            同一份查詢結果可以加入多張圖表，分別設定不同的欄位組合。
+            點擊頂部的「+ 新增」可加入第二、第三張圖表，
+            在結果區以頁籤切換顯示。
+          </Para>
+          <div className="space-y-3">
+            <StepItem num={1} title="設定好第一張圖表後點「+ 新增」" />
+            <StepItem num={2} title="切換到新頁籤，設定另一種欄位組合" desc="例如：第一張長條圖看「各廠異常數量」，第二張折線圖看「每日趨勢」" />
+            <StepItem num={3} title="點「儲存圖表設定」寫回命名查詢" />
+          </div>
+        </SubSection>
+
+        <SubSection title="儲存圖表設定">
+          <Para>
+            點擊面板右上角的「儲存圖表設定」，系統會將目前所有圖表設定寫入命名查詢（需已儲存命名查詢）。
+            下次載入此命名查詢並執行後，圖表會自動呈現您設定好的樣式。
+          </Para>
+        </SubSection>
+      </Section>
+
+      {/* ═══════════════════════════════════════════════════ 儀表板 Dashboard */}
+
+      <Section id="u-ai-bi-dashboard" icon={<Share2 size={22} />} iconColor="text-teal-600" title="儀表板 Dashboard Board">
+        <Para>
+          儀表板讓您把多個命名查詢的圖表組合成一個總覽頁面，
+          類似 Power BI 的 Report Page，每個圖表格（Tile）獨立執行查詢，
+          可拖拉調整位置與大小，分享給指定同仁瀏覽。
+        </Para>
+
+        <SubSection title="進入儀表板">
+          <Para>
+            在 AI 戰情室頂端工具列點擊「⊞」儀表板圖示，或直接訪問 <code className="bg-slate-100 px-1.5 py-0.5 rounded text-xs">/dashboard/boards</code>，
+            即可進入儀表板管理頁面。
+          </Para>
+        </SubSection>
+
+        <SubSection title="建立新儀表板">
+          <div className="space-y-3">
+            <StepItem num={1} title="點擊左側邊欄下方的「+ 新增儀表板」" />
+            <StepItem num={2} title="輸入儀表板名稱（必填）、說明、分類" desc="分類用來在左側清單分組，例如「生產」「品質」「人力」" />
+            <StepItem num={3} title="點「建立」完成" desc="新儀表板建立後自動選中，進入空白畫布" />
+          </div>
+        </SubSection>
+
+        <SubSection title="加入圖表 Tile">
+          <div className="space-y-3">
+            <StepItem num={1} title="點擊工具列「✏ 編輯佈局」進入編輯模式" />
+            <StepItem num={2} title="從上方「+ 加入查詢...」下拉選擇一個命名查詢" desc="系統會在畫布加入一個新的圖表格，預設 6×4 格大小" />
+            <StepItem num={3} title="重複加入多個命名查詢的圖表" />
+            <StepItem num={4} title="拖拉 Tile 標題列調整位置" desc="藍色手把（標題列）可拖曳移動" />
+            <StepItem num={5} title="拖拉 Tile 右下角調整大小" />
+            <StepItem num={6} title="點「💾 儲存佈局」完成排版" />
+          </div>
+          <NoteBox>
+            加入的命名查詢若有定義查詢參數，執行各 Tile 時會各自獨立彈出填值對話框，
+            參數設定不會互相影響。
+          </NoteBox>
+        </SubSection>
+
+        <SubSection title="執行與重新整理">
+          <Table
+            headers={['操作', '說明']}
+            rows={[
+              ['點擊單一 Tile 的 🔄 按鈕', '重新執行該 Tile 的命名查詢並更新圖表'],
+              ['點擊工具列「🔄 重新整理全部」', '同時觸發所有 Tile 重新查詢（平行執行）'],
+              ['首次進入儀表板', 'Tile 預設不自動執行，需手動點擊「點擊執行查詢」'],
+              ['命名查詢有設定「載入後自動執行」', '加入 Dashboard 後該 Tile 進入頁面時自動執行'],
+            ]}
+          />
+        </SubSection>
+
+        <SubSection title="分享儀表板">
+          <div className="space-y-3">
+            <StepItem num={1} title="點擊工具列「🔗 分享」按鈕" desc="開啟儀表板分享設定對話框" />
+            <StepItem num={2} title="依照命名查詢分享的相同流程，選擇對象類型與搜尋對象" />
+            <StepItem num={3} title="設定「使用權限」或「管理權限」後點「+ 新增」" />
+          </div>
+          <Table
+            headers={['權限', '說明']}
+            rows={[
+              ['使用權限', '可瀏覽、執行儀表板內所有圖表；可另存為自己的版本'],
+              ['管理權限', '可修改儀表板佈局與分享名單'],
+            ]}
+          />
+          <TipBox>
+            若儀表板包含的命名查詢未分享給對象，對象執行時會出現「查詢無法存取」錯誤。
+            建議儀表板與其包含的命名查詢共享給相同對象。
+          </TipBox>
+        </SubSection>
+
+        <SubSection title="複製儀表板">
+          <Para>
+            對被分享的儀表板，您可以選擇「另存為自己的版本」（Clone）取得一份獨立副本，
+            修改後不影響原始儀表板。Clone 的操作入口在儀表板選項選單中。
+          </Para>
         </SubSection>
       </Section>
     </div>

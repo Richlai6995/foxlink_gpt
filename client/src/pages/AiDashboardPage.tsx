@@ -10,7 +10,8 @@ import { useState, useEffect, useRef } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
   BarChart3, ChevronRight, ChevronDown, Send, RefreshCw,
-  Table, BarChart2, Settings2, Code, ArrowLeft, Layers, History, Trash2, X
+  Table, BarChart2, Settings2, Code, ArrowLeft, Layers, History, Trash2, X,
+  Save, BookMarked, Columns, LayoutDashboard, Share2, Pencil, Download
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useAuth } from '../context/AuthContext'
@@ -18,9 +19,18 @@ import api from '../lib/api'
 import AiChart from '../components/dashboard/AiChart'
 import ResultTable from '../components/dashboard/ResultTable'
 import DesignerPanel from '../components/dashboard/DesignerPanel'
-import type { AiSelectTopic, AiSelectDesign, AiQueryResult, AiChartConfig, AiChartDef, AiDashboardHistory } from '../types'
+import SchemaFieldPicker from '../components/dashboard/SchemaFieldPicker'
+import ChartBuilder from '../components/dashboard/ChartBuilder'
+import SavedQueryModal from '../components/dashboard/SavedQueryModal'
+import QueryParamsModal from '../components/dashboard/QueryParamsModal'
+import ShareModal from '../components/dashboard/ShareModal'
+import type {
+  AiSelectTopic, AiSelectDesign, AiQueryResult, AiChartConfig, AiChartDef,
+  AiDashboardHistory, AiSavedQuery, AiQueryParameter
+} from '../types'
 
 type ViewMode = 'chart' | 'table'
+type SidebarTab = 'topics' | 'history' | 'saved'
 
 export default function AiDashboardPage() {
   const { isAdmin, canUseDashboard, canDesignAiSelect } = useAuth()
@@ -53,7 +63,7 @@ export default function AiDashboardPage() {
   const [activeChartIdx, setActiveChartIdx] = useState(0)
 
   // 歷史記錄
-  const [sidebarTab, setSidebarTab] = useState<'topics' | 'history'>('topics')
+  const [sidebarTab, setSidebarTab] = useState<SidebarTab>('topics')
   const [history, setHistory] = useState<AiDashboardHistory[]>([])
   const [historyLoading, setHistoryLoading] = useState(false)
   const [expandedHistory, setExpandedHistory] = useState<number | null>(null)
@@ -100,6 +110,28 @@ export default function AiDashboardPage() {
   const [devVectorResults, setDevVectorResults] = useState<any[]>([])
 
   const abortRef = useRef<AbortController | null>(null)
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null)
+
+  // ── 命名查詢 / 報表 ──────────────────────────────────────────────────────
+  const [savedQueries, setSavedQueries] = useState<AiSavedQuery[]>([])
+  const [savedLoading, setSavedLoading] = useState(false)
+  const [showSaveModal, setShowSaveModal] = useState(false)
+  const [editingQuery, setEditingQuery] = useState<AiSavedQuery | null>(null)
+  const [showChartBuilder, setShowChartBuilder] = useState(false)
+  const [showFieldPicker, setShowFieldPicker] = useState(false)
+  const [shareTarget, setShareTarget] = useState<{ type: 'query' | 'dashboard'; id: number; name: string } | null>(null)
+  // 即將執行的命名查詢（需先填參數）
+  const [pendingQuery, setPendingQuery] = useState<AiSavedQuery | null>(null)
+  // 使用者自訂的 chart_config（覆蓋 design 預設）
+  const [userChartConfig, setUserChartConfig] = useState<AiChartConfig | null>(null)
+
+  const loadSavedQueries = async () => {
+    setSavedLoading(true)
+    try { setSavedQueries((await api.get('/dashboard/saved-queries')).data) }
+    catch { } finally { setSavedLoading(false) }
+  }
+
+  useEffect(() => { if (sidebarTab === 'saved') loadSavedQueries() }, [sidebarTab])
 
   useEffect(() => {
     if (!canUseDashboard && !isAdmin) {
@@ -147,6 +179,8 @@ export default function AiDashboardPage() {
     setDevDuration(null)
     setDevVectorResults([])
     setQuestion('')
+    setUserChartConfig(null)
+    setShowChartBuilder(false)
     // 帶入任務設定的向量搜尋預設值
     setAdvTopK(d.vector_top_k != null ? String(d.vector_top_k) : '')
     setAdvThreshold(d.vector_similarity_threshold != null ? String(d.vector_similarity_threshold) : '')
@@ -244,8 +278,29 @@ export default function AiDashboardPage() {
   }
 
   // Re-implement with proper SSE event parsing
-  const handleQuerySse = async () => {
-    if (!selectedDesign || !question.trim() || loading) return
+  /** 從參數值組出問句前綴，例：「計畫名稱 20250506，廠別 TW1、TW2，」 */
+  function buildParamPrefix(params: AiQueryParameter[], values: Record<string, string | string[]>): string {
+    const parts = params.map(p => {
+      const val = values[p.id]
+      const label = p.label_zh
+      if (!val || (Array.isArray(val) && val.length === 0) || val === '') return null
+      if (Array.isArray(val)) return `${label} ${val.join('、')}`
+      if (p.input_type === 'date_range') {
+        const [s, e] = (val as string).split('|')
+        return `${label} ${s} 到 ${e}`
+      }
+      if (p.input_type === 'number_range') {
+        const [min, max] = (val as string).split('|')
+        return `${label} ${min} 到 ${max}`
+      }
+      return `${label} ${val}`
+    }).filter(Boolean)
+    return parts.length ? parts.join('，') + '，' : ''
+  }
+
+  const handleQuerySse = async (overrideQuestion?: string) => {
+    const q = overrideQuestion ?? question
+    if (!selectedDesign || !q.trim() || loading) return
     setLoading(true)
     setStatusMsg('準備中...')
     setResult(null)
@@ -268,7 +323,7 @@ export default function AiDashboardPage() {
         },
         body: JSON.stringify({
           design_id: selectedDesign.id,
-          question: question.trim(),
+          question: q.trim(),
           lang: i18n.language,
           ...(selectedModelKey ? { model_key: selectedModelKey } : {}),
           ...(advTopK ? { vector_top_k: Number(advTopK) } : {}),
@@ -340,9 +395,40 @@ export default function AiDashboardPage() {
     }
   }
 
-  const chartConfig = result?.chart_config as AiChartConfig | null
-  const charts = chartConfig?.charts || []
+  // userChartConfig 覆蓋 result.chart_config
+  const effectiveChartConfig = (userChartConfig || result?.chart_config) as AiChartConfig | null
+  const charts = effectiveChartConfig?.charts || []
   const activeChart: AiChartDef | undefined = charts[activeChartIdx]
+
+  /** 載入命名查詢（帶 pinned_sql 直接執行，或開啟參數填寫 modal） */
+  const loadSavedQuery = async (sq: AiSavedQuery) => {
+    // 找對應 design
+    const did = sq.design_id
+    if (did) {
+      for (const topic of topics) {
+        const d = topic.designs?.find(d => d.id === did)
+        if (d) { selectDesign(d); break }
+      }
+    }
+    // 恢復 chart config
+    if (sq.chart_config) {
+      const cfg = typeof sq.chart_config === 'string' ? JSON.parse(sq.chart_config) : sq.chart_config
+      setUserChartConfig(cfg)
+    }
+    // 有參數 → 先開 modal
+    let params: AiQueryParameter[] = []
+    try { params = JSON.parse(sq.parameters_schema as any || '[]') || [] } catch { }
+    if (params.length > 0) {
+      setPendingQuery(sq)
+    } else {
+      // 直接執行
+      setQuestion(sq.question || '')
+      if (sq.pinned_sql && sq.auto_run) {
+        // TODO: trigger query with pinned_sql directly (future enhancement)
+      }
+    }
+    await api.patch(`/dashboard/saved-queries/${sq.id}/last-run`).catch(() => {})
+  }
 
   if (showDesigner && (canDesignAiSelect || isAdmin)) {
     return (
@@ -382,6 +468,10 @@ export default function AiDashboardPage() {
           <button onClick={() => setSidebarTab('topics')}
             className={`flex-1 flex items-center justify-center gap-1 py-2 text-xs transition ${sidebarTab === 'topics' ? 'text-orange-600 border-b-2 border-orange-400 font-medium' : 'text-gray-400 hover:text-gray-700'}`}>
             <Layers size={11} /> {t('aiDash.tabQuery')}
+          </button>
+          <button onClick={() => setSidebarTab('saved')}
+            className={`flex-1 flex items-center justify-center gap-1 py-2 text-xs transition ${sidebarTab === 'saved' ? 'text-orange-600 border-b-2 border-orange-400 font-medium' : 'text-gray-400 hover:text-gray-700'}`}>
+            <BookMarked size={11} /> {t('aiDash.tabSaved')}
           </button>
           <button onClick={() => setSidebarTab('history')}
             className={`flex-1 flex items-center justify-center gap-1 py-2 text-xs transition ${sidebarTab === 'history' ? 'text-orange-600 border-b-2 border-orange-400 font-medium' : 'text-gray-400 hover:text-gray-700'}`}>
@@ -435,6 +525,77 @@ export default function AiDashboardPage() {
                 )}
               </div>
             ))}
+          </div>
+        )}
+
+        {/* 我的查詢 */}
+        {sidebarTab === 'saved' && (
+          <div className="flex-1 overflow-y-auto flex flex-col">
+            <div className="flex items-center justify-between px-3 py-2 border-b border-gray-100">
+              <span className="text-xs text-gray-400">{savedQueries.length} 個查詢</span>
+              <button onClick={loadSavedQueries} className="text-gray-400 hover:text-blue-500">
+                <RefreshCw size={11} />
+              </button>
+            </div>
+            {savedLoading && <p className="text-xs text-gray-400 text-center py-4">載入中...</p>}
+            {!savedLoading && savedQueries.length === 0 && (
+              <p className="text-xs text-gray-400 text-center py-8 px-3">
+                尚無儲存的查詢<br />
+                <span className="text-gray-300">執行查詢後點上方💾按鈕儲存</span>
+              </p>
+            )}
+            {/* 按 category 分組 */}
+            {!savedLoading && (() => {
+              const grouped = savedQueries.reduce<Record<string, AiSavedQuery[]>>((acc, q) => {
+                const cat = q.category || '未分類'
+                ;(acc[cat] = acc[cat] || []).push(q)
+                return acc
+              }, {})
+              return Object.entries(grouped).map(([cat, qs]) => (
+                <div key={cat} className="mb-2">
+                  <div className="px-3 py-1 text-[10px] font-semibold text-gray-400 uppercase tracking-wide bg-gray-50 sticky top-0">
+                    {cat}
+                  </div>
+                  {qs.map(q => (
+                    <div key={q.id} className="flex items-center gap-1 border-b border-gray-50 pr-1 hover:bg-orange-50 transition group">
+                      <button
+                        onClick={() => loadSavedQuery(q)}
+                        className="flex-1 text-left px-3 py-2 min-w-0"
+                      >
+                        <p className="text-xs text-gray-700 truncate font-medium">{localName(q)}</p>
+                        <p className="text-[10px] text-gray-400 truncate">{localName({ name: q.design_name || '', name_en: q.design_name_en, name_vi: q.design_name_vi }) || '—'}</p>
+                      </button>
+                      {/* 常駐操作 icons — 僅 can_manage 才顯示 */}
+                      {!!q.can_manage && (
+                        <div className="flex items-center gap-0.5 flex-shrink-0">
+                          <button
+                            title="編輯"
+                            onClick={e => { e.stopPropagation(); setEditingQuery(q); setShowSaveModal(true) }}
+                            className="p-1 text-gray-300 hover:text-blue-500 rounded transition"
+                          ><Pencil size={11} /></button>
+                          <button
+                            title="分享"
+                            onClick={e => { e.stopPropagation(); setShareTarget({ type: 'query', id: q.id, name: q.name }) }}
+                            className="p-1 text-gray-300 hover:text-blue-500 rounded transition"
+                          ><Share2 size={11} /></button>
+                          <button
+                            title="刪除"
+                            onClick={async e => {
+                              e.stopPropagation()
+                              if (confirm(`刪除「${q.name}」?`)) {
+                                await api.delete(`/dashboard/saved-queries/${q.id}`)
+                                loadSavedQueries()
+                              }
+                            }}
+                            className="p-1 text-gray-300 hover:text-red-400 rounded transition"
+                          ><Trash2 size={11} /></button>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              ))
+            })()}
           </div>
         )}
 
@@ -531,7 +692,72 @@ export default function AiDashboardPage() {
               <span className="text-sm text-gray-400">{t('aiDash.selectDesign')}</span>
             )}
           </div>
-          {(canDesignAiSelect || isAdmin) && selectedDesign && (
+          {selectedDesign && (
+            <div className="flex items-center gap-1.5">
+              {/* 欄位選擇 */}
+              <div className="relative">
+                <button
+                  onClick={() => setShowFieldPicker(v => !v)}
+                  title="插入 Schema 欄位到游標位置"
+                  className={`flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg transition
+                    ${showFieldPicker ? 'bg-blue-100 text-blue-700' : 'text-gray-400 hover:text-gray-700 hover:bg-gray-50'}`}
+                >
+                  <Columns size={12} /> {t('aiDash.fp.btnLabel')}
+                </button>
+                {showFieldPicker && selectedDesign && (
+                  <SchemaFieldPicker
+                    designId={selectedDesign.id!}
+                    textareaRef={textareaRef}
+                    onInsert={setQuestion}
+                    onClose={() => setShowFieldPicker(false)}
+                  />
+                )}
+              </div>
+
+              {/* 圖表建構器 */}
+              {result && (
+                <button
+                  onClick={() => setShowChartBuilder(v => !v)}
+                  title="即時圖表建構器"
+                  className={`flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg transition
+                    ${showChartBuilder ? 'bg-purple-100 text-purple-700' : 'text-gray-400 hover:text-gray-700 hover:bg-gray-50'}`}
+                >
+                  <BarChart3 size={12} /> 圖表
+                </button>
+              )}
+
+              {/* 儲存查詢 */}
+              {result && (
+                <button
+                  onClick={() => { setEditingQuery(null); setShowSaveModal(true) }}
+                  title="儲存為命名查詢"
+                  className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg text-gray-400 hover:text-blue-600 hover:bg-blue-50 transition"
+                >
+                  <Save size={12} /> 儲存
+                </button>
+              )}
+
+              {/* 儀表板入口 */}
+              <button
+                onClick={() => navigate('/dashboard/boards')}
+                title="儀表板"
+                className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg text-gray-400 hover:text-orange-600 hover:bg-orange-50 transition"
+              >
+                <LayoutDashboard size={12} />
+              </button>
+
+              {/* 開發模式 */}
+              {(canDesignAiSelect || isAdmin) && (
+                <button
+                  onClick={() => setDevMode(v => !v)}
+                  className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg transition ${devMode ? 'bg-gray-200 text-gray-800' : 'text-gray-400 hover:text-gray-700 hover:bg-gray-50'}`}
+                >
+                  <Code size={12} /> {t('aiDash.devMode')}
+                </button>
+              )}
+            </div>
+          )}
+          {!selectedDesign && (canDesignAiSelect || isAdmin) && (
             <button
               onClick={() => setDevMode(v => !v)}
               className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg transition ${devMode ? 'bg-gray-200 text-gray-800' : 'text-gray-400 hover:text-gray-700 hover:bg-gray-50'}`}
@@ -547,6 +773,7 @@ export default function AiDashboardPage() {
             <div className="bg-white border border-gray-200 rounded-2xl p-4">
               <div className="flex gap-3">
                 <textarea
+                  ref={textareaRef}
                   className="flex-1 bg-transparent text-sm text-gray-800 placeholder-gray-400 resize-none outline-none min-h-[60px]"
                   placeholder={t('aiDash.queryPlaceholder')}
                   value={question}
@@ -557,7 +784,7 @@ export default function AiDashboardPage() {
                   disabled={loading}
                 />
                 <button
-                  onClick={handleQuerySse}
+                  onClick={() => handleQuerySse()}
                   disabled={!question.trim() || loading}
                   className="self-end flex items-center gap-1.5 bg-orange-600 hover:bg-orange-500 disabled:opacity-40 text-white px-4 py-2 rounded-xl text-sm font-medium transition"
                 >
@@ -624,7 +851,8 @@ export default function AiDashboardPage() {
 
           {/* 結果區域 */}
           {result && (
-            <div className="space-y-3">
+            <div className={showChartBuilder ? 'flex gap-4 items-start' : 'space-y-3'}>
+            <div className={showChartBuilder ? 'flex-1 space-y-3' : undefined}>
               {/* View mode toggle */}
               <div className="flex items-center gap-2">
                 <div className="flex bg-gray-100 rounded-lg p-0.5">
@@ -656,10 +884,35 @@ export default function AiDashboardPage() {
                   </div>
                 )}
 
-                <span className="ml-auto text-xs text-gray-400">
-                  {result.cached && <span className="text-teal-600 mr-2">{t('aiDash.cacheHit')}</span>}
-                  {t('aiDash.rowCount', { count: result.row_count })}
-                </span>
+                <div className="ml-auto flex items-center gap-2">
+                  <button
+                    onClick={() => {
+                      const cols = result.columns
+                      const labels = result.column_labels || {}
+                      const headers = cols.map(c => labels[c] || c)
+                      const csvRows = [
+                        headers.join(','),
+                        ...result.rows.map(r => cols.map(c => {
+                          const v = String((r as Record<string, unknown>)[c] ?? '')
+                          return v.includes(',') || v.includes('"') || v.includes('\n') ? `"${v.replace(/"/g, '""')}"` : v
+                        }).join(',')),
+                      ]
+                      const blob = new Blob(['\uFEFF' + csvRows.join('\n')], { type: 'text/csv;charset=utf-8;' })
+                      const url = URL.createObjectURL(blob)
+                      const a = document.createElement('a'); a.href = url
+                      a.download = `${selectedDesign?.name || 'export'}_${new Date().toISOString().slice(0, 10)}.csv`; a.click()
+                      URL.revokeObjectURL(url)
+                    }}
+                    className="flex items-center gap-1 text-xs text-gray-400 hover:text-green-600 hover:bg-green-50 px-2 py-1 rounded transition"
+                    title="匯出 CSV"
+                  >
+                    <Download size={12} /> CSV
+                  </button>
+                  <span className="text-xs text-gray-400">
+                    {result.cached && <span className="text-teal-600 mr-2">{t('aiDash.cacheHit')}</span>}
+                    {t('aiDash.rowCount', { count: result.row_count })}
+                  </span>
+                </div>
               </div>
 
               {/* Chart */}
@@ -676,6 +929,21 @@ export default function AiDashboardPage() {
                 </div>
               )}
             </div>
+
+            {/* ChartBuilder 側邊面板 */}
+            {showChartBuilder && (
+              <div className="flex-shrink-0" style={{ width: 360 }}>
+                <ChartBuilder
+                  rows={result.rows}
+                  columns={result.columns}
+                  columnLabels={result.column_labels}
+                  initialConfig={effectiveChartConfig}
+                  onSave={cfg => setUserChartConfig(cfg)}
+                  onClose={() => setShowChartBuilder(false)}
+                />
+              </div>
+            )}
+          </div>
           )}
 
           {/* 開發模式 Panel */}
@@ -726,6 +994,79 @@ export default function AiDashboardPage() {
           )}
         </div>
       </div>
+
+      {/* ── Modals ─────────────────────────────────────────────────────────── */}
+
+      {/* 儲存/編輯命名查詢 */}
+      {showSaveModal && (
+        <SavedQueryModal
+          initial={editingQuery || undefined}
+          designId={selectedDesign?.id}
+          question={editingQuery ? undefined : question}
+          pinnedSql={editingQuery ? undefined : devSql || undefined}
+          detectedSql={editingQuery ? undefined : devSql || undefined}
+          chartConfig={(() => {
+            // 新增：用 userChartConfig 優先；編輯：合併 userChartConfig + 舊 chart_config
+            const existingCfg = editingQuery
+              ? (() => {
+                  try {
+                    const raw = editingQuery.chart_config
+                    if (!raw) return null
+                    return typeof raw === 'string' ? JSON.parse(raw) : raw
+                  } catch { return null }
+                })()
+              : null
+            // 編輯模式：已存設定優先（保留使用者在 modal 設定的 x_axis_name 等）
+            // 新增模式：ChartBuilder 即時設定優先
+            const cfg = editingQuery
+              ? (existingCfg || userChartConfig || result?.chart_config)
+              : (userChartConfig || result?.chart_config)
+            if (!cfg) return null
+            // 帶入 available_columns（優先用本次 result columns，fallback 到已存的）
+            const withCols = {
+              ...cfg,
+              available_columns: result?.columns?.map(c => ({
+                key: c,
+                label: result.column_labels?.[c] || c,
+              })) || (cfg as any).available_columns || [],
+            }
+            return JSON.stringify(withCols)
+          })()}
+          onSave={saved => {
+            loadSavedQueries()
+            setSidebarTab('saved')
+          }}
+          onClose={() => { setShowSaveModal(false); setEditingQuery(null) }}
+        />
+      )}
+
+      {/* 執行命名查詢前填參數 */}
+      {pendingQuery && (() => {
+        let params: AiQueryParameter[] = []
+        try { params = JSON.parse(pendingQuery.parameters_schema as any || '[]') || [] } catch { }
+        return (
+          <QueryParamsModal
+            queryName={pendingQuery.name}
+            params={params}
+            onConfirm={values => {
+              const prefix = buildParamPrefix(params, values)
+              const baseQ = pendingQuery.question || ''
+              setQuestion(prefix + baseQ)  // 填入 textarea，讓使用者確認/修改後再按查詢
+              setPendingQuery(null)
+            }}
+            onClose={() => setPendingQuery(null)}
+          />
+        )
+      })()}
+
+      {/* 分享 Modal */}
+      {shareTarget && (
+        <ShareModal
+          title={shareTarget.name}
+          sharesUrl={`/dashboard/${shareTarget.type === 'query' ? 'saved-queries' : 'report-dashboards'}/${shareTarget.id}/shares`}
+          onClose={() => setShareTarget(null)}
+        />
+      )}
     </div>
   )
 }

@@ -549,6 +549,7 @@ async function buildPrompt(db, design, question, vectorResults, skipReason, lang
     : l.startsWith('vi')
       ? '5. Dùng bí danh cột tiếng Việt (AS) cho dễ đọc — dùng mô tả tiếng Việt trong schema nếu có'
       : '5. 欄位名稱用中文別名（AS）方便閱讀 — 優先使用 schema 中的欄位中文說明';
+  const designMaxRows = parseInt(design.max_rows || design.MAX_ROWS || 0) || 1000;
   const systemPrompt = design.system_prompt || `你是一個 Oracle ERP 資料庫查詢助手。
 根據提供的資料表 schema 和使用者問題，生成正確的 Oracle SQL SELECT 語句。
 規則：
@@ -558,7 +559,8 @@ async function buildPrompt(db, design, question, vectorResults, skipReason, lang
 4. 回傳格式：只輸出 SQL，不加任何說明文字
 ${aliasRule}
 6. 欄位引用須使用提供的資料表別名（alias.欄位名）
-7. 若 Prompt 中有「語意搜尋結果」區塊，必須將其 IN 條件加入 WHERE 子句`;
+7. 若 Prompt 中有「語意搜尋結果」區塊，必須將其 IN 條件加入 WHERE 子句
+8. 必須加上筆數限制：SELECT * FROM (...) WHERE ROWNUM <= ${designMaxRows}`;
 
   const fromHint = fromClause
     ? `\n## 建議使用的 FROM 子句（請直接使用，勿更改別名）：\n\`\`\`sql\n${fromClause}\`\`\`\n`
@@ -611,7 +613,7 @@ ${aliasInstruction}
 }
 
 // ─── 主查詢 Pipeline ──────────────────────────────────────────────────────────
-async function runDashboardQuery({ designId, question, userId, user, isDesigner, send, vectorTopK, vectorSimilarityThreshold, modelKey, effectivePolicy, lang }) {
+async function runDashboardQuery({ designId, question, userId, user, isDesigner, overrideSql, send, vectorTopK, vectorSimilarityThreshold, modelKey, effectivePolicy, lang }) {
   const db = require('../database-oracle').db;
 
   // 解析 LLM model（從 llm_models 表查，fallback 到 env）
@@ -630,6 +632,7 @@ async function runDashboardQuery({ designId, question, userId, user, isDesigner,
   // 取得 design
   const design = await db.prepare(`SELECT * FROM ai_select_designs WHERE id=?`).get(designId);
   if (!design) throw new Error('查詢設計不存在');
+  const designMaxRows = parseInt(design.max_rows || design.MAX_ROWS || 1000);
 
   // 1.5 資料權限 WHERE 計算（注入到 prompt）
   if (effectivePolicy?.rules?.length > 0) {
@@ -680,25 +683,35 @@ async function runDashboardQuery({ designId, question, userId, user, isDesigner,
     }
   }
 
-  // 3. 組裝 Prompt + 4. Gemini 生成 SQL
-  send('status', { message: 'AI 生成 SQL 中...' });
-  const prompt = await buildPrompt(db, design, question, vectorResults, design._skipReason, lang);
-  const sqlModel = genAI.getGenerativeModel({ model: sqlApiModel });
-  const genResult = await sqlModel.generateContent(prompt);
-  let generatedSql = genResult.response.text().trim();
+  let safeSql;
+  let genResult = null;
 
-  // 清除可能的 markdown code block 包裹（含多行 / 任意 fence 格式）
-  generatedSql = generatedSql
-    .replace(/^```[\w]*\r?\n?/im, '')   // 開頭 ```sql 或 ```
-    .replace(/\r?\n?```\s*$/im, '')     // 結尾 ```
-    .trim()
-    .replace(/;+\s*$/, '')             // Oracle OCI 不接受結尾分號
-    .trim();
+  if (overrideSql) {
+    // 直接使用指定 SQL，跳過 AI 生成
+    send('status', { message: 'ERP 查詢中（已鎖定 SQL）...' });
+    safeSql = validateSql(overrideSql.replace(/;+\s*$/, '').trim());
+    if (isDesigner) send('sql_preview', { sql: safeSql, cached: false, skipped_ai: true });
+  } else {
+    // 3. 組裝 Prompt + 4. Gemini 生成 SQL
+    send('status', { message: 'AI 生成 SQL 中...' });
+    const prompt = await buildPrompt(db, design, question, vectorResults, design._skipReason, lang);
+    const sqlModel = genAI.getGenerativeModel({ model: sqlApiModel });
+    genResult = await sqlModel.generateContent(prompt);
+    let generatedSql = genResult.response.text().trim();
 
-  // 5. SQL 安全審查
-  const safeSql = validateSql(generatedSql);
+    // 清除可能的 markdown code block 包裹（含多行 / 任意 fence 格式）
+    generatedSql = generatedSql
+      .replace(/^```[\w]*\r?\n?/im, '')
+      .replace(/\r?\n?```\s*$/im, '')
+      .trim()
+      .replace(/;+\s*$/, '')
+      .trim();
 
-  if (isDesigner) {
+    // 5. SQL 安全審查
+    safeSql = validateSql(generatedSql);
+  }
+
+  if (isDesigner && genResult) {
     const usage = genResult.response.usageMetadata;
     send('sql_preview', {
       sql: safeSql,
@@ -709,7 +722,7 @@ async function runDashboardQuery({ designId, question, userId, user, isDesigner,
   }
 
   // 6. 執行 Oracle ERP 查詢
-  send('status', { message: 'ERP 查詢中...' });
+  if (!overrideSql) send('status', { message: 'ERP 查詢中...' });
   const erpPool = await getErpPool();
   const erpConn = await erpPool.getConnection();
   let rows = [];
@@ -720,7 +733,7 @@ async function runDashboardQuery({ designId, question, userId, user, isDesigner,
       safeSql, [],
       {
         outFormat: oracledb.OUT_FORMAT_OBJECT,
-        maxRows: MAX_ROWS,
+        maxRows: designMaxRows || MAX_ROWS,
         fetchArraySize: 100,
         queryTimeout: SQL_TIMEOUT_SEC,
       }

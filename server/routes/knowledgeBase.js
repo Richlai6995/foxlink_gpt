@@ -177,6 +177,39 @@ async function getAccessibleKb(db, kbId, userId) {
   return kb || null;
 }
 
+/**
+ * Check if user can EDIT a KB (owner, admin, or has kb_access with permission='edit').
+ * Returns the kb row if allowed, null otherwise.
+ */
+async function getEditableKb(db, kbId, userId, userRole) {
+  if (userRole === 'admin') return db.prepare('SELECT * FROM knowledge_bases WHERE id=?').get(kbId);
+  // owner check
+  const kb = await db.prepare('SELECT * FROM knowledge_bases WHERE id=?').get(kbId);
+  if (!kb) return null;
+  if (kb.creator_id === userId) return kb;
+  // shared edit permission check
+  const user = await db.prepare('SELECT dept_code, profit_center, org_section, org_group_name, role_id FROM users WHERE id=?').get(userId);
+  if (!user) return null;
+  const access = await db.prepare(`
+    SELECT 1 FROM kb_access WHERE kb_id=? AND permission='edit' AND (
+      (grantee_type='user'          AND grantee_id=TO_CHAR(?))
+      OR (grantee_type='role'       AND grantee_id=TO_CHAR(?))
+      OR (grantee_type='dept'       AND grantee_id=? AND ? IS NOT NULL)
+      OR (grantee_type='profit_center' AND grantee_id=? AND ? IS NOT NULL)
+      OR (grantee_type='org_section'   AND grantee_id=? AND ? IS NOT NULL)
+      OR (grantee_type='org_group'     AND grantee_id=? AND ? IS NOT NULL)
+    )
+  `).get(
+    kbId,
+    userId, user.role_id,
+    user.dept_code, user.dept_code,
+    user.profit_center, user.profit_center,
+    user.org_section, user.org_section,
+    user.org_group_name, user.org_group_name,
+  );
+  return access ? kb : null;
+}
+
 /** Resolve effective KB dev permission for a user. */
 async function canCreateKb(db, userId) {
   const user = await db.prepare('SELECT role, can_create_kb, role_id FROM users WHERE id=?').get(userId);
@@ -314,8 +347,8 @@ router.get('/', async (req, res) => {
          ORDER BY kb.updated_at DESC`
       ).all();
     } else {
-      // Shared KBs with permission='use' only grant chat/search access — NOT visible in list/marketplace.
-      // Only permission='edit' grants show the KB in the list (user can also view/edit).
+      // Both 'use' and 'edit' permissions show the KB in the list.
+      // 'use' = can search/chat only; 'edit' = can also modify documents.
       // Oracle does not allow DISTINCT on CLOB columns (ORA-22848).
       // Use a subquery on id only, then join back to get full row including CLOBs.
       rows = await db.prepare(`
@@ -327,7 +360,7 @@ router.get('/', async (req, res) => {
           WHERE kb2.creator_id=?
             OR kb2.is_public=1
             OR EXISTS (
-              SELECT 1 FROM kb_access ka WHERE ka.kb_id=kb2.id AND ka.permission='edit' AND (
+              SELECT 1 FROM kb_access ka WHERE ka.kb_id=kb2.id AND (
                 (ka.grantee_type='user'             AND ka.grantee_id=TO_CHAR(?))
                 OR (ka.grantee_type='role'          AND ka.grantee_id=TO_CHAR(?))
                 OR (ka.grantee_type='dept'          AND ka.grantee_id=? AND ? IS NOT NULL)
@@ -367,6 +400,7 @@ router.get('/:id', async (req, res) => {
     const kb = await getAccessibleKb(db, req.params.id, req.user.id);
     if (!kb) return res.status(404).json({ error: '找不到知識庫或無存取權限' });
     kb.is_owner = kb.creator_id === req.user.id || req.user.role === 'admin';
+    kb.can_edit = kb.is_owner || !!(await getEditableKb(db, req.params.id, req.user.id, req.user.role));
     kb.chunk_config = (() => { try { return JSON.parse(kb.chunk_config || '{}'); } catch { return {}; } })();
     res.json(kb);
   } catch (e) {
@@ -378,10 +412,8 @@ router.get('/:id', async (req, res) => {
 router.put('/:id', async (req, res) => {
   const db = getDb();
   try {
-    const kb = await db.prepare('SELECT * FROM knowledge_bases WHERE id=? AND creator_id=?').get(req.params.id, req.user.id);
-    if (!kb && req.user.role !== 'admin') return res.status(403).json({ error: '僅知識庫擁有者可修改設定' });
-    const target = kb || await db.prepare('SELECT * FROM knowledge_bases WHERE id=?').get(req.params.id);
-    if (!target) return res.status(404).json({ error: '找不到知識庫' });
+    const target = await getEditableKb(db, req.params.id, req.user.id, req.user.role);
+    if (!target) return res.status(403).json({ error: '無編輯權限' });
 
     const {
       name, description,
@@ -488,10 +520,8 @@ router.get('/:id/documents', async (req, res) => {
 router.post('/:id/documents', upload.array('files', 20), async (req, res) => {
   const db = getDb();
   try {
-    const kb = await db.prepare('SELECT * FROM knowledge_bases WHERE id=? AND creator_id=?').get(req.params.id, req.user.id);
-    if (!kb && req.user.role !== 'admin') return res.status(403).json({ error: '僅知識庫擁有者可上傳文件' });
-    const target = kb || await db.prepare('SELECT * FROM knowledge_bases WHERE id=?').get(req.params.id);
-    if (!target) return res.status(404).json({ error: '找不到知識庫' });
+    const target = await getEditableKb(db, req.params.id, req.user.id, req.user.role);
+    if (!target) return res.status(403).json({ error: '無編輯權限' });
 
     // Per-upload parse_mode override; falls back to KB-level default
     const uploadParseMode = (() => {
@@ -950,9 +980,8 @@ async function updateKbStats(db, kbId) {
 router.post('/:id/translate', async (req, res) => {
   const db = getDb();
   try {
-    const kb = await db.prepare('SELECT * FROM knowledge_bases WHERE id=?').get(req.params.id);
-    if (!kb) return res.status(404).json({ error: '找不到知識庫' });
-    if (kb.creator_id !== req.user.id && req.user.role !== 'admin') return res.status(403).json({ error: '無操作權限' });
+    const kb = await getEditableKb(db, req.params.id, req.user.id, req.user.role);
+    if (!kb) return res.status(403).json({ error: '無編輯權限' });
     const trans = await translateFields({ name: kb.name, description: kb.description });
     await db.prepare(`UPDATE knowledge_bases SET name_zh=?,name_en=?,name_vi=?,desc_zh=?,desc_en=?,desc_vi=? WHERE id=?`)
       .run(trans.name_zh, trans.name_en, trans.name_vi, trans.desc_zh, trans.desc_en, trans.desc_vi, req.params.id);

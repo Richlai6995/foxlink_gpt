@@ -334,6 +334,22 @@ async function runMigrations(db) {
   await addCol('LLM_MODELS', 'IMAGE_OUTPUT', 'NUMBER(1) DEFAULT 0');
   // kb_access permission level (use = chat-only, edit = can edit + visible in marketplace)
   await addCol('KB_ACCESS', 'PERMISSION', "VARCHAR2(10) DEFAULT 'use'");
+  // Drop kb_chunks_vidx: global vector index can't handle mixed embedding dimensions (768 vs 3072).
+  // KB searches use VECTOR_DISTANCE() with partition pruning (kb_id filter), so brute-force is fine.
+  try {
+    const conn2 = await pool.getConnection();
+    try {
+      await conn2.execute(`DROP INDEX kb_chunks_vidx`, [], { autoCommit: true });
+      console.log('[Migration] Dropped kb_chunks_vidx (mixed-dimension KBs require brute-force scan)');
+    } catch (e) {
+      if (!e.message.includes('ORA-01418')) // ORA-01418 = index does not exist, ignore
+        console.warn('[Migration] kb_chunks_vidx drop:', e.message);
+    } finally {
+      await conn2.close();
+    }
+  } catch (e) {
+    console.warn('[Migration] kb_chunks_vidx drop pool error:', e.message);
+  }
 
   // knowledge_bases stats columns (in case old deployment missing them)
   await addCol('KNOWLEDGE_BASES', 'DOC_COUNT',        'NUMBER DEFAULT 0');
@@ -389,6 +405,19 @@ async function runMigrations(db) {
 
   // MCP Server response mode (inject = feed tool result to LLM, answer = return raw result directly)
   await addCol('MCP_SERVERS', 'RESPONSE_MODE', "VARCHAR2(10) DEFAULT 'inject'");
+
+  // AI Report Dashboard auto-refresh interval (minutes, null = manual)
+  await addCol('AI_REPORT_DASHBOARDS', 'AUTO_REFRESH_INTERVAL', 'NUMBER DEFAULT NULL');
+  await addCol('AI_REPORT_DASHBOARDS', 'NAME_EN', 'VARCHAR2(200)');
+  await addCol('AI_REPORT_DASHBOARDS', 'NAME_VI', 'VARCHAR2(200)');
+  await addCol('AI_REPORT_DASHBOARDS', 'DESCRIPTION_EN', 'VARCHAR2(2000)');
+  await addCol('AI_REPORT_DASHBOARDS', 'DESCRIPTION_VI', 'VARCHAR2(2000)');
+  await addCol('AI_REPORT_DASHBOARDS', 'CATEGORY_EN', 'VARCHAR2(200)');
+  await addCol('AI_REPORT_DASHBOARDS', 'CATEGORY_VI', 'VARCHAR2(200)');
+
+  // AI Saved Queries multilingual names
+  await addCol('AI_SAVED_QUERIES', 'NAME_EN', 'VARCHAR2(400)');
+  await addCol('AI_SAVED_QUERIES', 'NAME_VI', 'VARCHAR2(400)');
 
   // ── token_usage model normalization (one-time data fix) ────────────────────
   // Merge rows stored with raw API model IDs (e.g. 'gemini-3-pro-preview') or
@@ -884,6 +913,7 @@ async function runMigrations(db) {
   await addCol('AI_SELECT_DESIGNS', 'DESC_ZH',  'VARCHAR2(1000)');
   await addCol('AI_SELECT_DESIGNS', 'DESC_EN',  'VARCHAR2(1000)');
   await addCol('AI_SELECT_DESIGNS', 'DESC_VI',  'VARCHAR2(1000)');
+  await addCol('AI_SELECT_DESIGNS', 'MAX_ROWS',  'NUMBER DEFAULT 1000');
   // AI Select Topics (AI戰情 主題)
   await addCol('AI_SELECT_TOPICS', 'NAME_ZH',  'VARCHAR2(400)');
   await addCol('AI_SELECT_TOPICS', 'NAME_EN',  'VARCHAR2(400)');
@@ -894,6 +924,60 @@ async function runMigrations(db) {
   // Schema Columns (AI戰情 欄位說明)
   await addCol('AI_SCHEMA_COLUMNS', 'DESC_EN',  'VARCHAR2(1000)');
   await addCol('AI_SCHEMA_COLUMNS', 'DESC_VI',  'VARCHAR2(1000)');
+
+  // ── AI 命名查詢（儲存查詢 / 報表 Template）─────────────────────────────────
+  await createTable('AI_SAVED_QUERIES', `CREATE TABLE ai_saved_queries (
+    id                NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    user_id           NUMBER NOT NULL,
+    name              VARCHAR2(200) NOT NULL,
+    description       CLOB,
+    category          VARCHAR2(100),
+    design_id         NUMBER REFERENCES ai_select_designs(id) ON DELETE SET NULL,
+    question          CLOB,
+    pinned_sql        CLOB,
+    chart_config      CLOB,
+    parameters_schema CLOB,
+    auto_run          NUMBER(1) DEFAULT 0,
+    sort_order        NUMBER DEFAULT 0,
+    is_active         NUMBER(1) DEFAULT 1,
+    created_at        TIMESTAMP DEFAULT SYSTIMESTAMP,
+    updated_at        TIMESTAMP DEFAULT SYSTIMESTAMP,
+    last_run_at       TIMESTAMP
+  )`);
+
+  await createTable('AI_SAVED_QUERY_SHARES', `CREATE TABLE ai_saved_query_shares (
+    id           NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    query_id     NUMBER NOT NULL REFERENCES ai_saved_queries(id) ON DELETE CASCADE,
+    share_type   VARCHAR2(20) DEFAULT 'use',
+    grantee_type VARCHAR2(20) NOT NULL,
+    grantee_id   VARCHAR2(100) NOT NULL,
+    granted_by   NUMBER,
+    created_at   TIMESTAMP DEFAULT SYSTIMESTAMP
+  )`);
+
+  // ── AI 儀表板（多查詢組合 Dashboard Board）─────────────────────────────────
+  await createTable('AI_REPORT_DASHBOARDS', `CREATE TABLE ai_report_dashboards (
+    id            NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    user_id       NUMBER NOT NULL,
+    name          VARCHAR2(200) NOT NULL,
+    description   CLOB,
+    category      VARCHAR2(100),
+    layout_config CLOB,
+    sort_order    NUMBER DEFAULT 0,
+    is_active     NUMBER(1) DEFAULT 1,
+    created_at    TIMESTAMP DEFAULT SYSTIMESTAMP,
+    updated_at    TIMESTAMP DEFAULT SYSTIMESTAMP
+  )`);
+
+  await createTable('AI_REPORT_DASHBOARD_SHARES', `CREATE TABLE ai_report_dashboard_shares (
+    id             NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    dashboard_id   NUMBER NOT NULL REFERENCES ai_report_dashboards(id) ON DELETE CASCADE,
+    share_type     VARCHAR2(20) DEFAULT 'use',
+    grantee_type   VARCHAR2(20) NOT NULL,
+    grantee_id     VARCHAR2(100) NOT NULL,
+    granted_by     NUMBER,
+    created_at     TIMESTAMP DEFAULT SYSTIMESTAMP
+  )`);
 
   // ── Vector table partitioning ───────────────────────────────────────────────
   await migrateAiVectorStoreToPartitioned();
@@ -1050,7 +1134,7 @@ function _kbPartName(kbId) {
 
 async function _partitionExists(conn, tableName, partName) {
   const r = await conn.execute(
-    `SELECT COUNT(*) AS CNT FROM user_tab_partitions WHERE UPPER(table_name)=? AND UPPER(partition_name)=?`,
+    `SELECT COUNT(*) AS CNT FROM user_tab_partitions WHERE UPPER(table_name)=:1 AND UPPER(partition_name)=:2`,
     [tableName.toUpperCase(), partName.toUpperCase()],
     { outFormat: oracledb.OUT_FORMAT_OBJECT }
   );
@@ -1059,7 +1143,7 @@ async function _partitionExists(conn, tableName, partName) {
 
 async function _isPartitioned(conn, tableName) {
   const r = await conn.execute(
-    `SELECT COUNT(*) AS CNT FROM user_part_tables WHERE UPPER(table_name)=?`,
+    `SELECT COUNT(*) AS CNT FROM user_part_tables WHERE UPPER(table_name)=:1`,
     [tableName.toUpperCase()], { outFormat: oracledb.OUT_FORMAT_OBJECT }
   );
   return Number(r.rows[0].CNT) > 0;

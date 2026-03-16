@@ -10,6 +10,7 @@ import SkillMarket from './pages/SkillMarket'
 import KnowledgeBasePage from './pages/KnowledgeBasePage'
 import KnowledgeBaseDetailPage from './pages/KnowledgeBaseDetailPage'
 import AiDashboardPage from './pages/AiDashboardPage'
+import DashboardBoardPage from './pages/DashboardBoardPage'
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated } = useAuth()
@@ -72,6 +73,7 @@ function AppRoutes() {
       <Route path="/kb" element={<ProtectedRoute><KnowledgeBasePage /></ProtectedRoute>} />
       <Route path="/kb/:id" element={<ProtectedRoute><KnowledgeBaseDetailPage /></ProtectedRoute>} />
       <Route path="/dashboard" element={<ProtectedRoute><AiDashboardPage /></ProtectedRoute>} />
+      <Route path="/dashboard/boards" element={<ProtectedRoute><DashboardBoardPage /></ProtectedRoute>} />
       <Route path="/reset-password" element={<ResetPasswordPage />} />
       <Route path="*" element={<Navigate to={isAuthenticated ? '/chat' : '/login'} replace />} />
     </Routes>

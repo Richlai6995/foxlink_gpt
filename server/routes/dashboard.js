@@ -608,6 +608,33 @@ router.delete('/designer/designs/:id', requireDesigner, async (req, res) => {
 
 // ─── Schema 知識庫 ────────────────────────────────────────────────────────────
 
+// GET /api/dashboard/schemas-for-design/:designId — 一般使用者也可存取（供欄位選擇器用）
+router.get('/schemas-for-design/:designId', verifyToken, async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const designId = parseInt(req.params.designId);
+    const design = await db.prepare('SELECT target_schema_ids FROM ai_select_designs WHERE id=?').get(designId);
+    if (!design) return res.json([]);
+    let ids = [];
+    try {
+      const raw = design.target_schema_ids;
+      if (raw) ids = Array.isArray(raw) ? raw : JSON.parse(raw);
+    } catch { ids = []; }
+    if (!ids.length) return res.json([]);
+    const placeholders = ids.map(() => '?').join(',');
+    const schemas = await db.prepare(`SELECT * FROM ai_schema_definitions WHERE id IN (${placeholders})`).all(...ids);
+    const columns = await db.prepare(`SELECT * FROM ai_schema_columns WHERE schema_id IN (${placeholders}) ORDER BY id ASC`).all(...ids);
+    const colMap = {};
+    for (const c of columns) {
+      if (!colMap[c.schema_id]) colMap[c.schema_id] = [];
+      colMap[c.schema_id].push(c);
+    }
+    res.json(schemas.map(s => ({ ...s, columns: colMap[s.id] || [] })));
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // GET /api/dashboard/designer/schemas
 router.get('/designer/schemas', requireDesigner, async (req, res) => {
   try {
@@ -1228,7 +1255,7 @@ router.get('/etl/jobs/:id/logs', requireDesigner, async (req, res) => {
 
 // POST /api/dashboard/query
 router.post('/query', requireDashboard, async (req, res) => {
-  const { design_id, question, vector_top_k, vector_similarity_threshold, model_key, lang } = req.body;
+  const { design_id, question, vector_top_k, vector_similarity_threshold, model_key, lang, override_sql } = req.body;
   if (!design_id || !question?.trim()) {
     return res.status(400).json({ error: 'design_id 與 question 為必填' });
   }
@@ -1296,6 +1323,7 @@ router.post('/query', requireDashboard, async (req, res) => {
       userId: req.user.id,
       user: req.user,
       isDesigner,
+      overrideSql: override_sql || null,
       send: sendWrapped,
       vectorTopK: vector_top_k ? Number(vector_top_k) : undefined,
       vectorSimilarityThreshold: vector_similarity_threshold ?? undefined,
@@ -1625,5 +1653,639 @@ function checkForbiddenInQuestion(question, rules) {
 
   return [...new Set(forbidden)];
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ── AI 命名查詢 (Saved Queries) ──────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/** 判斷 user 是否能存取某 saved query（use 或 manage） */
+async function canAccessSavedQuery(db, query, user) {
+  if (user.role === 'admin') return true;
+  if (query.user_id === user.id) return true;
+  const shares = await db.prepare(
+    `SELECT share_type FROM ai_saved_query_shares WHERE query_id=? AND (
+      (grantee_type='user' AND grantee_id=?) OR
+      (grantee_type='role' AND grantee_id=?) OR
+      (grantee_type='department' AND grantee_id=?) OR
+      (grantee_type='cost_center' AND grantee_id=?) OR
+      (grantee_type='division' AND grantee_id=?) OR
+      (grantee_type='org_group' AND grantee_id=?)
+    )`
+  ).all(
+    query.id,
+    String(user.id), String(user.role_id || ''), String(user.dept_code || ''),
+    String(user.profit_center || ''), String(user.org_section || ''),
+    String(user.org_group_name || '')
+  );
+  return shares.length > 0;
+}
+
+async function canManageSavedQuery(db, query, user) {
+  if (user.role === 'admin') return true;
+  if (query.user_id === user.id) return true;
+  const shares = await db.prepare(
+    `SELECT share_type FROM ai_saved_query_shares WHERE query_id=? AND share_type='manage' AND (
+      (grantee_type='user' AND grantee_id=?) OR
+      (grantee_type='role' AND grantee_id=?) OR
+      (grantee_type='department' AND grantee_id=?) OR
+      (grantee_type='cost_center' AND grantee_id=?) OR
+      (grantee_type='division' AND grantee_id=?) OR
+      (grantee_type='org_group' AND grantee_id=?)
+    )`
+  ).all(
+    query.id,
+    String(user.id), String(user.role_id || ''), String(user.dept_code || ''),
+    String(user.profit_center || ''), String(user.org_section || ''),
+    String(user.org_group_name || '')
+  );
+  return shares.length > 0;
+}
+
+// GET /saved-queries — 取得我的 + 被分享的查詢（按分類分組）
+router.get('/saved-queries', requireDashboard, async (req, res) => {
+  const { db } = require('../database-oracle');
+  try {
+    const user = req.user;
+    const uid = String(user.id), rid = String(user.role_id || ''),
+          dept = String(user.dept_code || ''), pc = String(user.profit_center || ''),
+          div = String(user.org_section || ''), og = String(user.org_group_name || '');
+    const rows = await db.prepare(`
+      SELECT sq.*, u.name as creator_name, u.employee_id as creator_emp_id,
+             d.name as design_name, d.name_en as design_name_en, d.name_vi as design_name_vi,
+             t.name as topic_name, t.name_en as topic_name_en, t.name_vi as topic_name_vi,
+             CASE WHEN sq.user_id = ? THEN 1
+                  WHEN EXISTS (SELECT 1 FROM ai_saved_query_shares
+                               WHERE query_id=sq.id AND share_type='manage' AND (
+                                 (grantee_type='user' AND grantee_id=?) OR
+                                 (grantee_type='role' AND grantee_id=?) OR
+                                 (grantee_type='department' AND grantee_id=?) OR
+                                 (grantee_type='cost_center' AND grantee_id=?) OR
+                                 (grantee_type='division' AND grantee_id=?) OR
+                                 (grantee_type='org_group' AND grantee_id=?)
+                               )) THEN 1
+                  ELSE 0 END AS can_manage
+      FROM ai_saved_queries sq
+      LEFT JOIN users u ON u.id = sq.user_id
+      LEFT JOIN ai_select_designs d ON d.id = sq.design_id
+      LEFT JOIN ai_select_topics t ON t.id = d.topic_id
+      WHERE sq.is_active = 1
+        AND (
+          sq.user_id = ?
+          OR sq.id IN (
+            SELECT query_id FROM ai_saved_query_shares WHERE
+              (grantee_type='user' AND grantee_id=?) OR
+              (grantee_type='role' AND grantee_id=?) OR
+              (grantee_type='department' AND grantee_id=?) OR
+              (grantee_type='cost_center' AND grantee_id=?) OR
+              (grantee_type='division' AND grantee_id=?) OR
+              (grantee_type='org_group' AND grantee_id=?)
+          )
+        )
+      ORDER BY sq.category NULLS LAST, sq.sort_order, sq.name
+    `).all(
+      user.id, uid, rid, dept, pc, div, og,
+      user.id, uid, rid, dept, pc, div, og
+    );
+    const isAdmin = user.role === 'admin';
+    res.json(rows.map(r => ({ ...r, can_manage: isAdmin ? 1 : r.can_manage })));
+  } catch (e) {
+    console.error('[saved-queries GET]', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /saved-queries — 新增命名查詢
+router.post('/saved-queries', requireDashboard, async (req, res) => {
+  const { db } = require('../database-oracle');
+  try {
+    const { name, name_en, name_vi, description, category, design_id, question, pinned_sql,
+            chart_config, parameters_schema, auto_run, sort_order } = req.body;
+    if (!name) return res.status(400).json({ error: '名稱必填' });
+    // Auto-translate if not provided
+    let tEn = name_en || null, tVi = name_vi || null;
+    if (!tEn || !tVi) {
+      try {
+        const t = await translateFields({ name, description: null });
+        if (!tEn) tEn = t.name_en || null;
+        if (!tVi) tVi = t.name_vi || null;
+      } catch {}
+    }
+    const r = await db.prepare(`
+      INSERT INTO ai_saved_queries
+        (user_id, name, name_en, name_vi, description, category, design_id, question, pinned_sql,
+         chart_config, parameters_schema, auto_run, sort_order)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+    `).run(
+      req.user.id, name, tEn, tVi, description || null, category || null,
+      design_id || null, question || null, pinned_sql || null,
+      chart_config ? JSON.stringify(chart_config) : null,
+      parameters_schema ? JSON.stringify(parameters_schema) : null,
+      auto_run ? 1 : 0, sort_order || 0
+    );
+    const newRow = await db.prepare('SELECT * FROM ai_saved_queries WHERE id=?').get(r.lastInsertRowid);
+    res.json(newRow);
+  } catch (e) {
+    console.error('[saved-queries POST]', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// PUT /saved-queries/:id — 更新命名查詢
+router.put('/saved-queries/:id', requireDashboard, async (req, res) => {
+  const { db } = require('../database-oracle');
+  try {
+    const query = await db.prepare('SELECT * FROM ai_saved_queries WHERE id=?').get(req.params.id);
+    if (!query) return res.status(404).json({ error: '查詢不存在' });
+    if (!await canManageSavedQuery(db, query, req.user))
+      return res.status(403).json({ error: '無權限修改' });
+
+    const { name, name_en, name_vi, description, category, design_id, question, pinned_sql,
+            chart_config, parameters_schema, auto_run, sort_order } = req.body;
+    // Auto-translate if name changed or translations not provided
+    let tEn = name_en !== undefined ? (name_en || null) : query.name_en;
+    let tVi = name_vi !== undefined ? (name_vi || null) : query.name_vi;
+    if (name !== query.name && !name_en && !name_vi) {
+      try {
+        const t = await translateFields({ name, description: null });
+        tEn = t.name_en || null; tVi = t.name_vi || null;
+      } catch {}
+    }
+    await db.prepare(`
+      UPDATE ai_saved_queries SET
+        name=?, name_en=?, name_vi=?, description=?, category=?, design_id=?, question=?, pinned_sql=?,
+        chart_config=?, parameters_schema=?, auto_run=?, sort_order=?,
+        updated_at=SYSTIMESTAMP
+      WHERE id=?
+    `).run(
+      name, tEn, tVi, description || null, category || null, design_id || null,
+      question || null, pinned_sql || null,
+      chart_config ? JSON.stringify(chart_config) : null,
+      parameters_schema ? JSON.stringify(parameters_schema) : null,
+      auto_run ? 1 : 0, sort_order || 0,
+      req.params.id
+    );
+    const updated = await db.prepare('SELECT * FROM ai_saved_queries WHERE id=?').get(req.params.id);
+    res.json(updated);
+  } catch (e) {
+    console.error('[saved-queries PUT]', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// DELETE /saved-queries/:id
+router.delete('/saved-queries/:id', requireDashboard, async (req, res) => {
+  const { db } = require('../database-oracle');
+  try {
+    const query = await db.prepare('SELECT * FROM ai_saved_queries WHERE id=?').get(req.params.id);
+    if (!query) return res.status(404).json({ error: '查詢不存在' });
+    if (!await canManageSavedQuery(db, query, req.user))
+      return res.status(403).json({ error: '無權限刪除' });
+    await db.prepare(`UPDATE ai_saved_queries SET is_active=0, updated_at=SYSTIMESTAMP WHERE id=?`).run(req.params.id);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /saved-queries/:id/translate — 重新翻譯名稱
+router.post('/saved-queries/:id/translate', requireDashboard, async (req, res) => {
+  const { db } = require('../database-oracle');
+  try {
+    const query = await db.prepare('SELECT * FROM ai_saved_queries WHERE id=?').get(req.params.id);
+    if (!query) return res.status(404).json({ error: '不存在' });
+    if (!await canManageSavedQuery(db, query, req.user))
+      return res.status(403).json({ error: '無權限' });
+    const t = await translateFields({ name: query.name, description: null });
+    await db.prepare(`UPDATE ai_saved_queries SET name_en=?, name_vi=?, updated_at=SYSTIMESTAMP WHERE id=?`)
+      .run(t.name_en, t.name_vi, req.params.id);
+    res.json({ name_zh: query.name, name_en: t.name_en, name_vi: t.name_vi });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /saved-queries/:id/clone — 另存為（被分享者複製一份自己的）
+router.post('/saved-queries/:id/clone', requireDashboard, async (req, res) => {
+  const { db } = require('../database-oracle');
+  try {
+    const query = await db.prepare('SELECT * FROM ai_saved_queries WHERE id=?').get(req.params.id);
+    if (!query) return res.status(404).json({ error: '查詢不存在' });
+    if (!await canAccessSavedQuery(db, query, req.user))
+      return res.status(403).json({ error: '無存取權限' });
+
+    const newName = (req.body.name || query.name) + ' (複製)';
+    const r = await db.prepare(`
+      INSERT INTO ai_saved_queries
+        (user_id, name, description, category, design_id, question, pinned_sql,
+         chart_config, parameters_schema, auto_run, sort_order)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?)
+    `).run(
+      req.user.id, newName, query.description, query.category,
+      query.design_id, query.question, query.pinned_sql,
+      query.chart_config, query.parameters_schema, query.auto_run, 0
+    );
+    const newRow = await db.prepare('SELECT * FROM ai_saved_queries WHERE id=?').get(r.lastInsertRowid);
+    res.json(newRow);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// PATCH /saved-queries/:id/last-run — 更新最後執行時間
+router.patch('/saved-queries/:id/last-run', requireDashboard, async (req, res) => {
+  const { db } = require('../database-oracle');
+  try {
+    await db.prepare(`UPDATE ai_saved_queries SET last_run_at=SYSTIMESTAMP WHERE id=?`).run(req.params.id);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /saved-queries/:id/shares
+router.get('/saved-queries/:id/shares', requireDashboard, async (req, res) => {
+  const { db } = require('../database-oracle');
+  try {
+    const query = await db.prepare('SELECT * FROM ai_saved_queries WHERE id=?').get(req.params.id);
+    if (!query) return res.status(404).json({ error: '查詢不存在' });
+    if (!await canManageSavedQuery(db, query, req.user))
+      return res.status(403).json({ error: '無管理權限' });
+    const shares = await db.prepare(`SELECT * FROM ai_saved_query_shares WHERE query_id=? ORDER BY id`).all(req.params.id);
+    res.json(shares);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /saved-queries/:id/shares
+router.post('/saved-queries/:id/shares', requireDashboard, async (req, res) => {
+  const { db } = require('../database-oracle');
+  try {
+    const query = await db.prepare('SELECT * FROM ai_saved_queries WHERE id=?').get(req.params.id);
+    if (!query) return res.status(404).json({ error: '查詢不存在' });
+    if (!await canManageSavedQuery(db, query, req.user))
+      return res.status(403).json({ error: '無管理權限' });
+    const { grantee_type, grantee_id, share_type } = req.body;
+    if (!grantee_type || !grantee_id) return res.status(400).json({ error: '必填欄位缺少' });
+    // 避免重複
+    const exists = await db.prepare(
+      `SELECT id FROM ai_saved_query_shares WHERE query_id=? AND grantee_type=? AND grantee_id=?`
+    ).get(req.params.id, grantee_type, String(grantee_id));
+    if (exists) {
+      await db.prepare(`UPDATE ai_saved_query_shares SET share_type=? WHERE id=?`).run(share_type || 'use', exists.id);
+    } else {
+      await db.prepare(`INSERT INTO ai_saved_query_shares (query_id, grantee_type, grantee_id, share_type, granted_by) VALUES (?,?,?,?,?)`
+      ).run(req.params.id, grantee_type, String(grantee_id), share_type || 'use', req.user.id);
+    }
+    const shares = await db.prepare(`SELECT * FROM ai_saved_query_shares WHERE query_id=? ORDER BY id`).all(req.params.id);
+    res.json(shares);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// DELETE /saved-queries/:id/shares/:shareId
+router.delete('/saved-queries/:id/shares/:shareId', requireDashboard, async (req, res) => {
+  const { db } = require('../database-oracle');
+  try {
+    const query = await db.prepare('SELECT * FROM ai_saved_queries WHERE id=?').get(req.params.id);
+    if (!query || !await canManageSavedQuery(db, query, req.user))
+      return res.status(403).json({ error: '無管理權限' });
+    await db.prepare(`DELETE FROM ai_saved_query_shares WHERE id=? AND query_id=?`).run(req.params.shareId, req.params.id);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /saved-queries/param-values — 取得某 schema 欄位的 distinct 值（供參數下拉使用）
+router.get('/saved-queries/param-values', requireDashboard, async (req, res) => {
+  const { db } = require('../database-oracle');
+  const { getErpPool } = require('../services/dashboardService');
+  try {
+    const { schema_id, column_name, fetch_values_sql, search } = req.query;
+    if (!column_name) return res.status(400).json({ error: '欄位名稱必填' });
+
+    let sql = fetch_values_sql;
+    const searchFilter = search ? search.trim() : '';
+    const limit = searchFilter ? 100 : 50; // 無搜尋先載前50，有搜尋撈100
+    if (!sql && schema_id) {
+      const schemaDef = await db.prepare('SELECT table_name, source_sql, source_type FROM ai_schema_definitions WHERE id=?').get(schema_id);
+      if (!schemaDef) return res.status(404).json({ error: 'Schema 不存在' });
+      const col = column_name.toUpperCase();
+      const source = schemaDef.source_type === 'sql' ? `(${schemaDef.source_sql})` : schemaDef.table_name;
+      const likeClause = searchFilter ? ` AND UPPER(${col}) LIKE UPPER('%${searchFilter.replace(/'/g, "''")}%')` : '';
+      sql = `SELECT DISTINCT ${col} AS val FROM ${source} WHERE ${col} IS NOT NULL${likeClause} ORDER BY 1 FETCH FIRST ${limit} ROWS ONLY`;
+    }
+    if (!sql) return res.status(400).json({ error: '無法組建查詢' });
+
+    const erpPool = await getErpPool();
+    const conn = await erpPool.getConnection();
+    try {
+      const result = await conn.execute(sql, [], { outFormat: require('oracledb').OUT_FORMAT_OBJECT });
+      const rows = (result.rows || []).map(r => {
+        const keys = Object.keys(r);
+        const val = r.VAL ?? r[keys[0]];
+        const label = r.LABEL ?? val;
+        return { val, label };
+      });
+      res.json(rows);
+    } finally {
+      await conn.close();
+    }
+  } catch (e) {
+    console.error('[param-values]', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ── AI 儀表板 (Report Dashboards) ───────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
+
+async function canAccessDashboard(db, board, user) {
+  if (user.role === 'admin') return true;
+  if (board.user_id === user.id) return true;
+  const shares = await db.prepare(
+    `SELECT share_type FROM ai_report_dashboard_shares WHERE dashboard_id=? AND (
+      (grantee_type='user' AND grantee_id=?) OR
+      (grantee_type='role' AND grantee_id=?) OR
+      (grantee_type='department' AND grantee_id=?) OR
+      (grantee_type='cost_center' AND grantee_id=?) OR
+      (grantee_type='division' AND grantee_id=?) OR
+      (grantee_type='org_group' AND grantee_id=?)
+    )`
+  ).all(
+    board.id,
+    String(user.id), String(user.role_id || ''), String(user.dept_code || ''),
+    String(user.profit_center || ''), String(user.org_section || ''),
+    String(user.org_group_name || '')
+  );
+  return shares.length > 0;
+}
+
+async function canManageDashboard(db, board, user) {
+  if (user.role === 'admin') return true;
+  if (board.user_id === user.id) return true;
+  const shares = await db.prepare(
+    `SELECT share_type FROM ai_report_dashboard_shares WHERE dashboard_id=? AND share_type='manage' AND (
+      (grantee_type='user' AND grantee_id=?) OR
+      (grantee_type='role' AND grantee_id=?) OR
+      (grantee_type='department' AND grantee_id=?) OR
+      (grantee_type='cost_center' AND grantee_id=?) OR
+      (grantee_type='division' AND grantee_id=?) OR
+      (grantee_type='org_group' AND grantee_id=?)
+    )`
+  ).all(
+    board.id,
+    String(user.id), String(user.role_id || ''), String(user.dept_code || ''),
+    String(user.profit_center || ''), String(user.org_section || ''),
+    String(user.org_group_name || '')
+  );
+  return shares.length > 0;
+}
+
+// GET /report-dashboards
+router.get('/report-dashboards', requireDashboard, async (req, res) => {
+  const { db } = require('../database-oracle');
+  try {
+    const user = req.user;
+    const uid = String(user.id), rid = String(user.role_id || ''),
+          dept = String(user.dept_code || ''), pc = String(user.profit_center || ''),
+          div = String(user.org_section || ''), og = String(user.org_group_name || '');
+    const rows = await db.prepare(`
+      SELECT rd.*, u.name as creator_name,
+             CASE WHEN rd.user_id = ? THEN 1
+                  WHEN EXISTS (SELECT 1 FROM ai_report_dashboard_shares
+                               WHERE dashboard_id=rd.id AND share_type='manage' AND (
+                                 (grantee_type='user' AND grantee_id=?) OR
+                                 (grantee_type='role' AND grantee_id=?) OR
+                                 (grantee_type='department' AND grantee_id=?) OR
+                                 (grantee_type='cost_center' AND grantee_id=?) OR
+                                 (grantee_type='division' AND grantee_id=?) OR
+                                 (grantee_type='org_group' AND grantee_id=?)
+                               )) THEN 1
+                  ELSE 0 END AS can_manage
+      FROM ai_report_dashboards rd
+      LEFT JOIN users u ON u.id = rd.user_id
+      WHERE rd.is_active = 1
+        AND (
+          rd.user_id = ?
+          OR rd.id IN (
+            SELECT dashboard_id FROM ai_report_dashboard_shares WHERE
+              (grantee_type='user' AND grantee_id=?) OR
+              (grantee_type='role' AND grantee_id=?) OR
+              (grantee_type='department' AND grantee_id=?) OR
+              (grantee_type='cost_center' AND grantee_id=?) OR
+              (grantee_type='division' AND grantee_id=?) OR
+              (grantee_type='org_group' AND grantee_id=?)
+          )
+        )
+      ORDER BY rd.category NULLS LAST, rd.sort_order, rd.name
+    `).all(
+      user.id, uid, rid, dept, pc, div, og,
+      user.id, uid, rid, dept, pc, div, og
+    );
+    const isAdmin = user.role === 'admin';
+    res.json(rows.map(r => ({ ...r, can_manage: isAdmin ? 1 : r.can_manage })));
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /report-dashboards
+router.post('/report-dashboards', requireDashboard, async (req, res) => {
+  const { db } = require('../database-oracle');
+  try {
+    const { name, name_en, name_vi, description, description_en, description_vi, category, category_en, category_vi, layout_config, sort_order } = req.body;
+    if (!name) return res.status(400).json({ error: '名稱必填' });
+    let tEn = name_en || null, tVi = name_vi || null;
+    if (!tEn || !tVi) {
+      try {
+        const t = await translateFields({ name, description: null });
+        if (!tEn) tEn = t.name_en || null;
+        if (!tVi) tVi = t.name_vi || null;
+      } catch {}
+    }
+    const r = await db.prepare(`
+      INSERT INTO ai_report_dashboards (user_id, name, name_en, name_vi, description, description_en, description_vi, category, category_en, category_vi, layout_config, sort_order)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+    `).run(
+      req.user.id, name, tEn, tVi,
+      description || null, description_en || null, description_vi || null,
+      category || null, category_en || null, category_vi || null,
+      layout_config ? JSON.stringify(layout_config) : null, sort_order || 0
+    );
+    const newRow = await db.prepare('SELECT * FROM ai_report_dashboards WHERE id=?').get(r.lastInsertRowid);
+    res.json({ ...newRow, can_manage: 1 });  // 建立者一定有管理權
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// PUT /report-dashboards/:id
+router.put('/report-dashboards/:id', requireDashboard, async (req, res) => {
+  const { db } = require('../database-oracle');
+  try {
+    const board = await db.prepare('SELECT * FROM ai_report_dashboards WHERE id=?').get(req.params.id);
+    if (!board) return res.status(404).json({ error: '儀表板不存在' });
+    if (!await canManageDashboard(db, board, req.user))
+      return res.status(403).json({ error: '無權限修改' });
+    const { name, name_en, name_vi, description, description_en, description_vi, category, category_en, category_vi, layout_config, sort_order, auto_refresh_interval } = req.body;
+    await db.prepare(`
+      UPDATE ai_report_dashboards SET
+        name=?, name_en=?, name_vi=?, description=?, description_en=?, description_vi=?,
+        category=?, category_en=?, category_vi=?, layout_config=?, sort_order=?,
+        auto_refresh_interval=?, updated_at=SYSTIMESTAMP
+      WHERE id=?
+    `).run(
+      name, name_en || null, name_vi || null,
+      description || null, description_en || null, description_vi || null,
+      category || null, category_en || null, category_vi || null,
+      layout_config ? (typeof layout_config === 'string' ? layout_config : JSON.stringify(layout_config)) : null,
+      sort_order || 0,
+      auto_refresh_interval != null ? Number(auto_refresh_interval) : null,
+      req.params.id
+    );
+    const updated = await db.prepare('SELECT * FROM ai_report_dashboards WHERE id=?').get(req.params.id);
+    res.json(updated);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// DELETE /report-dashboards/:id
+router.delete('/report-dashboards/:id', requireDashboard, async (req, res) => {
+  const { db } = require('../database-oracle');
+  try {
+    const board = await db.prepare('SELECT * FROM ai_report_dashboards WHERE id=?').get(req.params.id);
+    if (!board) return res.status(404).json({ error: '儀表板不存在' });
+    if (!await canManageDashboard(db, board, req.user))
+      return res.status(403).json({ error: '無權限刪除' });
+    await db.prepare(`UPDATE ai_report_dashboards SET is_active=0, updated_at=SYSTIMESTAMP WHERE id=?`).run(req.params.id);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /report-dashboards/:id/translate — 重新翻譯名稱 + 說明 + 分類
+router.post('/report-dashboards/:id/translate', requireDashboard, async (req, res) => {
+  const { db } = require('../database-oracle');
+  try {
+    const board = await db.prepare('SELECT * FROM ai_report_dashboards WHERE id=?').get(req.params.id);
+    if (!board) return res.status(404).json({ error: '不存在' });
+    if (!await canManageDashboard(db, board, req.user))
+      return res.status(403).json({ error: '無權限' });
+    // Use body values if provided (user may have edited but not saved yet)
+    const nameStr = req.body.name || board.name;
+    const descStr = req.body.description !== undefined ? req.body.description : board.description;
+    const catStr = req.body.category !== undefined ? req.body.category : board.category;
+    const nameT = await translateFields({ name: nameStr, description: null });
+    let descEn = null, descVi = null, catEn = null, catVi = null;
+    if (descStr) {
+      const descT = await translateFields({ name: descStr, description: null }).catch(() => ({}));
+      descEn = descT.name_en || null; descVi = descT.name_vi || null;
+    }
+    if (catStr) {
+      const catT = await translateFields({ name: catStr, description: null }).catch(() => ({}));
+      catEn = catT.name_en || null; catVi = catT.name_vi || null;
+    }
+    await db.prepare(`UPDATE ai_report_dashboards SET name_en=?, name_vi=?, description_en=?, description_vi=?, category_en=?, category_vi=?, updated_at=SYSTIMESTAMP WHERE id=?`)
+      .run(nameT.name_en, nameT.name_vi, descEn, descVi, catEn, catVi, req.params.id);
+    res.json({
+      name_zh: board.name, name_en: nameT.name_en, name_vi: nameT.name_vi,
+      description_en: descEn, description_vi: descVi,
+      category_en: catEn, category_vi: catVi,
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /translate-text — 通用單一文字翻譯（不綁定任何 DB 記錄）
+router.post('/translate-text', requireDashboard, async (req, res) => {
+  try {
+    const { text } = req.body;
+    if (!text) return res.status(400).json({ error: 'text is required' });
+    const t = await translateFields({ name: text, description: null });
+    res.json({ zh: t.name_zh || text, en: t.name_en, vi: t.name_vi });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /report-dashboards/:id/clone
+router.post('/report-dashboards/:id/clone', requireDashboard, async (req, res) => {
+  const { db } = require('../database-oracle');
+  try {
+    const board = await db.prepare('SELECT * FROM ai_report_dashboards WHERE id=?').get(req.params.id);
+    if (!board) return res.status(404).json({ error: '儀表板不存在' });
+    if (!await canAccessDashboard(db, board, req.user))
+      return res.status(403).json({ error: '無存取權限' });
+    const newName = (req.body.name || board.name) + ' (複製)';
+    const r = await db.prepare(`
+      INSERT INTO ai_report_dashboards (user_id, name, description, category, layout_config, sort_order)
+      VALUES (?,?,?,?,?,?)
+    `).run(req.user.id, newName, board.description, board.category, board.layout_config, 0);
+    const newRow = await db.prepare('SELECT * FROM ai_report_dashboards WHERE id=?').get(r.lastInsertRowid);
+    res.json(newRow);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /report-dashboards/:id/shares
+router.get('/report-dashboards/:id/shares', requireDashboard, async (req, res) => {
+  const { db } = require('../database-oracle');
+  try {
+    const board = await db.prepare('SELECT * FROM ai_report_dashboards WHERE id=?').get(req.params.id);
+    if (!board || !await canManageDashboard(db, board, req.user))
+      return res.status(403).json({ error: '無管理權限' });
+    const shares = await db.prepare(`SELECT * FROM ai_report_dashboard_shares WHERE dashboard_id=? ORDER BY id`).all(req.params.id);
+    res.json(shares);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /report-dashboards/:id/shares
+router.post('/report-dashboards/:id/shares', requireDashboard, async (req, res) => {
+  const { db } = require('../database-oracle');
+  try {
+    const board = await db.prepare('SELECT * FROM ai_report_dashboards WHERE id=?').get(req.params.id);
+    if (!board || !await canManageDashboard(db, board, req.user))
+      return res.status(403).json({ error: '無管理權限' });
+    const { grantee_type, grantee_id, share_type } = req.body;
+    if (!grantee_type || !grantee_id) return res.status(400).json({ error: '必填欄位缺少' });
+    const exists = await db.prepare(
+      `SELECT id FROM ai_report_dashboard_shares WHERE dashboard_id=? AND grantee_type=? AND grantee_id=?`
+    ).get(req.params.id, grantee_type, String(grantee_id));
+    if (exists) {
+      await db.prepare(`UPDATE ai_report_dashboard_shares SET share_type=? WHERE id=?`).run(share_type || 'use', exists.id);
+    } else {
+      await db.prepare(`INSERT INTO ai_report_dashboard_shares (dashboard_id, grantee_type, grantee_id, share_type, granted_by) VALUES (?,?,?,?,?)`
+      ).run(req.params.id, grantee_type, String(grantee_id), share_type || 'use', req.user.id);
+    }
+    const shares = await db.prepare(`SELECT * FROM ai_report_dashboard_shares WHERE dashboard_id=? ORDER BY id`).all(req.params.id);
+    res.json(shares);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// DELETE /report-dashboards/:id/shares/:shareId
+router.delete('/report-dashboards/:id/shares/:shareId', requireDashboard, async (req, res) => {
+  const { db } = require('../database-oracle');
+  try {
+    const board = await db.prepare('SELECT * FROM ai_report_dashboards WHERE id=?').get(req.params.id);
+    if (!board || !await canManageDashboard(db, board, req.user))
+      return res.status(403).json({ error: '無管理權限' });
+    await db.prepare(`DELETE FROM ai_report_dashboard_shares WHERE id=? AND dashboard_id=?`).run(req.params.shareId, req.params.id);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
 
 module.exports = router;
