@@ -3,7 +3,7 @@
  * 讓使用者選欄位、聚合方式、圖表類型，即時預覽並儲存
  */
 import { useState, useMemo } from 'react'
-import type { AiChartConfig, AiChartDef, ChartColorPalette } from '../../types'
+import type { AiChartConfig, AiChartDef, ChartColorPalette, YAxisDef } from '../../types'
 import AiChart from './AiChart'
 import { useTranslation } from 'react-i18next'
 import api from '../../lib/api'
@@ -39,6 +39,102 @@ const PALETTE_OPTIONS: { key: ChartColorPalette; label: string; colors: string[]
 
 function colLabel(col: string, columnLabels?: Record<string, string>): string {
   return columnLabels?.[col.toLowerCase()] || col
+}
+
+const AGG_FNS: AggFn[] = ['SUM', 'COUNT', 'AVG', 'MAX', 'MIN', 'COUNT_DISTINCT']
+
+function newYAxis(columns: string[]): YAxisDef {
+  return { field: columns[0] || '', agg: 'SUM', chart_type: 'bar' }
+}
+
+interface YAxesPanelProps {
+  y_axes: YAxisDef[]
+  columns: string[]
+  columnLabels?: Record<string, string>
+  onChange: (y_axes: YAxisDef[]) => void
+}
+
+function YAxesPanel({ y_axes, columns, columnLabels, onChange }: YAxesPanelProps) {
+  function update(idx: number, patch: Partial<YAxisDef>) {
+    const next = y_axes.map((ax, i) => i === idx ? { ...ax, ...patch } : ax)
+    onChange(next)
+  }
+  function remove(idx: number) { onChange(y_axes.filter((_, i) => i !== idx)) }
+  function add() { onChange([...y_axes, newYAxis(columns)]) }
+
+  return (
+    <div className="space-y-2">
+      {y_axes.map((ax, idx) => (
+        <div key={idx} className="border border-gray-200 rounded p-2 space-y-1.5 bg-gray-50">
+          <div className="flex items-center gap-1">
+            <span className="text-xs text-gray-400 w-4">{idx + 1}</span>
+            {/* 欄位 */}
+            <select value={ax.field} onChange={e => update(idx, { field: e.target.value })}
+              className="flex-1 border border-gray-200 rounded px-1.5 py-0.5 text-xs focus:outline-none focus:border-blue-400">
+              {columns.map(c => <option key={c} value={c}>{colLabel(c, columnLabels)} ({c})</option>)}
+            </select>
+            {/* 聚合 */}
+            <select value={ax.agg} onChange={e => update(idx, { agg: e.target.value as YAxisDef['agg'] })}
+              className="w-20 border border-gray-200 rounded px-1.5 py-0.5 text-xs focus:outline-none focus:border-blue-400">
+              {AGG_FNS.map(fn => <option key={fn} value={fn}>{fn}</option>)}
+            </select>
+            {/* 類型 */}
+            <select value={ax.chart_type} onChange={e => update(idx, { chart_type: e.target.value as 'bar' | 'line' })}
+              className="w-14 border border-gray-200 rounded px-1.5 py-0.5 text-xs focus:outline-none focus:border-blue-400">
+              <option value="bar">Bar</option>
+              <option value="line">Line</option>
+            </select>
+            {/* 顏色 */}
+            <input type="color" value={ax.color || '#118DFF'}
+              onChange={e => update(idx, { color: e.target.value })}
+              className="w-7 h-6 rounded border border-gray-200 cursor-pointer p-0"
+              title="顏色" />
+            <button onClick={() => remove(idx)} className="text-gray-300 hover:text-red-500 text-xs ml-auto">✕</button>
+          </div>
+          {/* label / bar_width */}
+          <div className="flex gap-1">
+            <input type="text" placeholder="名稱 (label)" value={ax.label || ''}
+              onChange={e => update(idx, { label: e.target.value || undefined })}
+              className="flex-1 border border-gray-200 rounded px-1.5 py-0.5 text-xs focus:outline-none focus:border-blue-400" />
+            {ax.chart_type === 'bar' && (
+              <input type="text" placeholder="寬度 e.g. 40%" value={ax.bar_width || ''}
+                onChange={e => update(idx, { bar_width: e.target.value || undefined })}
+                className="w-24 border border-gray-200 rounded px-1.5 py-0.5 text-xs focus:outline-none focus:border-blue-400" />
+            )}
+          </div>
+          {/* toggles */}
+          <div className="flex flex-wrap gap-x-3 gap-y-1">
+            <label className="flex items-center gap-1 text-xs text-gray-600 cursor-pointer">
+              <input type="checkbox" checked={!!ax.gradient} onChange={e => update(idx, { gradient: e.target.checked })} />漸層
+            </label>
+            <label className="flex items-center gap-1 text-xs text-gray-600 cursor-pointer">
+              <input type="checkbox" checked={!!ax.shadow} onChange={e => update(idx, { shadow: e.target.checked })} />陰影
+            </label>
+            {ax.chart_type === 'bar' && (
+              <label className="flex items-center gap-1 text-xs text-gray-600 cursor-pointer">
+                <input type="checkbox" checked={!!ax.overlap} onChange={e => update(idx, { overlap: e.target.checked })} />套疊
+              </label>
+            )}
+            {ax.chart_type === 'line' && (<>
+              <label className="flex items-center gap-1 text-xs text-gray-600 cursor-pointer">
+                <input type="checkbox" checked={!!ax.smooth} onChange={e => update(idx, { smooth: e.target.checked })} />平滑
+              </label>
+              <label className="flex items-center gap-1 text-xs text-gray-600 cursor-pointer">
+                <input type="checkbox" checked={!!ax.area} onChange={e => update(idx, { area: e.target.checked })} />面積
+              </label>
+            </>)}
+            <label className="flex items-center gap-1 text-xs text-gray-600 cursor-pointer">
+              <input type="checkbox" checked={!!ax.use_right_axis} onChange={e => update(idx, { use_right_axis: e.target.checked })} />右軸
+            </label>
+          </div>
+        </div>
+      ))}
+      <button onClick={add}
+        className="w-full py-1 border border-dashed border-blue-300 text-blue-500 text-xs rounded hover:bg-blue-50">
+        + 新增 Y 軸 series
+      </button>
+    </div>
+  )
 }
 
 /** Client-side 聚合 */
@@ -125,9 +221,10 @@ export default function ChartBuilder({ rows, columns, columnLabels, initialConfi
   const previewChartRows = useMemo(() => {
     if (previewIdx === null) return []
     const c = charts[previewIdx]
-    if (!c?.def.x_field || !c.def.y_field) return []
-    // 多維度：直接傳 raw rows，AiChart 內部 pivot
-    if (c.def.series_field || c.def.stack_field) return rows
+    if (!c?.def.x_field) return []
+    // y_axes 模式 / 多維度：直接傳 raw rows，AiChart 內部處理
+    if ((c.def.y_axes && c.def.y_axes.length > 0) || c.def.series_field || c.def.stack_field) return rows
+    if (!c.def.y_field) return []
     // 單一 series：先 client-side 聚合
     const agg = aggregateRows(rows, c.def.x_field, c.def.y_field, c.def._agg || 'SUM', c.def.limit || 20)
     return agg.map(r => ({ [c.def.x_field!]: r.x, [c.def.y_field!]: r.y }))
@@ -324,7 +421,7 @@ export default function ChartBuilder({ rows, columns, columnLabels, initialConfi
           </div>
 
           {/* 分組 / 堆疊維度（bar / line only）*/}
-          {(active.def.type === 'bar' || active.def.type === 'line') && (
+          {(active.def.type === 'bar' || active.def.type === 'line') && !(active.def.y_axes?.length) && (
             <div className="grid grid-cols-2 gap-2">
               <div>
                 <label className="text-xs text-gray-500 block mb-1">{t('aiDash.cb.seriesField')}</label>
@@ -352,6 +449,27 @@ export default function ChartBuilder({ rows, columns, columnLabels, initialConfi
                   ))}
                 </select>
               </div>
+            </div>
+          )}
+
+          {/* 複數 Y 軸 (Method B)：bar / line only */}
+          {(active.def.type === 'bar' || active.def.type === 'line') && (
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-xs text-gray-500">複數 Y 軸 (進階)</label>
+                {(active.def.y_axes?.length ?? 0) > 0 && (
+                  <button
+                    onClick={() => updateActive({ y_axes: undefined, series_field: undefined, stack_field: undefined })}
+                    className="text-xs text-gray-400 hover:text-red-500"
+                  >清除全部</button>
+                )}
+              </div>
+              <YAxesPanel
+                y_axes={active.def.y_axes || []}
+                columns={columns}
+                columnLabels={columnLabels}
+                onChange={y_axes => updateActive({ y_axes: y_axes.length ? y_axes : undefined })}
+              />
             </div>
           )}
 
@@ -555,7 +673,7 @@ export default function ChartBuilder({ rows, columns, columnLabels, initialConfi
           {/* 預覽按鈕 */}
           <button
             onClick={() => setPreviewIdx(previewIdx === activeIdx ? null : activeIdx)}
-            disabled={!active.def.x_field || !active.def.y_field}
+            disabled={!active.def.x_field || (!active.def.y_field && !(active.def.y_axes?.length))}
             className="w-full py-1.5 border border-blue-300 text-blue-600 text-xs rounded hover:bg-blue-50 disabled:opacity-40"
           >
             {previewIdx === activeIdx ? `▲ ${t('aiDash.cb.collapsePreview')}` : `▼ ${t('aiDash.cb.preview')}`}

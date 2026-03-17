@@ -3,7 +3,7 @@
  * 僅 can_design_ai_select / admin 可見
  */
 import React, { useState, useEffect, useRef } from 'react'
-import { Plus, Save, Trash2, Play, RefreshCw, ChevronDown, ChevronRight, Eye, Link2, Edit3, Square, Pause, Share2, Copy, Upload, FolderOpen, Filter, X, Download, FileUp, PenLine, FunctionSquare, Languages } from 'lucide-react'
+import { Plus, Save, Trash2, Play, RefreshCw, ChevronDown, ChevronRight, Eye, Link2, Edit3, Square, Pause, Share2, Copy, Upload, FolderOpen, Filter, X, Download, FileUp, PenLine, FunctionSquare, Languages, RotateCcw } from 'lucide-react'
 import api from '../../lib/api'
 import type { AiSchemaDef, AiSchemaJoin, AiSelectTopic, AiSelectDesign, AiEtlJob, AiEtlRunLog, AiDashboardShare, AiSelectProject, AiProjectShare } from '../../types'
 import TranslationFields, { type TranslationData } from '../common/TranslationFields'
@@ -463,7 +463,7 @@ function SchemaManager({ projectId }: { projectId: number | null }) {
   const [expanded, setExpanded] = useState<number | null>(null)
   const [editId, setEditId] = useState<number | null>(null)
   const [form, setForm] = useState({
-    table_name: '', display_name: '', alias: '',
+    table_name: '', display_name: '', display_name_en: '', display_name_vi: '', alias: '',
     source_type: 'table' as 'table' | 'view' | 'sql', source_sql: '',
     db_connection: 'erp', business_notes: '', join_hints: '',
     vector_etl_job_id: undefined as number | undefined,
@@ -473,11 +473,16 @@ function SchemaManager({ projectId }: { projectId: number | null }) {
   const [etlJobs, setEtlJobs] = useState<AiEtlJob[]>([])
   const [projects, setProjects] = useState<AiSelectProject[]>([])
   const [loading, setLoading] = useState(false)
+  const [schemaTranslating, setSchemaTranslating] = useState(false)
+  const [showCopyDialog, setShowCopyDialog] = useState(false)
+  const [allSchemasForCopy, setAllSchemasForCopy] = useState<AiSchemaDef[]>([])
+  const [copySearch, setCopySearch] = useState('')
   const formRef = useRef<HTMLDivElement>(null)
 
   // ── 欄位說明編輯 ──────────────────────────────────────────────────────────────
   const [editingColsId, setEditingColsId] = useState<number | null>(null)
   const [editingCols, setEditingCols] = useState<any[]>([])
+  const [colFilter, setColFilter] = useState('')
   const [colsSaving, setColsSaving] = useState(false)
   const [showVirtualForm, setShowVirtualForm] = useState(false)
   const [virtualForm, setVirtualForm] = useState({ name: '', expression: '', description: '', fn_template: '' })
@@ -505,6 +510,7 @@ function SchemaManager({ projectId }: { projectId: number | null }) {
   const startEditCols = (s: any) => {
     setEditingColsId(s.id)
     setEditingCols((s.columns || []).map((c: any) => ({ ...c })))
+    setColFilter('')
     setShowVirtualForm(false)
   }
 
@@ -611,7 +617,7 @@ function SchemaManager({ projectId }: { projectId: number | null }) {
     api.get('/dashboard/projects').then(r => setProjects(r.data)).catch(() => {})
   }, [projectId])
 
-  const emptyForm = { table_name: '', display_name: '', alias: '', source_type: 'table' as const, source_sql: '', db_connection: 'erp', business_notes: '', join_hints: '', vector_etl_job_id: undefined as number | undefined, form_project_id: projectId || undefined }
+  const emptyForm = { table_name: '', display_name: '', display_name_en: '', display_name_vi: '', alias: '', source_type: 'table' as const, source_sql: '', db_connection: 'erp', business_notes: '', join_hints: '', vector_etl_job_id: undefined as number | undefined, form_project_id: projectId || undefined }
 
   const editingSchema = schemas.find(s => s.id === editId)
   const editColOptions = editingSchema
@@ -625,23 +631,57 @@ function SchemaManager({ projectId }: { projectId: number | null }) {
 
   const save = async () => {
     setLoading(true)
+    setSchemaTranslating(true)
     try {
       const { form_project_id, ...rest } = form
       const payload = { ...rest, base_conditions: baseConditions.filter(c => c.col), project_id: form_project_id ?? projectId ?? undefined }
       if (editId) {
-        await api.put(`/dashboard/designer/schemas/${editId}`, payload)
+        const r = await api.put(`/dashboard/designer/schemas/${editId}`, payload)
+        if (r.data.display_name_en || r.data.display_name_vi) {
+          setForm(p => ({ ...p, display_name_en: r.data.display_name_en || p.display_name_en, display_name_vi: r.data.display_name_vi || p.display_name_vi }))
+        }
       } else {
         await api.post('/dashboard/designer/schemas', payload)
+        setEditId(null)
+        setForm(emptyForm)
+        setBaseConditions([])
       }
-      setEditId(null)
-      setForm(emptyForm)
-      setBaseConditions([])
       load()
     } catch (e: any) {
       alert(e?.response?.data?.error || '儲存失敗')
     } finally {
       setLoading(false)
+      setSchemaTranslating(false)
     }
+  }
+
+  const retranslateSchema = async () => {
+    if (!editId) return
+    setSchemaTranslating(true)
+    try {
+      const r = await api.post(`/dashboard/designer/schemas/${editId}/translate`)
+      setForm(p => ({ ...p, display_name_en: r.data.display_name_en || '', display_name_vi: r.data.display_name_vi || '' }))
+    } catch { alert('重新翻譯失敗') }
+    finally { setSchemaTranslating(false) }
+  }
+
+  const openCopyDialog = async () => {
+    setCopySearch('')
+    try {
+      const r = await api.get('/dashboard/designer/schemas?all=true')
+      // 排除已在本專案的
+      const filtered = (r.data as AiSchemaDef[]).filter(s => s.project_id !== projectId)
+      setAllSchemasForCopy(filtered)
+    } catch { setAllSchemasForCopy([]) }
+    setShowCopyDialog(true)
+  }
+
+  const copySchema = async (srcId: number) => {
+    try {
+      await api.post(`/dashboard/designer/schemas/${srcId}/copy`, { target_project_id: projectId })
+      setShowCopyDialog(false)
+      load()
+    } catch (e: any) { alert(e?.response?.data?.error || '複製失敗') }
   }
 
   const del = async (id: number) => {
@@ -743,6 +783,30 @@ function SchemaManager({ projectId }: { projectId: number | null }) {
             <label className="text-xs text-gray-400 mb-1 block">顯示名稱</label>
             <input className="input py-1.5 text-sm" placeholder="工單異常視圖"
               value={form.display_name} onChange={e => setForm(p => ({ ...p, display_name: e.target.value }))} />
+            <div className="mt-1 space-y-1">
+              <div className="flex items-center gap-1">
+                <span className="text-[10px] text-gray-400 w-5 flex-shrink-0">EN</span>
+                <input className={`input py-1 text-xs flex-1 ${schemaTranslating ? 'opacity-50' : ''}`} placeholder={schemaTranslating ? '翻譯中...' : 'Display Name (EN)'}
+                  disabled={schemaTranslating}
+                  value={form.display_name_en} onChange={e => setForm(p => ({ ...p, display_name_en: e.target.value }))} />
+              </div>
+              <div className="flex items-center gap-1">
+                <span className="text-[10px] text-gray-400 w-5 flex-shrink-0">VI</span>
+                <input className={`input py-1 text-xs flex-1 ${schemaTranslating ? 'opacity-50' : ''}`} placeholder={schemaTranslating ? '翻譯中...' : 'Tên hiển thị (VI)'}
+                  disabled={schemaTranslating}
+                  value={form.display_name_vi} onChange={e => setForm(p => ({ ...p, display_name_vi: e.target.value }))} />
+                {editId && (
+                  <button type="button" onClick={retranslateSchema} disabled={schemaTranslating || !form.display_name}
+                    className="flex items-center gap-1 text-[11px] px-2 py-1 rounded border border-blue-300 text-blue-600 hover:bg-blue-50 disabled:opacity-40 flex-shrink-0">
+                    <RotateCcw size={10} className={schemaTranslating ? 'animate-spin' : ''} />
+                    重新翻譯
+                  </button>
+                )}
+              </div>
+              {!editId && form.display_name && (
+                <p className="text-[10px] text-blue-400">儲存後自動翻譯</p>
+              )}
+            </div>
           </div>
           <div>
             <label className="text-xs text-gray-400 mb-1 block">別名 (alias) <span className="text-gray-300">SQL 中引用用</span></label>
@@ -880,12 +944,59 @@ function SchemaManager({ projectId }: { projectId: number | null }) {
         </div>
       </div>
 
+      {/* 跨專案複製 Dialog */}
+      {showCopyDialog && (
+        <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50">
+          <div className="bg-white rounded-2xl shadow-xl p-5 w-[520px] max-h-[70vh] flex flex-col gap-3">
+            <div className="flex items-center justify-between">
+              <p className="text-sm font-semibold text-gray-800">從其他專案複製 Schema</p>
+              <button onClick={() => setShowCopyDialog(false)} className="text-gray-400 hover:text-gray-600">✕</button>
+            </div>
+            <input className="input py-1.5 text-sm" placeholder="搜尋名稱或 table..."
+              value={copySearch} onChange={e => setCopySearch(e.target.value)} autoFocus />
+            <div className="flex-1 overflow-y-auto space-y-1 min-h-0">
+              {allSchemasForCopy
+                .filter(s => {
+                  const q = copySearch.toLowerCase()
+                  return !q || (s.display_name || '').toLowerCase().includes(q) || s.table_name.toLowerCase().includes(q)
+                })
+                .map(s => (
+                  <div key={s.id} className="flex items-center justify-between px-3 py-2 rounded-lg hover:bg-gray-50 border border-gray-100">
+                    <div>
+                      <p className="text-sm font-medium text-gray-700">{s.display_name || s.table_name}</p>
+                      <p className="text-xs text-gray-400 font-mono">{s.table_name} · {s.db_connection}</p>
+                    </div>
+                    <button onClick={() => copySchema(s.id!)}
+                      className="text-xs px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700">
+                      複製到本專案
+                    </button>
+                  </div>
+                ))}
+              {allSchemasForCopy.filter(s => {
+                const q = copySearch.toLowerCase()
+                return !q || (s.display_name || '').toLowerCase().includes(q) || s.table_name.toLowerCase().includes(q)
+              }).length === 0 && (
+                <p className="text-xs text-gray-400 text-center py-6">無其他專案的 Schema</p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="flex items-center justify-between">
         <span className="text-xs text-gray-400 font-medium">Schema 清單（{schemas.length}）</span>
-        <button onClick={() => { setShowImport(true); setImportResult(null) }}
-          className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700 transition">
-          <RefreshCw size={12} /> 從 Oracle ERP 批次匯入
-        </button>
+        <div className="flex items-center gap-3">
+          {projectId && (
+            <button onClick={openCopyDialog}
+              className="flex items-center gap-1 text-xs text-purple-600 hover:text-purple-700 transition">
+              <Copy size={12} /> 從其他專案複製
+            </button>
+          )}
+          <button onClick={() => { setShowImport(true); setImportResult(null) }}
+            className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700 transition">
+            <RefreshCw size={12} /> 從 Oracle ERP 批次匯入
+          </button>
+        </div>
       </div>
 
       <div className="space-y-2">
@@ -911,6 +1022,7 @@ function SchemaManager({ projectId }: { projectId: number | null }) {
                   setEditId(s.id)
                   setForm({
                     table_name: s.table_name, display_name: s.display_name || '',
+                    display_name_en: s.display_name_en || '', display_name_vi: s.display_name_vi || '',
                     alias: s.alias || '', source_type: s.source_type || 'table', source_sql: s.source_sql || '',
                     db_connection: s.db_connection, business_notes: s.business_notes || '', join_hints: s.join_hints || '',
                     vector_etl_job_id: s.vector_etl_job_id,
@@ -982,11 +1094,41 @@ function SchemaManager({ projectId }: { projectId: number | null }) {
                 {/* 欄位列表 — 編輯模式 */}
                 {editingColsId === s.id ? (
                   <div className="space-y-2">
+                    {/* 搜尋過濾列 */}
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        className="input py-1 text-xs flex-1"
+                        placeholder="🔍 搜尋欄位名稱、說明..."
+                        value={colFilter}
+                        onChange={e => setColFilter(e.target.value)}
+                      />
+                      {colFilter && (
+                        <button onClick={() => setColFilter('')} className="text-gray-400 hover:text-gray-600 text-xs px-2">✕ 清除</button>
+                      )}
+                      <span className="text-xs text-gray-400 whitespace-nowrap">
+                        {colFilter
+                          ? `${editingCols.filter(c => c.column_name.toLowerCase().includes(colFilter.toLowerCase()) || (c.description || '').toLowerCase().includes(colFilter.toLowerCase()) || (c.desc_en || '').toLowerCase().includes(colFilter.toLowerCase())).length} / ${editingCols.length}`
+                          : `共 ${editingCols.length} 欄`}
+                      </span>
+                    </div>
                     <div className="overflow-auto max-h-[600px] rounded border border-blue-200">
                       <table className="w-full text-xs">
                         <thead className="sticky top-0 bg-blue-50 z-10">
                           <tr>
-                            <th className="px-2 py-1.5 text-left text-gray-500 font-medium w-8 text-center" title="資料權限過濾">🔒</th>
+                            <th className="px-2 py-1.5 text-center w-8" title="資料權限過濾">🔒</th>
+                            <th className="px-2 py-1.5 text-center w-8">
+                              <div className="flex flex-col items-center gap-0.5">
+                                <span title="使用者可見（可在欄位選擇器中選取）">👁</span>
+                                <div className="flex gap-0.5">
+                                  <button type="button" className="text-[9px] text-blue-500 hover:underline leading-none" title="全部設為可見"
+                                    onClick={() => setEditingCols(prev => prev.map(c => ({ ...c, is_visible: 1 })))}>全</button>
+                                  <span className="text-gray-300 text-[9px]">/</span>
+                                  <button type="button" className="text-[9px] text-gray-400 hover:underline leading-none" title="全部設為隱藏"
+                                    onClick={() => setEditingCols(prev => prev.map(c => ({ ...c, is_visible: 0 })))}>無</button>
+                                </div>
+                              </div>
+                            </th>
                             <th className="px-2 py-1.5 text-left text-gray-500 font-medium w-44">欄位名稱</th>
                             <th className="px-2 py-1.5 text-left text-gray-500 font-medium w-24">型態</th>
                             <th className="px-2 py-1.5 text-left text-gray-500 font-medium">說明 🇹🇼</th>
@@ -996,9 +1138,18 @@ function SchemaManager({ projectId }: { projectId: number | null }) {
                           </tr>
                         </thead>
                         <tbody>
-                          {editingCols.map((col, i) => (
+                          {editingCols.map((col, i) => {
+                            if (colFilter) {
+                              const q = colFilter.toLowerCase()
+                              const match = col.column_name.toLowerCase().includes(q)
+                                || (col.description || '').toLowerCase().includes(q)
+                                || (col.desc_en || '').toLowerCase().includes(q)
+                                || (col.desc_vi || '').toLowerCase().includes(q)
+                              if (!match) return null
+                            }
+                            return (
                             <>
-                              <tr key={`row-${i}`} className={col.is_virtual ? 'bg-purple-50' : col.is_filter_key ? 'bg-orange-50' : (i % 2 === 0 ? 'bg-white' : 'bg-gray-50')}>
+                              <tr key={`row-${i}`} className={col.is_virtual ? 'bg-purple-50' : col.is_filter_key ? 'bg-orange-50' : col.is_visible === 0 ? 'bg-gray-100 opacity-50' : (i % 2 === 0 ? 'bg-white' : 'bg-gray-50')}>
                                 {/* 過濾 checkbox */}
                                 <td className="px-2 py-1.5 text-center">
                                   <input type="checkbox"
@@ -1006,6 +1157,15 @@ function SchemaManager({ projectId }: { projectId: number | null }) {
                                     onChange={e => setEditingCols(prev => prev.map((c, idx) => idx === i ? { ...c, is_filter_key: e.target.checked ? 1 : 0 } : c))}
                                     className="w-3.5 h-3.5 rounded accent-orange-500 cursor-pointer"
                                     title="勾選：此欄位作為資料權限 SQL 過濾條件"
+                                  />
+                                </td>
+                                {/* 可見 checkbox */}
+                                <td className="px-2 py-1.5 text-center">
+                                  <input type="checkbox"
+                                    checked={col.is_visible !== 0}
+                                    onChange={e => setEditingCols(prev => prev.map((c, idx) => idx === i ? { ...c, is_visible: e.target.checked ? 1 : 0 } : c))}
+                                    className="w-3.5 h-3.5 rounded accent-blue-500 cursor-pointer"
+                                    title="使用者可在欄位選擇器中看到此欄位"
                                   />
                                 </td>
                                 <td className="px-2 py-1.5 font-mono text-gray-700 whitespace-nowrap">
@@ -1098,7 +1258,8 @@ function SchemaManager({ projectId }: { projectId: number | null }) {
                                 </tr>
                               )}
                             </>
-                          ))}
+                          )
+                          })}
                         </tbody>
                       </table>
                     </div>
@@ -1655,6 +1816,7 @@ function DesignManager({ projectId }: { projectId: number | null }) {
     vector_top_k: '10', vector_similarity_threshold: '0.50',
     vector_skip_fields: [] as string[],
     target_schema_ids: [] as number[], target_join_ids: [] as number[],
+    schema_where_only_ids: [] as number[],
     max_rows: '1000',
   })
   const [editTopicId, setEditTopicId] = useState<number | null>(null)
@@ -1738,19 +1900,25 @@ function DesignManager({ projectId }: { projectId: number | null }) {
   }
 
   const toggleSchemaId = (id: number) => {
-    setDesignForm(p => ({
-      ...p,
-      target_schema_ids: p.target_schema_ids.includes(id)
-        ? p.target_schema_ids.filter(x => x !== id)
-        : [...p.target_schema_ids, id],
-      // 取消 schema 時同時移除涉及該 schema 的 join
-      target_join_ids: p.target_schema_ids.includes(id)
-        ? p.target_join_ids.filter(jid => {
-            const j = allJoins.find(j => j.id === jid)
-            return j && j.left_schema_id !== id && j.right_schema_id !== id
-          })
-        : p.target_join_ids
-    }))
+    setDesignForm(p => {
+      const removing = p.target_schema_ids.includes(id)
+      return {
+        ...p,
+        target_schema_ids: removing
+          ? p.target_schema_ids.filter(x => x !== id)
+          : [...p.target_schema_ids, id],
+        // 取消 schema 時同時移除涉及該 schema 的 join 及 where_only 設定
+        target_join_ids: removing
+          ? p.target_join_ids.filter(jid => {
+              const j = allJoins.find(j => j.id === jid)
+              return j && j.left_schema_id !== id && j.right_schema_id !== id
+            })
+          : p.target_join_ids,
+        schema_where_only_ids: removing
+          ? p.schema_where_only_ids.filter(x => x !== id)
+          : p.schema_where_only_ids,
+      }
+    })
   }
 
   const toggleJoinId = (id: number) => {
@@ -1759,6 +1927,15 @@ function DesignManager({ projectId }: { projectId: number | null }) {
       target_join_ids: p.target_join_ids.includes(id)
         ? p.target_join_ids.filter(x => x !== id)
         : [...p.target_join_ids, id]
+    }))
+  }
+
+  const toggleSchemaWhereOnly = (id: number) => {
+    setDesignForm(p => ({
+      ...p,
+      schema_where_only_ids: p.schema_where_only_ids.includes(id)
+        ? p.schema_where_only_ids.filter(x => x !== id)
+        : [...p.schema_where_only_ids, id]
     }))
   }
 
@@ -1776,6 +1953,7 @@ function DesignManager({ projectId }: { projectId: number | null }) {
         vector_skip_fields: JSON.stringify(designForm.vector_skip_fields),
         target_schema_ids: designForm.target_schema_ids,
         target_join_ids: designForm.target_join_ids,
+        schema_where_only_ids: designForm.schema_where_only_ids,
         ...designTrans,
       }
       if (editDesign) {
@@ -1804,6 +1982,7 @@ function DesignManager({ projectId }: { projectId: number | null }) {
     vector_top_k: '10', vector_similarity_threshold: '0.50',
     vector_skip_fields: [] as string[],
     target_schema_ids: [] as number[], target_join_ids: [] as number[],
+    schema_where_only_ids: [] as number[],
     max_rows: '1000',
   })
 
@@ -1940,7 +2119,10 @@ function DesignManager({ projectId }: { projectId: number | null }) {
                         vector_skip_fields: full.vector_skip_fields
                           ? (typeof full.vector_skip_fields === 'string' ? JSON.parse(full.vector_skip_fields) : full.vector_skip_fields)
                           : [],
-                        target_schema_ids: sids, target_join_ids: jids
+                        target_schema_ids: sids, target_join_ids: jids,
+                        schema_where_only_ids: full.schema_where_only_ids
+                          ? (typeof full.schema_where_only_ids === 'string' ? JSON.parse(full.schema_where_only_ids) : full.schema_where_only_ids)
+                          : [],
                       })
                       setDesignTrans({
                         name_zh: (full as any).name_zh || null, name_en: (full as any).name_en || null, name_vi: (full as any).name_vi || null,
@@ -2032,19 +2214,30 @@ function DesignManager({ projectId }: { projectId: number | null }) {
                 <p className="text-xs text-gray-400 bg-white rounded-lg px-3 py-2">尚無 Schema，請先至 Schema 知識庫匯入</p>
               ) : (
                 <div className="bg-white rounded-lg border border-gray-200 divide-y divide-gray-100 max-h-40 overflow-y-auto">
-                  {schemas.map(s => (
-                    <label key={s.id} className="flex items-center gap-3 px-3 py-2 cursor-pointer hover:bg-gray-50">
-                      <input type="checkbox"
-                        checked={designForm.target_schema_ids.includes(s.id)}
-                        onChange={() => toggleSchemaId(s.id)} />
-                      {s.alias && <span className="text-xs font-mono text-purple-600">{s.alias}</span>}
-                      <span className="text-xs text-gray-700 font-medium">{s.display_name || s.table_name}</span>
-                      <span className="text-xs text-gray-400 truncate max-w-[120px]">{s.table_name}</span>
-                      <span className={`ml-auto text-xs px-1.5 py-0.5 rounded flex-shrink-0 ${s.db_connection === 'erp' ? 'bg-blue-100 text-blue-500' : 'bg-gray-200 text-gray-500'}`}>
-                        {s.db_connection}
-                      </span>
-                    </label>
-                  ))}
+                  {schemas.map(s => {
+                    const isSelected = designForm.target_schema_ids.includes(s.id)
+                    const isWhereOnly = designForm.schema_where_only_ids.includes(s.id)
+                    return (
+                      <div key={s.id} className="flex items-center gap-3 px-3 py-2 hover:bg-gray-50">
+                        <input type="checkbox"
+                          checked={isSelected}
+                          onChange={() => toggleSchemaId(s.id)} />
+                        {s.alias && <span className="text-xs font-mono text-purple-600">{s.alias}</span>}
+                        <span className="text-xs text-gray-700 font-medium flex-1 truncate">{s.display_name || s.table_name}</span>
+                        <span className="text-xs text-gray-400 truncate max-w-[100px] font-mono">{s.table_name}</span>
+                        {isSelected && (
+                          <label className="flex items-center gap-1 flex-shrink-0 cursor-pointer" title="僅作 WHERE 篩選，不出現在欄位選擇器">
+                            <input type="checkbox" checked={isWhereOnly}
+                              onChange={() => toggleSchemaWhereOnly(s.id)} />
+                            <span className={`text-xs ${isWhereOnly ? 'text-orange-500 font-medium' : 'text-gray-400'}`}>僅WHERE</span>
+                          </label>
+                        )}
+                        <span className={`text-xs px-1.5 py-0.5 rounded flex-shrink-0 ${s.db_connection === 'erp' ? 'bg-blue-100 text-blue-500' : 'bg-gray-200 text-gray-500'}`}>
+                          {s.db_connection}
+                        </span>
+                      </div>
+                    )
+                  })}
                 </div>
               )}
               {designForm.target_schema_ids.length > 0 && (

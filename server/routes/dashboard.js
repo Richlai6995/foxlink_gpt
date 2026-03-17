@@ -488,7 +488,7 @@ router.post('/designer/designs', requireDesigner, async (req, res) => {
   try {
     const db = require('../database-oracle').db;
     const {
-      topic_id, name, description, target_schema_ids, target_join_ids, vector_search_enabled,
+      topic_id, name, description, target_schema_ids, target_join_ids, schema_where_only_ids, vector_search_enabled,
       system_prompt, few_shot_examples, chart_config, cache_ttl_minutes, is_public,
       vector_top_k, vector_similarity_threshold, vector_skip_fields,
       name_zh, name_en, name_vi, desc_zh, desc_en, desc_vi,
@@ -496,14 +496,15 @@ router.post('/designer/designs', requireDesigner, async (req, res) => {
     if (!topic_id || !name) return res.status(400).json({ error: '主題與名稱為必填' });
     const r = await db.prepare(
       `INSERT INTO ai_select_designs
-         (topic_id, name, description, target_schema_ids, target_join_ids, vector_search_enabled,
+         (topic_id, name, description, target_schema_ids, target_join_ids, schema_where_only_ids, vector_search_enabled,
           system_prompt, few_shot_examples, chart_config, cache_ttl_minutes, is_public,
           vector_top_k, vector_similarity_threshold, vector_skip_fields, created_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
       topic_id, name, description || null,
       target_schema_ids ? JSON.stringify(target_schema_ids) : null,
       target_join_ids ? JSON.stringify(target_join_ids) : null,
+      schema_where_only_ids ? JSON.stringify(schema_where_only_ids) : null,
       vector_search_enabled ? 1 : 0,
       system_prompt || null,
       few_shot_examples || null,
@@ -539,7 +540,7 @@ router.put('/designer/designs/:id', requireDesigner, async (req, res) => {
       if (!design.project_id || !await canAccessProject(db, design.project_id, req.user, 'develop')) return res.status(403).json({ error: '無權限' });
     }
     const {
-      topic_id, name, description, target_schema_ids, target_join_ids, vector_search_enabled,
+      topic_id, name, description, target_schema_ids, target_join_ids, schema_where_only_ids, vector_search_enabled,
       system_prompt, few_shot_examples, chart_config, cache_ttl_minutes, is_public,
       vector_top_k, vector_similarity_threshold, vector_skip_fields,
       name_zh, name_en, name_vi, desc_zh, desc_en, desc_vi,
@@ -547,7 +548,7 @@ router.put('/designer/designs/:id', requireDesigner, async (req, res) => {
     const existing = await db.prepare(`SELECT name, description FROM ai_select_designs WHERE id=?`).get(req.params.id);
     await db.prepare(
       `UPDATE ai_select_designs SET
-         topic_id=?, name=?, description=?, target_schema_ids=?, target_join_ids=?, vector_search_enabled=?,
+         topic_id=?, name=?, description=?, target_schema_ids=?, target_join_ids=?, schema_where_only_ids=?, vector_search_enabled=?,
          system_prompt=?, few_shot_examples=?, chart_config=?, cache_ttl_minutes=?, is_public=?,
          vector_top_k=?, vector_similarity_threshold=?, vector_skip_fields=?,
          updated_at=SYSTIMESTAMP
@@ -556,6 +557,7 @@ router.put('/designer/designs/:id', requireDesigner, async (req, res) => {
       topic_id, name, description || null,
       target_schema_ids ? JSON.stringify(target_schema_ids) : null,
       target_join_ids ? JSON.stringify(target_join_ids) : null,
+      schema_where_only_ids ? JSON.stringify(schema_where_only_ids) : null,
       vector_search_enabled ? 1 : 0,
       system_prompt || null,
       few_shot_examples || null,
@@ -613,23 +615,34 @@ router.get('/schemas-for-design/:designId', verifyToken, async (req, res) => {
   try {
     const db = require('../database-oracle').db;
     const designId = parseInt(req.params.designId);
-    const design = await db.prepare('SELECT target_schema_ids FROM ai_select_designs WHERE id=?').get(designId);
+    const design = await db.prepare('SELECT target_schema_ids, schema_where_only_ids FROM ai_select_designs WHERE id=?').get(designId);
     if (!design) return res.json([]);
     let ids = [];
+    let whereOnlyIds = [];
     try {
       const raw = design.target_schema_ids;
       if (raw) ids = Array.isArray(raw) ? raw : JSON.parse(raw);
     } catch { ids = []; }
+    try {
+      const raw2 = design.schema_where_only_ids;
+      if (raw2) whereOnlyIds = Array.isArray(raw2) ? raw2 : JSON.parse(raw2);
+    } catch { whereOnlyIds = []; }
     if (!ids.length) return res.json([]);
     const placeholders = ids.map(() => '?').join(',');
     const schemas = await db.prepare(`SELECT * FROM ai_schema_definitions WHERE id IN (${placeholders})`).all(...ids);
-    const columns = await db.prepare(`SELECT * FROM ai_schema_columns WHERE schema_id IN (${placeholders}) ORDER BY id ASC`).all(...ids);
+    // 只回傳 is_visible != 0 的欄位給 field picker
+    const columns = await db.prepare(`SELECT * FROM ai_schema_columns WHERE schema_id IN (${placeholders}) AND NVL(is_visible,1) != 0 ORDER BY id ASC`).all(...ids);
     const colMap = {};
     for (const c of columns) {
       if (!colMap[c.schema_id]) colMap[c.schema_id] = [];
       colMap[c.schema_id].push(c);
     }
-    res.json(schemas.map(s => ({ ...s, columns: colMap[s.id] || [] })));
+    const whereOnlySet = new Set(whereOnlyIds.map(Number));
+    res.json(schemas.map(s => ({
+      ...s,
+      columns: colMap[s.id] || [],
+      where_only: whereOnlySet.has(Number(s.id)),
+    })));
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -639,12 +652,22 @@ router.get('/schemas-for-design/:designId', verifyToken, async (req, res) => {
 router.get('/designer/schemas', requireDesigner, async (req, res) => {
   try {
     const db = require('../database-oracle').db;
-    const { project_id } = req.query;
+    const { project_id, all } = req.query;
     const u = req.user;
     let filter = '';
     let binds = [];
-    if (project_id) {
-      filter = 'WHERE s.project_id=?';
+    if (all === 'true') {
+      // 查全部（供跨專案複製 schema 用），非 admin 只能看自己有存取權的
+      if (u.role !== 'admin') {
+        filter = `WHERE s.created_by=? OR EXISTS (
+          SELECT 1 FROM ai_select_projects p WHERE p.id=s.project_id AND (
+            p.created_by=? OR EXISTS (SELECT 1 FROM ai_project_shares sh WHERE sh.project_id=p.id AND sh.share_type='develop' AND ((sh.grantee_type='user' AND sh.grantee_id=?) OR (sh.grantee_type='role' AND sh.grantee_id=?)))
+          ))`;
+        binds = [u.id, u.id, String(u.id), String(u.role_id || '')];
+      }
+    } else if (project_id) {
+      // 包含指定專案的 schema，以及沒有指定專案（共用）的 schema
+      filter = 'WHERE s.project_id=? OR s.project_id IS NULL';
       binds = [project_id];
     } else if (u.role !== 'admin') {
       filter = `WHERE (s.project_id IS NULL AND s.created_by=?) OR EXISTS (
@@ -676,13 +699,14 @@ router.get('/designer/schemas', requireDesigner, async (req, res) => {
 router.post('/designer/schemas', requireDesigner, async (req, res) => {
   try {
     const db = require('../database-oracle').db;
-    const { table_name, display_name, alias, source_type, source_sql, db_connection, business_notes, join_hints, base_conditions, vector_etl_job_id, columns, project_id } = req.body;
+    const { table_name, display_name, display_name_en, display_name_vi, alias, source_type, source_sql, db_connection, business_notes, join_hints, base_conditions, vector_etl_job_id, columns, project_id } = req.body;
     if (!table_name) return res.status(400).json({ error: 'table_name 為必填' });
     const r = await db.prepare(
-      `INSERT INTO ai_schema_definitions (table_name, display_name, alias, source_type, source_sql, db_connection, business_notes, join_hints, base_conditions, vector_etl_job_id, created_by, project_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO ai_schema_definitions (table_name, display_name, display_name_en, display_name_vi, alias, source_type, source_sql, db_connection, business_notes, join_hints, base_conditions, vector_etl_job_id, created_by, project_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
-      table_name, display_name || null, alias || null, source_type || 'table', source_sql || null,
+      table_name, display_name || null, display_name_en || null, display_name_vi || null,
+      alias || null, source_type || 'table', source_sql || null,
       db_connection || 'erp',
       business_notes || null,
       join_hints ? JSON.stringify(join_hints) : null,
@@ -707,7 +731,19 @@ router.post('/designer/schemas', requireDesigner, async (req, res) => {
         );
       }
     }
-    res.json({ id: schemaId });
+
+    // 自動翻譯顯示名稱（若 EN/VI 未提供）
+    let autoEn = display_name_en || null, autoVi = display_name_vi || null;
+    if (display_name && (!autoEn || !autoVi)) {
+      try {
+        const trans = await translateFields({ name: display_name });
+        autoEn = autoEn || trans.name_en || null;
+        autoVi = autoVi || trans.name_vi || null;
+        await db.prepare(`UPDATE ai_schema_definitions SET display_name_en=?, display_name_vi=? WHERE id=?`)
+          .run(autoEn, autoVi, schemaId);
+      } catch (_) {}
+    }
+    res.json({ id: schemaId, display_name_en: autoEn, display_name_vi: autoVi });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -717,15 +753,25 @@ router.post('/designer/schemas', requireDesigner, async (req, res) => {
 router.put('/designer/schemas/:id', requireDesigner, async (req, res) => {
   try {
     const db = require('../database-oracle').db;
-    const { table_name, display_name, alias, source_type, source_sql, db_connection, business_notes, join_hints, base_conditions, vector_etl_job_id, is_active, project_id } = req.body;
+    const { table_name, display_name, display_name_en, display_name_vi, alias, source_type, source_sql, db_connection, business_notes, join_hints, base_conditions, vector_etl_job_id, is_active, project_id } = req.body;
+    // 自動翻譯顯示名稱（若 EN/VI 未提供）
+    let finalEn = display_name_en || null, finalVi = display_name_vi || null;
+    if (display_name && (!finalEn || !finalVi)) {
+      try {
+        const trans = await translateFields({ name: display_name });
+        finalEn = finalEn || trans.name_en || null;
+        finalVi = finalVi || trans.name_vi || null;
+      } catch (_) {}
+    }
     await db.prepare(
       `UPDATE ai_schema_definitions SET
-         table_name=?, display_name=?, alias=?, source_type=?, source_sql=?,
+         table_name=?, display_name=?, display_name_en=?, display_name_vi=?, alias=?, source_type=?, source_sql=?,
          db_connection=?, business_notes=?, join_hints=?, base_conditions=?, vector_etl_job_id=?, is_active=?,
          project_id=?, updated_at=SYSTIMESTAMP
        WHERE id=?`
     ).run(
-      table_name, display_name || null, alias || null, source_type || 'table', source_sql || null,
+      table_name, display_name || null, finalEn, finalVi,
+      alias || null, source_type || 'table', source_sql || null,
       db_connection || 'erp',
       business_notes || null,
       join_hints ? JSON.stringify(join_hints) : null,
@@ -735,7 +781,7 @@ router.put('/designer/schemas/:id', requireDesigner, async (req, res) => {
       project_id || null,
       req.params.id
     );
-    res.json({ ok: true });
+    res.json({ ok: true, display_name_en: finalEn, display_name_vi: finalVi });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -752,8 +798,8 @@ router.put('/designer/schemas/:id/columns', requireDesigner, async (req, res) =>
         await db.prepare(
           `INSERT INTO ai_schema_columns
              (schema_id, column_name, data_type, description, is_vectorized, value_mapping, sample_values, is_virtual, expression,
-              is_filter_key, filter_layer, filter_source, desc_en, desc_vi)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+              is_filter_key, filter_layer, filter_source, desc_en, desc_vi, is_visible)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         ).run(
           req.params.id, col.column_name, col.data_type || null, col.description || null,
           col.is_vectorized ? 1 : 0,
@@ -765,11 +811,64 @@ router.put('/designer/schemas/:id/columns', requireDesigner, async (req, res) =>
           col.filter_layer || null,
           col.filter_source || null,
           col.desc_en || null,
-          col.desc_vi || null
+          col.desc_vi || null,
+          col.is_visible === 0 ? 0 : 1
         );
       }
     }
     res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/dashboard/designer/schemas/:id/copy — 複製 schema 到指定專案
+router.post('/designer/schemas/:id/copy', requireDesigner, async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const { target_project_id } = req.body;
+    const src = await db.prepare(`SELECT * FROM ai_schema_definitions WHERE id=?`).get(req.params.id);
+    if (!src) return res.status(404).json({ error: '來源 Schema 不存在' });
+    const cols = await db.prepare(`SELECT * FROM ai_schema_columns WHERE schema_id=? ORDER BY id ASC`).all(req.params.id);
+    const r = await db.prepare(
+      `INSERT INTO ai_schema_definitions (table_name, display_name, display_name_en, display_name_vi, alias, source_type, source_sql,
+         db_connection, business_notes, join_hints, base_conditions, vector_etl_job_id, created_by, project_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      src.table_name, src.display_name, src.display_name_en, src.display_name_vi,
+      src.alias, src.source_type, src.source_sql, src.db_connection,
+      src.business_notes, src.join_hints, src.base_conditions, src.vector_etl_job_id,
+      req.user.id, target_project_id || null
+    );
+    const newId = r.lastInsertRowid;
+    for (const col of cols) {
+      await db.prepare(
+        `INSERT INTO ai_schema_columns (schema_id, column_name, data_type, description, is_vectorized, value_mapping, sample_values,
+           is_virtual, expression, is_filter_key, filter_layer, filter_source, desc_en, desc_vi, is_visible)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).run(
+        newId, col.column_name, col.data_type, col.description, col.is_vectorized,
+        col.value_mapping, col.sample_values, col.is_virtual, col.expression,
+        col.is_filter_key, col.filter_layer, col.filter_source, col.desc_en, col.desc_vi,
+        col.is_visible === 0 ? 0 : 1
+      );
+    }
+    res.json({ id: newId });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/dashboard/designer/schemas/:id/translate — 重新翻譯顯示名稱
+router.post('/designer/schemas/:id/translate', requireDesigner, async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const s = await db.prepare(`SELECT display_name FROM ai_schema_definitions WHERE id=?`).get(req.params.id);
+    if (!s) return res.status(404).json({ error: '不存在' });
+    const trans = await translateFields({ name: s.display_name });
+    await db.prepare(`UPDATE ai_schema_definitions SET display_name_en=?, display_name_vi=? WHERE id=?`)
+      .run(trans.name_en || null, trans.name_vi || null, req.params.id);
+    res.json({ display_name_en: trans.name_en || null, display_name_vi: trans.name_vi || null });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -1891,6 +1990,23 @@ router.post('/saved-queries/:id/clone', requireDashboard, async (req, res) => {
   }
 });
 
+// PATCH /saved-queries/:id/chart-config — 僅更新圖表設定（Tableau 自動存檔用）
+router.patch('/saved-queries/:id/chart-config', requireDashboard, async (req, res) => {
+  const { db } = require('../database-oracle');
+  try {
+    const query = await db.prepare('SELECT * FROM ai_saved_queries WHERE id=?').get(req.params.id);
+    if (!query) return res.status(404).json({ error: '查詢不存在' });
+    if (!await canManageSavedQuery(db, query, req.user))
+      return res.status(403).json({ error: '無權限修改' });
+    const { chart_config } = req.body;
+    await db.prepare(`UPDATE ai_saved_queries SET chart_config=?, updated_at=SYSTIMESTAMP WHERE id=?`)
+      .run(chart_config ? JSON.stringify(chart_config) : null, req.params.id);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // PATCH /saved-queries/:id/last-run — 更新最後執行時間
 router.patch('/saved-queries/:id/last-run', requireDashboard, async (req, res) => {
   const { db } = require('../database-oracle');
@@ -2097,7 +2213,7 @@ router.get('/report-dashboards', requireDashboard, async (req, res) => {
 router.post('/report-dashboards', requireDashboard, async (req, res) => {
   const { db } = require('../database-oracle');
   try {
-    const { name, name_en, name_vi, description, description_en, description_vi, category, category_en, category_vi, layout_config, sort_order } = req.body;
+    const { name, name_en, name_vi, description, description_en, description_vi, category, category_en, category_vi, layout_config, sort_order, bg_color, bg_image_url, bg_opacity, global_filters_schema, bookmarks, toolbar_bg_color } = req.body;
     if (!name) return res.status(400).json({ error: '名稱必填' });
     let tEn = name_en || null, tVi = name_vi || null;
     if (!tEn || !tVi) {
@@ -2108,13 +2224,17 @@ router.post('/report-dashboards', requireDashboard, async (req, res) => {
       } catch {}
     }
     const r = await db.prepare(`
-      INSERT INTO ai_report_dashboards (user_id, name, name_en, name_vi, description, description_en, description_vi, category, category_en, category_vi, layout_config, sort_order)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+      INSERT INTO ai_report_dashboards (user_id, name, name_en, name_vi, description, description_en, description_vi, category, category_en, category_vi, layout_config, sort_order, bg_color, bg_image_url, bg_opacity, global_filters_schema, bookmarks, toolbar_bg_color)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     `).run(
       req.user.id, name, tEn, tVi,
       description || null, description_en || null, description_vi || null,
       category || null, category_en || null, category_vi || null,
-      layout_config ? JSON.stringify(layout_config) : null, sort_order || 0
+      layout_config ? JSON.stringify(layout_config) : null, sort_order || 0,
+      bg_color || null, bg_image_url || null, bg_opacity != null ? Number(bg_opacity) : 1,
+      global_filters_schema ? (typeof global_filters_schema === 'string' ? global_filters_schema : JSON.stringify(global_filters_schema)) : null,
+      bookmarks ? (typeof bookmarks === 'string' ? bookmarks : JSON.stringify(bookmarks)) : null,
+      toolbar_bg_color || null
     );
     const newRow = await db.prepare('SELECT * FROM ai_report_dashboards WHERE id=?').get(r.lastInsertRowid);
     res.json({ ...newRow, can_manage: 1 });  // 建立者一定有管理權
@@ -2131,12 +2251,13 @@ router.put('/report-dashboards/:id', requireDashboard, async (req, res) => {
     if (!board) return res.status(404).json({ error: '儀表板不存在' });
     if (!await canManageDashboard(db, board, req.user))
       return res.status(403).json({ error: '無權限修改' });
-    const { name, name_en, name_vi, description, description_en, description_vi, category, category_en, category_vi, layout_config, sort_order, auto_refresh_interval } = req.body;
+    const { name, name_en, name_vi, description, description_en, description_vi, category, category_en, category_vi, layout_config, sort_order, auto_refresh_interval, bg_color, bg_image_url, bg_opacity, global_filters_schema, bookmarks, toolbar_bg_color } = req.body;
     await db.prepare(`
       UPDATE ai_report_dashboards SET
         name=?, name_en=?, name_vi=?, description=?, description_en=?, description_vi=?,
         category=?, category_en=?, category_vi=?, layout_config=?, sort_order=?,
-        auto_refresh_interval=?, updated_at=SYSTIMESTAMP
+        auto_refresh_interval=?, bg_color=?, bg_image_url=?, bg_opacity=?,
+        global_filters_schema=?, bookmarks=?, toolbar_bg_color=?, updated_at=SYSTIMESTAMP
       WHERE id=?
     `).run(
       name, name_en || null, name_vi || null,
@@ -2145,6 +2266,10 @@ router.put('/report-dashboards/:id', requireDashboard, async (req, res) => {
       layout_config ? (typeof layout_config === 'string' ? layout_config : JSON.stringify(layout_config)) : null,
       sort_order || 0,
       auto_refresh_interval != null ? Number(auto_refresh_interval) : null,
+      bg_color || null, bg_image_url || null, bg_opacity != null ? Number(bg_opacity) : 1,
+      global_filters_schema ? (typeof global_filters_schema === 'string' ? global_filters_schema : JSON.stringify(global_filters_schema)) : null,
+      bookmarks ? (typeof bookmarks === 'string' ? bookmarks : JSON.stringify(bookmarks)) : null,
+      toolbar_bg_color || null,
       req.params.id
     );
     const updated = await db.prepare('SELECT * FROM ai_report_dashboards WHERE id=?').get(req.params.id);

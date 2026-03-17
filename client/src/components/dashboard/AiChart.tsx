@@ -3,7 +3,7 @@
  * Supports: bar, line, pie, scatter, radar, gauge
  */
 import ReactECharts from 'echarts-for-react'
-import type { AiChartDef, ChartColorPalette } from '../../types'
+import type { AiChartDef, ChartColorPalette, YAxisDef, OverlayLine } from '../../types'
 import { useTranslation } from 'react-i18next'
 
 // Named palettes
@@ -15,11 +15,18 @@ const PALETTES: Record<ChartColorPalette, string[]> = {
   teal:   ['#0099BC', '#038387', '#00B4D8', '#0096C7', '#00B7C3', '#48CAE4'],
 }
 
-// Power BI standard palette (default)
+// 高對比多色調色盤（預設）— 相鄰顏色色相差 >60°，避免相近
 const DEFAULT_COLORS = [
-  '#118DFF', '#12239E', '#E66C37', '#6B007B',
-  '#E044A7', '#744EC2', '#D9B300', '#D64550',
-  '#009E49', '#0093D5',
+  '#5470c6', // 藍
+  '#91cc75', // 綠
+  '#fac858', // 黃
+  '#ee6666', // 紅
+  '#73c0de', // 淺藍
+  '#3ba272', // 深綠
+  '#fc8452', // 橘
+  '#9a60b4', // 紫
+  '#ea7ccc', // 粉
+  '#f0d062', // 金黃
 ]
 
 function getColors(chartDef: AiChartDef): string[] {
@@ -137,7 +144,31 @@ export default function AiChart({ chartDef, rows, columnLabels = {}, height = 32
     show_legend, show_grid,
     sort_by, sort_order, min_value, limit,
     series_field, stack_field, agg_fn,
+    y_axes, shadow, overlay_lines,
+    series_colors,
+    axis_label_color, axis_label_size,
+    axis_line_color, data_label_color, data_label_size,
+    legend_color, legend_size, title_color, title_size, grid_line_color,
   } = chartDef
+
+  // ── 樣式變數（有設定優先，否則用預設值）──────────────────────────────────────
+  const sAxisLabel  = axis_label_color  || '#6b7280'
+  const sAxisLabelSz = axis_label_size  || 11
+  const sAxisLine   = axis_line_color   || '#e5e7eb'
+  const sDataLabel  = data_label_color  || '#6b7280'
+  const sDataLabelSz = data_label_size  || 11
+  const sLegend     = legend_color      || '#6b7280'
+  const sLegendSz   = legend_size       || 12
+  const sTitle      = title_color       || '#374151'
+  const sTitleSz    = title_size        || 13
+  const sGridLine   = grid_line_color   || (show_grid !== false ? '#f3f4f6' : 'transparent')
+
+  // 解析 series_colors：若是 JSON string 就 parse，否則直接用
+  const seriesColorMap: Record<string, string> = (() => {
+    if (!series_colors) return {}
+    if (typeof series_colors === 'string') { try { return JSON.parse(series_colors) } catch { return {} } }
+    return series_colors
+  })()
 
   const title = pickLang(chartDef.title, chartDef.title_en, chartDef.title_vi)
   const x_axis_name = pickLang(chartDef.x_axis_name, chartDef.x_axis_name_en, chartDef.x_axis_name_vi)
@@ -176,7 +207,7 @@ export default function AiChart({ chartDef, rows, columnLabels = {}, height = 32
   })()
 
   const legendConfig = show_legend !== false
-    ? { textStyle: { color: '#6b7280' }, top: title ? 28 : 4 }
+    ? { show: true, textStyle: { color: sLegend, fontSize: sLegendSz }, top: title ? 28 : 4 }
     : { show: false }
 
   const gridConfig = {
@@ -185,10 +216,27 @@ export default function AiChart({ chartDef, rows, columnLabels = {}, height = 32
     bottom: 40,
     containLabel: true,
     show: show_grid,
-    borderColor: '#f3f4f6',
+    borderColor: sGridLine,
   }
 
-  const splitLineStyle = { lineStyle: { color: show_grid !== false ? '#f3f4f6' : 'transparent' } }
+  const splitLineStyle = { lineStyle: { color: sGridLine } }
+
+  // 軸 style 共用片段
+  const axisLabelStyle = { color: sAxisLabel, fontSize: sAxisLabelSz }
+  const axisLineStyle  = { lineStyle: { color: sAxisLine } }
+  const nameTextStyle  = { color: sAxisLabel, fontSize: sAxisLabelSz }
+  const dataLabelStyle = show_label
+    ? { show: true, color: sDataLabel, fontSize: sDataLabelSz }
+    : { show: false }
+  const dataLabelTop = show_label
+    ? { show: true, position: 'top' as const, color: sDataLabel, fontSize: sDataLabelSz }
+    : { show: false }
+  const dataLabelInside = show_label
+    ? { show: true, position: 'inside' as const, color: sDataLabel, fontSize: sDataLabelSz }
+    : { show: false }
+  const titleStyle = (t: string | undefined) => t
+    ? { text: t, textStyle: { color: sTitle, fontSize: sTitleSz } }
+    : undefined
 
   // ── Multi-dimension pivot helpers ──────────────────────────────────────────
   function pivotAgg(matchRows: Record<string, unknown>[]): number {
@@ -202,6 +250,24 @@ export default function AiChart({ chartDef, rows, columnLabels = {}, height = 32
       case 'COUNT_DISTINCT': return new Set(vals).size
       default:      return vals.reduce((a, b) => a + b, 0)  // SUM
     }
+  }
+
+  /** 單 series — 依 x_field group by 後套 agg_fn（確保切換 agg 有效果） */
+  function buildSingleSeriesData(): { xData: string[]; yData: number[] } {
+    if (!x_field) {
+      return {
+        xData: displayRows.map(r => String(rf(x_field, r) ?? '')),
+        yData: displayRows.map(r => Number(rf(y_field, r) ?? 0)),
+      }
+    }
+    const xSet = new Map<string, true>()
+    for (const r of displayRows) xSet.set(String(rf(x_field, r) ?? ''), true)
+    const xData = [...xSet.keys()]
+    const yData = xData.map(x => {
+      const matched = displayRows.filter(r => String(rf(x_field, r) ?? '') === x)
+      return pivotAgg(matched)
+    })
+    return { xData, yData }
   }
 
   /** 從 displayRows pivot 出多 series ECharts series 陣列 (bar / line) */
@@ -220,24 +286,26 @@ export default function AiChart({ chartDef, rows, columnLabels = {}, height = 32
       const seriesValues = [...seriesSet.keys()]
 
       const seriesList = seriesValues.map((sv, si) => {
-        const c = colors[si % colors.length]
+        const c = seriesColorMap[sv] || colors[si % colors.length]
         const data = xCategories.map(x => {
           const matched = displayRows.filter(r =>
             String(rf(x_field, r) ?? '') === x && String(rf(series_field, r) ?? '') === sv
           )
           return pivotAgg(matched)
         })
+        const shadowStyle = shadow ? { shadowBlur: 8, shadowColor: c + '80', shadowOffsetY: 2 } : {}
         if (chartType === 'line') return {
           name: sv, type: 'line', data,
           smooth: smooth ?? true, symbol: 'circle', symbolSize: 5,
-          lineStyle: { color: c, width: 2 }, itemStyle: { color: c },
+          lineStyle: { color: c, width: 2 }, itemStyle: { color: c, ...shadowStyle },
           areaStyle: area ? { color: c + '30' } : undefined,
-          label: show_label ? { show: true, color: '#6b7280', fontSize: 10 } : { show: false },
+          label: dataLabelStyle,
         }
+        const itemColor = gradient ? mkGradient(c) : c
         return {
           name: sv, type: 'bar', data,
-          itemStyle: { color: c, borderRadius: [3, 3, 0, 0] },
-          label: show_label ? { show: true, position: 'top', color: '#6b7280', fontSize: 10 } : { show: false },
+          itemStyle: { color: itemColor, borderRadius: [3, 3, 0, 0], ...shadowStyle },
+          label: dataLabelTop,
           barMaxWidth: 40,
         }
       })
@@ -251,23 +319,25 @@ export default function AiChart({ chartDef, rows, columnLabels = {}, height = 32
       const stackValues = [...stackSet.keys()]
 
       const seriesList = stackValues.map((stv, si) => {
-        const c = colors[si % colors.length]
+        const c = seriesColorMap[stv] || colors[si % colors.length]
         const data = xCategories.map(x => {
           const matched = displayRows.filter(r =>
             String(rf(x_field, r) ?? '') === x && String(rf(stack_field, r) ?? '') === stv
           )
           return pivotAgg(matched)
         })
+        const shadowStyle = shadow ? { shadowBlur: 8, shadowColor: c + '80', shadowOffsetY: 2 } : {}
         if (chartType === 'line') return {
           name: stv, type: 'line', stack: 'total', data,
           smooth: smooth ?? true, symbol: 'circle', symbolSize: 5,
-          lineStyle: { color: c, width: 2 }, itemStyle: { color: c },
+          lineStyle: { color: c, width: 2 }, itemStyle: { color: c, ...shadowStyle },
           areaStyle: { color: c + '50' },
-          label: show_label ? { show: true, color: '#6b7280', fontSize: 10 } : { show: false },
+          label: dataLabelStyle,
         }
+        const itemColor = gradient ? mkGradient(c) : c
         return {
           name: stv, type: 'bar', stack: 'total', data,
-          itemStyle: { color: c },
+          itemStyle: { color: itemColor, ...shadowStyle },
           label: show_label ? { show: true, position: 'inside', color: '#fff', fontSize: 10 } : { show: false },
           barMaxWidth: 60,
         }
@@ -288,7 +358,8 @@ export default function AiChart({ chartDef, rows, columnLabels = {}, height = 32
     const seriesList: object[] = []
     seriesValues.forEach((sv, si) => {
       stackValues.forEach((stv, sti) => {
-        const c = colors[(si * stackValues.length + sti) % colors.length]
+        const _key = stackValues.length > 1 ? `${sv}·${stv}` : sv
+        const c = seriesColorMap[_key] || seriesColorMap[sv] || colors[(si * stackValues.length + sti) % colors.length]
         const data = xCategories.map(x => {
           const matched = displayRows.filter(r =>
             String(rf(x_field, r) ?? '') === x &&
@@ -297,18 +368,20 @@ export default function AiChart({ chartDef, rows, columnLabels = {}, height = 32
           )
           return pivotAgg(matched)
         })
+        const shadowStyle = shadow ? { shadowBlur: 8, shadowColor: c + '80', shadowOffsetY: 2 } : {}
         if (chartType === 'line') {
           seriesList.push({
             name: `${sv}·${stv}`, type: 'line', stack: sv, data,
             smooth: smooth ?? true, symbol: 'circle', symbolSize: 5,
-            lineStyle: { color: c, width: 2 }, itemStyle: { color: c },
+            lineStyle: { color: c, width: 2 }, itemStyle: { color: c, ...shadowStyle },
             areaStyle: { color: c + '50' },
-            label: show_label ? { show: true, color: '#6b7280', fontSize: 10 } : { show: false },
+            label: dataLabelStyle,
           })
         } else {
+          const itemColor = gradient ? mkGradient(c) : c
           seriesList.push({
             name: `${sv}·${stv}`, type: 'bar', stack: sv, data,
-            itemStyle: { color: c },
+            itemStyle: { color: itemColor, ...shadowStyle },
             label: show_label ? { show: true, position: 'inside', color: '#fff', fontSize: 10 } : { show: false },
             barMaxWidth: 60,
           })
@@ -318,47 +391,166 @@ export default function AiChart({ chartDef, rows, columnLabels = {}, height = 32
     return { xCategories, seriesList }
   }
 
+  /** 疊加折線 (Option C)：在分組 bar 上疊加全域折線 */
+  function buildOverlayLineSeries(xCategories: string[]): { series: object[]; hasRightAxis: boolean } {
+    if (!overlay_lines?.length) return { series: [], hasRightAxis: false }
+    const hasRightAxis = overlay_lines.some(ol => ol.use_right_axis)
+    const series = overlay_lines.map((ol: OverlayLine, idx: number) => {
+      const c = ol.color || colors[(idx + 4) % colors.length]
+      const data = xCategories.map(x => {
+        const matched = displayRows.filter(r => String(rf(x_field, r) ?? '') === x)
+        const vals = matched.map(r => Number(rf(ol.field, r) ?? 0))
+        switch (ol.agg) {
+          case 'COUNT':          return matched.length
+          case 'AVG':            return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : 0
+          case 'MAX':            return vals.length ? Math.max(...vals) : 0
+          case 'MIN':            return vals.length ? Math.min(...vals) : 0
+          case 'COUNT_DISTINCT': return new Set(vals).size
+          default:               return vals.reduce((a, b) => a + b, 0)
+        }
+      })
+      return {
+        name: ol.label || ol.field,
+        type: 'line',
+        yAxisIndex: ol.use_right_axis ? 1 : 0,
+        data,
+        smooth: ol.smooth ?? false,
+        symbol: 'circle', symbolSize: 5,
+        lineStyle: { color: c, width: 2, type: ol.dashed ? 'dashed' : 'solid' },
+        itemStyle: { color: c },
+        label: dataLabelStyle,
+      }
+    })
+    return { series, hasRightAxis }
+  }
+
+  /** 複數 Y 軸 (Method B)：每個 YAxisDef 對應一條 series */
+  function buildYAxesSeries(): {
+    xCategories: string[]
+    seriesList: object[]
+    hasRightAxis: boolean
+  } | null {
+    if (!y_axes || y_axes.length === 0) return null
+
+    const xSet = new Map<string, true>()
+    for (const r of displayRows) xSet.set(String(rf(x_field, r) ?? ''), true)
+    const xCategories = [...xSet.keys()]
+
+    const hasRightAxis = y_axes.some(ax => ax.use_right_axis)
+
+    function aggVals(ax: YAxisDef, xVal: string): number {
+      const matched = displayRows.filter(r => String(rf(x_field, r) ?? '') === xVal)
+      const vals = matched.map(r => Number(rf(ax.field, r) ?? 0))
+      if (!matched.length) return 0
+      switch (ax.agg) {
+        case 'COUNT':          return matched.length
+        case 'AVG':            return vals.reduce((a, b) => a + b, 0) / vals.length
+        case 'MAX':            return Math.max(...vals)
+        case 'MIN':            return Math.min(...vals)
+        case 'COUNT_DISTINCT': return new Set(vals).size
+        default:               return vals.reduce((a, b) => a + b, 0) // SUM
+      }
+    }
+
+    const seriesList = y_axes.map((ax, idx) => {
+      const c = ax.color || colors[idx % colors.length]
+      const data = xCategories.map(x => aggVals(ax, x))
+      const yAxisIndex = ax.use_right_axis ? 1 : 0
+      const shadowStyle = ax.shadow ? { shadowBlur: 8, shadowColor: c + '80', shadowOffsetY: 2 } : {}
+      const seriesName = ax.label || ax.field
+
+      if (ax.chart_type === 'line') {
+        return {
+          name: seriesName, type: 'line', data, yAxisIndex,
+          smooth: ax.smooth ?? false,
+          symbol: 'circle', symbolSize: 5,
+          lineStyle: { color: c, width: 2 },
+          itemStyle: { color: c, ...shadowStyle },
+          areaStyle: ax.area ? { color: c + '30' } : undefined,
+          label: dataLabelStyle,
+        }
+      }
+      // bar
+      const itemColor = ax.gradient ? mkGradient(c) : c
+      return {
+        name: seriesName, type: 'bar', data, yAxisIndex,
+        barWidth: ax.bar_width,
+        barGap: ax.overlap ? '-100%' : undefined,
+        z: ax.overlap ? (idx + 1) * 2 : undefined,
+        itemStyle: { color: itemColor, borderRadius: [4, 4, 0, 0], ...shadowStyle },
+        label: dataLabelTop,
+        barMaxWidth: ax.bar_width ? undefined : 48,
+      }
+    })
+
+    return { xCategories, seriesList, hasRightAxis }
+  }
+
   let option: object = {}
 
-  if (type === 'bar') {
+  const yAxesResult = buildYAxesSeries()
+
+  if ((type === 'bar' || type === 'line') && yAxesResult) {
+    // ── 複數 Y 軸模式 (Method B) ──────────────────────────────────────────────
+    const { xCategories, seriesList, hasRightAxis } = yAxesResult
+    const leftAxis = { type: 'value', name: y_axis_name, nameTextStyle, axisLine: axisLineStyle, ...splitLineStyle, axisLabel: axisLabelStyle }
+    const rightAxis = { type: 'value', position: 'right', nameTextStyle, axisLine: axisLineStyle, ...splitLineStyle, axisLabel: axisLabelStyle }
+    option = {
+      ...BASE_OPTION,
+      backgroundColor: chartDef.chart_bg_color || 'transparent',
+      color: colors,
+      legend: { ...legendConfig, type: 'scroll' },
+      grid: { ...gridConfig, right: hasRightAxis ? 60 : 20 },
+      title: titleStyle(title),
+      xAxis: { type: 'category', name: x_axis_name, nameTextStyle, data: xCategories, axisLine: axisLineStyle, axisLabel: { ...axisLabelStyle, rotate: xCategories.length > 6 ? 30 : 0 } },
+      yAxis: hasRightAxis ? [leftAxis, rightAxis] : leftAxis,
+      series: seriesList,
+    }
+  } else if (type === 'bar') {
     const multi = buildMultiSeries('bar')
     if (multi) {
       const { xCategories, seriesList } = multi
+      const overlay = buildOverlayLineSeries(xCategories)
+      const hasRightAxis = overlay.hasRightAxis
+      const leftAxis = { type: 'value', name: y_axis_name, nameTextStyle, axisLine: axisLineStyle, ...splitLineStyle, axisLabel: axisLabelStyle }
+      const rightAxis = { type: 'value', position: 'right', nameTextStyle, axisLine: axisLineStyle, ...splitLineStyle, axisLabel: axisLabelStyle }
       option = {
         ...BASE_OPTION,
+        backgroundColor: chartDef.chart_bg_color || 'transparent',
         color: colors,
         legend: { ...legendConfig, type: 'scroll' },
-        grid: gridConfig,
-        title: title ? { text: title, textStyle: { color: '#374151', fontSize: 13 } } : undefined,
+        grid: { ...gridConfig, right: hasRightAxis ? 60 : 20 },
+        title: titleStyle(title),
         xAxis: horizontal
-          ? { type: 'value', name: x_axis_name, nameTextStyle: { color: '#6b7280' }, axisLine: { lineStyle: { color: '#e5e7eb' } }, ...splitLineStyle, axisLabel: { color: '#6b7280' } }
-          : { type: 'category', name: x_axis_name, nameTextStyle: { color: '#6b7280' }, data: xCategories, axisLine: { lineStyle: { color: '#e5e7eb' } }, axisLabel: { color: '#6b7280', rotate: xCategories.length > 6 ? 30 : 0 } },
+          ? { type: 'value', name: x_axis_name, nameTextStyle, axisLine: axisLineStyle, ...splitLineStyle, axisLabel: axisLabelStyle }
+          : { type: 'category', name: x_axis_name, nameTextStyle, data: xCategories, axisLine: axisLineStyle, axisLabel: { ...axisLabelStyle, rotate: xCategories.length > 6 ? 30 : 0 } },
         yAxis: horizontal
-          ? { type: 'category', name: y_axis_name, nameTextStyle: { color: '#6b7280' }, data: xCategories, axisLabel: { color: '#6b7280' } }
-          : { type: 'value', name: y_axis_name, nameTextStyle: { color: '#6b7280' }, axisLine: { lineStyle: { color: '#e5e7eb' } }, ...splitLineStyle, axisLabel: { color: '#6b7280' } },
-        series: seriesList,
+          ? { type: 'category', name: y_axis_name, nameTextStyle, data: xCategories, axisLabel: axisLabelStyle }
+          : hasRightAxis ? [leftAxis, rightAxis] : leftAxis,
+        series: [...seriesList, ...overlay.series],
       }
     } else {
-      const xData = displayRows.map(r => String(rf(x_field, r) ?? ''))
-      const yData = displayRows.map(r => Number(rf(y_field, r) ?? 0))
+      const { xData, yData } = buildSingleSeriesData()
       const color = gradient ? mkGradient(primaryColor) : primaryColor
+      const shadowStyle = shadow ? { shadowBlur: 8, shadowColor: primaryColor + '80', shadowOffsetY: 2 } : {}
       option = {
         ...BASE_OPTION,
+        backgroundColor: chartDef.chart_bg_color || 'transparent',
         color: colors,
         legend: legendConfig,
         grid: gridConfig,
-        title: title ? { text: title, textStyle: { color: '#374151', fontSize: 13 } } : undefined,
+        title: titleStyle(title),
         xAxis: horizontal
-          ? { type: 'value', name: x_axis_name, nameTextStyle: { color: '#6b7280' }, axisLine: { lineStyle: { color: '#e5e7eb' } }, ...splitLineStyle, axisLabel: { color: '#6b7280' } }
-          : { type: 'category', name: x_axis_name, nameTextStyle: { color: '#6b7280' }, data: xData, axisLine: { lineStyle: { color: '#e5e7eb' } }, axisLabel: { color: '#6b7280', rotate: xData.length > 8 ? 30 : 0 } },
+          ? { type: 'value', name: x_axis_name, nameTextStyle, axisLine: axisLineStyle, ...splitLineStyle, axisLabel: axisLabelStyle }
+          : { type: 'category', name: x_axis_name, nameTextStyle, data: xData, axisLine: axisLineStyle, axisLabel: { ...axisLabelStyle, rotate: xData.length > 8 ? 30 : 0 } },
         yAxis: horizontal
-          ? { type: 'category', name: y_axis_name, nameTextStyle: { color: '#6b7280' }, data: xData, axisLabel: { color: '#6b7280' } }
-          : { type: 'value', name: y_axis_name, nameTextStyle: { color: '#6b7280' }, axisLine: { lineStyle: { color: '#e5e7eb' } }, ...splitLineStyle, axisLabel: { color: '#6b7280' } },
+          ? { type: 'category', name: y_axis_name, nameTextStyle, data: xData, axisLabel: axisLabelStyle }
+          : { type: 'value', name: y_axis_name, nameTextStyle, axisLine: axisLineStyle, ...splitLineStyle, axisLabel: axisLabelStyle },
         series: [{
           type: 'bar',
           data: yData,
-          itemStyle: { color, borderRadius: [4, 4, 0, 0] },
-          label: show_label ? { show: true, position: 'top', color: '#6b7280', fontSize: 11 } : { show: false },
+          itemStyle: { color, borderRadius: [4, 4, 0, 0], ...shadowStyle },
+          label: dataLabelTop,
           barMaxWidth: 48,
         }],
       }
@@ -367,27 +559,33 @@ export default function AiChart({ chartDef, rows, columnLabels = {}, height = 32
     const multi = buildMultiSeries('line')
     if (multi) {
       const { xCategories, seriesList } = multi
+      const overlay = buildOverlayLineSeries(xCategories)
+      const hasRightAxis = overlay.hasRightAxis
+      const leftAxis = { type: 'value', name: y_axis_name, nameTextStyle, axisLine: axisLineStyle, ...splitLineStyle, axisLabel: axisLabelStyle }
+      const rightAxis = { type: 'value', position: 'right', nameTextStyle, axisLine: axisLineStyle, ...splitLineStyle, axisLabel: axisLabelStyle }
       option = {
         ...BASE_OPTION,
+        backgroundColor: chartDef.chart_bg_color || 'transparent',
         color: colors,
         legend: { ...legendConfig, type: 'scroll' },
-        grid: gridConfig,
-        title: title ? { text: title, textStyle: { color: '#374151', fontSize: 13 } } : undefined,
-        xAxis: { type: 'category', name: x_axis_name, nameTextStyle: { color: '#6b7280' }, data: xCategories, axisLine: { lineStyle: { color: '#e5e7eb' } }, axisLabel: { color: '#6b7280', rotate: xCategories.length > 6 ? 30 : 0 } },
-        yAxis: { type: 'value', name: y_axis_name, nameTextStyle: { color: '#6b7280' }, axisLine: { lineStyle: { color: '#e5e7eb' } }, ...splitLineStyle, axisLabel: { color: '#6b7280' } },
-        series: seriesList,
+        grid: { ...gridConfig, right: hasRightAxis ? 60 : 20 },
+        title: titleStyle(title),
+        xAxis: { type: 'category', name: x_axis_name, nameTextStyle, data: xCategories, axisLine: axisLineStyle, axisLabel: { ...axisLabelStyle, rotate: xCategories.length > 6 ? 30 : 0 } },
+        yAxis: hasRightAxis ? [leftAxis, rightAxis] : leftAxis,
+        series: [...seriesList, ...overlay.series],
       }
     } else {
-      const xData = displayRows.map(r => String(rf(x_field, r) ?? ''))
-      const yData = displayRows.map(r => Number(rf(y_field, r) ?? 0))
+      const { xData, yData } = buildSingleSeriesData()
+      const shadowStyle = shadow ? { shadowBlur: 8, shadowColor: primaryColor + '80', shadowOffsetY: 2 } : {}
       option = {
         ...BASE_OPTION,
+        backgroundColor: chartDef.chart_bg_color || 'transparent',
         color: colors,
         legend: legendConfig,
         grid: gridConfig,
-        title: title ? { text: title, textStyle: { color: '#374151', fontSize: 13 } } : undefined,
-        xAxis: { type: 'category', name: x_axis_name, nameTextStyle: { color: '#6b7280' }, data: xData, axisLine: { lineStyle: { color: '#e5e7eb' } }, axisLabel: { color: '#6b7280', rotate: xData.length > 8 ? 30 : 0 } },
-        yAxis: { type: 'value', name: y_axis_name, nameTextStyle: { color: '#6b7280' }, axisLine: { lineStyle: { color: '#e5e7eb' } }, ...splitLineStyle, axisLabel: { color: '#6b7280' } },
+        title: titleStyle(title),
+        xAxis: { type: 'category', name: x_axis_name, nameTextStyle, data: xData, axisLine: axisLineStyle, axisLabel: { ...axisLabelStyle, rotate: xData.length > 8 ? 30 : 0 } },
+        yAxis: { type: 'value', name: y_axis_name, nameTextStyle, axisLine: axisLineStyle, ...splitLineStyle, axisLabel: axisLabelStyle },
         series: [{
           type: 'line',
           data: yData,
@@ -395,9 +593,9 @@ export default function AiChart({ chartDef, rows, columnLabels = {}, height = 32
           symbol: 'circle',
           symbolSize: 6,
           lineStyle: { color: primaryColor, width: 2.5 },
-          itemStyle: { color: primaryColor },
+          itemStyle: { color: primaryColor, ...shadowStyle },
           areaStyle: area ? { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: primaryColor + '60' }, { offset: 1, color: primaryColor + '00' }] } } : undefined,
-          label: show_label ? { show: true, color: '#6b7280', fontSize: 11 } : { show: false },
+          label: dataLabelStyle,
         }],
       }
     }
@@ -409,17 +607,18 @@ export default function AiChart({ chartDef, rows, columnLabels = {}, height = 32
     }))
     option = {
       ...BASE_OPTION,
+      backgroundColor: chartDef.chart_bg_color || 'transparent',
       color: colors,
       grid: undefined,
       legend: { ...legendConfig, type: 'scroll' },
-      title: title ? { text: title, textStyle: { color: '#374151', fontSize: 13 }, left: 'center' } : undefined,
+      title: titleStyle(title) ? { ...titleStyle(title), left: 'center' } : undefined,
       series: [{
         type: 'pie',
         radius: donut ? ['40%', '70%'] : '65%',
         center: ['50%', '55%'],
         data: pieData,
-        label: { color: '#6b7280', fontSize: 11 },
-        labelLine: { lineStyle: { color: '#d1d5db' } },
+        label: { color: sDataLabel, fontSize: sDataLabelSz },
+        labelLine: { lineStyle: { color: sAxisLine } },
         emphasis: { itemStyle: { shadowBlur: 10, shadowColor: 'rgba(0,0,0,0.5)' } },
       }],
     }
@@ -427,31 +626,33 @@ export default function AiChart({ chartDef, rows, columnLabels = {}, height = 32
     const scatterData = displayRows.map(r => [Number(rf(x_field, r) ?? 0), Number(rf(y_field, r) ?? 0)])
     option = {
       ...BASE_OPTION,
+      backgroundColor: chartDef.chart_bg_color || 'transparent',
       color: colors,
       legend: legendConfig,
       grid: gridConfig,
-      title: title ? { text: title, textStyle: { color: '#374151', fontSize: 13 } } : undefined,
-      xAxis: { type: 'value', name: x_axis_name, nameTextStyle: { color: '#6b7280' }, axisLine: { lineStyle: { color: '#e5e7eb' } }, ...splitLineStyle, axisLabel: { color: '#6b7280' } },
-      yAxis: { type: 'value', name: y_axis_name, nameTextStyle: { color: '#6b7280' }, axisLine: { lineStyle: { color: '#e5e7eb' } }, ...splitLineStyle, axisLabel: { color: '#6b7280' } },
+      title: titleStyle(title),
+      xAxis: { type: 'value', name: x_axis_name, nameTextStyle, axisLine: axisLineStyle, ...splitLineStyle, axisLabel: axisLabelStyle },
+      yAxis: { type: 'value', name: y_axis_name, nameTextStyle, axisLine: axisLineStyle, ...splitLineStyle, axisLabel: axisLabelStyle },
       series: [{ type: 'scatter', data: scatterData, itemStyle: { color: primaryColor, opacity: 0.8 }, symbolSize: 8 }],
     }
   } else if (type === 'gauge') {
     const val = displayRows.length > 0 ? Number(rf(value_field, displayRows[0]) ?? 0) : 0
     option = {
       ...BASE_OPTION,
+      backgroundColor: chartDef.chart_bg_color || 'transparent',
       color: colors,
       grid: undefined,
-      title: title ? { text: title, textStyle: { color: '#374151', fontSize: 13 }, left: 'center' } : undefined,
+      title: titleStyle(title) ? { ...titleStyle(title), left: 'center' } : undefined,
       series: [{
         type: 'gauge',
         data: [{ value: val, name: label_field || '' }],
         axisLine: { lineStyle: { width: 16, color: [[0.3, colors[2] || '#E66C37'], [0.7, colors[6] || '#D9B300'], [1, primaryColor]] } },
-        axisTick: { lineStyle: { color: '#d1d5db' } },
-        splitLine: { lineStyle: { color: '#d1d5db' } },
-        axisLabel: { color: '#64748b' },
+        axisTick: { lineStyle: { color: sAxisLine } },
+        splitLine: { lineStyle: { color: sAxisLine } },
+        axisLabel: { color: sAxisLabel, fontSize: sAxisLabelSz },
         pointer: { itemStyle: { color: primaryColor } },
-        title: { color: '#6b7280' },
-        detail: { color: '#111827', fontSize: 20, fontWeight: 'bold' },
+        title: { color: sLegend },
+        detail: { color: sTitle, fontSize: 20, fontWeight: 'bold' },
       }],
     }
   }
@@ -459,6 +660,7 @@ export default function AiChart({ chartDef, rows, columnLabels = {}, height = 32
   return (
     <ReactECharts
       option={option}
+      notMerge
       style={{ height: height === undefined ? '100%' : height, width: '100%' }}
       theme="light"
       opts={{ renderer: 'canvas' }}

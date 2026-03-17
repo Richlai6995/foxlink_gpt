@@ -33,7 +33,8 @@ export default function SchemaFieldPicker({ designId, textareaRef, onInsert, onC
       .then((r: { data: AiSchemaDef[] }) => {
         const data = r.data || []
         setSchemas(data)
-        if (data.length === 1) setActiveSchema(data[0].id!)
+        const pickable = data.filter(s => !s.where_only)
+        if (pickable.length === 1) setActiveSchema(pickable[0].id!)
       })
       .catch(console.error)
       .finally(() => setLoading(false))
@@ -77,12 +78,18 @@ export default function SchemaFieldPicker({ designId, textareaRef, onInsert, onC
   }
 
   function schemaLabel(s: AiSchemaDef): string {
+    const lang = i18n.language
+    if (lang === 'en') return s.display_name_en || s.display_name || s.table_name
+    if (lang === 'vi') return s.display_name_vi || s.display_name || s.table_name
     return s.display_name || s.table_name
   }
 
+  // 過濾掉「僅WHERE」的 schema — 它們只作為 AI WHERE 條件上下文，不顯示在欄位選擇器
+  const pickableSchemas = schemas.filter(s => !s.where_only)
+
   const visibleSchemas = activeSchema
-    ? schemas.filter(s => s.id === activeSchema)
-    : schemas
+    ? pickableSchemas.filter(s => s.id === activeSchema)
+    : pickableSchemas
 
   const filteredSchemas = visibleSchemas.map(s => ({
     ...s,
@@ -162,14 +169,14 @@ export default function SchemaFieldPicker({ designId, textareaRef, onInsert, onC
       </div>
 
       {/* Table/View 切換 tabs（多個 schema 時才顯示） */}
-      {schemas.length > 1 && (
+      {pickableSchemas.length > 1 && (
         <div className="flex gap-1 px-2 py-1.5 border-b border-gray-100 overflow-x-auto flex-shrink-0">
           <button
             onClick={() => setActiveSchema(null)}
             className={`px-2.5 py-1 rounded text-xs whitespace-nowrap transition
               ${activeSchema === null ? 'bg-blue-100 text-blue-700 font-medium' : 'text-gray-500 hover:bg-gray-100'}`}
           >{t('aiDash.fp.all')}</button>
-          {schemas.map(s => (
+          {pickableSchemas.map(s => (
             <button
               key={s.id}
               onClick={() => setActiveSchema(s.id!)}

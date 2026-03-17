@@ -6,7 +6,7 @@ import {
   AlertTriangle, Database, Mail, Cpu, Zap, Settings, BookOpen,
   ChevronRight, Info, Lightbulb, Terminal, Globe, RefreshCw,
   Wand2, ImageIcon, Clock, Share2, GitFork, Lock, Sparkles, Code2, Package, Play, Square,
-  Paperclip, Search, Server, BookMarked, Wifi, WifiOff, CheckCircle, Loader2,
+  Paperclip, Search, Server, BookMarked, Wifi, WifiOff, CheckCircle, Loader2, Layers,
 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 
@@ -145,6 +145,7 @@ const userSections = [
   { id: 'u-ai-bi-query', label: '命名查詢 / 報表範本', icon: <BookMarked size={18} /> },
   { id: 'u-ai-bi-field', label: 'Schema 欄位選擇器', icon: <Server size={18} /> },
   { id: 'u-ai-bi-chart', label: '即時圖表建構器', icon: <BarChart3 size={18} /> },
+  { id: 'u-ai-bi-shelf', label: 'Tableau 拖拉式設計器', icon: <Layers size={18} /> },
   { id: 'u-ai-bi-dashboard', label: '儀表板 Dashboard', icon: <Share2 size={18} /> },
 ]
 
@@ -1092,7 +1093,8 @@ function UserManual() {
             ['自然語言查詢', '用中文提問，系統自動生成並執行 SQL，回傳結果與圖表'],
             ['命名查詢 / 報表範本', '儲存常用問題為具名範本，可定義查詢參數與圖表設定'],
             ['Schema 欄位選擇器', '從 ERP 資料表欄位清單選取並插入到提問輸入框'],
-            ['即時圖表建構器', '查詢結果出來後，自由拖拉設定長條圖、折線圖、圓餅圖等'],
+            ['即時圖表建構器', '查詢結果出來後，快速設定長條圖、折線圖、圓餅圖等，支援分組/堆疊/複數 Y 軸/漸層/陰影'],
+            ['Tableau 拖拉式設計器', '全螢幕拖拉欄位到各 Shelf，視覺化設計圖表，類似 Tableau 操作體驗'],
             ['儀表板 Board', '將多個命名查詢的圖表組合成一個可拖拉排版的儀表板'],
             ['查詢參數化', '命名查詢可定義填值欄位（下拉選單、日期範圍等），執行時彈窗填入'],
             ['分享', '命名查詢與儀表板可分享給指定使用者、角色、部門或組織單位'],
@@ -1207,6 +1209,32 @@ function UserManual() {
             日期範圍類型的參數支援「今天」「本月」「上月」快捷按鈕，使用者不必手動輸入。
             多選下拉會生成 IN (val1, val2, ...) 語法注入 SQL。
           </TipBox>
+          <Para>
+            每個參數的「中文標籤」旁有一個「翻譯」按鈕（↻），點擊後系統會自動呼叫 AI 翻譯，
+            將標籤翻成英文（EN）與越南文（VI），填入對應欄位，無需手動輸入多語版本。
+          </Para>
+        </SubSection>
+
+        <SubSection title="圖表設定（含複數 Y 軸）">
+          <Para>
+            命名查詢儲存對話框的「圖表設定」頁籤，功能與圖表建構器完全一致，包含：
+          </Para>
+          <Table
+            headers={['功能', '說明']}
+            rows={[
+              ['多圖表管理', '可新增多張圖表，各自獨立設定欄位、類型、樣式'],
+              ['X / Y 軸欄位選擇', '從命名查詢儲存的欄位清單（available_columns）中選取'],
+              ['分組 / 堆疊維度', '在 Y 軸欄位設定後，可額外指定分組或堆疊維度（bar / line 適用）'],
+              ['複數 Y 軸（進階）', '啟用後可定義多條 Series，每條獨立設定欄位、聚合、類型（bar/line）、顏色、漸層、陰影、套疊、右軸等'],
+              ['顏色主題', '全局色票或自訂 Series 顏色'],
+              ['排序 / 數值門檻', '排序方式與最小值過濾'],
+              ['三語標題翻譯', '圖表標題、X / Y 軸名稱旁均有翻譯按鈕，一鍵填入英文與越南文'],
+            ]}
+          />
+          <NoteBox>
+            若儲存時查詢尚未執行（沒有 live 結果欄位），可在「圖表設定」頁籤下方的「手動新增欄位」輸入欄位代碼，
+            讓 X / Y 欄位下拉選單有選項可選，不必重新執行查詢。
+          </NoteBox>
         </SubSection>
 
         <SubSection title="分享命名查詢">
@@ -1280,31 +1308,112 @@ function UserManual() {
           </div>
         </SubSection>
 
-        <SubSection title="設定圖表">
+        <SubSection title="基本設定">
           <Table
             headers={['設定項目', '說明']}
             rows={[
               ['圖表類型', '📊 長條圖 / 📈 折線圖 / 🍕 圓餅圖 / ⚫ 散佈圖 / 🕸 雷達圖，點擊圖示切換'],
-              ['X 軸 / 類別欄位', '選擇要作為橫軸（或圓餅標籤）的欄位，通常是代碼類欄位'],
-              ['Y 軸 / 數值欄位', '選擇要聚合計算的數值欄位'],
-              ['聚合函數', 'SUM（加總）、COUNT（計數）、AVG（平均）、MAX（最大值）、MIN（最小值）、COUNT_DISTINCT（相異計數）'],
-              ['顯示前幾筆', '依 Y 軸值由大到小排序後，取前 N 筆，預設 20 筆'],
-              ['圖表標題', '顯示在圖表上方的標題文字'],
+              ['X 軸 / 類別欄位', '選擇橫軸（或圓餅標籤）欄位，通常是代碼或時間類欄位'],
+              ['Y 軸 / 數值欄位', '選擇要聚合計算的數值欄位（單 Y 軸模式）'],
+              ['聚合函數', 'SUM / COUNT / AVG / MAX / MIN / COUNT_DISTINCT'],
+              ['顯示前幾筆', '取前 N 筆資料，預設 20 筆'],
+              ['圖表標題', '顯示在圖表上方的標題文字（支援三語翻譯按鈕）'],
+              ['X / Y 軸標題', '軸名稱說明文字，支援三語翻譯'],
             ]}
           />
           <TipBox>
-            聚合計算在瀏覽器端執行（Client-side），不需重跑 SQL。切換不同欄位或聚合方式後，點「即時預覽」即可看到效果。
+            聚合計算在瀏覽器端執行（Client-side），不需重跑 SQL。設定後點「▼ 預覽」即可即時看到圖表效果。
           </TipBox>
+        </SubSection>
+
+        <SubSection title="排序與篩選">
+          <Table
+            headers={['設定項目', '說明']}
+            rows={[
+              ['排序依據', '不排序 / 依 X 軸排序 / 依 Y 軸排序'],
+              ['排序方向', '升冪（ASC）/ 降冪（DESC）'],
+              ['數值門檻 (min_value)', '排除 Y 軸值 ≤ 此數的資料列，設為 0 可去除零值資料'],
+              ['圓餅 Top-N', '圓餅圖專用：依值由大到小取前 N 筆（其餘歸為其他或省略）'],
+            ]}
+          />
+        </SubSection>
+
+        <SubSection title="多維度設定（分組 / 堆疊）">
+          <Para>
+            長條圖與折線圖可在 Y 軸欄位之外，再加入「分組維度」或「堆疊維度」，
+            讓同一張圖呈現多個 Series。
+          </Para>
+          <Table
+            headers={['設定', '效果', '適用場景']}
+            rows={[
+              ['分組維度 (Series)', '同一 X 類別下並排多根柱子或多條線，每個維度值一種顏色', '比較各廠 × 各月份的數量'],
+              ['堆疊維度 (Stack)', '同一 X 類別的柱子向上堆疊，各維度值疊加為整體', '顯示各產品佔每月總量的比例'],
+              ['分組 + 堆疊同時使用', '每組並排，組內疊色，適合 3D 分析', '廠區 × 機種 × 不良類別'],
+            ]}
+          />
+          <NoteBox>
+            設定分組或堆疊維度後，圖表建構器會直接傳入原始資料列，由 AiChart 內部在瀏覽器端 pivot 計算，不需重跑 SQL。
+            「複數 Y 軸（進階）」模式啟用時，分組/堆疊維度會自動隱藏（兩者互斥）。
+          </NoteBox>
+        </SubSection>
+
+        <SubSection title="複數 Y 軸（進階 Method B）">
+          <Para>
+            當您需要把兩個以上的指標放在同一張圖、或需要「柱狀＋折線」混合圖、
+            或「套疊/子彈圖」效果時，可使用「複數 Y 軸」模式。
+            在圖表建構器的「複數 Y 軸 (進階)」區塊，點「+ 新增 Y 軸 series」加入每一條 Series。
+          </Para>
+          <Table
+            headers={['每條 Series 設定', '說明']}
+            rows={[
+              ['欄位', '該 Series 對應的資料欄位'],
+              ['聚合函數', 'SUM / COUNT / AVG / MAX / MIN / COUNT_DISTINCT，與欄位搭配'],
+              ['類型 (Bar / Line)', '單張圖可混合柱狀與折線，實現 Combo Chart'],
+              ['顏色', '點選色塊選擇任意顏色（HTML color picker）'],
+              ['名稱 (Label)', '顯示在圖例（Legend）的 Series 名稱'],
+              ['寬度 (Bar only)', '柱子寬度，例如 40%（百分比）或 30（像素）'],
+              ['漸層', '柱子或折線加上由上到下的漸層填充效果'],
+              ['陰影', '柱子或折線加上外發光陰影效果，增加立體感'],
+              ['套疊 (Bar only)', '讓此柱子疊在前一條 Series 上（barGap: -100%），實現子彈圖效果'],
+              ['平滑 (Line only)', '折線以貝茲曲線圓滑顯示'],
+              ['面積 (Line only)', '折線下方填滿半透明顏色'],
+              ['右軸', '讓此 Series 使用右側 Y 軸，適合不同量級的指標並排顯示'],
+            ]}
+          />
+          <TipBox>
+            子彈圖（Bullet Chart）做法：新增兩條 Bar Series，第一條寬度設 60%（背景），第二條寬度設 30%、勾選「套疊」（前景），
+            兩條使用不同顏色，即可呈現目標值vs實際值的子彈圖效果。
+          </TipBox>
+          <NoteBox>
+            啟用複數 Y 軸後，上方的單一 Y 軸欄位與分組/堆疊維度設定均會被忽略，圖表完全由 y_axes 陣列驅動。
+          </NoteBox>
+        </SubSection>
+
+        <SubSection title="顏色主題">
+          <Para>
+            在圖表建構器底部可選擇整體色票主題，影響所有 Series 的預設顏色（自訂顏色的 Series 不受影響）：
+          </Para>
+          <Table
+            headers={['主題', '色系說明']}
+            rows={[
+              ['預設（Power BI）', '藍橘紫綠，接近 Power BI 預設色票'],
+              ['藍 (Blue)', '深淺藍色系'],
+              ['綠 (Green)', '深淺綠色系'],
+              ['橘 (Orange)', '橘紅黃色系'],
+              ['紫 (Purple)', '深淺紫色系'],
+              ['青 (Teal)', '青藍色系'],
+            ]}
+          />
         </SubSection>
 
         <SubSection title="樣式選項">
           <Table
             headers={['圖表類型', '可用樣式']}
             rows={[
-              ['長條圖', '水平長條（Horizontal）'],
-              ['折線圖', '圓滑曲線（Smooth）、面積填滿（Area）'],
+              ['長條圖', '水平長條（Horizontal）、全域陰影（Shadow）'],
+              ['折線圖', '圓滑曲線（Smooth）、面積填滿（Area）、全域陰影（Shadow）'],
               ['圓餅圖', '甜甜圈樣式（Donut）'],
-              ['全部', '顯示數值標籤（Show Label）'],
+              ['全部', '顯示數值標籤（Show Label）、顯示圖例（Show Legend）、顯示格線（Show Grid）'],
             ]}
           />
         </SubSection>
@@ -1312,8 +1421,7 @@ function UserManual() {
         <SubSection title="多圖表">
           <Para>
             同一份查詢結果可以加入多張圖表，分別設定不同的欄位組合。
-            點擊頂部的「+ 新增」可加入第二、第三張圖表，
-            在結果區以頁籤切換顯示。
+            點頂部的「+ 新增」加入第二、第三張圖表，在結果區以頁籤切換。
           </Para>
           <div className="space-y-3">
             <StepItem num={1} title="設定好第一張圖表後點「+ 新增」" />
@@ -1324,9 +1432,96 @@ function UserManual() {
 
         <SubSection title="儲存圖表設定">
           <Para>
-            點擊面板右上角的「儲存圖表設定」，系統會將目前所有圖表設定寫入命名查詢（需已儲存命名查詢）。
+            點擊面板右上角的「儲存圖表設定」，系統將所有圖表設定寫入命名查詢（需已儲存命名查詢）。
             下次載入此命名查詢並執行後，圖表會自動呈現您設定好的樣式。
           </Para>
+        </SubSection>
+      </Section>
+
+      {/* ═══════════════════════════════════════════════════ Tableau 拖拉式設計器 */}
+
+      <Section id="u-ai-bi-shelf" icon={<Layers size={22} />} iconColor="text-rose-500" title="Tableau 拖拉式設計器">
+        <Para>
+          Tableau 拖拉式設計器提供類似 Tableau Worksheet 的全螢幕操作介面，
+          讓您把欄位直接拖到各個 Shelf（欄架），即時預覽圖表效果，
+          不需要設定欄位名稱字串，視覺化操作更直覺。
+          完成後點「套用」即可將圖表設定同步到 AI 戰情室。
+        </Para>
+
+        <SubSection title="開啟設計器">
+          <div className="space-y-3">
+            <StepItem num={1} title="執行查詢並取得結果" desc="頂端工具列的「Tableau」按鈕（Layers 圖示）才會亮起" />
+            <StepItem num={2} title="點擊工具列「Tableau」按鈕" desc="全螢幕覆蓋層彈出，左側是欄位清單，右側是 Shelf 區域與即時圖表預覽" />
+          </div>
+        </SubSection>
+
+        <SubSection title="欄位分類">
+          <Para>
+            系統會自動分析資料，將欄位分類為「維度」與「量值」：
+          </Para>
+          <Table
+            headers={['類型', '顯示色', '判斷邏輯']}
+            rows={[
+              ['維度 (Dimension)', '藍色標籤', '取前 30 筆，數值佔比 < 70%（通常是代碼、名稱、日期類）'],
+              ['量值 (Measure)', '橘色標籤', '取前 30 筆，數值佔比 ≥ 70%（通常是數量、金額、比率類）'],
+            ]}
+          />
+          <TipBox>
+            自動分類可能因資料特性有偏差，例如工廠代碼若全為數字會被歸為量值。
+            您可以手動將任意欄位拖到任何 Shelf，分類僅供參考。
+          </TipBox>
+        </SubSection>
+
+        <SubSection title="Shelf 說明">
+          <Table
+            headers={['Shelf', '對應設定', '說明']}
+            rows={[
+              ['Columns（X 軸）', 'x_field', '橫軸類別欄位，通常拖入維度欄位'],
+              ['Rows（Y 軸）', 'y_field + y_agg', '縱軸量值欄位，右側選聚合函數'],
+              ['Color（顏色維度）', 'series_field', '拖入後產生分組 Series，各維度值用不同顏色'],
+              ['Size（堆疊維度）', 'stack_field', '拖入後產生堆疊效果，各維度值向上疊加'],
+            ]}
+          />
+        </SubSection>
+
+        <SubSection title="拖拉操作流程">
+          <div className="space-y-3">
+            <StepItem num={1} title="從左側欄位清單抓取欄位" desc="長按後拖動，欄位上出現抓取游標（GripVertical 圖示）" />
+            <StepItem num={2} title="拖到目標 Shelf 放開" desc="Shelf 出現藍色 hover 高亮時放開即可完成配置" />
+            <StepItem num={3} title="同一 Shelf 可替換欄位" desc="再次拖入新欄位到已有欄位的 Shelf，會直接取代" />
+            <StepItem num={4} title="點擊 Shelf 上的 ✕ 移除欄位" desc="清空該維度設定" />
+            <StepItem num={5} title="圖表預覽即時更新" desc="每次變更 Shelf 配置，右側圖表預覽立刻重新計算並顯示" />
+          </div>
+        </SubSection>
+
+        <SubSection title="圖表類型與顯示選項">
+          <Para>
+            設計器頂部工具列提供快速切換圖表類型，以及常用顯示開關：
+          </Para>
+          <Table
+            headers={['選項', '說明']}
+            rows={[
+              ['圖表類型', '長條圖 / 折線圖 / 圓餅圖 / 散佈圖 / 雷達圖，點擊切換'],
+              ['聚合函數 (Y Shelf)', 'SUM / COUNT / AVG / MAX / MIN / COUNT_DISTINCT，僅影響 Y Shelf 欄位'],
+              ['顯示前 N 筆', '設定最多顯示幾筆資料，預設 20 筆'],
+              ['漸層', '長條圖柱子加上漸層填充'],
+              ['圓滑 (Line only)', '折線以圓滑曲線顯示'],
+              ['顯示標籤', '在各資料點上顯示數值'],
+              ['顯示圖例', '在圖表旁顯示 Series 名稱對照'],
+              ['顯示格線', '在圖表背景顯示輔助格線'],
+            ]}
+          />
+        </SubSection>
+
+        <SubSection title="套用與關閉">
+          <div className="space-y-3">
+            <StepItem num={1} title="設計滿意後，點擊右上角「套用」按鈕" desc="圖表設定會同步回 AI 戰情室的圖表顯示，並標記為使用者自訂設定" />
+            <StepItem num={2} title="點擊「關閉」或背景遮罩可不儲存直接退出" />
+            <StepItem num={3} title="套用後繼續點「💾 儲存」可將 Tableau 設計的圖表設定永久寫入命名查詢" />
+          </div>
+          <NoteBox>
+            Tableau 設計器產生的設定與圖表建構器（📐 圖表面板）共用同一份設定結構，可以在兩者之間互相切換精調。
+          </NoteBox>
         </SubSection>
       </Section>
 
@@ -1405,6 +1600,23 @@ function UserManual() {
             對被分享的儀表板，您可以選擇「另存為自己的版本」（Clone）取得一份獨立副本，
             修改後不影響原始儀表板。Clone 的操作入口在儀表板選項選單中。
           </Para>
+        </SubSection>
+
+        <SubSection title="唯讀模式與權限說明">
+          <Para>
+            儀表板依照您的權限顯示不同操作按鈕：
+          </Para>
+          <Table
+            headers={['您的權限', '能做的事', '介面提示']}
+            rows={[
+              ['管理權限（建立者或被授予管理）', '編輯佈局、新增/移除 Tile、調整大小、分享、刪除', '工具列顯示「編輯佈局」「分享」「刪除」按鈕'],
+              ['使用權限（被分享）', '執行查詢、查看圖表、另存副本（Clone）', '空白畫布時顯示「此儀表板為唯讀」提示，工具列不顯示編輯按鈕'],
+            ]}
+          />
+          <NoteBox>
+            若您看到「此儀表板為唯讀」提示而非「進入編輯模式加入圖表」，代表您對此儀表板只有使用權限。
+            如需編輯，請聯繫儀表板建立者授予管理權限，或使用「另存副本」建立自己的版本。
+          </NoteBox>
         </SubSection>
       </Section>
     </div>

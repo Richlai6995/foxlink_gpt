@@ -388,9 +388,16 @@ async function runMigrations(db) {
   await addCol('AI_SCHEMA_DEFINITIONS', 'SOURCE_SQL',       'CLOB');
   await addCol('AI_SCHEMA_DEFINITIONS', 'BASE_CONDITIONS',  'CLOB');  // JSON [{col,op,val}]
   await addCol('AI_SCHEMA_DEFINITIONS', 'VECTOR_ETL_JOB_ID', 'NUMBER');
+  // 多語系顯示名稱
+  await addCol('AI_SCHEMA_DEFINITIONS', 'DISPLAY_NAME_EN', 'VARCHAR2(200)');
+  await addCol('AI_SCHEMA_DEFINITIONS', 'DISPLAY_NAME_VI', 'VARCHAR2(200)');
+  // Schema 欄位可見性（0=隱藏，不出現在 field picker）
+  await addCol('AI_SCHEMA_COLUMNS', 'IS_VISIBLE', 'NUMBER(1) DEFAULT 1');
 
   // AI Select Design 加入 join 選擇
   await addCol('AI_SELECT_DESIGNS', 'TARGET_JOIN_IDS', 'CLOB');
+  // WHERE-only schema IDs（這些 schema 只用於 WHERE 篩選，不出現在 field 選擇器）
+  await addCol('AI_SELECT_DESIGNS', 'SCHEMA_WHERE_ONLY_IDS', 'CLOB');
 
   // ── AI ETL Jobs 擴充 ────────────────────────────────────────────────────────
   await addCol('AI_ETL_JOBS', 'JOB_TYPE',       "VARCHAR2(20) DEFAULT 'vector'");
@@ -414,6 +421,12 @@ async function runMigrations(db) {
   await addCol('AI_REPORT_DASHBOARDS', 'DESCRIPTION_VI', 'VARCHAR2(2000)');
   await addCol('AI_REPORT_DASHBOARDS', 'CATEGORY_EN', 'VARCHAR2(200)');
   await addCol('AI_REPORT_DASHBOARDS', 'CATEGORY_VI', 'VARCHAR2(200)');
+  await addCol('AI_REPORT_DASHBOARDS', 'BG_COLOR', 'VARCHAR2(20)');
+  await addCol('AI_REPORT_DASHBOARDS', 'BG_IMAGE_URL', 'VARCHAR2(500)');
+  await addCol('AI_REPORT_DASHBOARDS', 'BG_OPACITY', 'NUMBER(4,2) DEFAULT 1');
+  await addCol('AI_REPORT_DASHBOARDS', 'GLOBAL_FILTERS_SCHEMA', 'CLOB');
+  await addCol('AI_REPORT_DASHBOARDS', 'BOOKMARKS', 'CLOB');
+  await addCol('AI_REPORT_DASHBOARDS', 'TOOLBAR_BG_COLOR', 'VARCHAR2(20)');
 
   // AI Saved Queries multilingual names
   await addCol('AI_SAVED_QUERIES', 'NAME_EN', 'VARCHAR2(400)');

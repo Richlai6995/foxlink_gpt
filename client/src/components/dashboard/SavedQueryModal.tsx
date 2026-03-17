@@ -6,7 +6,7 @@ import { useState, useEffect, useMemo } from 'react'
 import api from '../../lib/api'
 import type {
   AiSavedQuery, AiQueryParameter, AiSchemaDef, AiSchemaColumn,
-  AiChartConfig, AiChartDef, ChartColorPalette,
+  AiChartConfig, AiChartDef, ChartColorPalette, YAxisDef, OverlayLine,
 } from '../../types'
 import { useTranslation } from 'react-i18next'
 import TranslationFields from '../common/TranslationFields'
@@ -62,6 +62,88 @@ const PALETTE_OPTIONS: { key: ChartColorPalette; label: string; colors: string[]
   { key: 'purple', label: '紫', colors: ['#744EC2','#6B007B','#8764B8'] },
   { key: 'teal',   label: '青', colors: ['#0099BC','#038387','#00B4D8'] },
 ]
+
+function newYAxisDef(cols: { key: string }[]): YAxisDef {
+  return { field: cols[0]?.key || '', agg: 'SUM', chart_type: 'bar' }
+}
+
+interface YAxesPanelSQProps {
+  y_axes: YAxisDef[]
+  cols: { key: string; label: string }[]
+  onChange: (y_axes: YAxisDef[]) => void
+}
+
+function YAxesPanelSQ({ y_axes, cols, onChange }: YAxesPanelSQProps) {
+  function update(idx: number, patch: Partial<YAxisDef>) {
+    onChange(y_axes.map((ax, i) => i === idx ? { ...ax, ...patch } : ax))
+  }
+  return (
+    <div className="space-y-2">
+      {y_axes.map((ax, idx) => (
+        <div key={idx} className="border border-gray-200 rounded p-2 space-y-1.5 bg-gray-50">
+          <div className="flex items-center gap-1">
+            <span className="text-xs text-gray-400 w-4">{idx + 1}</span>
+            <select value={ax.field} onChange={e => update(idx, { field: e.target.value })}
+              className="flex-1 border border-gray-200 rounded px-1.5 py-0.5 text-xs focus:outline-none focus:border-blue-400">
+              {cols.map(c => <option key={c.key} value={c.key}>{c.label} ({c.key})</option>)}
+            </select>
+            <select value={ax.agg} onChange={e => update(idx, { agg: e.target.value as YAxisDef['agg'] })}
+              className="w-20 border border-gray-200 rounded px-1.5 py-0.5 text-xs focus:outline-none focus:border-blue-400">
+              {AGG_FNS.map(fn => <option key={fn} value={fn}>{fn}</option>)}
+            </select>
+            <select value={ax.chart_type} onChange={e => update(idx, { chart_type: e.target.value as 'bar' | 'line' })}
+              className="w-14 border border-gray-200 rounded px-1.5 py-0.5 text-xs focus:outline-none focus:border-blue-400">
+              <option value="bar">Bar</option>
+              <option value="line">Line</option>
+            </select>
+            <input type="color" value={ax.color || '#118DFF'} onChange={e => update(idx, { color: e.target.value })}
+              className="w-7 h-6 rounded border border-gray-200 cursor-pointer p-0" title="顏色" />
+            <button onClick={() => onChange(y_axes.filter((_, i) => i !== idx))}
+              className="text-gray-300 hover:text-red-500 text-xs ml-auto">✕</button>
+          </div>
+          <div className="flex gap-1">
+            <input type="text" placeholder="名稱 (label)" value={ax.label || ''}
+              onChange={e => update(idx, { label: e.target.value || undefined })}
+              className="flex-1 border border-gray-200 rounded px-1.5 py-0.5 text-xs focus:outline-none focus:border-blue-400" />
+            {ax.chart_type === 'bar' && (
+              <input type="text" placeholder="寬度 e.g. 40%" value={ax.bar_width || ''}
+                onChange={e => update(idx, { bar_width: e.target.value || undefined })}
+                className="w-24 border border-gray-200 rounded px-1.5 py-0.5 text-xs focus:outline-none focus:border-blue-400" />
+            )}
+          </div>
+          <div className="flex flex-wrap gap-x-3 gap-y-1">
+            <label className="flex items-center gap-1 text-xs text-gray-600 cursor-pointer">
+              <input type="checkbox" checked={!!ax.gradient} onChange={e => update(idx, { gradient: e.target.checked })} />漸層
+            </label>
+            <label className="flex items-center gap-1 text-xs text-gray-600 cursor-pointer">
+              <input type="checkbox" checked={!!ax.shadow} onChange={e => update(idx, { shadow: e.target.checked })} />陰影
+            </label>
+            {ax.chart_type === 'bar' && (
+              <label className="flex items-center gap-1 text-xs text-gray-600 cursor-pointer">
+                <input type="checkbox" checked={!!ax.overlap} onChange={e => update(idx, { overlap: e.target.checked })} />套疊
+              </label>
+            )}
+            {ax.chart_type === 'line' && (<>
+              <label className="flex items-center gap-1 text-xs text-gray-600 cursor-pointer">
+                <input type="checkbox" checked={!!ax.smooth} onChange={e => update(idx, { smooth: e.target.checked })} />平滑
+              </label>
+              <label className="flex items-center gap-1 text-xs text-gray-600 cursor-pointer">
+                <input type="checkbox" checked={!!ax.area} onChange={e => update(idx, { area: e.target.checked })} />面積
+              </label>
+            </>)}
+            <label className="flex items-center gap-1 text-xs text-gray-600 cursor-pointer">
+              <input type="checkbox" checked={!!ax.use_right_axis} onChange={e => update(idx, { use_right_axis: e.target.checked })} />右軸
+            </label>
+          </div>
+        </div>
+      ))}
+      <button onClick={() => onChange([...y_axes, newYAxisDef(cols)])}
+        className="w-full py-1 border border-dashed border-blue-300 text-blue-500 text-xs rounded hover:bg-blue-50">
+        + 新增 Y 軸 series
+      </button>
+    </div>
+  )
+}
 
 type ChartDraft = AiChartDef & { _id: string; _agg: AggFn }
 
@@ -298,8 +380,8 @@ function ChartEditor({ initialConfig, onChange }: ChartEditorProps) {
         </div>
       </div>
 
-      {/* 分組 / 堆疊維度（bar / line only）*/}
-      {(active.type === 'bar' || active.type === 'line') && (
+      {/* 分組 / 堆疊維度（bar / line only，y_axes 啟用時隱藏）*/}
+      {(active.type === 'bar' || active.type === 'line') && !(active.y_axes?.length) && (
         <div className="grid grid-cols-2 gap-3">
           <FieldSelect
             label={t('aiDash.sqModal.seriesField')}
@@ -311,6 +393,73 @@ function ChartEditor({ initialConfig, onChange }: ChartEditorProps) {
             value={active.stack_field || ''}
             onChange={v => updateActive({ stack_field: v || undefined })}
           />
+        </div>
+      )}
+
+      {/* 複數 Y 軸 (Method B) */}
+      {(active.type === 'bar' || active.type === 'line') && (
+        <div>
+          <div className="flex items-center justify-between mb-1">
+            <label className="text-xs text-gray-500">複數 Y 軸 (進階)</label>
+            {(active.y_axes?.length ?? 0) > 0 && (
+              <button onClick={() => updateActive({ y_axes: undefined, series_field: undefined, stack_field: undefined })}
+                className="text-xs text-gray-400 hover:text-red-500">清除全部</button>
+            )}
+          </div>
+          <YAxesPanelSQ
+            y_axes={active.y_axes || []}
+            cols={cols}
+            onChange={y_axes => updateActive({ y_axes: y_axes.length ? y_axes : undefined })}
+          />
+        </div>
+      )}
+
+      {/* 疊加折線 (Option C) — bar 有 series_field 或 stack_field 且無 y_axes 時顯示 */}
+      {active.type === 'bar' && (active.series_field || active.stack_field) && !active.y_axes?.length && (
+        <div>
+          <div className="flex items-center justify-between mb-1">
+            <label className="text-xs text-gray-500">疊加折線</label>
+            <button
+              onClick={() => updateActive({ overlay_lines: [...(active.overlay_lines || []), { field: cols[0]?.key || '', agg: 'SUM' }] })}
+              className="text-xs text-blue-500 hover:text-blue-700"
+            >+ 新增</button>
+          </div>
+          {(active.overlay_lines || []).map((ol, idx) => (
+            <div key={idx} className="border border-gray-200 rounded p-2 mb-1.5 bg-gray-50 space-y-1.5">
+              <div className="flex items-center gap-1">
+                <select value={ol.field}
+                  onChange={e => updateActive({ overlay_lines: (active.overlay_lines || []).map((o, i) => i === idx ? { ...o, field: e.target.value } : o) })}
+                  className="flex-1 border border-gray-200 rounded px-1.5 py-0.5 text-xs focus:outline-none focus:border-blue-400 bg-white">
+                  {cols.map(c => <option key={c.key} value={c.key}>{c.label} ({c.key})</option>)}
+                </select>
+                <select value={ol.agg}
+                  onChange={e => updateActive({ overlay_lines: (active.overlay_lines || []).map((o, i) => i === idx ? { ...o, agg: e.target.value as OverlayLine['agg'] } : o) })}
+                  className="w-20 border border-gray-200 rounded px-1.5 py-0.5 text-xs focus:outline-none focus:border-blue-400 bg-white">
+                  {AGG_FNS.map(fn => <option key={fn} value={fn}>{fn}</option>)}
+                </select>
+                <input type="color" value={ol.color || '#E66C37'}
+                  onChange={e => updateActive({ overlay_lines: (active.overlay_lines || []).map((o, i) => i === idx ? { ...o, color: e.target.value } : o) })}
+                  className="w-7 h-6 rounded border border-gray-200 cursor-pointer p-0" title="顏色" />
+                <button onClick={() => updateActive({ overlay_lines: (active.overlay_lines || []).filter((_, i) => i !== idx) })}
+                  className="text-gray-300 hover:text-red-500 text-xs ml-auto">✕</button>
+              </div>
+              <input type="text" placeholder="名稱 (label)" value={ol.label || ''}
+                onChange={e => updateActive({ overlay_lines: (active.overlay_lines || []).map((o, i) => i === idx ? { ...o, label: e.target.value || undefined } : o) })}
+                className="w-full border border-gray-200 rounded px-1.5 py-0.5 text-xs focus:outline-none focus:border-blue-400" />
+              <div className="flex flex-wrap gap-x-3 gap-y-1">
+                {([['smooth', '平滑'], ['dashed', '虛線'], ['use_right_axis', '右軸']] as [keyof OverlayLine, string][]).map(([key, label]) => (
+                  <label key={key} className="flex items-center gap-1 text-xs text-gray-600 cursor-pointer">
+                    <input type="checkbox" checked={!!(ol as any)[key]}
+                      onChange={e => updateActive({ overlay_lines: (active.overlay_lines || []).map((o, i) => i === idx ? { ...o, [key]: e.target.checked } : o) })} />
+                    {label}
+                  </label>
+                ))}
+              </div>
+            </div>
+          ))}
+          {!(active.overlay_lines?.length) && (
+            <p className="text-xs text-gray-300 text-center py-1">在分組直條上疊加全域折線（先設定分組/堆疊欄位）</p>
+          )}
         </div>
       )}
 

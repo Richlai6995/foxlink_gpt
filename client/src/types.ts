@@ -191,6 +191,8 @@ export interface AiSchemaDef {
   id: number
   table_name: string
   display_name?: string
+  display_name_en?: string
+  display_name_vi?: string
   alias?: string
   source_type?: 'table' | 'view' | 'sql'
   source_sql?: string
@@ -202,6 +204,7 @@ export interface AiSchemaDef {
   is_active: number
   project_id?: number
   columns?: AiSchemaColumn[]
+  where_only?: boolean   // 由 API 計算後注入，本身不存在 DB
 }
 
 export interface AiSchemaJoin {
@@ -275,6 +278,7 @@ export interface AiSelectDesign {
   description?: string
   target_schema_ids?: string | number[]
   target_join_ids?: string | number[]
+  schema_where_only_ids?: string | number[]
   vector_search_enabled: number
   vector_top_k?: number
   vector_similarity_threshold?: string
@@ -364,6 +368,33 @@ export interface AiChartConfig {
 
 export type ChartColorPalette = 'blue' | 'green' | 'orange' | 'purple' | 'teal'
 
+/** 疊加折線定義 (Option C) — 在分組/堆疊 bar 上疊加全域折線 */
+export interface OverlayLine {
+  field: string
+  agg: 'SUM' | 'COUNT' | 'AVG' | 'MAX' | 'MIN' | 'COUNT_DISTINCT'
+  label?: string
+  color?: string
+  smooth?: boolean
+  dashed?: boolean
+  use_right_axis?: boolean
+}
+
+/** 複數 Y 軸定義（Method B），每條 series 獨立設定 */
+export interface YAxisDef {
+  field: string
+  agg: 'SUM' | 'COUNT' | 'AVG' | 'MAX' | 'MIN' | 'COUNT_DISTINCT'
+  chart_type: 'bar' | 'line'
+  label?: string          // series 名稱（legend）
+  color?: string          // 指定顏色 hex
+  gradient?: boolean      // 漸層填充
+  shadow?: boolean        // 陰影效果
+  bar_width?: string      // 例如 '30%'
+  overlap?: boolean       // barGap: '-100%' — 套疊在前一條上
+  smooth?: boolean        // line only
+  area?: boolean          // line only
+  use_right_axis?: boolean // 使用右 Y 軸
+}
+
 export interface AiChartDef {
   type: 'bar' | 'line' | 'pie' | 'scatter' | 'radar' | 'gauge'
   title?: string
@@ -387,10 +418,16 @@ export interface AiChartDef {
   limit?: number
   // 顏色設定
   color_palette?: ChartColorPalette
-  colors?: string[]   // 自訂色票陣列
+  colors?: string[]   // 自訂色票陣列（按 series 出現順序循環）
+  series_colors?: Record<string, string>  // 值→顏色精確對應（優先於 colors[]）
   // 多維度設定
   series_field?: string   // 分組維度 → 並排 (grouped)
   stack_field?: string    // 堆疊維度 → 疊色 (stacked within series)
+  // 複數 Y 軸（Method B）— 當有此陣列時，y_field/agg_fn/series_field/stack_field 模式全部略過
+  y_axes?: YAxisDef[]
+  shadow?: boolean  // 全域陰影（單 series bar/line）
+  // 疊加折線（Option C）— 在 series_field/stack_field 分組 bar 上疊加全域折線
+  overlay_lines?: OverlayLine[]
   // 排序設定
   sort_by?: 'none' | 'x' | 'y'
   sort_order?: 'asc' | 'desc'
@@ -403,6 +440,18 @@ export interface AiChartDef {
   x_axis_name_vi?: string
   y_axis_name_en?: string
   y_axis_name_vi?: string
+  // ── 文字 / 顏色樣式設定 ─────────────────────────────────────────────────────
+  chart_bg_color?: string      // 圖表 tile 底色
+  axis_label_color?: string    // x/y 軸刻度文字色
+  axis_label_size?: number     // x/y 軸刻度文字大小 (px)
+  axis_line_color?: string     // 軸線 + axisTick 顏色
+  data_label_color?: string    // series 標籤文字色（bar/line 頂端數字）
+  data_label_size?: number     // series 標籤文字大小
+  legend_color?: string        // 圖例文字色
+  legend_size?: number         // 圖例文字大小
+  title_color?: string         // 標題文字色
+  title_size?: number          // 標題文字大小
+  grid_line_color?: string     // 格線顏色
 }
 
 export interface TaskRun {
@@ -484,17 +533,51 @@ export interface AiSavedQueryShare {
 
 // ── AI 儀表板（Report Dashboards）────────────────────────────────────────────
 
+export interface KpiAlertRule {
+  operator: '>' | '<' | '>=' | '<='
+  value: number
+  color: string      // text/border color e.g. '#ef4444'
+  bg_color?: string  // background highlight
+}
+
 export interface AiDashboardItem {
-  query_id: number
-  chart_index: number          // 第幾張圖表（0-based）
+  tile_type?: 'chart' | 'kpi' | 'text'   // default 'chart'
+  query_id?: number   // required for chart/kpi, omitted for text
+  chart_index: number
   title_override?: string
-  param_values?: Record<string, string | string[]>  // 持久化的參數值（含動態日期 token）
+  param_values?: Record<string, string | string[]>
   // react-grid-layout layout item
-  i: string                    // 唯一 key（通常 `${query_id}_${chart_index}`）
+  i: string
   x: number
   y: number
   w: number
   h: number
+  // KPI card specific
+  kpi_column?: string
+  kpi_agg?: 'first' | 'sum' | 'avg' | 'count'
+  kpi_format?: 'number' | 'currency' | 'percent'
+  kpi_decimals?: number
+  kpi_comparison_column?: string   // second col for trend arrow
+  kpi_alert_rules?: KpiAlertRule[]
+  // Text widget specific
+  text_content?: string
+}
+
+export interface AiDashboardGlobalFilter {
+  id: string
+  label_zh: string
+  label_en?: string
+  input_type: 'text' | 'date' | 'date_range' | 'select' | 'dynamic_date'
+  param_name: string
+  default_value?: string
+  options?: string[]   // for select type
+}
+
+export interface AiDashboardBookmark {
+  id: string
+  name: string
+  global_values: Record<string, string>
+  created_at: string
 }
 
 export interface AiReportDashboard {
@@ -511,7 +594,13 @@ export interface AiReportDashboard {
   category_vi?: string
   layout_config?: AiDashboardItem[] | null
   sort_order?: number
-  auto_refresh_interval?: number | null   // 自動刷新間隔（分鐘），null = 手動
+  auto_refresh_interval?: number | null
+  bg_color?: string
+  bg_image_url?: string
+  bg_opacity?: number
+  toolbar_bg_color?: string
+  global_filters_schema?: AiDashboardGlobalFilter[] | string | null
+  bookmarks?: AiDashboardBookmark[] | string | null
   is_active?: number
   created_at?: string
   updated_at?: string

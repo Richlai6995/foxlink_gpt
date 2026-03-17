@@ -126,6 +126,10 @@ export default function AiDashboardPage() {
   const [pendingQuery, setPendingQuery] = useState<AiSavedQuery | null>(null)
   // 使用者自訂的 chart_config（覆蓋 design 預設）
   const [userChartConfig, setUserChartConfig] = useState<AiChartConfig | null>(null)
+  // 目前載入執行的命名查詢 id（Tableau 自動存檔用）
+  const [loadedSqId, setLoadedSqId] = useState<number | null>(null)
+  // 從 Tableau 另存為新查詢時帶入的 chart_config（新存才用，一般儲存不帶圖表設定）
+  const [pendingSaveChartConfig, setPendingSaveChartConfig] = useState<AiChartConfig | null>(null)
 
   const loadSavedQueries = async () => {
     setSavedLoading(true)
@@ -182,6 +186,7 @@ export default function AiDashboardPage() {
     setDevVectorResults([])
     setQuestion('')
     setUserChartConfig(null)
+    setLoadedSqId(null)
     setShowChartBuilder(false)
     // 帶入任務設定的向量搜尋預設值
     setAdvTopK(d.vector_top_k != null ? String(d.vector_top_k) : '')
@@ -412,6 +417,8 @@ export default function AiDashboardPage() {
         if (d) { selectDesign(d); break }
       }
     }
+    // 記錄目前載入的命名查詢 id（供 Tableau 自動存檔使用）
+    setLoadedSqId(sq.id)
     // 恢復 chart config
     if (sq.chart_config) {
       const cfg = typeof sq.chart_config === 'string' ? JSON.parse(sq.chart_config) : sq.chart_config
@@ -740,7 +747,7 @@ export default function AiDashboardPage() {
               {/* 儲存查詢 */}
               {result && (
                 <button
-                  onClick={() => { setEditingQuery(null); setShowSaveModal(true) }}
+                  onClick={() => { setEditingQuery(null); setPendingSaveChartConfig(null); setShowSaveModal(true) }}
                   title="儲存為命名查詢"
                   className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg text-gray-400 hover:text-blue-600 hover:bg-blue-50 transition"
                 >
@@ -1017,7 +1024,8 @@ export default function AiDashboardPage() {
           pinnedSql={editingQuery ? undefined : devSql || undefined}
           detectedSql={editingQuery ? undefined : devSql || undefined}
           chartConfig={(() => {
-            // 新增：用 userChartConfig 優先；編輯：合併 userChartConfig + 舊 chart_config
+            // 編輯模式：使用已儲存的 chart_config
+            // 新增模式：只有從 Tableau 另存時才帶 pendingSaveChartConfig，一般儲存不帶圖表
             const existingCfg = editingQuery
               ? (() => {
                   try {
@@ -1027,11 +1035,9 @@ export default function AiDashboardPage() {
                   } catch { return null }
                 })()
               : null
-            // 編輯模式：已存設定優先（保留使用者在 modal 設定的 x_axis_name 等）
-            // 新增模式：ChartBuilder 即時設定優先
             const cfg = editingQuery
               ? (existingCfg || userChartConfig || result?.chart_config)
-              : (userChartConfig || result?.chart_config)
+              : pendingSaveChartConfig   // 新增：只帶 Tableau 另存的設定，或 null
             if (!cfg) return null
             // 帶入 available_columns（優先用本次 result columns，fallback 到已存的）
             const withCols = {
@@ -1047,7 +1053,7 @@ export default function AiDashboardPage() {
             loadSavedQueries()
             setSidebarTab('saved')
           }}
-          onClose={() => { setShowSaveModal(false); setEditingQuery(null) }}
+          onClose={() => { setShowSaveModal(false); setEditingQuery(null); setPendingSaveChartConfig(null) }}
         />
       )}
 
@@ -1086,7 +1092,24 @@ export default function AiDashboardPage() {
           columns={result.columns}
           columnLabels={result.column_labels}
           initialConfig={effectiveChartConfig}
-          onSave={cfg => { setUserChartConfig(cfg); setShowShelfBuilder(false) }}
+          loadedSqName={loadedSqId ? (savedQueries.find(q => q.id === loadedSqId)?.name ?? null) : null}
+          onSave={async cfg => {
+            setUserChartConfig(cfg)
+            setShowShelfBuilder(false)
+            if (loadedSqId) {
+              try {
+                await api.patch(`/dashboard/saved-queries/${loadedSqId}/chart-config`, { chart_config: cfg })
+                loadSavedQueries()
+              } catch (e) { console.error('auto-save chart config failed', e) }
+            }
+          }}
+          onSaveAs={cfg => {
+            setUserChartConfig(cfg)
+            setShowShelfBuilder(false)
+            setEditingQuery(null)         // 確保開新建模式
+            setPendingSaveChartConfig(cfg) // 帶入 Tableau 設計好的圖表
+            setShowSaveModal(true)
+          }}
           onClose={() => setShowShelfBuilder(false)}
         />
       )}

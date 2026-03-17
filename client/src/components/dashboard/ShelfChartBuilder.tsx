@@ -1,9 +1,9 @@
 /**
- * ShelfChartBuilder — Tableau 風格拖拉式圖表建構器
+ * ShelfChartBuilder — Tableau 風格拖拉式圖表建構器（多圖表 tab）
  * 使用 HTML5 原生 drag & drop，無額外依賴
  */
-import { useState, useMemo, useRef } from 'react'
-import type { AiChartConfig, AiChartDef, ChartColorPalette } from '../../types'
+import { useState, useMemo } from 'react'
+import type { AiChartConfig, AiChartDef, ChartColorPalette, OverlayLine } from '../../types'
 import AiChart from './AiChart'
 import { useTranslation } from 'react-i18next'
 import api from '../../lib/api'
@@ -14,6 +14,10 @@ type FieldType = 'dimension' | 'measure'
 type ShelfKey = 'x_field' | 'y_field' | 'series_field' | 'stack_field'
 
 interface ShelfState {
+  id: string
+  title: string
+  title_en: string
+  title_vi: string
   x_field?: string
   y_field?: string
   y_agg: AggFn
@@ -24,10 +28,28 @@ interface ShelfState {
   horizontal: boolean
   smooth: boolean
   area: boolean
+  gradient: boolean
+  shadow: boolean
+  primary_color: string   // 單色自訂，空字串 = 跟色系走
   donut: boolean
   show_label: boolean
   show_legend: boolean
   color_palette?: ChartColorPalette
+  series_palette: string[]          // B：順序色票（multi-series 用）
+  series_colors: Record<string, string>  // C：值→顏色精確對應
+  overlay_lines: OverlayLine[]
+  // 文字/軸線樣式
+  chart_bg_color: string
+  axis_label_color: string
+  axis_label_size: number | ''
+  axis_line_color: string
+  data_label_color: string
+  data_label_size: number | ''
+  legend_color: string
+  legend_size: number | ''
+  title_color: string
+  title_size: number | ''
+  grid_line_color: string
 }
 
 interface Props {
@@ -35,17 +57,19 @@ interface Props {
   columns: string[]
   columnLabels?: Record<string, string>
   initialConfig?: AiChartConfig | null
+  loadedSqName?: string | null   // 目前載入的命名查詢名稱（有值 = 更新模式）
   onSave: (config: AiChartConfig) => void
+  onSaveAs: (config: AiChartConfig) => void  // 另存為新查詢
   onClose: () => void
 }
 
 const CHART_TYPES: { type: AiChartDef['type']; icon: React.ReactNode; label: string }[] = [
-  { type: 'bar',     icon: <BarChart2 size={14} />,  label: '長條' },
-  { type: 'line',    icon: <LineChart size={14} />,  label: '折線' },
-  { type: 'pie',     icon: <PieChart size={14} />,   label: '圓餅' },
+  { type: 'bar',     icon: <BarChart2 size={14} />,    label: '長條' },
+  { type: 'line',    icon: <LineChart size={14} />,    label: '折線' },
+  { type: 'pie',     icon: <PieChart size={14} />,     label: '圓餅' },
   { type: 'scatter', icon: <ScatterChart size={14} />, label: '散佈' },
-  { type: 'radar',   icon: <Radar size={14} />,      label: '雷達' },
-  { type: 'gauge',   icon: <Gauge size={14} />,      label: '儀錶' },
+  { type: 'radar',   icon: <Radar size={14} />,        label: '雷達' },
+  { type: 'gauge',   icon: <Gauge size={14} />,        label: '儀錶' },
 ]
 
 const AGG_FNS: AggFn[] = ['SUM', 'COUNT', 'AVG', 'MAX', 'MIN', 'COUNT_DISTINCT']
@@ -58,7 +82,6 @@ const PALETTE_OPTIONS: { key: ChartColorPalette; colors: string[] }[] = [
   { key: 'teal',   colors: ['#0099BC', '#038387', '#00B4D8'] },
 ]
 
-/** 依資料推斷欄位類型：連續數值 → measure，否則 → dimension */
 function classifyField(col: string, rows: Record<string, unknown>[]): FieldType {
   const samples = rows.slice(0, 30).map(r =>
     r[col] ?? r[col.toLowerCase()] ?? r[col.toUpperCase()]
@@ -72,31 +95,59 @@ function colLabel(col: string, labels?: Record<string, string>) {
   return labels?.[col.toLowerCase()] || col
 }
 
-function initShelf(columns: string[], rows: Record<string, unknown>[], initialConfig?: AiChartConfig | null): ShelfState {
-  const def = initialConfig?.charts?.[0]
-  if (def) {
-    return {
-      x_field: def.x_field || columns[0],
-      y_field: def.y_field || columns[1] || columns[0],
-      y_agg: (def.agg_fn as AggFn) || 'SUM',
-      series_field: def.series_field,
-      stack_field: def.stack_field,
-      chartType: def.type || 'bar',
-      limit: def.limit || 20,
-      horizontal: !!def.horizontal,
-      smooth: def.smooth !== false,
-      area: !!def.area,
-      donut: !!def.donut,
-      show_label: def.show_label !== false,
-      show_legend: def.show_legend !== false,
-      color_palette: def.color_palette,
-    }
+function defToShelf(def: AiChartDef, columns: string[], rows: Record<string, unknown>[]): ShelfState {
+  void rows
+  return {
+    id: crypto.randomUUID(),
+    title: def.title || '',
+    title_en: def.title_en || '',
+    title_vi: def.title_vi || '',
+    x_field: def.x_field || columns[0],
+    y_field: def.y_field || columns[1] || columns[0],
+    y_agg: (def.agg_fn as AggFn) || 'SUM',
+    series_field: def.series_field,
+    stack_field: def.stack_field,
+    chartType: def.type || 'bar',
+    limit: def.limit || 20,
+    horizontal: !!def.horizontal,
+    smooth: def.smooth !== false,
+    area: !!def.area,
+    gradient: !!def.gradient,
+    shadow: !!def.shadow,
+    primary_color: (!def.series_field && !def.stack_field) ? (def.colors?.[0] || '') : '',
+    donut: !!def.donut,
+    show_label: def.show_label !== false,
+    show_legend: def.show_legend !== false,
+    color_palette: def.color_palette,
+    series_palette: (def.series_field || def.stack_field) ? (def.colors || []) : [],
+    series_colors: (() => {
+      const sc = def.series_colors
+      if (!sc) return {}
+      if (typeof sc === 'string') { try { return JSON.parse(sc) } catch { return {} } }
+      return sc as Record<string, string>
+    })(),
+    overlay_lines: def.overlay_lines || [],
+    chart_bg_color: def.chart_bg_color || '',
+    axis_label_color: def.axis_label_color || '',
+    axis_label_size: def.axis_label_size ?? '',
+    axis_line_color: def.axis_line_color || '',
+    data_label_color: def.data_label_color || '',
+    data_label_size: def.data_label_size ?? '',
+    legend_color: def.legend_color || '',
+    legend_size: def.legend_size ?? '',
+    title_color: def.title_color || '',
+    title_size: def.title_size ?? '',
+    grid_line_color: def.grid_line_color || '',
   }
-  // 自動推斷初始欄位
+}
+
+function newBlankShelf(columns: string[], rows: Record<string, unknown>[]): ShelfState {
   const types = Object.fromEntries(columns.map(c => [c, classifyField(c, rows)]))
-  const dims = columns.filter(c => types[c] === 'dimension')
+  const dims     = columns.filter(c => types[c] === 'dimension')
   const measures = columns.filter(c => types[c] === 'measure')
   return {
+    id: crypto.randomUUID(),
+    title: '', title_en: '', title_vi: '',
     x_field: dims[0] || columns[0],
     y_field: measures[0] || columns[1] || columns[0],
     y_agg: 'SUM',
@@ -105,16 +156,38 @@ function initShelf(columns: string[], rows: Record<string, unknown>[], initialCo
     horizontal: false,
     smooth: true,
     area: false,
+    gradient: false,
+    shadow: false,
+    primary_color: '',
     donut: false,
     show_label: true,
     show_legend: true,
+    series_palette: [],
+    series_colors: {},
+    overlay_lines: [],
+    chart_bg_color: '',
+    axis_label_color: '',
+    axis_label_size: '',
+    axis_line_color: '',
+    data_label_color: '',
+    data_label_size: '',
+    legend_color: '',
+    legend_size: '',
+    title_color: '',
+    title_size: '',
+    grid_line_color: '',
   }
 }
 
+function initShelves(columns: string[], rows: Record<string, unknown>[], initialConfig?: AiChartConfig | null): ShelfState[] {
+  if (initialConfig?.charts?.length) {
+    return initialConfig.charts.map(def => defToShelf(def, columns, rows))
+  }
+  return [newBlankShelf(columns, rows)]
+}
+
 // ── Draggable field chip ───────────────────────────────────────────────────────
-function FieldChip({
-  col, label, type, onDragStart,
-}: {
+function FieldChip({ col, label, type, onDragStart }: {
   col: string; label: string; type: FieldType
   onDragStart: (col: string) => void
 }) {
@@ -136,37 +209,21 @@ function FieldChip({
 }
 
 // ── Shelf slot (drop target) ───────────────────────────────────────────────────
-function ShelfSlot({
-  label, fieldKey, value, agg, fieldType, rows, columns, columnLabels,
-  onDrop, onRemove, onAggChange, acceptTypes = ['dimension', 'measure'],
-}: {
-  label: string
-  fieldKey: ShelfKey
-  value?: string
-  agg?: AggFn
-  fieldType?: FieldType
-  rows: Record<string, unknown>[]
-  columns: string[]
+function ShelfSlot({ label, fieldKey, value, agg, fieldType, columnLabels, onDrop, onRemove, onAggChange }: {
+  label: string; fieldKey: ShelfKey; value?: string; agg?: AggFn; fieldType?: FieldType
   columnLabels?: Record<string, string>
   onDrop: (key: ShelfKey, field: string) => void
   onRemove: (key: ShelfKey) => void
   onAggChange?: (agg: AggFn) => void
-  acceptTypes?: FieldType[]
 }) {
   const [over, setOver] = useState(false)
-
   return (
     <div className="flex items-start gap-2">
       <span className="text-[10px] text-gray-400 w-14 flex-shrink-0 mt-1.5 text-right">{label}</span>
       <div
         onDragOver={e => { e.preventDefault(); setOver(true) }}
         onDragLeave={() => setOver(false)}
-        onDrop={e => {
-          e.preventDefault()
-          setOver(false)
-          const field = e.dataTransfer.getData('field')
-          if (field) onDrop(fieldKey, field)
-        }}
+        onDrop={e => { e.preventDefault(); setOver(false); const f = e.dataTransfer.getData('field'); if (f) onDrop(fieldKey, f) }}
         className={`flex-1 min-h-[30px] rounded border border-dashed flex flex-wrap gap-1 p-1 transition-colors
           ${over ? 'border-blue-400 bg-blue-50' : 'border-gray-200 bg-gray-50 hover:border-gray-300'}`}
       >
@@ -197,86 +254,158 @@ function ShelfSlot({
 }
 
 // ── Main Component ─────────────────────────────────────────────────────────────
-export default function ShelfChartBuilder({ rows, columns, columnLabels, initialConfig, onSave, onClose }: Props) {
+export default function ShelfChartBuilder({ rows, columns, columnLabels, initialConfig, loadedSqName, onSave, onSaveAs, onClose }: Props) {
   const { t } = useTranslation()
-  const [shelf, setShelf] = useState<ShelfState>(() => initShelf(columns, rows, initialConfig))
+  const [shelves, setShelves] = useState<ShelfState[]>(() => initShelves(columns, rows, initialConfig))
+  const [activeIdx, setActiveIdx] = useState(0)
   const [translating, setTranslating] = useState(false)
-  const [chartTitle, setChartTitle] = useState(initialConfig?.charts?.[0]?.title || '')
-  const [titleEn, setTitleEn] = useState(initialConfig?.charts?.[0]?.title_en || '')
-  const [titleVi, setTitleVi] = useState(initialConfig?.charts?.[0]?.title_vi || '')
   const [draggingField, setDraggingField] = useState<string | null>(null)
 
-  // 欄位類型分類（memo，避免重複計算）
-  const fieldTypes = useMemo(() =>
-    Object.fromEntries(columns.map(c => [c, classifyField(c, rows)])),
+  const fieldTypes = useMemo(
+    () => Object.fromEntries(columns.map(c => [c, classifyField(c, rows)])),
     [columns, rows]
   )
-
   const dimensions = columns.filter(c => fieldTypes[c] === 'dimension')
   const measures   = columns.filter(c => fieldTypes[c] === 'measure')
 
-  function updateShelf(patch: Partial<ShelfState>) {
-    setShelf(prev => ({ ...prev, ...patch }))
+  const active = shelves[activeIdx] ?? shelves[0]
+
+  function updateActive(patch: Partial<ShelfState>) {
+    setShelves(prev => prev.map((s, i) => i === activeIdx ? { ...s, ...patch } : s))
+  }
+
+  function addTab() {
+    const next = [...shelves, newBlankShelf(columns, rows)]
+    setShelves(next)
+    setActiveIdx(next.length - 1)
+  }
+
+  function removeTab(idx: number) {
+    if (shelves.length === 1) return   // keep at least one
+    const next = shelves.filter((_, i) => i !== idx)
+    setShelves(next)
+    setActiveIdx(Math.min(activeIdx, next.length - 1))
   }
 
   function handleDrop(key: ShelfKey, field: string) {
     setDraggingField(null)
-    // x_field / series / stack → 接受任何類型
-    // y_field → 偏好 measure，但允許任何
-    updateShelf({ [key]: field })
+    updateActive({ [key]: field })
   }
 
   function handleRemove(key: ShelfKey) {
-    updateShelf({ [key]: undefined })
+    updateActive({ [key]: undefined })
   }
 
-  // 建立 chartDef 給 AiChart preview
   const chartDef = useMemo((): AiChartDef => ({
-    type: shelf.chartType,
-    title: chartTitle || undefined,
-    title_en: titleEn || undefined,
-    title_vi: titleVi || undefined,
-    x_field: shelf.x_field,
-    y_field: shelf.y_field,
-    label_field: shelf.x_field,
-    value_field: shelf.y_field,
-    series_field: shelf.series_field,
-    stack_field: shelf.stack_field,
-    agg_fn: shelf.y_agg,
-    limit: shelf.limit,
-    horizontal: shelf.horizontal,
-    smooth: shelf.smooth,
-    area: shelf.area,
-    donut: shelf.donut,
-    show_label: shelf.show_label,
-    show_legend: shelf.show_legend,
-    color_palette: shelf.color_palette,
-  }), [shelf, chartTitle, titleEn, titleVi])
+    type: active.chartType,
+    title: active.title || undefined,
+    title_en: active.title_en || undefined,
+    title_vi: active.title_vi || undefined,
+    x_field: active.x_field,
+    y_field: active.y_field,
+    label_field: active.x_field,
+    value_field: active.y_field,
+    series_field: active.series_field,
+    stack_field: active.stack_field,
+    agg_fn: active.y_agg,
+    limit: active.limit,
+    horizontal: active.horizontal,
+    smooth: active.smooth,
+    area: active.area,
+    gradient: active.gradient,
+    shadow: active.shadow,
+    colors: (active.series_field || active.stack_field)
+      ? (active.series_palette.length ? active.series_palette : undefined)
+      : (active.primary_color ? [active.primary_color] : undefined),
+    series_colors: Object.keys(active.series_colors).length ? active.series_colors : undefined,
+    donut: active.donut,
+    show_label: active.show_label,
+    show_legend: active.show_legend,
+    color_palette: active.color_palette,
+    overlay_lines: active.overlay_lines.length ? active.overlay_lines : undefined,
+    chart_bg_color: active.chart_bg_color || undefined,
+    axis_label_color: active.axis_label_color || undefined,
+    axis_label_size: active.axis_label_size !== '' ? Number(active.axis_label_size) : undefined,
+    axis_line_color: active.axis_line_color || undefined,
+    data_label_color: active.data_label_color || undefined,
+    data_label_size: active.data_label_size !== '' ? Number(active.data_label_size) : undefined,
+    legend_color: active.legend_color || undefined,
+    legend_size: active.legend_size !== '' ? Number(active.legend_size) : undefined,
+    title_color: active.title_color || undefined,
+    title_size: active.title_size !== '' ? Number(active.title_size) : undefined,
+    grid_line_color: active.grid_line_color || undefined,
+  }), [active])
 
   async function translateTitle() {
-    if (!chartTitle) return
+    if (!active.title) return
     setTranslating(true)
     try {
-      const r = await api.post('/dashboard/translate-text', { text: chartTitle })
-      setTitleEn(r.data.en || '')
-      setTitleVi(r.data.vi || '')
+      const r = await api.post('/dashboard/translate-text', { text: active.title })
+      updateActive({ title_en: r.data.en || '', title_vi: r.data.vi || '' })
     } catch (e) { console.error(e) }
     finally { setTranslating(false) }
   }
 
-  function handleSave() {
-    const cfg: AiChartConfig = {
-      default_chart: shelf.chartType,
+  function buildConfig(): AiChartConfig {
+    const charts: AiChartDef[] = shelves.map(s => ({
+      type: s.chartType,
+      title: s.title || undefined,
+      title_en: s.title_en || undefined,
+      title_vi: s.title_vi || undefined,
+      x_field: s.x_field,
+      y_field: s.y_field,
+      label_field: s.x_field,
+      value_field: s.y_field,
+      series_field: s.series_field,
+      stack_field: s.stack_field,
+      agg_fn: s.y_agg,
+      limit: s.limit,
+      horizontal: s.horizontal,
+      smooth: s.smooth,
+      area: s.area,
+      gradient: s.gradient || undefined,
+      shadow: s.shadow || undefined,
+      colors: (s.series_field || s.stack_field)
+        ? (s.series_palette.length ? s.series_palette : undefined)
+        : (s.primary_color ? [s.primary_color] : undefined),
+      series_colors: Object.keys(s.series_colors).length ? s.series_colors : undefined,
+      donut: s.donut,
+      show_label: s.show_label,
+      show_legend: s.show_legend,
+      color_palette: s.color_palette,
+      overlay_lines: s.overlay_lines.length ? s.overlay_lines : undefined,
+      chart_bg_color: s.chart_bg_color || undefined,
+      axis_label_color: s.axis_label_color || undefined,
+      axis_label_size: s.axis_label_size !== '' ? Number(s.axis_label_size) : undefined,
+      axis_line_color: s.axis_line_color || undefined,
+      data_label_color: s.data_label_color || undefined,
+      data_label_size: s.data_label_size !== '' ? Number(s.data_label_size) : undefined,
+      legend_color: s.legend_color || undefined,
+      legend_size: s.legend_size !== '' ? Number(s.legend_size) : undefined,
+      title_color: s.title_color || undefined,
+      title_size: s.title_size !== '' ? Number(s.title_size) : undefined,
+      grid_line_color: s.grid_line_color || undefined,
+    }))
+    return {
+      default_chart: charts[0]?.type || 'bar',
       allow_table: true,
       allow_export: true,
       available_columns: columns.map(c => ({ key: c, label: colLabel(c, columnLabels) })),
-      charts: [{ ...chartDef, agg_fn: shelf.y_agg }],
+      charts,
     }
-    onSave(cfg)
+  }
+
+  function handleSave() {
+    onSave(buildConfig())
     onClose()
   }
 
-  const canPreview = !!(shelf.x_field && shelf.y_field)
+  function handleSaveAs() {
+    onSaveAs(buildConfig())
+    onClose()
+  }
+
+  const canPreview = !!(active?.x_field && active?.y_field)
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-gray-50" style={{ fontFamily: 'inherit' }}>
@@ -284,18 +413,73 @@ export default function ShelfChartBuilder({ rows, columns, columnLabels, initial
       {/* ── Header ── */}
       <div className="flex items-center justify-between px-5 py-2.5 bg-white border-b border-gray-200 flex-shrink-0">
         <div className="flex items-center gap-3">
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-700">
-            <X size={16} />
-          </button>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-700"><X size={16} /></button>
           <span className="font-semibold text-sm text-gray-800">Tableau 模式</span>
-          <span className="text-xs text-gray-400">拖曳左側欄位到 Shelf 即時預覽</span>
+          {loadedSqName ? (
+            <span className="flex items-center gap-1.5 text-xs">
+              <span className="text-gray-400">正在更新：</span>
+              <span className="font-medium text-blue-700 max-w-[200px] truncate" title={loadedSqName}>
+                {loadedSqName}
+              </span>
+            </span>
+          ) : (
+            <span className="text-xs text-amber-500">未連結查詢 — 儲存後需手動 💾 存檔</span>
+          )}
         </div>
+        <div className="flex items-center gap-2">
+          {/* 另存為新查詢（次要按鈕，永遠顯示） */}
+          <button
+            onClick={handleSaveAs}
+            disabled={!canPreview}
+            className="px-3 py-1.5 border border-gray-300 text-gray-600 text-xs rounded-lg hover:bg-gray-50 disabled:opacity-40"
+          >
+            另存為新查詢
+          </button>
+          {/* 主要儲存按鈕 */}
+          <button
+            onClick={handleSave}
+            disabled={!canPreview}
+            className={`px-4 py-1.5 text-white text-xs rounded-lg disabled:opacity-40
+              ${loadedSqName
+                ? 'bg-blue-600 hover:bg-blue-700'
+                : 'bg-gray-400 hover:bg-gray-500'}`}
+            title={loadedSqName ? `更新「${loadedSqName}」的圖表設定` : '套用至目前畫面（不存入資料庫）'}
+          >
+            {loadedSqName ? `更新查詢 (${shelves.length} 張圖)` : `套用 (${shelves.length} 張圖)`}
+          </button>
+        </div>
+      </div>
+
+      {/* ── Chart Tabs ── */}
+      <div className="flex items-center gap-0.5 px-4 py-1.5 bg-white border-b border-gray-100 flex-shrink-0 overflow-x-auto">
+        {shelves.map((s, i) => (
+          <div key={s.id} className="flex items-center flex-shrink-0">
+            <button
+              onClick={() => setActiveIdx(i)}
+              className={`px-3 py-1 text-xs rounded-t transition-colors
+                ${activeIdx === i
+                  ? 'bg-blue-50 text-blue-700 font-semibold border border-blue-300 border-b-white -mb-px z-10'
+                  : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'}`}
+            >
+              {s.title || `圖表 ${i + 1}`}
+            </button>
+            {shelves.length > 1 && (
+              <button
+                onClick={e => { e.stopPropagation(); removeTab(i) }}
+                className="ml-0.5 text-gray-300 hover:text-red-400 flex-shrink-0"
+                title="移除此圖表"
+              >
+                <X size={10} />
+              </button>
+            )}
+          </div>
+        ))}
         <button
-          onClick={handleSave}
-          disabled={!canPreview}
-          className="px-4 py-1.5 bg-blue-600 text-white text-xs rounded-lg hover:bg-blue-700 disabled:opacity-40"
+          onClick={addTab}
+          className="ml-2 px-2 py-1 text-xs text-blue-500 hover:text-blue-700 hover:bg-blue-50 rounded flex-shrink-0"
+          title="新增圖表"
         >
-          {t('common.save')}
+          ＋ 新增
         </button>
       </div>
 
@@ -307,44 +491,28 @@ export default function ShelfChartBuilder({ rows, columns, columnLabels, initial
           <div className="px-3 py-2 border-b border-gray-100">
             <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">欄位</span>
           </div>
-
-          {/* Dimensions */}
           {dimensions.length > 0 && (
             <div className="px-3 py-2">
               <p className="text-[9px] font-semibold text-blue-500 uppercase mb-1.5">📐 維度</p>
               <div className="space-y-1">
                 {dimensions.map(col => (
-                  <FieldChip
-                    key={col}
-                    col={col}
-                    label={colLabel(col, columnLabels)}
-                    type="dimension"
-                    onDragStart={setDraggingField}
-                  />
+                  <FieldChip key={col} col={col} label={colLabel(col, columnLabels)}
+                    type="dimension" onDragStart={setDraggingField} />
                 ))}
               </div>
             </div>
           )}
-
-          {/* Measures */}
           {measures.length > 0 && (
             <div className="px-3 py-2">
               <p className="text-[9px] font-semibold text-orange-500 uppercase mb-1.5">📊 指標</p>
               <div className="space-y-1">
                 {measures.map(col => (
-                  <FieldChip
-                    key={col}
-                    col={col}
-                    label={colLabel(col, columnLabels)}
-                    type="measure"
-                    onDragStart={setDraggingField}
-                  />
+                  <FieldChip key={col} col={col} label={colLabel(col, columnLabels)}
+                    type="measure" onDragStart={setDraggingField} />
                 ))}
               </div>
             </div>
           )}
-
-          {/* 如果自動分類不準，可手動切換 */}
           <div className="px-3 py-2 mt-auto border-t border-gray-100">
             <p className="text-[9px] text-gray-400 leading-relaxed">
               分類依資料樣本自動推斷<br />
@@ -362,11 +530,9 @@ export default function ShelfChartBuilder({ rows, columns, columnLabels, initial
             <p className="text-[10px] text-gray-400 mb-2">圖表類型</p>
             <div className="flex flex-wrap gap-1">
               {CHART_TYPES.map(ct => (
-                <button
-                  key={ct.type}
-                  onClick={() => updateShelf({ chartType: ct.type })}
+                <button key={ct.type} onClick={() => updateActive({ chartType: ct.type })}
                   className={`flex items-center gap-1 px-2 py-1 rounded border text-xs transition-colors
-                    ${shelf.chartType === ct.type
+                    ${active.chartType === ct.type
                       ? 'border-blue-500 bg-blue-50 text-blue-700 font-medium'
                       : 'border-gray-200 text-gray-500 hover:border-gray-300'}`}
                 >
@@ -379,74 +545,42 @@ export default function ShelfChartBuilder({ rows, columns, columnLabels, initial
           {/* Shelves */}
           <div className="px-4 py-3 space-y-2 border-b border-gray-100">
             <p className="text-[10px] text-gray-400 mb-1">Shelf</p>
-
-            <ShelfSlot
-              label="X 軸"
-              fieldKey="x_field"
-              value={shelf.x_field}
-              fieldType={shelf.x_field ? fieldTypes[shelf.x_field] : undefined}
-              rows={rows} columns={columns} columnLabels={columnLabels}
-              onDrop={handleDrop} onRemove={handleRemove}
-            />
-            <ShelfSlot
-              label="Y 軸"
-              fieldKey="y_field"
-              value={shelf.y_field}
-              agg={shelf.y_agg}
-              fieldType={shelf.y_field ? fieldTypes[shelf.y_field] : undefined}
-              rows={rows} columns={columns} columnLabels={columnLabels}
-              onDrop={handleDrop} onRemove={handleRemove}
-              onAggChange={agg => updateShelf({ y_agg: agg })}
-            />
-
-            {(shelf.chartType === 'bar' || shelf.chartType === 'line') && (
-              <>
-                <ShelfSlot
-                  label="分組"
-                  fieldKey="series_field"
-                  value={shelf.series_field}
-                  fieldType={shelf.series_field ? fieldTypes[shelf.series_field] : undefined}
-                  rows={rows} columns={columns} columnLabels={columnLabels}
-                  onDrop={handleDrop} onRemove={handleRemove}
-                />
-                <ShelfSlot
-                  label="堆疊"
-                  fieldKey="stack_field"
-                  value={shelf.stack_field}
-                  fieldType={shelf.stack_field ? fieldTypes[shelf.stack_field] : undefined}
-                  rows={rows} columns={columns} columnLabels={columnLabels}
-                  onDrop={handleDrop} onRemove={handleRemove}
-                />
-              </>
-            )}
+            <ShelfSlot label="X 軸" fieldKey="x_field" value={active.x_field}
+              fieldType={active.x_field ? fieldTypes[active.x_field] : undefined}
+              columnLabels={columnLabels} onDrop={handleDrop} onRemove={handleRemove} />
+            <ShelfSlot label="Y 軸" fieldKey="y_field" value={active.y_field} agg={active.y_agg}
+              fieldType={active.y_field ? fieldTypes[active.y_field] : undefined}
+              columnLabels={columnLabels} onDrop={handleDrop} onRemove={handleRemove}
+              onAggChange={agg => updateActive({ y_agg: agg })} />
+            {(active.chartType === 'bar' || active.chartType === 'line') && (<>
+              <ShelfSlot label="分組" fieldKey="series_field" value={active.series_field}
+                fieldType={active.series_field ? fieldTypes[active.series_field] : undefined}
+                columnLabels={columnLabels} onDrop={handleDrop} onRemove={handleRemove} />
+              <ShelfSlot label="堆疊" fieldKey="stack_field" value={active.stack_field}
+                fieldType={active.stack_field ? fieldTypes[active.stack_field] : undefined}
+                columnLabels={columnLabels} onDrop={handleDrop} onRemove={handleRemove} />
+            </>)}
           </div>
 
           {/* 圖表標題 */}
           <div className="px-4 py-3 border-b border-gray-100 space-y-1.5">
             <div className="flex items-center justify-between">
               <p className="text-[10px] text-gray-400">圖表標題</p>
-              <button
-                onClick={translateTitle}
-                disabled={translating || !chartTitle}
-                className="text-[10px] px-1.5 py-0.5 rounded border border-blue-200 text-blue-500 hover:bg-blue-50 disabled:opacity-40"
-              >
+              <button onClick={translateTitle} disabled={translating || !active.title}
+                className="text-[10px] px-1.5 py-0.5 rounded border border-blue-200 text-blue-500 hover:bg-blue-50 disabled:opacity-40">
                 {translating ? '...' : '↻ 翻譯'}
               </button>
             </div>
-            <input
-              type="text" value={chartTitle} onChange={e => setChartTitle(e.target.value)}
+            <input type="text" value={active.title} onChange={e => updateActive({ title: e.target.value })}
               placeholder="(選填)"
-              className="w-full border border-gray-200 rounded px-2 py-1 text-xs focus:outline-none focus:border-blue-400"
-            />
+              className="w-full border border-gray-200 rounded px-2 py-1 text-xs focus:outline-none focus:border-blue-400" />
             <div className="grid grid-cols-2 gap-1">
-              <input type="text" value={titleEn} onChange={e => setTitleEn(e.target.value)}
+              <input type="text" value={active.title_en} onChange={e => updateActive({ title_en: e.target.value })}
                 placeholder="Title (EN)"
-                className="border border-gray-200 rounded px-1.5 py-0.5 text-[11px] focus:outline-none focus:border-blue-400"
-              />
-              <input type="text" value={titleVi} onChange={e => setTitleVi(e.target.value)}
+                className="border border-gray-200 rounded px-1.5 py-0.5 text-[11px] focus:outline-none focus:border-blue-400" />
+              <input type="text" value={active.title_vi} onChange={e => updateActive({ title_vi: e.target.value })}
                 placeholder="Tiêu đề (VI)"
-                className="border border-gray-200 rounded px-1.5 py-0.5 text-[11px] focus:outline-none focus:border-blue-400"
-              />
+                className="border border-gray-200 rounded px-1.5 py-0.5 text-[11px] focus:outline-none focus:border-blue-400" />
             </div>
           </div>
 
@@ -454,68 +588,308 @@ export default function ShelfChartBuilder({ rows, columns, columnLabels, initial
           <div className="px-4 py-3 border-b border-gray-100 space-y-1.5">
             <p className="text-[10px] text-gray-400 mb-1">顯示選項</p>
             <div className="grid grid-cols-2 gap-x-4 gap-y-1">
-              {shelf.chartType === 'bar' && (
+              {active.chartType === 'bar' && (
                 <label className="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer">
-                  <input type="checkbox" checked={shelf.horizontal} onChange={e => updateShelf({ horizontal: e.target.checked })} />
-                  橫向
+                  <input type="checkbox" checked={active.horizontal} onChange={e => updateActive({ horizontal: e.target.checked })} />橫向
                 </label>
               )}
-              {shelf.chartType === 'line' && (
-                <>
-                  <label className="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer">
-                    <input type="checkbox" checked={shelf.smooth} onChange={e => updateShelf({ smooth: e.target.checked })} />
-                    平滑
-                  </label>
-                  <label className="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer">
-                    <input type="checkbox" checked={shelf.area} onChange={e => updateShelf({ area: e.target.checked })} />
-                    面積
-                  </label>
-                </>
-              )}
-              {shelf.chartType === 'pie' && (
+              {active.chartType === 'line' && (<>
                 <label className="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer">
-                  <input type="checkbox" checked={shelf.donut} onChange={e => updateShelf({ donut: e.target.checked })} />
-                  環形
+                  <input type="checkbox" checked={active.smooth} onChange={e => updateActive({ smooth: e.target.checked })} />平滑
+                </label>
+                <label className="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer">
+                  <input type="checkbox" checked={active.area} onChange={e => updateActive({ area: e.target.checked })} />面積
+                </label>
+              </>)}
+              {(active.chartType === 'bar' || active.chartType === 'line') && (<>
+                <label className="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer">
+                  <input type="checkbox" checked={active.gradient} onChange={e => updateActive({ gradient: e.target.checked })} />漸層
+                </label>
+                <label className="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer">
+                  <input type="checkbox" checked={active.shadow} onChange={e => updateActive({ shadow: e.target.checked })} />陰影
+                </label>
+              </>)}
+              {active.chartType === 'pie' && (
+                <label className="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer">
+                  <input type="checkbox" checked={active.donut} onChange={e => updateActive({ donut: e.target.checked })} />環形
                 </label>
               )}
               <label className="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer">
-                <input type="checkbox" checked={shelf.show_label} onChange={e => updateShelf({ show_label: e.target.checked })} />
-                數值標籤
+                <input type="checkbox" checked={active.show_label} onChange={e => updateActive({ show_label: e.target.checked })} />數值標籤
               </label>
               <label className="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer">
-                <input type="checkbox" checked={shelf.show_legend} onChange={e => updateShelf({ show_legend: e.target.checked })} />
-                圖例
+                <input type="checkbox" checked={active.show_legend} onChange={e => updateActive({ show_legend: e.target.checked })} />圖例
               </label>
             </div>
 
-            {/* 前 N 筆 */}
+            {/* 自訂主色 */}
+            <div className="flex items-center gap-2 mt-1">
+              <span className="text-xs text-gray-500 flex-shrink-0">主色</span>
+              <input
+                type="color"
+                value={active.primary_color || '#118DFF'}
+                onChange={e => updateActive({ primary_color: e.target.value, color_palette: undefined })}
+                className="w-8 h-6 rounded border border-gray-200 cursor-pointer p-0"
+                title="自訂主色（會覆蓋色系設定）"
+              />
+              {active.primary_color && (
+                <button
+                  onClick={() => updateActive({ primary_color: '' })}
+                  className="text-[10px] text-gray-400 hover:text-red-500"
+                  title="還原預設色"
+                >✕ 還原</button>
+              )}
+            </div>
             <div className="flex items-center gap-2 mt-1">
               <span className="text-xs text-gray-500">前 N 筆</span>
-              <input
-                type="number" min={1} max={500} value={shelf.limit}
-                onChange={e => updateShelf({ limit: parseInt(e.target.value) || 20 })}
-                className="w-20 border border-gray-200 rounded px-2 py-0.5 text-xs focus:outline-none focus:border-blue-400"
-              />
+              <input type="number" min={1} max={500} value={active.limit}
+                onChange={e => updateActive({ limit: parseInt(e.target.value) || 20 })}
+                className="w-20 border border-gray-200 rounded px-2 py-0.5 text-xs focus:outline-none focus:border-blue-400" />
             </div>
           </div>
 
+          {/* ── Series 顏色設定（分群/堆疊模式） ──────────────────────────── */}
+          {(active.series_field || active.stack_field) && (
+            <div className="px-4 py-3 border-b border-gray-100 space-y-3">
+              {/* B：順序色票 */}
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <p className="text-[10px] text-gray-400 font-medium">Series 顏色順序</p>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => updateActive({ series_palette: [...active.series_palette, '#5470c6'] })}
+                      className="text-[10px] text-blue-500 hover:text-blue-700">+ 新增</button>
+                    {active.series_palette.length > 0 && (
+                      <button onClick={() => updateActive({ series_palette: [] })}
+                        className="text-[10px] text-gray-400 hover:text-gray-600">重置預設</button>
+                    )}
+                  </div>
+                </div>
+                {active.series_palette.length === 0 && (
+                  <p className="text-[10px] text-gray-300 italic">使用預設高對比色票（藍/綠/黃/紅...）</p>
+                )}
+                <div className="flex flex-wrap gap-1.5">
+                  {active.series_palette.map((c, i) => (
+                    <div key={i} className="flex items-center gap-1 bg-gray-50 rounded px-1.5 py-1 border border-gray-200">
+                      <span className="text-[10px] text-gray-400 w-4 text-center">{i + 1}</span>
+                      <input type="color" value={c}
+                        onChange={e => updateActive({ series_palette: active.series_palette.map((x, j) => j === i ? e.target.value : x) })}
+                        className="w-6 h-6 rounded cursor-pointer border-0 p-0 bg-transparent" />
+                      <button onClick={() => updateActive({ series_palette: active.series_palette.filter((_, j) => j !== i) })}
+                        className="text-gray-300 hover:text-red-400 text-[10px]">✕</button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* C：值→顏色精確對應（從 rows 取得實際 series 值） */}
+              {(() => {
+                const sf = active.series_field || active.stack_field
+                if (!sf) return null
+                const vals = Array.from(new Set(rows.map(r => String(r[sf] ?? r[sf.toLowerCase()] ?? r[sf.toUpperCase()] ?? '')).filter(Boolean)))
+                if (!vals.length) return null
+                return (
+                  <div>
+                    <p className="text-[10px] text-gray-400 font-medium mb-1.5">值對應顏色（精確）</p>
+                    <div className="space-y-1">
+                      {vals.map(v => (
+                        <div key={v} className="flex items-center gap-2">
+                          <input type="color"
+                            value={active.series_colors[v] || '#cccccc'}
+                            onChange={e => updateActive({ series_colors: { ...active.series_colors, [v]: e.target.value } })}
+                            className="w-6 h-6 rounded cursor-pointer border border-gray-200 p-0 bg-transparent flex-shrink-0" />
+                          <span className="text-[11px] text-gray-600 truncate flex-1">{v}</span>
+                          {active.series_colors[v] && (
+                            <button onClick={() => {
+                              const next = { ...active.series_colors }
+                              delete next[v]
+                              updateActive({ series_colors: next })
+                            }} className="text-gray-300 hover:text-red-400 text-[10px] flex-shrink-0">✕</button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                    <p className="text-[10px] text-gray-300 mt-1">未設定的值 fallback 至順序色票</p>
+                  </div>
+                )
+              })()}
+            </div>
+          )}
+
+          {/* 疊加折線 (Option C) — bar 有 series_field 或 stack_field 才顯示 */}
+          {active.chartType === 'bar' && (active.series_field || active.stack_field) && (
+            <div className="px-4 py-3 border-b border-gray-100 space-y-2">
+              <div className="flex items-center justify-between">
+                <p className="text-[10px] text-gray-400">疊加折線</p>
+                <button
+                  onClick={() => updateActive({ overlay_lines: [...active.overlay_lines, { field: measures[0] || columns[0] || '', agg: 'SUM' }] })}
+                  className="text-[10px] text-blue-500 hover:text-blue-700"
+                >+ 新增</button>
+              </div>
+              {active.overlay_lines.map((ol, idx) => (
+                <div key={idx} className="border border-gray-200 rounded p-2 bg-gray-50 space-y-1.5">
+                  <div className="flex items-center gap-1">
+                    <select value={ol.field}
+                      onChange={e => updateActive({ overlay_lines: active.overlay_lines.map((o, i) => i === idx ? { ...o, field: e.target.value } : o) })}
+                      className="flex-1 border border-gray-200 rounded px-1 py-0.5 text-[11px] focus:outline-none focus:border-blue-400 bg-white">
+                      {columns.map(c => <option key={c} value={c}>{colLabel(c, columnLabels)}</option>)}
+                    </select>
+                    <select value={ol.agg}
+                      onChange={e => updateActive({ overlay_lines: active.overlay_lines.map((o, i) => i === idx ? { ...o, agg: e.target.value as OverlayLine['agg'] } : o) })}
+                      className="w-16 border border-gray-200 rounded px-1 py-0.5 text-[11px] focus:outline-none focus:border-blue-400 bg-white">
+                      {['SUM','COUNT','AVG','MAX','MIN','COUNT_DISTINCT'].map(fn => <option key={fn} value={fn}>{fn}</option>)}
+                    </select>
+                    <input type="color" value={ol.color || '#E66C37'}
+                      onChange={e => updateActive({ overlay_lines: active.overlay_lines.map((o, i) => i === idx ? { ...o, color: e.target.value } : o) })}
+                      className="w-6 h-6 rounded border border-gray-200 cursor-pointer p-0" />
+                    <button onClick={() => updateActive({ overlay_lines: active.overlay_lines.filter((_, i) => i !== idx) })}
+                      className="text-gray-300 hover:text-red-500 text-xs ml-auto">✕</button>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <input type="text" placeholder="名稱" value={ol.label || ''}
+                      onChange={e => updateActive({ overlay_lines: active.overlay_lines.map((o, i) => i === idx ? { ...o, label: e.target.value || undefined } : o) })}
+                      className="flex-1 border border-gray-200 rounded px-1.5 py-0.5 text-[11px] focus:outline-none focus:border-blue-400" />
+                  </div>
+                  <div className="flex flex-wrap gap-x-3 gap-y-1">
+                    {[
+                      { key: 'smooth',         label: '平滑' },
+                      { key: 'dashed',         label: '虛線' },
+                      { key: 'use_right_axis', label: '右軸' },
+                    ].map(opt => (
+                      <label key={opt.key} className="flex items-center gap-1 text-[11px] text-gray-600 cursor-pointer">
+                        <input type="checkbox" checked={!!(ol as any)[opt.key]}
+                          onChange={e => updateActive({ overlay_lines: active.overlay_lines.map((o, i) => i === idx ? { ...o, [opt.key]: e.target.checked } : o) })} />
+                        {opt.label}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              ))}
+              {active.overlay_lines.length === 0 && (
+                <p className="text-[10px] text-gray-300 text-center py-1">在分組直條上疊加全域折線</p>
+              )}
+            </div>
+          )}
+
           {/* 顏色主題 */}
-          <div className="px-4 py-3">
+          <div className="px-4 py-3 border-b border-gray-100">
             <p className="text-[10px] text-gray-400 mb-1.5">色系</p>
             <div className="flex gap-1.5 flex-wrap">
               {PALETTE_OPTIONS.map(p => (
-                <button
-                  key={p.key}
-                  onClick={() => updateShelf({ color_palette: shelf.color_palette === p.key ? undefined : p.key })}
+                <button key={p.key}
+                  onClick={() => updateActive({ color_palette: active.color_palette === p.key ? undefined : p.key })}
                   className={`flex gap-0.5 p-0.5 rounded border transition-colors
-                    ${shelf.color_palette === p.key ? 'border-blue-500 ring-1 ring-blue-300' : 'border-gray-200 hover:border-gray-300'}`}
+                    ${active.color_palette === p.key ? 'border-blue-500 ring-1 ring-blue-300' : 'border-gray-200 hover:border-gray-300'}`}
                   title={p.key}
                 >
-                  {p.colors.map((c, i) => (
-                    <span key={i} className="w-4 h-4 rounded-sm block" style={{ background: c }} />
-                  ))}
+                  {p.colors.map((c, i) => <span key={i} className="w-4 h-4 rounded-sm block" style={{ background: c }} />)}
                 </button>
               ))}
+            </div>
+          </div>
+
+          {/* ── 文字 / 軸線樣式 ─────────────────────────────────────────────── */}
+          <div className="px-4 py-3 space-y-2">
+            <p className="text-[10px] text-gray-400 font-semibold uppercase tracking-wide mb-1">文字 &amp; 軸線樣式</p>
+
+            {/* 圖表底色 */}
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] text-gray-500 w-16 flex-shrink-0">圖表底色</span>
+              <input type="color" value={active.chart_bg_color || '#ffffff'}
+                onChange={e => updateActive({ chart_bg_color: e.target.value })}
+                className="w-6 h-6 rounded border border-gray-200 cursor-pointer p-0" />
+              {active.chart_bg_color && (
+                <button onClick={() => updateActive({ chart_bg_color: '' })}
+                  className="text-[10px] text-gray-300 hover:text-red-400">重設</button>
+              )}
+            </div>
+
+            {/* 軸刻度 */}
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] text-gray-500 w-16 flex-shrink-0">軸刻度</span>
+              <input type="color" value={active.axis_label_color || '#6b7280'}
+                onChange={e => updateActive({ axis_label_color: e.target.value })}
+                className="w-6 h-6 rounded border border-gray-200 cursor-pointer p-0" />
+              <input type="number" min={8} max={24} value={active.axis_label_size}
+                onChange={e => updateActive({ axis_label_size: e.target.value === '' ? '' : Number(e.target.value) })}
+                className="w-12 border border-gray-200 rounded px-1.5 py-0.5 text-[11px] focus:outline-none focus:border-blue-400"
+                placeholder="11px" />
+              {(active.axis_label_color || active.axis_label_size !== '') && (
+                <button onClick={() => updateActive({ axis_label_color: '', axis_label_size: '' })}
+                  className="text-[10px] text-gray-300 hover:text-red-400">重設</button>
+              )}
+            </div>
+
+            {/* 軸線 */}
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] text-gray-500 w-16 flex-shrink-0">軸線</span>
+              <input type="color" value={active.axis_line_color || '#e5e7eb'}
+                onChange={e => updateActive({ axis_line_color: e.target.value })}
+                className="w-6 h-6 rounded border border-gray-200 cursor-pointer p-0" />
+              {active.axis_line_color && (
+                <button onClick={() => updateActive({ axis_line_color: '' })}
+                  className="text-[10px] text-gray-300 hover:text-red-400">重設</button>
+              )}
+            </div>
+
+            {/* 格線 */}
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] text-gray-500 w-16 flex-shrink-0">格線</span>
+              <input type="color" value={active.grid_line_color || '#f3f4f6'}
+                onChange={e => updateActive({ grid_line_color: e.target.value })}
+                className="w-6 h-6 rounded border border-gray-200 cursor-pointer p-0" />
+              {active.grid_line_color && (
+                <button onClick={() => updateActive({ grid_line_color: '' })}
+                  className="text-[10px] text-gray-300 hover:text-red-400">重設</button>
+              )}
+            </div>
+
+            {/* 資料標籤 */}
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] text-gray-500 w-16 flex-shrink-0">資料標籤</span>
+              <input type="color" value={active.data_label_color || '#6b7280'}
+                onChange={e => updateActive({ data_label_color: e.target.value })}
+                className="w-6 h-6 rounded border border-gray-200 cursor-pointer p-0" />
+              <input type="number" min={8} max={24} value={active.data_label_size}
+                onChange={e => updateActive({ data_label_size: e.target.value === '' ? '' : Number(e.target.value) })}
+                className="w-12 border border-gray-200 rounded px-1.5 py-0.5 text-[11px] focus:outline-none focus:border-blue-400"
+                placeholder="11px" />
+              {(active.data_label_color || active.data_label_size !== '') && (
+                <button onClick={() => updateActive({ data_label_color: '', data_label_size: '' })}
+                  className="text-[10px] text-gray-300 hover:text-red-400">重設</button>
+              )}
+            </div>
+
+            {/* 圖例 */}
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] text-gray-500 w-16 flex-shrink-0">圖例</span>
+              <input type="color" value={active.legend_color || '#6b7280'}
+                onChange={e => updateActive({ legend_color: e.target.value })}
+                className="w-6 h-6 rounded border border-gray-200 cursor-pointer p-0" />
+              <input type="number" min={8} max={24} value={active.legend_size}
+                onChange={e => updateActive({ legend_size: e.target.value === '' ? '' : Number(e.target.value) })}
+                className="w-12 border border-gray-200 rounded px-1.5 py-0.5 text-[11px] focus:outline-none focus:border-blue-400"
+                placeholder="12px" />
+              {(active.legend_color || active.legend_size !== '') && (
+                <button onClick={() => updateActive({ legend_color: '', legend_size: '' })}
+                  className="text-[10px] text-gray-300 hover:text-red-400">重設</button>
+              )}
+            </div>
+
+            {/* 標題 */}
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] text-gray-500 w-16 flex-shrink-0">標題</span>
+              <input type="color" value={active.title_color || '#374151'}
+                onChange={e => updateActive({ title_color: e.target.value })}
+                className="w-6 h-6 rounded border border-gray-200 cursor-pointer p-0" />
+              <input type="number" min={8} max={32} value={active.title_size}
+                onChange={e => updateActive({ title_size: e.target.value === '' ? '' : Number(e.target.value) })}
+                className="w-12 border border-gray-200 rounded px-1.5 py-0.5 text-[11px] focus:outline-none focus:border-blue-400"
+                placeholder="13px" />
+              {(active.title_color || active.title_size !== '') && (
+                <button onClick={() => updateActive({ title_color: '', title_size: '' })}
+                  className="text-[10px] text-gray-300 hover:text-red-400">重設</button>
+              )}
             </div>
           </div>
         </div>
@@ -524,48 +898,34 @@ export default function ShelfChartBuilder({ rows, columns, columnLabels, initial
         <div className="flex-1 flex flex-col overflow-hidden p-6">
           {canPreview ? (
             <>
-              {/* 當前設定摘要 */}
               <div className="flex items-center gap-2 mb-4 flex-wrap">
                 <span className="text-xs text-gray-500">X：</span>
-                <span className="text-xs font-medium text-blue-700">{colLabel(shelf.x_field!, columnLabels)}</span>
+                <span className="text-xs font-medium text-blue-700">{colLabel(active.x_field!, columnLabels)}</span>
                 <span className="text-xs text-gray-300">|</span>
                 <span className="text-xs text-gray-500">Y：</span>
-                <span className="text-xs font-medium text-orange-700">{colLabel(shelf.y_field!, columnLabels)} ({shelf.y_agg})</span>
-                {shelf.series_field && (
-                  <>
-                    <span className="text-xs text-gray-300">|</span>
-                    <span className="text-xs text-gray-500">分組：</span>
-                    <span className="text-xs font-medium text-purple-700">{colLabel(shelf.series_field, columnLabels)}</span>
-                  </>
-                )}
-                {shelf.stack_field && (
-                  <>
-                    <span className="text-xs text-gray-300">|</span>
-                    <span className="text-xs text-gray-500">堆疊：</span>
-                    <span className="text-xs font-medium text-teal-700">{colLabel(shelf.stack_field, columnLabels)}</span>
-                  </>
-                )}
+                <span className="text-xs font-medium text-orange-700">{colLabel(active.y_field!, columnLabels)} ({active.y_agg})</span>
+                {active.series_field && (<>
+                  <span className="text-xs text-gray-300">|</span>
+                  <span className="text-xs text-gray-500">分組：</span>
+                  <span className="text-xs font-medium text-purple-700">{colLabel(active.series_field, columnLabels)}</span>
+                </>)}
+                {active.stack_field && (<>
+                  <span className="text-xs text-gray-300">|</span>
+                  <span className="text-xs text-gray-500">堆疊：</span>
+                  <span className="text-xs font-medium text-teal-700">{colLabel(active.stack_field, columnLabels)}</span>
+                </>)}
                 <span className="ml-auto text-[10px] text-gray-400">{rows.length} 列</span>
               </div>
-
-              {/* Chart */}
               <div className="flex-1 bg-white rounded-xl border border-gray-200 p-4 overflow-hidden">
-                <AiChart
-                  chartDef={chartDef}
-                  rows={rows}
-                  columnLabels={columnLabels}
-                  height={undefined}
-                />
+                <AiChart chartDef={chartDef} rows={rows} columnLabels={columnLabels} height={undefined} />
               </div>
-
-              {/* 多維度說明 */}
-              {(shelf.series_field || shelf.stack_field) && (
+              {(active.series_field || active.stack_field) && (
                 <div className="mt-3 text-[10px] text-gray-400 text-center">
-                  {shelf.series_field && shelf.stack_field
-                    ? `分組「${colLabel(shelf.series_field, columnLabels)}」並排，堆疊「${colLabel(shelf.stack_field, columnLabels)}」疊色`
-                    : shelf.series_field
-                      ? `依「${colLabel(shelf.series_field, columnLabels)}」分組並排`
-                      : `依「${colLabel(shelf.stack_field!, columnLabels)}」堆疊`}
+                  {active.series_field && active.stack_field
+                    ? `分組「${colLabel(active.series_field, columnLabels)}」並排，堆疊「${colLabel(active.stack_field, columnLabels)}」疊色`
+                    : active.series_field
+                      ? `依「${colLabel(active.series_field, columnLabels)}」分組並排`
+                      : `依「${colLabel(active.stack_field!, columnLabels)}」堆疊`}
                 </div>
               )}
             </>
@@ -578,12 +938,10 @@ export default function ShelfChartBuilder({ rows, columns, columnLabels, initial
               </div>
               <div className="flex items-center gap-6 text-xs text-gray-400 mt-2">
                 <div className="flex items-center gap-1.5">
-                  <span className="w-3 h-3 rounded-sm bg-blue-200 inline-block" />
-                  藍色 = 維度（文字/日期）
+                  <span className="w-3 h-3 rounded-sm bg-blue-200 inline-block" />藍色 = 維度（文字/日期）
                 </div>
                 <div className="flex items-center gap-1.5">
-                  <span className="w-3 h-3 rounded-sm bg-orange-200 inline-block" />
-                  橘色 = 指標（數值）
+                  <span className="w-3 h-3 rounded-sm bg-orange-200 inline-block" />橘色 = 指標（數值）
                 </div>
               </div>
             </div>
@@ -592,7 +950,6 @@ export default function ShelfChartBuilder({ rows, columns, columnLabels, initial
 
       </div>
 
-      {/* ── Drag ghost indicator ── */}
       {draggingField && (
         <div className="fixed bottom-4 right-4 px-3 py-1.5 bg-gray-800 text-white text-xs rounded-lg shadow-lg pointer-events-none z-50">
           拖曳中：{colLabel(draggingField, columnLabels)}
