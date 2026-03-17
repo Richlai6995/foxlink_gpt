@@ -21,6 +21,7 @@ import ResultTable from '../components/dashboard/ResultTable'
 import DesignerPanel from '../components/dashboard/DesignerPanel'
 import SchemaFieldPicker from '../components/dashboard/SchemaFieldPicker'
 import ChartBuilder from '../components/dashboard/ChartBuilder'
+import ShelfChartBuilder from '../components/dashboard/ShelfChartBuilder'
 import SavedQueryModal from '../components/dashboard/SavedQueryModal'
 import QueryParamsModal from '../components/dashboard/QueryParamsModal'
 import ShareModal from '../components/dashboard/ShareModal'
@@ -118,6 +119,7 @@ export default function AiDashboardPage() {
   const [showSaveModal, setShowSaveModal] = useState(false)
   const [editingQuery, setEditingQuery] = useState<AiSavedQuery | null>(null)
   const [showChartBuilder, setShowChartBuilder] = useState(false)
+  const [showShelfBuilder, setShowShelfBuilder] = useState(false)
   const [showFieldPicker, setShowFieldPicker] = useState(false)
   const [shareTarget, setShareTarget] = useState<{ type: 'query' | 'dashboard'; id: number; name: string } | null>(null)
   // 即將執行的命名查詢（需先填參數）
@@ -716,14 +718,23 @@ export default function AiDashboardPage() {
 
               {/* 圖表建構器 */}
               {result && (
-                <button
-                  onClick={() => setShowChartBuilder(v => !v)}
-                  title="即時圖表建構器"
-                  className={`flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg transition
-                    ${showChartBuilder ? 'bg-purple-100 text-purple-700' : 'text-gray-400 hover:text-gray-700 hover:bg-gray-50'}`}
-                >
-                  <BarChart3 size={12} /> 圖表
-                </button>
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => setShowChartBuilder(v => !v)}
+                    title="經典圖表建構器"
+                    className={`flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg transition
+                      ${showChartBuilder ? 'bg-purple-100 text-purple-700' : 'text-gray-400 hover:text-gray-700 hover:bg-gray-50'}`}
+                  >
+                    <BarChart3 size={12} /> 圖表
+                  </button>
+                  <button
+                    onClick={() => setShowShelfBuilder(true)}
+                    title="Tableau 拖拉模式"
+                    className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 transition"
+                  >
+                    <Layers size={12} /> Tableau
+                  </button>
+                </div>
               )}
 
               {/* 儲存查詢 */}
@@ -1065,6 +1076,18 @@ export default function AiDashboardPage() {
           title={shareTarget.name}
           sharesUrl={`/dashboard/${shareTarget.type === 'query' ? 'saved-queries' : 'report-dashboards'}/${shareTarget.id}/shares`}
           onClose={() => setShareTarget(null)}
+        />
+      )}
+
+      {/* Tableau 拖拉模式 — 全螢幕 overlay */}
+      {showShelfBuilder && result && (
+        <ShelfChartBuilder
+          rows={result.rows}
+          columns={result.columns}
+          columnLabels={result.column_labels}
+          initialConfig={effectiveChartConfig}
+          onSave={cfg => { setUserChartConfig(cfg); setShowShelfBuilder(false) }}
+          onClose={() => setShowShelfBuilder(false)}
         />
       )}
     </div>

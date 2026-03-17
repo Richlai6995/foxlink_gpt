@@ -32,6 +32,7 @@ interface Props {
   chartDef: AiChartDef
   rows: Record<string, unknown>[]
   columnLabels?: Record<string, string>
+  height?: number | string   // 預設 320，傳 undefined 使用 '100%'
 }
 
 /** 解析 chart config 欄位名稱 → 實際 row 值
@@ -120,7 +121,7 @@ function sortRows(
   })
 }
 
-export default function AiChart({ chartDef, rows, columnLabels = {} }: Props) {
+export default function AiChart({ chartDef, rows, columnLabels = {}, height = 320 }: Props) {
   const { i18n } = useTranslation()
   const lang = i18n.language
 
@@ -458,7 +459,7 @@ export default function AiChart({ chartDef, rows, columnLabels = {} }: Props) {
   return (
     <ReactECharts
       option={option}
-      style={{ height: 320, width: '100%' }}
+      style={{ height: height === undefined ? '100%' : height, width: '100%' }}
       theme="light"
       opts={{ renderer: 'canvas' }}
     />
