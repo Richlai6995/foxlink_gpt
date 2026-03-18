@@ -7,6 +7,7 @@ import type { AiChartConfig, AiChartDef, ChartColorPalette, YAxisDef } from '../
 import AiChart from './AiChart'
 import { useTranslation } from 'react-i18next'
 import api from '../../lib/api'
+import ColorPickerInput from '../common/ColorPickerInput'
 
 type AggFn = 'SUM' | 'COUNT' | 'AVG' | 'MAX' | 'MIN' | 'COUNT_DISTINCT'
 
@@ -85,9 +86,8 @@ function YAxesPanel({ y_axes, columns, columnLabels, onChange }: YAxesPanelProps
               <option value="line">Line</option>
             </select>
             {/* 顏色 */}
-            <input type="color" value={ax.color || '#118DFF'}
-              onChange={e => update(idx, { color: e.target.value })}
-              className="w-7 h-6 rounded border border-gray-200 cursor-pointer p-0"
+            <ColorPickerInput value={ax.color || '#118DFF'}
+              onChange={v => update(idx, { color: v })}
               title="顏色" />
             <button onClick={() => remove(idx)} className="text-gray-300 hover:text-red-500 text-xs ml-auto">✕</button>
           </div>

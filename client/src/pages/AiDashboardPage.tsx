@@ -11,7 +11,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
   BarChart3, ChevronRight, ChevronDown, Send, RefreshCw,
   Table, BarChart2, Settings2, Code, ArrowLeft, Layers, History, Trash2, X,
-  Save, BookMarked, Columns, LayoutDashboard, Share2, Pencil, Download, Shield
+  Save, BookMarked, Columns, LayoutDashboard, Share2, Pencil, Download, Shield, CornerUpLeft
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useAuth } from '../context/AuthContext'
@@ -27,7 +27,7 @@ import QueryParamsModal from '../components/dashboard/QueryParamsModal'
 import ShareModal from '../components/dashboard/ShareModal'
 import type {
   AiSelectTopic, AiSelectDesign, AiQueryResult, AiChartConfig, AiChartDef,
-  AiDashboardHistory, AiSavedQuery, AiQueryParameter, MultiOrgScope
+  AiDashboardHistory, AiSavedQuery, AiQueryParameter, MultiOrgScope, OrgScope
 } from '../types'
 
 type ViewMode = 'chart' | 'table'
@@ -101,11 +101,22 @@ export default function AiDashboardPage() {
   const [multiOrgScope, setMultiOrgScope] = useState<MultiOrgScope | null>(null)
   const [multiOrgExpanded, setMultiOrgExpanded] = useState(false)
 
+  // ── 公司組織階層權限範圍（Layer 3）────────────────────────────────────────
+  const [orgScope, setOrgScope] = useState<OrgScope | null>(null)
+  const [orgScopeExpanded, setOrgScopeExpanded] = useState(false)
+
   useEffect(() => {
-    if (isAdmin) { setMultiOrgScope({ has_restrictions: false, is_admin: true }); return }
+    if (isAdmin) {
+      setMultiOrgScope({ has_restrictions: false, is_admin: true })
+      setOrgScope({ has_restrictions: false, is_admin: true } as any)
+      return
+    }
     api.get('/dashboard/multiorg-scope')
       .then(r => setMultiOrgScope(r.data))
       .catch(() => setMultiOrgScope({ has_restrictions: false }))
+    api.get('/dashboard/org-scope')
+      .then(r => setOrgScope(r.data))
+      .catch(() => setOrgScope(null))
   }, [isAdmin])
 
   // 向量搜尋覆蓋參數（查詢時可調整）
@@ -374,6 +385,7 @@ export default function AiDashboardPage() {
         try {
           const data = JSON.parse(dataStr)
           if (event === 'multiorg_scope') setMultiOrgScope(data as MultiOrgScope)
+          else if (event === 'org_scope') setOrgScope(data as OrgScope)
           else if (event === 'status') setStatusMsg(data.message || '')
           else if (event === 'sql_preview') {
             setDevSql(data.sql || '')
@@ -639,46 +651,47 @@ export default function AiDashboardPage() {
             )}
             <div className="flex-1 overflow-y-auto">
               {history.map(h => (
-                <div key={h.id} className="border-b border-gray-100">
-                  <button
-                    onClick={() => setExpandedHistory(expandedHistory === h.id ? null : h.id)}
-                    className="w-full text-left px-3 py-2 hover:bg-gray-50 transition group"
-                  >
-                    <div className="flex items-start justify-between gap-1">
-                      <div className="flex-1 min-w-0">
-                        <p className="text-xs text-gray-700 truncate">{h.question}</p>
-                        <p className="text-[10px] text-gray-400 mt-0.5">
-                          {h.topic_name && <span className="mr-1">{h.topic_name} /</span>}
-                          {h.design_name}
-                        </p>
-                        <p className="text-[10px] text-gray-300">{h.created_at}</p>
-                      </div>
-                      <div className="flex items-center gap-1 flex-shrink-0 opacity-0 group-hover:opacity-100 transition">
-                        <button onClick={e => deleteHistory(h.id, e)} className="text-gray-300 hover:text-red-400 p-0.5">
-                          <X size={11} />
-                        </button>
-                      </div>
-                    </div>
-                  </button>
-                  {expandedHistory === h.id && (
-                    <div className="bg-gray-50 px-3 py-2 space-y-2">
-                      {h.generated_sql && (
-                        <div>
-                          <p className="text-[10px] text-gray-400 mb-1 flex items-center justify-between">
-                            <span>生成 SQL</span>
-                            <span className="text-gray-300">{h.row_count} 筆</span>
-                          </p>
-                          <pre className="text-[10px] text-gray-600 bg-white border border-gray-200 rounded p-2 overflow-x-auto whitespace-pre-wrap max-h-40">
-                            {h.generated_sql}
-                          </pre>
-                        </div>
-                      )}
+                <div key={h.id} className="border-b border-gray-100 group">
+                  <div className="flex items-start gap-1 px-3 py-2 hover:bg-gray-50 transition">
+                    {/* 文字區：點擊展開 SQL */}
+                    <button
+                      onClick={() => setExpandedHistory(expandedHistory === h.id ? null : h.id)}
+                      className="flex-1 min-w-0 text-left"
+                    >
+                      <p className="text-xs text-gray-700 truncate">{h.question}</p>
+                      <p className="text-[10px] text-gray-400 mt-0.5">
+                        {h.topic_name && <span className="mr-1">{h.topic_name} /</span>}
+                        {h.design_name}
+                      </p>
+                      <p className="text-[10px] text-gray-300">{h.created_at}</p>
+                    </button>
+                    {/* 操作按鈕：hover 顯示 */}
+                    <div className="flex items-center gap-0.5 flex-shrink-0 opacity-0 group-hover:opacity-100 transition mt-0.5">
                       <button
+                        title="引用到提問欄"
                         onClick={() => { setQuestion(h.question); setSidebarTab('topics') }}
-                        className="text-xs text-blue-500 hover:text-blue-700"
+                        className="text-gray-300 hover:text-blue-500 p-0.5"
                       >
-                        {t('aiDash.requery')}
+                        <CornerUpLeft size={12} />
                       </button>
+                      <button
+                        title="刪除"
+                        onClick={e => deleteHistory(h.id, e)}
+                        className="text-gray-300 hover:text-red-400 p-0.5"
+                      >
+                        <X size={11} />
+                      </button>
+                    </div>
+                  </div>
+                  {expandedHistory === h.id && h.generated_sql && (
+                    <div className="bg-gray-50 px-3 pb-2">
+                      <p className="text-[10px] text-gray-400 mb-1 flex items-center justify-between">
+                        <span>生成 SQL</span>
+                        <span className="text-gray-300">{h.row_count} 筆</span>
+                      </p>
+                      <pre className="text-[10px] text-gray-600 bg-white border border-gray-200 rounded p-2 overflow-x-auto whitespace-pre-wrap max-h-40">
+                        {h.generated_sql}
+                      </pre>
                     </div>
                   )}
                 </div>
@@ -951,6 +964,88 @@ export default function AiDashboardPage() {
                       <p className="text-[10px] text-blue-400 mt-1.5">
                         * 滑鼠移至組織卡片可查看所屬 OU / 帳套
                       </p>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── 公司組織階層資料權限範圍（Layer 3）────────────────────────────── */}
+          {orgScope?.has_restrictions && (
+            <div className="bg-green-50 border border-green-200 rounded-xl overflow-hidden">
+              <button
+                onClick={() => setOrgScopeExpanded(p => !p)}
+                className="flex items-center gap-2 w-full px-4 py-2.5 text-left hover:bg-green-100 transition"
+              >
+                <Shield size={13} className="text-green-500 flex-shrink-0" />
+                <span className="text-xs font-medium text-green-700 flex-1">
+                  公司組織資料權限範圍
+                </span>
+                <span className="text-xs text-green-500">
+                  可查詢 {orgScope.dept_count ?? 0} 個部門
+                  &nbsp;{orgScopeExpanded ? '▲' : '▼'}
+                </span>
+              </button>
+              {orgScopeExpanded && (
+                <div className="px-4 pb-3 space-y-2.5 border-t border-green-200">
+                  {/* 事業群 */}
+                  {(orgScope.org_group_details?.length ?? 0) > 0 && (
+                    <div className="pt-2">
+                      <p className="text-[10px] font-semibold text-green-600 uppercase tracking-wide mb-1.5">事業群</p>
+                      <div className="flex flex-wrap gap-1">
+                        {orgScope.org_group_details!.map(g => (
+                          <span key={g.name} className="text-xs bg-green-100 text-green-800 border border-green-200 px-2 py-0.5 rounded-full">{g.name}</span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {/* 事業處 */}
+                  {(orgScope.org_section_details?.length ?? 0) > 0 && (
+                    <div>
+                      <p className="text-[10px] font-semibold text-green-600 uppercase tracking-wide mb-1.5">事業處</p>
+                      <div className="flex flex-wrap gap-1">
+                        {orgScope.org_section_details!.map(s => (
+                          <span key={s.code} className="text-xs bg-green-100 text-green-800 border border-green-200 px-2 py-0.5 rounded-full">
+                            <span className="font-mono font-semibold">{s.code}</span>
+                            {s.name && s.name !== s.code && <span className="ml-1">{s.name}</span>}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {/* 利潤中心 */}
+                  {(orgScope.profit_center_details?.length ?? 0) > 0 && (
+                    <div>
+                      <p className="text-[10px] font-semibold text-green-600 uppercase tracking-wide mb-1.5">利潤中心</p>
+                      <div className="flex flex-wrap gap-1">
+                        {orgScope.profit_center_details!.map(p => (
+                          <span key={p.code} className="text-xs bg-green-100 text-green-800 border border-green-200 px-2 py-0.5 rounded-full">
+                            <span className="font-mono font-semibold">{p.code}</span>
+                            {p.name && p.name !== p.code && <span className="ml-1">{p.name}</span>}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {/* 部門 */}
+                  {(orgScope.dept_details?.length ?? 0) > 0 && (
+                    <div>
+                      <p className="text-[10px] font-semibold text-green-600 uppercase tracking-wide mb-1.5">
+                        部門 — 共 {orgScope.dept_count} 個
+                      </p>
+                      <div className="flex flex-wrap gap-1">
+                        {orgScope.dept_details!.map(d => (
+                          <span
+                            key={d.dept_code}
+                            title={`${d.profit_center_name ?? ''} / ${d.org_section_name ?? ''}`}
+                            className="text-xs bg-white text-green-800 border border-green-200 px-2 py-0.5 rounded-full cursor-default"
+                          >
+                            <span className="font-mono font-semibold">{d.dept_code}</span>
+                            {d.dept_name && <span className="ml-1 text-green-600">{d.dept_name}</span>}
+                          </span>
+                        ))}
+                      </div>
                     </div>
                   )}
                 </div>

@@ -963,6 +963,98 @@ router.delete('/designer/schemas/:id', requireDesigner, async (req, res) => {
   }
 });
 
+// POST /api/dashboard/designer/schemas/:id/refresh — 從 ERP DB 重新抓欄位清單，保留既有欄位設定
+router.post('/designer/schemas/:id/refresh', requireDesigner, async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const schema = await db.prepare(`SELECT * FROM ai_schema_definitions WHERE id=?`).get(req.params.id);
+    if (!schema) return res.status(404).json({ error: 'Schema 不存在' });
+
+    if (schema.source_type === 'sql') {
+      return res.status(400).json({ error: '自訂 SQL 類型無法自動刷新欄位，請手動編輯' });
+    }
+
+    // 解析 owner.table_name
+    const fullName = (schema.table_name || '').trim();
+    const dot = fullName.indexOf('.');
+    const owner = dot > 0 ? fullName.slice(0, dot).toUpperCase() : 'APPS';
+    const tableName = dot > 0 ? fullName.slice(dot + 1).toUpperCase() : fullName.toUpperCase();
+
+    if (!tableName) return res.status(400).json({ error: 'Schema 的 table_name 為空' });
+
+    const erpPool = await require('../services/dashboardService').getErpPool();
+    const oracledb = require('oracledb');
+    const conn = await erpPool.getConnection();
+    let freshCols = [];
+    try {
+      const result = await conn.execute(
+        `SELECT c.COLUMN_NAME, c.DATA_TYPE, c.DATA_LENGTH, c.DATA_PRECISION, c.DATA_SCALE, cc.COMMENTS
+         FROM   ALL_TAB_COLUMNS c
+         LEFT JOIN ALL_COL_COMMENTS cc
+                ON cc.OWNER = c.OWNER AND cc.TABLE_NAME = c.TABLE_NAME AND cc.COLUMN_NAME = c.COLUMN_NAME
+         WHERE  c.OWNER = :owner AND c.TABLE_NAME = :tableName
+         ORDER BY c.COLUMN_ID`,
+        { owner, tableName },
+        { outFormat: oracledb.OUT_FORMAT_OBJECT }
+      );
+      for (const r of (result.rows || [])) {
+        let typeStr = r.DATA_TYPE;
+        if (r.DATA_TYPE === 'NUMBER' && r.DATA_PRECISION != null)
+          typeStr = `NUMBER(${r.DATA_PRECISION}${r.DATA_SCALE ? ',' + r.DATA_SCALE : ''})`;
+        else if (r.DATA_TYPE === 'VARCHAR2' || r.DATA_TYPE === 'CHAR')
+          typeStr = `${r.DATA_TYPE}(${r.DATA_LENGTH})`;
+        freshCols.push({ column_name: r.COLUMN_NAME, data_type: typeStr, description: r.COMMENTS || null });
+      }
+    } finally {
+      await conn.close().catch(() => {});
+    }
+
+    if (freshCols.length === 0) {
+      return res.status(404).json({ error: `在 Oracle 找不到 ${fullName} 的欄位，請確認 table_name 正確` });
+    }
+
+    // 取現有欄位（保留所有設定）
+    const existingCols = await db.prepare(`SELECT * FROM ai_schema_columns WHERE schema_id=? ORDER BY id ASC`).all(req.params.id);
+    const existingMap = new Map(existingCols.map(c => [c.column_name.toUpperCase(), c]));
+    const freshSet = new Set(freshCols.map(c => c.column_name.toUpperCase()));
+
+    const toAdd = freshCols.filter(c => !existingMap.has(c.column_name.toUpperCase()));
+    const toRemove = existingCols.filter(c => !freshSet.has(c.column_name.toUpperCase()));
+
+    // 刪除消失的欄位
+    for (const col of toRemove) {
+      await db.prepare(`DELETE FROM ai_schema_columns WHERE id=?`).run(col.id);
+    }
+    // 新增欄位（用 Oracle 說明，其餘設定保持預設）
+    for (const col of toAdd) {
+      await db.prepare(
+        `INSERT INTO ai_schema_columns (schema_id, column_name, data_type, description) VALUES (?, ?, ?, ?)`
+      ).run(req.params.id, col.column_name, col.data_type, col.description);
+    }
+    // 更新既有欄位的 data_type（型態可能改變，其他設定保留不動）
+    for (const col of freshCols) {
+      const existing = existingMap.get(col.column_name.toUpperCase());
+      if (existing && existing.data_type !== col.data_type) {
+        await db.prepare(`UPDATE ai_schema_columns SET data_type=? WHERE id=?`).run(col.data_type, existing.id);
+      }
+    }
+
+    await db.prepare(`UPDATE ai_schema_definitions SET updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(req.params.id);
+
+    res.json({
+      ok: true,
+      added: toAdd.length,
+      removed: toRemove.length,
+      unchanged: existingCols.length - toRemove.length,
+      total: freshCols.length,
+      added_cols: toAdd.map(c => c.column_name),
+      removed_cols: toRemove.map(c => c.column_name),
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // POST /api/dashboard/designer/schemas/import-oracle
 router.post('/designer/schemas/import-oracle', requireDesigner, async (req, res) => {
   const { table_names, owner: defaultOwner = 'APPS', db_connection = 'erp' } = req.body;
@@ -1210,7 +1302,7 @@ router.post('/etl/jobs', requireDesigner, async (req, res) => {
     const { scheduleToCron } = require('../services/dashboardService');
     const {
       name, source_sql, source_connection, vectorize_fields, metadata_fields,
-      embedding_dimension, is_incremental,
+      embedding_dimension, is_incremental, trigger_intent,
       job_type, target_table, target_mode, upsert_key, delete_sql,
       schedule_type, schedule_config, project_id
     } = req.body;
@@ -1220,8 +1312,8 @@ router.post('/etl/jobs', requireDesigner, async (req, res) => {
       `INSERT INTO ai_etl_jobs
          (name, source_sql, source_connection, vectorize_fields, metadata_fields,
           embedding_dimension, cron_expression, is_incremental, created_by,
-          job_type, target_table, target_mode, upsert_key, delete_sql, schedule_type, schedule_config, project_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          job_type, target_table, target_mode, upsert_key, delete_sql, schedule_type, schedule_config, project_id, trigger_intent)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
       name, source_sql, source_connection || 'erp',
       vectorize_fields ? JSON.stringify(vectorize_fields) : null,
@@ -1237,7 +1329,8 @@ router.post('/etl/jobs', requireDesigner, async (req, res) => {
       delete_sql || null,
       schedule_type || 'cron',
       schedule_config ? JSON.stringify(schedule_config) : null,
-      project_id || null
+      project_id || null,
+      trigger_intent || null
     );
     const newId = r.lastInsertRowid;
     // 為新 ETL job 加 AI_VECTOR_STORE partition（vector job 才需要）
@@ -1262,7 +1355,7 @@ router.put('/etl/jobs/:id', requireDesigner, async (req, res) => {
     const { scheduleToCron, scheduleEtlJob } = require('../services/dashboardService');
     const {
       name, source_sql, source_connection, vectorize_fields, metadata_fields,
-      embedding_dimension, is_incremental, status,
+      embedding_dimension, is_incremental, status, trigger_intent,
       job_type, target_table, target_mode, upsert_key, delete_sql,
       schedule_type, schedule_config, project_id
     } = req.body;
@@ -1272,7 +1365,7 @@ router.put('/etl/jobs/:id', requireDesigner, async (req, res) => {
          name=?, source_sql=?, source_connection=?, vectorize_fields=?, metadata_fields=?,
          embedding_dimension=?, cron_expression=?, is_incremental=?, status=?,
          job_type=?, target_table=?, target_mode=?, upsert_key=?, delete_sql=?,
-         schedule_type=?, schedule_config=?, project_id=?
+         schedule_type=?, schedule_config=?, project_id=?, trigger_intent=?
        WHERE id=?`
     ).run(
       name, source_sql, source_connection || 'erp',
@@ -1290,6 +1383,7 @@ router.put('/etl/jobs/:id', requireDesigner, async (req, res) => {
       schedule_type || 'cron',
       schedule_config ? JSON.stringify(schedule_config) : null,
       project_id || null,
+      trigger_intent || null,
       req.params.id
     );
     if (cronExpr && status !== 'inactive') {
@@ -1663,6 +1757,62 @@ router.post('/topics/:id/icon', requireDesigner, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// POST /api/dashboard/upload-logo — 上傳公司 Logo
+router.post('/upload-logo', async (req, res) => {
+  try {
+    const multer = require('multer');
+    const path = require('path');
+    const { UPLOAD_DIR: _ud } = require('../config/paths');
+    const uploadDir = path.join(_ud, 'dashboard_logos');
+    require('fs').mkdirSync(uploadDir, { recursive: true });
+    const storage = multer.diskStorage({
+      destination: uploadDir,
+      filename: (req, file, cb) => cb(null, `logo_${req.user.id}_${Date.now()}${path.extname(file.originalname)}`),
+    });
+    const upload = multer({
+      storage,
+      limits: { fileSize: 5 * 1024 * 1024 },
+      fileFilter: (req, file, cb) => {
+        if (file.mimetype.startsWith('image/')) cb(null, true);
+        else cb(new Error('只允許圖片檔案'));
+      },
+    }).single('logo');
+    upload(req, res, (err) => {
+      if (err) return res.status(400).json({ error: err.message });
+      if (!req.file) return res.status(400).json({ error: '未收到檔案' });
+      res.json({ url: `/uploads/dashboard_logos/${req.file.filename}` });
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/dashboard/upload-wallpaper — 上傳儀表板壁紙圖片
+router.post('/upload-wallpaper', async (req, res) => {
+  try {
+    const multer = require('multer');
+    const path = require('path');
+    const { UPLOAD_DIR: _ud } = require('../config/paths');
+    const uploadDir = path.join(_ud, 'dashboard_wallpapers');
+    require('fs').mkdirSync(uploadDir, { recursive: true });
+    const storage = multer.diskStorage({
+      destination: uploadDir,
+      filename: (req, file, cb) => cb(null, `wp_${req.user.id}_${Date.now()}${path.extname(file.originalname)}`),
+    });
+    const upload = multer({
+      storage,
+      limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB
+      fileFilter: (req, file, cb) => {
+        if (file.mimetype.startsWith('image/')) cb(null, true);
+        else cb(new Error('只允許圖片檔案'));
+      },
+    }).single('wallpaper');
+    upload(req, res, (err) => {
+      if (err) return res.status(400).json({ error: err.message });
+      if (!req.file) return res.status(400).json({ error: '未收到檔案' });
+      res.json({ url: `/uploads/dashboard_wallpapers/${req.file.filename}` });
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // GET /api/dashboard/admin/shares — admin only，以 project 為主
 router.get('/admin/shares', async (req, res) => {
   try {
@@ -1706,6 +1856,36 @@ router.get('/multiorg-scope', async (req, res) => {
   }
 });
 
+// ── GET /api/dashboard/org-scope ── 前端啟動時主動取得使用者的公司組織範圍 ──
+router.get('/org-scope', async (req, res) => {
+  if (req.user.role === 'admin') return res.json({ has_restrictions: false, is_admin: true });
+  try {
+    const db = require('../database-oracle').db;
+    // 重新從 DB 取最新使用者資料（session 可能快取舊的組織欄位）
+    const freshUser = await db.prepare(`SELECT * FROM users WHERE id=?`).get(req.user.id) || req.user;
+
+    const { getEffectivePolicy } = require('./dataPermissions');
+    const policy = await getEffectivePolicy(db, freshUser.id);
+
+    if (!policy?.rules?.length) return res.json({ has_restrictions: false });
+
+    const {
+      ORG_HIERARCHY_VALUE_TYPES, loadDeptHierarchy, resolveUserDeptScope, buildOrgScopePayload,
+    } = require('../services/orgHierarchyService');
+    const { getErpPool } = require('../services/dashboardService');
+
+    const hasOrgRules = policy.rules.some(r => ORG_HIERARCHY_VALUE_TYPES.has(r.value_type || r.filter_source));
+    if (!hasOrgRules) return res.json({ has_restrictions: false });
+
+    const hierarchy = await loadDeptHierarchy(getErpPool);
+    const scope = resolveUserDeptScope(policy.rules, freshUser, hierarchy);
+    res.json(buildOrgScopePayload(scope));
+  } catch (e) {
+    console.error('[org-scope]', e.message);
+    res.status(503).json({ error: '無法驗證組織權限（ERP 連線異常）', unavailable: true });
+  }
+});
+
 // ── 資料權限前置問題檢查 ──────────────────────────────────────────────────────
 /**
  * 雙向檢查（Layer 3/4 非 MultiOrg 規則，例如 dept_code / profit_center）：
@@ -1720,14 +1900,17 @@ router.get('/multiorg-scope', async (req, res) => {
  */
 function checkForbiddenInQuestion(question, rules) {
   const { MULTIORG_VALUE_TYPES } = require('../services/multiOrgService');
+  const { ORG_HIERARCHY_VALUE_TYPES } = require('../services/orgHierarchyService');
   const forbidden = [];
   const qUpper = question.toUpperCase();
   const qLower = question.toLowerCase();
 
-  // 依 value_type 分組計算 include / exclude（排除 MultiOrg，由 SSE phase 處理）
+  // 依 value_type 分組計算 include / exclude
+  // ⚠️ MultiOrg 和 Layer 3 OrgHierarchy 都由 SSE phase 各自的 service 處理，這裡跳過
   const groups = {};
   for (const r of rules) {
-    if (MULTIORG_VALUE_TYPES.has(r.value_type)) continue; // ← MultiOrg 不在此處理
+    if (MULTIORG_VALUE_TYPES.has(r.value_type)) continue;
+    if (ORG_HIERARCHY_VALUE_TYPES.has(r.value_type || r.filter_source)) continue; // ← Layer 3 不在此處理
     const key = `${r.layer}_${r.value_type}`;
     if (!groups[key]) groups[key] = { value_type: r.value_type, includes: [], excludes: [] };
     if (r.include_type === 'include') groups[key].includes.push({ id: r.value_id, name: r.value_name });
@@ -1748,9 +1931,8 @@ function checkForbiddenInQuestion(question, rules) {
     // ── 2. include 反向檢查：問題包含不在允許清單的代碼值 ────────────────
     // 只針對 code/name 型（不是 ID 型）做此檢查，避免數字誤判
     const CODE_TYPES = new Set([
-      'dept_code', 'profit_center',
-      'org_section', 'org_group_name',
-      // organization_code / operating_unit_name / set_of_books_name → 由 multiOrgService 處理
+      // org_group_name / org_section / profit_center / dept_code → 由 orgHierarchyService 處理，不在此
+      // organization_code / operating_unit / set_of_books_id → 由 multiOrgService 處理，不在此
     ]);
     if (includes.length > 0 && CODE_TYPES.has(value_type)) {
       const allowedIds  = includes.map(i => (i.id  || '').toUpperCase()).filter(Boolean);
@@ -2244,7 +2426,7 @@ router.get('/report-dashboards', requireDashboard, async (req, res) => {
 router.post('/report-dashboards', requireDashboard, async (req, res) => {
   const { db } = require('../database-oracle');
   try {
-    const { name, name_en, name_vi, description, description_en, description_vi, category, category_en, category_vi, layout_config, sort_order, bg_color, bg_image_url, bg_opacity, global_filters_schema, bookmarks, toolbar_bg_color } = req.body;
+    const { name, name_en, name_vi, description, description_en, description_vi, category, category_en, category_vi, layout_config, sort_order, bg_color, bg_image_url, bg_opacity, global_filters_schema, bookmarks, toolbar_bg_color, toolbar_text_color, logo_url, logo_height } = req.body;
     if (!name) return res.status(400).json({ error: '名稱必填' });
     let tEn = name_en || null, tVi = name_vi || null;
     if (!tEn || !tVi) {
@@ -2255,8 +2437,8 @@ router.post('/report-dashboards', requireDashboard, async (req, res) => {
       } catch {}
     }
     const r = await db.prepare(`
-      INSERT INTO ai_report_dashboards (user_id, name, name_en, name_vi, description, description_en, description_vi, category, category_en, category_vi, layout_config, sort_order, bg_color, bg_image_url, bg_opacity, global_filters_schema, bookmarks, toolbar_bg_color)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+      INSERT INTO ai_report_dashboards (user_id, name, name_en, name_vi, description, description_en, description_vi, category, category_en, category_vi, layout_config, sort_order, bg_color, bg_image_url, bg_opacity, global_filters_schema, bookmarks, toolbar_bg_color, toolbar_text_color, logo_url, logo_height)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     `).run(
       req.user.id, name, tEn, tVi,
       description || null, description_en || null, description_vi || null,
@@ -2265,7 +2447,8 @@ router.post('/report-dashboards', requireDashboard, async (req, res) => {
       bg_color || null, bg_image_url || null, bg_opacity != null ? Number(bg_opacity) : 1,
       global_filters_schema ? (typeof global_filters_schema === 'string' ? global_filters_schema : JSON.stringify(global_filters_schema)) : null,
       bookmarks ? (typeof bookmarks === 'string' ? bookmarks : JSON.stringify(bookmarks)) : null,
-      toolbar_bg_color || null
+      toolbar_bg_color || null, toolbar_text_color || null,
+      logo_url || null, logo_height != null ? Number(logo_height) : 28
     );
     const newRow = await db.prepare('SELECT * FROM ai_report_dashboards WHERE id=?').get(r.lastInsertRowid);
     res.json({ ...newRow, can_manage: 1 });  // 建立者一定有管理權
@@ -2282,13 +2465,14 @@ router.put('/report-dashboards/:id', requireDashboard, async (req, res) => {
     if (!board) return res.status(404).json({ error: '儀表板不存在' });
     if (!await canManageDashboard(db, board, req.user))
       return res.status(403).json({ error: '無權限修改' });
-    const { name, name_en, name_vi, description, description_en, description_vi, category, category_en, category_vi, layout_config, sort_order, auto_refresh_interval, bg_color, bg_image_url, bg_opacity, global_filters_schema, bookmarks, toolbar_bg_color } = req.body;
+    const { name, name_en, name_vi, description, description_en, description_vi, category, category_en, category_vi, layout_config, sort_order, auto_refresh_interval, bg_color, bg_image_url, bg_opacity, global_filters_schema, bookmarks, toolbar_bg_color, toolbar_text_color, logo_url, logo_height } = req.body;
     await db.prepare(`
       UPDATE ai_report_dashboards SET
         name=?, name_en=?, name_vi=?, description=?, description_en=?, description_vi=?,
         category=?, category_en=?, category_vi=?, layout_config=?, sort_order=?,
         auto_refresh_interval=?, bg_color=?, bg_image_url=?, bg_opacity=?,
-        global_filters_schema=?, bookmarks=?, toolbar_bg_color=?, updated_at=SYSTIMESTAMP
+        global_filters_schema=?, bookmarks=?, toolbar_bg_color=?, toolbar_text_color=?,
+        logo_url=?, logo_height=?, updated_at=SYSTIMESTAMP
       WHERE id=?
     `).run(
       name, name_en || null, name_vi || null,
@@ -2300,7 +2484,8 @@ router.put('/report-dashboards/:id', requireDashboard, async (req, res) => {
       bg_color || null, bg_image_url || null, bg_opacity != null ? Number(bg_opacity) : 1,
       global_filters_schema ? (typeof global_filters_schema === 'string' ? global_filters_schema : JSON.stringify(global_filters_schema)) : null,
       bookmarks ? (typeof bookmarks === 'string' ? bookmarks : JSON.stringify(bookmarks)) : null,
-      toolbar_bg_color || null,
+      toolbar_bg_color || null, toolbar_text_color || null,
+      logo_url || null, logo_height != null ? Number(logo_height) : 28,
       req.params.id
     );
     const updated = await db.prepare('SELECT * FROM ai_report_dashboards WHERE id=?').get(req.params.id);

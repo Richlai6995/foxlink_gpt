@@ -427,6 +427,9 @@ async function runMigrations(db) {
   await addCol('AI_REPORT_DASHBOARDS', 'GLOBAL_FILTERS_SCHEMA', 'CLOB');
   await addCol('AI_REPORT_DASHBOARDS', 'BOOKMARKS', 'CLOB');
   await addCol('AI_REPORT_DASHBOARDS', 'TOOLBAR_BG_COLOR', 'VARCHAR2(20)');
+  await addCol('AI_REPORT_DASHBOARDS', 'TOOLBAR_TEXT_COLOR', 'VARCHAR2(20)');
+  await addCol('AI_REPORT_DASHBOARDS', 'LOGO_URL',    'VARCHAR2(500)');
+  await addCol('AI_REPORT_DASHBOARDS', 'LOGO_HEIGHT', 'NUMBER DEFAULT 28');
 
   // AI Saved Queries multilingual names
   await addCol('AI_SAVED_QUERIES', 'NAME_EN', 'VARCHAR2(400)');
@@ -685,8 +688,8 @@ async function runMigrations(db) {
   )`);
 
   // ── AI Dashboard sharing & suspend ────────────────────────────────────────
-  await addCol('AI_SELECT_DESIGNS', 'SHARE_TYPE',   "VARCHAR2(20) DEFAULT 'none'");
-  await addCol('AI_SELECT_DESIGNS', 'IS_SUSPENDED',  'NUMBER(1) DEFAULT 0');
+  await addCol('AI_SELECT_DESIGNS', 'SHARE_TYPE',        "VARCHAR2(20) DEFAULT 'none'");
+  await addCol('AI_SELECT_DESIGNS', 'IS_SUSPENDED',       'NUMBER(1) DEFAULT 0');
   await addCol('AI_SELECT_TOPICS',  'IS_SUSPENDED',  'NUMBER(1) DEFAULT 0');
   await addCol('AI_SELECT_TOPICS',  'ICON_URL',      'VARCHAR2(500)');
 
@@ -721,7 +724,8 @@ async function runMigrations(db) {
   await addCol('AI_ETL_JOBS',           'DELETE_SQL',  'CLOB');
   await addCol('AI_ETL_JOBS',           'SCHEDULE_TYPE', 'VARCHAR2(20)');
   await addCol('AI_ETL_JOBS',           'SCHEDULE_CONFIG', 'CLOB');
-  await addCol('AI_ETL_JOBS',           'RUN_COUNT',   'NUMBER DEFAULT 0');
+  await addCol('AI_ETL_JOBS',           'RUN_COUNT',     'NUMBER DEFAULT 0');
+  await addCol('AI_ETL_JOBS',           'TRIGGER_INTENT','VARCHAR2(1000)'); // 觸發意圖描述
   await addCol('AI_ETL_RUN_LOGS',       'ROWS_INSERTED','NUMBER DEFAULT 0');
   await addCol('AI_ETL_RUN_LOGS',       'ROWS_UPDATED', 'NUMBER DEFAULT 0');
   await addCol('AI_ETL_RUN_LOGS',       'STATUS_MESSAGE', 'VARCHAR2(200)');

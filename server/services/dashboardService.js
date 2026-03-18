@@ -287,19 +287,19 @@ async function vectorSearch(db, jobIds, queryEmbedding, topK = VECTOR_TOP_K, sim
   }
 }
 
-// ─── 向量查詢翻譯（中文→英文，提升跨語言 embedding 對齊）──────────────────────
-// 若問句含有中文，先用 Gemini Flash 萃取語意關鍵字並翻成英文，再做 embedding
-// SQL 生成仍使用原始問句，僅 embedding 用翻譯版本
-async function translateQueryForEmbedding(question) {
-  // 沒有中文字元就不翻
+// ─── 向量查詢翻譯（中文→英文，依各 job 的 trigger_intent 做 context-aware 翻譯）──
+// triggerIntent: ETL Job 的 trigger_intent 欄位，描述此向量庫存放的是什麼資料
+async function translateQueryForEmbedding(question, triggerIntent) {
   if (!/[\u4e00-\u9fff]/.test(question)) return { query: question, inputTokens: 0, outputTokens: 0 };
   const flashModel = process.env.GEMINI_MODEL_FLASH || 'gemini-2.0-flash';
+  const context = triggerIntent
+    ? `This vector store contains: ${triggerIntent}`
+    : 'product/item description data';
   try {
     const model = genAI.getGenerativeModel({ model: flashModel });
     const result = await model.generateContent(
-      `Extract the key product/item description keywords from the following query and translate them to English.\n` +
-      `Return ONLY the English keywords suitable for semantic search against an English product description database.\n` +
-      `Do NOT include company codes, date ranges, quantity fields, or SQL terms — only the product/item description terms.\n` +
+      `Extract semantic search keywords from the following query relevant to: ${context}\n` +
+      `Return ONLY English keywords for semantic similarity search — no codes, dates, quantities, or field names.\n` +
       `Query: "${question}"\n` +
       `English keywords only:`
     );
@@ -315,6 +315,44 @@ async function translateQueryForEmbedding(question) {
   } catch (e) {
     console.warn('[Dashboard] Query translation failed, using original:', e.message);
     return { query: question, inputTokens: 0, outputTokens: 0, model: flashModel };
+  }
+}
+
+// ─── 批次判斷哪些 ETL Job 的向量搜尋應觸發（一次 Gemini 呼叫）──────────────────
+// jobs: [{ id, name, triggerIntent }]
+// 回傳應觸發的 job id Set
+// 若某 job 沒有設定 triggerIntent → 預設觸發（向下相容）
+async function checkVectorTriggers(question, jobs) {
+  const withIntent = jobs.filter(j => j.triggerIntent);
+  const alwaysRun  = jobs.filter(j => !j.triggerIntent).map(j => j.id);
+
+  if (withIntent.length === 0) return new Set(alwaysRun);
+
+  const flashModel = process.env.GEMINI_MODEL_FLASH || 'gemini-2.0-flash';
+  try {
+    const model = genAI.getGenerativeModel({ model: flashModel });
+    const lines = withIntent.map((j, i) => `${i + 1}. [${j.name}]: ${j.triggerIntent}`).join('\n');
+    const result = await model.generateContent(
+      `Given this user query, determine which semantic vector searches are necessary.\n` +
+      `Answer YES only if the query explicitly needs to look up data described by that store.\n` +
+      `Answer NO if the query merely mentions a field name (e.g. "料號") without needing semantic description lookup.\n\n` +
+      `Query: "${question}"\n\n` +
+      `Vector stores:\n${lines}\n\n` +
+      `Reply with one line per store, format: "1: YES" or "1: NO". Nothing else.`
+    );
+    const text = result.response.text().trim();
+    const triggered = new Set(alwaysRun);
+    for (const line of text.split('\n')) {
+      const m = line.match(/^(\d+):\s*(YES|NO)/i);
+      if (m && m[2].toUpperCase() === 'YES') {
+        triggered.add(withIntent[parseInt(m[1]) - 1]?.id);
+      }
+    }
+    console.log(`[Dashboard] Vector trigger check: "${text.replace(/\n/g, ' ')}" → triggered: [${[...triggered].join(',')}]`);
+    return triggered;
+  } catch (e) {
+    console.warn('[Dashboard] Vector trigger check failed, running all:', e.message);
+    return new Set(jobs.map(j => j.id));
   }
 }
 
@@ -629,6 +667,10 @@ async function runDashboardQuery({ designId, question, userId, user, isDesigner,
     }
   } catch (_) {}
 
+  // 重新從 DB 取最新使用者資料（session 可能快取舊的組織欄位）
+  const freshUser = await db.prepare(`SELECT * FROM users WHERE id=?`).get(userId);
+  if (freshUser) user = { ...user, ...freshUser };
+
   // 取得 design
   const design = await db.prepare(`SELECT * FROM ai_select_designs WHERE id=?`).get(designId);
   if (!design) throw new Error('查詢設計不存在');
@@ -665,6 +707,76 @@ async function runDashboardQuery({ designId, question, userId, user, isDesigner,
       // 每次都推送使用者的權限範圍（透明度）
       send('multiorg_scope', buildScopePayload(scope));
 
+      // ── 從 schema filter_key 找出此設計的 MultiOrg 過濾欄位，依層級注入 IN 條件 ──
+      // 設計者在 ood schema 欄位標記：
+      //   filter_source='organization_id' → INV/WIP/BOM → scope.orgDetails (org IDs)
+      //   filter_source='operating_unit'  → AP/AR/PO/OM → scope.allowedOUIds
+      //   filter_source='set_of_books_id' → GL           → scope.allowedSOBIds
+      if (scope.hasRules) {
+        const schemaIds = design.target_schema_ids ? JSON.parse(design.target_schema_ids) : [];
+        // 取出所有 MultiOrg filter key 欄位（可能有多個，例如同時標 org + OU）
+        const multiorgFilterKeys = [];
+        for (const sid of schemaIds) {
+          const cols = await db.prepare(
+            `SELECT c.column_name, c.filter_source, sd.alias, sd.table_name
+             FROM ai_schema_columns c
+             JOIN ai_schema_definitions sd ON sd.id = c.schema_id
+             WHERE c.schema_id=?
+               AND c.is_filter_key=1
+               AND c.filter_source IN ('organization_id','operating_unit','set_of_books_id')`
+          ).all(sid);
+          for (const col of cols) {
+            const tblAlias = col.alias || col.table_name.split('.').pop().toLowerCase();
+            multiorgFilterKeys.push({
+              colRef: `${tblAlias}.${col.column_name}`,
+              filterSource: col.filter_source,
+            });
+          }
+        }
+
+        if (multiorgFilterKeys.length === 0) {
+          console.warn('[MultiOrg] 無 MultiOrg filter key 欄位設定，請在 ood schema 標記過濾欄位');
+        }
+
+        const existingWhere = design._dataPermissionWhere?.dataPermWhere || [];
+        const newConditions = [];
+        let hasAnyAccess = false;
+
+        for (const fk of multiorgFilterKeys) {
+          let allowedIds = [];
+          if (fk.filterSource === 'organization_id') {
+            allowedIds = (scope.orgDetails || []).map(o => o.id).filter(Boolean);
+          } else if (fk.filterSource === 'operating_unit') {
+            allowedIds = [...(scope.allowedOUIds || [])];
+          } else if (fk.filterSource === 'set_of_books_id') {
+            allowedIds = [...(scope.allowedSOBIds || [])];
+          }
+
+          if (allowedIds.length) {
+            newConditions.push(`${fk.colRef} IN (${allowedIds.join(', ')})`);
+            hasAnyAccess = true;
+            console.log(`[MultiOrg] Injected WHERE: ${fk.colRef} IN (${allowedIds.length} items)`);
+          } else {
+            // 此層級無允許值 → 強制無結果（安全卡控）
+            newConditions.push(`1=0 /* MultiOrg: no access at ${fk.filterSource} level */`);
+            console.log(`[MultiOrg] No access at ${fk.filterSource} level → 1=0`);
+          }
+        }
+
+        if (multiorgFilterKeys.length > 0) {
+          design._dataPermissionWhere = {
+            dataPermWhere: [...existingWhere, ...newConditions],
+          };
+          if (!hasAnyAccess) {
+            send('error', {
+              error: '⛔ 您目前的資料權限設定未涵蓋此查詢所需的組織/營運單位/帳套層級，無法執行查詢。\n請聯繫管理員確認資料權限設定。',
+              multiorg_empty_scope: true,
+            });
+            return;
+          }
+        }
+      }
+
       // 偵測 prompt 中超出範圍的 terms → 硬拒
       const violations = checkViolations(question, scope, hierarchy);
       if (violations.length > 0) {
@@ -688,44 +800,122 @@ async function runDashboardQuery({ designId, question, userId, user, isDesigner,
     }
   }
 
+  // 1.7 Layer 3 公司組織階層權限（FL_ORG_EMP_DEPT_MV）
+  if (effectivePolicy?.rules?.length > 0) {
+    const {
+      ORG_HIERARCHY_VALUE_TYPES, loadDeptHierarchy,
+      resolveUserDeptScope, buildOrgScopePayload,
+    } = require('./orgHierarchyService');
+
+    const hasOrgHierarchyRules = effectivePolicy.rules.some(r =>
+      ORG_HIERARCHY_VALUE_TYPES.has(r.value_type || r.filter_source)
+    );
+
+    if (hasOrgHierarchyRules) {
+      let deptHierarchy, deptScope;
+      try {
+        deptHierarchy = await loadDeptHierarchy(getErpPool);
+        deptScope = resolveUserDeptScope(effectivePolicy.rules, user, deptHierarchy);
+      } catch (e) {
+        console.error('[OrgHierarchy] 無法載入 dept hierarchy，阻擋查詢:', e.message);
+        send('error', {
+          error: '⛔ 無法驗證組織資料權限（ERP 資料庫連線異常），請稍後再試。',
+          org_hierarchy_unavailable: true,
+        });
+        return;
+      }
+
+      // 推送使用者的部門權限範圍
+      send('org_scope', buildOrgScopePayload(deptScope));
+
+      // 注入 DEPT_CODE IN (...) 條件（與 MultiOrg 相同機制，從 schema filter_key 找欄位）
+      if (deptScope.hasRules && deptScope.allowedDeptCodes.size > 0) {
+        const schemaIds = design.target_schema_ids ? JSON.parse(design.target_schema_ids) : [];
+        let deptColRef = null;
+        for (const sid of schemaIds) {
+          const col = await db.prepare(
+            `SELECT c.column_name, sd.alias, sd.table_name
+             FROM ai_schema_columns c
+             JOIN ai_schema_definitions sd ON sd.id = c.schema_id
+             WHERE c.schema_id=? AND c.filter_source='dept_code' AND c.is_filter_key=1
+             FETCH FIRST 1 ROWS ONLY`
+          ).get(sid);
+          if (col) {
+            const tblAlias = col.alias || col.table_name.split('.').pop().toLowerCase();
+            deptColRef = `${tblAlias}.${col.column_name}`;
+            break;
+          }
+        }
+        deptColRef = deptColRef || 'DEPT_CODE';
+        const inList = [...deptScope.allowedDeptCodes].map(c => `'${c}'`).join(', ');
+        const existingWhere = design._dataPermissionWhere?.dataPermWhere || [];
+        design._dataPermissionWhere = {
+          dataPermWhere: [...existingWhere, `${deptColRef} IN (${inList})`],
+        };
+        console.log(`[OrgHierarchy] Injected WHERE: ${deptColRef} IN (${deptScope.allowedDeptCodes.size} depts)`);
+      } else if (deptScope.hasRules && deptScope.allowedDeptCodes.size === 0) {
+        send('error', {
+          error: '⛔ 您目前的組織資料權限設定未涵蓋任何部門，無法執行查詢。\n請聯繫管理員確認使用者組織資料是否已從 ERP 同步。',
+          org_hierarchy_empty_scope: true,
+        });
+        return;
+      }
+    }
+  }
+
   // 2. 向量語意搜尋
   let vectorResults = [];
   if (design.vector_search_enabled) {
     try {
       send('status', { message: '語意搜尋中...' });
       const dims = parseInt(process.env.DASHBOARD_EMBEDDING_DIMS || DEFAULT_DIMS);
-      // 若問句含中文，先翻成英文再 embed（提升跨語言對齊品質）
-      const { query: embeddingQuery, inputTokens: tqIn, outputTokens: tqOut, model: tqModel } = await translateQueryForEmbedding(question);
-      if ((tqIn || tqOut) && userId) {
-        const tqDay = new Date().toISOString().split('T')[0];
-        upsertTokenUsage(db, userId, tqDay, tqModel, tqIn, tqOut).catch(() => {});
-      }
-      const queryVec = await getEmbedding(embeddingQuery, dims);
-      // 從設計的 target_schemas 找出各 schema 綁定的 ETL Job
-      // 同時建立 jobId → schemaAlias 對應表，供 buildPrompt 加 alias 前綴
+
+      // 從設計的 target_schemas 找出各 schema 綁定的 ETL Job（含 trigger_intent）
       const schemaIds = design.target_schema_ids ? JSON.parse(design.target_schema_ids) : [];
-      const jobIds = [];
-      design._jobAliasMap = {}; // { jobId: 'ps' }
+      const jobMeta = []; // [{ id, name, triggerIntent, alias }]
+      design._jobAliasMap = {};
       for (const sid of schemaIds) {
         const s = await db.prepare(
-          `SELECT vector_etl_job_id, alias, table_name FROM ai_schema_definitions WHERE id=?`
+          `SELECT sd.vector_etl_job_id, sd.alias, sd.table_name, ej.name AS job_name, ej.trigger_intent
+           FROM ai_schema_definitions sd
+           LEFT JOIN ai_etl_jobs ej ON ej.id = sd.vector_etl_job_id
+           WHERE sd.id=?`
         ).get(sid);
         if (s?.vector_etl_job_id) {
-          jobIds.push(s.vector_etl_job_id);
           const alias = s.alias || s.table_name.split('.').pop().toLowerCase().replace(/[^a-z0-9_]/g, '_');
           design._jobAliasMap[s.vector_etl_job_id] = alias;
+          jobMeta.push({ id: s.vector_etl_job_id, name: s.job_name, triggerIntent: s.trigger_intent, alias });
         }
       }
-      // 依設計配置的 vector_skip_fields 判斷是否跳過向量搜尋
-      const { skip: skipVector, reason: skipReason } = await shouldSkipVector(db, design, question);
-      if (skipVector) console.log(`[Dashboard] Skip vector search: ${skipReason}`);
 
-      if (jobIds.length && !skipVector) {
+      // ── 觸發判斷：有 trigger_intent 的 job 須通過 AI 意圖比對才觸發 ──────────
+      const { skip: skipVector, reason: skipReason } = await shouldSkipVector(db, design, question);
+      if (skipVector) {
+        console.log(`[Dashboard] Skip vector search: ${skipReason}`);
+        design._skipReason = skipReason;
+      }
+
+      let activeJobIds = [];
+      if (jobMeta.length && !skipVector) {
+        const triggeredSet = await checkVectorTriggers(question, jobMeta);
+        activeJobIds = jobMeta.filter(j => triggeredSet.has(j.id)).map(j => j.id);
+      }
+
+      if (activeJobIds.length) {
+        // 翻譯時帶入第一個觸發 job 的 triggerIntent 作為語意 context
+        const firstIntent = jobMeta.find(j => activeJobIds.includes(j.id))?.triggerIntent;
+        const { query: embeddingQuery, inputTokens: tqIn, outputTokens: tqOut, model: tqModel }
+          = await translateQueryForEmbedding(question, firstIntent);
+        if ((tqIn || tqOut) && userId) {
+          const tqDay = new Date().toISOString().split('T')[0];
+          upsertTokenUsage(db, userId, tqDay, tqModel, tqIn, tqOut).catch(() => {});
+        }
+        const queryVec = await getEmbedding(embeddingQuery, dims);
         const topK = vectorTopK ?? design.vector_top_k ?? VECTOR_TOP_K;
         const threshold = vectorSimilarityThreshold ?? design.vector_similarity_threshold ?? null;
-        vectorResults = await vectorSearch(db, jobIds, queryVec, topK, threshold);
+        vectorResults = await vectorSearch(db, activeJobIds, queryVec, topK, threshold);
       }
-      if (skipVector) design._skipReason = skipReason;  // 傳給 buildPrompt
+
       if (isDesigner) send('vector_results', { results: vectorResults });
     } catch (e) {
       console.warn('[Dashboard] Vector search error:', e.message);
@@ -1322,10 +1512,16 @@ async function buildDataPermWhere(db, design, user, rules) {
     return `'${String(v).replace(/'/g, "''")}'`; // string, single-quoted
   }
 
+  // MultiOrg (Layer 4) 和 OrgHierarchy (Layer 3) 都另外由各自的 service 處理，這裡跳過
+  const { MULTIORG_VALUE_TYPES }       = require('./multiOrgService');
+  const { ORG_HIERARCHY_VALUE_TYPES }  = require('./orgHierarchyService');
+
   // 依 filter_source 分組規則
   for (const fcol of filterCols) {
     const { column_name, filter_layer, filter_source, tbl_alias } = fcol;
     if (!filter_layer || !filter_source) continue;
+    if (MULTIORG_VALUE_TYPES.has(filter_source))      continue; // Layer 4 MultiOrg → 由外部注入
+    if (ORG_HIERARCHY_VALUE_TYPES.has(filter_source)) continue; // Layer 3 OrgHierarchy → 由外部注入
     const layerNum = filter_layer === 'layer3' ? 3 : filter_layer === 'layer4' ? 4 : null;
     if (!layerNum) continue;
 

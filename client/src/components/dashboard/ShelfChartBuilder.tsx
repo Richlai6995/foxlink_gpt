@@ -8,6 +8,7 @@ import AiChart from './AiChart'
 import { useTranslation } from 'react-i18next'
 import api from '../../lib/api'
 import { X, GripVertical, BarChart2, LineChart, PieChart, ScatterChart, Radar, Gauge } from 'lucide-react'
+import ColorPickerInput from '../common/ColorPickerInput'
 
 type AggFn = 'SUM' | 'COUNT' | 'AVG' | 'MAX' | 'MIN' | 'COUNT_DISTINCT'
 type FieldType = 'dimension' | 'measure'
@@ -672,9 +673,8 @@ export default function ShelfChartBuilder({ rows, columns, columnLabels, initial
                   {active.series_palette.map((c, i) => (
                     <div key={i} className="flex items-center gap-1 bg-gray-50 rounded px-1.5 py-1 border border-gray-200">
                       <span className="text-[10px] text-gray-400 w-4 text-center">{i + 1}</span>
-                      <input type="color" value={c}
-                        onChange={e => updateActive({ series_palette: active.series_palette.map((x, j) => j === i ? e.target.value : x) })}
-                        className="w-6 h-6 rounded cursor-pointer border-0 p-0 bg-transparent" />
+                      <ColorPickerInput value={c}
+                        onChange={v => updateActive({ series_palette: active.series_palette.map((x, j) => j === i ? v : x) })} />
                       <button onClick={() => updateActive({ series_palette: active.series_palette.filter((_, j) => j !== i) })}
                         className="text-gray-300 hover:text-red-400 text-[10px]">✕</button>
                     </div>
@@ -694,10 +694,9 @@ export default function ShelfChartBuilder({ rows, columns, columnLabels, initial
                     <div className="space-y-1">
                       {vals.map(v => (
                         <div key={v} className="flex items-center gap-2">
-                          <input type="color"
+                          <ColorPickerInput
                             value={active.series_colors[v] || '#cccccc'}
-                            onChange={e => updateActive({ series_colors: { ...active.series_colors, [v]: e.target.value } })}
-                            className="w-6 h-6 rounded cursor-pointer border border-gray-200 p-0 bg-transparent flex-shrink-0" />
+                            onChange={v2 => updateActive({ series_colors: { ...active.series_colors, [v]: v2 } })} />
                           <span className="text-[11px] text-gray-600 truncate flex-1">{v}</span>
                           {active.series_colors[v] && (
                             <button onClick={() => {
@@ -739,9 +738,8 @@ export default function ShelfChartBuilder({ rows, columns, columnLabels, initial
                       className="w-16 border border-gray-200 rounded px-1 py-0.5 text-[11px] focus:outline-none focus:border-blue-400 bg-white">
                       {['SUM','COUNT','AVG','MAX','MIN','COUNT_DISTINCT'].map(fn => <option key={fn} value={fn}>{fn}</option>)}
                     </select>
-                    <input type="color" value={ol.color || '#E66C37'}
-                      onChange={e => updateActive({ overlay_lines: active.overlay_lines.map((o, i) => i === idx ? { ...o, color: e.target.value } : o) })}
-                      className="w-6 h-6 rounded border border-gray-200 cursor-pointer p-0" />
+                    <ColorPickerInput value={ol.color || '#E66C37'}
+                      onChange={v => updateActive({ overlay_lines: active.overlay_lines.map((o, i) => i === idx ? { ...o, color: v } : o) })} />
                     <button onClick={() => updateActive({ overlay_lines: active.overlay_lines.filter((_, i) => i !== idx) })}
                       className="text-gray-300 hover:text-red-500 text-xs ml-auto">✕</button>
                   </div>
@@ -795,9 +793,8 @@ export default function ShelfChartBuilder({ rows, columns, columnLabels, initial
             {/* 圖表底色 */}
             <div className="flex items-center gap-2">
               <span className="text-[11px] text-gray-500 w-16 flex-shrink-0">圖表底色</span>
-              <input type="color" value={active.chart_bg_color || '#ffffff'}
-                onChange={e => updateActive({ chart_bg_color: e.target.value })}
-                className="w-6 h-6 rounded border border-gray-200 cursor-pointer p-0" />
+              <ColorPickerInput value={active.chart_bg_color || '#ffffff'}
+                onChange={v => updateActive({ chart_bg_color: v })} />
               {active.chart_bg_color && (
                 <button onClick={() => updateActive({ chart_bg_color: '' })}
                   className="text-[10px] text-gray-300 hover:text-red-400">重設</button>
@@ -807,9 +804,8 @@ export default function ShelfChartBuilder({ rows, columns, columnLabels, initial
             {/* 軸刻度 */}
             <div className="flex items-center gap-2">
               <span className="text-[11px] text-gray-500 w-16 flex-shrink-0">軸刻度</span>
-              <input type="color" value={active.axis_label_color || '#6b7280'}
-                onChange={e => updateActive({ axis_label_color: e.target.value })}
-                className="w-6 h-6 rounded border border-gray-200 cursor-pointer p-0" />
+              <ColorPickerInput value={active.axis_label_color || '#6b7280'}
+                onChange={v => updateActive({ axis_label_color: v })} />
               <input type="number" min={8} max={24} value={active.axis_label_size}
                 onChange={e => updateActive({ axis_label_size: e.target.value === '' ? '' : Number(e.target.value) })}
                 className="w-12 border border-gray-200 rounded px-1.5 py-0.5 text-[11px] focus:outline-none focus:border-blue-400"
@@ -823,9 +819,8 @@ export default function ShelfChartBuilder({ rows, columns, columnLabels, initial
             {/* 軸線 */}
             <div className="flex items-center gap-2">
               <span className="text-[11px] text-gray-500 w-16 flex-shrink-0">軸線</span>
-              <input type="color" value={active.axis_line_color || '#e5e7eb'}
-                onChange={e => updateActive({ axis_line_color: e.target.value })}
-                className="w-6 h-6 rounded border border-gray-200 cursor-pointer p-0" />
+              <ColorPickerInput value={active.axis_line_color || '#e5e7eb'}
+                onChange={v => updateActive({ axis_line_color: v })} />
               {active.axis_line_color && (
                 <button onClick={() => updateActive({ axis_line_color: '' })}
                   className="text-[10px] text-gray-300 hover:text-red-400">重設</button>
@@ -835,9 +830,8 @@ export default function ShelfChartBuilder({ rows, columns, columnLabels, initial
             {/* 格線 */}
             <div className="flex items-center gap-2">
               <span className="text-[11px] text-gray-500 w-16 flex-shrink-0">格線</span>
-              <input type="color" value={active.grid_line_color || '#f3f4f6'}
-                onChange={e => updateActive({ grid_line_color: e.target.value })}
-                className="w-6 h-6 rounded border border-gray-200 cursor-pointer p-0" />
+              <ColorPickerInput value={active.grid_line_color || '#f3f4f6'}
+                onChange={v => updateActive({ grid_line_color: v })} />
               {active.grid_line_color && (
                 <button onClick={() => updateActive({ grid_line_color: '' })}
                   className="text-[10px] text-gray-300 hover:text-red-400">重設</button>
@@ -847,9 +841,8 @@ export default function ShelfChartBuilder({ rows, columns, columnLabels, initial
             {/* 資料標籤 */}
             <div className="flex items-center gap-2">
               <span className="text-[11px] text-gray-500 w-16 flex-shrink-0">資料標籤</span>
-              <input type="color" value={active.data_label_color || '#6b7280'}
-                onChange={e => updateActive({ data_label_color: e.target.value })}
-                className="w-6 h-6 rounded border border-gray-200 cursor-pointer p-0" />
+              <ColorPickerInput value={active.data_label_color || '#6b7280'}
+                onChange={v => updateActive({ data_label_color: v })} />
               <input type="number" min={8} max={24} value={active.data_label_size}
                 onChange={e => updateActive({ data_label_size: e.target.value === '' ? '' : Number(e.target.value) })}
                 className="w-12 border border-gray-200 rounded px-1.5 py-0.5 text-[11px] focus:outline-none focus:border-blue-400"
@@ -863,9 +856,8 @@ export default function ShelfChartBuilder({ rows, columns, columnLabels, initial
             {/* 圖例 */}
             <div className="flex items-center gap-2">
               <span className="text-[11px] text-gray-500 w-16 flex-shrink-0">圖例</span>
-              <input type="color" value={active.legend_color || '#6b7280'}
-                onChange={e => updateActive({ legend_color: e.target.value })}
-                className="w-6 h-6 rounded border border-gray-200 cursor-pointer p-0" />
+              <ColorPickerInput value={active.legend_color || '#6b7280'}
+                onChange={v => updateActive({ legend_color: v })} />
               <input type="number" min={8} max={24} value={active.legend_size}
                 onChange={e => updateActive({ legend_size: e.target.value === '' ? '' : Number(e.target.value) })}
                 className="w-12 border border-gray-200 rounded px-1.5 py-0.5 text-[11px] focus:outline-none focus:border-blue-400"
@@ -879,9 +871,8 @@ export default function ShelfChartBuilder({ rows, columns, columnLabels, initial
             {/* 標題 */}
             <div className="flex items-center gap-2">
               <span className="text-[11px] text-gray-500 w-16 flex-shrink-0">標題</span>
-              <input type="color" value={active.title_color || '#374151'}
-                onChange={e => updateActive({ title_color: e.target.value })}
-                className="w-6 h-6 rounded border border-gray-200 cursor-pointer p-0" />
+              <ColorPickerInput value={active.title_color || '#374151'}
+                onChange={v => updateActive({ title_color: v })} />
               <input type="number" min={8} max={32} value={active.title_size}
                 onChange={e => updateActive({ title_size: e.target.value === '' ? '' : Number(e.target.value) })}
                 className="w-12 border border-gray-200 rounded px-1.5 py-0.5 text-[11px] focus:outline-none focus:border-blue-400"

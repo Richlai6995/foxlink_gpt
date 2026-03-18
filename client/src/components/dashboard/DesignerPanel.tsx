@@ -1063,6 +1063,28 @@ function SchemaManager({ projectId }: { projectId: number | null }) {
                     className="flex items-center gap-1 text-xs px-2 py-1 rounded border border-gray-300 text-gray-600 hover:border-blue-400 hover:text-blue-600">
                     <PenLine size={11} /> 編輯說明
                   </button>
+                  {(s.source_type === 'table' || s.source_type === 'view' || !s.source_type) && (
+                    <button onClick={async () => {
+                      if (!confirm(`刷新「${s.display_name || s.table_name}」的欄位定義？\n• 新增欄位將加入\n• 已移除欄位將刪除\n• 現有欄位的所有設定（說明、可見性、過濾鍵等）保留不動`)) return
+                      try {
+                        const res = await api.post(`/dashboard/designer/schemas/${s.id}/refresh`)
+                        const { added, removed, unchanged, total, added_cols, removed_cols } = res.data
+                        // 重新載入 schemas
+                        const qs = projectId ? `?project_id=${projectId}` : ''
+                        const schemasRes = await api.get(`/dashboard/designer/schemas${qs}`)
+                        setSchemas(schemasRes.data)
+                        const freshSchema = schemasRes.data.find((sc: any) => sc.id === s.id)
+                        if (editingColsId === s.id && freshSchema) startEditCols(freshSchema)
+                        let msg = `刷新完成（共 ${total} 欄）\n✅ 新增 ${added}，🗑 移除 ${removed}，⬜ 保留 ${unchanged}`
+                        if (added_cols?.length) msg += `\n新增欄位：${added_cols.join(', ')}`
+                        if (removed_cols?.length) msg += `\n移除欄位：${removed_cols.join(', ')}`
+                        alert(msg)
+                      } catch (e: any) { alert(e?.response?.data?.error || '刷新失敗') }
+                    }}
+                      className="flex items-center gap-1 text-xs px-2 py-1 rounded border border-gray-300 text-gray-600 hover:border-teal-400 hover:text-teal-600">
+                      <RotateCcw size={11} /> 刷新定義
+                    </button>
+                  )}
                   <button onClick={async () => {
                     if (!confirm(`批次自動翻譯「${s.display_name || s.table_name}」所有欄位說明為英文和越文？`)) return
                     try {
@@ -1237,12 +1259,18 @@ function SchemaManager({ projectId }: { projectId: number | null }) {
                                                 <option value="org_group_name">事業群名稱 (ORG_GROUP_NAME)</option>
                                               </>}
                                               {col.filter_layer === 'layer4' && <>
-                                                <option value="organization_id">製造組織 ID - 數字</option>
-                                                <option value="organization_code">製造組織 Code（如 Z4E）</option>
-                                                <option value="operating_unit">營運單位 ID - 數字</option>
-                                                <option value="operating_unit_name">營運單位名稱</option>
-                                                <option value="set_of_books_id">帳套 ID - 數字</option>
-                                                <option value="set_of_books_name">帳套名稱</option>
+                                                <optgroup label="製造組織層 (INV/WIP/BOM)">
+                                                  <option value="organization_id">製造組織 ID（ORGANIZATION_ID）</option>
+                                                  <option value="organization_code">製造組織 Code（如 Z4E）</option>
+                                                </optgroup>
+                                                <optgroup label="營運單位層 (AP/AR/PO/OM)">
+                                                  <option value="operating_unit">營運單位 ID（OPERATING_UNIT）</option>
+                                                  <option value="operating_unit_name">營運單位名稱</option>
+                                                </optgroup>
+                                                <optgroup label="帳套層 (GL 總帳)">
+                                                  <option value="set_of_books_id">帳套 ID（SET_OF_BOOKS_ID）</option>
+                                                  <option value="set_of_books_name">帳套名稱</option>
+                                                </optgroup>
                                               </>}
                                             </select>
                                           </div>
@@ -2645,7 +2673,7 @@ function ScheduleBuilder({
 const EMPTY_FORM = {
   name: '', source_sql: '', source_connection: 'erp', is_incremental: true,
   job_type: 'vector' as 'vector' | 'table_copy',
-  vectorize_fields: '', metadata_fields: '', embedding_dimension: '768',
+  vectorize_fields: '', metadata_fields: '', embedding_dimension: '768', trigger_intent: '',
   target_table: '', target_mode: 'truncate_insert' as string, upsert_key: '', delete_sql: '',
   schedule_type: 'daily', schedule_config: { hour: 2, minute: 0 } as Record<string, any>,
   form_project_id: undefined as number | undefined,
@@ -2749,6 +2777,7 @@ function EtlManager({ projectId }: { projectId: number | null }) {
       vectorize_fields: parseFieldsToStr(j.vectorize_fields),
       metadata_fields: parseFieldsToStr(j.metadata_fields),
       embedding_dimension: String(j.embedding_dimension || 768),
+      trigger_intent: j.trigger_intent || '',
       target_table: j.target_table || '',
       target_mode: j.target_mode || 'truncate_insert',
       upsert_key: j.upsert_key || '',
@@ -2882,6 +2911,15 @@ function EtlManager({ projectId }: { projectId: number | null }) {
           {form.job_type === 'vector' && (
             <div className="space-y-2 border-t border-gray-200 pt-3">
               <p className="text-xs text-gray-400 font-medium">向量化設定</p>
+              <div>
+                <label className="text-xs text-gray-400 mb-1 block">
+                  觸發意圖描述
+                  <span className="ml-1 text-gray-300">（用自然語言描述「何時該搜尋此向量庫」，未填則永遠觸發）</span>
+                </label>
+                <input className="input py-1.5 text-sm w-full" placeholder="例：用戶想透過品名/描述搜尋料號，而非只是提到料號欄位名稱"
+                  value={form.trigger_intent}
+                  onChange={e => setForm(p => ({ ...p, trigger_intent: e.target.value }))} />
+              </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs text-gray-400 mb-1 block">向量化欄位（逗號分隔）</label>

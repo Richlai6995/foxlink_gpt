@@ -25,6 +25,7 @@ import QueryParamsModal from '../components/dashboard/QueryParamsModal'
 import ShareModal from '../components/dashboard/ShareModal'
 import TranslationFields from '../components/common/TranslationFields'
 import type { TranslationData } from '../components/common/TranslationFields'
+import ColorPickerInput from '../components/common/ColorPickerInput'
 import type {
   AiReportDashboard, AiDashboardItem, AiSavedQuery,
   AiQueryResult, AiChartConfig, AiQueryParameter,
@@ -262,6 +263,9 @@ export default function DashboardBoardPage() {
   const [bgImageUrl, setBgImageUrl] = useState('')
   const [bgOpacity, setBgOpacity] = useState(0.15)
   const [toolbarBgColor, setToolbarBgColor] = useState('')   // '' = 預設白色
+  const [toolbarTextColor, setToolbarTextColor] = useState('')  // '' = 自動對比
+  const [logoUrl, setLogoUrl] = useState('')
+  const [logoHeight, setLogoHeight] = useState(28)
 
   // ── global filters ──────────────────────────────────────────────────────────
   const [globalFilters, setGlobalFilters] = useState<AiDashboardGlobalFilter[]>([])
@@ -284,6 +288,10 @@ export default function DashboardBoardPage() {
   // ── export ──────────────────────────────────────────────────────────────────
   const [exporting, setExporting] = useState(false)
   const gridRef = useRef<HTMLDivElement>(null)
+  const wallpaperInputRef = useRef<HTMLInputElement>(null)
+  const logoInputRef = useRef<HTMLInputElement>(null)
+  const [wallpaperUploading, setWallpaperUploading] = useState(false)
+  const [logoUploading, setLogoUploading] = useState(false)
 
   // ── per-tile edit ───────────────────────────────────────────────────────────
   const [editingTile, setEditingTile] = useState<{ idx: number; item: AiDashboardItem } | null>(null)
@@ -315,6 +323,9 @@ export default function DashboardBoardPage() {
   const [editBgImageUrl, setEditBgImageUrl] = useState('')
   const [editBgOpacity, setEditBgOpacity] = useState(0.15)
   const [editToolbarBgColor, setEditToolbarBgColor] = useState('')
+  const [editToolbarTextColor, setEditToolbarTextColor] = useState('')
+  const [editLogoUrl, setEditLogoUrl] = useState('')
+  const [editLogoHeight, setEditLogoHeight] = useState(28)
   const [editGlobalFilters, setEditGlobalFilters] = useState<AiDashboardGlobalFilter[]>([])
   const [editingFilterLocal, setEditingFilterLocal] = useState<Partial<AiDashboardGlobalFilter> | null>(null)
 
@@ -347,6 +358,9 @@ export default function DashboardBoardPage() {
     setBgImageUrl(board.bg_image_url || '')
     setBgOpacity(board.bg_opacity ?? 0.15)
     setToolbarBgColor(board.toolbar_bg_color || '')
+    setToolbarTextColor(board.toolbar_text_color || '')
+    setLogoUrl(board.logo_url || '')
+    setLogoHeight(board.logo_height ?? 28)
     // global filters
     const gf = parseGlobalFilters(board.global_filters_schema)
     setGlobalFilters(gf)
@@ -495,6 +509,9 @@ export default function DashboardBoardPage() {
         bg_image_url: bgImageUrl || null,
         bg_opacity: bgOpacity,
         toolbar_bg_color: toolbarBgColor || null,
+        toolbar_text_color: toolbarTextColor || null,
+        logo_url: logoUrl || null,
+        logo_height: logoHeight,
         global_filters_schema: globalFilters,
         bookmarks: bookmarks,
       })
@@ -556,6 +573,9 @@ export default function DashboardBoardPage() {
     setEditBgImageUrl(b.bg_image_url || '')
     setEditBgOpacity(b.bg_opacity ?? 0.15)
     setEditToolbarBgColor(b.toolbar_bg_color || '')
+    setEditToolbarTextColor(b.toolbar_text_color || '')
+    setEditLogoUrl(b.logo_url || '')
+    setEditLogoHeight(b.logo_height ?? 28)
     setEditGlobalFilters(parseGlobalFilters(b.global_filters_schema))
     setEditingFilterLocal(null)
   }
@@ -584,6 +604,9 @@ export default function DashboardBoardPage() {
         bg_image_url: editBgImageUrl || null,
         bg_opacity: editBgOpacity,
         toolbar_bg_color: editToolbarBgColor || null,
+        toolbar_text_color: editToolbarTextColor || null,
+        logo_url: editLogoUrl || null,
+        logo_height: editLogoHeight,
         global_filters_schema: editGlobalFilters,
         bookmarks: bookmarks,
       }
@@ -596,6 +619,9 @@ export default function DashboardBoardPage() {
         setBgImageUrl(editBgImageUrl || '')
         setBgOpacity(editBgOpacity)
         setToolbarBgColor(editToolbarBgColor || '')
+        setToolbarTextColor(editToolbarTextColor || '')
+        setLogoUrl(editLogoUrl || '')
+        setLogoHeight(editLogoHeight)
         const gf = editGlobalFilters
         setGlobalFilters(gf)
         setGlobalValues(prev => {
@@ -903,17 +929,28 @@ export default function DashboardBoardPage() {
         {activeDashboard ? (
           <>
             {/* Board toolbar */}
+            {(toolbarTextColor || toolbarBgColor) && (
+              <style>{`.tbtn { color: ${toolbarTextColor || contrastColor(toolbarBgColor || '#fff')} !important; opacity: 0.8; } .tbtn:hover { opacity: 1 !important; }`}</style>
+            )}
             <div
               className="flex items-center justify-between px-4 py-2 border-b flex-shrink-0 gap-2 transition-colors"
               style={toolbarBgColor
-                ? { backgroundColor: toolbarBgColor, borderColor: `${toolbarBgColor}cc`, color: contrastColor(toolbarBgColor) }
-                : { backgroundColor: '#ffffff', borderColor: '#e5e7eb', color: '#111827' }
+                ? { backgroundColor: toolbarBgColor, borderColor: `${toolbarBgColor}cc`, color: toolbarTextColor || contrastColor(toolbarBgColor) }
+                : { backgroundColor: '#ffffff', borderColor: '#e5e7eb', color: toolbarTextColor || '#111827' }
               }>
               <div className="flex items-center gap-2 min-w-0">
                 {sidebarCollapsed && (
                   <button onClick={() => setSidebarCollapsed(false)} className="text-gray-400 hover:text-gray-600 flex-shrink-0" title="展開側欄">
                     <PanelLeftOpen size={16} />
                   </button>
+                )}
+                {logoUrl && (
+                  <img
+                    src={logoUrl}
+                    alt="logo"
+                    className="flex-shrink-0 object-contain"
+                    style={{ height: logoHeight, maxWidth: logoHeight * 4 }}
+                  />
                 )}
                 <span className="font-semibold text-sm truncate" style={{ color: 'inherit' }}>{boardName(activeDashboard)}</span>
                 {boardDesc(activeDashboard) && (
@@ -934,7 +971,7 @@ export default function DashboardBoardPage() {
                   <div className="relative">
                     <button
                       onClick={() => setShowBookmarks(p => !p)}
-                      className="flex items-center gap-1 text-xs text-gray-400 hover:text-amber-600 px-2 py-1.5 rounded hover:bg-amber-50 transition"
+                      className="tbtn flex items-center gap-1 text-xs text-gray-400 hover:text-amber-600 px-2 py-1.5 rounded hover:bg-amber-50 transition"
                       title="書籤"
                     >
                       <Bookmark size={12} />
@@ -973,7 +1010,7 @@ export default function DashboardBoardPage() {
                 {!!activeDashboard.can_manage && (
                   <button
                     onClick={() => setShowBgPanel(p => !p)}
-                    className={`flex items-center gap-1 text-xs px-2 py-1.5 rounded transition ${showBgPanel ? 'text-blue-600 bg-blue-50' : 'text-gray-400 hover:text-blue-600 hover:bg-blue-50'}`}
+                    className={`tbtn flex items-center gap-1 text-xs px-2 py-1.5 rounded transition ${showBgPanel ? 'text-blue-600 bg-blue-50' : 'text-gray-400 hover:text-blue-600 hover:bg-blue-50'}`}
                     title="背景設定"
                   >
                     <Image size={12} />
@@ -984,7 +1021,7 @@ export default function DashboardBoardPage() {
                 {tiles.length > 0 && (
                   <button
                     onClick={() => { setPresentationMode(true); setPresentationIdx(0) }}
-                    className="flex items-center gap-1 text-xs text-gray-400 hover:text-indigo-600 px-2 py-1.5 rounded hover:bg-indigo-50 transition"
+                    className="tbtn flex items-center gap-1 text-xs text-gray-400 hover:text-indigo-600 px-2 py-1.5 rounded hover:bg-indigo-50 transition"
                     title="簡報模式"
                   >
                     <Play size={12} />
@@ -995,7 +1032,7 @@ export default function DashboardBoardPage() {
                 <button
                   onClick={exportPng}
                   disabled={exporting}
-                  className="flex items-center gap-1 text-xs text-gray-400 hover:text-green-600 px-2 py-1.5 rounded hover:bg-green-50 transition"
+                  className="tbtn flex items-center gap-1 text-xs text-gray-400 hover:text-green-600 px-2 py-1.5 rounded hover:bg-green-50 transition"
                   title="匯出為 PNG"
                 >
                   {exporting ? <RefreshCw size={12} className="animate-spin" /> : <Download size={12} />}
@@ -1004,7 +1041,7 @@ export default function DashboardBoardPage() {
                 {/* 重新整理 */}
                 <button
                   onClick={runAllTiles}
-                  className="flex items-center gap-1 text-xs text-gray-400 hover:text-blue-600 px-2 py-1.5 rounded hover:bg-blue-50 transition"
+                  className="tbtn flex items-center gap-1 text-xs text-gray-400 hover:text-blue-600 px-2 py-1.5 rounded hover:bg-blue-50 transition"
                 >
                   <RefreshCw size={12} /> 重新整理
                 </button>
@@ -1013,7 +1050,7 @@ export default function DashboardBoardPage() {
                 {!!activeDashboard.can_manage && (
                   <button
                     onClick={() => setShareTarget({ id: activeDashboard.id, name: activeDashboard.name })}
-                    className="flex items-center gap-1 text-xs text-gray-400 hover:text-blue-600 px-2 py-1.5 rounded hover:bg-blue-50 transition"
+                    className="tbtn flex items-center gap-1 text-xs text-gray-400 hover:text-blue-600 px-2 py-1.5 rounded hover:bg-blue-50 transition"
                   >
                     <Share2 size={12} />
                   </button>
@@ -1057,7 +1094,7 @@ export default function DashboardBoardPage() {
                 {!!activeDashboard.can_manage && (!isEditing ? (
                   <button
                     onClick={() => setIsEditing(true)}
-                    className="flex items-center gap-1 text-xs text-gray-400 hover:text-orange-600 px-2 py-1.5 rounded hover:bg-orange-50 transition"
+                    className="tbtn flex items-center gap-1 text-xs text-gray-400 hover:text-orange-600 px-2 py-1.5 rounded hover:bg-orange-50 transition"
                   >
                     <Pencil size={12} /> 編輯
                   </button>
@@ -1068,7 +1105,7 @@ export default function DashboardBoardPage() {
                       <Save size={12} /> {saving ? '儲存中…' : '儲存'}
                     </button>
                     <button onClick={() => { setIsEditing(false); loadDashboard(activeDashboard) }}
-                      className="text-xs text-gray-400 hover:text-gray-600 px-2 py-1.5">取消</button>
+                      className="tbtn text-xs text-gray-400 hover:text-gray-600 px-2 py-1.5">取消</button>
                   </>
                 ))}
               </div>
@@ -1077,19 +1114,76 @@ export default function DashboardBoardPage() {
             {/* 背景設定面板 */}
             {showBgPanel && (
               <div className="bg-white border-b border-gray-200 px-5 py-2.5 flex items-center gap-4 flex-shrink-0 flex-wrap">
+                {/* Logo */}
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs text-gray-500 font-medium whitespace-nowrap">Logo</span>
+                  <input
+                    ref={logoInputRef}
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={async e => {
+                      const file = e.target.files?.[0]
+                      if (!file) return
+                      setLogoUploading(true)
+                      try {
+                        const fd = new FormData()
+                        fd.append('logo', file)
+                        const r = await api.post('/dashboard/upload-logo', fd, {
+                          headers: { 'Content-Type': 'multipart/form-data' },
+                        })
+                        setLogoUrl(r.data.url)
+                      } catch (err) { console.error(err) }
+                      finally { setLogoUploading(false); e.target.value = '' }
+                    }}
+                  />
+                  {logoUrl
+                    ? <img src={logoUrl} alt="logo" className="object-contain rounded border border-gray-200" style={{ height: 28, maxWidth: 80 }} />
+                    : <span className="text-[10px] text-gray-400">未設定</span>}
+                  <button
+                    onClick={() => logoInputRef.current?.click()}
+                    disabled={logoUploading}
+                    className="flex items-center gap-1 text-xs px-2 py-0.5 rounded border border-gray-300 text-gray-600 hover:border-blue-400 hover:text-blue-600 transition disabled:opacity-50"
+                  >
+                    {logoUploading ? <RefreshCw size={10} className="animate-spin" /> : <Image size={10} />}
+                    上傳
+                  </button>
+                  {logoUrl && (
+                    <button onClick={() => setLogoUrl('')} className="text-gray-400 hover:text-red-400" title="移除 Logo">
+                      <X size={10} />
+                    </button>
+                  )}
+                </div>
+                {/* Logo 尺寸 */}
+                {logoUrl && (
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-xs text-gray-500 font-medium whitespace-nowrap">Logo 高度</span>
+                    <input type="range" min={16} max={60} step={2} value={logoHeight}
+                      onChange={e => setLogoHeight(Number(e.target.value))}
+                      className="w-20 h-1.5 accent-blue-500" />
+                    <span className="text-[10px] text-gray-500 w-8">{logoHeight}px</span>
+                  </div>
+                )}
+
+                <div className="w-px h-5 bg-gray-200 flex-shrink-0" />
+
                 {/* 工具列背景 */}
                 <div className="flex items-center gap-1.5">
-                  <span className="text-xs text-gray-500 font-medium whitespace-nowrap">工具列</span>
-                  <input type="color" value={toolbarBgColor || '#ffffff'} onChange={e => setToolbarBgColor(e.target.value)}
-                    className="w-7 h-7 rounded border border-gray-200 cursor-pointer" title="工具列背景色" />
-                  {toolbarBgColor && (
-                    <span
-                      className="text-[10px] px-1.5 py-0.5 rounded font-medium"
-                      style={{ backgroundColor: toolbarBgColor, color: contrastColor(toolbarBgColor) }}
-                    >{toolbarBgColor}</span>
-                  )}
+                  <span className="text-xs text-gray-500 font-medium whitespace-nowrap">工具列底色</span>
+                  <ColorPickerInput value={toolbarBgColor || '#ffffff'} onChange={v => setToolbarBgColor(v)} title="工具列背景色" size="md" />
                   {toolbarBgColor && (
                     <button onClick={() => setToolbarBgColor('')} className="text-gray-400 hover:text-red-400" title="重設為白色">
+                      <X size={10} />
+                    </button>
+                  )}
+                </div>
+
+                {/* 工具列文字色 */}
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs text-gray-500 font-medium whitespace-nowrap">工具列文字</span>
+                  <ColorPickerInput value={toolbarTextColor || '#111827'} onChange={v => setToolbarTextColor(v)} title="工具列文字色" size="md" />
+                  {toolbarTextColor && (
+                    <button onClick={() => setToolbarTextColor('')} className="text-gray-400 hover:text-red-400" title="自動對比">
                       <X size={10} />
                     </button>
                   )}
@@ -1100,15 +1194,47 @@ export default function DashboardBoardPage() {
                 {/* 內容區背景 */}
                 <div className="flex items-center gap-1.5">
                   <span className="text-xs text-gray-500 font-medium whitespace-nowrap">內容區</span>
-                  <input type="color" value={bgColor} onChange={e => setBgColor(e.target.value)}
-                    className="w-7 h-7 rounded border border-gray-200 cursor-pointer" title="內容區背景色" />
-                  <span className="text-[10px] text-gray-400">{bgColor}</span>
+                  <ColorPickerInput value={bgColor} onChange={v => setBgColor(v)} title="內容區背景色" size="md" />
                 </div>
                 <div className="flex items-center gap-1.5">
-                  <span className="text-xs text-gray-400 whitespace-nowrap">壁紙 URL</span>
+                  <span className="text-xs text-gray-400 whitespace-nowrap">壁紙</span>
+                  {/* 隱藏 file input */}
+                  <input
+                    ref={wallpaperInputRef}
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={async e => {
+                      const file = e.target.files?.[0]
+                      if (!file) return
+                      setWallpaperUploading(true)
+                      try {
+                        const fd = new FormData()
+                        fd.append('wallpaper', file)
+                        const r = await api.post('/dashboard/upload-wallpaper', fd, {
+                          headers: { 'Content-Type': 'multipart/form-data' },
+                        })
+                        setBgImageUrl(r.data.url)
+                      } catch (err) {
+                        console.error(err)
+                      } finally {
+                        setWallpaperUploading(false)
+                        e.target.value = ''
+                      }
+                    }}
+                  />
+                  <button
+                    onClick={() => wallpaperInputRef.current?.click()}
+                    disabled={wallpaperUploading}
+                    className="flex items-center gap-1 text-xs px-2 py-0.5 rounded border border-gray-300 text-gray-600 hover:border-blue-400 hover:text-blue-600 transition disabled:opacity-50"
+                    title="從電腦上傳圖片"
+                  >
+                    {wallpaperUploading ? <RefreshCw size={10} className="animate-spin" /> : <Image size={10} />}
+                    上傳
+                  </button>
                   <input type="text" value={bgImageUrl} onChange={e => setBgImageUrl(e.target.value)}
-                    placeholder="https://…"
-                    className="w-44 border border-gray-200 rounded px-2 py-0.5 text-xs focus:outline-none focus:border-blue-400" />
+                    placeholder="或貼上 URL…"
+                    className="w-36 border border-gray-200 rounded px-2 py-0.5 text-xs focus:outline-none focus:border-blue-400" />
                   {bgImageUrl && <button onClick={() => setBgImageUrl('')} className="text-gray-400 hover:text-red-400"><X size={10} /></button>}
                 </div>
                 {bgImageUrl && (
@@ -1128,6 +1254,9 @@ export default function DashboardBoardPage() {
                       bg_image_url: bgImageUrl || undefined,
                       bg_opacity: bgOpacity,
                       toolbar_bg_color: toolbarBgColor || undefined,
+                      toolbar_text_color: toolbarTextColor || undefined,
+                      logo_url: logoUrl || undefined,
+                      logo_height: logoHeight,
                     }
                     setActiveDashboard(updated)
                     await api.put(`/dashboard/report-dashboards/${activeDashboard.id}`, updated).catch(console.error)
@@ -1322,7 +1451,7 @@ export default function DashboardBoardPage() {
                             {type === 'kpi' && <Activity size={10} className="text-orange-400 flex-shrink-0" />}
                             {type === 'text' && <Type size={10} className="text-blue-400 flex-shrink-0" />}
                             {type === 'chart' && <BarChart2 size={10} className="text-gray-400 flex-shrink-0" />}
-                            <span className="text-xs font-medium text-gray-700 truncate">
+                            <span className="text-xs font-medium truncate" style={{ color: 'inherit' }}>
                               {tile.item.title_override || (sq ? sqName(sq) : type === 'text' ? '文字標注' : `查詢 ${tile.item.query_id}`)}
                             </span>
                           </div>
@@ -1587,22 +1716,22 @@ export default function DashboardBoardPage() {
                             return { ...p, item: { ...p.item, kpi_alert_rules: rules } }
                           })}
                           className="border border-gray-200 rounded px-1.5 py-0.5 text-xs focus:outline-none w-20" />
-                        <input type="color" value={rule.color}
-                          onChange={e => setEditingTile(p => {
+                        <ColorPickerInput value={rule.color}
+                          onChange={v => setEditingTile(p => {
                             if (!p) return null
                             const rules = [...(p.item.kpi_alert_rules || [])]
-                            rules[ri] = { ...rules[ri], color: e.target.value }
+                            rules[ri] = { ...rules[ri], color: v }
                             return { ...p, item: { ...p.item, kpi_alert_rules: rules } }
                           })}
-                          className="w-7 h-7 rounded border border-gray-200 cursor-pointer" title="文字顏色" />
-                        <input type="color" value={rule.bg_color || '#ffffff'}
-                          onChange={e => setEditingTile(p => {
+                          title="文字顏色" size="md" />
+                        <ColorPickerInput value={rule.bg_color || '#ffffff'}
+                          onChange={v => setEditingTile(p => {
                             if (!p) return null
                             const rules = [...(p.item.kpi_alert_rules || [])]
-                            rules[ri] = { ...rules[ri], bg_color: e.target.value }
+                            rules[ri] = { ...rules[ri], bg_color: v }
                             return { ...p, item: { ...p.item, kpi_alert_rules: rules } }
                           })}
-                          className="w-7 h-7 rounded border border-gray-200 cursor-pointer" title="背景顏色" />
+                          title="背景顏色" size="md" />
                         <button onClick={() => setEditingTile(p => {
                           if (!p) return null
                           const rules = (p.item.kpi_alert_rules || []).filter((_, i) => i !== ri)
@@ -1795,33 +1924,109 @@ export default function DashboardBoardPage() {
             <div className="border-t border-gray-100 pt-3">
               <label className="text-sm text-gray-600 font-medium block mb-2">外觀設定</label>
               <div className="space-y-2">
+                {/* Logo */}
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-gray-500 w-16 flex-shrink-0">Logo</span>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    id="edit-logo-input"
+                    onChange={async e => {
+                      const file = e.target.files?.[0]
+                      if (!file) return
+                      setLogoUploading(true)
+                      try {
+                        const fd = new FormData()
+                        fd.append('logo', file)
+                        const r = await api.post('/dashboard/upload-logo', fd, {
+                          headers: { 'Content-Type': 'multipart/form-data' },
+                        })
+                        setEditLogoUrl(r.data.url)
+                      } catch (err) { console.error(err) }
+                      finally { setLogoUploading(false); e.target.value = '' }
+                    }}
+                  />
+                  {editLogoUrl
+                    ? <img src={editLogoUrl} alt="logo" className="object-contain rounded border border-gray-200 h-6 max-w-[60px]" />
+                    : <span className="text-[10px] text-gray-400">未設定</span>}
+                  <button
+                    onClick={() => document.getElementById('edit-logo-input')?.click()}
+                    disabled={logoUploading}
+                    className="flex items-center gap-1 text-xs px-1.5 py-0.5 rounded border border-gray-300 text-gray-600 hover:border-blue-400 hover:text-blue-600 transition disabled:opacity-50"
+                  >
+                    {logoUploading ? <RefreshCw size={10} className="animate-spin" /> : <Image size={10} />}
+                    上傳
+                  </button>
+                  {editLogoUrl && <button onClick={() => setEditLogoUrl('')} className="text-gray-400 hover:text-red-400"><X size={10} /></button>}
+                </div>
+                {editLogoUrl && (
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-gray-500 w-16 flex-shrink-0">Logo 高度</span>
+                    <input type="range" min={16} max={60} step={2} value={editLogoHeight}
+                      onChange={e => setEditLogoHeight(Number(e.target.value))}
+                      className="w-24 h-1.5 accent-blue-500" />
+                    <span className="text-[10px] text-gray-400">{editLogoHeight}px</span>
+                  </div>
+                )}
                 {/* 工具列背景色 */}
                 <div className="flex items-center gap-2">
-                  <span className="text-xs text-gray-500 w-16 flex-shrink-0">工具列色</span>
-                  <input type="color" value={editToolbarBgColor || '#ffffff'} onChange={e => setEditToolbarBgColor(e.target.value)}
-                    className="w-8 h-8 rounded border border-gray-200 cursor-pointer" />
-                  {editToolbarBgColor && (
-                    <span
-                      className="text-[10px] px-1.5 py-0.5 rounded font-medium"
-                      style={{ backgroundColor: editToolbarBgColor, color: contrastColor(editToolbarBgColor) }}
-                    >{editToolbarBgColor}</span>
-                  )}
+                  <span className="text-xs text-gray-500 w-16 flex-shrink-0">工具列底色</span>
+                  <ColorPickerInput value={editToolbarBgColor || '#ffffff'} onChange={v => setEditToolbarBgColor(v)} title="工具列背景色" size="md" />
                   {editToolbarBgColor && (
                     <button onClick={() => setEditToolbarBgColor('')} className="text-xs text-gray-400 hover:text-red-400">重設</button>
+                  )}
+                </div>
+                {/* 工具列文字色 */}
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-gray-500 w-16 flex-shrink-0">工具列文字</span>
+                  <ColorPickerInput value={editToolbarTextColor || '#111827'} onChange={v => setEditToolbarTextColor(v)} title="工具列文字色" size="md" />
+                  {editToolbarTextColor && (
+                    <button onClick={() => setEditToolbarTextColor('')} className="text-xs text-gray-400 hover:text-red-400">重設</button>
                   )}
                 </div>
                 {/* 內容區背景色 */}
                 <div className="flex items-center gap-2">
                   <span className="text-xs text-gray-500 w-16 flex-shrink-0">內容區色</span>
-                  <input type="color" value={editBgColor} onChange={e => setEditBgColor(e.target.value)}
-                    className="w-8 h-8 rounded border border-gray-200 cursor-pointer" />
-                  <span className="text-[10px] text-gray-400">{editBgColor}</span>
+                  <ColorPickerInput value={editBgColor} onChange={v => setEditBgColor(v)} title="內容區背景色" size="md" />
                 </div>
                 {/* 壁紙 */}
                 <div className="flex items-center gap-2">
-                  <span className="text-xs text-gray-500 w-16 flex-shrink-0">壁紙 URL</span>
+                  <span className="text-xs text-gray-500 w-16 flex-shrink-0">壁紙</span>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    id="edit-wallpaper-input"
+                    onChange={async e => {
+                      const file = e.target.files?.[0]
+                      if (!file) return
+                      setWallpaperUploading(true)
+                      try {
+                        const fd = new FormData()
+                        fd.append('wallpaper', file)
+                        const r = await api.post('/dashboard/upload-wallpaper', fd, {
+                          headers: { 'Content-Type': 'multipart/form-data' },
+                        })
+                        setEditBgImageUrl(r.data.url)
+                      } catch (err) {
+                        console.error(err)
+                      } finally {
+                        setWallpaperUploading(false)
+                        e.target.value = ''
+                      }
+                    }}
+                  />
+                  <button
+                    onClick={() => document.getElementById('edit-wallpaper-input')?.click()}
+                    disabled={wallpaperUploading}
+                    className="flex items-center gap-1 text-xs px-2 py-0.5 rounded border border-gray-300 text-gray-600 hover:border-blue-400 hover:text-blue-600 transition disabled:opacity-50 flex-shrink-0"
+                  >
+                    {wallpaperUploading ? <RefreshCw size={10} className="animate-spin" /> : <Image size={10} />}
+                    上傳
+                  </button>
                   <input type="text" value={editBgImageUrl} onChange={e => setEditBgImageUrl(e.target.value)}
-                    placeholder="https://…"
+                    placeholder="或貼上 URL…"
                     className="flex-1 border border-gray-200 rounded px-2 py-1 text-xs focus:outline-none focus:border-blue-400" />
                   {editBgImageUrl && <button onClick={() => setEditBgImageUrl('')} className="text-gray-400 hover:text-red-400"><X size={12} /></button>}
                 </div>

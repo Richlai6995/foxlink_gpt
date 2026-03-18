@@ -11,6 +11,7 @@ import type {
 import { useTranslation } from 'react-i18next'
 import TranslationFields from '../common/TranslationFields'
 import type { TranslationData } from '../common/TranslationFields'
+import ColorPickerInput from '../common/ColorPickerInput'
 
 interface Props {
   initial?: Partial<AiSavedQuery>
@@ -96,8 +97,7 @@ function YAxesPanelSQ({ y_axes, cols, onChange }: YAxesPanelSQProps) {
               <option value="bar">Bar</option>
               <option value="line">Line</option>
             </select>
-            <input type="color" value={ax.color || '#118DFF'} onChange={e => update(idx, { color: e.target.value })}
-              className="w-7 h-6 rounded border border-gray-200 cursor-pointer p-0" title="顏色" />
+            <ColorPickerInput value={ax.color || '#118DFF'} onChange={v => update(idx, { color: v })} title="顏色" />
             <button onClick={() => onChange(y_axes.filter((_, i) => i !== idx))}
               className="text-gray-300 hover:text-red-500 text-xs ml-auto">✕</button>
           </div>
@@ -437,9 +437,9 @@ function ChartEditor({ initialConfig, onChange }: ChartEditorProps) {
                   className="w-20 border border-gray-200 rounded px-1.5 py-0.5 text-xs focus:outline-none focus:border-blue-400 bg-white">
                   {AGG_FNS.map(fn => <option key={fn} value={fn}>{fn}</option>)}
                 </select>
-                <input type="color" value={ol.color || '#E66C37'}
-                  onChange={e => updateActive({ overlay_lines: (active.overlay_lines || []).map((o, i) => i === idx ? { ...o, color: e.target.value } : o) })}
-                  className="w-7 h-6 rounded border border-gray-200 cursor-pointer p-0" title="顏色" />
+                <ColorPickerInput value={ol.color || '#E66C37'}
+                  onChange={v => updateActive({ overlay_lines: (active.overlay_lines || []).map((o, i) => i === idx ? { ...o, color: v } : o) })}
+                  title="顏色" />
                 <button onClick={() => updateActive({ overlay_lines: (active.overlay_lines || []).filter((_, i) => i !== idx) })}
                   className="text-gray-300 hover:text-red-500 text-xs ml-auto">✕</button>
               </div>
@@ -593,6 +593,127 @@ function ChartEditor({ initialConfig, onChange }: ChartEditorProps) {
               className="px-2 py-1 rounded border border-gray-200 text-xs text-gray-400 hover:text-red-500">{t('aiDash.sqModal.resetPalette')}</button>
           )}
         </div>
+      </div>
+
+      {/* ── 自訂順序色票（B 模式，multi-series 用）────────────────────────── */}
+      {(active.type === 'bar' || active.type === 'line') && (
+        <div>
+          <div className="flex items-center justify-between mb-1">
+            <label className="text-xs text-gray-500">自訂系列色票順序（B 模式）</label>
+            <button
+              onClick={() => updateActive({ colors: [...(active.colors || ['#118DFF', '#E66C37', '#009E49', '#744EC2', '#0099BC']), '#888888'] })}
+              className="text-xs text-blue-500 hover:text-blue-700"
+            >+ 新增色票</button>
+          </div>
+          {(active.colors || []).length > 0 ? (
+            <div className="flex flex-wrap gap-1.5 items-center">
+              {(active.colors || []).map((c, i) => (
+                <div key={i} className="flex items-center gap-0.5">
+                  <ColorPickerInput
+                    value={c}
+                    onChange={v => updateActive({ colors: (active.colors || []).map((x, j) => j === i ? v : x) })}
+                    title={`Series ${i + 1}`}
+                    size="md"
+                  />
+                  <button
+                    onClick={() => updateActive({ colors: (active.colors || []).filter((_, j) => j !== i) })}
+                    className="text-gray-300 hover:text-red-400 text-[10px] leading-none"
+                  >✕</button>
+                </div>
+              ))}
+              <button onClick={() => updateActive({ colors: undefined })}
+                className="text-[10px] text-gray-300 hover:text-red-400 ml-1">全部清除</button>
+            </div>
+          ) : (
+            <p className="text-[10px] text-gray-300">未設定，使用上方顏色主題</p>
+          )}
+        </div>
+      )}
+
+      {/* ── 精確配色（C 模式，值→顏色映射）────────────────────────────────── */}
+      {(active.type === 'bar' || active.type === 'line' || active.type === 'pie') && (
+        <div>
+          <div className="flex items-center justify-between mb-1">
+            <label className="text-xs text-gray-500">精確配色（C 模式，值→顏色）</label>
+            <button
+              onClick={() => updateActive({ series_colors: { ...active.series_colors, '': '#118DFF' } })}
+              className="text-xs text-blue-500 hover:text-blue-700"
+            >+ 新增</button>
+          </div>
+          {Object.keys(active.series_colors || {}).length > 0 ? (
+            <div className="space-y-1">
+              {Object.entries(active.series_colors || {}).map(([k, v]) => (
+                <div key={k} className="flex items-center gap-1">
+                  <input
+                    type="text"
+                    value={k}
+                    onChange={e => {
+                      const next = { ...(active.series_colors || {}) }
+                      delete next[k]
+                      if (e.target.value) next[e.target.value] = v
+                      updateActive({ series_colors: next })
+                    }}
+                    placeholder="值（如 CATO V7）"
+                    className="flex-1 border border-gray-200 rounded px-1.5 py-0.5 text-xs focus:outline-none focus:border-blue-400"
+                  />
+                  <ColorPickerInput
+                    value={v}
+                    onChange={c => updateActive({ series_colors: { ...(active.series_colors || {}), [k]: c } })}
+                    size="md"
+                  />
+                  <button
+                    onClick={() => { const next = { ...(active.series_colors || {}) }; delete next[k]; updateActive({ series_colors: next }) }}
+                    className="text-gray-300 hover:text-red-400 text-xs"
+                  >✕</button>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-[10px] text-gray-300">未設定，顏色依序套用</p>
+          )}
+        </div>
+      )}
+
+      {/* ── 文字 & 軸線樣式 ────────────────────────────────────────────────── */}
+      <div className="border border-gray-100 rounded-lg p-3 space-y-2">
+        <p className="text-[10px] text-gray-400 font-semibold uppercase tracking-wide">文字 &amp; 軸線樣式</p>
+        {([
+          ['chart_bg_color',     '圖表底色',   false, '#ffffff'],
+          ['axis_label_color',   '軸刻度',     true,  '#6b7280'],
+          ['axis_line_color',    '軸線',       false, '#e5e7eb'],
+          ['grid_line_color',    '格線',       false, '#f3f4f6'],
+          ['data_label_color',   '資料標籤',   true,  '#6b7280'],
+          ['legend_color',       '圖例',       true,  '#6b7280'],
+          ['title_color',        '標題',       true,  '#374151'],
+        ] as [keyof ChartDraft, string, boolean, string][]).map(([field, label, hasSize, def]) => {
+          const sizeField = (field.replace('_color', '_size') as keyof ChartDraft)
+          const colorVal = (active[field] as string) || ''
+          const sizeVal = (active[sizeField] as number | '' | undefined) ?? ''
+          return (
+            <div key={field} className="flex items-center gap-2">
+              <span className="text-[11px] text-gray-500 w-16 flex-shrink-0">{label}</span>
+              <ColorPickerInput
+                value={colorVal || def}
+                onChange={v => updateActive({ [field]: v })}
+                title={label}
+              />
+              {hasSize && (
+                <input
+                  type="number" min={8} max={32} value={sizeVal}
+                  onChange={e => updateActive({ [sizeField]: e.target.value === '' ? undefined : Number(e.target.value) })}
+                  className="w-14 border border-gray-200 rounded px-1.5 py-0.5 text-[11px] focus:outline-none focus:border-blue-400"
+                  placeholder="px"
+                />
+              )}
+              {(colorVal || sizeVal !== '') && (
+                <button
+                  onClick={() => updateActive({ [field]: undefined, ...(hasSize ? { [sizeField]: undefined } : {}) })}
+                  className="text-[10px] text-gray-300 hover:text-red-400"
+                >重設</button>
+              )}
+            </div>
+          )
+        })}
       </div>
 
       {/* 樣式選項 */}

@@ -319,6 +319,7 @@ export interface AiEtlJob {
   vectorize_fields?: string | string[]
   metadata_fields?: string | string[]
   embedding_dimension: number
+  trigger_intent?: string
   cron_expression?: string
   is_incremental: number
   last_run_at?: string
@@ -601,6 +602,16 @@ export interface MultiOrgScope {
   org_details?: MultiOrgOrgDetail[]
 }
 
+export interface OrgScope {
+  has_restrictions: boolean
+  source_levels?: string[]
+  dept_count?: number
+  dept_details?: { dept_code: string; dept_name?: string; profit_center?: string; profit_center_name?: string; org_section?: string; org_section_name?: string; org_group_name?: string }[]
+  profit_center_details?: { code: string; name?: string }[]
+  org_section_details?: { code: string; name?: string }[]
+  org_group_details?: { name: string }[]
+}
+
 export interface AiReportDashboard {
   id: number
   user_id: number
@@ -620,6 +631,9 @@ export interface AiReportDashboard {
   bg_image_url?: string
   bg_opacity?: number
   toolbar_bg_color?: string
+  toolbar_text_color?: string
+  logo_url?: string
+  logo_height?: number
   global_filters_schema?: AiDashboardGlobalFilter[] | string | null
   bookmarks?: AiDashboardBookmark[] | string | null
   is_active?: number

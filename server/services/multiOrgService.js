@@ -15,14 +15,17 @@
  *   invalidateCache       — 強制清除快取（管理員手動重整用）
  */
 
+const oracledb = require('oracledb');
 const CACHE_TTL_MS = 20 * 60 * 1000; // 20 分鐘
 
 /** MultiOrg 相關的 value_type（與 ai_data_policy_rules.value_type 對應） */
 const MULTIORG_VALUE_TYPES = new Set([
   'organization_id',
   'organization_code',
-  'operating_unit',    // OU ID（OPERATING_UNIT 欄位）
+  'operating_unit',      // OU ID（OPERATING_UNIT 欄位）
+  'operating_unit_name', // OU 名稱（OPERATING_UNIT_NAME 欄位）
   'set_of_books_id',
+  'set_of_books_name',   // SOB 名稱（SET_OF_BOOKS_NAME 欄位）
 ]);
 
 // ── 快取 ──────────────────────────────────────────────────────────────────────
@@ -63,7 +66,7 @@ async function loadOrgHierarchy(getErpPool) {
          WHERE DISABLE_DATE IS NULL OR DISABLE_DATE > SYSDATE
          ORDER BY ORGANIZATION_NAME`,
         [],
-        { outFormat: 4 }  // oracledb.OUT_FORMAT_OBJECT = 4
+        { outFormat: oracledb.OUT_FORMAT_OBJECT }
       );
       rows = result?.rows || [];
     } catch (_mvErr) {
@@ -83,7 +86,7 @@ async function loadOrgHierarchy(getErpPool) {
          WHERE  (A.DISABLE_DATE IS NULL OR A.DISABLE_DATE > SYSDATE)
          ORDER BY A.ORGANIZATION_NAME`,
         [],
-        { outFormat: 4 }
+        { outFormat: oracledb.OUT_FORMAT_OBJECT }
       );
       rows = result?.rows || [];
     }
@@ -112,56 +115,102 @@ function resolveUserScope(rules, hierarchy) {
   const multiRules = rules.filter(r => MULTIORG_VALUE_TYPES.has(r.value_type));
   if (!multiRules.length) return { hasRules: false };
 
-  // 分類規則
-  const gr = (type, inc) =>
-    multiRules.filter(r => r.value_type === type && r.include_type === inc)
-              .map(r => String(r.value_id || '').trim()).filter(Boolean);
+  const includeRules = multiRules.filter(r => r.include_type === 'include');
+  const excludeRules = multiRules.filter(r => r.include_type === 'exclude');
 
-  const sobInc = gr('set_of_books_id', 'include');
-  const sobExc = gr('set_of_books_id', 'exclude');
-  const ouInc  = gr('operating_unit',  'include');
-  const ouExc  = gr('operating_unit',  'exclude');
-
-  const orgCodeInc = multiRules.filter(r => r.value_type === 'organization_code' && r.include_type === 'include')
-                                .map(r => (r.value_id || '').trim().toUpperCase()).filter(Boolean);
-  const orgCodeExc = multiRules.filter(r => r.value_type === 'organization_code' && r.include_type === 'exclude')
-                                .map(r => (r.value_id || '').trim().toUpperCase()).filter(Boolean);
-  const orgIdInc   = gr('organization_id', 'include');
-  const orgIdExc   = gr('organization_id', 'exclude');
-
-  // 從全量 hierarchy 逐層縮減
-  let rows = [...hierarchy];
-
-  if (sobInc.length) rows = rows.filter(r => sobInc.includes(String(r.SET_OF_BOOKS_ID)));
-  if (sobExc.length) rows = rows.filter(r => !sobExc.includes(String(r.SET_OF_BOOKS_ID)));
-  if (ouInc.length)  rows = rows.filter(r => ouInc.includes(String(r.OPERATING_UNIT)));
-  if (ouExc.length)  rows = rows.filter(r => !ouExc.includes(String(r.OPERATING_UNIT)));
-
-  if (orgCodeInc.length) rows = rows.filter(r => orgCodeInc.includes((r.ORGANIZATION_CODE || '').toUpperCase()));
-  if (orgCodeExc.length) rows = rows.filter(r => !orgCodeExc.includes((r.ORGANIZATION_CODE || '').toUpperCase()));
-  if (orgIdInc.length)   rows = rows.filter(r => orgIdInc.includes(String(r.ORGANIZATION_ID)));
-  if (orgIdExc.length)   rows = rows.filter(r => !orgIdExc.includes(String(r.ORGANIZATION_ID)));
-
-  // 建立快速查找 Set
-  const allowedOrgCodes = new Set(rows.map(r => (r.ORGANIZATION_CODE || '').toUpperCase()).filter(Boolean));
-  const allowedOUIds    = new Set(rows.map(r => String(r.OPERATING_UNIT)).filter(Boolean));
-  const allowedSOBIds   = new Set(rows.map(r => String(r.SET_OF_BOOKS_ID)).filter(Boolean));
-
-  // 去重的 OU / SOB 明細
-  const ouMap = new Map();
-  const sobMap = new Map();
-  for (const r of rows) {
-    const ouKey = String(r.OPERATING_UNIT);
-    if (!ouMap.has(ouKey)) ouMap.set(ouKey, { id: r.OPERATING_UNIT, name: r.OPERATING_UNIT_NAME });
-    const sobKey = String(r.SET_OF_BOOKS_ID);
-    if (!sobMap.has(sobKey)) sobMap.set(sobKey, { id: r.SET_OF_BOOKS_ID, name: r.SET_OF_BOOKS_NAME });
+  // 規則層級：SOB=3, OU=2, Org=1（只能往下展，不往上推論）
+  function getRuleLevel(valueType) {
+    if (valueType === 'set_of_books_id' || valueType === 'set_of_books_name') return 3;
+    if (valueType === 'operating_unit'  || valueType === 'operating_unit_name') return 2;
+    return 1; // organization_id, organization_code
   }
 
-  // 規則的來源層級（用於提示使用者以哪一層設定為基礎）
+  function rowMatchesRule(row, rule) {
+    const val = String(rule.value_id || '').trim();
+    if (!val) return false;
+    switch (rule.value_type) {
+      case 'set_of_books_id':     return String(row.SET_OF_BOOKS_ID) === val;
+      case 'set_of_books_name':   return (row.SET_OF_BOOKS_NAME || '').toLowerCase() === val.toLowerCase();
+      case 'operating_unit':      return String(row.OPERATING_UNIT) === val;
+      case 'operating_unit_name': return (row.OPERATING_UNIT_NAME || '').toLowerCase() === val.toLowerCase();
+      case 'organization_id':     return String(row.ORGANIZATION_ID) === val;
+      case 'organization_code':   return (row.ORGANIZATION_CODE || '').toUpperCase() === val.toUpperCase();
+      default: return false;
+    }
+  }
+
+  // ── Include：多條規則取聯集，同時記錄每個 row 最高被哪個層級的規則授權 ──────
+  // rowGrantLevel: row → maxLevel（3=SOB, 2=OU, 1=Org）
+  // 授權層級決定往下展示到哪：SOB→顯示SOB+OU+Org；OU→顯示OU+Org；Org→只顯示Org
+  const rowGrantLevel = new Map();
+
+  if (includeRules.length === 0) {
+    // 只有 exclude 規則 → 全量授權（視同 SOB 層）
+    for (const row of hierarchy) rowGrantLevel.set(row, 3);
+  } else {
+    for (const rule of includeRules) {
+      const level = getRuleLevel(rule.value_type);
+      for (const row of hierarchy) {
+        if (rowMatchesRule(row, rule)) {
+          const prev = rowGrantLevel.get(row) || 0;
+          if (level > prev) rowGrantLevel.set(row, level);
+        }
+      }
+    }
+  }
+
+  // ── Exclude：命中任一即移除（AND）──────────────────────────────────────────
+  let rows = [...rowGrantLevel.keys()];
+  for (const rule of excludeRules) {
+    rows = rows.filter(row => !rowMatchesRule(row, rule));
+  }
+
+  console.log('[MultiOrg] resolveUserScope:', {
+    includeRules: includeRules.map(r => `${r.value_type}=${r.value_id}`),
+    excludeRules: excludeRules.map(r => `${r.value_type}=${r.value_id}`),
+    hierarchyCount: hierarchy.length,
+    resultCount: rows.length,
+  });
+
+  // ── 依授權層級決定顯示哪幾層（只往下，不往上）──────────────────────────────
+  // grantLevel=3(SOB) → 顯示 SOB + OU + Org
+  // grantLevel=2(OU)  → 顯示 OU + Org
+  // grantLevel=1(Org) → 只顯示 Org
+  const allowedOrgCodes = new Set();
+  const allowedOUIds    = new Set();
+  const allowedSOBIds   = new Set();
+  const ouMap  = new Map();
+  const sobMap = new Map();
+
+  for (const row of rows) {
+    const level = rowGrantLevel.get(row) || 1;
+
+    // Org（全部顯示）
+    if (row.ORGANIZATION_CODE) allowedOrgCodes.add(row.ORGANIZATION_CODE.toUpperCase());
+
+    // OU（OU 層或以上才顯示）
+    if (level >= 2) {
+      const ouKey = String(row.OPERATING_UNIT);
+      allowedOUIds.add(ouKey);
+      if (!ouMap.has(ouKey)) ouMap.set(ouKey, { id: row.OPERATING_UNIT, name: row.OPERATING_UNIT_NAME });
+    }
+
+    // SOB（SOB 層才顯示）
+    if (level >= 3) {
+      const sobKey = String(row.SET_OF_BOOKS_ID);
+      allowedSOBIds.add(sobKey);
+      if (!sobMap.has(sobKey)) sobMap.set(sobKey, { id: row.SET_OF_BOOKS_ID, name: row.SET_OF_BOOKS_NAME });
+    }
+  }
+
+  // 規則涵蓋的最高層級（用於 checkViolations）
+  const maxGrantLevel = rows.length
+    ? Math.max(...rows.map(r => rowGrantLevel.get(r) || 1))
+    : 1;
   const sourceLevels = [];
-  if (sobInc.length || sobExc.length) sourceLevels.push('set_of_books_id');
-  if (ouInc.length  || ouExc.length)  sourceLevels.push('operating_unit');
-  if (orgCodeInc.length || orgCodeExc.length || orgIdInc.length || orgIdExc.length) sourceLevels.push('organization');
+  if (maxGrantLevel >= 3) sourceLevels.push('set_of_books_id');
+  if (maxGrantLevel >= 2) sourceLevels.push('operating_unit');
+  sourceLevels.push('organization');
 
   return {
     hasRules: true,
