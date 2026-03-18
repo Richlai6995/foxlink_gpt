@@ -639,6 +639,55 @@ async function runDashboardQuery({ designId, question, userId, user, isDesigner,
     design._dataPermissionWhere = await buildDataPermWhere(db, design, user, effectivePolicy.rules);
   }
 
+  // 1.6 Oracle MultiOrg 權限範圍通知 + 違規硬拒
+  if (effectivePolicy?.rules?.length > 0) {
+    const {
+      MULTIORG_VALUE_TYPES, loadOrgHierarchy, resolveUserScope,
+      checkViolations, buildScopePayload,
+    } = require('./multiOrgService');
+
+    const hasMultiOrgRules = effectivePolicy.rules.some(r => MULTIORG_VALUE_TYPES.has(r.value_type));
+    if (hasMultiOrgRules) {
+      let hierarchy, scope;
+      try {
+        hierarchy = await loadOrgHierarchy(getErpPool);
+        scope = resolveUserScope(effectivePolicy.rules, hierarchy);
+      } catch (e) {
+        // ERP DB 無法連線 → 無法驗證 → 阻擋查詢（方案 B）
+        console.error('[MultiOrg] 無法載入 hierarchy，阻擋查詢:', e.message);
+        send('error', {
+          error: '⛔ 無法驗證資料權限（ERP 資料庫連線異常），請稍後再試。',
+          multiorg_unavailable: true,
+        });
+        return;
+      }
+
+      // 每次都推送使用者的權限範圍（透明度）
+      send('multiorg_scope', buildScopePayload(scope));
+
+      // 偵測 prompt 中超出範圍的 terms → 硬拒
+      const violations = checkViolations(question, scope, hierarchy);
+      if (violations.length > 0) {
+        const allowedDesc = scope.orgDetails.length
+          ? `您可查詢的組織：${scope.orgDetails.map(o => `${o.code}(${o.name})`).slice(0, 10).join('、')}` +
+            (scope.orgDetails.length > 10 ? `⋯等 ${scope.orgDetails.length} 個` : '')
+          : '（無可查詢組織）';
+        send('error', {
+          error: [
+            '⛔ 資料權限不足，無法執行此查詢。',
+            '',
+            '問題中包含未授權的條件：',
+            ...violations.map(v => `• ${v.term}${v.name ? `（${v.name}）` : ''} — ${v.reason}`),
+            '',
+            allowedDesc,
+          ].join('\n'),
+          multiorg_violations: violations,
+        });
+        return;
+      }
+    }
+  }
+
   // 2. 向量語意搜尋
   let vectorResults = [];
   if (design.vector_search_enabled) {

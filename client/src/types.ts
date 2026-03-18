@@ -580,6 +580,27 @@ export interface AiDashboardBookmark {
   created_at: string
 }
 
+// ── Oracle MultiOrg 資料權限範圍 ─────────────────────────────────────────────
+export interface MultiOrgOrgDetail {
+  id: number
+  code: string
+  name: string
+  ou_id: number
+  ou_name: string
+  sob_id: number
+  sob_name: string
+}
+export interface MultiOrgScope {
+  has_restrictions: boolean
+  is_admin?: boolean
+  unavailable?: boolean
+  source_levels?: string[]
+  org_count?: number
+  sob_details?: { id: number; name: string }[]
+  ou_details?: { id: number; name: string }[]
+  org_details?: MultiOrgOrgDetail[]
+}
+
 export interface AiReportDashboard {
   id: number
   user_id: number

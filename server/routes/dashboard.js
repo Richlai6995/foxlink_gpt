@@ -1679,24 +1679,55 @@ router.get('/admin/shares', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ── GET /api/dashboard/multiorg-scope ── 前端啟動時主動取得使用者的 MultiOrg 範圍 ──
+router.get('/multiorg-scope', async (req, res) => {
+  if (req.user.role === 'admin') return res.json({ has_restrictions: false, is_admin: true });
+  try {
+    const db = require('../database-oracle').db;
+    const { getEffectivePolicy } = require('./dataPermissions');
+    const policy = await getEffectivePolicy(db, req.user.id);
+
+    if (!policy?.rules?.length) return res.json({ has_restrictions: false });
+
+    const {
+      MULTIORG_VALUE_TYPES, loadOrgHierarchy, resolveUserScope, buildScopePayload,
+    } = require('../services/multiOrgService');
+    const { getErpPool } = require('../services/dashboardService');
+
+    const hasMultiOrgRules = policy.rules.some(r => MULTIORG_VALUE_TYPES.has(r.value_type));
+    if (!hasMultiOrgRules) return res.json({ has_restrictions: false });
+
+    const hierarchy = await loadOrgHierarchy(getErpPool);
+    const scope = resolveUserScope(policy.rules, hierarchy);
+    res.json(buildScopePayload(scope));
+  } catch (e) {
+    console.error('[multiorg-scope]', e.message);
+    res.status(503).json({ error: '無法驗證資料權限（ERP 連線異常）', unavailable: true });
+  }
+});
+
 // ── 資料權限前置問題檢查 ──────────────────────────────────────────────────────
 /**
- * 雙向檢查：
+ * 雙向檢查（Layer 3/4 非 MultiOrg 規則，例如 dept_code / profit_center）：
  * 1. exclude 規則：問題中出現被排除的值 → 拒絕
  * 2. include 規則：問題中出現不在允許清單的值 → 拒絕
- *    （僅針對有明確代碼格式的 value_type：organization_code, dept_code, profit_center,
- *      org_section；其他 ID 型只做 exclude 檢查）
+ *
+ * ⚠️ MultiOrg 相關 value_type（organization_code, organization_id,
+ *    operating_unit, set_of_books_id）已移至 SSE phase 的 multiOrgService
+ *    做 hierarchy 展開後的精確比對，不在這裡處理。
  *
  * Returns array of { term, reason } 被拒絕的項目
  */
 function checkForbiddenInQuestion(question, rules) {
+  const { MULTIORG_VALUE_TYPES } = require('../services/multiOrgService');
   const forbidden = [];
   const qUpper = question.toUpperCase();
   const qLower = question.toLowerCase();
 
-  // 依 value_type 分組計算 include / exclude
+  // 依 value_type 分組計算 include / exclude（排除 MultiOrg，由 SSE phase 處理）
   const groups = {};
   for (const r of rules) {
+    if (MULTIORG_VALUE_TYPES.has(r.value_type)) continue; // ← MultiOrg 不在此處理
     const key = `${r.layer}_${r.value_type}`;
     if (!groups[key]) groups[key] = { value_type: r.value_type, includes: [], excludes: [] };
     if (r.include_type === 'include') groups[key].includes.push({ id: r.value_id, name: r.value_name });
@@ -1717,9 +1748,9 @@ function checkForbiddenInQuestion(question, rules) {
     // ── 2. include 反向檢查：問題包含不在允許清單的代碼值 ────────────────
     // 只針對 code/name 型（不是 ID 型）做此檢查，避免數字誤判
     const CODE_TYPES = new Set([
-      'organization_code', 'dept_code', 'profit_center',
+      'dept_code', 'profit_center',
       'org_section', 'org_group_name',
-      'operating_unit_name', 'set_of_books_name',
+      // organization_code / operating_unit_name / set_of_books_name → 由 multiOrgService 處理
     ]);
     if (includes.length > 0 && CODE_TYPES.has(value_type)) {
       const allowedIds  = includes.map(i => (i.id  || '').toUpperCase()).filter(Boolean);

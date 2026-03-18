@@ -11,7 +11,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
   BarChart3, ChevronRight, ChevronDown, Send, RefreshCw,
   Table, BarChart2, Settings2, Code, ArrowLeft, Layers, History, Trash2, X,
-  Save, BookMarked, Columns, LayoutDashboard, Share2, Pencil, Download
+  Save, BookMarked, Columns, LayoutDashboard, Share2, Pencil, Download, Shield
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useAuth } from '../context/AuthContext'
@@ -27,7 +27,7 @@ import QueryParamsModal from '../components/dashboard/QueryParamsModal'
 import ShareModal from '../components/dashboard/ShareModal'
 import type {
   AiSelectTopic, AiSelectDesign, AiQueryResult, AiChartConfig, AiChartDef,
-  AiDashboardHistory, AiSavedQuery, AiQueryParameter
+  AiDashboardHistory, AiSavedQuery, AiQueryParameter, MultiOrgScope
 } from '../types'
 
 type ViewMode = 'chart' | 'table'
@@ -96,6 +96,17 @@ export default function AiDashboardPage() {
       if (!selectedModelKey && list.length) setSelectedModelKey(list[0].key)
     }).catch(() => {})
   }, [])
+
+  // ── Oracle MultiOrg 權限範圍 ────────────────────────────────────────────────
+  const [multiOrgScope, setMultiOrgScope] = useState<MultiOrgScope | null>(null)
+  const [multiOrgExpanded, setMultiOrgExpanded] = useState(false)
+
+  useEffect(() => {
+    if (isAdmin) { setMultiOrgScope({ has_restrictions: false, is_admin: true }); return }
+    api.get('/dashboard/multiorg-scope')
+      .then(r => setMultiOrgScope(r.data))
+      .catch(() => setMultiOrgScope({ has_restrictions: false }))
+  }, [isAdmin])
 
   // 向量搜尋覆蓋參數（查詢時可調整）
   const [showVectorAdv, setShowVectorAdv] = useState(false)
@@ -259,7 +270,9 @@ export default function AiDashboardPage() {
     // Since we only read data: lines above, we lose event names.
     // Re-parse: the buf contains "event: X\ndata: {...}\n\n"
     // For simplicity, data objects carry implicit keys:
-    if ('message' in data && !('rows' in data)) {
+    if ('has_restrictions' in data) {
+      setMultiOrgScope(data as MultiOrgScope)
+    } else if ('message' in data && !('rows' in data)) {
       setStatusMsg(data.message || '')
     } else if ('sql' in data) {
       setDevSql(data.sql || '')
@@ -360,7 +373,8 @@ export default function AiDashboardPage() {
         if (!dataStr) return
         try {
           const data = JSON.parse(dataStr)
-          if (event === 'status') setStatusMsg(data.message || '')
+          if (event === 'multiorg_scope') setMultiOrgScope(data as MultiOrgScope)
+          else if (event === 'status') setStatusMsg(data.message || '')
           else if (event === 'sql_preview') {
             setDevSql(data.sql || '')
             setDevCached(!!data.cached)
@@ -382,7 +396,7 @@ export default function AiDashboardPage() {
             setStatusMsg('')
             setActiveChartIdx(0)
           }
-          else if (event === 'error') setStatusMsg('錯誤：' + data.message)
+          else if (event === 'error') setStatusMsg('錯誤：' + (data.error || data.message || '未知錯誤'))
         } catch {}
       }
 
@@ -864,6 +878,93 @@ export default function AiDashboardPage() {
                   {statusMsg}
                 </p>
               )}
+            </div>
+          )}
+
+          {/* ── Oracle MultiOrg 資料權限範圍 Persistent Panel ───────────────── */}
+          {multiOrgScope?.has_restrictions && (
+            <div className="bg-blue-50 border border-blue-200 rounded-xl overflow-hidden">
+              <button
+                onClick={() => setMultiOrgExpanded(p => !p)}
+                className="flex items-center gap-2 w-full px-4 py-2.5 text-left hover:bg-blue-100 transition"
+              >
+                <Shield size={13} className="text-blue-500 flex-shrink-0" />
+                <span className="text-xs font-medium text-blue-700 flex-1">
+                  Oracle MultiOrg 資料權限範圍
+                </span>
+                <span className="text-xs text-blue-500">
+                  可查詢 {multiOrgScope.org_count ?? 0} 個製造組織
+                  &nbsp;{multiOrgExpanded ? '▲' : '▼'}
+                </span>
+              </button>
+
+              {multiOrgExpanded && (
+                <div className="px-4 pb-3 space-y-2.5 border-t border-blue-200">
+                  {/* 帳套 */}
+                  {(multiOrgScope.sob_details?.length ?? 0) > 0 && (
+                    <div className="pt-2">
+                      <p className="text-[10px] font-semibold text-blue-600 uppercase tracking-wide mb-1.5">
+                        帳套（Set of Books）
+                      </p>
+                      <div className="flex flex-wrap gap-1">
+                        {multiOrgScope.sob_details!.map(s => (
+                          <span key={s.id} className="text-xs bg-blue-100 text-blue-800 border border-blue-200 px-2 py-0.5 rounded-full">
+                            {s.name}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {/* 營運單位 */}
+                  {(multiOrgScope.ou_details?.length ?? 0) > 0 && (
+                    <div>
+                      <p className="text-[10px] font-semibold text-blue-600 uppercase tracking-wide mb-1.5">
+                        營運單位（Operating Unit）
+                      </p>
+                      <div className="flex flex-wrap gap-1">
+                        {multiOrgScope.ou_details!.map(o => (
+                          <span key={o.id} className="text-xs bg-blue-100 text-blue-800 border border-blue-200 px-2 py-0.5 rounded-full">
+                            {o.name}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {/* 製造組織 */}
+                  {(multiOrgScope.org_details?.length ?? 0) > 0 && (
+                    <div>
+                      <p className="text-[10px] font-semibold text-blue-600 uppercase tracking-wide mb-1.5">
+                        製造組織（Organization）— 共 {multiOrgScope.org_count} 個
+                      </p>
+                      <div className="flex flex-wrap gap-1">
+                        {multiOrgScope.org_details!.map(o => (
+                          <span
+                            key={o.id}
+                            title={`${o.ou_name} / ${o.sob_name}`}
+                            className="text-xs bg-white text-blue-800 border border-blue-200 px-2 py-0.5 rounded-full cursor-default"
+                          >
+                            <span className="font-mono font-semibold">{o.code}</span>
+                            {o.name !== o.code && <span className="ml-1 text-blue-600">{o.name}</span>}
+                          </span>
+                        ))}
+                      </div>
+                      <p className="text-[10px] text-blue-400 mt-1.5">
+                        * 滑鼠移至組織卡片可查看所屬 OU / 帳套
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ERP 權限驗證失敗提示 */}
+          {multiOrgScope?.unavailable && (
+            <div className="bg-amber-50 border border-amber-300 rounded-xl px-4 py-2.5 flex items-center gap-2">
+              <Shield size={13} className="text-amber-500 flex-shrink-0" />
+              <span className="text-xs text-amber-700">
+                無法驗證 Oracle MultiOrg 資料權限（ERP 連線異常），查詢功能暫時限制。
+              </span>
             </div>
           )}
 
