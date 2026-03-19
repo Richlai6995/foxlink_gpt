@@ -684,7 +684,7 @@ async function runDashboardQuery({ designId, question, userId, user, isDesigner,
   // 1.6 Oracle MultiOrg 權限範圍通知 + 違規硬拒
   if (effectivePolicy?.rules?.length > 0) {
     const {
-      MULTIORG_VALUE_TYPES, loadOrgHierarchy, resolveUserScope,
+      MULTIORG_VALUE_TYPES, loadOrgHierarchy, loadAutoOrgIds, resolveUserScope,
       checkViolations, buildScopePayload,
     } = require('./multiOrgService');
 
@@ -693,7 +693,18 @@ async function runDashboardQuery({ designId, question, userId, user, isDesigner,
       let hierarchy, scope;
       try {
         hierarchy = await loadOrgHierarchy(getErpPool);
-        scope = resolveUserScope(effectivePolicy.rules, hierarchy);
+
+        // 若有 auto_from_employee 規則，先從 FL_ORG_EMP_DEPT_MV 推導員工對應的 ORGANIZATION_IDs
+        let autoOrgIds = new Set();
+        const hasAutoRule = effectivePolicy.rules.some(r => r.value_type === 'auto_from_employee');
+        if (hasAutoRule) {
+          const { loadDeptHierarchy } = require('./orgHierarchyService');
+          const deptHierarchy = await loadDeptHierarchy(getErpPool);
+          autoOrgIds = loadAutoOrgIds(user, deptHierarchy);
+          console.log(`[MultiOrg] auto_from_employee: derived ${autoOrgIds.size} ORGANIZATION_IDs`);
+        }
+
+        scope = resolveUserScope(effectivePolicy.rules, hierarchy, autoOrgIds);
       } catch (e) {
         // ERP DB 無法連線 → 無法驗證 → 阻擋查詢（方案 B）
         console.error('[MultiOrg] 無法載入 hierarchy，阻擋查詢:', e.message);
@@ -828,34 +839,131 @@ async function runDashboardQuery({ designId, question, userId, user, isDesigner,
       // 推送使用者的部門權限範圍
       send('org_scope', buildOrgScopePayload(deptScope));
 
-      // 注入 DEPT_CODE IN (...) 條件（與 MultiOrg 相同機制，從 schema filter_key 找欄位）
-      if (deptScope.hasRules && deptScope.allowedDeptCodes.size > 0) {
+      // ── org_code 語意前置檢核 ─────────────────────────────────────────────
+      // 當 schema 有 filter_source='org_code' 的 filter_key 欄位，
+      // 且 allowedOrgCodes 已從組織階層展開（有限制），
+      // 若問題中出現不在允許清單的 org_code（如 'Z4E'），直接拒絕。
+      if (deptScope.hasRules && deptScope.allowedOrgCodes.size > 0) {
         const schemaIds = design.target_schema_ids ? JSON.parse(design.target_schema_ids) : [];
-        let deptColRef = null;
+        let hasOrgCodeFilterKey = false;
         for (const sid of schemaIds) {
           const col = await db.prepare(
-            `SELECT c.column_name, sd.alias, sd.table_name
-             FROM ai_schema_columns c
-             JOIN ai_schema_definitions sd ON sd.id = c.schema_id
-             WHERE c.schema_id=? AND c.filter_source='dept_code' AND c.is_filter_key=1
+            `SELECT 1 FROM ai_schema_columns
+             WHERE schema_id=? AND filter_source='org_code' AND is_filter_key=1
              FETCH FIRST 1 ROWS ONLY`
           ).get(sid);
-          if (col) {
-            const tblAlias = col.alias || col.table_name.split('.').pop().toLowerCase();
-            deptColRef = `${tblAlias}.${col.column_name}`;
-            break;
+          if (col) { hasOrgCodeFilterKey = true; break; }
+        }
+
+        if (hasOrgCodeFilterKey) {
+          // 從問題中萃取形如 org_code 的詞（2-4 字元，含大寫英數，有數字混合者優先）
+          // 比純英文詞更像 org_code：至少含 1 個數字
+          const IGNORE = new Set([
+            'SELECT','FROM','WHERE','AND','OR','NOT','IN','IS','NULL','AS','BY',
+            'ORDER','GROUP','HAVING','JOIN','ON','LEFT','RIGHT','INNER','OUTER',
+            'WITH','CASE','WHEN','THEN','ELSE','END','LIKE','BETWEEN','EXISTS',
+            'DISTINCT','INTO','TOP','SET','UPDATE','INSERT','DELETE',
+            'SQL','ERP','ORG','BOM','MRP','PO','SO','WO','API','URL','UTC',
+            'CODE','DATA','NAME','DATE','TYPE','LIST','INFO','MODE','ITEM',
+          ]);
+          const qUpper = question.toUpperCase();
+          // org_code 格式：2-4 字元，必須含至少 1 個數字（Z4E, T1A, G08 等），避免 NAME/CODE 等純英字
+          const detectedCodes = [...new Set(
+            [...qUpper.matchAll(/\b[A-Z][A-Z0-9]{1,3}\b/g)].map(m => m[0])
+          )].filter(c => !IGNORE.has(c) && /\d/.test(c));
+
+          const forbiddenCodes = detectedCodes.filter(c => !deptScope.allowedOrgCodes.has(c));
+          if (forbiddenCodes.length > 0) {
+            const sample = [...deptScope.allowedOrgCodes].slice(0, 10).join('、');
+            send('error', {
+              error: [
+                '⛔ 資料權限不足，無法執行此查詢。',
+                '',
+                `問題中包含未授權的組織代碼：${forbiddenCodes.join('、')}`,
+                `您可查詢的組織代碼共 ${deptScope.allowedOrgCodes.size} 個，例如：${sample}${deptScope.allowedOrgCodes.size > 10 ? '⋯' : ''}`,
+              ].join('\n'),
+              org_code_violations: forbiddenCodes,
+            });
+            return;
+          }
+          console.log(`[OrgHierarchy] org_code semantic check: detected=${JSON.stringify(detectedCodes)}, all allowed`);
+        }
+      }
+
+      // 注入 Layer 3 WHERE 條件
+      // 優先順序：
+      //   1. 找到 rule 所在層級的 filter_key 欄 → 直接 equality（最簡單，e.g. oed.ORG_GROUP_NAME='消費電子事業群'）
+      //   2. 找到 filter_source='org_code' 的 filter_key → IN (allowedOrgCodes)
+      //   3. 找到 filter_source='org_id' 的 filter_key → IN (allowedOrgIds)
+      //   4. Fallback: filter_source='dept_code' → IN (allowedDeptCodes)，自動切成 <=999 的 OR 塊
+      if (deptScope.hasRules && (deptScope.allowedOrgCodes.size > 0 || deptScope.allowedDeptCodes.size > 0)) {
+        const schemaIds = design.target_schema_ids ? JSON.parse(design.target_schema_ids) : [];
+
+        // 查 filter_key 輔助函式
+        const findFilterKeyCol = async (filterSource) => {
+          for (const sid of schemaIds) {
+            const col = await db.prepare(
+              `SELECT c.column_name, sd.alias, sd.table_name
+               FROM ai_schema_columns c
+               JOIN ai_schema_definitions sd ON sd.id = c.schema_id
+               WHERE c.schema_id=? AND c.filter_source=? AND c.is_filter_key=1
+               FETCH FIRST 1 ROWS ONLY`
+            ).get(sid, filterSource);
+            if (col) {
+              const tblAlias = col.alias || col.table_name.split('.').pop().toLowerCase();
+              return `${tblAlias}.${col.column_name}`;
+            }
+          }
+          return null;
+        };
+
+        let whereClause = null;
+
+        // 1. 最高層 include 規則的直接 equality（單一值，最乾淨）
+        const highestLevel = deptScope.highestIncludeLevel;
+        if (highestLevel && deptScope.userValues[highestLevel]) {
+          const colRef = await findFilterKeyCol(highestLevel);
+          if (colRef) {
+            whereClause = `${colRef} = '${deptScope.userValues[highestLevel]}'`;
+            console.log(`[OrgHierarchy] Injected WHERE (level equality): ${whereClause}`);
           }
         }
-        deptColRef = deptColRef || 'DEPT_CODE';
-        const inList = [...deptScope.allowedDeptCodes].map(c => `'${c}'`).join(', ');
-        const existingWhere = design._dataPermissionWhere?.dataPermWhere || [];
-        design._dataPermissionWhere = {
-          dataPermWhere: [...existingWhere, `${deptColRef} IN (${inList})`],
-        };
-        console.log(`[OrgHierarchy] Injected WHERE: ${deptColRef} IN (${deptScope.allowedDeptCodes.size} depts)`);
-      } else if (deptScope.hasRules && deptScope.allowedDeptCodes.size === 0) {
+
+        // 2. org_code IN (list)
+        if (!whereClause && deptScope.allowedOrgCodes.size > 0) {
+          const colRef = await findFilterKeyCol('org_code');
+          if (colRef) {
+            const codes = [...deptScope.allowedOrgCodes];
+            whereClause = buildInChunks(colRef, codes);
+            console.log(`[OrgHierarchy] Injected WHERE (org_code): ${codes.length} org codes`);
+          }
+        }
+
+        // 3. org_id IN (list)
+        if (!whereClause && deptScope.allowedOrgIds.size > 0) {
+          const colRef = await findFilterKeyCol('org_id');
+          if (colRef) {
+            const ids = [...deptScope.allowedOrgIds];
+            whereClause = buildInChunks(colRef, ids, false);
+            console.log(`[OrgHierarchy] Injected WHERE (org_id): ${ids.length} org ids`);
+          }
+        }
+
+        // 4. Fallback: dept_code IN (chunks, 每塊 ≤999)
+        if (!whereClause && deptScope.allowedDeptCodes.size > 0) {
+          const colRef = (await findFilterKeyCol('dept_code')) || 'DEPT_CODE';
+          const codes = [...deptScope.allowedDeptCodes];
+          whereClause = buildInChunks(colRef, codes);
+          console.log(`[OrgHierarchy] Injected WHERE (dept_code fallback): ${codes.length} dept codes`);
+        }
+
+        if (whereClause) {
+          const existingWhere = design._dataPermissionWhere?.dataPermWhere || [];
+          design._dataPermissionWhere = { dataPermWhere: [...existingWhere, whereClause] };
+        }
+      } else if (deptScope.hasRules) {
         send('error', {
-          error: '⛔ 您目前的組織資料權限設定未涵蓋任何部門，無法執行查詢。\n請聯繫管理員確認使用者組織資料是否已從 ERP 同步。',
+          error: '⛔ 您目前的組織資料權限設定未涵蓋任何組織，無法執行查詢。\n請聯繫管理員確認使用者組織資料是否已從 ERP 同步。',
           org_hierarchy_empty_scope: true,
         });
         return;
@@ -1465,6 +1573,23 @@ function scheduleEtlJob(jobId, cronExpr) {
  * 若某層只有 exclude 沒有 include → 只加 NOT IN
  * 若某層只有 include → 只加 IN
  */
+/**
+ * 將 values 陣列切成 ≤999 塊，生成 Oracle IN 條件（避免 ORA-01795）
+ * @param {string}  colRef   欄位引用，如 oed.ORG_CODE
+ * @param {Array}   values   值陣列
+ * @param {boolean} quoted   true=字串加引號（預設），false=數值不加
+ */
+function buildInChunks(colRef, values, quoted = true) {
+  const CHUNK = 999;
+  const chunks = [];
+  for (let i = 0; i < values.length; i += CHUNK) {
+    const slice = values.slice(i, i + CHUNK);
+    const inList = slice.map(v => quoted ? `'${v}'` : String(v)).join(',');
+    chunks.push(`${colRef} IN (${inList})`);
+  }
+  return chunks.length === 1 ? chunks[0] : `(${chunks.join(' OR ')})`;
+}
+
 async function buildDataPermWhere(db, design, user, rules) {
   if (!rules?.length) return {};
   const schemaIds = design.target_schema_ids ? JSON.parse(design.target_schema_ids) : [];

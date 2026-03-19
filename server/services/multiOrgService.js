@@ -22,10 +22,11 @@ const CACHE_TTL_MS = 20 * 60 * 1000; // 20 分鐘
 const MULTIORG_VALUE_TYPES = new Set([
   'organization_id',
   'organization_code',
-  'operating_unit',      // OU ID（OPERATING_UNIT 欄位）
-  'operating_unit_name', // OU 名稱（OPERATING_UNIT_NAME 欄位）
+  'operating_unit',        // OU ID（OPERATING_UNIT 欄位）
+  'operating_unit_name',   // OU 名稱（OPERATING_UNIT_NAME 欄位）
   'set_of_books_id',
-  'set_of_books_name',   // SOB 名稱（SET_OF_BOOKS_NAME 欄位）
+  'set_of_books_name',     // SOB 名稱（SET_OF_BOOKS_NAME 欄位）
+  'auto_from_employee',    // 依員工部門自動推導（FL_ORG_EMP_DEPT_MV.ORG_ID → ORGANIZATION_ID）
 ]);
 
 // ── 快取 ──────────────────────────────────────────────────────────────────────
@@ -99,6 +100,44 @@ async function loadOrgHierarchy(getErpPool) {
   return rows;
 }
 
+// ── 從員工部門推導 ERP ORGANIZATION_IDs ──────────────────────────────────────
+/**
+ * 用 FL_ORG_EMP_DEPT_MV（deptHierarchy）查找使用者所屬部門對應的 ORG_ID，
+ * 即 FL_ORG_ORGANIZATION_DEFINITIONS_MV.ORGANIZATION_ID。
+ *
+ * 推導優先順序（最精確 → 最廣）：
+ *   dept_code → profit_center → org_section → org_group_name
+ * 找到第一個有匹配 ORG_ID 的層級後停止，避免過度授權。
+ *
+ * @param {object}   user          使用者物件（需有 dept_code / profit_center / org_section / org_group_name）
+ * @param {object[]} deptHierarchy loadDeptHierarchy() 的結果（FL_ORG_EMP_DEPT_MV rows，需含 ORG_ID）
+ * @returns {Set<string>}          可允許的 ORGANIZATION_ID 字串集合
+ */
+function loadAutoOrgIds(user, deptHierarchy) {
+  const u = user || {};
+  const orgIds = new Set();
+
+  const matchers = [
+    { userVal: (u.dept_code      || '').trim(), rowField: 'DEPT_CODE' },
+    { userVal: (u.profit_center  || '').trim(), rowField: 'PROFIT_CENTER' },
+    { userVal: (u.org_section    || '').trim(), rowField: 'ORG_SECTION' },
+    { userVal: (u.org_group_name || '').trim(), rowField: 'ORG_GROUP_NAME' },
+  ];
+
+  for (const { userVal, rowField } of matchers) {
+    if (!userVal) continue;
+    for (const row of deptHierarchy) {
+      if ((row[rowField] || '').trim() === userVal && row.ORG_ID) {
+        orgIds.add(String(row.ORG_ID));
+      }
+    }
+    if (orgIds.size > 0) break; // 找到就不再往上擴（避免過度授權）
+  }
+
+  console.log(`[MultiOrg] loadAutoOrgIds: ${orgIds.size} ORGANIZATION_IDs from user dept`);
+  return orgIds;
+}
+
 // ── 解析使用者有效 MultiOrg 範圍 ─────────────────────────────────────────────
 /**
  * 依規則過濾 hierarchy，回傳使用者能看到的 Orgs / OUs / SOBs。
@@ -111,7 +150,12 @@ async function loadOrgHierarchy(getErpPool) {
  * @param {object[]} rules     ai_data_policy_rules（已過濾為 MultiOrg 相關）
  * @param {object[]} hierarchy loadOrgHierarchy() 的結果
  */
-function resolveUserScope(rules, hierarchy) {
+/**
+ * @param {object[]} rules       ai_data_policy_rules（已過濾為 MultiOrg 相關）
+ * @param {object[]} hierarchy   loadOrgHierarchy() 的結果
+ * @param {Set<string>} autoOrgIds  loadAutoOrgIds() 推導的 ORGANIZATION_ID 集合（auto_from_employee 用）
+ */
+function resolveUserScope(rules, hierarchy, autoOrgIds = new Set()) {
   const multiRules = rules.filter(r => MULTIORG_VALUE_TYPES.has(r.value_type));
   if (!multiRules.length) return { hasRules: false };
 
@@ -149,6 +193,17 @@ function resolveUserScope(rules, hierarchy) {
     for (const row of hierarchy) rowGrantLevel.set(row, 3);
   } else {
     for (const rule of includeRules) {
+      if (rule.value_type === 'auto_from_employee') {
+        // 以員工部門推導出的 ORGANIZATION_IDs 為基準，
+        // 授予 SOB 層級（3），讓 OU/SOB 資訊也一併展開。
+        for (const row of hierarchy) {
+          if (autoOrgIds.has(String(row.ORGANIZATION_ID))) {
+            const prev = rowGrantLevel.get(row) || 0;
+            if (3 > prev) rowGrantLevel.set(row, 3);
+          }
+        }
+        continue;
+      }
       const level = getRuleLevel(rule.value_type);
       for (const row of hierarchy) {
         if (rowMatchesRule(row, rule)) {
@@ -322,6 +377,7 @@ function buildScopePayload(scope) {
 module.exports = {
   MULTIORG_VALUE_TYPES,
   loadOrgHierarchy,
+  loadAutoOrgIds,
   resolveUserScope,
   checkViolations,
   buildScopePayload,

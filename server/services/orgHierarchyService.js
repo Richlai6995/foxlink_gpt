@@ -26,6 +26,8 @@ const ORG_HIERARCHY_VALUE_TYPES = new Set([
   'org_section',
   'profit_center',
   'dept_code',
+  'org_code',   // FL_ORG_EMP_DEPT_MV.ORG_CODE — 展開後的組織代碼清單
+  'org_id',     // FL_ORG_EMP_DEPT_MV.ORG_ID
 ]);
 
 // 各 filter_source 的層級數值（用於控制顯示哪幾層）
@@ -70,7 +72,9 @@ async function loadDeptHierarchy(getErpPool) {
               PROFIT_CENTER_NAME,
               ORG_SECTION,
               ORG_SECTION_NAME,
-              ORG_GROUP_NAME
+              ORG_GROUP_NAME,
+              ORG_ID,
+              ORG_CODE
        FROM APPS.FL_ORG_EMP_DEPT_MV
        ORDER BY ORG_GROUP_NAME, ORG_SECTION, PROFIT_CENTER, DEPT_CODE`,
       [],
@@ -138,12 +142,42 @@ function resolveUserDeptScope(rules, user, hierarchy) {
 
   // ── Include：每條規則展開後取聯集，記錄各 row 的最高授權層級 ────────────
   const rowGrantLevel = new Map(); // row → maxGrantLevel
+
+  /**
+   * org_code / org_id 是「衍生型」filter_source：
+   *   它本身不是比對條件，而是「展開後收集 ORG_CODE/ORG_ID」的標記。
+   *   展開方式：以使用者最高可用的層級（事業群→事業處→利潤中心→部門）為準，
+   *   找到對應的 hierarchy rows，再從中收集 ORG_CODE / ORG_ID。
+   */
+  function expandRowsByUserNaturalScope() {
+    const naturalScope = userValues.org_group_name ? 'org_group_name'
+      : userValues.org_section   ? 'org_section'
+      : userValues.profit_center ? 'profit_center'
+      : userValues.dept_code     ? 'dept_code'
+      : null;
+    if (!naturalScope) return;
+    const level = ORG_GRANT_LEVEL[naturalScope] || 1;
+    for (const row of hierarchy) {
+      if (rowMatchesUserRule(row, naturalScope)) {
+        const prev = rowGrantLevel.get(row) || 0;
+        if (level > prev) rowGrantLevel.set(row, level);
+      }
+    }
+  }
+
   if (includeRules.length === 0) {
     // 只有 exclude 規則 → 從全量開始（視為最高層授權）
     for (const row of hierarchy) rowGrantLevel.set(row, 4);
   } else {
     for (const rule of includeRules) {
       const filterSource = rule.value_type || rule.filter_source;
+
+      // org_code / org_id：衍生型，改用使用者自然層級展開
+      if (filterSource === 'org_code' || filterSource === 'org_id') {
+        expandRowsByUserNaturalScope();
+        continue;
+      }
+
       const level = ORG_GRANT_LEVEL[filterSource] || 1;
       for (const row of hierarchy) {
         if (rowMatchesUserRule(row, filterSource)) {
@@ -171,15 +205,27 @@ function resolveUserDeptScope(rules, user, hierarchy) {
 
   // ── 依授權層級決定顯示哪幾層（只往下，不往上推論）──────────────────────
   const allowedDeptCodes = new Set();
+  const allowedOrgCodes  = new Set();
+  const allowedOrgIds    = new Set();
   const profitCenterMap  = new Map();
   const orgSectionMap    = new Map();
   const orgGroupSet      = new Set();
+  const orgCodeMap       = new Map(); // org_code → { org_code, org_id }
 
   for (const row of rows) {
     const level = rowGrantLevel.get(row) || 1;
 
     // 部門（全部顯示）
     if (row.DEPT_CODE) allowedDeptCodes.add(row.DEPT_CODE);
+
+    // 組織代碼/ID（全部收集，來自 ORG_ID/ORG_CODE 欄位）
+    if (row.ORG_CODE) {
+      allowedOrgCodes.add(row.ORG_CODE);
+      if (!orgCodeMap.has(row.ORG_CODE)) {
+        orgCodeMap.set(row.ORG_CODE, { org_code: row.ORG_CODE, org_id: row.ORG_ID || null });
+      }
+    }
+    if (row.ORG_ID) allowedOrgIds.add(String(row.ORG_ID));
 
     // 利潤中心（level >= 2 才顯示）
     if (level >= 2 && row.PROFIT_CENTER) {
@@ -211,10 +257,22 @@ function resolveUserDeptScope(rules, user, hierarchy) {
   if (maxGrantLevel >= 2) sourceLevels.push('profit_center');
   sourceLevels.push('dept_code');
 
+  // 最高層 include 規則的層級（用於 WHERE 注入）
+  const highestIncludeLevel = includeRules.length
+    ? includeRules.reduce((best, r) => {
+        const fs = r.value_type || r.filter_source;
+        return (ORG_GRANT_LEVEL[fs] || 0) > (ORG_GRANT_LEVEL[best] || 0) ? fs : best;
+      }, '')
+    : '';
+
   return {
-    hasRules:         true,
+    hasRules:           true,
     sourceLevels,
+    userValues,            // 使用者各層欄位值（補齊後），供 WHERE 注入使用
+    highestIncludeLevel,   // 最高層 include 規則的 filter_source
     allowedDeptCodes,
+    allowedOrgCodes,
+    allowedOrgIds,
     deptDetails: rows.map(r => ({
       dept_code:            r.DEPT_CODE,
       dept_name:            r.DEPT_DESC,
@@ -224,6 +282,7 @@ function resolveUserDeptScope(rules, user, hierarchy) {
       org_section_name:     r.ORG_SECTION_NAME,
       org_group_name:       r.ORG_GROUP_NAME,
     })),
+    orgCodeDetails:      [...orgCodeMap.values()],
     profitCenterDetails: [...profitCenterMap.values()],
     orgSectionDetails:   [...orgSectionMap.values()],
     orgGroupDetails:     [...orgGroupSet].map(n => ({ name: n })),
@@ -237,6 +296,8 @@ function buildOrgScopePayload(scope) {
     has_restrictions:       true,
     source_levels:          scope.sourceLevels,
     dept_count:             scope.deptDetails.length,
+    org_code_count:         scope.allowedOrgCodes?.size ?? 0,
+    org_code_details:       scope.orgCodeDetails || [],
     dept_details:           scope.deptDetails,
     profit_center_details:  scope.profitCenterDetails,
     org_section_details:    scope.orgSectionDetails,

@@ -983,7 +983,9 @@ export default function AiDashboardPage() {
                   公司組織資料權限範圍
                 </span>
                 <span className="text-xs text-green-500">
-                  可查詢 {orgScope.dept_count ?? 0} 個部門
+                  {(orgScope.org_code_count ?? 0) > 0
+                    ? `可查詢 ${orgScope.org_code_count} 個組織`
+                    : `可查詢 ${orgScope.dept_count ?? 0} 個部門`}
                   &nbsp;{orgScopeExpanded ? '▲' : '▼'}
                 </span>
               </button>
@@ -1023,6 +1025,21 @@ export default function AiDashboardPage() {
                           <span key={p.code} className="text-xs bg-green-100 text-green-800 border border-green-200 px-2 py-0.5 rounded-full">
                             <span className="font-mono font-semibold">{p.code}</span>
                             {p.name && p.name !== p.code && <span className="ml-1">{p.name}</span>}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {/* 組織代碼（ORG_CODE） */}
+                  {(orgScope.org_code_details?.length ?? 0) > 0 && (
+                    <div>
+                      <p className="text-[10px] font-semibold text-green-600 uppercase tracking-wide mb-1.5">
+                        組織代碼 — 共 {orgScope.org_code_count} 個
+                      </p>
+                      <div className="flex flex-wrap gap-1">
+                        {orgScope.org_code_details!.map(o => (
+                          <span key={o.org_code} className="text-xs bg-teal-50 text-teal-800 border border-teal-200 px-2 py-0.5 rounded-full font-mono font-semibold">
+                            {o.org_code}
                           </span>
                         ))}
                       </div>

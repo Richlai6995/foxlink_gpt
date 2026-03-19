@@ -1253,10 +1253,16 @@ function SchemaManager({ projectId }: { projectId: number | null }) {
                                             >
                                               <option value="">-- 來源欄位 --</option>
                                               {col.filter_layer === 'layer3' && <>
-                                                <option value="dept_code">部門代碼 (DEPT_CODE)</option>
-                                                <option value="profit_center">利潤中心 (PROFIT_CENTER)</option>
-                                                <option value="org_section">事業處 (ORG_SECTION)</option>
-                                                <option value="org_group_name">事業群名稱 (ORG_GROUP_NAME)</option>
+                                                <optgroup label="公司組織階層">
+                                                  <option value="org_group_name">事業群名稱 (ORG_GROUP_NAME)</option>
+                                                  <option value="org_section">事業處 (ORG_SECTION)</option>
+                                                  <option value="profit_center">利潤中心 (PROFIT_CENTER)</option>
+                                                  <option value="dept_code">部門代碼 (DEPT_CODE)</option>
+                                                </optgroup>
+                                                <optgroup label="對應製造組織">
+                                                  <option value="org_code">組織代碼 (ORG_CODE)</option>
+                                                  <option value="org_id">組織 ID (ORG_ID)</option>
+                                                </optgroup>
                                               </>}
                                               {col.filter_layer === 'layer4' && <>
                                                 <optgroup label="製造組織層 (INV/WIP/BOM)">

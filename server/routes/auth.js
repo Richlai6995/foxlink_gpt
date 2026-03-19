@@ -164,7 +164,7 @@ router.post('/login', async (req, res) => {
             if (ldapUser.employeeId) {
               try {
                 const { syncOrgToUsers } = require('../services/orgSyncService');
-                syncOrgToUsers(db, [String(ldapUser.employeeId)]).catch(() => { });
+                syncOrgToUsers(db, [String(ldapUser.employeeId)], 'login').catch(() => { });
               } catch (e) { /* ERP not configured */ }
             }
             return await createSession(res, dbUser);
@@ -192,7 +192,7 @@ router.post('/login', async (req, res) => {
             if (ldapUser.employeeId) {
               try {
                 const { syncOrgToUsers } = require('../services/orgSyncService');
-                syncOrgToUsers(db, [String(ldapUser.employeeId)]).catch(() => { });
+                syncOrgToUsers(db, [String(ldapUser.employeeId)], 'login').catch(() => { });
               } catch (e) { /* ERP not configured */ }
             }
             return await createSession(res, newUser);

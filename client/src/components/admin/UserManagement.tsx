@@ -1,8 +1,163 @@
 import { useState, useEffect } from 'react'
-import { Plus, Edit, Trash2, Save, X, Check, Download, UserCog, FileText, Mic, Image, CalendarClock, RefreshCw, Building2, Search, ShieldCheck } from 'lucide-react'
+import { Plus, Edit, Trash2, Save, X, Check, Download, UserCog, FileText, Mic, Image, CalendarClock, RefreshCw, Building2, Search, ShieldCheck, Clock, ChevronDown, ChevronUp, AlertTriangle } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import type { User } from '../../types'
 import api from '../../lib/api'
+
+// ── Org Sync Schedule Panel ───────────────────────────────────────────────────
+interface OrgSyncSchedule { enabled: boolean; hour: number; lastRun: string | null }
+interface OrgSyncChangeLog {
+  id: number; employee_id: string; user_name: string; sync_trigger: string
+  changed_fields: string | null; is_departure: number; notified_admin: number
+  error_msg: string | null; synced_at: string
+}
+
+function OrgSyncPanel() {
+  const [open, setOpen] = useState(false)
+  const [schedule, setSchedule] = useState<OrgSyncSchedule>({ enabled: false, hour: 2, lastRun: null })
+  const [saving, setSaving] = useState(false)
+  const [logs, setLogs] = useState<OrgSyncChangeLog[]>([])
+  const [logsOpen, setLogsOpen] = useState(false)
+  const [logsLoading, setLogsLoading] = useState(false)
+
+  useEffect(() => {
+    api.get('/admin/org-sync-schedule').then(r => setSchedule(r.data)).catch(() => {})
+  }, [])
+
+  const save = async () => {
+    setSaving(true)
+    try {
+      await api.post('/admin/org-sync-schedule', schedule)
+      alert('排程設定已儲存')
+    } catch (e: any) { alert(e?.response?.data?.error || '儲存失敗') }
+    finally { setSaving(false) }
+  }
+
+  const loadLogs = async () => {
+    setLogsLoading(true)
+    try {
+      const r = await api.get('/admin/org-sync-change-logs?limit=50')
+      setLogs(r.data)
+    } catch { setLogs([]) }
+    finally { setLogsLoading(false) }
+  }
+
+  const toggleLogs = () => {
+    if (!logsOpen) loadLogs()
+    setLogsOpen(p => !p)
+  }
+
+  const TRIGGER_LABEL: Record<string, string> = { scheduled: '排程', manual: '手動', login: '登入' }
+
+  return (
+    <div className="mb-3 border border-blue-200 rounded-lg bg-blue-50/50">
+      <button
+        onClick={() => setOpen(p => !p)}
+        className="w-full flex items-center justify-between px-4 py-2.5 text-sm font-medium text-blue-700 hover:bg-blue-50 rounded-lg"
+      >
+        <span className="flex items-center gap-1.5">
+          <Clock size={14} />
+          組織自動同步排程
+          {schedule.enabled && (
+            <span className="ml-2 text-xs bg-green-100 text-green-700 px-1.5 py-0.5 rounded-full">
+              每天 {schedule.hour}:00
+            </span>
+          )}
+        </span>
+        {open ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+      </button>
+
+      {open && (
+        <div className="px-4 pb-4 space-y-3">
+          <div className="flex items-center gap-4 flex-wrap">
+            <label className="flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={schedule.enabled}
+                onChange={e => setSchedule(p => ({ ...p, enabled: e.target.checked }))}
+                className="w-4 h-4 rounded" />
+              啟用自動同步
+            </label>
+            <label className="flex items-center gap-2 text-sm">
+              每天
+              <select value={schedule.hour}
+                onChange={e => setSchedule(p => ({ ...p, hour: parseInt(e.target.value) }))}
+                className="border rounded px-2 py-1 text-xs bg-white w-20">
+                {Array.from({ length: 24 }, (_, i) => (
+                  <option key={i} value={i}>{String(i).padStart(2, '0')}:00</option>
+                ))}
+              </select>
+              執行
+            </label>
+            <button onClick={save} disabled={saving}
+              className="flex items-center gap-1 text-xs px-3 py-1.5 rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50">
+              <Save size={12} /> {saving ? '儲存中...' : '儲存'}
+            </button>
+          </div>
+          {schedule.lastRun && (
+            <p className="text-xs text-slate-500">上次同步：{schedule.lastRun.slice(0, 19).replace('T', ' ')}</p>
+          )}
+
+          {/* 變動紀錄 */}
+          <button onClick={toggleLogs}
+            className="flex items-center gap-1 text-xs text-blue-600 hover:underline">
+            {logsOpen ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+            查看變動紀錄（最近 50 筆）
+          </button>
+          {logsOpen && (
+            <div className="overflow-auto max-h-64 rounded border border-slate-200 bg-white">
+              {logsLoading ? (
+                <div className="text-xs text-slate-400 p-3">載入中...</div>
+              ) : logs.length === 0 ? (
+                <div className="text-xs text-slate-400 p-3">尚無紀錄</div>
+              ) : (
+                <table className="w-full text-xs">
+                  <thead className="sticky top-0 bg-slate-50">
+                    <tr>
+                      <th className="px-2 py-1.5 text-left text-slate-500">時間</th>
+                      <th className="px-2 py-1.5 text-left text-slate-500">工號</th>
+                      <th className="px-2 py-1.5 text-left text-slate-500">姓名</th>
+                      <th className="px-2 py-1.5 text-left text-slate-500">來源</th>
+                      <th className="px-2 py-1.5 text-left text-slate-500">變動欄位</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {logs.map(log => {
+                      let fields: string[] = []
+                      try { fields = Object.keys(JSON.parse(log.changed_fields || '{}')) } catch { }
+                      const isErr = !!log.error_msg
+                      return (
+                        <tr key={log.id} className={`border-t ${log.is_departure ? 'bg-red-50' : isErr ? 'bg-amber-50' : ''}`}>
+                          <td className="px-2 py-1 text-slate-400 whitespace-nowrap">{log.synced_at}</td>
+                          <td className="px-2 py-1">{log.employee_id || '-'}</td>
+                          <td className="px-2 py-1">{log.user_name || '-'}</td>
+                          <td className="px-2 py-1">
+                            <span className="px-1 py-0.5 rounded text-[10px] bg-slate-100 text-slate-600">
+                              {TRIGGER_LABEL[log.sync_trigger] || log.sync_trigger}
+                            </span>
+                          </td>
+                          <td className="px-2 py-1">
+                            {isErr ? (
+                              <span className="text-amber-600 flex items-center gap-1">
+                                <AlertTriangle size={10} /> {log.error_msg}
+                              </span>
+                            ) : log.is_departure ? (
+                              <span className="text-red-600 font-medium">⚠️ 離職/調職 {fields.join(', ')}</span>
+                            ) : (
+                              <span className="text-slate-600">{fields.join(', ') || '-'}</span>
+                            )}
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
 
 interface Policy {
   id: number
@@ -330,6 +485,9 @@ export default function UserManagement() {
           </button>
         </div>
       </div>
+
+      {/* Org Sync Schedule Panel */}
+      <OrgSyncPanel />
 
       {/* Search bar */}
       <div className="mb-3 flex items-center gap-2 bg-slate-50 rounded-xl px-4 py-2.5 border border-slate-200">

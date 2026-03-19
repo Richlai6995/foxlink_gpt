@@ -996,6 +996,19 @@ async function runMigrations(db) {
     created_at     TIMESTAMP DEFAULT SYSTIMESTAMP
   )`);
 
+  // ── Org Sync Change Logs ─────────────────────────────────────────────────────
+  await createTable('ORG_SYNC_CHANGE_LOGS', `CREATE TABLE org_sync_change_logs (
+    id               NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    employee_id      VARCHAR2(50),
+    user_name        VARCHAR2(200),
+    sync_trigger     VARCHAR2(20) DEFAULT 'scheduled',
+    changed_fields   CLOB,
+    is_departure     NUMBER(1) DEFAULT 0,
+    notified_admin   NUMBER(1) DEFAULT 0,
+    error_msg        VARCHAR2(2000),
+    synced_at        TIMESTAMP DEFAULT SYSTIMESTAMP
+  )`);
+
   // ── Vector table partitioning ───────────────────────────────────────────────
   await migrateAiVectorStoreToPartitioned();
   await migrateKbChunksToPartitioned();

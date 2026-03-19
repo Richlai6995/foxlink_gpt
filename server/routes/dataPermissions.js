@@ -20,7 +20,8 @@ router.get('/lov/org', async (req, res) => {
            DEPT_CODE, DEPT_DESC,
            PROFIT_CENTER, PROFIT_CENTER_NAME,
            ORG_SECTION, ORG_SECTION_NAME,
-           ORG_GROUP_NAME
+           ORG_GROUP_NAME,
+           ORG_CODE, ORG_ID
          FROM FL_ORG_EMP_DEPT_MV
          WHERE DEPT_CODE IS NOT NULL
          ORDER BY ORG_GROUP_NAME, ORG_SECTION_NAME, PROFIT_CENTER_NAME, DEPT_DESC`

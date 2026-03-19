@@ -37,6 +37,7 @@ interface OrgLov {
   PROFIT_CENTER: string; PROFIT_CENTER_NAME: string
   ORG_SECTION: string; ORG_SECTION_NAME: string
   ORG_GROUP_NAME: string
+  ORG_CODE?: string; ORG_ID?: number
 }
 
 interface ErpOrgLov {
@@ -64,8 +65,10 @@ const VALUE_TYPE_OPTIONS: Record<number, { value: string; label: string }[]> = {
     { value: 'profit_center', label: '利潤中心' },
     { value: 'org_section', label: '事業處' },
     { value: 'org_group_name', label: '事業群' },
+    { value: 'org_code', label: '組織代碼 (ORG_CODE)' },
   ],
   4: [
+    { value: 'auto_from_employee',   label: '⚡ 依員工組織自動推導' },
     { value: 'organization_id',      label: '製造組織 ID (數字)' },
     { value: 'organization_code',    label: '製造組織 Code (如 Z4E)' },
     { value: 'operating_unit',       label: '營運單位 ID (數字)' },
@@ -491,6 +494,11 @@ function RuleRow({
       orgLov.forEach(o => { if (o.ORG_SECTION) map.set(o.ORG_SECTION, o.ORG_SECTION_NAME) })
       return Array.from(map.entries()).map(([id, name]) => ({ id, name: `${name} (${id})` }))
     }
+    if (vt === 'org_code') {
+      const set = new Set<string>()
+      orgLov.forEach(o => { if (o.ORG_CODE) set.add(o.ORG_CODE) })
+      return Array.from(set).map(c => ({ id: c, name: c }))
+    }
     if (vt === 'org_group_name') {
       const set = new Set<string>()
       orgLov.forEach(o => { if (o.ORG_GROUP_NAME) set.add(o.ORG_GROUP_NAME) })
@@ -546,7 +554,12 @@ function RuleRow({
       </select>
 
       {/* value picker */}
-      {lovOpts.length > 0 ? (
+      {rule.value_type === 'auto_from_employee' ? (
+        <div className="flex-1 flex items-center gap-1.5 bg-blue-50 border border-blue-200 rounded px-2.5 py-1.5">
+          <span className="text-[10px] text-blue-600 font-medium">自動依登入員工部門推導</span>
+          <span className="text-[9px] text-blue-400">dept → FL_ORG_EMP_DEPT_MV → ORGANIZATION_ID</span>
+        </div>
+      ) : lovOpts.length > 0 ? (
         <select
           value={rule.value_id}
           onChange={e => {

@@ -65,8 +65,8 @@ router.post('/users/sync-org-all', async (req, res) => {
       return res.status(400).json({ error: 'Oracle ERP 未設定 (請配置 ERP_DB_* 環境變數)' });
     }
     const { syncOrgToUsers } = require('../services/orgSyncService');
-    const result = await syncOrgToUsers(db, null);
-    res.json({ ...result, message: `已同步 ${result.synced} 筆組織資料` });
+    const result = await syncOrgToUsers(db, null, 'manual');
+    res.json({ ...result, message: `已同步 ${result.synced} 筆，無變動 ${result.unchanged ?? 0} 筆` });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -84,8 +84,8 @@ router.post('/users/:id/sync-org', async (req, res) => {
     if (!user) return res.status(404).json({ error: '使用者不存在' });
     if (!user.employee_id) return res.status(400).json({ error: '此使用者未設定工號，無法同步組織資料' });
     const { syncOrgToUsers } = require('../services/orgSyncService');
-    const result = await syncOrgToUsers(db, [String(user.employee_id)]);
-    res.json({ ...result, message: `已同步 ${result.synced} 筆組織資料` });
+    const result = await syncOrgToUsers(db, [String(user.employee_id)], 'manual');
+    res.json({ ...result, message: result.synced > 0 ? `組織資料已更新` : '組織資料無異動' });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -1341,6 +1341,25 @@ router.post('/org-sync-schedule', async (req, res) => {
     }
 
     res.json({ ok: true, enabled: !!enabled, hour: h });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/admin/org-sync-change-logs
+router.get('/org-sync-change-logs', async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const limit = Math.min(parseInt(req.query.limit || '50'), 200);
+    const rows = await db.prepare(`
+      SELECT id, employee_id, user_name, sync_trigger, changed_fields,
+             is_departure, notified_admin, error_msg,
+             TO_CHAR(synced_at, 'YYYY-MM-DD HH24:MI:SS') AS synced_at
+      FROM org_sync_change_logs
+      ORDER BY synced_at DESC
+      FETCH FIRST ? ROWS ONLY
+    `).all(limit);
+    res.json(rows);
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

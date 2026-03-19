@@ -610,6 +610,8 @@ export interface OrgScope {
   profit_center_details?: { code: string; name?: string }[]
   org_section_details?: { code: string; name?: string }[]
   org_group_details?: { name: string }[]
+  org_code_count?: number
+  org_code_details?: { org_code: string; org_id?: number | null }[]
 }
 
 export interface AiReportDashboard {
