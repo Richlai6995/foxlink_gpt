@@ -5,7 +5,7 @@ WORKDIR /app/client
 
 # Install deps first (layer cache)
 COPY client/package*.json ./
-RUN --network=host npm install
+RUN npm install
 
 # Build Vite/React app
 COPY client ./
@@ -20,18 +20,16 @@ FROM node:20-slim AS runner
 # Install Oracle Client dependency + utilities
 # node:20-slim = Debian Bookworm (glibc 2.36) → libaio1t64 (not libaio1)
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends \
-       libaio1t64 \
-       tzdata \
-       fontconfig \
+    && apt-get install -y --no-install-recommends tzdata fontconfig \
+    && (apt-get install -y --no-install-recommends libaio1t64 2>/dev/null \
+        || apt-get install -y --no-install-recommends libaio1) \
     && rm -rf /var/lib/apt/lists/*
 
 # Timezone
 ENV TZ=Asia/Taipei
 
-# Oracle environment variables (path must match docker-compose volume mount target)
-# Using Instant Client 23.26 (requires glibc >= 2.28, Bookworm has 2.36 ✓)
-ENV ORACLE_HOME=/opt/oracle/instantclient_23_26
+# Oracle environment variables — 對應 K8s volume mount: pvc-flhqgpt-source subPath:oracle_client
+ENV ORACLE_HOME=/opt/oracle/instantclient
 ENV LD_LIBRARY_PATH=${ORACLE_HOME}
 ENV PATH=${ORACLE_HOME}:${PATH}
 
