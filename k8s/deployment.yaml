@@ -35,7 +35,7 @@ spec:
 
       containers:
         - name: foxlink-gpt
-          image: your-registry/foxlink-gpt:latest   # TODO: 替換為實際 image registry
+          image: 10.8.93.11:5000/foxlink-gpt:latest
           imagePullPolicy: Always
           ports:
             - containerPort: 3007
@@ -67,27 +67,24 @@ spec:
 
           # ── Volume Mounts ─────────────────────────────────────────────────
           volumeMounts:
-            # ── 持久化資料（全部走同一個 NFS PVC，用 subPath 區分）──
-            - name: nfs-storage
+            # ── 持久化：上傳檔案（NFS）──
+            - name: nfs-upload
               mountPath: /app/uploads
-              subPath: uploads
-            - name: nfs-storage
-              mountPath: /app/logs
-              subPath: logs
-            - name: nfs-storage
-              mountPath: /app/backups
-              subPath: backups
-            - name: nfs-storage
-              mountPath: /app/fonts
-              subPath: fonts
-            - name: nfs-storage
+            # ── 持久化：Skill Runners（NFS，pod 重啟後保留）──
+            - name: nfs-source
               mountPath: /app/skill_runners
               subPath: skill_runners
-            # ── Oracle Instant Client ──
-            - name: nfs-storage
-              mountPath: /opt/oracle/instantclient
-              subPath: oracle_client
-              readOnly: true
+            # ── 暫存：logs / backups / fonts（pod 重啟後不需保留）──
+            - name: tmp-data
+              mountPath: /app/logs
+              subPath: logs
+            - name: tmp-data
+              mountPath: /app/backups
+              subPath: backups
+            - name: tmp-data
+              mountPath: /app/fonts
+              subPath: fonts
+            # Oracle Instant Client 已內建於 image，不需額外掛載
 
           # ── Resources ────────────────────────────────────────────────────
           resources:
@@ -123,9 +120,14 @@ spec:
 
       # ── Volumes ────────────────────────────────────────────────────────────
       volumes:
-        - name: nfs-storage
+        - name: nfs-upload
           persistentVolumeClaim:
-            claimName: foxlink-nfs-pvc   # 單一 NFS PVC，用 subPath 區分各目錄
+            claimName: pvc-flgpt-upload
+        - name: nfs-source
+          persistentVolumeClaim:
+            claimName: pvc-flgpt-source
+        - name: tmp-data
+          emptyDir: {}
 ---
 apiVersion: v1
 kind: Service
