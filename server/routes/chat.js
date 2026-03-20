@@ -1190,11 +1190,17 @@ router.post('/sessions/:id/messages', upload.array('files', 10), async (req, res
           new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 30000)),
         ]);
         let answerContent = `[Skill "${sk.name}" 無法取得回應]`;
+        let skillAudioUrl = null;
         if (resp.ok) {
           const data = await resp.json();
           answerContent = data.content || data.system_prompt || answerContent;
+          if (data.audio_url) skillAudioUrl = data.audio_url;
         }
         sendEvent({ type: 'chunk', content: answerContent });
+        if (skillAudioUrl) {
+          const fname = require('path').basename(skillAudioUrl);
+          sendEvent({ type: 'generated_files', files: [{ type: 'audio', filename: fname, publicUrl: skillAudioUrl }] });
+        }
         sendEvent({ type: 'done' });
         // Record 0-token usage for tracing
         const today = new Date().toISOString().slice(0, 10);

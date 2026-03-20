@@ -18,7 +18,8 @@ interface Props {
 function GeneratedFileLinks({ files }: { files: GeneratedFile[] }) {
   if (!files || files.length === 0) return null
   const imageFiles = files.filter((f) => f.type === 'image')
-  const otherFiles = files.filter((f) => f.type !== 'image')
+  const audioFiles = files.filter((f) => f.type === 'audio' || f.filename?.toLowerCase().endsWith('.mp3'))
+  const otherFiles = files.filter((f) => f.type !== 'image' && f.type !== 'audio' && !f.filename?.toLowerCase().endsWith('.mp3'))
   return (
     <div className="mt-3 space-y-2">
       {imageFiles.length > 0 && (
@@ -34,6 +35,23 @@ function GeneratedFileLinks({ files }: { files: GeneratedFile[] }) {
                 href={f.publicUrl}
                 download={f.filename}
                 className="inline-flex items-center gap-1.5 bg-blue-50 border border-blue-200 hover:bg-blue-100 text-blue-700 rounded-lg px-3 py-1.5 text-xs font-medium transition self-start"
+              >
+                <Download size={12} />
+                {f.filename}
+              </a>
+            </div>
+          ))}
+        </div>
+      )}
+      {audioFiles.length > 0 && (
+        <div className="flex flex-col gap-2">
+          {audioFiles.map((f, i) => (
+            <div key={i} className="flex flex-col gap-1">
+              <audio controls src={f.publicUrl} className="w-full max-w-md rounded-lg" preload="metadata" />
+              <a
+                href={f.publicUrl}
+                download={f.filename}
+                className="inline-flex items-center gap-1.5 bg-sky-50 border border-sky-200 hover:bg-sky-100 text-sky-700 rounded-lg px-3 py-1.5 text-xs font-medium transition self-start"
               >
                 <Download size={12} />
                 {f.filename}

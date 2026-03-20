@@ -115,7 +115,7 @@ module.exports = async function handler(body) {
     return { system_prompt: 'TTS 錯誤：' + (data.error || res.status) };
   }
 
-  const audioSrc    = FOXLINK_API + data.audio_url;
+  const audioSrc    = data.audio_url;  // relative path — works via nginx/direct
   const quality     = voiceName.includes('Neural2') ? 'Neural2 ★★★'
                     : voiceName.includes('Wavenet') ? 'Wavenet ★★☆' : 'Standard ★☆☆';
   const langLabel   = { 'cmn-TW': '繁體中文', 'en-US': '英文', 'vi-VN': '越南文', 'ja-JP': '日文', 'ko-KR': '韓文' }[lang] || lang;
