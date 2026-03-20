@@ -186,7 +186,7 @@ async function getEditableKb(db, kbId, userId, userRole) {
   // owner check
   const kb = await db.prepare('SELECT * FROM knowledge_bases WHERE id=?').get(kbId);
   if (!kb) return null;
-  if (kb.creator_id === userId) return kb;
+  if (String(kb.creator_id) === String(userId)) return kb;
   // shared edit permission check
   const user = await db.prepare('SELECT dept_code, profit_center, org_section, org_group_name, role_id FROM users WHERE id=?').get(userId);
   if (!user) return null;
@@ -384,7 +384,7 @@ router.get('/', async (req, res) => {
     // Mark each row with whether current user is owner
     const result = rows.map((r) => ({
       ...r,
-      is_owner: r.creator_id === uid || user.role === 'admin',
+      is_owner: String(r.creator_id) === String(uid) || user.role === 'admin',
       chunk_config: (() => { try { return JSON.parse(r.chunk_config || '{}'); } catch { return {}; } })(),
     }));
     res.json(result);
@@ -399,7 +399,7 @@ router.get('/:id', async (req, res) => {
   try {
     const kb = await getAccessibleKb(db, req.params.id, req.user.id);
     if (!kb) return res.status(404).json({ error: '找不到知識庫或無存取權限' });
-    kb.is_owner = kb.creator_id === req.user.id || req.user.role === 'admin';
+    kb.is_owner = String(kb.creator_id) === String(req.user.id) || req.user.role === 'admin';
     kb.can_edit = kb.is_owner || !!(await getEditableKb(db, req.params.id, req.user.id, req.user.role));
     kb.chunk_config = (() => { try { return JSON.parse(kb.chunk_config || '{}'); } catch { return {}; } })();
     res.json(kb);
@@ -482,7 +482,7 @@ router.delete('/:id', async (req, res) => {
   try {
     const kb = await db.prepare('SELECT * FROM knowledge_bases WHERE id=?').get(req.params.id);
     if (!kb) return res.status(404).json({ error: '找不到知識庫' });
-    if (kb.creator_id !== req.user.id && req.user.role !== 'admin') {
+    if (String(kb.creator_id) !== String(req.user.id) && req.user.role !== 'admin') {
       return res.status(403).json({ error: '僅知識庫擁有者可刪除' });
     }
     // Delete uploaded files
@@ -765,7 +765,7 @@ router.get('/:id/access', async (req, res) => {
   try {
     const kb = await db.prepare('SELECT creator_id FROM knowledge_bases WHERE id=?').get(req.params.id);
     if (!kb) return res.status(404).json({ error: '找不到知識庫' });
-    if (kb.creator_id !== req.user.id && req.user.role !== 'admin') {
+    if (String(kb.creator_id) !== String(req.user.id) && req.user.role !== 'admin') {
       return res.status(403).json({ error: '僅擁有者可檢視共享設定' });
     }
     const grants = await db.prepare(
@@ -786,7 +786,7 @@ router.post('/:id/access', async (req, res) => {
   try {
     const kb = await db.prepare('SELECT creator_id FROM knowledge_bases WHERE id=?').get(req.params.id);
     if (!kb) return res.status(404).json({ error: '找不到知識庫' });
-    if (kb.creator_id !== req.user.id && req.user.role !== 'admin') {
+    if (String(kb.creator_id) !== String(req.user.id) && req.user.role !== 'admin') {
       return res.status(403).json({ error: '僅擁有者可新增共享' });
     }
 
@@ -821,7 +821,7 @@ router.delete('/:id/access/:grantId', async (req, res) => {
   try {
     const kb = await db.prepare('SELECT creator_id FROM knowledge_bases WHERE id=?').get(req.params.id);
     if (!kb) return res.status(404).json({ error: '找不到知識庫' });
-    if (kb.creator_id !== req.user.id && req.user.role !== 'admin') {
+    if (String(kb.creator_id) !== String(req.user.id) && req.user.role !== 'admin') {
       return res.status(403).json({ error: '僅擁有者可移除共享' });
     }
     await db.prepare('DELETE FROM kb_access WHERE id=? AND kb_id=?').run(req.params.grantId, req.params.id);
@@ -837,7 +837,7 @@ router.post('/:id/request-public', async (req, res) => {
   try {
     const kb = await db.prepare('SELECT * FROM knowledge_bases WHERE id=?').get(req.params.id);
     if (!kb) return res.status(404).json({ error: '找不到知識庫' });
-    if (kb.creator_id !== req.user.id) return res.status(403).json({ error: '僅擁有者可申請公開' });
+    if (String(kb.creator_id) !== String(req.user.id)) return res.status(403).json({ error: '僅擁有者可申請公開' });
     if (kb.public_status === 'public') return res.status(409).json({ error: '已是公開狀態' });
     if (kb.public_status === 'pending') return res.status(409).json({ error: '已送出申請，等待管理員審核' });
 
