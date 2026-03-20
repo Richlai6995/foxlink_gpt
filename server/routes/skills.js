@@ -23,7 +23,7 @@ router.post('/tts/synthesize', verifyServiceKey, async (req, res) => {
     if (!text?.trim()) return res.status(400).json({ error: '請提供 text' });
 
     const model = await db.prepare(
-      `SELECT api_model, api_key_enc FROM llm_models WHERE model_role='tts' AND is_active=1 ORDER BY sort_order LIMIT 1`
+      `SELECT api_model, api_key_enc FROM llm_models WHERE model_role='tts' AND is_active=1 ORDER BY sort_order FETCH FIRST 1 ROWS ONLY`
     ).get();
     if (!model) return res.status(404).json({ error: '尚未設定 TTS 模型，請至管理後台新增 model_role=tts 的模型' });
 
@@ -68,7 +68,7 @@ router.post('/tts/synthesize', verifyServiceKey, async (req, res) => {
       const { upsertTokenUsage } = require('../services/tokenService');
       const today      = new Date().toISOString().slice(0, 10);
       const ttsModel   = await db.prepare(
-        `SELECT key FROM llm_models WHERE model_role='tts' AND is_active=1 ORDER BY sort_order LIMIT 1`
+        `SELECT key FROM llm_models WHERE model_role='tts' AND is_active=1 ORDER BY sort_order FETCH FIRST 1 ROWS ONLY`
       ).get();
       const modelKey = ttsModel?.key || 'google-tts';
       await upsertTokenUsage(db, effectiveUserId, today, modelKey, charCount, 0, 0);
