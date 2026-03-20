@@ -65,6 +65,9 @@ tmp/
 # ─── Server logs dir ──────────────────────────────────────────────────────────
 server/logs/
 
+# ─── Code skill runners (runtime generated, do not overwrite on server) ───────
+skill_runners/
+
 # ─── pnpm ─────────────────────────────────────────────────────────────────────
 pnpm-debug.log*
 

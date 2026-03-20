@@ -14,9 +14,10 @@ const { generateFile } = require('./fileGenerator');
 const { upsertTokenUsage } = require('./tokenService');
 const { extractTextFromFile } = require('./gemini');
 const { UPLOAD_DIR } = require('../config/paths');
+const { createClient } = require('./llmService');
 
-const MODEL_PRO   = process.env.GEMINI_MODEL_PRO   || 'gemini-2.0-flash';
-const MODEL_FLASH = process.env.GEMINI_MODEL_FLASH  || 'gemini-2.0-flash';
+const MODEL_PRO   = process.env.GEMINI_MODEL_PRO   || 'gemini-2.5-pro';
+const MODEL_FLASH = process.env.GEMINI_MODEL_FLASH  || 'gemini-2.5-flash';
 
 // ─── KB Search ────────────────────────────────────────────────────────────────
 
@@ -328,19 +329,24 @@ function detectLanguage(text) {
 /**
  * Generate plan JSON. Returns { plan, inputTokens, outputTokens }
  */
-async function generatePlan(question, depth, hasKb) {
-  const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-  const lang  = detectLanguage(question);
+async function generatePlan(question, depth, hasKb, llmClient = null) {
+  const lang     = detectLanguage(question);
   const langHint = lang === 'zh-TW' ? '請以繁體中文生成。' : 'Please generate in English.';
-  const count = Math.max(2, Math.min(12, depth)); // max 12 sub-questions
+  const count    = Math.max(2, Math.min(12, depth));
+  const prompt   = `你是一位研究規劃專家。使用者想深度研究：\n"${question}"\n\n${langHint}\n請生成一份研究計畫，含 ${count} 個子問題。\n\n回傳 JSON（嚴格格式，不加其他文字）：\n{"title":"研究主題（15字內）","objective":"目標說明（50字內）","language":"${lang}","sub_questions":[{"id":1,"question":"子問題1"},{"id":2,"question":"子問題2"}]}`;
 
+  if (llmClient) {
+    const raw  = await llmClient.generate([{ role: 'user', parts: [{ text: prompt }] }]);
+    const text = raw.trim().replace(/^```json\s*|^```\s*|```\s*$/gm, '').trim();
+    return { plan: JSON.parse(text), inputTokens: 0, outputTokens: 0 };
+  }
+
+  // fallback: direct Gemini env
+  const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
   const model = genAI.getGenerativeModel({
     model: MODEL_FLASH,
     generationConfig: { responseMimeType: 'application/json' },
   });
-
-  const prompt = `你是一位研究規劃專家。使用者想深度研究：\n"${question}"\n\n${langHint}\n請生成一份研究計畫，含 ${count} 個子問題。\n\n回傳 JSON（嚴格格式，不加其他文字）：\n{"title":"研究主題（15字內）","objective":"目標說明（50字內）","language":"${lang}","sub_questions":[{"id":1,"question":"子問題1"},{"id":2,"question":"子問題2"}]}`;
-
   const result = await model.generateContent(prompt);
   const usage  = result.response.usageMetadata || {};
   return {
@@ -356,8 +362,8 @@ async function generatePlan(question, depth, hasKb) {
  * global file context, per-SQ file context, and research hints.
  */
 async function generateSection(question, kbContext, difyContext, mcpDecls, useWebSearch, language,
-  globalFileContext = '', sqFileContext = '', hint = '') {
-  const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+  globalFileContext = '', sqFileContext = '', hint = '', llmClient = null) {
+  const genAI = llmClient ? null : new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
   const isZh = language === 'zh-TW';
   const langHint = isZh ? '請以繁體中文詳細回答。' : 'Please answer in detail in English.';
 
@@ -387,8 +393,12 @@ async function generateSection(question, kbContext, difyContext, mcpDecls, useWe
   const cleanDecls = mcpDecls.map(({ _serverId: _s, _serverName: _n, ...d }) => d);
   if (cleanDecls.length) tools.push({ functionDeclarations: cleanDecls });
 
-  const model = genAI.getGenerativeModel({ model: MODEL_PRO });
+  if (llmClient) {
+    const answer = await llmClient.generate([{ role: 'user', parts: [{ text: prompt }] }]);
+    return { answer: answer.trim(), inputTokens: 0, outputTokens: 0 };
+  }
 
+  const model = genAI.getGenerativeModel({ model: MODEL_PRO });
   const result = await model.generateContent({
     contents: [{ role: 'user', parts: [{ text: prompt }] }],
     ...(tools.length ? { tools } : {}),
@@ -398,14 +408,10 @@ async function generateSection(question, kbContext, difyContext, mcpDecls, useWe
   const inT  = usage.promptTokenCount     || 0;
   const outT = usage.candidatesTokenCount || 0;
 
-  // Handle MCP function calls if any
   const candidate = result.response.candidates?.[0];
   const fnCall = candidate?.content?.parts?.find((p) => p.functionCall);
   if (fnCall && mcpDecls.length) {
-    const { name: fnName, args } = fnCall.functionCall;
-    const mcpServerIds = [...new Set(mcpDecls.map((d) => d._serverId))];
-    // This would need db access; for now return the answer text + note
-    console.log(`[Research] MCP function call requested: ${fnName}`, args);
+    console.log(`[Research] MCP function call requested: ${fnCall.functionCall.name}`);
   }
 
   return { answer: result.response.text().trim(), inputTokens: inT, outputTokens: outT };
@@ -414,8 +420,8 @@ async function generateSection(question, kbContext, difyContext, mcpDecls, useWe
 /**
  * Synthesize all section answers into a final Markdown report.
  */
-async function synthesizeReport(title, sections, language) {
-  const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+async function synthesizeReport(title, sections, language, llmClient = null) {
+  const genAI = llmClient ? null : new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
   const langHint = language === 'zh-TW'
     ? '請以繁體中文撰寫完整研究報告。'
     : 'Please write a complete research report in English.';
@@ -438,6 +444,11 @@ ${sectionsText}
 2. 各章節對應一個子問題，保留原始研究內容並適當整合
 3. 結尾加入「結論與建議」章節
 4. 使用清晰的 Markdown 標題與格式`;
+
+  if (llmClient) {
+    const report = await llmClient.generate([{ role: 'user', parts: [{ text: prompt }] }]);
+    return { report: report.trim(), inputTokens: 0, outputTokens: 0 };
+  }
 
   const model  = genAI.getGenerativeModel({ model: MODEL_PRO });
   const result = await model.generateContent(prompt);
@@ -500,6 +511,9 @@ async function runResearchJob(db, jobId) {
   try {
     job = await db.prepare('SELECT * FROM research_jobs WHERE id=?').get(jobId);
     if (!job) return;
+
+    // Build LLM client from job's model_key (follows session's chosen model)
+    const llmClient = await createClient(db, job.model_key || 'pro').catch(() => null);
 
     const plan          = JSON.parse(job.plan_json || '{}');
     const subQuestions  = plan.sub_questions || [];
@@ -639,7 +653,7 @@ async function runResearchJob(db, jobId) {
         try {
           const sec = await generateSection(
             sq.question, kbContext, difyContext, mcpDecls, shouldWeb, language,
-            globalFileContext, sqFileContext, hint
+            globalFileContext, sqFileContext, hint, llmClient
           );
           answer = sec.answer;
           addTokens(MODEL_PRO, sec.inputTokens, sec.outputTokens);
@@ -662,7 +676,7 @@ async function runResearchJob(db, jobId) {
     await db.prepare(
       'UPDATE research_jobs SET progress_label=?, updated_at=SYSTIMESTAMP WHERE id=?'
     ).run(isEn ? 'Synthesizing report...' : '正在整合報告...', jobId);
-    const { report, inputTokens: synIn, outputTokens: synOut } = await synthesizeReport(plan.title, sections, language);
+    const { report, inputTokens: synIn, outputTokens: synOut } = await synthesizeReport(plan.title, sections, language, llmClient);
     addTokens(MODEL_PRO, synIn, synOut);
 
     // Generate files
@@ -723,6 +737,8 @@ async function rerunSections(db, jobId, sectionIds, sqOverrides = []) {
   try {
     job = await db.prepare('SELECT * FROM research_jobs WHERE id=?').get(jobId);
     if (!job) throw new Error('Job not found');
+
+    const llmClient = await createClient(db, job.model_key || 'pro').catch(() => null);
 
     const plan          = JSON.parse(job.plan_json || '{}');
     const subQuestions  = plan.sub_questions || [];
@@ -864,7 +880,7 @@ async function rerunSections(db, jobId, sectionIds, sqOverrides = []) {
       for (let attempt = 0; attempt < 3; attempt++) {
         try {
           const sec = await generateSection(question, kbContext, difyContext, mcpDecls, shouldWeb,
-            language, globalFileContext, sqFileContext, hint);
+            language, globalFileContext, sqFileContext, hint, llmClient);
           answer = sec.answer;
           addTokens(MODEL_PRO, sec.inputTokens, sec.outputTokens);
           break;
@@ -897,7 +913,7 @@ async function rerunSections(db, jobId, sectionIds, sqOverrides = []) {
       .filter((s) => s.done)
       .map((s) => ({ question: s.question, answer: s.answer }));
 
-    const { report, inputTokens: synIn, outputTokens: synOut } = await synthesizeReport(plan.title, allSections, language);
+    const { report, inputTokens: synIn, outputTokens: synOut } = await synthesizeReport(plan.title, allSections, language, llmClient);
     addTokens(MODEL_PRO, synIn, synOut);
 
     await db.prepare(

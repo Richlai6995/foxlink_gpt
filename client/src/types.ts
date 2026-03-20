@@ -268,6 +268,7 @@ export interface AiSelectTopic {
   is_active: number
   is_suspended?: number
   project_id?: number
+  policy_category_id?: number
   designs?: AiSelectDesign[]
 }
 

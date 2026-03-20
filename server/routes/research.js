@@ -110,7 +110,15 @@ router.post('/jobs', async (req, res) => {
       kb_config      = null,
       global_files   = [],   // [{name, path, mime_type}]
       ref_job_ids    = [],   // [jobId, ...] previous research refs
+      model_key      = null, // llm_models.key — follows current chat session model
     } = req.body;
+
+    // Resolve model_key: explicit > session's model > 'pro'
+    let resolvedModelKey = model_key || 'pro';
+    if (!model_key && session_id) {
+      const sess = await db.prepare('SELECT model FROM chat_sessions WHERE id=?').get(session_id);
+      if (sess?.model) resolvedModelKey = sess.model;
+    }
 
     if (!plan?.sub_questions?.length) return res.status(400).json({ error: '研究計畫格式錯誤' });
 
@@ -119,8 +127,8 @@ router.post('/jobs', async (req, res) => {
     await db.prepare(`
       INSERT INTO research_jobs
         (id, user_id, session_id, title, question, plan_json, status, use_web_search, output_formats,
-         kb_config_json, global_files_json, ref_job_ids_json)
-      VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?)
+         kb_config_json, global_files_json, ref_job_ids_json, model_key)
+      VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?)
     `).run(
       jobId,
       req.user.id,
@@ -133,6 +141,7 @@ router.post('/jobs', async (req, res) => {
       kb_config    ? JSON.stringify(kb_config)  : null,
       global_files.length ? JSON.stringify(global_files) : null,
       ref_job_ids.length  ? JSON.stringify(ref_job_ids)  : null,
+      resolvedModelKey,
     );
 
     if (session_id) {
@@ -162,7 +171,7 @@ router.get('/accessible-resources', async (req, res) => {
     if (!ok) return res.status(403).json({ error: '無權限' });
 
     const userId = req.user.id;
-    const roleId = req.user.role_id;
+    const roleId = req.user.role_id ? Number(req.user.role_id) : null;
     const isAdmin = req.user.role === 'admin';
 
     // Self-built KBs

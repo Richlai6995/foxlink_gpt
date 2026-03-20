@@ -2,8 +2,8 @@ import { useState, useEffect, useCallback } from 'react'
 import api from '../../lib/api'
 import {
   Plus, Trash2, Edit2, Save, X, ChevronRight, ChevronDown,
-  Shield, Users, UserCheck, Building2, Database, Check,
-  AlertCircle, RefreshCw
+  Shield, UserCheck, Building2, Database, Check,
+  AlertCircle, RefreshCw, Tag, ChevronUp, GripVertical
 } from 'lucide-react'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -22,6 +22,21 @@ interface Policy {
   description?: string
   creator_name?: string
   rules: PolicyRule[]
+  category_ids?: number[]
+}
+
+interface PolicyCategory {
+  id: number
+  name: string
+  description?: string
+  policy_ids?: number[]
+}
+
+interface PolicyAssignment {
+  policy_id: number
+  priority: number
+  name?: string       // from backend JOIN
+  policy_name?: string // local label fallback
 }
 
 interface Assignment {
@@ -61,6 +76,8 @@ const VALUE_TYPE_OPTIONS: Record<number, { value: string; label: string }[]> = {
   1: [{ value: 'user_id', label: '使用者' }],
   2: [{ value: 'role_id', label: '角色' }],
   3: [
+    { value: 'super_user',         label: '🔓 超級使用者（無限制）' },
+    { value: 'auto_from_employee', label: '⚡ 依員工組織自動推導' },
     { value: 'dept_code', label: '部門' },
     { value: 'profit_center', label: '利潤中心' },
     { value: 'org_section', label: '事業處' },
@@ -68,6 +85,7 @@ const VALUE_TYPE_OPTIONS: Record<number, { value: string; label: string }[]> = {
     { value: 'org_code', label: '組織代碼 (ORG_CODE)' },
   ],
   4: [
+    { value: 'super_user',           label: '🔓 超級使用者（無限制）' },
     { value: 'auto_from_employee',   label: '⚡ 依員工組織自動推導' },
     { value: 'organization_id',      label: '製造組織 ID (數字)' },
     { value: 'organization_code',    label: '製造組織 Code (如 Z4E)' },
@@ -81,6 +99,7 @@ const VALUE_TYPE_OPTIONS: Record<number, { value: string; label: string }[]> = {
 // ── Main Component ────────────────────────────────────────────────────────────
 export default function DataPermissionsPanel() {
   const [policies, setPolicies] = useState<Policy[]>([])
+  const [categories, setCategories] = useState<PolicyCategory[]>([])
   const [assignments, setAssignments] = useState<Assignment[]>([])
   const [users, setUsers] = useState<UserLov[]>([])
   const [roles, setRoles] = useState<RoleLov[]>([])
@@ -90,22 +109,23 @@ export default function DataPermissionsPanel() {
   const [selectedPolicyId, setSelectedPolicyId] = useState<number | null>(null)
   const [editing, setEditing] = useState(false)
   const [editForm, setEditForm] = useState<Omit<Policy, 'id'>>({ name: '', description: '', rules: [] })
-  const [activeTab, setActiveTab] = useState<'policies' | 'assignments'>('policies')
+  const [activeTab, setActiveTab] = useState<'policies' | 'categories' | 'assignments'>('policies')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const [p, a, u, r, orgData, erpOrgData] = await Promise.all([
+      const [p, cats, a, u, r, orgData, erpOrgData] = await Promise.all([
         api.get('/data-permissions/policies').then(r => r.data),
+        api.get('/data-permissions/categories').then(r => r.data).catch(() => []),
         api.get('/data-permissions/assignments').then(r => r.data),
         api.get('/data-permissions/lov/users').then(r => r.data),
         api.get('/data-permissions/lov/roles').then(r => r.data),
         api.get('/data-permissions/lov/org').then(r => r.data).catch(() => []),
         api.get('/data-permissions/lov/erp-org').then(r => r.data).catch(() => []),
       ])
-      setPolicies(p); setAssignments(a); setUsers(u); setRoles(r)
+      setPolicies(p); setCategories(cats); setAssignments(a); setUsers(u); setRoles(r)
       setOrgLov(orgData); setErpOrgLov(erpOrgData)
     } catch (e: any) {
       setError(e.message)
@@ -183,7 +203,7 @@ export default function DataPermissionsPanel() {
 
       {/* Tabs */}
       <div className="flex gap-1 border-b border-slate-200">
-        {(['policies', 'assignments'] as const).map(t => (
+        {(['policies', 'categories', 'assignments'] as const).map(t => (
           <button
             key={t}
             onClick={() => setActiveTab(t)}
@@ -191,7 +211,7 @@ export default function DataPermissionsPanel() {
               ? 'border-blue-600 text-blue-600'
               : 'border-transparent text-slate-500 hover:text-slate-700'}`}
           >
-            {t === 'policies' ? '政策設定' : '角色/使用者指派'}
+            {t === 'policies' ? '政策設定' : t === 'categories' ? '政策類別' : '角色/使用者指派'}
           </button>
         ))}
       </div>
@@ -253,6 +273,7 @@ export default function DataPermissionsPanel() {
             ) : selectedPolicy ? (
               <PolicyDetail
                 policy={selectedPolicy}
+                categories={categories}
                 onEdit={() => startEdit(selectedPolicy)}
               />
             ) : (
@@ -262,6 +283,16 @@ export default function DataPermissionsPanel() {
               </div>
             )}
           </div>
+        </div>
+      )}
+
+      {activeTab === 'categories' && (
+        <div className="flex-1 min-h-0 overflow-hidden">
+          <CategoriesPanel
+            categories={categories}
+            policies={policies}
+            onRefresh={load}
+          />
         </div>
       )}
 
@@ -281,11 +312,13 @@ export default function DataPermissionsPanel() {
 }
 
 // ── PolicyDetail ──────────────────────────────────────────────────────────────
-function PolicyDetail({ policy, onEdit }: { policy: Policy; onEdit: () => void }) {
+function PolicyDetail({ policy, categories, onEdit }: { policy: Policy; categories: PolicyCategory[]; onEdit: () => void }) {
   const byLayer = [1, 2, 3, 4].map(l => ({
     layer: l,
     rules: policy.rules.filter(r => r.layer === l),
   }))
+
+  const policyCats = categories.filter(c => c.policy_ids?.includes(policy.id))
 
   return (
     <div className="bg-white border border-slate-200 rounded-xl p-5 flex flex-col gap-4">
@@ -293,6 +326,15 @@ function PolicyDetail({ policy, onEdit }: { policy: Policy; onEdit: () => void }
         <div>
           <h3 className="font-semibold text-slate-800">{policy.name}</h3>
           {policy.description && <p className="text-sm text-slate-500 mt-1">{policy.description}</p>}
+          {policyCats.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 mt-2">
+              {policyCats.map(c => (
+                <span key={c.id} className="inline-flex items-center gap-1 text-xs bg-purple-50 border border-purple-200 text-purple-700 px-2 py-0.5 rounded-full">
+                  <Tag size={9} /> {c.name}
+                </span>
+              ))}
+            </div>
+          )}
         </div>
         <button onClick={onEdit} className="flex items-center gap-1.5 text-sm text-blue-600 hover:text-blue-700">
           <Edit2 size={13} /> 編輯
@@ -321,7 +363,7 @@ function PolicyDetail({ policy, onEdit }: { policy: Policy; onEdit: () => void }
                       : 'bg-red-50 border-red-200 text-red-700'}`}
                   >
                     {r.include_type === 'include' ? <Check size={10} /> : <X size={10} />}
-                    {r.value_name || r.value_id}
+                    {r.value_type === 'super_user' ? '🔓 超級使用者' : r.value_type === 'auto_from_employee' ? '⚡ 依員工組織' : (r.value_name || r.value_id)}
                     <span className="opacity-60 text-[10px]">({r.include_type === 'include' ? '允許' : '排除'})</span>
                   </span>
                 ))}
@@ -357,7 +399,6 @@ function PolicyEditor({
   function updateRule(idx: number, patch: Partial<PolicyRule>) {
     const rules = [...form.rules]
     rules[idx] = { ...rules[idx], ...patch }
-    // reset value when type changes
     if (patch.value_type !== undefined) {
       rules[idx].value_id = ''
       rules[idx].value_name = ''
@@ -414,7 +455,6 @@ function PolicyEditor({
 
       {([1, 2, 3, 4] as const).map(layer => {
         const cfg = LAYER_LABELS[layer]
-        const layerRules = form.rules.filter((_, i) => form.rules.findIndex(r => r === form.rules[i]) === i && form.rules[i].layer === layer)
         const expanded = expandedLayer === layer
         return (
           <div key={layer} className="border border-slate-200 rounded-lg overflow-hidden">
@@ -534,7 +574,6 @@ function RuleRow({
 
   return (
     <div className="flex items-center gap-2 bg-slate-50 rounded-lg p-2">
-      {/* include/exclude toggle */}
       <select
         value={rule.include_type}
         onChange={e => onChange({ include_type: e.target.value as 'include' | 'exclude' })}
@@ -544,7 +583,6 @@ function RuleRow({
         <option value="exclude">排除</option>
       </select>
 
-      {/* value type */}
       <select
         value={rule.value_type}
         onChange={e => onChange({ value_type: e.target.value })}
@@ -553,11 +591,16 @@ function RuleRow({
         {valueTypeOpts.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
       </select>
 
-      {/* value picker */}
-      {rule.value_type === 'auto_from_employee' ? (
+      {rule.value_type === 'super_user' ? (
+        <div className="flex-1 flex items-center gap-1.5 bg-amber-50 border border-amber-200 rounded px-2.5 py-1.5">
+          <span className="text-[10px] text-amber-700 font-medium">🔓 超級使用者 — 不套用任何限制條件</span>
+        </div>
+      ) : rule.value_type === 'auto_from_employee' ? (
         <div className="flex-1 flex items-center gap-1.5 bg-blue-50 border border-blue-200 rounded px-2.5 py-1.5">
           <span className="text-[10px] text-blue-600 font-medium">自動依登入員工部門推導</span>
-          <span className="text-[9px] text-blue-400">dept → FL_ORG_EMP_DEPT_MV → ORGANIZATION_ID</span>
+          <span className="text-[9px] text-blue-400">
+            {layer === 4 ? 'dept → FL_ORG_EMP_DEPT_MV → ORGANIZATION_ID' : 'dept → FL_ORG_EMP_DEPT_MV → 組織範圍'}
+          </span>
         </div>
       ) : lovOpts.length > 0 ? (
         <select
@@ -597,6 +640,290 @@ function RuleRow({
   )
 }
 
+// ── CategoriesPanel ───────────────────────────────────────────────────────────
+function CategoriesPanel({
+  categories, policies, onRefresh
+}: {
+  categories: PolicyCategory[]
+  policies: Policy[]
+  onRefresh: () => void
+}) {
+  const [selectedId, setSelectedId] = useState<number | null>(null)
+  const [editingNew, setEditingNew] = useState(false)
+  const [newName, setNewName] = useState('')
+  const [newDesc, setNewDesc] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+
+  // per-category edit state
+  const [editCatId, setEditCatId] = useState<number | null>(null)
+  const [editCatName, setEditCatName] = useState('')
+  const [editCatDesc, setEditCatDesc] = useState('')
+  const [editCatPolicies, setEditCatPolicies] = useState<number[]>([])
+
+  const selectedCat = categories.find(c => c.id === selectedId)
+
+  function selectCat(c: PolicyCategory) {
+    setSelectedId(c.id)
+    setEditingNew(false)
+    setEditCatId(null)
+  }
+
+  function startEditCat(c: PolicyCategory) {
+    setEditCatId(c.id)
+    setEditCatName(c.name)
+    setEditCatDesc(c.description || '')
+    setEditCatPolicies(c.policy_ids || [])
+  }
+
+  async function saveNewCategory() {
+    if (!newName.trim()) { setError('類別名稱為必填'); return }
+    setSaving(true); setError('')
+    try {
+      await api.post('/data-permissions/categories', { name: newName.trim(), description: newDesc.trim() })
+      setNewName(''); setNewDesc(''); setEditingNew(false)
+      await onRefresh()
+    } catch (e: any) {
+      setError(e.response?.data?.error || e.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function saveEditCat() {
+    if (!editCatName.trim()) { setError('類別名稱為必填'); return }
+    setSaving(true); setError('')
+    try {
+      await api.put(`/data-permissions/categories/${editCatId}`, {
+        name: editCatName.trim(),
+        description: editCatDesc.trim()
+      })
+      await api.put(`/data-permissions/categories/${editCatId}/policies`, { policy_ids: editCatPolicies })
+      setEditCatId(null)
+      await onRefresh()
+    } catch (e: any) {
+      setError(e.response?.data?.error || e.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function deleteCategory(id: number) {
+    if (!confirm('確定刪除此類別？（不會刪除關聯的政策）')) return
+    try {
+      await api.delete(`/data-permissions/categories/${id}`)
+      if (selectedId === id) setSelectedId(null)
+      await onRefresh()
+    } catch (e: any) {
+      setError(e.response?.data?.error || e.message)
+    }
+  }
+
+  function togglePolicy(pid: number) {
+    setEditCatPolicies(prev =>
+      prev.includes(pid) ? prev.filter(x => x !== pid) : [...prev, pid]
+    )
+  }
+
+  return (
+    <div className="flex gap-4 h-full min-h-0">
+      {/* Left: category list */}
+      <div className="w-64 flex flex-col gap-2 min-h-0">
+        <button
+          onClick={() => { setEditingNew(true); setSelectedId(null); setEditCatId(null) }}
+          className="flex items-center gap-2 text-sm bg-purple-600 text-white px-3 py-2 rounded-lg hover:bg-purple-700 transition"
+        >
+          <Plus size={14} /> 新增類別
+        </button>
+
+        {editingNew && (
+          <div className="bg-white border border-purple-200 rounded-lg p-3 flex flex-col gap-2">
+            <input
+              value={newName}
+              onChange={e => setNewName(e.target.value)}
+              placeholder="類別名稱 *"
+              className="w-full border border-slate-200 rounded px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-purple-300"
+              autoFocus
+            />
+            <input
+              value={newDesc}
+              onChange={e => setNewDesc(e.target.value)}
+              placeholder="說明（選填）"
+              className="w-full border border-slate-200 rounded px-2 py-1.5 text-sm outline-none"
+            />
+            <div className="flex gap-1.5">
+              <button
+                onClick={saveNewCategory}
+                disabled={saving}
+                className="flex-1 flex items-center justify-center gap-1 text-xs bg-purple-600 text-white px-2 py-1.5 rounded hover:bg-purple-700 disabled:opacity-50"
+              >
+                <Save size={11} /> {saving ? '儲存中...' : '建立'}
+              </button>
+              <button
+                onClick={() => { setEditingNew(false); setNewName(''); setNewDesc('') }}
+                className="px-2 py-1.5 text-xs border border-slate-200 rounded text-slate-600 hover:bg-slate-50"
+              >
+                取消
+              </button>
+            </div>
+          </div>
+        )}
+
+        <div className="flex-1 overflow-auto border border-slate-200 rounded-lg bg-white">
+          {categories.length === 0 && !editingNew && (
+            <div className="text-center text-slate-400 text-sm py-8">尚無類別</div>
+          )}
+          {categories.map(c => (
+            <div
+              key={c.id}
+              className={`flex items-center gap-2 px-3 py-2.5 border-b border-slate-100 last:border-0 cursor-pointer transition ${selectedId === c.id ? 'bg-purple-50' : 'hover:bg-slate-50'}`}
+              onClick={() => selectCat(c)}
+            >
+              <Tag size={13} className="text-purple-500 shrink-0" />
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-medium text-slate-800 truncate">{c.name}</div>
+                <div className="text-xs text-slate-400">{(c.policy_ids || []).length} 個政策</div>
+              </div>
+              <div className="flex gap-1 shrink-0">
+                <button
+                  onClick={e => { e.stopPropagation(); selectCat(c); startEditCat(c) }}
+                  className="p-1 text-slate-400 hover:text-purple-600 rounded"
+                ><Edit2 size={12} /></button>
+                <button
+                  onClick={e => { e.stopPropagation(); deleteCategory(c.id) }}
+                  className="p-1 text-slate-400 hover:text-red-600 rounded"
+                ><Trash2 size={12} /></button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Right: detail / edit */}
+      <div className="flex-1 min-w-0 overflow-y-auto">
+        {error && (
+          <div className="flex items-center gap-2 text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2 text-sm mb-3">
+            <AlertCircle size={14} /> {error}
+            <button className="ml-auto" onClick={() => setError('')}><X size={14} /></button>
+          </div>
+        )}
+
+        {editCatId !== null && selectedCat ? (
+          <div className="bg-white border border-slate-200 rounded-xl p-5 flex flex-col gap-4">
+            <div className="flex items-center justify-between">
+              <h3 className="font-semibold text-slate-800">編輯類別</h3>
+              <div className="flex gap-2">
+                <button onClick={() => setEditCatId(null)} className="px-3 py-1.5 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">
+                  取消
+                </button>
+                <button
+                  onClick={saveEditCat}
+                  disabled={saving}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50"
+                >
+                  <Save size={13} /> {saving ? '儲存中...' : '儲存'}
+                </button>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">類別名稱 *</label>
+                <input
+                  value={editCatName}
+                  onChange={e => setEditCatName(e.target.value)}
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-purple-300 outline-none"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">說明</label>
+                <input
+                  value={editCatDesc}
+                  onChange={e => setEditCatDesc(e.target.value)}
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-purple-300 outline-none"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-2">包含的政策（多選）</label>
+              <div className="border border-slate-200 rounded-lg overflow-hidden">
+                {policies.length === 0 && (
+                  <div className="text-center text-slate-400 text-sm py-4">尚無政策可選</div>
+                )}
+                {policies.map(p => (
+                  <label
+                    key={p.id}
+                    className="flex items-center gap-3 px-4 py-2.5 border-b border-slate-100 last:border-0 hover:bg-slate-50 cursor-pointer"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={editCatPolicies.includes(p.id)}
+                      onChange={() => togglePolicy(p.id)}
+                      className="accent-purple-600"
+                    />
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-medium text-slate-800">{p.name}</div>
+                      {p.description && <div className="text-xs text-slate-400 truncate">{p.description}</div>}
+                    </div>
+                    <span className="text-xs text-slate-400">{p.rules.length} 條規則</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+          </div>
+        ) : selectedCat ? (
+          <div className="bg-white border border-slate-200 rounded-xl p-5 flex flex-col gap-4">
+            <div className="flex items-start justify-between">
+              <div>
+                <div className="flex items-center gap-2">
+                  <Tag size={16} className="text-purple-500" />
+                  <h3 className="font-semibold text-slate-800">{selectedCat.name}</h3>
+                </div>
+                {selectedCat.description && <p className="text-sm text-slate-500 mt-1">{selectedCat.description}</p>}
+              </div>
+              <button
+                onClick={() => startEditCat(selectedCat)}
+                className="flex items-center gap-1.5 text-sm text-purple-600 hover:text-purple-700"
+              >
+                <Edit2 size={13} /> 編輯
+              </button>
+            </div>
+
+            <div>
+              <div className="text-xs font-medium text-slate-600 mb-2">包含的政策</div>
+              {(selectedCat.policy_ids || []).length === 0 ? (
+                <div className="text-sm text-slate-400 italic">尚未指派任何政策</div>
+              ) : (
+                <div className="flex flex-col gap-2">
+                  {(selectedCat.policy_ids || []).map(pid => {
+                    const p = policies.find(x => x.id === pid)
+                    if (!p) return null
+                    return (
+                      <div key={pid} className="flex items-center gap-3 bg-purple-50 border border-purple-100 rounded-lg px-3 py-2">
+                        <Shield size={13} className="text-purple-500 shrink-0" />
+                        <div className="flex-1 min-w-0">
+                          <div className="text-sm font-medium text-slate-800">{p.name}</div>
+                          {p.description && <div className="text-xs text-slate-400 truncate">{p.description}</div>}
+                        </div>
+                        <span className="text-xs text-slate-400">{p.rules.length} 條規則</span>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        ) : (
+          <div className="flex flex-col items-center justify-center h-full text-slate-400 text-sm">
+            <Tag size={40} className="mb-3 opacity-30" />
+            選擇類別或新增
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 // ── AssignmentsPanel ──────────────────────────────────────────────────────────
 function AssignmentsPanel({
   policies, assignments, users, roles, onRefresh
@@ -606,27 +933,7 @@ function AssignmentsPanel({
   onRefresh: () => void
 }) {
   const [tab, setTab] = useState<'roles' | 'users'>('roles')
-  const [saving, setSaving] = useState<number | null>(null)
   const [error, setError] = useState('')
-
-  function getAssignment(type: 'role' | 'user', id: number): Assignment | undefined {
-    return assignments.find(a => a.grantee_type === type && a.grantee_id === id)
-  }
-
-  async function assign(type: 'role' | 'user', id: number, policyId: number | null) {
-    setSaving(id); setError('')
-    try {
-      const endpoint = type === 'role'
-        ? `/data-permissions/assignments/role/${id}`
-        : `/data-permissions/assignments/user/${id}`
-      await api.put(endpoint, { policy_id: policyId })
-      await onRefresh()
-    } catch (e: any) {
-      setError(e.response?.data?.error || e.message)
-    } finally {
-      setSaving(null)
-    }
-  }
 
   return (
     <div className="flex flex-col gap-3">
@@ -636,6 +943,7 @@ function AssignmentsPanel({
           <button className="ml-auto" onClick={() => setError('')}><X size={14} /></button>
         </div>
       )}
+
       <div className="flex gap-1 border-b border-slate-200">
         {(['roles', 'users'] as const).map(t => (
           <button
@@ -648,115 +956,254 @@ function AssignmentsPanel({
         ))}
       </div>
 
-      {tab === 'roles' && (
-        <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
-          <table className="w-full text-sm">
-            <thead className="bg-slate-50 border-b border-slate-200">
-              <tr>
-                <th className="text-left px-4 py-2.5 text-xs font-medium text-slate-600">角色</th>
-                <th className="text-left px-4 py-2.5 text-xs font-medium text-slate-600">指派政策</th>
-                <th className="w-24"></th>
-              </tr>
-            </thead>
-            <tbody>
-              {roles.map(role => {
-                const asgn = getAssignment('role', role.id)
-                return (
-                  <AssignRow
-                    key={role.id}
-                    label={role.name}
-                    sub={role.description}
-                    currentPolicyId={asgn?.policy_id ?? null}
-                    policies={policies}
-                    saving={saving === role.id}
-                    onSave={pid => assign('role', role.id, pid)}
-                  />
-                )
-              })}
-            </tbody>
-          </table>
+      {tab === 'users' && (
+        <div className="flex items-center gap-2 text-blue-700 bg-blue-50 border border-blue-100 rounded-lg px-3 py-2 text-xs">
+          <AlertCircle size={13} /> 使用者有個人指派政策時優先套用；未設定則沿用所屬角色的政策。
         </div>
       )}
 
-      {tab === 'users' && (
-        <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
-          <div className="px-4 py-2 bg-blue-50 border-b border-blue-100 text-xs text-blue-700">
-            使用者有設定個人政策時優先套用；未設定則沿用所屬角色的政策。
-          </div>
-          <table className="w-full text-sm">
-            <thead className="bg-slate-50 border-b border-slate-200">
-              <tr>
-                <th className="text-left px-4 py-2.5 text-xs font-medium text-slate-600">使用者</th>
-                <th className="text-left px-4 py-2.5 text-xs font-medium text-slate-600">個人指派政策</th>
-                <th className="w-24"></th>
-              </tr>
-            </thead>
-            <tbody>
-              {users.map(user => {
-                const asgn = getAssignment('user', user.id)
-                return (
-                  <AssignRow
-                    key={user.id}
-                    label={user.name || user.username}
-                    sub={`${user.employee_id ? user.employee_id + ' | ' : ''}${user.dept_name || ''}`}
-                    currentPolicyId={asgn?.policy_id ?? null}
-                    policies={policies}
-                    saving={saving === user.id}
-                    onSave={pid => assign('user', user.id, pid)}
-                  />
-                )
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
+      <div className="flex flex-col gap-2">
+        {tab === 'roles' && roles.map(role => (
+          <MultiAssignRow
+            key={role.id}
+            type="role"
+            granteeId={role.id}
+            label={role.name}
+            sub={role.description}
+            policies={policies}
+            onError={setError}
+            onRefresh={onRefresh}
+          />
+        ))}
+        {tab === 'users' && users.map(user => (
+          <MultiAssignRow
+            key={user.id}
+            type="user"
+            granteeId={user.id}
+            label={user.name || user.username}
+            sub={`${user.employee_id ? user.employee_id + ' | ' : ''}${user.dept_name || ''}`}
+            policies={policies}
+            onError={setError}
+            onRefresh={onRefresh}
+          />
+        ))}
+      </div>
     </div>
   )
 }
 
-function AssignRow({
-  label, sub, currentPolicyId, policies, saving, onSave
+// ── MultiAssignRow ─────────────────────────────────────────────────────────────
+function MultiAssignRow({
+  type, granteeId, label, sub, policies, onError, onRefresh
 }: {
-  label: string; sub?: string; currentPolicyId: number | null
+  type: 'role' | 'user'
+  granteeId: number
+  label: string
+  sub?: string
   policies: Policy[]
-  saving: boolean; onSave: (pid: number | null) => void
+  onError: (msg: string) => void
+  onRefresh: () => void
 }) {
-  const [sel, setSel] = useState<string>(currentPolicyId != null ? String(currentPolicyId) : '')
+  const [expanded, setExpanded] = useState(false)
+  const [assigned, setAssigned] = useState<PolicyAssignment[]>([])
+  const [loading, setLoading] = useState(false)
+  const [saving, setSaving] = useState(false)
   const [dirty, setDirty] = useState(false)
 
+  const endpoint = type === 'role'
+    ? `/data-permissions/role-policies/${granteeId}`
+    : `/data-permissions/user-policies/${granteeId}`
+
+  async function loadAssigned() {
+    setLoading(true)
+    try {
+      const data = await api.get(endpoint).then(r => r.data)
+      setAssigned(Array.isArray(data) ? data : [])
+    } catch {
+      setAssigned([])
+    } finally {
+      setLoading(false)
+    }
+  }
+
   useEffect(() => {
-    setSel(currentPolicyId != null ? String(currentPolicyId) : '')
-    setDirty(false)
-  }, [currentPolicyId])
+    if (expanded) loadAssigned()
+  }, [expanded])
+
+  function isChecked(pid: number) {
+    return assigned.some(a => a.policy_id === pid)
+  }
+
+  function togglePolicy(pid: number) {
+    setDirty(true)
+    if (isChecked(pid)) {
+      setAssigned(prev => prev.filter(a => a.policy_id !== pid))
+    } else {
+      const maxPriority = assigned.length > 0 ? Math.max(...assigned.map(a => a.priority)) : 0
+      const p = policies.find(x => x.id === pid)
+      setAssigned(prev => [...prev, { policy_id: pid, priority: maxPriority + 10, name: p?.name }])
+    }
+  }
+
+  function movePriority(pid: number, direction: 'up' | 'down') {
+    const sorted = [...assigned].sort((a, b) => a.priority - b.priority)
+    const idx = sorted.findIndex(a => a.policy_id === pid)
+    if (direction === 'up' && idx === 0) return
+    if (direction === 'down' && idx === sorted.length - 1) return
+
+    const swapIdx = direction === 'up' ? idx - 1 : idx + 1
+    const newPriorities = sorted.map(a => a.priority)
+    ;[newPriorities[idx], newPriorities[swapIdx]] = [newPriorities[swapIdx], newPriorities[idx]]
+
+    setDirty(true)
+    setAssigned(sorted.map((a, i) => ({ ...a, priority: newPriorities[i] })))
+  }
+
+  async function saveAssigned() {
+    setSaving(true)
+    try {
+      await api.put(endpoint, {
+        policies: assigned.map(a => ({ policy_id: a.policy_id, priority: a.priority }))
+      })
+      setDirty(false)
+      await onRefresh()
+    } catch (e: any) {
+      onError(e.response?.data?.error || e.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const sortedAssigned = [...assigned].sort((a, b) => a.priority - b.priority)
 
   return (
-    <tr className="border-b border-slate-100 last:border-0">
-      <td className="px-4 py-2.5">
-        <div className="font-medium text-slate-800">{label}</div>
-        {sub && <div className="text-xs text-slate-400">{sub}</div>}
-      </td>
-      <td className="px-4 py-2.5">
-        <select
-          value={sel}
-          onChange={e => { setSel(e.target.value); setDirty(true) }}
-          className="text-sm border border-slate-200 rounded px-2 py-1 outline-none bg-white w-48"
-        >
-          <option value="">-- 不限制 --</option>
-          {policies.map(p => <option key={p.id} value={String(p.id)}>{p.name}</option>)}
-        </select>
-      </td>
-      <td className="px-4 py-2.5 text-right">
-        {dirty && (
-          <button
-            onClick={() => { onSave(sel ? Number(sel) : null); setDirty(false) }}
-            disabled={saving}
-            className="flex items-center gap-1 text-xs bg-blue-600 text-white px-2.5 py-1 rounded hover:bg-blue-700 disabled:opacity-50"
-          >
-            {saving ? <RefreshCw size={11} className="animate-spin" /> : <Save size={11} />}
-            儲存
-          </button>
-        )}
-      </td>
-    </tr>
+    <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+      <div
+        className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-slate-50 transition"
+        onClick={() => setExpanded(e => !e)}
+      >
+        <div className="flex-1 min-w-0">
+          <div className="font-medium text-slate-800 text-sm">{label}</div>
+          {sub && <div className="text-xs text-slate-400">{sub}</div>}
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          {assigned.length > 0 && !expanded && (
+            <div className="flex flex-wrap gap-1">
+              {sortedAssigned.slice(0, 3).map((a, i) => {
+                const p = policies.find(x => x.id === a.policy_id)
+                return (
+                  <span key={a.policy_id} className="text-xs bg-blue-50 border border-blue-200 text-blue-700 px-1.5 py-0.5 rounded-full">
+                    {i + 1}. {p?.name || a.name || `Policy ${a.policy_id}`}
+                  </span>
+                )
+              })}
+              {sortedAssigned.length > 3 && (
+                <span className="text-xs text-slate-400">+{sortedAssigned.length - 3}</span>
+              )}
+            </div>
+          )}
+          {expanded ? <ChevronDown size={14} className="text-slate-400" /> : <ChevronRight size={14} className="text-slate-400" />}
+        </div>
+      </div>
+
+      {expanded && (
+        <div className="border-t border-slate-100 p-4 flex flex-col gap-3">
+          {loading ? (
+            <div className="text-center text-slate-400 text-sm py-4">載入中...</div>
+          ) : (
+            <>
+              <div className="grid grid-cols-2 gap-4">
+                {/* Left: policy checklist */}
+                <div>
+                  <div className="text-xs font-medium text-slate-600 mb-2">選擇政策</div>
+                  <div className="border border-slate-200 rounded-lg overflow-hidden max-h-48 overflow-y-auto">
+                    {policies.length === 0 ? (
+                      <div className="text-center text-slate-400 text-sm py-4">尚無政策</div>
+                    ) : policies.map(p => (
+                      <label
+                        key={p.id}
+                        className="flex items-center gap-2.5 px-3 py-2 border-b border-slate-100 last:border-0 hover:bg-slate-50 cursor-pointer"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={isChecked(p.id)}
+                          onChange={() => togglePolicy(p.id)}
+                          className="accent-blue-600"
+                        />
+                        <div className="flex-1 min-w-0">
+                          <div className="text-xs font-medium text-slate-800 truncate">{p.name}</div>
+                          {p.description && <div className="text-[10px] text-slate-400 truncate">{p.description}</div>}
+                        </div>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Right: priority order */}
+                <div>
+                  <div className="text-xs font-medium text-slate-600 mb-2">
+                    優先順序
+                    <span className="ml-1 text-slate-400 font-normal">（數字越小越優先，可調整順序）</span>
+                  </div>
+                  {sortedAssigned.length === 0 ? (
+                    <div className="text-xs text-slate-400 italic py-2">未選擇任何政策（不限制）</div>
+                  ) : (
+                    <div className="flex flex-col gap-1.5">
+                      {sortedAssigned.map((a, i) => {
+                        const p = policies.find(x => x.id === a.policy_id)
+                        return (
+                          <div key={a.policy_id} className="flex items-center gap-2 bg-blue-50 border border-blue-100 rounded-lg px-2.5 py-1.5">
+                            <GripVertical size={12} className="text-slate-300 shrink-0" />
+                            <span className="text-xs text-blue-700 font-bold w-5 shrink-0">{i + 1}</span>
+                            <span className="flex-1 text-xs text-slate-800 truncate">
+                              {p?.name || a.name || `Policy ${a.policy_id}`}
+                            </span>
+                            <div className="flex flex-col gap-0.5 shrink-0">
+                              <button
+                                onClick={() => movePriority(a.policy_id, 'up')}
+                                disabled={i === 0}
+                                className="p-0.5 text-slate-400 hover:text-blue-600 disabled:opacity-30"
+                              >
+                                <ChevronUp size={10} />
+                              </button>
+                              <button
+                                onClick={() => movePriority(a.policy_id, 'down')}
+                                disabled={i === sortedAssigned.length - 1}
+                                className="p-0.5 text-slate-400 hover:text-blue-600 disabled:opacity-30"
+                              >
+                                <ChevronDown size={10} />
+                              </button>
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {dirty && (
+                <div className="flex items-center justify-end gap-2 pt-1 border-t border-slate-100">
+                  <button
+                    onClick={() => { loadAssigned(); setDirty(false) }}
+                    className="text-xs text-slate-500 hover:text-slate-700 px-2 py-1"
+                  >
+                    還原
+                  </button>
+                  <button
+                    onClick={saveAssigned}
+                    disabled={saving}
+                    className="flex items-center gap-1 text-xs bg-blue-600 text-white px-3 py-1.5 rounded-lg hover:bg-blue-700 disabled:opacity-50"
+                  >
+                    {saving ? <RefreshCw size={11} className="animate-spin" /> : <Save size={11} />}
+                    {saving ? '儲存中...' : '儲存變更'}
+                  </button>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
+    </div>
   )
 }

@@ -143,6 +143,7 @@ router.post('/login', async (req, res) => {
   try {
     const db = require('../database-oracle').db;
     const isAdmin = username.toUpperCase() === (process.env.DEFAULT_ADMIN_ACCOUNT || 'admin').toUpperCase();
+    console.log(`[Auth] Login attempt: ${username}, isAdmin=${isAdmin}, LDAP_ENABLED=${LDAP_ENABLED}`);
 
     // Try LDAP for non-admin
     if (!isAdmin && LDAP_ENABLED) {

@@ -44,6 +44,7 @@ interface StreamingSection { id: number; question: string; answer: string; done:
 
 interface Props {
   sessionId: string | null
+  modelKey?: string           // current session's model key — passed to research job
   initialQuestion?: string
   initialFiles?: File[]
   editJobId?: string          // edit & rerun mode: open an existing job
@@ -168,7 +169,7 @@ function FileAttachArea({ pendingFiles, onAdd, onRemove, uploadedFiles, onRemove
 
 // ── Main Component ─────────────────────────────────────────────────────────────
 
-export default function ResearchModal({ sessionId, initialQuestion = '', initialFiles = [], editJobId, onClose, onJobCreated }: Props) {
+export default function ResearchModal({ sessionId, modelKey, initialQuestion = '', initialFiles = [], editJobId, onClose, onJobCreated }: Props) {
   const { t, i18n } = useTranslation()
 
   const localName = (item: LocalizedItem) => {
@@ -440,6 +441,7 @@ export default function ResearchModal({ sessionId, initialQuestion = '', initial
           question:       question.trim(),
           plan:           finalPlan,
           session_id:     sessionId,
+          model_key:      modelKey,
           output_formats: formats.join(','),
           use_web_search: !hasKb && !kb_config && !allGlobalUploaded.length,
           kb_config,

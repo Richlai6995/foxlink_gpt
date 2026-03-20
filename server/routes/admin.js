@@ -285,7 +285,7 @@ router.post('/llm-models/test', async (req, res) => {
         apiVersion: api_version?.trim() || '2024-08-01-preview',
         deployment: deployment_name.trim(),
       });
-      const isO1 = /^o\d/i.test(deployment_name.trim());
+      const isO1 = /^o\d/i.test(deployment_name.trim()) || /^gpt-5/i.test(deployment_name.trim());
       const resp = await client.chat.completions.create({
         model:    deployment_name.trim(),
         messages: [{ role: 'user', content: 'Reply with the single word: OK' }],

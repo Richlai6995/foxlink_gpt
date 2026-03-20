@@ -195,8 +195,8 @@ async function streamChatAoai(modelRow, history, userParts, onChunk, extraSystem
     .join('\n');
   if (userText) messages.push({ role: 'user', content: userText });
 
-  // o1/o3 series: no system role, no streaming, use max_completion_tokens
-  const isO1 = /^o\d/i.test(modelRow.deployment_name || '');
+  // o1/o3/gpt-5.x series: no system role, no streaming, use max_completion_tokens
+  const isO1 = /^o\d/i.test(modelRow.deployment_name || '') || /^gpt-5/i.test(modelRow.deployment_name || '');
   if (isO1) {
     // o1 doesn't support streaming — do a regular call and simulate chunking
     const filteredMsgs = messages.filter((m) => m.role !== 'system');

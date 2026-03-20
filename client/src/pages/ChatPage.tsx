@@ -1159,6 +1159,7 @@ export default function ChatPage() {
       {showResearchModal && (
         <ResearchModal
           sessionId={currentSessionId}
+          modelKey={model}
           initialQuestion={researchInitialQuestion}
           initialFiles={researchInitialFiles}
           editJobId={editRerunJobId || undefined}

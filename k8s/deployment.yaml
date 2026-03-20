@@ -11,7 +11,7 @@ metadata:
   labels:
     app: foxlink-gpt
 spec:
-  replicas: 3
+  replicas: 4
   selector:
     matchLabels:
       app: foxlink-gpt
@@ -52,6 +52,8 @@ spec:
               value: "/app/uploads"
             - name: REDIS_URL
               value: "redis://redis:6379"
+            - name: NODE_OPTIONS
+              value: "--max-old-space-size=1536"
             # Oracle Instant Client
             # TODO: 確認版本後更新路徑
             - name: ORACLE_HOME
@@ -65,16 +67,32 @@ spec:
 
           # ── Volume Mounts ─────────────────────────────────────────────────
           volumeMounts:
-            - name: uploads
+            # ── 持久化資料（全部走同一個 NFS PVC，用 subPath 區分）──
+            - name: nfs-storage
               mountPath: /app/uploads
-            - name: oracle-client
+              subPath: uploads
+            - name: nfs-storage
+              mountPath: /app/logs
+              subPath: logs
+            - name: nfs-storage
+              mountPath: /app/backups
+              subPath: backups
+            - name: nfs-storage
+              mountPath: /app/fonts
+              subPath: fonts
+            - name: nfs-storage
+              mountPath: /app/skill_runners
+              subPath: skill_runners
+            # ── Oracle Instant Client ──
+            - name: nfs-storage
               mountPath: /opt/oracle/instantclient
+              subPath: oracle_client
               readOnly: true
 
           # ── Resources ────────────────────────────────────────────────────
           resources:
             requests:
-              memory: "512Mi"
+              memory: "768Mi"
               cpu: "500m"
             limits:
               memory: "2Gi"
@@ -105,18 +123,9 @@ spec:
 
       # ── Volumes ────────────────────────────────────────────────────────────
       volumes:
-        - name: uploads
+        - name: nfs-storage
           persistentVolumeClaim:
-            claimName: foxlink-nfs-pvc
-        - name: oracle-client
-          # TODO: 確認 Oracle Instant Client 掛載方式（NFS PVC 或 hostPath）
-          # 選項 A：獨立 NFS PVC（推薦）
-          persistentVolumeClaim:
-            claimName: foxlink-oracle-pvc
-          # 選項 B：hostPath（每個 node 都要有 Oracle client）
-          # hostPath:
-          #   path: /opt/oracle/instantclient
-          #   type: Directory
+            claimName: foxlink-nfs-pvc   # 單一 NFS PVC，用 subPath 區分各目錄
 ---
 apiVersion: v1
 kind: Service

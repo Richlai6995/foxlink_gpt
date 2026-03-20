@@ -10,7 +10,7 @@ spec:
   persistentVolumeReclaimPolicy: Retain
   nfs:
     server: 192.168.x.x          # TODO: 替換為 Synology NAS IP
-    path: /volume1/foxlink-uploads  # TODO: 替換為實際共用資料夾路徑
+    path: /volume1/foxlink-gpt    # TODO: 替換為 NAS 共用資料夾根路徑（subPath 在 deployment.yaml 區分）
   mountOptions:
     - nfsvers=4.1
     - hard

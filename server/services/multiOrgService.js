@@ -27,6 +27,7 @@ const MULTIORG_VALUE_TYPES = new Set([
   'set_of_books_id',
   'set_of_books_name',     // SOB 名稱（SET_OF_BOOKS_NAME 欄位）
   'auto_from_employee',    // 依員工部門自動推導（FL_ORG_EMP_DEPT_MV.ORG_ID → ORGANIZATION_ID）
+  'super_user',            // 超級使用者，不限制任何 ERP 組織
 ]);
 
 // ── 快取 ──────────────────────────────────────────────────────────────────────
@@ -162,6 +163,12 @@ function resolveUserScope(rules, hierarchy, autoOrgIds = new Set()) {
   const includeRules = multiRules.filter(r => r.include_type === 'include');
   const excludeRules = multiRules.filter(r => r.include_type === 'exclude');
 
+  // ── super_user 快速路徑：無任何 ERP 組織限制 ──────────────────────────────
+  const hasSuperUser = includeRules.some(r => r.value_type === 'super_user');
+  if (hasSuperUser) {
+    return { hasRules: true, superUser: true };
+  }
+
   // 規則層級：SOB=3, OU=2, Org=1（只能往下展，不往上推論）
   function getRuleLevel(valueType) {
     if (valueType === 'set_of_books_id' || valueType === 'set_of_books_name') return 3;
@@ -187,6 +194,17 @@ function resolveUserScope(rules, hierarchy, autoOrgIds = new Set()) {
   // rowGrantLevel: row → maxLevel（3=SOB, 2=OU, 1=Org）
   // 授權層級決定往下展示到哪：SOB→顯示SOB+OU+Org；OU→顯示OU+Org；Org→只顯示Org
   const rowGrantLevel = new Map();
+
+  // auto_from_employee rule 存在但 autoOrgIds 空 → 員工組織資料未設定，拒絕
+  const hasAutoRule = includeRules.some(r => r.value_type === 'auto_from_employee');
+  if (hasAutoRule && autoOrgIds.size === 0) {
+    console.warn('[MultiOrg] auto_from_employee: autoOrgIds 空，拒絕查詢');
+    return {
+      hasRules: true,
+      denied: true,
+      deniedReason: '⛔ 您的員工組織部門資料尚未設定，無法取得 ERP 組織權限。請聯絡管理員設定您的組織資料。',
+    };
+  }
 
   if (includeRules.length === 0) {
     // 只有 exclude 規則 → 全量授權（視同 SOB 層）
@@ -364,6 +382,8 @@ function checkViolations(question, scope, hierarchy) {
 // ── 格式化 multiorg_scope SSE payload ────────────────────────────────────────
 function buildScopePayload(scope) {
   if (!scope.hasRules) return { has_restrictions: false };
+  if (scope.denied) return { has_restrictions: true, denied: true, denied_reason: scope.deniedReason };
+  if (scope.superUser) return { has_restrictions: false, super_user: true };
   return {
     has_restrictions: true,
     source_levels:    scope.sourceLevels,

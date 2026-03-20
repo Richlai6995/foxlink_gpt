@@ -54,6 +54,7 @@ export default function AiDashboardPage() {
   const [topics, setTopics] = useState<AiSelectTopic[]>([])
   const [expandedTopics, setExpandedTopics] = useState<Set<number>>(new Set())
   const [selectedDesign, setSelectedDesign] = useState<AiSelectDesign | null>(null)
+  const selectedTopic = topics.find(t => t.designs?.some(d => d.id === selectedDesign?.id)) ?? null
   const [showDesigner, setShowDesigner] = useState(false)
 
   const [question, setQuestion] = useState('')
@@ -111,13 +112,23 @@ export default function AiDashboardPage() {
       setOrgScope({ has_restrictions: false, is_admin: true } as any)
       return
     }
-    api.get('/dashboard/multiorg-scope')
+    const catId = selectedTopic?.policy_category_id
+    const catQs = catId ? `?category_id=${catId}` : ''
+    api.get(`/dashboard/multiorg-scope${catQs}`)
       .then(r => setMultiOrgScope(r.data))
-      .catch(() => setMultiOrgScope({ has_restrictions: false }))
-    api.get('/dashboard/org-scope')
+      .catch(e => {
+        const d = e?.response?.data
+        if (d?.denied) setMultiOrgScope(d)
+        else setMultiOrgScope({ has_restrictions: false })
+      })
+    api.get(`/dashboard/org-scope${catQs}`)
       .then(r => setOrgScope(r.data))
-      .catch(() => setOrgScope(null))
-  }, [isAdmin])
+      .catch(e => {
+        const d = e?.response?.data
+        if (d?.denied) setOrgScope(d as any)
+        else setOrgScope(null)
+      })
+  }, [isAdmin, selectedTopic?.policy_category_id])
 
   // 向量搜尋覆蓋參數（查詢時可調整）
   const [showVectorAdv, setShowVectorAdv] = useState(false)
@@ -894,8 +905,19 @@ export default function AiDashboardPage() {
             </div>
           )}
 
+          {/* ── Oracle MultiOrg denied 警告 ─────────────────────────────────── */}
+          {multiOrgScope?.denied && (
+            <div className="bg-red-50 border border-red-300 rounded-xl px-4 py-3 flex items-start gap-2">
+              <Shield size={14} className="text-red-500 flex-shrink-0 mt-0.5" />
+              <div>
+                <p className="text-xs font-semibold text-red-700">Oracle MultiOrg 資料權限未設定</p>
+                <p className="text-xs text-red-600 mt-0.5">{multiOrgScope.denied_reason}</p>
+              </div>
+            </div>
+          )}
+
           {/* ── Oracle MultiOrg 資料權限範圍 Persistent Panel ───────────────── */}
-          {multiOrgScope?.has_restrictions && (
+          {multiOrgScope?.has_restrictions && !multiOrgScope?.denied && (
             <div className="bg-blue-50 border border-blue-200 rounded-xl overflow-hidden">
               <button
                 onClick={() => setMultiOrgExpanded(p => !p)}
@@ -971,8 +993,19 @@ export default function AiDashboardPage() {
             </div>
           )}
 
+          {/* ── 公司組織階層 denied 警告 ─────────────────────────────────────── */}
+          {(orgScope as any)?.denied && (
+            <div className="bg-red-50 border border-red-300 rounded-xl px-4 py-3 flex items-start gap-2">
+              <Shield size={14} className="text-red-500 flex-shrink-0 mt-0.5" />
+              <div>
+                <p className="text-xs font-semibold text-red-700">公司組織資料權限未設定</p>
+                <p className="text-xs text-red-600 mt-0.5">{(orgScope as any).denied_reason}</p>
+              </div>
+            </div>
+          )}
+
           {/* ── 公司組織階層資料權限範圍（Layer 3）────────────────────────────── */}
-          {orgScope?.has_restrictions && (
+          {orgScope?.has_restrictions && !(orgScope as any)?.denied && (
             <div className="bg-green-50 border border-green-200 rounded-xl overflow-hidden">
               <button
                 onClick={() => setOrgScopeExpanded(p => !p)}

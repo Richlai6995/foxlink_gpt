@@ -542,6 +542,7 @@ async function runMigrations(db) {
   await addCol('RESEARCH_JOBS', 'GLOBAL_FILES_JSON',   'CLOB');  // [{name,path,mime_type}]
   await addCol('RESEARCH_JOBS', 'SECTIONS_JSON',       'CLOB');  // [{sq_id,question,answer,done}] streaming
   await addCol('RESEARCH_JOBS', 'REF_JOB_IDS_JSON',   'CLOB');  // [jobId, ...] previous research refs
+  await addCol('RESEARCH_JOBS', 'MODEL_KEY',           'VARCHAR2(100)'); // llm_models.key to use
 
   // ── AI 戰情 ─────────────────────────────────────────────────────────────────
   await addCol('USERS', 'CAN_DESIGN_AI_SELECT', 'NUMBER(1) DEFAULT 0');
@@ -1008,6 +1009,43 @@ async function runMigrations(db) {
     error_msg        VARCHAR2(2000),
     synced_at        TIMESTAMP DEFAULT SYSTIMESTAMP
   )`);
+
+  // ── 政策類別 (Policy Categories) ────────────────────────────────────────────
+  await createTable('AI_POLICY_CATEGORIES', `CREATE TABLE ai_policy_categories (
+    id          NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    name        VARCHAR2(100) NOT NULL,
+    description VARCHAR2(500),
+    created_at  TIMESTAMP DEFAULT SYSTIMESTAMP
+  )`);
+
+  // 政策 ↔ 類別 N:M
+  await createTable('AI_POLICY_CATEGORY_MAP', `CREATE TABLE ai_policy_category_map (
+    policy_id   NUMBER NOT NULL REFERENCES ai_data_policies(id) ON DELETE CASCADE,
+    category_id NUMBER NOT NULL REFERENCES ai_policy_categories(id) ON DELETE CASCADE,
+    CONSTRAINT ai_policy_cat_map_pk PRIMARY KEY (policy_id, category_id)
+  )`);
+
+  // 角色 ↔ 政策 N:M（取代 ai_policy_assignments grantee_type='role' 單筆限制）
+  await createTable('AI_ROLE_POLICIES', `CREATE TABLE ai_role_policies (
+    role_id    NUMBER NOT NULL,
+    policy_id  NUMBER NOT NULL REFERENCES ai_data_policies(id) ON DELETE CASCADE,
+    priority   NUMBER DEFAULT 10,
+    CONSTRAINT ai_role_policies_pk PRIMARY KEY (role_id, policy_id)
+  )`);
+
+  // 使用者 ↔ 政策 N:M（取代 ai_policy_assignments grantee_type='user' 單筆限制）
+  await createTable('AI_USER_POLICIES', `CREATE TABLE ai_user_policies (
+    user_id    NUMBER NOT NULL,
+    policy_id  NUMBER NOT NULL REFERENCES ai_data_policies(id) ON DELETE CASCADE,
+    priority   NUMBER DEFAULT 10,
+    CONSTRAINT ai_user_policies_pk PRIMARY KEY (user_id, policy_id)
+  )`);
+
+  // 政策優先順序欄位（顯示用 / 未來 conflict resolution 用）
+  await addCol('AI_DATA_POLICIES', 'PRIORITY', 'NUMBER DEFAULT 10');
+
+  // 主題加政策類別欄位
+  await addCol('AI_SELECT_TOPICS', 'POLICY_CATEGORY_ID', 'NUMBER');
 
   // ── Vector table partitioning ───────────────────────────────────────────────
   await migrateAiVectorStoreToPartitioned();

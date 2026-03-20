@@ -718,12 +718,18 @@ async function runDashboardQuery({ designId, question, userId, user, isDesigner,
       // 每次都推送使用者的權限範圍（透明度）
       send('multiorg_scope', buildScopePayload(scope));
 
+      // 員工組織資料未設定 → 拒絕查詢
+      if (scope.denied) {
+        send('error', { error: scope.deniedReason });
+        return;
+      }
+
       // ── 從 schema filter_key 找出此設計的 MultiOrg 過濾欄位，依層級注入 IN 條件 ──
       // 設計者在 ood schema 欄位標記：
       //   filter_source='organization_id' → INV/WIP/BOM → scope.orgDetails (org IDs)
       //   filter_source='operating_unit'  → AP/AR/PO/OM → scope.allowedOUIds
       //   filter_source='set_of_books_id' → GL           → scope.allowedSOBIds
-      if (scope.hasRules) {
+      if (scope.hasRules && !scope.superUser) {
         const schemaIds = design.target_schema_ids ? JSON.parse(design.target_schema_ids) : [];
         // 取出所有 MultiOrg filter key 欄位（可能有多個，例如同時標 org + OU）
         const multiorgFilterKeys = [];
@@ -839,6 +845,12 @@ async function runDashboardQuery({ designId, question, userId, user, isDesigner,
       // 推送使用者的部門權限範圍
       send('org_scope', buildOrgScopePayload(deptScope));
 
+      // 員工組織資料未設定 → 拒絕查詢
+      if (deptScope.denied) {
+        send('error', { error: deptScope.deniedReason });
+        return;
+      }
+
       // ── org_code 語意前置檢核 ─────────────────────────────────────────────
       // 當 schema 有 filter_source='org_code' 的 filter_key 欄位，
       // 且 allowedOrgCodes 已從組織階層展開（有限制），
@@ -896,7 +908,7 @@ async function runDashboardQuery({ designId, question, userId, user, isDesigner,
       //   2. 找到 filter_source='org_code' 的 filter_key → IN (allowedOrgCodes)
       //   3. 找到 filter_source='org_id' 的 filter_key → IN (allowedOrgIds)
       //   4. Fallback: filter_source='dept_code' → IN (allowedDeptCodes)，自動切成 <=999 的 OR 塊
-      if (deptScope.hasRules && (deptScope.allowedOrgCodes.size > 0 || deptScope.allowedDeptCodes.size > 0)) {
+      if (deptScope.hasRules && !deptScope.superUser && (deptScope.allowedOrgCodes.size > 0 || deptScope.allowedDeptCodes.size > 0)) {
         const schemaIds = design.target_schema_ids ? JSON.parse(design.target_schema_ids) : [];
 
         // 查 filter_key 輔助函式

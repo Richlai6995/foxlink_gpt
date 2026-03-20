@@ -376,13 +376,13 @@ router.get('/designer/topics', requireDesigner, async (req, res) => {
 router.post('/designer/topics', requireDesigner, async (req, res) => {
   try {
     const db = require('../database-oracle').db;
-    const { name, description, icon, sort_order, project_id,
+    const { name, description, icon, sort_order, project_id, policy_category_id,
             name_zh, name_en, name_vi, desc_zh, desc_en, desc_vi } = req.body;
     if (!name) return res.status(400).json({ error: '主題名稱為必填' });
     if (project_id && !await canEditProject(db, project_id, req.user)) return res.status(403).json({ error: '無此專案權限' });
     const r = await db.prepare(
-      `INSERT INTO ai_select_topics (name, description, icon, sort_order, created_by, project_id) VALUES (?,?,?,?,?,?)`
-    ).run(name, description || null, icon || null, sort_order || 0, req.user.id, project_id || null);
+      `INSERT INTO ai_select_topics (name, description, icon, sort_order, created_by, project_id, policy_category_id) VALUES (?,?,?,?,?,?,?)`
+    ).run(name, description || null, icon || null, sort_order || 0, req.user.id, project_id || null, policy_category_id || null);
     const newId = r.lastInsertRowid;
     const trans = (name_zh !== undefined)
       ? { name_zh: name_zh || null, name_en: name_en || null, name_vi: name_vi || null, desc_zh: desc_zh || null, desc_en: desc_en || null, desc_vi: desc_vi || null }
@@ -407,13 +407,14 @@ router.put('/designer/topics/:id', requireDesigner, async (req, res) => {
     if (req.user.role !== 'admin' && topic.created_by !== req.user.id) {
       if (topic.project_id && !await canAccessProject(db, topic.project_id, req.user, 'develop')) return res.status(403).json({ error: '無權限' });
     }
-    const { name, description, icon, sort_order, is_active, project_id,
+    const { name, description, icon, sort_order, is_active, project_id, policy_category_id,
             name_zh, name_en, name_vi, desc_zh, desc_en, desc_vi } = req.body;
     const finalName = name ?? topic.name;
     const finalDesc = description !== undefined ? (description || null) : topic.description;
+    const finalCatId = policy_category_id !== undefined ? (policy_category_id || null) : topic.policy_category_id;
     await db.prepare(
-      `UPDATE ai_select_topics SET name=?, description=?, icon=?, sort_order=?, is_active=?, project_id=? WHERE id=?`
-    ).run(finalName, finalDesc, icon ?? topic.icon, sort_order ?? 0, is_active ?? 1, project_id || null, req.params.id);
+      `UPDATE ai_select_topics SET name=?, description=?, icon=?, sort_order=?, is_active=?, project_id=?, policy_category_id=? WHERE id=?`
+    ).run(finalName, finalDesc, icon ?? topic.icon, sort_order ?? 0, is_active ?? 1, project_id || null, finalCatId, req.params.id);
     if (name_zh !== undefined) {
       await db.prepare(`UPDATE ai_select_topics SET name_zh=?,name_en=?,name_vi=?,desc_zh=?,desc_en=?,desc_vi=? WHERE id=?`)
         .run(name_zh || null, name_en || null, name_vi || null, desc_zh || null, desc_en || null, desc_vi || null, req.params.id);
@@ -1455,20 +1456,28 @@ router.post('/query', requireDashboard, async (req, res) => {
 
   const isDesigner = req.user.role === 'admin' || req.user.can_design_ai_select == 1;
 
+  let _categoryId = null;
   try {
     const db = require('../database-oracle').db;
-    const design = await db.prepare(`SELECT id, is_public, is_suspended, created_by FROM ai_select_designs WHERE id=?`).get(design_id);
+    const design = await db.prepare(`SELECT id, is_public, is_suspended, created_by, topic_id FROM ai_select_designs WHERE id=?`).get(design_id);
     if (!design) return res.status(404).json({ error: '設計不存在' });
     if (design.is_suspended == 1) return res.status(403).json({ error: '此查詢設計已暫停使用' });
     const ok = await canAccessDesign(db, design, req.user);
     if (!ok) return res.status(403).json({ error: '無此查詢設計的存取權限' });
 
+    // 取得主題的政策類別
+    if (design.topic_id) {
+      const topic = await db.prepare(`SELECT policy_category_id FROM ai_select_topics WHERE id=?`).get(design.topic_id);
+      _categoryId = topic?.policy_category_id || null;
+    }
+
     // ── 資料權限前置檢查（非 admin）────────────────────────────────────────
     if (req.user.role !== 'admin') {
-      const { getEffectivePolicy } = require('./dataPermissions');
-      const policy = await getEffectivePolicy(db, req.user.id);
-      if (policy?.rules?.length > 0) {
-        const forbidden = checkForbiddenInQuestion(question.trim(), policy.rules);
+      const { getEffectivePolicies } = require('./dataPermissions');
+      const policies = await getEffectivePolicies(db, req.user.id, _categoryId);
+      const allRules = policies.flatMap(p => p.rules);
+      if (allRules.length > 0) {
+        const forbidden = checkForbiddenInQuestion(question.trim(), allRules);
         if (forbidden.length > 0) {
           return res.status(403).json({
             error: `⛔ 資料權限不足，無法執行此查詢。\n\n問題中包含未授權的條件：\n${forbidden.map(f => `• ${f}`).join('\n')}\n\n請確認您有權限查詢這些資料後再試。`,
@@ -1499,13 +1508,16 @@ router.post('/query', requireDashboard, async (req, res) => {
   };
 
   try {
-    // 取得有效政策（用於 SQL 層級過濾）
+    // 取得有效政策（依主題的政策類別過濾）
     let effectivePolicy = null;
     if (req.user.role !== 'admin') {
       try {
-        const { getEffectivePolicy } = require('./dataPermissions');
+        const { getEffectivePolicies } = require('./dataPermissions');
         const db = require('../database-oracle').db;
-        effectivePolicy = await getEffectivePolicy(db, req.user.id);
+        const policies = await getEffectivePolicies(db, req.user.id, _categoryId);
+        if (policies.length > 0) {
+          effectivePolicy = { rules: policies.flatMap(p => p.rules) };
+        }
       } catch (_) {}
     }
 
@@ -1834,22 +1846,40 @@ router.get('/multiorg-scope', async (req, res) => {
   if (req.user.role === 'admin') return res.json({ has_restrictions: false, is_admin: true });
   try {
     const db = require('../database-oracle').db;
-    const { getEffectivePolicy } = require('./dataPermissions');
-    const policy = await getEffectivePolicy(db, req.user.id);
+    const categoryId = req.query.category_id ? Number(req.query.category_id) : null;
+    const { getEffectivePolicies } = require('./dataPermissions');
+    const policiesArr = await getEffectivePolicies(db, req.user.id, categoryId);
+    const policy = policiesArr.length ? { rules: policiesArr.flatMap(p => p.rules) } : null;
 
     if (!policy?.rules?.length) return res.json({ has_restrictions: false });
 
     const {
-      MULTIORG_VALUE_TYPES, loadOrgHierarchy, resolveUserScope, buildScopePayload,
+      MULTIORG_VALUE_TYPES, loadOrgHierarchy, loadAutoOrgIds, resolveUserScope, buildScopePayload,
     } = require('../services/multiOrgService');
     const { getErpPool } = require('../services/dashboardService');
 
     const hasMultiOrgRules = policy.rules.some(r => MULTIORG_VALUE_TYPES.has(r.value_type));
     if (!hasMultiOrgRules) return res.json({ has_restrictions: false });
 
+    // 重新從 DB 取最新使用者資料（session 可能快取舊的組織欄位）
+    const freshUser = await (require('../database-oracle').db).prepare(`SELECT * FROM users WHERE id=?`).get(req.user.id) || req.user;
+
     const hierarchy = await loadOrgHierarchy(getErpPool);
-    const scope = resolveUserScope(policy.rules, hierarchy);
-    res.json(buildScopePayload(scope));
+
+    // auto_from_employee rule 需要先推導 ORGANIZATION_IDs
+    let autoOrgIds = new Set();
+    const hasAutoRule = policy.rules.some(r => r.value_type === 'auto_from_employee');
+    if (hasAutoRule) {
+      const { loadDeptHierarchy } = require('../services/orgHierarchyService');
+      const deptHierarchy = await loadDeptHierarchy(getErpPool);
+      autoOrgIds = loadAutoOrgIds(freshUser, deptHierarchy);
+      console.log(`[multiorg-scope] auto_from_employee: derived ${autoOrgIds.size} ORGANIZATION_IDs for user ${freshUser.username}`);
+    }
+
+    const scope = resolveUserScope(policy.rules, hierarchy, autoOrgIds);
+    const payload = buildScopePayload(scope);
+    if (payload.denied) return res.status(403).json(payload);
+    res.json(payload);
   } catch (e) {
     console.error('[multiorg-scope]', e.message);
     res.status(503).json({ error: '無法驗證資料權限（ERP 連線異常）', unavailable: true });
@@ -1863,9 +1893,11 @@ router.get('/org-scope', async (req, res) => {
     const db = require('../database-oracle').db;
     // 重新從 DB 取最新使用者資料（session 可能快取舊的組織欄位）
     const freshUser = await db.prepare(`SELECT * FROM users WHERE id=?`).get(req.user.id) || req.user;
+    const categoryId = req.query.category_id ? Number(req.query.category_id) : null;
 
-    const { getEffectivePolicy } = require('./dataPermissions');
-    const policy = await getEffectivePolicy(db, freshUser.id);
+    const { getEffectivePolicies } = require('./dataPermissions');
+    const policiesArr = await getEffectivePolicies(db, freshUser.id, categoryId);
+    const policy = policiesArr.length ? { rules: policiesArr.flatMap(p => p.rules) } : null;
 
     if (!policy?.rules?.length) return res.json({ has_restrictions: false });
 
@@ -1879,7 +1911,9 @@ router.get('/org-scope', async (req, res) => {
 
     const hierarchy = await loadDeptHierarchy(getErpPool);
     const scope = resolveUserDeptScope(policy.rules, freshUser, hierarchy);
-    res.json(buildOrgScopePayload(scope));
+    const payload = buildOrgScopePayload(scope);
+    if (payload.denied) return res.status(403).json(payload);
+    res.json(payload);
   } catch (e) {
     console.error('[org-scope]', e.message);
     res.status(503).json({ error: '無法驗證組織權限（ERP 連線異常）', unavailable: true });

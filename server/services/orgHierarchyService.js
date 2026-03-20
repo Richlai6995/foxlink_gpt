@@ -26,8 +26,10 @@ const ORG_HIERARCHY_VALUE_TYPES = new Set([
   'org_section',
   'profit_center',
   'dept_code',
-  'org_code',   // FL_ORG_EMP_DEPT_MV.ORG_CODE — 展開後的組織代碼清單
-  'org_id',     // FL_ORG_EMP_DEPT_MV.ORG_ID
+  'org_code',           // FL_ORG_EMP_DEPT_MV.ORG_CODE — 展開後的組織代碼清單
+  'org_id',             // FL_ORG_EMP_DEPT_MV.ORG_ID
+  'auto_from_employee', // Layer 3 自動依員工組織展開
+  'super_user',         // 超級使用者，不限制任何資料
 ]);
 
 // 各 filter_source 的層級數值（用於控制顯示哪幾層）
@@ -104,6 +106,94 @@ function resolveUserDeptScope(rules, user, hierarchy) {
   const orgRules = rules.filter(r => ORG_HIERARCHY_VALUE_TYPES.has(r.value_type || r.filter_source));
   if (!orgRules.length) return { hasRules: false };
 
+  // ── super_user 快速路徑：無任何限制 ──────────────────────────────────────
+  const hasSuperUser = orgRules.some(r =>
+    r.include_type === 'include' && (r.value_type || r.filter_source) === 'super_user'
+  );
+  if (hasSuperUser) {
+    return { hasRules: true, superUser: true };
+  }
+
+  // ── auto_from_employee 快速路徑：直接用 user profile，不展開 hierarchy ──
+  const isAutoOnly = orgRules.length > 0 &&
+    orgRules.filter(r => r.include_type === 'include').every(r =>
+      (r.value_type || r.filter_source) === 'auto_from_employee'
+    ) &&
+    orgRules.some(r => r.include_type === 'include');
+
+  if (isAutoOnly) {
+    const u = user || {};
+    const dept_code       = (u.dept_code        || '').trim();
+    const dept_name       = (u.dept_name         || '').trim();
+    const profit_center   = (u.profit_center     || '').trim();
+    const pc_name         = (u.profit_center_name|| '').trim();
+    const org_section     = (u.org_section       || '').trim();
+    const os_name         = (u.org_section_name  || '').trim();
+    const org_group_name  = (u.org_group_name    || '').trim();
+
+    // 補齊缺失的父層值（從 hierarchy 反查）
+    let resolvedPc = profit_center, resolvedPcName = pc_name;
+    let resolvedOs = org_section,   resolvedOsName = os_name;
+    let resolvedOg = org_group_name;
+    if (dept_code && (!resolvedPc || !resolvedOs || !resolvedOg)) {
+      const ref = hierarchy.find(r => (r.DEPT_CODE || '').trim() === dept_code);
+      if (ref) {
+        if (!resolvedPc) { resolvedPc = (ref.PROFIT_CENTER || '').trim(); resolvedPcName = (ref.PROFIT_CENTER_NAME || '').trim(); }
+        if (!resolvedOs) { resolvedOs = (ref.ORG_SECTION   || '').trim(); resolvedOsName = (ref.ORG_SECTION_NAME  || '').trim(); }
+        if (!resolvedOg) { resolvedOg = (ref.ORG_GROUP_NAME || '').trim(); }
+      }
+    }
+
+    const highestIncludeLevel = dept_code ? 'dept_code'
+      : resolvedPc ? 'profit_center'
+      : resolvedOs ? 'org_section'
+      : resolvedOg ? 'org_group_name' : '';
+
+    const userValues = {
+      org_group_name: resolvedOg,
+      org_section:    resolvedOs,
+      profit_center:  resolvedPc,
+      dept_code,
+    };
+
+    const deptDetails = dept_code ? [{
+      dept_code,
+      dept_name,
+      profit_center:       resolvedPc,
+      profit_center_name:  resolvedPcName,
+      org_section:         resolvedOs,
+      org_section_name:    resolvedOsName,
+      org_group_name:      resolvedOg,
+    }] : [];
+
+    // 員工組織資料完全空白 → 拒絕
+    if (!dept_code && !resolvedPc && !resolvedOs && !resolvedOg) {
+      console.warn('[OrgHierarchy] auto_from_employee: 員工組織資料完全空白，拒絕查詢');
+      return {
+        hasRules: true,
+        denied: true,
+        deniedReason: '⛔ 您的員工組織部門資料尚未設定，無法進行資料查詢。請聯絡管理員設定您的組織資料。',
+      };
+    }
+
+    console.log('[OrgHierarchy] auto_from_employee fast path:', { dept_code, resolvedPc, resolvedOs, resolvedOg });
+
+    return {
+      hasRules:           true,
+      sourceLevels:       ['dept_code'],
+      userValues,
+      highestIncludeLevel,
+      allowedDeptCodes:   dept_code ? new Set([dept_code]) : new Set(),
+      allowedOrgCodes:    new Set(),
+      allowedOrgIds:      new Set(),
+      deptDetails,
+      orgCodeDetails:     [],
+      profitCenterDetails: resolvedPc ? [{ code: resolvedPc, name: resolvedPcName }] : [],
+      orgSectionDetails:  resolvedOs ? [{ code: resolvedOs, name: resolvedOsName }] : [],
+      orgGroupDetails:    resolvedOg ? [{ name: resolvedOg }] : [],
+    };
+  }
+
   // 使用者 profile 欄位對應
   const userValues = {
     org_group_name: (user.org_group_name || '').trim(),
@@ -144,10 +234,8 @@ function resolveUserDeptScope(rules, user, hierarchy) {
   const rowGrantLevel = new Map(); // row → maxGrantLevel
 
   /**
-   * org_code / org_id 是「衍生型」filter_source：
-   *   它本身不是比對條件，而是「展開後收集 ORG_CODE/ORG_ID」的標記。
-   *   展開方式：以使用者最高可用的層級（事業群→事業處→利潤中心→部門）為準，
-   *   找到對應的 hierarchy rows，再從中收集 ORG_CODE / ORG_ID。
+   * org_code / org_id：衍生型，以使用者「最高可用」層級展開（廣授權）
+   *   e.g. 有 org_group_name → 展開整個事業群
    */
   function expandRowsByUserNaturalScope() {
     const naturalScope = userValues.org_group_name ? 'org_group_name'
@@ -165,6 +253,26 @@ function resolveUserDeptScope(rules, user, hierarchy) {
     }
   }
 
+  /**
+   * auto_from_employee：以使用者「最精確」層級展開（窄授權）
+   *   e.g. 有 dept_code → 只展開該部門那幾筆，不往事業群展開
+   */
+  function expandRowsByUserSpecificScope() {
+    const specificScope = userValues.dept_code     ? 'dept_code'
+      : userValues.profit_center ? 'profit_center'
+      : userValues.org_section   ? 'org_section'
+      : userValues.org_group_name ? 'org_group_name'
+      : null;
+    if (!specificScope) return;
+    const level = ORG_GRANT_LEVEL[specificScope] || 1;
+    for (const row of hierarchy) {
+      if (rowMatchesUserRule(row, specificScope)) {
+        const prev = rowGrantLevel.get(row) || 0;
+        if (level > prev) rowGrantLevel.set(row, level);
+      }
+    }
+  }
+
   if (includeRules.length === 0) {
     // 只有 exclude 規則 → 從全量開始（視為最高層授權）
     for (const row of hierarchy) rowGrantLevel.set(row, 4);
@@ -172,7 +280,13 @@ function resolveUserDeptScope(rules, user, hierarchy) {
     for (const rule of includeRules) {
       const filterSource = rule.value_type || rule.filter_source;
 
-      // org_code / org_id：衍生型，改用使用者自然層級展開
+      if (filterSource === 'auto_from_employee') {
+        // 依員工最精確層級展開（窄授權：只有自己那條組織路徑）
+        expandRowsByUserSpecificScope();
+        continue;
+      }
+
+      // org_code / org_id：衍生型，依最高層展開（廣授權）
       if (filterSource === 'org_code' || filterSource === 'org_id') {
         expandRowsByUserNaturalScope();
         continue;
@@ -204,6 +318,12 @@ function resolveUserDeptScope(rules, user, hierarchy) {
   });
 
   // ── 依授權層級決定顯示哪幾層（只往下，不往上推論）──────────────────────
+  // org_code / org_id 只在有明確規則時才收集（auto_from_employee 不觸發）
+  const hasOrgCodeRule = orgRules.some(r => {
+    const fs = r.value_type || r.filter_source;
+    return fs === 'org_code' || fs === 'org_id';
+  });
+
   const allowedDeptCodes = new Set();
   const allowedOrgCodes  = new Set();
   const allowedOrgIds    = new Set();
@@ -218,14 +338,16 @@ function resolveUserDeptScope(rules, user, hierarchy) {
     // 部門（全部顯示）
     if (row.DEPT_CODE) allowedDeptCodes.add(row.DEPT_CODE);
 
-    // 組織代碼/ID（全部收集，來自 ORG_ID/ORG_CODE 欄位）
-    if (row.ORG_CODE) {
-      allowedOrgCodes.add(row.ORG_CODE);
-      if (!orgCodeMap.has(row.ORG_CODE)) {
-        orgCodeMap.set(row.ORG_CODE, { org_code: row.ORG_CODE, org_id: row.ORG_ID || null });
+    // 組織代碼/ID（只在有明確 org_code/org_id 規則時才收集）
+    if (hasOrgCodeRule) {
+      if (row.ORG_CODE) {
+        allowedOrgCodes.add(row.ORG_CODE);
+        if (!orgCodeMap.has(row.ORG_CODE)) {
+          orgCodeMap.set(row.ORG_CODE, { org_code: row.ORG_CODE, org_id: row.ORG_ID || null });
+        }
       }
+      if (row.ORG_ID) allowedOrgIds.add(String(row.ORG_ID));
     }
-    if (row.ORG_ID) allowedOrgIds.add(String(row.ORG_ID));
 
     // 利潤中心（level >= 2 才顯示）
     if (level >= 2 && row.PROFIT_CENTER) {
@@ -258,10 +380,18 @@ function resolveUserDeptScope(rules, user, hierarchy) {
   sourceLevels.push('dept_code');
 
   // 最高層 include 規則的層級（用於 WHERE 注入）
+  // auto_from_employee 的有效層級取自使用者最精確欄位（最低層）
+  const autoEffectiveLevel = userValues.dept_code     ? 'dept_code'
+    : userValues.profit_center ? 'profit_center'
+    : userValues.org_section   ? 'org_section'
+    : userValues.org_group_name ? 'org_group_name'
+    : '';
+
   const highestIncludeLevel = includeRules.length
     ? includeRules.reduce((best, r) => {
         const fs = r.value_type || r.filter_source;
-        return (ORG_GRANT_LEVEL[fs] || 0) > (ORG_GRANT_LEVEL[best] || 0) ? fs : best;
+        const effectiveFs = fs === 'auto_from_employee' ? autoEffectiveLevel : fs;
+        return (ORG_GRANT_LEVEL[effectiveFs] || 0) > (ORG_GRANT_LEVEL[best] || 0) ? effectiveFs : best;
       }, '')
     : '';
 
@@ -292,6 +422,8 @@ function resolveUserDeptScope(rules, user, hierarchy) {
 // ── 格式化 org_scope SSE payload ─────────────────────────────────────────────
 function buildOrgScopePayload(scope) {
   if (!scope.hasRules) return { has_restrictions: false };
+  if (scope.denied) return { has_restrictions: true, denied: true, denied_reason: scope.deniedReason };
+  if (scope.superUser) return { has_restrictions: false, super_user: true };
   return {
     has_restrictions:       true,
     source_levels:          scope.sourceLevels,

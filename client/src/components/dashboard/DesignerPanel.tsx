@@ -1854,7 +1854,8 @@ function DesignManager({ projectId }: { projectId: number | null }) {
     max_rows: '1000',
   })
   const [editTopicId, setEditTopicId] = useState<number | null>(null)
-  const [topicForm, setTopicForm] = useState({ name: '', description: '', icon: '', sort_order: '0', form_project_id: undefined as number | undefined })
+  const [topicForm, setTopicForm] = useState({ name: '', description: '', icon: '', sort_order: '0', form_project_id: undefined as number | undefined, policy_category_id: undefined as number | undefined })
+  const [policyCategories, setPolicyCategories] = useState<{ id: number; name: string }[]>([])
   const [loading, setLoading] = useState(false)
   const topicFormRef = useRef<HTMLDivElement>(null)
   const iconInputRef = useRef<HTMLInputElement>(null)
@@ -1873,13 +1874,14 @@ function DesignManager({ projectId }: { projectId: number | null }) {
   useEffect(() => {
     load()
     api.get('/dashboard/projects').then(r => setProjects(r.data)).catch(() => {})
+    api.get('/data-permissions/categories').then(r => setPolicyCategories(r.data)).catch(() => {})
   }, [projectId])
 
   const saveTopic = async () => {
     setTopicTranslating(true)
     try {
-      const { form_project_id, ...rest } = topicForm
-      const payload = { ...rest, project_id: form_project_id ?? projectId ?? undefined, ...topicTrans }
+      const { form_project_id, policy_category_id, ...rest } = topicForm
+      const payload = { ...rest, project_id: form_project_id ?? projectId ?? undefined, policy_category_id: policy_category_id ?? null, ...topicTrans }
       if (editTopicId) {
         await api.put(`/dashboard/designer/topics/${editTopicId}`, payload)
         setEditTopicId(null)
@@ -1890,7 +1892,7 @@ function DesignManager({ projectId }: { projectId: number | null }) {
           desc_zh: res.data.desc_zh || null, desc_en: res.data.desc_en || null, desc_vi: res.data.desc_vi || null,
         })
       }
-      setTopicForm({ name: '', description: '', icon: '', sort_order: '0', form_project_id: projectId || undefined })
+      setTopicForm({ name: '', description: '', icon: '', sort_order: '0', form_project_id: projectId || undefined, policy_category_id: undefined })
       setTopicTrans({})
       load()
     } finally {
@@ -1900,7 +1902,7 @@ function DesignManager({ projectId }: { projectId: number | null }) {
 
   const startEditTopic = (t: AiSelectTopic) => {
     setEditTopicId(t.id)
-    setTopicForm({ name: t.name, description: t.description || '', icon: t.icon || '', sort_order: String(t.sort_order ?? 0), form_project_id: t.project_id ?? projectId ?? undefined })
+    setTopicForm({ name: t.name, description: t.description || '', icon: t.icon || '', sort_order: String(t.sort_order ?? 0), form_project_id: t.project_id ?? projectId ?? undefined, policy_category_id: t.policy_category_id ?? undefined })
     setTopicTrans({
       name_zh: (t as any).name_zh || null, name_en: (t as any).name_en || null, name_vi: (t as any).name_vi || null,
       desc_zh: (t as any).desc_zh || null, desc_en: (t as any).desc_en || null, desc_vi: (t as any).desc_vi || null,
@@ -2041,12 +2043,20 @@ function DesignManager({ projectId }: { projectId: number | null }) {
               value={topicForm.sort_order} onChange={e => setTopicForm(p => ({ ...p, sort_order: e.target.value }))} />
             <span className="absolute right-1 top-1/2 -translate-y-1/2 text-[10px] text-gray-400 pointer-events-none">越小越前</span>
           </div>
-          <div className="col-span-2">
+          <div>
             <label className="text-xs text-gray-400 mb-1 block">所屬專案</label>
             <select className="input py-1.5 text-sm" value={topicForm.form_project_id ?? ''}
               onChange={e => setTopicForm(p => ({ ...p, form_project_id: e.target.value ? Number(e.target.value) : undefined }))}>
               <option value="">— 未分配 —</option>
               {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="text-xs text-gray-400 mb-1 block">資料政策類別</label>
+            <select className="input py-1.5 text-sm" value={topicForm.policy_category_id ?? ''}
+              onChange={e => setTopicForm(p => ({ ...p, policy_category_id: e.target.value ? Number(e.target.value) : undefined }))}>
+              <option value="">— 不套用 —</option>
+              {policyCategories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
           </div>
         </div>
@@ -2076,7 +2086,7 @@ function DesignManager({ projectId }: { projectId: number | null }) {
             <Plus size={12} /> {editTopicId ? '儲存主題' : '新增主題'}
           </button>
           {editTopicId && (
-            <button onClick={() => { setEditTopicId(null); setTopicForm({ name: '', description: '', icon: '', sort_order: '0', form_project_id: projectId || undefined }); setTopicTrans({}) }}
+            <button onClick={() => { setEditTopicId(null); setTopicForm({ name: '', description: '', icon: '', sort_order: '0', form_project_id: projectId || undefined, policy_category_id: undefined }); setTopicTrans({}) }}
               className="text-xs text-gray-500 hover:text-gray-800 px-2">取消</button>
           )}
         </div>

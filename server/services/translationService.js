@@ -1,23 +1,16 @@
 'use strict';
 
-const { GoogleGenerativeAI } = require('@google/generative-ai');
-
-let genAI = null;
-function getAI() {
-  if (!genAI) genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-  return genAI;
-}
+const { createClient } = require('./llmService');
+const { db } = require('../database-oracle');
 
 /**
  * Translate a single text to { zh, en, vi }.
- * Uses Gemini Flash for speed. Returns null values on error (non-fatal).
+ * Uses the configured 'flash' LLM model from DB settings.
  */
 async function translateText(text) {
   if (!text?.trim()) return { zh: '', en: '', vi: '' };
   try {
-    const model = getAI().getGenerativeModel({
-      model: process.env.GEMINI_MODEL_FLASH || 'gemini-2.0-flash',
-    });
+    const client = await createClient(db, 'flash');
     const prompt = `Translate the following text to three languages.
 Return ONLY a valid JSON object with exactly these three keys: "zh" (Traditional Chinese 繁體中文), "en" (English), "vi" (Vietnamese).
 No markdown code block, no extra text, no explanation — just the raw JSON.
@@ -25,8 +18,10 @@ No markdown code block, no extra text, no explanation — just the raw JSON.
 Text to translate:
 ${JSON.stringify(text)}`;
 
-    const result = await model.generateContent(prompt);
-    const raw = result.response.text().trim().replace(/^```json\s*|^```\s*|```\s*$/gm, '').trim();
+    const raw = (await client.generate([{ role: 'user', parts: [{ text: prompt }] }]))
+      .trim()
+      .replace(/^```json\s*|^```\s*|```\s*$/gm, '')
+      .trim();
     return JSON.parse(raw);
   } catch (e) {
     console.warn('[Translation] translateText error:', e.message);
