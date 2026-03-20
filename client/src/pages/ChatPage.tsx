@@ -6,7 +6,7 @@ import Sidebar from '../components/Sidebar'
 import ChatWindow from '../components/ChatWindow'
 import MessageInput, { type MessageInputHandle } from '../components/MessageInput'
 import ResearchModal from '../components/ResearchModal'
-import type { ChatSession, ChatMessage, ModelType, GeneratedFile } from '../types'
+import type { ChatSession, ChatMessage, ModelType, GeneratedFile, LlmModel } from '../types'
 import api from '../lib/api'
 import { copyText } from '../lib/clipboard'
 import { useAuth } from '../context/AuthContext'
@@ -31,7 +31,7 @@ export default function ChatPage() {
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null)
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [model, setModel] = useState<ModelType>(
-    () => (localStorage.getItem('model') as ModelType) || 'pro'
+    () => (localStorage.getItem('model') as ModelType) || ''
   )
   const [streaming, setStreaming] = useState(false)
   const [streamingContent, setStreamingContent] = useState('')
@@ -68,6 +68,16 @@ export default function ChatPage() {
     if (!canUseDashboard && !isAdmin) return
     api.get('/dashboard/topics').then((r) => setDashTopics(r.data || [])).catch(() => {})
   }, [canUseDashboard, isAdmin])
+
+  // 若 localStorage 無 model 或 model 不存在於可用清單，預設用第一個 chat model
+  useEffect(() => {
+    if (model) return
+    api.get('/chat/models').then((r) => {
+      const models: LlmModel[] = r.data || []
+      const chatModels = models.filter((m) => !m.model_role || m.model_role === 'chat')
+      if (chatModels.length > 0) setModel(chatModels[0].key as ModelType)
+    }).catch(() => {})
+  }, [])
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {

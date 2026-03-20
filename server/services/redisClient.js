@@ -58,13 +58,18 @@ function getStore() {
 
   const Redis = require('ioredis');
   const client = new Redis(redisUrl, {
-    maxRetriesPerRequest: 2,
+    maxRetriesPerRequest: 1,
     connectTimeout: 3000,
     lazyConnect: false,
+    retryStrategy: () => null, // no retry, fallback immediately
   });
 
   client.on('connect', () => console.log('[Redis] Connected:', redisUrl));
-  client.on('error', (err) => console.error('[Redis] Error:', err.message));
+  client.on('error', (err) => {
+    console.warn('[Redis] Connection failed, falling back to in-memory store:', err.message);
+    store = new MemoryStore();
+    client.disconnect();
+  });
 
   store = new RedisStore(client);
   return store;
