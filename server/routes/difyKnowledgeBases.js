@@ -61,8 +61,8 @@ router.get('/my', async (req, res) => {
   try {
     const userId = req.user.id;
     // Get user's mcp_role_id (individual override) or fall back to default role
-    const user = await db.prepare(`SELECT mcp_role_id FROM users WHERE id=?`).get(userId);
-    let roleId = user?.mcp_role_id;
+    const user = await db.prepare(`SELECT role_id FROM users WHERE id=?`).get(userId);
+    let roleId = user?.role_id;
     if (!roleId) {
       const defaultRole = await db.prepare(`SELECT id FROM roles WHERE is_default=1 LIMIT 1`).get();
       roleId = defaultRole?.id;
