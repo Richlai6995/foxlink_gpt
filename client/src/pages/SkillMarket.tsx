@@ -524,6 +524,7 @@ interface GrantRecord {
     skill_id: number
     grantee_type: string
     grantee_id: string
+    grantee_name?: string
     granted_by: number | null
     granted_by_name?: string
     granted_at: string

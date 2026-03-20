@@ -596,6 +596,8 @@ export interface MultiOrgScope {
   has_restrictions: boolean
   is_admin?: boolean
   unavailable?: boolean
+  denied?: boolean
+  denied_reason?: string
   source_levels?: string[]
   org_count?: number
   sob_details?: { id: number; name: string }[]

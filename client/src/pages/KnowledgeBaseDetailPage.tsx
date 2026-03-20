@@ -900,7 +900,7 @@ function ShareTab({ kb, isOwner }: { kb: KnowledgeBase; isOwner: boolean }) {
         <div className="border border-slate-200 rounded-xl p-4 space-y-3">
           <div className="text-sm font-semibold text-slate-700">{t('kb.share.addGrantTitle')}</div>
           <div className="flex gap-2 flex-wrap">
-            <select value={granteeType} onChange={(e) => { setGranteeType(e.target.value); setGranteeId(''); setUserSearch('') }}
+            <select value={granteeType} onChange={(e) => { setGranteeType(e.target.value); setGranteeId('') }}
               className="border border-slate-300 rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
               {Object.entries(granteeTypeLabel).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
             </select>
