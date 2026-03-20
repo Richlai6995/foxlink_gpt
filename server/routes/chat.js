@@ -1207,7 +1207,27 @@ router.post('/sessions/:id/messages', upload.array('files', 10), async (req, res
         await upsertTokenUsage(db, req.user.id, today, 'external-skill', 0, 0, 0);
         await db.prepare(`INSERT INTO chat_messages (session_id, role, content) VALUES (?, 'assistant', ?)`)
           .run(sessionId, answerContent);
-        await db.prepare(`UPDATE chat_sessions SET updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(sessionId);
+        // Auto-generate session title (same logic as normal chat path)
+        try {
+          const sessionRow = await db.prepare(`SELECT title FROM chat_sessions WHERE id=?`).get(sessionId);
+          const currentTitle = sessionRow?.title || '';
+          const DEFAULT_TITLES = new Set(['新對話', 'New Chat', 'Cuộc trò chuyện mới']);
+          if (!currentTitle || DEFAULT_TITLES.has(currentTitle)) {
+            const quickTitle = combinedUserText.slice(0, 30).replace(/\n/g, ' ') || sk.name;
+            await db.prepare(`UPDATE chat_sessions SET title=?, updated_at=SYSTIMESTAMP WHERE id=?`).run(quickTitle, sessionId);
+            sendEvent({ type: 'title', title: quickTitle });
+            // Async LLM title refinement
+            generateTitle(combinedUserText, answerContent).then(async ({ title: llmTitle, title_zh, title_en, title_vi }) => {
+              if (llmTitle) {
+                await db.prepare(`UPDATE chat_sessions SET title=?, title_zh=?, title_en=?, title_vi=? WHERE id=?`)
+                  .run(llmTitle, title_zh || llmTitle, title_en || llmTitle, title_vi || llmTitle, sessionId);
+                try { sendEvent({ type: 'title', title: llmTitle, title_zh, title_en, title_vi }); } catch (_) {}
+              }
+            }).catch(() => {});
+          } else {
+            await db.prepare(`UPDATE chat_sessions SET updated_at=SYSTIMESTAMP WHERE id=?`).run(sessionId);
+          }
+        } catch (_) {}
         // Log skill call
         try {
           await db.prepare(`INSERT INTO skill_call_logs (skill_id, user_id, session_id, query_preview, response_preview, status, duration_ms) VALUES (?,?,?,?,?,?,?)`)
