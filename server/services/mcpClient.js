@@ -22,7 +22,7 @@ async function jsonRpc(url, apiKey, method, params = {}) {
     method: 'POST',
     headers,
     body,
-    signal: AbortSignal.timeout(15000),
+    signal: AbortSignal.timeout(60000),
   });
 
   if (!res.ok) throw new Error(`MCP HTTP ${res.status}: ${res.statusText}`);
@@ -137,7 +137,8 @@ async function getActiveToolDeclarations(db, roleId = null) {
     } else {
       servers = await db.prepare(`SELECT * FROM mcp_servers WHERE is_active=1`).all();
     }
-  } catch (_) {
+  } catch (e) {
+    console.error('[MCP] getActiveToolDeclarations error:', e.message);
     return { functionDeclarations: [], serverMap: {} };
   }
 

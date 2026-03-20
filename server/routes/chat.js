@@ -1305,7 +1305,8 @@ router.post('/sessions/:id/messages', upload.array('files', 10), async (req, res
       if (explicitMode) {
         // ── Explicit selection mode: user chose tools manually, skip intent filtering ──
         if (userMcpIds && userMcpIds.length > 0) {
-          const { functionDeclarations: allMcpDecls, serverMap: sm } = await mcpClient.getActiveToolDeclarations(db, roleId);
+          // Explicit mode: bypass role filter, use all active servers then filter by selected IDs
+          const { functionDeclarations: allMcpDecls, serverMap: sm } = await mcpClient.getActiveToolDeclarations(db, null);
           serverMap = sm;
           // Apply Skill MCP disable rule (safety constraint)
           const hasSkillDisable = sessionSkills.some(sk => sk.mcp_tool_mode === 'disable');
