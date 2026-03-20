@@ -980,9 +980,8 @@ async function updateKbStats(db, kbId) {
 router.post('/:id/translate', async (req, res) => {
   const db = getDb();
   try {
-    // Allow any user who has read access to re-translate (name/desc only, non-destructive)
-    const kb = await getAccessibleKb(db, req.params.id, req.user.id);
-    if (!kb) return res.status(403).json({ error: '無存取權限' });
+    const kb = await getEditableKb(db, req.params.id, req.user.id, req.user.role);
+    if (!kb) return res.status(403).json({ error: '無編輯權限' });
     const trans = await translateFields({ name: kb.name, description: kb.description });
     await db.prepare(`UPDATE knowledge_bases SET name_zh=?,name_en=?,name_vi=?,desc_zh=?,desc_en=?,desc_vi=? WHERE id=?`)
       .run(trans.name_zh, trans.name_en, trans.name_vi, trans.desc_zh, trans.desc_en, trans.desc_vi, req.params.id);

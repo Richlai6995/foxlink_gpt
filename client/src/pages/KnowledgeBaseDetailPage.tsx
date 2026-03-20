@@ -186,7 +186,7 @@ export default function KnowledgeBaseDetailPage() {
           <TranslationFields
             data={kbTrans}
             onChange={setKbTrans}
-            translateUrl={`/kb/${kb.id}/translate`}
+            translateUrl={(kb.can_edit || isAdmin) ? `/kb/${kb.id}/translate` : undefined}
             hasDescription
           />
           {(kb.can_edit || isAdmin) && (
