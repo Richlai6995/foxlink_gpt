@@ -980,11 +980,9 @@ async function updateKbStats(db, kbId) {
 router.post('/:id/translate', async (req, res) => {
   const db = getDb();
   try {
-    // Debug: log auth info to diagnose 403
-    const rawKb = await db.prepare('SELECT id, creator_id FROM knowledge_bases WHERE id=?').get(req.params.id);
-    console.log(`[KB translate] kbId=${req.params.id} creator_id=${rawKb?.creator_id}(${typeof rawKb?.creator_id}) userId=${req.user.id}(${typeof req.user.id}) role=${req.user.role}`);
-    const kb = await getEditableKb(db, req.params.id, req.user.id, req.user.role);
-    if (!kb) return res.status(403).json({ error: '無編輯權限' });
+    // Allow any user who has read access to re-translate (name/desc only, non-destructive)
+    const kb = await getAccessibleKb(db, req.params.id, req.user.id);
+    if (!kb) return res.status(403).json({ error: '無存取權限' });
     const trans = await translateFields({ name: kb.name, description: kb.description });
     await db.prepare(`UPDATE knowledge_bases SET name_zh=?,name_en=?,name_vi=?,desc_zh=?,desc_en=?,desc_vi=? WHERE id=?`)
       .run(trans.name_zh, trans.name_en, trans.name_vi, trans.desc_zh, trans.desc_en, trans.desc_vi, req.params.id);
