@@ -123,7 +123,7 @@ export default function ChatPage() {
     setShowMcpPanel(true); setShowDifyPanel(false); setShowKbPanel(false)
   }, [])
   const openDifyPanel = useCallback(async () => {
-    try { const r = await api.get('/dify-kb'); setAllDifyKbs((r.data || []).filter((k: any) => k.is_active)) } catch {}
+    try { const r = await api.get('/dify-kb/my'); setAllDifyKbs(r.data || []) } catch {}
     setShowDifyPanel(true); setShowMcpPanel(false); setShowKbPanel(false)
   }, [])
   const openKbPanel = useCallback(async () => {

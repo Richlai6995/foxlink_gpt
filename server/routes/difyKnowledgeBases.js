@@ -55,6 +55,34 @@ router.get('/active', async (req, res) => {
   }
 });
 
+// GET /api/dify-kb/my  — KBs accessible to current user via their MCP/DIFY role
+router.get('/my', async (req, res) => {
+  const db = getDb();
+  try {
+    const userId = req.user.id;
+    // Get user's mcp_role_id (individual override) or fall back to default role
+    const user = await db.prepare(`SELECT mcp_role_id FROM users WHERE id=?`).get(userId);
+    let roleId = user?.mcp_role_id;
+    if (!roleId) {
+      const defaultRole = await db.prepare(`SELECT id FROM roles WHERE is_default=1 LIMIT 1`).get();
+      roleId = defaultRole?.id;
+    }
+    if (!roleId) return res.json([]);
+
+    const kbs = await db.prepare(`
+      SELECT d.id, d.name, d.description, d.api_server, d.api_key,
+             d.name_zh, d.name_en, d.name_vi, d.desc_zh, d.desc_en, d.desc_vi
+      FROM dify_knowledge_bases d
+      JOIN role_dify_kbs r ON r.dify_kb_id = d.id
+      WHERE r.role_id = ? AND d.is_active = 1
+      ORDER BY d.sort_order ASC
+    `).all(roleId);
+    res.json(kbs);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // POST /api/dify-kb
 router.post('/', async (req, res) => {
   if (!requireAdmin(req, res)) return;
