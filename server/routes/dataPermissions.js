@@ -101,6 +101,52 @@ router.get('/lov/roles', async (req, res) => {
   }
 });
 
+// ── Simple Assignments（role/user → single policy）────────────────────────────
+// GET /api/data-permissions/assignments — 回傳全部 grantee_type/grantee_id/policy_id
+router.get('/assignments', async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const rows = await db.prepare(
+      `SELECT grantee_type, grantee_id, policy_id FROM ai_policy_assignments ORDER BY grantee_type, grantee_id`
+    ).all();
+    res.json(rows);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// PUT /api/data-permissions/assignments/role/:roleId
+router.put('/assignments/role/:roleId', async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const { roleId } = req.params;
+    const { policy_id } = req.body;
+    await db.prepare(`DELETE FROM ai_policy_assignments WHERE grantee_type='role' AND grantee_id=?`).run(roleId);
+    if (policy_id) {
+      await db.prepare(`INSERT INTO ai_policy_assignments (grantee_type, grantee_id, policy_id) VALUES ('role', ?, ?)`).run(roleId, policy_id);
+    }
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// PUT /api/data-permissions/assignments/user/:userId
+router.put('/assignments/user/:userId', async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const { userId } = req.params;
+    const { policy_id } = req.body;
+    await db.prepare(`DELETE FROM ai_policy_assignments WHERE grantee_type='user' AND grantee_id=?`).run(userId);
+    if (policy_id) {
+      await db.prepare(`INSERT INTO ai_policy_assignments (grantee_type, grantee_id, policy_id) VALUES ('user', ?, ?)`).run(userId, policy_id);
+    }
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ── 政策 CRUD ─────────────────────────────────────────────────────────────────
 // GET /api/data-permissions/policies
 router.get('/policies', async (req, res) => {
