@@ -146,21 +146,27 @@ export default function AiChart({ chartDef, rows, columnLabels = {}, height = 32
     series_field, stack_field, agg_fn,
     y_axes, shadow, overlay_lines,
     series_colors,
-    axis_label_color, axis_label_size,
-    axis_line_color, data_label_color, data_label_size,
-    legend_color, legend_size, title_color, title_size, grid_line_color,
+    axis_label_color, axis_label_size, axis_label_bold,
+    axis_line_color, data_label_color, data_label_size, data_label_bold,
+    legend_color, legend_size, legend_bold, title_color, title_size, title_bold,
+    title_left, title_top, legend_left, legend_top, legend_orient,
+    grid_line_color,
   } = chartDef
 
   // ── 樣式變數（有設定優先，否則用預設值）──────────────────────────────────────
-  const sAxisLabel  = axis_label_color  || '#6b7280'
-  const sAxisLabelSz = axis_label_size  || 11
-  const sAxisLine   = axis_line_color   || '#e5e7eb'
-  const sDataLabel  = data_label_color  || '#6b7280'
-  const sDataLabelSz = data_label_size  || 11
-  const sLegend     = legend_color      || '#6b7280'
-  const sLegendSz   = legend_size       || 12
-  const sTitle      = title_color       || '#374151'
-  const sTitleSz    = title_size        || 13
+  const sAxisLabel   = axis_label_color  || '#6b7280'
+  const sAxisLabelSz = axis_label_size   || 11
+  const sAxisLabelW  = axis_label_bold   ? 'bold' : 'normal'
+  const sAxisLine    = axis_line_color   || '#e5e7eb'
+  const sDataLabel   = data_label_color  || '#6b7280'
+  const sDataLabelSz = data_label_size   || 11
+  const sDataLabelW  = data_label_bold   ? 'bold' : 'normal'
+  const sLegend      = legend_color      || '#6b7280'
+  const sLegendSz    = legend_size       || 12
+  const sLegendW     = legend_bold       ? 'bold' : 'normal'
+  const sTitle       = title_color       || '#374151'
+  const sTitleSz     = title_size        || 13
+  const sTitleW      = title_bold        ? 'bold' : 'normal'
   const sGridLine   = grid_line_color   || (show_grid !== false ? '#f3f4f6' : 'transparent')
 
   // 解析 series_colors：若是 JSON string 就 parse，否則直接用
@@ -206,13 +212,26 @@ export default function AiChart({ chartDef, rows, columnLabels = {}, height = 32
     return filteredRows
   })()
 
+  // 圖例：位置由使用者設定，預設在標題下方或頂端
+  const defaultLegendTop = title ? 28 : 4
   const legendConfig = show_legend !== false
-    ? { show: true, textStyle: { color: sLegend, fontSize: sLegendSz }, top: title ? 28 : 4 }
+    ? {
+        show: true,
+        textStyle: { color: sLegend, fontSize: sLegendSz, fontWeight: sLegendW },
+        orient: legend_orient || 'horizontal',
+        left:  legend_left  ?? 'center',
+        top:   legend_top   ?? defaultLegendTop,
+      }
     : { show: false }
+
+  // grid top：若圖例/標題都在頂端則留空間，若圖例移到底部/左右就不需要
+  const legendAtTop = show_legend !== false && (!legend_top || legend_top === 'top' || Number(legend_top) < 80)
+  const titleAtTop  = !!title && (!title_top || title_top === 'top' || Number(title_top) < 40)
+  const gridTop = (titleAtTop && legendAtTop) ? 60 : titleAtTop ? 40 : legendAtTop ? 36 : 20
 
   const gridConfig = {
     left: 60, right: 20,
-    top: show_legend !== false ? 56 : 40,
+    top: gridTop,
     bottom: 40,
     containLabel: true,
     show: show_grid,
@@ -222,20 +241,25 @@ export default function AiChart({ chartDef, rows, columnLabels = {}, height = 32
   const splitLineStyle = { lineStyle: { color: sGridLine } }
 
   // 軸 style 共用片段
-  const axisLabelStyle = { color: sAxisLabel, fontSize: sAxisLabelSz }
+  const axisLabelStyle = { color: sAxisLabel, fontSize: sAxisLabelSz, fontWeight: sAxisLabelW }
   const axisLineStyle  = { lineStyle: { color: sAxisLine } }
-  const nameTextStyle  = { color: sAxisLabel, fontSize: sAxisLabelSz }
+  const nameTextStyle  = { color: sAxisLabel, fontSize: sAxisLabelSz, fontWeight: sAxisLabelW }
   const dataLabelStyle = show_label
-    ? { show: true, color: sDataLabel, fontSize: sDataLabelSz }
+    ? { show: true, color: sDataLabel, fontSize: sDataLabelSz, fontWeight: sDataLabelW }
     : { show: false }
   const dataLabelTop = show_label
-    ? { show: true, position: 'top' as const, color: sDataLabel, fontSize: sDataLabelSz }
+    ? { show: true, position: 'top' as const, color: sDataLabel, fontSize: sDataLabelSz, fontWeight: sDataLabelW }
     : { show: false }
   const dataLabelInside = show_label
-    ? { show: true, position: 'inside' as const, color: sDataLabel, fontSize: sDataLabelSz }
+    ? { show: true, position: 'inside' as const, color: sDataLabel, fontSize: sDataLabelSz, fontWeight: sDataLabelW }
     : { show: false }
   const titleStyle = (t: string | undefined) => t
-    ? { text: t, textStyle: { color: sTitle, fontSize: sTitleSz } }
+    ? {
+        text: t,
+        left:  title_left ?? 'auto',
+        top:   title_top  ?? 'auto',
+        textStyle: { color: sTitle, fontSize: sTitleSz, fontWeight: sTitleW },
+      }
     : undefined
 
   // ── Multi-dimension pivot helpers ──────────────────────────────────────────
@@ -611,7 +635,7 @@ export default function AiChart({ chartDef, rows, columnLabels = {}, height = 32
       color: colors,
       grid: undefined,
       legend: { ...legendConfig, type: 'scroll' },
-      title: titleStyle(title) ? { ...titleStyle(title), left: 'center' } : undefined,
+      title: titleStyle(title),
       series: [{
         type: 'pie',
         radius: donut ? ['40%', '70%'] : '65%',
@@ -642,7 +666,7 @@ export default function AiChart({ chartDef, rows, columnLabels = {}, height = 32
       backgroundColor: chartDef.chart_bg_color || 'transparent',
       color: colors,
       grid: undefined,
-      title: titleStyle(title) ? { ...titleStyle(title), left: 'center' } : undefined,
+      title: titleStyle(title),
       series: [{
         type: 'gauge',
         data: [{ value: val, name: label_field || '' }],
@@ -663,7 +687,7 @@ export default function AiChart({ chartDef, rows, columnLabels = {}, height = 32
       notMerge
       style={{ height: height === undefined ? '100%' : height, width: '100%' }}
       theme="light"
-      opts={{ renderer: 'canvas' }}
+      opts={{ renderer: 'svg' }}
     />
   )
 }

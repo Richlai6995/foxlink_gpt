@@ -350,8 +350,27 @@ router.post('/jobs/:id/rerun-sections', async (req, res) => {
     if (job.status === 'running' || job.status === 'pending')
       return res.status(409).json({ error: '研究仍在進行中，無法重跑' });
 
-    const { section_ids = [], sq_overrides = [] } = req.body;
+    const { section_ids = [], sq_overrides = [], kb_config, global_files, title, objective } = req.body;
     if (!section_ids.length) return res.status(400).json({ error: '請選擇至少一個子問題' });
+
+    // 若有傳入欄位，更新 job 記錄
+    const updates = [];
+    const params  = [];
+    if (kb_config !== undefined)    { updates.push('kb_config_json=?');    params.push(kb_config ? JSON.stringify(kb_config) : null); }
+    if (global_files !== undefined) { updates.push('global_files_json=?'); params.push(global_files?.length ? JSON.stringify(global_files) : null); }
+    if (title !== undefined)        { updates.push('title=?');             params.push(title); }
+    if (updates.length) {
+      await db.prepare(`UPDATE research_jobs SET ${updates.join(',')} WHERE id=?`).run(...params, req.params.id);
+    }
+    // objective 存在 plan_json 裡，需單獨更新
+    if (objective !== undefined) {
+      const job2 = await db.prepare('SELECT plan_json FROM research_jobs WHERE id=?').get(req.params.id);
+      if (job2?.plan_json) {
+        const plan = JSON.parse(job2.plan_json);
+        plan.objective = objective;
+        await db.prepare('UPDATE research_jobs SET plan_json=? WHERE id=?').run(JSON.stringify(plan), req.params.id);
+      }
+    }
 
     // Respond immediately, run async
     res.json({ ok: true, job_id: req.params.id });

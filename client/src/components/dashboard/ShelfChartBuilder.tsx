@@ -43,13 +43,22 @@ interface ShelfState {
   chart_bg_color: string
   axis_label_color: string
   axis_label_size: number | ''
+  axis_label_bold: boolean
   axis_line_color: string
   data_label_color: string
   data_label_size: number | ''
+  data_label_bold: boolean
   legend_color: string
   legend_size: number | ''
+  legend_bold: boolean
+  legend_left: string
+  legend_top: string
+  legend_orient: 'horizontal' | 'vertical'
   title_color: string
   title_size: number | ''
+  title_bold: boolean
+  title_left: string
+  title_top: string
   grid_line_color: string
 }
 
@@ -131,13 +140,22 @@ function defToShelf(def: AiChartDef, columns: string[], rows: Record<string, unk
     chart_bg_color: def.chart_bg_color || '',
     axis_label_color: def.axis_label_color || '',
     axis_label_size: def.axis_label_size ?? '',
+    axis_label_bold: def.axis_label_bold ?? false,
     axis_line_color: def.axis_line_color || '',
     data_label_color: def.data_label_color || '',
     data_label_size: def.data_label_size ?? '',
+    data_label_bold: def.data_label_bold ?? false,
     legend_color: def.legend_color || '',
     legend_size: def.legend_size ?? '',
+    legend_bold: def.legend_bold ?? false,
+    legend_left: def.legend_left || 'center',
+    legend_top: def.legend_top || '',
+    legend_orient: def.legend_orient || 'horizontal',
     title_color: def.title_color || '',
     title_size: def.title_size ?? '',
+    title_bold: def.title_bold ?? false,
+    title_left: def.title_left || 'auto',
+    title_top: def.title_top || '',
     grid_line_color: def.grid_line_color || '',
   }
 }
@@ -169,13 +187,22 @@ function newBlankShelf(columns: string[], rows: Record<string, unknown>[]): Shel
     chart_bg_color: '',
     axis_label_color: '',
     axis_label_size: '',
+    axis_label_bold: false,
     axis_line_color: '',
     data_label_color: '',
     data_label_size: '',
+    data_label_bold: false,
     legend_color: '',
     legend_size: '',
+    legend_bold: false,
+    legend_left: 'center',
+    legend_top: '',
+    legend_orient: 'horizontal',
     title_color: '',
     title_size: '',
+    title_bold: false,
+    title_left: 'auto',
+    title_top: '',
     grid_line_color: '',
   }
 }
@@ -327,13 +354,22 @@ export default function ShelfChartBuilder({ rows, columns, columnLabels, initial
     chart_bg_color: active.chart_bg_color || undefined,
     axis_label_color: active.axis_label_color || undefined,
     axis_label_size: active.axis_label_size !== '' ? Number(active.axis_label_size) : undefined,
+    axis_label_bold: active.axis_label_bold || undefined,
     axis_line_color: active.axis_line_color || undefined,
     data_label_color: active.data_label_color || undefined,
     data_label_size: active.data_label_size !== '' ? Number(active.data_label_size) : undefined,
+    data_label_bold: active.data_label_bold || undefined,
     legend_color: active.legend_color || undefined,
     legend_size: active.legend_size !== '' ? Number(active.legend_size) : undefined,
+    legend_bold: active.legend_bold || undefined,
+    legend_left: active.legend_left || undefined,
+    legend_top: active.legend_top || undefined,
+    legend_orient: active.legend_orient || undefined,
     title_color: active.title_color || undefined,
     title_size: active.title_size !== '' ? Number(active.title_size) : undefined,
+    title_bold: active.title_bold || undefined,
+    title_left: active.title_left || undefined,
+    title_top: active.title_top || undefined,
     grid_line_color: active.grid_line_color || undefined,
   }), [active])
 
@@ -378,13 +414,22 @@ export default function ShelfChartBuilder({ rows, columns, columnLabels, initial
       chart_bg_color: s.chart_bg_color || undefined,
       axis_label_color: s.axis_label_color || undefined,
       axis_label_size: s.axis_label_size !== '' ? Number(s.axis_label_size) : undefined,
+      axis_label_bold: s.axis_label_bold || undefined,
       axis_line_color: s.axis_line_color || undefined,
       data_label_color: s.data_label_color || undefined,
       data_label_size: s.data_label_size !== '' ? Number(s.data_label_size) : undefined,
+      data_label_bold: s.data_label_bold || undefined,
       legend_color: s.legend_color || undefined,
       legend_size: s.legend_size !== '' ? Number(s.legend_size) : undefined,
+      legend_bold: s.legend_bold || undefined,
+      legend_left: s.legend_left || undefined,
+      legend_top: s.legend_top || undefined,
+      legend_orient: s.legend_orient || undefined,
       title_color: s.title_color || undefined,
       title_size: s.title_size !== '' ? Number(s.title_size) : undefined,
+      title_bold: s.title_bold || undefined,
+      title_left: s.title_left || undefined,
+      title_top: s.title_top || undefined,
       grid_line_color: s.grid_line_color || undefined,
     }))
     return {
@@ -810,8 +855,11 @@ export default function ShelfChartBuilder({ rows, columns, columnLabels, initial
                 onChange={e => updateActive({ axis_label_size: e.target.value === '' ? '' : Number(e.target.value) })}
                 className="w-12 border border-gray-200 rounded px-1.5 py-0.5 text-[11px] focus:outline-none focus:border-blue-400"
                 placeholder="11px" />
-              {(active.axis_label_color || active.axis_label_size !== '') && (
-                <button onClick={() => updateActive({ axis_label_color: '', axis_label_size: '' })}
+              <button onClick={() => updateActive({ axis_label_bold: !active.axis_label_bold })}
+                title="粗體"
+                className={`text-[11px] px-1.5 py-0.5 rounded border font-bold ${active.axis_label_bold ? 'bg-blue-100 border-blue-400 text-blue-700' : 'border-gray-200 text-gray-400 hover:border-gray-400'}`}>B</button>
+              {(active.axis_label_color || active.axis_label_size !== '' || active.axis_label_bold) && (
+                <button onClick={() => updateActive({ axis_label_color: '', axis_label_size: '', axis_label_bold: false })}
                   className="text-[10px] text-gray-300 hover:text-red-400">重設</button>
               )}
             </div>
@@ -847,8 +895,11 @@ export default function ShelfChartBuilder({ rows, columns, columnLabels, initial
                 onChange={e => updateActive({ data_label_size: e.target.value === '' ? '' : Number(e.target.value) })}
                 className="w-12 border border-gray-200 rounded px-1.5 py-0.5 text-[11px] focus:outline-none focus:border-blue-400"
                 placeholder="11px" />
-              {(active.data_label_color || active.data_label_size !== '') && (
-                <button onClick={() => updateActive({ data_label_color: '', data_label_size: '' })}
+              <button onClick={() => updateActive({ data_label_bold: !active.data_label_bold })}
+                title="粗體"
+                className={`text-[11px] px-1.5 py-0.5 rounded border font-bold ${active.data_label_bold ? 'bg-blue-100 border-blue-400 text-blue-700' : 'border-gray-200 text-gray-400 hover:border-gray-400'}`}>B</button>
+              {(active.data_label_color || active.data_label_size !== '' || active.data_label_bold) && (
+                <button onClick={() => updateActive({ data_label_color: '', data_label_size: '', data_label_bold: false })}
                   className="text-[10px] text-gray-300 hover:text-red-400">重設</button>
               )}
             </div>
@@ -862,10 +913,29 @@ export default function ShelfChartBuilder({ rows, columns, columnLabels, initial
                 onChange={e => updateActive({ legend_size: e.target.value === '' ? '' : Number(e.target.value) })}
                 className="w-12 border border-gray-200 rounded px-1.5 py-0.5 text-[11px] focus:outline-none focus:border-blue-400"
                 placeholder="12px" />
-              {(active.legend_color || active.legend_size !== '') && (
-                <button onClick={() => updateActive({ legend_color: '', legend_size: '' })}
-                  className="text-[10px] text-gray-300 hover:text-red-400">重設</button>
-              )}
+              <button onClick={() => updateActive({ legend_bold: !active.legend_bold })}
+                title="粗體"
+                className={`text-[11px] px-1.5 py-0.5 rounded border font-bold ${active.legend_bold ? 'bg-blue-100 border-blue-400 text-blue-700' : 'border-gray-200 text-gray-400 hover:border-gray-400'}`}>B</button>
+            </div>
+            {/* 圖例位置 */}
+            <div className="flex items-center gap-2 pl-[72px]">
+              <select value={active.legend_left} onChange={e => updateActive({ legend_left: e.target.value })}
+                className="border border-gray-200 rounded px-1.5 py-0.5 text-[11px] focus:outline-none focus:border-blue-400">
+                <option value="left">靠左</option>
+                <option value="center">置中</option>
+                <option value="right">靠右</option>
+              </select>
+              <select value={active.legend_top} onChange={e => updateActive({ legend_top: e.target.value })}
+                className="border border-gray-200 rounded px-1.5 py-0.5 text-[11px] focus:outline-none focus:border-blue-400">
+                <option value="">頂端（預設）</option>
+                <option value="bottom">底部</option>
+                <option value="middle">中間</option>
+              </select>
+              <select value={active.legend_orient} onChange={e => updateActive({ legend_orient: e.target.value as 'horizontal' | 'vertical' })}
+                className="border border-gray-200 rounded px-1.5 py-0.5 text-[11px] focus:outline-none focus:border-blue-400">
+                <option value="horizontal">橫排</option>
+                <option value="vertical">直排</option>
+              </select>
             </div>
 
             {/* 標題 */}
@@ -877,10 +947,25 @@ export default function ShelfChartBuilder({ rows, columns, columnLabels, initial
                 onChange={e => updateActive({ title_size: e.target.value === '' ? '' : Number(e.target.value) })}
                 className="w-12 border border-gray-200 rounded px-1.5 py-0.5 text-[11px] focus:outline-none focus:border-blue-400"
                 placeholder="13px" />
-              {(active.title_color || active.title_size !== '') && (
-                <button onClick={() => updateActive({ title_color: '', title_size: '' })}
-                  className="text-[10px] text-gray-300 hover:text-red-400">重設</button>
-              )}
+              <button onClick={() => updateActive({ title_bold: !active.title_bold })}
+                title="粗體"
+                className={`text-[11px] px-1.5 py-0.5 rounded border font-bold ${active.title_bold ? 'bg-blue-100 border-blue-400 text-blue-700' : 'border-gray-200 text-gray-400 hover:border-gray-400'}`}>B</button>
+            </div>
+            {/* 標題位置 */}
+            <div className="flex items-center gap-2 pl-[72px]">
+              <select value={active.title_left} onChange={e => updateActive({ title_left: e.target.value })}
+                className="border border-gray-200 rounded px-1.5 py-0.5 text-[11px] focus:outline-none focus:border-blue-400">
+                <option value="auto">自動</option>
+                <option value="left">靠左</option>
+                <option value="center">置中</option>
+                <option value="right">靠右</option>
+              </select>
+              <select value={active.title_top} onChange={e => updateActive({ title_top: e.target.value })}
+                className="border border-gray-200 rounded px-1.5 py-0.5 text-[11px] focus:outline-none focus:border-blue-400">
+                <option value="">頂端（預設）</option>
+                <option value="middle">中間</option>
+                <option value="bottom">底部</option>
+              </select>
             </div>
           </div>
         </div>

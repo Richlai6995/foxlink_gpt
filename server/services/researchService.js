@@ -526,6 +526,10 @@ async function runResearchJob(db, jobId) {
     const kbConfig      = JSON.parse(job.kb_config_json || '{}');
     const taskBinding   = kbConfig.task   || {};
     const topicBindings = kbConfig.topics || {};
+    // hasKbConfig=true 表示使用者有進入 KB 設定畫面（即使全部留空）
+    // selfKbIds=null → 搜全部 KB（舊行為，僅在完全無設定時觸發）
+    // selfKbIds=[]   → 不搜任何 KB（使用者明確不選）
+    const hasKbConfig   = !!job.kb_config_json;
 
     // ── Global file context (extract once, reuse for all sub-questions) ───────
     const globalFiles   = JSON.parse(job.global_files_json || '[]');
@@ -577,11 +581,12 @@ async function runResearchJob(db, jobId) {
     for (let i = 0; i < subQuestions.length; i++) {
       const sq = subQuestions[i];
 
-      // Resolve bindings: topic > task > all-accessible
+      // Resolve bindings: topic > task > (搜全部 KB 僅在完全無 kb_config 時)
       const topicBind    = topicBindings[String(sq.id)] || {};
-      const selfKbIds    = topicBind.self_kb_ids?.length  ? topicBind.self_kb_ids
-                         : taskBinding.self_kb_ids?.length ? taskBinding.self_kb_ids
-                         : null;
+      const selfKbIds    = topicBind.self_kb_ids?.length   ? topicBind.self_kb_ids
+                         : taskBinding.self_kb_ids?.length  ? taskBinding.self_kb_ids
+                         : hasKbConfig                       ? []   // 有設定但沒選 → 不引用任何 KB
+                         : null;                                    // 完全無設定 → 搜全部 KB
       const difyKbIds    = topicBind.dify_kb_ids?.length  ? topicBind.dify_kb_ids
                          : taskBinding.dify_kb_ids?.length ? taskBinding.dify_kb_ids
                          : [];
@@ -622,9 +627,12 @@ async function runResearchJob(db, jobId) {
       // ── Self KB search ──────────────────────────────────────────────────────
       let kbContext = '';
       try {
-        kbContext = selfKbIds
-          ? await searchSpecificKbs(db, job.user_id, selfKbIds, sq.question)
-          : await searchUserKbs(db, job.user_id, sq.question);
+        if (selfKbIds === null) {
+          kbContext = await searchUserKbs(db, job.user_id, sq.question);
+        } else if (selfKbIds.length) {
+          kbContext = await searchSpecificKbs(db, job.user_id, selfKbIds, sq.question);
+        }
+        // selfKbIds=[] → 使用者沒選任何 KB，kbContext 維持空字串
       } catch (_) {}
 
       // ── Dify KB query ───────────────────────────────────────────────────────
@@ -757,6 +765,7 @@ async function rerunSections(db, jobId, sectionIds, sqOverrides = []) {
     const kbConfig      = JSON.parse(job.kb_config_json || '{}');
     const taskBinding   = kbConfig.task   || {};
     const topicBindings = kbConfig.topics || {};
+    const hasKbConfig   = !!job.kb_config_json;
 
     // Global file context
     const globalFiles = JSON.parse(job.global_files_json || '[]');
@@ -823,8 +832,9 @@ async function rerunSections(db, jobId, sectionIds, sqOverrides = []) {
 
       // Resolve bindings
       const topicBind    = topicBindings[String(sq.id)] || {};
-      const selfKbIds    = topicBind.self_kb_ids?.length  ? topicBind.self_kb_ids
-                         : taskBinding.self_kb_ids?.length ? taskBinding.self_kb_ids
+      const selfKbIds    = topicBind.self_kb_ids?.length   ? topicBind.self_kb_ids
+                         : taskBinding.self_kb_ids?.length  ? taskBinding.self_kb_ids
+                         : hasKbConfig                       ? []
                          : null;
       const difyKbIds    = topicBind.dify_kb_ids?.length  ? topicBind.dify_kb_ids
                          : taskBinding.dify_kb_ids?.length ? taskBinding.dify_kb_ids
@@ -854,9 +864,11 @@ async function rerunSections(db, jobId, sectionIds, sqOverrides = []) {
 
       let kbContext = '';
       try {
-        kbContext = selfKbIds
-          ? await searchSpecificKbs(db, job.user_id, selfKbIds, question)
-          : await searchUserKbs(db, job.user_id, question);
+        if (selfKbIds === null) {
+          kbContext = await searchUserKbs(db, job.user_id, question);
+        } else if (selfKbIds.length) {
+          kbContext = await searchSpecificKbs(db, job.user_id, selfKbIds, question);
+        }
       } catch (_) {}
 
       let difyContext = '';

@@ -227,6 +227,9 @@ export default function ResearchModal({ sessionId, modelKey, initialQuestion = '
   const [editJobLoading,   setEditJobLoading]   = useState(editMode)
   const [rerunIds,         setRerunIds]         = useState<Set<number>>(new Set())
   const [existingSections, setExistingSections] = useState<StreamingSection[]>([])
+  // 是否更動過整體 KB / 全局附件設定（dirty = 需要覆蓋 job 的原始設定）
+  const [rerunKbDirty,     setRerunKbDirty]     = useState(false)
+  const [rerunKbExpanded,  setRerunKbExpanded]  = useState(false)
 
   const step = jobId ? 3 : (plan || editMode) ? 2 : 1
 
@@ -359,6 +362,15 @@ export default function ResearchModal({ sessionId, modelKey, initialQuestion = '
     try {
       if (editMode && editJobId) {
         // ── RERUN MODE ─────────────────────────────────────────────────────
+        // Upload global pending files
+        let allGlobalUploaded = [...globalUploaded]
+        if (globalPending.length) {
+          const newUploaded = await uploadFiles(globalPending)
+          allGlobalUploaded = [...allGlobalUploaded, ...newUploaded]
+          setGlobalUploaded(allGlobalUploaded)
+          setGlobalPending([])
+        }
+
         // Upload per-SQ pending files for rerun IDs
         const sq_overrides = await Promise.all(
           plan.sub_questions
@@ -381,9 +393,20 @@ export default function ResearchModal({ sessionId, modelKey, initialQuestion = '
               }
             })
         )
+
+        // 整體 KB 設定：有任何變動就覆蓋，沒有則送 undefined（server 沿用原設定）
+        const hasTaskBinding = taskBinding.self_kb_ids.length || taskBinding.dify_kb_ids.length || taskBinding.mcp_server_ids.length
+        const kb_config = rerunKbDirty
+          ? (hasTaskBinding ? { task: taskBinding, topics: {} } : { task: emptyBinding(), topics: {} })
+          : undefined
+
         await api.post(`/research/jobs/${editJobId}/rerun-sections`, {
-          section_ids: Array.from(rerunIds),
+          section_ids:  Array.from(rerunIds),
           sq_overrides,
+          kb_config,
+          global_files: rerunKbDirty ? allGlobalUploaded : undefined,
+          title:        plan.title     || undefined,
+          objective:    plan.objective || undefined,
         })
         // Merge rerunning sections into existing for display
         const mergedSections = [...existingSections]
@@ -617,12 +640,85 @@ export default function ResearchModal({ sessionId, modelKey, initialQuestion = '
           {/* ── Step 2 ───────────────────────────────────────────────────── */}
           {step === 2 && plan && !editJobLoading && (
             <div className="space-y-4">
-              {/* Plan summary */}
+              {/* Plan summary — edit mode 可直接編輯 title / objective */}
               <div className="bg-slate-50 rounded-xl p-4 space-y-1.5">
                 <p className="text-xs text-slate-500 uppercase tracking-wide">{t('research.planTitle')}</p>
-                <p className="text-base font-semibold text-slate-800">{plan.title}</p>
-                <p className="text-sm text-slate-500">{plan.objective}</p>
+                {editMode ? (
+                  <>
+                    <input
+                      value={plan.title}
+                      onChange={e => setPlan(p => p ? { ...p, title: e.target.value } : p)}
+                      className="w-full text-base font-semibold text-slate-800 bg-white border border-slate-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-400"
+                      placeholder="研究主題"
+                    />
+                    <textarea
+                      value={plan.objective}
+                      onChange={e => setPlan(p => p ? { ...p, objective: e.target.value } : p)}
+                      rows={2}
+                      className="w-full text-sm text-slate-500 bg-white border border-slate-200 rounded-lg px-3 py-1.5 resize-none focus:outline-none focus:ring-2 focus:ring-blue-400"
+                      placeholder="研究方向 / 目標（選填）"
+                    />
+                  </>
+                ) : (
+                  <>
+                    <p className="text-base font-semibold text-slate-800">{plan.title}</p>
+                    <p className="text-sm text-slate-500">{plan.objective}</p>
+                  </>
+                )}
               </div>
+
+              {/* ── Edit mode：整體設定覆蓋（全局附件 + Task KB）────────────── */}
+              {editMode && (
+                <div className="border border-slate-200 rounded-xl overflow-hidden">
+                  <button
+                    className="w-full flex items-center justify-between px-4 py-2.5 bg-slate-50 hover:bg-slate-100 transition text-left"
+                    onClick={() => setRerunKbExpanded(p => !p)}
+                  >
+                    <span className="text-sm font-medium text-slate-700 flex items-center gap-2">
+                      <Database size={14} className="text-blue-500" />
+                      整體設定（全局附件 / 資料來源）
+                      {rerunKbDirty && <span className="text-[10px] bg-orange-100 text-orange-600 px-1.5 py-0.5 rounded">已修改</span>}
+                    </span>
+                    {rerunKbExpanded ? <ChevronUp size={14} className="text-slate-400" /> : <ChevronDown size={14} className="text-slate-400" />}
+                  </button>
+
+                  {rerunKbExpanded && (
+                    <div className="p-4 space-y-4 border-t border-slate-100">
+                      <p className="text-xs text-slate-400">修改後將覆蓋原研究的全局設定，僅影響本次重新研究的子問題。</p>
+
+                      {/* 全局附件 */}
+                      <FileAttachArea
+                        pendingFiles={globalPending}
+                        onAdd={(files) => { setGlobalPending(p => [...p, ...files]); setRerunKbDirty(true) }}
+                        onRemove={(i) => setGlobalPending(p => p.filter((_, j) => j !== i))}
+                        uploadedFiles={globalUploaded}
+                        onRemoveUploaded={(i) => { setGlobalUploaded(p => p.filter((_, j) => j !== i)); setRerunKbDirty(true) }}
+                        label={t('research.globalFilesLabel')}
+                      />
+
+                      {/* Task-level KB */}
+                      {!resLoading && hasAnyResource && (
+                        <div className="space-y-2">
+                          <ResourceSelect
+                            label={t('research.selfKbLabel')} icon={<Database size={11} />}
+                            options={resources.self_kbs.map((k) => ({ id: k.id, name: localName(k), sub: k.chunk_count ? t('research.chunksSuffix', { n: k.chunk_count }) : undefined }))}
+                            selected={taskBinding.self_kb_ids}
+                            onChange={(ids) => { setTaskBinding((p) => ({ ...p, self_kb_ids: ids })); setRerunKbDirty(true) }}
+                            colorClass="bg-blue-600"
+                          />
+                          <ResourceSelect
+                            label={t('research.difyKbLabel')} icon={<BookOpen size={11} />}
+                            options={resources.dify_kbs.map((k) => ({ id: k.id, name: localName(k) }))}
+                            selected={taskBinding.dify_kb_ids}
+                            onChange={(ids) => { setTaskBinding((p) => ({ ...p, dify_kb_ids: ids })); setRerunKbDirty(true) }}
+                            colorClass="bg-violet-600"
+                          />
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Global files & sources summary */}
               <div className="flex flex-wrap gap-2">

@@ -1651,6 +1651,7 @@ function JoinManager({ projectId }: { projectId: number | null }) {
                       <optgroup label="NULL 判斷">
                         <option value="IS NULL">IS NULL</option>
                         <option value="IS NOT NULL">IS NOT NULL</option>
+                        <option value="NULL_EQ">= NULL安全（兩側都NULL也相符）</option>
                       </optgroup>
                     </select>
                   </div>

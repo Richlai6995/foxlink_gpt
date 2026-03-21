@@ -446,13 +446,22 @@ export interface AiChartDef {
   chart_bg_color?: string      // 圖表 tile 底色
   axis_label_color?: string    // x/y 軸刻度文字色
   axis_label_size?: number     // x/y 軸刻度文字大小 (px)
+  axis_label_bold?: boolean    // x/y 軸刻度粗體
   axis_line_color?: string     // 軸線 + axisTick 顏色
   data_label_color?: string    // series 標籤文字色（bar/line 頂端數字）
   data_label_size?: number     // series 標籤文字大小
+  data_label_bold?: boolean    // series 標籤粗體
   legend_color?: string        // 圖例文字色
   legend_size?: number         // 圖例文字大小
+  legend_bold?: boolean        // 圖例粗體
   title_color?: string         // 標題文字色
   title_size?: number          // 標題文字大小
+  title_bold?: boolean         // 標題粗體
+  title_left?: string          // 標題水平位置: 'left'|'center'|'right' 或 '10px'
+  title_top?: string           // 標題垂直位置: 'top'|'middle'|'bottom' 或 '10px'
+  legend_left?: string         // 圖例水平位置: 'left'|'center'|'right' 或 '10px'
+  legend_top?: string          // 圖例垂直位置: 'top'|'middle'|'bottom' 或 '10px'
+  legend_orient?: 'horizontal' | 'vertical'  // 圖例排列方向
   grid_line_color?: string     // 格線顏色
 }
 

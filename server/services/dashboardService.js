@@ -489,6 +489,7 @@ async function buildPrompt(db, design, question, vectorResults, skipReason, lang
         const onClause = conditions.length
           ? conditions.map(c => {
               if (['IS NULL', 'IS NOT NULL'].includes(c.op)) return `${c.left} ${c.op}`;
+              if (c.op === 'NULL_EQ') return `DECODE(${c.left}, ${c.right}, 1, 0) = 1`;
               if (c.op === 'BETWEEN') return `${c.left} BETWEEN ${c.right} AND ${c.right2 || c.right}`;
               if (c.op === 'IN' || c.op === 'NOT IN') return `${c.left} ${c.op} (${c.right})`;
               return `${c.left} ${c.op || '='} ${c.right}`;
