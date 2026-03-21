@@ -538,4 +538,4 @@ async function initScheduler(db) {
   }
 }
 
-module.exports = { initScheduler, scheduleTask, unscheduleTask, runTask, enqueue };
+module.exports = { initScheduler, scheduleTask, unscheduleTask, runTask, enqueue, substituteVarsAsync };

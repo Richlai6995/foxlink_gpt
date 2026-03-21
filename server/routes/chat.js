@@ -1110,15 +1110,22 @@ router.post('/sessions/:id/messages', upload.array('files', 10), async (req, res
     let externalAnswerSkill = null;
 
     const { resolveToolRefs, hasToolRefs } = require('../services/promptResolver');
+    const { substituteVarsAsync } = require('../services/scheduledTaskService');
 
     for (const sk of sessionSkills) {
       console.log(`[Skill] id=${sk.id} name="${sk.name}" type=${sk.type} mode=${sk.endpoint_mode} url=${sk.endpoint_url}`);
       if (sk.type === 'builtin' && sk.system_prompt) {
-        // Resolve any {{skill:}} / {{kb:}} refs in the skill's own system_prompt
+        // Resolve {{date}}, {{scrape:url}}, {{fetch:url}} vars first
         let resolvedSystemPrompt = sk.system_prompt;
-        if (hasToolRefs(sk.system_prompt)) {
+        try {
+          resolvedSystemPrompt = await substituteVarsAsync(sk.system_prompt, sk.name);
+        } catch (e) {
+          console.warn(`[Skill] substituteVarsAsync failed for "${sk.name}": ${e.message}`);
+        }
+        // Then resolve any {{skill:}} / {{kb:}} refs
+        if (hasToolRefs(resolvedSystemPrompt)) {
           try {
-            const r = await resolveToolRefs(sk.system_prompt, db, { userId: req.user.id, sessionId });
+            const r = await resolveToolRefs(resolvedSystemPrompt, db, { userId: req.user.id, sessionId });
             resolvedSystemPrompt = r.resolvedText;
           } catch (e) {
             console.warn(`[Skill] promptResolver failed for "${sk.name}": ${e.message}`);
