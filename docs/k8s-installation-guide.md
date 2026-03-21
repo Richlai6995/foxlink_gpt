@@ -993,7 +993,217 @@ kubectl get hpa -n foxlink -w
 | 登入後被踢出 | `redis-cli keys "token:*"` | 確認 REDIS_URL 正確、Redis pod 是否 Running |
 | 上傳檔案消失 | `kubectl exec -n foxlink <pod> -- ls /app/uploads` | 確認 NFS PVC 有正確 mount |
 | Oracle 連線耗盡 | Oracle: `SELECT count(*) FROM v$session;` | 調大 PROCESSES，或降低 poolMax |
+| Pods 跑舊 image | `sudo ctr -n k8s.io images list \| grep foxlink` 比對 SHA | Worker 沒收到新 image，重新執行第十一節推送流程 |
+| Skill Runner 重啟消失 | pod log: `Failed to restore skill` | 後台 → 技能管理 → 重新儲存代碼；或配置 skill_runners PVC |
 
 ---
 
-*文件產出日期：2026-03-19 | Git tag: `backup-before-k8s-migration-20260319`*
+## 十一、程式版本更新流程（Local Registry）
+
+> **採用 Local Registry 方式**：flgptm01:5000 作為內部 image registry。
+> 一次性設定完成後，每次更版只需 `./deploy.sh`，約 1 分鐘，零停機。
+>
+> **已驗證環境**（2026-03-21）
+
+### 11.1 環境節點 IP 對照
+
+| 節點 | IP | 角色 |
+|------|-----|------|
+| flgptm01 | 10.8.93.11 | Control Plane（kubectl / docker build / registry） |
+| flgptn01 | 10.8.93.12 | Worker |
+| flgptn02 | 10.8.93.13 | Worker + Ingress（https://flgpt.foxlink.com.tw:8443） |
+| flgptn03 | 10.8.93.14 | Worker |
+
+> Worker node 只有 containerd，**沒有 docker CLI**。
+
+---
+
+### 11.2 一次性初始設定（新環境必做）
+
+#### Step 1：設定 fldba 免密碼 sudo（所有 worker，SSH 逐台執行）
+
+> **為什麼要做**：後續所有 containerd / systemctl 操作需要 sudo，非互動式 SSH 無法輸入密碼。
+
+分別 SSH 到每個 worker，各執行一次：
+
+```bash
+# SSH 到 flgptn01
+ssh fldba@10.8.93.12
+echo "fldba ALL=(ALL) NOPASSWD:ALL" | sudo tee /etc/sudoers.d/fldba
+exit
+
+# SSH 到 flgptn02
+ssh fldba@10.8.93.13
+echo "fldba ALL=(ALL) NOPASSWD:ALL" | sudo tee /etc/sudoers.d/fldba
+exit
+
+# SSH 到 flgptn03
+ssh fldba@10.8.93.14
+echo "fldba ALL=(ALL) NOPASSWD:ALL" | sudo tee /etc/sudoers.d/fldba
+exit
+```
+
+#### Step 2：在 flgptm01 啟動 Local Registry
+
+```bash
+# 啟動 registry container（永久 restart，資料存於 /opt/registry）
+docker run -d \
+  -p 5000:5000 \
+  --restart=always \
+  --name registry \
+  -v /opt/registry:/var/lib/registry \
+  registry:2
+
+# 確認啟動
+curl http://localhost:5000/v2/_catalog
+# 預期：{"repositories":[]}
+```
+
+#### Step 3：設定 flgptm01 docker 允許 insecure registry
+
+> docker push 預設用 HTTPS，本地 registry 是 HTTP，需明確允許。
+
+```bash
+sudo tee /etc/docker/daemon.json > /dev/null <<'EOF'
+{
+  "insecure-registries": ["10.8.93.11:5000"]
+}
+EOF
+
+sudo systemctl restart docker
+
+# 確認 registry container 還在（docker 重啟後 container 自動起來）
+docker ps | grep registry
+```
+
+#### Step 4：設定每個 Worker 的 containerd insecure registry
+
+> Step 1 完成（免密碼 sudo）後，可從 flgptm01 一次對三台執行。
+
+```bash
+for node_ip in 10.8.93.12 10.8.93.13 10.8.93.14; do
+  echo "=== Configuring $node_ip ==="
+  ssh fldba@${node_ip} "
+    # 建立 hosts.toml（告訴 containerd 這個 registry 用 HTTP）
+    sudo mkdir -p /etc/containerd/certs.d/10.8.93.11:5000
+    sudo tee /etc/containerd/certs.d/10.8.93.11:5000/hosts.toml > /dev/null <<'EOF'
+server = \"http://10.8.93.11:5000\"
+[host.\"http://10.8.93.11:5000\"]
+  capabilities = [\"pull\", \"resolve\"]
+  skip_verify = true
+EOF
+
+    # 產生完整 containerd config.toml（預設可能不存在）
+    sudo containerd config default | sudo tee /etc/containerd/config.toml > /dev/null
+
+    # 設定 config_path 讓 containerd 讀取 certs.d
+    sudo sed -i 's|config_path = \"\"|config_path = \"/etc/containerd/certs.d\"|' /etc/containerd/config.toml
+
+    # 重啟 containerd 套用設定
+    sudo systemctl restart containerd
+    echo 'done: '\$HOSTNAME
+  "
+done
+```
+
+確認設定正確：
+
+```bash
+for node_ip in 10.8.93.12 10.8.93.13 10.8.93.14; do
+  echo "=== $node_ip ==="
+  ssh fldba@${node_ip} "
+    grep config_path /etc/containerd/config.toml
+    cat /etc/containerd/certs.d/10.8.93.11:5000/hosts.toml
+  "
+done
+```
+
+#### Step 5：Build 並 Push 初始 image
+
+```bash
+# 在 flgptm01
+cd ~/foxlink_gpt
+docker build -t 10.8.93.11:5000/foxlink-gpt:latest .
+docker push 10.8.93.11:5000/foxlink-gpt:latest
+
+# 確認 registry 有收到
+curl http://10.8.93.11:5000/v2/foxlink-gpt/tags/list
+# 預期：{"name":"foxlink-gpt","tags":["latest"]}
+```
+
+#### Step 6：套用 deployment.yaml 並確認 rollout
+
+```bash
+cd ~/foxlink_gpt
+git pull
+kubectl apply -f k8s/deployment.yaml
+kubectl rollout status deployment/foxlink-gpt -n foxlink
+# 等待：deployment "foxlink-gpt" successfully rolled out
+```
+
+---
+
+### 11.3 日常程式更版流程
+
+**每次更版只需三行：**
+
+```bash
+ssh fldba@10.8.93.11
+cd ~/foxlink_gpt && git pull && ./deploy.sh
+```
+
+`deploy.sh` 自動執行：
+1. `docker build` → 新 image
+2. `docker push` → 推到 10.8.93.11:5000
+3. `kubectl rollout restart` → K8s 從 registry pull 新 image，rolling update（零停機）
+4. `kubectl rollout status` → 等待所有 pod 更新完成
+
+---
+
+### 11.4 常用 kubectl 指令
+
+```bash
+# 查看所有 pod 狀態與所在 node
+kubectl get pods -n foxlink -o wide
+
+# 查看 pod 啟動 log（確認版本）
+kubectl logs -n foxlink $(kubectl get pod -n foxlink -l app=foxlink-gpt \
+  -o jsonpath='{.items[0].metadata.name}') --tail=30
+
+# 查看 pod 異常原因
+kubectl describe pod <pod-name> -n foxlink | tail -20
+
+# 查看 node IP
+kubectl get nodes -o wide
+
+# 查看 rollout 歷史
+kubectl rollout history deployment/foxlink-gpt -n foxlink
+
+# 查看 registry 中的 image tag
+curl http://10.8.93.11:5000/v2/foxlink-gpt/tags/list
+```
+
+---
+
+### 11.5 Troubleshooting — Image Pull 失敗
+
+| 錯誤訊息 | 原因 | 解法 |
+|----------|------|------|
+| `http: server gave HTTP response to HTTPS client`（flgptm01） | docker daemon 未設定 insecure registry | 執行 Step 3 |
+| `http: server gave HTTP response to HTTPS client`（worker pod） | containerd 未設定 hosts.toml 或 config_path | 執行 Step 4 |
+| `sudo: a terminal is required` | fldba 未設定免密碼 sudo | 執行 Step 1 |
+| `NAME_UNKNOWN: repository name not known` | image 未 push 到 registry | 執行 Step 5 |
+
+---
+
+### 11.6 Skill Runner 在 K8s 的注意事項
+
+K8s pod 的 filesystem 是 ephemeral，每次 pod 重啟後 `skill_runners/<id>/user_code.js` 消失。
+（目前 `pvc-flgpt-source` 的 `skill_runners` subPath 已掛載，重啟後應保留。）
+
+若 skill 仍失效，手動復原：後台 → 技能管理 → 找到 Code Runner 技能 → 點「儲存代碼」。
+
+---
+
+*文件產出日期：2026-03-19 | 更新：2026-03-21（完整改寫第十一節，採用 Local Registry 部署）*
+*Git tag: `backup-before-k8s-migration-20260319`*
