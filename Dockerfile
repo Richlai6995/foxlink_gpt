@@ -7,7 +7,7 @@ WORKDIR /app/client
 
 # Install deps first (layer cache)
 COPY client/package*.json ./
-RUN npm ci
+RUN npm install
 
 # Build Vite/React app
 COPY client ./
