@@ -455,7 +455,7 @@ export default function MCPServersPanel() {
                 <>
                   <div>
                     <label className="block text-xs font-medium text-slate-600 mb-1">
-                      {t('mcp.form.url')} {form.transport_type !== 'stdio' ? '*' : ''}
+                      {t('mcp.form.url')} *
                     </label>
                     <input
                       value={form.url}
