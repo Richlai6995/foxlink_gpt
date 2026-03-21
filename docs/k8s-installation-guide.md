@@ -1118,7 +1118,25 @@ for node_ip in 10.8.93.12 10.8.93.13 10.8.93.14; do
 done
 ```
 
-#### Step 5：Build 並 Push 初始 image
+#### Step 5：設定 deploy.sh 執行權限
+
+> `git clone` 後 shell script 預設沒有執行權限，必須手動設定，否則 `./deploy.sh` 會報 `Permission denied`。
+
+```bash
+cd ~/foxlink_gpt
+chmod +x deploy.sh
+```
+
+若要讓 git 記住這個權限（避免其他環境 clone 後又要重設）：
+
+```bash
+# 在開發機（Windows/Mac）執行一次即可
+git update-index --chmod=+x deploy.sh
+git commit -m "chore: set deploy.sh executable"
+git push
+```
+
+#### Step 6：Build 並 Push 初始 image
 
 ```bash
 # 在 flgptm01
@@ -1131,7 +1149,7 @@ curl http://10.8.93.11:5000/v2/foxlink-gpt/tags/list
 # 預期：{"name":"foxlink-gpt","tags":["latest"]}
 ```
 
-#### Step 6：套用 deployment.yaml 並確認 rollout
+#### Step 7：套用 deployment.yaml 並確認 rollout
 
 ```bash
 cd ~/foxlink_gpt
