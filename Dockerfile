@@ -10,7 +10,7 @@ RUN yarn install --frozen-lockfile
 # Build Vite/React app
 COPY client ./
 # Pre-create dist dir — Vite 6.x prepareOutDir fails with ENOENT if dist doesn't exist
-RUN mkdir -p dist && npm run build
+RUN mkdir -p dist && npx vite build
 
 
 # ─── Stage 2: Production Server ───────────────────────────────────────────────
