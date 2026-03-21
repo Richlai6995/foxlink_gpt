@@ -26,6 +26,18 @@ if [ "${TAG}" != "latest" ]; then
   echo "▶ Also tagged as latest"
 fi
 
+echo "▶ Syncing K8s Secret from server/.env"
+ENV_FILE="$(dirname "$0")/server/.env"
+if [ -f "${ENV_FILE}" ]; then
+  kubectl delete secret foxlink-secrets -n ${NAMESPACE} --ignore-not-found
+  kubectl create secret generic foxlink-secrets \
+    --from-env-file="${ENV_FILE}" \
+    -n ${NAMESPACE}
+  echo "  Secret foxlink-secrets updated"
+else
+  echo "  ⚠️  server/.env not found, skipping Secret sync"
+fi
+
 echo "▶ Rolling update (maxUnavailable=0 → 零停機)"
 kubectl rollout restart deployment/${DEPLOY} -n ${NAMESPACE}
 kubectl rollout status deployment/${DEPLOY} -n ${NAMESPACE}

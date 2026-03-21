@@ -696,14 +696,23 @@ kubectl scale deployment foxlink-gpt --replicas=3 -n foxlink
 
 ### Secret 更新（.env 變更時）
 
+> ⚠️ **重要**：K8s pod 不讀取 `server/.env` 檔案，所有環境變數只來自 K8s Secret。
+> 每次 `.env` 有任何新增或修改（API Key、Model 名稱、SMTP 等），都必須同步 Secret，
+> 否則 pod 會用到舊值或缺少設定（例如翻譯功能用到廢棄的 LLM model）。
+
+**`deploy.sh` 已自動化此步驟**，每次執行 `./deploy.sh` 都會自動同步 Secret。
+
+手動同步方式：
+
 ```bash
-kubectl delete secret foxlink-secrets -n foxlink
+kubectl delete secret foxlink-secrets -n foxlink --ignore-not-found
 kubectl create secret generic foxlink-secrets \
   --from-env-file=server/.env \
   -n foxlink
 
 # 重啟 pod 讓新 secret 生效
 kubectl rollout restart deployment/foxlink-gpt -n foxlink
+kubectl rollout status deployment/foxlink-gpt -n foxlink
 ```
 
 ---
