@@ -10,19 +10,7 @@ const { db } = require('../database-oracle');
 async function translateText(text) {
   if (!text?.trim()) return { zh: '', en: '', vi: '' };
   try {
-    // 翻譯服務固定用 env 的 flash model，不走 DB（避免 DB model 設定過時導致失敗）
-    const flashModel = process.env.GEMINI_MODEL_FLASH || 'gemini-2.0-flash-lite';
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) throw new Error('GEMINI_API_KEY 未設定');
-    const { GoogleGenerativeAI } = require('@google/generative-ai');
-    const genAI = new GoogleGenerativeAI(apiKey);
-    const model = genAI.getGenerativeModel({ model: flashModel });
-    const client = {
-      generate: async (contents) => {
-        const result = await model.generateContent({ contents });
-        return result.response.text();
-      }
-    };
+    const client = await createClient(db, 'flash');
     const prompt = `Translate the following text to three languages.
 Return ONLY a valid JSON object with exactly these three keys: "zh" (Traditional Chinese 繁體中文), "en" (English), "vi" (Vietnamese).
 No markdown code block, no extra text, no explanation — just the raw JSON.
@@ -97,13 +85,7 @@ async function batchTranslateDescriptions(items, batchSize = 30) {
   for (let i = 0; i < valid.length; i += batchSize) {
     const chunk = valid.slice(i, i + batchSize);
     try {
-      const flashModel = process.env.GEMINI_MODEL_FLASH || 'gemini-2.0-flash-lite';
-      const apiKey = process.env.GEMINI_API_KEY;
-      if (!apiKey) throw new Error('GEMINI_API_KEY 未設定');
-      const { GoogleGenerativeAI } = require('@google/generative-ai');
-      const genAI = new GoogleGenerativeAI(apiKey);
-      const m = genAI.getGenerativeModel({ model: flashModel });
-      const client = { generate: async (contents) => { const r = await m.generateContent({ contents }); return r.response.text(); } };
+      const client = await createClient(db, 'flash');
       const payload = chunk.map((c, idx) => `${idx + 1}. ${c.description}`).join('\n');
       const prompt = `Translate each numbered item below to English (en) and Vietnamese (vi).
 Return ONLY a valid JSON array with objects: [{"en":"...","vi":"..."}, ...].
@@ -121,7 +103,7 @@ ${payload}`;
         results.set(c.id, { desc_en: t.en || null, desc_vi: t.vi || null });
       });
     } catch (e) {
-      console.warn('[Translation] batchTranslateDescriptions error:', e.message);
+      console.warn(`[Translation] batch error (chunk ${i}-${i + batchSize}):`, e.message);
       chunk.forEach(c => results.set(c.id, { desc_en: null, desc_vi: null }));
     }
   }
