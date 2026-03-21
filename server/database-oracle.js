@@ -544,6 +544,21 @@ async function runMigrations(db) {
   await addCol('RESEARCH_JOBS', 'REF_JOB_IDS_JSON',   'CLOB');  // [jobId, ...] previous research refs
   await addCol('RESEARCH_JOBS', 'MODEL_KEY',           'VARCHAR2(100)'); // llm_models.key to use
 
+  // ── Research Templates ────────────────────────────────────────────────────
+  await createTable('RESEARCH_TEMPLATES', `CREATE TABLE research_templates (
+    id               VARCHAR2(36)  DEFAULT SYS_GUID() PRIMARY KEY,
+    user_id          NUMBER        NOT NULL,
+    title            VARCHAR2(500) NOT NULL,
+    question         CLOB,
+    plan_json        CLOB,
+    kb_config_json   CLOB,
+    global_files_json CLOB,
+    output_formats   VARCHAR2(200) DEFAULT 'docx',
+    model_key        VARCHAR2(100),
+    created_at       TIMESTAMP     DEFAULT SYSTIMESTAMP,
+    updated_at       TIMESTAMP     DEFAULT SYSTIMESTAMP
+  )`);
+
   // ── AI 戰情 ─────────────────────────────────────────────────────────────────
   await addCol('USERS', 'CAN_DESIGN_AI_SELECT', 'NUMBER(1) DEFAULT 0');
   await addCol('USERS', 'CAN_USE_AI_DASHBOARD',  'NUMBER(1) DEFAULT 0');

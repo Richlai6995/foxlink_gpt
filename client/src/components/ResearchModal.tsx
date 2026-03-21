@@ -4,7 +4,7 @@ import {
   Globe, Database, Loader2, CheckCircle, AlertCircle,
   Server, ChevronDown, ChevronUp, BookOpen, Paperclip,
   FileText, Image, Music, File as FileIcon, History,
-  Lightbulb, Wifi, WifiOff, Clock,
+  Lightbulb, Wifi, WifiOff, Clock, BarChart2, Bookmark, BookmarkCheck,
 } from 'lucide-react'
 import api from '../lib/api'
 import { useTranslation } from 'react-i18next'
@@ -33,13 +33,32 @@ interface LocalizedItem { name: string; name_zh?: string; name_en?: string; name
 interface KbOption   extends LocalizedItem { id: number; chunk_count?: number }
 interface McpOption  extends LocalizedItem { id: number; tools_count?: number }
 interface PrevJob    { id: string; title: string; completed_at: string }
+interface DashboardDesignOption { id: number; name: string; description?: string; topic_name: string }
 interface Resources  {
   self_kbs: KbOption[]
   dify_kbs: KbOption[]
   mcp_servers: McpOption[]
   prev_jobs: PrevJob[]
+  dashboard_designs: DashboardDesignOption[]
 }
-interface TopicBinding { self_kb_ids: number[]; dify_kb_ids: number[]; mcp_server_ids: number[] }
+interface TopicBinding {
+  self_kb_ids: number[]
+  dify_kb_ids: number[]
+  mcp_server_ids: number[]
+  dashboard_design_ids: number[]
+}
+interface ResearchTemplate {
+  id: string
+  title: string
+  question?: string
+  plan_json?: string
+  kb_config_json?: string
+  global_files_json?: string
+  output_formats?: string
+  model_key?: string
+  created_at: string
+  updated_at: string
+}
 interface StreamingSection { id: number; question: string; answer: string; done: boolean }
 
 interface Props {
@@ -61,7 +80,7 @@ const FORMAT_OPTIONS = [
   { value: 'xlsx', label: 'Excel'},
 ]
 
-const emptyBinding = (): TopicBinding => ({ self_kb_ids: [], dify_kb_ids: [], mcp_server_ids: [] })
+const emptyBinding = (): TopicBinding => ({ self_kb_ids: [], dify_kb_ids: [], mcp_server_ids: [], dashboard_design_ids: [] })
 function toggleId(ids: number[], id: number): number[] {
   return ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id]
 }
@@ -197,8 +216,15 @@ export default function ResearchModal({ sessionId, modelKey, initialQuestion = '
   const suggestTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Resources
-  const [resources,    setResources]    = useState<Resources>({ self_kbs: [], dify_kbs: [], mcp_servers: [], prev_jobs: [] })
+  const [resources,    setResources]    = useState<Resources>({ self_kbs: [], dify_kbs: [], mcp_servers: [], prev_jobs: [], dashboard_designs: [] })
   const [resLoading,   setResLoading]   = useState(true)
+
+  // 我的研究（templates）
+  const [templates,       setTemplates]       = useState<ResearchTemplate[]>([])
+  const [tmplDropOpen,    setTmplDropOpen]     = useState(false)
+  const [savingTemplate,  setSavingTemplate]   = useState(false)
+  const [saveTemplName,   setSaveTemplName]    = useState('')
+  const [saveTemplOpen,   setSaveTemplOpen]    = useState(false)
 
   // Task-level binding
   const [taskBinding,  setTaskBinding]  = useState<TopicBinding>(emptyBinding())
@@ -240,10 +266,70 @@ export default function ResearchModal({ sessionId, modelKey, initialQuestion = '
   // ── Load resources ────────────────────────────────────────────────────────
   useEffect(() => {
     api.get('/research/accessible-resources')
-      .then((r) => setResources(r.data))
+      .then((r) => setResources({ dashboard_designs: [], ...r.data }))
       .catch(() => {})
       .finally(() => setResLoading(false))
   }, [])
+
+  // ── Load templates ────────────────────────────────────────────────────────
+  useEffect(() => {
+    api.get('/research/templates').then((r) => setTemplates(r.data)).catch(() => {})
+  }, [])
+
+  // ── Load template into Step 1 ─────────────────────────────────────────────
+  const loadTemplate = (tmpl: ResearchTemplate) => {
+    try {
+      if (tmpl.question) setQuestion(tmpl.question)
+      if (tmpl.output_formats) setFormats(tmpl.output_formats.split(',').filter(Boolean))
+      if (tmpl.plan_json) {
+        const p: Plan = JSON.parse(tmpl.plan_json)
+        setPlan(p)
+        const init: Record<number, TopicBinding> = {}
+        p.sub_questions?.forEach((sq: SubQuestion) => { init[sq.id] = emptyBinding() })
+        setTopicBindings(init)
+      }
+      if (tmpl.kb_config_json) {
+        const kbc = JSON.parse(tmpl.kb_config_json)
+        if (kbc.task) setTaskBinding({ ...emptyBinding(), ...kbc.task })
+      }
+    } catch (_) {}
+    setTmplDropOpen(false)
+  }
+
+  // ── Save template ─────────────────────────────────────────────────────────
+  const handleSaveTemplate = async () => {
+    if (!saveTemplName.trim() || !plan) return
+    setSavingTemplate(true)
+    try {
+      const kbConfig = { task: taskBinding, topics: Object.fromEntries(
+        Object.entries(topicBindings).filter(([, b]) =>
+          b.self_kb_ids.length || b.dify_kb_ids.length || b.mcp_server_ids.length || b.dashboard_design_ids?.length
+        )
+      )}
+      await api.post('/research/templates', {
+        title: saveTemplName.trim(),
+        question,
+        plan_json: plan,
+        kb_config_json: kbConfig,
+        output_formats: formats.join(','),
+        model_key: modelKey || null,
+      })
+      const r = await api.get('/research/templates')
+      setTemplates(r.data)
+      setSaveTemplOpen(false)
+      setSaveTemplName('')
+    } catch (_) {} finally {
+      setSavingTemplate(false)
+    }
+  }
+
+  const handleDeleteTemplate = async (id: string, e: React.MouseEvent) => {
+    e.stopPropagation()
+    try {
+      await api.delete(`/research/templates/${id}`)
+      setTemplates((prev) => prev.filter((t) => t.id !== id))
+    } catch (_) {}
+  }
 
   // ── Load existing job in edit mode ────────────────────────────────────────
   useEffect(() => {
@@ -317,13 +403,14 @@ export default function ResearchModal({ sessionId, modelKey, initialQuestion = '
   const toggleTopicExpand = (sqId: number) =>
     setExpandedTopics((prev) => { const n = new Set(prev); n.has(sqId) ? n.delete(sqId) : n.add(sqId); return n })
 
-  const hasAnyResource = resources.self_kbs.length + resources.dify_kbs.length + resources.mcp_servers.length > 0
+  const hasAnyResource = resources.self_kbs.length + resources.dify_kbs.length + resources.mcp_servers.length + resources.dashboard_designs.length > 0
 
   const bindingSummary = (binding: TopicBinding) => {
     const parts: string[] = []
     if (binding.self_kb_ids.length) parts.push(`${binding.self_kb_ids.length}KB`)
     if (binding.dify_kb_ids.length) parts.push(`${binding.dify_kb_ids.length}Dify`)
     if (binding.mcp_server_ids.length) parts.push(`${binding.mcp_server_ids.length}MCP`)
+    if (binding.dashboard_design_ids?.length) parts.push(`${binding.dashboard_design_ids.length}戰情`)
     return parts.join('+')
   }
 
@@ -504,7 +591,44 @@ export default function ResearchModal({ sessionId, modelKey, initialQuestion = '
 
               {/* Question */}
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1.5">{t('research.questionLabel')}</label>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-sm font-medium text-slate-700">{t('research.questionLabel')}</label>
+                  {templates.length > 0 && (
+                    <div className="relative">
+                      <button
+                        onClick={() => setTmplDropOpen((p) => !p)}
+                        className="flex items-center gap-1 text-xs px-2.5 py-1 rounded-lg border border-slate-200 text-slate-600 hover:border-blue-400 hover:text-blue-600 transition bg-white"
+                      >
+                        <Bookmark size={11} /> 我的研究
+                        <ChevronDown size={10} />
+                      </button>
+                      {tmplDropOpen && (
+                        <>
+                        <div className="fixed inset-0 z-40" onClick={() => setTmplDropOpen(false)} />
+                        <div className="absolute right-0 top-full mt-1 w-64 bg-white border border-slate-200 rounded-xl shadow-lg z-50 overflow-hidden">
+                          <div className="max-h-56 overflow-y-auto">
+                            {templates.map((tmpl) => (
+                              <div key={tmpl.id}
+                                onClick={() => loadTemplate(tmpl)}
+                                className="flex items-center justify-between px-3 py-2 hover:bg-blue-50 cursor-pointer group border-b border-slate-100 last:border-0">
+                                <div className="min-w-0 flex-1">
+                                  <p className="text-xs font-medium text-slate-700 truncate">{tmpl.title}</p>
+                                  <p className="text-[10px] text-slate-400">{tmpl.updated_at}</p>
+                                </div>
+                                <button
+                                  onClick={(e) => handleDeleteTemplate(tmpl.id, e)}
+                                  className="ml-2 p-0.5 text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition">
+                                  <Trash2 size={11} />
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                        </>
+                      )}
+                    </div>
+                  )}
+                </div>
                 <textarea
                   value={question} onChange={(e) => setQuestion(e.target.value)}
                   onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) handleGenerate() }}
@@ -590,6 +714,15 @@ export default function ResearchModal({ sessionId, modelKey, initialQuestion = '
                     selected={taskBinding.mcp_server_ids}
                     onChange={(ids) => setTaskBinding((p) => ({ ...p, mcp_server_ids: ids }))}
                     colorClass="bg-emerald-600"
+                  />
+                  <ResourceSelect
+                    label="AI 戰情" icon={<BarChart2 size={11} />}
+                    options={resources.dashboard_designs.map((d) => ({
+                      id: d.id, name: d.name, sub: d.topic_name,
+                    }))}
+                    selected={taskBinding.dashboard_design_ids ?? []}
+                    onChange={(ids) => setTaskBinding((p) => ({ ...p, dashboard_design_ids: ids }))}
+                    colorClass="bg-orange-500"
                   />
                 </div>
               )}
@@ -708,6 +841,20 @@ export default function ResearchModal({ sessionId, modelKey, initialQuestion = '
                             selected={taskBinding.dify_kb_ids}
                             onChange={(ids) => { setTaskBinding((p) => ({ ...p, dify_kb_ids: ids })); setRerunKbDirty(true) }}
                             colorClass="bg-violet-600"
+                          />
+                          <ResourceSelect
+                            label={t('research.mcpLabel')} icon={<Server size={11} />}
+                            options={resources.mcp_servers.map((m) => ({ id: m.id, name: localName(m) }))}
+                            selected={taskBinding.mcp_server_ids}
+                            onChange={(ids) => { setTaskBinding((p) => ({ ...p, mcp_server_ids: ids })); setRerunKbDirty(true) }}
+                            colorClass="bg-emerald-600"
+                          />
+                          <ResourceSelect
+                            label="AI 戰情" icon={<BarChart2 size={11} />}
+                            options={resources.dashboard_designs.map((d) => ({ id: d.id, name: d.name, sub: d.topic_name }))}
+                            selected={taskBinding.dashboard_design_ids ?? []}
+                            onChange={(ids) => { setTaskBinding((p) => ({ ...p, dashboard_design_ids: ids })); setRerunKbDirty(true) }}
+                            colorClass="bg-orange-500"
                           />
                         </div>
                       )}
@@ -902,6 +1049,11 @@ export default function ResearchModal({ sessionId, modelKey, initialQuestion = '
                                   selected={topicBind.mcp_server_ids}
                                   onChange={(ids) => setTopicBindings((p) => ({ ...p, [sq.id]: { ...topicBind, mcp_server_ids: ids } }))}
                                   colorClass="bg-emerald-600" />
+                                <ResourceSelect label="AI 戰情" icon={<BarChart2 size={11} />}
+                                  options={resources.dashboard_designs.map((d) => ({ id: d.id, name: d.name, sub: d.topic_name }))}
+                                  selected={topicBind.dashboard_design_ids ?? []}
+                                  onChange={(ids) => setTopicBindings((p) => ({ ...p, [sq.id]: { ...topicBind, dashboard_design_ids: ids } }))}
+                                  colorClass="bg-orange-500" />
                               </>
                             )}
                           </div>
@@ -992,6 +1144,38 @@ export default function ResearchModal({ sessionId, modelKey, initialQuestion = '
               <div className="flex items-center gap-3">
                 {editMode && rerunIds.size > 0 && (
                   <span className="text-xs text-orange-600">{t('research.rerunCount', { n: rerunIds.size })}</span>
+                )}
+                {/* 存為我的研究 */}
+                {!editMode && plan && (
+                  <div className="relative">
+                    <button
+                      onClick={() => { setSaveTemplName(plan.title || ''); setSaveTemplOpen((p) => !p) }}
+                      className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-500 hover:border-blue-400 hover:text-blue-600 transition"
+                      title="存為我的研究">
+                      <BookmarkCheck size={13} />
+                    </button>
+                    {saveTemplOpen && (
+                      <div className="absolute bottom-full right-0 mb-1 w-56 bg-white border border-slate-200 rounded-xl shadow-lg p-3 z-50 space-y-2">
+                        <p className="text-xs font-medium text-slate-600">存為我的研究</p>
+                        <input
+                          value={saveTemplName}
+                          onChange={(e) => setSaveTemplName(e.target.value)}
+                          placeholder="輸入名稱"
+                          className="w-full text-xs border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-400"
+                          onKeyDown={(e) => { if (e.key === 'Enter') handleSaveTemplate() }}
+                          autoFocus
+                        />
+                        <div className="flex gap-2">
+                          <button onClick={handleSaveTemplate} disabled={savingTemplate || !saveTemplName.trim()}
+                            className="flex-1 text-xs py-1 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 transition">
+                            {savingTemplate ? '儲存中...' : '儲存'}
+                          </button>
+                          <button onClick={() => setSaveTemplOpen(false)}
+                            className="px-2 text-xs text-slate-400 hover:text-slate-600">取消</button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 )}
                 <button
                   onClick={handleStart}

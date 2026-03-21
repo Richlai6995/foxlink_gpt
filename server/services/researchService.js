@@ -244,6 +244,54 @@ async function callMcpTool(db, mcpServerIds, toolName, args) {
   }
 }
 
+// ─── AI 戰情 Declarations & Query ─────────────────────────────────────────────
+
+/**
+ * Build Gemini function declarations from AI 戰情 design IDs.
+ * @returns {Array<{_designId, name, description, parameters}>}
+ */
+async function getDashboardDeclarations(db, userId, designIds) {
+  if (!designIds || !designIds.length) return [];
+  try {
+    const placeholders = designIds.map(() => '?').join(',');
+    const designs = await db.prepare(
+      `SELECT d.id, d.name, d.description, t.name AS topic_name
+       FROM ai_select_designs d
+       JOIN ai_select_topics t ON t.id = d.topic_id
+       WHERE d.is_active=1 AND NVL(d.is_suspended,0)=0 AND d.id IN (${placeholders})`
+    ).all(...designIds);
+    return designs.map((d) => ({
+      _designId: d.id,
+      name: `dashboard_${d.id}`,
+      description: `[AI戰情:${d.topic_name}] ${d.name}${d.description ? ' — ' + d.description : ''}。當需要查詢此主題的業務數據時呼叫。`,
+      parameters: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: '用自然語言描述你想查詢的內容，例如：「查詢2024年Q1各產品線的出貨量」' },
+        },
+        required: ['query'],
+      },
+    }));
+  } catch (e) {
+    console.warn('[Research] getDashboardDeclarations error:', e.message);
+    return [];
+  }
+}
+
+/**
+ * Format query result table as readable text (max 100 rows).
+ */
+function formatTableAsText(result) {
+  const { rows, columns, designName } = result;
+  if (!rows || !rows.length) return `【${designName}】查無符合資料。`;
+  const header = columns.join(' | ');
+  const divider = columns.map(() => '---').join(' | ');
+  const body = rows.slice(0, 100).map(r =>
+    columns.map(c => (r[c] === null || r[c] === undefined) ? '' : String(r[c])).join(' | ')
+  ).join('\n');
+  return `【${designName} 查詢結果（共 ${rows.length} 筆）】\n${header}\n${divider}\n${body}`;
+}
+
 // ─── File Context Extraction ──────────────────────────────────────────────────
 
 /**
@@ -362,7 +410,8 @@ async function generatePlan(question, depth, hasKb, llmClient = null) {
  * global file context, per-SQ file context, and research hints.
  */
 async function generateSection(question, kbContext, difyContext, mcpDecls, useWebSearch, language,
-  globalFileContext = '', sqFileContext = '', hint = '', llmClient = null) {
+  globalFileContext = '', sqFileContext = '', hint = '', dashboardDecls = [],
+  db = null, userId = null, modelKey = null, llmClient = null) {
   const genAI = llmClient ? null : new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
   const isZh = language === 'zh-TW';
   const langHint = isZh ? '請以繁體中文詳細回答。' : 'Please answer in detail in English.';
@@ -389,9 +438,11 @@ async function generateSection(question, kbContext, difyContext, mcpDecls, useWe
   const tools = [];
   if (useWebSearch && !combinedContext) tools.push({ googleSearch: {} });
 
-  // MCP function calling
-  const cleanDecls = mcpDecls.map(({ _serverId: _s, _serverName: _n, ...d }) => d);
-  if (cleanDecls.length) tools.push({ functionDeclarations: cleanDecls });
+  // Merge MCP + AI 戰情 function declarations
+  const cleanMcpDecls = mcpDecls.map(({ _serverId: _s, _serverName: _n, ...d }) => d);
+  const cleanDashDecls = dashboardDecls.map(({ _designId: _d, ...d }) => d);
+  const allFnDecls = [...cleanMcpDecls, ...cleanDashDecls];
+  if (allFnDecls.length) tools.push({ functionDeclarations: allFnDecls });
 
   if (llmClient) {
     const answer = await llmClient.generate([{ role: 'user', parts: [{ text: prompt }] }]);
@@ -399,22 +450,60 @@ async function generateSection(question, kbContext, difyContext, mcpDecls, useWe
   }
 
   const model = genAI.getGenerativeModel({ model: MODEL_PRO });
-  const result = await model.generateContent({
-    contents: [{ role: 'user', parts: [{ text: prompt }] }],
-    ...(tools.length ? { tools } : {}),
-  });
+  let totalIn = 0, totalOut = 0;
 
-  const usage = result.response.usageMetadata || {};
-  const inT  = usage.promptTokenCount     || 0;
-  const outT = usage.candidatesTokenCount || 0;
+  // ── Function calling loop (max 5 turns) ──────────────────────────────────
+  const MAX_TURNS = 5;
+  let contents = [{ role: 'user', parts: [{ text: prompt }] }];
 
-  const candidate = result.response.candidates?.[0];
-  const fnCall = candidate?.content?.parts?.find((p) => p.functionCall);
-  if (fnCall && mcpDecls.length) {
-    console.log(`[Research] MCP function call requested: ${fnCall.functionCall.name}`);
+  for (let turn = 0; turn < MAX_TURNS; turn++) {
+    const result = await model.generateContent({ contents, ...(tools.length ? { tools } : {}) });
+    const usage = result.response.usageMetadata || {};
+    totalIn  += usage.promptTokenCount     || 0;
+    totalOut += usage.candidatesTokenCount || 0;
+
+    const candidate = result.response.candidates?.[0];
+    const parts = candidate?.content?.parts || [];
+    const fnCalls = parts.filter((p) => p.functionCall);
+
+    if (!fnCalls.length) {
+      // No more function calls — extract final text
+      const answer = parts.map((p) => p.text || '').join('').trim()
+        || result.response.text().trim();
+      return { answer, inputTokens: totalIn, outputTokens: totalOut };
+    }
+
+    // Execute each function call
+    const fnResponses = [];
+    for (const part of fnCalls) {
+      const { name, args } = part.functionCall;
+      let responseText = '';
+      try {
+        if (name.startsWith('dashboard_') && db && userId) {
+          const designId = parseInt(name.replace('dashboard_', ''), 10);
+          console.log(`[Research] AI 戰情 function call: dashboard_${designId}, query: "${args.query}"`);
+          const { queryDashboardDesignSync } = require('./dashboardService');
+          const qResult = await queryDashboardDesignSync(db, userId, designId, args.query || question, modelKey);
+          responseText = formatTableAsText(qResult);
+        } else if (name.startsWith('mcp_')) {
+          console.log(`[Research] MCP function call: ${name}`);
+          const mcpServerIds = mcpDecls.map((d) => d._serverId).filter(Boolean);
+          responseText = await callMcpTool(db, mcpServerIds, name, args);
+        }
+      } catch (e) {
+        responseText = `查詢失敗：${e.message}`;
+        console.warn(`[Research] function call ${name} error:`, e.message);
+      }
+      fnResponses.push({ functionResponse: { name, response: { result: responseText } } });
+    }
+
+    // Append model turn + function responses to conversation
+    contents.push({ role: 'model', parts });
+    contents.push({ role: 'user', parts: fnResponses });
   }
 
-  return { answer: result.response.text().trim(), inputTokens: inT, outputTokens: outT };
+  // Fallback if loop exhausted without text answer
+  return { answer: '（研究生成逾時，請稍後重試）', inputTokens: totalIn, outputTokens: totalOut };
 }
 
 /**
@@ -593,6 +682,9 @@ async function runResearchJob(db, jobId) {
       const mcpServerIds = topicBind.mcp_server_ids?.length  ? topicBind.mcp_server_ids
                          : taskBinding.mcp_server_ids?.length ? taskBinding.mcp_server_ids
                          : [];
+      const dashboardDesignIds = topicBind.dashboard_design_ids?.length  ? topicBind.dashboard_design_ids
+                               : taskBinding.dashboard_design_ids?.length ? taskBinding.dashboard_design_ids
+                               : [];
 
       // Per-SQ web search override
       const sqUseWeb  = sq.use_web_search !== undefined ? Boolean(sq.use_web_search) : useWebSearch;
@@ -653,6 +745,10 @@ async function runResearchJob(db, jobId) {
       let mcpDecls = [];
       try { mcpDecls = await getMcpDeclarations(db, mcpServerIds); } catch (_) {}
 
+      // ── AI 戰情 declarations ─────────────────────────────────────────────────
+      let dashboardDecls = [];
+      try { dashboardDecls = await getDashboardDeclarations(db, job.user_id, dashboardDesignIds); } catch (_) {}
+
       const shouldWeb = sqUseWeb && !kbContext && !difyContext && !globalFileContext && !sqFileContext;
 
       // ── Generate section (retry 3x) ─────────────────────────────────────────
@@ -661,7 +757,7 @@ async function runResearchJob(db, jobId) {
         try {
           const sec = await generateSection(
             sq.question, kbContext, difyContext, mcpDecls, shouldWeb, language,
-            globalFileContext, sqFileContext, hint, llmClient
+            globalFileContext, sqFileContext, hint, dashboardDecls, db, job.user_id, job.model_key, llmClient
           );
           answer = sec.answer;
           addTokens(MODEL_PRO, sec.inputTokens, sec.outputTokens);
@@ -842,6 +938,9 @@ async function rerunSections(db, jobId, sectionIds, sqOverrides = []) {
       const mcpServerIds = topicBind.mcp_server_ids?.length  ? topicBind.mcp_server_ids
                          : taskBinding.mcp_server_ids?.length ? taskBinding.mcp_server_ids
                          : [];
+      const dashboardDesignIds = topicBind.dashboard_design_ids?.length  ? topicBind.dashboard_design_ids
+                               : taskBinding.dashboard_design_ids?.length ? taskBinding.dashboard_design_ids
+                               : [];
 
       let sqFileContext = '';
       if (sqFiles.length) {
@@ -886,13 +985,16 @@ async function rerunSections(db, jobId, sectionIds, sqOverrides = []) {
       let mcpDecls = [];
       try { mcpDecls = await getMcpDeclarations(db, mcpServerIds); } catch (_) {}
 
+      let dashboardDecls = [];
+      try { dashboardDecls = await getDashboardDeclarations(db, job.user_id, dashboardDesignIds); } catch (_) {}
+
       const shouldWeb = sqUseWeb && !kbContext && !difyContext && !globalFileContext && !sqFileContext;
 
       let answer = '';
       for (let attempt = 0; attempt < 3; attempt++) {
         try {
           const sec = await generateSection(question, kbContext, difyContext, mcpDecls, shouldWeb,
-            language, globalFileContext, sqFileContext, hint, llmClient);
+            language, globalFileContext, sqFileContext, hint, dashboardDecls, db, job.user_id, job.model_key, llmClient);
           answer = sec.answer;
           addTokens(MODEL_PRO, sec.inputTokens, sec.outputTokens);
           break;

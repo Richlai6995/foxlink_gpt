@@ -240,6 +240,37 @@ router.get('/accessible-resources', async (req, res) => {
       FETCH FIRST 20 ROWS ONLY
     `).all(userId);
 
+    // AI 戰情 designs（僅 can_use_ai_dashboard 或 admin）
+    let dashboardDesigns = [];
+    if (req.user.can_use_ai_dashboard == 1 || isAdmin) {
+      try {
+        if (isAdmin) {
+          dashboardDesigns = await db.prepare(`
+            SELECT d.id, d.name, d.description, t.name AS topic_name
+            FROM ai_select_designs d
+            JOIN ai_select_topics t ON t.id = d.topic_id
+            WHERE d.is_active = 1 AND NVL(d.is_suspended, 0) = 0
+            ORDER BY t.sort_order, t.name, d.name
+          `).all();
+        } else {
+          dashboardDesigns = await db.prepare(`
+            SELECT d.id, d.name, d.description, t.name AS topic_name
+            FROM ai_select_designs d
+            JOIN ai_select_topics t ON t.id = d.topic_id
+            WHERE d.is_active = 1 AND NVL(d.is_suspended, 0) = 0
+              AND (d.created_by = ? OR d.is_public = 1
+                OR EXISTS (
+                  SELECT 1 FROM ai_dashboard_shares s
+                  WHERE s.design_id = d.id
+                    AND ((s.grantee_type = 'user' AND s.grantee_id = TO_CHAR(?))
+                      OR (s.grantee_type = 'role' AND s.grantee_id = TO_CHAR(?)))
+                ))
+            ORDER BY t.sort_order, t.name, d.name
+          `).all(userId, userId, roleId || 0);
+        }
+      } catch (_) {}
+    }
+
     res.json({
       self_kbs: selfKbs.map((k) => ({ id: k.id, name: k.name, name_zh: k.name_zh, name_en: k.name_en, name_vi: k.name_vi, chunk_count: k.chunk_count })),
       dify_kbs: difyKbs.map((k) => ({ id: k.id, name: k.name, name_zh: k.name_zh, name_en: k.name_en, name_vi: k.name_vi })),
@@ -249,6 +280,7 @@ router.get('/accessible-resources', async (req, res) => {
         tools_count: JSON.parse(m.tools_json || '[]').length,
       })),
       prev_jobs: prevJobs.map((j) => ({ id: j.id, title: j.title, completed_at: j.completed_at })),
+      dashboard_designs: dashboardDesigns.map((d) => ({ id: d.id, name: d.name, description: d.description, topic_name: d.topic_name })),
     });
   } catch (e) {
     console.error('[Research] /accessible-resources error:', e.message);
@@ -427,6 +459,95 @@ router.get('/admin/jobs', async (req, res) => {
     `).all(...params, Number(offset), Number(limit));
     const total = await db.prepare(`SELECT COUNT(*) AS cnt FROM research_jobs rj ${where}`).get(...params);
     res.json({ jobs, total: Number(total?.cnt || 0) });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── Templates CRUD ────────────────────────────────────────────────────────────
+
+// GET /api/research/templates  — list user's saved templates
+router.get('/templates', async (req, res) => {
+  const db = getDb();
+  try {
+    const ok = await checkPermission(db, req.user);
+    if (!ok) return res.status(403).json({ error: '無權限' });
+    const rows = await db.prepare(`
+      SELECT id, title, question, plan_json, kb_config_json, global_files_json,
+             output_formats, model_key,
+             TO_CHAR(created_at,'YYYY-MM-DD HH24:MI') AS created_at,
+             TO_CHAR(updated_at,'YYYY-MM-DD HH24:MI') AS updated_at
+      FROM research_templates
+      WHERE user_id=?
+      ORDER BY updated_at DESC
+    `).all(req.user.id);
+    res.json(rows);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/research/templates  — save new template
+router.post('/templates', async (req, res) => {
+  const db = getDb();
+  try {
+    const ok = await checkPermission(db, req.user);
+    if (!ok) return res.status(403).json({ error: '無權限' });
+    const { title, question, plan_json, kb_config_json, global_files_json, output_formats, model_key } = req.body;
+    if (!title?.trim()) return res.status(400).json({ error: '標題為必填' });
+    const r = await db.prepare(`
+      INSERT INTO research_templates (user_id, title, question, plan_json, kb_config_json, global_files_json, output_formats, model_key)
+      VALUES (?,?,?,?,?,?,?,?)
+    `).run(req.user.id, title.trim(),
+      question || null,
+      plan_json ? JSON.stringify(plan_json) : null,
+      kb_config_json ? JSON.stringify(kb_config_json) : null,
+      global_files_json ? JSON.stringify(global_files_json) : null,
+      output_formats || 'docx',
+      model_key || null);
+    const newRow = await db.prepare('SELECT id FROM research_templates WHERE ROWID=(SELECT MAX(ROWID) FROM research_templates WHERE user_id=?)').get(req.user.id);
+    res.json({ ok: true, id: newRow?.id });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// PUT /api/research/templates/:id  — update template
+router.put('/templates/:id', async (req, res) => {
+  const db = getDb();
+  try {
+    const tmpl = await db.prepare('SELECT id, user_id FROM research_templates WHERE id=?').get(req.params.id);
+    if (!tmpl) return res.status(404).json({ error: '找不到模板' });
+    if (tmpl.user_id !== req.user.id && req.user.role !== 'admin') return res.status(403).json({ error: '無權限' });
+    const { title, question, plan_json, kb_config_json, global_files_json, output_formats, model_key } = req.body;
+    await db.prepare(`
+      UPDATE research_templates SET
+        title=?, question=?, plan_json=?, kb_config_json=?, global_files_json=?,
+        output_formats=?, model_key=?, updated_at=SYSTIMESTAMP
+      WHERE id=?
+    `).run(title?.trim() || tmpl.title,
+      question || null,
+      plan_json ? JSON.stringify(plan_json) : null,
+      kb_config_json ? JSON.stringify(kb_config_json) : null,
+      global_files_json ? JSON.stringify(global_files_json) : null,
+      output_formats || 'docx',
+      model_key || null,
+      req.params.id);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// DELETE /api/research/templates/:id
+router.delete('/templates/:id', async (req, res) => {
+  const db = getDb();
+  try {
+    const tmpl = await db.prepare('SELECT id, user_id FROM research_templates WHERE id=?').get(req.params.id);
+    if (!tmpl) return res.status(404).json({ error: '找不到模板' });
+    if (tmpl.user_id !== req.user.id && req.user.role !== 'admin') return res.status(403).json({ error: '無權限' });
+    await db.prepare('DELETE FROM research_templates WHERE id=?').run(req.params.id);
+    res.json({ ok: true });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

@@ -1683,8 +1683,96 @@ async function buildDataPermWhere(db, design, user, rules) {
   return { dataPermWhere: whereParts };
 }
 
+// ─── Research Integration: Promise-based query (no SSE) ──────────────────────
+/**
+ * Execute a dashboard design query and return results as a Promise.
+ * Used by researchService for AI 戰情 function calling.
+ * Applies data policies identical to runDashboardQuery.
+ * @returns {{ rows, columns, designName, sql }}
+ */
+async function queryDashboardDesignSync(db, userId, designId, question, modelKey = null) {
+  const SYNC_MAX_ROWS = 100;
+
+  // 1. Load design
+  const design = await db.prepare(`SELECT * FROM ai_select_designs WHERE id=?`).get(designId);
+  if (!design) throw new Error(`AI 戰情設計 ${designId} 不存在`);
+  if (design.is_suspended == 1) throw new Error(`AI 戰情設計「${design.name}」已暫停使用`);
+
+  // 2. Load fresh user
+  const user = await db.prepare(`SELECT * FROM users WHERE id=?`).get(userId);
+  if (!user) throw new Error('使用者不存在');
+
+  // 3. Effective policy (skip for admin)
+  let effectivePolicy = null;
+  if (user.role !== 'admin') {
+    try {
+      let _categoryId = null;
+      if (design.topic_id) {
+        const topic = await db.prepare(`SELECT policy_category_id FROM ai_select_topics WHERE id=?`).get(design.topic_id);
+        _categoryId = topic?.policy_category_id || null;
+      }
+      const { getEffectivePolicies } = require('../routes/dataPermissions');
+      const policies = await getEffectivePolicies(db, userId, _categoryId);
+      if (policies.length > 0) effectivePolicy = { rules: policies.flatMap(p => p.rules) };
+    } catch (_) {}
+  }
+
+  // 4. Data permission WHERE injection (same as runDashboardQuery)
+  if (effectivePolicy?.rules?.length > 0) {
+    design._dataPermissionWhere = await buildDataPermWhere(db, design, user, effectivePolicy.rules);
+  }
+
+  // 5. Resolve LLM model
+  let sqlApiModel = process.env.GEMINI_MODEL_PRO || 'gemini-3-pro-preview';
+  try {
+    if (modelKey) {
+      const mRow = await db.prepare(`SELECT api_model FROM llm_models WHERE key=? AND is_active=1`).get(modelKey);
+      if (mRow?.api_model) sqlApiModel = mRow.api_model;
+    } else {
+      const mRow = await db.prepare(`SELECT api_model FROM llm_models WHERE is_active=1 ORDER BY sort_order ASC FETCH FIRST 1 ROWS ONLY`).get();
+      if (mRow?.api_model) sqlApiModel = mRow.api_model;
+    }
+  } catch (_) {}
+
+  // 6. Generate SQL via Gemini
+  const prompt = await buildPrompt(db, design, question, [], null, 'zh-TW');
+  const sqlModel = genAI.getGenerativeModel({ model: sqlApiModel });
+  const genResult = await sqlModel.generateContent(prompt);
+  let generatedSql = genResult.response.text().trim()
+    .replace(/^```[\w]*\r?\n?/im, '')
+    .replace(/\r?\n?```\s*$/im, '')
+    .trim()
+    .replace(/;+\s*$/, '')
+    .trim();
+
+  // 7. Validate SQL (read-only check)
+  const safeSql = validateSql(generatedSql);
+
+  // 8. Execute against ERP DB
+  const erpPool = await getErpPool();
+  const erpConn = await erpPool.getConnection();
+  let rows = [], columns = [];
+  try {
+    const result = await erpConn.execute(safeSql, [], {
+      outFormat: oracledb.OUT_FORMAT_OBJECT,
+      maxRows: SYNC_MAX_ROWS,
+      fetchArraySize: 50,
+      queryTimeout: SQL_TIMEOUT_SEC,
+    });
+    rows = (result.rows || []).map(r =>
+      Object.fromEntries(Object.entries(r).map(([k, v]) => [k.toLowerCase(), v instanceof Date ? v.toISOString() : v]))
+    );
+    columns = (result.metaData || []).map(m => m.name.toLowerCase());
+  } finally {
+    await erpConn.close();
+  }
+
+  return { rows, columns, designName: design.name, sql: safeSql };
+}
+
 module.exports = {
   runDashboardQuery,
+  queryDashboardDesignSync,
   runEtlJob,
   cancelEtlJob,
   initEtlScheduler,
