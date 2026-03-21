@@ -1,13 +1,11 @@
 # ─── Stage 1: Build Frontend ──────────────────────────────────────────────────
 FROM node:20-alpine AS builder
 
-ENV NODE_ENV=development
-
 WORKDIR /app/client
 
 # Install deps first (layer cache)
 COPY client/package*.json ./
-RUN npm install
+RUN yarn install --frozen-lockfile
 
 # Build Vite/React app
 COPY client ./
