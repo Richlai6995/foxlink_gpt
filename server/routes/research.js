@@ -241,15 +241,16 @@ router.get('/accessible-resources', async (req, res) => {
     `).all(userId);
 
     // AI 戰情 designs（僅 can_use_ai_dashboard 或 admin）
+    // 使用 effective_can_use_ai_dashboard（已含 role 及 admin 判斷）
     let dashboardDesigns = [];
-    if (req.user.can_use_ai_dashboard == 1 || isAdmin) {
+    const canUseDashboard = req.user.effective_can_use_ai_dashboard || isAdmin;
+    if (canUseDashboard) {
       try {
         if (isAdmin) {
           dashboardDesigns = await db.prepare(`
             SELECT d.id, d.name, d.description, t.name AS topic_name
             FROM ai_select_designs d
             JOIN ai_select_topics t ON t.id = d.topic_id
-            WHERE d.is_active = 1 AND NVL(d.is_suspended, 0) = 0
             ORDER BY t.sort_order, t.name, d.name
           `).all();
         } else {
@@ -257,8 +258,7 @@ router.get('/accessible-resources', async (req, res) => {
             SELECT d.id, d.name, d.description, t.name AS topic_name
             FROM ai_select_designs d
             JOIN ai_select_topics t ON t.id = d.topic_id
-            WHERE d.is_active = 1 AND NVL(d.is_suspended, 0) = 0
-              AND (d.created_by = ? OR d.is_public = 1
+            WHERE (d.created_by = ? OR d.is_public = 1
                 OR EXISTS (
                   SELECT 1 FROM ai_dashboard_shares s
                   WHERE s.design_id = d.id
@@ -268,7 +268,7 @@ router.get('/accessible-resources', async (req, res) => {
             ORDER BY t.sort_order, t.name, d.name
           `).all(userId, userId, roleId || 0);
         }
-      } catch (_) {}
+      } catch (e) { console.error('[Research] accessible-resources dashboard_designs error:', e.message); }
     }
 
     res.json({
@@ -281,6 +281,7 @@ router.get('/accessible-resources', async (req, res) => {
       })),
       prev_jobs: prevJobs.map((j) => ({ id: j.id, title: j.title, completed_at: j.completed_at })),
       dashboard_designs: dashboardDesigns.map((d) => ({ id: d.id, name: d.name, description: d.description, topic_name: d.topic_name })),
+      can_use_dashboard: canUseDashboard,
     });
   } catch (e) {
     console.error('[Research] /accessible-resources error:', e.message);

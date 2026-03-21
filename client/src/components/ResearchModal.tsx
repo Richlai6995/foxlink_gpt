@@ -40,6 +40,7 @@ interface Resources  {
   mcp_servers: McpOption[]
   prev_jobs: PrevJob[]
   dashboard_designs: DashboardDesignOption[]
+  can_use_dashboard?: boolean
 }
 interface TopicBinding {
   self_kb_ids: number[]
@@ -101,15 +102,22 @@ function formatBytes(b?: number) {
 
 // ── ResourceSelect ────────────────────────────────────────────────────────────
 
-function ResourceSelect({ label, icon, options, selected, onChange, colorClass }: {
+function ResourceSelect({ label, icon, options, selected, onChange, colorClass, showWhenEmpty }: {
   label: string
   icon: React.ReactNode
   options: { id: number; name: string; sub?: string }[]
   selected: number[]
   onChange: (ids: number[]) => void
   colorClass: string
+  showWhenEmpty?: boolean
 }) {
-  if (!options.length) return null
+  if (!options.length && !showWhenEmpty) return null
+  if (!options.length) return (
+    <div>
+      <p className="text-xs font-medium text-slate-400 mb-1 flex items-center gap-1">{icon} {label}</p>
+      <p className="text-xs text-slate-400 italic">（尚無可用資料）</p>
+    </div>
+  )
   return (
     <div>
       <p className="text-xs font-medium text-slate-500 mb-1.5 flex items-center gap-1">{icon} {label}</p>
@@ -715,15 +723,18 @@ export default function ResearchModal({ sessionId, modelKey, initialQuestion = '
                     onChange={(ids) => setTaskBinding((p) => ({ ...p, mcp_server_ids: ids }))}
                     colorClass="bg-emerald-600"
                   />
-                  <ResourceSelect
-                    label="AI 戰情" icon={<BarChart2 size={11} />}
-                    options={resources.dashboard_designs.map((d) => ({
-                      id: d.id, name: d.name, sub: d.topic_name,
-                    }))}
-                    selected={taskBinding.dashboard_design_ids ?? []}
-                    onChange={(ids) => setTaskBinding((p) => ({ ...p, dashboard_design_ids: ids }))}
-                    colorClass="bg-orange-500"
-                  />
+                  {resources.can_use_dashboard && (
+                    <ResourceSelect
+                      label="AI 戰情" icon={<BarChart2 size={11} />}
+                      options={resources.dashboard_designs.map((d) => ({
+                        id: d.id, name: d.name, sub: d.topic_name,
+                      }))}
+                      selected={taskBinding.dashboard_design_ids ?? []}
+                      onChange={(ids) => setTaskBinding((p) => ({ ...p, dashboard_design_ids: ids }))}
+                      colorClass="bg-orange-500"
+                      showWhenEmpty
+                    />
+                  )}
                 </div>
               )}
 
@@ -849,13 +860,16 @@ export default function ResearchModal({ sessionId, modelKey, initialQuestion = '
                             onChange={(ids) => { setTaskBinding((p) => ({ ...p, mcp_server_ids: ids })); setRerunKbDirty(true) }}
                             colorClass="bg-emerald-600"
                           />
-                          <ResourceSelect
-                            label="AI 戰情" icon={<BarChart2 size={11} />}
-                            options={resources.dashboard_designs.map((d) => ({ id: d.id, name: d.name, sub: d.topic_name }))}
-                            selected={taskBinding.dashboard_design_ids ?? []}
-                            onChange={(ids) => { setTaskBinding((p) => ({ ...p, dashboard_design_ids: ids })); setRerunKbDirty(true) }}
-                            colorClass="bg-orange-500"
-                          />
+                          {resources.can_use_dashboard && (
+                            <ResourceSelect
+                              label="AI 戰情" icon={<BarChart2 size={11} />}
+                              options={resources.dashboard_designs.map((d) => ({ id: d.id, name: d.name, sub: d.topic_name }))}
+                              selected={taskBinding.dashboard_design_ids ?? []}
+                              onChange={(ids) => { setTaskBinding((p) => ({ ...p, dashboard_design_ids: ids })); setRerunKbDirty(true) }}
+                              colorClass="bg-orange-500"
+                              showWhenEmpty
+                            />
+                          )}
                         </div>
                       )}
                     </div>
@@ -1049,11 +1063,14 @@ export default function ResearchModal({ sessionId, modelKey, initialQuestion = '
                                   selected={topicBind.mcp_server_ids}
                                   onChange={(ids) => setTopicBindings((p) => ({ ...p, [sq.id]: { ...topicBind, mcp_server_ids: ids } }))}
                                   colorClass="bg-emerald-600" />
-                                <ResourceSelect label="AI 戰情" icon={<BarChart2 size={11} />}
-                                  options={resources.dashboard_designs.map((d) => ({ id: d.id, name: d.name, sub: d.topic_name }))}
-                                  selected={topicBind.dashboard_design_ids ?? []}
-                                  onChange={(ids) => setTopicBindings((p) => ({ ...p, [sq.id]: { ...topicBind, dashboard_design_ids: ids } }))}
-                                  colorClass="bg-orange-500" />
+                                {resources.can_use_dashboard && (
+                                  <ResourceSelect label="AI 戰情" icon={<BarChart2 size={11} />}
+                                    options={resources.dashboard_designs.map((d) => ({ id: d.id, name: d.name, sub: d.topic_name }))}
+                                    selected={topicBind.dashboard_design_ids ?? []}
+                                    onChange={(ids) => setTopicBindings((p) => ({ ...p, [sq.id]: { ...topicBind, dashboard_design_ids: ids } }))}
+                                    colorClass="bg-orange-500"
+                                    showWhenEmpty />
+                                )}
                               </>
                             )}
                           </div>

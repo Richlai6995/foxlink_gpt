@@ -268,8 +268,8 @@ const createSession = async (res, user) => {
   userWithoutPassword.effective_kb_max_size_mb       = user.role === 'admin' ? 99999 : resolveNum(user.kb_max_size_mb, rolePerms?.kb_max_size_mb, 500);
   userWithoutPassword.effective_kb_max_count         = user.role === 'admin' ? 99999 : resolveNum(user.kb_max_count,   rolePerms?.kb_max_count,   5);
   userWithoutPassword.effective_can_deep_research      = user.role === 'admin' || resolveEffective(user.can_deep_research, rolePerms?.can_deep_research ?? 1);
-  userWithoutPassword.effective_can_design_ai_select   = user.role === 'admin' || (user.can_design_ai_select == 1);
-  userWithoutPassword.effective_can_use_ai_dashboard   = user.role === 'admin' || (user.can_use_ai_dashboard == 1);
+  userWithoutPassword.effective_can_design_ai_select   = user.role === 'admin' || resolveEffective(user.can_design_ai_select,  rolePerms?.can_design_ai_select);
+  userWithoutPassword.effective_can_use_ai_dashboard   = user.role === 'admin' || resolveEffective(user.can_use_ai_dashboard,  rolePerms?.can_use_ai_dashboard);
   res.json({ token, user: userWithoutPassword });
 };
 
@@ -419,8 +419,8 @@ router.get('/me', async (req, res) => {
     userWithoutPassword.effective_kb_max_size_mb        = user.role === 'admin' ? 99999 : resolveNum(user.kb_max_size_mb,  rolePerms?.kb_max_size_mb, 500);
     userWithoutPassword.effective_kb_max_count          = user.role === 'admin' ? 99999 : resolveNum(user.kb_max_count,    rolePerms?.kb_max_count,   5);
     userWithoutPassword.effective_can_deep_research      = user.role === 'admin' || resolveEff(user.can_deep_research, rolePerms?.can_deep_research ?? 1);
-    userWithoutPassword.effective_can_design_ai_select   = user.role === 'admin' || (user.can_design_ai_select == 1);
-    userWithoutPassword.effective_can_use_ai_dashboard   = user.role === 'admin' || (user.can_use_ai_dashboard == 1);
+    userWithoutPassword.effective_can_design_ai_select   = user.role === 'admin' || resolveEff(user.can_design_ai_select,  rolePerms?.can_design_ai_select);
+    userWithoutPassword.effective_can_use_ai_dashboard   = user.role === 'admin' || resolveEff(user.can_use_ai_dashboard,  rolePerms?.can_use_ai_dashboard);
     // Resolve display language: USERS.preferred_language > browser Accept-Language > 'zh-TW'
     let resolvedLanguage = user.preferred_language || null;
     let is_first_lang_detect = false;

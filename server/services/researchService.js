@@ -258,7 +258,7 @@ async function getDashboardDeclarations(db, userId, designIds) {
       `SELECT d.id, d.name, d.description, t.name AS topic_name
        FROM ai_select_designs d
        JOIN ai_select_topics t ON t.id = d.topic_id
-       WHERE d.is_active=1 AND NVL(d.is_suspended,0)=0 AND d.id IN (${placeholders})`
+       WHERE d.id IN (${placeholders})`
     ).all(...designIds);
     return designs.map((d) => ({
       _designId: d.id,
