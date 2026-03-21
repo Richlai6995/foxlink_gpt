@@ -19,8 +19,8 @@ async function resolveModel(db, modelKey) {
     if (row) return row;
   } catch { /* ignore */ }
   // Fallback synthetic rows for env-only Gemini
-  const flashModel = process.env.GEMINI_MODEL_FLASH || 'gemini-2.0-flash';
-  const proModel   = process.env.GEMINI_MODEL_PRO   || 'gemini-1.5-pro';
+  const flashModel = process.env.GEMINI_MODEL_FLASH || 'gemini-3-flash-preview';
+  const proModel   = process.env.GEMINI_MODEL_PRO   || 'gemini-3-pro-preview';
   if (modelKey === 'flash') return { provider_type: 'gemini', api_model: flashModel };
   if (modelKey === 'pro')   return { provider_type: 'gemini', api_model: proModel };
   return { provider_type: 'gemini', api_model: modelKey };
