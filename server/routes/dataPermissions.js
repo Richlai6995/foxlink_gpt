@@ -246,10 +246,10 @@ router.post('/categories', async (req, res) => {
     const db = require('../database-oracle').db;
     const { name, description } = req.body;
     if (!name) return res.status(400).json({ error: '名稱為必填' });
-    const row = await db.prepare(
-      `INSERT INTO ai_policy_categories (name, description) VALUES (?,?) RETURNING id INTO :id`
+    await db.prepare(
+      `INSERT INTO ai_policy_categories (name, description) VALUES (?,?)`
     ).run(name, description || null);
-    const id = row?.lastID || (await db.prepare(`SELECT MAX(id) AS id FROM ai_policy_categories`).get())?.id;
+    const id = (await db.prepare(`SELECT MAX(id) AS id FROM ai_policy_categories`).get())?.id;
     res.json({ id, name, description });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
