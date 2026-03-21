@@ -98,12 +98,13 @@ ${payload}`;
         .replace(/^```json\s*|^```\s*|```\s*$/gm, '')
         .trim();
       const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) throw new Error(`回傳非陣列: ${raw.slice(0, 80)}`);
       chunk.forEach((c, idx) => {
         const t = parsed[idx] || {};
         results.set(c.id, { desc_en: t.en || null, desc_vi: t.vi || null });
       });
     } catch (e) {
-      console.warn(`[Translation] batch error (chunk ${i}-${i + batchSize}):`, e.message);
+      console.warn(`[Translation] batch error chunk ${i}-${i + chunk.length}:`, e.message);
       chunk.forEach(c => results.set(c.id, { desc_en: null, desc_vi: null }));
     }
   }

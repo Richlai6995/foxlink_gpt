@@ -1095,7 +1095,7 @@ function SchemaManager({ projectId }: { projectId: number | null }) {
                   <button onClick={async () => {
                     if (!confirm(`批次自動翻譯「${s.display_name || s.table_name}」所有欄位說明為英文和越文？`)) return
                     try {
-                      const res = await api.post(`/dashboard/designer/schemas/${s.id}/columns/translate`)
+                      const res = await api.post(`/dashboard/designer/schemas/${s.id}/columns/translate`, {}, { timeout: 300000 })
                       // 重新拉最新 schemas（含 desc_en/desc_vi）並更新 editingCols
                       const qs = projectId ? `?project_id=${projectId}` : ''
                       const schemasRes = await api.get(`/dashboard/designer/schemas${qs}`)
