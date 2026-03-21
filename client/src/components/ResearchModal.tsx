@@ -394,10 +394,9 @@ export default function ResearchModal({ sessionId, modelKey, initialQuestion = '
             })
         )
 
-        // 整體 KB 設定：有任何變動就覆蓋，沒有則送 undefined（server 沿用原設定）
-        const hasTaskBinding = taskBinding.self_kb_ids.length || taskBinding.dify_kb_ids.length || taskBinding.mcp_server_ids.length
+        // 整體 KB 設定：有任何變動就覆蓋（送明確 config，不送 null，避免後端誤判為舊資料而搜尋全部KB）
         const kb_config = rerunKbDirty
-          ? (hasTaskBinding ? { task: taskBinding, topics: {} } : { task: emptyBinding(), topics: {} })
+          ? { task: taskBinding, topics: {} }
           : undefined
 
         await api.post(`/research/jobs/${editJobId}/rerun-sections`, {
@@ -455,10 +454,7 @@ export default function ResearchModal({ sessionId, modelKey, initialQuestion = '
           if (bind.self_kb_ids.length || bind.dify_kb_ids.length || bind.mcp_server_ids.length)
             topicsConfig[sqId] = bind
         }
-        const hasTaskBinding = taskBinding.self_kb_ids.length || taskBinding.dify_kb_ids.length || taskBinding.mcp_server_ids.length
-        const kb_config = (hasTaskBinding || Object.keys(topicsConfig).length)
-          ? { task: taskBinding, topics: topicsConfig }
-          : null
+        const kb_config = { task: taskBinding, topics: topicsConfig }
 
         const res = await api.post('/research/jobs', {
           question:       question.trim(),
