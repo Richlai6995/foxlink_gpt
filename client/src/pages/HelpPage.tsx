@@ -1641,6 +1641,7 @@ const adminSections = [
   { id: 'a-code-runners', label: 'Code Runners', icon: <Code2 size={18} /> },
   { id: 'a-llm', label: 'LLM 模型管理', icon: <Cpu size={18} /> },
   { id: 'a-system', label: '系統設定', icon: <Settings size={18} /> },
+  { id: 'a-k8s', label: 'K8s 部署更新', icon: <Server size={18} /> },
 ]
 
 function AdminManual() {
@@ -2007,7 +2008,8 @@ module.exports = async function handler(body) {
               ['啟動失敗 / 錯誤狀態', 'user_code.js 語法錯誤或 require 的套件未安裝', '先執行「安裝套件」，再查看 Terminal 日誌確認錯誤訊息'],
               ['HTTP 500 注入失敗', 'handler 拋出例外或回傳格式錯誤', '查看 Terminal 日誌中的 [runner] handler error 行'],
               ['安裝套件後仍找不到模組', '安裝在舊目錄或 package.json 未更新', '重新安裝套件，確認對話框中有顯示該套件名稱'],
-              ['重啟 server 後 runner 消失', 'skill_runners 目錄未掛載 volume（Docker）', '確認 docker-compose.yml 有 skill_runners volume 設定'],
+              ['重啟 server 後 runner 消失（Docker）', 'skill_runners 目錄未掛載 volume', '確認 docker-compose.yml 有 skill_runners volume 設定'],
+              ['K8s pod 重啟後 runner 消失', 'pod 的 filesystem 是 ephemeral，沒有 PV', '進入 Admin → 技能管理，找到該 Code Skill → 點「儲存代碼」重建 runner；或配置 skill_runners PVC'],
             ]}
           />
         </SubSection>
@@ -2524,6 +2526,118 @@ generate_txt:供應商週報_{{date}}.txt
             ]}
           />
           <NoteBox>還原資料庫為破壞性操作，執行後目前的所有資料將被備份檔取代，請務必確認後再操作。</NoteBox>
+        </SubSection>
+      </Section>
+
+      <Section id="a-k8s" icon={<Server size={22} />} iconColor="text-violet-500" title="K8s 部署更新">
+        <Para>
+          FOXLINK GPT 在 Kubernetes 環境以 4 個 replica 部署，採用 flgptm01:5000 作為內部 Local Registry。
+          設定完成後每次更版只需一行指令，約 1 分鐘，零停機 Rolling Update。
+        </Para>
+
+        <SubSection title="環境架構">
+          <Table
+            headers={['節點', 'IP', '角色']}
+            rows={[
+              ['flgptm01', '10.8.93.11', 'Control Plane（kubectl / docker build / registry:5000）'],
+              ['flgptn01', '10.8.93.12', 'Worker'],
+              ['flgptn02', '10.8.93.13', 'Worker + Ingress（flgpt.foxlink.com.tw:8443）'],
+              ['flgptn03', '10.8.93.14', 'Worker'],
+            ]}
+          />
+          <NoteBox>Worker node 只有 containerd，沒有 docker CLI。Registry 為 HTTP（非 HTTPS），需各節點個別設定。</NoteBox>
+        </SubSection>
+
+        <SubSection title="一次性初始設定（新環境必做）">
+          <div className="space-y-3 mb-3">
+            <StepItem num={1} title="設定每個 Worker 免密碼 sudo" desc="非互動式 SSH 無法輸入密碼，需先解除限制" />
+          </div>
+          <Para>分別 SSH 到 flgptn01 / flgptn02 / flgptn03，各執行：</Para>
+          <CodeBlock>{`echo "fldba ALL=(ALL) NOPASSWD:ALL" | sudo tee /etc/sudoers.d/fldba`}</CodeBlock>
+
+          <div className="space-y-3 my-3">
+            <StepItem num={2} title="在 flgptm01 啟動 Local Registry" />
+          </div>
+          <CodeBlock>{`docker run -d -p 5000:5000 --restart=always --name registry \\
+  -v /opt/registry:/var/lib/registry registry:2
+curl http://localhost:5000/v2/_catalog`}</CodeBlock>
+
+          <div className="space-y-3 my-3">
+            <StepItem num={3} title="設定 flgptm01 docker 允許 HTTP registry" />
+          </div>
+          <CodeBlock>{`sudo tee /etc/docker/daemon.json > /dev/null <<'EOF'
+{ "insecure-registries": ["10.8.93.11:5000"] }
+EOF
+sudo systemctl restart docker`}</CodeBlock>
+
+          <div className="space-y-3 my-3">
+            <StepItem num={4} title="設定三個 Worker 的 containerd insecure registry" desc="從 flgptm01 統一執行（需先完成 Step 1）" />
+          </div>
+          <CodeBlock>{`for node_ip in 10.8.93.12 10.8.93.13 10.8.93.14; do
+  ssh fldba@\${node_ip} "
+    sudo mkdir -p /etc/containerd/certs.d/10.8.93.11:5000
+    sudo tee /etc/containerd/certs.d/10.8.93.11:5000/hosts.toml > /dev/null <<'EOF'
+server = \\"http://10.8.93.11:5000\\"
+[host.\\"http://10.8.93.11:5000\\"]
+  capabilities = [\\"pull\\", \\"resolve\\"]
+  skip_verify = true
+EOF
+    sudo containerd config default | sudo tee /etc/containerd/config.toml > /dev/null
+    sudo sed -i 's|config_path = \\"\\"|config_path = \\"/etc/containerd/certs.d\\"|' /etc/containerd/config.toml
+    sudo systemctl restart containerd && echo done
+  "
+done`}</CodeBlock>
+
+          <div className="space-y-3 my-3">
+            <StepItem num={5} title="Build 並 Push 初始 image，套用 deployment" />
+          </div>
+          <CodeBlock>{`cd ~/foxlink_gpt
+docker build -t 10.8.93.11:5000/foxlink-gpt:latest .
+docker push 10.8.93.11:5000/foxlink-gpt:latest
+curl http://10.8.93.11:5000/v2/foxlink-gpt/tags/list
+kubectl apply -f k8s/deployment.yaml
+kubectl rollout status deployment/foxlink-gpt -n foxlink`}</CodeBlock>
+          <TipBox>設定完成後，之後每次更版只需執行 Step 6。</TipBox>
+        </SubSection>
+
+        <SubSection title="日常程式更版（設定完成後）">
+          <CodeBlock>{`ssh fldba@10.8.93.11
+cd ~/foxlink_gpt && git pull && ./deploy.sh`}</CodeBlock>
+          <Para>deploy.sh 自動執行：docker build → push 到 registry → kubectl rollout restart → 等待完成。</Para>
+          <TipBox>Rolling Update 策略：maxUnavailable=0，永遠保持 4 個 pod 可用，更新期間 user 不受影響。看到 "successfully rolled out" 即完成。</TipBox>
+        </SubSection>
+
+        <SubSection title="常用 kubectl 指令">
+          <Table
+            headers={['指令', '用途']}
+            rows={[
+              ['kubectl get pods -n foxlink -o wide', '查看所有 pod 狀態與所在 node'],
+              ['kubectl logs -n foxlink <pod-name> --tail=30', '查看 pod 最新日誌'],
+              ['kubectl describe pod <pod-name> -n foxlink | tail -20', '查看 pod 異常事件'],
+              ['kubectl get nodes -o wide', '查看所有 node 的 IP'],
+              ['kubectl rollout history deployment/foxlink-gpt -n foxlink', '查看歷次 rollout 記錄'],
+              ['curl http://10.8.93.11:5000/v2/foxlink-gpt/tags/list', '查看 registry 中的 image tags'],
+            ]}
+          />
+        </SubSection>
+
+        <SubSection title="Image Pull 常見錯誤排查">
+          <Table
+            headers={['錯誤訊息', '原因', '解法']}
+            rows={[
+              ['http: server gave HTTP response to HTTPS client（push 失敗）', 'flgptm01 docker 未設定 insecure registry', '執行初始設定 Step 3'],
+              ['http: server gave HTTP response to HTTPS client（pod ErrImagePull）', 'Worker containerd 未設定 hosts.toml', '執行初始設定 Step 4'],
+              ['sudo: a terminal is required', 'Worker fldba 未設定免密碼 sudo', '執行初始設定 Step 1'],
+              ['NAME_UNKNOWN: repository name not known', 'Image 未 push 到 registry', '執行 docker push 後再 rollout'],
+            ]}
+          />
+        </SubSection>
+
+        <SubSection title="K8s 環境的 Skill Runner 注意事項">
+          <Para>
+            目前 skill_runners 目錄已掛載於 NFS PVC（pvc-flgpt-source），pod 重啟後應保留。
+            若 skill 仍失效，手動復原：後台 → 技能管理 → 找到 Code Runner 技能 → 點「儲存代碼」。
+          </Para>
         </SubSection>
       </Section>
     </div>
