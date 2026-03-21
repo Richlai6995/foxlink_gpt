@@ -1570,7 +1570,7 @@ function JoinManager({ projectId }: { projectId: number | null }) {
               <select className="input py-1.5 text-sm" value={form.left_schema_id}
                 onChange={e => setForm(p => ({ ...p, left_schema_id: e.target.value }))}>
                 <option value="">-- 選擇 --</option>
-                {schemas.map(s => <option key={s.id} value={s.id}>{s.alias || s.display_name || s.table_name}</option>)}
+                {schemas.map(s => <option key={s.id} value={s.id}>{s.table_name}{s.alias ? ` (${s.alias})` : ''}</option>)}
               </select>
             </div>
             <div>
@@ -1579,7 +1579,7 @@ function JoinManager({ projectId }: { projectId: number | null }) {
                 onChange={e => setForm(p => ({ ...p, right_schema_id: e.target.value }))}>
                 <option value="">-- 選擇 --</option>
                 {schemas.filter(s => s.id !== Number(form.left_schema_id)).map(s => (
-                  <option key={s.id} value={s.id}>{s.alias || s.display_name || s.table_name}</option>
+                  <option key={s.id} value={s.id}>{s.table_name}{s.alias ? ` (${s.alias})` : ''}</option>
                 ))}
               </select>
             </div>
