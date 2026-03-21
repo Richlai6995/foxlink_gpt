@@ -7,14 +7,20 @@ import { useTranslation } from 'react-i18next'
 import api from '../../lib/api'
 import TranslationFields, { type TranslationData } from '../common/TranslationFields'
 
+type TransportType = 'http-post' | 'http-sse' | 'streamable-http' | 'stdio' | 'auto'
+
 interface McpServer {
   id: number
   name: string
-  url: string
+  url: string | null
   api_key: string | null
   description: string | null
   is_active: number
   response_mode: 'inject' | 'answer' | null
+  transport_type: TransportType | null
+  command: string | null
+  args_json: string | null
+  env_json: string | null
   tools_json: string | null
   last_synced_at: string | null
   created_at: string
@@ -40,7 +46,20 @@ interface McpCallLog {
   session_id: string | null
 }
 
-const emptyForm = { name: '', url: '', api_key: '', description: '', is_active: true, response_mode: 'inject' as 'inject' | 'answer' }
+const TRANSPORT_LABELS: Record<TransportType, string> = {
+  'http-post': 'HTTP POST（標準）',
+  'http-sse': 'HTTP SSE（雙通道）',
+  'streamable-http': 'Streamable HTTP（MCP 2025）',
+  'stdio': 'stdio（本地指令）',
+  'auto': '自動偵測',
+}
+
+const emptyForm = {
+  name: '', url: '', api_key: '', description: '', is_active: true,
+  response_mode: 'inject' as 'inject' | 'answer',
+  transport_type: 'http-post' as TransportType,
+  command: '', args_json: '', env_json: '',
+}
 
 export default function MCPServersPanel() {
   const { t } = useTranslation()
@@ -84,7 +103,12 @@ export default function MCPServersPanel() {
 
   const openEdit = (s: McpServer) => {
     setEditing(s)
-    setForm({ name: s.name, url: s.url, api_key: s.api_key || '', description: s.description || '', is_active: !!s.is_active, response_mode: (s.response_mode as 'inject' | 'answer') || 'inject' })
+    setForm({
+      name: s.name, url: s.url || '', api_key: s.api_key || '', description: s.description || '',
+      is_active: !!s.is_active, response_mode: (s.response_mode as 'inject' | 'answer') || 'inject',
+      transport_type: (s.transport_type as TransportType) || 'http-post',
+      command: s.command || '', args_json: s.args_json || '', env_json: s.env_json || '',
+    })
     setTrans({
       name_zh: (s as any).name_zh || null, name_en: (s as any).name_en || null, name_vi: (s as any).name_vi || null,
       desc_zh: (s as any).desc_zh || null, desc_en: (s as any).desc_en || null, desc_vi: (s as any).desc_vi || null,
@@ -94,12 +118,23 @@ export default function MCPServersPanel() {
   }
 
   const save = async () => {
-    if (!form.name.trim() || !form.url.trim()) { setError(t('mcp.nameUrlRequired')); return }
+    if (!form.name.trim()) { setError('名稱為必填'); return }
+    if (form.transport_type !== 'stdio' && !form.url.trim()) { setError('URL 為必填（非 stdio 模式）'); return }
+    if (form.transport_type === 'stdio' && !form.command.trim()) { setError('stdio 模式需填寫指令'); return }
     setSaving(true)
     setTranslating(true)
     setError('')
     try {
-      const payload = { ...form, api_key: form.api_key || null, description: form.description || null, response_mode: form.response_mode, ...trans }
+      const payload = {
+        ...form,
+        api_key: form.api_key || null,
+        description: form.description || null,
+        url: form.url || null,
+        command: form.command || null,
+        args_json: form.args_json || null,
+        env_json: form.env_json || null,
+        ...trans,
+      }
       let res: any
       if (editing) {
         res = await api.put(`/mcp-servers/${editing.id}`, payload)
@@ -215,8 +250,15 @@ export default function MCPServersPanel() {
 
                   {/* Name & URL */}
                   <div className="flex-1 min-w-0">
-                    <div className="font-medium text-slate-800 text-sm">{s.name}</div>
-                    <div className="text-xs text-slate-400 truncate">{s.url}</div>
+                    <div className="font-medium text-slate-800 text-sm flex items-center gap-2">
+                      {s.name}
+                      <span className="text-xs px-1.5 py-0.5 bg-slate-100 text-slate-500 rounded font-normal">
+                        {s.transport_type || 'http-post'}
+                      </span>
+                    </div>
+                    <div className="text-xs text-slate-400 truncate">
+                      {s.transport_type === 'stdio' ? (s.command || '—') : (s.url || '—')}
+                    </div>
                   </div>
 
                   {/* Tool count badge */}
@@ -354,25 +396,86 @@ export default function MCPServersPanel() {
                   className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
               </div>
+
+              {/* Transport type */}
               <div>
-                <label className="block text-xs font-medium text-slate-600 mb-1">{t('mcp.form.url')} *</label>
-                <input
-                  value={form.url}
-                  onChange={e => setForm(p => ({ ...p, url: e.target.value }))}
-                  placeholder="https://your-mcp-server.com"
+                <label className="block text-xs font-medium text-slate-600 mb-1">傳輸方式 *</label>
+                <select
+                  value={form.transport_type}
+                  onChange={e => setForm(p => ({ ...p, transport_type: e.target.value as TransportType }))}
                   className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
+                >
+                  {(Object.keys(TRANSPORT_LABELS) as TransportType[]).map(k => (
+                    <option key={k} value={k}>{TRANSPORT_LABELS[k]}</option>
+                  ))}
+                </select>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  {form.transport_type === 'auto' && '依序嘗試各種方式並自動記住成功的傳輸類型'}
+                  {form.transport_type === 'http-post' && '直接 POST JSON-RPC 到 URL（最通用）'}
+                  {form.transport_type === 'http-sse' && 'GET /sse 建立 SSE 連線，POST /message 送出請求（舊式 MCP）'}
+                  {form.transport_type === 'streamable-http' && '單一 POST 端點，回應可為 JSON 或 SSE（MCP 2025 規範）'}
+                  {form.transport_type === 'stdio' && '啟動本地子程序，透過 stdin/stdout 通訊（本地端 MCP）'}
+                </p>
               </div>
-              <div>
-                <label className="block text-xs font-medium text-slate-600 mb-1">{t('mcp.form.apiKey')}</label>
-                <input
-                  type="password"
-                  value={form.api_key}
-                  onChange={e => setForm(p => ({ ...p, api_key: e.target.value }))}
-                  placeholder={t('mcp.form.apiKeyPlaceholder')}
-                  className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-              </div>
+
+              {/* stdio: command + args + env */}
+              {form.transport_type === 'stdio' ? (
+                <>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-600 mb-1">指令 (Command) *</label>
+                    <input
+                      value={form.command}
+                      onChange={e => setForm(p => ({ ...p, command: e.target.value }))}
+                      placeholder='npx -y @modelcontextprotocol/server-filesystem /tmp'
+                      className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                    <p className="text-xs text-slate-400 mt-0.5">完整指令，引號包住含空格的參數</p>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-600 mb-1">額外參數 (JSON array，選填)</label>
+                    <input
+                      value={form.args_json}
+                      onChange={e => setForm(p => ({ ...p, args_json: e.target.value }))}
+                      placeholder='["/workspace", "--verbose"]'
+                      className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-600 mb-1">環境變數 (JSON object，選填)</label>
+                    <textarea
+                      value={form.env_json}
+                      onChange={e => setForm(p => ({ ...p, env_json: e.target.value }))}
+                      placeholder={'{"API_KEY": "xxx", "DEBUG": "1"}'}
+                      rows={2}
+                      className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+                    />
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-600 mb-1">
+                      {t('mcp.form.url')} {form.transport_type !== 'stdio' ? '*' : ''}
+                    </label>
+                    <input
+                      value={form.url}
+                      onChange={e => setForm(p => ({ ...p, url: e.target.value }))}
+                      placeholder={form.transport_type === 'http-sse' ? 'https://your-server.com/sse' : 'https://your-mcp-server.com'}
+                      className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-600 mb-1">{t('mcp.form.apiKey')}</label>
+                    <input
+                      type="password"
+                      value={form.api_key}
+                      onChange={e => setForm(p => ({ ...p, api_key: e.target.value }))}
+                      placeholder={t('mcp.form.apiKeyPlaceholder')}
+                      className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                </>
+              )}
               <div>
                 <label className="block text-xs font-medium text-slate-600 mb-1">{t('mcp.form.description')}</label>
                 <textarea

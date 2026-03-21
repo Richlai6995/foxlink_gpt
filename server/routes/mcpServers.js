@@ -44,12 +44,17 @@ router.post('/', async (req, res) => {
   const db = getDb();
   try {
     const { name, url, api_key, description, is_active, response_mode,
+            transport_type, command, args_json, env_json,
             name_zh, name_en, name_vi, desc_zh, desc_en, desc_vi } = req.body;
-    if (!name || !url) return res.status(400).json({ error: '名稱和 URL 為必填' });
+    const tt = transport_type || 'http-post';
+    if (!name) return res.status(400).json({ error: '名稱為必填' });
+    if (tt !== 'stdio' && !url) return res.status(400).json({ error: 'URL 為必填（非 stdio 模式）' });
+    if (tt === 'stdio' && !command) return res.status(400).json({ error: 'stdio 模式需填寫指令' });
 
     const result = await db.prepare(
-      `INSERT INTO mcp_servers (name, url, api_key, description, is_active, response_mode) VALUES (?, ?, ?, ?, ?, ?)`
-    ).run(name, url, api_key || null, description || null, is_active !== false ? 1 : 0, response_mode || 'inject');
+      `INSERT INTO mcp_servers (name, url, api_key, description, is_active, response_mode, transport_type, command, args_json, env_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(name, url || null, api_key || null, description || null, is_active !== false ? 1 : 0, response_mode || 'inject',
+          tt, command || null, args_json || null, env_json || null);
 
     const newId = result.lastInsertRowid;
     const trans = (name_zh !== undefined)
@@ -75,18 +80,24 @@ router.put('/:id', async (req, res) => {
     if (!server) return res.status(404).json({ error: '找不到 MCP 伺服器' });
 
     const { name, url, api_key, description, is_active, response_mode,
+            transport_type, command, args_json, env_json,
             name_zh, name_en, name_vi, desc_zh, desc_en, desc_vi } = req.body;
     const finalName = name ?? server.name;
     const finalDesc = description !== undefined ? (description || null) : server.description;
+    const finalTt = transport_type !== undefined ? (transport_type || 'http-post') : (server.transport_type || 'http-post');
     await db.prepare(
-      `UPDATE mcp_servers SET name=?, url=?, api_key=?, description=?, is_active=?, response_mode=?, updated_at=SYSTIMESTAMP WHERE id=?`
+      `UPDATE mcp_servers SET name=?, url=?, api_key=?, description=?, is_active=?, response_mode=?, transport_type=?, command=?, args_json=?, env_json=?, updated_at=SYSTIMESTAMP WHERE id=?`
     ).run(
       finalName,
-      url ?? server.url,
+      url !== undefined ? (url || null) : server.url,
       api_key !== undefined ? (api_key || null) : server.api_key,
       finalDesc,
       is_active !== undefined ? (is_active ? 1 : 0) : server.is_active,
       response_mode !== undefined ? (response_mode || 'inject') : (server.response_mode || 'inject'),
+      finalTt,
+      command !== undefined ? (command || null) : server.command,
+      args_json !== undefined ? (args_json || null) : server.args_json,
+      env_json !== undefined ? (env_json || null) : server.env_json,
       req.params.id,
     );
 

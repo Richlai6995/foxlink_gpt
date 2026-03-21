@@ -1047,6 +1047,12 @@ async function runMigrations(db) {
   // 主題加政策類別欄位
   await addCol('AI_SELECT_TOPICS', 'POLICY_CATEGORY_ID', 'NUMBER');
 
+  // ── MCP multi-transport support ─────────────────────────────────────────────
+  await addCol('MCP_SERVERS', 'TRANSPORT_TYPE', "VARCHAR2(20) DEFAULT 'http-post'");
+  await addCol('MCP_SERVERS', 'COMMAND',        'VARCHAR2(2000)');
+  await addCol('MCP_SERVERS', 'ARGS_JSON',      'VARCHAR2(4000)');
+  await addCol('MCP_SERVERS', 'ENV_JSON',        'CLOB');
+
   // ── Vector table partitioning ───────────────────────────────────────────────
   await migrateAiVectorStoreToPartitioned();
   await migrateKbChunksToPartitioned();
