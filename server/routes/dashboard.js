@@ -10,7 +10,7 @@
 const express = require('express');
 const router = express.Router();
 const { verifyToken, verifyAdmin } = require('./auth');
-const { translateFields, translateDescription } = require('../services/translationService');
+const { translateFields, translateDescription, batchTranslateDescriptions } = require('../services/translationService');
 
 router.use(verifyToken);
 
@@ -882,13 +882,12 @@ router.post('/designer/schemas/:id/columns/translate', requireDesigner, async (r
     const cols = await db.prepare(
       `SELECT id, description FROM ai_schema_columns WHERE schema_id=? AND description IS NOT NULL`
     ).all(req.params.id);
+    // 批次翻譯（每 30 筆一次 LLM call，避免大表逐筆超時）
+    const resultMap = await batchTranslateDescriptions(cols, 30);
     let updated = 0;
-    for (const col of cols) {
-      const t = await translateDescription(col.description).catch(() => null);
-      if (t) {
-        await db.prepare(`UPDATE ai_schema_columns SET desc_en=?,desc_vi=? WHERE id=?`).run(t.desc_en, t.desc_vi, col.id);
-        updated++;
-      }
+    for (const [id, t] of resultMap) {
+      await db.prepare(`UPDATE ai_schema_columns SET desc_en=?,desc_vi=? WHERE id=?`).run(t.desc_en, t.desc_vi, id);
+      updated++;
     }
     res.json({ ok: true, updated });
   } catch (e) {
@@ -919,10 +918,10 @@ router.get('/designer/schemas/:id/columns/export-csv', requireDesigner, async (r
       `SELECT column_name, data_type, description, desc_en, desc_vi, is_virtual, expression FROM ai_schema_columns WHERE schema_id=? ORDER BY id ASC`
     ).all(req.params.id);
     const schema = await db.prepare(`SELECT table_name FROM ai_schema_definitions WHERE id=?`).get(req.params.id);
-    const lines = ['column_name,data_type,description,is_virtual,expression'];
+    const lines = ['column_name,data_type,description,desc_en,desc_vi,is_virtual,expression'];
     for (const c of cols) {
       const escape = v => `"${(v || '').replace(/"/g, '""')}"`;
-      lines.push([escape(c.column_name), escape(c.data_type || ''), escape(c.description || ''), c.is_virtual ? '1' : '0', escape(c.expression || '')].join(','));
+      lines.push([escape(c.column_name), escape(c.data_type || ''), escape(c.description || ''), escape(c.desc_en || ''), escape(c.desc_vi || ''), c.is_virtual ? '1' : '0', escape(c.expression || '')].join(','));
     }
     const filename = `schema_${schema?.table_name || req.params.id}.csv`;
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
@@ -937,14 +936,14 @@ router.get('/designer/schemas/:id/columns/export-csv', requireDesigner, async (r
 router.post('/designer/schemas/:id/columns/import-csv', requireDesigner, async (req, res) => {
   try {
     const db = require('../database-oracle').db;
-    const { rows } = req.body; // [{ column_name, description }]
+    const { rows } = req.body; // [{ column_name, description, desc_en, desc_vi }]
     if (!Array.isArray(rows)) return res.status(400).json({ error: 'rows 為必填陣列' });
     let updated = 0;
     for (const row of rows) {
       if (!row.column_name) continue;
       const r = await db.prepare(
-        `UPDATE ai_schema_columns SET description=? WHERE schema_id=? AND column_name=?`
-      ).run(row.description || null, req.params.id, row.column_name);
+        `UPDATE ai_schema_columns SET description=?, desc_en=?, desc_vi=? WHERE schema_id=? AND column_name=?`
+      ).run(row.description || null, row.desc_en || null, row.desc_vi || null, req.params.id, row.column_name);
       if (r.changes) updated++;
     }
     res.json({ ok: true, updated });

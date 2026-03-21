@@ -556,6 +556,8 @@ function SchemaManager({ projectId }: { projectId: number | null }) {
       const header = lines[0].split(',').map(h => h.replace(/^"|"$/g, '').trim())
       const nameIdx = header.indexOf('column_name')
       const descIdx = header.indexOf('description')
+      const enIdx   = header.indexOf('desc_en')
+      const viIdx   = header.indexOf('desc_vi')
       if (nameIdx < 0 || descIdx < 0) return alert('CSV 必須含 column_name 和 description 欄位')
       const parseCsvRow = (line: string) => {
         const result: string[] = []
@@ -570,7 +572,12 @@ function SchemaManager({ projectId }: { projectId: number | null }) {
       }
       const rows = lines.slice(1).map(l => {
         const cells = parseCsvRow(l)
-        return { column_name: cells[nameIdx]?.replace(/^"|"$/g, '') || '', description: cells[descIdx]?.replace(/^"|"$/g, '') || '' }
+        return {
+          column_name: cells[nameIdx]?.replace(/^"|"$/g, '') || '',
+          description: cells[descIdx]?.replace(/^"|"$/g, '') || '',
+          desc_en: enIdx >= 0 ? (cells[enIdx]?.replace(/^"|"$/g, '') || '') : undefined,
+          desc_vi: viIdx >= 0 ? (cells[viIdx]?.replace(/^"|"$/g, '') || '') : undefined,
+        }
       }).filter(r => r.column_name)
       try {
         const r = await api.post(`/dashboard/designer/schemas/${schemaId}/columns/import-csv`, { rows })
