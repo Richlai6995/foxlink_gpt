@@ -247,6 +247,54 @@ Docker image 內 `/app` 下有以下 runtime 目錄：
 └── oracle_client/          ← Oracle Instant Client（解壓後整個目錄放這）
 ```
 
+### 3.2.1 Oracle Instant Client 上傳到 NAS（必做）
+
+> ⚠️ **重要**：K8s pod 在 Thin mode 下無法連接密碼格式為 10G verifier 的 Oracle 帳號（如 ERP 的 `apps` 帳號），**必須掛載 Oracle Instant Client 啟用 Thick mode**。
+
+**步驟：**
+
+```bash
+# 1. 從管理節點掛載 NFS source 目錄
+sudo mkdir -p /mnt/flgpt-source
+sudo mount -t nfs <NAS_IP>:/volume1/flgpt-source /mnt/flgpt-source
+# 本環境：sudo mount -t nfs 10.8.91.215:/volume1/flgpt-source /mnt/flgpt-source
+
+# 2. 解壓 Oracle Instant Client（instantclient_19_29.zip）
+unzip instantclient_19_29.zip -d /tmp/
+
+# 3. 複製到 NFS，目錄名稱必須是 oracle_client（對應 deployment.yaml subPath）
+cp -r /tmp/instantclient_19_29 /mnt/flgpt-source/oracle_client
+
+# 4. 確認 .so 檔在正確位置（不能有多餘的子目錄層）
+ls /mnt/flgpt-source/oracle_client/libclntsh.so*
+# 應看到：.../oracle_client/libclntsh.so  .../oracle_client/libclntsh.so.19.1 等
+
+# 如果解壓多一層（oracle_client/instantclient_19_29/...），需要移平：
+# mv /mnt/flgpt-source/oracle_client/instantclient_19_29/* /mnt/flgpt-source/oracle_client/
+# rmdir /mnt/flgpt-source/oracle_client/instantclient_19_29
+```
+
+**`k8s/deployment.yaml` volumeMount 對應設定**（已設定好，確認存在即可）：
+
+```yaml
+# containers[0].volumeMounts 中應有：
+- name: nfs-source
+  mountPath: /opt/oracle/instantclient
+  subPath: oracle_client
+```
+
+**驗證 Thick mode 啟動成功**：
+
+```bash
+kubectl logs -n foxlink deployment/foxlink-gpt --tail=20 | grep -i "oracle\|thick"
+# 應看到：[Oracle] Thick mode, libDir: /opt/oracle/instantclient
+```
+
+> **為何需要 Thick mode？**
+> - Oracle 23 AI（系統 DB）使用新版密碼 verifier → Thin mode 可連
+> - ERP Oracle DB 的 `apps` 帳號使用舊版 10G verifier (0x939) → 僅 Thick mode 支援
+> - 另一個解法：請 DBA 執行 `ALTER USER apps IDENTIFIED BY <原密碼>;` 重新 hash（不改密碼，只升級 verifier 格式）
+
 > [!NOTE]
 > 如果有舊環境的 `uploads/` 資料要遷移，直接 `scp` 或 `rsync` 到 NAS 的 `uploads/` 即可。
 
