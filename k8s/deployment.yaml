@@ -84,7 +84,10 @@ spec:
             - name: tmp-data
               mountPath: /app/fonts
               subPath: fonts
-            # Oracle Instant Client 已內建於 image，不需額外掛載
+            # ── Oracle Instant Client（NFS subPath: oracle_client）──
+            - name: nfs-source
+              mountPath: /opt/oracle/instantclient
+              subPath: oracle_client
 
           # ── Resources ────────────────────────────────────────────────────
           resources:
