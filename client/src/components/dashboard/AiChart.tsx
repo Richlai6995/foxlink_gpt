@@ -3,6 +3,7 @@
  * Supports: bar, line, pie, scatter, radar, gauge
  */
 import ReactECharts from 'echarts-for-react'
+import { useRef } from 'react'
 import type { AiChartDef, ChartColorPalette, YAxisDef, OverlayLine } from '../../types'
 import { useTranslation } from 'react-i18next'
 
@@ -87,18 +88,6 @@ const BASE_OPTION = {
   },
   legend: { textStyle: { color: '#6b7280' } },
   grid: { left: 60, right: 20, top: 40, bottom: 40, containLabel: true },
-  toolbox: {
-    feature: {
-      saveAsImage: {
-        title: '下載圖片',
-        pixelRatio: 2,
-        iconStyle: { borderColor: '#9ca3af' },
-        emphasis: { iconStyle: { borderColor: '#3b82f6' } },
-      },
-    },
-    right: 8,
-    top: 4,
-  },
 }
 
 /** 依 sort_by / sort_order 排序 rows（不修改原陣列） */
@@ -131,6 +120,7 @@ function sortRows(
 export default function AiChart({ chartDef, rows, columnLabels = {}, height = 320 }: Props) {
   const { i18n } = useTranslation()
   const lang = i18n.language
+  const chartRef = useRef<ReactECharts>(null)
 
   const pickLang = (zh: string | undefined, en: string | undefined, vi: string | undefined) => {
     if (lang === 'en' && en) return en
@@ -685,13 +675,79 @@ export default function AiChart({ chartDef, rows, columnLabels = {}, height = 32
     }
   }
 
+  function handleDownload() {
+    const instance = chartRef.current?.getEchartsInstance?.()
+    if (!instance) return
+
+    const PRINT_TEXT  = '#111111'
+    const PRINT_LINE  = '#444444'
+    const PRINT_SPLIT = '#cccccc'
+    const PRINT_BG    = '#ffffff'
+
+    // Temporarily apply print theme
+    instance.setOption({
+      backgroundColor: PRINT_BG,
+      textStyle: { color: PRINT_TEXT },
+      legend: [{ textStyle: { color: PRINT_TEXT } }],
+      title: [{ textStyle: { color: PRINT_TEXT } }],
+      xAxis: (instance.getOption().xAxis as object[] | undefined)?.map((ax: object) => ({
+        ...ax,
+        axisLabel: { color: PRINT_TEXT },
+        nameTextStyle: { color: PRINT_TEXT },
+        axisLine: { show: true, lineStyle: { color: PRINT_LINE } },
+        axisTick: { lineStyle: { color: PRINT_LINE } },
+      })),
+      yAxis: (instance.getOption().yAxis as object[] | undefined)?.map((ax: object) => ({
+        ...ax,
+        axisLabel: { color: PRINT_TEXT },
+        nameTextStyle: { color: PRINT_TEXT },
+        axisLine: { show: true, lineStyle: { color: PRINT_LINE } },
+        axisTick: { lineStyle: { color: PRINT_LINE } },
+        splitLine: { lineStyle: { color: PRINT_SPLIT } },
+      })),
+    })
+
+    // Give ECharts one frame to re-render, then capture
+    requestAnimationFrame(() => {
+      const url = instance.getDataURL({ type: 'png', pixelRatio: 2, backgroundColor: PRINT_BG })
+      // Restore original option
+      instance.setOption({ ...option, backgroundColor: chartDef.chart_bg_color || 'transparent' }, { notMerge: true })
+
+      const title = chartDef.title || 'chart'
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `${title}.png`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+    })
+  }
+
   return (
-    <ReactECharts
-      option={option}
-      notMerge
-      style={{ height: height === undefined ? '100%' : height, width: '100%' }}
-      theme="light"
-      opts={{ renderer: 'svg' }}
-    />
+    <div style={{ position: 'relative', width: '100%', height: height === undefined ? '100%' : height }}>
+      <ReactECharts
+        ref={chartRef}
+        option={option}
+        notMerge
+        style={{ height: '100%', width: '100%' }}
+        theme="light"
+        opts={{ renderer: 'canvas' }}
+      />
+      {/* 白底黑字下載按鈕 */}
+      <button
+        onClick={handleDownload}
+        title="下載圖片（白底黑字）"
+        style={{
+          position: 'absolute', top: 4, right: 8,
+          background: 'transparent', border: 'none', cursor: 'pointer',
+          color: '#9ca3af', fontSize: 14, lineHeight: 1, padding: '2px 4px',
+          borderRadius: 4,
+        }}
+        onMouseEnter={e => (e.currentTarget.style.color = '#3b82f6')}
+        onMouseLeave={e => (e.currentTarget.style.color = '#9ca3af')}
+      >
+        ⬇
+      </button>
+    </div>
   )
 }

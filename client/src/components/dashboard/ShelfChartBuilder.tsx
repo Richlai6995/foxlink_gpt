@@ -324,10 +324,18 @@ function MultiMeasureSlot({ y_axes, columnLabels, fieldTypes, onDrop, onUpdate, 
                       onChange={e => onUpdate(idx, { color: e.target.value })}
                       className="w-5 h-5 rounded border-0 cursor-pointer p-0 flex-shrink-0"
                       title="系列顏色" />
-                    {/* 欄位名稱 */}
-                    <span className="text-xs font-medium text-orange-700 flex-1 truncate min-w-0" title={ax.field}>
+                    {/* 欄位名稱 + 別名輸入 */}
+                    <span className="text-[10px] text-orange-500 truncate flex-shrink-0 max-w-[60px]" title={ax.field}>
                       {colLabel(ax.field, columnLabels)}
                     </span>
+                    <input
+                      type="text"
+                      value={ax.label || ''}
+                      onChange={e => onUpdate(idx, { label: e.target.value || undefined })}
+                      placeholder="別名"
+                      className="text-[10px] bg-white border border-orange-200 rounded px-1 py-0 text-orange-800 outline-none w-16 flex-shrink-0"
+                      title="圖表顯示名稱（別名）"
+                    />
                     {/* Agg */}
                     <select value={ax.agg}
                       onChange={e => onUpdate(idx, { agg: e.target.value as AggFn })}

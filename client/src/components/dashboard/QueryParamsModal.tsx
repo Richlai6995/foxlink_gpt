@@ -328,6 +328,7 @@ export default function QueryParamsModal({ queryName, params, initialValues, onC
   )
   const [optionsMap, setOptionsMap] = useState<Record<string, { val: string; label: string }[]>>({})
   const [loadingMap, setLoadingMap] = useState<Record<string, boolean>>({})
+  const [errorMap, setErrorMap] = useState<Record<string, string>>({})
 
   useEffect(() => {
     // 初始只載入有 fetch_values_sql 的，或先帶前50筆（不搜尋）
@@ -340,15 +341,27 @@ export default function QueryParamsModal({ queryName, params, initialValues, onC
 
   async function fetchOptions(p: AiQueryParameter, search: string) {
     setLoadingMap(prev => ({ ...prev, [p.id]: true }))
+    setErrorMap(prev => ({ ...prev, [p.id]: '' }))
     try {
-      const reqParams: Record<string, string> = { column_name: p.column_name || '' }
+      if (!p.schema_id && !p.fetch_values_sql) {
+        setErrorMap(prev => ({ ...prev, [p.id]: '參數未設定資料來源（schema_id / fetch_values_sql）' }))
+        return
+      }
+      if (!p.column_name) {
+        setErrorMap(prev => ({ ...prev, [p.id]: '參數未設定 column_name' }))
+        return
+      }
+      const reqParams: Record<string, string> = { column_name: p.column_name }
       if (p.schema_id) reqParams.schema_id = String(p.schema_id)
       if (p.fetch_values_sql) reqParams.fetch_values_sql = p.fetch_values_sql
       if (search) reqParams.search = search
       const r = await api.get('/dashboard/saved-queries/param-values', { params: reqParams })
       setOptionsMap(prev => ({ ...prev, [p.id]: r.data }))
-    } catch (e) {
-      console.error(e)
+    } catch (e: unknown) {
+      console.error('[LOV fetch]', e)
+      const msg = (e as { response?: { data?: { error?: string } }; message?: string })
+        ?.response?.data?.error || (e as { message?: string })?.message || 'LOV 載入失敗'
+      setErrorMap(prev => ({ ...prev, [p.id]: msg }))
     } finally {
       setLoadingMap(prev => ({ ...prev, [p.id]: false }))
     }
@@ -400,6 +413,7 @@ export default function QueryParamsModal({ queryName, params, initialValues, onC
             const label = paramLabel(p)
             const opts = optionsMap[p.id] || []
             const isLoading = loadingMap[p.id]
+            const lovError = errorMap[p.id]
 
             return (
               <div key={p.id}>
@@ -409,23 +423,39 @@ export default function QueryParamsModal({ queryName, params, initialValues, onC
                 </label>
 
                 {p.input_type === 'select' && (
-                  <SearchableSelect
-                    opts={opts}
-                    value={pv.value as string}
-                    onChange={v => setValue(idx, v)}
-                    loading={isLoading}
-                    onSearch={s => fetchOptions(p, s)}
-                  />
+                  <>
+                    <SearchableSelect
+                      opts={opts}
+                      value={pv.value as string}
+                      onChange={v => setValue(idx, v)}
+                      loading={isLoading}
+                      onSearch={s => fetchOptions(p, s)}
+                    />
+                    {lovError && (
+                      <p className="text-xs text-red-500 mt-1 flex items-center gap-1">
+                        ⚠ {lovError}
+                        <button onClick={() => fetchOptions(p, '')} className="underline ml-1">重試</button>
+                      </p>
+                    )}
+                  </>
                 )}
 
                 {p.input_type === 'multiselect' && (
-                  <SearchableMultiSelect
-                    opts={opts}
-                    value={pv.value as string[]}
-                    onToggle={v => toggleMulti(idx, v)}
-                    loading={isLoading}
-                    onSearch={s => fetchOptions(p, s)}
-                  />
+                  <>
+                    <SearchableMultiSelect
+                      opts={opts}
+                      value={pv.value as string[]}
+                      onToggle={v => toggleMulti(idx, v)}
+                      loading={isLoading}
+                      onSearch={s => fetchOptions(p, s)}
+                    />
+                    {lovError && (
+                      <p className="text-xs text-red-500 mt-1 flex items-center gap-1">
+                        ⚠ {lovError}
+                        <button onClick={() => fetchOptions(p, '')} className="underline ml-1">重試</button>
+                      </p>
+                    )}
+                  </>
                 )}
 
                 {p.input_type === 'date_range' && (
