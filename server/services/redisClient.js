@@ -66,9 +66,13 @@ function getStore() {
 
   client.on('connect', () => console.log('[Redis] Connected:', redisUrl));
   client.on('error', (err) => {
-    console.warn('[Redis] Connection failed, falling back to in-memory store:', err.message);
-    store = new MemoryStore();
-    client.disconnect();
+    if (!(store instanceof MemoryStore)) {
+      console.warn('[Redis] Connection failed, falling back to in-memory store:', err.message);
+      store = new MemoryStore();
+      client.removeAllListeners('error');
+      client.on('error', () => {}); // swallow post-disconnect errors
+      client.disconnect();
+    }
   });
 
   store = new RedisStore(client);

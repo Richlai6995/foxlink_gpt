@@ -171,7 +171,7 @@ router.post('/login', async (req, res) => {
             return await createSession(res, dbUser);
           } else {
             // First LDAP login — auto-activate with default role permissions
-            const defaultRole = await db.prepare(`SELECT * FROM roles WHERE is_default=1 LIMIT 1`).get();
+            const defaultRole = await db.prepare(`SELECT * FROM roles WHERE is_default=1 FETCH FIRST 1 ROWS ONLY`).get();
             const result = await db.prepare(
               `INSERT INTO users (username, name, email, role, status, password, employee_id, creation_method,
                 role_id, allow_text_upload, text_max_mb, allow_audio_upload, audio_max_mb,

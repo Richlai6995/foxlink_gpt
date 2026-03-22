@@ -58,7 +58,7 @@ router.post('/', async (req, res) => {
     // Resolve role_id: explicit value > default role
     let resolvedRoleId = role_id || null;
     if (!resolvedRoleId) {
-      const defaultRole = await db.prepare(`SELECT id FROM roles WHERE is_default=1 LIMIT 1`).get();
+      const defaultRole = await db.prepare(`SELECT id FROM roles WHERE is_default=1 FETCH FIRST 1 ROWS ONLY`).get();
       if (defaultRole) resolvedRoleId = defaultRole.id;
     }
 

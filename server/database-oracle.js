@@ -1068,6 +1068,10 @@ async function runMigrations(db) {
   await addCol('MCP_SERVERS', 'ARGS_JSON',      'VARCHAR2(4000)');
   await addCol('MCP_SERVERS', 'ENV_JSON',        'CLOB');
 
+  // ── MCP / DIFY access share_type 補欄（舊表可能缺欄）────────────────────────
+  await addCol('MCP_ACCESS',  'SHARE_TYPE', "VARCHAR2(20) DEFAULT 'use'");
+  await addCol('DIFY_ACCESS', 'SHARE_TYPE', "VARCHAR2(20) DEFAULT 'use'");
+
   // ── MCP / DIFY 共享存取表（取代 role_mcp_servers / role_dify_kbs）────────────
   await createTable('MCP_ACCESS', `CREATE TABLE mcp_access (
     id            NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,

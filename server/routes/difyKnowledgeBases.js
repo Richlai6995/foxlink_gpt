@@ -71,28 +71,36 @@ router.get('/my', async (req, res) => {
       `SELECT role_id, dept_code, profit_center, org_section, org_group_name FROM users WHERE id=?`
     ).get(req.user.id);
     if (!u) return res.json([]);
-    const kbs = await db.prepare(
-      `SELECT DISTINCT d.id, d.name, d.description, d.api_server, d.api_key,
-              d.name_zh, d.name_en, d.name_vi, d.desc_zh, d.desc_en, d.desc_vi
-       FROM dify_knowledge_bases d
-       JOIN dify_access a ON a.dify_kb_id = d.id
+    const accessibleIds = await db.prepare(
+      `SELECT DISTINCT a.dify_kb_id
+       FROM dify_access a
+       JOIN dify_knowledge_bases d ON d.id = a.dify_kb_id
        WHERE d.is_active=1 AND (
-         (a.grantee_type='user'        AND a.grantee_id=TO_CHAR(?))
-         OR (a.grantee_type='role'     AND a.grantee_id=TO_CHAR(?) AND ? IS NOT NULL)
+         (a.grantee_type='user'        AND a.grantee_id=?)
+         OR (a.grantee_type='role'        AND a.grantee_id=? AND ? IS NOT NULL)
          OR (a.grantee_type='department'  AND a.grantee_id=? AND ? IS NOT NULL)
          OR (a.grantee_type='cost_center' AND a.grantee_id=? AND ? IS NOT NULL)
          OR (a.grantee_type='division'    AND a.grantee_id=? AND ? IS NOT NULL)
          OR (a.grantee_type='org_group'   AND a.grantee_id=? AND ? IS NOT NULL)
-       )
-       ORDER BY d.sort_order ASC`
+       )`
     ).all(
-      req.user.id,
-      u.role_id, u.role_id,
+      String(req.user.id),
+      u.role_id != null ? String(u.role_id) : null, u.role_id,
       u.dept_code, u.dept_code,
       u.profit_center, u.profit_center,
       u.org_section, u.org_section,
       u.org_group_name, u.org_group_name
     );
+    if (!accessibleIds.length) return res.json([]);
+    const ids = accessibleIds.map(r => r.dify_kb_id);
+    const placeholders = ids.map(() => '?').join(',');
+    const kbs = await db.prepare(
+      `SELECT id, name, DBMS_LOB.SUBSTR(description, 2000, 1) AS description,
+              api_server, api_key, name_zh, name_en, name_vi, desc_zh, desc_en, desc_vi
+       FROM dify_knowledge_bases
+       WHERE id IN (${placeholders}) AND is_active=1
+       ORDER BY sort_order ASC`
+    ).all(...ids);
     res.json(kbs);
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -105,7 +113,14 @@ router.get('/:id/access', async (req, res) => {
   const db = getDb();
   try {
     const grants = await db.prepare(
-      `SELECT a.*, u.name AS granted_by_name
+      `SELECT a.*,
+        CASE WHEN a.grantee_type='user'        THEN (SELECT name FROM users WHERE id=TO_NUMBER(a.grantee_id))
+             WHEN a.grantee_type='role'        THEN (SELECT name FROM roles WHERE id=TO_NUMBER(a.grantee_id))
+             WHEN a.grantee_type='department'  THEN (SELECT MAX(dept_name) FROM users WHERE dept_code=a.grantee_id)
+             WHEN a.grantee_type='cost_center' THEN (SELECT MAX(profit_center_name) FROM users WHERE profit_center=a.grantee_id)
+             WHEN a.grantee_type='division'    THEN (SELECT MAX(org_section_name) FROM users WHERE org_section=a.grantee_id)
+             ELSE a.grantee_id END AS grantee_name,
+        u.name AS granted_by_name
        FROM dify_access a LEFT JOIN users u ON u.id = a.granted_by
        WHERE a.dify_kb_id=? ORDER BY a.granted_at DESC`
     ).all(req.params.id);
@@ -136,7 +151,14 @@ router.post('/:id/access', async (req, res) => {
       ).run(req.params.id, grantee_type, String(grantee_id), share_type, req.user.id);
     }
     const grants = await db.prepare(
-      `SELECT a.*, u.name AS granted_by_name
+      `SELECT a.*,
+        CASE WHEN a.grantee_type='user'        THEN (SELECT name FROM users WHERE id=TO_NUMBER(a.grantee_id))
+             WHEN a.grantee_type='role'        THEN (SELECT name FROM roles WHERE id=TO_NUMBER(a.grantee_id))
+             WHEN a.grantee_type='department'  THEN (SELECT MAX(dept_name) FROM users WHERE dept_code=a.grantee_id)
+             WHEN a.grantee_type='cost_center' THEN (SELECT MAX(profit_center_name) FROM users WHERE profit_center=a.grantee_id)
+             WHEN a.grantee_type='division'    THEN (SELECT MAX(org_section_name) FROM users WHERE org_section=a.grantee_id)
+             ELSE a.grantee_id END AS grantee_name,
+        u.name AS granted_by_name
        FROM dify_access a LEFT JOIN users u ON u.id = a.granted_by
        WHERE a.dify_kb_id=? ORDER BY a.granted_at DESC`
     ).all(req.params.id);
