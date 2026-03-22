@@ -336,11 +336,30 @@ export default function QueryParamsModal({ queryName, params, initialValues, onC
     // 所有 select/multiselect 都嘗試載入，fetchOptions 內部處理缺設定的錯誤顯示
     for (const p of params) {
       if (p.input_type !== 'select' && p.input_type !== 'multiselect') continue
+      if (p.depends_on) continue // 有父參數的等父參數有值後才載
       fetchOptions(p, '')
     }
   }, [])
 
-  async function fetchOptions(p: AiQueryParameter, search: string) {
+  // 當父參數值改變時，重新載入子參數選項
+  useEffect(() => {
+    for (const pv of values) {
+      const p = pv.param
+      if (p.input_type !== 'select' && p.input_type !== 'multiselect') continue
+      if (!p.depends_on) continue
+      const parentVal = values.find(v => v.param.id === p.depends_on)?.value
+      const parentStr = Array.isArray(parentVal) ? parentVal[0] || '' : parentVal || ''
+      if (parentStr) {
+        fetchOptions(p, '', parentStr)
+      } else {
+        // 父參數未選，清空子選項
+        setOptionsMap(prev => ({ ...prev, [p.id]: [] }))
+        setFetchedSet(prev => { const s = new Set(prev); s.delete(p.id); return s })
+      }
+    }
+  }, [values.map(v => (Array.isArray(v.value) ? v.value[0] : v.value) || '').join('|')])
+
+  async function fetchOptions(p: AiQueryParameter, search: string, parentValue?: string) {
     setLoadingMap(prev => ({ ...prev, [p.id]: true }))
     setErrorMap(prev => ({ ...prev, [p.id]: '' }))
     try {
@@ -356,6 +375,11 @@ export default function QueryParamsModal({ queryName, params, initialValues, onC
       if (p.schema_id) reqParams.schema_id = String(p.schema_id)
       if (p.fetch_values_sql) reqParams.fetch_values_sql = p.fetch_values_sql
       if (search) reqParams.search = search
+      // Cascading filter
+      if (p.depends_on && p.depends_column && parentValue) {
+        reqParams.filter_column = p.depends_column
+        reqParams.filter_value = parentValue
+      }
       const r = await api.get('/dashboard/saved-queries/param-values', { params: reqParams })
       setOptionsMap(prev => ({ ...prev, [p.id]: r.data }))
       setFetchedSet(prev => new Set([...prev, p.id]))
@@ -419,12 +443,18 @@ export default function QueryParamsModal({ queryName, params, initialValues, onC
             const lovError = errorMap[p.id]
             const wasFetched = fetchedSet.has(p.id)
             const isLovEmpty = wasFetched && !isLoading && !lovError && opts.length === 0
+            // Cascade: 取父參數當前值
+            const parentValue = p.depends_on
+              ? (() => { const pv2 = values.find(v => v.param.id === p.depends_on); const v = pv2?.value; return Array.isArray(v) ? v[0] || '' : v || '' })()
+              : undefined
+            const dependsDisabled = !!(p.depends_on && !parentValue)
 
             return (
               <div key={p.id}>
                 <label className="text-sm font-medium text-gray-700 block mb-1.5">
                   {label}
                   {p.required && <span className="text-red-500 ml-0.5">*</span>}
+                  {dependsDisabled && <span className="text-xs text-gray-400 ml-1">（請先選擇前一個參數）</span>}
                 </label>
 
                 {p.input_type === 'select' && (
@@ -434,18 +464,18 @@ export default function QueryParamsModal({ queryName, params, initialValues, onC
                       value={pv.value as string}
                       onChange={v => setValue(idx, v)}
                       loading={isLoading}
-                      onSearch={s => fetchOptions(p, s)}
+                      onSearch={s => fetchOptions(p, s, parentValue)}
                     />
                     {lovError && (
                       <p className="text-xs text-red-500 mt-1 whitespace-pre-wrap">
                         ⚠ {lovError}
-                        <button onClick={() => fetchOptions(p, '')} className="underline ml-2">重試</button>
+                        <button onClick={() => fetchOptions(p, '', parentValue)} className="underline ml-2">重試</button>
                       </p>
                     )}
-                    {isLovEmpty && (
+                    {isLovEmpty && !dependsDisabled && (
                       <p className="text-xs text-amber-600 mt-1">
                         查詢成功但 ERP 回傳 0 筆，請確認 Schema 來源 SQL 是否能存取此欄位資料
-                        <button onClick={() => fetchOptions(p, '')} className="underline ml-2">重試</button>
+                        <button onClick={() => fetchOptions(p, '', parentValue)} className="underline ml-2">重試</button>
                       </p>
                     )}
                   </>
@@ -458,18 +488,18 @@ export default function QueryParamsModal({ queryName, params, initialValues, onC
                       value={pv.value as string[]}
                       onToggle={v => toggleMulti(idx, v)}
                       loading={isLoading}
-                      onSearch={s => fetchOptions(p, s)}
+                      onSearch={s => fetchOptions(p, s, parentValue)}
                     />
                     {lovError && (
                       <p className="text-xs text-red-500 mt-1 whitespace-pre-wrap">
                         ⚠ {lovError}
-                        <button onClick={() => fetchOptions(p, '')} className="underline ml-2">重試</button>
+                        <button onClick={() => fetchOptions(p, '', parentValue)} className="underline ml-2">重試</button>
                       </p>
                     )}
-                    {isLovEmpty && (
+                    {isLovEmpty && !dependsDisabled && (
                       <p className="text-xs text-amber-600 mt-1">
                         查詢成功但 ERP 回傳 0 筆，請確認 Schema 來源 SQL 是否能存取此欄位資料
-                        <button onClick={() => fetchOptions(p, '')} className="underline ml-2">重試</button>
+                        <button onClick={() => fetchOptions(p, '', parentValue)} className="underline ml-2">重試</button>
                       </p>
                     )}
                   </>

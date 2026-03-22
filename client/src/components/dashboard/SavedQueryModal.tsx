@@ -891,6 +891,25 @@ export default function SavedQueryModal({ initial, designId, question, pinnedSql
   function removeParam(idx: number) {
     setParams(prev => prev.filter((_, i) => i !== idx))
   }
+  function moveParam(idx: number, dir: -1 | 1) {
+    setParams(prev => {
+      const arr = [...prev]
+      const target = idx + dir
+      if (target < 0 || target >= arr.length) return arr
+      ;[arr[idx], arr[target]] = [arr[target], arr[idx]]
+      return arr
+    })
+  }
+  function previewSql(p: AiQueryParameter): string {
+    if (p.fetch_values_sql) return p.fetch_values_sql
+    if (!p.schema_id || !p.column_name) return ''
+    const schema = relevantSchemas.find(s => s.id === p.schema_id)
+    if (!schema) return ''
+    const col = p.column_name.toUpperCase()
+    const src = schema.source_type === 'sql' ? `(\n  ${schema.source_sql}\n)` : schema.table_name
+    const cascade = p.depends_on && p.depends_column ? `\n  AND ${p.depends_column.toUpperCase()} = :parent_value` : ''
+    return `SELECT DISTINCT ${col} AS VAL\nFROM ${src}\nWHERE ${col} IS NOT NULL${cascade}\nORDER BY 1\nFETCH FIRST 200 ROWS ONLY`
+  }
 
   async function handleSave() {
     if (!name.trim()) { alert(t('aiDash.sqModal.nameRequired')); return }
@@ -1050,10 +1069,19 @@ export default function SavedQueryModal({ initial, designId, question, pinnedSql
                   <span className="text-xs">{t('aiDash.sqModal.noParamsHint')}</span>
                 </div>
               )}
-              {params.map((p, idx) => (
+              {params.map((p, idx) => {
+                const sql = previewSql(p)
+                return (
                 <div key={p.id} className="border border-gray-200 rounded-lg p-4 space-y-3">
                   <div className="flex items-center justify-between">
-                    <span className="text-xs font-semibold text-gray-500">{t('aiDash.sqModal.paramN', { n: idx + 1 })}</span>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs font-semibold text-gray-500">{t('aiDash.sqModal.paramN', { n: idx + 1 })}</span>
+                      {/* 上下移 */}
+                      <button onClick={() => moveParam(idx, -1)} disabled={idx === 0}
+                        className="text-gray-300 hover:text-gray-600 disabled:opacity-20 text-base leading-none px-0.5" title="上移">▲</button>
+                      <button onClick={() => moveParam(idx, 1)} disabled={idx === params.length - 1}
+                        className="text-gray-300 hover:text-gray-600 disabled:opacity-20 text-base leading-none px-0.5" title="下移">▼</button>
+                    </div>
                     <button onClick={() => removeParam(idx)} className="text-gray-400 hover:text-red-500 text-xs">{t('aiDash.sqModal.paramRemove')}</button>
                   </div>
                   <div className="grid grid-cols-2 gap-3">
@@ -1126,9 +1154,48 @@ export default function SavedQueryModal({ initial, designId, question, pinnedSql
                         <input type="checkbox" checked={!!p.required} onChange={e => updateParam(idx, { required: e.target.checked })} />{t('aiDash.sqModal.paramRequired')}
                       </label>
                     </div>
+
+                    {/* Cascading: depends_on */}
+                    {(p.input_type === 'select' || p.input_type === 'multiselect') && idx > 0 && (
+                      <>
+                        <div>
+                          <label className="text-xs text-gray-500 block mb-1">受前面參數影響（Cascade）</label>
+                          <select value={p.depends_on || ''}
+                            onChange={e => updateParam(idx, { depends_on: e.target.value || undefined, depends_column: undefined })}
+                            className="w-full border border-gray-200 rounded px-2 py-1.5 text-sm focus:outline-none focus:border-blue-400 bg-white">
+                            <option value="">-- 不限制 --</option>
+                            {params.slice(0, idx).filter(pp => pp.input_type === 'select' || pp.input_type === 'multiselect').map(pp => (
+                              <option key={pp.id} value={pp.id}>{pp.label_zh || pp.id}</option>
+                            ))}
+                          </select>
+                        </div>
+                        {p.depends_on && (
+                          <div>
+                            <label className="text-xs text-gray-500 block mb-1">對應過濾欄位（本 Schema 中）</label>
+                            <select value={p.depends_column || ''}
+                              onChange={e => updateParam(idx, { depends_column: e.target.value || undefined })}
+                              className="w-full border border-gray-200 rounded px-2 py-1.5 text-sm focus:outline-none focus:border-blue-400 bg-white"
+                              disabled={!p.schema_id}>
+                              <option value="">-- 選欄位 --</option>
+                              {(relevantSchemas.find(s => s.id === p.schema_id)?.columns || []).map(c => (
+                                <option key={c.column_name} value={c.column_name}>{colLabel(c)} ({c.column_name})</option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
+                      </>
+                    )}
                   </div>
+
+                  {/* SQL 預覽 */}
+                  {sql && (
+                    <details className="mt-1">
+                      <summary className="text-xs text-blue-500 cursor-pointer select-none">📋 查詢 SQL 預覽</summary>
+                      <pre className="mt-1 text-[10px] bg-gray-50 border border-gray-200 rounded p-2 overflow-x-auto text-gray-600 whitespace-pre-wrap">{sql}</pre>
+                    </details>
+                  )}
                 </div>
-              ))}
+              )})}
             </div>
           )}
 

@@ -498,6 +498,8 @@ export interface AiQueryParameter {
   fetch_values_sql?: string    // 自訂 DISTINCT 查詢 SQL（優先於自動生成）
   inject_as?: QueryParamInjectAs
   sql_placeholder?: string     // SQL 中對應的 placeholder（e.g. ":FACTORY_CODE"）
+  depends_on?: string          // 上層參數 id，本參數選項受其值過濾
+  depends_column?: string      // source schema 中用來 filter 的欄位（對應 depends_on 的值）
 }
 
 export interface AiSavedQuery {

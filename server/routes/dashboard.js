@@ -2326,20 +2326,27 @@ router.get('/saved-queries/param-values', requireDashboard, async (req, res) => 
   const { getErpPool } = require('../services/dashboardService');
   let sql = null; // 宣告在 try 外，catch block 才能引用
   try {
-    const { schema_id, column_name, fetch_values_sql, search } = req.query;
-    console.log('[param-values] req:', { schema_id, column_name, has_fetch_sql: !!fetch_values_sql });
+    const { schema_id, column_name, fetch_values_sql, search, filter_column, filter_value } = req.query;
+    console.log('[param-values] req:', { schema_id, column_name, has_fetch_sql: !!fetch_values_sql, filter_column, filter_value });
     if (!column_name) return res.status(400).json({ error: '欄位名稱必填' });
 
     sql = fetch_values_sql || null;
     const searchFilter = search ? search.trim() : '';
-    const limit = searchFilter ? 100 : 50; // 無搜尋先載前50，有搜尋撈100
+    const limit = searchFilter ? 100 : 200;
+    // 父參數 cascade filter
+    const cascadeClause = (filter_column && filter_value)
+      ? ` AND ${filter_column.toUpperCase()} = '${String(filter_value).replace(/'/g, "''")}'`
+      : '';
     if (!sql && schema_id) {
       const schemaDef = await db.prepare('SELECT table_name, source_sql, source_type FROM ai_schema_definitions WHERE id=?').get(schema_id);
       if (!schemaDef) return res.status(404).json({ error: 'Schema 不存在' });
       const col = column_name.toUpperCase();
       const source = schemaDef.source_type === 'sql' ? `(${schemaDef.source_sql})` : schemaDef.table_name;
       const likeClause = searchFilter ? ` AND UPPER(${col}) LIKE UPPER('%${searchFilter.replace(/'/g, "''")}%')` : '';
-      sql = `SELECT DISTINCT ${col} AS val FROM ${source} WHERE ${col} IS NOT NULL${likeClause} ORDER BY 1 FETCH FIRST ${limit} ROWS ONLY`;
+      sql = `SELECT DISTINCT ${col} AS val FROM ${source} WHERE ${col} IS NOT NULL${likeClause}${cascadeClause} ORDER BY 1 FETCH FIRST ${limit} ROWS ONLY`;
+    } else if (sql && cascadeClause) {
+      // fetch_values_sql 模式：包成子查詢加 cascade filter
+      sql = `SELECT * FROM (${sql}) WHERE 1=1${cascadeClause}`;
     }
     if (!sql) return res.status(400).json({ error: '無法組建查詢' });
 
