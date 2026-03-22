@@ -44,7 +44,7 @@ interface Props {
 }
 
 /** 解析 chart config 欄位名稱 → 實際 row 值
- *  支援: 直接匹配 / lowercase / 去掉表別名前綴 / 透過 column_labels reverse lookup */
+ *  支援: 直接匹配 / lowercase / 去掉表別名前綴 / column_labels reverse lookup / 前綴模糊比對 */
 function resolveField(
   field: string | undefined,
   row: Record<string, unknown>,
@@ -62,8 +62,15 @@ function resolveField(
     const descLower = desc.toLowerCase()
     if (descLower in row) return row[descLower]
   }
-  const found = Object.keys(row).find(k => k.toLowerCase() === bare)
+  const keys = Object.keys(row)
+  const found = keys.find(k => k.toLowerCase() === bare)
   if (found) return row[found]
+  // 模糊比對：row key 是 field 的前綴，或 field 是 row key 的前綴（欄位名稱改版容錯）
+  const fuzzy = keys.find(k => {
+    const kl = k.toLowerCase()
+    return bare.startsWith(kl) || kl.startsWith(bare)
+  })
+  if (fuzzy) return row[fuzzy]
   return undefined
 }
 
@@ -446,20 +453,6 @@ export default function AiChart({ chartDef, rows, columnLabels = {}, height = 32
   } | null {
     if (!y_axes || y_axes.length === 0) return null
 
-    // DEBUG: 一次性印出 field 對應是否正確
-    if (displayRows.length > 0) {
-      const firstRow = displayRows[0]
-      const rowKeys = Object.keys(firstRow)
-      console.group('[AiChart y_axes DEBUG]')
-      console.log('x_field:', x_field, '→ value:', rf(x_field, firstRow))
-      console.log('row keys:', rowKeys)
-      y_axes.forEach(ax => {
-        const v = rf(ax.field, firstRow)
-        console.log(`ax.field="${ax.field}" → resolved=${v} (${typeof v})`, rowKeys.includes(ax.field) ? '✓ exact match' : '✗ fallback')
-      })
-      console.groupEnd()
-    }
-
     const xSet = new Map<string, true>()
     for (const r of displayRows) xSet.set(String(rf(x_field, r) ?? ''), true)
     const xCategories = [...xSet.keys()]
@@ -737,8 +730,23 @@ export default function AiChart({ chartDef, rows, columnLabels = {}, height = 32
     })
   }
 
+  // 偵測 y_axes 中失效的欄位（第一筆 row 解析不到的）
+  const invalidFields = y_axes && displayRows.length > 0
+    ? y_axes.filter(ax => rf(ax.field, displayRows[0]) === undefined).map(ax => ax.label || ax.field)
+    : []
+
   return (
     <div style={{ position: 'relative', width: '100%', height: height === undefined ? '100%' : height }}>
+      {invalidFields.length > 0 && (
+        <div style={{
+          position: 'absolute', top: 8, left: 8, right: 40, zIndex: 10,
+          background: '#fef3c7', border: '1px solid #f59e0b', borderRadius: 6,
+          padding: '4px 10px', fontSize: 11, color: '#92400e',
+        }}>
+          ⚠ 以下 Y 軸欄位在目前查詢結果中找不到（欄位名稱可能已變更，請在 Tableau 模式重新拖曳）：
+          {' '}<strong>{invalidFields.join('、')}</strong>
+        </div>
+      )}
       <ReactECharts
         ref={chartRef}
         option={option}
