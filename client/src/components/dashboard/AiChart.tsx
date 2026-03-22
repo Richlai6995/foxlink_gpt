@@ -446,6 +446,20 @@ export default function AiChart({ chartDef, rows, columnLabels = {}, height = 32
   } | null {
     if (!y_axes || y_axes.length === 0) return null
 
+    // DEBUG: 一次性印出 field 對應是否正確
+    if (displayRows.length > 0) {
+      const firstRow = displayRows[0]
+      const rowKeys = Object.keys(firstRow)
+      console.group('[AiChart y_axes DEBUG]')
+      console.log('x_field:', x_field, '→ value:', rf(x_field, firstRow))
+      console.log('row keys:', rowKeys)
+      y_axes.forEach(ax => {
+        const v = rf(ax.field, firstRow)
+        console.log(`ax.field="${ax.field}" → resolved=${v} (${typeof v})`, rowKeys.includes(ax.field) ? '✓ exact match' : '✗ fallback')
+      })
+      console.groupEnd()
+    }
+
     const xSet = new Map<string, true>()
     for (const r of displayRows) xSet.set(String(rf(x_field, r) ?? ''), true)
     const xCategories = [...xSet.keys()]
