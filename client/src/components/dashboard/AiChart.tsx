@@ -477,22 +477,25 @@ export default function AiChart({ chartDef, rows, columnLabels = {}, height = 32
       const c = ax.color || colors[idx % colors.length]
       const data = xCategories.map(x => aggVals(ax, x))
       const yAxisIndex = ax.use_right_axis ? 1 : 0
-      const shadowStyle = ax.shadow ? { shadowBlur: 8, shadowColor: c + '80', shadowOffsetY: 2 } : {}
+      // per-axis 優先，沒設定則 fallback 到全域 shadow/gradient
+      const useShadow = ax.shadow ?? shadow
+      const useGradient = ax.gradient ?? gradient
+      const shadowStyle = useShadow ? { shadowBlur: 8, shadowColor: c + '80', shadowOffsetY: 2 } : {}
       const seriesName = ax.label || ax.field
 
       if (ax.chart_type === 'line') {
         return {
           name: seriesName, type: 'line', data, yAxisIndex,
-          smooth: ax.smooth ?? false,
+          smooth: ax.smooth ?? smooth ?? false,
           symbol: 'circle', symbolSize: 5,
           lineStyle: { color: c, width: 2 },
           itemStyle: { color: c, ...shadowStyle },
-          areaStyle: ax.area ? { color: c + '30' } : undefined,
+          areaStyle: (ax.area ?? area) ? { color: c + '30' } : undefined,
           label: dataLabelStyle,
         }
       }
       // bar
-      const itemColor = ax.gradient ? mkGradient(c) : c
+      const itemColor = useGradient ? mkGradient(c) : c
       const stackGroup = ax.stack ? 'yAxesStack' : undefined
       return {
         name: seriesName, type: 'bar', data, yAxisIndex,
