@@ -2324,11 +2324,13 @@ router.delete('/saved-queries/:id/shares/:shareId', requireDashboard, async (req
 router.get('/saved-queries/param-values', requireDashboard, async (req, res) => {
   const { db } = require('../database-oracle');
   const { getErpPool } = require('../services/dashboardService');
+  let sql = null; // 宣告在 try 外，catch block 才能引用
   try {
     const { schema_id, column_name, fetch_values_sql, search } = req.query;
+    console.log('[param-values] req:', { schema_id, column_name, has_fetch_sql: !!fetch_values_sql });
     if (!column_name) return res.status(400).json({ error: '欄位名稱必填' });
 
-    let sql = fetch_values_sql;
+    sql = fetch_values_sql || null;
     const searchFilter = search ? search.trim() : '';
     const limit = searchFilter ? 100 : 50; // 無搜尋先載前50，有搜尋撈100
     if (!sql && schema_id) {
