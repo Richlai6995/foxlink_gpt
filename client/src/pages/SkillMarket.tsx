@@ -530,6 +530,13 @@ interface GrantRecord {
     granted_at: string
 }
 
+interface OrgLov {
+    depts: { code: string; name: string }[]
+    profit_centers: { code: string; name: string }[]
+    org_sections: { code: string; name: string }[]
+    org_groups: { name: string }[]
+}
+
 function SkillShareModal({ skill, onClose }: { skill: Skill; onClose: () => void }) {
     const [grants, setGrants] = useState<GrantRecord[]>([])
     const [loadingGrants, setLoadingGrants] = useState(false)
@@ -538,6 +545,10 @@ function SkillShareModal({ skill, onClose }: { skill: Skill; onClose: () => void
     const [granteeType, setGranteeType] = useState<string>('user')
     const [granteeId, setGranteeId] = useState<string>('')
     const [userDisplay, setUserDisplay] = useState<string>('')
+    const [roles, setRoles] = useState<{ id: number; name: string }[]>([])
+    const [orgs, setOrgs] = useState<OrgLov | null>(null)
+    const [orgSearch, setOrgSearch] = useState('')
+    const [orgOptions, setOrgOptions] = useState<{ id: string; name: string; sub?: string }[]>([])
 
     const loadGrants = useCallback(async () => {
         setLoadingGrants(true)
@@ -553,10 +564,37 @@ function SkillShareModal({ skill, onClose }: { skill: Skill; onClose: () => void
 
     useEffect(() => { loadGrants() }, [loadGrants])
 
+    useEffect(() => {
+        api.get('/roles').then(r => setRoles(r.data || [])).catch(() => {})
+        api.get('/dashboard/orgs').then(r => setOrgs(r.data)).catch(() => {})
+    }, [])
+
+    // 計算 org LOV 選項
+    useEffect(() => {
+        if (!orgs) { setOrgOptions([]); return }
+        const q = orgSearch.toLowerCase()
+        if (granteeType === 'dept') {
+            setOrgOptions(orgs.depts.filter(d => !q || d.code.toLowerCase().includes(q) || (d.name || '').toLowerCase().includes(q))
+                .map(d => ({ id: d.code, name: d.name || d.code, sub: d.code })))
+        } else if (granteeType === 'profit_center') {
+            setOrgOptions(orgs.profit_centers.filter(d => !q || d.code.toLowerCase().includes(q) || (d.name || '').toLowerCase().includes(q))
+                .map(d => ({ id: d.code, name: d.name || d.code, sub: d.code })))
+        } else if (granteeType === 'org_section') {
+            setOrgOptions(orgs.org_sections.filter(d => !q || d.code.toLowerCase().includes(q) || (d.name || '').toLowerCase().includes(q))
+                .map(d => ({ id: d.code, name: d.name || d.code, sub: d.code })))
+        } else if (granteeType === 'org_group') {
+            setOrgOptions(orgs.org_groups.filter(d => !q || d.name.toLowerCase().includes(q))
+                .map(d => ({ id: d.name, name: d.name })))
+        } else {
+            setOrgOptions([])
+        }
+    }, [granteeType, orgSearch, orgs])
+
     const handleTypeChange = (t: string) => {
         setGranteeType(t)
         setGranteeId('')
         setUserDisplay('')
+        setOrgSearch('')
     }
 
     const handleAdd = async () => {
@@ -638,21 +676,35 @@ function SkillShareModal({ skill, onClose }: { skill: Skill; onClose: () => void
                                     className="flex-1 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
                                 >
                                     <option value="">請選擇角色</option>
-                                    <option value="admin">系統管理員</option>
-                                    <option value="user">一般使用者</option>
+                                    {roles.map(r => <option key={r.id} value={String(r.id)}>{r.name}</option>)}
                                 </select>
                             ) : (
-                                <input
-                                    value={granteeId}
-                                    onChange={e => setGranteeId(e.target.value)}
-                                    placeholder={
-                                        granteeType === 'dept' ? '部門代碼' :
-                                        granteeType === 'profit_center' ? '利潤中心代碼' :
-                                        granteeType === 'org_section' ? '事業處名稱' :
-                                        '事業群名稱'
-                                    }
-                                    className="flex-1 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
-                                />
+                                <div className="flex-1 relative">
+                                    <input
+                                        value={orgSearch || granteeId}
+                                        onChange={e => {
+                                            const v = e.target.value
+                                            setOrgSearch(v)
+                                            setGranteeId(v.trim()) // free-text fallback
+                                        }}
+                                        placeholder={orgOptions.length > 0
+                                            ? `篩選${GRANTEE_TYPE_LABELS[granteeType]}...`
+                                            : `輸入${GRANTEE_TYPE_LABELS[granteeType]}代碼/名稱`}
+                                        className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
+                                    />
+                                    {orgOptions.length > 0 && (
+                                        <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg z-20 max-h-40 overflow-y-auto">
+                                            {orgOptions.map(opt => (
+                                                <button key={opt.id} type="button"
+                                                    onClick={() => { setGranteeId(opt.id); setOrgSearch(opt.name); setOrgOptions([]) }}
+                                                    className="w-full text-left px-3 py-1.5 text-sm hover:bg-blue-50 flex items-center justify-between text-slate-700">
+                                                    <span>{opt.name}</span>
+                                                    {opt.sub && <span className="text-xs text-slate-400">{opt.sub}</span>}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
                             )}
 
                             <button
