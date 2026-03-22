@@ -688,6 +688,49 @@ export default function AiChart({ chartDef, rows, columnLabels = {}, height = 32
   function handleDownload() {
     const instance = chartRef.current?.getEchartsInstance?.()
     if (!instance) return
+    // SVG renderer: 用 SVG → Canvas 轉換產生 PNG
+    const dom = instance.getDom()
+    const svgEl = dom?.querySelector('svg')
+    if (svgEl) {
+      const PRINT_BG = '#ffffff'
+      const PRINT_TEXT = '#111111'
+      const PRINT_AXIS = '#444444'
+      // 套用白底黑字到 SVG clone
+      const clone = svgEl.cloneNode(true) as SVGElement
+      clone.style.backgroundColor = PRINT_BG
+      clone.querySelectorAll('text').forEach(el => {
+        const col = el.getAttribute('fill') || ''
+        if (!col || col === 'none' || col === 'transparent') return
+        // 淺色文字改黑
+        el.setAttribute('fill', PRINT_TEXT)
+      })
+      clone.querySelectorAll('line, path').forEach(el => {
+        const s = el.getAttribute('stroke') || ''
+        if (s && s !== 'none' && s !== 'transparent') el.setAttribute('stroke', PRINT_AXIS)
+      })
+      const svgStr = new XMLSerializer().serializeToString(clone)
+      const blob = new Blob([svgStr], { type: 'image/svg+xml;charset=utf-8' })
+      const url = URL.createObjectURL(blob)
+      const img = new Image()
+      const W = svgEl.clientWidth || 800
+      const H = svgEl.clientHeight || 400
+      img.onload = () => {
+        const canvas = document.createElement('canvas')
+        const ratio = window.devicePixelRatio || 2
+        canvas.width = W * ratio; canvas.height = H * ratio
+        const ctx = canvas.getContext('2d')!
+        ctx.fillStyle = PRINT_BG; ctx.fillRect(0, 0, canvas.width, canvas.height)
+        ctx.scale(ratio, ratio); ctx.drawImage(img, 0, 0, W, H)
+        URL.revokeObjectURL(url)
+        const a = document.createElement('a')
+        a.href = canvas.toDataURL('image/png')
+        a.download = `${chartDef.title || 'chart'}.png`
+        a.click()
+      }
+      img.src = url
+      return
+    }
+    // fallback: canvas renderer path
 
     const PRINT_TEXT  = '#111111'
     const PRINT_LINE  = '#444444'
@@ -756,7 +799,7 @@ export default function AiChart({ chartDef, rows, columnLabels = {}, height = 32
         notMerge
         style={{ height: '100%', width: '100%' }}
         theme="light"
-        opts={{ renderer: 'canvas' }}
+        opts={{ renderer: 'svg' }}
       />
       {/* 白底黑字下載按鈕 */}
       <button
