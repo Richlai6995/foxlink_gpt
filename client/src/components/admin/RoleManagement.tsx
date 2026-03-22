@@ -124,14 +124,20 @@ export default function RoleManagement() {
   }
 
   const loadOrgData = async (roleId: number) => {
-    const [bindingsRes, lovRes] = await Promise.all([
-      api.get(`/roles/${roleId}/org-bindings`),
-      orgLov ? Promise.resolve({ data: orgLov }) : api.get('/roles/org-lov'),
-    ])
-    setOrgBindings(bindingsRes.data)
-    if (!orgLov) setOrgLov(lovRes.data)
+    try {
+      const [bindingsRes, lovRes] = await Promise.all([
+        api.get(`/roles/${roleId}/org-bindings`),
+        orgLov ? Promise.resolve({ data: orgLov }) : api.get('/roles/org-lov'),
+      ])
+      setOrgBindings(bindingsRes.data)
+      if (!orgLov) setOrgLov(lovRes.data)
+    } catch (e: any) {
+      console.error('[loadOrgData]', e)
+      // 載入失敗給空結構，讓畫面不卡在「載入中」
+      if (!orgLov) setOrgLov({ department: [], cost_center: [], division: [], org_group: [] })
+      setOrgError('組織資料載入失敗：' + (e.response?.data?.error || e.message))
+    }
     setOrgSearch('')
-    setOrgError('')
   }
 
   const addOrgBinding = async (roleId: number, type: string, item: OrgLovItem) => {
@@ -566,10 +572,9 @@ export default function RoleManagement() {
                 </select>
                 <p className="text-xs text-slate-400 mt-1">{t('roles.form.dataPolicyNote')}</p>
               </div>
-            </div>
 
-            {/* Budget limits */}
-            <div className="px-5 pb-5">
+              {/* Budget limits */}
+              <div>
               <label className="block text-sm font-medium text-slate-700 mb-2">{t('roles.form.budgetTitle')}</label>
               <div className="grid grid-cols-3 gap-3">
                 <div>
@@ -608,7 +613,7 @@ export default function RoleManagement() {
 
             {/* Org bindings — only when editing */}
             {editing && (
-              <div className="px-5 pb-5">
+              <div>
                 <label className="flex items-center gap-1.5 text-sm font-medium text-slate-700 mb-3">
                   <Building2 size={14} /> 預設組織綁定
                   <span className="text-xs text-slate-400 font-normal ml-1">（新 LDAP 使用者自動角色判斷）</span>
@@ -672,6 +677,7 @@ export default function RoleManagement() {
                 {orgError && <p className="text-xs text-red-500">{orgError}</p>}
               </div>
             )}
+            </div>{/* end scrollable */}
 
             <div className="p-5 border-t border-slate-100 flex justify-end gap-2">
               <button

@@ -43,6 +43,7 @@ router.get('/org-lov', async (req, res) => {
     ]);
     res.json({ department: depts, cost_center: costCenters, division: divisions, org_group: orgGroups });
   } catch (e) {
+    console.error('[roles/org-lov]', e.message);
     res.status(500).json({ error: e.message });
   }
 });
