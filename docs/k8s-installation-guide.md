@@ -247,7 +247,46 @@ Docker image 內 `/app` 下有以下 runtime 目錄：
 └── oracle_client/          ← Oracle Instant Client（解壓後整個目錄放這）
 ```
 
-### 3.2.1 Oracle Instant Client 上傳到 NAS（必做）
+### 3.2.1 CJK 中文字型上傳到 NAS（PDF 中文需要）
+
+> ⚠️ **重要**：若不上傳字型，PDF 輸出的中文將顯示亂碼。`/app/fonts` 掛載自 NFS `subPath: fonts`，pod 啟動時必須已有字型才能載入。
+
+**步驟：**
+
+```bash
+# 1. 掛載 NFS source 目錄
+sudo mkdir -p /mnt/flgpt-source
+sudo mount -t nfs <NAS_IP>:/volume1/flgpt-source /mnt/flgpt-source
+# 本環境：sudo mount -t nfs 10.8.91.215:/volume1/flgpt-source /mnt/flgpt-source
+
+# 2. 建立 fonts 目錄並上傳字型
+sudo mkdir -p /mnt/flgpt-source/fonts
+sudo cp NotoSansTC-Regular.ttf /mnt/flgpt-source/fonts/
+
+# 3. 確認
+ls -la /mnt/flgpt-source/fonts/
+# 應看到：NotoSansTC-Regular.ttf（約 7MB）
+
+# 4. 卸載
+sudo umount -l /mnt/flgpt-source
+```
+
+> [!TIP]
+> 字型檔可從 [Google Noto Fonts](https://fonts.google.com/noto/specimen/Noto+Sans+TC) 下載，
+> 或從 server 機器 `~/NotoSansTC-Regular.ttf` 取得。
+
+**`k8s/deployment.yaml` volumeMount 對應設定**（已設定好，確認存在即可）：
+
+```yaml
+# containers[0].volumeMounts 中應有：
+- name: nfs-source
+  mountPath: /app/fonts
+  subPath: fonts
+```
+
+---
+
+### 3.2.2 Oracle Instant Client 上傳到 NAS（必做）
 
 > ⚠️ **重要**：K8s pod 在 Thin mode 下無法連接密碼格式為 10G verifier 的 Oracle 帳號（如 ERP 的 `apps` 帳號），**必須掛載 Oracle Instant Client 啟用 Thick mode**。
 
