@@ -86,6 +86,7 @@ export default function RoleManagement() {
   const [orgTab, setOrgTab] = useState<typeof ORG_TABS[number]>('department')
   const [orgSearch, setOrgSearch] = useState('')
   const [orgError, setOrgError] = useState('')
+  const [showOrgPicker, setShowOrgPicker] = useState(false)
 
   const load = async () => {
     try {
@@ -614,67 +615,40 @@ export default function RoleManagement() {
             {/* Org bindings — only when editing */}
             {editing && (
               <div>
-                <label className="flex items-center gap-1.5 text-sm font-medium text-slate-700 mb-3">
-                  <Building2 size={14} /> 預設組織綁定
-                  <span className="text-xs text-slate-400 font-normal ml-1">（新 LDAP 使用者自動角色判斷）</span>
-                </label>
-
-                {/* Tabs */}
-                <div className="flex border-b border-slate-200 mb-3">
-                  {ORG_TABS.map(tab => (
-                    <button key={tab} onClick={() => { setOrgTab(tab); setOrgSearch('') }}
-                      className={`px-3 py-1.5 text-xs font-medium border-b-2 transition ${orgTab === tab ? 'border-blue-500 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>
-                      {ORG_TYPE_LABELS[tab]}
-                      <span className="ml-1 text-slate-400">({orgBindings.filter(b => b.org_type === tab).length})</span>
-                    </button>
-                  ))}
+                <div className="flex items-center justify-between mb-2">
+                  <label className="flex items-center gap-1.5 text-sm font-medium text-slate-700">
+                    <Building2 size={14} /> 預設組織綁定
+                    <span className="text-xs text-slate-400 font-normal ml-1">（新 LDAP 使用者自動角色判斷）</span>
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => { setShowOrgPicker(true); setOrgSearch('') }}
+                    className="px-3 py-1 text-xs bg-blue-50 text-blue-600 border border-blue-200 rounded-lg hover:bg-blue-100"
+                  >
+                    + 設定組織
+                  </button>
                 </div>
 
-                {/* Search */}
-                <input
-                  type="text" placeholder={`搜尋${ORG_TYPE_LABELS[orgTab]}...`}
-                  value={orgSearch} onChange={e => setOrgSearch(e.target.value)}
-                  className="w-full border border-slate-200 rounded px-2 py-1 text-xs mb-2 focus:outline-none focus:border-blue-400"
-                />
-
-                {/* LOV list */}
-                <div className="border border-slate-200 rounded max-h-32 overflow-y-auto mb-2">
-                  {!orgLov ? (
-                    <div className="text-xs text-slate-400 text-center py-3">載入中...</div>
-                  ) : (() => {
-                    const items = (orgLov[orgTab] || []).filter(item =>
-                      !orgSearch || item.code.toLowerCase().includes(orgSearch.toLowerCase()) || item.name.toLowerCase().includes(orgSearch.toLowerCase())
-                    )
-                    const boundCodes = new Set(orgBindings.filter(b => b.org_type === orgTab).map(b => b.org_code))
-                    return items.length === 0 ? (
-                      <div className="text-xs text-slate-400 text-center py-3">無資料</div>
-                    ) : items.map(item => {
-                      const isBound = boundCodes.has(item.code)
-                      return (
-                        <button key={item.code} disabled={isBound}
-                          onClick={() => addOrgBinding(editing.id, orgTab, item)}
-                          className={`w-full text-left px-3 py-1.5 text-xs flex items-center justify-between ${isBound ? 'bg-blue-50 text-blue-600' : 'hover:bg-slate-50 text-slate-700'}`}>
-                          <span>{item.name}</span>
-                          <span className="text-slate-400">{item.code}</span>
-                        </button>
-                      )
-                    })
-                  })()}
-                </div>
-
-                {/* Already bound badges */}
-                {orgBindings.filter(b => b.org_type === orgTab).length > 0 && (
-                  <div className="flex flex-wrap gap-1.5 mb-2">
-                    {orgBindings.filter(b => b.org_type === orgTab).map(b => (
-                      <span key={b.id} className="inline-flex items-center gap-1 px-2 py-0.5 bg-blue-100 text-blue-700 text-xs rounded-full">
-                        {b.org_name || b.org_code}
-                        <button onClick={() => removeOrgBinding(editing.id, b.id)} className="hover:text-red-500"><X size={10} /></button>
-                      </span>
-                    ))}
-                  </div>
-                )}
-
-                {orgError && <p className="text-xs text-red-500">{orgError}</p>}
+                {/* Current bindings summary by type */}
+                {ORG_TABS.map(tab => {
+                  const items = orgBindings.filter(b => b.org_type === tab)
+                  if (!items.length) return null
+                  return (
+                    <div key={tab} className="mb-2">
+                      <span className="text-xs text-slate-500 mr-1">{ORG_TYPE_LABELS[tab]}：</span>
+                      <div className="inline-flex flex-wrap gap-1">
+                        {items.map(b => (
+                          <span key={b.id} className="inline-flex items-center gap-1 px-2 py-0.5 bg-blue-100 text-blue-700 text-xs rounded-full">
+                            {b.org_name || b.org_code}
+                            <button type="button" onClick={() => removeOrgBinding(editing.id, b.id)} className="hover:text-red-500 ml-0.5"><X size={10} /></button>
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )
+                })}
+                {orgBindings.length === 0 && <p className="text-xs text-slate-400">尚未設定組織綁定</p>}
+                {orgError && <p className="text-xs text-red-500 mt-1">{orgError}</p>}
               </div>
             )}
             </div>{/* end scrollable */}
@@ -693,6 +667,92 @@ export default function RoleManagement() {
                 className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
               >
                 {saving ? t('common.saving') : t('common.save')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Org Picker Modal */}
+      {showOrgPicker && editing && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40" onClick={() => setShowOrgPicker(false)}>
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-xl max-h-[80vh] flex flex-col" onClick={e => e.stopPropagation()}>
+            {/* Header */}
+            <div className="flex items-center justify-between px-5 py-3 border-b border-slate-100">
+              <h4 className="font-semibold text-slate-800 text-sm">選擇組織綁定 — {editing.name}</h4>
+              <button onClick={() => setShowOrgPicker(false)} className="text-slate-400 hover:text-slate-600"><X size={18} /></button>
+            </div>
+
+            {/* Tabs */}
+            <div className="flex border-b border-slate-200 px-2">
+              {ORG_TABS.map(tab => (
+                <button key={tab} type="button" onClick={() => { setOrgTab(tab); setOrgSearch('') }}
+                  className={`px-4 py-2.5 text-sm font-medium border-b-2 transition ${orgTab === tab ? 'border-blue-500 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>
+                  {ORG_TYPE_LABELS[tab]}
+                  <span className="ml-1.5 text-xs text-slate-400">({orgBindings.filter(b => b.org_type === tab).length})</span>
+                </button>
+              ))}
+            </div>
+
+            {/* Search */}
+            <div className="px-4 py-2 border-b border-slate-100">
+              <input
+                type="text"
+                placeholder={`搜尋${ORG_TYPE_LABELS[orgTab]}名稱或代碼...`}
+                value={orgSearch}
+                onChange={e => setOrgSearch(e.target.value)}
+                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-400"
+                autoFocus
+              />
+            </div>
+
+            {/* List */}
+            <div className="flex-1 overflow-y-auto px-2 py-2">
+              {!orgLov ? (
+                <div className="text-sm text-slate-400 text-center py-8">載入中...</div>
+              ) : (() => {
+                const boundCodes = new Set(orgBindings.filter(b => b.org_type === orgTab).map(b => b.org_code))
+                const items = (orgLov[orgTab] || []).filter(item =>
+                  !orgSearch ||
+                  item.code.toLowerCase().includes(orgSearch.toLowerCase()) ||
+                  item.name.toLowerCase().includes(orgSearch.toLowerCase())
+                )
+                if (!items.length) return <div className="text-sm text-slate-400 text-center py-8">無符合資料</div>
+                return items.map(item => {
+                  const checked = boundCodes.has(item.code)
+                  return (
+                    <label key={item.code}
+                      className={`flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer hover:bg-slate-50 ${checked ? 'bg-blue-50' : ''}`}>
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => {
+                          if (checked) {
+                            const binding = orgBindings.find(b => b.org_type === orgTab && b.org_code === item.code)
+                            if (binding) removeOrgBinding(editing.id, binding.id)
+                          } else {
+                            addOrgBinding(editing.id, orgTab, item)
+                          }
+                        }}
+                        className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                      />
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm text-slate-800">{item.name}</div>
+                        <div className="text-xs text-slate-400">{item.code}</div>
+                      </div>
+                      {checked && <Check size={14} className="text-blue-500 flex-shrink-0" />}
+                    </label>
+                  )
+                })
+              })()}
+            </div>
+
+            {orgError && <div className="px-4 py-2 text-xs text-red-500 border-t border-slate-100">{orgError}</div>}
+
+            <div className="px-5 py-3 border-t border-slate-100 flex justify-end">
+              <button onClick={() => setShowOrgPicker(false)}
+                className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700">
+                完成
               </button>
             </div>
           </div>
