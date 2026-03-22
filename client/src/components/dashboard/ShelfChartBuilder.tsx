@@ -3,7 +3,7 @@
  * 使用 HTML5 原生 drag & drop，無額外依賴
  */
 import { useState, useMemo } from 'react'
-import type { AiChartConfig, AiChartDef, ChartColorPalette, OverlayLine } from '../../types'
+import type { AiChartConfig, AiChartDef, ChartColorPalette, OverlayLine, YAxisDef } from '../../types'
 import AiChart from './AiChart'
 import { useTranslation } from 'react-i18next'
 import api from '../../lib/api'
@@ -12,7 +12,12 @@ import ColorPickerInput from '../common/ColorPickerInput'
 
 type AggFn = 'SUM' | 'COUNT' | 'AVG' | 'MAX' | 'MIN' | 'COUNT_DISTINCT'
 type FieldType = 'dimension' | 'measure'
-type ShelfKey = 'x_field' | 'y_field' | 'series_field' | 'stack_field'
+type ShelfKey = 'x_field' | 'series_field' | 'stack_field'
+
+const DEFAULT_COLORS = [
+  '#5470c6', '#91cc75', '#fac858', '#ee6666', '#73c0de',
+  '#3ba272', '#fc8452', '#9a60b4', '#ea7ccc', '#f0d062',
+]
 
 interface ShelfState {
   id: string
@@ -20,8 +25,7 @@ interface ShelfState {
   title_en: string
   title_vi: string
   x_field?: string
-  y_field?: string
-  y_agg: AggFn
+  y_axes: YAxisDef[]
   series_field?: string
   stack_field?: string
   chartType: AiChartDef['type']
@@ -113,8 +117,11 @@ function defToShelf(def: AiChartDef, columns: string[], rows: Record<string, unk
     title_en: def.title_en || '',
     title_vi: def.title_vi || '',
     x_field: def.x_field || columns[0],
-    y_field: def.y_field || columns[1] || columns[0],
-    y_agg: (def.agg_fn as AggFn) || 'SUM',
+    y_axes: (() => {
+      if (def.y_axes?.length) return def.y_axes
+      if (def.y_field) return [{ field: def.y_field, agg: (def.agg_fn as AggFn) || 'SUM', chart_type: 'bar' as const }]
+      return []
+    })(),
     series_field: def.series_field,
     stack_field: def.stack_field,
     chartType: def.type || 'bar',
@@ -168,8 +175,7 @@ function newBlankShelf(columns: string[], rows: Record<string, unknown>[]): Shel
     id: crypto.randomUUID(),
     title: '', title_en: '', title_vi: '',
     x_field: dims[0] || columns[0],
-    y_field: measures[0] || columns[1] || columns[0],
-    y_agg: 'SUM',
+    y_axes: (measures[0] || columns[1]) ? [{ field: measures[0] || columns[1], agg: 'SUM' as AggFn, chart_type: 'bar' as const }] : [],
     chartType: 'bar',
     limit: 20,
     horizontal: false,
@@ -237,16 +243,17 @@ function FieldChip({ col, label, type, onDragStart }: {
 }
 
 // ── Shelf slot (drop target) ───────────────────────────────────────────────────
-function ShelfSlot({ label, fieldKey, value, agg, fieldType, columnLabels, onDrop, onRemove, onAggChange }: {
+function ShelfSlot({ label, fieldKey, value, agg, fieldType, columnLabels, onDrop, onRemove, onAggChange, disabled }: {
   label: string; fieldKey: ShelfKey; value?: string; agg?: AggFn; fieldType?: FieldType
   columnLabels?: Record<string, string>
   onDrop: (key: ShelfKey, field: string) => void
   onRemove: (key: ShelfKey) => void
   onAggChange?: (agg: AggFn) => void
+  disabled?: boolean
 }) {
   const [over, setOver] = useState(false)
   return (
-    <div className="flex items-start gap-2">
+    <div className={`flex items-start gap-2 ${disabled ? 'opacity-40 pointer-events-none' : ''}`}>
       <span className="text-[10px] text-gray-400 w-14 flex-shrink-0 mt-1.5 text-right">{label}</span>
       <div
         onDragOver={e => { e.preventDefault(); setOver(true) }}
@@ -259,10 +266,10 @@ function ShelfSlot({ label, fieldKey, value, agg, fieldType, columnLabels, onDro
           <div className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-xs
             ${fieldType === 'measure' ? 'bg-orange-100 text-orange-700' : 'bg-blue-100 text-blue-700'}`}>
             <span className="font-medium">{colLabel(value, columnLabels)}</span>
-            {fieldKey === 'y_field' && onAggChange && (
+            {false && onAggChange && (
               <select
                 value={agg || 'SUM'}
-                onChange={e => onAggChange(e.target.value as AggFn)}
+                onChange={e => onAggChange!(e.target.value as AggFn)}
                 onClick={e => e.stopPropagation()}
                 className="text-[10px] bg-transparent border-0 outline-none cursor-pointer text-orange-700 ml-0.5"
               >
@@ -275,6 +282,106 @@ function ShelfSlot({ label, fieldKey, value, agg, fieldType, columnLabels, onDro
           </div>
         ) : (
           <span className="text-[10px] text-gray-300 self-center px-1">拖曳欄位至此</span>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ── Multi-measure Y 軸 slot (drag & drop multiple measures) ───────────────────
+function MultiMeasureSlot({ y_axes, columnLabels, fieldTypes, onDrop, onUpdate, onRemove }: {
+  y_axes: YAxisDef[]
+  columnLabels?: Record<string, string>
+  fieldTypes: Record<string, FieldType>
+  onDrop: (field: string) => void
+  onUpdate: (idx: number, patch: Partial<YAxisDef>) => void
+  onRemove: (idx: number) => void
+}) {
+  void fieldTypes
+  const [over, setOver] = useState(false)
+  return (
+    <div className="flex items-start gap-2">
+      <span className="text-[10px] text-gray-400 w-14 flex-shrink-0 mt-1.5 text-right">Y 軸</span>
+      <div className="flex-1 space-y-1">
+        <div
+          onDragOver={e => { e.preventDefault(); setOver(true) }}
+          onDragLeave={() => setOver(false)}
+          onDrop={e => { e.preventDefault(); setOver(false); const f = e.dataTransfer.getData('field'); if (f) onDrop(f) }}
+          className={`min-h-[30px] rounded border border-dashed p-1 transition-colors
+            ${over ? 'border-blue-400 bg-blue-50' : 'border-gray-200 bg-gray-50 hover:border-gray-300'}`}
+        >
+          {y_axes.length === 0 ? (
+            <span className="text-[10px] text-gray-300 px-1 leading-7">拖曳指標至此（可多個）</span>
+          ) : (
+            <div className="space-y-0.5">
+              {y_axes.map((ax, idx) => {
+                const autoColor = DEFAULT_COLORS[idx % DEFAULT_COLORS.length]
+                const c = ax.color || autoColor
+                return (
+                  <div key={idx} className="flex items-center gap-1 bg-orange-50 rounded px-1.5 py-0.5 border border-orange-100">
+                    {/* 顏色 */}
+                    <input type="color" value={c}
+                      onChange={e => onUpdate(idx, { color: e.target.value })}
+                      className="w-5 h-5 rounded border-0 cursor-pointer p-0 flex-shrink-0"
+                      title="系列顏色" />
+                    {/* 欄位名稱 */}
+                    <span className="text-xs font-medium text-orange-700 flex-1 truncate min-w-0" title={ax.field}>
+                      {colLabel(ax.field, columnLabels)}
+                    </span>
+                    {/* Agg */}
+                    <select value={ax.agg}
+                      onChange={e => onUpdate(idx, { agg: e.target.value as AggFn })}
+                      onClick={e => e.stopPropagation()}
+                      className="text-[10px] bg-white border border-orange-200 rounded px-0.5 py-0 text-orange-700 outline-none cursor-pointer flex-shrink-0">
+                      {AGG_FNS.map(fn => <option key={fn} value={fn}>{fn}</option>)}
+                    </select>
+                    {/* 柱/折 切換 */}
+                    <button
+                      onClick={() => onUpdate(idx, { chart_type: ax.chart_type === 'line' ? 'bar' : 'line' })}
+                      className={`text-[10px] px-1.5 py-px rounded flex-shrink-0 border font-medium
+                        ${ax.chart_type === 'line'
+                          ? 'bg-purple-100 text-purple-700 border-purple-200'
+                          : 'bg-blue-100 text-blue-700 border-blue-200'}`}
+                      title="切換長條/折線">
+                      {ax.chart_type === 'line' ? '折' : '柱'}
+                    </button>
+                    {/* 堆疊 */}
+                    <button
+                      onClick={() => onUpdate(idx, { stack: !ax.stack })}
+                      className={`text-[10px] px-1.5 py-px rounded flex-shrink-0 border font-medium
+                        ${ax.stack
+                          ? 'bg-green-100 text-green-700 border-green-200'
+                          : 'bg-gray-50 text-gray-400 border-gray-200'}`}
+                      title="堆疊此 series">
+                      疊
+                    </button>
+                    {/* 右軸 */}
+                    <button
+                      onClick={() => onUpdate(idx, { use_right_axis: !ax.use_right_axis })}
+                      className={`text-[10px] px-1.5 py-px rounded flex-shrink-0 border font-medium
+                        ${ax.use_right_axis
+                          ? 'bg-teal-100 text-teal-700 border-teal-200'
+                          : 'bg-gray-50 text-gray-400 border-gray-200'}`}
+                      title="使用右 Y 軸">
+                      右
+                    </button>
+                    {/* 移除 */}
+                    <button onClick={() => onRemove(idx)} className="text-gray-400 hover:text-red-400 flex-shrink-0 ml-0.5">
+                      <X size={9} />
+                    </button>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
+        {y_axes.length > 1 && (
+          <p className="text-[9px] text-gray-400">
+            共 {y_axes.length} 個指標 · 多指標模式下分組/堆疊欄位無效
+          </p>
+        )}
+        {y_axes.length === 1 && (
+          <p className="text-[9px] text-gray-300">再拖曳更多指標可切換至多指標模式</p>
         )}
       </div>
     </div>
@@ -324,27 +431,42 @@ export default function ShelfChartBuilder({ rows, columns, columnLabels, initial
     updateActive({ [key]: undefined })
   }
 
+  function handleDropYAxis(field: string) {
+    setDraggingField(null)
+    if (active.y_axes.some(ax => ax.field === field)) return  // no duplicate
+    updateActive({ y_axes: [...active.y_axes, { field, agg: 'SUM', chart_type: 'bar' }] })
+  }
+
+  function handleRemoveYAxis(idx: number) {
+    updateActive({ y_axes: active.y_axes.filter((_, i) => i !== idx) })
+  }
+
+  function handleUpdateYAxis(idx: number, patch: Partial<YAxisDef>) {
+    updateActive({ y_axes: active.y_axes.map((ax, i) => i === idx ? { ...ax, ...patch } : ax) })
+  }
+
   const chartDef = useMemo((): AiChartDef => ({
     type: active.chartType,
     title: active.title || undefined,
     title_en: active.title_en || undefined,
     title_vi: active.title_vi || undefined,
     x_field: active.x_field,
-    y_field: active.y_field,
+    y_axes: active.y_axes.length > 0 ? active.y_axes : undefined,
+    y_field: active.y_axes[0]?.field,
     label_field: active.x_field,
-    value_field: active.y_field,
-    series_field: active.series_field,
-    stack_field: active.stack_field,
-    agg_fn: active.y_agg,
+    value_field: active.y_axes[0]?.field,
+    series_field: active.y_axes.length <= 1 ? active.series_field : undefined,
+    stack_field: active.y_axes.length <= 1 ? active.stack_field : undefined,
+    agg_fn: active.y_axes[0]?.agg || 'SUM',
     limit: active.limit,
     horizontal: active.horizontal,
     smooth: active.smooth,
     area: active.area,
     gradient: active.gradient,
     shadow: active.shadow,
-    colors: (active.series_field || active.stack_field)
+    colors: (active.y_axes.length <= 1 && (active.series_field || active.stack_field))
       ? (active.series_palette.length ? active.series_palette : undefined)
-      : (active.primary_color ? [active.primary_color] : undefined),
+      : (active.y_axes.length <= 1 && active.primary_color ? [active.primary_color] : undefined),
     series_colors: Object.keys(active.series_colors).length ? active.series_colors : undefined,
     donut: active.donut,
     show_label: active.show_label,
@@ -390,21 +512,22 @@ export default function ShelfChartBuilder({ rows, columns, columnLabels, initial
       title_en: s.title_en || undefined,
       title_vi: s.title_vi || undefined,
       x_field: s.x_field,
-      y_field: s.y_field,
+      y_axes: s.y_axes.length > 0 ? s.y_axes : undefined,
+      y_field: s.y_axes[0]?.field,
       label_field: s.x_field,
-      value_field: s.y_field,
-      series_field: s.series_field,
-      stack_field: s.stack_field,
-      agg_fn: s.y_agg,
+      value_field: s.y_axes[0]?.field,
+      series_field: s.y_axes.length <= 1 ? s.series_field : undefined,
+      stack_field: s.y_axes.length <= 1 ? s.stack_field : undefined,
+      agg_fn: s.y_axes[0]?.agg || 'SUM',
       limit: s.limit,
       horizontal: s.horizontal,
       smooth: s.smooth,
       area: s.area,
       gradient: s.gradient || undefined,
       shadow: s.shadow || undefined,
-      colors: (s.series_field || s.stack_field)
+      colors: (s.y_axes.length <= 1 && (s.series_field || s.stack_field))
         ? (s.series_palette.length ? s.series_palette : undefined)
-        : (s.primary_color ? [s.primary_color] : undefined),
+        : (s.y_axes.length <= 1 && s.primary_color ? [s.primary_color] : undefined),
       series_colors: Object.keys(s.series_colors).length ? s.series_colors : undefined,
       donut: s.donut,
       show_label: s.show_label,
@@ -451,7 +574,7 @@ export default function ShelfChartBuilder({ rows, columns, columnLabels, initial
     onClose()
   }
 
-  const canPreview = !!(active?.x_field && active?.y_field)
+  const canPreview = !!(active?.x_field && active?.y_axes.length > 0)
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-gray-50" style={{ fontFamily: 'inherit' }}>
@@ -594,17 +717,23 @@ export default function ShelfChartBuilder({ rows, columns, columnLabels, initial
             <ShelfSlot label="X 軸" fieldKey="x_field" value={active.x_field}
               fieldType={active.x_field ? fieldTypes[active.x_field] : undefined}
               columnLabels={columnLabels} onDrop={handleDrop} onRemove={handleRemove} />
-            <ShelfSlot label="Y 軸" fieldKey="y_field" value={active.y_field} agg={active.y_agg}
-              fieldType={active.y_field ? fieldTypes[active.y_field] : undefined}
-              columnLabels={columnLabels} onDrop={handleDrop} onRemove={handleRemove}
-              onAggChange={agg => updateActive({ y_agg: agg })} />
+            <MultiMeasureSlot
+              y_axes={active.y_axes}
+              columnLabels={columnLabels}
+              fieldTypes={fieldTypes}
+              onDrop={handleDropYAxis}
+              onUpdate={handleUpdateYAxis}
+              onRemove={handleRemoveYAxis}
+            />
             {(active.chartType === 'bar' || active.chartType === 'line') && (<>
               <ShelfSlot label="分組" fieldKey="series_field" value={active.series_field}
                 fieldType={active.series_field ? fieldTypes[active.series_field] : undefined}
-                columnLabels={columnLabels} onDrop={handleDrop} onRemove={handleRemove} />
+                columnLabels={columnLabels} onDrop={handleDrop} onRemove={handleRemove}
+                disabled={active.y_axes.length > 1} />
               <ShelfSlot label="堆疊" fieldKey="stack_field" value={active.stack_field}
                 fieldType={active.stack_field ? fieldTypes[active.stack_field] : undefined}
-                columnLabels={columnLabels} onDrop={handleDrop} onRemove={handleRemove} />
+                columnLabels={columnLabels} onDrop={handleDrop} onRemove={handleRemove}
+                disabled={active.y_axes.length > 1} />
             </>)}
           </div>
 
@@ -668,24 +797,26 @@ export default function ShelfChartBuilder({ rows, columns, columnLabels, initial
               </label>
             </div>
 
-            {/* 自訂主色 */}
-            <div className="flex items-center gap-2 mt-1">
-              <span className="text-xs text-gray-500 flex-shrink-0">主色</span>
-              <input
-                type="color"
-                value={active.primary_color || '#118DFF'}
-                onChange={e => updateActive({ primary_color: e.target.value, color_palette: undefined })}
-                className="w-8 h-6 rounded border border-gray-200 cursor-pointer p-0"
-                title="自訂主色（會覆蓋色系設定）"
-              />
-              {active.primary_color && (
-                <button
-                  onClick={() => updateActive({ primary_color: '' })}
-                  className="text-[10px] text-gray-400 hover:text-red-500"
-                  title="還原預設色"
-                >✕ 還原</button>
-              )}
-            </div>
+            {/* 自訂主色（僅單指標時顯示） */}
+            {active.y_axes.length <= 1 && (
+              <div className="flex items-center gap-2 mt-1">
+                <span className="text-xs text-gray-500 flex-shrink-0">主色</span>
+                <input
+                  type="color"
+                  value={active.primary_color || '#118DFF'}
+                  onChange={e => updateActive({ primary_color: e.target.value, color_palette: undefined })}
+                  className="w-8 h-6 rounded border border-gray-200 cursor-pointer p-0"
+                  title="自訂主色（會覆蓋色系設定）"
+                />
+                {active.primary_color && (
+                  <button
+                    onClick={() => updateActive({ primary_color: '' })}
+                    className="text-[10px] text-gray-400 hover:text-red-500"
+                    title="還原預設色"
+                  >✕ 還原</button>
+                )}
+              </div>
+            )}
             <div className="flex items-center gap-2 mt-1">
               <span className="text-xs text-gray-500">前 N 筆</span>
               <input type="number" min={1} max={500} value={active.limit}
@@ -694,8 +825,8 @@ export default function ShelfChartBuilder({ rows, columns, columnLabels, initial
             </div>
           </div>
 
-          {/* ── Series 顏色設定（分群/堆疊模式） ──────────────────────────── */}
-          {(active.series_field || active.stack_field) && (
+          {/* ── Series 顏色設定（分群/堆疊模式，單指標時才顯示） ─────────── */}
+          {active.y_axes.length <= 1 && (active.series_field || active.stack_field) && (
             <div className="px-4 py-3 border-b border-gray-100 space-y-3">
               {/* B：順序色票 */}
               <div>
@@ -761,7 +892,7 @@ export default function ShelfChartBuilder({ rows, columns, columnLabels, initial
           )}
 
           {/* 疊加折線 (Option C) — bar 有 series_field 或 stack_field 才顯示 */}
-          {active.chartType === 'bar' && (active.series_field || active.stack_field) && (
+          {active.chartType === 'bar' && active.y_axes.length <= 1 && (active.series_field || active.stack_field) && (
             <div className="px-4 py-3 border-b border-gray-100 space-y-2">
               <div className="flex items-center justify-between">
                 <p className="text-[10px] text-gray-400">疊加折線</p>
@@ -979,7 +1110,11 @@ export default function ShelfChartBuilder({ rows, columns, columnLabels, initial
                 <span className="text-xs font-medium text-blue-700">{colLabel(active.x_field!, columnLabels)}</span>
                 <span className="text-xs text-gray-300">|</span>
                 <span className="text-xs text-gray-500">Y：</span>
-                <span className="text-xs font-medium text-orange-700">{colLabel(active.y_field!, columnLabels)} ({active.y_agg})</span>
+                <span className="text-xs font-medium text-orange-700">
+                  {active.y_axes.length > 1
+                    ? `${active.y_axes.length} 個指標`
+                    : active.y_axes[0] ? `${colLabel(active.y_axes[0].field, columnLabels)} (${active.y_axes[0].agg})` : '—'}
+                </span>
                 {active.series_field && (<>
                   <span className="text-xs text-gray-300">|</span>
                   <span className="text-xs text-gray-500">分組：</span>

@@ -392,6 +392,7 @@ export interface YAxisDef {
   shadow?: boolean        // 陰影效果
   bar_width?: string      // 例如 '30%'
   overlap?: boolean       // barGap: '-100%' — 套疊在前一條上
+  stack?: boolean         // 與其他 stack:true 的 series 堆疊
   smooth?: boolean        // line only
   area?: boolean          // line only
   use_right_axis?: boolean // 使用右 Y 軸

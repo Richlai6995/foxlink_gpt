@@ -496,13 +496,17 @@ export default function AiChart({ chartDef, rows, columnLabels = {}, height = 32
       }
       // bar
       const itemColor = ax.gradient ? mkGradient(c) : c
+      const stackGroup = ax.stack ? 'yAxesStack' : undefined
       return {
         name: seriesName, type: 'bar', data, yAxisIndex,
+        stack: stackGroup,
         barWidth: ax.bar_width,
         barGap: ax.overlap ? '-100%' : undefined,
         z: ax.overlap ? (idx + 1) * 2 : undefined,
-        itemStyle: { color: itemColor, borderRadius: [4, 4, 0, 0], ...shadowStyle },
-        label: dataLabelTop,
+        itemStyle: { color: itemColor, borderRadius: stackGroup ? [0, 0, 0, 0] : [4, 4, 0, 0], ...shadowStyle },
+        label: stackGroup
+          ? { show: show_label, position: 'inside' as const, color: '#fff', fontSize: sDataLabelSz }
+          : dataLabelTop,
         barMaxWidth: ax.bar_width ? undefined : 48,
       }
     })
