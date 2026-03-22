@@ -134,8 +134,11 @@ async function generateXlsx(content, outputPath) {
   const ExcelJS = require('exceljs');
   let data;
   try {
-    data = JSON.parse(content);
+    // Strip any leading description text the AI might prepend (e.g. "JSON 陣列: ")
+    const jsonStr = content.replace(/^[^[{]*/s, '').replace(/[^}\]]*$/s, '');
+    data = JSON.parse(jsonStr);
   } catch (e) {
+    console.error('[FileGen] xlsx JSON parse failed, content snippet:', content.slice(0, 200));
     data = [{ sheetName: 'Sheet1', data: content.split('\n').map((r) => r.split(',')) }];
   }
   if (!Array.isArray(data)) data = [data];
@@ -271,10 +274,13 @@ async function generatePdf(content, outputPath) {
 
     // CJK font search order: bundled → Windows system → Linux system
     const fontPaths = [
-      // Bundled fonts (place in server/fonts/)
+      // Bundled fonts (place in server/fonts/ or project root fonts/)
       path.join(__dirname, '../fonts/NotoSansTC-Regular.ttf'),
       path.join(__dirname, '../fonts/NotoSansTC-Regular.otf'),
       path.join(__dirname, '../fonts/NotoSansCJK-Regular.ttc'),
+      // Docker: mounted from ./fonts → /app/fonts/
+      '/app/fonts/NotoSansTC-Regular.ttf',
+      '/app/fonts/NotoSansTC-Regular.otf',
       // Windows system fonts (TTF format for pdfkit compatibility)
       'C:\\Windows\\Fonts\\kaiu.ttf',      // DFKai-SB 標楷體 (繁中) ✓
       'C:\\Windows\\Fonts\\simhei.ttf',    // 黑體 (簡中)

@@ -270,7 +270,7 @@ function getSystemInstruction() {
 - 如果使用者要求 PDF 和 Word，就必須同時輸出兩個代碼區塊。
 
 \`\`\`generate_xlsx:filename.xlsx
-[JSON 陣列: [{"sheetName":"Sheet1","data":[[col1,col2],[val1,val2]]}]]
+[{"sheetName":"Sheet1","data":[["欄位1","欄位2"],["值1","值2"]]}]
 \`\`\`
 
 \`\`\`generate_docx:filename.docx
