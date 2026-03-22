@@ -399,6 +399,10 @@ async function shouldSkipVector(db, design, question) {
 async function buildPrompt(db, design, question, vectorResults, skipReason, lang) {
   // 取得 schema 定義
   const schemaIds = design.target_schema_ids ? JSON.parse(design.target_schema_ids) : [];
+  // 僅 WHERE 表：不可出現在 FROM/JOIN，只能在 WHERE EXISTS 子查詢
+  const whereOnlyIds = new Set(
+    (design.schema_where_only_ids ? JSON.parse(design.schema_where_only_ids) : []).map(Number)
+  );
   const schemaMap = {}; // id -> schema record with alias
   let schemaContext = '';
 
@@ -409,7 +413,8 @@ async function buildPrompt(db, design, question, vectorResults, skipReason, lang
     const alias = s.alias || s.table_name.split('.').pop().toLowerCase().replace(/[^a-z0-9_]/g, '_');
     schemaMap[sid] = { ...s, resolvedAlias: alias };
 
-    schemaContext += `\n## 資料表：${s.table_name}（${s.display_name || ''}）別名：${alias}\n`;
+    const isWhereOnly = whereOnlyIds.has(Number(sid));
+    schemaContext += `\n## 資料表：${s.table_name}（${s.display_name || ''}）別名：${alias}${isWhereOnly ? '【⚠️ 僅WHERE子查詢，禁止出現在FROM/JOIN】' : ''}\n`;
     if (s.source_type === 'sql' && s.source_sql) {
       schemaContext += `### 來源 SQL（使用此作為子查詢）：\n\`\`\`sql\n${s.source_sql}\n\`\`\`\n`;
     }
@@ -474,6 +479,7 @@ async function buildPrompt(db, design, question, vectorResults, skipReason, lang
       fromClause = `FROM ${mainSource} ${mainSchema.resolvedAlias}\n`;
 
       for (const j of selectedJoins) {
+        if (whereOnlyIds.has(Number(j.right_schema_id))) continue; // 僅WHERE表跳過 JOIN
         const rightSchema = schemaMap[j.right_schema_id];
         if (!rightSchema) continue;
         const rightSource = rightSchema.source_type === 'sql'
@@ -497,6 +503,46 @@ async function buildPrompt(db, design, question, vectorResults, skipReason, lang
           : '/* 請補充 JOIN 條件 */';
 
         fromClause += `${j.join_type || 'LEFT'} JOIN ${rightSource} ${rightSchema.resolvedAlias} ON ${onClause}\n`;
+      }
+    }
+  }
+
+  // 僅WHERE表的使用提示
+  let whereOnlyHint = '';
+  if (whereOnlyIds.size > 0) {
+    const whereOnlySchemas = [];
+    for (const sid of whereOnlyIds) {
+      const s = schemaMap[sid];
+      if (!s) continue;
+      // 找出此表相關的 join 條件（用於 WHERE EXISTS ON 子句參考）
+      const relatedJoins = [];
+      for (const jid of joinIds) {
+        const j = await db.prepare(`SELECT * FROM ai_schema_joins WHERE id=?`).get(jid);
+        if (!j || Number(j.right_schema_id) !== Number(sid)) continue;
+        let conditions = [];
+        try { conditions = typeof j.conditions_json === 'string' ? JSON.parse(j.conditions_json) : (j.conditions_json || []); } catch (_) {}
+        const onClause = conditions.length
+          ? conditions.map(c => {
+              if (['IS NULL', 'IS NOT NULL'].includes(c.op)) return `${c.left} ${c.op}`;
+              return `${c.left} ${c.op || '='} ${c.right}`;
+            }).join(' AND ')
+          : '/* 請補充關聯條件 */';
+        relatedJoins.push(`  -- 與 ${schemaMap[j.left_schema_id]?.resolvedAlias || '主表'} 的關聯條件: ${onClause}`);
+      }
+      whereOnlySchemas.push({ s, relatedJoins });
+    }
+
+    if (whereOnlySchemas.length > 0) {
+      whereOnlyHint = `\n## ⚠️ 僅WHERE子查詢限制表（重要規則）\n`;
+      whereOnlyHint += `以下資料表**絕對不可**出現在 FROM 或 JOIN 子句中（會造成資料列乘積爆炸）。\n`;
+      whereOnlyHint += `- 若需要用來篩選資料（如資料政策），請使用 \`WHERE EXISTS (SELECT 1 FROM 表名 別名 WHERE 關聯條件 AND 篩選條件)\`\n`;
+      whereOnlyHint += `- 若不需要篩選，則**完全省略**此表，不加任何 JOIN 或 EXISTS\n\n`;
+      for (const { s, relatedJoins } of whereOnlySchemas) {
+        whereOnlyHint += `### ${s.table_name}（別名：${s.resolvedAlias}）\n`;
+        if (relatedJoins.length) {
+          whereOnlyHint += `關聯條件參考（僅用於 EXISTS 內部）：\n\`\`\`sql\n${relatedJoins.join('\n')}\n\`\`\`\n`;
+        }
+        whereOnlyHint += `正確用法範例：\n\`\`\`sql\nAND EXISTS (SELECT 1 FROM ${s.table_name} ${s.resolvedAlias} WHERE <關聯條件> AND <篩選條件>)\n\`\`\`\n`;
       }
     }
   }
@@ -641,6 +687,7 @@ ${aliasRule}
 
 ${schemaContext}
 ${fromHint}
+${whereOnlyHint}
 ${whereHint}
 ${dataPermHint}
 ${vectorContext}
