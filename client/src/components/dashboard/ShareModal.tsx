@@ -67,12 +67,13 @@ export default function ShareModal({ title, sharesUrl, onClose }: Props) {
   // 根據 granteeType + search 拉候選清單 (user 改用 UserPicker，其他類型仍走這裡)
   useEffect(() => {
     if (granteeType === 'user') { setOptions([]); return }
-    if (!search.trim() && granteeType !== 'department' && granteeType !== 'cost_center' &&
-        granteeType !== 'division' && granteeType !== 'org_group' && granteeType !== 'role') {
+    const isOrgType = ['department','cost_center','division','org_group'].includes(granteeType)
+    if (!search.trim() && !isOrgType && granteeType !== 'role') {
       setOptions([])
       return
     }
-    setSelected(null)
+    // org 類型用 free-text：selected 由 onChange 管理，不在 effect 裡清掉
+    if (!isOrgType) setSelected(null)
 
     if (granteeType === 'role') {
       setOptLoading(true)
@@ -192,9 +193,16 @@ export default function ShareModal({ title, sharesUrl, onClose }: Props) {
               <div className="flex-1 relative">
                 <input
                   type="text"
-                  placeholder={`篩選${GRANTEE_TYPE_LABELS[granteeType]}...`}
+                  placeholder={options.length > 0 ? `篩選${GRANTEE_TYPE_LABELS[granteeType]}...` : `輸入${GRANTEE_TYPE_LABELS[granteeType]}代碼或名稱`}
                   value={search}
-                  onChange={e => setSearch(e.target.value)}
+                  onChange={e => {
+                    const v = e.target.value
+                    setSearch(v)
+                    // 對 org 類型允許直接手打：有值就暫存為 selected，讓「新增」可以按
+                    const isOrgType = ['department','cost_center','division','org_group'].includes(granteeType)
+                    if (isOrgType && v.trim()) setSelected({ id: v.trim(), name: v.trim() })
+                    else if (isOrgType) setSelected(null)
+                  }}
                   className="w-full border border-gray-200 rounded px-3 py-1.5 text-sm focus:outline-none focus:border-blue-400"
                 />
                 {/* Dropdown */}
