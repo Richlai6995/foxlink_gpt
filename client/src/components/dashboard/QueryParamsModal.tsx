@@ -1,7 +1,8 @@
 /**
  * QueryParamsModal — 執行命名查詢前，讓使用者填入參數值
  */
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useLayoutEffect } from 'react'
+import { createPortal } from 'react-dom'
 import api from '../../lib/api'
 import type { AiQueryParameter } from '../../types'
 import { useTranslation } from 'react-i18next'
@@ -33,7 +34,7 @@ const DEFAULT_SHORTCUTS: Record<string, string> = {
   })(),
 }
 
-/** 可搜尋單選下拉 */
+/** 可搜尋單選下拉 — 下拉用 portal 渲染，不受 overflow 截斷 */
 function SearchableSelect({
   opts, value, onChange, loading, onSearch,
 }: {
@@ -46,17 +47,42 @@ function SearchableSelect({
   const { t } = useTranslation()
   const [search, setSearch] = useState('')
   const [open, setOpen] = useState(false)
-  const ref = useRef<HTMLDivElement>(null)
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const dropdownRef = useRef<HTMLDivElement>(null)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [dropStyle, setDropStyle] = useState<React.CSSProperties>({})
   const selected = opts.find(o => o.val === value)
 
+  // 計算下拉位置（fixed 定位，不受 overflow 截斷）
+  useLayoutEffect(() => {
+    if (!open || !triggerRef.current) return
+    const rect = triggerRef.current.getBoundingClientRect()
+    const spaceBelow = window.innerHeight - rect.bottom - 8
+    const spaceAbove = rect.top - 8
+    const maxH = Math.min(320, spaceBelow > 180 ? spaceBelow : spaceAbove)
+    const above = spaceBelow < 180 && spaceAbove > spaceBelow
+    setDropStyle({
+      position: 'fixed',
+      left: rect.left,
+      width: rect.width,
+      maxHeight: maxH,
+      ...(above ? { bottom: window.innerHeight - rect.top } : { top: rect.bottom + 4 }),
+    })
+  }, [open])
+
+  // 點外關閉
   useEffect(() => {
+    if (!open) return
     const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+      if (
+        triggerRef.current?.contains(e.target as Node) ||
+        dropdownRef.current?.contains(e.target as Node)
+      ) return
+      setOpen(false)
     }
     document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
-  }, [])
+  }, [open])
 
   function handleSearch(v: string) {
     setSearch(v)
@@ -64,80 +90,66 @@ function SearchableSelect({
     debounceRef.current = setTimeout(() => onSearch(v), 350)
   }
 
-  const filtered = opts  // 後端已過濾，直接顯示
-
   const displayText = loading ? t('aiDash.qpModal.loading')
     : selected ? (selected.label !== selected.val ? `${selected.label} (${selected.val})` : selected.val)
-    : value ? value   // 有值但 opts 尚未載入時顯示原始值
+    : value ? value
     : t('aiDash.qpModal.selectPlaceholder')
 
+  const dropdown = open && createPortal(
+    <div ref={dropdownRef}
+      className="bg-white border border-gray-200 rounded-lg shadow-xl flex flex-col z-[9999] overflow-hidden"
+      style={dropStyle}
+    >
+      <div className="px-2 pt-2 pb-1 border-b border-gray-100 flex-shrink-0">
+        <div className="flex gap-1">
+          <input autoFocus type="text" value={search}
+            onChange={e => handleSearch(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter' && search.trim()) { onChange(search.trim()); setOpen(false) } }}
+            placeholder={t('aiDash.qpModal.searchPlaceholder')}
+            className="flex-1 border border-gray-200 rounded px-2 py-1.5 text-sm focus:outline-none focus:border-blue-400"
+          />
+          {search.trim() && (
+            <button onClick={() => { onChange(search.trim()); setOpen(false) }}
+              className="px-2 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700 whitespace-nowrap">
+              {t('aiDash.qpModal.useValue')}
+            </button>
+          )}
+        </div>
+      </div>
+      <button onClick={() => { onChange(''); setOpen(false) }}
+        className="text-left px-3 py-2 text-sm text-gray-400 hover:bg-gray-50 border-b border-gray-50 flex-shrink-0">
+        {t('aiDash.qpModal.noSelect')}
+      </button>
+      <div className="overflow-y-auto flex-1">
+        {opts.length === 0 && <div className="text-xs text-gray-400 text-center py-3">{t('aiDash.qpModal.noMatch')}</div>}
+        {opts.map(o => (
+          <button key={o.val} onClick={() => { onChange(o.val); setOpen(false) }}
+            className={`w-full text-left px-3 py-2 text-sm hover:bg-blue-50 flex items-center justify-between
+              ${o.val === value ? 'bg-blue-50 text-blue-700 font-medium' : 'text-gray-700'}`}>
+            <span>{o.label !== o.val ? o.label : o.val}</span>
+            {o.label !== o.val && <span className="text-xs text-gray-400 ml-2">{o.val}</span>}
+          </button>
+        ))}
+      </div>
+      <div className="px-2 py-1.5 text-xs text-gray-400 border-t border-gray-100 text-right flex-shrink-0">
+        {t('aiDash.qpModal.totalCount', { filtered: opts.length, total: opts.length })}
+      </div>
+    </div>,
+    document.body
+  )
+
   return (
-    <div ref={ref} className="relative">
-      <button
-        type="button"
+    <div className="relative">
+      <button ref={triggerRef} type="button"
         onClick={() => { if (!loading) { setOpen(v => !v); setSearch('') } }}
         className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-left focus:outline-none focus:border-blue-400 bg-white flex items-center justify-between"
       >
         <span className={selected ? 'text-gray-800' : 'text-gray-400'}>{displayText}</span>
-        <svg className="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <svg className="w-4 h-4 text-gray-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
         </svg>
       </button>
-
-      {open && (
-        <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-xl flex flex-col" style={{ maxHeight: 280 }}>
-          {/* 搜尋欄 */}
-          <div className="px-2 pt-2 pb-1 border-b border-gray-100">
-            <div className="flex gap-1">
-              <input
-                autoFocus
-                type="text"
-                value={search}
-                onChange={e => handleSearch(e.target.value)}
-                onKeyDown={e => {
-                  if (e.key === 'Enter' && search.trim()) {
-                    onChange(search.trim())
-                    setOpen(false)
-                  }
-                }}
-                placeholder={t('aiDash.qpModal.searchPlaceholder')}
-                className="flex-1 border border-gray-200 rounded px-2 py-1.5 text-sm focus:outline-none focus:border-blue-400"
-              />
-              {search.trim() && (
-                <button
-                  onClick={() => { onChange(search.trim()); setOpen(false) }}
-                  className="px-2 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700 whitespace-nowrap"
-                >{t('aiDash.qpModal.useValue')}</button>
-              )}
-            </div>
-          </div>
-          {/* 清除選項 */}
-          <button
-            onClick={() => { onChange(''); setOpen(false) }}
-            className="text-left px-3 py-2 text-sm text-gray-400 hover:bg-gray-50 border-b border-gray-50"
-          >{t('aiDash.qpModal.noSelect')}</button>
-          {/* 選項列表 */}
-          <div className="overflow-y-auto flex-1">
-            {filtered.length === 0 && (
-              <div className="text-xs text-gray-400 text-center py-3">{t('aiDash.qpModal.noMatch')}</div>
-            )}
-            {filtered.map(o => (
-              <button
-                key={o.val}
-                onClick={() => { onChange(o.val); setOpen(false) }}
-                className={`w-full text-left px-3 py-2 text-sm hover:bg-blue-50 flex items-center justify-between
-                  ${o.val === value ? 'bg-blue-50 text-blue-700 font-medium' : 'text-gray-700'}`}
-              >
-                <span>{o.label !== o.val ? o.label : o.val}</span>
-                {o.label !== o.val && <span className="text-xs text-gray-400 ml-2">{o.val}</span>}
-              </button>
-            ))}
-          </div>
-          <div className="px-2 py-1.5 text-xs text-gray-400 border-t border-gray-100 text-right">
-            {t('aiDash.qpModal.totalCount', { filtered: filtered.length, total: opts.length })}
-          </div>
-        </div>
-      )}
+      {dropdown}
     </div>
   )
 }
