@@ -1407,9 +1407,9 @@ export default function DashboardBoardPage() {
               <div className="relative z-10">
                 <ResponsiveGridLayout
                   className="layout"
-                  layouts={{ lg: gridLayout }}
-                  breakpoints={{ lg: 1200, md: 996, sm: 768 }}
-                  cols={{ lg: 12, md: 10, sm: 6 }}
+                  layouts={{ lg: gridLayout, md: gridLayout, sm: gridLayout }}
+                  breakpoints={{ lg: 1200, md: 768, sm: 480 }}
+                  cols={{ lg: 12, md: 12, sm: 12 }}
                   rowHeight={80}
                   isDraggable={isEditing}
                   isResizable={isEditing}

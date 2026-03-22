@@ -2,7 +2,7 @@
  * ShelfChartBuilder — Tableau 風格拖拉式圖表建構器（多圖表 tab）
  * 使用 HTML5 原生 drag & drop，無額外依賴
  */
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useRef } from 'react'
 import type { AiChartConfig, AiChartDef, ChartColorPalette, OverlayLine, YAxisDef } from '../../types'
 import AiChart from './AiChart'
 import { useTranslation } from 'react-i18next'
@@ -43,6 +43,13 @@ interface ShelfState {
   series_palette: string[]          // B：順序色票（multi-series 用）
   series_colors: Record<string, string>  // C：值→顏色精確對應
   overlay_lines: OverlayLine[]
+  // 排序 + 篩選
+  sort_by: 'none' | 'x' | 'y'
+  sort_order: 'asc' | 'desc'
+  min_value: number | ''
+  // 軸標題
+  x_axis_name: string
+  y_axis_name: string
   // 文字/軸線樣式
   chart_bg_color: string
   axis_label_color: string
@@ -144,6 +151,11 @@ function defToShelf(def: AiChartDef, columns: string[], rows: Record<string, unk
       return sc as Record<string, string>
     })(),
     overlay_lines: def.overlay_lines || [],
+    sort_by: def.sort_by || 'none',
+    sort_order: def.sort_order || 'desc',
+    min_value: def.min_value ?? '',
+    x_axis_name: def.x_axis_name || '',
+    y_axis_name: def.y_axis_name || '',
     chart_bg_color: def.chart_bg_color || '',
     axis_label_color: def.axis_label_color || '',
     axis_label_size: def.axis_label_size ?? '',
@@ -190,6 +202,11 @@ function newBlankShelf(columns: string[], rows: Record<string, unknown>[]): Shel
     series_palette: [],
     series_colors: {},
     overlay_lines: [],
+    sort_by: 'none',
+    sort_order: 'desc',
+    min_value: '',
+    x_axis_name: '',
+    y_axis_name: '',
     chart_bg_color: '',
     axis_label_color: '',
     axis_label_size: '',
@@ -403,6 +420,26 @@ export default function ShelfChartBuilder({ rows, columns, columnLabels, initial
   const [activeIdx, setActiveIdx] = useState(0)
   const [translating, setTranslating] = useState(false)
   const [draggingField, setDraggingField] = useState<string | null>(null)
+  const [panelWidth, setPanelWidth] = useState(320)
+  const resizingRef = useRef(false)
+
+  function onPanelResizeStart(e: React.MouseEvent) {
+    e.preventDefault()
+    resizingRef.current = true
+    const startX = e.clientX
+    const startW = panelWidth
+    function onMove(e2: MouseEvent) {
+      if (!resizingRef.current) return
+      setPanelWidth(Math.max(240, Math.min(700, startW + e2.clientX - startX)))
+    }
+    function onUp() {
+      resizingRef.current = false
+      document.removeEventListener('mousemove', onMove)
+      document.removeEventListener('mouseup', onUp)
+    }
+    document.addEventListener('mousemove', onMove)
+    document.addEventListener('mouseup', onUp)
+  }
 
   const fieldTypes = useMemo(
     () => Object.fromEntries(columns.map(c => [c, classifyField(c, rows)])),
@@ -481,6 +518,11 @@ export default function ShelfChartBuilder({ rows, columns, columnLabels, initial
     show_legend: active.show_legend,
     color_palette: active.color_palette,
     overlay_lines: active.overlay_lines.length ? active.overlay_lines : undefined,
+    sort_by: active.sort_by !== 'none' ? active.sort_by : undefined,
+    sort_order: active.sort_by !== 'none' ? active.sort_order : undefined,
+    min_value: active.min_value !== '' ? Number(active.min_value) : undefined,
+    x_axis_name: active.x_axis_name || undefined,
+    y_axis_name: active.y_axis_name || undefined,
     chart_bg_color: active.chart_bg_color || undefined,
     axis_label_color: active.axis_label_color || undefined,
     axis_label_size: active.axis_label_size !== '' ? Number(active.axis_label_size) : undefined,
@@ -542,6 +584,11 @@ export default function ShelfChartBuilder({ rows, columns, columnLabels, initial
       show_legend: s.show_legend,
       color_palette: s.color_palette,
       overlay_lines: s.overlay_lines.length ? s.overlay_lines : undefined,
+      sort_by: s.sort_by !== 'none' ? s.sort_by : undefined,
+      sort_order: s.sort_by !== 'none' ? s.sort_order : undefined,
+      min_value: s.min_value !== '' ? Number(s.min_value) : undefined,
+      x_axis_name: s.x_axis_name || undefined,
+      y_axis_name: s.y_axis_name || undefined,
       chart_bg_color: s.chart_bg_color || undefined,
       axis_label_color: s.axis_label_color || undefined,
       axis_label_size: s.axis_label_size !== '' ? Number(s.axis_label_size) : undefined,
@@ -699,8 +746,16 @@ export default function ShelfChartBuilder({ rows, columns, columnLabels, initial
           </div>
         </div>
 
-        {/* ── Center: Shelves + Options ── */}
-        <div className="w-80 bg-white border-r border-gray-200 flex flex-col flex-shrink-0 overflow-y-auto">
+        {/* ── Center: Shelves + Options (resizable) ── */}
+        <div className="bg-white border-r border-gray-200 flex flex-col flex-shrink-0 overflow-y-auto relative"
+          style={{ width: panelWidth }}>
+          {/* Resize handle */}
+          <div
+            onMouseDown={onPanelResizeStart}
+            className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize z-10 hover:bg-blue-300 transition-colors"
+            style={{ background: resizingRef.current ? '#93c5fd' : 'transparent' }}
+            title="拖曳調整寬度"
+          />
 
           {/* Chart type selector */}
           <div className="px-4 py-3 border-b border-gray-100">
@@ -830,6 +885,54 @@ export default function ShelfChartBuilder({ rows, columns, columnLabels, initial
               <input type="number" min={1} max={500} value={active.limit}
                 onChange={e => updateActive({ limit: parseInt(e.target.value) || 20 })}
                 className="w-20 border border-gray-200 rounded px-2 py-0.5 text-xs focus:outline-none focus:border-blue-400" />
+            </div>
+
+            {/* 排序設定 */}
+            {active.chartType !== 'pie' && active.chartType !== 'gauge' && active.chartType !== 'radar' && (
+              <div className="grid grid-cols-2 gap-1.5 mt-1">
+                <div>
+                  <label className="text-[10px] text-gray-400 block mb-0.5">排序依據</label>
+                  <select value={active.sort_by} onChange={e => updateActive({ sort_by: e.target.value as ShelfState['sort_by'] })}
+                    className="w-full border border-gray-200 rounded px-1.5 py-0.5 text-xs bg-white focus:outline-none focus:border-blue-400">
+                    <option value="none">不排序</option>
+                    <option value="x">X 軸值</option>
+                    <option value="y">Y 軸值</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-[10px] text-gray-400 block mb-0.5">排序方向</label>
+                  <select value={active.sort_order} onChange={e => updateActive({ sort_order: e.target.value as ShelfState['sort_order'] })}
+                    disabled={active.sort_by === 'none'}
+                    className="w-full border border-gray-200 rounded px-1.5 py-0.5 text-xs bg-white focus:outline-none focus:border-blue-400 disabled:opacity-40">
+                    <option value="asc">升冪 (A→Z / 小→大)</option>
+                    <option value="desc">降冪 (Z→A / 大→小)</option>
+                  </select>
+                </div>
+              </div>
+            )}
+
+            {/* 數值門檻 */}
+            <div className="mt-1">
+              <label className="text-[10px] text-gray-400 block mb-0.5">僅顯示數值 &gt;（設 0 排除零值）</label>
+              <input type="number" min={0} value={active.min_value ?? ''} placeholder="不限制"
+                onChange={e => updateActive({ min_value: e.target.value === '' ? '' : Number(e.target.value) })}
+                className="w-full border border-gray-200 rounded px-2 py-0.5 text-xs focus:outline-none focus:border-blue-400" />
+            </div>
+
+            {/* 軸標題 */}
+            <div className="grid grid-cols-2 gap-1.5 mt-1">
+              <div>
+                <label className="text-[10px] text-gray-400 block mb-0.5">X 軸標題</label>
+                <input type="text" value={active.x_axis_name} placeholder="(選填)"
+                  onChange={e => updateActive({ x_axis_name: e.target.value })}
+                  className="w-full border border-gray-200 rounded px-1.5 py-0.5 text-xs focus:outline-none focus:border-blue-400" />
+              </div>
+              <div>
+                <label className="text-[10px] text-gray-400 block mb-0.5">Y 軸標題</label>
+                <input type="text" value={active.y_axis_name} placeholder="(選填)"
+                  onChange={e => updateActive({ y_axis_name: e.target.value })}
+                  className="w-full border border-gray-200 rounded px-1.5 py-0.5 text-xs focus:outline-none focus:border-blue-400" />
+              </div>
             </div>
           </div>
 
