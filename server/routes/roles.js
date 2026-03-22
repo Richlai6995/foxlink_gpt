@@ -32,16 +32,28 @@ router.get('/', async (req, res) => {
 
 router.use(verifyAdmin);
 
-// GET /api/roles/org-lov  — LOV from APPS.FL_ORG_EMP_DEPT_MV (admin only)
+// GET /api/roles/org-lov  — LOV from ERP FL_ORG_EMP_DEPT_MV (admin only)
 router.get('/org-lov', async (req, res) => {
   try {
-    const [depts, costCenters, divisions, orgGroups] = await Promise.all([
-      db.prepare(`SELECT DISTINCT DEPT_CODE AS code, DEPT_DESC AS name FROM APPS.FL_ORG_EMP_DEPT_MV ORDER BY DEPT_CODE`).all(),
-      db.prepare(`SELECT DISTINCT PROFIT_CENTER AS code, PROFIT_CENTER_NAME AS name FROM APPS.FL_ORG_EMP_DEPT_MV ORDER BY PROFIT_CENTER`).all(),
-      db.prepare(`SELECT DISTINCT ORG_SECTION AS code, ORG_SECTION_NAME AS name FROM APPS.FL_ORG_EMP_DEPT_MV ORDER BY ORG_SECTION`).all(),
-      db.prepare(`SELECT DISTINCT ORG_GROUP_NAME AS code, ORG_GROUP_NAME AS name FROM APPS.FL_ORG_EMP_DEPT_MV ORDER BY ORG_GROUP_NAME`).all(),
+    const { isConfigured, execute } = require('../services/erpDb');
+    if (!isConfigured()) return res.json({ department: [], cost_center: [], division: [], org_group: [] });
+
+    const toList = (rows, codeCol, nameCol) =>
+      (rows || []).map(r => ({ code: r[codeCol] || r[codeCol.toLowerCase()] || '', name: r[nameCol] || r[nameCol.toLowerCase()] || '' }));
+
+    const [d, pc, os, og] = await Promise.all([
+      execute(`SELECT DISTINCT DEPT_CODE, DEPT_DESC FROM FL_ORG_EMP_DEPT_MV ORDER BY DEPT_CODE`),
+      execute(`SELECT DISTINCT PROFIT_CENTER, PROFIT_CENTER_NAME FROM FL_ORG_EMP_DEPT_MV ORDER BY PROFIT_CENTER`),
+      execute(`SELECT DISTINCT ORG_SECTION, ORG_SECTION_NAME FROM FL_ORG_EMP_DEPT_MV ORDER BY ORG_SECTION`),
+      execute(`SELECT DISTINCT ORG_GROUP_NAME FROM FL_ORG_EMP_DEPT_MV ORDER BY ORG_GROUP_NAME`),
     ]);
-    res.json({ department: depts, cost_center: costCenters, division: divisions, org_group: orgGroups });
+
+    res.json({
+      department:  toList(d?.rows,  'DEPT_CODE',       'DEPT_DESC'),
+      cost_center: toList(pc?.rows, 'PROFIT_CENTER',   'PROFIT_CENTER_NAME'),
+      division:    toList(os?.rows, 'ORG_SECTION',     'ORG_SECTION_NAME'),
+      org_group:   toList(og?.rows, 'ORG_GROUP_NAME',  'ORG_GROUP_NAME'),
+    });
   } catch (e) {
     console.error('[roles/org-lov]', e.message);
     res.status(500).json({ error: e.message });
