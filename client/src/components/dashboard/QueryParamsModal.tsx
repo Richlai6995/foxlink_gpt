@@ -329,12 +329,13 @@ export default function QueryParamsModal({ queryName, params, initialValues, onC
   const [optionsMap, setOptionsMap] = useState<Record<string, { val: string; label: string }[]>>({})
   const [loadingMap, setLoadingMap] = useState<Record<string, boolean>>({})
   const [errorMap, setErrorMap] = useState<Record<string, string>>({})
+  // undefined = 未載入過, [] = 載入但 0 筆, [...] = 有資料
+  const [fetchedSet, setFetchedSet] = useState<Set<string>>(new Set())
 
   useEffect(() => {
-    // 初始只載入有 fetch_values_sql 的，或先帶前50筆（不搜尋）
+    // 所有 select/multiselect 都嘗試載入，fetchOptions 內部處理缺設定的錯誤顯示
     for (const p of params) {
       if (p.input_type !== 'select' && p.input_type !== 'multiselect') continue
-      if (!p.schema_id && !p.fetch_values_sql) continue
       fetchOptions(p, '')
     }
   }, [])
@@ -344,11 +345,11 @@ export default function QueryParamsModal({ queryName, params, initialValues, onC
     setErrorMap(prev => ({ ...prev, [p.id]: '' }))
     try {
       if (!p.schema_id && !p.fetch_values_sql) {
-        setErrorMap(prev => ({ ...prev, [p.id]: '參數未設定資料來源（schema_id / fetch_values_sql）' }))
+        setErrorMap(prev => ({ ...prev, [p.id]: '⚙ 此參數尚未設定來源 Schema 或自訂 SQL，請到命名查詢設定查詢參數' }))
         return
       }
       if (!p.column_name) {
-        setErrorMap(prev => ({ ...prev, [p.id]: '參數未設定 column_name' }))
+        setErrorMap(prev => ({ ...prev, [p.id]: '⚙ 此參數尚未設定來源欄位（column_name）' }))
         return
       }
       const reqParams: Record<string, string> = { column_name: p.column_name }
@@ -357,11 +358,13 @@ export default function QueryParamsModal({ queryName, params, initialValues, onC
       if (search) reqParams.search = search
       const r = await api.get('/dashboard/saved-queries/param-values', { params: reqParams })
       setOptionsMap(prev => ({ ...prev, [p.id]: r.data }))
+      setFetchedSet(prev => new Set([...prev, p.id]))
     } catch (e: unknown) {
       console.error('[LOV fetch]', e)
-      const msg = (e as { response?: { data?: { error?: string } }; message?: string })
-        ?.response?.data?.error || (e as { message?: string })?.message || 'LOV 載入失敗'
-      setErrorMap(prev => ({ ...prev, [p.id]: msg }))
+      const errData = (e as { response?: { data?: { error?: string; sql?: string } } })?.response?.data
+      const msg = errData?.error || (e as { message?: string })?.message || 'LOV 載入失敗'
+      const sqlHint = errData?.sql ? `\nSQL: ${errData.sql}` : ''
+      setErrorMap(prev => ({ ...prev, [p.id]: msg + sqlHint }))
     } finally {
       setLoadingMap(prev => ({ ...prev, [p.id]: false }))
     }
@@ -414,6 +417,8 @@ export default function QueryParamsModal({ queryName, params, initialValues, onC
             const opts = optionsMap[p.id] || []
             const isLoading = loadingMap[p.id]
             const lovError = errorMap[p.id]
+            const wasFetched = fetchedSet.has(p.id)
+            const isLovEmpty = wasFetched && !isLoading && !lovError && opts.length === 0
 
             return (
               <div key={p.id}>
@@ -432,9 +437,15 @@ export default function QueryParamsModal({ queryName, params, initialValues, onC
                       onSearch={s => fetchOptions(p, s)}
                     />
                     {lovError && (
-                      <p className="text-xs text-red-500 mt-1 flex items-center gap-1">
+                      <p className="text-xs text-red-500 mt-1 whitespace-pre-wrap">
                         ⚠ {lovError}
-                        <button onClick={() => fetchOptions(p, '')} className="underline ml-1">重試</button>
+                        <button onClick={() => fetchOptions(p, '')} className="underline ml-2">重試</button>
+                      </p>
+                    )}
+                    {isLovEmpty && (
+                      <p className="text-xs text-amber-600 mt-1">
+                        查詢成功但 ERP 回傳 0 筆，請確認 Schema 來源 SQL 是否能存取此欄位資料
+                        <button onClick={() => fetchOptions(p, '')} className="underline ml-2">重試</button>
                       </p>
                     )}
                   </>
@@ -450,9 +461,15 @@ export default function QueryParamsModal({ queryName, params, initialValues, onC
                       onSearch={s => fetchOptions(p, s)}
                     />
                     {lovError && (
-                      <p className="text-xs text-red-500 mt-1 flex items-center gap-1">
+                      <p className="text-xs text-red-500 mt-1 whitespace-pre-wrap">
                         ⚠ {lovError}
-                        <button onClick={() => fetchOptions(p, '')} className="underline ml-1">重試</button>
+                        <button onClick={() => fetchOptions(p, '')} className="underline ml-2">重試</button>
+                      </p>
+                    )}
+                    {isLovEmpty && (
+                      <p className="text-xs text-amber-600 mt-1">
+                        查詢成功但 ERP 回傳 0 筆，請確認 Schema 來源 SQL 是否能存取此欄位資料
+                        <button onClick={() => fetchOptions(p, '')} className="underline ml-2">重試</button>
                       </p>
                     )}
                   </>

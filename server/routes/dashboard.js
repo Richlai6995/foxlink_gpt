@@ -2341,6 +2341,7 @@ router.get('/saved-queries/param-values', requireDashboard, async (req, res) => 
     }
     if (!sql) return res.status(400).json({ error: '無法組建查詢' });
 
+    console.log('[param-values] SQL:', sql);
     const erpPool = await getErpPool();
     const conn = await erpPool.getConnection();
     try {
@@ -2351,13 +2352,14 @@ router.get('/saved-queries/param-values', requireDashboard, async (req, res) => 
         const label = r.LABEL ?? val;
         return { val, label };
       });
+      console.log('[param-values] rows:', rows.length);
       res.json(rows);
     } finally {
       await conn.close();
     }
   } catch (e) {
-    console.error('[param-values]', e);
-    res.status(500).json({ error: e.message });
+    console.error('[param-values] ERROR:', e.message);
+    res.status(500).json({ error: e.message || String(e), sql: sql || null });
   }
 });
 
