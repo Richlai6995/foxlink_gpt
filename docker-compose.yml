@@ -22,8 +22,7 @@ services:
       # Code skill runners (must persist)
       - ./skill_runners:/app/skill_runners
       # ── Oracle Instant Client (Thick Mode) ────────────────────────────────
-      # TODO: 確認版本後統一路徑
-      - /mnt/e/oracle_client_linux/instantclient_19_29:/opt/oracle/instantclient
+      - /opt/oracle_client/instantclient_19_29:/opt/oracle/instantclient
     environment:
       - PORT=3007
       - TZ=Asia/Taipei
