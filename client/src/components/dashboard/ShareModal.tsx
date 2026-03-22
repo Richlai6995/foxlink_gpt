@@ -212,7 +212,7 @@ export default function ShareModal({ title, sharesUrl, onClose }: Props) {
                     {options.map(opt => (
                       <button
                         key={opt.id}
-                        onClick={() => { setSelected(opt); setSearch(opt.name) }}
+                        onClick={() => { setSelected(opt); setSearch(opt.name); setOptions([]) }}
                         className={`w-full text-left px-3 py-1.5 text-sm hover:bg-blue-50 flex items-center justify-between
                           ${selected?.id === opt.id ? 'bg-blue-50 text-blue-700' : 'text-gray-700'}`}
                       >
