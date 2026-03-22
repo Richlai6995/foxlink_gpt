@@ -64,7 +64,8 @@ export default function ShareModal({ title, sharesUrl, onClose }: Props) {
     }
   }
 
-  // 根據 granteeType + search 拉候選清單 (user 改用 UserPicker，其他類型仍走這裡)
+  // 根據 granteeType + search 拉候選清單（effect 僅在 search/granteeType/orgs 變化時執行）
+  // 注意：從下拉選取後不改 search，所以 effect 不會重跑，options 不會復原
   useEffect(() => {
     if (granteeType === 'user') { setOptions([]); return }
     const isOrgType = ['department','cost_center','division','org_group'].includes(granteeType)
@@ -72,8 +73,7 @@ export default function ShareModal({ title, sharesUrl, onClose }: Props) {
       setOptions([])
       return
     }
-    // org 類型用 free-text：selected 由 onChange 管理，不在 effect 裡清掉
-    if (!isOrgType) setSelected(null)
+    setSelected(null) // 使用者在打字中，清除上次選取
 
     if (granteeType === 'role') {
       setOptLoading(true)
@@ -193,28 +193,24 @@ export default function ShareModal({ title, sharesUrl, onClose }: Props) {
               <div className="flex-1 relative">
                 <input
                   type="text"
-                  placeholder={options.length > 0 ? `篩選${GRANTEE_TYPE_LABELS[granteeType]}...` : `輸入${GRANTEE_TYPE_LABELS[granteeType]}代碼或名稱`}
-                  value={search}
+                  placeholder={`篩選或輸入${GRANTEE_TYPE_LABELS[granteeType]}...`}
+                  value={selected ? selected.name : search}
                   onChange={e => {
                     const v = e.target.value
+                    setSelected(null)  // 使用者重新打字，清除選取
                     setSearch(v)
-                    // 對 org 類型允許直接手打：有值就暫存為 selected，讓「新增」可以按
-                    const isOrgType = ['department','cost_center','division','org_group'].includes(granteeType)
-                    if (isOrgType && v.trim()) setSelected({ id: v.trim(), name: v.trim() })
-                    else if (isOrgType) setSelected(null)
                   }}
                   className="w-full border border-gray-200 rounded px-3 py-1.5 text-sm focus:outline-none focus:border-blue-400"
                 />
-                {/* Dropdown */}
-                {options.length > 0 && (
+                {/* Dropdown — 只在無選取時顯示 */}
+                {!selected && options.length > 0 && (
                   <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded shadow-lg z-10 max-h-40 overflow-y-auto">
                     {optLoading && <div className="px-3 py-2 text-xs text-gray-400">搜尋中...</div>}
                     {options.map(opt => (
                       <button
                         key={opt.id}
-                        onClick={() => { setSelected(opt); setSearch(opt.name); setOptions([]) }}
-                        className={`w-full text-left px-3 py-1.5 text-sm hover:bg-blue-50 flex items-center justify-between
-                          ${selected?.id === opt.id ? 'bg-blue-50 text-blue-700' : 'text-gray-700'}`}
+                        onClick={() => { setSelected(opt); setOptions([]) }}
+                        className="w-full text-left px-3 py-1.5 text-sm hover:bg-blue-50 flex items-center justify-between text-gray-700"
                       >
                         <span>{opt.name}</span>
                         {opt.sub && <span className="text-xs text-gray-400">{opt.sub}</span>}
