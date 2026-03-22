@@ -55,29 +55,104 @@ router.get('/active', async (req, res) => {
   }
 });
 
-// GET /api/dify-kb/my  — KBs accessible to current user via their MCP/DIFY role
+// GET /api/dify-kb/my  — 依 dify_access 回傳當前使用者可用的 DIFY KB
 router.get('/my', async (req, res) => {
   const db = getDb();
   try {
-    const userId = req.user.id;
-    // Get user's mcp_role_id (individual override) or fall back to default role
-    const user = await db.prepare(`SELECT role_id FROM users WHERE id=?`).get(userId);
-    let roleId = user?.role_id;
-    if (!roleId) {
-      const defaultRole = await db.prepare(`SELECT id FROM roles WHERE is_default=1 LIMIT 1`).get();
-      roleId = defaultRole?.id;
+    if (req.user.role === 'admin') {
+      const kbs = await db.prepare(
+        `SELECT id, name, description, api_server, api_key,
+                name_zh, name_en, name_vi, desc_zh, desc_en, desc_vi
+         FROM dify_knowledge_bases WHERE is_active=1 ORDER BY sort_order ASC`
+      ).all();
+      return res.json(kbs);
     }
-    if (!roleId) return res.json([]);
-
-    const kbs = await db.prepare(`
-      SELECT d.id, d.name, d.description, d.api_server, d.api_key,
-             d.name_zh, d.name_en, d.name_vi, d.desc_zh, d.desc_en, d.desc_vi
-      FROM dify_knowledge_bases d
-      JOIN role_dify_kbs r ON r.dify_kb_id = d.id
-      WHERE r.role_id = ? AND d.is_active = 1
-      ORDER BY d.sort_order ASC
-    `).all(roleId);
+    const u = await db.prepare(
+      `SELECT role_id, dept_code, profit_center, org_section, org_group_name FROM users WHERE id=?`
+    ).get(req.user.id);
+    if (!u) return res.json([]);
+    const kbs = await db.prepare(
+      `SELECT DISTINCT d.id, d.name, d.description, d.api_server, d.api_key,
+              d.name_zh, d.name_en, d.name_vi, d.desc_zh, d.desc_en, d.desc_vi
+       FROM dify_knowledge_bases d
+       JOIN dify_access a ON a.dify_kb_id = d.id
+       WHERE d.is_active=1 AND (
+         (a.grantee_type='user'        AND a.grantee_id=TO_CHAR(?))
+         OR (a.grantee_type='role'     AND a.grantee_id=TO_CHAR(?) AND ? IS NOT NULL)
+         OR (a.grantee_type='department'  AND a.grantee_id=? AND ? IS NOT NULL)
+         OR (a.grantee_type='cost_center' AND a.grantee_id=? AND ? IS NOT NULL)
+         OR (a.grantee_type='division'    AND a.grantee_id=? AND ? IS NOT NULL)
+         OR (a.grantee_type='org_group'   AND a.grantee_id=? AND ? IS NOT NULL)
+       )
+       ORDER BY d.sort_order ASC`
+    ).all(
+      req.user.id,
+      u.role_id, u.role_id,
+      u.dept_code, u.dept_code,
+      u.profit_center, u.profit_center,
+      u.org_section, u.org_section,
+      u.org_group_name, u.org_group_name
+    );
     res.json(kbs);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/dify-kb/:id/access  — 列出共享清單（admin only）
+router.get('/:id/access', async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const db = getDb();
+  try {
+    const grants = await db.prepare(
+      `SELECT a.*, u.name AS granted_by_name
+       FROM dify_access a LEFT JOIN users u ON u.id = a.granted_by
+       WHERE a.dify_kb_id=? ORDER BY a.granted_at DESC`
+    ).all(req.params.id);
+    res.json(grants);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/dify-kb/:id/access  — 新增共享，回傳完整清單
+router.post('/:id/access', async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const db = getDb();
+  try {
+    const { grantee_type, grantee_id, share_type = 'use' } = req.body;
+    const validTypes = ['user', 'role', 'department', 'cost_center', 'division', 'org_group'];
+    if (!validTypes.includes(grantee_type) || !grantee_id) {
+      return res.status(400).json({ error: '請選擇有效的共享對象' });
+    }
+    const existing = await db.prepare(
+      `SELECT id FROM dify_access WHERE dify_kb_id=? AND grantee_type=? AND grantee_id=?`
+    ).get(req.params.id, grantee_type, String(grantee_id));
+    if (existing) {
+      await db.prepare(`UPDATE dify_access SET share_type=? WHERE id=?`).run(share_type, existing.id);
+    } else {
+      await db.prepare(
+        `INSERT INTO dify_access (dify_kb_id, grantee_type, grantee_id, share_type, granted_by) VALUES (?,?,?,?,?)`
+      ).run(req.params.id, grantee_type, String(grantee_id), share_type, req.user.id);
+    }
+    const grants = await db.prepare(
+      `SELECT a.*, u.name AS granted_by_name
+       FROM dify_access a LEFT JOIN users u ON u.id = a.granted_by
+       WHERE a.dify_kb_id=? ORDER BY a.granted_at DESC`
+    ).all(req.params.id);
+    res.json(grants);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// DELETE /api/dify-kb/:id/access/:grantId
+router.delete('/:id/access/:grantId', async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const db = getDb();
+  try {
+    await db.prepare(`DELETE FROM dify_access WHERE id=? AND dify_kb_id=?`).run(req.params.grantId, req.params.id);
+    res.json({ success: true });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

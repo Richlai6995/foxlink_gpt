@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react'
 import {
   Plus, Trash2, Edit2, ChevronDown, ChevronRight,
-  ToggleLeft, ToggleRight, AlertCircle, CheckCircle, Zap, Clock
+  ToggleLeft, ToggleRight, AlertCircle, CheckCircle, Zap, Clock, Share2
 } from 'lucide-react'
 import api from '../../lib/api'
 import TranslationFields, { type TranslationData } from '../common/TranslationFields'
+import ShareModal from '../dashboard/ShareModal'
 
 interface DifyKb {
   id: number
@@ -53,6 +54,7 @@ export default function DifyKnowledgeBasesPanel() {
   const [translating, setTranslating] = useState(false)
   const [testMsg, setTestMsg] = useState<Record<number, { ok: boolean; text: string }>>({})
   const [selectedLogKb, setSelectedLogKb] = useState<DifyKb | null>(null)
+  const [shareKb, setShareKb] = useState<DifyKb | null>(null)
   const [logs, setLogs] = useState<DifyCallLog[]>([])
   const [logsLoading, setLogsLoading] = useState(false)
   const [testQuery, setTestQuery] = useState('')
@@ -268,6 +270,9 @@ export default function DifyKnowledgeBasesPanel() {
                     <button onClick={() => openEdit(kb)} title="編輯" className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition">
                       <Edit2 size={14} />
                     </button>
+                    <button onClick={() => setShareKb(kb)} title="共享設定" className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition">
+                      <Share2 size={14} />
+                    </button>
                     <button onClick={() => toggle(kb)} title={kb.is_active ? '停用' : '啟用'} className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition">
                       {kb.is_active ? <ToggleRight size={16} className="text-green-500" /> : <ToggleLeft size={16} />}
                     </button>
@@ -467,6 +472,14 @@ export default function DifyKnowledgeBasesPanel() {
             </div>
           </div>
         </div>
+      )}
+
+      {shareKb && (
+        <ShareModal
+          title={`DIFY 知識庫 — ${shareKb.name}`}
+          sharesUrl={`/dify-kb/${shareKb.id}/access`}
+          onClose={() => setShareKb(null)}
+        />
       )}
     </div>
   )

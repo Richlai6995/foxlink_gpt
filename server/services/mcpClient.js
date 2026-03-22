@@ -397,16 +397,36 @@ async function callTool(db, server, sessionId, userId, toolName, args) {
   return resultContent;
 }
 
-async function getActiveToolDeclarations(db, roleId = null) {
+/**
+ * @param {object|null} userCtx  null = all servers；否則傳 { userId, roleId, deptCode, profitCenter, orgSection, orgGroupName }
+ */
+async function getActiveToolDeclarations(db, userCtx = null) {
   let servers;
   try {
-    servers = roleId
-      ? await db.prepare(
-          `SELECT m.* FROM mcp_servers m
-           JOIN role_mcp_servers rm ON rm.mcp_server_id = m.id
-           WHERE rm.role_id=? AND m.is_active=1`
-        ).all(roleId)
-      : await db.prepare(`SELECT * FROM mcp_servers WHERE is_active=1`).all();
+    if (!userCtx) {
+      servers = await db.prepare(`SELECT * FROM mcp_servers WHERE is_active=1`).all();
+    } else {
+      const { userId, roleId, deptCode, profitCenter, orgSection, orgGroupName } = userCtx;
+      servers = await db.prepare(
+        `SELECT DISTINCT m.* FROM mcp_servers m
+         JOIN mcp_access a ON a.mcp_server_id = m.id
+         WHERE m.is_active=1 AND (
+           (a.grantee_type='user'        AND a.grantee_id=TO_CHAR(?))
+           OR (a.grantee_type='role'     AND a.grantee_id=TO_CHAR(?) AND ? IS NOT NULL)
+           OR (a.grantee_type='department'  AND a.grantee_id=? AND ? IS NOT NULL)
+           OR (a.grantee_type='cost_center' AND a.grantee_id=? AND ? IS NOT NULL)
+           OR (a.grantee_type='division'    AND a.grantee_id=? AND ? IS NOT NULL)
+           OR (a.grantee_type='org_group'   AND a.grantee_id=? AND ? IS NOT NULL)
+         )`
+      ).all(
+        userId,
+        roleId, roleId,
+        deptCode, deptCode,
+        profitCenter, profitCenter,
+        orgSection, orgSection,
+        orgGroupName, orgGroupName
+      );
+    }
   } catch (e) {
     console.error('[MCP] getActiveToolDeclarations error:', e.message);
     return { functionDeclarations: [], serverMap: {} };

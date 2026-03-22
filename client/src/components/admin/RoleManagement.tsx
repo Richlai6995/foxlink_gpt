@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Plus, Trash2, Edit2, Star, StarOff, Plug, Zap, Check, FileText, Mic, Image, CalendarClock, Code2, Database, ShieldCheck } from 'lucide-react'
+import { Plus, Trash2, Edit2, Star, StarOff, Check, FileText, Mic, Image, CalendarClock, Code2, Database, ShieldCheck } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import api from '../../lib/api'
 
@@ -14,8 +14,6 @@ interface Role {
   name: string
   description: string | null
   is_default: number
-  mcp_server_ids: number[]
-  dify_kb_ids: number[]
   created_at: string
   budget_daily: number | null
   budget_weekly: number | null
@@ -38,26 +36,10 @@ interface Role {
   can_use_ai_dashboard: number
 }
 
-interface McpServer {
-  id: number
-  name: string
-  description: string | null
-  is_active: number
-}
-
-interface DifyKb {
-  id: number
-  name: string
-  description: string | null
-  is_active: number
-}
-
 const emptyForm = {
   name: '',
   description: '',
   is_default: false,
-  mcp_server_ids: [] as number[],
-  dify_kb_ids: [] as number[],
   budget_daily: '',
   budget_weekly: '',
   budget_monthly: '',
@@ -82,8 +64,6 @@ const emptyForm = {
 export default function RoleManagement() {
   const { t } = useTranslation()
   const [roles, setRoles] = useState<Role[]>([])
-  const [mcpServers, setMcpServers] = useState<McpServer[]>([])
-  const [difyKbs, setDifyKbs] = useState<DifyKb[]>([])
   const [policies, setPolicies] = useState<Policy[]>([])
   const [roleAssignments, setRoleAssignments] = useState<Record<string, number | null>>({}) // roleId → policyId
   const [loading, setLoading] = useState(true)
@@ -97,16 +77,12 @@ export default function RoleManagement() {
   const load = async () => {
     try {
       setLoading(true)
-      const [rolesRes, mcpRes, difyRes, policiesRes, assignRes] = await Promise.all([
+      const [rolesRes, policiesRes, assignRes] = await Promise.all([
         api.get('/roles'),
-        api.get('/mcp-servers'),
-        api.get('/dify-kb'),
         api.get('/data-permissions/policies').catch(() => ({ data: [] })),
         api.get('/data-permissions/assignments').catch(() => ({ data: [] })),
       ])
       setRoles(rolesRes.data)
-      setMcpServers(mcpRes.data)
-      setDifyKbs(difyRes.data)
       setPolicies(policiesRes.data)
       // build role → policyId map
       const map: Record<string, number | null> = {}
@@ -138,8 +114,6 @@ export default function RoleManagement() {
       name: role.name,
       description: role.description || '',
       is_default: !!role.is_default,
-      mcp_server_ids: [...role.mcp_server_ids],
-      dify_kb_ids: [...role.dify_kb_ids],
       budget_daily: role.budget_daily != null ? String(role.budget_daily) : '',
       budget_weekly: role.budget_weekly != null ? String(role.budget_weekly) : '',
       budget_monthly: role.budget_monthly != null ? String(role.budget_monthly) : '',
@@ -213,8 +187,6 @@ export default function RoleManagement() {
         name: role.name,
         description: role.description,
         is_default: true,
-        mcp_server_ids: role.mcp_server_ids,
-        dify_kb_ids: role.dify_kb_ids,
         budget_daily: role.budget_daily,
         budget_weekly: role.budget_weekly,
         budget_monthly: role.budget_monthly,
@@ -234,9 +206,6 @@ export default function RoleManagement() {
       alert(e.response?.data?.error || t('roles.setDefaultFailed'))
     }
   }
-
-  const mcpById = Object.fromEntries(mcpServers.map((s) => [s.id, s]))
-  const difyById = Object.fromEntries(difyKbs.map((k) => [k.id, k]))
 
   return (
     <div className="space-y-4">
@@ -306,22 +275,6 @@ export default function RoleManagement() {
                 </div>
               </div>
 
-              {/* Assigned resources */}
-              <div className="mt-3 flex flex-wrap gap-2">
-                {role.mcp_server_ids.length === 0 && role.dify_kb_ids.length === 0 && (
-                  <span className="text-xs text-slate-400 italic">{t('roles.noResources')}</span>
-                )}
-                {role.mcp_server_ids.map((id) => (
-                  <span key={`mcp-${id}`} className="flex items-center gap-1 text-xs bg-blue-50 text-blue-700 border border-blue-200 px-2 py-0.5 rounded-full">
-                    <Plug size={11} /> {mcpById[id]?.name ?? `MCP #${id}`}
-                  </span>
-                ))}
-                {role.dify_kb_ids.map((id) => (
-                  <span key={`dify-${id}`} className="flex items-center gap-1 text-xs bg-purple-50 text-purple-700 border border-purple-200 px-2 py-0.5 rounded-full">
-                    <Zap size={11} /> {difyById[id]?.name ?? `DIFY #${id}`}
-                  </span>
-                ))}
-              </div>
               {/* Permission summary */}
               <div className="mt-2 flex flex-wrap gap-1.5">
                 <span className={`flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border ${role.allow_text_upload !== 0 ? 'bg-green-50 text-green-700 border-green-200' : 'bg-slate-50 text-slate-400 border-slate-200 line-through'}`}>
@@ -408,59 +361,6 @@ export default function RoleManagement() {
                 <span className="text-sm text-slate-700">{t('roles.form.setDefault')}</span>
               </label>
 
-              {/* MCP Servers */}
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-2 flex items-center gap-1.5">
-                  <Plug size={14} /> {t('roles.form.mcpServers')}
-                </label>
-                {mcpServers.length === 0 ? (
-                  <p className="text-xs text-slate-400">{t('roles.noMcpServers')}</p>
-                ) : (
-                  <div className="space-y-1.5 max-h-36 overflow-y-auto border border-slate-200 rounded-lg p-2">
-                    {mcpServers.map((s) => {
-                      const checked = form.mcp_server_ids.includes(s.id)
-                      return (
-                        <label key={s.id} className="flex items-center gap-2 cursor-pointer hover:bg-slate-50 rounded px-1 py-0.5">
-                          <div className={`w-4 h-4 rounded border flex items-center justify-center flex-shrink-0 transition ${checked ? 'bg-blue-600 border-blue-600' : 'border-slate-300'}`}
-                            onClick={() => setForm({ ...form, mcp_server_ids: toggleId(form.mcp_server_ids, s.id) })}>
-                            {checked && <Check size={10} className="text-white" />}
-                          </div>
-                          <span className="text-sm text-slate-700">{s.name}</span>
-                          {!s.is_active && <span className="text-xs text-slate-400">{t('roles.disabled')}</span>}
-                          {s.description && <span className="text-xs text-slate-400 truncate">{s.description}</span>}
-                        </label>
-                      )
-                    })}
-                  </div>
-                )}
-              </div>
-
-              {/* DIFY KBs */}
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-2 flex items-center gap-1.5">
-                  <Zap size={14} /> {t('roles.form.difyKbs')}
-                </label>
-                {difyKbs.length === 0 ? (
-                  <p className="text-xs text-slate-400">{t('roles.noDifyKbs')}</p>
-                ) : (
-                  <div className="space-y-1.5 max-h-36 overflow-y-auto border border-slate-200 rounded-lg p-2">
-                    {difyKbs.map((k) => {
-                      const checked = form.dify_kb_ids.includes(k.id)
-                      return (
-                        <label key={k.id} className="flex items-center gap-2 cursor-pointer hover:bg-slate-50 rounded px-1 py-0.5">
-                          <div className={`w-4 h-4 rounded border flex items-center justify-center flex-shrink-0 transition ${checked ? 'bg-purple-600 border-purple-600' : 'border-slate-300'}`}
-                            onClick={() => setForm({ ...form, dify_kb_ids: toggleId(form.dify_kb_ids, k.id) })}>
-                            {checked && <Check size={10} className="text-white" />}
-                          </div>
-                          <span className="text-sm text-slate-700">{k.name}</span>
-                          {!k.is_active && <span className="text-xs text-slate-400">{t('roles.disabled')}</span>}
-                          {k.description && <span className="text-xs text-slate-400 truncate">{k.description}</span>}
-                        </label>
-                      )
-                    })}
-                  </div>
-                )}
-              </div>
               {/* Upload & Function Permissions */}
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-2">{t('roles.form.uploadPerms')}</label>

@@ -200,22 +200,37 @@ function setDifyConvId(sessionId, kbId, conversationId) {
   difyConvIds.get(sessionId).set(kbId, conversationId);
 }
 
-// Load active DIFY KBs for a user (role-filtered) and return as Gemini function declarations
-async function getDifyFunctionDeclarations(db, roleId) {
+// Load active DIFY KBs for a user (dify_access-filtered) and return as Gemini function declarations
+async function getDifyFunctionDeclarations(db, userCtx) {
   let kbs;
   try {
-    if (roleId) {
-      kbs = await db.prepare(
-        `SELECT d.id, d.name, d.api_server, d.api_key, d.description
-         FROM dify_knowledge_bases d
-         JOIN role_dify_kbs rd ON rd.dify_kb_id = d.id
-         WHERE rd.role_id=? AND d.is_active=1
-         ORDER BY d.sort_order ASC`
-      ).all(roleId);
-    } else {
+    if (!userCtx) {
       kbs = await db.prepare(
         `SELECT id, name, api_server, api_key, description FROM dify_knowledge_bases WHERE is_active=1 ORDER BY sort_order ASC`
       ).all();
+    } else {
+      const { userId, roleId, deptCode, profitCenter, orgSection, orgGroupName } = userCtx;
+      kbs = await db.prepare(
+        `SELECT DISTINCT d.id, d.name, d.api_server, d.api_key, d.description
+         FROM dify_knowledge_bases d
+         JOIN dify_access a ON a.dify_kb_id = d.id
+         WHERE d.is_active=1 AND (
+           (a.grantee_type='user'        AND a.grantee_id=TO_CHAR(?))
+           OR (a.grantee_type='role'     AND a.grantee_id=TO_CHAR(?) AND ? IS NOT NULL)
+           OR (a.grantee_type='department'  AND a.grantee_id=? AND ? IS NOT NULL)
+           OR (a.grantee_type='cost_center' AND a.grantee_id=? AND ? IS NOT NULL)
+           OR (a.grantee_type='division'    AND a.grantee_id=? AND ? IS NOT NULL)
+           OR (a.grantee_type='org_group'   AND a.grantee_id=? AND ? IS NOT NULL)
+         )
+         ORDER BY d.sort_order ASC`
+      ).all(
+        userId,
+        roleId, roleId,
+        deptCode, deptCode,
+        profitCenter, profitCenter,
+        orgSection, orgSection,
+        orgGroupName, orgGroupName
+      );
     }
   } catch (_) {
     return { declarations: [], kbMap: {} };
@@ -1327,9 +1342,19 @@ router.post('/sessions/:id/messages', upload.array('files', 10), async (req, res
       displayText = text || (savedImages.length > 0 ? `已生成 ${savedImages.length} 張圖片` : '圖片生成失敗');
       console.log(`[Chat] Image gen done in ${Date.now() - t0}ms, images=${imgResult.images.length} in=${inputTokens} out=${outputTokens}`);
     } else {
-      // ── Get user role ─────────────────────────────────────────────────────
-      const userRoleRow = await db.prepare(`SELECT role_id FROM users WHERE id=?`).get(req.user.id);
-      const roleId = userRoleRow?.role_id || null;
+      // ── Get user context (role + org fields for mcp_access / dify_access) ──
+      const userCtxRow = await db.prepare(
+        `SELECT role_id, dept_code, profit_center, org_section, org_group_name FROM users WHERE id=?`
+      ).get(req.user.id);
+      const roleId = userCtxRow?.role_id || null;
+      const userCtx = req.user.role === 'admin' ? null : {
+        userId: req.user.id,
+        roleId,
+        deptCode:     userCtxRow?.dept_code      || null,
+        profitCenter: userCtxRow?.profit_center  || null,
+        orgSection:   userCtxRow?.org_section    || null,
+        orgGroupName: userCtxRow?.org_group_name || null,
+      };
 
       // Shared maps for toolHandler (populated below regardless of mode)
       let serverMap = {}, kbMap = {}, selfKbMap = {};
@@ -1353,7 +1378,7 @@ router.post('/sessions/:id/messages', upload.array('files', 10), async (req, res
           }
         }
         if (userDifyIds && userDifyIds.length > 0) {
-          const { declarations, kbMap: km } = await getDifyFunctionDeclarations(db, roleId);
+          const { declarations, kbMap: km } = await getDifyFunctionDeclarations(db, userCtx);
           kbMap = km;
           const selectedIds = userDifyIds.map(Number);
           const selected = declarations.filter(d => {
@@ -1374,9 +1399,9 @@ router.post('/sessions/:id/messages', upload.array('files', 10), async (req, res
         console.log(`[Chat] Explicit tool mode: mcp=${userMcpIds?.length||0} dify=${userDifyIds?.length||0} selfkb=${userSelfKbIds?.length||0} → ${allDeclarations.length} tools`);
       } else {
         // ── Auto mode: load all accessible tools + intent filtering ───────────
-        const { functionDeclarations: allMcpDecls, serverMap: sm } = await mcpClient.getActiveToolDeclarations(db, roleId);
+        const { functionDeclarations: allMcpDecls, serverMap: sm } = await mcpClient.getActiveToolDeclarations(db, userCtx);
         serverMap = sm;
-        const { declarations: difyDecls, kbMap: km } = await getDifyFunctionDeclarations(db, roleId);
+        const { declarations: difyDecls, kbMap: km } = await getDifyFunctionDeclarations(db, userCtx);
         kbMap = km;
         const { declarations: selfKbDecls, kbMap: skm } = await getSelfKbDeclarations(db, req.user.id);
         selfKbMap = skm;

@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react'
 import {
   Plus, RefreshCw, Trash2, Edit2, ChevronDown, ChevronRight,
-  Plug, ToggleLeft, ToggleRight, AlertCircle, CheckCircle, Clock
+  Plug, ToggleLeft, ToggleRight, AlertCircle, CheckCircle, Clock, Share2
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import api from '../../lib/api'
 import TranslationFields, { type TranslationData } from '../common/TranslationFields'
+import ShareModal from '../dashboard/ShareModal'
 
 type TransportType = 'http-post' | 'http-sse' | 'streamable-http' | 'stdio' | 'auto'
 
@@ -78,6 +79,7 @@ export default function MCPServersPanel() {
   const [selectedLogServer, setSelectedLogServer] = useState<McpServer | null>(null)
   const [logs, setLogs] = useState<McpCallLog[]>([])
   const [logsLoading, setLogsLoading] = useState(false)
+  const [shareServer, setShareServer] = useState<McpServer | null>(null)
 
   const load = async () => {
     try {
@@ -278,6 +280,9 @@ export default function MCPServersPanel() {
                     </button>
                     <button onClick={() => openEdit(s)} title={t('common.edit')} className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition">
                       <Edit2 size={14} />
+                    </button>
+                    <button onClick={() => setShareServer(s)} title="共享設定" className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition">
+                      <Share2 size={14} />
                     </button>
                     <button onClick={() => toggle(s)} title={s.is_active ? t('common.disable') : t('common.enable')} className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition">
                       {s.is_active ? <ToggleRight size={16} className="text-green-500" /> : <ToggleLeft size={16} />}
@@ -543,6 +548,14 @@ export default function MCPServersPanel() {
             </div>
           </div>
         </div>
+      )}
+
+      {shareServer && (
+        <ShareModal
+          title={`MCP 伺服器 — ${shareServer.name}`}
+          sharesUrl={`/mcp-servers/${shareServer.id}/access`}
+          onClose={() => setShareServer(null)}
+        />
       )}
     </div>
   )

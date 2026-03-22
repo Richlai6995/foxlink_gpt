@@ -171,8 +171,11 @@ router.get('/accessible-resources', async (req, res) => {
     if (!ok) return res.status(403).json({ error: '無權限' });
 
     const userId = req.user.id;
-    const roleId = req.user.role_id ? Number(req.user.role_id) : null;
     const isAdmin = req.user.role === 'admin';
+    const uRow = isAdmin ? null : await db.prepare(
+      `SELECT role_id, dept_code, profit_center, org_section, org_group_name FROM users WHERE id=?`
+    ).get(userId);
+    const roleId = uRow?.role_id ? Number(uRow.role_id) : null;
 
     // Self-built KBs
     let selfKbs;
@@ -198,36 +201,64 @@ router.get('/accessible-resources', async (req, res) => {
       `).all(userId, userId, roleId);
     }
 
-    // Dify KBs
+    // Dify KBs — 改走 dify_access
     let difyKbs;
     if (isAdmin) {
       difyKbs = await db.prepare(
         `SELECT id, name, name_zh, name_en, name_vi FROM dify_knowledge_bases WHERE is_active=1 ORDER BY sort_order, name`
       ).all();
-    } else if (roleId) {
-      difyKbs = await db.prepare(`
-        SELECT d.id, d.name, d.name_zh, d.name_en, d.name_vi FROM dify_knowledge_bases d
-        JOIN role_dify_kbs rd ON rd.dify_kb_id=d.id AND rd.role_id=?
-        WHERE d.is_active=1 ORDER BY d.sort_order, d.name
-      `).all(roleId);
     } else {
-      difyKbs = [];
+      difyKbs = await db.prepare(`
+        SELECT DISTINCT d.id, d.name, d.name_zh, d.name_en, d.name_vi
+        FROM dify_knowledge_bases d
+        JOIN dify_access a ON a.dify_kb_id=d.id
+        WHERE d.is_active=1 AND (
+          (a.grantee_type='user'        AND a.grantee_id=TO_CHAR(?))
+          OR (a.grantee_type='role'     AND a.grantee_id=TO_CHAR(?) AND ? IS NOT NULL)
+          OR (a.grantee_type='department'  AND a.grantee_id=? AND ? IS NOT NULL)
+          OR (a.grantee_type='cost_center' AND a.grantee_id=? AND ? IS NOT NULL)
+          OR (a.grantee_type='division'    AND a.grantee_id=? AND ? IS NOT NULL)
+          OR (a.grantee_type='org_group'   AND a.grantee_id=? AND ? IS NOT NULL)
+        )
+        ORDER BY d.sort_order, d.name
+      `).all(
+        userId,
+        roleId, roleId,
+        uRow?.dept_code, uRow?.dept_code,
+        uRow?.profit_center, uRow?.profit_center,
+        uRow?.org_section, uRow?.org_section,
+        uRow?.org_group_name, uRow?.org_group_name
+      );
     }
 
-    // MCP servers
+    // MCP servers — 改走 mcp_access
     let mcpServers;
     if (isAdmin) {
       mcpServers = await db.prepare(
         `SELECT id, name, name_zh, name_en, name_vi, tools_json FROM mcp_servers WHERE is_active=1 ORDER BY name`
       ).all();
-    } else if (roleId) {
-      mcpServers = await db.prepare(`
-        SELECT m.id, m.name, m.name_zh, m.name_en, m.name_vi, m.tools_json FROM mcp_servers m
-        JOIN role_mcp_servers rm ON rm.mcp_server_id=m.id AND rm.role_id=?
-        WHERE m.is_active=1 ORDER BY m.name
-      `).all(roleId);
     } else {
-      mcpServers = [];
+      mcpServers = await db.prepare(`
+        SELECT DISTINCT m.id, m.name, m.name_zh, m.name_en, m.name_vi, m.tools_json
+        FROM mcp_servers m
+        JOIN mcp_access a ON a.mcp_server_id=m.id
+        WHERE m.is_active=1 AND (
+          (a.grantee_type='user'        AND a.grantee_id=TO_CHAR(?))
+          OR (a.grantee_type='role'     AND a.grantee_id=TO_CHAR(?) AND ? IS NOT NULL)
+          OR (a.grantee_type='department'  AND a.grantee_id=? AND ? IS NOT NULL)
+          OR (a.grantee_type='cost_center' AND a.grantee_id=? AND ? IS NOT NULL)
+          OR (a.grantee_type='division'    AND a.grantee_id=? AND ? IS NOT NULL)
+          OR (a.grantee_type='org_group'   AND a.grantee_id=? AND ? IS NOT NULL)
+        )
+        ORDER BY m.name
+      `).all(
+        userId,
+        roleId, roleId,
+        uRow?.dept_code, uRow?.dept_code,
+        uRow?.profit_center, uRow?.profit_center,
+        uRow?.org_section, uRow?.org_section,
+        uRow?.org_group_name, uRow?.org_group_name
+      );
     }
 
     // Completed research jobs (for "previous research as context")

@@ -119,7 +119,7 @@ export default function ChatPage() {
   const [editRerunJobId,     setEditRerunJobId]     = useState<string | null>(null)
 
   const openMcpPanel = useCallback(async () => {
-    try { const r = await api.get('/mcp-servers'); setAllMcpServers((r.data || []).filter((s: any) => s.is_active)) } catch {}
+    try { const r = await api.get('/mcp-servers/my'); setAllMcpServers(r.data || []) } catch {}
     setShowMcpPanel(true); setShowDifyPanel(false); setShowKbPanel(false)
   }, [])
   const openDifyPanel = useCallback(async () => {

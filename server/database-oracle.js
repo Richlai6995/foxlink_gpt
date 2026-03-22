@@ -1068,6 +1068,29 @@ async function runMigrations(db) {
   await addCol('MCP_SERVERS', 'ARGS_JSON',      'VARCHAR2(4000)');
   await addCol('MCP_SERVERS', 'ENV_JSON',        'CLOB');
 
+  // ── MCP / DIFY 共享存取表（取代 role_mcp_servers / role_dify_kbs）────────────
+  await createTable('MCP_ACCESS', `CREATE TABLE mcp_access (
+    id            NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    mcp_server_id NUMBER NOT NULL REFERENCES mcp_servers(id) ON DELETE CASCADE,
+    grantee_type  VARCHAR2(20) NOT NULL,
+    grantee_id    VARCHAR2(100) NOT NULL,
+    share_type    VARCHAR2(20) DEFAULT 'use',
+    granted_by    NUMBER REFERENCES users(id),
+    granted_at    TIMESTAMP DEFAULT SYSTIMESTAMP,
+    CONSTRAINT mcp_access_uq UNIQUE (mcp_server_id, grantee_type, grantee_id)
+  )`);
+
+  await createTable('DIFY_ACCESS', `CREATE TABLE dify_access (
+    id         NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    dify_kb_id NUMBER NOT NULL REFERENCES dify_knowledge_bases(id) ON DELETE CASCADE,
+    grantee_type VARCHAR2(20) NOT NULL,
+    grantee_id   VARCHAR2(100) NOT NULL,
+    share_type   VARCHAR2(20) DEFAULT 'use',
+    granted_by   NUMBER REFERENCES users(id),
+    granted_at   TIMESTAMP DEFAULT SYSTIMESTAMP,
+    CONSTRAINT dify_access_uq UNIQUE (dify_kb_id, grantee_type, grantee_id)
+  )`);
+
   // ── Vector table partitioning ───────────────────────────────────────────────
   await migrateAiVectorStoreToPartitioned();
   await migrateKbChunksToPartitioned();

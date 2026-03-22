@@ -192,6 +192,107 @@ router.get('/:id/logs', async (req, res) => {
   }
 });
 
+// GET /api/mcp-servers/my  — 依 mcp_access 回傳當前使用者可用的 MCP
+router.get('/my', async (req, res) => {
+  const db = getDb();
+  try {
+    if (req.user.role === 'admin') {
+      const servers = await db.prepare(
+        `SELECT id, name, description, is_active FROM mcp_servers WHERE is_active=1 ORDER BY created_at DESC`
+      ).all();
+      return res.json(servers);
+    }
+    const u = await db.prepare(
+      `SELECT role_id, dept_code, profit_center, org_section, org_group_name FROM users WHERE id=?`
+    ).get(req.user.id);
+    if (!u) return res.json([]);
+    const servers = await db.prepare(
+      `SELECT DISTINCT m.id, m.name, m.description, m.is_active
+       FROM mcp_servers m
+       JOIN mcp_access a ON a.mcp_server_id = m.id
+       WHERE m.is_active=1 AND (
+         (a.grantee_type='user'        AND a.grantee_id=TO_CHAR(?))
+         OR (a.grantee_type='role'     AND a.grantee_id=TO_CHAR(?) AND ? IS NOT NULL)
+         OR (a.grantee_type='department'  AND a.grantee_id=? AND ? IS NOT NULL)
+         OR (a.grantee_type='cost_center' AND a.grantee_id=? AND ? IS NOT NULL)
+         OR (a.grantee_type='division'    AND a.grantee_id=? AND ? IS NOT NULL)
+         OR (a.grantee_type='org_group'   AND a.grantee_id=? AND ? IS NOT NULL)
+       )
+       ORDER BY m.created_at DESC`
+    ).all(
+      req.user.id,
+      u.role_id, u.role_id,
+      u.dept_code, u.dept_code,
+      u.profit_center, u.profit_center,
+      u.org_section, u.org_section,
+      u.org_group_name, u.org_group_name
+    );
+    res.json(servers);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/mcp-servers/:id/access  — 列出共享清單（admin only）
+router.get('/:id/access', async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const db = getDb();
+  try {
+    const grants = await db.prepare(
+      `SELECT a.*, u.name AS granted_by_name
+       FROM mcp_access a LEFT JOIN users u ON u.id = a.granted_by
+       WHERE a.mcp_server_id=? ORDER BY a.granted_at DESC`
+    ).all(req.params.id);
+    res.json(grants);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/mcp-servers/:id/access  — 新增共享，回傳完整清單
+router.post('/:id/access', async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const db = getDb();
+  try {
+    const { grantee_type, grantee_id, share_type = 'use' } = req.body;
+    const validTypes = ['user', 'role', 'department', 'cost_center', 'division', 'org_group'];
+    if (!validTypes.includes(grantee_type) || !grantee_id) {
+      return res.status(400).json({ error: '請選擇有效的共享對象' });
+    }
+    // upsert: 若已存在則更新 share_type
+    const existing = await db.prepare(
+      `SELECT id FROM mcp_access WHERE mcp_server_id=? AND grantee_type=? AND grantee_id=?`
+    ).get(req.params.id, grantee_type, String(grantee_id));
+    if (existing) {
+      await db.prepare(`UPDATE mcp_access SET share_type=? WHERE id=?`).run(share_type, existing.id);
+    } else {
+      await db.prepare(
+        `INSERT INTO mcp_access (mcp_server_id, grantee_type, grantee_id, share_type, granted_by) VALUES (?,?,?,?,?)`
+      ).run(req.params.id, grantee_type, String(grantee_id), share_type, req.user.id);
+    }
+    const grants = await db.prepare(
+      `SELECT a.*, u.name AS granted_by_name
+       FROM mcp_access a LEFT JOIN users u ON u.id = a.granted_by
+       WHERE a.mcp_server_id=? ORDER BY a.granted_at DESC`
+    ).all(req.params.id);
+    res.json(grants);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// DELETE /api/mcp-servers/:id/access/:grantId
+router.delete('/:id/access/:grantId', async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const db = getDb();
+  try {
+    await db.prepare(`DELETE FROM mcp_access WHERE id=? AND mcp_server_id=?`).run(req.params.grantId, req.params.id);
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // GET /api/mcp-servers/active-servers  — sidebar display (name + description only)
 router.get('/active-servers', async (req, res) => {
   const db = getDb();

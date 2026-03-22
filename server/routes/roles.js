@@ -4,11 +4,15 @@ const { verifyToken, verifyAdmin } = require('./auth');
 const db = require('../database-oracle').db;
 
 router.use(verifyToken);
-router.use(verifyAdmin);
 
-// GET /api/roles  — list all roles with assigned MCP/DIFY ids
+// GET /api/roles  — list roles (id + name only for non-admin; full detail for admin)
 router.get('/', async (req, res) => {
   try {
+    if (req.user.role !== 'admin') {
+      // ShareModal 用：只回 id + name
+      const roles = await db.prepare(`SELECT id, name FROM roles ORDER BY id ASC`).all();
+      return res.json(roles);
+    }
     const roles = await db.prepare(`SELECT * FROM roles ORDER BY id ASC`).all();
     for (const role of roles) {
       role.mcp_server_ids = (await db
@@ -25,6 +29,8 @@ router.get('/', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
+router.use(verifyAdmin);
 
 // POST /api/roles  — create role
 router.post('/', async (req, res) => {
