@@ -74,14 +74,15 @@ spec:
             - name: nfs-source
               mountPath: /app/skill_runners
               subPath: skill_runners
-            # ── 暫存：logs / backups / fonts（pod 重啟後不需保留）──
+            # ── 暫存：logs / backups（pod 重啟後不需保留）──
             - name: tmp-data
               mountPath: /app/logs
               subPath: logs
             - name: tmp-data
               mountPath: /app/backups
               subPath: backups
-            - name: tmp-data
+            # ── CJK 字型（NFS 持久化，PDF 中文需要）──
+            - name: nfs-source
               mountPath: /app/fonts
               subPath: fonts
             # ── Oracle Instant Client（NFS subPath: oracle_client）──
