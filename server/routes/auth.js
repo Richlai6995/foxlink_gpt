@@ -4,6 +4,27 @@ const { v4: uuidv4 } = require('uuid');
 require('dotenv').config();
 
 /**
+ * 根據新使用者組織資料查詢 role_org_bindings，依部門→利潤中心→事業處→事業群→預設角色的優先序決定角色。
+ */
+async function resolveRoleByOrg(db, deptCode, profitCenter, orgSection, orgGroupName) {
+  const checks = [
+    ['department',  deptCode],
+    ['cost_center', profitCenter],
+    ['division',    orgSection],
+    ['org_group',   orgGroupName],
+  ];
+  for (const [type, code] of checks) {
+    if (!code) continue;
+    const row = await db.prepare(
+      `SELECT role_id FROM role_org_bindings WHERE org_type=? AND org_code=? FETCH FIRST 1 ROWS ONLY`
+    ).get(type, String(code).trim());
+    if (row) return row.role_id;
+  }
+  const def = await db.prepare(`SELECT id FROM roles WHERE is_default=1 FETCH FIRST 1 ROWS ONLY`).get();
+  return def?.id || null;
+}
+
+/**
  * Detect preferred language from browser Accept-Language header.
  * Maps to supported codes: 'zh-TW' | 'en' | 'vi'
  */
@@ -170,8 +191,32 @@ router.post('/login', async (req, res) => {
             }
             return await createSession(res, dbUser);
           } else {
-            // First LDAP login — auto-activate with default role permissions
-            const defaultRole = await db.prepare(`SELECT * FROM roles WHERE is_default=1 FETCH FIRST 1 ROWS ONLY`).get();
+            // First LDAP login — resolve role from org bindings, fallback to default role
+            let resolvedRoleId = null;
+            if (ldapUser.employeeId) {
+              try {
+                const { isConfigured, getEmployeeOrgData } = require('../services/erpDb');
+                if (isConfigured()) {
+                  const erpRows = await getEmployeeOrgData([String(ldapUser.employeeId)]);
+                  if (erpRows.length) {
+                    const r = erpRows[0];
+                    resolvedRoleId = await resolveRoleByOrg(db,
+                      r.DEPT_CODE?.trim(), r.PROFIT_CENTER?.trim(),
+                      r.ORG_SECTION?.trim(), r.ORG_GROUP_NAME?.trim()
+                    );
+                    console.log(`[Auth] Org-based role resolved: ${resolvedRoleId} for emp ${ldapUser.employeeId}`);
+                  }
+                }
+              } catch (e) {
+                console.warn('[Auth] org-based role resolution failed:', e.message);
+              }
+            }
+            if (!resolvedRoleId) {
+              resolvedRoleId = (await db.prepare(`SELECT id FROM roles WHERE is_default=1 FETCH FIRST 1 ROWS ONLY`).get())?.id ?? null;
+            }
+            const rolePerms = resolvedRoleId
+              ? await db.prepare(`SELECT * FROM roles WHERE id=?`).get(resolvedRoleId)
+              : null;
             const result = await db.prepare(
               `INSERT INTO users (username, name, email, role, status, password, employee_id, creation_method,
                 role_id, allow_text_upload, text_max_mb, allow_audio_upload, audio_max_mb,
@@ -179,14 +224,14 @@ router.post('/login', async (req, res) => {
                VALUES (?,?,?,'user','active',?,?,?, ?,?,?,?,?,?,?,?)`
             ).run(
               ldapUser.account, ldapUser.name, ldapUser.email, password, ldapUser.employeeId, 'ldap',
-              defaultRole?.id ?? null,
-              defaultRole?.allow_text_upload ?? 1,
-              defaultRole?.text_max_mb ?? 10,
-              defaultRole?.allow_audio_upload ?? 0,
-              defaultRole?.audio_max_mb ?? 10,
-              defaultRole?.allow_image_upload ?? 1,
-              defaultRole?.image_max_mb ?? 10,
-              defaultRole?.allow_scheduled_tasks ?? 0
+              resolvedRoleId ?? null,
+              rolePerms?.allow_text_upload ?? 1,
+              rolePerms?.text_max_mb ?? 10,
+              rolePerms?.allow_audio_upload ?? 0,
+              rolePerms?.audio_max_mb ?? 10,
+              rolePerms?.allow_image_upload ?? 1,
+              rolePerms?.image_max_mb ?? 10,
+              rolePerms?.allow_scheduled_tasks ?? 0
             );
             const newUser = await db.prepare('SELECT * FROM users WHERE id=?').get(result.lastInsertRowid);
             // Auto-sync org after first LDAP login

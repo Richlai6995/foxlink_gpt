@@ -1095,6 +1095,16 @@ async function runMigrations(db) {
     CONSTRAINT dify_access_uq UNIQUE (dify_kb_id, grantee_type, grantee_id)
   )`);
 
+  // ── 角色預設組織綁定（新使用者自動角色判斷）──────────────────────────────────
+  await createTable('ROLE_ORG_BINDINGS', `CREATE TABLE role_org_bindings (
+    id        NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    role_id   NUMBER NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
+    org_type  VARCHAR2(20) NOT NULL,
+    org_code  VARCHAR2(100) NOT NULL,
+    org_name  VARCHAR2(500),
+    CONSTRAINT role_org_bindings_uq UNIQUE (org_type, org_code)
+  )`);
+
   // ── Vector table partitioning ───────────────────────────────────────────────
   await migrateAiVectorStoreToPartitioned();
   await migrateKbChunksToPartitioned();

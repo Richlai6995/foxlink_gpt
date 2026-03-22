@@ -32,6 +32,73 @@ router.get('/', async (req, res) => {
 
 router.use(verifyAdmin);
 
+// GET /api/roles/org-lov  — LOV from APPS.FL_ORG_EMP_DEPT_MV (admin only)
+router.get('/org-lov', async (req, res) => {
+  try {
+    const [depts, costCenters, divisions, orgGroups] = await Promise.all([
+      db.prepare(`SELECT DISTINCT DEPT_CODE AS code, DEPT_DESC AS name FROM APPS.FL_ORG_EMP_DEPT_MV ORDER BY DEPT_CODE`).all(),
+      db.prepare(`SELECT DISTINCT PROFIT_CENTER AS code, PROFIT_CENTER_NAME AS name FROM APPS.FL_ORG_EMP_DEPT_MV ORDER BY PROFIT_CENTER`).all(),
+      db.prepare(`SELECT DISTINCT ORG_SECTION AS code, ORG_SECTION_NAME AS name FROM APPS.FL_ORG_EMP_DEPT_MV ORDER BY ORG_SECTION`).all(),
+      db.prepare(`SELECT DISTINCT ORG_GROUP_NAME AS code, ORG_GROUP_NAME AS name FROM APPS.FL_ORG_EMP_DEPT_MV ORDER BY ORG_GROUP_NAME`).all(),
+    ]);
+    res.json({ department: depts, cost_center: costCenters, division: divisions, org_group: orgGroups });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/roles/:id/org-bindings
+router.get('/:id/org-bindings', async (req, res) => {
+  try {
+    const bindings = await db.prepare(
+      `SELECT b.*, r.name AS role_name FROM role_org_bindings b
+       JOIN roles r ON r.id = b.role_id
+       WHERE b.role_id=? ORDER BY b.org_type, b.org_code`
+    ).all(req.params.id);
+    res.json(bindings);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/roles/:id/org-bindings
+router.post('/:id/org-bindings', async (req, res) => {
+  const { org_type, org_code, org_name } = req.body;
+  const validTypes = ['department', 'cost_center', 'division', 'org_group'];
+  if (!validTypes.includes(org_type) || !org_code) {
+    return res.status(400).json({ error: '無效的 org_type 或 org_code' });
+  }
+  try {
+    // 全域唯一：檢查是否被其他角色使用
+    const conflict = await db.prepare(
+      `SELECT b.role_id, r.name AS role_name FROM role_org_bindings b
+       JOIN roles r ON r.id = b.role_id
+       WHERE b.org_type=? AND b.org_code=? AND b.role_id != ?`
+    ).get(org_type, String(org_code), req.params.id);
+    if (conflict) {
+      return res.status(409).json({ error: `「${org_code}」已被角色「${conflict.role_name}」綁定` });
+    }
+    await db.prepare(
+      `INSERT INTO role_org_bindings (role_id, org_type, org_code, org_name) VALUES (?,?,?,?)`
+    ).run(req.params.id, org_type, String(org_code), org_name || null);
+    const bindings = await db.prepare(
+      `SELECT * FROM role_org_bindings WHERE role_id=? ORDER BY org_type, org_code`
+    ).all(req.params.id);
+    res.json(bindings);
+  } catch (e) {
+    if (e.message?.includes('ORA-00001')) {
+      return res.status(409).json({ error: `「${org_code}」已被其他角色綁定` });
+    }
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// DELETE /api/roles/:id/org-bindings/:bindingId
+router.delete('/:id/org-bindings/:bindingId', async (req, res) => {
+  try {
+    await db.prepare(`DELETE FROM role_org_bindings WHERE id=? AND role_id=?`).run(req.params.bindingId, req.params.id);
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // POST /api/roles  — create role
 router.post('/', async (req, res) => {
   const { name, description, is_default, mcp_server_ids = [], dify_kb_ids = [],
