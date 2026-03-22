@@ -749,13 +749,18 @@ export default function ShelfChartBuilder({ rows, columns, columnLabels, initial
         {/* ── Center: Shelves + Options (resizable) ── */}
         <div className="bg-white border-r border-gray-200 flex flex-col flex-shrink-0 overflow-y-auto relative"
           style={{ width: panelWidth }}>
-          {/* Resize handle */}
+          {/* Resize handle — 右邊緣明顯拖拉條 */}
           <div
             onMouseDown={onPanelResizeStart}
-            className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize z-10 hover:bg-blue-300 transition-colors"
-            style={{ background: resizingRef.current ? '#93c5fd' : 'transparent' }}
-            title="拖曳調整寬度"
-          />
+            className="absolute right-0 top-0 bottom-0 w-3 cursor-col-resize z-10 flex items-center justify-center group"
+            title="拖曳調整設定欄寬度"
+          >
+            <div className="w-1 h-12 rounded-full bg-gray-300 group-hover:bg-blue-400 transition-colors flex flex-col items-center justify-center gap-0.5">
+              <div className="w-0.5 h-0.5 rounded-full bg-white" />
+              <div className="w-0.5 h-0.5 rounded-full bg-white" />
+              <div className="w-0.5 h-0.5 rounded-full bg-white" />
+            </div>
+          </div>
 
           {/* Chart type selector */}
           <div className="px-4 py-3 border-b border-gray-100">
