@@ -72,8 +72,9 @@ app.get('/api/health', (req, res) => res.json({ status: 'ok', timestamp: new Dat
     // Auto-restore code skill runners
     try {
       const { db } = require('./database-oracle');
-      const { autoRestoreRunners } = require('./services/skillRunner');
+      const { autoRestoreRunners, startHealthMonitor } = require('./services/skillRunner');
       autoRestoreRunners(db);
+      startHealthMonitor(db);
     } catch (e) {
       console.error('[SkillRunner] autoRestoreRunners failed:', e.message);
     }

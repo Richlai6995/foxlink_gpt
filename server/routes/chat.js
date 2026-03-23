@@ -1151,6 +1151,16 @@ router.post('/sessions/:id/messages', upload.array('files', 10), async (req, res
     const { resolveToolRefs, hasToolRefs } = require('../services/promptResolver');
     const { substituteVarsAsync } = require('../services/scheduledTaskService');
 
+    async function checkCodeSkillHealth(endpointUrl) {
+      try {
+        const r = await Promise.race([
+          fetch(endpointUrl.replace(/\/$/, '') + '/health'),
+          new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 1000)),
+        ]);
+        return r.ok;
+      } catch (_) { return false; }
+    }
+
     for (const sk of sessionSkills) {
       console.log(`[Skill] id=${sk.id} name="${sk.name}" type=${sk.type} mode=${sk.endpoint_mode} url=${sk.endpoint_url}`);
       if (sk.type === 'builtin' && sk.system_prompt) {
@@ -1172,6 +1182,15 @@ router.post('/sessions/:id/messages', upload.array('files', 10), async (req, res
         }
         skillSystemPrompts.push(`# Skill: ${sk.name}\n${resolvedSystemPrompt}`);
       } else if ((sk.type === 'external' || sk.type === 'code') && sk.endpoint_url) {
+        // For code runners, do a quick health check first
+        if (sk.type === 'code') {
+          const healthy = await checkCodeSkillHealth(sk.endpoint_url);
+          if (!healthy) {
+            console.warn(`[Skill] "${sk.name}" health check failed (url=${sk.endpoint_url}), skipping`);
+            sendEvent({ type: 'status', message: `⚠️ Skill "${sk.name}" 離線，已跳過` });
+            continue;
+          }
+        }
         if (sk.endpoint_mode === 'answer') {
           externalAnswerSkill = sk;
         } else {

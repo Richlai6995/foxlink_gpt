@@ -3,12 +3,13 @@
  * skillRunner.js
  * Manages child-process lifecycle for type='code' skills.
  * Each skill gets its own Express server in a subprocess,
- * bound to 127.0.0.1 on a dynamically assigned port (4000–4999).
+ * bound to 127.0.0.1 on a dynamically assigned port (40100–40999).
  */
 
-const { spawn, execFile } = require('child_process');
+const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
+const net = require('net');
 
 const RUNNERS_DIR = path.join(__dirname, '../skill_runners');
 const TEMPLATE_DIR = path.join(__dirname, '../skill_runner_template');
@@ -20,36 +21,60 @@ const runningProcesses = new Map();
 // Set of ports currently in use
 const usedPorts = new Set();
 
-// SSE subscriber map: skillId → Set<res>
-const logSubscribers = new Map();
+// SSE subscriber maps
+const logSubscribers = new Map();    // skillId → Set<res>
+const statusSubscribers = new Set(); // admin panel live status
 
 // ── Port allocation ───────────────────────────────────────────────────────────
 function allocatePort() {
   for (let p = PORT_MIN; p <= PORT_MAX; p++) {
-    if (!usedPorts.has(p)) {
-      usedPorts.add(p);
-      return p;
-    }
+    if (!usedPorts.has(p)) { usedPorts.add(p); return p; }
   }
-  throw new Error('No available ports in range 4000-4999');
+  throw new Error('No available ports in range 40100-40999');
 }
 
-function releasePort(port) {
-  usedPorts.delete(port);
+function releasePort(port) { usedPorts.delete(port); }
+
+function isPortFree(port) {
+  return new Promise(resolve => {
+    const s = net.createServer();
+    s.once('error', () => resolve(false));
+    s.once('listening', () => s.close(() => resolve(true)));
+    s.listen(port, '127.0.0.1');
+  });
+}
+
+async function waitForPortFree(port, maxMs = 5000) {
+  const deadline = Date.now() + maxMs;
+  while (Date.now() < deadline) {
+    if (await isPortFree(port)) return true;
+    await new Promise(r => setTimeout(r, 300));
+  }
+  return false;
+}
+
+// ── Status broadcast ──────────────────────────────────────────────────────────
+function pushStatusUpdate(skillId, status, extra = {}) {
+  const data = JSON.stringify({ skillId: Number(skillId), status, ...extra });
+  for (const res of statusSubscribers) {
+    try { res.write(`data: ${data}\n\n`); }
+    catch (_) { statusSubscribers.delete(res); }
+  }
 }
 
 // ── Log helper ────────────────────────────────────────────────────────────────
 const MAX_LOG_LINES = 500;
 function appendLog(skillId, line) {
   const entry = runningProcesses.get(skillId);
+  const ts = new Date().toISOString();
+  const full = `${ts} ${line}`;
   if (entry) {
-    entry.logLines.push(`${new Date().toISOString()} ${line}`);
+    entry.logLines.push(full);
     if (entry.logLines.length > MAX_LOG_LINES) entry.logLines.shift();
   }
-  // Push to SSE subscribers
   const subs = logSubscribers.get(String(skillId));
   if (subs) {
-    const data = JSON.stringify({ line: `${new Date().toISOString()} ${line}` });
+    const data = JSON.stringify({ line: full });
     for (const res of subs) {
       try { res.write(`data: ${data}\n\n`); } catch (_) {}
     }
@@ -60,7 +85,6 @@ function appendLog(skillId, line) {
 function ensureRunnerDir(skillId) {
   const dir = path.join(RUNNERS_DIR, String(skillId));
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-  // Copy template runner.js if not present
   const runnerDst = path.join(dir, 'runner.js');
   if (!fs.existsSync(runnerDst)) {
     fs.copyFileSync(path.join(TEMPLATE_DIR, 'runner.js'), runnerDst);
@@ -78,91 +102,99 @@ function saveCode(skillId, code) {
 function generatePackageJson(skillId, packages) {
   const dir = path.join(RUNNERS_DIR, String(skillId));
   const deps = {};
-  for (const pkg of packages) {
-    if (pkg && pkg.trim()) deps[pkg.trim()] = '*';
-  }
-  // Always include express for the wrapper
+  for (const pkg of packages) { if (pkg && pkg.trim()) deps[pkg.trim()] = '*'; }
   deps['express'] = '^4.18.0';
-  const pkgJson = {
-    name: `skill-runner-${skillId}`,
-    version: '1.0.0',
-    private: true,
-    dependencies: deps,
-  };
+  const pkgJson = { name: `skill-runner-${skillId}`, version: '1.0.0', private: true, dependencies: deps };
   fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify(pkgJson, null, 2), 'utf8');
 }
 
-// ── npm install (returns a Promise, streams log lines via logCb) ──────────────
+// ── npm install ───────────────────────────────────────────────────────────────
 function installPackages(skillId, packages, logCb) {
   return new Promise((resolve, reject) => {
     const dir = path.join(RUNNERS_DIR, String(skillId));
-    if (!fs.existsSync(dir)) {
-      return reject(new Error('Runner directory not found. Save code first.'));
-    }
+    if (!fs.existsSync(dir)) return reject(new Error('Runner directory not found. Save code first.'));
     generatePackageJson(skillId, packages);
-
     logCb?.(`[install] Running npm install in ${dir}`);
     const child = spawn('npm', ['install', '--prefer-offline'], {
       cwd: dir,
       stdio: ['ignore', 'pipe', 'pipe'],
       shell: process.platform === 'win32',
     });
-
-    child.stdout.on('data', (d) => {
-      for (const line of d.toString().split('\n')) {
-        if (line.trim()) logCb?.(`[npm] ${line}`);
-      }
-    });
-    child.stderr.on('data', (d) => {
-      for (const line of d.toString().split('\n')) {
-        if (line.trim()) logCb?.(`[npm:err] ${line}`);
-      }
-    });
-    child.on('close', (code) => {
-      if (code === 0) {
-        logCb?.('[install] npm install completed successfully');
-        resolve();
-      } else {
-        reject(new Error(`npm install exited with code ${code}`));
-      }
-    });
+    child.stdout.on('data', d => { for (const l of d.toString().split('\n')) { if (l.trim()) logCb?.(`[npm] ${l}`); } });
+    child.stderr.on('data', d => { for (const l of d.toString().split('\n')) { if (l.trim()) logCb?.(`[npm:err] ${l}`); } });
+    child.on('close', code => { code === 0 ? resolve() : reject(new Error(`npm install exited with code ${code}`)); });
     child.on('error', reject);
   });
 }
 
-// ── Force kill helper ─────────────────────────────────────────────────────────
+// ── Force kill ────────────────────────────────────────────────────────────────
 function forceKillProcess(proc, pid) {
   try { proc.kill('SIGKILL'); } catch (_) {}
-  // Fallback: kill by PID directly (in case proc object is stale)
-  if (pid) {
-    try { process.kill(pid, 'SIGKILL'); } catch (_) {}
+  if (pid) { try { process.kill(pid, 'SIGKILL'); } catch (_) {} }
+}
+
+// ── Kill runner (async, with stopping state) ──────────────────────────────────
+async function killRunner(skillId, db) {
+  pushStatusUpdate(skillId, 'stopping');
+  try { db.prepare(`UPDATE skills SET code_status='stopping' WHERE id=?`).run(skillId); } catch (_) {}
+
+  const entry = runningProcesses.get(skillId);
+
+  if (!entry) {
+    // No in-memory entry — try kill by PID from DB
+    try {
+      const row = db.prepare(`SELECT code_pid, code_port FROM skills WHERE id=?`).get(skillId);
+      if (row?.code_pid) { try { process.kill(row.code_pid, 'SIGKILL'); } catch (_) {} }
+      if (row?.code_port) await waitForPortFree(row.code_port, 3000);
+    } catch (_) {}
+    try { db.prepare(`UPDATE skills SET code_status='stopped', code_port=NULL, code_pid=NULL, endpoint_url=NULL WHERE id=?`).run(skillId); } catch (_) {}
+    pushStatusUpdate(skillId, 'stopped');
+    return false;
   }
+
+  const { port } = entry;
+
+  // SIGTERM first, wait up to 3s, then SIGKILL
+  try { entry.process.kill('SIGTERM'); } catch (_) {}
+  await Promise.race([
+    new Promise(r => entry.process.once('exit', r)),
+    new Promise(r => setTimeout(r, 3000)),
+  ]);
+  forceKillProcess(entry.process, entry.process.pid);
+
+  releasePort(port);
+  runningProcesses.delete(skillId);
+
+  // Wait for OS to release port (max 5s)
+  await waitForPortFree(port, 5000);
+
+  try { db.prepare(`UPDATE skills SET code_status='stopped', code_port=NULL, code_pid=NULL, endpoint_url=NULL WHERE id=?`).run(skillId); } catch (_) {}
+  pushStatusUpdate(skillId, 'stopped');
+  return true;
 }
 
 // ── Spawn runner ──────────────────────────────────────────────────────────────
-function spawnRunner(skill, db) {
+async function spawnRunner(skill, db) {
+  const skillId = skill.id;
+  const dir = ensureRunnerDir(skillId);
+  const userCodePath = path.join(dir, 'user_code.js');
+  if (!fs.existsSync(userCodePath)) throw new Error('user_code.js not found. Save code first.');
+
+  // Kill existing process if any, then wait for port release
+  const existing = runningProcesses.get(skillId);
+  if (existing) {
+    const existingPort = existing.port;
+    forceKillProcess(existing.process, existing.process.pid);
+    releasePort(existingPort);
+    runningProcesses.delete(skillId);
+    await waitForPortFree(existingPort, 3000);
+  }
+
+  // Mark as starting
+  pushStatusUpdate(skillId, 'starting');
+  try { db.prepare(`UPDATE skills SET code_status='starting', code_error=NULL WHERE id=?`).run(skillId); } catch (_) {}
+
   return new Promise((resolve, reject) => {
-    const skillId = skill.id;
-    const dir = ensureRunnerDir(skillId);
-    const userCodePath = path.join(dir, 'user_code.js');
-
-    if (!fs.existsSync(userCodePath)) {
-      return reject(new Error('user_code.js not found. Save code first.'));
-    }
-
-    // Kill existing process if any
-    const existing = runningProcesses.get(skillId);
-    if (existing) {
-      forceKillProcess(existing.process, existing.process.pid);
-      releasePort(existing.port);
-      runningProcesses.delete(skillId);
-    }
-
-    // Mark as starting in DB so UI can show disabled state
-    try {
-      db.prepare(`UPDATE skills SET code_status='starting', code_error=NULL WHERE id=?`).run(skillId);
-    } catch (_) {}
-
     const port = allocatePort();
     const child = spawn('node', ['runner.js'], {
       cwd: dir,
@@ -172,19 +204,29 @@ function spawnRunner(skill, db) {
 
     runningProcesses.set(skillId, { process: child, port, logLines: [] });
 
+    const cleanup = (errMsg) => {
+      try { child.kill('SIGKILL'); } catch (_) {}
+      releasePort(port);
+      runningProcesses.delete(skillId);
+      try { db.prepare(`UPDATE skills SET code_status='error', code_port=NULL, code_pid=NULL, code_error=?, endpoint_url=NULL WHERE id=?`).run(errMsg, skillId); } catch (_) {}
+      pushStatusUpdate(skillId, 'error', { error: errMsg });
+    };
+
+    const timer = setTimeout(() => {
+      child.removeListener('message', onReady);
+      cleanup('Startup timed out after 10s');
+      reject(new Error('Runner startup timed out'));
+    }, 10000);
+
     const onReady = (msg) => {
       if (msg?.ready) {
         clearTimeout(timer);
         child.removeListener('message', onReady);
-        // Update DB
         try {
-          db.prepare(
-            `UPDATE skills SET code_status='running', code_port=?, code_pid=?, code_error=NULL,
-             endpoint_url=? WHERE id=?`
-          ).run(port, child.pid, `http://127.0.0.1:${port}`, skillId);
-        } catch (e) {
-          console.error('[skillRunner] DB update failed:', e.message);
-        }
+          db.prepare(`UPDATE skills SET code_status='running', code_port=?, code_pid=?, code_error=NULL, endpoint_url=? WHERE id=?`)
+            .run(port, child.pid, `http://127.0.0.1:${port}`, skillId);
+        } catch (e) { console.error('[skillRunner] DB update failed:', e.message); }
+        pushStatusUpdate(skillId, 'running', { port, pid: child.pid });
         resolve({ port, pid: child.pid });
       } else if (msg?.error) {
         clearTimeout(timer);
@@ -194,93 +236,32 @@ function spawnRunner(skill, db) {
       }
     };
 
-    const timer = setTimeout(() => {
-      child.removeListener('message', onReady);
-      cleanup('Startup timed out after 10s');
-      reject(new Error('Runner startup timed out'));
-    }, 10000);
-
-    function cleanup(errMsg) {
-      try { child.kill('SIGTERM'); } catch (_) {}
-      releasePort(port);
-      runningProcesses.delete(skillId);
-      try {
-        db.prepare(
-          `UPDATE skills SET code_status='error', code_port=NULL, code_pid=NULL, code_error=?, endpoint_url=NULL WHERE id=?`
-        ).run(errMsg, skillId);
-      } catch (_) {}
-    }
-
     child.on('message', onReady);
-
-    child.stdout.on('data', (d) => {
-      for (const line of d.toString().split('\n')) {
-        if (line.trim()) appendLog(skillId, `[out] ${line}`);
-      }
-    });
-    child.stderr.on('data', (d) => {
-      for (const line of d.toString().split('\n')) {
-        if (line.trim()) appendLog(skillId, `[err] ${line}`);
-      }
-    });
+    child.stdout.on('data', d => { for (const l of d.toString().split('\n')) { if (l.trim()) appendLog(skillId, `[out] ${l}`); } });
+    child.stderr.on('data', d => { for (const l of d.toString().split('\n')) { if (l.trim()) appendLog(skillId, `[err] ${l}`); } });
 
     child.on('exit', (code, signal) => {
-      const entry = runningProcesses.get(skillId);
-      if (entry) {
-        releasePort(entry.port);
-        runningProcesses.delete(skillId);
-      }
+      const e = runningProcesses.get(skillId);
+      if (e) { releasePort(e.port); runningProcesses.delete(skillId); }
       appendLog(skillId, `[exit] process exited code=${code} signal=${signal}`);
-      try {
-        db.prepare(
-          `UPDATE skills SET code_status='stopped', code_port=NULL, code_pid=NULL WHERE id=?`
-        ).run(skillId);
-      } catch (_) {}
+      try { db.prepare(`UPDATE skills SET code_status='stopped', code_port=NULL, code_pid=NULL WHERE id=?`).run(skillId); } catch (_) {}
+      pushStatusUpdate(skillId, 'stopped');
     });
 
-    child.on('error', (err) => {
-      appendLog(skillId, `[error] ${err.message}`);
-    });
+    child.on('error', err => { appendLog(skillId, `[error] ${err.message}`); });
   });
-}
-
-// ── Kill runner ───────────────────────────────────────────────────────────────
-function killRunner(skillId, db) {
-  const entry = runningProcesses.get(skillId);
-  if (!entry) {
-    // No in-memory entry — try to kill by stored PID from DB
-    try {
-      const row = db.prepare(`SELECT code_pid FROM skills WHERE id=?`).get(skillId);
-      if (row?.code_pid) {
-        try { process.kill(row.code_pid, 'SIGKILL'); } catch (_) {}
-      }
-      db.prepare(`UPDATE skills SET code_status='stopped', code_port=NULL, code_pid=NULL, endpoint_url=NULL WHERE id=?`).run(skillId);
-    } catch (_) {}
-    return false;
-  }
-  forceKillProcess(entry.process, entry.process.pid);
-  releasePort(entry.port);
-  runningProcesses.delete(skillId);
-  try {
-    db.prepare(
-      `UPDATE skills SET code_status='stopped', code_port=NULL, code_pid=NULL, endpoint_url=NULL WHERE id=?`
-    ).run(skillId);
-  } catch (_) {}
-  return true;
 }
 
 // ── Restart runner ────────────────────────────────────────────────────────────
 async function restartRunner(skill, db) {
-  killRunner(skill.id, db);
+  await killRunner(skill.id, db);
   return spawnRunner(skill, db);
 }
 
 // ── Auto-restore on server start ──────────────────────────────────────────────
 async function autoRestoreRunners(db) {
   try {
-    const skills = await db.prepare(
-      `SELECT * FROM skills WHERE type='code' AND code_status='running'`
-    ).all();
+    const skills = await db.prepare(`SELECT * FROM skills WHERE type='code' AND code_status IN ('running','starting','stopping')`).all();
     console.log(`[skillRunner] Auto-restoring ${skills.length} code skill(s)...`);
     for (const skill of skills) {
       try {
@@ -295,39 +276,52 @@ async function autoRestoreRunners(db) {
   }
 }
 
-// ── Log stream subscription ───────────────────────────────────────────────────
+// ── Health Monitor ────────────────────────────────────────────────────────────
+function startHealthMonitor(db) {
+  const INTERVAL_MS = 30000;
+  setInterval(async () => {
+    for (const [skillId, entry] of runningProcesses.entries()) {
+      try {
+        const resp = await Promise.race([
+          fetch(`http://127.0.0.1:${entry.port}/health`),
+          new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 2000)),
+        ]);
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      } catch (e) {
+        console.warn(`[skillRunner] Health check failed for skill #${skillId}: ${e.message}`);
+        appendLog(skillId, `[health] check failed: ${e.message} — marking as error`);
+        releasePort(entry.port);
+        runningProcesses.delete(skillId);
+        pushStatusUpdate(skillId, 'error', { error: 'Process died unexpectedly' });
+        try {
+          db.prepare(`UPDATE skills SET code_status='error', code_port=NULL, code_pid=NULL, code_error='Process died unexpectedly' WHERE id=?`).run(skillId);
+        } catch (_) {}
+      }
+    }
+  }, INTERVAL_MS);
+}
+
+// ── Log & Status subscription ─────────────────────────────────────────────────
 function subscribeLog(skillId, res) {
   const key = String(skillId);
   if (!logSubscribers.has(key)) logSubscribers.set(key, new Set());
   logSubscribers.get(key).add(res);
 }
-
-function unsubscribeLog(skillId, res) {
-  const key = String(skillId);
-  logSubscribers.get(key)?.delete(res);
-}
-
-function getLogs(skillId) {
-  return runningProcesses.get(skillId)?.logLines || [];
-}
-
+function unsubscribeLog(skillId, res) { logSubscribers.get(String(skillId))?.delete(res); }
+function getLogs(skillId) { return runningProcesses.get(skillId)?.logLines || []; }
 function getStatus(skillId) {
-  const entry = runningProcesses.get(skillId);
-  if (!entry) return { running: false };
-  return { running: true, port: entry.port, pid: entry.process.pid };
+  const e = runningProcesses.get(skillId);
+  if (!e) return { running: false };
+  return { running: true, port: e.port, pid: e.process.pid };
 }
+function subscribeStatus(res) { statusSubscribers.add(res); }
+function unsubscribeStatus(res) { statusSubscribers.delete(res); }
 
 module.exports = {
-  saveCode,
-  generatePackageJson,
-  installPackages,
-  spawnRunner,
-  killRunner,
-  restartRunner,
-  autoRestoreRunners,
-  subscribeLog,
-  unsubscribeLog,
-  getLogs,
-  getStatus,
+  saveCode, generatePackageJson, installPackages,
+  spawnRunner, killRunner, restartRunner,
+  autoRestoreRunners, startHealthMonitor,
+  subscribeLog, unsubscribeLog, getLogs, getStatus,
+  subscribeStatus, unsubscribeStatus, pushStatusUpdate,
   ensureRunnerDir,
 };

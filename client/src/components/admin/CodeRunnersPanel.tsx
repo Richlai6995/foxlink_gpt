@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { Play, Square, RotateCcw, Package, Terminal, X, AlertCircle, CheckCircle, Loader2 } from 'lucide-react'
+import { Play, Square, RotateCcw, Package, Terminal, X, AlertCircle, CheckCircle, Loader2, ChevronDown, ChevronRight } from 'lucide-react'
 import api from '../../lib/api'
 
 interface CodeRunner {
@@ -26,11 +26,16 @@ export default function CodeRunnersPanel() {
     const [logLines, setLogLines] = useState<string[]>([])
     const logEndRef = useRef<HTMLDivElement>(null)
     const sseRef = useRef<EventSource | null>(null)
+    const statusSseRef = useRef<EventSource | null>(null)
     const [actionLoading, setActionLoading] = useState<Record<number, string>>({})
-    // Install confirm dialog
     const [installDialog, setInstallDialog] = useState<{ runner: CodeRunner } | null>(null)
     const [installPkgInput, setInstallPkgInput] = useState('')
     const [installPkgs, setInstallPkgs] = useState<string[]>([])
+    // Inline log panel state
+    const [expandedLogs, setExpandedLogs] = useState<Set<number>>(new Set())
+    const [inlineLogs, setInlineLogs] = useState<Record<number, string[]>>({})
+    const inlineSseRefs = useRef<Record<number, EventSource>>({})
+    const inlineLogEndRefs = useRef<Record<number, HTMLDivElement | null>>({})
 
     const load = useCallback(async () => {
         setLoading(true)
@@ -44,29 +49,108 @@ export default function CodeRunnersPanel() {
         }
     }, [])
 
+    // Initial load
     useEffect(() => { load() }, [load])
+
+    // SSE status stream — real-time runner status updates
+    useEffect(() => {
+        const token = localStorage.getItem('token')
+        const es = new EventSource(`/api/admin/skill-runners/status-stream?token=${token}`)
+        statusSseRef.current = es
+        es.onmessage = (e) => {
+            try {
+                const d = JSON.parse(e.data)
+                setRunners(prev => prev.map(r =>
+                    r.id === d.skillId
+                        ? {
+                            ...r,
+                            code_status: d.status,
+                            runtime_running: d.status === 'running',
+                            runtime_port: d.port ?? (d.status === 'running' ? r.runtime_port : null),
+                            runtime_pid: d.pid ?? (d.status === 'running' ? r.runtime_pid : null),
+                            code_error: d.error ?? (d.status === 'error' ? r.code_error : null),
+                          }
+                        : r
+                ))
+                // Clear actionLoading when status settles
+                if (['running', 'stopped', 'error'].includes(d.status)) {
+                    setActionLoading(prev => { const n = { ...prev }; delete n[d.skillId]; return n })
+                }
+            } catch (_) {}
+        }
+        es.onerror = () => { /* auto-reconnects */ }
+        return () => { es.close(); statusSseRef.current = null }
+    }, [])
 
     useEffect(() => {
         logEndRef.current?.scrollIntoView({ behavior: 'smooth' })
     }, [logLines])
 
+    // Auto-scroll inline logs
+    useEffect(() => {
+        for (const id of expandedLogs) {
+            inlineLogEndRefs.current[id]?.scrollIntoView({ behavior: 'smooth' })
+        }
+    }, [inlineLogs, expandedLogs])
+
     const doAction = async (skillId: number, action: 'start' | 'stop' | 'restart') => {
         setActionLoading(p => ({ ...p, [skillId]: action }))
         try {
             await api.post(`/admin/skill-runners/${skillId}/${action}`)
-            await load()
+            // For stop: server returns 202 immediately, SSE will update status
+            // For start/restart: server awaits spawn, then SSE fires
+            if (action !== 'stop') {
+                await load()
+            }
         } catch (e: any) {
             setError(e.response?.data?.error || `${action} 失敗`)
-        } finally {
+            setActionLoading(p => { const n = { ...p }; delete n[skillId]; return n })
+        }
+        // For stop, actionLoading is cleared by SSE when status becomes 'stopped'
+        if (action !== 'stop') {
             setActionLoading(p => { const n = { ...p }; delete n[skillId]; return n })
         }
     }
+
+    const toggleInlineLog = (runnerId: number) => {
+        setExpandedLogs(prev => {
+            const next = new Set(prev)
+            if (next.has(runnerId)) {
+                next.delete(runnerId)
+                inlineSseRefs.current[runnerId]?.close()
+                delete inlineSseRefs.current[runnerId]
+            } else {
+                next.add(runnerId)
+                setInlineLogs(p => ({ ...p, [runnerId]: [] }))
+                const token = localStorage.getItem('token')
+                const es = new EventSource(`/api/admin/skill-runners/${runnerId}/logs?token=${token}`)
+                inlineSseRefs.current[runnerId] = es
+                es.onmessage = (e) => {
+                    try {
+                        const d = JSON.parse(e.data)
+                        if (d.line) setInlineLogs(p => ({
+                            ...p,
+                            [runnerId]: [...(p[runnerId] || []).slice(-49), d.line],
+                        }))
+                    } catch (_) {}
+                }
+                es.onerror = () => {}
+            }
+            return next
+        })
+    }
+
+    // Close all inline SSEs on unmount
+    useEffect(() => {
+        return () => {
+            for (const es of Object.values(inlineSseRefs.current)) es.close()
+        }
+    }, [])
 
     const openLog = (runner: CodeRunner) => {
         if (sseRef.current) { sseRef.current.close(); sseRef.current = null }
         setLogLines([])
         setLogModal({ skillId: runner.id, name: runner.name, mode: 'log' })
-
         const token = localStorage.getItem('token')
         const es = new EventSource(`/api/admin/skill-runners/${runner.id}/logs?token=${token}`)
         sseRef.current = es
@@ -80,7 +164,6 @@ export default function CodeRunnersPanel() {
     }
 
     const openInstall = (runner: CodeRunner) => {
-        // Show confirm dialog first
         setInstallPkgs([...runner.code_packages])
         setInstallPkgInput('')
         setInstallDialog({ runner })
@@ -91,7 +174,6 @@ export default function CodeRunnersPanel() {
         if (sseRef.current) { sseRef.current.close(); sseRef.current = null }
         setLogLines([])
         setLogModal({ skillId: runner.id, name: runner.name, mode: 'install' })
-
         const token = localStorage.getItem('token')
         fetch(`/api/admin/skill-runners/${runner.id}/install`, {
             method: 'POST',
@@ -131,10 +213,47 @@ export default function CodeRunnersPanel() {
 
     const statusBadge = (runner: CodeRunner) => {
         const s = runner.runtime_running ? 'running' : runner.code_status
-        if (s === 'running') return <span className="flex items-center gap-1 text-xs text-emerald-600 font-medium"><CheckCircle size={11} />運行中 :{runner.runtime_port}</span>
+        if (s === 'running') return <span className="flex items-center gap-1 text-xs text-emerald-600 font-medium"><CheckCircle size={11} />運行中 :{runner.runtime_port || runner.code_port}</span>
         if (s === 'error') return <span className="flex items-center gap-1 text-xs text-red-600 font-medium"><AlertCircle size={11} />錯誤</span>
         if (s === 'starting') return <span className="flex items-center gap-1 text-xs text-amber-600 font-medium"><Loader2 size={11} className="animate-spin" />啟動中</span>
+        if (s === 'stopping') return <span className="flex items-center gap-1 text-xs text-orange-500 font-medium"><Loader2 size={11} className="animate-spin" />停止中</span>
         return <span className="text-xs text-slate-400">已停止</span>
+    }
+
+    const actionButton = (runner: CodeRunner) => {
+        const isLoading = !!actionLoading[runner.id]
+        const s = runner.runtime_running ? 'running' : runner.code_status
+
+        if (s === 'running') {
+            return (
+                <button onClick={() => doAction(runner.id, 'stop')} disabled={isLoading}
+                    title="停止"
+                    className="flex items-center gap-1 px-3 py-1.5 text-xs bg-red-50 text-red-600 border border-red-200 rounded-lg hover:bg-red-100 disabled:opacity-50">
+                    {isLoading ? <Loader2 size={12} className="animate-spin" /> : <Square size={12} />}停止
+                </button>
+            )
+        }
+        if (s === 'starting' || (isLoading && actionLoading[runner.id] === 'start')) {
+            return (
+                <button disabled className="flex items-center gap-1 px-3 py-1.5 text-xs bg-amber-50 text-amber-600 border border-amber-200 rounded-lg opacity-70 cursor-not-allowed">
+                    <Loader2 size={12} className="animate-spin" />啟動中
+                </button>
+            )
+        }
+        if (s === 'stopping' || (isLoading && actionLoading[runner.id] === 'stop')) {
+            return (
+                <button disabled className="flex items-center gap-1 px-3 py-1.5 text-xs bg-orange-50 text-orange-500 border border-orange-200 rounded-lg opacity-70 cursor-not-allowed">
+                    <Loader2 size={12} className="animate-spin" />停止中
+                </button>
+            )
+        }
+        return (
+            <button onClick={() => doAction(runner.id, 'start')} disabled={isLoading}
+                title="啟動"
+                className="flex items-center gap-1 px-3 py-1.5 text-xs bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50">
+                {isLoading ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />}啟動
+            </button>
+        )
     }
 
     return (
@@ -161,74 +280,71 @@ export default function CodeRunnersPanel() {
 
             <div className="space-y-3">
                 {runners.map(runner => (
-                    <div key={runner.id} className="bg-white border border-slate-200 rounded-xl p-4 flex items-center gap-4">
-                        <div className="text-2xl">{runner.icon}</div>
-                        <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2 mb-0.5">
-                                <span className="font-medium text-slate-800 text-sm">{runner.name}</span>
-                                <span className="text-xs text-slate-400">#{runner.id}</span>
-                            </div>
-                            <div className="flex items-center gap-3">
-                                {statusBadge(runner)}
-                                {runner.runtime_pid && <span className="text-xs text-slate-400">PID: {runner.runtime_pid}</span>}
-                                {runner.code_packages.length > 0 && (
-                                    <span className="text-xs text-slate-400">pkg: {runner.code_packages.join(', ')}</span>
+                    <div key={runner.id} className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+                        {/* Runner header row */}
+                        <div className="p-4 flex items-center gap-4">
+                            <div className="text-2xl">{runner.icon}</div>
+                            <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2 mb-0.5">
+                                    <span className="font-medium text-slate-800 text-sm">{runner.name}</span>
+                                    <span className="text-xs text-slate-400">#{runner.id}</span>
+                                </div>
+                                <div className="flex items-center gap-3">
+                                    {statusBadge(runner)}
+                                    {(runner.runtime_pid || runner.code_pid) && (
+                                        <span className="text-xs text-slate-400">PID: {runner.runtime_pid || runner.code_pid}</span>
+                                    )}
+                                    {runner.code_packages.length > 0 && (
+                                        <span className="text-xs text-slate-400">pkg: {runner.code_packages.join(', ')}</span>
+                                    )}
+                                </div>
+                                {runner.code_error && !runner.runtime_running && runner.code_status !== 'stopping' && (
+                                    <p className="text-xs text-red-500 mt-1 truncate" title={runner.code_error}>{runner.code_error}</p>
                                 )}
                             </div>
-                            {runner.code_error && !runner.runtime_running && (
-                                <p className="text-xs text-red-500 mt-1 truncate" title={runner.code_error}>{runner.code_error}</p>
-                            )}
-                        </div>
-                        <div className="flex items-center gap-1.5 shrink-0">
-                            {runner.runtime_running ? (
+                            <div className="flex items-center gap-1.5 shrink-0">
+                                {actionButton(runner)}
                                 <button
-                                    onClick={() => doAction(runner.id, 'stop')}
-                                    disabled={!!actionLoading[runner.id]}
-                                    title="停止"
-                                    className="flex items-center gap-1 px-3 py-1.5 text-xs bg-red-50 text-red-600 border border-red-200 rounded-lg hover:bg-red-100 disabled:opacity-50"
-                                >
-                                    {actionLoading[runner.id] === 'stop' ? <Loader2 size={12} className="animate-spin" /> : <Square size={12} />}
-                                    停止
+                                    onClick={() => doAction(runner.id, 'restart')}
+                                    disabled={!!actionLoading[runner.id] || runner.code_status === 'stopping'}
+                                    title="重啟"
+                                    className="p-1.5 rounded-lg border border-slate-200 text-slate-500 hover:text-blue-600 hover:border-blue-300 disabled:opacity-50">
+                                    {actionLoading[runner.id] === 'restart' ? <Loader2 size={14} className="animate-spin" /> : <RotateCcw size={14} />}
                                 </button>
-                            ) : runner.code_status === 'starting' || actionLoading[runner.id] === 'start' ? (
-                                <button disabled className="flex items-center gap-1 px-3 py-1.5 text-xs bg-amber-50 text-amber-600 border border-amber-200 rounded-lg opacity-70 cursor-not-allowed">
-                                    <Loader2 size={12} className="animate-spin" />
-                                    啟動中
+                                <button onClick={() => openInstall(runner)} title="安裝套件"
+                                    className="p-1.5 rounded-lg border border-slate-200 text-slate-500 hover:text-emerald-600 hover:border-emerald-300">
+                                    <Package size={14} />
                                 </button>
-                            ) : (
-                                <button
-                                    onClick={() => doAction(runner.id, 'start')}
-                                    disabled={!!actionLoading[runner.id]}
-                                    title="啟動"
-                                    className="flex items-center gap-1 px-3 py-1.5 text-xs bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50"
-                                >
-                                    {actionLoading[runner.id] === 'start' ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />}
-                                    啟動
+                                <button onClick={() => openLog(runner)} title="查看完整日誌"
+                                    className="p-1.5 rounded-lg border border-slate-200 text-slate-500 hover:text-slate-700 hover:border-slate-400">
+                                    <Terminal size={14} />
                                 </button>
-                            )}
-                            <button
-                                onClick={() => doAction(runner.id, 'restart')}
-                                disabled={!!actionLoading[runner.id]}
-                                title="重啟"
-                                className="p-1.5 rounded-lg border border-slate-200 text-slate-500 hover:text-blue-600 hover:border-blue-300 disabled:opacity-50"
-                            >
-                                {actionLoading[runner.id] === 'restart' ? <Loader2 size={14} className="animate-spin" /> : <RotateCcw size={14} />}
-                            </button>
-                            <button
-                                onClick={() => openInstall(runner)}
-                                title="安裝套件"
-                                className="p-1.5 rounded-lg border border-slate-200 text-slate-500 hover:text-emerald-600 hover:border-emerald-300"
-                            >
-                                <Package size={14} />
-                            </button>
-                            <button
-                                onClick={() => openLog(runner)}
-                                title="查看日誌"
-                                className="p-1.5 rounded-lg border border-slate-200 text-slate-500 hover:text-slate-700 hover:border-slate-400"
-                            >
-                                <Terminal size={14} />
-                            </button>
+                                <button onClick={() => toggleInlineLog(runner.id)} title="展開/收合即時 Log"
+                                    className={`p-1.5 rounded-lg border text-slate-500 hover:text-indigo-600 hover:border-indigo-300 ${expandedLogs.has(runner.id) ? 'bg-indigo-50 border-indigo-200 text-indigo-600' : 'border-slate-200'}`}>
+                                    {expandedLogs.has(runner.id) ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                                </button>
+                            </div>
                         </div>
+
+                        {/* Inline log panel */}
+                        {expandedLogs.has(runner.id) && (
+                            <div className="border-t border-slate-100 bg-slate-900">
+                                <div className="flex items-center justify-between px-3 py-1.5 border-b border-slate-700">
+                                    <span className="text-xs text-slate-400 font-mono">即時 stdout/stderr</span>
+                                    <button onClick={() => setInlineLogs(p => ({ ...p, [runner.id]: [] }))}
+                                        className="text-xs text-slate-500 hover:text-slate-300">清除</button>
+                                </div>
+                                <div className="h-40 overflow-auto p-3 font-mono text-xs text-emerald-300 space-y-0.5">
+                                    {(!inlineLogs[runner.id] || inlineLogs[runner.id].length === 0) && (
+                                        <p className="text-slate-500 italic">等待輸出...</p>
+                                    )}
+                                    {(inlineLogs[runner.id] || []).map((line, i) => (
+                                        <div key={i} className="break-all">{line}</div>
+                                    ))}
+                                    <div ref={el => { inlineLogEndRefs.current[runner.id] = el }} />
+                                </div>
+                            </div>
+                        )}
                     </div>
                 ))}
             </div>
@@ -256,9 +372,7 @@ export default function CodeRunnersPanel() {
                                 {installPkgs.length === 0 && <span className="text-xs text-slate-400 italic">（只安裝 express wrapper，不含其他套件）</span>}
                             </div>
                             <div className="flex gap-2">
-                                <input
-                                    value={installPkgInput}
-                                    onChange={e => setInstallPkgInput(e.target.value)}
+                                <input value={installPkgInput} onChange={e => setInstallPkgInput(e.target.value)}
                                     onKeyDown={e => {
                                         if (e.key === 'Enter') {
                                             e.preventDefault()
@@ -270,23 +384,17 @@ export default function CodeRunnersPanel() {
                                     placeholder="輸入套件名稱後按 Enter，如 axios"
                                     className="flex-1 border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-300 font-mono"
                                 />
-                                <button
-                                    type="button"
-                                    onClick={() => {
-                                        const t = installPkgInput.trim()
-                                        if (t && !installPkgs.includes(t)) setInstallPkgs(p => [...p, t])
-                                        setInstallPkgInput('')
-                                    }}
-                                    className="px-3 py-1.5 border border-slate-200 rounded-lg text-sm text-slate-600 hover:border-emerald-300"
-                                >新增</button>
+                                <button type="button" onClick={() => {
+                                    const t = installPkgInput.trim()
+                                    if (t && !installPkgs.includes(t)) setInstallPkgs(p => [...p, t])
+                                    setInstallPkgInput('')
+                                }} className="px-3 py-1.5 border border-slate-200 rounded-lg text-sm text-slate-600 hover:border-emerald-300">新增</button>
                             </div>
                         </div>
                         <div className="flex justify-end gap-2 px-5 py-4 border-t border-slate-100">
                             <button onClick={() => setInstallDialog(null)} className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-lg">取消</button>
-                            <button
-                                onClick={() => doInstall(installDialog.runner, installPkgs)}
-                                className="px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm hover:bg-emerald-700 flex items-center gap-1.5"
-                            >
+                            <button onClick={() => doInstall(installDialog.runner, installPkgs)}
+                                className="px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm hover:bg-emerald-700 flex items-center gap-1.5">
                                 <Package size={14} />執行安裝
                             </button>
                         </div>

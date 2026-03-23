@@ -1519,8 +1519,12 @@ router.post('/skill-runners/:id/start', async (req, res) => {
 router.post('/skill-runners/:id/stop', async (req, res) => {
   try {
     const db = require('../database-oracle').db;
-    const killed = skillRunner.killRunner(parseInt(req.params.id), db);
-    res.json({ success: true, killed });
+    const skillId = parseInt(req.params.id);
+    // Return 202 immediately — actual kill happens in background
+    res.json({ success: true, status: 'stopping' });
+    skillRunner.killRunner(skillId, db).catch(e => {
+      console.error(`[skill-runners] stop error #${skillId}:`, e.message);
+    });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -1584,6 +1588,34 @@ router.post('/skill-runners/:id/install', async (req, res) => {
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
+});
+
+// GET /api/admin/skill-runners/status-stream — SSE live status for all runners
+router.get('/skill-runners/status-stream', async (req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders?.();
+
+  skillRunner.subscribeStatus(res);
+
+  // Send initial snapshot of all runner statuses
+  try {
+    const db = require('../database-oracle').db;
+    const skills = await db.prepare(`SELECT id, code_status, code_port, code_pid, code_error FROM skills WHERE type='code'`).all();
+    for (const s of skills) {
+      const rt = skillRunner.getStatus(s.id);
+      res.write(`data: ${JSON.stringify({
+        skillId: s.id,
+        status: rt.running ? 'running' : (s.code_status || 'stopped'),
+        port: rt.port ?? s.code_port ?? null,
+        pid: rt.pid ?? s.code_pid ?? null,
+        error: s.code_error || null,
+      })}\n\n`);
+    }
+  } catch (_) {}
+
+  req.on('close', () => skillRunner.unsubscribeStatus(res));
 });
 
 // GET /api/admin/skill-runners/:id/logs — SSE live stdout/stderr
