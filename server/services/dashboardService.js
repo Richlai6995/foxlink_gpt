@@ -1084,7 +1084,7 @@ async function runDashboardQuery({ designId, question, userId, user, isDesigner,
         vectorResults = await vectorSearch(db, activeJobIds, queryVec, topK, threshold);
       }
 
-      if (isDesigner) send('vector_results', { results: vectorResults });
+      send('vector_results', { results: vectorResults });
     } catch (e) {
       console.warn('[Dashboard] Vector search error:', e.message);
     }
@@ -1097,7 +1097,7 @@ async function runDashboardQuery({ designId, question, userId, user, isDesigner,
     // 直接使用指定 SQL，跳過 AI 生成
     send('status', { message: 'ERP 查詢中（已鎖定 SQL）...' });
     safeSql = validateSql(overrideSql.replace(/;+\s*$/, '').trim());
-    if (isDesigner) send('sql_preview', { sql: safeSql, cached: false, skipped_ai: true });
+    send('sql_preview', { sql: safeSql, cached: false, skipped_ai: true });
   } else {
     // 3. 組裝 Prompt + 4. Gemini 生成 SQL
     send('status', { message: 'AI 生成 SQL 中...' });
@@ -1118,7 +1118,7 @@ async function runDashboardQuery({ designId, question, userId, user, isDesigner,
     safeSql = validateSql(generatedSql);
   }
 
-  if (isDesigner && genResult) {
+  if (genResult) {
     const usage = genResult.response.usageMetadata;
     send('sql_preview', {
       sql: safeSql,
@@ -1158,7 +1158,7 @@ async function runDashboardQuery({ designId, question, userId, user, isDesigner,
     await erpConn.close();
   }
   const durationMs = Date.now() - startTime;
-  if (isDesigner) send('query_meta', { duration_ms: durationMs, row_count: rows.length });
+  send('query_meta', { duration_ms: durationMs, row_count: rows.length });
 
   // 7. 寫快取 + 推送結果
   const chartConfig = design.chart_config

@@ -803,17 +803,15 @@ export default function AiDashboardPage() {
               </button>
 
               {/* 開發模式 */}
-              {(canDesignAiSelect || isAdmin) && (
-                <button
-                  onClick={() => setDevMode(v => !v)}
-                  className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg transition ${devMode ? 'bg-gray-200 text-gray-800' : 'text-gray-400 hover:text-gray-700 hover:bg-gray-50'}`}
-                >
-                  <Code size={12} /> {t('aiDash.devMode')}
-                </button>
-              )}
+              <button
+                onClick={() => setDevMode(v => !v)}
+                className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg transition ${devMode ? 'bg-gray-200 text-gray-800' : 'text-gray-400 hover:text-gray-700 hover:bg-gray-50'}`}
+              >
+                <Code size={12} /> {t('aiDash.devMode')}
+              </button>
             </div>
           )}
-          {!selectedDesign && (canDesignAiSelect || isAdmin) && (
+          {!selectedDesign && (
             <button
               onClick={() => setDevMode(v => !v)}
               className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg transition ${devMode ? 'bg-gray-200 text-gray-800' : 'text-gray-400 hover:text-gray-700 hover:bg-gray-50'}`}
@@ -1211,7 +1209,7 @@ export default function AiDashboardPage() {
           )}
 
           {/* 開發模式 Panel */}
-          {devMode && (canDesignAiSelect || isAdmin) && (devSql || devVectorResults.length > 0) && (
+          {devMode && (devSql || devVectorResults.length > 0) && (
             <div className="bg-slate-900 border border-slate-700 rounded-2xl p-4 space-y-3">
               <p className="text-xs font-medium text-gray-500 flex items-center gap-1.5">
                 <Code size={12} /> {t('aiDash.devInfo')}
