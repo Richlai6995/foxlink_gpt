@@ -315,6 +315,14 @@ router.get('/topics', requireDashboard, async (req, res) => {
       )`;
       topicBinds = [u.id, String(u.id), String(u.role_id || ''), String(u.dept_code || ''), String(u.profit_center || ''), String(u.org_section || '')];
       console.log('[Dashboard/topics] user:', u.id, u.username, 'role_id:', u.role_id, 'binds:', topicBinds);
+      // debug: dump all active topics and their project shares
+      try {
+        const db2 = require('../database-oracle').db;
+        const allTopics = await db2.prepare(`SELECT id, name, project_id, is_active, is_suspended FROM ai_select_topics`).all();
+        console.log('[Dashboard/topics DEBUG] all topics:', JSON.stringify(allTopics));
+        const allShares = await db2.prepare(`SELECT * FROM ai_project_shares`).all();
+        console.log('[Dashboard/topics DEBUG] all shares:', JSON.stringify(allShares));
+      } catch(de) { console.log('[Dashboard/topics DEBUG] error:', de.message); }
       if (project_id) {
         projectFilter += ' AND t.project_id=?';
         topicBinds.push(project_id);
