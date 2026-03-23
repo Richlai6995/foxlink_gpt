@@ -1072,11 +1072,20 @@ async function runMigrations(db) {
   await addCol('MCP_ACCESS',  'SHARE_TYPE', "VARCHAR2(20) DEFAULT 'use'");
   await addCol('DIFY_ACCESS', 'SHARE_TYPE', "VARCHAR2(20) DEFAULT 'use'");
 
-  // ── AI 戰情欄位舊版 bug 修正：null 被存成 0，重置為 NULL 讓角色設定生效 ───────
+  // ── AI 戰情欄位舊版 bug 修正：null 被存成 0，僅執行一次 ──────────────────────
   try {
-    await db.prepare(`UPDATE users SET can_design_ai_select=NULL WHERE can_design_ai_select=0`).run();
-    await db.prepare(`UPDATE users SET can_use_ai_dashboard=NULL  WHERE can_use_ai_dashboard=0`).run();
-  } catch (e2) { /* 若欄位不存在（舊版），忽略 */ }
+    const migDone = await db.prepare(
+      `SELECT value FROM system_settings WHERE key='migration_ai_dashboard_null_v1'`
+    ).get();
+    if (!migDone) {
+      await db.prepare(`UPDATE users SET can_design_ai_select=NULL WHERE can_design_ai_select=0`).run();
+      await db.prepare(`UPDATE users SET can_use_ai_dashboard=NULL  WHERE can_use_ai_dashboard=0`).run();
+      await db.prepare(
+        `MERGE INTO system_settings USING dual ON (key='migration_ai_dashboard_null_v1')
+         WHEN NOT MATCHED THEN INSERT (key,value) VALUES ('migration_ai_dashboard_null_v1','1')`
+      ).run();
+    }
+  } catch (e2) { console.warn('[migration] ai_dashboard_null_v1 skipped:', e2.message); }
 
   // ── MCP / DIFY 公開申請欄位 ───────────────────────────────────────────────
   await addCol('MCP_SERVERS',          'IS_PUBLIC',       'NUMBER(1) DEFAULT 0');
