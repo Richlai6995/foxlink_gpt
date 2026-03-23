@@ -1021,7 +1021,7 @@ async function runDashboardQuery({ designId, question, userId, user, isDesigner,
           const existingWhere = design._dataPermissionWhere?.dataPermWhere || [];
           design._dataPermissionWhere = { dataPermWhere: [...existingWhere, whereClause] };
         }
-      } else if (deptScope.hasRules) {
+      } else if (deptScope.hasRules && !deptScope.superUser) {
         send('error', {
           error: '⛔ 您目前的組織資料權限設定未涵蓋任何組織，無法執行查詢。\n請聯繫管理員確認使用者組織資料是否已從 ERP 同步。',
           org_hierarchy_empty_scope: true,
