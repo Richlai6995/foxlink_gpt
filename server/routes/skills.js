@@ -52,7 +52,13 @@ router.post('/tts/synthesize', verifyServiceKey, async (req, res) => {
       return res.status(ttsRes.status).json({ error: err.error?.message || `TTS API 錯誤 ${ttsRes.status}` });
     }
 
-    const { audioContent } = await ttsRes.json();
+    const ttsBody = await ttsRes.json();
+    const { audioContent } = ttsBody;
+
+    if (!audioContent) {
+      console.error(`[TTS/synthesize] Google TTS returned ok but audioContent is empty. body keys=${Object.keys(ttsBody).join(',')}`);
+      return res.status(502).json({ error: `Google TTS 回傳空音訊（audioContent 為空），請確認 API Key 配額或語音名稱是否正確` });
+    }
 
     // 存成實體 MP3，回傳 URL（避免 base64 過長造成前端渲染問題）
     const UPLOAD_DIR = process.env.UPLOAD_DIR
@@ -61,7 +67,9 @@ router.post('/tts/synthesize', verifyServiceKey, async (req, res) => {
     const genDir = path.join(UPLOAD_DIR, 'generated');
     if (!fs.existsSync(genDir)) fs.mkdirSync(genDir, { recursive: true });
     const fname = `tts_${Date.now()}.mp3`;
-    fs.writeFileSync(path.join(genDir, fname), Buffer.from(audioContent, 'base64'));
+    const mp3Buf = Buffer.from(audioContent, 'base64');
+    fs.writeFileSync(path.join(genDir, fname), mp3Buf);
+    console.log(`[TTS/synthesize] saved ${fname} size=${mp3Buf.length}bytes`);
 
     // 記錄用量：Google TTS 按字元計費，input_tokens = 字元數
     const charCount = text.trim().length;
