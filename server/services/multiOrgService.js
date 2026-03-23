@@ -317,6 +317,7 @@ function resolveUserScope(rules, hierarchy, autoOrgIds = new Set()) {
  */
 function checkViolations(question, scope, hierarchy) {
   if (!scope.hasRules) return [];
+  if (scope.superUser) return []; // super_user 無任何限制，sourceLevels 未設定，不需驗證
 
   const violations = [];
   const qUp  = question.toUpperCase();
