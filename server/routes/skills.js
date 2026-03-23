@@ -20,6 +20,8 @@ router.post('/tts/synthesize', verifyServiceKey, async (req, res) => {
     const { decryptKey } = require('../services/llmKeyService');
     const { text, voice_name, speaking_rate = 1.0, pitch = 0.0, user_id } = req.body;
 
+    console.log(`[TTS/synthesize] from=${req.ip} user_id=${user_id || req.user?.id} chars=${text?.length ?? 0} voice=${voice_name || '(default)'} speed=${speaking_rate} preview="${(text || '').slice(0, 50)}"`);
+
     if (!text?.trim()) return res.status(400).json({ error: '請提供 text' });
 
     const model = await db.prepare(

@@ -26,17 +26,24 @@ app.use(express.json({ limit: '2mb' }));
 app.get('/health', (_req, res) => res.json({ ok: true, skill_id: SKILL_ID, port: PORT }));
 
 app.post('/', async (req, res) => {
+  const reqId = Date.now().toString(36);
+  const preview = (req.body.user_message || req.body.content || req.body.text || '').slice(0, 80);
+  console.log(`[runner:${SKILL_ID}] POST #${reqId} from=${req.ip} msg="${preview}"`);
+  const t0 = Date.now();
   try {
     const result = await userHandler(req.body);
     if (!result || typeof result !== 'object') {
+      console.error(`[runner:${SKILL_ID}] #${reqId} handler must return an object`);
       return res.status(500).json({ error: 'handler must return an object' });
     }
     if (!('system_prompt' in result) && !('content' in result)) {
+      console.error(`[runner:${SKILL_ID}] #${reqId} handler must return { system_prompt } or { content }`);
       return res.status(500).json({ error: 'handler must return { system_prompt } or { content }' });
     }
+    console.log(`[runner:${SKILL_ID}] #${reqId} OK ${Date.now() - t0}ms keys=${Object.keys(result).join(',')}`);
     res.json(result);
   } catch (e) {
-    console.error('[runner] handler error:', e.message);
+    console.error(`[runner:${SKILL_ID}] #${reqId} handler error ${Date.now() - t0}ms:`, e.message);
     res.status(500).json({ error: e.message });
   }
 });
@@ -57,4 +64,5 @@ const server = app.listen(PORT, '127.0.0.1', () => {
 
 process.on('SIGTERM', () => {
   server.close(() => process.exit(0));
+  setTimeout(() => process.exit(0), 3000).unref();
 });

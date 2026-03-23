@@ -1239,8 +1239,11 @@ router.post('/sessions/:id/messages', upload.array('files', 10), async (req, res
         let skillAudioUrl = null;
         if (resp.ok) {
           const data = await resp.json();
+          console.log(`[Skill] answer "${sk.name}" HTTP 200 keys=${Object.keys(data).join(',')} audio=${!!data.audio_url} ${Date.now()-_ansT0}ms`);
           answerContent = data.content || data.system_prompt || answerContent;
           if (data.audio_url) skillAudioUrl = data.audio_url;
+        } else {
+          console.warn(`[Skill] answer "${sk.name}" HTTP ${resp.status} url=${sk.endpoint_url}`);
         }
         sendEvent({ type: 'chunk', content: answerContent });
         if (skillAudioUrl) {
