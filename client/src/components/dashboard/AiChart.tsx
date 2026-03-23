@@ -698,22 +698,11 @@ export default function AiChart({ chartDef, rows, columnLabels = {}, height = 32
       // 套用白底黑字到 SVG clone
       const clone = svgEl.cloneNode(true) as SVGElement
       clone.style.backgroundColor = PRINT_BG
-      // ECharts 背景 rect 會蓋掉 canvas 白底，直接把 SVG 內所有背景 rect 改白
-      clone.querySelectorAll('rect').forEach(el => {
-        const fill = el.getAttribute('fill') || ''
-        const w = el.getAttribute('width') || ''
-        const h = el.getAttribute('height') || ''
-        // 第一個全版 rect 通常是 ECharts 背景
-        if (fill && fill !== 'none' && fill !== 'transparent' && (w === '100%' || h === '100%')) {
-          el.setAttribute('fill', PRINT_BG)
-        }
-      })
-      // 保險起見在最前面插入一個白底 rect
-      const bgRect = document.createElementNS('http://www.w3.org/2000/svg', 'rect')
-      bgRect.setAttribute('width', '100%')
-      bgRect.setAttribute('height', '100%')
-      bgRect.setAttribute('fill', PRINT_BG)
-      clone.insertBefore(bgRect, clone.firstChild)
+      // ECharts SVG 第一個子節點一定是背景 rect（含 px 尺寸），直接改白
+      const firstRect = clone.querySelector('rect')
+      if (firstRect) firstRect.setAttribute('fill', PRINT_BG)
+      // 同時把 SVG 根節點的 style/fill 也清掉
+      clone.setAttribute('style', `background:${PRINT_BG}`)
       clone.querySelectorAll('text').forEach(el => {
         const col = el.getAttribute('fill') || ''
         if (!col || col === 'none' || col === 'transparent') return
