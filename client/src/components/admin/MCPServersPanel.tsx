@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import {
   Plus, RefreshCw, Trash2, Edit2, ChevronDown, ChevronRight,
-  Plug, ToggleLeft, ToggleRight, AlertCircle, CheckCircle, Clock, Share2
+  Plug, ToggleLeft, ToggleRight, AlertCircle, CheckCircle, Clock, Share2, Globe, ShieldCheck
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import api from '../../lib/api'
@@ -17,6 +17,8 @@ interface McpServer {
   api_key: string | null
   description: string | null
   is_active: number
+  is_public: number
+  public_approved: number
   response_mode: 'inject' | 'answer' | null
   transport_type: TransportType | null
   command: string | null
@@ -56,7 +58,7 @@ const TRANSPORT_LABELS: Record<TransportType, string> = {
 }
 
 const emptyForm = {
-  name: '', url: '', api_key: '', description: '', is_active: true,
+  name: '', url: '', api_key: '', description: '', is_active: true, is_public: false,
   response_mode: 'inject' as 'inject' | 'answer',
   transport_type: 'http-post' as TransportType,
   command: '', args_json: '', env_json: '',
@@ -107,7 +109,8 @@ export default function MCPServersPanel() {
     setEditing(s)
     setForm({
       name: s.name, url: s.url || '', api_key: s.api_key || '', description: s.description || '',
-      is_active: !!s.is_active, response_mode: (s.response_mode as 'inject' | 'answer') || 'inject',
+      is_active: !!s.is_active, is_public: !!s.is_public,
+      response_mode: (s.response_mode as 'inject' | 'answer') || 'inject',
       transport_type: (s.transport_type as TransportType) || 'http-post',
       command: s.command || '', args_json: s.args_json || '', env_json: s.env_json || '',
     })
@@ -191,6 +194,15 @@ export default function MCPServersPanel() {
     }
   }
 
+  const approve = async (s: McpServer) => {
+    try {
+      const res = await api.post(`/mcp-servers/${s.id}/approve`)
+      await load()
+    } catch (e: any) {
+      alert(e.response?.data?.error || '操作失敗')
+    }
+  }
+
   const loadLogs = async (s: McpServer) => {
     setSelectedLogServer(s)
     setLogsLoading(true)
@@ -268,6 +280,13 @@ export default function MCPServersPanel() {
                     {t('mcp.toolCount', { count: tools.length })}
                   </span>
 
+                  {/* 公開狀態 badge */}
+                  {s.is_public === 1 && (
+                    s.public_approved === 1
+                      ? <span className="flex items-center gap-1 text-xs px-2 py-0.5 bg-green-50 text-green-700 rounded-full font-medium"><Globe size={11} /> 公開</span>
+                      : <span className="flex items-center gap-1 text-xs px-2 py-0.5 bg-amber-50 text-amber-700 rounded-full font-medium"><Globe size={11} /> 待核准</span>
+                  )}
+
                   {/* Actions */}
                   <div className="flex items-center gap-1">
                     <button
@@ -281,6 +300,15 @@ export default function MCPServersPanel() {
                     <button onClick={() => openEdit(s)} title={t('common.edit')} className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition">
                       <Edit2 size={14} />
                     </button>
+                    {s.is_public === 1 && (
+                      <button
+                        onClick={() => approve(s)}
+                        title={s.public_approved ? '取消核准公開' : '核准公開'}
+                        className={`p-1.5 rounded-lg transition ${s.public_approved ? 'text-green-600 hover:text-red-500 hover:bg-red-50' : 'text-amber-500 hover:text-green-600 hover:bg-green-50'}`}
+                      >
+                        <ShieldCheck size={14} />
+                      </button>
+                    )}
                     <button onClick={() => setShareServer(s)} title="共享設定" className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition">
                       <Share2 size={14} />
                     </button>
@@ -529,6 +557,18 @@ export default function MCPServersPanel() {
                   className="rounded"
                 />
                 <span className="text-sm text-slate-700">{t('mcp.form.enableOnCreate')}</span>
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={form.is_public}
+                  onChange={e => setForm(p => ({ ...p, is_public: e.target.checked }))}
+                  className="rounded"
+                />
+                <span className="text-sm text-slate-700 flex items-center gap-1.5">
+                  <Globe size={13} className="text-green-600" />
+                  公開（需 Admin 核准後所有使用者可見）
+                </span>
               </label>
             </div>
 

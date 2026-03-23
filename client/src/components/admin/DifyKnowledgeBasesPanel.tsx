@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import {
   Plus, Trash2, Edit2, ChevronDown, ChevronRight,
-  ToggleLeft, ToggleRight, AlertCircle, CheckCircle, Zap, Clock, Share2
+  ToggleLeft, ToggleRight, AlertCircle, CheckCircle, Zap, Clock, Share2, Globe, ShieldCheck
 } from 'lucide-react'
 import api from '../../lib/api'
 import TranslationFields, { type TranslationData } from '../common/TranslationFields'
@@ -15,6 +15,8 @@ interface DifyKb {
   api_key_masked: string
   description: string | null
   is_active: number
+  is_public: number
+  public_approved: number
   sort_order: number
   created_at: string
   updated_at: string
@@ -37,6 +39,7 @@ const emptyForm = {
   api_key: '',
   description: '',
   is_active: true,
+  is_public: false,
   sort_order: 0,
 }
 
@@ -89,6 +92,7 @@ export default function DifyKnowledgeBasesPanel() {
       api_key: '',  // blank = keep existing
       description: kb.description || '',
       is_active: !!kb.is_active,
+      is_public: !!kb.is_public,
       sort_order: kb.sort_order,
     })
     setTrans({
@@ -117,6 +121,7 @@ export default function DifyKnowledgeBasesPanel() {
         api_server: form.api_server,
         description: form.description || null,
         is_active: form.is_active,
+        is_public: form.is_public,
         sort_order: form.sort_order,
         ...trans,
       }
@@ -179,6 +184,15 @@ export default function DifyKnowledgeBasesPanel() {
       }))
     } finally {
       setTestingId(null)
+    }
+  }
+
+  const approve = async (kb: DifyKb) => {
+    try {
+      await api.post(`/dify-kb/${kb.id}/approve`)
+      await load()
+    } catch (e: any) {
+      alert(e.response?.data?.error || '操作失敗')
     }
   }
 
@@ -257,6 +271,14 @@ export default function DifyKnowledgeBasesPanel() {
                   <span className="text-xs px-2 py-0.5 bg-slate-100 text-slate-500 rounded-full font-medium">
                     #{kb.sort_order} 順序
                   </span>
+
+                  {/* 公開狀態 badge */}
+                  {kb.is_public === 1 && (
+                    kb.public_approved === 1
+                      ? <span className="flex items-center gap-1 text-xs px-2 py-0.5 bg-green-50 text-green-700 rounded-full font-medium"><Globe size={11} /> 公開</span>
+                      : <span className="flex items-center gap-1 text-xs px-2 py-0.5 bg-amber-50 text-amber-700 rounded-full font-medium"><Globe size={11} /> 待核准</span>
+                  )}
+
                   <div className="flex items-center gap-1">
                     <button
                       onClick={() => test(kb)}
@@ -270,6 +292,15 @@ export default function DifyKnowledgeBasesPanel() {
                     <button onClick={() => openEdit(kb)} title="編輯" className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition">
                       <Edit2 size={14} />
                     </button>
+                    {kb.is_public === 1 && (
+                      <button
+                        onClick={() => approve(kb)}
+                        title={kb.public_approved ? '取消核准公開' : '核准公開'}
+                        className={`p-1.5 rounded-lg transition ${kb.public_approved ? 'text-green-600 hover:text-red-500 hover:bg-red-50' : 'text-amber-500 hover:text-green-600 hover:bg-green-50'}`}
+                      >
+                        <ShieldCheck size={14} />
+                      </button>
+                    )}
                     <button onClick={() => setShareKb(kb)} title="共享設定" className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition">
                       <Share2 size={14} />
                     </button>
@@ -453,6 +484,18 @@ export default function DifyKnowledgeBasesPanel() {
                   className="rounded"
                 />
                 <span className="text-sm text-slate-700">啟用（對話時自動查詢此知識庫）</span>
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={form.is_public}
+                  onChange={e => setForm(p => ({ ...p, is_public: e.target.checked }))}
+                  className="rounded"
+                />
+                <span className="text-sm text-slate-700 flex items-center gap-1.5">
+                  <Globe size={13} className="text-green-600" />
+                  公開（需 Admin 核准後所有使用者可見）
+                </span>
               </label>
             </div>
 

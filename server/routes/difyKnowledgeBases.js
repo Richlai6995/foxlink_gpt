@@ -55,22 +55,33 @@ router.get('/active', async (req, res) => {
   }
 });
 
-// GET /api/dify-kb/my  — 依 dify_access 回傳當前使用者可用的 DIFY KB
+// GET /api/dify-kb/my  — 依 dify_access 回傳當前使用者可用的 DIFY KB（含公開已核准）
 router.get('/my', async (req, res) => {
   const db = getDb();
   try {
     if (req.user.role === 'admin') {
       const kbs = await db.prepare(
-        `SELECT id, name, description, api_server, api_key,
+        `SELECT id, name, description, api_server, api_key, is_public, public_approved,
                 name_zh, name_en, name_vi, desc_zh, desc_en, desc_vi
          FROM dify_knowledge_bases WHERE is_active=1 ORDER BY sort_order ASC`
       ).all();
       return res.json(kbs);
     }
+    // 公開且已核准的項目（所有使用者可見）
+    const publicKbs = await db.prepare(
+      `SELECT id, name, DBMS_LOB.SUBSTR(description, 2000, 1) AS description,
+              api_server, api_key, is_public, public_approved, 1 AS is_readonly,
+              name_zh, name_en, name_vi, desc_zh, desc_en, desc_vi
+       FROM dify_knowledge_bases WHERE is_active=1 AND is_public=1 AND public_approved=1
+       ORDER BY sort_order ASC`
+    ).all();
+    const publicIdSet = new Set(publicKbs.map(k => k.id));
+
     const u = await db.prepare(
       `SELECT role_id, dept_code, profit_center, org_section, org_group_name FROM users WHERE id=?`
     ).get(req.user.id);
-    if (!u) return res.json([]);
+    if (!u) return res.json(publicKbs);
+
     const accessibleIds = await db.prepare(
       `SELECT DISTINCT a.dify_kb_id
        FROM dify_access a
@@ -91,17 +102,20 @@ router.get('/my', async (req, res) => {
       u.org_section, u.org_section,
       u.org_group_name, u.org_group_name
     );
-    if (!accessibleIds.length) return res.json([]);
-    const ids = accessibleIds.map(r => r.dify_kb_id);
-    const placeholders = ids.map(() => '?').join(',');
-    const kbs = await db.prepare(
-      `SELECT id, name, DBMS_LOB.SUBSTR(description, 2000, 1) AS description,
-              api_server, api_key, name_zh, name_en, name_vi, desc_zh, desc_en, desc_vi
-       FROM dify_knowledge_bases
-       WHERE id IN (${placeholders}) AND is_active=1
-       ORDER BY sort_order ASC`
-    ).all(...ids);
-    res.json(kbs);
+    const privateIds = accessibleIds.map(r => r.dify_kb_id).filter(id => !publicIdSet.has(id));
+    let privateKbs = [];
+    if (privateIds.length) {
+      const placeholders = privateIds.map(() => '?').join(',');
+      privateKbs = await db.prepare(
+        `SELECT id, name, DBMS_LOB.SUBSTR(description, 2000, 1) AS description,
+                api_server, api_key, is_public, public_approved, 0 AS is_readonly,
+                name_zh, name_en, name_vi, desc_zh, desc_en, desc_vi
+         FROM dify_knowledge_bases
+         WHERE id IN (${placeholders}) AND is_active=1
+         ORDER BY sort_order ASC`
+      ).all(...privateIds);
+    }
+    res.json([...publicKbs, ...privateKbs]);
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -219,11 +233,13 @@ router.put('/:id', async (req, res) => {
     if (!kb) return res.status(404).json({ error: '找不到 DIFY 知識庫設定' });
 
     const { name, api_server, api_key, description, is_active, sort_order,
-            name_zh, name_en, name_vi, desc_zh, desc_en, desc_vi } = req.body;
+            name_zh, name_en, name_vi, desc_zh, desc_en, desc_vi, is_public } = req.body;
     const finalName = name ?? kb.name;
     const finalDesc = description !== undefined ? (description || null) : kb.description;
+    const newIsPublic = is_public !== undefined ? (is_public ? 1 : 0) : (kb.is_public || 0);
+    const newPublicApproved = newIsPublic ? (kb.public_approved || 0) : 0;
     await db.prepare(
-      `UPDATE dify_knowledge_bases SET name=?, api_server=?, api_key=?, description=?, is_active=?, sort_order=?, updated_at=SYSTIMESTAMP WHERE id=?`
+      `UPDATE dify_knowledge_bases SET name=?, api_server=?, api_key=?, description=?, is_active=?, sort_order=?, is_public=?, public_approved=?, updated_at=SYSTIMESTAMP WHERE id=?`
     ).run(
       finalName,
       api_server ? api_server.replace(/\/$/, '') : kb.api_server,
@@ -231,6 +247,7 @@ router.put('/:id', async (req, res) => {
       finalDesc,
       is_active !== undefined ? (is_active ? 1 : 0) : kb.is_active,
       sort_order !== undefined ? sort_order : kb.sort_order,
+      newIsPublic, newPublicApproved,
       req.params.id
     );
 
@@ -269,6 +286,22 @@ router.delete('/:id', async (req, res) => {
     if (!kb) return res.status(404).json({ error: '找不到 DIFY 知識庫設定' });
     await db.prepare(`DELETE FROM dify_knowledge_bases WHERE id=?`).run(req.params.id);
     res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/dify-kb/:id/approve  — 核准/取消核准公開（toggle）
+router.post('/:id/approve', async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const db = getDb();
+  try {
+    const kb = await db.prepare(`SELECT id, is_public, public_approved FROM dify_knowledge_bases WHERE id=?`).get(req.params.id);
+    if (!kb) return res.status(404).json({ error: '找不到 DIFY 知識庫設定' });
+    if (!kb.is_public) return res.status(400).json({ error: '此知識庫未申請公開' });
+    const newApproved = kb.public_approved ? 0 : 1;
+    await db.prepare(`UPDATE dify_knowledge_bases SET public_approved=?, updated_at=SYSTIMESTAMP WHERE id=?`).run(newApproved, req.params.id);
+    res.json({ public_approved: newApproved });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

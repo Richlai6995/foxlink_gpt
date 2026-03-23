@@ -81,12 +81,15 @@ router.put('/:id', async (req, res) => {
 
     const { name, url, api_key, description, is_active, response_mode,
             transport_type, command, args_json, env_json,
-            name_zh, name_en, name_vi, desc_zh, desc_en, desc_vi } = req.body;
+            name_zh, name_en, name_vi, desc_zh, desc_en, desc_vi, is_public } = req.body;
     const finalName = name ?? server.name;
     const finalDesc = description !== undefined ? (description || null) : server.description;
     const finalTt = transport_type !== undefined ? (transport_type || 'http-post') : (server.transport_type || 'http-post');
+    const newIsPublic = is_public !== undefined ? (is_public ? 1 : 0) : (server.is_public || 0);
+    // 若取消公開則同步重置核准狀態
+    const newPublicApproved = newIsPublic ? (server.public_approved || 0) : 0;
     await db.prepare(
-      `UPDATE mcp_servers SET name=?, url=?, api_key=?, description=?, is_active=?, response_mode=?, transport_type=?, command=?, args_json=?, env_json=?, updated_at=SYSTIMESTAMP WHERE id=?`
+      `UPDATE mcp_servers SET name=?, url=?, api_key=?, description=?, is_active=?, response_mode=?, transport_type=?, command=?, args_json=?, env_json=?, is_public=?, public_approved=?, updated_at=SYSTIMESTAMP WHERE id=?`
     ).run(
       finalName,
       url !== undefined ? (url || null) : server.url,
@@ -98,6 +101,7 @@ router.put('/:id', async (req, res) => {
       command !== undefined ? (command || null) : server.command,
       args_json !== undefined ? (args_json || null) : server.args_json,
       env_json !== undefined ? (env_json || null) : server.env_json,
+      newIsPublic, newPublicApproved,
       req.params.id,
     );
 
@@ -157,6 +161,22 @@ router.post('/:id/toggle', async (req, res) => {
   }
 });
 
+// POST /api/mcp-servers/:id/approve  — 核准/取消核准公開（toggle）
+router.post('/:id/approve', async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const db = getDb();
+  try {
+    const server = await db.prepare(`SELECT id, is_public, public_approved FROM mcp_servers WHERE id=?`).get(req.params.id);
+    if (!server) return res.status(404).json({ error: '找不到 MCP 伺服器' });
+    if (!server.is_public) return res.status(400).json({ error: '此伺服器未申請公開' });
+    const newApproved = server.public_approved ? 0 : 1;
+    await db.prepare(`UPDATE mcp_servers SET public_approved=?, updated_at=SYSTIMESTAMP WHERE id=?`).run(newApproved, req.params.id);
+    res.json({ public_approved: newApproved });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // POST /api/mcp-servers/:id/sync  — refresh tool list from MCP server
 router.post('/:id/sync', async (req, res) => {
   if (!requireAdmin(req, res)) return;
@@ -192,20 +212,28 @@ router.get('/:id/logs', async (req, res) => {
   }
 });
 
-// GET /api/mcp-servers/my  — 依 mcp_access 回傳當前使用者可用的 MCP
+// GET /api/mcp-servers/my  — 依 mcp_access 回傳當前使用者可用的 MCP（含公開已核准）
 router.get('/my', async (req, res) => {
   const db = getDb();
   try {
     if (req.user.role === 'admin') {
       const servers = await db.prepare(
-        `SELECT id, name, description, is_active FROM mcp_servers WHERE is_active=1 ORDER BY created_at DESC`
+        `SELECT id, name, description, is_active, is_public, public_approved FROM mcp_servers WHERE is_active=1 ORDER BY created_at DESC`
       ).all();
       return res.json(servers);
     }
+    // 公開且已核准的項目（所有使用者可見）
+    const publicServers = await db.prepare(
+      `SELECT id, name, DBMS_LOB.SUBSTR(description, 2000, 1) AS description, is_active, is_public, public_approved, 1 AS is_readonly
+       FROM mcp_servers WHERE is_active=1 AND is_public=1 AND public_approved=1`
+    ).all();
+    const publicIdSet = new Set(publicServers.map(s => s.id));
+
     const u = await db.prepare(
       `SELECT role_id, dept_code, profit_center, org_section, org_group_name FROM users WHERE id=?`
     ).get(req.user.id);
-    if (!u) return res.json([]);
+    if (!u) return res.json(publicServers);
+
     const accessibleIds = await db.prepare(
       `SELECT DISTINCT a.mcp_server_id
        FROM mcp_access a
@@ -226,14 +254,18 @@ router.get('/my', async (req, res) => {
       u.org_section, u.org_section,
       u.org_group_name, u.org_group_name
     );
-    if (!accessibleIds.length) return res.json([]);
-    const ids = accessibleIds.map(r => r.mcp_server_id);
-    const placeholders = ids.map(() => '?').join(',');
-    const servers = await db.prepare(
-      `SELECT id, name, DBMS_LOB.SUBSTR(description, 2000, 1) AS description, is_active
-       FROM mcp_servers WHERE id IN (${placeholders}) AND is_active=1 ORDER BY id DESC`
-    ).all(...ids);
-    res.json(servers);
+
+    // 個別授權的項目（排除已在 public 清單中的）
+    const privateIds = accessibleIds.map(r => r.mcp_server_id).filter(id => !publicIdSet.has(id));
+    let privateServers = [];
+    if (privateIds.length) {
+      const placeholders = privateIds.map(() => '?').join(',');
+      privateServers = await db.prepare(
+        `SELECT id, name, DBMS_LOB.SUBSTR(description, 2000, 1) AS description, is_active, is_public, public_approved, 0 AS is_readonly
+         FROM mcp_servers WHERE id IN (${placeholders}) AND is_active=1 ORDER BY id DESC`
+      ).all(...privateIds);
+    }
+    res.json([...publicServers, ...privateServers]);
   } catch (e) {
     console.error('[MCP/my ERROR]', e.message);
     res.status(500).json({ error: e.message });

@@ -1072,6 +1072,12 @@ async function runMigrations(db) {
   await addCol('MCP_ACCESS',  'SHARE_TYPE', "VARCHAR2(20) DEFAULT 'use'");
   await addCol('DIFY_ACCESS', 'SHARE_TYPE', "VARCHAR2(20) DEFAULT 'use'");
 
+  // ── MCP / DIFY 公開申請欄位 ───────────────────────────────────────────────
+  await addCol('MCP_SERVERS',          'IS_PUBLIC',       'NUMBER(1) DEFAULT 0');
+  await addCol('MCP_SERVERS',          'PUBLIC_APPROVED', 'NUMBER(1) DEFAULT 0');
+  await addCol('DIFY_KNOWLEDGE_BASES', 'IS_PUBLIC',       'NUMBER(1) DEFAULT 0');
+  await addCol('DIFY_KNOWLEDGE_BASES', 'PUBLIC_APPROVED', 'NUMBER(1) DEFAULT 0');
+
   // ── MCP / DIFY 共享存取表（取代 role_mcp_servers / role_dify_kbs）────────────
   await createTable('MCP_ACCESS', `CREATE TABLE mcp_access (
     id            NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
