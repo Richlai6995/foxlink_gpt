@@ -601,7 +601,17 @@ router.get('/sessions/:id', async (req, res) => {
       WHERE ss.session_id = ? ORDER BY ss.sort_order ASC
     `).all(req.params.id);
 
-    res.json({ session, messages, skills });
+    // Restore tool selections from log tables (MCP/DIFY) + stored context (KB)
+    const usedMcpRaw  = await db.prepare(`SELECT DISTINCT server_id FROM mcp_call_logs  WHERE session_id=?`).all(req.params.id).catch(() => []);
+    const usedDifyRaw = await db.prepare(`SELECT DISTINCT kb_id      FROM dify_call_logs WHERE session_id=?`).all(req.params.id).catch(() => []);
+    const usedMcpIds  = usedMcpRaw.map(r => Number(r.server_id));
+    const usedDifyIds = usedDifyRaw.map(r => Number(r.kb_id));
+    let usedKbIds = [];
+    if (session.tools_context_json) {
+      try { usedKbIds = JSON.parse(session.tools_context_json).kb || []; } catch {}
+    }
+
+    res.json({ session, messages, skills, used_mcp_ids: usedMcpIds, used_dify_ids: usedDifyIds, used_kb_ids: usedKbIds });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -666,6 +676,15 @@ router.post('/sessions/:id/messages', upload.array('files', 10), async (req, res
   const userDifyIds  = parseIds(req.body.dify_kb_ids);      // number[] | null
   const userSelfKbIds = parseIds(req.body.self_kb_ids);     // string[] | null
   const explicitMode = userMcpIds !== null || userDifyIds !== null || userSelfKbIds !== null;
+  // 儲存工具選擇到 session（供歷史載入時恢復）
+  if (explicitMode) {
+    try {
+      const ctx = JSON.stringify({ mcp: userMcpIds || [], dify: userDifyIds || [], kb: userSelfKbIds || [] });
+      await require('../database-oracle').db.prepare(
+        `UPDATE chat_sessions SET tools_context_json=? WHERE id=?`
+      ).run(ctx, sessionId);
+    } catch (_) {}
+  }
   const uploadedFiles = req.files || [];
 
   // Load per-user upload permissions

@@ -1072,6 +1072,9 @@ async function runMigrations(db) {
   await addCol('MCP_ACCESS',  'SHARE_TYPE', "VARCHAR2(20) DEFAULT 'use'");
   await addCol('DIFY_ACCESS', 'SHARE_TYPE', "VARCHAR2(20) DEFAULT 'use'");
 
+  // ── chat_sessions 工具選擇記錄欄位 ──────────────────────────────────────────
+  await addCol('CHAT_SESSIONS', 'TOOLS_CONTEXT_JSON', 'CLOB');
+
   // ── AI 戰情欄位舊版 bug 修正：null 被存成 0，僅執行一次 ──────────────────────
   try {
     const migDone = await db.prepare(

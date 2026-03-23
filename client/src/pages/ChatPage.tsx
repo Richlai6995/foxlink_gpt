@@ -224,6 +224,10 @@ export default function ChatPage() {
       const attached: Skill[] = res.data.skills || []
       setSessionSkills(attached)
       setPickedIds(new Set(attached.map((s: Skill) => s.id)))
+      // Restore MCP/DIFY/KB selections from session history
+      setSelectedMcpIds(new Set((res.data.used_mcp_ids || []).map(Number)))
+      setSelectedDifyIds(new Set((res.data.used_dify_ids || []).map(Number)))
+      setSelectedKbIds(new Set(res.data.used_kb_ids || []))
       // Sync model selector to the session's model (important for image-gen sessions)
       if (res.data.session?.model) {
         setModel(res.data.session.model as ModelType)
