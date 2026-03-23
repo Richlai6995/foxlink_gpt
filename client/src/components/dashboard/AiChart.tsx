@@ -84,9 +84,11 @@ function mkGradient(color: string) {
   }
 }
 
+const CHART_FONT = "'Noto Sans TC', 'Microsoft JhengHei', 'PingFang TC', 'Segoe UI', Arial, sans-serif"
+
 const BASE_OPTION = {
   backgroundColor: 'transparent',
-  textStyle: { color: '#374151', fontFamily: 'inherit' },
+  textStyle: { color: '#374151', fontFamily: CHART_FONT },
   tooltip: {
     backgroundColor: '#ffffff',
     borderColor: '#e5e7eb',
@@ -702,7 +704,7 @@ export default function AiChart({ chartDef, rows, columnLabels = {}, height = 32
       const firstRect = clone.querySelector('rect')
       if (firstRect) firstRect.setAttribute('fill', PRINT_BG)
       // 同時把 SVG 根節點的 style/fill 也清掉
-      clone.setAttribute('style', `background:${PRINT_BG}`)
+      clone.setAttribute('style', `background:${PRINT_BG};font-family:${CHART_FONT}`)
       clone.querySelectorAll('text').forEach(el => {
         const col = el.getAttribute('fill') || ''
         if (!col || col === 'none' || col === 'transparent') return
