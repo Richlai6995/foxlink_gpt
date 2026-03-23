@@ -38,8 +38,10 @@ function releasePort(port) { usedPorts.delete(port); }
 function isPortFree(port) {
   return new Promise(resolve => {
     const s = net.createServer();
-    s.once('error', () => resolve(false));
-    s.once('listening', () => s.close(() => resolve(true)));
+    // Safety timeout: if neither error nor listening fires within 500ms, assume occupied
+    const timer = setTimeout(() => { try { s.close(); } catch (_) {} resolve(false); }, 500);
+    s.once('error', () => { clearTimeout(timer); resolve(false); });
+    s.once('listening', () => { clearTimeout(timer); s.close(() => resolve(true)); });
     s.listen(port, '127.0.0.1');
   });
 }
@@ -154,22 +156,27 @@ async function killRunner(skillId, db) {
 
   const { port } = entry;
 
-  // SIGTERM first, wait up to 3s, then SIGKILL
-  try { entry.process.kill('SIGTERM'); } catch (_) {}
-  await Promise.race([
-    new Promise(r => entry.process.once('exit', r)),
-    new Promise(r => setTimeout(r, 3000)),
-  ]);
-  forceKillProcess(entry.process, entry.process.pid);
-
-  releasePort(port);
-  runningProcesses.delete(skillId);
-
-  // Wait for OS to release port (max 5s)
-  await waitForPortFree(port, 5000);
-
-  try { db.prepare(`UPDATE skills SET code_status='stopped', code_port=NULL, code_pid=NULL, endpoint_url=NULL WHERE id=?`).run(skillId); } catch (_) {}
-  pushStatusUpdate(skillId, 'stopped');
+  try {
+    // SIGTERM first, wait up to 3s, then SIGKILL
+    try { entry.process.kill('SIGTERM'); } catch (_) {}
+    await Promise.race([
+      new Promise(r => entry.process.once('exit', r)),
+      new Promise(r => setTimeout(r, 3000)),
+    ]);
+    forceKillProcess(entry.process, entry.process.pid);
+    releasePort(port);
+    runningProcesses.delete(skillId);
+    // Wait for OS to release port (max 3s)
+    await waitForPortFree(port, 3000);
+  } catch (e) {
+    console.error(`[skillRunner] killRunner error for #${skillId}:`, e.message);
+    releasePort(port);
+    runningProcesses.delete(skillId);
+  } finally {
+    // Always update DB and push stopped — even if something threw above
+    try { db.prepare(`UPDATE skills SET code_status='stopped', code_port=NULL, code_pid=NULL, endpoint_url=NULL WHERE id=?`).run(skillId); } catch (_) {}
+    pushStatusUpdate(skillId, 'stopped');
+  }
   return true;
 }
 
