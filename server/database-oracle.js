@@ -560,8 +560,8 @@ async function runMigrations(db) {
   )`);
 
   // ── AI 戰情 ─────────────────────────────────────────────────────────────────
-  await addCol('USERS', 'CAN_DESIGN_AI_SELECT', 'NUMBER(1) DEFAULT 0');
-  await addCol('USERS', 'CAN_USE_AI_DASHBOARD',  'NUMBER(1) DEFAULT 0');
+  await addCol('USERS', 'CAN_DESIGN_AI_SELECT', 'NUMBER(1)');
+  await addCol('USERS', 'CAN_USE_AI_DASHBOARD',  'NUMBER(1)');
 
   await createTable('AI_SCHEMA_DEFINITIONS', `CREATE TABLE ai_schema_definitions (
     id            NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -1071,6 +1071,12 @@ async function runMigrations(db) {
   // ── MCP / DIFY access share_type 補欄（舊表可能缺欄）────────────────────────
   await addCol('MCP_ACCESS',  'SHARE_TYPE', "VARCHAR2(20) DEFAULT 'use'");
   await addCol('DIFY_ACCESS', 'SHARE_TYPE', "VARCHAR2(20) DEFAULT 'use'");
+
+  // ── AI 戰情欄位舊版 bug 修正：null 被存成 0，重置為 NULL 讓角色設定生效 ───────
+  try {
+    await db.prepare(`UPDATE users SET can_design_ai_select=NULL WHERE can_design_ai_select=0`).run();
+    await db.prepare(`UPDATE users SET can_use_ai_dashboard=NULL  WHERE can_use_ai_dashboard=0`).run();
+  } catch (e2) { /* 若欄位不存在（舊版），忽略 */ }
 
   // ── MCP / DIFY 公開申請欄位 ───────────────────────────────────────────────
   await addCol('MCP_SERVERS',          'IS_PUBLIC',       'NUMBER(1) DEFAULT 0');

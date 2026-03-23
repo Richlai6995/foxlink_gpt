@@ -798,7 +798,7 @@ export default function UserManagement() {
                       onChange={e => setForm(p => ({ ...p, can_design_ai_select: e.target.value === '' ? null : e.target.value === '1' }))}
                       className="input py-1 text-sm"
                     >
-                      <option value="">{t('users.form.defaultDeny')}</option>
+                      <option value="">{t('users.form.followRoleSetting')}</option>
                       <option value="1">{t('users.form.allowDesign')}</option>
                       <option value="0">{t('users.form.deny')}</option>
                     </select>
@@ -810,7 +810,7 @@ export default function UserManagement() {
                       onChange={e => setForm(p => ({ ...p, can_use_ai_dashboard: e.target.value === '' ? null : e.target.value === '1' }))}
                       className="input py-1 text-sm"
                     >
-                      <option value="">{t('users.form.defaultDeny')}</option>
+                      <option value="">{t('users.form.followRoleSetting')}</option>
                       <option value="1">{t('users.form.allowUse')}</option>
                       <option value="0">{t('users.form.deny')}</option>
                     </select>

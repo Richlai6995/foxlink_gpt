@@ -76,8 +76,9 @@ router.post('/', async (req, res) => {
         `INSERT INTO users (username, password, name, employee_id, email, role, start_date, end_date, status,
                             allow_text_upload, text_max_mb, allow_audio_upload, audio_max_mb,
                             allow_image_upload, image_max_mb, allow_scheduled_tasks, role_id, creation_method,
-                            budget_daily, budget_weekly, budget_monthly)
-         VALUES (?, ?, ?, ?, ?, ?, ${DI}, ${DI}, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+                            budget_daily, budget_weekly, budget_monthly,
+                            can_design_ai_select, can_use_ai_dashboard)
+         VALUES (?, ?, ?, ?, ?, ?, ${DI}, ${DI}, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)`
       )
       .run(
         username, password, name,
@@ -159,8 +160,8 @@ router.put('/:id', async (req, res) => {
       kb_max_size_mb != null ? Number(kb_max_size_mb) : null,
       kb_max_count   != null ? Number(kb_max_count)   : null,
       can_deep_research !== undefined ? resolveSkillPerm(can_deep_research) : null,
-      can_design_ai_select !== undefined ? (can_design_ai_select ? 1 : 0) : 0,
-      can_use_ai_dashboard  !== undefined ? (can_use_ai_dashboard  ? 1 : 0) : 0,
+      resolveSkillPerm(can_design_ai_select !== undefined ? can_design_ai_select : null),
+      resolveSkillPerm(can_use_ai_dashboard  !== undefined ? can_use_ai_dashboard  : null),
     ];
 
     const orgParams = [
