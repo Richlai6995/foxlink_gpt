@@ -315,13 +315,13 @@ router.get('/topics', requireDashboard, async (req, res) => {
       )`;
       topicBinds = [u.id, String(u.id), String(u.role_id || ''), String(u.dept_code || ''), String(u.profit_center || ''), String(u.org_section || '')];
       console.log('[Dashboard/topics] user:', u.id, u.username, 'role_id:', u.role_id, 'binds:', topicBinds);
-      // debug: dump all active topics and their project shares
+      // debug: dump role name and all shares
       try {
         const db2 = require('../database-oracle').db;
-        const allTopics = await db2.prepare(`SELECT id, name, project_id, is_active, is_suspended FROM ai_select_topics`).all();
-        console.log('[Dashboard/topics DEBUG] all topics:', JSON.stringify(allTopics));
-        const allShares = await db2.prepare(`SELECT * FROM ai_project_shares`).all();
-        console.log('[Dashboard/topics DEBUG] all shares:', JSON.stringify(allShares));
+        const roleRow = u.role_id ? await db2.prepare(`SELECT id, name FROM roles WHERE id=?`).get(u.role_id) : null;
+        console.log('[Dashboard/topics DEBUG] role of user:', roleRow);
+        const allShares = await db2.prepare(`SELECT ps.*, r.name AS role_name FROM ai_project_shares ps LEFT JOIN roles r ON r.id=TO_NUMBER(ps.grantee_id) AND ps.grantee_type='role'`).all();
+        console.log('[Dashboard/topics DEBUG] all shares with role names:', JSON.stringify(allShares));
       } catch(de) { console.log('[Dashboard/topics DEBUG] error:', de.message); }
       if (project_id) {
         projectFilter += ' AND t.project_id=?';
