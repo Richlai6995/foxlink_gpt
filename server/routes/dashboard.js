@@ -229,7 +229,16 @@ router.get('/projects/:id/shares', async (req, res) => {
   try {
     const db = require('../database-oracle').db;
     if (!await canEditProject(db, req.params.id, req.user)) return res.status(403).json({ error: '無權限' });
-    const shares = await db.prepare(`SELECT * FROM ai_project_shares WHERE project_id=? ORDER BY id ASC`).all(req.params.id);
+    const shares = await db.prepare(
+      `SELECT a.*,
+         CASE WHEN a.grantee_type='user'        THEN (SELECT name FROM users WHERE id=TO_NUMBER(a.grantee_id))
+              WHEN a.grantee_type='role'        THEN (SELECT name FROM roles WHERE id=TO_NUMBER(a.grantee_id))
+              WHEN a.grantee_type='department'  THEN (SELECT MAX(dept_name) FROM users WHERE dept_code=a.grantee_id)
+              WHEN a.grantee_type='cost_center' THEN (SELECT MAX(profit_center_name) FROM users WHERE profit_center=a.grantee_id)
+              WHEN a.grantee_type='division'    THEN (SELECT MAX(org_section_name) FROM users WHERE org_section=a.grantee_id)
+              ELSE a.grantee_id END AS grantee_name
+       FROM ai_project_shares a WHERE a.project_id=? ORDER BY a.id ASC`
+    ).all(req.params.id);
     res.json(shares);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
