@@ -903,7 +903,7 @@ async function runDashboardQuery({ designId, question, userId, user, isDesigner,
       // 當 schema 有 filter_source='org_code' 的 filter_key 欄位，
       // 且 allowedOrgCodes 已從組織階層展開（有限制），
       // 若問題中出現不在允許清單的 org_code（如 'Z4E'），直接拒絕。
-      if (deptScope.hasRules && deptScope.allowedOrgCodes.size > 0) {
+      if (deptScope.hasRules && !deptScope.superUser && deptScope.allowedOrgCodes?.size > 0) {
         const schemaIds = design.target_schema_ids ? JSON.parse(design.target_schema_ids) : [];
         let hasOrgCodeFilterKey = false;
         for (const sid of schemaIds) {
