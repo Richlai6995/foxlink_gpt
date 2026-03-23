@@ -915,10 +915,10 @@ export default function UserManagement() {
       )}
 
       {/* Table */}
-      <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-        <div className="overflow-x-auto">
+      <div className="bg-white rounded-xl border border-slate-200 overflow-hidden flex flex-col" style={{ maxHeight: 'calc(100vh - 260px)' }}>
+        <div className="overflow-auto flex-1">
           <table className="w-full text-sm whitespace-nowrap">
-            <thead className="bg-slate-50 border-b border-slate-200">
+            <thead className="bg-slate-50 border-b border-slate-200 sticky top-0 z-10">
               <tr>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600">{t('users.cols.username')}</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600">{t('users.cols.name')}</th>
