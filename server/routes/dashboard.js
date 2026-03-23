@@ -246,14 +246,32 @@ router.get('/projects/:id/shares', async (req, res) => {
 
 // POST /api/dashboard/projects/:id/shares
 router.post('/projects/:id/shares', async (req, res) => {
+  console.log('[Dashboard/shares POST] user:', req.user.id, req.user.role, 'project:', req.params.id, 'body:', req.body);
   try {
     const db = require('../database-oracle').db;
-    if (!await canEditProject(db, req.params.id, req.user)) return res.status(403).json({ error: '無權限' });
+    const canEdit = await canEditProject(db, req.params.id, req.user);
+    console.log('[Dashboard/shares POST] canEdit:', canEdit);
+    if (!canEdit) return res.status(403).json({ error: '無權限' });
     const { share_type, grantee_type, grantee_id } = req.body;
     const r = await db.prepare(
       `INSERT INTO ai_project_shares (project_id, share_type, grantee_type, grantee_id, granted_by) VALUES (?,?,?,?,?)`
     ).run(req.params.id, share_type || 'use', grantee_type, grantee_id, req.user.id);
+    console.log('[Dashboard/shares POST] inserted id:', r.lastInsertRowid);
     res.json({ id: r.lastInsertRowid });
+  } catch (e) {
+    console.error('[Dashboard/shares POST] error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// PATCH /api/dashboard/projects/:id/shares/:shareId — admin fix grantee_id
+router.patch('/projects/:id/shares/:shareId', async (req, res) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ error: '需要管理員' });
+  try {
+    const db = require('../database-oracle').db;
+    const { grantee_id } = req.body;
+    await db.prepare(`UPDATE ai_project_shares SET grantee_id=? WHERE id=? AND project_id=?`).run(grantee_id, req.params.shareId, req.params.id);
+    res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
