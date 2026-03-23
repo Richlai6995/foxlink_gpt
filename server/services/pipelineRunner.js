@@ -189,7 +189,7 @@ async function execGenerateFile(node, vars, db, context) {
     return {
       text: `[語音已生成]`,
       file: {
-        filename: node.filename || fname,
+        filename: interpolate(node.filename || fname, vars),
         publicUrl: ttsData.audio_url,
         filePath: path.join(UPLOAD_DIR, 'generated', fname),
       },
@@ -197,7 +197,8 @@ async function execGenerateFile(node, vars, db, context) {
   }
 
   // For pdf/docx/xlsx/pptx/txt — wrap in generate block and process
-  const syntheticBlock = `\`\`\`generate_${fileType}:${node.filename || `output.${fileType}`}\n${input}\n\`\`\``;
+  const resolvedFilename = interpolate(node.filename || `output.${fileType}`, vars);
+  const syntheticBlock = `\`\`\`generate_${fileType}:${resolvedFilename}\n${input}\n\`\`\``;
   const blocks = await processGenerateBlocks(syntheticBlock, context.sessionId);
   if (blocks.length > 0) {
     return { text: `[已生成 ${fileType.toUpperCase()} 檔案]`, file: blocks[0] };
