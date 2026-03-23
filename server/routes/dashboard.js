@@ -239,6 +239,7 @@ router.get('/projects/:id/shares', async (req, res) => {
               ELSE a.grantee_id END AS grantee_name
        FROM ai_project_shares a WHERE a.project_id=? ORDER BY a.id ASC`
     ).all(req.params.id);
+    console.log('[Dashboard/shares] project', req.params.id, ':', JSON.stringify(shares));
     res.json(shares);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -313,6 +314,7 @@ router.get('/topics', requireDashboard, async (req, res) => {
         )
       )`;
       topicBinds = [u.id, String(u.id), String(u.role_id || ''), String(u.dept_code || ''), String(u.profit_center || ''), String(u.org_section || '')];
+      console.log('[Dashboard/topics] user:', u.id, u.username, 'role_id:', u.role_id, 'binds:', topicBinds);
       if (project_id) {
         projectFilter += ' AND t.project_id=?';
         topicBinds.push(project_id);
@@ -322,6 +324,7 @@ router.get('/topics', requireDashboard, async (req, res) => {
     const topics = await db.prepare(
       `SELECT t.* FROM ai_select_topics t WHERE t.is_active=1 AND t.is_suspended=0 ${projectFilter} ORDER BY t.sort_order ASC, t.id ASC`
     ).all(...topicBinds);
+    console.log('[Dashboard/topics] result count:', topics.length);
 
     const designs = await db.prepare(
       `SELECT id, topic_id, name, description, vector_search_enabled, chart_config,
