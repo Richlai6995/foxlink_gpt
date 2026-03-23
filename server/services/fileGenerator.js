@@ -64,7 +64,8 @@ async function processGenerateBlocks(responseText, sessionId) {
   while ((match = regex.exec(responseText)) !== null) {
     matchCount++;
     const type = match[1]; // xlsx, docx, pdf, pptx, txt
-    const filename = match[2].trim();
+    // Strip anything after the first `[`, `{`, space, or backtick — AI sometimes appends JSON on the same line as the filename
+    const filename = match[2].trim().split(/[\s\[{\`]/)[0];
     const content = match[3].trim();
     console.log(`[FileGen] Block #${matchCount}: type=${type}, filename=${filename}, content.length=${content.length}`);
 
