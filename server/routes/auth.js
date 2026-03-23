@@ -293,7 +293,7 @@ const createSession = async (res, user) => {
   let rolePerms = null;
   if (user.role_id) {
     rolePerms = await db.prepare(
-      'SELECT allow_create_skill, allow_external_skill, allow_code_skill, can_create_kb, kb_max_size_mb, kb_max_count, can_deep_research FROM roles WHERE id=?'
+      'SELECT allow_create_skill, allow_external_skill, allow_code_skill, can_create_kb, kb_max_size_mb, kb_max_count, can_deep_research, can_design_ai_select, can_use_ai_dashboard FROM roles WHERE id=?'
     ).get(user.role_id);
   }
   const resolveEffective = (userVal, roleVal) => {
@@ -444,7 +444,7 @@ router.get('/me', async (req, res) => {
     let rolePerms = null;
     if (user.role_id) {
       rolePerms = await db.prepare(
-        'SELECT allow_create_skill, allow_external_skill, allow_code_skill, can_create_kb, kb_max_size_mb, kb_max_count, can_deep_research FROM roles WHERE id=?'
+        'SELECT allow_create_skill, allow_external_skill, allow_code_skill, can_create_kb, kb_max_size_mb, kb_max_count, can_deep_research, can_design_ai_select, can_use_ai_dashboard FROM roles WHERE id=?'
       ).get(user.role_id);
     }
     const resolveEff = (uv, rv) => {
