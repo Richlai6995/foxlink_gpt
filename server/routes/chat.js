@@ -213,14 +213,18 @@ async function getDifyFunctionDeclarations(db, userCtx) {
       kbs = await db.prepare(
         `SELECT DISTINCT d.id, d.name, d.api_server, d.api_key, d.description
          FROM dify_knowledge_bases d
-         JOIN dify_access a ON a.dify_kb_id = d.id
          WHERE d.is_active=1 AND (
-           (a.grantee_type='user'        AND a.grantee_id=TO_CHAR(?))
-           OR (a.grantee_type='role'     AND a.grantee_id=TO_CHAR(?) AND ? IS NOT NULL)
-           OR (a.grantee_type='department'  AND a.grantee_id=? AND ? IS NOT NULL)
-           OR (a.grantee_type='cost_center' AND a.grantee_id=? AND ? IS NOT NULL)
-           OR (a.grantee_type='division'    AND a.grantee_id=? AND ? IS NOT NULL)
-           OR (a.grantee_type='org_group'   AND a.grantee_id=? AND ? IS NOT NULL)
+           (d.is_public=1 AND d.public_approved=1)
+           OR EXISTS (
+             SELECT 1 FROM dify_access a WHERE a.dify_kb_id = d.id AND (
+               (a.grantee_type='user'        AND a.grantee_id=TO_CHAR(?))
+               OR (a.grantee_type='role'     AND a.grantee_id=TO_CHAR(?) AND ? IS NOT NULL)
+               OR (a.grantee_type='department'  AND a.grantee_id=? AND ? IS NOT NULL)
+               OR (a.grantee_type='cost_center' AND a.grantee_id=? AND ? IS NOT NULL)
+               OR (a.grantee_type='division'    AND a.grantee_id=? AND ? IS NOT NULL)
+               OR (a.grantee_type='org_group'   AND a.grantee_id=? AND ? IS NOT NULL)
+             )
+           )
          )
          ORDER BY d.sort_order ASC`
       ).all(

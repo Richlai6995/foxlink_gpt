@@ -409,14 +409,18 @@ async function getActiveToolDeclarations(db, userCtx = null) {
       const { userId, roleId, deptCode, profitCenter, orgSection, orgGroupName } = userCtx;
       servers = await db.prepare(
         `SELECT DISTINCT m.* FROM mcp_servers m
-         JOIN mcp_access a ON a.mcp_server_id = m.id
          WHERE m.is_active=1 AND (
-           (a.grantee_type='user'        AND a.grantee_id=TO_CHAR(?))
-           OR (a.grantee_type='role'     AND a.grantee_id=TO_CHAR(?) AND ? IS NOT NULL)
-           OR (a.grantee_type='department'  AND a.grantee_id=? AND ? IS NOT NULL)
-           OR (a.grantee_type='cost_center' AND a.grantee_id=? AND ? IS NOT NULL)
-           OR (a.grantee_type='division'    AND a.grantee_id=? AND ? IS NOT NULL)
-           OR (a.grantee_type='org_group'   AND a.grantee_id=? AND ? IS NOT NULL)
+           (m.is_public=1 AND m.public_approved=1)
+           OR EXISTS (
+             SELECT 1 FROM mcp_access a WHERE a.mcp_server_id = m.id AND (
+               (a.grantee_type='user'        AND a.grantee_id=TO_CHAR(?))
+               OR (a.grantee_type='role'     AND a.grantee_id=TO_CHAR(?) AND ? IS NOT NULL)
+               OR (a.grantee_type='department'  AND a.grantee_id=? AND ? IS NOT NULL)
+               OR (a.grantee_type='cost_center' AND a.grantee_id=? AND ? IS NOT NULL)
+               OR (a.grantee_type='division'    AND a.grantee_id=? AND ? IS NOT NULL)
+               OR (a.grantee_type='org_group'   AND a.grantee_id=? AND ? IS NOT NULL)
+             )
+           )
          )`
       ).all(
         userId,
