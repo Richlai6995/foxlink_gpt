@@ -236,7 +236,8 @@ async function getDifyFunctionDeclarations(db, userCtx) {
         orgGroupName, orgGroupName
       );
     }
-  } catch (_) {
+  } catch (e) {
+    console.error('[DIFY] getDifyFunctionDeclarations error:', e.message);
     return { declarations: [], kbMap: {} };
   }
 
@@ -1401,7 +1402,8 @@ router.post('/sessions/:id/messages', upload.array('files', 10), async (req, res
           }
         }
         if (userDifyIds && userDifyIds.length > 0) {
-          const { declarations, kbMap: km } = await getDifyFunctionDeclarations(db, userCtx);
+          // Explicit mode: bypass access filter (same as MCP) — user already selected from /my which is access-controlled
+          const { declarations, kbMap: km } = await getDifyFunctionDeclarations(db, null);
           kbMap = km;
           const selectedIds = userDifyIds.map(Number);
           const selected = declarations.filter(d => {
