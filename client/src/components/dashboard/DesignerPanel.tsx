@@ -130,7 +130,7 @@ function ShareFormBody({
           />
         ) : (
           <select className="input py-1.5 text-sm flex-1" value={form.grantee_id}
-            onChange={e => setForm(p => ({ ...p, grantee_id: e.target.value }))}>
+            onChange={e => { const v = e.target.value; setForm(p => ({ ...p, grantee_id: v })) }}>
             <option value="">請選擇...</option>
             {lovOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
           </select>

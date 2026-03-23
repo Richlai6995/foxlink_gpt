@@ -130,6 +130,15 @@ function installPackages(skillId, packages, logCb) {
   });
 }
 
+// ── Force kill helper ─────────────────────────────────────────────────────────
+function forceKillProcess(proc, pid) {
+  try { proc.kill('SIGKILL'); } catch (_) {}
+  // Fallback: kill by PID directly (in case proc object is stale)
+  if (pid) {
+    try { process.kill(pid, 'SIGKILL'); } catch (_) {}
+  }
+}
+
 // ── Spawn runner ──────────────────────────────────────────────────────────────
 function spawnRunner(skill, db) {
   return new Promise((resolve, reject) => {
@@ -144,10 +153,15 @@ function spawnRunner(skill, db) {
     // Kill existing process if any
     const existing = runningProcesses.get(skillId);
     if (existing) {
-      try { existing.process.kill('SIGTERM'); } catch (_) {}
+      forceKillProcess(existing.process, existing.process.pid);
       releasePort(existing.port);
       runningProcesses.delete(skillId);
     }
+
+    // Mark as starting in DB so UI can show disabled state
+    try {
+      db.prepare(`UPDATE skills SET code_status='starting', code_error=NULL WHERE id=?`).run(skillId);
+    } catch (_) {}
 
     const port = allocatePort();
     const child = spawn('node', ['runner.js'], {
@@ -233,13 +247,23 @@ function spawnRunner(skill, db) {
 // ── Kill runner ───────────────────────────────────────────────────────────────
 function killRunner(skillId, db) {
   const entry = runningProcesses.get(skillId);
-  if (!entry) return false;
-  try { entry.process.kill('SIGTERM'); } catch (_) {}
+  if (!entry) {
+    // No in-memory entry — try to kill by stored PID from DB
+    try {
+      const row = db.prepare(`SELECT code_pid FROM skills WHERE id=?`).get(skillId);
+      if (row?.code_pid) {
+        try { process.kill(row.code_pid, 'SIGKILL'); } catch (_) {}
+      }
+      db.prepare(`UPDATE skills SET code_status='stopped', code_port=NULL, code_pid=NULL, endpoint_url=NULL WHERE id=?`).run(skillId);
+    } catch (_) {}
+    return false;
+  }
+  forceKillProcess(entry.process, entry.process.pid);
   releasePort(entry.port);
   runningProcesses.delete(skillId);
   try {
     db.prepare(
-      `UPDATE skills SET code_status='stopped', code_port=NULL, code_pid=NULL WHERE id=?`
+      `UPDATE skills SET code_status='stopped', code_port=NULL, code_pid=NULL, endpoint_url=NULL WHERE id=?`
     ).run(skillId);
   } catch (_) {}
   return true;

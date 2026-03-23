@@ -239,24 +239,20 @@ router.get('/projects/:id/shares', async (req, res) => {
               ELSE a.grantee_id END AS grantee_name
        FROM ai_project_shares a WHERE a.project_id=? ORDER BY a.id ASC`
     ).all(req.params.id);
-    console.log('[Dashboard/shares] project', req.params.id, ':', JSON.stringify(shares));
     res.json(shares);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // POST /api/dashboard/projects/:id/shares
 router.post('/projects/:id/shares', async (req, res) => {
-  console.log('[Dashboard/shares POST] user:', req.user.id, req.user.role, 'project:', req.params.id, 'body:', req.body);
   try {
     const db = require('../database-oracle').db;
     const canEdit = await canEditProject(db, req.params.id, req.user);
-    console.log('[Dashboard/shares POST] canEdit:', canEdit);
     if (!canEdit) return res.status(403).json({ error: '無權限' });
     const { share_type, grantee_type, grantee_id } = req.body;
     const r = await db.prepare(
       `INSERT INTO ai_project_shares (project_id, share_type, grantee_type, grantee_id, granted_by) VALUES (?,?,?,?,?)`
     ).run(req.params.id, share_type || 'use', grantee_type, grantee_id, req.user.id);
-    console.log('[Dashboard/shares POST] inserted id:', r.lastInsertRowid);
     res.json({ id: r.lastInsertRowid });
   } catch (e) {
     console.error('[Dashboard/shares POST] error:', e.message);
@@ -313,6 +309,7 @@ router.get('/topics', requireDashboard, async (req, res) => {
         topicBinds = [project_id];
       }
     } else {
+      const userBinds = [String(u.id), String(u.role_id || ''), String(u.dept_code || ''), String(u.profit_center || ''), String(u.org_section || '')];
       projectFilter = `AND (
         t.project_id IS NULL
         OR EXISTS (
@@ -330,17 +327,19 @@ router.get('/topics', requireDashboard, async (req, res) => {
             )
           )
         )
+        OR EXISTS (
+          SELECT 1 FROM ai_select_designs d2
+          JOIN ai_dashboard_shares ds ON ds.design_id=d2.id
+          WHERE d2.topic_id=t.id AND (
+            (ds.grantee_type='user' AND ds.grantee_id=?) OR
+            (ds.grantee_type='role' AND ds.grantee_id=?) OR
+            (ds.grantee_type='department' AND ds.grantee_id=?) OR
+            (ds.grantee_type='cost_center' AND ds.grantee_id=?) OR
+            (ds.grantee_type='division' AND ds.grantee_id=?)
+          )
+        )
       )`;
-      topicBinds = [u.id, String(u.id), String(u.role_id || ''), String(u.dept_code || ''), String(u.profit_center || ''), String(u.org_section || '')];
-      console.log('[Dashboard/topics] user:', u.id, u.username, 'role_id:', u.role_id, 'binds:', topicBinds);
-      // debug: dump role name and all shares
-      try {
-        const db2 = require('../database-oracle').db;
-        const roleRow = u.role_id ? await db2.prepare(`SELECT id, name FROM roles WHERE id=?`).get(u.role_id) : null;
-        console.log('[Dashboard/topics DEBUG] role of user:', roleRow);
-        const allShares = await db2.prepare(`SELECT ps.*, r.name AS role_name FROM ai_project_shares ps LEFT JOIN roles r ON r.id=TO_NUMBER(ps.grantee_id) AND ps.grantee_type='role'`).all();
-        console.log('[Dashboard/topics DEBUG] all shares with role names:', JSON.stringify(allShares));
-      } catch(de) { console.log('[Dashboard/topics DEBUG] error:', de.message); }
+      topicBinds = [u.id, ...userBinds, ...userBinds];
       if (project_id) {
         projectFilter += ' AND t.project_id=?';
         topicBinds.push(project_id);
@@ -350,17 +349,44 @@ router.get('/topics', requireDashboard, async (req, res) => {
     const topics = await db.prepare(
       `SELECT t.* FROM ai_select_topics t WHERE t.is_active=1 AND t.is_suspended=0 ${projectFilter} ORDER BY t.sort_order ASC, t.id ASC`
     ).all(...topicBinds);
-    console.log('[Dashboard/topics] result count:', topics.length);
 
+    // 設計可見條件：有 project 層存取 OR 有 ai_dashboard_shares 直接分享
+    const userBindsForDesign = u.role === 'admin' ? null : [
+      u.id, String(u.id), String(u.role_id || ''), String(u.dept_code || ''), String(u.profit_center || ''), String(u.org_section || ''),
+      String(u.id), String(u.role_id || ''), String(u.dept_code || ''), String(u.profit_center || ''), String(u.org_section || ''),
+    ];
+    const designsWhereClause = u.role === 'admin' ? '' : `AND (
+      EXISTS (
+        SELECT 1 FROM ai_select_topics t2
+        JOIN ai_select_projects p ON p.id=t2.project_id
+        WHERE t2.id=d.topic_id AND (
+          p.created_by=? OR (p.is_public=1 AND p.public_approved=1) OR
+          EXISTS (SELECT 1 FROM ai_project_shares s WHERE s.project_id=p.id AND (
+            (s.grantee_type='user' AND s.grantee_id=?) OR
+            (s.grantee_type='role' AND s.grantee_id=?) OR
+            (s.grantee_type='department' AND s.grantee_id=?) OR
+            (s.grantee_type='cost_center' AND s.grantee_id=?) OR
+            (s.grantee_type='division' AND s.grantee_id=?)
+          ))
+        )
+      )
+      OR EXISTS (SELECT 1 FROM ai_dashboard_shares ds WHERE ds.design_id=d.id AND (
+        (ds.grantee_type='user' AND ds.grantee_id=?) OR
+        (ds.grantee_type='role' AND ds.grantee_id=?) OR
+        (ds.grantee_type='department' AND ds.grantee_id=?) OR
+        (ds.grantee_type='cost_center' AND ds.grantee_id=?) OR
+        (ds.grantee_type='division' AND ds.grantee_id=?)
+      ))
+    )`;
     const designs = await db.prepare(
-      `SELECT id, topic_id, name, description, vector_search_enabled, chart_config,
-              is_public, created_by, is_suspended,
-              vector_top_k, vector_similarity_threshold,
-              name_zh, name_en, name_vi, desc_zh, desc_en, desc_vi
-       FROM ai_select_designs
-       WHERE is_suspended=0
-       ORDER BY id ASC`
-    ).all();
+      `SELECT d.id, d.topic_id, d.name, d.description, d.vector_search_enabled, d.chart_config,
+              d.is_public, d.created_by, d.is_suspended,
+              d.vector_top_k, d.vector_similarity_threshold,
+              d.name_zh, d.name_en, d.name_vi, d.desc_zh, d.desc_en, d.desc_vi
+       FROM ai_select_designs d
+       WHERE d.is_suspended=0 ${designsWhereClause}
+       ORDER BY d.id ASC`
+    ).all(...(userBindsForDesign || []));
 
     const designMap = {};
     for (const d of designs) {

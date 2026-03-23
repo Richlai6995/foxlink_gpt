@@ -180,17 +180,7 @@ export default function CodeRunnersPanel() {
                             )}
                         </div>
                         <div className="flex items-center gap-1.5 shrink-0">
-                            {!runner.runtime_running ? (
-                                <button
-                                    onClick={() => doAction(runner.id, 'start')}
-                                    disabled={!!actionLoading[runner.id]}
-                                    title="啟動"
-                                    className="flex items-center gap-1 px-3 py-1.5 text-xs bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50"
-                                >
-                                    {actionLoading[runner.id] === 'start' ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />}
-                                    啟動
-                                </button>
-                            ) : (
+                            {runner.runtime_running ? (
                                 <button
                                     onClick={() => doAction(runner.id, 'stop')}
                                     disabled={!!actionLoading[runner.id]}
@@ -199,6 +189,21 @@ export default function CodeRunnersPanel() {
                                 >
                                     {actionLoading[runner.id] === 'stop' ? <Loader2 size={12} className="animate-spin" /> : <Square size={12} />}
                                     停止
+                                </button>
+                            ) : runner.code_status === 'starting' || actionLoading[runner.id] === 'start' ? (
+                                <button disabled className="flex items-center gap-1 px-3 py-1.5 text-xs bg-amber-50 text-amber-600 border border-amber-200 rounded-lg opacity-70 cursor-not-allowed">
+                                    <Loader2 size={12} className="animate-spin" />
+                                    啟動中
+                                </button>
+                            ) : (
+                                <button
+                                    onClick={() => doAction(runner.id, 'start')}
+                                    disabled={!!actionLoading[runner.id]}
+                                    title="啟動"
+                                    className="flex items-center gap-1 px-3 py-1.5 text-xs bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50"
+                                >
+                                    {actionLoading[runner.id] === 'start' ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />}
+                                    啟動
                                 </button>
                             )}
                             <button
