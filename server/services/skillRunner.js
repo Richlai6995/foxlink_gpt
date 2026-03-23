@@ -157,17 +157,17 @@ async function killRunner(skillId, db) {
   const { port } = entry;
 
   try {
-    // SIGTERM first, wait up to 3s, then SIGKILL
-    try { entry.process.kill('SIGTERM'); } catch (_) {}
+    // Skip SIGTERM — go straight to SIGKILL to avoid server.close() keep-alive delay
+    forceKillProcess(entry.process, entry.process.pid);
+    // Wait for exit confirmation (max 1s)
     await Promise.race([
       new Promise(r => entry.process.once('exit', r)),
-      new Promise(r => setTimeout(r, 3000)),
+      new Promise(r => setTimeout(r, 1000)),
     ]);
-    forceKillProcess(entry.process, entry.process.pid);
     releasePort(port);
     runningProcesses.delete(skillId);
-    // Wait for OS to release port (max 3s)
-    await waitForPortFree(port, 3000);
+    // Brief wait for OS to release port (max 1s)
+    await waitForPortFree(port, 1000);
   } catch (e) {
     console.error(`[skillRunner] killRunner error for #${skillId}:`, e.message);
     releasePort(port);
@@ -194,7 +194,7 @@ async function spawnRunner(skill, db) {
     forceKillProcess(existing.process, existing.process.pid);
     releasePort(existingPort);
     runningProcesses.delete(skillId);
-    await waitForPortFree(existingPort, 3000);
+    await waitForPortFree(existingPort, 1000);
   }
 
   // Mark as starting

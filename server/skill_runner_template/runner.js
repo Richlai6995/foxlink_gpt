@@ -63,6 +63,7 @@ const server = app.listen(PORT, '127.0.0.1', () => {
 });
 
 process.on('SIGTERM', () => {
+  if (server.closeAllConnections) server.closeAllConnections(); // Node 18.2+ closes keep-alive connections
   server.close(() => process.exit(0));
-  setTimeout(() => process.exit(0), 3000).unref();
+  setTimeout(() => process.exit(0), 500).unref(); // Force exit after 500ms
 });
