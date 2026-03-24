@@ -13,7 +13,41 @@ function verifyServiceKey(req, res, next) {
   verifyToken(req, res, next);
 }
 
+// ── Helper: split text at sentence/clause boundaries for Google TTS (max 5000 bytes per call) ──
+function splitTextForTTS(text, maxBytes = 4800) {
+  const chunks = [];
+  let remaining = text;
+
+  while (remaining.length > 0) {
+    if (Buffer.byteLength(remaining, 'utf8') <= maxBytes) {
+      chunks.push(remaining);
+      break;
+    }
+    // Conservative estimate: assume 3 bytes/char, then refine
+    let end = Math.min(remaining.length, Math.floor(maxBytes / 3));
+    while (end > 100 && Buffer.byteLength(remaining.slice(0, end), 'utf8') > maxBytes) {
+      end -= 50;
+    }
+    // Split at sentence boundary (。！？；\n) first
+    let splitAt = -1;
+    for (let i = end; i > end * 0.4; i--) {
+      if (/[。！？；\n]/.test(remaining[i])) { splitAt = i + 1; break; }
+    }
+    // Fallback: split at comma/clause boundary
+    if (splitAt === -1) {
+      for (let i = end; i > end * 0.4; i--) {
+        if (/[，、,：]/.test(remaining[i])) { splitAt = i + 1; break; }
+      }
+    }
+    if (splitAt === -1) splitAt = end; // hard split
+    chunks.push(remaining.slice(0, splitAt).trim());
+    remaining = remaining.slice(splitAt).trim();
+  }
+  return chunks.filter(c => c.length > 0);
+}
+
 // TTS endpoint 用 service key 或 user token 皆可
+// 支援長文本自動分段呼叫 Google TTS 再合併 MP3
 router.post('/tts/synthesize', verifyServiceKey, async (req, res) => {
   try {
     const db = require('../database-oracle').db;
@@ -35,50 +69,65 @@ router.post('/tts/synthesize', verifyServiceKey, async (req, res) => {
     const selectedVoice = voice_name?.trim() || model.api_model || 'cmn-TW-Wavenet-A';
     const langCode = selectedVoice.split('-').slice(0, 2).join('-');
 
-    const ttsPayload = {
-      input: { text: text.trim() },
-      voice: { languageCode: langCode, name: selectedVoice },
-      audioConfig: { audioEncoding: 'MP3', speakingRate: Number(speaking_rate), pitch: Number(pitch) },
-    };
-    console.log(`[TTS/synthesize] calling Google TTS voice=${selectedVoice} lang=${langCode} textBytes=${Buffer.byteLength(text.trim(),'utf8')}`);
+    const inputText = text.trim();
+    const inputBytes = Buffer.byteLength(inputText, 'utf8');
 
-    const ttsRes = await fetch(
-      `https://texttospeech.googleapis.com/v1/text:synthesize?key=${apiKey}`,
-      {
+    // Split into chunks if text exceeds safe limit (Google TTS max = 5000 bytes)
+    const chunks = inputBytes <= 4800 ? [inputText] : splitTextForTTS(inputText);
+    console.log(`[TTS/synthesize] voice=${selectedVoice} lang=${langCode} totalBytes=${inputBytes} chunks=${chunks.length}`);
+
+    const ttsUrl = `https://texttospeech.googleapis.com/v1/text:synthesize?key=${apiKey}`;
+    const voiceCfg = { languageCode: langCode, name: selectedVoice };
+    const audioCfg = { audioEncoding: 'MP3', speakingRate: Number(speaking_rate), pitch: Number(pitch) };
+    const mp3Buffers = [];
+
+    for (let i = 0; i < chunks.length; i++) {
+      const chunk = chunks[i];
+      const chunkBytes = Buffer.byteLength(chunk, 'utf8');
+      console.log(`[TTS/synthesize] chunk ${i + 1}/${chunks.length}: ${chunk.length} chars, ${chunkBytes} bytes`);
+
+      const ttsRes = await fetch(ttsUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(ttsPayload),
+        body: JSON.stringify({ input: { text: chunk }, voice: voiceCfg, audioConfig: audioCfg }),
+        signal: AbortSignal.timeout(60000),
+      });
+
+      if (!ttsRes.ok) {
+        const err = await ttsRes.json().catch(() => ({}));
+        const errMsg = err?.error?.message || err?.error?.status || `TTS API 錯誤 ${ttsRes.status}`;
+        console.error(`[TTS/synthesize] chunk ${i + 1} HTTP ${ttsRes.status}: ${errMsg}`);
+        return res.status(ttsRes.status).json({ error: `chunk ${i + 1}/${chunks.length}: ${errMsg}` });
       }
-    );
-    if (!ttsRes.ok) {
-      const err = await ttsRes.json().catch(() => ({}));
-      const errMsg = err?.error?.message || err?.error?.status || `TTS API 錯誤 ${ttsRes.status}`;
-      console.error(`[TTS/synthesize] Google TTS HTTP ${ttsRes.status} voice=${selectedVoice} error=${errMsg}`);
-      return res.status(ttsRes.status).json({ error: errMsg });
+
+      const { audioContent } = await ttsRes.json();
+      if (!audioContent) {
+        console.error(`[TTS/synthesize] chunk ${i + 1} returned empty audioContent`);
+        continue; // skip empty chunk, try remaining
+      }
+      mp3Buffers.push(Buffer.from(audioContent, 'base64'));
     }
 
-    const ttsBody = await ttsRes.json();
-    const { audioContent } = ttsBody;
-
-    if (!audioContent) {
-      const bodySnap = JSON.stringify(ttsBody).slice(0, 500);
-      console.error(`[TTS/synthesize] audioContent empty! voice=${selectedVoice} lang=${langCode} bodySnap=${bodySnap}`);
+    if (mp3Buffers.length === 0) {
+      console.error(`[TTS/synthesize] all chunks returned empty audioContent, voice=${selectedVoice}`);
       return res.status(502).json({ error: `Google TTS 回傳空音訊 voice=${selectedVoice}，請確認語音名稱是否有效或 API Key 是否有 Cloud TTS 權限` });
     }
 
-    // 存成實體 MP3，回傳 URL（避免 base64 過長造成前端渲染問題）
+    // Concatenate MP3 buffers (MP3 is frame-based, simple concat is valid)
+    const mp3Buf = Buffer.concat(mp3Buffers);
+
+    // 存成實體 MP3
     const UPLOAD_DIR = process.env.UPLOAD_DIR
       ? path.resolve(process.env.UPLOAD_DIR)
       : path.join(__dirname, '../uploads');
     const genDir = path.join(UPLOAD_DIR, 'generated');
     if (!fs.existsSync(genDir)) fs.mkdirSync(genDir, { recursive: true });
     const fname = `tts_${Date.now()}.mp3`;
-    const mp3Buf = Buffer.from(audioContent, 'base64');
     fs.writeFileSync(path.join(genDir, fname), mp3Buf);
-    console.log(`[TTS/synthesize] saved ${fname} size=${mp3Buf.length}bytes`);
+    console.log(`[TTS/synthesize] saved ${fname} size=${mp3Buf.length}bytes chunks=${mp3Buffers.length}`);
 
     // 記錄用量：Google TTS 按字元計費，input_tokens = 字元數
-    const charCount = text.trim().length;
+    const charCount = inputText.length;
     const effectiveUserId = user_id || req.user?.id;
     if (effectiveUserId && charCount > 0) {
       const { upsertTokenUsage } = require('../services/tokenService');
@@ -97,6 +146,7 @@ router.post('/tts/synthesize', verifyServiceKey, async (req, res) => {
       char_count: charCount,
     });
   } catch (e) {
+    console.error(`[TTS/synthesize] error: ${e.message}`);
     res.status(500).json({ error: e.message });
   }
 });
