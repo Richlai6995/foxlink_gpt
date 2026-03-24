@@ -1283,8 +1283,12 @@ router.post('/sessions/:id/messages', upload.array('files', 10), async (req, res
         }
         sendEvent({ type: 'chunk', content: answerContent });
         if (skillAudioUrl) {
+          const isDataUrl = skillAudioUrl.startsWith('data:');
           const fname = skillAudioFileUrl ? path.basename(skillAudioFileUrl) : `tts_${Date.now()}.mp3`;
+          console.log(`[Skill] sending audio: isDataUrl=${isDataUrl} fileUrl=${skillAudioFileUrl} dataUrlLen=${isDataUrl ? skillAudioUrl.length : 0} fname=${fname}`);
           sendEvent({ type: 'generated_files', files: [{ type: 'audio', filename: fname, publicUrl: skillAudioUrl }] });
+        } else {
+          console.log(`[Skill] NO audio_url from skill "${sk.name}"`);
         }
         sendEvent({ type: 'done' });
         // Record 0-token usage for tracing

@@ -561,6 +561,12 @@ export default function ChatPage() {
                   title_vi: event.title_vi || s.title_vi,
                 } : s))
               } else if (event.type === 'generated_files') {
+                console.log('[SSE-DEBUG] generated_files:', event.files.map((f: any) => ({
+                  type: f.type, filename: f.filename,
+                  urlType: f.publicUrl?.startsWith('data:') ? 'dataURL' : 'fileURL',
+                  urlLen: f.publicUrl?.length,
+                  urlPreview: f.publicUrl?.slice(0, 60),
+                })))
                 generatedFiles.push(...event.files)
               } else if (event.type === 'error') {
                 streamError = event.message || '發生錯誤'
