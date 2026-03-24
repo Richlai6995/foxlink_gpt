@@ -252,8 +252,8 @@ async function getDifyFunctionDeclarations(db, userCtx) {
       ? `此工具的適用範疇：${kb.description}`
       : `企業內部知識庫「${kb.name}」`;
     const desc = `知識庫查詢工具「${kb.name}」。${scopeText}。` +
-      `呼叫規則：(1) 使用者問題的核心意圖必須明確屬於上述範疇才呼叫，主題相關但意圖不符時不要呼叫；` +
-      `(2) 每次對話此工具只呼叫一次，已呼叫後不得重複呼叫。`;
+      `呼叫規則：(1) 使用者問題的核心意圖屬於上述範疇時就應呼叫，不要自行猜測答案；` +
+      `(2) 同一輪回覆中此工具只呼叫一次，但不同輪次可以再次呼叫。`;
     declarations.push({
       name: safeName,
       description: desc,
@@ -601,14 +601,24 @@ router.get('/sessions/:id', async (req, res) => {
       WHERE ss.session_id = ? ORDER BY ss.sort_order ASC
     `).all(req.params.id);
 
-    // Restore tool selections from log tables (MCP/DIFY) + stored context (KB)
-    const usedMcpRaw  = await db.prepare(`SELECT DISTINCT server_id FROM mcp_call_logs  WHERE session_id=?`).all(req.params.id).catch(() => []);
-    const usedDifyRaw = await db.prepare(`SELECT DISTINCT kb_id      FROM dify_call_logs WHERE session_id=?`).all(req.params.id).catch(() => []);
-    const usedMcpIds  = usedMcpRaw.map(r => Number(r.server_id));
-    const usedDifyIds = usedDifyRaw.map(r => Number(r.kb_id));
-    let usedKbIds = [];
+    // Restore tool selections from stored context (primary) + call logs (fallback)
+    let usedMcpIds = [], usedDifyIds = [], usedKbIds = [];
     if (session.tools_context_json) {
-      try { usedKbIds = JSON.parse(session.tools_context_json).kb || []; } catch {}
+      try {
+        const ctx = JSON.parse(session.tools_context_json);
+        usedMcpIds  = (ctx.mcp  || []).map(Number);
+        usedDifyIds = (ctx.dify || []).map(Number);
+        usedKbIds   = ctx.kb    || [];
+      } catch {}
+    }
+    // Fallback: if tools_context_json was empty, try call logs
+    if (!usedMcpIds.length) {
+      const raw = await db.prepare(`SELECT DISTINCT server_id FROM mcp_call_logs WHERE session_id=?`).all(req.params.id).catch(() => []);
+      usedMcpIds = raw.map(r => Number(r.server_id));
+    }
+    if (!usedDifyIds.length) {
+      const raw = await db.prepare(`SELECT DISTINCT kb_id FROM dify_call_logs WHERE session_id=?`).all(req.params.id).catch(() => []);
+      usedDifyIds = raw.map(r => Number(r.kb_id));
     }
 
     res.json({ session, messages, skills, used_mcp_ids: usedMcpIds, used_dify_ids: usedDifyIds, used_kb_ids: usedKbIds });
