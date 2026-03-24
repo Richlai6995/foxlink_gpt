@@ -3,6 +3,37 @@ kind: Namespace
 metadata:
   name: foxlink
 ---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: foxlink-gpt
+  namespace: foxlink
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: foxlink-gpt-monitor
+rules:
+  - apiGroups: [""]
+    resources: ["nodes", "pods", "events", "namespaces"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: foxlink-gpt-monitor
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: foxlink-gpt-monitor
+subjects:
+  - kind: ServiceAccount
+    name: foxlink-gpt
+    namespace: foxlink
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -25,6 +56,7 @@ spec:
       labels:
         app: foxlink-gpt
     spec:
+      serviceAccountName: foxlink-gpt
       terminationGracePeriodSeconds: 60
 
       # ── Init: 等 Redis 就緒再啟動 ─────────────────────────────────────────
@@ -89,6 +121,10 @@ spec:
             - name: nfs-source
               mountPath: /opt/oracle/instantclient
               subPath: oracle_client
+            # ── Docker Socket（監控用）──
+            - name: docker-sock
+              mountPath: /var/run/docker.sock
+              readOnly: true
 
           # ── Resources ────────────────────────────────────────────────────
           resources:
@@ -132,6 +168,10 @@ spec:
             claimName: pvc-flgpt-source
         - name: tmp-data
           emptyDir: {}
+        - name: docker-sock
+          hostPath:
+            path: /var/run/docker.sock
+            type: Socket
 ---
 apiVersion: v1
 kind: Service
