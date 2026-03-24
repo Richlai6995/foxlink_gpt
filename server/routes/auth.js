@@ -173,6 +173,10 @@ const authenticateLDAP = (account, password) => {
   });
 };
 
+function tryParseError(text) {
+  try { const j = JSON.parse(text); return j.error_description || j.error || null; } catch { return null; }
+}
+
 // Log SSO config status at startup
 console.log(`[SSO] Enabled: ${isSsoEnabled()}, Issuer: ${process.env.SSO_ISSUER || '(not set)'}, ClientID: ${process.env.SSO_CLIENT_ID ? '(set)' : '(not set)'}`);
 
@@ -216,22 +220,27 @@ router.get('/sso/callback', async (req, res) => {
     const cfg = await getSsoConfig();
 
     // 1. Exchange authorization code for tokens
+    const redirectUri = `${process.env.APP_BASE_URL}/api/auth/sso/callback`;
+    const basicAuth = Buffer.from(`${process.env.SSO_CLIENT_ID}:${process.env.SSO_CLIENT_SECRET}`).toString('base64');
+    console.log('[SSO] Token exchange → endpoint:', cfg.token_endpoint, 'redirect_uri:', redirectUri);
+
     const tokenResp = await fetch(cfg.token_endpoint, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Authorization': `Basic ${basicAuth}`,
+      },
       body: new URLSearchParams({
         grant_type: 'authorization_code',
         code: String(code),
-        redirect_uri: `${process.env.APP_BASE_URL}/api/auth/sso/callback`,
-        client_id: process.env.SSO_CLIENT_ID,
-        client_secret: process.env.SSO_CLIENT_SECRET,
+        redirect_uri: redirectUri,
       }),
       signal: AbortSignal.timeout(10000),
     });
     if (!tokenResp.ok) {
       const text = await tokenResp.text();
       console.error('[SSO] token exchange failed:', tokenResp.status, text);
-      return res.redirect(`${baseUrl}/login?sso_error=${encodeURIComponent('SSO Token 交換失敗')}`);
+      return res.redirect(`${baseUrl}/login?sso_error=${encodeURIComponent('SSO Token 交換失敗: ' + (tryParseError(text) || tokenResp.status))}`);
     }
     const tokenData = await tokenResp.json();
 
