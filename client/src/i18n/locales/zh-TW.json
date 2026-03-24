@@ -193,6 +193,7 @@
       "codeRunners": "Code Runners",
       "aiDashboard": "AI 戰情室",
       "dataPermissions": "資料權限管理",
+      "monitor": "系統監控",
       "db": "歷史資料清除設定",
       "mail": "郵件設定",
       "llm": "LLM 模型設定",
@@ -1358,5 +1359,13 @@
     "rerunCount": "已選 {{n}} 個子問題重跑",
     "rerunBtn": "確認並重跑",
     "errorNoRerun": "請至少選擇一個子問題重跑"
+  },
+  "monitor": {
+    "nodes": "節點",
+    "pods": "Pods",
+    "onlineUsers": "線上人數",
+    "disk": "磁碟",
+    "alerts": "告警",
+    "unresolved": "未解除"
   }
 }

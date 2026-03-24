@@ -193,6 +193,7 @@
       "codeRunners": "Code Runners",
       "aiDashboard": "AI Dashboard",
       "dataPermissions": "Data Permissions",
+      "monitor": "System Monitor",
       "db": "History Cleanup Settings",
       "mail": "Mail Settings",
       "llm": "LLM Model Settings",
@@ -1358,5 +1359,13 @@
     "rerunCount": "{{n}} sub-question(s) selected for re-run",
     "rerunBtn": "Confirm & Re-run",
     "errorNoRerun": "Please select at least one sub-question to re-run"
+  },
+  "monitor": {
+    "nodes": "Nodes",
+    "pods": "Pods",
+    "onlineUsers": "Online Users",
+    "disk": "Disk",
+    "alerts": "Alerts",
+    "unresolved": "Unresolved"
   }
 }

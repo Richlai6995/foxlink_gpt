@@ -1129,6 +1129,108 @@ async function runMigrations(db) {
     CONSTRAINT role_org_bindings_uq UNIQUE (org_type, org_code)
   )`);
 
+  // ── 系統監控表 (K8s / Docker / Host) ──────────────────────────────────────────
+
+  // 節點指標歷史（每 5 分鐘一筆）
+  await createTable('NODE_METRICS', `CREATE TABLE node_metrics (
+    id            NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    node_name     VARCHAR2(100) NOT NULL,
+    role          VARCHAR2(20),
+    status        VARCHAR2(20),
+    cpu_alloc     VARCHAR2(20),
+    cpu_req       VARCHAR2(20),
+    cpu_req_pct   NUMBER(5,2),
+    mem_alloc     VARCHAR2(20),
+    mem_req       VARCHAR2(20),
+    mem_req_pct   NUMBER(5,2),
+    pod_count     NUMBER,
+    collected_at  TIMESTAMP DEFAULT SYSTIMESTAMP
+  )`);
+
+  // 主機系統指標（每 5 分鐘一筆，讀 /proc）
+  await createTable('HOST_METRICS', `CREATE TABLE host_metrics (
+    id            NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    load_1m       NUMBER(6,2),
+    load_5m       NUMBER(6,2),
+    load_15m      NUMBER(6,2),
+    mem_total_mb  NUMBER,
+    mem_used_mb   NUMBER,
+    mem_cached_mb NUMBER,
+    swap_used_mb  NUMBER,
+    net_rx_mb     NUMBER(10,2),
+    net_tx_mb     NUMBER(10,2),
+    disk_read_mb  NUMBER(10,2),
+    disk_write_mb NUMBER(10,2),
+    uptime_sec    NUMBER,
+    collected_at  TIMESTAMP DEFAULT SYSTIMESTAMP
+  )`);
+
+  // 磁碟使用歷史（每小時一筆）
+  await createTable('DISK_METRICS', `CREATE TABLE disk_metrics (
+    id            NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    mount         VARCHAR2(200),
+    device        VARCHAR2(200),
+    total_gb      NUMBER(10,2),
+    used_gb       NUMBER(10,2),
+    use_pct       NUMBER(5,2),
+    inode_pct     NUMBER(5,2),
+    is_mounted    NUMBER(1) DEFAULT 1,
+    collected_at  TIMESTAMP DEFAULT SYSTIMESTAMP
+  )`);
+
+  // 線上人數快照（每 5 分鐘一筆）
+  await createTable('ONLINE_USER_SNAPSHOTS', `CREATE TABLE online_user_snapshots (
+    id            NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    online_count  NUMBER,
+    user_ids      VARCHAR2(2000),
+    collected_at  TIMESTAMP DEFAULT SYSTIMESTAMP
+  )`);
+
+  // Service 健康檢查設定
+  await createTable('HEALTH_CHECKS', `CREATE TABLE health_checks (
+    id              NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    name            VARCHAR2(100) NOT NULL,
+    url             VARCHAR2(500) NOT NULL,
+    method          VARCHAR2(10) DEFAULT 'GET',
+    expected_status NUMBER DEFAULT 200,
+    timeout_ms      NUMBER DEFAULT 5000,
+    enabled         NUMBER(1) DEFAULT 1,
+    created_at      TIMESTAMP DEFAULT SYSTIMESTAMP
+  )`);
+
+  // Service 健康檢查結果（每 1 分鐘一筆）
+  await createTable('HEALTH_CHECK_RESULTS', `CREATE TABLE health_check_results (
+    id            NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    check_id      NUMBER NOT NULL,
+    status_code   NUMBER,
+    response_ms   NUMBER,
+    is_up         NUMBER(1),
+    error_msg     VARCHAR2(500),
+    checked_at    TIMESTAMP DEFAULT SYSTIMESTAMP
+  )`);
+
+  // 異常通知記錄
+  await createTable('MONITOR_ALERTS', `CREATE TABLE monitor_alerts (
+    id            NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    alert_type    VARCHAR2(50),
+    severity      VARCHAR2(20),
+    resource_name VARCHAR2(200),
+    message       CLOB,
+    notified_at   TIMESTAMP DEFAULT SYSTIMESTAMP,
+    resolved_at   TIMESTAMP
+  )`);
+
+  // Deploy 歷史紀錄
+  await createTable('DEPLOY_HISTORY', `CREATE TABLE deploy_history (
+    id            NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    triggered_by  NUMBER,
+    git_before    VARCHAR2(40),
+    git_after     VARCHAR2(40),
+    exit_code     NUMBER,
+    log_text      CLOB,
+    deployed_at   TIMESTAMP DEFAULT SYSTIMESTAMP
+  )`);
+
   // ── Vector table partitioning ───────────────────────────────────────────────
   await migrateAiVectorStoreToPartitioned();
   await migrateKbChunksToPartitioned();

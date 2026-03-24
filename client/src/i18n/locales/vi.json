@@ -193,6 +193,7 @@
       "codeRunners": "Code Runners",
       "aiDashboard": "Bảng điều khiển AI",
       "dataPermissions": "Quyền dữ liệu",
+      "monitor": "Giám sát hệ thống",
       "db": "Cài đặt xóa lịch sử",
       "mail": "Cài đặt email",
       "llm": "Cài đặt mô hình LLM",
@@ -1358,5 +1359,13 @@
     "rerunCount": "Đã chọn {{n}} câu hỏi phụ để chạy lại",
     "rerunBtn": "Xác nhận & Chạy lại",
     "errorNoRerun": "Vui lòng chọn ít nhất một câu hỏi phụ để chạy lại"
+  },
+  "monitor": {
+    "nodes": "Nút",
+    "pods": "Pods",
+    "onlineUsers": "Người dùng trực tuyến",
+    "disk": "Ổ đĩa",
+    "alerts": "Cảnh báo",
+    "unresolved": "Chưa giải quyết"
   }
 }

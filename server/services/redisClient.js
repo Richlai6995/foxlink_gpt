@@ -107,4 +107,42 @@ module.exports = {
   async delSession(token) {
     await getStore().del(`sess:${token}`);
   },
+  /**
+   * Get all active sessions (for online user monitoring).
+   * Only works with MemoryStore; Redis would need SCAN.
+   * @returns {object[]}
+   */
+  async getAllSessions() {
+    const s = getStore();
+    if (s instanceof MemoryStore) {
+      const results = [];
+      const now = Date.now();
+      for (const [key, entry] of s.store) {
+        if (!key.startsWith('sess:')) continue;
+        if (entry.exp && now > entry.exp) continue;
+        try { results.push(JSON.parse(entry.val)); } catch {}
+      }
+      return results;
+    }
+    // Redis: use SCAN to find sess:* keys
+    if (s.client && typeof s.client.scanStream === 'function') {
+      return new Promise((resolve, reject) => {
+        const results = [];
+        const stream = s.client.scanStream({ match: 'sess:*', count: 100 });
+        const keys = [];
+        stream.on('data', k => keys.push(...k));
+        stream.on('end', async () => {
+          try {
+            for (const key of keys) {
+              const raw = await s.client.get(key);
+              if (raw) try { results.push(JSON.parse(raw)); } catch {}
+            }
+            resolve(results);
+          } catch (e) { reject(e); }
+        });
+        stream.on('error', reject);
+      });
+    }
+    return [];
+  },
 };

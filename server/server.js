@@ -76,6 +76,8 @@ app.get('/api/health', (req, res) => res.json({ status: 'ok', timestamp: new Dat
     console.log('[Route] /api/dashboard OK');
     app.use('/api/data-permissions', require('./routes/dataPermissions'));
     console.log('[Route] /api/data-permissions OK');
+    app.use('/api/monitor', require('./routes/monitor'));
+    console.log('[Route] /api/monitor OK');
 
     // Auto-restore code skill runners
     try {
@@ -209,6 +211,14 @@ app.get('/api/health', (req, res) => res.json({ status: 'ok', timestamp: new Dat
       initEtlScheduler(db);
     } catch (e) {
       console.error('[ETL Scheduler] Failed to init:', e.message);
+    }
+
+    // Init System Monitor Metrics Collector
+    try {
+      const { startMetricsCollector } = require('./services/metricsCollector');
+      startMetricsCollector(db);
+    } catch (e) {
+      console.error('[MetricsCollector] Failed to start:', e.message);
     }
   } catch (error) {
     console.error('Failed to initialize:', error);
