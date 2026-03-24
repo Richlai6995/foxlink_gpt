@@ -204,7 +204,8 @@ router.get('/summary', async (req, res) => {
       disks: diskRows || [],
     });
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    console.error('[Monitor] summary error:', e.message);
+    res.json({ nodes: { total: 0, ready: 0 }, pods: { running: 0, error: 0, total: 0 }, onlineUsers: 0, unresolvedAlerts: 0, host: null, disks: [] });
   }
 });
 
@@ -213,8 +214,8 @@ router.get('/nodes', async (req, res) => {
   try {
     const data = await getK8sResource('/api/v1/nodes', ['get', 'nodes', '-o', 'json']);
     res.json(data);
-  } catch (e) {
-    res.status(500).json({ error: e.message });
+  } catch {
+    res.json({ items: [] });
   }
 });
 
@@ -226,19 +227,17 @@ router.get('/nodes/detail', async (req, res) => {
     for (const node of (nodes.items || [])) {
       const name = node.metadata?.name;
       try {
-        // Try kubectl describe for detailed resource info
         const desc = await runCmd('kubectl', ['describe', 'node', name]);
         const detail = parseNodeDescribe(name, node, desc);
         details.push(detail);
       } catch {
-        // Fallback: build detail from K8s API node object directly
         const detail = parseNodeFromApi(name, node);
         details.push(detail);
       }
     }
     res.json(details);
-  } catch (e) {
-    res.status(500).json({ error: e.message });
+  } catch {
+    res.json([]);
   }
 });
 
@@ -328,8 +327,8 @@ router.get('/nodes/history', async (req, res) => {
        ORDER BY collected_at ASC`
     ).all();
     res.json(rows);
-  } catch (e) {
-    res.status(500).json({ error: e.message });
+  } catch {
+    res.json([]);
   }
 });
 
@@ -338,8 +337,8 @@ router.get('/pods', async (req, res) => {
   try {
     const data = await getK8sResource('/api/v1/pods', ['get', 'pods', '--all-namespaces', '-o', 'json']);
     res.json(data);
-  } catch (e) {
-    res.status(500).json({ error: e.message });
+  } catch {
+    res.json({ items: [] });
   }
 });
 
@@ -348,8 +347,8 @@ router.get('/events', async (req, res) => {
   try {
     const data = await getK8sResource('/api/v1/events', ['get', 'events', '--all-namespaces', '-o', 'json']);
     res.json(data);
-  } catch (e) {
-    res.status(500).json({ error: e.message });
+  } catch {
+    res.json({ items: [] });
   }
 });
 
@@ -358,8 +357,8 @@ router.get('/host/current', async (req, res) => {
   try {
     const metrics = await collectHostMetrics();
     res.json(metrics);
-  } catch (e) {
-    res.status(500).json({ error: e.message });
+  } catch {
+    res.json({ load_1m: 0, load_5m: 0, load_15m: 0, mem_total_mb: 0, mem_used_mb: 0, uptime_sec: 0 });
   }
 });
 
@@ -466,8 +465,8 @@ router.get('/host/history', async (req, res) => {
        ORDER BY collected_at ASC`
     ).all();
     res.json(rows);
-  } catch (e) {
-    res.status(500).json({ error: e.message });
+  } catch {
+    res.json([]);
   }
 });
 
@@ -475,21 +474,23 @@ router.get('/host/processes', async (req, res) => {
   try {
     let processes = [];
     if (os.platform() === 'linux') {
-      const out = await runCmd('ps', ['aux', '--sort=-%cpu'], 5000);
-      const lines = out.split('\n').slice(1, 21); // top 20
-      processes = lines.filter(l => l.trim()).map(line => {
-        const parts = line.trim().split(/\s+/);
-        return {
-          user: parts[0], pid: parts[1],
-          cpu: parseFloat(parts[2]) || 0,
-          mem: parseFloat(parts[3]) || 0,
-          command: parts.slice(10).join(' '),
-        };
-      });
+      try {
+        const out = await runCmd('ps', ['aux', '--sort=-%cpu'], 5000);
+        const lines = out.split('\n').slice(1, 21); // top 20
+        processes = lines.filter(l => l.trim()).map(line => {
+          const parts = line.trim().split(/\s+/);
+          return {
+            user: parts[0], pid: parts[1],
+            cpu: parseFloat(parts[2]) || 0,
+            mem: parseFloat(parts[3]) || 0,
+            command: parts.slice(10).join(' '),
+          };
+        });
+      } catch {}
     }
     res.json(processes);
-  } catch (e) {
-    res.status(500).json({ error: e.message });
+  } catch {
+    res.json([]);
   }
 });
 
@@ -516,8 +517,8 @@ router.get('/images', async (req, res) => {
       return res.json(images);
     }
     res.json([]);
-  } catch (e) {
-    res.status(500).json({ error: e.message });
+  } catch {
+    res.json([]);
   }
 });
 
@@ -562,8 +563,8 @@ router.get('/containers', async (req, res) => {
       return res.json(containers);
     }
     res.json([]);
-  } catch (e) {
-    res.status(500).json({ error: e.message });
+  } catch {
+    res.json([]);
   }
 });
 
@@ -769,48 +770,44 @@ router.get('/logs/container/:id', (req, res) => {
 
 // ─── Disk / NAS ─────────────────────────────────────────────────────────────
 router.get('/disk', async (req, res) => {
+  let disks = [];
   try {
-    let disks = [];
     if (os.platform() === 'linux') {
-      // df -h (usage) + df -i (inodes)
-      const dfOut = await runCmd('df', ['-h', '--output=source,target,size,used,avail,pcent']);
-      const diOut = await runCmd('df', ['-i', '--output=source,target,ipcent']);
+      try {
+        const dfOut = await runCmd('df', ['-h', '--output=source,target,size,used,avail,pcent']);
+        const diOut = await runCmd('df', ['-i', '--output=source,target,ipcent']).catch(() => '');
 
-      const inodeMap = {};
-      for (const line of diOut.split('\n').slice(1)) {
-        const parts = line.trim().split(/\s+/);
-        if (parts.length >= 3) inodeMap[parts[1]] = parts[2];
-      }
+        const inodeMap = {};
+        for (const line of (diOut || '').split('\n').slice(1)) {
+          const parts = line.trim().split(/\s+/);
+          if (parts.length >= 3) inodeMap[parts[1]] = parts[2];
+        }
 
-      for (const line of dfOut.split('\n').slice(1)) {
-        const parts = line.trim().split(/\s+/);
-        if (parts.length < 6) continue;
-        const mount = parts[1];
-        const device = parts[0];
-        // Skip pseudo filesystems (but keep overlay=root, NFS, CIFS mounts)
-        if (['tmpfs', 'devtmpfs'].includes(device)) continue;
-        if (mount.startsWith('/sys') || mount.startsWith('/proc') || mount.startsWith('/dev/shm') || mount.startsWith('/run')) continue;
+        for (const line of dfOut.split('\n').slice(1)) {
+          const parts = line.trim().split(/\s+/);
+          if (parts.length < 6) continue;
+          const mount = parts[1];
+          const device = parts[0];
+          if (['tmpfs', 'devtmpfs'].includes(device)) continue;
+          if (mount.startsWith('/sys') || mount.startsWith('/proc') || mount.startsWith('/dev/shm') || mount.startsWith('/run')) continue;
 
-        const totalStr = parts[2];
-        const usedStr = parts[3];
-        const usePctStr = parts[5].replace('%', '');
-
-        disks.push({
-          device: parts[0],
-          mount,
-          total: totalStr,
-          used: usedStr,
-          available: parts[4],
-          use_pct: parseFloat(usePctStr) || 0,
-          inode_pct: parseFloat((inodeMap[mount] || '0').replace('%', '')) || 0,
-          is_mounted: true,
-        });
+          disks.push({
+            device,
+            mount,
+            total: parts[2],
+            used: parts[3],
+            available: parts[4],
+            use_pct: parseFloat(parts[5].replace('%', '')) || 0,
+            inode_pct: parseFloat((inodeMap[mount] || '0').replace('%', '')) || 0,
+            is_mounted: true,
+          });
+        }
+      } catch (e) {
+        console.warn('[Monitor] df failed:', e.message);
       }
     }
-    res.json(disks);
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
+  } catch {}
+  res.json(disks);
 });
 
 router.get('/disk/history', async (req, res) => {
@@ -827,8 +824,8 @@ router.get('/disk/history', async (req, res) => {
     sql += ` ORDER BY collected_at ASC`;
     const rows = await db.prepare(sql).all(...binds);
     res.json(rows);
-  } catch (e) {
-    res.status(500).json({ error: e.message });
+  } catch {
+    res.json([]);
   }
 });
 
@@ -840,7 +837,6 @@ router.get('/online-users', async (req, res) => {
     try {
       const sessions = await redis.getAllSessions();
       if (sessions) {
-        // Deduplicate by user id (same user may have multiple sessions)
         const seen = new Map();
         for (const s of sessions) {
           if (!s.id) continue;
@@ -858,10 +854,10 @@ router.get('/online-users', async (req, res) => {
         }
         users = Array.from(seen.values());
       }
-    } catch { /* getAllSessions may not exist */ }
+    } catch {}
     res.json({ count: users.length, users });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
+  } catch {
+    res.json({ count: 0, users: [] });
   }
 });
 
@@ -875,8 +871,8 @@ router.get('/online-users/history', async (req, res) => {
        ORDER BY collected_at ASC`
     ).all();
     res.json(rows);
-  } catch (e) {
-    res.status(500).json({ error: e.message });
+  } catch {
+    res.json([]);
   }
 });
 
