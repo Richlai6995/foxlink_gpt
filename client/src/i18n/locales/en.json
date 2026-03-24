@@ -59,7 +59,10 @@
     "resetSubmit": "Send Reset Link",
     "resetSubmitting": "Sending...",
     "loginFailed": "Login failed, please try again",
-    "requestFailed": "Request failed, please try again"
+    "requestFailed": "Request failed, please try again",
+    "or": "OR",
+    "ssoButton": "Foxlink SSO Login",
+    "ssoLoading": "SSO logging in..."
   },
   "resetPassword": {
     "title": "Reset Password",

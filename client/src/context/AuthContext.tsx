@@ -8,6 +8,7 @@ interface AuthContextType {
   user: User | null
   token: string | null
   login: (username: string, password: string) => Promise<void>
+  loginWithSsoToken: (ssoToken: string) => Promise<void>
   logout: () => Promise<void>
   isAuthenticated: boolean
   isAdmin: boolean
@@ -66,6 +67,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     applyLanguage(u)
   }, [])
 
+  const loginWithSsoToken = useCallback(async (ssoToken: string) => {
+    const res = await api.get(`/auth/sso/user?token=${ssoToken}`)
+    const { token: t, user: u } = res.data
+    localStorage.setItem('token', t)
+    localStorage.setItem('user', JSON.stringify(u))
+    setToken(t)
+    setUser(u)
+    applyLanguage(u)
+  }, [])
+
   const logout = useCallback(async () => {
     try { await api.post('/auth/logout') } catch (_) {}
     localStorage.removeItem('token')
@@ -103,6 +114,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         user,
         token,
         login,
+        loginWithSsoToken,
         logout,
         isAuthenticated: !!token && !!user,
         isAdmin,

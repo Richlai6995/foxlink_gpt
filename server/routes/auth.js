@@ -44,6 +44,23 @@ function detectLangFromHeader(acceptLanguage) {
 
 const redis = require('../services/redisClient');
 
+// ── SSO / OIDC Config ──────────────────────────────────────────────
+const SSO_ENABLED = !!(process.env.SSO_ISSUER && process.env.SSO_CLIENT_ID && process.env.SSO_CLIENT_SECRET);
+let _ssoConfig = null; // cached OIDC discovery
+
+async function getSsoConfig() {
+  if (_ssoConfig) return _ssoConfig;
+  const discoveryUrl = `${process.env.SSO_ISSUER}/.well-known/openid-configuration`;
+  const resp = await fetch(discoveryUrl, {
+    headers: { Accept: 'application/json' },
+    signal: AbortSignal.timeout(10000),
+  });
+  if (!resp.ok) throw new Error(`SSO discovery failed: ${resp.status}`);
+  _ssoConfig = await resp.json();
+  console.log('[SSO] OIDC discovery loaded:', _ssoConfig.issuer);
+  return _ssoConfig;
+}
+
 // LDAP Config
 let ldap = null;
 const LDAP_ENABLED = !!(process.env.LDAP_URL && process.env.LDAP_BASE_DN);
@@ -152,6 +169,221 @@ const authenticateLDAP = (account, password) => {
     }
   });
 };
+
+// ── SSO Routes ─────────────────────────────────────────────────────
+
+// GET /api/auth/sso/login — redirect to SSO authorization page
+router.get('/sso/login', async (_req, res) => {
+  if (!SSO_ENABLED) return res.status(501).json({ error: 'SSO not configured' });
+  try {
+    const cfg = await getSsoConfig();
+    const params = new URLSearchParams({
+      response_type: 'code',
+      client_id: process.env.SSO_CLIENT_ID,
+      redirect_uri: `${process.env.APP_BASE_URL}/api/auth/sso/callback`,
+      scope: process.env.SSO_SCOPE || 'openid profile email',
+    });
+    res.redirect(`${cfg.authorization_endpoint}?${params}`);
+  } catch (e) {
+    console.error('[SSO] login redirect error:', e.message);
+    res.redirect(`${process.env.APP_BASE_URL}/login?sso_error=${encodeURIComponent('SSO 服務暫時無法連線')}`);
+  }
+});
+
+// GET /api/auth/sso/callback — exchange code for token, get userinfo, create session
+router.get('/sso/callback', async (req, res) => {
+  const { code, error: ssoError } = req.query;
+  const baseUrl = process.env.APP_BASE_URL || '';
+
+  if (ssoError || !code) {
+    return res.redirect(`${baseUrl}/login?sso_error=${encodeURIComponent(ssoError || 'SSO 登入失敗')}`);
+  }
+
+  try {
+    const cfg = await getSsoConfig();
+
+    // 1. Exchange authorization code for tokens
+    const tokenResp = await fetch(cfg.token_endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'authorization_code',
+        code: String(code),
+        redirect_uri: `${process.env.APP_BASE_URL}/api/auth/sso/callback`,
+        client_id: process.env.SSO_CLIENT_ID,
+        client_secret: process.env.SSO_CLIENT_SECRET,
+      }),
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!tokenResp.ok) {
+      const text = await tokenResp.text();
+      console.error('[SSO] token exchange failed:', tokenResp.status, text);
+      return res.redirect(`${baseUrl}/login?sso_error=${encodeURIComponent('SSO Token 交換失敗')}`);
+    }
+    const tokenData = await tokenResp.json();
+
+    // 2. Get userinfo
+    const userInfoResp = await fetch(cfg.userinfo_endpoint, {
+      headers: { Authorization: `Bearer ${tokenData.access_token}` },
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!userInfoResp.ok) {
+      console.error('[SSO] userinfo failed:', userInfoResp.status);
+      return res.redirect(`${baseUrl}/login?sso_error=${encodeURIComponent('SSO 無法取得使用者資訊')}`);
+    }
+    const ssoUser = await userInfoResp.json();
+    // ssoUser: { sub, account, emp_cd, name, email, department, title }
+    console.log('[SSO] userinfo:', { account: ssoUser.account, emp_cd: ssoUser.emp_cd, name: ssoUser.name });
+
+    const db = require('../database-oracle').db;
+    const username = (ssoUser.account || ssoUser.sub).toUpperCase();
+    let dbUser = await db.prepare('SELECT * FROM users WHERE UPPER(username) = UPPER(?)').get(username);
+
+    if (dbUser) {
+      // Existing user — sync SSO info
+      await db.prepare(
+        'UPDATE users SET name=?, email=?, employee_id=?, creation_method=COALESCE(NULLIF(creation_method,\'manual\'),?) WHERE id=?'
+      ).run(ssoUser.name, ssoUser.email, ssoUser.emp_cd || dbUser.employee_id, 'sso', dbUser.id);
+
+      if (dbUser.status !== 'active') {
+        return res.redirect(`${baseUrl}/login?sso_error=${encodeURIComponent('帳號已停用，請聯絡系統管理員')}`);
+      }
+      dbUser = await db.prepare('SELECT * FROM users WHERE id=?').get(dbUser.id);
+
+      // Auto-sync org from ERP
+      if (ssoUser.emp_cd) {
+        try {
+          const { syncOrgToUsers } = require('../services/orgSyncService');
+          syncOrgToUsers(db, [String(ssoUser.emp_cd)], 'sso-login').catch(() => {});
+        } catch (_) {}
+      }
+    } else {
+      // First SSO login — auto-create user (same pattern as LDAP first login)
+      let resolvedRoleId = null;
+      if (ssoUser.emp_cd) {
+        try {
+          const { isConfigured, getEmployeeOrgData } = require('../services/erpDb');
+          if (isConfigured()) {
+            const erpRows = await getEmployeeOrgData([String(ssoUser.emp_cd)]);
+            if (erpRows.length) {
+              const r = erpRows[0];
+              resolvedRoleId = await resolveRoleByOrg(db,
+                r.DEPT_CODE?.trim(), r.PROFIT_CENTER?.trim(),
+                r.ORG_SECTION?.trim(), r.ORG_GROUP_NAME?.trim()
+              );
+              console.log(`[SSO] Org-based role resolved: ${resolvedRoleId} for emp ${ssoUser.emp_cd}`);
+            }
+          }
+        } catch (e) {
+          console.warn('[SSO] org-based role resolution failed:', e.message);
+        }
+      }
+      // Fallback: try resolveRoleByOrg with SSO department, then default role
+      if (!resolvedRoleId && ssoUser.department) {
+        resolvedRoleId = await resolveRoleByOrg(db, ssoUser.department, null, null, null);
+      }
+      if (!resolvedRoleId) {
+        resolvedRoleId = (await db.prepare('SELECT id FROM roles WHERE is_default=1 FETCH FIRST 1 ROWS ONLY').get())?.id ?? null;
+      }
+
+      const rolePerms = resolvedRoleId
+        ? await db.prepare('SELECT * FROM roles WHERE id=?').get(resolvedRoleId)
+        : null;
+
+      const result = await db.prepare(
+        `INSERT INTO users (username, name, email, role, status, password, employee_id, creation_method,
+          role_id, allow_text_upload, text_max_mb, allow_audio_upload, audio_max_mb,
+          allow_image_upload, image_max_mb, allow_scheduled_tasks)
+         VALUES (?,?,?,'user','active',?,?,?, ?,?,?,?,?,?,?,?)`
+      ).run(
+        username, ssoUser.name, ssoUser.email, '', ssoUser.emp_cd || '', 'sso',
+        resolvedRoleId ?? null,
+        rolePerms?.allow_text_upload ?? 1,
+        rolePerms?.text_max_mb ?? 10,
+        rolePerms?.allow_audio_upload ?? 0,
+        rolePerms?.audio_max_mb ?? 10,
+        rolePerms?.allow_image_upload ?? 1,
+        rolePerms?.image_max_mb ?? 10,
+        rolePerms?.allow_scheduled_tasks ?? 0
+      );
+      dbUser = await db.prepare('SELECT * FROM users WHERE id=?').get(result.lastInsertRowid);
+
+      // Auto-sync org after first SSO login
+      if (ssoUser.emp_cd) {
+        try {
+          const { syncOrgToUsers } = require('../services/orgSyncService');
+          syncOrgToUsers(db, [String(ssoUser.emp_cd)], 'sso-login').catch(() => {});
+        } catch (_) {}
+      }
+    }
+
+    // 3. Create session (same as local/LDAP login)
+    const sessionToken = uuidv4();
+    await redis.setSession(sessionToken, {
+      id: dbUser.id,
+      username: dbUser.username,
+      role: dbUser.role,
+      name: dbUser.name,
+      employee_id: dbUser.employee_id,
+      email: dbUser.email,
+      can_design_ai_select: dbUser.can_design_ai_select,
+      can_use_ai_dashboard: dbUser.can_use_ai_dashboard,
+      role_id: dbUser.role_id,
+      dept_code: dbUser.dept_code,
+      profit_center: dbUser.profit_center,
+      org_section: dbUser.org_section,
+    });
+
+    // Redirect to frontend with token
+    res.redirect(`${baseUrl}/login?sso_token=${sessionToken}`);
+  } catch (e) {
+    console.error('[SSO] callback error:', e);
+    res.redirect(`${baseUrl}/login?sso_error=${encodeURIComponent('SSO 登入處理失敗: ' + e.message)}`);
+  }
+});
+
+// GET /api/auth/sso/user — frontend calls this after receiving sso_token to get user profile
+router.get('/sso/user', async (req, res) => {
+  const token = req.query.token;
+  if (!token) return res.status(400).json({ error: 'Missing token' });
+  const session = await redis.getSession(token);
+  if (!session) return res.status(401).json({ error: 'Invalid token' });
+  try {
+    const db = require('../database-oracle').db;
+    const user = await db.prepare('SELECT * FROM users WHERE id=?').get(session.id);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    const { password: _, ...u } = user;
+    // Resolve effective permissions (same as createSession)
+    let rolePerms = null;
+    if (user.role_id) {
+      rolePerms = await db.prepare(
+        'SELECT allow_create_skill, allow_external_skill, allow_code_skill, can_create_kb, kb_max_size_mb, kb_max_count, can_deep_research, can_design_ai_select, can_use_ai_dashboard FROM roles WHERE id=?'
+      ).get(user.role_id);
+    }
+    const resolveEff = (uv, rv) => {
+      if (uv !== null && uv !== undefined) return uv === 1;
+      if (rv !== null && rv !== undefined) return rv === 1;
+      return false;
+    };
+    const resolveNum = (uv, rv, def) => {
+      if (uv !== null && uv !== undefined) return Number(uv);
+      if (rv !== null && rv !== undefined) return Number(rv);
+      return def;
+    };
+    u.effective_allow_create_skill   = user.role === 'admin' || resolveEff(user.allow_create_skill,   rolePerms?.allow_create_skill);
+    u.effective_allow_external_skill = user.role === 'admin' || resolveEff(user.allow_external_skill, rolePerms?.allow_external_skill);
+    u.effective_allow_code_skill     = user.role === 'admin' || resolveEff(user.allow_code_skill,     rolePerms?.allow_code_skill);
+    u.effective_can_create_kb        = user.role === 'admin' || resolveEff(user.can_create_kb,        rolePerms?.can_create_kb);
+    u.effective_kb_max_size_mb       = user.role === 'admin' ? 99999 : resolveNum(user.kb_max_size_mb, rolePerms?.kb_max_size_mb, 500);
+    u.effective_kb_max_count         = user.role === 'admin' ? 99999 : resolveNum(user.kb_max_count,   rolePerms?.kb_max_count,   5);
+    u.effective_can_deep_research      = user.role === 'admin' || resolveEff(user.can_deep_research, rolePerms?.can_deep_research ?? 1);
+    u.effective_can_design_ai_select   = user.role === 'admin' || resolveEff(user.can_design_ai_select,  rolePerms?.can_design_ai_select);
+    u.effective_can_use_ai_dashboard   = user.role === 'admin' || resolveEff(user.can_use_ai_dashboard,  rolePerms?.can_use_ai_dashboard);
+    res.json({ token, user: u });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
 
 // POST /api/auth/login
 router.post('/login', async (req, res) => {

@@ -1,17 +1,36 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useAuth } from '../context/AuthContext'
-import { Eye, EyeOff, X, Mail } from 'lucide-react'
+import { Eye, EyeOff, X, Mail, Shield } from 'lucide-react'
 import api from '../lib/api'
 import { useTranslation } from 'react-i18next'
 
 export default function Login() {
-  const { login } = useAuth()
+  const { login, loginWithSsoToken } = useAuth()
   const { t } = useTranslation()
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [showPw, setShowPw] = useState(false)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const [ssoLoading, setSsoLoading] = useState(false)
+
+  // Handle SSO callback: ?sso_token=xxx or ?sso_error=xxx
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const ssoToken = params.get('sso_token')
+    const ssoError = params.get('sso_error')
+    if (ssoError) {
+      setError(decodeURIComponent(ssoError))
+      window.history.replaceState({}, '', '/login')
+    } else if (ssoToken) {
+      setSsoLoading(true)
+      window.history.replaceState({}, '', '/login')
+      loginWithSsoToken(ssoToken).catch((err) => {
+        setError(err?.message || 'SSO 登入失敗')
+        setSsoLoading(false)
+      })
+    }
+  }, [loginWithSsoToken])
 
   // Forgot password modal state
   const [showForgot, setShowForgot] = useState(false)
@@ -133,6 +152,22 @@ export default function Login() {
               </button>
             </div>
           </form>
+
+          {/* SSO Divider & Button */}
+          <div className="flex items-center gap-3 my-5">
+            <div className="flex-1 h-px bg-white/10" />
+            <span className="text-slate-500 text-xs">{t('login.or', 'OR')}</span>
+            <div className="flex-1 h-px bg-white/10" />
+          </div>
+          <button
+            type="button"
+            onClick={() => { window.location.href = '/api/auth/sso/login' }}
+            disabled={ssoLoading}
+            className="w-full flex items-center justify-center gap-2 bg-white/10 hover:bg-white/20 disabled:opacity-50 border border-white/20 text-white font-semibold py-3 rounded-xl transition"
+          >
+            <Shield size={18} />
+            {ssoLoading ? t('login.ssoLoading', 'SSO 登入中...') : t('login.ssoButton', 'Foxlink SSO 登入')}
+          </button>
         </div>
 
         {/* Forgot Password Modal */}

@@ -59,7 +59,10 @@
     "resetSubmit": "寄送重置連結",
     "resetSubmitting": "寄送中...",
     "loginFailed": "登入失敗，請稍後再試",
-    "requestFailed": "請求失敗，請稍後再試"
+    "requestFailed": "請求失敗，請稍後再試",
+    "or": "或",
+    "ssoButton": "Foxlink SSO 登入",
+    "ssoLoading": "SSO 登入中..."
   },
   "resetPassword": {
     "title": "重設密碼",

@@ -59,7 +59,10 @@
     "resetSubmit": "Gửi link đặt lại",
     "resetSubmitting": "Đang gửi...",
     "loginFailed": "Đăng nhập thất bại, vui lòng thử lại",
-    "requestFailed": "Yêu cầu thất bại, vui lòng thử lại"
+    "requestFailed": "Yêu cầu thất bại, vui lòng thử lại",
+    "or": "HOẶC",
+    "ssoButton": "Đăng nhập Foxlink SSO",
+    "ssoLoading": "Đang đăng nhập SSO..."
   },
   "resetPassword": {
     "title": "Đặt lại mật khẩu",
