@@ -323,14 +323,19 @@ async function runTask(db, taskId) {
       } catch (_) {}
 
       // Process file generation blocks
-      // If task has a filename_template, override AI-generated filename with it
       let processableText = text;
       if (task.output_type === 'file' && task.filename_template) {
+        // Override all generate block filenames with the task's filename template
         const renderedFilename = substituteVars(task.filename_template, task.name);
-        // Replace only the filename part in generate blocks, keep the type
         processableText = text.replace(
           /```generate_(\w+):([^\n]+)/g,
           (_match, type) => '```generate_' + type + ':' + renderedFilename
+        );
+      } else {
+        // Always substitute {{date}} / {{weekday}} / {{task_name}} in generate block filenames
+        processableText = text.replace(
+          /```generate_(\w+):([^\n]+)/g,
+          (_match, type, fn) => '```generate_' + type + ':' + substituteVars(fn.trim(), task.name)
         );
       }
       const blocks = await processGenerateBlocks(processableText, sid);

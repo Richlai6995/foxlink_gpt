@@ -35,29 +35,35 @@ router.post('/tts/synthesize', verifyServiceKey, async (req, res) => {
     const selectedVoice = voice_name?.trim() || model.api_model || 'cmn-TW-Wavenet-A';
     const langCode = selectedVoice.split('-').slice(0, 2).join('-');
 
+    const ttsPayload = {
+      input: { text: text.trim() },
+      voice: { languageCode: langCode, name: selectedVoice },
+      audioConfig: { audioEncoding: 'MP3', speakingRate: Number(speaking_rate), pitch: Number(pitch) },
+    };
+    console.log(`[TTS/synthesize] calling Google TTS voice=${selectedVoice} lang=${langCode} textBytes=${Buffer.byteLength(text.trim(),'utf8')}`);
+
     const ttsRes = await fetch(
       `https://texttospeech.googleapis.com/v1/text:synthesize?key=${apiKey}`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          input: { text: text.trim() },
-          voice: { languageCode: langCode, name: selectedVoice },
-          audioConfig: { audioEncoding: 'MP3', speakingRate: speaking_rate, pitch },
-        }),
+        body: JSON.stringify(ttsPayload),
       }
     );
     if (!ttsRes.ok) {
-      const err = await ttsRes.json();
-      return res.status(ttsRes.status).json({ error: err.error?.message || `TTS API 錯誤 ${ttsRes.status}` });
+      const err = await ttsRes.json().catch(() => ({}));
+      const errMsg = err?.error?.message || err?.error?.status || `TTS API 錯誤 ${ttsRes.status}`;
+      console.error(`[TTS/synthesize] Google TTS HTTP ${ttsRes.status} voice=${selectedVoice} error=${errMsg}`);
+      return res.status(ttsRes.status).json({ error: errMsg });
     }
 
     const ttsBody = await ttsRes.json();
     const { audioContent } = ttsBody;
 
     if (!audioContent) {
-      console.error(`[TTS/synthesize] Google TTS returned ok but audioContent is empty. body keys=${Object.keys(ttsBody).join(',')}`);
-      return res.status(502).json({ error: `Google TTS 回傳空音訊（audioContent 為空），請確認 API Key 配額或語音名稱是否正確` });
+      const bodySnap = JSON.stringify(ttsBody).slice(0, 500);
+      console.error(`[TTS/synthesize] audioContent empty! voice=${selectedVoice} lang=${langCode} bodySnap=${bodySnap}`);
+      return res.status(502).json({ error: `Google TTS 回傳空音訊 voice=${selectedVoice}，請確認語音名稱是否有效或 API Key 是否有 Cloud TTS 權限` });
     }
 
     // 存成實體 MP3，回傳 URL（避免 base64 過長造成前端渲染問題）

@@ -64,8 +64,9 @@ async function processGenerateBlocks(responseText, sessionId) {
   while ((match = regex.exec(responseText)) !== null) {
     matchCount++;
     const type = match[1]; // xlsx, docx, pdf, pptx, txt
-    // Strip anything after the first `[`, `{`, space, or backtick — AI sometimes appends JSON on the same line as the filename
-    const filename = match[2].trim().split(/[\s\[{\`]/)[0];
+    // Strip trailing metadata AI may append (space, [, backtick).
+    // Note: do NOT split on `{` — it breaks {{date}} and other template variables.
+    const filename = match[2].trim().split(/[\s\[\`]/)[0];
     const content = match[3].trim();
     console.log(`[FileGen] Block #${matchCount}: type=${type}, filename=${filename}, content.length=${content.length}`);
 
@@ -236,27 +237,40 @@ async function generateDocx(content, outputPath) {
   return outputPath;
 }
 
-// Render a text line with clickable hyperlinks for ( https://... ) patterns
+// Render a text line with clickable hyperlinks
+// Supports: [text](url), (url), and bare https://... URLs
 function renderLineWithLinks(doc, text) {
-  const urlRe = /\(\s*(https?:\/\/[^\s)]+)\s*\)/g;
+  // Order matters: markdown links first, then parenthesized URLs, then bare URLs
+  const tokenRe = /\[([^\]]+)\]\((https?:\/\/[^)]+)\)|\(\s*(https?:\/\/[^\s)]+)\s*\)|(https?:\/\/[^\s,;)）\]<]+)/g;
   const parts = [];
   let cursor = 0;
   let match;
 
-  while ((match = urlRe.exec(text)) !== null) {
-    if (match.index > cursor) parts.push({ type: 'text', value: text.slice(cursor, match.index) });
-    parts.push({ type: 'link', value: match[1] });
+  while ((match = tokenRe.exec(text)) !== null) {
+    if (match.index > cursor) {
+      parts.push({ type: 'text', value: text.slice(cursor, match.index) });
+    }
+    if (match[1]) {
+      // Markdown link [text](url)
+      parts.push({ type: 'link', display: match[1], url: match[2] });
+    } else if (match[3]) {
+      // Parenthesized URL (url)
+      parts.push({ type: 'link', display: match[3], url: match[3] });
+    } else if (match[4]) {
+      // Bare URL https://...
+      parts.push({ type: 'link', display: match[4], url: match[4] });
+    }
     cursor = match.index + match[0].length;
   }
-  if (parts.length === 0) return false; // no links found
 
+  if (parts.length === 0) return false; // no links found
   if (cursor < text.length) parts.push({ type: 'text', value: text.slice(cursor) });
 
   for (let i = 0; i < parts.length; i++) {
     const part = parts[i];
     const isLast = i === parts.length - 1;
     if (part.type === 'link') {
-      doc.fillColor('#1d4ed8').text(part.value, { link: part.value, underline: true, continued: !isLast });
+      doc.fillColor('#1d4ed8').text(part.display, { link: part.url, underline: true, continued: !isLast });
     } else {
       doc.fillColor('#1a1a1a').text(part.value, { continued: !isLast });
     }
