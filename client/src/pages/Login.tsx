@@ -163,7 +163,7 @@ export default function Login() {
             type="button"
             onClick={() => { window.location.href = '/api/auth/sso/login' }}
             disabled={ssoLoading}
-            className="w-full flex items-center justify-center gap-2 bg-white/10 hover:bg-white/20 disabled:opacity-50 border border-white/20 text-white font-semibold py-3 rounded-xl transition"
+            className="w-full flex items-center justify-center gap-2 bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white font-semibold py-3 rounded-xl transition shadow-lg shadow-orange-500/30"
           >
             <Shield size={18} />
             {ssoLoading ? t('login.ssoLoading', 'SSO 登入中...') : t('login.ssoButton', 'Foxlink SSO 登入')}
