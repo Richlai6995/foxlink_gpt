@@ -100,12 +100,20 @@ router.post('/tts/synthesize', verifyServiceKey, async (req, res) => {
         return res.status(ttsRes.status).json({ error: `chunk ${i + 1}/${chunks.length}: ${errMsg}` });
       }
 
-      const { audioContent } = await ttsRes.json();
+      const ttsBody = await ttsRes.json();
+      const { audioContent } = ttsBody;
       if (!audioContent) {
-        console.error(`[TTS/synthesize] chunk ${i + 1} returned empty audioContent`);
+        const bodyKeys = Object.keys(ttsBody).join(',');
+        console.error(`[TTS/synthesize] chunk ${i + 1} returned empty audioContent. bodyKeys=${bodyKeys} bodySnap=${JSON.stringify(ttsBody).slice(0, 300)}`);
         continue; // skip empty chunk, try remaining
       }
-      mp3Buffers.push(Buffer.from(audioContent, 'base64'));
+      // Diagnostic: log base64 length and first 20 chars
+      console.log(`[TTS/synthesize] chunk ${i + 1} audioContent: base64.length=${audioContent.length} first20="${audioContent.slice(0, 20)}"`);
+      const buf = Buffer.from(audioContent, 'base64');
+      // Verify MP3 magic bytes (ID3 tag or MPEG sync word 0xFF)
+      const magic = buf.length >= 3 ? `0x${buf[0].toString(16)} 0x${buf[1].toString(16)} 0x${buf[2].toString(16)}` : 'too-short';
+      console.log(`[TTS/synthesize] chunk ${i + 1} decoded: ${buf.length} bytes, magic=${magic}`);
+      mp3Buffers.push(buf);
     }
 
     if (mp3Buffers.length === 0) {
@@ -123,8 +131,14 @@ router.post('/tts/synthesize', verifyServiceKey, async (req, res) => {
     const genDir = path.join(UPLOAD_DIR, 'generated');
     if (!fs.existsSync(genDir)) fs.mkdirSync(genDir, { recursive: true });
     const fname = `tts_${Date.now()}.mp3`;
-    fs.writeFileSync(path.join(genDir, fname), mp3Buf);
-    console.log(`[TTS/synthesize] saved ${fname} size=${mp3Buf.length}bytes chunks=${mp3Buffers.length}`);
+    const fullPath = path.join(genDir, fname);
+    fs.writeFileSync(fullPath, mp3Buf);
+
+    // ── Diagnostic: verify file was written correctly ──
+    const fileStat = fs.statSync(fullPath);
+    const readBack = fs.readFileSync(fullPath);
+    const readMagic = readBack.length >= 3 ? `0x${readBack[0].toString(16)} 0x${readBack[1].toString(16)} 0x${readBack[2].toString(16)}` : 'too-short';
+    console.log(`[TTS/synthesize] saved ${fname} | bufSize=${mp3Buf.length} | diskSize=${fileStat.size} | diskMagic=${readMagic} | path=${fullPath} | UPLOAD_DIR=${UPLOAD_DIR}`);
 
     // 記錄用量：Google TTS 按字元計費，input_tokens = 字元數
     const charCount = inputText.length;
@@ -149,6 +163,56 @@ router.post('/tts/synthesize', verifyServiceKey, async (req, res) => {
     console.error(`[TTS/synthesize] error: ${e.message}`);
     res.status(500).json({ error: e.message });
   }
+});
+
+// ── TTS diagnostic endpoint: GET /api/skills/tts/diag/:filename ──────────────
+// 用法: curl http://host/api/skills/tts/diag/tts_1774315482672.mp3
+router.get('/tts/diag/:filename', verifyServiceKey, (req, res) => {
+  const UPLOAD_DIR = process.env.UPLOAD_DIR
+    ? path.resolve(process.env.UPLOAD_DIR)
+    : path.join(__dirname, '../uploads');
+  const genDir = path.join(UPLOAD_DIR, 'generated');
+  const fullPath = path.join(genDir, req.params.filename);
+
+  const result = {
+    UPLOAD_DIR,
+    genDir,
+    fullPath,
+    genDirExists: fs.existsSync(genDir),
+    fileExists: fs.existsSync(fullPath),
+  };
+
+  if (result.fileExists) {
+    const stat = fs.statSync(fullPath);
+    const buf = fs.readFileSync(fullPath);
+    result.fileSize = stat.size;
+    result.fileMtime = stat.mtime.toISOString();
+    result.magic = buf.length >= 4
+      ? `${buf[0].toString(16).padStart(2,'0')} ${buf[1].toString(16).padStart(2,'0')} ${buf[2].toString(16).padStart(2,'0')} ${buf[3].toString(16).padStart(2,'0')}`
+      : 'too-short';
+    result.isValidMp3 = (buf[0] === 0xFF && (buf[1] & 0xE0) === 0xE0) || (buf[0] === 0x49 && buf[1] === 0x44 && buf[2] === 0x33); // 0xFF 0xFB... or ID3
+    // List other tts files for reference
+    try {
+      const files = fs.readdirSync(genDir).filter(f => f.startsWith('tts_')).slice(-5);
+      result.recentTtsFiles = files.map(f => {
+        const s = fs.statSync(path.join(genDir, f));
+        return { name: f, size: s.size, mtime: s.mtime.toISOString() };
+      });
+    } catch (_) {}
+  }
+
+  // Also check static mount
+  result.staticUploadUrl = `/uploads/generated/${req.params.filename}`;
+  result.hint = result.fileExists && result.fileSize > 0 && result.isValidMp3
+    ? 'File exists and looks like valid MP3. Issue might be static file serving (nginx/express.static path mismatch).'
+    : result.fileExists && result.fileSize === 0
+    ? 'File exists but is EMPTY (0 bytes). Google TTS returned empty audioContent.'
+    : result.fileExists && !result.isValidMp3
+    ? 'File exists but does NOT have MP3 magic bytes. Content might be corrupted or not MP3.'
+    : 'File does NOT exist on disk. Check UPLOAD_DIR and genDir paths.';
+
+  console.log(`[TTS/diag] ${req.params.filename}:`, JSON.stringify(result, null, 2));
+  res.json(result);
 });
 
 router.use(verifyToken);
