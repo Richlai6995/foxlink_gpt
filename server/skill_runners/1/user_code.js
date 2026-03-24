@@ -56,13 +56,22 @@ module.exports = async function handler(body) {
     return 0.0;
   }
   function extractText(t) {
-    // Short input (< 300 chars) → TTS command mode
+    // 1. Strip command prefix: "把以下文字轉成繁中女聲,語速1x, 內容如下:"
+    //    Matches: 把/將/請...內容如下/以下內容/如下/以下 + colon
+    const prefixMatch = t.match(/^[\s\S]{0,200}?(?:內容如下|以下內容|內容是|如下)[：:]\s*/);
+    if (prefixMatch) {
+      t = t.slice(prefixMatch[0].length);
+      // Strip surrounding quotes left by the delimiter
+      t = t.replace(/^[\s"「『""]+/, '').replace(/[\s"」』""]+$/, '');
+    }
+
+    // 2. Short input (< 300 chars) → TTS command mode
     if (t.length < 300) {
       const quoted = t.match(/[「『"]([\s\S]+?)[」』"]/);
       if (quoted) return quoted[1].trim();
       return t.replace(/把|將|轉成|轉為|念出|用.{0,5}(聲|音|語|文)|語速.*|音調.*|男聲|女聲|英文|越文|日文|韓文|快|慢|低沉|高亢/g, '').trim();
     }
-    // Long text from pipeline — strip markdown, URLs, then flatten to single-line for TTS
+    // 3. Long text — strip markdown, URLs, then flatten for TTS
     return t
       .replace(/```[\s\S]*?```/g, '')           // fenced code blocks
       .replace(/`[^`]+`/g, '')                   // inline code
@@ -71,6 +80,7 @@ module.exports = async function handler(body) {
       .replace(/\*\*/g, '').replace(/\*/g, '')   // bold/italic
       .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')   // [text](url) → text
       .replace(/^\|.*\|$/gm, '')                 // table rows
+      .replace(/^來源：\S+$/gm, '')              // "來源：https://..." lines
       .replace(/\n/g, '，')                      // newlines → Chinese pause (natural TTS phrasing)
       .replace(/，{2,}/g, '，')                  // collapse multiple commas
       .replace(/\s{2,}/g, ' ')

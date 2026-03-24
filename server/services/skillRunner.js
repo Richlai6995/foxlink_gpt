@@ -14,6 +14,7 @@ const net = require('net');
 
 const RUNNERS_DIR = path.join(__dirname, '../skill_runners');
 const TEMPLATE_DIR = path.join(__dirname, '../skill_runner_template');
+const SOURCES_DIR = path.join(__dirname, '../skill_sources');
 const PORT_MIN = 40100;
 const PORT_MAX = 40999;
 
@@ -269,8 +270,73 @@ async function restartRunner(skill, db) {
   return spawnRunner(skill, db);
 }
 
+// ── Sync skill_sources/ (git) → DB on startup ────────────────────────────────
+// Ensures deploy always pushes latest git code into DB code_snippet.
+// After this, autoRestoreRunners syncs DB → disk → child process.
+async function syncSkillSources(db) {
+  const manifestPath = path.join(SOURCES_DIR, 'manifest.json');
+  if (!fs.existsSync(manifestPath)) return;
+
+  let manifest;
+  try { manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8')); } catch (e) {
+    console.error('[skillSources] Failed to parse manifest.json:', e.message);
+    return;
+  }
+
+  for (const entry of manifest) {
+    const srcPath = path.join(SOURCES_DIR, entry.file);
+    if (!fs.existsSync(srcPath)) {
+      console.warn(`[skillSources] File not found: ${entry.file}`);
+      continue;
+    }
+
+    const srcCode = fs.readFileSync(srcPath, 'utf8');
+    const srcHash = crypto.createHash('md5').update(srcCode).digest('hex');
+
+    // Find matching skill in DB by name regex
+    const matchRegex = entry.match_name || entry.file.replace(/\.js$/, '');
+    let skills;
+    try {
+      skills = await db.prepare(
+        `SELECT id, name, code_snippet FROM skills WHERE type='code'`
+      ).all();
+    } catch (e) {
+      console.error('[skillSources] DB query failed:', e.message);
+      continue;
+    }
+
+    const re = new RegExp(matchRegex, 'i');
+    const matched = skills.filter(s => re.test(s.name));
+    if (!matched.length) {
+      console.warn(`[skillSources] No skill matched "${matchRegex}" for ${entry.file}`);
+      continue;
+    }
+
+    for (const skill of matched) {
+      const dbHash = skill.code_snippet
+        ? crypto.createHash('md5').update(skill.code_snippet).digest('hex')
+        : null;
+      if (dbHash === srcHash) {
+        console.log(`[skillSources] ${entry.file} → skill #${skill.id} (${skill.name}): up-to-date`);
+        continue;
+      }
+      try {
+        await db.prepare(`UPDATE skills SET code_snippet=:1 WHERE id=:2`).run(srcCode, skill.id);
+        console.log(`[skillSources] ${entry.file} → skill #${skill.id} (${skill.name}): UPDATED`);
+      } catch (e) {
+        console.error(`[skillSources] Failed to update skill #${skill.id}: ${e.message}`);
+      }
+    }
+  }
+}
+
 // ── Auto-restore on server start ──────────────────────────────────────────────
 async function autoRestoreRunners(db) {
+  // First: sync git skill_sources/ → DB (ensures deploy pushes latest code)
+  try { await syncSkillSources(db); } catch (e) {
+    console.error('[skillRunner] syncSkillSources failed:', e.message);
+  }
+
   try {
     const skills = await db.prepare(`SELECT * FROM skills WHERE type='code' AND code_status IN ('running','starting','stopping')`).all();
     console.log(`[skillRunner] Auto-restoring ${skills.length} code skill(s)...`);

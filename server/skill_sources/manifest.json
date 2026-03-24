@@ -1,0 +1,7 @@
+[
+  {
+    "file": "tts.js",
+    "match_name": "轉聲音|語音合成|TTS",
+    "description": "文字轉語音 (Google Cloud TTS)"
+  }
+]
