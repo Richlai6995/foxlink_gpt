@@ -27,15 +27,20 @@ module.exports = async function handler(body) {
   };
 
   function detectLang(t) {
-    if (/英文|english|英語/i.test(t))               return 'en-US';
-    if (/越文|越南|vietnamese|tiếng việt/i.test(t))  return 'vi-VN';
-    if (/日文|日語|japanese/i.test(t))               return 'ja-JP';
-    if (/韓文|韓語|korean/i.test(t))                 return 'ko-KR';
+    // Chinese keywords first (unambiguous), then English with word boundary
+    if (/英文|英語/.test(t) || /\benglish\b/i.test(t))               return 'en-US';
+    if (/越文|越南/.test(t) || /\bvietnamese\b|tiếng việt/i.test(t)) return 'vi-VN';
+    if (/日文|日語/.test(t) || /\bjapanese\b/i.test(t))              return 'ja-JP';
+    if (/韓文|韓語/.test(t) || /\bkorean\b/i.test(t))               return 'ko-KR';
     return 'cmn-TW';
   }
   function detectGender(t) {
-    if (/男聲|男生|male|man/i.test(t))    return 'MALE';
-    if (/女聲|女生|female|woman/i.test(t)) return 'FEMALE';
+    // Check Chinese keywords first (unambiguous, user intent)
+    if (/女聲|女生/.test(t)) return 'FEMALE';
+    if (/男聲|男生/.test(t)) return 'MALE';
+    // English with word boundaries — prevent "demand","management" matching "man"
+    if (/\bfemale\b|\bwoman\b/i.test(t)) return 'FEMALE';
+    if (/\bmale\b|\bman\b/i.test(t))     return 'MALE';
     return 'FEMALE';
   }
   function detectSpeed(t) {
