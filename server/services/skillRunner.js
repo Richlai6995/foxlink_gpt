@@ -272,6 +272,22 @@ async function autoRestoreRunners(db) {
     console.log(`[skillRunner] Auto-restoring ${skills.length} code skill(s)...`);
     for (const skill of skills) {
       try {
+        // Sync code between DB and disk to ensure consistency
+        if (skill.code_snippet) {
+          // DB has code → write to disk (ensures all pods use latest)
+          saveCode(skill.id, skill.code_snippet);
+          console.log(`[skillRunner] Synced DB→disk for skill #${skill.id}`);
+        } else {
+          // DB code_snippet empty but disk file may exist → sync disk→DB
+          const diskPath = path.join(RUNNERS_DIR, String(skill.id), 'user_code.js');
+          if (fs.existsSync(diskPath)) {
+            const diskCode = fs.readFileSync(diskPath, 'utf8');
+            try {
+              await db.prepare(`UPDATE skills SET code_snippet=:1 WHERE id=:2`).run(diskCode, skill.id);
+              console.log(`[skillRunner] Synced disk→DB for skill #${skill.id}`);
+            } catch (e2) { console.warn(`[skillRunner] disk→DB sync failed for #${skill.id}: ${e2.message}`); }
+          }
+        }
         await spawnRunner(skill, db);
         console.log(`[skillRunner] Restored skill #${skill.id} (${skill.name})`);
       } catch (e) {
