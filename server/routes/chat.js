@@ -368,20 +368,19 @@ ${contextSection}
 async function executeDifyQuery(db, kb, query, sessionId, userId) {
   const t0 = Date.now();
   const conversationId = getDifyConvId(sessionId, kb.id);
+  console.log(`[DIFY] Calling KB "${kb.name}" (id=${kb.id}) user=${userId} query="${query.slice(0, 80)}" convId=${conversationId || '(new)'}`);
   try {
+    // Don't send empty conversation_id — some DIFY versions reject it
+    const body = { inputs: {}, query, response_mode: 'blocking', user: `foxlink-user-${userId}` };
+    if (conversationId) body.conversation_id = conversationId;
+
     const difyRes = await fetch(`${kb.api_server}/chat-messages`, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${kb.api_key}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        inputs: {},
-        query,
-        response_mode: 'blocking',
-        conversation_id: conversationId,
-        user: `foxlink-user-${userId}`,
-      }),
+      body: JSON.stringify(body),
       signal: AbortSignal.timeout(30000),
     });
     const duration = Date.now() - t0;
@@ -394,7 +393,7 @@ async function executeDifyQuery(db, kb, query, sessionId, userId) {
           `INSERT INTO dify_call_logs (kb_id, session_id, user_id, query_preview, response_preview, status, duration_ms) VALUES (?,?,?,?,?,?,?)`
         ).run(kb.id, sessionId, userId, query.slice(0, 200), answer.slice(0, 300), 'ok', duration);
       } catch (_) { }
-      console.log(`[DIFY] KB "${kb.name}" ok in ${duration}ms`);
+      console.log(`[DIFY] KB "${kb.name}" ok in ${duration}ms answer="${answer.slice(0, 100)}"`);
       return answer || `[知識庫「${kb.name}」無相關回應]`;
     } else {
       const errText = await difyRes.text().catch(() => '');
@@ -402,9 +401,9 @@ async function executeDifyQuery(db, kb, query, sessionId, userId) {
       try {
         await db.prepare(
           `INSERT INTO dify_call_logs (kb_id, session_id, user_id, query_preview, status, error_msg, duration_ms) VALUES (?,?,?,?,?,?,?)`
-        ).run(kb.id, sessionId, userId, query.slice(0, 200), 'error', msg, duration);
+        ).run(kb.id, sessionId, userId, query.slice(0, 200), 'error', `${msg}: ${errText.slice(0, 150)}`, duration);
       } catch (_) { }
-      console.warn(`[DIFY] KB "${kb.name}" ${msg}: ${errText.slice(0, 100)}`);
+      console.warn(`[DIFY] KB "${kb.name}" ${msg} user=${userId}: ${errText.slice(0, 200)}`);
       return `[知識庫「${kb.name}」查詢失敗: ${msg}]`;
     }
   } catch (e) {
@@ -414,7 +413,7 @@ async function executeDifyQuery(db, kb, query, sessionId, userId) {
         `INSERT INTO dify_call_logs (kb_id, session_id, user_id, query_preview, status, error_msg, duration_ms) VALUES (?,?,?,?,?,?,?)`
       ).run(kb.id, sessionId, userId, query.slice(0, 200), 'error', e.message.slice(0, 200), duration);
     } catch (_) { }
-    console.error(`[DIFY] KB "${kb.name}" failed:`, e.message);
+    console.error(`[DIFY] KB "${kb.name}" failed user=${userId}:`, e.message);
     return `[知識庫「${kb.name}」查詢失敗: ${e.message}]`;
   }
 }
@@ -1647,7 +1646,7 @@ router.post('/sessions/:id/messages', upload.array('files', 10), async (req, res
             aiText = displayText;
             sendEvent({ type: 'chunk', content: displayText });
           }
-          console.log(`[Chat] Tools+Gemini done in ${Date.now() - t0}ms, tools=${allDeclarations.length} in=${inputTokens} out=${outputTokens} tokens`);
+          console.log(`[Chat] Tools+Gemini done in ${Date.now() - t0}ms, tools=${allDeclarations.length} dify_called=${calledDifyKbs.size} mcp_called=${Object.keys(serverMap).length > 0 ? 'yes' : 'no'} in=${inputTokens} out=${outputTokens} tokens`);
         }
       } else {
         // ── Standard streaming chat (no tools) ───────────────────────────
