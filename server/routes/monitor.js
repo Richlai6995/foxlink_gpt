@@ -833,6 +833,7 @@ router.get('/disk/history', async (req, res) => {
 router.get('/online-users', async (req, res) => {
   try {
     const redis = require('../services/redisClient');
+    const db = require('../database-oracle').db;
     let users = [];
     try {
       const sessions = await redis.getAllSessions();
@@ -849,8 +850,32 @@ router.get('/online-users', async (req, res) => {
               email: s.email || null,
               role: s.role || 'user',
               loginTime: s.loginTime || null,
+              dept_code: s.dept_code || null,
+              profit_center: s.profit_center || null,
+              org_section: s.org_section || null,
+              org_group_name: null, // will fill from DB
             });
           }
+        }
+        // Batch-fill org_group_name from DB for all online user IDs
+        const userIds = Array.from(seen.keys());
+        if (userIds.length > 0) {
+          try {
+            const placeholders = userIds.map(() => '?').join(',');
+            const rows = await db.prepare(
+              `SELECT id, dept_code, profit_center, org_section, org_group_name FROM users WHERE id IN (${placeholders})`
+            ).all(...userIds);
+            for (const row of rows) {
+              const u = seen.get(row.id);
+              if (u) {
+                u.org_group_name = row.org_group_name || null;
+                // Backfill from DB if session didn't have these
+                if (!u.dept_code) u.dept_code = row.dept_code || null;
+                if (!u.profit_center) u.profit_center = row.profit_center || null;
+                if (!u.org_section) u.org_section = row.org_section || null;
+              }
+            }
+          } catch {}
         }
         users = Array.from(seen.values());
       }

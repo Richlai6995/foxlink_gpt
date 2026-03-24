@@ -38,6 +38,9 @@ else
   echo "  ⚠️  server/.env not found, skipping Secret sync"
 fi
 
+echo "▶ Applying K8s manifests (RBAC, Deployment, Service...)"
+kubectl apply -f "$(dirname "$0")/k8s/deployment.yaml"
+
 echo "▶ Rolling update (maxUnavailable=0 → 零停機)"
 kubectl rollout restart deployment/${DEPLOY} -n ${NAMESPACE}
 kubectl rollout status deployment/${DEPLOY} -n ${NAMESPACE}
