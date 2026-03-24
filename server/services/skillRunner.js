@@ -7,6 +7,7 @@
  */
 
 const { spawn } = require('child_process');
+const crypto = require('crypto');
 const path = require('path');
 const fs = require('fs');
 const net = require('net');
@@ -20,6 +21,8 @@ const PORT_MAX = 40999;
 const runningProcesses = new Map();
 // Set of ports currently in use
 const usedPorts = new Set();
+// Track code hash per skill to detect DB changes from other pods
+const codeHashes = new Map(); // skillId → md5 hex
 
 // SSE subscriber maps
 const logSubscribers = new Map();    // skillId → Set<res>
@@ -98,6 +101,7 @@ function ensureRunnerDir(skillId) {
 function saveCode(skillId, code) {
   const dir = ensureRunnerDir(skillId);
   fs.writeFileSync(path.join(dir, 'user_code.js'), code, 'utf8');
+  codeHashes.set(skillId, crypto.createHash('md5').update(code).digest('hex'));
 }
 
 // ── Generate package.json ─────────────────────────────────────────────────────
@@ -303,6 +307,7 @@ async function autoRestoreRunners(db) {
 function startHealthMonitor(db) {
   const INTERVAL_MS = 30000;
   setInterval(async () => {
+    // 1. Health check running processes
     for (const [skillId, entry] of runningProcesses.entries()) {
       try {
         const resp = await Promise.race([
@@ -321,6 +326,27 @@ function startHealthMonitor(db) {
         } catch (_) {}
       }
     }
+
+    // 2. Hot-reload: detect DB code_snippet changes from other pods
+    //    If admin UI saved new code on pod A, pod B/C/D pick it up here
+    try {
+      const skills = await db.prepare(
+        `SELECT id, name, code_snippet FROM skills WHERE type='code' AND code_status='running'`
+      ).all();
+      for (const skill of skills) {
+        if (!skill.code_snippet || !runningProcesses.has(skill.id)) continue;
+        const dbHash = crypto.createHash('md5').update(skill.code_snippet).digest('hex');
+        const localHash = codeHashes.get(skill.id);
+        if (localHash && dbHash !== localHash) {
+          console.log(`[skillRunner] Code change detected for skill #${skill.id} (${skill.name}), hot-reloading...`);
+          appendLog(skill.id, `[hot-reload] DB code changed, restarting...`);
+          saveCode(skill.id, skill.code_snippet);
+          try { await restartRunner(skill, db); } catch (e) {
+            console.error(`[skillRunner] Hot-reload failed for #${skill.id}: ${e.message}`);
+          }
+        }
+      }
+    } catch (_) { /* DB query fail is non-fatal for health monitor */ }
   }, INTERVAL_MS);
 }
 
