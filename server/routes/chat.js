@@ -1256,17 +1256,34 @@ router.post('/sessions/:id/messages', upload.array('files', 10), async (req, res
         ]);
         let answerContent = `[Skill "${sk.name}" 無法取得回應]`;
         let skillAudioUrl = null;
+        let skillAudioFileUrl = null;  // original file URL (for filename)
         if (resp.ok) {
           const data = await resp.json();
           console.log(`[Skill] answer "${sk.name}" HTTP 200 keys=${Object.keys(data).join(',')} audio=${!!data.audio_url} ${Date.now()-_ansT0}ms`);
           answerContent = data.content || data.system_prompt || answerContent;
-          if (data.audio_url) skillAudioUrl = data.audio_url;
+          if (data.audio_url) {
+            skillAudioFileUrl = data.audio_url;
+            skillAudioUrl = data.audio_url;
+            // Inline audio as base64 data URL — bypasses static file serving issues in K8s
+            try {
+              const audioPath = path.join(UPLOAD_DIR, 'generated', path.basename(data.audio_url));
+              if (fs.existsSync(audioPath)) {
+                const buf = fs.readFileSync(audioPath);
+                skillAudioUrl = `data:audio/mpeg;base64,${buf.toString('base64')}`;
+                console.log(`[Skill] inlined audio ${buf.length} bytes from ${audioPath}`);
+              } else {
+                console.warn(`[Skill] audio file not found: ${audioPath}`);
+              }
+            } catch (e) {
+              console.warn(`[Skill] inline audio failed: ${e.message}, using file URL`);
+            }
+          }
         } else {
           console.warn(`[Skill] answer "${sk.name}" HTTP ${resp.status} url=${sk.endpoint_url}`);
         }
         sendEvent({ type: 'chunk', content: answerContent });
         if (skillAudioUrl) {
-          const fname = require('path').basename(skillAudioUrl);
+          const fname = skillAudioFileUrl ? path.basename(skillAudioFileUrl) : `tts_${Date.now()}.mp3`;
           sendEvent({ type: 'generated_files', files: [{ type: 'audio', filename: fname, publicUrl: skillAudioUrl }] });
         }
         sendEvent({ type: 'done' });
