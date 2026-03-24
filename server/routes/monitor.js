@@ -224,6 +224,13 @@ router.get('/nodes/detail', async (req, res) => {
     const nodes = await getK8sResource('/api/v1/nodes', ['get', 'nodes', '-o', 'json']);
     const details = [];
 
+    // Pre-fetch all pods for resource calculation (K8s API fallback)
+    let allPods = [];
+    try {
+      const podData = await getK8sResource('/api/v1/pods', ['get', 'pods', '--all-namespaces', '-o', 'json']);
+      allPods = podData.items || [];
+    } catch {}
+
     for (const node of (nodes.items || [])) {
       const name = node.metadata?.name;
       try {
@@ -231,7 +238,7 @@ router.get('/nodes/detail', async (req, res) => {
         const detail = parseNodeDescribe(name, node, desc);
         details.push(detail);
       } catch {
-        const detail = parseNodeFromApi(name, node);
+        const detail = parseNodeFromApi(name, node, allPods);
         details.push(detail);
       }
     }
@@ -298,22 +305,73 @@ function parseNodeDescribe(name, nodeObj, descText) {
   return result;
 }
 
-// Fallback: build node detail from K8s API object (when kubectl describe unavailable)
-function parseNodeFromApi(name, nodeObj) {
+// ── Helpers: parse K8s resource quantities ──────────────────────────────────
+function parseCpuQuantity(str) {
+  if (!str) return 0;
+  str = String(str).trim();
+  if (str.endsWith('m')) return parseInt(str) || 0;       // millicores
+  if (str.endsWith('n')) return (parseInt(str) || 0) / 1e6; // nanocores → millicores
+  return (parseFloat(str) || 0) * 1000;                   // cores → millicores
+}
+
+function parseMemQuantity(str) {
+  if (!str) return 0;
+  str = String(str).trim();
+  const units = { Ki: 1024, Mi: 1024 ** 2, Gi: 1024 ** 3, Ti: 1024 ** 4, K: 1e3, M: 1e6, G: 1e9, T: 1e12 };
+  for (const [suffix, mult] of Object.entries(units)) {
+    if (str.endsWith(suffix)) return (parseFloat(str) || 0) * mult;
+  }
+  return parseFloat(str) || 0; // bytes
+}
+
+function formatCpuMillis(m) {
+  return m >= 1000 ? `${(m / 1000).toFixed(1)}` : `${Math.round(m)}m`;
+}
+
+function formatMemBytes(b) {
+  if (b >= 1024 ** 3) return `${(b / (1024 ** 3)).toFixed(1)}Gi`;
+  if (b >= 1024 ** 2) return `${Math.round(b / (1024 ** 2))}Mi`;
+  return `${Math.round(b / 1024)}Ki`;
+}
+
+// Fallback: build node detail from K8s API object + pods (when kubectl describe unavailable)
+function parseNodeFromApi(name, nodeObj, allPods = []) {
   const labels = nodeObj.metadata?.labels || {};
   const readyCond = nodeObj.status?.conditions?.find(c => c.type === 'Ready');
   const alloc = nodeObj.status?.allocatable || {};
   const cap = nodeObj.status?.capacity || {};
+
+  // Filter running pods on this node
+  const nodePods = allPods.filter(p =>
+    p.spec?.nodeName === name && p.status?.phase !== 'Succeeded' && p.status?.phase !== 'Failed'
+  );
+
+  // Sum resource requests from all containers on this node
+  let totalCpuReqMillis = 0;
+  let totalMemReqBytes = 0;
+  for (const pod of nodePods) {
+    for (const c of (pod.spec?.containers || [])) {
+      totalCpuReqMillis += parseCpuQuantity(c.resources?.requests?.cpu);
+      totalMemReqBytes += parseMemQuantity(c.resources?.requests?.memory);
+    }
+  }
+
+  const allocCpuMillis = parseCpuQuantity(alloc.cpu || cap.cpu);
+  const allocMemBytes = parseMemQuantity(alloc.memory || cap.memory);
+
+  const cpuReqPct = allocCpuMillis > 0 ? Math.round((totalCpuReqMillis / allocCpuMillis) * 100) : 0;
+  const memReqPct = allocMemBytes > 0 ? Math.round((totalMemReqBytes / allocMemBytes) * 100) : 0;
+
   return {
     name,
     status: readyCond?.status === 'True' ? 'Ready' : 'NotReady',
     role: (labels['node-role.kubernetes.io/master'] !== undefined ||
            labels['node-role.kubernetes.io/control-plane'] !== undefined) ? 'master' : 'worker',
     allocatable: { cpu: alloc.cpu || cap.cpu || '', memory: alloc.memory || cap.memory || '' },
-    requests: { cpu: '-', memory: '-' },
-    cpuReqPct: 0,
-    memReqPct: 0,
-    podCount: 0,
+    requests: { cpu: formatCpuMillis(totalCpuReqMillis), memory: formatMemBytes(totalMemReqBytes) },
+    cpuReqPct,
+    memReqPct,
+    podCount: nodePods.length,
   };
 }
 
@@ -632,6 +690,36 @@ router.post('/containers/:id/start', async (req, res) => {
   }
 });
 
+// ─── Helper: stream pod logs via K8s API ────────────────────────────────────
+function streamPodLogViaApi(req, res, ns, pod, tail) {
+  const https = require('https');
+  const token = fs.readFileSync(K8S_TOKEN_PATH, 'utf8').trim();
+  const host = process.env.KUBERNETES_SERVICE_HOST || 'kubernetes.default.svc';
+  const port = process.env.KUBERNETES_SERVICE_PORT || '443';
+  let ca; try { ca = fs.readFileSync(K8S_CA_PATH); } catch {}
+  const url = `https://${host}:${port}/api/v1/namespaces/${ns}/pods/${pod}/log?tailLines=${tail}&follow=true`;
+
+  const apiReq = https.get(url, {
+    headers: { Authorization: `Bearer ${token}` }, ca, rejectUnauthorized: !!ca,
+  }, (apiRes) => {
+    apiRes.on('data', d => {
+      const lines = d.toString('utf8').split('\n');
+      for (const line of lines) {
+        if (line) res.write(`data: ${JSON.stringify({ line })}\n\n`);
+      }
+    });
+    apiRes.on('end', () => {
+      res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+      res.end();
+    });
+  });
+  apiReq.on('error', (e) => {
+    res.write(`data: ${JSON.stringify({ error: e.message })}\n\n`);
+    res.end();
+  });
+  req.on('close', () => { apiReq.destroy(); });
+}
+
 // ─── Log Streaming (SSE) ────────────────────────────────────────────────────
 router.get('/logs/pod/:ns/:pod', (req, res) => {
   const { ns, pod } = req.params;
@@ -640,9 +728,13 @@ router.get('/logs/pod/:ns/:pod', (req, res) => {
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
 
-  // Try kubectl first
+  // If K8s service account available, use API directly (no kubectl needed)
+  if (hasK8sServiceAccount()) {
+    return streamPodLogViaApi(req, res, ns, pod, tail);
+  }
+
+  // Fallback: try kubectl
   const proc = spawn('kubectl', ['logs', '-f', '--tail', String(tail), '-n', ns, pod], { shell: true });
-  let kubectlFailed = false;
 
   proc.stdout.on('data', d => {
     const lines = d.toString('utf8').split('\n');
@@ -653,45 +745,10 @@ router.get('/logs/pod/:ns/:pod', (req, res) => {
   proc.stderr.on('data', d => {
     res.write(`data: ${JSON.stringify({ error: d.toString('utf8') })}\n\n`);
   });
-  proc.on('error', () => { kubectlFailed = true; });
-  proc.on('close', async (code) => {
-    if (code !== 0 && kubectlFailed && hasK8sServiceAccount()) {
-      // Fallback: K8s API for logs (non-streaming)
-      try {
-        const https = require('https');
-        const token = fs.readFileSync(K8S_TOKEN_PATH, 'utf8').trim();
-        const host = process.env.KUBERNETES_SERVICE_HOST || 'kubernetes.default.svc';
-        const port = process.env.KUBERNETES_SERVICE_PORT || '443';
-        let ca; try { ca = fs.readFileSync(K8S_CA_PATH); } catch {}
-        const url = `https://${host}:${port}/api/v1/namespaces/${ns}/pods/${pod}/log?tailLines=${tail}&follow=true`;
-
-        const apiReq = https.get(url, {
-          headers: { Authorization: `Bearer ${token}` }, ca, rejectUnauthorized: !!ca,
-        }, (apiRes) => {
-          apiRes.on('data', d => {
-            const lines = d.toString('utf8').split('\n');
-            for (const line of lines) {
-              if (line) res.write(`data: ${JSON.stringify({ line })}\n\n`);
-            }
-          });
-          apiRes.on('end', () => {
-            res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
-            res.end();
-          });
-        });
-        apiReq.on('error', (e) => {
-          res.write(`data: ${JSON.stringify({ error: e.message })}\n\n`);
-          res.end();
-        });
-        req.on('close', () => { apiReq.destroy(); });
-      } catch (e) {
-        res.write(`data: ${JSON.stringify({ error: e.message })}\n\n`);
-        res.end();
-      }
-    } else {
-      res.write(`data: ${JSON.stringify({ done: true, exitCode: code })}\n\n`);
-      res.end();
-    }
+  proc.on('error', () => {});
+  proc.on('close', (code) => {
+    res.write(`data: ${JSON.stringify({ done: true, exitCode: code })}\n\n`);
+    res.end();
   });
 
   req.on('close', () => {

@@ -141,16 +141,18 @@ export default function MonitorPage() {
         <OnlineUsersPanel current={onlineUsers} history={onlineHistory as never[]} loading={loading} />
       </div>
 
-      {/* Row 3: Docker Containers + Images */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <ContainerTable
-          containers={containers}
-          loading={loading}
-          onRefresh={fetchAll}
-          onViewLog={(id) => setLogTarget({ type: 'container', target: id })}
-        />
-        <DockerImagesPanel images={images} loading={loading} onRefresh={fetchAll} />
-      </div>
+      {/* Row 3: Docker Containers + Images (hidden when no Docker socket) */}
+      {(containers.length > 0 || images.length > 0) && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <ContainerTable
+            containers={containers}
+            loading={loading}
+            onRefresh={fetchAll}
+            onViewLog={(id) => setLogTarget({ type: 'container', target: id })}
+          />
+          <DockerImagesPanel images={images} loading={loading} onRefresh={fetchAll} />
+        </div>
+      )}
 
       {/* Health Checks */}
       <HealthChecksPanel onRefresh={fetchAll} />

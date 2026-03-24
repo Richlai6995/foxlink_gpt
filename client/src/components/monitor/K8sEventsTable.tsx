@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useState, useCallback } from 'react'
+import { Download } from 'lucide-react'
 
 interface K8sEvent {
   metadata: { name: string; namespace: string; creationTimestamp: string }
@@ -20,6 +21,28 @@ export default function K8sEventsTable({ events, loading }: Props) {
 
   const filtered = showWarningOnly ? events.filter(e => e.type === 'Warning') : events
 
+  const exportCsv = useCallback(() => {
+    const BOM = '\uFEFF'
+    const headers = ['Type', 'Namespace', 'Reason', 'Object', 'Message', 'Count', 'Last Seen']
+    const rows = filtered.map(e => [
+      e.type,
+      e.metadata?.namespace || '',
+      e.reason,
+      `${e.involvedObject?.kind}/${e.involvedObject?.name}`,
+      (e.message || '').replace(/"/g, '""'),
+      String(e.count || ''),
+      e.lastTimestamp ? new Date(e.lastTimestamp).toLocaleString() : '',
+    ])
+    const csv = BOM + [headers, ...rows].map(r => r.map(c => `"${c}"`).join(',')).join('\n')
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `k8s_events_${new Date().toISOString().slice(0, 19).replace(/:/g, '')}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+  }, [filtered])
+
   if (loading) return <div className="animate-pulse h-32 bg-white border rounded-lg" />
 
   return (
@@ -27,15 +50,24 @@ export default function K8sEventsTable({ events, loading }: Props) {
       <div className="px-3 py-2 border-b border-slate-100 flex items-center gap-2">
         <span className="text-sm font-medium text-slate-700">K8s Events</span>
         <span className="text-xs text-slate-400">({filtered.length})</span>
-        <label className="ml-auto flex items-center gap-1.5 text-xs text-slate-500 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={showWarningOnly}
-            onChange={e => setShowWarningOnly(e.target.checked)}
-            className="rounded border-slate-300"
-          />
-          Warning only
-        </label>
+        <div className="ml-auto flex items-center gap-3">
+          <button
+            onClick={exportCsv}
+            className="flex items-center gap-1 text-xs text-slate-400 hover:text-blue-600 transition"
+            title="匯出 CSV"
+          >
+            <Download size={13} />
+          </button>
+          <label className="flex items-center gap-1.5 text-xs text-slate-500 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={showWarningOnly}
+              onChange={e => setShowWarningOnly(e.target.checked)}
+              className="rounded border-slate-300"
+            />
+            Warning only
+          </label>
+        </div>
       </div>
       <div className="max-h-48 overflow-auto">
         <table className="w-full text-xs">

@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { Search, Download, Square } from 'lucide-react'
+import { Search, Download, X } from 'lucide-react'
 
 interface Props {
   type: 'pod' | 'container'
@@ -12,6 +12,7 @@ export default function LogViewer({ type, target, onClose }: Props) {
   const [search, setSearch] = useState('')
   const [tail, setTail] = useState(100)
   const [autoScroll, setAutoScroll] = useState(true)
+  const [streaming, setStreaming] = useState(true)
   const containerRef = useRef<HTMLDivElement>(null)
   const esRef = useRef<EventSource | null>(null)
 
@@ -27,12 +28,13 @@ export default function LogViewer({ type, target, onClose }: Props) {
     const es = new EventSource(url)
     esRef.current = es
     setLines([])
+    setStreaming(true)
 
     es.onmessage = (e) => {
       try {
         const data = JSON.parse(e.data)
         if (data.done) {
-          setLines(prev => [...prev, `--- Process exited (code ${data.exitCode}) ---`])
+          setStreaming(false)
           es.close()
           return
         }
@@ -43,7 +45,6 @@ export default function LogViewer({ type, target, onClose }: Props) {
         if (data.line) {
           setLines(prev => {
             const next = [...prev, data.line]
-            // Keep max 5000 lines
             return next.length > 5000 ? next.slice(-5000) : next
           })
         }
@@ -52,6 +53,7 @@ export default function LogViewer({ type, target, onClose }: Props) {
 
     es.onerror = () => {
       setLines(prev => [...prev, '--- Connection lost ---'])
+      setStreaming(false)
       es.close()
     }
   }, [type, target, tail, token])
@@ -67,6 +69,11 @@ export default function LogViewer({ type, target, onClose }: Props) {
     }
   }, [lines, autoScroll])
 
+  const handleClose = () => {
+    esRef.current?.close()
+    onClose()
+  }
+
   const downloadLog = () => {
     const blob = new Blob([lines.join('\n')], { type: 'text/plain' })
     const url = URL.createObjectURL(blob)
@@ -78,10 +85,9 @@ export default function LogViewer({ type, target, onClose }: Props) {
   }
 
   const highlightLine = (line: string) => {
-    // Color-code log levels
-    if (/\bERROR\b|\bFATAL\b|\bPANIC\b/i.test(line)) return 'text-red-500'
-    if (/\bWARN\b/i.test(line)) return 'text-yellow-600'
-    if (/\bDEBUG\b/i.test(line)) return 'text-slate-400'
+    if (/\bERROR\b|\bFATAL\b|\bPANIC\b/i.test(line)) return 'text-red-400'
+    if (/\bWARN\b/i.test(line)) return 'text-yellow-400'
+    if (/\bDEBUG\b/i.test(line)) return 'text-slate-500'
     return 'text-slate-300'
   }
 
@@ -90,69 +96,75 @@ export default function LogViewer({ type, target, onClose }: Props) {
     : lines
 
   return (
-    <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
-      <div className="px-3 py-2 border-b border-slate-100 flex items-center gap-2">
-        <span className="text-sm font-medium text-slate-700">
-          Log: {type === 'pod' ? `Pod ${target}` : `Container ${target.slice(0, 12)}`}
-        </span>
-        <div className="ml-auto flex items-center gap-2">
-          <div className="relative">
-            <Search size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-400" />
-            <input
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-              placeholder="搜尋..."
-              className="text-xs border rounded pl-6 pr-2 py-1 w-40"
-            />
-          </div>
-          <select
-            value={tail}
-            onChange={e => setTail(Number(e.target.value))}
-            className="text-xs border rounded px-2 py-1"
-          >
-            <option value={50}>50 行</option>
-            <option value={100}>100 行</option>
-            <option value={500}>500 行</option>
-            <option value={1000}>1000 行</option>
-          </select>
-          <button onClick={downloadLog} className="p-1 text-slate-400 hover:text-blue-600" title="下載 log">
-            <Download size={14} />
-          </button>
-          <button
-            onClick={() => { esRef.current?.close(); onClose() }}
-            className="p-1 text-slate-400 hover:text-red-600"
-            title="停止 & 關閉"
-          >
-            <Square size={14} />
-          </button>
-        </div>
-      </div>
-      <div
-        ref={containerRef}
-        className="bg-slate-900 font-mono text-xs p-3 overflow-auto"
-        style={{ height: 300 }}
-        onScroll={() => {
-          if (!containerRef.current) return
-          const { scrollTop, scrollHeight, clientHeight } = containerRef.current
-          setAutoScroll(scrollHeight - scrollTop - clientHeight < 50)
-        }}
-      >
-        {filteredLines.map((line, i) => {
-          const isSearchMatch = search && line.toLowerCase().includes(search.toLowerCase())
-          return (
-            <div
-              key={i}
-              className={`whitespace-pre-wrap break-all leading-5 ${highlightLine(line)} ${isSearchMatch ? 'bg-yellow-900/30' : ''}`}
-            >
-              {line}
+    <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-6" onClick={handleClose}>
+      <div className="bg-slate-900 rounded-xl shadow-2xl w-full max-w-5xl max-h-[85vh] flex flex-col" onClick={e => e.stopPropagation()}>
+        {/* Header */}
+        <div className="flex items-center gap-2 px-4 py-3 border-b border-slate-700">
+          <span className="text-sm font-medium text-white truncate flex-1">
+            {type === 'pod' ? `Pod ${target}` : `Container ${target.slice(0, 12)}`}
+          </span>
+          {streaming && (
+            <span className="flex items-center gap-1 text-[10px] text-green-400">
+              <span className="w-1.5 h-1.5 bg-green-400 rounded-full animate-pulse" />
+              LIVE
+            </span>
+          )}
+          <div className="flex items-center gap-2">
+            <div className="relative">
+              <Search size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-500" />
+              <input
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                placeholder="搜尋..."
+                className="text-xs bg-slate-800 border border-slate-600 rounded pl-6 pr-2 py-1 w-36 text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
+              />
             </div>
-          )
-        })}
-        {filteredLines.length === 0 && (
-          <div className="text-slate-600 text-center py-8">
-            {search ? 'No matching lines' : 'Waiting for log data...'}
+            <select
+              value={tail}
+              onChange={e => setTail(Number(e.target.value))}
+              className="text-xs bg-slate-800 border border-slate-600 rounded px-2 py-1 text-white"
+            >
+              <option value={50}>50 行</option>
+              <option value={100}>100 行</option>
+              <option value={500}>500 行</option>
+              <option value={1000}>1000 行</option>
+            </select>
+            <button onClick={downloadLog} className="p-1 text-slate-400 hover:text-blue-400" title="下載 log">
+              <Download size={14} />
+            </button>
+            <button onClick={handleClose} className="p-1 text-slate-400 hover:text-red-400" title="關閉">
+              <X size={16} />
+            </button>
           </div>
-        )}
+        </div>
+
+        {/* Log content */}
+        <div
+          ref={containerRef}
+          className="flex-1 font-mono text-xs p-3 overflow-auto min-h-0"
+          onScroll={() => {
+            if (!containerRef.current) return
+            const { scrollTop, scrollHeight, clientHeight } = containerRef.current
+            setAutoScroll(scrollHeight - scrollTop - clientHeight < 50)
+          }}
+        >
+          {filteredLines.map((line, i) => {
+            const isSearchMatch = search && line.toLowerCase().includes(search.toLowerCase())
+            return (
+              <div
+                key={i}
+                className={`whitespace-pre-wrap break-all leading-5 ${highlightLine(line)} ${isSearchMatch ? 'bg-yellow-900/30' : ''}`}
+              >
+                {line}
+              </div>
+            )
+          })}
+          {filteredLines.length === 0 && (
+            <div className="text-slate-600 text-center py-8">
+              {search ? 'No matching lines' : 'Waiting for log data...'}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   )
