@@ -154,7 +154,7 @@ router.post('/tts/synthesize', verifyServiceKey, async (req, res) => {
     }
 
     res.json({
-      audio_url:  `/uploads/generated/${fname}`,
+      audio_url:  `/api/skills/tts/audio/${fname}`,
       voice_used: selectedVoice,
       language:   langCode,
       char_count: charCount,
@@ -162,6 +162,52 @@ router.post('/tts/synthesize', verifyServiceKey, async (req, res) => {
   } catch (e) {
     console.error(`[TTS/synthesize] error: ${e.message}`);
     res.status(500).json({ error: e.message });
+  }
+});
+
+// ── TTS audio streaming endpoint ─────────────────────────────────────────────
+// 不走 express.static，明確設定 Content-Type / Content-Length / Range
+// 解決 K8s nginx ingress proxy-buffering:off 導致 <audio> 無法播放的問題
+router.get('/tts/audio/:filename', (req, res) => {
+  const UPLOAD_DIR = process.env.UPLOAD_DIR
+    ? path.resolve(process.env.UPLOAD_DIR)
+    : path.join(__dirname, '../uploads');
+  const safeName = path.basename(req.params.filename); // prevent traversal
+  const filePath = path.join(UPLOAD_DIR, 'generated', safeName);
+
+  if (!fs.existsSync(filePath)) {
+    console.error(`[TTS/audio] 404 ${safeName} path=${filePath}`);
+    return res.status(404).json({ error: 'File not found' });
+  }
+
+  const stat = fs.statSync(filePath);
+  const fileSize = stat.size;
+  const range = req.headers.range;
+
+  if (range) {
+    // Range request (seeking / metadata preload)
+    const parts = range.replace(/bytes=/, '').split('-');
+    const start = parseInt(parts[0], 10);
+    const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+    const chunkSize = end - start + 1;
+    console.log(`[TTS/audio] 206 ${safeName} range=${start}-${end}/${fileSize}`);
+    res.writeHead(206, {
+      'Content-Range': `bytes ${start}-${end}/${fileSize}`,
+      'Accept-Ranges': 'bytes',
+      'Content-Length': chunkSize,
+      'Content-Type': 'audio/mpeg',
+    });
+    fs.createReadStream(filePath, { start, end }).pipe(res);
+  } else {
+    // Full file
+    console.log(`[TTS/audio] 200 ${safeName} size=${fileSize}`);
+    res.writeHead(200, {
+      'Content-Length': fileSize,
+      'Content-Type': 'audio/mpeg',
+      'Accept-Ranges': 'bytes',
+      'Cache-Control': 'public, max-age=86400',
+    });
+    fs.createReadStream(filePath).pipe(res);
   }
 });
 

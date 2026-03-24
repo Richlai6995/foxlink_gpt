@@ -23,7 +23,15 @@ const UPLOAD_DIR = process.env.UPLOAD_DIR
   ? path.resolve(process.env.UPLOAD_DIR)
   : path.join(__dirname, 'uploads');
 if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
-app.use('/uploads', express.static(UPLOAD_DIR));
+app.use('/uploads', express.static(UPLOAD_DIR, {
+  setHeaders: (res, filePath) => {
+    // Ensure proper MIME + range support for media files (K8s nginx proxy-buffering:off workaround)
+    if (filePath.endsWith('.mp3')) {
+      res.set('Content-Type', 'audio/mpeg');
+      res.set('Accept-Ranges', 'bytes');
+    }
+  },
+}));
 
 // NOTE: uncaughtException / unhandledRejection handlers are in services/logger.js
 // with enhanced file-based logging and full stack traces.
