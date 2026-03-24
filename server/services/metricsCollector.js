@@ -11,7 +11,7 @@ const cron = require('node-cron');
 const { spawn } = require('child_process');
 const os = require('os');
 const fs = require('fs');
-const { collectHostMetrics, parseNodeDescribe } = require('../routes/monitor');
+const { collectHostMetrics, parseNodeDescribe, getK8sResource } = require('../routes/monitor');
 const { notifyAlert, isInCooldown } = require('./webhookNotifier');
 
 let db = null;
@@ -100,8 +100,7 @@ async function checkHealthFailure(check) {
 // ─── Node Metrics Collection (every 5 min) ──────────────────────────────────
 async function collectNodeMetrics() {
   try {
-    const nodesJson = await runCmd('kubectl', ['get', 'nodes', '-o', 'json']);
-    const nodes = JSON.parse(nodesJson);
+    const nodes = await getK8sResource('/api/v1/nodes', ['get', 'nodes', '-o', 'json']);
 
     const cooldown = parseInt(await getSetting('monitor_alert_cooldown', '30'));
     const cpuThreshold = parseFloat(await getSetting('monitor_cpu_threshold', '90'));
@@ -183,8 +182,7 @@ async function checkPodAlerts() {
     const alertEnabled = await getSetting('monitor_alert_enabled', 'true');
     if (alertEnabled !== 'true') return;
 
-    const podsJson = await runCmd('kubectl', ['get', 'pods', '--all-namespaces', '-o', 'json']);
-    const pods = JSON.parse(podsJson);
+    const pods = await getK8sResource('/api/v1/pods', ['get', 'pods', '--all-namespaces', '-o', 'json']);
     const cooldown = parseInt(await getSetting('monitor_alert_cooldown', '30'));
     const restartLimit = parseInt(await getSetting('monitor_pod_restart_limit', '5'));
     const pendingMinutes = parseInt(await getSetting('monitor_pod_pending_minutes', '10'));
@@ -318,8 +316,8 @@ async function collectDiskMetrics() {
       if (parts.length < 5) continue;
       const device = parts[0];
       const mount = parts[1];
-      if (['tmpfs', 'devtmpfs', 'overlay'].includes(device)) continue;
-      if (mount.startsWith('/sys') || mount.startsWith('/proc') || mount.startsWith('/dev/shm')) continue;
+      if (['tmpfs', 'devtmpfs'].includes(device)) continue;
+      if (mount.startsWith('/sys') || mount.startsWith('/proc') || mount.startsWith('/dev/shm') || mount.startsWith('/run')) continue;
 
       const totalBytes = parseInt(parts[2]) || 0;
       const usedBytes = parseInt(parts[3]) || 0;
@@ -387,24 +385,39 @@ async function checkContainerAlerts() {
     const alertEnabled = await getSetting('monitor_alert_enabled', 'true');
     if (alertEnabled !== 'true') return;
 
-    const out = await runCmd('docker', ['ps', '-a', '--format', '{{json .}}']);
-    const containers = out.trim().split('\n').filter(Boolean);
-    const cooldown = parseInt(await getSetting('monitor_alert_cooldown', '30'));
+    let containerList = [];
+    // Try docker CLI first
+    try {
+      const out = await runCmd('docker', ['ps', '-a', '--format', '{{json .}}']);
+      containerList = out.trim().split('\n').filter(Boolean).map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+    } catch {
+      // Fallback: Docker socket API
+      const { hasDockerSocket, dockerApiGet } = (() => {
+        try { return require('../routes/monitor'); } catch { return {}; }
+      })();
+      if (typeof hasDockerSocket === 'function' && hasDockerSocket()) {
+        try {
+          const raw = await dockerApiGet('/containers/json?all=true');
+          containerList = (raw || []).map(c => ({
+            Names: (c.Names || []).map(n => n.replace(/^\//, '')).join(', '),
+            State: c.State || '',
+            Status: c.Status || '',
+          }));
+        } catch {}
+      }
+    }
 
-    for (const line of containers) {
-      try {
-        const c = JSON.parse(line);
-        // Check for exited containers (unexpected)
-        if (c.State === 'exited' && c.Status && !c.Status.includes('Exited (0)')) {
-          if (!await isInCooldown(db, 'container_exit', c.Names, cooldown)) {
-            await notifyAlert({
-              db, alertType: 'container_exit', severity: 'critical',
-              resourceName: c.Names,
-              message: `Container ${c.Names} exited unexpectedly: ${c.Status}`,
-            });
-          }
+    const cooldown = parseInt(await getSetting('monitor_alert_cooldown', '30'));
+    for (const c of containerList) {
+      if (c.State === 'exited' && c.Status && !c.Status.includes('Exited (0)')) {
+        if (!await isInCooldown(db, 'container_exit', c.Names, cooldown)) {
+          await notifyAlert({
+            db, alertType: 'container_exit', severity: 'critical',
+            resourceName: c.Names,
+            message: `Container ${c.Names} exited unexpectedly: ${c.Status}`,
+          });
         }
-      } catch {}
+      }
     }
   } catch (e) {
     if (!e.message?.includes('not found') && !e.message?.includes('ENOENT')) {

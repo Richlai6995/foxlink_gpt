@@ -29,6 +29,122 @@ function tryParseJSON(str) {
   try { return JSON.parse(str); } catch { return null; }
 }
 
+// ─── K8s API helper (use service account token, fallback from kubectl) ───────
+const K8S_TOKEN_PATH = '/var/run/secrets/kubernetes.io/serviceaccount/token';
+const K8S_CA_PATH = '/var/run/secrets/kubernetes.io/serviceaccount/ca.crt';
+const K8S_NS_PATH = '/var/run/secrets/kubernetes.io/serviceaccount/namespace';
+
+function hasK8sServiceAccount() {
+  try { return fs.existsSync(K8S_TOKEN_PATH); } catch { return false; }
+}
+
+async function k8sApiGet(path) {
+  const token = fs.readFileSync(K8S_TOKEN_PATH, 'utf8').trim();
+  const host = process.env.KUBERNETES_SERVICE_HOST || 'kubernetes.default.svc';
+  const port = process.env.KUBERNETES_SERVICE_PORT || '443';
+  const url = `https://${host}:${port}${path}`;
+
+  // Use Node native https with CA cert to avoid TLS issues
+  const https = require('https');
+  let ca;
+  try { ca = fs.readFileSync(K8S_CA_PATH); } catch {}
+
+  return new Promise((resolve, reject) => {
+    const req = https.get(url, {
+      headers: { Authorization: `Bearer ${token}` },
+      ca,
+      rejectUnauthorized: !!ca,
+      timeout: 10000,
+    }, (res) => {
+      const chunks = [];
+      res.on('data', d => chunks.push(d));
+      res.on('end', () => {
+        const body = Buffer.concat(chunks).toString('utf8');
+        if (res.statusCode >= 200 && res.statusCode < 300) {
+          resolve(JSON.parse(body));
+        } else {
+          reject(new Error(`K8s API ${res.statusCode}: ${body.slice(0, 300)}`));
+        }
+      });
+    });
+    req.on('error', reject);
+    req.on('timeout', () => { req.destroy(); reject(new Error('K8s API timeout')); });
+  });
+}
+
+// Try kubectl first, fallback to K8s API
+async function getK8sResource(apiPath, kubectlArgs) {
+  // Try kubectl CLI first
+  try {
+    const out = await runCmd('kubectl', kubectlArgs);
+    return JSON.parse(out);
+  } catch {}
+
+  // Fallback: K8s service account API
+  if (hasK8sServiceAccount()) {
+    return await k8sApiGet(apiPath);
+  }
+
+  throw new Error('kubectl 無法連線且無 K8s service account');
+}
+
+// ─── Docker API helper (via /var/run/docker.sock, fallback from docker CLI) ──
+const DOCKER_SOCKET = '/var/run/docker.sock';
+
+function hasDockerSocket() {
+  try { return fs.existsSync(DOCKER_SOCKET); } catch { return false; }
+}
+
+async function dockerApiGet(path) {
+  const http = require('http');
+  return new Promise((resolve, reject) => {
+    const req = http.get({
+      socketPath: DOCKER_SOCKET,
+      path,
+      timeout: 10000,
+    }, (res) => {
+      const chunks = [];
+      res.on('data', d => chunks.push(d));
+      res.on('end', () => {
+        const body = Buffer.concat(chunks).toString('utf8');
+        if (res.statusCode >= 200 && res.statusCode < 300) {
+          resolve(JSON.parse(body));
+        } else {
+          reject(new Error(`Docker API ${res.statusCode}: ${body.slice(0, 300)}`));
+        }
+      });
+    });
+    req.on('error', reject);
+    req.on('timeout', () => { req.destroy(); reject(new Error('Docker API timeout')); });
+  });
+}
+
+async function dockerApiPost(path) {
+  const http = require('http');
+  return new Promise((resolve, reject) => {
+    const req = http.request({
+      socketPath: DOCKER_SOCKET,
+      path,
+      method: 'POST',
+      timeout: 30000,
+    }, (res) => {
+      const chunks = [];
+      res.on('data', d => chunks.push(d));
+      res.on('end', () => {
+        const body = Buffer.concat(chunks).toString('utf8');
+        if (res.statusCode >= 200 && res.statusCode < 300) {
+          resolve(tryParseJSON(body) || body);
+        } else {
+          reject(new Error(`Docker API ${res.statusCode}: ${body.slice(0, 300)}`));
+        }
+      });
+    });
+    req.on('error', reject);
+    req.on('timeout', () => { req.destroy(); reject(new Error('Docker API timeout')); });
+    req.end();
+  });
+}
+
 // ─── Dashboard Summary ──────────────────────────────────────────────────────
 router.get('/summary', async (req, res) => {
   try {
@@ -63,23 +179,21 @@ router.get('/summary', async (req, res) => {
     // Node statuses
     let nodesSummary = { total: 0, ready: 0 };
     try {
-      const nodesJson = await runCmd('kubectl', ['get', 'nodes', '-o', 'json']);
-      const nodes = JSON.parse(nodesJson);
+      const nodes = await getK8sResource('/api/v1/nodes', ['get', 'nodes', '-o', 'json']);
       nodesSummary.total = nodes.items?.length || 0;
       nodesSummary.ready = (nodes.items || []).filter(n =>
         n.status?.conditions?.some(c => c.type === 'Ready' && c.status === 'True')
       ).length;
-    } catch { /* kubectl not available */ }
+    } catch { /* K8s not available */ }
 
     // Pod statuses
     let podsSummary = { running: 0, error: 0, total: 0 };
     try {
-      const podsJson = await runCmd('kubectl', ['get', 'pods', '--all-namespaces', '-o', 'json']);
-      const pods = JSON.parse(podsJson);
+      const pods = await getK8sResource('/api/v1/pods', ['get', 'pods', '--all-namespaces', '-o', 'json']);
       podsSummary.total = pods.items?.length || 0;
       podsSummary.running = (pods.items || []).filter(p => p.status?.phase === 'Running').length;
       podsSummary.error = podsSummary.total - podsSummary.running;
-    } catch { /* kubectl not available */ }
+    } catch { /* K8s not available */ }
 
     res.json({
       nodes: nodesSummary,
@@ -97,8 +211,8 @@ router.get('/summary', async (req, res) => {
 // ─── Nodes ──────────────────────────────────────────────────────────────────
 router.get('/nodes', async (req, res) => {
   try {
-    const out = await runCmd('kubectl', ['get', 'nodes', '-o', 'json']);
-    res.json(JSON.parse(out));
+    const data = await getK8sResource('/api/v1/nodes', ['get', 'nodes', '-o', 'json']);
+    res.json(data);
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -106,20 +220,20 @@ router.get('/nodes', async (req, res) => {
 
 router.get('/nodes/detail', async (req, res) => {
   try {
-    // Get node names first
-    const nodesJson = await runCmd('kubectl', ['get', 'nodes', '-o', 'json']);
-    const nodes = JSON.parse(nodesJson);
+    const nodes = await getK8sResource('/api/v1/nodes', ['get', 'nodes', '-o', 'json']);
     const details = [];
 
     for (const node of (nodes.items || [])) {
       const name = node.metadata?.name;
       try {
+        // Try kubectl describe for detailed resource info
         const desc = await runCmd('kubectl', ['describe', 'node', name]);
-        // Parse Allocatable and Requests from describe output
         const detail = parseNodeDescribe(name, node, desc);
         details.push(detail);
-      } catch (e2) {
-        details.push({ name, error: e2.message });
+      } catch {
+        // Fallback: build detail from K8s API node object directly
+        const detail = parseNodeFromApi(name, node);
+        details.push(detail);
       }
     }
     res.json(details);
@@ -185,6 +299,25 @@ function parseNodeDescribe(name, nodeObj, descText) {
   return result;
 }
 
+// Fallback: build node detail from K8s API object (when kubectl describe unavailable)
+function parseNodeFromApi(name, nodeObj) {
+  const labels = nodeObj.metadata?.labels || {};
+  const readyCond = nodeObj.status?.conditions?.find(c => c.type === 'Ready');
+  const alloc = nodeObj.status?.allocatable || {};
+  const cap = nodeObj.status?.capacity || {};
+  return {
+    name,
+    status: readyCond?.status === 'True' ? 'Ready' : 'NotReady',
+    role: (labels['node-role.kubernetes.io/master'] !== undefined ||
+           labels['node-role.kubernetes.io/control-plane'] !== undefined) ? 'master' : 'worker',
+    allocatable: { cpu: alloc.cpu || cap.cpu || '', memory: alloc.memory || cap.memory || '' },
+    requests: { cpu: '-', memory: '-' },
+    cpuReqPct: 0,
+    memReqPct: 0,
+    podCount: 0,
+  };
+}
+
 router.get('/nodes/history', async (req, res) => {
   try {
     const db = require('../database-oracle').db;
@@ -203,8 +336,8 @@ router.get('/nodes/history', async (req, res) => {
 // ─── Pods ───────────────────────────────────────────────────────────────────
 router.get('/pods', async (req, res) => {
   try {
-    const out = await runCmd('kubectl', ['get', 'pods', '--all-namespaces', '-o', 'json']);
-    res.json(JSON.parse(out));
+    const data = await getK8sResource('/api/v1/pods', ['get', 'pods', '--all-namespaces', '-o', 'json']);
+    res.json(data);
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -213,8 +346,8 @@ router.get('/pods', async (req, res) => {
 // ─── K8s Events ─────────────────────────────────────────────────────────────
 router.get('/events', async (req, res) => {
   try {
-    const out = await runCmd('kubectl', ['get', 'events', '--all-namespaces', '-o', 'json']);
-    res.json(JSON.parse(out));
+    const data = await getK8sResource('/api/v1/events', ['get', 'events', '--all-namespaces', '-o', 'json']);
+    res.json(data);
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -363,9 +496,26 @@ router.get('/host/processes', async (req, res) => {
 // ─── Docker Images ──────────────────────────────────────────────────────────
 router.get('/images', async (req, res) => {
   try {
-    const out = await runCmd('docker', ['images', '--format', '{{json .}}']);
-    const images = out.trim().split('\n').filter(Boolean).map(l => tryParseJSON(l)).filter(Boolean);
-    res.json(images);
+    // Try docker CLI first
+    try {
+      const out = await runCmd('docker', ['images', '--format', '{{json .}}']);
+      const images = out.trim().split('\n').filter(Boolean).map(l => tryParseJSON(l)).filter(Boolean);
+      return res.json(images);
+    } catch {}
+
+    // Fallback: Docker socket API
+    if (hasDockerSocket()) {
+      const raw = await dockerApiGet('/images/json');
+      const images = (raw || []).map(img => ({
+        Repository: (img.RepoTags?.[0] || '<none>:<none>').split(':')[0],
+        Tag: (img.RepoTags?.[0] || '<none>:<none>').split(':')[1] || '<none>',
+        ID: (img.Id || '').replace('sha256:', '').slice(0, 12),
+        Size: `${Math.round((img.Size || 0) / 1024 / 1024)}MB`,
+        CreatedAt: img.Created ? new Date(img.Created * 1000).toISOString() : '',
+      }));
+      return res.json(images);
+    }
+    res.json([]);
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -373,8 +523,15 @@ router.get('/images', async (req, res) => {
 
 router.post('/images/prune', async (req, res) => {
   try {
-    const out = await runCmd('docker', ['image', 'prune', '-f'], 60000);
-    res.json({ message: 'Prune completed', output: out });
+    try {
+      const out = await runCmd('docker', ['image', 'prune', '-f'], 60000);
+      return res.json({ message: 'Prune completed', output: out });
+    } catch {}
+    if (hasDockerSocket()) {
+      const result = await dockerApiPost('/images/prune');
+      return res.json({ message: 'Prune completed', output: JSON.stringify(result) });
+    }
+    res.status(500).json({ error: 'Docker not available' });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -383,9 +540,28 @@ router.post('/images/prune', async (req, res) => {
 // ─── Docker Containers ──────────────────────────────────────────────────────
 router.get('/containers', async (req, res) => {
   try {
-    const out = await runCmd('docker', ['ps', '-a', '--format', '{{json .}}']);
-    const containers = out.trim().split('\n').filter(Boolean).map(l => tryParseJSON(l)).filter(Boolean);
-    res.json(containers);
+    // Try docker CLI first
+    try {
+      const out = await runCmd('docker', ['ps', '-a', '--format', '{{json .}}']);
+      const containers = out.trim().split('\n').filter(Boolean).map(l => tryParseJSON(l)).filter(Boolean);
+      return res.json(containers);
+    } catch {}
+
+    // Fallback: Docker socket API
+    if (hasDockerSocket()) {
+      const raw = await dockerApiGet('/containers/json?all=true');
+      const containers = (raw || []).map(c => ({
+        ID: (c.Id || '').slice(0, 12),
+        Names: (c.Names || []).map(n => n.replace(/^\//, '')).join(', '),
+        Image: c.Image || '',
+        Status: c.Status || '',
+        State: c.State || '',
+        RunningFor: c.Status || '',
+        Ports: (c.Ports || []).map(p => p.PublicPort ? `${p.PublicPort}->${p.PrivatePort}/${p.Type}` : `${p.PrivatePort}/${p.Type}`).join(', '),
+      }));
+      return res.json(containers);
+    }
+    res.json([]);
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -393,8 +569,15 @@ router.get('/containers', async (req, res) => {
 
 router.get('/containers/:id/stats', async (req, res) => {
   try {
-    const out = await runCmd('docker', ['stats', '--no-stream', '--format', '{{json .}}', req.params.id]);
-    res.json(tryParseJSON(out.trim()) || {});
+    try {
+      const out = await runCmd('docker', ['stats', '--no-stream', '--format', '{{json .}}', req.params.id]);
+      return res.json(tryParseJSON(out.trim()) || {});
+    } catch {}
+    if (hasDockerSocket()) {
+      const stats = await dockerApiGet(`/containers/${req.params.id}/stats?stream=false`);
+      return res.json(stats || {});
+    }
+    res.status(500).json({ error: 'Docker not available' });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -402,8 +585,15 @@ router.get('/containers/:id/stats', async (req, res) => {
 
 router.post('/containers/:id/restart', async (req, res) => {
   try {
-    await runCmd('docker', ['restart', req.params.id], 30000);
-    res.json({ message: `Container ${req.params.id} restarted` });
+    try {
+      await runCmd('docker', ['restart', req.params.id], 30000);
+      return res.json({ message: `Container ${req.params.id} restarted` });
+    } catch {}
+    if (hasDockerSocket()) {
+      await dockerApiPost(`/containers/${req.params.id}/restart`);
+      return res.json({ message: `Container ${req.params.id} restarted` });
+    }
+    res.status(500).json({ error: 'Docker not available' });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -411,8 +601,15 @@ router.post('/containers/:id/restart', async (req, res) => {
 
 router.post('/containers/:id/stop', async (req, res) => {
   try {
-    await runCmd('docker', ['stop', req.params.id], 30000);
-    res.json({ message: `Container ${req.params.id} stopped` });
+    try {
+      await runCmd('docker', ['stop', req.params.id], 30000);
+      return res.json({ message: `Container ${req.params.id} stopped` });
+    } catch {}
+    if (hasDockerSocket()) {
+      await dockerApiPost(`/containers/${req.params.id}/stop`);
+      return res.json({ message: `Container ${req.params.id} stopped` });
+    }
+    res.status(500).json({ error: 'Docker not available' });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -420,8 +617,15 @@ router.post('/containers/:id/stop', async (req, res) => {
 
 router.post('/containers/:id/start', async (req, res) => {
   try {
-    await runCmd('docker', ['start', req.params.id]);
-    res.json({ message: `Container ${req.params.id} started` });
+    try {
+      await runCmd('docker', ['start', req.params.id]);
+      return res.json({ message: `Container ${req.params.id} started` });
+    } catch {}
+    if (hasDockerSocket()) {
+      await dockerApiPost(`/containers/${req.params.id}/start`);
+      return res.json({ message: `Container ${req.params.id} started` });
+    }
+    res.status(500).json({ error: 'Docker not available' });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -435,7 +639,10 @@ router.get('/logs/pod/:ns/:pod', (req, res) => {
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
 
+  // Try kubectl first
   const proc = spawn('kubectl', ['logs', '-f', '--tail', String(tail), '-n', ns, pod], { shell: true });
+  let kubectlFailed = false;
+
   proc.stdout.on('data', d => {
     const lines = d.toString('utf8').split('\n');
     for (const line of lines) {
@@ -445,9 +652,45 @@ router.get('/logs/pod/:ns/:pod', (req, res) => {
   proc.stderr.on('data', d => {
     res.write(`data: ${JSON.stringify({ error: d.toString('utf8') })}\n\n`);
   });
-  proc.on('close', code => {
-    res.write(`data: ${JSON.stringify({ done: true, exitCode: code })}\n\n`);
-    res.end();
+  proc.on('error', () => { kubectlFailed = true; });
+  proc.on('close', async (code) => {
+    if (code !== 0 && kubectlFailed && hasK8sServiceAccount()) {
+      // Fallback: K8s API for logs (non-streaming)
+      try {
+        const https = require('https');
+        const token = fs.readFileSync(K8S_TOKEN_PATH, 'utf8').trim();
+        const host = process.env.KUBERNETES_SERVICE_HOST || 'kubernetes.default.svc';
+        const port = process.env.KUBERNETES_SERVICE_PORT || '443';
+        let ca; try { ca = fs.readFileSync(K8S_CA_PATH); } catch {}
+        const url = `https://${host}:${port}/api/v1/namespaces/${ns}/pods/${pod}/log?tailLines=${tail}&follow=true`;
+
+        const apiReq = https.get(url, {
+          headers: { Authorization: `Bearer ${token}` }, ca, rejectUnauthorized: !!ca,
+        }, (apiRes) => {
+          apiRes.on('data', d => {
+            const lines = d.toString('utf8').split('\n');
+            for (const line of lines) {
+              if (line) res.write(`data: ${JSON.stringify({ line })}\n\n`);
+            }
+          });
+          apiRes.on('end', () => {
+            res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+            res.end();
+          });
+        });
+        apiReq.on('error', (e) => {
+          res.write(`data: ${JSON.stringify({ error: e.message })}\n\n`);
+          res.end();
+        });
+        req.on('close', () => { apiReq.destroy(); });
+      } catch (e) {
+        res.write(`data: ${JSON.stringify({ error: e.message })}\n\n`);
+        res.end();
+      }
+    } else {
+      res.write(`data: ${JSON.stringify({ done: true, exitCode: code })}\n\n`);
+      res.end();
+    }
   });
 
   req.on('close', () => {
@@ -461,7 +704,10 @@ router.get('/logs/container/:id', (req, res) => {
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
 
+  // Try docker CLI first
   const proc = spawn('docker', ['logs', '-f', '--tail', String(tail), req.params.id], { shell: true });
+  let dockerFailed = false;
+
   proc.stdout.on('data', d => {
     const lines = d.toString('utf8').split('\n');
     for (const line of lines) {
@@ -474,9 +720,46 @@ router.get('/logs/container/:id', (req, res) => {
       if (line) res.write(`data: ${JSON.stringify({ line })}\n\n`);
     }
   });
-  proc.on('close', code => {
-    res.write(`data: ${JSON.stringify({ done: true, exitCode: code })}\n\n`);
-    res.end();
+  proc.on('error', () => { dockerFailed = true; });
+  proc.on('close', async (code) => {
+    if (code !== 0 && dockerFailed && hasDockerSocket()) {
+      // Fallback: Docker socket API for logs
+      try {
+        const http = require('http');
+        const apiReq = http.get({
+          socketPath: DOCKER_SOCKET,
+          path: `/containers/${req.params.id}/logs?stdout=true&stderr=true&follow=true&tail=${tail}`,
+        }, (apiRes) => {
+          apiRes.on('data', d => {
+            // Docker log API prepends 8-byte header per frame; strip it
+            let buf = d;
+            while (buf.length > 8) {
+              const frameLen = buf.readUInt32BE(4);
+              const text = buf.slice(8, 8 + frameLen).toString('utf8');
+              for (const line of text.split('\n')) {
+                if (line) res.write(`data: ${JSON.stringify({ line })}\n\n`);
+              }
+              buf = buf.slice(8 + frameLen);
+            }
+          });
+          apiRes.on('end', () => {
+            res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+            res.end();
+          });
+        });
+        apiReq.on('error', (e) => {
+          res.write(`data: ${JSON.stringify({ error: e.message })}\n\n`);
+          res.end();
+        });
+        req.on('close', () => { apiReq.destroy(); });
+      } catch (e) {
+        res.write(`data: ${JSON.stringify({ error: e.message })}\n\n`);
+        res.end();
+      }
+    } else {
+      res.write(`data: ${JSON.stringify({ done: true, exitCode: code })}\n\n`);
+      res.end();
+    }
   });
 
   req.on('close', () => {
@@ -503,9 +786,10 @@ router.get('/disk', async (req, res) => {
         const parts = line.trim().split(/\s+/);
         if (parts.length < 6) continue;
         const mount = parts[1];
-        // Skip pseudo filesystems
-        if (['tmpfs', 'devtmpfs', 'overlay'].includes(parts[0])) continue;
-        if (mount.startsWith('/sys') || mount.startsWith('/proc') || mount.startsWith('/dev/shm')) continue;
+        const device = parts[0];
+        // Skip pseudo filesystems (but keep overlay=root, NFS, CIFS mounts)
+        if (['tmpfs', 'devtmpfs'].includes(device)) continue;
+        if (mount.startsWith('/sys') || mount.startsWith('/proc') || mount.startsWith('/dev/shm') || mount.startsWith('/run')) continue;
 
         const totalStr = parts[2];
         const usedStr = parts[3];
@@ -556,13 +840,23 @@ router.get('/online-users', async (req, res) => {
     try {
       const sessions = await redis.getAllSessions();
       if (sessions) {
-        users = sessions.map(s => ({
-          id: s.id,
-          username: s.username,
-          name: s.name,
-          employee_id: s.employee_id,
-          loginTime: s.loginTime || null,
-        }));
+        // Deduplicate by user id (same user may have multiple sessions)
+        const seen = new Map();
+        for (const s of sessions) {
+          if (!s.id) continue;
+          if (!seen.has(s.id)) {
+            seen.set(s.id, {
+              id: s.id,
+              username: s.username,
+              name: s.name,
+              employee_id: s.employee_id,
+              email: s.email || null,
+              role: s.role || 'user',
+              loginTime: s.loginTime || null,
+            });
+          }
+        }
+        users = Array.from(seen.values());
       }
     } catch { /* getAllSessions may not exist */ }
     res.json({ count: users.length, users });
@@ -815,3 +1109,6 @@ router.put('/settings', async (req, res) => {
 module.exports = router;
 module.exports.collectHostMetrics = collectHostMetrics;
 module.exports.parseNodeDescribe = parseNodeDescribe;
+module.exports.getK8sResource = getK8sResource;
+module.exports.hasDockerSocket = hasDockerSocket;
+module.exports.dockerApiGet = dockerApiGet;

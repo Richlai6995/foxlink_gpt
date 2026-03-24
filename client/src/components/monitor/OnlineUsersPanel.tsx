@@ -7,6 +7,8 @@ interface OnlineUser {
   username: string
   name: string
   employee_id: string
+  email: string | null
+  role: string
   loginTime: string | null
 }
 
@@ -22,7 +24,7 @@ interface Props {
 }
 
 export default function OnlineUsersPanel({ current, history, loading }: Props) {
-  const [showUsers, setShowUsers] = useState(false)
+  const [showUsers, setShowUsers] = useState(true)
 
   const chartOption = useMemo(() => ({
     tooltip: { trigger: 'axis' as const },
@@ -63,21 +65,27 @@ export default function OnlineUsersPanel({ current, history, loading }: Props) {
       </div>
 
       {showUsers && current.users.length > 0 && (
-        <div className="max-h-32 overflow-auto border rounded">
+        <div className="max-h-52 overflow-auto border rounded">
           <table className="w-full text-xs">
             <thead className="bg-slate-50 sticky top-0">
               <tr>
                 <th className="text-left px-2 py-1 text-slate-500">工號</th>
                 <th className="text-left px-2 py-1 text-slate-500">姓名</th>
                 <th className="text-left px-2 py-1 text-slate-500">帳號</th>
+                <th className="text-left px-2 py-1 text-slate-500">角色</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-50">
               {current.users.map(u => (
-                <tr key={u.id}>
+                <tr key={u.id} className="hover:bg-slate-50">
                   <td className="px-2 py-1 font-mono">{u.employee_id || '-'}</td>
                   <td className="px-2 py-1">{u.name}</td>
                   <td className="px-2 py-1 text-slate-400">{u.username}</td>
+                  <td className="px-2 py-1">
+                    <span className={`px-1.5 py-0.5 rounded text-[10px] ${u.role === 'admin' ? 'bg-red-100 text-red-700' : 'bg-slate-100 text-slate-600'}`}>
+                      {u.role === 'admin' ? '管理員' : '使用者'}
+                    </span>
+                  </td>
                 </tr>
               ))}
             </tbody>

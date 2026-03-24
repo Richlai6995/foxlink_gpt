@@ -45,7 +45,10 @@ function detectLangFromHeader(acceptLanguage) {
 const redis = require('../services/redisClient');
 
 // ── SSO / OIDC Config ──────────────────────────────────────────────
-const SSO_ENABLED = !!(process.env.SSO_ISSUER && process.env.SSO_CLIENT_ID && process.env.SSO_CLIENT_SECRET);
+// Runtime check (not cached at module load) so env changes take effect after restart
+function isSsoEnabled() {
+  return !!(process.env.SSO_ISSUER && process.env.SSO_CLIENT_ID && process.env.SSO_CLIENT_SECRET);
+}
 let _ssoConfig = null; // cached OIDC discovery
 
 async function getSsoConfig() {
@@ -170,11 +173,17 @@ const authenticateLDAP = (account, password) => {
   });
 };
 
+// Log SSO config status at startup
+console.log(`[SSO] Enabled: ${isSsoEnabled()}, Issuer: ${process.env.SSO_ISSUER || '(not set)'}, ClientID: ${process.env.SSO_CLIENT_ID ? '(set)' : '(not set)'}`);
+
 // ── SSO Routes ─────────────────────────────────────────────────────
 
 // GET /api/auth/sso/login — redirect to SSO authorization page
 router.get('/sso/login', async (_req, res) => {
-  if (!SSO_ENABLED) return res.status(501).json({ error: 'SSO not configured' });
+  if (!isSsoEnabled()) {
+    console.warn('[SSO] Not configured. SSO_ISSUER:', process.env.SSO_ISSUER || '(empty)', 'SSO_CLIENT_ID:', process.env.SSO_CLIENT_ID ? '(set)' : '(empty)', 'SSO_CLIENT_SECRET:', process.env.SSO_CLIENT_SECRET ? '(set)' : '(empty)');
+    return res.status(501).json({ error: 'SSO not configured — 請確認 .env 中 SSO_ISSUER, SSO_CLIENT_ID, SSO_CLIENT_SECRET 皆已設定' });
+  }
   try {
     const cfg = await getSsoConfig();
     const params = new URLSearchParams({
@@ -194,6 +203,10 @@ router.get('/sso/login', async (_req, res) => {
 router.get('/sso/callback', async (req, res) => {
   const { code, error: ssoError } = req.query;
   const baseUrl = process.env.APP_BASE_URL || '';
+
+  if (!isSsoEnabled()) {
+    return res.redirect(`${baseUrl}/login?sso_error=${encodeURIComponent('SSO 未設定')}`);
+  }
 
   if (ssoError || !code) {
     return res.redirect(`${baseUrl}/login?sso_error=${encodeURIComponent(ssoError || 'SSO 登入失敗')}`);
