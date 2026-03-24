@@ -6,7 +6,7 @@ import {
   AlertTriangle, Database, Mail, Cpu, Zap, Settings, BookOpen,
   ChevronRight, Info, Lightbulb, Terminal, Globe, RefreshCw,
   Wand2, ImageIcon, Clock, Share2, GitFork, Lock, Sparkles, Code2, Package, Play, Square,
-  Paperclip, Search, Server, BookMarked, Wifi, WifiOff, CheckCircle, Loader2, Layers,
+  Paperclip, Search, Server, BookMarked, Wifi, WifiOff, CheckCircle, Loader2, Layers, Activity,
 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 
@@ -1641,6 +1641,7 @@ const adminSections = [
   { id: 'a-code-runners', label: 'Code Runners', icon: <Code2 size={18} /> },
   { id: 'a-llm', label: 'LLM 模型管理', icon: <Cpu size={18} /> },
   { id: 'a-system', label: '系統設定', icon: <Settings size={18} /> },
+  { id: 'a-monitor', label: '系統監控', icon: <Activity size={18} /> },
   { id: 'a-k8s', label: 'K8s 部署更新', icon: <Server size={18} /> },
 ]
 
@@ -2526,6 +2527,82 @@ generate_txt:供應商週報_{{date}}.txt
             ]}
           />
           <NoteBox>還原資料庫為破壞性操作，執行後目前的所有資料將被備份檔取代，請務必確認後再操作。</NoteBox>
+        </SubSection>
+      </Section>
+
+      <Section id="a-monitor" icon={<Activity size={22} />} iconColor="text-teal-500" title="系統監控">
+        <Para>
+          系統監控位於後台管理的「系統監控」頁籤，提供 K8s 叢集、Docker 容器、主機資源、磁碟、線上人數等即時監控，
+          每 30 秒自動刷新。所有面板在對應服務不可用時會靜默顯示空資料，不影響其他功能。
+        </Para>
+
+        <SubSection title="監控面板總覽">
+          <Table
+            headers={['面板', '功能說明']}
+            rows={[
+              ['摘要卡片', '一目了然：節點數、Pod 數、線上人數、磁碟使用率、CPU Load、未解除告警數'],
+              ['K8s Nodes', '各節點狀態（Ready/NotReady）、CPU/Memory 請求百分比、Pod 數量'],
+              ['K8s Pods', '所有命名空間的 Pod 列表，含狀態、重啟次數、可查看即時 Log'],
+              ['K8s Events', 'K8s 叢集事件，支援「僅顯示 Warning」篩選'],
+              ['主機系統指標', 'CPU Load、記憶體使用、網路 I/O、系統 Uptime、Top 20 Processes'],
+              ['磁碟 / NAS 掛載', '各掛載點使用率進度條、inode 使用率、NFS 掛載狀態'],
+              ['線上人數', '即時在線使用者人數與清單（工號、姓名、帳號、角色）、24 小時趨勢圖'],
+              ['Docker Containers', '容器列表含狀態，支援 Restart / Stop / Start 操作與查看 Log'],
+              ['Docker Images', '映像列表，支援一鍵清理 dangling images'],
+              ['Service 健康檢查', '自定義 HTTP 健康檢查端點，顯示 30 天 uptime 百分比'],
+              ['趨勢圖表', '主機/節點/磁碟歷史趨勢，支援 24h / 7d / 30d 切換'],
+            ]}
+          />
+        </SubSection>
+
+        <SubSection title="告警機制">
+          <Para>系統會依設定的閾值自動產生告警，告警分為三個等級：</Para>
+          <Table
+            headers={['等級', '觸發條件範例', '通知方式']}
+            rows={[
+              ['Warning', '磁碟使用率接近閾值', '頁面 Banner 顯示'],
+              ['Critical', 'CPU/記憶體超過閾值、Health Check 連續失敗、容器異常退出', '頁面 Banner + Email 通知'],
+              ['Emergency', 'Node NotReady', '頁面 Banner + Email + Webhook（LINE / Teams）'],
+            ]}
+          />
+          <TipBox>告警設定可在監控頁面右上角的齒輪圖示進入，可調整閾值、資料保留天數、Webhook URL 等。</TipBox>
+        </SubSection>
+
+        <SubSection title="Deploy 面板">
+          <Para>
+            監控頁面內建一鍵部署功能（位於頁面右上角），支援在管理介面直接觸發 K8s Rolling Update，
+            部署過程以 SSE 即時串流顯示輸出，並記錄部署歷史。
+          </Para>
+          <NoteBox>Deploy 功能需要 server 所在環境具備 kubectl 和 deploy 腳本的執行權限。</NoteBox>
+        </SubSection>
+
+        <SubSection title="Log 檢視器">
+          <Para>
+            點擊 Pod 或 Container 的「Log」按鈕即可開啟即時 Log 串流視窗，支援：
+          </Para>
+          <ul className="list-disc pl-6 text-sm text-slate-600 space-y-1">
+            <li>SSE 即時串流顯示</li>
+            <li>關鍵字搜尋高亮</li>
+            <li>Log 等級顏色區分（ERROR 紅色、WARN 橘色等）</li>
+            <li>一鍵下載 Log 檔案</li>
+          </ul>
+        </SubSection>
+
+        <SubSection title="K8s 部署前置設定">
+          <Para>
+            監控功能需要 K8s RBAC 權限（已寫入 deployment.yaml），首次啟用時需執行：
+          </Para>
+          <CodeBlock>{`# 1. Build 新 image
+cd ~/foxlink_gpt && git pull && ./deploy.sh
+
+# 2. Apply RBAC + volume mount
+kubectl apply -f k8s/deployment.yaml
+
+# 3. 重啟 pod
+kubectl rollout restart deployment foxlink-gpt -n foxlink`}</CodeBlock>
+          <Para>
+            詳細說明請參考 <code className="bg-slate-100 px-1 rounded text-xs">docs/k8s-installation-guide.md</code> 第十二節。
+          </Para>
         </SubSection>
       </Section>
 

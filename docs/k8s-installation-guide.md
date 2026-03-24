@@ -1319,5 +1319,67 @@ K8s pod 的 filesystem 是 ephemeral，每次 pod 重啟後 `skill_runners/<id>/
 
 ---
 
-*文件產出日期：2026-03-19 | 更新：2026-03-21（完整改寫第十一節，採用 Local Registry 部署）*
+---
+
+## 十二、系統監控模組部署
+
+系統監控功能需要額外的 K8s RBAC 權限與 Docker Socket 掛載，相關資源已寫入 `k8s/deployment.yaml`。
+
+### 12.1 已包含的 K8s 資源
+
+| 資源類型            | 名稱                    | 用途                                               |
+|--------------------|-------------------------|---------------------------------------------------|
+| ServiceAccount     | `foxlink-gpt`           | Pod 身份，用於存取 K8s API                          |
+| ClusterRole        | `foxlink-gpt-monitor`   | 唯讀權限：nodes / pods / events / namespaces + pods/log |
+| ClusterRoleBinding | `foxlink-gpt-monitor`   | 綁定 SA 到 ClusterRole                             |
+
+### 12.2 Deployment 中的監控設定
+
+- **`serviceAccountName: foxlink-gpt`** — K8s 自動掛載 token 到 `/var/run/secrets/kubernetes.io/serviceaccount/`，程式透過 K8s API 讀取 nodes/pods/events
+- **Docker Socket Volume Mount** — `/var/run/docker.sock`（readOnly），用於監控 Docker 容器與映像
+
+### 12.3 首次啟用監控的部署步驟
+
+```bash
+# 1. 先 build 新 image（含監控程式碼）
+cd ~/foxlink_gpt
+git pull && ./deploy.sh
+
+# 2. Apply deployment.yaml（含 RBAC + 新 volume mount）
+kubectl apply -f k8s/deployment.yaml
+
+# 3. 重啟讓新 SA 和 volume 生效
+kubectl rollout restart deployment foxlink-gpt -n foxlink
+
+# 4. 確認 rollout 完成
+kubectl rollout status deployment/foxlink-gpt -n foxlink
+```
+
+> [!NOTE]
+> 順序很重要：先 `deploy.sh` build 新 image，再 `kubectl apply` 套用 RBAC 與 volume，最後 `rollout restart` 讓 pod 用新 SA 啟動。
+
+### 12.4 監控功能說明
+
+| 功能區塊           | 資料來源                              | 前置條件                        |
+|-------------------|--------------------------------------|--------------------------------|
+| K8s Nodes         | K8s API `/api/v1/nodes`              | ServiceAccount RBAC            |
+| K8s Pods          | K8s API `/api/v1/pods`               | ServiceAccount RBAC            |
+| K8s Events        | K8s API `/api/v1/events`             | ServiceAccount RBAC            |
+| Pod Logs          | K8s API `/api/v1/namespaces/{ns}/pods/{pod}/log` | ServiceAccount RBAC |
+| Docker Containers | Docker Socket API `/containers/json` | `/var/run/docker.sock` 掛載    |
+| Docker Images     | Docker Socket API `/images/json`     | `/var/run/docker.sock` 掛載    |
+| 主機指標          | `/proc/loadavg`, `/proc/meminfo` 等  | Linux 容器（自動可用）          |
+| 磁碟 / NAS        | `df -h` 指令                         | Linux 容器（自動可用）          |
+| 線上人數          | Redis session 列舉                   | Redis（自動可用）               |
+
+### 12.5 注意事項
+
+- **不需要安裝 kubectl CLI**：程式自動讀取 service account token 直接呼叫 K8s API
+- **containerd 環境**：Worker node 若使用 containerd（非 dockerd），`/var/run/docker.sock` 不存在，Docker 區塊會顯示空資料（不報錯）
+- **磁碟監控**：容器內 `df` 顯示容器視角的檔案系統，包含 overlay（根目錄）與 NFS 掛載
+- **工具不可用時**：所有監控 API 採用 soft-fail 設計，工具不可用時返回空資料而非 500 錯誤
+
+---
+
+*文件產出日期：2026-03-19 | 更新：2026-03-24（新增第十二節：系統監控模組部署）*
 *Git tag: `backup-before-k8s-migration-20260319`*
