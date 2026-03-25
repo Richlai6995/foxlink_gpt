@@ -165,7 +165,10 @@ async function collectNodeMetrics() {
           }
         }
       } catch (e2) {
-        console.warn(`[MetricsCollector] Node ${name} error:`, e2.message);
+        // kubectl 未安裝時靜音（不影響核心功能）
+        if (!e2.message?.includes('not found') && !e2.message?.includes('ENOENT') && !e2.message?.includes('127')) {
+          console.warn(`[MetricsCollector] Node ${name} error:`, e2.message);
+        }
       }
     }
   } catch (e) {
@@ -371,13 +374,17 @@ async function collectDiskMetrics() {
   if (os.platform() !== 'linux') return;
   try {
     const dfOut = await runCmd('df', ['-B1', '--output=source,target,size,used,pcent']);
-    const diOut = await runCmd('df', ['-i', '--output=source,target,ipcent']);
-
+    // df -i 與 --output 在部分 Linux 版本互斥，改用標準 df -i 輸出解析
+    // 標準格式: Filesystem Inodes IUsed IFree IUse% Mounted
     const inodeMap = {};
-    for (const line of diOut.split('\n').slice(1)) {
-      const parts = line.trim().split(/\s+/);
-      if (parts.length >= 3) inodeMap[parts[1]] = parts[2];
-    }
+    try {
+      const diOut = await runCmd('df', ['-i']);
+      for (const line of diOut.split('\n').slice(1)) {
+        const parts = line.trim().split(/\s+/);
+        // 欄位: Filesystem Inodes IUsed IFree IUse% Mounted
+        if (parts.length >= 6) inodeMap[parts[5]] = parts[4]; // key=mount, val=IUse%
+      }
+    } catch (_) { /* inode 資料非必要，取不到就跳過 */ }
 
     const alertEnabled = await getSetting('monitor_alert_enabled', 'true');
     const cooldown = parseInt(await getSetting('monitor_alert_cooldown', '30'));
