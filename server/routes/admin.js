@@ -124,7 +124,7 @@ router.get('/token-usage', async (req, res) => {
 });
 
 // POST /api/admin/token-usage/recalc-costs — 補算 cost=NULL 的歷史資料
-router.post('/token-usage/recalc-costs', requireAdmin, async (req, res) => {
+router.post('/token-usage/recalc-costs', async (req, res) => {
   try {
     const db = require('../database-oracle').db;
     const { recalcNullCosts } = require('../services/tokenService');
