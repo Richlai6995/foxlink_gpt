@@ -192,7 +192,11 @@ router.get('/summary', async (req, res) => {
       const pods = await getK8sResource('/api/v1/pods', ['get', 'pods', '--all-namespaces', '-o', 'json']);
       podsSummary.total = pods.items?.length || 0;
       podsSummary.running = (pods.items || []).filter(p => p.status?.phase === 'Running').length;
-      podsSummary.error = podsSummary.total - podsSummary.running;
+      // Succeeded (Job 完成) 不算 Error，只有 Failed / Unknown / Pending 才算
+      podsSummary.error = (pods.items || []).filter(p => {
+        const phase = p.status?.phase;
+        return phase !== 'Running' && phase !== 'Succeeded';
+      }).length;
     } catch { /* K8s not available */ }
 
     res.json({
