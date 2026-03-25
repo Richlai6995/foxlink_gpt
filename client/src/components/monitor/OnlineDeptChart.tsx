@@ -31,18 +31,35 @@ export default function OnlineDeptChart() {
   const chartOption = useMemo(() => {
     if (data.length === 0) return null
 
-    // Group by time buckets (round to 5 min) and dimension value
-    const timeSet = new Set<string>()
-    const seriesMap: Record<string, Record<string, number>> = {}
-
+    // Step 1: sum rows with identical (exact_ts, dimValue) — one snapshot can have
+    //         multiple rows for the same profit_center but different org_section
+    const exactGroups: Record<string, Record<string, number>> = {}
     for (const d of data) {
-      const t = new Date(d.collected_at)
-      const timeKey = `${t.getMonth() + 1}/${t.getDate()} ${t.getHours().toString().padStart(2, '0')}:${(Math.floor(t.getMinutes() / 5) * 5).toString().padStart(2, '0')}`
-      timeSet.add(timeKey)
-
+      const ts = new Date(d.collected_at).getTime().toString()
       const dimValue = d[dimension] || 'Unknown'
-      if (!seriesMap[dimValue]) seriesMap[dimValue] = {}
-      seriesMap[dimValue][timeKey] = (seriesMap[dimValue][timeKey] || 0) + d.user_count
+      if (!exactGroups[ts]) exactGroups[ts] = {}
+      exactGroups[ts][dimValue] = (exactGroups[ts][dimValue] || 0) + d.user_count
+    }
+
+    // Step 2: for each 5-min display bucket, keep only the LATEST snapshot's values.
+    //         Summing across multiple snapshots per bucket inflates counts.
+    const bucketLatest: Record<string, { ts: number; values: Record<string, number> }> = {}
+    for (const [tsStr, values] of Object.entries(exactGroups)) {
+      const ts = parseInt(tsStr)
+      const dt = new Date(ts)
+      const bucket = `${dt.getMonth() + 1}/${dt.getDate()} ${dt.getHours().toString().padStart(2, '0')}:${(Math.floor(dt.getMinutes() / 5) * 5).toString().padStart(2, '0')}`
+      if (!bucketLatest[bucket] || ts > bucketLatest[bucket].ts) {
+        bucketLatest[bucket] = { ts, values }
+      }
+    }
+
+    const timeSet = new Set<string>(Object.keys(bucketLatest))
+    const seriesMap: Record<string, Record<string, number>> = {}
+    for (const [bucket, { values }] of Object.entries(bucketLatest)) {
+      for (const [dimValue, count] of Object.entries(values)) {
+        if (!seriesMap[dimValue]) seriesMap[dimValue] = {}
+        seriesMap[dimValue][bucket] = count
+      }
     }
 
     const times = Array.from(timeSet).sort()

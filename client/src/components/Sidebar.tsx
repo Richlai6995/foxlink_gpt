@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react'
-import { Plus, MessageSquare, Trash2, ChevronDown, LogOut, Settings, Cpu, Zap, CalendarClock, HelpCircle, KeyRound, X, Eye, EyeOff, GitFork, Sparkles, Database, Menu, ChevronUp, BarChart3, Globe } from 'lucide-react'
+import { useState, useEffect, useRef } from 'react'
+import { Plus, MessageSquare, Trash2, Pencil, Check, ChevronDown, LogOut, Settings, Cpu, Zap, CalendarClock, HelpCircle, KeyRound, X, Eye, EyeOff, GitFork, Sparkles, Database, Menu, ChevronUp, BarChart3, Globe } from 'lucide-react'
 import type { ChatSession, ModelType, LlmModel } from '../types'
 import { useAuth } from '../context/AuthContext'
 import { useNavigate } from 'react-router-dom'
@@ -15,6 +15,7 @@ interface Props {
   onSelectSession: (id: string) => void
   onDeleteSession: (id: string) => void
   onModelChange: (m: ModelType) => void
+  onRenameSession?: (id: string, title: string, titleZh: string, titleEn: string, titleVi: string) => void
 }
 
 function groupSessions(sessions: ChatSession[], t: (k: string) => string) {
@@ -49,11 +50,16 @@ export default function Sidebar({
   onSelectSession,
   onDeleteSession,
   onModelChange,
+  onRenameSession,
 }: Props) {
   const { user, logout, isAdmin, canSchedule, canCreateKb, canUseDashboard, setLanguage } = useAuth()
   const navigate = useNavigate()
   const { t, i18n } = useTranslation()
   const [hoveredId, setHoveredId] = useState<string | null>(null)
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editingTitle, setEditingTitle] = useState('')
+  const [renamingSessions, setRenamingSessions] = useState<Set<string>>(new Set())
+  const editInputRef = useRef<HTMLInputElement>(null)
   const [showModelMenu, setShowModelMenu] = useState(false)
   const [llmModels, setLlmModels] = useState<LlmModel[]>([])
   const [showMenu, setShowMenu] = useState(false)
@@ -122,6 +128,28 @@ export default function Sidebar({
   useEffect(() => {
     api.get('/chat/models').then((r) => setLlmModels(r.data)).catch(() => { })
   }, [])
+
+  const startRename = (s: ChatSession, e: React.MouseEvent) => {
+    e.stopPropagation()
+    setEditingId(s.id)
+    setEditingTitle(sessionTitle(s) || s.title || '')
+    setTimeout(() => editInputRef.current?.select(), 50)
+  }
+
+  const submitRename = async (id: string) => {
+    const newTitle = editingTitle.trim()
+    setEditingId(null)
+    if (!newTitle) return
+    const orig = sessions.find((s) => s.id === id)
+    if (newTitle === sessionTitle(orig!)) return
+    setRenamingSessions((prev) => new Set(prev).add(id))
+    try {
+      const { data } = await api.patch(`/chat/sessions/${id}/title`, { title: newTitle })
+      onRenameSession?.(id, data.title, data.title_zh, data.title_en, data.title_vi)
+    } catch (_) { /* ignore */ } finally {
+      setRenamingSessions((prev) => { const s = new Set(prev); s.delete(id); return s })
+    }
+  }
 
   const handleLangChange = async (lang: LangCode) => {
     setShowLangMenu(false)
@@ -217,20 +245,53 @@ export default function Sidebar({
                     }`}
                   onMouseEnter={() => setHoveredId(s.id)}
                   onMouseLeave={() => setHoveredId(null)}
-                  onClick={() => onSelectSession(s.id)}
+                  onClick={() => editingId !== s.id && onSelectSession(s.id)}
                 >
-                  <div className="flex items-center gap-2 px-3 py-2">
-                    <MessageSquare size={14} className="flex-shrink-0 opacity-60" />
-                    <span className="text-xs truncate flex-1">{sessionTitle(s) || t('sidebar.newSession')}</span>
-                    {hoveredId === s.id && (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          onDeleteSession(s.id)
+                  <div className="flex items-center gap-1.5 px-3 py-2">
+                    <MessageSquare size={14} className="flex-shrink-0 opacity-60 shrink-0" />
+                    {editingId === s.id ? (
+                      <input
+                        ref={editInputRef}
+                        className="flex-1 min-w-0 text-xs bg-slate-600 text-white rounded px-1.5 py-0.5 outline-none border border-blue-400"
+                        value={editingTitle}
+                        onChange={(e) => setEditingTitle(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') submitRename(s.id)
+                          if (e.key === 'Escape') setEditingId(null)
                         }}
-                        className="text-slate-500 hover:text-red-400 transition flex-shrink-0"
+                        onBlur={() => submitRename(s.id)}
+                        onClick={(e) => e.stopPropagation()}
+                        maxLength={100}
+                        autoFocus
+                      />
+                    ) : (
+                      <span className="text-xs truncate flex-1 min-w-0">
+                        {renamingSessions.has(s.id) ? '...' : (sessionTitle(s) || t('sidebar.newSession'))}
+                      </span>
+                    )}
+                    {hoveredId === s.id && editingId !== s.id && (
+                      <div className="flex items-center gap-0.5 flex-shrink-0">
+                        <button
+                          onClick={(e) => startRename(s, e)}
+                          className="text-slate-500 hover:text-blue-400 transition p-0.5"
+                          title="重命名"
+                        >
+                          <Pencil size={12} />
+                        </button>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); onDeleteSession(s.id) }}
+                          className="text-slate-500 hover:text-red-400 transition p-0.5"
+                        >
+                          <Trash2 size={12} />
+                        </button>
+                      </div>
+                    )}
+                    {editingId === s.id && (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); submitRename(s.id) }}
+                        className="text-blue-400 hover:text-blue-300 transition flex-shrink-0 p-0.5"
                       >
-                        <Trash2 size={13} />
+                        <Check size={12} />
                       </button>
                     )}
                   </div>

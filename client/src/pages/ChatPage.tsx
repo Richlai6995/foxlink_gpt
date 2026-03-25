@@ -88,7 +88,7 @@ export default function ChatPage() {
   }, [showDashPanel])
 
   // ── Skill panel state ──────────────────────────────────────────────────────
-  interface Skill { id: number; name: string; icon: string; description: string; type: string; model_key?: string | null }
+  interface Skill { id: number; name: string; icon: string; description: string; type: string; model_key?: string | null; prompt_variables?: string }
   const [sessionSkills, setSessionSkills] = useState<Skill[]>([])       // currently attached
   const [allSkills, setAllSkills] = useState<Skill[]>([])               // available to pick
   const [showSkillPanel, setShowSkillPanel] = useState(false)
@@ -96,6 +96,7 @@ export default function ChatPage() {
   const [pickedIds, setPickedIds] = useState<Set<number>>(new Set())    // draft selection
   const [skillSaving, setSkillSaving] = useState(false)
   const [pendingSkillIds, setPendingSkillIds] = useState<Set<number>>(new Set())
+  const [skillVarModal, setSkillVarModal] = useState<{ skillId: number; skillName: string; variables: any[]; values: Record<string, any> } | null>(null)
   const skillPanelRef = useRef<HTMLDivElement>(null)
 
   // ── Explicit tool selection panels ────────────────────────────────────────
@@ -381,7 +382,7 @@ export default function ChatPage() {
     setShowSkillPanel(true)
   }, [])
 
-  const saveSkills = useCallback(async () => {
+  const doSaveSkills = useCallback(async (skillVariables?: Record<number, Record<string, any>>) => {
     if (!currentSessionId) {
       // No session yet — store as pending, show in UI from allSkills
       setPendingSkillIds(new Set(pickedIds))
@@ -392,7 +393,11 @@ export default function ChatPage() {
     }
     setSkillSaving(true)
     try {
-      await api.put(`/chat/sessions/${currentSessionId}/skills`, { skill_ids: [...pickedIds] })
+      const payload: any = { skill_ids: [...pickedIds] }
+      if (skillVariables) {
+        payload.skill_variables = skillVariables
+      }
+      await api.put(`/chat/sessions/${currentSessionId}/skills`, payload)
       const res = await api.get(`/chat/sessions/${currentSessionId}`)
       const attached: Skill[] = res.data.skills || []
       setSessionSkills(attached)
@@ -404,6 +409,30 @@ export default function ChatPage() {
       setSkillSaving(false)
     }
   }, [currentSessionId, pickedIds, allSkills])
+
+  const saveSkills = useCallback(async () => {
+    // Check if any newly selected skill has prompt_variables
+    const skillsWithVars = allSkills.filter(s =>
+      pickedIds.has(s.id) && s.prompt_variables && s.prompt_variables !== '[]'
+    )
+    if (skillsWithVars.length > 0) {
+      const sk = skillsWithVars[0]
+      try {
+        const vars = JSON.parse(sk.prompt_variables || '[]')
+        if (vars.length > 0) {
+          setSkillVarModal({
+            skillId: sk.id,
+            skillName: sk.name,
+            variables: vars,
+            values: {},
+          })
+          return // Wait for modal submission
+        }
+      } catch { /* invalid JSON, skip */ }
+    }
+    // No variables needed, save normally
+    await doSaveSkills()
+  }, [allSkills, pickedIds, doSaveSkills])
 
   const togglePick = (id: number) => setPickedIds(prev => {
     const next = new Set(prev)
@@ -568,6 +597,13 @@ export default function ChatPage() {
                   urlPreview: f.publicUrl?.slice(0, 60),
                 })))
                 generatedFiles.push(...event.files)
+              } else if (event.type === 'audio') {
+                // post_answer skill returned audio
+                generatedFiles.push({
+                  type: 'audio',
+                  filename: event.filename || 'output.mp3',
+                  publicUrl: event.audio_url,
+                })
               } else if (event.type === 'error') {
                 streamError = event.message || '發生錯誤'
                 streamDone = true
@@ -676,6 +712,9 @@ export default function ChatPage() {
         onSelectSession={handleSelectSession}
         onDeleteSession={handleDeleteSession}
         onModelChange={handleModelChange}
+        onRenameSession={(id, title, titleZh, titleEn, titleVi) => {
+          setSessions((prev) => prev.map((s) => s.id === id ? { ...s, title, title_zh: titleZh, title_en: titleEn, title_vi: titleVi } : s))
+        }}
       />
 
       <div className="flex-1 flex flex-col min-w-0">
@@ -1248,6 +1287,67 @@ export default function ChatPage() {
               </button>
             </div>
             <p className="text-xs text-slate-400 mt-3">此快照不會隨原始對話更新，是獨立的分享副本。</p>
+          </div>
+        </div>
+      )}
+
+      {/* ── Skill prompt_variables modal ── */}
+      {skillVarModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-white rounded-xl shadow-lg p-5 w-96 max-h-[80vh] overflow-y-auto">
+            <h3 className="text-sm font-semibold mb-3">技能「{skillVarModal.skillName}」— 輸入參數</h3>
+            <div className="space-y-3">
+              {skillVarModal.variables.map((v: any) => (
+                <div key={v.name}>
+                  <label className="block text-xs text-slate-500 mb-1">
+                    {v.label || v.name} {v.required && <span className="text-red-400">*</span>}
+                  </label>
+                  {v.type === 'select' ? (
+                    <select
+                      value={skillVarModal.values[v.name] || v.default || ''}
+                      onChange={e => setSkillVarModal(prev => prev ? {...prev, values: {...prev.values, [v.name]: e.target.value}} : null)}
+                      className="w-full border rounded px-3 py-2 text-sm"
+                    >
+                      <option value="">請選擇</option>
+                      {(v.options || []).map((opt: string) => <option key={opt} value={opt}>{opt}</option>)}
+                    </select>
+                  ) : v.type === 'textarea' ? (
+                    <textarea
+                      value={skillVarModal.values[v.name] || ''}
+                      onChange={e => setSkillVarModal(prev => prev ? {...prev, values: {...prev.values, [v.name]: e.target.value}} : null)}
+                      className="w-full border rounded px-3 py-2 text-sm h-20 resize-y"
+                      placeholder={v.placeholder}
+                    />
+                  ) : v.type === 'checkbox' ? (
+                    <input
+                      type="checkbox"
+                      checked={!!skillVarModal.values[v.name]}
+                      onChange={e => setSkillVarModal(prev => prev ? {...prev, values: {...prev.values, [v.name]: e.target.checked}} : null)}
+                    />
+                  ) : (
+                    <input
+                      type={v.type === 'number' ? 'number' : v.type === 'date' ? 'date' : 'text'}
+                      value={skillVarModal.values[v.name] || ''}
+                      onChange={e => setSkillVarModal(prev => prev ? {...prev, values: {...prev.values, [v.name]: e.target.value}} : null)}
+                      className="w-full border rounded px-3 py-2 text-sm"
+                      placeholder={v.placeholder}
+                    />
+                  )}
+                </div>
+              ))}
+            </div>
+            <div className="flex justify-end gap-2 mt-4">
+              <button onClick={() => setSkillVarModal(null)} className="px-3 py-1.5 text-sm text-slate-500 hover:text-slate-700">取消</button>
+              <button
+                onClick={async () => {
+                  await doSaveSkills({ [skillVarModal.skillId]: skillVarModal.values })
+                  setSkillVarModal(null)
+                }}
+                className="px-3 py-1.5 bg-blue-500 text-white text-sm rounded hover:bg-blue-600"
+              >
+                確定
+              </button>
+            </div>
           </div>
         </div>
       )}

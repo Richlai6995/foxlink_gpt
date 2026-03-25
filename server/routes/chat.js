@@ -11,6 +11,19 @@ const { processGenerateBlocks } = require('../services/fileGenerator');
 const { notifyAdminSensitiveKeyword } = require('../services/mailService');
 const mcpClient = require('../services/mcpClient');
 
+// ── Pending TTS map: sessionId → { aiResponse, skill, timestamp } ────────────
+// When a post_answer TTS skill returns { pending:true } (no voice pref given),
+// we store the AI response here and wait for the user's next message with voice keywords.
+const pendingTtsMap = new Map();
+// Auto-expire stale entries every 10 minutes
+setInterval(() => {
+  const tenMin = 10 * 60 * 1000;
+  const now = Date.now();
+  for (const [sid, entry] of pendingTtsMap) {
+    if (now - entry.timestamp > tenMin) pendingTtsMap.delete(sid);
+  }
+}, 60000);
+
 // ── Self-Built Knowledge Base — function-calling approach ────────────────────
 
 /** Load accessible self-built KBs for a user and return Gemini function declarations. */
@@ -24,12 +37,12 @@ async function getSelfKbDeclarations(db, userId) {
     let kbs;
     if (user.role === 'admin') {
       kbs = await db.prepare(
-        `SELECT id, name, description, retrieval_mode, embedding_dims, top_k_return, score_threshold
+        `SELECT id, name, description, tags, retrieval_mode, embedding_dims, top_k_return, score_threshold
          FROM knowledge_bases WHERE chunk_count > 0 ORDER BY name ASC`
       ).all();
     } else {
       kbs = await db.prepare(`
-        SELECT kb.id, kb.name, kb.description, kb.retrieval_mode, kb.embedding_dims, kb.top_k_return, kb.score_threshold
+        SELECT kb.id, kb.name, kb.description, kb.tags, kb.retrieval_mode, kb.embedding_dims, kb.top_k_return, kb.score_threshold
         FROM knowledge_bases kb
         WHERE kb.chunk_count > 0 AND (
           kb.creator_id=?
@@ -206,12 +219,12 @@ async function getDifyFunctionDeclarations(db, userCtx) {
   try {
     if (!userCtx) {
       kbs = await db.prepare(
-        `SELECT id, name, api_server, api_key, description FROM dify_knowledge_bases WHERE is_active=1 ORDER BY sort_order ASC`
+        `SELECT id, name, api_server, api_key, description, tags FROM dify_knowledge_bases WHERE is_active=1 ORDER BY sort_order ASC`
       ).all();
     } else {
       const { userId, roleId, deptCode, profitCenter, orgSection, orgGroupName } = userCtx;
       kbs = await db.prepare(
-        `SELECT DISTINCT d.id, d.name, d.api_server, d.api_key, d.description
+        `SELECT DISTINCT d.id, d.name, d.api_server, d.api_key, d.description, d.tags
          FROM dify_knowledge_bases d
          WHERE d.is_active=1 AND (
            (d.is_public=1 AND d.public_approved=1)
@@ -381,7 +394,7 @@ async function executeDifyQuery(db, kb, query, sessionId, userId) {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(30000),
+      signal: AbortSignal.timeout(120000),
     });
     const duration = Date.now() - t0;
     if (difyRes.ok) {
@@ -627,6 +640,37 @@ router.get('/sessions/:id', async (req, res) => {
   }
 });
 
+// PATCH /api/chat/sessions/:id/title — 手動改名，自動翻譯成 zh/en/vi
+router.patch('/sessions/:id/title', async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const { title } = req.body;
+    if (!title || !title.trim()) return res.status(400).json({ error: '標題不可空白' });
+    const session = await db.prepare('SELECT id FROM chat_sessions WHERE id=? AND user_id=?').get(req.params.id, req.user.id);
+    if (!session) return res.status(404).json({ error: '找不到對話' });
+
+    const newTitle = title.trim().slice(0, 100);
+    let titleZh = newTitle, titleEn = newTitle, titleVi = newTitle;
+
+    try {
+      const { generateTextSync, MODEL_FLASH } = require('../services/gemini');
+      const prompt = `請將以下對話標題翻譯成繁體中文、英文、越南文，以 JSON 回覆。\n標題：「${newTitle}」\n格式：{"zh":"...","en":"...","vi":"..."}`;
+      const { text } = await generateTextSync(MODEL_FLASH, [], prompt);
+      const cleaned = text.replace(/```(?:json)?\s*/gi, '').replace(/```/g, '').trim();
+      const parsed = JSON.parse(cleaned.match(/\{[\s\S]*\}/)?.[0] || '{}');
+      if (parsed.zh) titleZh = parsed.zh;
+      if (parsed.en) titleEn = parsed.en;
+      if (parsed.vi) titleVi = parsed.vi;
+    } catch (_) { /* 翻譯失敗時維持原標題 */ }
+
+    await db.prepare('UPDATE chat_sessions SET title=?, title_zh=?, title_en=?, title_vi=?, updated_at=SYSTIMESTAMP WHERE id=?')
+      .run(newTitle, titleZh, titleEn, titleVi, req.params.id);
+    res.json({ success: true, title: newTitle, title_zh: titleZh, title_en: titleEn, title_vi: titleVi });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // PUT /api/chat/sessions/:id/skills — 更新 session 掛載的 skills（array of skill ids）
 router.put('/sessions/:id/skills', async (req, res) => {
   try {
@@ -634,9 +678,15 @@ router.put('/sessions/:id/skills', async (req, res) => {
     const session = await db.prepare('SELECT id FROM chat_sessions WHERE id=? AND user_id=?').get(req.params.id, req.user.id);
     if (!session) return res.status(404).json({ error: '找不到對話' });
     const skillIds = Array.isArray(req.body.skill_ids) ? req.body.skill_ids : [];
+    const skillVariables = req.body.skill_variables || {};
     await db.prepare('DELETE FROM session_skills WHERE session_id=?').run(req.params.id);
     for (const [idx, id] of skillIds.entries()) {
       await db.prepare('INSERT INTO session_skills (session_id, skill_id, sort_order) VALUES (?,?,?)').run(req.params.id, id, idx);
+    }
+    // Update variables_json for skills that have prompt_variables
+    for (const [skillId, vars] of Object.entries(skillVariables)) {
+      await db.prepare('UPDATE session_skills SET variables_json=? WHERE session_id=? AND skill_id=?')
+        .run(JSON.stringify(vars), req.params.id, skillId);
     }
     res.json({ success: true, skill_ids: skillIds });
   } catch (e) {
@@ -680,7 +730,12 @@ router.post('/sessions/:id/messages', upload.array('files', 10), async (req, res
   // When present (even as '[]'), skip auto-discovery + intent filtering for that category.
   function parseIds(raw) {
     if (raw === undefined || raw === null) return null;
-    try { const v = JSON.parse(raw); return Array.isArray(v) ? v : null; } catch { return null; }
+    try {
+      const v = JSON.parse(raw);
+      // Empty array → null so auto TAG routing kicks in instead of explicit mode
+      if (!Array.isArray(v) || v.length === 0) return null;
+      return v;
+    } catch { return null; }
   }
   const userMcpIds   = parseIds(req.body.mcp_server_ids);  // number[] | null
   const userDifyIds  = parseIds(req.body.dify_kb_ids);      // number[] | null
@@ -1015,6 +1070,71 @@ router.post('/sessions/:id/messages', upload.array('files', 10), async (req, res
       return res.end();
     }
 
+    // ── Pending TTS: user replied with voice preference → execute TTS now ──
+    const pendingTts = pendingTtsMap.get(sessionId);
+    if (pendingTts) {
+      const hasVoicePref = /男聲|女聲|wavenet|neural2|standard|male|female|英文|越文|日文|韓文|cmn-|en-US|vi-VN|ja-JP|ko-KR/i.test(combinedUserText);
+      if (hasVoicePref) {
+        console.log(`[TTS pending] Session ${sessionId}: voice pref detected, running deferred TTS`);
+        pendingTtsMap.delete(sessionId);
+        const { sk } = pendingTts;
+        try {
+          sendEvent({ type: 'status', message: `Skill: ${sk.name} 語音合成中...` });
+          const resp = await Promise.race([
+            fetch(sk.endpoint_url, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'X-Source': 'foxlink-gpt',
+                ...(sk.endpoint_secret ? { Authorization: `Bearer ${sk.endpoint_secret}` } : {}),
+              },
+              body: JSON.stringify({
+                user_message: combinedUserText,
+                ai_response: pendingTts.aiResponse,
+                session_id: sessionId,
+                user_id: req.user.id,
+              }),
+            }),
+            new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 120000)),
+          ]);
+          if (resp.ok) {
+            const data = await resp.json();
+            console.log(`[TTS pending] result keys=${Object.keys(data).join(',')}`);
+            if (data.audio_url) {
+              let audioUrl = data.audio_url;
+              try {
+                const audioPath = path.join(UPLOAD_DIR, 'generated', path.basename(data.audio_url));
+                if (fs.existsSync(audioPath)) {
+                  const buf = fs.readFileSync(audioPath);
+                  audioUrl = `data:audio/mpeg;base64,${buf.toString('base64')}`;
+                }
+              } catch (_) {}
+              sendEvent({ type: 'audio', audio_url: audioUrl, filename: path.basename(data.audio_url || 'output.mp3') });
+            }
+            const ttsDisplayText = (data.system_prompt || '✅ 語音合成完成！').trim();
+            // Save minimal user + assistant messages for this TTS-reply turn
+            await db.prepare(`INSERT INTO chat_messages (session_id, role, content) VALUES (?, 'user', ?)`).run(sessionId, combinedUserText);
+            await db.prepare(`INSERT INTO chat_messages (session_id, role, content) VALUES (?, 'assistant', ?)`).run(sessionId, ttsDisplayText);
+            sendEvent({ type: 'chunk', content: ttsDisplayText });
+            sendEvent({ type: 'done' });
+          } else {
+            sendEvent({ type: 'error', message: `TTS 合成失敗 (HTTP ${resp.status})` });
+            sendEvent({ type: 'done' });
+          }
+        } catch (e) {
+          console.warn(`[TTS pending] failed:`, e.message);
+          sendEvent({ type: 'error', message: `TTS 合成失敗: ${e.message}` });
+          sendEvent({ type: 'done' });
+        }
+        clearInterval(sseKeepAlive);
+        return res.end();
+      } else {
+        // No voice keywords → discard pending TTS
+        console.log(`[TTS pending] Session ${sessionId}: no voice pref, discarding pending TTS`);
+        pendingTtsMap.delete(sessionId);
+      }
+    }
+
     // Load history (include files_json for image continuity)
     const historyMessages = await db
       .prepare(
@@ -1150,6 +1270,60 @@ router.post('/sessions/:id/messages', upload.array('files', 10), async (req, res
       WHERE ss.session_id = ? ORDER BY ss.sort_order ASC
     `).all(sessionId);
 
+    // ── TAG-based skill auto-routing (skills not manually attached but tags match) ──
+    const sessionSkillIds = new Set(sessionSkills.map(s => String(s.id)));
+    let tagRoutedSkills = [];
+    try {
+      // Simple query: owner OR is_public — avoid JOIN to skill_access for reliability
+      const allAccessibleSkills = await db.prepare(`
+        SELECT * FROM skills
+        WHERE owner_user_id=? OR is_public=1
+        ORDER BY id ASC
+      `).all(req.user.id);
+      console.log(`[Skill] TAG routing: found ${allAccessibleSkills.length} accessible skills for user ${req.user.id}`);
+      const msgLower = combinedUserText.toLowerCase();
+      for (const sk of allAccessibleSkills) {
+        if (sessionSkillIds.has(String(sk.id))) continue;
+        const rawTags = sk.tags;
+        // Split each stored tag by comma to handle comma-in-string storage issues
+        const tags = (() => {
+          try {
+            const t = JSON.parse(rawTags || '[]');
+            if (!Array.isArray(t)) return [];
+            return t.flatMap(tag => String(tag).split(',').map(s => s.trim()).filter(Boolean));
+          } catch { return []; }
+        })();
+        console.log(`[Skill] Checking skill "${sk.name}" id=${sk.id} public=${sk.is_public} mode=${sk.endpoint_mode} tags=${JSON.stringify(tags)}`);
+        if (tags.length === 0) continue;
+        // Bidirectional match: message contains tag, OR any 2+ char segment of tag is in message
+        const tagMatch = tags.some(tag => {
+          const t = String(tag).toLowerCase();
+          if (msgLower.includes(t)) return true;
+          // Check 2-4 char substrings of tag against message (e.g. "聲音" in "文字轉聲音" matches "轉成聲音檔")
+          for (let len = 2; len <= Math.min(t.length, 4); len++) {
+            for (let i = 0; i <= t.length - len; i++) {
+              if (msgLower.includes(t.slice(i, i + len))) return true;
+            }
+          }
+          return false;
+        });
+        if (tagMatch) {
+          tagRoutedSkills.push(sk);
+          console.log(`[Skill] TAG-auto-routed skill "${sk.name}" tags=[${tags.join(',')}]`);
+        }
+      }
+    } catch (e) {
+      console.warn('[Skill] TAG auto-routing for skills failed:', e.message);
+    }
+    const tagRoutedSkillIds = new Set(tagRoutedSkills.map(s => String(s.id)));
+    const allSkillsToProcess = [...sessionSkills, ...tagRoutedSkills];
+    // TAG-routed external/answer skills run AFTER Gemini (post_answer) so the AI search can still happen
+    const postAnswerSkills = [];
+    // Pre-inject system hint for TAG-routed post_answer skills so AI doesn't try to handle it itself
+    const tagRoutedPostHints = tagRoutedSkills
+      .filter(sk => sk.endpoint_mode === 'post_answer' || (sk.endpoint_mode === 'answer'))
+      .map(sk => `注意：系統已偵測到使用者需要「${sk.name}」技能，該技能將在 AI 回答後自動處理，請勿在回答中提及無法執行此功能，也不要自行嘗試替代方案（如生成 txt 檔案）。`);
+
     // Collect system prompts from builtin skills
     const skillSystemPrompts = [];
     // Track which skills need external-inject calls
@@ -1170,7 +1344,30 @@ router.post('/sessions/:id/messages', upload.array('files', 10), async (req, res
       } catch (_) { return false; }
     }
 
-    for (const sk of sessionSkills) {
+    // ── Rate limiting for skills ─────────────────────────────────────────
+    for (const sk of allSkillsToProcess) {
+      if (sk.rate_limit_per_user || sk.rate_limit_global) {
+        const window = sk.rate_limit_window || 'hour';
+        const intervalExpr = window === 'minute' ? "INTERVAL '1' MINUTE" : window === 'day' ? "INTERVAL '1' DAY" : "INTERVAL '1' HOUR";
+
+        if (sk.rate_limit_per_user) {
+          const row = await db.prepare(`SELECT COUNT(*) AS cnt FROM skill_call_logs WHERE skill_id=? AND user_id=? AND called_at > SYSTIMESTAMP - ${intervalExpr}`).get(sk.id, req.user.id);
+          if ((row?.cnt || 0) >= sk.rate_limit_per_user) {
+            sendEvent({ type: 'error', message: `技能「${sk.name}」呼叫已達上限（每${window === 'minute' ? '分鐘' : window === 'day' ? '天' : '小時'} ${sk.rate_limit_per_user} 次）` });
+            sendEvent({ type: 'done' }); res.end(); return;
+          }
+        }
+        if (sk.rate_limit_global) {
+          const row = await db.prepare(`SELECT COUNT(*) AS cnt FROM skill_call_logs WHERE skill_id=? AND called_at > SYSTIMESTAMP - ${intervalExpr}`).get(sk.id);
+          if ((row?.cnt || 0) >= sk.rate_limit_global) {
+            sendEvent({ type: 'error', message: `技能「${sk.name}」全域呼叫已達上限` });
+            sendEvent({ type: 'done' }); res.end(); return;
+          }
+        }
+      }
+    }
+
+    for (const sk of allSkillsToProcess) {
       console.log(`[Skill] id=${sk.id} name="${sk.name}" type=${sk.type} mode=${sk.endpoint_mode} url=${sk.endpoint_url}`);
       if (sk.type === 'builtin' && sk.system_prompt) {
         // Resolve {{date}}, {{scrape:url}}, {{fetch:url}} vars first
@@ -1190,23 +1387,101 @@ router.post('/sessions/:id/messages', upload.array('files', 10), async (req, res
           }
         }
         skillSystemPrompts.push(`# Skill: ${sk.name}\n${resolvedSystemPrompt}`);
-      } else if ((sk.type === 'external' || sk.type === 'code') && sk.endpoint_url) {
+        // Output schema
+        if (sk.output_schema) {
+          try {
+            const oSchema = JSON.parse(sk.output_schema);
+            skillSystemPrompts.push(`# 輸出格式要求 (Skill: ${sk.name})\n請嚴格按照以下 JSON Schema 格式回答：\n\`\`\`json\n${JSON.stringify(oSchema, null, 2)}\n\`\`\``);
+          } catch (_) {}
+        }
+      } else if (sk.type === 'external' || sk.type === 'code') {
+        // For code runners, resolve endpoint URL from code_port if not set
+        if (sk.type === 'code' && !sk.endpoint_url && sk.code_port) {
+          sk = { ...sk, endpoint_url: `http://localhost:${sk.code_port}` };
+        }
+        if (!sk.endpoint_url) {
+          console.warn(`[Skill] "${sk.name}" skipped: no endpoint_url (code_status=${sk.code_status}, code_port=${sk.code_port})`);
+          continue;
+        }
         // For code runners, do a quick health check first
         if (sk.type === 'code') {
           const healthy = await checkCodeSkillHealth(sk.endpoint_url);
           if (!healthy) {
             console.warn(`[Skill] "${sk.name}" health check failed (url=${sk.endpoint_url}), skipping`);
-            sendEvent({ type: 'status', message: `⚠️ Skill "${sk.name}" 離線，已跳過` });
+            sendEvent({ type: 'status', message: `⚠️ Skill "${sk.name}" 離線，請先在技能設定中啟動 Code Runner` });
             continue;
           }
         }
         if (sk.endpoint_mode === 'answer') {
-          externalAnswerSkill = sk;
+          // TAG-routed skills run AFTER Gemini so the AI can still process other intents first
+          if (tagRoutedSkillIds.has(String(sk.id))) {
+            postAnswerSkills.push(sk);
+          } else {
+            externalAnswerSkill = sk;
+          }
+        } else if (sk.endpoint_mode === 'post_answer') {
+          postAnswerSkills.push(sk);
+          // Allow post_answer code skills to ALSO inject a system_prompt into Gemini
+          // (e.g. TTS: tell Gemini to ask user about voice preferences)
+          if (sk.system_prompt) {
+            skillSystemPrompts.push(`# Skill: ${sk.name}\n${sk.system_prompt}`);
+          }
         } else {
           externalInjectSkills.push(sk);
         }
+      } else if (sk.type === 'workflow' && sk.workflow_json) {
+        // Workflow skills are executed inline — they process the user's message through the workflow
+        sendEvent({ type: 'status', message: `執行工作流：${sk.name}` });
+        try {
+          const { WorkflowEngine } = require('../services/workflowEngine');
+          const workflow = JSON.parse(sk.workflow_json);
+          // Resolve prompt_variables from session_skills
+          const ssRow = await db.prepare('SELECT variables_json FROM session_skills WHERE session_id=? AND skill_id=?').get(sessionId, sk.id);
+          const vars = (() => { try { return JSON.parse(ssRow?.variables_json || '{}'); } catch { return {}; } })();
+
+          const engine = new WorkflowEngine(db, { userId: req.user.id, sessionId });
+          const { output, log } = await engine.execute(workflow, combinedUserText, vars);
+
+          if (output) {
+            skillSystemPrompts.push(`# Workflow Result: ${sk.name}\n${output}`);
+          }
+          console.log(`[Skill] Workflow "${sk.name}" executed: ${log.length} nodes, output=${output?.length || 0} chars`);
+
+          // Log skill call
+          try {
+            await db.prepare(`INSERT INTO skill_call_logs (skill_id, user_id, session_id, query_preview, response_preview, status, duration_ms) VALUES (?,?,?,?,?,?,?)`)
+              .run(sk.id, req.user.id, sessionId, combinedUserText.slice(0, 200), (output || '').slice(0, 200), 'ok', log.reduce((s, n) => s + (n.duration || 0), 0));
+          } catch (_) {}
+        } catch (e) {
+          console.error(`[Skill] Workflow "${sk.name}" error:`, e.message);
+          skillSystemPrompts.push(`# Workflow Error: ${sk.name}\n工作流執行失敗: ${e.message}`);
+        }
       }
     }
+
+    // ── Register code skills with tool_schema as Gemini function declarations ──
+    // post_answer / answer skills run AFTER Gemini — do NOT register them as Gemini tools
+    const codeSkillToolMap = {};
+    for (const sk of allSkillsToProcess) {
+      if ((sk.type === 'code' || sk.type === 'external') && sk.tool_schema && sk.code_status === 'running' && sk.endpoint_url
+          && sk.endpoint_mode !== 'post_answer' && sk.endpoint_mode !== 'answer') {
+        try {
+          const schema = JSON.parse(sk.tool_schema);
+          const toolName = `skill_tool_${sk.id}`;
+          codeSkillToolMap[toolName] = sk;
+          // Will be added to allDeclarations later
+          console.log(`[Skill] Registered code skill "${sk.name}" as Gemini tool: ${toolName}`);
+        } catch (e) {
+          console.warn(`[Skill] Failed to parse tool_schema for "${sk.name}":`, e.message);
+        }
+      }
+    }
+
+    // Build recent conversation context to pass to skills (last 6 messages, newest last)
+    const recentMessages = historyMessages.slice(-6).map(m => ({
+      role: m.role,
+      content: (m.content || '').slice(0, 1000),
+    }));
 
     // External inject: call endpoints and collect additional system prompts
     for (const sk of externalInjectSkills) {
@@ -1221,7 +1496,7 @@ router.post('/sessions/:id/messages', upload.array('files', 10), async (req, res
               'X-Source': 'foxlink-gpt',
               ...(sk.endpoint_secret ? { Authorization: `Bearer ${sk.endpoint_secret}` } : {}),
             },
-            body: JSON.stringify({ user_message: combinedUserText, session_id: sessionId, user_id: req.user.id }),
+            body: JSON.stringify({ user_message: combinedUserText, session_id: sessionId, user_id: req.user.id, recent_messages: recentMessages }),
           }),
           new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 5000)),
         ]);
@@ -1259,7 +1534,7 @@ router.post('/sessions/:id/messages', upload.array('files', 10), async (req, res
               'X-Source': 'foxlink-gpt',
               ...(sk.endpoint_secret ? { Authorization: `Bearer ${sk.endpoint_secret}` } : {}),
             },
-            body: JSON.stringify({ user_message: combinedUserText, session_id: sessionId, user_id: req.user.id }),
+            body: JSON.stringify({ user_message: combinedUserText, session_id: sessionId, user_id: req.user.id, recent_messages: recentMessages }),
           }),
           new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 30000)),
         ]);
@@ -1343,7 +1618,7 @@ router.post('/sessions/:id/messages', upload.array('files', 10), async (req, res
     }
 
     // Determine model (skill's model_key takes priority if set)
-    const skillModelKey = sessionSkills.find(sk => sk.model_key)?.model_key;
+    const skillModelKey = allSkillsToProcess.find(sk => sk.model_key)?.model_key;
 
     // Stream AI response
     let aiText = '';
@@ -1351,9 +1626,10 @@ router.post('/sessions/:id/messages', upload.array('files', 10), async (req, res
     const { apiModel, imageOutput, providerType, modelRow } = await resolveApiModel(db, chosenModel);
     const history = sanitizeHistory(buildHistory(historyMessages, imageOutput));
 
-    // Inject skill system prompts into Gemini instruction
-    const skillExtraInstruction = skillSystemPrompts.length > 0
-      ? '\n\n---\n' + skillSystemPrompts.join('\n\n')
+    // Inject skill system prompts into Gemini instruction (+ TAG-routed post_answer hints)
+    const allSkillPrompts = [...skillSystemPrompts, ...tagRoutedPostHints];
+    const skillExtraInstruction = allSkillPrompts.length > 0
+      ? '\n\n---\n' + allSkillPrompts.join('\n\n')
       : '';
 
     // Inject user language preference into system instruction
@@ -1443,7 +1719,7 @@ router.post('/sessions/:id/messages', upload.array('files', 10), async (req, res
           const { functionDeclarations: allMcpDecls, serverMap: sm } = await mcpClient.getActiveToolDeclarations(db, null);
           serverMap = sm;
           // Apply Skill MCP disable rule (safety constraint)
-          const hasSkillDisable = sessionSkills.some(sk => sk.mcp_tool_mode === 'disable');
+          const hasSkillDisable = allSkillsToProcess.some(sk => sk.mcp_tool_mode === 'disable');
           if (!hasSkillDisable) {
             const selectedIds = userMcpIds.map(Number);
             const selected = allMcpDecls.filter(d => {
@@ -1536,17 +1812,135 @@ router.post('/sessions/:id/messages', upload.array('files', 10), async (req, res
         }
         // ── End Skill MCP filtering ──────────────────────────────────────────
 
-        // Intent-filter MCP tools, DIFY KBs, and self-built KBs before passing to LLM
+        // ── Apply Skill KB binding (self_kb_ids + dify_kb_ids + kb_mode) ──────
+        for (const sk of allSkillsToProcess) {
+          const skSelfKbIds = (() => { try { return JSON.parse(sk.self_kb_ids || '[]'); } catch { return []; } })();
+          const skDifyKbIds = (() => { try { return JSON.parse(sk.dify_kb_ids || '[]'); } catch { return []; } })();
+          const kbMode = sk.kb_mode || 'append';
+
+          if (kbMode === 'disable') {
+            // Remove all KB declarations (but keep MCP)
+            difyDecls.length = 0;
+            selfKbDecls.length = 0;
+            console.log(`[Skill] KB mode=disable for "${sk.name}" → all KBs removed`);
+          } else if (kbMode === 'exclusive') {
+            // Only keep specified KBs
+            const allowedDifyIds = new Set(skDifyKbIds.map(Number));
+            const allowedSelfIds = new Set(skSelfKbIds.map(String));
+            difyDecls.splice(0, difyDecls.length, ...difyDecls.filter(d => { const kb = km[d.name]; return kb && allowedDifyIds.has(Number(kb.id)); }));
+            selfKbDecls.splice(0, selfKbDecls.length, ...selfKbDecls.filter(d => { const kb = skm[d.name]; return kb && allowedSelfIds.has(String(kb.id)); }));
+            console.log(`[Skill] KB mode=exclusive for "${sk.name}" → dify=${difyDecls.length} selfkb=${selfKbDecls.length}`);
+          } else if (kbMode === 'append') {
+            // Force-add specified KBs even if not in user's access list
+            for (const kbId of skSelfKbIds) {
+              const alreadyHas = selfKbDecls.some(d => skm[d.name]?.id === kbId);
+              if (!alreadyHas) {
+                const kb = await db.prepare('SELECT * FROM knowledge_bases WHERE id=?').get(kbId);
+                if (kb) {
+                  const declName = `selfkb_${kb.id}`;
+                  selfKbDecls.push({ name: declName, description: `自建知識庫查詢「${kb.name}」。適用範疇：${(kb.description || '').slice(0, 200)}`, parameters: { type: 'object', properties: { query: { type: 'string', description: '查詢關鍵字' } }, required: ['query'] } });
+                  skm[declName] = kb;
+                  console.log(`[Skill] KB append: force-added selfkb "${kb.name}"`);
+                }
+              }
+            }
+            for (const kbId of skDifyKbIds) {
+              const alreadyHas = difyDecls.some(d => km[d.name]?.id === Number(kbId));
+              if (!alreadyHas) {
+                const kb = await db.prepare('SELECT * FROM dify_knowledge_bases WHERE id=? AND is_active=1').get(kbId);
+                if (kb) {
+                  const declName = `dify_kb_${kb.id}`;
+                  difyDecls.push({ name: declName, description: `知識庫查詢工具「${kb.name}」。適用於：${(kb.description || '').slice(0, 200)}`, parameters: { type: 'object', properties: { query: { type: 'string', description: '查詢內容' } }, required: ['query'] } });
+                  km[declName] = kb;
+                  console.log(`[Skill] KB append: force-added dify "${kb.name}"`);
+                }
+              }
+            }
+          }
+        }
+
+        // ── post_answer skills with no KB bindings → suppress KB TAG routing ──
+        // A post_answer skill (e.g. TTS) processes the AI response and doesn't need KBs.
+        // If such a skill is active and no inject/answer skill explicitly requested KBs,
+        // clear KB pools so TAG routing can't accidentally pull in unrelated KBs.
+        if (postAnswerSkills.length > 0 && externalInjectSkills.length === 0) {
+          const postAnswerHasKb = postAnswerSkills.some(sk => {
+            const dIds = (() => { try { const v = JSON.parse(sk.dify_kb_ids || '[]'); return Array.isArray(v) ? v : []; } catch { return []; } })();
+            const sIds = (() => { try { const v = JSON.parse(sk.self_kb_ids || '[]'); return Array.isArray(v) ? v : []; } catch { return []; } })();
+            return dIds.length > 0 || sIds.length > 0;
+          });
+          if (!postAnswerHasKb) {
+            difyDecls.length = 0;
+            selfKbDecls.length = 0;
+            console.log('[Skill] post_answer skill(s) with no KB bindings → suppressed KB TAG routing');
+          }
+        }
+
+        // ── TAG-based auto-routing ───────────────────────────────────────────
         const recentCtx = historyMessages.slice(-4)
           .map(m => `${m.role === 'user' ? '使用者' : 'AI'}: ${m.content.slice(0, 300)}`).join('\n');
-        const intentCtx = { db, userId: req.user.id };
-        const [mcpDecls, filteredDifyDecls, filteredSelfKbDecls] = await Promise.all([
-          filterMcpDeclsByIntent(combinedUserText, filteredAllMcpDecls, recentCtx, intentCtx),
-          filterDifyDeclsByIntent(combinedUserText, difyDecls, recentCtx, intentCtx),
-          filterDifyDeclsByIntent(combinedUserText, selfKbDecls, recentCtx, intentCtx),
-        ]);
-        allDeclarations = [...mcpDecls, ...filteredDifyDecls, ...filteredSelfKbDecls];
+
+        try {
+          const { autoRouteByTags } = require('../services/tagRouter');
+          // Build unified tool list with tags
+          const allToolsWithTags = [
+            ...filteredAllMcpDecls.map(d => {
+              const entry = sm[d.name];
+              const tags = (() => { try { return JSON.parse(entry?.server?.tags || '[]'); } catch { return []; } })();
+              return { ...d, tags, toolType: 'mcp' };
+            }),
+            ...difyDecls.map(d => {
+              const kb = km[d.name];
+              const tags = (() => { try { return JSON.parse(kb?.tags || '[]'); } catch { return []; } })();
+              return { ...d, tags, toolType: 'dify' };
+            }),
+            ...selfKbDecls.map(d => {
+              const kb = skm[d.name];
+              const tags = (() => { try { return JSON.parse(kb?.tags || '[]'); } catch { return []; } })();
+              return { ...d, tags, toolType: 'selfkb' };
+            }),
+          ];
+
+          const hasAnyTags = allToolsWithTags.some(t => t.tags.length > 0);
+          if (hasAnyTags) {
+            const { selected, intentTags, method } = await autoRouteByTags(combinedUserText, recentCtx, allToolsWithTags, db);
+            allDeclarations = selected.map(({ tags, toolType, ...decl }) => decl);
+            console.log(`[Chat] TAG auto-route: method=${method} intentTags=[${intentTags.join(',')}] selected=${allDeclarations.length}/${allToolsWithTags.length}`);
+          } else {
+            // No tags defined anywhere → fallback to existing intent filtering
+            const intentCtx = { db, userId: req.user.id };
+            const [mcpDecls, filteredDifyDecls, filteredSelfKbDecls] = await Promise.all([
+              filterMcpDeclsByIntent(combinedUserText, filteredAllMcpDecls, recentCtx, intentCtx),
+              filterDifyDeclsByIntent(combinedUserText, difyDecls, recentCtx, intentCtx),
+              filterDifyDeclsByIntent(combinedUserText, selfKbDecls, recentCtx, intentCtx),
+            ]);
+            allDeclarations = [...mcpDecls, ...filteredDifyDecls, ...filteredSelfKbDecls];
+            console.log(`[Chat] Legacy intent-filter: ${allDeclarations.length} tools`);
+          }
+        } catch (tagErr) {
+          console.warn('[Chat] TAG routing failed, falling back to intent filter:', tagErr.message);
+          const intentCtx = { db, userId: req.user.id };
+          const [mcpDecls, filteredDifyDecls, filteredSelfKbDecls] = await Promise.all([
+            filterMcpDeclsByIntent(combinedUserText, filteredAllMcpDecls, recentCtx, intentCtx),
+            filterDifyDeclsByIntent(combinedUserText, difyDecls, recentCtx, intentCtx),
+            filterDifyDeclsByIntent(combinedUserText, selfKbDecls, recentCtx, intentCtx),
+          ]);
+          allDeclarations = [...mcpDecls, ...filteredDifyDecls, ...filteredSelfKbDecls];
+        }
       }
+
+      // ── Add code skill tool declarations ───────────────────────────────
+      for (const [toolName, sk] of Object.entries(codeSkillToolMap)) {
+        try {
+          const schema = JSON.parse(sk.tool_schema);
+          allDeclarations.push({
+            name: toolName,
+            description: schema.description || sk.description || sk.name,
+            parameters: schema.parameters || { type: 'object', properties: {} },
+          });
+        } catch (_) {}
+      }
+
       // ── End tool loading ─────────────────────────────────────────────────
 
       if (allDeclarations.length > 0) {
@@ -1555,8 +1949,70 @@ router.post('/sessions/:id/messages', upload.array('files', 10), async (req, res
 
         // ── Fast path: pure SelfKB only (no MCP, no DIFY) → pre-fetch + stream ──
         const pureSelfKb = mcpCount === 0 && allDeclarations.every(d => selfKbMap[d.name]);
+        // ── Fast path: pure DIFY only (no MCP, no selfKB) → pre-fetch + stream ──
+        const pureDify = mcpCount === 0 && allDeclarations.every(d => kbMap[d.name]);
 
-        if (pureSelfKb) {
+        if (pureDify) {
+          sendEvent({ type: 'status', message: `查詢 ${allDeclarations.length} 個 DIFY 知識庫...` });
+          const difyContextParts = await Promise.all(
+            allDeclarations.map(async (decl) => {
+              const kb = kbMap[decl.name];
+              if (!kb) return null;
+              const t1 = Date.now();
+              try {
+                const convId = getDifyConvId(sessionId, kb.id);
+                const difyResp = await fetch(`${kb.api_server}/chat-messages`, {
+                  method: 'POST',
+                  headers: { Authorization: `Bearer ${kb.api_key}`, 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ inputs: {}, query: combinedUserText, response_mode: 'blocking', conversation_id: convId || '', user: String(req.user.id) }),
+                  signal: AbortSignal.timeout(120000),
+                });
+                if (!difyResp.ok) return null;
+                const ddata = await difyResp.json();
+                if (ddata.conversation_id) setDifyConvId(sessionId, kb.id, ddata.conversation_id);
+                const answer = ddata.answer || '';
+                console.log(`[DIFY] Fast-path KB "${kb.name}" ok in ${Date.now() - t1}ms`);
+                if (!answer.trim()) return null;
+                return `## 知識庫：${kb.name}\n\n${answer}`;
+              } catch (e) {
+                console.warn(`[DIFY] Fast-path KB "${kb.name}" failed:`, e.message);
+                return null;
+              }
+            })
+          );
+          const difyContext = difyContextParts.filter(Boolean).join('\n\n---\n\n');
+          // Count how many KBs actually returned data vs. how many were queried
+          const difyFailedCount = allDeclarations.length - difyContextParts.filter(Boolean).length;
+          const difyInstruction = difyContext
+            ? `以下是從知識庫檢索到的相關資料，請優先根據這些資料回答問題：\n\n${difyContext}`
+            : difyFailedCount > 0
+              ? `注意：系統嘗試查詢 ${difyFailedCount} 個知識庫，但未取得有效資料（可能超時或無相關內容）。請根據現有知識及網路搜尋回答問題，並告知使用者知識庫查詢未返回結果。`
+              : '';
+          sendEvent({ type: 'status', message: 'AI 整理回覆中...' });
+          const finalInstruction = [skillExtraInstruction, difyInstruction, langInstruction].filter(Boolean).join('\n\n---\n\n');
+          let firstChunkReceived = false;
+          const keepAliveInterval = setInterval(() => {
+            if (!firstChunkReceived && !clientDisconnected) sendEvent({ type: 'status', message: 'AI 整理回覆中...' });
+            else clearInterval(keepAliveInterval);
+          }, 15000);
+          try {
+            const _onChunk = (chunk) => {
+              if (clientDisconnected) throw new Error('CLIENT_DISCONNECTED');
+              firstChunkReceived = true; aiText += chunk;
+              sendEvent({ type: 'chunk', content: chunk });
+            };
+            if (providerType === 'azure_openai' && modelRow) {
+              ({ text, inputTokens, outputTokens } = await streamChatAoai(modelRow, history, userParts, _onChunk, finalInstruction));
+            } else {
+              // Do NOT disable Google search even when DIFY returned data — let Gemini supplement with web search if needed
+              ({ text, inputTokens, outputTokens } = await streamChat(apiModel, history, userParts, _onChunk, finalInstruction, disableSearchForSkill));
+            }
+          } finally {
+            clearInterval(keepAliveInterval);
+          }
+          console.log(`[Chat] DIFY fast-path done in ${Date.now() - t0}ms, kbs=${allDeclarations.length} hasCtx=${!!difyContext} in=${inputTokens} out=${outputTokens} tokens`);
+
+        } else if (pureSelfKb) {
           sendEvent({ type: 'status', message: `查詢 ${kbTotal} 個知識庫...` });
 
           // Run all KB searches in parallel
@@ -1610,6 +2066,28 @@ router.post('/sessions/:id/messages', upload.array('files', 10), async (req, res
           const calledSelfKbs = new Set();
 
           const toolHandler = async (toolName, args) => {
+            // ── Code skill tool handling ──────────────────────────────────
+            if (codeSkillToolMap[toolName]) {
+              const sk = codeSkillToolMap[toolName];
+              sendEvent({ type: 'status', message: `執行技能程式：${sk.name}` });
+              const _t0 = Date.now();
+              try {
+                const resp = await fetch(sk.endpoint_url, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json', ...(sk.endpoint_secret ? { Authorization: `Bearer ${sk.endpoint_secret}` } : {}) },
+                  body: JSON.stringify({ ...args, user_message: combinedUserText, user_id: req.user.id, session_id: sessionId, recent_messages: recentMessages }),
+                  signal: AbortSignal.timeout(120000),
+                });
+                if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+                const data = await resp.json();
+                const result = data.content || data.result || JSON.stringify(data);
+                try { await db.prepare(`INSERT INTO skill_call_logs (skill_id, user_id, session_id, query_preview, response_preview, status, duration_ms) VALUES (?,?,?,?,?,?,?)`).run(sk.id, req.user.id, sessionId, JSON.stringify(args).slice(0, 200), String(result).slice(0, 200), 'ok', Date.now() - _t0); } catch (_) {}
+                return result;
+              } catch (e) {
+                try { await db.prepare(`INSERT INTO skill_call_logs (skill_id, user_id, session_id, query_preview, status, error_msg, duration_ms) VALUES (?,?,?,?,?,?,?)`).run(sk.id, req.user.id, sessionId, JSON.stringify(args).slice(0, 200), 'error', e.message, Date.now() - _t0); } catch (_) {}
+                return `[技能程式執行失敗: ${e.message}]`;
+              }
+            }
             if (selfKbMap[toolName]) {
               if (calledSelfKbs.has(toolName)) {
                 console.warn(`[SelfKB] Duplicate call prevented for ${toolName}`);
@@ -1711,6 +2189,71 @@ router.post('/sessions/:id/messages', upload.array('files', 10), async (req, res
         .replace(/```generate_[a-z]+:[^\n]+\n[\s\S]*?```/g, '')
         .replace(/\n{3,}/g, '\n\n')
         .trim();
+    }
+
+    // ── Post-answer skills (run after Gemini, receive AI response as input) ──
+    for (const sk of postAnswerSkills) {
+      try {
+        sendEvent({ type: 'status', message: `Skill: ${sk.name} 後處理中...` });
+        const resp = await Promise.race([
+          fetch(sk.endpoint_url, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Source': 'foxlink-gpt',
+              ...(sk.endpoint_secret ? { Authorization: `Bearer ${sk.endpoint_secret}` } : {}),
+            },
+            body: JSON.stringify({
+              user_message: combinedUserText,
+              ai_response: displayText || text,
+              session_id: sessionId,
+              user_id: req.user.id,
+              recent_messages: recentMessages,
+            }),
+          }),
+          new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 120000)),
+        ]);
+        if (resp.ok) {
+          const data = await resp.json();
+          console.log(`[Skill] post_answer "${sk.name}" keys=${Object.keys(data).join(',')}`);
+          // ── Pending TTS: skill needs voice preference before synthesizing ──
+          if (data.pending === true) {
+            pendingTtsMap.set(sessionId, { aiResponse: displayText || text, sk, timestamp: Date.now() });
+            console.log(`[TTS pending] Stored pending TTS for session ${sessionId}`);
+            // Append the prompt asking user for voice preference to the AI response
+            if (data.system_prompt) {
+              displayText = (displayText || text) + data.system_prompt;
+            }
+            continue;
+          }
+          if (data.audio_url) {
+            let audioUrl = data.audio_url;
+            try {
+              const audioPath = path.join(UPLOAD_DIR, 'generated', path.basename(data.audio_url));
+              if (fs.existsSync(audioPath)) {
+                const buf = fs.readFileSync(audioPath);
+                audioUrl = `data:audio/mpeg;base64,${buf.toString('base64')}`;
+              }
+            } catch (_) {}
+            sendEvent({ type: 'audio', audio_url: audioUrl, filename: path.basename(data.audio_url || 'output.mp3') });
+          }
+          if (data.files && Array.isArray(data.files)) {
+            sendEvent({ type: 'generated_files', files: data.files });
+          }
+          if (data.content && !data.audio_url) {
+            // Append to display text if skill returned additional content
+            displayText = (displayText || text) + '\n\n' + data.content;
+          }
+        } else {
+          console.warn(`[Skill] post_answer HTTP ${resp.status} for "${sk.name}"`);
+        }
+        try {
+          await db.prepare(`INSERT INTO skill_call_logs (skill_id, user_id, session_id, query_preview, status, duration_ms) VALUES (?,?,?,?,?,?)`)
+            .run(sk.id, req.user.id, sessionId, combinedUserText.slice(0, 200), 'ok', 0);
+        } catch (_) {}
+      } catch (e) {
+        console.warn(`[Skill] post_answer failed for "${sk.name}":`, e.message);
+      }
     }
 
     // Save AI message

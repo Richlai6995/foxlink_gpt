@@ -241,10 +241,29 @@ function StreamingBubble({ content, status }: { content: string; status?: string
 export default function ChatWindow({ messages, streaming, streamingContent, streamingStatus, onCopy, onRegenerate }: Props) {
   const { t } = useTranslation()
   const bottomRef = useRef<HTMLDivElement>(null)
+  const lastUserMsgRef = useRef<HTMLDivElement>(null)
+  const prevMsgCountRef = useRef(0)
 
+  // Only scroll when a NEW user message is added — scroll to show the question,
+  // then stay still while the answer generates below (Gemini-style behaviour).
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages, streamingContent])
+    const newCount = messages.length
+    const prevCount = prevMsgCountRef.current
+    prevMsgCountRef.current = newCount
+
+    if (newCount > prevCount) {
+      const lastMsg = messages[newCount - 1]
+      if (lastMsg?.role === 'user') {
+        // Scroll the user question into view; answer will appear below without forcing scroll
+        requestAnimationFrame(() => {
+          lastUserMsgRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+        })
+      } else {
+        // An assistant message was saved (streaming finished) — don't auto-scroll
+      }
+    }
+  }, [messages])
+  // Intentionally no effect on streamingContent — don't scroll while streaming
 
   if (messages.length === 0 && !streaming) {
     return (
@@ -275,17 +294,20 @@ export default function ChatWindow({ messages, streaming, streamingContent, stre
     )
   }
 
+  const lastUserIdx = messages.map((m) => m.role).lastIndexOf('user')
+
   return (
     <div className="flex-1 overflow-y-auto bg-slate-50 px-4 py-6">
       <div className="max-w-3xl mx-auto space-y-6">
         {messages.map((msg, i) => (
-          <MessageBubble
-            key={msg.id}
-            msg={msg}
-            onCopy={onCopy}
-            onRegenerate={onRegenerate}
-            isLast={i === messages.length - 1 && msg.role === 'assistant'}
-          />
+          <div key={msg.id} ref={i === lastUserIdx ? lastUserMsgRef : undefined}>
+            <MessageBubble
+              msg={msg}
+              onCopy={onCopy}
+              onRegenerate={onRegenerate}
+              isLast={i === messages.length - 1 && msg.role === 'assistant'}
+            />
+          </div>
         ))}
         {streaming && <StreamingBubble content={streamingContent} status={streamingStatus} />}
         <div ref={bottomRef} />
