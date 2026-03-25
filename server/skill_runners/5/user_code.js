@@ -167,9 +167,7 @@ module.exports = async function handler(body) {
       '| 聲音 | ' + data.voice_used + '（' + genderLabel + '）|\n' +
       '| 品質 | ' + quality + ' |\n' +
       '| 語速 | ' + speed + 'x |\n' +
-      '| 音調 | ' + (pitch > 0 ? '+' : '') + pitch + ' |\n\n' +
-      '<audio controls src="' + audioSrc + '"></audio>\n\n' +
-      '[⬇ 下載 MP3](' + audioSrc + ')',
+      '| 音調 | ' + (pitch > 0 ? '+' : '') + pitch + ' |',
     audio_url:      data.audio_url,
     voice_used:     data.voice_used,
     language:       lang,
