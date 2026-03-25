@@ -379,11 +379,27 @@ router.get('/nodes/history', async (req, res) => {
   try {
     const db = require('../database-oracle').db;
     const hours = parseInt(req.query.hours) || 24;
-    const rows = await db.prepare(
-      `SELECT * FROM node_metrics
-       WHERE collected_at > SYSTIMESTAMP - INTERVAL '${hours}' HOUR
-       ORDER BY collected_at ASC`
-    ).all();
+    let rows;
+    if (hours <= 24) {
+      rows = await db.prepare(
+        `SELECT * FROM node_metrics
+         WHERE collected_at > SYSTIMESTAMP - INTERVAL '${hours}' HOUR
+         ORDER BY collected_at ASC`
+      ).all();
+    } else {
+      const bucketHours = hours <= 168 ? 1 : 4;
+      rows = await db.prepare(
+        `SELECT node_name,
+                TRUNC(collected_at, 'HH') - NUMTODSINTERVAL(MOD(EXTRACT(HOUR FROM collected_at), ${bucketHours}), 'HOUR') AS collected_at,
+                AVG(cpu_req_pct) AS cpu_req_pct, AVG(mem_req_pct) AS mem_req_pct,
+                AVG(pod_count) AS pod_count
+         FROM node_metrics
+         WHERE collected_at > SYSTIMESTAMP - INTERVAL '${hours}' HOUR
+         GROUP BY node_name,
+                  TRUNC(collected_at, 'HH') - NUMTODSINTERVAL(MOD(EXTRACT(HOUR FROM collected_at), ${bucketHours}), 'HOUR')
+         ORDER BY 2 ASC, 1 ASC`
+      ).all();
+    }
     res.json(rows);
   } catch {
     res.json([]);
@@ -517,11 +533,30 @@ router.get('/host/history', async (req, res) => {
   try {
     const db = require('../database-oracle').db;
     const hours = parseInt(req.query.hours) || 24;
-    const rows = await db.prepare(
-      `SELECT * FROM host_metrics
-       WHERE collected_at > SYSTIMESTAMP - INTERVAL '${hours}' HOUR
-       ORDER BY collected_at ASC`
-    ).all();
+    let rows;
+    if (hours <= 24) {
+      // 原始 5 分鐘粒度
+      rows = await db.prepare(
+        `SELECT * FROM host_metrics
+         WHERE collected_at > SYSTIMESTAMP - INTERVAL '${hours}' HOUR
+         ORDER BY collected_at ASC`
+      ).all();
+    } else {
+      // 7d → 每小時平均；30d → 每 4 小時平均
+      const bucketHours = hours <= 168 ? 1 : 4;
+      rows = await db.prepare(
+        `SELECT TRUNC(collected_at, 'HH') - NUMTODSINTERVAL(MOD(EXTRACT(HOUR FROM collected_at), ${bucketHours}), 'HOUR') AS collected_at,
+                AVG(load_1m) AS load_1m, AVG(load_5m) AS load_5m, AVG(load_15m) AS load_15m,
+                AVG(mem_total_mb) AS mem_total_mb, AVG(mem_used_mb) AS mem_used_mb,
+                AVG(mem_cached_mb) AS mem_cached_mb, AVG(swap_used_mb) AS swap_used_mb,
+                AVG(net_rx_mb) AS net_rx_mb, AVG(net_tx_mb) AS net_tx_mb,
+                AVG(disk_read_mb) AS disk_read_mb, AVG(disk_write_mb) AS disk_write_mb
+         FROM host_metrics
+         WHERE collected_at > SYSTIMESTAMP - INTERVAL '${hours}' HOUR
+         GROUP BY TRUNC(collected_at, 'HH') - NUMTODSINTERVAL(MOD(EXTRACT(HOUR FROM collected_at), ${bucketHours}), 'HOUR')
+         ORDER BY 1 ASC`
+      ).all();
+    }
     res.json(rows);
   } catch {
     res.json([]);
@@ -872,14 +907,29 @@ router.get('/disk/history', async (req, res) => {
     const db = require('../database-oracle').db;
     const days = parseInt(req.query.days) || 7;
     const mount = req.query.mount || null;
-    let sql = `SELECT * FROM disk_metrics WHERE collected_at > SYSTIMESTAMP - INTERVAL '${days}' DAY`;
-    const binds = [];
-    if (mount) {
-      sql += ` AND mount = ?`;
-      binds.push(mount);
+    let rows;
+    if (days <= 7) {
+      // 每小時原始資料
+      let sql = `SELECT * FROM disk_metrics WHERE collected_at > SYSTIMESTAMP - INTERVAL '${days}' DAY`;
+      const binds = [];
+      if (mount) { sql += ` AND mount = ?`; binds.push(mount); }
+      sql += ` ORDER BY collected_at ASC`;
+      rows = await db.prepare(sql).all(...binds);
+    } else {
+      // 30d → 每 6 小時平均
+      const mountFilter = mount ? `AND mount = ?` : '';
+      const binds = mount ? [mount] : [];
+      rows = await db.prepare(
+        `SELECT mount,
+                TRUNC(collected_at, 'HH') - NUMTODSINTERVAL(MOD(EXTRACT(HOUR FROM collected_at), 6), 'HOUR') AS collected_at,
+                AVG(use_pct) AS use_pct, AVG(inode_pct) AS inode_pct, MIN(is_mounted) AS is_mounted
+         FROM disk_metrics
+         WHERE collected_at > SYSTIMESTAMP - INTERVAL '${days}' DAY ${mountFilter}
+         GROUP BY mount,
+                  TRUNC(collected_at, 'HH') - NUMTODSINTERVAL(MOD(EXTRACT(HOUR FROM collected_at), 6), 'HOUR')
+         ORDER BY 2 ASC, 1 ASC`
+      ).all(...binds);
     }
-    sql += ` ORDER BY collected_at ASC`;
-    const rows = await db.prepare(sql).all(...binds);
     res.json(rows);
   } catch {
     res.json([]);
