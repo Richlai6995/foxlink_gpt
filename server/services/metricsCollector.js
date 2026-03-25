@@ -353,6 +353,8 @@ async function snapshotOnlineDept() {
 
     // Insert snapshot rows — 同批次共用同一個 snapshot_id，前端 group by 不會重複累加
     const snapId = Math.floor(Date.now() / 1000);
+    const totalAgg = Object.values(agg).reduce((s, v) => s + v, 0);
+    console.log(`[DeptSnapshot] sessions=${sessions.length} uniqueUsers=${seen.size} aggTotal=${totalAgg} snapId=${snapId}`);
     for (const [key, count] of Object.entries(agg)) {
       const { profit_center, org_section, org_group_name, dept_code } = JSON.parse(key);
       await db.prepare(
