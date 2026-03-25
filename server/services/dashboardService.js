@@ -160,7 +160,7 @@ async function getPoolBySourceId(sourceId, db) {
       const { getAdapter } = require('./dbAdapters');
       const adapter = getAdapter(dbType);
 
-      const { decryptPassword } = require('../routes/dbSources');
+      const { decryptPassword } = require('../utils/dbCrypto');
       const password = decryptPassword(src.password_enc || src.PASSWORD_ENC);
 
       const config = {

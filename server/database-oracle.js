@@ -1390,14 +1390,8 @@ async function migrateDefaultDbSource() {
       return;
     }
 
-    // 密碼加密（使用與 dbSources.js 相同的金鑰）
-    const crypto = require('crypto');
-    const secret = process.env.DASHBOARD_DB_SECRET || process.env.JWT_SECRET || 'foxlink-db-secret-key';
-    const key    = crypto.scryptSync(secret, 'foxlink-db-salt-v1', 32);
-    const iv     = crypto.randomBytes(16);
-    const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
-    const encrypted = Buffer.concat([cipher.update(pwd, 'utf8'), cipher.final()]);
-    const passwordEnc = `${iv.toString('hex')}:${cipher.getAuthTag().toString('hex')}:${encrypted.toString('hex')}`;
+    const { encryptPassword } = require('./utils/dbCrypto');
+    const passwordEnc = encryptPassword(pwd);
 
     await db.prepare(`
       INSERT INTO ai_db_sources
