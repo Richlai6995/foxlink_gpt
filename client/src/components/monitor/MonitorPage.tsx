@@ -33,7 +33,6 @@ export default function MonitorPage() {
   const [disks, setDisks] = useState<any[]>([])
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [onlineUsers, setOnlineUsers] = useState<any>({ count: 0, users: [] })
-  const [onlineHistory, setOnlineHistory] = useState<Record<string, unknown>[]>([])
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [containers, setContainers] = useState<any[]>([])
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -57,7 +56,6 @@ export default function MonitorPage() {
         api.get('/monitor/host/processes'),
         api.get('/monitor/disk'),
         api.get('/monitor/online-users'),
-        api.get('/monitor/online-users/history?hours=24'),
         api.get('/monitor/containers'),
         api.get('/monitor/images'),
       ])
@@ -73,9 +71,8 @@ export default function MonitorPage() {
       setProcesses((get(6) || []) as Record<string, unknown>[])
       setDisks((get(7) || []) as Record<string, unknown>[])
       setOnlineUsers(get(8) || { count: 0, users: [] })
-      setOnlineHistory((get(9) || []) as Record<string, unknown>[])
-      setContainers((get(10) || []) as Record<string, unknown>[])
-      setImages((get(11) || []) as Record<string, unknown>[])
+      setContainers((get(9) || []) as Record<string, unknown>[])
+      setImages((get(10) || []) as Record<string, unknown>[])
     } catch (e) {
       console.error('Monitor fetch error:', e)
     } finally {
@@ -145,7 +142,7 @@ export default function MonitorPage() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <HostMetricsPanel metrics={hostMetrics as never} processes={processes as never[]} loading={loading} />
         <DiskUsagePanel disks={disks} loading={loading} />
-        <OnlineUsersPanel current={onlineUsers} history={onlineHistory as never[]} loading={loading} />
+        <OnlineUsersPanel current={onlineUsers} loading={loading} />
       </div>
 
       {/* Row 3: Online Dept Chart */}

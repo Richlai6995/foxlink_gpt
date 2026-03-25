@@ -92,11 +92,13 @@ export default function OnlineDeptChart() {
             onChange={e => setHours(Number(e.target.value))}
             className="text-xs border rounded px-1.5 py-1"
           >
-            <option value={6}>6 小時</option>
-            <option value={12}>12 小時</option>
-            <option value={24}>24 小時</option>
-            <option value={72}>3 天</option>
-            <option value={168}>7 天</option>
+            <option value={6}>6h</option>
+            <option value={12}>12h</option>
+            <option value={24}>24h</option>
+            <option value={72}>3d</option>
+            <option value={168}>7d</option>
+            <option value={336}>14d</option>
+            <option value={720}>30d</option>
           </select>
         </div>
       </div>

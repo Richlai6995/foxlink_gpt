@@ -1,6 +1,7 @@
-import { useState, useMemo, useCallback } from 'react'
+import { useState, useEffect, useMemo, useCallback } from 'react'
 import { Users, X, Download, Maximize2 } from 'lucide-react'
 import ReactECharts from 'echarts-for-react'
+import api from '../../lib/api'
 
 interface OnlineUser {
   id: number
@@ -23,12 +24,19 @@ interface Snapshot {
 
 interface Props {
   current: { count: number; users: OnlineUser[] }
-  history: Snapshot[]
   loading: boolean
 }
 
-export default function OnlineUsersPanel({ current, history, loading }: Props) {
+export default function OnlineUsersPanel({ current, loading }: Props) {
   const [showModal, setShowModal] = useState(false)
+  const [hours, setHours] = useState(24)
+  const [history, setHistory] = useState<Snapshot[]>([])
+
+  useEffect(() => {
+    api.get(`/monitor/online-users/history?hours=${hours}`)
+      .then(({ data }) => setHistory(data || []))
+      .catch(() => setHistory([]))
+  }, [hours])
 
   const chartOption = useMemo(() => ({
     tooltip: { trigger: 'axis' as const },
@@ -37,9 +45,11 @@ export default function OnlineUsersPanel({ current, history, loading }: Props) {
       type: 'category' as const,
       data: history.map(h => {
         const d = new Date(h.collected_at)
-        return `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`
+        return hours > 48
+          ? `${d.getMonth() + 1}/${d.getDate()} ${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`
+          : `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`
       }),
-      axisLabel: { fontSize: 10 },
+      axisLabel: { fontSize: 9, rotate: hours > 48 ? 30 : 0 },
     },
     yAxis: { type: 'value' as const, minInterval: 1, axisLabel: { fontSize: 10 } },
     series: [{
@@ -50,7 +60,7 @@ export default function OnlineUsersPanel({ current, history, loading }: Props) {
       lineStyle: { width: 2 },
       itemStyle: { color: '#3b82f6' },
     }],
-  }), [history])
+  }), [history, hours])
 
   const exportCsv = useCallback(() => {
     const BOM = '\uFEFF'
@@ -77,7 +87,6 @@ export default function OnlineUsersPanel({ current, history, loading }: Props) {
 
   if (loading) return <div className="animate-pulse h-48 bg-white border rounded-lg" />
 
-  // Inline compact table (summary)
   const compactTable = (
     <div className="max-h-40 overflow-auto border rounded text-xs">
       <table className="w-full">
@@ -115,6 +124,19 @@ export default function OnlineUsersPanel({ current, history, loading }: Props) {
           <span className="text-sm font-medium text-slate-700">線上人數</span>
           <span className="text-lg font-bold text-blue-600 ml-2">{current.count}</span>
           <div className="ml-auto flex items-center gap-1">
+            <select
+              value={hours}
+              onChange={e => setHours(Number(e.target.value))}
+              className="text-xs border rounded px-1.5 py-0.5"
+            >
+              <option value={6}>6h</option>
+              <option value={12}>12h</option>
+              <option value={24}>24h</option>
+              <option value={72}>3d</option>
+              <option value={168}>7d</option>
+              <option value={336}>14d</option>
+              <option value={720}>30d</option>
+            </select>
             <button
               onClick={exportCsv}
               className="p-1 text-slate-400 hover:text-blue-600 rounded"
@@ -146,7 +168,6 @@ export default function OnlineUsersPanel({ current, history, loading }: Props) {
       {showModal && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setShowModal(false)}>
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-5xl max-h-[80vh] flex flex-col" onClick={e => e.stopPropagation()}>
-            {/* Header */}
             <div className="flex items-center justify-between px-5 py-3 border-b">
               <div className="flex items-center gap-2">
                 <Users size={16} className="text-blue-500" />
@@ -166,8 +187,6 @@ export default function OnlineUsersPanel({ current, history, loading }: Props) {
                 </button>
               </div>
             </div>
-
-            {/* Table */}
             <div className="flex-1 overflow-auto">
               <table className="w-full text-sm">
                 <thead className="bg-slate-50 sticky top-0">
