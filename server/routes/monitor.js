@@ -1113,10 +1113,11 @@ router.get('/alerts', async (req, res) => {
   try {
     const db = require('../database-oracle').db;
     const resolved = req.query.resolved;
-    let sql = `SELECT * FROM monitor_alerts`;
-    if (resolved === 'false') sql += ` WHERE resolved_at IS NULL`;
-    else if (resolved === 'true') sql += ` WHERE resolved_at IS NOT NULL`;
-    sql += ` ORDER BY notified_at DESC FETCH FIRST 200 ROWS ONLY`;
+    const days = parseInt(req.query.days) || 7;
+    const conditions = [`notified_at > SYSTIMESTAMP - INTERVAL '${days}' DAY`];
+    if (resolved === 'false') conditions.push('resolved_at IS NULL');
+    else if (resolved === 'true') conditions.push('resolved_at IS NOT NULL');
+    const sql = `SELECT * FROM monitor_alerts WHERE ${conditions.join(' AND ')} ORDER BY notified_at DESC FETCH FIRST 500 ROWS ONLY`;
     const rows = await db.prepare(sql).all();
     res.json(rows);
   } catch (e) {
@@ -1136,6 +1137,33 @@ router.post('/alerts/:id/resolve', async (req, res) => {
   }
 });
 
+// Batch resolve all unresolved alerts
+router.post('/alerts/resolve-all', async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    await db.prepare(
+      `UPDATE monitor_alerts SET resolved_at = SYSTIMESTAMP WHERE resolved_at IS NULL`
+    ).run();
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Snooze an alert for N days
+router.post('/alerts/:id/snooze', async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const days = parseInt(req.body.days) || 7;
+    await db.prepare(
+      `UPDATE monitor_alerts SET snoozed_until = SYSTIMESTAMP + INTERVAL '${days}' DAY WHERE id = ?`
+    ).run(req.params.id);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ─── Monitor Settings ───────────────────────────────────────────────────────
 const MONITOR_SETTING_KEYS = [
   'monitor_log_retention_days', 'monitor_metrics_retention_days',
@@ -1147,6 +1175,9 @@ const MONITOR_SETTING_KEYS = [
   'monitor_load_threshold',
   'monitor_alert_webhook_url', 'monitor_alert_webhook_enabled',
   'monitor_alert_webhook_type',
+  'monitor_ai_model',
+  'monitor_dept_snapshot_interval',
+  'monitor_dept_retention_days',
 ];
 
 router.get('/settings', async (req, res) => {
@@ -1180,6 +1211,132 @@ router.put('/settings', async (req, res) => {
     res.json({ ok: true });
   } catch (e) {
     res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── AI Diagnose ─────────────────────────────────────────────────────────────
+router.post('/alerts/:id/diagnose', async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const alert = await db.prepare(`SELECT * FROM monitor_alerts WHERE id=?`).get(req.params.id);
+    if (!alert) return res.status(404).json({ error: 'Alert not found' });
+
+    // Get AI model from settings
+    const modelSetting = await db.prepare(`SELECT value FROM system_settings WHERE key='monitor_ai_model'`).get();
+    const modelKey = modelSetting?.value || 'flash';
+    const modelName = modelKey === 'pro'
+      ? (process.env.GEMINI_MODEL_PRO || 'gemini-2.5-pro-preview-05-06')
+      : (process.env.GEMINI_MODEL_FLASH || 'gemini-2.5-flash-preview-05-20');
+
+    // Collect context
+    let podDetail = '';
+    let podLogs = '';
+    const resourceName = alert.resource_name || '';
+
+    if (alert.alert_type === 'pod_crash' || alert.alert_type === 'pod_pending') {
+      // resource_name format: "ns/podname/container" or "ns/podname"
+      const parts = resourceName.split('/');
+      const ns = parts[0] || 'default';
+      const podPrefix = parts[1] || '';
+
+      // Get pod detail from K8s API
+      try {
+        const podData = await getK8sResource(`/api/v1/namespaces/${ns}/pods`, ['get', 'pods', '-n', ns, '-o', 'json']);
+        const matchPod = (podData.items || []).find(p => p.metadata?.name?.startsWith(podPrefix));
+        if (matchPod) {
+          podDetail = JSON.stringify({
+            name: matchPod.metadata?.name,
+            namespace: ns,
+            phase: matchPod.status?.phase,
+            conditions: matchPod.status?.conditions,
+            containerStatuses: matchPod.status?.containerStatuses,
+            nodeName: matchPod.spec?.nodeName,
+          }, null, 2);
+
+          // Get pod logs (last 50 lines)
+          try {
+            const https = require('https');
+            const token = fs.readFileSync(K8S_TOKEN_PATH, 'utf8').trim();
+            const host = process.env.KUBERNETES_SERVICE_HOST || 'kubernetes.default.svc';
+            const port = process.env.KUBERNETES_SERVICE_PORT || '443';
+            let ca; try { ca = fs.readFileSync(K8S_CA_PATH); } catch {}
+            const logUrl = `https://${host}:${port}/api/v1/namespaces/${ns}/pods/${matchPod.metadata.name}/log?tailLines=50`;
+            podLogs = await new Promise((resolve) => {
+              const apiReq = https.get(logUrl, {
+                headers: { Authorization: `Bearer ${token}` }, ca, rejectUnauthorized: !!ca,
+              }, (apiRes) => {
+                let body = '';
+                apiRes.on('data', d => body += d.toString());
+                apiRes.on('end', () => resolve(body));
+              });
+              apiReq.on('error', () => resolve('(unable to fetch logs)'));
+              setTimeout(() => { apiReq.destroy(); resolve('(timeout)'); }, 10000);
+            });
+          } catch {}
+        }
+      } catch {}
+    }
+
+    // Build prompt
+    const prompt = `你是 Kubernetes 運維專家。請根據以下 K8s 告警事件分析可能原因，並給出具體修復步驟。
+如果需要執行指令，請以 \`\`\`bash 代碼塊格式呈現方便複製。
+
+## 告警資訊
+- **類型**: ${alert.alert_type}
+- **嚴重度**: ${alert.severity}
+- **資源**: ${alert.resource_name}
+- **訊息**: ${alert.message}
+- **時間**: ${alert.notified_at}
+
+${podDetail ? `## Pod 狀態\n\`\`\`json\n${podDetail}\n\`\`\`\n` : ''}
+${podLogs ? `## 最近 Logs (last 50 lines)\n\`\`\`\n${podLogs}\n\`\`\`\n` : ''}
+
+請用繁體中文回答，包含：
+1. 問題分析（可能原因）
+2. 建議修復步驟
+3. 預防措施`;
+
+    // SSE streaming response
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+
+    const { GoogleGenerativeAI } = require('@google/generative-ai');
+    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+    const model = genAI.getGenerativeModel({ model: modelName });
+
+    const result = await model.generateContentStream(prompt);
+    for await (const chunk of result.stream) {
+      const text = chunk.text();
+      if (text) {
+        res.write(`data: ${JSON.stringify({ text })}\n\n`);
+      }
+    }
+    res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+    res.end();
+  } catch (e) {
+    if (!res.headersSent) {
+      res.status(500).json({ error: e.message });
+    } else {
+      res.write(`data: ${JSON.stringify({ error: e.message })}\n\n`);
+      res.end();
+    }
+  }
+});
+
+// ─── Online Dept Snapshots ───────────────────────────────────────────────────
+router.get('/online-dept/history', async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const hours = parseInt(req.query.hours) || 24;
+    const rows = await db.prepare(
+      `SELECT * FROM online_dept_snapshots
+       WHERE collected_at > SYSTIMESTAMP - INTERVAL '${hours}' HOUR
+       ORDER BY collected_at ASC`
+    ).all();
+    res.json(rows);
+  } catch {
+    res.json([]);
   }
 });
 

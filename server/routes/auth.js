@@ -769,6 +769,8 @@ const verifyToken = async (req, res, next) => {
   const session = await redis.getSession(token);
   if (!session) return res.status(401).json({ error: 'Invalid or expired token' });
   req.user = session;
+  // Sliding expiration: reset TTL on every authenticated request
+  redis.touchSession(token).catch(() => {});
   next();
 };
 

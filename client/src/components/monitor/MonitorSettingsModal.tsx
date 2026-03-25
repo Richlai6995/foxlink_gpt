@@ -24,6 +24,9 @@ const defaultSettings: Record<string, string> = {
   monitor_alert_webhook_enabled: 'false',
   monitor_alert_webhook_type: 'teams',
   monitor_alert_webhook_url: '',
+  monitor_ai_model: 'flash',
+  monitor_dept_snapshot_interval: '5',
+  monitor_dept_retention_days: '30',
 }
 
 export default function MonitorSettingsModal({ open, onClose }: Props) {
@@ -144,6 +147,32 @@ export default function MonitorSettingsModal({ open, onClose }: Props) {
               <Field label="Pod restart 上限" k="monitor_pod_restart_limit" type="number" />
               <Field label="Pod pending 上限 (分鐘)" k="monitor_pod_pending_minutes" type="number" />
               <Field label="通知冷卻 (分鐘)" k="monitor_alert_cooldown" type="number" />
+            </div>
+          </div>
+
+          {/* AI Diagnose */}
+          <div>
+            <h3 className="text-xs font-medium text-slate-700 mb-2">AI 故障診斷</h3>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="flex flex-col gap-0.5">
+                <label className="text-xs text-slate-500">診斷模型</label>
+                <select
+                  value={settings.monitor_ai_model || 'flash'}
+                  onChange={e => setSettings(s => ({ ...s, monitor_ai_model: e.target.value }))}
+                  className="text-xs border rounded px-2 py-1.5"
+                >
+                  <option value="flash">Gemini Flash（快速）</option>
+                  <option value="pro">Gemini Pro（深入）</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          {/* Dept Stats */}
+          <div>
+            <h3 className="text-xs font-medium text-slate-700 mb-2">部門統計</h3>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="部門統計保留天數" k="monitor_dept_retention_days" type="number" />
             </div>
           </div>
 

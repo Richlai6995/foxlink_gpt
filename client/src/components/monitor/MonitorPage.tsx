@@ -9,6 +9,7 @@ import K8sEventsTable from './K8sEventsTable'
 import HostMetricsPanel from './HostMetricsPanel'
 import DiskUsagePanel from './DiskUsagePanel'
 import OnlineUsersPanel from './OnlineUsersPanel'
+import OnlineDeptChart from './OnlineDeptChart'
 import ContainerTable from './ContainerTable'
 import DockerImagesPanel from './DockerImagesPanel'
 import HealthChecksPanel from './HealthChecksPanel'
@@ -38,6 +39,7 @@ export default function MonitorPage() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [images, setImages] = useState<any[]>([])
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [alertFilterDays, setAlertFilterDays] = useState(7)
 
   // Log viewer state
   const [logTarget, setLogTarget] = useState<{ type: 'pod' | 'container'; target: string } | null>(null)
@@ -47,7 +49,7 @@ export default function MonitorPage() {
     try {
       const results = await Promise.allSettled([
         api.get('/monitor/summary'),
-        api.get('/monitor/alerts?resolved=false'),
+        api.get(`/monitor/alerts?resolved=false&days=${alertFilterDays}`),
         api.get('/monitor/nodes/detail'),
         api.get('/monitor/pods'),
         api.get('/monitor/events'),
@@ -79,7 +81,7 @@ export default function MonitorPage() {
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [alertFilterDays])
 
   useEffect(() => {
     fetchAll()
@@ -112,7 +114,12 @@ export default function MonitorPage() {
       </div>
 
       {/* Alert Banner */}
-      <AlertBanner alerts={alerts as never[]} onRefresh={fetchAll} />
+      <AlertBanner
+        alerts={alerts as never[]}
+        onRefresh={fetchAll}
+        filterDays={alertFilterDays}
+        onFilterDaysChange={setAlertFilterDays}
+      />
 
       {/* Summary Cards */}
       <MonitorSummaryCards data={summary as never} loading={loading} />
@@ -141,7 +148,10 @@ export default function MonitorPage() {
         <OnlineUsersPanel current={onlineUsers} history={onlineHistory as never[]} loading={loading} />
       </div>
 
-      {/* Row 3: Docker Containers + Images (hidden when no Docker socket) */}
+      {/* Row 3: Online Dept Chart */}
+      <OnlineDeptChart />
+
+      {/* Row 4: Docker Containers + Images (hidden when no Docker socket) */}
       {(containers.length > 0 || images.length > 0) && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <ContainerTable

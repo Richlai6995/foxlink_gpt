@@ -49,11 +49,11 @@ async function sendWebhook(url, type, message, severity) {
 /**
  * Send alert through all configured channels (email + webhook)
  */
-async function notifyAlert({ db, alertType, severity, resourceName, message }) {
-  // 1. Write to monitor_alerts
+async function notifyAlert({ db, alertType, severity, resourceName, message, lastKnownValue = null }) {
+  // 1. Write to monitor_alerts (with last_known_value for dedup)
   await db.prepare(
-    `INSERT INTO monitor_alerts (alert_type, severity, resource_name, message) VALUES (?,?,?,?)`
-  ).run(alertType, severity, resourceName, message);
+    `INSERT INTO monitor_alerts (alert_type, severity, resource_name, message, last_known_value) VALUES (?,?,?,?,?)`
+  ).run(alertType, severity, resourceName, message, lastKnownValue !== null ? String(lastKnownValue) : null);
 
   // 2. Email for critical/emergency
   if (severity === 'critical' || severity === 'emergency') {

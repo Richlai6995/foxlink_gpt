@@ -190,15 +190,31 @@ async function checkPodAlerts() {
     for (const pod of (pods.items || [])) {
       const podName = `${pod.metadata?.namespace}/${pod.metadata?.name}`;
 
-      // CrashLoopBackOff check
+      // CrashLoopBackOff check — incremental: only alert when restart count INCREASES
       const containers = pod.status?.containerStatuses || [];
       for (const c of containers) {
         if (c.restartCount > restartLimit) {
-          if (!await isInCooldown(db, 'pod_crash', podName, cooldown)) {
+          const resourceKey = `${podName}/${c.name}`;
+          // Check last known restart count from existing unresolved alert
+          const lastAlert = await db.prepare(
+            `SELECT last_known_value FROM monitor_alerts
+             WHERE alert_type='pod_crash' AND resource_name=? AND resolved_at IS NULL
+             ORDER BY notified_at DESC FETCH FIRST 1 ROW ONLY`
+          ).get(resourceKey);
+          const lastKnown = lastAlert ? parseInt(lastAlert.last_known_value) || 0 : 0;
+
+          if (c.restartCount > lastKnown) {
+            // Auto-resolve previous alerts for same resource (dedup)
+            await db.prepare(
+              `UPDATE monitor_alerts SET resolved_at=SYSTIMESTAMP
+               WHERE alert_type='pod_crash' AND resource_name=? AND resolved_at IS NULL`
+            ).run(resourceKey);
+
             await notifyAlert({
               db, alertType: 'pod_crash', severity: 'critical',
-              resourceName: podName,
+              resourceName: resourceKey,
               message: `Pod ${podName} container ${c.name} restarts: ${c.restartCount} (> ${restartLimit})`,
+              lastKnownValue: c.restartCount,
             });
           }
         }
@@ -291,6 +307,59 @@ async function snapshotOnlineUsers() {
     ).run(userIds.length, JSON.stringify(userIds));
   } catch (e) {
     console.error('[MetricsCollector] snapshotOnlineUsers error:', e.message);
+  }
+}
+
+// ─── Online Dept Snapshot (every N minutes, configurable) ───────────────────
+async function snapshotOnlineDept() {
+  try {
+    const redis = require('./redisClient');
+    const dbOracle = require('../database-oracle').db;
+    let sessions = [];
+    try { sessions = await redis.getAllSessions() || []; } catch {}
+
+    // Deduplicate by user ID
+    const seen = new Map();
+    for (const s of sessions) {
+      if (!s.id || seen.has(s.id)) continue;
+      seen.set(s.id, s);
+    }
+
+    // Enrich with DB data for org fields
+    const userIds = Array.from(seen.keys());
+    const userMap = new Map();
+    if (userIds.length > 0) {
+      try {
+        const ph = userIds.map(() => '?').join(',');
+        const rows = await dbOracle.prepare(
+          `SELECT id, dept_code, profit_center, org_section, org_group_name FROM users WHERE id IN (${ph})`
+        ).all(...userIds);
+        for (const r of rows) userMap.set(r.id, r);
+      } catch {}
+    }
+
+    // Aggregate by profit_center (primary dimension)
+    const agg = {};
+    for (const [uid, sess] of seen) {
+      const dbUser = userMap.get(uid) || {};
+      const key = JSON.stringify({
+        profit_center: dbUser.profit_center || sess.profit_center || 'Unknown',
+        org_section: dbUser.org_section || sess.org_section || '',
+        org_group_name: dbUser.org_group_name || '',
+        dept_code: dbUser.dept_code || sess.dept_code || '',
+      });
+      agg[key] = (agg[key] || 0) + 1;
+    }
+
+    // Insert snapshot rows
+    for (const [key, count] of Object.entries(agg)) {
+      const { profit_center, org_section, org_group_name, dept_code } = JSON.parse(key);
+      await db.prepare(
+        `INSERT INTO online_dept_snapshots (profit_center, org_section, org_group_name, dept_code, user_count) VALUES (?,?,?,?,?)`
+      ).run(profit_center, org_section, org_group_name, dept_code, count);
+    }
+  } catch (e) {
+    console.error('[MetricsCollector] snapshotOnlineDept error:', e.message);
   }
 }
 
@@ -439,6 +508,8 @@ async function cleanupOldData() {
     await db.prepare(`DELETE FROM host_metrics WHERE collected_at < SYSTIMESTAMP - INTERVAL '${metricsRetention}' DAY`).run();
     await db.prepare(`DELETE FROM disk_metrics WHERE collected_at < SYSTIMESTAMP - INTERVAL '${diskRetention}' DAY`).run();
     await db.prepare(`DELETE FROM online_user_snapshots WHERE collected_at < SYSTIMESTAMP - INTERVAL '${onlineRetention}' DAY`).run();
+    const deptRetention = await getSetting('monitor_dept_retention_days', '30');
+    await db.prepare(`DELETE FROM online_dept_snapshots WHERE collected_at < SYSTIMESTAMP - INTERVAL '${deptRetention}' DAY`).run();
     await db.prepare(`DELETE FROM health_check_results WHERE checked_at < SYSTIMESTAMP - INTERVAL '${healthRetention}' DAY`).run();
     await db.prepare(`DELETE FROM monitor_alerts WHERE resolved_at IS NOT NULL AND notified_at < SYSTIMESTAMP - INTERVAL '${logRetention}' DAY`).run();
 
@@ -463,6 +534,7 @@ function startMetricsCollector(_db) {
     collectNodeMetrics().catch(e => console.error('[MetricsCollector] node metrics cron error:', e.message));
     collectAndStoreHostMetrics().catch(e => console.error('[MetricsCollector] host metrics cron error:', e.message));
     snapshotOnlineUsers().catch(e => console.error('[MetricsCollector] online users cron error:', e.message));
+    snapshotOnlineDept().catch(e => console.error('[MetricsCollector] online dept cron error:', e.message));
     checkPodAlerts().catch(e => console.error('[MetricsCollector] pod alerts cron error:', e.message));
     checkContainerAlerts().catch(e => console.error('[MetricsCollector] container alerts cron error:', e.message));
   }));

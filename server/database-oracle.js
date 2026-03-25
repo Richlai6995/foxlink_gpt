@@ -491,6 +491,17 @@ async function runMigrations(db) {
     }
   };
 
+  const safeAddColumn = async (table, column, type) => {
+    try {
+      await db.prepare(`ALTER TABLE ${table} ADD (${column} ${type})`).run();
+      console.log(`[Migration] Added column ${table}.${column}`);
+    } catch (e) {
+      if (!e.message?.includes('ORA-01430')) { // column already exists
+        console.warn(`[Migration] safeAddColumn ${table}.${column}: ${e.message}`);
+      }
+    }
+  };
+
   // ── External API Keys ──────────────────────────────────────────────────────
   await createTable('API_KEYS', `CREATE TABLE api_keys (
     id              VARCHAR2(36)  PRIMARY KEY,
@@ -1186,6 +1197,17 @@ async function runMigrations(db) {
     collected_at  TIMESTAMP DEFAULT SYSTIMESTAMP
   )`);
 
+  // 線上人數部門統計快照
+  await createTable('ONLINE_DEPT_SNAPSHOTS', `CREATE TABLE online_dept_snapshots (
+    id              NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    collected_at    TIMESTAMP DEFAULT SYSTIMESTAMP,
+    profit_center   VARCHAR2(100),
+    org_section     VARCHAR2(100),
+    org_group_name  VARCHAR2(100),
+    dept_code       VARCHAR2(100),
+    user_count      NUMBER DEFAULT 0
+  )`);
+
   // Service 健康檢查設定
   await createTable('HEALTH_CHECKS', `CREATE TABLE health_checks (
     id              NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -1211,14 +1233,19 @@ async function runMigrations(db) {
 
   // 異常通知記錄
   await createTable('MONITOR_ALERTS', `CREATE TABLE monitor_alerts (
-    id            NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    alert_type    VARCHAR2(50),
-    severity      VARCHAR2(20),
-    resource_name VARCHAR2(200),
-    message       CLOB,
-    notified_at   TIMESTAMP DEFAULT SYSTIMESTAMP,
-    resolved_at   TIMESTAMP
+    id               NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    alert_type       VARCHAR2(50),
+    severity         VARCHAR2(20),
+    resource_name    VARCHAR2(200),
+    message          CLOB,
+    notified_at      TIMESTAMP DEFAULT SYSTIMESTAMP,
+    resolved_at      TIMESTAMP,
+    last_known_value VARCHAR2(100),
+    snoozed_until    TIMESTAMP
   )`);
+  // Migration: add columns if table already exists
+  await safeAddColumn('MONITOR_ALERTS', 'LAST_KNOWN_VALUE', 'VARCHAR2(100)');
+  await safeAddColumn('MONITOR_ALERTS', 'SNOOZED_UNTIL', 'TIMESTAMP');
 
   // Deploy 歷史紀錄
   await createTable('DEPLOY_HISTORY', `CREATE TABLE deploy_history (

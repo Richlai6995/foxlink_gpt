@@ -101,6 +101,19 @@ module.exports = {
     try { return JSON.parse(raw); } catch { return null; }
   },
   /**
+   * Touch session — reset TTL (sliding expiration).
+   * @param {string} token
+   */
+  async touchSession(token) {
+    const s = getStore();
+    if (s instanceof MemoryStore) {
+      const entry = s.store.get(`sess:${token}`);
+      if (entry) entry.exp = Date.now() + TOKEN_TTL * 1000;
+    } else if (s.client && typeof s.client.expire === 'function') {
+      await s.client.expire(`sess:${token}`, TOKEN_TTL);
+    }
+  },
+  /**
    * Delete a session (logout).
    * @param {string} token
    */
