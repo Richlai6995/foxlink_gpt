@@ -5,7 +5,7 @@ WORKDIR /app/client
 
 # Install deps first (layer cache)
 COPY client/package*.json ./
-RUN yarn install --frozen-lockfile
+RUN npm install
 
 # Build Vite/React app
 COPY client ./
