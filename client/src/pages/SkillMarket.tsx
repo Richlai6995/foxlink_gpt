@@ -48,7 +48,35 @@ interface Skill {
 
 interface Model { key: string; name: string }
 
-const ICONS = ['🤖', '🧠', '📝', '💡', '🔍', '📊', '🎯', '🛠️', '📚', '🌐', '⚡', '🔬', '💬', '🎨', '🔧', '📋', '🚀', '🏭']
+const ICONS = [
+  // AI / 技術
+  '🤖','🧠','💡','⚡','🔬','🔭','🧬','🛸','🤯','🦾','🦿','🧩','💻','🖥️','⌨️','🖱️',
+  // 文件 / 辦公
+  '📝','📋','📄','📃','📑','📜','🗒️','📰','📓','📔','📒','📕','📗','📘','📙','📚',
+  '🗂️','🗃️','📂','📁','🗄️','🖊️','🖋️','✒️','✏️','📐','📏','📌','📎','🖇️',
+  // 分析 / 數據
+  '📊','📈','📉','🔢','🧮','🗓️','📅','📆','🕐','⏱️','⏰','🔔','🔕',
+  // 工具 / 設定
+  '🔧','🛠️','⚙️','🔩','🪛','🔨','⛏️','🪚','🔗','🪝','🔑','🗝️','🔓','🔒','🛡️',
+  // 通訊 / 社交
+  '💬','🗨️','🗯️','💭','📢','📣','📡','📞','☎️','📠','📧','📨','📩','📤','📥','📬',
+  // 搜尋 / 導航
+  '🔍','🔎','🧭','🗺️','📍','🚩','🏁','🎯','🏴','🌐','🌍','🌎','🌏',
+  // 媒體 / 創意
+  '🎨','🖼️','🖌️','🖍️','🎬','🎥','📸','📷','🎙️','🎚️','🎛️','🎵','🎶','🎼','🎤','🎧',
+  '🎭','🎪','🎠','🎡','🎢',
+  // 商業 / 金融
+  '💼','🏢','🏦','💰','💳','💵','💴','💶','💷','💸','📦','🏷️','🛒','🤝','🤜','🤛',
+  // 人物 / 角色
+  '👤','👥','🧑‍💻','👨‍🔬','👩‍🏫','🧑‍🏭','👮','🕵️','🧑‍⚕️','👨‍🍳','🧑‍🎨','👷','🧑‍🚀',
+  // 自然 / 環境
+  '🌿','🍃','☀️','🌙','⭐','🌟','💫','✨','🌈','🔥','💧','🌱','🌊','🌋','🏔️','🏝️',
+  // 交通 / 物流
+  '🚀','✈️','🚂','🚢','🚁','🚛','🏭','🏗️','⚓','🛤️',
+  // 符號 / 狀態
+  '✅','❌','⭕','❓','❗','💯','🆗','🆕','🆙','🆒','🔴','🟡','🟢','🔵','🟣',
+  '🏆','🥇','🎖️','🎗️','🎁','🎀','🧧','⚔️','🗡️','🛡️',
+]
 
 const EMPTY_FORM = {
     name: '', description: '', icon: '🤖', type: 'builtin' as 'builtin' | 'external' | 'code' | 'workflow',
@@ -82,6 +110,7 @@ export default function SkillMarket() {
     const [saving, setSaving] = useState(false)
     const [tagInput, setTagInput] = useState('')
     const [pkgInput, setPkgInput] = useState('')
+    const [showIconPicker, setShowIconPicker] = useState(false)
 
     const canCodeSkill = currentUser?.role === 'admin' || (currentUser as any)?.effective_allow_code_skill === true
     const canCreateSkill = currentUser?.role === 'admin' || (currentUser as any)?.effective_allow_create_skill === true
@@ -376,11 +405,25 @@ export default function SkillMarket() {
                                             <div>
                                                 <label className="block text-xs font-medium text-slate-600 mb-1">圖示</label>
                                                 <div className="relative">
-                                                    <select value={form.icon} onChange={e => setForm(p => ({ ...p, icon: e.target.value }))}
-                                                        className="appearance-none w-16 text-center text-xl border border-slate-200 rounded-lg py-2 focus:outline-none focus:ring-2 focus:ring-blue-300">
-                                                        {ICONS.map(i => <option key={i} value={i}>{i}</option>)}
-                                                    </select>
-                                                    <ChevronDown size={10} className="absolute right-1 bottom-3 text-slate-400 pointer-events-none" />
+                                                    <button type="button"
+                                                        onClick={() => setShowIconPicker(p => !p)}
+                                                        className="w-16 h-10 text-2xl border border-slate-200 rounded-lg flex items-center justify-center hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-300">
+                                                        {form.icon}
+                                                    </button>
+                                                    {showIconPicker && (
+                                                        <>
+                                                        <div className="fixed inset-0 z-40" onClick={() => setShowIconPicker(false)} />
+                                                        <div className="absolute z-50 mt-1 left-0 w-72 max-h-64 overflow-y-auto bg-white border border-slate-200 rounded-xl shadow-xl p-2 grid grid-cols-8 gap-1">
+                                                            {ICONS.map(i => (
+                                                                <button key={i} type="button"
+                                                                    onClick={() => { setForm(p => ({ ...p, icon: i })); setShowIconPicker(false) }}
+                                                                    className={`text-xl w-8 h-8 flex items-center justify-center rounded-lg hover:bg-blue-50 transition-colors ${form.icon === i ? 'bg-blue-100 ring-2 ring-blue-300' : ''}`}>
+                                                                    {i}
+                                                                </button>
+                                                            ))}
+                                                        </div>
+                                                        </>
+                                                    )}
                                                 </div>
                                             </div>
                                             <div className="flex-1">
