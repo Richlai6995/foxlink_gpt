@@ -133,6 +133,70 @@ const ERP_POOL_ALIAS = `erp_${crypto.randomBytes(8).toString('hex')}`;
 let _erpPoolProxy = null;
 let _erpPoolInitPromise = null;  // 防止並發初始化競爭條件
 
+// ─── Multi-source pool map（Phase 1: Oracle，Phase 2+: MySQL/MSSQL）──────────
+// Map<sourceId, { proxy, initPromise }>
+const _poolMap = new Map();
+
+/**
+ * 依 ai_db_sources.id 取得對應的 ReadOnly pool proxy。
+ * 若來源未設定（sourceId 為 null/undefined），回退到預設 ERP pool。
+ */
+async function getPoolBySourceId(sourceId, db) {
+  if (!sourceId) return getErpPool();
+
+  const id = Number(sourceId);
+  const cached = _poolMap.get(id);
+  if (cached?.proxy) return cached.proxy;
+
+  if (!_poolMap.has(id)) _poolMap.set(id, { proxy: null, initPromise: null });
+  const entry = _poolMap.get(id);
+
+  if (!entry.initPromise) {
+    entry.initPromise = (async () => {
+      const src = await db.prepare(`SELECT * FROM ai_db_sources WHERE id=? AND is_active=1`).get(id);
+      if (!src) throw new Error(`DB Source ${id} 不存在或已停用`);
+
+      const dbType  = src.db_type  || src.DB_TYPE  || 'oracle';
+      const { getAdapter } = require('./dbAdapters');
+      const adapter = getAdapter(dbType);
+
+      const { decryptPassword } = require('../routes/dbSources');
+      const password = decryptPassword(src.password_enc || src.PASSWORD_ENC);
+
+      const config = {
+        host:          src.host         || src.HOST,
+        port:     Number(src.port       || src.PORT       || (dbType === 'oracle' ? 1521 : dbType === 'mysql' ? 3306 : 1433)),
+        service_name:  src.service_name || src.SERVICE_NAME,
+        database_name: src.database_name || src.DATABASE_NAME,
+        username:      src.username     || src.USERNAME,
+        password,
+        pool_min:  Number(src.pool_min  || src.POOL_MIN  || 1),
+        pool_max:  Number(src.pool_max  || src.POOL_MAX  || 5),
+        pool_timeout: Number(src.pool_timeout || src.POOL_TIMEOUT || 60),
+      };
+
+      entry.proxy = await adapter.createPool(config);
+      console.log(`[DB Source] Pool ready: id=${id} name=${src.name || src.NAME} type=${dbType}`);
+    })();
+  }
+
+  await entry.initPromise;
+  return entry.proxy;
+}
+
+/**
+ * 清除指定來源的 pool 快取（編輯或刪除來源後呼叫）
+ */
+function invalidatePoolCache(sourceId) {
+  const id = Number(sourceId);
+  const entry = _poolMap.get(id);
+  if (entry?.proxy) {
+    try { entry.proxy.close(); } catch (_) {}
+  }
+  _poolMap.delete(id);
+  console.log(`[DB Source] Pool cache invalidated: id=${id}`);
+}
+
 async function getErpPool() {
   if (_erpPoolProxy) return _erpPoolProxy;
   // 單例 Promise：多個並發請求只建立一次 pool
@@ -1128,9 +1192,22 @@ async function runDashboardQuery({ designId, question, userId, user, isDesigner,
     });
   }
 
-  // 6. 執行 Oracle ERP 查詢
-  if (!overrideSql) send('status', { message: 'ERP 查詢中...' });
-  const erpPool = await getErpPool();
+  // 6. 執行查詢（依 schema 的 source_db_id 選擇對應 pool）
+  if (!overrideSql) send('status', { message: 'DB 查詢中...' });
+
+  // 解析 source_db_id：取 design 第一個 schema 的來源
+  let sourceDbId = null;
+  try {
+    const schemaIds = design.target_schema_ids
+      ? (typeof design.target_schema_ids === 'string' ? JSON.parse(design.target_schema_ids) : design.target_schema_ids)
+      : [];
+    if (schemaIds.length > 0) {
+      const firstSchema = await db.prepare(`SELECT source_db_id FROM ai_schema_definitions WHERE id=?`).get(schemaIds[0]);
+      sourceDbId = firstSchema?.source_db_id ?? firstSchema?.SOURCE_DB_ID ?? null;
+    }
+  } catch (_) {}
+
+  const erpPool = await getPoolBySourceId(sourceDbId, db);
   const erpConn = await erpPool.getConnection();
   let rows = [];
   let columns = [];
@@ -1243,8 +1320,9 @@ async function runEtlJob(jobId) {
   ).run(msg, logId).catch(() => {});
 
   try {
-    // ── 1. 取得 ERP 來源資料 ───────────────────────────────────────────────────
-    const erpPool = await getErpPool();
+    // ── 1. 取得來源資料（依 source_db_id 選擇對應 pool）──────────────────────
+    const etlSourceDbId = job.source_db_id ?? job.SOURCE_DB_ID ?? null;
+    const erpPool = await getPoolBySourceId(etlSourceDbId, db);
     const erpConn = await erpPool.getConnection();
     let sourceRows = [];
     try {
@@ -1825,6 +1903,8 @@ module.exports = {
   initEtlScheduler,
   scheduleEtlJob,
   scheduleToCron,
-  getErpPool,       // 供 dashboard.js import-oracle 路由使用（同一保護層）
-  assertErpReadOnly, // 供其他模組需要時直接呼叫
+  getErpPool,           // 供 dashboard.js import-oracle 路由使用（同一保護層）
+  assertErpReadOnly,    // 供其他模組需要時直接呼叫
+  getPoolBySourceId,    // 多來源 pool 取用
+  invalidatePoolCache,  // 更新/刪除 db-source 時清快取
 };

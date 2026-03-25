@@ -5,7 +5,7 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { Plus, Save, Trash2, Play, RefreshCw, ChevronDown, ChevronRight, Eye, Link2, Edit3, Square, Pause, Share2, Copy, Upload, FolderOpen, Filter, X, Download, FileUp, PenLine, FunctionSquare, Languages, RotateCcw } from 'lucide-react'
 import api from '../../lib/api'
-import type { AiSchemaDef, AiSchemaJoin, AiSelectTopic, AiSelectDesign, AiEtlJob, AiEtlRunLog, AiDashboardShare, AiSelectProject, AiProjectShare } from '../../types'
+import type { AiSchemaDef, AiSchemaJoin, AiSelectTopic, AiSelectDesign, AiEtlJob, AiEtlRunLog, AiDashboardShare, AiSelectProject, AiProjectShare, DbSource } from '../../types'
 import TranslationFields, { type TranslationData } from '../common/TranslationFields'
 import UserPicker from '../common/UserPicker'
 
@@ -465,10 +465,12 @@ function SchemaManager({ projectId }: { projectId: number | null }) {
   const [form, setForm] = useState({
     table_name: '', display_name: '', display_name_en: '', display_name_vi: '', alias: '',
     source_type: 'table' as 'table' | 'view' | 'sql', source_sql: '',
-    db_connection: 'erp', business_notes: '', join_hints: '',
+    db_connection: 'erp', source_db_id: undefined as number | undefined,
+    business_notes: '', join_hints: '',
     vector_etl_job_id: undefined as number | undefined,
     form_project_id: undefined as number | undefined
   })
+  const [dbSources, setDbSources] = useState<DbSource[]>([])
   const [baseConditions, setBaseConditions] = useState<BaseCondition[]>([])
   const [etlJobs, setEtlJobs] = useState<AiEtlJob[]>([])
   const [projects, setProjects] = useState<AiSelectProject[]>([])
@@ -609,7 +611,7 @@ function SchemaManager({ projectId }: { projectId: number | null }) {
   const [showImport, setShowImport] = useState(false)
   const [importText, setImportText] = useState('')
   const [importOwner, setImportOwner] = useState('APPS')
-  const [importConn, setImportConn] = useState('erp')
+  const [importSourceDbId, setImportSourceDbId] = useState<number | undefined>(undefined)
   const [importLoading, setImportLoading] = useState(false)
   const [importResult, setImportResult] = useState<{ imported: {table:string,columns:number}[], skipped: string[] } | null>(null)
 
@@ -622,9 +624,15 @@ function SchemaManager({ projectId }: { projectId: number | null }) {
     const etlUrl = projectId ? `/dashboard/etl/jobs?project_id=${projectId}` : '/dashboard/etl/jobs'
     api.get(etlUrl).then(r => setEtlJobs(r.data)).catch(() => {})
     api.get('/dashboard/projects').then(r => setProjects(r.data)).catch(() => {})
+    api.get('/db-sources').then(r => {
+      setDbSources(r.data)
+      // 預設選 default source
+      const def = (r.data as DbSource[]).find(s => s.is_default)
+      if (def) setImportSourceDbId(def.id)
+    }).catch(() => {})
   }, [projectId])
 
-  const emptyForm = { table_name: '', display_name: '', display_name_en: '', display_name_vi: '', alias: '', source_type: 'table' as const, source_sql: '', db_connection: 'erp', business_notes: '', join_hints: '', vector_etl_job_id: undefined as number | undefined, form_project_id: projectId || undefined }
+  const emptyForm = { table_name: '', display_name: '', display_name_en: '', display_name_vi: '', alias: '', source_type: 'table' as const, source_sql: '', db_connection: 'erp', source_db_id: undefined as number | undefined, business_notes: '', join_hints: '', vector_etl_job_id: undefined as number | undefined, form_project_id: projectId || undefined }
 
   const editingSchema = schemas.find(s => s.id === editId)
   const editColOptions = editingSchema
@@ -704,7 +712,7 @@ function SchemaManager({ projectId }: { projectId: number | null }) {
     setImportResult(null)
     try {
       const r = await api.post('/dashboard/designer/schemas/import-oracle', {
-        table_names, owner: importOwner, db_connection: importConn
+        table_names, owner: importOwner, source_db_id: importSourceDbId
       })
       setImportResult(r.data)
       load()
@@ -734,11 +742,15 @@ function SchemaManager({ projectId }: { projectId: number | null }) {
                     onChange={e => setImportOwner(e.target.value.toUpperCase())} placeholder="APPS" />
                 </div>
                 <div>
-                  <label className="text-xs text-gray-500 mb-1 block">DB 連線</label>
-                  <select className="input py-1.5 text-sm" value={importConn}
-                    onChange={e => setImportConn(e.target.value)}>
-                    <option value="erp">ERP (Oracle)</option>
-                    <option value="system">系統 DB</option>
+                  <label className="text-xs text-gray-500 mb-1 block">資料來源</label>
+                  <select className="input py-1.5 text-sm" value={importSourceDbId ?? ''}
+                    onChange={e => setImportSourceDbId(e.target.value ? Number(e.target.value) : undefined)}>
+                    <option value="">— 請選擇 —</option>
+                    {dbSources.filter(s => s.is_active).map(s => (
+                      <option key={s.id} value={s.id}>
+                        {s.name} ({s.db_type.toUpperCase()}{s.is_default ? ' · 預設' : ''})
+                      </option>
+                    ))}
                   </select>
                 </div>
               </div>
@@ -830,11 +842,15 @@ function SchemaManager({ projectId }: { projectId: number | null }) {
             </select>
           </div>
           <div>
-            <label className="text-xs text-gray-400 mb-1 block">資料庫連線</label>
-            <select className="input py-1.5 text-sm" value={form.db_connection}
-              onChange={e => setForm(p => ({ ...p, db_connection: e.target.value }))}>
-              <option value="erp">ERP (Oracle)</option>
-              <option value="system">系統 DB</option>
+            <label className="text-xs text-gray-400 mb-1 block">資料來源</label>
+            <select className="input py-1.5 text-sm" value={form.source_db_id ?? ''}
+              onChange={e => setForm(p => ({ ...p, source_db_id: e.target.value ? Number(e.target.value) : undefined }))}>
+              <option value="">— 請選擇 DB 來源 —</option>
+              {dbSources.filter(s => s.is_active).map(s => (
+                <option key={s.id} value={s.id}>
+                  {s.name} ({s.db_type.toUpperCase()}{s.is_default ? ' · 預設' : ''})
+                </option>
+              ))}
             </select>
           </div>
           <div>
@@ -971,7 +987,7 @@ function SchemaManager({ projectId }: { projectId: number | null }) {
                   <div key={s.id} className="flex items-center justify-between px-3 py-2 rounded-lg hover:bg-gray-50 border border-gray-100">
                     <div>
                       <p className="text-sm font-medium text-gray-700">{s.display_name || s.table_name}</p>
-                      <p className="text-xs text-gray-400 font-mono">{s.table_name} · {s.db_connection}</p>
+                      <p className="text-xs text-gray-400 font-mono">{s.table_name} · {s.source_db_id ? (dbSources.find(d => d.id === s.source_db_id)?.name ?? s.db_connection) : s.db_connection}</p>
                     </div>
                     <button onClick={() => copySchema(s.id!)}
                       className="text-xs px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700">
@@ -1019,8 +1035,8 @@ function SchemaManager({ projectId }: { projectId: number | null }) {
                 {s.source_type && s.source_type !== 'table' && (
                   <span className="text-xs px-1.5 py-0.5 rounded bg-amber-100 text-amber-600">{s.source_type}</span>
                 )}
-                <span className={`text-xs px-1.5 py-0.5 rounded ${s.db_connection === 'erp' ? 'bg-blue-100 text-blue-600' : 'bg-gray-200 text-gray-500'}`}>
-                  {s.db_connection}
+                <span className="text-xs px-1.5 py-0.5 rounded bg-blue-100 text-blue-600">
+                  {s.source_db_id ? (dbSources.find(d => d.id === s.source_db_id)?.name ?? s.db_connection) : s.db_connection}
                 </span>
               </div>
               <div className="flex gap-2">
@@ -1031,7 +1047,7 @@ function SchemaManager({ projectId }: { projectId: number | null }) {
                     table_name: s.table_name, display_name: s.display_name || '',
                     display_name_en: s.display_name_en || '', display_name_vi: s.display_name_vi || '',
                     alias: s.alias || '', source_type: s.source_type || 'table', source_sql: s.source_sql || '',
-                    db_connection: s.db_connection, business_notes: s.business_notes || '', join_hints: s.join_hints || '',
+                    db_connection: s.db_connection, source_db_id: s.source_db_id, business_notes: s.business_notes || '', join_hints: s.join_hints || '',
                     vector_etl_job_id: s.vector_etl_job_id,
                     form_project_id: s.project_id ?? projectId ?? undefined
                   })
@@ -1872,6 +1888,7 @@ function DesignManager({ projectId }: { projectId: number | null }) {
   // Share & copy modals
   const [shareDesign, setShareDesign] = useState<AiSelectDesign | null>(null)
   const [copyTopic, setCopyTopic] = useState<AiSelectTopic | null>(null)
+  const [dbSources, setDbSources] = useState<DbSource[]>([])
 
   const load = () => {
     const qs = projectId ? `?project_id=${projectId}` : ''
@@ -1883,6 +1900,7 @@ function DesignManager({ projectId }: { projectId: number | null }) {
     load()
     api.get('/dashboard/projects').then(r => setProjects(r.data)).catch(() => {})
     api.get('/data-permissions/categories').then(r => setPolicyCategories(r.data)).catch(() => {})
+    api.get('/db-sources').then(r => setDbSources(r.data)).catch(() => {})
   }, [projectId])
 
   const saveTopic = async () => {
@@ -2284,8 +2302,8 @@ function DesignManager({ projectId }: { projectId: number | null }) {
                             <span className={`text-xs ${isWhereOnly ? 'text-orange-500 font-medium' : 'text-gray-400'}`}>僅WHERE</span>
                           </label>
                         )}
-                        <span className={`text-xs px-1.5 py-0.5 rounded flex-shrink-0 ${s.db_connection === 'erp' ? 'bg-blue-100 text-blue-500' : 'bg-gray-200 text-gray-500'}`}>
-                          {s.db_connection}
+                        <span className="text-xs px-1.5 py-0.5 rounded flex-shrink-0 bg-blue-100 text-blue-500">
+                          {s.source_db_id ? (dbSources.find(d => d.id === s.source_db_id)?.name ?? s.db_connection) : s.db_connection}
                         </span>
                       </div>
                     )

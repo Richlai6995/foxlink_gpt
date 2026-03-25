@@ -1313,6 +1313,100 @@ async function runMigrations(db) {
   // ── Vector table partitioning ───────────────────────────────────────────────
   await migrateAiVectorStoreToPartitioned();
   await migrateKbChunksToPartitioned();
+
+  // ── Multi DB Sources（Phase 1: Oracle / Phase 2+: MySQL, MSSQL）────────────
+  await createTable('AI_DB_SOURCES', `CREATE TABLE ai_db_sources (
+    id             NUMBER GENERATED AS IDENTITY PRIMARY KEY,
+    name           VARCHAR2(100)  NOT NULL,
+    db_type        VARCHAR2(20)   DEFAULT 'oracle',
+    host           VARCHAR2(200),
+    port           NUMBER,
+    service_name   VARCHAR2(100),
+    database_name  VARCHAR2(100),
+    schema_name    VARCHAR2(100),
+    username       VARCHAR2(100),
+    password_enc   CLOB,
+    is_default     NUMBER(1)      DEFAULT 0,
+    is_active      NUMBER(1)      DEFAULT 1,
+    pool_min       NUMBER         DEFAULT 1,
+    pool_max       NUMBER         DEFAULT 5,
+    pool_timeout   NUMBER         DEFAULT 60,
+    ssl_enabled    NUMBER(1)      DEFAULT 0,
+    ssl_ca_cert    CLOB,
+    last_ping_at   TIMESTAMP,
+    last_ping_ok   NUMBER(1),
+    created_at     TIMESTAMP      DEFAULT SYSTIMESTAMP,
+    updated_at     TIMESTAMP      DEFAULT SYSTIMESTAMP
+  )`);
+
+  // 自動插入預設 ERP 來源（從 env 讀取，僅在表格為空時插入）
+  await migrateDefaultDbSource();
+
+  // ai_schema_definitions: 新增 source_db_id（Phase 1 migration）
+  await safeAddColumn('AI_SCHEMA_DEFINITIONS', 'SOURCE_DB_ID', 'NUMBER');
+  // 將舊的 db_connection='erp' 對應到 is_default=1 的來源
+  try {
+    await db.prepare(`
+      UPDATE ai_schema_definitions SET source_db_id = (
+        SELECT id FROM ai_db_sources WHERE is_default=1 AND ROWNUM=1
+      )
+      WHERE source_db_id IS NULL AND (db_connection='erp' OR db_connection IS NULL)
+    `).run();
+  } catch (e) {
+    console.warn('[Migration] source_db_id backfill:', e.message);
+  }
+
+  // ai_etl_jobs: 新增 source_db_id
+  await safeAddColumn('AI_ETL_JOBS', 'SOURCE_DB_ID', 'NUMBER');
+  try {
+    await db.prepare(`
+      UPDATE ai_etl_jobs SET source_db_id = (
+        SELECT id FROM ai_db_sources WHERE is_default=1 AND ROWNUM=1
+      )
+      WHERE source_db_id IS NULL
+    `).run();
+  } catch (e) {
+    console.warn('[Migration] etl source_db_id backfill:', e.message);
+  }
+}
+
+// ─── Default DB Source migration ───────────────────────────────────────────────
+
+async function migrateDefaultDbSource() {
+  try {
+    const existing = await db.prepare(`SELECT COUNT(*) AS CNT FROM ai_db_sources`).get();
+    if (Number(existing?.CNT ?? existing?.cnt ?? 0) > 0) return; // 已有資料，跳過
+
+    const host    = process.env.ERP_DB_HOST;
+    const port    = process.env.ERP_DB_PORT    || 1521;
+    const svc     = process.env.ERP_DB_SERVICE_NAME;
+    const user    = process.env.ERP_DB_USER;
+    const pwd     = process.env.ERP_DB_USER_PASSWORD;
+
+    if (!host || !svc || !user || !pwd) {
+      console.warn('[Migration] ERP env 未完整設定，跳過自動建立預設 DB 來源');
+      return;
+    }
+
+    // 密碼加密（使用與 dbSources.js 相同的金鑰）
+    const crypto = require('crypto');
+    const secret = process.env.DASHBOARD_DB_SECRET || process.env.JWT_SECRET || 'foxlink-db-secret-key';
+    const key    = crypto.scryptSync(secret, 'foxlink-db-salt-v1', 32);
+    const iv     = crypto.randomBytes(16);
+    const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+    const encrypted = Buffer.concat([cipher.update(pwd, 'utf8'), cipher.final()]);
+    const passwordEnc = `${iv.toString('hex')}:${cipher.getAuthTag().toString('hex')}:${encrypted.toString('hex')}`;
+
+    await db.prepare(`
+      INSERT INTO ai_db_sources
+        (name, db_type, host, port, service_name, username, password_enc, is_default, is_active)
+      VALUES (?,?,?,?,?,?,?,1,1)
+    `).run('ERP Oracle（預設）', 'oracle', host, Number(port), svc, user, passwordEnc);
+
+    console.log(`[Migration] 預設 DB 來源已建立: ${user}@${host}:${port}/${svc}`);
+  } catch (e) {
+    console.warn('[Migration] migrateDefaultDbSource error:', e.message);
+  }
 }
 
 // ─── Partition migration helpers ───────────────────────────────────────────────

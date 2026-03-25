@@ -23,7 +23,8 @@ import ApiKeysPanel from '../components/admin/ApiKeysPanel'
 import AiDashboardAdmin from '../components/admin/AiDashboardAdmin'
 import DataPermissionsPanel from '../components/admin/DataPermissionsPanel'
 import MonitorPage from '../components/monitor/MonitorPage'
-type Tab = 'users' | 'roles' | 'tokens' | 'audit' | 'keywords' | 'db' | 'mail' | 'llm' | 'vector-defaults' | 'cost' | 'scheduled' | 'mcp' | 'dify' | 'kb' | 'skills' | 'code-runners' | 'research' | 'api-keys' | 'ai-dashboard' | 'data-permissions' | 'monitor'
+import DbSourcesPanel from '../components/admin/DbSourcesPanel'
+type Tab = 'users' | 'roles' | 'tokens' | 'audit' | 'keywords' | 'db' | 'mail' | 'llm' | 'vector-defaults' | 'cost' | 'scheduled' | 'mcp' | 'dify' | 'kb' | 'skills' | 'code-runners' | 'research' | 'api-keys' | 'ai-dashboard' | 'data-permissions' | 'monitor' | 'db-sources'
 
 export default function AdminDashboard() {
   const [activeTab, setActiveTab] = useState<Tab>('users')
@@ -47,6 +48,7 @@ export default function AdminDashboard() {
     { id: 'code-runners', label: t('admin.tabs.codeRunners'), icon: <Code2 size={16} /> },
     { id: 'ai-dashboard', label: t('admin.tabs.aiDashboard'), icon: <MonitorPlay size={16} /> },
     { id: 'data-permissions', label: t('admin.tabs.dataPermissions'), icon: <Lock size={16} /> },
+    { id: 'db-sources', label: 'DB 來源管理', icon: <Database size={16} /> },
     { id: 'monitor', label: t('admin.tabs.monitor', '系統監控'), icon: <Activity size={16} /> },
     { id: 'db', label: t('admin.tabs.db'), icon: <Database size={16} /> },
     { id: 'mail', label: t('admin.tabs.mail'), icon: <Mail size={16} /> },
@@ -113,6 +115,7 @@ export default function AdminDashboard() {
           {activeTab === 'api-keys' && <ApiKeysPanel />}
           {activeTab === 'ai-dashboard' && <AiDashboardAdmin />}
           {activeTab === 'data-permissions' && <DataPermissionsPanel />}
+          {activeTab === 'db-sources' && <DbSourcesPanel />}
           {activeTab === 'monitor' && <MonitorPage />}
         </main>
       </div>

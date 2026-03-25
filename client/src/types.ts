@@ -197,6 +197,7 @@ export interface AiSchemaDef {
   source_type?: 'table' | 'view' | 'sql'
   source_sql?: string
   db_connection: string
+  source_db_id?: number
   business_notes?: string
   join_hints?: string
   base_conditions?: string
@@ -205,6 +206,22 @@ export interface AiSchemaDef {
   project_id?: number
   columns?: AiSchemaColumn[]
   where_only?: boolean   // 由 API 計算後注入，本身不存在 DB
+}
+
+export interface DbSource {
+  id: number
+  name: string
+  db_type: 'oracle' | 'mysql' | 'mssql'
+  host: string
+  port: number
+  service_name?: string
+  database_name?: string
+  schema_name?: string
+  username: string
+  is_active: number
+  is_default: number
+  last_ping_ok?: number
+  last_ping_at?: string
 }
 
 export interface AiSchemaJoin {

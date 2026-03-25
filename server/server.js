@@ -74,6 +74,8 @@ app.get('/api/health', (req, res) => res.json({ status: 'ok', timestamp: new Dat
     console.log('[Route] /api/v1 OK');
     app.use('/api/dashboard', require('./routes/dashboard'));
     console.log('[Route] /api/dashboard OK');
+    app.use('/api/db-sources', require('./routes/dbSources'));
+    console.log('[Route] /api/db-sources OK');
     app.use('/api/data-permissions', require('./routes/dataPermissions'));
     console.log('[Route] /api/data-permissions OK');
     app.use('/api/monitor', require('./routes/monitor'));

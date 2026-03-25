@@ -764,15 +764,16 @@ router.get('/designer/schemas', requireDesigner, async (req, res) => {
 router.post('/designer/schemas', requireDesigner, async (req, res) => {
   try {
     const db = require('../database-oracle').db;
-    const { table_name, display_name, display_name_en, display_name_vi, alias, source_type, source_sql, db_connection, business_notes, join_hints, base_conditions, vector_etl_job_id, columns, project_id } = req.body;
+    const { table_name, display_name, display_name_en, display_name_vi, alias, source_type, source_sql, db_connection, source_db_id, business_notes, join_hints, base_conditions, vector_etl_job_id, columns, project_id } = req.body;
     if (!table_name) return res.status(400).json({ error: 'table_name 為必填' });
     const r = await db.prepare(
-      `INSERT INTO ai_schema_definitions (table_name, display_name, display_name_en, display_name_vi, alias, source_type, source_sql, db_connection, business_notes, join_hints, base_conditions, vector_etl_job_id, created_by, project_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO ai_schema_definitions (table_name, display_name, display_name_en, display_name_vi, alias, source_type, source_sql, db_connection, source_db_id, business_notes, join_hints, base_conditions, vector_etl_job_id, created_by, project_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
       table_name, display_name || null, display_name_en || null, display_name_vi || null,
       alias || null, source_type || 'table', source_sql || null,
       db_connection || 'erp',
+      source_db_id || null,
       business_notes || null,
       join_hints ? JSON.stringify(join_hints) : null,
       Array.isArray(base_conditions) ? JSON.stringify(base_conditions) : (base_conditions || null),
@@ -818,7 +819,7 @@ router.post('/designer/schemas', requireDesigner, async (req, res) => {
 router.put('/designer/schemas/:id', requireDesigner, async (req, res) => {
   try {
     const db = require('../database-oracle').db;
-    const { table_name, display_name, display_name_en, display_name_vi, alias, source_type, source_sql, db_connection, business_notes, join_hints, base_conditions, vector_etl_job_id, is_active, project_id } = req.body;
+    const { table_name, display_name, display_name_en, display_name_vi, alias, source_type, source_sql, db_connection, source_db_id, business_notes, join_hints, base_conditions, vector_etl_job_id, is_active, project_id } = req.body;
     // 自動翻譯顯示名稱（若 EN/VI 未提供）
     let finalEn = display_name_en || null, finalVi = display_name_vi || null;
     if (display_name && (!finalEn || !finalVi)) {
@@ -831,13 +832,14 @@ router.put('/designer/schemas/:id', requireDesigner, async (req, res) => {
     await db.prepare(
       `UPDATE ai_schema_definitions SET
          table_name=?, display_name=?, display_name_en=?, display_name_vi=?, alias=?, source_type=?, source_sql=?,
-         db_connection=?, business_notes=?, join_hints=?, base_conditions=?, vector_etl_job_id=?, is_active=?,
+         db_connection=?, source_db_id=?, business_notes=?, join_hints=?, base_conditions=?, vector_etl_job_id=?, is_active=?,
          project_id=?, updated_at=SYSTIMESTAMP
        WHERE id=?`
     ).run(
       table_name, display_name || null, finalEn, finalVi,
       alias || null, source_type || 'table', source_sql || null,
       db_connection || 'erp',
+      source_db_id || null,
       business_notes || null,
       join_hints ? JSON.stringify(join_hints) : null,
       Array.isArray(base_conditions) ? JSON.stringify(base_conditions) : (base_conditions || null),
@@ -1121,7 +1123,7 @@ router.post('/designer/schemas/:id/refresh', requireDesigner, async (req, res) =
 
 // POST /api/dashboard/designer/schemas/import-oracle
 router.post('/designer/schemas/import-oracle', requireDesigner, async (req, res) => {
-  const { table_names, owner: defaultOwner = 'APPS', db_connection = 'erp' } = req.body;
+  const { table_names, owner: defaultOwner = 'APPS', db_connection = 'erp', source_db_id } = req.body;
   if (!Array.isArray(table_names) || table_names.length === 0)
     return res.status(400).json({ error: 'table_names 為必填陣列' });
   if (table_names.length > 50)
@@ -1147,7 +1149,10 @@ router.post('/designer/schemas/import-oracle', requireDesigner, async (req, res)
 
   try {
     const { db } = require('../database-oracle');
-    const erpPool = await require('../services/dashboardService').getErpPool();
+    const { getErpPool, getPoolBySourceId } = require('../services/dashboardService');
+    const targetPool = source_db_id
+      ? await getPoolBySourceId(Number(source_db_id), db)
+      : await getErpPool();
     const oracledb = require('oracledb');
 
     const byOwner = {};
@@ -1157,7 +1162,7 @@ router.post('/designer/schemas/import-oracle', requireDesigner, async (req, res)
     }
 
     const byTable = {};
-    const conn = await erpPool.getConnection();
+    const conn = await targetPool.getConnection();
     try {
       for (const [ownerKey, tables] of Object.entries(byOwner)) {
         const inList = tables.map(t => `'${t}'`).join(',');
@@ -1198,8 +1203,8 @@ router.post('/designer/schemas/import-oracle', requireDesigner, async (req, res)
       const fullName = key;
 
       let existing = await db.prepare(
-        `SELECT id FROM ai_schema_definitions WHERE table_name=? AND db_connection=?`
-      ).get(fullName, db_connection);
+        `SELECT id FROM ai_schema_definitions WHERE table_name=? AND (source_db_id=? OR (source_db_id IS NULL AND db_connection=?))`
+      ).get(fullName, source_db_id || null, db_connection);
 
       let schemaId;
       if (existing) {
@@ -1207,9 +1212,9 @@ router.post('/designer/schemas/import-oracle', requireDesigner, async (req, res)
         await db.prepare(`UPDATE ai_schema_definitions SET updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(schemaId);
       } else {
         const r = await db.prepare(
-          `INSERT INTO ai_schema_definitions (table_name, display_name, db_connection, created_by)
-           VALUES (?, ?, ?, ?)`
-        ).run(fullName, tname, db_connection, req.user.id);
+          `INSERT INTO ai_schema_definitions (table_name, display_name, db_connection, source_db_id, created_by)
+           VALUES (?, ?, ?, ?, ?)`
+        ).run(fullName, tname, db_connection, source_db_id || null, req.user.id);
         schemaId = r.lastInsertRowid;
       }
 
