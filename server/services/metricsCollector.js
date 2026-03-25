@@ -354,15 +354,27 @@ async function snapshotOnlineDept() {
       agg[key] = (agg[key] || 0) + 1;
     }
 
-    // Insert snapshot rows — 同批次共用同一個 snapshot_id，前端 group by 不會重複累加
-    const snapId = Math.floor(Date.now() / 1000);
+    // snapshot_id = 5 分鐘邊界（同一視窗內所有 pods 共用相同 key），搭配 MERGE 去重
+    const snapId = Math.floor(Date.now() / 300000) * 300; // Unix seconds rounded to 5-min
     const totalAgg = Object.values(agg).reduce((s, v) => s + v, 0);
     console.log(`[DeptSnapshot] sessions=${sessions.length} uniqueUsers=${seen.size} aggTotal=${totalAgg} snapId=${snapId}`);
     for (const [key, count] of Object.entries(agg)) {
       const { profit_center, org_section, org_group_name, dept_code } = JSON.parse(key);
-      await db.prepare(
-        `INSERT INTO online_dept_snapshots (snapshot_id, profit_center, org_section, org_group_name, dept_code, user_count) VALUES (?,?,?,?,?,?)`
-      ).run(snapId, profit_center, org_section, org_group_name, dept_code, count);
+      // MERGE：同 snapshot + dept 組合只保留一筆，多 pod 並發只有第一個寫入，後續 UPDATE（值相同不影響）
+      await db.prepare(`
+        MERGE INTO online_dept_snapshots dst
+        USING (SELECT ? AS snap_id, ? AS pc, ? AS os, ? AS og, ? AS dc, ? AS cnt FROM dual) src
+        ON (dst.snapshot_id = src.snap_id
+            AND NVL(dst.profit_center,'~')  = NVL(src.pc,'~')
+            AND NVL(dst.org_section,'~')    = NVL(src.os,'~')
+            AND NVL(dst.org_group_name,'~') = NVL(src.og,'~')
+            AND NVL(dst.dept_code,'~')      = NVL(src.dc,'~'))
+        WHEN NOT MATCHED THEN
+          INSERT (snapshot_id, profit_center, org_section, org_group_name, dept_code, user_count)
+          VALUES (src.snap_id, src.pc, src.os, src.og, src.dc, src.cnt)
+        WHEN MATCHED THEN
+          UPDATE SET dst.user_count = src.cnt, dst.collected_at = SYSTIMESTAMP
+      `).run(snapId, profit_center || null, org_section || null, org_group_name || null, dept_code || null, count);
     }
   } catch (e) {
     console.error('[MetricsCollector] snapshotOnlineDept error:', e.message);

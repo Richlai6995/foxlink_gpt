@@ -1210,6 +1210,33 @@ async function runMigrations(db) {
   )`);
   await safeAddColumn('ONLINE_DEPT_SNAPSHOTS', 'SNAPSHOT_ID', 'NUMBER');
 
+  // 確保 ONLINE_DEPT_SNAPSHOTS 有唯一約束（multi-pod 去重）
+  try {
+    const constraintExists = await db.prepare(
+      `SELECT COUNT(*) AS CNT FROM user_constraints
+       WHERE constraint_name='UQ_DEPT_SNAP_KEY' AND table_name='ONLINE_DEPT_SNAPSHOTS'`
+    ).get();
+    if (Number(constraintExists?.CNT ?? 0) === 0) {
+      // 先刪除重複列（保留最小 id 的那筆）
+      await db.prepare(`
+        DELETE FROM online_dept_snapshots
+        WHERE id NOT IN (
+          SELECT MIN(id) FROM online_dept_snapshots
+          GROUP BY snapshot_id, NVL(profit_center,'~'), NVL(org_section,'~'),
+                   NVL(org_group_name,'~'), NVL(dept_code,'~')
+        ) AND snapshot_id IS NOT NULL
+      `).run();
+      await db.prepare(`
+        ALTER TABLE online_dept_snapshots
+        ADD CONSTRAINT uq_dept_snap_key
+        UNIQUE (snapshot_id, profit_center, org_section, org_group_name, dept_code)
+      `).run();
+      console.log('[Migration] online_dept_snapshots: UNIQUE constraint added');
+    }
+  } catch (e) {
+    console.warn('[Migration] online_dept_snapshots unique constraint:', e.message);
+  }
+
   // Service 健康檢查設定
   await createTable('HEALTH_CHECKS', `CREATE TABLE health_checks (
     id              NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
