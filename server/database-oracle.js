@@ -1370,6 +1370,12 @@ async function runMigrations(db) {
   } catch (e) {
     console.warn('[Migration] etl source_db_id backfill:', e.message);
   }
+
+  // ── 補算 token_usage.cost=NULL 的歷史資料（非同步，不阻塞啟動）────────────
+  try {
+    const { recalcNullCosts } = require('./services/tokenService');
+    recalcNullCosts(db, 365).catch(e => console.warn('[Migration] recalcNullCosts:', e.message));
+  } catch (_) {}
 }
 
 // ─── Default DB Source migration ───────────────────────────────────────────────

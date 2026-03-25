@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { BarChart3, RefreshCw, Download, Plus, Trash2, DollarSign, Pencil, Check, X, Search } from 'lucide-react'
+import { BarChart3, RefreshCw, Download, Plus, Trash2, DollarSign, Pencil, Check, X, Search, Calculator } from 'lucide-react'
 import type { TokenUsage, TokenPrice, LlmModel } from '../../types'
 import api from '../../lib/api'
 
@@ -376,6 +376,15 @@ export default function TokenUsagePanel() {
           </button>
           <button onClick={load} disabled={loading} className="btn-ghost flex items-center gap-1.5">
             <RefreshCw size={14} className={loading ? 'animate-spin' : ''} /> 重新整理
+          </button>
+          <button onClick={async () => {
+            try {
+              const r = await api.post('/admin/token-usage/recalc-costs?days=365')
+              alert(`補算完成：修正 ${r.data.fixed} 筆，失敗 ${r.data.failed} 筆`)
+              load()
+            } catch (e: any) { alert('補算失敗：' + (e?.response?.data?.error || e.message)) }
+          }} disabled={loading} className="btn-ghost flex items-center gap-1.5 text-amber-600 hover:text-amber-700">
+            <Calculator size={14} /> 補算費用
           </button>
         </div>
       </div>

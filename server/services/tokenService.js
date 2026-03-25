@@ -33,15 +33,20 @@ async function normalizeModelKey(db, model) {
 async function calcCallCost(db, model, date, inputTokens, outputTokens, imageCount) {
   try {
     const DI = `TO_DATE(?, 'YYYY-MM-DD')`;
-    // 同時比對 key（直接）或 llm_models.name（管理員用顯示名稱設定時也能命中）
+    // 三種方式命中定價：
+    //   1. tp.model = model (直接比對，例如管理員把 token_prices.model 填成 key)
+    //   2. llm_models.key = model AND llm_models.name = tp.model (canonical key → 顯示名稱 → price)
+    //   3. llm_models.api_model = model AND llm_models.name = tp.model (raw API ID → 顯示名稱 → price)
     const price = await db.prepare(
       `SELECT tp.* FROM token_prices tp
-       WHERE (tp.model=? OR EXISTS (
-         SELECT 1 FROM llm_models lm WHERE lm.key=? AND lm.name=tp.model
-       ))
+       WHERE (
+         LOWER(tp.model)=LOWER(?)
+         OR EXISTS (SELECT 1 FROM llm_models lm WHERE LOWER(lm.key)=LOWER(?) AND LOWER(lm.name)=LOWER(tp.model))
+         OR EXISTS (SELECT 1 FROM llm_models lm WHERE LOWER(lm.api_model)=LOWER(?) AND LOWER(lm.name)=LOWER(tp.model))
+       )
        AND tp.start_date<=${DI} AND (tp.end_date IS NULL OR tp.end_date>=${DI})
        ORDER BY tp.start_date DESC FETCH FIRST 1 ROWS ONLY`
-    ).get(model, model, date, date);
+    ).get(model, model, model, date, date);
     if (!price) return { cost: null, currency: null };
 
     const useT2 = price.tier_threshold && price.price_input_tier2 != null && inputTokens > price.tier_threshold;
@@ -87,4 +92,69 @@ async function upsertTokenUsage(db, userId, date, model, inputTokens, outputToke
   }
 }
 
-module.exports = { upsertTokenUsage, calcCallCost };
+/**
+ * 重新計算 token_usage 中 cost=NULL 的所有資料列。
+ * 在 server 啟動 migration 時自動執行，也可由管理員手動觸發。
+ * @param {object} db
+ * @param {number} [limitDays=365] 只回溯幾天（避免全表掃描過久）
+ * @returns {Promise<{fixed: number, failed: number}>}
+ */
+async function recalcNullCosts(db, limitDays = 365) {
+  let fixed = 0, failed = 0;
+  try {
+    const nullRows = await db.prepare(
+      `SELECT id, user_id, TO_CHAR(usage_date,'YYYY-MM-DD') AS usage_date,
+              model, input_tokens, output_tokens, COALESCE(image_count,0) AS image_count
+       FROM token_usage
+       WHERE cost IS NULL
+         AND usage_date >= SYSDATE - ?
+       ORDER BY usage_date DESC`
+    ).all(limitDays);
+
+    for (const row of nullRows) {
+      try {
+        // normalizeModelKey 先嘗試把 raw api_model → canonical key
+        const normModel = await normalizeModelKey(db, row.model);
+        const { cost, currency } = await calcCallCost(
+          db, normModel, row.usage_date,
+          row.input_tokens || 0, row.output_tokens || 0, row.image_count || 0
+        );
+        if (cost == null) { failed++; continue; }
+
+        // 同時修正 model key（如有必要）
+        if (normModel !== row.model) {
+          // 嘗試 merge 到 canonical key 的同一天 row
+          const D = `TO_DATE(?, 'YYYY-MM-DD')`;
+          const canonical = await db.prepare(
+            `SELECT id FROM token_usage WHERE user_id=? AND usage_date=${D} AND model=? AND id<>?`
+          ).get(row.user_id, row.usage_date, normModel, row.id);
+          if (canonical) {
+            await db.prepare(
+              `UPDATE token_usage SET
+                 input_tokens=input_tokens+?, output_tokens=output_tokens+?,
+                 image_count=COALESCE(image_count,0)+?,
+                 cost=COALESCE(cost,0)+?, currency=COALESCE(?,currency)
+               WHERE id=?`
+            ).run(row.input_tokens||0, row.output_tokens||0, row.image_count||0, cost, currency, canonical.id);
+            await db.prepare('DELETE FROM token_usage WHERE id=?').run(row.id);
+            fixed++;
+            continue;
+          }
+          await db.prepare('UPDATE token_usage SET model=?, cost=?, currency=? WHERE id=?')
+            .run(normModel, cost, currency, row.id);
+        } else {
+          await db.prepare('UPDATE token_usage SET cost=?, currency=? WHERE id=?')
+            .run(cost, currency, row.id);
+        }
+        fixed++;
+      } catch (_) { failed++; }
+    }
+  } catch (e) {
+    console.error('[TokenService] recalcNullCosts error:', e.message);
+  }
+  if (fixed || failed)
+    console.log(`[TokenService] recalcNullCosts: fixed=${fixed} failed=${failed}`);
+  return { fixed, failed };
+}
+
+module.exports = { upsertTokenUsage, calcCallCost, recalcNullCosts };
