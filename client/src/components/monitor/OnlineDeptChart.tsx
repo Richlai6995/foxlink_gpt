@@ -31,20 +31,19 @@ export default function OnlineDeptChart() {
   const chartOption = useMemo(() => {
     if (data.length === 0) return null
 
-    // Step 1: sum rows with identical (exact_ts, dimValue) — one snapshot can have
-    //         multiple rows for the same profit_center but different org_section
-    const exactGroups: Record<string, Record<string, number>> = {}
+    // Step 1: group by 1-minute window — rows from the same snapshot share the same
+    //         minute even if INSERT timestamps differ by a few ms. Sum per dimValue.
+    const minuteGroups: Record<number, Record<string, number>> = {}
     for (const d of data) {
-      const ts = new Date(d.collected_at).getTime().toString()
+      const minuteTs = Math.floor(new Date(d.collected_at).getTime() / 60000) * 60000
       const dimValue = d[dimension] || 'Unknown'
-      if (!exactGroups[ts]) exactGroups[ts] = {}
-      exactGroups[ts][dimValue] = (exactGroups[ts][dimValue] || 0) + d.user_count
+      if (!minuteGroups[minuteTs]) minuteGroups[minuteTs] = {}
+      minuteGroups[minuteTs][dimValue] = (minuteGroups[minuteTs][dimValue] || 0) + d.user_count
     }
 
-    // Step 2: for each 5-min display bucket, keep only the LATEST snapshot's values.
-    //         Summing across multiple snapshots per bucket inflates counts.
+    // Step 2: for each 5-min display bucket, keep only the LATEST 1-min snapshot.
     const bucketLatest: Record<string, { ts: number; values: Record<string, number> }> = {}
-    for (const [tsStr, values] of Object.entries(exactGroups)) {
+    for (const [tsStr, values] of Object.entries(minuteGroups)) {
       const ts = parseInt(tsStr)
       const dt = new Date(ts)
       const bucket = `${dt.getMonth() + 1}/${dt.getDate()} ${dt.getHours().toString().padStart(2, '0')}:${(Math.floor(dt.getMinutes() / 5) * 5).toString().padStart(2, '0')}`
