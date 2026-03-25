@@ -351,12 +351,13 @@ async function snapshotOnlineDept() {
       agg[key] = (agg[key] || 0) + 1;
     }
 
-    // Insert snapshot rows
+    // Insert snapshot rows — 同批次共用同一個 snapshot_id，前端 group by 不會重複累加
+    const snapId = Math.floor(Date.now() / 1000);
     for (const [key, count] of Object.entries(agg)) {
       const { profit_center, org_section, org_group_name, dept_code } = JSON.parse(key);
       await db.prepare(
-        `INSERT INTO online_dept_snapshots (profit_center, org_section, org_group_name, dept_code, user_count) VALUES (?,?,?,?,?)`
-      ).run(profit_center, org_section, org_group_name, dept_code, count);
+        `INSERT INTO online_dept_snapshots (snapshot_id, profit_center, org_section, org_group_name, dept_code, user_count) VALUES (?,?,?,?,?,?)`
+      ).run(snapId, profit_center, org_section, org_group_name, dept_code, count);
     }
   } catch (e) {
     console.error('[MetricsCollector] snapshotOnlineDept error:', e.message);

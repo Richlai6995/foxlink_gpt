@@ -4,6 +4,7 @@ import ReactECharts from 'echarts-for-react'
 import api from '../../lib/api'
 
 interface DeptSnapshot {
+  snapshot_id: number | null
   collected_at: string
   profit_center: string
   org_section: string
@@ -31,20 +32,23 @@ export default function OnlineDeptChart() {
   const chartOption = useMemo(() => {
     if (data.length === 0) return null
 
-    // Step 1: group by 1-minute window — rows from the same snapshot share the same
-    //         minute even if INSERT timestamps differ by a few ms. Sum per dimValue.
-    const minuteGroups: Record<number, Record<string, number>> = {}
+    // Step 1: group by snapshot_id (same batch = exact same snapshot_id).
+    // Fallback: 舊資料無 snapshot_id 時用 1-minute window 作為 key。
+    const snapGroups: Record<string, { ts: number; values: Record<string, number> }> = {}
     for (const d of data) {
-      const minuteTs = Math.floor(new Date(d.collected_at).getTime() / 60000) * 60000
+      const key = d.snapshot_id != null
+        ? String(d.snapshot_id)
+        : String(Math.floor(new Date(d.collected_at).getTime() / 60000))
+      const ts = d.snapshot_id != null ? d.snapshot_id * 1000 : new Date(d.collected_at).getTime()
       const dimValue = d[dimension] || 'Unknown'
-      if (!minuteGroups[minuteTs]) minuteGroups[minuteTs] = {}
-      minuteGroups[minuteTs][dimValue] = (minuteGroups[minuteTs][dimValue] || 0) + d.user_count
+      if (!snapGroups[key]) snapGroups[key] = { ts, values: {} }
+      // 同 snapshot 同 dimValue 直接取（不 SUM — 每個 key 對應唯一 count）
+      snapGroups[key].values[dimValue] = (snapGroups[key].values[dimValue] || 0) + d.user_count
     }
 
-    // Step 2: for each 5-min display bucket, keep only the LATEST 1-min snapshot.
+    // Step 2: 每 5 分鐘顯示一個 bucket，取最新的 snapshot。
     const bucketLatest: Record<string, { ts: number; values: Record<string, number> }> = {}
-    for (const [tsStr, values] of Object.entries(minuteGroups)) {
-      const ts = parseInt(tsStr)
+    for (const { ts, values } of Object.values(snapGroups)) {
       const dt = new Date(ts)
       const bucket = `${dt.getMonth() + 1}/${dt.getDate()} ${dt.getHours().toString().padStart(2, '0')}:${(Math.floor(dt.getMinutes() / 5) * 5).toString().padStart(2, '0')}`
       if (!bucketLatest[bucket] || ts > bucketLatest[bucket].ts) {
@@ -52,7 +56,6 @@ export default function OnlineDeptChart() {
       }
     }
 
-    const timeSet = new Set<string>(Object.keys(bucketLatest))
     const seriesMap: Record<string, Record<string, number>> = {}
     for (const [bucket, { values }] of Object.entries(bucketLatest)) {
       for (const [dimValue, count] of Object.entries(values)) {
@@ -61,7 +64,7 @@ export default function OnlineDeptChart() {
       }
     }
 
-    const times = Array.from(timeSet).sort()
+    const times = Object.keys(bucketLatest).sort()
     const series = Object.entries(seriesMap).map(([name, timeData]) => ({
       name,
       type: 'line' as const,

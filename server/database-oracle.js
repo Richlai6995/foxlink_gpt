@@ -1200,6 +1200,7 @@ async function runMigrations(db) {
   // 線上人數部門統計快照
   await createTable('ONLINE_DEPT_SNAPSHOTS', `CREATE TABLE online_dept_snapshots (
     id              NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    snapshot_id     NUMBER,
     collected_at    TIMESTAMP DEFAULT SYSTIMESTAMP,
     profit_center   VARCHAR2(100),
     org_section     VARCHAR2(100),
@@ -1207,6 +1208,7 @@ async function runMigrations(db) {
     dept_code       VARCHAR2(100),
     user_count      NUMBER DEFAULT 0
   )`);
+  await safeAddColumn('ONLINE_DEPT_SNAPSHOTS', 'SNAPSHOT_ID', 'NUMBER');
 
   // Service 健康檢查設定
   await createTable('HEALTH_CHECKS', `CREATE TABLE health_checks (
