@@ -47,7 +47,7 @@ router.get('/active', async (req, res) => {
   const db = getDb();
   try {
     const kbs = await db.prepare(
-      `SELECT id, name, api_server, api_key, description FROM dify_knowledge_bases WHERE is_active=1 ORDER BY sort_order ASC`
+      `SELECT id, name, api_server, api_key, description, tags FROM dify_knowledge_bases WHERE is_active=1 ORDER BY sort_order ASC`
     ).all();
     res.json(kbs);
   } catch (e) {
@@ -62,7 +62,7 @@ router.get('/my', async (req, res) => {
     if (req.user.role === 'admin') {
       const kbs = await db.prepare(
         `SELECT id, name, description, api_server, api_key, is_public, public_approved,
-                name_zh, name_en, name_vi, desc_zh, desc_en, desc_vi
+                name_zh, name_en, name_vi, desc_zh, desc_en, desc_vi, tags
          FROM dify_knowledge_bases WHERE is_active=1 ORDER BY sort_order ASC`
       ).all();
       return res.json(kbs);
@@ -71,7 +71,7 @@ router.get('/my', async (req, res) => {
     const publicKbs = await db.prepare(
       `SELECT id, name, DBMS_LOB.SUBSTR(description, 2000, 1) AS description,
               api_server, api_key, is_public, public_approved, 1 AS is_readonly,
-              name_zh, name_en, name_vi, desc_zh, desc_en, desc_vi
+              name_zh, name_en, name_vi, desc_zh, desc_en, desc_vi, tags
        FROM dify_knowledge_bases WHERE is_active=1 AND is_public=1 AND public_approved=1
        ORDER BY sort_order ASC`
     ).all();
@@ -109,7 +109,7 @@ router.get('/my', async (req, res) => {
       privateKbs = await db.prepare(
         `SELECT id, name, DBMS_LOB.SUBSTR(description, 2000, 1) AS description,
                 api_server, api_key, is_public, public_approved, 0 AS is_readonly,
-                name_zh, name_en, name_vi, desc_zh, desc_en, desc_vi
+                name_zh, name_en, name_vi, desc_zh, desc_en, desc_vi, tags
          FROM dify_knowledge_bases
          WHERE id IN (${placeholders}) AND is_active=1
          ORDER BY sort_order ASC`
@@ -200,14 +200,15 @@ router.post('/', async (req, res) => {
   const db = getDb();
   try {
     const { name, api_server, api_key, description, is_active, sort_order,
-            name_zh, name_en, name_vi, desc_zh, desc_en, desc_vi } = req.body;
+            name_zh, name_en, name_vi, desc_zh, desc_en, desc_vi, tags } = req.body;
     if (!name || !api_server || !api_key) {
       return res.status(400).json({ error: '名稱、API Server 和 API Key 為必填' });
     }
+    const tagsStr = JSON.stringify(tags || []);
     const result = await db.prepare(
-      `INSERT INTO dify_knowledge_bases (name, api_server, api_key, description, is_active, sort_order)
-       VALUES (?, ?, ?, ?, ?, ?)`
-    ).run(name, api_server.replace(/\/$/, ''), api_key, description || null, is_active !== false ? 1 : 0, sort_order || 0);
+      `INSERT INTO dify_knowledge_bases (name, api_server, api_key, description, is_active, sort_order, tags)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
+    ).run(name, api_server.replace(/\/$/, ''), api_key, description || null, is_active !== false ? 1 : 0, sort_order || 0, tagsStr);
 
     const newId = result.lastInsertRowid;
     const trans = (name_zh !== undefined)
@@ -233,13 +234,14 @@ router.put('/:id', async (req, res) => {
     if (!kb) return res.status(404).json({ error: '找不到 DIFY 知識庫設定' });
 
     const { name, api_server, api_key, description, is_active, sort_order,
-            name_zh, name_en, name_vi, desc_zh, desc_en, desc_vi, is_public } = req.body;
+            name_zh, name_en, name_vi, desc_zh, desc_en, desc_vi, is_public, tags } = req.body;
     const finalName = name ?? kb.name;
     const finalDesc = description !== undefined ? (description || null) : kb.description;
     const newIsPublic = is_public !== undefined ? (is_public ? 1 : 0) : (kb.is_public || 0);
     const newPublicApproved = newIsPublic ? (kb.public_approved || 0) : 0;
+    const tagsStr = tags !== undefined ? JSON.stringify(tags || []) : kb.tags;
     await db.prepare(
-      `UPDATE dify_knowledge_bases SET name=?, api_server=?, api_key=?, description=?, is_active=?, sort_order=?, is_public=?, public_approved=?, updated_at=SYSTIMESTAMP WHERE id=?`
+      `UPDATE dify_knowledge_bases SET name=?, api_server=?, api_key=?, description=?, is_active=?, sort_order=?, is_public=?, public_approved=?, tags=?, updated_at=SYSTIMESTAMP WHERE id=?`
     ).run(
       finalName,
       api_server ? api_server.replace(/\/$/, '') : kb.api_server,
@@ -248,6 +250,7 @@ router.put('/:id', async (req, res) => {
       is_active !== undefined ? (is_active ? 1 : 0) : kb.is_active,
       sort_order !== undefined ? sort_order : kb.sort_order,
       newIsPublic, newPublicApproved,
+      tagsStr,
       req.params.id
     );
 

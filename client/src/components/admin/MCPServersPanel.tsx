@@ -6,6 +6,7 @@ import {
 import { useTranslation } from 'react-i18next'
 import api from '../../lib/api'
 import TranslationFields, { type TranslationData } from '../common/TranslationFields'
+import TagInput from '../common/TagInput'
 import ShareModal from '../dashboard/ShareModal'
 
 type TransportType = 'http-post' | 'http-sse' | 'streamable-http' | 'stdio' | 'auto'
@@ -27,6 +28,7 @@ interface McpServer {
   tools_json: string | null
   last_synced_at: string | null
   created_at: string
+  tags: string | null
   updated_at: string
 }
 
@@ -82,6 +84,7 @@ export default function MCPServersPanel() {
   const [logs, setLogs] = useState<McpCallLog[]>([])
   const [logsLoading, setLogsLoading] = useState(false)
   const [shareServer, setShareServer] = useState<McpServer | null>(null)
+  const [tags, setTags] = useState<string[]>([])
 
   const load = async () => {
     try {
@@ -101,6 +104,7 @@ export default function MCPServersPanel() {
     setEditing(null)
     setForm(emptyForm)
     setTrans({})
+    setTags([])
     setError('')
     setShowModal(true)
   }
@@ -118,6 +122,7 @@ export default function MCPServersPanel() {
       name_zh: (s as any).name_zh || null, name_en: (s as any).name_en || null, name_vi: (s as any).name_vi || null,
       desc_zh: (s as any).desc_zh || null, desc_en: (s as any).desc_en || null, desc_vi: (s as any).desc_vi || null,
     })
+    setTags((() => { try { return JSON.parse(s.tags || '[]') } catch { return [] } })())
     setError('')
     setShowModal(true)
   }
@@ -138,6 +143,7 @@ export default function MCPServersPanel() {
         command: form.command || null,
         args_json: form.args_json || null,
         env_json: form.env_json || null,
+        tags: tags,
         ...trans,
       }
       let res: any
@@ -414,11 +420,14 @@ export default function MCPServersPanel() {
       {/* Modal */}
       {showModal && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-lg p-6">
-            <h3 className="text-base font-semibold text-slate-800 mb-4">
-              {editing ? t('mcp.form.editTitle') : t('mcp.form.addTitle')}
-            </h3>
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-lg max-h-[90vh] flex flex-col">
+            <div className="px-6 pt-6 pb-2 shrink-0">
+              <h3 className="text-base font-semibold text-slate-800">
+                {editing ? t('mcp.form.editTitle') : t('mcp.form.addTitle')}
+              </h3>
+            </div>
 
+            <div className="overflow-y-auto flex-1 px-6 pb-2">
             <div className="space-y-3">
               <div>
                 <label className="block text-xs font-medium text-slate-600 mb-1">{t('mcp.form.name')} *</label>
@@ -518,6 +527,10 @@ export default function MCPServersPanel() {
                   className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
                 />
               </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">標籤 (Tags)</label>
+                <TagInput tags={tags} onChange={setTags} placeholder="輸入標籤後按 Enter" />
+              </div>
               <TranslationFields
                 data={trans}
                 onChange={setTrans}
@@ -573,8 +586,9 @@ export default function MCPServersPanel() {
             </div>
 
             {error && <p className="text-red-500 text-sm mt-3">{error}</p>}
+            </div>{/* end overflow-y-auto */}
 
-            <div className="flex justify-end gap-2 mt-5">
+            <div className="flex justify-end gap-2 px-6 py-4 border-t border-slate-100 shrink-0">
               <button onClick={() => setShowModal(false)} className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-lg transition">
                 {t('common.cancel')}
               </button>

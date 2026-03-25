@@ -1258,6 +1258,58 @@ async function runMigrations(db) {
     deployed_at   TIMESTAMP DEFAULT SYSTIMESTAMP
   )`);
 
+  // ── TAG 欄位 (MCP / DIFY KB / 自建 KB) ──────────────────────────────────────
+  await safeAddColumn('MCP_SERVERS',           'TAGS', "CLOB DEFAULT '[]'");
+  await safeAddColumn('DIFY_KNOWLEDGE_BASES',  'TAGS', "CLOB DEFAULT '[]'");
+  await safeAddColumn('KNOWLEDGE_BASES',       'TAGS', "CLOB DEFAULT '[]'");
+
+  // ── Skills 擴充欄位 ──────────────────────────────────────────────────────────
+  // KB 綁定
+  await safeAddColumn('SKILLS', 'SELF_KB_IDS',   "CLOB DEFAULT '[]'");
+  await safeAddColumn('SKILLS', 'KB_MODE',       "VARCHAR2(20) DEFAULT 'append'");
+  // Code skill → Gemini function declaration
+  await safeAddColumn('SKILLS', 'TOOL_SCHEMA',   'CLOB');
+  // Output Schema
+  await safeAddColumn('SKILLS', 'OUTPUT_SCHEMA',  'CLOB');
+  // Rate Limiting
+  await safeAddColumn('SKILLS', 'RATE_LIMIT_PER_USER', 'NUMBER');
+  await safeAddColumn('SKILLS', 'RATE_LIMIT_GLOBAL',   'NUMBER');
+  await safeAddColumn('SKILLS', 'RATE_LIMIT_WINDOW',   "VARCHAR2(10) DEFAULT 'hour'");
+  // 版本控制
+  await safeAddColumn('SKILLS', 'PROMPT_VERSION',    'NUMBER DEFAULT 1');
+  await safeAddColumn('SKILLS', 'PUBLISHED_PROMPT',  'CLOB');
+  await safeAddColumn('SKILLS', 'DRAFT_PROMPT',      'CLOB');
+  // Workflow JSON (for type='workflow')
+  await safeAddColumn('SKILLS', 'WORKFLOW_JSON',     'CLOB');
+
+  // session_skills 變數
+  await safeAddColumn('SESSION_SKILLS', 'VARIABLES_JSON', "CLOB DEFAULT '{}'");
+
+  // ── Skill Prompt 版本歷史表 ─────────────────────────────────────────────────
+  await createTable('SKILL_PROMPT_VERSIONS', `CREATE TABLE skill_prompt_versions (
+    id            NUMBER GENERATED AS IDENTITY PRIMARY KEY,
+    skill_id      NUMBER NOT NULL REFERENCES skills(id) ON DELETE CASCADE,
+    version       NUMBER NOT NULL,
+    system_prompt CLOB,
+    workflow_json CLOB,
+    changed_by    NUMBER REFERENCES users(id),
+    change_note   VARCHAR2(500),
+    created_at    TIMESTAMP DEFAULT SYSTIMESTAMP,
+    CONSTRAINT skill_ver_uq UNIQUE (skill_id, version)
+  )`);
+
+  // ── Skill Workflow 表 ───────────────────────────────────────────────────────
+  await createTable('SKILL_WORKFLOWS', `CREATE TABLE skill_workflows (
+    id              VARCHAR2(36) PRIMARY KEY,
+    skill_id        NUMBER NOT NULL REFERENCES skills(id) ON DELETE CASCADE,
+    version         NUMBER DEFAULT 1,
+    nodes_json      CLOB NOT NULL,
+    edges_json      CLOB NOT NULL,
+    variables_json  CLOB DEFAULT '{}',
+    created_at      TIMESTAMP DEFAULT SYSTIMESTAMP,
+    updated_at      TIMESTAMP DEFAULT SYSTIMESTAMP
+  )`);
+
   // ── Vector table partitioning ───────────────────────────────────────────────
   await migrateAiVectorStoreToPartitioned();
   await migrateKbChunksToPartitioned();

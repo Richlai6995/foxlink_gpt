@@ -292,6 +292,7 @@ CREATE TABLE mcp_servers (
   description   CLOB,
   is_active     NUMBER(1) DEFAULT 1,
   tools_json    CLOB,
+  tags          CLOB DEFAULT ''[]'',
   last_synced_at TIMESTAMP,
   created_at    TIMESTAMP DEFAULT SYSTIMESTAMP,
   updated_at    TIMESTAMP DEFAULT SYSTIMESTAMP
@@ -325,6 +326,7 @@ CREATE TABLE dify_knowledge_bases (
   description CLOB,
   is_active   NUMBER(1) DEFAULT 1,
   sort_order  NUMBER DEFAULT 0,
+  tags        CLOB DEFAULT ''[]'',
   created_at  TIMESTAMP DEFAULT SYSTIMESTAMP,
   updated_at  TIMESTAMP DEFAULT SYSTIMESTAMP
 )'; EXCEPTION WHEN OTHERS THEN IF SQLCODE = -955 THEN NULL; ELSE RAISE; END IF; END;
@@ -398,7 +400,18 @@ CREATE TABLE skills (
   mcp_tool_mode     VARCHAR2(20) DEFAULT ''append'',
   mcp_tool_ids      CLOB DEFAULT ''[]'',
   dify_kb_ids       CLOB DEFAULT ''[]'',
+  self_kb_ids       CLOB DEFAULT ''[]'',
+  kb_mode           VARCHAR2(20) DEFAULT ''append'',
   tags              CLOB DEFAULT ''[]'',
+  tool_schema       CLOB,
+  output_schema     CLOB,
+  rate_limit_per_user NUMBER,
+  rate_limit_global   NUMBER,
+  rate_limit_window   VARCHAR2(10) DEFAULT ''hour'',
+  prompt_version    NUMBER DEFAULT 1,
+  published_prompt  CLOB,
+  draft_prompt      CLOB,
+  workflow_json     CLOB,
   code_snippet      CLOB,
   code_packages     CLOB DEFAULT ''[]'',
   code_status       VARCHAR2(20) DEFAULT ''stopped'',
@@ -417,10 +430,40 @@ CREATE TABLE skills (
 -- ─── SESSION SKILLS ───────────────────────────────────────────────────────────
 BEGIN EXECUTE IMMEDIATE '
 CREATE TABLE session_skills (
-  session_id VARCHAR2(36) NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
-  skill_id   NUMBER NOT NULL REFERENCES skills(id) ON DELETE CASCADE,
-  sort_order NUMBER DEFAULT 0,
+  session_id     VARCHAR2(36) NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
+  skill_id       NUMBER NOT NULL REFERENCES skills(id) ON DELETE CASCADE,
+  sort_order     NUMBER DEFAULT 0,
+  variables_json CLOB DEFAULT ''{}'',
   PRIMARY KEY (session_id, skill_id)
+)'; EXCEPTION WHEN OTHERS THEN IF SQLCODE = -955 THEN NULL; ELSE RAISE; END IF; END;
+/
+
+-- ─── SKILL PROMPT VERSIONS ──────────────────────────────────────────────────
+BEGIN EXECUTE IMMEDIATE '
+CREATE TABLE skill_prompt_versions (
+  id            NUMBER GENERATED AS IDENTITY PRIMARY KEY,
+  skill_id      NUMBER NOT NULL REFERENCES skills(id) ON DELETE CASCADE,
+  version       NUMBER NOT NULL,
+  system_prompt CLOB,
+  workflow_json CLOB,
+  changed_by    NUMBER REFERENCES users(id),
+  change_note   VARCHAR2(500),
+  created_at    TIMESTAMP DEFAULT SYSTIMESTAMP,
+  CONSTRAINT skill_ver_uq UNIQUE (skill_id, version)
+)'; EXCEPTION WHEN OTHERS THEN IF SQLCODE = -955 THEN NULL; ELSE RAISE; END IF; END;
+/
+
+-- ─── SKILL WORKFLOWS ────────────────────────────────────────────────────────
+BEGIN EXECUTE IMMEDIATE '
+CREATE TABLE skill_workflows (
+  id              VARCHAR2(36) PRIMARY KEY,
+  skill_id        NUMBER NOT NULL REFERENCES skills(id) ON DELETE CASCADE,
+  version         NUMBER DEFAULT 1,
+  nodes_json      CLOB NOT NULL,
+  edges_json      CLOB NOT NULL,
+  variables_json  CLOB DEFAULT ''{}'',
+  created_at      TIMESTAMP DEFAULT SYSTIMESTAMP,
+  updated_at      TIMESTAMP DEFAULT SYSTIMESTAMP
 )'; EXCEPTION WHEN OTHERS THEN IF SQLCODE = -955 THEN NULL; ELSE RAISE; END IF; END;
 /
 
@@ -454,6 +497,8 @@ CREATE TABLE knowledge_bases (
   public_reviewed_by NUMBER REFERENCES users(id) ON DELETE SET NULL,
   public_reviewed_at TIMESTAMP,
   public_reject_reason VARCHAR2(500),
+  -- Tags
+  tags             CLOB DEFAULT ''[]'',
   -- Stats
   doc_count        NUMBER DEFAULT 0,
   chunk_count      NUMBER DEFAULT 0,

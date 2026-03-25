@@ -5,17 +5,19 @@ import { Plus, Search, Globe, Lock, GitFork, Send, Pencil, Trash2, Clock, X, Che
 import api from '../lib/api'
 import TranslationFields, { type TranslationData } from '../components/common/TranslationFields'
 import UserPicker from '../components/common/UserPicker'
+import TagInput from '../components/common/TagInput'
+import WorkflowEditor from '../components/workflow/WorkflowEditor'
 
 interface Skill {
     id: number
     name: string
     description: string
     icon: string
-    type: 'builtin' | 'external' | 'code'
+    type: 'builtin' | 'external' | 'code' | 'workflow'
     system_prompt?: string
     endpoint_url?: string
     endpoint_secret?: string
-    endpoint_mode: 'inject' | 'answer'
+    endpoint_mode: 'inject' | 'answer' | 'post_answer'
     model_key?: string | null
     mcp_tool_mode: 'append' | 'exclusive' | 'disable'
     mcp_tool_ids: number[]
@@ -30,6 +32,18 @@ interface Skill {
     code_packages?: string[]
     code_status?: string
     created_at: string
+    self_kb_ids: string[]
+    kb_mode: 'append' | 'exclusive' | 'disable'
+    tool_schema?: string
+    output_schema?: string
+    rate_limit_per_user?: number | null
+    rate_limit_global?: number | null
+    rate_limit_window?: 'minute' | 'hour' | 'day'
+    prompt_version?: number
+    published_prompt?: string
+    draft_prompt?: string
+    workflow_json?: string
+    prompt_variables?: string
 }
 
 interface Model { key: string; name: string }
@@ -37,11 +51,20 @@ interface Model { key: string; name: string }
 const ICONS = ['🤖', '🧠', '📝', '💡', '🔍', '📊', '🎯', '🛠️', '📚', '🌐', '⚡', '🔬', '💬', '🎨', '🔧', '📋', '🚀', '🏭']
 
 const EMPTY_FORM = {
-    name: '', description: '', icon: '🤖', type: 'builtin' as 'builtin' | 'external' | 'code',
+    name: '', description: '', icon: '🤖', type: 'builtin' as 'builtin' | 'external' | 'code' | 'workflow',
     system_prompt: '', endpoint_url: '', endpoint_secret: '', endpoint_mode: 'inject' as 'inject' | 'answer',
     model_key: '', mcp_tool_mode: 'append' as 'append' | 'exclusive' | 'disable',
     mcp_tool_ids: [] as number[], dify_kb_ids: [] as number[], tags: [] as string[],
     code_snippet: '', code_packages: [] as string[],
+    self_kb_ids: [] as string[],
+    kb_mode: 'append' as 'append' | 'exclusive' | 'disable',
+    tool_schema: '',
+    output_schema: '',
+    rate_limit_per_user: '' as string | number,
+    rate_limit_global: '' as string | number,
+    rate_limit_window: 'hour' as 'minute' | 'hour' | 'day',
+    prompt_variables: '[]',
+    workflow_json: '',
 }
 
 export default function SkillMarket() {
@@ -64,7 +87,13 @@ export default function SkillMarket() {
     const canCreateSkill = currentUser?.role === 'admin' || (currentUser as any)?.effective_allow_create_skill === true
     const [viewingSkill, setViewingSkill] = useState<Skill | null>(null)
     const [sharingSkill, setSharingSkill] = useState<Skill | null>(null)
-    const [editorTab, setEditorTab] = useState<'編輯' | '呼叫歷史'>('編輯')
+    const [editorTab, setEditorTab] = useState<'basic' | 'tools' | 'io' | 'advanced' | 'history'>('basic')
+    const [availableKbs, setAvailableKbs] = useState<{id: string; name: string}[]>([])
+    const [availableDifyKbs, setAvailableDifyKbs] = useState<{id: number; name: string}[]>([])
+    const [availableMcpServers, setAvailableMcpServers] = useState<{id: number; name: string}[]>([])
+    const [availableSkillsList, setAvailableSkillsList] = useState<{id: number; name: string}[]>([])
+    const [versionHistory, setVersionHistory] = useState<any[]>([])
+    const [showVersions, setShowVersions] = useState(false)
     const [trans, setTrans] = useState<TranslationData>({})
     const [translating, setTranslating] = useState(false)
 
@@ -74,12 +103,19 @@ export default function SkillMarket() {
             const params: Record<string, string> = {}
             if (q) params.q = q
             if (typeFilter) params.type = typeFilter
-            const [skillsRes, modelsRes] = await Promise.all([
+            const [skillsRes, modelsRes, kbRes, difyRes, mcpRes] = await Promise.all([
                 api.get('/skills', { params }),
                 api.get('/chat/models'),
+                api.get('/kb').catch(() => ({ data: [] })),
+                api.get('/dify-kb/my').catch(() => ({ data: [] })),
+                api.get('/mcp-servers/my').catch(() => ({ data: [] })),
             ])
             setSkills(skillsRes.data)
             setModels(modelsRes.data)
+            setAvailableKbs(kbRes.data.map((k: any) => ({ id: k.id, name: k.name })))
+            setAvailableDifyKbs(difyRes.data.map((k: any) => ({ id: k.id, name: k.name })))
+            setAvailableMcpServers(mcpRes.data.map((s: any) => ({ id: s.id, name: s.name })))
+            setAvailableSkillsList(skillsRes.data.map((s: any) => ({ id: s.id, name: s.name })))
         } catch (e: any) {
             setError(e.response?.data?.error || '載入失敗')
         } finally {
@@ -89,7 +125,7 @@ export default function SkillMarket() {
 
     useEffect(() => { load() }, [load])
 
-    const openCreate = () => { setEditingSkill(null); setForm({ ...EMPTY_FORM }); setTagInput(''); setTrans({}); setEditorTab('編輯'); setShowEditor(true) }
+    const openCreate = () => { setEditingSkill(null); setForm({ ...EMPTY_FORM }); setTagInput(''); setTrans({}); setEditorTab('basic'); setShowEditor(true); setVersionHistory([]) }
     const openEdit = async (sk: Skill) => {
         setEditingSkill(sk)
         setForm({
@@ -103,6 +139,15 @@ export default function SkillMarket() {
             tags: sk.tags || [],
             code_snippet: sk.code_snippet || '',
             code_packages: sk.code_packages || [],
+            self_kb_ids: sk.self_kb_ids || [],
+            kb_mode: sk.kb_mode || 'append',
+            tool_schema: typeof sk.tool_schema === 'object' ? JSON.stringify(sk.tool_schema, null, 2) : (sk.tool_schema || ''),
+            output_schema: typeof sk.output_schema === 'object' ? JSON.stringify(sk.output_schema, null, 2) : (sk.output_schema || ''),
+            rate_limit_per_user: sk.rate_limit_per_user ?? '',
+            rate_limit_global: sk.rate_limit_global ?? '',
+            rate_limit_window: sk.rate_limit_window || 'hour',
+            prompt_variables: typeof sk.prompt_variables === 'object' ? JSON.stringify(sk.prompt_variables, null, 2) : (sk.prompt_variables || '[]'),
+            workflow_json: typeof sk.workflow_json === 'object' ? JSON.stringify(sk.workflow_json, null, 2) : (sk.workflow_json || ''),
         })
         setTrans({
             name_zh: (sk as any).name_zh || null, name_en: (sk as any).name_en || null, name_vi: (sk as any).name_vi || null,
@@ -110,8 +155,9 @@ export default function SkillMarket() {
         })
         setTagInput('')
         setPkgInput('')
-        setEditorTab('編輯')
+        setEditorTab('basic')
         setShowEditor(true)
+        loadVersionHistory(sk.id)
     }
 
     const save = async () => {
@@ -123,7 +169,18 @@ export default function SkillMarket() {
         const pendingPkg = pkgInput.trim()
         const finalTags = pendingTag && !form.tags.includes(pendingTag) ? [...form.tags, pendingTag] : form.tags
         const finalPkgs = pendingPkg && !form.code_packages.includes(pendingPkg) ? [...form.code_packages, pendingPkg] : form.code_packages
-        const payload = { ...form, tags: finalTags, code_packages: finalPkgs, ...trans }
+        const payload = {
+            ...form, tags: finalTags, code_packages: finalPkgs, ...trans,
+            self_kb_ids: JSON.stringify(form.self_kb_ids),
+            kb_mode: form.kb_mode,
+            tool_schema: form.tool_schema || null,
+            output_schema: form.output_schema || null,
+            rate_limit_per_user: form.rate_limit_per_user ? Number(form.rate_limit_per_user) : null,
+            rate_limit_global: form.rate_limit_global ? Number(form.rate_limit_global) : null,
+            rate_limit_window: form.rate_limit_window,
+            prompt_variables: form.prompt_variables || '[]',
+            workflow_json: form.workflow_json || null,
+        }
         setTranslating(true)
         try {
             if (editingSkill) {
@@ -149,6 +206,39 @@ export default function SkillMarket() {
             setSaving(false)
             setTranslating(false)
         }
+    }
+
+    const setField = (key: string, value: any) => setForm(p => ({ ...p, [key]: value }))
+
+    const handlePublish = async () => {
+        if (!editingSkill) return
+        const note = prompt('版本備注 (選填):')
+        try {
+            await api.post(`/skills/${editingSkill.id}/publish`, { change_note: note || '' })
+            alert('已發布')
+            loadVersionHistory(editingSkill.id)
+            load()
+        } catch (e: any) { alert(e.response?.data?.error || '發布失敗') }
+    }
+
+    const handleRollback = async (version: number) => {
+        if (!editingSkill || !confirm(`確定要回滾到 v${version}？`)) return
+        try {
+            await api.post(`/skills/${editingSkill.id}/rollback/${version}`)
+            alert(`已回滾到 v${version}`)
+            const res = await api.get(`/skills/${editingSkill.id}`)
+            setEditingSkill(res.data)
+            setField('system_prompt', res.data.system_prompt || '')
+            setField('workflow_json', res.data.workflow_json || '')
+            loadVersionHistory(editingSkill.id)
+        } catch (e: any) { alert(e.response?.data?.error || '回滾失敗') }
+    }
+
+    const loadVersionHistory = async (id: number) => {
+        try {
+            const res = await api.get(`/skills/${id}/versions`)
+            setVersionHistory(res.data)
+        } catch { setVersionHistory([]) }
     }
 
     const del = async (sk: Skill) => {
@@ -217,6 +307,7 @@ export default function SkillMarket() {
                         <option value="builtin">內建</option>
                         <option value="external">外部</option>
                         <option value="code">內部程式</option>
+                        <option value="workflow">工作流</option>
                     </select>
                 </div>
 
@@ -258,182 +349,357 @@ export default function SkillMarket() {
                             <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
                                 <div className="flex items-center gap-4">
                                     <h3 className="font-semibold text-slate-800">{editingSkill ? '編輯技能' : '建立技能'}</h3>
-                                    {editingSkill && (
-                                        <div className="flex gap-1 border border-slate-200 rounded-lg p-0.5">
-                                            {(['編輯', '呼叫歷史'] as const).map((t) => (
-                                                <button key={t} onClick={() => setEditorTab(t)}
-                                                    className={`px-3 py-1 rounded text-xs font-medium transition ${editorTab === t ? 'bg-blue-600 text-white' : 'text-slate-500 hover:text-slate-700'}`}>
-                                                    {t}
-                                                </button>
-                                            ))}
-                                        </div>
-                                    )}
                                 </div>
                                 <button onClick={() => setShowEditor(false)} className="p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100"><X size={16} /></button>
                             </div>
-                            {editorTab === '呼叫歷史' && editingSkill ? (
-                                <SkillCallHistory skillId={editingSkill.id} />
-                            ) : null}
-                            <div className="p-6 space-y-4" style={editorTab === '呼叫歷史' ? { display: 'none' } : {}}>
-                                {/* Basic */}
-                                <div className="flex gap-3">
-                                    <div>
-                                        <label className="block text-xs font-medium text-slate-600 mb-1">圖示</label>
-                                        <div className="relative">
-                                            <select value={form.icon} onChange={e => setForm(p => ({ ...p, icon: e.target.value }))}
-                                                className="appearance-none w-16 text-center text-xl border border-slate-200 rounded-lg py-2 focus:outline-none focus:ring-2 focus:ring-blue-300">
-                                                {ICONS.map(i => <option key={i} value={i}>{i}</option>)}
-                                            </select>
-                                            <ChevronDown size={10} className="absolute right-1 bottom-3 text-slate-400 pointer-events-none" />
-                                        </div>
-                                    </div>
-                                    <div className="flex-1">
-                                        <label className="block text-xs font-medium text-slate-600 mb-1">名稱 *</label>
-                                        <input value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))}
-                                            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300" />
-                                    </div>
-                                </div>
-                                <div>
-                                    <label className="block text-xs font-medium text-slate-600 mb-1">描述</label>
-                                    <textarea value={form.description} rows={2} onChange={e => setForm(p => ({ ...p, description: e.target.value }))}
-                                        className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 resize-none" />
-                                </div>
+                            {/* Tab bar */}
+                            <div className="flex gap-1 border-b border-slate-100 px-6 pt-2">
+                                {([
+                                    ['basic', '基本資訊'],
+                                    ['tools', '工具綁定'],
+                                    ['io', '輸入/輸出'],
+                                    ['advanced', '進階設定'],
+                                    ...(editingSkill ? [['history', '版本歷史']] : []),
+                                ] as [typeof editorTab, string][]).map(([key, label]) => (
+                                    <button key={key} onClick={() => setEditorTab(key)}
+                                        className={`px-3 py-2 text-xs font-medium transition border-b-2 ${editorTab === key ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>
+                                        {label}
+                                    </button>
+                                ))}
+                            </div>
 
-                                <TranslationFields
-                                    data={trans}
-                                    onChange={setTrans}
-                                    translateUrl={editingSkill ? `/skills/${editingSkill.id}/translate` : undefined}
-                                    hasDescription
-                                    translating={translating}
-                                />
-
-                                {/* Type */}
-                                <div>
-                                    <label className="block text-xs font-medium text-slate-600 mb-1">類型</label>
-                                    <div className="flex gap-2 flex-wrap">
-                                        {(['builtin', 'external'] as const).map(t => (
-                                            <button key={t} onClick={() => setForm(p => ({ ...p, type: t }))}
-                                                className={`px-4 py-1.5 rounded-lg text-sm border transition ${form.type === t ? 'bg-blue-600 text-white border-blue-600' : 'border-slate-200 text-slate-600 hover:border-blue-300'}`}>
-                                                {t === 'builtin' ? '內建 Prompt' : '外部 Endpoint'}
-                                            </button>
-                                        ))}
-                                        {canCodeSkill && (
-                                            <button onClick={() => setForm(p => ({ ...p, type: 'code' }))}
-                                                className={`px-4 py-1.5 rounded-lg text-sm border transition flex items-center gap-1 ${form.type === 'code' ? 'bg-emerald-600 text-white border-emerald-600' : 'border-slate-200 text-slate-600 hover:border-emerald-300'}`}>
-                                                <Code2 size={13} />內部程式
-                                            </button>
-                                        )}
-                                    </div>
-                                </div>
-
-                                {form.type === 'builtin' ? (
-                                    <div>
-                                        <label className="block text-xs font-medium text-slate-600 mb-1">System Prompt</label>
-                                        <textarea value={form.system_prompt} rows={6} onChange={e => setForm(p => ({ ...p, system_prompt: e.target.value }))}
-                                            placeholder="輸入給 AI 的角色設定與指令..."
-                                            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-300 resize-y" />
-                                    </div>
-                                ) : form.type === 'external' ? (
-                                    <div className="space-y-3">
-                                        <div>
-                                            <label className="block text-xs font-medium text-slate-600 mb-1">Endpoint URL</label>
-                                            <input value={form.endpoint_url} onChange={e => setForm(p => ({ ...p, endpoint_url: e.target.value }))}
-                                                placeholder="https://your-service.com/skill"
-                                                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300" />
-                                        </div>
-                                        <div>
-                                            <label className="block text-xs font-medium text-slate-600 mb-1">Bearer Token（選填）</label>
-                                            <input type="password" value={form.endpoint_secret} onChange={e => setForm(p => ({ ...p, endpoint_secret: e.target.value }))}
-                                                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300" />
-                                        </div>
-                                        <div>
-                                            <label className="block text-xs font-medium text-slate-600 mb-1">回應模式</label>
-                                            <div className="flex gap-2">
-                                                {(['inject', 'answer'] as const).map(m => (
-                                                    <button key={m} onClick={() => setForm(p => ({ ...p, endpoint_mode: m }))}
-                                                        className={`px-3 py-1.5 rounded-lg text-xs border transition ${form.endpoint_mode === m ? 'bg-indigo-600 text-white border-indigo-600' : 'border-slate-200 text-slate-600 hover:border-indigo-300'}`}>
-                                                        {m === 'inject' ? 'Inject（補充 Prompt）' : 'Answer（直接回答）'}
-                                                    </button>
-                                                ))}
+                            <div className="p-6 space-y-4">
+                                {/* ─── Basic tab ─── */}
+                                {editorTab === 'basic' && (
+                                    <div className="space-y-4">
+                                        <div className="flex gap-3">
+                                            <div>
+                                                <label className="block text-xs font-medium text-slate-600 mb-1">圖示</label>
+                                                <div className="relative">
+                                                    <select value={form.icon} onChange={e => setForm(p => ({ ...p, icon: e.target.value }))}
+                                                        className="appearance-none w-16 text-center text-xl border border-slate-200 rounded-lg py-2 focus:outline-none focus:ring-2 focus:ring-blue-300">
+                                                        {ICONS.map(i => <option key={i} value={i}>{i}</option>)}
+                                                    </select>
+                                                    <ChevronDown size={10} className="absolute right-1 bottom-3 text-slate-400 pointer-events-none" />
+                                                </div>
+                                            </div>
+                                            <div className="flex-1">
+                                                <label className="block text-xs font-medium text-slate-600 mb-1">名稱 *</label>
+                                                <input value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))}
+                                                    className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300" />
                                             </div>
                                         </div>
-                                    </div>
-                                ) : (
-                                    /* code type */
-                                    <div className="space-y-3">
-                                        <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-700">
-                                            儲存後請至後台「Code Runners」頁簽啟動此 Skill。handler 需 export 一個 async function，回傳 {'{ system_prompt }'} 或 {'{ content }'}。
-                                        </div>
                                         <div>
-                                            <label className="block text-xs font-medium text-slate-600 mb-1">Node.js Handler 程式碼</label>
-                                            <textarea value={form.code_snippet} rows={12}
-                                                onChange={e => setForm(p => ({ ...p, code_snippet: e.target.value }))}
-                                                placeholder={`// 範例\nmodule.exports = async function handler(body) {\n  const { user_message } = body;\n  // 可 require 已安裝的 npm 套件\n  return { system_prompt: '相關資訊：' + user_message };\n};`}
-                                                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-emerald-300 resize-y bg-slate-950 text-emerald-300" />
+                                            <label className="block text-xs font-medium text-slate-600 mb-1">描述</label>
+                                            <textarea value={form.description} rows={2} onChange={e => setForm(p => ({ ...p, description: e.target.value }))}
+                                                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 resize-none" />
                                         </div>
+
+                                        <TranslationFields
+                                            data={trans}
+                                            onChange={setTrans}
+                                            translateUrl={editingSkill ? `/skills/${editingSkill.id}/translate` : undefined}
+                                            hasDescription
+                                            translating={translating}
+                                        />
+
+                                        {/* Type */}
                                         <div>
-                                            <label className="block text-xs font-medium text-slate-600 mb-1">NPM 套件（安裝後才可 require）</label>
-                                            <div className="flex flex-wrap gap-1 mb-2">
-                                                {form.code_packages.map(p => (
-                                                    <span key={p} className="inline-flex items-center gap-1 px-2 py-0.5 bg-emerald-100 rounded text-xs text-emerald-700">
-                                                        {p}<button type="button" onClick={() => setForm(f => ({ ...f, code_packages: f.code_packages.filter(x => x !== p) }))}><X size={10} /></button>
+                                            <label className="block text-xs font-medium text-slate-600 mb-1">類型</label>
+                                            <div className="flex gap-2 flex-wrap">
+                                                {(['builtin', 'external'] as const).map(t => (
+                                                    <button key={t} onClick={() => setForm(p => ({ ...p, type: t }))}
+                                                        className={`px-4 py-1.5 rounded-lg text-sm border transition ${form.type === t ? 'bg-blue-600 text-white border-blue-600' : 'border-slate-200 text-slate-600 hover:border-blue-300'}`}>
+                                                        {t === 'builtin' ? '內建 Prompt' : '外部 Endpoint'}
+                                                    </button>
+                                                ))}
+                                                {canCodeSkill && (
+                                                    <button onClick={() => setForm(p => ({ ...p, type: 'code' }))}
+                                                        className={`px-4 py-1.5 rounded-lg text-sm border transition flex items-center gap-1 ${form.type === 'code' ? 'bg-emerald-600 text-white border-emerald-600' : 'border-slate-200 text-slate-600 hover:border-emerald-300'}`}>
+                                                        <Code2 size={13} />內部程式
+                                                    </button>
+                                                )}
+                                                <button onClick={() => setForm(p => ({ ...p, type: 'workflow' }))}
+                                                    className={`px-4 py-1.5 rounded-lg text-sm border transition ${form.type === 'workflow' ? 'bg-orange-600 text-white border-orange-600' : 'border-slate-200 text-slate-600 hover:border-orange-300'}`}>
+                                                    工作流
+                                                </button>
+                                            </div>
+                                        </div>
+
+                                        {/* Tags */}
+                                        <div>
+                                            <label className="block text-xs font-medium text-slate-600 mb-1">標籤 *</label>
+                                            <div className="flex gap-2 flex-wrap mb-2">
+                                                {form.tags.map(t => (
+                                                    <span key={t} className="inline-flex items-center gap-1 px-2 py-0.5 bg-slate-100 rounded text-xs text-slate-600">
+                                                        {t}<button onClick={() => setForm(p => ({ ...p, tags: p.tags.filter(x => x !== t) }))}><X size={10} /></button>
                                                     </span>
                                                 ))}
                                             </div>
                                             <div className="flex gap-2">
-                                                <input value={pkgInput} onChange={e => setPkgInput(e.target.value)}
-                                                    onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), addPkg())}
-                                                    placeholder="axios, mssql... 後按 Enter"
-                                                    className="flex-1 border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-300" />
-                                                <button type="button" onClick={addPkg} className="px-3 py-1.5 border border-slate-200 rounded-lg text-sm text-slate-600 hover:border-emerald-300">新增</button>
+                                                <input value={tagInput} onChange={e => setTagInput(e.target.value)}
+                                                    onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), addTag())}
+                                                    placeholder="輸入標籤後按 Enter"
+                                                    className="flex-1 border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300" />
+                                                <button onClick={addTag} className="px-3 py-1.5 border border-slate-200 rounded-lg text-sm text-slate-600 hover:border-blue-300">新增</button>
                                             </div>
                                         </div>
+
+                                        {/* System Prompt (builtin) */}
+                                        {form.type === 'builtin' && (
+                                            <div>
+                                                <label className="block text-xs font-medium text-slate-600 mb-1">System Prompt</label>
+                                                <textarea value={form.system_prompt} rows={6} onChange={e => setForm(p => ({ ...p, system_prompt: e.target.value }))}
+                                                    placeholder="輸入給 AI 的角色設定與指令..."
+                                                    className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-300 resize-y" />
+                                            </div>
+                                        )}
+
+                                        {/* External type fields */}
+                                        {form.type === 'external' && (
+                                            <div className="space-y-3">
+                                                <div>
+                                                    <label className="block text-xs font-medium text-slate-600 mb-1">Endpoint URL</label>
+                                                    <input value={form.endpoint_url} onChange={e => setForm(p => ({ ...p, endpoint_url: e.target.value }))}
+                                                        placeholder="https://your-service.com/skill"
+                                                        className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300" />
+                                                </div>
+                                                <div>
+                                                    <label className="block text-xs font-medium text-slate-600 mb-1">Bearer Token（選填）</label>
+                                                    <input type="password" value={form.endpoint_secret} onChange={e => setForm(p => ({ ...p, endpoint_secret: e.target.value }))}
+                                                        className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300" />
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {/* Code type fields */}
+                                        {form.type === 'code' && (
+                                            <div className="space-y-3">
+                                                <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-700">
+                                                    儲存後請至後台「Code Runners」頁簽啟動此 Skill。handler 需 export 一個 async function，回傳 {'{ system_prompt }'} 或 {'{ content }'}。
+                                                </div>
+                                                <div>
+                                                    <label className="block text-xs font-medium text-slate-600 mb-1">Node.js Handler 程式碼</label>
+                                                    <textarea value={form.code_snippet} rows={12}
+                                                        onChange={e => setForm(p => ({ ...p, code_snippet: e.target.value }))}
+                                                        placeholder={`// 範例\nmodule.exports = async function handler(body) {\n  const { user_message } = body;\n  // 可 require 已安裝的 npm 套件\n  return { system_prompt: '相關資訊：' + user_message };\n};`}
+                                                        className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-emerald-300 resize-y bg-slate-950 text-emerald-300" />
+                                                </div>
+                                                <div>
+                                                    <label className="block text-xs font-medium text-slate-600 mb-1">NPM 套件（安裝後才可 require）</label>
+                                                    <div className="flex flex-wrap gap-1 mb-2">
+                                                        {form.code_packages.map(p => (
+                                                            <span key={p} className="inline-flex items-center gap-1 px-2 py-0.5 bg-emerald-100 rounded text-xs text-emerald-700">
+                                                                {p}<button type="button" onClick={() => setForm(f => ({ ...f, code_packages: f.code_packages.filter(x => x !== p) }))}><X size={10} /></button>
+                                                            </span>
+                                                        ))}
+                                                    </div>
+                                                    <div className="flex gap-2">
+                                                        <input value={pkgInput} onChange={e => setPkgInput(e.target.value)}
+                                                            onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), addPkg())}
+                                                            placeholder="axios, mssql... 後按 Enter"
+                                                            className="flex-1 border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-300" />
+                                                        <button type="button" onClick={addPkg} className="px-3 py-1.5 border border-slate-200 rounded-lg text-sm text-slate-600 hover:border-emerald-300">新增</button>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {/* Workflow editor */}
+                                        {form.type === 'workflow' && (
+                                            <div className="mt-3">
+                                                <label className="block text-xs text-slate-500 mb-1">工作流程編輯器</label>
+                                                <WorkflowEditor
+                                                    value={form.workflow_json}
+                                                    onChange={(json) => setField('workflow_json', json)}
+                                                    availableKbs={availableKbs}
+                                                    availableDifyKbs={availableDifyKbs}
+                                                    availableMcpServers={availableMcpServers}
+                                                    availableSkills={availableSkillsList}
+                                                    availableModels={models}
+                                                />
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+
+                                {/* ─── Tools tab ─── */}
+                                {editorTab === 'tools' && (
+                                    <div className="space-y-4">
+                                        {/* MCP Tool Mode */}
                                         <div>
-                                            <label className="block text-xs font-medium text-slate-600 mb-1">回應模式</label>
-                                            <div className="flex gap-2">
-                                                {(['inject', 'answer'] as const).map(m => (
-                                                    <button key={m} type="button" onClick={() => setForm(p => ({ ...p, endpoint_mode: m }))}
-                                                        className={`px-3 py-1.5 rounded-lg text-xs border transition ${form.endpoint_mode === m ? 'bg-indigo-600 text-white border-indigo-600' : 'border-slate-200 text-slate-600 hover:border-indigo-300'}`}>
-                                                        {m === 'inject' ? 'Inject（補充 Prompt）' : 'Answer（直接回答）'}
-                                                    </button>
+                                            <label className="block text-xs text-slate-500 mb-1">MCP 工具模式</label>
+                                            <select value={form.mcp_tool_mode} onChange={e => setField('mcp_tool_mode', e.target.value)}
+                                                className="w-full border rounded px-3 py-2 text-sm">
+                                                <option value="append">附加</option>
+                                                <option value="exclusive">獨佔</option>
+                                                <option value="disable">停用</option>
+                                            </select>
+                                        </div>
+
+                                        {/* Self KB binding */}
+                                        <div>
+                                            <label className="block text-xs text-slate-500 mb-1">自建知識庫綁定</label>
+                                            <div className="space-y-1 max-h-40 overflow-y-auto border rounded p-2">
+                                                {availableKbs.map(kb => (
+                                                    <label key={kb.id} className="flex items-center gap-2 text-sm">
+                                                        <input type="checkbox" checked={form.self_kb_ids.includes(kb.id)}
+                                                            onChange={e => setField('self_kb_ids', e.target.checked
+                                                                ? [...form.self_kb_ids, kb.id]
+                                                                : form.self_kb_ids.filter(x => x !== kb.id))} />
+                                                        {kb.name}
+                                                    </label>
                                                 ))}
+                                                {availableKbs.length === 0 && <span className="text-xs text-slate-400">無可用知識庫</span>}
+                                            </div>
+                                        </div>
+
+                                        {/* DIFY KB binding */}
+                                        <div>
+                                            <label className="block text-xs text-slate-500 mb-1">DIFY 知識庫綁定</label>
+                                            <div className="space-y-1 max-h-40 overflow-y-auto border rounded p-2">
+                                                {availableDifyKbs.map(kb => (
+                                                    <label key={kb.id} className="flex items-center gap-2 text-sm">
+                                                        <input type="checkbox" checked={form.dify_kb_ids.includes(kb.id)}
+                                                            onChange={e => setField('dify_kb_ids', e.target.checked
+                                                                ? [...form.dify_kb_ids, kb.id]
+                                                                : form.dify_kb_ids.filter(x => x !== kb.id))} />
+                                                        {kb.name}
+                                                    </label>
+                                                ))}
+                                                {availableDifyKbs.length === 0 && <span className="text-xs text-slate-400">無可用 DIFY 知識庫</span>}
+                                            </div>
+                                        </div>
+
+                                        {/* KB Mode */}
+                                        <div>
+                                            <label className="block text-xs text-slate-500 mb-1">知識庫模式</label>
+                                            <select value={form.kb_mode} onChange={e => setField('kb_mode', e.target.value)}
+                                                className="w-full border rounded px-3 py-2 text-sm">
+                                                <option value="append">附加 (加入可用清單)</option>
+                                                <option value="exclusive">獨佔 (只用這些)</option>
+                                                <option value="disable">停用 (不使用知識庫)</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* ─── I/O tab ─── */}
+                                {editorTab === 'io' && (
+                                    <div className="space-y-4">
+                                        {/* prompt_variables */}
+                                        <div>
+                                            <label className="block text-xs text-slate-500 mb-1">輸入變數 (prompt_variables)</label>
+                                            <textarea value={form.prompt_variables} onChange={e => setField('prompt_variables', e.target.value)}
+                                                className="w-full border rounded px-3 py-2 text-xs font-mono h-32 resize-y"
+                                                placeholder='[{"name":"department","label":"部門","type":"select","options":["HR","IT"],"required":true}]' />
+                                            <p className="text-xs text-slate-400 mt-1">JSON 陣列。type: text/select/number/date/date_range/textarea/checkbox</p>
+                                        </div>
+
+                                        {/* tool_schema (code/external skills) */}
+                                        {(form.type === 'code' || form.type === 'external') && (
+                                            <div>
+                                                <label className="block text-xs text-slate-500 mb-1">Tool Schema (Gemini Function Declaration)</label>
+                                                <textarea value={form.tool_schema} onChange={e => setField('tool_schema', e.target.value)}
+                                                    className="w-full border rounded px-3 py-2 text-xs font-mono h-32 resize-y"
+                                                    placeholder='{"description":"查詢出勤","parameters":{"type":"object","properties":{"employee_id":{"type":"string"}}}}' />
+                                                <p className="text-xs text-slate-400 mt-1">定義後，LLM 會自動判斷何時呼叫此技能的程式</p>
+                                            </div>
+                                        )}
+
+                                        {/* output_schema */}
+                                        <div>
+                                            <label className="block text-xs text-slate-500 mb-1">輸出格式 (Output Schema)</label>
+                                            <textarea value={form.output_schema} onChange={e => setField('output_schema', e.target.value)}
+                                                className="w-full border rounded px-3 py-2 text-xs font-mono h-32 resize-y"
+                                                placeholder='{"type":"object","properties":{"summary":{"type":"string"},"items":{"type":"array"}}}' />
+                                            <p className="text-xs text-slate-400 mt-1">JSON Schema，LLM 會按此格式輸出</p>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* ─── Advanced tab ─── */}
+                                {editorTab === 'advanced' && (
+                                    <div className="space-y-4">
+                                        {/* model_key */}
+                                        <div>
+                                            <label className="block text-xs text-slate-500 mb-1">指定模型</label>
+                                            <select value={form.model_key} onChange={e => setField('model_key', e.target.value)}
+                                                className="w-full border rounded px-3 py-2 text-sm">
+                                                <option value="">預設</option>
+                                                {models.map(m => <option key={m.key} value={m.key}>{m.name}</option>)}
+                                            </select>
+                                        </div>
+
+                                        {/* endpoint_mode */}
+                                        {(form.type === 'external' || form.type === 'code') && (
+                                            <div>
+                                                <label className="block text-xs text-slate-500 mb-1">回應模式</label>
+                                                <select value={form.endpoint_mode} onChange={e => setField('endpoint_mode', e.target.value as any)}
+                                                    className="w-full border rounded px-3 py-2 text-sm">
+                                                    <option value="inject">注入 (結果送入 LLM)</option>
+                                                    <option value="answer">直答 (直接回傳，跳過 LLM)</option>
+                                                    <option value="post_answer">後處理 (LLM 回答後再呼叫，適合 TTS)</option>
+                                                </select>
+                                            </div>
+                                        )}
+
+                                        {/* Rate Limiting */}
+                                        <div className="grid grid-cols-3 gap-3">
+                                            <div>
+                                                <label className="block text-xs text-slate-500 mb-1">每用戶上限</label>
+                                                <input type="number" value={form.rate_limit_per_user} onChange={e => setField('rate_limit_per_user', e.target.value)}
+                                                    className="w-full border rounded px-3 py-2 text-sm" placeholder="不限" min={0} />
+                                            </div>
+                                            <div>
+                                                <label className="block text-xs text-slate-500 mb-1">全域上限</label>
+                                                <input type="number" value={form.rate_limit_global} onChange={e => setField('rate_limit_global', e.target.value)}
+                                                    className="w-full border rounded px-3 py-2 text-sm" placeholder="不限" min={0} />
+                                            </div>
+                                            <div>
+                                                <label className="block text-xs text-slate-500 mb-1">時間窗口</label>
+                                                <select value={form.rate_limit_window} onChange={e => setField('rate_limit_window', e.target.value)}
+                                                    className="w-full border rounded px-3 py-2 text-sm">
+                                                    <option value="minute">每分鐘</option>
+                                                    <option value="hour">每小時</option>
+                                                    <option value="day">每天</option>
+                                                </select>
                                             </div>
                                         </div>
                                     </div>
                                 )}
 
-                                {/* Model */}
-                                <div>
-                                    <label className="block text-xs font-medium text-slate-600 mb-1">綁定模型（不設定則跟隨使用者選擇）</label>
-                                    <select value={form.model_key} onChange={e => setForm(p => ({ ...p, model_key: e.target.value }))}
-                                        className="border border-slate-200 rounded-lg px-3 py-2 text-sm w-full focus:outline-none focus:ring-2 focus:ring-blue-300">
-                                        <option value="">不綁定</option>
-                                        {models.map(m => <option key={m.key} value={m.key}>{m.name}</option>)}
-                                    </select>
-                                </div>
+                                {/* ─── History tab ─── */}
+                                {editorTab === 'history' && (
+                                    <div className="space-y-3">
+                                        {/* Publish button */}
+                                        <div className="flex items-center gap-2">
+                                            <button onClick={handlePublish} className="px-3 py-1.5 bg-green-500 text-white text-sm rounded hover:bg-green-600">
+                                                發布版本
+                                            </button>
+                                            <span className="text-xs text-slate-500">當前版本: v{editingSkill?.prompt_version || 1}</span>
+                                        </div>
 
-                                {/* Tags */}
-                                <div>
-                                    <label className="block text-xs font-medium text-slate-600 mb-1">標籤</label>
-                                    <div className="flex gap-2 flex-wrap mb-2">
-                                        {form.tags.map(t => (
-                                            <span key={t} className="inline-flex items-center gap-1 px-2 py-0.5 bg-slate-100 rounded text-xs text-slate-600">
-                                                {t}<button onClick={() => setForm(p => ({ ...p, tags: p.tags.filter(x => x !== t) }))}><X size={10} /></button>
-                                            </span>
-                                        ))}
+                                        {/* Version list */}
+                                        <div className="space-y-2 max-h-60 overflow-y-auto">
+                                            {versionHistory.map((v: any) => (
+                                                <div key={v.version} className="flex items-center justify-between p-2 bg-slate-50 rounded text-sm">
+                                                    <div>
+                                                        <span className="font-medium">v{v.version}</span>
+                                                        <span className="text-xs text-slate-400 ml-2">{v.changed_by_name} · {new Date(v.created_at).toLocaleString()}</span>
+                                                        {v.change_note && <span className="text-xs text-slate-500 ml-2">{v.change_note}</span>}
+                                                    </div>
+                                                    <button onClick={() => handleRollback(v.version)} className="text-xs text-blue-500 hover:underline">回滾</button>
+                                                </div>
+                                            ))}
+                                            {versionHistory.length === 0 && <p className="text-xs text-slate-400 text-center py-4">尚無發布歷史</p>}
+                                        </div>
                                     </div>
-                                    <div className="flex gap-2">
-                                        <input value={tagInput} onChange={e => setTagInput(e.target.value)}
-                                            onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), addTag())}
-                                            placeholder="輸入標籤後按 Enter"
-                                            className="flex-1 border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300" />
-                                        <button onClick={addTag} className="px-3 py-1.5 border border-slate-200 rounded-lg text-sm text-slate-600 hover:border-blue-300">新增</button>
-                                    </div>
-                                </div>
+                                )}
 
                                 {error && <p className="text-sm text-red-600">{error}</p>}
                             </div>
-                            {editorTab === '編輯' && (
+                            {editorTab !== 'history' && (
                             <div className="flex justify-end gap-2 px-6 py-4 border-t border-slate-100">
                                 <button onClick={() => setShowEditor(false)} className="px-4 py-2 rounded-lg text-sm text-slate-600 hover:bg-slate-100">取消</button>
                                 <button onClick={save} disabled={saving}
@@ -470,7 +736,7 @@ export default function SkillMarket() {
                                     </div>
                                 </div>
                                 <div className="grid grid-cols-2 gap-3">
-                                    <div><span className="text-xs text-slate-400 block">類型</span><p className="text-slate-700">{viewingSkill.type === 'builtin' ? '內建 Prompt' : viewingSkill.type === 'external' ? '外部 Endpoint' : '內部程式'}</p></div>
+                                    <div><span className="text-xs text-slate-400 block">類型</span><p className="text-slate-700">{viewingSkill.type === 'builtin' ? '內建 Prompt' : viewingSkill.type === 'external' ? '外部 Endpoint' : viewingSkill.type === 'workflow' ? '工作流' : '內部程式'}</p></div>
                                     <div><span className="text-xs text-slate-400 block">端點模式</span><p className="text-slate-700">{viewingSkill.endpoint_mode}</p></div>
                                     {viewingSkill.model_key && <div><span className="text-xs text-slate-400 block">指定模型</span><p className="text-slate-700">{viewingSkill.model_key}</p></div>}
                                     <div><span className="text-xs text-slate-400 block">MCP 工具模式</span><p className="text-slate-700">{viewingSkill.mcp_tool_mode}</p></div>
@@ -780,8 +1046,8 @@ function SkillCard({ skill, onEdit, onDelete, onFork, onRequestPublic, onUse, on
                 <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
                         <h3 className="font-semibold text-slate-800 text-sm truncate">{skill.name}</h3>
-                        <span className={`shrink-0 text-xs px-1.5 py-0.5 rounded font-medium ${skill.type === 'external' ? 'bg-purple-100 text-purple-700' : skill.type === 'code' ? 'bg-emerald-100 text-emerald-700' : 'bg-blue-100 text-blue-700'}`}>
-                            {skill.type === 'external' ? '外部' : skill.type === 'code' ? '程式' : '內建'}
+                        <span className={`shrink-0 text-xs px-1.5 py-0.5 rounded font-medium ${skill.type === 'external' ? 'bg-purple-100 text-purple-700' : skill.type === 'code' ? 'bg-emerald-100 text-emerald-700' : skill.type === 'workflow' ? 'bg-orange-100 text-orange-700' : 'bg-blue-100 text-blue-700'}`}>
+                            {skill.type === 'external' ? '外部' : skill.type === 'code' ? '程式' : skill.type === 'workflow' ? '工作流' : '內建'}
                         </span>
                         {skill.type === 'code' && skill.code_status && (
                             <span className={`shrink-0 text-xs px-1.5 py-0.5 rounded ${skill.code_status === 'running' ? 'bg-emerald-50 text-emerald-600' : skill.code_status === 'error' ? 'bg-red-50 text-red-600' : 'bg-slate-100 text-slate-500'}`}>

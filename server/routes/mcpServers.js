@@ -44,17 +44,19 @@ router.post('/', async (req, res) => {
   const db = getDb();
   try {
     const { name, url, api_key, description, is_active, response_mode,
-            transport_type, command, args_json, env_json,
+            transport_type, command, args_json, env_json, tags,
             name_zh, name_en, name_vi, desc_zh, desc_en, desc_vi } = req.body;
     const tt = transport_type || 'http-post';
     if (!name) return res.status(400).json({ error: '名稱為必填' });
     if (tt !== 'stdio' && !url) return res.status(400).json({ error: 'URL 為必填（非 stdio 模式）' });
     if (tt === 'stdio' && !command) return res.status(400).json({ error: 'stdio 模式需填寫指令' });
+    if (tags !== undefined && !Array.isArray(tags)) return res.status(400).json({ error: 'tags 必須為陣列' });
+    const tagsStr = JSON.stringify(tags || []);
 
     const result = await db.prepare(
-      `INSERT INTO mcp_servers (name, url, api_key, description, is_active, response_mode, transport_type, command, args_json, env_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO mcp_servers (name, url, api_key, description, is_active, response_mode, transport_type, command, args_json, env_json, tags) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(name, url || null, api_key || null, description || null, is_active !== false ? 1 : 0, response_mode || 'inject',
-          tt, command || null, args_json || null, env_json || null);
+          tt, command || null, args_json || null, env_json || null, tagsStr);
 
     const newId = result.lastInsertRowid;
     const trans = (name_zh !== undefined)
@@ -80,16 +82,18 @@ router.put('/:id', async (req, res) => {
     if (!server) return res.status(404).json({ error: '找不到 MCP 伺服器' });
 
     const { name, url, api_key, description, is_active, response_mode,
-            transport_type, command, args_json, env_json,
+            transport_type, command, args_json, env_json, tags,
             name_zh, name_en, name_vi, desc_zh, desc_en, desc_vi, is_public } = req.body;
+    if (tags !== undefined && !Array.isArray(tags)) return res.status(400).json({ error: 'tags 必須為陣列' });
     const finalName = name ?? server.name;
     const finalDesc = description !== undefined ? (description || null) : server.description;
     const finalTt = transport_type !== undefined ? (transport_type || 'http-post') : (server.transport_type || 'http-post');
+    const finalTags = tags !== undefined ? JSON.stringify(tags) : (server.tags || '[]');
     const newIsPublic = is_public !== undefined ? (is_public ? 1 : 0) : (server.is_public || 0);
     // 若取消公開則同步重置核准狀態
     const newPublicApproved = newIsPublic ? (server.public_approved || 0) : 0;
     await db.prepare(
-      `UPDATE mcp_servers SET name=?, url=?, api_key=?, description=?, is_active=?, response_mode=?, transport_type=?, command=?, args_json=?, env_json=?, is_public=?, public_approved=?, updated_at=SYSTIMESTAMP WHERE id=?`
+      `UPDATE mcp_servers SET name=?, url=?, api_key=?, description=?, is_active=?, response_mode=?, transport_type=?, command=?, args_json=?, env_json=?, tags=?, is_public=?, public_approved=?, updated_at=SYSTIMESTAMP WHERE id=?`
     ).run(
       finalName,
       url !== undefined ? (url || null) : server.url,
@@ -101,6 +105,7 @@ router.put('/:id', async (req, res) => {
       command !== undefined ? (command || null) : server.command,
       args_json !== undefined ? (args_json || null) : server.args_json,
       env_json !== undefined ? (env_json || null) : server.env_json,
+      finalTags,
       newIsPublic, newPublicApproved,
       req.params.id,
     );

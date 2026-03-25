@@ -281,8 +281,10 @@ router.post('/', async (req, res) => {
     score_threshold = 0,
     ocr_model      = null,
     parse_mode     = 'text_only',
+    tags,
     name_zh, name_en, name_vi, desc_zh, desc_en, desc_vi,
   } = req.body;
+  const tagsStr = JSON.stringify(tags || []);
 
   if (!name?.trim()) return res.status(400).json({ error: '知識庫名稱為必填' });
   if (![768, 1536, 3072].includes(Number(embedding_dims))) {
@@ -297,8 +299,8 @@ router.post('/', async (req, res) => {
          embedding_model, embedding_dims,
          chunk_strategy, chunk_config,
          retrieval_mode, rerank_model,
-         top_k_fetch, top_k_return, score_threshold, ocr_model, parse_mode)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         top_k_fetch, top_k_return, score_threshold, ocr_model, parse_mode, tags)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       id, req.user.id, name.trim(), description || null,
       await require('../services/llmDefaults').resolveDefaultModel(db, 'embedding'),
@@ -309,6 +311,7 @@ router.post('/', async (req, res) => {
       Number(top_k_fetch), Number(top_k_return), Number(score_threshold),
       ocr_model || null,
       ['text_only', 'format_aware'].includes(parse_mode) ? parse_mode : 'text_only',
+      tagsStr,
     );
     // Auto-translate
     const trans = (name_zh !== undefined)
@@ -420,7 +423,7 @@ router.put('/:id', async (req, res) => {
       chunk_strategy, chunk_config,
       retrieval_mode, rerank_model,
       top_k_fetch, top_k_return, score_threshold,
-      ocr_model, parse_mode,
+      ocr_model, parse_mode, tags,
       name_zh, name_en, name_vi, desc_zh, desc_en, desc_vi,
     } = req.body;
 
@@ -433,6 +436,7 @@ router.put('/:id', async (req, res) => {
           retrieval_mode=?, rerank_model=?,
           top_k_fetch=?, top_k_return=?, score_threshold=?,
           ocr_model=?, parse_mode=?,
+          tags=?,
           updated_at=SYSTIMESTAMP
       WHERE id=?
     `).run(
@@ -447,6 +451,7 @@ router.put('/:id', async (req, res) => {
       score_threshold != null ? Number(score_threshold) : target.score_threshold,
       ocr_model !== undefined ? (ocr_model || null) : target.ocr_model,
       parse_mode !== undefined ? (['text_only','format_aware'].includes(parse_mode) ? parse_mode : 'text_only') : (target.parse_mode || 'text_only'),
+      tags !== undefined ? JSON.stringify(tags || []) : (target.tags || '[]'),
       req.params.id,
     );
 

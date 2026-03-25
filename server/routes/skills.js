@@ -284,8 +284,12 @@ function serializeSkill(s, maskSecret = true) {
         ...s,
         mcp_tool_ids: parseJsonField(s.mcp_tool_ids),
         dify_kb_ids: parseJsonField(s.dify_kb_ids),
+        self_kb_ids: parseJsonField(s.self_kb_ids),
         tags: parseJsonField(s.tags),
         code_packages: parseJsonField(s.code_packages),
+        tool_schema: parseJsonField(s.tool_schema, null),
+        output_schema: parseJsonField(s.output_schema, null),
+        workflow_json: parseJsonField(s.workflow_json, null),
         endpoint_secret: maskSecret ? (s.endpoint_secret ? '****' : '') : s.endpoint_secret,
     };
 }
@@ -373,7 +377,10 @@ router.post('/', async (req, res) => {
         }
         const { name, description, icon, type, system_prompt, endpoint_url, endpoint_secret,
             endpoint_mode, model_key, mcp_tool_mode, mcp_tool_ids, dify_kb_ids, tags,
-            code_snippet, code_packages } = req.body;
+            code_snippet, code_packages,
+            self_kb_ids, kb_mode, tool_schema, output_schema,
+            rate_limit_per_user, rate_limit_global, rate_limit_window,
+            prompt_version, published_prompt, draft_prompt, workflow_json } = req.body;
         if (!name) return res.status(400).json({ error: 'name 必填' });
         if (type === 'external' && !await hasSkillPerm(db, req.user.id, 'allow_external_skill') && req.user.role !== 'admin') {
             return res.status(403).json({ error: '無建立外部 Skill 的權限' });
@@ -385,8 +392,11 @@ router.post('/', async (req, res) => {
         const result = await db.prepare(`
       INSERT INTO skills (name, description, icon, type, system_prompt, endpoint_url, endpoint_secret,
         endpoint_mode, model_key, mcp_tool_mode, mcp_tool_ids, dify_kb_ids, tags, owner_user_id,
-        code_snippet, code_packages)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        code_snippet, code_packages,
+        self_kb_ids, kb_mode, tool_schema, output_schema,
+        rate_limit_per_user, rate_limit_global, rate_limit_window,
+        prompt_version, published_prompt, draft_prompt, workflow_json)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     `).run(
             name, description || null, icon || '🤖',
             type || 'builtin', system_prompt || null,
@@ -398,7 +408,18 @@ router.post('/', async (req, res) => {
             JSON.stringify(tags || []),
             req.user.id,
             code_snippet || null,
-            JSON.stringify(code_packages || [])
+            JSON.stringify(code_packages || []),
+            JSON.stringify(self_kb_ids || []),
+            kb_mode || 'append',
+            tool_schema ? JSON.stringify(tool_schema) : null,
+            output_schema ? JSON.stringify(output_schema) : null,
+            rate_limit_per_user != null ? Number(rate_limit_per_user) : null,
+            rate_limit_global != null ? Number(rate_limit_global) : null,
+            rate_limit_window || 'hour',
+            prompt_version != null ? Number(prompt_version) : 1,
+            published_prompt || null,
+            draft_prompt || null,
+            workflow_json ? JSON.stringify(workflow_json) : null
         );
         const newId = result.lastInsertRowid;
         // Auto-translate (or use manually provided translations)
@@ -449,6 +470,9 @@ router.put('/:id', async (req, res) => {
         const { name, description, icon, type, system_prompt, endpoint_url, endpoint_secret,
             endpoint_mode, model_key, mcp_tool_mode, mcp_tool_ids, dify_kb_ids, tags,
             code_snippet, code_packages,
+            self_kb_ids, kb_mode, tool_schema, output_schema,
+            rate_limit_per_user, rate_limit_global, rate_limit_window,
+            prompt_version, published_prompt, draft_prompt, workflow_json,
             name_zh, name_en, name_vi, desc_zh, desc_en, desc_vi } = req.body;
         if (type === 'external' && !await hasSkillPerm(db, req.user.id, 'allow_external_skill') && req.user.role !== 'admin') {
             return res.status(403).json({ error: '無建立外部 Skill 的權限' });
@@ -467,7 +491,11 @@ router.put('/:id', async (req, res) => {
       UPDATE skills SET name=?, description=?, icon=?, type=?, system_prompt=?,
         endpoint_url=?, endpoint_secret=?, endpoint_mode=?, model_key=?,
         mcp_tool_mode=?, mcp_tool_ids=?, dify_kb_ids=?, tags=?,
-        code_snippet=?, code_packages=?, updated_at=CURRENT_TIMESTAMP
+        code_snippet=?, code_packages=?,
+        self_kb_ids=?, kb_mode=?, tool_schema=?, output_schema=?,
+        rate_limit_per_user=?, rate_limit_global=?, rate_limit_window=?,
+        prompt_version=?, published_prompt=?, draft_prompt=?, workflow_json=?,
+        updated_at=CURRENT_TIMESTAMP
       WHERE id=?
     `).run(
             finalName, finalDesc, icon ?? s.icon,
@@ -480,6 +508,17 @@ router.put('/:id', async (req, res) => {
             tagsJson,
             code_snippet !== undefined ? (code_snippet || null) : s.code_snippet,
             JSON.stringify(code_packages ?? parseJsonField(s.code_packages)),
+            JSON.stringify(self_kb_ids ?? parseJsonField(s.self_kb_ids)),
+            kb_mode ?? s.kb_mode ?? 'append',
+            tool_schema !== undefined ? (tool_schema ? JSON.stringify(tool_schema) : null) : s.tool_schema,
+            output_schema !== undefined ? (output_schema ? JSON.stringify(output_schema) : null) : s.output_schema,
+            rate_limit_per_user !== undefined ? (rate_limit_per_user != null ? Number(rate_limit_per_user) : null) : s.rate_limit_per_user,
+            rate_limit_global !== undefined ? (rate_limit_global != null ? Number(rate_limit_global) : null) : s.rate_limit_global,
+            rate_limit_window ?? s.rate_limit_window ?? 'hour',
+            prompt_version !== undefined ? (prompt_version != null ? Number(prompt_version) : s.prompt_version) : s.prompt_version,
+            published_prompt !== undefined ? (published_prompt || null) : s.published_prompt,
+            draft_prompt !== undefined ? (draft_prompt || null) : s.draft_prompt,
+            workflow_json !== undefined ? (workflow_json ? JSON.stringify(workflow_json) : null) : s.workflow_json,
             req.params.id
         );
         console.log(`[Skill PUT] UPDATE rowsAffected=${updateResult?.changes}`);
@@ -550,12 +589,19 @@ router.post('/:id/fork', async (req, res) => {
         const result = await db.prepare(`
       INSERT INTO skills (name, description, icon, type, system_prompt, endpoint_url, endpoint_secret,
         endpoint_mode, model_key, mcp_tool_mode, mcp_tool_ids, dify_kb_ids, tags, owner_user_id,
-        is_public, is_admin_approved, pending_approval)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,0,0)
+        is_public, is_admin_approved, pending_approval,
+        self_kb_ids, kb_mode, tool_schema, output_schema,
+        rate_limit_per_user, rate_limit_global, rate_limit_window,
+        prompt_version, published_prompt, draft_prompt, workflow_json)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,0,0,?,?,?,?,?,?,?,?,?,?,?)
     `).run(
             `${s.name} (複本)`, s.description, s.icon, s.type, s.system_prompt,
             s.endpoint_url, s.endpoint_secret, s.endpoint_mode, s.model_key,
-            s.mcp_tool_mode, s.mcp_tool_ids, s.dify_kb_ids, s.tags, req.user.id
+            s.mcp_tool_mode, s.mcp_tool_ids, s.dify_kb_ids, s.tags, req.user.id,
+            s.self_kb_ids, s.kb_mode || 'append',
+            s.tool_schema, s.output_schema,
+            s.rate_limit_per_user, s.rate_limit_global, s.rate_limit_window || 'hour',
+            1, s.published_prompt, s.draft_prompt, s.workflow_json
         );
         const forked = await db.prepare('SELECT * FROM skills WHERE id=?').get(result.lastInsertRowid);
         res.json(serializeSkill(forked, false));
@@ -688,6 +734,93 @@ router.post('/:id/translate', async (req, res) => {
         await db.prepare(`UPDATE skills SET name_zh=?,name_en=?,name_vi=?,desc_zh=?,desc_en=?,desc_vi=? WHERE id=?`)
             .run(trans.name_zh, trans.name_en, trans.name_vi, trans.desc_zh, trans.desc_en, trans.desc_vi, req.params.id);
         res.json(trans);
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// ── POST /api/skills/:id/publish — 發佈當前 prompt 為新版本 ────────────────────
+router.post('/:id/publish', verifyToken, async (req, res) => {
+    try {
+        const db = require('../database-oracle').db;
+        const { change_note } = req.body;
+        const skill = await db.prepare('SELECT * FROM skills WHERE id=?').get(req.params.id);
+        if (!skill) return res.status(404).json({ error: '技能不存在' });
+        if (skill.owner_user_id !== req.user.id && req.user.role !== 'admin')
+            return res.status(403).json({ error: '無權限' });
+
+        const newVersion = (skill.prompt_version || 0) + 1;
+
+        // Insert version record
+        await db.prepare(`
+            INSERT INTO skill_prompt_versions (skill_id, version, system_prompt, workflow_json, changed_by, change_note)
+            VALUES (?, ?, ?, ?, ?, ?)
+        `).run(req.params.id, newVersion, skill.system_prompt, skill.workflow_json, req.user.id, change_note || null);
+
+        // Update skill
+        await db.prepare(`
+            UPDATE skills SET prompt_version=?, published_prompt=?, draft_prompt=NULL, updated_at=CURRENT_TIMESTAMP WHERE id=?
+        `).run(newVersion, skill.system_prompt, req.params.id);
+
+        res.json({ ok: true, version: newVersion });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// ── GET /api/skills/:id/versions — 取得版本歷史 ──────────────────────────────────
+router.get('/:id/versions', verifyToken, async (req, res) => {
+    try {
+        const db = require('../database-oracle').db;
+        const versions = await db.prepare(`
+            SELECT v.*, u.name as changed_by_name
+            FROM skill_prompt_versions v
+            LEFT JOIN users u ON u.id = v.changed_by
+            WHERE v.skill_id = ?
+            ORDER BY v.version DESC
+        `).all(req.params.id);
+        res.json(versions);
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// ── GET /api/skills/:id/versions/:version — 取得特定版本 ─────────────────────────
+router.get('/:id/versions/:version', verifyToken, async (req, res) => {
+    try {
+        const db = require('../database-oracle').db;
+        const version = await db.prepare(`
+            SELECT v.*, u.name as changed_by_name
+            FROM skill_prompt_versions v
+            LEFT JOIN users u ON u.id = v.changed_by
+            WHERE v.skill_id = ? AND v.version = ?
+        `).get(req.params.id, req.params.version);
+        if (!version) return res.status(404).json({ error: '版本不存在' });
+        res.json(version);
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// ── POST /api/skills/:id/rollback/:version — 回滾到指定版本 ──────────────────────
+router.post('/:id/rollback/:version', verifyToken, async (req, res) => {
+    try {
+        const db = require('../database-oracle').db;
+        const skill = await db.prepare('SELECT * FROM skills WHERE id=?').get(req.params.id);
+        if (!skill) return res.status(404).json({ error: '技能不存在' });
+        if (skill.owner_user_id !== req.user.id && req.user.role !== 'admin')
+            return res.status(403).json({ error: '無權限' });
+
+        const version = await db.prepare('SELECT * FROM skill_prompt_versions WHERE skill_id=? AND version=?')
+            .get(req.params.id, req.params.version);
+        if (!version) return res.status(404).json({ error: '版本不存在' });
+
+        // Restore prompt and workflow
+        await db.prepare(`
+            UPDATE skills SET system_prompt=?, workflow_json=?, updated_at=CURRENT_TIMESTAMP WHERE id=?
+        `).run(version.system_prompt, version.workflow_json, req.params.id);
+
+        res.json({ ok: true, restored_version: Number(req.params.version) });
     } catch (e) {
         res.status(500).json({ error: e.message });
     }

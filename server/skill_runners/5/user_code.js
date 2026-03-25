@@ -1,5 +1,23 @@
 module.exports = async function handler(body) {
+  // For post_answer mode: user_message carries voice preferences, ai_response carries text to synthesize
   const input      = body.user_message || body.content || body.text || body.message || '';
+  const rawContent = body.ai_response || input;   // prefer AI response if present (post_answer mode)
+
+  // In post_answer mode: if AI response is substantial but user hasn't specified voice preferences,
+  // pause and ask rather than guessing. Return { pending: true } so server stores content for next turn.
+  const isPostAnswerMode = !!body.ai_response && body.ai_response.length > 150;
+  const hasVoicePref = /男聲|女聲|wavenet|neural2|standard|male|female|英文|越文|日文|韓文|cmn-|en-US|vi-VN|ja-JP|ko-KR/i.test(input);
+  if (isPostAnswerMode && !hasVoicePref) {
+    return {
+      pending: true,
+      system_prompt:
+        '\n\n---\n🎤 **語音合成準備就緒！** 請回覆您想要的語言和聲音，例如：\n' +
+        '- `繁中男聲` / `繁中女聲`\n' +
+        '- `英文男聲` / `英文女聲`\n' +
+        '- `越南文男聲` / `日文女聲` / `韓文男聲`\n\n' +
+        '回覆後系統將自動為您生成語音。',
+    };
+  }
   const FOXLINK_API = process.env.FOXLINK_API_URL  || `http://localhost:${process.env.PORT || 3001}`;
   const SERVICE_KEY = process.env.SKILL_SERVICE_KEY || 'foxlink-tts-2024';
 
@@ -87,6 +105,8 @@ module.exports = async function handler(body) {
       .trim();
   }
 
+  // Voice settings from user_message (e.g. "男聲", "英文", "語速快")
+  // Text content from ai_response if present, otherwise from user_message
   const explicitVoice = input.match(/\b([a-z]{2,3}-[A-Z]{2}-(?:Neural2|Wavenet|Standard)-[A-Z])\b/);
 
   const lang      = detectLang(input);
@@ -94,7 +114,7 @@ module.exports = async function handler(body) {
   const speed     = detectSpeed(input);
   const pitch     = detectPitch(input);
   const voiceName = explicitVoice ? explicitVoice[1] : VOICES[lang]?.[gender]?.[0];
-  const text      = extractText(input);
+  const text      = extractText(rawContent);
 
   console.log('[TTS skill] FOXLINK_API=' + FOXLINK_API + ' PORT=' + process.env.PORT);
   console.log('[TTS skill] input.length=' + input.length + ' extracted.length=' + text.length);

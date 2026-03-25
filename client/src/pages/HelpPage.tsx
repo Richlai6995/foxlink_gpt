@@ -606,7 +606,7 @@ function UserManual() {
         </Para>
 
         <SubSection title="技能類型">
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="border border-blue-200 rounded-xl p-4 bg-blue-50">
               <div className="flex items-center gap-2 mb-2">
                 <span className="text-lg">🧠</span>
@@ -636,6 +636,16 @@ function UserManual() {
                 在平台內直接撰寫 Node.js 程式碼，以獨立子程序運行。
                 適合：即時股價查詢、ERP 資料對接、自動計算等需要程式邏輯的場景。
                 需要管理員授予「允許程式技能」權限。
+              </p>
+            </div>
+            <div className="border border-orange-200 rounded-xl p-4 bg-orange-50">
+              <div className="flex items-center gap-2 mb-2">
+                <GitFork size={16} className="text-orange-600" />
+                <span className="font-semibold text-orange-700 text-sm">工作流程技能（Workflow）</span>
+              </div>
+              <p className="text-xs text-orange-600 leading-5">
+                以 DAG（有向無環圖）視覺化編排多步驟流程，串接 LLM、知識庫、MCP 工具、HTTP 請求、條件判斷等節點。
+                適合：多步驟審核流程、資料管線、複雜 AI Agent 等場景。
               </p>
             </div>
           </div>
@@ -676,10 +686,149 @@ function UserManual() {
             headers={['模式', '說明']}
             rows={[
               ['append（追加）', '在角色已授權的工具基礎上，加入技能指定的額外伺服器工具（預設）'],
-              ['exclusive（雙展）', '仅限定使用技能指定的 MCP 伺服器，角色其他工具暂時停用'],
+              ['exclusive（獨佔）', '僅限定使用技能指定的 MCP 伺服器，角色其他工具暫時停用'],
               ['disable（停用）', '對話期間禁用全部 MCP 工具，適合純文字對話場景'],
             ]}
           />
+        </SubSection>
+
+        <SubSection title="知識庫綁定（KB Binding）">
+          <Para>
+            技能可以綁定特定的自建知識庫與 DIFY 知識庫，讓掛載技能時自動啟用相關知識庫，無需使用者手動選取。
+          </Para>
+          <Table
+            headers={['模式', '說明']}
+            rows={[
+              ['append（追加）', '技能綁定的知識庫與使用者已掛載的知識庫同時生效（預設）'],
+              ['exclusive（獨佔）', '僅使用技能綁定的知識庫，忽略使用者自行掛載的知識庫'],
+              ['disable（停用）', '對話期間不使用任何知識庫'],
+            ]}
+          />
+          <TipBox>知識庫綁定由技能建立者在編輯頁「工具與知識庫」頁籤中設定，使用者掛載技能後自動套用。</TipBox>
+        </SubSection>
+
+        <SubSection title="TAG 自動路由">
+          <Para>
+            系統使用 TAG 標籤機制自動判斷每則訊息應啟用哪些工具、知識庫與技能，無需使用者手動勾選。
+            每個 MCP 伺服器、DIFY 知識庫、自建知識庫及技能都可設定標籤（Tags），系統流程如下：
+          </Para>
+          <div className="space-y-3">
+            <StepItem num={1} title="使用者發送訊息" desc="系統以 Flash LLM 從訊息中萃取 0~5 個意圖標籤（intent tags）" />
+            <StepItem num={2} title="TAG 比對" desc="將意圖標籤與所有工具/知識庫/技能上的標籤進行雙向模糊比對" />
+            <StepItem num={3} title="描述精篩（Description Refinement）" desc="若 TAG 比對命中過多候選項，再以 Flash LLM 根據工具描述做二次精篩" />
+            <StepItem num={4} title="Fallback" desc="若未設定任何 TAG 或比對全部落空，則回退到傳統的 intent 過濾機制" />
+          </div>
+          <TipBox>
+            建議為每個工具和知識庫設定 2~5 個精準的標籤（如「股票」「財報」「ERP」），
+            讓系統能更準確地自動路由，減少不必要的工具呼叫，節省 Token 費用。
+          </TipBox>
+        </SubSection>
+
+        <SubSection title="Prompt 輸入變數（prompt_variables）">
+          <Para>
+            技能可以定義輸入變數，讓使用者在掛載技能到對話時填寫自訂參數，這些參數會自動注入到 System Prompt 中。
+            例如，翻譯技能可設定「目標語言」變數，掛載時讓使用者選擇「日文」或「韓文」。
+          </Para>
+          <Table
+            headers={['變數類型', '說明']}
+            rows={[
+              ['text', '單行文字輸入'],
+              ['textarea', '多行文字輸入'],
+              ['select', '下拉選單，需預先定義選項'],
+              ['number', '數字輸入'],
+              ['date', '日期選擇器'],
+              ['checkbox', '布林值勾選框'],
+            ]}
+          />
+          <Para>
+            在 System Prompt 中使用 {'{{變數名稱}}'} 語法引用變數，例如：
+          </Para>
+          <CodeBlock>{`你是一位專業翻譯員，請將使用者的文字翻譯為 {{target_language}}。
+翻譯風格：{{style}}`}</CodeBlock>
+          <TipBox>掛載技能時若該技能定義了輸入變數，系統會彈出表單讓使用者填寫，填寫後的值會存在該對話的技能設定中。</TipBox>
+        </SubSection>
+
+        <SubSection title="Code 技能自動註冊為 Gemini Tool">
+          <Para>
+            Code 類型技能可以定義 <strong>Tool Schema</strong>（Gemini Function Declaration），
+            讓 AI 在對話中自動判斷是否需要呼叫該程式技能，而非每次都觸發。
+          </Para>
+          <Para>
+            例如，一個「股價查詢」Code 技能定義了 Tool Schema，AI 收到「台積電股價多少」時會自動呼叫，
+            但收到「今天天氣如何」則不會觸發。這等同於 Gemini 的 Function Calling 機制。
+          </Para>
+          <NoteBox>未定義 Tool Schema 的 Code 技能仍按原有的 inject/answer 端點模式運作，不受影響。</NoteBox>
+        </SubSection>
+
+        <SubSection title="Output Schema（輸出結構定義）">
+          <Para>
+            技能可以定義 JSON 格式的輸出結構（Output Schema），指引 AI 以固定的 JSON 格式回覆。
+            適合需要結構化資料的場景，如自動產生工單、匯出報表欄位等。
+          </Para>
+          <CodeBlock>{`{
+  "type": "object",
+  "properties": {
+    "summary": { "type": "string", "description": "摘要" },
+    "score": { "type": "number", "description": "評分 0-100" },
+    "tags": { "type": "array", "items": { "type": "string" } }
+  }
+}`}</CodeBlock>
+        </SubSection>
+
+        <SubSection title="速率限制（Rate Limiting）">
+          <Para>
+            技能可設定使用頻率限制，防止濫用或控制 API 成本：
+          </Para>
+          <Table
+            headers={['設定', '說明']}
+            rows={[
+              ['每人上限', '單一使用者在指定時間窗口內可呼叫此技能的最大次數'],
+              ['全域上限', '所有使用者合計在指定時間窗口內的最大呼叫次數'],
+              ['時間窗口', '限制的計算週期：每分鐘（minute）、每小時（hour）、每日（day）'],
+            ]}
+          />
+          <TipBox>超過速率限制時，系統會回覆提示訊息，使用者需等待時間窗口重置後再使用。</TipBox>
+        </SubSection>
+
+        <SubSection title="版本控制與發佈">
+          <Para>
+            技能的 Prompt 支援版本控制機制，讓您可以安全地修改和回滾：
+          </Para>
+          <div className="space-y-3">
+            <StepItem num={1} title="編輯草稿（Draft）" desc="修改 Prompt 時，改動先存入草稿，不影響目前線上版本" />
+            <StepItem num={2} title="發佈（Publish）" desc="確認修改無誤後，點選「發佈新版本」，草稿變為正式版本，版本號 +1" />
+            <StepItem num={3} title="查看歷史版本" desc="在「版本歷史」頁籤可瀏覽所有已發佈的版本內容" />
+            <StepItem num={4} title="回滾（Rollback）" desc="若新版本有問題，可一鍵回滾到任一歷史版本" />
+          </div>
+          <NoteBox>版本控制僅追蹤 Prompt 與 Workflow 設定的變更，其他欄位（名稱、描述等）修改後即時生效。</NoteBox>
+        </SubSection>
+
+        <SubSection title="Workflow 工作流程編排">
+          <Para>
+            Workflow 類型技能使用視覺化拖拉編輯器（React Flow），以 DAG 方式編排多步驟 AI 流程。
+            每個節點代表一個處理步驟，節點之間以連線定義執行順序。
+          </Para>
+          <Table
+            headers={['節點類型', '說明']}
+            rows={[
+              ['🟢 開始（Start）', '流程入口，接收使用者輸入'],
+              ['🤖 LLM', '呼叫大語言模型處理文字，可設定 System Prompt 與模型'],
+              ['📚 知識庫（Knowledge Base）', '查詢自建知識庫，取得相關段落'],
+              ['🔌 DIFY', '查詢 DIFY 知識庫'],
+              ['🔧 MCP 工具', '呼叫 MCP 伺服器的工具'],
+              ['✨ 技能（Skill）', '呼叫其他已建立的技能'],
+              ['💻 程式碼（Code）', '執行自訂 JavaScript 程式碼'],
+              ['🌐 HTTP 請求', '呼叫外部 REST API'],
+              ['❓ 條件判斷（Condition）', '根據前一步結果分支（contains / equals / gt / lt 等）'],
+              ['📝 模板（Template）', '使用模板語法組合多個節點的輸出'],
+              ['🔴 輸出（Output）', '流程終點，定義最終輸出內容'],
+            ]}
+          />
+          <Para>
+            節點之間可使用 {'{{nodeId.output}}'} 語法引用其他節點的輸出，例如 {'{{start.input}}'} 取得使用者原始訊息，
+            {'{{llm_1.output}}'} 取得 LLM 節點的回應。
+          </Para>
+          <TipBox>Workflow 最多允許 50 個節點，執行時以拓撲排序依序處理。條件節點支援 default（符合條件）與 else（不符合）兩條分支路徑。</TipBox>
         </SubSection>
       </Section>
 
@@ -698,7 +847,7 @@ function UserManual() {
         <SubSection title="建立知識庫">
           <div className="space-y-3">
             <StepItem num={1} title="點選「知識庫市集」→「+ 建立知識庫」" />
-            <StepItem num={2} title="填寫名稱、描述（必填名稱）" />
+            <StepItem num={2} title="填寫名稱、描述（必填名稱）" desc="建立後可在詳情頁頂部點選鉛筆圖示快速編輯名稱與描述" />
             <StepItem num={3} title="選擇 Embedding 維度" desc="768 維適合大多數情況；1536 / 3072 精度更高但費用也較高，且建立後無法更改" />
             <StepItem num={4} title="選擇分塊策略" desc="「常規分段」：依段落切分，適合一般文件；「父子分塊」：大塊作背景、小塊用來檢索，適合長篇技術文件" />
             <StepItem num={5} title="選擇檢索模式" desc="「向量檢索」：語意相似度；「全文檢索」：關鍵字比對；「混合檢索」：兩者結合（建議）" />
@@ -727,7 +876,8 @@ function UserManual() {
             <StepItem num={3} title="在下拉選單中勾選一或多個要使用的知識庫，點「確認」" />
             <StepItem num={4} title="發送訊息，AI 會先檢索知識庫再組合回答" desc="回覆中如有引用文件段落，AI 通常會說明來源文件名稱" />
           </div>
-          <TipBox>可以同時掛載「自建知識庫」＋「DIFY 知識庫」＋「MCP 工具」，AI 會綜合所有來源回答。</TipBox>
+          <TipBox>可以同時掛載「自建知識庫」＋「DIFY 知識庫」＋「MCP 工具」，AI 會綜合所有來源回答。
+            此外，若知識庫設有標籤（Tags），系統會透過 TAG 自動路由機制，根據訊息內容自動判斷是否啟用對應知識庫。</TipBox>
         </SubSection>
 
         <SubSection title="召回測試（檢索測試）">
@@ -1859,6 +2009,8 @@ function AdminManual() {
               ['查看文件', '進入任意知識庫，查看已上傳的文件、分塊狀態及錯誤訊息'],
               ['召回測試', '測試知識庫的檢索效果，調整分段與 Score 閾值'],
               ['修改設定', '調整分段策略、檢索模式、OCR 模型等參數'],
+              ['標籤管理', '為知識庫設定 TAG 標籤（如「SOP」「規格書」），用於 TAG 自動路由比對'],
+              ['行內編輯', '在知識庫詳情頁頂部可直接點選鉛筆圖示，快速修改名稱與描述'],
               ['共享管理', '新增或移除共享對象，調整 use / edit 權限'],
               ['刪除知識庫', '刪除後所有文件及向量資料一併清除，不可恢復'],
             ]}
@@ -1925,13 +2077,54 @@ function AdminManual() {
         </SubSection>
 
         <SubSection title="直接管理公開技能">
-          <Para>管理員可以不經申請，直接將任何技能新增或修改為公開 / 私人、常用技能（建立官方推薦探面）。</Para>
+          <Para>管理員可以不經申請，直接將任何技能新增或修改為公開 / 私人、常用技能（建立官方推薦頁面）。</Para>
           <Table
             headers={['操作', '步驟']}
             rows={[
               ['公開技能', '後台 → 技能管理 → 找到目標技能 → 點 Approve'],
               ['設為私人', '找到目標 → 點 Reject 或直接編輯 is_public=0'],
               ['建立官方技能', '管理員建立後可直接設為公開，不需經申請流程'],
+            ]}
+          />
+        </SubSection>
+
+        <SubSection title="技能版本管理">
+          <Para>管理員可在技能詳情中查看任何技能的版本歷史，並執行回滾操作：</Para>
+          <Table
+            headers={['操作', '說明']}
+            rows={[
+              ['查看版本歷史', '進入技能編輯 → 「版本歷史」頁籤，列出所有已發佈版本的 Prompt 內容與時間戳'],
+              ['回滾版本', '點選歷史版本的「回滾」按鈕，該版本的 Prompt 與 Workflow 設定會覆蓋當前正式版本'],
+              ['發佈新版本', '確認草稿修改無誤後，點選「發佈新版本」，版本號遞增，原版本保留在歷史中'],
+            ]}
+          />
+          <NoteBox>回滾操作會立即生效，所有已掛載此技能的對話下次發送訊息時即使用回滾後的版本。</NoteBox>
+        </SubSection>
+
+        <SubSection title="Workflow 技能管理">
+          <Para>
+            Workflow 類型的技能在技能管理列表中以「Workflow」標籤識別。管理員可進入編輯頁面使用視覺化編輯器查看和修改流程，
+            或直接檢視 workflow_json 原始資料。
+          </Para>
+          <Table
+            headers={['注意事項', '說明']}
+            rows={[
+              ['節點上限', '單一 Workflow 最多 50 個節點，超過時無法新增'],
+              ['錯誤處理', '節點執行失敗時，Workflow 會在該節點停止並回傳錯誤訊息給使用者'],
+              ['效能考量', 'Workflow 中每個 LLM / DIFY / MCP 節點都會消耗 Token，建議控制節點數量以管理成本'],
+            ]}
+          />
+        </SubSection>
+
+        <SubSection title="速率限制監控">
+          <Para>
+            管理員可在技能設定中查看和調整每個技能的速率限制。超過限制的呼叫會被系統攔截並記錄。
+          </Para>
+          <Table
+            headers={['設定項', '說明']}
+            rows={[
+              ['每人上限 / 全域上限', '可設定為空（不限制）或正整數'],
+              ['時間窗口', 'minute（每分鐘）、hour（每小時）、day（每日）'],
             ]}
           />
         </SubSection>
@@ -2328,6 +2521,7 @@ generate_txt:供應商週報_{{date}}.txt
               ['URL', '是', 'MCP 伺服器的 HTTP 端點，需符合 MCP Streamable HTTP 規範'],
               ['API Key', '否', '若 MCP 伺服器需要驗證，填入 Bearer Token'],
               ['說明', '否', '給管理員的備注，不影響 AI 行為'],
+              ['標籤（Tags）', '否', '用於 TAG 自動路由的標籤，例如「ERP」「工單」「庫存」。系統根據使用者訊息自動比對標籤決定是否啟用此伺服器'],
               ['啟用', '—', '關閉後 AI 對話不會呼叫此伺服器的工具'],
             ]}
           />
@@ -2404,6 +2598,7 @@ generate_txt:供應商週報_{{date}}.txt
               ['API Server', '是', 'DIFY 的 API 端點，預設 https://fldify-api.foxlink.com.tw/v1'],
               ['API Key', '是（新增時）', 'DIFY 應用的 API Key，格式為 app-xxxxxxxx。編輯時留空表示保持不變'],
               ['描述', '建議填', '告訴 AI 這個知識庫的用途，讓 AI 更精準地判斷何時引用。例：包含產品規格、零件型號，當使用者詢問產品規格時引用'],
+              ['標籤（Tags）', '否', '用於 TAG 自動路由的標籤，例如「產品規格」「零件」。系統根據使用者訊息自動比對標籤決定是否查詢此知識庫'],
               ['排序順序', '否', '數字越小越優先查詢，同分時依此排序'],
               ['啟用', '—', '啟用後每次對話自動查詢，停用後不查詢但保留設定'],
             ]}

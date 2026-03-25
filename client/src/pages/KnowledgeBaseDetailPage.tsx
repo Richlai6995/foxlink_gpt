@@ -5,12 +5,14 @@ import {
   Upload, Trash2, RefreshCw, CheckCircle, XCircle, Clock,
   AlertCircle, Globe, Lock, ChevronDown, ChevronUp, Plus, X,
   User, Building2, Layers, BookOpen, Save, Target, Image, History,
+  Pencil, Check,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import api from '../lib/api'
 import { useAuth } from '../context/AuthContext'
 import TranslationFields, { type TranslationData } from '../components/common/TranslationFields'
 import UserPicker from '../components/common/UserPicker'
+import TagInput from '../components/common/TagInput'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -26,6 +28,7 @@ interface KnowledgeBase {
   doc_count: number; chunk_count: number; total_size_bytes: number
   creator_id: number; creator_name: string; is_owner: boolean; can_edit: boolean
   created_at: string; updated_at: string
+  tags?: string
 }
 
 interface KbDocument {
@@ -87,6 +90,10 @@ export default function KnowledgeBaseDetailPage() {
   const [kbTrans, setKbTrans] = useState<TranslationData>({})
   const [savingTrans, setSavingTrans] = useState(false)
   const [transMsg, setTransMsg] = useState('')
+  const [headerEditing, setHeaderEditing] = useState(false)
+  const [headerName, setHeaderName] = useState('')
+  const [headerDesc, setHeaderDesc] = useState('')
+  const [headerSaving, setHeaderSaving] = useState(false)
 
   const loadKb = useCallback(async () => {
     try {
@@ -115,6 +122,24 @@ export default function KnowledgeBaseDetailPage() {
     } catch (e: any) {
       setTransMsg(e.response?.data?.error || t('kb.detail.saveFailed'))
     } finally { setSavingTrans(false) }
+  }
+
+  const startHeaderEdit = () => {
+    if (!kb) return
+    setHeaderName(kb.name)
+    setHeaderDesc(kb.description ?? '')
+    setHeaderEditing(true)
+  }
+
+  const saveHeaderEdit = async () => {
+    if (!kb) return
+    setHeaderSaving(true)
+    try {
+      await api.put(`/kb/${kb.id}`, { name: headerName.trim() || kb.name, description: headerDesc.trim() || null })
+      setHeaderEditing(false)
+      loadKb()
+    } catch { /* ignore */ }
+    finally { setHeaderSaving(false) }
   }
 
   const tabLabel = (key: TabKey) => {
@@ -164,8 +189,44 @@ export default function KnowledgeBaseDetailPage() {
             <BookOpen size={20} className="text-blue-600" />
           </div>
           <div className="flex-1 min-w-0">
-            <div className="font-semibold text-slate-800">{kb.name}</div>
-            {kb.description && <div className="text-sm text-slate-500 truncate">{kb.description}</div>}
+            {headerEditing ? (
+              <div className="space-y-1.5">
+                <input
+                  value={headerName}
+                  onChange={(e) => setHeaderName(e.target.value)}
+                  className="w-full border border-slate-300 rounded-lg px-2.5 py-1 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-blue-400"
+                  maxLength={200}
+                  autoFocus
+                />
+                <input
+                  value={headerDesc}
+                  onChange={(e) => setHeaderDesc(e.target.value)}
+                  className="w-full border border-slate-300 rounded-lg px-2.5 py-1 text-xs text-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-400"
+                  placeholder={t('kb.settings.descLabel')}
+                  maxLength={500}
+                />
+                <div className="flex items-center gap-1.5">
+                  <button onClick={saveHeaderEdit} disabled={headerSaving} className="flex items-center gap-1 px-2 py-0.5 bg-blue-600 text-white text-xs rounded-md hover:bg-blue-700 disabled:opacity-50">
+                    <Check size={12} /> {t('kb.settings.saveBtn')}
+                  </button>
+                  <button onClick={() => setHeaderEditing(false)} className="px-2 py-0.5 text-xs text-slate-500 hover:text-slate-700">
+                    {t('kb.detail.back')}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="flex items-center gap-1.5 group">
+                <div>
+                  <div className="font-semibold text-slate-800">{kb.name}</div>
+                  {kb.description && <div className="text-sm text-slate-500 truncate">{kb.description}</div>}
+                </div>
+                {(kb.can_edit || isAdmin) && (
+                  <button onClick={startHeaderEdit} className="opacity-0 group-hover:opacity-100 transition p-1 rounded hover:bg-slate-100" title="編輯名稱/描述">
+                    <Pencil size={13} className="text-slate-400" />
+                  </button>
+                )}
+              </div>
+            )}
           </div>
           <div className="hidden md:flex items-center gap-4 text-xs text-slate-500">
             <span><span className="font-medium text-slate-700">{kb.doc_count}</span> {t('kb.detail.docCountLabel')}</span>
@@ -455,6 +516,8 @@ function DocumentsTab({ kb, onRefresh, isOwner }: { kb: KnowledgeBase; onRefresh
 
 function SettingsTab({ kb, onSaved, isOwner }: { kb: KnowledgeBase; onSaved: () => void; isOwner: boolean }) {
   const { t } = useTranslation()
+  const { isAdmin } = useAuth()
+  const canEditTags = isOwner || isAdmin
   const defaultCfg = {
     separator:        '\\n\\n',
     max_size:         1024,
@@ -482,6 +545,7 @@ function SettingsTab({ kb, onSaved, isOwner }: { kb: KnowledgeBase; onSaved: () 
   const [llmModels,     setLlmModels]     = useState<{ key: string; name: string; api_model: string; model_role: string | null }[]>([])
   const [saving,        setSaving]        = useState(false)
   const [msg,           setMsg]           = useState('')
+  const [kbTags,        setKbTags]        = useState<string[]>(() => { try { return JSON.parse(kb.tags || '[]') } catch { return [] } })
 
   useEffect(() => {
     api.get('/admin/llm-models').then((res) => {
@@ -506,6 +570,7 @@ function SettingsTab({ kb, onSaved, isOwner }: { kb: KnowledgeBase; onSaved: () 
       await api.put(`/kb/${kb.id}`, {
         name:             kbName.trim() || kb.name,
         description:      kbDesc.trim() || null,
+        tags:             kbTags,
         chunk_strategy:   strategy,
         chunk_config:     cfg,
         retrieval_mode:   retMode,
@@ -555,6 +620,13 @@ function SettingsTab({ kb, onSaved, isOwner }: { kb: KnowledgeBase; onSaved: () 
           </div>
         </div>
       )}
+
+      {/* Tags — always visible so all users can see what labels the KB has */}
+      <div>
+        <label className="block text-xs text-slate-500 mb-1">標籤 (Tags)</label>
+        <TagInput tags={kbTags} onChange={setKbTags} disabled={!canEditTags} placeholder="輸入標籤後按 Enter" />
+        {!canEditTags && <p className="text-xs text-slate-400 mt-1">僅知識庫擁有者或系統管理員可修改標籤</p>}
+      </div>
 
       {/* Chunk Strategy */}
       <div>
