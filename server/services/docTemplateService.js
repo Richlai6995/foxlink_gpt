@@ -774,6 +774,39 @@ async function generateDocument(db, templateId, userId, inputData, outputFormat)
       }).filter(Boolean).join('\n');
     }
 
+    // ── Try to extract JPEG logo from original PDF ──────────────────────────
+    let logoBytes = null;
+    let logoAspect = 0.4;
+    try {
+      const { PDFDocument: PDFLib, PDFName, PDFDict } = require('pdf-lib');
+      const origPdfDoc = await PDFLib.load(tplBuf);
+      const firstPage = origPdfDoc.getPage(0);
+      const resources = firstPage.node.Resources();
+      if (resources) {
+        const xObjects = resources.lookup(PDFName.of('XObject'));
+        if (xObjects instanceof PDFDict) {
+          for (const [, valOrRef] of xObjects.dict.entries()) {
+            try {
+              const xObj = origPdfDoc.context.lookup(valOrRef);
+              if (!xObj || !xObj.dict) continue;
+              const subtype = xObj.dict.get(PDFName.of('Subtype'));
+              if (!subtype || subtype.encodedName !== '/Image') continue;
+              const filter = xObj.dict.get(PDFName.of('Filter'));
+              if (filter && filter.encodedName === '/DCTDecode') {
+                logoBytes = Buffer.from(xObj.contents);
+                const w = xObj.dict.get(PDFName.of('Width'))?.numberValue ?? 100;
+                const h = xObj.dict.get(PDFName.of('Height'))?.numberValue ?? 40;
+                logoAspect = h / w;
+                break;
+              }
+            } catch { /* skip xObject */ }
+          }
+        }
+      }
+    } catch (e) {
+      console.log('[DocTemplate] Logo extraction skipped:', e.message);
+    }
+
     const fontPath = path.join(__dirname, '../fonts/NotoSansTC-Regular.ttf');
     const MX = 50; // margin x
     const doc = new PDFKit({ margin: MX, size: 'A4', bufferPages: true });
@@ -786,14 +819,16 @@ async function generateDocument(db, templateId, userId, inputData, outputFormat)
     const labelW   = 85;
     const valW     = tblW - labelW;
     const fz       = 9;
-    // Cycle through row background colors
     const bgColors = ['#c6efce', '#bdd7ee', '#bdd7ee', '#fce4d6', '#fce4d6', '#fff2cc'];
 
-    // Title row
-    doc.fontSize(13).text(tpl.name || '文件', { align: 'center' }).moveDown(0.4);
-    doc.font('CJK').fontSize(fz);
-
-    let curY = doc.y;
+    // ── Logo (if extracted) ──────────────────────────────────────────────
+    let curY = MX;
+    if (logoBytes) {
+      const logoW = 140;
+      const logoH = Math.max(20, Math.round(logoW * logoAspect));
+      doc.image(logoBytes, MX, curY, { width: logoW });
+      curY += logoH + 14;
+    }
 
     for (let idx = 0; idx < variables.length; idx++) {
       const v = variables[idx];
