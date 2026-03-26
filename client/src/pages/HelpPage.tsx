@@ -140,6 +140,7 @@ const userSections = [
   { id: 'u-kb', label: '知識庫市集', icon: <Database size={18} /> },
   { id: 'u-research', label: '深度研究', icon: <GitFork size={18} /> },
   { id: 'u-toolbar-toggles', label: '頂端列功能開關', icon: <Zap size={18} /> },
+  { id: 'u-lang', label: '語言切換與多語設定', icon: <Globe size={18} /> },
   { id: 'u-budget', label: '對話額度限制', icon: <DollarSign size={18} /> },
   { id: 'u-ai-bi', label: 'AI 戰情室', icon: <BarChart3 size={18} /> },
   { id: 'u-ai-bi-query', label: '命名查詢 / 報表範本', icon: <BookMarked size={18} /> },
@@ -672,6 +673,79 @@ function UserManual() {
           />
           <NoteBox>以上語法須以三個反引號（```）包覆，置於 Prompt 最後，再附上報告內容說明。詳細格式請參閱系統管理員版說明書。</NoteBox>
         </SubSection>
+
+        <SubSection title="在 Prompt 中直接引用工具（技能 / 知識庫）">
+          <Para>
+            撰寫排程 Prompt 時，可以直接在文字中引用已建立的技能（Skill）和知識庫（KB），
+            系統執行時會自動呼叫對應的工具並將結果注入給 AI 分析。
+          </Para>
+          <Table
+            headers={['語法', '說明', '範例']}
+            rows={[
+              ['{{skill:技能名稱}}', '執行指定技能，將技能回傳結果注入對話背景', '{{skill:匯率查詢}}'],
+              ['{{kb:知識庫名稱}}', '從指定知識庫查詢與 Prompt 相關的段落，注入背景', '{{kb:產品規格庫}}'],
+            ]}
+          />
+          <div className="bg-slate-900 rounded-xl p-4 mt-3">
+            <p className="text-xs text-slate-500 mb-2 font-mono">Prompt 引用工具範例</p>
+            <pre className="text-sm text-slate-300 font-mono leading-7 whitespace-pre-wrap">{`今天是 {{date}}（{{weekday}}），
+請根據以下最新匯率資料 {{skill:匯率查詢}}
+以及生產 SOP 規定 {{kb:製程標準庫}}
+整理本日需注意事項並以繁體中文條列輸出。`}</pre>
+          </div>
+          <TipBox>
+            撰寫 Prompt 時，輸入 <code className="bg-slate-700 text-slate-200 px-1 rounded text-xs">{`{{skill:`}</code> 或 <code className="bg-slate-700 text-slate-200 px-1 rounded text-xs">{`{{kb:`}</code>
+            後，系統會自動彈出技能 / 知識庫名稱選單供快速選取，也可用斜線 <code className="bg-slate-700 text-slate-200 px-1 rounded text-xs">/</code> 觸發同樣的選單。
+          </TipBox>
+        </SubSection>
+
+        <SubSection title="Pipeline 管線：串接多步驟工作流程">
+          <Para>
+            Pipeline 讓一個排程任務依序執行多個步驟（節點），前一步的結果可作為後一步的輸入，
+            適合需要「查資料 → 分析 → 生成報告 → 寄信」等多階段自動化作業。
+          </Para>
+          <Para>在任務編輯頁切換至「<strong>Pipeline 管線</strong>」頁籤，點「+ 新增節點」加入步驟。</Para>
+          <Table
+            headers={['節點類型', '圖示', '說明', '適用場景']}
+            rows={[
+              ['技能（Skill）', '⚡ 黃色', '呼叫指定技能，將技能回傳結果存入輸出變數', '即時查詢庫存、呼叫外部 API'],
+              ['MCP 工具', '🔧 紫色', '直接呼叫 MCP 伺服器的指定工具，傳入 args 參數', '搜尋 Oracle 程式、ERP 資料查詢'],
+              ['知識庫（KB）', '📖 綠色', '以 query 文字查詢指定知識庫，取得相關段落', '查 SOP、產品規格、技術文件'],
+              ['AI 追加（AI）', '🤖 藍色', '讓 AI 對前一步的結果再做分析/整理，需撰寫 Prompt', '整合多個來源後做二次摘要'],
+              ['生成檔案', '📤 靛色', '將前一步 AI 輸出生成特定格式檔案', '輸出 Excel / PDF / PPT / Word'],
+              ['條件判斷', '🌿 玫瑰色', '根據前一步輸出進行分支（if/else），支援 AI 判斷或文字比對', '根據異常數量高低分流'],
+              ['並行執行', '⑁ 青色', '將多個子步驟同時執行，加速多路查詢', '同時查多個知識庫、多個 API'],
+            ]}
+          />
+          <Para>每個節點都可設定「<strong>失敗時行為</strong>」：</Para>
+          <Table
+            headers={['失敗行為', '說明']}
+            rows={[
+              ['continue（繼續）', '此步驟失敗後跳過，繼續執行下一個節點'],
+              ['stop（停止）', '此步驟失敗後中止整個 Pipeline，不寄出報告'],
+              ['goto（跳轉）', '此步驟失敗後跳到指定節點 ID 繼續執行'],
+            ]}
+          />
+          <div className="bg-slate-900 rounded-xl p-4 mt-3">
+            <p className="text-xs text-slate-500 mb-2 font-mono">Pipeline 典型流程範例</p>
+            <pre className="text-sm text-slate-300 font-mono leading-7 whitespace-pre-wrap">{`[1] MCP 工具：查詢本日 ERP 不良工單數量
+    ↓
+[2] 知識庫：查詢相關 SOP 改善措施
+    ↓
+[3] AI 追加：整合以上資料，撰寫異常摘要報告
+    ↓
+[4] 生成檔案：輸出為 Excel，檔名 異常報告_{{date}}.xlsx
+    ↓（寄出 Email 附附件）`}</pre>
+          </div>
+          <TipBox>
+            Pipeline 與 Prompt 可以同時使用：Prompt 作為主要的 AI 指示，Pipeline 則在 Prompt 執行前先完成資料收集步驟，
+            Pipeline 的最終輸出會自動注入到 Prompt 的執行上下文中。
+          </TipBox>
+          <NoteBox>
+            Pipeline 節點數量較多時執行時間會增加，建議使用並行節點加速獨立的查詢步驟。
+            若無需多步驟，直接在 Prompt 中使用 <code className="bg-amber-100 text-amber-800 px-1 rounded text-xs">{`{{skill:}}`}</code> / <code className="bg-amber-100 text-amber-800 px-1 rounded text-xs">{`{{kb:}}`}</code> 語法即可，更簡潔。
+          </NoteBox>
+        </SubSection>
       </Section>
 
       <Section id="u-image" icon={<ImageIcon size={22} />} iconColor="text-violet-500" title="圖片生成與修圖">
@@ -886,13 +960,53 @@ function UserManual() {
           <TipBox>可以對同一個對話掛載多個技能，效果會叠加。再次點「技能」按鈕即可修改或移除已掛載的技能。</TipBox>
         </SubSection>
 
-        <SubSection title="建立與分享技能">
+        <SubSection title="建立技能">
           <div className="space-y-3">
             <StepItem num={1} title="進入技能市集，點選「建立技能」" />
-            <StepItem num={2} title="自行建立內建或外部技能，共享給同事" desc="廳此技能預設為私人，點選「申請公開」將申請送對管理員審核" />
-            <StepItem num={3} title="審核通過後，全體員工可在公開技能區看到並使用" />
-            <StepItem num={4} title="對於公開技能，可點選 Fork 則複製一份到自己帳號，再根據需要修改" />
+            <StepItem num={2} title="填寫名稱、說明、選擇圖示與技能類型（內建 Prompt / 外部 / Code / Workflow）" />
+            <StepItem num={3} title="設定技能的 Tags（標籤）" desc="Tags 決定系統在何時自動啟用此技能。建議設定 2~5 個精準標籤，如「翻譯」「越南文」，讓 TAG 路由機制能正確匹配" />
+            <StepItem num={4} title="完成設定後點「儲存」，技能預設為「私人」，僅自己可用" />
           </div>
+          <NoteBox>
+            技能同樣需要設定 Tags 才能透過 TAG 路由自動啟用。未設定 Tags 的技能只能在對話頂部手動選擇掛載。
+          </NoteBox>
+        </SubSection>
+
+        <SubSection title="申請技能公開（需管理員審核）">
+          <Para>
+            建立的技能預設為私人，只有您自己可以使用。若希望分享給全體同仁，需申請公開並通過管理員審核：
+          </Para>
+          <div className="space-y-3">
+            <StepItem num={1} title="在技能市集的「我的技能」區找到目標技能卡片" />
+            <StepItem num={2} title="點選技能卡片右下角的「申請公開」按鈕（地球圖示）" desc="按鈕僅在技能狀態為「私人」且尚未申請時顯示" />
+            <StepItem num={3} title="系統將申請送交管理員審核" desc="技能卡片狀態徽章變為橘色「待審核」" />
+            <StepItem num={4} title="管理員在後台審核後批准或拒絕" desc="批准後技能狀態變為綠色「公開」，所有員工可在公開技能區看到" />
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-3">
+            <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 text-center">
+              <p className="text-xs font-semibold text-slate-500 mb-1">私人</p>
+              <p className="text-xs text-slate-500 leading-5">灰色徽章，僅自己可見與使用</p>
+            </div>
+            <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-center">
+              <p className="text-xs font-semibold text-amber-600 mb-1">待審核</p>
+              <p className="text-xs text-amber-600 leading-5">橘色徽章，申請已送出，等待管理員批准</p>
+            </div>
+            <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-center">
+              <p className="text-xs font-semibold text-green-600 mb-1">公開</p>
+              <p className="text-xs text-green-600 leading-5">綠色徽章，全員可在公開市集看到並使用或 Fork</p>
+            </div>
+          </div>
+          <TipBox>
+            公開技能的其他員工可點選「Fork」複製一份到自己的帳號後自由修改，原始公開版本不受影響。
+          </TipBox>
+        </SubSection>
+
+        <SubSection title="個人分享技能給特定對象">
+          <Para>
+            不想公開給全員、只想分享給特定同事？可在技能卡片選單點「分享」，
+            選擇分享對象（使用者 / 角色 / 部門）後設定「使用」或「管理」權限，
+            對方可在技能市集的「分享給我」區找到此技能。
+          </Para>
         </SubSection>
 
         <SubSection title="技能上的 MCP 工具模式">
@@ -1169,6 +1283,41 @@ function UserManual() {
             XLSX 中的公式只會保留計算結果值，不保留公式本身。若需讓 AI 理解公式邏輯，請先將說明另存為 TXT 或 MD 一起上傳。
           </NoteBox>
         </SubSection>
+
+        <SubSection title="設定標籤（Tags）— 讓知識庫在對話中被自動啟用的關鍵">
+          <div className="flex gap-3 bg-red-50 border border-red-200 rounded-xl p-4 mb-4">
+            <AlertTriangle size={16} className="text-red-500 flex-shrink-0 mt-0.5" />
+            <p className="text-red-700 text-sm leading-6">
+              <strong>重要：必須為知識庫設定標籤（Tags），AI 才能在對話中透過 TAG 路由機制自動找到並使用它。</strong>
+              未設定標籤的知識庫只能在對話頂部手動勾選掛載，無法被系統自動匹配。
+            </p>
+          </div>
+          <Para>
+            Tags 是讓系統「知道這個知識庫適合回答哪類問題」的關鍵線索。
+            系統每次收到使用者訊息時，會先萃取訊息的意圖標籤，再比對所有知識庫的 Tags，
+            命中的知識庫才會被自動啟用查詢。
+          </Para>
+          <Para>如何設定 Tags：</Para>
+          <div className="space-y-3">
+            <StepItem num={1} title="進入知識庫詳情頁 → 點選「設定」頁籤" />
+            <StepItem num={2} title="找到「標籤（Tags）」欄位" desc="在知識庫名稱、描述下方" />
+            <StepItem num={3} title="輸入標籤文字後按 Enter，可新增多個標籤" desc="例如：SOP、製程規範、品質手冊、產品規格" />
+            <StepItem num={4} title="點「儲存設定」完成" />
+          </div>
+          <Table
+            headers={['好的標籤（推薦）', '不好的標籤（避免）', '原因']}
+            rows={[
+              ['SOP', '文件', '太模糊，幾乎所有知識庫都符合'],
+              ['不良分析、品質管制', '資料', '無法讓系統辨識知識庫主題'],
+              ['原物料採購、供應商', '採購', '具體詞彙比單一詞更精準'],
+              ['ERP WIP 程式', '程式', '加入領域前綴詞提升比對準確度'],
+            ]}
+          />
+          <TipBox>
+            建議每個知識庫設定 3~6 個精準標籤，涵蓋主題的不同說法（例如「SOP」和「標準作業程序」同時設定）。
+            標籤設定後可回到對話測試，發現 AI 沒有用到預期知識庫時，可再回頭調整標籤。
+          </TipBox>
+        </SubSection>
       </Section>
 
       <Section id="u-research" icon={<GitFork size={22} />} iconColor="text-indigo-500" title="深度研究">
@@ -1387,12 +1536,13 @@ function UserManual() {
         </Para>
 
         <Table
-          headers={['開關', '圖示', '說明', '停用時行為']}
+          headers={['開關 / 按鈕', '圖示', '說明', '停用 / 隱藏時行為']}
           rows={[
-            ['技能 (Skill)', 'Sparkles ✦', '啟用後，AI 回覆前會先查詢符合的技能 Prompt 並套用', '跳過技能注入，AI 以原始模型回答'],
-            ['知識庫', 'Database 🗄️', '啟用後，AI 回覆前會從已掛載的自建知識庫檢索相關段落', '不做知識庫檢索，直接回答'],
-            ['DIFY 知識庫', 'Zap ⚡', '啟用後，AI 回覆前會從已掛載的 DIFY 知識庫查詢', '跳過 DIFY 檢索'],
-            ['MCP 工具', 'Globe 🌐', '啟用後，AI 可呼叫已設定的 MCP 伺服器（搜尋、程式執行等）', '停用所有 MCP 工具呼叫'],
+            ['技能 (Skill)', 'Sparkles ✦ 紫色', '啟用後，AI 回覆前會先查詢符合的技能 Prompt 並套用', '跳過技能注入，AI 以原始模型回答'],
+            ['知識庫', 'Database 🗄️ 藍色', '啟用後，AI 回覆前會從已掛載的自建知識庫檢索相關段落', '不做知識庫檢索，直接回答'],
+            ['DIFY 知識庫', 'Zap ⚡ 綠色', '啟用後，AI 回覆前會從已掛載的 DIFY 知識庫查詢', '跳過 DIFY 檢索'],
+            ['MCP 工具', 'Globe 🌐 藍色', '啟用後，AI 可呼叫已設定的 MCP 伺服器（搜尋、程式執行等）', '停用所有 MCP 工具呼叫'],
+            ['AI 戰情室快速入口', 'BarChart3 📊 橘色', '點擊後彈出 AI 戰情室主題 / 查詢任務下拉選單，可直接跳入指定查詢頁面', '僅在有「使用 AI 戰情室」權限的帳號才顯示此按鈕'],
           ]}
         />
 
@@ -1409,6 +1559,87 @@ function UserManual() {
           <NoteBox>
             各開關僅在對應功能已設定的情況下才有效果：知識庫開關需先在下拉選單中掛載知識庫；
             MCP 開關需管理員已設定並啟用 MCP 伺服器；DIFY 知識庫開關需管理員已設定 DIFY API。
+          </NoteBox>
+        </SubSection>
+      </Section>
+
+      <Section id="u-lang" icon={<Globe size={22} />} iconColor="text-sky-500" title="語言切換與多語設定">
+        <Para>
+          FOXLINK GPT 完整支援<strong>繁體中文（繁中）、英文（EN）、越南文（VI）</strong>三種語言，
+          涵蓋 UI 介面語言切換及內容多語翻譯兩個層面，讓不同語系的同仁都能流暢使用。
+        </Para>
+
+        <SubSection title="切換 UI 介面語言">
+          <div className="space-y-3">
+            <StepItem num={1} title="點選左側邊欄底部的「🌐 語言切換」按鈕" desc="顯示目前語言名稱（如「繁體中文」），點擊展開語言選單" />
+            <StepItem num={2} title="從選單中選擇目標語言" desc="繁體中文 🇹🇼 / English 🇺🇸 / Tiếng Việt 🇻🇳" />
+            <StepItem num={3} title="介面語言立即切換" desc="所有 UI 文字、按鈕、提示訊息均切換為所選語言，無需重新整理頁面" />
+          </div>
+          <Para>
+            語言偏好設定會同步儲存到您的帳號（伺服器端），下次登入後自動套用，與瀏覽器無關。
+          </Para>
+          <TipBox>
+            對話標題（Session Title）支援三語版本。切換語言後，歷史對話的標題也會自動顯示對應語言版本
+            （若建立時系統已翻譯）。
+          </TipBox>
+        </SubSection>
+
+        <SubSection title="內容多語翻譯機制">
+          <Para>
+            系統各功能中的名稱、說明等文字欄位均支援三語版本（繁中 / EN / VI）。
+            翻譯的觸發方式分為<strong>自動翻譯</strong>和<strong>手動翻譯</strong>兩種，
+            不同功能模組的處理方式不同，請依下表了解各場景的行為：
+          </Para>
+          <Table
+            headers={['功能 / 場景', '翻譯觸發方式', '說明']}
+            rows={[
+              ['技能（Skill）名稱 / 說明', '儲存時自動翻譯', '點「儲存」後，系統自動呼叫 AI 翻譯成三語並儲存'],
+              ['知識庫（KB）名稱 / 說明', '建立時自動翻譯', '點「建立」後自動翻譯，也可事後手動重新翻譯'],
+              ['對話標題（Session Title）', '重新命名時自動翻譯', '手動改名後系統背景自動翻譯為英文與越南文'],
+              ['AI 戰情室命名查詢參數標籤', '手動按翻譯按鈕', '參數標籤旁有「↻」按鈕，點擊後 AI 翻譯並填入 EN / VI 欄位'],
+              ['AI 戰情室圖表標題 / 軸名', '手動按翻譯按鈕', '圖表標題、X / Y 軸名稱旁各有翻譯按鈕，一鍵填入三語'],
+              ['儀表板名稱', '手動按翻譯按鈕', '編輯儀表板時可點翻譯按鈕自動填入英文與越南文'],
+            ]}
+          />
+          <NoteBox>
+            自動翻譯在儲存時背景執行，通常只需數秒。若翻譯失敗（如 AI 服務暫時中斷），
+            欄位會保留空白或原語言內容，可事後使用「重新翻譯」功能重跑。
+          </NoteBox>
+        </SubSection>
+
+        <SubSection title="手動重新翻譯">
+          <Para>
+            技能市集、知識庫市集等設定頁中，名稱 / 說明欄位下方有一個
+            <strong>「多語翻譯」展開區（Language 圖示）</strong>，點擊展開後可看到三語版本的當前內容，
+            並提供「↻ 重新翻譯」按鈕：
+          </Para>
+          <div className="space-y-3">
+            <StepItem num={1} title="展開多語翻譯區（點 Languages 圖示或箭頭）" desc="顯示 繁中 / EN / VI 三欄翻譯內容" />
+            <StepItem num={2} title="直接修改任一欄位內容（選用）" desc="可手動覆寫自動翻譯的結果" />
+            <StepItem num={3} title="點擊「↻ 重新翻譯」按鈕" desc="以目前的繁中內容為基礎，重新呼叫 AI 翻譯，填入 EN 和 VI 欄位" />
+            <StepItem num={4} title="儲存設定使翻譯生效" />
+          </div>
+          <TipBox>
+            手動修改的翻譯內容在儲存後可以再次點「重新翻譯」覆蓋，或保留手動版本不動。
+            翻譯以<strong>繁中版本</strong>為主要來源，若繁中欄位為空，翻譯結果可能不正確。
+          </TipBox>
+        </SubSection>
+
+        <SubSection title="各語言版本顯示邏輯">
+          <Para>
+            當系統以某語言顯示內容（如技能名稱、對話標題）時，使用以下 fallback 順序：
+          </Para>
+          <Table
+            headers={['切換到 / 目前語言', '優先顯示', '備用（若翻譯空白）']}
+            rows={[
+              ['繁體中文（繁中）', 'name_zh / title_zh', '原始 name / title 欄位'],
+              ['English（EN）', 'name_en / title_en', '繁中版本 → 原始欄位'],
+              ['Tiếng Việt（VI）', 'name_vi / title_vi', '繁中版本 → 原始欄位'],
+            ]}
+          />
+          <NoteBox>
+            若切換到英文或越南文後，某些技能名稱 / 知識庫名稱仍顯示中文，
+            代表該項目尚未翻譯。可進入設定頁手動觸發翻譯。
           </NoteBox>
         </SubSection>
       </Section>
@@ -1511,12 +1742,14 @@ function UserManual() {
           AI 戰情室是一套以自然語言驅動的企業 ERP 資料查詢與視覺化平台，
           讓您無需懂 SQL 就能直接對 Oracle ERP 資料庫提問，即時取得報表、圖表，
           並可儲存常用查詢組合成彈性的 BI 儀表板。
+          <strong>系統透過資料政策控管每位使用者的資料可視範圍</strong>，確保員工只能看到其職責範圍內的 ERP 資料。
         </Para>
 
         <Table
           headers={['功能模組', '說明']}
           rows={[
             ['自然語言查詢', '用中文提問，系統自動生成並執行 SQL，回傳結果與圖表'],
+            ['資料政策（Data Policy）', '四層過濾機制，依使用者 / 角色 / 組織 / ERP Multi-Org 控管資料可視範圍'],
             ['命名查詢 / 報表範本', '儲存常用問題為具名範本，可定義查詢參數與圖表設定'],
             ['Schema 欄位選擇器', '從 ERP 資料表欄位清單選取並插入到提問輸入框'],
             ['即時圖表建構器', '查詢結果出來後，快速設定長條圖、折線圖、圓餅圖等，支援分組/堆疊/複數 Y 軸/漸層/陰影'],
@@ -1569,6 +1802,68 @@ function UserManual() {
           <NoteBox>
             通常無需調整，使用設計師設定的預設值即可。若查詢結果不符預期，可嘗試降低閾值至 0.30~0.40。
           </NoteBox>
+        </SubSection>
+
+        <SubSection title="資料政策（Data Policy）— 資料可視範圍控管">
+          <Para>
+            AI 戰情室的查詢結果受<strong>資料政策</strong>控管，系統在執行 SQL 前會自動在 WHERE 條件加入
+            使用者所屬的組織過濾條件，確保每位員工只能看到其職責範圍內的 ERP 資料。
+            此機制完全在後端執行，使用者無法繞過。
+          </Para>
+          <Para>資料政策採用<strong>四層過濾架構</strong>，由管理員在後台設定：</Para>
+          <Table
+            headers={['層次', '過濾維度', '說明']}
+            rows={[
+              ['第 1 層 使用者過濾', '指定使用者帳號', '為特定使用者設定個人化的資料限制，優先級最高'],
+              ['第 2 層 角色過濾', '角色群組', '為一整個角色（如「廠長」「生管人員」）設定統一過濾條件'],
+              ['第 3 層 人事組織過濾', '部門 / 利潤中心 / 事業處 / 事業群 / 組織代碼', '依人事系統的組織歸屬自動過濾，支援「依員工組織自動推導」'],
+              ['第 4 層 ERP Multi-Org 過濾', '製造組織 / 營運單位 / 帳套', '依 Oracle ERP 的 Multi-Org 架構過濾，控管跨廠區資料存取'],
+            ]}
+          />
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4">
+            <div className="border border-blue-200 rounded-xl p-4 bg-blue-50">
+              <div className="flex items-center gap-2 mb-2">
+                <Activity size={14} className="text-blue-500" />
+                <span className="font-semibold text-blue-700 text-sm">人事組織自動推導</span>
+              </div>
+              <p className="text-xs text-blue-600 leading-5">
+                第 3 層設定「依員工組織自動推導（auto_from_employee）」時，
+                系統自動讀取登入者在 HR 系統的部門、利潤中心、事業處、事業群歸屬，
+                不需手動逐一指定每位員工，異動職位時自動生效。
+              </p>
+            </div>
+            <div className="border border-orange-200 rounded-xl p-4 bg-orange-50">
+              <div className="flex items-center gap-2 mb-2">
+                <Activity size={14} className="text-orange-500" />
+                <span className="font-semibold text-orange-700 text-sm">ERP Multi-Org 自動推導</span>
+              </div>
+              <p className="text-xs text-orange-600 leading-5">
+                第 4 層設定「依員工組織自動推導」時，系統對應 Oracle ERP 中的製造組織代碼（如 Z4E）或營運單位，
+                查詢時自動加上 ORGANIZATION_ID 或 ORG_ID 的 WHERE 條件，限制看到的廠區資料。
+              </p>
+            </div>
+          </div>
+
+          <Table
+            headers={['常見組織維度', '說明', '範例']}
+            rows={[
+              ['部門代碼（DEPT_CODE）', '依人事系統部門代碼過濾', '只看 MFG01 部門的資料'],
+              ['利潤中心（Profit Center）', '依利潤中心代碼過濾', '只看所屬利潤中心的損益資料'],
+              ['事業處（Org Section）', '依事業處代碼過濾', '中國廠 / 台灣廠 / 越南廠分隔'],
+              ['製造組織（Organization Code）', '對應 ERP mtl_parameters.organization_code', '如 Z4E（漳州廠）、TWE（台灣廠）'],
+              ['營運單位（Operating Unit）', '對應 Oracle MO 架構的 operating_unit 欄位', '區分不同 Operating Unit 的 AP/AR'],
+            ]}
+          />
+
+          <NoteBox>
+            <strong>超級使用者（super_user）</strong>：若管理員為特定使用者或角色設定第 3 / 4 層為「超級使用者（無限制）」，
+            該帳號可查看所有組織的資料，不受組織過濾限制。通常僅授予 IT 管理人員或最高主管。
+          </NoteBox>
+          <TipBox>
+            若您查詢某廠區資料時顯示空白或數量明顯偏少，很可能是資料政策將您的可視範圍限制在特定組織。
+            請洽系統管理員確認您的資料政策設定。
+          </TipBox>
         </SubSection>
       </Section>
 
