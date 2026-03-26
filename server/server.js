@@ -80,6 +80,8 @@ app.get('/api/health', (req, res) => res.json({ status: 'ok', timestamp: new Dat
     console.log('[Route] /api/data-permissions OK');
     app.use('/api/monitor', require('./routes/monitor'));
     console.log('[Route] /api/monitor OK');
+    app.use('/api/doc-templates', require('./routes/docTemplates'));
+    console.log('[Route] /api/doc-templates OK');
 
     // Auto-restore code skill runners
     try {

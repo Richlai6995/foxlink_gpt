@@ -697,3 +697,75 @@ export interface ShareGrantee {
   name: string
   sub?: string    // 副標題（e.g. 工號、部門代碼）
 }
+
+// ── Document Templates ────────────────────────────────────────────────────────
+
+export type TemplateVariableType = 'text' | 'number' | 'date' | 'select' | 'loop'
+export type TemplateFormat = 'docx' | 'xlsx' | 'pdf'
+export type TemplateStrategy = 'native' | 'pdf_form' | 'ai_schema'
+export type TemplateAccessLevel = 'owner' | 'edit' | 'use'
+export type TemplateShareType = 'use' | 'edit'
+
+export interface TemplateVariable {
+  key: string
+  label: string
+  type: TemplateVariableType
+  required: boolean
+  original_text?: string
+  description?: string
+  default_value?: string
+  placeholder?: string
+  options?: string[] | null
+  children?: TemplateVariable[]
+}
+
+export interface TemplateSchema {
+  variables: TemplateVariable[]
+  confidence?: number
+  notes?: string
+  strategy?: TemplateStrategy
+  extracted_at?: string
+}
+
+export interface DocTemplate {
+  id: string
+  creator_id: number
+  creator_name?: string
+  name: string
+  description?: string
+  format: TemplateFormat
+  strategy: TemplateStrategy
+  template_file?: string
+  original_file?: string
+  schema_json?: string
+  preview_url?: string
+  is_public: number
+  tags?: string
+  use_count: number
+  forked_from?: string
+  created_at: string
+  updated_at: string
+  access_level?: TemplateAccessLevel
+}
+
+export interface DocTemplateShare {
+  id: number
+  template_id: string
+  share_type: TemplateShareType
+  grantee_type: ShareGrantee['type']
+  grantee_id: string
+  grantee_name?: string
+  granted_by?: number
+  created_at: string
+}
+
+export interface DocTemplateOutput {
+  id: string
+  template_id: string
+  user_id: number
+  user_name?: string
+  input_data?: string
+  output_file?: string
+  output_format?: string
+  created_at: string
+}

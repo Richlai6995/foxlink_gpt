@@ -1,6 +1,8 @@
 import { useState, useRef, useCallback, useImperativeHandle, forwardRef } from 'react'
-import { Send, Paperclip, X, FileText, Image, Music, AlertCircle, Search } from 'lucide-react'
+import { Send, Paperclip, X, FileText, Image, Music, AlertCircle, Search, LayoutTemplate } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
+import TemplatePickerPopover from './templates/TemplatePickerPopover'
+import { DocTemplate } from '../types'
 
 interface Props {
   onSend: (message: string, files: File[]) => void
@@ -49,6 +51,8 @@ const MessageInput = forwardRef<MessageInputHandle, Props>(function MessageInput
   const [message, setMessage] = useState('')
   const [files, setFiles] = useState<File[]>([])
   const [fileError, setFileError] = useState('')
+  const [showTemplatePicker, setShowTemplatePicker] = useState(false)
+  const [selectedTemplate, setSelectedTemplate] = useState<DocTemplate | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -131,10 +135,14 @@ const MessageInput = forwardRef<MessageInputHandle, Props>(function MessageInput
   const handleSubmit = () => {
     if (disabled) return
     if (!message.trim() && files.length === 0) return
-    onSend(message.trim(), files)
+    const finalMsg = selectedTemplate
+      ? `[使用範本:${selectedTemplate.id}:${selectedTemplate.name}] ${message.trim()}`
+      : message.trim()
+    onSend(finalMsg, files)
     setMessage('')
     setFiles([])
     setFileError('')
+    setSelectedTemplate(null)
     if (textareaRef.current) textareaRef.current.style.height = 'auto'
   }
 
@@ -154,6 +162,17 @@ const MessageInput = forwardRef<MessageInputHandle, Props>(function MessageInput
 
   return (
     <div className="p-4 bg-white border-t border-slate-200">
+      {/* Selected template badge */}
+      {selectedTemplate && (
+        <div className="flex items-center gap-2 mb-2 bg-indigo-50 border border-indigo-200 rounded-lg px-3 py-1.5 text-xs text-indigo-700">
+          <LayoutTemplate size={13} />
+          <span>使用範本：<strong>{selectedTemplate.name}</strong></span>
+          <button onClick={() => setSelectedTemplate(null)} className="ml-auto text-indigo-400 hover:text-indigo-600">
+            <X size={12} />
+          </button>
+        </div>
+      )}
+
       {/* File previews */}
       {files.length > 0 && (
         <div className="flex flex-wrap gap-2 mb-3">
@@ -198,6 +217,24 @@ const MessageInput = forwardRef<MessageInputHandle, Props>(function MessageInput
         >
           <Paperclip size={18} />
         </button>
+
+        {/* Template Picker */}
+        <div className="relative flex-shrink-0">
+          <button
+            onClick={() => setShowTemplatePicker(!showTemplatePicker)}
+            disabled={disabled}
+            className={`transition p-1 mb-0.5 disabled:opacity-50 ${selectedTemplate ? 'text-indigo-500' : 'text-slate-400 hover:text-indigo-500'}`}
+            title="使用文件範本"
+          >
+            <LayoutTemplate size={18} />
+          </button>
+          {showTemplatePicker && (
+            <TemplatePickerPopover
+              onSelect={t => { setSelectedTemplate(t); setShowTemplatePicker(false) }}
+              onClose={() => setShowTemplatePicker(false)}
+            />
+          )}
+        </div>
 
         {/* Deep Research */}
         {canResearch && (

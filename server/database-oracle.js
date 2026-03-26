@@ -1402,6 +1402,47 @@ async function runMigrations(db) {
   await safeAddColumn('ROLES', 'QUOTA_EXCEED_ACTION', "VARCHAR2(10) DEFAULT 'block'");
   await safeAddColumn('USERS', 'QUOTA_EXCEED_ACTION', 'VARCHAR2(10)');
 
+  // ── 文件範本系統 ────────────────────────────────────────────────────────────
+  await createTable('DOC_TEMPLATES', `CREATE TABLE doc_templates (
+    id             VARCHAR2(36)  PRIMARY KEY,
+    creator_id     NUMBER        NOT NULL REFERENCES users(id),
+    name           VARCHAR2(200) NOT NULL,
+    description    CLOB,
+    format         VARCHAR2(20)  NOT NULL,
+    strategy       VARCHAR2(20)  DEFAULT 'native',
+    template_file  VARCHAR2(500),
+    original_file  VARCHAR2(500),
+    schema_json    CLOB,
+    preview_url    VARCHAR2(500),
+    is_public      NUMBER(1)     DEFAULT 0,
+    tags           CLOB,
+    use_count      NUMBER        DEFAULT 0,
+    forked_from    VARCHAR2(36)  REFERENCES doc_templates(id) ON DELETE SET NULL,
+    created_at     TIMESTAMP     DEFAULT SYSTIMESTAMP,
+    updated_at     TIMESTAMP     DEFAULT SYSTIMESTAMP
+  )`);
+
+  await createTable('DOC_TEMPLATE_SHARES', `CREATE TABLE doc_template_shares (
+    id             NUMBER        GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    template_id    VARCHAR2(36)  NOT NULL REFERENCES doc_templates(id) ON DELETE CASCADE,
+    share_type     VARCHAR2(20)  DEFAULT 'use',
+    grantee_type   VARCHAR2(20)  NOT NULL,
+    grantee_id     VARCHAR2(100) NOT NULL,
+    granted_by     NUMBER        REFERENCES users(id),
+    created_at     TIMESTAMP     DEFAULT SYSTIMESTAMP,
+    CONSTRAINT uq_doc_tpl_share UNIQUE (template_id, grantee_type, grantee_id)
+  )`);
+
+  await createTable('DOC_TEMPLATE_OUTPUTS', `CREATE TABLE doc_template_outputs (
+    id             VARCHAR2(36)  PRIMARY KEY,
+    template_id    VARCHAR2(36)  NOT NULL REFERENCES doc_templates(id),
+    user_id        NUMBER        NOT NULL REFERENCES users(id),
+    input_data     CLOB,
+    output_file    VARCHAR2(500),
+    output_format  VARCHAR2(20),
+    created_at     TIMESTAMP     DEFAULT SYSTIMESTAMP
+  )`);
+
   // ── 補算 token_usage.cost=NULL 的歷史資料（非同步，不阻塞啟動）────────────
   try {
     const { recalcNullCosts } = require('./services/tokenService');

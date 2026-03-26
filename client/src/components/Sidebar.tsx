@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { Plus, MessageSquare, Trash2, Pencil, Check, ChevronDown, LogOut, Settings, Cpu, Zap, CalendarClock, HelpCircle, KeyRound, X, Eye, EyeOff, GitFork, Sparkles, Database, Menu, ChevronUp, BarChart3, Globe } from 'lucide-react'
+import { Plus, MessageSquare, Trash2, Pencil, Check, ChevronDown, LogOut, Settings, Cpu, Zap, CalendarClock, HelpCircle, KeyRound, X, Eye, EyeOff, GitFork, Sparkles, Database, Menu, ChevronUp, BarChart3, Globe, FileText } from 'lucide-react'
 import type { ChatSession, ModelType, LlmModel } from '../types'
 import { useAuth } from '../context/AuthContext'
 import { useNavigate } from 'react-router-dom'
@@ -351,6 +351,10 @@ export default function Sidebar({
                   <BarChart3 size={13} /> {t('sidebar.aiDashboard')}
                 </button>
               )}
+              <button onClick={() => { setShowMenu(false); navigate('/templates') }}
+                className="w-full flex items-center gap-2 text-indigo-400 hover:bg-slate-700 px-3 py-2.5 text-xs transition font-medium">
+                <FileText size={13} /> 文件範本
+              </button>
               <button onClick={() => { setShowMenu(false); navigate('/help') }}
                 className="w-full flex items-center gap-2 text-emerald-400 hover:bg-slate-700 px-3 py-2.5 text-xs transition font-medium">
                 <HelpCircle size={13} /> {t('sidebar.helpDoc')}

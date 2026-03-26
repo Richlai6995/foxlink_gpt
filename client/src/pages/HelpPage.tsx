@@ -7,7 +7,7 @@ import {
   ChevronRight, Info, Lightbulb, Terminal, Globe, RefreshCw,
   Wand2, ImageIcon, Clock, Share2, GitFork, Lock, Sparkles, Code2, Package, Play, Square,
   Paperclip, Search, Server, BookMarked, Wifi, WifiOff, CheckCircle, Loader2, Layers, Activity,
-  Key, ShieldCheck,
+  Key, ShieldCheck, LayoutTemplate, FileSpreadsheet, File,
 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 
@@ -151,6 +151,7 @@ const userSections = [
   { id: 'u-ai-bi-dashboard', label: '儀表板 Dashboard', icon: <Share2 size={18} /> },
   { id: 'u-ai-bi-schema', label: 'Schema 與多資料庫來源', icon: <Database size={18} /> },
   { id: 'u-help-kb', label: 'AI 回答使用問題', icon: <BookMarked size={18} /> },
+  { id: 'u-doc-template', label: '文件範本', icon: <LayoutTemplate size={18} /> },
 ]
 
 function UserManual() {
@@ -2658,12 +2659,152 @@ function UserManual() {
             {['登入與登出', '介面導覽', '開始對話', 'AI 模型選擇', '上傳檔案',
               '對話歷史', '可用工具 / TAG路由', '自動排程', '圖片生成',
               '技能 Skill', '知識庫市集', '深度研究', '語言切換', '對話額度',
-              'AI 戰情室', '命名查詢', 'Schema 欄位', '圖表建構器', '儀表板'].map((label) => (
+              'AI 戰情室', '命名查詢', 'Schema 欄位', '圖表建構器', '儀表板', '文件範本'].map((label) => (
               <span key={label} className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded text-xs">{label}</span>
             ))}
           </div>
           <NoteBox>
             說明書知識庫由系統自動維護，每次系統更新後會自動同步最新內容，您不需要做任何設定。
+          </NoteBox>
+        </SubSection>
+      </Section>
+
+      {/* ═══════════════════════════════ 文件範本 */}
+      <Section id="u-doc-template" icon={<LayoutTemplate size={22} />} iconColor="text-indigo-500" title="文件範本">
+        <Para>
+          <strong>文件範本庫</strong>讓您預先定義帶有<strong>變數佔位符</strong>的 Word、Excel 或 PDF 文件，
+          之後只需填入資料，系統自動輸出格式完整的正式文件。適合會議紀錄、報告、表單等重複性文件的產出。
+        </Para>
+        <Table
+          headers={['支援格式', '引擎', '說明']}
+          rows={[
+            ['Word (DOCX)', 'docxtemplater', '保留原始字型、樣式、表格，原生 {{變數}} 替換'],
+            ['Excel (XLSX)', 'ExcelJS', '儲存格佔位符替換，保留公式與格式'],
+            ['PDF', 'pdf-lib / AI 重建', 'AcroForm 表單欄位優先；無表單時由 AI 識別後重建'],
+          ]}
+        />
+
+        <SubSection title="進入文件範本庫">
+          <Para>從左側邊欄點選<strong>文件範本</strong>圖示（LayoutTemplate 圖示），進入範本管理頁面。</Para>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-2">
+            {[
+              { icon: '📁', title: '我的範本', desc: '您建立的所有範本' },
+              { icon: '🌐', title: '分享給我 / 公開', desc: '他人分享或公開的範本' },
+              { icon: '🔍', title: '搜尋篩選', desc: '依名稱或格式快速篩選' },
+            ].map(item => (
+              <div key={item.title} className="bg-slate-50 border border-slate-200 rounded-lg p-3">
+                <div className="text-lg mb-1">{item.icon}</div>
+                <p className="text-xs font-semibold text-slate-700">{item.title}</p>
+                <p className="text-xs text-slate-500 mt-0.5">{item.desc}</p>
+              </div>
+            ))}
+          </div>
+        </SubSection>
+
+        <SubSection title="新增範本（上傳精靈）">
+          <div className="space-y-3">
+            <StepItem num={1} title="點選右上角「新增範本」藍色按鈕" />
+            <StepItem num={2} title="拖曳或點選上傳您的文件" desc="支援 DOCX、XLSX、PDF，系統自動讀取內容" />
+            <StepItem num={3} title="AI 自動分析：識別文件中的變數" desc="例如：{{姓名}}、{{日期}}、{{金額}}，並列出建議的變數清單" />
+            <StepItem num={4} title="確認或調整變數設定" desc="可修改變數名稱、類型（文字/數字/日期/選項）、是否必填、預設值" />
+            <StepItem num={5} title="填寫範本名稱、描述、標籤，點選「建立」完成" />
+          </div>
+          <TipBox>
+            AI 識別的變數準確度約 85–95%，建議上傳前先確認文件中的佔位文字清晰，
+            例如「請輸入姓名」比「XXX」更容易被正確識別。
+          </TipBox>
+        </SubSection>
+
+        <SubSection title="使用範本生成文件">
+          <Para>有三種方式可以套用範本產生文件：</Para>
+          <div className="space-y-3 mt-2">
+            <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-4">
+              <p className="text-sm font-semibold text-indigo-700 mb-2 flex items-center gap-2">
+                <LayoutTemplate size={15} /> 方式 1：在對話輸入框選擇範本
+              </p>
+              <p className="text-xs text-indigo-600 leading-5">
+                點選輸入框左方的<strong>「範本」圖示</strong>（LayoutTemplate），從彈出清單選擇範本，
+                系統會在您的訊息前方附加 <code className="bg-indigo-100 px-1 rounded">[使用範本:名稱]</code> 標記，
+                AI 自動以對話內容填入變數並生成文件。
+              </p>
+            </div>
+            <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
+              <p className="text-sm font-semibold text-blue-700 mb-2 flex items-center gap-2">
+                <FileSpreadsheet size={15} /> 方式 2：從範本卡片點選「生成」
+              </p>
+              <p className="text-xs text-blue-600 leading-5">
+                在文件範本庫找到目標範本，點選卡片上的<strong>「生成」按鈕</strong>，
+                系統彈出填寫表單，依序輸入所有變數後點選「生成」，即可下載完成的文件。
+              </p>
+            </div>
+          </div>
+          <NoteBox>
+            生成文件的格式預設與範本相同。若需轉換格式（如 DOCX → PDF），可在生成表單中選擇輸出格式。
+          </NoteBox>
+        </SubSection>
+
+        <SubSection title="變數類型說明">
+          <Table
+            headers={['類型', '說明', '範例']}
+            rows={[
+              ['text', '一般文字', '姓名、部門、說明'],
+              ['number', '數字，可帶小數', '金額、數量、比率'],
+              ['date', '日期格式', '2024-01-01'],
+              ['select', '固定選項清單', '狀態：核准 / 退回 / 審核中'],
+              ['loop', '重複表格列', '明細清單（每列可有多個子欄位）'],
+            ]}
+          />
+          <TipBox>
+            <strong>loop 類型</strong>適合用於有多筆明細的表格，例如採購清單、出差明細。
+            生成時可動態新增或刪除列數，每列獨立填寫。
+          </TipBox>
+        </SubSection>
+
+        <SubSection title="下載範本原始檔">
+          <Para>
+            若您擁有「使用」以上權限，可點選範本卡片右上角選單的<strong>「下載」</strong>，
+            下載該範本的原始文件（含佔位符）在本機修改後，重新建立新範本使用。
+          </Para>
+        </SubSection>
+
+        <SubSection title="複製別人的範本（Fork）">
+          <div className="space-y-3">
+            <StepItem num={1} title="在公開或被分享的範本卡片點選「複製」圖示" />
+            <StepItem num={2} title="系統建立一份您專屬的副本" desc="原始文件、變數 Schema 完整複製，您可自由修改" />
+            <StepItem num={3} title="進入「我的範本」找到複製的副本，點選「編輯」進行調整" />
+          </div>
+          <TipBox>Fork 副本與原始範本相互獨立，修改副本不影響原始範本，也不需要通知原作者。</TipBox>
+        </SubSection>
+
+        <SubSection title="分享範本">
+          <Para>範本擁有者（owner）可將範本分享給其他使用者、部門或職稱群組：</Para>
+          <Table
+            headers={['分享類型', '說明']}
+            rows={[
+              ['use（使用）', '被分享者可生成文件、下載原始檔，但不能修改範本設定'],
+              ['edit（編輯）', '被分享者可修改範本名稱、描述、標籤、變數 Schema'],
+            ]}
+          />
+          <Para>分享對象可以是：</Para>
+          <div className="flex flex-wrap gap-2 mt-2">
+            {['個別使用者', '部門', '職稱', '成本中心', '分部', '組織群組'].map(t => (
+              <span key={t} className="px-2 py-0.5 bg-indigo-100 text-indigo-700 rounded text-xs">{t}</span>
+            ))}
+          </div>
+        </SubSection>
+
+        <SubSection title="公開範本">
+          <Para>
+            您可以將自己的範本設為<strong>全員公開</strong>，讓所有使用者都能在範本庫瀏覽和使用。
+          </Para>
+          <div className="space-y-3">
+            <StepItem num={1} title="開啟範本的「分享設定」" />
+            <StepItem num={2} title="點選「設為公開」開關" />
+            <StepItem num={3} title="確認公告提示後，範本立即對全員可見" />
+          </div>
+          <NoteBox>
+            公開範本不需要管理員審核，但請確認文件內容無敏感資訊，因為全員均可看到並使用。
+            若需取消公開，再次點選開關即可。
           </NoteBox>
         </SubSection>
       </Section>
@@ -2699,6 +2840,7 @@ const adminSections = [
   { id: 'a-k8s', label: 'K8s 部署更新', icon: <Server size={18} /> },
   { id: 'a-env-config', label: 'ENV 環境變數設定', icon: <Settings size={18} /> },
   { id: 'a-help-kb-sync', label: '說明書 KB 自動同步', icon: <RefreshCw size={18} /> },
+  { id: 'a-doc-template', label: '文件範本管理', icon: <LayoutTemplate size={18} /> },
 ]
 
 function AdminManual() {
@@ -5010,6 +5152,127 @@ SESSION_TTL_SECONDS=28800`}</CodeBlock>
             <StepItem num={4} title="Server 重啟後自動重建知識庫並對所有章節重新 embed" />
           </div>
           <NoteBox>若只是清除 Redis lock（如手動 DEL lock:help_kb_sync），不刪除知識庫，下次重啟仍會因 hash 相同而略過，無法強制重 embed。需同時刪除知識庫才有效。</NoteBox>
+        </SubSection>
+      </Section>
+
+      {/* ═══════════════════════════════ 文件範本管理 */}
+      <Section id="a-doc-template" icon={<LayoutTemplate size={22} />} iconColor="text-indigo-500" title="文件範本管理">
+        <Para>
+          管理員可查看全部使用者的範本、管理公開範本、查詢範本使用紀錄，並了解後端 DB 結構與 API。
+        </Para>
+
+        <SubSection title="DB 資料表">
+          <Table
+            headers={['資料表', '用途']}
+            rows={[
+              ['doc_templates', '範本主表：id、creator_id、name、format、schema_json、is_public、use_count、forked_from 等'],
+              ['doc_template_shares', '共享設定：template_id、share_type(use/edit)、grantee_type、grantee_id'],
+              ['doc_template_outputs', '生成紀錄：template_id、user_id、input_data、output_file、created_at'],
+            ]}
+          />
+          <TipBox>
+            Oracle DB 使用 <code className="bg-blue-100 px-1 rounded text-xs">VARCHAR2(36)</code> UUID 主鍵，
+            <code className="bg-blue-100 px-1 rounded text-xs">doc_template_shares</code> 使用 UNIQUE 約束 <code className="bg-blue-100 px-1 rounded text-xs">(template_id, grantee_type, grantee_id)</code> 防止重複分享。
+          </TipBox>
+        </SubSection>
+
+        <SubSection title="API 端點一覽">
+          <Table
+            headers={['方法', '路徑', '說明', '權限']}
+            rows={[
+              ['GET', '/api/doc-templates', '列出範本（搜尋/格式篩選）', '登入使用者'],
+              ['POST', '/api/doc-templates/upload', 'SSE 串流：上傳分析（parsing→analyzing→done）', '登入使用者'],
+              ['POST', '/api/doc-templates', '建立範本（含注入佔位符）', '登入使用者'],
+              ['GET', '/api/doc-templates/:id', '取得單一範本', 'use+'],
+              ['PUT', '/api/doc-templates/:id', '更新名稱/描述/標籤/schema', 'edit+'],
+              ['DELETE', '/api/doc-templates/:id', '刪除範本及所有檔案', 'owner'],
+              ['GET', '/api/doc-templates/:id/download', '下載原始檔或佔位符檔（?type=template）', 'use+'],
+              ['POST', '/api/doc-templates/:id/generate', '生成文件，回傳 download_url', 'use+'],
+              ['GET', '/api/doc-templates/:id/outputs', '查詢生成歷史', 'use+'],
+              ['POST', '/api/doc-templates/:id/fork', '複製範本給當前使用者', 'use+'],
+              ['GET/POST/DELETE', '/api/doc-templates/:id/shares', '共享管理（讀/建/刪）', 'owner'],
+            ]}
+          />
+        </SubSection>
+
+        <SubSection title="上傳分析 SSE 事件">
+          <Para>POST /api/doc-templates/upload 使用 Server-Sent Events 回傳進度：</Para>
+          <Table
+            headers={['事件', '說明']}
+            rows={[
+              ['status: parsing', '正在解析文件內容（mammoth / ExcelJS / pdf-parse）'],
+              ['status: analyzing', '已解析，正在呼叫 Gemini Flash 識別變數'],
+              ['done', '分析完成，回傳 { tempPath, format, schema }，前端進入確認步驟'],
+              ['error', '分析失敗，回傳錯誤訊息'],
+            ]}
+          />
+          <CodeBlock>{`// SSE 事件格式
+data: {"event":"status","message":"parsing"}
+data: {"event":"status","message":"analyzing"}
+data: {"event":"done","tempPath":"/tmp/xxx.docx","format":"docx","schema":{"variables":[...]}}`}</CodeBlock>
+        </SubSection>
+
+        <SubSection title="變數識別 — Gemini Prompt 說明">
+          <Para>
+            系統向 Gemini Flash 送出以下 JSON 格式要求，識別文件中的填寫區域：
+          </Para>
+          <div className="bg-slate-900 rounded-xl p-4">
+            <pre className="text-xs text-slate-300 font-mono leading-6 whitespace-pre">{`{
+  "variables": [
+    {
+      "key": "recipient_name",   // 英文識別鍵
+      "label": "收件人姓名",      // 顯示名稱
+      "type": "text",            // text|number|date|select|loop
+      "required": true,
+      "default_value": "",
+      "original_text": "請輸入收件人姓名", // 文件中的原始文字
+      "children": []             // loop 類型才有，代表每列的子欄位
+    }
+  ],
+  "confidence": 0.92,
+  "notes": "..."
+}`}</pre>
+          </div>
+        </SubSection>
+
+        <SubSection title="DOCX 佔位符注入機制">
+          <Para>
+            Word 文件的 XML 結構中，一段連續文字可能被分割成多個 <code className="bg-slate-100 px-1 rounded text-xs">&lt;w:r&gt;</code>（run）節點。
+            系統透過 <strong>run-merge 演算法</strong>解決此問題：
+          </Para>
+          <div className="space-y-3">
+            <StepItem num={1} title="JSZip 解壓 DOCX，讀取 word/document.xml" />
+            <StepItem num={2} title="對每個段落（<w:p>）合併所有 run 的純文字" />
+            <StepItem num={3} title="以 original_text → {{key}} 進行字串替換" />
+            <StepItem num={4} title="替換後重建為單一 merged run，寫回 DOCX" />
+          </div>
+          <NoteBox>
+            若原始文件同一句話跨越多個格式段（如部分文字加粗），merge 後會統一格式，
+            建議範本文件的佔位文字保持單一格式（全無加粗或全加粗），避免格式遺失。
+          </NoteBox>
+        </SubSection>
+
+        <SubSection title="檔案儲存路徑">
+          <Table
+            headers={['類型', '路徑', '說明']}
+            rows={[
+              ['原始上傳', 'uploads/templates/original/<uuid>.{ext}', '使用者上傳的原始文件'],
+              ['注入佔位符後', 'uploads/templates/processed/<uuid>.{ext}', 'docxtemplater 使用的範本檔'],
+              ['生成輸出', 'uploads/generated/<uuid>.{ext}', '每次生成的結果文件'],
+            ]}
+          />
+        </SubSection>
+
+        <SubSection title="is_public 管理">
+          <Para>
+            管理員可透過 <code className="bg-slate-100 px-1 rounded text-xs">PUT /api/doc-templates/:id</code>（帶 <code className="bg-slate-100 px-1 rounded text-xs">is_public: 0/1</code>）
+            強制關閉任何範本的公開狀態。使用者自行公開時，系統在前端已有 <code className="bg-slate-100 px-1 rounded text-xs">window.confirm()</code> 確認提示，
+            後端無需額外審核流程。
+          </Para>
+          <NoteBox>
+            管理員目前無專屬後台 UI 管理範本，若需批量管理，請直接查詢 <code className="bg-amber-100 px-1 rounded text-xs">doc_templates</code> 資料表。
+            未來版本預計新增管理員範本總覽頁面。
+          </NoteBox>
         </SubSection>
       </Section>
     </div>
