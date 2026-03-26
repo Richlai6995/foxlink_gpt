@@ -1961,17 +1961,19 @@ router.post('/sessions/:id/messages', upload.array('files', 10), async (req, res
               const t1 = Date.now();
               try {
                 const convId = getDifyConvId(sessionId, kb.id);
+                const difyBody = { inputs: {}, query: combinedUserText, response_mode: 'blocking', user: `foxlink-user-${req.user.id}` };
+                if (convId) difyBody.conversation_id = convId;
                 const difyResp = await fetch(`${kb.api_server}/chat-messages`, {
                   method: 'POST',
                   headers: { Authorization: `Bearer ${kb.api_key}`, 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ inputs: {}, query: combinedUserText, response_mode: 'blocking', conversation_id: convId || '', user: String(req.user.id) }),
+                  body: JSON.stringify(difyBody),
                   signal: AbortSignal.timeout(120000),
                 });
                 if (!difyResp.ok) return null;
                 const ddata = await difyResp.json();
                 if (ddata.conversation_id) setDifyConvId(sessionId, kb.id, ddata.conversation_id);
                 const answer = ddata.answer || '';
-                console.log(`[DIFY] Fast-path KB "${kb.name}" ok in ${Date.now() - t1}ms`);
+                console.log(`[DIFY] Fast-path KB "${kb.name}" ok in ${Date.now() - t1}ms answer="${answer.slice(0, 150)}"`);
                 if (!answer.trim()) return null;
                 return `## 知識庫：${kb.name}\n\n${answer}`;
               } catch (e) {
