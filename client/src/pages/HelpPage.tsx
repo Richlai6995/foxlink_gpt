@@ -2518,6 +2518,7 @@ const adminSections = [
   { id: 'a-system', label: '系統設定', icon: <Settings size={18} /> },
   { id: 'a-monitor', label: '系統監控', icon: <Activity size={18} /> },
   { id: 'a-k8s', label: 'K8s 部署更新', icon: <Server size={18} /> },
+  { id: 'a-env-config', label: 'ENV 環境變數設定', icon: <Settings size={18} /> },
 ]
 
 function AdminManual() {
@@ -4102,6 +4103,326 @@ cd ~/foxlink_gpt && git pull && ./deploy.sh`}</CodeBlock>
             目前 skill_runners 目錄已掛載於 NFS PVC（pvc-flgpt-source），pod 重啟後應保留。
             若 skill 仍失效，手動復原：後台 → 技能管理 → 找到 Code Runner 技能 → 點「儲存代碼」。
           </Para>
+        </SubSection>
+      </Section>
+
+      <Section id="a-env-config" icon={<Settings size={22} />} iconColor="text-slate-600" title="ENV 環境變數設定">
+        <Para>
+          所有系統行為均由 <code className="bg-slate-100 px-1 rounded text-xs">server/.env</code> 控制。
+          本節按功能群組說明每個參數的用途，並標明「本機開發」與「K8s/Docker 正式環境」的典型值差異。
+          K8s 部署時參數通常透過 <code className="bg-slate-100 px-1 rounded text-xs">kubectl create secret</code> 或
+          ConfigMap 注入，不直接存在容器內的 .env 檔。
+        </Para>
+        <NoteBox>
+          敏感參數（密碼、API Key、JWT Secret）在 K8s 必須使用 Secret 而非 ConfigMap，避免明文存儲在 YAML。
+          本機開發可直接寫入 <code className="bg-slate-100 px-1 rounded text-xs">.env</code>，但請勿將該檔案 commit 進 git。
+        </NoteBox>
+
+        <SubSection title="基本伺服器">
+          <Table
+            headers={['參數', '用途', '本機開發', 'K8s/Docker']}
+            rows={[
+              ['PORT', 'Express 監聽埠', '3007', '3007（container 內部，Ingress 對外 8443）'],
+              ['NODE_ENV', '環境識別，影響錯誤輸出詳細度', 'development', 'production'],
+              ['APP_BASE_URL', '系統對外 URL，用於 SSO callback、Email 連結等', 'http://localhost:3007', 'https://flgpt.foxlink.com.tw:8443'],
+              ['FOXLINK_API_URL', '伺服器自我呼叫 API 的 base URL（skill runner、MCP 測試等）', 'http://localhost:3007', 'http://foxlink-gpt-svc:3007（cluster 內部 Service）'],
+            ]}
+          />
+        </SubSection>
+
+        <SubSection title="認證與安全">
+          <Table
+            headers={['參數', '用途', '說明']}
+            rows={[
+              ['JWT_SECRET', 'Token 簽名秘鑰（備用，目前 session 改用 Redis UUID）', '任意隨機字串，長度建議 ≥ 32 字元；K8s 以 Secret 注入'],
+              ['DEFAULT_ADMIN_ACCOUNT', '初始管理員帳號', '預設 ADMIN，系統初始化時自動建立（若帳號不存在）'],
+              ['DEFAULT_ADMIN_PASSWORD', '初始管理員密碼', '首次登入後務必修改；K8s 以 Secret 注入'],
+              ['LLM_KEY_SECRET', 'AES-256 金鑰（64 hex 字元），用於加密資料庫中儲存的 LLM API Key', '若留空，系統自動以 JWT_SECRET 的 SHA-256 作為替代金鑰；建議正式環境明確設定'],
+            ]}
+          />
+          <NoteBox>LLM_KEY_SECRET 對應 LLM 模型管理中各 Provider 的 API Key 加密儲存。若更換此金鑰，已儲存的 API Key 將無法解密，需重新輸入。</NoteBox>
+        </SubSection>
+
+        <SubSection title="AI 模型（Gemini）">
+          <Table
+            headers={['參數', '用途', '說明']}
+            rows={[
+              ['GEMINI_API_KEY', 'Google Gemini API 金鑰', '必填；K8s 以 Secret 注入。用於預設 Gemini 對話模型及 Embedding/OCR 功能'],
+              ['GEMINI_MODEL_PRO', '初始 Pro 模型 ID（首次啟動寫入 DB）', 'gemini-3-pro-preview；啟動後可在後台「LLM 模型管理」修改，ENV 僅作為初始值'],
+              ['GEMINI_MODEL_FLASH', '初始 Flash 模型 ID（首次啟動寫入 DB）', 'gemini-3-flash-preview；同上，啟動後可覆寫'],
+            ]}
+          />
+          <TipBox>GEMINI_MODEL_PRO / FLASH 只在資料庫對應記錄不存在時才有效。若已在後台修改過 LLM 模型設定，重啟不會覆蓋。</TipBox>
+        </SubSection>
+
+        <SubSection title="檔案儲存">
+          <Table
+            headers={['參數', '用途', '本機開發', 'K8s/Docker']}
+            rows={[
+              ['UPLOAD_DIR', '用戶上傳檔案、生成檔案、KB 索引的根目錄', './uploads（相對 server/）', '/app/uploads（掛載 PVC pvc-flgpt-upload）'],
+            ]}
+          />
+          <NoteBox>K8s 必須掛載 PVC，否則 pod 重啟後所有上傳檔案消失。uploads/ 目錄下有 generated/、kb/、sessions/ 等子目錄由系統自動建立。</NoteBox>
+        </SubSection>
+
+        <SubSection title="Email 通知（SMTP）">
+          <Table
+            headers={['參數', '用途', '說明']}
+            rows={[
+              ['ADMIN_NOTIFY_EMAIL', '敏感詞警示、系統異常通知的收件人 Email', '建議設為管理員信箱或群組信箱'],
+              ['SMTP_SERVER', 'SMTP 主機位址', '例：dp-notes.foxlink.com.tw'],
+              ['SMTP_PORT', 'SMTP 埠號', '一般 25（非加密）或 587（STARTTLS）或 465（SSL）'],
+              ['SMTP_USERNAME', 'SMTP 登入帳號', '留空表示不需要認證（部分內部 SMTP 允許）'],
+              ['SMTP_PASSWORD', 'SMTP 登入密碼', 'K8s 以 Secret 注入'],
+              ['FROM_ADDRESS', '寄件人 Email 地址', '例：fl_support@foxlink.com.tw'],
+            ]}
+          />
+        </SubSection>
+
+        <SubSection title="Oracle 用戶端（本機開發）">
+          <Table
+            headers={['參數', '用途', '說明']}
+            rows={[
+              ['ORACLE_HOME', 'Oracle Instant Client 安裝路徑', '本機 Windows：D:\\ORACLE_CLIENT_23\\instantclient_23_0；K8s container 已內建，通常不需設定（由 Dockerfile 預設）'],
+              ['NLS_LANG', 'Oracle 字元集設定', '固定 AMERICAN_AMERICA.AL32UTF8，確保 ZHT16BIG5/ZHS16GBK ERP 資料自動轉 UTF-8 回傳，K8s 與本機相同'],
+            ]}
+          />
+        </SubSection>
+
+        <SubSection title="ERP 資料庫（AI 戰情 + 組織階層）">
+          <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-4">
+            <div className="flex items-center gap-2 mb-2">
+              <AlertTriangle size={16} className="text-amber-500" />
+              <span className="text-sm font-semibold text-amber-700">ERP_DB 與多來源 DB 的互動關係（必讀）</span>
+            </div>
+            <div className="space-y-2 text-sm text-amber-800 leading-6">
+              <p><strong>場景 1 — 首次啟動（ai_db_sources 表為空）：</strong>系統自動將 ERP_DB_* 參數寫入 <code className="bg-amber-100 px-1 rounded text-xs">ai_db_sources</code> 表作為預設來源（is_default=1），並回填既有 Schema 的 source_db_id。</p>
+              <p><strong>場景 2 — Schema 已綁定 source_db_id：</strong>AI 戰情查詢使用 <code className="bg-amber-100 px-1 rounded text-xs">ai_db_sources</code> 表中的連線設定，ERP_DB_* 環境變數對此 Schema 的查詢<strong>無作用</strong>。修改連線請至後台「AI 戰情 — 外部資料來源」編輯。</p>
+              <p><strong>場景 3 — 組織階層 / Multi-Org 驗證：</strong>ERP_DB_* <strong>永遠</strong>被使用（不受 ai_db_sources 影響），用於載入公司組織階層樹與多組織政策驗證。若 ERP_DB_HOST 未設定，這些功能將無法使用。</p>
+            </div>
+          </div>
+          <Table
+            headers={['參數', '用途', '本機開發', 'K8s/Docker']}
+            rows={[
+              ['ERP_DB_HOST', 'ERP Oracle 主機 IP 或 FQDN', '10.8.93.104', '同（或 K8s Secret 注入）'],
+              ['ERP_DB_PORT', 'ERP Oracle Listener 埠', '1589', '1589'],
+              ['ERP_DB_SERVICE_NAME', 'ERP Oracle Service Name（TNS）', 'ebs_CUFOX', '正式：ebs_T365'],
+              ['ERP_DB_USER', 'ERP 查詢帳號', 'apps', 'apps'],
+              ['ERP_DB_USER_PASSWORD', 'ERP 查詢帳號密碼', 'cl3g42ji（開發）', 'K8s Secret 注入，請勿明文存 YAML'],
+            ]}
+          />
+        </SubSection>
+
+        <SubSection title="系統資料庫（FOXLINK GPT 主庫 Oracle 23 AI）">
+          <Table
+            headers={['參數', '用途', '本機開發', 'K8s/Docker']}
+            rows={[
+              ['SYSTEM_DB_HOST', 'Oracle 23 AI 主機 IP', '10.8.93.70（開發機）', '10.8.93.15（正式機）'],
+              ['SYSTEM_DB_PORT', 'Oracle Listener 埠', '1526（開發）', '1524（正式）'],
+              ['SYSTEM_DB_SERVICE_NAME', 'Oracle Service Name', 'AI（開發）', 'GPT（正式）'],
+              ['SYSTEM_DB_USER', 'Schema 帳號', 'FLGPT', 'FLGPT'],
+              ['SYSTEM_DB_USER_PASSWORD', 'Schema 密碼', 'Gptxu06vu04（開發）', 'K8s Secret 注入'],
+            ]}
+          />
+          <NoteBox>系統主庫存放所有用戶、對話、Token 用量、稽核、KB、MCP 等資料。正式與開發環境使用不同 Oracle Instance，請勿混用。</NoteBox>
+        </SubSection>
+
+        <SubSection title="AI 戰情 ETL">
+          <Table
+            headers={['參數', '用途', '說明']}
+            rows={[
+              ['DASHBOARD_ETL_MAX_ROWS', 'AI 戰情 SQL 查詢單次最大回傳筆數', '預設 1,000,000；可降低以保護記憶體，但過低會導致大型報表截斷資料'],
+            ]}
+          />
+        </SubSection>
+
+        <SubSection title="知識庫預設設定（KB_*）">
+          <Para>以下參數設定知識庫的全域預設值；各 KB 可在後台「自建知識庫管理」編輯頁覆寫個別設定。</Para>
+          <Table
+            headers={['參數', '用途', '預設值', '說明']}
+            rows={[
+              ['KB_EMBEDDING_MODEL', 'Embedding 向量化模型 ID', 'gemini-embedding-001', '對應後台「向量預設模型設定」中 model_role=embedding 的模型'],
+              ['KB_OCR_MODEL', 'OCR 圖文辨識模型 ID', 'gemini-3-flash-preview', '用於 PDF 掃描版 OCR，建議用 Flash（速度快）'],
+              ['KB_PDF_OCR_MAX_MB', 'PDF OCR 最大檔案大小（MB）', '18', '超過此大小的 PDF 跳過 OCR，改用純文字解析'],
+              ['KB_EMBEDDING_DIMS', 'Embedding 向量維度', '768', '需與 Embedding 模型輸出維度一致；改動後需重建所有 KB 索引'],
+              ['KB_RERANK_MODEL', 'Rerank 重排序模型 ID', 'gemini-2.5-flash', '混合檢索的第二階段重排序，建議 Flash 系列'],
+              ['KB_RERANK_TOP_K_FETCH', 'Rerank 前取回候選數', '10', '向量/全文檢索各取 10 筆後送 Rerank'],
+              ['KB_RERANK_TOP_K_RETURN', 'Rerank 後最終回傳數', '3', '經重排序後保留最相關的 3 筆送給 LLM'],
+              ['KB_RERANK_SCORE_THRESHOLD', 'Rerank 最低分數門檻', '0.5', '低於此分數的結果過濾掉，0 為關閉門檻'],
+              ['KB_DEFAULT_CHUNK_STRATEGY', '預設切塊策略', 'regular', 'regular（固定大小）或 semantic（語義切塊）'],
+              ['KB_DEFAULT_CHUNK_SIZE', '預設切塊大小（tokens）', '1024', ''],
+              ['KB_DEFAULT_CHUNK_OVERLAP', '預設切塊重疊（tokens）', '50', ''],
+              ['KB_DEFAULT_RETRIEVAL_MODE', '預設檢索模式', 'hybrid', 'hybrid（向量 + 全文）/ vector / fulltext'],
+              ['KB_ALLOW_ADMIN_CREATE', '允許管理員建立 KB', 'true', ''],
+              ['KB_ALLOW_USER_CREATE', '允許一般使用者建立 KB', 'false', '開放後使用者可在對話頁面建立個人 KB'],
+            ]}
+          />
+        </SubSection>
+
+        <SubSection title="外部 API 與 MCP">
+          <Table
+            headers={['參數', '用途', '說明']}
+            rows={[
+              ['EXTERNAL_API_BASE_URL', '對外 API 的 base URL，用於 KB 公開存取文件中的 endpoint 說明', '本機：http://localhost:3007；K8s：https://flgpt.foxlink.com.tw:8443'],
+              ['API_KEY_PREFIX', 'API 金鑰前綴（顯示用）', '預設 flgpt_；生成的金鑰格式為 flgpt_xxxxxxxx'],
+              ['API_RATE_LIMIT_PER_MIN', '每分鐘 API 呼叫上限（per API key）', '60；超過回傳 429 Too Many Requests'],
+              ['MCP_SERVER_ENABLED', '是否開放 /mcp 端點供外部 MCP Client 連線', 'true；設 false 可完全關閉 MCP 存取'],
+              ['API_CHAT_SESSION_TTL_HOURS', 'API 方式建立的 Chat Session 存活時間（小時）', '24；超時 Session 自動清除'],
+            ]}
+          />
+        </SubSection>
+
+        <SubSection title="LDAP / AD 整合">
+          <Table
+            headers={['參數', '用途', '說明']}
+            rows={[
+              ['LDAP_URL', 'LDAP 伺服器連線 URL', '例：ldap://10.8.91.152:389；若不使用 AD 登入可整組移除'],
+              ['LDAP_BASE_DN', 'LDAP 搜尋基礎 DN', '例：DC=foxlink,DC=ldap'],
+              ['LDAP_MANAGER_DN', 'LDAP Bind 帳號 DN（唯讀，用於搜尋使用者）', '例：CN=manager,DC=foxlink,DC=ldap'],
+              ['LDAP_MANAGER_PASSWORD', 'LDAP Bind 帳號密碼', 'K8s 以 Secret 注入'],
+            ]}
+          />
+          <TipBox>
+            LDAP 參數全部移除或留空時，系統仍可正常運作，僅停用 AD 登入——用戶只能使用手動建立的本地帳號登入。
+            ADMIN 帳號永遠使用本地驗證，不受 LDAP 影響。
+          </TipBox>
+        </SubSection>
+
+        <SubSection title="SSO / OIDC 整合">
+          <Table
+            headers={['參數', '用途', '說明']}
+            rows={[
+              ['SSO_ISSUER', 'OIDC Provider 的 Issuer URL', '例：https://sso.foxlink.com.tw；系統自動從 /.well-known/openid-configuration 取得端點'],
+              ['SSO_CLIENT_ID', 'OIDC Client ID', '在 SSO 後台建立 Application 後取得'],
+              ['SSO_CLIENT_SECRET', 'OIDC Client Secret', 'K8s 以 Secret 注入'],
+              ['SSO_SCOPE', 'OIDC 請求的 Scope', '通常 openid profile email；可依 SSO 服務調整'],
+            ]}
+          />
+          <NoteBox>SSO 與 LDAP 可同時啟用。登入順序：LDAP → SSO → 本地密碼。若三者都設定，依序嘗試；ADMIN 帳號略過前兩者直接本地驗證。</NoteBox>
+        </SubSection>
+
+        <SubSection title="技能服務">
+          <Table
+            headers={['參數', '用途', '說明']}
+            rows={[
+              ['SKILL_SERVICE_KEY', '外部技能服務（如 TTS）的共享金鑰', '用於驗證技能執行服務的請求來源；本機開發與 K8s 相同值'],
+            ]}
+          />
+        </SubSection>
+
+        <SubSection title="Redis Session Store">
+          <Table
+            headers={['參數', '用途', '本機開發', 'K8s/Docker']}
+            rows={[
+              ['REDIS_URL', 'Redis 連線 URL；K8s 多 replica 共享 session 必填', '留空或不設定（自動 fallback 到 in-memory Map）', 'redis://redis:6379（cluster 內部 Redis Service）'],
+              ['SESSION_TTL_SECONDS', 'Session Token 存活時間（秒）', '28800（8 小時）', '同；可依需求調整'],
+            ]}
+          />
+          <div className="bg-red-50 border border-red-200 rounded-xl p-4 space-y-1">
+            <div className="flex items-center gap-2">
+              <AlertTriangle size={15} className="text-red-500" />
+              <span className="text-sm font-semibold text-red-700">K8s 多 Replica 必讀</span>
+            </div>
+            <p className="text-sm text-red-700 leading-6">
+              K8s 部署 4 replica 時，若不設定 REDIS_URL，每個 pod 各自維護 in-memory session，
+              用戶的下一個請求可能被路由到不同 pod 而出現「未登入」錯誤。
+              正式環境<strong>必須</strong>部署 Redis 並設定 REDIS_URL。
+            </p>
+          </div>
+        </SubSection>
+
+        <SubSection title="完整 .env 範本（本機開發）">
+          <CodeBlock>{`# ─── 基本伺服器 ───────────────────────────────────────────────────
+PORT=3007
+NODE_ENV=development
+APP_BASE_URL=http://localhost:5173
+FOXLINK_API_URL=http://localhost:3007
+
+# ─── 認證 ─────────────────────────────────────────────────────────
+JWT_SECRET=change_this_to_a_random_string_32chars_min
+DEFAULT_ADMIN_ACCOUNT=ADMIN
+DEFAULT_ADMIN_PASSWORD=Foxlink123
+LLM_KEY_SECRET=                        # 留空=自動用 JWT_SECRET 衍生
+
+# ─── Gemini AI ─────────────────────────────────────────────────────
+GEMINI_API_KEY=AIzaSy...your_key...
+GEMINI_MODEL_PRO=gemini-3-pro-preview
+GEMINI_MODEL_FLASH=gemini-3-flash-preview
+
+# ─── 檔案儲存 ─────────────────────────────────────────────────────
+UPLOAD_DIR=./uploads                   # 本機相對路徑
+
+# ─── Email ────────────────────────────────────────────────────────
+ADMIN_NOTIFY_EMAIL=admin@your-domain.com
+SMTP_SERVER=smtp.your-domain.com
+SMTP_PORT=25
+SMTP_USERNAME=
+SMTP_PASSWORD=
+FROM_ADDRESS=noreply@your-domain.com
+
+# ─── Oracle Client ────────────────────────────────────────────────
+ORACLE_HOME=D:\\ORACLE_CLIENT_23\\instantclient_23_0
+NLS_LANG=AMERICAN_AMERICA.AL32UTF8
+
+# ─── ERP DB ───────────────────────────────────────────────────────
+ERP_DB_HOST=10.8.93.104
+ERP_DB_PORT=1589
+ERP_DB_SERVICE_NAME=ebs_CUFOX
+ERP_DB_USER=apps
+ERP_DB_USER_PASSWORD=your_erp_password
+
+# ─── System DB (Oracle 23 AI) ─────────────────────────────────────
+SYSTEM_DB_HOST=10.8.93.70
+SYSTEM_DB_PORT=1526
+SYSTEM_DB_SERVICE_NAME=AI
+SYSTEM_DB_USER=FLGPT
+SYSTEM_DB_USER_PASSWORD=your_system_db_password
+
+# ─── AI Dashboard ─────────────────────────────────────────────────
+DASHBOARD_ETL_MAX_ROWS=1000000
+
+# ─── Knowledge Base ───────────────────────────────────────────────
+KB_EMBEDDING_MODEL=gemini-embedding-001
+KB_OCR_MODEL=gemini-3-flash-preview
+KB_PDF_OCR_MAX_MB=18
+KB_EMBEDDING_DIMS=768
+KB_RERANK_MODEL=gemini-2.5-flash
+KB_RERANK_TOP_K_FETCH=10
+KB_RERANK_TOP_K_RETURN=3
+KB_RERANK_SCORE_THRESHOLD=0.5
+KB_DEFAULT_CHUNK_STRATEGY=regular
+KB_DEFAULT_CHUNK_SIZE=1024
+KB_DEFAULT_CHUNK_OVERLAP=50
+KB_DEFAULT_RETRIEVAL_MODE=hybrid
+KB_ALLOW_ADMIN_CREATE=true
+KB_ALLOW_USER_CREATE=false
+
+# ─── 外部 API / MCP ───────────────────────────────────────────────
+EXTERNAL_API_BASE_URL=http://localhost:3007
+API_KEY_PREFIX=flgpt_
+API_RATE_LIMIT_PER_MIN=60
+MCP_SERVER_ENABLED=true
+API_CHAT_SESSION_TTL_HOURS=24
+
+# ─── LDAP（不用可整組移除）────────────────────────────────────────
+LDAP_URL=ldap://your-ldap-server:389
+LDAP_BASE_DN=DC=yourdomain,DC=local
+LDAP_MANAGER_DN=CN=manager,DC=yourdomain,DC=local
+LDAP_MANAGER_PASSWORD=your_ldap_password
+
+# ─── SSO / OIDC（不用可移除）─────────────────────────────────────
+# SSO_ISSUER=https://sso.your-domain.com
+# SSO_CLIENT_ID=your_client_id
+# SSO_CLIENT_SECRET=your_client_secret
+# SSO_SCOPE=openid profile email
+
+# ─── Skill Service ────────────────────────────────────────────────
+SKILL_SERVICE_KEY=your-skill-service-key
+
+# ─── Redis（本機開發可留空）──────────────────────────────────────
+# REDIS_URL=redis://localhost:6379
+SESSION_TTL_SECONDS=28800`}</CodeBlock>
+          <TipBox>複製此範本到 <code className="bg-blue-50 px-1 rounded text-xs">server/.env</code>，填入實際值後即可啟動本機開發環境。確保 .gitignore 包含 <code className="bg-blue-50 px-1 rounded text-xs">server/.env</code>。</TipBox>
         </SubSection>
       </Section>
     </div>
