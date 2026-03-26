@@ -623,6 +623,7 @@ async function generateDocument(db, templateId, userId, inputData, outputFormat)
 
     const variables = schema.variables || [];
     wb.eachSheet(sheet => {
+      // ── Simple variables: text replacement ────────────────────────────────
       sheet.eachRow(row => {
         row.eachCell(cell => {
           if (typeof cell.value !== 'string') return;
@@ -636,6 +637,61 @@ async function generateDocument(db, templateId, userId, inputData, outputFormat)
           cell.value = v;
         });
       });
+
+      // ── Loop variables: find header row → insert data rows ───────────────
+      for (const varDef of variables) {
+        if (varDef.type !== 'loop') continue;
+        const items = Array.isArray(inputData[varDef.key]) ? inputData[varDef.key] : [];
+        const children = varDef.children || [];
+        if (!items.length || !children.length) continue;
+
+        // Find the header row: a row where cells contain children labels/keys
+        // colMap: { childKey → colNumber (1-based) }
+        let headerRowNum = -1;
+        let colMap = {};
+
+        sheet.eachRow({ includeEmpty: false }, (row, rowNum) => {
+          if (headerRowNum !== -1) return;
+          const map = {};
+          row.eachCell((cell, colNum) => {
+            const cellTxt = String(cell.value ?? '').replace(/\s/g, '');
+            for (const c of children) {
+              const labelKey = (c.label || '').replace(/\s/g, '');
+              const varKey   = (c.key   || '').toLowerCase();
+              // Match by label (Chinese) or key (English)
+              if ((labelKey && cellTxt.includes(labelKey)) ||
+                  (varKey && cellTxt.toLowerCase().includes(varKey))) {
+                map[c.key] = colNum;
+              }
+            }
+          });
+          // Accept if at least 2 children (or all if < 2) are mapped
+          if (Object.keys(map).length >= Math.min(children.length, 2)) {
+            headerRowNum = rowNum;
+            colMap = map;
+          }
+        });
+
+        // Fallback: no header found → use sequential columns starting at 1
+        if (headerRowNum === -1) {
+          headerRowNum = sheet.lastRow?.number ?? 0;
+          children.forEach((c, i) => { colMap[c.key] = i + 1; });
+        }
+
+        // Build rows to insert
+        const maxCol = Math.max(...Object.values(colMap), 0);
+        const newRowsData = items.map(item => {
+          const arr = new Array(maxCol).fill(null);
+          for (const [key, colNum] of Object.entries(colMap)) {
+            arr[colNum - 1] = String(item[key] ?? '');
+          }
+          return arr;
+        });
+
+        // Insert rows after headerRowNum using spliceRows
+        sheet.spliceRows(headerRowNum + 1, 0, ...newRowsData);
+        console.log(`[DocTemplate] XLSX loop ${varDef.key}: headerRow=${headerRowNum} items=${items.length} cols=${JSON.stringify(colMap)}`);
+      }
     });
 
     outPath = path.join(outDir, `${outputId}.xlsx`);
