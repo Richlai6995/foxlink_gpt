@@ -240,62 +240,88 @@ function escapeXml(str) {
     .replace(/'/g, '&apos;');
 }
 
+// ─── Cell-level helpers ────────────────────────────────────────────────────────
+
+/** Extract all run text from a <w:tc>, decode XML entities, normalize whitespace */
+function getTcText(tcXml) {
+  const texts = [];
+  const pat = /<w:t[^>]*>([\s\S]*?)<\/w:t>/g;
+  let m;
+  while ((m = pat.exec(tcXml)) !== null) texts.push(m[1]);
+  return texts.join('')
+    .replace(/&amp;/g, '&').replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'");
+}
+
+/** Replace entire content of a <w:tc>, preserving cell + text formatting */
+function buildReplacedTc(tcXml, newText) {
+  const tcOpenM = tcXml.match(/^(<w:tc\b[^>]*>)/);
+  const tcOpen  = tcOpenM ? tcOpenM[1] : '<w:tc>';
+  const tcPrM   = tcXml.match(/(<w:tcPr>[\s\S]*?<\/w:tcPr>)/);
+  const tcPr    = tcPrM ? tcPrM[1] : '';
+
+  let pPr = '', rPr = '';
+  const firstParaM = tcXml.match(/<w:p\b[^>]*>[\s\S]*?<\/w:p>/);
+  if (firstParaM) {
+    const pPrM = firstParaM[0].match(/<w:pPr>([\s\S]*?)<\/w:pPr>/);
+    if (pPrM) pPr = `<w:pPr>${pPrM[1]}</w:pPr>`;
+    const rPrM = firstParaM[0].match(/<w:rPr>([\s\S]*?)<\/w:rPr>/);
+    if (rPrM) rPr = `<w:rPr>${rPrM[1]}</w:rPr>`;
+  }
+  return `${tcOpen}${tcPr}<w:p>${pPr}${buildRunXml(rPr, newText)}</w:p><w:p>${pPr}</w:p></w:tc>`;
+}
+
 /**
- * Find ALL <w:tc> elements whose combined run text contains searchText,
- * and replace each one's body content with newText (supports \n → <w:br/>).
- *
- * Search strategy:
- *  - original_text from AI may contain \n (mammoth joins paragraphs with \n),
- *    but the XML run texts joined have no \n between paragraphs.
- *  - So we use only the FIRST LINE of searchText as the search key, normalized.
- * Returns { xml: newXml, found: boolean }
+ * Find ALL <w:tc> containing searchText (first-line snippet, normalized),
+ * replace their content with newText.
+ * Handles: original_text may have \n from mammoth; XML has no \n between paragraphs.
  */
 function replaceTcContent(xml, searchText, newText) {
-  // Derive a robust search snippet: first non-empty line, normalized whitespace
-  const searchSnippet = (searchText.split('\n').find(l => l.trim()) || searchText)
+  const snippet = (searchText.split('\n').find(l => l.trim()) || searchText)
     .trim().slice(0, 80).replace(/\s+/g, ' ');
-  if (!searchSnippet) return { xml, found: false };
+  if (!snippet) return { xml, found: false };
 
   let found = false;
   const newXml = xml.replace(/<w:tc\b[^>]*>[\s\S]*?<\/w:tc>/g, (tcXml) => {
-    // NOTE: no early-exit — replace ALL cells containing the snippet
-    // (original doc may have the same form repeated on multiple pages)
-
-    // Collect all run texts in this cell (handles run-splitting)
-    const runTexts = [];
-    const runPat = /<w:t[^>]*>([\s\S]*?)<\/w:t>/g;
-    let m;
-    while ((m = runPat.exec(tcXml)) !== null) runTexts.push(m[1]);
-
-    // Decode common XML entities and normalize whitespace for comparison
-    const cellText = runTexts.join('')
-      .replace(/&amp;/g, '&').replace(/&lt;/g, '<')
-      .replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'")
-      .replace(/\s+/g, ' ');
-
-    if (!cellText.includes(searchSnippet)) return tcXml;
+    const cellText = getTcText(tcXml).replace(/\s+/g, ' ');
+    if (!cellText.includes(snippet)) return tcXml;
     found = true;
+    return buildReplacedTc(tcXml, newText);
+  });
+  return { xml: newXml, found };
+}
 
-    // Preserve cell properties
-    const tcOpenMatch = tcXml.match(/^(<w:tc\b[^>]*>)/);
-    const tcOpen = tcOpenMatch ? tcOpenMatch[1] : '<w:tc>';
-    const tcPrMatch = tcXml.match(/(<w:tcPr>[\s\S]*?<\/w:tcPr>)/);
-    const tcPr = tcPrMatch ? tcPrMatch[1] : '';
+/**
+ * Label-based cell replacement: find <w:tr> whose FIRST cell fuzzy-matches
+ * labelText, replace the SECOND cell's content with newText.
+ * This is the PRIMARY strategy — works even when original_text is null/missing.
+ * Replaces ALL matching rows (handles multi-copy template documents).
+ */
+function fillCellByLabel(xml, labelText, newText) {
+  if (!labelText) return { xml, found: false };
+  // Normalize: remove colons, spaces; take first 6 chars as key
+  const labelKey = labelText.replace(/[:：\s]/g, '').slice(0, 6);
+  if (labelKey.length < 2) return { xml, found: false };
 
-    // Preserve paragraph + run formatting from first content paragraph
-    let pPr = '', rPr = '';
-    const firstParaMatch = tcXml.match(/<w:p\b[^>]*>[\s\S]*?<\/w:p>/);
-    if (firstParaMatch) {
-      const pPrM = firstParaMatch[0].match(/<w:pPr>([\s\S]*?)<\/w:pPr>/);
-      if (pPrM) pPr = `<w:pPr>${pPrM[1]}</w:pPr>`;
-      const rPrM = firstParaMatch[0].match(/<w:rPr>([\s\S]*?)<\/w:rPr>/);
-      if (rPrM) rPr = `<w:rPr>${rPrM[1]}</w:rPr>`;
-    }
+  let found = false;
+  const newXml = xml.replace(/<w:tr\b[^>]*>[\s\S]*?<\/w:tr>/g, (trXml) => {
+    // Collect cells with positions
+    const cells = [];
+    const tcPat = /<w:tc\b[^>]*>[\s\S]*?<\/w:tc>/g;
+    let m;
+    while ((m = tcPat.exec(trXml)) !== null) cells.push({ full: m[0], index: m.index });
+    if (cells.length < 2) return trXml;
 
-    // Build replacement: one paragraph with new content + required empty trailing paragraph
-    const newPara = `<w:p>${pPr}${buildRunXml(rPr, newText)}</w:p>`;
-    const emptyPara = `<w:p>${pPr}</w:p>`;
-    return `${tcOpen}${tcPr}${newPara}${emptyPara}</w:tc>`;
+    // First cell must fuzzy-match the label
+    const firstText = getTcText(cells[0].full).replace(/[:：\s]/g, '');
+    const matches = firstText.includes(labelKey) || labelKey.includes(firstText);
+    if (!matches || firstText.length < 2) return trXml;
+
+    found = true;
+    // Replace SECOND cell (value cell)
+    const val = cells[1];
+    const newVal = buildReplacedTc(val.full, newText);
+    return trXml.slice(0, val.index) + newVal + trXml.slice(val.index + val.full.length);
   });
   return { xml: newXml, found };
 }
@@ -486,81 +512,82 @@ async function generateDocument(db, templateId, userId, inputData, outputFormat)
     // Clean up any trPr that became empty after removal
     xml = xml.replace(/<w:trPr>\s*<\/w:trPr>/g, '');
 
-    // ── Simple variables (text / number / date / select) ───────────────────
+    // ── Fill variables ──────────────────────────────────────────────────────
+    // Strategy (in priority order):
+    //   1. fillCellByLabel  — find row by label text, replace value cell
+    //      Works even when original_text is null. Primary approach.
+    //   2. replaceTcContent — find cell by content snippet, replace it
+    //      Secondary: handles non-standard layouts.
+    //   3. mergeRunsAndReplace — paragraph-level. Last resort for simple vars.
     for (const v of variables) {
-      if (!v.original_text || v.type === 'loop') continue;
-      const val = String(inputData[v.key] ?? v.default_value ?? '');
-      // Try cell-level replacement first (more reliable for multi-paragraph cells)
-      const { xml: x1, found } = replaceTcContent(xml, v.original_text, val);
-      if (found) {
-        xml = x1;
-      } else {
-        // Fallback: paragraph-level run merge + replace
-        xml = xml.replace(/<w:p\b[^>]*>[\s\S]*?<\/w:p>/g, (para) =>
-          mergeRunsAndReplace(para, v.original_text, val)
-        );
-      }
-    }
+      let value;
 
-    // ── Loop variables ──────────────────────────────────────────────────────
-    // Strategy:
-    //   1. ALL children's original_text in the SAME <w:tr> → row duplication
-    //   2. Otherwise → replace each child's entire cell with numbered list text
-    for (const v of variables) {
-      if (v.type !== 'loop') continue;
-      const items = Array.isArray(inputData[v.key]) ? inputData[v.key] : [];
-      const children = v.children || [];
-      if (!children.length || !items.length) continue;
+      if (v.type === 'loop') {
+        const items = Array.isArray(inputData[v.key]) ? inputData[v.key] : [];
+        const children = v.children || [];
+        if (!children.length || !items.length) continue;
 
-      const firstChild = children.find(c => c.original_text);
-      if (!firstChild) continue;
-
-      const escapedText = firstChild.original_text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      const trPattern = new RegExp(`<w:tr\\b[^>]*>[\\s\\S]*?${escapedText}[\\s\\S]*?<\\/w:tr>`);
-      const trMatch = xml.match(trPattern);
-
-      const isRepeatingRow = trMatch && children
-        .filter(c => c.original_text)
-        .every(c => trMatch[0].includes(c.original_text));
-
-      if (isRepeatingRow) {
-        // ── True repeating table row ──────────────────────────────────────
-        const templateRow = trMatch[0];
-        const newRows = items.map(item => {
-          let row = templateRow;
-          for (const c of children) {
-            if (!c.original_text) continue;
-            row = row.replace(/<w:p\b[^>]*>[\s\S]*?<\/w:p>/g, (para) =>
-              mergeRunsAndReplace(para, c.original_text, String(item[c.key] ?? ''))
-            );
-          }
-          return row;
-        });
-        xml = xml.replace(templateRow, newRows.join(''));
-      } else {
-        // ── Flat: replace entire cell content per child ───────────────────
-        // Each child gets its cell's content replaced with all items' values
-        // joined as a numbered list (with Word line-breaks for multi-line)
-        for (const c of children) {
-          if (!c.original_text) continue;
-          const vals = items
-            .map((item, idx) => {
-              const val = String(item[c.key] ?? '').trim();
-              return val ? `${idx + 1}. ${val}` : '';
-            })
-            .filter(s => s);
-          const newText = vals.join('\n');
-          // Cell-level replacement (replaces all paragraphs in the matching cell)
-          const { xml: newXml, found } = replaceTcContent(xml, c.original_text, newText);
-          if (found) {
-            xml = newXml;
-          } else {
-            // Fallback: paragraph-level
-            xml = xml.replace(/<w:p\b[^>]*>[\s\S]*?<\/w:p>/g, (para) =>
-              mergeRunsAndReplace(para, c.original_text, newText)
-            );
+        // ── Check for true repeating table row pattern ──────────────────
+        const firstChild = children.find(c => c.original_text);
+        if (firstChild) {
+          const escaped = firstChild.original_text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          const trMatch = xml.match(new RegExp(
+            `<w:tr\\b[^>]*>[\\s\\S]*?${escaped}[\\s\\S]*?<\\/w:tr>`
+          ));
+          if (trMatch && children.filter(c => c.original_text)
+            .every(c => trMatch[0].includes(c.original_text))) {
+            // All children in same <w:tr> → duplicate row per item
+            const templateRow = trMatch[0];
+            const newRows = items.map(item => {
+              let row = templateRow;
+              for (const c of children) {
+                if (!c.original_text) continue;
+                row = row.replace(/<w:p\b[^>]*>[\s\S]*?<\/w:p>/g, (para) =>
+                  mergeRunsAndReplace(para, c.original_text, String(item[c.key] ?? ''))
+                );
+              }
+              return row;
+            });
+            xml = xml.replace(templateRow, newRows.join(''));
+            continue;
           }
         }
+
+        // ── Flat: all items → numbered list using ALL children joined ───
+        const vals = items.map((item, idx) => {
+          // Join all children values for this item on one line
+          const parts = children.map(c => {
+            const val = String(item[c.key] ?? '').trim();
+            // If there are multiple children, prefix with child label
+            return children.length > 1 && c.label
+              ? `${c.label}: ${val}`
+              : val;
+          }).filter(s => s);
+          return parts.length ? `${idx + 1}. ${parts.join('　')}` : '';
+        }).filter(s => s);
+        value = vals.join('\n');
+      } else {
+        value = String(inputData[v.key] ?? v.default_value ?? '');
+      }
+
+      // 1. Label-based (primary — works regardless of original_text)
+      const { xml: x1, found: f1 } = fillCellByLabel(xml, v.label, value);
+      if (f1) { xml = x1; continue; }
+
+      // 2. Content-based (secondary — uses original_text snippet)
+      const origText = v.type === 'loop'
+        ? (v.children?.find(c => c.original_text)?.original_text || '')
+        : (v.original_text || '');
+      if (origText) {
+        const { xml: x2, found: f2 } = replaceTcContent(xml, origText, value);
+        if (f2) { xml = x2; continue; }
+      }
+
+      // 3. Paragraph-level (last resort — only for simple vars with original_text)
+      if (v.original_text && v.type !== 'loop') {
+        xml = xml.replace(/<w:p\b[^>]*>[\s\S]*?<\/w:p>/g, (para) =>
+          mergeRunsAndReplace(para, v.original_text, value)
+        );
       }
     }
 
