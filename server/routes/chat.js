@@ -935,6 +935,32 @@ router.post('/sessions/:id/messages', upload.array('files', 10), async (req, res
     const userParts = [];
     let combinedUserText = message;
 
+    // ── Doc Template Tag Detection ──────────────────────────────────────────
+    // Message prefix: [使用範本:UUID:name]
+    let docTemplateId = null;
+    let docTemplateName = '';
+    let docTemplateSchema = null;
+    {
+      const tplMatch = combinedUserText.match(/^\[使用範本:([^:]+):([^\]]+)\]\s*/);
+      if (tplMatch) {
+        docTemplateId   = tplMatch[1];
+        docTemplateName = tplMatch[2];
+        combinedUserText = combinedUserText.slice(tplMatch[0].length).trim();
+        try {
+          const tplRow = await db.prepare('SELECT schema_json, name FROM doc_templates WHERE id=?').get(docTemplateId);
+          if (tplRow?.schema_json) {
+            docTemplateSchema = typeof tplRow.schema_json === 'string'
+              ? JSON.parse(tplRow.schema_json) : tplRow.schema_json;
+            docTemplateName = tplRow.name || docTemplateName;
+            console.log(`[DocTemplate] Chat template: id=${docTemplateId} name="${docTemplateName}" vars=${docTemplateSchema.variables?.length}`);
+          }
+        } catch (e) {
+          console.warn('[DocTemplate] Failed to load schema:', e.message);
+          docTemplateId = null;
+        }
+      }
+    }
+
     for (const file of uploadedFiles) {
       const ext = path.extname(file.originalname).toLowerCase();
       const mimeType = file.mimetype;
@@ -1637,6 +1663,37 @@ router.post('/sessions/:id/messages', upload.array('files', 10), async (req, res
       ? '\n\n---\n' + allSkillPrompts.join('\n\n')
       : '';
 
+    // ── Doc Template system injection ──────────────────────────────────────
+    let templateExtraInstruction = '';
+    if (docTemplateId && docTemplateSchema?.variables?.length > 0) {
+      const varList = docTemplateSchema.variables.map(v => {
+        let desc = `- ${v.label}（key: ${v.key}, type: ${v.type}${v.required ? ', 必填' : ''}）`;
+        if (v.type === 'loop' && v.children?.length)
+          desc += `\n  子欄位: ${v.children.map(c => `${c.label}(${c.key})`).join(', ')}`;
+        return desc;
+      }).join('\n');
+      templateExtraInstruction = `
+
+---
+【文件範本填寫模式】
+使用者選擇了文件範本「${docTemplateName}」，請從使用者提供的文字中提取變數值並填入範本。
+
+範本變數清單：
+${varList}
+
+請執行以下步驟：
+1. 簡短說明你識別到的內容（1-2句）
+2. 在回覆最後加上一個 JSON 代碼塊（必須以 \`\`\`template_values 開頭），格式如下：
+\`\`\`template_values
+{"key1": "value1", "key2": "value2"}
+\`\`\`
+
+注意：
+- loop 類型的值應為陣列，例如 [{"子key1": "值", "子key2": "值"}, ...]
+- 文字中找不到的欄位設為空字串 ""
+- 請直接提取文字中的資料，不要杜撰`;
+    }
+
     // Inject user language preference into system instruction
     const userRow = await db.prepare('SELECT preferred_language FROM users WHERE id=?').get(req.user.id);
     const resolvedLang = userRow?.preferred_language || 'zh-TW';
@@ -1996,7 +2053,7 @@ router.post('/sessions/:id/messages', upload.array('files', 10), async (req, res
               ? `注意：系統嘗試查詢 ${difyFailedCount} 個知識庫，但未取得有效資料（可能超時或無相關內容）。請根據現有知識及網路搜尋回答問題，並告知使用者知識庫查詢未返回結果。`
               : '';
           sendEvent({ type: 'status', message: 'AI 整理回覆中...' });
-          const finalInstruction = [skillExtraInstruction, difyInstruction, langInstruction].filter(Boolean).join('\n\n---\n\n');
+          const finalInstruction = [skillExtraInstruction, templateExtraInstruction, difyInstruction, langInstruction].filter(Boolean).join('\n\n---\n\n');
           let firstChunkReceived = false;
           const keepAliveInterval = setInterval(() => {
             if (!firstChunkReceived && !clientDisconnected) sendEvent({ type: 'status', message: 'AI 整理回覆中...' });
@@ -2042,7 +2099,7 @@ router.post('/sessions/:id/messages', upload.array('files', 10), async (req, res
 
           sendEvent({ type: 'status', message: 'AI 思考中...' });
 
-          const finalInstruction = [skillExtraInstruction, kbInstruction, langInstruction].filter(Boolean).join('\n\n---\n\n');
+          const finalInstruction = [skillExtraInstruction, templateExtraInstruction, kbInstruction, langInstruction].filter(Boolean).join('\n\n---\n\n');
           let firstChunkReceived = false;
           const keepAliveInterval = setInterval(() => {
             if (!firstChunkReceived && !clientDisconnected) sendEvent({ type: 'status', message: 'AI 思考中...' });
@@ -2166,10 +2223,11 @@ router.post('/sessions/:id/messages', upload.array('files', 10), async (req, res
             firstChunkReceived = true; aiText += chunk;
             sendEvent({ type: 'chunk', content: chunk });
           };
+          const combinedInstruction = [skillExtraInstruction, templateExtraInstruction].filter(Boolean).join('\n\n---\n\n') || skillExtraInstruction;
           if (providerType === 'azure_openai' && modelRow) {
-            ({ text, inputTokens, outputTokens } = await streamChatAoai(modelRow, history, userParts, _onChunk, skillExtraInstruction));
+            ({ text, inputTokens, outputTokens } = await streamChatAoai(modelRow, history, userParts, _onChunk, combinedInstruction));
           } else {
-            ({ text, inputTokens, outputTokens } = await streamChat(apiModel, history, userParts, _onChunk, skillExtraInstruction, disableSearchForSkill));
+            ({ text, inputTokens, outputTokens } = await streamChat(apiModel, history, userParts, _onChunk, combinedInstruction, disableSearchForSkill));
           }
         } finally {
           clearInterval(keepAliveInterval);
@@ -2192,8 +2250,35 @@ router.post('/sessions/:id/messages', upload.array('files', 10), async (req, res
         allGeneratedFiles = clientFiles;
       }
 
+      // ── Doc Template auto-generate from AI-extracted values ────────────────
+      if (docTemplateId && docTemplateSchema) {
+        try {
+          const valMatch = text.match(/```template_values\s*([\s\S]*?)```/);
+          if (valMatch) {
+            const inputData = JSON.parse(valMatch[1].trim());
+            sendEvent({ type: 'status', message: '正在生成文件範本...' });
+            const svc = require('../services/docTemplateService');
+            const result = await svc.generateDocument(db, docTemplateId, req.user.id, inputData, null);
+            const ext = result.filePath.split('.').pop();
+            const publicUrl = `/uploads/${result.filePath}`;
+            const tplFile = { type: ext, filename: `${docTemplateName}.${ext}`, publicUrl };
+            const allFiles = [...allGeneratedFiles, tplFile];
+            sendEvent({ type: 'generated_files', files: allFiles });
+            allGeneratedFiles = allFiles;
+            console.log(`[DocTemplate] Auto-generated: ${publicUrl}`);
+          } else {
+            console.warn('[DocTemplate] AI response did not contain template_values block');
+          }
+        } catch (e) {
+          console.error('[DocTemplate] Auto-generate failed:', e.message);
+          sendEvent({ type: 'chunk', content: `\n\n⚠️ 文件自動生成失敗: ${e.message}` });
+          text += `\n\n⚠️ 文件自動生成失敗: ${e.message}`;
+        }
+      }
+
       displayText = text
         .replace(/```generate_[a-z]+:[^\n]+\n[\s\S]*?```/g, '')
+        .replace(/```template_values[\s\S]*?```/g, '')
         .replace(/\n{3,}/g, '\n\n')
         .trim();
     }
