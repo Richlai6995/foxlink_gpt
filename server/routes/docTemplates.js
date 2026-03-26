@@ -16,7 +16,7 @@ const UPLOAD_DIR = process.env.UPLOAD_DIR
   ? path.resolve(process.env.UPLOAD_DIR)
   : path.join(__dirname, '../uploads');
 
-const ALLOWED_FORMATS = { docx: true, xlsx: true, pdf: true };
+const ALLOWED_FORMATS = { docx: true, xlsx: true, pdf: true, pptx: true };
 
 // Temp upload storage
 const upload = multer({

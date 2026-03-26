@@ -98,6 +98,24 @@ async function extractText(filePath, format) {
     return text;
   }
 
+  if (format === 'pptx') {
+    const zip = new JSZip();
+    await zip.loadAsync(buf);
+    const slideFiles = Object.keys(zip.files)
+      .filter(f => /^ppt\/slides\/slide\d+\.xml$/.test(f))
+      .sort();
+    const texts = [];
+    for (const sf of slideFiles) {
+      const xmlStr = await zip.file(sf).async('string');
+      const matches = xmlStr.match(/<a:t[^>]*>([\s\S]*?)<\/a:t>/g) || [];
+      const slideText = matches.map(m => m.replace(/<[^>]+>/g, '')).join(' ');
+      if (slideText.trim()) texts.push(slideText.trim());
+    }
+    const text = texts.join('\n');
+    console.log(`[DocTemplate] PPTX 擷取完成，投影片=${slideFiles.length}，文字長度=${text.length}`);
+    return text;
+  }
+
   if (format === 'pdf') {
     try {
       const pdfParse = require('pdf-parse');
@@ -695,6 +713,49 @@ async function generateDocument(db, templateId, userId, inputData, outputFormat)
 
     outPath = path.join(outDir, `${outputId}.xlsx`);
     await wb.xlsx.writeFile(outPath);
+
+  } else if (tpl.format === 'pptx') {
+    // PPTX: direct XML replacement in each slide (DrawingML <a:t> elements)
+    const origBuf = await fs.readFile(path.join(UPLOAD_DIR, tpl.original_file));
+    const zip = await new JSZip().loadAsync(origBuf);
+    const variables = schema.variables || [];
+
+    const slideFiles = Object.keys(zip.files)
+      .filter(f => /^ppt\/slides\/slide\d+\.xml$/.test(f));
+
+    for (const sf of slideFiles) {
+      let xml = await zip.file(sf).async('string');
+
+      for (const v of variables) {
+        if (v.type === 'loop' || !v.original_text) continue;
+        const val = String(inputData[v.key] ?? v.default_value ?? '');
+        // Replace within <a:p> paragraphs (DrawingML runs: <a:r><a:t>text</a:t></a:r>)
+        xml = xml.replace(/<a:p\b[^>]*>[\s\S]*?<\/a:p>/g, (para) => {
+          const runPat = /<a:r\b[^>]*>(?:<a:rPr[^>]*(?:\/>|>[\s\S]*?<\/a:rPr>))?<a:t[^>]*>([\s\S]*?)<\/a:t><\/a:r>/g;
+          const runs = [];
+          let m;
+          while ((m = runPat.exec(para)) !== null) runs.push({ full: m[0], text: m[1], index: m.index });
+          const combined = runs.map(r => r.text).join('');
+          if (!combined.includes(v.original_text)) return para;
+          const newText = combined.replaceAll(v.original_text, val);
+          const firstRun = runs[0].full;
+          const rPrM = firstRun.match(/<a:rPr[^>]*(?:\/>|>[\s\S]*?<\/a:rPr>)/);
+          const rPr = rPrM ? rPrM[0] : '';
+          const newRun = `<a:r>${rPr}<a:t xml:space="preserve">${escapeXml(newText)}</a:t></a:r>`;
+          let result = para;
+          for (let i = runs.length - 1; i >= 0; i--) {
+            result = result.slice(0, runs[i].index) + result.slice(runs[i].index + runs[i].full.length);
+          }
+          return result.replace('</a:p>', newRun + '</a:p>');
+        });
+      }
+
+      zip.file(sf, xml);
+    }
+
+    const out = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE', compressionOptions: { level: 6 } });
+    outPath = path.join(outDir, `${outputId}.pptx`);
+    await fs.writeFile(outPath, out);
 
   } else if (tpl.format === 'pdf' && tpl.strategy === 'pdf_form') {
     const { PDFDocument } = require('pdf-lib');

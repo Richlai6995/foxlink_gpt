@@ -11,6 +11,7 @@ const FORMAT_OPTIONS = [
   { value: '', label: '所有格式' },
   { value: 'docx', label: 'Word (DOCX)' },
   { value: 'xlsx', label: 'Excel (XLSX)' },
+  { value: 'pptx', label: 'PowerPoint (PPTX)' },
   { value: 'pdf', label: 'PDF' },
 ]
 

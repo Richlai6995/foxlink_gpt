@@ -30,8 +30,8 @@ export default function TemplateUploadWizard({ onCreated, onClose }: Props) {
 
   const handleFile = (f: File) => {
     const ext = f.name.split('.').pop()?.toLowerCase() || ''
-    if (!['docx', 'xlsx', 'pdf'].includes(ext)) {
-      setError('僅支援 DOCX、XLSX、PDF 格式')
+    if (!['docx', 'xlsx', 'pdf', 'pptx'].includes(ext)) {
+      setError('僅支援 DOCX、XLSX、PPTX、PDF 格式')
       return
     }
     setFile(f)
@@ -156,9 +156,9 @@ export default function TemplateUploadWizard({ onCreated, onClose }: Props) {
               >
                 <Upload size={32} className="text-slate-400" />
                 <div className="text-sm text-slate-600">拖放檔案至此，或點擊選擇</div>
-                <div className="text-xs text-slate-400">支援 DOCX / XLSX / PDF，最大 50MB</div>
+                <div className="text-xs text-slate-400">支援 DOCX / XLSX / PPTX / PDF，最大 50MB</div>
               </div>
-              <input ref={inputRef} type="file" className="hidden" accept=".docx,.xlsx,.pdf" onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f) }} />
+              <input ref={inputRef} type="file" className="hidden" accept=".docx,.xlsx,.pdf,.pptx" onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f) }} />
 
               {file && (
                 <div className="flex items-center gap-2 text-sm text-slate-700 bg-slate-50 border rounded px-4 py-2 w-full">
