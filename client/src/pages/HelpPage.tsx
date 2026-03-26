@@ -140,7 +140,7 @@ const userSections = [
   { id: 'u-kb', label: '知識庫市集', icon: <Database size={18} /> },
   { id: 'u-research', label: '深度研究', icon: <GitFork size={18} /> },
   { id: 'u-toolbar-toggles', label: '頂端列功能開關', icon: <Zap size={18} /> },
-  { id: 'u-budget', label: '使用金額提示', icon: <DollarSign size={18} /> },
+  { id: 'u-budget', label: '對話額度限制', icon: <DollarSign size={18} /> },
   { id: 'u-ai-bi', label: 'AI 戰情室', icon: <BarChart3 size={18} /> },
   { id: 'u-ai-bi-query', label: '命名查詢 / 報表範本', icon: <BookMarked size={18} /> },
   { id: 'u-ai-bi-field', label: 'Schema 欄位選擇器', icon: <Server size={18} /> },
@@ -154,48 +154,121 @@ function UserManual() {
     <div>
       <Section id="u-intro" icon={<BookOpen size={22} />} iconColor="text-blue-500" title="系統介紹">
         <Para>
-          FOXLINK GPT 是正崴精密工業內部專屬的 AI 智慧助理平台，採用 Google Gemini 大型語言模型，
-          提供流暢的中英文對話、文件分析、多媒體處理及自動化排程等功能，協助同仁提升工作效率。
+          FOXLINK GPT 是正崴精密工業內部專屬的 AI 智慧助理平台，同時整合 <strong>Azure OpenAI (AOAI)</strong> 與
+          <strong> Google Gemini</strong> 兩大語言模型體系，提供流暢的多語言對話、文件深度分析、多媒體處理、
+          工具調用及自動化排程等功能，協助同仁大幅提升日常工作效率。
+        </Para>
+        <Para>
+          平台以企業安全為前提，所有資料傳輸均在正崴內部網路環境下進行，對話記錄保存於公司伺服器，
+          符合資訊安全及稽核要求。
         </Para>
         <Table
           headers={['功能', '說明']}
           rows={[
-            ['智慧對話', '支援繁體中文及英文，具備單次 Session 記憶能力'],
-            ['文件分析', '可上傳 PDF、Word、Excel、PowerPoint、圖片，AI 直接閱讀內容'],
-            ['音訊轉文字', '上傳語音檔，系統自動轉錄後送 AI 分析'],
+            ['多樣語言模型', '支援 AOAI（GPT 系列）與 Gemini（Pro / Flash / Image）多種模型，可依需求自由切換'],
+            ['智慧對話', '支援繁體中文、英文及越南文，具備單次 Session 完整記憶能力'],
+            ['深度研究', '自動拆解成最多 12 個子議題分別調查，可結合知識庫、技能、MCP 工具作為資料來源或輸入提示'],
+            ['文件分析', '可上傳 PDF、Word、Excel、PowerPoint、圖片，AI 直接閱讀並分析內容'],
+            ['工具調用', '可調用自建知識庫、DIFY 知識庫、MCP 工具及技能（Skill）進行問答與作業自動化'],
+            ['AI 戰情室', '結合 Oracle ERP 資料庫與向量語意搜尋，用自然語言查詢生產戰情，並生成圖表 / 儀表板'],
+            ['任務排程', '設定排程讓 AI 定期執行分析任務，結果自動寄送 Email 或生成下載檔案'],
+            ['音訊轉文字', '上傳語音檔，系統自動轉錄為文字後送 AI 分析'],
             ['生成輸出', 'AI 可依指令生成 PDF、Excel、Word、PPT、TXT 供下載'],
-            ['對話記錄', '所有對話永久保存，可隨時查閱歷史'],
+            ['對話記錄', '所有對話永久保存於伺服器，可隨時查閱、搜尋歷史問答'],
           ]}
         />
+        <NoteBox>
+          部分進階功能（如深度研究、排程任務、知識庫建立、AI 戰情室）須由系統管理員開通對應權限後才能使用，
+          若看不到相關入口，請洽 IT 部門申請。
+        </NoteBox>
       </Section>
 
       <Section id="u-login" icon={<User size={22} />} iconColor="text-indigo-500" title="登入與登出">
-        <SubSection title="登入系統">
+
+        <SubSection title="Foxlink SSO 單一登入（AD 帳號適用）">
+          <Para>
+            持有公司 Active Directory（AD）網域帳號的同仁，可使用 <strong>Foxlink SSO</strong> 一鍵登入，
+            無需另外記憶 FOXLINK GPT 密碼。
+          </Para>
           <div className="space-y-3">
-            <StepItem num={1} title="開啟瀏覽器，輸入系統網址" desc="建議使用 Chrome 或 Edge 瀏覽器以獲得最佳體驗" />
-            <StepItem num={2} title="輸入工號與密碼" desc="使用您的 AD 網域帳號登入，或由系統管理員提供的本機帳號" />
-            <StepItem num={3} title="點選「登入」按鈕" desc="登入成功後自動跳轉至主畫面" />
+            <StepItem num={1} title="開啟瀏覽器，輸入系統網址" desc="建議使用 Chrome 或 Edge 以獲得最佳體驗" />
+            <StepItem num={2} title="點選登入頁面的「Foxlink SSO 登入」藍色按鈕" desc="系統自動導向公司 SSO 驗證頁面" />
+            <StepItem num={3} title="輸入您的 AD 工號與 AD 密碼完成驗證" desc="若您已在公司內部網路環境登入 AD，可能免輸入直接通過" />
+            <StepItem num={4} title="驗證通過後自動跳回 FOXLINK GPT 主畫面" />
           </div>
-          <TipBox>首次使用請洽系統管理員確認帳號已建立並啟用。若帳號未啟用，系統會顯示「帳號尚未啟用」提示。</TipBox>
+          <NoteBox>
+            <strong>重要：SSO 僅適用於擁有 AD 帳號的正崴員工。</strong>
+            由系統管理員手動建立的本地帳號（如外部合作夥伴、特殊功能帳號）無法使用 SSO，
+            必須以帳號密碼方式登入（見下方說明）。
+          </NoteBox>
+          <TipBox>
+            AD 帳號登入後如需修改密碼，請透過公司 AD 系統（如 Windows 網域）更改，
+            FOXLINK GPT 的「修改密碼」功能僅限本地帳號使用。
+          </TipBox>
         </SubSection>
+
+        <SubSection title="帳號密碼登入（本地帳號適用）">
+          <div className="space-y-3">
+            <StepItem num={1} title="開啟瀏覽器，輸入系統網址" />
+            <StepItem num={2} title="在登入頁面輸入帳號與密碼" desc="帳號密碼由系統管理員提供，首次使用請先洽系統管理員確認帳號已建立並啟用" />
+            <StepItem num={3} title="點選「登入」按鈕，登入成功後自動跳轉至主畫面" />
+          </div>
+          <NoteBox>若帳號未啟用，系統會顯示「帳號尚未啟用」提示，請洽系統管理員確認帳號狀態。</NoteBox>
+        </SubSection>
+
+        <SubSection title="忘記密碼（本地帳號適用）">
+          <Para>
+            本地帳號若忘記密碼，可使用登入頁面的「忘記密碼」功能，
+            系統會寄送重設密碼連結至您的帳號綁定 Email。
+          </Para>
+          <div className="space-y-3">
+            <StepItem num={1} title="在登入頁面點選「忘記密碼？」連結" desc="位於登入按鈕下方" />
+            <StepItem num={2} title="輸入您的帳號（工號），點選「發送重設信件」" />
+            <StepItem num={3} title="至您的 Email 信箱開啟重設連結" desc="連結有效期限通常為 24 小時" />
+            <StepItem num={4} title="依指示設定新密碼後即可重新登入" />
+          </div>
+          <NoteBox>
+            AD 帳號忘記密碼請聯絡 IT 部門透過公司 AD 系統重設，無法透過此功能處理。
+          </NoteBox>
+        </SubSection>
+
         <SubSection title="登出系統">
           <Para>點選左側邊欄最下方的登出圖示（向左箭頭），即可安全登出。登出後 Token 立即失效，確保帳號安全。</Para>
         </SubSection>
+
       </Section>
 
       <Section id="u-ui" icon={<Settings size={22} />} iconColor="text-slate-500" title="介面導覽">
-        <Para>主畫面分為三個區域：</Para>
+        <Para>主畫面分為兩大區域：<strong>左側邊欄</strong>（導航與功能入口）與<strong>中央對話區域</strong>（對話主體）。</Para>
         <div className="grid grid-cols-1 gap-3">
           {[
             {
               color: 'bg-slate-800',
               title: '左側邊欄',
-              items: ['FOXLINK GPT Logo 及品牌', '新對話按鈕', 'AI 模型選擇下拉選單', '對話歷史清單（依時間分組）', '系統管理 / 排程任務 快捷鈕（依權限顯示）', '使用者資訊及登出'],
+              items: [
+                'FOXLINK GPT Logo 及品牌識別',
+                '「+ 新對話」按鈕 — 建立全新對話 Session',
+                'AI 模型選擇下拉選單 — 切換 AOAI / Gemini 等模型',
+                '對話歷史清單（依今天、昨天、過去 7 天、更早分組）',
+                '「更多功能」折疊選單 — 含匯入分享、系統管理、排程任務、技能市集、知識庫市集、AI 戰情室、使用說明',
+                '語言切換（中文 / English / Tiếng Việt）',
+                '使用者資訊、修改密碼、登出圖示',
+              ],
             },
             {
               color: 'bg-blue-700',
               title: '中央對話區域',
-              items: ['頂部：當前對話標題 + 停止生成按鈕', '訊息區：您的問題（右側藍色）、AI 回覆（左側白色）', '每則 AI 回覆支援懸停複製、Token 計數', '底部：訊息輸入框 + 檔案上傳按鈕'],
+              items: [
+                '頂部工具列：對話標題、分享按鈕、停止生成按鈕',
+                '頂部工具列功能開關：技能（✦）、自建知識庫（🗄️）、DIFY 知識庫（⚡）、MCP 工具（🌐）',
+                '頂部工具列額度指示器：顯示日 / 週 / 月用量（有設定時才出現）',
+                '頂部工具列消耗趨勢按鈕（📈）：查看個人各模型歷史費用走勢',
+                '頂部工具列深度研究面板（🔭）：發起或查閱研究任務',
+                '頂部工具列 AI 戰情快速入口（📊，有權限才顯示）',
+                '訊息區：您的問題（右側藍色泡泡）、AI 回覆（左側白色），支援 Markdown 格式化顯示',
+                '每則 AI 回覆底部：複製按鈕、Token 計數',
+                '底部：訊息輸入框（支援 Shift+Enter 換行、Enter 送出）、迴紋針附件按鈕（📎）、深度研究按鈕（🔍）',
+              ],
             },
           ].map((b) => (
             <div key={b.title} className={`${b.color} rounded-xl p-4`}>
@@ -210,6 +283,10 @@ function UserManual() {
             </div>
           ))}
         </div>
+        <TipBox>
+          部分頂部工具列功能（如 AI 戰情室、排程任務）只有具備對應權限的帳號才會顯示，
+          若有需要請洽系統管理員開通。
+        </TipBox>
       </Section>
 
       <Section id="u-chat" icon={<MessageSquare size={22} />} iconColor="text-green-500" title="開始對話">
@@ -227,16 +304,30 @@ function UserManual() {
         <SubSection title="貼上圖片">
           <Para>在輸入框中直接按 Ctrl + V 可貼上剪貼簿中的圖片，或將圖片檔案拖曳至頁面任何位置上傳。</Para>
         </SubSection>
+        <SubSection title="生成圖片（重要）">
+          <div className="flex gap-3 bg-violet-50 border border-violet-200 rounded-xl p-4 mb-3">
+            <AlertTriangle size={16} className="text-violet-500 flex-shrink-0 mt-0.5" />
+            <p className="text-violet-700 text-sm leading-6">
+              <strong>要讓 AI 生成圖片，必須先在左側邊欄的模型下拉選單中切換為「Image 類型」模型</strong>（例如 Gemini Image 或其他支援圖片輸出的模型）。
+              使用一般 Pro / Flash / GPT 模型時，AI 無法生成圖片，只能描述圖片。
+            </p>
+          </div>
+          <Para>詳細的圖片生成與修圖操作說明，請參閱本文件的「圖片生成與修圖」章節。</Para>
+        </SubSection>
       </Section>
 
       <Section id="u-model" icon={<Cpu size={22} />} iconColor="text-purple-500" title="選擇 AI 模型">
-        <Para>系統提供兩種 AI 模型可切換，由左側邊欄的下拉選單選擇：</Para>
+        <Para>
+          系統同時支援 <strong>Azure OpenAI（AOAI）</strong> 及 <strong>Google Gemini</strong> 兩大平台的多種模型，
+          由左側邊欄的模型下拉選單切換。不同模型在能力、速度、費用上各有差異，請依需求選擇。
+        </Para>
+
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div className="border border-blue-200 rounded-xl p-4 bg-blue-50">
             <div className="flex items-center gap-2 mb-2">
               <Cpu size={18} className="text-blue-500" />
               <span className="font-semibold text-blue-700">Gemini Pro</span>
-              <Tag color="blue">預設</Tag>
+              <Tag color="blue">高精度</Tag>
             </div>
             <ul className="text-sm text-blue-600 space-y-1">
               <li>• 高精度、深度思考能力</li>
@@ -258,8 +349,41 @@ function UserManual() {
               <li>• Token 成本較低</li>
             </ul>
           </div>
+          <div className="border border-violet-200 rounded-xl p-4 bg-violet-50">
+            <div className="flex items-center gap-2 mb-2">
+              <ImageIcon size={18} className="text-violet-500" />
+              <span className="font-semibold text-violet-700">Gemini Image</span>
+              <Tag color="purple">圖片生成</Tag>
+            </div>
+            <ul className="text-sm text-violet-600 space-y-1">
+              <li>• <strong>唯一支援生成圖片的模型</strong></li>
+              <li>• 文字生圖、上傳圖修圖、風格轉換</li>
+              <li>• 多輪對話連續調整圖片</li>
+              <li>• 若需生成圖片，必須切換至此模型</li>
+            </ul>
+          </div>
+          <div className="border border-green-200 rounded-xl p-4 bg-green-50">
+            <div className="flex items-center gap-2 mb-2">
+              <Cpu size={18} className="text-green-600" />
+              <span className="font-semibold text-green-700">AOAI GPT 5.4</span>
+              <Tag color="green">目前最新</Tag>
+            </div>
+            <ul className="text-sm text-green-700 space-y-1">
+              <li>• <strong>目前已支援 AOAI GPT 5.4 模型</strong></li>
+              <li>• 長文脈絡理解能力強</li>
+              <li>• 適合需要 OpenAI 相容 API 的場景</li>
+              <li>• 後續將陸續新增更多 AOAI 模型</li>
+            </ul>
+          </div>
         </div>
-        <NoteBox>模型選擇會保存在您的瀏覽器，下次開啟仍會維持您上次的選擇。切換模型不會影響當前對話的歷史記錄。</NoteBox>
+
+        <NoteBox>
+          <strong>模型清單由系統管理員統一維護，</strong>實際可用模型以畫面下拉選單為準，後續將陸續新增更多 AOAI 及 Gemini 模型版本。
+          模型選擇會保存在您的瀏覽器，下次開啟仍會維持上次的選擇；切換模型不會影響當前對話歷史記錄。
+        </NoteBox>
+        <TipBox>
+          若模型下拉選單中看不到 Image 類型模型，表示管理員尚未開放此功能，請洽 IT 部門申請。
+        </TipBox>
       </Section>
 
       <Section id="u-upload" icon={<Upload size={22} />} iconColor="text-teal-500" title="上傳檔案">
@@ -297,6 +421,19 @@ function UserManual() {
         <SubSection title="查看歷史">
           <Para>點選左側邊欄任意一條對話標題，即可重新開啟該對話並查看完整的問答記錄。</Para>
         </SubSection>
+        <SubSection title="重新命名對話">
+          <Para>
+            系統預設以 AI 自動生成的摘要作為對話標題，您可以隨時將其改為更易辨識的名稱：
+          </Para>
+          <div className="space-y-3">
+            <StepItem num={1} title="滑鼠移到左側邊欄的對話標題上" desc="右側出現鉛筆圖示（✏）" />
+            <StepItem num={2} title="點選鉛筆圖示，標題變為可編輯輸入框" />
+            <StepItem num={3} title="輸入新名稱，按 Enter 確認，或按 Esc 取消" desc="也可點選輸入框旁的確認勾選圖示（✓）儲存" />
+          </div>
+          <TipBox>
+            系統支援多語言標題，修改時 AI 會同步翻譯成英文及越南文，方便切換語系後也能看到對應語言的標題。
+          </TipBox>
+        </SubSection>
         <SubSection title="刪除對話">
           <Para>
             滑鼠移到對話標題上，右側會出現垃圾桶圖示，點選即可刪除該對話。刪除後無法復原，請謹慎操作。
@@ -307,43 +444,118 @@ function UserManual() {
 
       <Section id="u-tools" icon={<Terminal size={22} />} iconColor="text-cyan-500" title="可用工具">
         <Para>
-          系統管理員可為 FOXLINK GPT 整合外部工具，讓 AI 在對話中自動取用企業內部資料或知識庫。
-          您可以在左側邊欄的「可用工具」區塊查看目前啟用中的工具清單，了解 AI 具備哪些延伸能力。
+          FOXLINK GPT 支援多種工具擴展能力，讓 AI 在對話中自動取用企業內部資料、知識庫及技能。
+          您可以透過對話頂部工具列的各功能開關，明確指定要使用哪些工具；
+          也可以讓系統根據訊息內容自動判斷（TAG 路由機制）。
         </Para>
 
-        <SubSection title="查看可用工具">
-          <Para>登入後，左側邊欄的模型選擇器下方會出現「可用工具」摺疊列，顯示目前系統啟用的工具數量：</Para>
+        <SubSection title="工具類型說明">
           <div className="grid grid-cols-2 gap-3">
             <div className="border border-cyan-200 rounded-xl p-4 bg-cyan-50">
               <div className="flex items-center gap-2 mb-2">
                 <span className="text-lg">🔌</span>
                 <span className="font-semibold text-cyan-700 text-sm">MCP 工具</span>
-                <Tag color="blue">藍色標籤</Tag>
+                <Tag color="blue">即時外部查詢</Tag>
               </div>
               <p className="text-xs text-cyan-600 leading-5">
                 連接外部系統的即時查詢工具，例如 ERP 資料庫查詢、Oracle 程式搜尋等。
-                AI 在判斷需要時會自動呼叫，您不需要手動觸發。
+                AI 在判斷需要時自動呼叫，無需手動觸發。
               </p>
             </div>
             <div className="border border-yellow-200 rounded-xl p-4 bg-yellow-50">
               <div className="flex items-center gap-2 mb-2">
                 <span className="text-lg">📚</span>
                 <span className="font-semibold text-yellow-700 text-sm">DIFY 知識庫</span>
-                <Tag color="orange">黃色標籤</Tag>
+                <Tag color="orange">企業文件庫</Tag>
               </div>
               <p className="text-xs text-yellow-600 leading-5">
-                企業內部文件知識庫，例如產品規格、SOP 手冊。
-                每次對話時自動查詢，找到相關內容則注入給 AI 作為回答依據。
+                由 DIFY 平台管理的企業內部文件知識庫，例如產品規格、SOP 手冊。
+                對話時自動查詢，找到相關段落則注入給 AI 作為回答依據。
+              </p>
+            </div>
+            <div className="border border-teal-200 rounded-xl p-4 bg-teal-50">
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-lg">🗄️</span>
+                <span className="font-semibold text-teal-700 text-sm">自建知識庫</span>
+                <Tag color="green">向量語意搜尋</Tag>
+              </div>
+              <p className="text-xs text-teal-600 leading-5">
+                由您或同事在「知識庫市集」中建立並上傳文件的向量化知識庫。
+                支援 PDF、Word、Excel、PPTX 等格式，語意搜尋精度高。
+                可在對話頂部的「知識庫」按鈕中選擇要掛載哪幾個知識庫。
+              </p>
+            </div>
+            <div className="border border-purple-200 rounded-xl p-4 bg-purple-50">
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-lg">✨</span>
+                <span className="font-semibold text-purple-700 text-sm">技能（Skill）</span>
+                <Tag color="purple">角色與自動化</Tag>
+              </div>
+              <p className="text-xs text-purple-600 leading-5">
+                掛載技能後，AI 會自動套用對應的 System Prompt、外部 API 或工作流程。
+                例如「翻譯技能」讓 AI 固定以指定語言回覆，「ERP 查詢技能」自動整合資料庫資料。
+                可在技能市集瀏覽並掛載到對話。
               </p>
             </div>
           </div>
-          <Para>點選「可用工具」標題列可展開或收合工具清單，查看每個工具的名稱與功能說明。</Para>
         </SubSection>
 
-        <SubSection title="如何善用工具">
+        <SubSection title="如何選擇要使用的工具">
+          <Para>對話頂部工具列提供四個開關，可明確控制每類工具的啟用狀態：</Para>
+          <Table
+            headers={['開關', '說明', '啟用（亮色）', '停用（灰色）']}
+            rows={[
+              ['✦ 技能', '頂部紫色 Badge 圖示', '自動套用掛載的技能', '跳過技能注入'],
+              ['🗄️ 知識庫', '資料庫圖示', '從已掛載的自建知識庫檢索', '不做向量檢索'],
+              ['⚡ DIFY', '閃電圖示', '從已掛載的 DIFY 知識庫查詢', '跳過 DIFY 查詢'],
+              ['🌐 MCP', '地球圖示', '允許 AI 呼叫 MCP 伺服器工具', '停用所有 MCP 呼叫'],
+            ]}
+          />
+          <Para>
+            此外，您也可以點選各開關圖示旁的下拉箭頭，<strong>明確指定</strong>要使用哪幾個知識庫 / MCP 伺服器 / DIFY 知識庫，
+            而非讓系統自動選擇全部。
+          </Para>
+        </SubSection>
+
+        <SubSection title="系統如何自動判斷啟用哪些工具（TAG 路由機制）">
+          <Para>
+            當您<strong>未勾選任何特定工具</strong>，或<strong>只啟用了開關但未明確選擇具體項目</strong>時，
+            系統會透過 <strong>TAG 自動路由機制</strong>，根據您的訊息內容智慧決定要啟用哪些工具：
+          </Para>
+          <div className="space-y-3">
+            <StepItem num={1} title="萃取意圖標籤" desc="系統以快速 LLM 從您的訊息中萃取 0~5 個意圖標籤（如「庫存」「SOP」「ERP」）" />
+            <StepItem num={2} title="TAG 比對" desc="將意圖標籤與所有已設定工具 / 知識庫 / 技能的標籤進行雙向模糊比對，找出候選項" />
+            <StepItem num={3} title="描述精篩（二次過濾）" desc="若比對命中太多候選，再以 LLM 根據工具說明描述做二次精選，避免不必要的呼叫" />
+            <StepItem num={4} title="Fallback 機制" desc="若工具沒有設定 TAG、或比對全部落空，回退到傳統 intent 關鍵字過濾" />
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4">
+            <div className="bg-slate-50 border border-slate-200 rounded-xl p-4">
+              <p className="text-xs font-semibold text-slate-500 mb-2">情境一：未勾選任何工具</p>
+              <p className="text-xs text-slate-600 leading-5">
+                系統對<strong>所有可用工具</strong>進行 TAG 路由，自動判斷哪些工具與當前問題相關並啟用，
+                無相關工具則直接以 AI 本身知識回答。
+              </p>
+            </div>
+            <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
+              <p className="text-xs font-semibold text-blue-500 mb-2">情境二：只勾選部分工具（如知識庫開關開啟）</p>
+              <p className="text-xs text-blue-600 leading-5">
+                開關開啟類別的工具<strong>一定會嘗試查詢</strong>；其他未開啟類別的工具則跳過（即使 TAG 比對命中也不呼叫），
+                讓您精確控制 AI 的資料來源。
+              </p>
+            </div>
+          </div>
+
+          <TipBox>
+            想讓 AI 只用特定知識庫回答、不查詢其他來源？啟用知識庫開關並在下拉選單明確勾選目標知識庫，
+            同時關閉 DIFY 和 MCP 開關即可。
+          </TipBox>
+        </SubSection>
+
+        <SubSection title="使用範例">
           <div className="space-y-3">
             <div className="bg-slate-50 rounded-xl p-4 border border-slate-200">
-              <p className="text-xs text-slate-400 mb-2 font-medium">MCP 工具使用範例（ERP 查詢）</p>
+              <p className="text-xs text-slate-400 mb-2 font-medium">MCP 工具（ERP 查詢）</p>
               <div className="space-y-1.5">
                 {[
                   '「搜尋 WIP 相關的 Oracle 程式有哪些？」',
@@ -357,7 +569,7 @@ function UserManual() {
               </div>
             </div>
             <div className="bg-slate-50 rounded-xl p-4 border border-slate-200">
-              <p className="text-xs text-slate-400 mb-2 font-medium">DIFY 知識庫使用範例（產品規格）</p>
+              <p className="text-xs text-slate-400 mb-2 font-medium">自建知識庫 / DIFY 知識庫（文件查詢）</p>
               <div className="space-y-1.5">
                 {[
                   '「FL-X100 連接器的最大電流規格是多少？」',
@@ -365,13 +577,15 @@ function UserManual() {
                   '「生產 SOP 中關於焊接溫度的規定是什麼？」',
                 ].map((q, i) => (
                   <div key={i} className="flex gap-2 text-sm text-slate-700">
-                    <span className="text-yellow-400">•</span>{q}
+                    <span className="text-yellow-500">•</span>{q}
                   </div>
                 ))}
               </div>
             </div>
           </div>
-          <TipBox>AI 會根據您的問題內容自動判斷是否需要查詢工具，您只需要像平常一樣提問即可，不需要特殊指令。若沒有看到「可用工具」列表，表示目前尚未整合任何工具，可洽管理員設定。</TipBox>
+          <TipBox>
+            若沒有看到工具相關選項，表示管理員尚未設定或開放相關功能，可洽 IT 部門申請。
+          </TipBox>
         </SubSection>
       </Section>
 
@@ -1199,32 +1413,94 @@ function UserManual() {
         </SubSection>
       </Section>
 
-      <Section id="u-budget" icon={<DollarSign size={22} />} iconColor="text-emerald-500" title="使用金額提示">
+      <Section id="u-budget" icon={<DollarSign size={22} />} iconColor="text-emerald-500" title="對話額度限制">
         <Para>
-          若系統管理員為您的帳號設定了使用金額上限，對話頁面頂部工具列會出現金額指示器，
-          顯示您目前的用量及上限，方便您掌握自己的使用狀況。
+          系統管理員可為帳號或角色設定使用金額上限，當用量接近或超過限制時，
+          對話頁面<strong>頂部工具列</strong>會出現金額指示器，讓您隨時掌握自己的用量狀況。
         </Para>
 
-        <Table
-          headers={['指示器顏色', '說明']}
-          rows={[
-            ['灰色（正常）', '目前用量在上限 80% 以內，一切正常'],
-            ['橘色（接近上限）', '目前用量超過上限的 80%，請留意使用量'],
-            ['紅色（已超出）', '當前週期用量已達上限，新訊息將被系統拒絕'],
-          ]}
-        />
-
-        <SubSection title="週期說明">
-          <Para>金額上限分為三種週期，管理員可分別設定，您可能看到一個或多個指示器：</Para>
+        <SubSection title="指示器顯示位置">
+          <Para>
+            金額指示器位於<strong>對話頁面頂部工具列右側</strong>，分日 / 週 / 月三種週期，
+            管理員可分別設定，您可能同時看到一個或多個指示器：
+          </Para>
           <Table
-            headers={['週期', '重設時間', '顯示標籤']}
+            headers={['週期', '重設時間', '顯示標籤範例']}
             rows={[
-              ['每日限額', '每天凌晨 00:00 重設', '日 $已用/$上限'],
-              ['每週限額', '每週一 00:00 重設', '週 $已用/$上限'],
-              ['每月限額', '每月 1 日 00:00 重設', '月 $已用/$上限'],
+              ['每日限額', '每天凌晨 00:00 重設', '日 $0.12/$1.00'],
+              ['每週限額', '每週一 00:00 重設', '週 $3.50/$10.00'],
+              ['每月限額', '每月 1 日 00:00 重設', '月 $12.80/$50.00'],
             ]}
           />
-          <NoteBox>金額計算基於 Token 用量乘以各模型定價，若管理員尚未設定模型定價，顯示金額可能為 $0.000，此情況請洽管理員確認。系統管理員帳號不受金額限制，不會顯示此指示器。</NoteBox>
+          <Table
+            headers={['指示器顏色', '意義']}
+            rows={[
+              ['灰色（正常）', '目前用量在上限 80% 以內，一切正常，可正常使用'],
+              ['橘色（接近上限）', '目前用量超過上限的 80%，請留意使用量，即將達到限制'],
+              ['紅色（已超出）', '當前週期用量已達上限，依限制模式決定後續行為（見下方說明）'],
+            ]}
+          />
+          <NoteBox>
+            金額計算基於 Token 用量乘以各模型定價。若管理員尚未設定模型定價，顯示金額可能為 $0.000，此情況請洽管理員確認。
+            系統管理員帳號不受金額限制，不會顯示此指示器。
+          </NoteBox>
+        </SubSection>
+
+        <SubSection title="額度超過後的限制方式">
+          <Para>
+            管理員可針對每個<strong>角色（Role）或個別使用者</strong>分別設定超過額度後的行為模式：
+          </Para>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="border border-amber-200 rounded-xl p-4 bg-amber-50">
+              <div className="flex items-center gap-2 mb-2">
+                <AlertTriangle size={16} className="text-amber-500" />
+                <span className="font-semibold text-amber-700 text-sm">警告模式（warn）</span>
+              </div>
+              <p className="text-xs text-amber-700 leading-5">
+                超過額度後仍<strong>可繼續對話</strong>，但頂部指示器會顯示紅色警告，
+                提醒您已超出本週期限額。適合主管或核心業務人員，確保不影響工作。
+              </p>
+            </div>
+            <div className="border border-red-200 rounded-xl p-4 bg-red-50">
+              <div className="flex items-center gap-2 mb-2">
+                <AlertTriangle size={16} className="text-red-500" />
+                <span className="font-semibold text-red-700 text-sm">禁止模式（block）</span>
+              </div>
+              <p className="text-xs text-red-700 leading-5">
+                超過額度後<strong>無法繼續發送新訊息</strong>，系統回覆「已達使用上限」提示，
+                需等待下個週期重設後才能繼續使用。
+              </p>
+            </div>
+          </div>
+          <TipBox>
+            若您在重要工作時突然收到「已達使用上限」拒絕訊息，請洽系統管理員臨時調整限額或切換為警告模式。
+          </TipBox>
+        </SubSection>
+
+        <SubSection title="消耗趨勢查看">
+          <Para>
+            想了解自己過去一段時間的 Token 用量與費用分布？點選頂部工具列的
+            <strong>「📈 消耗趨勢」按鈕（TrendingUp 圖示）</strong>，開啟個人用量統計面板：
+          </Para>
+          <div className="bg-slate-50 border border-slate-200 rounded-xl p-4">
+            <p className="text-xs text-slate-400 mb-2 font-medium">消耗趨勢面板功能</p>
+            <ul className="space-y-1.5">
+              {[
+                '折線圖：顯示過去 N 天各模型每日費用走勢（多條線按模型分色）',
+                '時間範圍：可切換查看最近 7 天 / 30 天 / 90 天',
+                '總計：面板頂部顯示所選時間內的總費用及總 Token 數',
+                '各模型彙總：底部表格列出每種模型的輸入 / 輸出 Token 及費用',
+              ].map((item, i) => (
+                <li key={i} className="flex gap-2 text-xs text-slate-600">
+                  <span className="text-blue-400">•</span>{item}
+                </li>
+              ))}
+            </ul>
+          </div>
+          <TipBox>
+            消耗趨勢讓您一目了然各模型的使用分布，若某天費用明顯偏高，
+            可回到對話歷史找出當天的深度研究或大型文件分析任務加以調整。
+          </TipBox>
         </SubSection>
       </Section>
 
