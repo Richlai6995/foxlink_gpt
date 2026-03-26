@@ -200,6 +200,25 @@ router.get('/:id', async (req, res) => {
   }
 });
 
+// ─── GET /:id/preview-file  Serve original file (for PDF visual editor) ────────
+router.get('/:id/preview-file', async (req, res) => {
+  try {
+    const access = await svc.checkAccess(db, req.params.id, req.user);
+    if (!access) return res.status(403).json({ error: '無存取權限' });
+
+    const tpl = await db.prepare('SELECT original_file, format FROM doc_templates WHERE id=?').get(req.params.id);
+    if (!tpl) return res.status(404).json({ error: '範本不存在' });
+
+    const filePath = path.join(UPLOAD_DIR, tpl.original_file);
+    const mimeMap = { pdf: 'application/pdf', docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation' };
+    res.setHeader('Content-Type', mimeMap[tpl.format] || 'application/octet-stream');
+    res.setHeader('Content-Disposition', 'inline');
+    res.sendFile(filePath);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ─── PUT /:id  Update ─────────────────────────────────────────────────────────
 router.put('/:id', async (req, res) => {
   try {

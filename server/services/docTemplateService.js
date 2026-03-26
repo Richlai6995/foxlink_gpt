@@ -986,9 +986,111 @@ async function generateDocument(db, templateId, userId, inputData, outputFormat)
     await fs.writeFile(outPath, out);
 
   } else if (tpl.format === 'pdf' && tpl.strategy !== 'pdf_form') {
+    const variables = schema.variables || [];
+    const flatVars  = variables.flatMap(v => v.type === 'loop' ? (v.children || []) : [v]);
+    const hasCells  = flatVars.some(v => v.pdf_cell);
+
+    if (tpl.is_fixed_format && hasCells) {
+      // ── PDF Overlay: keep original PDF, overlay text at pdf_cell coords ──
+      const { PDFDocument, rgb, pushGraphicsState, popGraphicsState,
+              moveTo, lineTo, closePath, clip, endPath } = require('pdf-lib');
+      const fontkit = require('@pdf-lib/fontkit');
+
+      const origDoc = await PDFDocument.load(tplBuf);
+      origDoc.registerFontkit(fontkit);
+
+      const fontPath = path.join(__dirname, '../fonts/NotoSansTC-Regular.ttf');
+      let customFont;
+      try {
+        const fontBytes = await fs.readFile(fontPath);
+        customFont = await origDoc.embedFont(fontBytes);
+      } catch {
+        customFont = await origDoc.embedFont('Helvetica');
+      }
+
+      // Flatten loop vars
+      const flatData = { ...inputData };
+      for (const v of variables) {
+        if (v.type !== 'loop') continue;
+        const items = Array.isArray(inputData[v.key]) ? inputData[v.key] : [];
+        flatData[v.key] = items.map((item, i) => {
+          const parts = (v.children || []).map(c => String(item[c.key] ?? '').trim()).filter(Boolean);
+          return parts.length ? `${i + 1}. ${parts.join('　')}` : '';
+        }).filter(Boolean).join('\n');
+      }
+
+      const pdflibPages = origDoc.getPages();
+      const unpositioned = [];
+
+      for (const v of flatVars) {
+        const cell = v.pdf_cell;
+        if (!cell) { unpositioned.push(v.label || v.key); continue; }
+        const value = String(flatData[v.key] ?? '').trim();
+        if (!value) continue;
+
+        const page = pdflibPages[cell.page ?? 0];
+        if (!page) continue;
+
+        const { height: pageH } = page.getSize();
+        const eff      = getEffectiveStyle(v) || {};
+        const fontSize = eff.fontSize ?? 9;
+        const overflow = eff.overflow ?? 'wrap';
+        const maxChars = eff.maxChars;
+
+        // hex → rgb(0-1)
+        const hexRgb = (hex) => {
+          const h = (hex || '').replace('#', '');
+          if (h.length !== 6) return null;
+          return { r: parseInt(h.slice(0,2),16)/255, g: parseInt(h.slice(2,4),16)/255, b: parseInt(h.slice(4,6),16)/255 };
+        };
+        const fgColor = hexRgb(eff.color) ?? { r: 0, g: 0, b: 0 };
+
+        // Convert top-left origin (stored) → pdf-lib bottom-left origin
+        const cellTop    = pageH - cell.y;
+        const cellBottom = pageH - cell.y - cell.height;
+
+        let text = value;
+        if (overflow === 'truncate' && maxChars && text.length > maxChars) {
+          text = text.slice(0, maxChars - 1) + '…';
+        }
+
+        // Clip to cell rect, then draw text
+        page.pushOperators(
+          pushGraphicsState(),
+          moveTo(cell.x,            cellBottom),
+          lineTo(cell.x + cell.width, cellBottom),
+          lineTo(cell.x + cell.width, cellTop),
+          lineTo(cell.x,            cellTop),
+          closePath(),
+          clip(),
+          endPath()
+        );
+
+        page.drawText(text, {
+          x:          cell.x + 2,
+          y:          cellTop - fontSize - 2,
+          size:       fontSize,
+          font:       customFont,
+          color:      rgb(fgColor.r, fgColor.g, fgColor.b),
+          maxWidth:   cell.width - 4,
+          lineHeight: fontSize * 1.3,
+        });
+
+        page.pushOperators(popGraphicsState());
+      }
+
+      if (unpositioned.length) {
+        console.warn(`[DocTemplate] pdf_overlay: unpositioned fields skipped: ${unpositioned.join(', ')}`);
+      }
+
+      const pdfBytes = await origDoc.save();
+      outPath = path.join(outDir, `${outputId}.pdf`);
+      await fs.writeFile(outPath, pdfBytes);
+
+    } else {
+    // ── PDF Regen (pdfkit dynamic height) ────────────────────────────────
     // Non-form PDF: regenerate with pdfkit so rows auto-expand with content
     const PDFKit = require('pdfkit');
-    const variables = schema.variables || [];
 
     // ── Flatten loop variables → numbered text ──────────────────────────────
     const flatData = { ...inputData };
@@ -1100,6 +1202,8 @@ async function generateDocument(db, templateId, userId, inputData, outputFormat)
       doc.on('error', reject);
       doc.end();
     });
+
+    } // end else (pdf_regen)
 
   } else if (tpl.format === 'pdf' && tpl.strategy === 'pdf_form') {
     const { PDFDocument } = require('pdf-lib');

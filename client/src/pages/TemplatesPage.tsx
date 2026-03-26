@@ -7,6 +7,7 @@ import TemplateCard from '../components/templates/TemplateCard'
 import TemplateUploadWizard from '../components/templates/TemplateUploadWizard'
 import VariableSchemaEditor from '../components/templates/VariableSchemaEditor'
 import StyleEditorTab from '../components/templates/StyleEditorTab'
+import PDFFieldEditor from '../components/templates/PDFFieldEditor'
 
 const FORMAT_OPTIONS = [
   { value: '', label: '所有格式' },
@@ -16,7 +17,7 @@ const FORMAT_OPTIONS = [
   { value: 'pdf', label: 'PDF' },
 ]
 
-type EditTab = 'basic' | 'variables' | 'style'
+type EditTab = 'basic' | 'variables' | 'style' | 'layout'
 
 // Edit modal for updating name/description/tags/schema/style
 function TemplateEditModal({ template, onClose, onSaved }: {
@@ -57,11 +58,14 @@ function TemplateEditModal({ template, onClose, onSaved }: {
     setTagInput('')
   }
 
-  const TABS: { key: EditTab; label: string }[] = [
+  const isPdf = template.format === 'pdf' && template.strategy !== 'pdf_form'
+
+  const TABS: { key: EditTab; label: string; pdfOnly?: boolean }[] = [
     { key: 'basic',     label: '基本資訊' },
     { key: 'variables', label: '變數設定' },
     { key: 'style',     label: '樣式設定' },
-  ]
+    { key: 'layout',    label: '版面編輯器', pdfOnly: true },
+  ].filter(t => !t.pdfOnly || isPdf)
 
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
@@ -158,6 +162,22 @@ function TemplateEditModal({ template, onClose, onSaved }: {
                 </div>
               )}
               <StyleEditorTab
+                variables={schema.variables || []}
+                onChange={vars => setSchema({ ...schema, variables: vars })}
+                readonly={!canEdit}
+              />
+            </div>
+          )}
+
+          {/* Layout tab — PDF only */}
+          {tab === 'layout' && (
+            <div>
+              <div className="mb-2 text-xs text-slate-500">
+                在下方 PDF 預覽上，先選取右上方「選擇變數」下拉後拖拉畫框，即可定義該欄位的填寫位置。
+                已定位的欄位將在生成時以 <strong>疊加模式</strong> 寫入原始 PDF。
+              </div>
+              <PDFFieldEditor
+                templateId={template.id}
                 variables={schema.variables || []}
                 onChange={vars => setSchema({ ...schema, variables: vars })}
                 readonly={!canEdit}
