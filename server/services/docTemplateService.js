@@ -449,6 +449,46 @@ async function detectStylesFromPptx(origBuf, variables) {
   return styles;
 }
 
+/** Detect primary language of text: CJK ratio > 30% → 繁體中文, else English */
+function detectLang(text) {
+  if (!text) return '繁體中文';
+  const cjk = [...text].filter(c => /[\u4e00-\u9fff\u3400-\u4dbf\uff00-\uffef]/.test(c)).length;
+  return cjk / text.length > 0.3 ? '繁體中文' : 'English';
+}
+
+/**
+ * Summarize text to fit within maxChars using Gemini Flash.
+ * Falls back to hard truncation if AI fails or result is still too long.
+ */
+async function summarizeText(text, maxChars) {
+  const lang = detectLang(text);
+  const prompt = `請用${lang}將以下文字壓縮至${maxChars}字以內。只輸出壓縮後內容，不加任何說明或標題：\n${text}`;
+  try {
+    const result = await generateTextSync(MODEL_FLASH, [], prompt);
+    const summary = (typeof result === 'string' ? result : (result.text || '')).trim();
+    console.log(`[DocTemplate] summarize: ${text.length}→${summary.length} chars`);
+    return summary.length <= maxChars ? summary : summary.slice(0, maxChars - 1) + '…';
+  } catch (e) {
+    console.warn('[DocTemplate] summarize failed, truncating:', e.message);
+    return text.slice(0, maxChars - 1) + '…';
+  }
+}
+
+/**
+ * Apply overflow strategy to a value given effective style.
+ * Handles: truncate (immediate), summarize (async AI).
+ * 'wrap' and 'shrink' are handled at render time, returned unchanged here.
+ */
+async function applyOverflow(value, eff) {
+  if (!value || !eff) return value;
+  const { overflow = 'wrap', maxChars } = eff;
+  if (!maxChars || value.length <= maxChars) return value;
+
+  if (overflow === 'truncate') return value.slice(0, maxChars - 1) + '…';
+  if (overflow === 'summarize') return await summarizeText(value, maxChars);
+  return value;
+}
+
 // ─── Cell-level helpers ────────────────────────────────────────────────────────
 
 /** Extract all run text from a <w:tc>, decode XML entities, normalize whitespace */
@@ -816,6 +856,9 @@ async function generateDocument(db, templateId, userId, inputData, outputFormat)
         value = String(inputData[v.key] ?? v.default_value ?? '');
       }
 
+      // Apply overflow policy (truncate/summarize) when fixed mode is on
+      if (isFixed && vStyle) value = await applyOverflow(value, vStyle);
+
       // 1. Label-based (primary — works regardless of original_text)
       const { xml: x1, found: f1 } = fillCellByLabel(xml, v.label, value, vStyle);
       if (f1) { xml = x1; continue; }
@@ -1049,10 +1092,8 @@ async function generateDocument(db, templateId, userId, inputData, outputFormat)
         const cellTop    = pageH - cell.y;
         const cellBottom = pageH - cell.y - cell.height;
 
-        let text = value;
-        if (overflow === 'truncate' && maxChars && text.length > maxChars) {
-          text = text.slice(0, maxChars - 1) + '…';
-        }
+        // Apply overflow (truncate / summarize) — applyOverflow handles both
+        const text = await applyOverflow(value, eff);
 
         // Clip to cell rect, then draw text
         page.pushOperators(
@@ -1162,7 +1203,10 @@ async function generateDocument(db, templateId, userId, inputData, outputFormat)
 
     for (let idx = 0; idx < variables.length; idx++) {
       const v = variables[idx];
-      const value = String(flatData[v.key] ?? '').trim();
+      const rawVal = String(flatData[v.key] ?? '').trim();
+      const eff = tpl.is_fixed_format ? getEffectiveStyle(v) : null;
+      // For regen, only 'summarize' makes sense (rows auto-expand for wrap/shrink)
+      const value = (eff?.overflow === 'summarize') ? await applyOverflow(rawVal, eff) : rawVal;
       const label = (v.label || v.key) + ':';
       const bg    = bgColors[idx % bgColors.length];
 
