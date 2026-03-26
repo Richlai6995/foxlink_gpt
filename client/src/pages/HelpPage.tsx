@@ -520,38 +520,153 @@ function UserManual() {
           </Para>
         </SubSection>
 
-        <SubSection title="系統如何自動判斷啟用哪些工具（TAG 路由機制）">
-          <Para>
-            當您<strong>未勾選任何特定工具</strong>，或<strong>只啟用了開關但未明確選擇具體項目</strong>時，
-            系統會透過 <strong>TAG 自動路由機制</strong>，根據您的訊息內容智慧決定要啟用哪些工具：
-          </Para>
-          <div className="space-y-3">
-            <StepItem num={1} title="萃取意圖標籤" desc="系統以快速 LLM 從您的訊息中萃取 0~5 個意圖標籤（如「庫存」「SOP」「ERP」）" />
-            <StepItem num={2} title="TAG 比對" desc="將意圖標籤與所有已設定工具 / 知識庫 / 技能的標籤進行雙向模糊比對，找出候選項" />
-            <StepItem num={3} title="描述精篩（二次過濾）" desc="若比對命中太多候選，再以 LLM 根據工具說明描述做二次精選，避免不必要的呼叫" />
-            <StepItem num={4} title="Fallback 機制" desc="若工具沒有設定 TAG、或比對全部落空，回退到傳統 intent 關鍵字過濾" />
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4">
-            <div className="bg-slate-50 border border-slate-200 rounded-xl p-4">
-              <p className="text-xs font-semibold text-slate-500 mb-2">情境一：未勾選任何工具</p>
-              <p className="text-xs text-slate-600 leading-5">
-                系統對<strong>所有可用工具</strong>進行 TAG 路由，自動判斷哪些工具與當前問題相關並啟用，
-                無相關工具則直接以 AI 本身知識回答。
-              </p>
-            </div>
-            <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
-              <p className="text-xs font-semibold text-blue-500 mb-2">情境二：只勾選部分工具（如知識庫開關開啟）</p>
+        <SubSection title="兩種工具啟用模式">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="border-2 border-blue-300 rounded-xl p-4 bg-blue-50">
+              <div className="font-semibold text-blue-700 text-sm mb-2">模式 A：明確指定（Explicit）</div>
               <p className="text-xs text-blue-600 leading-5">
-                開關開啟類別的工具<strong>一定會嘗試查詢</strong>；其他未開啟類別的工具則跳過（即使 TAG 比對命中也不呼叫），
-                讓您精確控制 AI 的資料來源。
+                在工具列下拉選單<strong>具體勾選</strong>特定知識庫 / MCP 伺服器時啟用。<br/>
+                系統<strong>直接使用所選工具，跳過所有自動路由與 intent 判斷</strong>，效率最高。
+              </p>
+              <div className="mt-2 text-xs text-blue-500">例：勾選「自建 KB 工具列」→ 選「HR 制度知識庫」</div>
+            </div>
+            <div className="border-2 border-slate-300 rounded-xl p-4 bg-slate-50">
+              <div className="font-semibold text-slate-700 text-sm mb-2">模式 B：自動路由（Auto）</div>
+              <p className="text-xs text-slate-600 leading-5">
+                工具列<strong>開關開啟但未具體選擇</strong>，或<strong>全部關閉</strong>時啟用。<br/>
+                系統依訊息內容智慧決定要呼叫哪些工具（TAG 路由機制，見下方）。
+              </p>
+              <div className="mt-2 text-xs text-slate-500">例：知識庫開關開啟 → 未勾選具體 KB → 系統自動比對</div>
+            </div>
+          </div>
+          <NoteBox>空陣列（全部取消勾選）等同「未選」，系統會切換回自動路由，不會跳過工具。</NoteBox>
+        </SubSection>
+
+        <SubSection title="自動路由完整流程（Auto 模式）">
+          <Para>每次送出訊息時，系統依以下步驟決定傳哪些工具給 AI：</Para>
+
+          <div className="space-y-3 mt-2">
+            <StepItem num={1} title="依存取權限載入可用工具" desc="MCP 依 mcp_access 授權、DIFY KB 依 dify_access 授權、自建 KB 依 creator/公開/kb_access 授權 — 只載入您有權使用的工具" />
+            <StepItem num={2} title="套用技能（Skill）約束" desc="若 session 有掛載技能，技能可強制限制工具清單（見下方「技能對工具的影響」）" />
+            <StepItem num={3} title="TAG 自動路由（有任何工具設定 Tags 時）" desc="Flash LLM 提取訊息意圖標籤 → 與工具 Tags 比對 → 再以 LLM 依描述精篩" />
+            <StepItem num={4} title="Fallback（所有工具均無 Tags 時）" desc="Flash LLM 直接閱讀全部工具的描述文字做分類，效率較低、準確性較差" />
+            <StepItem num={5} title="Gemini Function Calling 最終決策" desc="篩選後的工具以 function declarations 傳給 LLM，由 AI 根據對話上下文決定實際要呼叫哪個" />
+          </div>
+
+          <div className="mt-4 space-y-3">
+            <div className="bg-slate-900 rounded-xl px-5 py-4">
+              <pre className="text-xs text-slate-300 font-mono leading-6 whitespace-pre">{`使用者訊息
+    │
+    ▼
+[Step 1] 依授權載入可用工具（MCP / DIFY KB / 自建 KB）
+    │
+    ▼
+[Step 2] 技能約束（disable / exclusive / append）
+    │
+    ├─ 有任何工具設定了 Tags？
+    │        ▼ YES
+    │  [Step 3a] Flash 提取意圖標籤（0~5 個）
+    │        ▼
+    │  TAG 比對（雙向模糊）
+    │        ▼
+    │  有匹配候選 → Flash 描述精篩 → 選中工具
+    │  無匹配候選 → Flash 對全部工具描述分類
+    │
+    └─ NO（全部無 Tags）
+       [Step 4] Flash 對全部工具描述分類（Fallback）
+    │
+    ▼
+[Step 5] 送給 Gemini → LLM 決定呼叫哪個工具
+    │
+    ▼
+執行工具 → 結果注入 prompt → AI 回覆`}</pre>
+            </div>
+          </div>
+        </SubSection>
+
+        <SubSection title="TAG 路由的判斷規則">
+          <Para>系統使用 Gemini Flash 作為「意圖分類器」（不是回答問題），進行兩個階段的判斷：</Para>
+
+          <div className="space-y-3">
+            <div className="border border-cyan-200 bg-cyan-50 rounded-lg p-3">
+              <div className="text-xs font-semibold text-cyan-700 mb-1">第一階段：TAG 比對（雙向模糊）</div>
+              <p className="text-xs text-cyan-600 leading-5">
+                Flash 從訊息中提取 0~5 個主題標籤（如 <code className="bg-white px-1 rounded">「人資」「請假」「HR」</code>），
+                再與工具 Tags 做雙向部分比對：<br/>
+                ✓ <code className="bg-white px-1 rounded">「人資」</code> 比對工具 Tag <code className="bg-white px-1 rounded">「HR人資管理」</code> → 命中<br/>
+                ✗ <code className="bg-white px-1 rounded">「庫存」</code> 比對工具 Tag <code className="bg-white px-1 rounded">「人資」</code> → 不命中
+              </p>
+            </div>
+            <div className="border border-purple-200 bg-purple-50 rounded-lg p-3">
+              <div className="text-xs font-semibold text-purple-700 mb-1">第二階段：描述精篩（Flash 判斷）</div>
+              <p className="text-xs text-purple-600 leading-5">
+                對 TAG 比對命中的候選工具，Flash 再讀工具的「說明描述」做更嚴格的判斷，規則：<br/>
+                • 核心意圖必須<strong>完全符合</strong>工具說明範疇才選用<br/>
+                • 跟進前一輪 AI 問題的回覆，會參考最近 4 則對話上下文繼續使用同工具<br/>
+                • 一般聊天、寫作、摘要等不需工具的問題 → 一律不選任何工具<br/>
+                • 不確定時，不選用（寧可不呼叫，避免雜訊）
               </p>
             </div>
           </div>
 
+          <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="bg-green-50 border border-green-200 rounded-lg p-3">
+              <p className="text-xs font-semibold text-green-700 mb-1">✅ 有 Tags → 精準高效</p>
+              <p className="text-xs text-green-600 leading-5">
+                先縮小候選範圍再精篩，LLM 只需判斷少量工具，準確性高、消耗 Token 少。
+              </p>
+            </div>
+            <div className="bg-orange-50 border border-orange-200 rounded-lg p-3">
+              <p className="text-xs font-semibold text-orange-700 mb-1">⚠️ 無 Tags → Fallback 效果較差</p>
+              <p className="text-xs text-orange-600 leading-5">
+                Flash 需要閱讀全部工具描述做分類，工具數量多時效果下降，也多消耗 Token。
+                建議管理員為每個工具設定 Tags。
+              </p>
+            </div>
+          </div>
+        </SubSection>
+
+        <SubSection title="技能（Skill）對工具的影響">
+          <Para>掛載技能後，技能可以約束 Auto 模式下的工具範圍。技能設定分三種模式：</Para>
+          <Table
+            headers={['模式', 'MCP 工具行為', 'KB 工具行為']}
+            rows={[
+              ['disable', '移除全部 MCP 工具，AI 無法呼叫任何 MCP', '移除全部 DIFY + 自建 KB，不做知識庫查詢'],
+              ['exclusive（排他）', '只保留技能指定的 MCP 伺服器，其他全移除', '只保留技能指定的 KB，其他全移除'],
+              ['append（附加）', '在使用者有存取權的 MCP 之外，強制額外加入技能指定的伺服器', '強制加入技能指定的 KB（即使使用者原本沒有存取權）'],
+            ]}
+          />
+          <NoteBox>
+            Code 技能（程式執行工具）永遠附加到工具清單，不受以上模式影響。<br/>
+            明確指定模式（Explicit）下，disable 規則仍然生效作為安全防護。
+          </NoteBox>
+        </SubSection>
+
+        <SubSection title="特殊快速路徑（Fast Path）">
+          <Para>以下情況系統會走優化路徑，跳過 Gemini Function Calling，提升回應速度：</Para>
+          <Table
+            headers={['條件', '行為', '優點']}
+            rows={[
+              ['只選中 DIFY KB（無 MCP）', '並行查詢全部選中的 DIFY KB → 結果直接注入 prompt → AI 整合回覆', '省略 function calling 往返，速度更快'],
+              ['只選中自建 KB（無 MCP）', '並行向量檢索全部選中的自建 KB → 結果注入 prompt', '同上'],
+              ['混合模式（MCP + KB）', '走 Gemini 原生 function calling，AI 自行決定呼叫哪些工具、呼叫幾次', '靈活性高，可多輪工具調用'],
+            ]}
+          />
+        </SubSection>
+
+        <SubSection title="情境對照表">
+          <Table
+            headers={['您的操作', '系統行為', '工具覆蓋範圍']}
+            rows={[
+              ['全部開關關閉', 'Auto 模式：TAG 路由對全部可用工具', '依授權範圍內所有工具'],
+              ['開關開啟，未具體勾選', 'Auto 模式：TAG 路由（只看開啟的類別）', '該類別的授權工具'],
+              ['下拉勾選具體工具', 'Explicit 模式：直接使用選中工具', '只有您勾選的那幾個'],
+              ['掛載技能（disable）', 'Auto 模式，但 Skill disable 先移除對應類別', '受技能限制'],
+              ['掛載技能（exclusive）', 'Auto 模式，但只保留技能指定工具', '技能指定的工具'],
+            ]}
+          />
           <TipBox>
-            想讓 AI 只用特定知識庫回答、不查詢其他來源？啟用知識庫開關並在下拉選單明確勾選目標知識庫，
-            同時關閉 DIFY 和 MCP 開關即可。
+            最精確的方式：下拉選單明確勾選目標工具 + 關閉不需要的類別開關。最省力的方式：所有工具設定好 Tags，讓系統 TAG 路由自動判斷。
           </TipBox>
         </SubSection>
 
