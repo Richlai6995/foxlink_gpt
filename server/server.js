@@ -222,6 +222,16 @@ app.get('/api/health', (req, res) => res.json({ status: 'ok', timestamp: new Dat
     } catch (e) {
       console.error('[MetricsCollector] Failed to start:', e.message);
     }
+
+    // Auto-sync Help KB (non-blocking, runs in background)
+    setImmediate(async () => {
+      try {
+        const { syncHelpKb } = require('./services/helpKbSync');
+        await syncHelpKb(db);
+      } catch (e) {
+        console.error('[HelpKB] Failed to sync:', e.message);
+      }
+    });
   } catch (error) {
     console.error('Failed to initialize:', error);
     process.exit(1);
