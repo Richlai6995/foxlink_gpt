@@ -931,7 +931,8 @@ router.put('/settings/vector-defaults', async (req, res) => {
 // GET /api/admin/settings/template-model
 router.get('/settings/template-model', async (req, res) => {
   try {
-    const row = await db.prepare(`SELECT value FROM system_settings WHERE key='template_analysis_model'`).get();
+    const db = require('../database-oracle').db;
+    const row = await db.prepare(`SELECT value FROM system_settings WHERE key=?`).get('template_analysis_model');
     res.json({ model: row?.value || 'flash' });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -939,11 +940,12 @@ router.get('/settings/template-model', async (req, res) => {
 // PUT /api/admin/settings/template-model
 router.put('/settings/template-model', async (req, res) => {
   try {
+    const db = require('../database-oracle').db;
     const { model } = req.body;
     if (!['flash', 'pro'].includes(model)) return res.status(400).json({ error: '僅允許 flash 或 pro' });
-    const ex = await db.prepare(`SELECT key FROM system_settings WHERE key='template_analysis_model'`).get();
-    if (ex) await db.prepare(`UPDATE system_settings SET value=? WHERE key='template_analysis_model'`).run(model);
-    else await db.prepare(`INSERT INTO system_settings (key,value) VALUES ('template_analysis_model',?)`).run(model);
+    const ex = await db.prepare(`SELECT key FROM system_settings WHERE key=?`).get('template_analysis_model');
+    if (ex) await db.prepare(`UPDATE system_settings SET value=? WHERE key=?`).run(model, 'template_analysis_model');
+    else await db.prepare(`INSERT INTO system_settings (key,value) VALUES (?,?)`).run('template_analysis_model', model);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

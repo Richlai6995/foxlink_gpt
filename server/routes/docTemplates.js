@@ -120,7 +120,7 @@ router.post('/upload', upload.single('file'), async (req, res) => {
       // Read model from system_settings (allow admin to switch flash/pro)
       let model;
       try {
-        const settingRow = await db.prepare(`SELECT value FROM system_settings WHERE key='template_analysis_model'`).get();
+        const settingRow = await db.prepare(`SELECT value FROM system_settings WHERE key=?`).get('template_analysis_model');
         if (settingRow?.value === 'pro') model = svc.MODEL_PRO;
         else if (settingRow?.value === 'flash') model = svc.MODEL_FLASH;
       } catch { /* ignore */ }
