@@ -757,6 +757,118 @@ async function generateDocument(db, templateId, userId, inputData, outputFormat)
     outPath = path.join(outDir, `${outputId}.pptx`);
     await fs.writeFile(outPath, out);
 
+  } else if (tpl.format === 'pdf' && tpl.strategy !== 'pdf_form') {
+    // Non-form PDF: use pdf-lib to overlay text at label positions
+    const { PDFDocument, rgb } = require('pdf-lib');
+    const pdfParseLib = require('pdf-parse');
+    const origBuf = await fs.readFile(path.join(UPLOAD_DIR, tpl.original_file));
+
+    // ── Extract text positions from original PDF ────────────────────────────
+    const textItems = []; // { text, x, y, w }
+    try {
+      await pdfParseLib(origBuf, {
+        pagerender: (pageData) => pageData.getTextContent().then(content => {
+          content.items.forEach(item => {
+            if (item.str && item.str.trim()) {
+              textItems.push({
+                text: item.str.trim(),
+                x: item.transform[4],
+                y: item.transform[5],
+                w: item.width || 50,
+              });
+            }
+          });
+          return '';
+        })
+      });
+    } catch (e) {
+      console.warn('[DocTemplate] PDF text extraction for positions failed:', e.message);
+    }
+    console.log(`[DocTemplate] PDF text items found: ${textItems.length}`);
+
+    // ── Load PDF and embed Chinese font ─────────────────────────────────────
+    const pdfDoc = await PDFDocument.load(origBuf);
+    let font;
+    try {
+      const fontkit = require('@pdf-lib/fontkit');
+      pdfDoc.registerFontkit(fontkit);
+      const fontBytes = await fs.readFile(path.join(__dirname, '../fonts/NotoSansTC-Regular.ttf'));
+      font = await pdfDoc.embedFont(fontBytes);
+      console.log('[DocTemplate] 載入中文字型成功');
+    } catch (e) {
+      console.warn('[DocTemplate] 中文字型載入失敗，使用 Helvetica:', e.message);
+      const { StandardFonts } = require('pdf-lib');
+      font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+    }
+
+    const pages = pdfDoc.getPages();
+    const page  = pages[0];
+    const { width, height } = page.getSize();
+    const fontSize = 10;
+    const lineH   = fontSize + 4;
+    const variables = schema.variables || [];
+
+    // ── Flatten loop variables → numbered text ──────────────────────────────
+    const flatData = { ...inputData };
+    for (const v of variables) {
+      if (v.type !== 'loop') continue;
+      const items = Array.isArray(inputData[v.key]) ? inputData[v.key] : [];
+      const children = v.children || [];
+      const vals = items.map((item, idx) => {
+        const parts = children.map(c => String(item[c.key] ?? '').trim()).filter(s => s);
+        return parts.length ? `${idx + 1}. ${parts.join(' ')}` : '';
+      }).filter(s => s);
+      flatData[v.key] = vals.join('\n');
+    }
+
+    // ── Overlay each variable's value ────────────────────────────────────────
+    for (const v of variables) {
+      const value = String(flatData[v.key] ?? '').trim();
+      if (!value) continue;
+
+      const labelKey = (v.label || '').replace(/[:：\s]/g, '').slice(0, 6);
+
+      // Find label text position in the PDF
+      let labelItem = null;
+      for (const item of textItems) {
+        const itemKey = item.text.replace(/[:：\s]/g, '');
+        if (itemKey.includes(labelKey) || labelKey.includes(itemKey)) {
+          labelItem = item;
+          break;
+        }
+      }
+
+      let valX, valY;
+      if (labelItem) {
+        // Value starts after the label text (right column of table)
+        valX = Math.min(labelItem.x + labelItem.w + 8, width * 0.65);
+        valY = labelItem.y;
+        // Ensure minimum right-column offset
+        if (valX < width * 0.2) valX = width * 0.25;
+      } else {
+        // Fallback: by variable index
+        const idx = variables.findIndex(vv => vv.key === v.key);
+        valY = height * 0.65 - idx * 30;
+        valX = width * 0.28;
+      }
+
+      const maxW = width - valX - 8;
+      const lines = value.split('\n');
+      let curY = valY;
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        page.drawText(line, { x: valX, y: curY, size: fontSize, font,
+          color: rgb(0, 0, 0), maxWidth: maxW, lineHeight: lineH });
+        // Estimate line count for long text
+        const estimatedLines = Math.ceil((line.length * fontSize * 0.6) / maxW) || 1;
+        curY -= lineH * estimatedLines;
+      }
+    }
+
+    const pdfBytes = await pdfDoc.save();
+    outPath = path.join(outDir, `${outputId}.pdf`);
+    await fs.writeFile(outPath, Buffer.from(pdfBytes));
+
   } else if (tpl.format === 'pdf' && tpl.strategy === 'pdf_form') {
     const { PDFDocument } = require('pdf-lib');
     const doc  = await PDFDocument.load(tplBuf);
