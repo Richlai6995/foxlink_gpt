@@ -240,6 +240,54 @@ function escapeXml(str) {
     .replace(/'/g, '&apos;');
 }
 
+/**
+ * Find the FIRST <w:tc> whose combined run text contains searchText,
+ * and replace its entire body content with newText (supports \n → <w:br/>).
+ * Returns { xml: newXml, found: boolean }
+ */
+function replaceTcContent(xml, searchText, newText) {
+  let found = false;
+  const newXml = xml.replace(/<w:tc\b[^>]*>[\s\S]*?<\/w:tc>/g, (tcXml) => {
+    if (found) return tcXml;
+
+    // Collect all run texts in this cell (handles run-splitting)
+    const runTexts = [];
+    const runPat = /<w:t[^>]*>([\s\S]*?)<\/w:t>/g;
+    let m;
+    while ((m = runPat.exec(tcXml)) !== null) runTexts.push(m[1]);
+
+    // Decode common XML entities for comparison
+    const cellText = runTexts.join('')
+      .replace(/&amp;/g, '&').replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'");
+
+    if (!cellText.includes(searchText)) return tcXml;
+    found = true;
+
+    // Preserve cell properties
+    const tcOpenMatch = tcXml.match(/^(<w:tc\b[^>]*>)/);
+    const tcOpen = tcOpenMatch ? tcOpenMatch[1] : '<w:tc>';
+    const tcPrMatch = tcXml.match(/(<w:tcPr>[\s\S]*?<\/w:tcPr>)/);
+    const tcPr = tcPrMatch ? tcPrMatch[1] : '';
+
+    // Preserve paragraph + run formatting from first content paragraph
+    let pPr = '', rPr = '';
+    const firstParaMatch = tcXml.match(/<w:p\b[^>]*>[\s\S]*?<\/w:p>/);
+    if (firstParaMatch) {
+      const pPrM = firstParaMatch[0].match(/<w:pPr>([\s\S]*?)<\/w:pPr>/);
+      if (pPrM) pPr = `<w:pPr>${pPrM[1]}</w:pPr>`;
+      const rPrM = firstParaMatch[0].match(/<w:rPr>([\s\S]*?)<\/w:rPr>/);
+      if (rPrM) rPr = `<w:rPr>${rPrM[1]}</w:rPr>`;
+    }
+
+    // Build replacement: one paragraph with new content + required empty trailing paragraph
+    const newPara = `<w:p>${pPr}${buildRunXml(rPr, newText)}</w:p>`;
+    const emptyPara = `<w:p>${pPr}</w:p>`;
+    return `${tcOpen}${tcPr}${newPara}${emptyPara}</w:tc>`;
+  });
+  return { xml: newXml, found };
+}
+
 async function injectDocxPlaceholders(docxBuf, variables) {
   const zip = new JSZip();
   await zip.loadAsync(docxBuf);
@@ -419,22 +467,33 @@ async function generateDocument(db, templateId, userId, inputData, outputFormat)
 
     const variables = schema.variables || [];
 
+    // ── Strip <w:tblHeader/> to prevent rows from repeating on each page ────
+    // Word's "repeat header rows" feature causes ALL marked rows to appear on
+    // every page. Remove this to keep headers on page 1 only.
+    xml = xml.replace(/<w:tblHeader\/>/g, '');
+    // Clean up any trPr that became empty after removal
+    xml = xml.replace(/<w:trPr>\s*<\/w:trPr>/g, '');
+
     // ── Simple variables (text / number / date / select) ───────────────────
     for (const v of variables) {
       if (!v.original_text || v.type === 'loop') continue;
       const val = String(inputData[v.key] ?? v.default_value ?? '');
-      // Use paragraph-level run merge + replace (same as injectDocxPlaceholders)
-      xml = xml.replace(/<w:p\b[^>]*>[\s\S]*?<\/w:p>/g, (para) =>
-        mergeRunsAndReplace(para, v.original_text, val)
-      );
+      // Try cell-level replacement first (more reliable for multi-paragraph cells)
+      const { xml: x1, found } = replaceTcContent(xml, v.original_text, val);
+      if (found) {
+        xml = x1;
+      } else {
+        // Fallback: paragraph-level run merge + replace
+        xml = xml.replace(/<w:p\b[^>]*>[\s\S]*?<\/w:p>/g, (para) =>
+          mergeRunsAndReplace(para, v.original_text, val)
+        );
+      }
     }
 
     // ── Loop variables ──────────────────────────────────────────────────────
     // Strategy:
-    //   1. If ALL children's original_text appear in the SAME <w:tr>
-    //      → true repeating table row → duplicate row for each item.
-    //   2. Otherwise → flatten items to multi-line text replacement per child.
-    //      (Handles meeting-minutes style: loop items in single text cells)
+    //   1. ALL children's original_text in the SAME <w:tr> → row duplication
+    //   2. Otherwise → replace each child's entire cell with numbered list text
     for (const v of variables) {
       if (v.type !== 'loop') continue;
       const items = Array.isArray(inputData[v.key]) ? inputData[v.key] : [];
@@ -448,7 +507,6 @@ async function generateDocument(db, templateId, userId, inputData, outputFormat)
       const trPattern = new RegExp(`<w:tr\\b[^>]*>[\\s\\S]*?${escapedText}[\\s\\S]*?<\\/w:tr>`);
       const trMatch = xml.match(trPattern);
 
-      // Check if ALL children with original_text are within the same <w:tr>
       const isRepeatingRow = trMatch && children
         .filter(c => c.original_text)
         .every(c => trMatch[0].includes(c.original_text));
@@ -468,8 +526,9 @@ async function generateDocument(db, templateId, userId, inputData, outputFormat)
         });
         xml = xml.replace(templateRow, newRows.join(''));
       } else {
-        // ── Flat text replacement: join all items per child with newlines ──
-        // This handles single-cell multi-item content (e.g. meeting content)
+        // ── Flat: replace entire cell content per child ───────────────────
+        // Each child gets its cell's content replaced with all items' values
+        // joined as a numbered list (with Word line-breaks for multi-line)
         for (const c of children) {
           if (!c.original_text) continue;
           const vals = items
@@ -478,10 +537,17 @@ async function generateDocument(db, templateId, userId, inputData, outputFormat)
               return val ? `${idx + 1}. ${val}` : '';
             })
             .filter(s => s);
-          const joinedVal = vals.join('\n');
-          xml = xml.replace(/<w:p\b[^>]*>[\s\S]*?<\/w:p>/g, (para) =>
-            mergeRunsAndReplace(para, c.original_text, joinedVal)
-          );
+          const newText = vals.join('\n');
+          // Cell-level replacement (replaces all paragraphs in the matching cell)
+          const { xml: newXml, found } = replaceTcContent(xml, c.original_text, newText);
+          if (found) {
+            xml = newXml;
+          } else {
+            // Fallback: paragraph-level
+            xml = xml.replace(/<w:p\b[^>]*>[\s\S]*?<\/w:p>/g, (para) =>
+              mergeRunsAndReplace(para, c.original_text, newText)
+            );
+          }
         }
       }
     }
