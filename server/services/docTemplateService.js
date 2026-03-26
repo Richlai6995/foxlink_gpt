@@ -513,58 +513,71 @@ async function listTemplates(db, user, { search, format, tag } = {}) {
   const div    = user.org_section || '';
   const og     = user.org_group || '';
 
+  // Oracle: SELECT DISTINCT with CLOB columns is not supported (ORA-00932).
+  // Enumerate all columns explicitly and use WHERE EXISTS instead of DISTINCT.
+  const uid = String(userId);
+
+  // Grantee match for CASE (access_level check) — param suffix A
+  const granteeA = `(
+      (s.grantee_type='user'        AND s.grantee_id=:uidA) OR
+      (s.grantee_type='role'        AND s.grantee_id=:roleA) OR
+      (s.grantee_type='department'  AND s.grantee_id=:deptA) OR
+      (s.grantee_type='cost_center' AND s.grantee_id=:ccA) OR
+      (s.grantee_type='division'    AND s.grantee_id=:divA) OR
+      (s.grantee_type='org_group'   AND s.grantee_id=:ogA)
+    )`;
+
+  // Grantee match for WHERE EXISTS — param suffix B
+  const granteeB = `(
+      (s2.grantee_type='user'        AND s2.grantee_id=:uidB) OR
+      (s2.grantee_type='role'        AND s2.grantee_id=:roleB) OR
+      (s2.grantee_type='department'  AND s2.grantee_id=:deptB) OR
+      (s2.grantee_type='cost_center' AND s2.grantee_id=:ccB) OR
+      (s2.grantee_type='division'    AND s2.grantee_id=:divB) OR
+      (s2.grantee_type='org_group'   AND s2.grantee_id=:ogB)
+    )`;
+
   let sql = `
-    SELECT DISTINCT t.*,
+    SELECT t.id, t.creator_id, t.name, t.description, t.format, t.strategy,
+           t.template_file, t.original_file, t.schema_json, t.preview_url,
+           t.is_public, t.tags, t.use_count, t.forked_from, t.created_at, t.updated_at,
       CASE
-        WHEN t.creator_id = :userId THEN 'owner'
+        WHEN t.creator_id = :uid THEN 'owner'
         WHEN EXISTS (
           SELECT 1 FROM doc_template_shares s
-          WHERE s.template_id = t.id AND s.share_type = 'edit'
-            AND (
-              (s.grantee_type='user'        AND s.grantee_id=:userId2) OR
-              (s.grantee_type='role'        AND s.grantee_id=:roleId) OR
-              (s.grantee_type='department'  AND s.grantee_id=:dept) OR
-              (s.grantee_type='cost_center' AND s.grantee_id=:cc) OR
-              (s.grantee_type='division'    AND s.grantee_id=:div) OR
-              (s.grantee_type='org_group'   AND s.grantee_id=:og)
-            )
+          WHERE s.template_id = t.id AND s.share_type = 'edit' AND ${granteeA}
         ) THEN 'edit'
         ELSE 'use'
       END AS access_level
     FROM doc_templates t
     WHERE (
-      t.creator_id = :userId3
+      t.creator_id = :uid2
       OR t.is_public = 1
       OR EXISTS (
         SELECT 1 FROM doc_template_shares s2
-        WHERE s2.template_id = t.id
-          AND (
-            (s2.grantee_type='user'        AND s2.grantee_id=:userId4) OR
-            (s2.grantee_type='role'        AND s2.grantee_id=:roleId2) OR
-            (s2.grantee_type='department'  AND s2.grantee_id=:dept2) OR
-            (s2.grantee_type='cost_center' AND s2.grantee_id=:cc2) OR
-            (s2.grantee_type='division'    AND s2.grantee_id=:div2) OR
-            (s2.grantee_type='org_group'   AND s2.grantee_id=:og2)
-          )
+        WHERE s2.template_id = t.id AND ${granteeB}
       )
     )
   `;
 
   const binds = {
-    userId: String(userId), userId2: String(userId), userId3: String(userId), userId4: String(userId),
-    roleId, roleId2: roleId,
-    dept, dept2: dept,
-    cc, cc2: cc,
-    div, div2: div,
-    og, og2: og,
+    uid, uid2: uid,
+    uidA: uid, roleA: roleId, deptA: dept, ccA: cc, divA: div, ogA: og,
+    uidB: uid, roleB: roleId, deptB: dept, ccB: cc, divB: div, ogB: og,
   };
 
   if (format) { sql += ' AND t.format = :format'; binds.format = format; }
-  if (search) { sql += ' AND (UPPER(t.name) LIKE :search OR UPPER(t.description) LIKE :search2)'; binds.search = `%${search.toUpperCase()}%`; binds.search2 = `%${search.toUpperCase()}%`; }
+  if (search) {
+    sql += ' AND (UPPER(t.name) LIKE :search OR UPPER(t.description) LIKE :search2)';
+    binds.search = `%${search.toUpperCase()}%`;
+    binds.search2 = `%${search.toUpperCase()}%`;
+  }
 
   sql += ' ORDER BY t.updated_at DESC';
 
+  console.log('[DocTemplate] listTemplates uid=', uid, 'format=', format || '-', 'search=', search || '-');
   let rows = await db.prepare(sql).all(binds);
+  console.log('[DocTemplate] listTemplates 回傳', rows.length, '筆');
 
   // Tag filter (client-side since tags is JSON array)
   if (tag) {

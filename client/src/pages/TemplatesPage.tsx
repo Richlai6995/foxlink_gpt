@@ -113,16 +113,20 @@ export default function TemplatesPage() {
   const [format, setFormat] = useState('')
   const [showWizard, setShowWizard] = useState(false)
   const [editTarget, setEditTarget] = useState<DocTemplate | null>(null)
+  const [fetchError, setFetchError] = useState('')
 
   const fetch = useCallback(async () => {
     setLoading(true)
+    setFetchError('')
     try {
       const params = new URLSearchParams()
       if (search) params.set('search', search)
       if (format) params.set('format', format)
       const { data } = await api.get(`/doc-templates?${params}`)
       setTemplates(data)
-    } catch { /* ignore */ } finally {
+    } catch (e: any) {
+      setFetchError(e.response?.data?.error || e.message || '載入失敗')
+    } finally {
       setLoading(false)
     }
   }, [search, format])
@@ -193,10 +197,17 @@ export default function TemplatesPage() {
         </button>
       </div>
 
+      {/* Fetch error */}
+      {fetchError && (
+        <div className="mb-4 bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-600">
+          載入錯誤：{fetchError}
+        </div>
+      )}
+
       {/* Content */}
       {loading ? (
         <div className="text-sm text-slate-400 text-center py-12">載入中...</div>
-      ) : templates.length === 0 ? (
+      ) : fetchError ? null : templates.length === 0 ? (
         <div className="text-center py-16 text-slate-400">
           <div className="text-4xl mb-3">📄</div>
           <div className="text-sm">尚無範本，點擊「新增範本」上傳第一份文件</div>
