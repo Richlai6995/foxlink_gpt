@@ -3996,21 +3996,109 @@ kubectl rollout restart deployment foxlink-gpt -n foxlink`}</CodeBlock>
 
       <Section id="a-k8s" icon={<Server size={22} />} iconColor="text-violet-500" title="K8s 部署更新">
         <Para>
-          FOXLINK GPT 在 Kubernetes 環境以 4 個 replica 部署，採用 flgptm01:5000 作為內部 Local Registry。
-          設定完成後每次更版只需一行指令，約 1 分鐘，零停機 Rolling Update。
+          FOXLINK GPT 以 Kubernetes 部署，基本 4 replica（HPA 可自動擴至 8），採用 flgptm01:5000 內部 HTTP Registry。
+          設定完成後每次更版執行 <code className="bg-slate-100 px-1 rounded text-xs">./deploy.sh</code> 即可，約 1 分鐘零停機完成。
         </Para>
 
-        <SubSection title="環境架構">
+        <SubSection title="K8s 節點架構">
           <Table
             headers={['節點', 'IP', '角色']}
             rows={[
-              ['flgptm01', '10.8.93.11', 'Control Plane（kubectl / docker build / registry:5000）'],
+              ['flgptm01', '10.8.93.11', 'Control Plane — kubectl / docker build / Local Registry:5000'],
               ['flgptn01', '10.8.93.12', 'Worker'],
               ['flgptn02', '10.8.93.13', 'Worker + Ingress（flgpt.foxlink.com.tw:8443）'],
               ['flgptn03', '10.8.93.14', 'Worker'],
             ]}
           />
-          <NoteBox>Worker node 只有 containerd，沒有 docker CLI。Registry 為 HTTP（非 HTTPS），需各節點個別設定。</NoteBox>
+          <NoteBox>Worker node 只有 containerd，沒有 docker CLI。Registry 為 HTTP（非 HTTPS），需各節點個別設定 insecure registry。</NoteBox>
+        </SubSection>
+
+        <SubSection title="K8s 資源清單">
+          <Table
+            headers={['資源', '名稱 / 規格', '用途']}
+            rows={[
+              ['Namespace', 'foxlink', '所有資源的命名空間'],
+              ['ServiceAccount + ClusterRole', 'foxlink-gpt-monitor', 'Pod 讀取 K8s API（監控用）— get/list/watch nodes/pods/events/logs'],
+              ['Deployment', 'foxlink-gpt × 4 replica', '主應用程式'],
+              ['Service (ClusterIP)', 'foxlink-gpt:3007', '叢集內部路由'],
+              ['Deployment', 'redis × 1 replica', 'Session Token 共享 Store（multi-replica 必要）'],
+              ['Service (ClusterIP)', 'redis:6379', 'Redis 內部路由'],
+              ['Ingress (nginx)', 'foxlink-gpt', 'flgpt.foxlink.com.tw:8443 → Service:3007'],
+              ['HorizontalPodAutoscaler', 'foxlink-gpt-hpa', 'CPU≥70% 或 Memory≥80% 時自動擴至最多 8 pod'],
+              ['PVC (NFS)', 'pvc-flgpt-upload (500Gi)', '使用者上傳、生成檔案、KB 索引（ReadWriteMany）'],
+              ['PVC (NFS)', 'pvc-flgpt-source (共用)', 'skill_runners / fonts / oracle_client（NFS subPath 分隔）'],
+            ]}
+          />
+        </SubSection>
+
+        <SubSection title="Container 規格">
+          <Table
+            headers={['項目', '設定值', '說明']}
+            rows={[
+              ['Image', '10.8.93.11:5000/foxlink-gpt:latest', 'imagePullPolicy: Always'],
+              ['Port', '3007', ''],
+              ['Memory Request / Limit', '768 Mi / 2 Gi', ''],
+              ['CPU Request / Limit', '500 m / 2000 m', ''],
+              ['NODE_OPTIONS', '--max-old-space-size=1536', 'Node.js heap 上限 1.5 GB'],
+              ['TZ', 'Asia/Taipei', '確保排程時間、Log 時間正確'],
+              ['ORACLE_HOME / LD_LIBRARY_PATH', '/opt/oracle/instantclient', '從 pvc-flgpt-source subPath: oracle_client 掛載'],
+              ['InitContainer', 'wait-for-redis', 'Pod 啟動前先等 Redis 就緒（redis-cli ping）'],
+              ['Liveness Probe', 'GET /api/health，delay 30s，period 10s', '失敗 3 次重啟 pod'],
+              ['Readiness Probe', 'GET /api/health，delay 10s，period 5s', '失敗 2 次從 Service 移除'],
+              ['Graceful Shutdown', 'preStop sleep 15s + terminationGracePeriod 60s', '確保進行中的 SSE streaming 有時間完成'],
+            ]}
+          />
+        </SubSection>
+
+        <SubSection title="NFS PVC subPath 目錄結構">
+          <Para>兩個 PVC 透過 <code className="bg-slate-100 px-1 rounded text-xs">subPath</code> 在 pod 內掛載到不同路徑：</Para>
+          <CodeBlock>{`pvc-flgpt-upload（NAS /volume1/foxlink-gpt/uploads）
+  └── 掛載到 /app/uploads（用戶上傳、generated/、kb/ 索引）
+
+pvc-flgpt-source（NAS /volume1/foxlink-gpt/source）
+  ├── subPath: skill_runners  → /app/skill_runners（Code Runner 腳本）
+  ├── subPath: fonts          → /app/fonts（CJK PDF 字型 NotoSansTC）
+  └── subPath: oracle_client  → /opt/oracle/instantclient（Oracle 23 Instant Client）`}</CodeBlock>
+          <NoteBox>nfs-pvc.yaml 中 NAS IP 與路徑為 TODO 佔位符，部署前需填入實際 Synology NAS IP（192.168.x.x）和共用資料夾路徑。</NoteBox>
+        </SubSection>
+
+        <SubSection title="Redis 部署">
+          <Para>
+            <code className="bg-slate-100 px-1 rounded text-xs">k8s/redis.yaml</code> 部署 redis:7-alpine，
+            以 <code className="bg-slate-100 px-1 rounded text-xs">--save ""</code> 關閉持久化（純記憶體），
+            Memory 限制 512 Mi。redis 重啟後所有 Session Token 失效，用戶需重新登入（正常維護行為）。
+          </Para>
+          <TipBox>若需要 Redis 持久化（重啟不登出），可在 args 改為 <code className="bg-blue-50 px-1 rounded text-xs">["--save", "60", "1"]</code> 並掛載 PVC。目前維持無狀態設計以簡化運維。</TipBox>
+        </SubSection>
+
+        <SubSection title="HPA 自動擴縮">
+          <Table
+            headers={['參數', '值', '說明']}
+            rows={[
+              ['minReplicas', '4', '最少保持 4 個 pod'],
+              ['maxReplicas', '8', '最多擴至 8 個 pod'],
+              ['CPU 觸發', 'averageUtilization ≥ 70%', '超過時自動新增 pod'],
+              ['Memory 觸發', 'averageUtilization ≥ 80%', '超過時自動新增 pod'],
+              ['縮容穩定視窗', '300 秒', '避免快速縮放震盪'],
+              ['縮容速率', '每 60 秒最多減少 1 pod', ''],
+            ]}
+          />
+          <Para>需安裝 Metrics Server 才能讓 HPA 運作：<code className="bg-slate-100 px-1 rounded text-xs">kubectl apply -f k8s/hpa.yaml</code></Para>
+        </SubSection>
+
+        <SubSection title="Ingress 重要設定">
+          <Table
+            headers={['Annotation', '值', '用途']}
+            rows={[
+              ['proxy-buffering', 'off', 'SSE streaming（AI 逐字輸出）必要，關閉 nginx buffer'],
+              ['proxy-read-timeout / proxy-send-timeout', '3600s', '深度研究、長篇生成不逾時'],
+              ['proxy-http-version', '1.1', 'SSE keepalive 需要 HTTP/1.1'],
+              ['proxy-body-size', '160m', '音訊（50 MB）/ PDF 大檔上傳上限'],
+              ['upstream-keepalive-connections', '100', '長連線複用，減少 TCP 握手開銷'],
+              ['limit-connections', '50', '每個 IP 最多 50 個同時連線（防濫用）'],
+            ]}
+          />
+          <NoteBox>ingress.yaml 中 host 為 `foxlink-gpt.example.com`（TODO），部署前需改為實際域名，並視需求啟用 TLS 區段。</NoteBox>
         </SubSection>
 
         <SubSection title="一次性初始設定（新環境必做）">
@@ -4054,22 +4142,64 @@ EOF
 done`}</CodeBlock>
 
           <div className="space-y-3 my-3">
-            <StepItem num={5} title="Build 並 Push 初始 image，套用 deployment" />
+            <StepItem num={5} title="填寫 TODO 項目" desc="部署前必須修改以下佔位符" />
+          </div>
+          <Table
+            headers={['檔案', 'TODO 項目']}
+            rows={[
+              ['k8s/nfs-pvc.yaml', 'NAS IP（192.168.x.x）、NFS 共用資料夾路徑'],
+              ['k8s/ingress.yaml', '實際域名（foxlink-gpt.example.com → 實際）、TLS 憑證'],
+              ['k8s/uptime-kuma.yaml', '監控用域名'],
+              ['k8s/loki-stack.yaml', 'Log 查詢域名、Grafana admin 密碼'],
+            ]}
+          />
+
+          <div className="space-y-3 my-3">
+            <StepItem num={6} title="按順序套用 K8s manifest" desc="依賴關係：PVC → Redis → Deployment → Ingress → HPA" />
           </div>
           <CodeBlock>{`cd ~/foxlink_gpt
-docker build -t 10.8.93.11:5000/foxlink-gpt:latest .
-docker push 10.8.93.11:5000/foxlink-gpt:latest
-curl http://10.8.93.11:5000/v2/foxlink-gpt/tags/list
+
+# Step 6-1: 儲存層（NFS PVC）
+kubectl apply -f k8s/nfs-pvc.yaml
+
+# Step 6-2: Redis（Session store，Deployment 的 InitContainer 需要它就緒）
+kubectl apply -f k8s/redis.yaml
+
+# Step 6-3: 主應用（含 RBAC + Deployment + Service）
+kubectl create namespace foxlink --dry-run=client -o yaml | kubectl apply -f -
+kubectl create secret generic foxlink-secrets --from-env-file=server/.env -n foxlink
 kubectl apply -f k8s/deployment.yaml
-kubectl rollout status deployment/foxlink-gpt -n foxlink`}</CodeBlock>
-          <TipBox>設定完成後，之後每次更版只需執行 Step 6。</TipBox>
+
+# Step 6-4: 對外流量
+kubectl apply -f k8s/ingress.yaml
+
+# Step 6-5: 自動擴縮（需先安裝 Metrics Server）
+kubectl apply -f k8s/hpa.yaml
+
+# Step 6-6: 監控（選配）
+kubectl apply -f k8s/uptime-kuma.yaml
+kubectl apply -f k8s/loki-stack.yaml`}</CodeBlock>
+          <TipBox>設定完成後，之後每次更版只需執行 deploy.sh（見下方）。</TipBox>
         </SubSection>
 
-        <SubSection title="日常程式更版（設定完成後）">
+        <SubSection title="日常程式更版（deploy.sh）">
           <CodeBlock>{`ssh fldba@10.8.93.11
-cd ~/foxlink_gpt && git pull && ./deploy.sh`}</CodeBlock>
-          <Para>deploy.sh 自動執行：docker build → push 到 registry → kubectl rollout restart → 等待完成。</Para>
-          <TipBox>Rolling Update 策略：maxUnavailable=0，永遠保持 4 個 pod 可用，更新期間 user 不受影響。看到 "successfully rolled out" 即完成。</TipBox>
+cd ~/foxlink_gpt && git pull
+
+# 更版到 latest
+./deploy.sh
+
+# 或發行指定版本 tag
+./deploy.sh v1.2.3`}</CodeBlock>
+          <Para>deploy.sh 自動依序執行：</Para>
+          <div className="pl-2 space-y-1 text-sm text-slate-600 mt-2">
+            <p>① docker build → push 到 registry（若指定 tag 同時也 tag 為 latest）</p>
+            <p>② <strong>kubectl delete + create secret foxlink-secrets</strong>（從 server/.env 同步最新設定）</p>
+            <p>③ kubectl apply -f k8s/deployment.yaml（套用 manifest 變更）</p>
+            <p>④ kubectl rollout restart → rollout status（等待 Rolling Update 完成）</p>
+          </div>
+          <NoteBox>每次更版都會重新同步 Secret，因此只需修改 server/.env 再執行 deploy.sh 即可更新環境變數，不需要手動 kubectl。</NoteBox>
+          <TipBox>Rolling Update 策略：maxUnavailable=0，更新期間永遠保持 4 個 pod 可用。看到 "successfully rolled out" 即完成。</TipBox>
         </SubSection>
 
         <SubSection title="常用 kubectl 指令">
@@ -4077,11 +4207,16 @@ cd ~/foxlink_gpt && git pull && ./deploy.sh`}</CodeBlock>
             headers={['指令', '用途']}
             rows={[
               ['kubectl get pods -n foxlink -o wide', '查看所有 pod 狀態與所在 node'],
-              ['kubectl logs -n foxlink <pod-name> --tail=30', '查看 pod 最新日誌'],
-              ['kubectl describe pod <pod-name> -n foxlink | tail -20', '查看 pod 異常事件'],
-              ['kubectl get nodes -o wide', '查看所有 node 的 IP'],
+              ['kubectl logs -n foxlink <pod-name> --tail=50 -f', '即時追蹤 pod 日誌'],
+              ['kubectl logs -n foxlink -l app=foxlink-gpt --tail=30', '所有 pod 合併日誌（省略 pod name）'],
+              ['kubectl describe pod <pod-name> -n foxlink | tail -20', '查看 pod 異常事件（ErrImagePull / OOMKilled 等）'],
+              ['kubectl get hpa -n foxlink', '查看 HPA 當前擴縮狀態'],
+              ['kubectl get pvc -n foxlink', '確認 PVC 是否 Bound'],
+              ['kubectl get nodes -o wide', '查看所有 node IP 與狀態'],
               ['kubectl rollout history deployment/foxlink-gpt -n foxlink', '查看歷次 rollout 記錄'],
+              ['kubectl rollout undo deployment/foxlink-gpt -n foxlink', '回滾到上一個版本'],
               ['curl http://10.8.93.11:5000/v2/foxlink-gpt/tags/list', '查看 registry 中的 image tags'],
+              ['kubectl exec -n foxlink <pod> -- /bin/sh', '進入 pod shell 除錯'],
             ]}
           />
         </SubSection>
@@ -4094,15 +4229,28 @@ cd ~/foxlink_gpt && git pull && ./deploy.sh`}</CodeBlock>
               ['http: server gave HTTP response to HTTPS client（pod ErrImagePull）', 'Worker containerd 未設定 hosts.toml', '執行初始設定 Step 4'],
               ['sudo: a terminal is required', 'Worker fldba 未設定免密碼 sudo', '執行初始設定 Step 1'],
               ['NAME_UNKNOWN: repository name not known', 'Image 未 push 到 registry', '執行 docker push 後再 rollout'],
+              ['OOMKilled', 'Pod 超出 memory limit 2Gi', '排查大型 AI 回應 / KB 索引，或暫時提高 limits'],
+              ['pod has unbound PVC', 'NFS PVC 未 Bound', '確認 NAS IP 和路徑正確，NFS server 可達'],
             ]}
           />
         </SubSection>
 
-        <SubSection title="K8s 環境的 Skill Runner 注意事項">
-          <Para>
-            目前 skill_runners 目錄已掛載於 NFS PVC（pvc-flgpt-source），pod 重啟後應保留。
-            若 skill 仍失效，手動復原：後台 → 技能管理 → 找到 Code Runner 技能 → 點「儲存代碼」。
-          </Para>
+        <SubSection title="K8s 環境特殊注意事項">
+          <Para>以下項目與本機開發環境不同，部署後需確認：</Para>
+          <Table
+            headers={['項目', '本機開發', 'K8s 環境']}
+            rows={[
+              ['Oracle Client', 'ORACLE_HOME 本機路徑', '從 pvc-flgpt-source subPath: oracle_client 掛載到 /opt/oracle/instantclient'],
+              ['字型（CJK PDF）', 'server/fonts/ 本機目錄', '從 pvc-flgpt-source subPath: fonts 掛載到 /app/fonts'],
+              ['Skill Runners', '本機 server/skill_runners/', '從 pvc-flgpt-source subPath: skill_runners 掛載到 /app/skill_runners；pod 重啟後保留'],
+              ['Session Store', 'In-memory Map（單程序）', 'Redis Service redis:6379（多 replica 共享）'],
+              ['環境變數', 'server/.env 直接讀取', 'K8s Secret foxlink-secrets（由 deploy.sh 自動同步）'],
+              ['上傳檔案', './uploads 本機目錄', 'PVC pvc-flgpt-upload 掛載到 /app/uploads（NFS 持久化）'],
+            ]}
+          />
+          <NoteBox>
+            Skill Runner 若仍失效，手動復原：後台 → 技能管理 → 找到 Code Runner 技能 → 點「儲存代碼」（重新寫入 NFS PVC）。
+          </NoteBox>
         </SubSection>
       </Section>
 
