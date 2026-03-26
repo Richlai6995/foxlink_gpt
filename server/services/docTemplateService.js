@@ -184,6 +184,21 @@ ${text.slice(0, 8000)}
  * Merge split runs in a paragraph XML and replace original_text with {{key}}.
  * Simple approach: flatten runs into text, do string replacement, rebuild XML.
  */
+/**
+ * Build a Word XML run (or runs) for a text value.
+ * Handles \n by inserting <w:br/> line-break runs between lines.
+ */
+function buildRunXml(rPr, text) {
+  const lines = text.split('\n');
+  if (lines.length === 1) {
+    return `<w:r>${rPr}<w:t xml:space="preserve">${escapeXml(text)}</w:t></w:r>`;
+  }
+  return lines.map((line, i) => {
+    const t = `<w:r>${rPr}<w:t xml:space="preserve">${escapeXml(line)}</w:t></w:r>`;
+    return i === 0 ? t : `<w:r><w:br/></w:r>${t}`;
+  }).join('');
+}
+
 function mergeRunsAndReplace(paraXml, original, replacement) {
   // Extract all run texts in order, track run boundaries
   const runPattern = /<w:r\b[^>]*>(?:<w:rPr>[\s\S]*?<\/w:rPr>)?<w:t[^>]*>([\s\S]*?)<\/w:t><\/w:r>/g;
@@ -199,21 +214,19 @@ function mergeRunsAndReplace(paraXml, original, replacement) {
   // Build new combined text with replacement
   const newCombined = combined.replaceAll(original, replacement);
 
-  // Replace all runs with a single run carrying first run's rPr + new text
   if (runs.length === 0) return paraXml;
 
   const firstRun = runs[0].full;
   const rPrMatch = firstRun.match(/<w:rPr>[\s\S]*?<\/w:rPr>/);
   const rPr = rPrMatch ? rPrMatch[0] : '';
-  const newRun = `<w:r>${rPr}<w:t xml:space="preserve">${escapeXml(newCombined)}</w:t></w:r>`;
+  // Support \n → <w:br/> line breaks
+  const newRun = buildRunXml(rPr, newCombined);
 
   // Remove all matched runs from the paragraph and insert the new one
   let result = paraXml;
-  // Remove in reverse order to preserve indices
   for (let i = runs.length - 1; i >= 0; i--) {
     result = result.slice(0, runs[i].index) + result.slice(runs[i].index + runs[i].full.length);
   }
-  // Insert newRun before </w:p>
   result = result.replace('</w:p>', newRun + '</w:p>');
   return result;
 }
@@ -416,39 +429,61 @@ async function generateDocument(db, templateId, userId, inputData, outputFormat)
       );
     }
 
-    // ── Loop variables (table rows) ─────────────────────────────────────────
+    // ── Loop variables ──────────────────────────────────────────────────────
+    // Strategy:
+    //   1. If ALL children's original_text appear in the SAME <w:tr>
+    //      → true repeating table row → duplicate row for each item.
+    //   2. Otherwise → flatten items to multi-line text replacement per child.
+    //      (Handles meeting-minutes style: loop items in single text cells)
     for (const v of variables) {
       if (v.type !== 'loop') continue;
       const items = Array.isArray(inputData[v.key]) ? inputData[v.key] : [];
       const children = v.children || [];
       if (!children.length || !items.length) continue;
 
-      // Find the <w:tr> that contains any child's original_text
       const firstChild = children.find(c => c.original_text);
       if (!firstChild) continue;
 
-      // Escape for regex
       const escapedText = firstChild.original_text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       const trPattern = new RegExp(`<w:tr\\b[^>]*>[\\s\\S]*?${escapedText}[\\s\\S]*?<\\/w:tr>`);
       const trMatch = xml.match(trPattern);
-      if (!trMatch) continue;
 
-      const templateRow = trMatch[0];
+      // Check if ALL children with original_text are within the same <w:tr>
+      const isRepeatingRow = trMatch && children
+        .filter(c => c.original_text)
+        .every(c => trMatch[0].includes(c.original_text));
 
-      // Build replacement rows
-      const newRows = items.map(item => {
-        let row = templateRow;
+      if (isRepeatingRow) {
+        // ── True repeating table row ──────────────────────────────────────
+        const templateRow = trMatch[0];
+        const newRows = items.map(item => {
+          let row = templateRow;
+          for (const c of children) {
+            if (!c.original_text) continue;
+            row = row.replace(/<w:p\b[^>]*>[\s\S]*?<\/w:p>/g, (para) =>
+              mergeRunsAndReplace(para, c.original_text, String(item[c.key] ?? ''))
+            );
+          }
+          return row;
+        });
+        xml = xml.replace(templateRow, newRows.join(''));
+      } else {
+        // ── Flat text replacement: join all items per child with newlines ──
+        // This handles single-cell multi-item content (e.g. meeting content)
         for (const c of children) {
           if (!c.original_text) continue;
-          const cellVal = String(item[c.key] ?? '');
-          row = row.replace(/<w:p\b[^>]*>[\s\S]*?<\/w:p>/g, (para) =>
-            mergeRunsAndReplace(para, c.original_text, cellVal)
+          const vals = items
+            .map((item, idx) => {
+              const val = String(item[c.key] ?? '').trim();
+              return val ? `${idx + 1}. ${val}` : '';
+            })
+            .filter(s => s);
+          const joinedVal = vals.join('\n');
+          xml = xml.replace(/<w:p\b[^>]*>[\s\S]*?<\/w:p>/g, (para) =>
+            mergeRunsAndReplace(para, c.original_text, joinedVal)
           );
         }
-        return row;
-      });
-
-      xml = xml.replace(templateRow, newRows.join(''));
+      }
     }
 
     zip.file('word/document.xml', xml);
