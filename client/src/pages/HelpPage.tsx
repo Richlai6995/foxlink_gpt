@@ -7,6 +7,7 @@ import {
   ChevronRight, Info, Lightbulb, Terminal, Globe, RefreshCw,
   Wand2, ImageIcon, Clock, Share2, GitFork, Lock, Sparkles, Code2, Package, Play, Square,
   Paperclip, Search, Server, BookMarked, Wifi, WifiOff, CheckCircle, Loader2, Layers, Activity,
+  Key, ShieldCheck,
 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 
@@ -148,6 +149,7 @@ const userSections = [
   { id: 'u-ai-bi-chart', label: '即時圖表建構器', icon: <BarChart3 size={18} /> },
   { id: 'u-ai-bi-shelf', label: 'Tableau 拖拉式設計器', icon: <Layers size={18} /> },
   { id: 'u-ai-bi-dashboard', label: '儀表板 Dashboard', icon: <Share2 size={18} /> },
+  { id: 'u-ai-bi-schema', label: 'Schema 與多資料庫來源', icon: <Database size={18} /> },
 ]
 
 function UserManual() {
@@ -2340,6 +2342,152 @@ function UserManual() {
           </NoteBox>
         </SubSection>
       </Section>
+
+      {/* ═══════════════════════════════════════════════════ Schema 與多資料庫來源 */}
+
+      <Section id="u-ai-bi-schema" icon={<Database size={22} />} iconColor="text-cyan-600" title="Schema 與多資料庫來源">
+        <Para>
+          AI 戰情室的自然語言查詢能力，建立在<strong>多資料庫來源（DB Sources）</strong>與
+          <strong> Schema 知識庫</strong>的設計上。設計者（具備「開發 AI 戰情室」權限的帳號）
+          可以為不同的資料庫連線建立 Schema，讓 AI 知道哪些資料表可查、有哪些欄位、欄位代表什麼業務意義，
+          從而生成精準的 SQL。系統支援 <strong>Oracle、MySQL、MSSQL</strong> 三種資料庫，
+          且同一個查詢專案中可同時引用來自不同資料庫的多個 Schema，實現跨庫查詢。
+        </Para>
+
+        <SubSection title="整體架構概覽">
+          <Table
+            headers={['層次', '名稱', '說明']}
+            rows={[
+              ['1', '外部資料來源（DB Source）', '系統管理員在後台設定的 Oracle/MySQL/MSSQL 連線，含 Host/Port/帳密/連線池'],
+              ['2', '戰情專案（Project）', '設計者建立的邏輯分組，一個專案包含多個 Schema + Topic + Design'],
+              ['3', 'Schema 知識庫', '對應到 DB Source 中某個資料表/視圖/子查詢，並說明各欄位業務意義'],
+              ['4', 'Join 定義', '說明 Schema 間的 JOIN 關係，輔助 AI 生成跨表 SQL'],
+              ['5', '主題 / 查詢任務（Topic / Design）', '終端使用者看到的查詢分類與具體任務，引用一或多個 Schema'],
+            ]}
+          />
+          <TipBox>
+            每個 Schema 各自指定一個 DB Source，因此同一專案的不同 Schema 可以分別來自
+            Oracle ERP 主機、MySQL 分析資料庫、MSSQL 報表庫等不同系統，AI 生成 SQL 時會路由到正確的資料庫執行。
+          </TipBox>
+        </SubSection>
+
+        <SubSection title="Step 1：設定外部資料來源（DB Source）">
+          <Para>
+            進入後台管理 → 「AI 戰情室 — 外部資料來源」頁籤（系統管理員才能看到）。點擊「+ 新增來源」，填入以下欄位：
+          </Para>
+          <Table
+            headers={['欄位', '說明', '範例']}
+            rows={[
+              ['名稱', '此連線的識別用標籤', 'ERP Oracle 主機、MySQL 分析庫'],
+              ['資料庫類型', 'Oracle / MySQL / MSSQL', 'oracle'],
+              ['Host', '資料庫伺服器 IP 或網域', '192.168.10.10'],
+              ['Port', 'Oracle=1521，MySQL=3306，MSSQL=1433', '1521'],
+              ['Service Name（Oracle）', 'Oracle Service Name / SID', 'ORCL'],
+              ['Database Name（MySQL/MSSQL）', '目標資料庫名稱', 'erp_db'],
+              ['帳號 / 密碼', '查詢帳號（建議使用唯讀帳號）', 'apps / ••••••'],
+              ['Pool Min / Max', '連線池大小，依查詢頻率調整', '1 / 5'],
+              ['狀態', '啟用或停用此連線', '啟用'],
+            ]}
+          />
+          <Para>儲存後，可點擊每個來源的 <strong>Wifi 圖示</strong>測試連線（Ping），確認連線成功後才能在 Schema 中使用。</Para>
+          <NoteBox>
+            連線測試會實際執行 SELECT 1 驗證到達目標資料庫的網路與帳密是否正確。
+            若顯示「連線失敗」，請確認防火牆已開放對應 Port 及帳號權限。
+          </NoteBox>
+        </SubSection>
+
+        <SubSection title="Step 2：在設計者介面建立 Schema">
+          <Para>
+            具備「開發 AI 戰情室」權限的帳號，在 AI 戰情室底部點擊「⊞ 設計者模式」進入設計面板，
+            選擇目標<strong>專案</strong>後，點擊「Schema 知識庫」頁籤，即可新增 Schema。
+          </Para>
+          <Table
+            headers={['欄位', '說明']}
+            rows={[
+              ['資料表/視圖名稱', '格式為 OWNER.TABLE_NAME（如 APPS.WO_ABNORMAL_V）或純表名（如 WO_ABNORMAL_V）'],
+              ['顯示名稱（中/英/越）', 'AI 提示詞與介面顯示用的友善名稱，儲存後自動翻譯英文/越文'],
+              ['別名（alias）', 'SQL 中引用此 Schema 的短代號，如 wo_abnormal，需為小寫英數字'],
+              ['來源類型', 'Table（實體表）/ View（視圖）/ SQL（自訂子查詢，可做複雜預處理）'],
+              ['資料來源（DB Source）', '從已設定的 DB Sources 選擇此 Schema 對應哪個資料庫連線'],
+              ['業務說明（business_notes）', '告訴 AI 此資料表的業務用途，影響 AI 生成 SQL 的準確性'],
+              ['Join 提示（join_hints）', '說明此表常見的 JOIN 條件，輔助跨表查詢'],
+              ['基礎過濾條件（Base Conditions）', '每次生成 SQL 都會自動加入的 WHERE 條件，如有效狀態過濾'],
+            ]}
+          />
+          <TipBox>
+            <strong>多資料庫跨庫設計</strong>：同一個專案中，可以新增多個 Schema 各自指定不同的 DB Source。
+            設計者在查詢任務（Design）的 Schema 欄位選擇器中勾選所需 Schema，AI 執行時會分別對各 Schema 對應的 DB Source 下查，
+            再合併結果回傳。這樣可實現如「ERP Oracle + MySQL 分析庫」的跨庫自然語言查詢。
+          </TipBox>
+        </SubSection>
+
+        <SubSection title="Step 3：管理 Schema 欄位說明">
+          <Para>
+            Schema 建立後，點擊欄位清單圖示（Columns）進入欄位說明編輯介面，
+            為每個欄位填入<strong>業務意義說明</strong>（description），這是 AI 正確理解欄位用途的關鍵：
+          </Para>
+          <Table
+            headers={['操作', '說明']}
+            rows={[
+              ['手動編輯說明', '逐欄填入中文業務說明，也可補充英文（desc_en）、越文（desc_vi）'],
+              ['匯出 CSV', '點「匯出 CSV」下載欄位清單，可在 Excel 批次填寫後再匯入'],
+              ['匯入 CSV', '填好的 CSV（欄位 column_name, description, desc_en, desc_vi）直接匯入更新'],
+              ['虛擬欄位（Virtual Column）', '定義計算欄位，如 TO_CHAR(order_date, \'YYYYMM\') 作為年月分組維度'],
+              ['Oracle 函數範本', '虛擬欄位提供 Oracle 常用函數範本選單，如 TRUNC/EXTRACT/NVL/ROUND 等'],
+            ]}
+          />
+          <NoteBox>
+            欄位說明品質直接影響 AI 生成 SQL 的準確性。建議至少為查詢條件欄位、維度欄位、金額欄位填入中文說明。
+            欄位說明可隨時更新，無需重建 Schema。
+          </NoteBox>
+        </SubSection>
+
+        <SubSection title="從 Oracle 批次匯入 Schema">
+          <Para>
+            若要快速將多個 Oracle ERP 資料表登錄到 Schema 知識庫，可使用<strong>批次匯入</strong>功能：
+          </Para>
+          <div className="space-y-3">
+            <StepItem num={1} title="點擊 Schema 頁籤右上方「從 Oracle 批次匯入」按鈕" />
+            <StepItem num={2} title="選擇資料來源（DB Source）" desc="選擇目標 Oracle 連線，通常為 ERP 主機" />
+            <StepItem num={3} title="填寫預設 Owner（Schema Owner）" desc="如 APPS，系統在無前綴的表名前自動補上此 Owner" />
+            <StepItem num={4} title="在文字框貼上資料表清單" desc="每行一個表名，格式範例：WO_ABNORMAL_V / APPS.MTL_SYSTEM_ITEMS_B / HR.EMPLOYEES（支援混搭不同 Owner）" />
+            <StepItem num={5} title="點「開始匯入」" desc="系統向 Oracle Data Dictionary 查詢各表的欄位清單，自動建立 Schema 及欄位（每次最多 50 個表）" />
+            <StepItem num={6} title="查看匯入結果" desc="成功的顯示 ✓ 表名 — N 欄；查無此表的顯示 ✗（請確認 Owner 與表名是否正確）" />
+          </div>
+          <TipBox>
+            批次匯入只建立 Schema 骨架與欄位名稱/型態，欄位的<strong>業務意義說明仍需手動補充</strong>（或匯出 CSV 填寫後匯回）。
+          </TipBox>
+        </SubSection>
+
+        <SubSection title="複製 Schema 到其他專案">
+          <Para>
+            設計者可從其他專案複製現有 Schema 到目前專案，避免重複設定相同的 ERP 基礎表：
+            點擊 Schema 清單右上方「複製來源 Schema」按鈕，搜尋並選取其他專案的 Schema 即可複製，
+            複製後可獨立修改不影響原始。
+          </Para>
+        </SubSection>
+
+        <SubSection title="多資料庫查詢流程（進階）">
+          <Para>
+            當一個查詢任務（Design）引用了來自不同 DB Source 的多個 Schema 時，查詢流程如下：
+          </Para>
+          <Table
+            headers={['步驟', '說明']}
+            rows={[
+              ['1. LLM SQL 生成', 'AI 根據使用者問題與所有選取 Schema 的欄位說明，生成各個 Schema 對應的 SQL 片段'],
+              ['2. 路由執行', '後端依照每個 SQL 片段對應的 source_db_id，向對應的 DB Source 各自發出查詢'],
+              ['3. 結果合併', '各 DB 回傳結果後，若有跨庫 JOIN 需求則在應用層合併，最終整合回傳給前端'],
+              ['4. 資料政策套用', '每個 DB 查詢在生成 SQL 時均套用該使用者的資料政策過濾條件，確保資料安全'],
+            ]}
+          />
+          <NoteBox>
+            目前跨庫 JOIN 需在 LLM Prompt 層面透過業務說明指引 AI 生成分開的查詢再合併，
+            不支援在同一 SQL 語句中跨庫 JOIN（因屬不同資料庫連線）。
+            設計建議：若需跨 Oracle ERP + MySQL 的組合報表，可設計兩個 Design 分別查詢，
+            或透過 ETL 預先將資料同步到單一庫後再設定 Schema。
+          </NoteBox>
+        </SubSection>
+      </Section>
     </div>
   )
 }
@@ -2361,6 +2509,12 @@ const adminSections = [
   { id: 'a-skill', label: '技能市集管理', icon: <Sparkles size={18} /> },
   { id: 'a-code-runners', label: 'Code Runners', icon: <Code2 size={18} /> },
   { id: 'a-llm', label: 'LLM 模型管理', icon: <Cpu size={18} /> },
+  { id: 'a-data-permissions', label: '資料權限管理', icon: <ShieldCheck size={18} /> },
+  { id: 'a-db-sources', label: 'AI 戰情 — 外部資料來源', icon: <Database size={18} /> },
+  { id: 'a-vector-defaults', label: '向量預設模型設定', icon: <Cpu size={18} /> },
+  { id: 'a-research-logs', label: '深度研究紀錄', icon: <GitFork size={18} /> },
+  { id: 'a-api-keys', label: '外部 API 金鑰管理', icon: <Key size={18} /> },
+  { id: 'a-cost-analysis', label: '費用分析', icon: <DollarSign size={18} /> },
   { id: 'a-system', label: '系統設定', icon: <Settings size={18} /> },
   { id: 'a-monitor', label: '系統監控', icon: <Activity size={18} /> },
   { id: 'a-k8s', label: 'K8s 部署更新', icon: <Server size={18} /> },
@@ -2438,14 +2592,73 @@ function AdminManual() {
         </SubSection>
 
         <SubSection title="功能權限設定">
-          <Para>除上傳外，部分進階功能也可依需求開放給特定使用者：</Para>
+          <Para>除上傳外，部分進階功能也可依需求開放給特定使用者（優先於角色設定）：</Para>
           <Table
-            headers={['設定項目', '說明']}
+            headers={['設定項目', '說明', '預設']}
             rows={[
-              ['允許排程任務', '開啟後一般使用者也可建立、編輯及執行自動排程任務'],
+              ['允許排程任務', '開啟後一般使用者也可建立、編輯及執行自動排程任務', '繼承角色'],
+              ['允許建立 Skill', '開啟後可建立自定義技能', '繼承角色'],
+              ['允許外部 Skill', '開啟後可建立帶有外部 Endpoint 的技能', '繼承角色'],
+              ['允許程式技能', '開啟後可建立 type=code 的 Node.js 程式技能', '繼承角色'],
+              ['允許建立知識庫', '開啟後可在側邊欄看到知識庫市集入口並建立知識庫', '繼承角色'],
+              ['知識庫最大容量 (MB)', '該使用者所有知識庫文件的總容量上限', '繼承角色'],
+              ['知識庫最大數量', '可建立的知識庫數量上限', '繼承角色'],
+              ['允許深度研究', '開啟後可使用深度研究（Deep Research）功能', '繼承角色'],
+              ['開發 AI 戰情室', '開啟後可在 AI 戰情室使用設計者模式建立 Schema / Topic / Design', '繼承角色'],
+              ['使用 AI 戰情室', '開啟後可進入 AI 戰情室查詢 ERP 資料', '繼承角色'],
             ]}
           />
-          <TipBox>未來若新增其他進階功能（如 API 存取、自訂 Prompt 範本等），也會在此處統一管理。</TipBox>
+          <TipBox>「繼承角色」代表此欄位留空，實際行為由所屬角色的設定決定。使用者層設定優先於角色設定，設為明確值可覆蓋角色預設。</TipBox>
+        </SubSection>
+
+        <SubSection title="使用金額限制與超過處理方式">
+          <Para>
+            可為個別使用者獨立設定 USD 金額上限，優先於角色設定。若留空則沿用角色的限額。
+          </Para>
+          <Table
+            headers={['欄位', '說明', '範例']}
+            rows={[
+              ['每日限額 (USD)', '使用者每天可消耗的最高費用', '0.05'],
+              ['每週限額 (USD)', '使用者每週一至週日可消耗的最高費用', '0.20'],
+              ['每月限額 (USD)', '使用者每月 1 日至月底可消耗的最高費用', '0.50'],
+            ]}
+          />
+          <Para>當使用量達到任一限額時，系統依<strong>「額度超過限制方式」</strong>決定處理行為：</Para>
+          <Table
+            headers={['模式', '行為', '備註']}
+            rows={[
+              ['沿用角色設定（留空）', '沿用所屬角色的設定', '建議個別使用者使用此選項'],
+              ['禁止（block）', '直接封鎖新訊息，AI 拒絕回覆並告知額度已滿', '最嚴格的限制模式'],
+              ['警告（warn）', '允許繼續對話，但頂端列顯示紅色警告條，提醒已超出額度', '適合不想中斷工作流程的場景'],
+            ]}
+          />
+          <NoteBox>
+            warn 模式下使用者雖可繼續使用，但管理員仍可在 Token 統計頁面看到超用紀錄。
+            建議對一般員工使用 warn，對成本敏感部門使用 block。
+          </NoteBox>
+        </SubSection>
+
+        <SubSection title="組織資訊同步">
+          <Para>
+            使用者管理頁面提供「組織自動同步排程」功能，定期從人事系統同步員工的部門、利潤中心、事業處等組織資訊：
+          </Para>
+          <Table
+            headers={['觸發方式', '說明']}
+            rows={[
+              ['登入時自動同步', '每次 LDAP 登入後自動更新該員工的組織資訊'],
+              ['手動觸發', '點擊單一使用者的「同步組織」按鈕，立即更新'],
+              ['批量同步', '點擊「批量同步所有使用者」，一次更新全體帳號'],
+              ['排程自動同步', '設定每天幾點自動批量同步（可在「組織自動同步排程」展開設定）'],
+            ]}
+          />
+          <TipBox>同步變更記錄（如部門異動、離職）可在「同步變更紀錄」中查看，追蹤每次同步的異動欄位。</TipBox>
+        </SubSection>
+
+        <SubSection title="指派資料權限原則">
+          <Para>
+            可為每位使用者指派一個<strong>資料權限原則（Data Permission Policy）</strong>，控制其在 AI 戰情室可查詢的資料範圍。
+            若未指派，系統會依照所屬角色的原則設定。詳見「資料權限管理」章節。
+          </Para>
         </SubSection>
 
         <SubSection title="帳號啟用邏輯">
@@ -2481,36 +2694,56 @@ function AdminManual() {
           <TipBox>建議為不同部門或職能分別建立角色，例如「研發工程師」（允許圖片/音訊上傳）、「業務人員」（僅允許文件上傳，月限額 $5）。</TipBox>
         </SubSection>
 
-        <SubSection title="上傳與功能權限">
-          <Table
-            headers={['設定項目', '說明', '角色預設']}
-            rows={[
-              ['允許上傳文字文件', '開啟後允許 PDF、DOCX、XLSX、PPTX、TXT', '開啟'],
-              ['文件大小上限 (MB)', '單一文件最大允許大小', '10 MB'],
-              ['允許上傳音訊', '開啟後允許 MP3、WAV、M4A 等音訊，系統自動轉文字', '關閉'],
-              ['音訊大小上限 (MB)', '單一音訊最大允許大小', '10 MB'],
-              ['允許上傳圖片', '開啟後允許 JPG、PNG、WEBP 等圖片', '開啟'],
-              ['圖片大小上限 (MB)', '單一圖片最大允許大小', '10 MB'],
-              ['允許排程任務', '開啟後此角色的使用者可建立自動排程', '關閉'],
-            ]}
-          />
-          <NoteBox>使用者頁面的個別設定仍可覆蓋角色設定。選擇角色後，欄位會自動帶入角色值，管理員仍可針對個別使用者調整。</NoteBox>
-        </SubSection>
-
-        <SubSection title="使用金額限制（Budget）">
+        <SubSection title="使用金額限制（Budget）與超過處理方式">
           <Para>
-            可為角色設定 USD 金額上限，旗下所有使用者共享此限制邏輯（各自獨立計算，非共用額度）。
+            可為角色設定 USD 金額上限，旗下所有使用者各自獨立計算（非共用額度）。
             若使用者有個別設定，則以個別設定優先。
           </Para>
           <Table
             headers={['欄位', '說明', '範例']}
             rows={[
-              ['每日限額 (USD)', '使用者每天可消耗的最高費用，超出後當日訊息被拒絕', '0.05'],
-              ['每週限額 (USD)', '使用者每週一至週日可消耗的最高費用', '0.20'],
-              ['每月限額 (USD)', '使用者每月 1 日至月底可消耗的最高費用', '0.50'],
+              ['每日限額 (USD)', '每天可消耗的最高費用', '0.05'],
+              ['每週限額 (USD)', '每週一至週日可消耗的最高費用', '0.20'],
+              ['每月限額 (USD)', '每月 1 日至月底可消耗的最高費用', '0.50'],
             ]}
           />
-          <TipBox>留空代表不設限。建議先觀察實際使用量再決定限額，避免設太低導致正常使用受阻。金額計算需依賴 LLM 模型定價設定，若尚未設定定價則限額無效。</TipBox>
+          <Para>超過任一限額時，依<strong>「額度超過限制方式」</strong>決定處理行為：</Para>
+          <Table
+            headers={['模式', '行為']}
+            rows={[
+              ['禁止（block）', '直接封鎖新訊息，AI 拒絕回覆並告知額度已滿；預設值'],
+              ['警告（warn）', '允許繼續對話，但頂端列顯示紅色警告條，提醒已超出額度'],
+            ]}
+          />
+          <TipBox>
+            warn 模式適合不想中斷員工工作流程的部門；block 模式適合需要嚴格管控費用的場景。
+            留空代表不設限。金額計算需依賴 LLM 模型定價設定，若尚未設定費率則限額無效。
+          </TipBox>
+        </SubSection>
+
+        <SubSection title="完整功能權限設定">
+          <Table
+            headers={['設定項目', '說明', '預設值']}
+            rows={[
+              ['允許上傳文字文件', 'PDF、DOCX、XLSX、PPTX、TXT', '開啟'],
+              ['文件大小上限 (MB)', '單一文件最大允許大小', '10 MB'],
+              ['允許上傳音訊', 'MP3、WAV、M4A 等，系統自動轉文字', '關閉'],
+              ['音訊大小上限 (MB)', '單一音訊最大允許大小', '10 MB'],
+              ['允許上傳圖片', 'JPG、PNG、WEBP 等', '開啟'],
+              ['圖片大小上限 (MB)', '單一圖片最大允許大小', '10 MB'],
+              ['允許排程任務', '可建立自動排程任務', '關閉'],
+              ['允許建立 Skill', '可在技能市集建立自定義技能', '關閉'],
+              ['允許外部 Skill', '可建立帶有外部 Endpoint URL 的技能', '關閉'],
+              ['允許程式技能', '可建立 type=code 的 Node.js 程式技能', '關閉'],
+              ['允許建立知識庫', '可在知識庫市集建立知識庫', '關閉'],
+              ['知識庫最大容量 (MB)', '此角色使用者可建立的知識庫總容量上限', '500 MB'],
+              ['知識庫最大數量', '此角色使用者可建立的知識庫數量上限', '5 個'],
+              ['允許深度研究', '可使用 Deep Research 功能進行多輪網路搜尋分析', '開啟'],
+              ['開發 AI 戰情室', '可在 AI 戰情室使用設計者模式建立 Schema / Topic / Design', '關閉'],
+              ['使用 AI 戰情室', '可進入 AI 戰情室頁面查詢 ERP 資料', '關閉'],
+            ]}
+          />
+          <NoteBox>使用者層級的個別設定仍可覆蓋角色設定。選擇角色後，欄位自動帶入角色值，管理員可針對個別使用者調整。</NoteBox>
         </SubSection>
 
         <SubSection title="預設角色">
@@ -2982,31 +3215,81 @@ generate_txt:供應商週報_{{date}}.txt
 
       <Section id="a-tokens" icon={<BarChart3 size={22} />} iconColor="text-blue-500" title="Token 與費用統計">
         <Para>
-          系統每日自動彙整每位使用者在每個 LLM 模型上消耗的 Token 數量，方便管理員掌握使用量與費用。
+          系統每日自動彙整每位使用者在每個 LLM 模型上消耗的 Token 數量，並根據費率設定自動計算費用。
+          管理員可在「Token 統計」頁籤進行查詢、匯出 CSV，並設定各模型的計費費率。
         </Para>
-        <SubSection title="查詢方式">
+
+        <SubSection title="Token 使用量查詢">
           <div className="space-y-3">
             <StepItem num={1} title="進入後台，點選「Token 統計」頁籤" />
-            <StepItem num={2} title="選擇查詢日期區間及使用者（可不篩選看全部）" />
-            <StepItem num={3} title="查看每日每人每模型的輸入/輸出 Token 明細" />
+            <StepItem num={2} title="設定查詢條件" desc="可選擇日期區間（預設 30 天）、篩選特定模型、依姓名/工號/Email/部門搜尋" />
+            <StepItem num={3} title="查看明細表格" desc="每行為一筆「使用者 + 日期 + 模型」的彙總記錄" />
+            <StepItem num={4} title="匯出 CSV" desc="點擊「匯出 CSV」下載完整明細，含幣別與圖片計數欄位" />
           </div>
+          <Table
+            headers={['欄位', '說明']}
+            rows={[
+              ['日期', '使用日期（台灣時區，每日彙整一筆）'],
+              ['使用者', '工號 + 姓名'],
+              ['部門 / 利潤中心', '依 HR 組織同步的組織資訊'],
+              ['模型', 'LLM 模型名稱（Pro / Flash / GPT-4o 等）'],
+              ['輸入 Token', '送給 AI 的提示詞 Token 總數（含對話歷史）'],
+              ['輸出 Token', 'AI 生成回覆的 Token 總數'],
+              ['圖片輸出數', '若模型有圖片生成，記錄當日產生的圖片張數'],
+              ['費用 (USD)', '根據費率設定計算的當日費用'],
+            ]}
+          />
         </SubSection>
-        <SubSection title="費用分析">
+
+        <SubSection title="費率設定（Token Pricing）">
           <Para>
-            點選「費用統計及分析」頁籤，系統會根據各 LLM 模型的定價自動計算每日費用。
-            定價設定請至「LLM 模型設定」頁籤調整（單位：USD per 1M tokens）。
+            系統依各模型的費率設定計算費用。管理員可在「Token 統計」頁籤右側的「費率設定」區域，
+            為每個模型設定一或多筆費率記錄（支援費率調漲/降情境）。
           </Para>
+          <Table
+            headers={['欄位', '說明', '範例']}
+            rows={[
+              ['模型名稱', '對應 LLM 模型的 key（支援下拉自動補全）', 'pro, gpt4o-eus'],
+              ['輸入價格 / 1M tokens（第 1 段）', '每百萬輸入 Token 的費用', '3.50'],
+              ['輸出價格 / 1M tokens（第 1 段）', '每百萬輸出 Token 的費用', '10.50'],
+              ['圖片輸出價格 / 張', '每張圖片生成的費用（僅圖片模型填寫）', '0.04'],
+              ['幣別', 'USD / TWD / CNY', 'USD'],
+              ['生效日期', '此費率從哪天起適用', '2026-01-01'],
+              ['結束日期', '費率到哪天止（空白 = 永久）', '（空白）'],
+              ['啟用兩段計費', '超過門檻 Token 數的部分使用第 2 段價格', '勾選'],
+              ['第 1 段上限 (tokens)', '兩段計費門檻，超過此數量使用第 2 段費率', '1000000'],
+              ['輸入價格 / 1M tokens（第 2 段）', '超出門檻後的輸入費率', '7.00'],
+              ['輸出價格 / 1M tokens（第 2 段）', '超出門檻後的輸出費率', '21.00'],
+            ]}
+          />
+          <TipBox>
+            若同一模型有多筆費率記錄，系統依照<strong>生效日期區間</strong>選取對應費率計算，
+            支援費率隨時間變動的場景（如 Google 調整定價）。
+          </TipBox>
+          <NoteBox>
+            費率設定後，可點擊「重新計算費用（365天）」按鈕，根據新費率補算過去所有使用記錄的費用欄位，
+            確保歷史數據準確。
+          </NoteBox>
         </SubSection>
-        <Table
-          headers={['欄位', '說明']}
-          rows={[
-            ['日期', '使用日期（台灣時區）'],
-            ['使用者', '工號 + 姓名'],
-            ['模型', 'Pro 或 Flash'],
-            ['輸入 Token', '送給 AI 的提示詞 Token 數（含對話歷史）'],
-            ['輸出 Token', 'AI 生成回覆的 Token 數'],
-          ]}
-        />
+
+        <SubSection title="費用分析（成本歸因）">
+          <Para>
+            點選「費用統計及分析」頁籤，可依利潤中心、部門、員工三個層級分析 AI 費用歸因：
+          </Para>
+          <Table
+            headers={['面板', '說明']}
+            rows={[
+              ['利潤中心費用佔比（圓餅圖）', '各利潤中心的費用佔全公司比例；點擊可鑽取到部門層級'],
+              ['部門費用由高到低（長條圖）', '選定利潤中心後，顯示其底下各部門的費用排行'],
+              ['月份費用趨勢', '時間序列長條圖，顯示各月各利潤中心費用趨勢'],
+              ['利潤中心費用總表', '含部門、事業處、事業群分類，支援點擊鑽取'],
+              ['月份費用分析表', '同一利潤中心下的月份明細'],
+              ['員工 Token 明細清單', '最細粒度，顯示每位員工的輸入/輸出 Token 及費用'],
+            ]}
+          />
+          <TipBox>點擊利潤中心圓餅圖某個扇形，可篩選該利潤中心的部門長條圖；再點部門長條圖可進一步看員工清單。三層鑽取無需頁面跳轉。</TipBox>
+          <Para>費用分析所有視圖均支援<strong>匯出 CSV</strong>，可分別匯出利潤中心彙總、月份分析、員工清單。</Para>
+        </SubSection>
       </Section>
 
       <Section id="a-audit" icon={<Shield size={22} />} iconColor="text-red-500" title="稽核與敏感詞">
@@ -3050,37 +3333,58 @@ generate_txt:供應商週報_{{date}}.txt
         <Para>
           MCP（Model Context Protocol）是一種標準通訊協定，讓 FOXLINK GPT 的 AI 對話可以即時呼叫外部工具伺服器，
           擴充 AI 的能力範圍，例如查詢 ERP 資料庫、呼叫企業內部 API、執行自動化腳本等。
+          系統全面支援 MCP 的所有主流傳輸模式，包含新舊規範及本地端 stdio 模式。
         </Para>
 
-        <SubSection title="MCP 是什麼？">
-          <Para>
-            一般情況下 AI 只能回答文字問題。透過 MCP 伺服器，AI 可以在對話中自動決定是否呼叫工具，
-            取得即時資料後再整合到回覆中。例如：使用者問「查一下工單 WO12345 的狀態」，
-            AI 會自動呼叫 ERP 查詢工具取得資料，再用自然語言回答。
-          </Para>
-          <div className="bg-slate-800 rounded-xl p-4">
-            <p className="text-xs text-slate-400 mb-2">對話範例</p>
-            <div className="space-y-2">
-              <div className="flex gap-2">
-                <Tag color="blue">使用者</Tag>
-                <span className="text-slate-300 text-sm">查一下 FL_MOA_B2_WIP_DETAIL_P 這支程式是誰寫的？</span>
-              </div>
-              <div className="flex gap-2">
-                <Tag color="green">AI + MCP</Tag>
-                <span className="text-slate-300 text-sm">AI 自動呼叫 search_programs 工具查詢 ERP，回傳作者及程式資訊</span>
-              </div>
+        <SubSection title="Tags 標籤 — TAG 路由的關鍵設定">
+          <div className="border-2 border-amber-400 bg-amber-50 rounded-xl p-4 mb-2">
+            <div className="flex items-center gap-2 mb-2">
+              <AlertTriangle size={16} className="text-amber-600" />
+              <span className="font-bold text-amber-700">重要：Tags 是讓 AI 自動選用 MCP 工具的必要條件</span>
             </div>
+            <p className="text-sm text-amber-700">
+              若未設定 Tags，使用者在對話中<strong>必須手動</strong>從頂端列切換按鈕選取此 MCP 伺服器，
+              系統不會自動判斷何時使用。設定 Tags 後，LLM 會根據使用者訊息的意圖自動比對標籤，決定是否啟用此工具。
+            </p>
           </div>
+          <Para>Tags 設定建議：</Para>
+          <Table
+            headers={['MCP 用途', '建議 Tags', '說明']}
+            rows={[
+              ['ERP 工單查詢', 'ERP, 工單, WO, 生產', '使用者說「查工單」「WO12345」等即觸發'],
+              ['庫存查詢', '庫存, 料號, BOM, 備料', '使用者說「查料號」「確認庫存」等即觸發'],
+              ['HR 人事系統', 'HR, 人事, 員工, 組織', '使用者說「查員工」「部門主管」等即觸發'],
+              ['通用工具', '（不設 Tags）', '只能手動掛載，不會自動觸發'],
+            ]}
+          />
+        </SubSection>
+
+        <SubSection title="支援的傳輸模式">
+          <Table
+            headers={['傳輸模式', '適用場景', '說明']}
+            rows={[
+              ['HTTP POST (http-post)', '標準 MCP 伺服器', '傳統 MCP 請求/回應模式，大多數 MCP Server 支援'],
+              ['HTTP SSE (http-sse)', '舊式 MCP 伺服器', 'MCP 2024 規範的 SSE 模式，向下相容舊版 MCP Server'],
+              ['Streamable HTTP (streamable-http)', '新式 MCP 伺服器', 'MCP 2025 規範，支援串流回應，推薦優先使用'],
+              ['stdio（本地指令）', '本地端 MCP 工具', '在 server 機器上執行 npx / python 等指令，無需 HTTP 端點'],
+              ['auto（自動偵測）', '不確定時選此', '系統自動嘗試多種協定，找到可用的即套用'],
+            ]}
+          />
+          <NoteBox>
+            stdio 模式在 server 主機本地執行 MCP 工具（如 npx -y @modelcontextprotocol/server-filesystem /tmp），
+            工具直接存取本機資源，不經由 HTTP 傳輸，適合檔案系統、資料庫等本地工具。
+          </NoteBox>
         </SubSection>
 
         <SubSection title="新增 MCP 伺服器">
           <div className="space-y-3">
             <StepItem num={1} title="進入後台，點選「MCP 伺服器」頁籤" />
             <StepItem num={2} title="點選「新增伺服器」按鈕" />
-            <StepItem num={3} title="填寫伺服器資訊" desc="名稱（顯示用）、URL（MCP Streamable HTTP 端點）、API Key（若需驗證）" />
-            <StepItem num={4} title="儲存後點選同步圖示" desc="系統會連線到 MCP 伺服器，自動取得可用工具清單" />
-            <StepItem num={5} title="確認工具清單已載入" desc="展開伺服器卡片可看到工具名稱及說明" />
-            <StepItem num={6} title="確認狀態為綠燈（啟用）" desc="之後 AI 對話即可自動使用這些工具" />
+            <StepItem num={3} title="選擇傳輸模式" desc="HTTP 類型填入 URL + API Key；stdio 類型填入指令（command）及可選的 args_json / env_json" />
+            <StepItem num={4} title="填寫名稱、說明、Tags" desc="Tags 為讓 AI 自動路由的關鍵，建議依業務領域填入" />
+            <StepItem num={5} title="選擇回應方式（response_mode）" desc="inject = AI 收到工具結果後自行回答；answer = 工具結果直接作為 AI 最終回覆" />
+            <StepItem num={6} title="儲存後點選同步圖示（↻）" desc="系統連線到 MCP 伺服器取得可用工具清單，並存入 tools_json" />
+            <StepItem num={7} title="確認工具清單已載入，狀態為啟用（綠燈）" />
           </div>
         </SubSection>
 
@@ -3089,21 +3393,34 @@ generate_txt:供應商週報_{{date}}.txt
             headers={['欄位', '必填', '說明']}
             rows={[
               ['名稱', '是', '識別用顯示名稱，例：ERP DB Search'],
-              ['URL', '是', 'MCP 伺服器的 HTTP 端點，需符合 MCP Streamable HTTP 規範'],
-              ['API Key', '否', '若 MCP 伺服器需要驗證，填入 Bearer Token'],
-              ['說明', '否', '給管理員的備注，不影響 AI 行為'],
-              ['標籤（Tags）', '否', '用於 TAG 自動路由的標籤，例如「ERP」「工單」「庫存」。系統根據使用者訊息自動比對標籤決定是否啟用此伺服器'],
+              ['傳輸方式', '是', '選擇上方五種傳輸模式之一'],
+              ['URL（HTTP 類型）', '是', 'MCP 伺服器的 HTTP 端點'],
+              ['API Key（HTTP 類型）', '否', '若 MCP 伺服器需要驗證，填入 Bearer Token'],
+              ['指令（stdio 類型）', '是', '本地執行指令，如 npx -y @modelcontextprotocol/server-filesystem /tmp'],
+              ['Args JSON（stdio 類型）', '否', '額外參數，JSON Array 格式，如 ["/data", "--readonly"]'],
+              ['Env JSON（stdio 類型）', '否', '環境變數，JSON Object 格式，如 {"API_KEY": "xxx"}'],
+              ['回應方式', '是', 'inject = AI 整合後回答；answer = 直接輸出工具結果'],
+              ['說明（description）', '建議填', '告訴 AI 此工具的業務用途，影響 AI 判斷何時使用'],
+              ['標籤（Tags）', '必填，否則無法自動路由', '如「ERP」「工單」「庫存」，以逗號分隔'],
               ['啟用', '—', '關閉後 AI 對話不會呼叫此伺服器的工具'],
+              ['公開', '—', '勾選後申請公開，需管理員核准，所有使用者可在側邊欄選取'],
             ]}
           />
+        </SubSection>
+
+        <SubSection title="公開核准">
+          <Para>
+            MCP 伺服器預設僅建立者可使用（或透過角色授權）。勾選「公開」後進入待審核狀態，
+            管理員在列表中看到「核准」按鈕點擊後，所有使用者即可在頂端列的 MCP 切換面板中看到此工具。
+          </Para>
         </SubSection>
 
         <SubSection title="同步與管理">
           <div className="space-y-2">
             {[
-              { icon: <RefreshCw size={13} />, label: '同步工具', desc: '點選同步圖示，重新從 MCP 伺服器取得最新工具清單（伺服器更新工具時需要重新同步）' },
-              { icon: <Info size={13} />, label: '展開工具清單', desc: '點選伺服器卡片左側箭頭，可查看該伺服器提供的所有工具名稱及說明' },
-              { icon: <Info size={13} />, label: '呼叫記錄', desc: '點選「呼叫記錄」按鈕，查看 AI 實際呼叫工具的歷史，包含成功/失敗狀態、耗時、回應預覽' },
+              { icon: <RefreshCw size={13} />, label: '同步工具（↻）', desc: '重新從 MCP 伺服器取得最新工具清單，更新 tools_json（伺服器新增工具後需同步）' },
+              { icon: <Info size={13} />, label: '展開工具清單', desc: '點選伺服器卡片左側箭頭，查看所有工具名稱及說明' },
+              { icon: <Info size={13} />, label: '呼叫記錄', desc: '查看 AI 實際呼叫工具的歷史，含使用者、時間、成功/失敗狀態、耗時、回應預覽（最近 50 筆）' },
             ].map((item, i) => (
               <div key={i} className="flex gap-3 p-3 bg-slate-50 rounded-lg">
                 <span className="text-slate-400 flex-shrink-0 mt-0.5">{item.icon}</span>
@@ -3114,7 +3431,7 @@ generate_txt:供應商週報_{{date}}.txt
               </div>
             ))}
           </div>
-          <NoteBox>MCP 伺服器必須部署在網路可連接的位置，且需實作 MCP Streamable HTTP 規範（/mcp 端點）。如需自行開發 MCP 伺服器，請參考 MCP 官方規範文件。</NoteBox>
+          <NoteBox>HTTP 類型 MCP 伺服器必須部署在 server 網路可連接的位置。stdio 類型工具在 server 主機本地執行，無需外部連線。如需自行開發 MCP 伺服器，請參考 MCP 2025 官方規範文件。</NoteBox>
         </SubSection>
       </Section>
 
@@ -3122,9 +3439,20 @@ generate_txt:供應商週報_{{date}}.txt
         <Para>
           DIFY 是正崴內部部署的知識管理平台（fldify-api.foxlink.com.tw），
           可將企業內部文件、產品規格、SOP 等資料建成向量知識庫。
-          整合後，使用者在 FOXLINK GPT 對話時，AI 會自動查詢相關知識庫，
+          整合後，使用者在 FOXLINK GPT 對話時，AI 可自動查詢相關知識庫，
           讓回答能參考企業內部文件內容，而非僅依賴通用知識。
         </Para>
+
+        <div className="border-2 border-amber-400 bg-amber-50 rounded-xl p-4 mb-4">
+          <div className="flex items-center gap-2 mb-2">
+            <AlertTriangle size={16} className="text-amber-600" />
+            <span className="font-bold text-amber-700">重要：Tags 是讓 AI 自動選用 DIFY 知識庫的必要條件</span>
+          </div>
+          <p className="text-sm text-amber-700">
+            若未設定 Tags，使用者在對話中<strong>必須手動</strong>從頂端列切換按鈕選取此知識庫，
+            系統不會在對話中自動查詢。設定 Tags 後，LLM 根據使用者訊息意圖自動比對標籤，決定是否查詢此知識庫。
+          </p>
+        </div>
 
         <SubSection title="運作原理">
           <Para>
@@ -3169,7 +3497,7 @@ generate_txt:供應商週報_{{date}}.txt
               ['API Server', '是', 'DIFY 的 API 端點，預設 https://fldify-api.foxlink.com.tw/v1'],
               ['API Key', '是（新增時）', 'DIFY 應用的 API Key，格式為 app-xxxxxxxx。編輯時留空表示保持不變'],
               ['描述', '建議填', '告訴 AI 這個知識庫的用途，讓 AI 更精準地判斷何時引用。例：包含產品規格、零件型號，當使用者詢問產品規格時引用'],
-              ['標籤（Tags）', '否', '用於 TAG 自動路由的標籤，例如「產品規格」「零件」。系統根據使用者訊息自動比對標籤決定是否查詢此知識庫'],
+              ['標籤（Tags）', '必填，否則無法自動路由', '如「產品規格」「零件」「SOP」。系統根據使用者訊息意圖自動比對標籤，決定是否查詢此知識庫'],
               ['排序順序', '否', '數字越小越優先查詢，同分時依此排序'],
               ['啟用', '—', '啟用後每次對話自動查詢，停用後不查詢但保留設定'],
             ]}
@@ -3193,20 +3521,24 @@ generate_txt:供應商週報_{{date}}.txt
 
       <Section id="a-llm" icon={<Cpu size={22} />} iconColor="text-violet-500" title="LLM 模型管理">
         <Para>
-          在「LLM 模型設定」頁籤，管理員可新增、編輯或停用 AI 模型選項，支援 Google Gemini 及 Azure OpenAI 兩種供應商，讓使用者在對話和排程中可自由選擇。
+          在「LLM 模型設定」頁籤，管理員可新增、編輯或停用 AI 模型選項，
+          支援 <strong>Google Gemini、Azure OpenAI、Oracle OCI Generative AI、Cohere</strong> 四種供應商，
+          涵蓋 chat（對話）、embedding（向量化）、rerank（重排序）、tts（文字轉語音）、stt（語音轉文字）五種模型角色。
         </Para>
 
         <SubSection title="通用欄位">
           <Table
-            headers={['欄位', '說明']}
+            headers={['欄位', '必填', '說明']}
             rows={[
-              ['識別鍵 (key)', '系統內部識別碼，用於對應 Prompt 設定（如 pro、flash）'],
-              ['顯示名稱', '使用者看到的模型名稱（如 Gemini 2.0 Pro）'],
-              ['說明文字', '顯示於模型選單下方的小字說明'],
-              ['排序', '數字越小排越前，影響選單顯示順序'],
-              ['啟用', '關閉後使用者無法選擇此模型，但歷史記錄不受影響'],
-              ['輸入定價', '每百萬 Token 的費用（USD），用於費用統計'],
-              ['輸出定價', '每百萬 Token 的費用（USD），用於費用統計'],
+              ['識別鍵 (key)', '是', '系統內部識別碼（如 pro、flash、gpt4o-eus），新增後不可修改'],
+              ['顯示名稱', '是', '使用者看到的模型名稱'],
+              ['提供商', '是', 'gemini / azure_openai / oci / cohere，新增後不可修改'],
+              ['模型角色', '是', 'chat（對話）/ embedding（向量化）/ rerank（重排序）/ tts（語音合成）/ stt（語音識別）'],
+              ['API 模型 ID', '依提供商', 'Gemini/OCI/Cohere 必填；Azure 不需（使用 Deployment Name）'],
+              ['說明文字', '否', '顯示於模型選單下方的小字說明'],
+              ['排序', '否', '數字越小排越前，影響選單顯示順序'],
+              ['支援圖片輸出', '否', '開啟後此模型支援圖片生成（Gemini Imagen 系列）'],
+              ['啟用', '—', '關閉後使用者無法選擇此模型，但歷史記錄不受影響'],
             ]}
           />
         </SubSection>
@@ -3255,6 +3587,34 @@ generate_txt:供應商週報_{{date}}.txt
           <TipBox>判斷規則：Deployment Name 以 <code className="bg-slate-100 px-1 rounded text-xs">o</code> 加數字開頭（如 <code className="bg-slate-100 px-1 rounded text-xs">o1</code>、<code className="bg-slate-100 px-1 rounded text-xs">o3-mini</code>）即視為推理模型，無需額外設定。</TipBox>
         </SubSection>
 
+        <SubSection title="Oracle OCI Generative AI 模型設定">
+          <Para>選擇供應商「Oracle OCI」後，需填寫以下欄位（所有 OCI 憑證均加密存儲）：</Para>
+          <Table
+            headers={['欄位', '說明', '範例']}
+            rows={[
+              ['API 模型 ID', 'OCI 模型 ID', 'cohere.command-r-plus'],
+              ['User OCID', 'OCI 使用者 OCID', 'ocid1.user.oc1..xxx'],
+              ['Tenancy OCID', 'OCI 租戶 OCID', 'ocid1.tenancy.oc1..xxx'],
+              ['Fingerprint', 'API Key 指紋', 'xx:xx:xx:...'],
+              ['Region', 'OCI 區域', 'ap-tokyo-1'],
+              ['Compartment ID', 'OCI Compartment（選填）', 'ocid1.compartment.oc1..xxx'],
+              ['Private Key（PEM）', 'RSA 私鑰（.pem 內容），加密後存入 DB；編輯時留空=保持原值', '-----BEGIN RSA PRIVATE KEY-----...'],
+            ]}
+          />
+        </SubSection>
+
+        <SubSection title="Cohere 模型設定">
+          <Para>選擇供應商「Cohere」後，需填寫以下欄位：</Para>
+          <Table
+            headers={['欄位', '說明']}
+            rows={[
+              ['API 模型 ID', 'Cohere 模型代號，如 rerank-v3.5（通常用於 Rerank 角色）'],
+              ['API Key', 'Cohere API Key，加密存入 DB'],
+            ]}
+          />
+          <TipBox>Cohere 目前主要用於 Rerank（重排序）模型角色，搭配知識庫混合檢索使用，提升召回精準度。</TipBox>
+        </SubSection>
+
         <SubSection title="測試連線">
           <Para>
             新增或編輯模型後，點選對話框底部的「測試連線」按鈕，系統會向目標模型發送一則測試訊息並顯示回應，
@@ -3262,6 +3622,267 @@ generate_txt:供應商週報_{{date}}.txt
           </Para>
           <NoteBox>測試時使用的 API Key 優先使用表單中填入的值；若表單留空，則使用 DB 中已加密儲存的 Key。</NoteBox>
         </SubSection>
+      </Section>
+
+      {/* ═══════════════════════════════════════════════════ 資料權限管理 */}
+
+      <Section id="a-data-permissions" icon={<ShieldCheck size={22} />} iconColor="text-indigo-600" title="資料權限管理">
+        <Para>
+          資料權限管理用於控制每位使用者或角色在 AI 戰情室可查詢的 ERP 資料範圍。
+          透過建立<strong>原則（Policy）→ 規則（Rule）</strong>的組合，並指派給使用者或角色，
+          系統在執行 SQL 時自動在 WHERE 條件加入對應的過濾條件。
+        </Para>
+
+        <SubSection title="核心概念">
+          <Table
+            headers={['概念', '說明']}
+            rows={[
+              ['原則（Policy）', '一組規則的集合，定義「可看到哪些資料」的完整條件，可指派給使用者或角色'],
+              ['規則（Rule）', '最細粒度的限制單元，格式為「欄位 + 操作符 + 值」，如 dept_code = D001'],
+              ['類別（Category）', '將多個原則分組管理，例如「生產」「採購」「人資」類別'],
+              ['指派（Assignment）', '將原則套用到特定使用者帳號或角色，生效後即時限制其查詢範圍'],
+            ]}
+          />
+        </SubSection>
+
+        <SubSection title="建立資料權限原則">
+          <div className="space-y-3">
+            <StepItem num={1} title="進入後台 → 資料權限管理" />
+            <StepItem num={2} title="點擊「+ 新增原則」" desc="填入名稱（必填）、說明、所屬類別（選填）" />
+            <StepItem num={3} title="新增規則" desc="為原則加入一或多條規則，每條規則指定「欄位 + 操作符 + 值」" />
+            <StepItem num={4} title="儲存原則" />
+            <StepItem num={5} title="指派給使用者或角色" desc="在原則清單點擊「指派」，選擇使用者帳號或角色，點「確認指派」" />
+          </div>
+        </SubSection>
+
+        <SubSection title="規則欄位與操作符">
+          <Para>支援的過濾欄位（field）對應 ERP 組織維度：</Para>
+          <Table
+            headers={['欄位名稱', '說明', '範例值']}
+            rows={[
+              ['dept_code', '部門代碼', 'D001, R&D'],
+              ['profit_center', '利潤中心代碼', 'PC001'],
+              ['org_section', '事業處代碼', 'OA'],
+              ['org_group_name', '事業群名稱', 'ICP'],
+              ['org_code', '組織代碼', 'TW01'],
+              ['organization_id', 'ERP Multi-Org 製造組織 ID', '101'],
+              ['organization_code', 'ERP Multi-Org 製造組織代碼', 'M01'],
+              ['operating_unit', '營運單位 ID', '2000'],
+              ['operating_unit_name', '營運單位名稱', 'Taiwan OU'],
+              ['set_of_books_id', '帳套 ID', '1'],
+              ['set_of_books_name', '帳套名稱', 'TWD Corp Ledger'],
+            ]}
+          />
+          <Para>可用的操作符：</Para>
+          <Table
+            headers={['操作符', '說明', '範例']}
+            rows={[
+              ['eq（等於）', '精確比對', 'dept_code eq D001'],
+              ['in（包含於）', '值在指定清單中', 'dept_code in [D001, D002, D003]'],
+              ['starts_with（前綴）', '以指定字串開頭', 'dept_code starts_with R'],
+              ['contains（包含）', '字串包含', 'dept_code contains &Dev'],
+            ]}
+          />
+        </SubSection>
+
+        <SubSection title="類別管理">
+          <Para>
+            類別（Category）讓管理員將功能相近的原則分組，例如「製造類」「財務類」，
+            方便大量原則時的管理。可在右側「類別管理」面板新增/編輯類別，並拖曳或勾選原則歸入類別。
+          </Para>
+        </SubSection>
+
+        <SubSection title="指派優先順序">
+          <Table
+            headers={['層次', '優先級', '說明']}
+            rows={[
+              ['使用者個人指派', '最高', '直接指派給該使用者的原則，優先套用'],
+              ['角色指派', '次之', '使用者所屬角色的預設原則，使用者未個人指派時套用'],
+              ['無指派', '最低', '未設定任何原則，查詢不受資料限制（需注意資訊安全）'],
+            ]}
+          />
+          <TipBox>建議為每個角色都設定預設原則，確保新加入的使用者自動繼承適當的資料限制，而非無限制存取所有 ERP 資料。</TipBox>
+        </SubSection>
+      </Section>
+
+      {/* ═══════════════════════════════════════════════════ AI 戰情 — 外部資料來源 */}
+
+      <Section id="a-db-sources" icon={<Database size={22} />} iconColor="text-cyan-600" title="AI 戰情 — 外部資料來源">
+        <Para>
+          外部資料來源（DB Sources）是 AI 戰情室連接 Oracle / MySQL / MSSQL 資料庫的連線設定，
+          由系統管理員在後台「AI 戰情室 — 外部資料來源」頁籤管理。設計者在建立 Schema 時需指定使用哪個資料來源。
+        </Para>
+        <Para>詳細設定說明請參考使用者說明的「<strong>Schema 與多資料庫來源</strong>」章節（Step 1：設定外部資料來源），
+          包含 Oracle / MySQL / MSSQL 各欄位說明、連線池設定及 Ping 測試操作。
+        </Para>
+        <TipBox>
+          建議為每個 DB Source 使用<strong>唯讀帳號</strong>（SELECT only），避免 AI 生成的 SQL 意外修改 ERP 資料。
+          Ping 測試確認連線成功後才啟用，未啟用的 DB Source 不會出現在 Schema 選單中。
+        </TipBox>
+      </Section>
+
+      {/* ═══════════════════════════════════════════════════ 向量預設模型設定 */}
+
+      <Section id="a-vector-defaults" icon={<Cpu size={22} />} iconColor="text-teal-600" title="向量預設模型設定">
+        <Para>
+          向量預設模型設定決定整個系統在進行知識庫向量化、重排序、OCR 時使用哪個 LLM 模型，
+          位於後台管理的「向量預設模型」頁籤。
+        </Para>
+
+        <SubSection title="設定項目">
+          <Table
+            headers={['設定', '說明', '模型角色要求']}
+            rows={[
+              ['Embedding 模型', '知識庫文件向量化（embedding）使用的模型；決定向量維度，變更後需重建知識庫', 'model_role = embedding'],
+              ['Rerank 模型', '混合檢索重排序使用的模型；提升召回精準度', 'model_role = rerank'],
+              ['OCR 模型', '知識庫文件含圖片或 PDF 時進行 OCR 的模型（使用 chat 模型的多模態能力）', 'model_role = chat（且支援圖片輸入）'],
+            ]}
+          />
+          <NoteBox>
+            選單只會顯示<strong>已啟用</strong>且對應模型角色（model_role）正確的模型。
+            選擇空值時，自動使用 .env 的環境變數預設值（KB_EMBEDDING_MODEL / KB_RERANK_MODEL / KB_OCR_MODEL）。
+          </NoteBox>
+        </SubSection>
+
+        <SubSection title="注意事項">
+          <Para>
+            <strong>Embedding 模型</strong>的維度（dimension）與知識庫向量資料庫強綁定：
+          </Para>
+          <div className="space-y-2 pl-2">
+            {[
+              '如果更換 Embedding 模型，舊的向量資料與新模型的維度不符，需重建所有知識庫向量（會消耗大量 Token）',
+              '建議在初期慎選 Embedding 模型，一旦知識庫資料量大後再更換成本極高',
+              'OCR 模型選擇影響圖片/PDF 的解析品質，建議使用 Gemini Flash 或同級別的快速多模態模型',
+            ].map((item, i) => (
+              <div key={i} className="flex items-start gap-2 text-sm text-slate-600">
+                <span className="w-2 h-2 rounded-full bg-orange-400 flex-shrink-0 mt-1.5" />
+                {item}
+              </div>
+            ))}
+          </div>
+        </SubSection>
+      </Section>
+
+      {/* ═══════════════════════════════════════════════════ 深度研究紀錄 */}
+
+      <Section id="a-research-logs" icon={<GitFork size={22} />} iconColor="text-blue-600" title="深度研究紀錄">
+        <Para>
+          深度研究紀錄位於後台管理的「深度研究紀錄」頁籤，管理員可查看所有使用者發起的 Deep Research 任務，
+          包含進行中、已完成、失敗的任務，並可下載結果報告。
+        </Para>
+
+        <SubSection title="查詢與篩選">
+          <Table
+            headers={['篩選條件', '說明']}
+            rows={[
+              ['關鍵字搜尋', '依研究主題標題或問題內容搜尋'],
+              ['狀態篩選', 'pending（排隊中）/ running（進行中）/ done（已完成）/ failed（失敗）'],
+              ['分頁', '每頁顯示 20 筆，支援翻頁'],
+            ]}
+          />
+        </SubSection>
+
+        <SubSection title="記錄內容">
+          <Table
+            headers={['欄位', '說明']}
+            rows={[
+              ['使用者', '發起研究的使用者工號與姓名'],
+              ['研究主題', '研究標題（AI 自動產生或使用者輸入）'],
+              ['狀態', '彩色徽章標示：灰=排隊中、藍=進行中、綠=已完成、紅=失敗'],
+              ['建立時間', '任務發起時間'],
+              ['完成時間', '研究完成時間（failed 狀態顯示失敗時間）'],
+              ['展開詳情', '點擊記錄可展開：完整問題、輸出格式、是否啟用網路搜尋、錯誤訊息、結果下載連結'],
+            ]}
+          />
+          <TipBox>
+            研究結果可下載為多種格式（Markdown / PDF 等），下載連結顯示在展開詳情的底部。
+            failed 狀態的任務會顯示具體錯誤訊息，可幫助排查問題。
+          </TipBox>
+        </SubSection>
+      </Section>
+
+      {/* ═══════════════════════════════════════════════════ 外部 API 金鑰管理 */}
+
+      <Section id="a-api-keys" icon={<Key size={22} />} iconColor="text-amber-600" title="外部 API 金鑰管理">
+        <Para>
+          外部 API 金鑰管理讓第三方系統可透過 REST API 安全存取 FOXLINK GPT 的知識庫查詢服務，
+          位於後台管理的「外部 API 金鑰」頁籤（僅系統管理員可見）。
+        </Para>
+
+        <SubSection title="建立 API 金鑰">
+          <div className="space-y-3">
+            <StepItem num={1} title="點擊「新增 API 金鑰」" />
+            <StepItem num={2} title="填寫名稱（必填）與說明（選填）" desc="建議使用有意義的名稱，如「ERP 整合系統」「測試環境」" />
+            <StepItem num={3} title="選擇可存取的知識庫" desc="留空 = 可存取所有啟用的知識庫；勾選特定知識庫 = 限制存取範圍" />
+            <StepItem num={4} title="設定到期日期（選填）" desc="到期後金鑰自動停用，建議為對外提供的金鑰設定到期日" />
+            <StepItem num={5} title="點「建立」" desc="系統一次性顯示完整金鑰（格式 fk_sk_xxxx），請立即複製並安全保管，關閉後無法再查看" />
+          </div>
+          <NoteBox>金鑰建立後系統只儲存雜湊值，不保留明文。若遺失金鑰，只能刪除後重新建立。</NoteBox>
+        </SubSection>
+
+        <SubSection title="API 金鑰管理欄位">
+          <Table
+            headers={['欄位', '說明']}
+            rows={[
+              ['名稱', '金鑰識別標籤'],
+              ['前綴', '金鑰的可見前幾位（如 fk_sk_Ab...），用於識別但不洩漏完整金鑰'],
+              ['可存取知識庫', '顯示已授權的知識庫清單，或「全部」'],
+              ['狀態', '啟用 / 停用 / 已到期（超過到期日）'],
+              ['到期日期', '留空 = 永不過期'],
+              ['最後使用時間', '記錄上次使用此金鑰呼叫 API 的時間，可監控使用情況'],
+              ['建立者', '建立此金鑰的管理員帳號'],
+            ]}
+          />
+        </SubSection>
+
+        <SubSection title="外部 API 使用方式">
+          <Para>第三方系統取得金鑰後，可呼叫以下 API 端點：</Para>
+          <CodeBlock>{`# 請求標頭
+Authorization: Bearer fk_sk_your_api_key_here
+
+# 列出可用知識庫
+GET /api/v1/kb/list
+
+# 語意搜尋知識庫
+POST /api/v1/kb/search
+{
+  "kb_id": 1,         // 知識庫 ID
+  "query": "產品規格",  // 搜尋問題
+  "top_k": 5          // 回傳筆數
+}
+
+# 知識庫問答（AI 整合回答）
+POST /api/v1/kb/chat
+{
+  "kb_id": 1,
+  "question": "FL-X100 的最大電流是多少？",
+  "model": "flash"    // 使用的 LLM 模型 key
+}`}</CodeBlock>
+          <TipBox>API 金鑰存取受知識庫權限限制，若呼叫未授權的知識庫 ID 會回傳 403 錯誤。金鑰啟用/停用可即時生效，無需重啟服務。</TipBox>
+        </SubSection>
+      </Section>
+
+      {/* ═══════════════════════════════════════════════════ 費用分析 */}
+
+      <Section id="a-cost-analysis" icon={<DollarSign size={22} />} iconColor="text-green-600" title="費用分析">
+        <Para>
+          費用分析頁籤提供以<strong>利潤中心 → 部門 → 員工</strong>三層鑽取的 AI 費用歸因分析，
+          讓管理層快速掌握哪個部門、哪位員工消耗最多 AI 費用，並支援多維度圖表與 CSV 匯出。
+        </Para>
+        <Para>詳細說明請參考「<strong>Token 與費用統計</strong>」章節的「費用分析（成本歸因）」小節。此頁籤是費用分析的完整獨立視圖，同樣支援：</Para>
+        <Table
+          headers={['功能', '說明']}
+          rows={[
+            ['日期篩選', '選擇查詢日期區間，預設為當月 1 日至今日'],
+            ['利潤中心圓餅圖', '各利潤中心費用佔比；點擊扇形可鑽取到部門層級'],
+            ['部門費用長條圖', '依費用由高到低排列各部門，點擊可進一步查看員工清單'],
+            ['月份費用趨勢圖', '時間序列分析，觀察費用在各月份的變化趨勢'],
+            ['利潤中心彙總表', '表格形式含部門、事業處、事業群層級；支援 CSV 匯出'],
+            ['月份費用分析表', '同一利潤中心下按月份拆分的費用明細；支援 CSV 匯出'],
+            ['員工 Token 明細', '最細粒度，含每位員工的 Input/Output Token 數及費用；支援 CSV 匯出'],
+          ]}
+        />
+        <NoteBox>費用計算依賴費率設定（Token Pricing），若費率未設定則費用欄位顯示為 0。可在「Token 與費用統計」頁籤的費率設定區域新增費率，並執行「重新計算費用」補算歷史數據。</NoteBox>
       </Section>
 
       <Section id="a-system" icon={<Settings size={22} />} iconColor="text-slate-500" title="系統設定">
