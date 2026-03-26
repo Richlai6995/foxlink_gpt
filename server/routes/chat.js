@@ -1089,7 +1089,8 @@ router.post('/sessions/:id/messages', upload.array('files', 10), async (req, res
           '\n可用 icon 名稱：shield, shield-check, alert, info, check, check-circle, user, users, bar-chart, line-chart, pie-chart, trending-up, trending-down, target, building, briefcase, settings, globe, lightbulb, rocket, file, file-text, clipboard, clock, calendar, arrow-right, star, award, package, link\n' +
           '規則：1)第一張必須是 title 封面；2)bullets 最多 7 條；3)3col 最多 3 欄每欄最多 5 條；4)flow 最多 5 步驟；5)所有文字使用使用者指定語言（預設繁體中文）；6)必須輸出完整 JSON 代碼區塊。',
       });
-    } else if (wantsFileGen) {
+    } else if (wantsFileGen && !docTemplateId) {
+      // Only inject file-gen reminder when no doc template is selected
       console.log(`[Chat] File generation detected, injecting reminder`);
       userParts.push({
         text: '[系統規則強制提醒] 你必須在本次回覆中直接輸出完整的 generate_xxx:filename 代碼區塊（包含所有檔案內容）。只說「已生成」「系統處理」「點擊連結」是無效的，絕對不會產生任何檔案。',
@@ -2239,11 +2240,12 @@ ${varList}
       const blockHeaders = text.match(/```generate_\w+:[^\n]+/g);
       console.log(`[Chat] Generate block headers in response: ${blockHeaders ? JSON.stringify(blockHeaders) : 'none'}`);
 
-      if (blockHeaders && blockHeaders.length > 0) {
+      if (!docTemplateId && blockHeaders && blockHeaders.length > 0) {
         sendEvent({ type: 'status', message: `正在生成 ${blockHeaders.length} 個檔案...` });
       }
 
-      const generatedFiles = await processGenerateBlocks(text, sessionId);
+      // When a doc template is selected, skip free-form file generation entirely
+      const generatedFiles = docTemplateId ? [] : await processGenerateBlocks(text, sessionId);
       if (generatedFiles.length > 0) {
         const clientFiles = generatedFiles.map(({ type, filename, publicUrl }) => ({ type, filename, publicUrl }));
         sendEvent({ type: 'generated_files', files: clientFiles });
