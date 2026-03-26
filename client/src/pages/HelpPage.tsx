@@ -3922,6 +3922,7 @@ POST /api/v1/kb/chat
         <Para>
           系統監控位於後台管理的「系統監控」頁籤，提供 K8s 叢集、Docker 容器、主機資源、磁碟、線上人數等即時監控，
           每 30 秒自動刷新。所有面板在對應服務不可用時會靜默顯示空資料，不影響其他功能。
+          設定入口：監控頁面右上角齒輪圖示 → 監控設定。
         </Para>
 
         <SubSection title="監控面板總覽">
@@ -3939,21 +3940,134 @@ POST /api/v1/kb/chat
               ['Docker Images', '映像列表，支援一鍵清理 dangling images'],
               ['Service 健康檢查', '自定義 HTTP 健康檢查端點，顯示 30 天 uptime 百分比'],
               ['趨勢圖表', '主機/節點/磁碟歷史趨勢，支援 24h / 7d / 30d 切換'],
+              ['告警列表', '所有未解除告警，支援解除、忽略 N 天（Snooze）、AI 診斷'],
             ]}
           />
         </SubSection>
 
-        <SubSection title="告警機制">
-          <Para>系統會依設定的閾值自動產生告警，告警分為三個等級：</Para>
+        <SubSection title="監控設定 — 資料保留天數">
+          <Para>控制各類監控資料在資料庫的保留時間，到期後由排程自動清除。</Para>
           <Table
-            headers={['等級', '觸發條件範例', '通知方式']}
+            headers={['設定項目', '參數鍵', '預設值', '說明']}
             rows={[
-              ['Warning', '磁碟使用率接近閾值', '頁面 Banner 顯示'],
-              ['Critical', 'CPU/記憶體超過閾值、Health Check 連續失敗、容器異常退出', '頁面 Banner + Email 通知'],
-              ['Emergency', 'Node NotReady', '頁面 Banner + Email + Webhook（LINE / Teams）'],
+              ['節點/主機指標', 'monitor_metrics_retention_days', '7 天', 'K8s Node 與主機 CPU/Memory/Load 歷史趨勢資料'],
+              ['磁碟指標', 'monitor_disk_retention_days', '30 天', '磁碟使用率歷史記錄'],
+              ['線上人數', 'monitor_online_retention_days', '30 天', '每分鐘在線快照（用於趨勢圖）'],
+              ['健康檢查', 'monitor_health_check_retention', '7 天', 'Service HTTP uptime 檢查記錄'],
+              ['告警紀錄', 'monitor_log_retention_days', '30 天', 'monitor_alerts 表的已解除告警保留天數'],
+              ['部門統計', 'monitor_dept_retention_days', '30 天', '部門在線人數快照保留天數'],
             ]}
           />
-          <TipBox>告警設定可在監控頁面右上角的齒輪圖示進入，可調整閾值、資料保留天數、Webhook URL 等。</TipBox>
+        </SubSection>
+
+        <SubSection title="監控設定 — 告警閾值">
+          <Table
+            headers={['設定項目', '參數鍵', '預設值', '觸發說明']}
+            rows={[
+              ['啟用告警', 'monitor_alert_enabled', 'true', '關閉後所有閾值告警停止，但 emergency 等級仍會觸發'],
+              ['CPU Request % 閾值', 'monitor_cpu_threshold', '90', 'K8s Node 的 CPU 請求百分比 > 此值 → critical 告警'],
+              ['Memory % 閾值', 'monitor_mem_threshold', '85', 'K8s Node 的 Memory 請求百分比 > 此值 → critical 告警；主機實際記憶體使用 > 此值 → warning'],
+              ['磁碟 % 閾值', 'monitor_disk_threshold', '85', '任一掛載點使用率 > 此值 → critical 告警'],
+              ['CPU Load/cores 比值', 'monitor_load_threshold', '0.9', '主機 Load 1m ÷ CPU 核心數 > 此值 → warning 告警'],
+              ['Pod restart 上限', 'monitor_pod_restart_limit', '5', 'Pod 任一 container 重啟次數 > 此值 → critical 告警'],
+              ['Pod pending 上限 (分鐘)', 'monitor_pod_pending_minutes', '10', 'Pod 持續 Pending 超過此時間 → warning 告警'],
+              ['通知冷卻 (分鐘)', 'monitor_alert_cooldown', '30', '同一告警類型在冷卻期內不重複發送通知，避免告警風暴'],
+            ]}
+          />
+        </SubSection>
+
+        <SubSection title="監控設定 — AI 故障診斷 & 部門統計">
+          <Table
+            headers={['設定項目', '參數鍵', '預設值', '說明']}
+            rows={[
+              ['診斷模型', 'monitor_ai_model', 'flash', '告警詳情頁「AI 診斷」使用的模型：flash（快速）或 pro（深入分析）'],
+              ['部門統計快照間隔', 'monitor_dept_snapshot_interval', '5 分鐘', '每隔幾分鐘記錄一次各部門在線人數快照'],
+              ['部門統計保留天數', 'monitor_dept_retention_days', '30 天', '部門在線快照保留天數'],
+            ]}
+          />
+        </SubSection>
+
+        <SubSection title="告警類型與通知邏輯">
+          <Para>系統依以下 10 種告警類型自動偵測並通知。通知邏輯依嚴重度分層：</Para>
+          <div className="grid grid-cols-3 gap-3 mb-4">
+            <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 text-sm">
+              <div className="font-semibold text-yellow-700 mb-1">⚠️ Warning</div>
+              <div className="text-yellow-600 text-xs leading-5">頁面 Banner 顯示<br/>不發 Email / Webhook</div>
+            </div>
+            <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm">
+              <div className="font-semibold text-red-700 mb-1">🔴 Critical</div>
+              <div className="text-red-600 text-xs leading-5">頁面 Banner<br/>Email → 所有管理員<br/>Webhook（需啟用設定）</div>
+            </div>
+            <div className="bg-red-100 border border-red-300 rounded-lg p-3 text-sm">
+              <div className="font-semibold text-red-800 mb-1">🚨 Emergency</div>
+              <div className="text-red-700 text-xs leading-5">頁面 Banner<br/>Email → 所有管理員<br/>Webhook（<strong>強制發送</strong>，無視啟用設定）</div>
+            </div>
+          </div>
+          <Table
+            headers={['告警類型', '嚴重度', '觸發條件']}
+            rows={[
+              ['node_not_ready', 'Emergency', 'K8s Node 狀態非 Ready'],
+              ['nas_down', 'Emergency', 'NFS 掛載點消失（mount 不存在）'],
+              ['resource_high', 'Critical', 'Node CPU 請求 % 或 Memory 請求 % 超過閾值'],
+              ['pod_crash', 'Critical', 'Pod container 重啟次數超過設定上限'],
+              ['disk_high', 'Critical', '磁碟掛載點使用率超過閾值'],
+              ['container_exit', 'Critical', 'Docker container 異常退出（exit code ≠ 0）'],
+              ['service_down', 'Critical', 'Health Check 端點回應失敗'],
+              ['pod_pending', 'Warning', 'Pod 持續 Pending 超過設定分鐘'],
+              ['host_load_high', 'Warning', '主機 CPU Load/cores 超過閾值'],
+              ['host_mem_high', 'Warning', '主機記憶體使用率超過 Memory 閾值'],
+            ]}
+          />
+          <NoteBox>冷卻機制（monitor_alert_cooldown）對所有等級均有效：同一 alert_type + resource_name 在冷卻期內不重複觸發通知，但告警會繼續記錄到 monitor_alerts 表。</NoteBox>
+        </SubSection>
+
+        <SubSection title="Webhook 通知設定">
+          <Para>
+            在監控設定中開啟「啟用 Webhook」後，critical / emergency 告警除了 Email 外也會推送到指定平台。
+            支援三種類型，設定方式如下：
+          </Para>
+
+          <div className="space-y-4 mt-2">
+            <div className="border border-slate-200 rounded-lg p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-sm font-semibold text-slate-700">Microsoft Teams</span>
+                <Tag color="blue">推薦</Tag>
+              </div>
+              <div className="text-sm text-slate-600 space-y-1 leading-6">
+                <p>① Teams 頻道 → 右鍵「管理頻道」→「連接器」→「Incoming Webhook」→「設定」</p>
+                <p>② 輸入名稱（如 FOXLINK GPT Monitor），上傳 logo，點「建立」</p>
+                <p>③ 複製產生的 Webhook URL（格式：<code className="bg-slate-100 px-1 rounded text-xs">https://xxx.webhook.office.com/webhookb2/...</code>）</p>
+                <p>④ 監控設定 → 類型選「Microsoft Teams」→ 貼上 URL → 儲存</p>
+              </div>
+            </div>
+
+            <div className="border border-slate-200 rounded-lg p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-sm font-semibold text-slate-700">Webex</span>
+              </div>
+              <div className="text-sm text-slate-600 space-y-1 leading-6">
+                <p>① 進入 <code className="bg-slate-100 px-1 rounded text-xs">developer.webex.com</code> → 登入 → 「My Webex Apps」→「Create a New App」→「Incoming Webhook」</p>
+                <p>② 填入名稱、選擇目標 Space（群組），點「Add Webhook」</p>
+                <p>③ 複製產生的 Webhook URL（格式：<code className="bg-slate-100 px-1 rounded text-xs">https://webexapis.com/v1/webhooks/incomingConnection/...</code>）</p>
+                <p>④ 監控設定 → 類型選「Webex」→ 貼上 URL → 儲存</p>
+                <p className="text-xs text-slate-400">訊息格式：Markdown（⚠️/🔴/🚨 emoji + 告警詳情）</p>
+              </div>
+            </div>
+
+            <div className="border border-slate-200 rounded-lg p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-sm font-semibold text-slate-700">LINE Notify</span>
+              </div>
+              <div className="text-sm text-slate-600 space-y-1 leading-6">
+                <p>① 前往 <code className="bg-slate-100 px-1 rounded text-xs">notify-bot.line.me/zh_TW</code> → 登入 LINE 帳號</p>
+                <p>② 「個人頁面」→「發行權杖」→ 填入名稱、選擇接收群組</p>
+                <p>③ 複製產生的 Token（格式：隨機英數字串）</p>
+                <p>④ 監控設定 → 類型選「LINE Notify」→ 將 Token 貼入「URL」欄位 → 儲存</p>
+                <p className="text-xs text-slate-400">注意：LINE Notify 欄位輸入的是 Token，不是 URL；系統會自動以 Bearer Token 呼叫 LINE API</p>
+              </div>
+            </div>
+          </div>
+          <TipBox>設定後可點「測試發送」立即驗證是否收到通知，不需等待真實告警觸發。</TipBox>
         </SubSection>
 
         <SubSection title="Deploy 面板">
@@ -3961,13 +4075,11 @@ POST /api/v1/kb/chat
             監控頁面內建一鍵部署功能（位於頁面右上角），支援在管理介面直接觸發 K8s Rolling Update，
             部署過程以 SSE 即時串流顯示輸出，並記錄部署歷史。
           </Para>
-          <NoteBox>Deploy 功能需要 server 所在環境具備 kubectl 和 deploy 腳本的執行權限。</NoteBox>
+          <NoteBox>Deploy 功能需要 server 所在環境具備 kubectl 和 deploy.sh 的執行權限（K8s flgptm01 節點）。</NoteBox>
         </SubSection>
 
         <SubSection title="Log 檢視器">
-          <Para>
-            點擊 Pod 或 Container 的「Log」按鈕即可開啟即時 Log 串流視窗，支援：
-          </Para>
+          <Para>點擊 Pod 或 Container 的「Log」按鈕開啟即時 Log 串流視窗，支援：</Para>
           <ul className="list-disc pl-6 text-sm text-slate-600 space-y-1">
             <li>SSE 即時串流顯示</li>
             <li>關鍵字搜尋高亮</li>
@@ -3976,21 +4088,16 @@ POST /api/v1/kb/chat
           </ul>
         </SubSection>
 
-        <SubSection title="K8s 部署前置設定">
-          <Para>
-            監控功能需要 K8s RBAC 權限（已寫入 deployment.yaml），首次啟用時需執行：
-          </Para>
-          <CodeBlock>{`# 1. Build 新 image
-cd ~/foxlink_gpt && git pull && ./deploy.sh
-
-# 2. Apply RBAC + volume mount
-kubectl apply -f k8s/deployment.yaml
-
-# 3. 重啟 pod
-kubectl rollout restart deployment foxlink-gpt -n foxlink`}</CodeBlock>
-          <Para>
-            詳細說明請參考 <code className="bg-slate-100 px-1 rounded text-xs">docs/k8s-installation-guide.md</code> 第十二節。
-          </Para>
+        <SubSection title="告警操作">
+          <Table
+            headers={['操作', '說明']}
+            rows={[
+              ['解除（Resolve）', '標記告警已處理，移出未解除列表，保留歷史紀錄'],
+              ['全部解除（Resolve All）', '一次性解除所有未解除告警'],
+              ['Snooze N 天', '告警暫時忽略 N 天（snoozed_until），期間不重複通知'],
+              ['AI 診斷', '針對 pod_crash / pod_pending 告警，AI 自動讀取 Pod describe 和最近 50 行 Log 進行故障分析'],
+            ]}
+          />
         </SubSection>
       </Section>
 
