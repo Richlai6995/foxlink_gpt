@@ -11,6 +11,10 @@ const { v4: uuid } = require('uuid');
 const { embedText, toVectorStr, DEFAULT_MODEL: DEFAULT_EMBED_MODEL } = require('./kbEmbedding');
 const { chunkDocument } = require('./kbDocParser');
 const { sections } = require('./helpContent');
+const { tryLock, unlock } = require('./redisClient');
+
+const LOCK_KEY = 'lock:help_kb_sync';
+const LOCK_TTL = 600; // 10 分鐘（足夠完成 21 章節 embedding）
 
 const KB_NAME = 'FOXLINK GPT 使用說明書';
 const KB_TAGS = JSON.stringify(['使用說明', '操作手冊', '功能教學', '如何使用', 'FOXLINK GPT']);
@@ -176,6 +180,13 @@ async function updateKbStats(db, kbId) {
  * @param {object} db
  */
 async function syncHelpKb(db) {
+  // 分散式鎖：K8s 多 replica 只讓一個 pod 跑同步
+  const acquired = await tryLock(LOCK_KEY, LOCK_TTL);
+  if (!acquired) {
+    console.log('[HelpKB] 另一個 pod 正在同步，略過。');
+    return;
+  }
+
   try {
     console.log('[HelpKB] 開始同步說明書知識庫...');
     const kb = await getOrCreateKb(db);
@@ -201,6 +212,8 @@ async function syncHelpKb(db) {
     }
   } catch (e) {
     console.error('[HelpKB] syncHelpKb 失敗:', e.message);
+  } finally {
+    await unlock(LOCK_KEY);
   }
 }
 

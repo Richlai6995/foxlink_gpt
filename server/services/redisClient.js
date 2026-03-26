@@ -81,9 +81,46 @@ function getStore() {
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
+/**
+ * Distributed lock via Redis SET NX EX.
+ * Falls back to a process-level mutex in MemoryStore mode (local dev).
+ */
+const _memLocks = new Set();
+
 module.exports = {
   TOKEN_TTL,
   ADMIN_TOKEN_TTL,
+
+  /**
+   * Try to acquire a distributed lock.
+   * Returns true if acquired, false if someone else holds it.
+   * @param {string} key  Lock key (e.g. 'lock:help_kb_sync')
+   * @param {number} ttlSeconds  Auto-expire (prevents deadlock if pod crashes)
+   */
+  async tryLock(key, ttlSeconds = 120) {
+    const s = getStore();
+    if (s instanceof MemoryStore) {
+      if (_memLocks.has(key)) return false;
+      _memLocks.add(key);
+      return true;
+    }
+    // ioredis SET NX EX
+    const result = await s.client.set(key, '1', 'EX', ttlSeconds, 'NX');
+    return result === 'OK';
+  },
+
+  /**
+   * Release a distributed lock.
+   */
+  async unlock(key) {
+    const s = getStore();
+    if (s instanceof MemoryStore) {
+      _memLocks.delete(key);
+      return;
+    }
+    await s.client.del(key);
+  },
+
   /**
    * Save session data under token key with TTL.
    * @param {string} token
