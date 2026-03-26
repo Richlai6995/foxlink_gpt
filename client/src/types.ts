@@ -701,10 +701,25 @@ export interface ShareGrantee {
 // ── Document Templates ────────────────────────────────────────────────────────
 
 export type TemplateVariableType = 'text' | 'number' | 'date' | 'select' | 'loop'
-export type TemplateFormat = 'docx' | 'xlsx' | 'pdf'
+export type TemplateFormat = 'docx' | 'xlsx' | 'pdf' | 'pptx'
 export type TemplateStrategy = 'native' | 'pdf_form' | 'ai_schema'
 export type TemplateAccessLevel = 'owner' | 'edit' | 'use'
 export type TemplateShareType = 'use' | 'edit'
+export type TemplateOverflow = 'wrap' | 'truncate' | 'shrink' | 'summarize'
+
+export interface VariableStyleProps {
+  fontSize?: number       // pt
+  bold?: boolean
+  italic?: boolean
+  color?: string          // hex e.g. "#CC0000"
+  overflow?: TemplateOverflow
+  maxChars?: number
+}
+
+export interface VariableStyle {
+  detected?: VariableStyleProps   // auto-detected from original template file
+  override?: VariableStyleProps   // user-configured override
+}
 
 export interface TemplateVariable {
   key: string
@@ -717,6 +732,18 @@ export interface TemplateVariable {
   placeholder?: string
   options?: string[] | null
   children?: TemplateVariable[]
+  style?: VariableStyle
+  docx_style?: {
+    rowHeightPt?: number    // fixed row height (twips/20); option C: override template's own height
+    noWrap?: boolean
+  }
+  pdf_cell?: {              // phase 2: visual editor coordinates
+    page: number
+    x: number
+    y: number
+    width: number
+    height: number
+  }
 }
 
 export interface TemplateSchema {
@@ -740,6 +767,7 @@ export interface DocTemplate {
   schema_json?: string
   preview_url?: string
   is_public: number
+  is_fixed_format: number
   tags?: string
   use_count: number
   forked_from?: string

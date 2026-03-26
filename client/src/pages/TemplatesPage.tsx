@@ -6,6 +6,7 @@ import { DocTemplate, TemplateSchema } from '../types'
 import TemplateCard from '../components/templates/TemplateCard'
 import TemplateUploadWizard from '../components/templates/TemplateUploadWizard'
 import VariableSchemaEditor from '../components/templates/VariableSchemaEditor'
+import StyleEditorTab from '../components/templates/StyleEditorTab'
 
 const FORMAT_OPTIONS = [
   { value: '', label: '所有格式' },
@@ -15,14 +16,18 @@ const FORMAT_OPTIONS = [
   { value: 'pdf', label: 'PDF' },
 ]
 
-// Edit modal for updating name/description/tags/schema
+type EditTab = 'basic' | 'variables' | 'style'
+
+// Edit modal for updating name/description/tags/schema/style
 function TemplateEditModal({ template, onClose, onSaved }: {
   template: DocTemplate
   onClose: () => void
   onSaved: () => void
 }) {
+  const [tab, setTab] = useState<EditTab>('basic')
   const [name, setName] = useState(template.name)
   const [description, setDescription] = useState(template.description || '')
+  const [isFixedFormat, setIsFixedFormat] = useState(!!template.is_fixed_format)
   const [tags, setTags] = useState<string[]>(() => { try { return JSON.parse(template.tags || '[]') } catch { return [] } })
   const [tagInput, setTagInput] = useState('')
   const [schema, setSchema] = useState<TemplateSchema>(() => { try { return JSON.parse(template.schema_json || '{}') } catch { return { variables: [] } } })
@@ -35,7 +40,7 @@ function TemplateEditModal({ template, onClose, onSaved }: {
     setError('')
     try {
       await api.put(`/doc-templates/${template.id}`, {
-        name, description, tags, schema_json: schema,
+        name, description, tags, schema_json: schema, is_fixed_format: isFixedFormat,
       })
       onSaved()
       onClose()
@@ -52,49 +57,115 @@ function TemplateEditModal({ template, onClose, onSaved }: {
     setTagInput('')
   }
 
+  const TABS: { key: EditTab; label: string }[] = [
+    { key: 'basic',     label: '基本資訊' },
+    { key: 'variables', label: '變數設定' },
+    { key: 'style',     label: '樣式設定' },
+  ]
+
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg w-[700px] max-h-[85vh] flex flex-col">
+      <div className="bg-white rounded-lg w-[780px] max-h-[85vh] flex flex-col">
+        {/* Header */}
         <div className="flex items-center justify-between px-5 py-3 border-b">
-          <span className="font-medium text-sm">編輯範本</span>
+          <div className="flex items-center gap-4">
+            <span className="font-medium text-sm">編輯範本</span>
+            {/* Fixed format toggle */}
+            <label className="flex items-center gap-2 cursor-pointer">
+              <button
+                onClick={() => canEdit && setIsFixedFormat(!isFixedFormat)}
+                className={`w-9 h-5 rounded-full transition relative ${isFixedFormat ? 'bg-blue-600' : 'bg-slate-300'} ${!canEdit ? 'opacity-50 cursor-not-allowed' : ''}`}
+              >
+                <div className={`w-3.5 h-3.5 rounded-full bg-white absolute top-0.5 transition ${isFixedFormat ? 'left-[18px]' : 'left-0.5'}`} />
+              </button>
+              <span className={`text-xs ${isFixedFormat ? 'text-blue-600 font-medium' : 'text-slate-500'}`}>
+                固定格式模式
+              </span>
+            </label>
+          </div>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-600">✕</button>
         </div>
-        <div className="flex-1 overflow-auto p-5 space-y-4">
-          {error && <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded p-2">{error}</div>}
 
-          <div>
-            <label className="text-xs text-slate-500 block mb-1">範本名稱</label>
-            <input className="w-full border rounded px-3 py-2 text-sm" value={name} onChange={e => setName(e.target.value)} />
-          </div>
-          <div>
-            <label className="text-xs text-slate-500 block mb-1">描述</label>
-            <textarea className="w-full border rounded px-3 py-2 text-sm" rows={2} value={description} onChange={e => setDescription(e.target.value)} />
-          </div>
-          <div>
-            <label className="text-xs text-slate-500 block mb-1">標籤</label>
-            <div className="flex flex-wrap gap-1 mb-1">
-              {tags.map(t => (
-                <span key={t} className="flex items-center gap-1 bg-blue-100 text-blue-700 text-xs px-2 py-0.5 rounded-full">
-                  {t}
-                  <button onClick={() => setTags(tags.filter(x => x !== t))}>✕</button>
-                </span>
-              ))}
-            </div>
-            <div className="flex gap-2">
-              <input className="flex-1 border rounded px-2 py-1 text-xs" placeholder="輸入標籤後按 Enter" value={tagInput} onChange={e => setTagInput(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addTag() } }} />
-              <button onClick={addTag} className="text-xs px-2 py-1 border rounded text-slate-600">新增</button>
-            </div>
-          </div>
+        {/* Tab bar */}
+        <div className="flex border-b px-5">
+          {TABS.map(t => (
+            <button
+              key={t.key}
+              onClick={() => setTab(t.key)}
+              className={`px-4 py-2 text-xs font-medium border-b-2 transition ${tab === t.key ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}
+            >
+              {t.label}
+              {t.key === 'style' && isFixedFormat && (
+                <span className="ml-1 text-[10px] bg-blue-100 text-blue-600 px-1 rounded">啟用</span>
+              )}
+            </button>
+          ))}
+        </div>
 
-          <div>
-            <label className="text-xs text-slate-500 block mb-2">變數設定</label>
+        <div className="flex-1 overflow-auto p-5">
+          {error && <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded p-2 mb-3">{error}</div>}
+
+          {/* Basic tab */}
+          {tab === 'basic' && (
+            <div className="space-y-4">
+              <div>
+                <label className="text-xs text-slate-500 block mb-1">範本名稱</label>
+                <input className="w-full border rounded px-3 py-2 text-sm" value={name} onChange={e => setName(e.target.value)} />
+              </div>
+              <div>
+                <label className="text-xs text-slate-500 block mb-1">描述</label>
+                <textarea className="w-full border rounded px-3 py-2 text-sm" rows={2} value={description} onChange={e => setDescription(e.target.value)} />
+              </div>
+              <div>
+                <label className="text-xs text-slate-500 block mb-1">標籤</label>
+                <div className="flex flex-wrap gap-1 mb-1">
+                  {tags.map(t => (
+                    <span key={t} className="flex items-center gap-1 bg-blue-100 text-blue-700 text-xs px-2 py-0.5 rounded-full">
+                      {t}
+                      <button onClick={() => setTags(tags.filter(x => x !== t))}>✕</button>
+                    </span>
+                  ))}
+                </div>
+                <div className="flex gap-2">
+                  <input className="flex-1 border rounded px-2 py-1 text-xs" placeholder="輸入標籤後按 Enter" value={tagInput} onChange={e => setTagInput(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addTag() } }} />
+                  <button onClick={addTag} className="text-xs px-2 py-1 border rounded text-slate-600">新增</button>
+                </div>
+              </div>
+              {isFixedFormat && (
+                <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 text-xs text-blue-700">
+                  <strong>固定格式模式已啟用</strong>：生成時每個儲存格將套用「樣式設定」頁籤中的字型/顏色/溢位設定。
+                  DOCX 可另在各 loop 變數的 <code>docx_style.rowHeightPt</code> 設定固定列高。
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Variables tab */}
+          {tab === 'variables' && (
             <VariableSchemaEditor
               variables={schema.variables || []}
               onChange={vars => setSchema({ ...schema, variables: vars })}
               readonly={!canEdit}
             />
-          </div>
+          )}
+
+          {/* Style tab */}
+          {tab === 'style' && (
+            <div>
+              {!isFixedFormat && (
+                <div className="mb-3 text-xs text-slate-500 bg-slate-50 border rounded p-3">
+                  樣式設定在「固定格式模式」關閉時不會套用。請先在標題列開啟固定格式模式。
+                </div>
+              )}
+              <StyleEditorTab
+                variables={schema.variables || []}
+                onChange={vars => setSchema({ ...schema, variables: vars })}
+                readonly={!canEdit}
+              />
+            </div>
+          )}
         </div>
+
         <div className="flex justify-end gap-2 px-5 py-3 border-t">
           <button onClick={onClose} className="text-sm text-slate-500 hover:text-slate-700">取消</button>
           <button onClick={save} disabled={saving} className="px-4 py-1.5 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50">

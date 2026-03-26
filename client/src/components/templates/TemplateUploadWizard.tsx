@@ -24,6 +24,7 @@ export default function TemplateUploadWizard({ onCreated, onClose }: Props) {
   const [tags, setTags] = useState<string[]>([])
   const [tagInput, setTagInput] = useState('')
   const [isPublic, setIsPublic] = useState(false)
+  const [isFixedFormat, setIsFixedFormat] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
@@ -102,6 +103,7 @@ export default function TemplateUploadWizard({ onCreated, onClose }: Props) {
         format,
         tags,
         is_public: isPublic,
+        is_fixed_format: isFixedFormat,
         schema_json: schema,
         temp_file: tempFile,
       })
@@ -249,6 +251,16 @@ export default function TemplateUploadWizard({ onCreated, onClose }: Props) {
                   <div className={`w-4 h-4 rounded-full bg-white absolute top-0.5 transition ${isPublic ? 'left-5' : 'left-0.5'}`} />
                 </button>
                 {isPublic && <span className="text-xs text-blue-600">所有使用者可瀏覽</span>}
+              </div>
+              <div className="flex items-center gap-3">
+                <label className="text-xs text-slate-500">固定格式模式</label>
+                <button
+                  onClick={() => setIsFixedFormat(!isFixedFormat)}
+                  className={`w-10 h-5 rounded-full transition relative ${isFixedFormat ? 'bg-blue-600' : 'bg-slate-300'}`}
+                >
+                  <div className={`w-4 h-4 rounded-full bg-white absolute top-0.5 transition ${isFixedFormat ? 'left-5' : 'left-0.5'}`} />
+                </button>
+                {isFixedFormat && <span className="text-xs text-blue-600">啟用固定格式（儲存格大小/字型/溢位）</span>}
               </div>
             </div>
           )}

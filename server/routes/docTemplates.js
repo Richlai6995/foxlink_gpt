@@ -147,7 +147,7 @@ router.post('/upload', upload.single('file'), async (req, res) => {
 
 // ─── POST /  Create ───────────────────────────────────────────────────────────
 router.post('/', async (req, res) => {
-  const { name, description, format, tags, is_public, schema_json, temp_file, original_name } = req.body;
+  const { name, description, format, tags, is_public, is_fixed_format, schema_json, temp_file, original_name } = req.body;
   if (!name || !format || !temp_file || !schema_json) {
     return res.status(400).json({ error: '缺少必要欄位' });
   }
@@ -170,6 +170,7 @@ router.post('/', async (req, res) => {
       format,
       tags: typeof tags === 'string' ? JSON.parse(tags) : tags,
       isPublic: is_public,
+      isFixedFormat: is_fixed_format,
       schemaJson: typeof schema_json === 'string' ? JSON.parse(schema_json) : schema_json,
       tempFilePath: tempPath,
     });
@@ -205,7 +206,7 @@ router.put('/:id', async (req, res) => {
     const access = await svc.checkAccess(db, req.params.id, req.user);
     if (!access || access === 'use') return res.status(403).json({ error: '無編輯權限' });
 
-    const { name, description, tags, schema_json, is_public } = req.body;
+    const { name, description, tags, schema_json, is_public, is_fixed_format } = req.body;
 
     // Only owner/admin can toggle is_public
     if (is_public !== undefined && access !== 'owner') {
@@ -215,11 +216,12 @@ router.put('/:id', async (req, res) => {
     const fields = [];
     const vals = [];
 
-    if (name !== undefined)       { fields.push('name=?');        vals.push(name); }
-    if (description !== undefined){ fields.push('description=?'); vals.push(description); }
-    if (tags !== undefined)       { fields.push('tags=?');        vals.push(JSON.stringify(tags)); }
-    if (schema_json !== undefined){ fields.push('schema_json=?'); vals.push(typeof schema_json === 'string' ? schema_json : JSON.stringify(schema_json)); }
-    if (is_public !== undefined)  { fields.push('is_public=?');  vals.push(is_public ? 1 : 0); }
+    if (name !== undefined)           { fields.push('name=?');            vals.push(name); }
+    if (description !== undefined)    { fields.push('description=?');     vals.push(description); }
+    if (tags !== undefined)           { fields.push('tags=?');            vals.push(JSON.stringify(tags)); }
+    if (schema_json !== undefined)    { fields.push('schema_json=?');     vals.push(typeof schema_json === 'string' ? schema_json : JSON.stringify(schema_json)); }
+    if (is_public !== undefined)      { fields.push('is_public=?');       vals.push(is_public ? 1 : 0); }
+    if (is_fixed_format !== undefined){ fields.push('is_fixed_format=?'); vals.push(is_fixed_format ? 1 : 0); }
 
     if (fields.length) {
       fields.push('updated_at=SYSTIMESTAMP');

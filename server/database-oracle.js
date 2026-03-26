@@ -1403,6 +1403,8 @@ async function runMigrations(db) {
   await safeAddColumn('USERS', 'QUOTA_EXCEED_ACTION', 'VARCHAR2(10)');
 
   // ── 文件範本系統 ────────────────────────────────────────────────────────────
+  await safeAddColumn('DOC_TEMPLATES', 'IS_FIXED_FORMAT', 'NUMBER(1) DEFAULT 0');
+
   await createTable('DOC_TEMPLATES', `CREATE TABLE doc_templates (
     id             VARCHAR2(36)  PRIMARY KEY,
     creator_id     NUMBER        NOT NULL REFERENCES users(id),

@@ -258,6 +258,197 @@ function escapeXml(str) {
     .replace(/'/g, '&apos;');
 }
 
+// ─── Style helpers ─────────────────────────────────────────────────────────────
+
+/** Resolve effective style: override wins over detected, with 'wrap' as overflow default */
+function getEffectiveStyle(variable) {
+  const d = variable?.style?.detected || {};
+  const o = variable?.style?.override  || {};
+  const merged = { overflow: 'wrap', ...d, ...o };
+  return Object.keys(merged).length ? merged : null;
+}
+
+/**
+ * Merge style overrides into an existing <w:rPr>...</w:rPr> string.
+ * Returns updated rPr string (may be empty string if nothing to add).
+ */
+function buildStyledRPr(baseRPr, style) {
+  if (!style) return baseRPr || '';
+  const { fontSize, bold, italic, color } = style;
+  if (fontSize === undefined && bold === undefined && italic === undefined && color === undefined) return baseRPr || '';
+
+  let inner = '';
+  if (baseRPr) {
+    const m = baseRPr.match(/^<w:rPr>([\s\S]*)<\/w:rPr>$/);
+    if (m) inner = m[1];
+  }
+
+  if (fontSize !== undefined) {
+    const halfPts = Math.round(fontSize * 2);
+    inner = inner.replace(/<w:sz\s[^>]*\/>/g, '').replace(/<w:szCs\s[^>]*\/>/g, '');
+    inner += `<w:sz w:val="${halfPts}"/><w:szCs w:val="${halfPts}"/>`;
+  }
+  if (bold !== undefined) {
+    inner = inner.replace(/<w:b(?!Cs)[^>]*\/>/g, '');
+    if (bold) inner = '<w:b/>' + inner;
+  }
+  if (italic !== undefined) {
+    inner = inner.replace(/<w:i(?!Cs)[^>]*\/>/g, '');
+    if (italic) inner = '<w:i/>' + inner;
+  }
+  if (color !== undefined) {
+    const hex = color.replace('#', '');
+    inner = inner.replace(/<w:color\s[^>]*\/>/g, '');
+    inner += `<w:color w:val="${hex}"/>`;
+  }
+  return inner ? `<w:rPr>${inner}</w:rPr>` : '';
+}
+
+/**
+ * Parse <w:rPr> inner XML → VariableStyleProps object (for style detection).
+ */
+function parseRPrStyle(rPrInner) {
+  const s = {};
+  const szM = rPrInner.match(/<w:sz\s+w:val="(\d+)"/);
+  if (szM) s.fontSize = parseInt(szM[1]) / 2;
+  if (/<w:b(?!Cs)/.test(rPrInner)) s.bold = true;
+  if (/<w:i(?!Cs)/.test(rPrInner)) s.italic = true;
+  const colorM = rPrInner.match(/<w:color\s+w:val="([0-9A-Fa-f]{6})"/);
+  if (colorM && colorM[1].toLowerCase() !== 'auto') s.color = `#${colorM[1]}`;
+  return s;
+}
+
+/**
+ * Auto-detect style (fontSize/bold/italic/color) per variable from a DOCX buffer.
+ * Finds each variable's value cell via label-match and reads its first <w:rPr>.
+ * Returns { [key]: VariableStyleProps }
+ */
+async function detectStylesFromDocx(origBuf, variables) {
+  const zip = await new JSZip().loadAsync(origBuf);
+  const xmlFile = zip.file('word/document.xml');
+  if (!xmlFile) return {};
+  const xml = await xmlFile.async('string');
+  const styles = {};
+
+  const flatVars = [];
+  for (const v of variables) {
+    if (v.type === 'loop') {
+      for (const c of (v.children || [])) flatVars.push(c);
+    } else {
+      flatVars.push(v);
+    }
+  }
+
+  for (const v of flatVars) {
+    const labelKey = (v.label || v.key).replace(/[:：\s]/g, '').slice(0, 6);
+    if (!labelKey) continue;
+    const trPat = /<w:tr\b[^>]*>[\s\S]*?<\/w:tr>/g;
+    let m;
+    while ((m = trPat.exec(xml)) !== null) {
+      const cells = [];
+      const cp = /<w:tc\b[^>]*>[\s\S]*?<\/w:tc>/g;
+      let cm;
+      while ((cm = cp.exec(m[0])) !== null) cells.push(cm[0]);
+      if (cells.length < 2) continue;
+      const firstText = getTcText(cells[0]).replace(/[:：\s]/g, '').slice(0, 6);
+      if (!firstText.includes(labelKey) && !labelKey.includes(firstText)) continue;
+      // Found label → inspect value cell's rPr
+      const valCell = cells[1];
+      const rPrM = valCell.match(/<w:rPr>([\s\S]*?)<\/w:rPr>/);
+      if (rPrM) {
+        const s = parseRPrStyle(rPrM[1]);
+        if (Object.keys(s).length) styles[v.key] = s;
+      }
+      break;
+    }
+  }
+  return styles;
+}
+
+/**
+ * Auto-detect style per variable from an XLSX buffer using ExcelJS.
+ * Returns { [key]: VariableStyleProps }
+ */
+async function detectStylesFromXlsx(origBuf, variables) {
+  const ExcelJS = require('exceljs');
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(origBuf);
+  const styles = {};
+
+  const flatVars = variables.flatMap(v => v.type === 'loop' ? (v.children || []) : [v]);
+
+  wb.eachSheet(sheet => {
+    sheet.eachRow(row => {
+      row.eachCell({ includeEmpty: false }, (cell, colNumber) => {
+        if (typeof cell.value !== 'string') return;
+        const cellText = String(cell.value).replace(/[:：\s]/g, '').slice(0, 6);
+        const matched = flatVars.find(v => {
+          const lk = (v.label || v.key).replace(/[:：\s]/g, '').slice(0, 6);
+          return cellText.includes(lk) || lk.includes(cellText);
+        });
+        if (!matched) return;
+        // Read style from the adjacent cell (same row, next column)
+        const valCell = row.getCell(colNumber + 1);
+        if (!valCell?.font) return;
+        const s = {};
+        if (valCell.font.size) s.fontSize = valCell.font.size;
+        if (valCell.font.bold) s.bold = true;
+        if (valCell.font.italic) s.italic = true;
+        if (valCell.font.color?.argb) {
+          // ARGB → #RRGGBB
+          const argb = valCell.font.color.argb;
+          if (argb && argb.length === 8) s.color = `#${argb.slice(2)}`;
+        }
+        if (Object.keys(s).length) styles[matched.key] = s;
+      });
+    });
+  });
+  return styles;
+}
+
+/**
+ * Auto-detect style per variable from a PPTX buffer using JSZip + DrawingML.
+ * Returns { [key]: VariableStyleProps }
+ */
+async function detectStylesFromPptx(origBuf, variables) {
+  const zip = await new JSZip().loadAsync(origBuf);
+  const styles = {};
+  const slideFiles = Object.keys(zip.files).filter(f => /^ppt\/slides\/slide\d+\.xml$/.test(f));
+
+  for (const sf of slideFiles) {
+    const xml = await zip.file(sf).async('string');
+    for (const v of variables) {
+      if (v.type === 'loop' || !v.original_text) continue;
+      if (styles[v.key]) continue;
+      // Find <a:p> containing original_text
+      const paraPat = /<a:p\b[^>]*>[\s\S]*?<\/a:p>/g;
+      let m;
+      while ((m = paraPat.exec(xml)) !== null) {
+        const runTexts = [];
+        const rPat = /<a:t[^>]*>([\s\S]*?)<\/a:t>/g;
+        let rm;
+        while ((rm = rPat.exec(m[0])) !== null) runTexts.push(rm[1]);
+        if (!runTexts.join('').includes(v.original_text)) continue;
+        // Found the paragraph — read first run's rPr
+        const rPrM = m[0].match(/<a:rPr\b([^>]*)>/);
+        if (!rPrM) break;
+        const attrs = rPrM[1];
+        const s = {};
+        const szM = attrs.match(/\bsz="(\d+)"/);
+        if (szM) s.fontSize = parseInt(szM[1]) / 100; // EMU hundredths of a pt
+        if (/\bb="1"/.test(attrs)) s.bold = true;
+        if (/\bi="1"/.test(attrs)) s.italic = true;
+        // solidFill hex
+        const fillM = m[0].match(/<a:solidFill>[\s\S]*?<a:srgbClr val="([0-9A-Fa-f]{6})"[\s\S]*?<\/a:solidFill>/);
+        if (fillM) s.color = `#${fillM[1]}`;
+        if (Object.keys(s).length) styles[v.key] = s;
+        break;
+      }
+    }
+  }
+  return styles;
+}
+
 // ─── Cell-level helpers ────────────────────────────────────────────────────────
 
 /** Extract all run text from a <w:tc>, decode XML entities, normalize whitespace */
@@ -271,8 +462,9 @@ function getTcText(tcXml) {
     .replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'");
 }
 
-/** Replace entire content of a <w:tc>, preserving cell + text formatting */
-function buildReplacedTc(tcXml, newText) {
+/** Replace entire content of a <w:tc>, preserving cell + text formatting.
+ *  If style is provided, override rPr with style properties. */
+function buildReplacedTc(tcXml, newText, style) {
   const tcOpenM = tcXml.match(/^(<w:tc\b[^>]*>)/);
   const tcOpen  = tcOpenM ? tcOpenM[1] : '<w:tc>';
   const tcPrM   = tcXml.match(/(<w:tcPr>[\s\S]*?<\/w:tcPr>)/);
@@ -286,6 +478,7 @@ function buildReplacedTc(tcXml, newText) {
     const rPrM = firstParaM[0].match(/<w:rPr>([\s\S]*?)<\/w:rPr>/);
     if (rPrM) rPr = `<w:rPr>${rPrM[1]}</w:rPr>`;
   }
+  if (style) rPr = buildStyledRPr(rPr, style);
   return `${tcOpen}${tcPr}<w:p>${pPr}${buildRunXml(rPr, newText)}</w:p><w:p>${pPr}</w:p></w:tc>`;
 }
 
@@ -294,7 +487,7 @@ function buildReplacedTc(tcXml, newText) {
  * replace their content with newText.
  * Handles: original_text may have \n from mammoth; XML has no \n between paragraphs.
  */
-function replaceTcContent(xml, searchText, newText) {
+function replaceTcContent(xml, searchText, newText, style) {
   const snippet = (searchText.split('\n').find(l => l.trim()) || searchText)
     .trim().slice(0, 80).replace(/\s+/g, ' ');
   if (!snippet) return { xml, found: false };
@@ -304,7 +497,7 @@ function replaceTcContent(xml, searchText, newText) {
     const cellText = getTcText(tcXml).replace(/\s+/g, ' ');
     if (!cellText.includes(snippet)) return tcXml;
     found = true;
-    return buildReplacedTc(tcXml, newText);
+    return buildReplacedTc(tcXml, newText, style);
   });
   return { xml: newXml, found };
 }
@@ -315,7 +508,7 @@ function replaceTcContent(xml, searchText, newText) {
  * This is the PRIMARY strategy — works even when original_text is null/missing.
  * Replaces ALL matching rows (handles multi-copy template documents).
  */
-function fillCellByLabel(xml, labelText, newText) {
+function fillCellByLabel(xml, labelText, newText, style) {
   if (!labelText) return { xml, found: false };
   // Normalize: remove colons, spaces; take first 6 chars as key
   const labelKey = labelText.replace(/[:：\s]/g, '').slice(0, 6);
@@ -338,7 +531,7 @@ function fillCellByLabel(xml, labelText, newText) {
     found = true;
     // Replace SECOND cell (value cell)
     const val = cells[1];
-    const newVal = buildReplacedTc(val.full, newText);
+    const newVal = buildReplacedTc(val.full, newText, style);
     return trXml.slice(0, val.index) + newVal + trXml.slice(val.index + val.full.length);
   });
   return { xml: newXml, found };
@@ -450,7 +643,7 @@ async function analyzeDocument(filePath, format) {
 /**
  * Create template: inject placeholders into original file, save both
  */
-async function createTemplate(db, { creatorId, name, description, format, tags, isPublic, schemaJson, tempFilePath }) {
+async function createTemplate(db, { creatorId, name, description, format, tags, isPublic, isFixedFormat, schemaJson, tempFilePath }) {
   await ensureTemplatesDir();
 
   const id = uuid();
@@ -479,18 +672,41 @@ async function createTemplate(db, { creatorId, name, description, format, tags, 
 
   await fs.writeFile(tplDest, tplBuf);
 
+  // ── Auto-detect styles from original file ──────────────────────────────────
+  try {
+    let detectedStyles = {};
+    if (format === 'docx') detectedStyles = await detectStylesFromDocx(origBuf, variables);
+    else if (format === 'xlsx') detectedStyles = await detectStylesFromXlsx(origBuf, variables);
+    else if (format === 'pptx') detectedStyles = await detectStylesFromPptx(origBuf, variables);
+
+    // Merge detected styles into schema variables
+    let changed = false;
+    const applyDetected = (vars) => vars.map(v => {
+      const d = detectedStyles[v.key];
+      const updated = d ? { ...v, style: { ...(v.style || {}), detected: d } } : v;
+      if (updated.children) updated.children = applyDetected(updated.children);
+      if (updated !== v) changed = true;
+      return updated;
+    });
+    schemaJson = { ...schemaJson, variables: applyDetected(variables) };
+    if (changed) console.log(`[DocTemplate] detectStyles: ${Object.keys(detectedStyles).length} vars styled`);
+  } catch (e) {
+    console.warn('[DocTemplate] detectStyles failed (non-fatal):', e.message);
+  }
+
   await db.prepare(`
     INSERT INTO doc_templates
       (id, creator_id, name, description, format, strategy,
-       template_file, original_file, schema_json, tags, is_public)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       template_file, original_file, schema_json, tags, is_public, is_fixed_format)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     id, creatorId, name, description || null, format, strategy,
     `templates/${id}.${ext}`,
     `templates/${id}_orig.${ext}`,
     JSON.stringify(schemaJson),
     tags ? JSON.stringify(tags) : null,
-    isPublic ? 1 : 0
+    isPublic ? 1 : 0,
+    isFixedFormat ? 1 : 0
   );
 
   return db.prepare('SELECT * FROM doc_templates WHERE id=?').get(id);
@@ -531,14 +747,10 @@ async function generateDocument(db, templateId, userId, inputData, outputFormat)
     xml = xml.replace(/<w:trPr>\s*<\/w:trPr>/g, '');
 
     // ── Fill variables ──────────────────────────────────────────────────────
-    // Strategy (in priority order):
-    //   1. fillCellByLabel  — find row by label text, replace value cell
-    //      Works even when original_text is null. Primary approach.
-    //   2. replaceTcContent — find cell by content snippet, replace it
-    //      Secondary: handles non-standard layouts.
-    //   3. mergeRunsAndReplace — paragraph-level. Last resort for simple vars.
+    const isFixed = !!(tpl.is_fixed_format);
     for (const v of variables) {
       let value;
+      const vStyle = isFixed ? getEffectiveStyle(v) : null;
 
       if (v.type === 'loop') {
         const items = Array.isArray(inputData[v.key]) ? inputData[v.key] : [];
@@ -555,31 +767,47 @@ async function generateDocument(db, templateId, userId, inputData, outputFormat)
           if (trMatch && children.filter(c => c.original_text)
             .every(c => trMatch[0].includes(c.original_text))) {
             // All children in same <w:tr> → duplicate row per item
-            const templateRow = trMatch[0];
+            let templateRow = trMatch[0];
+
+            // ── Fixed mode: inject/override <w:trHeight> in <w:trPr> ───
+            if (isFixed && v.docx_style?.rowHeightPt) {
+              const twips = Math.round(v.docx_style.rowHeightPt * 20);
+              const heightTag = `<w:trHeight w:val="${twips}" w:hRule="exact"/>`;
+              const trPrM = templateRow.match(/<w:trPr>([\s\S]*?)<\/w:trPr>/);
+              if (trPrM) {
+                const newInner = trPrM[1].replace(/<w:trHeight[^>]*\/>/g, '') + heightTag;
+                templateRow = templateRow.replace(/<w:trPr>[\s\S]*?<\/w:trPr>/, `<w:trPr>${newInner}</w:trPr>`);
+              } else {
+                templateRow = templateRow.replace('<w:tr', `<w:tr><w:trPr>${heightTag}</w:trPr>`);
+              }
+            }
+
             const newRows = items.map(item => {
               let row = templateRow;
               for (const c of children) {
                 if (!c.original_text) continue;
-                row = row.replace(/<w:p\b[^>]*>[\s\S]*?<\/w:p>/g, (para) =>
-                  mergeRunsAndReplace(para, c.original_text, String(item[c.key] ?? ''))
-                );
+                const cStyle = isFixed ? getEffectiveStyle(c) : null;
+                row = row.replace(/<w:p\b[^>]*>[\s\S]*?<\/w:p>/g, (para) => {
+                  const replaced = mergeRunsAndReplace(para, c.original_text, String(item[c.key] ?? ''));
+                  if (!cStyle || replaced === para) return replaced;
+                  // Apply style to the replacement run's rPr
+                  return replaced.replace(/<w:rPr>([\s\S]*?)<\/w:rPr>/, (_, inner) =>
+                    buildStyledRPr(`<w:rPr>${inner}</w:rPr>`, cStyle)
+                  );
+                });
               }
               return row;
             });
-            xml = xml.replace(templateRow, newRows.join(''));
+            xml = xml.replace(trMatch[0], newRows.join(''));
             continue;
           }
         }
 
         // ── Flat: all items → numbered list using ALL children joined ───
         const vals = items.map((item, idx) => {
-          // Join all children values for this item on one line
           const parts = children.map(c => {
             const val = String(item[c.key] ?? '').trim();
-            // If there are multiple children, prefix with child label
-            return children.length > 1 && c.label
-              ? `${c.label}: ${val}`
-              : val;
+            return children.length > 1 && c.label ? `${c.label}: ${val}` : val;
           }).filter(s => s);
           return parts.length ? `${idx + 1}. ${parts.join('　')}` : '';
         }).filter(s => s);
@@ -589,7 +817,7 @@ async function generateDocument(db, templateId, userId, inputData, outputFormat)
       }
 
       // 1. Label-based (primary — works regardless of original_text)
-      const { xml: x1, found: f1 } = fillCellByLabel(xml, v.label, value);
+      const { xml: x1, found: f1 } = fillCellByLabel(xml, v.label, value, vStyle);
       if (f1) { xml = x1; continue; }
 
       // 2. Content-based (secondary — uses original_text snippet)
@@ -597,7 +825,7 @@ async function generateDocument(db, templateId, userId, inputData, outputFormat)
         ? (v.children?.find(c => c.original_text)?.original_text || '')
         : (v.original_text || '');
       if (origText) {
-        const { xml: x2, found: f2 } = replaceTcContent(xml, origText, value);
+        const { xml: x2, found: f2 } = replaceTcContent(xml, origText, value, vStyle);
         if (f2) { xml = x2; continue; }
       }
 
