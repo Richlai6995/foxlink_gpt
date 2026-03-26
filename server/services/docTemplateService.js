@@ -505,81 +505,88 @@ async function forkTemplate(db, templateId, newOwnerId) {
  * Returns raw rows with access info.
  */
 async function listTemplates(db, user, { search, format, tag } = {}) {
-  // Get all accessible templates
-  const userId = user.id;
-  const roleId = user.role_id || '';
-  const dept   = user.department || '';
-  const cc     = user.profit_center || '';
-  const div    = user.org_section || '';
-  const og     = user.org_group || '';
-
-  // Oracle: SELECT DISTINCT with CLOB columns is not supported (ORA-00932).
-  // Enumerate all columns explicitly and use WHERE EXISTS instead of DISTINCT.
-  const uid = String(userId);
-  // Oracle NJS-044: empty string '' is invalid as bind value → convert to null
+  const uid = String(user.id);
+  // Oracle NJS-044: empty string '' is invalid bind value → null
   const n = (v) => (v && String(v).trim()) ? String(v) : null;
-  const roleId_ = n(roleId), dept_ = n(dept), cc_ = n(cc), div_ = n(div), og_ = n(og);
+  const role = n(user.role_id);
+  const dept = n(user.department);
+  const cc   = n(user.profit_center);
+  const div  = n(user.org_section);
+  const og   = n(user.org_group);
 
-  // Grantee match for CASE (access_level check) — param suffix A
-  const granteeA = `(
-      (s.grantee_type='user'        AND s.grantee_id=:uidA) OR
-      (s.grantee_type='role'        AND s.grantee_id=:roleA) OR
-      (s.grantee_type='department'  AND s.grantee_id=:deptA) OR
-      (s.grantee_type='cost_center' AND s.grantee_id=:ccA) OR
-      (s.grantee_type='division'    AND s.grantee_id=:divA) OR
-      (s.grantee_type='org_group'   AND s.grantee_id=:ogA)
+  // Oracle wrapper ONLY supports positional ? params (converts to :1 :2 ...).
+  // Named bind objects are NOT supported → use array params in SQL order.
+  //
+  // Grantee clause appears twice (CASE + WHERE), each needs its own params.
+  const granteeClause = (alias) => `(
+      (${alias}.grantee_type='user'        AND ${alias}.grantee_id=?) OR
+      (${alias}.grantee_type='role'        AND ${alias}.grantee_id=?) OR
+      (${alias}.grantee_type='department'  AND ${alias}.grantee_id=?) OR
+      (${alias}.grantee_type='cost_center' AND ${alias}.grantee_id=?) OR
+      (${alias}.grantee_type='division'    AND ${alias}.grantee_id=?) OR
+      (${alias}.grantee_type='org_group'   AND ${alias}.grantee_id=?)
     )`;
 
-  // Grantee match for WHERE EXISTS — param suffix B
-  const granteeB = `(
-      (s2.grantee_type='user'        AND s2.grantee_id=:uidB) OR
-      (s2.grantee_type='role'        AND s2.grantee_id=:roleB) OR
-      (s2.grantee_type='department'  AND s2.grantee_id=:deptB) OR
-      (s2.grantee_type='cost_center' AND s2.grantee_id=:ccB) OR
-      (s2.grantee_type='division'    AND s2.grantee_id=:divB) OR
-      (s2.grantee_type='org_group'   AND s2.grantee_id=:ogB)
-    )`;
+  // Admin shortcut: see all templates as owner
+  const isAdmin = user.role === 'admin';
 
-  let sql = `
-    SELECT t.id, t.creator_id, t.name, t.description, t.format, t.strategy,
-           t.template_file, t.original_file, t.schema_json, t.preview_url,
-           t.is_public, t.tags, t.use_count, t.forked_from, t.created_at, t.updated_at,
-      CASE
-        WHEN t.creator_id = :uid THEN 'owner'
-        WHEN EXISTS (
-          SELECT 1 FROM doc_template_shares s
-          WHERE s.template_id = t.id AND s.share_type = 'edit' AND ${granteeA}
-        ) THEN 'edit'
-        ELSE 'use'
-      END AS access_level
-    FROM doc_templates t
-    WHERE (
-      t.creator_id = :uid2
-      OR t.is_public = 1
-      OR EXISTS (
-        SELECT 1 FROM doc_template_shares s2
-        WHERE s2.template_id = t.id AND ${granteeB}
+  let sql, params;
+
+  if (isAdmin) {
+    sql = `
+      SELECT t.id, t.creator_id, t.name, t.description, t.format, t.strategy,
+             t.template_file, t.original_file, t.schema_json, t.preview_url,
+             t.is_public, t.tags, t.use_count, t.forked_from, t.created_at, t.updated_at,
+             'owner' AS access_level
+      FROM doc_templates t
+      WHERE 1=1
+    `;
+    params = [];
+  } else {
+    sql = `
+      SELECT t.id, t.creator_id, t.name, t.description, t.format, t.strategy,
+             t.template_file, t.original_file, t.schema_json, t.preview_url,
+             t.is_public, t.tags, t.use_count, t.forked_from, t.created_at, t.updated_at,
+        CASE
+          WHEN t.creator_id = ? THEN 'owner'
+          WHEN EXISTS (
+            SELECT 1 FROM doc_template_shares s
+            WHERE s.template_id = t.id AND s.share_type = 'edit'
+              AND ${granteeClause('s')}
+          ) THEN 'edit'
+          ELSE 'use'
+        END AS access_level
+      FROM doc_templates t
+      WHERE (
+        t.creator_id = ?
+        OR t.is_public = 1
+        OR EXISTS (
+          SELECT 1 FROM doc_template_shares s2
+          WHERE s2.template_id = t.id AND ${granteeClause('s2')}
+        )
       )
-    )
-  `;
+    `;
+    // Params in SQL order:
+    // CASE: uid, uid role dept cc div og (7)
+    // WHERE: uid, uid role dept cc div og (7)
+    params = [
+      uid,                          // CASE creator_id
+      uid, role, dept, cc, div, og, // CASE grantee (s)
+      uid,                          // WHERE creator_id
+      uid, role, dept, cc, div, og, // WHERE grantee (s2)
+    ];
+  }
 
-  const binds = {
-    uid, uid2: uid,
-    uidA: uid, roleA: roleId_, deptA: dept_, ccA: cc_, divA: div_, ogA: og_,
-    uidB: uid, roleB: roleId_, deptB: dept_, ccB: cc_, divB: div_, ogB: og_,
-  };
-
-  if (format) { sql += ' AND t.format = :format'; binds.format = format; }
+  if (format) { sql += ' AND t.format = ?'; params.push(format); }
   if (search) {
-    sql += ' AND (UPPER(t.name) LIKE :search OR UPPER(t.description) LIKE :search2)';
-    binds.search = `%${search.toUpperCase()}%`;
-    binds.search2 = `%${search.toUpperCase()}%`;
+    sql += ' AND (UPPER(t.name) LIKE ? OR UPPER(t.description) LIKE ?)';
+    params.push(`%${search.toUpperCase()}%`, `%${search.toUpperCase()}%`);
   }
 
   sql += ' ORDER BY t.updated_at DESC';
 
-  console.log('[DocTemplate] listTemplates uid=', uid, 'format=', format || '-', 'search=', search || '-');
-  let rows = await db.prepare(sql).all(binds);
+  console.log('[DocTemplate] listTemplates uid=', uid, 'admin=', isAdmin, 'format=', format || '-', 'search=', search || '-');
+  let rows = await db.prepare(sql).all(...params);
   console.log('[DocTemplate] listTemplates 回傳', rows.length, '筆');
 
   // Tag filter (client-side since tags is JSON array)
