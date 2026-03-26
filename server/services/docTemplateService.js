@@ -516,6 +516,9 @@ async function listTemplates(db, user, { search, format, tag } = {}) {
   // Oracle: SELECT DISTINCT with CLOB columns is not supported (ORA-00932).
   // Enumerate all columns explicitly and use WHERE EXISTS instead of DISTINCT.
   const uid = String(userId);
+  // Oracle NJS-044: empty string '' is invalid as bind value → convert to null
+  const n = (v) => (v && String(v).trim()) ? String(v) : null;
+  const roleId_ = n(roleId), dept_ = n(dept), cc_ = n(cc), div_ = n(div), og_ = n(og);
 
   // Grantee match for CASE (access_level check) — param suffix A
   const granteeA = `(
@@ -562,8 +565,8 @@ async function listTemplates(db, user, { search, format, tag } = {}) {
 
   const binds = {
     uid, uid2: uid,
-    uidA: uid, roleA: roleId, deptA: dept, ccA: cc, divA: div, ogA: og,
-    uidB: uid, roleB: roleId, deptB: dept, ccB: cc, divB: div, ogB: og,
+    uidA: uid, roleA: roleId_, deptA: dept_, ccA: cc_, divA: div_, ogA: og_,
+    uidB: uid, roleB: roleId_, deptB: dept_, ccB: cc_, divB: div_, ogB: og_,
   };
 
   if (format) { sql += ' AND t.format = :format'; binds.format = format; }
