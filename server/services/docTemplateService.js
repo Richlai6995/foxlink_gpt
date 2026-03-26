@@ -790,7 +790,7 @@ async function generateDocument(db, templateId, userId, inputData, outputFormat)
     const bgColors = ['#c6efce', '#bdd7ee', '#bdd7ee', '#fce4d6', '#fce4d6', '#fff2cc'];
 
     // Title row
-    doc.fontSize(13).text('會議記錄', { align: 'center' }).moveDown(0.4);
+    doc.fontSize(13).text(tpl.name || '文件', { align: 'center' }).moveDown(0.4);
     doc.font('CJK').fontSize(fz);
 
     let curY = doc.y;
