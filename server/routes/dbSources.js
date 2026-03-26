@@ -35,11 +35,15 @@ function maskSource(src) {
 }
 
 // ── GET /api/db-sources ──────────────────────────────────────────────────────
-router.get('/', requireAdmin, async (req, res) => {
+// admin: 看全部; 一般 user: 只看 active（供 schema 匯入下拉選單使用）
+router.get('/', async (req, res) => {
   try {
     const db = require('../database-oracle').db;
+    const isAdmin = req.user?.role === 'admin';
     const rows = await db.prepare(
-      `SELECT * FROM ai_db_sources ORDER BY is_default DESC, name ASC`
+      isAdmin
+        ? `SELECT * FROM ai_db_sources ORDER BY is_default DESC, name ASC`
+        : `SELECT * FROM ai_db_sources WHERE is_active=1 ORDER BY is_default DESC, name ASC`
     ).all();
     res.json(rows.map(maskSource));
   } catch (e) {
