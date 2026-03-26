@@ -150,6 +150,7 @@ const userSections = [
   { id: 'u-ai-bi-shelf', label: 'Tableau 拖拉式設計器', icon: <Layers size={18} /> },
   { id: 'u-ai-bi-dashboard', label: '儀表板 Dashboard', icon: <Share2 size={18} /> },
   { id: 'u-ai-bi-schema', label: 'Schema 與多資料庫來源', icon: <Database size={18} /> },
+  { id: 'u-help-kb', label: 'AI 回答使用問題', icon: <BookMarked size={18} /> },
 ]
 
 function UserManual() {
@@ -2603,6 +2604,69 @@ function UserManual() {
           </NoteBox>
         </SubSection>
       </Section>
+
+      <Section id="u-help-kb" icon={<BookMarked size={22} />} iconColor="text-blue-500" title="AI 回答使用問題">
+        <Para>
+          FOXLINK GPT 內建了一套<strong>使用說明知識庫</strong>，涵蓋系統所有功能的操作方式。
+          您可以直接在對話框向 AI 提問，不需要翻閱說明書，AI 會從知識庫中找到最相關的說明回答您。
+        </Para>
+
+        <SubSection title="如何詢問">
+          <Para>只要在任意對話中，用自然語言描述您的問題即可：</Para>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-2">
+            {[
+              { q: '怎麼上傳 PDF 檔案？', tag: '上傳' },
+              { q: '如何建立自動排程任務？', tag: '排程' },
+              { q: '深度研究和一般對話有什麼差別？', tag: '深度研究' },
+              { q: '技能（Skill）要怎麼掛載到對話？', tag: '技能' },
+              { q: 'TAG 路由是什麼意思？', tag: '工具' },
+              { q: '知識庫要設定什麼標籤才會被自動啟用？', tag: '知識庫' },
+              { q: '對話額度超過後還能繼續使用嗎？', tag: '額度' },
+              { q: '如何分享對話給同事？', tag: '分享' },
+            ].map((item) => (
+              <div key={item.q} className="flex items-start gap-2 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
+                <span className="text-blue-400 mt-0.5 flex-shrink-0">💬</span>
+                <p className="text-xs text-slate-700 leading-5">{item.q}</p>
+              </div>
+            ))}
+          </div>
+          <TipBox>
+            要讓 AI 優先從說明書回答，可以在問題中加上「使用說明」「怎麼操作」「如何設定」等語詞，
+            系統的 TAG 路由機制會自動偵測並查詢說明書知識庫。
+          </TipBox>
+        </SubSection>
+
+        <SubSection title="適合詢問的問題類型">
+          <Table
+            headers={['問題類型', '範例']}
+            rows={[
+              ['操作步驟', '「排程任務要怎麼建立？步驟是什麼？」'],
+              ['功能差異', '「Gemini Pro 和 Flash 有什麼不同？」'],
+              ['設定說明', '「知識庫的 Embedding 維度要選哪個？」'],
+              ['工具使用', '「MCP 工具和自建知識庫怎麼一起用？」'],
+              ['錯誤排解', '「為什麼 AI 沒有使用我掛載的知識庫？」'],
+              ['概念理解', '「TAG 路由的第一階段和第二階段有什麼區別？」'],
+            ]}
+          />
+        </SubSection>
+
+        <SubSection title="說明書知識庫的範圍">
+          <Para>
+            說明書知識庫涵蓋本使用說明的所有章節（共 21 個），包含：
+          </Para>
+          <div className="flex flex-wrap gap-2 mt-2">
+            {['登入與登出', '介面導覽', '開始對話', 'AI 模型選擇', '上傳檔案',
+              '對話歷史', '可用工具 / TAG路由', '自動排程', '圖片生成',
+              '技能 Skill', '知識庫市集', '深度研究', '語言切換', '對話額度',
+              'AI 戰情室', '命名查詢', 'Schema 欄位', '圖表建構器', '儀表板'].map((label) => (
+              <span key={label} className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded text-xs">{label}</span>
+            ))}
+          </div>
+          <NoteBox>
+            說明書知識庫由系統自動維護，每次系統更新後會自動同步最新內容，您不需要做任何設定。
+          </NoteBox>
+        </SubSection>
+      </Section>
     </div>
   )
 }
@@ -2634,6 +2698,7 @@ const adminSections = [
   { id: 'a-monitor', label: '系統監控', icon: <Activity size={18} /> },
   { id: 'a-k8s', label: 'K8s 部署更新', icon: <Server size={18} /> },
   { id: 'a-env-config', label: 'ENV 環境變數設定', icon: <Settings size={18} /> },
+  { id: 'a-help-kb-sync', label: '說明書 KB 自動同步', icon: <RefreshCw size={18} /> },
 ]
 
 function AdminManual() {
@@ -4793,6 +4858,158 @@ SKILL_SERVICE_KEY=your-skill-service-key
 # REDIS_URL=redis://localhost:6379
 SESSION_TTL_SECONDS=28800`}</CodeBlock>
           <TipBox>複製此範本到 <code className="bg-blue-50 px-1 rounded text-xs">server/.env</code>，填入實際值後即可啟動本機開發環境。確保 .gitignore 包含 <code className="bg-blue-50 px-1 rounded text-xs">server/.env</code>。</TipBox>
+        </SubSection>
+      </Section>
+
+      {/* ═══════════════════════════════ 說明書 KB 自動同步 */}
+      <Section id="a-help-kb-sync" icon={<RefreshCw size={22} />} iconColor="text-blue-500" title="說明書 KB 自動同步">
+        <Para>
+          系統在每次啟動時，會自動將使用者說明書內容向量化並存入一個名為
+          <strong>「FOXLINK GPT 使用說明書」</strong>的系統公開知識庫。
+          這讓 AI 在對話中能回答「如何使用本系統」的問題，並透過 TAG 路由自動匹配，
+          使用者不需要手動掛載知識庫。
+        </Para>
+
+        <SubSection title="同步機制概覽">
+          <div className="bg-slate-900 rounded-xl px-5 py-4 mt-2">
+            <pre className="text-xs text-slate-300 font-mono leading-6 whitespace-pre">{`K8s 部署新版本（rolling update）
+  │
+  ▼
+新 Pod 啟動 → server.js listen 完成
+  │
+  └─ setImmediate(syncHelpKb)   ← 非阻塞，不影響 API 啟動
+       │
+       ├─ tryLock("lock:help_kb_sync", TTL=600s)
+       │     ├─ 搶到鎖 → 執行同步（只有 1 個 Pod）
+       │     └─ 未搶到 → 印「略過」，直接返回（其餘 3 個 Pod）
+       │
+       ▼ 拿到鎖的 Pod：
+  找或建立 KB「FOXLINK GPT 使用說明書」
+       │
+       ▼ 逐章節（共 21 個）：
+  計算 MD5 hash → 比對 kb_documents.filename
+       ├─ hash 相同 → skip（不重新 embed）
+       └─ hash 不同 → 刪舊 chunks → 重新 Embed → 插入
+       │
+       ▼
+  updateKbStats → unlock`}</pre>
+          </div>
+        </SubSection>
+
+        <SubSection title="Hash 增量更新說明">
+          <Para>
+            每個章節以 <strong>MD5 hash</strong> 作為版本指紋，存於 <code className="bg-slate-100 px-1 rounded text-xs">kb_documents.filename</code>，
+            格式為 <code className="bg-slate-100 px-1 rounded text-xs">章節ID::md5hash</code>（例：<code className="bg-slate-100 px-1 rounded text-xs">u-tools::a3f7c912...</code>）。
+          </Para>
+          <Table
+            headers={['狀況', '行為', '說明']}
+            rows={[
+              ['內容未變', 'skip（不 embed）', 'hash 相同，直接跳過，不消耗 Embedding API 費用'],
+              ['內容有改動', '刪舊 → 重新 embed → 插入', 'hash 不同，清除該章節所有舊 chunks 後重建'],
+              ['新章節', '直接 embed → 插入', '在 kb_documents 中找不到對應記錄'],
+              ['章節被刪除', '不處理（舊 chunks 殘留）', '需手動進入知識庫管理頁刪除文件'],
+            ]}
+          />
+          <NoteBox>
+            每次 deploy 後系統只會重新 embed 有變動的章節，通常只需幾秒到幾分鐘，不影響正常對話使用。
+          </NoteBox>
+        </SubSection>
+
+        <SubSection title="K8s 多 Replica 安全機制">
+          <Para>
+            K8s 預設跑 4 個 replica，若全部同時啟動都執行 embed 會造成 Oracle 寫入衝突。
+            系統透過 <strong>Redis 分散式鎖</strong>（<code className="bg-slate-100 px-1 rounded text-xs">SET NX EX</code>）解決此問題：
+          </Para>
+          <Table
+            headers={['Pod', '取鎖結果', '行為']}
+            rows={[
+              ['Pod 1（最先啟動）', '取鎖成功', '執行完整同步流程，完成後釋鎖'],
+              ['Pod 2 / 3 / 4', '取鎖失敗（鎖已存在）', '印 log「另一個 pod 正在同步，略過」後直接返回'],
+            ]}
+          />
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+              <p className="text-xs font-semibold text-blue-700 mb-1">Lock Key</p>
+              <code className="text-xs text-blue-600">lock:help_kb_sync</code>
+            </div>
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+              <p className="text-xs font-semibold text-amber-700 mb-1">Lock TTL</p>
+              <p className="text-xs text-amber-600">600 秒（10 分鐘）<br/>防止 Pod crash 後 deadlock</p>
+            </div>
+          </div>
+          <TipBox>本機開發無 REDIS_URL 時，Redis 自動降級為記憶體 Map（單 process），行為相同，無需特別設定。</TipBox>
+        </SubSection>
+
+        <SubSection title="知識庫基本設定">
+          <Table
+            headers={['設定項目', '值', '說明']}
+            rows={[
+              ['名稱', 'FOXLINK GPT 使用說明書', '系統自動建立，名稱固定，不可在 UI 中刪除後自動重建'],
+              ['is_public', '1（全員可見）', '所有使用者無需申請，可在知識庫市集看到並在對話中使用'],
+              ['Tags', '使用說明, 操作手冊, 功能教學, 如何使用, FOXLINK GPT', 'TAG 路由比對依據，覆蓋常見問法'],
+              ['Embedding 模型', '同 KB_EMBEDDING_MODEL 環境變數（預設 gemini-embedding-001）', ''],
+              ['維度', '768', '固定，不跟隨 ENV 變動'],
+              ['分塊策略', 'regular（1024 字 / chunk, overlap 50）', ''],
+              ['檢索模式', 'hybrid（向量 + 全文）', ''],
+            ]}
+          />
+        </SubSection>
+
+        <SubSection title="如何更新說明書內容">
+          <Para>說明書內容維護在一個獨立的 JS 文字檔，開發者修改後重新 deploy 即可自動同步：</Para>
+          <div className="space-y-3">
+            <StepItem num={1} title="編輯 server/services/helpContent.js" desc="每個物件對應一個章節，修改 content 欄位的文字內容" />
+            <StepItem num={2} title="git commit & push → 觸發 CI/CD deploy" />
+            <StepItem num={3} title="新 Pod 啟動後自動偵測 hash 變動，重新 embed 有改動的章節" desc="Server log 會印出：[HelpKB] ✓ 更新章節: 章節名稱" />
+          </div>
+          <div className="bg-slate-900 rounded-xl p-4 mt-3">
+            <p className="text-xs text-slate-400 mb-2 font-mono">server/services/helpContent.js 結構</p>
+            <pre className="text-xs text-slate-300 font-mono leading-6 whitespace-pre">{`const sections = [
+  {
+    id: 'u-tools',          // 對應 HelpPage.tsx 的 Section id
+    title: '可用工具',       // 章節標題（用於 log）
+    content: \`             // 純文字內容（供向量化使用）
+      MCP 工具：連接外部系統...
+      TAG 路由步驟：
+      Step 1：...
+    \`,
+  },
+  // ...更多章節
+];`}</pre>
+          </div>
+          <NoteBox>
+            <code className="bg-amber-100 px-1 rounded text-xs">helpContent.js</code> 與 <code className="bg-amber-100 px-1 rounded text-xs">HelpPage.tsx</code> 是獨立維護的。
+            修改 HelpPage.tsx 的 UI 時，記得同步更新 helpContent.js 的對應章節文字，
+            否則 AI 回答的說明內容會與頁面說明書不一致。
+          </NoteBox>
+        </SubSection>
+
+        <SubSection title="Server Log 觀察">
+          <Para>啟動時查看以下 log 可確認同步狀態：</Para>
+          <div className="bg-slate-900 rounded-xl p-4">
+            <pre className="text-xs font-mono leading-6 whitespace-pre">{`[HelpKB] 開始同步說明書知識庫...
+[HelpKB] 知識庫建立完成: <uuid>        ← 首次建立才出現
+[HelpKB] ✓ 更新章節: 可用工具           ← 有改動的章節
+[HelpKB] ✓ 更新章節: 技能 Skill
+[HelpKB] 同步完成，共更新 2 個章節。
+
+── 若無改動 ──
+[HelpKB] 說明書知識庫已是最新，略過。
+
+── 若被其他 Pod 搶先 ──
+[HelpKB] 另一個 pod 正在同步，略過。`}</pre>
+          </div>
+        </SubSection>
+
+        <SubSection title="手動強制重新同步">
+          <Para>若需強制重建所有章節（如更換 Embedding 模型維度），步驟如下：</Para>
+          <div className="space-y-3">
+            <StepItem num={1} title="進入知識庫市集 → 找到「FOXLINK GPT 使用說明書」" />
+            <StepItem num={2} title="刪除知識庫（或刪除所有文件）" desc="刪除後 kb_documents 及 kb_chunks 全部清空" />
+            <StepItem num={3} title="重新啟動 Server（或 rolling restart）" desc="kubectl rollout restart deployment/foxlink-gpt" />
+            <StepItem num={4} title="Server 重啟後自動重建知識庫並對所有章節重新 embed" />
+          </div>
+          <NoteBox>若只是清除 Redis lock（如手動 DEL lock:help_kb_sync），不刪除知識庫，下次重啟仍會因 hash 相同而略過，無法強制重 embed。需同時刪除知識庫才有效。</NoteBox>
         </SubSection>
       </Section>
     </div>
