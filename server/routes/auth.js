@@ -769,8 +769,19 @@ const verifyToken = async (req, res, next) => {
   const session = await redis.getSession(token);
   if (!session) return res.status(401).json({ error: 'Invalid or expired token' });
   req.user = session;
-  // Sliding expiration: reset TTL on every authenticated request
-  redis.touchSession(token).catch(() => {});
+  // Sliding expiration：只有真正的使用者操作才重設 TTL。
+  // 以下 passive 路徑由前端自動輪詢，不算「使用者活動」，不重設 TTL，
+  // 讓 session 能在真正閒置 SESSION_TTL 秒後自然過期。
+  const url = req.originalUrl || req.url || '';
+  const isPassive = (
+    url.includes('/api/monitor') ||
+    url.includes('/api/admin/token-usage') ||
+    url.includes('/api/users/online') ||
+    url.includes('/api/auth/me')
+  );
+  if (!isPassive) {
+    redis.touchSession(token).catch(() => {});
+  }
   next();
 };
 
