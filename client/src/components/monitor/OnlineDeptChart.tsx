@@ -1,5 +1,5 @@
-import { useState, useEffect, useMemo } from 'react'
-import { Building2 } from 'lucide-react'
+import { useState, useEffect, useMemo, useCallback } from 'react'
+import { Building2, Download } from 'lucide-react'
 import ReactECharts from 'echarts-for-react'
 import api from '../../lib/api'
 
@@ -29,11 +29,9 @@ export default function OnlineDeptChart() {
       .finally(() => setLoading(false))
   }, [hours])
 
-  const chartOption = useMemo(() => {
+  const buildChartData = useCallback(() => {
     if (data.length === 0) return null
 
-    // Step 1: group by snapshot_id (same batch = exact same snapshot_id).
-    // Fallback: 舊資料無 snapshot_id 時用 1-minute window 作為 key。
     const snapGroups: Record<string, { ts: number; values: Record<string, number> }> = {}
     for (const d of data) {
       const key = d.snapshot_id != null
@@ -42,11 +40,9 @@ export default function OnlineDeptChart() {
       const ts = d.snapshot_id != null ? d.snapshot_id * 1000 : new Date(d.collected_at).getTime()
       const dimValue = d[dimension] || 'Unknown'
       if (!snapGroups[key]) snapGroups[key] = { ts, values: {} }
-      // 同 snapshot 同 dimValue 直接取（不 SUM — 每個 key 對應唯一 count）
       snapGroups[key].values[dimValue] = (snapGroups[key].values[dimValue] || 0) + d.user_count
     }
 
-    // Step 2: 每 5 分鐘顯示一個 bucket，取最新的 snapshot。
     const bucketLatest: Record<string, { ts: number; values: Record<string, number> }> = {}
     for (const { ts, values } of Object.values(snapGroups)) {
       const dt = new Date(ts)
@@ -56,6 +52,7 @@ export default function OnlineDeptChart() {
       }
     }
 
+    const times = Object.keys(bucketLatest).sort()
     const seriesMap: Record<string, Record<string, number>> = {}
     for (const [bucket, { values }] of Object.entries(bucketLatest)) {
       for (const [dimValue, count] of Object.entries(values)) {
@@ -64,7 +61,14 @@ export default function OnlineDeptChart() {
       }
     }
 
-    const times = Object.keys(bucketLatest).sort()
+    return { times, seriesMap, bucketLatest }
+  }, [data, dimension])
+
+  const chartOption = useMemo(() => {
+    const built = buildChartData()
+    if (!built) return null
+    const { times, seriesMap } = built
+
     const series = Object.entries(seriesMap).map(([name, timeData]) => ({
       name,
       type: 'line' as const,
@@ -77,10 +81,10 @@ export default function OnlineDeptChart() {
       tooltip: { trigger: 'axis' as const },
       legend: {
         type: 'scroll' as const,
-        bottom: 0,
+        top: 0,
         textStyle: { fontSize: 10 },
       },
-      grid: { top: 20, right: 20, bottom: 40, left: 40 },
+      grid: { top: 40, right: 20, bottom: 50, left: 40 },
       xAxis: {
         type: 'category' as const,
         data: times,
@@ -89,7 +93,25 @@ export default function OnlineDeptChart() {
       yAxis: { type: 'value' as const, minInterval: 1, axisLabel: { fontSize: 10 } },
       series,
     }
-  }, [data, dimension])
+  }, [buildChartData])
+
+  const exportCsv = useCallback(() => {
+    const built = buildChartData()
+    if (!built) return
+    const { times, seriesMap } = built
+    const dimNames = Object.keys(seriesMap).sort()
+    const BOM = '\uFEFF'
+    const headers = ['時間', ...dimNames]
+    const rows = times.map(t => [t, ...dimNames.map(d => String(seriesMap[d]?.[t] ?? 0))])
+    const csv = BOM + [headers, ...rows].map(r => r.map(c => `"${c}"`).join(',')).join('\n')
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `dept_online_${new Date().toISOString().slice(0, 10)}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+  }, [buildChartData])
 
   return (
     <div className="bg-white border border-slate-200 rounded-lg p-4 space-y-3">
@@ -119,6 +141,13 @@ export default function OnlineDeptChart() {
             <option value={336}>14d</option>
             <option value={720}>30d</option>
           </select>
+          <button
+            onClick={exportCsv}
+            className="p-1 text-slate-400 hover:text-blue-600 rounded"
+            title="匯出 CSV"
+          >
+            <Download size={14} />
+          </button>
         </div>
       </div>
 
