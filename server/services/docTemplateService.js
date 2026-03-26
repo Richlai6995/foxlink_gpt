@@ -397,13 +397,63 @@ async function generateDocument(db, templateId, userId, inputData, outputFormat)
   let outPath;
 
   if (tpl.format === 'docx') {
-    const PizZip        = require('pizzip');
-    const Docxtemplater = require('docxtemplater');
+    // Use ORIGINAL file + direct XML replacement.
+    // Docxtemplater {{}} approach fails when Word splits runs, causing duplicate-tag errors.
+    const JSZip = require('jszip');
+    const origBuf = await fs.readFile(path.join(UPLOAD_DIR, tpl.original_file));
+    const zip     = await new JSZip().loadAsync(origBuf);
+    let xml = await zip.file('word/document.xml').async('string');
 
-    const zip = new PizZip(tplBuf);
-    const doc = new Docxtemplater(zip, { paragraphLoop: true, linebreaks: true });
-    doc.render(inputData);
-    const out = doc.getZip().generate({ type: 'nodebuffer' });
+    const variables = schema.variables || [];
+
+    // ── Simple variables (text / number / date / select) ───────────────────
+    for (const v of variables) {
+      if (!v.original_text || v.type === 'loop') continue;
+      const val = String(inputData[v.key] ?? v.default_value ?? '');
+      // Use paragraph-level run merge + replace (same as injectDocxPlaceholders)
+      xml = xml.replace(/<w:p\b[^>]*>[\s\S]*?<\/w:p>/g, (para) =>
+        mergeRunsAndReplace(para, v.original_text, val)
+      );
+    }
+
+    // ── Loop variables (table rows) ─────────────────────────────────────────
+    for (const v of variables) {
+      if (v.type !== 'loop') continue;
+      const items = Array.isArray(inputData[v.key]) ? inputData[v.key] : [];
+      const children = v.children || [];
+      if (!children.length || !items.length) continue;
+
+      // Find the <w:tr> that contains any child's original_text
+      const firstChild = children.find(c => c.original_text);
+      if (!firstChild) continue;
+
+      // Escape for regex
+      const escapedText = firstChild.original_text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const trPattern = new RegExp(`<w:tr\\b[^>]*>[\\s\\S]*?${escapedText}[\\s\\S]*?<\\/w:tr>`);
+      const trMatch = xml.match(trPattern);
+      if (!trMatch) continue;
+
+      const templateRow = trMatch[0];
+
+      // Build replacement rows
+      const newRows = items.map(item => {
+        let row = templateRow;
+        for (const c of children) {
+          if (!c.original_text) continue;
+          const cellVal = String(item[c.key] ?? '');
+          row = row.replace(/<w:p\b[^>]*>[\s\S]*?<\/w:p>/g, (para) =>
+            mergeRunsAndReplace(para, c.original_text, cellVal)
+          );
+        }
+        return row;
+      });
+
+      xml = xml.replace(templateRow, newRows.join(''));
+    }
+
+    zip.file('word/document.xml', xml);
+    const out = await zip.generateAsync({ type: 'nodebuffer',
+      compression: 'DEFLATE', compressionOptions: { level: 6 } });
 
     outPath = path.join(outDir, `${outputId}.docx`);
     await fs.writeFile(outPath, out);
@@ -411,18 +461,23 @@ async function generateDocument(db, templateId, userId, inputData, outputFormat)
   } else if (tpl.format === 'xlsx') {
     const ExcelJS = require('exceljs');
     const wb = new ExcelJS.Workbook();
-    await wb.xlsx.load(tplBuf);
+    // Use original file to avoid broken {{}} injection
+    const origBuf = await fs.readFile(path.join(UPLOAD_DIR, tpl.original_file));
+    await wb.xlsx.load(origBuf);
 
+    const variables = schema.variables || [];
     wb.eachSheet(sheet => {
       sheet.eachRow(row => {
         row.eachCell(cell => {
-          if (typeof cell.value === 'string') {
-            let v = cell.value;
-            for (const [k, val] of Object.entries(inputData)) {
-              v = v.replaceAll(`{{${k}}}`, String(val ?? ''));
+          if (typeof cell.value !== 'string') return;
+          let v = cell.value;
+          for (const varDef of variables) {
+            if (!varDef.original_text || varDef.type === 'loop') continue;
+            if (v.includes(varDef.original_text)) {
+              v = v.replaceAll(varDef.original_text, String(inputData[varDef.key] ?? ''));
             }
-            cell.value = v;
           }
+          cell.value = v;
         });
       });
     });
