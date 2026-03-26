@@ -811,9 +811,26 @@ const verifyToken = async (req, res, next) => {
   const session = await redis.getSession(token);
   if (!session) return res.status(401).json({ error: 'Invalid or expired token' });
   req.user = session;
-  // Sliding expiration：管理員使用超長 TTL（不會因監控畫面開著就被登出）；
-  // 一般使用者使用標準 SESSION_TTL 滑動視窗。
+  // Sliding expiration：管理員使用超長 TTL，一般使用者使用 SESSION_TTL。
   redis.touchSession(token, session.role === 'admin').catch(() => {});
+
+  // 從 X-Current-Page header 更新 session 的 current_page（每次 API 請求自動帶入）
+  const xPage = req.headers['x-current-page'];
+  if (xPage && xPage !== session.current_page) {
+    const PAGE_TITLES = {
+      '/': '對話', '/chat': '對話', '/skills': '技能市場',
+      '/knowledge': '知識庫', '/dify': 'DIFY', '/mcp': 'MCP',
+      '/research': '深度研究', '/monitor': 'AI 戰情',
+      '/dashboard': 'AI 戰情', '/admin': '系統管理', '/help': '說明',
+    };
+    const title = Object.entries(PAGE_TITLES).find(([k]) => k !== '/' && xPage.startsWith(k))?.[1]
+      ?? PAGE_TITLES[xPage] ?? xPage;
+    session.current_page       = xPage;
+    session.current_page_title = title;
+    session.current_page_at    = new Date().toISOString();
+    redis.setSession(token, session, session.role === 'admin').catch(() => {});
+  }
+
   next();
 };
 

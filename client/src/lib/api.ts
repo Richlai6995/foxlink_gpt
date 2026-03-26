@@ -10,6 +10,8 @@ api.interceptors.request.use((config) => {
   if (token) {
     config.headers.Authorization = `Bearer ${token}`
   }
+  // 每次 API 請求都帶上目前路由，讓 verifyToken 能更新 session 的 current_page
+  config.headers['X-Current-Page'] = window.location.pathname
   return config
 })
 
