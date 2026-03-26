@@ -70,6 +70,12 @@ export default function MonitorSettingsModal({ open, onClose }: Props) {
           },
           body: new URLSearchParams({ message: '\n[TEST] FOXLINK GPT Monitor 測試通知' }),
         })
+      } else if (type === 'webex') {
+        await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ markdown: '✅ **[TEST] FOXLINK GPT Monitor**\n\n這是一則測試通知' }),
+        })
       } else {
         await fetch(url, {
           method: 'POST',
@@ -199,12 +205,14 @@ export default function MonitorSettingsModal({ open, onClose }: Props) {
                   className="text-xs border rounded px-2 py-1.5 w-40"
                 >
                   <option value="teams">Microsoft Teams</option>
+                  <option value="webex">Webex</option>
                   <option value="line">LINE Notify</option>
                 </select>
               </div>
               <div>
                 <label className="text-xs text-slate-500">
-                  {settings.monitor_alert_webhook_type === 'line' ? 'LINE Notify Token' : 'Teams Webhook URL'}
+                  {settings.monitor_alert_webhook_type === 'line' ? 'LINE Notify Token' :
+                   settings.monitor_alert_webhook_type === 'webex' ? 'Webex Webhook URL' : 'Teams Webhook URL'}
                 </label>
                 <input
                   value={settings.monitor_alert_webhook_url || ''}

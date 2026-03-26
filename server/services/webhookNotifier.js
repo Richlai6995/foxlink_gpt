@@ -1,5 +1,5 @@
 /**
- * Webhook Notifier — LINE Notify & Microsoft Teams
+ * Webhook Notifier — LINE Notify, Microsoft Teams & Webex
  */
 
 async function sendWebhook(url, type, message, severity) {
@@ -17,6 +17,20 @@ async function sendWebhook(url, type, message, severity) {
         body: new URLSearchParams({ message: `\n[${severity}] ${message}` }),
       });
       if (!res.ok) console.warn('[Webhook] LINE Notify error:', res.status, await res.text());
+      return res.ok;
+    } else if (type === 'webex') {
+      // Webex Incoming Webhook
+      const emojiMap = { warning: '⚠️', critical: '🔴', emergency: '🚨' };
+      const emoji = emojiMap[severity] || '🔴';
+      const body = {
+        markdown: `${emoji} **[FOXLINK GPT] ${severity.toUpperCase()} Alert**\n\n${message}`,
+      };
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) console.warn('[Webhook] Webex error:', res.status, await res.text());
       return res.ok;
     } else {
       // Microsoft Teams Incoming Webhook (MessageCard)
