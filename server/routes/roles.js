@@ -115,7 +115,7 @@ router.delete('/:id/org-bindings/:bindingId', async (req, res) => {
 // POST /api/roles  — create role
 router.post('/', async (req, res) => {
   const { name, description, is_default, mcp_server_ids = [], dify_kb_ids = [],
-    budget_daily, budget_weekly, budget_monthly,
+    budget_daily, budget_weekly, budget_monthly, quota_exceed_action,
     allow_text_upload, text_max_mb, allow_audio_upload, audio_max_mb,
     allow_image_upload, image_max_mb, allow_scheduled_tasks,
     allow_create_skill, allow_external_skill, allow_code_skill,
@@ -129,15 +129,16 @@ router.post('/', async (req, res) => {
     const parseBudget = (v) => (v != null && v !== '') ? Number(v) : null;
     const result = await db
       .prepare(`INSERT INTO roles (name, description, is_default,
-                  budget_daily, budget_weekly, budget_monthly,
+                  budget_daily, budget_weekly, budget_monthly, quota_exceed_action,
                   allow_text_upload, text_max_mb, allow_audio_upload, audio_max_mb,
                   allow_image_upload, image_max_mb, allow_scheduled_tasks,
                   allow_create_skill, allow_external_skill, allow_code_skill,
                   can_create_kb, kb_max_size_mb, kb_max_count, can_deep_research,
                   can_design_ai_select, can_use_ai_dashboard)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .run(name, description || null, is_default ? 1 : 0,
         parseBudget(budget_daily), parseBudget(budget_weekly), parseBudget(budget_monthly),
+        quota_exceed_action === 'warn' ? 'warn' : 'block',
         allow_text_upload !== undefined ? (allow_text_upload ? 1 : 0) : 1,
         text_max_mb || 10,
         allow_audio_upload !== undefined ? (allow_audio_upload ? 1 : 0) : 0,
@@ -169,7 +170,7 @@ router.post('/', async (req, res) => {
 router.put('/:id', async (req, res) => {
   const { id } = req.params;
   const { name, description, is_default, mcp_server_ids = [], dify_kb_ids = [],
-    budget_daily, budget_weekly, budget_monthly,
+    budget_daily, budget_weekly, budget_monthly, quota_exceed_action,
     allow_text_upload, text_max_mb, allow_audio_upload, audio_max_mb,
     allow_image_upload, image_max_mb, allow_scheduled_tasks,
     allow_create_skill, allow_external_skill, allow_code_skill,
@@ -183,7 +184,7 @@ router.put('/:id', async (req, res) => {
     const parseBudget = (v) => (v != null && v !== '') ? Number(v) : null;
     await db.prepare(
       `UPDATE roles SET name=?, description=?, is_default=?,
-         budget_daily=?, budget_weekly=?, budget_monthly=?,
+         budget_daily=?, budget_weekly=?, budget_monthly=?, quota_exceed_action=?,
          allow_text_upload=?, text_max_mb=?, allow_audio_upload=?, audio_max_mb=?,
          allow_image_upload=?, image_max_mb=?, allow_scheduled_tasks=?,
          allow_create_skill=?, allow_external_skill=?, allow_code_skill=?,
@@ -193,6 +194,7 @@ router.put('/:id', async (req, res) => {
        WHERE id=?`
     ).run(name, description || null, is_default ? 1 : 0,
       parseBudget(budget_daily), parseBudget(budget_weekly), parseBudget(budget_monthly),
+      quota_exceed_action === 'warn' ? 'warn' : 'block',
       allow_text_upload !== undefined ? (allow_text_upload ? 1 : 0) : 1,
       text_max_mb || 10,
       allow_audio_upload !== undefined ? (allow_audio_upload ? 1 : 0) : 0,

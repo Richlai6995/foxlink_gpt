@@ -211,6 +211,7 @@ interface UserForm {
   budget_daily: string
   budget_weekly: string
   budget_monthly: string
+  quota_exceed_action: string  // '' = 沿用角色
   // org fields (manual override)
   dept_code: string
   dept_name: string
@@ -239,7 +240,7 @@ const empty: UserForm = {
   kb_max_size_mb: '',
   kb_max_count: '',
   role_id: null,
-  budget_daily: '', budget_weekly: '', budget_monthly: '',
+  budget_daily: '', budget_weekly: '', budget_monthly: '', quota_exceed_action: '',
   dept_code: '', dept_name: '', profit_center: '', profit_center_name: '',
   org_section: '', org_section_name: '', org_group_name: '', factory_code: '', org_end_date: '',
 }
@@ -330,6 +331,7 @@ export default function UserManagement() {
       budget_daily: u2.budget_daily != null ? String(u2.budget_daily) : '',
       budget_weekly: u2.budget_weekly != null ? String(u2.budget_weekly) : '',
       budget_monthly: u2.budget_monthly != null ? String(u2.budget_monthly) : '',
+      quota_exceed_action: u2.quota_exceed_action || '',
       dept_code: u2.dept_code || '',
       dept_name: u2.dept_name || '',
       profit_center: u2.profit_center || '',
@@ -732,6 +734,20 @@ export default function UserManagement() {
                     />
                   </div>
                 </div>
+              </div>
+
+              {/* Quota exceed action override */}
+              <div className="px-5 pb-2">
+                <label className="text-xs text-slate-500 mb-1 block">額度超過限制方式</label>
+                <select
+                  value={form.quota_exceed_action}
+                  onChange={e => setForm(p => ({ ...p, quota_exceed_action: e.target.value }))}
+                  className="input py-1.5 text-sm"
+                >
+                  <option value="">沿用角色設定</option>
+                  <option value="block">禁止（封鎖請求）</option>
+                  <option value="warn">警告（允許繼續使用，TopBar 顯示警告）</option>
+                </select>
               </div>
 
               {/* Skill permission override */}

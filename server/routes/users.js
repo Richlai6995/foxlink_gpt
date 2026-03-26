@@ -25,7 +25,7 @@ router.get('/', async (req, res) => {
                 u.can_create_kb, u.kb_max_size_mb, u.kb_max_count, u.can_deep_research,
                 u.can_design_ai_select, u.can_use_ai_dashboard,
                 u.role_id, r.name AS role_name, u.creation_method,
-                u.budget_daily, u.budget_weekly, u.budget_monthly,
+                u.budget_daily, u.budget_weekly, u.budget_monthly, u.quota_exceed_action,
                 ${ORG_COLS}
          FROM users u
          LEFT JOIN roles r ON r.id = u.role_id`;
@@ -48,7 +48,7 @@ router.post('/', async (req, res) => {
   const { username, password, name, employee_id, email, role, start_date, end_date, status,
     allow_text_upload, text_max_mb, allow_audio_upload, audio_max_mb,
     allow_image_upload, image_max_mb, allow_scheduled_tasks, role_id,
-    budget_daily, budget_weekly, budget_monthly } = req.body;
+    budget_daily, budget_weekly, budget_monthly, quota_exceed_action } = req.body;
   if (!username || !password || !name) {
     return res.status(400).json({ error: '帳號、密碼、姓名為必填' });
   }
@@ -76,9 +76,9 @@ router.post('/', async (req, res) => {
         `INSERT INTO users (username, password, name, employee_id, email, role, start_date, end_date, status,
                             allow_text_upload, text_max_mb, allow_audio_upload, audio_max_mb,
                             allow_image_upload, image_max_mb, allow_scheduled_tasks, role_id, creation_method,
-                            budget_daily, budget_weekly, budget_monthly,
+                            budget_daily, budget_weekly, budget_monthly, quota_exceed_action,
                             can_design_ai_select, can_use_ai_dashboard)
-         VALUES (?, ?, ?, ?, ?, ?, ${DI}, ${DI}, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)`
+         VALUES (?, ?, ?, ?, ?, ?, ${DI}, ${DI}, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)`
       )
       .run(
         username, password, name,
@@ -95,7 +95,8 @@ router.post('/', async (req, res) => {
         allow_scheduled_tasks !== undefined ? (allow_scheduled_tasks ? 1 : 0) : (rolePerms?.allow_scheduled_tasks ?? 0),
         resolvedRoleId,
         'manual',
-        parseBudget(budget_daily), parseBudget(budget_weekly), parseBudget(budget_monthly)
+        parseBudget(budget_daily), parseBudget(budget_weekly), parseBudget(budget_monthly),
+        quota_exceed_action || null
       );
 
     // If employee_id provided, auto-sync org
@@ -124,7 +125,7 @@ router.put('/:id', async (req, res) => {
   const { password, name, employee_id, email, role, start_date, end_date, status,
     allow_text_upload, text_max_mb, allow_audio_upload, audio_max_mb,
     allow_image_upload, image_max_mb, allow_scheduled_tasks, role_id,
-    budget_daily, budget_weekly, budget_monthly,
+    budget_daily, budget_weekly, budget_monthly, quota_exceed_action,
     allow_create_skill, allow_external_skill, allow_code_skill,
     can_create_kb, kb_max_size_mb, kb_max_count,
     can_deep_research,
@@ -153,6 +154,7 @@ router.put('/:id', async (req, res) => {
       allow_scheduled_tasks ? 1 : 0,
       role_id || null,
       parseBudget(budget_daily), parseBudget(budget_weekly), parseBudget(budget_monthly),
+      quota_exceed_action || null,
       resolveSkillPerm(allow_create_skill !== undefined ? allow_create_skill : null),
       resolveSkillPerm(allow_external_skill !== undefined ? allow_external_skill : null),
       resolveSkillPerm(allow_code_skill !== undefined ? allow_code_skill : null),
@@ -182,7 +184,7 @@ router.put('/:id', async (req, res) => {
     const baseSet = `name=?, employee_id=?, email=?, role=?, start_date=${D}, end_date=${D}, status=?,
              allow_text_upload=?, text_max_mb=?, allow_audio_upload=?, audio_max_mb=?,
              allow_image_upload=?, image_max_mb=?, allow_scheduled_tasks=?, role_id=?,
-             budget_daily=?, budget_weekly=?, budget_monthly=?,
+             budget_daily=?, budget_weekly=?, budget_monthly=?, quota_exceed_action=?,
              allow_create_skill=?, allow_external_skill=?, allow_code_skill=?,
              can_create_kb=?, kb_max_size_mb=?, kb_max_count=?, can_deep_research=?,
              can_design_ai_select=?, can_use_ai_dashboard=?`;

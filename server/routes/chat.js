@@ -494,13 +494,16 @@ router.get('/budget', async (req, res) => {
     const db = require('../database-oracle').db;
     const budgetRow = await db.prepare(
       `SELECT u.budget_daily, u.budget_weekly, u.budget_monthly,
-              r.budget_daily AS role_daily, r.budget_weekly AS role_weekly, r.budget_monthly AS role_monthly
+              u.quota_exceed_action AS user_action,
+              r.budget_daily AS role_daily, r.budget_weekly AS role_weekly, r.budget_monthly AS role_monthly,
+              r.quota_exceed_action AS role_action
        FROM users u LEFT JOIN roles r ON r.id = u.role_id WHERE u.id = ?`
     ).get(req.user.id);
 
     const limitD = budgetRow?.budget_daily ?? budgetRow?.role_daily ?? null;
     const limitW = budgetRow?.budget_weekly ?? budgetRow?.role_weekly ?? null;
     const limitM = budgetRow?.budget_monthly ?? budgetRow?.role_monthly ?? null;
+    const exceedAction = budgetRow?.user_action || budgetRow?.role_action || 'block';
 
     const now = new Date();
     const todayStr = now.toISOString().slice(0, 10);
@@ -535,6 +538,7 @@ router.get('/budget', async (req, res) => {
 
     res.json({
       isAdmin: req.user.role === 'admin',
+      quota_exceed_action: exceedAction,
       daily: limitD != null ? { limit: limitD, spent: spentD, remaining: Math.max(0, limitD - spentD), exceeded: spentD >= limitD } : null,
       weekly: limitW != null ? { limit: limitW, spent: spentW, remaining: Math.max(0, limitW - spentW), exceeded: spentW >= limitW } : null,
       monthly: limitM != null ? { limit: limitM, spent: spentM, remaining: Math.max(0, limitM - spentM), exceeded: spentM >= limitM } : null,
@@ -805,7 +809,9 @@ router.post('/sessions/:id/messages', upload.array('files', 10), async (req, res
   if (req.user.role !== 'admin') {
     const budgetRow = await db.prepare(
       `SELECT u.budget_daily, u.budget_weekly, u.budget_monthly,
-              r.budget_daily AS role_daily, r.budget_weekly AS role_weekly, r.budget_monthly AS role_monthly
+              u.quota_exceed_action AS user_action,
+              r.budget_daily AS role_daily, r.budget_weekly AS role_weekly, r.budget_monthly AS role_monthly,
+              r.quota_exceed_action AS role_action
        FROM users u LEFT JOIN roles r ON r.id = u.role_id WHERE u.id = ?`
     ).get(req.user.id);
 
@@ -813,18 +819,17 @@ router.post('/sessions/:id/messages', upload.array('files', 10), async (req, res
       const limitD = budgetRow.budget_daily ?? budgetRow.role_daily;
       const limitW = budgetRow.budget_weekly ?? budgetRow.role_weekly;
       const limitM = budgetRow.budget_monthly ?? budgetRow.role_monthly;
+      // user action overrides role action; default 'block'
+      const exceedAction = budgetRow.user_action || budgetRow.role_action || 'block';
 
       const now = new Date();
       const todayStr = now.toISOString().slice(0, 10);
 
-      console.log(`[Budget] user=${req.user.id}(${req.user.username}) limitD=${limitD} limitW=${limitW} limitM=${limitM} date=${todayStr}`);
+      console.log(`[Budget] user=${req.user.id}(${req.user.username}) limitD=${limitD} limitW=${limitW} limitM=${limitM} action=${exceedAction} date=${todayStr}`);
 
-      // Helper: sum cost across all models; if no price configured for any model,
-      // fall back to counting images * $0.04 as minimum estimate so image-only usage is still tracked.
       const sumCost = (rows) => {
         const { total, images } = rows || {};
         if ((total || 0) > 0) return total;
-        // fallback: if cost is all-null but images were generated, use $0.04/image as proxy
         return (images || 0) * 0.04;
       };
 
@@ -836,7 +841,7 @@ router.post('/sessions/:id/messages', upload.array('files', 10), async (req, res
         ).get(req.user.id, todayStr);
         const spent = sumCost(row);
         console.log(`[Budget] daily spent=${spent} limit=${limitD}`);
-        if (spent >= limitD) {
+        if (spent >= limitD && exceedAction !== 'warn') {
           return res.status(429).json({ error: `當日使用金額已達上限 $${limitD}（已使用 $${spent.toFixed(4)}），請明日再試。` });
         }
       }
@@ -852,7 +857,7 @@ router.post('/sessions/:id/messages', upload.array('files', 10), async (req, res
         ).get(req.user.id, mondayStr, todayStr);
         const spent = sumCost(row);
         console.log(`[Budget] weekly spent=${spent} limit=${limitW}`);
-        if (spent >= limitW) {
+        if (spent >= limitW && exceedAction !== 'warn') {
           return res.status(429).json({ error: `本週使用金額已達上限 $${limitW}（已使用 $${spent.toFixed(4)}），請下週一再試。` });
         }
       }
@@ -865,7 +870,7 @@ router.post('/sessions/:id/messages', upload.array('files', 10), async (req, res
         ).get(req.user.id, firstOfMonth, todayStr);
         const spent = sumCost(row);
         console.log(`[Budget] monthly spent=${spent} limit=${limitM}`);
-        if (spent >= limitM) {
+        if (spent >= limitM && exceedAction !== 'warn') {
           return res.status(429).json({ error: `本月使用金額已達上限 $${limitM}（已使用 $${spent.toFixed(4)}），請下月一日再試。` });
         }
       }

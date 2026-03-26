@@ -26,6 +26,7 @@ interface Role {
   budget_daily: number | null
   budget_weekly: number | null
   budget_monthly: number | null
+  quota_exceed_action: string
   allow_text_upload: number
   text_max_mb: number
   allow_audio_upload: number
@@ -51,6 +52,7 @@ const emptyForm = {
   budget_daily: '',
   budget_weekly: '',
   budget_monthly: '',
+  quota_exceed_action: 'block',
   allow_text_upload: true,
   text_max_mb: 10,
   allow_audio_upload: false,
@@ -171,6 +173,7 @@ export default function RoleManagement() {
       budget_daily: role.budget_daily != null ? String(role.budget_daily) : '',
       budget_weekly: role.budget_weekly != null ? String(role.budget_weekly) : '',
       budget_monthly: role.budget_monthly != null ? String(role.budget_monthly) : '',
+      quota_exceed_action: role.quota_exceed_action || 'block',
       allow_text_upload: role.allow_text_upload !== 0,
       text_max_mb: role.text_max_mb || 10,
       allow_audio_upload: role.allow_audio_upload === 1,
@@ -610,6 +613,17 @@ export default function RoleManagement() {
                 </div>
               </div>
               <p className="text-xs text-slate-400 mt-1.5">{t('roles.form.budgetNote')}</p>
+              <div className="mt-3">
+                <label className="text-xs text-slate-500 mb-1 block">額度超過限制方式</label>
+                <select
+                  value={form.quota_exceed_action}
+                  onChange={e => setForm({ ...form, quota_exceed_action: e.target.value })}
+                  className="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                >
+                  <option value="block">禁止（封鎖請求）</option>
+                  <option value="warn">警告（允許繼續使用，TopBar 顯示警告）</option>
+                </select>
+              </div>
             </div>
 
             {/* Org bindings — only when editing */}

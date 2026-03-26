@@ -52,6 +52,7 @@ export default function ChatPage() {
   // ── Deep Research state ────────────────────────────────────────────────────
   const [showResearchModal, setShowResearchModal] = useState(false)
   const [showTokenStats, setShowTokenStats] = useState(false)
+  const [budgetWarning, setBudgetWarning] = useState<string | null>(null)
   const [researchInitialQuestion, setResearchInitialQuestion] = useState('')
   const [researchInitialFiles,    setResearchInitialFiles]    = useState<File[]>([])
   const [researchBanner,   setResearchBanner]   = useState<{ id: string; title: string }[]>([])
@@ -244,6 +245,25 @@ export default function ChatPage() {
     loadSessions()
     loadBudget()
   }, [loadSessions, loadBudget])
+
+  // Poll budget status every 60s to show topbar warning if quota exceeded + action=warn
+  useEffect(() => {
+    const check = async () => {
+      try {
+        const res = await api.get('/chat/budget')
+        const b = res.data
+        if (b.isAdmin || b.quota_exceed_action !== 'warn') { setBudgetWarning(null); return }
+        const parts: string[] = []
+        if (b.daily?.exceeded) parts.push(`當日 $${b.daily.spent.toFixed(2)}/$${b.daily.limit}`)
+        if (b.weekly?.exceeded) parts.push(`本週 $${b.weekly.spent.toFixed(2)}/$${b.weekly.limit}`)
+        if (b.monthly?.exceeded) parts.push(`本月 $${b.monthly.spent.toFixed(2)}/$${b.monthly.limit}`)
+        setBudgetWarning(parts.length > 0 ? `⚠️ 使用額度已超限：${parts.join('、')}` : null)
+      } catch { setBudgetWarning(null) }
+    }
+    check()
+    const t = setInterval(check, 60000)
+    return () => clearInterval(t)
+  }, [])
 
   const initialResearchLoad = useRef(true)
   // Poll all research jobs every 5 s (for top-bar panel + completion banner)
@@ -736,6 +756,15 @@ export default function ChatPage() {
             >
               <X size={14} />
             </button>
+          </div>
+        )}
+
+        {/* Budget warning banner */}
+        {budgetWarning && (
+          <div className="bg-amber-50 border-b border-amber-200 px-4 py-1.5 flex items-center gap-2 text-xs text-amber-800">
+            <AlertTriangle size={13} className="text-amber-500 flex-shrink-0" />
+            <span className="flex-1">{budgetWarning}</span>
+            <button onClick={() => setBudgetWarning(null)} className="text-amber-500 hover:text-amber-700"><X size={12} /></button>
           </div>
         )}
 
