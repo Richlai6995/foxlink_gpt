@@ -241,14 +241,25 @@ function escapeXml(str) {
 }
 
 /**
- * Find the FIRST <w:tc> whose combined run text contains searchText,
- * and replace its entire body content with newText (supports \n → <w:br/>).
+ * Find ALL <w:tc> elements whose combined run text contains searchText,
+ * and replace each one's body content with newText (supports \n → <w:br/>).
+ *
+ * Search strategy:
+ *  - original_text from AI may contain \n (mammoth joins paragraphs with \n),
+ *    but the XML run texts joined have no \n between paragraphs.
+ *  - So we use only the FIRST LINE of searchText as the search key, normalized.
  * Returns { xml: newXml, found: boolean }
  */
 function replaceTcContent(xml, searchText, newText) {
+  // Derive a robust search snippet: first non-empty line, normalized whitespace
+  const searchSnippet = (searchText.split('\n').find(l => l.trim()) || searchText)
+    .trim().slice(0, 80).replace(/\s+/g, ' ');
+  if (!searchSnippet) return { xml, found: false };
+
   let found = false;
   const newXml = xml.replace(/<w:tc\b[^>]*>[\s\S]*?<\/w:tc>/g, (tcXml) => {
-    if (found) return tcXml;
+    // NOTE: no early-exit — replace ALL cells containing the snippet
+    // (original doc may have the same form repeated on multiple pages)
 
     // Collect all run texts in this cell (handles run-splitting)
     const runTexts = [];
@@ -256,12 +267,13 @@ function replaceTcContent(xml, searchText, newText) {
     let m;
     while ((m = runPat.exec(tcXml)) !== null) runTexts.push(m[1]);
 
-    // Decode common XML entities for comparison
+    // Decode common XML entities and normalize whitespace for comparison
     const cellText = runTexts.join('')
       .replace(/&amp;/g, '&').replace(/&lt;/g, '<')
-      .replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'");
+      .replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'")
+      .replace(/\s+/g, ' ');
 
-    if (!cellText.includes(searchText)) return tcXml;
+    if (!cellText.includes(searchSnippet)) return tcXml;
     found = true;
 
     // Preserve cell properties
@@ -549,6 +561,22 @@ async function generateDocument(db, templateId, userId, inputData, outputFormat)
             );
           }
         }
+      }
+    }
+
+    // ── Remove body-level content after the last table ─────────────────────
+    // Original filled documents often have free-form text or extra table copies
+    // after the main form. Keep only up to (and including) the last </w:tbl>,
+    // plus the section properties required by OOXML.
+    {
+      const lastTblClose = xml.lastIndexOf('</w:tbl>');
+      const bodyClose    = xml.lastIndexOf('</w:body>');
+      if (lastTblClose !== -1 && bodyClose > lastTblClose + 8) {
+        const afterLastTbl = xml.slice(lastTblClose + 8, bodyClose);
+        // Preserve <w:sectPr> (page size, margins, etc.)
+        const sectPrMatch = afterLastTbl.match(/<w:sectPr\b[\s\S]*?<\/w:sectPr>/);
+        const sectPr = sectPrMatch ? sectPrMatch[0] : '';
+        xml = xml.slice(0, lastTblClose + 8) + sectPr + '</w:body>' + xml.slice(bodyClose + 8);
       }
     }
 
