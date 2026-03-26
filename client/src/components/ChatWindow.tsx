@@ -115,7 +115,7 @@ function MessageBubble({
   const [hover, setHover] = useState(false)
 
   const handleCopy = () => {
-    const text = msg.role === 'assistant' ? markdownToPlainText(msg.content) : msg.content
+    const text = msg.role === 'assistant' ? markdownToPlainText(msg.content ?? '') : (msg.content ?? '')
     onCopy(text)
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
@@ -143,7 +143,7 @@ function MessageBubble({
             </div>
           )}
           <div className="bg-blue-600 text-white px-4 py-3 rounded-2xl rounded-tr-sm text-sm leading-relaxed whitespace-pre-wrap">
-            {msg.content}
+            {msg.content ?? ''}
           </div>
           {hover && (
             <button
@@ -174,9 +174,9 @@ function MessageBubble({
       </div>
       <div className="flex-1 max-w-[85%]">
         <div className="bg-white border border-slate-200 rounded-2xl rounded-tl-sm px-5 py-4 shadow-sm overflow-hidden break-words">
-          {msg.content.startsWith('__RESEARCH_JOB__:')
-            ? <ResearchProgressCard jobId={msg.content.slice('__RESEARCH_JOB__:'.length)} />
-            : <><MarkdownRenderer content={msg.content} /><GeneratedFileLinks files={msg.generated_files || []} /></>
+          {(msg.content ?? '').startsWith('__RESEARCH_JOB__:')
+            ? <ResearchProgressCard jobId={(msg.content ?? '').slice('__RESEARCH_JOB__:'.length)} />
+            : <><MarkdownRenderer content={msg.content ?? ''} /><GeneratedFileLinks files={msg.generated_files || []} /></>
           }
         </div>
         {hover && (
