@@ -354,7 +354,7 @@ router.get('/sso/callback', async (req, res) => {
       dept_code: dbUser.dept_code,
       profit_center: dbUser.profit_center,
       org_section: dbUser.org_section,
-    });
+    }, dbUser.role === 'admin');
 
     // Redirect to frontend with token
     res.redirect(`${baseUrl}/login?sso_token=${sessionToken}`);
@@ -541,7 +541,7 @@ const createSession = async (res, user) => {
     dept_code:     user.dept_code,
     profit_center: user.profit_center,
     org_section:   user.org_section,
-  });
+  }, user.role === 'admin');
   const { password: _, ...userWithoutPassword } = user;
   // Resolve effective skill permissions (user setting overrides role default)
   let rolePerms = null;
@@ -769,19 +769,9 @@ const verifyToken = async (req, res, next) => {
   const session = await redis.getSession(token);
   if (!session) return res.status(401).json({ error: 'Invalid or expired token' });
   req.user = session;
-  // Sliding expiration：只有真正的使用者操作才重設 TTL。
-  // 以下 passive 路徑由前端自動輪詢，不算「使用者活動」，不重設 TTL，
-  // 讓 session 能在真正閒置 SESSION_TTL 秒後自然過期。
-  const url = req.originalUrl || req.url || '';
-  const isPassive = (
-    url.includes('/api/monitor') ||
-    url.includes('/api/admin/token-usage') ||
-    url.includes('/api/users/online') ||
-    url.includes('/api/auth/me')
-  );
-  if (!isPassive) {
-    redis.touchSession(token).catch(() => {});
-  }
+  // Sliding expiration：管理員使用超長 TTL（不會因監控畫面開著就被登出）；
+  // 一般使用者使用標準 SESSION_TTL 滑動視窗。
+  redis.touchSession(token, session.role === 'admin').catch(() => {});
   next();
 };
 

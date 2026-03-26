@@ -3,7 +3,8 @@
  * Set REDIS_URL in .env to enable Redis (e.g. redis://redis:6379).
  * If REDIS_URL is not set, falls back to a simple in-memory Map (single-process only).
  */
-const TOKEN_TTL = parseInt(process.env.SESSION_TTL_SECONDS || '28800', 10); // 8 hours
+const TOKEN_TTL       = parseInt(process.env.SESSION_TTL_SECONDS       || '28800',   10); // 8 hours (一般使用者)
+const ADMIN_TOKEN_TTL = parseInt(process.env.ADMIN_SESSION_TTL_SECONDS || '2592000', 10); // 30 days (管理員)
 
 // ── In-memory fallback ────────────────────────────────────────────────────────
 class MemoryStore {
@@ -82,13 +83,16 @@ function getStore() {
 // ── Public API ────────────────────────────────────────────────────────────────
 module.exports = {
   TOKEN_TTL,
+  ADMIN_TOKEN_TTL,
   /**
    * Save session data under token key with TTL.
    * @param {string} token
    * @param {object} data
+   * @param {boolean} [isAdmin=false] 管理員使用 30 天 TTL
    */
-  async setSession(token, data) {
-    await getStore().set(`sess:${token}`, TOKEN_TTL, JSON.stringify(data));
+  async setSession(token, data, isAdmin = false) {
+    const ttl = isAdmin ? ADMIN_TOKEN_TTL : TOKEN_TTL;
+    await getStore().set(`sess:${token}`, ttl, JSON.stringify(data));
   },
   /**
    * Retrieve session data by token. Returns null if missing/expired.
@@ -103,14 +107,16 @@ module.exports = {
   /**
    * Touch session — reset TTL (sliding expiration).
    * @param {string} token
+   * @param {boolean} [isAdmin=false] 管理員使用 30 天 TTL，一般使用者使用 SESSION_TTL
    */
-  async touchSession(token) {
+  async touchSession(token, isAdmin = false) {
+    const ttl = isAdmin ? ADMIN_TOKEN_TTL : TOKEN_TTL;
     const s = getStore();
     if (s instanceof MemoryStore) {
       const entry = s.store.get(`sess:${token}`);
-      if (entry) entry.exp = Date.now() + TOKEN_TTL * 1000;
+      if (entry) entry.exp = Date.now() + ttl * 1000;
     } else if (s.client && typeof s.client.expire === 'function') {
-      await s.client.expire(`sess:${token}`, TOKEN_TTL);
+      await s.client.expire(`sess:${token}`, ttl);
     }
   },
   /**
