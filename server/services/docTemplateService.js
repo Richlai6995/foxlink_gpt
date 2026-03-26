@@ -678,19 +678,18 @@ async function generateDocument(db, templateId, userId, inputData, outputFormat)
           children.forEach((c, i) => { colMap[c.key] = i + 1; });
         }
 
-        // Build rows to insert
-        const maxCol = Math.max(...Object.values(colMap), 0);
-        const newRowsData = items.map(item => {
-          const arr = new Array(maxCol).fill(null);
+        // Write data into existing rows (preserves template formatting/colors/borders)
+        // Only use spliceRows if we run out of pre-formatted rows
+        const existingLastRow = sheet.lastRow?.number ?? headerRowNum;
+        items.forEach((item, idx) => {
+          const rowNum = headerRowNum + 1 + idx;
+          const row = sheet.getRow(rowNum);
           for (const [key, colNum] of Object.entries(colMap)) {
-            arr[colNum - 1] = String(item[key] ?? '');
+            row.getCell(colNum).value = String(item[key] ?? '');
           }
-          return arr;
+          row.commit();
         });
-
-        // Insert rows after headerRowNum using spliceRows
-        sheet.spliceRows(headerRowNum + 1, 0, ...newRowsData);
-        console.log(`[DocTemplate] XLSX loop ${varDef.key}: headerRow=${headerRowNum} items=${items.length} cols=${JSON.stringify(colMap)}`);
+        console.log(`[DocTemplate] XLSX loop ${varDef.key}: headerRow=${headerRowNum} items=${items.length} cols=${JSON.stringify(colMap)} existingRows=${existingLastRow}`);
       }
     });
 
