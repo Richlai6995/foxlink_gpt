@@ -965,6 +965,9 @@ router.get('/online-users', async (req, res) => {
               profit_center: s.profit_center || null,
               org_section: s.org_section || null,
               org_group_name: null, // will fill from DB
+              current_page: s.current_page || null,
+              current_page_title: s.current_page_title || null,
+              current_page_at: s.current_page_at || null,
             });
           }
         }

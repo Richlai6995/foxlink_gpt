@@ -15,6 +15,9 @@ interface OnlineUser {
   profit_center: string | null
   org_section: string | null
   org_group_name: string | null
+  current_page: string | null
+  current_page_title: string | null
+  current_page_at: string | null
 }
 
 interface Snapshot {
@@ -96,6 +99,7 @@ export default function OnlineUsersPanel({ current, loading }: Props) {
             <th className="text-left px-2 py-1 text-slate-500">姓名</th>
             <th className="text-left px-2 py-1 text-slate-500">角色</th>
             <th className="text-left px-2 py-1 text-slate-500">部門</th>
+            <th className="text-left px-2 py-1 text-slate-500">所在頁面</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-slate-50">
@@ -109,6 +113,9 @@ export default function OnlineUsersPanel({ current, loading }: Props) {
                 </span>
               </td>
               <td className="px-2 py-1 text-slate-500">{u.dept_code || '-'}</td>
+              <td className="px-2 py-1 text-slate-400 max-w-[80px] truncate" title={u.current_page_title || u.current_page || ''}>
+                {u.current_page_title || '-'}
+              </td>
             </tr>
           ))}
         </tbody>
@@ -199,6 +206,7 @@ export default function OnlineUsersPanel({ current, loading }: Props) {
                     <th className="text-left px-3 py-2 text-slate-500 font-medium whitespace-nowrap">利潤中心</th>
                     <th className="text-left px-3 py-2 text-slate-500 font-medium whitespace-nowrap">事業處</th>
                     <th className="text-left px-3 py-2 text-slate-500 font-medium whitespace-nowrap">事業群</th>
+                    <th className="text-left px-3 py-2 text-slate-500 font-medium whitespace-nowrap">所在頁面</th>
                     <th className="text-left px-3 py-2 text-slate-500 font-medium whitespace-nowrap">Email</th>
                   </tr>
                 </thead>
@@ -217,6 +225,10 @@ export default function OnlineUsersPanel({ current, loading }: Props) {
                       <td className="px-3 py-2 whitespace-nowrap">{u.profit_center || '-'}</td>
                       <td className="px-3 py-2 whitespace-nowrap">{u.org_section || '-'}</td>
                       <td className="px-3 py-2 whitespace-nowrap">{u.org_group_name || '-'}</td>
+                      <td className="px-3 py-2 whitespace-nowrap text-slate-500"
+                        title={u.current_page || ''}>
+                        {u.current_page_title || '-'}
+                      </td>
                       <td className="px-3 py-2 text-slate-400 text-xs">{u.email || '-'}</td>
                     </tr>
                   ))}

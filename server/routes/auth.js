@@ -756,6 +756,48 @@ router.put('/language', async (req, res, next) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// POST /api/auth/activity — 前端定期上報目前所在頁面，存入 session
+router.post('/activity', async (req, res) => {
+  const token = req.headers.authorization?.split(' ')[1];
+  if (!token) return res.json({ ok: false });
+  const session = await redis.getSession(token);
+  if (!session) return res.json({ ok: false });
+  const { page, page_title } = req.body;
+  session.current_page       = page       || null;
+  session.current_page_title = page_title || null;
+  session.current_page_at    = new Date().toISOString();
+  await redis.setSession(token, session, session.role === 'admin');
+  res.json({ ok: true });
+});
+
+// GET /api/auth/token-stats — 使用者查看自己近 30 天各模型費用（無需 admin）
+router.get('/token-stats', async (req, res) => {
+  const token = req.headers.authorization?.split(' ')[1];
+  const session = token ? await redis.getSession(token) : null;
+  if (!session) return res.status(401).json({ error: 'Unauthorized' });
+  try {
+    const db = require('../database-oracle').db;
+    const days = Math.min(parseInt(req.query.days) || 30, 90);
+    const rows = await db.prepare(`
+      SELECT TO_CHAR(usage_date,'YYYY-MM-DD') AS usage_date,
+             tu.model,
+             COALESCE(lm.name, tu.model) AS model_name,
+             COALESCE(tu.input_tokens,0)  AS input_tokens,
+             COALESCE(tu.output_tokens,0) AS output_tokens,
+             COALESCE(tu.cost,0)          AS cost,
+             COALESCE(tu.currency,'USD')  AS currency
+      FROM token_usage tu
+      LEFT JOIN llm_models lm ON LOWER(lm.key)=LOWER(tu.model) AND lm.is_active=1
+      WHERE tu.user_id = ?
+        AND tu.usage_date >= SYSDATE - ?
+      ORDER BY tu.usage_date ASC, tu.model ASC
+    `).all(session.id, days);
+    res.json(rows);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // Middleware
 const verifyToken = async (req, res, next) => {
   let token = null;

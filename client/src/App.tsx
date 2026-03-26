@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider, useAuth } from './context/AuthContext'
+import { usePageActivity } from './lib/usePageActivity'
 import Login from './pages/Login'
 import ChatPage from './pages/ChatPage'
 import AdminDashboard from './pages/AdminDashboard'
@@ -27,6 +28,7 @@ function AdminRoute({ children }: { children: React.ReactNode }) {
 
 function AppRoutes() {
   const { isAuthenticated } = useAuth()
+  usePageActivity()
   return (
     <Routes>
       <Route path="/login" element={isAuthenticated ? <Navigate to="/chat" replace /> : <Login />} />

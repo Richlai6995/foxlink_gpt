@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useSearchParams, useNavigate } from 'react-router-dom'
-import { Square, AlertTriangle, Share2, Copy, Check, X, Sparkles, Search, Plus, Plug, Zap, Database, CheckCircle, BarChart3, ChevronDown, RefreshCw } from 'lucide-react'
+import { Square, AlertTriangle, Share2, Copy, Check, X, Sparkles, Search, Plus, Plug, Zap, Database, CheckCircle, BarChart3, ChevronDown, RefreshCw, TrendingUp } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import Sidebar from '../components/Sidebar'
 import ChatWindow from '../components/ChatWindow'
@@ -10,6 +10,7 @@ import type { ChatSession, ChatMessage, ModelType, GeneratedFile, LlmModel } fro
 import api from '../lib/api'
 import { copyText } from '../lib/clipboard'
 import { useAuth } from '../context/AuthContext'
+import TokenStatsModal from '../components/common/TokenStatsModal'
 
 export default function ChatPage() {
   const { t, i18n } = useTranslation()
@@ -50,6 +51,7 @@ export default function ChatPage() {
 
   // ── Deep Research state ────────────────────────────────────────────────────
   const [showResearchModal, setShowResearchModal] = useState(false)
+  const [showTokenStats, setShowTokenStats] = useState(false)
   const [researchInitialQuestion, setResearchInitialQuestion] = useState('')
   const [researchInitialFiles,    setResearchInitialFiles]    = useState<File[]>([])
   const [researchBanner,   setResearchBanner]   = useState<{ id: string; title: string }[]>([])
@@ -1188,7 +1190,19 @@ export default function ChatPage() {
               )}
             </div>
           )}
+
+          {/* Token 消耗趨勢按鈕 — 最右側 */}
+          <button
+            onClick={() => setShowTokenStats(true)}
+            className="flex items-center gap-1 text-xs px-2 py-0.5 rounded-lg border text-slate-500 bg-slate-50 border-slate-200 hover:text-blue-600 hover:border-blue-300 hover:bg-blue-50 transition"
+            title="查看我的 Token 消耗趨勢"
+          >
+            <TrendingUp size={11} />
+            消耗趨勢
+          </button>
         </div>
+
+        {showTokenStats && <TokenStatsModal onClose={() => setShowTokenStats(false)} />}
 
         <ChatWindow
           messages={messages}
