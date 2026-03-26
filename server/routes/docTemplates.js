@@ -68,7 +68,10 @@ router.get('/', async (req, res) => {
 router.post('/upload', upload.single('file'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: '請上傳檔案' });
 
-  const format = formatFromFile(req.file.originalname);
+  const originalName = Buffer.from(req.file.originalname, 'latin1').toString('utf8');
+  const format = formatFromFile(originalName) || formatFromFile(req.file.originalname);
+  console.log(`[DocTemplates] upload: file=${originalName}, format=${format}, size=${req.file.size}`);
+
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
@@ -76,23 +79,68 @@ router.post('/upload', upload.single('file'), async (req, res) => {
   const send = (event, data) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
 
   try {
+    // Step 1: extract text
     send('status', { step: 'parsing', message: '擷取文件內容中...' });
-    send('status', { step: 'analyzing', message: 'AI 分析變數中...' });
+    let text = '';
+    let schema;
 
-    const schema = await svc.analyzeDocument(req.file.path, format);
+    if (format === 'pdf') {
+      // Try AcroForm first
+      const { default: pdfLib } = await import('pdf-lib').catch(() => ({ default: require('pdf-lib') }));
+      const buf = await fs.readFile(req.file.path);
+      try {
+        const pdfDoc = await pdfLib.PDFDocument.load(buf, { ignoreEncryption: true });
+        const form = pdfDoc.getForm();
+        const fields = form.getFields().map(f => ({
+          key: f.getName().replace(/\s+/g, '_').toLowerCase(),
+          label: f.getName(),
+          type: 'text',
+          required: false,
+          original_text: f.getName(),
+          description: 'PDF 表單欄位',
+          options: null,
+          children: [],
+        }));
+        if (fields.length > 0) {
+          console.log(`[DocTemplates] PDF AcroForm 偵測到 ${fields.length} 個欄位`);
+          schema = { variables: fields, confidence: 1.0, notes: 'PDF 表單欄位自動偵測', strategy: 'pdf_form' };
+        }
+      } catch (e) {
+        console.log('[DocTemplates] PDF AcroForm 偵測失敗，改用 AI 分析:', e.message);
+      }
+    }
+
+    if (!schema) {
+      text = await svc.extractText(req.file.path, format);
+      console.log(`[DocTemplates] 擷取文字長度: ${text.length}`);
+
+      // Step 2: AI analyze
+      send('status', { step: 'analyzing', message: 'AI 分析變數中...' });
+
+      // Read model from system_settings (allow admin to switch flash/pro)
+      let model;
+      try {
+        const settingRow = await db.prepare(`SELECT value FROM system_settings WHERE key='template_analysis_model'`).get();
+        if (settingRow?.value === 'pro') model = svc.MODEL_PRO;
+        else if (settingRow?.value === 'flash') model = svc.MODEL_FLASH;
+      } catch { /* ignore */ }
+
+      const aiResult = await svc.analyzeVariables(text, model);
+      schema = { ...aiResult, strategy: format === 'pdf' ? 'ai_schema' : 'native', extracted_at: new Date().toISOString() };
+    }
 
     send('result', {
       schema,
-      temp_file: req.file.filename,  // client sends this back when confirming
+      temp_file: req.file.filename,
       format,
-      original_name: Buffer.from(req.file.originalname, 'latin1').toString('utf8'),
+      original_name: originalName,
     });
     send('done', {});
   } catch (e) {
+    console.error('[DocTemplates] upload error:', e.message, e.stack);
     send('error', { message: e.message });
   } finally {
     res.end();
-    // Clean up temp file after 30 minutes
     setTimeout(() => fs.unlink(req.file.path).catch(() => {}), 30 * 60 * 1000);
   }
 });

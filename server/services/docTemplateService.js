@@ -10,7 +10,10 @@ const { v4: uuid } = require('uuid');
 const JSZip = require('jszip');
 const mammoth = require('mammoth');
 
-const { generateTextSync, MODEL_FLASH } = require('./gemini');
+const { generateTextSync, MODEL_FLASH, MODEL_PRO } = require('./gemini');
+
+// Allow override via env var or system_settings (read at call time via getAnalysisModel)
+const TEMPLATE_ANALYSIS_MODEL = process.env.TEMPLATE_ANALYSIS_MODEL || null;
 
 const UPLOAD_DIR = process.env.UPLOAD_DIR
   ? path.resolve(process.env.UPLOAD_DIR)
@@ -67,10 +70,14 @@ async function checkAccess(db, templateId, user) {
 // ─── Text Extraction ───────────────────────────────────────────────────────────
 
 async function extractText(filePath, format) {
+  console.log(`[DocTemplate] extractText: format=${format}, path=${filePath}`);
   const buf = await fs.readFile(filePath);
+  console.log(`[DocTemplate] 檔案大小: ${buf.length} bytes`);
 
   if (format === 'docx') {
     const result = await mammoth.extractRawText({ buffer: buf });
+    console.log(`[DocTemplate] mammoth 擷取完成，文字長度=${result.value.length}，警告數=${result.messages.length}`);
+    if (result.messages.length) console.warn('[DocTemplate] mammoth 警告:', result.messages.map(m => m.message).join('; '));
     return result.value;
   }
 
@@ -86,25 +93,38 @@ async function extractText(filePath, format) {
         lines.push(cells.join('\t'));
       });
     });
-    return lines.join('\n');
+    const text = lines.join('\n');
+    console.log(`[DocTemplate] ExcelJS 擷取完成，文字長度=${text.length}`);
+    return text;
   }
 
   if (format === 'pdf') {
     try {
       const pdfParse = require('pdf-parse');
       const data = await pdfParse(buf);
+      console.log(`[DocTemplate] pdf-parse 擷取完成，文字長度=${data.text.length}`);
       return data.text;
-    } catch {
+    } catch (e) {
+      console.error('[DocTemplate] pdf-parse 失敗:', e.message);
       return '';
     }
   }
 
+  console.warn(`[DocTemplate] 未知格式: ${format}`);
   return '';
 }
 
 // ─── AI Variable Analysis ──────────────────────────────────────────────────────
 
-async function analyzeVariables(text) {
+async function analyzeVariables(text, model) {
+  const useModel = model || TEMPLATE_ANALYSIS_MODEL || MODEL_FLASH;
+  console.log(`[DocTemplate] analyzeVariables: 文字長度=${text.length}, 模型=${useModel}`);
+
+  if (!text || text.trim().length < 10) {
+    console.warn('[DocTemplate] analyzeVariables: 擷取文字過短，無法分析');
+    return { variables: [], confidence: 0, notes: '文件文字擷取失敗或內容過短' };
+  }
+
   const prompt = `你是一個文件範本分析器。以下是一份文件的內容：
 
 ---
@@ -141,14 +161,20 @@ ${text.slice(0, 8000)}
 5. 直接回傳 JSON，不要包在 markdown 中`;
 
   try {
-    const raw = await generateTextSync(MODEL_FLASH, [], prompt);
-    let cleaned = raw.replace(/```(?:json)?\s*/gi, '').replace(/```/g, '').trim();
+    const raw = await generateTextSync(useModel, [], prompt);
+    // generateTextSync returns { text, inputTokens, outputTokens } — extract .text
+    const rawText = typeof raw === 'string' ? raw : raw.text;
+    console.log(`[DocTemplate] AI 原始回應 (前200字): ${String(rawText).slice(0, 200)}`);
+    let cleaned = String(rawText).replace(/```(?:json)?\s*/gi, '').replace(/```/g, '').trim();
     const m = cleaned.match(/\{[\s\S]*\}/);
     if (m) cleaned = m[0];
-    return JSON.parse(cleaned);
+    const result = JSON.parse(cleaned);
+    console.log(`[DocTemplate] 識別出 ${result.variables?.length ?? 0} 個變數，信心度 ${result.confidence}`);
+    return result;
   } catch (e) {
     console.error('[DocTemplate] analyzeVariables error:', e.message);
-    return { variables: [], confidence: 0, notes: 'AI 分析失敗' };
+    console.error('[DocTemplate] analyzeVariables stack:', e.stack);
+    return { variables: [], confidence: 0, notes: `AI 分析失敗: ${e.message}` };
   }
 }
 
@@ -552,10 +578,14 @@ async function listTemplates(db, user, { search, format, tag } = {}) {
 
 module.exports = {
   checkAccess,
+  extractText,
+  analyzeVariables,
   analyzeDocument,
   createTemplate,
   generateDocument,
   forkTemplate,
   listTemplates,
   TEMPLATES_DIR,
+  MODEL_FLASH,
+  MODEL_PRO,
 };

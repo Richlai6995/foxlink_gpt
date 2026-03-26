@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Plus, Search, RefreshCw } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
+import { Plus, Search, RefreshCw, ArrowLeft } from 'lucide-react'
 import api from '../lib/api'
 import { DocTemplate, TemplateSchema } from '../types'
 import TemplateCard from '../components/templates/TemplateCard'
@@ -105,6 +106,7 @@ function TemplateEditModal({ template, onClose, onSaved }: {
 }
 
 export default function TemplatesPage() {
+  const navigate = useNavigate()
   const [templates, setTemplates] = useState<DocTemplate[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
@@ -147,9 +149,18 @@ export default function TemplatesPage() {
     <div className="flex-1 overflow-auto p-6">
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-lg font-semibold">文件範本庫</h1>
-          <p className="text-xs text-slate-400 mt-0.5">上傳文件，由 AI 識別變數，可重複使用、分享給他人</p>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => navigate(-1)}
+            className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition"
+            title="返回"
+          >
+            <ArrowLeft size={18} />
+          </button>
+          <div>
+            <h1 className="text-lg font-semibold">文件範本庫</h1>
+            <p className="text-xs text-slate-400 mt-0.5">上傳文件，由 AI 識別變數，可重複使用、分享給他人</p>
+          </div>
         </div>
         <button
           onClick={() => setShowWizard(true)}

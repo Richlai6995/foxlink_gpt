@@ -928,6 +928,26 @@ router.put('/settings/vector-defaults', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// GET /api/admin/settings/template-model
+router.get('/settings/template-model', async (req, res) => {
+  try {
+    const row = await db.prepare(`SELECT value FROM system_settings WHERE key='template_analysis_model'`).get();
+    res.json({ model: row?.value || 'flash' });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// PUT /api/admin/settings/template-model
+router.put('/settings/template-model', async (req, res) => {
+  try {
+    const { model } = req.body;
+    if (!['flash', 'pro'].includes(model)) return res.status(400).json({ error: '僅允許 flash 或 pro' });
+    const ex = await db.prepare(`SELECT key FROM system_settings WHERE key='template_analysis_model'`).get();
+    if (ex) await db.prepare(`UPDATE system_settings SET value=? WHERE key='template_analysis_model'`).run(model);
+    else await db.prepare(`INSERT INTO system_settings (key,value) VALUES ('template_analysis_model',?)`).run(model);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // GET /api/admin/chat-sessions (all users, for admin view)
 router.get('/chat-sessions', async (req, res) => {
   try {

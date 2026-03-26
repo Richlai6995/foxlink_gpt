@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Save, RefreshCw, Cpu } from 'lucide-react'
+import { Save, RefreshCw, Cpu, LayoutTemplate } from 'lucide-react'
 import type { LlmModel } from '../../types'
 import api from '../../lib/api'
 
@@ -15,14 +15,19 @@ export default function VectorDefaultsPanel() {
   const [models,  setModels]  = useState<LlmModel[]>([])
   const [saving,  setSaving]  = useState(false)
   const [msg,     setMsg]     = useState<{ ok: boolean; text: string } | null>(null)
+  const [templateModel,    setTemplateModel]    = useState<'flash' | 'pro'>('flash')
+  const [savingTpl,        setSavingTpl]        = useState(false)
+  const [msgTpl,           setMsgTpl]           = useState<{ ok: boolean; text: string } | null>(null)
 
   const load = async () => {
-    const [d, m] = await Promise.all([
+    const [d, m, t] = await Promise.all([
       api.get('/admin/settings/vector-defaults'),
       api.get('/admin/llm-models'),
+      api.get('/admin/settings/template-model'),
     ])
     setData(d.data)
     setModels(m.data)
+    setTemplateModel(t.data.model || 'flash')
   }
 
   useEffect(() => { load() }, [])
@@ -125,6 +130,52 @@ export default function VectorDefaultsPanel() {
         {msg && (
           <span className={`text-sm ${msg.ok ? 'text-green-600' : 'text-red-500'}`}>{msg.text}</span>
         )}
+      </div>
+
+      {/* ── Template Analysis Model ────────────────────────────────────── */}
+      <div className="border-t pt-6 space-y-4">
+        <div className="flex items-center gap-2">
+          <LayoutTemplate size={16} className="text-indigo-500" />
+          <h3 className="text-sm font-semibold text-slate-700">文件範本變數識別模型</h3>
+        </div>
+        <p className="text-xs text-slate-500">
+          上傳文件範本時，AI 識別變數所使用的 Gemini 模型。
+          Flash 速度快（建議），Pro 分析能力較強但較慢。
+          亦可透過 ENV <code className="bg-slate-100 px-1 rounded">TEMPLATE_ANALYSIS_MODEL</code> 指定模型 ID 覆蓋此設定。
+        </p>
+        <div className="bg-white rounded-xl border border-slate-200">
+          <div className="p-4 space-y-1.5">
+            <label className="text-sm font-medium text-slate-700">識別模型</label>
+            <select
+              className="input w-full"
+              value={templateModel}
+              onChange={e => setTemplateModel(e.target.value as 'flash' | 'pro')}
+            >
+              <option value="flash">Gemini Flash（速度快，建議）</option>
+              <option value="pro">Gemini Pro（分析能力強）</option>
+            </select>
+            <p className="text-xs text-slate-400">ENV: GEMINI_MODEL_FLASH / GEMINI_MODEL_PRO</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={async () => {
+              setSavingTpl(true); setMsgTpl(null)
+              try {
+                await api.put('/admin/settings/template-model', { model: templateModel })
+                setMsgTpl({ ok: true, text: '儲存成功' })
+              } catch (e: any) {
+                setMsgTpl({ ok: false, text: e.response?.data?.error || '儲存失敗' })
+              } finally { setSavingTpl(false) }
+            }}
+            disabled={savingTpl}
+            className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm font-medium disabled:opacity-50"
+          >
+            {savingTpl ? <RefreshCw size={14} className="animate-spin" /> : <Save size={14} />}
+            儲存
+          </button>
+          {msgTpl && <span className={`text-sm ${msgTpl.ok ? 'text-green-600' : 'text-red-500'}`}>{msgTpl.text}</span>}
+        </div>
       </div>
     </div>
   )
