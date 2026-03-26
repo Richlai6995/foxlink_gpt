@@ -758,54 +758,8 @@ async function generateDocument(db, templateId, userId, inputData, outputFormat)
     await fs.writeFile(outPath, out);
 
   } else if (tpl.format === 'pdf' && tpl.strategy !== 'pdf_form') {
-    // Non-form PDF: use pdf-lib to overlay text at label positions
-    const { PDFDocument, rgb } = require('pdf-lib');
-    const pdfParseLib = require('pdf-parse');
-    const origBuf = await fs.readFile(path.join(UPLOAD_DIR, tpl.original_file));
-
-    // ── Extract text positions from original PDF ────────────────────────────
-    const textItems = []; // { text, x, y, w }
-    try {
-      await pdfParseLib(origBuf, {
-        pagerender: (pageData) => pageData.getTextContent().then(content => {
-          content.items.forEach(item => {
-            if (item.str && item.str.trim()) {
-              textItems.push({
-                text: item.str.trim(),
-                x: item.transform[4],
-                y: item.transform[5],
-                w: item.width || 50,
-              });
-            }
-          });
-          return '';
-        })
-      });
-    } catch (e) {
-      console.warn('[DocTemplate] PDF text extraction for positions failed:', e.message);
-    }
-    console.log(`[DocTemplate] PDF text items found: ${textItems.length}`);
-
-    // ── Load PDF and embed Chinese font ─────────────────────────────────────
-    const pdfDoc = await PDFDocument.load(origBuf);
-    let font;
-    try {
-      const fontkit = require('@pdf-lib/fontkit');
-      pdfDoc.registerFontkit(fontkit);
-      const fontBytes = await fs.readFile(path.join(__dirname, '../fonts/NotoSansTC-Regular.ttf'));
-      font = await pdfDoc.embedFont(fontBytes);
-      console.log('[DocTemplate] 載入中文字型成功');
-    } catch (e) {
-      console.warn('[DocTemplate] 中文字型載入失敗，使用 Helvetica:', e.message);
-      const { StandardFonts } = require('pdf-lib');
-      font = await pdfDoc.embedFont(StandardFonts.Helvetica);
-    }
-
-    const pages = pdfDoc.getPages();
-    const page  = pages[0];
-    const { width, height } = page.getSize();
-    const fontSize = 10;
-    const lineH   = fontSize + 4;
+    // Non-form PDF: regenerate with pdfkit so rows auto-expand with content
+    const PDFKit = require('pdfkit');
     const variables = schema.variables || [];
 
     // ── Flatten loop variables → numbered text ──────────────────────────────
@@ -814,60 +768,75 @@ async function generateDocument(db, templateId, userId, inputData, outputFormat)
       if (v.type !== 'loop') continue;
       const items = Array.isArray(inputData[v.key]) ? inputData[v.key] : [];
       const children = v.children || [];
-      const vals = items.map((item, idx) => {
-        const parts = children.map(c => String(item[c.key] ?? '').trim()).filter(s => s);
-        return parts.length ? `${idx + 1}. ${parts.join(' ')}` : '';
-      }).filter(s => s);
-      flatData[v.key] = vals.join('\n');
+      flatData[v.key] = items.map((item, i) => {
+        const parts = children.map(c => String(item[c.key] ?? '').trim()).filter(Boolean);
+        return parts.length ? `${i + 1}. ${parts.join('　')}` : '';
+      }).filter(Boolean).join('\n');
     }
 
-    // ── Overlay each variable's value ────────────────────────────────────────
-    for (const v of variables) {
+    const fontPath = path.join(__dirname, '../fonts/NotoSansTC-Regular.ttf');
+    const MX = 50; // margin x
+    const doc = new PDFKit({ margin: MX, size: 'A4', bufferPages: true });
+    doc.registerFont('CJK', fontPath);
+    doc.font('CJK');
+
+    const pw       = doc.page.width;
+    const ph       = doc.page.height;
+    const tblW     = pw - MX * 2;
+    const labelW   = 85;
+    const valW     = tblW - labelW;
+    const fz       = 9;
+    // Cycle through row background colors
+    const bgColors = ['#c6efce', '#bdd7ee', '#bdd7ee', '#fce4d6', '#fce4d6', '#fff2cc'];
+
+    // Title row
+    doc.fontSize(13).text('會議記錄', { align: 'center' }).moveDown(0.4);
+    doc.font('CJK').fontSize(fz);
+
+    let curY = doc.y;
+
+    for (let idx = 0; idx < variables.length; idx++) {
+      const v = variables[idx];
       const value = String(flatData[v.key] ?? '').trim();
-      if (!value) continue;
+      const label = (v.label || v.key) + ':';
+      const bg    = bgColors[idx % bgColors.length];
 
-      const labelKey = (v.label || '').replace(/[:：\s]/g, '').slice(0, 6);
+      // Measure value text height for dynamic row sizing
+      doc.font('CJK').fontSize(fz);
+      const measuredH = doc.heightOfString(value || ' ', { width: valW - 10 });
+      const rowH = Math.max(22, measuredH + 12);
 
-      // Find label text position in the PDF
-      let labelItem = null;
-      for (const item of textItems) {
-        const itemKey = item.text.replace(/[:：\s]/g, '');
-        if (itemKey.includes(labelKey) || labelKey.includes(itemKey)) {
-          labelItem = item;
-          break;
-        }
+      // Page overflow: start a new page
+      if (curY + rowH > ph - MX) {
+        doc.addPage();
+        doc.font('CJK').fontSize(fz);
+        curY = MX;
       }
 
-      let valX, valY;
-      if (labelItem) {
-        // Value starts after the label text (right column of table)
-        valX = Math.min(labelItem.x + labelItem.w + 8, width * 0.65);
-        valY = labelItem.y;
-        // Ensure minimum right-column offset
-        if (valX < width * 0.2) valX = width * 0.25;
-      } else {
-        // Fallback: by variable index
-        const idx = variables.findIndex(vv => vv.key === v.key);
-        valY = height * 0.65 - idx * 30;
-        valX = width * 0.28;
+      // ── Label cell (coloured background) ───────────────────────────────────
+      doc.rect(MX, curY, labelW, rowH).fillAndStroke(bg, '#aaaaaa');
+      doc.font('CJK').fontSize(fz).fillColor('#000000')
+        .text(label, MX + 4, curY + 6, { width: labelW - 8, lineBreak: false, ellipsis: true });
+
+      // ── Value cell (white background) ───────────────────────────────────────
+      doc.rect(MX + labelW, curY, valW, rowH).fillAndStroke('#ffffff', '#aaaaaa');
+      if (value) {
+        doc.font('CJK').fontSize(fz).fillColor('#000000')
+          .text(value, MX + labelW + 4, curY + 6, { width: valW - 10 });
       }
 
-      const maxW = width - valX - 8;
-      const lines = value.split('\n');
-      let curY = valY;
-      for (const line of lines) {
-        if (!line.trim()) continue;
-        page.drawText(line, { x: valX, y: curY, size: fontSize, font,
-          color: rgb(0, 0, 0), maxWidth: maxW, lineHeight: lineH });
-        // Estimate line count for long text
-        const estimatedLines = Math.ceil((line.length * fontSize * 0.6) / maxW) || 1;
-        curY -= lineH * estimatedLines;
-      }
+      curY += rowH;
     }
 
-    const pdfBytes = await pdfDoc.save();
     outPath = path.join(outDir, `${outputId}.pdf`);
-    await fs.writeFile(outPath, Buffer.from(pdfBytes));
+    await new Promise((resolve, reject) => {
+      const wStream = require('fs').createWriteStream(outPath);
+      doc.pipe(wStream);
+      wStream.on('finish', resolve);
+      wStream.on('error', reject);
+      doc.on('error', reject);
+      doc.end();
+    });
 
   } else if (tpl.format === 'pdf' && tpl.strategy === 'pdf_form') {
     const { PDFDocument } = require('pdf-lib');
