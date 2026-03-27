@@ -936,15 +936,17 @@ router.post('/sessions/:id/messages', upload.array('files', 10), async (req, res
     let combinedUserText = message;
 
     // ── Doc Template Tag Detection ──────────────────────────────────────────
-    // Message prefix: [使用範本:UUID:name]
+    // Message prefix: [使用範本:UUID:name:outputFormat]
     let docTemplateId = null;
     let docTemplateName = '';
     let docTemplateSchema = null;
+    let docTemplateOutputFmt = null;
     {
-      const tplMatch = combinedUserText.match(/^\[使用範本:([^:]+):([^\]]+)\]\s*/);
+      const tplMatch = combinedUserText.match(/^\[使用範本:([^:]+):([^:\]]+)(?::([^\]]+))?\]\s*/);
       if (tplMatch) {
-        docTemplateId   = tplMatch[1];
-        docTemplateName = tplMatch[2];
+        docTemplateId      = tplMatch[1];
+        docTemplateName    = tplMatch[2];
+        docTemplateOutputFmt = tplMatch[3] || null;
         combinedUserText = combinedUserText.slice(tplMatch[0].length).trim();
         try {
           const tplRow = await db.prepare('SELECT schema_json, name FROM doc_templates WHERE id=?').get(docTemplateId);
@@ -2267,7 +2269,7 @@ ${hasPreserve ? '- 標記【★保留原文】的欄位：必須完整複製原�
             const inputData = JSON.parse(valMatch[1].trim());
             sendEvent({ type: 'status', message: '正在生成文件範本...' });
             const svc = require('../services/docTemplateService');
-            const result = await svc.generateDocument(db, docTemplateId, req.user.id, inputData, null);
+            const result = await svc.generateDocument(db, docTemplateId, req.user.id, inputData, docTemplateOutputFmt);
             const ext = result.filePath.split('.').pop();
             const publicUrl = `/uploads/${result.filePath}`;
             const tplFile = { type: ext, filename: `${docTemplateName}.${ext}`, publicUrl };

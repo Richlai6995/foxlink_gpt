@@ -2,59 +2,11 @@ import { useState } from 'react'
 import { X, Download, Loader2 } from 'lucide-react'
 import api from '../../lib/api'
 import { DocTemplate, TemplateVariable } from '../../types'
+import LoopDataTable from './LoopDataTable'
 
 interface Props {
   template: DocTemplate
   onClose: () => void
-}
-
-function LoopField({ variable, value, onChange }: {
-  variable: TemplateVariable
-  value: Record<string, string>[]
-  onChange: (rows: Record<string, string>[]) => void
-}) {
-  const addRow = () => onChange([...value, {}])
-  const removeRow = (i: number) => onChange(value.filter((_, idx) => idx !== i))
-  const setCell = (rowIdx: number, key: string, val: string) => {
-    const next = [...value]
-    next[rowIdx] = { ...next[rowIdx], [key]: val }
-    onChange(next)
-  }
-
-  return (
-    <div>
-      <table className="w-full text-xs border-collapse mb-1">
-        <thead>
-          <tr className="bg-slate-100">
-            {(variable.children || []).map(c => (
-              <th key={c.key} className="border px-2 py-1 text-left font-medium">{c.label}</th>
-            ))}
-            <th className="border px-2 py-1 w-8"></th>
-          </tr>
-        </thead>
-        <tbody>
-          {value.map((row, ri) => (
-            <tr key={ri}>
-              {(variable.children || []).map(c => (
-                <td key={c.key} className="border px-1 py-0.5">
-                  <input
-                    className="w-full outline-none text-xs px-1"
-                    type={c.type === 'number' ? 'number' : c.type === 'date' ? 'date' : 'text'}
-                    value={row[c.key] || ''}
-                    onChange={e => setCell(ri, c.key, e.target.value)}
-                  />
-                </td>
-              ))}
-              <td className="border px-1 py-0.5 text-center">
-                <button onClick={() => removeRow(ri)} className="text-red-400 hover:text-red-600">✕</button>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      <button onClick={addRow} className="text-xs text-blue-500 hover:text-blue-700">+ 新增一行</button>
-    </div>
-  )
 }
 
 export default function TemplateGenerateModal({ template, onClose }: Props) {
@@ -75,6 +27,7 @@ export default function TemplateGenerateModal({ template, onClose }: Props) {
   const [generating, setGenerating] = useState(false)
   const [downloadUrl, setDownloadUrl] = useState('')
   const [error, setError] = useState('')
+  const [outputFormat, setOutputFormat] = useState<string>(template.format)
 
   const setVal = (key: string, v: unknown) => setValues(prev => ({ ...prev, [key]: v }))
 
@@ -85,6 +38,7 @@ export default function TemplateGenerateModal({ template, onClose }: Props) {
     try {
       const { data } = await api.post(`/doc-templates/${template.id}/generate`, {
         input_data: values,
+        output_format: outputFormat !== template.format ? outputFormat : undefined,
       })
       setDownloadUrl(data.download_url)
     } catch (e: unknown) {
@@ -118,7 +72,7 @@ export default function TemplateGenerateModal({ template, onClose }: Props) {
               </label>
 
               {v.type === 'loop' ? (
-                <LoopField
+                <LoopDataTable
                   variable={v}
                   value={(values[v.key] as Record<string, string>[]) || []}
                   onChange={rows => setVal(v.key, rows)}
@@ -160,16 +114,36 @@ export default function TemplateGenerateModal({ template, onClose }: Props) {
           )}
         </div>
 
-        <div className="flex justify-end gap-2 px-5 py-3 border-t">
-          <button onClick={onClose} className="text-sm text-slate-500 hover:text-slate-700">關閉</button>
-          <button
-            onClick={generate}
-            disabled={generating}
-            className="px-4 py-1.5 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2"
-          >
-            {generating && <Loader2 size={13} className="animate-spin" />}
-            {generating ? '生成中...' : '生成文件'}
-          </button>
+        <div className="flex items-center justify-between gap-2 px-5 py-3 border-t">
+          <div className="flex items-center gap-2">
+            {template.format === 'pdf' && (
+              <>
+                <span className="text-xs text-slate-500">輸出格式</span>
+                <div className="flex rounded border text-xs overflow-hidden">
+                  {[{ v: 'pdf', label: 'PDF' }, { v: 'docx', label: 'Word' }].map(o => (
+                    <button
+                      key={o.v}
+                      onClick={() => setOutputFormat(o.v)}
+                      className={`px-3 py-1 transition ${outputFormat === o.v ? 'bg-blue-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`}
+                    >
+                      {o.label}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+          <div className="flex gap-2">
+            <button onClick={onClose} className="text-sm text-slate-500 hover:text-slate-700">關閉</button>
+            <button
+              onClick={generate}
+              disabled={generating}
+              className="px-4 py-1.5 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2"
+            >
+              {generating && <Loader2 size={13} className="animate-spin" />}
+              {generating ? '生成中...' : '生成文件'}
+            </button>
+          </div>
         </div>
       </div>
     </div>

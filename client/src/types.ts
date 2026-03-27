@@ -722,6 +722,7 @@ export interface VariableStyle {
 }
 
 export type TemplateContentMode = 'variable' | 'static' | 'empty'
+export type TemplateLoopMode = 'table_rows' | 'text_list'
 
 export interface TemplateVariable {
   key: string
@@ -729,6 +730,7 @@ export interface TemplateVariable {
   type: TemplateVariableType
   required: boolean
   content_mode?: TemplateContentMode   // 'variable'(default) | 'static'(fixed) | 'empty'(clear)
+  loop_mode?: TemplateLoopMode         // 'table_rows'(default) | 'text_list' (format as numbered text)
   original_text?: string
   description?: string
   default_value?: string
@@ -751,12 +753,24 @@ export interface TemplateVariable {
   }
 }
 
+export interface XlsxListSettings {
+  headerRowNum?: number   // 1-based; auto-detect if omitted
+  oddRowColor?: string    // hex e.g. "#FFFFFF"
+  evenRowColor?: string   // hex e.g. "#EEF2FF"
+}
+
+export interface DocxSettings {
+  cellSpacingAfter?: number  // pt, default 0 (tight); increase for more space between loop items
+}
+
 export interface TemplateSchema {
   variables: TemplateVariable[]
   confidence?: number
   notes?: string
   strategy?: TemplateStrategy
   extracted_at?: string
+  xlsx_settings?: XlsxListSettings
+  docx_settings?: DocxSettings
 }
 
 export interface DocTemplate {

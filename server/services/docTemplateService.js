@@ -570,21 +570,23 @@ function fillCellByLabel(xml, labelText, newText, style) {
 
   let found = false;
   const newXml = xml.replace(/<w:tr\b[^>]*>[\s\S]*?<\/w:tr>/g, (trXml) => {
-    // Collect cells with positions
+    // Collect ALL cells with positions
     const cells = [];
     const tcPat = /<w:tc\b[^>]*>[\s\S]*?<\/w:tc>/g;
     let m;
     while ((m = tcPat.exec(trXml)) !== null) cells.push({ full: m[0], index: m.index });
     if (cells.length < 2) return trXml;
 
-    // First cell must fuzzy-match the label
-    const firstText = getTcText(cells[0].full).replace(/[:：\s]/g, '');
-    const matches = firstText.includes(labelKey) || labelKey.includes(firstText);
-    if (!matches || firstText.length < 2) return trXml;
+    // Scan ALL cells (not just first) for the label — handles multi-column form rows
+    const labelIdx = cells.findIndex(c => {
+      const txt = getTcText(c.full).replace(/[:：\s]/g, '');
+      return txt.length >= 2 && (txt.includes(labelKey) || labelKey.includes(txt));
+    });
+    if (labelIdx === -1 || labelIdx + 1 >= cells.length) return trXml;
 
     found = true;
-    // Replace SECOND cell (value cell)
-    const val = cells[1];
+    // Replace the cell IMMEDIATELY AFTER the matched label cell
+    const val = cells[labelIdx + 1];
     const newVal = buildReplacedTc(val.full, newText, style);
     return trXml.slice(0, val.index) + newVal + trXml.slice(val.index + val.full.length);
   });
@@ -769,7 +771,7 @@ async function createTemplate(db, { creatorId, name, description, format, tags, 
 /**
  * Generate document from template with user-supplied data
  */
-async function generateDocument(db, templateId, userId, inputData, outputFormat) {
+async function generateDocument(db, templateId, userId, inputData, outputFormat, _skipDb = false) {
   const tpl = await db.prepare('SELECT * FROM doc_templates WHERE id=?').get(templateId);
   if (!tpl) throw new Error('範本不存在');
 
@@ -784,10 +786,93 @@ async function generateDocument(db, templateId, userId, inputData, outputFormat)
   let outPath;
 
   if (tpl.format === 'docx') {
-    // Use ORIGINAL file + direct XML replacement.
-    // Docxtemplater {{}} approach fails when Word splits runs, causing duplicate-tag errors.
     const JSZip = require('jszip');
     const origBuf = await fs.readFile(path.join(UPLOAD_DIR, tpl.original_file));
+
+    // ── Detect docxtemplater mode: template contains {tag} placeholders ──────
+    // Word splits runs when typing, so we check the raw XML for {word} patterns.
+    const peekZip = await new JSZip().loadAsync(origBuf);
+    const peekXml = await peekZip.file('word/document.xml').async('string');
+    // Strip XML tags (empty string, NOT space) so split runs merge: {va</w:r><w:r>r} → {var}
+    const allText = peekXml.replace(/<[^>]+>/g, '');
+    const schemaVars = schema.variables || [];
+    // Detect: any variable key appears as {key}, {#key}, or {/key}
+    const usesDocxtemplater = schemaVars.some(v =>
+      allText.includes(`{${v.key}}`) ||
+      allText.includes(`{#${v.key}}`) ||
+      allText.includes(`{/${v.key}}`)
+    );
+
+    if (usesDocxtemplater) {
+      // ── Path A: docxtemplater ─────────────────────────────────────────────
+      const PizZip        = require('pizzip');
+      const Docxtemplater = require('docxtemplater');
+
+      const variables = schema.variables || [];
+      const renderData = {};
+      for (const v of variables) {
+        if (v.content_mode === 'static') {
+          renderData[v.key] = (v.default_value ?? '').toString().trimEnd();
+        } else if (v.content_mode === 'empty') {
+          renderData[v.key] = '';
+        } else if (v.type === 'loop') {
+          // Trim string values inside each loop item too
+          const rows = Array.isArray(inputData[v.key]) ? inputData[v.key] : [];
+          renderData[v.key] = rows.map(row => {
+            const cleaned = {};
+            for (const [k, val] of Object.entries(row)) {
+              cleaned[k] = typeof val === 'string' ? val.trimEnd() : val;
+            }
+            return cleaned;
+          });
+        } else {
+          // Trim trailing newlines to prevent extra blank line in cell
+          const raw = String(inputData[v.key] ?? v.default_value ?? '');
+          renderData[v.key] = raw.trimEnd();
+        }
+      }
+
+      const pzip = new PizZip(origBuf);
+      const doc  = new Docxtemplater(pzip, {
+        paragraphLoop: true,
+        linebreaks:    true,
+        delimiters:    { start: '{', end: '}' },
+      });
+
+      try {
+        doc.render(renderData);
+      } catch (e) {
+        // Enrich error message for template author
+        const msg = e.properties?.errors?.map(x => x.message).join('; ') || e.message;
+        throw new Error(`docxtemplater 渲染失敗：${msg}`);
+      }
+
+      // ── Post-process: compact paragraph spacing inside table cells ────────
+      // Word's Normal style has spaceAfter=8pt which makes loop items spread apart.
+      // Schema can override via docx_settings.cellSpacingAfter (pt, default 0).
+      const cellSpacingAfter = (schema.docx_settings?.cellSpacingAfter ?? 0) * 20; // twips
+      const renderedPzip = doc.getZip();
+      let renderedXml = renderedPzip.files['word/document.xml'].asText();
+
+      // Within each <w:tc>, patch every <w:pPr>: replace or add <w:spacing>
+      renderedXml = renderedXml.replace(/<w:tc\b[^>]*>[\s\S]*?<\/w:tc>/g, tcBlock => {
+        return tcBlock.replace(/<w:pPr\b[^>]*>[\s\S]*?<\/w:pPr>/g, pPrBlock => {
+          // Remove any existing <w:spacing> tag
+          const stripped = pPrBlock.replace(/<w:spacing\b[^/]*\/>/g, '');
+          // Inject tight spacing: single line height, configurable space-after
+          const spacingTag = `<w:spacing w:after="${cellSpacingAfter}" w:line="240" w:lineRule="auto"/>`;
+          return stripped.replace(/<\/w:pPr>/, spacingTag + '</w:pPr>');
+        });
+      });
+
+      renderedPzip.file('word/document.xml', renderedXml);
+      const out = renderedPzip.generate({ type: 'nodebuffer', compression: 'DEFLATE' });
+      outPath = path.join(outDir, `${outputId}.docx`);
+      await fs.writeFile(outPath, out);
+
+    } else {
+    // ── Path B: legacy XML manipulation ──────────────────────────────────────
+
     const zip     = await new JSZip().loadAsync(origBuf);
     let xml = await zip.file('word/document.xml').async('string');
 
@@ -840,6 +925,9 @@ async function generateDocument(db, templateId, userId, inputData, outputFormat)
           });
           return applyRowHeight(row);
         };
+
+        // ── Strategy A & B: skip when loop_mode is 'text_list' ──────────
+        if (v.loop_mode !== 'text_list') {
 
         // ── Strategy A: text-replacement (filled templates) ──────────────
         const firstChild = children.find(c => c.original_text);
@@ -955,7 +1043,9 @@ async function generateDocument(db, templateId, userId, inputData, outputFormat)
           if (blankHandled) continue;
         }
 
-        // ── Strategy C: flat fallback ────────────────────────────────────
+        } // end loop_mode !== 'text_list' block
+
+        // ── Strategy C: flat fallback (always runs for text_list mode) ───
         const vals = items.map((item, idx) => {
           const parts = children.map(c => {
             const val = String(item[c.key] ?? '').trim();
@@ -1015,6 +1105,8 @@ async function generateDocument(db, templateId, userId, inputData, outputFormat)
     outPath = path.join(outDir, `${outputId}.docx`);
     await fs.writeFile(outPath, out);
 
+    } // end Path B (legacy XML)
+
   } else if (tpl.format === 'xlsx') {
     const ExcelJS = require('exceljs');
     const wb = new ExcelJS.Workbook();
@@ -1023,6 +1115,12 @@ async function generateDocument(db, templateId, userId, inputData, outputFormat)
     await wb.xlsx.load(origBuf);
 
     const variables = schema.variables || [];
+    const xlsxSettings = schema.xlsx_settings || {};
+
+    const toArgb = hex => hex ? 'FF' + hex.replace('#', '').toUpperCase() : null;
+    const oddFill  = xlsxSettings.oddRowColor  ? { type: 'pattern', pattern: 'solid', fgColor: { argb: toArgb(xlsxSettings.oddRowColor)  } } : null;
+    const evenFill = xlsxSettings.evenRowColor ? { type: 'pattern', pattern: 'solid', fgColor: { argb: toArgb(xlsxSettings.evenRowColor) } } : null;
+
     wb.eachSheet(sheet => {
       // ── Simple variables: text replacement ────────────────────────────────
       sheet.eachRow(row => {
@@ -1046,41 +1144,57 @@ async function generateDocument(db, templateId, userId, inputData, outputFormat)
         const children = varDef.children || [];
         if (!items.length || !children.length) continue;
 
-        // Find the header row: a row where cells contain children labels/keys
-        // colMap: { childKey → colNumber (1-based) }
-        let headerRowNum = -1;
+        // Find the header row: prefer explicit xlsx_settings.headerRowNum, else auto-detect
+        let headerRowNum = xlsxSettings.headerRowNum ?? -1;
         let colMap = {};
 
-        sheet.eachRow({ includeEmpty: false }, (row, rowNum) => {
-          if (headerRowNum !== -1) return;
-          const map = {};
-          row.eachCell((cell, colNum) => {
+        if (headerRowNum !== -1) {
+          // Build colMap from the specified header row
+          const hRow = sheet.getRow(headerRowNum);
+          hRow.eachCell((cell, colNum) => {
             const cellTxt = String(cell.value ?? '').replace(/\s/g, '');
             for (const c of children) {
               const labelKey = (c.label || '').replace(/\s/g, '');
               const varKey   = (c.key   || '').toLowerCase();
-              // Match by label (Chinese) or key (English)
               if ((labelKey && cellTxt.includes(labelKey)) ||
                   (varKey && cellTxt.toLowerCase().includes(varKey))) {
-                map[c.key] = colNum;
+                colMap[c.key] = colNum;
               }
             }
           });
-          // Accept if at least 2 children (or all if < 2) are mapped
-          if (Object.keys(map).length >= Math.min(children.length, 2)) {
-            headerRowNum = rowNum;
-            colMap = map;
-          }
-        });
+        } else {
+          // Auto-detect: find a row where cells contain children labels/keys
+          sheet.eachRow({ includeEmpty: false }, (row, rowNum) => {
+            if (headerRowNum !== -1) return;
+            const map = {};
+            row.eachCell((cell, colNum) => {
+              const cellTxt = String(cell.value ?? '').replace(/\s/g, '');
+              for (const c of children) {
+                const labelKey = (c.label || '').replace(/\s/g, '');
+                const varKey   = (c.key   || '').toLowerCase();
+                if ((labelKey && cellTxt.includes(labelKey)) ||
+                    (varKey && cellTxt.toLowerCase().includes(varKey))) {
+                  map[c.key] = colNum;
+                }
+              }
+            });
+            if (Object.keys(map).length >= Math.min(children.length, 2)) {
+              headerRowNum = rowNum;
+              colMap = map;
+            }
+          });
+        }
 
         // Fallback: no header found → use sequential columns starting at 1
         if (headerRowNum === -1) {
           headerRowNum = sheet.lastRow?.number ?? 0;
           children.forEach((c, i) => { colMap[c.key] = i + 1; });
         }
+        if (!Object.keys(colMap).length) {
+          children.forEach((c, i) => { colMap[c.key] = i + 1; });
+        }
 
-        // Write data into existing rows (preserves template formatting/colors/borders)
-        // Only use spliceRows if we run out of pre-formatted rows
+        // Write data rows
         const existingLastRow = sheet.lastRow?.number ?? headerRowNum;
         items.forEach((item, idx) => {
           const rowNum = headerRowNum + 1 + idx;
@@ -1088,6 +1202,9 @@ async function generateDocument(db, templateId, userId, inputData, outputFormat)
           for (const [key, colNum] of Object.entries(colMap)) {
             row.getCell(colNum).value = String(item[key] ?? '');
           }
+
+          const fill = idx % 2 === 0 ? oddFill : evenFill;
+          if (fill) row.eachCell({ includeEmpty: false }, cell => { cell.fill = fill; });
           row.commit();
         });
         console.log(`[DocTemplate] XLSX loop ${varDef.key}: headerRow=${headerRowNum} items=${items.length} cols=${JSON.stringify(colMap)} existingRows=${existingLastRow}`);
@@ -1139,6 +1256,35 @@ async function generateDocument(db, templateId, userId, inputData, outputFormat)
     const out = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE', compressionOptions: { level: 6 } });
     outPath = path.join(outDir, `${outputId}.pptx`);
     await fs.writeFile(outPath, out);
+
+  } else if (tpl.format === 'pdf' && fmt === 'docx') {
+    // ── PDF template → DOCX output via LibreOffice ──────────────────────────
+    // Step 1: generate PDF without DB recording
+    const pdfResult  = await generateDocument(db, templateId, userId, inputData, 'pdf', true);
+    const tmpPdfPath = path.join(UPLOAD_DIR, pdfResult.filePath);
+    const tmpPdfId   = pdfResult.outputId;
+
+    // Step 2: LibreOffice headless convert
+    const { execFile } = require('child_process');
+    const { promisify } = require('util');
+    const execFileAsync = promisify(execFile);
+
+    const soffice = process.env.SOFFICE_PATH || 'soffice';
+    try {
+      await execFileAsync(soffice, [
+        '--headless', '--convert-to', 'docx',
+        '--outdir', outDir,
+        tmpPdfPath,
+      ], { timeout: 60000 });
+    } catch (e) {
+      await fs.unlink(tmpPdfPath).catch(() => {});
+      throw new Error(`LibreOffice 轉換失敗: ${e.message}`);
+    }
+
+    // soffice outputs <stem>.docx in outDir
+    outPath = path.join(outDir, `${outputId}.docx`);
+    await fs.rename(path.join(outDir, `${tmpPdfId}.docx`), outPath);
+    await fs.unlink(tmpPdfPath).catch(() => {});
 
   } else if (tpl.format === 'pdf' && tpl.strategy !== 'pdf_form') {
     const variables = schema.variables || [];
@@ -1508,15 +1654,18 @@ async function generateDocument(db, templateId, userId, inputData, outputFormat)
     throw new Error(`不支援的格式: ${tpl.format}`);
   }
 
-  // Record output
-  const relPath = `generated/${outputId}.${tpl.format}`;
-  await db.prepare(`
-    INSERT INTO doc_template_outputs (id, template_id, user_id, input_data, output_file, output_format)
-    VALUES (?, ?, ?, ?, ?, ?)
-  `).run(outputId, templateId, userId, JSON.stringify(inputData), relPath, fmt);
+  // Record output — use actual file extension from outPath (may differ when cross-format output)
+  const outExt  = path.extname(outPath).slice(1) || tpl.format;
+  const relPath = `generated/${outputId}.${outExt}`;
 
-  // Increment use_count
-  await db.prepare('UPDATE doc_templates SET use_count = use_count + 1 WHERE id=?').run(templateId);
+  if (!_skipDb) {
+    await db.prepare(`
+      INSERT INTO doc_template_outputs (id, template_id, user_id, input_data, output_file, output_format)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(outputId, templateId, userId, JSON.stringify(inputData), relPath, fmt);
+
+    await db.prepare('UPDATE doc_templates SET use_count = use_count + 1 WHERE id=?').run(templateId);
+  }
 
   return { outputId, filePath: relPath };
 }

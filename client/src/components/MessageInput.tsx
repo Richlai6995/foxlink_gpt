@@ -53,6 +53,7 @@ const MessageInput = forwardRef<MessageInputHandle, Props>(function MessageInput
   const [fileError, setFileError] = useState('')
   const [showTemplatePicker, setShowTemplatePicker] = useState(false)
   const [selectedTemplate, setSelectedTemplate] = useState<DocTemplate | null>(null)
+  const [tplOutputFmt, setTplOutputFmt] = useState<'pdf' | 'docx'>('pdf')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -135,14 +136,16 @@ const MessageInput = forwardRef<MessageInputHandle, Props>(function MessageInput
   const handleSubmit = () => {
     if (disabled) return
     if (!message.trim() && files.length === 0) return
+    const outFmt = selectedTemplate?.format === 'pdf' ? tplOutputFmt : selectedTemplate?.format
     const finalMsg = selectedTemplate
-      ? `[使用範本:${selectedTemplate.id}:${selectedTemplate.name}] ${message.trim()}`
+      ? `[使用範本:${selectedTemplate.id}:${selectedTemplate.name}:${outFmt}] ${message.trim()}`
       : message.trim()
     onSend(finalMsg, files)
     setMessage('')
     setFiles([])
     setFileError('')
     setSelectedTemplate(null)
+    setTplOutputFmt('pdf')
     if (textareaRef.current) textareaRef.current.style.height = 'auto'
   }
 
@@ -167,6 +170,19 @@ const MessageInput = forwardRef<MessageInputHandle, Props>(function MessageInput
         <div className="flex items-center gap-2 mb-2 bg-indigo-50 border border-indigo-200 rounded-lg px-3 py-1.5 text-xs text-indigo-700">
           <LayoutTemplate size={13} />
           <span>使用範本：<strong>{selectedTemplate.name}</strong></span>
+          {selectedTemplate.format === 'pdf' && (
+            <div className="flex rounded border border-indigo-300 overflow-hidden text-[11px] ml-1">
+              {(['pdf', 'docx'] as const).map(f => (
+                <button
+                  key={f}
+                  onClick={() => setTplOutputFmt(f)}
+                  className={`px-2 py-0.5 transition ${tplOutputFmt === f ? 'bg-indigo-600 text-white' : 'bg-white text-indigo-600 hover:bg-indigo-50'}`}
+                >
+                  {f === 'pdf' ? 'PDF' : 'Word'}
+                </button>
+              ))}
+            </div>
+          )}
           <button onClick={() => setSelectedTemplate(null)} className="ml-auto text-indigo-400 hover:text-indigo-600">
             <X size={12} />
           </button>

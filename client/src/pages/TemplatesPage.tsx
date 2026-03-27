@@ -2,12 +2,14 @@ import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Plus, Search, RefreshCw, ArrowLeft, ScanLine, Loader2 } from 'lucide-react'
 import api from '../lib/api'
-import { DocTemplate, TemplateSchema, TemplateVariable } from '../types'
+import { DocTemplate, TemplateSchema, TemplateVariable, DocxSettings } from '../types'
 import TemplateCard from '../components/templates/TemplateCard'
 import TemplateUploadWizard from '../components/templates/TemplateUploadWizard'
 import VariableSchemaEditor from '../components/templates/VariableSchemaEditor'
 import StyleEditorTab from '../components/templates/StyleEditorTab'
 import PDFFieldEditor from '../components/templates/PDFFieldEditor'
+import DocxPreviewTab from '../components/templates/DocxPreviewTab'
+import XlsxListFormatTab from '../components/templates/XlsxListFormatTab'
 
 const FORMAT_OPTIONS = [
   { value: '', label: '所有格式' },
@@ -17,7 +19,7 @@ const FORMAT_OPTIONS = [
   { value: 'pdf', label: 'PDF' },
 ]
 
-type EditTab = 'basic' | 'variables' | 'style' | 'layout'
+type EditTab = 'basic' | 'variables' | 'style' | 'layout' | 'preview' | 'xlsxformat'
 
 function OcrScanButton({ templateId, onComplete }: { templateId: string; onComplete: (vars: TemplateVariable[]) => void }) {
   const [scanning, setScanning] = useState(false)
@@ -91,14 +93,18 @@ function TemplateEditModal({ template, onClose, onSaved }: {
     setTagInput('')
   }
 
-  const isPdf = template.format === 'pdf' && template.strategy !== 'pdf_form'
+  const isPdf  = template.format === 'pdf' && template.strategy !== 'pdf_form'
+  const isDocx = template.format === 'docx'
+  const isXlsx = template.format === 'xlsx'
 
-  const TABS: { key: EditTab; label: string; pdfOnly?: boolean }[] = [
-    { key: 'basic',     label: '基本資訊' },
-    { key: 'variables', label: '變數設定' },
-    { key: 'style',     label: '樣式設定' },
-    { key: 'layout',    label: '版面編輯器', pdfOnly: true },
-  ].filter(t => !t.pdfOnly || isPdf)
+  const TABS: { key: EditTab; label: string }[] = ([
+    { key: 'basic',       label: '基本資訊',    show: true },
+    { key: 'variables',   label: '變數設定',    show: true },
+    { key: 'style',       label: '樣式設定',    show: true },
+    { key: 'xlsxformat',  label: '清單格式',    show: isXlsx },
+    { key: 'layout',      label: '版面編輯器',  show: isPdf },
+    { key: 'preview',     label: '預覽',        show: isDocx },
+  ] as { key: EditTab; label: string; show: boolean }[]).filter(t => t.show)
 
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
@@ -174,6 +180,29 @@ function TemplateEditModal({ template, onClose, onSaved }: {
                   DOCX 可另在各 loop 變數的 <code>docx_style.rowHeightPt</code> 設定固定列高。
                 </div>
               )}
+              {isDocx && (
+                <div className="border rounded-lg px-4 py-3 space-y-2">
+                  <div className="text-xs font-medium text-slate-600">DOCX 生成設定（新版語法）</div>
+                  <div className="flex items-center gap-3">
+                    <label className="text-xs text-slate-500 w-32">儲存格行距（pt）</label>
+                    <input
+                      type="number" min={0} max={20} step={1}
+                      disabled={!canEdit}
+                      className="w-20 border rounded px-2 py-1 text-xs disabled:opacity-50"
+                      placeholder="0（緊密）"
+                      value={(schema.docx_settings as DocxSettings | undefined)?.cellSpacingAfter ?? ''}
+                      onChange={e => setSchema({
+                        ...schema,
+                        docx_settings: {
+                          ...(schema.docx_settings || {}),
+                          cellSpacingAfter: e.target.value ? parseFloat(e.target.value) : undefined,
+                        },
+                      })}
+                    />
+                    <span className="text-xs text-slate-400">0 = 緊密，4 = 正常，8 = 寬鬆</span>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -183,6 +212,7 @@ function TemplateEditModal({ template, onClose, onSaved }: {
               variables={schema.variables || []}
               onChange={vars => setSchema({ ...schema, variables: vars })}
               readonly={!canEdit}
+              format={template.format}
             />
           )}
 
@@ -224,6 +254,20 @@ function TemplateEditModal({ template, onClose, onSaved }: {
                 readonly={!canEdit}
               />
             </div>
+          )}
+
+          {/* XLSX list format tab */}
+          {tab === 'xlsxformat' && (
+            <XlsxListFormatTab
+              settings={schema.xlsx_settings || {}}
+              onChange={s => setSchema({ ...schema, xlsx_settings: s })}
+              readonly={!canEdit}
+            />
+          )}
+
+          {/* DOCX preview tab */}
+          {tab === 'preview' && (
+            <DocxPreviewTab template={template} />
           )}
         </div>
 

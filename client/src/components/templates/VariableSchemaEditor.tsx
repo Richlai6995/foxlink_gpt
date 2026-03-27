@@ -1,11 +1,12 @@
 import { useState } from 'react'
 import { Plus, Trash2, ChevronDown, ChevronRight } from 'lucide-react'
-import { TemplateVariable, TemplateVariableType, TemplateContentMode } from '../../types'
+import { TemplateVariable, TemplateVariableType, TemplateContentMode, TemplateLoopMode } from '../../types'
 
 interface Props {
   variables: TemplateVariable[]
   onChange: (vars: TemplateVariable[]) => void
   readonly?: boolean
+  format?: string   // e.g. 'docx' — enables syntax hint
 }
 
 const VAR_TYPES: { value: TemplateVariableType; label: string }[] = [
@@ -59,6 +60,17 @@ function VarRow({
             >
               {VAR_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
             </select>
+            {v.type === 'loop' && (
+              <select
+                className="text-xs border rounded px-1.5 py-1 bg-blue-50"
+                title="迴圈模式：表格列插入 or 格式化文字填入"
+                value={v.loop_mode ?? 'table_rows'}
+                onChange={e => upd({ loop_mode: e.target.value as TemplateLoopMode })}
+              >
+                <option value="table_rows">表格列</option>
+                <option value="text_list">文字清單</option>
+              </select>
+            )}
             <label className="flex items-center gap-1 text-xs text-slate-500">
               <input type="checkbox" checked={v.required} onChange={e => upd({ required: e.target.checked })} />
               必填
@@ -147,7 +159,7 @@ function VarRow({
   )
 }
 
-export default function VariableSchemaEditor({ variables, onChange, readonly }: Props) {
+export default function VariableSchemaEditor({ variables, onChange, readonly, format }: Props) {
   const addVar = () => onChange([
     ...variables,
     { key: `var_${Date.now()}`, label: '新變數', type: 'text', required: false },
@@ -155,6 +167,27 @@ export default function VariableSchemaEditor({ variables, onChange, readonly }: 
 
   return (
     <div>
+      {format === 'docx' && (
+        <div className="mb-3 bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 text-xs text-blue-800 space-y-1.5">
+          <div className="font-medium">💡 DOCX 新版模板語法（推薦）</div>
+          <div>在 Word 範本裡直接打以下標籤，生成時自動替換，不需 original_text 偵測：</div>
+          <div className="font-mono bg-white border border-blue-100 rounded px-3 py-2 space-y-1 text-[11px]">
+            {variables.filter(v => v.type !== 'loop').map(v => (
+              <div key={v.key}><span className="text-blue-600">{`{${v.key}}`}</span> <span className="text-slate-400">← {v.label}</span></div>
+            ))}
+            {variables.filter(v => v.type === 'loop').map(v => (
+              <div key={v.key}>
+                <div><span className="text-green-600">{`{#${v.key}}`}</span> <span className="text-slate-400">← {v.label} 迴圈開始</span></div>
+                {(v.children || []).map(c => (
+                  <div key={c.key} className="pl-3"><span className="text-blue-600">{`{${c.key}}`}</span> <span className="text-slate-400">← {c.label}</span></div>
+                ))}
+                <div><span className="text-green-600">{`{/${v.key}}`}</span> <span className="text-slate-400">← 迴圈結束</span></div>
+              </div>
+            ))}
+          </div>
+          <div className="text-slate-500">表格列迴圈：把 <code>{'{#key}'}</code> 放在列的第一格、<code>{'{/key}'}</code> 放在最後一格，整列自動重複。</div>
+        </div>
+      )}
       {variables.map((v, i) => (
         <VarRow
           key={i}
