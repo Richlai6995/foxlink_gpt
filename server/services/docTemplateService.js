@@ -1273,7 +1273,9 @@ async function generateDocument(db, templateId, userId, inputData, outputFormat,
     let sofficStdout = '', sofficeStderr = '';
     try {
       const result = await execFileAsync(soffice, [
-        '--headless', '--convert-to', 'docx',
+        '--headless',
+        '--infilter=writer_pdf_import',
+        '--convert-to', 'docx:MS Word 2007 XML',
         '--outdir', outDir,
         tmpPdfPath,
       ], { timeout: 60000 });
