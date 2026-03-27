@@ -129,3 +129,6 @@ refrence_project/
 - **sql.js quirk**: `db.prepare(sql).run(params)` frees the statement automatically via `StatementWrapper`. Directly using `dbInstance.prepare()` requires manual `.free()`.
 - **Docker path remapping**: Scheduler remaps `project.local_path` (Windows dev path) to `FILES_ROOT_DIR`-relative path using regex matching on `file_management_container` or `files` path segments.
 - **AI file generation**: Gemini responses with ` ```csv_to_xlsx:filename.xlsx ``` ` blocks are parsed by the `/api/ai` route to generate actual files server-side.
+
+# 使用說明檔案: HelpPage.tsx
+- 需要改變說明時編輯此檔案
