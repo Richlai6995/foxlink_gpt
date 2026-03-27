@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Plus, Trash2, ChevronDown, ChevronRight } from 'lucide-react'
-import { TemplateVariable, TemplateVariableType } from '../../types'
+import { TemplateVariable, TemplateVariableType, TemplateContentMode } from '../../types'
 
 interface Props {
   variables: TemplateVariable[]
@@ -63,12 +63,29 @@ function VarRow({
               <input type="checkbox" checked={v.required} onChange={e => upd({ required: e.target.checked })} />
               必填
             </label>
-            <input
-              className="text-xs border rounded px-1.5 py-1 flex-1 min-w-0"
-              placeholder="預設值"
-              value={v.default_value || ''}
-              onChange={e => upd({ default_value: e.target.value })}
-            />
+            {/* Content mode toggle — only for non-loop vars */}
+            {v.type !== 'loop' && (
+              <div className="flex rounded border text-xs overflow-hidden" title="內容模式">
+                {(['variable', 'static', 'empty'] as TemplateContentMode[]).map(m => (
+                  <button
+                    key={m}
+                    onClick={() => upd({ content_mode: m })}
+                    title={{ variable: '變數：使用者填入', static: '靜態：固定文字', empty: '清空：保留框格' }[m]}
+                    className={`px-1.5 py-0.5 transition ${(v.content_mode ?? 'variable') === m ? 'bg-blue-600 text-white' : 'bg-white text-slate-500 hover:bg-slate-100'}`}
+                  >
+                    {m === 'variable' ? 'V' : m === 'static' ? 'T' : '∅'}
+                  </button>
+                ))}
+              </div>
+            )}
+            {v.content_mode !== 'empty' && (
+              <input
+                className="text-xs border rounded px-1.5 py-1 flex-1 min-w-0"
+                placeholder={v.content_mode === 'static' ? '固定文字內容' : '預設值'}
+                value={v.default_value || ''}
+                onChange={e => upd({ default_value: e.target.value })}
+              />
+            )}
             <button onClick={onDelete} className="text-red-400 hover:text-red-600 ml-auto">
               <Trash2 size={13} />
             </button>
@@ -79,6 +96,8 @@ function VarRow({
             <span className="text-xs text-slate-700 w-28">{v.label}</span>
             <span className="text-xs text-slate-500">{VAR_TYPES.find(t => t.value === v.type)?.label}</span>
             {v.required && <span className="text-xs text-red-500">必填</span>}
+            {v.content_mode === 'static' && <span className="text-xs bg-amber-100 text-amber-700 px-1 rounded">固定</span>}
+            {v.content_mode === 'empty' && <span className="text-xs bg-slate-100 text-slate-500 px-1 rounded">清空</span>}
           </>
         )}
       </div>

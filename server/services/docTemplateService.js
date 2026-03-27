@@ -260,6 +260,20 @@ function escapeXml(str) {
 
 // ─── Style helpers ─────────────────────────────────────────────────────────────
 
+/**
+ * Resolve a variable's value from inputData, respecting content_mode:
+ *   'static' → always use default_value (fixed text)
+ *   'empty'  → always return '' (clear the cell)
+ *   'variable' (default) → inputData[key] ?? default_value ?? ''
+ */
+function resolveValue(v, inputData) {
+  const mode = v.content_mode || 'variable';
+  if (mode === 'static') return String(v.default_value ?? '');
+  if (mode === 'empty')  return '';
+  const raw = inputData[v.key];
+  return raw !== undefined ? String(raw) : String(v.default_value ?? '');
+}
+
 /** Resolve effective style: override wins over detected, with 'wrap' as overflow default */
 function getEffectiveStyle(variable) {
   const d = variable?.style?.detected || {};
@@ -853,7 +867,7 @@ async function generateDocument(db, templateId, userId, inputData, outputFormat)
         }).filter(s => s);
         value = vals.join('\n');
       } else {
-        value = String(inputData[v.key] ?? v.default_value ?? '');
+        value = resolveValue(v, inputData);
       }
 
       // Apply overflow policy (truncate/summarize) when fixed mode is on
@@ -920,7 +934,7 @@ async function generateDocument(db, templateId, userId, inputData, outputFormat)
           for (const varDef of variables) {
             if (!varDef.original_text || varDef.type === 'loop') continue;
             if (v.includes(varDef.original_text)) {
-              v = v.replaceAll(varDef.original_text, String(inputData[varDef.key] ?? ''));
+              v = v.replaceAll(varDef.original_text, resolveValue(varDef, inputData));
             }
           }
           cell.value = v;
@@ -999,7 +1013,7 @@ async function generateDocument(db, templateId, userId, inputData, outputFormat)
 
       for (const v of variables) {
         if (v.type === 'loop' || !v.original_text) continue;
-        const val = String(inputData[v.key] ?? v.default_value ?? '');
+        const val = resolveValue(v, inputData);
         // Replace within <a:p> paragraphs (DrawingML runs: <a:r><a:t>text</a:t></a:r>)
         xml = xml.replace(/<a:p\b[^>]*>[\s\S]*?<\/a:p>/g, (para) => {
           const runPat = /<a:r\b[^>]*>(?:<a:rPr[^>]*(?:\/>|>[\s\S]*?<\/a:rPr>))?<a:t[^>]*>([\s\S]*?)<\/a:t><\/a:r>/g;
@@ -1065,16 +1079,37 @@ async function generateDocument(db, templateId, userId, inputData, outputFormat)
       const pdflibPages = origDoc.getPages();
       const unpositioned = [];
 
+      // Apply resolveValue for static/empty mode vars into flatData
+      for (const v of flatVars) {
+        if (v.content_mode && v.content_mode !== 'variable') {
+          flatData[v.key] = resolveValue(v, inputData);
+        }
+      }
+
       for (const v of flatVars) {
         const cell = v.pdf_cell;
         if (!cell) { unpositioned.push(v.label || v.key); continue; }
-        const value = String(flatData[v.key] ?? '').trim();
-        if (!value) continue;
 
         const page = pdflibPages[cell.page ?? 0];
         if (!page) continue;
 
         const { height: pageH } = page.getSize();
+        const cellTop    = pageH - cell.y;
+        const cellBottom = pageH - cell.y - cell.height;
+
+        // 'empty' mode: draw white rect to erase original content, skip text
+        if ((v.content_mode || 'variable') === 'empty') {
+          page.drawRectangle({
+            x: cell.x, y: cellBottom,
+            width: cell.width, height: cell.height,
+            color: rgb(1, 1, 1), borderWidth: 0,
+          });
+          continue;
+        }
+
+        const value = String(flatData[v.key] ?? '').trim();
+        if (!value) continue;
+
         const eff      = getEffectiveStyle(v) || {};
         const fontSize = eff.fontSize ?? 9;
         const overflow = eff.overflow ?? 'wrap';
@@ -1087,10 +1122,6 @@ async function generateDocument(db, templateId, userId, inputData, outputFormat)
           return { r: parseInt(h.slice(0,2),16)/255, g: parseInt(h.slice(2,4),16)/255, b: parseInt(h.slice(4,6),16)/255 };
         };
         const fgColor = hexRgb(eff.color) ?? { r: 0, g: 0, b: 0 };
-
-        // Convert top-left origin (stored) → pdf-lib bottom-left origin
-        const cellTop    = pageH - cell.y;
-        const cellBottom = pageH - cell.y - cell.height;
 
         // Apply overflow (truncate / summarize) — applyOverflow handles both
         const text = await applyOverflow(value, eff);
@@ -1418,6 +1449,82 @@ async function listTemplates(db, user, { search, format, tag } = {}) {
   return rows;
 }
 
+// ─── OCR for scanned / image-based PDFs ────────────────────────────────────────
+
+/**
+ * Use Gemini Vision (Pro) to OCR a PDF and return a schema with approximate pdf_cell coords.
+ * Falls back to empty schema on failure.
+ */
+async function ocrPdfFields(pdfBuf, model) {
+  const useModel = model || MODEL_PRO;
+  console.log(`[DocTemplate] ocrPdfFields: buf=${pdfBuf.length} bytes, model=${useModel}`);
+
+  // Get actual page dimensions from pdf-lib
+  let pageWidthPt = 595, pageHeightPt = 842;
+  try {
+    const { PDFDocument } = require('pdf-lib');
+    const pdfDoc = await PDFDocument.load(pdfBuf, { ignoreEncryption: true });
+    const pg = pdfDoc.getPage(0);
+    const sz = pg.getSize();
+    pageWidthPt  = sz.width;
+    pageHeightPt = sz.height;
+  } catch (e) {
+    console.warn('[DocTemplate] OCR: cannot read page size, using A4 default:', e.message);
+  }
+
+  const base64 = pdfBuf.toString('base64');
+  const prompt =
+`你是一個 PDF 表單 OCR 識別器。請仔細分析這份 PDF（可能是掃描圖片）。
+
+此 PDF 第一頁尺寸：${pageWidthPt.toFixed(1)} x ${pageHeightPt.toFixed(1)} pt（座標原點在左上角，x 向右，y 向下）。
+
+請識別所有「填寫欄位」（標籤旁的空白區域、底線欄位、方格欄位）。
+回傳 JSON（不要加 markdown fence，直接輸出純 JSON）：
+{
+  "variables": [
+    {
+      "key": "snake_case唯一識別碼",
+      "label": "欄位標籤（中文）",
+      "original_text": "填寫區內的現有文字，若空白則填空字串",
+      "type": "text|number|date|select",
+      "required": true,
+      "description": "",
+      "options": null,
+      "children": [],
+      "pdf_cell": {
+        "page": 0,
+        "x": 欄位左邊界_pt,
+        "y": 欄位上邊界_pt（從頁面頂部往下量）,
+        "width": 欄位寬度_pt,
+        "height": 欄位高度_pt
+      }
+    }
+  ],
+  "confidence": 0.85,
+  "notes": "備註"
+}`;
+
+  try {
+    const { GoogleGenerativeAI } = require('@google/generative-ai');
+    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
+    const m = genAI.getGenerativeModel({ model: useModel });
+    const result = await m.generateContent([
+      { inlineData: { data: base64, mimeType: 'application/pdf' } },
+      prompt,
+    ]);
+    const raw = result.response.text().trim();
+    let cleaned = raw.replace(/```(?:json)?\s*/gi, '').replace(/```/g, '').trim();
+    const match = cleaned.match(/\{[\s\S]*\}/);
+    if (match) cleaned = match[0];
+    const parsed = JSON.parse(cleaned);
+    console.log(`[DocTemplate] OCR: identified ${parsed.variables?.length ?? 0} fields`);
+    return parsed;
+  } catch (e) {
+    console.error('[DocTemplate] OCR failed:', e.message);
+    return { variables: [], confidence: 0, notes: `OCR 失敗: ${e.message}` };
+  }
+}
+
 module.exports = {
   checkAccess,
   extractText,
@@ -1427,6 +1534,7 @@ module.exports = {
   generateDocument,
   forkTemplate,
   listTemplates,
+  ocrPdfFields,
   TEMPLATES_DIR,
   MODEL_FLASH,
   MODEL_PRO,

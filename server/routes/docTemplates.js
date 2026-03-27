@@ -110,6 +110,28 @@ router.post('/upload', upload.single('file'), async (req, res) => {
       }
     }
 
+    if (!schema && format === 'pdf') {
+      // Detect scanned (image-only) PDF: try pdf-parse first; if text too short → OCR
+      try {
+        const pdfParse = require('pdf-parse');
+        const buf = await fs.readFile(req.file.path);
+        const parsed = await pdfParse(buf);
+        const nonWs = (parsed.text || '').replace(/\s/g, '').length;
+        if (nonWs < 50) {
+          send('status', { step: 'ocr', message: '偵測到掃描式 PDF，使用 Gemini Vision OCR...' });
+          let ocrModel;
+          try {
+            const row = await db.prepare(`SELECT value FROM system_settings WHERE key=?`).get('template_analysis_model');
+            if (row?.value === 'pro') ocrModel = svc.MODEL_PRO;
+          } catch {}
+          const ocrResult = await svc.ocrPdfFields(buf, ocrModel);
+          schema = { ...ocrResult, strategy: 'ai_schema', extracted_at: new Date().toISOString(), is_ocr: true };
+        }
+      } catch (e) {
+        console.warn('[DocTemplates] scanned-PDF detection error:', e.message);
+      }
+    }
+
     if (!schema) {
       text = await svc.extractText(req.file.path, format);
       console.log(`[DocTemplates] 擷取文字長度: ${text.length}`);
@@ -351,6 +373,55 @@ router.post('/:id/fork', async (req, res) => {
     const tpl = await svc.forkTemplate(db, req.params.id, req.user.id);
     res.json(tpl);
   } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── POST /:id/ocr-scan  Re-OCR a PDF template ──────────────────────────────
+router.post('/:id/ocr-scan', async (req, res) => {
+  try {
+    const access = await svc.checkAccess(db, req.params.id, req.user);
+    if (!access || access === 'use') return res.status(403).json({ error: '需要編輯權限' });
+
+    const tpl = await db.prepare('SELECT * FROM doc_templates WHERE id=?').get(req.params.id);
+    if (!tpl || tpl.format !== 'pdf') return res.status(400).json({ error: '僅支援 PDF 範本' });
+
+    const filePath = path.join(UPLOAD_DIR, tpl.original_file);
+    const buf = await fs.readFile(filePath);
+
+    let ocrModel;
+    try {
+      const row = await db.prepare(`SELECT value FROM system_settings WHERE key=?`).get('template_analysis_model');
+      if (row?.value === 'pro') ocrModel = svc.MODEL_PRO;
+    } catch {}
+
+    const ocrResult = await svc.ocrPdfFields(buf, ocrModel);
+
+    // Merge: keep existing non-pdf_cell fields, update or append OCR fields
+    const existing = JSON.parse(tpl.schema_json || '{}');
+    const existingVars = existing.variables || [];
+    const ocrVars = ocrResult.variables || [];
+
+    // Map existing vars by key for quick lookup
+    const varMap = Object.fromEntries(existingVars.map(v => [v.key, v]));
+    for (const ov of ocrVars) {
+      if (varMap[ov.key]) {
+        // Update pdf_cell on existing var (preserve other settings)
+        varMap[ov.key] = { ...varMap[ov.key], pdf_cell: ov.pdf_cell };
+      } else {
+        // New var detected by OCR
+        varMap[ov.key] = ov;
+      }
+    }
+    const mergedVars = Object.values(varMap);
+    const merged = { ...existing, variables: mergedVars, is_ocr: true };
+
+    await db.prepare(`UPDATE doc_templates SET schema_json=?, updated_at=SYSTIMESTAMP WHERE id=?`)
+      .run(JSON.stringify(merged), req.params.id);
+
+    res.json({ ok: true, schema: merged });
+  } catch (e) {
+    console.error('[DocTemplates] ocr-scan error:', e.message);
     res.status(500).json({ error: e.message });
   }
 });

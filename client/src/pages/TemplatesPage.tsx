@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Plus, Search, RefreshCw, ArrowLeft } from 'lucide-react'
+import { Plus, Search, RefreshCw, ArrowLeft, ScanLine, Loader2 } from 'lucide-react'
 import api from '../lib/api'
-import { DocTemplate, TemplateSchema } from '../types'
+import { DocTemplate, TemplateSchema, TemplateVariable } from '../types'
 import TemplateCard from '../components/templates/TemplateCard'
 import TemplateUploadWizard from '../components/templates/TemplateUploadWizard'
 import VariableSchemaEditor from '../components/templates/VariableSchemaEditor'
@@ -18,6 +18,39 @@ const FORMAT_OPTIONS = [
 ]
 
 type EditTab = 'basic' | 'variables' | 'style' | 'layout'
+
+function OcrScanButton({ templateId, onComplete }: { templateId: string; onComplete: (vars: TemplateVariable[]) => void }) {
+  const [scanning, setScanning] = useState(false)
+  const [err, setErr] = useState('')
+
+  const run = async () => {
+    setScanning(true)
+    setErr('')
+    try {
+      const { data } = await api.post(`/doc-templates/${templateId}/ocr-scan`)
+      onComplete(data.schema?.variables || [])
+    } catch (e: unknown) {
+      setErr((e as { response?: { data?: { error?: string } }; message?: string }).response?.data?.error || (e as Error).message || 'OCR 失敗')
+    } finally {
+      setScanning(false)
+    }
+  }
+
+  return (
+    <div className="flex items-center gap-2">
+      {err && <span className="text-xs text-red-500">{err}</span>}
+      <button
+        onClick={run}
+        disabled={scanning}
+        title="使用 Gemini Vision 重新 OCR 掃描此 PDF，自動填入欄位座標"
+        className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-purple-600 text-white rounded hover:bg-purple-700 disabled:opacity-50"
+      >
+        {scanning ? <Loader2 size={12} className="animate-spin" /> : <ScanLine size={12} />}
+        {scanning ? 'OCR 掃描中...' : 'OCR 重新掃描'}
+      </button>
+    </div>
+  )
+}
 
 // Edit modal for updating name/description/tags/schema/style
 function TemplateEditModal({ template, onClose, onSaved }: {
@@ -172,9 +205,17 @@ function TemplateEditModal({ template, onClose, onSaved }: {
           {/* Layout tab — PDF only */}
           {tab === 'layout' && (
             <div>
-              <div className="mb-2 text-xs text-slate-500">
-                在下方 PDF 預覽上，先選取右上方「選擇變數」下拉後拖拉畫框，即可定義該欄位的填寫位置。
-                已定位的欄位將在生成時以 <strong>疊加模式</strong> 寫入原始 PDF。
+              <div className="mb-2 flex items-start justify-between gap-3">
+                <p className="text-xs text-slate-500">
+                  在下方 PDF 預覽上，先選取右上方「選擇變數」下拉後拖拉畫框，即可定義該欄位的填寫位置。
+                  已定位的欄位將在生成時以 <strong>疊加模式</strong> 寫入原始 PDF。
+                </p>
+                {canEdit && (
+                  <OcrScanButton
+                    templateId={template.id}
+                    onComplete={vars => setSchema({ ...schema, variables: vars })}
+                  />
+                )}
               </div>
               <PDFFieldEditor
                 templateId={template.id}

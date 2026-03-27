@@ -721,11 +721,14 @@ export interface VariableStyle {
   override?: VariableStyleProps   // user-configured override
 }
 
+export type TemplateContentMode = 'variable' | 'static' | 'empty'
+
 export interface TemplateVariable {
   key: string
   label: string
   type: TemplateVariableType
   required: boolean
+  content_mode?: TemplateContentMode   // 'variable'(default) | 'static'(fixed) | 'empty'(clear)
   original_text?: string
   description?: string
   default_value?: string

@@ -75,6 +75,8 @@ export default function TemplateUploadWizard({ onCreated, onClose }: Props) {
               setSchema(data.schema)
               setTempFile(data.temp_file)
               setFormat(data.format)
+              // Auto-enable fixed format for OCR-detected PDFs
+              if (data.schema?.is_ocr) setIsFixedFormat(true)
             }
             if (data.message === undefined && data.schema === undefined) {
               // done event
@@ -181,9 +183,17 @@ export default function TemplateUploadWizard({ onCreated, onClose }: Props) {
             <div>
               <div className="flex items-center justify-between mb-3">
                 <div>
-                  <div className="text-sm font-medium">AI 識別到 {schema.variables.length} 個變數</div>
+                  <div className="text-sm font-medium flex items-center gap-2">
+                    AI 識別到 {schema.variables.length} 個變數
+                    {(schema as { is_ocr?: boolean }).is_ocr && (
+                      <span className="text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full">OCR 自動定位</span>
+                    )}
+                  </div>
                   {schema.confidence !== undefined && (
                     <div className="text-xs text-slate-400">信心度 {Math.round(schema.confidence * 100)}%{schema.notes ? ` · ${schema.notes}` : ''}</div>
+                  )}
+                  {(schema as { is_ocr?: boolean }).is_ocr && (
+                    <div className="text-xs text-purple-600 mt-0.5">已啟用固定格式模式，請至「版面編輯器」確認欄位座標</div>
                   )}
                 </div>
               </div>

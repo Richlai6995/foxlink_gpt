@@ -63,7 +63,15 @@ export default function TemplateGenerateModal({ template, onClose }: Props) {
   })()
   const variables: TemplateVariable[] = schema.variables || []
 
-  const [values, setValues] = useState<Record<string, unknown>>({})
+  // Pre-populate static/empty variables; only 'variable' mode vars are shown in form
+  const [values, setValues] = useState<Record<string, unknown>>(() => {
+    const init: Record<string, unknown> = {}
+    for (const v of variables) {
+      if (v.content_mode === 'static') init[v.key] = v.default_value ?? ''
+      else if (v.content_mode === 'empty') init[v.key] = ''
+    }
+    return init
+  })
   const [generating, setGenerating] = useState(false)
   const [downloadUrl, setDownloadUrl] = useState('')
   const [error, setError] = useState('')
@@ -98,10 +106,10 @@ export default function TemplateGenerateModal({ template, onClose }: Props) {
         </div>
 
         <div className="flex-1 overflow-auto p-5 space-y-4">
-          {variables.length === 0 && (
-            <div className="text-sm text-slate-400 text-center py-4">此範本沒有定義變數</div>
+          {variables.filter(v => (v.content_mode ?? 'variable') === 'variable').length === 0 && (
+            <div className="text-sm text-slate-400 text-center py-4">此範本沒有需要填入的變數</div>
           )}
-          {variables.map(v => (
+          {variables.filter(v => (v.content_mode ?? 'variable') === 'variable').map(v => (
             <div key={v.key}>
               <label className="text-xs text-slate-500 block mb-1">
                 {v.label}
