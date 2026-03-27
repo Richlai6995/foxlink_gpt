@@ -204,7 +204,7 @@ export default function StyleEditorTab({ variables, onChange, readonly }: Props)
       </table>
 
       <p className="text-[10px] text-slate-400 mt-2 px-1">
-        「已偵測」表示從原始範本自動讀取，欄位空白表示使用偵測值。手動設定後可點「重設」還原。
+        「已偵測」表示從原始範本自動讀取，欄位空白表示使用偵測值。手動設定後可點「重設」還原。非固定格式亦套用 Override 字型/顏色/粗體設定。
       </p>
     </div>
   )

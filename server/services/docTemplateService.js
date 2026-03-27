@@ -1162,8 +1162,7 @@ async function generateDocument(db, templateId, userId, inputData, outputFormat)
       try { boldFont = await origDoc.embedFont(await fs.readFile(fontBoldPath)); }
       catch { boldFont = null; }
 
-      // Apply style settings only when is_fixed_format is enabled
-      const applyStyle = !!tpl.is_fixed_format;
+      // Styles are always applied (override wins over detected; detected may be absent for non-fixed)
 
       // Flatten loop vars
       const flatData = { ...inputData };
@@ -1187,19 +1186,34 @@ async function generateDocument(db, templateId, userId, inputData, outputFormat)
       };
 
       // ── Helper: wrap text to lines using font metrics ───────────────────────
+      // Word-aware: CJK chars break anywhere; ASCII runs are treated as atomic tokens.
       function wrapLines(text, font, fontSize, maxWidth) {
+        const isCJK = ch => ch.codePointAt(0) > 0x2E80;
+        const cw = ch => { try { return font.widthOfTextAtSize(ch, fontSize); } catch { return fontSize * (isCJK(ch) ? 1.0 : 0.55); } };
+        const tokW = s => [...s].reduce((a, c) => a + cw(c), 0);
         const lines = [];
         for (const para of text.split('\n')) {
           if (!para) { lines.push(''); continue; }
-          let line = '', lw = 0;
+          // Tokenize: CJK → individual; space → break marker; ASCII run → single token
+          const tokens = [];
+          let cur = '';
           for (const ch of para) {
-            let cw;
-            try { cw = font.widthOfTextAtSize(ch, fontSize); }
-            catch { cw = fontSize * (ch.codePointAt(0) > 0x2E80 ? 1.0 : 0.55); }
-            if (lw + cw > maxWidth && line) { lines.push(line); line = ch; lw = cw; }
-            else { line += ch; lw += cw; }
+            if (isCJK(ch)) { if (cur) { tokens.push(cur); cur = ''; } tokens.push(ch); }
+            else if (ch === ' ') { if (cur) { tokens.push(cur); cur = ''; } tokens.push(' '); }
+            else cur += ch;
           }
-          if (line) lines.push(line);
+          if (cur) tokens.push(cur);
+          let line = '', lw = 0;
+          for (const tok of tokens) {
+            const tw = tokW(tok);
+            if (tok === ' ') {
+              if (lw + tw <= maxWidth) { if (line) { line += ' '; lw += tw; } }
+              else if (line) { lines.push(line); line = ''; lw = 0; }
+            } else if (lw + tw > maxWidth && line) {
+              lines.push(line.trimEnd()); line = tok; lw = tw;
+            } else { line += tok; lw += tw; }
+          }
+          if (line.trim()) lines.push(line.trimEnd());
         }
         while (lines.length && lines[lines.length - 1] === '') lines.pop();
         return lines;
@@ -1231,10 +1245,10 @@ async function generateDocument(db, templateId, userId, inputData, outputFormat)
         if (!v.pdf_cell || (v.content_mode || 'variable') === 'empty') continue;
         const value = String(flatData[v.key] ?? '').trim();
         if (!value) continue;
-        const eff      = applyStyle ? (getEffectiveStyle(v) || {}) : {};
+        const eff      = getEffectiveStyle(v) || {};
         const fontSize = eff.fontSize ?? 9;
-        const isBold   = applyStyle && eff.bold === true;
-        const fgColor  = (applyStyle && hexRgb(eff.color)) ?? { r: 0, g: 0, b: 0 };
+        const isBold   = eff.bold === true;
+        const fgColor  = hexRgb(eff.color) ?? { r: 0, g: 0, b: 0 };
         const text     = await applyOverflow(value, eff);
         const lines    = wrapLines(text, regularFont, fontSize, v.pdf_cell.width - 4);
         cellData.set(v.key, { lines, fontSize, isBold, fgColor });
@@ -1253,7 +1267,7 @@ async function generateDocument(db, templateId, userId, inputData, outputFormat)
         const cell = v.pdf_cell;
         const cd = cellData.get(v.key);
         if (!cd) continue;
-        const linesPerCell = Math.max(1, Math.floor((cell.height - 4) / (cd.fontSize * 1.3)));
+        const linesPerCell = Math.max(1, Math.round((cell.height - 4) / (cd.fontSize * 1.3)));
         const lastPage = (cell.page ?? 0) + Math.ceil(cd.lines.length / linesPerCell) - 1;
         if (lastPage > maxAnchorPage) maxAnchorPage = lastPage;
       }
@@ -1284,7 +1298,7 @@ async function generateDocument(db, templateId, userId, inputData, outputFormat)
         if (!cd) continue;
         const { lines, fontSize, isBold, fgColor } = cd;
         const lineH = fontSize * 1.3;
-        const linesPerCell = Math.max(1, Math.floor((cell.height - 4) / lineH));
+        const linesPerCell = Math.max(1, Math.round((cell.height - 4) / lineH));
         let lineIdx = 0, drawPageIdx = cell.page ?? 0;
         while (lineIdx < lines.length && drawPageIdx < allPages.length) {
           const pg = allPages[drawPageIdx];
@@ -1295,17 +1309,21 @@ async function generateDocument(db, templateId, userId, inputData, outputFormat)
           drawCellLines(pg, chunk, cell.x, topY, cell.width, cell.height, botY, fontSize, isBold, fgColor);
           drawPageIdx++;
         }
+        // Non-overflow anchor cells: repeat on all continuation pages so headers appear on every page
+        const cellOverflows = lines.length > linesPerCell;
+        if (!cellOverflows && allPages.length > origPageCount) {
+          for (let pi = origPageCount; pi < allPages.length; pi++) {
+            const pg = allPages[pi];
+            const { height: pH } = pg.getSize();
+            const topY = pH - cell.y, botY = pH - cell.y - cell.height;
+            drawCellLines(pg, lines, cell.x, topY, cell.width, cell.height, botY, fontSize, isBold, fgColor);
+          }
+        }
       }
 
-      // ── Draw float cells (after anchor overflow, on a new blank page) ───────
+      // ── Draw float cells (on last anchor page, or original page if no overflow) ──
       if (floatVars2.length > 0) {
         const hadOverflow = maxAnchorPage >= origPageCount;
-        if (hadOverflow) {
-          // Add ONE blank white page for float cells
-          origDoc.addPage([pgW, pgH0]);
-          allPages = origDoc.getPages();
-        }
-        const floatPgIdx = hadOverflow ? allPages.length - 1 : (floatVars2[0].pdf_cell.page ?? 0);
         for (const v of floatVars2) {
           const cell = v.pdf_cell;
           if ((v.content_mode || 'variable') === 'empty') continue;
@@ -1314,10 +1332,13 @@ async function generateDocument(db, templateId, userId, inputData, outputFormat)
           const { lines, fontSize, isBold, fgColor } = cd;
           const lineH  = fontSize * 1.3;
           const needed = lines.length * lineH + fontSize + 4;
-          const pg = allPages[floatPgIdx];
+          // If anchor overflowed, float cells go to last continuation page; else original page
+          const pgIdx = hadOverflow ? maxAnchorPage : (cell.page ?? 0);
+          const pg = allPages[pgIdx];
+          if (!pg) continue;
           const { height: pH } = pg.getSize();
           const topY = pH - cell.y;
-          // Draw with extended height (needed, not fixed cell.height) so clip doesn't cut
+          // Draw with extended height so clip doesn't cut off content
           drawCellLines(pg, lines, cell.x, topY, cell.width, Math.max(cell.height, needed), topY - Math.max(cell.height, needed), fontSize, isBold, fgColor);
         }
       }
@@ -1380,10 +1401,13 @@ async function generateDocument(db, templateId, userId, inputData, outputFormat)
       console.log('[DocTemplate] Logo extraction skipped:', e.message);
     }
 
-    const fontPath = path.join(__dirname, '../fonts/NotoSansTC-Regular.ttf');
+    const fontPath     = path.join(__dirname, '../fonts/NotoSansTC-Regular.ttf');
+    const fontBoldPath = path.join(__dirname, '../fonts/NotoSansTC-Bold.ttf');
     const MX = 50; // margin x
     const doc = new PDFKit({ margin: MX, size: 'A4', bufferPages: true });
     doc.registerFont('CJK', fontPath);
+    let hasBoldFont = false;
+    try { doc.registerFont('CJK-Bold', fontBoldPath); hasBoldFont = true; } catch { /* no bold */ }
     doc.font('CJK');
 
     const pw       = doc.page.width;
@@ -1391,8 +1415,8 @@ async function generateDocument(db, templateId, userId, inputData, outputFormat)
     const tblW     = pw - MX * 2;
     const labelW   = 85;
     const valW     = tblW - labelW;
-    const fz       = 9;
-    const bgColors = ['#c6efce', '#bdd7ee', '#bdd7ee', '#fce4d6', '#fce4d6', '#fff2cc'];
+    const fzDefault = 9;
+    const bgColors  = ['#c6efce', '#bdd7ee', '#bdd7ee', '#fce4d6', '#fce4d6', '#fff2cc'];
 
     // ── Logo (if extracted) ──────────────────────────────────────────────
     let curY = MX;
@@ -1406,33 +1430,37 @@ async function generateDocument(db, templateId, userId, inputData, outputFormat)
     for (let idx = 0; idx < variables.length; idx++) {
       const v = variables[idx];
       const rawVal = String(flatData[v.key] ?? '').trim();
-      const eff = tpl.is_fixed_format ? getEffectiveStyle(v) : null;
-      // For regen, only 'summarize' makes sense (rows auto-expand for wrap/shrink)
-      const value = (eff?.overflow === 'summarize') ? await applyOverflow(rawVal, eff) : rawVal;
-      const label = (v.label || v.key) + ':';
-      const bg    = bgColors[idx % bgColors.length];
+      // Always apply style overrides (even for non-fixed-format)
+      const eff    = getEffectiveStyle(v) || {};
+      const value  = (eff.overflow === 'summarize') ? await applyOverflow(rawVal, eff) : rawVal;
+      const label  = (v.label || v.key) + ':';
+      const bg     = bgColors[idx % bgColors.length];
+      const fz     = eff.fontSize || fzDefault;
+      const fgHex  = eff.color   || '#000000';
+      const useBold = eff.bold === true && hasBoldFont;
+      const valFont = useBold ? 'CJK-Bold' : 'CJK';
 
       // Measure value text height for dynamic row sizing
-      doc.font('CJK').fontSize(fz);
+      doc.font(valFont).fontSize(fz);
       const measuredH = doc.heightOfString(value || ' ', { width: valW - 10 });
       const rowH = Math.max(22, measuredH + 12);
 
       // Page overflow: start a new page
       if (curY + rowH > ph - MX) {
         doc.addPage();
-        doc.font('CJK').fontSize(fz);
+        doc.font(valFont).fontSize(fz);
         curY = MX;
       }
 
       // ── Label cell (coloured background) ───────────────────────────────────
       doc.rect(MX, curY, labelW, rowH).fillAndStroke(bg, '#aaaaaa');
-      doc.font('CJK').fontSize(fz).fillColor('#000000')
+      doc.font('CJK').fontSize(fzDefault).fillColor('#000000')
         .text(label, MX + 4, curY + 6, { width: labelW - 8, lineBreak: false, ellipsis: true });
 
       // ── Value cell (white background) ───────────────────────────────────────
       doc.rect(MX + labelW, curY, valW, rowH).fillAndStroke('#ffffff', '#aaaaaa');
       if (value) {
-        doc.font('CJK').fontSize(fz).fillColor('#000000')
+        doc.font(valFont).fontSize(fz).fillColor(fgHex)
           .text(value, MX + labelW + 4, curY + 6, { width: valW - 10 });
       }
 

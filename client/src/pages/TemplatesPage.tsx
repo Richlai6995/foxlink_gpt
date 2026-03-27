@@ -191,7 +191,7 @@ function TemplateEditModal({ template, onClose, onSaved }: {
             <div>
               {!isFixedFormat && (
                 <div className="mb-3 text-xs text-slate-500 bg-slate-50 border rounded p-3">
-                  樣式設定在「固定格式模式」關閉時不會套用。請先在標題列開啟固定格式模式。
+                  固定格式模式關閉時，PDF overlay 路徑不套用偵測樣式，但<strong>手動設定的 Override（字型大小、顏色、粗體）仍會套用</strong>於生成文件。
                 </div>
               )}
               <StyleEditorTab

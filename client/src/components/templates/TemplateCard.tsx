@@ -131,14 +131,12 @@ export default function TemplateCard({ template, onRefresh, onEdit }: Props) {
             </button>
           )}
 
-          {!isOwner && (
-            <button
-              onClick={handleFork}
-              className="flex items-center gap-1 text-xs px-2 py-1 border rounded text-slate-600 hover:bg-slate-50"
-            >
-              <Copy size={11} /> 複製
-            </button>
-          )}
+          <button
+            onClick={handleFork}
+            className="flex items-center gap-1 text-xs px-2 py-1 border rounded text-slate-600 hover:bg-slate-50"
+          >
+            <Copy size={11} /> 複製
+          </button>
 
           {isOwner && (
             <button
