@@ -5536,7 +5536,7 @@ const cellBottom = pageHeight - cell.y - cell.height
             rows={[
               ['variable（預設）', 'resolveValue() 取 inputData[key] 或 default_value', '無特殊處理，正常寫入文字'],
               ['static', '始終使用 default_value，不詢問使用者', '正常寫入 default_value 文字'],
-              ['empty', '始終回傳空字串（''）', '畫 rgb(1,1,1) 白色矩形覆蓋原始文字後 continue'],
+              ['empty', '始終回傳空字串（空白）', '畫 rgb(1,1,1) 白色矩形覆蓋原始文字後 continue'],
             ]}
           />
           <CodeBlock>{`// resolveValue() — server/services/docTemplateService.js
