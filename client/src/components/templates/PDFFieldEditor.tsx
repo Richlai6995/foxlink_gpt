@@ -1,13 +1,9 @@
 /**
  * PDF Visual Field Editor
- * Renders the original PDF template and lets users draw rectangles
- * to define the position of each variable's fill area (pdf_cell).
- *
- * Coordinate system:
- *   PDF native: origin bottom-left, units = points (pt, 1/72 inch)
- *   Canvas:     origin top-left,    units = px
- *   Stored pdf_cell: PDF points (origin top-left for easier mental model)
- *   → at render time y_canvas = (pageH_pt - pdf_y - pdf_h) * scale
+ * – pointer capture ensures drag never drops when cursor leaves SVG
+ * – resize handles (8-point) on selected box
+ * – move by dragging inside selected box
+ * – X/Y/W/H editable numeric inputs
  */
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { TemplateVariable, TemplateOverflow } from '../../types'
@@ -27,16 +23,14 @@ async function getPdfjsLib() {
 
 // ── Types ────────────────────────────────────────────────────────────────────
 interface PdfCell { page: number; x: number; y: number; width: number; height: number }
+interface FieldRect { key: string; cell: PdfCell }
 
-interface FieldRect {
-  key: string        // variable key
-  cell: PdfCell
-}
+type ResizeHandle = 'nw'|'n'|'ne'|'e'|'se'|'s'|'sw'|'w'
 
-interface DrawState {
-  startX: number; startY: number   // canvas coords
-  currentX: number; currentY: number
-}
+type Drag =
+  | { t: 'draw'; sx: number; sy: number; cx: number; cy: number }
+  | { t: 'move';   key: string; sx: number; sy: number; cx: number; cy: number; origCell: PdfCell }
+  | { t: 'resize'; key: string; handle: ResizeHandle; sx: number; sy: number; cx: number; cy: number; origCell: PdfCell }
 
 interface Props {
   templateId: string
@@ -57,41 +51,59 @@ const FIELD_COLORS = [
   '#06b6d4','#84cc16','#f97316','#ec4899','#14b8a6',
 ]
 
-// ── Flatten variables (no loop parents — use children) ──────────────────────
+const HANDLE_CURSORS: Record<ResizeHandle, string> = {
+  nw: 'nw-resize', n: 'n-resize',  ne: 'ne-resize',
+  e:  'e-resize',  se: 'se-resize', s:  's-resize',
+  sw: 'sw-resize', w:  'w-resize',
+}
+
+const HS = 8 // resize handle size (px)
+
+// ── helpers ──────────────────────────────────────────────────────────────────
 function getFlatVars(variables: TemplateVariable[]): TemplateVariable[] {
   return variables.flatMap(v => v.type === 'loop' ? (v.children || []) : [v])
 }
-
 function colorForIdx(i: number) { return FIELD_COLORS[i % FIELD_COLORS.length] }
 
-// ── canvas coords → PDF pt (top-left origin) ─────────────────────────────────
-function canvasToPdf(
-  cx: number, cy: number, cw: number, ch: number,
-  pageH_pt: number, scale: number
-): PdfCell {
-  // Clamp to positive
-  const x = Math.max(0, cx) / scale
-  const y = Math.max(0, cy) / scale
-  const w = Math.abs(cw) / scale
-  const h = Math.abs(ch) / scale
-  // Convert top-left origin y to bottom-left PDF y (for pdf-lib overlay)
-  // We store as top-left for visual editor simplicity; service converts when drawing
-  return { page: 0, x, y, width: w, height: h }
-}
-
-// ── PDF pt (top-left) → canvas rect ─────────────────────────────────────────
-function pdfToCanvas(cell: PdfCell, scale: number) {
+function canvasToPdf(cx: number, cy: number, cw: number, ch: number, scale: number): Omit<PdfCell, 'page'> {
   return {
-    x: cell.x * scale,
-    y: cell.y * scale,
-    w: cell.width * scale,
-    h: cell.height * scale,
+    x: Math.max(0, cx) / scale,
+    y: Math.max(0, cy) / scale,
+    width:  Math.abs(cw) / scale,
+    height: Math.abs(ch) / scale,
   }
 }
+function pdfToCanvas(cell: PdfCell, scale: number) {
+  return { x: cell.x * scale, y: cell.y * scale, w: cell.width * scale, h: cell.height * scale }
+}
 
+function applyResize(cell: PdfCell, handle: ResizeHandle, dx: number, dy: number, scale: number): PdfCell {
+  const dpx = dx / scale, dpy = dy / scale
+  let { x, y, width, height } = cell
+  if (handle.includes('w')) { x += dpx; width  -= dpx }
+  if (handle.includes('e')) {           width  += dpx }
+  if (handle.includes('n')) { y += dpy; height -= dpy }
+  if (handle.includes('s')) {           height += dpy }
+  return { ...cell, x: Math.max(0, x), y: Math.max(0, y), width: Math.max(4, width), height: Math.max(4, height) }
+}
+
+function resizeHandlePositions(rx: number, ry: number, rw: number, rh: number): { h: ResizeHandle; cx: number; cy: number }[] {
+  return [
+    { h: 'nw', cx: rx,        cy: ry        },
+    { h: 'n',  cx: rx + rw/2, cy: ry        },
+    { h: 'ne', cx: rx + rw,   cy: ry        },
+    { h: 'e',  cx: rx + rw,   cy: ry + rh/2 },
+    { h: 'se', cx: rx + rw,   cy: ry + rh   },
+    { h: 's',  cx: rx + rw/2, cy: ry + rh   },
+    { h: 'sw', cx: rx,        cy: ry + rh   },
+    { h: 'w',  cx: rx,        cy: ry + rh/2 },
+  ]
+}
+
+// ── component ─────────────────────────────────────────────────────────────────
 export default function PDFFieldEditor({ templateId, variables, onChange, readonly }: Props) {
-  const canvasRef    = useRef<HTMLCanvasElement>(null)
-  const overlayRef   = useRef<SVGSVGElement>(null)
+  const canvasRef     = useRef<HTMLCanvasElement>(null)
+  const overlayRef    = useRef<SVGSVGElement>(null)
   const canvasAreaRef = useRef<HTMLDivElement>(null)
 
   const [pdfDoc, setPdfDoc]       = useState<import('pdfjs-dist').PDFDocumentProxy | null>(null)
@@ -102,54 +114,44 @@ export default function PDFFieldEditor({ templateId, variables, onChange, readon
   const [loading, setLoading]     = useState(true)
   const [error, setError]         = useState('')
 
-  const fitWidth = useCallback(() => {
-    if (!canvasAreaRef.current || !pageSize.ptW) return
-    const containerW = canvasAreaRef.current.clientWidth - 24  // minus padding
-    const newScale = Math.floor((containerW / pageSize.ptW) * 10) / 10
-    setScale(Math.max(0.5, Math.min(5, newScale)))
-  }, [pageSize.ptW])
+  const [drag, setDrag]             = useState<Drag | null>(null)
+  const [selectedKey, setSelectedKey] = useState<string | null>(null)
+  const [assignKey, setAssignKey]     = useState('')
 
-  // Fields: derived from variables' pdf_cell on current page
-  const flatVars  = getFlatVars(variables)
+  const flatVars = getFlatVars(variables)
   const fields: FieldRect[] = flatVars
     .filter(v => v.pdf_cell && v.pdf_cell.page === pageNum - 1)
     .map(v => ({ key: v.key, cell: v.pdf_cell! }))
 
-  const [drawing, setDrawing] = useState<DrawState | null>(null)
-  const [selectedKey, setSelectedKey] = useState<string | null>(null)
-  const [assignKey, setAssignKey]     = useState('')   // variable to assign when drawing
+  const fitWidth = useCallback(() => {
+    if (!canvasAreaRef.current || !pageSize.ptW) return
+    const containerW = canvasAreaRef.current.clientWidth - 24
+    const newScale = Math.floor((containerW / pageSize.ptW) * 10) / 10
+    setScale(Math.max(0.5, Math.min(5, newScale)))
+  }, [pageSize.ptW])
 
   // ── Load PDF ──────────────────────────────────────────────────────────────
   useEffect(() => {
     let cancelled = false
-    setLoading(true)
-    setError('')
-
+    setLoading(true); setError('')
     ;(async () => {
       try {
-        const lib = await getPdfjsLib()
+        const lib   = await getPdfjsLib()
         const token = localStorage.getItem('token') || ''
-        const task = lib.getDocument({
+        const doc   = await lib.getDocument({
           url: `/api/doc-templates/${templateId}/preview-file`,
           httpHeaders: { Authorization: `Bearer ${token}` },
-        })
-        const doc = await task.promise
+        }).promise
         if (cancelled) return
-        setPdfDoc(doc)
-        setPageCount(doc.numPages)
-        setPageNum(1)
-        setLoading(false)
+        setPdfDoc(doc); setPageCount(doc.numPages); setPageNum(1); setLoading(false)
       } catch (e: unknown) {
-        if (!cancelled) {
-          setError('PDF 載入失敗: ' + (e instanceof Error ? e.message : String(e)))
-          setLoading(false)
-        }
+        if (!cancelled) { setError('PDF 載入失敗: ' + (e instanceof Error ? e.message : String(e))); setLoading(false) }
       }
     })()
     return () => { cancelled = true }
   }, [templateId])
 
-  // ── Render page to canvas ─────────────────────────────────────────────────
+  // ── Render page ───────────────────────────────────────────────────────────
   const renderPage = useCallback(async (doc: typeof pdfDoc, pn: number, sc: number) => {
     if (!doc || !canvasRef.current) return
     const page     = await doc.getPage(pn)
@@ -158,16 +160,13 @@ export default function PDFFieldEditor({ templateId, variables, onChange, readon
     canvas.width   = viewport.width
     canvas.height  = viewport.height
     setPageSize({ w: viewport.width, h: viewport.height, ptW: viewport.width / sc, ptH: viewport.height / sc })
-    const ctx = canvas.getContext('2d')!
-    await page.render({ canvasContext: ctx, viewport }).promise
+    await page.render({ canvasContext: canvas.getContext('2d')!, viewport }).promise
   }, [])
 
-  useEffect(() => {
-    if (pdfDoc) renderPage(pdfDoc, pageNum, scale)
-  }, [pdfDoc, pageNum, scale, renderPage])
+  useEffect(() => { if (pdfDoc) renderPage(pdfDoc, pageNum, scale) }, [pdfDoc, pageNum, scale, renderPage])
 
-  // ── Update variable's pdf_cell ────────────────────────────────────────────
-  const setCellForKey = (key: string, cell: PdfCell | undefined) => {
+  // ── Mutate helpers ────────────────────────────────────────────────────────
+  const setCellForKey = useCallback((key: string, cell: PdfCell | undefined) => {
     const update = (vars: TemplateVariable[]): TemplateVariable[] =>
       vars.map(v => {
         if (v.key === key) return { ...v, pdf_cell: cell }
@@ -175,43 +174,97 @@ export default function PDFFieldEditor({ templateId, variables, onChange, readon
         return v
       })
     onChange(update(variables))
+  }, [variables, onChange])
+
+  // ── Get SVG-relative pointer coords ──────────────────────────────────────
+  const getSvgXY = (e: React.PointerEvent): { x: number; y: number } => {
+    const r = overlayRef.current!.getBoundingClientRect()
+    return { x: e.clientX - r.left, y: e.clientY - r.top }
   }
 
-  // ── Mouse draw handlers ────────────────────────────────────────────────────
-  const svgRect = () => overlayRef.current?.getBoundingClientRect()
-
-  const onMouseDown = (e: React.MouseEvent) => {
+  // ── Pointer handlers on SVG (draw) ────────────────────────────────────────
+  const onSvgPointerDown = (e: React.PointerEvent<SVGSVGElement>) => {
     if (readonly || !assignKey) return
-    const r = svgRect()!
-    setDrawing({ startX: e.clientX - r.left, startY: e.clientY - r.top, currentX: e.clientX - r.left, currentY: e.clientY - r.top })
+    const { x, y } = getSvgXY(e)
+    e.currentTarget.setPointerCapture(e.pointerId)
+    setDrag({ t: 'draw', sx: x, sy: y, cx: x, cy: y })
     setSelectedKey(null)
   }
-  const onMouseMove = (e: React.MouseEvent) => {
-    if (!drawing) return
-    const r = svgRect()!
-    setDrawing(d => d ? { ...d, currentX: e.clientX - r.left, currentY: e.clientY - r.top } : null)
-  }
-  const onMouseUp = () => {
-    if (!drawing || !assignKey) { setDrawing(null); return }
-    const { startX, startY, currentX, currentY } = drawing
-    const cw = currentX - startX
-    const ch = currentY - startY
-    if (Math.abs(cw) < 8 || Math.abs(ch) < 8) { setDrawing(null); return }
 
-    // Normalise (handle negative drag)
-    const x = Math.min(startX, currentX)
-    const y = Math.min(startY, currentY)
-    const w = Math.abs(cw)
-    const h = Math.abs(ch)
-
-    const cell = canvasToPdf(x, y, w, h, pageSize.ptH, scale)
-    cell.page = pageNum - 1
-    setCellForKey(assignKey, cell)
-    setSelectedKey(assignKey)
-    setDrawing(null)
+  const onSvgPointerMove = (e: React.PointerEvent<SVGSVGElement>) => {
+    if (!drag) return
+    const { x, y } = getSvgXY(e)
+    setDrag(d => d ? { ...d, cx: x, cy: y } : null)
   }
 
-  // ── Currently selected variable (for right panel) ─────────────────────────
+  const onSvgPointerUp = (e: React.PointerEvent<SVGSVGElement>) => {
+    if (!drag) return
+    const d = drag
+    setDrag(null)
+
+    if (d.t === 'draw') {
+      const cw = d.cx - d.sx, ch = d.cy - d.sy
+      if (Math.abs(cw) < 5 || Math.abs(ch) < 5 || !assignKey) return
+      const x = Math.min(d.sx, d.cx), y = Math.min(d.sy, d.cy)
+      const cell: PdfCell = { ...canvasToPdf(x, y, Math.abs(cw), Math.abs(ch), scale), page: pageNum - 1 }
+      setCellForKey(assignKey, cell)
+      setSelectedKey(assignKey)
+
+    } else if (d.t === 'move') {
+      const dx = d.cx - d.sx, dy = d.cy - d.sy
+      if (Math.abs(dx) > 2 || Math.abs(dy) > 2) {
+        setCellForKey(d.key, {
+          ...d.origCell,
+          x: Math.max(0, d.origCell.x + dx / scale),
+          y: Math.max(0, d.origCell.y + dy / scale),
+        })
+      }
+
+    } else if (d.t === 'resize') {
+      setCellForKey(d.key, applyResize(d.origCell, d.handle, d.cx - d.sx, d.cy - d.sy, scale))
+    }
+  }
+
+  // ── Pointer handlers on field rects (move) ────────────────────────────────
+  const onFieldPointerDown = (e: React.PointerEvent, key: string, cell: PdfCell) => {
+    if (readonly) return
+    e.stopPropagation()
+    const { x, y } = getSvgXY(e)
+    overlayRef.current!.setPointerCapture(e.pointerId)
+    setDrag({ t: 'move', key, sx: x, sy: y, cx: x, cy: y, origCell: { ...cell } })
+    setSelectedKey(key)
+    setAssignKey(key)
+  }
+
+  // ── Pointer handlers on resize handles ────────────────────────────────────
+  const onHandlePointerDown = (e: React.PointerEvent, key: string, cell: PdfCell, handle: ResizeHandle) => {
+    if (readonly) return
+    e.stopPropagation()
+    const { x, y } = getSvgXY(e)
+    overlayRef.current!.setPointerCapture(e.pointerId)
+    setDrag({ t: 'resize', key, handle, sx: x, sy: y, cx: x, cy: y, origCell: { ...cell } })
+  }
+
+  // ── Compute live preview rect ─────────────────────────────────────────────
+  type Preview = { x: number; y: number; w: number; h: number; forKey?: string }
+  const preview: Preview | null = (() => {
+    if (!drag) return null
+    if (drag.t === 'draw') {
+      return { x: Math.min(drag.sx, drag.cx), y: Math.min(drag.sy, drag.cy), w: Math.abs(drag.cx - drag.sx), h: Math.abs(drag.cy - drag.sy) }
+    }
+    if (drag.t === 'move') {
+      const r = pdfToCanvas(drag.origCell, scale)
+      return { x: r.x + (drag.cx - drag.sx), y: r.y + (drag.cy - drag.sy), w: r.w, h: r.h, forKey: drag.key }
+    }
+    if (drag.t === 'resize') {
+      const newCell = applyResize(drag.origCell, drag.handle, drag.cx - drag.sx, drag.cy - drag.sy, scale)
+      const r = pdfToCanvas(newCell, scale)
+      return { x: r.x, y: r.y, w: r.w, h: r.h, forKey: drag.key }
+    }
+    return null
+  })()
+
+  // ── Right-panel helpers ───────────────────────────────────────────────────
   const selectedVar = flatVars.find(v => v.key === selectedKey) || null
   const patchSelectedVar = (patch: Partial<TemplateVariable>) => {
     if (!selectedKey) return
@@ -223,22 +276,21 @@ export default function PDFFieldEditor({ templateId, variables, onChange, readon
       })
     onChange(update(variables))
   }
+  const patchCell = (patch: Partial<PdfCell>) => {
+    if (!selectedKey || !selectedVar?.pdf_cell) return
+    setCellForKey(selectedKey, { ...selectedVar.pdf_cell, ...patch })
+  }
 
-  // ── Rendering preview rect for in-progress draw ───────────────────────────
-  const drawPreview = drawing ? {
-    x: Math.min(drawing.startX, drawing.currentX),
-    y: Math.min(drawing.startY, drawing.currentY),
-    w: Math.abs(drawing.currentX - drawing.startX),
-    h: Math.abs(drawing.currentY - drawing.startY),
-  } : null
-
-  // ── Unassigned variable keys ───────────────────────────────────────────────
   const unassigned = flatVars.filter(v => !v.pdf_cell)
   const assigned   = flatVars.filter(v => v.pdf_cell)
 
+  // ── Canvas cursor ─────────────────────────────────────────────────────────
+  const dragHandle = drag?.t === 'resize' ? HANDLE_CURSORS[drag.handle] : drag?.t === 'move' ? 'move' : undefined
+  const canvasCursor = dragHandle ?? (assignKey && !readonly ? 'crosshair' : 'default')
+
   return (
     <div className="flex gap-3 h-[calc(100vh-280px)] min-h-[480px]">
-      {/* ── Left: PDF canvas + SVG overlay ────────────────────────────────── */}
+      {/* ── Left: PDF canvas + SVG overlay ──────────────────────────────── */}
       <div className="flex-1 flex flex-col min-w-0">
         {/* Toolbar */}
         <div className="flex items-center gap-2 mb-2 flex-wrap">
@@ -264,7 +316,6 @@ export default function PDFFieldEditor({ templateId, variables, onChange, readon
             <button onClick={() => setScale(s => Math.min(5, +(s + 0.25).toFixed(2)))} className="px-2 py-0.5 border rounded text-xs">+</button>
             <button onClick={fitWidth} className="px-2 py-0.5 border rounded text-xs text-blue-600 hover:bg-blue-50" title="符合寬度">符合</button>
           </div>
-          {/* Assign target selector */}
           {!readonly && (
             <div className="flex items-center gap-1 ml-2">
               <span className="text-xs text-slate-500">點選變數後拖拉畫框:</span>
@@ -285,58 +336,77 @@ export default function PDFFieldEditor({ templateId, variables, onChange, readon
         </div>
 
         {/* Canvas area */}
-        <div ref={canvasAreaRef} className="flex-1 overflow-auto border rounded bg-slate-100 relative" style={{ cursor: assignKey && !readonly ? 'crosshair' : 'default' }}>
+        <div ref={canvasAreaRef} className="flex-1 overflow-auto border rounded bg-slate-100 relative" style={{ cursor: canvasCursor }}>
           {loading && <div className="absolute inset-0 flex items-center justify-center text-xs text-slate-500 bg-white/80">載入中...</div>}
           {error   && <div className="absolute inset-0 flex items-center justify-center text-xs text-red-500 bg-white/80 p-4 text-center">{error}</div>}
 
           <div className="relative inline-block">
             <canvas ref={canvasRef} />
 
-            {/* SVG overlay for field rects */}
             <svg
               ref={overlayRef}
-              className="absolute inset-0 pointer-events-auto"
-              style={{ width: pageSize.w, height: pageSize.h }}
-              onMouseDown={onMouseDown}
-              onMouseMove={onMouseMove}
-              onMouseUp={onMouseUp}
-              onMouseLeave={onMouseUp}
+              className="absolute inset-0"
+              style={{ width: pageSize.w, height: pageSize.h, cursor: canvasCursor, touchAction: 'none' }}
+              onPointerDown={onSvgPointerDown}
+              onPointerMove={onSvgPointerMove}
+              onPointerUp={onSvgPointerUp}
+              onPointerCancel={() => setDrag(null)}
             >
               {/* Existing field rects */}
-              {fields.map((f, i) => {
-                const r = pdfToCanvas(f.cell, scale)
-                const color = colorForIdx(flatVars.findIndex(v => v.key === f.key))
-                const isSelected = f.key === selectedKey
+              {fields.map((f) => {
+                const r      = pdfToCanvas(f.cell, scale)
+                const color  = colorForIdx(flatVars.findIndex(v => v.key === f.key))
+                const isSel  = f.key === selectedKey
+                const isDragging = drag && (drag.t === 'move' || drag.t === 'resize') && drag.key === f.key
+                const opacity = isDragging ? 0.3 : 1
+
                 return (
-                  <g key={f.key} onClick={() => { setSelectedKey(f.key); setAssignKey(f.key) }} style={{ cursor: 'pointer' }}>
+                  <g key={f.key} style={{ opacity }}>
+                    {/* Main rect */}
                     <rect
                       x={r.x} y={r.y} width={r.w} height={r.h}
                       fill={color + '22'}
                       stroke={color}
-                      strokeWidth={isSelected ? 2 : 1}
-                      strokeDasharray={isSelected ? '' : '4 2'}
+                      strokeWidth={isSel ? 2 : 1}
+                      strokeDasharray={isSel ? '' : '4 2'}
+                      style={{ cursor: isSel ? 'move' : 'pointer' }}
+                      onPointerDown={e => onFieldPointerDown(e, f.key, f.cell)}
                     />
-                    <rect x={r.x} y={r.y - 14} width={Math.min(r.w, 120)} height={14} fill={color} rx={2} />
-                    <text x={r.x + 3} y={r.y - 3} fontSize={10} fill="white" style={{ userSelect: 'none' }}>
+                    {/* Label tag */}
+                    <rect x={r.x} y={r.y - 14} width={Math.min(r.w, 120)} height={14} fill={color} rx={2} style={{ pointerEvents: 'none' }} />
+                    <text x={r.x + 3} y={r.y - 3} fontSize={10} fill="white" style={{ userSelect: 'none', pointerEvents: 'none' }}>
                       {(flatVars.find(v => v.key === f.key)?.label || f.key).slice(0, 14)}
                     </text>
                     {/* Delete button */}
-                    {!readonly && isSelected && (
-                      <g onClick={e => { e.stopPropagation(); setCellForKey(f.key, undefined); setSelectedKey(null) }}>
+                    {!readonly && isSel && (
+                      <g
+                        style={{ cursor: 'pointer' }}
+                        onPointerDown={e => { e.stopPropagation(); setCellForKey(f.key, undefined); setSelectedKey(null) }}
+                      >
                         <circle cx={r.x + r.w - 6} cy={r.y + 6} r={7} fill="#ef4444" />
-                        <text x={r.x + r.w - 6} y={r.y + 10} textAnchor="middle" fontSize={11} fill="white" style={{ userSelect: 'none' }}>✕</text>
+                        <text x={r.x + r.w - 6} y={r.y + 10} textAnchor="middle" fontSize={11} fill="white" style={{ userSelect: 'none', pointerEvents: 'none' }}>✕</text>
                       </g>
                     )}
+                    {/* Resize handles (only on selected, not during drag) */}
+                    {!readonly && isSel && !isDragging && resizeHandlePositions(r.x, r.y, r.w, r.h).map(({ h, cx, cy }) => (
+                      <rect
+                        key={h}
+                        x={cx - HS / 2} y={cy - HS / 2} width={HS} height={HS}
+                        fill="white" stroke="#3b82f6" strokeWidth={1.5} rx={1}
+                        style={{ cursor: HANDLE_CURSORS[h] }}
+                        onPointerDown={e => onHandlePointerDown(e, f.key, f.cell, h)}
+                      />
+                    ))}
                   </g>
                 )
               })}
 
-              {/* In-progress draw rect */}
-              {drawPreview && (
+              {/* Live drag preview */}
+              {preview && (
                 <rect
-                  x={drawPreview.x} y={drawPreview.y}
-                  width={drawPreview.w} height={drawPreview.h}
+                  x={preview.x} y={preview.y} width={preview.w} height={preview.h}
                   fill="#3b82f633" stroke="#3b82f6" strokeWidth={1.5} strokeDasharray="4 2"
+                  style={{ pointerEvents: 'none' }}
                 />
               )}
             </svg>
@@ -344,7 +414,7 @@ export default function PDFFieldEditor({ templateId, variables, onChange, readon
         </div>
       </div>
 
-      {/* ── Right: field list + selected field detail ─────────────────────── */}
+      {/* ── Right: field list + selected field detail ────────────────────── */}
       <div className="w-64 flex flex-col gap-2 shrink-0 overflow-y-auto">
         {/* Progress */}
         <div className="text-[11px] text-slate-500 bg-slate-50 border rounded p-2">
@@ -376,13 +446,28 @@ export default function PDFFieldEditor({ templateId, variables, onChange, readon
             <div className="font-medium text-slate-700 truncate">{selectedVar.label || selectedVar.key}</div>
 
             {selectedVar.pdf_cell ? (
-              <div className="text-[10px] text-slate-400 space-y-0.5">
-                <div>X: {selectedVar.pdf_cell.x.toFixed(1)} pt</div>
-                <div>Y: {selectedVar.pdf_cell.y.toFixed(1)} pt</div>
-                <div>W: {selectedVar.pdf_cell.width.toFixed(1)} pt</div>
-                <div>H: {selectedVar.pdf_cell.height.toFixed(1)} pt</div>
-                <div>頁: {selectedVar.pdf_cell.page + 1}</div>
-              </div>
+              <>
+                {/* Editable position/size */}
+                <div className="grid grid-cols-2 gap-x-2 gap-y-1">
+                  {([['x', 'X'], ['y', 'Y'], ['width', 'W'], ['height', 'H']] as const).map(([k, label]) => (
+                    <div key={k} className="flex items-center gap-1">
+                      <span className="text-slate-400 w-4 shrink-0">{label}</span>
+                      <input
+                        type="number" step="1" min={k === 'width' || k === 'height' ? 4 : 0}
+                        className="w-0 flex-1 border rounded px-1 py-0.5 text-[10px]"
+                        disabled={readonly}
+                        value={Math.round(selectedVar.pdf_cell![k])}
+                        onChange={e => {
+                          const v = parseFloat(e.target.value)
+                          if (!isNaN(v)) patchCell({ [k]: Math.max(k === 'width' || k === 'height' ? 4 : 0, v) })
+                        }}
+                      />
+                      <span className="text-slate-300 text-[9px] shrink-0">pt</span>
+                    </div>
+                  ))}
+                </div>
+                <div className="text-[10px] text-slate-400">頁: {selectedVar.pdf_cell.page + 1}</div>
+              </>
             ) : (
               <div className="text-orange-500 text-[10px]">尚未定位，請在左側拖拉畫框</div>
             )}
