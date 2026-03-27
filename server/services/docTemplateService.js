@@ -811,7 +811,37 @@ async function generateDocument(db, templateId, userId, inputData, outputFormat)
         const children = v.children || [];
         if (!children.length || !items.length) continue;
 
-        // ── Check for true repeating table row pattern ──────────────────
+        // ── Helper: apply fixed row height to a <w:tr> ─────────────────
+        const applyRowHeight = (trXml) => {
+          if (!isFixed || !v.docx_style?.rowHeightPt) return trXml;
+          const twips = Math.round(v.docx_style.rowHeightPt * 20);
+          const heightTag = `<w:trHeight w:val="${twips}" w:hRule="exact"/>`;
+          const trPrM = trXml.match(/<w:trPr>([\s\S]*?)<\/w:trPr>/);
+          if (trPrM) {
+            const newInner = trPrM[1].replace(/<w:trHeight[^>]*\/>/g, '') + heightTag;
+            return trXml.replace(/<w:trPr>[\s\S]*?<\/w:trPr>/, `<w:trPr>${newInner}</w:trPr>`);
+          }
+          return trXml.replace('<w:tr', `<w:tr><w:trPr>${heightTag}</w:trPr>`);
+        };
+
+        // ── Helper: fill blank template row by column index ──────────────
+        const fillBlankRow = (blankRow, item) => {
+          const cells = [...blankRow.matchAll(/<w:tc\b[^>]*>[\s\S]*?<\/w:tc>/g)];
+          let row = blankRow;
+          let offset = 0;
+          children.forEach((c, idx) => {
+            if (idx >= cells.length) return;
+            const cell = cells[idx];
+            const cStyle = isFixed ? getEffectiveStyle(c) : null;
+            const val = String(item[c.key] ?? '');
+            const newCell = buildReplacedTc(cell[0], val, cStyle);
+            row = row.slice(0, cell.index + offset) + newCell + row.slice(cell.index + offset + cell[0].length);
+            offset += newCell.length - cell[0].length;
+          });
+          return applyRowHeight(row);
+        };
+
+        // ── Strategy A: text-replacement (filled templates) ──────────────
         const firstChild = children.find(c => c.original_text);
         if (firstChild) {
           const escaped = firstChild.original_text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -820,44 +850,110 @@ async function generateDocument(db, templateId, userId, inputData, outputFormat)
           ));
           if (trMatch && children.filter(c => c.original_text)
             .every(c => trMatch[0].includes(c.original_text))) {
-            // All children in same <w:tr> → duplicate row per item
-            let templateRow = trMatch[0];
 
-            // ── Fixed mode: inject/override <w:trHeight> in <w:trPr> ───
-            if (isFixed && v.docx_style?.rowHeightPt) {
-              const twips = Math.round(v.docx_style.rowHeightPt * 20);
-              const heightTag = `<w:trHeight w:val="${twips}" w:hRule="exact"/>`;
-              const trPrM = templateRow.match(/<w:trPr>([\s\S]*?)<\/w:trPr>/);
-              if (trPrM) {
-                const newInner = trPrM[1].replace(/<w:trHeight[^>]*\/>/g, '') + heightTag;
-                templateRow = templateRow.replace(/<w:trPr>[\s\S]*?<\/w:trPr>/, `<w:trPr>${newInner}</w:trPr>`);
-              } else {
-                templateRow = templateRow.replace('<w:tr', `<w:tr><w:trPr>${heightTag}</w:trPr>`);
-              }
-            }
-
-            const newRows = items.map(item => {
-              let row = templateRow;
-              for (const c of children) {
-                if (!c.original_text) continue;
-                const cStyle = isFixed ? getEffectiveStyle(c) : null;
-                row = row.replace(/<w:p\b[^>]*>[\s\S]*?<\/w:p>/g, (para) => {
-                  const replaced = mergeRunsAndReplace(para, c.original_text, String(item[c.key] ?? ''));
-                  if (!cStyle || replaced === para) return replaced;
-                  // Apply style to the replacement run's rPr
-                  return replaced.replace(/<w:rPr>([\s\S]*?)<\/w:rPr>/, (_, inner) =>
-                    buildStyledRPr(`<w:rPr>${inner}</w:rPr>`, cStyle)
-                  );
-                });
-              }
-              return row;
+            // Detect column-header row: original_text ≈ label (blank template)
+            const isHeaderRow = children.filter(c => c.original_text).every(c => {
+              const a = (c.original_text || '').replace(/\s+/g, '').toLowerCase();
+              const b = (c.label || '').replace(/\s+/g, '').toLowerCase();
+              return a === b || a.includes(b) || b.includes(a);
             });
-            xml = xml.replace(trMatch[0], newRows.join(''));
-            continue;
+
+            if (!isHeaderRow) {
+              // Normal text-replacement row duplication
+              const newRows = items.map(item => {
+                let row = applyRowHeight(trMatch[0]);
+                for (const c of children) {
+                  if (!c.original_text) continue;
+                  const cStyle = isFixed ? getEffectiveStyle(c) : null;
+                  row = row.replace(/<w:p\b[^>]*>[\s\S]*?<\/w:p>/g, (para) => {
+                    const replaced = mergeRunsAndReplace(para, c.original_text, String(item[c.key] ?? ''));
+                    if (!cStyle || replaced === para) return replaced;
+                    return replaced.replace(/<w:rPr>([\s\S]*?)<\/w:rPr>/, (_, inner) =>
+                      buildStyledRPr(`<w:rPr>${inner}</w:rPr>`, cStyle)
+                    );
+                  });
+                }
+                return row;
+              });
+              xml = xml.replace(trMatch[0], newRows.join(''));
+              continue;
+            }
+            // isHeaderRow → fall through to Strategy B
           }
         }
 
-        // ── Flat: all items → numbered list using ALL children joined ───
+        // ── Strategy B: blank template row detection (blank form) ────────
+        {
+          const tblPat = /<w:tbl\b[^>]*>[\s\S]*?<\/w:tbl>/g;
+          let tm;
+          let blankHandled = false;
+          while ((tm = tblPat.exec(xml)) !== null) {
+            const tblXml = tm[0];
+            const rows = [...tblXml.matchAll(/<w:tr\b[^>]*>[\s\S]*?<\/w:tr>/g)];
+
+            // Find a header row whose cells match child labels
+            let headerIdx = -1;
+            for (let ri = 0; ri < rows.length; ri++) {
+              const cells = [...rows[ri][0].matchAll(/<w:tc\b[^>]*>[\s\S]*?<\/w:tc>/g)];
+              const matched = children.filter(c => {
+                const lk = (c.label || c.key).replace(/\s+/g, '').toLowerCase().slice(0, 8);
+                return cells.some(rc => {
+                  const ct = getTcText(rc[0]).replace(/\s+/g, '').toLowerCase();
+                  return ct.includes(lk) || lk.includes(ct);
+                });
+              }).length;
+              if (matched >= Math.ceil(children.length / 2)) { headerIdx = ri; break; }
+            }
+            if (headerIdx === -1) continue;
+
+            // Collect consecutive blank rows after header
+            const blankRows = [];
+            for (let ri = headerIdx + 1; ri < rows.length; ri++) {
+              const cells = [...rows[ri][0].matchAll(/<w:tc\b[^>]*>[\s\S]*?<\/w:tc>/g)];
+              if (cells.length > 0 && cells.every(c => getTcText(c[0]).trim() === '')) {
+                blankRows.push(rows[ri][0]);
+              } else { break; }
+            }
+            if (blankRows.length === 0) continue;
+
+            // Map children to column indices via header row
+            const headerCells = [...rows[headerIdx][0].matchAll(/<w:tc\b[^>]*>[\s\S]*?<\/w:tc>/g)];
+            const childColMap = children.map((c, fallback) => {
+              const lk = (c.label || c.key).replace(/\s+/g, '').toLowerCase().slice(0, 8);
+              const ci = headerCells.findIndex(hc => {
+                const ht = getTcText(hc[0]).replace(/\s+/g, '').toLowerCase();
+                return ht.includes(lk) || lk.includes(ht);
+              });
+              return { c, colIdx: ci >= 0 ? ci : fallback };
+            });
+
+            const newRows = items.map(item => {
+              let row = blankRows[0];
+              let offset = 0;
+              const sorted = [...childColMap].sort((a, b) => a.colIdx - b.colIdx);
+              const blankCells = [...blankRows[0].matchAll(/<w:tc\b[^>]*>[\s\S]*?<\/w:tc>/g)];
+              for (const { c, colIdx } of sorted) {
+                if (colIdx >= blankCells.length) continue;
+                const cell = blankCells[colIdx];
+                const cStyle = isFixed ? getEffectiveStyle(c) : null;
+                const val = String(item[c.key] ?? '');
+                const newCell = buildReplacedTc(cell[0], val, cStyle);
+                row = row.slice(0, cell.index + offset) + newCell + row.slice(cell.index + offset + cell[0].length);
+                offset += newCell.length - cell[0].length;
+              }
+              return applyRowHeight(row);
+            });
+
+            // Replace first blank row with generated rows; remove extras
+            xml = xml.replace(blankRows[0], newRows.join(''));
+            for (let i = 1; i < blankRows.length; i++) xml = xml.replace(blankRows[i], '');
+            blankHandled = true;
+            break;
+          }
+          if (blankHandled) continue;
+        }
+
+        // ── Strategy C: flat fallback ────────────────────────────────────
         const vals = items.map((item, idx) => {
           const parts = children.map(c => {
             const val = String(item[c.key] ?? '').trim();

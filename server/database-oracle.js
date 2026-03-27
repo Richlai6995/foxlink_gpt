@@ -1417,6 +1417,7 @@ async function runMigrations(db) {
     schema_json    CLOB,
     preview_url    VARCHAR2(500),
     is_public      NUMBER(1)     DEFAULT 0,
+    is_fixed_format NUMBER(1)    DEFAULT 0,
     tags           CLOB,
     use_count      NUMBER        DEFAULT 0,
     forked_from    VARCHAR2(36)  REFERENCES doc_templates(id) ON DELETE SET NULL,
