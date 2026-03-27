@@ -2914,6 +2914,73 @@ function UserManual() {
             建議上傳後立即完成版面編輯器設定，再分享給他人使用。
           </NoteBox>
         </SubSection>
+
+        <SubSection title="內容模式（Content Mode）">
+          <Para>
+            每個欄位可設定<strong>內容模式</strong>，控制生成文件時該欄位的取值方式。
+            在「變數設定」頁籤的每個欄位右側，有三個小按鈕可切換模式：
+          </Para>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-2">
+            {[
+              { badge: 'V', color: 'bg-blue-600', title: '變數（預設）', desc: '每次生成時由使用者填入。表單中會顯示此欄位等待輸入。' },
+              { badge: 'T', color: 'bg-amber-500', title: '靜態（固定文字）', desc: '永遠使用「預設值」欄位的內容，不詢問使用者。適合公司名稱、固定標題。' },
+              { badge: '∅', color: 'bg-slate-500', title: '清空（保留格式）', desc: '永遠清空此格內容。PDF 覆蓋模式會畫白色矩形蓋掉原始文字，框線保留。' },
+            ].map(item => (
+              <div key={item.badge} className="bg-slate-50 border rounded-lg p-3 flex gap-3">
+                <span className={`${item.color} text-white text-xs font-bold w-6 h-6 rounded flex-shrink-0 flex items-center justify-center mt-0.5`}>
+                  {item.badge}
+                </span>
+                <div>
+                  <p className="text-xs font-semibold text-slate-700">{item.title}</p>
+                  <p className="text-[11px] text-slate-500 mt-0.5 leading-4">{item.desc}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+          <TipBox>
+            典型用法：上傳一份 PDF 表單，將「標題」設為靜態（保留原始值）、「內容欄位」設為變數（使用者填入）、
+            「填寫範例」設為清空（清除預印文字），即可製作乾淨的可重複使用表單。
+          </TipBox>
+        </SubSection>
+
+        <SubSection title="OCR 掃描式 PDF">
+          <Para>
+            若上傳的 PDF 是<strong>掃描版圖片型</strong>（文字無法直接複製），
+            系統會自動偵測並使用<strong>Gemini Vision OCR</strong>識別欄位位置，
+            同時自動啟用「固定格式模式」，讓您直接在版面編輯器微調座標。
+          </Para>
+
+          <div className="space-y-3 mt-2">
+            <StepItem num={1} title="上傳掃描版 PDF" desc="系統偵測到文字內容極少（<50字元），自動進入 OCR 流程" />
+            <StepItem num={2} title="等待 Gemini Vision 分析" desc="顯示「OCR 掃描中...」狀態，時間約 10-30 秒，取決於頁面複雜度" />
+            <StepItem num={3} title="檢視 OCR 識別結果" desc='變數清單顯示「OCR 自動定位」標籤，座標已預先填入' />
+            <StepItem num={4} title="在版面編輯器微調座標" desc="OCR 座標為估算值（誤差約 5-15 pt），建議人工確認並拖拉微調" />
+          </div>
+
+          <div className="bg-purple-50 border border-purple-200 rounded-xl p-4 mt-3">
+            <p className="text-xs font-semibold text-purple-700 mb-2">對現有範本重新 OCR</p>
+            <p className="text-xs text-purple-600 leading-5">
+              若想更新現有 PDF 範本的欄位座標，開啟範本「編輯」→「版面編輯器」頁籤，
+              點選右上角<strong>「OCR 重新掃描」</strong>紫色按鈕。
+              系統重新分析後，會將新偵測到的 pdf_cell 座標合併回現有變數，
+              不影響已手動設定好的其他欄位設定。
+            </p>
+          </div>
+
+          <Table
+            headers={['PDF 類型', 'OCR 準確度', '建議做法']}
+            rows={[
+              ['白底清晰掃描表單', '~85%', '直接使用，微調 1-2 個座標'],
+              ['彩色底色表單', '~75%', '使用後逐欄確認座標'],
+              ['圖文混排複雜版面', '~60%', '以 OCR 結果作參考，手動重新框選'],
+              ['文字型 PDF（非掃描）', 'N/A', '系統自動用 AI 文字分析，不走 OCR'],
+            ]}
+          />
+          <NoteBox>
+            OCR 功能使用 Gemini Pro 模型，每次約消耗 1,000-3,000 input tokens。
+            大量批次上傳時請注意 API 配額。
+          </NoteBox>
+        </SubSection>
       </Section>
     </div>
   )
@@ -5456,6 +5523,71 @@ const cellBottom = pageHeight - cell.y - cell.height
               ['PUT', '/api/doc-templates/:id', '更新時可傳入 is_fixed_format: 0/1 切換模式'],
             ]}
           />
+        </SubSection>
+
+        <SubSection title="content_mode — 內容模式 Schema 說明">
+          <Para>
+            每個 <code className="bg-slate-100 px-1 rounded text-xs">TemplateVariable</code> 新增選用欄位
+            <code className="bg-slate-100 px-1 rounded text-xs">content_mode</code>，
+            控制生成時的取值邏輯。未設定時預設為 <code className="bg-slate-100 px-1 rounded text-xs">'variable'</code>，與原有行為完全相容。
+          </Para>
+          <Table
+            headers={['content_mode 值', '生成時行為', 'PDF overlay 特殊處理']}
+            rows={[
+              ['variable（預設）', 'resolveValue() 取 inputData[key] 或 default_value', '無特殊處理，正常寫入文字'],
+              ['static', '始終使用 default_value，不詢問使用者', '正常寫入 default_value 文字'],
+              ['empty', '始終回傳空字串（''）', '畫 rgb(1,1,1) 白色矩形覆蓋原始文字後 continue'],
+            ]}
+          />
+          <CodeBlock>{`// resolveValue() — server/services/docTemplateService.js
+function resolveValue(v, inputData) {
+  const mode = v.content_mode || 'variable';
+  if (mode === 'static') return String(v.default_value ?? '');
+  if (mode === 'empty')  return '';
+  const raw = inputData[v.key];
+  return raw !== undefined ? String(raw) : String(v.default_value ?? '');
+}`}</CodeBlock>
+          <Para>
+            <code className="bg-slate-100 px-1 rounded text-xs">resolveValue()</code> 取代了 DOCX / XLSX / PPTX / PDF 各格式中原本的
+            <code className="bg-slate-100 px-1 rounded text-xs">String(inputData[v.key] ?? v.default_value ?? '')</code> 直接取值，
+            統一處理所有格式的內容模式。
+          </Para>
+        </SubSection>
+
+        <SubSection title="OCR 掃描式 PDF — 後端實作">
+          <Para>
+            <code className="bg-slate-100 px-1 rounded text-xs">ocrPdfFields(pdfBuf, model?)</code> 函式位於
+            <code className="bg-slate-100 px-1 rounded text-xs">server/services/docTemplateService.js</code>，
+            使用 Gemini Pro Vision 對 PDF 做 OCR 並回傳帶 <code className="bg-slate-100 px-1 rounded text-xs">pdf_cell</code> 座標的 schema。
+          </Para>
+          <div className="space-y-3">
+            <StepItem num={1} title="讀取頁面尺寸（pdf-lib）" desc="取得實際寬高（pt），fallback A4：595×842。座標計算依此基準" />
+            <StepItem num={2} title="PDF buffer → base64" desc="以 inlineData mimeType='application/pdf' 傳給 Gemini" />
+            <StepItem num={3} title="Gemini Pro 回傳 JSON" desc="包含 variables[].pdf_cell { page, x, y, width, height }（頂左原點，pt）" />
+            <StepItem num={4} title="解析 + fallback" desc="JSON 解析失敗時回傳空 schema，不中斷上傳流程" />
+          </div>
+          <Table
+            headers={['API 端點', '說明']}
+            rows={[
+              ['POST /upload（自動觸發）', 'PDF pdf-parse 萃取 < 50 非空白字元時自動呼叫 ocrPdfFields()'],
+              ['POST /:id/ocr-scan', '對現有 PDF 範本重新 OCR；合併新 pdf_cell 回 schema_json，更新 DB'],
+            ]}
+          />
+          <CodeBlock>{`// POST /:id/ocr-scan 合併邏輯
+const varMap = Object.fromEntries(existingVars.map(v => [v.key, v]));
+for (const ov of ocrVars) {
+  if (varMap[ov.key]) {
+    varMap[ov.key] = { ...varMap[ov.key], pdf_cell: ov.pdf_cell };  // 更新座標
+  } else {
+    varMap[ov.key] = ov;   // 追加新欄位
+  }
+}
+// 寫回 DB schema_json`}</CodeBlock>
+          <NoteBox>
+            OCR 掃描使用 MODEL_PRO（Gemini Pro），而非 Flash。若 system_settings 中
+            <code className="bg-amber-100 px-1 rounded text-xs">template_analysis_model='pro'</code> 已設定，會自動沿用。
+            OCR 座標為估算值，前端版面編輯器提供人工微調入口。
+          </NoteBox>
         </SubSection>
       </Section>
     </div>
