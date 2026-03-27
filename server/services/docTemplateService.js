@@ -1337,6 +1337,8 @@ async function generateDocument(db, templateId, userId, inputData, outputFormat,
 
     if (hasCells) {
       // ── Overlay template: reconstruct table from pdf_cell positions ──────
+      // Each row is its own Table so column split points can differ per row
+      // (e.g. 會議時間 vs 與會人員 start at different X positions).
       const cellVars = flatVars.filter(v => v.pdf_cell && (v.content_mode ?? 'variable') !== 'empty');
 
       // Group by Y (tolerance ±5pt) → rows; sort by X → columns
@@ -1350,38 +1352,42 @@ async function generateDocument(db, templateId, userId, inputData, outputFormat,
       rowGroups.sort((a, b) => a.y - b.y);
       for (const rg of rowGroups) rg.vars.sort((a, b) => a.pdf_cell.x - b.pdf_cell.x);
 
-      const maxVPR   = Math.max(1, ...rowGroups.map(r => r.vars.length));
-      const totalCols = maxVPR * 2; // label + value per variable slot
-
-      // Compute column widths (%) from the widest row's cell positions
-      const widestRow = rowGroups.reduce((a, b) => a.vars.length > b.vars.length ? a : b);
-      // Infer table left edge: for multi-var rows, label width = gap between cells;
-      // then page margin = first cell x − label width
-      let inferredLabelW;
-      if (widestRow.vars.length >= 2) {
-        inferredLabelW = widestRow.vars[1].pdf_cell.x
-          - (widestRow.vars[0].pdf_cell.x + widestRow.vars[0].pdf_cell.width);
-      } else {
-        inferredLabelW = 85; // fallback
+      // Infer table left edge from multi-var rows
+      const multiVarRows = rowGroups.filter(r => r.vars.length >= 2);
+      let inferredLabelW = 85;
+      if (multiVarRows.length > 0) {
+        const gaps = [];
+        for (const rg of multiVarRows) {
+          for (let i = 1; i < rg.vars.length; i++) {
+            gaps.push(rg.vars[i].pdf_cell.x - (rg.vars[i - 1].pdf_cell.x + rg.vars[i - 1].pdf_cell.width));
+          }
+        }
+        inferredLabelW = gaps.reduce((a, b) => a + b, 0) / gaps.length;
       }
-      const tableLeft = Math.max(0, widestRow.vars[0].pdf_cell.x - inferredLabelW);
+      const tableLeft = Math.max(0, Math.min(...cellVars.map(v => v.pdf_cell.x)) - inferredLabelW);
       const maxRight  = Math.max(...cellVars.map(v => v.pdf_cell.x + v.pdf_cell.width));
       const fullW     = maxRight - tableLeft;
 
-      const colPcts = [];
-      let prevRight = tableLeft;
-      for (const v of widestRow.vars) {
-        colPcts.push(Math.round((v.pdf_cell.x - prevRight) / fullW * 100));   // label %
-        colPcts.push(Math.round(v.pdf_cell.width / fullW * 100));              // value %
-        prevRight = v.pdf_cell.x + v.pdf_cell.width;
-      }
-      // Normalize sum to 100%
-      const sum = colPcts.reduce((a, b) => a + b, 0);
-      if (sum !== 100) colPcts[colPcts.length - 1] += (100 - sum);
+      // Border without top for middle/last rows to avoid double-border
+      const borderNone = { style: BorderStyle.NONE, size: 0 };
 
-      // Build table rows
-      const tableRows = [];
-      for (const rg of rowGroups) {
+      // Build one Table per row — each with its own column proportions
+      for (let ri = 0; ri < rowGroups.length; ri++) {
+        const rg = rowGroups[ri];
+
+        // Compute this row's column widths from its own cell positions
+        const rowColPcts = [];
+        let prev = tableLeft;
+        for (const v of rg.vars) {
+          rowColPcts.push(Math.round((v.pdf_cell.x - prev) / fullW * 100));
+          rowColPcts.push(Math.round(v.pdf_cell.width / fullW * 100));
+          prev = v.pdf_cell.x + v.pdf_cell.width;
+        }
+        // Normalize
+        const s = rowColPcts.reduce((a, b) => a + b, 0);
+        if (s !== 100) rowColPcts[rowColPcts.length - 1] += (100 - s);
+
+        // Build cells
         const cells = [];
         for (let i = 0; i < rg.vars.length; i++) {
           const v   = rg.vars[i];
@@ -1391,33 +1397,33 @@ async function generateDocument(db, templateId, userId, inputData, outputFormat,
           const fz  = Math.round((eff.fontSize || fzDefault) * 2);
           const fg  = (eff.color || '#000000').replace('#', '');
 
-          // Label cell — same fontSize as value
+          // Label cell
           cells.push(new TableCell({
-            columnSpan: 1,
+            width: { size: rowColPcts[i * 2], type: WidthType.PERCENTAGE },
             verticalAlign: VerticalAlign.CENTER,
             children: [new Paragraph({
               children: [new TextRun({ text: v.label || v.key, bold: true, size: fz, color: '1F4E79' })],
               spacing: { before: 40, after: 40 },
             })],
           }));
-
-          // Value cell — merge remaining columns for the last var in short rows
-          const isLast    = (i === rg.vars.length - 1);
-          const valueSpan = isLast ? (totalCols - rg.vars.length * 2 + 1) : 1;
+          // Value cell
           cells.push(new TableCell({
-            columnSpan: valueSpan,
+            width: { size: rowColPcts[i * 2 + 1], type: WidthType.PERCENTAGE },
             children: mkValueParas(val, fz, eff.bold === true, fg),
           }));
         }
-        tableRows.push(new TableRow({ children: cells }));
-      }
 
-      docChildren.push(new Table({
-        width: { size: 100, type: WidthType.PERCENTAGE },
-        borders: tblBorders,
-        columnWidths: colPcts.map(p => Math.round(p * 90)),  // DXA approx
-        rows: tableRows,
-      }));
+        // Remove top border for non-first rows to avoid double lines
+        const rowBorders = ri === 0 ? tblBorders : {
+          ...tblBorders, top: borderNone,
+        };
+
+        docChildren.push(new Table({
+          width: { size: 100, type: WidthType.PERCENTAGE },
+          borders: rowBorders,
+          rows: [new TableRow({ children: cells })],
+        }));
+      }
 
     } else {
       // ── Regen template (no pdf_cell): simple label|value rows ─────────
