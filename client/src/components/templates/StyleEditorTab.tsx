@@ -1,4 +1,5 @@
 import { TemplateVariable, VariableStyleProps, TemplateOverflow } from '../../types'
+import ColorPicker from './ColorPicker'
 
 interface Props {
   variables: TemplateVariable[]
@@ -141,18 +142,11 @@ export default function StyleEditorTab({ variables, onChange, readonly }: Props)
 
                 {/* Color */}
                 <td className="px-2 py-1.5">
-                  <div className="flex items-center gap-1">
-                    <input
-                      type="color"
-                      disabled={readonly}
-                      className="w-6 h-6 rounded border cursor-pointer disabled:opacity-50"
-                      value={v.style?.override?.color ?? eff.color ?? '#000000'}
-                      onChange={e => update(path, { color: e.target.value })}
-                    />
-                    <span className="text-[10px] text-slate-400">
-                      {v.style?.override?.color ?? eff.color ?? ''}
-                    </span>
-                  </div>
+                  <ColorPicker
+                    disabled={readonly}
+                    value={v.style?.override?.color ?? eff.color ?? '#000000'}
+                    onChange={hex => update(path, { color: hex })}
+                  />
                 </td>
 
                 {/* Overflow */}

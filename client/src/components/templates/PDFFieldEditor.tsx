@@ -7,6 +7,7 @@
  */
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { TemplateVariable, TemplateOverflow } from '../../types'
+import ColorPicker from './ColorPicker'
 
 // ── pdfjs lazy init ──────────────────────────────────────────────────────────
 let pdfjsLib: typeof import('pdfjs-dist') | null = null
@@ -498,9 +499,10 @@ export default function PDFFieldEditor({ templateId, variables, onChange, readon
               </div>
               <div className="flex items-center gap-1">
                 <span className="w-12 text-slate-400">顏色</span>
-                <input type="color" className="w-7 h-5 border rounded" disabled={readonly}
+                <ColorPicker
+                  disabled={readonly}
                   value={selectedVar.style?.override?.color ?? selectedVar.style?.detected?.color ?? '#000000'}
-                  onChange={e => patchSelectedVar({ style: { ...selectedVar.style, override: { ...selectedVar.style?.override, color: e.target.value } } })}
+                  onChange={hex => patchSelectedVar({ style: { ...selectedVar.style, override: { ...selectedVar.style?.override, color: hex } } })}
                 />
               </div>
               <div>
