@@ -741,6 +741,7 @@ export interface TemplateVariable {
     noWrap?: boolean
   }
   allow_ai_rewrite?: boolean  // default false — AI must preserve exact content when false
+  pdf_anchor?: boolean        // default true: stay at defined page, overflow→template copy; false: float after preceding overflow
   pdf_cell?: {              // phase 2: visual editor coordinates
     page: number
     x: number

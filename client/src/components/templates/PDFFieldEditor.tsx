@@ -468,6 +468,28 @@ export default function PDFFieldEditor({ templateId, variables, onChange, readon
                   ))}
                 </div>
                 <div className="text-[10px] text-slate-400">頁: {selectedVar.pdf_cell.page + 1}</div>
+
+                {/* Anchor toggle */}
+                {!readonly && (
+                  <div className="pt-1 border-t">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] text-slate-500">溢出行為</span>
+                      <button
+                        type="button"
+                        onClick={() => patchSelectedVar({ pdf_anchor: selectedVar.pdf_anchor === false ? true : false })}
+                        className={`text-[10px] px-2 py-0.5 rounded border transition ${selectedVar.pdf_anchor === false ? 'bg-orange-500 text-white border-orange-500' : 'bg-slate-100 text-slate-600 border-slate-300'}`}
+                        title={selectedVar.pdf_anchor === false ? '目前：跟著前面往下移（空白延伸頁）' : '目前：固定在原頁（複製底版延伸）'}
+                      >
+                        {selectedVar.pdf_anchor === false ? '隨前文下移' : '固定此頁'}
+                      </button>
+                    </div>
+                    <div className="text-[9px] text-slate-400 mt-0.5">
+                      {selectedVar.pdf_anchor === false
+                        ? '前面欄位超框時，此欄位跟著移到空白延伸頁'
+                        : '超框內容延伸到下一頁，此頁位置不變'}
+                    </div>
+                  </div>
+                )}
               </>
             ) : (
               <div className="text-orange-500 text-[10px]">尚未定位，請在左側拖拉畫框</div>

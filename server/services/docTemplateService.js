@@ -1145,8 +1145,8 @@ async function generateDocument(db, templateId, userId, inputData, outputFormat)
     const flatVars  = variables.flatMap(v => v.type === 'loop' ? (v.children || []) : [v]);
     const hasCells  = flatVars.some(v => v.pdf_cell);
 
-    if (tpl.is_fixed_format && hasCells) {
-      // ── PDF Overlay: keep original PDF, overlay text at pdf_cell coords ──
+    if (hasCells) {
+      // ── PDF Overlay (always when cells defined; style only when is_fixed_format) ──
       const { PDFDocument, rgb, pushGraphicsState, popGraphicsState,
               moveTo, lineTo, closePath, clip, endPath } = require('pdf-lib');
       const fontkit = require('@pdf-lib/fontkit');
@@ -1154,14 +1154,16 @@ async function generateDocument(db, templateId, userId, inputData, outputFormat)
       const origDoc = await PDFDocument.load(tplBuf);
       origDoc.registerFontkit(fontkit);
 
-      const fontPath = path.join(__dirname, '../fonts/NotoSansTC-Regular.ttf');
-      let customFont;
-      try {
-        const fontBytes = await fs.readFile(fontPath);
-        customFont = await origDoc.embedFont(fontBytes);
-      } catch {
-        customFont = await origDoc.embedFont('Helvetica');
-      }
+      const fontPath     = path.join(__dirname, '../fonts/NotoSansTC-Regular.ttf');
+      const fontBoldPath = path.join(__dirname, '../fonts/NotoSansTC-Bold.ttf');
+      let regularFont, boldFont;
+      try { regularFont = await origDoc.embedFont(await fs.readFile(fontPath)); }
+      catch { regularFont = await origDoc.embedFont('Helvetica'); }
+      try { boldFont = await origDoc.embedFont(await fs.readFile(fontBoldPath)); }
+      catch { boldFont = null; }
+
+      // Apply style settings only when is_fixed_format is enabled
+      const applyStyle = !!tpl.is_fixed_format;
 
       // Flatten loop vars
       const flatData = { ...inputData };
@@ -1173,104 +1175,150 @@ async function generateDocument(db, templateId, userId, inputData, outputFormat)
           return parts.length ? `${i + 1}. ${parts.join('　')}` : '';
         }).filter(Boolean).join('\n');
       }
-
-      const pdflibPages = origDoc.getPages();
-      const unpositioned = [];
-
-      // Apply resolveValue for static/empty mode vars into flatData
       for (const v of flatVars) {
-        if (v.content_mode && v.content_mode !== 'variable') {
-          flatData[v.key] = resolveValue(v, inputData);
+        if (v.content_mode && v.content_mode !== 'variable') flatData[v.key] = resolveValue(v, inputData);
+      }
+
+      // ── Helper: hex color string → {r,g,b} (0-1 range) ────────────────────
+      const hexRgb = (hex) => {
+        const h = (hex || '').replace('#', '');
+        if (h.length !== 6) return null;
+        return { r: parseInt(h.slice(0,2),16)/255, g: parseInt(h.slice(2,4),16)/255, b: parseInt(h.slice(4,6),16)/255 };
+      };
+
+      // ── Helper: wrap text to lines using font metrics ───────────────────────
+      function wrapLines(text, font, fontSize, maxWidth) {
+        const lines = [];
+        for (const para of text.split('\n')) {
+          if (!para) { lines.push(''); continue; }
+          let line = '', lw = 0;
+          for (const ch of para) {
+            let cw;
+            try { cw = font.widthOfTextAtSize(ch, fontSize); }
+            catch { cw = fontSize * (ch.codePointAt(0) > 0x2E80 ? 1.0 : 0.55); }
+            if (lw + cw > maxWidth && line) { lines.push(line); line = ch; lw = cw; }
+            else { line += ch; lw += cw; }
+          }
+          if (line) lines.push(line);
+        }
+        while (lines.length && lines[lines.length - 1] === '') lines.pop();
+        return lines;
+      }
+
+      // ── Helper: draw text lines with clip rect on a given page ─────────────
+      function drawCellLines(pg, lines, cx, cyTop, cw, ch, cyBot, fontSize, isBold, fgColor) {
+        const lineH = fontSize * 1.3;
+        pg.pushOperators(
+          pushGraphicsState(),
+          moveTo(cx, cyBot), lineTo(cx + cw, cyBot), lineTo(cx + cw, cyTop), lineTo(cx, cyTop),
+          closePath(), clip(), endPath()
+        );
+        const useFont = (isBold && boldFont) ? boldFont : regularFont;
+        for (let i = 0; i < lines.length; i++) {
+          if (!lines[i]) continue;
+          const x = cx + 2, y = cyTop - fontSize - 2 - i * lineH;
+          pg.drawText(lines[i], { x, y, size: fontSize, font: useFont, color: rgb(fgColor.r, fgColor.g, fgColor.b) });
+          if (isBold && !boldFont) {
+            pg.drawText(lines[i], { x: x + 0.4, y, size: fontSize, font: regularFont, color: rgb(fgColor.r, fgColor.g, fgColor.b) });
+          }
+        }
+        pg.pushOperators(popGraphicsState());
+      }
+
+      // ── Pre-compute wrapped lines for all cells ─────────────────────────────
+      const cellData = new Map(); // key → { lines, fontSize, isBold, fgColor }
+      for (const v of flatVars) {
+        if (!v.pdf_cell || (v.content_mode || 'variable') === 'empty') continue;
+        const value = String(flatData[v.key] ?? '').trim();
+        if (!value) continue;
+        const eff      = applyStyle ? (getEffectiveStyle(v) || {}) : {};
+        const fontSize = eff.fontSize ?? 9;
+        const isBold   = applyStyle && eff.bold === true;
+        const fgColor  = (applyStyle && hexRgb(eff.color)) ?? { r: 0, g: 0, b: 0 };
+        const text     = await applyOverflow(value, eff);
+        const lines    = wrapLines(text, regularFont, fontSize, v.pdf_cell.width - 4);
+        cellData.set(v.key, { lines, fontSize, isBold, fgColor });
+      }
+
+      // ── Separate anchor vars (pdf_anchor !== false) and float vars ──────────
+      const anchorVars = flatVars.filter(v => v.pdf_cell && v.pdf_anchor !== false);
+      const floatVars2 = flatVars.filter(v => v.pdf_cell && v.pdf_anchor === false)
+        .sort((a, b) => (a.pdf_cell.page - b.pdf_cell.page) || (a.pdf_cell.y - b.pdf_cell.y));
+      const unpositioned = flatVars.filter(v => !v.pdf_cell).map(v => v.label || v.key);
+
+      // ── Calculate extra pages needed for anchor overflow ────────────────────
+      const origPageCount = origDoc.getPageCount();
+      let maxAnchorPage = origPageCount - 1;
+      for (const v of anchorVars) {
+        const cell = v.pdf_cell;
+        const cd = cellData.get(v.key);
+        if (!cd) continue;
+        const linesPerCell = Math.max(1, Math.floor((cell.height - 4) / (cd.fontSize * 1.3)));
+        const lastPage = (cell.page ?? 0) + Math.ceil(cd.lines.length / linesPerCell) - 1;
+        if (lastPage > maxAnchorPage) maxAnchorPage = lastPage;
+      }
+
+      // Add extra pages (copies of original template) for anchor overflow
+      if (maxAnchorPage >= origPageCount) {
+        const extraCount = maxAnchorPage - origPageCount + 1;
+        const toCopy = Array.from({ length: extraCount }, (_, i) => Math.min(i, origPageCount - 1));
+        const copied = await origDoc.copyPages(origDoc, toCopy);
+        for (const p of copied) origDoc.addPage(p);
+      }
+      let allPages = origDoc.getPages();
+      const { width: pgW, height: pgH0 } = allPages[0].getSize();
+
+      // ── Draw anchor cells (overflow continues on template-copy pages) ───────
+      for (const v of anchorVars) {
+        const cell = v.pdf_cell;
+        // empty mode: white rect on designated page
+        if ((v.content_mode || 'variable') === 'empty') {
+          const pg = allPages[cell.page ?? 0];
+          if (pg) {
+            const { height: pH } = pg.getSize();
+            pg.drawRectangle({ x: cell.x, y: pH - cell.y - cell.height, width: cell.width, height: cell.height, color: rgb(1,1,1), borderWidth: 0 });
+          }
+          continue;
+        }
+        const cd = cellData.get(v.key);
+        if (!cd) continue;
+        const { lines, fontSize, isBold, fgColor } = cd;
+        const lineH = fontSize * 1.3;
+        const linesPerCell = Math.max(1, Math.floor((cell.height - 4) / lineH));
+        let lineIdx = 0, drawPageIdx = cell.page ?? 0;
+        while (lineIdx < lines.length && drawPageIdx < allPages.length) {
+          const pg = allPages[drawPageIdx];
+          const { height: pH } = pg.getSize();
+          const topY = pH - cell.y, botY = pH - cell.y - cell.height;
+          const chunk = lines.slice(lineIdx, lineIdx + linesPerCell);
+          lineIdx += chunk.length;
+          drawCellLines(pg, chunk, cell.x, topY, cell.width, cell.height, botY, fontSize, isBold, fgColor);
+          drawPageIdx++;
         }
       }
 
-      for (const v of flatVars) {
-        const cell = v.pdf_cell;
-        if (!cell) { unpositioned.push(v.label || v.key); continue; }
-
-        const page = pdflibPages[cell.page ?? 0];
-        if (!page) continue;
-
-        const { height: pageH } = page.getSize();
-        const cellTop    = pageH - cell.y;
-        const cellBottom = pageH - cell.y - cell.height;
-
-        // 'empty' mode: draw white rect to erase original content, skip text
-        if ((v.content_mode || 'variable') === 'empty') {
-          page.drawRectangle({
-            x: cell.x, y: cellBottom,
-            width: cell.width, height: cell.height,
-            color: rgb(1, 1, 1), borderWidth: 0,
-          });
-          continue;
+      // ── Draw float cells (after anchor overflow, on a new blank page) ───────
+      if (floatVars2.length > 0) {
+        const hadOverflow = maxAnchorPage >= origPageCount;
+        if (hadOverflow) {
+          // Add ONE blank white page for float cells
+          origDoc.addPage([pgW, pgH0]);
+          allPages = origDoc.getPages();
         }
-
-        const value = String(flatData[v.key] ?? '').trim();
-        if (!value) continue;
-
-        const eff      = getEffectiveStyle(v) || {};
-        const fontSize = eff.fontSize ?? 9;
-        const overflow = eff.overflow ?? 'wrap';
-        const maxChars = eff.maxChars;
-
-        // hex → rgb(0-1)
-        const hexRgb = (hex) => {
-          const h = (hex || '').replace('#', '');
-          if (h.length !== 6) return null;
-          return { r: parseInt(h.slice(0,2),16)/255, g: parseInt(h.slice(2,4),16)/255, b: parseInt(h.slice(4,6),16)/255 };
-        };
-        const fgColor = hexRgb(eff.color) ?? { r: 0, g: 0, b: 0 };
-
-        // Apply overflow (truncate / summarize) — applyOverflow handles both
-        const text = await applyOverflow(value, eff);
-
-        // ── Manual line-wrap + multi-page overflow ──────────────────────────
-        // Manually wrap text so we control exactly which lines fit in each cell.
-        // If content overflows the cell height, continue on the same cell position
-        // on subsequent PDF pages.
-        const lineH   = fontSize * 1.3;
-        const maxW    = cell.width - 4;
-        const padX    = cell.x + 2;
-        const maxLinesPerCell = Math.max(1, Math.floor((cell.height - 4) / lineH));
-
-        // Build wrapped line array using font metrics
-        const wrappedLines = [];
-        for (const para of text.split('\n')) {
-          if (!para) { wrappedLines.push(''); continue; }
-          let line = '', lineW = 0;
-          for (const ch of para) {
-            let cw;
-            try { cw = customFont.widthOfTextAtSize(ch, fontSize); }
-            catch { cw = fontSize * (ch.codePointAt(0) > 0x2E80 ? 1.0 : 0.55); }
-            if (lineW + cw > maxW && line) {
-              wrappedLines.push(line); line = ch; lineW = cw;
-            } else { line += ch; lineW += cw; }
-          }
-          wrappedLines.push(line);
-        }
-        // Remove trailing empty lines
-        while (wrappedLines.length && wrappedLines[wrappedLines.length - 1] === '') wrappedLines.pop();
-
-        // Draw chunk-by-chunk across pages
-        let lineIdx = 0;
-        let drawPageIdx = cell.page ?? 0;
-        while (lineIdx < wrappedLines.length && drawPageIdx < pdflibPages.length) {
-          const dp = pdflibPages[drawPageIdx];
-          const { height: dpH } = dp.getSize();
-          const topY = dpH - cell.y;
-          const chunk = wrappedLines.slice(lineIdx, lineIdx + maxLinesPerCell);
-          lineIdx += chunk.length;
-          for (let i = 0; i < chunk.length; i++) {
-            if (!chunk[i]) continue;
-            dp.drawText(chunk[i], {
-              x:    padX,
-              y:    topY - fontSize - 2 - i * lineH,
-              size: fontSize,
-              font: customFont,
-              color: rgb(fgColor.r, fgColor.g, fgColor.b),
-            });
-          }
-          drawPageIdx++;
+        const floatPgIdx = hadOverflow ? allPages.length - 1 : (floatVars2[0].pdf_cell.page ?? 0);
+        for (const v of floatVars2) {
+          const cell = v.pdf_cell;
+          if ((v.content_mode || 'variable') === 'empty') continue;
+          const cd = cellData.get(v.key);
+          if (!cd) continue;
+          const { lines, fontSize, isBold, fgColor } = cd;
+          const lineH  = fontSize * 1.3;
+          const needed = lines.length * lineH + fontSize + 4;
+          const pg = allPages[floatPgIdx];
+          const { height: pH } = pg.getSize();
+          const topY = pH - cell.y;
+          // Draw with extended height (needed, not fixed cell.height) so clip doesn't cut
+          drawCellLines(pg, lines, cell.x, topY, cell.width, Math.max(cell.height, needed), topY - Math.max(cell.height, needed), fontSize, isBold, fgColor);
         }
       }
 
