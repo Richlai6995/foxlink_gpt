@@ -1288,7 +1288,7 @@ async function generateDocument(db, templateId, userId, inputData, outputFormat,
     const borderDef  = { style: BorderStyle.SINGLE, size: 6, color: '333333' };
     const tblBorders = { top: borderDef, bottom: borderDef, left: borderDef, right: borderDef,
                          insideH: borderDef, insideV: borderDef };
-    const fzDefault  = 9;
+    const fzDefault  = 12;
 
     // Helper: create value paragraphs (split by \n)
     const mkValueParas = (text, fz, bold, color) => {
@@ -1354,12 +1354,22 @@ async function generateDocument(db, templateId, userId, inputData, outputFormat,
       const totalCols = maxVPR * 2; // label + value per variable slot
 
       // Compute column widths (%) from the widest row's cell positions
-      const MX = 50; // typical PDF margin
-      const maxRight = Math.max(...cellVars.map(v => v.pdf_cell.x + v.pdf_cell.width));
-      const fullW    = maxRight - MX;
       const widestRow = rowGroups.reduce((a, b) => a.vars.length > b.vars.length ? a : b);
-      const colPcts   = [];
-      let prevRight   = MX;
+      // Infer table left edge: for multi-var rows, label width = gap between cells;
+      // then page margin = first cell x − label width
+      let inferredLabelW;
+      if (widestRow.vars.length >= 2) {
+        inferredLabelW = widestRow.vars[1].pdf_cell.x
+          - (widestRow.vars[0].pdf_cell.x + widestRow.vars[0].pdf_cell.width);
+      } else {
+        inferredLabelW = 85; // fallback
+      }
+      const tableLeft = Math.max(0, widestRow.vars[0].pdf_cell.x - inferredLabelW);
+      const maxRight  = Math.max(...cellVars.map(v => v.pdf_cell.x + v.pdf_cell.width));
+      const fullW     = maxRight - tableLeft;
+
+      const colPcts = [];
+      let prevRight = tableLeft;
       for (const v of widestRow.vars) {
         colPcts.push(Math.round((v.pdf_cell.x - prevRight) / fullW * 100));   // label %
         colPcts.push(Math.round(v.pdf_cell.width / fullW * 100));              // value %
@@ -1381,12 +1391,12 @@ async function generateDocument(db, templateId, userId, inputData, outputFormat,
           const fz  = Math.round((eff.fontSize || fzDefault) * 2);
           const fg  = (eff.color || '#000000').replace('#', '');
 
-          // Label cell
+          // Label cell — same fontSize as value
           cells.push(new TableCell({
             columnSpan: 1,
             verticalAlign: VerticalAlign.CENTER,
             children: [new Paragraph({
-              children: [new TextRun({ text: v.label || v.key, bold: true, size: 18, color: '1F4E79' })],
+              children: [new TextRun({ text: v.label || v.key, bold: true, size: fz, color: '1F4E79' })],
               spacing: { before: 40, after: 40 },
             })],
           }));
@@ -1428,7 +1438,7 @@ async function generateDocument(db, templateId, userId, inputData, outputFormat,
                 width: { size: 18, type: WidthType.PERCENTAGE },
                 verticalAlign: VerticalAlign.CENTER,
                 children: [new Paragraph({
-                  children: [new TextRun({ text: (v.label || v.key), bold: true, size: 18, color: '1F4E79' })],
+                  children: [new TextRun({ text: (v.label || v.key), bold: true, size: fz, color: '1F4E79' })],
                   spacing: { before: 40, after: 40 },
                 })],
               }),
