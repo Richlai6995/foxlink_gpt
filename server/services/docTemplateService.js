@@ -1258,53 +1258,133 @@ async function generateDocument(db, templateId, userId, inputData, outputFormat,
     await fs.writeFile(outPath, out);
 
   } else if (tpl.format === 'pdf' && fmt === 'docx') {
-    // ── PDF template → DOCX output via LibreOffice ──────────────────────────
-    // Step 1: generate PDF without DB recording
-    const pdfResult  = await generateDocument(db, templateId, userId, inputData, 'pdf', true);
-    const tmpPdfPath = path.join(UPLOAD_DIR, pdfResult.filePath);
-    const tmpPdfId   = pdfResult.outputId;
+    // ── PDF template → DOCX output (schema-based, mirrors pdfkit regen) ─────
+    // Builds Word document directly from schema variables — same bgColors,
+    // logo extraction, loop flattening, and style overrides as pdfkit path.
+    const { Document, Packer, Paragraph, Table, TableRow, TableCell,
+            TextRun, ImageRun, WidthType, BorderStyle, AlignmentType,
+            ShadingType, HeadingLevel } = require('docx');
 
-    // Step 2: LibreOffice headless convert
-    const { execFile } = require('child_process');
-    const { promisify } = require('util');
-    const execFileAsync = promisify(execFile);
+    const variables = schema.variables || [];
+    const bgColors  = ['C6EFCE', 'BDD7EE', 'BDD7EE', 'FCE4D6', 'FCE4D6', 'FFF2CC'];
+    const borderDef = { style: BorderStyle.SINGLE, size: 4, color: 'AAAAAA' };
+    const allBorders = {
+      top: borderDef, bottom: borderDef,
+      left: borderDef, right: borderDef,
+      insideH: borderDef, insideV: borderDef,
+    };
 
-    const soffice = process.env.SOFFICE_PATH || 'soffice';
-    let sofficStdout = '', sofficeStderr = '';
+    // ── Flatten loop variables → numbered text (same as pdfkit) ─────────────
+    const flatData = { ...inputData };
+    for (const v of variables) {
+      if (v.type !== 'loop') continue;
+      const items    = Array.isArray(inputData[v.key]) ? inputData[v.key] : [];
+      const children = v.children || [];
+      flatData[v.key] = items.map((item, i) => {
+        const parts = children.map(c => String(item[c.key] ?? '').trim()).filter(Boolean);
+        return parts.length ? `${i + 1}. ${parts.join('　')}` : '';
+      }).filter(Boolean).join('\n');
+    }
+
+    // ── Extract JPEG logo from original PDF ──────────────────────────────────
+    let logoBytes = null;
+    let logoAspect = 0.4;
     try {
-      const result = await execFileAsync(soffice, [
-        '--headless',
-        '--infilter=writer_pdf_import',
-        '--convert-to', 'docx:MS Word 2007 XML',
-        '--outdir', outDir,
-        tmpPdfPath,
-      ], { timeout: 60000 });
-      sofficStdout = result.stdout || '';
-      sofficeStderr = result.stderr || '';
+      const { PDFDocument: PDFLib, PDFName, PDFDict } = require('pdf-lib');
+      const origPdfDoc = await PDFLib.load(tplBuf);
+      const resources  = origPdfDoc.getPage(0).node.Resources();
+      if (resources) {
+        const xObjects = resources.lookup(PDFName.of('XObject'));
+        if (xObjects instanceof PDFDict) {
+          for (const [, ref] of xObjects.dict.entries()) {
+            try {
+              const xObj = origPdfDoc.context.lookup(ref);
+              if (!xObj?.dict) continue;
+              if (xObj.dict.get(PDFName.of('Subtype'))?.encodedName !== '/Image') continue;
+              if (xObj.dict.get(PDFName.of('Filter'))?.encodedName === '/DCTDecode') {
+                logoBytes  = Buffer.from(xObj.contents);
+                const w    = xObj.dict.get(PDFName.of('Width'))?.numberValue  ?? 100;
+                const h    = xObj.dict.get(PDFName.of('Height'))?.numberValue ?? 40;
+                logoAspect = h / w;
+                break;
+              }
+            } catch { /* skip */ }
+          }
+        }
+      }
     } catch (e) {
-      await fs.unlink(tmpPdfPath).catch(() => {});
-      throw new Error(`LibreOffice 轉換失敗: ${e.message}\n${e.stderr || ''}`);
+      console.log('[DocTemplate] Logo extraction skipped:', e.message);
     }
 
-    // soffice outputs <stem>.docx — find it by scanning outDir
-    // (stem may include path separators on some platforms)
-    const expectedName = `${tmpPdfId}.docx`;
-    const expectedPath = path.join(outDir, expectedName);
-    const exists = await fs.access(expectedPath).then(() => true).catch(() => false);
-    if (!exists) {
-      // Scan for any newly created .docx to aid diagnosis
-      const dirEntries = await fs.readdir(outDir);
-      const candidates = dirEntries.filter(f => f.endsWith('.docx'));
-      console.error(`[DocTemplate] LibreOffice stdout: ${sofficStdout}`);
-      console.error(`[DocTemplate] LibreOffice stderr: ${sofficeStderr}`);
-      console.error(`[DocTemplate] Expected: ${expectedName}, found docx files: ${candidates.join(', ')}`);
-      await fs.unlink(tmpPdfPath).catch(() => {});
-      throw new Error('LibreOffice 未產生 DOCX 檔案，請確認 libreoffice-draw 已安裝（PDF import filter）');
+    const fzDefault = 9;
+    const docChildren = [];
+
+    // Logo
+    if (logoBytes) {
+      const logoW = 140;
+      const logoH = Math.max(20, Math.round(logoW * logoAspect));
+      docChildren.push(new Paragraph({
+        children: [new ImageRun({ data: logoBytes, transformation: { width: logoW, height: logoH }, type: 'jpg' })],
+        spacing: { after: 80 },
+      }));
     }
 
+    // Title
+    docChildren.push(new Paragraph({
+      text: tpl.name,
+      heading: HeadingLevel.HEADING_2,
+      alignment: AlignmentType.CENTER,
+      spacing: { after: 120 },
+    }));
+
+    // One row per variable (label cell with bgColor + value cell white)
+    for (let idx = 0; idx < variables.length; idx++) {
+      const v = variables[idx];
+      if ((v.content_mode ?? 'variable') === 'empty') continue;
+
+      const eff    = getEffectiveStyle(v) || {};
+      const rawVal = String(flatData[v.key] ?? '').trim();
+      const value  = (eff.overflow === 'summarize') ? await applyOverflow(rawVal, eff) : rawVal;
+      const fz     = Math.round((eff.fontSize || fzDefault) * 2); // half-points
+      const color  = (eff.color || '#000000').replace('#', '');
+      const bold   = eff.bold === true;
+      const bg     = bgColors[idx % bgColors.length];
+
+      // Split multi-line value into Paragraph per line
+      const valueLines = value.split('\n');
+      const valueParagraphs = valueLines.map((line, li) => new Paragraph({
+        children: [new TextRun({ text: line, bold, size: fz, color })],
+        spacing: li === valueLines.length - 1 ? { before: 40, after: 40 } : { before: 0, after: 0 },
+      }));
+
+      docChildren.push(new Table({
+        width: { size: 100, type: WidthType.PERCENTAGE },
+        borders: allBorders,
+        rows: [new TableRow({
+          children: [
+            new TableCell({
+              width: { size: 18, type: WidthType.PERCENTAGE },
+              shading: { type: ShadingType.CLEAR, fill: bg },
+              children: [new Paragraph({
+                children: [new TextRun({ text: (v.label || v.key) + ':', bold: true, size: 18, color: '000000' })],
+                spacing: { before: 40, after: 40 },
+              })],
+            }),
+            new TableCell({
+              width: { size: 82, type: WidthType.PERCENTAGE },
+              shading: { type: ShadingType.CLEAR, fill: 'FFFFFF' },
+              children: valueParagraphs,
+            }),
+          ],
+        })],
+      }));
+      docChildren.push(new Paragraph({ text: '', spacing: { before: 0, after: 16 } }));
+    }
+
+    const doc = new Document({ sections: [{ children: docChildren }] });
+    const out = await Packer.toBuffer(doc);
     outPath = path.join(outDir, `${outputId}.docx`);
-    await fs.rename(expectedPath, outPath);
-    await fs.unlink(tmpPdfPath).catch(() => {});
+    await fs.writeFile(outPath, out);
 
   } else if (tpl.format === 'pdf' && tpl.strategy !== 'pdf_form') {
     const variables = schema.variables || [];
