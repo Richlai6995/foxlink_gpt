@@ -78,6 +78,16 @@ function VarRow({
                 ))}
               </div>
             )}
+            {/* AI rewrite toggle — only for variable mode */}
+            {v.type !== 'loop' && (v.content_mode ?? 'variable') === 'variable' && (
+              <button
+                onClick={() => upd({ allow_ai_rewrite: !v.allow_ai_rewrite })}
+                title={v.allow_ai_rewrite ? '目前：允許AI修改此欄位內容 (點擊關閉)' : '目前：保留原文，AI不可改寫 (點擊開啟AI改寫)'}
+                className={`px-1.5 py-0.5 text-xs border rounded transition shrink-0 ${v.allow_ai_rewrite ? 'bg-orange-500 text-white border-orange-500' : 'bg-slate-100 text-slate-500 border-slate-300'}`}
+              >
+                AI改
+              </button>
+            )}
             {v.content_mode !== 'empty' && (
               <input
                 className="text-xs border rounded px-1.5 py-1 flex-1 min-w-0"
@@ -98,6 +108,7 @@ function VarRow({
             {v.required && <span className="text-xs text-red-500">必填</span>}
             {v.content_mode === 'static' && <span className="text-xs bg-amber-100 text-amber-700 px-1 rounded">固定</span>}
             {v.content_mode === 'empty' && <span className="text-xs bg-slate-100 text-slate-500 px-1 rounded">清空</span>}
+            {v.allow_ai_rewrite && <span className="text-xs bg-orange-100 text-orange-600 px-1 rounded">AI改</span>}
           </>
         )}
       </div>

@@ -740,6 +740,7 @@ export interface TemplateVariable {
     rowHeightPt?: number    // fixed row height (twips/20); option C: override template's own height
     noWrap?: boolean
   }
+  allow_ai_rewrite?: boolean  // default false — AI must preserve exact content when false
   pdf_cell?: {              // phase 2: visual editor coordinates
     page: number
     x: number

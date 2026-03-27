@@ -1668,11 +1668,17 @@ router.post('/sessions/:id/messages', upload.array('files', 10), async (req, res
     let templateExtraInstruction = '';
     if (docTemplateId && docTemplateSchema?.variables?.length > 0) {
       const varList = docTemplateSchema.variables.map(v => {
-        let desc = `- ${v.label}（key: ${v.key}, type: ${v.type}${v.required ? ', 必填' : ''}）`;
+        const flatV = v.type === 'loop' ? (v.children || []) : [v];
+        const preserveChildren = flatV.filter(c => !c.allow_ai_rewrite);
+        let desc = `- ${v.label}（key: ${v.key}, type: ${v.type}${v.required ? ', 必填' : ''}${!v.allow_ai_rewrite && v.type !== 'loop' ? '【★保留原文】' : ''}）`;
         if (v.type === 'loop' && v.children?.length)
-          desc += `\n  子欄位: ${v.children.map(c => `${c.label}(${c.key})`).join(', ')}`;
+          desc += `\n  子欄位: ${v.children.map(c => `${c.label}(${c.key})${!c.allow_ai_rewrite ? '【★保留原文】' : ''}`).join(', ')}`;
         return desc;
       }).join('\n');
+      const hasPreserve = docTemplateSchema.variables.some(v => {
+        if (v.type === 'loop') return (v.children || []).some(c => !c.allow_ai_rewrite);
+        return !v.allow_ai_rewrite;
+      });
       templateExtraInstruction = `
 
 ---
@@ -1692,7 +1698,8 @@ ${varList}
 注意：
 - loop 類型的值應為陣列，例如 [{"子key1": "值", "子key2": "值"}, ...]
 - 文字中找不到的欄位設為空字串 ""
-- 請直接提取文字中的資料，不要杜撰`;
+${hasPreserve ? '- 標記【★保留原文】的欄位：必須完整複製原始文字，絕對不得摘要、縮短、改寫或省略任何字句，原文是什麼就填什麼' : ''}
+- 未標記保留原文的欄位：直接提取文字中的資料，不要杜撰`;
     }
 
     // Inject user language preference into system instruction

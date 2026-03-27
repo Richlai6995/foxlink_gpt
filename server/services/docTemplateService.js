@@ -1224,29 +1224,54 @@ async function generateDocument(db, templateId, userId, inputData, outputFormat)
         // Apply overflow (truncate / summarize) — applyOverflow handles both
         const text = await applyOverflow(value, eff);
 
-        // Clip to cell rect, then draw text
-        page.pushOperators(
-          pushGraphicsState(),
-          moveTo(cell.x,            cellBottom),
-          lineTo(cell.x + cell.width, cellBottom),
-          lineTo(cell.x + cell.width, cellTop),
-          lineTo(cell.x,            cellTop),
-          closePath(),
-          clip(),
-          endPath()
-        );
+        // ── Manual line-wrap + multi-page overflow ──────────────────────────
+        // Manually wrap text so we control exactly which lines fit in each cell.
+        // If content overflows the cell height, continue on the same cell position
+        // on subsequent PDF pages.
+        const lineH   = fontSize * 1.3;
+        const maxW    = cell.width - 4;
+        const padX    = cell.x + 2;
+        const maxLinesPerCell = Math.max(1, Math.floor((cell.height - 4) / lineH));
 
-        page.drawText(text, {
-          x:          cell.x + 2,
-          y:          cellTop - fontSize - 2,
-          size:       fontSize,
-          font:       customFont,
-          color:      rgb(fgColor.r, fgColor.g, fgColor.b),
-          maxWidth:   cell.width - 4,
-          lineHeight: fontSize * 1.3,
-        });
+        // Build wrapped line array using font metrics
+        const wrappedLines = [];
+        for (const para of text.split('\n')) {
+          if (!para) { wrappedLines.push(''); continue; }
+          let line = '', lineW = 0;
+          for (const ch of para) {
+            let cw;
+            try { cw = customFont.widthOfTextAtSize(ch, fontSize); }
+            catch { cw = fontSize * (ch.codePointAt(0) > 0x2E80 ? 1.0 : 0.55); }
+            if (lineW + cw > maxW && line) {
+              wrappedLines.push(line); line = ch; lineW = cw;
+            } else { line += ch; lineW += cw; }
+          }
+          wrappedLines.push(line);
+        }
+        // Remove trailing empty lines
+        while (wrappedLines.length && wrappedLines[wrappedLines.length - 1] === '') wrappedLines.pop();
 
-        page.pushOperators(popGraphicsState());
+        // Draw chunk-by-chunk across pages
+        let lineIdx = 0;
+        let drawPageIdx = cell.page ?? 0;
+        while (lineIdx < wrappedLines.length && drawPageIdx < pdflibPages.length) {
+          const dp = pdflibPages[drawPageIdx];
+          const { height: dpH } = dp.getSize();
+          const topY = dpH - cell.y;
+          const chunk = wrappedLines.slice(lineIdx, lineIdx + maxLinesPerCell);
+          lineIdx += chunk.length;
+          for (let i = 0; i < chunk.length; i++) {
+            if (!chunk[i]) continue;
+            dp.drawText(chunk[i], {
+              x:    padX,
+              y:    topY - fontSize - 2 - i * lineH,
+              size: fontSize,
+              font: customFont,
+              color: rgb(fgColor.r, fgColor.g, fgColor.b),
+            });
+          }
+          drawPageIdx++;
+        }
       }
 
       if (unpositioned.length) {
