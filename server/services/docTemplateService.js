@@ -1258,23 +1258,15 @@ async function generateDocument(db, templateId, userId, inputData, outputFormat,
     await fs.writeFile(outPath, out);
 
   } else if (tpl.format === 'pdf' && fmt === 'docx') {
-    // ── PDF template → DOCX output (schema-based, mirrors pdfkit regen) ─────
-    // Builds Word document directly from schema variables — same bgColors,
-    // logo extraction, loop flattening, and style overrides as pdfkit path.
+    // ── PDF template → DOCX output ──────────────────────────────────────────
+    // Reads pdf_cell positions to reconstruct the table structure in DOCX.
+    // Groups cells by Y → rows, sorts by X → columns.  No extra colors added.
     const { Document, Packer, Paragraph, Table, TableRow, TableCell,
-            TextRun, ImageRun, WidthType, BorderStyle, AlignmentType,
-            ShadingType, HeadingLevel } = require('docx');
+            TextRun, ImageRun, WidthType, BorderStyle, VerticalAlign } = require('docx');
 
     const variables = schema.variables || [];
-    const bgColors  = ['C6EFCE', 'BDD7EE', 'BDD7EE', 'FCE4D6', 'FCE4D6', 'FFF2CC'];
-    const borderDef = { style: BorderStyle.SINGLE, size: 4, color: 'AAAAAA' };
-    const allBorders = {
-      top: borderDef, bottom: borderDef,
-      left: borderDef, right: borderDef,
-      insideH: borderDef, insideV: borderDef,
-    };
 
-    // ── Flatten loop variables → numbered text (same as pdfkit) ─────────────
+    // ── Flatten loop variables → numbered text ──────────────────────────────
     const flatData = { ...inputData };
     for (const v of variables) {
       if (v.type !== 'loop') continue;
@@ -1285,10 +1277,30 @@ async function generateDocument(db, templateId, userId, inputData, outputFormat,
         return parts.length ? `${i + 1}. ${parts.join('　')}` : '';
       }).filter(Boolean).join('\n');
     }
+    // Resolve static values
+    for (const v of variables) {
+      if (v.content_mode === 'static') flatData[v.key] = v.default_value ?? '';
+    }
+
+    const flatVars = variables.flatMap(v => v.type === 'loop' ? (v.children || []) : [v]);
+    const hasCells = flatVars.some(v => v.pdf_cell);
+
+    const borderDef  = { style: BorderStyle.SINGLE, size: 6, color: '333333' };
+    const tblBorders = { top: borderDef, bottom: borderDef, left: borderDef, right: borderDef,
+                         insideH: borderDef, insideV: borderDef };
+    const fzDefault  = 9;
+
+    // Helper: create value paragraphs (split by \n)
+    const mkValueParas = (text, fz, bold, color) => {
+      const lines = (text || ' ').split('\n');
+      return lines.map(line => new Paragraph({
+        children: [new TextRun({ text: line, bold, size: fz, color })],
+        spacing: { before: 30, after: 30 },
+      }));
+    };
 
     // ── Extract JPEG logo from original PDF ──────────────────────────────────
-    let logoBytes = null;
-    let logoAspect = 0.4;
+    let logoBytes = null, logoAspect = 0.4;
     try {
       const { PDFDocument: PDFLib, PDFName, PDFDict } = require('pdf-lib');
       const origPdfDoc = await PDFLib.load(tplBuf);
@@ -1303,8 +1315,8 @@ async function generateDocument(db, templateId, userId, inputData, outputFormat,
               if (xObj.dict.get(PDFName.of('Subtype'))?.encodedName !== '/Image') continue;
               if (xObj.dict.get(PDFName.of('Filter'))?.encodedName === '/DCTDecode') {
                 logoBytes  = Buffer.from(xObj.contents);
-                const w    = xObj.dict.get(PDFName.of('Width'))?.numberValue  ?? 100;
-                const h    = xObj.dict.get(PDFName.of('Height'))?.numberValue ?? 40;
+                const w = xObj.dict.get(PDFName.of('Width'))?.numberValue  ?? 100;
+                const h = xObj.dict.get(PDFName.of('Height'))?.numberValue ?? 40;
                 logoAspect = h / w;
                 break;
               }
@@ -1312,73 +1324,122 @@ async function generateDocument(db, templateId, userId, inputData, outputFormat,
           }
         }
       }
-    } catch (e) {
-      console.log('[DocTemplate] Logo extraction skipped:', e.message);
-    }
+    } catch (e) { console.log('[DocTemplate] Logo extraction skipped:', e.message); }
 
-    const fzDefault = 9;
     const docChildren = [];
-
-    // Logo
     if (logoBytes) {
-      const logoW = 140;
-      const logoH = Math.max(20, Math.round(logoW * logoAspect));
+      const logoW = 140, logoH = Math.max(20, Math.round(logoW * logoAspect));
       docChildren.push(new Paragraph({
         children: [new ImageRun({ data: logoBytes, transformation: { width: logoW, height: logoH }, type: 'jpg' })],
-        spacing: { after: 80 },
+        spacing: { after: 60 },
       }));
     }
 
-    // Title
-    docChildren.push(new Paragraph({
-      text: tpl.name,
-      heading: HeadingLevel.HEADING_2,
-      alignment: AlignmentType.CENTER,
-      spacing: { after: 120 },
-    }));
+    if (hasCells) {
+      // ── Overlay template: reconstruct table from pdf_cell positions ──────
+      const cellVars = flatVars.filter(v => v.pdf_cell && (v.content_mode ?? 'variable') !== 'empty');
 
-    // One row per variable (label cell with bgColor + value cell white)
-    for (let idx = 0; idx < variables.length; idx++) {
-      const v = variables[idx];
-      if ((v.content_mode ?? 'variable') === 'empty') continue;
+      // Group by Y (tolerance ±5pt) → rows; sort by X → columns
+      const rowGroups = [];
+      for (const v of cellVars) {
+        const y = v.pdf_cell.y;
+        let rg = rowGroups.find(r => Math.abs(r.y - y) < 5);
+        if (!rg) { rg = { y, vars: [] }; rowGroups.push(rg); }
+        rg.vars.push(v);
+      }
+      rowGroups.sort((a, b) => a.y - b.y);
+      for (const rg of rowGroups) rg.vars.sort((a, b) => a.pdf_cell.x - b.pdf_cell.x);
 
-      const eff    = getEffectiveStyle(v) || {};
-      const rawVal = String(flatData[v.key] ?? '').trim();
-      const value  = (eff.overflow === 'summarize') ? await applyOverflow(rawVal, eff) : rawVal;
-      const fz     = Math.round((eff.fontSize || fzDefault) * 2); // half-points
-      const color  = (eff.color || '#000000').replace('#', '');
-      const bold   = eff.bold === true;
-      const bg     = bgColors[idx % bgColors.length];
+      const maxVPR   = Math.max(1, ...rowGroups.map(r => r.vars.length));
+      const totalCols = maxVPR * 2; // label + value per variable slot
 
-      // Split multi-line value into Paragraph per line
-      const valueLines = value.split('\n');
-      const valueParagraphs = valueLines.map((line, li) => new Paragraph({
-        children: [new TextRun({ text: line, bold, size: fz, color })],
-        spacing: li === valueLines.length - 1 ? { before: 40, after: 40 } : { before: 0, after: 0 },
-      }));
+      // Compute column widths (%) from the widest row's cell positions
+      const MX = 50; // typical PDF margin
+      const maxRight = Math.max(...cellVars.map(v => v.pdf_cell.x + v.pdf_cell.width));
+      const fullW    = maxRight - MX;
+      const widestRow = rowGroups.reduce((a, b) => a.vars.length > b.vars.length ? a : b);
+      const colPcts   = [];
+      let prevRight   = MX;
+      for (const v of widestRow.vars) {
+        colPcts.push(Math.round((v.pdf_cell.x - prevRight) / fullW * 100));   // label %
+        colPcts.push(Math.round(v.pdf_cell.width / fullW * 100));              // value %
+        prevRight = v.pdf_cell.x + v.pdf_cell.width;
+      }
+      // Normalize sum to 100%
+      const sum = colPcts.reduce((a, b) => a + b, 0);
+      if (sum !== 100) colPcts[colPcts.length - 1] += (100 - sum);
+
+      // Build table rows
+      const tableRows = [];
+      for (const rg of rowGroups) {
+        const cells = [];
+        for (let i = 0; i < rg.vars.length; i++) {
+          const v   = rg.vars[i];
+          const eff = getEffectiveStyle(v) || {};
+          const raw = String(flatData[v.key] ?? '').trim();
+          const val = (eff.overflow === 'summarize') ? await applyOverflow(raw, eff) : raw;
+          const fz  = Math.round((eff.fontSize || fzDefault) * 2);
+          const fg  = (eff.color || '#000000').replace('#', '');
+
+          // Label cell
+          cells.push(new TableCell({
+            columnSpan: 1,
+            verticalAlign: VerticalAlign.CENTER,
+            children: [new Paragraph({
+              children: [new TextRun({ text: v.label || v.key, bold: true, size: 18, color: '1F4E79' })],
+              spacing: { before: 40, after: 40 },
+            })],
+          }));
+
+          // Value cell — merge remaining columns for the last var in short rows
+          const isLast    = (i === rg.vars.length - 1);
+          const valueSpan = isLast ? (totalCols - rg.vars.length * 2 + 1) : 1;
+          cells.push(new TableCell({
+            columnSpan: valueSpan,
+            children: mkValueParas(val, fz, eff.bold === true, fg),
+          }));
+        }
+        tableRows.push(new TableRow({ children: cells }));
+      }
 
       docChildren.push(new Table({
         width: { size: 100, type: WidthType.PERCENTAGE },
-        borders: allBorders,
-        rows: [new TableRow({
-          children: [
-            new TableCell({
-              width: { size: 18, type: WidthType.PERCENTAGE },
-              shading: { type: ShadingType.CLEAR, fill: bg },
-              children: [new Paragraph({
-                children: [new TextRun({ text: (v.label || v.key) + ':', bold: true, size: 18, color: '000000' })],
-                spacing: { before: 40, after: 40 },
-              })],
-            }),
-            new TableCell({
-              width: { size: 82, type: WidthType.PERCENTAGE },
-              shading: { type: ShadingType.CLEAR, fill: 'FFFFFF' },
-              children: valueParagraphs,
-            }),
-          ],
-        })],
+        borders: tblBorders,
+        columnWidths: colPcts.map(p => Math.round(p * 90)),  // DXA approx
+        rows: tableRows,
       }));
-      docChildren.push(new Paragraph({ text: '', spacing: { before: 0, after: 16 } }));
+
+    } else {
+      // ── Regen template (no pdf_cell): simple label|value rows ─────────
+      for (const v of variables) {
+        if ((v.content_mode ?? 'variable') === 'empty') continue;
+        const eff = getEffectiveStyle(v) || {};
+        const raw = String(flatData[v.key] ?? '').trim();
+        const val = (eff.overflow === 'summarize') ? await applyOverflow(raw, eff) : raw;
+        const fz  = Math.round((eff.fontSize || fzDefault) * 2);
+        const fg  = (eff.color || '#000000').replace('#', '');
+
+        docChildren.push(new Table({
+          width: { size: 100, type: WidthType.PERCENTAGE },
+          borders: tblBorders,
+          rows: [new TableRow({
+            children: [
+              new TableCell({
+                width: { size: 18, type: WidthType.PERCENTAGE },
+                verticalAlign: VerticalAlign.CENTER,
+                children: [new Paragraph({
+                  children: [new TextRun({ text: (v.label || v.key), bold: true, size: 18, color: '1F4E79' })],
+                  spacing: { before: 40, after: 40 },
+                })],
+              }),
+              new TableCell({
+                width: { size: 82, type: WidthType.PERCENTAGE },
+                children: mkValueParas(val, fz, eff.bold === true, fg),
+              }),
+            ],
+          })],
+        }));
+      }
     }
 
     const doc = new Document({ sections: [{ children: docChildren }] });
