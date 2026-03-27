@@ -2807,6 +2807,113 @@ function UserManual() {
             若需取消公開，再次點選開關即可。
           </NoteBox>
         </SubSection>
+
+        <SubSection title="固定格式模式（Fixed Format Mode）">
+          <Para>
+            <strong>固定格式模式</strong>讓您精確控制每個變數的字型大小、顏色、粗體，以及儲存格的溢位處理策略。
+            適合公司制式表單、合約、報告等<strong>版面不可隨意伸縮</strong>的場景。
+          </Para>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-2">
+            {[
+              { icon: '📝', title: 'Word (DOCX)', desc: '每格字型/顏色/粗體精確套用；loop 表格列高可固定（rowHeightPt）' },
+              { icon: '📊', title: 'Excel (XLSX)', desc: '每格套用字型樣式；AI 自動從原始範本偵測 cell.font' },
+              { icon: '📄', title: 'PDF（非表單）', desc: '疊加模式：保留原始 Logo/框線，在指定座標寫入文字' },
+            ].map(item => (
+              <div key={item.title} className="bg-indigo-50 border border-indigo-200 rounded-lg p-3">
+                <div className="text-lg mb-1">{item.icon}</div>
+                <p className="text-xs font-semibold text-slate-700">{item.title}</p>
+                <p className="text-xs text-slate-500 mt-0.5">{item.desc}</p>
+              </div>
+            ))}
+          </div>
+
+          <div className="mt-4 space-y-3">
+            <StepItem num={1} title="上傳範本時啟用" desc="在「新增範本」精靈的 Step 3（確認變數）中，開啟「固定格式模式」開關" />
+            <StepItem num={2} title="或在編輯時啟用" desc="開啟範本「編輯」視窗，在標題列右側找到「固定格式模式」切換開關" />
+            <StepItem num={3} title="進入「樣式設定」頁籤調整字型/顏色/溢位" />
+            <StepItem num={4} title="（PDF 專用）進入「版面編輯器」頁籤定義各欄位的填寫位置" />
+          </div>
+          <TipBox>
+            開啟固定格式模式後，系統會自動從原始範本讀取字型樣式作為預設值，您只需覆寫與原始不同的欄位即可。
+          </TipBox>
+        </SubSection>
+
+        <SubSection title="樣式設定頁籤">
+          <Para>
+            在範本「編輯」視窗中點選<strong>「樣式設定」</strong>頁籤，可對每個變數（含 loop 子欄位）設定：
+          </Para>
+          <Table
+            headers={['設定項目', '說明']}
+            rows={[
+              ['字型大小 (pt)', '輸入點數，如 10、12、14，留空表示沿用偵測值'],
+              ['粗體', '勾選即套用 bold'],
+              ['斜體', '勾選即套用 italic'],
+              ['顏色', '點選色盤選擇顏色，留空表示沿用偵測值（預設黑色）'],
+              ['溢位策略', '見下方說明'],
+              ['最大字數', '配合 truncate / summarize 策略使用，設定觸發上限'],
+            ]}
+          />
+          <Para>
+            欄位旁的<strong>「已偵測」</strong>綠色徽章，表示該值是系統自動從原始範本讀取的。
+            手動修改後可點選<strong>「重設」</strong>還原為偵測值。
+          </Para>
+          <NoteBox>
+            「樣式設定」在固定格式模式<strong>關閉</strong>時不會套用。請先在編輯視窗標題列開啟固定格式模式。
+          </NoteBox>
+        </SubSection>
+
+        <SubSection title="溢位策略說明">
+          <Para>
+            當變數內容超出儲存格或欄位空間時，系統依所選策略處理：
+          </Para>
+          <Table
+            headers={['策略', '行為', '適用場景']}
+            rows={[
+              ['折行（wrap）', '預設值，內容自動換行，欄高隨內容增長', '說明欄位、備註等無固定行數的格'],
+              ['截斷（truncate）', '超過「最大字數」後直接截斷並加 …', '簡短標題、代碼欄位，不允許換行'],
+              ['縮小字型（shrink）', '自動縮小字型大小，使文字擠進原格', 'PDF 覆蓋模式的單行格'],
+              ['AI 摘要（summarize）', '呼叫 Gemini Flash 自動摘要到設定字數內', '長篇說明需要保留語意、不能截斷時'],
+            ]}
+          />
+          <TipBox>
+            AI 摘要策略會自動偵測輸入語言（中文比率 &gt; 30% 使用繁體中文摘要），
+            摘要失敗時會自動 fallback 為截斷策略，不影響文件生成。
+          </TipBox>
+        </SubSection>
+
+        <SubSection title="PDF 版面編輯器">
+          <Para>
+            對於 PDF 格式（非 AcroForm 表單）的固定格式範本，需要用<strong>版面編輯器</strong>手動定義每個欄位的填寫座標。
+            完成定位後，生成時系統以<strong>疊加模式</strong>在原始 PDF 上直接寫入文字，保留 Logo、框線、印章等所有原始視覺元素。
+          </Para>
+          <div className="space-y-3 mt-2">
+            <StepItem num={1} title="開啟範本編輯視窗，切換到「版面編輯器」頁籤" desc="此頁籤僅對 PDF（非 AcroForm）格式的範本顯示" />
+            <StepItem num={2} title="PDF 預覽載入後，在右上方「選擇變數」下拉選取要定位的欄位" />
+            <StepItem num={3} title="在 PDF 預覽畫面上拖曳畫出矩形框" desc="框的位置即為該欄位文字的填寫區域，支援跨頁定位" />
+            <StepItem num={4} title="右側面板確認座標，可重複框選覆蓋修正" />
+            <StepItem num={5} title="對所有變數完成定位後，點選「儲存」" />
+          </div>
+          <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 mt-3">
+            <p className="text-xs font-semibold text-slate-600 mb-2">版面編輯器操作說明</p>
+            <div className="grid grid-cols-2 gap-2">
+              {[
+                { key: '縮放', val: '點選 + / − 按鈕或拖動縮放列調整預覽大小' },
+                { key: '換頁', val: '點選 ◀ ▶ 按鈕切換 PDF 頁面' },
+                { key: '已定位欄位', val: '藍色半透明矩形，點選即選取，右側顯示詳細資訊' },
+                { key: '刪除框位', val: '選取矩形後按鍵盤 Delete 或右側「刪除」按鈕' },
+              ].map(row => (
+                <div key={row.key} className="bg-white rounded p-2 border">
+                  <p className="text-[11px] font-semibold text-slate-700">{row.key}</p>
+                  <p className="text-[10px] text-slate-500 mt-0.5">{row.val}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+          <NoteBox>
+            若有變數尚未定位，生成文件時系統會跳過該欄位並在伺服器記錄警告，其他已定位的欄位仍正常填入。
+            建議上傳後立即完成版面編輯器設定，再分享給他人使用。
+          </NoteBox>
+        </SubSection>
       </Section>
     </div>
   )
@@ -5273,6 +5380,82 @@ data: {"event":"done","tempPath":"/tmp/xxx.docx","format":"docx","schema":{"vari
             管理員目前無專屬後台 UI 管理範本，若需批量管理，請直接查詢 <code className="bg-amber-100 px-1 rounded text-xs">doc_templates</code> 資料表。
             未來版本預計新增管理員範本總覽頁面。
           </NoteBox>
+        </SubSection>
+
+        <SubSection title="固定格式模式 — DB 欄位與 Schema 結構">
+          <Para>
+            <code className="bg-slate-100 px-1 rounded text-xs">doc_templates.IS_FIXED_FORMAT</code>（Oracle <code className="bg-slate-100 px-1 rounded text-xs">NUMBER(1) DEFAULT 0</code>）
+            控制是否啟用固定格式模式。啟用後 <code className="bg-slate-100 px-1 rounded text-xs">schema_json</code> 中每個變數可含以下額外欄位：
+          </Para>
+          <CodeBlock>{`// schema_json.variables[i] 固定格式延伸欄位
+{
+  "key": "amount",
+  "type": "number",
+  // 樣式（DOCX/XLSX/PDF 共用）
+  "style": {
+    "detected": { "fontSize": 10, "bold": false, "color": "#000000" },
+    "override":  { "fontSize": 12, "bold": true, "color": "#1a237e",
+                   "overflow": "truncate", "maxChars": 50 }
+  },
+  // DOCX loop 固定列高（點數，僅 loop 類型子欄位父列有效）
+  "docx_style": { "rowHeightPt": 28 },
+  // PDF 欄位座標（版面編輯器設定，頂左原點，單位 pt）
+  "pdf_cell": { "page": 1, "x": 72, "y": 120, "width": 200, "height": 20 }
+}`}</CodeBlock>
+        </SubSection>
+
+        <SubSection title="樣式自動偵測機制">
+          <Para>
+            上傳範本時，系統自動從原始檔案讀取字型樣式，存入 <code className="bg-slate-100 px-1 rounded text-xs">style.detected</code>：
+          </Para>
+          <Table
+            headers={['格式', '偵測來源', '偵測內容']}
+            rows={[
+              ['DOCX', '標記值所在儲存格的 <w:rPr>', 'fontSize（w:sz÷2）、bold（w:b）、italic（w:i）、color（w:color）'],
+              ['XLSX', 'ExcelJS cell.font', 'size、bold、italic、color.argb（去除 alpha 前綴）'],
+              ['PPTX', 'slide XML <a:rPr> 屬性', 'sz（÷100 換算 pt）、b、i；<a:solidFill> 顏色'],
+            ]}
+          />
+          <Para>
+            生成時優先使用 <code className="bg-slate-100 px-1 rounded text-xs">style.override</code>，
+            若無覆寫則 fallback 至 <code className="bg-slate-100 px-1 rounded text-xs">style.detected</code>。
+            溢位預設為 <code className="bg-slate-100 px-1 rounded text-xs">wrap</code>。
+          </Para>
+        </SubSection>
+
+        <SubSection title="PDF 疊加生成（pdf_overlay）流程">
+          <Para>
+            當範本為 PDF、<code className="bg-slate-100 px-1 rounded text-xs">is_fixed_format=1</code> 且至少一個變數有 <code className="bg-slate-100 px-1 rounded text-xs">pdf_cell</code> 時，
+            採用 <strong>pdf_overlay 策略</strong>（而非 pdfkit 重建）：
+          </Para>
+          <div className="space-y-3">
+            <StepItem num={1} title="pdf-lib 載入原始 PDF 二進位（保留 Logo / 印章 / 框線）" />
+            <StepItem num={2} title="fontkit 注入 CJK 字型（NotoSansTC），確保中文正確顯示" />
+            <StepItem num={3} title="依 pdf_cell 座標計算 pdf-lib 底左原點：pdfY = pageH − cell.y − cell.height" />
+            <StepItem num={4} title="pushGraphicsState → clip 矩形 → drawText → endPath 防止溢出" />
+            <StepItem num={5} title="shrink 策略：縮小 fontSize 直到文字寬度 ≤ cell.width" />
+            <StepItem num={6} title="未定位欄位（無 pdf_cell）：console.warn 跳過，不影響其他欄位" />
+          </div>
+          <CodeBlock>{`// 座標轉換（server/services/docTemplateService.js）
+// 儲存：頂左原點（與 pdfjs-dist canvas 一致）
+// pdf-lib 使用底左原點，需轉換：
+const cellTop    = pageHeight - cell.y
+const cellBottom = pageHeight - cell.y - cell.height
+// drawText y = cellBottom（加 padding）`}</CodeBlock>
+          <NoteBox>
+            CJK 字型檔需存在於 <code className="bg-amber-100 px-1 rounded text-xs">server/fonts/NotoSansTC-Regular.ttf</code>，
+            若不存在，PDF 疊加中文字可能顯示為亂碼或空白。請確認部署環境有此字型。
+          </NoteBox>
+        </SubSection>
+
+        <SubSection title="新增 API 端點（固定格式）">
+          <Table
+            headers={['方法', '路徑', '說明']}
+            rows={[
+              ['GET', '/api/doc-templates/:id/preview-file', '取得原始 PDF 供 pdfjs-dist 預覽（版面編輯器使用）'],
+              ['PUT', '/api/doc-templates/:id', '更新時可傳入 is_fixed_format: 0/1 切換模式'],
+            ]}
+          />
         </SubSection>
       </Section>
     </div>

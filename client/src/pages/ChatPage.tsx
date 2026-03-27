@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useSearchParams, useNavigate } from 'react-router-dom'
-import { Square, AlertTriangle, Share2, Copy, Check, X, Sparkles, Search, Plus, Plug, Zap, Database, CheckCircle, BarChart3, ChevronDown, RefreshCw, TrendingUp } from 'lucide-react'
+import { Square, AlertTriangle, Share2, Copy, Check, X, Sparkles, Search, Plus, Plug, Zap, Database, CheckCircle, BarChart3, ChevronDown, RefreshCw, TrendingUp, GripVertical, Eye, EyeOff } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import Sidebar from '../components/Sidebar'
 import ChatWindow from '../components/ChatWindow'
@@ -11,6 +11,16 @@ import api from '../lib/api'
 import { copyText } from '../lib/clipboard'
 import { useAuth } from '../context/AuthContext'
 import TokenStatsModal from '../components/common/TokenStatsModal'
+
+function applyOrder<T extends { id: any }>(items: T[], order: (number | string)[]): T[] {
+  const map = new Map(items.map(i => [String(i.id), i]))
+  const sorted = order.map(id => map.get(String(id))).filter(Boolean) as T[]
+  const rest = items.filter(i => !order.some(o => String(o) === String(i.id)))
+  return [...sorted, ...rest]
+}
+function reorderArr<T>(arr: T[], from: number, to: number): T[] {
+  const a = [...arr]; const [it] = a.splice(from, 1); a.splice(to, 0, it); return a
+}
 
 export default function ChatPage() {
   const { t, i18n } = useTranslation()
@@ -118,6 +128,22 @@ export default function ChatPage() {
   const kbPanelRef       = useRef<HTMLDivElement>(null)
   const researchPanelRef = useRef<HTMLDivElement>(null)
 
+  // ── Tool ordering / hiding / search (per-user localStorage) ─────────────
+  const [mcpOrder,    setMcpOrder]    = useState<number[]>([])
+  const [mcpHidden,   setMcpHidden]   = useState<Set<number>>(new Set())
+  const [mcpSearch,   setMcpSearch]   = useState('')
+  const mcpDragSrc = useRef<number | null>(null)
+  const [difyOrder,   setDifyOrder]   = useState<number[]>([])
+  const [difyHidden,  setDifyHidden]  = useState<Set<number>>(new Set())
+  const [difySearch,  setDifySearch]  = useState('')
+  const difyDragSrc = useRef<number | null>(null)
+  const [kbOrder,     setKbOrder]     = useState<string[]>([])
+  const [kbHidden,    setKbHidden]    = useState<Set<string>>(new Set())
+  const [kbSearch,    setKbSearch]    = useState('')
+  const kbDragSrc = useRef<string | null>(null)
+  const [skillOrder,  setSkillOrder]  = useState<number[]>([])
+  const [skillHidden, setSkillHidden] = useState<Set<number>>(new Set())
+
   const [researchJobs,       setResearchJobs]       = useState<any[]>([])
   const [showResearchPanel,  setShowResearchPanel]  = useState(false)
   const [editRerunJobId,     setEditRerunJobId]     = useState<string | null>(null)
@@ -146,6 +172,36 @@ export default function ChatPage() {
     if (showMcpPanel || showDifyPanel || showKbPanel || showResearchPanel) document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
   }, [showMcpPanel, showDifyPanel, showKbPanel, showResearchPanel])
+
+  // Load tool panel preferences from localStorage (once user is known)
+  useEffect(() => {
+    if (!user) return
+    const uid = (user as any).id
+    try {
+      setMcpOrder(JSON.parse(localStorage.getItem(`fl_mcp_order_${uid}`) || '[]'))
+      setMcpHidden(new Set(JSON.parse(localStorage.getItem(`fl_mcp_hidden_${uid}`) || '[]')))
+      setDifyOrder(JSON.parse(localStorage.getItem(`fl_dify_order_${uid}`) || '[]'))
+      setDifyHidden(new Set(JSON.parse(localStorage.getItem(`fl_dify_hidden_${uid}`) || '[]')))
+      setKbOrder(JSON.parse(localStorage.getItem(`fl_kb_order_${uid}`) || '[]'))
+      setKbHidden(new Set(JSON.parse(localStorage.getItem(`fl_kb_hidden_${uid}`) || '[]')))
+      setSkillOrder(JSON.parse(localStorage.getItem(`fl_skill_order_${uid}`) || '[]'))
+      setSkillHidden(new Set(JSON.parse(localStorage.getItem(`fl_skill_hidden_${uid}`) || '[]')))
+    } catch {}
+  }, [user])
+
+  // Persist tool panel preferences to localStorage
+  useEffect(() => {
+    if (!user) return
+    const uid = (user as any).id
+    localStorage.setItem(`fl_mcp_order_${uid}`,    JSON.stringify(mcpOrder))
+    localStorage.setItem(`fl_mcp_hidden_${uid}`,   JSON.stringify([...mcpHidden]))
+    localStorage.setItem(`fl_dify_order_${uid}`,   JSON.stringify(difyOrder))
+    localStorage.setItem(`fl_dify_hidden_${uid}`,  JSON.stringify([...difyHidden]))
+    localStorage.setItem(`fl_kb_order_${uid}`,     JSON.stringify(kbOrder))
+    localStorage.setItem(`fl_kb_hidden_${uid}`,    JSON.stringify([...kbHidden]))
+    localStorage.setItem(`fl_skill_order_${uid}`,  JSON.stringify(skillOrder))
+    localStorage.setItem(`fl_skill_hidden_${uid}`, JSON.stringify([...skillHidden]))
+  }, [mcpOrder, mcpHidden, difyOrder, difyHidden, kbOrder, kbHidden, skillOrder, skillHidden, user])
 
   interface BudgetPeriod { limit: number; spent: number; remaining: number; exceeded: boolean }
   interface BudgetInfo { isAdmin: boolean; daily: BudgetPeriod | null; weekly: BudgetPeriod | null; monthly: BudgetPeriod | null }
@@ -785,37 +841,69 @@ export default function ChatPage() {
               <Plug size={13} />
               {selectedMcpIds.size > 0 ? t('chat.topbar.mcpCount', { count: selectedMcpIds.size }) : t('chat.topbar.mcp')}
             </button>
-            {showMcpPanel && (
-              <div className="absolute top-full right-0 mt-1 w-72 bg-white border border-slate-200 rounded-xl shadow-2xl z-50">
-                <div className="p-3 border-b border-slate-100 flex items-center justify-between">
-                  <span className="text-sm font-semibold text-slate-800 flex items-center gap-1.5"><Plug size={14} className="text-cyan-500" />{t('chat.topbar.mcpPanelTitle')}</span>
-                  <button onClick={() => setShowMcpPanel(false)} className="text-slate-400 hover:text-slate-600"><X size={14} /></button>
+            {showMcpPanel && (() => {
+              const _q = mcpSearch.toLowerCase()
+              const _base = applyOrder(allMcpServers, mcpOrder)
+              const _match = (s: ToolItem) => !_q || localName(s).toLowerCase().includes(_q) || (localDesc(s)||'').toLowerCase().includes(_q)
+              const _vis = _base.filter(s => !mcpHidden.has(s.id as number) && _match(s))
+              const _hid = _base.filter(s => mcpHidden.has(s.id as number) && _match(s))
+              const McpRow = ({ s, isHid }: { s: ToolItem; isHid: boolean }) => {
+                const id = s.id as number; const picked = !isHid && selectedMcpIds.has(id)
+                return (
+                  <div key={id} draggable={!_q}
+                    onDragStart={() => { mcpDragSrc.current = id }}
+                    onDragOver={e => e.preventDefault()}
+                    onDrop={() => {
+                      if (mcpDragSrc.current == null || mcpDragSrc.current === id) return
+                      const ids = applyOrder(allMcpServers, mcpOrder).map(x => x.id as number)
+                      const f = ids.indexOf(mcpDragSrc.current!); const tt = ids.indexOf(id)
+                      if (f !== -1 && tt !== -1) setMcpOrder(reorderArr(ids, f, tt))
+                      mcpDragSrc.current = null
+                    }}
+                    className={`flex items-center gap-2 px-2 py-1.5 rounded-lg border transition group ${isHid ? 'opacity-40 border-transparent' : picked ? 'bg-cyan-50 border-cyan-200' : 'hover:bg-slate-50 border-transparent'}`}
+                  >
+                    {!_q && <GripVertical size={12} className="text-slate-300 cursor-grab flex-shrink-0" />}
+                    {!isHid
+                      ? <button onClick={() => setSelectedMcpIds(prev => { const n = new Set(prev); picked ? n.delete(id) : n.add(id); return n })} className={`w-4 h-4 rounded border flex items-center justify-center flex-shrink-0 ${picked ? 'bg-cyan-600 border-cyan-600' : 'border-slate-300'}`}>{picked && <Check size={10} className="text-white" />}</button>
+                      : <div className="w-4 h-4 flex-shrink-0" />
+                    }
+                    <button onClick={() => setMcpHidden(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n })}
+                      className={`w-4 h-4 rounded-full flex items-center justify-center flex-shrink-0 bg-blue-500 hover:bg-blue-700 text-white transition-all ${isHid ? '' : 'opacity-0 group-hover:opacity-100'}`}
+                      title={isHid ? '取消隱藏' : '隱藏'}>
+                      {isHid ? <Eye size={9} /> : <EyeOff size={9} />}
+                    </button>
+                    <div className="flex-1 min-w-0 cursor-pointer" onClick={() => { if (!isHid) setSelectedMcpIds(prev => { const n = new Set(prev); picked ? n.delete(id) : n.add(id); return n }) }}>
+                      <p className="text-xs font-medium text-slate-800 whitespace-nowrap">{localName(s)}</p>
+                      {localDesc(s) && <p className="text-xs text-slate-400 whitespace-nowrap">{localDesc(s)}</p>}
+                    </div>
+                  </div>
+                )
+              }
+              return (
+                <div className="absolute top-full right-0 mt-1 w-80 bg-white border border-slate-200 rounded-xl shadow-2xl z-50">
+                  <div className="p-3 border-b border-slate-100">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-sm font-semibold text-slate-800 flex items-center gap-1.5"><Plug size={14} className="text-cyan-500" />{t('chat.topbar.mcpPanelTitle')}</span>
+                      <button onClick={() => setShowMcpPanel(false)} className="text-slate-400 hover:text-slate-600"><X size={14} /></button>
+                    </div>
+                    <div className="relative">
+                      <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                      <input value={mcpSearch} onChange={e => setMcpSearch(e.target.value)} placeholder="搜尋..." autoFocus
+                        className="w-full pl-7 pr-3 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-cyan-300" />
+                    </div>
+                  </div>
+                  <div className="max-h-56 overflow-y-auto p-2 space-y-0.5">
+                    {allMcpServers.length === 0 ? (
+                      <div className="text-center py-6 text-slate-400 text-xs">{t('chat.topbar.mcpEmpty')}</div>
+                    ) : <>{_vis.map(s => <McpRow key={s.id} s={s} isHid={false} />)}{_hid.length > 0 && <><div className="px-2 pt-1.5 pb-0.5 text-xs text-slate-400 border-t border-slate-100 mt-1">已隱藏 ({_hid.length})</div>{_hid.map(s => <McpRow key={s.id} s={s} isHid={true} />)}</>}</>}
+                  </div>
+                  <div className="p-2 border-t border-slate-100 flex justify-between items-center">
+                    <button onClick={() => setSelectedMcpIds(new Set())} className="text-xs text-slate-400 hover:text-red-500 px-2 py-1">{t('chat.topbar.clear')}</button>
+                    <button onClick={() => setShowMcpPanel(false)} className="px-3 py-1.5 text-xs bg-cyan-600 text-white rounded-lg hover:bg-cyan-700">{t('chat.topbar.confirm')}</button>
+                  </div>
                 </div>
-                <div className="max-h-56 overflow-y-auto overflow-x-auto p-2 space-y-1">
-                  {allMcpServers.length === 0 ? (
-                    <div className="text-center py-6 text-slate-400 text-xs">{t('chat.topbar.mcpEmpty')}</div>
-                  ) : allMcpServers.map(s => {
-                    const picked = selectedMcpIds.has(s.id as number)
-                    return (
-                      <button key={s.id} onClick={() => setSelectedMcpIds(prev => { const n = new Set(prev); picked ? n.delete(s.id as number) : n.add(s.id as number); return n })}
-                        className={`min-w-full w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-left transition ${picked ? 'bg-cyan-50 border border-cyan-200' : 'hover:bg-slate-50 border border-transparent'}`}>
-                        <div className={`w-4 h-4 rounded border flex items-center justify-center flex-shrink-0 ${picked ? 'bg-cyan-600 border-cyan-600' : 'border-slate-300'}`}>
-                          {picked && <Check size={10} className="text-white" />}
-                        </div>
-                        <div className="flex-shrink-0">
-                          <p className="text-xs font-medium text-slate-800 whitespace-nowrap">{localName(s)}</p>
-                          {localDesc(s) && <p className="text-xs text-slate-400 whitespace-nowrap">{localDesc(s)}</p>}
-                        </div>
-                      </button>
-                    )
-                  })}
-                </div>
-                <div className="p-2 border-t border-slate-100 flex justify-between items-center">
-                  <button onClick={() => setSelectedMcpIds(new Set())} className="text-xs text-slate-400 hover:text-red-500 px-2 py-1">{t('chat.topbar.clear')}</button>
-                  <button onClick={() => setShowMcpPanel(false)} className="px-3 py-1.5 text-xs bg-cyan-600 text-white rounded-lg hover:bg-cyan-700">{t('chat.topbar.confirm')}</button>
-                </div>
-              </div>
-            )}
+              )
+            })()}
           </div>
 
           {/* ── DIFY KB button ── */}
@@ -828,37 +916,69 @@ export default function ChatPage() {
               <Zap size={13} />
               {selectedDifyIds.size > 0 ? t('chat.topbar.difyCount', { count: selectedDifyIds.size }) : t('chat.topbar.dify')}
             </button>
-            {showDifyPanel && (
-              <div className="absolute top-full right-0 mt-1 w-72 bg-white border border-slate-200 rounded-xl shadow-2xl z-50">
-                <div className="p-3 border-b border-slate-100 flex items-center justify-between">
-                  <span className="text-sm font-semibold text-slate-800 flex items-center gap-1.5"><Zap size={14} className="text-amber-500" />{t('chat.topbar.difyPanelTitle')}</span>
-                  <button onClick={() => setShowDifyPanel(false)} className="text-slate-400 hover:text-slate-600"><X size={14} /></button>
+            {showDifyPanel && (() => {
+              const _q = difySearch.toLowerCase()
+              const _base = applyOrder(allDifyKbs, difyOrder)
+              const _match = (s: ToolItem) => !_q || localName(s).toLowerCase().includes(_q) || (localDesc(s)||'').toLowerCase().includes(_q)
+              const _vis = _base.filter(s => !difyHidden.has(s.id as number) && _match(s))
+              const _hid = _base.filter(s => difyHidden.has(s.id as number) && _match(s))
+              const DifyRow = ({ s, isHid }: { s: ToolItem; isHid: boolean }) => {
+                const id = s.id as number; const picked = !isHid && selectedDifyIds.has(id)
+                return (
+                  <div key={id} draggable={!_q}
+                    onDragStart={() => { difyDragSrc.current = id }}
+                    onDragOver={e => e.preventDefault()}
+                    onDrop={() => {
+                      if (difyDragSrc.current == null || difyDragSrc.current === id) return
+                      const ids = applyOrder(allDifyKbs, difyOrder).map(x => x.id as number)
+                      const f = ids.indexOf(difyDragSrc.current!); const tt = ids.indexOf(id)
+                      if (f !== -1 && tt !== -1) setDifyOrder(reorderArr(ids, f, tt))
+                      difyDragSrc.current = null
+                    }}
+                    className={`flex items-center gap-2 px-2 py-1.5 rounded-lg border transition group ${isHid ? 'opacity-40 border-transparent' : picked ? 'bg-amber-50 border-amber-200' : 'hover:bg-slate-50 border-transparent'}`}
+                  >
+                    {!_q && <GripVertical size={12} className="text-slate-300 cursor-grab flex-shrink-0" />}
+                    {!isHid
+                      ? <button onClick={() => setSelectedDifyIds(prev => { const n = new Set(prev); picked ? n.delete(id) : n.add(id); return n })} className={`w-4 h-4 rounded border flex items-center justify-center flex-shrink-0 ${picked ? 'bg-amber-500 border-amber-500' : 'border-slate-300'}`}>{picked && <Check size={10} className="text-white" />}</button>
+                      : <div className="w-4 h-4 flex-shrink-0" />
+                    }
+                    <button onClick={() => setDifyHidden(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n })}
+                      className={`w-4 h-4 rounded-full flex items-center justify-center flex-shrink-0 bg-blue-500 hover:bg-blue-700 text-white transition-all ${isHid ? '' : 'opacity-0 group-hover:opacity-100'}`}
+                      title={isHid ? '取消隱藏' : '隱藏'}>
+                      {isHid ? <Eye size={9} /> : <EyeOff size={9} />}
+                    </button>
+                    <div className="flex-1 min-w-0 cursor-pointer" onClick={() => { if (!isHid) setSelectedDifyIds(prev => { const n = new Set(prev); picked ? n.delete(id) : n.add(id); return n }) }}>
+                      <p className="text-xs font-medium text-slate-800 whitespace-nowrap">{localName(s)}</p>
+                      {localDesc(s) && <p className="text-xs text-slate-400 whitespace-nowrap">{localDesc(s)}</p>}
+                    </div>
+                  </div>
+                )
+              }
+              return (
+                <div className="absolute top-full right-0 mt-1 w-80 bg-white border border-slate-200 rounded-xl shadow-2xl z-50">
+                  <div className="p-3 border-b border-slate-100">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-sm font-semibold text-slate-800 flex items-center gap-1.5"><Zap size={14} className="text-amber-500" />{t('chat.topbar.difyPanelTitle')}</span>
+                      <button onClick={() => setShowDifyPanel(false)} className="text-slate-400 hover:text-slate-600"><X size={14} /></button>
+                    </div>
+                    <div className="relative">
+                      <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                      <input value={difySearch} onChange={e => setDifySearch(e.target.value)} placeholder="搜尋..." autoFocus
+                        className="w-full pl-7 pr-3 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-300" />
+                    </div>
+                  </div>
+                  <div className="max-h-56 overflow-y-auto p-2 space-y-0.5">
+                    {allDifyKbs.length === 0 ? (
+                      <div className="text-center py-6 text-slate-400 text-xs">{t('chat.topbar.difyEmpty')}</div>
+                    ) : <>{_vis.map(s => <DifyRow key={s.id} s={s} isHid={false} />)}{_hid.length > 0 && <><div className="px-2 pt-1.5 pb-0.5 text-xs text-slate-400 border-t border-slate-100 mt-1">已隱藏 ({_hid.length})</div>{_hid.map(s => <DifyRow key={s.id} s={s} isHid={true} />)}</>}</>}
+                  </div>
+                  <div className="p-2 border-t border-slate-100 flex justify-between items-center">
+                    <button onClick={() => setSelectedDifyIds(new Set())} className="text-xs text-slate-400 hover:text-red-500 px-2 py-1">{t('chat.topbar.clear')}</button>
+                    <button onClick={() => setShowDifyPanel(false)} className="px-3 py-1.5 text-xs bg-amber-500 text-white rounded-lg hover:bg-amber-600">{t('chat.topbar.confirm')}</button>
+                  </div>
                 </div>
-                <div className="max-h-56 overflow-y-auto overflow-x-auto p-2 space-y-1">
-                  {allDifyKbs.length === 0 ? (
-                    <div className="text-center py-6 text-slate-400 text-xs">{t('chat.topbar.difyEmpty')}</div>
-                  ) : allDifyKbs.map(k => {
-                    const picked = selectedDifyIds.has(k.id as number)
-                    return (
-                      <button key={k.id} onClick={() => setSelectedDifyIds(prev => { const n = new Set(prev); picked ? n.delete(k.id as number) : n.add(k.id as number); return n })}
-                        className={`min-w-full w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-left transition ${picked ? 'bg-amber-50 border border-amber-200' : 'hover:bg-slate-50 border border-transparent'}`}>
-                        <div className={`w-4 h-4 rounded border flex items-center justify-center flex-shrink-0 ${picked ? 'bg-amber-500 border-amber-500' : 'border-slate-300'}`}>
-                          {picked && <Check size={10} className="text-white" />}
-                        </div>
-                        <div className="flex-shrink-0">
-                          <p className="text-xs font-medium text-slate-800 whitespace-nowrap">{localName(k)}</p>
-                          {localDesc(k) && <p className="text-xs text-slate-400 whitespace-nowrap">{localDesc(k)}</p>}
-                        </div>
-                      </button>
-                    )
-                  })}
-                </div>
-                <div className="p-2 border-t border-slate-100 flex justify-between items-center">
-                  <button onClick={() => setSelectedDifyIds(new Set())} className="text-xs text-slate-400 hover:text-red-500 px-2 py-1">{t('chat.topbar.clear')}</button>
-                  <button onClick={() => setShowDifyPanel(false)} className="px-3 py-1.5 text-xs bg-amber-500 text-white rounded-lg hover:bg-amber-600">{t('chat.topbar.confirm')}</button>
-                </div>
-              </div>
-            )}
+              )
+            })()}
           </div>
 
           {/* ── Self-built KB button ── */}
@@ -871,37 +991,69 @@ export default function ChatPage() {
               <Database size={13} />
               {selectedKbIds.size > 0 ? t('chat.topbar.kbCount', { count: selectedKbIds.size }) : t('chat.topbar.kb')}
             </button>
-            {showKbPanel && (
-              <div className="absolute top-full right-0 mt-1 w-72 bg-white border border-slate-200 rounded-xl shadow-2xl z-50">
-                <div className="p-3 border-b border-slate-100 flex items-center justify-between">
-                  <span className="text-sm font-semibold text-slate-800 flex items-center gap-1.5"><Database size={14} className="text-emerald-500" />{t('chat.topbar.kbPanelTitle')}</span>
-                  <button onClick={() => setShowKbPanel(false)} className="text-slate-400 hover:text-slate-600"><X size={14} /></button>
+            {showKbPanel && (() => {
+              const _q = kbSearch.toLowerCase()
+              const _base = applyOrder(allSelfKbs, kbOrder)
+              const _match = (s: ToolItem) => !_q || localName(s).toLowerCase().includes(_q) || (localDesc(s)||'').toLowerCase().includes(_q)
+              const _vis = _base.filter(s => !kbHidden.has(String(s.id)) && _match(s))
+              const _hid = _base.filter(s => kbHidden.has(String(s.id)) && _match(s))
+              const KbRow = ({ s, isHid }: { s: ToolItem; isHid: boolean }) => {
+                const sid = String(s.id); const picked = !isHid && selectedKbIds.has(sid)
+                return (
+                  <div key={sid} draggable={!_q}
+                    onDragStart={() => { kbDragSrc.current = sid }}
+                    onDragOver={e => e.preventDefault()}
+                    onDrop={() => {
+                      if (kbDragSrc.current == null || kbDragSrc.current === sid) return
+                      const ids = applyOrder(allSelfKbs, kbOrder).map(x => String(x.id))
+                      const f = ids.indexOf(kbDragSrc.current!); const tt = ids.indexOf(sid)
+                      if (f !== -1 && tt !== -1) setKbOrder(reorderArr(ids, f, tt))
+                      kbDragSrc.current = null
+                    }}
+                    className={`flex items-center gap-2 px-2 py-1.5 rounded-lg border transition group ${isHid ? 'opacity-40 border-transparent' : picked ? 'bg-emerald-50 border-emerald-200' : 'hover:bg-slate-50 border-transparent'}`}
+                  >
+                    {!_q && <GripVertical size={12} className="text-slate-300 cursor-grab flex-shrink-0" />}
+                    {!isHid
+                      ? <button onClick={() => setSelectedKbIds(prev => { const n = new Set(prev); picked ? n.delete(sid) : n.add(sid); return n })} className={`w-4 h-4 rounded border flex items-center justify-center flex-shrink-0 ${picked ? 'bg-emerald-600 border-emerald-600' : 'border-slate-300'}`}>{picked && <Check size={10} className="text-white" />}</button>
+                      : <div className="w-4 h-4 flex-shrink-0" />
+                    }
+                    <button onClick={() => setKbHidden(prev => { const n = new Set(prev); n.has(sid) ? n.delete(sid) : n.add(sid); return n })}
+                      className={`w-4 h-4 rounded-full flex items-center justify-center flex-shrink-0 bg-blue-500 hover:bg-blue-700 text-white transition-all ${isHid ? '' : 'opacity-0 group-hover:opacity-100'}`}
+                      title={isHid ? '取消隱藏' : '隱藏'}>
+                      {isHid ? <Eye size={9} /> : <EyeOff size={9} />}
+                    </button>
+                    <div className="flex-1 min-w-0 cursor-pointer" onClick={() => { if (!isHid) setSelectedKbIds(prev => { const n = new Set(prev); picked ? n.delete(sid) : n.add(sid); return n }) }}>
+                      <p className="text-xs font-medium text-slate-800 whitespace-nowrap">{localName(s)}</p>
+                      {localDesc(s) && <p className="text-xs text-slate-400 whitespace-nowrap">{localDesc(s)}</p>}
+                    </div>
+                  </div>
+                )
+              }
+              return (
+                <div className="absolute top-full right-0 mt-1 w-80 bg-white border border-slate-200 rounded-xl shadow-2xl z-50">
+                  <div className="p-3 border-b border-slate-100">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-sm font-semibold text-slate-800 flex items-center gap-1.5"><Database size={14} className="text-emerald-500" />{t('chat.topbar.kbPanelTitle')}</span>
+                      <button onClick={() => setShowKbPanel(false)} className="text-slate-400 hover:text-slate-600"><X size={14} /></button>
+                    </div>
+                    <div className="relative">
+                      <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                      <input value={kbSearch} onChange={e => setKbSearch(e.target.value)} placeholder="搜尋..." autoFocus
+                        className="w-full pl-7 pr-3 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-300" />
+                    </div>
+                  </div>
+                  <div className="max-h-56 overflow-y-auto p-2 space-y-0.5">
+                    {allSelfKbs.length === 0 ? (
+                      <div className="text-center py-6 text-slate-400 text-xs">{t('chat.topbar.kbEmpty')}</div>
+                    ) : <>{_vis.map(s => <KbRow key={s.id} s={s} isHid={false} />)}{_hid.length > 0 && <><div className="px-2 pt-1.5 pb-0.5 text-xs text-slate-400 border-t border-slate-100 mt-1">已隱藏 ({_hid.length})</div>{_hid.map(s => <KbRow key={s.id} s={s} isHid={true} />)}</>}</>}
+                  </div>
+                  <div className="p-2 border-t border-slate-100 flex justify-between items-center">
+                    <button onClick={() => setSelectedKbIds(new Set())} className="text-xs text-slate-400 hover:text-red-500 px-2 py-1">{t('chat.topbar.clear')}</button>
+                    <button onClick={() => setShowKbPanel(false)} className="px-3 py-1.5 text-xs bg-emerald-600 text-white rounded-lg hover:bg-emerald-700">{t('chat.topbar.confirm')}</button>
+                  </div>
                 </div>
-                <div className="max-h-56 overflow-y-auto overflow-x-auto p-2 space-y-1">
-                  {allSelfKbs.length === 0 ? (
-                    <div className="text-center py-6 text-slate-400 text-xs">{t('chat.topbar.kbEmpty')}</div>
-                  ) : allSelfKbs.map(k => {
-                    const picked = selectedKbIds.has(String(k.id))
-                    return (
-                      <button key={k.id} onClick={() => setSelectedKbIds(prev => { const n = new Set(prev); picked ? n.delete(String(k.id)) : n.add(String(k.id)); return n })}
-                        className={`min-w-full w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-left transition ${picked ? 'bg-emerald-50 border border-emerald-200' : 'hover:bg-slate-50 border border-transparent'}`}>
-                        <div className={`w-4 h-4 rounded border flex items-center justify-center flex-shrink-0 ${picked ? 'bg-emerald-600 border-emerald-600' : 'border-slate-300'}`}>
-                          {picked && <Check size={10} className="text-white" />}
-                        </div>
-                        <div className="flex-shrink-0">
-                          <p className="text-xs font-medium text-slate-800 whitespace-nowrap">{localName(k)}</p>
-                          {localDesc(k) && <p className="text-xs text-slate-400 whitespace-nowrap">{localDesc(k)}</p>}
-                        </div>
-                      </button>
-                    )
-                  })}
-                </div>
-                <div className="p-2 border-t border-slate-100 flex justify-between items-center">
-                  <button onClick={() => setSelectedKbIds(new Set())} className="text-xs text-slate-400 hover:text-red-500 px-2 py-1">{t('chat.topbar.clear')}</button>
-                  <button onClick={() => setShowKbPanel(false)} className="px-3 py-1.5 text-xs bg-emerald-600 text-white rounded-lg hover:bg-emerald-700">{t('chat.topbar.confirm')}</button>
-                </div>
-              </div>
-            )}
+              )
+            })()}
           </div>
 
           {/* Skills button + badges */}
@@ -925,73 +1077,101 @@ export default function ChatPage() {
               </button>
 
               {/* Skill selection dropdown panel */}
-              {showSkillPanel && (
-                <div className="absolute top-full right-0 mt-1 w-80 bg-white border border-slate-200 rounded-xl shadow-2xl z-50">
-                  <div className="p-3 border-b border-slate-100">
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-sm font-semibold text-slate-800 flex items-center gap-1.5"><Sparkles size={14} className="text-purple-500" />{t('chat.topbar.skillsPanelTitle')}</span>
-                      <button onClick={() => setShowSkillPanel(false)} className="text-slate-400 hover:text-slate-600"><X size={14} /></button>
-                    </div>
-                    <div className="relative">
-                      <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
-                      <input
-                        value={skillSearch} onChange={e => setSkillSearch(e.target.value)}
-                        placeholder={t('chat.topbar.searchSkills')}
-                        className="w-full pl-7 pr-3 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-300"
-                        autoFocus
-                      />
-                    </div>
-                  </div>
-
-                  <div className="max-h-64 overflow-y-auto overflow-x-auto p-2 space-y-1">
-                    {allSkills
-                      .filter(sk => !skillSearch || sk.name.includes(skillSearch) || (sk.description || '').includes(skillSearch))
-                      .map(sk => {
-                        const picked = pickedIds.has(sk.id)
-                        return (
-                          <button
-                            key={sk.id}
-                            onClick={() => togglePick(sk.id)}
-                            className={`min-w-full w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-left transition ${picked ? 'bg-purple-50 border border-purple-200' : 'hover:bg-slate-50 border border-transparent'
-                              }`}
-                          >
-                            <div className={`w-4 h-4 rounded border flex items-center justify-center flex-shrink-0 transition ${picked ? 'bg-purple-600 border-purple-600' : 'border-slate-300'
-                              }`}>
-                              {picked && <Check size={10} className="text-white" />}
-                            </div>
-                            <span className="text-lg leading-none flex-shrink-0">{sk.icon}</span>
-                            <div className="flex-shrink-0">
-                              <p className="text-xs font-medium text-slate-800 whitespace-nowrap">{localName(sk)}</p>
-                              {localDesc(sk) && <p className="text-xs text-slate-400 whitespace-nowrap">{localDesc(sk)}</p>}
-                            </div>
-                            {sk.model_key && <span className="text-xs text-indigo-500 flex-shrink-0 ml-2">{sk.model_key}</span>}
-                          </button>
-                        )
-                      })
-                    }
-                    {allSkills.length === 0 && (
-                      <div className="text-center py-6 text-slate-400">
-                        <Sparkles size={24} className="mx-auto mb-2 opacity-30" />
-                        <p className="text-xs">{t('chat.topbar.skillsEmpty')}</p>
-                        <a href="/skills" className="text-xs text-purple-500 hover:underline flex items-center justify-center gap-1 mt-1"><Plus size={10} />{t('chat.topbar.createSkill')}</a>
+              {showSkillPanel && (() => {
+                const _base = applyOrder(allSkills, skillOrder)
+                const _vis = _base.filter(sk => !skillHidden.has(sk.id) && (!skillSearch || sk.name.includes(skillSearch) || (sk.description||'').includes(skillSearch)))
+                const _hid = _base.filter(sk => skillHidden.has(sk.id) && (!skillSearch || sk.name.includes(skillSearch) || (sk.description||'').includes(skillSearch)))
+                return (
+                  <div className="absolute top-full right-0 mt-1 w-80 bg-white border border-slate-200 rounded-xl shadow-2xl z-50">
+                    <div className="p-3 border-b border-slate-100">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-sm font-semibold text-slate-800 flex items-center gap-1.5"><Sparkles size={14} className="text-purple-500" />{t('chat.topbar.skillsPanelTitle')}</span>
+                        <button onClick={() => setShowSkillPanel(false)} className="text-slate-400 hover:text-slate-600"><X size={14} /></button>
                       </div>
-                    )}
-                  </div>
+                      <div className="relative">
+                        <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                        <input value={skillSearch} onChange={e => setSkillSearch(e.target.value)}
+                          placeholder={t('chat.topbar.searchSkills')}
+                          className="w-full pl-7 pr-3 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-300" autoFocus />
+                      </div>
+                    </div>
 
-                  <div className="p-3 border-t border-slate-100 flex justify-between items-center">
-                    <span className="text-xs text-slate-500">{t('chat.topbar.selectedCount', { count: pickedIds.size })}</span>
-                    <div className="flex gap-2">
-                      <button onClick={() => setShowSkillPanel(false)} className="px-3 py-1.5 text-xs text-slate-500 hover:bg-slate-100 rounded-lg">{t('common.cancel')}</button>
-                      <button
-                        onClick={saveSkills} disabled={skillSaving}
-                        className="px-3 py-1.5 text-xs bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50"
-                      >
-                        {skillSaving ? t('common.saving') : t('chat.topbar.confirmMount')}
-                      </button>
+                    <div className="max-h-64 overflow-y-auto p-2 space-y-0.5">
+                      {allSkills.length === 0 ? (
+                        <div className="text-center py-6 text-slate-400">
+                          <Sparkles size={24} className="mx-auto mb-2 opacity-30" />
+                          <p className="text-xs">{t('chat.topbar.skillsEmpty')}</p>
+                          <a href="/skills" className="text-xs text-purple-500 hover:underline flex items-center justify-center gap-1 mt-1"><Plus size={10} />{t('chat.topbar.createSkill')}</a>
+                        </div>
+                      ) : <>
+                        {_vis.map(sk => {
+                          const picked = pickedIds.has(sk.id)
+                          return (
+                            <div key={sk.id} draggable={!skillSearch}
+                              onDragStart={() => { (window as any)._skillDragSrc = sk.id }}
+                              onDragOver={e => e.preventDefault()}
+                              onDrop={() => {
+                                const src = (window as any)._skillDragSrc
+                                if (src == null || src === sk.id) return
+                                const ids = applyOrder(allSkills, skillOrder).map(x => x.id)
+                                const f = ids.indexOf(src); const tt = ids.indexOf(sk.id)
+                                if (f !== -1 && tt !== -1) setSkillOrder(reorderArr(ids, f, tt))
+                                ;(window as any)._skillDragSrc = null
+                              }}
+                              className={`flex items-center gap-2 px-2 py-1.5 rounded-lg border transition group ${picked ? 'bg-purple-50 border-purple-200' : 'hover:bg-slate-50 border-transparent'}`}
+                            >
+                              {!skillSearch && <GripVertical size={12} className="text-slate-300 cursor-grab flex-shrink-0" />}
+                              <button onClick={() => togglePick(sk.id)} className={`w-4 h-4 rounded border flex items-center justify-center flex-shrink-0 transition ${picked ? 'bg-purple-600 border-purple-600' : 'border-slate-300'}`}>
+                                {picked && <Check size={10} className="text-white" />}
+                              </button>
+                              <button onClick={() => setSkillHidden(prev => { const n = new Set(prev); n.add(sk.id); return n })}
+                                className="w-4 h-4 rounded-full flex items-center justify-center flex-shrink-0 bg-blue-500 hover:bg-blue-700 text-white transition-all opacity-0 group-hover:opacity-100"
+                                title="隱藏">
+                                <EyeOff size={9} />
+                              </button>
+                              <span className="text-lg leading-none flex-shrink-0">{sk.icon}</span>
+                              <div className="flex-1 min-w-0 cursor-pointer" onClick={() => togglePick(sk.id)}>
+                                <p className="text-xs font-medium text-slate-800 whitespace-nowrap">{localName(sk)}</p>
+                                {localDesc(sk) && <p className="text-xs text-slate-400 whitespace-nowrap">{localDesc(sk)}</p>}
+                              </div>
+                              {sk.model_key && <span className="text-xs text-indigo-500 flex-shrink-0">{sk.model_key}</span>}
+                            </div>
+                          )
+                        })}
+                        {_hid.length > 0 && <>
+                          <div className="px-2 pt-1.5 pb-0.5 text-xs text-slate-400 border-t border-slate-100 mt-1">已隱藏 ({_hid.length})</div>
+                          {_hid.map(sk => (
+                            <div key={sk.id} className="flex items-center gap-2 px-2 py-1.5 rounded-lg border border-transparent opacity-40 hover:opacity-70 transition group">
+                              {!skillSearch && <GripVertical size={12} className="text-slate-300 flex-shrink-0" />}
+                              <div className="w-4 h-4 flex-shrink-0" />
+                              <button onClick={() => setSkillHidden(prev => { const n = new Set(prev); n.delete(sk.id); return n })}
+                                className="w-4 h-4 rounded-full flex items-center justify-center flex-shrink-0 bg-blue-500 hover:bg-blue-700 text-white transition-all"
+                                title="取消隱藏">
+                                <Eye size={9} />
+                              </button>
+                              <span className="text-lg leading-none flex-shrink-0">{sk.icon}</span>
+                              <div className="flex-1 min-w-0">
+                                <p className="text-xs font-medium text-slate-800 whitespace-nowrap">{localName(sk)}</p>
+                                {localDesc(sk) && <p className="text-xs text-slate-400 whitespace-nowrap">{localDesc(sk)}</p>}
+                              </div>
+                            </div>
+                          ))}
+                        </>}
+                      </>}
+                    </div>
+
+                    <div className="p-3 border-t border-slate-100 flex justify-between items-center">
+                      <span className="text-xs text-slate-500">{t('chat.topbar.selectedCount', { count: pickedIds.size })}</span>
+                      <div className="flex gap-2">
+                        <button onClick={() => setShowSkillPanel(false)} className="px-3 py-1.5 text-xs text-slate-500 hover:bg-slate-100 rounded-lg">{t('common.cancel')}</button>
+                        <button onClick={saveSkills} disabled={skillSaving} className="px-3 py-1.5 text-xs bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50">
+                          {skillSaving ? t('common.saving') : t('chat.topbar.confirmMount')}
+                        </button>
+                      </div>
                     </div>
                   </div>
-                </div>
-              )}
+                )
+              })()}
             </div>
 
           {/* ── AI 戰情快速入口 ── */}
