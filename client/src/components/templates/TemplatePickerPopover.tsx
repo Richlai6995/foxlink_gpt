@@ -84,7 +84,7 @@ export default function TemplatePickerPopover({ onSelect, onClose }: Props) {
             {!q && <GripVertical size={13} className="text-slate-300 cursor-grab ml-2 flex-shrink-0" />}
             <button onClick={() => onSelect(t)} className="flex-1 flex items-center gap-2 px-2 py-2 text-xs text-left min-w-0">
               <FormatIcon format={t.format} />
-              <div className="flex-1 min-w-0 overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
+              <div className="flex-1 min-w-0 overflow-x-auto" style={{ scrollbarWidth: 'thin' }}>
                 <div className="whitespace-nowrap">{t.name}</div>
                 {t.creator_name && t.access_level !== 'owner' && (
                   <div className="text-slate-400 whitespace-nowrap">by {t.creator_name}</div>
@@ -129,7 +129,7 @@ export default function TemplatePickerPopover({ onSelect, onClose }: Props) {
   const shared = base.filter(t => t.access_level === 'edit' || t.access_level === 'use')
 
   return (
-    <div ref={ref} className="absolute bottom-full mb-2 left-0 w-80 bg-white border rounded-lg shadow-lg z-40 overflow-hidden">
+    <div ref={ref} className="absolute bottom-full mb-2 left-0 w-[520px] bg-white border rounded-lg shadow-lg z-40 overflow-hidden">
       <div className="px-3 py-2 border-b flex items-center gap-2">
         <Search size={13} className="text-slate-400" />
         <input autoFocus className="flex-1 text-xs outline-none" placeholder="搜尋範本..."
