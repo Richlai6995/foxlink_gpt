@@ -1482,7 +1482,7 @@ async function listTemplates(db, user, { search, format, tag } = {}) {
     sql = `
       SELECT t.id, t.creator_id, t.name, t.description, t.format, t.strategy,
              t.template_file, t.original_file, t.schema_json, t.preview_url,
-             t.is_public, t.tags, t.use_count, t.forked_from, t.created_at, t.updated_at,
+             t.is_public, t.is_fixed_format, t.tags, t.use_count, t.forked_from, t.created_at, t.updated_at,
              'owner' AS access_level
       FROM doc_templates t
       WHERE 1=1
@@ -1492,7 +1492,7 @@ async function listTemplates(db, user, { search, format, tag } = {}) {
     sql = `
       SELECT t.id, t.creator_id, t.name, t.description, t.format, t.strategy,
              t.template_file, t.original_file, t.schema_json, t.preview_url,
-             t.is_public, t.tags, t.use_count, t.forked_from, t.created_at, t.updated_at,
+             t.is_public, t.is_fixed_format, t.tags, t.use_count, t.forked_from, t.created_at, t.updated_at,
         CASE
           WHEN t.creator_id = ? THEN 'owner'
           WHEN EXISTS (
