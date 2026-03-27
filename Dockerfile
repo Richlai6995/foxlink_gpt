@@ -23,7 +23,7 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends tzdata fontconfig \
     && (apt-get install -y --no-install-recommends libaio1t64 2>/dev/null \
         || apt-get install -y --no-install-recommends libaio1) \
-    && apt-get install -y --no-install-recommends libreoffice-writer \
+    && apt-get install -y --no-install-recommends libreoffice-writer libreoffice-draw \
     && rm -rf /var/lib/apt/lists/*
 
 # Timezone

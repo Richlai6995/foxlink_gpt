@@ -1270,20 +1270,38 @@ async function generateDocument(db, templateId, userId, inputData, outputFormat,
     const execFileAsync = promisify(execFile);
 
     const soffice = process.env.SOFFICE_PATH || 'soffice';
+    let sofficStdout = '', sofficeStderr = '';
     try {
-      await execFileAsync(soffice, [
+      const result = await execFileAsync(soffice, [
         '--headless', '--convert-to', 'docx',
         '--outdir', outDir,
         tmpPdfPath,
       ], { timeout: 60000 });
+      sofficStdout = result.stdout || '';
+      sofficeStderr = result.stderr || '';
     } catch (e) {
       await fs.unlink(tmpPdfPath).catch(() => {});
-      throw new Error(`LibreOffice 轉換失敗: ${e.message}`);
+      throw new Error(`LibreOffice 轉換失敗: ${e.message}\n${e.stderr || ''}`);
     }
 
-    // soffice outputs <stem>.docx in outDir
+    // soffice outputs <stem>.docx — find it by scanning outDir
+    // (stem may include path separators on some platforms)
+    const expectedName = `${tmpPdfId}.docx`;
+    const expectedPath = path.join(outDir, expectedName);
+    const exists = await fs.access(expectedPath).then(() => true).catch(() => false);
+    if (!exists) {
+      // Scan for any newly created .docx to aid diagnosis
+      const dirEntries = await fs.readdir(outDir);
+      const candidates = dirEntries.filter(f => f.endsWith('.docx'));
+      console.error(`[DocTemplate] LibreOffice stdout: ${sofficStdout}`);
+      console.error(`[DocTemplate] LibreOffice stderr: ${sofficeStderr}`);
+      console.error(`[DocTemplate] Expected: ${expectedName}, found docx files: ${candidates.join(', ')}`);
+      await fs.unlink(tmpPdfPath).catch(() => {});
+      throw new Error('LibreOffice 未產生 DOCX 檔案，請確認 libreoffice-draw 已安裝（PDF import filter）');
+    }
+
     outPath = path.join(outDir, `${outputId}.docx`);
-    await fs.rename(path.join(outDir, `${tmpPdfId}.docx`), outPath);
+    await fs.rename(expectedPath, outPath);
     await fs.unlink(tmpPdfPath).catch(() => {});
 
   } else if (tpl.format === 'pdf' && tpl.strategy !== 'pdf_form') {
