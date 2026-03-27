@@ -90,16 +90,24 @@ function pdfToCanvas(cell: PdfCell, scale: number) {
 }
 
 export default function PDFFieldEditor({ templateId, variables, onChange, readonly }: Props) {
-  const canvasRef  = useRef<HTMLCanvasElement>(null)
-  const overlayRef = useRef<SVGSVGElement>(null)
+  const canvasRef    = useRef<HTMLCanvasElement>(null)
+  const overlayRef   = useRef<SVGSVGElement>(null)
+  const canvasAreaRef = useRef<HTMLDivElement>(null)
 
   const [pdfDoc, setPdfDoc]       = useState<import('pdfjs-dist').PDFDocumentProxy | null>(null)
   const [pageNum, setPageNum]     = useState(1)
   const [pageCount, setPageCount] = useState(1)
-  const [scale, setScale]         = useState(1.3)
+  const [scale, setScale]         = useState(1.5)
   const [pageSize, setPageSize]   = useState({ w: 0, h: 0, ptW: 0, ptH: 0 })
   const [loading, setLoading]     = useState(true)
   const [error, setError]         = useState('')
+
+  const fitWidth = useCallback(() => {
+    if (!canvasAreaRef.current || !pageSize.ptW) return
+    const containerW = canvasAreaRef.current.clientWidth - 24  // minus padding
+    const newScale = Math.floor((containerW / pageSize.ptW) * 10) / 10
+    setScale(Math.max(0.5, Math.min(5, newScale)))
+  }, [pageSize.ptW])
 
   // Fields: derived from variables' pdf_cell on current page
   const flatVars  = getFlatVars(variables)
@@ -240,9 +248,21 @@ export default function PDFFieldEditor({ templateId, variables, onChange, readon
             <button onClick={() => setPageNum(p => Math.min(pageCount, p + 1))} disabled={pageNum >= pageCount} className="px-2 py-0.5 border rounded text-xs disabled:opacity-40">›</button>
           </div>
           <div className="flex items-center gap-1">
-            <button onClick={() => setScale(s => Math.max(0.5, +(s - 0.2).toFixed(1)))} className="px-2 py-0.5 border rounded text-xs">−</button>
-            <span className="text-xs w-10 text-center">{Math.round(scale * 100)}%</span>
-            <button onClick={() => setScale(s => Math.min(3, +(s + 0.2).toFixed(1)))} className="px-2 py-0.5 border rounded text-xs">+</button>
+            <button onClick={() => setScale(s => Math.max(0.5, +(s - 0.25).toFixed(2)))} className="px-2 py-0.5 border rounded text-xs">−</button>
+            <select
+              className="text-xs border rounded px-1 py-0.5 w-20 text-center"
+              value={scale}
+              onChange={e => setScale(+e.target.value)}
+            >
+              {[0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.5, 3, 4, 5].map(v => (
+                <option key={v} value={v}>{Math.round(v * 100)}%</option>
+              ))}
+              {![0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.5, 3, 4, 5].includes(scale) && (
+                <option value={scale}>{Math.round(scale * 100)}%</option>
+              )}
+            </select>
+            <button onClick={() => setScale(s => Math.min(5, +(s + 0.25).toFixed(2)))} className="px-2 py-0.5 border rounded text-xs">+</button>
+            <button onClick={fitWidth} className="px-2 py-0.5 border rounded text-xs text-blue-600 hover:bg-blue-50" title="符合寬度">符合</button>
           </div>
           {/* Assign target selector */}
           {!readonly && (
@@ -265,7 +285,7 @@ export default function PDFFieldEditor({ templateId, variables, onChange, readon
         </div>
 
         {/* Canvas area */}
-        <div className="flex-1 overflow-auto border rounded bg-slate-100 relative" style={{ cursor: assignKey && !readonly ? 'crosshair' : 'default' }}>
+        <div ref={canvasAreaRef} className="flex-1 overflow-auto border rounded bg-slate-100 relative" style={{ cursor: assignKey && !readonly ? 'crosshair' : 'default' }}>
           {loading && <div className="absolute inset-0 flex items-center justify-center text-xs text-slate-500 bg-white/80">載入中...</div>}
           {error   && <div className="absolute inset-0 flex items-center justify-center text-xs text-red-500 bg-white/80 p-4 text-center">{error}</div>}
 
