@@ -906,15 +906,13 @@ async function generateDocument(db, templateId, userId, inputData, outputFormat)
             }
             if (headerIdx === -1) continue;
 
-            // Collect consecutive blank rows after header
-            const blankRows = [];
-            for (let ri = headerIdx + 1; ri < rows.length; ri++) {
-              const cells = [...rows[ri][0].matchAll(/<w:tc\b[^>]*>[\s\S]*?<\/w:tc>/g)];
-              if (cells.length > 0 && cells.every(c => getTcText(c[0]).trim() === '')) {
-                blankRows.push(rows[ri][0]);
-              } else { break; }
-            }
-            if (blankRows.length === 0) continue;
+            // All rows after header → use first as template, replace all with generated
+            const rowsAfterHeader = rows.slice(headerIdx + 1);
+            if (rowsAfterHeader.length === 0) continue;
+
+            const templateRow = rowsAfterHeader[0][0];
+            const templateCells = [...templateRow.matchAll(/<w:tc\b[^>]*>[\s\S]*?<\/w:tc>/g)];
+            if (templateCells.length === 0) continue;
 
             // Map children to column indices via header row
             const headerCells = [...rows[headerIdx][0].matchAll(/<w:tc\b[^>]*>[\s\S]*?<\/w:tc>/g)];
@@ -928,13 +926,12 @@ async function generateDocument(db, templateId, userId, inputData, outputFormat)
             });
 
             const newRows = items.map(item => {
-              let row = blankRows[0];
+              let row = templateRow;
               let offset = 0;
               const sorted = [...childColMap].sort((a, b) => a.colIdx - b.colIdx);
-              const blankCells = [...blankRows[0].matchAll(/<w:tc\b[^>]*>[\s\S]*?<\/w:tc>/g)];
               for (const { c, colIdx } of sorted) {
-                if (colIdx >= blankCells.length) continue;
-                const cell = blankCells[colIdx];
+                if (colIdx >= templateCells.length) continue;
+                const cell = templateCells[colIdx];
                 const cStyle = isFixed ? getEffectiveStyle(c) : null;
                 const val = String(item[c.key] ?? '');
                 const newCell = buildReplacedTc(cell[0], val, cStyle);
@@ -944,9 +941,9 @@ async function generateDocument(db, templateId, userId, inputData, outputFormat)
               return applyRowHeight(row);
             });
 
-            // Replace first blank row with generated rows; remove extras
-            xml = xml.replace(blankRows[0], newRows.join(''));
-            for (let i = 1; i < blankRows.length; i++) xml = xml.replace(blankRows[i], '');
+            // Replace first data row with N generated rows; remove remaining template rows
+            xml = xml.replace(templateRow, newRows.join(''));
+            for (let i = 1; i < rowsAfterHeader.length; i++) xml = xml.replace(rowsAfterHeader[i][0], '');
             blankHandled = true;
             break;
           }
