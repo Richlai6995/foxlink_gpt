@@ -941,9 +941,14 @@ async function generateDocument(db, templateId, userId, inputData, outputFormat)
               return applyRowHeight(row);
             });
 
-            // Replace first data row with N generated rows; remove remaining template rows
-            xml = xml.replace(templateRow, newRows.join(''));
-            for (let i = 1; i < rowsAfterHeader.length; i++) xml = xml.replace(rowsAfterHeader[i][0], '');
+            // Position-based replacement: keep everything up to and including header row,
+            // then inject all generated rows, then close the table.
+            const headerRow = rows[headerIdx];
+            const afterHeaderStart = headerRow.index + headerRow[0].length;
+            const tableCloseTag = '</w:tbl>';
+            const tableCloseIdx = tblXml.lastIndexOf(tableCloseTag);
+            const newTblXml = tblXml.slice(0, afterHeaderStart) + newRows.join('') + tblXml.slice(tableCloseIdx);
+            xml = xml.slice(0, tm.index) + newTblXml + xml.slice(tm.index + tblXml.length);
             blankHandled = true;
             break;
           }
