@@ -1134,7 +1134,6 @@ export default function ChatPage() {
                                 <p className="text-xs font-medium text-slate-800 whitespace-nowrap">{localName(sk)}</p>
                                 {localDesc(sk) && <p className="text-xs text-slate-400 whitespace-nowrap">{localDesc(sk)}</p>}
                               </div>
-                              {sk.model_key && <span className="text-xs text-indigo-500 flex-shrink-0">{sk.model_key}</span>}
                             </div>
                           )
                         })}
