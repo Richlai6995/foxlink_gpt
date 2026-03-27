@@ -102,7 +102,7 @@ function TemplateEditModal({ template, onClose, onSaved }: {
 
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg w-[780px] max-h-[85vh] flex flex-col">
+      <div className="bg-white rounded-lg w-[calc(100vw-32px)] h-[calc(100vh-32px)] flex flex-col">
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-3 border-b">
           <div className="flex items-center gap-4">

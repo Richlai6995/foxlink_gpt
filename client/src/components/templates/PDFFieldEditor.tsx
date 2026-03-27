@@ -229,7 +229,7 @@ export default function PDFFieldEditor({ templateId, variables, onChange, readon
   const assigned   = flatVars.filter(v => v.pdf_cell)
 
   return (
-    <div className="flex gap-3 h-[560px]">
+    <div className="flex gap-3 h-[calc(100vh-280px)] min-h-[480px]">
       {/* ── Left: PDF canvas + SVG overlay ────────────────────────────────── */}
       <div className="flex-1 flex flex-col min-w-0">
         {/* Toolbar */}
@@ -325,7 +325,7 @@ export default function PDFFieldEditor({ templateId, variables, onChange, readon
       </div>
 
       {/* ── Right: field list + selected field detail ─────────────────────── */}
-      <div className="w-56 flex flex-col gap-2 shrink-0 overflow-y-auto">
+      <div className="w-64 flex flex-col gap-2 shrink-0 overflow-y-auto">
         {/* Progress */}
         <div className="text-[11px] text-slate-500 bg-slate-50 border rounded p-2">
           <div className="font-medium mb-1">欄位定位進度</div>
@@ -336,7 +336,7 @@ export default function PDFFieldEditor({ templateId, variables, onChange, readon
         </div>
 
         {/* All fields mini list */}
-        <div className="border rounded overflow-hidden text-[11px]">
+        <div className="border rounded overflow-hidden text-[11px] max-h-64 overflow-y-auto">
           {flatVars.map((v, i) => (
             <div
               key={v.key}
