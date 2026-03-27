@@ -1222,9 +1222,12 @@ async function generateDocument(db, templateId, userId, inputData, outputFormat)
       // ── Helper: draw text lines with clip rect on a given page ─────────────
       function drawCellLines(pg, lines, cx, cyTop, cw, ch, cyBot, fontSize, isBold, fgColor) {
         const lineH = fontSize * 1.3;
+        // Extend clip downward by one font-size so the last line (whose baseline may sit
+        // just below the nominal cell boundary when linesPerCell uses Math.round) is visible.
+        const clipBot = cyBot - fontSize;
         pg.pushOperators(
           pushGraphicsState(),
-          moveTo(cx, cyBot), lineTo(cx + cw, cyBot), lineTo(cx + cw, cyTop), lineTo(cx, cyTop),
+          moveTo(cx, clipBot), lineTo(cx + cw, clipBot), lineTo(cx + cw, cyTop), lineTo(cx, cyTop),
           closePath(), clip(), endPath()
         );
         const useFont = (isBold && boldFont) ? boldFont : regularFont;
@@ -1440,31 +1443,36 @@ async function generateDocument(db, templateId, userId, inputData, outputFormat)
       const useBold = eff.bold === true && hasBoldFont;
       const valFont = useBold ? 'CJK-Bold' : 'CJK';
 
-      // Measure value text height for dynamic row sizing
+      // Measure value text height; pdfkit can under-report vs actual render,
+      // so add generous buffer: 15% extra + 1 line height + 16pt padding
       doc.font(valFont).fontSize(fz);
       const measuredH = doc.heightOfString(value || ' ', { width: valW - 10 });
-      const rowH = Math.max(22, measuredH + 12);
+      const rowH = Math.max(22, Math.ceil(measuredH * 1.15) + fz + 16);
 
-      // Page overflow: start a new page
+      // Page overflow: start a new page if remaining space is too small
       if (curY + rowH > ph - MX) {
         doc.addPage();
         doc.font(valFont).fontSize(fz);
         curY = MX;
       }
 
+      const rowStartY = curY;
+
       // ── Label cell (coloured background) ───────────────────────────────────
-      doc.rect(MX, curY, labelW, rowH).fillAndStroke(bg, '#aaaaaa');
+      doc.rect(MX, rowStartY, labelW, rowH).fillAndStroke(bg, '#aaaaaa');
       doc.font('CJK').fontSize(fzDefault).fillColor('#000000')
-        .text(label, MX + 4, curY + 6, { width: labelW - 8, lineBreak: false, ellipsis: true });
+        .text(label, MX + 4, rowStartY + 6, { width: labelW - 8, lineBreak: false, ellipsis: true });
 
       // ── Value cell (white background) ───────────────────────────────────────
-      doc.rect(MX + labelW, curY, valW, rowH).fillAndStroke('#ffffff', '#aaaaaa');
+      doc.rect(MX + labelW, rowStartY, valW, rowH).fillAndStroke('#ffffff', '#aaaaaa');
       if (value) {
         doc.font(valFont).fontSize(fz).fillColor(fgHex)
-          .text(value, MX + labelW + 4, curY + 6, { width: valW - 10 });
+          .text(value, MX + labelW + 4, rowStartY + 6, { width: valW - 10 });
+        // Use actual pdfkit cursor (doc.y) to advance; prevents gaps AND prevents overlap
+        curY = Math.max(rowStartY + rowH, doc.y + 4);
+      } else {
+        curY = rowStartY + rowH;
       }
-
-      curY += rowH;
     }
 
     outPath = path.join(outDir, `${outputId}.pdf`);
