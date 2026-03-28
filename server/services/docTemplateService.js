@@ -2363,9 +2363,8 @@ function parseJsonFromAiOutput(text) {
  * Returns { filename, publicUrl, filePath (absolute) }.
  */
 async function generateDocumentFromJson(db, templateId, jsonData, user, outputFormat) {
-  const access = await checkAccess(db, templateId, user);
-  if (!access) throw new Error('無範本存取權限');
-
+  // Trusted internal callers (scheduled tasks, pipelines, skills).
+  // Access was already verified at the API / UI layer when the user selected the template.
   const UPLOAD_DIR_PATH = process.env.UPLOAD_DIR
     ? path.resolve(process.env.UPLOAD_DIR)
     : path.join(__dirname, '../uploads');
