@@ -1395,7 +1395,32 @@ router.get('/online-dept/history', async (req, res) => {
        WHERE collected_at > SYSTIMESTAMP - INTERVAL '${hours}' HOUR
        ORDER BY collected_at ASC`
     ).all();
-    res.json(rows);
+
+    // Build code→name lookup from users table to backfill older snapshots that
+    // were recorded before profit_center_name / org_section_name columns existed.
+    // This ensures old-code series and new-name series are unified under the same key.
+    const pcMap = new Map();   // profit_center code → profit_center_name
+    const osMap = new Map();   // org_section code   → org_section_name
+    try {
+      const mappings = await db.prepare(
+        `SELECT DISTINCT profit_center, profit_center_name, org_section, org_section_name
+         FROM users
+         WHERE profit_center IS NOT NULL OR org_section IS NOT NULL`
+      ).all();
+      for (const r of mappings) {
+        if (r.profit_center && r.profit_center_name) pcMap.set(r.profit_center, r.profit_center_name);
+        if (r.org_section   && r.org_section_name)   osMap.set(r.org_section,   r.org_section_name);
+      }
+    } catch { /* ignore — fallback to code display */ }
+
+    // Enrich each row: fill in name where snapshot stored null
+    const enriched = rows.map(r => ({
+      ...r,
+      profit_center_name: r.profit_center_name || pcMap.get(r.profit_center) || null,
+      org_section_name:   r.org_section_name   || osMap.get(r.org_section)   || null,
+    }));
+
+    res.json(enriched);
   } catch {
     res.json([]);
   }
