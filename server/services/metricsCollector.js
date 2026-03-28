@@ -335,22 +335,33 @@ async function snapshotOnlineDept() {
       try {
         const ph = userIds.map(() => '?').join(',');
         const rows = await dbOracle.prepare(
-          `SELECT id, dept_code, profit_center, profit_center_name, org_section, org_section_name, org_group_name FROM users WHERE id IN (${ph})`
+          `SELECT id, dept_code, profit_center, org_section, org_group_name FROM users WHERE id IN (${ph})`
         ).all(...userIds);
         for (const r of rows) userMap.set(r.id, r);
       } catch {}
     }
 
-    // Aggregate by profit_center (primary dimension)
+    // Load org code→name from FL_ORG_EMP_DEPT_MV (authoritative, 20-min cached).
+    // Fallback to empty maps if ERP is unavailable — names will be null in snapshot
+    // and the history API will backfill them on query.
+    let pcMap = new Map(), osMap = new Map();
+    try {
+      const { getOrgCodeNameMaps } = require('./orgHierarchyService');
+      const { getErpPool }         = require('./dashboardService');
+      ({ pcMap, osMap } = await getOrgCodeNameMaps(getErpPool));
+    } catch { /* ERP unavailable — names left empty, backfilled at query time */ }
+
+    // Aggregate by (profit_center, org_section, org_group_name, dept_code)
     const agg = {};
     for (const [uid, sess] of seen) {
       const dbUser = userMap.get(uid) || {};
-      const profit_center = dbUser.profit_center || sess.profit_center || 'Unknown';
-      const org_section = dbUser.org_section || sess.org_section || '';
+      const profit_center  = dbUser.profit_center  || sess.profit_center  || 'Unknown';
+      const org_section    = dbUser.org_section    || sess.org_section    || '';
       const org_group_name = dbUser.org_group_name || '';
-      const dept_code = dbUser.dept_code || sess.dept_code || '';
-      const profit_center_name = dbUser.profit_center_name || '';
-      const org_section_name = dbUser.org_section_name || '';
+      const dept_code      = dbUser.dept_code      || sess.dept_code      || '';
+      // Names from MV (authoritative); fallback to session/db values
+      const profit_center_name = pcMap.get(profit_center) || '';
+      const org_section_name   = osMap.get(org_section)   || '';
       const key = JSON.stringify({ profit_center, org_section, org_group_name, dept_code });
       if (!agg[key]) agg[key] = { count: 0, profit_center_name, org_section_name };
       agg[key].count++;

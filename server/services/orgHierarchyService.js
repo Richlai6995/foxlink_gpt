@@ -437,10 +437,29 @@ function buildOrgScopePayload(scope) {
   };
 }
 
+/**
+ * 從 MV 取得 profit_center↔name、org_section↔name 的快速查詢 Map。
+ * 複用 loadDeptHierarchy 的 20 分鐘快取，不額外建連線。
+ *
+ * @param {Function} getErpPool  dashboardService.getErpPool()
+ * @returns {{ pcMap: Map<string,string>, osMap: Map<string,string> }}
+ */
+async function getOrgCodeNameMaps(getErpPool) {
+  const rows = await loadDeptHierarchy(getErpPool);
+  const pcMap = new Map(); // profit_center code → profit_center_name
+  const osMap = new Map(); // org_section code   → org_section_name
+  for (const r of rows) {
+    if (r.PROFIT_CENTER && r.PROFIT_CENTER_NAME) pcMap.set(r.PROFIT_CENTER, r.PROFIT_CENTER_NAME);
+    if (r.ORG_SECTION   && r.ORG_SECTION_NAME)   osMap.set(r.ORG_SECTION,   r.ORG_SECTION_NAME);
+  }
+  return { pcMap, osMap };
+}
+
 module.exports = {
   ORG_HIERARCHY_VALUE_TYPES,
   loadDeptHierarchy,
   resolveUserDeptScope,
   buildOrgScopePayload,
   invalidateCache,
+  getOrgCodeNameMaps,
 };

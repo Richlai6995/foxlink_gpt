@@ -43,7 +43,7 @@ export default function OnlineDeptChart() {
       const dimValue = dimension === 'profit_center'
         ? (d.profit_center_name || d.profit_center || 'Unknown')
         : dimension === 'org_section'
-          ? (d.org_section_name || d.org_section || 'Unknown')
+          ? (d.org_section_name ? `${d.org_section} ${d.org_section_name}` : d.org_section || 'Unknown')
           : (d[dimension] || 'Unknown')
       if (!snapGroups[key]) snapGroups[key] = { ts, values: {} }
       snapGroups[key].values[dimValue] = (snapGroups[key].values[dimValue] || 0) + d.user_count
