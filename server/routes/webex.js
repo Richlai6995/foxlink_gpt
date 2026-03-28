@@ -95,17 +95,29 @@ function stripMention(text, botName) {
 // ── DB 查用戶（email 正規化比對）────────────────────────────────────────────────
 async function findUserByEmail(db, rawEmail) {
   const normalized = normalizeEmail(rawEmail);
-  const row = await db.prepare(
-    `SELECT id, username, name, email, role, status,
-            allow_text_upload, text_max_mb,
-            allow_audio_upload, audio_max_mb,
-            allow_image_upload, image_max_mb,
-            budget_daily, budget_weekly, budget_monthly,
-            role_id, dept_code, profit_center, org_section, org_group_name
-     FROM users
-     WHERE LOWER(REPLACE(email, '.com.tw', '.com')) = ?
-     FETCH FIRST 1 ROWS ONLY`
-  ).get(normalized);
+  console.log(`[Webex][Auth] email lookup: raw="${rawEmail}" → normalized="${normalized}"`);
+  let row;
+  try {
+    row = await db.prepare(
+      `SELECT id, username, name, email, role, status,
+              allow_text_upload, text_max_mb,
+              allow_audio_upload, audio_max_mb,
+              allow_image_upload, image_max_mb,
+              budget_daily, budget_weekly, budget_monthly,
+              role_id, dept_code, profit_center, org_section, org_group_name
+       FROM users
+       WHERE LOWER(REPLACE(email, '.com.tw', '.com')) = ?
+       FETCH FIRST 1 ROWS ONLY`
+    ).get(normalized);
+  } catch (e) {
+    console.error(`[Webex][Auth] DB query error: ${e.message}`);
+    return null;
+  }
+  if (row) {
+    console.log(`[Webex][Auth] ✅ user found: id=${row.id} username="${row.username}" name="${row.name}" email="${row.email}" role=${row.role} status=${row.status}`);
+  } else {
+    console.warn(`[Webex][Auth] ❌ user NOT found for normalized email="${normalized}"`);
+  }
   return row;
 }
 
@@ -699,11 +711,14 @@ router.post('/webhook', async (req, res) => {
   const signature = req.headers['x-spark-signature'];
   const rawBody = req.rawBody; // Buffer，由 express.json verify 儲存
 
+  console.log(`[Webex] Webhook received: ip=${req.ip} hasRawBody=${!!rawBody} hasSignature=${!!signature}`);
+
   // 驗簽
   if (!verifySignature(rawBody, signature, secret)) {
-    console.warn('[Webex] Signature mismatch from', req.ip);
+    console.warn(`[Webex] ❌ Signature mismatch from ${req.ip} — rawBodyLen=${rawBody?.length ?? 'N/A'} sig="${signature?.slice(0,10)}..."`);
     return;
   }
+  console.log('[Webex] ✅ Signature verified');
 
   // req.body 已由 express.json 解析，直接用
   const event = req.body;
@@ -712,8 +727,13 @@ router.post('/webhook', async (req, res) => {
     return;
   }
 
+  console.log(`[Webex] Event: resource=${event.resource} event=${event.event} actorId=${event.actorId} msgId=${event.data?.id}`);
+
   // 只處理 messages:created
-  if (event.resource !== 'messages' || event.event !== 'created') return;
+  if (event.resource !== 'messages' || event.event !== 'created') {
+    console.log(`[Webex] Ignored non-message event: ${event.resource}/${event.event}`);
+    return;
+  }
 
   // 背景處理（不 block response）
   setImmediate(() => handleWebexEvent(event).catch(e => {
@@ -733,13 +753,21 @@ async function handleWebexEvent(event) {
 
   // 過濾 Bot 自己發的訊息
   const botPersonId = await webex.getBotPersonId().catch(() => null);
-  if (botPersonId && event.actorId === botPersonId) return;
-  if (botPersonId && event.data?.personId === botPersonId) return;
+  console.log(`[Webex] botPersonId=${botPersonId} actorId=${event.actorId}`);
+  if (botPersonId && event.actorId === botPersonId) {
+    console.log('[Webex] Ignored: bot own message (actorId match)');
+    return;
+  }
+  if (botPersonId && event.data?.personId === botPersonId) {
+    console.log('[Webex] Ignored: bot own message (personId match)');
+    return;
+  }
 
   // 取得完整訊息
   let message;
   try {
     message = await webex.getMessage(event.data.id);
+    console.log(`[Webex] Message fetched: id=${message.id} roomType=${message.roomType} personEmail="${message.personEmail}" text="${(message.text || '').slice(0, 80)}" files=${message.files?.length ?? 0}`);
   } catch (e) {
     console.error('[Webex] getMessage error:', e.message);
     return;
@@ -749,22 +777,25 @@ async function handleWebexEvent(event) {
   const roomId = message.roomId;
   const isDm = message.roomType === 'direct';
 
-  console.log(`[Webex] ${isDm ? 'DM' : 'Room'} from ${senderEmail} room=${roomId}`);
+  console.log(`[Webex] Incoming ${isDm ? 'DM' : 'GroupRoom'} from="${senderEmail}" roomId="${roomId}"`);
 
   // 查 user
   const user = await findUserByEmail(db, senderEmail);
   if (!user) {
+    console.warn(`[Webex][Auth] No user matched, sending rejection to roomId="${roomId}"`);
     await webex.sendMessage(roomId,
       `⚠️ 您的帳號（${senderEmail}）尚未在 FOXLINK GPT 系統中註冊。\n請聯絡系統管理員申請帳號。`
     );
     return;
   }
   if (user.status !== 'active') {
+    console.warn(`[Webex][Auth] User id=${user.id} status=${user.status}, rejected`);
     await webex.sendMessage(roomId,
       `⚠️ 您的帳號目前已停用，請聯絡系統管理員。`
     );
     return;
   }
+  console.log(`[Webex][Auth] User authenticated: id=${user.id} username="${user.username}" role=${user.role}`);
 
   // 取得 Bot 名稱（用來剝 mention）
   let botName = 'FOXLINK GPT';
@@ -776,15 +807,21 @@ async function handleWebexEvent(event) {
   // 解析訊息文字（去 mention）
   const rawText = message.text || '';
   const msgText = stripMention(rawText, botName).trim();
+  console.log(`[Webex] Message parsed: botName="${botName}" rawText="${rawText.slice(0, 80)}" → msgText="${msgText.slice(0, 80)}"`);
 
   // 非 DM 時若訊息為空（只有 mention）直接略過
-  if (!isDm && !msgText && (!message.files || message.files.length === 0)) return;
+  if (!isDm && !msgText && (!message.files || message.files.length === 0)) {
+    console.log('[Webex] Ignored: empty message after mention strip');
+    return;
+  }
 
   // 取得/建立 session
   let sessionId = await getOrCreateSession(db, user.id, roomId, isDm);
+  console.log(`[Webex] Session: id=${sessionId} isDm=${isDm}`);
 
   // ── 指令分派 ──────────────────────────────────────────────────────────────
   const cmdText = msgText.toLowerCase();
+  console.log(`[Webex] Dispatch: cmd="${cmdText.slice(0, 30)}"`);
 
   // ? → 工具清單
   if (msgText === '?') {
