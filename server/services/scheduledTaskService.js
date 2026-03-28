@@ -358,8 +358,12 @@ async function runTask(db, taskId) {
           (_match, type, fn) => '```generate_' + type + ':' + substituteVars(fn.trim(), task.name)
         );
       }
-      const blocks = await processGenerateBlocks(processableText, sid);
-      generatedFiles = blocks.map(b => ({ filename: b.filename, publicUrl: b.publicUrl, filePath: b.filePath }));
+      // When template IDs are in play, skip free-form generate blocks to avoid
+      // producing a duplicate default-styled file alongside the template output.
+      if (promptTemplateIds.length === 0) {
+        const blocks = await processGenerateBlocks(processableText, sid);
+        generatedFiles = blocks.map(b => ({ filename: b.filename, publicUrl: b.publicUrl, filePath: b.filePath }));
+      }
 
       // ── Template document generation ({{template:id}} or output_template_id) ─
       if (promptTemplateIds.length > 0) {
