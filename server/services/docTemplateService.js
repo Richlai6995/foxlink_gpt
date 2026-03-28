@@ -2341,15 +2341,16 @@ async function getTemplateSchemaInstruction(db, templateId) {
  */
 function parseJsonFromAiOutput(text) {
   if (!text) return null;
-  // Try ```json ... ``` fence first
-  const fenceMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/);
-  const raw = fenceMatch ? fenceMatch[1].trim() : text.trim();
+  // Strip any fenced code block (```...``` or ```lang:filename ... ```)
+  // The [^\n]* handles language tags including generate_xlsx:filename.xlsx
+  const stripped = text.replace(/```[^\n]*\n([\s\S]*?)```/g, '$1').trim();
+  const src = stripped || text.trim();
   // Find outermost { ... }
-  const start = raw.indexOf('{');
-  const end   = raw.lastIndexOf('}');
+  const start = src.indexOf('{');
+  const end   = src.lastIndexOf('}');
   if (start === -1 || end === -1) return null;
   try {
-    return JSON.parse(raw.slice(start, end + 1));
+    return JSON.parse(src.slice(start, end + 1));
   } catch (_) {
     return null;
   }

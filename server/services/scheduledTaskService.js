@@ -368,6 +368,7 @@ async function runTask(db, taskId) {
       // ── Template document generation ({{template:id}} or output_template_id) ─
       if (promptTemplateIds.length > 0) {
         const jsonData = parseJsonFromAiOutput(text);
+        console.log(`[Scheduled] parseJsonFromAiOutput result: ${jsonData ? JSON.stringify(jsonData).slice(0,200) : 'null'}`);
         if (jsonData) {
           for (const tid of promptTemplateIds) {
             try {
@@ -376,11 +377,11 @@ async function runTask(db, taskId) {
               generatedFiles.push({ filename: renderedFilename, publicUrl: tplFile.publicUrl, filePath: tplFile.filePath });
               console.log(`[Scheduled] Template ${tid} generated: ${tplFile.filename}`);
             } catch (e) {
-              console.error(`[Scheduled] Template ${tid} generation failed:`, e.message);
+              console.error(`[Scheduled] Template ${tid} generation failed:`, e.message, e.stack);
             }
           }
         } else {
-          console.warn('[Scheduled] Template requested but AI output is not valid JSON');
+          console.warn('[Scheduled] Template requested but AI output is not valid JSON, text snippet:', text.slice(0, 300));
         }
       }
 
