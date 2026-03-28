@@ -82,6 +82,8 @@ app.get('/api/health', (req, res) => res.json({ status: 'ok', timestamp: new Dat
     console.log('[Route] /api/monitor OK');
     app.use('/api/doc-templates', require('./routes/docTemplates'));
     console.log('[Route] /api/doc-templates OK');
+    app.use('/api/webex', require('./routes/webex'));
+    console.log('[Route] /api/webex OK');
 
     // Auto-restore code skill runners
     try {

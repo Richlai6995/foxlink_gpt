@@ -515,6 +515,570 @@ async function detectStylesFromPptx(origBuf, variables) {
   return styles;
 }
 
+// ─── PPTX Multi-Layout System ──────────────────────────────────────────────────
+
+/**
+ * Extract {full, index, length, phType, isAux, x, y, cx, cy, area, texts}
+ * for each <p:sp> in a slide XML.
+ */
+function _extractShapeInfos(xml) {
+  const spPat = /<p:sp\b[\s\S]*?<\/p:sp>/g;
+  const shapes = [];
+  let m;
+  while ((m = spPat.exec(xml)) !== null) {
+    const sp = m[0];
+    const phAttr = (sp.match(/<p:ph([^>]*)/) || [])[1] || null;
+    const phType = phAttr ? ((phAttr.match(/\btype="([^"]+)"/) || [])[1] || 'body') : null;
+    const isAux  = phType === 'dt' || phType === 'sldNum' || phType === 'ftr';
+    const offM   = sp.match(/<a:off\s+x="(\d+)"\s+y="(\d+)"/);
+    const extM   = sp.match(/<a:ext\s+cx="(\d+)"\s+cy="(\d+)"/);
+    const x  = offM ? parseInt(offM[1]) : 0;
+    const y  = offM ? parseInt(offM[2]) : 0;
+    const cx = extM ? parseInt(extM[1]) : 0;
+    const cy = extM ? parseInt(extM[2]) : 0;
+    const texts = (sp.match(/<a:t[^>]*>([\s\S]*?)<\/a:t>/g) || [])
+      .map(t => t.replace(/<[^>]+>/g, '')).join(' ').trim();
+    shapes.push({ full: sp, index: m.index, length: m[0].length, phType, isAux, x, y, cx, cy, area: cx * cy, texts });
+  }
+  return shapes;
+}
+
+/**
+ * Detect number of horizontal columns from shape layout.
+ * Finds the Y-band that has the most shapes at different X positions.
+ */
+function _detectColumnCount(shapes) {
+  if (shapes.length < 2) return 1;
+  const SLIDE_H = 6858000;
+  const BAND_H  = SLIDE_H * 0.25;
+  const sorted  = [...shapes].sort((a, b) => a.y - b.y);
+  const bands   = [];
+  for (const s of sorted) {
+    const band = bands.find(b => Math.abs(b.cy - s.y) < BAND_H);
+    if (band) { band.shapes.push(s); band.cy = band.shapes.reduce((sum, sh) => sum + sh.y, 0) / band.shapes.length; }
+    else       bands.push({ cy: s.y, shapes: [s] });
+  }
+  return Math.min(Math.max(...bands.map(b => b.shapes.length), 1), 4);
+}
+
+/**
+ * Read every slide in the zip and return an array of slide info objects.
+ */
+async function _getPptxSlideInfos(zip) {
+  const slideFiles = Object.keys(zip.files)
+    .filter(f => /^ppt\/slides\/slide\d+\.xml$/.test(f))
+    .sort((a, b) => parseInt(a.match(/slide(\d+)/)[1]) - parseInt(b.match(/slide(\d+)/)[1]));
+
+  return Promise.all(slideFiles.map(async (sf, idx) => {
+    const xml    = await zip.file(sf).async('string');
+    const relsFile = `ppt/slides/_rels/slide${idx + 1}.xml.rels`;
+    const relsXml  = zip.file(relsFile) ? await zip.file(relsFile).async('string') : null;
+    const shapes   = _extractShapeInfos(xml);
+    const visible  = shapes.filter(s => !s.isAux && s.area > 0);
+    const phTypes  = shapes.filter(s => s.phType).map(s => s.phType);
+    // Exclude title shapes from column detection (they span full width)
+    const numCols  = _detectColumnCount(visible.filter(s => s.phType !== 'title' && s.phType !== 'ctrTitle'));
+    const allText  = shapes.map(s => s.texts).join(' ').trim().slice(0, 300);
+    return { file: sf, index: idx, num: idx + 1, phTypes, spCount: shapes.length, numCols, allText, shapes, xml, relsXml };
+  }));
+}
+
+/**
+ * Classify each slide as cover / bullets / 3col / closing.
+ */
+function _classifyPptxSlides(slideInfos) {
+  return slideInfos.map((si, idx) => {
+    if (idx === 0) return { ...si, slideType: 'cover' };
+    if (idx === slideInfos.length - 1 && slideInfos.length > 2) return { ...si, slideType: 'closing' };
+    if (si.numCols >= 3) return { ...si, slideType: '3col' };
+    return { ...si, slideType: 'bullets' };
+  });
+}
+
+/**
+ * Replace the txBody of a <p:sp> element with a single placeholder run,
+ * preserving the original paragraph/run formatting.
+ */
+function _injectShapePlaceholder(spXml, placeholderKey) {
+  // PPTX slides use <p:txBody>, DrawingML uses <a:txBody> — match both
+  return spXml.replace(/<((?:p|a):txBody)>([\s\S]*?)<\/(?:p|a):txBody>/, (match, tag) => {
+    const txBody = match;
+    const bodyPrM  = txBody.match(/<a:bodyPr[\s\S]*?(?:\/>|<\/a:bodyPr>)/);
+    const lstStyleM= txBody.match(/<a:lstStyle>[\s\S]*?<\/a:lstStyle>/);
+    const bodyPr   = bodyPrM  ? bodyPrM[0]  : '<a:bodyPr/>';
+    const lstStyle = lstStyleM? lstStyleM[0]: '<a:lstStyle/>';
+    const firstParaM = txBody.match(/<a:p\b[^>]*>[\s\S]*?<\/a:p>/);
+    let para;
+    if (firstParaM) {
+      const pPr = (firstParaM[0].match(/<a:pPr[\s\S]*?<\/a:pPr>/) || [])[0] || '';
+      const rPr = (firstParaM[0].match(/<a:rPr[^>]*(?:\/>|>[\s\S]*?<\/a:rPr>)/) || [])[0] || '';
+      para = `<a:p>${pPr}<a:r>${rPr}<a:t xml:space="preserve">{{${placeholderKey}}}</a:t></a:r></a:p>`;
+    } else {
+      para = `<a:p><a:r><a:t>{{${placeholderKey}}}</a:t></a:r></a:p>`;
+    }
+    return `<${tag}>${bodyPr}${lstStyle}${para}</${tag}>`;
+  });
+}
+
+/**
+ * Replace shapes in xml (reverse index order to preserve offsets).
+ * pairs: [{shape, key}]
+ */
+function _applyShapeInjections(xml, pairs) {
+  pairs.sort((a, b) => b.shape.index - a.shape.index);
+  let result = xml;
+  for (const { shape, key } of pairs) {
+    const newSp = _injectShapePlaceholder(shape.full, key);
+    result = result.slice(0, shape.index) + newSp + result.slice(shape.index + shape.length);
+  }
+  return result;
+}
+
+/** Inject {{slide_title}} + {{slide_content}} into a bullets-type slide XML. */
+function _injectBulletsLayoutPlaceholders(xml) {
+  const shapes   = _extractShapeInfos(xml);
+  // ph-typed shapes may have no explicit geometry (inherited from layout) → area=0; include them
+  const candidates = shapes.filter(s => !s.isAux);
+  const visible    = candidates.filter(s => s.area > 0);
+  // Title: prefer phType match (even if area=0), fallback to topmost visible
+  const title = candidates.find(s => s.phType === 'title' || s.phType === 'ctrTitle')
+             || visible.sort((a, b) => a.y - b.y)[0];
+  // Body: prefer phType match (even if area=0), fallback to largest non-title visible
+  const body  = candidates.find(s => (s.phType === 'body' || s.phType === 'subTitle') && s !== title)
+             || visible.filter(s => s !== title).sort((a, b) => b.area - a.area)[0];
+  const pairs = [];
+  if (title) pairs.push({ shape: title, key: 'slide_title' });
+  if (body)  pairs.push({ shape: body,  key: 'slide_content' });
+  return _applyShapeInjections(xml, pairs);
+}
+
+/** Inject 3-column placeholders into a 3col-type slide XML. */
+function _inject3ColLayoutPlaceholders(xml) {
+  const shapes  = _extractShapeInfos(xml);
+  const candidates = shapes.filter(s => !s.isAux);
+  const visible = candidates.filter(s => s.area > 0);
+  const title   = candidates.find(s => s.phType === 'title' || s.phType === 'ctrTitle')
+               || visible.sort((a, b) => a.y - b.y)[0];
+  const nonTitle = visible.filter(s => s !== title);
+  const SLIDE_W  = 9144000;
+  const third    = SLIDE_W / 3;
+  const pickColShapes = (shapes) => {
+    if (!shapes.length) return { header: null, content: null };
+    const sorted = [...shapes].sort((a, b) => a.y - b.y);
+    return { header: sorted[0], content: sorted[sorted.length - 1] };
+  };
+  const c1 = pickColShapes(nonTitle.filter(s => s.x < third));
+  const c2 = pickColShapes(nonTitle.filter(s => s.x >= third && s.x < 2 * third));
+  const c3 = pickColShapes(nonTitle.filter(s => s.x >= 2 * third));
+  const pairs = [];
+  if (title)      pairs.push({ shape: title,      key: 'slide_title'  });
+  if (c1.header)  pairs.push({ shape: c1.header,  key: 'col1_title'   });
+  if (c1.content && c1.content !== c1.header) pairs.push({ shape: c1.content, key: 'col1_content' });
+  if (c2.header)  pairs.push({ shape: c2.header,  key: 'col2_title'   });
+  if (c2.content && c2.content !== c2.header) pairs.push({ shape: c2.content, key: 'col2_content' });
+  if (c3.header)  pairs.push({ shape: c3.header,  key: 'col3_title'   });
+  if (c3.content && c3.content !== c3.header) pairs.push({ shape: c3.content, key: 'col3_content' });
+  // Deduplicate by shape index
+  const seen = new Set();
+  return _applyShapeInjections(xml, pairs.filter(p => { if (seen.has(p.shape.index)) return false; seen.add(p.shape.index); return true; }));
+}
+
+/**
+ * Inject layout placeholders into all bullets/3col slides of origBuf.
+ * classifiedSlides must include .xml (loaded from zip).
+ */
+async function _injectLayoutPlaceholders(origBuf, classifiedSlides) {
+  const zip = await new JSZip().loadAsync(origBuf);
+  for (const si of classifiedSlides) {
+    if (si.slideType !== 'bullets' && si.slideType !== '3col') continue;
+    const injected = si.slideType === 'bullets'
+      ? _injectBulletsLayoutPlaceholders(si.xml)
+      : _inject3ColLayoutPlaceholders(si.xml);
+    zip.file(si.file, injected);
+  }
+  return zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE', compressionOptions: { level: 6 } });
+}
+
+/**
+ * Expand {{placeholderKey}} inside a <a:txBody> into one <a:p> per line of content.
+ * The template paragraph's pPr/rPr is cloned for each bullet.
+ */
+function _expandPptxBullets(xml, placeholderKey, content, bulletStyle) {
+  const ph = `{{${placeholderKey}}}`;
+  // PPTX slides use <p:txBody>, DrawingML uses <a:txBody> — match both
+  return xml.replace(/<((?:p|a):txBody)>[\s\S]*?<\/(?:p|a):txBody>/g, (txBody, tag) => {
+    if (!txBody.includes(ph)) return txBody;
+
+    // ── Extract bodyPr properly ──────────────────────────────────────────────
+    // Some PPTX generators omit </a:bodyPr>, leaving children (spAutoFit etc.)
+    // inside an unclosed element. Detect and fix this.
+    let bodyPr = '<a:bodyPr/>';
+    const bpOpenM = txBody.match(/<a:bodyPr\b([^>]*)(\/?>)/);
+    if (bpOpenM) {
+      if (bpOpenM[2] === '/>') {
+        // Self-closing: <a:bodyPr attrs/>
+        bodyPr = bpOpenM[0];
+      } else {
+        // Has children: <a:bodyPr attrs>...children...</a:bodyPr>  (or missing close)
+        const closeIdx = txBody.indexOf('</a:bodyPr>', bpOpenM.index);
+        if (closeIdx > -1) {
+          bodyPr = txBody.slice(bpOpenM.index, closeIdx + '</a:bodyPr>'.length);
+        } else {
+          // Missing </a:bodyPr> — collect children up to <a:lstStyle or <a:p
+          const afterOpen = bpOpenM.index + bpOpenM[0].length;
+          const nextSibling = txBody.slice(afterOpen).search(/<a:(lstStyle|p)\b/);
+          const childrenEnd = nextSibling > -1 ? afterOpen + nextSibling : afterOpen;
+          bodyPr = txBody.slice(bpOpenM.index, childrenEnd) + '</a:bodyPr>';
+        }
+      }
+    }
+
+    const lstStyleM= txBody.match(/<a:lstStyle\b[\s\S]*?(?:\/>|<\/a:lstStyle>)/);
+    const lstStyle = lstStyleM? lstStyleM[0]: '<a:lstStyle/>';
+    const allParas = [];
+    const paraPat  = /<a:p\b[^>]*>[\s\S]*?<\/a:p>/g;
+    let m;
+    while ((m = paraPat.exec(txBody)) !== null) allParas.push(m[0]);
+    let templatePara = null;
+    const beforeParas = [], afterParas = [];
+    let found = false;
+    for (const para of allParas) {
+      const t = (para.match(/<a:t[^>]*>([\s\S]*?)<\/a:t>/g) || []).map(x => x.replace(/<[^>]+>/g, '')).join('');
+      if (!found && t.includes(ph)) { templatePara = para; found = true; }
+      else if (!found) beforeParas.push(para);
+      else             afterParas.push(para);
+    }
+    if (!templatePara) return txBody;
+    let pPr = (templatePara.match(/<a:pPr[\s\S]*?<\/a:pPr>/) || [])[0] || '';
+    const rPr = (templatePara.match(/<a:rPr[^>]*(?:\/>|>[\s\S]*?<\/a:rPr>)/) || [])[0] || '';
+
+    // Apply bulletStyle overrides (lineSpacing, bullet) into pPr
+    if (bulletStyle) {
+      if (bulletStyle.lineSpacing) {
+        const spcVal = Math.round(bulletStyle.lineSpacing * 100000); // OOXML: 100000 = 1.0x
+        const lnSpcXml = `<a:lnSpc><a:spcPct val="${spcVal}"/></a:lnSpc>`;
+        // Replace existing or inject before closing </a:pPr>
+        if (pPr.includes('<a:lnSpc>')) {
+          pPr = pPr.replace(/<a:lnSpc>[\s\S]*?<\/a:lnSpc>/, lnSpcXml);
+        } else if (pPr.includes('</a:pPr>')) {
+          pPr = pPr.replace('</a:pPr>', lnSpcXml + '</a:pPr>');
+        } else if (!pPr) {
+          pPr = `<a:pPr>${lnSpcXml}</a:pPr>`;
+        }
+      }
+      if (bulletStyle.bullet) {
+        // Remove any existing bullet specs
+        pPr = pPr.replace(/<a:buNone\/>/g, '').replace(/<a:buChar[^/]*\/>/g, '')
+                 .replace(/<a:buAutoNum[^/]*\/>/g, '').replace(/<a:buFont[^/]*\/>/g, '');
+        const buXml = bulletStyle.bullet === 'none'
+          ? '<a:buNone/>'
+          : `<a:buFont typeface="Arial Unicode MS" panose="020B0604020202020204"/><a:buChar char="${bulletStyle.bullet}"/>`;
+        if (pPr.includes('</a:pPr>')) {
+          pPr = pPr.replace('</a:pPr>', buXml + '</a:pPr>');
+        } else if (!pPr) {
+          pPr = `<a:pPr>${buXml}</a:pPr>`;
+        }
+      }
+    }
+
+    const lines = content.split('\n').map(l => l.trim()).filter(l => l);
+    if (!lines.length) lines.push('');
+    const expanded = lines.map(line => {
+      const clean = line.replace(/^[•·✓■○▸–★➤\-\*]\s*/, '');
+      return `<a:p>${pPr}<a:r>${rPr}<a:t xml:space="preserve">${escapeXml(clean)}</a:t></a:r></a:p>`;
+    });
+    return `<${tag}>${bodyPr}${lstStyle}${[...beforeParas, ...expanded, ...afterParas].join('')}</${tag}>`;
+  });
+}
+
+/**
+ * Fill a layout slide template XML with one content item.
+ * Uses bullet expansion for content fields, simple replacement for titles.
+ */
+function _fillLayoutSlide(xml, itemData, layoutType, contentStyleOpts) {
+  const { fontSizeOverride, lineSpacing, bullet } = contentStyleOpts || {};
+  const bulletStyle = (lineSpacing || bullet) ? { lineSpacing, bullet } : null;
+
+  xml = _replacePptxPlaceholders(xml, { slide_title: itemData.slide_title || '' });
+  if (layoutType === '3col') {
+    xml = _replacePptxPlaceholders(xml, { col1_title: itemData.col1_title || '', col2_title: itemData.col2_title || '', col3_title: itemData.col3_title || '' });
+    xml = _expandPptxBullets(xml, 'col1_content', itemData.col1_content || '', bulletStyle);
+    xml = _expandPptxBullets(xml, 'col2_content', itemData.col2_content || '', bulletStyle);
+    xml = _expandPptxBullets(xml, 'col3_content', itemData.col3_content || '', bulletStyle);
+  } else {
+    xml = _expandPptxBullets(xml, 'slide_content', itemData.slide_content || '', bulletStyle);
+  }
+  // Reposition the content text box: move below title, expand to fill slide body area
+  xml = _repositionContentShape(xml, fontSizeOverride);
+  return xml;
+}
+
+/**
+ * Reposition the content text box shape to fill the area below the title.
+ * Finds the largest-area non-title shape and adjusts its position/size.
+ */
+function _repositionContentShape(xml, contentFontOverridePt) {
+  const SLIDE_W = 9144000;  // standard 4:3
+  const MARGIN_X = 457200;  // ~0.5in left/right
+  const CONTENT_TOP = 1100000;  // below title+line (~1.2in from top)
+  const CONTENT_BOTTOM = 6400000; // above footer area
+  // Only compute override font if user explicitly set it; undefined = keep template original
+  const CONTENT_FONT = contentFontOverridePt ? Math.round(contentFontOverridePt * 100) : null;
+
+  // Find all shape positions
+  const shapes = [];
+  const spPat = /<p:sp\b[\s\S]*?<\/p:sp>/g;
+  let m;
+  while ((m = spPat.exec(xml)) !== null) {
+    const offM = m[0].match(/<a:off\s+x="(\d+)"\s+y="(\d+)"/);
+    const extM = m[0].match(/<a:ext\s+cx="(\d+)"\s+cy="(\d+)"/);
+    const hasContent = m[0].includes('slide_content') || m[0].includes('txBox="1"');
+    if (offM && extM && hasContent) {
+      shapes.push({ index: m.index, length: m[0].length, full: m[0],
+        x: parseInt(offM[1]), y: parseInt(offM[2]),
+        cx: parseInt(extM[1]), cy: parseInt(extM[2]) });
+    }
+  }
+  if (!shapes.length) return xml;
+
+  // Pick the content shape (txBox with smallest y among txBox shapes, or only txBox)
+  const contentShape = shapes.sort((a, b) => b.cy - a.cy)[0];
+  if (!contentShape) return xml;
+
+  // Only reposition if content is in a tiny area (less than 30% of slide height)
+  if (contentShape.cy > 0.3 * CONTENT_BOTTOM) return xml;
+
+  let sp = contentShape.full;
+  // Update position and size
+  sp = sp.replace(
+    /<a:off\s+x="\d+"\s+y="\d+"/,
+    `<a:off x="${MARGIN_X}" y="${CONTENT_TOP}"`
+  );
+  sp = sp.replace(
+    /<a:ext\s+cx="\d+"\s+cy="\d+"/,
+    `<a:ext cx="${SLIDE_W - 2 * MARGIN_X}" cy="${CONTENT_BOTTOM - CONTENT_TOP}"`
+  );
+  // Apply font size override only if user explicitly set it; otherwise keep template original
+  if (CONTENT_FONT) {
+    sp = sp.replace(/(<a:rPr[^>]*)\ssz="\d+"/g, '$1 sz="' + CONTENT_FONT + '"');
+  }
+  // Replace spAutoFit with normAutofit (shrink text to fit instead of grow shape)
+  sp = sp.replace(/<a:spAutoFit\/>/g, '<a:normAutofit/>');
+
+  return xml.slice(0, contentShape.index) + sp + xml.slice(contentShape.index + contentShape.length);
+}
+
+/**
+ * Build a fallback rels XML for a layout_template slide that lacks a rels file.
+ * Picks the first slideLayout NOT already referenced by cover/closing slides.
+ * Falls back to slideLayout2 (index 1) if all layouts are used.
+ */
+async function _buildFallbackSlideRels(zip, slideEntries, slideConfig) {
+  const LAYOUT_TYPE = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout';
+  // Collect layouts used by non-layout_template slides (cover, closing, etc.)
+  const usedLayouts = new Set();
+  for (const entry of slideEntries) {
+    const cfg = slideConfig.find(c => c.index === entry.num - 1);
+    if (cfg?.type === 'layout_template') continue;
+    const rf = `ppt/slides/_rels/slide${entry.num}.xml.rels`;
+    const rx = zip.file(rf) ? await zip.file(rf).async('string') : null;
+    if (rx) {
+      const m = rx.match(/Type="[^"]*slideLayout"[^>]*Target="([^"]+)"/);
+      if (m) usedLayouts.add(m[1]);
+    }
+  }
+  // All slideLayout files in the zip, sorted numerically
+  const allLayouts = Object.keys(zip.files)
+    .filter(f => /^ppt\/slideLayouts\/slideLayout\d+\.xml$/.test(f))
+    .sort((a, b) => parseInt(a.match(/(\d+)/)[1]) - parseInt(b.match(/(\d+)/)[1]))
+    .map(f => `../slideLayouts/${f.split('/').pop()}`);
+  if (!allLayouts.length) return null;
+  // Prefer first layout NOT used by cover/closing; else fall back to 2nd (index 1) or 1st
+  const target = allLayouts.find(l => !usedLayouts.has(l))
+              || allLayouts[1]
+              || allLayouts[0];
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">\n  <Relationship Id="rId1" Type="${LAYOUT_TYPE}" Target="${target}"/>\n</Relationships>`;
+}
+
+/**
+ * Build the full output slide list for a layout_template PPTX.
+ * Template slides are expanded once (at the first layout_template position)
+ * into N copies (one per item in slidesData), each with the proper layout.
+ * Cover/closing slides just get simple var replacement.
+ */
+async function _generateLayoutPptx(zip, schema, inputData, slideConfig, variables) {
+  const slideEntries = Object.keys(zip.files)
+    .filter(f => /^ppt\/slides\/slide\d+\.xml$/.test(f))
+    .map(f => ({ file: f, num: parseInt(f.match(/slide(\d+)/)[1]) }))
+    .sort((a, b) => a.num - b.num);
+
+  // Flat var map for cover/closing replacements
+  const varMap = {};
+  for (const v of variables) {
+    if (v.type !== 'loop') varMap[v.key] = resolveValue(v, inputData);
+  }
+
+  const contentVar   = schema.pptx_settings?.content_array_var || 'slides';
+  const layoutField  = schema.pptx_settings?.layout_field       || 'type';
+  const rawSlidesData = Array.isArray(inputData[contentVar]) ? inputData[contentVar] : [];
+
+  // Filter out Google Search grounding reference slides (e.g. "參考來源" with vertexaisearch URLs)
+  const slidesData = rawSlidesData.filter(s => {
+    const title   = (s.slide_title   || '').toLowerCase();
+    const content = (s.slide_content || '').toLowerCase();
+    if ((title.includes('參考來源') || title.includes('參考文獻') || title.includes('references'))
+        && (content.includes('vertexaisearch') || content.includes('http') || content.includes('.google.'))) {
+      console.log(`[DocTemplate] Filtered out reference slide: "${s.slide_title}"`);
+      return false;
+    }
+    return true;
+  });
+
+  // Resolve content style overrides from schema variable (user override only; undefined = keep template)
+  const loopVar = variables.find(v => v.key === contentVar && v.type === 'loop');
+  const contentChild = loopVar?.children?.find(c => c.key === 'slide_content');
+  const contentOverride = contentChild?.style?.override || {};
+  const contentStyleOpts = {
+    fontSizeOverride: contentOverride.fontSize,     // pt or undefined
+    lineSpacing:      contentOverride.lineSpacing,   // 1.0/1.5/2.0 or undefined
+    bullet:           contentOverride.bullet,         // '•'/'✓'/'none' or undefined
+  };
+  console.log(`[DocTemplate] slide_content style: fontSize=${contentOverride.fontSize ?? 'template'}, lineSpacing=${contentOverride.lineSpacing ?? 'template'}, bullet=${contentOverride.bullet ?? 'template'}`);
+
+  // Diagnostic: log input data for each slide
+  slidesData.forEach((s, i) => {
+    const hasContent = !!(s.slide_content && s.slide_content.trim());
+    console.log(`[DocTemplate] inputSlide[${i}] type=${s.type || s[layoutField]} title="${(s.slide_title||'').slice(0,30)}" hasContent=${hasContent} contentLen=${(s.slide_content||'').length}`);
+  });
+
+  // Pre-load all layout template XMLs (keyed by layout name)
+  const layoutTemplates = {};
+  for (const entry of slideEntries) {
+    const cfg = slideConfig.find(c => c.index === entry.num - 1);
+    if (cfg?.type === 'layout_template' && !layoutTemplates[cfg.layout]) {
+      const xml     = await zip.file(entry.file).async('string');
+      const relsFile = `ppt/slides/_rels/slide${entry.num}.xml.rels`;
+      let relsXml    = zip.file(relsFile) ? await zip.file(relsFile).async('string') : null;
+      if (!relsXml) {
+        // No rels file for this slide — build a fallback pointing to a non-cover layout
+        relsXml = await _buildFallbackSlideRels(zip, slideEntries, slideConfig);
+        console.warn(`[DocTemplate] layout_template slide${entry.num} has no rels — fallback: ${relsXml ? 'built' : 'none'}`);
+      } else {
+        const layoutM = relsXml.match(/Type="[^"]*slideLayout"[^>]*Target="([^"]+)"/);
+        console.log(`[DocTemplate] layout_template slide${entry.num} rels → ${layoutM?.[1] || '(no layout rel)'}`);
+      }
+      const hasSlidePlaceholders = xml.includes('{{slide_title}}') || xml.includes('{{slide_content}}');
+      console.log(`[DocTemplate] template loaded: slide${entry.num} layout=${cfg.layout} hasPlaceholders=${hasSlidePlaceholders} xmlLen=${xml.length}`);
+      layoutTemplates[cfg.layout] = { xml, relsXml };
+    }
+  }
+  const fallbackTemplate = Object.values(layoutTemplates)[0] || null;
+
+  // Build output slides
+  const outputSlides = [];
+  let expandedContent = false;
+  for (const entry of slideEntries) {
+    const cfg = slideConfig.find(c => c.index === entry.num - 1);
+    if (cfg?.type === 'layout_template') {
+      if (!expandedContent) {
+        expandedContent = true;
+        for (const item of slidesData) {
+          const layout   = item[layoutField] || 'bullets';
+          const template = layoutTemplates[layout] || layoutTemplates['bullets'] || fallbackTemplate;
+          if (!template) continue;
+          let xml = _fillLayoutSlide(template.xml, item, layout, contentStyleOpts);
+          xml = _replacePptxPlaceholders(xml, varMap); // apply cover vars too
+          const hasTitle   = xml.includes('{{slide_title}}');
+          const hasContent = xml.includes('{{slide_content}}');
+          console.log(`[DocTemplate] content slide: layout=${layout} title="${item.slide_title?.slice(0,30)}" unreplaced={{slide_title}}:${hasTitle} {{slide_content}}:${hasContent}`);
+          outputSlides.push({ xml, relsXml: template.relsXml });
+        }
+      }
+      // Skip additional layout_template slides (they are all pre-loaded above)
+    } else {
+      let xml = await zip.file(entry.file).async('string');
+      const relsFile = `ppt/slides/_rels/slide${entry.num}.xml.rels`;
+      const relsXml  = zip.file(relsFile) ? await zip.file(relsFile).async('string') : null;
+      outputSlides.push({ xml: _replacePptxPlaceholders(xml, varMap), relsXml });
+    }
+  }
+
+  await _rebuildPptxSlides(zip, outputSlides);
+}
+
+/**
+ * Full PPTX document analysis: auto-detect slide types, build schema with pptx_settings.
+ */
+async function _analyzePptxDocument(filePath) {
+  const buf  = await fs.readFile(filePath);
+  const zip  = await new JSZip().loadAsync(buf);
+  const infos = await _getPptxSlideInfos(zip);
+  const classified = _classifyPptxSlides(infos);
+  console.log(`[DocTemplate] PPTX 投影片分類: ${classified.map(s => `${s.num}:${s.slideType}`).join(', ')}`);
+
+  // Extract cover variables via AI (only cover slide text)
+  const coverSlide = classified.find(s => s.slideType === 'cover');
+  let coverVars = [];
+  if (coverSlide?.allText) {
+    const aiResult = await analyzeVariables(coverSlide.allText);
+    for (const v of (aiResult.variables || [])) {
+      if (v.type !== 'loop') {
+        coverVars.push({ ...v, key: v.key.startsWith('cover_') ? v.key : `cover_${v.key}` });
+      }
+    }
+  }
+  if (coverVars.length === 0) {
+    coverVars = [
+      { key: 'cover_title',     label: '標題',  type: 'text', required: true,  original_text: '', description: '封面標題' },
+      { key: 'cover_subtitle',  label: '副標題', type: 'text', required: false, original_text: '', description: '封面副標題' },
+      { key: 'cover_date',      label: '日期',   type: 'date', required: false, original_text: '', description: '報告日期' },
+      { key: 'cover_presenter', label: '報告人', type: 'text', required: false, original_text: '', description: '報告人姓名' },
+    ];
+  }
+
+  const slideConfig = classified.map(s => {
+    if (s.slideType === 'cover')   return { index: s.index, type: 'cover' };
+    if (s.slideType === 'closing') return { index: s.index, type: 'closing' };
+    return { index: s.index, type: 'layout_template', layout: s.slideType };
+  });
+
+  const hasCol    = classified.some(s => s.slideType === '3col');
+  const layoutOpts = ['bullets', ...(hasCol ? ['3col'] : [])];
+
+  const slideChildren = [
+    { key: 'type',          label: '版型',       type: 'select', options: layoutOpts, required: true,  description: '投影片版型 (bullets 或 3col)' },
+    { key: 'slide_title',   label: '投影片標題', type: 'text',   required: true,  description: '每張內頁的標題' },
+    { key: 'slide_content', label: '內容',        type: 'text',   required: false, description: '子彈重點，每行一條（以 \\n 分隔）' },
+    ...(hasCol ? [
+      { key: 'col1_title',   label: '欄1標題', type: 'text', required: false, description: '三欄版型第1欄標題' },
+      { key: 'col1_content', label: '欄1內容', type: 'text', required: false, description: '三欄版型第1欄內容（以 \\n 分隔）' },
+      { key: 'col2_title',   label: '欄2標題', type: 'text', required: false, description: '三欄版型第2欄標題' },
+      { key: 'col2_content', label: '欄2內容', type: 'text', required: false, description: '三欄版型第2欄內容（以 \\n 分隔）' },
+      { key: 'col3_title',   label: '欄3標題', type: 'text', required: false, description: '三欄版型第3欄標題' },
+      { key: 'col3_content', label: '欄3內容', type: 'text', required: false, description: '三欄版型第3欄內容（以 \\n 分隔）' },
+    ] : []),
+  ];
+
+  const layoutCount = slideConfig.filter(c => c.type === 'layout_template').length;
+  const layoutTypes = [...new Set(slideConfig.filter(c => c.type === 'layout_template').map(c => c.layout))];
+
+  return {
+    variables: [
+      ...coverVars,
+      { key: 'slides', label: '投影片內容', type: 'loop', required: true, description: '每個元素對應一張內頁投影片', children: slideChildren },
+    ],
+    confidence: 0.9,
+    notes: `自動偵測到 ${layoutCount} 張內容版型 (${layoutTypes.join('/')})`,
+    strategy: 'native',
+    extracted_at: new Date().toISOString(),
+    pptx_settings: {
+      slide_config: slideConfig,
+      content_array_var: 'slides',
+      layout_field: 'type',
+    },
+  };
+}
+
 /** Detect primary language of text: CJK ratio > 30% → 繁體中文, else English */
 function detectLang(text) {
   if (!text) return '繁體中文';
@@ -766,32 +1330,66 @@ async function _rebuildPptxSlides(zip, outputSlides) {
                  /^ppt\/slides\/_rels\/slide\d+\.xml\.rels$/.test(f))
     .forEach(f => zip.remove(f));
 
+  // Track which notesSlide targets are used so we don't duplicate references
+  const usedNoteTargets = new Set();
   for (let i = 0; i < outputSlides.length; i++) {
     const num = i + 1;
     zip.file(`ppt/slides/slide${num}.xml`, outputSlides[i].xml);
-    if (outputSlides[i].relsXml)
-      zip.file(`ppt/slides/_rels/slide${num}.xml.rels`, outputSlides[i].relsXml);
+    if (outputSlides[i].relsXml) {
+      let rels = outputSlides[i].relsXml;
+      // Strip notesSlide references from cloned slides to avoid multiple slides
+      // referencing the same notesSlide (causes PowerPoint repair mode)
+      const noteM = rels.match(/Target="[^"]*notesSlide[^"]*"/);
+      if (noteM) {
+        const target = noteM[0];
+        if (usedNoteTargets.has(target)) {
+          rels = rels.replace(/<Relationship[^>]*notesSlide[^>]*\/>\s*/g, '');
+        } else {
+          usedNoteTargets.add(target);
+        }
+      }
+      zip.file(`ppt/slides/_rels/slide${num}.xml.rels`, rels);
+    }
   }
 
-  // rId offset: avoid collisions with theme/layout/master relationships (typically rId1-rId9)
-  const RID_OFFSET = 10;
+  // Dynamically compute rId offset: find the max existing rId (after removing old slide rels)
+  // to avoid collisions with non-slide relationships (theme, handoutMaster, presProps, etc.)
+  let presRels = await zip.file('ppt/_rels/presentation.xml.rels').async('string');
+  // Remove old slide relationships first
+  presRels = presRels.replace(new RegExp(`<Relationship[^>]*Type="${_SLIDE_REL_TYPE}"[^>]*/>`,'g'), '');
+  // Find max rId among remaining (non-slide) relationships
+  const existingIds = [...presRels.matchAll(/Id="rId(\d+)"/g)].map(m => parseInt(m[1]));
+  const RID_OFFSET = (existingIds.length ? Math.max(...existingIds) : 0) + 1;
+  console.log(`[DocTemplate] _rebuildPptxSlides: ${outputSlides.length} slides, RID_OFFSET=${RID_OFFSET} (max existing: ${existingIds.length ? Math.max(...existingIds) : 'none'})`);
 
   // Update ppt/_rels/presentation.xml.rels
-  let presRels = await zip.file('ppt/_rels/presentation.xml.rels').async('string');
-  presRels = presRels.replace(new RegExp(`<Relationship[^>]*Type="${_SLIDE_REL_TYPE}"[^>]*/>`,'g'), '');
   const newRels = outputSlides.map((_, i) =>
     `<Relationship Id="rId${RID_OFFSET + i}" Type="${_SLIDE_REL_TYPE}" Target="slides/slide${i + 1}.xml"/>`
   ).join('\n');
   presRels = presRels.replace('</Relationships>', newRels + '\n</Relationships>');
   zip.file('ppt/_rels/presentation.xml.rels', presRels);
 
-  // Update ppt/presentation.xml sldIdLst
+  // Also find max sldId to avoid collision with existing IDs
   let presXml = await zip.file('ppt/presentation.xml').async('string');
+  const existingSldIds = [...presXml.matchAll(/<p:sldId\s+id="(\d+)"/g)].map(m => parseInt(m[1]));
+  const SLD_ID_START = (existingSldIds.length ? Math.max(...existingSldIds) : 255) + 1;
   const sldIds = outputSlides.map((_, i) =>
-    `<p:sldId id="${256 + i}" r:id="rId${RID_OFFSET + i}"/>`
+    `<p:sldId id="${SLD_ID_START + i}" r:id="rId${RID_OFFSET + i}"/>`
   ).join('');
   presXml = presXml.replace(/<p:sldIdLst>[\s\S]*?<\/p:sldIdLst>/, `<p:sldIdLst>${sldIds}</p:sldIdLst>`);
   zip.file('ppt/presentation.xml', presXml);
+
+  // Update [Content_Types].xml — register all new slide parts
+  const SLIDE_CT = 'application/vnd.openxmlformats-officedocument.presentationml.slide+xml';
+  let ctXml = await zip.file('[Content_Types].xml').async('string');
+  // Remove old slide Override entries
+  ctXml = ctXml.replace(/<Override[^>]*PartName="[^"]*\/slides\/slide\d+\.xml"[^>]*\/>\s*/g, '');
+  // Add entries for all output slides
+  const slideOverrides = outputSlides.map((_, i) =>
+    `<Override PartName="/ppt/slides/slide${i + 1}.xml" ContentType="${SLIDE_CT}"/>`
+  ).join('\n');
+  ctXml = ctXml.replace('</Types>', slideOverrides + '\n</Types>');
+  zip.file('[Content_Types].xml', ctXml);
 }
 
 // ─── PDF Form Detection ────────────────────────────────────────────────────────
@@ -839,6 +1437,11 @@ async function analyzeDocument(filePath, format) {
     }
   }
 
+  // PPTX: use smart multi-layout auto-detection
+  if (!schema && format === 'pptx') {
+    schema = await _analyzePptxDocument(filePath);
+  }
+
   if (!schema) {
     const text = await extractText(filePath, format);
     const aiResult = await analyzeVariables(text);
@@ -878,7 +1481,19 @@ async function createTemplate(db, { creatorId, name, description, format, tags, 
   } else if (format === 'xlsx' && strategy === 'native') {
     tplBuf = await injectXlsxPlaceholders(origBuf, variables);
   } else if (format === 'pptx' && strategy === 'native') {
-    tplBuf = await injectPptxPlaceholders(origBuf, variables);
+    const pptxSettings = schemaJson.pptx_settings;
+    if (pptxSettings?.slide_config?.some(c => c.type === 'layout_template')) {
+      // Smart multi-layout: inject cover vars first, then layout placeholders
+      const coverVars = variables.filter(v => v.type !== 'loop');
+      let workBuf = coverVars.length > 0 ? await injectPptxPlaceholders(origBuf, coverVars) : origBuf;
+      const workZip   = await new JSZip().loadAsync(workBuf);
+      const infos      = await _getPptxSlideInfos(workZip);
+      const classified = _classifyPptxSlides(infos);
+      tplBuf = await _injectLayoutPlaceholders(workBuf, classified);
+      console.log(`[DocTemplate] PPTX layout injection: ${classified.map(s => `${s.num}:${s.slideType}`).join(', ')}`);
+    } else {
+      tplBuf = await injectPptxPlaceholders(origBuf, variables);
+    }
   } else {
     // pdf_form or ai_schema: template = original (fill at generate time)
     tplBuf = origBuf;
@@ -1461,55 +2076,56 @@ async function generateDocument(db, templateId, userId, inputData, outputFormat,
 
   } else if (tpl.format === 'pptx') {
     // PPTX: template_file has {{key}} placeholders (injected at createTemplate time).
-    // Supports content_repeat slides that are duplicated per loop-variable array item.
+    // Supports: layout_template (multi-layout with bullet expansion),
+    //           content_repeat (legacy per-item slide duplication),
+    //           and simple (flat var replacement).
     const zip = await new JSZip().loadAsync(tplBuf);
-    const variables = schema.variables || [];
+    const variables  = schema.variables || [];
     const slideConfig = schema.pptx_settings?.slide_config || [];
 
-    // Build flat var map for all non-loop variables
-    const varMap = {};
-    for (const v of variables) {
-      if (v.type === 'loop') continue;
-      varMap[v.key] = resolveValue(v, inputData);
-    }
-
-    const slideEntries = Object.keys(zip.files)
-      .filter(f => /^ppt\/slides\/slide\d+\.xml$/.test(f))
-      .map(f => ({ file: f, num: parseInt(f.match(/slide(\d+)/)[1]) }))
-      .sort((a, b) => a.num - b.num);
-
-    if (!slideConfig.some(c => c.type === 'content_repeat')) {
-      // Simple path: just replace {{key}} in every slide
-      for (const entry of slideEntries) {
-        let xml = await zip.file(entry.file).async('string');
-        zip.file(entry.file, _replacePptxPlaceholders(xml, varMap));
-      }
+    if (slideConfig.some(c => c.type === 'layout_template')) {
+      // ── New multi-layout path ────────────────────────────────────────────────
+      await _generateLayoutPptx(zip, schema, inputData, slideConfig, variables);
     } else {
-      // Expand content_repeat slides into N copies, one per array item
-      const outputSlides = [];
-      for (const entry of slideEntries) {
-        const slideIdx = entry.num - 1; // 0-based
-        const cfg = slideConfig.find(c => c.index === slideIdx);
-        const origXml = await zip.file(entry.file).async('string');
-        const relsFile = `ppt/slides/_rels/slide${entry.num}.xml.rels`;
-        const relsXml = zip.file(relsFile) ? await zip.file(relsFile).async('string') : null;
-
-        if (cfg?.type === 'content_repeat' && cfg.loop_var) {
-          const items = Array.isArray(inputData[cfg.loop_var]) ? inputData[cfg.loop_var] : [];
-          const loopVar = variables.find(v => v.key === cfg.loop_var);
-          const children = loopVar?.children || [];
-          for (const item of items) {
-            const itemMap = { ...varMap };
-            for (const child of children)
-              itemMap[child.key] = String(item[child.key] ?? child.default_value ?? '');
-            outputSlides.push({ xml: _replacePptxPlaceholders(origXml, itemMap), relsXml });
-          }
-          // no items → skip slide entirely
-        } else {
-          outputSlides.push({ xml: _replacePptxPlaceholders(origXml, varMap), relsXml });
-        }
+      // ── Legacy simple / content_repeat path ─────────────────────────────────
+      const varMap = {};
+      for (const v of variables) {
+        if (v.type === 'loop') continue;
+        varMap[v.key] = resolveValue(v, inputData);
       }
-      await _rebuildPptxSlides(zip, outputSlides);
+      const slideEntries = Object.keys(zip.files)
+        .filter(f => /^ppt\/slides\/slide\d+\.xml$/.test(f))
+        .map(f => ({ file: f, num: parseInt(f.match(/slide(\d+)/)[1]) }))
+        .sort((a, b) => a.num - b.num);
+
+      if (!slideConfig.some(c => c.type === 'content_repeat')) {
+        for (const entry of slideEntries) {
+          let xml = await zip.file(entry.file).async('string');
+          zip.file(entry.file, _replacePptxPlaceholders(xml, varMap));
+        }
+      } else {
+        const outputSlides = [];
+        for (const entry of slideEntries) {
+          const cfg      = slideConfig.find(c => c.index === entry.num - 1);
+          const origXml  = await zip.file(entry.file).async('string');
+          const relsFile = `ppt/slides/_rels/slide${entry.num}.xml.rels`;
+          const relsXml  = zip.file(relsFile) ? await zip.file(relsFile).async('string') : null;
+          if (cfg?.type === 'content_repeat' && cfg.loop_var) {
+            const items    = Array.isArray(inputData[cfg.loop_var]) ? inputData[cfg.loop_var] : [];
+            const loopVar  = variables.find(v => v.key === cfg.loop_var);
+            const children = loopVar?.children || [];
+            for (const item of items) {
+              const itemMap = { ...varMap };
+              for (const child of children)
+                itemMap[child.key] = String(item[child.key] ?? child.default_value ?? '');
+              outputSlides.push({ xml: _replacePptxPlaceholders(origXml, itemMap), relsXml });
+            }
+          } else {
+            outputSlides.push({ xml: _replacePptxPlaceholders(origXml, varMap), relsXml });
+          }
+        }
+        await _rebuildPptxSlides(zip, outputSlides);
+      }
     }
 
     const out = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE', compressionOptions: { level: 6 } });
@@ -2446,14 +3062,22 @@ async function getTemplateSchemaInstruction(db, templateId) {
   };
 
   const shape = buildShape(variables);
+  // Add _ai_filename for AI to suggest a content-relevant filename
+  shape._ai_filename = '(依報告內容產生簡短檔名，中文，不含副檔名和日期)';
   const shapeJson = JSON.stringify(shape, null, 2);
+
+  // Cover title hint: _ai_filename will be used as cover title automatically, so AI just needs to make _ai_filename good
+  const titleHint = '\n「_ai_filename」同時會作為封面報告標題使用，請產生精確反映報告內容的名稱。';
+
   return [
     `\n\n---`,
     `【強制輸出格式】無論之前的指令如何，你的最終輸出必須且只能是以下格式的純 JSON 物件，`,
     `不得加任何說明文字、不得用 generate_xlsx/generate_csv 等代碼塊包裝，不得改變 key 名稱：`,
     shapeJson,
-    `Key 名稱區分大小寫，必須與上方完全一致。`,
+    `Key 名稱區分大小寫，必須與上方完全一致。每個 key 都必須有值，不可省略。`,
+    `「_ai_filename」是必填欄位，請依報告主題產生簡短中文檔名（5-15字），例如「美國關稅政策分析」，不含日期和副檔名。`,
     `（範本：${tpl.name}，格式：${tpl.format.toUpperCase()}）`,
+    titleHint,
   ].join('\n');
 }
 

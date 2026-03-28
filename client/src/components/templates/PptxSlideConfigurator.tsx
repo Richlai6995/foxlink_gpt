@@ -16,6 +16,8 @@ const SLIDE_TYPE_LABELS: Record<PptxSlideType, string> = {
   content_single: '內頁（單次）',
   content_repeat: '內頁（可重複）',
   back: '封底',
+  layout_template: '內容版型（AI 多版型）',
+  closing: '封底（AI 多版型）',
 }
 
 const SLIDE_TYPE_COLORS: Record<PptxSlideType, string> = {
@@ -23,6 +25,8 @@ const SLIDE_TYPE_COLORS: Record<PptxSlideType, string> = {
   content_single: 'bg-slate-100 text-slate-700',
   content_repeat: 'bg-green-100 text-green-700',
   back: 'bg-purple-100 text-purple-700',
+  layout_template: 'bg-teal-100 text-teal-700',
+  closing: 'bg-indigo-100 text-indigo-700',
 }
 
 export default function PptxSlideConfigurator({ templateId, slideCount, slideConfig, loopVars, onChange }: Props) {
@@ -99,24 +103,30 @@ export default function PptxSlideConfigurator({ templateId, slideCount, slideCon
               <div className="flex-1 space-y-2">
                 <div className="flex items-center gap-2">
                   <span className="text-xs text-slate-500 w-14 flex-shrink-0">Slide {i + 1}</span>
-                  {/* Type selector */}
-                  <div className="relative">
-                    <select
-                      className={`text-xs pl-2 pr-6 py-1 rounded border border-transparent appearance-none cursor-pointer font-medium ${SLIDE_TYPE_COLORS[cfg.type]}`}
-                      value={cfg.type}
-                      onChange={e => {
-                        const t = e.target.value as PptxSlideType
-                        const patch: Partial<PptxSlideConfig> = { type: t }
-                        if (t !== 'content_repeat') patch.loop_var = undefined
-                        updateConfig(i, patch)
-                      }}
-                    >
-                      {(Object.keys(SLIDE_TYPE_LABELS) as PptxSlideType[]).map(t => (
-                        <option key={t} value={t}>{SLIDE_TYPE_LABELS[t]}</option>
-                      ))}
-                    </select>
-                    <ChevronDown size={10} className="absolute right-1.5 top-1/2 -translate-y-1/2 pointer-events-none text-current opacity-60" />
-                  </div>
+                  {/* Type selector — read-only for layout_template / closing (auto-detected) */}
+                  {(cfg.type === 'layout_template' || cfg.type === 'closing') ? (
+                    <span className={`text-xs px-2 py-1 rounded font-medium ${SLIDE_TYPE_COLORS[cfg.type]}`}>
+                      {SLIDE_TYPE_LABELS[cfg.type]}{cfg.layout ? ` (${cfg.layout})` : ''}
+                    </span>
+                  ) : (
+                    <div className="relative">
+                      <select
+                        className={`text-xs pl-2 pr-6 py-1 rounded border border-transparent appearance-none cursor-pointer font-medium ${SLIDE_TYPE_COLORS[cfg.type] ?? 'bg-slate-100 text-slate-700'}`}
+                        value={cfg.type}
+                        onChange={e => {
+                          const t = e.target.value as PptxSlideType
+                          const patch: Partial<PptxSlideConfig> = { type: t }
+                          if (t !== 'content_repeat') patch.loop_var = undefined
+                          updateConfig(i, patch)
+                        }}
+                      >
+                        {(['cover', 'content_single', 'content_repeat', 'back'] as PptxSlideType[]).map(t => (
+                          <option key={t} value={t}>{SLIDE_TYPE_LABELS[t]}</option>
+                        ))}
+                      </select>
+                      <ChevronDown size={10} className="absolute right-1.5 top-1/2 -translate-y-1/2 pointer-events-none text-current opacity-60" />
+                    </div>
+                  )}
                 </div>
 
                 {/* Loop var selector for content_repeat */}

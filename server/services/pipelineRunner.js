@@ -185,7 +185,18 @@ async function execGenerateFile(node, vars, db, context) {
     }
     const user = context.user || { id: context.userId, role: 'admin' };
     const tplFile = await generateDocumentFromJson(db, node.template_id, jsonData, user);
-    const resolvedFilename = interpolate(node.filename || tplFile.filename, vars);
+    // Use AI-suggested filename + date if available
+    let resolvedFilename;
+    if (node.filename) {
+      resolvedFilename = interpolate(node.filename, vars);
+    } else {
+      const todayStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+      const aiName = jsonData._ai_filename
+        ? jsonData._ai_filename.replace(/[\\/:*?"<>|]/g, '').trim()
+        : '';
+      const ext = tplFile.filename.split('.').pop();
+      resolvedFilename = aiName ? `${aiName}_${todayStr}.${ext}` : tplFile.filename;
+    }
     return {
       text: `[已生成範本檔案: ${resolvedFilename}]`,
       file: { filename: resolvedFilename, publicUrl: tplFile.publicUrl, filePath: tplFile.filePath },

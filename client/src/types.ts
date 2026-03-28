@@ -716,6 +716,8 @@ export interface VariableStyleProps {
   bgColor?: string        // hex e.g. "#FFFF00" (cell background color)
   overflow?: TemplateOverflow
   maxChars?: number
+  lineSpacing?: number    // line height multiplier: 1.0, 1.15, 1.5, 2.0, 2.5, 3.0
+  bullet?: string         // bullet character: '•', '✓', '■', '○', '▸', '–', '★' or 'none'
 }
 
 export interface VariableStyle {
@@ -765,17 +767,20 @@ export interface DocxSettings {
   cellSpacingAfter?: number  // pt, default 0 (tight); increase for more space between loop items
 }
 
-export type PptxSlideType = 'cover' | 'content_single' | 'content_repeat' | 'back'
+export type PptxSlideType = 'cover' | 'content_single' | 'content_repeat' | 'back' | 'layout_template' | 'closing'
 
 export interface PptxSlideConfig {
   index: number            // 0-based slide index
   type: PptxSlideType
+  layout?: string          // 'bullets' | '3col' — for layout_template type
   loop_var?: string        // key of loop-type variable (only for content_repeat)
   thumbnail_url?: string   // /uploads/templates/thumbnails/xxx.png
 }
 
 export interface PptxSettings {
   slide_config: PptxSlideConfig[]
+  content_array_var?: string  // 'slides' — key of the slides loop variable
+  layout_field?: string       // 'type' — field name inside each slide item
 }
 
 export interface TemplateSchema {

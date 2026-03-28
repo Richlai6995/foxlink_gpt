@@ -132,6 +132,17 @@ router.post('/upload', upload.single('file'), async (req, res) => {
       }
     }
 
+    // PPTX: smart multi-layout auto-detection (must run before generic fallback)
+    if (!schema && format === 'pptx') {
+      try {
+        send('status', { step: 'analyzing', message: 'AI 分析投影片版型與佈局中...' });
+        schema = await svc.analyzeDocument(req.file.path, format);
+        console.log(`[DocTemplates] PPTX smart analysis OK, vars=${schema?.variables?.length}`);
+      } catch (e) {
+        console.warn('[DocTemplates] PPTX smart analysis failed, falling back:', e.message);
+      }
+    }
+
     if (!schema) {
       text = await svc.extractText(req.file.path, format);
       console.log(`[DocTemplates] 擷取文字長度: ${text.length}`);

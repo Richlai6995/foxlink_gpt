@@ -1,8 +1,8 @@
 # 文件範本功能規格書
 
-**版本**：v1.2
-**更新日期**：2026-03-27
-**負責模組**：`server/services/docTemplateService.js`、`server/routes/docTemplates.js`、`client/src/components/templates/`
+**版本**：v2.1
+**更新日期**：2026-03-29
+**負責模組**：`server/services/docTemplateService.js`、`server/services/pipelineAgents.js`、`server/routes/docTemplates.js`、`client/src/components/templates/`
 
 ---
 
@@ -16,6 +16,7 @@
 - **固定格式模式**：精確控制每格的字型大小、顏色、溢位策略，適合制式表單
 - **內容模式**：每個欄位可設為「使用者填入」、「固定文字」或「清空保留格式」
 - **OCR 支援**：掃描版圖片型 PDF 可用 Gemini Vision 自動識別欄位位置
+- **Chat 整合**：對話中選擇範本，AI 自動填入值並生成文件（`[使用範本:UUID:名稱:格式]`）
 
 ---
 
@@ -50,10 +51,23 @@
   "confidence": 0.92,
   "notes": "AI 備註",
   "strategy": "native|pdf_form|ai_schema",
-  "extracted_at": "2026-03-27T00:00:00.000Z",
-  "is_ocr": true
+  "extracted_at": "2026-03-28T00:00:00.000Z",
+  "is_ocr": true,
+
+  "pptx_settings": {
+    "slide_config": [
+      { "index": 0, "type": "cover" },
+      { "index": 1, "type": "layout_template", "layout": "bullets" },
+      { "index": 2, "type": "layout_template", "layout": "3col" },
+      { "index": 3, "type": "closing" }
+    ],
+    "content_array_var": "slides",
+    "layout_field": "type"
+  }
 }
 ```
+
+> `pptx_settings` 僅 PPTX 範本且使用多版型系統時存在（見 §5.3）。
 
 ### 2.3 `TemplateVariable` 型別
 
@@ -97,12 +111,43 @@ interface VariableStyleProps {
   bold?: boolean
   italic?: boolean
   color?: string          // hex e.g. '#CC0000'
+  bgColor?: string        // hex e.g. '#FFFF00' (cell background)
   overflow?: 'wrap' | 'truncate' | 'shrink' | 'summarize'
   maxChars?: number
+  lineSpacing?: number    // 行距倍率：1.0, 1.15, 1.5, 2.0, 2.5, 3.0
+  bullet?: string         // 列標符號：'•', '✓', '■', '○', '▸', '–', '★', '➤' 或 'none'
 }
 ```
 
-### 2.4 `doc_template_shares` 資料表
+### 2.4 PPTX 多版型 loop 變數範例
+
+PPTX 多版型範本的 `variables` 結構固定如下：
+
+```json
+[
+  { "key": "cover_title",     "type": "text", "label": "標題" },
+  { "key": "cover_presenter", "type": "text", "label": "報告人" },
+  { "key": "cover_date",      "type": "date", "label": "日期" },
+  {
+    "key": "slides",
+    "type": "loop",
+    "label": "投影片內容",
+    "children": [
+      { "key": "type",          "type": "select", "options": ["bullets","3col"], "required": true },
+      { "key": "slide_title",   "type": "text",   "required": true },
+      { "key": "slide_content", "type": "text",   "description": "子彈重點，\\n 分隔" },
+      { "key": "col1_title",    "type": "text" },
+      { "key": "col1_content",  "type": "text" },
+      { "key": "col2_title",    "type": "text" },
+      { "key": "col2_content",  "type": "text" },
+      { "key": "col3_title",    "type": "text" },
+      { "key": "col3_content",  "type": "text" }
+    ]
+  }
+]
+```
+
+### 2.5 `doc_template_shares` 資料表
 
 | 欄位 | 說明 |
 |------|------|
@@ -113,7 +158,7 @@ interface VariableStyleProps {
 
 UNIQUE 約束：`(template_id, grantee_type, grantee_id)`
 
-### 2.5 `doc_template_outputs` 資料表
+### 2.6 `doc_template_outputs` 資料表
 
 每次生成文件的記錄，包含 `template_id`、`user_id`、`input_data`（JSON）、`output_file`（下載路徑）、`created_at`。
 
@@ -145,11 +190,30 @@ Server ──[SSE]──▶ Client
   ├─ pdf-parse 文字 < 50 非空白字元?  →  「掃描 PDF」→ ocrPdfFields() → strategy='ai_schema', is_ocr=true
   └─ 有文字 → analyzeVariables(text) → strategy='ai_schema'
 
-上傳 DOCX/XLSX/PPTX?
+上傳 DOCX/XLSX?
   └─ extractText() → analyzeVariables(text) → strategy='native'
+
+上傳 PPTX?  ← 2026-03-28 更新：使用智慧多版型分析，非通用 AI 分析
+  └─ _analyzePptxDocument() →
+       _getPptxSlideInfos()       讀取每張投影片結構（佔位符類型、形狀位置）
+       _classifyPptxSlides()      自動分類：cover / bullets / 3col / closing
+       analyzeVariables(coverSlide.text)  僅分析封面變數
+       → 回傳 schema + pptx_settings.slide_config
+       → strategy='native'
 ```
 
-### 3.3 AI 變數識別 Prompt 重點
+### 3.3 PPTX 投影片自動分類規則
+
+| 位置 | 欄數偵測 | 分類結果 |
+|------|----------|----------|
+| 第 1 張 | 任意 | `cover` |
+| 最後 1 張（共 3 張以上） | 任意 | `closing` |
+| 中間任意 | ≥ 3 欄（`_detectColumnCount` 非 title 形狀） | `3col` |
+| 中間任意 | < 3 欄 | `bullets` |
+
+欄數偵測方法：以 Y-band（高度 25%）分組所有非 aux、非 title 形狀，找出同一 Y-band 內最多形狀數。
+
+### 3.4 AI 變數識別 Prompt 重點（DOCX/XLSX/PDF）
 
 使用 Gemini Flash，要求回傳 JSON（不包 markdown fence）：
 - `key`：英文 snake_case 唯一識別碼
@@ -161,17 +225,60 @@ Server ──[SSE]──▶ Client
 
 ## 4. 建立範本（`createTemplate`）
 
-1. 複製上傳的暫存檔為 `original_file`
-2. 根據格式注入佔位符：
+### 4.1 DOCX / XLSX
+
+1. 複製暫存檔為 `original_file`
+2. 注入佔位符：
    - DOCX：run-merge 演算法，`original_text → {{key}}`，重建為單一 run
    - XLSX：ExcelJS 逐格替換
-   - PDF/PPTX：不注入，template_file = original_file
-3. 自動偵測樣式（Style Detection）：
-   - DOCX：找 label-value 對應表格列，讀取 value cell 的 `<w:rPr>`
-   - XLSX：找 label 旁的 value cell，讀取 ExcelJS `cell.font`
-   - PPTX：找含 `original_text` 的 `<a:p>`，讀取 `<a:rPr>` 屬性
-4. 將偵測到的樣式寫入 `variable.style.detected`
-5. 存入 `doc_templates` 資料表
+3. 自動偵測樣式（Style Detection）
+4. 存入 DB
+
+### 4.2 PPTX（2026-03-28 更新）
+
+兩路徑依 `pptx_settings.slide_config` 是否含 `layout_template` 決定：
+
+**路徑 A：多版型模式（有 `layout_template`）**
+
+```
+injectPptxPlaceholders(origBuf, coverVars)
+  └─ 僅替換封面/簡單變數的 original_text → {{cover_key}}
+
+_getPptxSlideInfos(workBuf) → _classifyPptxSlides()
+  └─ 取得每張投影片的分類和 XML
+
+_injectLayoutPlaceholders(workBuf, classifiedSlides)
+  └─ bullets slides → _injectBulletsLayoutPlaceholders()
+  │     title shape  → {{slide_title}}
+  │     body shape   → {{slide_content}}
+  └─ 3col slides → _inject3ColLayoutPlaceholders()
+        title       → {{slide_title}}
+        col1 header → {{col1_title}}, col1 body → {{col1_content}}
+        col2/col3 同上
+```
+
+形狀偵測策略：
+- Title：優先找 `<p:ph type="title"/>` 或 `<p:ph type="ctrTitle"/>`，fallback 最頂端形狀
+- Body：優先找 `<p:ph type="body"/>`，fallback 最大面積非 title 形狀
+- 3col 欄位：以 X 位置三等分（SLIDE_W = 9,144,000 EMU），同欄取最頂/最大形狀
+
+**路徑 B：簡單模式（無 `layout_template`，向下兼容）**
+
+```
+injectPptxPlaceholders(origBuf, variables)
+  └─ 對所有 slide 做 run-merge 替換 original_text → {{key}}
+```
+
+### 4.3 PDF
+
+- `pdf_form`：template_file = original_file（pdf-lib 直接填 AcroForm）
+- `ai_schema`：template_file = original_file（生成時覆蓋疊加）
+
+### 4.4 樣式自動偵測
+
+1. 存入 template 後，對 DOCX/XLSX/PPTX 執行 Style Detection
+2. 結果寫入 `variable.style.detected`
+3. 失敗為 non-fatal（warn log，不中斷）
 
 ---
 
@@ -196,10 +303,69 @@ Server ──[SSE]──▶ Client
 - Loop：找 header row（含 children.label），從 header 下一行逐行寫入 item 值
 - 固定格式模式：套用 fontSize/bold/italic/color 至 ExcelJS `cell.font`
 
-### 5.3 PPTX（JSZip + DrawingML XML）
+### 5.3 PPTX（JSZip + DrawingML XML）— 2026-03-28 全面更新
 
-- 逐 slide XML 做 run-merge 替換（`<a:r>` 內的 `<a:t>`）
-- 保留第一個 run 的 `<a:rPr>` 格式
+#### 生成路徑選擇
+
+```
+schema.pptx_settings?.slide_config 含 layout_template?
+  ├─ 是 → _generateLayoutPptx()   多版型展開路徑（新）
+  └─ 否 →
+       含 content_repeat?
+         ├─ 是 → content_repeat 展開路徑（舊，向下兼容）
+         └─ 否 → 簡單替換路徑（舊，向下兼容）
+```
+
+#### 多版型展開路徑（`_generateLayoutPptx`）
+
+```
+1. 過濾 Google Search grounding 參考文獻 slides
+   （slide_title 含「參考來源/文獻/References」且 content 含 URL）
+2. 解析 slide_content 變數的 style.override → contentStyleOpts
+3. 預載入所有 layout_template slides 的 XML（依 layout 名稱 key）
+4. 逐張處理模板投影片：
+   - cover / closing / 無 cfg → _replacePptxPlaceholders(xml, varMap) 簡單替換
+   - layout_template（第一次遇到）→ 展開 slides[] 陣列：
+       foreach item in slidesData:
+         layout = item.type (bullets|3col)
+         template = layoutTemplates[layout] || fallback
+         xml = _fillLayoutSlide(template.xml, item, layout, contentStyleOpts)
+         xml = _replacePptxPlaceholders(xml, varMap)  // 套用封面變數
+   - layout_template（後續重複） → 跳過（已預載為 template）
+5. _rebuildPptxSlides(zip, outputSlides) 重建 presentation.xml + rels
+```
+
+#### `_fillLayoutSlide` 填充規則
+
+接收 `contentStyleOpts = { fontSizeOverride, lineSpacing, bullet }` 參數，從 `slide_content` 變數的 `style.override` 解析。
+
+| 版型 | 欄位處理 |
+|------|---------|
+| `bullets` | `slide_title` → 簡單替換；`slide_content` → `_expandPptxBullets(bulletStyle)` 展開 |
+| `3col` | `slide_title`、`col*_title` → 簡單替換；`col*_content` → `_expandPptxBullets(bulletStyle)` 展開 |
+
+填充後呼叫 `_repositionContentShape(xml, fontSizeOverride)`：
+- `fontSizeOverride` 為 `undefined` 時不修改字型（保留範本原始大小）
+- 有值時覆寫所有 `<a:rPr>` 的 `sz` 屬性（pt × 100 = OOXML hundredths）
+
+#### `_expandPptxBullets` 子彈展開演算法
+
+```
+1. 找到 txBody 中含 {{placeholderKey}} 的 <a:p>（模板段落）
+2. 提取模板段落的 <a:pPr>（段落格式，含子彈符號）和 <a:rPr>（字型）
+3. 套用 bulletStyle 覆寫（若有 override）：
+   - lineSpacing → 注入 <a:lnSpc><a:spcPct val="150000"/></a:lnSpc> 到 <a:pPr>
+   - bullet → 移除既有 buChar/buNone/buAutoNum，注入 <a:buFont>+<a:buChar char="✓"/>
+     或 <a:buNone/>（bullet='none' 時）
+4. 將 content 以 \n 分割為 lines[]
+5. 每 line 去除前置符號（•·✓■○▸–★➤-*），克隆模板段落結構，填入文字
+6. 以展開的 <a:p>[] 取代原始單一段落
+7. 保留模板段落前後的其他 <a:p>（beforeParas, afterParas）
+```
+
+#### 舊版 `content_repeat` 路徑（向下兼容）
+
+依 `slide_config[].type === 'content_repeat'` 標記的 slide，對 `inputData[loop_var][]` 逐項複製，每份替換子欄位 `{{child.key}}`。
 
 ### 5.4 PDF — AcroForm 表單（`strategy='pdf_form'`）
 
@@ -247,7 +413,19 @@ override（使用者設定）> detected（自動偵測）> 系統預設值
 const merged = { overflow: 'wrap', ...detected, ...override }
 ```
 
-### 6.3 Style Detection 對應表
+### 6.3 PPTX 行距與列標設定
+
+`StyleEditorTab` 為 `slide_content` 等變數提供行距和列標控制，儲存於 `style.override`：
+
+| 設定 | 欄位 | OOXML 對應 | 說明 |
+|------|------|-----------|------|
+| 行距 | `lineSpacing` | `<a:lnSpc><a:spcPct val="150000"/></a:lnSpc>` | 1.0=單行，1.5=1.5倍，2.0=雙行 |
+| 列標 | `bullet` | `<a:buFont>+<a:buChar char="✓"/>` | 可選：• ✓ ■ ○ ▸ – ★ ➤ 或 none（無符號） |
+
+- 僅 `style.override` 有值時套用，`undefined` = 保留範本原始設定
+- 字型大小同理：`fontSizeOverride` 有值時覆寫 `<a:rPr sz>`，否則保留範本
+
+### 6.4 Style Detection 對應表
 
 | 格式 | 偵測來源 | 對應欄位 |
 |------|----------|----------|
@@ -427,7 +605,7 @@ client/src/
     ├── TemplateUploadWizard.tsx          # 三步驟上傳精靈（上傳→確認變數→儲存設定）
     ├── TemplateGenerateModal.tsx         # 填入變數生成文件
     ├── VariableSchemaEditor.tsx          # 變數 Schema 編輯（含 content_mode V/T/∅）
-    ├── StyleEditorTab.tsx                # 樣式設定（字型/顏色/溢位）
+    ├── StyleEditorTab.tsx                # 樣式設定（字型/顏色/溢位/行距/列標）
     ├── PDFFieldEditor.tsx                # PDF 版面編輯器（pdfjs-dist + SVG overlay）
     ├── TemplateShareModal.tsx            # 分享設定
     └── TemplatePickerPopover.tsx         # 對話框選擇範本按鈕
@@ -441,18 +619,182 @@ client/src/
 |------|------------------------|------|
 | 上傳暫存 | `tmp/<uuid>_<timestamp>` | 上傳後 30 分鐘自動清除 |
 | 原始檔 | `templates/<id>_orig.<ext>` | 使用者上傳的原始文件 |
-| 注入佔位符版 | `templates/<id>.<ext>` | DOCX/XLSX：已注入 `{{key}}`；PDF/PPTX = 同原始檔 |
+| 注入佔位符版 | `templates/<id>.<ext>` | DOCX/XLSX/PPTX：已注入 `{{key}}`；PDF = 同原始檔 |
 | 生成輸出 | `generated/<uuid>.<ext>` | 每次 generate 的輸出，不自動清除 |
 
 ---
 
-## 15. 已知限制與未來規劃
+## 15. Chat 模式整合
+
+### 15.1 範本啟動語法
+
+使用者在對話框選擇範本後，前端自動在訊息前加上標籤：
+
+```
+[使用範本:UUID:範本名稱:outputFormat] 使用者訊息內容
+```
+
+`chat.js` 解析標籤，載入 `schema_json`，觸發範本模式。
+
+### 15.2 AI 輸出格式要求
+
+Chat 模式下 AI 必須在回覆結尾輸出：
+
+````
+```template_values
+{ "key1": "value1", "_ai_filename": "報告主題名稱", "slides": [...] }
+```
+````
+
+**`_ai_filename`（必填）**：AI 依報告內容產生的簡短中文檔名（5-15 字），不含日期和副檔名。系統自動：
+1. 以 `_ai_filename` 作為**封面主標題**（覆寫 `cover_*` 中字型最大的變數）
+2. 以 `_ai_filename + _YYYYMMDD.ext` 作為**下載檔名**
+
+PPTX 多版型範本的 `template_values` 範例：
+
+```json
+{
+  "_ai_filename": "2026Q1業績分析報告",
+  "cover_title": "2026Q1業績分析報告",
+  "cover_date": "2026-03-31",
+  "cover_presenter": "業務部",
+  "slides": [
+    {
+      "type": "bullets",
+      "slide_title": "本季亮點",
+      "slide_content": "營收成長 15%\n新客戶 23 家\n滿意度評分 4.8"
+    },
+    {
+      "type": "3col",
+      "slide_title": "三大策略比較",
+      "col1_title": "品質",   "col1_content": "ISO 認證\n零缺陷目標",
+      "col2_title": "效率",   "col2_content": "流程精簡\n自動化導入",
+      "col3_title": "創新",   "col3_content": "研發投入\n新品開發"
+    }
+  ]
+}
+```
+
+### 15.3 強制指令注入
+
+當 `docTemplateId` 存在時，`chat.js` 在 `userParts` 中注入強制覆蓋指令：
+- 禁止輸出任何 `generate_xxx` 代碼塊
+- 要求輸出 `template_values` 代碼塊（含 `_ai_filename`）
+- PPTX 版型注入多版型格式規則（slides 陣列、`\n` 分隔子彈點、最多 6 條）
+
+### 15.4 AI 檔名與封面標題自動處理（`chat.js`）
+
+```
+解析 template_values 後：
+1. 提取 _ai_filename，去除可能的副檔名（.pptx 等）
+2. 找封面主標題變數：cover_* 開頭、style.detected.fontSize 最大者
+3. 覆寫封面變數值 = _ai_filename
+4. 組合下載檔名 = _ai_filename + "_YYYYMMDD" + ".ext"
+5. 刪除 _ai_filename（不傳入文件生成，避免多餘欄位）
+```
+
+---
+
+## 16. AI Pipeline Agents（`server/services/pipelineAgents.js`）
+
+文件生成流程採用多層獨立 Flash LLM Agent 架構，每個 Agent 單一職責，失敗均為 non-fatal（靜默 fallback）。
+
+### 16.1 架構概覽
+
+```
+Pro LLM 輸出
+    │
+    ├─[P2] Schema Extractor (Flash)
+    │      template_values block 缺失/JSON 解析失敗時啟動
+    │      從 Pro 全文提取符合 schema 的 JSON
+    │
+    ├─[P1] Schema Validator + AutoFix
+    │      rule-based 校驗（無 AI call）
+    │      有錯 → Flash 自動修正 JSON
+    │
+    ├─[P0] PPTX Layout Engine (Flash)
+    │      僅 isPptxLayout && slides[] 非空時啟動
+    │      overflow 拆分（> 6 條→新投影片）
+    │      長句壓縮（> 30 字）
+    │      3 個平行項目自動改 3col 版型
+    │
+    └─ generateDocument() 機械式生成
+```
+
+### 16.2 P0：PPTX Layout Engine
+
+**觸發條件**：`pptx_settings.slide_config` 含 `layout_template` 且 `inputData.slides` 非空
+
+**Flash Prompt 規則**：
+- bullets 每張 ≤ 6 條，超出拆為續頁（標題加「（續）」）
+- 每條重點 ≤ 30 中文字，過長壓縮核心意思
+- 3col 每欄 ≤ 4 條
+- 3 個平行並列項目的 bullets 投影片自動升級為 3col
+- slide_title 不可帶序號（如「1. 」），有則移除
+- 「參考來源」「參考文獻」等僅含 URL 的投影片直接刪除
+- slide_content 必須完整保留原始資訊，不可刪除內容
+- 輸出純 JSON 陣列
+
+**後處理**：硬過濾 Google Search grounding reference slides（title 含「參考來源」且 content 含 URL）
+
+**失敗行為**：回傳非陣列或空陣列 → warn log，使用原始 slides。
+
+### 16.3 P1：Schema Validator + AutoFix
+
+**觸發條件**：每次 template 生成前均執行
+
+**rule-based 校驗項目**：
+- required 欄位不得為 null/undefined/""
+- loop 欄位必須是非空陣列（若 required=true）
+- loop 子項目必須是物件
+- required 子欄位不得缺失
+
+**Flash 修正**：發現錯誤時，將 errors 清單 + schema 定義 + 原始 JSON 傳給 Flash 要求修正。
+
+**失敗行為**：Flash 修正也失敗 → 使用原始 inputData，不中斷。
+
+### 16.4 P2：Template Values Extractor
+
+**觸發條件**：`template_values` block 缺失，或 `JSON.parse` 拋出例外
+
+**機制**：將 Pro 完整回覆文字（截至 7000 字）+ schema 欄位描述交給 Flash，要求提取 JSON。
+
+**失敗行為**：Flash 回傳非物件 → throw Error（視為生成失敗）。
+
+### 16.5 P3：Task Planner
+
+**觸發條件**：`_isLikelyMultiStep()` 正則快篩通過（含「然後...寄」「先...再」「生成...並發給」等模式）且非 template 模式（template 模式有自己的 pipeline）
+
+**機制**：
+1. 快篩通過 → 呼叫 Flash `planDynamicTask()`
+2. Flash 判斷是否真正多步驟，產生 `pipelineRunner` 相容的 `nodes[]`
+3. 若 `nodes.length >= 2` → 呼叫 `executeDynamicPlan()` 接 `pipelineRunner.runPipeline()`
+4. 早期 return，跳過後續 Pro LLM call
+
+**失敗行為**：Flash 失敗或 `nodes` 不足 2 個 → `return null` → 繼續正常流程。
+
+**可用節點類型**：`skill`、`kb`、`mcp`、`ai`、`generate_file`、`condition`（繼承自 pipelineRunner）
+
+### 16.6 Pipeline 執行位置（`chat.js` 整合點）
+
+| Agent | 插入位置 | 說明 |
+|-------|---------|------|
+| P3 | tool loading 完成後、Pro LLM call 前 | 多步驟則 early return |
+| P2 | `template_values` 解析後、P1 之前 | JSON 解析失敗時 fallback |
+| P1 | P2 之後、P0 之前 | 每次均執行 |
+| P0 | P1 之後、generateDocument 前 | 僅 PPTX layout_template |
+
+---
+
+## 17. 已知限制與規劃
 
 | 項目 | 現狀 | 備註 |
 |------|------|------|
 | PDF AcroForm 加密 | pdf-lib 可讀取大多數加密（ignoreEncryption=true） | 強加密須先解鎖 |
 | PDF regen 字型 | 需 `server/fonts/NotoSansTC-Regular.ttf` | 未部署此字型中文顯示為亂碼 |
 | OCR 座標精度 | 估算值，需人工微調約 5-15 pt | 複雜版面誤差更大 |
-| PPTX loop | 尚未支援 | 暫時以靜態替換處理 |
+| PPTX 封面變數注入 | 依賴 AI 分析 `original_text`；fallback 預設變數無 original_text 時封面維持靜態 | 可在版面編輯器手動指定 |
+| PPTX 3col 欄位偵測 | 依 X 位置三等分；不規則欄間距可能分類錯誤 | 建議上傳前檢視分析結果 |
 | DOCX 跨格合併儲存格 | 可能影響 label-based 偵測 | 建議範本避免使用跨格 |
 | PDF 彩色背景 empty 模式 | 白色矩形覆蓋可能露白邊 | 非白底文件需注意 |
+| P3 多步驟執行 UI 反饋 | 目前僅 status event，無步驟進度 bar | 規劃前端進度顯示 |

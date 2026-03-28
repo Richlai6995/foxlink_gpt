@@ -1458,6 +1458,9 @@ async function runMigrations(db) {
     const { recalcNullCosts } = require('./services/tokenService');
     recalcNullCosts(db, 365).catch(e => console.warn('[Migration] recalcNullCosts:', e.message));
   } catch (_) {}
+
+  // ── Webex Bot 支援欄位 ────────────────────────────────────────────────────
+  await safeAddColumn('CHAT_SESSIONS', 'WEBEX_ROOM_ID', 'VARCHAR2(200)');
 }
 
 // ─── Default DB Source migration ───────────────────────────────────────────────

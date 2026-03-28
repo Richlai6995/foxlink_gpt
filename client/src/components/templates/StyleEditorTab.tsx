@@ -14,6 +14,21 @@ const OVERFLOW_OPTIONS: { value: TemplateOverflow; label: string }[] = [
   { value: 'summarize', label: 'AI 摘要' },
 ]
 
+const LINE_SPACING_OPTIONS = [1.0, 1.15, 1.5, 2.0, 2.5, 3.0]
+
+const BULLET_OPTIONS: { value: string; label: string }[] = [
+  { value: '',    label: '沿用' },
+  { value: 'none', label: '無' },
+  { value: '•',   label: '• 圓點' },
+  { value: '✓',   label: '✓ 勾選' },
+  { value: '■',   label: '■ 方塊' },
+  { value: '○',   label: '○ 空心圓' },
+  { value: '▸',   label: '▸ 三角' },
+  { value: '–',   label: '– 短橫' },
+  { value: '★',   label: '★ 星號' },
+  { value: '➤',   label: '➤ 箭頭' },
+]
+
 /** Flatten variables (loop children as sub-rows) for table display */
 function flattenVars(vars: TemplateVariable[]): { v: TemplateVariable; path: number[]; isChild: boolean }[] {
   const rows: { v: TemplateVariable; path: number[]; isChild: boolean }[] = []
@@ -82,6 +97,8 @@ export default function StyleEditorTab({ variables, onChange, readonly }: Props)
             <th className="text-left px-2 py-2 w-24">字型大小 (pt)</th>
             <th className="text-center px-2 py-2 w-12">粗體</th>
             <th className="text-center px-2 py-2 w-12">斜體</th>
+            <th className="text-left px-2 py-2 w-20">行距</th>
+            <th className="text-left px-2 py-2 w-24">列標</th>
             <th className="text-left px-2 py-2 w-24">字型顏色</th>
             <th className="text-left px-2 py-2 w-24">底色</th>
             <th className="text-left px-2 py-2 w-32">溢位策略</th>
@@ -139,6 +156,35 @@ export default function StyleEditorTab({ variables, onChange, readonly }: Props)
                     checked={!!(v.style?.override?.italic ?? eff.italic)}
                     onChange={e => update(path, { italic: e.target.checked || undefined })}
                   />
+                </td>
+
+                {/* Line Spacing */}
+                <td className="px-2 py-1.5">
+                  <select
+                    disabled={readonly}
+                    className="border rounded px-1.5 py-0.5 text-xs disabled:opacity-50 w-16"
+                    value={v.style?.override?.lineSpacing ?? ''}
+                    onChange={e => update(path, { lineSpacing: e.target.value ? parseFloat(e.target.value) : undefined })}
+                  >
+                    <option value="">沿用</option>
+                    {LINE_SPACING_OPTIONS.map(s => (
+                      <option key={s} value={s}>{s}</option>
+                    ))}
+                  </select>
+                </td>
+
+                {/* Bullet marker */}
+                <td className="px-2 py-1.5">
+                  <select
+                    disabled={readonly}
+                    className="border rounded px-1.5 py-0.5 text-xs disabled:opacity-50 w-20"
+                    value={v.style?.override?.bullet ?? ''}
+                    onChange={e => update(path, { bullet: e.target.value || undefined })}
+                  >
+                    {BULLET_OPTIONS.map(o => (
+                      <option key={o.value} value={o.value}>{o.label}</option>
+                    ))}
+                  </select>
                 </td>
 
                 {/* Font Color — empty = use original template color */}

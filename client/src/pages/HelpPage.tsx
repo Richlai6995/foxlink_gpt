@@ -2680,7 +2680,7 @@ function UserManual() {
           rows={[
             ['Word (DOCX)', 'docxtemplater', '保留原始字型、樣式、表格，原生 {{變數}} 替換'],
             ['Excel (XLSX)', 'ExcelJS', '儲存格佔位符替換，保留公式與格式'],
-            ['PowerPoint (PPTX)', 'JSZip XML 替換', '保留原始品牌設計，支援封面/內頁/封底分類，可重複內頁自動展開多頁'],
+            ['PowerPoint (PPTX)', 'JSZip XML 替換', '保留原始品牌設計，支援封面/內頁/封底分類，可重複內頁自動展開多頁，支援行距/列標樣式設定'],
             ['PDF', 'pdf-lib / AI 重建', 'AcroForm 表單欄位優先；無表單時由 AI 識別後重建'],
           ]}
         />
@@ -2718,31 +2718,69 @@ function UserManual() {
 
         <SubSection title="PPTX 投影片範本設計">
           <Para>
-            上傳 PPTX 後，系統會自動計算投影片數量，並在 Step 2 顯示<strong>「投影片設定」</strong>區塊。
-            每張投影片可設定四種類型：
+            上傳 PPTX 後，系統會<strong>自動偵測並分類</strong>每張投影片的版型，無需手動設定。
+            支援四種版型，系統依位置和欄數自動判斷：
           </Para>
           <Table
-            headers={['類型', '說明']}
+            headers={['版型', '自動判斷條件', '注入的佔位符']}
             rows={[
-              ['封面', '簡報首頁，通常有標題、主講人、日期等變數，生成一次'],
-              ['內頁（單次）', '固定內容的內頁，每次生成只出現一頁'],
-              ['內頁（可重複）', '對應一個 loop 類型變數，AI 提供幾筆資料就自動複製幾頁'],
-              ['封底', '簡報末頁，生成一次'],
+              ['cover（封面）', '第 1 張投影片', '{{cover_title}}、{{cover_subtitle}} 等（依原始文字框自動命名）'],
+              ['bullets（條列）', '非封面/封底，且欄數 &lt; 3', '{{slide_title}}、{{slide_content}}（以 \\n 分隔每條重點）'],
+              ['3col（三欄）', '非封面/封底，欄數 ≥ 3', '{{slide_title}}、{{col1_title}}、{{col1_content}}（三欄各一組）'],
+              ['closing（封底）', '最後一張（簡報超過 2 張時）', '{{closing_title}}、{{closing_message}} 等'],
             ]}
           />
           <Para>
-            對於<strong>內頁（可重複）</strong>，需同時在「迴圈變數」下拉選單中指定對應的 loop 類型變數（請先在變數清單中建立）。
-            每筆資料的子欄位（如 slide_title、slide_content）會填入該頁的 {'{{key}}'} 佔位符。
+            AI 提供的 <code className="bg-slate-100 px-1 rounded">slides[]</code> 陣列中，每個元素可指定
+            <code className="bg-slate-100 px-1 rounded">type: "bullets"</code> 或
+            <code className="bg-slate-100 px-1 rounded">type: "3col"</code>，
+            系統根據 type 選擇對應的範本投影片複製並填入資料。
           </Para>
+          <Para>
+            <strong>AI 排版引擎（自動）</strong>會在文件生成前對 slides[] 進行以下處理：
+          </Para>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mt-2">
+            {[
+              { icon: '✂️', title: '自動拆頁', desc: 'bullets 超過 6 條重點時，自動拆分成下一張，標題加「（續）」' },
+              { icon: '📏', title: '長句壓縮', desc: '每條重點超過 30 字時，AI 自動壓縮核心意思' },
+              { icon: '📐', title: '3欄升級', desc: '3 個平行條列項目（如方案比較）自動升級為 3col 版型' },
+              { icon: '🔤', title: 'AI 智慧命名', desc: 'AI 自動產生報告標題作為封面名稱，並以「主題_日期」格式命名下載檔案' },
+              { icon: '🚫', title: '過濾參考文獻', desc: 'Google 搜尋產生的參考來源連結自動過濾，不會出現在簡報中' },
+            ].map(item => (
+              <div key={item.title} className="bg-purple-50 border border-purple-200 rounded-lg p-3">
+                <div className="text-lg mb-1">{item.icon}</div>
+                <p className="text-xs font-semibold text-slate-700">{item.title}</p>
+                <p className="text-xs text-slate-500 mt-0.5">{item.desc}</p>
+              </div>
+            ))}
+          </div>
           <TipBox>
             <strong>縮圖預覽：</strong>建立範本後，可在投影片設定卡片上點擊縮圖區塊，
             上傳各投影片的截圖（直接在 PowerPoint 中「另存新檔 → PNG」即可）。
             之後在設定畫面就能以圖片預覽確認每張 slide 的版型。
           </TipBox>
           <NoteBox>
-            PPTX 生成時，系統以 XML 層級替換 {'{{key}}'} 佔位符，完整保留原始的背景圖、色彩、字型、Logo，
-            不需要重建投影片版型。
+            PPTX 生成時，系統以 XML 層級替換佔位符，完整保留原始的背景圖、色彩、字型、Logo，
+            條列重點以真實的段落（&lt;a:p&gt;）展開，非純文字換行，確保 PowerPoint 顯示正確。
           </NoteBox>
+        </SubSection>
+
+        <SubSection title="PPTX 樣式設定：行距與列標">
+          <Para>
+            在<strong>樣式設定</strong>頁籤中，可以針對投影片內容（<code className="bg-slate-100 px-1 rounded">slide_content</code>）
+            設定行距和列標符號。設定後所有自動生成的內頁投影片都會套用。
+          </Para>
+          <Table
+            headers={['設定項目', '選項', '說明']}
+            rows={[
+              ['行距', '沿用 / 1.0 / 1.15 / 1.5 / 2.0 / 2.5 / 3.0', '控制每條重點之間的行間距，「沿用」保留範本原始設定'],
+              ['列標', '沿用 / 無 / • 圓點 / ✓ 勾選 / ■ 方塊 / ○ 空心圓 / ▸ 三角 / – 短橫 / ★ 星號 / ➤ 箭頭', '每條重點前方的符號，「無」表示無符號，「沿用」保留範本原始設定'],
+              ['字型大小', '數字 (pt)', '留空 = 保留範本原始大小；填入數字則覆寫所有內容文字'],
+            ]}
+          />
+          <TipBox>
+            這些設定僅影響 override，留空或選「沿用」時完全保留範本 PPTX 原始的格式設定。
+          </TipBox>
         </SubSection>
 
         <SubSection title="使用範本生成文件">
@@ -2756,6 +2794,8 @@ function UserManual() {
                 點選輸入框左方的<strong>「範本」圖示</strong>，從彈出清單選擇範本，
                 系統會在訊息前方附加 <code className="bg-indigo-100 px-1 rounded">[使用範本:名稱]</code> 標記，
                 AI 自動以對話內容填入變數並在回應中提供下載連結。
+                檔名格式為<strong>「AI產生的報告主題_日期.副檔名」</strong>（如：美國關稅政策分析_20260329.pptx），
+                封面標題也會自動使用 AI 產生的報告名稱。
               </p>
             </div>
             <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
@@ -2819,12 +2859,48 @@ function UserManual() {
   ]
 }`}</CodeBlock>
           <Para>
-            AI 回應後，系統從回應文字中自動萃取第一個 JSON 物件，解析並對應到範本的各個欄位，
-            然後呼叫範本引擎生成最終文件。
+            PPTX 多版型範本的 JSON 格式如下，<code className="bg-slate-100 px-1 rounded">slides</code> 陣列中每個元素代表一張投影片：
           </Para>
+          <CodeBlock>{`{
+  "cover_title":     "2025 Q1 業務報告",
+  "cover_presenter": "業務發展部",
+  "slides": [
+    {
+      "type": "bullets",
+      "slide_title": "本季亮點",
+      "slide_content": "訂單成長 18%\\n新客戶開發 42 家\\n客戶滿意度 4.8 / 5.0\\n市場佔有率提升至 23%"
+    },
+    {
+      "type": "3col",
+      "slide_title": "三大策略方向",
+      "col1_title": "品質提升",
+      "col1_content": "導入 ISO 驗證\\n零缺陷目標",
+      "col2_title": "效率優化",
+      "col2_content": "自動化產線\\n縮短交期 30%",
+      "col3_title": "市場擴展",
+      "col3_content": "東南亞佈局\\n電商渠道強化"
+    }
+  ]
+}`}</CodeBlock>
+          <Para>
+            AI 回應後，系統依序執行以下處理流程，確保文件正確生成：
+          </Para>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-2">
+            {[
+              { icon: '🔍', title: 'P2 — 格式修復', desc: '若 AI JSON 解析失敗，Flash 自動重新從回應文字中提取有效 JSON' },
+              { icon: '✅', title: 'P1 — Schema 驗證', desc: '檢查必填欄位是否齊全，若有缺失則 Flash 嘗試自動補齊' },
+              { icon: '🎨', title: 'P0 — 排版引擎', desc: 'PPTX 專用：自動拆頁、壓縮長句、升級 3col 版型' },
+              { icon: '📄', title: '文件生成', desc: '以處理後的 JSON 填入範本，XML 層級替換，保留所有原始樣式' },
+            ].map(item => (
+              <div key={item.title} className="bg-slate-50 border rounded-lg p-3">
+                <p className="text-xs font-semibold text-slate-700">{item.icon} {item.title}</p>
+                <p className="text-[11px] text-slate-500 mt-0.5 leading-4">{item.desc}</p>
+              </div>
+            ))}
+          </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-2">
             {[
-              { icon: '✅', title: '自動支援 loop 欄位', desc: 'JSON 中若某欄位為陣列，對應到範本的 loop 類型，可自動產生多行表格' },
+              { icon: '✅', title: '自動支援 loop 欄位', desc: 'JSON 中若某欄位為陣列，對應到範本的 loop 類型，可自動產生多行表格或多張投影片' },
               { icon: '✅', title: '格式完整保留', desc: '生成的文件保留原始範本的字型、框線、Logo，僅填入 AI 提供的資料' },
               { icon: '⚠️', title: '欄位名稱需對應', desc: 'JSON 的 key 必須與範本變數的 key 一致，AI 通常能自動對應，但若範本有更動建議重新測試一次' },
               { icon: '⚠️', title: '需有「使用」權限', desc: 'AI 自動生成同樣需要對範本有 use 以上的存取權限，否則生成步驟會失敗' },
