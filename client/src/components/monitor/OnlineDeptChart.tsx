@@ -7,7 +7,9 @@ interface DeptSnapshot {
   snapshot_id: number | null
   collected_at: string
   profit_center: string
+  profit_center_name: string
   org_section: string
+  org_section_name: string
   org_group_name: string
   dept_code: string
   user_count: number
@@ -38,7 +40,11 @@ export default function OnlineDeptChart() {
         ? String(d.snapshot_id)
         : String(Math.floor(new Date(d.collected_at).getTime() / 60000))
       const ts = d.snapshot_id != null ? d.snapshot_id * 1000 : new Date(d.collected_at).getTime()
-      const dimValue = d[dimension] || 'Unknown'
+      const dimValue = dimension === 'profit_center'
+        ? (d.profit_center_name || d.profit_center || 'Unknown')
+        : dimension === 'org_section'
+          ? (d.org_section_name || d.org_section || 'Unknown')
+          : (d[dimension] || 'Unknown')
       if (!snapGroups[key]) snapGroups[key] = { ts, values: {} }
       snapGroups[key].values[dimValue] = (snapGroups[key].values[dimValue] || 0) + d.user_count
     }
@@ -153,7 +159,7 @@ export default function OnlineDeptChart() {
 
       {loading && <div className="animate-pulse h-48 bg-slate-50 rounded" />}
       {!loading && chartOption && (
-        <ReactECharts option={chartOption} style={{ height: 250 }} opts={{ renderer: 'svg' }} />
+        <ReactECharts key={dimension} option={chartOption} style={{ height: 250 }} opts={{ renderer: 'svg' }} notMerge />
       )}
       {!loading && !chartOption && (
         <div className="text-xs text-slate-400 text-center py-8">尚無部門統計資料（資料每 5 分鐘收集一次）</div>

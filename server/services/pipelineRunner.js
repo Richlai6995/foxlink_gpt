@@ -163,6 +163,23 @@ async function execGenerateFile(node, vars, db, context) {
   const input = interpolate(node.input || '{{ai_output}}', vars);
   const fileType = node.file_type || 'pdf';
 
+  // ── Template mode: fill a doc template with JSON data ──────────────────────
+  if (node.template_id) {
+    const {
+      generateDocumentFromJson,
+      parseJsonFromAiOutput,
+    } = require('./docTemplateService');
+    const jsonData = parseJsonFromAiOutput(input);
+    if (!jsonData) throw new Error('Pipeline generate_file: 資料來源無法解析為 JSON');
+    const user = context.user || { id: context.userId, role: 'admin' };
+    const tplFile = await generateDocumentFromJson(db, node.template_id, jsonData, user);
+    const resolvedFilename = interpolate(node.filename || tplFile.filename, vars);
+    return {
+      text: `[已生成範本檔案: ${resolvedFilename}]`,
+      file: { filename: resolvedFilename, publicUrl: tplFile.publicUrl, filePath: tplFile.filePath },
+    };
+  }
+
   if (fileType === 'mp3') {
     const FOXLINK_API = `http://127.0.0.1:${process.env.PORT || 3001}`;
     const SERVICE_KEY = process.env.SKILL_SERVICE_KEY || '';

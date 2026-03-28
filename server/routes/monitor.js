@@ -156,11 +156,15 @@ router.get('/summary', async (req, res) => {
       `SELECT COUNT(*) AS cnt FROM monitor_alerts WHERE resolved_at IS NULL`
     ).get();
 
-    // Online users
+    // Online users (deduplicated by user ID, same as /online-users endpoint)
     let onlineCount = 0;
     try {
       const sessions = await redis.getAllSessions();
-      onlineCount = sessions ? sessions.length : 0;
+      if (sessions) {
+        const seen = new Set();
+        for (const s of sessions) { if (s.id) seen.add(s.id); }
+        onlineCount = seen.size;
+      }
     } catch { /* redis may not support getAllSessions */ }
 
     // Latest host metrics

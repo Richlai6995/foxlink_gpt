@@ -283,6 +283,40 @@ function getEffectiveStyle(variable) {
 }
 
 /**
+ * Apply style to an ExcelJS cell.
+ * - fontSize / bold / italic: from effective style (detected + override merged)
+ * - color / bgColor: ONLY from override (never from detected) to preserve
+ *   original template cell formatting when no explicit override is set.
+ *
+ * @param {object} cell  ExcelJS Cell
+ * @param {object} eff   Effective style (detected+override, from getEffectiveStyle)
+ * @param {object} ovr   Override-only style (variable.style?.override || {})
+ */
+function applyXlsxCellStyle(cell, eff, ovr = {}) {
+  if (!eff) return;
+  const { fontSize, bold, italic } = eff;
+  const { color, bgColor } = ovr;   // colours ONLY from override
+
+  if (fontSize !== undefined || bold !== undefined || italic !== undefined || color !== undefined) {
+    const existing = cell.font || {};
+    cell.font = {
+      ...existing,
+      ...(fontSize !== undefined ? { size: fontSize } : {}),
+      ...(bold     !== undefined ? { bold } : {}),
+      ...(italic   !== undefined ? { italic } : {}),
+      ...(color    ? { color: { argb: 'FF' + color.replace('#', '').toUpperCase() } } : {}),
+    };
+  }
+  if (bgColor) {
+    cell.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FF' + bgColor.replace('#', '').toUpperCase() },
+    };
+  }
+}
+
+/**
  * Merge style overrides into an existing <w:rPr>...</w:rPr> string.
  * Returns updated rPr string (may be empty string if nothing to add).
  */
@@ -389,30 +423,47 @@ async function detectStylesFromXlsx(origBuf, variables) {
   await wb.xlsx.load(origBuf);
   const styles = {};
 
+  // Build lookup sets: which keys are loop children vs simple vars
+  const loopChildKeys = new Set();
+  for (const v of variables) {
+    if (v.type === 'loop') (v.children || []).forEach(c => loopChildKeys.add(c.key));
+  }
   const flatVars = variables.flatMap(v => v.type === 'loop' ? (v.children || []) : [v]);
 
+  const readCellStyle = (cell) => {
+    if (!cell) return {};
+    const s = {};
+    if (cell.font?.size)   s.fontSize = cell.font.size;
+    if (cell.font?.bold)   s.bold = true;
+    if (cell.font?.italic) s.italic = true;
+    // NOTE: Do NOT detect color/bgColor — keep them empty so the original
+    // template's cell formatting is preserved during generation.
+    // Users must explicitly set color/bgColor overrides in the style editor.
+    return s;
+  };
+
   wb.eachSheet(sheet => {
-    sheet.eachRow(row => {
+    sheet.eachRow((row, rowNumber) => {
       row.eachCell({ includeEmpty: false }, (cell, colNumber) => {
         if (typeof cell.value !== 'string') return;
         const cellText = String(cell.value).replace(/[:：\s]/g, '').slice(0, 6);
         const matched = flatVars.find(v => {
+          if (styles[v.key]) return false; // already detected
           const lk = (v.label || v.key).replace(/[:：\s]/g, '').slice(0, 6);
           return cellText.includes(lk) || lk.includes(cellText);
         });
         if (!matched) return;
-        // Read style from the adjacent cell (same row, next column)
-        const valCell = row.getCell(colNumber + 1);
-        if (!valCell?.font) return;
-        const s = {};
-        if (valCell.font.size) s.fontSize = valCell.font.size;
-        if (valCell.font.bold) s.bold = true;
-        if (valCell.font.italic) s.italic = true;
-        if (valCell.font.color?.argb) {
-          // ARGB → #RRGGBB
-          const argb = valCell.font.color.argb;
-          if (argb && argb.length === 8) s.color = `#${argb.slice(2)}`;
+
+        let valCell;
+        if (loopChildKeys.has(matched.key)) {
+          // Loop child: header is in this cell; data is in the row BELOW, same column
+          valCell = sheet.getRow(rowNumber + 1).getCell(colNumber);
+        } else {
+          // Simple var: label cell + value in adjacent column (same row)
+          valCell = row.getCell(colNumber + 1);
         }
+
+        const s = readCellStyle(valCell);
         if (Object.keys(s).length) styles[matched.key] = s;
       });
     });
@@ -1122,18 +1173,26 @@ async function generateDocument(db, templateId, userId, inputData, outputFormat,
     const evenFill = xlsxSettings.evenRowColor ? { type: 'pattern', pattern: 'solid', fgColor: { argb: toArgb(xlsxSettings.evenRowColor) } } : null;
 
     wb.eachSheet(sheet => {
-      // ── Simple variables: text replacement ────────────────────────────────
+      // ── Simple variables: text replacement + style override ────────────────
       sheet.eachRow(row => {
         row.eachCell(cell => {
           if (typeof cell.value !== 'string') return;
           let v = cell.value;
+          let matchedVar = null;
           for (const varDef of variables) {
             if (!varDef.original_text || varDef.type === 'loop') continue;
             if (v.includes(varDef.original_text)) {
               v = v.replaceAll(varDef.original_text, resolveValue(varDef, inputData));
+              matchedVar = varDef;
             }
           }
           cell.value = v;
+          // Apply style override (color only from explicit override)
+          if (matchedVar) {
+            const eff = getEffectiveStyle(matchedVar);
+            const ovr = matchedVar?.style?.override || {};
+            if (eff) applyXlsxCellStyle(cell, eff, ovr);
+          }
         });
       });
 
@@ -1185,16 +1244,71 @@ async function generateDocument(db, templateId, userId, inputData, outputFormat,
           });
         }
 
-        // Fallback: no header found → use sequential columns starting at 1
+        // Fallback: label matching failed → find the row with the most non-empty cells
+        // (typically the header row). Map children to those columns in order.
         if (headerRowNum === -1) {
-          headerRowNum = sheet.lastRow?.number ?? 0;
-          children.forEach((c, i) => { colMap[c.key] = i + 1; });
+          let bestRowNum = 1;
+          let bestCount = 0;
+          sheet.eachRow({ includeEmpty: false }, (row, rowNum) => {
+            let cnt = 0;
+            row.eachCell({ includeEmpty: false }, () => cnt++);
+            if (cnt > bestCount) { bestCount = cnt; bestRowNum = rowNum; }
+          });
+          headerRowNum = bestRowNum;
+          // Map children to the actual column positions found in that row
+          const hRowCols = [];
+          sheet.getRow(headerRowNum).eachCell({ includeEmpty: false }, (_, colNum) => hRowCols.push(colNum));
+          children.forEach((c, i) => { colMap[c.key] = hRowCols[i] ?? (i + 1); });
         }
         if (!Object.keys(colMap).length) {
           children.forEach((c, i) => { colMap[c.key] = i + 1; });
         }
 
-        // Write data rows
+        // ── Step 1: Apply style to header row (colour = parent override only) ─
+        const parentEff = getEffectiveStyle(varDef);
+        const parentOvr = varDef?.style?.override || {};
+        const hRow = sheet.getRow(headerRowNum);
+        if (parentEff) {
+          for (const [, colNum] of Object.entries(colMap)) {
+            applyXlsxCellStyle(hRow.getCell(colNum), parentEff, parentOvr);
+          }
+        }
+
+        // ── Step 1b: Normalise data row formatting ───────────────────────────
+        // Some templates have fewer placeholder rows than the actual data count,
+        // OR the last placeholder row has no fill (e.g. a blank separator row).
+        // Copy formatting from the FIRST template data row to any target row that
+        // lacks a fill so all generated rows look consistent.
+        {
+          const firstDataRowNum = headerRowNum + 1;
+          const refRow = sheet.getRow(firstDataRowNum);
+          // Capture reference styles from the mapped columns
+          const refStyles = {};
+          for (const [, colNum] of Object.entries(colMap)) {
+            const c = refRow.getCell(colNum);
+            if (c.style && Object.keys(c.style).length) {
+              refStyles[colNum] = JSON.parse(JSON.stringify(c.style));
+            }
+          }
+          const refHeight = refRow.height;
+          const lastDataRowNum = headerRowNum + items.length;
+          for (let rn = firstDataRowNum + 1; rn <= lastDataRowNum; rn++) {
+            const row = sheet.getRow(rn);
+            let hasFill = false;
+            for (const [, colNum] of Object.entries(colMap)) {
+              const c = row.getCell(colNum);
+              if (c.fill && c.fill.type !== 'none' && c.fill.pattern !== 'none') { hasFill = true; break; }
+            }
+            if (!hasFill) {
+              if (refHeight) row.height = refHeight;
+              for (const [, colNum] of Object.entries(colMap)) {
+                if (refStyles[colNum]) row.getCell(colNum).style = JSON.parse(JSON.stringify(refStyles[colNum]));
+              }
+            }
+          }
+        }
+
+        // ── Step 2: Write data rows (values only) ────────────────────────────
         const existingLastRow = sheet.lastRow?.number ?? headerRowNum;
         items.forEach((item, idx) => {
           const rowNum = headerRowNum + 1 + idx;
@@ -1202,11 +1316,35 @@ async function generateDocument(db, templateId, userId, inputData, outputFormat,
           for (const [key, colNum] of Object.entries(colMap)) {
             row.getCell(colNum).value = String(item[key] ?? '');
           }
-
-          const fill = idx % 2 === 0 ? oddFill : evenFill;
-          if (fill) row.eachCell({ includeEmpty: false }, cell => { cell.fill = fill; });
-          row.commit();
         });
+
+        // ── Step 3: Apply styles to all data rows (separate pass) ────────────
+        // Build child eff+override map once
+        const childStyleMap = {};
+        for (const [key] of Object.entries(colMap)) {
+          const childVar = children.find(c => c.key === key);
+          if (childVar) childStyleMap[key] = {
+            eff: getEffectiveStyle(childVar),
+            ovr: childVar?.style?.override || {},
+          };
+        }
+
+        for (let idx = 0; idx < items.length; idx++) {
+          const rowNum = headerRowNum + 1 + idx;
+          const row = sheet.getRow(rowNum);
+
+          // Apply per-column style (colour only from override)
+          for (const [key, colNum] of Object.entries(colMap)) {
+            const sm = childStyleMap[key];
+            if (sm?.eff) applyXlsxCellStyle(row.getCell(colNum), sm.eff, sm.ovr);
+          }
+
+          // Alternating row fill (lower priority than per-cell bgColor)
+          const fill = idx % 2 === 0 ? oddFill : evenFill;
+          if (fill) row.eachCell({ includeEmpty: false }, cell => {
+            if (!cell.fill || cell.fill.pattern === 'none') cell.fill = fill;
+          });
+        }
         console.log(`[DocTemplate] XLSX loop ${varDef.key}: headerRow=${headerRowNum} items=${items.length} cols=${JSON.stringify(colMap)} existingRows=${existingLastRow}`);
       }
     });
@@ -1262,7 +1400,8 @@ async function generateDocument(db, templateId, userId, inputData, outputFormat,
     // Reads pdf_cell positions to reconstruct the table structure in DOCX.
     // Groups cells by Y → rows, sorts by X → columns.  No extra colors added.
     const { Document, Packer, Paragraph, Table, TableRow, TableCell,
-            TextRun, ImageRun, WidthType, BorderStyle, VerticalAlign } = require('docx');
+            TextRun, ImageRun, WidthType, BorderStyle, VerticalAlign,
+            LineRuleType } = require('docx');
 
     const variables = schema.variables || [];
 
@@ -1290,12 +1429,15 @@ async function generateDocument(db, templateId, userId, inputData, outputFormat,
                          insideH: borderDef, insideV: borderDef };
     const fzDefault  = 12;
 
-    // Helper: create value paragraphs (split by \n)
+    // Helper: create value paragraphs (split by \n), single line spacing
+    const singleSpacing = { line: 240, lineRule: LineRuleType.AUTO, before: 0, after: 0 };
     const mkValueParas = (text, fz, bold, color) => {
-      const lines = (text || ' ').split('\n');
+      let lines = (text || ' ').split('\n');
+      // Remove trailing empty lines to avoid blank paragraph at bottom
+      while (lines.length > 1 && !lines[lines.length - 1].trim()) lines.pop();
       return lines.map(line => new Paragraph({
-        children: [new TextRun({ text: line, bold, size: fz, color })],
-        spacing: { before: 30, after: 30 },
+        children: [new TextRun({ text: line || ' ', bold, size: fz, color })],
+        spacing: singleSpacing,
       }));
     };
 
@@ -1331,14 +1473,16 @@ async function generateDocument(db, templateId, userId, inputData, outputFormat,
       const logoW = 140, logoH = Math.max(20, Math.round(logoW * logoAspect));
       docChildren.push(new Paragraph({
         children: [new ImageRun({ data: logoBytes, transformation: { width: logoW, height: logoH }, type: 'jpg' })],
-        spacing: { after: 60 },
+        spacing: { ...singleSpacing, after: 60 },
       }));
     }
 
     if (hasCells) {
       // ── Overlay template: reconstruct table from pdf_cell positions ──────
-      // Each row is its own Table so column split points can differ per row
-      // (e.g. 會議時間 vs 與會人員 start at different X positions).
+      // Fine-grained column grid: union of ALL unique X boundaries across all
+      // rows creates a logical column grid. Each cell uses columnSpan to merge
+      // the appropriate columns.  This keeps ONE table so the outer frame stays
+      // consistent while allowing rows to have different split points.
       const cellVars = flatVars.filter(v => v.pdf_cell && (v.content_mode ?? 'variable') !== 'empty');
 
       // Group by Y (tolerance ±5pt) → rows; sort by X → columns
@@ -1352,7 +1496,7 @@ async function generateDocument(db, templateId, userId, inputData, outputFormat,
       rowGroups.sort((a, b) => a.y - b.y);
       for (const rg of rowGroups) rg.vars.sort((a, b) => a.pdf_cell.x - b.pdf_cell.x);
 
-      // Infer table left edge from multi-var rows
+      // Infer label width (gap between label start and first value cell)
       const multiVarRows = rowGroups.filter(r => r.vars.length >= 2);
       let inferredLabelW = 85;
       if (multiVarRows.length > 0) {
@@ -1364,31 +1508,77 @@ async function generateDocument(db, templateId, userId, inputData, outputFormat,
         }
         inferredLabelW = gaps.reduce((a, b) => a + b, 0) / gaps.length;
       }
+
+      // ── Step 1: Collect ALL unique X boundaries ──────────────────────────
       const tableLeft = Math.max(0, Math.min(...cellVars.map(v => v.pdf_cell.x)) - inferredLabelW);
       const maxRight  = Math.max(...cellVars.map(v => v.pdf_cell.x + v.pdf_cell.width));
-      const fullW     = maxRight - tableLeft;
 
-      // Border without top for middle/last rows to avoid double-border
-      const borderNone = { style: BorderStyle.NONE, size: 0 };
-
-      // Build one Table per row — each with its own column proportions
-      for (let ri = 0; ri < rowGroups.length; ri++) {
-        const rg = rowGroups[ri];
-
-        // Compute this row's column widths from its own cell positions
-        const rowColPcts = [];
-        let prev = tableLeft;
-        for (const v of rg.vars) {
-          rowColPcts.push(Math.round((v.pdf_cell.x - prev) / fullW * 100));
-          rowColPcts.push(Math.round(v.pdf_cell.width / fullW * 100));
-          prev = v.pdf_cell.x + v.pdf_cell.width;
+      const xSet = new Set();
+      xSet.add(tableLeft);
+      xSet.add(maxRight);
+      for (const v of cellVars) {
+        xSet.add(v.pdf_cell.x);
+        xSet.add(v.pdf_cell.x + v.pdf_cell.width);
+      }
+      // For each row, add the label start X (cell.x - inferredLabelW for that cell)
+      for (const rg of rowGroups) {
+        for (let i = 0; i < rg.vars.length; i++) {
+          const v = rg.vars[i];
+          if (i === 0) {
+            // First cell's label starts at tableLeft (already added)
+          } else {
+            // Subsequent labels start after the previous value cell ends
+            const prevEnd = rg.vars[i - 1].pdf_cell.x + rg.vars[i - 1].pdf_cell.width;
+            xSet.add(prevEnd);
+          }
         }
-        // Normalize
-        const s = rowColPcts.reduce((a, b) => a + b, 0);
-        if (s !== 100) rowColPcts[rowColPcts.length - 1] += (100 - s);
+      }
 
-        // Build cells
+      // ── Step 2: Sort and merge nearby boundaries (tolerance 3pt) ─────────
+      let bounds = [...xSet].sort((a, b) => a - b);
+      const merged = [bounds[0]];
+      for (let i = 1; i < bounds.length; i++) {
+        if (bounds[i] - merged[merged.length - 1] < 3) {
+          // Merge: keep the average
+          merged[merged.length - 1] = (merged[merged.length - 1] + bounds[i]) / 2;
+        } else {
+          merged.push(bounds[i]);
+        }
+      }
+      bounds = merged;
+
+      const numCols = bounds.length - 1;
+      const fullW   = bounds[bounds.length - 1] - bounds[0];
+
+      // Column widths as percentages of total table width
+      const colPcts = [];
+      for (let i = 0; i < numCols; i++) {
+        colPcts.push((bounds[i + 1] - bounds[i]) / fullW * 100);
+      }
+      // Normalize to exactly 100
+      const pctTotal = colPcts.reduce((a, b) => a + b, 0);
+      if (Math.abs(pctTotal - 100) > 0.01) colPcts[colPcts.length - 1] += (100 - pctTotal);
+
+      // DXA widths for columnWidths grid (A4 content width with 1" margins = 9026 DXA)
+      const CONTENT_W_DXA = 9026;
+      const colWidths = colPcts.map(p => Math.round(p / 100 * CONTENT_W_DXA));
+
+      // Helper: find the closest column index for an X coordinate
+      const findCol = (x) => {
+        let best = 0, bestDist = Math.abs(bounds[0] - x);
+        for (let i = 1; i < bounds.length; i++) {
+          const d = Math.abs(bounds[i] - x);
+          if (d < bestDist) { bestDist = d; best = i; }
+        }
+        return best;
+      };
+
+      // ── Step 3: Build rows with columnSpan ───────────────────────────────
+      const tableRows = [];
+      for (const rg of rowGroups) {
         const cells = [];
+        let curCol = 0;  // Current column index in the logical grid
+
         for (let i = 0; i < rg.vars.length; i++) {
           const v   = rg.vars[i];
           const eff = getEffectiveStyle(v) || {};
@@ -1397,33 +1587,59 @@ async function generateDocument(db, templateId, userId, inputData, outputFormat,
           const fz  = Math.round((eff.fontSize || fzDefault) * 2);
           const fg  = (eff.color || '#000000').replace('#', '');
 
-          // Label cell
+          const valStartCol = findCol(v.pdf_cell.x);
+          const isLastVar   = (i === rg.vars.length - 1);
+          const valEndCol   = isLastVar ? numCols : findCol(v.pdf_cell.x + v.pdf_cell.width);
+
+          // Label cell: spans from curCol to valStartCol
+          let labelSpan = valStartCol - curCol;
+          let valueSpan = valEndCol - valStartCol;
+          // If label has no room (boundaries merged), borrow 1 col from value
+          if (labelSpan <= 0) { labelSpan = 1; valueSpan = Math.max(1, valueSpan - 1); }
+          if (valueSpan <= 0) valueSpan = 1;
+
+          const labelPct = colPcts.slice(curCol, curCol + labelSpan).reduce((a, b) => a + b, 0);
           cells.push(new TableCell({
-            width: { size: rowColPcts[i * 2], type: WidthType.PERCENTAGE },
-            verticalAlign: VerticalAlign.CENTER,
+            width: { size: labelPct, type: WidthType.PERCENTAGE },
+            columnSpan: labelSpan,
             children: [new Paragraph({
               children: [new TextRun({ text: v.label || v.key, bold: true, size: fz, color: '1F4E79' })],
-              spacing: { before: 40, after: 40 },
+              spacing: singleSpacing,
             })],
           }));
-          // Value cell
+
+          // Value cell: spans from valStartCol to valEndCol
+          const valPct = colPcts.slice(curCol + labelSpan, curCol + labelSpan + valueSpan).reduce((a, b) => a + b, 0);
           cells.push(new TableCell({
-            width: { size: rowColPcts[i * 2 + 1], type: WidthType.PERCENTAGE },
+            width: { size: valPct, type: WidthType.PERCENTAGE },
+            columnSpan: valueSpan,
             children: mkValueParas(val, fz, eff.bold === true, fg),
+          }));
+
+          curCol = curCol + labelSpan + valueSpan;
+        }
+
+        // Fill any remaining columns if row doesn't reach the right edge
+        if (curCol < numCols) {
+          const remaining = numCols - curCol;
+          const remPct = colPcts.slice(curCol, numCols).reduce((a, b) => a + b, 0);
+          cells.push(new TableCell({
+            width: { size: remPct, type: WidthType.PERCENTAGE },
+            columnSpan: remaining,
+            children: [new Paragraph({ children: [] })],
           }));
         }
 
-        // Remove top border for non-first rows to avoid double lines
-        const rowBorders = ri === 0 ? tblBorders : {
-          ...tblBorders, top: borderNone,
-        };
-
-        docChildren.push(new Table({
-          width: { size: 100, type: WidthType.PERCENTAGE },
-          borders: rowBorders,
-          rows: [new TableRow({ children: cells })],
-        }));
+        tableRows.push(new TableRow({ children: cells }));
       }
+
+      // ── Step 4: Single unified table with column grid ──────────────────
+      docChildren.push(new Table({
+        width: { size: 100, type: WidthType.PERCENTAGE },
+        borders: tblBorders,
+        columnWidths: colWidths,
+        rows: tableRows,
+      }));
 
     } else {
       // ── Regen template (no pdf_cell): simple label|value rows ─────────
@@ -1442,10 +1658,9 @@ async function generateDocument(db, templateId, userId, inputData, outputFormat,
             children: [
               new TableCell({
                 width: { size: 18, type: WidthType.PERCENTAGE },
-                verticalAlign: VerticalAlign.CENTER,
                 children: [new Paragraph({
                   children: [new TextRun({ text: (v.label || v.key), bold: true, size: fz, color: '1F4E79' })],
-                  spacing: { before: 40, after: 40 },
+                  spacing: singleSpacing,
                 })],
               }),
               new TableCell({
@@ -1458,7 +1673,30 @@ async function generateDocument(db, templateId, userId, inputData, outputFormat,
       }
     }
 
-    const doc = new Document({ sections: [{ children: docChildren }] });
+    const doc = new Document({
+      styles: {
+        default: {
+          document: {
+            paragraph: { spacing: singleSpacing },
+            run: { size: fzDefault * 2 },
+          },
+        },
+        paragraphStyles: [{
+          id: 'Normal',
+          name: 'Normal',
+          paragraph: { spacing: singleSpacing },
+        }],
+      },
+      sections: [{
+        properties: {
+          page: {
+            size: { width: 11906, height: 16838 },          // A4
+            margin: { top: 1440, right: 1440, bottom: 1440, left: 1440 }, // 1 inch
+          },
+        },
+        children: docChildren,
+      }],
+    });
     const out = await Packer.toBuffer(doc);
     outPath = path.join(outDir, `${outputId}.docx`);
     await fs.writeFile(outPath, out);
@@ -2058,6 +2296,92 @@ async function ocrPdfFields(pdfBuf, model) {
   }
 }
 
+// ─── Template-aware helpers for skill / schedule / pipeline ────────────────────
+
+/**
+ * Build the JSON output instruction to append to AI system prompt.
+ * Returns null if templateId is falsy or template not found.
+ */
+async function getTemplateSchemaInstruction(db, templateId) {
+  if (!templateId) return null;
+  const tpl = await db.prepare('SELECT name, schema_json, format FROM doc_templates WHERE id=?').get(templateId);
+  if (!tpl) return null;
+  const schema = JSON.parse(tpl.schema_json || '{}');
+  const variables = schema.variables || [];
+
+  // Build minimal JSON shape for AI guidance
+  const buildShape = (vars) => {
+    const obj = {};
+    for (const v of vars) {
+      if (v.type === 'loop') {
+        const childShape = {};
+        for (const c of (v.children || [])) childShape[c.key] = c.label || c.key;
+        obj[v.key] = [childShape];
+      } else {
+        obj[v.key] = v.label || v.key;
+      }
+    }
+    return obj;
+  };
+
+  const shape = buildShape(variables);
+  return [
+    `\n\n---`,
+    `請以純 JSON 格式輸出資料（不要有任何其他文字、markdown、說明），格式如下：`,
+    `\`\`\`json`,
+    JSON.stringify(shape, null, 2),
+    `\`\`\``,
+    `（輸出範本：${tpl.name}，格式：${tpl.format.toUpperCase()}）`,
+  ].join('\n');
+}
+
+/**
+ * Parse JSON from AI text output (strips markdown fences if present).
+ * Returns parsed object or null on failure.
+ */
+function parseJsonFromAiOutput(text) {
+  if (!text) return null;
+  // Try ```json ... ``` fence first
+  const fenceMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/);
+  const raw = fenceMatch ? fenceMatch[1].trim() : text.trim();
+  // Find outermost { ... }
+  const start = raw.indexOf('{');
+  const end   = raw.lastIndexOf('}');
+  if (start === -1 || end === -1) return null;
+  try {
+    return JSON.parse(raw.slice(start, end + 1));
+  } catch (_) {
+    return null;
+  }
+}
+
+/**
+ * Generate a document from template using JSON data.
+ * Checks user's 'use' access to the template.
+ * Returns { filename, publicUrl, filePath (absolute) }.
+ */
+async function generateDocumentFromJson(db, templateId, jsonData, user, outputFormat) {
+  const access = await checkAccess(db, templateId, user);
+  if (!access) throw new Error('無範本存取權限');
+
+  const UPLOAD_DIR_PATH = process.env.UPLOAD_DIR
+    ? path.resolve(process.env.UPLOAD_DIR)
+    : path.join(__dirname, '../uploads');
+
+  const tpl = await db.prepare('SELECT * FROM doc_templates WHERE id=?').get(templateId);
+  if (!tpl) throw new Error('範本不存在');
+
+  // generateDocument returns { outputId, filePath: 'generated/<id>.<ext>' }
+  const { filePath: relPath } = await generateDocument(
+    db, templateId, user.id, jsonData, outputFormat || tpl.format
+  );
+
+  const filename  = path.basename(relPath);                      // '<id>.<ext>'
+  const absPath   = path.join(UPLOAD_DIR_PATH, relPath);
+  const publicUrl = `/uploads/${relPath}`;
+  return { filename, publicUrl, filePath: absPath };
+}
+
 module.exports = {
   checkAccess,
   extractText,
@@ -2065,6 +2389,9 @@ module.exports = {
   analyzeDocument,
   createTemplate,
   generateDocument,
+  generateDocumentFromJson,
+  getTemplateSchemaInstruction,
+  parseJsonFromAiOutput,
   forkTemplate,
   listTemplates,
   ocrPdfFields,

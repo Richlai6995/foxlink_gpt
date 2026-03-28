@@ -1,12 +1,14 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
-import { Plus, Search, Globe, Lock, GitFork, Send, Pencil, Trash2, Clock, X, ChevronDown, Zap, ArrowLeft, MessageSquare, Code2, Eye, Share2, History, CheckCircle, XCircle } from 'lucide-react'
+import { Plus, Search, Globe, Lock, GitFork, Send, Pencil, Trash2, Clock, X, ChevronDown, Zap, ArrowLeft, MessageSquare, Code2, Eye, Share2, History, CheckCircle, XCircle, LayoutTemplate } from 'lucide-react'
 import api from '../lib/api'
 import TranslationFields, { type TranslationData } from '../components/common/TranslationFields'
 import UserPicker from '../components/common/UserPicker'
 import TagInput from '../components/common/TagInput'
 import WorkflowEditor from '../components/workflow/WorkflowEditor'
+import TemplatePickerPopover from '../components/templates/TemplatePickerPopover'
+import type { DocTemplate } from '../types'
 
 interface Skill {
     id: number
@@ -44,6 +46,7 @@ interface Skill {
     draft_prompt?: string
     workflow_json?: string
     prompt_variables?: string
+    output_template_id?: string | null
 }
 
 interface Model { key: string; name: string }
@@ -80,7 +83,7 @@ const ICONS = [
 
 const EMPTY_FORM = {
     name: '', description: '', icon: '🤖', type: 'builtin' as 'builtin' | 'external' | 'code' | 'workflow',
-    system_prompt: '', endpoint_url: '', endpoint_secret: '', endpoint_mode: 'inject' as 'inject' | 'answer',
+    system_prompt: '', endpoint_url: '', endpoint_secret: '', endpoint_mode: 'inject' as 'inject' | 'answer' | 'post_answer',
     model_key: '', mcp_tool_mode: 'append' as 'append' | 'exclusive' | 'disable',
     mcp_tool_ids: [] as number[], dify_kb_ids: [] as number[], tags: [] as string[],
     code_snippet: '', code_packages: [] as string[],
@@ -93,6 +96,7 @@ const EMPTY_FORM = {
     rate_limit_window: 'hour' as 'minute' | 'hour' | 'day',
     prompt_variables: '[]',
     workflow_json: '',
+    output_template_id: '' as string,
 }
 
 export default function SkillMarket() {
@@ -124,6 +128,8 @@ export default function SkillMarket() {
     const [versionHistory, setVersionHistory] = useState<any[]>([])
     const [showVersions, setShowVersions] = useState(false)
     const [trans, setTrans] = useState<TranslationData>({})
+    const [outputTemplate, setOutputTemplate] = useState<DocTemplate | null>(null)
+    const [showTemplatePicker, setShowTemplatePicker] = useState(false)
     const [translating, setTranslating] = useState(false)
 
     const load = useCallback(async () => {
@@ -154,7 +160,7 @@ export default function SkillMarket() {
 
     useEffect(() => { load() }, [load])
 
-    const openCreate = () => { setEditingSkill(null); setForm({ ...EMPTY_FORM }); setTagInput(''); setTrans({}); setEditorTab('basic'); setShowEditor(true); setVersionHistory([]) }
+    const openCreate = () => { setEditingSkill(null); setForm({ ...EMPTY_FORM }); setTagInput(''); setTrans({}); setEditorTab('basic'); setShowEditor(true); setVersionHistory([]); setOutputTemplate(null) }
     const openEdit = async (sk: Skill) => {
         setEditingSkill(sk)
         setForm({
@@ -177,7 +183,14 @@ export default function SkillMarket() {
             rate_limit_window: sk.rate_limit_window || 'hour',
             prompt_variables: typeof sk.prompt_variables === 'object' ? JSON.stringify(sk.prompt_variables, null, 2) : (sk.prompt_variables || '[]'),
             workflow_json: typeof sk.workflow_json === 'object' ? JSON.stringify(sk.workflow_json, null, 2) : (sk.workflow_json || ''),
+            output_template_id: sk.output_template_id || '',
         })
+        // Load output template info if set
+        if (sk.output_template_id) {
+            api.get(`/doc-templates/${sk.output_template_id}`).then(r => setOutputTemplate(r.data)).catch(() => setOutputTemplate(null))
+        } else {
+            setOutputTemplate(null)
+        }
         setTrans({
             name_zh: (sk as any).name_zh || null, name_en: (sk as any).name_en || null, name_vi: (sk as any).name_vi || null,
             desc_zh: (sk as any).desc_zh || null, desc_en: (sk as any).desc_en || null, desc_vi: (sk as any).desc_vi || null,
@@ -209,6 +222,7 @@ export default function SkillMarket() {
             rate_limit_window: form.rate_limit_window,
             prompt_variables: form.prompt_variables || '[]',
             workflow_json: form.workflow_json || null,
+            output_template_id: form.output_template_id || null,
         }
         setTranslating(true)
         try {
@@ -657,6 +671,35 @@ export default function SkillMarket() {
                                                 className="w-full border rounded px-3 py-2 text-xs font-mono h-32 resize-y"
                                                 placeholder='{"type":"object","properties":{"summary":{"type":"string"},"items":{"type":"array"}}}' />
                                             <p className="text-xs text-slate-400 mt-1">JSON Schema，LLM 會按此格式輸出</p>
+                                        </div>
+
+                                        {/* output_template_id */}
+                                        <div>
+                                            <label className="block text-xs text-slate-500 mb-1">輸出範本</label>
+                                            <div className="relative">
+                                                {outputTemplate ? (
+                                                    <div className="flex items-center gap-2 px-3 py-2 border border-blue-300 bg-blue-50 rounded-lg text-sm">
+                                                        <LayoutTemplate size={14} className="text-blue-500 shrink-0" />
+                                                        <span className="flex-1 text-blue-700 truncate">{outputTemplate.name}</span>
+                                                        <button type="button" onClick={() => { setOutputTemplate(null); setField('output_template_id', '') }}
+                                                            className="text-slate-400 hover:text-red-500"><X size={13} /></button>
+                                                    </div>
+                                                ) : (
+                                                    <button type="button" onClick={() => setShowTemplatePicker(true)}
+                                                        className="flex items-center gap-2 px-3 py-2 border border-dashed border-slate-300 rounded-lg text-sm text-slate-500 hover:border-blue-400 hover:text-blue-600 transition w-full">
+                                                        <LayoutTemplate size={14} />選擇輸出範本（選填）
+                                                    </button>
+                                                )}
+                                                {showTemplatePicker && (
+                                                    <div className="absolute z-50 top-full mt-1 left-0 right-0">
+                                                        <TemplatePickerPopover
+                                                            onSelect={t => { setOutputTemplate(t); setField('output_template_id', t.id); setShowTemplatePicker(false) }}
+                                                            onClose={() => setShowTemplatePicker(false)}
+                                                        />
+                                                    </div>
+                                                )}
+                                            </div>
+                                            <p className="text-xs text-slate-400 mt-1">選擇後 AI 會強制輸出 JSON 並套用此範本產生文件</p>
                                         </div>
                                     </div>
                                 )}

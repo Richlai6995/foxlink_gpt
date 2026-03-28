@@ -2716,16 +2716,16 @@ function UserManual() {
         </SubSection>
 
         <SubSection title="使用範本生成文件">
-          <Para>有三種方式可以套用範本產生文件：</Para>
+          <Para>共有五種方式可以套用範本產生文件：</Para>
           <div className="space-y-3 mt-2">
             <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-4">
               <p className="text-sm font-semibold text-indigo-700 mb-2 flex items-center gap-2">
                 <LayoutTemplate size={15} /> 方式 1：在對話輸入框選擇範本
               </p>
               <p className="text-xs text-indigo-600 leading-5">
-                點選輸入框左方的<strong>「範本」圖示</strong>（LayoutTemplate），從彈出清單選擇範本，
-                系統會在您的訊息前方附加 <code className="bg-indigo-100 px-1 rounded">[使用範本:名稱]</code> 標記，
-                AI 自動以對話內容填入變數並生成文件。
+                點選輸入框左方的<strong>「範本」圖示</strong>，從彈出清單選擇範本，
+                系統會在訊息前方附加 <code className="bg-indigo-100 px-1 rounded">[使用範本:名稱]</code> 標記，
+                AI 自動以對話內容填入變數並在回應中提供下載連結。
               </p>
             </div>
             <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
@@ -2737,10 +2737,74 @@ function UserManual() {
                 系統彈出填寫表單，依序輸入所有變數後點選「生成」，即可下載完成的文件。
               </p>
             </div>
+            <div className="bg-purple-50 border border-purple-200 rounded-xl p-4">
+              <p className="text-sm font-semibold text-purple-700 mb-2 flex items-center gap-2">
+                <Sparkles size={15} /> 方式 3：透過 Skill 技能自動套用
+              </p>
+              <p className="text-xs text-purple-600 leading-5">
+                在技能市集（Skill）編輯器的 <strong>「輸入/輸出」頁籤</strong>，選擇<strong>「輸出範本」</strong>。
+                之後在對話中套用此技能時，AI 會強制以 JSON 格式輸出，並自動套用所選範本產生文件，
+                文件下載連結直接顯示在對話中。
+              </p>
+            </div>
+            <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
+              <p className="text-sm font-semibold text-amber-700 mb-2 flex items-center gap-2">
+                <Clock size={15} /> 方式 4：排程任務自動生成
+              </p>
+              <p className="text-xs text-amber-600 leading-5">
+                在<strong>「排程任務」</strong>設定中，於<strong>「輸出範本」</strong>欄位選擇範本。
+                排程執行後，AI 的回應會自動解析為 JSON 並套用範本，生成的文件可透過 Email 附件寄送，
+                也會記錄在任務執行歷史中供下載。亦可在 Prompt 中插入
+                <code className="bg-amber-100 px-1 rounded">{'{{template:範本ID}}'}</code> 標籤來指定範本。
+              </p>
+            </div>
+            <div className="bg-teal-50 border border-teal-200 rounded-xl p-4">
+              <p className="text-sm font-semibold text-teal-700 mb-2 flex items-center gap-2">
+                <Zap size={15} /> 方式 5：Pipeline 工作流程節點
+              </p>
+              <p className="text-xs text-teal-600 leading-5">
+                在 Pipeline（工作流程）編輯器中，於<strong>「產生檔案」節點</strong>選擇<strong>「使用範本」</strong>模式，
+                指定目標範本後，上一個節點的 AI JSON 輸出會自動被解析並套用到範本，
+                生成的文件作為後續節點的輸入或最終輸出。
+              </p>
+            </div>
           </div>
           <NoteBox>
-            生成文件的格式預設與範本相同。若需轉換格式（如 DOCX → PDF），可在生成表單中選擇輸出格式。
+            方式 3～5（AI 自動套用）要求 AI 輸出符合範本結構的 JSON。系統會將範本的欄位清單注入到 AI 指令中，
+            引導 AI 自動產生正確的 JSON 格式，無需人工手動填表。
           </NoteBox>
+        </SubSection>
+
+        <SubSection title="AI 自動填表 — JSON 輸出機制">
+          <Para>
+            當使用技能綁定範本、排程任務或 Pipeline 節點時，系統會自動在 AI 的系統提示末尾注入範本的欄位說明，
+            格式如下：
+          </Para>
+          <CodeBlock>{`# 請以下列 JSON 格式輸出（用於文件範本填寫）
+{
+  "customer_name": "（客戶姓名 — text）",
+  "order_date":    "（訂單日期 — date）",
+  "items": [
+    { "product_code": "（產品代碼）", "qty": "（數量）" }
+  ]
+}`}</CodeBlock>
+          <Para>
+            AI 回應後，系統從回應文字中自動萃取第一個 JSON 物件，解析並對應到範本的各個欄位，
+            然後呼叫範本引擎生成最終文件。
+          </Para>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-2">
+            {[
+              { icon: '✅', title: '自動支援 loop 欄位', desc: 'JSON 中若某欄位為陣列，對應到範本的 loop 類型，可自動產生多行表格' },
+              { icon: '✅', title: '格式完整保留', desc: '生成的文件保留原始範本的字型、框線、Logo，僅填入 AI 提供的資料' },
+              { icon: '⚠️', title: '欄位名稱需對應', desc: 'JSON 的 key 必須與範本變數的 key 一致，AI 通常能自動對應，但若範本有更動建議重新測試一次' },
+              { icon: '⚠️', title: '需有「使用」權限', desc: 'AI 自動生成同樣需要對範本有 use 以上的存取權限，否則生成步驟會失敗' },
+            ].map(item => (
+              <div key={item.title} className="bg-slate-50 border rounded-lg p-3">
+                <p className="text-xs font-semibold text-slate-700">{item.icon} {item.title}</p>
+                <p className="text-[11px] text-slate-500 mt-0.5 leading-4">{item.desc}</p>
+              </div>
+            ))}
+          </div>
         </SubSection>
 
         <SubSection title="變數類型說明">
@@ -5588,6 +5652,129 @@ for (const ov of ocrVars) {
             <code className="bg-amber-100 px-1 rounded text-xs">template_analysis_model='pro'</code> 已設定，會自動沿用。
             OCR 座標為估算值，前端版面編輯器提供人工微調入口。
           </NoteBox>
+        </SubSection>
+
+        <SubSection title="範本 AI 整合 — 三大自動化管道">
+          <Para>
+            範本系統提供三個新的 AI 自動化整合管道，讓 AI 直接根據對話/排程內容產出結構化文件，無需人工填表。
+            三個管道共用同一套後端 API（<code className="bg-slate-100 px-1 rounded text-xs">docTemplateService.js</code>）。
+          </Para>
+          <Table
+            headers={['管道', '設定位置', '欄位', '觸發時機']}
+            rows={[
+              ['Skill 技能', '技能市集 → 編輯 → I/O 頁籤', 'output_template_id（skills 資料表）', '使用者在對話中套用此 Skill 時'],
+              ['排程任務', '排程任務 → 編輯 → 產出格式', 'output_template_id（scheduled_tasks 資料表）', '排程執行或手動「立即執行」時'],
+              ['Pipeline 節點', 'Pipeline 編輯器 → generate_file 節點 → 使用範本', 'template_id（節點 JSON config）', 'Pipeline 工作流程執行到該節點時'],
+            ]}
+          />
+
+          <div className="mt-4 space-y-4">
+            <div className="bg-purple-50 border border-purple-200 rounded-xl p-4">
+              <p className="text-xs font-semibold text-purple-700 mb-2">Skill output_template_id 流程</p>
+              <div className="space-y-1 text-xs text-purple-600 leading-5">
+                <p>1. 後端 <code className="bg-purple-100 px-1 rounded">chat.js</code> 偵測到 skill.output_template_id 不為空</p>
+                <p>2. 呼叫 <code className="bg-purple-100 px-1 rounded">getTemplateSchemaInstruction(db, id)</code>，將範本欄位說明注入 skillSystemPrompts</p>
+                <p>3. AI 以 JSON 格式回應，儲存為 text</p>
+                <p>4. 呼叫 <code className="bg-purple-100 px-1 rounded">parseJsonFromAiOutput(text)</code> 萃取 JSON</p>
+                <p>5. 呼叫 <code className="bg-purple-100 px-1 rounded">generateDocumentFromJson(db, id, jsonData, user)</code> 產生文件</p>
+                <p>6. 以 SSE <code className="bg-purple-100 px-1 rounded">generated_files</code> 事件推送下載連結到前端</p>
+              </div>
+            </div>
+
+            <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
+              <p className="text-xs font-semibold text-amber-700 mb-2">排程任務 output_template_id 流程</p>
+              <div className="space-y-1 text-xs text-amber-600 leading-5">
+                <p>1. <code className="bg-amber-100 px-1 rounded">scheduledTaskService.js</code> 執行 runTask()</p>
+                <p>2. 解析 prompt 中的 <code className="bg-amber-100 px-1 rounded">{'{{template:範本ID}}'}</code> 標籤，將其從 prompt 移除並收集 ID</p>
+                <p>3. 若 task.output_template_id 不為空且不在清單中，補充進去</p>
+                <p>4. 對每個 ID 呼叫 getTemplateSchemaInstruction()，附加到 prompt 末尾</p>
+                <p>5. AI 回應後，parseJsonFromAiOutput() 萃取 JSON</p>
+                <p>6. generateDocumentFromJson() 生成文件，加入 generatedFiles 清單</p>
+                <p>7. 若有設定收件人，附件寄送 Email；同時記錄在 scheduled_task_runs.generated_files_json</p>
+              </div>
+              <div className="mt-2 bg-amber-100 rounded-lg px-3 py-2">
+                <p className="text-xs font-semibold text-amber-800 mb-1">Prompt 中的範本標籤語法</p>
+                <pre className="text-xs text-amber-700 font-mono">{'請根據今日出勤數據生成報告。\n{{template:abc123-uuid}}'}</pre>
+                <p className="text-xs text-amber-600 mt-1">標籤會被移除後只剩 schema 指令注入，不影響 AI 的自然回應</p>
+              </div>
+            </div>
+
+            <div className="bg-teal-50 border border-teal-200 rounded-xl p-4">
+              <p className="text-xs font-semibold text-teal-700 mb-2">Pipeline generate_file 節點 — template_id 流程</p>
+              <div className="space-y-1 text-xs text-teal-600 leading-5">
+                <p>1. 節點 config 含 <code className="bg-teal-100 px-1 rounded">template_id</code> 時，<code className="bg-teal-100 px-1 rounded">pipelineRunner.js</code> 走 template 路徑</p>
+                <p>2. 接收上一個節點的文字輸出，呼叫 parseJsonFromAiOutput() 嘗試解析 JSON</p>
+                <p>3. 若無法解析為 JSON，節點拋出錯誤停止執行</p>
+                <p>4. 解析成功後呼叫 generateDocumentFromJson()，context.user 作為權限主體</p>
+                <p>5. 回傳 <code className="bg-teal-100 px-1 rounded">{'{ text: "[已生成範本檔案]", file: {...} }'}</code>，供後續節點使用或作為最終輸出</p>
+              </div>
+            </div>
+          </div>
+        </SubSection>
+
+        <SubSection title="三大整合 API — docTemplateService.js 新增函式">
+          <Table
+            headers={['函式', '用途', '說明']}
+            rows={[
+              [
+                'getTemplateSchemaInstruction(db, templateId)',
+                '生成 AI 指令字串',
+                '從 DB 讀取範本 schema，建構「請以下列 JSON 格式輸出」的說明文字，注入 AI 系統提示',
+              ],
+              [
+                'parseJsonFromAiOutput(text)',
+                '從 AI 回應萃取 JSON',
+                '去除 Markdown 代碼塊標記（```json ... ```），搜尋 { } 包圍的 JSON 物件並解析。失敗回傳 null',
+              ],
+              [
+                'generateDocumentFromJson(db, templateId, jsonData, user, outputFormat?)',
+                '依 JSON 生成文件',
+                '先以 checkAccess() 確認 user 有 use 以上權限，再呼叫 generateDocument()，回傳 { filename, publicUrl, filePath }',
+              ],
+            ]}
+          />
+          <CodeBlock>{`// getTemplateSchemaInstruction 回傳範例：
+\\n\\n# 請以下列 JSON 格式輸出（用於文件範本填寫）
+{
+  "report_title": "（報告標題 — text）",
+  "report_date":  "（報告日期 — date）",
+  "items": [
+    { "dept": "（部門）", "count": "（人數）" }
+  ]
+}
+
+// parseJsonFromAiOutput 萃取邏輯：
+function parseJsonFromAiOutput(text) {
+  // 移除 \`\`\`json ... \`\`\` 圍欄
+  const clean = text.replace(/\`\`\`[\\w]*\\n?([\\s\\S]*?)\\n?\`\`\`/g, '$1').trim();
+  const m = clean.match(/{[\\s\\S]*}/);
+  if (!m) return null;
+  try { return JSON.parse(m[0]); } catch { return null; }
+}`}</CodeBlock>
+          <NoteBox>
+            generateDocumentFromJson 需要 user 物件（含 id, role）以通過 checkAccess() 權限檢查。
+            Pipeline 執行時從 context.user 取得；排程執行時由 task.user_id 查詢 DB 得到完整 user 物件。
+          </NoteBox>
+        </SubSection>
+
+        <SubSection title="DB 欄位更新（AI 整合相關）">
+          <Table
+            headers={['資料表', '欄位', '類型', '說明']}
+            rows={[
+              ['skills', 'OUTPUT_TEMPLATE_ID', 'VARCHAR2(36) NULL', '綁定的輸出範本 ID；套用技能時 AI 自動填表並生成文件'],
+              ['scheduled_tasks', 'OUTPUT_TEMPLATE_ID', 'VARCHAR2(36) NULL', '排程固定指定的輸出範本 ID'],
+            ]}
+          />
+          <Para>
+            以上欄位透過 <code className="bg-slate-100 px-1 rounded text-xs">database-oracle.js</code> 的
+            <code className="bg-slate-100 px-1 rounded text-xs">safeAddColumn()</code>（skills）與
+            <code className="bg-slate-100 px-1 rounded text-xs">addCol()</code>（scheduled_tasks）遷移新增，
+            伺服器啟動時自動執行，無需手動執行 DDL。
+          </Para>
+          <Para>
+            Pipeline 的 template_id 存放在 Pipeline JSON 的節點 config 物件中（非獨立 DB 欄位），
+            隨排程任務的 <code className="bg-slate-100 px-1 rounded text-xs">pipeline_json</code> 欄位一起儲存。
+          </Para>
         </SubSection>
       </Section>
     </div>

@@ -335,7 +335,7 @@ async function snapshotOnlineDept() {
       try {
         const ph = userIds.map(() => '?').join(',');
         const rows = await dbOracle.prepare(
-          `SELECT id, dept_code, profit_center, org_section, org_group_name FROM users WHERE id IN (${ph})`
+          `SELECT id, dept_code, profit_center, profit_center_name, org_section, org_section_name, org_group_name FROM users WHERE id IN (${ph})`
         ).all(...userIds);
         for (const r of rows) userMap.set(r.id, r);
       } catch {}
@@ -345,36 +345,39 @@ async function snapshotOnlineDept() {
     const agg = {};
     for (const [uid, sess] of seen) {
       const dbUser = userMap.get(uid) || {};
-      const key = JSON.stringify({
-        profit_center: dbUser.profit_center || sess.profit_center || 'Unknown',
-        org_section: dbUser.org_section || sess.org_section || '',
-        org_group_name: dbUser.org_group_name || '',
-        dept_code: dbUser.dept_code || sess.dept_code || '',
-      });
-      agg[key] = (agg[key] || 0) + 1;
+      const profit_center = dbUser.profit_center || sess.profit_center || 'Unknown';
+      const org_section = dbUser.org_section || sess.org_section || '';
+      const org_group_name = dbUser.org_group_name || '';
+      const dept_code = dbUser.dept_code || sess.dept_code || '';
+      const profit_center_name = dbUser.profit_center_name || '';
+      const org_section_name = dbUser.org_section_name || '';
+      const key = JSON.stringify({ profit_center, org_section, org_group_name, dept_code });
+      if (!agg[key]) agg[key] = { count: 0, profit_center_name, org_section_name };
+      agg[key].count++;
     }
 
     // snapshot_id = 5 分鐘邊界（同一視窗內所有 pods 共用相同 key），搭配 MERGE 去重
     const snapId = Math.floor(Date.now() / 300000) * 300; // Unix seconds rounded to 5-min
-    const totalAgg = Object.values(agg).reduce((s, v) => s + v, 0);
+    const totalAgg = Object.values(agg).reduce((s, v) => s + v.count, 0);
     console.log(`[DeptSnapshot] sessions=${sessions.length} uniqueUsers=${seen.size} aggTotal=${totalAgg} snapId=${snapId}`);
-    for (const [key, count] of Object.entries(agg)) {
+    for (const [key, { count, profit_center_name, org_section_name }] of Object.entries(agg)) {
       const { profit_center, org_section, org_group_name, dept_code } = JSON.parse(key);
       // MERGE：同 snapshot + dept 組合只保留一筆，多 pod 並發只有第一個寫入，後續 UPDATE（值相同不影響）
       await db.prepare(`
         MERGE INTO online_dept_snapshots dst
-        USING (SELECT ? AS snap_id, ? AS pc, ? AS os, ? AS og, ? AS dc, ? AS cnt FROM dual) src
+        USING (SELECT ? AS snap_id, ? AS pc, ? AS os, ? AS og, ? AS dc, ? AS pc_name, ? AS os_name, ? AS cnt FROM dual) src
         ON (dst.snapshot_id = src.snap_id
             AND NVL(dst.profit_center,'~')  = NVL(src.pc,'~')
             AND NVL(dst.org_section,'~')    = NVL(src.os,'~')
             AND NVL(dst.org_group_name,'~') = NVL(src.og,'~')
             AND NVL(dst.dept_code,'~')      = NVL(src.dc,'~'))
         WHEN NOT MATCHED THEN
-          INSERT (snapshot_id, profit_center, org_section, org_group_name, dept_code, user_count)
-          VALUES (src.snap_id, src.pc, src.os, src.og, src.dc, src.cnt)
+          INSERT (snapshot_id, profit_center, org_section, org_group_name, dept_code, profit_center_name, org_section_name, user_count)
+          VALUES (src.snap_id, src.pc, src.os, src.og, src.dc, src.pc_name, src.os_name, src.cnt)
         WHEN MATCHED THEN
-          UPDATE SET dst.user_count = src.cnt, dst.collected_at = SYSTIMESTAMP
-      `).run(snapId, profit_center || null, org_section || null, org_group_name || null, dept_code || null, count);
+          UPDATE SET dst.user_count = src.cnt, dst.collected_at = SYSTIMESTAMP,
+                     dst.profit_center_name = src.pc_name, dst.org_section_name = src.os_name
+      `).run(snapId, profit_center || null, org_section || null, org_group_name || null, dept_code || null, profit_center_name || null, org_section_name || null, count);
     }
   } catch (e) {
     console.error('[MetricsCollector] snapshotOnlineDept error:', e.message);

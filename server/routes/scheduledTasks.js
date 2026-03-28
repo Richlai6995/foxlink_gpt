@@ -57,6 +57,7 @@ router.post('/', async (req, res) => {
       model, prompt, output_type, file_type, filename_template,
       recipients_json, email_subject, email_body,
       status, expire_at, max_runs, tools_config_json, pipeline_json,
+      output_template_id,
     } = req.body;
 
     if (!name || !prompt) return res.status(400).json({ error: '名稱和 Prompt 為必填' });
@@ -65,8 +66,9 @@ router.post('/', async (req, res) => {
       `INSERT INTO scheduled_tasks
         (user_id, name, schedule_type, schedule_hour, schedule_minute, schedule_weekday, schedule_monthday,
          model, prompt, output_type, file_type, filename_template,
-         recipients_json, email_subject, email_body, status, expire_at, max_runs, tools_config_json, pipeline_json)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+         recipients_json, email_subject, email_body, status, expire_at, max_runs, tools_config_json, pipeline_json,
+         output_template_id)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
     ).run(
       req.user.id, name,
       schedule_type || 'daily',
@@ -81,6 +83,7 @@ router.post('/', async (req, res) => {
       max_runs ?? 0,
       JSON.stringify(tools_config_json || []),
       pipeline_json ? JSON.stringify(pipeline_json) : null,
+      output_template_id || null,
     );
 
     const task = await db.prepare('SELECT * FROM scheduled_tasks WHERE id=?').get(result.lastInsertRowid);
@@ -107,6 +110,7 @@ router.put('/:id', async (req, res) => {
       model, prompt, output_type, file_type, filename_template,
       recipients_json, email_subject, email_body,
       status, expire_at, max_runs, tools_config_json, pipeline_json,
+      output_template_id,
     } = req.body;
 
     await db.prepare(
@@ -115,7 +119,8 @@ router.put('/:id', async (req, res) => {
         schedule_weekday=?, schedule_monthday=?,
         model=?, prompt=?, output_type=?, file_type=?, filename_template=?,
         recipients_json=?, email_subject=?, email_body=?,
-        status=?, expire_at=?, max_runs=?, tools_config_json=?, pipeline_json=?, updated_at=CURRENT_TIMESTAMP
+        status=?, expire_at=?, max_runs=?, tools_config_json=?, pipeline_json=?,
+        output_template_id=?, updated_at=CURRENT_TIMESTAMP
        WHERE id=?`
     ).run(
       name ?? task.name,
@@ -131,6 +136,7 @@ router.put('/:id', async (req, res) => {
       max_runs ?? task.max_runs,
       tools_config_json ? JSON.stringify(tools_config_json) : (task.tools_config_json || '[]'),
       pipeline_json !== undefined ? (pipeline_json ? JSON.stringify(pipeline_json) : null) : task.pipeline_json,
+      output_template_id !== undefined ? (output_template_id || null) : task.output_template_id,
       req.params.id,
     );
 

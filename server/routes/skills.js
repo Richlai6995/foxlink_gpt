@@ -378,7 +378,7 @@ router.post('/', async (req, res) => {
         const { name, description, icon, type, system_prompt, endpoint_url, endpoint_secret,
             endpoint_mode, model_key, mcp_tool_mode, mcp_tool_ids, dify_kb_ids, tags,
             code_snippet, code_packages,
-            self_kb_ids, kb_mode, tool_schema, output_schema,
+            self_kb_ids, kb_mode, tool_schema, output_schema, output_template_id,
             rate_limit_per_user, rate_limit_global, rate_limit_window,
             prompt_version, published_prompt, draft_prompt, workflow_json } = req.body;
         if (!name) return res.status(400).json({ error: 'name 必填' });
@@ -393,10 +393,10 @@ router.post('/', async (req, res) => {
       INSERT INTO skills (name, description, icon, type, system_prompt, endpoint_url, endpoint_secret,
         endpoint_mode, model_key, mcp_tool_mode, mcp_tool_ids, dify_kb_ids, tags, owner_user_id,
         code_snippet, code_packages,
-        self_kb_ids, kb_mode, tool_schema, output_schema,
+        self_kb_ids, kb_mode, tool_schema, output_schema, output_template_id,
         rate_limit_per_user, rate_limit_global, rate_limit_window,
         prompt_version, published_prompt, draft_prompt, workflow_json)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     `).run(
             name, description || null, icon || '🤖',
             type || 'builtin', system_prompt || null,
@@ -413,6 +413,7 @@ router.post('/', async (req, res) => {
             kb_mode || 'append',
             tool_schema ? JSON.stringify(tool_schema) : null,
             output_schema ? JSON.stringify(output_schema) : null,
+            output_template_id || null,
             rate_limit_per_user != null ? Number(rate_limit_per_user) : null,
             rate_limit_global != null ? Number(rate_limit_global) : null,
             rate_limit_window || 'hour',
@@ -470,7 +471,7 @@ router.put('/:id', async (req, res) => {
         const { name, description, icon, type, system_prompt, endpoint_url, endpoint_secret,
             endpoint_mode, model_key, mcp_tool_mode, mcp_tool_ids, dify_kb_ids, tags,
             code_snippet, code_packages,
-            self_kb_ids, kb_mode, tool_schema, output_schema,
+            self_kb_ids, kb_mode, tool_schema, output_schema, output_template_id,
             rate_limit_per_user, rate_limit_global, rate_limit_window,
             prompt_version, published_prompt, draft_prompt, workflow_json,
             name_zh, name_en, name_vi, desc_zh, desc_en, desc_vi } = req.body;
@@ -492,7 +493,7 @@ router.put('/:id', async (req, res) => {
         endpoint_url=?, endpoint_secret=?, endpoint_mode=?, model_key=?,
         mcp_tool_mode=?, mcp_tool_ids=?, dify_kb_ids=?, tags=?,
         code_snippet=?, code_packages=?,
-        self_kb_ids=?, kb_mode=?, tool_schema=?, output_schema=?,
+        self_kb_ids=?, kb_mode=?, tool_schema=?, output_schema=?, output_template_id=?,
         rate_limit_per_user=?, rate_limit_global=?, rate_limit_window=?,
         prompt_version=?, published_prompt=?, draft_prompt=?, workflow_json=?,
         updated_at=CURRENT_TIMESTAMP
@@ -512,6 +513,7 @@ router.put('/:id', async (req, res) => {
             kb_mode ?? s.kb_mode ?? 'append',
             tool_schema !== undefined ? (tool_schema ? JSON.stringify(tool_schema) : null) : s.tool_schema,
             output_schema !== undefined ? (output_schema ? JSON.stringify(output_schema) : null) : s.output_schema,
+            output_template_id !== undefined ? (output_template_id || null) : s.output_template_id,
             rate_limit_per_user !== undefined ? (rate_limit_per_user != null ? Number(rate_limit_per_user) : null) : s.rate_limit_per_user,
             rate_limit_global !== undefined ? (rate_limit_global != null ? Number(rate_limit_global) : null) : s.rate_limit_global,
             rate_limit_window ?? s.rate_limit_window ?? 'hour',

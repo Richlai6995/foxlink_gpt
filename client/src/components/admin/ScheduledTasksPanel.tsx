@@ -3,13 +3,14 @@ import {
   CalendarClock, Plus, Play, Pause, Trash2, Edit2, History,
   RefreshCw, CheckCircle, XCircle, ChevronDown, ChevronUp,
   Clock, Mail, FileText, X, Save, TriangleAlert, Settings2,
-  Zap, BookOpen, Wrench, GitBranch,
+  Zap, BookOpen, Wrench, GitBranch, LayoutTemplate,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import api from '../../lib/api'
 import { useAuth } from '../../context/AuthContext'
-import type { ScheduledTask, TaskRun } from '../../types'
+import type { ScheduledTask, TaskRun, DocTemplate } from '../../types'
 import PipelineTab, { type PipelineNode } from './PipelineTab'
+import TemplatePickerPopover from '../templates/TemplatePickerPopover'
 
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六']
 const FILE_TYPES = ['xlsx', 'docx', 'pdf', 'pptx', 'foxlink_pptx', 'txt', 'mp3']
@@ -73,6 +74,8 @@ function TaskFormModal({
   const [mcpServers, setMcpServers] = useState<{ id: number; name: string; tools_json?: string }[]>([])
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  const [outputTemplate, setOutputTemplate] = useState<DocTemplate | null>(null)
+  const [showTemplatePicker, setShowTemplatePicker] = useState(false)
   const [recipientInput, setRecipientInput] = useState('')
   const [catalog, setCatalog] = useState<ToolCatalog>({ skills: [], kbs: [] })
   const promptRef = useRef<HTMLTextAreaElement>(null)
@@ -116,6 +119,18 @@ function TaskFormModal({
       .then((r) => setMcpServers(r.data || []))
       .catch(() => {})
   }, [])
+
+  // Load template info when editing an existing task that has output_template_id
+  useEffect(() => {
+    if (task?.output_template_id) {
+      api.get('/doc-templates')
+        .then((r) => {
+          const found = (r.data?.items || r.data || []).find((t: DocTemplate) => t.id === task.output_template_id)
+          if (found) setOutputTemplate(found)
+        })
+        .catch(() => {})
+    }
+  }, [task?.output_template_id])
 
   const set = (k: keyof ScheduledTask, v: unknown) =>
     setForm((p) => ({ ...p, [k]: v }))
@@ -449,6 +464,44 @@ function TaskFormModal({
                   {t('scheduledTask.form.mp3Note')}
                 </p>
               )}
+              {/* ── Output template picker ── */}
+              <div>
+                <label className="label flex items-center gap-1.5">
+                  <LayoutTemplate size={13} className="text-indigo-500" /> 輸出範本（選填）
+                </label>
+                {outputTemplate ? (
+                  <div className="flex items-center gap-2 bg-indigo-50 border border-indigo-200 rounded-lg px-3 py-2 text-xs text-indigo-700">
+                    <LayoutTemplate size={13} />
+                    <span className="flex-1 font-medium">{outputTemplate.name}</span>
+                    <span className="text-indigo-400">{outputTemplate.format.toUpperCase()}</span>
+                    <button onClick={() => { setOutputTemplate(null); set('output_template_id', null) }}
+                      className="ml-1 text-indigo-400 hover:text-red-500"><X size={12} /></button>
+                  </div>
+                ) : (
+                  <div className="relative inline-block">
+                    <button
+                      type="button"
+                      onClick={() => setShowTemplatePicker(v => !v)}
+                      className="flex items-center gap-1.5 text-xs border border-dashed border-slate-300 rounded-lg px-3 py-1.5 text-slate-500 hover:border-indigo-400 hover:text-indigo-600 transition"
+                    >
+                      <LayoutTemplate size={13} /> 選擇範本…
+                    </button>
+                    {showTemplatePicker && (
+                      <TemplatePickerPopover
+                        onSelect={(tpl) => {
+                          setOutputTemplate(tpl)
+                          set('output_template_id', tpl.id)
+                          setShowTemplatePicker(false)
+                        }}
+                        onClose={() => setShowTemplatePicker(false)}
+                      />
+                    )}
+                  </div>
+                )}
+                <p className="text-[10px] text-slate-400 mt-1">
+                  選擇後，AI 會依範本變數 schema 輸出 JSON，系統自動填入範本生成檔案。亦可在 Prompt 中使用 <code className="bg-slate-100 px-1 rounded">{'{{template:id}}'}</code> 引用。
+                </p>
+              </div>
             </>
           )}
 

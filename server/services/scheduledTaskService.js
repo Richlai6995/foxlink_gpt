@@ -222,6 +222,11 @@ async function runTask(db, taskId) {
   const { sendMail } = require('./mailService');
   const { resolveToolRefs, hasToolRefs } = require('./promptResolver');
   const { runPipeline } = require('./pipelineRunner');
+  const {
+    getTemplateSchemaInstruction,
+    parseJsonFromAiOutput,
+    generateDocumentFromJson,
+  } = require('./docTemplateService');
 
   const task = await db.prepare('SELECT * FROM scheduled_tasks WHERE id = ?').get(taskId);
   if (!task) { console.error(`[Scheduled] Task ${taskId} not found`); return; }
@@ -269,6 +274,21 @@ async function runTask(db, taskId) {
 
       // Render prompt variables (+ fetch any {{fetch:URL}} placeholders)
       let renderedPrompt = await substituteVarsAsync(task.prompt, task.name);
+
+      // ── {{template:id}} tag in prompt ─────────────────────────────────────
+      // Extract template IDs from prompt, strip the tags, append JSON instruction
+      const tplTagRe = /\{\{template:([^}]+)\}\}/g;
+      const promptTemplateIds = [];
+      renderedPrompt = renderedPrompt.replace(tplTagRe, (_, id) => { promptTemplateIds.push(id.trim()); return ''; }).trim();
+      // Also honour task-level output_template_id field
+      if (task.output_template_id && !promptTemplateIds.includes(task.output_template_id)) {
+        promptTemplateIds.push(task.output_template_id);
+      }
+      // Append JSON schema instructions for each template
+      for (const tid of promptTemplateIds) {
+        const instr = await getTemplateSchemaInstruction(db, tid).catch(() => null);
+        if (instr) renderedPrompt += instr;
+      }
 
       // Resolve tool references {{skill:}}, {{kb:}}, {{mcp:}}, {{dify:}}
       if (hasToolRefs(renderedPrompt)) {
@@ -341,6 +361,25 @@ async function runTask(db, taskId) {
       const blocks = await processGenerateBlocks(processableText, sid);
       generatedFiles = blocks.map(b => ({ filename: b.filename, publicUrl: b.publicUrl, filePath: b.filePath }));
 
+      // ── Template document generation ({{template:id}} or output_template_id) ─
+      if (promptTemplateIds.length > 0) {
+        const jsonData = parseJsonFromAiOutput(text);
+        if (jsonData) {
+          for (const tid of promptTemplateIds) {
+            try {
+              const tplFile = await generateDocumentFromJson(db, tid, jsonData, user);
+              const renderedFilename = substituteVars(task.filename_template || tplFile.filename, task.name);
+              generatedFiles.push({ filename: renderedFilename, publicUrl: tplFile.publicUrl, filePath: tplFile.filePath });
+              console.log(`[Scheduled] Template ${tid} generated: ${tplFile.filename}`);
+            } catch (e) {
+              console.error(`[Scheduled] Template ${tid} generation failed:`, e.message);
+            }
+          }
+        } else {
+          console.warn('[Scheduled] Template requested but AI output is not valid JSON');
+        }
+      }
+
       // ── Audio output: call TTS skill if file_type is mp3/wav ──────────────
       if (task.output_type === 'file' && (task.file_type === 'mp3' || task.file_type === 'wav')) {
         try {
@@ -398,7 +437,7 @@ async function runTask(db, taskId) {
           pipelineNodes,
           responseText,
           db,
-          { userId: task.user_id, sessionId, taskName: task.name }
+          { userId: task.user_id, sessionId, taskName: task.name, user }
         );
         generatedFiles.push(...pFiles);
         pipelineLog = pLog;

@@ -150,6 +150,7 @@ export interface ScheduledTask {
   output_type: 'text' | 'file'
   file_type?: string
   filename_template?: string
+  output_template_id?: string
   recipients_json: string
   email_subject?: string
   email_body?: string
@@ -711,7 +712,8 @@ export interface VariableStyleProps {
   fontSize?: number       // pt
   bold?: boolean
   italic?: boolean
-  color?: string          // hex e.g. "#CC0000"
+  color?: string          // hex e.g. "#CC0000" (font color)
+  bgColor?: string        // hex e.g. "#FFFF00" (cell background color)
   overflow?: TemplateOverflow
   maxChars?: number
 }

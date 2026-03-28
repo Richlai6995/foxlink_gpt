@@ -2,8 +2,10 @@ import { useState, useCallback } from 'react'
 import {
   Plus, Trash2, ChevronDown, ChevronUp, GitBranch,
   Zap, Wrench, BookOpen, Bot, FileOutput, GitMerge, X,
-  GripVertical, AlertCircle, CheckCircle2,
+  GripVertical, AlertCircle, CheckCircle2, LayoutTemplate,
 } from 'lucide-react'
+import TemplatePickerPopover from '../templates/TemplatePickerPopover'
+import type { DocTemplate } from '../../types'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 export interface PipelineNode {
@@ -25,6 +27,9 @@ export interface PipelineNode {
   // ai
   prompt?: string
   model?: string
+  // generate_file template
+  template_id?: string
+  template_name?: string
   // condition
   judge?: 'ai' | 'text'
   value?: string
@@ -167,6 +172,84 @@ function VarInput({
   )
 }
 
+// ─── GenerateFileForm (with template picker) ───────────────────────────────────
+function GenerateFileForm({
+  node, otherIds, onChange,
+}: {
+  node: PipelineNode
+  otherIds: string[]
+  onChange: (patch: Partial<PipelineNode>) => void
+}) {
+  const [showPicker, setShowPicker] = useState(false)
+  const hasTemplate = !!node.template_id
+
+  return (
+    <div className="space-y-3">
+      {/* Template mode toggle */}
+      <div>
+        <label className="label text-xs flex items-center gap-1.5">
+          <LayoutTemplate size={12} className="text-indigo-500" /> 範本模式
+        </label>
+        {hasTemplate ? (
+          <div className="flex items-center gap-2 bg-indigo-50 border border-indigo-200 rounded-lg px-3 py-1.5 text-xs text-indigo-700">
+            <LayoutTemplate size={12} />
+            <span className="flex-1 font-medium">{node.template_name || node.template_id}</span>
+            <button onClick={() => onChange({ template_id: undefined, template_name: undefined })}
+              className="text-indigo-400 hover:text-red-500"><X size={11} /></button>
+          </div>
+        ) : (
+          <div className="relative inline-block">
+            <button type="button" onClick={() => setShowPicker(v => !v)}
+              className="flex items-center gap-1.5 text-xs border border-dashed border-slate-300 rounded-lg px-3 py-1.5 text-slate-500 hover:border-indigo-400 hover:text-indigo-600 transition">
+              <LayoutTemplate size={12} /> 選擇範本（可選）
+            </button>
+            {showPicker && (
+              <TemplatePickerPopover
+                onSelect={(tpl: DocTemplate) => {
+                  onChange({ template_id: tpl.id, template_name: tpl.name, output_file: tpl.format })
+                  setShowPicker(false)
+                }}
+                onClose={() => setShowPicker(false)}
+              />
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Format + filename (hidden in template mode since format is locked) */}
+      {!hasTemplate && (
+        <div className="flex gap-2">
+          <div>
+            <label className="label text-xs">檔案格式</label>
+            <select className="input text-xs" value={node.output_file || 'pdf'} onChange={(e) => onChange({ output_file: e.target.value })}>
+              {FILE_TYPES.map((t) => <option key={t} value={t}>{t.toUpperCase()}</option>)}
+            </select>
+          </div>
+          <div className="flex-1">
+            <label className="label text-xs">檔名</label>
+            <input className="input w-full text-xs" value={node.filename || ''} onChange={(e) => onChange({ filename: e.target.value })} placeholder={`報告_{{date}}.${node.output_file || 'pdf'}`} />
+          </div>
+        </div>
+      )}
+      {hasTemplate && (
+        <div className="flex-1">
+          <label className="label text-xs">檔名（選填）</label>
+          <input className="input w-full text-xs" value={node.filename || ''} onChange={(e) => onChange({ filename: e.target.value })} placeholder={`報告_{{date}}.${node.output_file || 'xlsx'}`} />
+        </div>
+      )}
+
+      {/* Data source */}
+      <div>
+        <label className="label text-xs">{hasTemplate ? '資料來源（JSON）' : '內容來源'}</label>
+        <VarInput value={node.input || '{{ai_output}}'} onChange={(v) => onChange({ input: v })} placeholder="{{ai_output}}" allNodeIds={otherIds} />
+        {hasTemplate && (
+          <p className="text-[10px] text-slate-400 mt-1">需為 JSON 格式，key 與範本變數對應。</p>
+        )}
+      </div>
+    </div>
+  )
+}
+
 // ─── NodeForm ─────────────────────────────────────────────────────────────────
 function NodeForm({
   node, allNodes, catalog, mcpServers, onChange,
@@ -279,24 +362,7 @@ function NodeForm({
   )
 
   if (node.type === 'generate_file') return (
-    <div className="space-y-3">
-      <div className="flex gap-2">
-        <div>
-          <label className="label text-xs">檔案格式</label>
-          <select className="input text-xs" value={node.output_file || 'pdf'} onChange={(e) => onChange({ output_file: e.target.value })}>
-            {FILE_TYPES.map((t) => <option key={t} value={t}>{t.toUpperCase()}</option>)}
-          </select>
-        </div>
-        <div className="flex-1">
-          <label className="label text-xs">檔名</label>
-          <input className="input w-full text-xs" value={node.filename || ''} onChange={(e) => onChange({ filename: e.target.value })} placeholder={`報告_{{date}}.${node.output_file || 'pdf'}`} />
-        </div>
-      </div>
-      <div>
-        <label className="label text-xs">內容來源</label>
-        <VarInput value={node.input || '{{ai_output}}'} onChange={(v) => onChange({ input: v })} placeholder="{{ai_output}}" allNodeIds={otherIds} />
-      </div>
-    </div>
+    <GenerateFileForm node={node} otherIds={otherIds} onChange={onChange} />
   )
 
   if (node.type === 'condition') return (
@@ -413,7 +479,7 @@ function NodeCard({
     if (node.type === 'mcp') return node.server ? `${node.server} → ${node.tool || '?'}` : '未設定'
     if (node.type === 'kb') return node.name || '未選擇知識庫'
     if (node.type === 'ai') return node.prompt ? node.prompt.slice(0, 40) + '…' : '未設定 Prompt'
-    if (node.type === 'generate_file') return `輸出 ${(node.output_file || 'pdf').toUpperCase()}`
+    if (node.type === 'generate_file') return node.template_id ? `範本: ${node.template_name || node.template_id}` : `輸出 ${(node.output_file || 'pdf').toUpperCase()}`
     if (node.type === 'condition') return (node.judge || 'ai') === 'ai' ? 'AI 判斷' : `${node.operator || 'contains'} "${node.value || ''}"`
     if (node.type === 'parallel') return `同時執行 ${(node.steps || []).length} 個節點`
     return ''

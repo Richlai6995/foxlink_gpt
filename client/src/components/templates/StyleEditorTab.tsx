@@ -82,7 +82,8 @@ export default function StyleEditorTab({ variables, onChange, readonly }: Props)
             <th className="text-left px-2 py-2 w-24">字型大小 (pt)</th>
             <th className="text-center px-2 py-2 w-12">粗體</th>
             <th className="text-center px-2 py-2 w-12">斜體</th>
-            <th className="text-left px-2 py-2 w-24">顏色</th>
+            <th className="text-left px-2 py-2 w-24">字型顏色</th>
+            <th className="text-left px-2 py-2 w-24">底色</th>
             <th className="text-left px-2 py-2 w-32">溢位策略</th>
             <th className="text-left px-2 py-2 w-20">最大字數</th>
             <th className="text-left px-2 py-2 w-20">偵測來源</th>
@@ -140,13 +141,58 @@ export default function StyleEditorTab({ variables, onChange, readonly }: Props)
                   />
                 </td>
 
-                {/* Color */}
+                {/* Font Color — empty = use original template color */}
                 <td className="px-2 py-1.5">
-                  <ColorPicker
-                    disabled={readonly}
-                    value={v.style?.override?.color ?? eff.color ?? '#000000'}
-                    onChange={hex => update(path, { color: hex })}
-                  />
+                  {v.style?.override?.color ? (
+                    <div className="flex items-center gap-1">
+                      <ColorPicker
+                        disabled={readonly}
+                        value={v.style.override.color}
+                        onChange={hex => update(path, { color: hex })}
+                      />
+                      {!readonly && (
+                        <button
+                          onClick={() => update(path, { color: '' })}
+                          className="text-[10px] text-slate-400 hover:text-red-500"
+                          title="清除，沿用原色"
+                        >✕</button>
+                      )}
+                    </div>
+                  ) : (
+                    <button
+                      disabled={readonly}
+                      onClick={() => update(path, { color: '#000000' })}
+                      className="text-[10px] text-slate-400 border border-dashed border-slate-300 rounded px-1.5 py-0.5 hover:bg-slate-50 disabled:opacity-40"
+                      title="點擊設定字型顏色"
+                    >沿用</button>
+                  )}
+                </td>
+
+                {/* Background Color — empty = use original template color */}
+                <td className="px-2 py-1.5">
+                  {v.style?.override?.bgColor ? (
+                    <div className="flex items-center gap-1">
+                      <ColorPicker
+                        disabled={readonly}
+                        value={v.style.override.bgColor}
+                        onChange={hex => update(path, { bgColor: hex })}
+                      />
+                      {!readonly && (
+                        <button
+                          onClick={() => update(path, { bgColor: '' })}
+                          className="text-[10px] text-slate-400 hover:text-red-500"
+                          title="清除，沿用原色"
+                        >✕</button>
+                      )}
+                    </div>
+                  ) : (
+                    <button
+                      disabled={readonly}
+                      onClick={() => update(path, { bgColor: '#ffffff' })}
+                      className="text-[10px] text-slate-400 border border-dashed border-slate-300 rounded px-1.5 py-0.5 hover:bg-slate-50 disabled:opacity-40"
+                      title="點擊設定底色"
+                    >沿用</button>
+                  )}
                 </td>
 
                 {/* Overflow */}

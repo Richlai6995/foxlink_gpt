@@ -887,8 +887,11 @@ async function runMigrations(db) {
   await addCol('SCHEDULED_TASK_RUNS', 'TOOLS_USED_JSON',   'CLOB');
 
   // ── Scheduled Tasks Pipeline 支援 ───────────────────────────────────────────
-  await addCol('SCHEDULED_TASKS',     'PIPELINE_JSON',     'CLOB');
-  await addCol('SCHEDULED_TASK_RUNS', 'PIPELINE_LOG_JSON', 'CLOB');
+  await addCol('SCHEDULED_TASKS',     'PIPELINE_JSON',        'CLOB');
+  await addCol('SCHEDULED_TASK_RUNS', 'PIPELINE_LOG_JSON',    'CLOB');
+
+  // ── Scheduled Tasks 文件範本輸出支援 ─────────────────────────────────────────
+  await addCol('SCHEDULED_TASKS',     'OUTPUT_TEMPLATE_ID',   'VARCHAR2(64)');
 
   // ── Skill Call Logs ──────────────────────────────────────────────────────────
   await createTable('SKILL_CALL_LOGS', `CREATE TABLE skill_call_logs (
@@ -1209,6 +1212,8 @@ async function runMigrations(db) {
     user_count      NUMBER DEFAULT 0
   )`);
   await safeAddColumn('ONLINE_DEPT_SNAPSHOTS', 'SNAPSHOT_ID', 'NUMBER');
+  await safeAddColumn('ONLINE_DEPT_SNAPSHOTS', 'PROFIT_CENTER_NAME', 'VARCHAR2(200)');
+  await safeAddColumn('ONLINE_DEPT_SNAPSHOTS', 'ORG_SECTION_NAME', 'VARCHAR2(200)');
 
   // 確保 ONLINE_DEPT_SNAPSHOTS 有唯一約束（multi-pod 去重）
   try {
@@ -1309,7 +1314,9 @@ async function runMigrations(db) {
   await safeAddColumn('SKILLS', 'PUBLISHED_PROMPT',  'CLOB');
   await safeAddColumn('SKILLS', 'DRAFT_PROMPT',      'CLOB');
   // Workflow JSON (for type='workflow')
-  await safeAddColumn('SKILLS', 'WORKFLOW_JSON',     'CLOB');
+  await safeAddColumn('SKILLS', 'WORKFLOW_JSON',        'CLOB');
+  // 文件範本輸出（skill 使用範本產出檔案）
+  await safeAddColumn('SKILLS', 'OUTPUT_TEMPLATE_ID',   'VARCHAR2(64)');
 
   // session_skills 變數
   await safeAddColumn('SESSION_SKILLS', 'VARIABLES_JSON', "CLOB DEFAULT '{}'");
