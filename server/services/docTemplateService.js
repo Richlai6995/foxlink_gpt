@@ -2349,10 +2349,15 @@ function parseJsonFromAiOutput(text) {
   // Find outermost { ... }
   const start = src.indexOf('{');
   const end   = src.lastIndexOf('}');
-  if (start === -1 || end === -1) return null;
+  if (start === -1 || end === -1) {
+    console.warn('[parseJsonFromAiOutput] no { } found, src length:', src.length, 'first200:', src.slice(0, 200));
+    return null;
+  }
+  const slice = src.slice(start, end + 1);
   try {
-    return JSON.parse(src.slice(start, end + 1));
-  } catch (_) {
+    return JSON.parse(slice);
+  } catch (e) {
+    console.warn('[parseJsonFromAiOutput] JSON.parse error:', e.message, 'slice tail:', slice.slice(-100));
     return null;
   }
 }
