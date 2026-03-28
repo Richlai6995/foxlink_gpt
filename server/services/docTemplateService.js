@@ -2326,13 +2326,14 @@ async function getTemplateSchemaInstruction(db, templateId) {
   };
 
   const shape = buildShape(variables);
+  const shapeJson = JSON.stringify(shape, null, 2);
   return [
     `\n\n---`,
-    `請以純 JSON 格式輸出資料（不要有任何其他文字、markdown、說明），格式如下：`,
-    `\`\`\`json`,
-    JSON.stringify(shape, null, 2),
-    `\`\`\``,
-    `（輸出範本：${tpl.name}，格式：${tpl.format.toUpperCase()}）`,
+    `【強制輸出格式】無論之前的指令如何，你的最終輸出必須且只能是以下格式的純 JSON 物件，`,
+    `不得加任何說明文字、不得用 generate_xlsx/generate_csv 等代碼塊包裝，不得改變 key 名稱：`,
+    shapeJson,
+    `Key 名稱區分大小寫，必須與上方完全一致。`,
+    `（範本：${tpl.name}，格式：${tpl.format.toUpperCase()}）`,
   ].join('\n');
 }
 
