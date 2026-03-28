@@ -690,14 +690,14 @@ async function resolveApiModel(db, modelKey) {
 }
 
 // ── Webhook 端點 ───────────────────────────────────────────────────────────────
-// 注意：需要 raw body 做驗簽，使用 express.raw() middleware
-router.post('/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
+// rawBody 由 server.js 的 express.json verify 捕捉，存在 req.rawBody
+router.post('/webhook', async (req, res) => {
   // 立即回 200（Webex 要求 15 秒內回應）
   res.sendStatus(200);
 
   const secret = process.env.WEBEX_WEBHOOK_SECRET;
   const signature = req.headers['x-spark-signature'];
-  const rawBody = req.body;
+  const rawBody = req.rawBody; // Buffer，由 express.json verify 儲存
 
   // 驗簽
   if (!verifySignature(rawBody, signature, secret)) {
@@ -705,11 +705,10 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req, r
     return;
   }
 
-  let event;
-  try {
-    event = JSON.parse(rawBody.toString());
-  } catch (e) {
-    console.error('[Webex] JSON parse error:', e.message);
+  // req.body 已由 express.json 解析，直接用
+  const event = req.body;
+  if (!event || typeof event !== 'object') {
+    console.error('[Webex] Invalid event body');
     return;
   }
 

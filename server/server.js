@@ -15,7 +15,10 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 
 app.use(cors());
-app.use(express.json({ limit: '100mb' }));
+app.use(express.json({
+  limit: '100mb',
+  verify: (req, _res, buf) => { req.rawBody = buf; }, // for Webex HMAC verification
+}));
 app.use(express.urlencoded({ limit: '100mb', extended: true }));
 
 // Serve uploaded files statically
