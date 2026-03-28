@@ -168,9 +168,21 @@ async function execGenerateFile(node, vars, db, context) {
     const {
       generateDocumentFromJson,
       parseJsonFromAiOutput,
+      getTemplateSchemaInstruction,
     } = require('./docTemplateService');
-    const jsonData = parseJsonFromAiOutput(input);
-    if (!jsonData) throw new Error('Pipeline generate_file: 資料來源無法解析為 JSON');
+    let jsonData = parseJsonFromAiOutput(input);
+    // If direct parse fails, do an AI re-format step using the template schema instruction
+    if (!jsonData) {
+      const { generateTextSync } = require('./gemini');
+      const { resolveDefaultModel } = require('./llmDefaults');
+      const schemaInstr = await getTemplateSchemaInstruction(db, node.template_id).catch(() => '');
+      if (!schemaInstr) throw new Error('Pipeline generate_file: 資料來源無法解析為 JSON，且無法取得範本 schema');
+      const apiModel = await resolveDefaultModel(db, 'chat').catch(() => null);
+      const reformatPrompt = `以下是資料內容，請依照格式指令輸出：\n${input}\n${schemaInstr}`;
+      const { text: reformatText } = await generateTextSync(apiModel, [], reformatPrompt);
+      jsonData = parseJsonFromAiOutput(reformatText);
+      if (!jsonData) throw new Error('Pipeline generate_file: 資料來源無法解析為 JSON（re-format 後仍失敗）');
+    }
     const user = context.user || { id: context.userId, role: 'admin' };
     const tplFile = await generateDocumentFromJson(db, node.template_id, jsonData, user);
     const resolvedFilename = interpolate(node.filename || tplFile.filename, vars);
