@@ -765,6 +765,19 @@ export interface DocxSettings {
   cellSpacingAfter?: number  // pt, default 0 (tight); increase for more space between loop items
 }
 
+export type PptxSlideType = 'cover' | 'content_single' | 'content_repeat' | 'back'
+
+export interface PptxSlideConfig {
+  index: number            // 0-based slide index
+  type: PptxSlideType
+  loop_var?: string        // key of loop-type variable (only for content_repeat)
+  thumbnail_url?: string   // /uploads/templates/thumbnails/xxx.png
+}
+
+export interface PptxSettings {
+  slide_config: PptxSlideConfig[]
+}
+
 export interface TemplateSchema {
   variables: TemplateVariable[]
   confidence?: number
@@ -773,6 +786,7 @@ export interface TemplateSchema {
   extracted_at?: string
   xlsx_settings?: XlsxListSettings
   docx_settings?: DocxSettings
+  pptx_settings?: PptxSettings
 }
 
 export interface DocTemplate {

@@ -690,6 +690,110 @@ async function injectXlsxPlaceholders(xlsxBuf, variables) {
   return wb.xlsx.writeBuffer();
 }
 
+// ─── PPTX Placeholder Injection ────────────────────────────────────────────────
+
+/** Merge split DrawingML runs and replace text within one <a:p> paragraph. */
+function _mergePptxRunsAndReplace(paraXml, oldText, newText) {
+  const runPat = /<a:r\b[^>]*>(?:<a:rPr[^>]*(?:\/>|>[\s\S]*?<\/a:rPr>))?<a:t[^>]*>([\s\S]*?)<\/a:t><\/a:r>/g;
+  const runs = [];
+  let m;
+  while ((m = runPat.exec(paraXml)) !== null) runs.push({ full: m[0], text: m[1], index: m.index });
+  const combined = runs.map(r => r.text).join('');
+  if (!runs.length || !combined.includes(oldText)) return paraXml;
+  const replaced = combined.replaceAll(oldText, newText);
+  const rPrM = runs[0].full.match(/<a:rPr[^>]*(?:\/>|>[\s\S]*?<\/a:rPr>)/);
+  const rPr  = rPrM ? rPrM[0] : '';
+  const newRun = `<a:r>${rPr}<a:t xml:space="preserve">${escapeXml(replaced)}</a:t></a:r>`;
+  let result = paraXml;
+  for (let i = runs.length - 1; i >= 0; i--)
+    result = result.slice(0, runs[i].index) + result.slice(runs[i].index + runs[i].full.length);
+  return result.replace('</a:p>', newRun + '</a:p>');
+}
+
+/** Inject {{key}} placeholders into a PPTX buffer (replaces original_text in slide XMLs). */
+async function injectPptxPlaceholders(pptxBuf, variables) {
+  const zip = await new JSZip().loadAsync(pptxBuf);
+  const slideFiles = Object.keys(zip.files)
+    .filter(f => /^ppt\/slides\/slide\d+\.xml$/.test(f)).sort();
+  for (const sf of slideFiles) {
+    let xml = await zip.file(sf).async('string');
+    for (const v of variables) {
+      if (!v.original_text || v.type === 'loop') continue;
+      xml = xml.replace(/<a:p\b[^>]*>[\s\S]*?<\/a:p>/g, para =>
+        _mergePptxRunsAndReplace(para, v.original_text, `{{${v.key}}}`)
+      );
+    }
+    zip.file(sf, xml);
+  }
+  return zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE', compressionOptions: { level: 6 } });
+}
+
+/** Replace {{key}} placeholders with values in a single slide XML string. */
+function _replacePptxPlaceholders(xml, varMap) {
+  for (const [key, val] of Object.entries(varMap)) {
+    const ph = `{{${key}}}`;
+    xml = xml.replace(/<a:p\b[^>]*>[\s\S]*?<\/a:p>/g, para => {
+      const runPat = /<a:r\b[^>]*>(?:<a:rPr[^>]*(?:\/>|>[\s\S]*?<\/a:rPr>))?<a:t[^>]*>([\s\S]*?)<\/a:t><\/a:r>/g;
+      const runs = [];
+      let m;
+      while ((m = runPat.exec(para)) !== null) runs.push({ full: m[0], text: m[1], index: m.index });
+      const combined = runs.map(r => r.text).join('');
+      if (!runs.length || !combined.includes(ph)) return para;
+      const newText = combined.replaceAll(ph, String(val));
+      const rPrM = runs[0].full.match(/<a:rPr[^>]*(?:\/>|>[\s\S]*?<\/a:rPr>)/);
+      const rPr  = rPrM ? rPrM[0] : '';
+      const newRun = `<a:r>${rPr}<a:t xml:space="preserve">${escapeXml(newText)}</a:t></a:r>`;
+      let result = para;
+      for (let i = runs.length - 1; i >= 0; i--)
+        result = result.slice(0, runs[i].index) + result.slice(runs[i].index + runs[i].full.length);
+      return result.replace('</a:p>', newRun + '</a:p>');
+    });
+  }
+  return xml;
+}
+
+const _SLIDE_REL_TYPE = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide';
+
+/**
+ * Rebuild PPTX slide list: remove old slides, add outputSlides in order,
+ * update presentation.xml and presentation.xml.rels.
+ * outputSlides: [{xml, relsXml}]
+ */
+async function _rebuildPptxSlides(zip, outputSlides) {
+  // Remove existing slide files
+  Object.keys(zip.files)
+    .filter(f => /^ppt\/slides\/slide\d+\.xml$/.test(f) ||
+                 /^ppt\/slides\/_rels\/slide\d+\.xml\.rels$/.test(f))
+    .forEach(f => zip.remove(f));
+
+  for (let i = 0; i < outputSlides.length; i++) {
+    const num = i + 1;
+    zip.file(`ppt/slides/slide${num}.xml`, outputSlides[i].xml);
+    if (outputSlides[i].relsXml)
+      zip.file(`ppt/slides/_rels/slide${num}.xml.rels`, outputSlides[i].relsXml);
+  }
+
+  // rId offset: avoid collisions with theme/layout/master relationships (typically rId1-rId9)
+  const RID_OFFSET = 10;
+
+  // Update ppt/_rels/presentation.xml.rels
+  let presRels = await zip.file('ppt/_rels/presentation.xml.rels').async('string');
+  presRels = presRels.replace(new RegExp(`<Relationship[^>]*Type="${_SLIDE_REL_TYPE}"[^>]*/>`,'g'), '');
+  const newRels = outputSlides.map((_, i) =>
+    `<Relationship Id="rId${RID_OFFSET + i}" Type="${_SLIDE_REL_TYPE}" Target="slides/slide${i + 1}.xml"/>`
+  ).join('\n');
+  presRels = presRels.replace('</Relationships>', newRels + '\n</Relationships>');
+  zip.file('ppt/_rels/presentation.xml.rels', presRels);
+
+  // Update ppt/presentation.xml sldIdLst
+  let presXml = await zip.file('ppt/presentation.xml').async('string');
+  const sldIds = outputSlides.map((_, i) =>
+    `<p:sldId id="${256 + i}" r:id="rId${RID_OFFSET + i}"/>`
+  ).join('');
+  presXml = presXml.replace(/<p:sldIdLst>[\s\S]*?<\/p:sldIdLst>/, `<p:sldIdLst>${sldIds}</p:sldIdLst>`);
+  zip.file('ppt/presentation.xml', presXml);
+}
+
 // ─── PDF Form Detection ────────────────────────────────────────────────────────
 
 async function detectPdfFormFields(pdfBuf) {
@@ -773,6 +877,8 @@ async function createTemplate(db, { creatorId, name, description, format, tags, 
     tplBuf = await injectDocxPlaceholders(origBuf, variables);
   } else if (format === 'xlsx' && strategy === 'native') {
     tplBuf = await injectXlsxPlaceholders(origBuf, variables);
+  } else if (format === 'pptx' && strategy === 'native') {
+    tplBuf = await injectPptxPlaceholders(origBuf, variables);
   } else {
     // pdf_form or ai_schema: template = original (fill at generate time)
     tplBuf = origBuf;
@@ -1354,42 +1460,56 @@ async function generateDocument(db, templateId, userId, inputData, outputFormat,
     await wb.xlsx.writeFile(outPath);
 
   } else if (tpl.format === 'pptx') {
-    // PPTX: direct XML replacement in each slide (DrawingML <a:t> elements)
-    const origBuf = await fs.readFile(path.join(UPLOAD_DIR, tpl.original_file));
-    const zip = await new JSZip().loadAsync(origBuf);
+    // PPTX: template_file has {{key}} placeholders (injected at createTemplate time).
+    // Supports content_repeat slides that are duplicated per loop-variable array item.
+    const zip = await new JSZip().loadAsync(tplBuf);
     const variables = schema.variables || [];
+    const slideConfig = schema.pptx_settings?.slide_config || [];
 
-    const slideFiles = Object.keys(zip.files)
-      .filter(f => /^ppt\/slides\/slide\d+\.xml$/.test(f));
+    // Build flat var map for all non-loop variables
+    const varMap = {};
+    for (const v of variables) {
+      if (v.type === 'loop') continue;
+      varMap[v.key] = resolveValue(v, inputData);
+    }
 
-    for (const sf of slideFiles) {
-      let xml = await zip.file(sf).async('string');
+    const slideEntries = Object.keys(zip.files)
+      .filter(f => /^ppt\/slides\/slide\d+\.xml$/.test(f))
+      .map(f => ({ file: f, num: parseInt(f.match(/slide(\d+)/)[1]) }))
+      .sort((a, b) => a.num - b.num);
 
-      for (const v of variables) {
-        if (v.type === 'loop' || !v.original_text) continue;
-        const val = resolveValue(v, inputData);
-        // Replace within <a:p> paragraphs (DrawingML runs: <a:r><a:t>text</a:t></a:r>)
-        xml = xml.replace(/<a:p\b[^>]*>[\s\S]*?<\/a:p>/g, (para) => {
-          const runPat = /<a:r\b[^>]*>(?:<a:rPr[^>]*(?:\/>|>[\s\S]*?<\/a:rPr>))?<a:t[^>]*>([\s\S]*?)<\/a:t><\/a:r>/g;
-          const runs = [];
-          let m;
-          while ((m = runPat.exec(para)) !== null) runs.push({ full: m[0], text: m[1], index: m.index });
-          const combined = runs.map(r => r.text).join('');
-          if (!combined.includes(v.original_text)) return para;
-          const newText = combined.replaceAll(v.original_text, val);
-          const firstRun = runs[0].full;
-          const rPrM = firstRun.match(/<a:rPr[^>]*(?:\/>|>[\s\S]*?<\/a:rPr>)/);
-          const rPr = rPrM ? rPrM[0] : '';
-          const newRun = `<a:r>${rPr}<a:t xml:space="preserve">${escapeXml(newText)}</a:t></a:r>`;
-          let result = para;
-          for (let i = runs.length - 1; i >= 0; i--) {
-            result = result.slice(0, runs[i].index) + result.slice(runs[i].index + runs[i].full.length);
-          }
-          return result.replace('</a:p>', newRun + '</a:p>');
-        });
+    if (!slideConfig.some(c => c.type === 'content_repeat')) {
+      // Simple path: just replace {{key}} in every slide
+      for (const entry of slideEntries) {
+        let xml = await zip.file(entry.file).async('string');
+        zip.file(entry.file, _replacePptxPlaceholders(xml, varMap));
       }
+    } else {
+      // Expand content_repeat slides into N copies, one per array item
+      const outputSlides = [];
+      for (const entry of slideEntries) {
+        const slideIdx = entry.num - 1; // 0-based
+        const cfg = slideConfig.find(c => c.index === slideIdx);
+        const origXml = await zip.file(entry.file).async('string');
+        const relsFile = `ppt/slides/_rels/slide${entry.num}.xml.rels`;
+        const relsXml = zip.file(relsFile) ? await zip.file(relsFile).async('string') : null;
 
-      zip.file(sf, xml);
+        if (cfg?.type === 'content_repeat' && cfg.loop_var) {
+          const items = Array.isArray(inputData[cfg.loop_var]) ? inputData[cfg.loop_var] : [];
+          const loopVar = variables.find(v => v.key === cfg.loop_var);
+          const children = loopVar?.children || [];
+          for (const item of items) {
+            const itemMap = { ...varMap };
+            for (const child of children)
+              itemMap[child.key] = String(item[child.key] ?? child.default_value ?? '');
+            outputSlides.push({ xml: _replacePptxPlaceholders(origXml, itemMap), relsXml });
+          }
+          // no items → skip slide entirely
+        } else {
+          outputSlides.push({ xml: _replacePptxPlaceholders(origXml, varMap), relsXml });
+        }
+      }
+      await _rebuildPptxSlides(zip, outputSlides);
     }
 
     const out = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE', compressionOptions: { level: 6 } });

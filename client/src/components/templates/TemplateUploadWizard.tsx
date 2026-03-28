@@ -1,8 +1,9 @@
 import { useState, useRef } from 'react'
 import { Upload, X, CheckCircle, AlertCircle } from 'lucide-react'
 import api from '../../lib/api'
-import { TemplateSchema, TemplateVariable } from '../../types'
+import { PptxSlideConfig, TemplateSchema, TemplateVariable } from '../../types'
 import VariableSchemaEditor from './VariableSchemaEditor'
+import PptxSlideConfigurator from './PptxSlideConfigurator'
 
 interface Props {
   onCreated: () => void
@@ -19,6 +20,8 @@ export default function TemplateUploadWizard({ onCreated, onClose }: Props) {
   const [schema, setSchema] = useState<TemplateSchema | null>(null)
   const [tempFile, setTempFile] = useState('')
   const [format, setFormat] = useState('')
+  const [pptxSlideCount, setPptxSlideCount] = useState(0)
+  const [createdTemplateId, setCreatedTemplateId] = useState<string | undefined>()
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const [tags, setTags] = useState<string[]>([])
@@ -75,11 +78,8 @@ export default function TemplateUploadWizard({ onCreated, onClose }: Props) {
               setSchema(data.schema)
               setTempFile(data.temp_file)
               setFormat(data.format)
-              // Auto-enable fixed format for OCR-detected PDFs
+              if (data.pptx_slide_count) setPptxSlideCount(data.pptx_slide_count)
               if (data.schema?.is_ocr) setIsFixedFormat(true)
-            }
-            if (data.message === undefined && data.schema === undefined) {
-              // done event
             }
           }
         }
@@ -99,7 +99,7 @@ export default function TemplateUploadWizard({ onCreated, onClose }: Props) {
     setSaving(true)
     setError('')
     try {
-      await api.post('/doc-templates', {
+      const res = await api.post('/doc-templates', {
         name: name.trim(),
         description,
         format,
@@ -109,6 +109,7 @@ export default function TemplateUploadWizard({ onCreated, onClose }: Props) {
         schema_json: schema,
         temp_file: tempFile,
       })
+      setCreatedTemplateId(res.data.id)
       onCreated()
     } catch (e: unknown) {
       setError((e as Error).message)
@@ -121,6 +122,14 @@ export default function TemplateUploadWizard({ onCreated, onClose }: Props) {
     const t = tagInput.trim()
     if (t && !tags.includes(t)) setTags([...tags, t])
     setTagInput('')
+  }
+
+  // PPTX slide config helpers
+  const slideConfig: PptxSlideConfig[] = schema?.pptx_settings?.slide_config || []
+  const loopVars: TemplateVariable[] = schema?.variables.filter(v => v.type === 'loop') || []
+  const handleSlideConfigChange = (cfg: PptxSlideConfig[]) => {
+    if (!schema) return
+    setSchema({ ...schema, pptx_settings: { ...(schema.pptx_settings || {}), slide_config: cfg } })
   }
 
   return (
@@ -197,6 +206,18 @@ export default function TemplateUploadWizard({ onCreated, onClose }: Props) {
                   )}
                 </div>
               </div>
+
+              {/* PPTX: slide configurator */}
+              {format === 'pptx' && pptxSlideCount > 0 && (
+                <PptxSlideConfigurator
+                  templateId={createdTemplateId}
+                  slideCount={pptxSlideCount}
+                  slideConfig={slideConfig}
+                  loopVars={loopVars}
+                  onChange={handleSlideConfigChange}
+                />
+              )}
+
               <VariableSchemaEditor
                 variables={schema.variables}
                 onChange={vars => setSchema({ ...schema, variables: vars })}
@@ -272,6 +293,13 @@ export default function TemplateUploadWizard({ onCreated, onClose }: Props) {
                 </button>
                 {isFixedFormat && <span className="text-xs text-blue-600">啟用固定格式（儲存格大小/字型/溢位）</span>}
               </div>
+
+              {/* PPTX: reminder to upload thumbnails after creation */}
+              {format === 'pptx' && (
+                <div className="text-xs text-slate-400 bg-slate-50 border rounded p-2">
+                  建立後，可在範本編輯頁面為每張投影片上傳預覽縮圖。
+                </div>
+              )}
             </div>
           )}
         </div>

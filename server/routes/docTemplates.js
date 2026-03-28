@@ -151,11 +151,23 @@ router.post('/upload', upload.single('file'), async (req, res) => {
       schema = { ...aiResult, strategy: format === 'pdf' ? 'ai_schema' : 'native', extracted_at: new Date().toISOString() };
     }
 
+    // For PPTX: count slides to inform the frontend configurator
+    let pptxSlideCount;
+    if (format === 'pptx') {
+      try {
+        const JSZip = require('jszip');
+        const buf = await fs.readFile(req.file.path);
+        const zip = await new JSZip().loadAsync(buf);
+        pptxSlideCount = Object.keys(zip.files).filter(f => /^ppt\/slides\/slide\d+\.xml$/.test(f)).length;
+      } catch { /* non-fatal */ }
+    }
+
     send('result', {
       schema,
       temp_file: req.file.filename,
       format,
       original_name: originalName,
+      pptx_slide_count: pptxSlideCount,
     });
     send('done', {});
   } catch (e) {
@@ -498,6 +510,59 @@ router.delete('/:id/shares/:shareId', async (req, res) => {
     );
     res.json({ ok: true });
   } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── POST /:id/slides/:index/thumbnail  Upload slide preview image ────────────
+const thumbnailUpload = multer({
+  storage: multer.diskStorage({
+    destination: (req, file, cb) => {
+      const dir = path.join(UPLOAD_DIR, 'templates', 'thumbnails');
+      require('fs').mkdirSync(dir, { recursive: true });
+      cb(null, dir);
+    },
+    filename: (req, file, cb) => {
+      const ext = (file.originalname.split('.').pop() || 'png').toLowerCase();
+      cb(null, `${req.params.id}_slide${req.params.index}.${ext}`);
+    },
+  }),
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    if (/^image\//.test(file.mimetype)) cb(null, true);
+    else cb(new Error('僅接受圖片格式'));
+  },
+});
+
+router.post('/:id/slides/:index/thumbnail', thumbnailUpload.single('thumbnail'), async (req, res) => {
+  try {
+    const access = await svc.checkAccess(db, req.params.id, req.user);
+    if (!access || access === 'use') return res.status(403).json({ error: '無編輯權限' });
+
+    const tpl = await db.prepare('SELECT * FROM doc_templates WHERE id=?').get(req.params.id);
+    if (!tpl) return res.status(404).json({ error: '範本不存在' });
+    if (!req.file) return res.status(400).json({ error: '請上傳圖片' });
+
+    const slideIndex = parseInt(req.params.index);
+    const publicUrl = `/uploads/templates/thumbnails/${req.file.filename}`;
+
+    // Update pptx_settings.slide_config thumbnail_url for this slide
+    const schema = JSON.parse(tpl.schema_json || '{}');
+    const slideConfig = schema.pptx_settings?.slide_config || [];
+    const cfg = slideConfig.find(c => c.index === slideIndex);
+    if (cfg) {
+      cfg.thumbnail_url = publicUrl;
+    } else {
+      slideConfig.push({ index: slideIndex, type: 'content_single', thumbnail_url: publicUrl });
+    }
+    schema.pptx_settings = { ...(schema.pptx_settings || {}), slide_config: slideConfig };
+
+    await db.prepare('UPDATE doc_templates SET schema_json=?, updated_at=CURRENT_TIMESTAMP WHERE id=?')
+      .run(JSON.stringify(schema), req.params.id);
+
+    res.json({ ok: true, thumbnail_url: publicUrl });
+  } catch (e) {
+    console.error('[DocTemplates] thumbnail upload error:', e.message);
     res.status(500).json({ error: e.message });
   }
 });
