@@ -2347,8 +2347,25 @@ function parseJsonFromAiOutput(text) {
   // The [^\n]* handles language tags including generate_xlsx:filename.xlsx
   const stripped = text.replace(/```[^\n]*\n([\s\S]*?)```/g, '$1').trim();
   const src = stripped || text.trim();
+
+  // Detect array root [ ... ] — AI should output object, not array.
+  const arrStart = src.indexOf('[');
+  const objStart = src.indexOf('{');
+  if (arrStart !== -1 && (objStart === -1 || arrStart < objStart)) {
+    const arrEnd = src.lastIndexOf(']');
+    if (arrEnd !== -1) {
+      try {
+        const arr = JSON.parse(src.slice(arrStart, arrEnd + 1));
+        if (Array.isArray(arr)) {
+          console.warn('[parseJsonFromAiOutput] AI output root is array, not object. AI did not follow schema instruction. Snippet:', src.slice(0, 200));
+          return null;
+        }
+      } catch (_) { /* fall through to object search */ }
+    }
+  }
+
   // Find outermost { ... }
-  const start = src.indexOf('{');
+  const start = objStart;
   const end   = src.lastIndexOf('}');
   if (start === -1 || end === -1) {
     console.warn('[parseJsonFromAiOutput] no { } found, src length:', src.length, 'first200:', src.slice(0, 200));
