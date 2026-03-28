@@ -38,7 +38,8 @@ async function checkAccess(db, templateId, user) {
   ).get(templateId);
   if (!tpl) return null;
 
-  if (tpl.creator_id === user.id) return 'owner';
+  // Use loose comparison: Oracle NUMBER may come back as string or BigInt
+  if (String(tpl.creator_id) === String(user.id)) return 'owner';
 
   const shares = await db.prepare(`
     SELECT share_type FROM doc_template_shares
@@ -62,7 +63,7 @@ async function checkAccess(db, templateId, user) {
 
   if (shares.some(s => s.share_type === 'edit')) return 'edit';
   if (shares.some(s => s.share_type === 'use'))  return 'use';
-  if (tpl.is_public === 1) return 'use';
+  if (Number(tpl.is_public) === 1) return 'use';
 
   return null;
 }
