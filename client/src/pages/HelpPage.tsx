@@ -2680,6 +2680,7 @@ function UserManual() {
           rows={[
             ['Word (DOCX)', 'docxtemplater', '保留原始字型、樣式、表格，原生 {{變數}} 替換'],
             ['Excel (XLSX)', 'ExcelJS', '儲存格佔位符替換，保留公式與格式'],
+            ['PowerPoint (PPTX)', 'JSZip XML 替換', '保留原始品牌設計，支援封面/內頁/封底分類，可重複內頁自動展開多頁'],
             ['PDF', 'pdf-lib / AI 重建', 'AcroForm 表單欄位優先；無表單時由 AI 識別後重建'],
           ]}
         />
@@ -2704,15 +2705,44 @@ function UserManual() {
         <SubSection title="新增範本（上傳精靈）">
           <div className="space-y-3">
             <StepItem num={1} title="點選右上角「新增範本」藍色按鈕" />
-            <StepItem num={2} title="拖曳或點選上傳您的文件" desc="支援 DOCX、XLSX、PDF，系統自動讀取內容" />
+            <StepItem num={2} title="拖曳或點選上傳您的文件" desc="支援 DOCX、XLSX、PPTX、PDF，系統自動讀取內容" />
             <StepItem num={3} title="AI 自動分析：識別文件中的變數" desc="例如：{{姓名}}、{{日期}}、{{金額}}，並列出建議的變數清單" />
-            <StepItem num={4} title="確認或調整變數設定" desc="可修改變數名稱、類型（文字/數字/日期/選項）、是否必填、預設值" />
+            <StepItem num={4} title="確認或調整變數設定" desc="可修改變數名稱、類型（文字/數字/日期/選項）、是否必填、預設值。若為 PPTX，可在此設定每張投影片的類型" />
             <StepItem num={5} title="填寫範本名稱、描述、標籤，點選「建立」完成" />
           </div>
           <TipBox>
             AI 識別的變數準確度約 85–95%，建議上傳前先確認文件中的佔位文字清晰，
             例如「請輸入姓名」比「XXX」更容易被正確識別。
           </TipBox>
+        </SubSection>
+
+        <SubSection title="PPTX 投影片範本設計">
+          <Para>
+            上傳 PPTX 後，系統會自動計算投影片數量，並在 Step 2 顯示<strong>「投影片設定」</strong>區塊。
+            每張投影片可設定四種類型：
+          </Para>
+          <Table
+            headers={['類型', '說明']}
+            rows={[
+              ['封面', '簡報首頁，通常有標題、主講人、日期等變數，生成一次'],
+              ['內頁（單次）', '固定內容的內頁，每次生成只出現一頁'],
+              ['內頁（可重複）', '對應一個 loop 類型變數，AI 提供幾筆資料就自動複製幾頁'],
+              ['封底', '簡報末頁，生成一次'],
+            ]}
+          />
+          <Para>
+            對於<strong>內頁（可重複）</strong>，需同時在「迴圈變數」下拉選單中指定對應的 loop 類型變數（請先在變數清單中建立）。
+            每筆資料的子欄位（如 slide_title、slide_content）會填入該頁的 {'{{key}}'} 佔位符。
+          </Para>
+          <TipBox>
+            <strong>縮圖預覽：</strong>建立範本後，可在投影片設定卡片上點擊縮圖區塊，
+            上傳各投影片的截圖（直接在 PowerPoint 中「另存新檔 → PNG」即可）。
+            之後在設定畫面就能以圖片預覽確認每張 slide 的版型。
+          </TipBox>
+          <NoteBox>
+            PPTX 生成時，系統以 XML 層級替換 {'{{key}}'} 佔位符，完整保留原始的背景圖、色彩、字型、Logo，
+            不需要重建投影片版型。
+          </NoteBox>
         </SubSection>
 
         <SubSection title="使用範本生成文件">
@@ -5704,7 +5734,7 @@ for (const ov of ocrVars) {
               <div className="space-y-1 text-xs text-teal-600 leading-5">
                 <p>1. 節點 config 含 <code className="bg-teal-100 px-1 rounded">template_id</code> 時，<code className="bg-teal-100 px-1 rounded">pipelineRunner.js</code> 走 template 路徑</p>
                 <p>2. 接收上一個節點的文字輸出，呼叫 parseJsonFromAiOutput() 嘗試解析 JSON</p>
-                <p>3. 若無法解析為 JSON，節點拋出錯誤停止執行</p>
+                <p>3. 若 parse 失敗，自動呼叫 getTemplateSchemaInstruction() + AI re-format，再次解析</p>
                 <p>4. 解析成功後呼叫 generateDocumentFromJson()，context.user 作為權限主體</p>
                 <p>5. 回傳 <code className="bg-teal-100 px-1 rounded">{'{ text: "[已生成範本檔案]", file: {...} }'}</code>，供後續節點使用或作為最終輸出</p>
               </div>
@@ -5754,6 +5784,43 @@ function parseJsonFromAiOutput(text) {
           <NoteBox>
             generateDocumentFromJson 需要 user 物件（含 id, role）以通過 checkAccess() 權限檢查。
             Pipeline 執行時從 context.user 取得；排程執行時由 task.user_id 查詢 DB 得到完整 user 物件。
+          </NoteBox>
+        </SubSection>
+
+        <SubSection title="PPTX 範本技術架構">
+          <Para>
+            PPTX 範本以 JSZip 在 XML 層級操作，完整保留原始品牌設計（背景圖、色彩、字型、Logo），
+            不依賴 LibreOffice 或任何外部轉換工具。
+          </Para>
+          <Table
+            headers={['函式', '用途']}
+            rows={[
+              ['injectPptxPlaceholders(buf, vars)', '上傳時將 original_text 替換為 {{key}} 佔位符，存成 template_file'],
+              ['_replacePptxPlaceholders(xml, varMap)', '生成時將 {{key}} 替換為實際值，保留第一個 run 的格式'],
+              ['_rebuildPptxSlides(zip, outputSlides)', 'content_repeat 展開後，重建 presentation.xml 的 sldIdLst 和 .rels 關聯'],
+            ]}
+          />
+          <Para>
+            slide_config 存於 <code className="bg-slate-100 px-1 rounded text-xs">doc_templates.schema_json</code> 的
+            <code className="bg-slate-100 px-1 rounded text-xs">pptx_settings.slide_config</code> 欄位，結構如下：
+          </Para>
+          <CodeBlock>{`// pptx_settings.slide_config 範例
+[
+  { "index": 0, "type": "cover" },
+  { "index": 1, "type": "content_repeat", "loop_var": "slides",
+    "thumbnail_url": "/uploads/templates/thumbnails/xxx_slide1.png" },
+  { "index": 2, "type": "back" }
+]
+
+// type 可選值：
+// "cover"           — 封面（生成一頁）
+// "content_single"  — 內頁（生成一頁）
+// "content_repeat"  — 可重複內頁（依 loop_var 陣列長度展開 N 頁）
+// "back"            — 封底（生成一頁）`}</CodeBlock>
+          <NoteBox>
+            縮圖透過 <code className="bg-slate-100 px-1 rounded text-xs">POST /api/doc-templates/:id/slides/:index/thumbnail</code> 上傳，
+            存至 <code className="bg-slate-100 px-1 rounded text-xs">uploads/templates/thumbnails/</code>，
+            URL 回寫到 slide_config[index].thumbnail_url。
           </NoteBox>
         </SubSection>
 
