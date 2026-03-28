@@ -1381,5 +1381,121 @@ kubectl rollout status deployment/foxlink-gpt -n foxlink
 
 ---
 
-*文件產出日期：2026-03-19 | 更新：2026-03-24（新增第十二節：系統監控模組部署）*
+## 第十三節：Webex Bot 整合部署
+
+### 13.1 事前準備
+
+1. 至 [Webex Developer Portal](https://developer.webex.com/my-apps) 建立 Bot，取得 **Bot Access Token**
+2. 確認 `https://flgpt.foxlink.com.tw:8443` 可從公網存取（Webex webhook 需要回撥）
+
+### 13.2 設定環境變數
+
+在 `server/.env` 中新增（或 K8s Secret）：
+
+```env
+# Webex Bot
+WEBEX_BOT_TOKEN=<Bot Access Token>
+WEBEX_WEBHOOK_SECRET=<自定任意字串，用於 HMAC-SHA1 驗簽>
+WEBEX_PUBLIC_URL=https://flgpt.foxlink.com.tw:8443
+```
+
+若使用 K8s Secret 管理：
+
+```bash
+kubectl create secret generic foxlink-gpt-secret \
+  --from-literal=WEBEX_BOT_TOKEN=<token> \
+  --from-literal=WEBEX_WEBHOOK_SECRET=<secret> \
+  -n foxlink --dry-run=client -o yaml | kubectl apply -f -
+```
+
+### 13.3 部署新版本
+
+```bash
+# 1. 拉最新程式碼並 build image
+git pull && ./deploy.sh
+
+# 2. 確認新端點可達（回應 200 表示 route 已載入）
+curl -X POST https://flgpt.foxlink.com.tw:8443/api/webex/webhook \
+  -H "Content-Type: application/json" -d '{}'
+```
+
+### 13.4 登記 Webhook（一次性，部署後執行一次）
+
+```bash
+cd /home/fldba/foxlink_gpt/server
+npm install                          # 確保 axios、form-data 已安裝
+node scripts/registerWebhook.js
+```
+
+預期輸出：
+
+```
+🔍 查詢現有 webhooks...
+   找到 0 個 webhook
+➕ 建立 webhook → https://flgpt.foxlink.com.tw:8443/api/webex/webhook
+
+✅ Webhook 建立成功！
+   ID:         Y2lzY29zcGFyazovL...
+   Name:       FOXLINK GPT Webhook
+   Target URL: https://flgpt.foxlink.com.tw:8443/api/webex/webhook
+   Status:     active
+
+🤖 Bot 資訊：
+   名稱: Foxlink GPT Service
+   Email: Foxlink_GPT_Service@webex.bot
+```
+
+> [!NOTE]
+> 每次 `WEBEX_PUBLIC_URL` 變更（如換 domain 或 port）時需重新執行此腳本，舊 webhook 會自動刪除並重建。
+
+### 13.5 驗證測試
+
+在 Webex 搜尋 Bot Email（`Foxlink_GPT_Service@webex.bot`）開啟 DM，依序測試：
+
+| 指令 | 預期回應 |
+|---|---|
+| `?` | 列出該帳號授權的工具清單 |
+| `/help` | 顯示使用說明 |
+| `/new` | 開啟新對話，清除記憶 |
+| 一般問題 | AI 回答（簡化格式） |
+
+### 13.6 Log 監控
+
+```bash
+# 查看 Webex 相關 log
+kubectl logs -f deployment/foxlink-gpt -n foxlink | grep "\[Webex\]"
+```
+
+正常運作時的 log 範例：
+
+```
+[Webex] DM from alice@foxlink.com room=Y2lzY29z...
+[Webex] User resolved: id=42 name=Alice
+[Webex] Session reused: 3fa85f64-5717-4562-b3fc-2c963f66afa6
+[Webex] Calling AI model=gemini-3-pro-preview user=alice session=... tools=5
+[Webex] AI response generated: 342 chars
+```
+
+### 13.7 DB Migration
+
+首次啟動新版本時，`runMigrations()` 會自動執行：
+
+```sql
+ALTER TABLE CHAT_SESSIONS ADD WEBEX_ROOM_ID VARCHAR2(200);
+```
+
+無需手動操作。
+
+### 13.8 注意事項
+
+- **Email 正規化**：Webex 帳號為 `@foxlink.com`，LDAP 帳號可能為 `@foxlink.com.tw`，系統自動對應，不分大小寫
+- **未知 email**：非系統用戶發訊時，Bot 回覆拒絕訊息並要求聯絡管理員
+- **群組 Room**：需 @Bot 才觸發，群組 session 永久保存（不按日切割）
+- **DM Session**：每日自動新 session，同一天的對話共用記憶
+- **檔案上傳**：依各用戶 DB 設定的 `allow_*_upload` / `*_max_mb` 限制
+- **Webhook Secret**：務必設定 `WEBEX_WEBHOOK_SECRET`，否則任何人可偽造 webhook 呼叫
+
+---
+
+*文件產出日期：2026-03-19 | 更新：2026-03-29（新增第十三節：Webex Bot 整合部署）*
 *Git tag: `backup-before-k8s-migration-20260319`*
