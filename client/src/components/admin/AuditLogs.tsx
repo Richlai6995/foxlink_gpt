@@ -4,6 +4,11 @@ import type { AuditLog } from '../../types'
 import api from '../../lib/api'
 import { useTranslation } from 'react-i18next'
 
+function fmtTW(iso: string | undefined) {
+  if (!iso) return ''
+  return new Date(iso).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false })
+}
+
 export default function AuditLogs() {
   const { t } = useTranslation()
   const [logs, setLogs] = useState<AuditLog[]>([])
@@ -48,7 +53,7 @@ export default function AuditLogs() {
       const kws = JSON.parse(l.sensitive_keywords || '[]').join(';')
       const content = `"${(l.content || '').replace(/"/g, '""')}"`
       return [
-        l.created_at?.slice(0, 16),
+        fmtTW(l.created_at),
         l.source === 'webex' ? 'Webex' : 'Web',
         l.name || l.username,
         l.employee_id || '',
@@ -149,7 +154,7 @@ export default function AuditLogs() {
               )}
               <span className="text-sm font-medium text-slate-700">{l.name || l.username}</span>
               {l.employee_id && <span className="text-xs text-slate-400">{l.employee_id}</span>}
-              <span className="text-xs text-slate-400">{l.created_at?.slice(0, 16)}</span>
+              <span className="text-xs text-slate-400">{fmtTW(l.created_at)}</span>
               {l.source === 'webex' ? (
                 <span className="inline-flex items-center gap-1 text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full">
                   <MessageSquare size={10} /> Webex
