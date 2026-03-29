@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { X, Download, Loader2 } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import api from '../../lib/api'
 import { DocTemplate, TemplateVariable } from '../../types'
 import LoopDataTable from './LoopDataTable'
@@ -10,12 +11,12 @@ interface Props {
 }
 
 export default function TemplateGenerateModal({ template, onClose }: Props) {
+  const { t } = useTranslation()
   const schema = (() => {
     try { return JSON.parse(template.schema_json || '{}') } catch { return { variables: [] } }
   })()
   const variables: TemplateVariable[] = schema.variables || []
 
-  // Pre-populate static/empty variables; only 'variable' mode vars are shown in form
   const [values, setValues] = useState<Record<string, unknown>>(() => {
     const init: Record<string, unknown> = {}
     for (const v of variables) {
@@ -54,14 +55,14 @@ export default function TemplateGenerateModal({ template, onClose }: Props) {
         <div className="flex items-center justify-between px-5 py-3 border-b">
           <div>
             <div className="font-medium text-sm">{template.name}</div>
-            <div className="text-xs text-slate-400">填入變數後生成文件</div>
+            <div className="text-xs text-slate-400">{t('tpl.generate.subtitle')}</div>
           </div>
           <button onClick={onClose}><X size={16} /></button>
         </div>
 
         <div className="flex-1 overflow-auto p-5 space-y-4">
           {variables.filter(v => (v.content_mode ?? 'variable') === 'variable').length === 0 && (
-            <div className="text-sm text-slate-400 text-center py-4">此範本沒有需要填入的變數</div>
+            <div className="text-sm text-slate-400 text-center py-4">{t('tpl.generate.noVariables')}</div>
           )}
           {variables.filter(v => (v.content_mode ?? 'variable') === 'variable').map(v => (
             <div key={v.key}>
@@ -83,7 +84,7 @@ export default function TemplateGenerateModal({ template, onClose }: Props) {
                   value={(values[v.key] as string) || ''}
                   onChange={e => setVal(v.key, e.target.value)}
                 >
-                  <option value="">請選擇</option>
+                  <option value="">{t('tpl.generate.selectPlaceholder')}</option>
                   {(v.options || []).map(o => <option key={o} value={o}>{o}</option>)}
                 </select>
               ) : (
@@ -102,13 +103,13 @@ export default function TemplateGenerateModal({ template, onClose }: Props) {
 
           {downloadUrl && (
             <div className="flex items-center gap-3 bg-green-50 border border-green-200 rounded p-3">
-              <div className="text-xs text-green-700 flex-1">文件生成成功！</div>
+              <div className="text-xs text-green-700 flex-1">{t('tpl.generate.success')}</div>
               <a
                 href={downloadUrl}
                 download
                 className="flex items-center gap-1 text-xs bg-green-600 text-white px-3 py-1.5 rounded hover:bg-green-700"
               >
-                <Download size={13} /> 下載
+                <Download size={13} /> {t('tpl.generate.download')}
               </a>
             </div>
           )}
@@ -118,7 +119,7 @@ export default function TemplateGenerateModal({ template, onClose }: Props) {
           <div className="flex items-center gap-2">
             {template.format === 'pdf' && (
               <>
-                <span className="text-xs text-slate-500">輸出格式</span>
+                <span className="text-xs text-slate-500">{t('tpl.generate.outputFormat')}</span>
                 <div className="flex rounded border text-xs overflow-hidden">
                   {[{ v: 'pdf', label: 'PDF' }, { v: 'docx', label: 'Word' }].map(o => (
                     <button
@@ -134,14 +135,14 @@ export default function TemplateGenerateModal({ template, onClose }: Props) {
             )}
           </div>
           <div className="flex gap-2">
-            <button onClick={onClose} className="text-sm text-slate-500 hover:text-slate-700">關閉</button>
+            <button onClick={onClose} className="text-sm text-slate-500 hover:text-slate-700">{t('tpl.generate.close')}</button>
             <button
               onClick={generate}
               disabled={generating}
               className="px-4 py-1.5 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2"
             >
               {generating && <Loader2 size={13} className="animate-spin" />}
-              {generating ? '生成中...' : '生成文件'}
+              {generating ? t('tpl.generate.generating') : t('tpl.generate.generateDoc')}
             </button>
           </div>
         </div>

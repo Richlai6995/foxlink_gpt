@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Plus, Search, RefreshCw, ArrowLeft, ScanLine, Loader2 } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import api from '../lib/api'
 import { DocTemplate, TemplateSchema, TemplateVariable, DocxSettings } from '../types'
 import TemplateCard from '../components/templates/TemplateCard'
@@ -11,17 +12,10 @@ import PDFFieldEditor from '../components/templates/PDFFieldEditor'
 import DocxPreviewTab from '../components/templates/DocxPreviewTab'
 import XlsxListFormatTab from '../components/templates/XlsxListFormatTab'
 
-const FORMAT_OPTIONS = [
-  { value: '', label: '所有格式' },
-  { value: 'docx', label: 'Word (DOCX)' },
-  { value: 'xlsx', label: 'Excel (XLSX)' },
-  { value: 'pptx', label: 'PowerPoint (PPTX)' },
-  { value: 'pdf', label: 'PDF' },
-]
-
 type EditTab = 'basic' | 'variables' | 'style' | 'layout' | 'preview' | 'xlsxformat'
 
 function OcrScanButton({ templateId, onComplete }: { templateId: string; onComplete: (vars: TemplateVariable[]) => void }) {
+  const { t } = useTranslation()
   const [scanning, setScanning] = useState(false)
   const [err, setErr] = useState('')
 
@@ -32,7 +26,7 @@ function OcrScanButton({ templateId, onComplete }: { templateId: string; onCompl
       const { data } = await api.post(`/doc-templates/${templateId}/ocr-scan`)
       onComplete(data.schema?.variables || [])
     } catch (e: unknown) {
-      setErr((e as { response?: { data?: { error?: string } }; message?: string }).response?.data?.error || (e as Error).message || 'OCR 失敗')
+      setErr((e as { response?: { data?: { error?: string } }; message?: string }).response?.data?.error || (e as Error).message || t('tpl.ocrFailed'))
     } finally {
       setScanning(false)
     }
@@ -44,11 +38,11 @@ function OcrScanButton({ templateId, onComplete }: { templateId: string; onCompl
       <button
         onClick={run}
         disabled={scanning}
-        title="使用 Gemini Vision 重新 OCR 掃描此 PDF，自動填入欄位座標"
+        title={t('tpl.ocrTitle')}
         className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-purple-600 text-white rounded hover:bg-purple-700 disabled:opacity-50"
       >
         {scanning ? <Loader2 size={12} className="animate-spin" /> : <ScanLine size={12} />}
-        {scanning ? 'OCR 掃描中...' : 'OCR 重新掃描'}
+        {scanning ? t('tpl.ocrScanning') : t('tpl.ocrRescan')}
       </button>
     </div>
   )
@@ -60,6 +54,7 @@ function TemplateEditModal({ template, onClose, onSaved }: {
   onClose: () => void
   onSaved: () => void
 }) {
+  const { t } = useTranslation()
   const [tab, setTab] = useState<EditTab>('basic')
   const [name, setName] = useState(template.name)
   const [description, setDescription] = useState(template.description || '')
@@ -88,8 +83,8 @@ function TemplateEditModal({ template, onClose, onSaved }: {
   }
 
   const addTag = () => {
-    const t = tagInput.trim()
-    if (t && !tags.includes(t)) setTags([...tags, t])
+    const v = tagInput.trim()
+    if (v && !tags.includes(v)) setTags([...tags, v])
     setTagInput('')
   }
 
@@ -98,12 +93,12 @@ function TemplateEditModal({ template, onClose, onSaved }: {
   const isXlsx = template.format === 'xlsx'
 
   const TABS: { key: EditTab; label: string }[] = ([
-    { key: 'basic',       label: '基本資訊',    show: true },
-    { key: 'variables',   label: '變數設定',    show: true },
-    { key: 'style',       label: '樣式設定',    show: true },
-    { key: 'xlsxformat',  label: '清單格式',    show: isXlsx },
-    { key: 'layout',      label: '版面編輯器',  show: isPdf },
-    { key: 'preview',     label: '預覽',        show: isDocx },
+    { key: 'basic',       label: t('tpl.tabs.basic'),      show: true },
+    { key: 'variables',   label: t('tpl.tabs.variables'),  show: true },
+    { key: 'style',       label: t('tpl.tabs.style'),      show: true },
+    { key: 'xlsxformat',  label: t('tpl.tabs.xlsxformat'), show: isXlsx },
+    { key: 'layout',      label: t('tpl.tabs.layout'),     show: isPdf },
+    { key: 'preview',     label: t('tpl.tabs.preview'),    show: isDocx },
   ] as { key: EditTab; label: string; show: boolean }[]).filter(t => t.show)
 
   return (
@@ -112,7 +107,7 @@ function TemplateEditModal({ template, onClose, onSaved }: {
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-3 border-b">
           <div className="flex items-center gap-4">
-            <span className="font-medium text-sm">編輯範本</span>
+            <span className="font-medium text-sm">{t('tpl.editTemplate')}</span>
             {/* Fixed format toggle */}
             <label className="flex items-center gap-2 cursor-pointer">
               <button
@@ -122,7 +117,7 @@ function TemplateEditModal({ template, onClose, onSaved }: {
                 <div className={`w-3.5 h-3.5 rounded-full bg-white absolute top-0.5 transition ${isFixedFormat ? 'left-[18px]' : 'left-0.5'}`} />
               </button>
               <span className={`text-xs ${isFixedFormat ? 'text-blue-600 font-medium' : 'text-slate-500'}`}>
-                固定格式模式
+                {t('tpl.fixedFormatMode')}
               </span>
             </label>
           </div>
@@ -131,15 +126,15 @@ function TemplateEditModal({ template, onClose, onSaved }: {
 
         {/* Tab bar */}
         <div className="flex border-b px-5">
-          {TABS.map(t => (
+          {TABS.map(tb => (
             <button
-              key={t.key}
-              onClick={() => setTab(t.key)}
-              className={`px-4 py-2 text-xs font-medium border-b-2 transition ${tab === t.key ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}
+              key={tb.key}
+              onClick={() => setTab(tb.key)}
+              className={`px-4 py-2 text-xs font-medium border-b-2 transition ${tab === tb.key ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}
             >
-              {t.label}
-              {t.key === 'style' && isFixedFormat && (
-                <span className="ml-1 text-[10px] bg-blue-100 text-blue-600 px-1 rounded">啟用</span>
+              {tb.label}
+              {tb.key === 'style' && isFixedFormat && (
+                <span className="ml-1 text-[10px] bg-blue-100 text-blue-600 px-1 rounded">{t('tpl.enabled')}</span>
               )}
             </button>
           ))}
@@ -152,44 +147,43 @@ function TemplateEditModal({ template, onClose, onSaved }: {
           {tab === 'basic' && (
             <div className="space-y-4">
               <div>
-                <label className="text-xs text-slate-500 block mb-1">範本名稱</label>
+                <label className="text-xs text-slate-500 block mb-1">{t('tpl.basic.name')}</label>
                 <input className="w-full border rounded px-3 py-2 text-sm" value={name} onChange={e => setName(e.target.value)} />
               </div>
               <div>
-                <label className="text-xs text-slate-500 block mb-1">描述</label>
+                <label className="text-xs text-slate-500 block mb-1">{t('tpl.basic.description')}</label>
                 <textarea className="w-full border rounded px-3 py-2 text-sm" rows={2} value={description} onChange={e => setDescription(e.target.value)} />
               </div>
               <div>
-                <label className="text-xs text-slate-500 block mb-1">標籤</label>
+                <label className="text-xs text-slate-500 block mb-1">{t('tpl.basic.tags')}</label>
                 <div className="flex flex-wrap gap-1 mb-1">
-                  {tags.map(t => (
-                    <span key={t} className="flex items-center gap-1 bg-blue-100 text-blue-700 text-xs px-2 py-0.5 rounded-full">
-                      {t}
-                      <button onClick={() => setTags(tags.filter(x => x !== t))}>✕</button>
+                  {tags.map(tg => (
+                    <span key={tg} className="flex items-center gap-1 bg-blue-100 text-blue-700 text-xs px-2 py-0.5 rounded-full">
+                      {tg}
+                      <button onClick={() => setTags(tags.filter(x => x !== tg))}>✕</button>
                     </span>
                   ))}
                 </div>
                 <div className="flex gap-2">
-                  <input className="flex-1 border rounded px-2 py-1 text-xs" placeholder="輸入標籤後按 Enter" value={tagInput} onChange={e => setTagInput(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addTag() } }} />
-                  <button onClick={addTag} className="text-xs px-2 py-1 border rounded text-slate-600">新增</button>
+                  <input className="flex-1 border rounded px-2 py-1 text-xs" placeholder={t('tpl.basic.tagPlaceholder')} value={tagInput} onChange={e => setTagInput(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addTag() } }} />
+                  <button onClick={addTag} className="text-xs px-2 py-1 border rounded text-slate-600">{t('tpl.basic.addTag')}</button>
                 </div>
               </div>
               {isFixedFormat && (
                 <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 text-xs text-blue-700">
-                  <strong>固定格式模式已啟用</strong>：生成時每個儲存格將套用「樣式設定」頁籤中的字型/顏色/溢位設定。
-                  DOCX 可另在各 loop 變數的 <code>docx_style.rowHeightPt</code> 設定固定列高。
+                  <strong>{t('tpl.fixedFormatMode')}</strong>：{t('tpl.basic.fixedFormatHint')}
                 </div>
               )}
               {isDocx && (
                 <div className="border rounded-lg px-4 py-3 space-y-2">
-                  <div className="text-xs font-medium text-slate-600">DOCX 生成設定（新版語法）</div>
+                  <div className="text-xs font-medium text-slate-600">{t('tpl.basic.docxSettings')}</div>
                   <div className="flex items-center gap-3">
-                    <label className="text-xs text-slate-500 w-32">儲存格行距（pt）</label>
+                    <label className="text-xs text-slate-500 w-32">{t('tpl.basic.cellSpacing')}</label>
                     <input
                       type="number" min={0} max={20} step={1}
                       disabled={!canEdit}
                       className="w-20 border rounded px-2 py-1 text-xs disabled:opacity-50"
-                      placeholder="0（緊密）"
+                      placeholder={t('tpl.basic.cellSpacingPlaceholder')}
                       value={(schema.docx_settings as DocxSettings | undefined)?.cellSpacingAfter ?? ''}
                       onChange={e => setSchema({
                         ...schema,
@@ -199,7 +193,7 @@ function TemplateEditModal({ template, onClose, onSaved }: {
                         },
                       })}
                     />
-                    <span className="text-xs text-slate-400">0 = 緊密，4 = 正常，8 = 寬鬆</span>
+                    <span className="text-xs text-slate-400">{t('tpl.basic.cellSpacingHint')}</span>
                   </div>
                 </div>
               )}
@@ -220,9 +214,7 @@ function TemplateEditModal({ template, onClose, onSaved }: {
           {tab === 'style' && (
             <div>
               {!isFixedFormat && (
-                <div className="mb-3 text-xs text-slate-500 bg-slate-50 border rounded p-3">
-                  固定格式模式關閉時，PDF overlay 路徑不套用偵測樣式，但<strong>手動設定的 Override（字型大小、顏色、粗體）仍會套用</strong>於生成文件。
-                </div>
+                <div className="mb-3 text-xs text-slate-500 bg-slate-50 border rounded p-3" dangerouslySetInnerHTML={{ __html: t('tpl.styleNote') }} />
               )}
               <StyleEditorTab
                 variables={schema.variables || []}
@@ -236,10 +228,7 @@ function TemplateEditModal({ template, onClose, onSaved }: {
           {tab === 'layout' && (
             <div>
               <div className="mb-2 flex items-start justify-between gap-3">
-                <p className="text-xs text-slate-500">
-                  在下方 PDF 預覽上，先選取右上方「選擇變數」下拉後拖拉畫框，即可定義該欄位的填寫位置。
-                  已定位的欄位將在生成時以 <strong>疊加模式</strong> 寫入原始 PDF。
-                </p>
+                <p className="text-xs text-slate-500" dangerouslySetInnerHTML={{ __html: t('tpl.layoutNote') }} />
                 {canEdit && (
                   <OcrScanButton
                     templateId={template.id}
@@ -272,9 +261,9 @@ function TemplateEditModal({ template, onClose, onSaved }: {
         </div>
 
         <div className="flex justify-end gap-2 px-5 py-3 border-t">
-          <button onClick={onClose} className="text-sm text-slate-500 hover:text-slate-700">取消</button>
+          <button onClick={onClose} className="text-sm text-slate-500 hover:text-slate-700">{t('tpl.cancel')}</button>
           <button onClick={save} disabled={saving} className="px-4 py-1.5 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50">
-            {saving ? '儲存中...' : '儲存'}
+            {saving ? t('tpl.saving') : t('tpl.save')}
           </button>
         </div>
       </div>
@@ -283,6 +272,7 @@ function TemplateEditModal({ template, onClose, onSaved }: {
 }
 
 export default function TemplatesPage() {
+  const { t } = useTranslation()
   const navigate = useNavigate()
   const [templates, setTemplates] = useState<DocTemplate[]>([])
   const [loading, setLoading] = useState(true)
@@ -292,7 +282,15 @@ export default function TemplatesPage() {
   const [editTarget, setEditTarget] = useState<DocTemplate | null>(null)
   const [fetchError, setFetchError] = useState('')
 
-  const fetch = useCallback(async () => {
+  const FORMAT_OPTIONS = [
+    { value: '', label: t('tpl.allFormats') },
+    { value: 'docx', label: 'Word (DOCX)' },
+    { value: 'xlsx', label: 'Excel (XLSX)' },
+    { value: 'pptx', label: 'PowerPoint (PPTX)' },
+    { value: 'pdf', label: 'PDF' },
+  ]
+
+  const doFetch = useCallback(async () => {
     setLoading(true)
     setFetchError('')
     try {
@@ -302,13 +300,13 @@ export default function TemplatesPage() {
       const { data } = await api.get(`/doc-templates?${params}`)
       setTemplates(data)
     } catch (e: any) {
-      setFetchError(e.response?.data?.error || e.message || '載入失敗')
+      setFetchError(e.response?.data?.error || e.message || t('tpl.loadFailed'))
     } finally {
       setLoading(false)
     }
-  }, [search, format])
+  }, [search, format, t])
 
-  useEffect(() => { fetch() }, [fetch])
+  useEffect(() => { doFetch() }, [doFetch])
 
   const mine = templates.filter(t => t.access_level === 'owner')
   const sharedToMe = templates.filter(t => t.access_level === 'edit' || t.access_level === 'use')
@@ -318,8 +316,8 @@ export default function TemplatesPage() {
       <div className="mb-8">
         <h2 className="text-sm font-medium text-slate-700 mb-3">{title}</h2>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-          {items.map(t => (
-            <TemplateCard key={t.id} template={t} onRefresh={fetch} onEdit={setEditTarget} />
+          {items.map(tp => (
+            <TemplateCard key={tp.id} template={tp} onRefresh={doFetch} onEdit={setEditTarget} />
           ))}
         </div>
       </div>
@@ -334,20 +332,20 @@ export default function TemplatesPage() {
           <button
             onClick={() => navigate(-1)}
             className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition"
-            title="返回"
+            title={t('tpl.back')}
           >
             <ArrowLeft size={18} />
           </button>
           <div>
-            <h1 className="text-lg font-semibold">文件範本庫</h1>
-            <p className="text-xs text-slate-400 mt-0.5">上傳文件，由 AI 識別變數，可重複使用、分享給他人</p>
+            <h1 className="text-lg font-semibold">{t('tpl.title')}</h1>
+            <p className="text-xs text-slate-400 mt-0.5">{t('tpl.subtitle')}</p>
           </div>
         </div>
         <button
           onClick={() => setShowWizard(true)}
           className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700"
         >
-          <Plus size={15} /> 新增範本
+          <Plus size={15} /> {t('tpl.addTemplate')}
         </button>
       </div>
 
@@ -357,7 +355,7 @@ export default function TemplatesPage() {
           <Search size={14} className="absolute left-3 top-2.5 text-slate-400" />
           <input
             className="pl-9 pr-3 py-2 border rounded-lg text-sm w-60"
-            placeholder="搜尋範本名稱..."
+            placeholder={t('tpl.searchPlaceholder')}
             value={search}
             onChange={e => setSearch(e.target.value)}
           />
@@ -369,7 +367,7 @@ export default function TemplatesPage() {
         >
           {FORMAT_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
         </select>
-        <button onClick={fetch} className="p-2 border rounded-lg text-slate-500 hover:bg-slate-50">
+        <button onClick={doFetch} className="p-2 border rounded-lg text-slate-500 hover:bg-slate-50">
           <RefreshCw size={14} />
         </button>
       </div>
@@ -377,31 +375,31 @@ export default function TemplatesPage() {
       {/* Fetch error */}
       {fetchError && (
         <div className="mb-4 bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-600">
-          載入錯誤：{fetchError}
+          {t('tpl.loadError')}{fetchError}
         </div>
       )}
 
       {/* Content */}
       {loading ? (
-        <div className="text-sm text-slate-400 text-center py-12">載入中...</div>
+        <div className="text-sm text-slate-400 text-center py-12">{t('tpl.loading')}</div>
       ) : fetchError ? null : templates.length === 0 ? (
         <div className="text-center py-16 text-slate-400">
           <div className="text-4xl mb-3">📄</div>
-          <div className="text-sm">尚無範本，點擊「新增範本」上傳第一份文件</div>
+          <div className="text-sm">{t('tpl.empty')}</div>
         </div>
       ) : (
         <>
-          <Section title="📂 我的範本" items={mine} />
-          <Section title="🌐 分享給我 / 公開範本" items={sharedToMe} />
+          <Section title={`📂 ${t('tpl.myTemplates')}`} items={mine} />
+          <Section title={`🌐 ${t('tpl.sharedTemplates')}`} items={sharedToMe} />
         </>
       )}
 
       {/* Modals */}
       {showWizard && (
-        <TemplateUploadWizard onCreated={() => { setShowWizard(false); fetch() }} onClose={() => setShowWizard(false)} />
+        <TemplateUploadWizard onCreated={() => { setShowWizard(false); doFetch() }} onClose={() => setShowWizard(false)} />
       )}
       {editTarget && (
-        <TemplateEditModal template={editTarget} onClose={() => setEditTarget(null)} onSaved={fetch} />
+        <TemplateEditModal template={editTarget} onClose={() => setEditTarget(null)} onSaved={doFetch} />
       )}
     </div>
   )

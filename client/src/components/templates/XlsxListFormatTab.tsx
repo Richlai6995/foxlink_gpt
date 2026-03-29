@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import { XlsxListSettings } from '../../types'
 import ColorPicker from './ColorPicker'
 
@@ -7,41 +8,41 @@ interface Props {
   readonly?: boolean
 }
 
-const PRESET_SCHEMES = [
-  { label: '無配色', odd: '', even: '' },
-  { label: '藍白', odd: '#FFFFFF', even: '#EEF2FF' },
-  { label: '灰白', odd: '#FFFFFF', even: '#F8FAFC' },
-  { label: '藍深', odd: '#DBEAFE', even: '#EFF6FF' },
-  { label: '綠白', odd: '#FFFFFF', even: '#F0FDF4' },
-]
-
 export default function XlsxListFormatTab({ settings, onChange, readonly }: Props) {
+  const { t } = useTranslation()
   const set = (patch: Partial<XlsxListSettings>) => onChange({ ...settings, ...patch })
+
+  const PRESET_SCHEMES = [
+    { label: t('tpl.xlsx.noColor'), odd: '', even: '' },
+    { label: t('tpl.xlsx.blueWhite'), odd: '#FFFFFF', even: '#EEF2FF' },
+    { label: t('tpl.xlsx.grayWhite'), odd: '#FFFFFF', even: '#F8FAFC' },
+    { label: t('tpl.xlsx.blueDeep'), odd: '#DBEAFE', even: '#EFF6FF' },
+    { label: t('tpl.xlsx.greenWhite'), odd: '#FFFFFF', even: '#F0FDF4' },
+  ]
 
   return (
     <div className="space-y-6 max-w-xl">
       {/* Header row */}
       <div>
-        <label className="text-xs font-medium text-slate-600 block mb-1">標題列列號</label>
+        <label className="text-xs font-medium text-slate-600 block mb-1">{t('tpl.xlsx.headerRowNum')}</label>
         <div className="flex items-center gap-2">
           <input
             type="number"
             min={1} max={100}
             disabled={readonly}
             className="w-20 border rounded px-2 py-1.5 text-sm disabled:opacity-50"
-            placeholder="自動偵測"
+            placeholder={t('tpl.xlsx.autoDetect')}
             value={settings.headerRowNum ?? ''}
             onChange={e => set({ headerRowNum: e.target.value ? parseInt(e.target.value) : undefined })}
           />
-          <span className="text-xs text-slate-400">空白 = 自動偵測（依欄位名稱配對）</span>
+          <span className="text-xs text-slate-400">{t('tpl.xlsx.autoDetectHint')}</span>
         </div>
       </div>
 
       {/* Alternating row colors */}
       <div>
-        <label className="text-xs font-medium text-slate-600 block mb-2">交替列背景色</label>
+        <label className="text-xs font-medium text-slate-600 block mb-2">{t('tpl.xlsx.altRowColors')}</label>
 
-        {/* Preset */}
         <div className="flex flex-wrap gap-2 mb-4">
           {PRESET_SCHEMES.map(p => (
             <button
@@ -63,10 +64,9 @@ export default function XlsxListFormatTab({ settings, onChange, readonly }: Prop
           ))}
         </div>
 
-        {/* Custom pickers */}
         <div className="grid grid-cols-2 gap-4">
           <div>
-            <label className="text-xs text-slate-500 block mb-1">奇數列（第 1、3、5… 筆）</label>
+            <label className="text-xs text-slate-500 block mb-1">{t('tpl.xlsx.oddRow')}</label>
             <div className="flex items-center gap-2">
               <ColorPicker
                 disabled={readonly}
@@ -74,19 +74,15 @@ export default function XlsxListFormatTab({ settings, onChange, readonly }: Prop
                 onChange={hex => set({ oddRowColor: hex === '#FFFFFF' ? undefined : hex })}
               />
               {settings.oddRowColor && (
-                <button
-                  disabled={readonly}
-                  onClick={() => set({ oddRowColor: undefined })}
+                <button disabled={readonly} onClick={() => set({ oddRowColor: undefined })}
                   className="text-xs text-slate-400 hover:text-red-500 disabled:opacity-50"
-                >
-                  清除
-                </button>
+                >{t('tpl.xlsx.clear')}</button>
               )}
             </div>
           </div>
 
           <div>
-            <label className="text-xs text-slate-500 block mb-1">偶數列（第 2、4、6… 筆）</label>
+            <label className="text-xs text-slate-500 block mb-1">{t('tpl.xlsx.evenRow')}</label>
             <div className="flex items-center gap-2">
               <ColorPicker
                 disabled={readonly}
@@ -94,13 +90,9 @@ export default function XlsxListFormatTab({ settings, onChange, readonly }: Prop
                 onChange={hex => set({ evenRowColor: hex === '#FFFFFF' ? undefined : hex })}
               />
               {settings.evenRowColor && (
-                <button
-                  disabled={readonly}
-                  onClick={() => set({ evenRowColor: undefined })}
+                <button disabled={readonly} onClick={() => set({ evenRowColor: undefined })}
                   className="text-xs text-slate-400 hover:text-red-500 disabled:opacity-50"
-                >
-                  清除
-                </button>
+                >{t('tpl.xlsx.clear')}</button>
               )}
             </div>
           </div>
@@ -110,10 +102,10 @@ export default function XlsxListFormatTab({ settings, onChange, readonly }: Prop
       {/* Preview */}
       {(settings.oddRowColor || settings.evenRowColor) && (
         <div>
-          <label className="text-xs font-medium text-slate-600 block mb-2">預覽</label>
+          <label className="text-xs font-medium text-slate-600 block mb-2">{t('tpl.xlsx.preview')}</label>
           <div className="border rounded overflow-hidden text-xs">
             <div className="bg-slate-100 px-3 py-1.5 font-medium text-slate-600 border-b">
-              標題列（不受配色影響）
+              {t('tpl.xlsx.headerRowPreview')}
             </div>
             {[1, 2, 3, 4, 5].map(i => (
               <div
@@ -121,12 +113,12 @@ export default function XlsxListFormatTab({ settings, onChange, readonly }: Prop
                 className="px-3 py-1.5 border-b last:border-0 text-slate-600"
                 style={{ background: i % 2 === 1 ? (settings.oddRowColor || 'transparent') : (settings.evenRowColor || 'transparent') }}
               >
-                第 {i} 筆資料列
+                {t('tpl.xlsx.dataRow', { n: i })}
               </div>
             ))}
           </div>
           <p className="text-[10px] text-slate-400 mt-1">
-            配色套用於迴圈（loop）型變數的資料列，標題列保持原始範本樣式。
+            {t('tpl.xlsx.colorHint')}
           </p>
         </div>
       )}

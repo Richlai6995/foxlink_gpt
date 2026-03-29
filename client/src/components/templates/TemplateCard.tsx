@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { FileText, FileSpreadsheet, File, Play, Edit2, Share2, Copy, Trash2, Download } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import api from '../../lib/api'
 import { DocTemplate } from '../../types'
 import TemplateGenerateModal from './TemplateGenerateModal'
@@ -20,6 +21,7 @@ function FormatIcon({ format }: { format: string }) {
 const FORMAT_LABEL: Record<string, string> = { docx: 'Word', xlsx: 'Excel', pdf: 'PDF' }
 
 export default function TemplateCard({ template, onRefresh, onEdit }: Props) {
+  const { t } = useTranslation()
   const [showGenerate, setShowGenerate] = useState(false)
   const [showShare, setShowShare] = useState(false)
   const [isPublic, setIsPublic] = useState(template.is_public === 1)
@@ -39,7 +41,7 @@ export default function TemplateCard({ template, onRefresh, onEdit }: Props) {
   }
 
   const handleDelete = async () => {
-    if (!window.confirm(`確定要刪除「${template.name}」嗎？此操作無法復原。`)) return
+    if (!window.confirm(t('tpl.card.confirmDelete', { name: template.name }))) return
     try {
       await api.delete(`/doc-templates/${template.id}`)
       onRefresh()
@@ -52,7 +54,6 @@ export default function TemplateCard({ template, onRefresh, onEdit }: Props) {
     const token = localStorage.getItem('token')
     const url = `/api/doc-templates/${template.id}/download`
     const a = document.createElement('a')
-    // Use fetch to handle auth header
     fetch(url, { headers: { Authorization: `Bearer ${token}` } })
       .then(r => r.blob())
       .then(blob => {
@@ -73,11 +74,11 @@ export default function TemplateCard({ template, onRefresh, onEdit }: Props) {
             <div className="text-sm font-medium truncate">{template.name}</div>
             <div className="text-xs text-slate-400">
               {FORMAT_LABEL[template.format] || template.format}
-              {template.creator_name && ` · by ${template.creator_name}`}
-              {template.forked_from && ' · 副本'}
+              {template.creator_name && ` · ${t('tpl.card.by', { name: template.creator_name })}`}
+              {template.forked_from && ` · ${t('tpl.card.forked')}`}
             </div>
           </div>
-          {isPublic && <span className="text-xs text-blue-500 bg-blue-50 px-1.5 py-0.5 rounded">公開</span>}
+          {isPublic && <span className="text-xs text-blue-500 bg-blue-50 px-1.5 py-0.5 rounded">{t('tpl.card.public')}</span>}
         </div>
 
         {/* Description */}
@@ -88,14 +89,14 @@ export default function TemplateCard({ template, onRefresh, onEdit }: Props) {
         {/* Tags */}
         {tags.length > 0 && (
           <div className="flex flex-wrap gap-1">
-            {tags.map(t => (
-              <span key={t} className="text-xs bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded-full">{t}</span>
+            {tags.map(tg => (
+              <span key={tg} className="text-xs bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded-full">{tg}</span>
             ))}
           </div>
         )}
 
         {/* Stats */}
-        <div className="text-xs text-slate-400">使用 {template.use_count} 次</div>
+        <div className="text-xs text-slate-400">{t('tpl.card.useCount', { count: template.use_count })}</div>
 
         {/* Actions */}
         <div className="flex flex-wrap gap-1 mt-auto pt-2 border-t">
@@ -103,14 +104,14 @@ export default function TemplateCard({ template, onRefresh, onEdit }: Props) {
             onClick={() => setShowGenerate(true)}
             className="flex items-center gap-1 text-xs px-2 py-1 bg-blue-600 text-white rounded hover:bg-blue-700"
           >
-            <Play size={11} /> 生成
+            <Play size={11} /> {t('tpl.card.generate')}
           </button>
 
           <button
             onClick={handleDownload}
             className="flex items-center gap-1 text-xs px-2 py-1 border rounded text-slate-600 hover:bg-slate-50"
           >
-            <Download size={11} /> 下載
+            <Download size={11} /> {t('tpl.card.download')}
           </button>
 
           {canEdit && (
@@ -118,7 +119,7 @@ export default function TemplateCard({ template, onRefresh, onEdit }: Props) {
               onClick={() => onEdit(template)}
               className="flex items-center gap-1 text-xs px-2 py-1 border rounded text-slate-600 hover:bg-slate-50"
             >
-              <Edit2 size={11} /> 編輯
+              <Edit2 size={11} /> {t('tpl.card.edit')}
             </button>
           )}
 
@@ -127,7 +128,7 @@ export default function TemplateCard({ template, onRefresh, onEdit }: Props) {
               onClick={() => setShowShare(true)}
               className="flex items-center gap-1 text-xs px-2 py-1 border rounded text-slate-600 hover:bg-slate-50"
             >
-              <Share2 size={11} /> 分享
+              <Share2 size={11} /> {t('tpl.card.share')}
             </button>
           )}
 
@@ -135,7 +136,7 @@ export default function TemplateCard({ template, onRefresh, onEdit }: Props) {
             onClick={handleFork}
             className="flex items-center gap-1 text-xs px-2 py-1 border rounded text-slate-600 hover:bg-slate-50"
           >
-            <Copy size={11} /> 複製
+            <Copy size={11} /> {t('tpl.card.fork')}
           </button>
 
           {isOwner && (
@@ -143,7 +144,7 @@ export default function TemplateCard({ template, onRefresh, onEdit }: Props) {
               onClick={handleDelete}
               className="flex items-center gap-1 text-xs px-2 py-1 border rounded text-red-500 hover:bg-red-50 ml-auto"
             >
-              <Trash2 size={11} /> 刪除
+              <Trash2 size={11} /> {t('tpl.card.delete')}
             </button>
           )}
         </div>

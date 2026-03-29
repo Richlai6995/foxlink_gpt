@@ -353,7 +353,7 @@ export default function Sidebar({
               )}
               <button onClick={() => { setShowMenu(false); navigate('/templates') }}
                 className="w-full flex items-center gap-2 text-indigo-400 hover:bg-slate-700 px-3 py-2.5 text-xs transition font-medium">
-                <FileText size={13} /> 文件範本
+                <FileText size={13} /> {t('tpl.sidebar')}
               </button>
               <button onClick={() => { setShowMenu(false); navigate('/help') }}
                 className="w-full flex items-center gap-2 text-emerald-400 hover:bg-slate-700 px-3 py-2.5 text-xs transition font-medium">

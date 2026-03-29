@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import { TemplateVariable } from '../../types'
 
 interface Props {
@@ -7,6 +8,7 @@ interface Props {
 }
 
 export default function LoopDataTable({ variable, value, onChange }: Props) {
+  const { t } = useTranslation()
   const children = variable.children || []
   const addRow = () => onChange([...value, {}])
   const removeRow = (i: number) => onChange(value.filter((_, idx) => idx !== i))
@@ -47,7 +49,7 @@ export default function LoopDataTable({ variable, value, onChange }: Props) {
           ))}
         </tbody>
       </table>
-      <button onClick={addRow} className="text-xs text-blue-500 hover:text-blue-700">+ 新增一行</button>
+      <button onClick={addRow} className="text-xs text-blue-500 hover:text-blue-700">{t('tpl.loop.addRow')}</button>
     </div>
   )
 }

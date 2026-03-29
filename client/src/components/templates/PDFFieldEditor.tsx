@@ -6,6 +6,7 @@
  * – X/Y/W/H editable numeric inputs
  */
 import { useEffect, useRef, useState, useCallback } from 'react'
+import { useTranslation } from 'react-i18next'
 import { TemplateVariable, TemplateOverflow } from '../../types'
 import ColorPicker from './ColorPicker'
 
@@ -40,12 +41,7 @@ interface Props {
   readonly?: boolean
 }
 
-const OVERFLOW_OPTIONS: { value: TemplateOverflow; label: string }[] = [
-  { value: 'wrap',      label: '折行' },
-  { value: 'truncate',  label: '截斷' },
-  { value: 'shrink',    label: '縮小字型' },
-  { value: 'summarize', label: 'AI 摘要' },
-]
+// OVERFLOW_OPTIONS moved inside component to access t()
 
 const FIELD_COLORS = [
   '#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6',
@@ -103,6 +99,7 @@ function resizeHandlePositions(rx: number, ry: number, rw: number, rh: number): 
 
 // ── component ─────────────────────────────────────────────────────────────────
 export default function PDFFieldEditor({ templateId, variables, onChange, readonly }: Props) {
+  const { t } = useTranslation()
   const canvasRef     = useRef<HTMLCanvasElement>(null)
   const overlayRef    = useRef<SVGSVGElement>(null)
   const canvasAreaRef = useRef<HTMLDivElement>(null)
@@ -146,7 +143,7 @@ export default function PDFFieldEditor({ templateId, variables, onChange, readon
         if (cancelled) return
         setPdfDoc(doc); setPageCount(doc.numPages); setPageNum(1); setLoading(false)
       } catch (e: unknown) {
-        if (!cancelled) { setError('PDF 載入失敗: ' + (e instanceof Error ? e.message : String(e))); setLoading(false) }
+        if (!cancelled) { setError(t('tpl.pdf.loadFailed') + (e instanceof Error ? e.message : String(e))); setLoading(false) }
       }
     })()
     return () => { cancelled = true }
@@ -315,17 +312,17 @@ export default function PDFFieldEditor({ templateId, variables, onChange, readon
               )}
             </select>
             <button onClick={() => setScale(s => Math.min(5, +(s + 0.25).toFixed(2)))} className="px-2 py-0.5 border rounded text-xs">+</button>
-            <button onClick={fitWidth} className="px-2 py-0.5 border rounded text-xs text-blue-600 hover:bg-blue-50" title="符合寬度">符合</button>
+            <button onClick={fitWidth} className="px-2 py-0.5 border rounded text-xs text-blue-600 hover:bg-blue-50" title={t('tpl.pdf.fitWidth')}>{t('tpl.pdf.fit')}</button>
           </div>
           {!readonly && (
             <div className="flex items-center gap-1 ml-2">
-              <span className="text-xs text-slate-500">點選變數後拖拉畫框:</span>
+              <span className="text-xs text-slate-500">{t('tpl.pdf.selectVarHint')}</span>
               <select
                 className={`text-xs border rounded px-1.5 py-0.5 ${assignKey ? 'border-blue-500 text-blue-700' : ''}`}
                 value={assignKey}
                 onChange={e => setAssignKey(e.target.value)}
               >
-                <option value="">— 選擇變數 —</option>
+                <option value="">{t('tpl.pdf.selectVar')}</option>
                 {flatVars.map((v, i) => (
                   <option key={v.key} value={v.key} style={{ color: colorForIdx(i) }}>
                     {v.pdf_cell ? '✓ ' : ''}{v.label || v.key}
@@ -338,7 +335,7 @@ export default function PDFFieldEditor({ templateId, variables, onChange, readon
 
         {/* Canvas area */}
         <div ref={canvasAreaRef} className="flex-1 overflow-auto border rounded bg-slate-100 relative" style={{ cursor: canvasCursor }}>
-          {loading && <div className="absolute inset-0 flex items-center justify-center text-xs text-slate-500 bg-white/80">載入中...</div>}
+          {loading && <div className="absolute inset-0 flex items-center justify-center text-xs text-slate-500 bg-white/80">{t('tpl.loading')}</div>}
           {error   && <div className="absolute inset-0 flex items-center justify-center text-xs text-red-500 bg-white/80 p-4 text-center">{error}</div>}
 
           <div className="relative inline-block">
@@ -419,10 +416,10 @@ export default function PDFFieldEditor({ templateId, variables, onChange, readon
       <div className="w-64 flex flex-col gap-2 shrink-0 overflow-y-auto">
         {/* Progress */}
         <div className="text-[11px] text-slate-500 bg-slate-50 border rounded p-2">
-          <div className="font-medium mb-1">欄位定位進度</div>
-          <div className="text-green-600">{assigned.length} 已定位</div>
+          <div className="font-medium mb-1">{t('tpl.pdf.fieldProgress')}</div>
+          <div className="text-green-600">{t('tpl.pdf.assignedCount', { count: assigned.length })}</div>
           {unassigned.length > 0 && (
-            <div className="text-orange-500">{unassigned.length} 未定位：{unassigned.map(v => v.label || v.key).join('、')}</div>
+            <div className="text-orange-500">{t('tpl.pdf.unassignedCount', { count: unassigned.length })}{t('tpl.pdf.unassigned')}{unassigned.map(v => v.label || v.key).join('、')}</div>
           )}
         </div>
 
@@ -467,39 +464,39 @@ export default function PDFFieldEditor({ templateId, variables, onChange, readon
                     </div>
                   ))}
                 </div>
-                <div className="text-[10px] text-slate-400">頁: {selectedVar.pdf_cell.page + 1}</div>
+                <div className="text-[10px] text-slate-400">{t('tpl.pdf.page', { n: selectedVar.pdf_cell.page + 1 })}</div>
 
                 {/* Anchor toggle */}
                 {!readonly && (
                   <div className="pt-1 border-t">
                     <div className="flex items-center justify-between">
-                      <span className="text-[10px] text-slate-500">溢出行為</span>
+                      <span className="text-[10px] text-slate-500">{t('tpl.pdf.overflowBehavior')}</span>
                       <button
                         type="button"
                         onClick={() => patchSelectedVar({ pdf_anchor: selectedVar.pdf_anchor === false ? true : false })}
                         className={`text-[10px] px-2 py-0.5 rounded border transition ${selectedVar.pdf_anchor === false ? 'bg-orange-500 text-white border-orange-500' : 'bg-slate-100 text-slate-600 border-slate-300'}`}
-                        title={selectedVar.pdf_anchor === false ? '目前：跟著前面往下移（空白延伸頁）' : '目前：固定在原頁（複製底版延伸）'}
+                        title={selectedVar.pdf_anchor === false ? t('tpl.pdf.anchorFloatHint') : t('tpl.pdf.anchorFixedHint')}
                       >
-                        {selectedVar.pdf_anchor === false ? '隨前文下移' : '固定此頁'}
+                        {selectedVar.pdf_anchor === false ? t('tpl.pdf.anchorFloat') : t('tpl.pdf.anchorFixed')}
                       </button>
                     </div>
                     <div className="text-[9px] text-slate-400 mt-0.5">
                       {selectedVar.pdf_anchor === false
-                        ? '前面欄位超框時，此欄位跟著移到空白延伸頁'
-                        : '超框內容延伸到下一頁，此頁位置不變'}
+                        ? t('tpl.pdf.anchorFloatHint')
+                        : t('tpl.pdf.anchorFixedHint')}
                     </div>
                   </div>
                 )}
               </>
             ) : (
-              <div className="text-orange-500 text-[10px]">尚未定位，請在左側拖拉畫框</div>
+              <div className="text-orange-500 text-[10px]">{t('tpl.pdf.notPositioned')}</div>
             )}
 
             {/* Style overrides */}
             <div className="space-y-1.5 pt-1 border-t">
-              <div className="text-slate-500 font-medium">樣式</div>
+              <div className="text-slate-500 font-medium">{t('tpl.pdf.styleTitle')}</div>
               <div className="flex items-center gap-1">
-                <span className="w-12 text-slate-400">字型 pt</span>
+                <span className="w-12 text-slate-400">{t('tpl.pdf.fontPt')}</span>
                 <input type="number" min={6} max={72} className="w-14 border rounded px-1 py-0.5 text-[11px]" disabled={readonly}
                   value={selectedVar.style?.override?.fontSize ?? selectedVar.style?.detected?.fontSize ?? ''}
                   onChange={e => patchSelectedVar({ style: { ...selectedVar.style, override: { ...selectedVar.style?.override, fontSize: e.target.value ? +e.target.value : undefined } } })}
@@ -510,17 +507,17 @@ export default function PDFFieldEditor({ templateId, variables, onChange, readon
                   <input type="checkbox" disabled={readonly}
                     checked={!!(selectedVar.style?.override?.bold ?? selectedVar.style?.detected?.bold)}
                     onChange={e => patchSelectedVar({ style: { ...selectedVar.style, override: { ...selectedVar.style?.override, bold: e.target.checked || undefined } } })}
-                  /> 粗
+                  /> {t('tpl.pdf.boldShort')}
                 </label>
                 <label className="flex items-center gap-1 text-slate-400">
                   <input type="checkbox" disabled={readonly}
                     checked={!!(selectedVar.style?.override?.italic ?? selectedVar.style?.detected?.italic)}
                     onChange={e => patchSelectedVar({ style: { ...selectedVar.style, override: { ...selectedVar.style?.override, italic: e.target.checked || undefined } } })}
-                  /> 斜
+                  /> {t('tpl.pdf.italicShort')}
                 </label>
               </div>
               <div className="flex items-center gap-1">
-                <span className="w-12 text-slate-400">顏色</span>
+                <span className="w-12 text-slate-400">{t('tpl.pdf.color')}</span>
                 <ColorPicker
                   disabled={readonly}
                   value={selectedVar.style?.override?.color ?? selectedVar.style?.detected?.color ?? '#000000'}
@@ -528,12 +525,17 @@ export default function PDFFieldEditor({ templateId, variables, onChange, readon
                 />
               </div>
               <div>
-                <span className="text-slate-400">溢位</span>
+                <span className="text-slate-400">{t('tpl.pdf.overflow')}</span>
                 <select className="mt-0.5 w-full border rounded px-1 py-0.5 text-[11px]" disabled={readonly}
                   value={selectedVar.style?.override?.overflow ?? selectedVar.style?.detected?.overflow ?? 'wrap'}
                   onChange={e => patchSelectedVar({ style: { ...selectedVar.style, override: { ...selectedVar.style?.override, overflow: e.target.value as TemplateOverflow } } })}
                 >
-                  {OVERFLOW_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                  {[
+                    { value: 'wrap', label: t('tpl.pdf.overflowWrap') },
+                    { value: 'truncate', label: t('tpl.pdf.overflowTruncate') },
+                    { value: 'shrink', label: t('tpl.pdf.overflowShrink') },
+                    { value: 'summarize', label: t('tpl.pdf.overflowSummarize') },
+                  ].map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
                 </select>
               </div>
             </div>

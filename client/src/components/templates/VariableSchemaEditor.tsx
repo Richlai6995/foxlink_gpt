@@ -1,21 +1,14 @@
 import { useState } from 'react'
 import { Plus, Trash2, ChevronDown, ChevronRight } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import { TemplateVariable, TemplateVariableType, TemplateContentMode, TemplateLoopMode } from '../../types'
 
 interface Props {
   variables: TemplateVariable[]
   onChange: (vars: TemplateVariable[]) => void
   readonly?: boolean
-  format?: string   // e.g. 'docx' — enables syntax hint
+  format?: string
 }
-
-const VAR_TYPES: { value: TemplateVariableType; label: string }[] = [
-  { value: 'text',   label: '文字' },
-  { value: 'number', label: '數字' },
-  { value: 'date',   label: '日期' },
-  { value: 'select', label: '選項' },
-  { value: 'loop',   label: '循環（表格行）' },
-]
 
 function VarRow({
   v, index, onUpdate, onDelete, level = 0, readonly,
@@ -27,7 +20,16 @@ function VarRow({
   level?: number
   readonly?: boolean
 }) {
+  const { t } = useTranslation()
   const [expanded, setExpanded] = useState(true)
+
+  const VAR_TYPES: { value: TemplateVariableType; label: string }[] = [
+    { value: 'text',   label: t('tpl.vars.text') },
+    { value: 'number', label: t('tpl.vars.number') },
+    { value: 'date',   label: t('tpl.vars.date') },
+    { value: 'select', label: t('tpl.vars.select') },
+    { value: 'loop',   label: t('tpl.vars.loop') },
+  ]
 
   const upd = (patch: Partial<TemplateVariable>) => onUpdate({ ...v, ...patch })
 
@@ -49,7 +51,7 @@ function VarRow({
             />
             <input
               className="text-xs border rounded px-1.5 py-1 w-28"
-              placeholder="顯示名稱"
+              placeholder={t('tpl.vars.displayName')}
               value={v.label}
               onChange={e => upd({ label: e.target.value })}
             />
@@ -58,31 +60,30 @@ function VarRow({
               value={v.type}
               onChange={e => upd({ type: e.target.value as TemplateVariableType })}
             >
-              {VAR_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+              {VAR_TYPES.map(vt => <option key={vt.value} value={vt.value}>{vt.label}</option>)}
             </select>
             {v.type === 'loop' && (
               <select
                 className="text-xs border rounded px-1.5 py-1 bg-blue-50"
-                title="迴圈模式：表格列插入 or 格式化文字填入"
+                title={t('tpl.vars.loopModeTitle')}
                 value={v.loop_mode ?? 'table_rows'}
                 onChange={e => upd({ loop_mode: e.target.value as TemplateLoopMode })}
               >
-                <option value="table_rows">表格列</option>
-                <option value="text_list">文字清單</option>
+                <option value="table_rows">{t('tpl.vars.tableRows')}</option>
+                <option value="text_list">{t('tpl.vars.textList')}</option>
               </select>
             )}
             <label className="flex items-center gap-1 text-xs text-slate-500">
               <input type="checkbox" checked={v.required} onChange={e => upd({ required: e.target.checked })} />
-              必填
+              {t('tpl.vars.required')}
             </label>
-            {/* Content mode toggle — only for non-loop vars */}
             {v.type !== 'loop' && (
-              <div className="flex rounded border text-xs overflow-hidden" title="內容模式">
+              <div className="flex rounded border text-xs overflow-hidden" title={t('tpl.vars.contentMode')}>
                 {(['variable', 'static', 'empty'] as TemplateContentMode[]).map(m => (
                   <button
                     key={m}
                     onClick={() => upd({ content_mode: m })}
-                    title={{ variable: '變數：使用者填入', static: '靜態：固定文字', empty: '清空：保留框格' }[m]}
+                    title={{ variable: t('tpl.vars.modeVariable'), static: t('tpl.vars.modeStatic'), empty: t('tpl.vars.modeEmpty') }[m]}
                     className={`px-1.5 py-0.5 transition ${(v.content_mode ?? 'variable') === m ? 'bg-blue-600 text-white' : 'bg-white text-slate-500 hover:bg-slate-100'}`}
                   >
                     {m === 'variable' ? 'V' : m === 'static' ? 'T' : '∅'}
@@ -90,20 +91,19 @@ function VarRow({
                 ))}
               </div>
             )}
-            {/* AI rewrite toggle — only for variable mode */}
             {v.type !== 'loop' && (v.content_mode ?? 'variable') === 'variable' && (
               <button
                 onClick={() => upd({ allow_ai_rewrite: !v.allow_ai_rewrite })}
-                title={v.allow_ai_rewrite ? '目前：允許AI修改此欄位內容 (點擊關閉)' : '目前：保留原文，AI不可改寫 (點擊開啟AI改寫)'}
+                title={v.allow_ai_rewrite ? t('tpl.vars.aiRewriteOn') : t('tpl.vars.aiRewriteOff')}
                 className={`px-1.5 py-0.5 text-xs border rounded transition shrink-0 ${v.allow_ai_rewrite ? 'bg-orange-500 text-white border-orange-500' : 'bg-slate-100 text-slate-500 border-slate-300'}`}
               >
-                AI改
+                {t('tpl.vars.aiRewrite')}
               </button>
             )}
             {v.content_mode !== 'empty' && (
               <input
                 className="text-xs border rounded px-1.5 py-1 flex-1 min-w-0"
-                placeholder={v.content_mode === 'static' ? '固定文字內容' : '預設值'}
+                placeholder={v.content_mode === 'static' ? t('tpl.vars.staticPlaceholder') : t('tpl.vars.defaultPlaceholder')}
                 value={v.default_value || ''}
                 onChange={e => upd({ default_value: e.target.value })}
               />
@@ -116,11 +116,11 @@ function VarRow({
           <>
             <span className="text-xs font-mono text-blue-600 w-36">{`{{${v.key}}}`}</span>
             <span className="text-xs text-slate-700 w-28">{v.label}</span>
-            <span className="text-xs text-slate-500">{VAR_TYPES.find(t => t.value === v.type)?.label}</span>
-            {v.required && <span className="text-xs text-red-500">必填</span>}
-            {v.content_mode === 'static' && <span className="text-xs bg-amber-100 text-amber-700 px-1 rounded">固定</span>}
-            {v.content_mode === 'empty' && <span className="text-xs bg-slate-100 text-slate-500 px-1 rounded">清空</span>}
-            {v.allow_ai_rewrite && <span className="text-xs bg-orange-100 text-orange-600 px-1 rounded">AI改</span>}
+            <span className="text-xs text-slate-500">{VAR_TYPES.find(vt => vt.value === v.type)?.label}</span>
+            {v.required && <span className="text-xs text-red-500">{t('tpl.vars.required')}</span>}
+            {v.content_mode === 'static' && <span className="text-xs bg-amber-100 text-amber-700 px-1 rounded">{t('tpl.vars.staticBadge')}</span>}
+            {v.content_mode === 'empty' && <span className="text-xs bg-slate-100 text-slate-500 px-1 rounded">{t('tpl.vars.emptyBadge')}</span>}
+            {v.allow_ai_rewrite && <span className="text-xs bg-orange-100 text-orange-600 px-1 rounded">{t('tpl.vars.aiRewrite')}</span>}
           </>
         )}
       </div>
@@ -147,10 +147,10 @@ function VarRow({
           ))}
           {!readonly && (
             <button
-              onClick={() => upd({ children: [...(v.children || []), { key: `child_${Date.now()}`, label: '子欄位', type: 'text', required: false }] })}
+              onClick={() => upd({ children: [...(v.children || []), { key: `child_${Date.now()}`, label: t('tpl.vars.subField'), type: 'text', required: false }] })}
               className="text-xs text-blue-500 hover:text-blue-700 flex items-center gap-1 mt-1"
             >
-              <Plus size={12} /> 新增子欄位
+              <Plus size={12} /> {t('tpl.vars.addSubField')}
             </button>
           )}
         </div>
@@ -160,32 +160,34 @@ function VarRow({
 }
 
 export default function VariableSchemaEditor({ variables, onChange, readonly, format }: Props) {
+  const { t } = useTranslation()
+
   const addVar = () => onChange([
     ...variables,
-    { key: `var_${Date.now()}`, label: '新變數', type: 'text', required: false },
+    { key: `var_${Date.now()}`, label: t('tpl.vars.newVariable'), type: 'text', required: false },
   ])
 
   return (
     <div>
       {format === 'docx' && (
         <div className="mb-3 bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 text-xs text-blue-800 space-y-1.5">
-          <div className="font-medium">💡 DOCX 新版模板語法（推薦）</div>
-          <div>在 Word 範本裡直接打以下標籤，生成時自動替換，不需 original_text 偵測：</div>
+          <div className="font-medium">{t('tpl.vars.docxSyntaxTitle')}</div>
+          <div>{t('tpl.vars.docxSyntaxDesc')}</div>
           <div className="font-mono bg-white border border-blue-100 rounded px-3 py-2 space-y-1 text-[11px]">
             {variables.filter(v => v.type !== 'loop').map(v => (
               <div key={v.key}><span className="text-blue-600">{`{${v.key}}`}</span> <span className="text-slate-400">← {v.label}</span></div>
             ))}
             {variables.filter(v => v.type === 'loop').map(v => (
               <div key={v.key}>
-                <div><span className="text-green-600">{`{#${v.key}}`}</span> <span className="text-slate-400">← {v.label} 迴圈開始</span></div>
+                <div><span className="text-green-600">{`{#${v.key}}`}</span> <span className="text-slate-400">← {v.label} {t('tpl.vars.loopStart')}</span></div>
                 {(v.children || []).map(c => (
                   <div key={c.key} className="pl-3"><span className="text-blue-600">{`{${c.key}}`}</span> <span className="text-slate-400">← {c.label}</span></div>
                 ))}
-                <div><span className="text-green-600">{`{/${v.key}}`}</span> <span className="text-slate-400">← 迴圈結束</span></div>
+                <div><span className="text-green-600">{`{/${v.key}}`}</span> <span className="text-slate-400">← {t('tpl.vars.loopEnd')}</span></div>
               </div>
             ))}
           </div>
-          <div className="text-slate-500">表格列迴圈：把 <code>{'{#key}'}</code> 放在列的第一格、<code>{'{/key}'}</code> 放在最後一格，整列自動重複。</div>
+          <div className="text-slate-500">{t('tpl.vars.docxTableLoopHint')}</div>
         </div>
       )}
       {variables.map((v, i) => (
@@ -207,7 +209,7 @@ export default function VariableSchemaEditor({ variables, onChange, readonly, fo
           onClick={addVar}
           className="mt-2 flex items-center gap-1 text-xs text-blue-500 hover:text-blue-700"
         >
-          <Plus size={13} /> 新增變數
+          <Plus size={13} /> {t('tpl.vars.addVariable')}
         </button>
       )}
     </div>

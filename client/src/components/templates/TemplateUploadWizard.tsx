@@ -1,5 +1,6 @@
 import { useState, useRef } from 'react'
 import { Upload, X, CheckCircle, AlertCircle } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import api from '../../lib/api'
 import { PptxSlideConfig, TemplateSchema, TemplateVariable } from '../../types'
 import VariableSchemaEditor from './VariableSchemaEditor'
@@ -13,6 +14,7 @@ interface Props {
 type Step = 1 | 2 | 3
 
 export default function TemplateUploadWizard({ onCreated, onClose }: Props) {
+  const { t } = useTranslation()
   const [step, setStep] = useState<Step>(1)
   const [file, setFile] = useState<File | null>(null)
   const [uploading, setUploading] = useState(false)
@@ -35,7 +37,7 @@ export default function TemplateUploadWizard({ onCreated, onClose }: Props) {
   const handleFile = (f: File) => {
     const ext = f.name.split('.').pop()?.toLowerCase() || ''
     if (!['docx', 'xlsx', 'pdf', 'pptx'].includes(ext)) {
-      setError('僅支援 DOCX、XLSX、PPTX、PDF 格式')
+      setError(t('tpl.upload.formatError'))
       return
     }
     setFile(f)
@@ -46,7 +48,7 @@ export default function TemplateUploadWizard({ onCreated, onClose }: Props) {
   const handleUpload = async () => {
     if (!file) return
     setUploading(true)
-    setUploadMsg('上傳中...')
+    setUploadMsg(t('tpl.upload.uploading'))
     setError('')
 
     const fd = new FormData()
@@ -95,7 +97,7 @@ export default function TemplateUploadWizard({ onCreated, onClose }: Props) {
   }
 
   const handleCreate = async () => {
-    if (!name.trim()) { setError('請輸入範本名稱'); return }
+    if (!name.trim()) { setError(t('tpl.upload.nameRequired')); return }
     setSaving(true)
     setError('')
     try {
@@ -119,12 +121,11 @@ export default function TemplateUploadWizard({ onCreated, onClose }: Props) {
   }
 
   const addTag = () => {
-    const t = tagInput.trim()
-    if (t && !tags.includes(t)) setTags([...tags, t])
+    const v = tagInput.trim()
+    if (v && !tags.includes(v)) setTags([...tags, v])
     setTagInput('')
   }
 
-  // PPTX slide config helpers
   const slideConfig: PptxSlideConfig[] = schema?.pptx_settings?.slide_config || []
   const loopVars: TemplateVariable[] = schema?.variables.filter(v => v.type === 'loop') || []
   const handleSlideConfigChange = (cfg: PptxSlideConfig[]) => {
@@ -138,12 +139,12 @@ export default function TemplateUploadWizard({ onCreated, onClose }: Props) {
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-3 border-b">
           <div className="flex items-center gap-4">
-            <span className="font-medium text-sm">新增文件範本</span>
+            <span className="font-medium text-sm">{t('tpl.upload.title')}</span>
             <div className="flex items-center gap-2 text-xs text-slate-400">
               {[1, 2, 3].map(s => (
                 <span key={s} className={`flex items-center gap-1 ${step === s ? 'text-blue-600 font-medium' : step > s ? 'text-green-600' : ''}`}>
                   <span className={`w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold ${step === s ? 'bg-blue-600 text-white' : step > s ? 'bg-green-500 text-white' : 'bg-slate-200'}`}>{s}</span>
-                  {s === 1 ? '上傳' : s === 2 ? '確認變數' : '儲存設定'}
+                  {s === 1 ? t('tpl.upload.step1') : s === 2 ? t('tpl.upload.step2') : t('tpl.upload.step3')}
                 </span>
               ))}
             </div>
@@ -168,8 +169,8 @@ export default function TemplateUploadWizard({ onCreated, onClose }: Props) {
                 onDrop={e => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) handleFile(f) }}
               >
                 <Upload size={32} className="text-slate-400" />
-                <div className="text-sm text-slate-600">拖放檔案至此，或點擊選擇</div>
-                <div className="text-xs text-slate-400">支援 DOCX / XLSX / PPTX / PDF，最大 50MB</div>
+                <div className="text-sm text-slate-600">{t('tpl.upload.dropHint')}</div>
+                <div className="text-xs text-slate-400">{t('tpl.upload.formatHint')}</div>
               </div>
               <input ref={inputRef} type="file" className="hidden" accept=".docx,.xlsx,.pdf,.pptx" onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f) }} />
 
@@ -193,21 +194,20 @@ export default function TemplateUploadWizard({ onCreated, onClose }: Props) {
               <div className="flex items-center justify-between mb-3">
                 <div>
                   <div className="text-sm font-medium flex items-center gap-2">
-                    AI 識別到 {schema.variables.length} 個變數
+                    {t('tpl.upload.aiDetected', { count: schema.variables.length })}
                     {(schema as { is_ocr?: boolean }).is_ocr && (
-                      <span className="text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full">OCR 自動定位</span>
+                      <span className="text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full">{t('tpl.upload.ocrAutoLocate')}</span>
                     )}
                   </div>
                   {schema.confidence !== undefined && (
                     <div className="text-xs text-slate-400">信心度 {Math.round(schema.confidence * 100)}%{schema.notes ? ` · ${schema.notes}` : ''}</div>
                   )}
                   {(schema as { is_ocr?: boolean }).is_ocr && (
-                    <div className="text-xs text-purple-600 mt-0.5">已啟用固定格式模式，請至「版面編輯器」確認欄位座標</div>
+                    <div className="text-xs text-purple-600 mt-0.5">{t('tpl.upload.ocrFixedHint')}</div>
                   )}
                 </div>
               </div>
 
-              {/* PPTX: slide configurator */}
               {format === 'pptx' && pptxSlideCount > 0 && (
                 <PptxSlideConfigurator
                   templateId={createdTemplateId}
@@ -229,51 +229,51 @@ export default function TemplateUploadWizard({ onCreated, onClose }: Props) {
           {step === 3 && (
             <div className="space-y-4 max-w-md">
               <div>
-                <label className="text-xs text-slate-500 block mb-1">範本名稱 *</label>
+                <label className="text-xs text-slate-500 block mb-1">{t('tpl.basic.name')} *</label>
                 <input
                   className="w-full border rounded px-3 py-2 text-sm"
                   value={name}
                   onChange={e => setName(e.target.value)}
-                  placeholder="輸入範本名稱"
+                  placeholder={t('tpl.upload.namePlaceholder')}
                 />
               </div>
               <div>
-                <label className="text-xs text-slate-500 block mb-1">描述</label>
+                <label className="text-xs text-slate-500 block mb-1">{t('tpl.basic.description')}</label>
                 <textarea
                   className="w-full border rounded px-3 py-2 text-sm"
                   rows={2}
                   value={description}
                   onChange={e => setDescription(e.target.value)}
-                  placeholder="選填說明"
+                  placeholder={t('tpl.upload.descPlaceholder')}
                 />
               </div>
               <div>
-                <label className="text-xs text-slate-500 block mb-1">標籤</label>
+                <label className="text-xs text-slate-500 block mb-1">{t('tpl.basic.tags')}</label>
                 <div className="flex flex-wrap gap-1 mb-1">
-                  {tags.map(t => (
-                    <span key={t} className="flex items-center gap-1 bg-blue-100 text-blue-700 text-xs px-2 py-0.5 rounded-full">
-                      {t}
-                      <button onClick={() => setTags(tags.filter(x => x !== t))}><X size={10} /></button>
+                  {tags.map(tg => (
+                    <span key={tg} className="flex items-center gap-1 bg-blue-100 text-blue-700 text-xs px-2 py-0.5 rounded-full">
+                      {tg}
+                      <button onClick={() => setTags(tags.filter(x => x !== tg))}><X size={10} /></button>
                     </span>
                   ))}
                 </div>
                 <div className="flex gap-2">
                   <input
                     className="flex-1 border rounded px-2 py-1 text-xs"
-                    placeholder="輸入標籤後按 Enter"
+                    placeholder={t('tpl.basic.tagPlaceholder')}
                     value={tagInput}
                     onChange={e => setTagInput(e.target.value)}
                     onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addTag() } }}
                   />
-                  <button onClick={addTag} className="text-xs px-2 py-1 border rounded text-slate-600">新增</button>
+                  <button onClick={addTag} className="text-xs px-2 py-1 border rounded text-slate-600">{t('tpl.basic.addTag')}</button>
                 </div>
               </div>
               <div className="flex items-center gap-3">
-                <label className="text-xs text-slate-500">公開範本</label>
+                <label className="text-xs text-slate-500">{t('tpl.upload.publicTemplate')}</label>
                 <button
                   onClick={() => {
                     if (!isPublic) {
-                      if (!window.confirm('確定要公開此範本嗎？\n\n公開後，所有使用者都可以：\n• 瀏覽此範本的內容與變數設定\n• 使用此範本生成文件\n• 複製此範本為自己的副本')) return
+                      if (!window.confirm(t('tpl.upload.publicConfirm'))) return
                     }
                     setIsPublic(!isPublic)
                   }}
@@ -281,23 +281,22 @@ export default function TemplateUploadWizard({ onCreated, onClose }: Props) {
                 >
                   <div className={`w-4 h-4 rounded-full bg-white absolute top-0.5 transition ${isPublic ? 'left-5' : 'left-0.5'}`} />
                 </button>
-                {isPublic && <span className="text-xs text-blue-600">所有使用者可瀏覽</span>}
+                {isPublic && <span className="text-xs text-blue-600">{t('tpl.upload.publicVisible')}</span>}
               </div>
               <div className="flex items-center gap-3">
-                <label className="text-xs text-slate-500">固定格式模式</label>
+                <label className="text-xs text-slate-500">{t('tpl.fixedFormatMode')}</label>
                 <button
                   onClick={() => setIsFixedFormat(!isFixedFormat)}
                   className={`w-10 h-5 rounded-full transition relative ${isFixedFormat ? 'bg-blue-600' : 'bg-slate-300'}`}
                 >
                   <div className={`w-4 h-4 rounded-full bg-white absolute top-0.5 transition ${isFixedFormat ? 'left-5' : 'left-0.5'}`} />
                 </button>
-                {isFixedFormat && <span className="text-xs text-blue-600">啟用固定格式（儲存格大小/字型/溢位）</span>}
+                {isFixedFormat && <span className="text-xs text-blue-600">{t('tpl.upload.fixedFormatEnabled')}</span>}
               </div>
 
-              {/* PPTX: reminder to upload thumbnails after creation */}
               {format === 'pptx' && (
                 <div className="text-xs text-slate-400 bg-slate-50 border rounded p-2">
-                  建立後，可在範本編輯頁面為每張投影片上傳預覽縮圖。
+                  {t('tpl.upload.pptxThumbnailHint')}
                 </div>
               )}
             </div>
@@ -310,7 +309,7 @@ export default function TemplateUploadWizard({ onCreated, onClose }: Props) {
             onClick={() => step > 1 ? setStep((step - 1) as Step) : onClose()}
             className="text-sm text-slate-500 hover:text-slate-700"
           >
-            {step === 1 ? '取消' : '← 上一步'}
+            {step === 1 ? t('tpl.cancel') : t('tpl.upload.prevStep')}
           </button>
           <div className="flex gap-2">
             {step === 1 && (
@@ -319,7 +318,7 @@ export default function TemplateUploadWizard({ onCreated, onClose }: Props) {
                 disabled={!file || uploading}
                 className="px-4 py-1.5 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
               >
-                {uploading ? '分析中...' : '下一步 →'}
+                {uploading ? t('tpl.upload.analyzing') : t('tpl.upload.nextStep')}
               </button>
             )}
             {step === 2 && (
@@ -327,7 +326,7 @@ export default function TemplateUploadWizard({ onCreated, onClose }: Props) {
                 onClick={() => setStep(3)}
                 className="px-4 py-1.5 text-sm bg-blue-600 text-white rounded hover:bg-blue-700"
               >
-                下一步 →
+                {t('tpl.upload.nextStep')}
               </button>
             )}
             {step === 3 && (
@@ -336,7 +335,7 @@ export default function TemplateUploadWizard({ onCreated, onClose }: Props) {
                 disabled={saving}
                 className="px-4 py-1.5 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
               >
-                {saving ? '建立中...' : '建立範本'}
+                {saving ? t('tpl.upload.creating') : t('tpl.upload.createTemplate')}
               </button>
             )}
           </div>

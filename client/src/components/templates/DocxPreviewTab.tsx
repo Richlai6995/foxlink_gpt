@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useMemo } from 'react'
 import { renderAsync } from 'docx-preview'
 import { Loader2, AlertCircle, Play, RefreshCw } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import api from '../../lib/api'
 import { DocTemplate, TemplateVariable } from '../../types'
 import LoopDataTable from './LoopDataTable'
@@ -10,6 +11,7 @@ interface Props {
 }
 
 export default function DocxPreviewTab({ template }: Props) {
+  const { t } = useTranslation()
   const schema = useMemo(() => {
     try { return JSON.parse(template.schema_json || '{}') } catch { return { variables: [] } }
   }, [template.schema_json])
@@ -32,12 +34,10 @@ export default function DocxPreviewTab({ template }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const setVal = (key: string, v: unknown) => setValues(prev => ({ ...prev, [key]: v }))
 
-  // Initial load: show blank template
   useEffect(() => {
     setFetchUrl(`/api/doc-templates/${template.id}/download`)
   }, [template.id])
 
-  // Render docx whenever fetchUrl changes
   useEffect(() => {
     if (!fetchUrl || !containerRef.current) return
     const ctrl = new AbortController()
@@ -70,12 +70,12 @@ export default function DocxPreviewTab({ template }: Props) {
       .then(() => setLoading(false))
       .catch(e => {
         if (e.name === 'AbortError') return
-        setError(e.message || '渲染失敗')
+        setError(e.message || t('tpl.docxPreview.renderFailed'))
         setLoading(false)
       })
 
     return () => ctrl.abort()
-  }, [fetchUrl])
+  }, [fetchUrl, t])
 
   const generatePreview = async () => {
     setGenerating(true)
@@ -85,7 +85,7 @@ export default function DocxPreviewTab({ template }: Props) {
       setFetchUrl(data.download_url)
       setMode('generated')
     } catch (e: unknown) {
-      setError((e as { message?: string }).message || '生成失敗')
+      setError((e as { message?: string }).message || t('tpl.docxPreview.renderFailed'))
     } finally {
       setGenerating(false)
     }
@@ -100,12 +100,11 @@ export default function DocxPreviewTab({ template }: Props) {
 
   return (
     <div className="flex gap-4 h-full min-h-0">
-      {/* Left: form panel */}
       <div className="w-60 flex-shrink-0 flex flex-col gap-3 overflow-auto">
-        <div className="text-xs font-medium text-slate-600">試填資料</div>
+        <div className="text-xs font-medium text-slate-600">{t('tpl.docxPreview.trialData')}</div>
 
         {formVars.length === 0 && (
-          <div className="text-xs text-slate-400">無需填入的變數</div>
+          <div className="text-xs text-slate-400">{t('tpl.docxPreview.noVarsNeeded')}</div>
         )}
 
         {formVars.map(v => (
@@ -126,7 +125,7 @@ export default function DocxPreviewTab({ template }: Props) {
                 value={(values[v.key] as string) || ''}
                 onChange={e => setVal(v.key, e.target.value)}
               >
-                <option value="">請選擇</option>
+                <option value="">{t('tpl.docxPreview.selectPlaceholder')}</option>
                 {(v.options || []).map(o => <option key={o} value={o}>{o}</option>)}
               </select>
             ) : (
@@ -148,12 +147,12 @@ export default function DocxPreviewTab({ template }: Props) {
             className="flex items-center gap-1.5 flex-1 justify-center text-xs px-3 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
           >
             {generating ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />}
-            {generating ? '生成中...' : '生成預覽'}
+            {generating ? t('tpl.docxPreview.generating') : t('tpl.docxPreview.generatePreview')}
           </button>
           {mode === 'generated' && (
             <button
               onClick={showTemplate}
-              title="回到原始範本"
+              title={t('tpl.docxPreview.backToTemplate')}
               className="p-1.5 border rounded text-slate-500 hover:bg-slate-50"
             >
               <RefreshCw size={12} />
@@ -162,10 +161,9 @@ export default function DocxPreviewTab({ template }: Props) {
         </div>
       </div>
 
-      {/* Right: docx preview */}
       <div className="flex-1 flex flex-col min-w-0 min-h-0">
         <div className="flex items-center gap-2 mb-2 text-xs text-slate-400">
-          {mode === 'template' ? '📄 原始範本（含佔位符）' : '✅ 試填結果預覽'}
+          {mode === 'template' ? t('tpl.docxPreview.templateView') : t('tpl.docxPreview.generatedView')}
           {loading && <Loader2 size={12} className="animate-spin" />}
         </div>
 
