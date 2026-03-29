@@ -223,13 +223,13 @@ router.get('/my', async (req, res) => {
   try {
     if (req.user.role === 'admin') {
       const servers = await db.prepare(
-        `SELECT id, name, description, is_active, is_public, public_approved FROM mcp_servers WHERE is_active=1 ORDER BY created_at DESC`
+        `SELECT id, name, description, is_active, is_public, public_approved, name_zh, name_en, name_vi, desc_zh, desc_en, desc_vi FROM mcp_servers WHERE is_active=1 ORDER BY created_at DESC`
       ).all();
       return res.json(servers);
     }
     // 公開且已核准的項目（所有使用者可見）
     const publicServers = await db.prepare(
-      `SELECT id, name, DBMS_LOB.SUBSTR(description, 2000, 1) AS description, is_active, is_public, public_approved, 1 AS is_readonly
+      `SELECT id, name, DBMS_LOB.SUBSTR(description, 2000, 1) AS description, is_active, is_public, public_approved, name_zh, name_en, name_vi, desc_zh, desc_en, desc_vi, 1 AS is_readonly
        FROM mcp_servers WHERE is_active=1 AND is_public=1 AND public_approved=1`
     ).all();
     const publicIdSet = new Set(publicServers.map(s => s.id));
@@ -266,7 +266,7 @@ router.get('/my', async (req, res) => {
     if (privateIds.length) {
       const placeholders = privateIds.map(() => '?').join(',');
       privateServers = await db.prepare(
-        `SELECT id, name, DBMS_LOB.SUBSTR(description, 2000, 1) AS description, is_active, is_public, public_approved, 0 AS is_readonly
+        `SELECT id, name, DBMS_LOB.SUBSTR(description, 2000, 1) AS description, is_active, is_public, public_approved, name_zh, name_en, name_vi, desc_zh, desc_en, desc_vi, 0 AS is_readonly
          FROM mcp_servers WHERE id IN (${placeholders}) AND is_active=1 ORDER BY id DESC`
       ).all(...privateIds);
     }
