@@ -3177,7 +3177,7 @@ function UserManual() {
             headers={['指令', '功能']}
             rows={[
               ['?', '列出您目前授權使用的所有工具（技能、知識庫、MCP 工具）'],
-              ['/new 或 /重置', '開啟新對話，清除本次 Session 記憶'],
+              ['/new（或：新對話、重置、/clear、/restart...）', '開啟新對話，清除本次 Session 記憶，介面顯示時間戳分隔線'],
               ['/help', '顯示 Bot 使用說明'],
               ['其他任何文字', '直接送 AI 問答，自動判斷並調用合適工具'],
             ]}
@@ -3201,8 +3201,11 @@ function UserManual() {
           <Para>
             <strong>DM 對話</strong>：每日（台北時區）自動開啟新 Session，同一天的訊息共享上下文記憶。<br />
             <strong>群組 Room</strong>：單一永久 Session，所有成員的對話共享同一記憶。<br />
-            傳送 <code className="bg-slate-100 px-1 rounded text-xs">/new</code> 可隨時手動清除記憶開始新對話。
+            傳送 <code className="bg-slate-100 px-1 rounded text-xs">/new</code>（或「新對話」、「重置」、<code className="bg-slate-100 px-1 rounded text-xs">/clear</code>）可隨時手動清除記憶開始新對話。
           </Para>
+          <TipBox>
+            開啟新對話後，Webex 聊天室會顯示時間戳分隔線（━━━ 🔄 新對話開始 ━━━），舊訊息仍保留在歷史中，FOXLINK GPT 的「對話紀錄」也同步保存，可隨時回顧。
+          </TipBox>
         </SubSection>
 
         <SubSection title="注意事項">
@@ -3210,6 +3213,7 @@ function UserManual() {
             {[
               'Bot 功能須由管理員在您的帳號設定中開啟「允許使用 Webex Bot」',
               '您的 Webex 帳號 email 必須與系統中的帳號 email 一致（自動支援 @foxlink.com / @foxlink.com.tw 互轉）',
+              'AI 處理期間 Bot 會先回覆「⏳ 正在分析您的問題，請稍候...」，處理完成後自動刪除該訊息',
               'Webex 回應格式已針對行動裝置簡化，詳細報表建議使用 Web 介面',
               '回應超過 4000 字元時會自動截斷，並提示您至 Web 介面查看完整版',
             ].map((t, i) => (
@@ -6106,6 +6110,29 @@ tryLock("webex:msg:{id}", 60s)  ← Redis 分散鎖
           </Para>
         </SubSection>
 
+        <SubSection title="Typing Indicator 與檔案附件">
+          <Para>
+            <strong>Typing Indicator：</strong>AI 呼叫前 Bot 會先傳送「⏳ 正在分析您的問題，請稍候...」，AI 回應完成後自動刪除該訊息。
+            若 AI 呼叫失敗，Typing Indicator 也會在回覆錯誤訊息前刪除。
+          </Para>
+          <Para>
+            <strong>AI 生成檔案附件：</strong>AI 在 Webex 模式下生成 Excel/Word/PDF/PPT 時，系統直接以附件回傳，不會輸出「請至 Web 介面下載」等連結文字。
+            AI 說明文字為「📎 檔案將以附件傳送，請稍候」。
+          </Para>
+        </SubSection>
+
+        <SubSection title="暫存檔定期清理">
+          <Table
+            headers={['時機', '清理目標', '說明']}
+            rows={[
+              ['用戶執行 /new', 'uploads/webex_tmp/', '清除超過 30 分鐘的殘留暫存檔'],
+              ['Server 啟動 + 每小時', 'uploads/webex_tmp/', '清除超過 24 小時的附件暫存檔'],
+              ['Server 啟動 + 每小時', 'uploads/generated/', '清除超過 24 小時的 AI 生成檔案暫存'],
+            ]}
+          />
+          <Para>Log 格式：<code className="bg-slate-100 px-1 rounded text-xs">[TmpCleanup] uploads/generated/: removed N stale files</code></Para>
+        </SubSection>
+
         <SubSection title="錯誤排查">
           <Table
             headers={['現象', '原因', '處理方式']}
@@ -6116,6 +6143,7 @@ tryLock("webex:msg:{id}", 60s)  ← Redis 分散鎖
               ['「帳號已停用」訊息', 'users.status != active', '在使用者管理中啟用帳號'],
               ['「使用金額已達上限」訊息', '用戶超過 daily/weekly/monthly 預算', '調整使用者或角色的預算設定'],
               ['首則訊息延遲較長', '正常現象，最長等待一個 Polling 週期', 'WEBEX_POLL_INTERVAL_MS 可調小（預設 8000ms）'],
+              ['AI 回傳下載連結而非附件', 'WEBEX_SYSTEM_SUFFIX 未正確注入', '確認 webex.js 中 WEBEX_SYSTEM_SUFFIX 包含檔案生成規則（第 6-9 條）'],
             ]}
           />
         </SubSection>
