@@ -27,6 +27,7 @@ const { generateWithTools, extractTextFromFile, fileToGeminiPart, transcribeAudi
 const { processGenerateBlocks } = require('../services/fileGenerator');
 const { upsertTokenUsage, checkBudgetExceeded } = require('../services/tokenService');
 const { notifyAdminSensitiveKeyword } = require('../services/mailService');
+const { tryLock } = require('../services/redisClient');
 
 const UPLOAD_DIR = process.env.UPLOAD_DIR
   ? path.resolve(process.env.UPLOAD_DIR)
@@ -705,12 +706,50 @@ async function processMessage(db, webex, user, sessionId, roomId, messageText, f
     console.warn('[Webex] processGenerateBlocks error:', e.message);
   }
 
-  // fallback：AI 說了「附件傳送」但沒有 generate 代碼塊 → 提示重試
+  // fallback：AI 說了「附件傳送」但沒有 generate 代碼塊
+  // → 自動將 AI 輸出內容包裝成 generate 代碼塊再次嘗試生成
   const claimedAttachment = /附件傳送|以附件/.test(aiText);
   if (claimedAttachment && !hasGenerateBlock && generatedFiles.length === 0) {
-    console.warn('[Webex] AI claimed attachment but no generate block found — prompting retry');
-    aiText = aiText.replace(/📎[^\n]*附件[^\n]*/g, '').trim();
-    aiText += '\n\n⚠️ 抱歉，檔案生成失敗。請重新傳送指令，例如「整理成 PDF」或「匯出為 Excel」。';
+    console.warn('[Webex] Auto-wrap fallback: AI claimed attachment but no generate block');
+
+    const attachIdx = aiText.indexOf('📎');
+    const contentPart = (attachIdx > 0 ? aiText.slice(0, attachIdx) : aiText)
+      .replace(/📎[^\n]*/g, '').trim();
+
+    if (contentPart.length > 30) {
+      // 從用戶訊息推斷格式
+      const msgLow = combinedText.toLowerCase();
+      let genType = 'pdf';
+      if (msgLow.includes('excel') || msgLow.includes('xlsx') || msgLow.includes('試算表')) {
+        genType = 'xlsx';
+      } else if (msgLow.includes('word') || msgLow.includes('docx')) {
+        genType = 'docx';
+      } else if (msgLow.includes('txt') || msgLow.includes('文字檔')) {
+        genType = 'txt';
+      }
+
+      const fname = `document_${Date.now()}.${genType === 'xlsx' ? 'xlsx' : genType === 'docx' ? 'docx' : genType === 'txt' ? 'txt' : 'pdf'}`;
+      const syntheticBlock = `\`\`\`generate_${genType}:${fname}\n${contentPart}\n\`\`\``;
+      console.log(`[Webex] Auto-wrap: generate_${genType}:${fname} contentLen=${contentPart.length}`);
+
+      try {
+        const genResult = await processGenerateBlocks(syntheticBlock, { userId: user.id, sessionId });
+        if (genResult?.files?.length) {
+          generatedFiles = genResult.files;
+          aiText = '📎 檔案將以附件傳送，請稍候';
+          console.log(`[Webex] Auto-wrap succeeded: ${generatedFiles.map(f => f.filename).join(', ')}`);
+        }
+      } catch (e) {
+        console.warn('[Webex] Auto-wrap error:', e.message);
+      }
+    }
+
+    if (generatedFiles.length === 0) {
+      // 最終 fallback：清除誤導文字，提示重試
+      aiText = contentPart || aiText.replace(/📎[^\n]*/g, '').trim();
+      aiText += '\n\n⚠️ 抱歉，檔案生成失敗。請重新傳送指令，例如「整理成 PDF」或「匯出為 Excel」。';
+      console.warn('[Webex] Auto-wrap failed, showing error to user');
+    }
   }
 
   // 8. 截斷過長回應
@@ -832,6 +871,21 @@ async function handleWebexEvent(event) {
     console.error('[Webex] getMessage error:', e.message);
     return;
   }
+
+  // Redis lock — 避免 polling 同時處理同一訊息（兩者共用同一 lock key）
+  const lockKey = `webex:msg:${message.id}`;
+  let acquired = true;
+  try {
+    acquired = await tryLock(lockKey, 60);
+  } catch (e) {
+    console.warn('[Webex] Webhook tryLock error:', e.message);
+    // Redis 故障時保守降級：仍處理（避免訊息遺失）
+  }
+  if (!acquired) {
+    console.log(`[Webex] Webhook skipped (lock held by polling pod): msg=${message.id}`);
+    return;
+  }
+  console.log(`[Webex] Webhook acquired lock: msg=${message.id}`);
 
   await handleWebexMessage(message);
 }
