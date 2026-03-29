@@ -32,6 +32,10 @@ function startPolling() {
     console.log('[WebexListener] WEBEX_BOT_TOKEN not set — polling disabled');
     return;
   }
+  if (process.env.WEBEX_POLLING_ENABLED === 'false') {
+    console.log('[WebexListener] Polling disabled by env (WEBEX_POLLING_ENABLED=false)');
+    return;
+  }
   if (_started) return;
   _started = true;
 
