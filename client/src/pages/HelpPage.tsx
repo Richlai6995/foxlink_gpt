@@ -6070,14 +6070,51 @@ tryLock("webex:msg:{id}", 60s)  ← Redis 分散鎖
           <Para>以上欄位透過 <code className="bg-slate-100 px-1 rounded text-xs">safeAddColumn()</code> 在伺服器啟動時自動新增，無需手動 DDL。</Para>
         </SubSection>
 
+        <SubSection title="稽核日誌與對話紀錄">
+          <Para>
+            所有 Webex 對話自動寫入稽核系統，與 Web UI 對話統一管理，以「來源」欄位區分：
+          </Para>
+          <Table
+            headers={['功能', '位置', '說明']}
+            rows={[
+              ['Email 認證紀錄', '後台 → Webex Bot 日誌 → 認證紀錄', '查看每次 email 對應結果（成功/找不到帳號/停用）'],
+              ['對話稽核（Webex 專屬）', '後台 → Webex Bot 日誌 → 對話稽核', '只顯示 Webex Bot 的對話，含敏感詞偵測'],
+              ['全來源稽核日誌', '後台 → 稽核日誌 → 來源篩選', '可選「全部 / Webex Bot / Web UI」，每筆顯示來源 badge'],
+              ['Token 費用統計', '後台 → Token 與費用統計', 'Webex 與 Web UI token 使用合計顯示'],
+            ]}
+          />
+          <TipBox>
+            認證紀錄可用來確認 email 正規化是否正確（@foxlink.com ↔ @foxlink.com.tw），失敗記錄會紅色警示方便排查。
+          </TipBox>
+        </SubSection>
+
+        <SubSection title="Token 預算管理">
+          <Para>
+            Webex Bot 與 Web UI 套用<strong>相同的預算規則</strong>，用戶無法透過 Webex 繞過費用上限。
+            AI 呼叫前會先檢查 daily / weekly / monthly 上限：
+          </Para>
+          <Table
+            headers={['模式', '行為']}
+            rows={[
+              ['block（預設）', '超額 → Bot 回覆「當日/本週/本月使用金額已達上限 $N」並中止'],
+              ['warn', '超額 → 仍繼續執行，server log 記錄警告'],
+              ['admin 帳號', '豁免預算檢查，不受限制'],
+            ]}
+          />
+          <Para>
+            預算設定位置：後台 → 使用者管理 → 編輯使用者 → 額度限制，或透過角色設定批次管理。
+          </Para>
+        </SubSection>
+
         <SubSection title="錯誤排查">
           <Table
             headers={['現象', '原因', '處理方式']}
             rows={[
               ['Bot 無回應', 'Polling 未啟動或 WEBEX_BOT_TOKEN 未設定', '確認 log 有 Polling started；確認 secret 有 WEBEX_BOT_TOKEN'],
               ['用戶收到多份相同回應', 'Redis 未連線，多 Pod 各自處理', '確認 redis pod 運行中；確認 REDIS_URL 正確'],
-              ['「帳號未在系統中」訊息', '用戶 email 未在 users 表，或 email 格式不符', '新增帳號並設定 email；或確認 @foxlink.com/.com.tw 互轉邏輯'],
+              ['「帳號未在系統中」訊息', '用戶 email 未在 users 表，或 email 格式不符', '查認證紀錄確認 norm_email；新增帳號並設定正確 email'],
               ['「帳號已停用」訊息', 'users.status != active', '在使用者管理中啟用帳號'],
+              ['「使用金額已達上限」訊息', '用戶超過 daily/weekly/monthly 預算', '調整使用者或角色的預算設定'],
               ['首則訊息延遲較長', '正常現象，最長等待一個 Polling 週期', 'WEBEX_POLL_INTERVAL_MS 可調小（預設 8000ms）'],
             ]}
           />
