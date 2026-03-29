@@ -48,11 +48,30 @@ const WEBEX_SYSTEM_SUFFIX = `
 4. Markdown 僅使用粗體、清單、代碼塊（Webex 支援有限）
 5. 如回答需要詳細版，結尾加：「💡 需詳細版本請至 Web 介面查看」
 
-【Webex 檔案生成規則】（此規則優先級最高，覆蓋其他指令）
-6. 若需要生成 Excel/Word/PDF/PPT/TXT 等檔案，照常輸出完整的 \`\`\`generate_xlsx:filename.xlsx\`\`\` 代碼塊（系統會自動處理）
-7. 生成完畢後說：「📎 檔案將以附件傳送，請稍候」
-8. 絕對不要說「請點擊下載連結」、「請至 Web 介面下載」、「以下是下載連結」等語句
-9. Webex 模式下所有生成的檔案都會直接以附件附加在此訊息中，無需任何連結
+【Webex 檔案生成規則 — 強制執行，最高優先級】
+當使用者要求生成/輸出/匯出/整理成 Excel/Word/PDF/PPT/TXT 等檔案時：
+
+⚠️ 你必須在回覆中完整輸出 generate 代碼塊，否則系統無法生成檔案。
+⚠️ 只說「📎 檔案將以附件傳送」而沒有輸出代碼塊，等於完全沒有生成任何東西。
+
+正確的輸出格式範例（以 PDF 為例）：
+\`\`\`generate_pdf:報告檔名.pdf
+# 標題
+完整的文件內容...
+\`\`\`
+📎 檔案將以附件傳送，請稍候
+
+正確的輸出格式範例（以 Excel 為例）：
+\`\`\`generate_xlsx:資料檔名.xlsx
+[{"sheetName":"Sheet1","data":[["欄位1","欄位2"],["值1","值2"]]}]
+\`\`\`
+📎 檔案將以附件傳送，請稍候
+
+規則：
+- 必須先輸出完整 generate_xxx 代碼塊（含完整文件內容），再說「📎 檔案將以附件傳送，請稍候」
+- 禁止只說「📎 檔案將以附件傳送」而不輸出代碼塊
+- 禁止說「請點擊下載連結」、「請至 Web 介面下載」
+- Webex 模式下所有生成的檔案直接以附件回傳，不需要連結
 `;
 
 // ── 驗簽 ──────────────────────────────────────────────────────────────────────
@@ -672,15 +691,26 @@ async function processMessage(db, webex, user, sessionId, roomId, messageText, f
 
   // 7. 處理 generate_xxx 代碼塊
   let generatedFiles = [];
+  const hasGenerateBlock = /```generate_[a-z_]+:[^\n]+/.test(aiText);
+  console.log(`[Webex] generate blocks detected=${hasGenerateBlock} aiTextLen=${aiText.length}`);
   try {
     const genResult = await processGenerateBlocks(aiText, { userId: user.id, sessionId });
     if (genResult?.files?.length) {
       generatedFiles = genResult.files;
+      console.log(`[Webex] generated ${generatedFiles.length} file(s): ${generatedFiles.map(f => f.filename).join(', ')}`);
       // 清除 code block，只保留說明文字
       aiText = aiText.replace(/```generate_[a-z_]+:[^\n]+\n[\s\S]*?```/g, '').trim();
     }
   } catch (e) {
     console.warn('[Webex] processGenerateBlocks error:', e.message);
+  }
+
+  // fallback：AI 說了「附件傳送」但沒有 generate 代碼塊 → 提示重試
+  const claimedAttachment = /附件傳送|以附件/.test(aiText);
+  if (claimedAttachment && !hasGenerateBlock && generatedFiles.length === 0) {
+    console.warn('[Webex] AI claimed attachment but no generate block found — prompting retry');
+    aiText = aiText.replace(/📎[^\n]*附件[^\n]*/g, '').trim();
+    aiText += '\n\n⚠️ 抱歉，檔案生成失敗。請重新傳送指令，例如「整理成 PDF」或「匯出為 Excel」。';
   }
 
   // 8. 截斷過長回應
