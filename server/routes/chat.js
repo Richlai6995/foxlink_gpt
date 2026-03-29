@@ -610,7 +610,7 @@ router.get('/sessions', async (req, res) => {
       .prepare(
         `SELECT id, title, title_zh, title_en, title_vi, model, created_at, updated_at
          FROM chat_sessions
-         WHERE user_id = ? AND (source IS NULL OR source NOT IN ('scheduled','webex_dm','webex_room'))
+         WHERE user_id = ? AND (source IS NULL OR source != 'scheduled')
            AND EXISTS (SELECT 1 FROM chat_messages WHERE session_id = chat_sessions.id)
          ORDER BY updated_at DESC`
       )
