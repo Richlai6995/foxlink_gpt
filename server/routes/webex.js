@@ -696,8 +696,8 @@ async function processMessage(db, webex, user, sessionId, roomId, messageText, f
   console.log(`[Webex] generate blocks detected=${hasGenerateBlock} aiTextLen=${aiText.length}`);
   try {
     const genResult = await processGenerateBlocks(aiText, { userId: user.id, sessionId });
-    if (genResult?.files?.length) {
-      generatedFiles = genResult.files;
+    if (genResult?.length) {
+      generatedFiles = genResult; // processGenerateBlocks returns array directly
       console.log(`[Webex] generated ${generatedFiles.length} file(s): ${generatedFiles.map(f => f.filename).join(', ')}`);
       // 清除 code block，只保留說明文字
       aiText = aiText.replace(/```generate_[a-z_]+:[^\n]+\n[\s\S]*?```/g, '').trim();
@@ -734,8 +734,8 @@ async function processMessage(db, webex, user, sessionId, roomId, messageText, f
 
       try {
         const genResult = await processGenerateBlocks(syntheticBlock, { userId: user.id, sessionId });
-        if (genResult?.files?.length) {
-          generatedFiles = genResult.files;
+        if (genResult?.length) {
+          generatedFiles = genResult; // array direct
           aiText = '📎 檔案將以附件傳送，請稍候';
           console.log(`[Webex] Auto-wrap succeeded: ${generatedFiles.map(f => f.filename).join(', ')}`);
         }
@@ -775,12 +775,16 @@ async function processMessage(db, webex, user, sessionId, roomId, messageText, f
     await webex.sendMessage(roomId, aiText, { markdown: aiText });
   }
 
-  // 13. 送回生成的檔案
+  // 13. 送回生成的檔案（使用 file.filePath，包含 timestamp prefix）
   for (const file of generatedFiles) {
     try {
-      const filePath = path.join(UPLOAD_DIR, 'generated', file.filename);
+      const filePath = file.filePath; // e.g. /uploads/generated/1234567890_report.pdf
+      console.log(`[Webex] Sending file: ${filePath} exists=${fs.existsSync(filePath)}`);
       if (fs.existsSync(filePath)) {
         await webex.sendFile(roomId, `📄 已生成：${file.filename}`, filePath);
+        console.log(`[Webex] File sent: ${file.filename}`);
+      } else {
+        console.error(`[Webex] File not found: ${filePath}`);
       }
     } catch (e) {
       console.error('[Webex] File send error:', e.message);
