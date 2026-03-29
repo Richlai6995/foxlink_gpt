@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { Plus, Search, Globe, Lock, GitFork, Send, Pencil, Trash2, Clock, X, ChevronDown, Zap, ArrowLeft, MessageSquare, Code2, Eye, Share2, History, CheckCircle, XCircle, LayoutTemplate } from 'lucide-react'
 import api from '../lib/api'
+import { fmtTW } from '../lib/fmtTW'
 import TranslationFields, { type TranslationData } from '../components/common/TranslationFields'
 import UserPicker from '../components/common/UserPicker'
 import TagInput from '../components/common/TagInput'
@@ -772,7 +773,7 @@ export default function SkillMarket() {
                                                 <div key={v.version} className="flex items-center justify-between p-2 bg-slate-50 rounded text-sm">
                                                     <div>
                                                         <span className="font-medium">v{v.version}</span>
-                                                        <span className="text-xs text-slate-400 ml-2">{v.changed_by_name} · {new Date(v.created_at).toLocaleString()}</span>
+                                                        <span className="text-xs text-slate-400 ml-2">{v.changed_by_name} · {fmtTW(v.created_at)}</span>
                                                         {v.change_note && <span className="text-xs text-slate-500 ml-2">{v.change_note}</span>}
                                                     </div>
                                                     <button onClick={() => handleRollback(v.version)} className="text-xs text-blue-500 hover:underline">回滾</button>

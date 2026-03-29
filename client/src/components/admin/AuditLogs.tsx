@@ -2,12 +2,8 @@ import { useState, useEffect } from 'react'
 import { Shield, AlertTriangle, RefreshCw, Download, Search, MessageSquare, Monitor } from 'lucide-react'
 import type { AuditLog } from '../../types'
 import api from '../../lib/api'
+import { fmtTW } from '../../lib/fmtTW'
 import { useTranslation } from 'react-i18next'
-
-function fmtTW(iso: string | undefined) {
-  if (!iso) return ''
-  return new Date(iso).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false })
-}
 
 export default function AuditLogs() {
   const { t } = useTranslation()

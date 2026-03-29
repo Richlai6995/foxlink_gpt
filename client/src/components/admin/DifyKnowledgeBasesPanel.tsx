@@ -3,6 +3,7 @@ import {
   Plus, Trash2, Edit2, ChevronDown, ChevronRight,
   ToggleLeft, ToggleRight, AlertCircle, CheckCircle, Zap, Clock, Share2, Globe, ShieldCheck
 } from 'lucide-react'
+import { fmtTW } from '../../lib/fmtTW'
 import api from '../../lib/api'
 import TranslationFields, { type TranslationData } from '../common/TranslationFields'
 import TagInput from '../common/TagInput'
@@ -363,7 +364,7 @@ export default function DifyKnowledgeBasesPanel() {
                     </div>
                     <div className="flex gap-2 text-xs text-slate-400">
                       <Clock size={11} className="mt-0.5" />
-                      更新時間：{kb.updated_at}
+                      更新時間：{fmtTW(kb.updated_at)}
                     </div>
                   </div>
                 )}

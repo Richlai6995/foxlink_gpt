@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Search, ChevronLeft, ChevronRight, Download, CheckCircle, XCircle, Loader2, Clock } from 'lucide-react'
 import api from '../../lib/api'
+import { fmtTW } from '../../lib/fmtTW'
 
 interface ResearchJob {
   id: string
@@ -137,8 +138,8 @@ export default function ResearchLogsPanel() {
                       {st.label}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-slate-500 text-xs whitespace-nowrap">{j.created_at?.slice(0, 16)}</td>
-                  <td className="px-4 py-3 text-slate-500 text-xs whitespace-nowrap">{j.completed_at?.slice(0, 16) || '—'}</td>
+                  <td className="px-4 py-3 text-slate-500 text-xs whitespace-nowrap">{fmtTW(j.created_at)}</td>
+                  <td className="px-4 py-3 text-slate-500 text-xs whitespace-nowrap">{fmtTW(j.completed_at) || '—'}</td>
                   <td className="px-4 py-3 text-slate-400 text-xs">{isExpanded ? '▲' : '▼'}</td>
                 </tr>,
                 isExpanded && (

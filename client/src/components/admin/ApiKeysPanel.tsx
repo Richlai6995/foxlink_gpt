@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Plus, Trash2, Copy, Check, ToggleLeft, ToggleRight, Key, RefreshCw } from 'lucide-react'
 import api from '../../lib/api'
+import { fmtTW, fmtDateTW } from '../../lib/fmtTW'
 
 interface ApiKey {
   id: number
@@ -289,10 +290,10 @@ export default function ApiKeysPanel() {
                     </button>
                   </td>
                   <td className="px-4 py-3 text-xs text-slate-500 whitespace-nowrap">
-                    {k.expires_at ? k.expires_at.slice(0, 10) : '—'}
+                    {k.expires_at ? fmtDateTW(k.expires_at) : '—'}
                   </td>
                   <td className="px-4 py-3 text-xs text-slate-500 whitespace-nowrap">
-                    {k.last_used_at ? k.last_used_at.slice(0, 16) : '從未使用'}
+                    {k.last_used_at ? fmtTW(k.last_used_at) : '從未使用'}
                   </td>
                   <td className="px-4 py-3 text-xs text-slate-500">
                     {k.created_by_name || k.created_by_username}

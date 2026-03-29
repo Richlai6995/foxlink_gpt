@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { MessageSquare, RefreshCw, Download, Search, CheckCircle, XCircle, AlertTriangle, Shield } from 'lucide-react'
 import api from '../../lib/api'
+import { fmtTW } from '../../lib/fmtTW'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -81,7 +82,7 @@ function AuthLogsTab() {
   const exportCsv = () => {
     const header = '時間,原始Email,正規化Email,使用者姓名,帳號,結果,房間類型,訊息預覽'
     const lines = displayed.map(l => [
-      l.created_at?.slice(0, 16),
+      fmtTW(l.created_at),
       l.raw_email,
       l.norm_email,
       l.user_name || '',
@@ -166,7 +167,7 @@ function AuthLogsTab() {
               const badge = STATUS_LABEL[l.status] || { label: l.status, cls: 'bg-slate-100 text-slate-600', icon: null }
               return (
                 <tr key={l.id} className="border-t border-slate-100 hover:bg-slate-50">
-                  <td className="px-4 py-2.5 text-slate-500 whitespace-nowrap">{l.created_at?.slice(0, 16)}</td>
+                  <td className="px-4 py-2.5 text-slate-500 whitespace-nowrap">{fmtTW(l.created_at)}</td>
                   <td className="px-4 py-2.5 font-mono text-xs">{l.raw_email}</td>
                   <td className="px-4 py-2.5 font-mono text-xs text-slate-500">{l.norm_email}</td>
                   <td className="px-4 py-2.5">
@@ -243,7 +244,7 @@ function WebexAuditTab() {
     const lines = displayed.map(l => {
       const kws = JSON.parse(l.sensitive_keywords || '[]').join(';')
       return [
-        l.created_at?.slice(0, 16),
+        fmtTW(l.created_at),
         l.name || l.username,
         l.employee_id || '',
         l.has_sensitive ? '是' : '否',
@@ -319,7 +320,7 @@ function WebexAuditTab() {
               }
               <span className="text-sm font-medium text-slate-700">{l.name || l.username}</span>
               {l.employee_id && <span className="text-xs text-slate-400">{l.employee_id}</span>}
-              <span className="text-xs text-slate-400">{l.created_at?.slice(0, 16)}</span>
+              <span className="text-xs text-slate-400">{fmtTW(l.created_at)}</span>
               {l.has_sensitive
                 ? <span className="ml-auto text-xs bg-red-100 text-red-700 px-2 py-0.5 rounded-full">
                     敏感詞：{JSON.parse(l.sensitive_keywords || '[]').join(', ')}

@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { Rocket, X, Clock, CheckCircle, XCircle } from 'lucide-react'
 import api from '../../lib/api'
+import { fmtTW } from '../../lib/fmtTW'
 
 interface DeployRecord {
   id: number
@@ -111,7 +112,7 @@ export default function DeployPanel({ onRefresh }: Props) {
         </button>
         {history.length > 0 && (
           <span className="text-xs text-slate-400">
-            上次: {new Date(history[0].deployed_at).toLocaleString()}
+            上次: {fmtTW(history[0].deployed_at)}
             {history[0].exit_code === 0
               ? <CheckCircle size={12} className="inline ml-1 text-green-500" />
               : <XCircle size={12} className="inline ml-1 text-red-500" />}
@@ -185,7 +186,7 @@ export default function DeployPanel({ onRefresh }: Props) {
               {history.map(h => (
                 <>
                   <tr key={h.id} className="hover:bg-slate-50">
-                    <td className="px-3 py-1.5 whitespace-nowrap">{new Date(h.deployed_at).toLocaleString()}</td>
+                    <td className="px-3 py-1.5 whitespace-nowrap">{fmtTW(h.deployed_at)}</td>
                     <td className="px-3 py-1.5">{h.triggered_by_name || h.triggered_by_username}</td>
                     <td className="px-3 py-1.5 font-mono text-[10px]">
                       {h.git_before?.slice(0, 7)} → {h.git_after?.slice(0, 7)}

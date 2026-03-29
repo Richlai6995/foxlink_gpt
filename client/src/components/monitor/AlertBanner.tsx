@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { AlertTriangle, ChevronDown, ChevronUp, CheckCircle, BellOff, Bot, X, CheckCheck, Download } from 'lucide-react'
 import api from '../../lib/api'
+import { fmtTW } from '../../lib/fmtTW'
 import ReactMarkdown from 'react-markdown'
 
 interface Alert {
@@ -128,7 +129,7 @@ export default function AlertBanner({ alerts, onRefresh, filterDays, onFilterDay
       a.alert_type,
       a.resource_name,
       (a.message || '').replace(/"/g, '""'),
-      new Date(a.notified_at).toLocaleString(),
+      fmtTW(a.notified_at),
       a.resolved_at ? '已解除' : '未解除',
     ])
     const csv = BOM + [headers, ...rows].map(r => r.map(c => `"${c}"`).join(',')).join('\n')
@@ -190,7 +191,7 @@ export default function AlertBanner({ alerts, onRefresh, filterDays, onFilterDay
                 <span className="text-slate-500 font-mono text-xs">{a.alert_type}</span>
                 <span className="flex-1 text-slate-700 truncate text-xs" title={a.message}>{a.message}</span>
                 <span className="text-[10px] text-slate-400 whitespace-nowrap">
-                  {new Date(a.notified_at).toLocaleString()}
+                  {fmtTW(a.notified_at)}
                 </span>
                 <button
                   onClick={() => diagnoseAlert(a.id)}

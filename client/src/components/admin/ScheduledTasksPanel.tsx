@@ -7,6 +7,7 @@ import {
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import api from '../../lib/api'
+import { fmtTW, fmtDateTW } from '../../lib/fmtTW'
 import { useAuth } from '../../context/AuthContext'
 import type { ScheduledTask, TaskRun, DocTemplate } from '../../types'
 import PipelineTab, { type PipelineNode } from './PipelineTab'
@@ -688,7 +689,7 @@ function RunDetailModal({ run, onClose }: { run: TaskRun; onClose: () => void })
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={onClose}>
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[80vh] flex flex-col" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between px-5 py-3 border-b">
-          <span className="font-semibold text-slate-800 text-sm">執行結果 — {run.run_at?.slice(0, 16)}</span>
+          <span className="font-semibold text-slate-800 text-sm">執行結果 — {fmtTW(run.run_at)}</span>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-600"><X size={16} /></button>
         </div>
         <div className="overflow-y-auto p-5 flex-1 text-sm text-slate-700 whitespace-pre-wrap">
@@ -746,7 +747,7 @@ function HistoryRow({ taskId }: { taskId: number }) {
             ]
             return (
               <tr key={r.id} className="border-b border-slate-50 hover:bg-slate-50">
-                <td className="py-1.5 pr-3 whitespace-nowrap text-slate-600">{r.run_at?.slice(0, 16)}</td>
+                <td className="py-1.5 pr-3 whitespace-nowrap text-slate-600">{fmtTW(r.run_at)}</td>
                 <td className="py-1.5 pr-3">
                   {r.status === 'ok'
                     ? <span className="flex items-center gap-1 text-green-600"><CheckCircle size={12} /> {t('scheduledTask.runOk')}</span>
@@ -1073,14 +1074,14 @@ export default function ScheduledTasksPanel() {
                           {task.last_run_status === 'ok'
                             ? <CheckCircle size={13} className="text-green-500" />
                             : <XCircle size={13} className="text-red-500" />}
-                          <span className="text-slate-600">{task.last_run_at.slice(0, 16)}</span>
+                          <span className="text-slate-600">{fmtTW(task.last_run_at)}</span>
                         </span>
                       ) : (
                         <span className="text-slate-300">{t('scheduledTask.notYetRun')}</span>
                       )}
                     </td>
                     <td className="px-4 py-3 text-slate-500 text-xs">
-                      {task.expire_at ? task.expire_at.slice(0, 10) : <span className="text-slate-300">{t('scheduledTask.noExpiry')}</span>}
+                      {task.expire_at ? fmtDateTW(task.expire_at) : <span className="text-slate-300">{t('scheduledTask.noExpiry')}</span>}
                     </td>
                     <td className="px-4 py-3 text-slate-500 text-xs">
                       {task.run_count}{task.max_runs > 0 ? ` / ${task.max_runs}` : ''}

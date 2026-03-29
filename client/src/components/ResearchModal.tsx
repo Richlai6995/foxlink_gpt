@@ -7,6 +7,7 @@ import {
   Lightbulb, Wifi, WifiOff, Clock, BarChart2, Bookmark, BookmarkCheck,
 } from 'lucide-react'
 import api from '../lib/api'
+import { fmtTW } from '../lib/fmtTW'
 import { useTranslation } from 'react-i18next'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -621,7 +622,7 @@ export default function ResearchModal({ sessionId, modelKey, initialQuestion = '
                                 className="flex items-center justify-between px-3 py-2 hover:bg-blue-50 cursor-pointer group border-b border-slate-100 last:border-0">
                                 <div className="min-w-0 flex-1">
                                   <p className="text-xs font-medium text-slate-700 truncate">{tmpl.title}</p>
-                                  <p className="text-[10px] text-slate-400">{tmpl.updated_at}</p>
+                                  <p className="text-[10px] text-slate-400">{fmtTW(tmpl.updated_at)}</p>
                                 </div>
                                 <button
                                   onClick={(e) => handleDeleteTemplate(tmpl.id, e)}

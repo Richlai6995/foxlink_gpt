@@ -3,6 +3,7 @@ import { Plus, Edit, Trash2, Save, X, Check, Download, UserCog, FileText, Mic, I
 import { useTranslation } from 'react-i18next'
 import type { User } from '../../types'
 import api from '../../lib/api'
+import { fmtTW } from '../../lib/fmtTW'
 
 // ── Org Sync Schedule Panel ───────────────────────────────────────────────────
 interface OrgSyncSchedule { enabled: boolean; hour: number; lastRun: string | null }
@@ -93,7 +94,7 @@ function OrgSyncPanel() {
             </button>
           </div>
           {schedule.lastRun && (
-            <p className="text-xs text-slate-500">上次同步：{schedule.lastRun.slice(0, 19).replace('T', ' ')}</p>
+            <p className="text-xs text-slate-500">上次同步：{fmtTW(schedule.lastRun)}</p>
           )}
 
           {/* 變動紀錄 */}
@@ -1079,7 +1080,7 @@ export default function UserManagement() {
                     <td className="px-4 py-3 text-slate-500 text-xs bg-green-50/40">{u2.org_group_name || '-'}</td>
                     <td className="px-4 py-3 text-slate-500 text-xs bg-green-50/40">{u2.factory_code || '-'}</td>
                     <td className="px-4 py-3 text-slate-500 text-xs bg-green-50/40">{u2.org_end_date || '-'}</td>
-                    <td className="px-4 py-3 text-slate-400 text-xs bg-green-50/40">{u2.org_synced_at ? u2.org_synced_at.slice(0, 16).replace('T', ' ') : '-'}</td>
+                    <td className="px-4 py-3 text-slate-400 text-xs bg-green-50/40">{u2.org_synced_at ? fmtTW(u2.org_synced_at) : '-'}</td>
                   </tr>
                 )
               })}

@@ -3,6 +3,7 @@ import {
   Search, CheckCircle, XCircle, Loader2, ChevronDown, ChevronUp, Download,
 } from 'lucide-react'
 import api from '../lib/api'
+import { fmtTW } from '../lib/fmtTW'
 import type { ResearchJob } from '../types'
 
 interface ResearchFile { name: string; url: string; type: string }
@@ -95,7 +96,7 @@ export default function ResearchProgressCard({ jobId }: Props) {
 
           {job.status === 'done' && (
             <p className="text-xs text-green-600 mt-0.5">
-              研究完成 · {job.completed_at?.slice(0, 16)}
+              研究完成 · {fmtTW(job.completed_at)}
             </p>
           )}
 

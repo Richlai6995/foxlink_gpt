@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { BookOpen, Check, X, Clock, Globe, Lock, RefreshCw, FileText, Layers } from 'lucide-react'
 import api from '../../lib/api'
+import { fmtTW } from '../../lib/fmtTW'
 
 interface KbRequest {
   id: string
@@ -136,7 +137,7 @@ export default function KbAdminPanel() {
                       </span>
                     </td>
                     <td className="px-4 py-3 text-slate-500">{formatBytes(r.total_size_bytes)}</td>
-                    <td className="px-4 py-3 text-slate-400 text-xs">{r.updated_at}</td>
+                    <td className="px-4 py-3 text-slate-400 text-xs">{fmtTW(r.updated_at)}</td>
                     <td className="px-4 py-3">
                       <div className="flex gap-1">
                         {r.public_status === 'pending' && (

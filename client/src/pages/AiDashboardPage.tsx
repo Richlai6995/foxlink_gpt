@@ -7,6 +7,7 @@
  *   底部     — 開發模式 panel（設計者專用）
  */
 import { useState, useEffect, useRef } from 'react'
+import { fmtTW } from '../lib/fmtTW'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
   BarChart3, ChevronRight, ChevronDown, Send, RefreshCw,
@@ -674,7 +675,7 @@ export default function AiDashboardPage() {
                         {h.topic_name && <span className="mr-1">{h.topic_name} /</span>}
                         {h.design_name}
                       </p>
-                      <p className="text-[10px] text-gray-300">{h.created_at}</p>
+                      <p className="text-[10px] text-gray-300">{fmtTW(h.created_at)}</p>
                     </button>
                     {/* 操作按鈕：hover 顯示 */}
                     <div className="flex items-center gap-0.5 flex-shrink-0 opacity-0 group-hover:opacity-100 transition mt-0.5">

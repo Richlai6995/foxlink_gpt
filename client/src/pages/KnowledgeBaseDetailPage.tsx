@@ -9,6 +9,7 @@ import {
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import api from '../lib/api'
+import { fmtTW, fmtDateTW } from '../lib/fmtTW'
 import { useAuth } from '../context/AuthContext'
 import TranslationFields, { type TranslationData } from '../components/common/TranslationFields'
 import UserPicker from '../components/common/UserPicker'
@@ -438,7 +439,7 @@ function DocumentsTab({ kb, onRefresh, isOwner }: { kb: KnowledgeBase; onRefresh
                   <div className="text-xs text-slate-400 flex items-center gap-2">
                     <span>{formatBytes(doc.file_size)}</span>
                     <span>{doc.chunk_count} {t('kb.docs.chunksSuffix')}</span>
-                    <span>{doc.created_at?.slice(0, 10)}</span>
+                    <span>{fmtDateTW(doc.created_at)}</span>
                     {doc.status === 'error' && <span className="text-red-500">{doc.error_msg?.slice(0, 60)}</span>}
                   </div>
                 </div>
@@ -1025,7 +1026,7 @@ function ShareTab({ kb, isOwner }: { kb: KnowledgeBase; isOwner: boolean }) {
                     {g.permission === 'edit' ? t('kb.share.permEditBadge') : t('kb.share.permUseBadge')}
                   </span>
                 </div>
-                <div className="text-xs text-slate-400">{t('kb.share.grantedBy', { name: g.granted_by_name })} · {g.granted_at?.slice(0, 10)}</div>
+                <div className="text-xs text-slate-400">{t('kb.share.grantedBy', { name: g.granted_by_name })} · {fmtDateTW(g.granted_at)}</div>
               </div>
               {isOwner && (
                 <button onClick={() => removeGrant(g.id)} className="p-1 text-slate-300 hover:text-red-500 transition">
@@ -1235,7 +1236,7 @@ function QueryHistoryTab({ kbId }: { kbId: string }) {
                 {log.user_name && <span className="text-xs text-slate-400">by {log.user_name}</span>}
               </div>
             </div>
-            <span className="text-xs text-slate-400 whitespace-nowrap">{log.created_at}</span>
+            <span className="text-xs text-slate-400 whitespace-nowrap">{fmtTW(log.created_at)}</span>
           </div>
         ))}
       </div>

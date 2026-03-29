@@ -3,6 +3,7 @@ import { useSearchParams, useNavigate } from 'react-router-dom'
 import { Square, AlertTriangle, Share2, Copy, Check, X, Sparkles, Search, Plus, Plug, Zap, Database, CheckCircle, BarChart3, ChevronDown, RefreshCw, TrendingUp, GripVertical, Eye, EyeOff } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import Sidebar from '../components/Sidebar'
+import { fmtTW } from '../lib/fmtTW'
 import ChatWindow from '../components/ChatWindow'
 import MessageInput, { type MessageInputHandle } from '../components/MessageInput'
 import ResearchModal from '../components/ResearchModal'
@@ -1307,7 +1308,7 @@ export default function ChatPage() {
                                 )}
                                 {j.status === 'done' && (
                                   <div className="mt-1 space-y-1">
-                                    <p className="text-green-600">{t('chat.topbar.researchJobDone', { time: j.completed_at?.slice(0, 16) })}</p>
+                                    <p className="text-green-600">{t('chat.topbar.researchJobDone', { time: fmtTW(j.completed_at) })}</p>
                                     {j.result_files_json && (() => {
                                       try {
                                         const files: { name: string; url: string; type: string }[] = JSON.parse(j.result_files_json)

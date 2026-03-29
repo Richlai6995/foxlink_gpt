@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react'
 import { Plus, Trash2, Edit3, Wifi, WifiOff, CheckCircle, XCircle, RefreshCw } from 'lucide-react'
 import api from '../../lib/api'
+import { fmtTW } from '../../lib/fmtTW'
 import type { DbSource } from '../../types'
 
 interface FormState {
@@ -136,7 +137,7 @@ export default function DbSourcesPanel() {
                 )}
                 {s.last_ping_at && !pr && (
                   <p className={`text-xs mt-0.5 ${s.last_ping_ok ? 'text-green-500' : 'text-red-400'}`}>
-                    上次 Ping: {s.last_ping_ok ? '成功' : '失敗'} · {new Date(s.last_ping_at).toLocaleString()}
+                    上次 Ping: {s.last_ping_ok ? '成功' : '失敗'} · {fmtTW(s.last_ping_at)}
                   </p>
                 )}
               </div>

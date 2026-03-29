@@ -1,5 +1,6 @@
 import { useState, useCallback } from 'react'
 import { Download } from 'lucide-react'
+import { fmtTW } from '../../lib/fmtTW'
 
 interface K8sEvent {
   metadata: { name: string; namespace: string; creationTimestamp: string }
@@ -31,7 +32,7 @@ export default function K8sEventsTable({ events, loading }: Props) {
       `${e.involvedObject?.kind}/${e.involvedObject?.name}`,
       (e.message || '').replace(/"/g, '""'),
       String(e.count || ''),
-      e.lastTimestamp ? new Date(e.lastTimestamp).toLocaleString() : '',
+      e.lastTimestamp ? fmtTW(e.lastTimestamp) : '',
     ])
     const csv = BOM + [headers, ...rows].map(r => r.map(c => `"${c}"`).join(',')).join('\n')
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
@@ -96,7 +97,7 @@ export default function K8sEventsTable({ events, loading }: Props) {
                 </td>
                 <td className="px-3 py-1.5 text-slate-500">{e.count}</td>
                 <td className="px-3 py-1.5 text-slate-400 whitespace-nowrap">
-                  {e.lastTimestamp ? new Date(e.lastTimestamp).toLocaleString() : '-'}
+                  {e.lastTimestamp ? fmtTW(e.lastTimestamp) : '-'}
                 </td>
               </tr>
             ))}

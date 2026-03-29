@@ -5,6 +5,7 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { Plus, Save, Trash2, Play, RefreshCw, ChevronDown, ChevronRight, Eye, Link2, Edit3, Square, Pause, Share2, Copy, Upload, FolderOpen, Filter, X, Download, FileUp, PenLine, FunctionSquare, Languages, RotateCcw } from 'lucide-react'
 import api from '../../lib/api'
+import { fmtTW } from '../../lib/fmtTW'
 import type { AiSchemaDef, AiSchemaJoin, AiSelectTopic, AiSelectDesign, AiEtlJob, AiEtlRunLog, AiDashboardShare, AiSelectProject, AiProjectShare, DbSource } from '../../types'
 import TranslationFields, { type TranslationData } from '../common/TranslationFields'
 import UserPicker from '../common/UserPicker'
@@ -3126,7 +3127,7 @@ function EtlManager({ projectId }: { projectId: number | null }) {
             <div className="text-xs text-gray-400 flex gap-3 flex-wrap">
               {scheduleLabel(j) && <span className="font-mono text-blue-400">{scheduleLabel(j)}</span>}
               <span>執行 {j.run_count ?? 0} 次</span>
-              {j.last_run_at && <span>上次：{new Date(j.last_run_at).toLocaleString('zh-TW')}</span>}
+              {j.last_run_at && <span>上次：{fmtTW(j.last_run_at)}</span>}
               {j.job_type !== 'table_copy' && <span>維度：{j.embedding_dimension}</span>}
               {j.job_type !== 'table_copy' && j.upsert_key && <span className="text-teal-500">PK：{j.upsert_key}</span>}
               {j.job_type === 'table_copy' && j.target_table && <span>→ {j.target_table} ({j.target_mode})</span>}
@@ -3149,7 +3150,7 @@ function EtlManager({ projectId }: { projectId: number | null }) {
                 <div key={l.id} className={`rounded-lg p-3 text-xs ${l.status === 'success' ? 'bg-green-50 border border-green-200' : l.status === 'failed' ? 'bg-red-50 border border-red-200' : 'bg-yellow-50 border border-yellow-200'}`}>
                   <div className="flex justify-between mb-1">
                     <span className={`font-medium ${l.status === 'success' ? 'text-green-600' : l.status === 'failed' ? 'text-red-500' : 'text-yellow-600'}`}>{l.status}</span>
-                    <span className="text-gray-400">{l.started_at ? new Date(l.started_at).toLocaleString('zh-TW') : '-'}</span>
+                    <span className="text-gray-400">{l.started_at ? fmtTW(l.started_at) : '-'}</span>
                   </div>
                   <div className="text-gray-500 flex gap-3 flex-wrap">
                     <span>撈取 {l.rows_fetched ?? 0} 筆</span>
