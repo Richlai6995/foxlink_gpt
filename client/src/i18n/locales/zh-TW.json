@@ -1399,5 +1399,19 @@
     "disk": "磁碟",
     "alerts": "告警",
     "unresolved": "未解除"
+  },
+  "tokenStats": {
+    "title": "我的 Token 消耗趨勢",
+    "button": "消耗趨勢",
+    "days": "{{n}} 天",
+    "totalCost": "累計費用",
+    "totalTokens": "累計 Tokens",
+    "modelCount": "使用模型數",
+    "noData": "此期間無 Token 使用記錄",
+    "date": "日期",
+    "model": "模型",
+    "inputTokens": "輸入 Tokens",
+    "outputTokens": "輸出 Tokens",
+    "cost": "費用 (USD)"
   }
 }

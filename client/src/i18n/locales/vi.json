@@ -1399,5 +1399,19 @@
     "disk": "Ổ đĩa",
     "alerts": "Cảnh báo",
     "unresolved": "Chưa giải quyết"
+  },
+  "tokenStats": {
+    "title": "Xu hướng tiêu thụ Token",
+    "button": "Xu hướng",
+    "days": "{{n}} ngày",
+    "totalCost": "Tổng chi phí",
+    "totalTokens": "Tổng Tokens",
+    "modelCount": "Số mô hình",
+    "noData": "Không có dữ liệu Token trong khoảng thời gian này",
+    "date": "Ngày",
+    "model": "Mô hình",
+    "inputTokens": "Tokens đầu vào",
+    "outputTokens": "Tokens đầu ra",
+    "cost": "Chi phí (USD)"
   }
 }

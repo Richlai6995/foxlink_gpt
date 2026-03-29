@@ -1399,5 +1399,19 @@
     "disk": "Disk",
     "alerts": "Alerts",
     "unresolved": "Unresolved"
+  },
+  "tokenStats": {
+    "title": "My Token Usage Trend",
+    "button": "Usage Trend",
+    "days": "{{n}} Days",
+    "totalCost": "Total Cost",
+    "totalTokens": "Total Tokens",
+    "modelCount": "Models Used",
+    "noData": "No token usage during this period",
+    "date": "Date",
+    "model": "Model",
+    "inputTokens": "Input Tokens",
+    "outputTokens": "Output Tokens",
+    "cost": "Cost (USD)"
   }
 }

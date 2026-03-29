@@ -1404,10 +1404,10 @@ export default function ChatPage() {
           <button
             onClick={() => setShowTokenStats(true)}
             className="flex items-center gap-1 text-xs px-2 py-0.5 rounded-lg border text-slate-500 bg-slate-50 border-slate-200 hover:text-blue-600 hover:border-blue-300 hover:bg-blue-50 transition"
-            title="查看我的 Token 消耗趨勢"
+            title={t('tokenStats.title')}
           >
             <TrendingUp size={11} />
-            消耗趨勢
+            {t('tokenStats.button')}
           </button>
         </div>
 

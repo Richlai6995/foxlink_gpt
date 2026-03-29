@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { X, TrendingUp } from 'lucide-react'
 import ReactECharts from 'echarts-for-react'
 import api from '../../lib/api'
+import { useTranslation } from 'react-i18next'
 
 interface Row {
   usage_date: string
@@ -18,6 +19,7 @@ interface Props {
 }
 
 export default function TokenStatsModal({ onClose }: Props) {
+  const { t } = useTranslation()
   const [rows, setRows] = useState<Row[]>([])
   const [days, setDays] = useState(30)
   const [loading, setLoading] = useState(true)
@@ -96,7 +98,7 @@ export default function TokenStatsModal({ onClose }: Props) {
         <div className="flex items-center justify-between px-5 py-3 border-b">
           <div className="flex items-center gap-2">
             <TrendingUp size={16} className="text-blue-500" />
-            <span className="font-semibold text-slate-700">我的 Token 消耗趨勢</span>
+            <span className="font-semibold text-slate-700">{t('tokenStats.title')}</span>
           </div>
           <div className="flex items-center gap-2">
             <select
@@ -104,11 +106,11 @@ export default function TokenStatsModal({ onClose }: Props) {
               onChange={e => setDays(Number(e.target.value))}
               className="text-xs border rounded px-2 py-1"
             >
-              <option value={7}>7 天</option>
-              <option value={14}>14 天</option>
-              <option value={30}>30 天</option>
-              <option value={60}>60 天</option>
-              <option value={90}>90 天</option>
+              <option value={7}>{t('tokenStats.days', { n: 7 })}</option>
+              <option value={14}>{t('tokenStats.days', { n: 14 })}</option>
+              <option value={30}>{t('tokenStats.days', { n: 30 })}</option>
+              <option value={60}>{t('tokenStats.days', { n: 60 })}</option>
+              <option value={90}>{t('tokenStats.days', { n: 90 })}</option>
             </select>
             <button onClick={onClose} className="p-1 text-slate-400 hover:text-slate-600">
               <X size={18} />
@@ -119,15 +121,15 @@ export default function TokenStatsModal({ onClose }: Props) {
         {/* Summary stats */}
         <div className="flex gap-6 px-5 py-3 bg-slate-50 border-b text-sm">
           <div>
-            <span className="text-slate-500 text-xs">累計費用</span>
+            <span className="text-slate-500 text-xs">{t('tokenStats.totalCost')}</span>
             <div className="font-bold text-blue-600">${totalCost.toFixed(4)} USD</div>
           </div>
           <div>
-            <span className="text-slate-500 text-xs">累計 Tokens</span>
+            <span className="text-slate-500 text-xs">{t('tokenStats.totalTokens')}</span>
             <div className="font-bold text-slate-700">{totalTokens.toLocaleString()}</div>
           </div>
           <div>
-            <span className="text-slate-500 text-xs">使用模型數</span>
+            <span className="text-slate-500 text-xs">{t('tokenStats.modelCount')}</span>
             <div className="font-bold text-slate-700">
               {new Set(rows.map(r => r.model_name || r.model)).size}
             </div>
@@ -139,7 +141,7 @@ export default function TokenStatsModal({ onClose }: Props) {
           {loading ? (
             <div className="animate-pulse h-60 bg-slate-100 rounded" />
           ) : rows.length === 0 ? (
-            <div className="text-center text-slate-400 py-16 text-sm">此期間無 Token 使用記錄</div>
+            <div className="text-center text-slate-400 py-16 text-sm">{t('tokenStats.noData')}</div>
           ) : (
             <ReactECharts option={chartOption} style={{ height: 280 }} opts={{ renderer: 'svg' }} />
           )}
@@ -151,11 +153,11 @@ export default function TokenStatsModal({ onClose }: Props) {
             <table className="w-full text-xs">
               <thead className="bg-slate-50 sticky top-0">
                 <tr>
-                  <th className="text-left px-3 py-2 text-slate-500">日期</th>
-                  <th className="text-left px-3 py-2 text-slate-500">模型</th>
-                  <th className="text-right px-3 py-2 text-slate-500">輸入 Tokens</th>
-                  <th className="text-right px-3 py-2 text-slate-500">輸出 Tokens</th>
-                  <th className="text-right px-3 py-2 text-slate-500">費用 (USD)</th>
+                  <th className="text-left px-3 py-2 text-slate-500">{t('tokenStats.date')}</th>
+                  <th className="text-left px-3 py-2 text-slate-500">{t('tokenStats.model')}</th>
+                  <th className="text-right px-3 py-2 text-slate-500">{t('tokenStats.inputTokens')}</th>
+                  <th className="text-right px-3 py-2 text-slate-500">{t('tokenStats.outputTokens')}</th>
+                  <th className="text-right px-3 py-2 text-slate-500">{t('tokenStats.cost')}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-50">
