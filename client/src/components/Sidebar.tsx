@@ -170,8 +170,8 @@ export default function Sidebar({
       {/* Header */}
       <div className="p-4 border-b border-slate-800">
         <div className="flex items-center gap-2 mb-4">
-          <img src="/favicon.png" alt="FOXLINK GPT TO CORTEX" className="w-8 h-8 object-contain flex-shrink-0" />
-          <span className="text-white font-bold text-lg">FOXLINK GPT TO CORTEX</span>
+          <img src="/favicon.png" alt="Foxlink GPT to Cortex" className="w-8 h-8 object-contain flex-shrink-0" />
+          <span className="text-white font-bold text-lg">Foxlink GPT to Cortex</span>
         </div>
 
         <button

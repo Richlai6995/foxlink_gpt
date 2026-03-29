@@ -147,7 +147,7 @@ export default function KnowledgeBasePage() {
           <div className="w-7 h-7 bg-blue-600 rounded-lg flex items-center justify-center">
             <Cpu size={14} className="text-white" />
           </div>
-          <span className="font-bold">FOXLINK GPT TO CORTEX</span>
+          <span className="font-bold">Foxlink GPT to Cortex</span>
           <span className="text-slate-500 text-sm">/ {t('kb.pageTitle')}</span>
         </div>
         <button onClick={() => navigate('/chat')} className="flex items-center gap-1.5 text-slate-400 hover:text-white text-sm transition">

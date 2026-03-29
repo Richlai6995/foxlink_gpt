@@ -160,7 +160,7 @@ function UserManual() {
     <div>
       <Section id="u-intro" icon={<BookOpen size={22} />} iconColor="text-blue-500" title="系統介紹">
         <Para>
-          FOXLINK GPT TO CORTEX 是正崴精密工業內部專屬的 AI 智慧助理平台，同時整合 <strong>Azure OpenAI (AOAI)</strong> 與
+          Foxlink GPT to Cortex 是正崴精密工業內部專屬的 AI 智慧助理平台，同時整合 <strong>Azure OpenAI (AOAI)</strong> 與
           <strong> Google Gemini</strong> 兩大語言模型體系，提供流暢的多語言對話、文件深度分析、多媒體處理、
           工具調用及自動化排程等功能，協助同仁大幅提升日常工作效率。
         </Para>
@@ -194,13 +194,13 @@ function UserManual() {
         <SubSection title="Foxlink SSO 單一登入（AD 帳號適用）">
           <Para>
             持有公司 Active Directory（AD）網域帳號的同仁，可使用 <strong>Foxlink SSO</strong> 一鍵登入，
-            無需另外記憶 FOXLINK GPT TO CORTEX 密碼。
+            無需另外記憶 Foxlink GPT to Cortex 密碼。
           </Para>
           <div className="space-y-3">
             <StepItem num={1} title="開啟瀏覽器，輸入系統網址" desc="建議使用 Chrome 或 Edge 以獲得最佳體驗" />
             <StepItem num={2} title="點選登入頁面的「Foxlink SSO 登入」藍色按鈕" desc="系統自動導向公司 SSO 驗證頁面" />
             <StepItem num={3} title="輸入您的 AD 工號與 AD 密碼完成驗證" desc="若您已在公司內部網路環境登入 AD，可能免輸入直接通過" />
-            <StepItem num={4} title="驗證通過後自動跳回 FOXLINK GPT TO CORTEX 主畫面" />
+            <StepItem num={4} title="驗證通過後自動跳回 Foxlink GPT to Cortex 主畫面" />
           </div>
           <NoteBox>
             <strong>重要：SSO 僅適用於擁有 AD 帳號的正崴員工。</strong>
@@ -209,7 +209,7 @@ function UserManual() {
           </NoteBox>
           <TipBox>
             AD 帳號登入後如需修改密碼，請透過公司 AD 系統（如 Windows 網域）更改，
-            FOXLINK GPT TO CORTEX 的「修改密碼」功能僅限本地帳號使用。
+            Foxlink GPT to Cortex 的「修改密碼」功能僅限本地帳號使用。
           </TipBox>
         </SubSection>
 
@@ -252,7 +252,7 @@ function UserManual() {
               color: 'bg-slate-800',
               title: '左側邊欄',
               items: [
-                'FOXLINK GPT TO CORTEX Logo 及品牌識別',
+                'Foxlink GPT to Cortex Logo 及品牌識別',
                 '「+ 新對話」按鈕 — 建立全新對話 Session',
                 'AI 模型選擇下拉選單 — 切換 AOAI / Gemini 等模型',
                 '對話歷史清單（依今天、昨天、過去 7 天、更早分組）',
@@ -450,7 +450,7 @@ function UserManual() {
 
       <Section id="u-tools" icon={<Terminal size={22} />} iconColor="text-cyan-500" title="可用工具">
         <Para>
-          FOXLINK GPT TO CORTEX 支援多種工具擴展能力，讓 AI 在對話中自動取用企業內部資料、知識庫及技能。
+          Foxlink GPT to Cortex 支援多種工具擴展能力，讓 AI 在對話中自動取用企業內部資料、知識庫及技能。
           您可以透過對話頂部工具列的各功能開關，明確指定要使用哪些工具；
           也可以讓系統根據訊息內容自動判斷（TAG 路由機制）。
         </Para>
@@ -960,7 +960,7 @@ function UserManual() {
 
       <Section id="u-share" icon={<Share2 size={22} />} iconColor="text-blue-500" title="分享對話">
         <Para>
-          FOXLINK GPT TO CORTEX 提供類似 ChatGPT 的對話分享功能，您可以將任何一段完整的對話建立為唯讀快照，
+          Foxlink GPT to Cortex 提供類似 ChatGPT 的對話分享功能，您可以將任何一段完整的對話建立為唯讀快照，
           並把連結分享給同事。對方只需登入即可查看，也可以選擇「繼續這段對話」複製一份到自己的帳號接著使用。
         </Para>
 
@@ -1685,7 +1685,7 @@ function UserManual() {
 
       <Section id="u-lang" icon={<Globe size={22} />} iconColor="text-sky-500" title="語言切換與多語設定">
         <Para>
-          FOXLINK GPT TO CORTEX 完整支援<strong>繁體中文（繁中）、英文（EN）、越南文（VI）</strong>三種語言，
+          Foxlink GPT to Cortex 完整支援<strong>繁體中文（繁中）、英文（EN）、越南文（VI）</strong>三種語言，
           涵蓋 UI 介面語言切換及內容多語翻譯兩個層面，讓不同語系的同仁都能流暢使用。
         </Para>
 
@@ -2609,7 +2609,7 @@ function UserManual() {
 
       <Section id="u-help-kb" icon={<BookMarked size={22} />} iconColor="text-blue-500" title="AI 回答使用問題">
         <Para>
-          FOXLINK GPT TO CORTEX 內建了一套<strong>使用說明知識庫</strong>，涵蓋系統所有功能的操作方式。
+          Foxlink GPT to Cortex 內建了一套<strong>使用說明知識庫</strong>，涵蓋系統所有功能的操作方式。
           您可以直接在對話框向 AI 提問，不需要翻閱說明書，AI 會從知識庫中找到最相關的說明回答您。
         </Para>
 
@@ -3157,15 +3157,15 @@ function UserManual() {
       {/* ═══════════════════════════════ Webex Bot 使用 */}
       <Section id="u-webex-bot" icon={<MessageSquare size={22} />} iconColor="text-green-500" title="Webex Bot 使用">
         <Para>
-          FOXLINK GPT TO CORTEX 支援透過 <strong>Cisco Webex</strong> 直接與 AI 對話，享有與 Web 介面相同的問答、工具調用、檔案收發能力，
+          Foxlink GPT to Cortex 支援透過 <strong>Cisco Webex</strong> 直接與 AI 對話，享有與 Web 介面相同的問答、工具調用、檔案收發能力，
           無需開啟瀏覽器，在 Webex 行動裝置上也能隨時使用。
         </Para>
 
         <SubSection title="開始使用">
           <div className="space-y-3">
-            <StepItem num={1} title="在 Webex 搜尋 Bot 帳號" desc="搜尋「FOXLINK GPT TO CORTEX」或 Bot 的 email（請洽管理員取得），點擊後直接傳送訊息" />
+            <StepItem num={1} title="在 Webex 搜尋 Bot 帳號" desc="搜尋「Foxlink GPT to Cortex」或 Bot 的 email（請洽管理員取得），點擊後直接傳送訊息" />
             <StepItem num={2} title="傳送第一則訊息" desc="Bot 會在 8 秒內開始處理並回覆，第一次使用會自動建立對話 Session" />
-            <StepItem num={3} title="群組 Room 使用" desc="在群組中需要 @FOXLINK GPT TO CORTEX 才會觸發，DM 則直接傳送即可" />
+            <StepItem num={3} title="群組 Room 使用" desc="在群組中需要 @Foxlink GPT to Cortex 才會觸發，DM 則直接傳送即可" />
           </div>
           <NoteBox>
             Bot 採用輪詢模式（每 8 秒），訊息最長延遲約 8 秒才開始處理，請稍待 AI 回應（約 10–30 秒）。
@@ -3204,7 +3204,7 @@ function UserManual() {
             傳送 <code className="bg-slate-100 px-1 rounded text-xs">/new</code>（或「新對話」、「重置」、<code className="bg-slate-100 px-1 rounded text-xs">/clear</code>）可隨時手動清除記憶開始新對話。
           </Para>
           <TipBox>
-            開啟新對話後，Webex 聊天室會顯示時間戳分隔線（━━━ 🔄 新對話開始 ━━━），舊訊息仍保留在歷史中，FOXLINK GPT TO CORTEX 的「對話紀錄」也同步保存，可隨時回顧。
+            開啟新對話後，Webex 聊天室會顯示時間戳分隔線（━━━ 🔄 新對話開始 ━━━），舊訊息仍保留在歷史中，Foxlink GPT to Cortex 的「對話紀錄」也同步保存，可隨時回顧。
           </TipBox>
         </SubSection>
 
@@ -4072,7 +4072,7 @@ generate_txt:供應商週報_{{date}}.txt
 
       <Section id="a-mcp" icon={<Globe size={22} />} iconColor="text-cyan-500" title="MCP 伺服器管理">
         <Para>
-          MCP（Model Context Protocol）是一種標準通訊協定，讓 FOXLINK GPT TO CORTEX 的 AI 對話可以即時呼叫外部工具伺服器，
+          MCP（Model Context Protocol）是一種標準通訊協定，讓 Foxlink GPT to Cortex 的 AI 對話可以即時呼叫外部工具伺服器，
           擴充 AI 的能力範圍，例如查詢 ERP 資料庫、呼叫企業內部 API、執行自動化腳本等。
           系統全面支援 MCP 的所有主流傳輸模式，包含新舊規範及本地端 stdio 模式。
         </Para>
@@ -4180,7 +4180,7 @@ generate_txt:供應商週報_{{date}}.txt
         <Para>
           DIFY 是正崴內部部署的知識管理平台（fldify-api.foxlink.com.tw），
           可將企業內部文件、產品規格、SOP 等資料建成向量知識庫。
-          整合後，使用者在 FOXLINK GPT TO CORTEX 對話時，AI 可自動查詢相關知識庫，
+          整合後，使用者在 Foxlink GPT to Cortex 對話時，AI 可自動查詢相關知識庫，
           讓回答能參考企業內部文件內容，而非僅依賴通用知識。
         </Para>
 
@@ -4222,7 +4222,7 @@ generate_txt:供應商週報_{{date}}.txt
         <SubSection title="新增 DIFY 知識庫">
           <div className="space-y-3">
             <StepItem num={1} title="在 DIFY 平台建立知識庫並取得 API Key" desc="登入 fldify-api.foxlink.com.tw，建立應用並複製 API Key（格式：app-xxxxxxxx）" />
-            <StepItem num={2} title="進入 FOXLINK GPT TO CORTEX 後台，點選「DIFY 知識庫」頁籤" />
+            <StepItem num={2} title="進入 Foxlink GPT to Cortex 後台，點選「DIFY 知識庫」頁籤" />
             <StepItem num={3} title="點選「新增知識庫」按鈕" />
             <StepItem num={4} title="填寫設定欄位" desc="名稱、API Server、API Key、描述（重要）、排序順序" />
             <StepItem num={5} title="點選「測試」按鈕確認連線正常" desc="測試成功會顯示回應時間及預覽文字" />
@@ -4546,7 +4546,7 @@ generate_txt:供應商週報_{{date}}.txt
 
       <Section id="a-api-keys" icon={<Key size={22} />} iconColor="text-amber-600" title="外部 API 金鑰管理">
         <Para>
-          外部 API 金鑰管理讓第三方系統可透過 REST API 安全存取 FOXLINK GPT TO CORTEX 的知識庫查詢服務，
+          外部 API 金鑰管理讓第三方系統可透過 REST API 安全存取 Foxlink GPT to Cortex 的知識庫查詢服務，
           位於後台管理的「外部 API 金鑰」頁籤（僅系統管理員可見）。
         </Para>
 
@@ -4775,7 +4775,7 @@ POST /api/v1/kb/chat
               </div>
               <div className="text-sm text-slate-600 space-y-1 leading-6">
                 <p>① Teams 頻道 → 右鍵「管理頻道」→「連接器」→「Incoming Webhook」→「設定」</p>
-                <p>② 輸入名稱（如 FOXLINK GPT TO CORTEX Monitor），上傳 logo，點「建立」</p>
+                <p>② 輸入名稱（如 Foxlink GPT to Cortex Monitor），上傳 logo，點「建立」</p>
                 <p>③ 複製產生的 Webhook URL（格式：<code className="bg-slate-100 px-1 rounded text-xs">https://xxx.webhook.office.com/webhookb2/...</code>）</p>
                 <p>④ 監控設定 → 類型選「Microsoft Teams」→ 貼上 URL → 儲存</p>
               </div>
@@ -4843,7 +4843,7 @@ POST /api/v1/kb/chat
 
       <Section id="a-k8s" icon={<Server size={22} />} iconColor="text-violet-500" title="K8s 部署更新">
         <Para>
-          FOXLINK GPT TO CORTEX 以 Kubernetes 部署，基本 4 replica（HPA 可自動擴至 8），採用 flgptm01:5000 內部 HTTP Registry。
+          Foxlink GPT to Cortex 以 Kubernetes 部署，基本 4 replica（HPA 可自動擴至 8），採用 flgptm01:5000 內部 HTTP Registry。
           設定完成後每次更版執行 <code className="bg-slate-100 px-1 rounded text-xs">./deploy.sh</code> 即可，約 1 分鐘零停機完成。
         </Para>
 
@@ -5208,7 +5208,7 @@ cd ~/foxlink_gpt && git pull
           />
         </SubSection>
 
-        <SubSection title="系統資料庫（FOXLINK GPT TO CORTEX 主庫 Oracle 23 AI）">
+        <SubSection title="系統資料庫（Foxlink GPT to Cortex 主庫 Oracle 23 AI）">
           <Table
             headers={['參數', '用途', '本機開發', 'K8s/Docker']}
             rows={[
@@ -5425,7 +5425,7 @@ SESSION_TTL_SECONDS=28800`}</CodeBlock>
       <Section id="a-help-kb-sync" icon={<RefreshCw size={22} />} iconColor="text-blue-500" title="說明書 KB 自動同步">
         <Para>
           系統在每次啟動時，會自動將使用者說明書內容向量化並存入一個名為
-          <strong>「FOXLINK GPT TO CORTEX 使用說明書」</strong>的系統公開知識庫。
+          <strong>「Foxlink GPT to Cortex 使用說明書」</strong>的系統公開知識庫。
           這讓 AI 在對話中能回答「如何使用本系統」的問題，並透過 TAG 路由自動匹配，
           使用者不需要手動掛載知識庫。
         </Para>
@@ -5444,7 +5444,7 @@ SESSION_TTL_SECONDS=28800`}</CodeBlock>
        │     └─ 未搶到 → 印「略過」，直接返回（其餘 3 個 Pod）
        │
        ▼ 拿到鎖的 Pod：
-  找或建立 KB「FOXLINK GPT TO CORTEX 使用說明書」
+  找或建立 KB「Foxlink GPT to Cortex 使用說明書」
        │
        ▼ 逐章節（共 21 個）：
   計算 MD5 hash → 比對 kb_documents.filename
@@ -5504,9 +5504,9 @@ SESSION_TTL_SECONDS=28800`}</CodeBlock>
           <Table
             headers={['設定項目', '值', '說明']}
             rows={[
-              ['名稱', 'FOXLINK GPT TO CORTEX 使用說明書', '系統自動建立，名稱固定，不可在 UI 中刪除後自動重建'],
+              ['名稱', 'Foxlink GPT to Cortex 使用說明書', '系統自動建立，名稱固定，不可在 UI 中刪除後自動重建'],
               ['is_public', '1（全員可見）', '所有使用者無需申請，可在知識庫市集看到並在對話中使用'],
-              ['Tags', '使用說明, 操作手冊, 功能教學, 如何使用, FOXLINK GPT TO CORTEX', 'TAG 路由比對依據，覆蓋常見問法'],
+              ['Tags', '使用說明, 操作手冊, 功能教學, 如何使用, Foxlink GPT to Cortex', 'TAG 路由比對依據，覆蓋常見問法'],
               ['Embedding 模型', '同 KB_EMBEDDING_MODEL 環境變數（預設 gemini-embedding-001）', ''],
               ['維度', '768', '固定，不跟隨 ENV 變動'],
               ['分塊策略', 'regular（1024 字 / chunk, overlap 50）', ''],
@@ -5564,7 +5564,7 @@ SESSION_TTL_SECONDS=28800`}</CodeBlock>
         <SubSection title="手動強制重新同步">
           <Para>若需強制重建所有章節（如更換 Embedding 模型維度），步驟如下：</Para>
           <div className="space-y-3">
-            <StepItem num={1} title="進入知識庫市集 → 找到「FOXLINK GPT TO CORTEX 使用說明書」" />
+            <StepItem num={1} title="進入知識庫市集 → 找到「Foxlink GPT to Cortex 使用說明書」" />
             <StepItem num={2} title="刪除知識庫（或刪除所有文件）" desc="刪除後 kb_documents 及 kb_chunks 全部清空" />
             <StepItem num={3} title="重新啟動 Server（或 rolling restart）" desc="kubectl rollout restart deployment/foxlink-gpt" />
             <StepItem num={4} title="Server 重啟後自動重建知識庫並對所有章節重新 embed" />
@@ -6182,7 +6182,7 @@ export default function HelpPage() {
         </button>
         <div className="flex items-center gap-2">
           <BookOpen size={20} className="text-blue-500" />
-          <h1 className="text-lg font-bold text-slate-800">FOXLINK GPT TO CORTEX 使用說明書</h1>
+          <h1 className="text-lg font-bold text-slate-800">Foxlink GPT to Cortex 使用說明書</h1>
         </div>
 
         {/* Role tabs */}
@@ -6249,7 +6249,7 @@ export default function HelpPage() {
 
             {/* Footer */}
             <div className="mt-16 pt-8 border-t border-slate-200 text-center">
-              <p className="text-slate-400 text-xs">FOXLINK GPT TO CORTEX 使用說明書</p>
+              <p className="text-slate-400 text-xs">Foxlink GPT to Cortex 使用說明書</p>
               <p className="text-slate-300 text-xs mt-1">如有問題請洽系統管理員</p>
             </div>
           </div>

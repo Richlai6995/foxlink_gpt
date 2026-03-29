@@ -38,9 +38,9 @@ export default function ResetPasswordPage() {
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
           <div className="inline-flex items-center justify-center w-20 h-20 mb-4">
-            <img src="/favicon.png" alt="FOXLINK GPT TO CORTEX" className="w-20 h-20 object-contain drop-shadow-lg" />
+            <img src="/favicon.png" alt="Foxlink GPT to Cortex" className="w-20 h-20 object-contain drop-shadow-lg" />
           </div>
-          <h1 className="text-2xl font-bold text-white">FOXLINK GPT TO CORTEX</h1>
+          <h1 className="text-2xl font-bold text-white">Foxlink GPT to Cortex</h1>
           <p className="text-slate-400 text-sm mt-1">重設密碼</p>
         </div>
 
