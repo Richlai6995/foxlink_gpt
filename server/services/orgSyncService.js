@@ -105,7 +105,7 @@ async function syncOrgToUsers(db, employeeNos = null, trigger = 'manual') {
     users = await db.prepare(
       `SELECT id, employee_id, name, email, username, dept_code, dept_name, profit_center, profit_center_name,
               org_section, org_section_name, org_group_name, factory_code, org_end_date
-       FROM users WHERE employee_id IS NOT NULL AND employee_id != '' AND status = 'active'`
+       FROM users WHERE employee_id IS NOT NULL AND status = 'active'`
     ).all();
   } else {
     const placeholders = employeeNos.map(() => '?').join(',');
@@ -117,9 +117,10 @@ async function syncOrgToUsers(db, employeeNos = null, trigger = 'manual') {
   }
 
   const empNos = [...new Set(users.map(u => String(u.employee_id)).filter(Boolean))];
+  console.log(`[OrgSync] Found ${users.length} users, ${empNos.length} unique employee_ids`);
   if (!empNos.length) {
     console.log('[OrgSync] No employees to sync.');
-    return { synced: 0 };
+    return { synced: 0, total_users: users.length };
   }
 
   // 查 ERP
@@ -136,6 +137,8 @@ async function syncOrgToUsers(db, employeeNos = null, trigger = 'manual') {
     });
     return { synced: 0, error: e.message };
   }
+
+  console.log(`[OrgSync] ERP returned ${rows.length} rows for ${empNos.length} employees`);
 
   // 建立 ERP 資料 map
   const erpMap = {};
@@ -235,8 +238,9 @@ async function syncOrgToUsers(db, employeeNos = null, trigger = 'manual') {
     }
   }
 
-  console.log(`[OrgSync] syncOrgToUsers done (trigger=${trigger}): changed=${synced}, unchanged=${unchanged}`);
-  return { synced, unchanged };
+  const skipped = users.length - synced - unchanged;
+  console.log(`[OrgSync] syncOrgToUsers done (trigger=${trigger}): changed=${synced}, unchanged=${unchanged}, erp_not_found=${skipped}`);
+  return { synced, unchanged, total_users: users.length, erp_rows: rows.length };
 }
 
 /**

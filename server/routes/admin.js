@@ -66,7 +66,8 @@ router.post('/users/sync-org-all', async (req, res) => {
     }
     const { syncOrgToUsers } = require('../services/orgSyncService');
     const result = await syncOrgToUsers(db, null, 'manual');
-    res.json({ ...result, message: `已同步 ${result.synced} 筆，無變動 ${result.unchanged ?? 0} 筆` });
+    const errPart = result.error ? `（錯誤：${result.error}）` : '';
+    res.json({ ...result, message: `已同步 ${result.synced} 筆，無變動 ${result.unchanged ?? 0} 筆${errPart}` });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
