@@ -25,7 +25,7 @@ const { v4: uuidv4 } = require('uuid');
 const { getWebexService } = require('../services/webexService');
 const { generateWithTools, extractTextFromFile, fileToGeminiPart, transcribeAudio, MODEL_PRO } = require('../services/gemini');
 const { processGenerateBlocks } = require('../services/fileGenerator');
-const { upsertTokenUsage } = require('../services/tokenService');
+const { upsertTokenUsage, checkBudgetExceeded } = require('../services/tokenService');
 const { notifyAdminSensitiveKeyword } = require('../services/mailService');
 
 const UPLOAD_DIR = process.env.UPLOAD_DIR
@@ -293,8 +293,8 @@ async function checkSensitiveKeywords(db, user, sessionId, content) {
     const hasSensitive = matched.length > 0 ? 1 : 0;
 
     await db.prepare(
-      `INSERT INTO audit_logs (user_id, session_id, content, has_sensitive, sensitive_keywords)
-       VALUES (?, ?, ?, ?, ?)`
+      `INSERT INTO audit_logs (user_id, session_id, content, has_sensitive, sensitive_keywords, source)
+       VALUES (?, ?, ?, ?, ?, 'webex')`
     ).run(user.id, sessionId, content.slice(0, 4000), hasSensitive, matched.length ? JSON.stringify(matched) : null);
 
     if (hasSensitive) {
@@ -612,6 +612,19 @@ async function processMessage(db, webex, user, sessionId, roomId, messageText, f
   const { declarations, handlers } = await loadFunctionDeclarations(db, user);
 
   // 6. 呼叫 AI
+  // 6. Budget 檢查（admin 豁免）
+  if (user.role !== 'admin') {
+    const budget = await checkBudgetExceeded(db, user.id);
+    if (budget.exceeded && budget.action !== 'warn') {
+      await webex.sendMessage(roomId, `⚠️ ${budget.message}`);
+      return;
+    }
+    if (budget.exceeded && budget.action === 'warn') {
+      // warn 模式：繼續執行但提示
+      console.warn(`[Webex][Budget] warn user=${user.id} msg="${budget.message}"`);
+    }
+  }
+
   const { apiModel } = await resolveApiModel(db, 'pro');
   console.log(`[Webex] Calling AI model=${apiModel} user=${user.username} session=${sessionId} tools=${declarations.length}`);
 
@@ -797,8 +810,16 @@ async function handleWebexMessage(message) {
 
   // 查 user
   const user = await findUserByEmail(db, senderEmail);
+  const roomType = isDm ? 'direct' : 'group';
+  const msgPreview = (message.text || '').slice(0, 100);
+
   if (!user) {
     console.warn(`[Webex][Auth] No user matched, sending rejection to roomId="${roomId}"`);
+    // 記錄認證失敗
+    db.prepare(
+      `INSERT INTO webex_auth_logs (raw_email, norm_email, status, room_type, room_id, msg_text)
+       VALUES (?, ?, 'not_found', ?, ?, ?)`
+    ).run(senderEmail, normalizeEmail(senderEmail), roomType, roomId, msgPreview).catch(() => {});
     await webex.sendMessage(roomId,
       `⚠️ 您的帳號（${senderEmail}）尚未在 FOXLINK GPT 系統中註冊。\n請聯絡系統管理員申請帳號。`
     );
@@ -806,6 +827,10 @@ async function handleWebexMessage(message) {
   }
   if (user.status !== 'active') {
     console.warn(`[Webex][Auth] User id=${user.id} status=${user.status}, rejected`);
+    db.prepare(
+      `INSERT INTO webex_auth_logs (raw_email, norm_email, user_id, user_name, username, status, room_type, room_id, msg_text)
+       VALUES (?, ?, ?, ?, ?, 'disabled', ?, ?, ?)`
+    ).run(senderEmail, normalizeEmail(senderEmail), user.id, user.name, user.username, roomType, roomId, msgPreview).catch(() => {});
     await webex.sendMessage(roomId,
       `⚠️ 您的帳號目前已停用，請聯絡系統管理員。`
     );
@@ -814,12 +839,21 @@ async function handleWebexMessage(message) {
   // webex_bot_enabled = 0 表示此帳號不允許使用 Webex Bot
   if (user.webex_bot_enabled === 0) {
     console.warn(`[Webex][Auth] User id=${user.id} webex_bot_enabled=0, rejected`);
+    db.prepare(
+      `INSERT INTO webex_auth_logs (raw_email, norm_email, user_id, user_name, username, status, room_type, room_id, msg_text)
+       VALUES (?, ?, ?, ?, ?, 'bot_disabled', ?, ?, ?)`
+    ).run(senderEmail, normalizeEmail(senderEmail), user.id, user.name, user.username, roomType, roomId, msgPreview).catch(() => {});
     await webex.sendMessage(roomId,
       `⚠️ 您的帳號目前未開啟 Webex Bot 功能，如需使用請聯絡系統管理員。`
     );
     return;
   }
   console.log(`[Webex][Auth] User authenticated: id=${user.id} username="${user.username}" role=${user.role}`);
+  // 記錄認證成功
+  db.prepare(
+    `INSERT INTO webex_auth_logs (raw_email, norm_email, user_id, user_name, username, status, room_type, room_id, msg_text)
+     VALUES (?, ?, ?, ?, ?, 'ok', ?, ?, ?)`
+  ).run(senderEmail, normalizeEmail(senderEmail), user.id, user.name, user.username, roomType, roomId, msgPreview).catch(() => {});
 
   // 取得 Bot 名稱（用來剝 mention）
   let botName = 'FOXLINK GPT';

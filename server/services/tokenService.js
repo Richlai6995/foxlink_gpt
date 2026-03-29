@@ -157,4 +157,85 @@ async function recalcNullCosts(db, limitDays = 365) {
   return { fixed, failed };
 }
 
-module.exports = { upsertTokenUsage, calcCallCost, recalcNullCosts };
+/**
+ * 檢查使用者是否超過 daily/weekly/monthly 預算。
+ * @returns {{ exceeded: boolean, message: string, action: string }}
+ *   exceeded=true 且 action='block' → 拒絕請求
+ *   exceeded=true 且 action='warn'  → 僅警告，仍允許
+ */
+async function checkBudgetExceeded(db, userId) {
+  try {
+    const budgetRow = await db.prepare(
+      `SELECT u.budget_daily, u.budget_weekly, u.budget_monthly,
+              u.quota_exceed_action AS user_action,
+              r.budget_daily AS role_daily, r.budget_weekly AS role_weekly, r.budget_monthly AS role_monthly,
+              r.quota_exceed_action AS role_action
+       FROM users u LEFT JOIN roles r ON r.id = u.role_id WHERE u.id = ?`
+    ).get(userId);
+
+    if (!budgetRow) return { exceeded: false, message: '', action: 'block' };
+
+    const limitD = budgetRow.budget_daily  ?? budgetRow.role_daily  ?? null;
+    const limitW = budgetRow.budget_weekly ?? budgetRow.role_weekly ?? null;
+    const limitM = budgetRow.budget_monthly?? budgetRow.role_monthly?? null;
+    const action = budgetRow.user_action || budgetRow.role_action || 'block';
+
+    const now = new Date();
+    const todayStr = now.toISOString().slice(0, 10);
+    const D = `TO_DATE(?, 'YYYY-MM-DD')`;
+
+    const sumCost = (row) => {
+      const total = row?.total ?? 0;
+      const images = row?.images ?? 0;
+      return total > 0 ? total : images * 0.04;
+    };
+
+    if (limitD != null) {
+      const row = await db.prepare(
+        `SELECT COALESCE(SUM(cost),0) AS total, COALESCE(SUM(image_count),0) AS images
+         FROM token_usage WHERE user_id=? AND usage_date=${D}`
+      ).get(userId, todayStr);
+      const spent = sumCost(row);
+      if (spent >= limitD) {
+        return { exceeded: true, action,
+          message: `當日使用金額已達上限 $${limitD}（已使用 $${spent.toFixed(4)}），請明日再試。` };
+      }
+    }
+
+    if (limitW != null) {
+      const dow = now.getDay();
+      const monday = new Date(now);
+      monday.setDate(now.getDate() + (dow === 0 ? -6 : 1 - dow));
+      const mondayStr = monday.toISOString().slice(0, 10);
+      const row = await db.prepare(
+        `SELECT COALESCE(SUM(cost),0) AS total, COALESCE(SUM(image_count),0) AS images
+         FROM token_usage WHERE user_id=? AND usage_date>=${D} AND usage_date<=${D}`
+      ).get(userId, mondayStr, todayStr);
+      const spent = sumCost(row);
+      if (spent >= limitW) {
+        return { exceeded: true, action,
+          message: `本週使用金額已達上限 $${limitW}（已使用 $${spent.toFixed(4)}），請下週一再試。` };
+      }
+    }
+
+    if (limitM != null) {
+      const firstOfMonth = `${todayStr.slice(0, 7)}-01`;
+      const row = await db.prepare(
+        `SELECT COALESCE(SUM(cost),0) AS total, COALESCE(SUM(image_count),0) AS images
+         FROM token_usage WHERE user_id=? AND usage_date>=${D} AND usage_date<=${D}`
+      ).get(userId, firstOfMonth, todayStr);
+      const spent = sumCost(row);
+      if (spent >= limitM) {
+        return { exceeded: true, action,
+          message: `本月使用金額已達上限 $${limitM}（已使用 $${spent.toFixed(4)}），請下月一日再試。` };
+      }
+    }
+
+    return { exceeded: false, message: '', action };
+  } catch (e) {
+    console.error('[TokenService] checkBudgetExceeded error:', e.message);
+    return { exceeded: false, message: '', action: 'block' }; // 出錯時不阻擋
+  }
+}
+
+module.exports = { upsertTokenUsage, calcCallCost, recalcNullCosts, checkBudgetExceeded };

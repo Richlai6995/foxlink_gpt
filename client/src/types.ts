@@ -96,6 +96,7 @@ export interface AuditLog {
   username: string
   name: string
   employee_id?: string
+  source?: string | null
 }
 
 export interface SensitiveKeyword {

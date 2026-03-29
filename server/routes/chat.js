@@ -2789,8 +2789,8 @@ async function checkSensitiveKeywords(db, user, sessionId, content) {
     const hasSensitive = matched.length > 0 ? 1 : 0;
 
     await db.prepare(
-      `INSERT INTO audit_logs (user_id, session_id, content, has_sensitive, sensitive_keywords)
-       VALUES (?, ?, ?, ?, ?)`
+      `INSERT INTO audit_logs (user_id, session_id, content, has_sensitive, sensitive_keywords, source)
+       VALUES (?, ?, ?, ?, ?, 'web')`
     ).run(user.id, sessionId, content, hasSensitive, matched.length ? JSON.stringify(matched) : null);
 
     if (hasSensitive) {

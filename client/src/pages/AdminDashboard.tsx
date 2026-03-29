@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Users, BarChart3, Shield, AlertTriangle, Database, Mail, ArrowLeft, Cpu, DollarSign, CalendarClock, Plug, Zap, UserCog, Sparkles, Code2, Search, KeyRound, MonitorPlay, Lock, Activity } from 'lucide-react'
+import { Users, BarChart3, Shield, AlertTriangle, Database, Mail, ArrowLeft, Cpu, DollarSign, CalendarClock, Plug, Zap, UserCog, Sparkles, Code2, Search, KeyRound, MonitorPlay, Lock, Activity, MessageSquare } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import UserManagement from '../components/admin/UserManagement'
 import TokenUsagePanel from '../components/admin/TokenUsage'
@@ -24,7 +24,8 @@ import AiDashboardAdmin from '../components/admin/AiDashboardAdmin'
 import DataPermissionsPanel from '../components/admin/DataPermissionsPanel'
 import MonitorPage from '../components/monitor/MonitorPage'
 import DbSourcesPanel from '../components/admin/DbSourcesPanel'
-type Tab = 'users' | 'roles' | 'tokens' | 'audit' | 'keywords' | 'db' | 'mail' | 'llm' | 'vector-defaults' | 'cost' | 'scheduled' | 'mcp' | 'dify' | 'kb' | 'skills' | 'code-runners' | 'research' | 'api-keys' | 'ai-dashboard' | 'data-permissions' | 'monitor' | 'db-sources'
+import WebexLogsPanel from '../components/admin/WebexLogsPanel'
+type Tab = 'users' | 'roles' | 'tokens' | 'audit' | 'keywords' | 'db' | 'mail' | 'llm' | 'vector-defaults' | 'cost' | 'scheduled' | 'mcp' | 'dify' | 'kb' | 'skills' | 'code-runners' | 'research' | 'api-keys' | 'ai-dashboard' | 'data-permissions' | 'monitor' | 'db-sources' | 'webex-logs'
 
 export default function AdminDashboard() {
   const [activeTab, setActiveTab] = useState<Tab>('users')
@@ -37,6 +38,7 @@ export default function AdminDashboard() {
     { id: 'tokens', label: t('admin.tabs.tokens'), icon: <BarChart3 size={16} /> },
     { id: 'cost', label: t('admin.tabs.cost'), icon: <DollarSign size={16} /> },
     { id: 'audit', label: t('admin.tabs.audit'), icon: <Shield size={16} /> },
+    { id: 'webex-logs', label: 'Webex Bot 日誌', icon: <MessageSquare size={16} /> },
     { id: 'keywords', label: t('admin.tabs.keywords'), icon: <AlertTriangle size={16} /> },
     { id: 'research', label: t('admin.tabs.research'), icon: <Search size={16} /> },
     { id: 'api-keys', label: t('admin.tabs.apiKeys'), icon: <KeyRound size={16} /> },
@@ -99,6 +101,7 @@ export default function AdminDashboard() {
           {activeTab === 'roles' && <RoleManagement />}
           {activeTab === 'tokens' && <TokenUsagePanel />}
           {activeTab === 'audit' && <AuditLogs />}
+          {activeTab === 'webex-logs' && <WebexLogsPanel />}
           {activeTab === 'keywords' && <SensitiveKeywords />}
           {activeTab === 'db' && <DbMaintenance />}
           {activeTab === 'mail' && <MailSettingsPanel />}

@@ -152,6 +152,7 @@ const userSections = [
   { id: 'u-ai-bi-schema', label: 'Schema 與多資料庫來源', icon: <Database size={18} /> },
   { id: 'u-help-kb', label: 'AI 回答使用問題', icon: <BookMarked size={18} /> },
   { id: 'u-doc-template', label: '文件範本', icon: <LayoutTemplate size={18} /> },
+  { id: 'u-webex-bot', label: 'Webex Bot 使用', icon: <MessageSquare size={18} /> },
 ]
 
 function UserManual() {
@@ -3152,6 +3153,74 @@ function UserManual() {
           </NoteBox>
         </SubSection>
       </Section>
+
+      {/* ═══════════════════════════════ Webex Bot 使用 */}
+      <Section id="u-webex-bot" icon={<MessageSquare size={22} />} iconColor="text-green-500" title="Webex Bot 使用">
+        <Para>
+          FOXLINK GPT 支援透過 <strong>Cisco Webex</strong> 直接與 AI 對話，享有與 Web 介面相同的問答、工具調用、檔案收發能力，
+          無需開啟瀏覽器，在 Webex 行動裝置上也能隨時使用。
+        </Para>
+
+        <SubSection title="開始使用">
+          <div className="space-y-3">
+            <StepItem num={1} title="在 Webex 搜尋 Bot 帳號" desc="搜尋「FOXLINK GPT」或 Bot 的 email（請洽管理員取得），點擊後直接傳送訊息" />
+            <StepItem num={2} title="傳送第一則訊息" desc="Bot 會在 8 秒內開始處理並回覆，第一次使用會自動建立對話 Session" />
+            <StepItem num={3} title="群組 Room 使用" desc="在群組中需要 @FOXLINK GPT 才會觸發，DM 則直接傳送即可" />
+          </div>
+          <NoteBox>
+            Bot 採用輪詢模式（每 8 秒），訊息最長延遲約 8 秒才開始處理，請稍待 AI 回應（約 10–30 秒）。
+          </NoteBox>
+        </SubSection>
+
+        <SubSection title="指令清單">
+          <Table
+            headers={['指令', '功能']}
+            rows={[
+              ['?', '列出您目前授權使用的所有工具（技能、知識庫、MCP 工具）'],
+              ['/new 或 /重置', '開啟新對話，清除本次 Session 記憶'],
+              ['/help', '顯示 Bot 使用說明'],
+              ['其他任何文字', '直接送 AI 問答，自動判斷並調用合適工具'],
+            ]}
+          />
+        </SubSection>
+
+        <SubSection title="附件支援">
+          <Table
+            headers={['類型', '說明']}
+            rows={[
+              ['PDF / Word / Excel / PPT', 'AI 直接讀取內容並回答問題'],
+              ['圖片（JPG / PNG / GIF / WebP）', 'AI 進行圖像分析'],
+              ['音訊（MP3 / WAV / MP4 Audio）', '自動轉錄為文字後分析'],
+              ['AI 生成的檔案', 'xlsx / docx / pdf / pptx 以附件方式回傳'],
+            ]}
+          />
+          <NoteBox>不支援影片檔（mp4 video / webm）。</NoteBox>
+        </SubSection>
+
+        <SubSection title="對話記憶與 Session">
+          <Para>
+            <strong>DM 對話</strong>：每日（台北時區）自動開啟新 Session，同一天的訊息共享上下文記憶。<br />
+            <strong>群組 Room</strong>：單一永久 Session，所有成員的對話共享同一記憶。<br />
+            傳送 <code className="bg-slate-100 px-1 rounded text-xs">/new</code> 可隨時手動清除記憶開始新對話。
+          </Para>
+        </SubSection>
+
+        <SubSection title="注意事項">
+          <div className="space-y-2">
+            {[
+              'Bot 功能須由管理員在您的帳號設定中開啟「允許使用 Webex Bot」',
+              '您的 Webex 帳號 email 必須與系統中的帳號 email 一致（自動支援 @foxlink.com / @foxlink.com.tw 互轉）',
+              'Webex 回應格式已針對行動裝置簡化，詳細報表建議使用 Web 介面',
+              '回應超過 4000 字元時會自動截斷，並提示您至 Web 介面查看完整版',
+            ].map((t, i) => (
+              <div key={i} className="flex items-start gap-2 text-sm text-slate-600">
+                <span className="text-blue-400 flex-shrink-0 mt-0.5">•</span>
+                {t}
+              </div>
+            ))}
+          </div>
+        </SubSection>
+      </Section>
     </div>
   )
 }
@@ -3185,6 +3254,7 @@ const adminSections = [
   { id: 'a-env-config', label: 'ENV 環境變數設定', icon: <Settings size={18} /> },
   { id: 'a-help-kb-sync', label: '說明書 KB 自動同步', icon: <RefreshCw size={18} /> },
   { id: 'a-doc-template', label: '文件範本管理', icon: <LayoutTemplate size={18} /> },
+  { id: 'a-webex-bot', label: 'Webex Bot 管理', icon: <MessageSquare size={18} /> },
 ]
 
 function AdminManual() {
@@ -5918,6 +5988,99 @@ function parseJsonFromAiOutput(text) {
             Pipeline 的 template_id 存放在 Pipeline JSON 的節點 config 物件中（非獨立 DB 欄位），
             隨排程任務的 <code className="bg-slate-100 px-1 rounded text-xs">pipeline_json</code> 欄位一起儲存。
           </Para>
+        </SubSection>
+      </Section>
+
+      {/* ═══════════════════════════════ Webex Bot 管理 */}
+      <Section id="a-webex-bot" icon={<MessageSquare size={22} />} iconColor="text-green-500" title="Webex Bot 管理">
+        <Para>
+          系統以 <strong>Outbound Polling</strong> 模式與 Webex 整合，每 8 秒主動向 Webex API 查詢新訊息，
+          不需公網 inbound URL，適用企業內網防火牆環境。K8s 多 Pod 部署透過 <strong>Redis 分散鎖</strong> 確保同一訊息只有一個 Pod 處理，不重複回應。
+        </Para>
+
+        <SubSection title="系統架構">
+          <CodeBlock>{`K8s 4 Pods 同時運行
+    │
+    │ 每 8 秒 outbound HTTPS
+    ▼
+GET /v1/rooms?sortBy=lastactivity&max=200
+    │ 新 DM 立即出現在頂端，首則訊息延遲 ≤ 8 秒
+    ▼
+GET /v1/messages?roomId={id}&max=50（最多翻 3 頁 = 150 則/room/cycle）
+    │
+    ▼ 每則訊息
+tryLock("webex:msg:{id}", 60s)  ← Redis 分散鎖
+    ├─ 搶到 → 此 Pod 處理（保證只有 1 個 Pod）
+    └─ 未搶到 → skip
+
+不同用戶訊息 lock key 不同
+→ 4 Pod 可同時各自處理 4 個用戶，並行能力 = Pod 數`}</CodeBlock>
+        </SubSection>
+
+        <SubSection title="啟動確認">
+          <Para>部署後查看任一 Pod log，應看到：</Para>
+          <CodeBlock>{`[WebexListener] Polling started (interval=8000ms, redis-lock=enabled)`}</CodeBlock>
+          <Para>收到訊息時，搶到 lock 的 Pod 會顯示：</Para>
+          <CodeBlock>{`[WebexListener] Dispatch: type=direct from="alice@foxlink.com" text="..."`}</CodeBlock>
+          <Para>其他 Pod 會顯示：</Para>
+          <CodeBlock>{`[WebexListener] Skipped (lock held by another pod): msg=Y2lzY29zcGF...`}</CodeBlock>
+        </SubSection>
+
+        <SubSection title="環境變數設定">
+          <Table
+            headers={['變數', '說明', '必填']}
+            rows={[
+              ['WEBEX_BOT_TOKEN', 'developer.webex.com 取得的 Bot Access Token', '✅ 必填'],
+              ['REDIS_URL', 'Redis 連線字串，多 Pod 防重複必要（e.g. redis://redis:6379）', '✅ 建議'],
+              ['WEBEX_POLL_INTERVAL_MS', 'Polling 間隔毫秒，預設 8000', '選填'],
+              ['WEBEX_ROOMS_PER_POLL', '每次取幾間房間，預設 200', '選填'],
+              ['WEBEX_PUBLIC_URL', 'AI 回應截斷時提示用的 Web 介面網址', '選填'],
+              ['WEBEX_WEBHOOK_SECRET', 'Webhook 備用模式的 HMAC 驗簽密鑰', '選填'],
+            ]}
+          />
+          <NoteBox>
+            本專案 K8s 環境的 WEBEX_BOT_TOKEN 與 REDIS_URL 已設定在 <code className="bg-amber-100 px-1 rounded text-xs">foxlink-secrets</code> Secret 中，無需額外操作。
+          </NoteBox>
+        </SubSection>
+
+        <SubSection title="每個使用者的 Webex Bot 開關">
+          <Para>
+            管理員可在「使用者管理」→ 編輯使用者 → 功能權限區塊，勾選或取消勾選
+            <strong>「允許使用 Webex Bot」</strong>（對應 DB 欄位 <code className="bg-slate-100 px-1 rounded text-xs">webex_bot_enabled</code>）。
+          </Para>
+          <Table
+            headers={['設定', '行為']}
+            rows={[
+              ['✅ 開啟（預設）', 'Bot 正常處理該用戶訊息'],
+              ['❌ 關閉', 'Bot 回覆「您的帳號目前未開啟 Webex Bot 功能，如需使用請聯絡系統管理員」'],
+            ]}
+          />
+          <TipBox>新建帳號預設開啟，可搭配角色設定批次管理。</TipBox>
+        </SubSection>
+
+        <SubSection title="DB Schema（自動 Migration）">
+          <Table
+            headers={['資料表', '欄位', '類型', '說明']}
+            rows={[
+              ['USERS', 'WEBEX_BOT_ENABLED', 'NUMBER(1) DEFAULT 1', '0=停用 Webex Bot，1=啟用'],
+              ['CHAT_SESSIONS', 'SOURCE', "VARCHAR2(30)", "'webex_dm' | 'webex_room' | NULL"],
+              ['CHAT_SESSIONS', 'WEBEX_ROOM_ID', 'VARCHAR2(200)', '群組 Room ID，DM 為 NULL'],
+            ]}
+          />
+          <Para>以上欄位透過 <code className="bg-slate-100 px-1 rounded text-xs">safeAddColumn()</code> 在伺服器啟動時自動新增，無需手動 DDL。</Para>
+        </SubSection>
+
+        <SubSection title="錯誤排查">
+          <Table
+            headers={['現象', '原因', '處理方式']}
+            rows={[
+              ['Bot 無回應', 'Polling 未啟動或 WEBEX_BOT_TOKEN 未設定', '確認 log 有 Polling started；確認 secret 有 WEBEX_BOT_TOKEN'],
+              ['用戶收到多份相同回應', 'Redis 未連線，多 Pod 各自處理', '確認 redis pod 運行中；確認 REDIS_URL 正確'],
+              ['「帳號未在系統中」訊息', '用戶 email 未在 users 表，或 email 格式不符', '新增帳號並設定 email；或確認 @foxlink.com/.com.tw 互轉邏輯'],
+              ['「帳號已停用」訊息', 'users.status != active', '在使用者管理中啟用帳號'],
+              ['首則訊息延遲較長', '正常現象，最長等待一個 Polling 週期', 'WEBEX_POLL_INTERVAL_MS 可調小（預設 8000ms）'],
+            ]}
+          />
         </SubSection>
       </Section>
     </div>

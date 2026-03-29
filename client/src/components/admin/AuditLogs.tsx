@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Shield, AlertTriangle, RefreshCw, Download, Search } from 'lucide-react'
+import { Shield, AlertTriangle, RefreshCw, Download, Search, MessageSquare, Monitor } from 'lucide-react'
 import type { AuditLog } from '../../types'
 import api from '../../lib/api'
 import { useTranslation } from 'react-i18next'
@@ -14,6 +14,7 @@ export default function AuditLogs() {
     startDate: new Date(Date.now() - 7 * 86400000).toISOString().split('T')[0],
     endDate: new Date().toISOString().split('T')[0],
     sensitive: '',
+    source: '',
   })
 
   const load = async () => {
@@ -23,6 +24,7 @@ export default function AuditLogs() {
       if (filters.startDate) params.set('startDate', filters.startDate)
       if (filters.endDate) params.set('endDate', filters.endDate)
       if (filters.sensitive) params.set('sensitive', filters.sensitive)
+      if (filters.source) params.set('source', filters.source)
       const res = await api.get(`/admin/audit-logs?${params}`)
       setLogs(res.data)
     } catch (e) {
@@ -41,12 +43,13 @@ export default function AuditLogs() {
   const sensitiveCount = displayedLogs.filter((l) => l.has_sensitive).length
 
   const exportCsv = () => {
-    const header = '時間,使用者,工號,是否敏感,敏感詞,對話內容'
+    const header = '時間,來源,使用者,工號,是否敏感,敏感詞,對話內容'
     const lines = displayedLogs.map((l) => {
       const kws = JSON.parse(l.sensitive_keywords || '[]').join(';')
       const content = `"${(l.content || '').replace(/"/g, '""')}"`
       return [
         l.created_at?.slice(0, 16),
+        l.source === 'webex' ? 'Webex' : 'Web',
         l.name || l.username,
         l.employee_id || '',
         l.has_sensitive ? '是' : '否',
@@ -103,6 +106,14 @@ export default function AuditLogs() {
             <option value="1">{t('audit.typeSensitive')}</option>
           </select>
         </div>
+        <div>
+          <label className="label">來源</label>
+          <select value={filters.source} onChange={(e) => setFilters((p) => ({ ...p, source: e.target.value }))} className="input">
+            <option value="">全部</option>
+            <option value="webex">Webex Bot</option>
+            <option value="web">Web UI</option>
+          </select>
+        </div>
         <div className="flex items-end">
           <button onClick={load} className="btn-primary">{t('audit.query')}</button>
         </div>
@@ -139,6 +150,15 @@ export default function AuditLogs() {
               <span className="text-sm font-medium text-slate-700">{l.name || l.username}</span>
               {l.employee_id && <span className="text-xs text-slate-400">{l.employee_id}</span>}
               <span className="text-xs text-slate-400">{l.created_at?.slice(0, 16)}</span>
+              {l.source === 'webex' ? (
+                <span className="inline-flex items-center gap-1 text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full">
+                  <MessageSquare size={10} /> Webex
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1 text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">
+                  <Monitor size={10} /> Web
+                </span>
+              )}
               {l.has_sensitive ? (
                 <span className="ml-auto text-xs bg-red-100 text-red-700 px-2 py-0.5 rounded-full">
                   {t('audit.sensitive', { keywords: JSON.parse(l.sensitive_keywords || '[]').join(', ') })}

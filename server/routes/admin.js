@@ -555,11 +555,12 @@ router.put('/kb-public-requests/:id', async (req, res) => {
 router.get('/audit-logs', async (req, res) => {
   try {
     const db = require('../database-oracle').db;
-    const { startDate, endDate, userId, sensitive } = req.query;
+    const { startDate, endDate, userId, sensitive, source } = req.query;
 
     let sql = `
       SELECT al.id, al.session_id, al.content, al.has_sensitive,
              al.sensitive_keywords, al.notified, al.created_at,
+             al.source,
              u.username, u.name, u.employee_id
       FROM audit_logs al
       JOIN users u ON al.user_id = u.id
@@ -570,7 +571,33 @@ router.get('/audit-logs', async (req, res) => {
     if (endDate) { sql += ` AND TRUNC(al.created_at) <= TO_DATE(?, 'YYYY-MM-DD')`; params.push(endDate); }
     if (userId) { sql += ' AND al.user_id = ?'; params.push(userId); }
     if (sensitive === '1') { sql += ' AND al.has_sensitive = 1'; }
+    if (source) { sql += ' AND al.source = ?'; params.push(source); }
     sql += ' ORDER BY al.created_at DESC FETCH FIRST 500 ROWS ONLY';
+
+    const rows = await db.prepare(sql).all(...params);
+    res.json(rows);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/admin/webex-auth-logs
+router.get('/webex-auth-logs', async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const { startDate, endDate, status } = req.query;
+
+    let sql = `
+      SELECT id, raw_email, norm_email, user_id, user_name, username,
+             status, room_type, room_id, msg_text, created_at
+      FROM webex_auth_logs
+      WHERE 1=1
+    `;
+    const params = [];
+    if (startDate) { sql += ` AND TRUNC(created_at) >= TO_DATE(?, 'YYYY-MM-DD')`; params.push(startDate); }
+    if (endDate) { sql += ` AND TRUNC(created_at) <= TO_DATE(?, 'YYYY-MM-DD')`; params.push(endDate); }
+    if (status) { sql += ' AND status = ?'; params.push(status); }
+    sql += ' ORDER BY created_at DESC FETCH FIRST 500 ROWS ONLY';
 
     const rows = await db.prepare(sql).all(...params);
     res.json(rows);
