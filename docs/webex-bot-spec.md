@@ -1,8 +1,8 @@
 # Webex Bot 整合規格書
 
-> 版本：1.0
+> 版本：1.1
 > 日期：2026-03-29
-> 狀態：待實作
+> 狀態：已實作（Polling 模式）
 
 ---
 
@@ -14,27 +14,49 @@
 
 ## 2. 系統架構
 
+### 2.1 Polling 模式（正式採用）
+
+`flgpt.foxlink.com.tw` 為企業內網 DNS，Webex Cloud 無法主動 inbound 連線，因此採用 **Outbound Polling** 模式：
+
 ```
-Webex App (User DM / Group Room)
+FOXLINK GPT Server
         │
-        │ HTTPS POST (webhook event)
+        │ HTTPS GET（outbound，每 5 秒）
         ▼
-FOXLINK GPT Server (/api/webex/webhook)
+Webex Events API
+GET /v1/events?resource=messages&type=created&from=T-5s&to=T
         │
-        ├─ 身分驗證 (email → users DB)
+        │ 回傳新訊息事件清單
+        ▼
+webexListener.js (startPolling)
+        │
+        ├─ 過濾 Bot 自身訊息
+        ├─ GET /v1/messages/{id} 取完整訊息
+        │
+        ▼
+handleWebexMessage(message)   ← 共用核心，webhook 模式也呼叫此函數
+        │
+        ├─ 身分驗證 (email → users DB，含 webex_bot_enabled 檢查)
         ├─ Session 管理 (取得/建立 chat_session)
-        ├─ 指令解析 (? / /new / 一般訊息)
+        ├─ 指令解析 (? / /new / /help / 一般訊息)
         ├─ 檔案下載 (Webex file URL → 暫存)
         │
-        ├─ AI Pipeline (reuse existing)
-        │     ├─ tagRouter (intent tagging)
+        ├─ AI Pipeline
         │     ├─ gemini.generateWithTools (function calling)
         │     ├─ selfKB / DIFY KB / MCP tool calls
-        │     ├─ pipelineRunner (post-answer nodes)
         │     └─ fileGenerator (xlsx/pdf/docx/pptx)
         │
         └─ Webex Messages API (送回回應 + 生成檔案)
 ```
+
+**Polling 優點：**
+- 不需公網 inbound URL，適用企業內網防火牆
+- 實作簡單，無 HMAC 驗簽需求（outbound 不需）
+- 5 秒輪詢延遲對 Bot 使用場景可接受
+
+### 2.2 Webhook 模式（備用，需公網）
+
+`POST /api/webex/webhook` 端點仍保留，供未來開放公網時使用。Webex Cloud 主動 POST → HMAC-SHA1 驗簽 → `handleWebexMessage(message)`。
 
 ---
 
@@ -42,15 +64,19 @@ FOXLINK GPT Server (/api/webex/webhook)
 
 | 檔案路徑 | 說明 |
 |---|---|
-| `server/routes/webex.js` | Webhook HTTP handler，主邏輯入口 |
+| `server/routes/webex.js` | Webhook handler + `handleWebexMessage()` 核心邏輯 |
 | `server/services/webexService.js` | Webex REST API 封裝（傳訊/下載/上傳） |
-| `server/scripts/registerWebhook.js` | 一次性執行：向 Webex 平台登記 webhook URL |
+| `server/services/webexListener.js` | Outbound polling listener（主要運作模式） |
+| `server/scripts/registerWebhook.js` | 一次性腳本：向 Webex 平台登記 webhook（備用模式用） |
 
 ### 修改既有檔案
 
 | 檔案路徑 | 修改內容 |
 |---|---|
-| `server/server.js` | 新增 `app.use('/api/webex', require('./routes/webex'))` |
+| `server/server.js` | 新增 webex route + `startPolling()` 啟動 |
+| `server/database-oracle.js` | Migration：`CHAT_SESSIONS.SOURCE`、`CHAT_SESSIONS.WEBEX_ROOM_ID`、`USERS.WEBEX_BOT_ENABLED` |
+| `server/routes/users.js` | GET/POST/PUT 加入 `webex_bot_enabled` |
+| `client/src/components/admin/UserManagement.tsx` | 加入「允許使用 Webex Bot」勾選框 |
 | `server/.env` | 新增 3 個環境變數 |
 
 ---
@@ -60,12 +86,14 @@ FOXLINK GPT Server (/api/webex/webhook)
 ```env
 # Webex Bot
 WEBEX_BOT_TOKEN=<Bot Access Token from developer.webex.com>
-WEBEX_WEBHOOK_SECRET=<自定義任意字串，用於 HMAC-SHA1 驗簽>
-WEBEX_PUBLIC_URL=https://your-domain.com   # 不含尾斜線
+WEBEX_WEBHOOK_SECRET=<自定義任意字串，用於 HMAC-SHA1 驗簽（備用 webhook 模式才需要）>
+WEBEX_PUBLIC_URL=https://your-domain.com   # 不含尾斜線（webhook 模式 + 回應截斷提示用）
+WEBEX_POLL_INTERVAL_MS=5000                # Polling 間隔（毫秒），預設 5000，可選
 ```
 
-> **注意**：`WEBEX_PUBLIC_URL` 在開發環境可用 ngrok，Production 用 K8s Ingress 域名。
-> Webhook URL 最終為 `${WEBEX_PUBLIC_URL}/api/webex/webhook`
+**最低必要設定（Polling 模式）：** 只需 `WEBEX_BOT_TOKEN`，其他選填。
+
+> `WEBEX_PUBLIC_URL` 即使在 polling 模式下也建議設定，因為 AI 回應截斷時會提示用戶到 Web 介面查看完整版。
 
 ---
 
@@ -146,51 +174,63 @@ VALUES (:uuid, :userId, :title, 'pro', :source, :roomId)
 
 ---
 
-## 7. Webhook Handler 流程
+## 7. 訊息處理流程
 
-### 7.1 POST /api/webex/webhook
-
-```
-1. 驗簽（HMAC-SHA1）
-   └── 失敗 → 401 + 不處理
-
-2. 解析 event：只處理 resource='messages' + event='created'
-   └── 其他 event → 200 忽略
-
-3. 呼叫 Webex API 取得完整訊息
-   (webhook event 只有 message ID，需另查)
-
-4. 過濾 Bot 自己發的訊息（personId == BOT_PERSON_ID）
-   └── 是自己 → 200 忽略（防止無限迴圈）
-
-5. email 正規化 → DB 查 user
-   └── 找不到 → 回覆拒絕訊息 → 200
-
-6. 檢查 user status == 'active'
-   └── inactive → 回覆帳號停用訊息 → 200
-
-7. 解析訊息文字（去除 @Bot mention 前綴）
-
-8. 下載附件（如有）→ 暫存 uploads/webex_tmp/
-
-9. 指令分派：
-   ├── text == '?'              → handleToolList()
-   ├── text == '/new' | '/重置' → handleNewSession()
-   ├── text == '/help'          → handleHelp()
-   └── 其他                     → handleChat()
-
-10. 所有步驟完成後回 200 給 Webex（15 秒內必須回應）
-```
-
-> **重要**：Webex 要求 webhook 在 **15 秒內** 回 HTTP 200，否則視為失敗並重試。
-> AI 生成可能超時，需在回 200 後 async 發送回覆，或先回「處理中...」。
-
-### 7.2 非同步回應策略
+### 7.1 Polling 主流程（webexListener.js）
 
 ```
-接收 webhook → 立即 res.sendStatus(200)
-            → 背景執行 processMessage()
-                └── AI 完成後呼叫 webexService.sendMessage()
+每 5 秒 GET /v1/events?resource=messages&type=created&from=T-5s&to=T
+        │
+        ├─ 空結果 → 下次再查
+        │
+        └─ 有訊息 →
+              ├─ 過濾 Bot 自身訊息（actorId / personId == botPersonId）
+              ├─ GET /v1/messages/{id} 取完整訊息物件
+              └─ setImmediate → handleWebexMessage(message)
+```
+
+### 7.2 Webhook 備用流程（/api/webex/webhook）
+
+```
+Webex POST → 立即回 200（15 秒限制）
+           → setImmediate → handleWebexEvent(event)
+                          → getMessage(event.data.id)
+                          → handleWebexMessage(message)
+```
+
+HMAC-SHA1 驗簽邏輯保留，`req.rawBody` 由 `express.json({ verify })` 儲存（不影響其他路由）。
+
+### 7.3 handleWebexMessage() 核心流程
+
+```
+1. email 正規化 → DB 查 user（含 webex_bot_enabled 欄位）
+   ├─ 找不到 → 拒絕訊息
+   ├─ status != 'active' → 停用提示
+   └─ webex_bot_enabled == 0 → Webex Bot 未啟用提示
+
+2. 去除 @Bot mention 前綴（群組 Room）
+
+3. 取得/建立 Session
+   ├─ DM: 每日新 session（以台北時區日期判斷）
+   └─ Room: 永久 session（以 webex_room_id 識別）
+
+4. 指令分派
+   ├─ '?'              → 工具清單
+   ├─ '/new' | '/重置' → 新 session
+   ├─ '/help'          → 使用說明
+   └─ 其他             → AI Pipeline
+
+5. 下載附件 → 暫存 uploads/webex_tmp/
+
+6. 呼叫 AI（generateWithTools，非 SSE）
+
+7. processGenerateBlocks → 生成檔案
+
+8. 截斷超長回應（> 4000 字元）
+
+9. 儲存訊息、更新 session、記錄 token
+
+10. sendMessage / sendFile 回傳
 ```
 
 ---
@@ -405,7 +445,7 @@ Webex API base URL：`https://webexapis.com/v1`
 
 ---
 
-## 12. Webhook 安全驗簽
+## 12. Webhook 安全驗簽（備用模式）
 
 Webex 在 webhook header 帶 `X-Spark-Signature`（HMAC-SHA1）：
 
@@ -414,16 +454,28 @@ const crypto = require('crypto');
 
 function verifyWebexSignature(rawBody, signature, secret) {
   const hmac = crypto.createHmac('sha1', secret);
-  hmac.update(rawBody);
+  hmac.update(rawBody);  // rawBody 必須是 Buffer
   const expected = hmac.digest('hex');
   return crypto.timingSafeEqual(
-    Buffer.from(signature, 'hex'),
-    Buffer.from(expected, 'hex')
+    Buffer.from(signature.toLowerCase(), 'hex'),
+    Buffer.from(expected.toLowerCase(), 'hex')
   );
 }
 ```
 
-> 需使用 `express.raw()` 或在 multer 前取得 raw body，不可使用 `express.json()` parse 後的 body（會破壞簽名計算）。
+**Raw Body 取得方式：** 在 `express.json()` 的 `verify` 回呼中儲存：
+
+```js
+// server.js
+app.use(express.json({
+  limit: '100mb',
+  verify: (req, _res, buf) => { req.rawBody = buf; },  // ← 此行
+}));
+```
+
+在 route 中直接用 `req.rawBody`（Buffer），不需另加 `express.raw()` middleware。
+
+> **Polling 模式無需驗簽**，因為是 server 主動 outbound 呼叫，不存在偽造問題。
 
 ---
 
@@ -453,19 +505,30 @@ node server/scripts/registerWebhook.js
 
 ## 14. DB Schema 變更
 
-### 14.1 chat_sessions 新增欄位
+### 14.1 Migration 欄位（全部透過 safeAddColumn 自動執行）
 
 ```sql
-ALTER TABLE chat_sessions ADD webex_room_id VARCHAR2(200);
-ALTER TABLE chat_sessions ADD webex_source VARCHAR2(20);
--- webex_source: 'dm' | 'room' | NULL（非 Webex 來源）
-```
+-- chat_sessions
+ALTER TABLE CHAT_SESSIONS ADD WEBEX_ROOM_ID VARCHAR2(200);  -- 群組 Room ID
+ALTER TABLE CHAT_SESSIONS ADD SOURCE VARCHAR2(30);           -- 'webex_dm' | 'webex_room' | NULL
 
-> `source` 欄位已存在，`webex_room_id` 為新增。
+-- users（新增）
+ALTER TABLE USERS ADD WEBEX_BOT_ENABLED NUMBER(1) DEFAULT 1;
+-- 0 = 停用 Webex Bot 功能，1 = 啟用（預設全體啟用）
+```
 
 ### 14.2 Migration 方式
 
-在 `database-oracle.js` 的 `initSchema()` 中，依現有 `ALTER TABLE ... ADD` 模式新增欄位存在檢查邏輯。
+`server/database-oracle.js` 的 `runMigrations()` 末尾：
+
+```js
+// ── Webex Bot 支援欄位
+await safeAddColumn('CHAT_SESSIONS', 'WEBEX_ROOM_ID', 'VARCHAR2(200)');
+await safeAddColumn('CHAT_SESSIONS', 'SOURCE', "VARCHAR2(30)");
+await safeAddColumn('USERS', 'WEBEX_BOT_ENABLED', 'NUMBER(1) DEFAULT 1');
+```
+
+**Server 啟動時自動執行，idempotent，不需手動操作。**
 
 ---
 
@@ -495,10 +558,11 @@ function stripMention(text, botDisplayName) {
 |---|---|
 | 用戶 email 不在系統 | `⚠️ 您的帳號（{email}）未在系統中，請聯絡系統管理員。` |
 | 用戶帳號停用 | `⚠️ 您的帳號目前已停用，請聯絡系統管理員。` |
-| AI 呼叫失敗 | `❌ AI 服務暫時發生錯誤，請稍後重試。（錯誤代碼：{code}）` |
+| **webex_bot_enabled=0** | `⚠️ 您的帳號目前未開啟 Webex Bot 功能，如需使用請聯絡系統管理員。` |
+| AI 呼叫失敗 | `❌ AI 服務暫時發生錯誤，請稍後重試。（{error message}）` |
 | 附件格式不支援 | `❌ 不支援此附件格式（{filename}），請傳送 PDF/Word/Excel/PPT/圖片/音訊。` |
 | 附件超過大小限制 | `❌ 附件 {filename} 超過大小限制（{limit}MB）。` |
-| 影片檔 | `❌ 不支援影片檔。請傳送音訊檔（mp3/wav）代替。` |
+| 影片檔 | `❌ 不支援影片檔（{filename}），請傳送音訊或文件。` |
 | 超過 token 預算 | `⚠️ 您今日的使用量已達上限，請明日再試。` |
 
 ---
@@ -534,36 +598,52 @@ Webex 訊息有字元限制（約 7439 bytes），且視窗較小。系統在 We
 
 ## 19. 開發/測試流程
 
-### 19.1 ngrok 設定（本地開發）
+### 19.1 本地開發啟動（Polling 模式）
+
+```bash
+# server/.env 只需設定 WEBEX_BOT_TOKEN，即可直接 polling
+cd server && npm run dev
+
+# log 應出現：
+# [WebexListener] Polling started (interval=5000ms, from=...)
+```
+
+無需 ngrok，無需公網，直接發 Webex DM 測試。
+
+### 19.2 ngrok 設定（Webhook 備用模式）
 
 ```bash
 ngrok http 3001
 # 取得 https://xxxx.ngrok.io
 # 更新 .env: WEBEX_PUBLIC_URL=https://xxxx.ngrok.io
-# 重新執行: node server/scripts/registerWebhook.js
+# 執行: node server/scripts/registerWebhook.js
 ```
 
-### 19.2 測試清單
+### 19.3 測試清單
 
 | 測試項目 | 預期結果 |
 |---|---|
 | DM 傳送 `?` | 列出授權工具清單 |
-| DM 傳送一般問題 | AI 回應（簡化格式） |
+| DM 傳送一般問題 | AI 回應（簡化格式），5 秒內開始處理 |
 | DM 傳送 `/new` | 確認訊息 + 新 session |
+| DM 傳送 `/help` | 顯示使用說明 |
 | 未知 email DM | 拒絕訊息 |
 | 停用帳號 DM | 停用提示訊息 |
+| webex_bot_enabled=0 的帳號 | 未開啟提示訊息 |
 | 傳送 PDF 附件 | AI 讀取 PDF 內容並回答 |
 | AI 生成 Excel | 回傳 xlsx 附件 |
 | 傳送影片檔 | 拒絕訊息 |
 | 群組 Room @mention | 正確識別發訊人並回應 |
 | 群組 Room 無 @mention | 不回應（靜默忽略） |
-| 偽造 webhook 簽名 | 401 拒絕 |
-| webhook 超時 15s | 先回 200，背景繼續處理後送訊息 |
+| 偽造 webhook 簽名 | 驗簽失敗，靜默忽略 |
+| 伺服器重啟 | 30 秒內恢復 polling，啟動期間訊息補掃 |
 
 ---
 
 ## 20. 未來擴充考量（本版不實作）
 
+- **Webhook 模式切換**：未來若開放公網，可改回 webhook（更即時、無輪詢負擔）
+- **Per-Pod 防重複處理**：多 Pod K8s 環境下，polling 各 Pod 獨立執行，同一訊息可能被多 Pod 處理 — 可改為 Redis 分散式 Lock 解決
 - **Webex Adaptive Cards**：比純文字更豐富的互動 UI（按鈕選項、表單）
 - **多語系**：偵測用戶 Webex 語系自動切換回應語言
 - **Bot 主動通知**：排程任務完成時 Bot 主動 DM 用戶
@@ -579,6 +659,28 @@ ngrok http 3001
 - `crypto`（Node.js built-in）— HMAC-SHA1 驗簽
 - `uuid` — session ID 生成
 - `fs` — 附件暫存讀寫
+
+---
+
+---
+
+## 22. 多 Pod K8s 注意事項（⚠️ 重要）
+
+K8s 部署通常有多個 Pod（`replicas: N`）。每個 Pod 都會獨立執行 `startPolling()`，意味著 **同一則 Webex 訊息可能被所有 Pod 同時處理，造成重複回應**。
+
+**目前緩解方式（v1.1）：**
+- Webex API 的 `GET /v1/events` 是唯讀查詢，不會消費/標記訊息
+- 多 Pod 可能各自呼叫 `handleWebexMessage` 並各自送出 AI 回應 → 用戶收到 N 份相同回覆
+
+**建議解法（依優先順序）：**
+
+| 方案 | 複雜度 | 說明 |
+|---|---|---|
+| **K8s 只跑 1 Pod** | 低 | `replicas: 1`，最簡單，Web UI 不支援 HA 但 Webex Bot 正常 |
+| **Redis Distributed Lock** | 中 | `SET webex_lock:{msgId} 1 NX EX 30`，搶到鎖才處理 |
+| **Webhook 模式** | 低 | Webex 只 POST 一次給 load balancer，轉發到某一 Pod |
+
+**目前建議：** 若已有多 Pod，先用 `replicas: 1` 或加 Redis Lock（Redis 本已在基礎設施中）。
 
 ---
 

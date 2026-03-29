@@ -1383,119 +1383,195 @@ kubectl rollout status deployment/foxlink-gpt -n foxlink
 
 ## 第十三節：Webex Bot 整合部署
 
+> **架構說明**：採用 **Outbound Polling 模式**。Server 主動每 5 秒向 Webex Events API 輪詢，
+> 不需公網 inbound URL，適合 `flgpt.foxlink.com.tw` 企業內網環境。
+
 ### 13.1 事前準備
 
-1. 至 [Webex Developer Portal](https://developer.webex.com/my-apps) 建立 Bot，取得 **Bot Access Token**
-2. 確認 `https://flgpt.foxlink.com.tw:8443` 可從公網存取（Webex webhook 需要回撥）
+1. 至 [Webex Developer Portal](https://developer.webex.com/my-apps) 建立 Bot
+2. 取得 **Bot Access Token**（Bot 建立後在 Bot 頁面取得）
+3. 記下 Bot 的 Email（格式：`yourbot@webex.bot`），讓使用者搜尋加入 DM
+
+> [!NOTE]
+> **不需要**公網可達性。Polling 為 outbound HTTPS，從 K8s pod 主動連 Webex Cloud，
+> 企業防火牆 Egress 通常允許（port 443）。
 
 ### 13.2 設定環境變數
 
-在 `server/.env` 中新增（或 K8s Secret）：
+#### 方式 A：直接修改 `server/.env`
 
 ```env
-# Webex Bot
-WEBEX_BOT_TOKEN=<Bot Access Token>
-WEBEX_WEBHOOK_SECRET=<自定任意字串，用於 HMAC-SHA1 驗簽>
+# Webex Bot（必填）
+WEBEX_BOT_TOKEN=MWExYTBlM2MtNWZmOC00ZDhlLTk2NDQtZGE3ZjdmN2RiZjY5...
+
+# Webhook 備用模式驗簽（可選，polling 模式不需要）
+WEBEX_WEBHOOK_SECRET=FLK88900ijasdf7ljlakjdf83kjodfaend
+
+# 回應截斷時提示用戶連結的 URL（可選）
 WEBEX_PUBLIC_URL=https://flgpt.foxlink.com.tw:8443
+
+# Polling 間隔，預設 5000ms（可選）
+# WEBEX_POLL_INTERVAL_MS=5000
 ```
 
-若使用 K8s Secret 管理：
+#### 方式 B：K8s Secret（生產環境建議）
 
 ```bash
-kubectl create secret generic foxlink-gpt-secret \
-  --from-literal=WEBEX_BOT_TOKEN=<token> \
-  --from-literal=WEBEX_WEBHOOK_SECRET=<secret> \
-  -n foxlink --dry-run=client -o yaml | kubectl apply -f -
+# 更新 Secret（不替換整個 secret，只更新 Webex 相關 key）
+kubectl create secret generic foxlink-gpt-env \
+  --from-env-file=server/.env \
+  -n foxlink \
+  --dry-run=client -o yaml | kubectl apply -f -
 ```
 
-### 13.3 部署新版本
+或只更新 token：
 
 ```bash
-# 1. 拉最新程式碼並 build image
-git pull && ./deploy.sh
-
-# 2. 確認新端點可達（回應 200 表示 route 已載入）
-curl -X POST https://flgpt.foxlink.com.tw:8443/api/webex/webhook \
-  -H "Content-Type: application/json" -d '{}'
+kubectl patch secret foxlink-gpt-env -n foxlink \
+  --type='json' \
+  -p='[{"op":"replace","path":"/data/WEBEX_BOT_TOKEN","value":"'$(echo -n "<token>" | base64)'"}]'
 ```
 
-### 13.4 登記 Webhook（一次性，部署後執行一次）
+### 13.3 部署步驟
 
 ```bash
-cd /home/fldba/foxlink_gpt/server
-npm install                          # 確保 axios、form-data 已安裝
-node scripts/registerWebhook.js
+# 1. 確認在正確目錄
+cd /home/fldba/foxlink_gpt
+
+# 2. 拉最新程式碼
+git pull origin master
+
+# 3. Build Docker image
+docker build -t foxlink-gpt:latest .
+
+# 4. 推送到 registry（依實際 registry 位址調整）
+docker tag foxlink-gpt:latest <registry>/foxlink-gpt:latest
+docker push <registry>/foxlink-gpt:latest
+
+# 5. 滾動更新 K8s Deployment
+kubectl rollout restart deployment/foxlink-gpt -n foxlink
+
+# 6. 等待 rollout 完成
+kubectl rollout status deployment/foxlink-gpt -n foxlink
 ```
 
-預期輸出：
+### 13.4 驗證 Polling 已啟動
 
-```
-🔍 查詢現有 webhooks...
-   找到 0 個 webhook
-➕ 建立 webhook → https://flgpt.foxlink.com.tw:8443/api/webex/webhook
-
-✅ Webhook 建立成功！
-   ID:         Y2lzY29zcGFyazovL...
-   Name:       FOXLINK GPT Webhook
-   Target URL: https://flgpt.foxlink.com.tw:8443/api/webex/webhook
-   Status:     active
-
-🤖 Bot 資訊：
-   名稱: Foxlink GPT Service
-   Email: Foxlink_GPT_Service@webex.bot
+```bash
+# 查看所有 Pod 的啟動 log（多 Pod 環境需加 --prefix）
+kubectl logs -n foxlink -l app=foxlink-gpt --prefix=true --since=2m | grep "WebexListener"
 ```
 
-> [!NOTE]
-> 每次 `WEBEX_PUBLIC_URL` 變更（如換 domain 或 port）時需重新執行此腳本，舊 webhook 會自動刪除並重建。
+正常啟動輸出：
+```
+[pod/foxlink-gpt-xxx] [WebexListener] Polling started (interval=5000ms, from=2026-03-29T...)
+```
+
+若未出現此行，確認 `WEBEX_BOT_TOKEN` 已正確設定。
 
 ### 13.5 驗證測試
 
-在 Webex 搜尋 Bot Email（`Foxlink_GPT_Service@webex.bot`）開啟 DM，依序測試：
+在 Webex 搜尋 Bot Email，開啟 DM，依序測試（每次發訊後等 5-10 秒）：
 
 | 指令 | 預期回應 |
 |---|---|
 | `?` | 列出該帳號授權的工具清單 |
 | `/help` | 顯示使用說明 |
-| `/new` | 開啟新對話，清除記憶 |
-| 一般問題 | AI 回答（簡化格式） |
+| `/new` | 確認訊息 + 開啟新對話 |
+| 一般問題 | AI 回答（簡化格式，~5-30 秒） |
+| 不在系統的 email 發訊 | `⚠️ 您的帳號...未在系統中` |
 
 ### 13.6 Log 監控
 
 ```bash
-# 查看 Webex 相關 log
-kubectl logs -f deployment/foxlink-gpt -n foxlink | grep "\[Webex\]"
+# 全部 Pod 的 Webex 相關 log（即時）
+kubectl logs -n foxlink -l app=foxlink-gpt --prefix=true -f | grep "\[Webex"
+
+# 含 Auth 解析過程
+kubectl logs -n foxlink -l app=foxlink-gpt --prefix=true --since=10m | grep "\[Webex\]"
 ```
 
 正常運作時的 log 範例：
 
 ```
-[Webex] DM from alice@foxlink.com room=Y2lzY29z...
-[Webex] User resolved: id=42 name=Alice
-[Webex] Session reused: 3fa85f64-5717-4562-b3fc-2c963f66afa6
-[Webex] Calling AI model=gemini-3-pro-preview user=alice session=... tools=5
-[Webex] AI response generated: 342 chars
+[WebexListener] 1 new event(s) since 2026-03-29T08:30:00.000Z
+[WebexListener] Dispatch: id=Y2lz... from="alice@foxlink.com" text="請問今天..."
+[Webex] Incoming DM from="alice@foxlink.com" roomId="Y2lz..."
+[Webex][Auth] email lookup: raw="alice@foxlink.com" → normalized="alice@foxlink.com"
+[Webex][Auth] ✅ user found: id=42 username="A001234" name="Alice" role=user status=active
+[Webex] Session: id=3fa85f64-... isDm=true
+[Webex] Processing chat: user=A001234 session=3fa85f64-... text="請問今天..." files=0
+[Webex] Calling AI model=gemini-3-pro-preview user=A001234 session=... tools=5
 ```
 
 ### 13.7 DB Migration
 
-首次啟動新版本時，`runMigrations()` 會自動執行：
+首次啟動新版本時，`runMigrations()` 自動執行下列欄位新增（idempotent，重複安全）：
 
 ```sql
-ALTER TABLE CHAT_SESSIONS ADD WEBEX_ROOM_ID VARCHAR2(200);
+ALTER TABLE CHAT_SESSIONS ADD WEBEX_ROOM_ID VARCHAR2(200);  -- Webex 群組 Room ID
+ALTER TABLE CHAT_SESSIONS ADD SOURCE VARCHAR2(30);           -- 'webex_dm' | 'webex_room'
+ALTER TABLE USERS ADD WEBEX_BOT_ENABLED NUMBER(1) DEFAULT 1;-- 0=停用, 1=啟用
 ```
 
-無需手動操作。
+**無需手動操作**，server 啟動時自動完成。
 
-### 13.8 注意事項
+### 13.8 Per-User Webex Bot 開關
 
-- **Email 正規化**：Webex 帳號為 `@foxlink.com`，LDAP 帳號可能為 `@foxlink.com.tw`，系統自動對應，不分大小寫
+系統支援針對個別用戶關閉 Webex Bot 功能：
+
+1. 系統管理員登入 Web UI → 使用者管理
+2. 編輯目標用戶 → 功能權限區塊
+3. 取消勾選「**允許使用 Webex Bot**」→ 儲存
+
+被關閉的用戶透過 Webex 發訊時，Bot 會回覆：
+```
+⚠️ 您的帳號目前未開啟 Webex Bot 功能，如需使用請聯絡系統管理員。
+```
+
+**預設值**：所有用戶預設開啟（`WEBEX_BOT_ENABLED DEFAULT 1`）。
+
+### 13.9 多 Pod 注意事項（⚠️ 重要）
+
+若 K8s Deployment 設定 `replicas > 1`，**每個 Pod 都會獨立 polling**，同一訊息可能被多 Pod 重複處理，造成用戶收到多份相同回應。
+
+**解決方案（擇一）：**
+
+**方案 A：Webex Bot 專用 Pod（推薦，最簡單）**
+
+在 Deployment 加入 annotation 將 Webex polling 集中在單一 Pod：
+
+```yaml
+# 在 deployment.yaml 中，將 replicas 改為 1
+# 或拆出獨立 Deployment 只跑 1 replica 供 Webex Bot 使用
+spec:
+  replicas: 1   # 暫時改為 1（如果整體 replicas 本來就是 1 則無需操作）
+```
+
+**方案 B：環境變數關閉部分 Pod 的 Polling**
+
+未來可加入 `WEBEX_POLLING_ENABLED=false` 環境變數機制，讓非主要 Pod 不啟動 polling（待實作）。
+
+**方案 C：Redis Distributed Lock（待實作）**
+
+```js
+// 每次處理訊息前，用 Redis SET NX EX 搶鎖
+await redis.set(`webex:msg:${msgId}`, '1', 'NX', 'EX', 30)
+```
+
+> 目前建議：若 replicas=4（生產環境），先觀察是否有重複回應問題；若有，優先用方案 A（`replicas: 1`）或等待方案 C 實作。
+
+### 13.10 注意事項
+
+- **Email 正規化**：Webex 帳號 `@foxlink.com`，LDAP 可能 `@foxlink.com.tw`，自動對應，不分大小寫
 - **未知 email**：非系統用戶發訊時，Bot 回覆拒絕訊息並要求聯絡管理員
-- **群組 Room**：需 @Bot 才觸發，群組 session 永久保存（不按日切割）
-- **DM Session**：每日自動新 session，同一天的對話共用記憶
-- **檔案上傳**：依各用戶 DB 設定的 `allow_*_upload` / `*_max_mb` 限制
-- **Webhook Secret**：務必設定 `WEBEX_WEBHOOK_SECRET`，否則任何人可偽造 webhook 呼叫
+- **群組 Room**：需 @Bot 才觸發；群組 session 永久保存（不按日切割）
+- **DM Session**：每日自動新 session，同一天共用記憶
+- **重啟補掃**：Server 啟動時往前 30 秒查詢，重啟期間不遺漏訊息
+- **Polling 流量**：每 5 秒 1 次 GET，對 Webex API rate limit（每分鐘數百次）影響極小
+- **Webhook 備用端點**：`POST /api/webex/webhook` 仍在，未來開放公網可直接切換至 webhook 模式，停止 polling
 
 ---
 
-*文件產出日期：2026-03-19 | 更新：2026-03-29（新增第十三節：Webex Bot 整合部署）*
+*文件產出日期：2026-03-19 | 更新：2026-03-29（第十三節：Webex Bot — Polling 模式 + webex_bot_enabled）*
 *Git tag: `backup-before-k8s-migration-20260319`*
