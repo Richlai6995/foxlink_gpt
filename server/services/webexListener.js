@@ -3,30 +3,29 @@
 /**
  * Webex Bot Polling Listener
  *
- * 策略：
- *   每次 poll:
- *   1. GET /v1/rooms?sortBy=lastactivity&max=200
- *      → 按最近活躍排序，新 DM 房間（lastActivity = 第一則訊息時間）
- *        會直接出現在最前面，不需要 cache / 等待發現
- *   2. filter: room.lastActivity > prevLastChecked
- *   3. 對每間 active room:
- *      GET /v1/messages?roomId={id}&max=50
- *      若 50 筆都是新的 → 繼續翻頁（beforeMessage pagination）
- *      直到碰到舊訊息為止，確保不漏訊息
+ * 多 Pod 防重複：每則訊息處理前先搶 Redis lock (webex:msg:{id})
+ * 搶不到的 Pod 直接略過，避免重複回應。
+ * REDIS_URL 未設定時 fallback 到 MemoryStore（單 Pod 仍可用）。
  *
- * 延遲：新用戶第一則訊息 ≈ POLL_INTERVAL (預設 8s) + AI 時間
- * 容量：每個 active room 每次最多取 150 筆（3 頁），已足夠任何實際場景
+ * 策略：
+ *   1. GET /v1/rooms?sortBy=lastactivity&max=200
+ *      → 新 DM 房間排最前面，不需 cache，首次訊息 ≤ POLL_INTERVAL 即被發現
+ *   2. filter: room.lastActivity > prevLastChecked
+ *   3. GET /v1/messages?roomId={id}&max=50（翻頁直到碰舊訊息，不漏）
+ *   4. 每則訊息：tryLock(webex:msg:{id}, 60s) → 搶到才處理
  */
 
 const { getWebexService } = require('./webexService');
+const { tryLock }         = require('./redisClient');
 
 const POLL_INTERVAL  = parseInt(process.env.WEBEX_POLL_INTERVAL_MS || '8000', 10);
 const ROOMS_PER_POLL = parseInt(process.env.WEBEX_ROOMS_PER_POLL   || '200',  10);
-const MSGS_PAGE_SIZE = 50;   // Webex API 每頁最大 50
-const MAX_PAGES      = 3;    // 每間房間最多翻幾頁（150 筆），防爆
+const MSGS_PAGE_SIZE = 50;
+const MAX_PAGES      = 3;    // 最多翻 3 頁 = 150 筆/room/cycle
+const MSG_LOCK_TTL   = 60;   // seconds — 訊息處理鎖的有效期
 
 let _started     = false;
-let _lastChecked = null; // ISO string
+let _lastChecked = null;
 
 function startPolling() {
   if (!process.env.WEBEX_BOT_TOKEN) {
@@ -36,10 +35,8 @@ function startPolling() {
   if (_started) return;
   _started = true;
 
-  // 往前 30 秒，避免重啟時漏掉剛發的訊息
   _lastChecked = new Date(Date.now() - 30_000).toISOString();
-
-  console.log(`[WebexListener] Polling started (interval=${POLL_INTERVAL}ms)`);
+  console.log(`[WebexListener] Polling started (interval=${POLL_INTERVAL}ms, redis-lock=enabled)`);
 
   setInterval(() => {
     pollOnce().catch(e => console.error('[WebexListener] Poll error:', e.message));
@@ -54,8 +51,7 @@ async function pollOnce() {
   const prevLastChecked = _lastChecked;
   _lastChecked          = new Date().toISOString();
 
-  // ── Step 1: 取最近活躍的 rooms（sortBy=lastactivity）────────────────────────
-  // 新 DM 的 lastActivity = 用戶第一則訊息時間，會排在最前面
+  // ── Step 1: 取最近活躍的 rooms ─────────────────────────────────────────────
   let rooms = [];
   try {
     const res = await webex.client.get('/rooms', {
@@ -64,11 +60,10 @@ async function pollOnce() {
     rooms = res.data?.items || [];
   } catch (e) {
     console.error('[WebexListener] GET /rooms error:', e.response?.status, e.message);
-    _lastChecked = prevLastChecked; // rollback
+    _lastChecked = prevLastChecked;
     return;
   }
 
-  // ── Step 2: 只處理 lastActivity > prevLastChecked 的房間 ───────────────────
   const activeRooms = rooms.filter(r => r.lastActivity > prevLastChecked);
   if (activeRooms.length === 0) return;
 
@@ -82,10 +77,10 @@ async function pollOnce() {
     return;
   }
 
-  // ── Step 3: 對每間 active room 拉訊息（支援翻頁，避免漏訊息）──────────────
+  // ── Step 2: 對每間 active room 拉訊息（翻頁）──────────────────────────────
   for (const room of activeRooms) {
     const newMsgs = [];
-    let beforeMessage; // 翻頁游標（最舊那筆的 message ID）
+    let beforeMessage;
     let page = 0;
 
     while (page < MAX_PAGES) {
@@ -97,31 +92,39 @@ async function pollOnce() {
         const res = await webex.client.get('/messages', { params });
         msgs = res.data?.items || [];
       } catch (e) {
-        console.warn(`[WebexListener] GET /messages room=${room.id} page=${page} error:`, e.response?.status);
+        console.warn(`[WebexListener] GET /messages room=${room.id} page=${page}:`, e.response?.status);
         break;
       }
       if (msgs.length === 0) break;
 
-      // items 是 newest-first
       const freshInPage = msgs.filter(m => m.created > prevLastChecked);
       newMsgs.push(...freshInPage);
 
-      // 如果這頁有部分是舊的 → 已經拉完所有新訊息，不需繼續翻頁
-      if (freshInPage.length < msgs.length) break;
-
-      // 整頁都是新的 → 可能還有更早的新訊息，繼續翻頁
-      beforeMessage = msgs[msgs.length - 1].id; // 最舊那筆，下頁從這裡往前
+      if (freshInPage.length < msgs.length) break; // 碰到舊訊息，停止翻頁
+      beforeMessage = msgs[msgs.length - 1].id;    // 繼續翻下一頁
     }
 
     if (newMsgs.length === 0) continue;
+    newMsgs.reverse(); // oldest-first
 
-    // reverse: oldest-first，讓 AI 依序處理
-    newMsgs.reverse();
-
-    console.log(`[WebexListener] room="${room.title?.slice(0, 20)}" → ${newMsgs.length} new msg(s)${page > 1 ? ` (${page} pages)` : ''}`);
+    console.log(`[WebexListener] room="${room.title?.slice(0, 20)}" → ${newMsgs.length} msg(s)`);
 
     for (const msg of newMsgs) {
       if (botPersonId && msg.personId === botPersonId) continue;
+
+      // ── Redis distributed lock：多 Pod 只有一個搶到的才處理 ───────────────
+      const lockKey = `webex:msg:${msg.id}`;
+      let acquired = false;
+      try {
+        acquired = await tryLock(lockKey, MSG_LOCK_TTL);
+      } catch (e) {
+        console.warn('[WebexListener] tryLock error:', e.message);
+        acquired = true; // Redis 掛了就讓每個 Pod 都處理（保守降級）
+      }
+      if (!acquired) {
+        console.log(`[WebexListener] Skipped (lock held by another pod): msg=${msg.id}`);
+        continue;
+      }
 
       console.log(`[WebexListener] Dispatch: type=${msg.roomType} from="${msg.personEmail}" text="${(msg.text || '').slice(0, 60)}"`);
 
