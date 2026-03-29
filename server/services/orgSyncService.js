@@ -103,14 +103,14 @@ async function syncOrgToUsers(db, employeeNos = null, trigger = 'manual') {
   let users;
   if (!employeeNos) {
     users = await db.prepare(
-      `SELECT id, employee_id, name, username, dept_code, dept_name, profit_center, profit_center_name,
+      `SELECT id, employee_id, name, email, username, dept_code, dept_name, profit_center, profit_center_name,
               org_section, org_section_name, org_group_name, factory_code, org_end_date
        FROM users WHERE employee_id IS NOT NULL AND employee_id != '' AND status = 'active'`
     ).all();
   } else {
     const placeholders = employeeNos.map(() => '?').join(',');
     users = await db.prepare(
-      `SELECT id, employee_id, name, username, dept_code, dept_name, profit_center, profit_center_name,
+      `SELECT id, employee_id, name, email, username, dept_code, dept_name, profit_center, profit_center_name,
               org_section, org_section_name, org_group_name, factory_code, org_end_date
        FROM users WHERE employee_id IN (${placeholders})`
     ).all(...employeeNos);
@@ -173,6 +173,18 @@ async function syncOrgToUsers(db, employeeNos = null, trigger = 'manual') {
       changed['org_end_date'] = { old: oldEndDate || null, new: endDate.toISOString().slice(0, 10) };
     }
 
+    // 補填空白的 email 和 name（從 ERP 拉回來）
+    const erpEmail = trim(r.EMAIL);
+    const erpName  = trim(r.C_NAME);
+    const needFillEmail = erpEmail && (!user.email || user.email === '-' || user.email.trim() === '');
+    const needFillName  = erpName  && (!user.name  || user.name.trim() === '');
+    if (needFillEmail) {
+      changed['email'] = { old: user.email || null, new: erpEmail };
+    }
+    if (needFillName) {
+      changed['name'] = { old: user.name || null, new: erpName };
+    }
+
     const hasChange = Object.keys(changed).length > 0;
 
     // 永遠更新 org_synced_at；有變動才寫其他欄位
@@ -183,7 +195,9 @@ async function syncOrgToUsers(db, employeeNos = null, trigger = 'manual') {
           profit_center=?, profit_center_name=?,
           org_section=?, org_section_name=?,
           org_group_name=?, factory_code=?,
-          org_end_date=?, org_synced_at=?
+          org_end_date=?, org_synced_at=?,
+          email=COALESCE(NULLIF(NULLIF(email,'-'),''), ?),
+          name=COALESCE(NULLIF(name,''), ?)
         WHERE employee_id=?
       `).run(
         incoming.dept_code || null, incoming.dept_name || null,
@@ -191,6 +205,8 @@ async function syncOrgToUsers(db, employeeNos = null, trigger = 'manual') {
         incoming.org_section || null, incoming.org_section_name || null,
         incoming.org_group_name || null, incoming.factory_code || null,
         endDate, new Date(),
+        erpEmail || null,
+        erpName || null,
         empId,
       );
 
