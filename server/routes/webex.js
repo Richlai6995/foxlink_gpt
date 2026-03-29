@@ -925,7 +925,9 @@ async function handleWebexMessage(message) {
       }
       if (cleaned > 0) console.log(`[Webex] /new cleanup: removed ${cleaned} stale tmp files`);
     } catch (_) {}
-    await webex.sendMessage(roomId, '✅ 已開啟新對話，之前的對話記憶已清除。\n請輸入您的問題。');
+    const now = new Date().toLocaleString('zh-TW', { timeZone: 'Asia/Taipei', hour12: false });
+    const divider = `━━━━━━━━━━━━━━━━━━━━━━━━\n🔄 新對話開始（${now}）\n━━━━━━━━━━━━━━━━━━━━━━━━\n請輸入您的問題。`;
+    await webex.sendMessage(roomId, divider);
     return;
   }
 
