@@ -36,7 +36,7 @@ class WebexService {
     return res.data;
   }
 
-  /** 傳送純文字訊息 */
+  /** 傳送純文字訊息，回傳 message id */
   async sendMessage(roomId, text, { markdown, parentId } = {}) {
     const payload = { roomId };
     if (markdown) {
@@ -45,7 +45,17 @@ class WebexService {
       payload.text = text;
     }
     if (parentId) payload.parentId = parentId;
-    await this.client.post('/messages', payload);
+    const res = await this.client.post('/messages', payload);
+    return res.data?.id || null;
+  }
+
+  /** 刪除訊息（用於撤回 typing indicator） */
+  async deleteMessage(messageId) {
+    try {
+      await this.client.delete(`/messages/${messageId}`);
+    } catch (e) {
+      // 刪除失敗不影響主流程
+    }
   }
 
   /** 傳送含本地附件的訊息 */

@@ -247,6 +247,36 @@ app.get('/api/health', (req, res) => res.json({ status: 'ok', timestamp: new Dat
         console.error('[HelpKB] Failed to sync:', e.message);
       }
     });
+
+    // Periodic cleanup: uploads/generated/ 和 uploads/webex_tmp/ 超過 24h 的暫存檔
+    const GENERATED_DIR = path.join(UPLOAD_DIR, 'generated');
+    const WEBEX_TMP_DIR = path.join(UPLOAD_DIR, 'webex_tmp');
+    const cleanupStaleTmpFiles = () => {
+      const ttlMs = 24 * 60 * 60 * 1000; // 24 hours
+      const now = Date.now();
+      for (const dir of [GENERATED_DIR, WEBEX_TMP_DIR]) {
+        if (!fs.existsSync(dir)) continue;
+        try {
+          let cleaned = 0;
+          for (const f of fs.readdirSync(dir)) {
+            const fp = path.join(dir, f);
+            try {
+              const stat = fs.statSync(fp);
+              if (stat.isFile() && now - stat.mtimeMs > ttlMs) {
+                fs.unlinkSync(fp);
+                cleaned++;
+              }
+            } catch (_) {}
+          }
+          if (cleaned > 0) console.log(`[TmpCleanup] ${dir}: removed ${cleaned} stale files`);
+        } catch (e) {
+          console.error(`[TmpCleanup] Error scanning ${dir}:`, e.message);
+        }
+      }
+    };
+    // 啟動後立即執行一次，之後每小時執行
+    cleanupStaleTmpFiles();
+    setInterval(cleanupStaleTmpFiles, 60 * 60 * 1000);
   } catch (error) {
     console.error('Failed to initialize:', error);
     process.exit(1);

@@ -47,6 +47,12 @@ const WEBEX_SYSTEM_SUFFIX = `
 3. 避免寬表格（改用清單呈現）
 4. Markdown 僅使用粗體、清單、代碼塊（Webex 支援有限）
 5. 如回答需要詳細版，結尾加：「💡 需詳細版本請至 Web 介面查看」
+
+【Webex 檔案生成規則】（此規則優先級最高，覆蓋其他指令）
+6. 若需要生成 Excel/Word/PDF/PPT/TXT 等檔案，照常輸出完整的 \`\`\`generate_xlsx:filename.xlsx\`\`\` 代碼塊（系統會自動處理）
+7. 生成完畢後說：「📎 檔案將以附件傳送，請稍候」
+8. 絕對不要說「請點擊下載連結」、「請至 Web 介面下載」、「以下是下載連結」等語句
+9. Webex 模式下所有生成的檔案都會直接以附件附加在此訊息中，無需任何連結
 `;
 
 // ── 驗簽 ──────────────────────────────────────────────────────────────────────
@@ -628,6 +634,12 @@ async function processMessage(db, webex, user, sessionId, roomId, messageText, f
   const { apiModel } = await resolveApiModel(db, 'pro');
   console.log(`[Webex] Calling AI model=${apiModel} user=${user.username} session=${sessionId} tools=${declarations.length}`);
 
+  // Typing indicator：先發「處理中」訊息，AI 完成後刪除
+  let typingMsgId = null;
+  try {
+    typingMsgId = await webex.sendMessage(roomId, '⏳ 正在分析您的問題，請稍候...');
+  } catch (_) {}
+
   let aiText = '';
   let inputTokens = 0;
   let outputTokens = 0;
@@ -650,9 +662,13 @@ async function processMessage(db, webex, user, sessionId, roomId, messageText, f
     outputTokens = result.outputTokens || 0;
   } catch (e) {
     console.error('[Webex] AI call error:', e.message);
+    if (typingMsgId) await webex.deleteMessage(typingMsgId);
     await webex.sendMessage(roomId, `❌ AI 服務暫時發生錯誤，請稍後重試。\n（${e.message?.slice(0, 80)}）`);
     return;
   }
+
+  // 刪除 typing indicator
+  if (typingMsgId) await webex.deleteMessage(typingMsgId);
 
   // 7. 處理 generate_xxx 代碼塊
   let generatedFiles = [];
@@ -888,9 +904,27 @@ async function handleWebexMessage(message) {
     return;
   }
 
-  // /new 或 /重置 → 新 session
-  if (cmdText === '/new' || cmdText === '/重置') {
+  // /new 及多種別名 → 新 session + 清理暫存檔
+  const NEW_SESSION_CMDS = ['/new', '/重置', '新對話', '重置', '/clear', '/restart', '/reset', 'new'];
+  if (NEW_SESSION_CMDS.includes(cmdText)) {
     sessionId = await createNewSession(db, user.id, roomId, isDm);
+    // 清理 webex_tmp 中的殘留暫存檔（超過 30 分鐘）
+    try {
+      const now = Date.now();
+      const tmpFiles = fs.readdirSync(WEBEX_TMP_DIR);
+      let cleaned = 0;
+      for (const f of tmpFiles) {
+        const fp = path.join(WEBEX_TMP_DIR, f);
+        try {
+          const stat = fs.statSync(fp);
+          if (now - stat.mtimeMs > 30 * 60 * 1000) {
+            fs.unlinkSync(fp);
+            cleaned++;
+          }
+        } catch (_) {}
+      }
+      if (cleaned > 0) console.log(`[Webex] /new cleanup: removed ${cleaned} stale tmp files`);
+    } catch (_) {}
     await webex.sendMessage(roomId, '✅ 已開啟新對話，之前的對話記憶已清除。\n請輸入您的問題。');
     return;
   }
