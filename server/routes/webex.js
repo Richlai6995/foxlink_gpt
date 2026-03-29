@@ -104,7 +104,8 @@ async function findUserByEmail(db, rawEmail) {
               allow_audio_upload, audio_max_mb,
               allow_image_upload, image_max_mb,
               budget_daily, budget_weekly, budget_monthly,
-              role_id, dept_code, profit_center, org_section, org_group_name
+              role_id, dept_code, profit_center, org_section, org_group_name,
+              webex_bot_enabled
        FROM users
        WHERE LOWER(REPLACE(email, '.com.tw', '.com')) = ?
        FETCH FIRST 1 ROWS ONLY`
@@ -741,8 +742,8 @@ router.post('/webhook', async (req, res) => {
   }));
 });
 
+// Webhook 事件處理（取完整訊息後交給 handleWebexMessage）
 async function handleWebexEvent(event) {
-  const db = require('../database-oracle').db;
   let webex;
   try {
     webex = getWebexService();
@@ -773,6 +774,21 @@ async function handleWebexEvent(event) {
     return;
   }
 
+  await handleWebexMessage(message);
+}
+
+// ── 公開函數：由 webhook 端點或 polling listener 呼叫 ──────────────────────────
+// 接受完整 message 物件（已含 personEmail, roomId, text, files 等欄位）
+async function handleWebexMessage(message) {
+  const db = require('../database-oracle').db;
+  let webex;
+  try {
+    webex = getWebexService();
+  } catch (e) {
+    console.error('[Webex] getWebexService error:', e.message);
+    return;
+  }
+
   const senderEmail = message.personEmail || '';
   const roomId = message.roomId;
   const isDm = message.roomType === 'direct';
@@ -792,6 +808,14 @@ async function handleWebexEvent(event) {
     console.warn(`[Webex][Auth] User id=${user.id} status=${user.status}, rejected`);
     await webex.sendMessage(roomId,
       `⚠️ 您的帳號目前已停用，請聯絡系統管理員。`
+    );
+    return;
+  }
+  // webex_bot_enabled = 0 表示此帳號不允許使用 Webex Bot
+  if (user.webex_bot_enabled === 0) {
+    console.warn(`[Webex][Auth] User id=${user.id} webex_bot_enabled=0, rejected`);
+    await webex.sendMessage(roomId,
+      `⚠️ 您的帳號目前未開啟 Webex Bot 功能，如需使用請聯絡系統管理員。`
     );
     return;
   }
@@ -865,3 +889,4 @@ async function handleWebexEvent(event) {
 }
 
 module.exports = router;
+module.exports.handleWebexMessage = handleWebexMessage;

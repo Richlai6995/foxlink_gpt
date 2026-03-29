@@ -26,6 +26,7 @@ router.get('/', async (req, res) => {
                 u.can_design_ai_select, u.can_use_ai_dashboard,
                 u.role_id, r.name AS role_name, u.creation_method,
                 u.budget_daily, u.budget_weekly, u.budget_monthly, u.quota_exceed_action,
+                u.webex_bot_enabled,
                 ${ORG_COLS}
          FROM users u
          LEFT JOIN roles r ON r.id = u.role_id`;
@@ -48,7 +49,8 @@ router.post('/', async (req, res) => {
   const { username, password, name, employee_id, email, role, start_date, end_date, status,
     allow_text_upload, text_max_mb, allow_audio_upload, audio_max_mb,
     allow_image_upload, image_max_mb, allow_scheduled_tasks, role_id,
-    budget_daily, budget_weekly, budget_monthly, quota_exceed_action } = req.body;
+    budget_daily, budget_weekly, budget_monthly, quota_exceed_action,
+    webex_bot_enabled } = req.body;
   if (!username || !password || !name) {
     return res.status(400).json({ error: '帳號、密碼、姓名為必填' });
   }
@@ -77,8 +79,8 @@ router.post('/', async (req, res) => {
                             allow_text_upload, text_max_mb, allow_audio_upload, audio_max_mb,
                             allow_image_upload, image_max_mb, allow_scheduled_tasks, role_id, creation_method,
                             budget_daily, budget_weekly, budget_monthly, quota_exceed_action,
-                            can_design_ai_select, can_use_ai_dashboard)
-         VALUES (?, ?, ?, ?, ?, ?, ${DI}, ${DI}, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)`
+                            can_design_ai_select, can_use_ai_dashboard, webex_bot_enabled)
+         VALUES (?, ?, ?, ?, ?, ?, ${DI}, ${DI}, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?)`
       )
       .run(
         username, password, name,
@@ -96,7 +98,8 @@ router.post('/', async (req, res) => {
         resolvedRoleId,
         'manual',
         parseBudget(budget_daily), parseBudget(budget_weekly), parseBudget(budget_monthly),
-        quota_exceed_action || null
+        quota_exceed_action || null,
+        webex_bot_enabled !== undefined ? (webex_bot_enabled ? 1 : 0) : 1
       );
 
     // If employee_id provided, auto-sync org
@@ -130,6 +133,7 @@ router.put('/:id', async (req, res) => {
     can_create_kb, kb_max_size_mb, kb_max_count,
     can_deep_research,
     can_design_ai_select, can_use_ai_dashboard,
+    webex_bot_enabled,
     // allow manual override of org fields from UI
     dept_code, dept_name, profit_center, profit_center_name,
     org_section, org_section_name, org_group_name, factory_code, org_end_date,
@@ -164,6 +168,7 @@ router.put('/:id', async (req, res) => {
       can_deep_research !== undefined ? resolveSkillPerm(can_deep_research) : null,
       resolveSkillPerm(can_design_ai_select !== undefined ? can_design_ai_select : null),
       resolveSkillPerm(can_use_ai_dashboard  !== undefined ? can_use_ai_dashboard  : null),
+      webex_bot_enabled !== undefined ? (webex_bot_enabled ? 1 : 0) : 1,
     ];
 
     const orgParams = [
@@ -187,7 +192,8 @@ router.put('/:id', async (req, res) => {
              budget_daily=?, budget_weekly=?, budget_monthly=?, quota_exceed_action=?,
              allow_create_skill=?, allow_external_skill=?, allow_code_skill=?,
              can_create_kb=?, kb_max_size_mb=?, kb_max_count=?, can_deep_research=?,
-             can_design_ai_select=?, can_use_ai_dashboard=?`;
+             can_design_ai_select=?, can_use_ai_dashboard=?,
+             webex_bot_enabled=?`;
     const orgSet = hasOrgOverride
       ? `, dept_code=?, dept_name=?, profit_center=?, profit_center_name=?,
            org_section=?, org_section_name=?, org_group_name=?, factory_code=?, org_end_date=${D}`

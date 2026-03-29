@@ -1461,6 +1461,9 @@ async function runMigrations(db) {
 
   // ── Webex Bot 支援欄位 ────────────────────────────────────────────────────
   await safeAddColumn('CHAT_SESSIONS', 'WEBEX_ROOM_ID', 'VARCHAR2(200)');
+  await safeAddColumn('CHAT_SESSIONS', 'SOURCE', "VARCHAR2(30)");
+  // webex_bot_enabled: 0=停用, 1=啟用 (DEFAULT 1 = 預設全體可用)
+  await safeAddColumn('USERS', 'WEBEX_BOT_ENABLED', 'NUMBER(1) DEFAULT 1');
 }
 
 // ─── Default DB Source migration ───────────────────────────────────────────────

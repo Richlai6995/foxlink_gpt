@@ -88,6 +88,14 @@ app.get('/api/health', (req, res) => res.json({ status: 'ok', timestamp: new Dat
     app.use('/api/webex', require('./routes/webex'));
     console.log('[Route] /api/webex OK');
 
+    // Start Webex Bot polling listener (outbound, works behind corporate firewall)
+    try {
+      const { startPolling } = require('./services/webexListener');
+      startPolling();
+    } catch (e) {
+      console.error('[WebexListener] Failed to start:', e.message);
+    }
+
     // Auto-restore code skill runners
     try {
       const { db } = require('./database-oracle');

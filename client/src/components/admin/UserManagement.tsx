@@ -205,6 +205,7 @@ interface UserForm {
   can_deep_research: boolean | null
   can_design_ai_select: boolean | null
   can_use_ai_dashboard: boolean | null
+  webex_bot_enabled: boolean
   kb_max_size_mb: string
   kb_max_count: string
   role_id: number | null
@@ -237,6 +238,7 @@ const empty: UserForm = {
   can_deep_research: null,
   can_design_ai_select: null,
   can_use_ai_dashboard: null,
+  webex_bot_enabled: true,
   kb_max_size_mb: '',
   kb_max_count: '',
   role_id: null,
@@ -348,6 +350,7 @@ export default function UserManagement() {
       can_deep_research: u2.can_deep_research == null ? null : u2.can_deep_research === 1,
       can_design_ai_select: u2.can_design_ai_select == null ? null : u2.can_design_ai_select === 1,
       can_use_ai_dashboard: u2.can_use_ai_dashboard == null ? null : u2.can_use_ai_dashboard === 1,
+      webex_bot_enabled: u2.webex_bot_enabled !== 0,
       kb_max_size_mb: u2.kb_max_size_mb != null ? String(u2.kb_max_size_mb) : '',
       kb_max_count: u2.kb_max_count != null ? String(u2.kb_max_count) : '',
     })
@@ -631,15 +634,26 @@ export default function UserManagement() {
               {/* Scheduled tasks permission */}
               <div className="px-5 pb-4">
                 <label className="label mb-1.5">{t('users.form.funcPerms')}</label>
-                <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
-                  <input
-                    type="checkbox"
-                    checked={form.allow_scheduled_tasks}
-                    onChange={e => setForm(p => ({ ...p, allow_scheduled_tasks: e.target.checked }))}
-                    className="w-4 h-4 accent-blue-600"
-                  />
-                  {t('users.form.allowScheduledTasks')}
-                </label>
+                <div className="flex flex-col gap-2">
+                  <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={form.allow_scheduled_tasks}
+                      onChange={e => setForm(p => ({ ...p, allow_scheduled_tasks: e.target.checked }))}
+                      className="w-4 h-4 accent-blue-600"
+                    />
+                    {t('users.form.allowScheduledTasks')}
+                  </label>
+                  <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={form.webex_bot_enabled}
+                      onChange={e => setForm(p => ({ ...p, webex_bot_enabled: e.target.checked }))}
+                      className="w-4 h-4 accent-blue-600"
+                    />
+                    允許使用 Webex Bot
+                  </label>
+                </div>
               </div>
 
               {/* Role assignment */}
