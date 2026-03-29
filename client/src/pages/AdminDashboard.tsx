@@ -66,7 +66,7 @@ export default function AdminDashboard() {
           <div className="w-7 h-7 bg-blue-600 rounded-lg flex items-center justify-center">
             <Cpu size={14} className="text-white" />
           </div>
-          <span className="font-bold">FOXLINK GPT</span>
+          <span className="font-bold">FOXLINK GPT TO CORTEX</span>
           <span className="text-slate-500 text-sm">/ {t('admin.title')}</span>
         </div>
         <button

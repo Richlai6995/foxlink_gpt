@@ -46,7 +46,7 @@ const emptyForm = (): Partial<ScheduledTask> => ({
   recipients_json: '[]',
   email_subject: '排程任務執行完成：{{task_name}} ({{date}})',
   email_body:
-    '您好，\n\n以下為 {{date}}（{{weekday}}）排程任務「{{task_name}}」的執行結果：\n\n{{ai_response}}\n\n如有附件請見附檔。\n\nFOXLINK GPT',
+    '您好，\n\n以下為 {{date}}（{{weekday}}）排程任務「{{task_name}}」的執行結果：\n\n{{ai_response}}\n\n如有附件請見附檔。\n\nFOXLINK GPT TO CORTEX',
   status: 'active',
   expire_at: '',
   max_runs: 0,

@@ -829,7 +829,7 @@ export default function ChatPage() {
           <span className="text-slate-600 text-sm font-medium truncate flex-1">
             {currentSessionId
               ? sessions.find((s) => s.id === currentSessionId)?.title || t('chat.topbar.chatting')
-              : 'FOXLINK GPT'}
+              : 'FOXLINK GPT TO CORTEX'}
           </span>
           {/* ── MCP button ── */}
           <div className="relative" ref={mcpPanelRef}>

@@ -272,7 +272,7 @@ export default function ChatWindow({ messages, streaming, streamingContent, stre
           <div className="w-16 h-16 bg-blue-100 rounded-2xl flex items-center justify-center mx-auto mb-4">
             <Cpu size={32} className="text-blue-600" />
           </div>
-          <h2 className="text-xl font-semibold text-slate-700 mb-2">FOXLINK GPT</h2>
+          <h2 className="text-xl font-semibold text-slate-700 mb-2">FOXLINK GPT TO CORTEX</h2>
           <p className="text-slate-400 text-sm">{t('chat.startPrompt')}</p>
           <div className="mt-6 flex flex-wrap justify-center gap-2 max-w-md">
             {[
