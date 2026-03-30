@@ -5,6 +5,7 @@ import {
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import api from '../../lib/api'
+import { fmtTW } from '../../lib/fmtTW'
 import TranslationFields, { type TranslationData } from '../common/TranslationFields'
 import TagInput from '../common/TagInput'
 import ShareModal from '../dashboard/ShareModal'
@@ -51,13 +52,7 @@ interface McpCallLog {
   session_id: string | null
 }
 
-const TRANSPORT_LABELS: Record<TransportType, string> = {
-  'http-post': 'HTTP POST（標準）',
-  'http-sse': 'HTTP SSE（雙通道）',
-  'streamable-http': 'Streamable HTTP（MCP 2025）',
-  'stdio': 'stdio（本地指令）',
-  'auto': '自動偵測',
-}
+const TRANSPORT_TYPES: TransportType[] = ['http-post', 'http-sse', 'streamable-http', 'stdio', 'auto']
 
 const emptyForm = {
   name: '', url: '', api_key: '', description: '', is_active: true, is_public: false,
@@ -67,7 +62,18 @@ const emptyForm = {
 }
 
 export default function MCPServersPanel() {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
+
+  const localName = (s: McpServer) => {
+    if (i18n.language === 'en') return (s as any).name_en || s.name
+    if (i18n.language === 'vi') return (s as any).name_vi || s.name
+    return (s as any).name_zh || s.name
+  }
+  const localDesc = (s: McpServer) => {
+    if (i18n.language === 'en') return (s as any).desc_en || s.description
+    if (i18n.language === 'vi') return (s as any).desc_vi || s.description
+    return (s as any).desc_zh || s.description
+  }
   const [servers, setServers] = useState<McpServer[]>([])
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
@@ -128,9 +134,9 @@ export default function MCPServersPanel() {
   }
 
   const save = async () => {
-    if (!form.name.trim()) { setError('名稱為必填'); return }
-    if (form.transport_type !== 'stdio' && !form.url.trim()) { setError('URL 為必填（非 stdio 模式）'); return }
-    if (form.transport_type === 'stdio' && !form.command.trim()) { setError('stdio 模式需填寫指令'); return }
+    if (!form.name.trim()) { setError(t('mcp.form.nameRequired')); return }
+    if (form.transport_type !== 'stdio' && !form.url.trim()) { setError(t('mcp.form.urlRequired')); return }
+    if (form.transport_type === 'stdio' && !form.command.trim()) { setError(t('mcp.form.commandRequired')); return }
     setSaving(true)
     setTranslating(true)
     setError('')
@@ -205,7 +211,7 @@ export default function MCPServersPanel() {
       const res = await api.post(`/mcp-servers/${s.id}/approve`)
       await load()
     } catch (e: any) {
-      alert(e.response?.data?.error || '操作失敗')
+      alert(e.response?.data?.error || t('mcp.operateFailed'))
     }
   }
 
@@ -271,7 +277,7 @@ export default function MCPServersPanel() {
                   {/* Name & URL */}
                   <div className="flex-1 min-w-0">
                     <div className="font-medium text-slate-800 text-sm flex items-center gap-2">
-                      {s.name}
+                      {localName(s)}
                       <span className="text-xs px-1.5 py-0.5 bg-slate-100 text-slate-500 rounded font-normal">
                         {s.transport_type || 'http-post'}
                       </span>
@@ -289,8 +295,8 @@ export default function MCPServersPanel() {
                   {/* 公開狀態 badge */}
                   {s.is_public === 1 && (
                     s.public_approved === 1
-                      ? <span className="flex items-center gap-1 text-xs px-2 py-0.5 bg-green-50 text-green-700 rounded-full font-medium"><Globe size={11} /> 公開</span>
-                      : <span className="flex items-center gap-1 text-xs px-2 py-0.5 bg-amber-50 text-amber-700 rounded-full font-medium"><Globe size={11} /> 待核准</span>
+                      ? <span className="flex items-center gap-1 text-xs px-2 py-0.5 bg-green-50 text-green-700 rounded-full font-medium"><Globe size={11} /> {t('mcp.public')}</span>
+                      : <span className="flex items-center gap-1 text-xs px-2 py-0.5 bg-amber-50 text-amber-700 rounded-full font-medium"><Globe size={11} /> {t('mcp.pendingApproval')}</span>
                   )}
 
                   {/* Actions */}
@@ -309,13 +315,13 @@ export default function MCPServersPanel() {
                     {s.is_public === 1 && (
                       <button
                         onClick={() => approve(s)}
-                        title={s.public_approved ? '取消核准公開' : '核准公開'}
+                        title={s.public_approved ? t('mcp.revokeApproval') : t('mcp.approve')}
                         className={`p-1.5 rounded-lg transition ${s.public_approved ? 'text-green-600 hover:text-red-500 hover:bg-red-50' : 'text-amber-500 hover:text-green-600 hover:bg-green-50'}`}
                       >
                         <ShieldCheck size={14} />
                       </button>
                     )}
-                    <button onClick={() => setShareServer(s)} title="共享設定" className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition">
+                    <button onClick={() => setShareServer(s)} title={t('mcp.shareSettings')} className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition">
                       <Share2 size={14} />
                     </button>
                     <button onClick={() => toggle(s)} title={s.is_active ? t('common.disable') : t('common.enable')} className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition">
@@ -345,7 +351,7 @@ export default function MCPServersPanel() {
                   <div className="border-t border-slate-100 bg-slate-50 px-4 py-3">
                     {s.last_synced_at && (
                       <div className="flex items-center gap-1.5 text-xs text-slate-400 mb-2">
-                        <Clock size={11} /> {t('mcp.lastSynced')}：{s.last_synced_at}
+                        <Clock size={11} /> {t('mcp.lastSynced')}{fmtTW(s.last_synced_at)}
                       </div>
                     )}
                     {tools.length === 0 ? (
@@ -360,7 +366,7 @@ export default function MCPServersPanel() {
                         ))}
                       </div>
                     )}
-                    {s.description && <p className="text-xs text-slate-400 mt-2 border-t border-slate-200 pt-2">{s.description}</p>}
+                    {(localDesc(s)) && <p className="text-xs text-slate-400 mt-2 border-t border-slate-200 pt-2">{localDesc(s)}</p>}
                   </div>
                 )}
               </div>
@@ -396,7 +402,7 @@ export default function MCPServersPanel() {
                 <tbody className="divide-y divide-slate-100">
                   {logs.map(log => (
                     <tr key={log.id} className="hover:bg-slate-50">
-                      <td className="px-3 py-2 text-slate-500 whitespace-nowrap">{log.called_at}</td>
+                      <td className="px-3 py-2 text-slate-500 whitespace-nowrap">{fmtTW(log.called_at)}</td>
                       <td className="px-3 py-2 font-mono text-blue-700">{log.tool_name}</td>
                       <td className="px-3 py-2 text-slate-500">{log.user_name || '—'}</td>
                       <td className="px-3 py-2">
@@ -441,22 +447,22 @@ export default function MCPServersPanel() {
 
               {/* Transport type */}
               <div>
-                <label className="block text-xs font-medium text-slate-600 mb-1">傳輸方式 *</label>
+                <label className="block text-xs font-medium text-slate-600 mb-1">{t('mcp.form.transportType')}</label>
                 <select
                   value={form.transport_type}
                   onChange={e => setForm(p => ({ ...p, transport_type: e.target.value as TransportType }))}
                   className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
-                  {(Object.keys(TRANSPORT_LABELS) as TransportType[]).map(k => (
-                    <option key={k} value={k}>{TRANSPORT_LABELS[k]}</option>
+                  {TRANSPORT_TYPES.map(k => (
+                    <option key={k} value={k}>{t(`mcp.transport.${k}`)}</option>
                   ))}
                 </select>
                 <p className="text-xs text-slate-400 mt-0.5">
-                  {form.transport_type === 'auto' && '依序嘗試各種方式並自動記住成功的傳輸類型'}
-                  {form.transport_type === 'http-post' && '直接 POST JSON-RPC 到 URL（最通用）'}
-                  {form.transport_type === 'http-sse' && 'GET /sse 建立 SSE 連線，POST /message 送出請求（舊式 MCP）'}
-                  {form.transport_type === 'streamable-http' && '單一 POST 端點，回應可為 JSON 或 SSE（MCP 2025 規範）'}
-                  {form.transport_type === 'stdio' && '啟動本地子程序，透過 stdin/stdout 通訊（本地端 MCP）'}
+                  {form.transport_type === 'auto' && t('mcp.form.transportAuto')}
+                  {form.transport_type === 'http-post' && t('mcp.form.transportHttpPost')}
+                  {form.transport_type === 'http-sse' && t('mcp.form.transportHttpSse')}
+                  {form.transport_type === 'streamable-http' && t('mcp.form.transportStreamable')}
+                  {form.transport_type === 'stdio' && t('mcp.form.transportStdio')}
                 </p>
               </div>
 
@@ -464,17 +470,17 @@ export default function MCPServersPanel() {
               {form.transport_type === 'stdio' ? (
                 <>
                   <div>
-                    <label className="block text-xs font-medium text-slate-600 mb-1">指令 (Command) *</label>
+                    <label className="block text-xs font-medium text-slate-600 mb-1">{t('mcp.form.command')}</label>
                     <input
                       value={form.command}
                       onChange={e => setForm(p => ({ ...p, command: e.target.value }))}
                       placeholder='npx -y @modelcontextprotocol/server-filesystem /tmp'
                       className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
                     />
-                    <p className="text-xs text-slate-400 mt-0.5">完整指令，引號包住含空格的參數</p>
+                    <p className="text-xs text-slate-400 mt-0.5">{t('mcp.form.commandHint')}</p>
                   </div>
                   <div>
-                    <label className="block text-xs font-medium text-slate-600 mb-1">額外參數 (JSON array，選填)</label>
+                    <label className="block text-xs font-medium text-slate-600 mb-1">{t('mcp.form.argsJson')}</label>
                     <input
                       value={form.args_json}
                       onChange={e => setForm(p => ({ ...p, args_json: e.target.value }))}
@@ -483,7 +489,7 @@ export default function MCPServersPanel() {
                     />
                   </div>
                   <div>
-                    <label className="block text-xs font-medium text-slate-600 mb-1">環境變數 (JSON object，選填)</label>
+                    <label className="block text-xs font-medium text-slate-600 mb-1">{t('mcp.form.envJson')}</label>
                     <textarea
                       value={form.env_json}
                       onChange={e => setForm(p => ({ ...p, env_json: e.target.value }))}
@@ -528,8 +534,8 @@ export default function MCPServersPanel() {
                 />
               </div>
               <div>
-                <label className="block text-xs font-medium text-slate-600 mb-1">標籤 (Tags)</label>
-                <TagInput tags={tags} onChange={setTags} placeholder="輸入標籤後按 Enter" />
+                <label className="block text-xs font-medium text-slate-600 mb-1">{t('mcp.form.tags')}</label>
+                <TagInput tags={tags} onChange={setTags} placeholder={t('mcp.form.tagsPlaceholder')} />
               </div>
               <TranslationFields
                 data={trans}
@@ -580,7 +586,7 @@ export default function MCPServersPanel() {
                 />
                 <span className="text-sm text-slate-700 flex items-center gap-1.5">
                   <Globe size={13} className="text-green-600" />
-                  公開（需 Admin 核准後所有使用者可見）
+                  {t('mcp.form.isPublic')}
                 </span>
               </label>
             </div>
@@ -606,7 +612,7 @@ export default function MCPServersPanel() {
 
       {shareServer && (
         <ShareModal
-          title={`MCP 伺服器 — ${shareServer.name}`}
+          title={t('mcp.serverShare', { name: localName(shareServer) })}
           sharesUrl={`/mcp-servers/${shareServer.id}/access`}
           onClose={() => setShareServer(null)}
         />
