@@ -7,7 +7,7 @@ import {
   ChevronRight, Info, Lightbulb, Terminal, Globe, RefreshCw,
   Wand2, ImageIcon, Clock, Share2, GitFork, Lock, Sparkles, Code2, Package, Play, Square,
   Paperclip, Search, Server, BookMarked, Wifi, WifiOff, CheckCircle, Loader2, Layers, Activity,
-  Key, ShieldCheck, LayoutTemplate, FileSpreadsheet, File,
+  Key, ShieldCheck, LayoutTemplate, FileSpreadsheet, File, FlaskConical,
 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 
@@ -3234,6 +3234,7 @@ function UserManual() {
 const adminSections = [
   { id: 'a-users', label: '使用者管理', icon: <Users size={18} /> },
   { id: 'a-roles', label: '角色管理', icon: <Lock size={18} /> },
+  { id: 'a-admin-test', label: '管理員測試模式', icon: <FlaskConical size={18} /> },
   { id: 'a-schedule', label: '排程任務', icon: <CalendarClock size={18} /> },
   { id: 'a-prompt', label: '排程 Prompt 語法', icon: <Terminal size={18} /> },
   { id: 'a-generate', label: '檔案生成語法', icon: <Download size={18} /> },
@@ -3510,6 +3511,91 @@ function AdminManual() {
             AI 只能存取這些已授權的工具，未勾選的工具不會出現在其對話中。
           </Para>
           <NoteBox>若角色未綁定任何 MCP / DIFY，系統預設讓所有已啟用的工具對使用者可見。建議明確綁定，以避免機密知識庫意外對不相關部門開放。</NoteBox>
+        </SubSection>
+      </Section>
+
+      <Section id="a-admin-test" icon={<FlaskConical size={22} />} iconColor="text-orange-500" title="管理員測試模式">
+        <Para>
+          系統管理員與一般使用者適用<strong>相同的工具授權規則</strong>——只有被明確授權（公開核准或角色指定）的
+          MCP 伺服器、DIFY 知識庫、自建知識庫、技能及文件範本，才會出現在管理員的對話介面中。
+          這樣的設計讓管理員看到的介面與使用者完全一致，避免意外使用到尚未準備好的工具。
+        </Para>
+        <Para>
+          當需要測試<strong>尚未授權</strong>的工具（例如剛建立的 MCP 伺服器或新範本），
+          可透過「管理員測試模式」暫時將工具加入自己的對話，驗證設定正確後再正式授權給使用者。
+        </Para>
+
+        <SubSection title="啟用測試模式">
+          <div className="space-y-3">
+            <StepItem num={1} title="在對話頁頂端列找到 🔬 燒杯圖示按鈕（僅管理員可見）" desc="若有已加入的測試工具，圖示右上角會顯示橘色數字徽章" />
+            <StepItem num={2} title="點擊按鈕，展開測試模式浮動面板" />
+            <StepItem num={3} title="切換「工具」或「文件範本」頁籤" desc="面板顯示目前尚未被授權給管理員帳號的工具清單" />
+            <StepItem num={4} title="找到目標工具，點選「+ 加入」" desc="工具立即加入測試列表，可在對話中使用" />
+            <StepItem num={5} title="關閉面板，回到對話" desc="已加入的工具出現在工具選單中，標有 🔬 橘色徽章" />
+          </div>
+        </SubSection>
+
+        <SubSection title="工具頁籤說明">
+          <Para>「工具」頁籤顯示所有目前未授權給管理員帳號的工具，按類型分組：</Para>
+          <Table
+            headers={['類型', '說明']}
+            rows={[
+              ['MCP', '外部工具伺服器（Model Context Protocol）'],
+              ['DIFY 知識庫', 'DIFY 平台知識庫'],
+              ['自建知識庫', '系統內部向量知識庫'],
+              ['技能', '技能市集中的自定義技能'],
+            ]}
+          />
+          <Para>「文件範本」頁籤顯示所有未授權給管理員帳號的文件範本，可逐一加入測試。</Para>
+        </SubSection>
+
+        <SubSection title="移除與清除">
+          <div className="space-y-2">
+            {[
+              { icon: <FlaskConical size={13} className="text-orange-400" />, label: '移除單一工具', desc: '在「已加入測試」區塊點選工具右側的 ✕ 按鈕' },
+              { icon: <FlaskConical size={13} className="text-orange-400" />, label: '清除全部', desc: '面板底部點選「清除全部」，一次移除所有測試工具與範本' },
+              { icon: <FlaskConical size={13} className="text-orange-400" />, label: '登出自動清除', desc: '登出系統後，測試模式設定自動全部清除' },
+            ].map((item, i) => (
+              <div key={i} className="flex gap-3 p-3 bg-slate-50 rounded-lg">
+                <span className="text-slate-400 flex-shrink-0 mt-0.5">{item.icon}</span>
+                <div>
+                  <span className="text-sm font-medium text-slate-700">{item.label}：</span>
+                  <span className="text-sm text-slate-500">{item.desc}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </SubSection>
+
+        <SubSection title="重要限制">
+          <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 space-y-2">
+            {[
+              '測試模式僅影響管理員自身的對話介面，其他使用者完全不受影響。',
+              '已加入測試的工具以 🔬 橘色徽章標示，方便辨認與一般授權工具的差異。',
+              '測試狀態在瀏覽器重新整理後仍保留（存於瀏覽器 localStorage），直到登出為止。',
+              'Webex Bot 永遠使用一般使用者的授權邏輯，不受管理員測試模式影響。',
+            ].map((text, i) => (
+              <div key={i} className="flex items-start gap-2 text-sm text-amber-700">
+                <span className="text-amber-500 flex-shrink-0 mt-0.5">•</span>
+                {text}
+              </div>
+            ))}
+          </div>
+        </SubSection>
+
+        <SubSection title="測試完成後正式授權">
+          <Para>確認工具運作正常後，透過以下方式正式開放給使用者：</Para>
+          <Table
+            headers={['工具類型', '授權方式']}
+            rows={[
+              ['MCP 伺服器', '在「角色管理」勾選此伺服器，或核准伺服器的「公開」申請'],
+              ['DIFY 知識庫', '在「角色管理」勾選此知識庫，或核准「公開」申請'],
+              ['自建知識庫', '核准使用者提出的公開申請，或於角色指派'],
+              ['技能', '在技能市集核准公開申請'],
+              ['文件範本', '在範本設定中開啟公開，或在角色管理中指派'],
+            ]}
+          />
+          <TipBox>建議在測試模式確認工具正常後再正式授權，避免將設定錯誤的工具開放給所有使用者。</TipBox>
         </SubSection>
       </Section>
 
