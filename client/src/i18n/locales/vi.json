@@ -1522,6 +1522,7 @@
       "permEdit": "Chỉnh sửa",
       "searchUser": "Tìm theo tên hoặc mã nhân viên",
       "inputIdPlaceholder": "Nhập ID {{type}}",
+      "selectPlaceholder": "Chọn {{type}}",
       "adding": "Đang thêm...",
       "addShare": "+ Thêm chia sẻ",
       "currentShares": "Đang chia sẻ",

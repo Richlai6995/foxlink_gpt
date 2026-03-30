@@ -1522,6 +1522,7 @@
       "permEdit": "Edit",
       "searchUser": "Search by name or employee ID",
       "inputIdPlaceholder": "Enter {{type}} ID",
+      "selectPlaceholder": "Select {{type}}",
       "adding": "Adding...",
       "addShare": "+ Add Share",
       "currentShares": "Current Shares",

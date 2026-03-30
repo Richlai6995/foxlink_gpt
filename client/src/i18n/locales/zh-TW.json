@@ -1522,6 +1522,7 @@
       "permEdit": "編輯",
       "searchUser": "搜尋使用者名稱或工號",
       "inputIdPlaceholder": "輸入{{type}} ID",
+      "selectPlaceholder": "請選擇{{type}}",
       "adding": "新增中...",
       "addShare": "+ 新增分享",
       "currentShares": "目前分享",

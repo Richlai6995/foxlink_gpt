@@ -10,33 +10,46 @@ interface Props {
   onPublicChange: (isPublic: boolean) => void
 }
 
+interface OrgOption { code?: string; name: string }
+interface OrgData {
+  depts: OrgOption[]
+  profit_centers: OrgOption[]
+  org_sections: OrgOption[]
+  org_groups: OrgOption[]
+}
+
 export default function TemplateShareModal({ template, onClose, onPublicChange }: Props) {
   const { t } = useTranslation()
 
   const GRANTEE_TYPES = [
-    { value: 'user', label: t('tpl.share.granteeUser'), icon: '👤' },
-    { value: 'role', label: t('tpl.share.granteeRole'), icon: '👥' },
+    { value: 'user',       label: t('tpl.share.granteeUser'),       icon: '👤' },
+    { value: 'role',       label: t('tpl.share.granteeRole'),       icon: '👥' },
     { value: 'department', label: t('tpl.share.granteeDepartment'), icon: '🏢' },
-    { value: 'cost_center', label: t('tpl.share.granteeCostCenter'), icon: '💰' },
-    { value: 'division', label: t('tpl.share.granteeDivision'), icon: '🏭' },
-    { value: 'org_group', label: t('tpl.share.granteeOrgGroup'), icon: '🌐' },
+    { value: 'cost_center',label: t('tpl.share.granteeCostCenter'), icon: '💰' },
+    { value: 'division',   label: t('tpl.share.granteeDivision'),   icon: '🏭' },
+    { value: 'org_group',  label: t('tpl.share.granteeOrgGroup'),   icon: '🌐' },
   ]
 
-  const [shares, setShares] = useState<DocTemplateShare[]>([])
+  const [shares, setShares]           = useState<DocTemplateShare[]>([])
+  const [orgs, setOrgs]               = useState<OrgData>({ depts: [], profit_centers: [], org_sections: [], org_groups: [] })
+  const [roles, setRoles]             = useState<{ id: number; name: string }[]>([])
   const [granteeType, setGranteeType] = useState<string>('user')
-  const [granteeId, setGranteeId] = useState('')
-  const [shareType, setShareType] = useState<'use' | 'edit'>('use')
-  const [userSearch, setUserSearch] = useState('')
+  const [granteeId, setGranteeId]     = useState('')
+  const [shareType, setShareType]     = useState<'use' | 'edit'>('use')
+  const [userSearch, setUserSearch]   = useState('')
   const [userResults, setUserResults] = useState<{ id: number; name: string; username: string }[]>([])
-  const [adding, setAdding] = useState(false)
-  const [isPublic, setIsPublic] = useState(template.is_public === 1)
+  const [adding, setAdding]           = useState(false)
+  const [isPublic, setIsPublic]       = useState(template.is_public === 1)
 
   useEffect(() => {
     fetchShares()
+    api.get('/kb/orgs').then(r => setOrgs(r.data)).catch(() => {})
+    api.get('/roles').then(r => setRoles(r.data || [])).catch(() => {})
   }, [])
 
   useEffect(() => {
     if (granteeType !== 'user') { setUserSearch(''); setUserResults([]); setGranteeId('') }
+    else { setGranteeId('') }
   }, [granteeType])
 
   const fetchShares = async () => {
@@ -56,6 +69,15 @@ export default function TemplateShareModal({ template, onClose, onPublicChange }
     }, 300)
     return () => clearTimeout(timer)
   }, [userSearch, granteeType])
+
+  const getLovOptions = (): { id: string; label: string }[] => {
+    if (granteeType === 'role')        return roles.map(r => ({ id: String(r.id), label: r.name }))
+    if (granteeType === 'department')  return orgs.depts.map(d => ({ id: d.code || '', label: `${d.code} ${d.name}` }))
+    if (granteeType === 'cost_center') return orgs.profit_centers.map(d => ({ id: d.code || '', label: `${d.code} ${d.name}` }))
+    if (granteeType === 'division')    return orgs.org_sections.map(d => ({ id: d.code || '', label: `${d.code} ${d.name}` }))
+    if (granteeType === 'org_group')   return orgs.org_groups.map(d => ({ id: d.name || '', label: d.name }))
+    return []
+  }
 
   const addShare = async () => {
     if (!granteeId) return
@@ -91,6 +113,8 @@ export default function TemplateShareModal({ template, onClose, onPublicChange }
       onPublicChange(next)
     } catch { /* ignore */ }
   }
+
+  const lovOptions = getLovOptions()
 
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
@@ -150,12 +174,16 @@ export default function TemplateShareModal({ template, onClose, onPublicChange }
                   )}
                 </>
               ) : (
-                <input
+                <select
                   className="w-full border rounded px-3 py-1.5 text-xs"
-                  placeholder={t('tpl.share.inputIdPlaceholder', { type: GRANTEE_TYPES.find(gt => gt.value === granteeType)?.label })}
                   value={granteeId}
                   onChange={e => setGranteeId(e.target.value)}
-                />
+                >
+                  <option value="">-- {t('tpl.share.selectPlaceholder', { type: GRANTEE_TYPES.find(gt => gt.value === granteeType)?.label })} --</option>
+                  {lovOptions.map(o => (
+                    <option key={o.id} value={o.id}>{o.label}</option>
+                  ))}
+                </select>
               )}
             </div>
             <button
