@@ -800,7 +800,8 @@ async function runDashboardQuery({ designId, question, userId, user, isDesigner,
       checkViolations, buildScopePayload,
     } = require('./multiOrgService');
 
-    const hasMultiOrgRules = effectivePolicy.rules.some(r => MULTIORG_VALUE_TYPES.has(r.value_type));
+    const layer4Rules = effectivePolicy.rules.filter(r => r.layer === 4);
+    const hasMultiOrgRules = layer4Rules.some(r => MULTIORG_VALUE_TYPES.has(r.value_type));
     if (hasMultiOrgRules) {
       let hierarchy, scope;
       try {
@@ -808,7 +809,7 @@ async function runDashboardQuery({ designId, question, userId, user, isDesigner,
 
         // 若有 auto_from_employee 規則，先從 FL_ORG_EMP_DEPT_MV 推導員工對應的 ORGANIZATION_IDs
         let autoOrgIds = new Set();
-        const hasAutoRule = effectivePolicy.rules.some(r => r.value_type === 'auto_from_employee');
+        const hasAutoRule = layer4Rules.some(r => r.value_type === 'auto_from_employee');
         if (hasAutoRule) {
           const { loadDeptHierarchy } = require('./orgHierarchyService');
           const deptHierarchy = await loadDeptHierarchy(getErpPool);
@@ -816,7 +817,7 @@ async function runDashboardQuery({ designId, question, userId, user, isDesigner,
           console.log(`[MultiOrg] auto_from_employee: derived ${autoOrgIds.size} ORGANIZATION_IDs`);
         }
 
-        scope = resolveUserScope(effectivePolicy.rules, hierarchy, autoOrgIds);
+        scope = resolveUserScope(layer4Rules, hierarchy, autoOrgIds);
       } catch (e) {
         // ERP DB 無法連線 → 無法驗證 → 阻擋查詢（方案 B）
         console.error('[MultiOrg] 無法載入 hierarchy，阻擋查詢:', e.message);
@@ -936,7 +937,8 @@ async function runDashboardQuery({ designId, question, userId, user, isDesigner,
       resolveUserDeptScope, buildOrgScopePayload,
     } = require('./orgHierarchyService');
 
-    const hasOrgHierarchyRules = effectivePolicy.rules.some(r =>
+    const layer3Rules = effectivePolicy.rules.filter(r => r.layer === 3);
+    const hasOrgHierarchyRules = layer3Rules.some(r =>
       ORG_HIERARCHY_VALUE_TYPES.has(r.value_type || r.filter_source)
     );
 
@@ -944,7 +946,7 @@ async function runDashboardQuery({ designId, question, userId, user, isDesigner,
       let deptHierarchy, deptScope;
       try {
         deptHierarchy = await loadDeptHierarchy(getErpPool);
-        deptScope = resolveUserDeptScope(effectivePolicy.rules, user, deptHierarchy);
+        deptScope = resolveUserDeptScope(layer3Rules, user, deptHierarchy);
       } catch (e) {
         console.error('[OrgHierarchy] 無法載入 dept hierarchy，阻擋查詢:', e.message);
         send('error', {

@@ -1979,7 +1979,8 @@ router.get('/multiorg-scope', async (req, res) => {
     } = require('../services/multiOrgService');
     const { getErpPool } = require('../services/dashboardService');
 
-    const hasMultiOrgRules = policy.rules.some(r => MULTIORG_VALUE_TYPES.has(r.value_type));
+    const layer4Rules = policy.rules.filter(r => r.layer === 4);
+    const hasMultiOrgRules = layer4Rules.some(r => MULTIORG_VALUE_TYPES.has(r.value_type));
     if (!hasMultiOrgRules) return res.json({ has_restrictions: false });
 
     // 重新從 DB 取最新使用者資料（session 可能快取舊的組織欄位）
@@ -1989,7 +1990,7 @@ router.get('/multiorg-scope', async (req, res) => {
 
     // auto_from_employee rule 需要先推導 ORGANIZATION_IDs
     let autoOrgIds = new Set();
-    const hasAutoRule = policy.rules.some(r => r.value_type === 'auto_from_employee');
+    const hasAutoRule = layer4Rules.some(r => r.value_type === 'auto_from_employee');
     if (hasAutoRule) {
       const { loadDeptHierarchy } = require('../services/orgHierarchyService');
       const deptHierarchy = await loadDeptHierarchy(getErpPool);
@@ -1997,7 +1998,7 @@ router.get('/multiorg-scope', async (req, res) => {
       console.log(`[multiorg-scope] auto_from_employee: derived ${autoOrgIds.size} ORGANIZATION_IDs for user ${freshUser.username}`);
     }
 
-    const scope = resolveUserScope(policy.rules, hierarchy, autoOrgIds);
+    const scope = resolveUserScope(layer4Rules, hierarchy, autoOrgIds);
     const payload = buildScopePayload(scope);
     if (payload.denied) return res.status(403).json(payload);
     res.json(payload);
@@ -2058,11 +2059,12 @@ router.get('/org-scope', async (req, res) => {
     } = require('../services/orgHierarchyService');
     const { getErpPool } = require('../services/dashboardService');
 
-    const hasOrgRules = policy.rules.some(r => ORG_HIERARCHY_VALUE_TYPES.has(r.value_type || r.filter_source));
+    const layer3Rules = policy.rules.filter(r => r.layer === 3);
+    const hasOrgRules = layer3Rules.some(r => ORG_HIERARCHY_VALUE_TYPES.has(r.value_type || r.filter_source));
     if (!hasOrgRules) return res.json({ has_restrictions: false });
 
     const hierarchy = await loadDeptHierarchy(getErpPool);
-    const scope = resolveUserDeptScope(policy.rules, freshUser, hierarchy);
+    const scope = resolveUserDeptScope(layer3Rules, freshUser, hierarchy);
     const payload = buildOrgScopePayload(scope);
     if (payload.denied) return res.status(403).json(payload);
     res.json(payload);
