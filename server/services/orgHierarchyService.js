@@ -214,18 +214,21 @@ function resolveUserDeptScope(rules, user, hierarchy) {
     if (!userValues.profit_center)  userValues.profit_center  = (refRow.PROFIT_CENTER  || '').trim();
   }
 
-  // 比對函式：row 是否符合此 filter_source + 使用者欄位值
-  function rowMatchesUserRule(row, filterSource) {
-    const userVal = userValues[filterSource];
-    if (!userVal) return false; // 使用者此欄位無值 → 無法匹配
+  // 比對函式：row 是否符合此 filter_source + 指定值
+  // val 優先使用 rule.value_id（明確設定值），若無則退回 user profile 欄位
+  function rowMatchesValue(row, filterSource, val) {
+    const compareVal = (val || '').trim() || userValues[filterSource];
+    if (!compareVal) return false;
     switch (filterSource) {
-      case 'org_group_name': return (row.ORG_GROUP_NAME || '') === userVal;
-      case 'org_section':    return (row.ORG_SECTION    || '') === userVal;
-      case 'profit_center':  return (row.PROFIT_CENTER  || '') === userVal;
-      case 'dept_code':      return (row.DEPT_CODE      || '') === userVal;
+      case 'org_group_name': return (row.ORG_GROUP_NAME || '').trim() === compareVal;
+      case 'org_section':    return (row.ORG_SECTION    || '').trim() === compareVal;
+      case 'profit_center':  return (row.PROFIT_CENTER  || '').trim() === compareVal;
+      case 'dept_code':      return (row.DEPT_CODE      || '').trim() === compareVal;
       default: return false;
     }
   }
+  // 向下相容（原本呼叫點不傳值時退回 user profile）
+  function rowMatchesUserRule(row, filterSource) { return rowMatchesValue(row, filterSource, null); }
 
   const includeRules = orgRules.filter(r => r.include_type === 'include');
   const excludeRules = orgRules.filter(r => r.include_type === 'exclude');
@@ -294,7 +297,8 @@ function resolveUserDeptScope(rules, user, hierarchy) {
 
       const level = ORG_GRANT_LEVEL[filterSource] || 1;
       for (const row of hierarchy) {
-        if (rowMatchesUserRule(row, filterSource)) {
+        // 優先使用 rule 的 value_id（明確指定值），否則退回 user profile
+        if (rowMatchesValue(row, filterSource, rule.value_id)) {
           const prev = rowGrantLevel.get(row) || 0;
           if (level > prev) rowGrantLevel.set(row, level);
         }
@@ -306,7 +310,7 @@ function resolveUserDeptScope(rules, user, hierarchy) {
   let rows = [...rowGrantLevel.keys()];
   for (const rule of excludeRules) {
     const filterSource = rule.value_type || rule.filter_source;
-    rows = rows.filter(row => !rowMatchesUserRule(row, filterSource));
+    rows = rows.filter(row => !rowMatchesValue(row, filterSource, rule.value_id));
   }
 
   console.log('[OrgHierarchy] resolveUserDeptScope:', {
@@ -395,11 +399,23 @@ function resolveUserDeptScope(rules, user, hierarchy) {
       }, '')
     : '';
 
+  // 收集明確 value_id（可多個）的規則，供 WHERE 注入優先使用
+  const explicitValuesBySource = {};
+  for (const r of includeRules) {
+    const fs = r.value_type || r.filter_source;
+    const v = (r.value_id || '').trim();
+    if (v && (fs === 'profit_center' || fs === 'dept_code' || fs === 'org_section' || fs === 'org_group_name')) {
+      if (!explicitValuesBySource[fs]) explicitValuesBySource[fs] = [];
+      if (!explicitValuesBySource[fs].includes(v)) explicitValuesBySource[fs].push(v);
+    }
+  }
+
   return {
-    hasRules:           true,
+    hasRules:               true,
     sourceLevels,
-    userValues,            // 使用者各層欄位值（補齊後），供 WHERE 注入使用
-    highestIncludeLevel,   // 最高層 include 規則的 filter_source
+    userValues,              // 使用者 profile 各層欄位值（補齊後），auto 路徑用
+    explicitValuesBySource,  // rule 明確指定的 value_id，非 auto 路徑優先用
+    highestIncludeLevel,     // 最高層 include 規則的 filter_source
     allowedDeptCodes,
     allowedOrgCodes,
     allowedOrgIds,

@@ -1045,13 +1045,23 @@ async function runDashboardQuery({ designId, question, userId, user, isDesigner,
 
         let whereClause = null;
 
-        // 1. 最高層 include 規則的直接 equality（單一值，最乾淨）
+        // 1. 最高層 include 規則的直接 equality/IN（優先使用 rule 明確 value_id）
         const highestLevel = deptScope.highestIncludeLevel;
-        if (highestLevel && deptScope.userValues[highestLevel]) {
+        if (highestLevel) {
           const colRef = await findFilterKeyCol(highestLevel);
           if (colRef) {
-            whereClause = `${colRef} = '${deptScope.userValues[highestLevel]}'`;
-            console.log(`[OrgHierarchy] Injected WHERE (level equality): ${whereClause}`);
+            const explicitVals = deptScope.explicitValuesBySource?.[highestLevel];
+            if (explicitVals?.length) {
+              // 使用 rule 明確指定的值（支援多個 IN）
+              whereClause = explicitVals.length === 1
+                ? `${colRef} = '${explicitVals[0].replace(/'/g, "''")}'`
+                : `${colRef} IN (${explicitVals.map(v => `'${v.replace(/'/g, "''")}'`).join(', ')})`;
+              console.log(`[OrgHierarchy] Injected WHERE (explicit value): ${whereClause}`);
+            } else if (deptScope.userValues[highestLevel]) {
+              // 退回 user profile 值（auto_from_employee 等路徑）
+              whereClause = `${colRef} = '${deptScope.userValues[highestLevel]}'`;
+              console.log(`[OrgHierarchy] Injected WHERE (profile value): ${whereClause}`);
+            }
           }
         }
 
