@@ -73,9 +73,18 @@ const LAYER_LABELS: Record<number, { label: string; icon: React.ReactNode; color
 }
 
 const VALUE_TYPE_OPTIONS: Record<number, { value: string; label: string }[]> = {
-  1: [{ value: 'user_id', label: '使用者' }],
-  2: [{ value: 'role_id', label: '角色' }],
+  1: [
+    { value: 'full_block', label: '🚫 全面禁止（完全封鎖）' },
+    { value: 'super_user', label: '🔓 超級使用者（無限制）' },
+    { value: 'user_id',    label: '使用者' },
+  ],
+  2: [
+    { value: 'full_block', label: '🚫 全面禁止（完全封鎖）' },
+    { value: 'super_user', label: '🔓 超級使用者（無限制）' },
+    { value: 'role_id',    label: '角色' },
+  ],
   3: [
+    { value: 'full_block',         label: '🚫 全面禁止（完全封鎖）' },
     { value: 'super_user',         label: '🔓 超級使用者（無限制）' },
     { value: 'auto_from_employee', label: '⚡ 依員工組織自動推導' },
     { value: 'dept_code', label: '部門' },
@@ -85,6 +94,7 @@ const VALUE_TYPE_OPTIONS: Record<number, { value: string; label: string }[]> = {
     { value: 'org_code', label: '組織代碼 (ORG_CODE)' },
   ],
   4: [
+    { value: 'full_block',           label: '🚫 全面禁止（完全封鎖）' },
     { value: 'super_user',           label: '🔓 超級使用者（無限制）' },
     { value: 'auto_from_employee',   label: '⚡ 依員工組織自動推導' },
     { value: 'organization_id',      label: '製造組織 ID (數字)' },
@@ -358,13 +368,19 @@ function PolicyDetail({ policy, categories, onEdit }: { policy: Policy; categori
                 {rules.map((r, i) => (
                   <span
                     key={i}
-                    className={`flex items-center gap-1 text-xs px-2 py-1 rounded-full border ${r.include_type === 'include'
-                      ? 'bg-green-50 border-green-200 text-green-700'
-                      : 'bg-red-50 border-red-200 text-red-700'}`}
+                    className={`flex items-center gap-1 text-xs px-2 py-1 rounded-full border ${
+                      r.value_type === 'full_block'
+                        ? 'bg-red-100 border-red-400 text-red-800 font-semibold'
+                        : r.include_type === 'include'
+                          ? 'bg-green-50 border-green-200 text-green-700'
+                          : 'bg-red-50 border-red-200 text-red-700'
+                    }`}
                   >
-                    {r.include_type === 'include' ? <Check size={10} /> : <X size={10} />}
-                    {r.value_type === 'super_user' ? '🔓 超級使用者' : r.value_type === 'auto_from_employee' ? '⚡ 依員工組織' : (r.value_name || r.value_id)}
-                    <span className="opacity-60 text-[10px]">({r.include_type === 'include' ? '允許' : '排除'})</span>
+                    {r.value_type === 'full_block' ? null : r.include_type === 'include' ? <Check size={10} /> : <X size={10} />}
+                    {r.value_type === 'full_block' ? '🚫 全面禁止' : r.value_type === 'super_user' ? '🔓 超級使用者' : r.value_type === 'auto_from_employee' ? '⚡ 依員工組織' : (r.value_name || r.value_id)}
+                    {r.value_type !== 'full_block' && (
+                      <span className="opacity-60 text-[10px]">({r.include_type === 'include' ? '允許' : '排除'})</span>
+                    )}
                   </span>
                 ))}
               </div>
@@ -591,7 +607,14 @@ function RuleRow({
         {valueTypeOpts.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
       </select>
 
-      {rule.value_type === 'super_user' ? (
+      {rule.value_type === 'full_block' ? (
+        <div className="flex-1 flex items-center gap-1.5 bg-red-50 border border-red-300 rounded px-2.5 py-1.5">
+          <span className="text-[10px] text-red-700 font-medium">🚫 全面禁止 — 完全封鎖此使用者/角色的查詢</span>
+          {(rule.layer === 3 || rule.layer === 4) && (
+            <span className="text-[9px] text-red-400 ml-1">（須 Schema 含對應 filter 欄位才生效）</span>
+          )}
+        </div>
+      ) : rule.value_type === 'super_user' ? (
         <div className="flex-1 flex items-center gap-1.5 bg-amber-50 border border-amber-200 rounded px-2.5 py-1.5">
           <span className="text-[10px] text-amber-700 font-medium">🔓 超級使用者 — 不套用任何限制條件</span>
         </div>

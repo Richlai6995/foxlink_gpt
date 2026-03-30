@@ -114,22 +114,24 @@ export default function AiDashboardPage() {
       return
     }
     const catId = selectedTopic?.policy_category_id
-    const catQs = catId ? `?category_id=${catId}` : ''
-    api.get(`/dashboard/multiorg-scope${catQs}`)
+    const designId = selectedDesign?.id
+    const base = catId ? `?category_id=${catId}` : '?'
+    const qs = base + (designId ? `${catId ? '&' : ''}design_id=${designId}` : '')
+    api.get(`/dashboard/multiorg-scope${qs}`)
       .then(r => setMultiOrgScope(r.data))
       .catch(e => {
         const d = e?.response?.data
         if (d?.denied) setMultiOrgScope(d)
         else setMultiOrgScope({ has_restrictions: false })
       })
-    api.get(`/dashboard/org-scope${catQs}`)
+    api.get(`/dashboard/org-scope${qs}`)
       .then(r => setOrgScope(r.data))
       .catch(e => {
         const d = e?.response?.data
         if (d?.denied) setOrgScope(d as any)
         else setOrgScope(null)
       })
-  }, [isAdmin, selectedTopic?.policy_category_id])
+  }, [isAdmin, selectedTopic?.policy_category_id, selectedDesign?.id])
 
   // 向量搜尋覆蓋參數（查詢時可調整）
   const [showVectorAdv, setShowVectorAdv] = useState(false)
@@ -836,11 +838,11 @@ export default function AiDashboardPage() {
                   onKeyDown={e => {
                     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleQuerySse() }
                   }}
-                  disabled={loading}
+                  disabled={loading || !!(multiOrgScope?.denied) || !!(orgScope as any)?.denied}
                 />
                 <button
                   onClick={() => handleQuerySse()}
-                  disabled={!question.trim() || loading}
+                  disabled={!question.trim() || loading || !!(multiOrgScope?.denied) || !!(orgScope as any)?.denied}
                   className="self-end flex items-center gap-1.5 bg-orange-600 hover:bg-orange-500 disabled:opacity-40 text-white px-4 py-2 rounded-xl text-sm font-medium transition"
                 >
                   {loading ? <RefreshCw size={14} className="animate-spin" /> : <Send size={14} />}
@@ -904,12 +906,14 @@ export default function AiDashboardPage() {
             </div>
           )}
 
-          {/* ── Oracle MultiOrg denied 警告 ─────────────────────────────────── */}
+          {/* ── Oracle MultiOrg denied / full_block 警告 ────────────────────── */}
           {multiOrgScope?.denied && (
             <div className="bg-red-50 border border-red-300 rounded-xl px-4 py-3 flex items-start gap-2">
               <Shield size={14} className="text-red-500 flex-shrink-0 mt-0.5" />
               <div>
-                <p className="text-xs font-semibold text-red-700">Oracle MultiOrg 資料權限未設定</p>
+                <p className="text-xs font-semibold text-red-700">
+                  {(multiOrgScope as any).full_block ? '🚫 全面禁止 — 此帳號無權查詢此主題' : 'Oracle MultiOrg 資料權限未設定'}
+                </p>
                 <p className="text-xs text-red-600 mt-0.5">{multiOrgScope.denied_reason}</p>
               </div>
             </div>
@@ -992,12 +996,14 @@ export default function AiDashboardPage() {
             </div>
           )}
 
-          {/* ── 公司組織階層 denied 警告 ─────────────────────────────────────── */}
+          {/* ── 公司組織階層 denied / full_block 警告 ───────────────────────── */}
           {(orgScope as any)?.denied && (
             <div className="bg-red-50 border border-red-300 rounded-xl px-4 py-3 flex items-start gap-2">
               <Shield size={14} className="text-red-500 flex-shrink-0 mt-0.5" />
               <div>
-                <p className="text-xs font-semibold text-red-700">公司組織資料權限未設定</p>
+                <p className="text-xs font-semibold text-red-700">
+                  {(orgScope as any).full_block ? '🚫 全面禁止 — 此帳號無權查詢此主題' : '公司組織資料權限未設定'}
+                </p>
                 <p className="text-xs text-red-600 mt-0.5">{(orgScope as any).denied_reason}</p>
               </div>
             </div>

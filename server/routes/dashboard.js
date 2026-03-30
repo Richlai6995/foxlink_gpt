@@ -1545,6 +1545,36 @@ router.post('/query', requireDashboard, async (req, res) => {
       const policies = await getEffectivePolicies(db, req.user.id, _categoryId);
       const allRules = policies.flatMap(p => p.rules);
       if (allRules.length > 0) {
+        // ── full_block 前置封鎖 ──
+        const layer12Block = allRules.some(r => (r.layer === 1 || r.layer === 2) && r.value_type === 'full_block');
+        if (layer12Block) {
+          return res.status(403).json({ error: '⛔ 全面禁止：此帳號的資料政策已設定為全面禁止，無法執行任何查詢。' });
+        }
+        const layer3Block = allRules.some(r => r.layer === 3 && r.value_type === 'full_block');
+        if (layer3Block && design_id) {
+          const col = await db.prepare(
+            `SELECT sc.id FROM ai_select_designs d
+             JOIN ai_schema_columns sc ON sc.schema_id = d.schema_id
+             WHERE d.id = ? AND sc.filter_layer = 'layer3'
+             FETCH FIRST 1 ROWS ONLY`
+          ).get(Number(design_id));
+          if (col) {
+            return res.status(403).json({ error: '⛔ 全面禁止（組織層）：此帳號在組織層被設定為全面禁止，無法查詢此主題資料。' });
+          }
+        }
+        const layer4Block = allRules.some(r => r.layer === 4 && r.value_type === 'full_block');
+        if (layer4Block && design_id) {
+          const col = await db.prepare(
+            `SELECT sc.id FROM ai_select_designs d
+             JOIN ai_schema_columns sc ON sc.schema_id = d.schema_id
+             WHERE d.id = ? AND sc.filter_layer = 'layer4'
+             FETCH FIRST 1 ROWS ONLY`
+          ).get(Number(design_id));
+          if (col) {
+            return res.status(403).json({ error: '⛔ 全面禁止（ERP Multi-Org 層）：此帳號在 ERP 層被設定為全面禁止，無法查詢此主題資料。' });
+          }
+        }
+        // ── 一般問題關鍵字檢查 ──
         const forbidden = checkForbiddenInQuestion(question.trim(), allRules);
         if (forbidden.length > 0) {
           return res.status(403).json({
@@ -1921,6 +1951,29 @@ router.get('/multiorg-scope', async (req, res) => {
 
     if (!policy?.rules?.length) return res.json({ has_restrictions: false });
 
+    // ── full_block 檢查（Layer 4: 須有 filter_layer=layer4 欄位）──
+    const designId = req.query.design_id ? Number(req.query.design_id) : null;
+    const layer4Block = policy.rules.some(r => r.layer === 4 && r.value_type === 'full_block');
+    if (layer4Block) {
+      let schemaHasLayer4 = true; // conservative
+      if (designId) {
+        const col = await db.prepare(
+          `SELECT sc.id FROM ai_select_designs d
+           JOIN ai_schema_columns sc ON sc.schema_id = d.schema_id
+           WHERE d.id = ? AND sc.filter_layer = 'layer4'
+           FETCH FIRST 1 ROWS ONLY`
+        ).get(designId);
+        schemaHasLayer4 = !!col;
+      }
+      if (schemaHasLayer4) {
+        return res.status(403).json({
+          denied: true,
+          full_block: true,
+          denied_reason: '此帳號在 ERP Multi-Org 層（Layer 4）被設定為全面禁止，無法查詢此主題資料',
+        });
+      }
+    }
+
     const {
       MULTIORG_VALUE_TYPES, loadOrgHierarchy, loadAutoOrgIds, resolveUserScope, buildScopePayload,
     } = require('../services/multiOrgService');
@@ -1962,12 +2015,43 @@ router.get('/org-scope', async (req, res) => {
     // 重新從 DB 取最新使用者資料（session 可能快取舊的組織欄位）
     const freshUser = await db.prepare(`SELECT * FROM users WHERE id=?`).get(req.user.id) || req.user;
     const categoryId = req.query.category_id ? Number(req.query.category_id) : null;
+    const designId = req.query.design_id ? Number(req.query.design_id) : null;
 
     const { getEffectivePolicies } = require('./dataPermissions');
     const policiesArr = await getEffectivePolicies(db, freshUser.id, categoryId);
     const policy = policiesArr.length ? { rules: policiesArr.flatMap(p => p.rules) } : null;
 
     if (!policy?.rules?.length) return res.json({ has_restrictions: false });
+
+    // ── full_block 檢查（Layer 1/2: 無條件；Layer 3: 須有 filter_layer=layer3 欄位）──
+    const layer12Block = policy.rules.some(r => (r.layer === 1 || r.layer === 2) && r.value_type === 'full_block');
+    if (layer12Block) {
+      return res.status(403).json({
+        denied: true,
+        full_block: true,
+        denied_reason: '此帳號的資料政策已設定為全面禁止，無法查詢此主題資料',
+      });
+    }
+    const layer3Block = policy.rules.some(r => r.layer === 3 && r.value_type === 'full_block');
+    if (layer3Block) {
+      let schemaHasLayer3 = true; // conservative: deny if no design_id
+      if (designId) {
+        const col = await db.prepare(
+          `SELECT sc.id FROM ai_select_designs d
+           JOIN ai_schema_columns sc ON sc.schema_id = d.schema_id
+           WHERE d.id = ? AND sc.filter_layer = 'layer3'
+           FETCH FIRST 1 ROWS ONLY`
+        ).get(designId);
+        schemaHasLayer3 = !!col;
+      }
+      if (schemaHasLayer3) {
+        return res.status(403).json({
+          denied: true,
+          full_block: true,
+          denied_reason: '此帳號在組織層（Layer 3）被設定為全面禁止，無法查詢此主題資料',
+        });
+      }
+    }
 
     const {
       ORG_HIERARCHY_VALUE_TYPES, loadDeptHierarchy, resolveUserDeptScope, buildOrgScopePayload,
