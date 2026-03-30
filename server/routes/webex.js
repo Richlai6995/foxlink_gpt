@@ -254,7 +254,7 @@ async function buildToolList(db, user) {
   // DIFY KB
   try {
     const difyKbs = await db.prepare(
-      `SELECT DISTINCT d.name, d.description FROM dify_knowledge_bases d
+      `SELECT DISTINCT d.name, d.description, d.sort_order FROM dify_knowledge_bases d
        WHERE d.is_active=1 AND (
          (d.is_public=1 AND d.public_approved=1)
          OR EXISTS (
