@@ -51,6 +51,25 @@ async function attachCreatorName(rows) {
   return rows.map(r => ({ ...r, creator_name: map[r.creator_id] || '' }));
 }
 
+// ─── GET /unauthorized  — admin only: 列出 admin 尚無權限的範本（供測試模式）─────
+router.get('/unauthorized', async (req, res) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ error: '僅管理員可存取' });
+  try {
+    // Get authorized template IDs for this admin
+    const authorized = await svc.listTemplates(db, req.user, {});
+    const authorizedSet = new Set(authorized.map(t => t.id));
+
+    // Get all templates
+    const all = await db.prepare(
+      `SELECT id, name, description, format, tags, is_public FROM doc_templates ORDER BY updated_at DESC`
+    ).all();
+    const unauthorized = all.filter(t => !authorizedSet.has(t.id));
+    res.json(unauthorized);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ─── GET /  List ──────────────────────────────────────────────────────────────
 router.get('/', async (req, res) => {
   try {

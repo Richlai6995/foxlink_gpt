@@ -218,15 +218,10 @@ router.get('/:id/logs', async (req, res) => {
 });
 
 // GET /api/mcp-servers/my  — 依 mcp_access 回傳當前使用者可用的 MCP（含公開已核准）
+// Admin 也走相同過濾邏輯（不再 bypass），需透過 /unauthorized 搭配前端測試模式存取未授權項目
 router.get('/my', async (req, res) => {
   const db = getDb();
   try {
-    if (req.user.role === 'admin') {
-      const servers = await db.prepare(
-        `SELECT id, name, description, is_active, is_public, public_approved, name_zh, name_en, name_vi, desc_zh, desc_en, desc_vi FROM mcp_servers WHERE is_active=1 ORDER BY created_at DESC`
-      ).all();
-      return res.json(servers);
-    }
     // 公開且已核准的項目（所有使用者可見）
     const publicServers = await db.prepare(
       `SELECT id, name, DBMS_LOB.SUBSTR(description, 2000, 1) AS description, is_active, is_public, public_approved, name_zh, name_en, name_vi, desc_zh, desc_en, desc_vi, 1 AS is_readonly
@@ -273,6 +268,51 @@ router.get('/my', async (req, res) => {
     res.json([...publicServers, ...privateServers]);
   } catch (e) {
     console.error('[MCP/my ERROR]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/mcp-servers/unauthorized  — admin only: 列出 admin 尚無權限的 active MCP（供測試模式）
+router.get('/unauthorized', async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const db = getDb();
+  try {
+    const all = await db.prepare(
+      `SELECT id, name, DBMS_LOB.SUBSTR(description, 2000, 1) AS description, name_zh, name_en, name_vi, desc_zh, desc_en, desc_vi FROM mcp_servers WHERE is_active=1 ORDER BY created_at DESC`
+    ).all();
+
+    const publicIds = await db.prepare(
+      `SELECT id FROM mcp_servers WHERE is_active=1 AND is_public=1 AND public_approved=1`
+    ).all();
+    const authorizedSet = new Set(publicIds.map(r => r.id));
+
+    const u = await db.prepare(
+      `SELECT role_id, dept_code, profit_center, org_section, org_group_name FROM users WHERE id=?`
+    ).get(req.user.id);
+    if (u) {
+      const granted = await db.prepare(
+        `SELECT DISTINCT a.mcp_server_id FROM mcp_access a
+         JOIN mcp_servers m ON m.id = a.mcp_server_id
+         WHERE m.is_active=1 AND (
+           (a.grantee_type='user'        AND a.grantee_id=?)
+           OR (a.grantee_type='role'        AND a.grantee_id=? AND ? IS NOT NULL)
+           OR (a.grantee_type='department'  AND a.grantee_id=? AND ? IS NOT NULL)
+           OR (a.grantee_type='cost_center' AND a.grantee_id=? AND ? IS NOT NULL)
+           OR (a.grantee_type='division'    AND a.grantee_id=? AND ? IS NOT NULL)
+           OR (a.grantee_type='org_group'   AND a.grantee_id=? AND ? IS NOT NULL)
+         )`
+      ).all(
+        String(req.user.id),
+        u.role_id != null ? String(u.role_id) : null, u.role_id,
+        u.dept_code, u.dept_code,
+        u.profit_center, u.profit_center,
+        u.org_section, u.org_section,
+        u.org_group_name, u.org_group_name
+      );
+      granted.forEach(r => authorizedSet.add(r.mcp_server_id));
+    }
+    res.json(all.filter(s => !authorizedSet.has(s.id)));
+  } catch (e) {
     res.status(500).json({ error: e.message });
   }
 });

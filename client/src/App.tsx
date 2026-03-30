@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider, useAuth } from './context/AuthContext'
+import { AdminOverrideProvider } from './context/AdminOverrideContext'
 import { usePageActivity } from './lib/usePageActivity'
 import Login from './pages/Login'
 import ChatPage from './pages/ChatPage'
@@ -28,9 +29,10 @@ function AdminRoute({ children }: { children: React.ReactNode }) {
 }
 
 function AppRoutes() {
-  const { isAuthenticated } = useAuth()
+  const { isAuthenticated, user } = useAuth()
   usePageActivity()
   return (
+    <AdminOverrideProvider userId={(user as any)?.id ?? null}>
     <Routes>
       <Route path="/login" element={isAuthenticated ? <Navigate to="/chat" replace /> : <Login />} />
       <Route
@@ -81,6 +83,7 @@ function AppRoutes() {
       <Route path="/reset-password" element={<ResetPasswordPage />} />
       <Route path="*" element={<Navigate to={isAuthenticated ? '/chat' : '/login'} replace />} />
     </Routes>
+    </AdminOverrideProvider>
   )
 }
 

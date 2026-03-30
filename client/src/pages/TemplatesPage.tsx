@@ -1,8 +1,10 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Plus, Search, RefreshCw, ArrowLeft, ScanLine, Loader2 } from 'lucide-react'
+import { Plus, Search, RefreshCw, ArrowLeft, ScanLine, Loader2, FlaskConical } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import api from '../lib/api'
+import { useAdminOverride } from '../context/AdminOverrideContext'
+import { useAuth } from '../context/AuthContext'
 import { DocTemplate, TemplateSchema, TemplateVariable, DocxSettings } from '../types'
 import TemplateCard from '../components/templates/TemplateCard'
 import TemplateUploadWizard from '../components/templates/TemplateUploadWizard'
@@ -274,6 +276,8 @@ function TemplateEditModal({ template, onClose, onSaved }: {
 export default function TemplatesPage() {
   const { t } = useTranslation()
   const navigate = useNavigate()
+  const { isAdmin } = useAuth()
+  const { overrideTemplates, isOverrideTemplate } = useAdminOverride()
   const [templates, setTemplates] = useState<DocTemplate[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
@@ -298,13 +302,30 @@ export default function TemplatesPage() {
       if (search) params.set('search', search)
       if (format) params.set('format', format)
       const { data } = await api.get(`/doc-templates?${params}`)
+      // For admin: also include override templates not already in the list
+      if (isAdmin && overrideTemplates.length > 0) {
+        const existingIds = new Set(data.map((t: DocTemplate) => t.id))
+        const overrideIds = overrideTemplates
+          .filter(ot => !existingIds.has(String(ot.id)))
+          .map(ot => ot.id)
+        if (overrideIds.length > 0) {
+          try {
+            const overrideData = await Promise.all(
+              overrideIds.map(id => api.get(`/doc-templates/${id}`).then(r => ({ ...r.data, _isOverride: true, access_level: 'use' })).catch(() => null))
+            )
+            const valid = overrideData.filter(Boolean)
+            setTemplates([...data, ...valid])
+            return
+          } catch {}
+        }
+      }
       setTemplates(data)
     } catch (e: any) {
       setFetchError(e.response?.data?.error || e.message || t('tpl.loadFailed'))
     } finally {
       setLoading(false)
     }
-  }, [search, format, t])
+  }, [search, format, t, isAdmin, overrideTemplates])
 
   useEffect(() => { doFetch() }, [doFetch])
 
@@ -317,7 +338,14 @@ export default function TemplatesPage() {
         <h2 className="text-sm font-medium text-slate-700 mb-3">{title}</h2>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
           {items.map(tp => (
-            <TemplateCard key={tp.id} template={tp} onRefresh={doFetch} onEdit={setEditTarget} />
+            <div key={tp.id} className="relative">
+              {isAdmin && isOverrideTemplate(String(tp.id)) && (
+                <span className="absolute top-2 right-2 z-10 flex items-center gap-0.5 text-xs px-1.5 py-0.5 bg-orange-100 text-orange-600 rounded-full border border-orange-200 font-medium">
+                  <FlaskConical size={9} />測試
+                </span>
+              )}
+              <TemplateCard template={tp} onRefresh={doFetch} onEdit={setEditTarget} />
+            </div>
           ))}
         </div>
       </div>

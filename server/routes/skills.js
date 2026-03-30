@@ -368,6 +368,53 @@ router.get('/', async (req, res) => {
     }
 });
 
+// ── GET /api/skills/unauthorized  — admin only: 列出 admin 尚無權限的 skill ──────
+router.get('/unauthorized', async (req, res) => {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: '僅管理員可存取' });
+    try {
+        const db = require('../database-oracle').db;
+        const userProfile = await db.prepare(
+            'SELECT id, role, dept_code, profit_center, org_section, org_group_name FROM users WHERE id=?'
+        ).get(req.user.id);
+        if (!userProfile) return res.json([]);
+
+        // Get authorized skill IDs using the same filter as GET /
+        const authRows = await db.prepare(`
+          SELECT s.id FROM skills s
+          WHERE (
+            s.owner_user_id = ?
+            OR s.is_public = 1
+            OR EXISTS (
+              SELECT 1 FROM skill_access sa WHERE sa.skill_id=s.id AND (
+                (sa.grantee_type='user' AND sa.grantee_id=TO_CHAR(?))
+                OR (sa.grantee_type='role' AND sa.grantee_id=?)
+                OR (sa.grantee_type='dept' AND sa.grantee_id=? AND ? IS NOT NULL)
+                OR (sa.grantee_type='profit_center' AND sa.grantee_id=? AND ? IS NOT NULL)
+                OR (sa.grantee_type='org_section' AND sa.grantee_id=? AND ? IS NOT NULL)
+                OR (sa.grantee_type='org_group' AND sa.grantee_id=? AND ? IS NOT NULL)
+              )
+            )
+          )
+        `).all(
+            req.user.id,
+            req.user.id, userProfile.role,
+            userProfile.dept_code, userProfile.dept_code,
+            userProfile.profit_center, userProfile.profit_center,
+            userProfile.org_section, userProfile.org_section,
+            userProfile.org_group_name, userProfile.org_group_name,
+        );
+        const authorizedSet = new Set(authRows.map(r => r.id));
+
+        const all = await db.prepare(
+            `SELECT s.id, s.name, s.icon, s.description, s.type, s.name_zh, s.name_en, s.name_vi, s.desc_zh, s.desc_en, s.desc_vi
+             FROM skills s ORDER BY s.created_at DESC`
+        ).all();
+        res.json(all.filter(s => !authorizedSet.has(s.id)).map(s => serializeSkill(s)));
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
 // ── POST /api/skills — 建立 ───────────────────────────────────────────────────
 router.post('/', async (req, res) => {
     try {

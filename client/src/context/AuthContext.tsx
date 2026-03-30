@@ -3,6 +3,7 @@ import type { User } from '../types'
 import api from '../lib/api'
 import i18n from '../i18n'
 import type { LangCode } from '../i18n'
+import { clearAdminOverrideStorage } from './AdminOverrideContext'
 
 interface AuthContextType {
   user: User | null
@@ -79,12 +80,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const logout = useCallback(async () => {
     try { await api.post('/auth/logout') } catch (_) {}
+    const uid = (user as any)?.id
+    if (uid) clearAdminOverrideStorage(uid)
     localStorage.removeItem('token')
     localStorage.removeItem('user')
     setToken(null)
     setUser(null)
     i18n.changeLanguage('zh-TW')
-  }, [])
+  }, [user])
 
   const setLanguage = useCallback(async (lang: LangCode) => {
     // Optimistic: update UI immediately, then persist to server

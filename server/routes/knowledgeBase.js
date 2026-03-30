@@ -342,14 +342,8 @@ router.get('/', async (req, res) => {
     if (!user) return res.json([]);
 
     let rows;
-    if (user.role === 'admin') {
-      rows = await db.prepare(
-        `SELECT kb.*, u.name AS creator_name, u.employee_id AS creator_emp
-         FROM knowledge_bases kb
-         JOIN users u ON u.id = kb.creator_id
-         ORDER BY kb.updated_at DESC`
-      ).all();
-    } else {
+    {
+      // Admin 也走相同過濾邏輯（不再 bypass），需透過 /unauthorized 搭配前端測試模式存取未授權 KB
       // Both 'use' and 'edit' permissions show the KB in the list.
       // 'use' = can search/chat only; 'edit' = can also modify documents.
       // Oracle does not allow DISTINCT on CLOB columns (ORA-22848).
@@ -391,6 +385,53 @@ router.get('/', async (req, res) => {
       chunk_config: (() => { try { return JSON.parse(r.chunk_config || '{}'); } catch { return {}; } })(),
     }));
     res.json(result);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── GET /api/kb/unauthorized  — admin only: 列出 admin 尚無權限的 KB（供測試模式）──
+router.get('/unauthorized', async (req, res) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ error: '僅管理員可存取' });
+  const db = getDb();
+  try {
+    const uid = req.user.id;
+    const user = await db.prepare(
+      'SELECT role, dept_code, profit_center, org_section, org_group_name, role_id FROM users WHERE id=?'
+    ).get(uid);
+    if (!user) return res.json([]);
+
+    // Get authorized KB IDs (same logic as the list query)
+    const authorizedRows = await db.prepare(`
+      SELECT kb2.id FROM knowledge_bases kb2
+      WHERE kb2.creator_id=?
+        OR kb2.is_public=1
+        OR EXISTS (
+          SELECT 1 FROM kb_access ka WHERE ka.kb_id=kb2.id AND (
+            (ka.grantee_type='user'             AND ka.grantee_id=TO_CHAR(?))
+            OR (ka.grantee_type='role'          AND ka.grantee_id=TO_CHAR(?))
+            OR (ka.grantee_type='dept'          AND ka.grantee_id=? AND ? IS NOT NULL)
+            OR (ka.grantee_type='profit_center' AND ka.grantee_id=? AND ? IS NOT NULL)
+            OR (ka.grantee_type='org_section'   AND ka.grantee_id=? AND ? IS NOT NULL)
+            OR (ka.grantee_type='org_group'     AND ka.grantee_id=? AND ? IS NOT NULL)
+          )
+        )
+    `).all(
+      uid,
+      uid, user.role_id,
+      user.dept_code, user.dept_code,
+      user.profit_center, user.profit_center,
+      user.org_section, user.org_section,
+      user.org_group_name, user.org_group_name,
+    );
+    const authorizedSet = new Set(authorizedRows.map(r => r.id));
+
+    const all = await db.prepare(
+      `SELECT kb.id, kb.name, kb.description, kb.embed_model, kb.chunk_count, u.name AS creator_name
+       FROM knowledge_bases kb JOIN users u ON u.id = kb.creator_id
+       ORDER BY kb.updated_at DESC`
+    ).all();
+    res.json(all.filter(k => !authorizedSet.has(k.id)));
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

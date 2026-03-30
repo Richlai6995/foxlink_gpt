@@ -2885,22 +2885,10 @@ async function listTemplates(db, user, { search, format, tag } = {}) {
       (${alias}.grantee_type='org_group'   AND ${alias}.grantee_id=?)
     )`;
 
-  // Admin shortcut: see all templates as owner
-  const isAdmin = user.role === 'admin';
-
+  // Admin 也走相同過濾邏輯（不再 bypass），需透過 /unauthorized 搭配前端測試模式存取未授權範本
   let sql, params;
 
-  if (isAdmin) {
-    sql = `
-      SELECT t.id, t.creator_id, t.name, t.description, t.format, t.strategy,
-             t.template_file, t.original_file, t.schema_json, t.preview_url,
-             t.is_public, t.is_fixed_format, t.tags, t.use_count, t.forked_from, t.created_at, t.updated_at,
-             'owner' AS access_level
-      FROM doc_templates t
-      WHERE 1=1
-    `;
-    params = [];
-  } else {
+  {
     sql = `
       SELECT t.id, t.creator_id, t.name, t.description, t.format, t.strategy,
              t.template_file, t.original_file, t.schema_json, t.preview_url,
@@ -2943,7 +2931,7 @@ async function listTemplates(db, user, { search, format, tag } = {}) {
 
   sql += ' ORDER BY t.updated_at DESC';
 
-  console.log('[DocTemplate] listTemplates uid=', uid, 'admin=', isAdmin, 'format=', format || '-', 'search=', search || '-');
+  console.log('[DocTemplate] listTemplates uid=', uid, 'format=', format || '-', 'search=', search || '-');
   let rows = await db.prepare(sql).all(...params);
   console.log('[DocTemplate] listTemplates 回傳', rows.length, '筆');
 

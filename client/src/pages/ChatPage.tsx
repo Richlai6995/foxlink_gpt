@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useSearchParams, useNavigate } from 'react-router-dom'
-import { Square, AlertTriangle, Share2, Copy, Check, X, Sparkles, Search, Plus, Plug, Zap, Database, CheckCircle, BarChart3, ChevronDown, RefreshCw, TrendingUp, GripVertical, Eye, EyeOff } from 'lucide-react'
+import { Square, AlertTriangle, Share2, Copy, Check, X, Sparkles, Search, Plus, Plug, Zap, Database, CheckCircle, BarChart3, ChevronDown, RefreshCw, TrendingUp, GripVertical, Eye, EyeOff, FlaskConical, Settings } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import Sidebar from '../components/Sidebar'
 import { fmtTW } from '../lib/fmtTW'
@@ -11,6 +11,8 @@ import type { ChatSession, ChatMessage, ModelType, GeneratedFile, LlmModel } fro
 import api from '../lib/api'
 import { copyText } from '../lib/clipboard'
 import { useAuth } from '../context/AuthContext'
+import { useAdminOverride } from '../context/AdminOverrideContext'
+import AdminOverridePopover from '../components/AdminOverridePopover'
 import TokenStatsModal from '../components/common/TokenStatsModal'
 
 function applyOrder<T extends { id: any }>(items: T[], order: (number | string)[]): T[] {
@@ -71,6 +73,7 @@ export default function ChatPage() {
 
   const canResearch = (user as any)?.effective_can_deep_research === true
   const { canUseDashboard, isAdmin } = useAuth()
+  const { overrideTools, isOverrideTool } = useAdminOverride()
 
   // ── AI 戰情快速入口 ─────────────────────────────────────────────────────────
   interface DashTopic { id: number; name: string; designs: { id: number; name: string }[] }
@@ -150,17 +153,35 @@ export default function ChatPage() {
   const [editRerunJobId,     setEditRerunJobId]     = useState<string | null>(null)
 
   const openMcpPanel = useCallback(async () => {
-    try { const r = await api.get('/mcp-servers/my'); setAllMcpServers(r.data || []) } catch {}
+    try {
+      const r = await api.get('/mcp-servers/my')
+      const authorized: ToolItem[] = r.data || []
+      const overrideMcps = overrideTools.filter(t => t.type === 'mcp' && !authorized.some(a => String(a.id) === String(t.id)))
+        .map(t => ({ id: t.id as number, name: t.name_zh || t.name, description: t.description || null, _isOverride: true } as any))
+      setAllMcpServers([...authorized, ...overrideMcps])
+    } catch {}
     setShowMcpPanel(true); setShowDifyPanel(false); setShowKbPanel(false)
-  }, [])
+  }, [overrideTools])
   const openDifyPanel = useCallback(async () => {
-    try { const r = await api.get('/dify-kb/my'); setAllDifyKbs(r.data || []) } catch {}
+    try {
+      const r = await api.get('/dify-kb/my')
+      const authorized: ToolItem[] = r.data || []
+      const overrideDify = overrideTools.filter(t => t.type === 'dify' && !authorized.some(a => String(a.id) === String(t.id)))
+        .map(t => ({ id: t.id as number, name: t.name_zh || t.name, description: t.description || null, _isOverride: true } as any))
+      setAllDifyKbs([...authorized, ...overrideDify])
+    } catch {}
     setShowDifyPanel(true); setShowMcpPanel(false); setShowKbPanel(false)
-  }, [])
+  }, [overrideTools])
   const openKbPanel = useCallback(async () => {
-    try { const r = await api.get('/kb'); setAllSelfKbs((r.data || []).filter((k: any) => (k.chunk_count ?? 0) > 0)) } catch {}
+    try {
+      const r = await api.get('/kb')
+      const authorized: ToolItem[] = (r.data || []).filter((k: any) => (k.chunk_count ?? 0) > 0)
+      const overrideKbs = overrideTools.filter(t => t.type === 'kb' && !authorized.some(a => String(a.id) === String(t.id)))
+        .map(t => ({ id: t.id as string, name: t.name_zh || t.name, description: t.description || null, chunk_count: 1, _isOverride: true } as any))
+      setAllSelfKbs([...authorized, ...overrideKbs])
+    } catch {}
     setShowKbPanel(true); setShowMcpPanel(false); setShowDifyPanel(false)
-  }, [])
+  }, [overrideTools])
 
   // Close tool panels on outside click
   useEffect(() => {
@@ -455,11 +476,14 @@ export default function ChatPage() {
   const openSkillPanel = useCallback(async () => {
     try {
       const res = await api.get('/skills')
-      setAllSkills(res.data)
+      const authorized: Skill[] = res.data || []
+      const overrideSkillItems = overrideTools.filter(t => t.type === 'skill' && !authorized.some(a => String(a.id) === String(t.id)))
+        .map(t => ({ id: Number(t.id), name: t.name_zh || t.name, icon: t.icon || '🔧', description: t.description || '', type: t.skill_type || 'prompt', _isOverride: true } as any))
+      setAllSkills([...authorized, ...overrideSkillItems])
     } catch { }
     setSkillSearch('')
     setShowSkillPanel(true)
-  }, [])
+  }, [overrideTools])
 
   const doSaveSkills = useCallback(async (skillVariables?: Record<number, Record<string, any>>) => {
     if (!currentSessionId) {
@@ -874,7 +898,10 @@ export default function ChatPage() {
                       {isHid ? <Eye size={9} /> : <EyeOff size={9} />}
                     </button>
                     <div className="flex-1 min-w-0 cursor-pointer" onClick={() => { if (!isHid) setSelectedMcpIds(prev => { const n = new Set(prev); picked ? n.delete(id) : n.add(id); return n }) }}>
-                      <p className="text-xs font-medium text-slate-800 whitespace-nowrap">{localName(s)}</p>
+                      <p className="text-xs font-medium text-slate-800 whitespace-nowrap flex items-center gap-1">
+                        {localName(s)}
+                        {isOverrideTool('mcp', id) && <FlaskConical size={10} className="text-orange-400 flex-shrink-0" title="測試模式" />}
+                      </p>
                       {localDesc(s) && <p className="text-xs text-slate-400 whitespace-nowrap">{localDesc(s)}</p>}
                     </div>
                   </div>
@@ -895,7 +922,10 @@ export default function ChatPage() {
                   </div>
                   <div className="max-h-56 overflow-y-auto p-2 space-y-0.5">
                     {allMcpServers.length === 0 ? (
-                      <div className="text-center py-6 text-slate-400 text-xs">{t('chat.topbar.mcpEmpty')}</div>
+                      <div className="text-center py-6 text-slate-400 text-xs">
+                        {t('chat.topbar.mcpEmpty')}
+                        {isAdmin && <div className="mt-2"><a href="/admin" className="text-blue-500 hover:underline flex items-center justify-center gap-1"><Settings size={10} />前往設定授權</a></div>}
+                      </div>
                     ) : <>{_vis.map(s => <McpRow key={s.id} s={s} isHid={false} />)}{_hid.length > 0 && <><div className="px-2 pt-1.5 pb-0.5 text-xs text-slate-400 border-t border-slate-100 mt-1">已隱藏 ({_hid.length})</div>{_hid.map(s => <McpRow key={s.id} s={s} isHid={true} />)}</>}</>}
                   </div>
                   <div className="p-2 border-t border-slate-100 flex justify-between items-center">
@@ -949,7 +979,10 @@ export default function ChatPage() {
                       {isHid ? <Eye size={9} /> : <EyeOff size={9} />}
                     </button>
                     <div className="flex-1 min-w-0 cursor-pointer" onClick={() => { if (!isHid) setSelectedDifyIds(prev => { const n = new Set(prev); picked ? n.delete(id) : n.add(id); return n }) }}>
-                      <p className="text-xs font-medium text-slate-800 whitespace-nowrap">{localName(s)}</p>
+                      <p className="text-xs font-medium text-slate-800 whitespace-nowrap flex items-center gap-1">
+                        {localName(s)}
+                        {isOverrideTool('dify', id) && <FlaskConical size={10} className="text-orange-400 flex-shrink-0" title="測試模式" />}
+                      </p>
                       {localDesc(s) && <p className="text-xs text-slate-400 whitespace-nowrap">{localDesc(s)}</p>}
                     </div>
                   </div>
@@ -970,7 +1003,10 @@ export default function ChatPage() {
                   </div>
                   <div className="max-h-56 overflow-y-auto p-2 space-y-0.5">
                     {allDifyKbs.length === 0 ? (
-                      <div className="text-center py-6 text-slate-400 text-xs">{t('chat.topbar.difyEmpty')}</div>
+                      <div className="text-center py-6 text-slate-400 text-xs">
+                        {t('chat.topbar.difyEmpty')}
+                        {isAdmin && <div className="mt-2"><a href="/admin" className="text-blue-500 hover:underline flex items-center justify-center gap-1"><Settings size={10} />前往設定授權</a></div>}
+                      </div>
                     ) : <>{_vis.map(s => <DifyRow key={s.id} s={s} isHid={false} />)}{_hid.length > 0 && <><div className="px-2 pt-1.5 pb-0.5 text-xs text-slate-400 border-t border-slate-100 mt-1">已隱藏 ({_hid.length})</div>{_hid.map(s => <DifyRow key={s.id} s={s} isHid={true} />)}</>}</>}
                   </div>
                   <div className="p-2 border-t border-slate-100 flex justify-between items-center">
@@ -1024,7 +1060,10 @@ export default function ChatPage() {
                       {isHid ? <Eye size={9} /> : <EyeOff size={9} />}
                     </button>
                     <div className="flex-1 min-w-0 cursor-pointer" onClick={() => { if (!isHid) setSelectedKbIds(prev => { const n = new Set(prev); picked ? n.delete(sid) : n.add(sid); return n }) }}>
-                      <p className="text-xs font-medium text-slate-800 whitespace-nowrap">{localName(s)}</p>
+                      <p className="text-xs font-medium text-slate-800 whitespace-nowrap flex items-center gap-1">
+                        {localName(s)}
+                        {isOverrideTool('kb', sid) && <FlaskConical size={10} className="text-orange-400 flex-shrink-0" title="測試模式" />}
+                      </p>
                       {localDesc(s) && <p className="text-xs text-slate-400 whitespace-nowrap">{localDesc(s)}</p>}
                     </div>
                   </div>
@@ -1045,7 +1084,10 @@ export default function ChatPage() {
                   </div>
                   <div className="max-h-56 overflow-y-auto p-2 space-y-0.5">
                     {allSelfKbs.length === 0 ? (
-                      <div className="text-center py-6 text-slate-400 text-xs">{t('chat.topbar.kbEmpty')}</div>
+                      <div className="text-center py-6 text-slate-400 text-xs">
+                        {t('chat.topbar.kbEmpty')}
+                        {isAdmin && <div className="mt-2"><a href="/admin" className="text-blue-500 hover:underline flex items-center justify-center gap-1"><Settings size={10} />前往設定授權</a></div>}
+                      </div>
                     ) : <>{_vis.map(s => <KbRow key={s.id} s={s} isHid={false} />)}{_hid.length > 0 && <><div className="px-2 pt-1.5 pb-0.5 text-xs text-slate-400 border-t border-slate-100 mt-1">已隱藏 ({_hid.length})</div>{_hid.map(s => <KbRow key={s.id} s={s} isHid={true} />)}</>}</>}
                   </div>
                   <div className="p-2 border-t border-slate-100 flex justify-between items-center">
@@ -1224,6 +1266,9 @@ export default function ChatPage() {
               )}
             </div>
           )}
+
+          {/* Admin 測試模式按鈕 */}
+          {isAdmin && <AdminOverridePopover />}
 
           {/* Share button — only when a session is loaded and not streaming */}
           {currentSessionId && messages.length > 0 && !streaming && (

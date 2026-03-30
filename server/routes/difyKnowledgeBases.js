@@ -56,17 +56,10 @@ router.get('/active', async (req, res) => {
 });
 
 // GET /api/dify-kb/my  — 依 dify_access 回傳當前使用者可用的 DIFY KB（含公開已核准）
+// Admin 也走相同過濾邏輯（不再 bypass）
 router.get('/my', async (req, res) => {
   const db = getDb();
   try {
-    if (req.user.role === 'admin') {
-      const kbs = await db.prepare(
-        `SELECT id, name, description, api_server, api_key, is_public, public_approved,
-                name_zh, name_en, name_vi, desc_zh, desc_en, desc_vi, tags
-         FROM dify_knowledge_bases WHERE is_active=1 ORDER BY sort_order ASC`
-      ).all();
-      return res.json(kbs);
-    }
     // 公開且已核准的項目（所有使用者可見）
     const publicKbs = await db.prepare(
       `SELECT id, name, DBMS_LOB.SUBSTR(description, 2000, 1) AS description,
@@ -116,6 +109,51 @@ router.get('/my', async (req, res) => {
       ).all(...privateIds);
     }
     res.json([...publicKbs, ...privateKbs]);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/dify-kb/unauthorized  — admin only: 列出 admin 尚無權限的 active DIFY KB（供測試模式）
+router.get('/unauthorized', async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const db = getDb();
+  try {
+    const all = await db.prepare(
+      `SELECT id, name, DBMS_LOB.SUBSTR(description, 2000, 1) AS description, name_zh, name_en, name_vi, desc_zh, desc_en, desc_vi, tags FROM dify_knowledge_bases WHERE is_active=1 ORDER BY sort_order ASC`
+    ).all();
+
+    const publicIds = await db.prepare(
+      `SELECT id FROM dify_knowledge_bases WHERE is_active=1 AND is_public=1 AND public_approved=1`
+    ).all();
+    const authorizedSet = new Set(publicIds.map(r => r.id));
+
+    const u = await db.prepare(
+      `SELECT role_id, dept_code, profit_center, org_section, org_group_name FROM users WHERE id=?`
+    ).get(req.user.id);
+    if (u) {
+      const granted = await db.prepare(
+        `SELECT DISTINCT a.dify_kb_id FROM dify_access a
+         JOIN dify_knowledge_bases d ON d.id = a.dify_kb_id
+         WHERE d.is_active=1 AND (
+           (a.grantee_type='user'        AND a.grantee_id=?)
+           OR (a.grantee_type='role'        AND a.grantee_id=? AND ? IS NOT NULL)
+           OR (a.grantee_type='department'  AND a.grantee_id=? AND ? IS NOT NULL)
+           OR (a.grantee_type='cost_center' AND a.grantee_id=? AND ? IS NOT NULL)
+           OR (a.grantee_type='division'    AND a.grantee_id=? AND ? IS NOT NULL)
+           OR (a.grantee_type='org_group'   AND a.grantee_id=? AND ? IS NOT NULL)
+         )`
+      ).all(
+        String(req.user.id),
+        u.role_id != null ? String(u.role_id) : null, u.role_id,
+        u.dept_code, u.dept_code,
+        u.profit_center, u.profit_center,
+        u.org_section, u.org_section,
+        u.org_group_name, u.org_group_name
+      );
+      granted.forEach(r => authorizedSet.add(r.dify_kb_id));
+    }
+    res.json(all.filter(k => !authorizedSet.has(k.id)));
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
