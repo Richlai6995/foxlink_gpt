@@ -226,13 +226,7 @@ async function buildToolList(db, user) {
 
   // 自建 KB
   try {
-    let kbs;
-    if (user.role === 'admin') {
-      kbs = await db.prepare(
-        `SELECT name, description FROM knowledge_bases WHERE chunk_count>0 ORDER BY name ASC`
-      ).all();
-    } else {
-      kbs = await db.prepare(
+    const kbs = await db.prepare(
         `SELECT kb.name, kb.description FROM knowledge_bases kb
          WHERE kb.chunk_count>0 AND (
            kb.creator_id=? OR kb.is_public=1
@@ -245,7 +239,6 @@ async function buildToolList(db, user) {
          )
          ORDER BY kb.name ASC`
       ).all(user.id, user.id, user.role_id || 0, user.dept_code, user.dept_code);
-    }
     if (kbs.length > 0) {
       lines.push('🧠 **自建知識庫 (KB)**：');
       kbs.forEach(k => {
@@ -287,8 +280,19 @@ async function buildToolList(db, user) {
   // MCP
   try {
     const mcpServers = await db.prepare(
-      `SELECT name, description FROM mcp_servers WHERE is_active=1 ORDER BY name ASC`
-    ).all();
+      `SELECT DISTINCT m.name, DBMS_LOB.SUBSTR(m.description, 200, 1) AS description
+       FROM mcp_servers m
+       WHERE m.is_active=1 AND (
+         (m.is_public=1 AND m.public_approved=1)
+         OR EXISTS (
+           SELECT 1 FROM mcp_access a WHERE a.mcp_server_id=m.id AND (
+             (a.grantee_type='user' AND a.grantee_id=TO_CHAR(?))
+             OR (a.grantee_type='role' AND a.grantee_id=TO_CHAR(?))
+           )
+         )
+       )
+       ORDER BY m.name ASC`
+    ).all(user.id, user.role_id || 0);
     if (mcpServers.length > 0) {
       lines.push('⚙️ **MCP 工具**：');
       mcpServers.forEach(m => {
@@ -340,14 +344,7 @@ async function loadFunctionDeclarations(db, user) {
 
   // ── 自建 KB ─────────────────────────────────────────────────────────────────
   try {
-    let kbs;
-    if (user.role === 'admin') {
-      kbs = await db.prepare(
-        `SELECT id, name, description, retrieval_mode, embedding_dims, top_k_return, score_threshold
-         FROM knowledge_bases WHERE chunk_count>0 ORDER BY name ASC`
-      ).all();
-    } else {
-      kbs = await db.prepare(
+    const kbs = await db.prepare(
         `SELECT kb.id, kb.name, kb.description, kb.retrieval_mode, kb.embedding_dims, kb.top_k_return, kb.score_threshold
          FROM knowledge_bases kb
          WHERE kb.chunk_count>0 AND (
@@ -359,7 +356,6 @@ async function loadFunctionDeclarations(db, user) {
          )
          ORDER BY kb.name ASC`
       ).all(user.id, user.id, user.role_id || 0);
-    }
 
     for (const kb of kbs) {
       const fnName = `selfkb_${kb.id.replace(/-/g, '_')}`;
@@ -478,8 +474,19 @@ async function loadFunctionDeclarations(db, user) {
   try {
     const mcpClient = require('../services/mcpClient');
     const mcpServers = await db.prepare(
-      `SELECT id, name, endpoint_url, is_active FROM mcp_servers WHERE is_active=1 ORDER BY name ASC`
-    ).all();
+      `SELECT DISTINCT m.id, m.name, m.endpoint_url, m.is_active
+       FROM mcp_servers m
+       WHERE m.is_active=1 AND (
+         (m.is_public=1 AND m.public_approved=1)
+         OR EXISTS (
+           SELECT 1 FROM mcp_access a WHERE a.mcp_server_id=m.id AND (
+             (a.grantee_type='user' AND a.grantee_id=TO_CHAR(?))
+             OR (a.grantee_type='role' AND a.grantee_id=TO_CHAR(?))
+           )
+         )
+       )
+       ORDER BY m.name ASC`
+    ).all(user.id, user.role_id || 0);
 
     for (const srv of mcpServers) {
       try {
