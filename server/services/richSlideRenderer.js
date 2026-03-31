@@ -1043,6 +1043,8 @@ function renderRichSlides(pptx, data) {
 
   for (let i = 0; i < slides.length; i++) {
     const d = slides[i];
+    // Normalize title field — AI sometimes returns slide_title instead of title
+    if (!d.title && d.slide_title) d.title = d.slide_title;
     const s = pptx.addSlide();
     s.background = { color: theme.bg };
     const pn = i + 1;
@@ -1089,37 +1091,43 @@ function renderRichInnerSlides(pptx, slidesArray, themeName, options = {}) {
   if (options.height) H = options.height;
   if (options.noFooter) DRAW_FOOTER = false;
 
-  const theme = THEMES[themeName] || THEMES.dark;
-  const total = slidesArray.length;
-  const meta = '';
+  try {
+    const theme = THEMES[themeName] || THEMES.dark;
+    const total = slidesArray.length;
+    const meta = '';
 
-  for (let i = 0; i < slidesArray.length; i++) {
-    const d = slidesArray[i];
-    const s = pptx.addSlide();
-    s.background = { color: theme.bg };
-    const pn = i + 1;
+    for (let i = 0; i < slidesArray.length; i++) {
+      const d = slidesArray[i];
+      // Normalize title field — AI sometimes returns slide_title instead of title
+      if (!d.title && d.slide_title) d.title = d.slide_title;
+      console.log(`[RichRenderer] slide ${i + 1}: type=${d.type}, title="${(d.title || '').substring(0, 40)}", keys=${Object.keys(d).join(',')}`);
+      const s = pptx.addSlide();
+      s.background = { color: theme.bg };
+      const pn = i + 1;
 
-    switch (d.type) {
-      case 'dashboard':    renderDashboard(pptx, s, d, theme, pn, total, meta); break;
-      case 'data_table':   renderDataTable(pptx, s, d, theme, pn, total, meta); break;
-      case 'chart':        renderChart(pptx, s, d, theme, pn, total, meta); break;
-      case 'infographic':  renderInfographic(pptx, s, d, theme, pn, total, meta); break;
-      case 'timeline':     renderTimeline(pptx, s, d, theme, pn, total, meta); break;
-      case 'comparison':   renderComparison(pptx, s, d, theme, pn, total, meta); break;
-      case 'process_flow': renderProcessFlow(pptx, s, d, theme, pn, total, meta); break;
-      case 'image_text':   renderImageText(pptx, s, d, theme, pn, total, meta); break;
-      case 'bullets':      renderBullets(pptx, s, d, theme, pn, total, meta); break;
-      case 'two_col':      renderTwoCol(pptx, s, d, theme, pn, total, meta); break;
-      case '3col':         render3Col(pptx, s, d, theme, pn, total, meta); break;
-      case 'quote':        renderQuote(pptx, s, d, theme, pn, total); break;
-      case 'section':      renderSection(pptx, s, d, theme, pn, total); break;
-      default:             renderBullets(pptx, s, d, theme, pn, total, meta); break;
+      switch (d.type) {
+        case 'dashboard':    renderDashboard(pptx, s, d, theme, pn, total, meta); break;
+        case 'data_table':   renderDataTable(pptx, s, d, theme, pn, total, meta); break;
+        case 'chart':        renderChart(pptx, s, d, theme, pn, total, meta); break;
+        case 'infographic':  renderInfographic(pptx, s, d, theme, pn, total, meta); break;
+        case 'timeline':     renderTimeline(pptx, s, d, theme, pn, total, meta); break;
+        case 'comparison':   renderComparison(pptx, s, d, theme, pn, total, meta); break;
+        case 'process_flow': renderProcessFlow(pptx, s, d, theme, pn, total, meta); break;
+        case 'image_text':   renderImageText(pptx, s, d, theme, pn, total, meta); break;
+        case 'bullets':      renderBullets(pptx, s, d, theme, pn, total, meta); break;
+        case 'two_col':      renderTwoCol(pptx, s, d, theme, pn, total, meta); break;
+        case '3col':         render3Col(pptx, s, d, theme, pn, total, meta); break;
+        case 'quote':        renderQuote(pptx, s, d, theme, pn, total); break;
+        case 'section':      renderSection(pptx, s, d, theme, pn, total); break;
+        default:             renderBullets(pptx, s, d, theme, pn, total, meta); break;
+      }
+      if (d.notes) s.addNotes(strip(d.notes));
     }
-    if (d.notes) s.addNotes(strip(d.notes));
+    return slidesArray.length;
+  } finally {
+    // Always restore globals — prevents stale values on error
+    W = prevW; H = prevH; DRAW_FOOTER = prevFooter;
   }
-  // Restore defaults
-  W = prevW; H = prevH; DRAW_FOOTER = prevFooter;
-  return slidesArray.length;
 }
 
 module.exports = {
