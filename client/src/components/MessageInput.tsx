@@ -1,8 +1,8 @@
-import { useState, useRef, useCallback, useImperativeHandle, forwardRef } from 'react'
-import { Send, Paperclip, X, FileText, Image, Music, AlertCircle, Search, LayoutTemplate } from 'lucide-react'
+import { useState, useRef, useCallback, useImperativeHandle, forwardRef, useMemo } from 'react'
+import { Send, Paperclip, X, FileText, Image, Music, AlertCircle, Search, LayoutTemplate, Sparkles, Palette } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import TemplatePickerPopover from './templates/TemplatePickerPopover'
-import { DocTemplate } from '../types'
+import { DocTemplate, TemplateSchema } from '../types'
 
 interface Props {
   onSend: (message: string, files: File[]) => void
@@ -54,7 +54,19 @@ const MessageInput = forwardRef<MessageInputHandle, Props>(function MessageInput
   const [showTemplatePicker, setShowTemplatePicker] = useState(false)
   const [selectedTemplate, setSelectedTemplate] = useState<DocTemplate | null>(null)
   const [tplOutputFmt, setTplOutputFmt] = useState<'pdf' | 'docx'>('pdf')
+  const [pptxMode, setPptxMode] = useState<'template' | 'rich'>('template')
+  const [pptxTheme, setPptxTheme] = useState<'dark' | 'light' | 'corporate'>('dark')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+
+  // Detect if selected PPTX template has layout_template slides (supports rich mode)
+  const isPptxWithLayout = useMemo(() => {
+    if (!selectedTemplate || selectedTemplate.format !== 'pptx' || !selectedTemplate.schema_json) return false
+    try {
+      const schema: TemplateSchema = typeof selectedTemplate.schema_json === 'string'
+        ? JSON.parse(selectedTemplate.schema_json) : selectedTemplate.schema_json
+      return schema.pptx_settings?.slide_config?.some(c => c.type === 'layout_template') ?? false
+    } catch { return false }
+  }, [selectedTemplate])
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const u = user as any
@@ -137,8 +149,10 @@ const MessageInput = forwardRef<MessageInputHandle, Props>(function MessageInput
     if (disabled) return
     if (!message.trim() && files.length === 0) return
     const outFmt = selectedTemplate?.format === 'pdf' ? tplOutputFmt : selectedTemplate?.format
+    // Embed pptxMode + pptxTheme for PPTX templates with layout_template
+    const pptxSuffix = (isPptxWithLayout && pptxMode === 'rich') ? `:rich:${pptxTheme}` : ''
     const finalMsg = selectedTemplate
-      ? `[使用範本:${selectedTemplate.id}:${selectedTemplate.name}:${outFmt}] ${message.trim()}`
+      ? `[使用範本:${selectedTemplate.id}:${selectedTemplate.name}:${outFmt}${pptxSuffix}] ${message.trim()}`
       : message.trim()
     onSend(finalMsg, files)
     setMessage('')
@@ -146,6 +160,8 @@ const MessageInput = forwardRef<MessageInputHandle, Props>(function MessageInput
     setFileError('')
     setSelectedTemplate(null)
     setTplOutputFmt('pdf')
+    setPptxMode('template')
+    setPptxTheme('dark')
     if (textareaRef.current) textareaRef.current.style.height = 'auto'
   }
 
@@ -167,9 +183,10 @@ const MessageInput = forwardRef<MessageInputHandle, Props>(function MessageInput
     <div className="p-4 bg-white border-t border-slate-200">
       {/* Selected template badge */}
       {selectedTemplate && (
-        <div className="flex items-center gap-2 mb-2 bg-indigo-50 border border-indigo-200 rounded-lg px-3 py-1.5 text-xs text-indigo-700">
+        <div className="flex items-center gap-2 mb-2 bg-indigo-50 border border-indigo-200 rounded-lg px-3 py-1.5 text-xs text-indigo-700 flex-wrap">
           <LayoutTemplate size={13} />
           <span>使用範本：<strong>{selectedTemplate.name}</strong></span>
+          {/* PDF output format toggle */}
           {selectedTemplate.format === 'pdf' && (
             <div className="flex rounded border border-indigo-300 overflow-hidden text-[11px] ml-1">
               {(['pdf', 'docx'] as const).map(f => (
@@ -179,6 +196,41 @@ const MessageInput = forwardRef<MessageInputHandle, Props>(function MessageInput
                   className={`px-2 py-0.5 transition ${tplOutputFmt === f ? 'bg-indigo-600 text-white' : 'bg-white text-indigo-600 hover:bg-indigo-50'}`}
                 >
                   {f === 'pdf' ? 'PDF' : 'Word'}
+                </button>
+              ))}
+            </div>
+          )}
+          {/* PPTX: content mode toggle (template vs AI rich) */}
+          {isPptxWithLayout && (
+            <div className="flex rounded border border-indigo-300 overflow-hidden text-[11px] ml-1">
+              <button
+                onClick={() => setPptxMode('template')}
+                className={`px-2 py-0.5 transition flex items-center gap-1 ${pptxMode === 'template' ? 'bg-indigo-600 text-white' : 'bg-white text-indigo-600 hover:bg-indigo-50'}`}
+              >
+                <LayoutTemplate size={10} />依範本格式
+              </button>
+              <button
+                onClick={() => setPptxMode('rich')}
+                className={`px-2 py-0.5 transition flex items-center gap-1 ${pptxMode === 'rich' ? 'bg-indigo-600 text-white' : 'bg-white text-indigo-600 hover:bg-indigo-50'}`}
+              >
+                <Sparkles size={10} />AI 自由設計
+              </button>
+            </div>
+          )}
+          {/* PPTX: theme selector (only in rich mode) */}
+          {isPptxWithLayout && pptxMode === 'rich' && (
+            <div className="flex rounded border border-indigo-300 overflow-hidden text-[11px] ml-1">
+              {([
+                { value: 'dark' as const, label: '深色', icon: '🌙' },
+                { value: 'light' as const, label: '淺色', icon: '☀️' },
+                { value: 'corporate' as const, label: '企業', icon: '🏢' },
+              ]).map(t => (
+                <button
+                  key={t.value}
+                  onClick={() => setPptxTheme(t.value)}
+                  className={`px-2 py-0.5 transition ${pptxTheme === t.value ? 'bg-indigo-600 text-white' : 'bg-white text-indigo-600 hover:bg-indigo-50'}`}
+                >
+                  {t.icon} {t.label}
                 </button>
               ))}
             </div>

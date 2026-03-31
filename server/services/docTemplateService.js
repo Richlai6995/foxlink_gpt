@@ -2076,16 +2076,41 @@ async function generateDocument(db, templateId, userId, inputData, outputFormat,
 
   } else if (tpl.format === 'pptx') {
     // PPTX: template_file has {{key}} placeholders (injected at createTemplate time).
-    // Supports: layout_template (multi-layout with bullet expansion),
+    // Supports: rich (pptxgenjs dashboard/chart/table inner slides),
+    //           layout_template (multi-layout with bullet expansion),
     //           content_repeat (legacy per-item slide duplication),
     //           and simple (flat var replacement).
     const zip = await new JSZip().loadAsync(tplBuf);
     const variables  = schema.variables || [];
     const slideConfig = schema.pptx_settings?.slide_config || [];
+    let pptxRichHandled = false;
 
     if (slideConfig.some(c => c.type === 'layout_template')) {
-      // ── New multi-layout path ────────────────────────────────────────────────
-      await _generateLayoutPptx(zip, schema, inputData, slideConfig, variables);
+      // Check if AI output contains rich slide types → use pptxgenjs renderer
+      const contentVar = schema.pptx_settings?.content_array_var || 'slides';
+      const slidesData = Array.isArray(inputData[contentVar]) ? inputData[contentVar] : [];
+      const RICH_TYPES = new Set(['dashboard', 'data_table', 'chart', 'infographic', 'timeline', 'comparison', 'process_flow', 'image_text']);
+      const hasRichSlides = slidesData.some(s => RICH_TYPES.has(s.type));
+      // User explicitly selected "AI 自由設計" → always use rich renderer
+      const forceRichMode = inputData._pptxRenderMode === 'rich';
+
+      if (hasRichSlides || forceRichMode) {
+        // ── Rich rendering path: template cover/closing + pptxgenjs inner slides ──
+        console.log(`[DocTemplate] PPTX rich mode: ${slidesData.length} slides (hasRich=${hasRichSlides}, forceRich=${forceRichMode})`);
+        const { mergeTemplateWithRichSlides } = require('./templatePptxMerger');
+        const varMap = {};
+        for (const v of variables) {
+          if (v.type !== 'loop') varMap[v.key] = resolveValue(v, inputData);
+        }
+        const richTheme = inputData._theme || 'dark';
+        const mergedBuffer = await mergeTemplateWithRichSlides(tplBuf, slideConfig, varMap, slidesData, richTheme);
+        outPath = path.join(outDir, `${outputId}.pptx`);
+        await fs.writeFile(outPath, mergedBuffer);
+        pptxRichHandled = true;
+      } else {
+        // ── Existing multi-layout path ────────────────────────────────────────────
+        await _generateLayoutPptx(zip, schema, inputData, slideConfig, variables);
+      }
     } else {
       // ── Legacy simple / content_repeat path ─────────────────────────────────
       const varMap = {};
@@ -2128,9 +2153,11 @@ async function generateDocument(db, templateId, userId, inputData, outputFormat,
       }
     }
 
-    const out = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE', compressionOptions: { level: 6 } });
-    outPath = path.join(outDir, `${outputId}.pptx`);
-    await fs.writeFile(outPath, out);
+    if (!pptxRichHandled) {
+      const out = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE', compressionOptions: { level: 6 } });
+      outPath = path.join(outDir, `${outputId}.pptx`);
+      await fs.writeFile(outPath, out);
+    }
 
   } else if (tpl.format === 'pdf' && fmt === 'docx') {
     // ── PDF template → DOCX output ──────────────────────────────────────────

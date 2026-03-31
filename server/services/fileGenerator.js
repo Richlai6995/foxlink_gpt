@@ -20,7 +20,7 @@ function stripInlineMarkdown(text) {
 const { UPLOAD_DIR } = require('../config/paths');
 
 // CPU-intensive types that should run in a worker thread
-const WORKER_TYPES = new Set(['pdf', 'pptx', 'docx', 'foxlink_pptx']);
+const WORKER_TYPES = new Set(['pdf', 'pptx', 'docx', 'foxlink_pptx', 'rich_pptx']);
 
 /**
  * Run a CPU-intensive file generation in a dedicated worker thread.
@@ -114,6 +114,8 @@ async function generateFile(type, filename, content, sessionId) {
       return await generatePptx(content, outputPath);
     case 'foxlink_pptx':
       return await generateFoxlinkPptx(content, outputPath);
+    case 'rich_pptx':
+      return await generateRichPptx(content, outputPath);
     case 'txt': {
       // Strip markdown symbols from each line
       const cleanTxt = content.split('\n').map((line) => {
@@ -1047,6 +1049,31 @@ async function generateFoxlinkPptx(content, outputPath) {
     if (slide.notes) s.addNotes(slide.notes);
   }
 
+  await pptx.writeFile({ fileName: outputPath });
+  return outputPath;
+}
+
+// ─── Rich PPTX (dashboard, charts, tables, infographics, etc.) ───────────────
+async function generateRichPptx(content, outputPath) {
+  const PptxGenJS = require('pptxgenjs');
+  const { renderRichSlides } = require('./richSlideRenderer');
+
+  let data;
+  try {
+    data = JSON.parse(content);
+  } catch (e) {
+    // Try to extract JSON from surrounding text
+    const m = content.match(/\{[\s\S]*\}/);
+    if (!m) throw new Error('Invalid JSON for rich PPTX');
+    data = JSON.parse(m[0]);
+  }
+
+  const pptx = new PptxGenJS();
+  pptx.layout = 'LAYOUT_WIDE';
+  pptx.author = data.author || '';
+  pptx.subject = data.subject || 'Rich Presentation';
+
+  renderRichSlides(pptx, data);
   await pptx.writeFile({ fileName: outputPath });
   return outputPath;
 }
