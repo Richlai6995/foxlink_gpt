@@ -128,7 +128,7 @@ function MessageBubble({
         onMouseEnter={() => setHover(true)}
         onMouseLeave={() => setHover(false)}
       >
-        <div className="flex flex-col items-end max-w-[70%] gap-1">
+        <div className="flex flex-col items-end min-w-0 max-w-[75%] gap-1">
           {/* Files */}
           {msg.files && msg.files.length > 0 && (
             <div className="flex flex-wrap gap-1 justify-end mb-1">
@@ -142,7 +142,7 @@ function MessageBubble({
               ))}
             </div>
           )}
-          <div className="bg-blue-600 text-white px-4 py-3 rounded-2xl rounded-tr-sm text-sm leading-relaxed whitespace-pre-wrap">
+          <div className="bg-blue-600 text-white px-4 py-3 rounded-2xl rounded-tr-sm text-sm leading-relaxed whitespace-pre-wrap break-words min-w-0 w-full">
             {msg.content ?? ''}
           </div>
           {hover && (
@@ -297,7 +297,7 @@ export default function ChatWindow({ messages, streaming, streamingContent, stre
   const lastUserIdx = messages.map((m) => m.role).lastIndexOf('user')
 
   return (
-    <div className="flex-1 min-w-0 overflow-y-auto overflow-x-hidden bg-slate-50 px-4 py-6">
+    <div className="flex-1 min-w-0 overflow-y-auto overflow-x-hidden bg-slate-50 pl-4 pr-4 py-6">
       <div className="max-w-3xl mx-auto space-y-6">
         {messages.map((msg, i) => (
           <div key={msg.id} ref={i === lastUserIdx ? lastUserMsgRef : undefined}>
