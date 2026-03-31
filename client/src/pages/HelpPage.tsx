@@ -3225,9 +3225,34 @@ function UserManual() {
           </div>
         </SubSection>
 
-        <SubSection title="帳號無法串連時的錯誤訊息">
+        <SubSection title="多語言回應">
           <Para>
-            若您在 Webex 傳送訊息給 Bot 時收到錯誤提示，系統會以<strong>中文 / 英文 / 越文</strong>三語顯示，以下為可能情境與處理方式：
+            Webex Bot 的所有系統訊息（錯誤提示、指令回應、處理中提示等）會<strong>依照您在網頁端設定的語言偏好</strong>自動切換為對應語言。
+            支援<strong>繁體中文、英文、越南文</strong>三種語言。
+          </Para>
+
+          <Table
+            headers={['訊息類型', '語言依據', '說明']}
+            rows={[
+              ['帳號未串連（找不到帳號）', '三語同時顯示', '系統無法辨識您的身份，因此中/英/越三語全部列出'],
+              ['帳號停用 / Bot 未啟用', '依您的語言設定', '系統已辨識您的帳號，依偏好語言回應'],
+              ['檔案上傳錯誤', '依您的語言設定', '影片拒絕、音訊/圖片權限不足、檔案過大等'],
+              ['/help 使用說明', '依您的語言設定', '完整翻譯版的指令說明與附件支援資訊'],
+              ['/new 新對話提示', '依您的語言設定', '分隔線與提示文字'],
+              ['處理中 / AI 錯誤', '依您的語言設定', '「⏳ 正在分析...」及錯誤訊息'],
+              ['預算超限通知', '依您的語言設定', '日/週/月使用額度警告'],
+              ['生成檔案提示', '依您的語言設定', '「📄 已生成：檔名」'],
+            ]}
+          />
+
+          <TipBox>
+            語言設定方式：登入網頁版 → 右上角語言切換（🌐）→ 選擇繁體中文 / English / Tiếng Việt。設定後 Webex Bot 會自動套用，無需額外操作。
+          </TipBox>
+        </SubSection>
+
+        <SubSection title="帳號無法串連時的處理方式">
+          <Para>
+            若您尚未登入過網頁系統，Bot 會以<strong>中/英/越三語同時顯示</strong>以下錯誤訊息：
           </Para>
 
           <div className="space-y-4 mt-3">
@@ -3258,6 +3283,7 @@ function UserManual() {
               </div>
               <div className="text-sm text-slate-600">
                 <div className="flex items-start gap-2"><span className="text-red-400 flex-shrink-0">→</span><span>您的帳號已被管理員停用（可能離職、調動或到期），請聯絡系統管理員重新啟用。</span></div>
+                <div className="flex items-start gap-2"><span className="text-red-400 flex-shrink-0">→</span><span>此訊息會依您帳號的語言設定，以對應語言顯示。</span></div>
               </div>
             </div>
 
@@ -3269,13 +3295,10 @@ function UserManual() {
               </div>
               <div className="text-sm text-slate-600">
                 <div className="flex items-start gap-2"><span className="text-slate-400 flex-shrink-0">→</span><span>帳號存在但管理員尚未開啟「允許使用 Webex Bot」選項。請聯絡管理員至後台 → 使用者管理 → 編輯您的帳號 → 開啟 Webex Bot。</span></div>
+                <div className="flex items-start gap-2"><span className="text-slate-400 flex-shrink-0">→</span><span>此訊息會依您帳號的語言設定，以對應語言顯示。</span></div>
               </div>
             </div>
           </div>
-
-          <TipBox>
-            以上錯誤訊息皆以<strong>中文、英文、越文</strong>三語同時顯示，無論您的 Webex 介面語言為何，都能看懂訊息內容。
-          </TipBox>
         </SubSection>
       </Section>
     </div>
