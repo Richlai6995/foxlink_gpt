@@ -297,7 +297,7 @@ export default function ChatWindow({ messages, streaming, streamingContent, stre
   const lastUserIdx = messages.map((m) => m.role).lastIndexOf('user')
 
   return (
-    <div className="flex-1 overflow-y-auto bg-slate-50 px-4 py-6">
+    <div className="flex-1 min-w-0 overflow-y-auto overflow-x-hidden bg-slate-50 px-4 py-6">
       <div className="max-w-3xl mx-auto space-y-6">
         {messages.map((msg, i) => (
           <div key={msg.id} ref={i === lastUserIdx ? lastUserMsgRef : undefined}>
