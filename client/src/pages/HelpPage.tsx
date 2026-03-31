@@ -3224,6 +3224,59 @@ function UserManual() {
             ))}
           </div>
         </SubSection>
+
+        <SubSection title="帳號無法串連時的錯誤訊息">
+          <Para>
+            若您在 Webex 傳送訊息給 Bot 時收到錯誤提示，系統會以<strong>中文 / 英文 / 越文</strong>三語顯示，以下為可能情境與處理方式：
+          </Para>
+
+          <div className="space-y-4 mt-3">
+            {/* 情境 1: 找不到帳號 */}
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+              <div className="font-semibold text-amber-800 mb-2">情境一：帳號未串連（找不到帳號）</div>
+              <div className="bg-white rounded p-3 text-xs font-mono text-slate-700 whitespace-pre-line mb-2">
+                {[
+                  '⚠️ 無法串連 Foxlink GPT to Cortex 帳號，以下為可能原因：',
+                  '1. 尚未登入過網頁系統產生帳號，請進行第一次登入',
+                  '2. 可能帳號無 email 資訊',
+                  '3. 網路連線問題',
+                  '請檢查以上原因或是洽廠區資訊處理',
+                ].join('\n')}
+              </div>
+              <div className="text-sm text-slate-600 space-y-1">
+                <div className="flex items-start gap-2"><span className="text-amber-500 flex-shrink-0">→</span><span><strong>原因 1</strong>：您尚未登入過 Foxlink GPT 網頁版（<code className="bg-slate-100 px-1 rounded text-xs">flgpt.foxlink.com.tw</code>），系統尚未建立帳號。請先用瀏覽器登入一次即可。</span></div>
+                <div className="flex items-start gap-2"><span className="text-amber-500 flex-shrink-0">→</span><span><strong>原因 2</strong>：您的帳號在系統中沒有 email，或 email 與 Webex 帳號不一致。請聯絡管理員確認。</span></div>
+                <div className="flex items-start gap-2"><span className="text-amber-500 flex-shrink-0">→</span><span><strong>原因 3</strong>：網路暫時異常，稍後再試。若持續發生請洽廠區資訊處理。</span></div>
+              </div>
+            </div>
+
+            {/* 情境 2: 帳號停用 */}
+            <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+              <div className="font-semibold text-red-800 mb-2">情境二：帳號已停用</div>
+              <div className="bg-white rounded p-3 text-xs font-mono text-slate-700 whitespace-pre-line mb-2">
+                ⚠️ 您的帳號目前已停用，請聯絡系統管理員。
+              </div>
+              <div className="text-sm text-slate-600">
+                <div className="flex items-start gap-2"><span className="text-red-400 flex-shrink-0">→</span><span>您的帳號已被管理員停用（可能離職、調動或到期），請聯絡系統管理員重新啟用。</span></div>
+              </div>
+            </div>
+
+            {/* 情境 3: Bot 未啟用 */}
+            <div className="bg-slate-50 border border-slate-200 rounded-lg p-4">
+              <div className="font-semibold text-slate-800 mb-2">情境三：Webex Bot 功能未開啟</div>
+              <div className="bg-white rounded p-3 text-xs font-mono text-slate-700 whitespace-pre-line mb-2">
+                ⚠️ 您的帳號目前未開啟 Webex Bot 功能，如需使用請聯絡系統管理員。
+              </div>
+              <div className="text-sm text-slate-600">
+                <div className="flex items-start gap-2"><span className="text-slate-400 flex-shrink-0">→</span><span>帳號存在但管理員尚未開啟「允許使用 Webex Bot」選項。請聯絡管理員至後台 → 使用者管理 → 編輯您的帳號 → 開啟 Webex Bot。</span></div>
+              </div>
+            </div>
+          </div>
+
+          <TipBox>
+            以上錯誤訊息皆以<strong>中文、英文、越文</strong>三語同時顯示，無論您的 Webex 介面語言為何，都能看懂訊息內容。
+          </TipBox>
+        </SubSection>
       </Section>
     </div>
   )
@@ -6142,7 +6195,7 @@ tryLock("webex:msg:{id}", 60s)  ← Redis 分散鎖
             headers={['設定', '行為']}
             rows={[
               ['✅ 開啟（預設）', 'Bot 正常處理該用戶訊息'],
-              ['❌ 關閉', 'Bot 回覆「您的帳號目前未開啟 Webex Bot 功能，如需使用請聯絡系統管理員」'],
+              ['❌ 關閉', 'Bot 以中/英/越三語回覆「您的帳號目前未開啟 Webex Bot 功能，如需使用請聯絡系統管理員」'],
             ]}
           />
           <TipBox>新建帳號預設開啟，可搭配角色設定批次管理。</TipBox>
