@@ -1,9 +1,9 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import api from '../../lib/api'
 import {
   Plus, Trash2, Edit2, Save, X, ChevronRight, ChevronDown,
   Shield, UserCheck, Building2, Database, Check,
-  AlertCircle, RefreshCw, Tag, ChevronUp, GripVertical
+  AlertCircle, RefreshCw, Tag, ChevronUp, GripVertical, Search
 } from 'lucide-react'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -635,17 +635,12 @@ function RuleRow({
           </span>
         </div>
       ) : lovOpts.length > 0 ? (
-        <select
-          value={rule.value_id}
-          onChange={e => {
-            const opt = lovOpts.find(o => o.id === e.target.value)
-            onChange({ value_id: e.target.value, value_name: opt?.name || e.target.value })
-          }}
-          className="flex-1 text-xs border border-slate-200 rounded px-2 py-1 outline-none bg-white"
-        >
-          <option value="">-- 請選擇 --</option>
-          {lovOpts.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
-        </select>
+        <SearchableSelect
+          value={rule.value_id || ''}
+          options={lovOpts}
+          onChange={(id, name) => onChange({ value_id: id, value_name: name })}
+          className="flex-1"
+        />
       ) : (
         <div className="flex-1 flex flex-col gap-0.5">
           <input
@@ -966,6 +961,27 @@ function AssignmentsPanel({
 }) {
   const [tab, setTab] = useState<'roles' | 'users'>('roles')
   const [error, setError] = useState('')
+  const [roleSearch, setRoleSearch] = useState('')
+  const [userSearch, setUserSearch] = useState('')
+
+  const filteredRoles = roleSearch.trim()
+    ? roles.filter(r =>
+        r.name.toLowerCase().includes(roleSearch.toLowerCase()) ||
+        (r.description || '').toLowerCase().includes(roleSearch.toLowerCase())
+      )
+    : roles
+
+  const filteredUsers = userSearch.trim()
+    ? users.filter(u => {
+        const q = userSearch.toLowerCase()
+        return (
+          (u.name || '').toLowerCase().includes(q) ||
+          (u.username || '').toLowerCase().includes(q) ||
+          (u.employee_id || '').toLowerCase().includes(q) ||
+          (u.dept_name || '').toLowerCase().includes(q)
+        )
+      })
+    : users
 
   return (
     <div className="flex flex-col gap-3">
@@ -983,19 +999,44 @@ function AssignmentsPanel({
             onClick={() => setTab(t)}
             className={`px-4 py-2 text-sm font-medium border-b-2 transition ${tab === t ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}
           >
-            {t === 'roles' ? `角色 (${roles.length})` : `使用者 (${users.length})`}
+            {t === 'roles'
+              ? `角色 (${roleSearch.trim() ? filteredRoles.length + '/' : ''}${roles.length})`
+              : `使用者 (${userSearch.trim() ? filteredUsers.length + '/' : ''}${users.length})`}
           </button>
         ))}
       </div>
 
-      {tab === 'users' && (
-        <div className="flex items-center gap-2 text-blue-700 bg-blue-50 border border-blue-100 rounded-lg px-3 py-2 text-xs">
-          <AlertCircle size={13} /> 使用者有個人指派政策時優先套用；未設定則沿用所屬角色的政策。
+      {tab === 'roles' && (
+        <div className="relative">
+          <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+          <input
+            value={roleSearch}
+            onChange={e => setRoleSearch(e.target.value)}
+            placeholder="搜尋角色名稱..."
+            className="w-full text-xs border border-slate-200 rounded-lg pl-7 pr-3 py-1.5 outline-none focus:border-blue-400"
+          />
         </div>
       )}
 
+      {tab === 'users' && (
+        <>
+          <div className="flex items-center gap-2 text-blue-700 bg-blue-50 border border-blue-100 rounded-lg px-3 py-2 text-xs">
+            <AlertCircle size={13} /> 使用者有個人指派政策時優先套用；未設定則沿用所屬角色的政策。
+          </div>
+          <div className="relative">
+            <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+            <input
+              value={userSearch}
+              onChange={e => setUserSearch(e.target.value)}
+              placeholder="搜尋姓名 / 帳號 / 工號..."
+              className="w-full text-xs border border-slate-200 rounded-lg pl-7 pr-3 py-1.5 outline-none focus:border-blue-400"
+            />
+          </div>
+        </>
+      )}
+
       <div className="flex flex-col gap-2">
-        {tab === 'roles' && roles.map(role => (
+        {tab === 'roles' && filteredRoles.map(role => (
           <MultiAssignRow
             key={role.id}
             type="role"
@@ -1008,7 +1049,7 @@ function AssignmentsPanel({
             onRefresh={onRefresh}
           />
         ))}
-        {tab === 'users' && users.map(user => (
+        {tab === 'users' && filteredUsers.map(user => (
           <MultiAssignRow
             key={user.id}
             type="user"
@@ -1459,5 +1500,94 @@ function AddPolicyInlineBtn({
       <option value="">選政策...</option>
       {available.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
     </select>
+  )
+}
+
+// ── SearchableSelect ───────────────────────────────────────────────────────────
+function SearchableSelect({
+  value, options, onChange, placeholder = '-- 請選擇 --', className = ''
+}: {
+  value: string
+  options: { id: string; name: string }[]
+  onChange: (id: string, name: string) => void
+  placeholder?: string
+  className?: string
+}) {
+  const [open, setOpen] = useState(false)
+  const [q, setQ] = useState('')
+  const ref = useRef<HTMLDivElement>(null)
+
+  const selected = options.find(o => o.id === value)
+  const filtered = q.trim()
+    ? options.filter(o => o.name.toLowerCase().includes(q.toLowerCase()) || o.id.toLowerCase().includes(q.toLowerCase()))
+    : options
+
+  // close on outside click
+  useEffect(() => {
+    if (!open) return
+    function handler(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        setOpen(false); setQ('')
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [open])
+
+  return (
+    <div ref={ref} className={`relative ${className}`}>
+      {/* trigger */}
+      <button
+        type="button"
+        onClick={() => { setOpen(o => !o); setQ('') }}
+        className="w-full flex items-center justify-between gap-1 text-xs border border-slate-200 rounded px-2 py-1 bg-white hover:border-blue-400 outline-none text-left"
+      >
+        <span className={`flex-1 truncate ${selected ? 'text-slate-800' : 'text-slate-400'}`}>
+          {selected ? selected.name : placeholder}
+        </span>
+        <ChevronDown size={11} className={`shrink-0 text-slate-400 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+
+      {/* dropdown */}
+      {open && (
+        <div className="absolute z-50 left-0 right-0 top-full mt-0.5 bg-white border border-slate-200 rounded-lg shadow-lg overflow-hidden">
+          <div className="p-1.5 border-b border-slate-100">
+            <div className="relative">
+              <Search size={11} className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+              <input
+                autoFocus
+                value={q}
+                onChange={e => setQ(e.target.value)}
+                placeholder="搜尋..."
+                className="w-full text-xs border border-slate-200 rounded pl-6 pr-2 py-1 outline-none focus:border-blue-400"
+              />
+            </div>
+          </div>
+          <div className="max-h-48 overflow-y-auto">
+            {value && (
+              <button
+                type="button"
+                onClick={() => { onChange('', ''); setOpen(false); setQ('') }}
+                className="w-full text-left px-3 py-1.5 text-xs text-slate-400 hover:bg-slate-50 border-b border-slate-100"
+              >
+                {placeholder}
+              </button>
+            )}
+            {filtered.length === 0 ? (
+              <div className="px-3 py-3 text-xs text-slate-400 text-center">無符合結果</div>
+            ) : filtered.map(o => (
+              <button
+                key={o.id}
+                type="button"
+                onClick={() => { onChange(o.id, o.name); setOpen(false); setQ('') }}
+                className={`w-full text-left px-3 py-1.5 text-xs hover:bg-blue-50 hover:text-blue-700 ${o.id === value ? 'bg-blue-50 text-blue-700 font-medium' : 'text-slate-700'}`}
+              >
+                {o.name}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
   )
 }
