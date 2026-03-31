@@ -12,6 +12,19 @@ export const SUPPORTED_LANGUAGES = [
 
 export type LangCode = 'zh-TW' | 'en' | 'vi'
 
+function detectLang(): string {
+  // 1. 優先使用使用者手動選擇的語言
+  const saved = localStorage.getItem('preferred_language')
+  if (saved && ['zh-TW', 'en', 'vi'].includes(saved)) return saved
+
+  // 2. 偵測瀏覽器語言
+  const nav = (navigator.languages?.[0] || navigator.language || '').toLowerCase()
+  if (nav.startsWith('zh')) return 'zh-TW'
+  if (nav.startsWith('vi')) return 'vi'
+  return 'en'
+}
+const initLang = detectLang()
+
 i18n
   .use(initReactI18next)
   .init({
@@ -20,7 +33,7 @@ i18n
       en:      { translation: en },
       vi:      { translation: vi },
     },
-    lng: 'zh-TW',
+    lng: initLang,
     fallbackLng: 'zh-TW',
     interpolation: { escapeValue: false },
   })

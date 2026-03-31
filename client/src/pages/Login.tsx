@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react'
 import { useAuth } from '../context/AuthContext'
-import { Eye, EyeOff, X, Mail, Shield } from 'lucide-react'
+import { Eye, EyeOff, X, Mail, Shield, Globe } from 'lucide-react'
 import api from '../lib/api'
 import { useTranslation } from 'react-i18next'
+import i18n, { SUPPORTED_LANGUAGES, type LangCode } from '../i18n'
 
 export default function Login() {
   const { login, loginWithSsoToken } = useAuth()
@@ -13,6 +14,13 @@ export default function Login() {
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const [ssoLoading, setSsoLoading] = useState(false)
+  const [showLangMenu, setShowLangMenu] = useState(false)
+
+  const handleLangChange = (lang: LangCode) => {
+    i18n.changeLanguage(lang)
+    localStorage.setItem('preferred_language', lang)
+    setShowLangMenu(false)
+  }
 
   // Handle SSO callback: ?sso_token=xxx or ?sso_error=xxx
   useEffect(() => {
@@ -81,6 +89,31 @@ export default function Login() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-950 to-slate-900 flex items-center justify-center p-4">
+      {/* Language switcher — top right */}
+      <div className="absolute top-4 right-4 z-10">
+        <button
+          onClick={() => setShowLangMenu(v => !v)}
+          className="flex items-center gap-1.5 text-slate-400 hover:text-slate-200 text-xs bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg px-3 py-1.5 transition"
+        >
+          <Globe size={13} />
+          {SUPPORTED_LANGUAGES.find(l => l.code === i18n.language)?.label || i18n.language}
+        </button>
+        {showLangMenu && (
+          <div className="absolute right-0 mt-1 bg-slate-800 border border-slate-700 rounded-xl overflow-hidden shadow-2xl min-w-[130px]">
+            {SUPPORTED_LANGUAGES.map(lang => (
+              <button
+                key={lang.code}
+                onClick={() => handleLangChange(lang.code as LangCode)}
+                className={`w-full text-left px-4 py-2 text-xs hover:bg-slate-700 transition ${i18n.language === lang.code ? 'text-blue-400 font-medium' : 'text-slate-300'}`}
+              >
+                {lang.label}
+                {i18n.language === lang.code && <span className="float-right">✓</span>}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
       <div className="w-full max-w-md">
         {/* Logo */}
         <div className="text-center mb-8">
