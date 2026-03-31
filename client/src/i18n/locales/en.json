@@ -62,7 +62,11 @@
     "requestFailed": "Request failed, please try again",
     "or": "OR",
     "ssoButton": "Foxlink SSO Login",
-    "ssoLoading": "SSO logging in..."
+    "ssoLoading": "SSO logging in...",
+    "loginHintTitle": "Please sign in using one of the following methods",
+    "loginHint1": "AD account / password login",
+    "loginHint2": "Foxlink SSO AD account / password login",
+    "loginHint3": "No AD account? Use your assigned account / password"
   },
   "resetPassword": {
     "title": "Reset Password",

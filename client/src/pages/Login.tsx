@@ -91,6 +91,16 @@ export default function Login() {
           <p className="text-slate-400 text-sm mt-1">{t('login.title')}</p>
         </div>
 
+        {/* Login hint */}
+        <div className="bg-white/5 border border-white/10 rounded-xl px-5 py-4 mb-4 text-sm text-slate-300">
+          <p className="font-medium text-slate-200 mb-2">{t('login.loginHintTitle')}</p>
+          <ol className="space-y-1 list-none">
+            <li className="flex gap-2"><span className="text-blue-400 font-bold shrink-0">1.</span>{t('login.loginHint1')}</li>
+            <li className="flex gap-2"><span className="text-orange-400 font-bold shrink-0">2.</span>{t('login.loginHint2')}</li>
+            <li className="flex gap-2"><span className="text-slate-400 font-bold shrink-0">3.</span>{t('login.loginHint3')}</li>
+          </ol>
+        </div>
+
         {/* Card */}
         <div className="bg-white/5 backdrop-blur-sm border border-white/10 rounded-2xl p-8 shadow-2xl">
           <form onSubmit={handleSubmit} className="space-y-5">

@@ -62,7 +62,11 @@
     "requestFailed": "Yêu cầu thất bại, vui lòng thử lại",
     "or": "HOẶC",
     "ssoButton": "Đăng nhập Foxlink SSO",
-    "ssoLoading": "Đang đăng nhập SSO..."
+    "ssoLoading": "Đang đăng nhập SSO...",
+    "loginHintTitle": "Vui lòng đăng nhập bằng một trong các phương thức sau",
+    "loginHint1": "Đăng nhập bằng tài khoản / mật khẩu AD",
+    "loginHint2": "Đăng nhập Foxlink SSO bằng tài khoản / mật khẩu AD",
+    "loginHint3": "Không có tài khoản AD? Dùng tài khoản / mật khẩu đã đăng ký"
   },
   "resetPassword": {
     "title": "Đặt lại mật khẩu",

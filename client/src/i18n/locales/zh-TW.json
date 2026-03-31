@@ -62,7 +62,11 @@
     "requestFailed": "請求失敗，請稍後再試",
     "or": "或",
     "ssoButton": "Foxlink SSO 登入",
-    "ssoLoading": "SSO 登入中..."
+    "ssoLoading": "SSO 登入中...",
+    "loginHintTitle": "請用以下方法登入",
+    "loginHint1": "AD 帳號 / 密碼登入",
+    "loginHint2": "Foxlink SSO AD 帳號 / 密碼登入",
+    "loginHint3": "無 AD 帳號請使用申請的帳號 / 密碼登入"
   },
   "resetPassword": {
     "title": "重設密碼",
