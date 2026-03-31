@@ -374,10 +374,15 @@ async function buildToolList(db, user, lang) {
   const l = L[lang] || L['zh-TW'];
   const lines = [l.title];
 
+  // 依語言取名稱/描述，fallback 到原始 name/description
+  const langSuffix = lang === 'en' ? 'en' : lang === 'vi' ? 'vi' : 'zh';
+  const pickName = (row) => row[`name_${langSuffix}`] || row.name;
+  const pickDesc = (row) => row[`desc_${langSuffix}`] || row.description;
+
   // Skills
   try {
     const skills = await db.prepare(
-      `SELECT name, description FROM skills
+      `SELECT name, description, name_zh, name_en, name_vi, desc_zh, desc_en, desc_vi FROM skills
        WHERE is_public=1
           OR owner_user_id=?
           OR EXISTS (
@@ -390,8 +395,8 @@ async function buildToolList(db, user, lang) {
     if (skills.length > 0) {
       lines.push(l.skills);
       skills.forEach(s => {
-        const desc = s.description ? ` — ${s.description.slice(0, 30)}` : '';
-        lines.push(`• ${s.name}${desc}`);
+        const desc = pickDesc(s) ? ` — ${pickDesc(s).slice(0, 40)}` : '';
+        lines.push(`• ${pickName(s)}${desc}`);
       });
       lines.push('');
     }
@@ -402,7 +407,7 @@ async function buildToolList(db, user, lang) {
   // 自建 KB
   try {
     const kbs = await db.prepare(
-        `SELECT kb.name, kb.description FROM knowledge_bases kb
+        `SELECT kb.name, kb.description, kb.name_zh, kb.name_en, kb.name_vi, kb.desc_zh, kb.desc_en, kb.desc_vi FROM knowledge_bases kb
          WHERE kb.chunk_count>0 AND (
            kb.creator_id=? OR kb.is_public=1
            OR EXISTS (
@@ -417,8 +422,8 @@ async function buildToolList(db, user, lang) {
     if (kbs.length > 0) {
       lines.push(l.kb);
       kbs.forEach(k => {
-        const desc = k.description ? ` — ${k.description.slice(0, 30)}` : '';
-        lines.push(`• ${k.name}${desc}`);
+        const desc = pickDesc(k) ? ` — ${pickDesc(k).slice(0, 40)}` : '';
+        lines.push(`• ${pickName(k)}${desc}`);
       });
       lines.push('');
     }
@@ -429,7 +434,7 @@ async function buildToolList(db, user, lang) {
   // DIFY KB
   try {
     const difyKbs = await db.prepare(
-      `SELECT DISTINCT d.name, d.description, d.sort_order FROM dify_knowledge_bases d
+      `SELECT DISTINCT d.name, d.description, d.sort_order, d.name_zh, d.name_en, d.name_vi, d.desc_zh, d.desc_en, d.desc_vi FROM dify_knowledge_bases d
        WHERE d.is_active=1 AND (
          (d.is_public=1 AND d.public_approved=1)
          OR EXISTS (
@@ -443,8 +448,8 @@ async function buildToolList(db, user, lang) {
     if (difyKbs.length > 0) {
       lines.push(l.dify);
       difyKbs.forEach(k => {
-        const desc = k.description ? ` — ${k.description.slice(0, 30)}` : '';
-        lines.push(`• ${k.name}${desc}`);
+        const desc = pickDesc(k) ? ` — ${pickDesc(k).slice(0, 40)}` : '';
+        lines.push(`• ${pickName(k)}${desc}`);
       });
       lines.push('');
     }
@@ -455,7 +460,8 @@ async function buildToolList(db, user, lang) {
   // MCP
   try {
     const mcpServers = await db.prepare(
-      `SELECT DISTINCT m.name, DBMS_LOB.SUBSTR(m.description, 200, 1) AS description
+      `SELECT DISTINCT m.name, DBMS_LOB.SUBSTR(m.description, 200, 1) AS description,
+              m.name_zh, m.name_en, m.name_vi, m.desc_zh, m.desc_en, m.desc_vi
        FROM mcp_servers m
        WHERE m.is_active=1 AND (
          (m.is_public=1 AND m.public_approved=1)
@@ -471,8 +477,8 @@ async function buildToolList(db, user, lang) {
     if (mcpServers.length > 0) {
       lines.push(l.mcp);
       mcpServers.forEach(m => {
-        const desc = m.description ? ` — ${m.description.slice(0, 30)}` : '';
-        lines.push(`• ${m.name}${desc}`);
+        const desc = pickDesc(m) ? ` — ${pickDesc(m).slice(0, 40)}` : '';
+        lines.push(`• ${pickName(m)}${desc}`);
       });
       lines.push('');
     }
