@@ -166,7 +166,7 @@ export default function Sidebar({
   }
 
   return (
-    <div className="w-72 shrink-0 bg-slate-900 flex flex-col h-full border-r border-slate-800">
+    <div className="fixed inset-y-0 left-0 w-72 bg-slate-900 flex flex-col border-r border-slate-800 z-30">
       {/* Header */}
       <div className="p-4 border-b border-slate-800">
         <div className="flex items-center gap-2 mb-4">
