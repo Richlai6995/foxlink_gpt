@@ -104,14 +104,14 @@ async function syncOrgToUsers(db, employeeNos = null, trigger = 'manual') {
   if (!employeeNos) {
     users = await db.prepare(
       `SELECT id, employee_id, name, email, username, dept_code, dept_name, profit_center, profit_center_name,
-              org_section, org_section_name, org_group_name, factory_code, org_end_date
+              org_section, org_section_name, org_group_name, factory_code, org_end_date, name_manually_set
        FROM users WHERE employee_id IS NOT NULL AND status = 'active'`
     ).all();
   } else {
     const placeholders = employeeNos.map(() => '?').join(',');
     users = await db.prepare(
       `SELECT id, employee_id, name, email, username, dept_code, dept_name, profit_center, profit_center_name,
-              org_section, org_section_name, org_group_name, factory_code, org_end_date
+              org_section, org_section_name, org_group_name, factory_code, org_end_date, name_manually_set
        FROM users WHERE employee_id IN (${placeholders})`
     ).all(...employeeNos);
   }
@@ -177,10 +177,11 @@ async function syncOrgToUsers(db, employeeNos = null, trigger = 'manual') {
     }
 
     // 補填空白的 email 和 name（從 ERP 拉回來）
+    // name_manually_set=1 表示管理員已手動鎖定姓名，不覆蓋
     const erpEmail = trim(r.EMAIL);
     const erpName  = trim(r.C_NAME);
     const needFillEmail = erpEmail && (!user.email || user.email === '-' || user.email.trim() === '');
-    const needFillName  = erpName  && (!user.name  || user.name.trim() === '');
+    const needFillName  = erpName  && (!user.name_manually_set) && (!user.name  || user.name.trim() === '');
     if (needFillEmail) {
       changed['email'] = { old: user.email || null, new: erpEmail };
     }

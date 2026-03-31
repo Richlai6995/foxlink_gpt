@@ -1502,6 +1502,9 @@ async function runMigrations(db) {
     created_at  TIMESTAMP     DEFAULT SYSTIMESTAMP,
     CONSTRAINT uq_role_cat_pol UNIQUE (role_id, category_id, policy_id)
   )`);
+
+  // ── 姓名鎖定欄位（防止 LDAP/ERP 自動覆蓋手動修改的姓名）────────────────────
+  await safeAddColumn('USERS', 'NAME_MANUALLY_SET', 'NUMBER(1) DEFAULT 0');
 }
 
 // ─── Default DB Source migration ───────────────────────────────────────────────

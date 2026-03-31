@@ -207,6 +207,7 @@ interface UserForm {
   can_design_ai_select: boolean | null
   can_use_ai_dashboard: boolean | null
   webex_bot_enabled: boolean
+  name_manually_set: boolean
   kb_max_size_mb: string
   kb_max_count: string
   role_id: number | null
@@ -240,6 +241,7 @@ const empty: UserForm = {
   can_design_ai_select: null,
   can_use_ai_dashboard: null,
   webex_bot_enabled: true,
+  name_manually_set: false,
   kb_max_size_mb: '',
   kb_max_count: '',
   role_id: null,
@@ -352,6 +354,7 @@ export default function UserManagement() {
       can_design_ai_select: u2.can_design_ai_select == null ? null : u2.can_design_ai_select === 1,
       can_use_ai_dashboard: u2.can_use_ai_dashboard == null ? null : u2.can_use_ai_dashboard === 1,
       webex_bot_enabled: u2.webex_bot_enabled !== 0,
+      name_manually_set: u2.name_manually_set === 1,
       kb_max_size_mb: u2.kb_max_size_mb != null ? String(u2.kb_max_size_mb) : '',
       kb_max_count: u2.kb_max_count != null ? String(u2.kb_max_count) : '',
     })
@@ -536,6 +539,14 @@ export default function UserManagement() {
                 <div>
                   <label className="label">{t('users.form.nameRequired')}</label>
                   <input {...F('name')} className="input" />
+                  <label className="flex items-center gap-1.5 mt-1 text-xs text-slate-500 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={form.name_manually_set}
+                      onChange={e => setForm(f => ({ ...f, name_manually_set: e.target.checked }))}
+                    />
+                    鎖定姓名（不讓 AD / ERP 自動覆蓋）
+                  </label>
                 </div>
                 <div>
                   <label className="label">{t('users.form.employeeId')}</label>
