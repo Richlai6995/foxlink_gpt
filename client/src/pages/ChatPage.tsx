@@ -789,24 +789,7 @@ export default function ChatPage() {
   }, [currentSessionId, messages, handleSend])
 
   return (
-    <div
-      className="h-screen bg-slate-50 relative"
-      onDragEnter={handleDragEnter}
-      onDragLeave={handleDragLeave}
-      onDragOver={handleDragOver}
-      onDrop={handlePageDrop}
-    >
-      {/* Drop overlay */}
-      {isDraggingOver && (
-        <div className="absolute inset-0 z-50 bg-blue-500/10 border-4 border-dashed border-blue-400 rounded-none flex flex-col items-center justify-center pointer-events-none">
-          <div className="bg-white/90 rounded-2xl px-8 py-6 shadow-xl flex flex-col items-center gap-3">
-            <svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="17 8 12 3 7 8" /><line x1="12" y1="3" x2="12" y2="15" /></svg>
-            <p className="text-blue-600 text-lg font-semibold">放開以上傳檔案</p>
-            <p className="text-slate-400 text-sm">支援 PDF、Word、Excel、PPT、圖片、音訊</p>
-          </div>
-        </div>
-      )}
-
+    <>
       <Sidebar
         sessions={sessions}
         currentSessionId={currentSessionId}
@@ -820,7 +803,24 @@ export default function ChatPage() {
         }}
       />
 
-      <div className="ml-72 flex flex-col h-screen overflow-hidden">
+      <div
+        className="fixed inset-y-0 left-72 right-0 flex flex-col overflow-hidden bg-slate-50"
+        onDragEnter={handleDragEnter}
+        onDragLeave={handleDragLeave}
+        onDragOver={handleDragOver}
+        onDrop={handlePageDrop}
+      >
+        {/* Drop overlay */}
+        {isDraggingOver && (
+          <div className="absolute inset-0 z-50 bg-blue-500/10 border-4 border-dashed border-blue-400 rounded-none flex flex-col items-center justify-center pointer-events-none">
+            <div className="bg-white/90 rounded-2xl px-8 py-6 shadow-xl flex flex-col items-center gap-3">
+              <svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="17 8 12 3 7 8" /><line x1="12" y1="3" x2="12" y2="15" /></svg>
+              <p className="text-blue-600 text-lg font-semibold">放開以上傳檔案</p>
+              <p className="text-slate-400 text-sm">支援 PDF、Word、Excel、PPT、圖片、音訊</p>
+            </div>
+          </div>
+        )}
+
         {/* Research completion banner */}
         {researchBanner.length > 0 && (
           <div className="bg-green-600 text-white px-4 py-2 flex items-center gap-3 text-sm">
@@ -1619,6 +1619,7 @@ export default function ChatPage() {
           </div>
         </div>
       )}
-    </div>
+      </div>
+    </>
   )
 }
