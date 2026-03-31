@@ -931,9 +931,25 @@ async function handleWebexMessage(message) {
       `INSERT INTO webex_auth_logs (raw_email, norm_email, status, room_type, room_id, msg_text)
        VALUES (?, ?, 'not_found', ?, ?, ?)`
     ).run(senderEmail, normalizeEmail(senderEmail), roomType, roomId, msgPreview).catch(() => {});
-    await webex.sendMessage(roomId,
-      `⚠️ 您的帳號（${senderEmail}）尚未在 FOXLINK GPT 系統中註冊。\n請聯絡系統管理員申請帳號。`
-    );
+    await webex.sendMessage(roomId, [
+      `⚠️ 無法串連 Foxlink GPT to Cortex 帳號（${senderEmail}），以下為可能原因：`,
+      `1. 尚未登入過網頁系統產生帳號，請進行第一次登入`,
+      `2. 可能帳號無 email 資訊`,
+      `3. 網路連線問題`,
+      `請檢查以上原因或是洽廠區資訊處理`,
+      ``,
+      `⚠️ Unable to link Foxlink GPT to Cortex account (${senderEmail}). Possible reasons:`,
+      `1. You have not logged into the web system to create an account. Please log in for the first time.`,
+      `2. Your account may not have email information.`,
+      `3. Network connection issue.`,
+      `Please check the above or contact your local IT department.`,
+      ``,
+      `⚠️ Không thể liên kết tài khoản Foxlink GPT to Cortex (${senderEmail}). Nguyên nhân có thể:`,
+      `1. Bạn chưa đăng nhập vào hệ thống web để tạo tài khoản. Vui lòng đăng nhập lần đầu.`,
+      `2. Tài khoản có thể không có thông tin email.`,
+      `3. Sự cố kết nối mạng.`,
+      `Vui lòng kiểm tra các nguyên nhân trên hoặc liên hệ bộ phận IT tại nhà máy.`,
+    ].join('\n'));
     return;
   }
   if (user.status !== 'active') {
@@ -942,9 +958,11 @@ async function handleWebexMessage(message) {
       `INSERT INTO webex_auth_logs (raw_email, norm_email, user_id, user_name, username, status, room_type, room_id, msg_text)
        VALUES (?, ?, ?, ?, ?, 'disabled', ?, ?, ?)`
     ).run(senderEmail, normalizeEmail(senderEmail), user.id, user.name, user.username, roomType, roomId, msgPreview).catch(() => {});
-    await webex.sendMessage(roomId,
-      `⚠️ 您的帳號目前已停用，請聯絡系統管理員。`
-    );
+    await webex.sendMessage(roomId, [
+      `⚠️ 您的帳號（${senderEmail}）目前已停用，請聯絡系統管理員。`,
+      `⚠️ Your account (${senderEmail}) is currently disabled. Please contact the system administrator.`,
+      `⚠️ Tài khoản của bạn (${senderEmail}) hiện đã bị vô hiệu hóa. Vui lòng liên hệ quản trị viên hệ thống.`,
+    ].join('\n'));
     return;
   }
   // webex_bot_enabled = 0 表示此帳號不允許使用 Webex Bot
@@ -954,9 +972,11 @@ async function handleWebexMessage(message) {
       `INSERT INTO webex_auth_logs (raw_email, norm_email, user_id, user_name, username, status, room_type, room_id, msg_text)
        VALUES (?, ?, ?, ?, ?, 'bot_disabled', ?, ?, ?)`
     ).run(senderEmail, normalizeEmail(senderEmail), user.id, user.name, user.username, roomType, roomId, msgPreview).catch(() => {});
-    await webex.sendMessage(roomId,
-      `⚠️ 您的帳號目前未開啟 Webex Bot 功能，如需使用請聯絡系統管理員。`
-    );
+    await webex.sendMessage(roomId, [
+      `⚠️ 您的帳號（${senderEmail}）目前未開啟 Webex Bot 功能，如需使用請聯絡系統管理員。`,
+      `⚠️ Your account (${senderEmail}) does not have Webex Bot enabled. Please contact the system administrator to enable it.`,
+      `⚠️ Tài khoản của bạn (${senderEmail}) chưa được bật tính năng Webex Bot. Vui lòng liên hệ quản trị viên hệ thống để kích hoạt.`,
+    ].join('\n'));
     return;
   }
   console.log(`[Webex][Auth] User authenticated: id=${user.id} username="${user.username}" role=${user.role}`);
