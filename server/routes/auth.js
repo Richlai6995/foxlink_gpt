@@ -265,7 +265,7 @@ router.get('/sso/callback', async (req, res) => {
       // Existing user — sync SSO info
       // name_manually_set=1 表示管理員已手動鎖定姓名，不讓 SSO 覆蓋
       await db.prepare(
-        'UPDATE users SET name=CASE WHEN name_manually_set=1 THEN name ELSE ? END, email=?, employee_id=?, creation_method=COALESCE(NULLIF(creation_method,\'manual\'),?) WHERE id=?'
+        'UPDATE users SET name=CASE WHEN name_manually_set=1 THEN name ELSE ? END, email=?, employee_id=CASE WHEN name_manually_set=1 THEN employee_id ELSE ? END, creation_method=COALESCE(NULLIF(creation_method,\'manual\'),?) WHERE id=?'
       ).run(ssoUser.name, ssoUser.email, ssoUser.emp_cd || dbUser.employee_id, 'sso', dbUser.id);
 
       if (dbUser.status !== 'active') {
@@ -431,7 +431,7 @@ router.post('/login', async (req, res) => {
             // Existing user (may have been manually created) — sync AD info and mark as LDAP managed
             // name_manually_set=1 表示管理員已手動鎖定姓名，不讓 LDAP 覆蓋
             await db.prepare(
-              'UPDATE users SET name=CASE WHEN name_manually_set=1 THEN name ELSE ? END, email=?, employee_id=?, password=?, creation_method=? WHERE id=?'
+              'UPDATE users SET name=CASE WHEN name_manually_set=1 THEN name ELSE ? END, email=?, employee_id=CASE WHEN name_manually_set=1 THEN employee_id ELSE ? END, password=?, creation_method=? WHERE id=?'
             ).run(ldapUser.name, ldapUser.email, ldapUser.employeeId, password, 'ldap', dbUser.id);
 
             if (dbUser.status !== 'active') {
