@@ -365,8 +365,14 @@ async function createNewSession(db, userId, roomId, isDm) {
 }
 
 // ── 工具清單（? 指令）────────────────────────────────────────────────────────
-async function buildToolList(db, user) {
-  const lines = ['📋 **您可使用的工具**（依帳號授權）\n'];
+async function buildToolList(db, user, lang) {
+  const L = {
+    'zh-TW': { title: '📋 **您可使用的工具**（依帳號授權）\n', skills: '🔧 **技能 (Skills)**：', kb: '🧠 **自建知識庫 (KB)**：', dify: '🔌 **DIFY 知識庫**：', mcp: '⚙️ **MCP 工具**：', empty: '（目前無可用工具）', tip: '💡 直接輸入問題，AI 將自動判斷並使用合適工具。' },
+    'en':    { title: '📋 **Your Available Tools** (based on account permissions)\n', skills: '🔧 **Skills**:', kb: '🧠 **Knowledge Bases (KB)**:', dify: '🔌 **DIFY Knowledge Bases**:', mcp: '⚙️ **MCP Tools**:', empty: '(No tools available)', tip: '💡 Just type your question — AI will automatically select the appropriate tool.' },
+    'vi':   { title: '📋 **Công cụ khả dụng của bạn** (theo quyền tài khoản)\n', skills: '🔧 **Kỹ năng (Skills)**:', kb: '🧠 **Kho tri thức tự xây (KB)**:', dify: '🔌 **Kho tri thức DIFY**:', mcp: '⚙️ **Công cụ MCP**:', empty: '(Không có công cụ khả dụng)', tip: '💡 Chỉ cần nhập câu hỏi — AI sẽ tự động chọn công cụ phù hợp.' },
+  };
+  const l = L[lang] || L['zh-TW'];
+  const lines = [l.title];
 
   // Skills
   try {
@@ -382,7 +388,7 @@ async function buildToolList(db, user) {
        ORDER BY name ASC`
     ).all(user.id, user.id, user.role_id || 0);
     if (skills.length > 0) {
-      lines.push('🔧 **技能 (Skills)**：');
+      lines.push(l.skills);
       skills.forEach(s => {
         const desc = s.description ? ` — ${s.description.slice(0, 30)}` : '';
         lines.push(`• ${s.name}${desc}`);
@@ -409,7 +415,7 @@ async function buildToolList(db, user) {
          ORDER BY kb.name ASC`
       ).all(user.id, user.id, user.role_id || 0, user.dept_code, user.dept_code);
     if (kbs.length > 0) {
-      lines.push('🧠 **自建知識庫 (KB)**：');
+      lines.push(l.kb);
       kbs.forEach(k => {
         const desc = k.description ? ` — ${k.description.slice(0, 30)}` : '';
         lines.push(`• ${k.name}${desc}`);
@@ -435,7 +441,7 @@ async function buildToolList(db, user) {
        ORDER BY d.sort_order ASC`
     ).all(user.id, user.role_id || 0);
     if (difyKbs.length > 0) {
-      lines.push('🔌 **DIFY 知識庫**：');
+      lines.push(l.dify);
       difyKbs.forEach(k => {
         const desc = k.description ? ` — ${k.description.slice(0, 30)}` : '';
         lines.push(`• ${k.name}${desc}`);
@@ -463,7 +469,7 @@ async function buildToolList(db, user) {
        ORDER BY m.name ASC`
     ).all(user.id, user.role_id || 0);
     if (mcpServers.length > 0) {
-      lines.push('⚙️ **MCP 工具**：');
+      lines.push(l.mcp);
       mcpServers.forEach(m => {
         const desc = m.description ? ` — ${m.description.slice(0, 30)}` : '';
         lines.push(`• ${m.name}${desc}`);
@@ -475,9 +481,9 @@ async function buildToolList(db, user) {
   }
 
   if (lines.length <= 1) {
-    lines.push('（目前無可用工具）');
+    lines.push(l.empty);
   } else {
-    lines.push('💡 直接輸入問題，AI 將自動判斷並使用合適工具。');
+    lines.push(l.tip);
   }
 
   return lines.join('\n');
@@ -1160,9 +1166,9 @@ async function handleWebexMessage(message) {
   const cmdText = msgText.toLowerCase();
   console.log(`[Webex] Dispatch: cmd="${cmdText.slice(0, 30)}"`);
 
-  // ? → 工具清單
-  if (msgText === '?') {
-    const toolList = await buildToolList(db, user);
+  // ? → 工具清單（容許 "?" / "? :" / "？" 等變體）
+  if (/^[?？]\s*[:：]?\s*$/.test(msgText)) {
+    const toolList = await buildToolList(db, user, lang);
     await webex.sendMessage(roomId, toolList, { markdown: toolList });
     return;
   }
