@@ -38,6 +38,175 @@ if (!fs.existsSync(WEBEX_TMP_DIR)) fs.mkdirSync(WEBEX_TMP_DIR, { recursive: true
 
 const MAX_HISTORY_MESSAGES = 20;
 const MAX_WEBEX_CHARS = 4000; // Webex 實際限制 ~7439 bytes，留餘裕
+
+// ── i18n 訊息對照表 ─────────────────────────────────────────────────────────────
+// user.preferred_language: 'zh-TW' | 'en' | 'vi'，fallback 'zh-TW'
+const WEBEX_I18N = {
+  // 帳號拒絕 — not_found（無 user，三語全發）
+  not_found: (email) => [
+    `⚠️ 無法串連 Foxlink GPT to Cortex 帳號（${email}），以下為可能原因：`,
+    `1. 尚未登入過網頁系統產生帳號，請進行第一次登入`,
+    `2. 可能帳號無 email 資訊`,
+    `3. 網路連線問題`,
+    `請檢查以上原因或是洽廠區資訊處理`,
+    ``,
+    `⚠️ Unable to link Foxlink GPT to Cortex account (${email}). Possible reasons:`,
+    `1. You have not logged into the web system to create an account. Please log in for the first time.`,
+    `2. Your account may not have email information.`,
+    `3. Network connection issue.`,
+    `Please check the above or contact your local IT department.`,
+    ``,
+    `⚠️ Không thể liên kết tài khoản Foxlink GPT to Cortex (${email}). Nguyên nhân có thể:`,
+    `1. Bạn chưa đăng nhập vào hệ thống web để tạo tài khoản. Vui lòng đăng nhập lần đầu.`,
+    `2. Tài khoản có thể không có thông tin email.`,
+    `3. Sự cố kết nối mạng.`,
+    `Vui lòng kiểm tra các nguyên nhân trên hoặc liên hệ bộ phận IT tại nhà máy.`,
+  ].join('\n'),
+
+  // 帳號拒絕 — disabled
+  disabled: {
+    'zh-TW': (email) => `⚠️ 您的帳號（${email}）目前已停用，請聯絡系統管理員。`,
+    'en':    (email) => `⚠️ Your account (${email}) is currently disabled. Please contact the system administrator.`,
+    'vi':    (email) => `⚠️ Tài khoản của bạn (${email}) hiện đã bị vô hiệu hóa. Vui lòng liên hệ quản trị viên hệ thống.`,
+  },
+  // 帳號拒絕 — bot_disabled
+  bot_disabled: {
+    'zh-TW': (email) => `⚠️ 您的帳號（${email}）目前未開啟 Webex Bot 功能，如需使用請聯絡系統管理員。`,
+    'en':    (email) => `⚠️ Your account (${email}) does not have Webex Bot enabled. Please contact the system administrator to enable it.`,
+    'vi':    (email) => `⚠️ Tài khoản của bạn (${email}) chưa được bật tính năng Webex Bot. Vui lòng liên hệ quản trị viên hệ thống để kích hoạt.`,
+  },
+  // 影片拒絕
+  video_reject: {
+    'zh-TW': (f) => `❌ 不支援影片檔（${f}），請傳送音訊或文件。`,
+    'en':    (f) => `❌ Video files are not supported (${f}). Please send audio or documents.`,
+    'vi':    (f) => `❌ Không hỗ trợ tệp video (${f}). Vui lòng gửi âm thanh hoặc tài liệu.`,
+  },
+  // 音訊無權限
+  audio_no_perm: {
+    'zh-TW': (f) => `❌ 您的帳號無音訊上傳權限（${f}），請聯絡管理員。`,
+    'en':    (f) => `❌ Your account does not have audio upload permission (${f}). Please contact the administrator.`,
+    'vi':    (f) => `❌ Tài khoản của bạn không có quyền tải lên âm thanh (${f}). Vui lòng liên hệ quản trị viên.`,
+  },
+  // 音訊超過上限
+  audio_too_large: {
+    'zh-TW': (mb, f) => `❌ 音訊檔超過上限 ${mb}MB（${f}）。`,
+    'en':    (mb, f) => `❌ Audio file exceeds the ${mb}MB limit (${f}).`,
+    'vi':    (mb, f) => `❌ Tệp âm thanh vượt quá giới hạn ${mb}MB (${f}).`,
+  },
+  // 圖片無權限
+  image_no_perm: {
+    'zh-TW': (f) => `❌ 您的帳號無圖片上傳權限（${f}）。`,
+    'en':    (f) => `❌ Your account does not have image upload permission (${f}).`,
+    'vi':    (f) => `❌ Tài khoản của bạn không có quyền tải lên hình ảnh (${f}).`,
+  },
+  // 圖片超過上限
+  image_too_large: {
+    'zh-TW': (mb, f) => `❌ 圖片超過上限 ${mb}MB（${f}）。`,
+    'en':    (mb, f) => `❌ Image exceeds the ${mb}MB limit (${f}).`,
+    'vi':    (mb, f) => `❌ Hình ảnh vượt quá giới hạn ${mb}MB (${f}).`,
+  },
+  // 處理中
+  typing: {
+    'zh-TW': '⏳ 正在分析您的問題，請稍候...',
+    'en':    '⏳ Analyzing your question, please wait...',
+    'vi':    '⏳ Đang phân tích câu hỏi của bạn, vui lòng chờ...',
+  },
+  // AI 錯誤
+  ai_error: {
+    'zh-TW': (e) => `❌ AI 服務暫時發生錯誤，請稍後重試。\n（${e}）`,
+    'en':    (e) => `❌ AI service encountered an error. Please try again later.\n(${e})`,
+    'vi':    (e) => `❌ Dịch vụ AI tạm thời gặp lỗi. Vui lòng thử lại sau.\n(${e})`,
+  },
+  // 生成檔案
+  file_generated: {
+    'zh-TW': (f) => `📄 已生成：${f}`,
+    'en':    (f) => `📄 Generated: ${f}`,
+    'vi':    (f) => `📄 Đã tạo: ${f}`,
+  },
+  // /new 分隔線
+  new_session: {
+    'zh-TW': (t) => `━━━━━━━━━━━━━━━━━━━━━━━━\n🔄 新對話開始（${t}）\n━━━━━━━━━━━━━━━━━━━━━━━━\n請輸入您的問題。`,
+    'en':    (t) => `━━━━━━━━━━━━━━━━━━━━━━━━\n🔄 New conversation started (${t})\n━━━━━━━━━━━━━━━━━━━━━━━━\nPlease enter your question.`,
+    'vi':    (t) => `━━━━━━━━━━━━━━━━━━━━━━━━\n🔄 Cuộc trò chuyện mới bắt đầu (${t})\n━━━━━━━━━━━━━━━━━━━━━━━━\nVui lòng nhập câu hỏi của bạn.`,
+  },
+  // /help
+  help: {
+    'zh-TW': [
+      '🤖 **FOXLINK GPT Bot 使用說明**\n',
+      '📌 **指令**：',
+      '• `?` — 查看您的可用工具清單',
+      '• `/new` — 開啟新對話（清除記憶）',
+      '• `/help` — 顯示此說明\n',
+      '📎 **附件支援**：',
+      '• PDF、Word、Excel、PPT、圖片、音訊',
+      '• AI 可讀取附件內容並回答',
+      '• AI 生成的 Excel/PDF 等會以附件回傳\n',
+      '⚠️ **注意**：',
+      '• 群組 Room 請 @Bot 後輸入問題',
+      '• 回覆約需 10-30 秒，請稍候',
+    ].join('\n'),
+    'en': [
+      '🤖 **FOXLINK GPT Bot User Guide**\n',
+      '📌 **Commands**:',
+      '• `?` — View your available tools',
+      '• `/new` — Start a new conversation (clear memory)',
+      '• `/help` — Show this guide\n',
+      '📎 **Attachment Support**:',
+      '• PDF, Word, Excel, PPT, images, audio',
+      '• AI can read attachment content and answer',
+      '• AI-generated Excel/PDF files are sent as attachments\n',
+      '⚠️ **Note**:',
+      '• In group rooms, @mention the Bot before your question',
+      '• Replies may take 10-30 seconds, please wait',
+    ].join('\n'),
+    'vi': [
+      '🤖 **Hướng dẫn sử dụng FOXLINK GPT Bot**\n',
+      '📌 **Lệnh**:',
+      '• `?` — Xem danh sách công cụ khả dụng',
+      '• `/new` — Bắt đầu cuộc trò chuyện mới (xóa bộ nhớ)',
+      '• `/help` — Hiển thị hướng dẫn này\n',
+      '📎 **Hỗ trợ tệp đính kèm**:',
+      '• PDF, Word, Excel, PPT, hình ảnh, âm thanh',
+      '• AI có thể đọc nội dung tệp và trả lời',
+      '• Các tệp AI tạo (Excel/PDF) được gửi dưới dạng tệp đính kèm\n',
+      '⚠️ **Lưu ý**:',
+      '• Trong phòng nhóm, hãy @Bot trước khi nhập câu hỏi',
+      '• Phản hồi có thể mất 10-30 giây, vui lòng chờ',
+    ].join('\n'),
+  },
+};
+
+// 預算超限訊息翻譯（budget.message 由 tokenService 產生，格式固定）
+function translateBudgetMsg(msg, lang) {
+  if (!lang || lang === 'zh-TW') return `⚠️ ${msg}`;
+  // 解析中文 budget message: "當日/本週/本月使用金額已達上限 $X（已使用 $Y），請明日/下週一/下月一日再試。"
+  const m = msg.match(/(當日|本週|本月).*?\$([.\d]+).*?\$([.\d]+)/);
+  if (!m) return `⚠️ ${msg}`;
+  const [, period, limit, spent] = m;
+  const periods = {
+    en:  { '當日': 'daily', '本週': 'weekly', '本月': 'monthly' },
+    vi:  { '當日': 'hàng ngày', '本週': 'hàng tuần', '本月': 'hàng tháng' },
+  };
+  const retries = {
+    en:  { '當日': 'Please try again tomorrow.', '本週': 'Please try again next Monday.', '本月': 'Please try again next month.' },
+    vi:  { '當日': 'Vui lòng thử lại vào ngày mai.', '本週': 'Vui lòng thử lại vào thứ Hai tuần sau.', '本月': 'Vui lòng thử lại vào tháng sau.' },
+  };
+  const p = periods[lang]?.[period] || period;
+  const r = retries[lang]?.[period] || '';
+  if (lang === 'en') return `⚠️ Your ${p} usage has reached the limit of $${limit} (used $${spent}). ${r}`;
+  if (lang === 'vi') return `⚠️ Mức sử dụng ${p} của bạn đã đạt giới hạn $${limit} (đã dùng $${spent}). ${r}`;
+  return `⚠️ ${msg}`;
+}
+
+// 取得 i18n 訊息（支援函數或字串）
+function t(key, lang, ...args) {
+  const entry = WEBEX_I18N[key];
+  if (!entry) return key;
+  // not_found 特殊處理：直接是函數（三語全發）
+  if (typeof entry === 'function') return entry(...args);
+  const val = entry[lang] || entry['zh-TW'];
+  return typeof val === 'function' ? val(...args) : val;
+}
 const WEBEX_SYSTEM_SUFFIX = `
 
 ---
@@ -131,7 +300,7 @@ async function findUserByEmail(db, rawEmail) {
               allow_image_upload, image_max_mb,
               budget_daily, budget_weekly, budget_monthly,
               role_id, dept_code, profit_center, org_section, org_group_name,
-              webex_bot_enabled
+              webex_bot_enabled, preferred_language
        FROM users
        WHERE LOWER(REPLACE(email, '.com.tw', '.com')) = ?
        FETCH FIRST 1 ROWS ONLY`
@@ -519,7 +688,7 @@ async function loadFunctionDeclarations(db, user) {
 }
 
 // ── 主訊息處理 ─────────────────────────────────────────────────────────────────
-async function processMessage(db, webex, user, sessionId, roomId, messageText, fileUrls, isDm) {
+async function processMessage(db, webex, user, sessionId, roomId, messageText, fileUrls, isDm, lang) {
   const today = getTaipeiDateStr();
 
   // 1. 下載並處理附件
@@ -539,7 +708,7 @@ async function processMessage(db, webex, user, sessionId, roomId, messageText, f
 
       // 影片檔拒絕
       if (mimeType.startsWith('video/')) {
-        await webex.sendMessage(roomId, `❌ 不支援影片檔（${filename}），請傳送音訊或文件。`);
+        await webex.sendMessage(roomId, t('video_reject', lang, filename));
         fs.unlink(tmpPath, () => {});
         continue;
       }
@@ -548,12 +717,12 @@ async function processMessage(db, webex, user, sessionId, roomId, messageText, f
       if (mimeType.startsWith('audio/')) {
         const maxMb = user.audio_max_mb || 10;
         if (!user.allow_audio_upload) {
-          await webex.sendMessage(roomId, `❌ 您的帳號無音訊上傳權限（${filename}），請聯絡管理員。`);
+          await webex.sendMessage(roomId, t('audio_no_perm', lang, filename));
           fs.unlink(tmpPath, () => {});
           continue;
         }
         if (sizeMb > maxMb) {
-          await webex.sendMessage(roomId, `❌ 音訊檔超過上限 ${maxMb}MB（${filename}）。`);
+          await webex.sendMessage(roomId, t('audio_too_large', lang, maxMb, filename));
           fs.unlink(tmpPath, () => {});
           continue;
         }
@@ -575,13 +744,13 @@ async function processMessage(db, webex, user, sessionId, roomId, messageText, f
       // 圖片
       if (mimeType.startsWith('image/')) {
         if (user.allow_image_upload === 0) {
-          await webex.sendMessage(roomId, `❌ 您的帳號無圖片上傳權限（${filename}）。`);
+          await webex.sendMessage(roomId, t('image_no_perm', lang, filename));
           fs.unlink(tmpPath, () => {});
           continue;
         }
         const maxMb = user.image_max_mb || 10;
         if (sizeMb > maxMb) {
-          await webex.sendMessage(roomId, `❌ 圖片超過上限 ${maxMb}MB（${filename}）。`);
+          await webex.sendMessage(roomId, t('image_too_large', lang, maxMb, filename));
           fs.unlink(tmpPath, () => {});
           continue;
         }
@@ -649,7 +818,7 @@ async function processMessage(db, webex, user, sessionId, roomId, messageText, f
   if (user.role !== 'admin') {
     const budget = await checkBudgetExceeded(db, user.id);
     if (budget.exceeded && budget.action !== 'warn') {
-      await webex.sendMessage(roomId, `⚠️ ${budget.message}`);
+      await webex.sendMessage(roomId, translateBudgetMsg(budget.message, lang));
       return;
     }
     if (budget.exceeded && budget.action === 'warn') {
@@ -664,7 +833,7 @@ async function processMessage(db, webex, user, sessionId, roomId, messageText, f
   // Typing indicator：先發「處理中」訊息，AI 完成後刪除
   let typingMsgId = null;
   try {
-    typingMsgId = await webex.sendMessage(roomId, '⏳ 正在分析您的問題，請稍候...');
+    typingMsgId = await webex.sendMessage(roomId, t('typing', lang));
   } catch (_) {}
 
   let aiText = '';
@@ -690,7 +859,7 @@ async function processMessage(db, webex, user, sessionId, roomId, messageText, f
   } catch (e) {
     console.error('[Webex] AI call error:', e.message);
     if (typingMsgId) await webex.deleteMessage(typingMsgId);
-    await webex.sendMessage(roomId, `❌ AI 服務暫時發生錯誤，請稍後重試。\n（${e.message?.slice(0, 80)}）`);
+    await webex.sendMessage(roomId, t('ai_error', lang, e.message?.slice(0, 80)));
     return;
   }
 
@@ -788,7 +957,7 @@ async function processMessage(db, webex, user, sessionId, roomId, messageText, f
       const filePath = file.filePath; // e.g. /uploads/generated/1234567890_report.pdf
       console.log(`[Webex] Sending file: ${filePath} exists=${fs.existsSync(filePath)}`);
       if (fs.existsSync(filePath)) {
-        await webex.sendFile(roomId, `📄 已生成：${file.filename}`, filePath);
+        await webex.sendFile(roomId, t('file_generated', lang, file.filename), filePath);
         console.log(`[Webex] File sent: ${file.filename}`);
       } else {
         console.error(`[Webex] File not found: ${filePath}`);
@@ -931,38 +1100,21 @@ async function handleWebexMessage(message) {
       `INSERT INTO webex_auth_logs (raw_email, norm_email, status, room_type, room_id, msg_text)
        VALUES (?, ?, 'not_found', ?, ?, ?)`
     ).run(senderEmail, normalizeEmail(senderEmail), roomType, roomId, msgPreview).catch(() => {});
-    await webex.sendMessage(roomId, [
-      `⚠️ 無法串連 Foxlink GPT to Cortex 帳號（${senderEmail}），以下為可能原因：`,
-      `1. 尚未登入過網頁系統產生帳號，請進行第一次登入`,
-      `2. 可能帳號無 email 資訊`,
-      `3. 網路連線問題`,
-      `請檢查以上原因或是洽廠區資訊處理`,
-      ``,
-      `⚠️ Unable to link Foxlink GPT to Cortex account (${senderEmail}). Possible reasons:`,
-      `1. You have not logged into the web system to create an account. Please log in for the first time.`,
-      `2. Your account may not have email information.`,
-      `3. Network connection issue.`,
-      `Please check the above or contact your local IT department.`,
-      ``,
-      `⚠️ Không thể liên kết tài khoản Foxlink GPT to Cortex (${senderEmail}). Nguyên nhân có thể:`,
-      `1. Bạn chưa đăng nhập vào hệ thống web để tạo tài khoản. Vui lòng đăng nhập lần đầu.`,
-      `2. Tài khoản có thể không có thông tin email.`,
-      `3. Sự cố kết nối mạng.`,
-      `Vui lòng kiểm tra các nguyên nhân trên hoặc liên hệ bộ phận IT tại nhà máy.`,
-    ].join('\n'));
+    // not_found: 無法取得 user，三語全發
+    await webex.sendMessage(roomId, t('not_found', null, senderEmail));
     return;
   }
+
+  // 有 user → 依 preferred_language 決定回應語言
+  const lang = user.preferred_language || 'zh-TW';
+
   if (user.status !== 'active') {
     console.warn(`[Webex][Auth] User id=${user.id} status=${user.status}, rejected`);
     db.prepare(
       `INSERT INTO webex_auth_logs (raw_email, norm_email, user_id, user_name, username, status, room_type, room_id, msg_text)
        VALUES (?, ?, ?, ?, ?, 'disabled', ?, ?, ?)`
     ).run(senderEmail, normalizeEmail(senderEmail), user.id, user.name, user.username, roomType, roomId, msgPreview).catch(() => {});
-    await webex.sendMessage(roomId, [
-      `⚠️ 您的帳號（${senderEmail}）目前已停用，請聯絡系統管理員。`,
-      `⚠️ Your account (${senderEmail}) is currently disabled. Please contact the system administrator.`,
-      `⚠️ Tài khoản của bạn (${senderEmail}) hiện đã bị vô hiệu hóa. Vui lòng liên hệ quản trị viên hệ thống.`,
-    ].join('\n'));
+    await webex.sendMessage(roomId, t('disabled', lang, senderEmail));
     return;
   }
   // webex_bot_enabled = 0 表示此帳號不允許使用 Webex Bot
@@ -972,11 +1124,7 @@ async function handleWebexMessage(message) {
       `INSERT INTO webex_auth_logs (raw_email, norm_email, user_id, user_name, username, status, room_type, room_id, msg_text)
        VALUES (?, ?, ?, ?, ?, 'bot_disabled', ?, ?, ?)`
     ).run(senderEmail, normalizeEmail(senderEmail), user.id, user.name, user.username, roomType, roomId, msgPreview).catch(() => {});
-    await webex.sendMessage(roomId, [
-      `⚠️ 您的帳號（${senderEmail}）目前未開啟 Webex Bot 功能，如需使用請聯絡系統管理員。`,
-      `⚠️ Your account (${senderEmail}) does not have Webex Bot enabled. Please contact the system administrator to enable it.`,
-      `⚠️ Tài khoản của bạn (${senderEmail}) chưa được bật tính năng Webex Bot. Vui lòng liên hệ quản trị viên hệ thống để kích hoạt.`,
-    ].join('\n'));
+    await webex.sendMessage(roomId, t('bot_disabled', lang, senderEmail));
     return;
   }
   console.log(`[Webex][Auth] User authenticated: id=${user.id} username="${user.username}" role=${user.role}`);
@@ -1040,28 +1188,15 @@ async function handleWebexMessage(message) {
       }
       if (cleaned > 0) console.log(`[Webex] /new cleanup: removed ${cleaned} stale tmp files`);
     } catch (_) {}
-    const now = new Date().toLocaleString('zh-TW', { timeZone: 'Asia/Taipei', hour12: false });
-    const divider = `━━━━━━━━━━━━━━━━━━━━━━━━\n🔄 新對話開始（${now}）\n━━━━━━━━━━━━━━━━━━━━━━━━\n請輸入您的問題。`;
+    const nowStr = new Date().toLocaleString('zh-TW', { timeZone: 'Asia/Taipei', hour12: false });
+    const divider = t('new_session', lang, nowStr);
     await webex.sendMessage(roomId, divider);
     return;
   }
 
   // /help → 使用說明
   if (cmdText === '/help') {
-    const helpText = [
-      '🤖 **FOXLINK GPT Bot 使用說明**\n',
-      '📌 **指令**：',
-      '• `?` — 查看您的可用工具清單',
-      '• `/new` — 開啟新對話（清除記憶）',
-      '• `/help` — 顯示此說明\n',
-      '📎 **附件支援**：',
-      '• PDF、Word、Excel、PPT、圖片、音訊',
-      '• AI 可讀取附件內容並回答',
-      '• AI 生成的 Excel/PDF 等會以附件回傳\n',
-      '⚠️ **注意**：',
-      '• 群組 Room 請 @Bot 後輸入問題',
-      '• 回覆約需 10-30 秒，請稍候',
-    ].join('\n');
+    const helpText = t('help', lang);
     await webex.sendMessage(roomId, helpText, { markdown: helpText });
     return;
   }
@@ -1070,7 +1205,7 @@ async function handleWebexMessage(message) {
   const fileUrls = message.files || [];
   console.log(`[Webex] Processing chat: user=${user.username} session=${sessionId} text="${msgText.slice(0, 50)}" files=${fileUrls.length}`);
 
-  await processMessage(db, webex, user, sessionId, roomId, msgText, fileUrls, isDm);
+  await processMessage(db, webex, user, sessionId, roomId, msgText, fileUrls, isDm, lang);
 }
 
 module.exports = router;
