@@ -348,6 +348,98 @@ router.put('/user-policies/:userId', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ── 使用者 × 類別 政策綁定 CRUD ─────────────────────────────────────────────
+// GET /api/data-permissions/user-cat-policies/:userId
+router.get('/user-cat-policies/:userId', async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const rows = await db.prepare(
+      `SELECT ucp.id, ucp.category_id, c.name AS category_name,
+              ucp.policy_id, p.name AS policy_name
+       FROM ai_user_cat_policies ucp
+       JOIN ai_policy_categories c ON c.id = ucp.category_id
+       JOIN ai_data_policies p     ON p.id = ucp.policy_id
+       WHERE ucp.user_id = ?
+       ORDER BY c.name, p.name`
+    ).all(req.params.userId);
+    res.json(rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/data-permissions/user-cat-policies
+router.post('/user-cat-policies', async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const { user_id, category_id, policy_id } = req.body;
+    const exists = await db.prepare(
+      `SELECT 1 FROM ai_user_cat_policies WHERE user_id=? AND category_id=? AND policy_id=?`
+    ).get(user_id, category_id, policy_id);
+    if (!exists) {
+      await db.prepare(
+        `INSERT INTO ai_user_cat_policies (user_id, category_id, policy_id) VALUES (?,?,?)`
+      ).run(user_id, category_id, policy_id);
+    }
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// DELETE /api/data-permissions/user-cat-policies/:userId/:categoryId/:policyId
+router.delete('/user-cat-policies/:userId/:categoryId/:policyId', async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    await db.prepare(
+      `DELETE FROM ai_user_cat_policies WHERE user_id=? AND category_id=? AND policy_id=?`
+    ).run(req.params.userId, req.params.categoryId, req.params.policyId);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── 角色 × 類別 政策綁定 CRUD ──────────────────────────────────────────────
+// GET /api/data-permissions/role-cat-policies/:roleId
+router.get('/role-cat-policies/:roleId', async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const rows = await db.prepare(
+      `SELECT rcp.id, rcp.category_id, c.name AS category_name,
+              rcp.policy_id, p.name AS policy_name
+       FROM ai_role_cat_policies rcp
+       JOIN ai_policy_categories c ON c.id = rcp.category_id
+       JOIN ai_data_policies p     ON p.id = rcp.policy_id
+       WHERE rcp.role_id = ?
+       ORDER BY c.name, p.name`
+    ).all(req.params.roleId);
+    res.json(rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/data-permissions/role-cat-policies
+router.post('/role-cat-policies', async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const { role_id, category_id, policy_id } = req.body;
+    const exists = await db.prepare(
+      `SELECT 1 FROM ai_role_cat_policies WHERE role_id=? AND category_id=? AND policy_id=?`
+    ).get(role_id, category_id, policy_id);
+    if (!exists) {
+      await db.prepare(
+        `INSERT INTO ai_role_cat_policies (role_id, category_id, policy_id) VALUES (?,?,?)`
+      ).run(role_id, category_id, policy_id);
+    }
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// DELETE /api/data-permissions/role-cat-policies/:roleId/:categoryId/:policyId
+router.delete('/role-cat-policies/:roleId/:categoryId/:policyId', async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    await db.prepare(
+      `DELETE FROM ai_role_cat_policies WHERE role_id=? AND category_id=? AND policy_id=?`
+    ).run(req.params.roleId, req.params.categoryId, req.params.policyId);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ── 有效政策（給定使用者 + 類別）────────────────────────────────────────────
 // GET /api/data-permissions/effective/:userId?category_id=X
 router.get('/effective/:userId', async (req, res) => {
@@ -360,87 +452,66 @@ router.get('/effective/:userId', async (req, res) => {
 });
 
 /**
- * 計算使用者有效政策陣列（依類別過濾）：
- * 1. 使用者有個人指派政策 → 用使用者的（過濾符合 categoryId 的）
- * 2. 無個人政策 → 用角色的
- * 3. 都沒有 → []（無權限，如果 categoryId 存在）
+ * 計算使用者有效政策陣列（5 層優先順序）：
+ *   層級 1（新）：USER  對此 category 的明確綁定（ai_user_cat_policies）
+ *   層級 2（新）：ROLE  對此 category 的明確綁定（ai_role_cat_policies）
+ *   層級 3（原）：USER  的一般政策（ai_user_policies）
+ *   層級 4（原）：ROLE  的一般政策（ai_role_policies）
+ *   層級 5：都沒有 → []
  *
- * @param {object} db
- * @param {number|string} userId
- * @param {number|null} categoryId  null = 不過濾類別（backward compat）
- * @returns {Promise<{rules: object[]}[]>}
+ * 層級 1/2 只在 categoryId 有值時觸發；找不到則 fall through 到 3/4。
  */
 async function getEffectivePolicies(db, userId, categoryId = null) {
   const user = await db.prepare(`SELECT id, role_id FROM users WHERE id=?`).get(userId);
   if (!user) return [];
 
-  // ── 使用者直接指派的政策 ──
-  let userPolicies = [];
+  // ── 層級 1/2：類別層（新）─────────────────────────────────────────────────
   if (categoryId) {
-    userPolicies = await db.prepare(
-      `SELECT p.id, p.name, p.priority, up.priority AS assign_priority
-       FROM ai_user_policies up
-       JOIN ai_data_policies p ON p.id = up.policy_id
-       JOIN ai_policy_category_map pcm ON pcm.policy_id = p.id
-       WHERE up.user_id = ? AND pcm.category_id = ?
-       ORDER BY up.priority ASC, p.priority ASC`
+    // 層級 1：USER 對此 category 的綁定
+    const userCat = await db.prepare(
+      `SELECT policy_id FROM ai_user_cat_policies WHERE user_id=? AND category_id=?`
     ).all(userId, categoryId);
-  } else {
-    // Backward compat: 無類別 → 取所有使用者政策
-    userPolicies = await db.prepare(
-      `SELECT p.id, p.name, p.priority, up.priority AS assign_priority
-       FROM ai_user_policies up
-       JOIN ai_data_policies p ON p.id = up.policy_id
-       WHERE up.user_id = ?
-       ORDER BY up.priority ASC`
-    ).all(userId);
+
+    if (userCat.length > 0) {
+      return await _loadPoliciesWithRules(db, userCat.map(r => r.policy_id));
+    }
+
+    // 層級 2：ROLE 對此 category 的綁定
+    if (user.role_id) {
+      const roleCat = await db.prepare(
+        `SELECT policy_id FROM ai_role_cat_policies WHERE role_id=? AND category_id=?`
+      ).all(user.role_id, categoryId);
+
+      if (roleCat.length > 0) {
+        return await _loadPoliciesWithRules(db, roleCat.map(r => r.policy_id));
+      }
+    }
+    // 層級 1/2 都沒有 → fall through 到原始邏輯
   }
 
-  // 使用者有直接設定 → 用使用者的（覆蓋角色）
+  // ── 層級 3/4：原始邏輯（一字不改）─────────────────────────────────────────
+  const userPolicies = await db.prepare(
+    `SELECT p.id FROM ai_user_policies up
+     JOIN ai_data_policies p ON p.id = up.policy_id
+     WHERE up.user_id = ?
+     ORDER BY up.priority ASC`
+  ).all(userId);
+
   if (userPolicies.length > 0) {
     return await _loadPoliciesWithRules(db, userPolicies.map(p => p.id));
   }
 
-  // ── 角色的政策 ──
   if (!user.role_id) return [];
 
-  let rolePolicies = [];
-  if (categoryId) {
-    rolePolicies = await db.prepare(
-      `SELECT p.id, p.name, p.priority, rp.priority AS assign_priority
-       FROM ai_role_policies rp
-       JOIN ai_data_policies p ON p.id = rp.policy_id
-       JOIN ai_policy_category_map pcm ON pcm.policy_id = p.id
-       WHERE rp.role_id = ? AND pcm.category_id = ?
-       ORDER BY rp.priority ASC, p.priority ASC`
-    ).all(user.role_id, categoryId);
-  } else {
-    rolePolicies = await db.prepare(
-      `SELECT p.id, p.name, p.priority, rp.priority AS assign_priority
-       FROM ai_role_policies rp
-       JOIN ai_data_policies p ON p.id = rp.policy_id
-       WHERE rp.role_id = ?
-       ORDER BY rp.priority ASC`
-    ).all(user.role_id);
-  }
+  const rolePolicies = await db.prepare(
+    `SELECT p.id FROM ai_role_policies rp
+     JOIN ai_data_policies p ON p.id = rp.policy_id
+     WHERE rp.role_id = ?
+     ORDER BY rp.priority ASC`
+  ).all(user.role_id);
 
   if (rolePolicies.length > 0) {
     return await _loadPoliciesWithRules(db, rolePolicies.map(p => p.id));
-  }
-
-  // ── Backward compat: 舊 ai_policy_assignments ──（categoryId 為 null 時才 fallback）
-  if (!categoryId) {
-    const oldAssign = await db.prepare(
-      `SELECT policy_id FROM ai_policy_assignments WHERE grantee_type='user' AND grantee_id=?`
-    ).get(String(userId));
-    let policyId = oldAssign?.policy_id ?? null;
-    if (!policyId && user.role_id) {
-      const roleAssign = await db.prepare(
-        `SELECT policy_id FROM ai_policy_assignments WHERE grantee_type='role' AND grantee_id=?`
-      ).get(String(user.role_id));
-      policyId = roleAssign?.policy_id ?? null;
-    }
-    if (policyId) return await _loadPoliciesWithRules(db, [policyId]);
   }
 
   return [];

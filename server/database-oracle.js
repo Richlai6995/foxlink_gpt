@@ -1483,6 +1483,25 @@ async function runMigrations(db) {
     msg_text     VARCHAR2(200),
     created_at   TIMESTAMP DEFAULT SYSTIMESTAMP
   )`);
+
+  // ── 資料政策 × 類別綁定（使用者/角色對特定類別指定政策）────────────────────
+  await createTable('AI_USER_CAT_POLICIES', `CREATE TABLE ai_user_cat_policies (
+    id          NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    user_id     NUMBER        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    category_id NUMBER        NOT NULL REFERENCES ai_policy_categories(id) ON DELETE CASCADE,
+    policy_id   NUMBER        NOT NULL REFERENCES ai_data_policies(id) ON DELETE CASCADE,
+    created_at  TIMESTAMP     DEFAULT SYSTIMESTAMP,
+    CONSTRAINT uq_user_cat_pol UNIQUE (user_id, category_id, policy_id)
+  )`);
+
+  await createTable('AI_ROLE_CAT_POLICIES', `CREATE TABLE ai_role_cat_policies (
+    id          NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    role_id     NUMBER        NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
+    category_id NUMBER        NOT NULL REFERENCES ai_policy_categories(id) ON DELETE CASCADE,
+    policy_id   NUMBER        NOT NULL REFERENCES ai_data_policies(id) ON DELETE CASCADE,
+    created_at  TIMESTAMP     DEFAULT SYSTIMESTAMP,
+    CONSTRAINT uq_role_cat_pol UNIQUE (role_id, category_id, policy_id)
+  )`);
 }
 
 // ─── Default DB Source migration ───────────────────────────────────────────────

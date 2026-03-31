@@ -64,6 +64,14 @@ interface ErpOrgLov {
 interface UserLov { id: number; username: string; name: string; employee_id?: string; dept_name?: string }
 interface RoleLov { id: number; name: string; description?: string }
 
+interface CatBinding {
+  id: number
+  category_id: number
+  category_name: string
+  policy_id: number
+  policy_name: string
+}
+
 // ── Layer config ──────────────────────────────────────────────────────────────
 const LAYER_LABELS: Record<number, { label: string; icon: React.ReactNode; color: string }> = {
   1: { label: '第1層 使用者過濾', icon: <UserCheck size={14} />, color: 'text-blue-600 bg-blue-50' },
@@ -310,6 +318,7 @@ export default function DataPermissionsPanel() {
         <div className="flex-1 overflow-y-auto">
           <AssignmentsPanel
             policies={policies}
+            categories={categories}
             assignments={assignments}
             users={users}
             roles={roles}
@@ -949,9 +958,9 @@ function CategoriesPanel({
 
 // ── AssignmentsPanel ──────────────────────────────────────────────────────────
 function AssignmentsPanel({
-  policies, assignments, users, roles, onRefresh
+  policies, categories, assignments, users, roles, onRefresh
 }: {
-  policies: Policy[]; assignments: Assignment[]
+  policies: Policy[]; categories: PolicyCategory[]; assignments: Assignment[]
   users: UserLov[]; roles: RoleLov[]
   onRefresh: () => void
 }) {
@@ -994,6 +1003,7 @@ function AssignmentsPanel({
             label={role.name}
             sub={role.description}
             policies={policies}
+            categories={categories}
             onError={setError}
             onRefresh={onRefresh}
           />
@@ -1006,6 +1016,7 @@ function AssignmentsPanel({
             label={user.name || user.username}
             sub={`${user.employee_id ? user.employee_id + ' | ' : ''}${user.dept_name || ''}`}
             policies={policies}
+            categories={categories}
             onError={setError}
             onRefresh={onRefresh}
           />
@@ -1017,13 +1028,14 @@ function AssignmentsPanel({
 
 // ── MultiAssignRow ─────────────────────────────────────────────────────────────
 function MultiAssignRow({
-  type, granteeId, label, sub, policies, onError, onRefresh
+  type, granteeId, label, sub, policies, categories, onError, onRefresh
 }: {
   type: 'role' | 'user'
   granteeId: number
   label: string
   sub?: string
   policies: Policy[]
+  categories: PolicyCategory[]
   onError: (msg: string) => void
   onRefresh: () => void
 }) {
@@ -1135,6 +1147,10 @@ function MultiAssignRow({
             <div className="text-center text-slate-400 text-sm py-4">載入中...</div>
           ) : (
             <>
+              {/* ── Section 1: 一般政策（無類別）── */}
+              <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide">
+                一般政策（無類別）
+              </div>
               <div className="grid grid-cols-2 gap-4">
                 {/* Left: policy checklist */}
                 <div>
@@ -1223,10 +1239,225 @@ function MultiAssignRow({
                   </button>
                 </div>
               )}
+
+              {/* ── Section 2: 類別政策綁定（新）── */}
+              <div className="border-t border-slate-200 pt-3">
+                <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">
+                  類別政策綁定
+                </div>
+                <CatBindingsSection
+                  type={type}
+                  granteeId={granteeId}
+                  policies={policies}
+                  categories={categories}
+                  onError={onError}
+                />
+              </div>
             </>
           )}
         </div>
       )}
     </div>
+  )
+}
+
+// ── CatBindingsSection ─────────────────────────────────────────────────────────
+function CatBindingsSection({
+  type, granteeId, policies, categories, onError
+}: {
+  type: 'role' | 'user'
+  granteeId: number
+  policies: Policy[]
+  categories: PolicyCategory[]
+  onError: (msg: string) => void
+}) {
+  const [bindings, setBindings] = useState<CatBinding[]>([])
+  const [loading, setLoading] = useState(false)
+  const [adding, setAdding] = useState(false)
+  const [addCatId, setAddCatId] = useState<number | ''>('')
+  const [addPolicyId, setAddPolicyId] = useState<number | ''>('')
+  const [saving, setSaving] = useState(false)
+
+  const baseUrl = type === 'role'
+    ? `/data-permissions/role-cat-policies`
+    : `/data-permissions/user-cat-policies`
+  const idKey = type === 'role' ? 'role_id' : 'user_id'
+
+  async function load() {
+    setLoading(true)
+    try {
+      const data = await api.get(`${baseUrl}/${granteeId}`).then(r => r.data)
+      setBindings(Array.isArray(data) ? data : [])
+    } catch {
+      setBindings([])
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => { load() }, [granteeId, type])
+
+  async function addBinding() {
+    if (!addCatId || !addPolicyId) return
+    setSaving(true)
+    try {
+      await api.post(baseUrl, { [idKey]: granteeId, category_id: addCatId, policy_id: addPolicyId })
+      setAdding(false)
+      setAddCatId('')
+      setAddPolicyId('')
+      await load()
+    } catch (e: any) {
+      onError(e.response?.data?.error || e.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function removeBinding(b: CatBinding) {
+    try {
+      await api.delete(`${baseUrl}/${granteeId}/${b.category_id}/${b.policy_id}`)
+      setBindings(prev => prev.filter(x => x.id !== b.id))
+    } catch (e: any) {
+      onError(e.response?.data?.error || e.message)
+    }
+  }
+
+  // Group by category
+  const grouped = bindings.reduce<Record<number, { cat_name: string; items: CatBinding[] }>>((acc, b) => {
+    if (!acc[b.category_id]) acc[b.category_id] = { cat_name: b.category_name, items: [] }
+    acc[b.category_id].items.push(b)
+    return acc
+  }, {})
+
+  if (loading) return <div className="text-xs text-slate-400 py-1">載入中...</div>
+
+  return (
+    <div className="flex flex-col gap-2">
+      {Object.keys(grouped).length === 0 && !adding && (
+        <div className="text-xs text-slate-400 italic">尚無類別政策綁定</div>
+      )}
+
+      {Object.entries(grouped).map(([catId, { cat_name, items }]) => (
+        <div key={catId} className="flex items-start gap-2 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
+          <div className="flex items-center gap-1 shrink-0 pt-0.5">
+            <Tag size={11} className="text-slate-400" />
+            <span className="text-xs font-medium text-slate-700 whitespace-nowrap">{cat_name}</span>
+          </div>
+          <div className="flex flex-wrap gap-1 flex-1">
+            {items.map(b => (
+              <span
+                key={b.id}
+                className="inline-flex items-center gap-1 text-[11px] bg-blue-50 border border-blue-200 text-blue-700 px-2 py-0.5 rounded-full"
+              >
+                {b.policy_name}
+                <button
+                  onClick={() => removeBinding(b)}
+                  className="text-blue-400 hover:text-red-500 ml-0.5"
+                  title="移除"
+                >
+                  <X size={10} />
+                </button>
+              </span>
+            ))}
+            <AddPolicyInlineBtn
+              policies={policies}
+              existingPolicyIds={items.map(i => i.policy_id)}
+              onAdd={async (pid) => {
+                setSaving(true)
+                try {
+                  await api.post(baseUrl, { [idKey]: granteeId, category_id: Number(catId), policy_id: pid })
+                  await load()
+                } catch (e: any) {
+                  onError(e.response?.data?.error || e.message)
+                } finally { setSaving(false) }
+              }}
+            />
+          </div>
+        </div>
+      ))}
+
+      {adding ? (
+        <div className="flex items-center gap-2 bg-green-50 border border-green-200 rounded-lg px-3 py-2">
+          <select
+            value={addCatId}
+            onChange={e => setAddCatId(e.target.value ? Number(e.target.value) : '')}
+            className="text-xs border border-slate-300 rounded px-2 py-1 bg-white"
+          >
+            <option value="">選擇類別...</option>
+            {categories.map(c => (
+              <option key={c.id} value={c.id}>{c.name}</option>
+            ))}
+          </select>
+          <select
+            value={addPolicyId}
+            onChange={e => setAddPolicyId(e.target.value ? Number(e.target.value) : '')}
+            className="text-xs border border-slate-300 rounded px-2 py-1 bg-white"
+          >
+            <option value="">選擇政策...</option>
+            {policies.map(p => (
+              <option key={p.id} value={p.id}>{p.name}</option>
+            ))}
+          </select>
+          <button
+            onClick={addBinding}
+            disabled={!addCatId || !addPolicyId || saving}
+            className="flex items-center gap-1 text-xs bg-green-600 text-white px-2.5 py-1 rounded-lg hover:bg-green-700 disabled:opacity-50"
+          >
+            {saving ? <RefreshCw size={10} className="animate-spin" /> : <Check size={10} />}
+            新增
+          </button>
+          <button
+            onClick={() => { setAdding(false); setAddCatId(''); setAddPolicyId('') }}
+            className="text-xs text-slate-500 hover:text-slate-700 px-1.5 py-1"
+          >
+            取消
+          </button>
+        </div>
+      ) : (
+        <button
+          onClick={() => setAdding(true)}
+          className="flex items-center gap-1 text-xs text-slate-500 hover:text-blue-600 border border-dashed border-slate-300 hover:border-blue-400 rounded-lg px-3 py-1.5 transition w-fit"
+        >
+          <Plus size={12} /> 新增類別綁定
+        </button>
+      )}
+    </div>
+  )
+}
+
+// ── AddPolicyInlineBtn: 在既有 category 行加政策 ──────────────────────────────
+function AddPolicyInlineBtn({
+  policies, existingPolicyIds, onAdd
+}: {
+  policies: Policy[]
+  existingPolicyIds: number[]
+  onAdd: (policyId: number) => Promise<void>
+}) {
+  const [open, setOpen] = useState(false)
+  const available = policies.filter(p => !existingPolicyIds.includes(p.id))
+  if (available.length === 0) return null
+  if (!open) return (
+    <button
+      onClick={() => setOpen(true)}
+      className="text-[11px] text-slate-400 hover:text-blue-600 border border-dashed border-slate-300 hover:border-blue-400 px-1.5 py-0.5 rounded-full transition"
+    >
+      + 加政策
+    </button>
+  )
+  return (
+    <select
+      autoFocus
+      defaultValue=""
+      onChange={async e => {
+        if (!e.target.value) return
+        await onAdd(Number(e.target.value))
+        setOpen(false)
+      }}
+      onBlur={() => setOpen(false)}
+      className="text-xs border border-blue-300 rounded px-1.5 py-0.5 bg-white"
+    >
+      <option value="">選政策...</option>
+      {available.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+    </select>
   )
 }
