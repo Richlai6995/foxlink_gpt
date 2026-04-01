@@ -674,8 +674,8 @@ async function loadFunctionDeclarations(db, user) {
           const apiKey = kb.api_key || '';
           const apiServer = (kb.api_server || 'https://api.dify.ai').replace(/\/$/, '');
           const res = await require('axios').post(
-            `${apiServer}/v1/chat-messages`,
-            { inputs: {}, query, response_mode: 'blocking', conversation_id: '', user: String(user.id) },
+            `${apiServer}/chat-messages`,
+            { inputs: {}, query, response_mode: 'blocking', user: `foxlink-user-${user.id}` },
             { headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' }, timeout: 30000 }
           );
           const answer = res.data?.answer || res.data?.message || '無結果';
