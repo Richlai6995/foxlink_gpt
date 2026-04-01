@@ -473,7 +473,10 @@ async function buildToolList(db, user, lang) {
     const difyAcl = buildAccessFilter('a', 'dify_kb_id', 'd', user);
     console.log(`[Webex][buildToolList] DIFY params: ${JSON.stringify(difyAcl.params)}`);
     const difyKbs = await db.prepare(
-      `SELECT DISTINCT d.name, d.description, d.sort_order, d.name_zh, d.name_en, d.name_vi, d.desc_zh, d.desc_en, d.desc_vi FROM dify_knowledge_bases d
+      `SELECT d.name, DBMS_LOB.SUBSTR(d.description, 200, 1) AS description, d.sort_order,
+              d.name_zh, d.name_en, d.name_vi,
+              DBMS_LOB.SUBSTR(d.desc_zh, 200, 1) AS desc_zh, DBMS_LOB.SUBSTR(d.desc_en, 200, 1) AS desc_en, DBMS_LOB.SUBSTR(d.desc_vi, 200, 1) AS desc_vi
+       FROM dify_knowledge_bases d
        WHERE d.is_active=1 AND (
          (d.is_public=1 AND d.public_approved=1)
          OR ${difyAcl.clause}
@@ -498,8 +501,9 @@ async function buildToolList(db, user, lang) {
     const mcpAcl = buildAccessFilter('a', 'mcp_server_id', 'm', user);
     console.log(`[Webex][buildToolList] MCP params: ${JSON.stringify(mcpAcl.params)}`);
     const mcpServers = await db.prepare(
-      `SELECT DISTINCT m.name, DBMS_LOB.SUBSTR(m.description, 200, 1) AS description,
-              m.name_zh, m.name_en, m.name_vi, m.desc_zh, m.desc_en, m.desc_vi
+      `SELECT m.name, DBMS_LOB.SUBSTR(m.description, 200, 1) AS description,
+              m.name_zh, m.name_en, m.name_vi,
+              DBMS_LOB.SUBSTR(m.desc_zh, 200, 1) AS desc_zh, DBMS_LOB.SUBSTR(m.desc_en, 200, 1) AS desc_en, DBMS_LOB.SUBSTR(m.desc_vi, 200, 1) AS desc_vi
        FROM mcp_servers m
        WHERE m.is_active=1 AND (
          (m.is_public=1 AND m.public_approved=1)
@@ -642,7 +646,7 @@ async function loadFunctionDeclarations(db, user) {
     const difyAcl2 = buildAccessFilter('a', 'dify_kb_id', 'd', user);
     console.log(`[Webex][loadFuncDecl] DIFY params: ${JSON.stringify(difyAcl2.params)}`);
     const difyKbs = await db.prepare(
-      `SELECT DISTINCT d.id, d.name, d.api_server, d.api_key, d.description
+      `SELECT d.id, d.name, d.api_server, d.api_key, DBMS_LOB.SUBSTR(d.description, 500, 1) AS description
        FROM dify_knowledge_bases d
        WHERE d.is_active=1 AND (
          (d.is_public=1 AND d.public_approved=1)
@@ -691,7 +695,7 @@ async function loadFunctionDeclarations(db, user) {
     const mcpAcl2 = buildAccessFilter('a', 'mcp_server_id', 'm', user);
     console.log(`[Webex][loadFuncDecl] MCP params: ${JSON.stringify(mcpAcl2.params)}`);
     const mcpServers = await db.prepare(
-      `SELECT DISTINCT m.id, m.name, m.endpoint_url, m.is_active
+      `SELECT m.id, m.name, m.endpoint_url, m.is_active
        FROM mcp_servers m
        WHERE m.is_active=1 AND (
          (m.is_public=1 AND m.public_approved=1)
