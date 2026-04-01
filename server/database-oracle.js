@@ -1505,6 +1505,29 @@ async function runMigrations(db) {
 
   // ── 姓名鎖定欄位（防止 LDAP/ERP 自動覆蓋手動修改的姓名）────────────────────
   await safeAddColumn('USERS', 'NAME_MANUALLY_SET', 'NUMBER(1) DEFAULT 0');
+
+  // ── 說明文件多語翻譯 ─────────────────────────────────────────────────────────
+  await createTable('HELP_SECTIONS', `CREATE TABLE help_sections (
+    id             VARCHAR2(60)  PRIMARY KEY,
+    section_type   VARCHAR2(10)  DEFAULT 'user',
+    sort_order     NUMBER        DEFAULT 0,
+    icon           VARCHAR2(60),
+    icon_color     VARCHAR2(60),
+    last_modified  VARCHAR2(20)  NOT NULL,
+    created_at     TIMESTAMP     DEFAULT SYSTIMESTAMP
+  )`);
+
+  await createTable('HELP_TRANSLATIONS', `CREATE TABLE help_translations (
+    id             NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    section_id     VARCHAR2(60)  NOT NULL REFERENCES help_sections(id) ON DELETE CASCADE,
+    lang           VARCHAR2(10)  NOT NULL,
+    title          VARCHAR2(200) NOT NULL,
+    sidebar_label  VARCHAR2(200) NOT NULL,
+    blocks_json    CLOB          NOT NULL,
+    translated_at  VARCHAR2(20),
+    updated_at     TIMESTAMP     DEFAULT SYSTIMESTAMP,
+    CONSTRAINT help_trans_uq UNIQUE (section_id, lang)
+  )`);
 }
 
 // ─── Default DB Source migration ───────────────────────────────────────────────

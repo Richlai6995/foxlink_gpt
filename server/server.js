@@ -87,6 +87,8 @@ app.get('/api/health', (req, res) => res.json({ status: 'ok', timestamp: new Dat
     console.log('[Route] /api/doc-templates OK');
     app.use('/api/webex', require('./routes/webex'));
     console.log('[Route] /api/webex OK');
+    app.use('/api/help', require('./routes/helpSections'));
+    console.log('[Route] /api/help OK');
 
     // Start Webex Bot polling listener (outbound, works behind corporate firewall)
     try {
@@ -245,6 +247,16 @@ app.get('/api/health', (req, res) => res.json({ status: 'ok', timestamp: new Dat
         await syncHelpKb(db);
       } catch (e) {
         console.error('[HelpKB] Failed to sync:', e.message);
+      }
+    });
+
+    // Auto-seed Help Sections (compare last_modified, upsert changed sections)
+    setImmediate(async () => {
+      try {
+        const { autoSeedHelp } = require('./services/helpAutoSeed');
+        await autoSeedHelp(db);
+      } catch (e) {
+        console.error('[HelpAutoSeed] Failed:', e.message);
       }
     });
 

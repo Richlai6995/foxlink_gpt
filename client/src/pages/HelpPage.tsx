@@ -1,5 +1,6 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useTranslation } from 'react-i18next'
 import {
   ArrowLeft, MessageSquare, Upload, History, Copy, Download,
   User, Users, CalendarClock, BarChart3, DollarSign, Shield,
@@ -7,9 +8,11 @@ import {
   ChevronRight, Info, Lightbulb, Terminal, Globe, RefreshCw,
   Wand2, ImageIcon, Clock, Share2, GitFork, Lock, Sparkles, Code2, Package, Play, Square,
   Paperclip, Search, Server, BookMarked, Wifi, WifiOff, CheckCircle, Loader2, Layers, Activity,
-  Key, ShieldCheck, LayoutTemplate, FileSpreadsheet, File, FlaskConical,
+  Key, ShieldCheck, LayoutTemplate, FileSpreadsheet, File, FlaskConical, Languages,
 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
+import api from '../lib/api'
+import { RenderHelpSections, getIcon, type HelpSectionData } from '../components/HelpBlockRenderer'
 
 // ── Reusable layout helpers ───────────────────────────────────────────────────
 
@@ -3334,6 +3337,7 @@ const adminSections = [
   { id: 'a-k8s', label: 'K8s 部署更新', icon: <Server size={18} /> },
   { id: 'a-env-config', label: 'ENV 環境變數設定', icon: <Settings size={18} /> },
   { id: 'a-help-kb-sync', label: '說明書 KB 自動同步', icon: <RefreshCw size={18} /> },
+  { id: 'a-help-translation', label: '說明文件翻譯管理', icon: <Languages size={18} /> },
   { id: 'a-doc-template', label: '文件範本管理', icon: <LayoutTemplate size={18} /> },
   { id: 'a-webex-bot', label: 'Webex Bot 管理', icon: <MessageSquare size={18} /> },
 ]
@@ -5735,6 +5739,93 @@ SESSION_TTL_SECONDS=28800`}</CodeBlock>
         </SubSection>
       </Section>
 
+      {/* ═══════════════════════════════ 說明文件翻譯管理 */}
+      <Section id="a-help-translation" icon={<Languages size={22} />} iconColor="text-sky-500" title="說明文件翻譯管理">
+        <Para>
+          系統支援使用者說明頁面的多語言翻譯（繁體中文 → English / Tiếng Việt），
+          管理員可在<strong>管理後台 →「說明文件翻譯」</strong>頁籤操作。
+          中文內容為唯一原始語言（Source of Truth），翻譯永遠是中文 → 其他語言，不會反向。
+        </Para>
+
+        <SubSection title="架構概覽">
+          <Table
+            headers={['元件', '說明']}
+            rows={[
+              ['helpSeedData.js', '中文種子資料檔（程式碼變更時由 LLM 同步更新）'],
+              ['help_sections + help_translations', 'Oracle DB 表，儲存各語言翻譯內容'],
+              ['helpAutoSeed.js', 'Server 啟動時自動比對 last_modified，匯入有變更的段落'],
+              ['HelpTranslationPanel', '管理後台翻譯面板，支援批次翻譯、手動編輯、即時進度'],
+              ['HelpBlockRenderer', '前端渲染器，將 block JSON 轉為頁面元件'],
+            ]}
+          />
+        </SubSection>
+
+        <SubSection title="日常操作流程">
+          <Para><strong>情況一：程式碼變更導致說明內容更新</strong>（最常見，幾乎不需手動操作）</Para>
+          <div className="space-y-3">
+            <StepItem num={1} title="LLM 修改程式時自動更新 helpSeedData.js" desc="同時 bump 該段落的 last_modified 日期" />
+            <StepItem num={2} title="Server 重啟（或 K8s 重新部署）" desc="helpAutoSeed 自動比對日期，只匯入有變更的段落到 DB" />
+            <StepItem num={3} title="進入翻譯管理面板" desc="看到 en/vi 欄位顯示黃色 ⚠️ 過期標記" />
+            <StepItem num={4} title="點選「選取全部過期段落」→「批次翻譯」" desc="LLM 自動翻譯，即時顯示進度（等待中 → 翻譯中 → 完成 ✓）" />
+          </div>
+
+          <Para><strong>情況二：手動編輯中文說明</strong></Para>
+          <div className="space-y-3">
+            <StepItem num={1} title="在翻譯面板按 ✏️ 編輯按鈕" desc="切到 zh-TW 頁籤進行編輯" />
+            <StepItem num={2} title="修改標題、側邊欄標籤或區塊 JSON → 儲存" desc="系統自動 bump last_modified，en/vi 翻譯標記為過期" />
+            <StepItem num={3} title="對過期的語言版本執行翻譯" />
+          </div>
+
+          <Para><strong>情況三：手動微調英文或越文翻譯</strong></Para>
+          <div className="space-y-3">
+            <StepItem num={1} title="按 ✏️ → 切到 en 或 vi 頁籤" desc="直接修改翻譯內容" />
+            <StepItem num={2} title="儲存（系統會提醒將覆蓋 LLM 翻譯）" desc="此操作不影響中文原文" />
+          </div>
+        </SubSection>
+
+        <SubSection title="翻譯面板功能">
+          <Table
+            headers={['功能', '說明']}
+            rows={[
+              ['翻譯模型選擇', '從 LLM 模型管理載入可用模型，建議用 Flash 類以節省成本'],
+              ['語言進度卡', '顯示各語言已翻譯 / 總數、過期數量、進度條'],
+              ['批次翻譯', '勾選多個段落 → 選語言 → 一鍵翻譯，支援即時進度顯示與中斷'],
+              ['單段翻譯', '操作欄按 EN / VI 按鈕，翻譯單一段落'],
+              ['終止翻譯', '翻譯進行中可隨時按「終止翻譯」中斷批次作業'],
+              ['手動編輯', '按 ✏️ 進入編輯 Modal，可切換 zh-TW / en / vi 頁籤'],
+              ['重新匯入種子資料', '從 helpSeedData.js 強制重新匯入所有 zh-TW 內容'],
+            ]}
+          />
+        </SubSection>
+
+        <SubSection title="翻譯狀態圖示說明">
+          <Table
+            headers={['圖示', '狀態', '說明']}
+            rows={[
+              ['✓ 綠色日期', '已翻譯（最新）', '翻譯日期 ≥ zh-TW 修改日期'],
+              ['⚠️ 黃色日期', '過期', '翻譯日期 < zh-TW 修改日期，需重新翻譯'],
+              ['—', '尚未翻譯', '該語言版本尚未建立'],
+              ['🔄 轉圈', '翻譯中', '正在呼叫 LLM 翻譯'],
+              ['🕐 等待中', '排隊等待', '批次翻譯中，尚未輪到此段落'],
+              ['✓ 綠色「完成」', '剛完成', '本次翻譯作業已完成'],
+              ['✗ 紅色「失敗」', '翻譯失敗', '滑鼠移上可查看錯誤訊息'],
+            ]}
+          />
+        </SubSection>
+
+        <SubSection title="注意事項">
+          <TipBox>
+            翻譯永遠是<strong>中文 → 其他語言</strong>的單向流程。手動編輯英文或越文不會影響中文原文，
+            但下次中文有變更並重新翻譯時，手動編輯的內容會被 LLM 翻譯覆蓋（儲存時會有確認提示）。
+          </TipBox>
+          <NoteBox>
+            Server 每次啟動時會自動執行 Auto Seed，比對 helpSeedData.js 與 DB 的 last_modified，
+            只匯入有變更的段落。若所有段落都是最新的，會印出 log：
+            <code className="bg-amber-100 px-1 rounded text-xs ml-1">[HelpAutoSeed] All 28 sections up-to-date</code>
+          </NoteBox>
+        </SubSection>
+      </Section>
+
       {/* ═══════════════════════════════ 文件範本管理 */}
       <Section id="a-doc-template" icon={<LayoutTemplate size={22} />} iconColor="text-indigo-500" title="文件範本管理">
         <Para>
@@ -6321,10 +6412,44 @@ type Role = 'user' | 'admin'
 export default function HelpPage() {
   const navigate = useNavigate()
   const { isAdmin } = useAuth()
+  const { i18n } = useTranslation()
   const [role, setRole] = useState<Role>(isAdmin ? 'admin' : 'user')
   const contentRef = useRef<HTMLDivElement>(null)
+  const [apiSections, setApiSections] = useState<HelpSectionData[]>([])
+  const [loadingApi, setLoadingApi] = useState(false)
 
-  const sections = role === 'user' ? userSections : adminSections
+  // Fetch user sections from API (multilingual)
+  useEffect(() => {
+    if (role !== 'user') return
+    let cancelled = false
+    const lang = i18n.language || 'zh-TW'
+    setLoadingApi(true)
+    api.get('/help/sections', { params: { lang } })
+      .then(res => {
+        if (!cancelled) {
+          // Filter to user sections only, and only those that have content
+          const userOnly = (res.data as HelpSectionData[]).filter(
+            s => s.sectionType === 'user' && s.blocks.length > 0
+          )
+          setApiSections(userOnly)
+        }
+      })
+      .catch(err => {
+        console.warn('[HelpPage] Failed to load API sections, falling back to hardcoded:', err.message)
+        setApiSections([]) // fallback: show hardcoded
+      })
+      .finally(() => { if (!cancelled) setLoadingApi(false) })
+    return () => { cancelled = true }
+  }, [role, i18n.language])
+
+  const useApi = role === 'user' && apiSections.length > 0
+
+  // Sidebar items
+  const sidebarItems = role === 'admin'
+    ? adminSections
+    : useApi
+      ? apiSections.map(s => ({ id: s.id, label: s.sidebarLabel, icon: getIcon(s.icon, 'sm') || <BookOpen size={18} /> }))
+      : userSections
 
   function scrollTo(id: string) {
     const el = document.getElementById(id)
@@ -6379,7 +6504,7 @@ export default function HelpPage() {
         <nav className="w-56 bg-white border-r border-slate-200 overflow-y-auto flex-shrink-0 py-4 px-3">
           <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider px-2 mb-3">目錄</p>
           <div className="space-y-0.5">
-            {sections.map((s) => (
+            {sidebarItems.map((s) => (
               <button
                 key={s.id}
                 onClick={() => scrollTo(s.id)}
@@ -6407,7 +6532,19 @@ export default function HelpPage() {
               {role === 'admin' ? '系統管理員操作手冊' : '一般使用者操作手冊'}
             </div>
 
-            {role === 'user' ? <UserManual /> : <AdminManual />}
+            {role === 'user' ? (
+              loadingApi ? (
+                <div className="flex items-center justify-center h-64">
+                  <Loader2 className="animate-spin text-blue-500" size={24} />
+                </div>
+              ) : useApi ? (
+                <RenderHelpSections sections={apiSections} />
+              ) : (
+                <UserManual />
+              )
+            ) : (
+              <AdminManual />
+            )}
 
             {/* Footer */}
             <div className="mt-16 pt-8 border-t border-slate-200 text-center">

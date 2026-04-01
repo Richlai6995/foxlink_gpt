@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Users, BarChart3, Shield, AlertTriangle, Database, Mail, ArrowLeft, Cpu, DollarSign, CalendarClock, Plug, Zap, UserCog, Sparkles, Code2, Search, KeyRound, MonitorPlay, Lock, Activity, MessageSquare } from 'lucide-react'
+import { Users, BarChart3, Shield, AlertTriangle, Database, Mail, ArrowLeft, Cpu, DollarSign, CalendarClock, Plug, Zap, UserCog, Sparkles, Code2, Search, KeyRound, MonitorPlay, Lock, Activity, MessageSquare, Languages } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import UserManagement from '../components/admin/UserManagement'
 import TokenUsagePanel from '../components/admin/TokenUsage'
@@ -25,7 +25,8 @@ import DataPermissionsPanel from '../components/admin/DataPermissionsPanel'
 import MonitorPage from '../components/monitor/MonitorPage'
 import DbSourcesPanel from '../components/admin/DbSourcesPanel'
 import WebexLogsPanel from '../components/admin/WebexLogsPanel'
-type Tab = 'users' | 'roles' | 'tokens' | 'audit' | 'keywords' | 'db' | 'mail' | 'llm' | 'vector-defaults' | 'cost' | 'scheduled' | 'mcp' | 'dify' | 'kb' | 'skills' | 'code-runners' | 'research' | 'api-keys' | 'ai-dashboard' | 'data-permissions' | 'monitor' | 'db-sources' | 'webex-logs'
+import HelpTranslationPanel from '../components/admin/HelpTranslationPanel'
+type Tab = 'users' | 'roles' | 'tokens' | 'audit' | 'keywords' | 'db' | 'mail' | 'llm' | 'vector-defaults' | 'cost' | 'scheduled' | 'mcp' | 'dify' | 'kb' | 'skills' | 'code-runners' | 'research' | 'api-keys' | 'ai-dashboard' | 'data-permissions' | 'monitor' | 'db-sources' | 'webex-logs' | 'help-translation'
 
 export default function AdminDashboard() {
   const [activeTab, setActiveTab] = useState<Tab>('users')
@@ -58,6 +59,7 @@ export default function AdminDashboard() {
     { id: 'api-keys', label: t('admin.tabs.apiKeys'), icon: <KeyRound size={16} className="text-yellow-600" /> },
     { id: 'scheduled', label: t('admin.tabs.scheduled'), icon: <CalendarClock size={16} className="text-cyan-500" /> },
     { id: 'webex-logs', label: 'Webex Bot 日誌', icon: <MessageSquare size={16} className="text-purple-500" /> },
+    { id: 'help-translation', label: '說明文件翻譯', icon: <Languages size={16} className="text-sky-500" /> },
     // ─ 系統維運 ─
     { id: 'monitor', label: t('admin.tabs.monitor', '系統監控'), icon: <Activity size={16} className="text-red-400" /> },
     { id: 'db', label: t('admin.tabs.db'), icon: <Database size={16} className="text-slate-500" /> },
@@ -126,6 +128,7 @@ export default function AdminDashboard() {
           {activeTab === 'ai-dashboard' && <AiDashboardAdmin />}
           {activeTab === 'data-permissions' && <DataPermissionsPanel />}
           {activeTab === 'db-sources' && <DbSourcesPanel />}
+          {activeTab === 'help-translation' && <HelpTranslationPanel />}
           {activeTab === 'monitor' && <MonitorPage />}
         </main>
       </div>

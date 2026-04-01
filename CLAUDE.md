@@ -130,5 +130,35 @@ refrence_project/
 - **Docker path remapping**: Scheduler remaps `project.local_path` (Windows dev path) to `FILES_ROOT_DIR`-relative path using regex matching on `file_management_container` or `files` path segments.
 - **AI file generation**: Gemini responses with ` ```csv_to_xlsx:filename.xlsx ``` ` blocks are parsed by the `/api/ai` route to generate actual files server-side.
 
-# 使用說明檔案: HelpPage.tsx
-- 需要改變說明時編輯此檔案
+# 使用說明檔案：多語言 Help 系統
+
+使用者說明頁面採用 DB 驅動的多語言架構（zh-TW / en / vi），內容以 block-based JSON 儲存。
+
+## 架構
+- **種子資料**: `server/data/helpSeedData.js` — zh-TW 原始內容（source of truth for code changes）
+- **DB 表**: `help_sections` + `help_translations` — 運行時資料來源
+- **自動同步**: Server 啟動時 `helpAutoSeed.js` 比對 `last_modified`，自動匯入變更段落
+- **翻譯**: Admin 介面 `HelpTranslationPanel` 可用 LLM 批次翻譯、手動編輯
+- **渲染**: `HelpBlockRenderer.tsx` 將 block JSON 渲染為 JSX
+
+## 修改說明內容時的規則（重要！）
+
+當程式碼變更影響到使用者說明時，**必須同步更新 `server/data/helpSeedData.js`**：
+
+1. 找到對應的 section（依 `id` 識別，如 `u-intro`、`u-chat`、`u-model` 等）
+2. 修改該 section 的 `blocks` 陣列內容
+3. **必須 bump `last_modified`** 為當天日期（格式 `YYYY-MM-DD`），這會觸發：
+   - Server 啟動時自動將變更同步到 DB
+   - Admin 翻譯面板顯示 en/vi 版本為「過期」，提示管理員重新翻譯
+4. 若 helpSeedData.js 太大無法一次讀取，可編輯對應的 `_helpSeed_part1.js` 或 `_helpSeed_part2.js`，然後執行 `node server/data/mergeSeeds.js` 重新合併
+
+## Block 類型
+`para`, `tip`, `note`, `table`, `steps`, `code`, `list`, `subsection`, `card_grid`, `comparison`
+
+## 範例：新增一個段落
+```js
+{
+  type: 'para',
+  text: '這是新的說明文字，支援 **粗體** 和 `代碼`'
+}
+```
