@@ -207,7 +207,7 @@ function t(key, lang, ...args) {
   const val = entry[lang] || entry['zh-TW'];
   return typeof val === 'function' ? val(...args) : val;
 }
-const WEBEX_SYSTEM_SUFFIX = `
+const WEBEX_SYSTEM_SUFFIX_BASE = `
 
 ---
 【Webex 回覆格式規範】
@@ -243,6 +243,16 @@ const WEBEX_SYSTEM_SUFFIX = `
 - 禁止說「請點擊下載連結」、「請至 Web 介面下載」
 - Webex 模式下所有生成的檔案直接以附件回傳，不需要連結
 `;
+
+const WEBEX_LANG_INSTRUCTION = {
+  'zh-TW': '\n\n---\n請使用繁體中文回答，除非使用者在問題中明確指定輸出語言（例如翻譯任務）。',
+  'en':    '\n\n---\nPlease respond in English, unless the user explicitly specifies a different output language (e.g., translation tasks).',
+  'vi':    '\n\n---\nVui lòng trả lời bằng Tiếng Việt, trừ khi người dùng chỉ định rõ ngôn ngữ đầu ra khác (ví dụ: nhiệm vụ dịch thuật).',
+};
+
+function getWebexSystemSuffix(lang) {
+  return WEBEX_SYSTEM_SUFFIX_BASE + (WEBEX_LANG_INSTRUCTION[lang] || WEBEX_LANG_INSTRUCTION['zh-TW']);
+}
 
 // ── 驗簽 ──────────────────────────────────────────────────────────────────────
 function verifySignature(rawBody, signature, secret) {
@@ -863,7 +873,7 @@ async function processMessage(db, webex, user, sessionId, roomId, messageText, f
         if (!handler) return `[未知工具: ${name}]`;
         return handler(args);
       },
-      WEBEX_SYSTEM_SUFFIX
+      getWebexSystemSuffix(lang)
     );
     aiText = result.text || '';
     inputTokens = result.inputTokens || 0;
