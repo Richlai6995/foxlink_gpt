@@ -695,7 +695,7 @@ async function loadFunctionDeclarations(db, user) {
     const mcpAcl2 = buildAccessFilter('a', 'mcp_server_id', 'm', user);
     console.log(`[Webex][loadFuncDecl] MCP params: ${JSON.stringify(mcpAcl2.params)}`);
     const mcpServers = await db.prepare(
-      `SELECT m.id, m.name, m.endpoint_url, m.is_active
+      `SELECT m.id, m.name, m.is_active
        FROM mcp_servers m
        WHERE m.is_active=1 AND (
          (m.is_public=1 AND m.public_approved=1)
