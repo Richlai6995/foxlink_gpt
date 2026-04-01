@@ -695,7 +695,7 @@ async function loadFunctionDeclarations(db, user) {
     const mcpAcl2 = buildAccessFilter('a', 'mcp_server_id', 'm', user);
     console.log(`[Webex][loadFuncDecl] MCP params: ${JSON.stringify(mcpAcl2.params)}`);
     const mcpServers = await db.prepare(
-      `SELECT m.id, m.name, m.is_active
+      `SELECT m.*
        FROM mcp_servers m
        WHERE m.is_active=1 AND (
          (m.is_public=1 AND m.public_approved=1)
@@ -707,7 +707,7 @@ async function loadFunctionDeclarations(db, user) {
 
     for (const srv of mcpServers) {
       try {
-        const tools = await mcpClient.listTools(srv.id);
+        const tools = await mcpClient.listTools(db, srv);
         for (const tool of (tools || [])) {
           const fnName = `mcp_${srv.id}_${tool.name}`.replace(/[^a-zA-Z0-9_]/g, '_');
           declarations.push({
@@ -717,7 +717,7 @@ async function loadFunctionDeclarations(db, user) {
           });
           handlers[fnName] = async (args) => {
             try {
-              const result = await mcpClient.callTool(srv.id, tool.name, args);
+              const result = await mcpClient.callTool(db, srv, null, user.id, tool.name, args);
               return typeof result === 'string' ? result : JSON.stringify(result, null, 2);
             } catch (e) {
               return `[MCP "${tool.name}" 錯誤: ${e.message}]`;
