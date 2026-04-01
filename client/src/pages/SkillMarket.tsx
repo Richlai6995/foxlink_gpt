@@ -48,6 +48,7 @@ interface Skill {
     workflow_json?: string
     prompt_variables?: string
     output_template_id?: string | null
+    my_share_type?: 'use' | 'develop' | 'owner'
 }
 
 interface Model { key: string; name: string }
@@ -828,20 +829,23 @@ export default function SkillMarket() {
                                     {viewingSkill.model_key && <div><span className="text-xs text-slate-400 block">指定模型</span><p className="text-slate-700">{viewingSkill.model_key}</p></div>}
                                     <div><span className="text-xs text-slate-400 block">MCP 工具模式</span><p className="text-slate-700">{viewingSkill.mcp_tool_mode}</p></div>
                                 </div>
-                                {viewingSkill.system_prompt && (
+                                {viewingSkill.my_share_type === 'develop' && viewingSkill.system_prompt && (
                                     <div>
                                         <p className="text-xs text-slate-400 mb-1">System Prompt</p>
                                         <pre className="bg-slate-50 border border-slate-200 rounded-lg p-3 text-xs text-slate-700 whitespace-pre-wrap font-mono max-h-48 overflow-y-auto">{viewingSkill.system_prompt}</pre>
                                     </div>
                                 )}
-                                {viewingSkill.endpoint_url && (
+                                {viewingSkill.my_share_type === 'develop' && viewingSkill.endpoint_url && (
                                     <div><span className="text-xs text-slate-400 block">Endpoint URL</span><p className="text-slate-700 font-mono text-xs break-all">{viewingSkill.endpoint_url}</p></div>
                                 )}
-                                {viewingSkill.type === 'code' && viewingSkill.code_snippet && (
+                                {viewingSkill.my_share_type === 'develop' && viewingSkill.type === 'code' && viewingSkill.code_snippet && (
                                     <div>
                                         <p className="text-xs text-slate-400 mb-1">程式碼</p>
                                         <pre className="bg-slate-950 rounded-lg p-3 text-xs text-emerald-300 whitespace-pre-wrap font-mono max-h-64 overflow-y-auto">{viewingSkill.code_snippet}</pre>
                                     </div>
+                                )}
+                                {viewingSkill.my_share_type !== 'develop' && (
+                                    <p className="text-xs text-slate-400 italic">需要「開發」權限才能查看程式碼與設定細節</p>
                                 )}
                                 {viewingSkill.tags && viewingSkill.tags.length > 0 && (
                                     <div className="flex flex-wrap gap-1">
@@ -851,7 +855,9 @@ export default function SkillMarket() {
                                 <p className="text-xs text-slate-400">建立者：{viewingSkill.owner_name || '—'}</p>
                             </div>
                             <div className="flex justify-end gap-2 px-6 py-4 border-t border-slate-100">
-                                <button onClick={() => { fork(viewingSkill); setViewingSkill(null) }} className="px-4 py-2 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 flex items-center gap-1.5"><GitFork size={14} />Fork 一份</button>
+                                {viewingSkill.my_share_type === 'develop' && (
+                                    <button onClick={() => { fork(viewingSkill); setViewingSkill(null) }} className="px-4 py-2 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 flex items-center gap-1.5"><GitFork size={14} />Fork 一份</button>
+                                )}
                                 <button onClick={() => setViewingSkill(null)} className="px-4 py-2 bg-slate-100 text-slate-700 rounded-lg text-sm hover:bg-slate-200">關閉</button>
                             </div>
                         </div>
@@ -878,6 +884,7 @@ interface GrantRecord {
     grantee_type: string
     grantee_id: string
     grantee_name?: string
+    share_type: 'use' | 'develop'
     granted_by: number | null
     granted_by_name?: string
     granted_at: string
@@ -897,6 +904,7 @@ function SkillShareModal({ skill, onClose }: { skill: Skill; onClose: () => void
     const [error, setError] = useState('')
     const [granteeType, setGranteeType] = useState<string>('user')
     const [granteeId, setGranteeId] = useState<string>('')
+    const [shareType, setShareType] = useState<'use' | 'develop'>('use')
     const [userDisplay, setUserDisplay] = useState<string>('')
     const [roles, setRoles] = useState<{ id: number; name: string }[]>([])
     const [orgs, setOrgs] = useState<OrgLov | null>(null)
@@ -956,14 +964,27 @@ function SkillShareModal({ skill, onClose }: { skill: Skill; onClose: () => void
         setSubmitting(true)
         setError('')
         try {
-            await api.post(`/skills/${skill.id}/access`, { grantee_type: granteeType, grantee_id: finalId })
+            const res = await api.post(`/skills/${skill.id}/access`, {
+                grantee_type: granteeType, grantee_id: finalId, share_type: shareType
+            })
+            setGrants(Array.isArray(res.data) ? res.data : grants)
             setGranteeId('')
             setUserDisplay('')
-            await loadGrants()
         } catch (e: any) {
             setError(e.response?.data?.error || '新增失敗')
         } finally {
             setSubmitting(false)
+        }
+    }
+
+    const handleChangeShareType = async (grant: GrantRecord, newType: 'use' | 'develop') => {
+        try {
+            const res = await api.post(`/skills/${skill.id}/access`, {
+                grantee_type: grant.grantee_type, grantee_id: grant.grantee_id, share_type: newType
+            })
+            setGrants(Array.isArray(res.data) ? res.data : grants)
+        } catch (e: any) {
+            setError(e.response?.data?.error || '更新失敗')
         }
     }
 
@@ -1060,6 +1081,14 @@ function SkillShareModal({ skill, onClose }: { skill: Skill; onClose: () => void
                                 </div>
                             )}
 
+                            <select
+                                value={shareType}
+                                onChange={e => setShareType(e.target.value as 'use' | 'develop')}
+                                className="border border-slate-200 rounded-lg px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 shrink-0"
+                            >
+                                <option value="use">使用</option>
+                                <option value="develop">開發</option>
+                            </select>
                             <button
                                 onClick={handleAdd}
                                 disabled={submitting}
@@ -1087,13 +1116,23 @@ function SkillShareModal({ skill, onClose }: { skill: Skill; onClose: () => void
                                             </span>
                                             <span className="text-sm text-slate-700 truncate">{getGranteeDisplay(g)}</span>
                                         </div>
-                                        <button
-                                            onClick={() => handleDelete(g.id)}
-                                            className="p-1 rounded hover:bg-red-50 text-slate-400 hover:text-red-500 transition shrink-0 ml-2"
-                                            title="移除共享"
-                                        >
-                                            <Trash2 size={13} />
-                                        </button>
+                                        <div className="flex items-center gap-1.5 shrink-0 ml-2">
+                                            <select
+                                                value={g.share_type || 'use'}
+                                                onChange={e => handleChangeShareType(g, e.target.value as 'use' | 'develop')}
+                                                className={`text-xs border rounded px-1.5 py-0.5 ${g.share_type === 'develop' ? 'bg-amber-50 border-amber-300 text-amber-700' : 'bg-slate-50 border-slate-200 text-slate-600'}`}
+                                            >
+                                                <option value="use">使用</option>
+                                                <option value="develop">開發</option>
+                                            </select>
+                                            <button
+                                                onClick={() => handleDelete(g.id)}
+                                                className="p-1 rounded hover:bg-red-50 text-slate-400 hover:text-red-500 transition"
+                                                title="移除共享"
+                                            >
+                                                <Trash2 size={13} />
+                                            </button>
+                                        </div>
                                     </div>
                                 ))}
                             </div>
@@ -1168,7 +1207,7 @@ function SkillCard({ skill, onEdit, onDelete, onFork, onRequestPublic, onUse, on
                             <Eye size={13} />
                         </button>
                     )}
-                    {!isOwner && (
+                    {!isOwner && skill.my_share_type === 'develop' && (
                         <button onClick={onFork} title="Fork 一份" className="p-1 rounded hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition">
                             <GitFork size={13} />
                         </button>

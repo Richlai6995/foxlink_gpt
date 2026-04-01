@@ -865,6 +865,8 @@ async function runMigrations(db) {
     CONSTRAINT skill_access_uq UNIQUE (skill_id, grantee_type, grantee_id)
   )`);
 
+  await addCol('SKILL_ACCESS', 'SHARE_TYPE', "VARCHAR2(20) DEFAULT 'use'");
+
   // ── Scheduled Task Runs (execution history) ─────────────────────────────────
   await createTable('SCHEDULED_TASK_RUNS', `CREATE TABLE scheduled_task_runs (
     id                   NUMBER GENERATED AS IDENTITY PRIMARY KEY,
