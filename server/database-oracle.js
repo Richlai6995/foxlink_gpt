@@ -1112,6 +1112,28 @@ async function runMigrations(db) {
   await addCol('DIFY_KNOWLEDGE_BASES', 'IS_PUBLIC',       'NUMBER(1) DEFAULT 0');
   await addCol('DIFY_KNOWLEDGE_BASES', 'PUBLIC_APPROVED', 'NUMBER(1) DEFAULT 0');
 
+  // ── API 連接器擴展欄位（DIFY → 通用 API Connector）──────────────────────────
+  await addCol('DIFY_KNOWLEDGE_BASES', 'CONNECTOR_TYPE',        "VARCHAR2(20) DEFAULT 'dify'");
+  await addCol('DIFY_KNOWLEDGE_BASES', 'HTTP_METHOD',            "VARCHAR2(10) DEFAULT 'POST'");
+  await addCol('DIFY_KNOWLEDGE_BASES', 'CONTENT_TYPE',           "VARCHAR2(100) DEFAULT 'application/json'");
+  // 認證
+  await addCol('DIFY_KNOWLEDGE_BASES', 'AUTH_TYPE',              "VARCHAR2(30) DEFAULT 'bearer'");
+  await addCol('DIFY_KNOWLEDGE_BASES', 'AUTH_HEADER_NAME',       'VARCHAR2(100)');
+  await addCol('DIFY_KNOWLEDGE_BASES', 'AUTH_QUERY_PARAM_NAME',  'VARCHAR2(100)');
+  await addCol('DIFY_KNOWLEDGE_BASES', 'AUTH_CONFIG',            'CLOB');
+  // 請求
+  await addCol('DIFY_KNOWLEDGE_BASES', 'REQUEST_HEADERS',        'CLOB');
+  await addCol('DIFY_KNOWLEDGE_BASES', 'REQUEST_BODY_TEMPLATE',  'CLOB');
+  await addCol('DIFY_KNOWLEDGE_BASES', 'INPUT_PARAMS',           'CLOB');
+  // 回應
+  await addCol('DIFY_KNOWLEDGE_BASES', 'RESPONSE_TYPE',          "VARCHAR2(20) DEFAULT 'json'");
+  await addCol('DIFY_KNOWLEDGE_BASES', 'RESPONSE_EXTRACT',       'VARCHAR2(500)');
+  await addCol('DIFY_KNOWLEDGE_BASES', 'RESPONSE_TEMPLATE',      'CLOB');
+  await addCol('DIFY_KNOWLEDGE_BASES', 'EMPTY_MESSAGE',          'VARCHAR2(500)');
+  await addCol('DIFY_KNOWLEDGE_BASES', 'ERROR_MAPPING',          'CLOB');
+  // Email 域名自動重試 (foxlink.com ↔ foxlink.com.tw)
+  await addCol('DIFY_KNOWLEDGE_BASES', 'EMAIL_DOMAIN_FALLBACK',  'NUMBER(1) DEFAULT 0');
+
   // ── MCP / DIFY 共享存取表（取代 role_mcp_servers / role_dify_kbs）────────────
   await createTable('MCP_ACCESS', `CREATE TABLE mcp_access (
     id            NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,

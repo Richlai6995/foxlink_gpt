@@ -54,7 +54,7 @@ const NODE_DEFS: NodeDef[] = [
   { type: 'start', label: '開始', icon: Play, color: 'bg-green-100 text-green-700', borderColor: 'border-green-400' },
   { type: 'llm', label: 'LLM', icon: Brain, color: 'bg-blue-100 text-blue-700', borderColor: 'border-blue-400' },
   { type: 'knowledge_base', label: '知識庫', icon: BookOpen, color: 'bg-purple-100 text-purple-700', borderColor: 'border-purple-400' },
-  { type: 'dify', label: 'DIFY', icon: Database, color: 'bg-orange-100 text-orange-700', borderColor: 'border-orange-400' },
+  { type: 'dify', label: 'API', icon: Database, color: 'bg-orange-100 text-orange-700', borderColor: 'border-orange-400' },
   { type: 'mcp_tool', label: 'MCP 工具', icon: Wrench, color: 'bg-slate-100 text-slate-700', borderColor: 'border-slate-400' },
   { type: 'skill', label: '技能', icon: Zap, color: 'bg-yellow-100 text-yellow-700', borderColor: 'border-yellow-400' },
   { type: 'code', label: '程式碼', icon: Code2, color: 'bg-gray-100 text-gray-700', borderColor: 'border-gray-400' },
@@ -375,12 +375,12 @@ function NodeConfigPanel({
       {/* dify */}
       {nodeType === 'dify' && (
         <>
-          <FieldLabel>DIFY 知識庫</FieldLabel>
+          <FieldLabel>API 連接器</FieldLabel>
           <SelectInput
             value={String(d.dify_kb_id ?? '')}
             onChange={v => set('dify_kb_id', v ? parseInt(v) : null)}
             options={availableDifyKbs.map(k => ({ value: String(k.id), label: k.name }))}
-            placeholder="選擇 DIFY 知識庫..."
+            placeholder="選擇 API 連接器..."
           />
           <FieldLabel>查詢</FieldLabel>
           <TextArea value={d.query as string} onChange={v => set('query', v)} placeholder="{{input}}" rows={2} />

@@ -52,7 +52,7 @@ export default function AdminDashboard() {
     { id: 'research', label: t('admin.tabs.research'), icon: <Search size={16} className="text-teal-500" /> },
     // ─ 知識庫與資料 ─
     { id: 'kb', label: t('admin.tabs.kb'), icon: <Database size={16} className="text-violet-500" /> },
-    { id: 'dify', label: t('admin.tabs.dify'), icon: <Zap size={16} className="text-orange-500" /> },
+    { id: 'dify', label: t('admin.tabs.apiConnectors'), icon: <Zap size={16} className="text-orange-500" /> },
     { id: 'vector-defaults', label: t('admin.tabs.vectorDefaults'), icon: <Cpu size={16} className="text-teal-600" /> },
     // ─ 整合與排程 ─
     { id: 'mcp', label: t('admin.tabs.mcp'), icon: <Plug size={16} className="text-indigo-500" /> },

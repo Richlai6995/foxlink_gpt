@@ -49,7 +49,7 @@ const userSections = [
           ],
           [
             "工具調用",
-            "可調用自建知識庫、DIFY 知識庫、MCP 工具及技能（Skill）進行問答與作業自動化"
+            "可調用自建知識庫、API 連接器、MCP 工具及技能（Skill）進行問答與作業自動化"
           ],
           [
             "AI 戰情室",
@@ -233,7 +233,7 @@ const userSections = [
             "desc": "",
             "items": [
               "頂部工具列：對話標題、分享按鈕、停止生成按鈕",
-              "頂部工具列功能開關：技能（✦）、自建知識庫（🗄️）、DIFY 知識庫（⚡）、MCP 工具（🌐）",
+              "頂部工具列功能開關：技能（✦）、自建知識庫（🗄️）、API 連接器（⚡）、MCP 工具（🌐）",
               "頂部工具列額度指示器：顯示日 / 週 / 月用量（有設定時才出現）",
               "頂部工具列消耗趨勢按鈕（📈）：查看個人各模型歷史費用走勢",
               "頂部工具列深度研究面板（🔭）：發起或查閱研究任務",
@@ -525,7 +525,7 @@ const userSections = [
     "sort_order": 8,
     "icon": "Terminal",
     "icon_color": "text-cyan-500",
-    "last_modified": "2026-04-01",
+    "last_modified": "2026-04-02",
     "title": "可用工具",
     "sidebar_label": "可用工具",
     "blocks": [
@@ -553,12 +553,12 @@ const userSections = [
               },
               {
                 "emoji": "📚",
-                "title": "DIFY 知識庫",
+                "title": "API 連接器",
                 "tag": {
                   "color": "orange",
                   "text": "企業文件庫"
                 },
-                "desc": "由 DIFY 平台管理的企業內部文件知識庫，例如產品規格、SOP 手冊。對話時自動查詢，找到相關段落則注入給 AI 作為回答依據。",
+                "desc": "由 API 連接器管理的企業內部文件知識庫，例如產品規格、SOP 手冊。對話時自動查詢，找到相關段落則注入給 AI 作為回答依據。",
                 "borderColor": "yellow"
               },
               {
@@ -615,10 +615,10 @@ const userSections = [
                 "不做向量檢索"
               ],
               [
-                "⚡ DIFY",
+                "⚡ API",
                 "閃電圖示",
-                "從已掛載的 DIFY 知識庫查詢",
-                "跳過 DIFY 查詢"
+                "從已掛載的 API 連接器查詢",
+                "跳過 API 查詢"
               ],
               [
                 "🌐 MCP",
@@ -630,7 +630,7 @@ const userSections = [
           },
           {
             "type": "para",
-            "text": "此外，您也可以點選各開關圖示旁的下拉箭頭，**明確指定**要使用哪幾個知識庫 / MCP 伺服器 / DIFY 知識庫，而非讓系統自動選擇全部。"
+            "text": "此外，您也可以點選各開關圖示旁的下拉箭頭，**明確指定**要使用哪幾個知識庫 / MCP 伺服器 / API 連接器，而非讓系統自動選擇全部。"
           }
         ]
       },
@@ -674,7 +674,7 @@ const userSections = [
             "items": [
               {
                 "title": "依存取權限載入可用工具",
-                "desc": "MCP 依 mcp_access 授權、DIFY KB 依 dify_access 授權、自建 KB 依 creator/公開/kb_access 授權 — 只載入您有權使用的工具"
+                "desc": "MCP 依 mcp_access 授權、API 連接器依 api_access 授權、自建 KB 依 creator/公開/kb_access 授權 — 只載入您有權使用的工具"
               },
               {
                 "title": "套用技能（Skill）約束",
@@ -696,7 +696,7 @@ const userSections = [
           },
           {
             "type": "code",
-            "text": "使用者訊息\n    │\n    ▼\n[Step 1] 依授權載入可用工具（MCP / DIFY KB / 自建 KB）\n    │\n    ▼\n[Step 2] 技能約束（disable / exclusive / append）\n    │\n    ├─ 有任何工具設定了 Tags？\n    │        ▼ YES\n    │  [Step 3a] Flash 提取意圖標籤（0~5 個）\n    │        ▼\n    │  TAG 比對（雙向模糊）\n    │        ▼\n    │  有匹配候選 → Flash 描述精篩 → 選中工具\n    │  無匹配候選 → Flash 對全部工具描述分類\n    │\n    └─ NO（全部無 Tags）\n       [Step 4] Flash 對全部工具描述分類（Fallback）\n    │\n    ▼\n[Step 5] 送給 Gemini → LLM 決定呼叫哪個工具\n    │\n    ▼\n執行工具 → 結果注入 prompt → AI 回覆"
+            "text": "使用者訊息\n    │\n    ▼\n[Step 1] 依授權載入可用工具（MCP / API 連接器 / 自建 KB）\n    │\n    ▼\n[Step 2] 技能約束（disable / exclusive / append）\n    │\n    ├─ 有任何工具設定了 Tags？\n    │        ▼ YES\n    │  [Step 3a] Flash 提取意圖標籤（0~5 個）\n    │        ▼\n    │  TAG 比對（雙向模糊）\n    │        ▼\n    │  有匹配候選 → Flash 描述精篩 → 選中工具\n    │  無匹配候選 → Flash 對全部工具描述分類\n    │\n    └─ NO（全部無 Tags）\n       [Step 4] Flash 對全部工具描述分類（Fallback）\n    │\n    ▼\n[Step 5] 送給 Gemini → LLM 決定呼叫哪個工具\n    │\n    ▼\n執行工具 → 結果注入 prompt → AI 回覆"
           }
         ]
       },
@@ -751,7 +751,7 @@ const userSections = [
               [
                 "disable",
                 "移除全部 MCP 工具，AI 無法呼叫任何 MCP",
-                "移除全部 DIFY + 自建 KB，不做知識庫查詢"
+                "移除全部 API 連接器 + 自建 KB，不做知識庫查詢"
               ],
               [
                 "exclusive（排他）",
@@ -788,8 +788,8 @@ const userSections = [
             ],
             "rows": [
               [
-                "只選中 DIFY KB（無 MCP）",
-                "並行查詢全部選中的 DIFY KB → 結果直接注入 prompt → AI 整合回覆",
+                "只選中 API 連接器（無 MCP）",
+                "並行查詢全部選中的 API 連接器 → 結果直接注入 prompt → AI 整合回覆",
                 "省略 function calling 往返，速度更快"
               ],
               [
@@ -859,7 +859,7 @@ const userSections = [
             "type": "list",
             "items": [
               "**MCP 工具（ERP 查詢）**\n• 「搜尋 WIP 相關的 Oracle 程式有哪些？」\n• 「FL_MOA_B2_WIP_DETAIL_P 這支程式是誰寫的？」\n• 「查 WIP_DISCRETE_JOBS 這張資料表被哪些程式使用？」",
-              "**自建知識庫 / DIFY 知識庫（文件查詢）**\n• 「FL-X100 連接器的最大電流規格是多少？」\n• 「查詢產品 BOM 結構中 PN12345 的規格」\n• 「生產 SOP 中關於焊接溫度的規定是什麼？」"
+              "**自建知識庫 / API 連接器（文件查詢）**\n• 「FL-X100 連接器的最大電流規格是多少？」\n• 「查詢產品 BOM 結構中 PN12345 的規格」\n• 「生產 SOP 中關於焊接溫度的規定是什麼？」"
             ]
           },
           {
@@ -1622,7 +1622,7 @@ const userSections = [
         "blocks": [
           {
             "type": "para",
-            "text": "技能可以綁定特定的自建知識庫與 DIFY 知識庫，讓掛載技能時自動啟用相關知識庫，無需使用者手動選取。"
+            "text": "技能可以綁定特定的自建知識庫與 API 連接器，讓掛載技能時自動啟用相關知識庫，無需使用者手動選取。"
           },
           {
             "type": "table",
@@ -1657,7 +1657,7 @@ const userSections = [
         "blocks": [
           {
             "type": "para",
-            "text": "系統使用 TAG 標籤機制自動判斷每則訊息應啟用哪些工具、知識庫與技能，無需使用者手動勾選。每個 MCP 伺服器、DIFY 知識庫、自建知識庫及技能都可設定標籤（Tags），系統流程如下："
+            "text": "系統使用 TAG 標籤機制自動判斷每則訊息應啟用哪些工具、知識庫與技能，無需使用者手動勾選。每個 MCP 伺服器、API 連接器、自建知識庫及技能都可設定標籤（Tags），系統流程如下："
           },
           {
             "type": "steps",
@@ -1871,8 +1871,8 @@ const userSections = [
                 "查詢自建知識庫，取得相關段落"
               ],
               [
-                "🔌 DIFY",
-                "查詢 DIFY 知識庫"
+                "🔌 API",
+                "查詢 API 連接器"
               ],
               [
                 "🔧 MCP 工具",
@@ -2035,7 +2035,7 @@ const userSections = [
           },
           {
             "type": "tip",
-            "text": "可以同時掛載「自建知識庫」＋「DIFY 知識庫」＋「MCP 工具」，AI 會綜合所有來源回答。此外，若知識庫設有標籤（Tags），系統會透過 TAG 自動路由機制，根據訊息內容自動判斷是否啟用對應知識庫。"
+            "text": "可以同時掛載「自建知識庫」＋「API 連接器」＋「MCP 工具」，AI 會綜合所有來源回答。此外，若知識庫設有標籤（Tags），系統會透過 TAG 自動路由機制，根據訊息內容自動判斷是否啟用對應知識庫。"
           }
         ]
       },
@@ -2365,7 +2365,7 @@ const userSections = [
               ],
               [
                 "整體資料來源",
-                "為所有子問題預設使用的資料來源：自建知識庫 / Dify 知識庫 / MCP 工具（子問題可個別覆蓋）"
+                "為所有子問題預設使用的資料來源：自建知識庫 / API 連接器 / MCP 工具（子問題可個別覆蓋）"
               ],
               [
                 "自動建議 KB",
@@ -2401,7 +2401,7 @@ const userSections = [
               "**研究方向提示** — 輸入提示文字，例如「只看台灣市場數據」、「聚焦 2024 年後的資料」，引導 AI 研究方向。",
               "**子問題專屬附件** — 為此子問題額外附加不同的參考文件，僅此子問題使用，不影響其他子問題。",
               "**網路搜尋開關** — 為此子問題個別啟用或停用網路搜尋（覆蓋任務層級設定）。亮藍色 = 啟用，灰色 = 停用。實際是否啟用網搜還受「無 KB 資料才觸發」的邏輯控制。",
-              "**子問題資料來源（覆蓋任務設定）** — 為此子問題指定不同的自建 KB / Dify KB / MCP 工具，覆蓋 Step 1 設定的任務層級來源。"
+              "**子問題資料來源（覆蓋任務設定）** — 為此子問題指定不同的自建 KB / API 連接器 / MCP 工具，覆蓋 Step 1 設定的任務層級來源。"
             ]
           },
           {
@@ -2454,7 +2454,7 @@ const userSections = [
               [
                 "子問題層級",
                 "最高",
-                "若子問題有設定個別 KB / Dify / MCP，以子問題設定為準"
+                "若子問題有設定個別 KB / API 連接器 / MCP，以子問題設定為準"
               ],
               [
                 "任務層級",
@@ -2669,10 +2669,10 @@ const userSections = [
             "不做知識庫檢索，直接回答"
           ],
           [
-            "DIFY 知識庫",
+            "API 連接器",
             "Zap ⚡ 綠色",
-            "啟用後，AI 回覆前會從已掛載的 DIFY 知識庫查詢",
-            "跳過 DIFY 檢索"
+            "啟用後，AI 回覆前會從已掛載的 API 連接器查詢",
+            "跳過 API 檢索"
           ],
           [
             "MCP 工具",
@@ -2715,7 +2715,7 @@ const userSections = [
           },
           {
             "type": "note",
-            "text": "各開關僅在對應功能已設定的情況下才有效果：知識庫開關需先在下拉選單中掛載知識庫；MCP 開關需管理員已設定並啟用 MCP 伺服器；DIFY 知識庫開關需管理員已設定 DIFY API。"
+            "text": "各開關僅在對應功能已設定的情況下才有效果：知識庫開關需先在下拉選單中掛載知識庫；MCP 開關需管理員已設定並啟用 MCP 伺服器；API 連接器開關需管理員已設定 API 連接器。"
           }
         ]
       }

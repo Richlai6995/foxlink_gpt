@@ -124,7 +124,7 @@ export default function DbMaintenance() {
     { label: '稽核日誌（敏感）', value: cleanupStats.audit_sensitive, color: 'text-orange-600' },
     { label: 'LLM 對話', value: cleanupStats.llm_sessions, color: 'text-blue-600' },
     { label: '排程任務執行', value: cleanupStats.scheduled_task_runs, color: 'text-indigo-600' },
-    { label: 'DIFY 呼叫', value: cleanupStats.dify_call_logs, color: 'text-purple-600' },
+    { label: 'API 連接器呼叫', value: cleanupStats.dify_call_logs, color: 'text-purple-600' },
     { label: 'KB 查詢', value: cleanupStats.kb_query_logs, color: 'text-teal-600' },
     { label: '技能呼叫', value: cleanupStats.skill_call_logs, color: 'text-yellow-600' },
     { label: '研究任務', value: cleanupStats.research_jobs, color: 'text-red-600' },
@@ -168,13 +168,13 @@ export default function DbMaintenance() {
         <DaysInput label="排程執行歷史保留天數" value={settings.scheduled_task_days} onChange={(v) => set('scheduled_task_days', v)} />
       </Section>
 
-      {/* DIFY KB */}
+      {/* API Connector */}
       <Section
         icon={<Database size={16} className="text-purple-500" />}
-        title="DIFY 知識庫呼叫紀錄清除"
-        desc="清除早於此天數的 DIFY 知識庫呼叫紀錄。"
+        title="API 連接器呼叫紀錄清除"
+        desc="清除早於此天數的 API 連接器呼叫紀錄。"
       >
-        <DaysInput label="DIFY 呼叫紀錄保留天數" value={settings.dify_days} onChange={(v) => set('dify_days', v)} />
+        <DaysInput label="API 連接器呼叫紀錄保留天數" value={settings.dify_days} onChange={(v) => set('dify_days', v)} />
       </Section>
 
       {/* 自建 KB */}

@@ -417,7 +417,7 @@ export default function ResearchModal({ sessionId, modelKey, initialQuestion = '
   const bindingSummary = (binding: TopicBinding) => {
     const parts: string[] = []
     if (binding.self_kb_ids.length) parts.push(`${binding.self_kb_ids.length}KB`)
-    if (binding.dify_kb_ids.length) parts.push(`${binding.dify_kb_ids.length}Dify`)
+    if (binding.dify_kb_ids.length) parts.push(`${binding.dify_kb_ids.length}API`)
     if (binding.mcp_server_ids.length) parts.push(`${binding.mcp_server_ids.length}MCP`)
     if (binding.dashboard_design_ids?.length) parts.push(`${binding.dashboard_design_ids.length}戰情`)
     return parts.join('+')

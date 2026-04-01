@@ -213,18 +213,27 @@ function setDifyConvId(sessionId, kbId, conversationId) {
   difyConvIds.get(sessionId).set(kbId, conversationId);
 }
 
-// Load active DIFY KBs for a user (dify_access-filtered) and return as Gemini function declarations
+// Load active API connectors (DIFY + REST API) for a user (dify_access-filtered)
+// and return as Gemini function declarations
 async function getDifyFunctionDeclarations(db, userCtx) {
+  const { buildFunctionDeclaration } = require('../services/apiConnectorService');
   let kbs;
   try {
+    const connectorCols = `d.id, d.name, d.api_server, d.api_key, d.description, d.tags, d.sort_order,
+      d.connector_type, d.http_method, d.content_type,
+      d.auth_type, d.auth_header_name, d.auth_query_param_name, d.auth_config,
+      d.request_headers, d.request_body_template, d.input_params,
+      d.response_type, d.response_extract, d.response_template, d.empty_message, d.error_mapping,
+      d.email_domain_fallback`;
+
     if (!userCtx) {
       kbs = await db.prepare(
-        `SELECT id, name, api_server, api_key, description, tags FROM dify_knowledge_bases WHERE is_active=1 ORDER BY sort_order ASC`
+        `SELECT ${connectorCols} FROM dify_knowledge_bases d WHERE d.is_active=1 ORDER BY d.sort_order ASC`
       ).all();
     } else {
       const { userId, roleId, deptCode, profitCenter, orgSection, orgGroupName } = userCtx;
       kbs = await db.prepare(
-        `SELECT DISTINCT d.id, d.name, d.api_server, d.api_key, d.description, d.tags, d.sort_order
+        `SELECT DISTINCT ${connectorCols}
          FROM dify_knowledge_bases d
          WHERE d.is_active=1 AND (
            (d.is_public=1 AND d.public_approved=1)
@@ -250,7 +259,7 @@ async function getDifyFunctionDeclarations(db, userCtx) {
       );
     }
   } catch (e) {
-    console.error('[DIFY] getDifyFunctionDeclarations error:', e.message);
+    console.error('[API] getDifyFunctionDeclarations error:', e.message);
     return { declarations: [], kbMap: {} };
   }
 
@@ -258,27 +267,9 @@ async function getDifyFunctionDeclarations(db, userCtx) {
   const kbMap = {};
 
   for (const kb of kbs) {
-    // Gemini function name: only [a-zA-Z0-9_]
-    const safeName = `dify_kb_${kb.id}`;
-    // Wrap user description as "scope", not as LLM instructions
-    const scopeText = kb.description
-      ? `此工具的適用範疇：${kb.description}`
-      : `企業內部知識庫「${kb.name}」`;
-    const desc = `知識庫查詢工具「${kb.name}」。${scopeText}。` +
-      `呼叫規則：(1) 使用者問題的核心意圖屬於上述範疇時就應呼叫，不要自行猜測答案；` +
-      `(2) 同一輪回覆中此工具只呼叫一次，但不同輪次可以再次呼叫。`;
-    declarations.push({
-      name: safeName,
-      description: desc,
-      parameters: {
-        type: 'object',
-        properties: {
-          query: { type: 'string', description: '要查詢的問題，通常與使用者輸入相同' },
-        },
-        required: ['query'],
-      },
-    });
-    kbMap[safeName] = kb;
+    const decl = buildFunctionDeclaration(kb);
+    declarations.push(decl);
+    kbMap[decl.name] = kb;
   }
 
   return { declarations, kbMap };
@@ -325,10 +316,10 @@ ${contextSection}
     const parsed = JSON.parse(m[0]);
     const callSet = new Set(parsed.call || []);
     const filtered = difyDecls.filter(d => callSet.has(d.name));
-    console.log(`[DIFY Intent] "${userMessage.slice(0, 60)}" → [${filtered.map(d => d.name).join(',') || 'none'}]`);
+    console.log(`[API Intent] "${userMessage.slice(0, 60)}" → [${filtered.map(d => d.name).join(',') || 'none'}]`);
     return filtered;
   } catch (e) {
-    console.warn('[DIFY Intent] Classification failed, skipping all DIFY:', e.message);
+    console.warn('[API Intent] Classification failed, skipping all API connectors:', e.message);
     return [];
   }
 }
@@ -378,58 +369,27 @@ ${contextSection}
   }
 }
 
-// Execute a single DIFY KB query (called when LLM decides to invoke it)
-async function executeDifyQuery(db, kb, query, sessionId, userId) {
-  const t0 = Date.now();
-  const conversationId = getDifyConvId(sessionId, kb.id);
-  console.log(`[DIFY] Calling KB "${kb.name}" (id=${kb.id}) user=${userId} query="${query.slice(0, 80)}" convId=${conversationId || '(new)'}`);
-  try {
-    // Don't send empty conversation_id — some DIFY versions reject it
-    const body = { inputs: {}, query, response_mode: 'blocking', user: `foxlink-user-${userId}` };
-    if (conversationId) body.conversation_id = conversationId;
-
-    const difyRes = await fetch(`${kb.api_server}/chat-messages`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${kb.api_key}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(120000),
-    });
-    const duration = Date.now() - t0;
-    if (difyRes.ok) {
-      const data = await difyRes.json();
-      if (data.conversation_id) setDifyConvId(sessionId, kb.id, data.conversation_id);
-      const answer = (data.answer || '').trim();
-      try {
-        await db.prepare(
-          `INSERT INTO dify_call_logs (kb_id, session_id, user_id, query_preview, response_preview, status, duration_ms) VALUES (?,?,?,?,?,?,?)`
-        ).run(kb.id, sessionId, userId, query.slice(0, 200), answer.slice(0, 300), 'ok', duration);
-      } catch (_) { }
-      console.log(`[DIFY] KB "${kb.name}" ok in ${duration}ms answer="${answer.slice(0, 100)}"`);
-      return answer || `[知識庫「${kb.name}」無相關回應]`;
-    } else {
-      const errText = await difyRes.text().catch(() => '');
-      const msg = `HTTP ${difyRes.status}`;
-      try {
-        await db.prepare(
-          `INSERT INTO dify_call_logs (kb_id, session_id, user_id, query_preview, status, error_msg, duration_ms) VALUES (?,?,?,?,?,?,?)`
-        ).run(kb.id, sessionId, userId, query.slice(0, 200), 'error', `${msg}: ${errText.slice(0, 150)}`, duration);
-      } catch (_) { }
-      console.warn(`[DIFY] KB "${kb.name}" ${msg} user=${userId}: ${errText.slice(0, 200)}`);
-      return `[知識庫「${kb.name}」查詢失敗: ${msg}]`;
-    }
-  } catch (e) {
-    const duration = Date.now() - t0;
-    try {
-      await db.prepare(
-        `INSERT INTO dify_call_logs (kb_id, session_id, user_id, query_preview, status, error_msg, duration_ms) VALUES (?,?,?,?,?,?,?)`
-      ).run(kb.id, sessionId, userId, query.slice(0, 200), 'error', e.message.slice(0, 200), duration);
-    } catch (_) { }
-    console.error(`[DIFY] KB "${kb.name}" failed user=${userId}:`, e.message);
-    return `[知識庫「${kb.name}」查詢失敗: ${e.message}]`;
-  }
+// Execute a single API connector query (DIFY or REST API)
+// This is a thin wrapper that delegates to apiConnectorService.executeConnector
+async function executeDifyQuery(db, kb, query, sessionId, userId, reqUser, extraArgs = {}) {
+  const { executeConnector } = require('../services/apiConnectorService');
+  // Build user context for system parameter resolution
+  const apiUserCtx = {
+    id: userId,
+    email: reqUser?.email || '',
+    name: reqUser?.name || '',
+    employee_id: reqUser?.employee_id || '',
+    dept_code: reqUser?.dept_code || '',
+    title: reqUser?.title || '',
+  };
+  // 合併 query + AI function calling 回傳的其他參數（如 days, keyword 等）
+  const aiArgs = { query, ...extraArgs };
+  return await executeConnector(kb, aiArgs, apiUserCtx, {
+    sessionId,
+    db,
+    getDifyConvId,
+    setDifyConvId,
+  });
 }
 
 // ── Explicit KB bypass detection ─────────────────────────────────────────────
@@ -2007,7 +1967,7 @@ ${hasPreserve ? '- 標記【★保留原文】的欄位：必須完整複製原�
           });
           allDeclarations.push(...selected);
         }
-        console.log(`[Chat] Explicit tool mode: mcp=${userMcpIds?.length||0} dify=${userDifyIds?.length||0} selfkb=${userSelfKbIds?.length||0} → ${allDeclarations.length} tools`);
+        console.log(`[Chat] Explicit tool mode: mcp=${userMcpIds?.length||0} api=${userDifyIds?.length||0} selfkb=${userSelfKbIds?.length||0} → ${allDeclarations.length} tools`);
       } else {
         // ── Auto mode: load all accessible tools + intent filtering ───────────
         const { functionDeclarations: allMcpDecls, serverMap: sm } = await mcpClient.getActiveToolDeclarations(db, userCtx);
@@ -2107,10 +2067,11 @@ ${hasPreserve ? '- 標記【★保留原文】的欄位：必須完整複製原�
               if (!alreadyHas) {
                 const kb = await db.prepare('SELECT * FROM dify_knowledge_bases WHERE id=? AND is_active=1').get(kbId);
                 if (kb) {
-                  const declName = `dify_kb_${kb.id}`;
-                  difyDecls.push({ name: declName, description: `知識庫查詢工具「${kb.name}」。適用於：${(kb.description || '').slice(0, 200)}`, parameters: { type: 'object', properties: { query: { type: 'string', description: '查詢內容' } }, required: ['query'] } });
-                  km[declName] = kb;
-                  console.log(`[Skill] KB append: force-added dify "${kb.name}"`);
+                  const { buildFunctionDeclaration } = require('../services/apiConnectorService');
+                  const decl = buildFunctionDeclaration(kb);
+                  difyDecls.push(decl);
+                  km[decl.name] = kb;
+                  console.log(`[Skill] KB append: force-added api "${kb.name}"`);
                 }
               }
             }
@@ -2150,7 +2111,7 @@ ${hasPreserve ? '- 標記【★保留原文】的欄位：必須完整複製原�
             ...difyDecls.map(d => {
               const kb = km[d.name];
               const tags = (() => { try { return JSON.parse(kb?.tags || '[]'); } catch { return []; } })();
-              return { ...d, tags, toolType: 'dify' };
+              return { ...d, tags, toolType: kb?.connector_type === 'rest_api' ? 'api' : 'dify' };
             }),
             ...selfKbDecls.map(d => {
               const kb = skm[d.name];
@@ -2251,35 +2212,41 @@ ${hasPreserve ? '- 標記【★保留原文】的欄位：必須完整複製原�
 
         // ── Fast path: pure SelfKB only (no MCP, no DIFY) → pre-fetch + stream ──
         const pureSelfKb = mcpCount === 0 && allDeclarations.every(d => selfKbMap[d.name]);
-        // ── Fast path: pure DIFY only (no MCP, no selfKB) → pre-fetch + stream ──
-        const pureDify = mcpCount === 0 && allDeclarations.every(d => kbMap[d.name]);
+        // ── Fast path: pure API connector only (no MCP, no selfKB) → pre-fetch + stream ──
+        // Only if all connectors have NO user_input params (system/fixed params can be auto-resolved)
+        const { executeConnector: execConn, parseJson: pj } = require('../services/apiConnectorService');
+        const allAreConnectors = allDeclarations.every(d => kbMap[d.name]);
+        const hasUserInputParams = allAreConnectors && allDeclarations.some(d => {
+          const kb = kbMap[d.name];
+          const params = pj(kb.input_params) || [];
+          return params.some(p => p.source === 'user_input');
+        });
+        const pureDify = mcpCount === 0 && allAreConnectors && !hasUserInputParams;
 
         if (pureDify) {
-          sendEvent({ type: 'status', message: `查詢 ${allDeclarations.length} 個 DIFY 知識庫...` });
+          sendEvent({ type: 'status', message: `查詢 ${allDeclarations.length} 個 API 連接器...` });
+          const apiUserCtx = {
+            id: req.user.id,
+            email: req.user.email || '',
+            name: req.user.name || '',
+            employee_id: req.user.employee_id || '',
+            dept_code: req.user.dept_code || '',
+            title: req.user.title || '',
+          };
           const difyContextParts = await Promise.all(
             allDeclarations.map(async (decl) => {
               const kb = kbMap[decl.name];
               if (!kb) return null;
               const t1 = Date.now();
               try {
-                const convId = getDifyConvId(sessionId, kb.id);
-                const difyBody = { inputs: {}, query: combinedUserText, response_mode: 'blocking', user: `foxlink-user-${req.user.id}` };
-                if (convId) difyBody.conversation_id = convId;
-                const difyResp = await fetch(`${kb.api_server}/chat-messages`, {
-                  method: 'POST',
-                  headers: { Authorization: `Bearer ${kb.api_key}`, 'Content-Type': 'application/json' },
-                  body: JSON.stringify(difyBody),
-                  signal: AbortSignal.timeout(120000),
+                const answer = await execConn(kb, { query: combinedUserText }, apiUserCtx, {
+                  sessionId, db, getDifyConvId, setDifyConvId,
                 });
-                if (!difyResp.ok) return null;
-                const ddata = await difyResp.json();
-                if (ddata.conversation_id) setDifyConvId(sessionId, kb.id, ddata.conversation_id);
-                const answer = ddata.answer || '';
-                console.log(`[DIFY] Fast-path KB "${kb.name}" ok in ${Date.now() - t1}ms answer="${answer.slice(0, 150)}"`);
-                if (!answer.trim()) return null;
+                console.log(`[API] Fast-path "${kb.name}" ok in ${Date.now() - t1}ms answer="${(answer || '').slice(0, 150)}"`);
+                if (!answer || !answer.trim() || answer.startsWith(`[${kb.name}: 查詢失敗`)) return null;
                 return `## 知識庫：${kb.name}\n\n${answer}`;
               } catch (e) {
-                console.warn(`[DIFY] Fast-path KB "${kb.name}" failed:`, e.message);
+                console.warn(`[API] Fast-path "${kb.name}" failed:`, e.message);
                 return null;
               }
             })
@@ -2424,13 +2391,15 @@ ${hasPreserve ? '- 標記【★保留原文】的欄位：必須完整複製原�
             }
             if (kbMap[toolName]) {
               if (calledDifyKbs.has(toolName)) {
-                console.warn(`[DIFY] Duplicate call prevented for ${toolName}`);
-                return `[知識庫已在本輪查詢過，請直接使用先前的查詢結果]`;
+                console.warn(`[API] Duplicate call prevented for ${toolName}`);
+                return `[此工具已在本輪查詢過，請直接使用先前的查詢結果]`;
               }
               calledDifyKbs.add(toolName);
               const kb = kbMap[toolName];
-              sendEvent({ type: 'status', message: `查詢知識庫：${kb.name}` });
-              return await executeDifyQuery(db, kb, args.query || combinedUserText, sessionId, req.user.id);
+              const connType = kb.connector_type || 'dify';
+              sendEvent({ type: 'status', message: connType === 'dify' ? `查詢知識庫：${kb.name}` : `呼叫 API：${kb.name}` });
+              const { query: _q, ...restArgs } = args || {};
+              return await executeDifyQuery(db, kb, _q || combinedUserText, sessionId, req.user.id, req.user, restArgs);
             }
             const entry = serverMap[toolName];
             if (!entry) return `[未知工具: ${toolName}]`;
@@ -2458,7 +2427,7 @@ ${hasPreserve ? '- 標記【★保留原文】的欄位：必須完整複製原�
             aiText = displayText;
             sendEvent({ type: 'chunk', content: displayText });
           }
-          console.log(`[Chat] Tools+Gemini done in ${Date.now() - t0}ms, tools=${allDeclarations.length} dify_called=${calledDifyKbs.size} mcp_called=${Object.keys(serverMap).length > 0 ? 'yes' : 'no'} in=${inputTokens} out=${outputTokens} tokens`);
+          console.log(`[Chat] Tools+Gemini done in ${Date.now() - t0}ms, tools=${allDeclarations.length} api_called=${calledDifyKbs.size} mcp_called=${Object.keys(serverMap).length > 0 ? 'yes' : 'no'} in=${inputTokens} out=${outputTokens} tokens`);
         }
       } else {
         // ── Standard streaming chat (no tools) ───────────────────────────

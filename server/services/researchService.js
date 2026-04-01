@@ -137,33 +137,21 @@ async function searchKbsInternal(db, userId, kbIds, query, topK) {
 // ─── Dify KB Query ────────────────────────────────────────────────────────────
 
 /**
- * Query a single Dify KB with a question. Returns answer text or ''.
+ * Query a single API connector (DIFY or REST API) with a question. Returns answer text or ''.
  */
-async function queryDifyKb(difyKb, question) {
+async function queryDifyKb(connector, question) {
+  const { executeConnector } = require('./apiConnectorService');
   try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 60000); // 60s timeout
-    const resp = await fetch(`${difyKb.api_server}/chat-messages`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${difyKb.api_key}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        inputs: {},
-        query: question,
-        response_mode: 'blocking',
-        conversation_id: '',
-        user: 'foxlink-research',
-      }),
-      signal: controller.signal,
-    });
-    clearTimeout(timer);
-    if (!resp.ok) return '';
-    const data = await resp.json();
-    return data.answer || '';
+    const answer = await executeConnector(
+      connector,
+      { query: question },
+      { id: 0, email: '', name: 'research', employee_id: '', dept_code: '' },
+      { sessionId: null, db: null }
+    );
+    // Strip error brackets for empty-like responses
+    return (answer && !answer.startsWith('[')) ? answer : '';
   } catch (e) {
-    console.warn(`[Research] Dify KB ${difyKb.id} query error:`, e.message);
+    console.warn(`[Research] API connector ${connector.id} query error:`, e.message);
     return '';
   }
 }

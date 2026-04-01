@@ -404,9 +404,9 @@ async function createNewSession(db, userId, roomId, isDm) {
 // ── 工具清單（? 指令）────────────────────────────────────────────────────────
 async function buildToolList(db, user, lang) {
   const L = {
-    'zh-TW': { title: '📋 **您可使用的工具**（依帳號授權）\n', skills: '🔧 **技能 (Skills)**：', kb: '🧠 **自建知識庫 (KB)**：', dify: '🔌 **DIFY 知識庫**：', mcp: '⚙️ **MCP 工具**：', empty: '（目前無可用工具）', tip: '💡 直接輸入問題，AI 將自動判斷並使用合適工具。' },
-    'en':    { title: '📋 **Your Available Tools** (based on account permissions)\n', skills: '🔧 **Skills**:', kb: '🧠 **Knowledge Bases (KB)**:', dify: '🔌 **DIFY Knowledge Bases**:', mcp: '⚙️ **MCP Tools**:', empty: '(No tools available)', tip: '💡 Just type your question — AI will automatically select the appropriate tool.' },
-    'vi':   { title: '📋 **Công cụ khả dụng của bạn** (theo quyền tài khoản)\n', skills: '🔧 **Kỹ năng (Skills)**:', kb: '🧠 **Kho tri thức tự xây (KB)**:', dify: '🔌 **Kho tri thức DIFY**:', mcp: '⚙️ **Công cụ MCP**:', empty: '(Không có công cụ khả dụng)', tip: '💡 Chỉ cần nhập câu hỏi — AI sẽ tự động chọn công cụ phù hợp.' },
+    'zh-TW': { title: '📋 **您可使用的工具**（依帳號授權）\n', skills: '🔧 **技能 (Skills)**：', kb: '🧠 **自建知識庫 (KB)**：', dify: '🔌 **API 連接器**：', mcp: '⚙️ **MCP 工具**：', empty: '（目前無可用工具）', tip: '💡 直接輸入問題，AI 將自動判斷並使用合適工具。' },
+    'en':    { title: '📋 **Your Available Tools** (based on account permissions)\n', skills: '🔧 **Skills**:', kb: '🧠 **Knowledge Bases (KB)**:', dify: '🔌 **API Connectors**:', mcp: '⚙️ **MCP Tools**:', empty: '(No tools available)', tip: '💡 Just type your question — AI will automatically select the appropriate tool.' },
+    'vi':   { title: '📋 **Công cụ khả dụng của bạn** (theo quyền tài khoản)\n', skills: '🔧 **Kỹ năng (Skills)**:', kb: '🧠 **Kho tri thức tự xây (KB)**:', dify: '🔌 **Bộ kết nối API**:', mcp: '⚙️ **Công cụ MCP**:', empty: '(Không có công cụ khả dụng)', tip: '💡 Chỉ cần nhập câu hỏi — AI sẽ tự động chọn công cụ phù hợp.' },
   };
   const l = L[lang] || L['zh-TW'];
   const lines = [l.title];
@@ -643,10 +643,11 @@ async function loadFunctionDeclarations(db, user) {
 
   // ── DIFY KB ──────────────────────────────────────────────────────────────────
   try {
+    const { buildFunctionDeclaration, executeConnector } = require('../services/apiConnectorService');
     const difyAcl2 = buildAccessFilter('a', 'dify_kb_id', 'd', user);
-    console.log(`[Webex][loadFuncDecl] DIFY params: ${JSON.stringify(difyAcl2.params)}`);
+    console.log(`[Webex][loadFuncDecl] API params: ${JSON.stringify(difyAcl2.params)}`);
     const difyKbs = await db.prepare(
-      `SELECT d.id, d.name, d.api_server, d.api_key, DBMS_LOB.SUBSTR(d.description, 500, 1) AS description
+      `SELECT d.*
        FROM dify_knowledge_bases d
        WHERE d.is_active=1 AND (
          (d.is_public=1 AND d.public_approved=1)
@@ -654,39 +655,25 @@ async function loadFunctionDeclarations(db, user) {
        )
        ORDER BY d.sort_order ASC`
     ).all(...difyAcl2.params);
-    console.log(`[Webex][loadFuncDecl] DIFY result count: ${difyKbs.length}`);
+    console.log(`[Webex][loadFuncDecl] API result count: ${difyKbs.length}`);
 
     for (const kb of difyKbs) {
-      const fnName = `dify_kb_${kb.id}`;
-      const scopeText = kb.description ? `適用範疇：${kb.description}` : `企業知識庫「${kb.name}」`;
-      declarations.push({
-        name: fnName,
-        description: `知識庫查詢「${kb.name}」。${scopeText}。同一輪只呼叫一次。`,
-        parameters: {
-          type: 'object',
-          properties: { query: { type: 'string', description: '查詢問題' } },
-          required: ['query'],
-        },
-      });
-      handlers[fnName] = async (args) => {
+      const decl = buildFunctionDeclaration(kb);
+      declarations.push(decl);
+      const connType = kb.connector_type || 'dify';
+      handlers[decl.name] = async (args) => {
         try {
-          const query = args.query || '';
-          const apiKey = kb.api_key || '';
-          const apiServer = (kb.api_server || 'https://api.dify.ai').replace(/\/$/, '');
-          const res = await require('axios').post(
-            `${apiServer}/chat-messages`,
-            { inputs: {}, query, response_mode: 'blocking', user: `foxlink-user-${user.id}` },
-            { headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' }, timeout: 30000 }
-          );
-          const answer = res.data?.answer || res.data?.message || '無結果';
-          return `【DIFY「${kb.name}」結果】\n${answer}`;
+          const userCtx = { id: user.id, email: user.email || '', name: user.name || '', employee_id: user.employee_id || '', dept_code: user.dept_code || '' };
+          const answer = await executeConnector(kb, args, userCtx, { sessionId: null, db });
+          const label = connType === 'dify' ? `DIFY「${kb.name}」` : `API「${kb.name}」`;
+          return `【${label}結果】\n${answer}`;
         } catch (e) {
-          return `[DIFY「${kb.name}」查詢失敗: ${e.message}]`;
+          return `[API「${kb.name}」查詢失敗: ${e.message}]`;
         }
       };
     }
   } catch (e) {
-    console.warn('[Webex] loadFunctionDeclarations dify error:', e.message);
+    console.warn('[Webex] loadFunctionDeclarations api error:', e.message);
   }
 
   // ── MCP ──────────────────────────────────────────────────────────────────────

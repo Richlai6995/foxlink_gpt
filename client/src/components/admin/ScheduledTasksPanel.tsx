@@ -595,7 +595,7 @@ function TaskFormModal({
                   <p><span className="text-blue-600">{'{{kb:名稱}}'}</span> — 查詢知識庫並注入結果</p>
                   <p><span className="text-blue-600">{'{{kb:名稱 query="查詢詞"}}'}</span> — 帶固定查詢詞</p>
                   <p><span className="text-slate-400">{'{{mcp:工具名}}'}</span> — 呼叫 MCP 工具</p>
-                  <p><span className="text-slate-400">{'{{dify:名稱}}'}</span> — 呼叫 Dify 知識庫</p>
+                  <p><span className="text-slate-400">{'{{dify:名稱}}'}</span> — 呼叫 API 連接器</p>
                 </div>
               </div>
             </div>

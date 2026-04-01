@@ -821,7 +821,7 @@ const verifyToken = async (req, res, next) => {
   if (xPage && xPage !== session.current_page) {
     const PAGE_TITLES = {
       '/': '對話', '/chat': '對話', '/skills': '技能市場',
-      '/knowledge': '知識庫', '/dify': 'DIFY', '/mcp': 'MCP',
+      '/knowledge': '知識庫', '/dify': 'API 連接器', '/mcp': 'MCP',
       '/research': '深度研究', '/monitor': 'AI 戰情',
       '/dashboard': 'AI 戰情', '/admin': '系統管理', '/help': '說明',
     };

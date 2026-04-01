@@ -4,6 +4,7 @@ const express = require('express');
 const router = express.Router();
 const { verifyToken } = require('./auth');
 const { translateFields } = require('../services/translationService');
+const { testConnector, parseJson } = require('../services/apiConnectorService');
 
 router.use(verifyToken);
 
@@ -11,7 +12,7 @@ function getDb() { return require('../database-oracle').db; }
 
 function requireAdmin(req, res) {
   if (req.user.role !== 'admin') {
-    res.status(403).json({ error: '僅管理員可操作 DIFY 知識庫設定' });
+    res.status(403).json({ error: '僅管理員可操作 API 連接器設定' });
     return false;
   }
   return true;
@@ -25,18 +26,29 @@ function twTimestamp(d = twNow()) {
   return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
+// ── API 連接器新增欄位清單 ──
+const CONNECTOR_FIELDS = [
+  'connector_type', 'http_method', 'content_type',
+  'auth_type', 'auth_header_name', 'auth_query_param_name', 'auth_config',
+  'request_headers', 'request_body_template', 'input_params',
+  'response_type', 'response_extract', 'response_template', 'empty_message', 'error_mapping',
+  'email_domain_fallback',
+];
+
+function maskApiKey(kb) {
+  return {
+    ...kb,
+    api_key_masked: kb.api_key ? '***' + kb.api_key.slice(-8) : '',
+  };
+}
+
 // GET /api/dify-kb  — list all (admin only)
 router.get('/', async (req, res) => {
   if (!requireAdmin(req, res)) return;
   const db = getDb();
   try {
     const kbs = await db.prepare(`SELECT * FROM dify_knowledge_bases ORDER BY sort_order ASC, created_at DESC`).all();
-    // Mask api_key in response (show only last 8 chars)
-    const masked = kbs.map(kb => ({
-      ...kb,
-      api_key_masked: kb.api_key ? '***' + kb.api_key.slice(-8) : '',
-    }));
-    res.json(masked);
+    res.json(kbs.map(maskApiKey));
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -47,7 +59,12 @@ router.get('/active', async (req, res) => {
   const db = getDb();
   try {
     const kbs = await db.prepare(
-      `SELECT id, name, api_server, api_key, description, tags FROM dify_knowledge_bases WHERE is_active=1 ORDER BY sort_order ASC`
+      `SELECT id, name, api_server, api_key, description, tags,
+              connector_type, http_method, content_type,
+              auth_type, auth_header_name, auth_query_param_name, auth_config,
+              request_headers, request_body_template, input_params,
+              response_type, response_extract, response_template, empty_message, error_mapping
+       FROM dify_knowledge_bases WHERE is_active=1 ORDER BY sort_order ASC`
     ).all();
     res.json(kbs);
   } catch (e) {
@@ -55,16 +72,18 @@ router.get('/active', async (req, res) => {
   }
 });
 
-// GET /api/dify-kb/my  — 依 dify_access 回傳當前使用者可用的 DIFY KB（含公開已核准）
-// Admin 也走相同過濾邏輯（不再 bypass）
+// GET /api/dify-kb/my  — 依 dify_access 回傳當前使用者可用的 API 連接器（含公開已核准）
 router.get('/my', async (req, res) => {
   const db = getDb();
   try {
+    const selectCols = `id, name, DBMS_LOB.SUBSTR(description, 2000, 1) AS description,
+            api_server, api_key, is_public, public_approved,
+            name_zh, name_en, name_vi, desc_zh, desc_en, desc_vi, tags,
+            connector_type, input_params`;
+
     // 公開且已核准的項目（所有使用者可見）
     const publicKbs = await db.prepare(
-      `SELECT id, name, DBMS_LOB.SUBSTR(description, 2000, 1) AS description,
-              api_server, api_key, is_public, public_approved, 1 AS is_readonly,
-              name_zh, name_en, name_vi, desc_zh, desc_en, desc_vi, tags
+      `SELECT ${selectCols}, 1 AS is_readonly
        FROM dify_knowledge_bases WHERE is_active=1 AND is_public=1 AND public_approved=1
        ORDER BY sort_order ASC`
     ).all();
@@ -100,9 +119,7 @@ router.get('/my', async (req, res) => {
     if (privateIds.length) {
       const placeholders = privateIds.map(() => '?').join(',');
       privateKbs = await db.prepare(
-        `SELECT id, name, DBMS_LOB.SUBSTR(description, 2000, 1) AS description,
-                api_server, api_key, is_public, public_approved, 0 AS is_readonly,
-                name_zh, name_en, name_vi, desc_zh, desc_en, desc_vi, tags
+        `SELECT ${selectCols}, 0 AS is_readonly
          FROM dify_knowledge_bases
          WHERE id IN (${placeholders}) AND is_active=1
          ORDER BY sort_order ASC`
@@ -114,13 +131,15 @@ router.get('/my', async (req, res) => {
   }
 });
 
-// GET /api/dify-kb/unauthorized  — admin only: 列出 admin 尚無權限的 active DIFY KB（供測試模式）
+// GET /api/dify-kb/unauthorized  — admin only: 列出 admin 尚無權限的 active 項目（供測試模式）
 router.get('/unauthorized', async (req, res) => {
   if (!requireAdmin(req, res)) return;
   const db = getDb();
   try {
     const all = await db.prepare(
-      `SELECT id, name, DBMS_LOB.SUBSTR(description, 2000, 1) AS description, name_zh, name_en, name_vi, desc_zh, desc_en, desc_vi, tags FROM dify_knowledge_bases WHERE is_active=1 ORDER BY sort_order ASC`
+      `SELECT id, name, DBMS_LOB.SUBSTR(description, 2000, 1) AS description,
+              name_zh, name_en, name_vi, desc_zh, desc_en, desc_vi, tags, connector_type
+       FROM dify_knowledge_bases WHERE is_active=1 ORDER BY sort_order ASC`
     ).all();
 
     const publicIds = await db.prepare(
@@ -238,15 +257,59 @@ router.post('/', async (req, res) => {
   const db = getDb();
   try {
     const { name, api_server, api_key, description, is_active, sort_order,
-            name_zh, name_en, name_vi, desc_zh, desc_en, desc_vi, tags } = req.body;
-    if (!name || !api_server || !api_key) {
-      return res.status(400).json({ error: '名稱、API Server 和 API Key 為必填' });
+            name_zh, name_en, name_vi, desc_zh, desc_en, desc_vi, tags,
+            // 新欄位
+            connector_type, http_method, content_type,
+            auth_type, auth_header_name, auth_query_param_name, auth_config,
+            request_headers, request_body_template, input_params,
+            response_type, response_extract, response_template, empty_message, error_mapping,
+            email_domain_fallback,
+    } = req.body;
+
+    const connType = connector_type || 'dify';
+    // DIFY 必填 api_server + api_key; REST API api_key 可選（auth_type=none 時）
+    if (!name || !api_server) {
+      return res.status(400).json({ error: '名稱和 API URL 為必填' });
     }
+    if (connType === 'dify' && !api_key) {
+      return res.status(400).json({ error: 'DIFY 類型必須提供 API Key' });
+    }
+
     const tagsStr = JSON.stringify(tags || []);
     const result = await db.prepare(
-      `INSERT INTO dify_knowledge_bases (name, api_server, api_key, description, is_active, sort_order, tags)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`
-    ).run(name, api_server.replace(/\/$/, ''), api_key, description || null, is_active !== false ? 1 : 0, sort_order || 0, tagsStr);
+      `INSERT INTO dify_knowledge_bases (
+        name, api_server, api_key, description, is_active, sort_order, tags,
+        connector_type, http_method, content_type,
+        auth_type, auth_header_name, auth_query_param_name, auth_config,
+        request_headers, request_body_template, input_params,
+        response_type, response_extract, response_template, empty_message, error_mapping,
+        email_domain_fallback
+      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+    ).run(
+      name,
+      api_server.replace(/\/$/, ''),
+      api_key || null,
+      description || null,
+      is_active !== false ? 1 : 0,
+      sort_order || 0,
+      tagsStr,
+      connType,
+      http_method || 'POST',
+      content_type || 'application/json',
+      auth_type || (connType === 'dify' ? 'bearer' : 'none'),
+      auth_header_name || null,
+      auth_query_param_name || null,
+      typeof auth_config === 'object' ? JSON.stringify(auth_config) : (auth_config || null),
+      typeof request_headers === 'object' ? JSON.stringify(request_headers) : (request_headers || null),
+      typeof request_body_template === 'object' ? JSON.stringify(request_body_template) : (request_body_template || null),
+      typeof input_params === 'object' ? JSON.stringify(input_params) : (input_params || null),
+      response_type || (connType === 'dify' ? 'json' : 'text'),
+      response_extract || null,
+      response_template || null,
+      empty_message || null,
+      typeof error_mapping === 'object' ? JSON.stringify(error_mapping) : (error_mapping || null),
+      email_domain_fallback ? 1 : 0,
+    );
 
     const newId = result.lastInsertRowid;
     const trans = (name_zh !== undefined)
@@ -257,7 +320,7 @@ router.post('/', async (req, res) => {
         .run(trans.name_zh, trans.name_en, trans.name_vi, trans.desc_zh, trans.desc_en, trans.desc_vi, newId);
     }
     const kb = await db.prepare(`SELECT * FROM dify_knowledge_bases WHERE id=?`).get(newId);
-    res.json({ ...kb, api_key_masked: '***' + kb.api_key.slice(-8) });
+    res.json(maskApiKey(kb));
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -269,28 +332,61 @@ router.put('/:id', async (req, res) => {
   const db = getDb();
   try {
     const kb = await db.prepare(`SELECT * FROM dify_knowledge_bases WHERE id=?`).get(req.params.id);
-    if (!kb) return res.status(404).json({ error: '找不到 DIFY 知識庫設定' });
+    if (!kb) return res.status(404).json({ error: '找不到 API 連接器設定' });
 
     const { name, api_server, api_key, description, is_active, sort_order,
-            name_zh, name_en, name_vi, desc_zh, desc_en, desc_vi, is_public, tags } = req.body;
+            name_zh, name_en, name_vi, desc_zh, desc_en, desc_vi, is_public, tags,
+            // 新欄位
+            connector_type, http_method, content_type,
+            auth_type, auth_header_name, auth_query_param_name, auth_config,
+            request_headers, request_body_template, input_params,
+            response_type, response_extract, response_template, empty_message, error_mapping,
+            email_domain_fallback,
+    } = req.body;
+
     const finalName = name ?? kb.name;
     const finalDesc = description !== undefined ? (description || null) : kb.description;
     const newIsPublic = is_public !== undefined ? (is_public ? 1 : 0) : (kb.is_public || 0);
     const newPublicApproved = newIsPublic ? (kb.public_approved || 0) : 0;
     const tagsStr = tags !== undefined ? JSON.stringify(tags || []) : kb.tags;
-    await db.prepare(
-      `UPDATE dify_knowledge_bases SET name=?, api_server=?, api_key=?, description=?, is_active=?, sort_order=?, is_public=?, public_approved=?, tags=?, updated_at=SYSTIMESTAMP WHERE id=?`
-    ).run(
-      finalName,
-      api_server ? api_server.replace(/\/$/, '') : kb.api_server,
-      api_key || kb.api_key,
-      finalDesc,
-      is_active !== undefined ? (is_active ? 1 : 0) : kb.is_active,
-      sort_order !== undefined ? sort_order : kb.sort_order,
-      newIsPublic, newPublicApproved,
-      tagsStr,
-      req.params.id
-    );
+
+    // 動態建構 SET clauses
+    const sets = [];
+    const params = [];
+    const addSet = (col, val) => { sets.push(`${col}=?`); params.push(val); };
+
+    addSet('name', finalName);
+    addSet('api_server', api_server ? api_server.replace(/\/$/, '') : kb.api_server);
+    addSet('api_key', api_key || kb.api_key);
+    addSet('description', finalDesc);
+    addSet('is_active', is_active !== undefined ? (is_active ? 1 : 0) : kb.is_active);
+    addSet('sort_order', sort_order !== undefined ? sort_order : kb.sort_order);
+    addSet('is_public', newIsPublic);
+    addSet('public_approved', newPublicApproved);
+    addSet('tags', tagsStr);
+
+    // API 連接器新欄位
+    if (connector_type !== undefined) addSet('connector_type', connector_type);
+    if (http_method !== undefined) addSet('http_method', http_method);
+    if (content_type !== undefined) addSet('content_type', content_type);
+    if (auth_type !== undefined) addSet('auth_type', auth_type);
+    if (auth_header_name !== undefined) addSet('auth_header_name', auth_header_name || null);
+    if (auth_query_param_name !== undefined) addSet('auth_query_param_name', auth_query_param_name || null);
+    if (auth_config !== undefined) addSet('auth_config', typeof auth_config === 'object' ? JSON.stringify(auth_config) : (auth_config || null));
+    if (request_headers !== undefined) addSet('request_headers', typeof request_headers === 'object' ? JSON.stringify(request_headers) : (request_headers || null));
+    if (request_body_template !== undefined) addSet('request_body_template', typeof request_body_template === 'object' ? JSON.stringify(request_body_template) : (request_body_template || null));
+    if (input_params !== undefined) addSet('input_params', typeof input_params === 'object' ? JSON.stringify(input_params) : (input_params || null));
+    if (response_type !== undefined) addSet('response_type', response_type);
+    if (response_extract !== undefined) addSet('response_extract', response_extract || null);
+    if (response_template !== undefined) addSet('response_template', response_template || null);
+    if (empty_message !== undefined) addSet('empty_message', empty_message || null);
+    if (error_mapping !== undefined) addSet('error_mapping', typeof error_mapping === 'object' ? JSON.stringify(error_mapping) : (error_mapping || null));
+    if (email_domain_fallback !== undefined) addSet('email_domain_fallback', email_domain_fallback ? 1 : 0);
+
+    sets.push('updated_at=SYSTIMESTAMP');
+    params.push(req.params.id);
+
+    await db.prepare(`UPDATE dify_knowledge_bases SET ${sets.join(', ')} WHERE id=?`).run(...params);
 
     if (name_zh !== undefined) {
       await db.prepare(`UPDATE dify_knowledge_bases SET name_zh=?,name_en=?,name_vi=?,desc_zh=?,desc_en=?,desc_vi=? WHERE id=?`)
@@ -304,15 +400,15 @@ router.put('/:id', async (req, res) => {
           description: descChanged ? finalDesc : null,
         }).catch(() => ({}));
         const setClauses = [];
-        const params = [];
-        if (nameChanged && trans.name_zh !== undefined) { setClauses.push('name_zh=?,name_en=?,name_vi=?'); params.push(trans.name_zh, trans.name_en, trans.name_vi); }
-        if (descChanged && trans.desc_zh !== undefined) { setClauses.push('desc_zh=?,desc_en=?,desc_vi=?'); params.push(trans.desc_zh, trans.desc_en, trans.desc_vi); }
-        if (setClauses.length) await db.prepare(`UPDATE dify_knowledge_bases SET ${setClauses.join(',')} WHERE id=?`).run(...params, req.params.id);
+        const tParams = [];
+        if (nameChanged && trans.name_zh !== undefined) { setClauses.push('name_zh=?,name_en=?,name_vi=?'); tParams.push(trans.name_zh, trans.name_en, trans.name_vi); }
+        if (descChanged && trans.desc_zh !== undefined) { setClauses.push('desc_zh=?,desc_en=?,desc_vi=?'); tParams.push(trans.desc_zh, trans.desc_en, trans.desc_vi); }
+        if (setClauses.length) await db.prepare(`UPDATE dify_knowledge_bases SET ${setClauses.join(',')} WHERE id=?`).run(...tParams, req.params.id);
       }
     }
 
     const updated = await db.prepare(`SELECT * FROM dify_knowledge_bases WHERE id=?`).get(req.params.id);
-    res.json({ ...updated, api_key_masked: '***' + updated.api_key.slice(-8) });
+    res.json(maskApiKey(updated));
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -324,7 +420,7 @@ router.delete('/:id', async (req, res) => {
   const db = getDb();
   try {
     const kb = await db.prepare(`SELECT id FROM dify_knowledge_bases WHERE id=?`).get(req.params.id);
-    if (!kb) return res.status(404).json({ error: '找不到 DIFY 知識庫設定' });
+    if (!kb) return res.status(404).json({ error: '找不到 API 連接器設定' });
     await db.prepare(`DELETE FROM dify_knowledge_bases WHERE id=?`).run(req.params.id);
     res.json({ success: true });
   } catch (e) {
@@ -338,8 +434,8 @@ router.post('/:id/approve', async (req, res) => {
   const db = getDb();
   try {
     const kb = await db.prepare(`SELECT id, is_public, public_approved FROM dify_knowledge_bases WHERE id=?`).get(req.params.id);
-    if (!kb) return res.status(404).json({ error: '找不到 DIFY 知識庫設定' });
-    if (!kb.is_public) return res.status(400).json({ error: '此知識庫未申請公開' });
+    if (!kb) return res.status(404).json({ error: '找不到 API 連接器設定' });
+    if (!kb.is_public) return res.status(400).json({ error: '此連接器未申請公開' });
     const newApproved = kb.public_approved ? 0 : 1;
     await db.prepare(`UPDATE dify_knowledge_bases SET public_approved=?, updated_at=SYSTIMESTAMP WHERE id=?`).run(newApproved, req.params.id);
     res.json({ public_approved: newApproved });
@@ -354,7 +450,7 @@ router.post('/:id/toggle', async (req, res) => {
   const db = getDb();
   try {
     const kb = await db.prepare(`SELECT * FROM dify_knowledge_bases WHERE id=?`).get(req.params.id);
-    if (!kb) return res.status(404).json({ error: '找不到 DIFY 知識庫設定' });
+    if (!kb) return res.status(404).json({ error: '找不到 API 連接器設定' });
     const newActive = kb.is_active ? 0 : 1;
     await db.prepare(`UPDATE dify_knowledge_bases SET is_active=?, updated_at=SYSTIMESTAMP WHERE id=?`)
       .run(newActive, req.params.id);
@@ -364,47 +460,28 @@ router.post('/:id/toggle', async (req, res) => {
   }
 });
 
-// POST /api/dify-kb/:id/test  — send a test query to DIFY
+// POST /api/dify-kb/:id/test  — 測試 API 連接器（支援 DIFY + REST API）
 router.post('/:id/test', async (req, res) => {
   if (!requireAdmin(req, res)) return;
   const db = getDb();
   try {
     const kb = await db.prepare(`SELECT * FROM dify_knowledge_bases WHERE id=?`).get(req.params.id);
-    if (!kb) return res.status(404).json({ error: '找不到 DIFY 知識庫設定' });
+    if (!kb) return res.status(404).json({ error: '找不到 API 連接器設定' });
 
-    const query = req.body.query || '你好，請說明你能回答哪些問題？';
-    const t0 = Date.now();
+    // 取得使用者資訊作為 system_* 參數的來源
+    const user = await db.prepare(`SELECT id, email, name, employee_id, dept_code FROM users WHERE id=?`).get(req.user.id);
+    const userCtx = user || { id: req.user.id, email: '', name: '', employee_id: '', dept_code: '' };
 
-    const difyRes = await fetch(`${kb.api_server}/chat-messages`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${kb.api_key}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        inputs: {},
-        query,
-        response_mode: 'blocking',
-        conversation_id: '',
-        user: `foxlink-test-${req.user.id}`,
-      }),
-      signal: AbortSignal.timeout(30000),
-    });
+    // req.body.test_params 是管理員手動填入的 user_input 參數值
+    const testParams = req.body.test_params || {};
+    if (req.body.query) testParams.query = req.body.query;
 
-    const duration = Date.now() - t0;
-
-    if (!difyRes.ok) {
-      const errText = await difyRes.text();
-      return res.status(502).json({ error: `DIFY 回應錯誤 ${difyRes.status}: ${errText.slice(0, 200)}` });
+    const result = await testConnector(kb, testParams, userCtx);
+    if (result.success) {
+      res.json(result);
+    } else {
+      res.status(502).json({ error: result.error, duration_ms: result.duration_ms });
     }
-
-    const data = await difyRes.json();
-    res.json({
-      success: true,
-      answer: data.answer || '(無回應)',
-      duration_ms: duration,
-      conversation_id: data.conversation_id,
-    });
   } catch (e) {
     res.status(500).json({ error: `連線失敗：${e.message}` });
   }
@@ -416,7 +493,7 @@ router.post('/:id/translate', async (req, res) => {
   const db = getDb();
   try {
     const kb = await db.prepare(`SELECT * FROM dify_knowledge_bases WHERE id=?`).get(req.params.id);
-    if (!kb) return res.status(404).json({ error: '找不到 DIFY 知識庫設定' });
+    if (!kb) return res.status(404).json({ error: '找不到 API 連接器設定' });
     const trans = await translateFields({ name: kb.name, description: kb.description });
     await db.prepare(`UPDATE dify_knowledge_bases SET name_zh=?,name_en=?,name_vi=?,desc_zh=?,desc_en=?,desc_vi=? WHERE id=?`)
       .run(trans.name_zh, trans.name_en, trans.name_vi, trans.desc_zh, trans.desc_en, trans.desc_vi, req.params.id);
@@ -432,13 +509,13 @@ router.get('/:id/logs', async (req, res) => {
   const db = getDb();
   try {
     const kb = await db.prepare(`SELECT id FROM dify_knowledge_bases WHERE id=?`).get(req.params.id);
-    if (!kb) return res.status(404).json({ error: '找不到 DIFY 知識庫設定' });
+    if (!kb) return res.status(404).json({ error: '找不到 API 連接器設定' });
 
     const limit = Math.min(parseInt(req.query.limit || '50'), 200);
     const logs = await db.prepare(
       `SELECT l.*, u.name as user_name FROM dify_call_logs l
        LEFT JOIN users u ON u.id = l.user_id
-       WHERE l.kb_id=? ORDER BY l.called_at DESC LIMIT ?`
+       WHERE l.kb_id=? ORDER BY l.called_at DESC FETCH FIRST ? ROWS ONLY`
     ).all(req.params.id, limit);
     res.json(logs);
   } catch (e) {

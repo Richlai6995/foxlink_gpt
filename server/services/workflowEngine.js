@@ -438,60 +438,23 @@ class WorkflowEngine {
     return chunks.join('\n---\n').slice(0, 8000);
   }
 
-  /** dify — query DIFY KB via chat-messages API. */
+  /** dify — query API connector (DIFY or REST API) via apiConnectorService. */
   async _execDify(node) {
+    const { executeConnector } = require('./apiConnectorService');
     const data = node.data || {};
     const difyKbId = data.dify_kb_id;
     if (!difyKbId) return '[dify 節點缺少 dify_kb_id]';
 
     const kb = await this.db.prepare('SELECT * FROM dify_knowledge_bases WHERE id=? AND is_active=1').get(difyKbId);
-    if (!kb) return `[DIFY 知識庫 id=${difyKbId} 不存在或未啟用]`;
+    if (!kb) return `[API 連接器 id=${difyKbId} 不存在或未啟用]`;
 
     const query = this.resolveTemplate(data.query || '{{start.output}}');
+    const userCtx = { id: this.userId || 0, email: '', name: '', employee_id: '', dept_code: '' };
 
-    const body = {
-      inputs: {},
-      query,
-      response_mode: 'blocking',
-      user: `foxlink-user-${this.userId || 0}`,
-    };
-
-    const t0 = Date.now();
-    const difyRes = await fetch(`${kb.api_server}/chat-messages`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${kb.api_key}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(30000),
+    return await executeConnector(kb, { query }, userCtx, {
+      sessionId: this.sessionId,
+      db: this.db,
     });
-
-    const duration = Date.now() - t0;
-
-    if (!difyRes.ok) {
-      const errText = await difyRes.text().catch(() => '');
-      const msg = `HTTP ${difyRes.status}`;
-      // Log to dify_call_logs
-      try {
-        await this.db.prepare(
-          'INSERT INTO dify_call_logs (kb_id, session_id, user_id, query_preview, status, error_msg, duration_ms) VALUES (?,?,?,?,?,?,?)'
-        ).run(kb.id, this.sessionId, this.userId, query.slice(0, 200), 'error', `${msg}: ${errText.slice(0, 150)}`, duration);
-      } catch (_) { /* ignore */ }
-      return `[DIFY 知識庫「${kb.name}」查詢失敗: ${msg}]`;
-    }
-
-    const resData = await difyRes.json();
-    const answer = (resData.answer || '').trim();
-
-    // Log to dify_call_logs
-    try {
-      await this.db.prepare(
-        'INSERT INTO dify_call_logs (kb_id, session_id, user_id, query_preview, response_preview, status, duration_ms) VALUES (?,?,?,?,?,?,?)'
-      ).run(kb.id, this.sessionId, this.userId, query.slice(0, 200), answer.slice(0, 300), 'ok', duration);
-    } catch (_) { /* ignore */ }
-
-    return answer || `[知識庫「${kb.name}」無相關回應]`;
   }
 
   /** mcp_tool — call an MCP server tool. */

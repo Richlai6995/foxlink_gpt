@@ -36,7 +36,7 @@ const TYPE_ICONS = {
 
 const TYPE_LABELS: Record<string, string> = {
   mcp: 'MCP',
-  dify: 'DIFY 知識庫',
+  dify: 'API 連接器',
   kb: '自建知識庫',
   skill: '技能',
 }

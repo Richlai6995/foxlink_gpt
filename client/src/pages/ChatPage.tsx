@@ -937,7 +937,7 @@ export default function ChatPage() {
             })()}
           </div>
 
-          {/* ── DIFY KB button ── */}
+          {/* ── API Connectors button (was DIFY KB) ── */}
           <div className="relative" ref={difyPanelRef}>
             <button
               onClick={openDifyPanel}

@@ -638,9 +638,9 @@ export default function SkillMarket() {
                                             </div>
                                         </div>
 
-                                        {/* DIFY KB binding */}
+                                        {/* API Connector binding */}
                                         <div>
-                                            <label className="block text-xs text-slate-500 mb-1">DIFY 知識庫綁定</label>
+                                            <label className="block text-xs text-slate-500 mb-1">API 連接器綁定</label>
                                             <div className="space-y-1 max-h-40 overflow-y-auto border rounded p-2">
                                                 {availableDifyKbs.map(kb => (
                                                     <label key={kb.id} className="flex items-center gap-2 text-sm">
@@ -651,7 +651,7 @@ export default function SkillMarket() {
                                                         {kb.name}
                                                     </label>
                                                 ))}
-                                                {availableDifyKbs.length === 0 && <span className="text-xs text-slate-400">無可用 DIFY 知識庫</span>}
+                                                {availableDifyKbs.length === 0 && <span className="text-xs text-slate-400">無可用 API 連接器</span>}
                                             </div>
                                         </div>
 

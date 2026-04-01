@@ -178,7 +178,7 @@ function UserManual() {
             ['智慧對話', '支援繁體中文、英文及越南文，具備單次 Session 完整記憶能力'],
             ['深度研究', '自動拆解成最多 12 個子議題分別調查，可結合知識庫、技能、MCP 工具作為資料來源或輸入提示'],
             ['文件分析', '可上傳 PDF、Word、Excel、PowerPoint、圖片，AI 直接閱讀並分析內容'],
-            ['工具調用', '可調用自建知識庫、DIFY 知識庫、MCP 工具及技能（Skill）進行問答與作業自動化'],
+            ['工具調用', '可調用自建知識庫、API 連接器、MCP 工具及技能（Skill）進行問答與作業自動化'],
             ['AI 戰情室', '結合 Oracle ERP 資料庫與向量語意搜尋，用自然語言查詢生產戰情，並生成圖表 / 儀表板'],
             ['任務排程', '設定排程讓 AI 定期執行分析任務，結果自動寄送 Email 或生成下載檔案'],
             ['音訊轉文字', '上傳語音檔，系統自動轉錄為文字後送 AI 分析'],
@@ -269,7 +269,7 @@ function UserManual() {
               title: '中央對話區域',
               items: [
                 '頂部工具列：對話標題、分享按鈕、停止生成按鈕',
-                '頂部工具列功能開關：技能（✦）、自建知識庫（🗄️）、DIFY 知識庫（⚡）、MCP 工具（🌐）',
+                '頂部工具列功能開關：技能（✦）、自建知識庫（🗄️）、API 連接器（⚡）、MCP 工具（🌐）',
                 '頂部工具列額度指示器：顯示日 / 週 / 月用量（有設定時才出現）',
                 '頂部工具列消耗趨勢按鈕（📈）：查看個人各模型歷史費用走勢',
                 '頂部工具列深度研究面板（🔭）：發起或查閱研究任務',
@@ -474,11 +474,11 @@ function UserManual() {
             <div className="border border-yellow-200 rounded-xl p-4 bg-yellow-50">
               <div className="flex items-center gap-2 mb-2">
                 <span className="text-lg">📚</span>
-                <span className="font-semibold text-yellow-700 text-sm">DIFY 知識庫</span>
+                <span className="font-semibold text-yellow-700 text-sm">API 連接器</span>
                 <Tag color="orange">企業文件庫</Tag>
               </div>
               <p className="text-xs text-yellow-600 leading-5">
-                由 DIFY 平台管理的企業內部文件知識庫，例如產品規格、SOP 手冊。
+                透過 API 連接外部知識管理平台的企業內部文件知識庫，例如產品規格、SOP 手冊。
                 對話時自動查詢，找到相關段落則注入給 AI 作為回答依據。
               </p>
             </div>
@@ -516,12 +516,12 @@ function UserManual() {
             rows={[
               ['✦ 技能', '頂部紫色 Badge 圖示', '自動套用掛載的技能', '跳過技能注入'],
               ['🗄️ 知識庫', '資料庫圖示', '從已掛載的自建知識庫檢索', '不做向量檢索'],
-              ['⚡ DIFY', '閃電圖示', '從已掛載的 DIFY 知識庫查詢', '跳過 DIFY 查詢'],
+              ['⚡ API', '閃電圖示', '從已掛載的 API 連接器查詢', '跳過 API 連接器查詢'],
               ['🌐 MCP', '地球圖示', '允許 AI 呼叫 MCP 伺服器工具', '停用所有 MCP 呼叫'],
             ]}
           />
           <Para>
-            此外，您也可以點選各開關圖示旁的下拉箭頭，<strong>明確指定</strong>要使用哪幾個知識庫 / MCP 伺服器 / DIFY 知識庫，
+            此外，您也可以點選各開關圖示旁的下拉箭頭，<strong>明確指定</strong>要使用哪幾個知識庫 / MCP 伺服器 / API 連接器，
             而非讓系統自動選擇全部。
           </Para>
         </SubSection>
@@ -552,7 +552,7 @@ function UserManual() {
           <Para>每次送出訊息時，系統依以下步驟決定傳哪些工具給 AI：</Para>
 
           <div className="space-y-3 mt-2">
-            <StepItem num={1} title="依存取權限載入可用工具" desc="MCP 依 mcp_access 授權、DIFY KB 依 dify_access 授權、自建 KB 依 creator/公開/kb_access 授權 — 只載入您有權使用的工具" />
+            <StepItem num={1} title="依存取權限載入可用工具" desc="MCP 依 mcp_access 授權、API 連接器依 api_access 授權、自建 KB 依 creator/公開/kb_access 授權 — 只載入您有權使用的工具" />
             <StepItem num={2} title="套用技能（Skill）約束" desc="若 session 有掛載技能，技能可強制限制工具清單（見下方「技能對工具的影響」）" />
             <StepItem num={3} title="TAG 自動路由（有任何工具設定 Tags 時）" desc="Flash LLM 提取訊息意圖標籤 → 與工具 Tags 比對 → 再以 LLM 依描述精篩" />
             <StepItem num={4} title="Fallback（所有工具均無 Tags 時）" desc="Flash LLM 直接閱讀全部工具的描述文字做分類，效率較低、準確性較差" />
@@ -564,7 +564,7 @@ function UserManual() {
               <pre className="text-xs text-slate-300 font-mono leading-6 whitespace-pre">{`使用者訊息
     │
     ▼
-[Step 1] 依授權載入可用工具（MCP / DIFY KB / 自建 KB）
+[Step 1] 依授權載入可用工具（MCP / API 連接器 / 自建 KB）
     │
     ▼
 [Step 2] 技能約束（disable / exclusive / append）
@@ -637,7 +637,7 @@ function UserManual() {
           <Table
             headers={['模式', 'MCP 工具行為', 'KB 工具行為']}
             rows={[
-              ['disable', '移除全部 MCP 工具，AI 無法呼叫任何 MCP', '移除全部 DIFY + 自建 KB，不做知識庫查詢'],
+              ['disable', '移除全部 MCP 工具，AI 無法呼叫任何 MCP', '移除全部 API 連接器 + 自建 KB，不做知識庫查詢'],
               ['exclusive（排他）', '只保留技能指定的 MCP 伺服器，其他全移除', '只保留技能指定的 KB，其他全移除'],
               ['append（附加）', '在使用者有存取權的 MCP 之外，強制額外加入技能指定的伺服器', '強制加入技能指定的 KB（即使使用者原本沒有存取權）'],
             ]}
@@ -653,7 +653,7 @@ function UserManual() {
           <Table
             headers={['條件', '行為', '優點']}
             rows={[
-              ['只選中 DIFY KB（無 MCP）', '並行查詢全部選中的 DIFY KB → 結果直接注入 prompt → AI 整合回覆', '省略 function calling 往返，速度更快'],
+              ['只選中 API 連接器（無 MCP）', '並行查詢全部選中的 API 連接器 → 結果直接注入 prompt → AI 整合回覆', '省略 function calling 往返，速度更快'],
               ['只選中自建 KB（無 MCP）', '並行向量檢索全部選中的自建 KB → 結果注入 prompt', '同上'],
               ['混合模式（MCP + KB）', '走 Gemini 原生 function calling，AI 自行決定呼叫哪些工具、呼叫幾次', '靈活性高，可多輪工具調用'],
             ]}
@@ -693,7 +693,7 @@ function UserManual() {
               </div>
             </div>
             <div className="bg-slate-50 rounded-xl p-4 border border-slate-200">
-              <p className="text-xs text-slate-400 mb-2 font-medium">自建知識庫 / DIFY 知識庫（文件查詢）</p>
+              <p className="text-xs text-slate-400 mb-2 font-medium">自建知識庫 / API 連接器（文件查詢）</p>
               <div className="space-y-1.5">
                 {[
                   '「FL-X100 連接器的最大電流規格是多少？」',
@@ -1145,7 +1145,7 @@ function UserManual() {
 
         <SubSection title="知識庫綁定（KB Binding）">
           <Para>
-            技能可以綁定特定的自建知識庫與 DIFY 知識庫，讓掛載技能時自動啟用相關知識庫，無需使用者手動選取。
+            技能可以綁定特定的自建知識庫與 API 連接器，讓掛載技能時自動啟用相關知識庫，無需使用者手動選取。
           </Para>
           <Table
             headers={['模式', '說明']}
@@ -1161,7 +1161,7 @@ function UserManual() {
         <SubSection title="TAG 自動路由">
           <Para>
             系統使用 TAG 標籤機制自動判斷每則訊息應啟用哪些工具、知識庫與技能，無需使用者手動勾選。
-            每個 MCP 伺服器、DIFY 知識庫、自建知識庫及技能都可設定標籤（Tags），系統流程如下：
+            每個 MCP 伺服器、API 連接器、自建知識庫及技能都可設定標籤（Tags），系統流程如下：
           </Para>
           <div className="space-y-3">
             <StepItem num={1} title="使用者發送訊息" desc="系統以 Flash LLM 從訊息中萃取 0~5 個意圖標籤（intent tags）" />
@@ -1265,7 +1265,7 @@ function UserManual() {
               ['🟢 開始（Start）', '流程入口，接收使用者輸入'],
               ['🤖 LLM', '呼叫大語言模型處理文字，可設定 System Prompt 與模型'],
               ['📚 知識庫（Knowledge Base）', '查詢自建知識庫，取得相關段落'],
-              ['🔌 DIFY', '查詢 DIFY 知識庫'],
+              ['🔌 API', '查詢 API 連接器'],
               ['🔧 MCP 工具', '呼叫 MCP 伺服器的工具'],
               ['✨ 技能（Skill）', '呼叫其他已建立的技能'],
               ['💻 程式碼（Code）', '執行自訂 JavaScript 程式碼'],
@@ -1327,7 +1327,7 @@ function UserManual() {
             <StepItem num={3} title="在下拉選單中勾選一或多個要使用的知識庫，點「確認」" />
             <StepItem num={4} title="發送訊息，AI 會先檢索知識庫再組合回答" desc="回覆中如有引用文件段落，AI 通常會說明來源文件名稱" />
           </div>
-          <TipBox>可以同時掛載「自建知識庫」＋「DIFY 知識庫」＋「MCP 工具」，AI 會綜合所有來源回答。
+          <TipBox>可以同時掛載「自建知識庫」＋「API 連接器」＋「MCP 工具」，AI 會綜合所有來源回答。
             此外，若知識庫設有標籤（Tags），系統會透過 TAG 自動路由機制，根據訊息內容自動判斷是否啟用對應知識庫。</TipBox>
         </SubSection>
 
@@ -1479,7 +1479,7 @@ function UserManual() {
               ['全局附件', '上傳檔案（PDF / Word / Excel / 圖片等）作為所有子問題的共用背景資料，拖放或點擊 + 附加'],
               ['研究深度', '快速 2 個、標準 5 個、深入 8 個、全面 12 個子問題，深度越高耗時越長'],
               ['輸出格式', '可多選 Word / PDF / PPT / Excel，完成後每種格式各生成一個下載連結'],
-              ['整體資料來源', '為所有子問題預設使用的資料來源：自建知識庫 / Dify 知識庫 / MCP 工具（子問題可個別覆蓋）'],
+              ['整體資料來源', '為所有子問題預設使用的資料來源：自建知識庫 / API 連接器 / MCP 工具（子問題可個別覆蓋）'],
               ['自動建議 KB', '輸入問題 1 秒後系統自動分析並預選相關知識庫（橘色「自動建議」標籤）'],
               ['引用前次研究', '選擇已完成的研究，其摘要會自動作為本次研究的背景知識，可多選最多 3 筆'],
             ]}
@@ -1526,7 +1526,7 @@ function UserManual() {
               <Database size={14} className="text-blue-600 flex-shrink-0 mt-0.5" />
               <div>
                 <p className="text-sm font-medium text-slate-700">子問題資料來源（覆蓋任務設定）</p>
-                <p className="text-xs text-slate-500 leading-5">為此子問題指定不同的自建 KB / Dify KB / MCP 工具，覆蓋 Step 1 設定的任務層級來源。</p>
+                <p className="text-xs text-slate-500 leading-5">為此子問題指定不同的自建 KB / API 連接器 / MCP 工具，覆蓋 Step 1 設定的任務層級來源。</p>
               </div>
             </div>
           </div>
@@ -1563,7 +1563,7 @@ function UserManual() {
           <Table
             headers={['層級', '優先', '說明']}
             rows={[
-              ['子問題層級', '最高', '若子問題有設定個別 KB / Dify / MCP，以子問題設定為準'],
+              ['子問題層級', '最高', '若子問題有設定個別 KB / API 連接器 / MCP，以子問題設定為準'],
               ['任務層級', '次高', '子問題未設定時，使用 Step 1 的整體任務資料來源'],
               ['全部 KB', '預設', '任務層級也未設定時，自動搜尋您能存取的所有知識庫'],
               ['網路搜尋', '補充', '知識庫無結果且無附件時自動觸發（需有可用的 MCP 搜尋工具）'],
@@ -1663,7 +1663,7 @@ function UserManual() {
           rows={[
             ['技能 (Skill)', 'Sparkles ✦ 紫色', '啟用後，AI 回覆前會先查詢符合的技能 Prompt 並套用', '跳過技能注入，AI 以原始模型回答'],
             ['知識庫', 'Database 🗄️ 藍色', '啟用後，AI 回覆前會從已掛載的自建知識庫檢索相關段落', '不做知識庫檢索，直接回答'],
-            ['DIFY 知識庫', 'Zap ⚡ 綠色', '啟用後，AI 回覆前會從已掛載的 DIFY 知識庫查詢', '跳過 DIFY 檢索'],
+            ['API 連接器', 'Zap ⚡ 綠色', '啟用後，AI 回覆前會從已掛載的 API 連接器查詢', '跳過 API 連接器檢索'],
             ['MCP 工具', 'Globe 🌐 藍色', '啟用後，AI 可呼叫已設定的 MCP 伺服器（搜尋、程式執行等）', '停用所有 MCP 工具呼叫'],
             ['AI 戰情室快速入口', 'BarChart3 📊 橘色', '點擊後彈出 AI 戰情室主題 / 查詢任務下拉選單，可直接跳入指定查詢頁面', '僅在有「使用 AI 戰情室」權限的帳號才顯示此按鈕'],
           ]}
@@ -1681,7 +1681,7 @@ function UserManual() {
           </TipBox>
           <NoteBox>
             各開關僅在對應功能已設定的情況下才有效果：知識庫開關需先在下拉選單中掛載知識庫；
-            MCP 開關需管理員已設定並啟用 MCP 伺服器；DIFY 知識庫開關需管理員已設定 DIFY API。
+            MCP 開關需管理員已設定並啟用 MCP 伺服器；API 連接器開關需管理員已設定 API 連接器。
           </NoteBox>
         </SubSection>
       </Section>
@@ -3321,7 +3321,7 @@ const adminSections = [
   { id: 'a-tokens', label: 'Token 與費用統計', icon: <BarChart3 size={18} /> },
   { id: 'a-audit', label: '稽核與敏感詞', icon: <Shield size={18} /> },
   { id: 'a-mcp', label: 'MCP 伺服器', icon: <Globe size={18} /> },
-  { id: 'a-dify', label: 'DIFY 知識庫', icon: <Zap size={18} /> },
+  { id: 'a-dify', label: 'API 連接器', icon: <Zap size={18} /> },
   { id: 'a-kb', label: '自建知識庫管理', icon: <Database size={18} /> },
   { id: 'a-skill', label: '技能市集管理', icon: <Sparkles size={18} /> },
   { id: 'a-code-runners', label: 'Code Runners', icon: <Code2 size={18} /> },
@@ -3511,7 +3511,7 @@ function AdminManual() {
             <StepItem num={4} title="設定上傳與功能權限" desc="決定此角色的使用者預設可執行哪些操作" />
             <StepItem num={5} title="設定使用金額限制（選填）" desc="可設定每日、每週、每月的 USD 金額上限" />
             <StepItem num={6} title="指定預設角色（選填）" desc="勾選後，LDAP 自動建立的新帳號會套用此角色" />
-            <StepItem num={7} title="指定 MCP / DIFY 知識庫（選填）" desc="限制此角色只能使用指定的工具或知識庫" />
+            <StepItem num={7} title="指定 MCP / API 連接器（選填）" desc="限制此角色只能使用指定的工具或知識庫" />
           </div>
           <TipBox>建議為不同部門或職能分別建立角色，例如「研發工程師」（允許圖片/音訊上傳）、「業務人員」（僅允許文件上傳，月限額 $5）。</TipBox>
         </SubSection>
@@ -3585,19 +3585,19 @@ function AdminManual() {
           </Para>
         </SubSection>
 
-        <SubSection title="MCP 伺服器與 DIFY 知識庫綁定">
+        <SubSection title="MCP 伺服器與 API 連接器綁定">
           <Para>
-            可為角色勾選允許使用的 MCP 伺服器和 DIFY 知識庫。此角色的使用者對話時，
+            可為角色勾選允許使用的 MCP 伺服器和 API 連接器。此角色的使用者對話時，
             AI 只能存取這些已授權的工具，未勾選的工具不會出現在其對話中。
           </Para>
-          <NoteBox>若角色未綁定任何 MCP / DIFY，系統預設讓所有已啟用的工具對使用者可見。建議明確綁定，以避免機密知識庫意外對不相關部門開放。</NoteBox>
+          <NoteBox>若角色未綁定任何 MCP / API 連接器，系統預設讓所有已啟用的工具對使用者可見。建議明確綁定，以避免機密知識庫意外對不相關部門開放。</NoteBox>
         </SubSection>
       </Section>
 
       <Section id="a-admin-test" icon={<FlaskConical size={22} />} iconColor="text-orange-500" title="管理員測試模式">
         <Para>
           系統管理員與一般使用者適用<strong>相同的工具授權規則</strong>——只有被明確授權（公開核准或角色指定）的
-          MCP 伺服器、DIFY 知識庫、自建知識庫、技能及文件範本，才會出現在管理員的對話介面中。
+          MCP 伺服器、API 連接器、自建知識庫、技能及文件範本，才會出現在管理員的對話介面中。
           這樣的設計讓管理員看到的介面與使用者完全一致，避免意外使用到尚未準備好的工具。
         </Para>
         <Para>
@@ -3621,7 +3621,7 @@ function AdminManual() {
             headers={['類型', '說明']}
             rows={[
               ['MCP', '外部工具伺服器（Model Context Protocol）'],
-              ['DIFY 知識庫', 'DIFY 平台知識庫'],
+              ['API 連接器', 'API 連接外部知識庫'],
               ['自建知識庫', '系統內部向量知識庫'],
               ['技能', '技能市集中的自定義技能'],
             ]}
@@ -3669,7 +3669,7 @@ function AdminManual() {
             headers={['工具類型', '授權方式']}
             rows={[
               ['MCP 伺服器', '在「角色管理」勾選此伺服器，或核准伺服器的「公開」申請'],
-              ['DIFY 知識庫', '在「角色管理」勾選此知識庫，或核准「公開」申請'],
+              ['API 連接器', '在「角色管理」勾選此連接器，或核准「公開」申請'],
               ['自建知識庫', '核准使用者提出的公開申請，或於角色指派'],
               ['技能', '在技能市集核准公開申請'],
               ['文件範本', '在範本設定中開啟公開，或在角色管理中指派'],
@@ -3822,7 +3822,7 @@ function AdminManual() {
             rows={[
               ['節點上限', '單一 Workflow 最多 50 個節點，超過時無法新增'],
               ['錯誤處理', '節點執行失敗時，Workflow 會在該節點停止並回傳錯誤訊息給使用者'],
-              ['效能考量', 'Workflow 中每個 LLM / DIFY / MCP 節點都會消耗 Token，建議控制節點數量以管理成本'],
+              ['效能考量', 'Workflow 中每個 LLM / API 連接器 / MCP 節點都會消耗 Token，建議控制節點數量以管理成本'],
             ]}
           />
         </SubSection>
@@ -4342,10 +4342,10 @@ generate_txt:供應商週報_{{date}}.txt
         </SubSection>
       </Section>
 
-      <Section id="a-dify" icon={<Zap size={22} />} iconColor="text-yellow-500" title="DIFY 知識庫整合">
+      <Section id="a-dify" icon={<Zap size={22} />} iconColor="text-yellow-500" title="API 連接器整合">
         <Para>
-          DIFY 是正崴內部部署的知識管理平台（fldify-api.foxlink.com.tw），
-          可將企業內部文件、產品規格、SOP 等資料建成向量知識庫。
+          API 連接器可連接各種外部 REST API，
+          將企業內部文件、產品規格、SOP 等資料透過 API 接入系統。
           整合後，使用者在 Foxlink GPT to Cortex 對話時，AI 可自動查詢相關知識庫，
           讓回答能參考企業內部文件內容，而非僅依賴通用知識。
         </Para>
@@ -4353,7 +4353,7 @@ generate_txt:供應商週報_{{date}}.txt
         <div className="border-2 border-amber-400 bg-amber-50 rounded-xl p-4 mb-4">
           <div className="flex items-center gap-2 mb-2">
             <AlertTriangle size={16} className="text-amber-600" />
-            <span className="font-bold text-amber-700">重要：Tags 是讓 AI 自動選用 DIFY 知識庫的必要條件</span>
+            <span className="font-bold text-amber-700">重要：Tags 是讓 AI 自動選用 API 連接器的必要條件</span>
           </div>
           <p className="text-sm text-amber-700">
             若未設定 Tags，使用者在對話中<strong>必須手動</strong>從頂端列切換按鈕選取此知識庫，
@@ -4363,7 +4363,7 @@ generate_txt:供應商週報_{{date}}.txt
 
         <SubSection title="運作原理">
           <Para>
-            每次使用者發送訊息時，系統同時將訊息送去查詢所有已啟用的 DIFY 知識庫，
+            每次使用者發送訊息時，系統同時將訊息送去查詢所有已啟用的 API 連接器，
             若找到相關內容則自動注入為 AI 的背景知識，AI 在回答時即可引用這些企業特定資訊。
           </Para>
           <div className="bg-slate-800 rounded-xl p-4">
@@ -4375,7 +4375,7 @@ generate_txt:供應商週報_{{date}}.txt
               </div>
               <div className="flex items-center gap-3">
                 <span className="w-5 h-5 bg-slate-600 rounded-full flex items-center justify-center text-xs text-white flex-shrink-0">2</span>
-                系統查詢 DIFY 知識庫，找到產品規格文件中的相關段落
+                系統查詢 API 連接器，找到產品規格文件中的相關段落
               </div>
               <div className="flex items-center gap-3">
                 <span className="w-5 h-5 bg-green-600 rounded-full flex items-center justify-center text-xs text-white flex-shrink-0">3</span>
@@ -4385,14 +4385,14 @@ generate_txt:供應商週報_{{date}}.txt
           </div>
         </SubSection>
 
-        <SubSection title="新增 DIFY 知識庫">
+        <SubSection title="新增 API 連接器">
           <div className="space-y-3">
-            <StepItem num={1} title="在 DIFY 平台建立知識庫並取得 API Key" desc="登入 fldify-api.foxlink.com.tw，建立應用並複製 API Key（格式：app-xxxxxxxx）" />
-            <StepItem num={2} title="進入 Foxlink GPT to Cortex 後台，點選「DIFY 知識庫」頁籤" />
-            <StepItem num={3} title="點選「新增知識庫」按鈕" />
+            <StepItem num={1} title="在外部平台建立知識庫或 API 端點並取得 API Key" desc="取得外部 REST API 的端點 URL 與認證金鑰（API Key / OAuth2 等）" />
+            <StepItem num={2} title="進入 Foxlink GPT to Cortex 後台，點選「API 連接器」頁籤" />
+            <StepItem num={3} title="點選「新增連接器」按鈕" />
             <StepItem num={4} title="填寫設定欄位" desc="名稱、API Server、API Key、描述（重要）、排序順序" />
             <StepItem num={5} title="點選「測試」按鈕確認連線正常" desc="測試成功會顯示回應時間及預覽文字" />
-            <StepItem num={6} title="啟用後即生效" desc="之後所有使用者對話都會自動查詢此知識庫" />
+            <StepItem num={6} title="啟用後即生效" desc="之後所有使用者對話都會自動查詢此連接器" />
           </div>
         </SubSection>
 
@@ -4401,8 +4401,8 @@ generate_txt:供應商週報_{{date}}.txt
             headers={['欄位', '必填', '說明']}
             rows={[
               ['名稱', '是', '識別用顯示名稱，例：產品規格知識庫'],
-              ['API Server', '是', 'DIFY 的 API 端點，預設 https://fldify-api.foxlink.com.tw/v1'],
-              ['API Key', '是（新增時）', 'DIFY 應用的 API Key，格式為 app-xxxxxxxx。編輯時留空表示保持不變'],
+              ['API URL', '是', '外部 API 端點，例如 https://afservice.foxlink.com.tw/AIService/api/...'],
+              ['API Key', '是（新增時）', '外部平台的 API Key。編輯時留空表示保持不變'],
               ['描述', '建議填', '告訴 AI 這個知識庫的用途，讓 AI 更精準地判斷何時引用。例：包含產品規格、零件型號，當使用者詢問產品規格時引用'],
               ['標籤（Tags）', '必填，否則無法自動路由', '如「產品規格」「零件」「SOP」。系統根據使用者訊息意圖自動比對標籤，決定是否查詢此知識庫'],
               ['排序順序', '否', '數字越小越優先查詢，同分時依此排序'],

@@ -201,7 +201,7 @@ async function resolveToolRefs(text, db, opts = {}) {
   const difyPattern = /\{\{dify:([^}]+)\}\}/g;
   for (const m of [...result.matchAll(difyPattern)]) {
     const name = m[1].trim();
-    result = result.replace(m[0], `[Dify 知識庫「${name}」（尚未支援，敬請期待）]`);
+    result = result.replace(m[0], `[API 連接器「${name}」（尚未支援，敬請期待）]`);
     toolsUsed.dify_kbs.push(name);
   }
 

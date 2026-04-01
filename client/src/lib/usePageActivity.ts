@@ -8,7 +8,7 @@ const PAGE_TITLES: Record<string, string> = {
   '/chat':        '對話',
   '/skills':      '技能市場',
   '/knowledge':   '知識庫',
-  '/dify':        'DIFY',
+  '/dify':        'API 連接器',
   '/mcp':         'MCP',
   '/research':    '深度研究',
   '/monitor':     'AI 戰情',
