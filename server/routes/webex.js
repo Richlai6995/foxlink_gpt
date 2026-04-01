@@ -271,6 +271,33 @@ function verifySignature(rawBody, signature, secret) {
   }
 }
 
+// ── 共用 access 權限參數（MCP/DIFY/KB 六種 grantee_type）────────────────────
+// 回傳 { clause, params } 供 EXISTS 子查詢使用
+// accessAlias: access 表別名, fkCol: 外鍵欄位名 (e.g. 'mcp_server_id', 'dify_kb_id')
+function buildAccessFilter(accessAlias, fkCol, tableAlias, user) {
+  const a = accessAlias;
+  const clause = `EXISTS (
+    SELECT 1 FROM ${fkCol.includes('mcp') ? 'mcp_access' : 'dify_access'} ${a}
+    WHERE ${a}.${fkCol}=${tableAlias}.id AND (
+      (${a}.grantee_type='user'        AND ${a}.grantee_id=?)
+      OR (${a}.grantee_type='role'        AND ${a}.grantee_id=? AND ? IS NOT NULL)
+      OR (${a}.grantee_type='department'  AND ${a}.grantee_id=? AND ? IS NOT NULL)
+      OR (${a}.grantee_type='cost_center' AND ${a}.grantee_id=? AND ? IS NOT NULL)
+      OR (${a}.grantee_type='division'    AND ${a}.grantee_id=? AND ? IS NOT NULL)
+      OR (${a}.grantee_type='org_group'   AND ${a}.grantee_id=? AND ? IS NOT NULL)
+    )
+  )`;
+  const params = [
+    String(user.id),
+    user.role_id != null ? String(user.role_id) : null, user.role_id ?? null,
+    user.dept_code ?? null, user.dept_code ?? null,
+    user.profit_center ?? null, user.profit_center ?? null,
+    user.org_section ?? null, user.org_section ?? null,
+    user.org_group_name ?? null, user.org_group_name ?? null,
+  ];
+  return { clause, params };
+}
+
 // ── Email 正規化 ───────────────────────────────────────────────────────────────
 // @foxlink.com.tw → @foxlink.com，不分大小寫
 function normalizeEmail(email) {
@@ -443,18 +470,15 @@ async function buildToolList(db, user, lang) {
 
   // DIFY KB
   try {
+    const difyAcl = buildAccessFilter('a', 'dify_kb_id', 'd', user);
     const difyKbs = await db.prepare(
       `SELECT DISTINCT d.name, d.description, d.sort_order, d.name_zh, d.name_en, d.name_vi, d.desc_zh, d.desc_en, d.desc_vi FROM dify_knowledge_bases d
        WHERE d.is_active=1 AND (
          (d.is_public=1 AND d.public_approved=1)
-         OR EXISTS (
-           SELECT 1 FROM dify_access a WHERE a.dify_kb_id=d.id
-           AND ((a.grantee_type='user' AND a.grantee_id=TO_CHAR(?))
-             OR (a.grantee_type='role' AND a.grantee_id=TO_CHAR(?)))
-         )
+         OR ${difyAcl.clause}
        )
        ORDER BY d.sort_order ASC`
-    ).all(user.id, user.role_id || 0);
+    ).all(...difyAcl.params);
     if (difyKbs.length > 0) {
       lines.push(l.dify);
       difyKbs.forEach(k => {
@@ -469,21 +493,17 @@ async function buildToolList(db, user, lang) {
 
   // MCP
   try {
+    const mcpAcl = buildAccessFilter('a', 'mcp_server_id', 'm', user);
     const mcpServers = await db.prepare(
       `SELECT DISTINCT m.name, DBMS_LOB.SUBSTR(m.description, 200, 1) AS description,
               m.name_zh, m.name_en, m.name_vi, m.desc_zh, m.desc_en, m.desc_vi
        FROM mcp_servers m
        WHERE m.is_active=1 AND (
          (m.is_public=1 AND m.public_approved=1)
-         OR EXISTS (
-           SELECT 1 FROM mcp_access a WHERE a.mcp_server_id=m.id AND (
-             (a.grantee_type='user' AND a.grantee_id=TO_CHAR(?))
-             OR (a.grantee_type='role' AND a.grantee_id=TO_CHAR(?))
-           )
-         )
+         OR ${mcpAcl.clause}
        )
        ORDER BY m.name ASC`
-    ).all(user.id, user.role_id || 0);
+    ).all(...mcpAcl.params);
     if (mcpServers.length > 0) {
       lines.push(l.mcp);
       mcpServers.forEach(m => {
@@ -615,18 +635,16 @@ async function loadFunctionDeclarations(db, user) {
 
   // ── DIFY KB ──────────────────────────────────────────────────────────────────
   try {
+    const difyAcl2 = buildAccessFilter('a', 'dify_kb_id', 'd', user);
     const difyKbs = await db.prepare(
       `SELECT DISTINCT d.id, d.name, d.api_server, d.api_key, d.description
        FROM dify_knowledge_bases d
        WHERE d.is_active=1 AND (
          (d.is_public=1 AND d.public_approved=1)
-         OR EXISTS (SELECT 1 FROM dify_access a WHERE a.dify_kb_id=d.id AND (
-           (a.grantee_type='user' AND a.grantee_id=TO_CHAR(?))
-           OR (a.grantee_type='role' AND a.grantee_id=TO_CHAR(?))
-         ))
+         OR ${difyAcl2.clause}
        )
        ORDER BY d.sort_order ASC`
-    ).all(user.id, user.role_id || 0);
+    ).all(...difyAcl2.params);
 
     for (const kb of difyKbs) {
       const fnName = `dify_kb_${kb.id}`;
@@ -664,20 +682,16 @@ async function loadFunctionDeclarations(db, user) {
   // ── MCP ──────────────────────────────────────────────────────────────────────
   try {
     const mcpClient = require('../services/mcpClient');
+    const mcpAcl2 = buildAccessFilter('a', 'mcp_server_id', 'm', user);
     const mcpServers = await db.prepare(
       `SELECT DISTINCT m.id, m.name, m.endpoint_url, m.is_active
        FROM mcp_servers m
        WHERE m.is_active=1 AND (
          (m.is_public=1 AND m.public_approved=1)
-         OR EXISTS (
-           SELECT 1 FROM mcp_access a WHERE a.mcp_server_id=m.id AND (
-             (a.grantee_type='user' AND a.grantee_id=TO_CHAR(?))
-             OR (a.grantee_type='role' AND a.grantee_id=TO_CHAR(?))
-           )
-         )
+         OR ${mcpAcl2.clause}
        )
        ORDER BY m.name ASC`
-    ).all(user.id, user.role_id || 0);
+    ).all(...mcpAcl2.params);
 
     for (const srv of mcpServers) {
       try {
