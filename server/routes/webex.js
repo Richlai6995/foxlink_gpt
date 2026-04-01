@@ -913,10 +913,9 @@ async function processMessage(db, webex, user, sessionId, roomId, messageText, f
   const { apiModel } = await resolveApiModel(db, 'pro');
   console.log(`[Webex] Calling AI model=${apiModel} user=${user.username} session=${sessionId} tools=${declarations.length}`);
 
-  // Typing indicator：先發「處理中」訊息，AI 完成後刪除
-  let typingMsgId = null;
+  // Typing indicator：發送「處理中」提示（保留不刪除，避免使用者看到訊息消失）
   try {
-    typingMsgId = await webex.sendMessage(roomId, t('typing', lang));
+    await webex.sendMessage(roomId, t('typing', lang));
   } catch (_) {}
 
   let aiText = '';
@@ -941,13 +940,9 @@ async function processMessage(db, webex, user, sessionId, roomId, messageText, f
     outputTokens = result.outputTokens || 0;
   } catch (e) {
     console.error('[Webex] AI call error:', e.message);
-    if (typingMsgId) await webex.deleteMessage(typingMsgId);
     await webex.sendMessage(roomId, t('ai_error', lang, e.message?.slice(0, 80)));
     return;
   }
-
-  // 刪除 typing indicator
-  if (typingMsgId) await webex.deleteMessage(typingMsgId);
 
   // 7. 處理 generate_xxx 代碼塊
   let generatedFiles = [];
