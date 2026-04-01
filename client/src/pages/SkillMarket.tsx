@@ -316,6 +316,7 @@ export default function SkillMarket() {
     }
 
     const mySkills = skills.filter(s => isOwner(s))
+    const sharedSkills = skills.filter(s => !isOwner(s) && !s.is_public && s.my_share_type)
     const publicSkills = skills.filter(s => !isOwner(s) && s.is_public && s.is_admin_approved)
 
     return (
@@ -370,12 +371,34 @@ export default function SkillMarket() {
                     </section>
                 )}
 
+                {/* Shared Skills */}
+                {sharedSkills.length > 0 && (
+                    <section className="mb-8">
+                        <h2 className="text-sm font-semibold text-slate-600 mb-3 uppercase tracking-wide">共享給我的技能</h2>
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                            {sharedSkills.map(sk => (
+                                <SkillCard key={sk.id} skill={sk}
+                                    onFork={sk.my_share_type === 'develop' ? () => fork(sk) : undefined}
+                                    onUse={() => navigate(`/chat?skillId=${sk.id}`)}
+                                    onView={() => setViewingSkill(sk)}
+                                    isOwner={false} />
+                            ))}
+                        </div>
+                    </section>
+                )}
+
                 {/* Public Skills */}
                 {publicSkills.length > 0 && (
                     <section>
                         <h2 className="text-sm font-semibold text-slate-600 mb-3 uppercase tracking-wide">公開技能</h2>
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                            {publicSkills.map(sk => <SkillCard key={sk.id} skill={sk} onFork={() => fork(sk)} onUse={() => navigate(`/chat?skillId=${sk.id}`)} onView={() => setViewingSkill(sk)} isOwner={false} />)}
+                            {publicSkills.map(sk => (
+                                <SkillCard key={sk.id} skill={sk}
+                                    onFork={sk.my_share_type === 'develop' ? () => fork(sk) : undefined}
+                                    onUse={() => navigate(`/chat?skillId=${sk.id}`)}
+                                    onView={() => setViewingSkill(sk)}
+                                    isOwner={false} />
+                            ))}
                         </div>
                     </section>
                 )}
@@ -1152,7 +1175,7 @@ function SkillCard({ skill, onEdit, onDelete, onFork, onRequestPublic, onUse, on
     skill: Skill
     onEdit?: () => void
     onDelete?: () => void
-    onFork: () => void
+    onFork?: () => void
     onRequestPublic?: () => void
     onUse?: () => void
     onView?: () => void
@@ -1207,7 +1230,7 @@ function SkillCard({ skill, onEdit, onDelete, onFork, onRequestPublic, onUse, on
                             <Eye size={13} />
                         </button>
                     )}
-                    {!isOwner && skill.my_share_type === 'develop' && (
+                    {!isOwner && onFork && (
                         <button onClick={onFork} title="Fork 一份" className="p-1 rounded hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition">
                             <GitFork size={13} />
                         </button>
@@ -1232,7 +1255,7 @@ function SkillCard({ skill, onEdit, onDelete, onFork, onRequestPublic, onUse, on
                             <Trash2 size={13} />
                         </button>
                     )}
-                    {isOwner && (
+                    {isOwner && onFork && (
                         <button onClick={onFork} title="複製一份" className="p-1 rounded hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition">
                             <GitFork size={13} />
                         </button>
