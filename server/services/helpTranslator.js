@@ -60,8 +60,8 @@ async function resolveModelInfo(db, modelKey) {
 }
 
 // Max blocks per chunk — keeps each LLM call well within output token limits
-const CHUNK_SIZE = 8;
-const MAX_RETRIES = 2;
+const CHUNK_SIZE = 5;
+const MAX_RETRIES = 3;
 
 /**
  * Call LLM to translate a JSON payload, with retry on JSON parse failure
@@ -81,7 +81,7 @@ async function callLLM(payload, targetLang, modelInfo, signal) {
 
   const prompt = `Translate the following help documentation content from Traditional Chinese to ${langName}.
 
-${JSON.stringify(payload, null, 2)}`;
+${JSON.stringify(payload)}`;
 
   let lastError;
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
@@ -99,7 +99,36 @@ ${JSON.stringify(payload, null, 2)}`;
         cleaned = cleaned.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '');
       }
 
-      return JSON.parse(cleaned);
+      try {
+        return JSON.parse(cleaned);
+      } catch (parseErr) {
+        // Try to salvage truncated JSON by closing open structures
+        let fixed = cleaned;
+        // Count unmatched brackets
+        let braces = 0, brackets = 0, inStr = false, escaped = false;
+        for (const ch of fixed) {
+          if (escaped) { escaped = false; continue; }
+          if (ch === '\\') { escaped = true; continue; }
+          if (ch === '"') { inStr = !inStr; continue; }
+          if (inStr) continue;
+          if (ch === '{') braces++;
+          else if (ch === '}') braces--;
+          else if (ch === '[') brackets++;
+          else if (ch === ']') brackets--;
+        }
+        // If we're inside a string, close it
+        if (inStr) fixed += '"';
+        // Close any open brackets/braces
+        while (brackets > 0) { fixed += ']'; brackets--; }
+        while (braces > 0) { fixed += '}'; braces--; }
+        try {
+          const result = JSON.parse(fixed);
+          console.warn(`[HelpTranslator]   Salvaged truncated JSON (closed ${braces} braces, ${brackets} brackets)`);
+          return result;
+        } catch {
+          throw parseErr; // Can't salvage, throw original error
+        }
+      }
     } catch (err) {
       lastError = err;
       if (err.message === 'Translation aborted') throw err;
@@ -118,24 +147,31 @@ ${JSON.stringify(payload, null, 2)}`;
  * @param {string} targetLang - 'en' | 'vi'
  * @param {object} modelInfo - { apiModel, apiKey, provider }
  * @param {AbortSignal} [signal] - optional abort signal
+ * @param {function} [onChunkProgress] - callback(chunk, totalChunks) for progress tracking
  */
-async function translateSection(zhContent, targetLang, modelInfo, signal) {
+async function translateSection(zhContent, targetLang, modelInfo, signal, onChunkProgress) {
   const blocks = zhContent.blocks || [];
+  const totalChunks = Math.ceil(blocks.length / CHUNK_SIZE);
 
   // Small section — translate in one shot
   if (blocks.length <= CHUNK_SIZE) {
-    return callLLM(zhContent, targetLang, modelInfo, signal);
+    onChunkProgress?.(0, 1);
+    const result = await callLLM(zhContent, targetLang, modelInfo, signal);
+    onChunkProgress?.(1, 1);
+    return result;
   }
 
   // Large section — translate title/sidebarLabel first, then blocks in chunks
-  console.log(`[HelpTranslator]   Large section (${blocks.length} blocks), splitting into chunks of ${CHUNK_SIZE}`);
+  console.log(`[HelpTranslator]   Large section (${blocks.length} blocks), splitting into ${totalChunks} chunks of ${CHUNK_SIZE}`);
 
   // 1) Translate metadata (title + sidebarLabel) with first chunk
+  onChunkProgress?.(0, totalChunks);
   const firstChunk = blocks.slice(0, CHUNK_SIZE);
   const firstResult = await callLLM(
     { title: zhContent.title, sidebarLabel: zhContent.sidebarLabel, blocks: firstChunk },
     targetLang, modelInfo, signal,
   );
+  onChunkProgress?.(1, totalChunks);
 
   const translatedBlocks = [...(firstResult.blocks || firstChunk)];
 
@@ -143,10 +179,9 @@ async function translateSection(zhContent, targetLang, modelInfo, signal) {
   for (let i = CHUNK_SIZE; i < blocks.length; i += CHUNK_SIZE) {
     if (signal?.aborted) throw new Error('Translation aborted');
 
+    const chunkIdx = Math.floor(i / CHUNK_SIZE);
     const chunk = blocks.slice(i, i + CHUNK_SIZE);
-    const chunkNum = Math.floor(i / CHUNK_SIZE) + 1;
-    const totalChunks = Math.ceil(blocks.length / CHUNK_SIZE);
-    console.log(`[HelpTranslator]   Chunk ${chunkNum + 1}/${totalChunks} (blocks ${i}-${Math.min(i + CHUNK_SIZE, blocks.length) - 1})`);
+    console.log(`[HelpTranslator]   Chunk ${chunkIdx + 1}/${totalChunks} (blocks ${i}-${Math.min(i + CHUNK_SIZE, blocks.length) - 1})`);
 
     const chunkResult = await callLLM(
       { title: '_', sidebarLabel: '_', blocks: chunk },
@@ -154,6 +189,7 @@ async function translateSection(zhContent, targetLang, modelInfo, signal) {
     );
 
     translatedBlocks.push(...(chunkResult.blocks || chunk));
+    onChunkProgress?.(chunkIdx + 1, totalChunks);
   }
 
   return {
@@ -226,7 +262,10 @@ async function translateHelpSections(db, sectionIds, targetLang, modelKey = 'fla
         };
 
         console.log(`[HelpTranslator] Translating ${sectionId} → ${targetLang} ...`);
-        const translated = await translateSection(zhContent, targetLang, modelInfo, abortController.signal);
+        const onChunkProgress = (chunk, totalChunks) => {
+          notify({ sectionId, status: 'translating', index: i, total, chunk, totalChunks });
+        };
+        const translated = await translateSection(zhContent, targetLang, modelInfo, abortController.signal, onChunkProgress);
 
         // Validate structure
         if (!translated.title || !translated.sidebarLabel || !Array.isArray(translated.blocks)) {

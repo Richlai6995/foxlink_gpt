@@ -34,10 +34,12 @@ interface LlmModelOption {
 // SSE progress event from server
 interface TranslationProgress {
   sectionId: string
-  status: 'translating' | 'done' | 'error' | 'aborted'
+  status: 'translating' | 'done' | 'error' | 'aborted' | 'pending'
   error?: string
   index: number
   total: number
+  chunk?: number
+  totalChunks?: number
 }
 
 const ALL_LANGS = [
@@ -170,24 +172,31 @@ export default function HelpTranslationPanel() {
         const data = res.data
         if (!data.found) return
 
-        // Update per-section progress
+        // Update per-section progress (server now sends objects with status/chunk/totalChunks)
         const newProgress: Record<string, TranslationProgress> = {}
         const newResults: Record<string, { ok: boolean; error?: string }> = {}
         let doneCount = 0
-        const entries = Object.entries(data.sections as Record<string, string>)
+        const entries = Object.entries(data.sections as Record<string, { status: string; error?: string; chunk?: number; totalChunks?: number }>)
 
         for (let i = 0; i < entries.length; i++) {
-          const [secId, status] = entries[i]
+          const [secId, info] = entries[i]
           const key = `${secId}-${targetLang}`
-          newProgress[key] = { sectionId: secId, status: status as any, index: i, total: data.total }
+          newProgress[key] = {
+            sectionId: secId,
+            status: info.status as any,
+            index: i,
+            total: data.total,
+            chunk: info.chunk,
+            totalChunks: info.totalChunks,
+          }
 
-          if (status === 'done') {
+          if (info.status === 'done') {
             doneCount++
             newResults[key] = { ok: true }
-          } else if (status.startsWith('error:')) {
+          } else if (info.status === 'error') {
             doneCount++
-            newResults[key] = { ok: false, error: status.slice(6) || 'Unknown error' }
-          } else if (status === 'aborted') {
+            newResults[key] = { ok: false, error: info.error || 'Unknown error' }
+          } else if (info.status === 'aborted') {
             doneCount++
             newResults[key] = { ok: false, error: 'Aborted' }
           }
@@ -591,19 +600,36 @@ export default function HelpTranslationPanel() {
 
                   return (
                     <td key={lang.code} className="text-center px-3 py-3">
-                      {isActive ? (
-                        <div className="flex items-center justify-center gap-1">
-                          <Loader2 size={14} className="animate-spin text-blue-500" />
-                          <span className="text-xs text-blue-500">翻譯中</span>
-                          <button
-                            onClick={() => handleAbortSingle(section.id, lang.code)}
-                            className="text-red-400 hover:text-red-600 ml-1"
-                            title="終止"
-                          >
-                            <Square size={10} />
-                          </button>
+                      {isActive ? (() => {
+                        const ch = progress?.chunk ?? 0
+                        const tc = progress?.totalChunks ?? 1
+                        const pct = tc > 1 ? Math.round((ch / tc) * 100) : null
+                        return (
+                        <div className="flex flex-col items-center gap-1 min-w-[80px]">
+                          <div className="flex items-center gap-1">
+                            <Loader2 size={13} className="animate-spin text-blue-500" />
+                            <span className="text-xs text-blue-500">
+                              翻譯中{pct !== null ? ` ${pct}%` : ''}
+                            </span>
+                            <button
+                              onClick={() => handleAbortSingle(section.id, lang.code)}
+                              className="text-red-400 hover:text-red-600 ml-0.5"
+                              title="終止"
+                            >
+                              <Square size={10} />
+                            </button>
+                          </div>
+                          {pct !== null && (
+                            <div className="w-full bg-blue-100 rounded-full h-1.5">
+                              <div
+                                className="bg-blue-500 h-1.5 rounded-full transition-all duration-500"
+                                style={{ width: `${pct}%` }}
+                              />
+                            </div>
+                          )}
                         </div>
-                      ) : isWaiting ? (
+                        )
+                      })() : isWaiting ? (
                         <div className="flex items-center justify-center gap-1">
                           <Clock size={13} className="text-slate-400 animate-pulse" />
                           <span className="text-xs text-slate-400">等待中</span>

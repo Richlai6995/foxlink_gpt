@@ -196,14 +196,23 @@ router.post('/admin/translate', verifyToken, verifyAdmin, (req, res) => {
 
   // Init progress store
   const progress = { sections: {}, done: false, results: null, aborted: false, total: sectionIds.length };
-  for (const id of sectionIds) progress.sections[id] = 'pending';
+  for (const id of sectionIds) progress.sections[id] = { status: 'pending' };
   jobProgress.set(jobId, progress);
 
-  // Progress callback
-  const onProgress = ({ sectionId, status, error, index, total }) => {
+  // Progress callback — stores status + chunk progress
+  const onProgress = ({ sectionId, status, error, index, total, chunk, totalChunks }) => {
     const p = jobProgress.get(jobId);
     if (!p) return;
-    p.sections[sectionId] = status === 'done' ? 'done' : status === 'error' ? `error:${error || ''}` : status;
+    if (status === 'done') {
+      p.sections[sectionId] = { status: 'done' };
+    } else if (status === 'error') {
+      p.sections[sectionId] = { status: 'error', error: error || '' };
+    } else if (status === 'aborted') {
+      p.sections[sectionId] = { status: 'aborted' };
+    } else {
+      // translating — include chunk progress
+      p.sections[sectionId] = { status, chunk: chunk ?? 0, totalChunks: totalChunks ?? 1 };
+    }
     p.total = total;
   };
 
