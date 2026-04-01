@@ -216,7 +216,7 @@ const WEBEX_SYSTEM_SUFFIX_BASE = `
 2. 用 bullet list 取代大段落，每條不超過 40 字
 3. 避免寬表格（改用清單呈現）
 4. Markdown 僅使用粗體、清單、代碼塊（Webex 支援有限）
-5. 如回答需要詳細版，結尾加：「💡 需詳細版本請至 Web 介面查看」
+5. 如回答需要詳細版，結尾加提示語（依回覆語言）：中文「💡 需詳細版本請至 Web 介面查看」/ English "💡 For a detailed version, please visit the Web interface" / Tiếng Việt "💡 Để xem phiên bản chi tiết, vui lòng truy cập giao diện Web"
 
 【Webex 檔案生成規則 — 強制執行，最高優先級】
 當使用者要求生成/輸出/匯出/整理成 Excel/Word/PDF/PPT/TXT 等檔案時：
