@@ -147,32 +147,41 @@ export default function HelpTranslationPanel() {
   // ── Polling-based translate (shared for single & batch) ─────────────────────
 
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const ACTIVE_JOB_KEY = 'help_translate_active_job'
 
-  function startTranslateJob(
-    sectionIds: string[],
-    targetLang: string,
-    jobId: string,
-    onDone: () => void,
-  ) {
-    // Fire POST to start background translation
-    api.post('/help/admin/translate', {
-      sectionIds,
-      targetLang,
-      modelKey: selectedModel,
-      jobId,
-    }).catch(err => {
-      console.error('Failed to start translate job:', err)
-      onDone()
-    })
+  function saveActiveJob(jobId: string, targetLang: string, sectionIds: string[]) {
+    sessionStorage.setItem(ACTIVE_JOB_KEY, JSON.stringify({ jobId, targetLang, sectionIds }))
+  }
 
-    // Start polling progress every 1.5s
+  function clearActiveJob() {
+    sessionStorage.removeItem(ACTIVE_JOB_KEY)
+  }
+
+  /** Start polling for a job's progress. Works for both new and resumed jobs. */
+  function startPolling(jobId: string, targetLang: string, sectionIds: string[], onDone: () => void) {
+    if (pollingRef.current) clearInterval(pollingRef.current)
+
+    // Ensure queue keys are set so cells show waiting/translating
+    const queueKeys = new Set(sectionIds.map(id => `${id}-${targetLang}`))
+    setBatchQueueKeys(queueKeys)
+    setBatchTranslating(true)
+
     const poll = setInterval(async () => {
       try {
         const res = await api.get(`/help/admin/translate/progress/${jobId}`)
         const data = res.data
-        if (!data.found) return
+        if (!data.found) {
+          // Job no longer exists on server (server restarted / expired)
+          clearInterval(poll)
+          pollingRef.current = null
+          clearActiveJob()
+          setBatchTranslating(false)
+          setBatchProgress(null)
+          setBatchQueueKeys(new Set())
+          fetchStatus()
+          return
+        }
 
-        // Update per-section progress (server now sends objects with status/chunk/totalChunks)
         const newProgress: Record<string, TranslationProgress> = {}
         const newResults: Record<string, { ok: boolean; error?: string }> = {}
         let doneCount = 0
@@ -206,10 +215,10 @@ export default function HelpTranslationPanel() {
         setResults(prev => ({ ...prev, ...newResults }))
         setBatchProgress({ current: doneCount, total: data.total })
 
-        // Job finished
         if (data.done) {
           clearInterval(poll)
           pollingRef.current = null
+          clearActiveJob()
           onDone()
         }
       } catch { /* ignore polling errors */ }
@@ -218,7 +227,49 @@ export default function HelpTranslationPanel() {
     pollingRef.current = poll
   }
 
-  // Cleanup polling on unmount
+  function startTranslateJob(
+    sectionIds: string[],
+    targetLang: string,
+    jobId: string,
+    onDone: () => void,
+  ) {
+    saveActiveJob(jobId, targetLang, sectionIds)
+
+    // Fire POST to start background translation
+    api.post('/help/admin/translate', {
+      sectionIds,
+      targetLang,
+      modelKey: selectedModel,
+      jobId,
+    }).catch(err => {
+      console.error('Failed to start translate job:', err)
+      clearActiveJob()
+      onDone()
+    })
+
+    startPolling(jobId, targetLang, sectionIds, onDone)
+  }
+
+  // On mount: resume polling if there's an active job from a previous visit
+  useEffect(() => {
+    try {
+      const saved = sessionStorage.getItem(ACTIVE_JOB_KEY)
+      if (!saved) return
+      const { jobId, targetLang, sectionIds } = JSON.parse(saved)
+      if (!jobId) return
+      console.log(`[HelpTranslation] Resuming polling for job ${jobId}`)
+      batchJobIdRef.current = jobId
+      startPolling(jobId, targetLang, sectionIds, () => {
+        setBatchTranslating(false)
+        setBatchProgress(null)
+        setBatchQueueKeys(new Set())
+        batchJobIdRef.current = null
+        fetchStatus()
+      })
+    } catch { /* ignore */ }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Cleanup polling on unmount (but don't clear sessionStorage — job continues on server)
   useEffect(() => {
     return () => {
       if (pollingRef.current) clearInterval(pollingRef.current)
@@ -259,11 +310,9 @@ export default function HelpTranslationPanel() {
 
     const jobId = genJobId()
     batchJobIdRef.current = jobId
-    setBatchTranslating(true)
     setBatchProgress({ current: 0, total: ids.length })
-    // Mark all as queued, clear old progress/results for these
+    // Clear old progress/results for these sections
     const queueKeys = new Set(ids.map(id => `${id}-${batchLang}`))
-    setBatchQueueKeys(queueKeys)
     setProgressMap(prev => {
       const n = { ...prev }
       for (const k of queueKeys) delete n[k]
@@ -289,6 +338,7 @@ export default function HelpTranslationPanel() {
     const jobId = batchJobIdRef.current
     if (jobId) {
       await api.post('/help/admin/translate/abort', { jobId }).catch(() => {})
+      clearActiveJob()
     }
   }
 
