@@ -443,22 +443,18 @@ async function buildToolList(db, user, lang) {
 
   // DIFY KB
   try {
-    const isAdminDify = user.role === 'admin';
     const difyKbs = await db.prepare(
-      isAdminDify
-        ? `SELECT DISTINCT d.name, d.description, d.sort_order, d.name_zh, d.name_en, d.name_vi, d.desc_zh, d.desc_en, d.desc_vi FROM dify_knowledge_bases d
-           WHERE d.is_active=1 ORDER BY d.sort_order ASC`
-        : `SELECT DISTINCT d.name, d.description, d.sort_order, d.name_zh, d.name_en, d.name_vi, d.desc_zh, d.desc_en, d.desc_vi FROM dify_knowledge_bases d
-           WHERE d.is_active=1 AND (
-             (d.is_public=1 AND d.public_approved=1)
-             OR EXISTS (
-               SELECT 1 FROM dify_access a WHERE a.dify_kb_id=d.id
-               AND ((a.grantee_type='user' AND a.grantee_id=TO_CHAR(?))
-                 OR (a.grantee_type='role' AND a.grantee_id=TO_CHAR(?)))
-             )
-           )
-           ORDER BY d.sort_order ASC`
-    ).all(...(isAdminDify ? [] : [user.id, user.role_id || 0]));
+      `SELECT DISTINCT d.name, d.description, d.sort_order, d.name_zh, d.name_en, d.name_vi, d.desc_zh, d.desc_en, d.desc_vi FROM dify_knowledge_bases d
+       WHERE d.is_active=1 AND (
+         (d.is_public=1 AND d.public_approved=1)
+         OR EXISTS (
+           SELECT 1 FROM dify_access a WHERE a.dify_kb_id=d.id
+           AND ((a.grantee_type='user' AND a.grantee_id=TO_CHAR(?))
+             OR (a.grantee_type='role' AND a.grantee_id=TO_CHAR(?)))
+         )
+       )
+       ORDER BY d.sort_order ASC`
+    ).all(user.id, user.role_id || 0);
     if (difyKbs.length > 0) {
       lines.push(l.dify);
       difyKbs.forEach(k => {
@@ -473,26 +469,21 @@ async function buildToolList(db, user, lang) {
 
   // MCP
   try {
-    const isAdminMcpList = user.role === 'admin';
     const mcpServers = await db.prepare(
-      isAdminMcpList
-        ? `SELECT DISTINCT m.name, DBMS_LOB.SUBSTR(m.description, 200, 1) AS description,
-                  m.name_zh, m.name_en, m.name_vi, m.desc_zh, m.desc_en, m.desc_vi
-           FROM mcp_servers m WHERE m.is_active=1 ORDER BY m.name ASC`
-        : `SELECT DISTINCT m.name, DBMS_LOB.SUBSTR(m.description, 200, 1) AS description,
-                  m.name_zh, m.name_en, m.name_vi, m.desc_zh, m.desc_en, m.desc_vi
-           FROM mcp_servers m
-           WHERE m.is_active=1 AND (
-             (m.is_public=1 AND m.public_approved=1)
-             OR EXISTS (
-               SELECT 1 FROM mcp_access a WHERE a.mcp_server_id=m.id AND (
-                 (a.grantee_type='user' AND a.grantee_id=TO_CHAR(?))
-                 OR (a.grantee_type='role' AND a.grantee_id=TO_CHAR(?))
-               )
-             )
+      `SELECT DISTINCT m.name, DBMS_LOB.SUBSTR(m.description, 200, 1) AS description,
+              m.name_zh, m.name_en, m.name_vi, m.desc_zh, m.desc_en, m.desc_vi
+       FROM mcp_servers m
+       WHERE m.is_active=1 AND (
+         (m.is_public=1 AND m.public_approved=1)
+         OR EXISTS (
+           SELECT 1 FROM mcp_access a WHERE a.mcp_server_id=m.id AND (
+             (a.grantee_type='user' AND a.grantee_id=TO_CHAR(?))
+             OR (a.grantee_type='role' AND a.grantee_id=TO_CHAR(?))
            )
-           ORDER BY m.name ASC`
-    ).all(...(isAdminMcpList ? [] : [user.id, user.role_id || 0]));
+         )
+       )
+       ORDER BY m.name ASC`
+    ).all(user.id, user.role_id || 0);
     if (mcpServers.length > 0) {
       lines.push(l.mcp);
       mcpServers.forEach(m => {
@@ -624,22 +615,18 @@ async function loadFunctionDeclarations(db, user) {
 
   // ── DIFY KB ──────────────────────────────────────────────────────────────────
   try {
-    const isAdmin = user.role === 'admin';
     const difyKbs = await db.prepare(
-      isAdmin
-        ? `SELECT DISTINCT d.id, d.name, d.api_server, d.api_key, d.description
-           FROM dify_knowledge_bases d WHERE d.is_active=1 ORDER BY d.sort_order ASC`
-        : `SELECT DISTINCT d.id, d.name, d.api_server, d.api_key, d.description
-           FROM dify_knowledge_bases d
-           WHERE d.is_active=1 AND (
-             (d.is_public=1 AND d.public_approved=1)
-             OR EXISTS (SELECT 1 FROM dify_access a WHERE a.dify_kb_id=d.id AND (
-               (a.grantee_type='user' AND a.grantee_id=TO_CHAR(?))
-               OR (a.grantee_type='role' AND a.grantee_id=TO_CHAR(?))
-             ))
-           )
-           ORDER BY d.sort_order ASC`
-    ).all(...(isAdmin ? [] : [user.id, user.role_id || 0]));
+      `SELECT DISTINCT d.id, d.name, d.api_server, d.api_key, d.description
+       FROM dify_knowledge_bases d
+       WHERE d.is_active=1 AND (
+         (d.is_public=1 AND d.public_approved=1)
+         OR EXISTS (SELECT 1 FROM dify_access a WHERE a.dify_kb_id=d.id AND (
+           (a.grantee_type='user' AND a.grantee_id=TO_CHAR(?))
+           OR (a.grantee_type='role' AND a.grantee_id=TO_CHAR(?))
+         ))
+       )
+       ORDER BY d.sort_order ASC`
+    ).all(user.id, user.role_id || 0);
 
     for (const kb of difyKbs) {
       const fnName = `dify_kb_${kb.id}`;
@@ -677,24 +664,20 @@ async function loadFunctionDeclarations(db, user) {
   // ── MCP ──────────────────────────────────────────────────────────────────────
   try {
     const mcpClient = require('../services/mcpClient');
-    const isAdminMcp = user.role === 'admin';
     const mcpServers = await db.prepare(
-      isAdminMcp
-        ? `SELECT DISTINCT m.id, m.name, m.endpoint_url, m.is_active
-           FROM mcp_servers m WHERE m.is_active=1 ORDER BY m.name ASC`
-        : `SELECT DISTINCT m.id, m.name, m.endpoint_url, m.is_active
-           FROM mcp_servers m
-           WHERE m.is_active=1 AND (
-             (m.is_public=1 AND m.public_approved=1)
-             OR EXISTS (
-               SELECT 1 FROM mcp_access a WHERE a.mcp_server_id=m.id AND (
-                 (a.grantee_type='user' AND a.grantee_id=TO_CHAR(?))
-                 OR (a.grantee_type='role' AND a.grantee_id=TO_CHAR(?))
-               )
-             )
+      `SELECT DISTINCT m.id, m.name, m.endpoint_url, m.is_active
+       FROM mcp_servers m
+       WHERE m.is_active=1 AND (
+         (m.is_public=1 AND m.public_approved=1)
+         OR EXISTS (
+           SELECT 1 FROM mcp_access a WHERE a.mcp_server_id=m.id AND (
+             (a.grantee_type='user' AND a.grantee_id=TO_CHAR(?))
+             OR (a.grantee_type='role' AND a.grantee_id=TO_CHAR(?))
            )
-           ORDER BY m.name ASC`
-    ).all(...(isAdminMcp ? [] : [user.id, user.role_id || 0]));
+         )
+       )
+       ORDER BY m.name ASC`
+    ).all(user.id, user.role_id || 0);
 
     for (const srv of mcpServers) {
       try {
