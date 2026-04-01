@@ -734,13 +734,28 @@ router.post('/containers/:id/start', async (req, res) => {
 });
 
 // ─── Helper: stream pod logs via K8s API ────────────────────────────────────
-function streamPodLogViaApi(req, res, ns, pod, tail) {
+function streamPodLogViaApi(req, res, ns, pod, tail, since) {
   const https = require('https');
   const token = fs.readFileSync(K8S_TOKEN_PATH, 'utf8').trim();
   const host = process.env.KUBERNETES_SERVICE_HOST || 'kubernetes.default.svc';
   const port = process.env.KUBERNETES_SERVICE_PORT || '443';
   let ca; try { ca = fs.readFileSync(K8S_CA_PATH); } catch {}
-  const url = `https://${host}:${port}/api/v1/namespaces/${ns}/pods/${pod}/log?tailLines=${tail}&follow=true`;
+  const params = new URLSearchParams({ follow: 'true', timestamps: 'true' });
+  if (since && /^\d{4}-\d{2}-\d{2}/.test(since)) {
+    params.set('sinceTime', since);
+  } else if (since) {
+    // 轉 duration 到秒 (e.g. "1h" → 3600)
+    const match = since.match(/^(\d+)(s|m|h|d)$/);
+    if (match) {
+      const units = { s: 1, m: 60, h: 3600, d: 86400 };
+      params.set('sinceSeconds', String(parseInt(match[1]) * (units[match[2]] || 1)));
+    }
+  } else if (tail > 0) {
+    params.set('tailLines', String(tail));
+  } else {
+    params.set('sinceSeconds', '3600'); // 預設 1 小時
+  }
+  const url = `https://${host}:${port}/api/v1/namespaces/${ns}/pods/${pod}/log?${params}`;
 
   const apiReq = https.get(url, {
     headers: { Authorization: `Bearer ${token}` }, ca, rejectUnauthorized: !!ca,
@@ -766,18 +781,33 @@ function streamPodLogViaApi(req, res, ns, pod, tail) {
 // ─── Log Streaming (SSE) ────────────────────────────────────────────────────
 router.get('/logs/pod/:ns/:pod', (req, res) => {
   const { ns, pod } = req.params;
-  const tail = parseInt(req.query.tail) || 100;
+  const since = req.query.since || '';  // ISO date string or duration like "1h"
+  const tail = parseInt(req.query.tail) || 0;
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
 
   // If K8s service account available, use API directly (no kubectl needed)
   if (hasK8sServiceAccount()) {
-    return streamPodLogViaApi(req, res, ns, pod, tail);
+    return streamPodLogViaApi(req, res, ns, pod, tail, since);
   }
 
   // Fallback: try kubectl
-  const proc = spawn('kubectl', ['logs', '-f', '--tail', String(tail), '-n', ns, pod], { shell: true });
+  const args = ['logs', '-f', '--timestamps', '-n', ns, pod];
+  if (since) {
+    // ISO date → --since-time; otherwise --since (e.g. "1h", "30m")
+    if (/^\d{4}-\d{2}-\d{2}/.test(since)) {
+      args.push('--since-time', since);
+    } else {
+      args.push('--since', since);
+    }
+  } else if (tail > 0) {
+    args.push('--tail', String(tail));
+  } else {
+    // 預設顯示最近 1 小時
+    args.push('--since', '1h');
+  }
+  const proc = spawn('kubectl', args, { shell: true });
 
   proc.stdout.on('data', d => {
     const lines = d.toString('utf8').split('\n');
@@ -800,13 +830,23 @@ router.get('/logs/pod/:ns/:pod', (req, res) => {
 });
 
 router.get('/logs/container/:id', (req, res) => {
-  const tail = parseInt(req.query.tail) || 100;
+  const since = req.query.since || '';
+  const tail = parseInt(req.query.tail) || 0;
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
 
   // Try docker CLI first
-  const proc = spawn('docker', ['logs', '-f', '--tail', String(tail), req.params.id], { shell: true });
+  const args = ['logs', '-f', '--timestamps'];
+  if (since) {
+    args.push('--since', since); // Docker accepts ISO date or duration like "1h"
+  } else if (tail > 0) {
+    args.push('--tail', String(tail));
+  } else {
+    args.push('--since', '1h');
+  }
+  args.push(req.params.id);
+  const proc = spawn('docker', args, { shell: true });
   let dockerFailed = false;
 
   proc.stdout.on('data', d => {

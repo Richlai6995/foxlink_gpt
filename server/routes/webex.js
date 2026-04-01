@@ -735,6 +735,40 @@ async function loadFunctionDeclarations(db, user) {
   return { declarations, handlers };
 }
 
+/**
+ * Sanitize Gemini history: filter empty model turns, merge consecutive same-role,
+ * strip leading model turns, ensure history ends with model turn.
+ */
+function sanitizeHistory(hist) {
+  if (!hist || hist.length === 0) return [];
+  const isEmptyTextPart = (p) => !p.inlineData && !p.functionCall && !p.functionResponse
+    && typeof p.text === 'string' && p.text.trim() === '';
+  // filter out model turns with only empty text
+  const filtered = hist.filter((entry) => {
+    if (entry.role !== 'model') return true;
+    return entry.parts.filter((p) => !isEmptyTextPart(p)).length > 0;
+  });
+  // merge consecutive same-role entries
+  const merged = [];
+  for (const entry of filtered) {
+    const last = merged[merged.length - 1];
+    if (last && last.role === entry.role) {
+      last.parts = [...last.parts, ...entry.parts];
+    } else {
+      merged.push({ role: entry.role, parts: [...entry.parts] });
+    }
+  }
+  // strip leading model turns (Gemini requires first content = user)
+  while (merged.length > 0 && merged[0].role === 'model') {
+    merged.shift();
+  }
+  // history must end with model turn
+  while (merged.length > 0 && merged[merged.length - 1].role === 'user') {
+    merged.pop();
+  }
+  return merged;
+}
+
 // ── 主訊息處理 ─────────────────────────────────────────────────────────────────
 async function processMessage(db, webex, user, sessionId, roomId, messageText, fileUrls, isDm, lang) {
   const today = getTaipeiDateStr();
@@ -852,11 +886,12 @@ async function processMessage(db, webex, user, sessionId, roomId, messageText, f
     `SELECT role, content FROM chat_messages
      WHERE session_id=? ORDER BY created_at DESC FETCH FIRST ? ROWS ONLY`
   ).all(sessionId, MAX_HISTORY_MESSAGES);
-  // 倒序回正序，移除最後一筆（剛插入的用戶訊息）
-  const history = historyMsgs.reverse().slice(0, -1).map(m => ({
+  // 倒序回正序，移除最後一筆（剛插入的用戶訊息），並 sanitize
+  const rawHistory = historyMsgs.reverse().slice(0, -1).map(m => ({
     role: m.role === 'user' ? 'user' : 'model',
     parts: [{ text: m.content || ' ' }],
   }));
+  const history = sanitizeHistory(rawHistory);
 
   // 5. 載入工具
   const { declarations, handlers } = await loadFunctionDeclarations(db, user);
@@ -1104,7 +1139,7 @@ async function handleWebexEvent(event) {
   const lockKey = `webex:msg:${message.id}`;
   let acquired = true;
   try {
-    acquired = await tryLock(lockKey, 60);
+    acquired = await tryLock(lockKey, 300);
   } catch (e) {
     console.warn('[Webex] Webhook tryLock error:', e.message);
     // Redis 故障時保守降級：仍處理（避免訊息遺失）

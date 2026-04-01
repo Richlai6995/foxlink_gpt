@@ -224,7 +224,7 @@ async function getDifyFunctionDeclarations(db, userCtx) {
     } else {
       const { userId, roleId, deptCode, profitCenter, orgSection, orgGroupName } = userCtx;
       kbs = await db.prepare(
-        `SELECT DISTINCT d.id, d.name, d.api_server, d.api_key, d.description, d.tags
+        `SELECT DISTINCT d.id, d.name, d.api_server, d.api_key, d.description, d.tags, d.sort_order
          FROM dify_knowledge_bases d
          WHERE d.is_active=1 AND (
            (d.is_public=1 AND d.public_approved=1)
@@ -1411,7 +1411,12 @@ router.post('/sessions/:id/messages', upload.array('files', 10), async (req, res
         }
       }
 
-      // Step 3: history must end with model turn
+      // Step 3: strip leading model turns (Gemini requires first content = user)
+      while (merged.length > 0 && merged[0].role === 'model') {
+        merged.shift();
+      }
+
+      // Step 4: history must end with model turn
       while (merged.length > 0 && merged[merged.length - 1].role === 'user') {
         merged.pop();
       }

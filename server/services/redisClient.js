@@ -110,6 +110,27 @@ module.exports = {
   },
 
   /**
+   * Generic shared key-value get (for cross-pod state like cursors).
+   * @param {string} key
+   * @returns {string|null}
+   */
+  async getSharedValue(key) {
+    const s = getStore();
+    return s.get(key);
+  },
+
+  /**
+   * Generic shared key-value set with TTL.
+   * @param {string} key
+   * @param {string} value
+   * @param {number} ttlSeconds
+   */
+  async setSharedValue(key, value, ttlSeconds = 600) {
+    const s = getStore();
+    await s.set(key, ttlSeconds, value);
+  },
+
+  /**
    * Release a distributed lock.
    */
   async unlock(key) {
