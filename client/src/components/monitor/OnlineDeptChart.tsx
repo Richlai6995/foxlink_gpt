@@ -81,21 +81,53 @@ export default function OnlineDeptChart() {
       smooth: true,
       data: times.map(t => timeData[t] || 0),
       emphasis: { focus: 'series' as const },
+      label: { show: false },
+      endLabel: { show: false },
     }))
 
     return {
-      tooltip: { trigger: 'axis' as const },
+      tooltip: {
+        trigger: 'axis' as const,
+        confine: true,
+        extraCssText: 'max-height:320px;overflow-y:auto;',
+        formatter: (params: any) => {
+          if (!Array.isArray(params) || params.length === 0) return ''
+          const title = `<div style="font-weight:600;margin-bottom:4px">${params[0].axisValue}</div>`
+          // 過濾掉 0 值，按人數降序
+          const items = params
+            .filter((p: any) => p.value > 0)
+            .sort((a: any, b: any) => b.value - a.value)
+          if (items.length === 0) return title + '<div style="color:#999">無上線人員</div>'
+          // 雙欄排列
+          const half = Math.ceil(items.length / 2)
+          const left = items.slice(0, half)
+          const right = items.slice(half)
+          const renderItem = (p: any) =>
+            `<div style="display:flex;align-items:center;gap:4px;white-space:nowrap">${p.marker}<span>${p.seriesName}</span><span style="font-weight:600;margin-left:auto;padding-left:8px">${p.value}</span></div>`
+          let html = title + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:0 16px">'
+          for (let i = 0; i < half; i++) {
+            html += renderItem(left[i])
+            if (right[i]) html += renderItem(right[i])
+            else html += '<div></div>'
+          }
+          html += '</div>'
+          return html
+        },
+      },
       legend: {
-        type: 'plain' as const,
-        top: 0,
-        left: 'center',
-        orient: 'horizontal' as const,
+        type: 'scroll' as const,
+        orient: 'vertical' as const,
+        right: 0,
+        top: 10,
+        bottom: 50,
         textStyle: { fontSize: 10 },
         itemWidth: 14,
         itemHeight: 10,
-        itemGap: 8,
+        itemGap: 6,
+        pageIconSize: 12,
+        pageTextStyle: { fontSize: 10 },
       },
-      grid: { top: 'auto' as any, right: 20, bottom: 50, left: 40 },
+      grid: { top: 10, right: 150, bottom: 50, left: 40 },
       xAxis: {
         type: 'category' as const,
         data: times,
