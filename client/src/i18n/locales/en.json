@@ -734,6 +734,14 @@
   },
   "help": {
     "title": "Help Documentation",
+    "pageTitle": "Foxlink GPT to Cortex User Guide",
+    "back": "Back",
+    "roleUser": "Regular User",
+    "roleAdmin": "Administrator",
+    "badgeUser": "Regular User Guide",
+    "badgeAdmin": "Administrator Guide",
+    "toc": "Contents",
+    "footerContact": "For questions, please contact your system administrator",
     "sections": {
       "intro": "System Introduction",
       "loginLogout": "Login & Logout",

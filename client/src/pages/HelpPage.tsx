@@ -6412,7 +6412,7 @@ type Role = 'user' | 'admin'
 export default function HelpPage() {
   const navigate = useNavigate()
   const { isAdmin } = useAuth()
-  const { i18n } = useTranslation()
+  const { t, i18n } = useTranslation()
   const [role, setRole] = useState<Role>(isAdmin ? 'admin' : 'user')
   const contentRef = useRef<HTMLDivElement>(null)
   const [apiSections, setApiSections] = useState<HelpSectionData[]>([])
@@ -6465,11 +6465,11 @@ export default function HelpPage() {
           className="flex items-center gap-2 text-slate-500 hover:text-slate-800 transition text-sm"
         >
           <ArrowLeft size={18} />
-          返回
+          {t('help.back')}
         </button>
         <div className="flex items-center gap-2">
           <BookOpen size={20} className="text-blue-500" />
-          <h1 className="text-lg font-bold text-slate-800">Foxlink GPT to Cortex 使用說明書</h1>
+          <h1 className="text-lg font-bold text-slate-800">{t('help.pageTitle')}</h1>
         </div>
 
         {/* Role tabs */}
@@ -6482,7 +6482,7 @@ export default function HelpPage() {
               }`}
           >
             <User size={15} />
-            一般使用者
+            {t('help.roleUser')}
           </button>
           {isAdmin && (
             <button
@@ -6493,7 +6493,7 @@ export default function HelpPage() {
                 }`}
             >
               <Settings size={15} />
-              系統管理員
+              {t('help.roleAdmin')}
             </button>
           )}
         </div>
@@ -6502,7 +6502,7 @@ export default function HelpPage() {
       <div className="flex flex-1 overflow-hidden">
         {/* Left TOC */}
         <nav className="w-56 bg-white border-r border-slate-200 overflow-y-auto flex-shrink-0 py-4 px-3">
-          <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider px-2 mb-3">目錄</p>
+          <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider px-2 mb-3">{t('help.toc')}</p>
           <div className="space-y-0.5">
             {sidebarItems.map((s) => (
               <button
@@ -6529,7 +6529,7 @@ export default function HelpPage() {
               : 'bg-blue-100 text-blue-700 border border-blue-200'
               }`}>
               {role === 'admin' ? <Settings size={15} /> : <User size={15} />}
-              {role === 'admin' ? '系統管理員操作手冊' : '一般使用者操作手冊'}
+              {role === 'admin' ? t('help.badgeAdmin') : t('help.badgeUser')}
             </div>
 
             {role === 'user' ? (
@@ -6548,8 +6548,8 @@ export default function HelpPage() {
 
             {/* Footer */}
             <div className="mt-16 pt-8 border-t border-slate-200 text-center">
-              <p className="text-slate-400 text-xs">Foxlink GPT to Cortex 使用說明書</p>
-              <p className="text-slate-300 text-xs mt-1">如有問題請洽系統管理員</p>
+              <p className="text-slate-400 text-xs">{t('help.pageTitle')}</p>
+              <p className="text-slate-300 text-xs mt-1">{t('help.footerContact')}</p>
             </div>
           </div>
         </main>
