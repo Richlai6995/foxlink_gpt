@@ -86,11 +86,16 @@ export default function OnlineDeptChart() {
     return {
       tooltip: { trigger: 'axis' as const },
       legend: {
-        type: 'scroll' as const,
+        type: 'plain' as const,
         top: 0,
+        left: 'center',
+        orient: 'horizontal' as const,
         textStyle: { fontSize: 10 },
+        itemWidth: 14,
+        itemHeight: 10,
+        itemGap: 8,
       },
-      grid: { top: 40, right: 20, bottom: 50, left: 40 },
+      grid: { top: 'auto' as any, right: 20, bottom: 50, left: 40 },
       xAxis: {
         type: 'category' as const,
         data: times,
@@ -159,7 +164,7 @@ export default function OnlineDeptChart() {
 
       {loading && <div className="animate-pulse h-48 bg-slate-50 rounded" />}
       {!loading && chartOption && (
-        <ReactECharts key={dimension} option={chartOption} style={{ height: 250 }} opts={{ renderer: 'svg' }} notMerge />
+        <ReactECharts key={dimension} option={chartOption} style={{ height: 350 }} opts={{ renderer: 'svg' }} notMerge />
       )}
       {!loading && !chartOption && (
         <div className="text-xs text-slate-400 text-center py-8">尚無部門統計資料（資料每 5 分鐘收集一次）</div>

@@ -258,6 +258,7 @@ export default function UserManagement() {
   const [userAssignments, setUserAssignments] = useState<Record<string, number | null>>({}) // userId → policyId
   const [showForm, setShowForm] = useState(false)
   const [editId, setEditId] = useState<number | null>(null)
+  const [editOriginalName, setEditOriginalName] = useState('')
   const [form, setForm] = useState<UserForm>(empty)
   const [formPolicyId, setFormPolicyId] = useState<number | null>(null)
   const [loading, setLoading] = useState(false)
@@ -359,6 +360,7 @@ export default function UserManagement() {
       kb_max_count: u2.kb_max_count != null ? String(u2.kb_max_count) : '',
     })
     setEditId(u.id)
+    setEditOriginalName(u.name)
     setError('')
     setShowForm(true)
   }
@@ -538,7 +540,20 @@ export default function UserManagement() {
                 </div>
                 <div>
                   <label className="label">{t('users.form.nameRequired')}</label>
-                  <input {...F('name')} className="input" />
+                  <input
+                    value={form.name}
+                    onChange={e => {
+                      const newName = e.target.value
+                      setForm(f => ({
+                        ...f,
+                        name: newName,
+                        ...(editId && newName !== editOriginalName && !f.name_manually_set
+                          ? { name_manually_set: true }
+                          : {}),
+                      }))
+                    }}
+                    className="input"
+                  />
                   <label className="flex items-center gap-1.5 mt-1 text-xs text-slate-500 cursor-pointer select-none">
                     <input
                       type="checkbox"
