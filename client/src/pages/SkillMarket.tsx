@@ -378,6 +378,7 @@ export default function SkillMarket() {
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                             {sharedSkills.map(sk => (
                                 <SkillCard key={sk.id} skill={sk}
+                                    onEdit={sk.my_share_type === 'develop' ? () => openEdit(sk) : undefined}
                                     onFork={sk.my_share_type === 'develop' ? () => fork(sk) : undefined}
                                     onUse={() => navigate(`/chat?skillId=${sk.id}`)}
                                     onView={() => setViewingSkill(sk)}
@@ -394,6 +395,7 @@ export default function SkillMarket() {
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                             {publicSkills.map(sk => (
                                 <SkillCard key={sk.id} skill={sk}
+                                    onEdit={sk.my_share_type === 'develop' ? () => openEdit(sk) : undefined}
                                     onFork={sk.my_share_type === 'develop' ? () => fork(sk) : undefined}
                                     onUse={() => navigate(`/chat?skillId=${sk.id}`)}
                                     onView={() => setViewingSkill(sk)}
@@ -1235,7 +1237,7 @@ function SkillCard({ skill, onEdit, onDelete, onFork, onRequestPublic, onUse, on
                             <GitFork size={13} />
                         </button>
                     )}
-                    {isOwner && onEdit && (
+                    {onEdit && (
                         <button onClick={onEdit} title="編輯" className="p-1 rounded hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition">
                             <Pencil size={13} />
                         </button>

@@ -546,14 +546,16 @@ router.get('/:id', async (req, res) => {
         const isOwner = s.owner_user_id === req.user.id;
         const isAdmin = req.user.role === 'admin';
         let isDevelop = isOwner || isAdmin;
-        if (!isOwner && !isAdmin && !s.is_public) {
+        if (!isOwner && !isAdmin) {
             const userProfile = await db.prepare(
                 'SELECT id, role, dept_code, profit_center, org_section, org_group_name FROM users WHERE id=?'
             ).get(req.user.id);
-            const hasAccess = userProfile && await canUserAccessSkill(db, req.params.id, userProfile);
-            if (!hasAccess) return res.status(403).json({ error: '無存取權限' });
-            // Check if user has develop permission
-            isDevelop = await hasDevAccess(db, req.params.id, userProfile);
+            if (!s.is_public) {
+                const hasAccess = userProfile && await canUserAccessSkill(db, req.params.id, userProfile);
+                if (!hasAccess) return res.status(403).json({ error: '無存取權限' });
+            }
+            // Check if user has develop permission (even for public skills)
+            isDevelop = userProfile ? await hasDevAccess(db, req.params.id, userProfile) : false;
         }
         res.json({ ...serializeSkill(s, !isDevelop), my_share_type: isDevelop ? 'develop' : 'use' });
     } catch (e) {
@@ -567,8 +569,14 @@ router.put('/:id', async (req, res) => {
         const db = require('../database-oracle').db;
         const s = await db.prepare('SELECT * FROM skills WHERE id=?').get(req.params.id);
         if (!s) return res.status(404).json({ error: '找不到 skill' });
-        if (s.owner_user_id !== req.user.id && req.user.role !== 'admin') {
-            return res.status(403).json({ error: '只有建立者或管理員可以編輯' });
+        const isOwner = s.owner_user_id === req.user.id;
+        const isAdmin = req.user.role === 'admin';
+        if (!isOwner && !isAdmin) {
+            const userProfile = await db.prepare(
+                'SELECT id, role, dept_code, profit_center, org_section, org_group_name FROM users WHERE id=?'
+            ).get(req.user.id);
+            const isDev = userProfile && await hasDevAccess(db, req.params.id, userProfile);
+            if (!isDev) return res.status(403).json({ error: '需要「開發」權限才能編輯' });
         }
         const { name, description, icon, type, system_prompt, endpoint_url, endpoint_secret,
             endpoint_mode, model_key, mcp_tool_mode, mcp_tool_ids, dify_kb_ids, tags,
