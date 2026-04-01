@@ -75,6 +75,7 @@ export default function HelpTranslationPanel() {
   // Abort support
   const batchJobIdRef = useRef<string | null>(null)
   const singleJobIdRef = useRef<Record<string, string>>({})
+  const knownErrorsRef = useRef<Set<string>>(new Set())
 
   // Edit modal
   const [editModal, setEditModal] = useState<{
@@ -157,78 +158,118 @@ export default function HelpTranslationPanel() {
     sessionStorage.removeItem(ACTIVE_JOB_KEY)
   }
 
-  /** Start polling for a job's progress. Works for both new and resumed jobs. */
+  /**
+   * Poll translation progress via DB status (multi-pod safe).
+   * Checks isOutdated() from help_translations table — works regardless of which pod
+   * handles the request. Falls back to in-memory progress endpoint every 4th poll
+   * for error detection.
+   */
   function startPolling(jobId: string, targetLang: string, sectionIds: string[], onDone: () => void) {
     if (pollingRef.current) clearInterval(pollingRef.current)
 
-    // Ensure queue keys are set so cells show waiting/translating
     const queueKeys = new Set(sectionIds.map(id => `${id}-${targetLang}`))
     setBatchQueueKeys(queueKeys)
     setBatchTranslating(true)
+    knownErrorsRef.current = new Set()
 
-    let notFoundCount = 0
-    const MAX_NOT_FOUND = 3 // Allow up to 3 not-found polls before giving up
+    let lastDoneCount = 0
+    let lastChangeTime = Date.now()
+    let pollCount = 0
+    const STALL_TIMEOUT = 5 * 60 * 1000 // 5 min without new completions → give up
 
     const poll = setInterval(async () => {
+      pollCount++
       try {
-        const res = await api.get(`/help/admin/translate/progress/${jobId}`)
-        const data = res.data
-        if (!data.found) {
-          notFoundCount++
-          if (notFoundCount < MAX_NOT_FOUND) return // Retry next poll
-          // Job truly gone (server restarted / expired / multi-pod miss)
-          clearInterval(poll)
-          pollingRef.current = null
-          clearActiveJob()
-          setBatchTranslating(false)
-          setBatchProgress(null)
-          setBatchQueueKeys(new Set())
-          fetchStatus()
-          return
-        }
-        notFoundCount = 0 // Reset on success
+        // Primary: check DB status (reliable across all pods)
+        const res = await api.get('/help/admin/status')
+        const allSections: SectionStatus[] = res.data
+        setSections(allSections)
 
         const newProgress: Record<string, TranslationProgress> = {}
         const newResults: Record<string, { ok: boolean; error?: string }> = {}
         let doneCount = 0
-        const entries = Object.entries(data.sections as Record<string, { status: string; error?: string; chunk?: number; totalChunks?: number }>)
+        let foundCurrent = false
 
-        for (let i = 0; i < entries.length; i++) {
-          const [secId, info] = entries[i]
+        for (let i = 0; i < sectionIds.length; i++) {
+          const secId = sectionIds[i]
           const key = `${secId}-${targetLang}`
-          newProgress[key] = {
-            sectionId: secId,
-            status: info.status as any,
-            index: i,
-            total: data.total,
-            chunk: info.chunk,
-            totalChunks: info.totalChunks,
-          }
+          const sec = allSections.find(s => s.id === secId)
+          const stillOutdated = !sec || isOutdated(sec, targetLang)
+          const hasError = knownErrorsRef.current.has(secId)
 
-          if (info.status === 'done') {
+          if (!stillOutdated) {
+            // Section is now up-to-date in DB → translation succeeded
             doneCount++
+            newProgress[key] = { sectionId: secId, status: 'done', index: i, total: sectionIds.length }
             newResults[key] = { ok: true }
-          } else if (info.status === 'error') {
+          } else if (hasError) {
+            // Known error from in-memory check
             doneCount++
-            newResults[key] = { ok: false, error: info.error || 'Unknown error' }
-          } else if (info.status === 'aborted') {
-            doneCount++
-            newResults[key] = { ok: false, error: 'Aborted' }
+            newProgress[key] = { sectionId: secId, status: 'error' as any, index: i, total: sectionIds.length }
+          } else if (!foundCurrent) {
+            // First still-outdated section → currently being translated
+            foundCurrent = true
+            newProgress[key] = { sectionId: secId, status: 'translating', index: i, total: sectionIds.length }
+          } else {
+            // After current → waiting
+            newProgress[key] = { sectionId: secId, status: 'pending', index: i, total: sectionIds.length }
           }
         }
 
         setProgressMap(prev => ({ ...prev, ...newProgress }))
         setResults(prev => ({ ...prev, ...newResults }))
-        setBatchProgress({ current: doneCount, total: data.total })
+        setBatchProgress({ current: doneCount, total: sectionIds.length })
 
-        if (data.done) {
+        // Track stall
+        if (doneCount > lastDoneCount) {
+          lastDoneCount = doneCount
+          lastChangeTime = Date.now()
+        }
+
+        // All sections accounted for → done
+        if (doneCount === sectionIds.length) {
+          clearInterval(poll)
+          pollingRef.current = null
+          clearActiveJob()
+          onDone()
+          return
+        }
+
+        // Every 4th poll (~10s): best-effort check in-memory progress for errors / job done
+        if (pollCount % 4 === 0) {
+          try {
+            const pRes = await api.get(`/help/admin/translate/progress/${jobId}`)
+            if (pRes.data.found) {
+              for (const [secId, info] of Object.entries(pRes.data.sections as Record<string, any>)) {
+                if (info.status === 'error') {
+                  knownErrorsRef.current.add(secId)
+                  const key = `${secId}-${targetLang}`
+                  setResults(prev => ({ ...prev, [key]: { ok: false, error: info.error || 'Error' } }))
+                }
+              }
+              if (pRes.data.done) {
+                clearInterval(poll)
+                pollingRef.current = null
+                clearActiveJob()
+                onDone()
+                return
+              }
+            }
+          } catch { /* best-effort, ignore cross-pod failures */ }
+        }
+
+        // Stall detection: no new completions for 5 minutes
+        if (Date.now() - lastChangeTime > STALL_TIMEOUT) {
+          console.warn('[HelpTranslation] Stall detected after 5 min, stopping')
           clearInterval(poll)
           pollingRef.current = null
           clearActiveJob()
           onDone()
         }
-      } catch { /* ignore polling errors */ }
-    }, 1500)
+      } catch (err) {
+        console.error('[HelpTranslation] Poll error:', err)
+      }
+    }, 2500)
 
     pollingRef.current = poll
   }
