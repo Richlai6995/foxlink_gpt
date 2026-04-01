@@ -78,15 +78,29 @@ function fmtTokens(v: number) {
 
 // ─── Sub-components ────────────────────────────────────────────────────────
 
-function ExportBtn({ href, label }: { href: string; label: string }) {
+function ExportBtn({ href, label, filename }: { href: string; label: string; filename?: string }) {
+  const handleClick = async () => {
+    try {
+      const res = await api.get(href.replace(/^\/api/, ''), { responseType: 'blob' })
+      const blob = new Blob([res.data], { type: 'text/csv;charset=utf-8' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = filename || 'export.csv'
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch (e) {
+      console.error('Export failed:', e)
+      alert('匯出失敗')
+    }
+  }
   return (
-    <a
-      href={href}
-      download
+    <button
+      onClick={handleClick}
       className="inline-flex items-center gap-1 px-3 py-1.5 text-xs bg-gray-100 hover:bg-gray-200 rounded border border-gray-300 text-gray-700"
     >
       <Download size={12} /> {label}
-    </a>
+    </button>
   )
 }
 
@@ -370,7 +384,7 @@ export default function CostAnalysis() {
       <div className="bg-white border rounded-lg p-4">
         <div className="flex items-center justify-between mb-3">
           <h3 className="text-sm font-semibold text-gray-700">利潤中心費用總表</h3>
-          <ExportBtn href={summaryExportUrl} label="匯出 CSV" />
+          <ExportBtn href={summaryExportUrl} label="匯出 CSV" filename={`summary_${startDate}_${endDate}.csv`} />
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-xs border-collapse">
@@ -417,7 +431,7 @@ export default function CostAnalysis() {
           <h3 className="text-sm font-semibold text-gray-700">
             月份費用分析表{selectedPC ? ` — ${summary.find(r => r.profit_center === selectedPC)?.profit_center_name}` : ''}
           </h3>
-          <ExportBtn href={monthlyExportUrl} label="匯出 CSV" />
+          <ExportBtn href={monthlyExportUrl} label="匯出 CSV" filename={`monthly_${startDate}_${endDate}.csv`} />
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-xs border-collapse">
@@ -463,7 +477,7 @@ export default function CostAnalysis() {
             Token 使用清單
             {filteredEmps.length !== employees.length && ` (篩選後 ${filteredEmps.length}/${employees.length} 人)`}
           </h3>
-          <ExportBtn href={empExportUrl} label="匯出 CSV" />
+          <ExportBtn href={empExportUrl} label="匯出 CSV" filename={`employees_${startDate}_${endDate}.csv`} />
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-xs border-collapse">
