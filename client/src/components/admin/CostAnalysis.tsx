@@ -108,9 +108,9 @@ function ExportBtn({ href, label, filename }: { href: string; label: string; fil
 
 export default function CostAnalysis() {
   const today = new Date().toISOString().slice(0, 10)
-  const firstOfMonth = today.slice(0, 8) + '01'
+  const thirtyDaysAgo = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10)
 
-  const [startDate, setStartDate] = useState(firstOfMonth)
+  const [startDate, setStartDate] = useState(thirtyDaysAgo)
   const [endDate, setEndDate] = useState(today)
   const [summary, setSummary] = useState<SummaryRow[]>([])
   const [monthly, setMonthly] = useState<MonthlyRow[]>([])
