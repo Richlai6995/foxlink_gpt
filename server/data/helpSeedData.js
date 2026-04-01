@@ -1,0 +1,6031 @@
+/**
+ * Help page seed data — zh-TW (source of truth)
+ * Auto-extracted from HelpPage.tsx
+ * Generated: 2026-04-01
+ *
+ * Block types: para, tip, note, table, steps, code, list, subsection, card_grid, comparison
+ */
+
+const userSections = [
+  {
+    "id": "u-intro",
+    "sort_order": 1,
+    "icon": "BookOpen",
+    "icon_color": "text-blue-500",
+    "last_modified": "2026-04-01",
+    "title": "系統介紹",
+    "sidebar_label": "系統介紹",
+    "blocks": [
+      {
+        "type": "para",
+        "text": "Foxlink GPT to Cortex 是正崴精密工業內部專屬的 AI 智慧助理平台，同時整合 **Azure OpenAI (AOAI)** 與 **Google Gemini** 兩大語言模型體系，提供流暢的多語言對話、文件深度分析、多媒體處理、工具調用及自動化排程等功能，協助同仁大幅提升日常工作效率。"
+      },
+      {
+        "type": "para",
+        "text": "平台以企業安全為前提，所有資料傳輸均在正崴內部網路環境下進行，對話記錄保存於公司伺服器，符合資訊安全及稽核要求。"
+      },
+      {
+        "type": "table",
+        "headers": [
+          "功能",
+          "說明"
+        ],
+        "rows": [
+          [
+            "多樣語言模型",
+            "支援 AOAI（GPT 系列）與 Gemini（Pro / Flash / Image）多種模型，可依需求自由切換"
+          ],
+          [
+            "智慧對話",
+            "支援繁體中文、英文及越南文，具備單次 Session 完整記憶能力"
+          ],
+          [
+            "深度研究",
+            "自動拆解成最多 12 個子議題分別調查，可結合知識庫、技能、MCP 工具作為資料來源或輸入提示"
+          ],
+          [
+            "文件分析",
+            "可上傳 PDF、Word、Excel、PowerPoint、圖片，AI 直接閱讀並分析內容"
+          ],
+          [
+            "工具調用",
+            "可調用自建知識庫、DIFY 知識庫、MCP 工具及技能（Skill）進行問答與作業自動化"
+          ],
+          [
+            "AI 戰情室",
+            "結合 Oracle ERP 資料庫與向量語意搜尋，用自然語言查詢生產戰情，並生成圖表 / 儀表板"
+          ],
+          [
+            "任務排程",
+            "設定排程讓 AI 定期執行分析任務，結果自動寄送 Email 或生成下載檔案"
+          ],
+          [
+            "音訊轉文字",
+            "上傳語音檔，系統自動轉錄為文字後送 AI 分析"
+          ],
+          [
+            "生成輸出",
+            "AI 可依指令生成 PDF、Excel、Word、PPT、TXT 供下載"
+          ],
+          [
+            "對話記錄",
+            "所有對話永久保存於伺服器，可隨時查閱、搜尋歷史問答"
+          ]
+        ]
+      },
+      {
+        "type": "note",
+        "text": "部分進階功能（如深度研究、排程任務、知識庫建立、AI 戰情室）須由系統管理員開通對應權限後才能使用，若看不到相關入口，請洽 IT 部門申請。"
+      }
+    ]
+  },
+  {
+    "id": "u-login",
+    "sort_order": 2,
+    "icon": "User",
+    "icon_color": "text-indigo-500",
+    "last_modified": "2026-04-01",
+    "title": "登入與登出",
+    "sidebar_label": "登入與登出",
+    "blocks": [
+      {
+        "type": "subsection",
+        "title": "Foxlink SSO 單一登入（AD 帳號適用）",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "持有公司 Active Directory（AD）網域帳號的同仁，可使用 **Foxlink SSO** 一鍵登入，無需另外記憶 Foxlink GPT to Cortex 密碼。"
+          },
+          {
+            "type": "steps",
+            "items": [
+              {
+                "title": "開啟瀏覽器，輸入系統網址",
+                "desc": "建議使用 Chrome 或 Edge 以獲得最佳體驗"
+              },
+              {
+                "title": "點選登入頁面的「Foxlink SSO 登入」藍色按鈕",
+                "desc": "系統自動導向公司 SSO 驗證頁面"
+              },
+              {
+                "title": "輸入您的 AD 工號與 AD 密碼完成驗證",
+                "desc": "若您已在公司內部網路環境登入 AD，可能免輸入直接通過"
+              },
+              {
+                "title": "驗證通過後自動跳回 Foxlink GPT to Cortex 主畫面"
+              }
+            ]
+          },
+          {
+            "type": "note",
+            "text": "**重要：SSO 僅適用於擁有 AD 帳號的正崴員工。**由系統管理員手動建立的本地帳號（如外部合作夥伴、特殊功能帳號）無法使用 SSO，必須以帳號密碼方式登入（見下方說明）。"
+          },
+          {
+            "type": "tip",
+            "text": "AD 帳號登入後如需修改密碼，請透過公司 AD 系統（如 Windows 網域）更改，Foxlink GPT to Cortex 的「修改密碼」功能僅限本地帳號使用。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "帳號密碼登入（本地帳號適用）",
+        "blocks": [
+          {
+            "type": "steps",
+            "items": [
+              {
+                "title": "開啟瀏覽器，輸入系統網址"
+              },
+              {
+                "title": "在登入頁面輸入帳號與密碼",
+                "desc": "帳號密碼由系統管理員提供，首次使用請先洽系統管理員確認帳號已建立並啟用"
+              },
+              {
+                "title": "點選「登入」按鈕，登入成功後自動跳轉至主畫面"
+              }
+            ]
+          },
+          {
+            "type": "note",
+            "text": "若帳號未啟用，系統會顯示「帳號尚未啟用」提示，請洽系統管理員確認帳號狀態。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "忘記密碼（本地帳號適用）",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "本地帳號若忘記密碼，可使用登入頁面的「忘記密碼」功能，系統會寄送重設密碼連結至您的帳號綁定 Email。"
+          },
+          {
+            "type": "steps",
+            "items": [
+              {
+                "title": "在登入頁面點選「忘記密碼？」連結",
+                "desc": "位於登入按鈕下方"
+              },
+              {
+                "title": "輸入您的帳號（工號），點選「發送重設信件」"
+              },
+              {
+                "title": "至您的 Email 信箱開啟重設連結",
+                "desc": "連結有效期限通常為 24 小時"
+              },
+              {
+                "title": "依指示設定新密碼後即可重新登入"
+              }
+            ]
+          },
+          {
+            "type": "note",
+            "text": "AD 帳號忘記密碼請聯絡 IT 部門透過公司 AD 系統重設，無法透過此功能處理。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "登出系統",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "點選左側邊欄最下方的登出圖示（向左箭頭），即可安全登出。登出後 Token 立即失效，確保帳號安全。"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "u-ui",
+    "sort_order": 3,
+    "icon": "Settings",
+    "icon_color": "text-slate-500",
+    "last_modified": "2026-04-01",
+    "title": "介面導覽",
+    "sidebar_label": "介面導覽",
+    "blocks": [
+      {
+        "type": "para",
+        "text": "主畫面分為兩大區域：**左側邊欄**（導航與功能入口）與**中央對話區域**（對話主體）。"
+      },
+      {
+        "type": "card_grid",
+        "cols": 1,
+        "items": [
+          {
+            "title": "左側邊欄",
+            "borderColor": "slate",
+            "desc": "",
+            "items": [
+              "Foxlink GPT to Cortex Logo 及品牌識別",
+              "「+ 新對話」按鈕 — 建立全新對話 Session",
+              "AI 模型選擇下拉選單 — 切換 AOAI / Gemini 等模型",
+              "對話歷史清單（依今天、昨天、過去 7 天、更早分組）",
+              "「更多功能」折疊選單 — 含匯入分享、系統管理、排程任務、技能市集、知識庫市集、AI 戰情室、使用說明",
+              "語言切換（中文 / English / Tiếng Việt）",
+              "使用者資訊、修改密碼、登出圖示"
+            ]
+          },
+          {
+            "title": "中央對話區域",
+            "borderColor": "blue",
+            "desc": "",
+            "items": [
+              "頂部工具列：對話標題、分享按鈕、停止生成按鈕",
+              "頂部工具列功能開關：技能（✦）、自建知識庫（🗄️）、DIFY 知識庫（⚡）、MCP 工具（🌐）",
+              "頂部工具列額度指示器：顯示日 / 週 / 月用量（有設定時才出現）",
+              "頂部工具列消耗趨勢按鈕（📈）：查看個人各模型歷史費用走勢",
+              "頂部工具列深度研究面板（🔭）：發起或查閱研究任務",
+              "頂部工具列 AI 戰情快速入口（📊，有權限才顯示）",
+              "訊息區：您的問題（右側藍色泡泡）、AI 回覆（左側白色），支援 Markdown 格式化顯示",
+              "每則 AI 回覆底部：複製按鈕、Token 計數",
+              "底部：訊息輸入框（支援 Shift+Enter 換行、Enter 送出）、迴紋針附件按鈕（📎）、深度研究按鈕（🔍）"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "tip",
+        "text": "部分頂部工具列功能（如 AI 戰情室、排程任務）只有具備對應權限的帳號才會顯示，若有需要請洽系統管理員開通。"
+      }
+    ]
+  },
+  {
+    "id": "u-chat",
+    "sort_order": 4,
+    "icon": "MessageSquare",
+    "icon_color": "text-green-500",
+    "last_modified": "2026-04-01",
+    "title": "開始對話",
+    "sidebar_label": "開始對話",
+    "blocks": [
+      {
+        "type": "subsection",
+        "title": "發送訊息",
+        "blocks": [
+          {
+            "type": "steps",
+            "items": [
+              {
+                "title": "點選左上角「新對話」或直接在輸入框輸入問題"
+              },
+              {
+                "title": "在底部輸入框輸入您的問題或需求",
+                "desc": "支援多行輸入，按 Shift + Enter 換行，按 Enter 送出"
+              },
+              {
+                "title": "AI 開始即時串流回覆",
+                "desc": "回覆過程中可點選停止按鈕中斷生成"
+              }
+            ]
+          },
+          {
+            "type": "tip",
+            "text": "在同一個對話 Session 中，AI 會記住前面所有的對話內容。若想重新開始不帶上下文，請點選「新對話」。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "重新生成",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "滑鼠移到 AI 最後一則回覆上，點選重新整理圖示，系統會以相同問題重新生成一次回答，適合對回覆不滿意時使用。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "貼上圖片",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "在輸入框中直接按 Ctrl + V 可貼上剪貼簿中的圖片，或將圖片檔案拖曳至頁面任何位置上傳。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "生成圖片（重要）",
+        "blocks": [
+          {
+            "type": "note",
+            "text": "**要讓 AI 生成圖片，必須先在左側邊欄的模型下拉選單中切換為「Image 類型」模型**（例如 Gemini Image 或其他支援圖片輸出的模型）。使用一般 Pro / Flash / GPT 模型時，AI 無法生成圖片，只能描述圖片。"
+          },
+          {
+            "type": "para",
+            "text": "詳細的圖片生成與修圖操作說明，請參閱本文件的「圖片生成與修圖」章節。"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "u-model",
+    "sort_order": 5,
+    "icon": "Cpu",
+    "icon_color": "text-purple-500",
+    "last_modified": "2026-04-01",
+    "title": "選擇 AI 模型",
+    "sidebar_label": "選擇 AI 模型",
+    "blocks": [
+      {
+        "type": "para",
+        "text": "系統同時支援 **Azure OpenAI（AOAI）** 及 **Google Gemini** 兩大平台的多種模型，由左側邊欄的模型下拉選單切換。不同模型在能力、速度、費用上各有差異，請依需求選擇。"
+      },
+      {
+        "type": "card_grid",
+        "cols": 2,
+        "items": [
+          {
+            "emoji": "",
+            "title": "Gemini Pro",
+            "tag": {
+              "color": "blue",
+              "text": "高精度"
+            },
+            "desc": "• 高精度、深度思考能力\n• 適合複雜分析、報告撰寫\n• 長文件處理、多步驟推理\n• 回覆速度相對較慢",
+            "borderColor": "blue"
+          },
+          {
+            "emoji": "",
+            "title": "Gemini Flash",
+            "tag": {
+              "color": "orange",
+              "text": "快速"
+            },
+            "desc": "• 回覆速度極快\n• 適合簡短問答、快速翻譯\n• 音訊轉錄使用此模型\n• Token 成本較低",
+            "borderColor": "yellow"
+          },
+          {
+            "emoji": "",
+            "title": "Gemini Image",
+            "tag": {
+              "color": "purple",
+              "text": "圖片生成"
+            },
+            "desc": "• **唯一支援生成圖片的模型**\n• 文字生圖、上傳圖修圖、風格轉換\n• 多輪對話連續調整圖片\n• 若需生成圖片，必須切換至此模型",
+            "borderColor": "violet"
+          },
+          {
+            "emoji": "",
+            "title": "AOAI GPT 5.4",
+            "tag": {
+              "color": "green",
+              "text": "目前最新"
+            },
+            "desc": "• **目前已支援 AOAI GPT 5.4 模型**\n• 長文脈絡理解能力強\n• 適合需要 OpenAI 相容 API 的場景\n• 後續將陸續新增更多 AOAI 模型",
+            "borderColor": "green"
+          }
+        ]
+      },
+      {
+        "type": "note",
+        "text": "**模型清單由系統管理員統一維護，**實際可用模型以畫面下拉選單為準，後續將陸續新增更多 AOAI 及 Gemini 模型版本。模型選擇會保存在您的瀏覽器，下次開啟仍會維持上次的選擇；切換模型不會影響當前對話歷史記錄。"
+      },
+      {
+        "type": "tip",
+        "text": "若模型下拉選單中看不到 Image 類型模型，表示管理員尚未開放此功能，請洽 IT 部門申請。"
+      }
+    ]
+  },
+  {
+    "id": "u-upload",
+    "sort_order": 6,
+    "icon": "Upload",
+    "icon_color": "text-teal-500",
+    "last_modified": "2026-04-01",
+    "title": "上傳檔案",
+    "sidebar_label": "上傳檔案",
+    "blocks": [
+      {
+        "type": "subsection",
+        "title": "支援格式",
+        "blocks": [
+          {
+            "type": "table",
+            "headers": [
+              "類型",
+              "支援格式",
+              "說明"
+            ],
+            "rows": [
+              [
+                "文件",
+                "PDF、DOCX、XLSX、PPTX、TXT、CSV",
+                "AI 直接讀取文件內容進行分析"
+              ],
+              [
+                "圖片",
+                "JPG、PNG、GIF、WEBP",
+                "AI 可辨識圖片中的文字與內容"
+              ],
+              [
+                "音訊",
+                "MP3、WAV、M4A、OGG、FLAC",
+                "自動轉錄為文字後送 AI 分析"
+              ]
+            ]
+          },
+          {
+            "type": "note",
+            "text": "不支援上傳影片檔案。單檔最大限制為 50MB（依管理員設定可能有所不同）。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "上傳方式",
+        "blocks": [
+          {
+            "type": "list",
+            "items": [
+              "**點選迴紋針圖示** — 輸入框右側的迴紋針按鈕，點選後選擇本機檔案，可同時選取多個檔案",
+              "**拖曳上傳** — 直接將檔案拖曳到頁面任何位置，頁面出現藍色框時放開即可",
+              "**貼上圖片** — 複製圖片後在輸入框按 Ctrl + V"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "u-history",
+    "sort_order": 7,
+    "icon": "History",
+    "icon_color": "text-orange-500",
+    "last_modified": "2026-04-01",
+    "title": "對話歷史",
+    "sidebar_label": "對話歷史",
+    "blocks": [
+      {
+        "type": "para",
+        "text": "所有對話均永久保存於伺服器端，與瀏覽器無關。左側邊欄依時間分組顯示歷史對話（今天、昨天、過去 7 天、更早）。"
+      },
+      {
+        "type": "subsection",
+        "title": "查看歷史",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "點選左側邊欄任意一條對話標題，即可重新開啟該對話並查看完整的問答記錄。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "重新命名對話",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "系統預設以 AI 自動生成的摘要作為對話標題，您可以隨時將其改為更易辨識的名稱："
+          },
+          {
+            "type": "steps",
+            "items": [
+              {
+                "title": "滑鼠移到左側邊欄的對話標題上",
+                "desc": "右側出現鉛筆圖示（✏）"
+              },
+              {
+                "title": "點選鉛筆圖示，標題變為可編輯輸入框"
+              },
+              {
+                "title": "輸入新名稱，按 Enter 確認，或按 Esc 取消",
+                "desc": "也可點選輸入框旁的確認勾選圖示（✓）儲存"
+              }
+            ]
+          },
+          {
+            "type": "tip",
+            "text": "系統支援多語言標題，修改時 AI 會同步翻譯成英文及越南文，方便切換語系後也能看到對應語言的標題。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "刪除對話",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "滑鼠移到對話標題上，右側會出現垃圾桶圖示，點選即可刪除該對話。刪除後無法復原，請謹慎操作。"
+          },
+          {
+            "type": "note",
+            "text": "刪除僅影響您的對話列表視覺顯示，系統管理員的稽核日誌中仍會保留此對話記錄。"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "u-tools",
+    "sort_order": 8,
+    "icon": "Terminal",
+    "icon_color": "text-cyan-500",
+    "last_modified": "2026-04-01",
+    "title": "可用工具",
+    "sidebar_label": "可用工具",
+    "blocks": [
+      {
+        "type": "para",
+        "text": "Foxlink GPT to Cortex 支援多種工具擴展能力，讓 AI 在對話中自動取用企業內部資料、知識庫及技能。您可以透過對話頂部工具列的各功能開關，明確指定要使用哪些工具；也可以讓系統根據訊息內容自動判斷（TAG 路由機制）。"
+      },
+      {
+        "type": "subsection",
+        "title": "工具類型說明",
+        "blocks": [
+          {
+            "type": "card_grid",
+            "cols": 2,
+            "items": [
+              {
+                "emoji": "🔌",
+                "title": "MCP 工具",
+                "tag": {
+                  "color": "blue",
+                  "text": "即時外部查詢"
+                },
+                "desc": "連接外部系統的即時查詢工具，例如 ERP 資料庫查詢、Oracle 程式搜尋等。AI 在判斷需要時自動呼叫，無需手動觸發。",
+                "borderColor": "cyan"
+              },
+              {
+                "emoji": "📚",
+                "title": "DIFY 知識庫",
+                "tag": {
+                  "color": "orange",
+                  "text": "企業文件庫"
+                },
+                "desc": "由 DIFY 平台管理的企業內部文件知識庫，例如產品規格、SOP 手冊。對話時自動查詢，找到相關段落則注入給 AI 作為回答依據。",
+                "borderColor": "yellow"
+              },
+              {
+                "emoji": "🗄️",
+                "title": "自建知識庫",
+                "tag": {
+                  "color": "green",
+                  "text": "向量語意搜尋"
+                },
+                "desc": "由您或同事在「知識庫市集」中建立並上傳文件的向量化知識庫。支援 PDF、Word、Excel、PPTX 等格式，語意搜尋精度高。可在對話頂部的「知識庫」按鈕中選擇要掛載哪幾個知識庫。",
+                "borderColor": "teal"
+              },
+              {
+                "emoji": "✨",
+                "title": "技能（Skill）",
+                "tag": {
+                  "color": "purple",
+                  "text": "角色與自動化"
+                },
+                "desc": "掛載技能後，AI 會自動套用對應的 System Prompt、外部 API 或工作流程。例如「翻譯技能」讓 AI 固定以指定語言回覆，「ERP 查詢技能」自動整合資料庫資料。可在技能市集瀏覽並掛載到對話。",
+                "borderColor": "purple"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "如何選擇要使用的工具",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "對話頂部工具列提供四個開關，可明確控制每類工具的啟用狀態："
+          },
+          {
+            "type": "table",
+            "headers": [
+              "開關",
+              "說明",
+              "啟用（亮色）",
+              "停用（灰色）"
+            ],
+            "rows": [
+              [
+                "✦ 技能",
+                "頂部紫色 Badge 圖示",
+                "自動套用掛載的技能",
+                "跳過技能注入"
+              ],
+              [
+                "🗄️ 知識庫",
+                "資料庫圖示",
+                "從已掛載的自建知識庫檢索",
+                "不做向量檢索"
+              ],
+              [
+                "⚡ DIFY",
+                "閃電圖示",
+                "從已掛載的 DIFY 知識庫查詢",
+                "跳過 DIFY 查詢"
+              ],
+              [
+                "🌐 MCP",
+                "地球圖示",
+                "允許 AI 呼叫 MCP 伺服器工具",
+                "停用所有 MCP 呼叫"
+              ]
+            ]
+          },
+          {
+            "type": "para",
+            "text": "此外，您也可以點選各開關圖示旁的下拉箭頭，**明確指定**要使用哪幾個知識庫 / MCP 伺服器 / DIFY 知識庫，而非讓系統自動選擇全部。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "兩種工具啟用模式",
+        "blocks": [
+          {
+            "type": "comparison",
+            "items": [
+              {
+                "title": "模式 A：明確指定（Explicit）",
+                "desc": "在工具列下拉選單**具體勾選**特定知識庫 / MCP 伺服器時啟用。\n系統**直接使用所選工具，跳過所有自動路由與 intent 判斷**，效率最高。",
+                "example": "例：勾選「自建 KB 工具列」→ 選「HR 制度知識庫」",
+                "borderColor": "blue"
+              },
+              {
+                "title": "模式 B：自動路由（Auto）",
+                "desc": "工具列**開關開啟但未具體選擇**，或**全部關閉**時啟用。\n系統依訊息內容智慧決定要呼叫哪些工具（TAG 路由機制，見下方）。",
+                "example": "例：知識庫開關開啟 → 未勾選具體 KB → 系統自動比對",
+                "borderColor": "slate"
+              }
+            ]
+          },
+          {
+            "type": "note",
+            "text": "空陣列（全部取消勾選）等同「未選」，系統會切換回自動路由，不會跳過工具。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "自動路由完整流程（Auto 模式）",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "每次送出訊息時，系統依以下步驟決定傳哪些工具給 AI："
+          },
+          {
+            "type": "steps",
+            "items": [
+              {
+                "title": "依存取權限載入可用工具",
+                "desc": "MCP 依 mcp_access 授權、DIFY KB 依 dify_access 授權、自建 KB 依 creator/公開/kb_access 授權 — 只載入您有權使用的工具"
+              },
+              {
+                "title": "套用技能（Skill）約束",
+                "desc": "若 session 有掛載技能，技能可強制限制工具清單（見下方「技能對工具的影響」）"
+              },
+              {
+                "title": "TAG 自動路由（有任何工具設定 Tags 時）",
+                "desc": "Flash LLM 提取訊息意圖標籤 → 與工具 Tags 比對 → 再以 LLM 依描述精篩"
+              },
+              {
+                "title": "Fallback（所有工具均無 Tags 時）",
+                "desc": "Flash LLM 直接閱讀全部工具的描述文字做分類，效率較低、準確性較差"
+              },
+              {
+                "title": "Gemini Function Calling 最終決策",
+                "desc": "篩選後的工具以 function declarations 傳給 LLM，由 AI 根據對話上下文決定實際要呼叫哪個"
+              }
+            ]
+          },
+          {
+            "type": "code",
+            "text": "使用者訊息\n    │\n    ▼\n[Step 1] 依授權載入可用工具（MCP / DIFY KB / 自建 KB）\n    │\n    ▼\n[Step 2] 技能約束（disable / exclusive / append）\n    │\n    ├─ 有任何工具設定了 Tags？\n    │        ▼ YES\n    │  [Step 3a] Flash 提取意圖標籤（0~5 個）\n    │        ▼\n    │  TAG 比對（雙向模糊）\n    │        ▼\n    │  有匹配候選 → Flash 描述精篩 → 選中工具\n    │  無匹配候選 → Flash 對全部工具描述分類\n    │\n    └─ NO（全部無 Tags）\n       [Step 4] Flash 對全部工具描述分類（Fallback）\n    │\n    ▼\n[Step 5] 送給 Gemini → LLM 決定呼叫哪個工具\n    │\n    ▼\n執行工具 → 結果注入 prompt → AI 回覆"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "TAG 路由的判斷規則",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "系統使用 Gemini Flash 作為「意圖分類器」（不是回答問題），進行兩個階段的判斷："
+          },
+          {
+            "type": "list",
+            "items": [
+              "**第一階段：TAG 比對（雙向模糊）** — Flash 從訊息中提取 0~5 個主題標籤（如 `「人資」「請假」「HR」`），再與工具 Tags 做雙向部分比對：\n✓ `「人資」` 比對工具 Tag `「HR人資管理」` → 命中\n✗ `「庫存」` 比對工具 Tag `「人資」` → 不命中",
+              "**第二階段：描述精篩（Flash 判斷）** — 對 TAG 比對命中的候選工具，Flash 再讀工具的「說明描述」做更嚴格的判斷，規則：\n• 核心意圖必須**完全符合**工具說明範疇才選用\n• 跟進前一輪 AI 問題的回覆，會參考最近 4 則對話上下文繼續使用同工具\n• 一般聊天、寫作、摘要等不需工具的問題 → 一律不選任何工具\n• 不確定時，不選用（寧可不呼叫，避免雜訊）"
+            ]
+          },
+          {
+            "type": "comparison",
+            "items": [
+              {
+                "title": "✅ 有 Tags → 精準高效",
+                "desc": "先縮小候選範圍再精篩，LLM 只需判斷少量工具，準確性高、消耗 Token 少。",
+                "borderColor": "green"
+              },
+              {
+                "title": "⚠️ 無 Tags → Fallback 效果較差",
+                "desc": "Flash 需要閱讀全部工具描述做分類，工具數量多時效果下降，也多消耗 Token。建議管理員為每個工具設定 Tags。",
+                "borderColor": "orange"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "技能（Skill）對工具的影響",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "掛載技能後，技能可以約束 Auto 模式下的工具範圍。技能設定分三種模式："
+          },
+          {
+            "type": "table",
+            "headers": [
+              "模式",
+              "MCP 工具行為",
+              "KB 工具行為"
+            ],
+            "rows": [
+              [
+                "disable",
+                "移除全部 MCP 工具，AI 無法呼叫任何 MCP",
+                "移除全部 DIFY + 自建 KB，不做知識庫查詢"
+              ],
+              [
+                "exclusive（排他）",
+                "只保留技能指定的 MCP 伺服器，其他全移除",
+                "只保留技能指定的 KB，其他全移除"
+              ],
+              [
+                "append（附加）",
+                "在使用者有存取權的 MCP 之外，強制額外加入技能指定的伺服器",
+                "強制加入技能指定的 KB（即使使用者原本沒有存取權）"
+              ]
+            ]
+          },
+          {
+            "type": "note",
+            "text": "Code 技能（程式執行工具）永遠附加到工具清單，不受以上模式影響。\n明確指定模式（Explicit）下，disable 規則仍然生效作為安全防護。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "特殊快速路徑（Fast Path）",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "以下情況系統會走優化路徑，跳過 Gemini Function Calling，提升回應速度："
+          },
+          {
+            "type": "table",
+            "headers": [
+              "條件",
+              "行為",
+              "優點"
+            ],
+            "rows": [
+              [
+                "只選中 DIFY KB（無 MCP）",
+                "並行查詢全部選中的 DIFY KB → 結果直接注入 prompt → AI 整合回覆",
+                "省略 function calling 往返，速度更快"
+              ],
+              [
+                "只選中自建 KB（無 MCP）",
+                "並行向量檢索全部選中的自建 KB → 結果注入 prompt",
+                "同上"
+              ],
+              [
+                "混合模式（MCP + KB）",
+                "走 Gemini 原生 function calling，AI 自行決定呼叫哪些工具、呼叫幾次",
+                "靈活性高，可多輪工具調用"
+              ]
+            ]
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "情境對照表",
+        "blocks": [
+          {
+            "type": "table",
+            "headers": [
+              "您的操作",
+              "系統行為",
+              "工具覆蓋範圍"
+            ],
+            "rows": [
+              [
+                "全部開關關閉",
+                "Auto 模式：TAG 路由對全部可用工具",
+                "依授權範圍內所有工具"
+              ],
+              [
+                "開關開啟，未具體勾選",
+                "Auto 模式：TAG 路由（只看開啟的類別）",
+                "該類別的授權工具"
+              ],
+              [
+                "下拉勾選具體工具",
+                "Explicit 模式：直接使用選中工具",
+                "只有您勾選的那幾個"
+              ],
+              [
+                "掛載技能（disable）",
+                "Auto 模式，但 Skill disable 先移除對應類別",
+                "受技能限制"
+              ],
+              [
+                "掛載技能（exclusive）",
+                "Auto 模式，但只保留技能指定工具",
+                "技能指定的工具"
+              ]
+            ]
+          },
+          {
+            "type": "tip",
+            "text": "最精確的方式：下拉選單明確勾選目標工具 + 關閉不需要的類別開關。最省力的方式：所有工具設定好 Tags，讓系統 TAG 路由自動判斷。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "使用範例",
+        "blocks": [
+          {
+            "type": "list",
+            "items": [
+              "**MCP 工具（ERP 查詢）**\n• 「搜尋 WIP 相關的 Oracle 程式有哪些？」\n• 「FL_MOA_B2_WIP_DETAIL_P 這支程式是誰寫的？」\n• 「查 WIP_DISCRETE_JOBS 這張資料表被哪些程式使用？」",
+              "**自建知識庫 / DIFY 知識庫（文件查詢）**\n• 「FL-X100 連接器的最大電流規格是多少？」\n• 「查詢產品 BOM 結構中 PN12345 的規格」\n• 「生產 SOP 中關於焊接溫度的規定是什麼？」"
+            ]
+          },
+          {
+            "type": "tip",
+            "text": "若沒有看到工具相關選項，表示管理員尚未設定或開放相關功能，可洽 IT 部門申請。"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "u-schedule",
+    "sort_order": 9,
+    "icon": "Clock",
+    "icon_color": "text-green-500",
+    "last_modified": "2026-04-01",
+    "title": "自動排程功能",
+    "sidebar_label": "自動排程功能",
+    "blocks": [
+      {
+        "type": "para",
+        "text": "排程任務可讓系統在指定時間自動執行 AI 分析，並將結果以 Email 寄送給您，或生成 PDF、Excel 等檔案供下載。適合每日新聞摘要、匯率通知、定期報表等重複性需求，完全不需要人工操作。"
+      },
+      {
+        "type": "note",
+        "text": "排程任務功能需由系統管理員開啟權限後才能使用。若左側邊欄看不到「排程任務」按鈕，請洽管理員申請。"
+      },
+      {
+        "type": "subsection",
+        "title": "建立我的第一個排程",
+        "blocks": [
+          {
+            "type": "steps",
+            "items": [
+              {
+                "title": "點選左側邊欄「排程任務」",
+                "desc": "進入排程任務管理頁面"
+              },
+              {
+                "title": "點選「新增任務」按鈕"
+              },
+              {
+                "title": "填寫任務名稱與執行時間",
+                "desc": "選擇每日、每週或每月，並設定幾點幾分執行"
+              },
+              {
+                "title": "撰寫 AI Prompt（問題內容）",
+                "desc": "告訴 AI 要做什麼，可以加入特殊語法讓 AI 抓取即時資料"
+              },
+              {
+                "title": "填入 Email 收件地址",
+                "desc": "AI 完成後自動寄報告給您"
+              },
+              {
+                "title": "儲存並啟用",
+                "desc": "狀態設為「執行中」即完成"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "Prompt 中的自動變數",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "在 Prompt 裡可以使用以下變數，系統執行時會自動帶入當天的實際值："
+          },
+          {
+            "type": "table",
+            "headers": [
+              "寫法",
+              "執行時替換為",
+              "範例"
+            ],
+            "rows": [
+              [
+                "{{date}}",
+                "執行當天日期",
+                "2026-03-01"
+              ],
+              [
+                "{{weekday}}",
+                "執行當天星期幾",
+                "星期六"
+              ],
+              [
+                "{{task_name}}",
+                "您設定的任務名稱",
+                "台股日報"
+              ]
+            ]
+          },
+          {
+            "type": "code",
+            "text": "Prompt 範例\n\n今天是 {{date}}（{{weekday}}），\n請為「{{task_name}}」撰寫今日工作提醒摘要。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "抓取即時網路資料",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "排程 Prompt 支援兩種方式讓 AI 自動抓取最新資料，不需要您手動複製貼上："
+          },
+          {
+            "type": "list",
+            "items": [
+              "**抓取 API 或 RSS Feed** [fetch] — 適合新聞 API、RSS 訂閱、政府開放資料等直接回傳 JSON/XML 的網址\n`{{fetch:https://api.cnyes.com/media/api/v1/newslist/category/tw_stock?limit=10}}`",
+              "**抓取一般網頁** [scrape] — 適合一般新聞文章、銀行匯率頁、供應商官網公告等 HTML 網頁\n`{{scrape:https://rate.bot.com.tw/xrt?Lang=zh-TW}}`"
+            ]
+          },
+          {
+            "type": "tip",
+            "text": "同一個 Prompt 可以同時使用多個 fetch 和 scrape，AI 會將所有資料一起分析。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "讓 AI 生成可下載的檔案",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "在 Prompt 末尾指示 AI 將報告輸出為特定格式，系統會自動生成檔案並附在 Email 中："
+          },
+          {
+            "type": "table",
+            "headers": [
+              "檔案格式",
+              "寫法範例"
+            ],
+            "rows": [
+              [
+                "PDF 報告",
+                "generate_pdf:報告名稱_{{date}}.pdf"
+              ],
+              [
+                "Excel 表格",
+                "generate_xlsx:報告名稱_{{date}}.xlsx"
+              ],
+              [
+                "Word 文件",
+                "generate_docx:報告名稱_{{date}}.docx"
+              ],
+              [
+                "PowerPoint",
+                "generate_pptx:報告名稱_{{date}}.pptx"
+              ],
+              [
+                "純文字",
+                "generate_txt:報告名稱_{{date}}.txt"
+              ]
+            ]
+          },
+          {
+            "type": "note",
+            "text": "以上語法須以三個反引號（```）包覆，置於 Prompt 最後，再附上報告內容說明。詳細格式請參閱系統管理員版說明書。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "在 Prompt 中直接引用工具（技能 / 知識庫）",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "撰寫排程 Prompt 時，可以直接在文字中引用已建立的技能（Skill）和知識庫（KB），系統執行時會自動呼叫對應的工具並將結果注入給 AI 分析。"
+          },
+          {
+            "type": "table",
+            "headers": [
+              "語法",
+              "說明",
+              "範例"
+            ],
+            "rows": [
+              [
+                "{{skill:技能名稱}}",
+                "執行指定技能，將技能回傳結果注入對話背景",
+                "{{skill:匯率查詢}}"
+              ],
+              [
+                "{{kb:知識庫名稱}}",
+                "從指定知識庫查詢與 Prompt 相關的段落，注入背景",
+                "{{kb:產品規格庫}}"
+              ]
+            ]
+          },
+          {
+            "type": "code",
+            "text": "Prompt 引用工具範例\n\n今天是 {{date}}（{{weekday}}），\n請根據以下最新匯率資料 {{skill:匯率查詢}}\n以及生產 SOP 規定 {{kb:製程標準庫}}\n整理本日需注意事項並以繁體中文條列輸出。"
+          },
+          {
+            "type": "tip",
+            "text": "撰寫 Prompt 時，輸入 `{{skill:` 或 `{{kb:` 後，系統會自動彈出技能 / 知識庫名稱選單供快速選取，也可用斜線 `/` 觸發同樣的選單。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "Pipeline 管線：串接多步驟工作流程",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "Pipeline 讓一個排程任務依序執行多個步驟（節點），前一步的結果可作為後一步的輸入，適合需要「查資料 → 分析 → 生成報告 → 寄信」等多階段自動化作業。"
+          },
+          {
+            "type": "para",
+            "text": "在任務編輯頁切換至「**Pipeline 管線**」頁籤，點「+ 新增節點」加入步驟。"
+          },
+          {
+            "type": "table",
+            "headers": [
+              "節點類型",
+              "圖示",
+              "說明",
+              "適用場景"
+            ],
+            "rows": [
+              [
+                "技能（Skill）",
+                "⚡ 黃色",
+                "呼叫指定技能，將技能回傳結果存入輸出變數",
+                "即時查詢庫存、呼叫外部 API"
+              ],
+              [
+                "MCP 工具",
+                "🔧 紫色",
+                "直接呼叫 MCP 伺服器的指定工具，傳入 args 參數",
+                "搜尋 Oracle 程式、ERP 資料查詢"
+              ],
+              [
+                "知識庫（KB）",
+                "📖 綠色",
+                "以 query 文字查詢指定知識庫，取得相關段落",
+                "查 SOP、產品規格、技術文件"
+              ],
+              [
+                "AI 追加（AI）",
+                "🤖 藍色",
+                "讓 AI 對前一步的結果再做分析/整理，需撰寫 Prompt",
+                "整合多個來源後做二次摘要"
+              ],
+              [
+                "生成檔案",
+                "📤 靛色",
+                "將前一步 AI 輸出生成特定格式檔案",
+                "輸出 Excel / PDF / PPT / Word"
+              ],
+              [
+                "條件判斷",
+                "🌿 玫瑰色",
+                "根據前一步輸出進行分支（if/else），支援 AI 判斷或文字比對",
+                "根據異常數量高低分流"
+              ],
+              [
+                "並行執行",
+                "⑁ 青色",
+                "將多個子步驟同時執行，加速多路查詢",
+                "同時查多個知識庫、多個 API"
+              ]
+            ]
+          },
+          {
+            "type": "para",
+            "text": "每個節點都可設定「**失敗時行為**」："
+          },
+          {
+            "type": "table",
+            "headers": [
+              "失敗行為",
+              "說明"
+            ],
+            "rows": [
+              [
+                "continue（繼續）",
+                "此步驟失敗後跳過，繼續執行下一個節點"
+              ],
+              [
+                "stop（停止）",
+                "此步驟失敗後中止整個 Pipeline，不寄出報告"
+              ],
+              [
+                "goto（跳轉）",
+                "此步驟失敗後跳到指定節點 ID 繼續執行"
+              ]
+            ]
+          },
+          {
+            "type": "code",
+            "text": "Pipeline 典型流程範例\n\n[1] MCP 工具：查詢本日 ERP 不良工單數量\n    ↓\n[2] 知識庫：查詢相關 SOP 改善措施\n    ↓\n[3] AI 追加：整合以上資料，撰寫異常摘要報告\n    ↓\n[4] 生成檔案：輸出為 Excel，檔名 異常報告_{{date}}.xlsx\n    ↓（寄出 Email 附附件）"
+          },
+          {
+            "type": "tip",
+            "text": "Pipeline 與 Prompt 可以同時使用：Prompt 作為主要的 AI 指示，Pipeline 則在 Prompt 執行前先完成資料收集步驟，Pipeline 的最終輸出會自動注入到 Prompt 的執行上下文中。"
+          },
+          {
+            "type": "note",
+            "text": "Pipeline 節點數量較多時執行時間會增加，建議使用並行節點加速獨立的查詢步驟。若無需多步驟，直接在 Prompt 中使用 `{{skill:}}` / `{{kb:}}` 語法即可，更簡潔。"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "u-image",
+    "sort_order": 10,
+    "icon": "ImageIcon",
+    "icon_color": "text-violet-500",
+    "last_modified": "2026-04-01",
+    "title": "圖片生成與修圖",
+    "sidebar_label": "圖片生成與修圖",
+    "blocks": [
+      {
+        "type": "para",
+        "text": "系統支援 Gemini 圖片生成模型，可依文字描述直接生成圖片，也可以上傳現有圖片後請 AI 進行修改、風格轉換、局部調整等作業。"
+      },
+      {
+        "type": "note",
+        "text": "圖片生成功能需選擇支援圖片輸出的模型（如 Gemini Image 模型），請確認左側模型選單中有此選項，否則請洽管理員開啟。"
+      },
+      {
+        "type": "subsection",
+        "title": "文字生圖",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "直接在對話框輸入您想要的圖片描述，AI 會依照說明生成圖片："
+          },
+          {
+            "type": "list",
+            "items": [
+              "幫我生成一張台灣風格的科技辦公室插圖，藍色調，現代感，適合用於簡報封面。",
+              "生成一個正崴精密工廠生產線的示意圖，寫實風格，畫面乾淨，橫向構圖。"
+            ]
+          },
+          {
+            "type": "tip",
+            "text": "描述越具體效果越好，可以說明風格（寫實/插畫/3D）、色調、構圖方向、使用場景。中文英文描述均可。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "修圖：對現有圖片進行 AI 編輯",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "上傳您的圖片，再用文字告訴 AI 要怎麼修改："
+          },
+          {
+            "type": "list",
+            "items": [
+              "**更換背景** — 請將這張產品圖的背景換成純白色",
+              "**風格轉換** — 將這張照片轉換為水彩畫風格",
+              "**局部修改** — 將圖中的文字改為英文版本",
+              "**補充元素** — 在圖片右下角加入 FOXLINK 公司 Logo 的位置提示",
+              "**調整色調** — 將整張圖調整為偏冷藍色的科技感配色"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "多輪對話修圖",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "在同一個 Session 中可以連續對圖片進行多次修改，AI 會記住上一輪的圖片狀態，您只需要說「再把左側的人物移除」、「顏色再深一點」即可持續調整。"
+          },
+          {
+            "type": "steps",
+            "items": [
+              {
+                "title": "上傳原始圖片，並說明第一步修改",
+                "desc": "例：幫我去除圖片中的浮水印"
+              },
+              {
+                "title": "AI 生成修改後的圖片",
+                "desc": "檢視結果是否符合需求"
+              },
+              {
+                "title": "繼續下一步修改",
+                "desc": "例：好，再把背景改為漸層藍"
+              },
+              {
+                "title": "滿意後下載圖片",
+                "desc": "點選圖片右鍵儲存，或點選下載連結"
+              }
+            ]
+          },
+          {
+            "type": "tip",
+            "text": "若對修改結果不滿意，可點選「重新生成」按鈕，AI 會以同樣指令重新嘗試，每次結果略有差異。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "注意事項",
+        "blocks": [
+          {
+            "type": "list",
+            "items": [
+              "生成圖片每次會消耗較多 Token，請注意使用量",
+              "不可生成涉及真實人物肖像、政治敏感、色情暴力等內容",
+              "生成的圖片版權建議用於內部使用，商業用途請確認授權規範",
+              "圖片生成時間約 10-30 秒，請耐心等待，不要重複送出"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "u-output",
+    "sort_order": 11,
+    "icon": "Download",
+    "icon_color": "text-pink-500",
+    "last_modified": "2026-04-01",
+    "title": "複製與下載",
+    "sidebar_label": "複製與下載",
+    "blocks": [
+      {
+        "type": "subsection",
+        "title": "複製 AI 回覆",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "滑鼠移到任意一則 AI 回覆上，左下角會出現複製圖示。點選後整則回覆文字（含格式）複製至剪貼簿，可直接貼入 Word 等應用程式。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "下載生成檔案",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "當您要求 AI 輸出特定格式的檔案（如請幫我匯出 Excel），AI 回覆結束後會自動顯示下載連結。點選連結即可下載，檔案保存於伺服器，可隨時回到歷史對話重新下載。"
+          },
+          {
+            "type": "tip",
+            "text": "生成檔案的指令範例：「請將以上資料整理成 Excel 表格並輸出」、「將報告轉為 PDF 格式」。"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "u-share",
+    "sort_order": 12,
+    "icon": "Share2",
+    "icon_color": "text-blue-500",
+    "last_modified": "2026-04-01",
+    "title": "分享對話",
+    "sidebar_label": "分享對話",
+    "blocks": [
+      {
+        "type": "para",
+        "text": "Foxlink GPT to Cortex 提供類似 ChatGPT 的對話分享功能，您可以將任何一段完整的對話建立為唯讀快照，並把連結分享給同事。對方只需登入即可查看，也可以選擇「繼續這段對話」複製一份到自己的帳號接著使用。"
+      },
+      {
+        "type": "subsection",
+        "title": "建立分享連結",
+        "blocks": [
+          {
+            "type": "steps",
+            "items": [
+              {
+                "title": "開啟您想分享的對話",
+                "desc": "從左側邊欄點選目標對話"
+              },
+              {
+                "title": "點選頂部工具列的「分享」按鈕",
+                "desc": "按鈕位於對話標題右側，AI 回覆中才會顯示"
+              },
+              {
+                "title": "系統建立快照並顯示分享連結",
+                "desc": "彈出視窗顯示完整 URL"
+              },
+              {
+                "title": "點選「複製」按鈕",
+                "desc": "複製連結後貼給同事即可"
+              }
+            ]
+          },
+          {
+            "type": "note",
+            "text": "分享連結建立後，原始對話的後續更改不會影響快照內容。快照是獨立的複本，兩者完全分離。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "查看分享內容",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "收到分享連結的使用者點開後，需先登入系統（需有效帳號），然後可以查看完整的對話記錄。頁面頂部會顯示分享者名稱及建立時間。"
+          },
+          {
+            "type": "comparison",
+            "items": [
+              {
+                "title": "唯讀模式",
+                "desc": "只能查看，無法修改或繼續對話，保護原始內容不被更動。",
+                "borderColor": "slate"
+              },
+              {
+                "title": "繼續對話（Fork）",
+                "desc": "點選「在我的對話繼續」，系統建立一份您專屬的對話副本，可自由接續。",
+                "borderColor": "blue"
+              }
+            ]
+          },
+          {
+            "type": "tip",
+            "text": "Fork（繼續對話）後會在您的對話歷史出現一筆標題為「[Fork] 原始標題」的新對話，不影響原分享快照。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "分享的圖片與檔案",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "分享快照建立時，對話中所有使用者上傳的圖片及 AI 生成的圖片都會複製一份到快照中，與原始檔案完全獨立。查看者及 Fork 使用者看到的圖片都是各自獨立的複本，互不影響。"
+          },
+          {
+            "type": "note",
+            "text": "若分享對話中含有文件（PDF、Word 等），文件內容已在對話時送給 AI 分析，快照中保留的是文字紀錄，不含原始檔案本身。"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "u-skill",
+    "sort_order": 13,
+    "icon": "Sparkles",
+    "icon_color": "text-purple-500",
+    "last_modified": "2026-04-01",
+    "title": "技能 Skill",
+    "sidebar_label": "技能 Skill",
+    "blocks": [
+      {
+        "type": "para",
+        "text": "技能（Skill）是可以掌載到對話的自訂模組，能讓 AI 具備特定領域的專業知識、固定指令或對接外部服務的能力。例如，掛載「專業術語翻譯」技能後，每次對話 AI 會自動以該行業的標準用語進行翻譯。"
+      },
+      {
+        "type": "subsection",
+        "title": "技能類型",
+        "blocks": [
+          {
+            "type": "card_grid",
+            "cols": 2,
+            "items": [
+              {
+                "emoji": "🧠",
+                "title": "內建 Prompt 技能",
+                "desc": "透過 System Prompt 給 AI 加上角色設定或指引。不需要外部服務，建立簡單。適合：翻譯腔調、行業專家、內部 SOP 助手等。",
+                "borderColor": "blue"
+              },
+              {
+                "emoji": "🌐",
+                "title": "外部 Endpoint 技能",
+                "desc": "呼叫外部 API，取得即時資料再供給 AI。適合：時刻查詢、即時庫存、外部知識庫對接等。",
+                "borderColor": "purple"
+              },
+              {
+                "emoji": "",
+                "title": "內部程式技能（Code）",
+                "desc": "在平台內直接撰寫 Node.js 程式碼，以獨立子程序運行。適合：即時股價查詢、ERP 資料對接、自動計算等需要程式邏輯的場景。需要管理員授予「允許程式技能」權限。",
+                "borderColor": "emerald"
+              },
+              {
+                "emoji": "",
+                "title": "工作流程技能（Workflow）",
+                "desc": "以 DAG（有向無環圖）視覺化編排多步驟流程，串接 LLM、知識庫、MCP 工具、HTTP 請求、條件判斷等節點。適合：多步驟審核流程、資料管線、複雜 AI Agent 等場景。",
+                "borderColor": "orange"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "端點模式（外部 / 程式技能適用）",
+        "blocks": [
+          {
+            "type": "table",
+            "headers": [
+              "模式",
+              "行為說明"
+            ],
+            "rows": [
+              [
+                "inject（注入）",
+                "Skill 執行後，將回傳的資料注入 AI 的 System Prompt，AI 再根據這份資料回答。AI 仍擁有思考空間，適合「提供背景資訊」的場景（如即時股價、庫存數據）。"
+              ],
+              [
+                "answer（直接回答）",
+                "Skill 執行結果直接作為最終回覆，完全略過 AI。適合需要精準固定格式輸出的場景。"
+              ]
+            ]
+          },
+          {
+            "type": "tip",
+            "text": "inject 模式：若使用者訊息中沒有觸發條件（如找不到股票代號），Skill 可回傳空 system_prompt，AI 會正常以 Google 搜尋或自身知識回答。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "如何將技能掛載到對話",
+        "blocks": [
+          {
+            "type": "steps",
+            "items": [
+              {
+                "title": "前往左側邊欄的「技能市集」",
+                "desc": "個人技能與公開技能均可在此瀏覽"
+              },
+              {
+                "title": "點選技能卡片右下角的「💬」(在對話中使用)",
+                "desc": "系統自動建立新對話並掛載此技能"
+              },
+              {
+                "title": "或開啟對話後，點選頂部工具列的「✨ 技能」按鈕",
+                "desc": "選擇要掛載的技能後點「確認掛載」"
+              },
+              {
+                "title": "頂部工具列出現紫色 Badge 確認掛載成功",
+                "desc": "此對話之後每次發訊都會自動套用此技能"
+              }
+            ]
+          },
+          {
+            "type": "tip",
+            "text": "可以對同一個對話掛載多個技能，效果會叠加。再次點「技能」按鈕即可修改或移除已掛載的技能。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "建立技能",
+        "blocks": [
+          {
+            "type": "steps",
+            "items": [
+              {
+                "title": "進入技能市集，點選「建立技能」"
+              },
+              {
+                "title": "填寫名稱、說明、選擇圖示與技能類型（內建 Prompt / 外部 / Code / Workflow）"
+              },
+              {
+                "title": "設定技能的 Tags（標籤）",
+                "desc": "Tags 決定系統在何時自動啟用此技能。建議設定 2~5 個精準標籤，如「翻譯」「越南文」，讓 TAG 路由機制能正確匹配"
+              },
+              {
+                "title": "完成設定後點「儲存」，技能預設為「私人」，僅自己可用"
+              }
+            ]
+          },
+          {
+            "type": "note",
+            "text": "技能同樣需要設定 Tags 才能透過 TAG 路由自動啟用。未設定 Tags 的技能只能在對話頂部手動選擇掛載。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "申請技能公開（需管理員審核）",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "建立的技能預設為私人，只有您自己可以使用。若希望分享給全體同仁，需申請公開並通過管理員審核："
+          },
+          {
+            "type": "steps",
+            "items": [
+              {
+                "title": "在技能市集的「我的技能」區找到目標技能卡片"
+              },
+              {
+                "title": "點選技能卡片右下角的「申請公開」按鈕（地球圖示）",
+                "desc": "按鈕僅在技能狀態為「私人」且尚未申請時顯示"
+              },
+              {
+                "title": "系統將申請送交管理員審核",
+                "desc": "技能卡片狀態徽章變為橘色「待審核」"
+              },
+              {
+                "title": "管理員在後台審核後批准或拒絕",
+                "desc": "批准後技能狀態變為綠色「公開」，所有員工可在公開技能區看到"
+              }
+            ]
+          },
+          {
+            "type": "list",
+            "items": [
+              "**私人** — 灰色徽章，僅自己可見與使用",
+              "**待審核** — 橘色徽章，申請已送出，等待管理員批准",
+              "**公開** — 綠色徽章，全員可在公開市集看到並使用或 Fork"
+            ]
+          },
+          {
+            "type": "tip",
+            "text": "公開技能的其他員工可點選「Fork」複製一份到自己的帳號後自由修改，原始公開版本不受影響。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "個人分享技能給特定對象",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "不想公開給全員、只想分享給特定同事？可在技能卡片選單點「分享」，選擇分享對象（使用者 / 角色 / 部門）後設定「使用」或「管理」權限，對方可在技能市集的「分享給我」區找到此技能。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "技能上的 MCP 工具模式",
+        "blocks": [
+          {
+            "type": "table",
+            "headers": [
+              "模式",
+              "說明"
+            ],
+            "rows": [
+              [
+                "append（追加）",
+                "在角色已授權的工具基礎上，加入技能指定的額外伺服器工具（預設）"
+              ],
+              [
+                "exclusive（獨佔）",
+                "僅限定使用技能指定的 MCP 伺服器，角色其他工具暫時停用"
+              ],
+              [
+                "disable（停用）",
+                "對話期間禁用全部 MCP 工具，適合純文字對話場景"
+              ]
+            ]
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "知識庫綁定（KB Binding）",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "技能可以綁定特定的自建知識庫與 DIFY 知識庫，讓掛載技能時自動啟用相關知識庫，無需使用者手動選取。"
+          },
+          {
+            "type": "table",
+            "headers": [
+              "模式",
+              "說明"
+            ],
+            "rows": [
+              [
+                "append（追加）",
+                "技能綁定的知識庫與使用者已掛載的知識庫同時生效（預設）"
+              ],
+              [
+                "exclusive（獨佔）",
+                "僅使用技能綁定的知識庫，忽略使用者自行掛載的知識庫"
+              ],
+              [
+                "disable（停用）",
+                "對話期間不使用任何知識庫"
+              ]
+            ]
+          },
+          {
+            "type": "tip",
+            "text": "知識庫綁定由技能建立者在編輯頁「工具與知識庫」頁籤中設定，使用者掛載技能後自動套用。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "TAG 自動路由",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "系統使用 TAG 標籤機制自動判斷每則訊息應啟用哪些工具、知識庫與技能，無需使用者手動勾選。每個 MCP 伺服器、DIFY 知識庫、自建知識庫及技能都可設定標籤（Tags），系統流程如下："
+          },
+          {
+            "type": "steps",
+            "items": [
+              {
+                "title": "使用者發送訊息",
+                "desc": "系統以 Flash LLM 從訊息中萃取 0~5 個意圖標籤（intent tags）"
+              },
+              {
+                "title": "TAG 比對",
+                "desc": "將意圖標籤與所有工具/知識庫/技能上的標籤進行雙向模糊比對"
+              },
+              {
+                "title": "描述精篩（Description Refinement）",
+                "desc": "若 TAG 比對命中過多候選項，再以 Flash LLM 根據工具描述做二次精篩"
+              },
+              {
+                "title": "Fallback",
+                "desc": "若未設定任何 TAG 或比對全部落空，則回退到傳統的 intent 過濾機制"
+              }
+            ]
+          },
+          {
+            "type": "tip",
+            "text": "建議為每個工具和知識庫設定 2~5 個精準的標籤（如「股票」「財報」「ERP」），讓系統能更準確地自動路由，減少不必要的工具呼叫，節省 Token 費用。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "Prompt 輸入變數（prompt_variables）",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "技能可以定義輸入變數，讓使用者在掛載技能到對話時填寫自訂參數，這些參數會自動注入到 System Prompt 中。例如，翻譯技能可設定「目標語言」變數，掛載時讓使用者選擇「日文」或「韓文」。"
+          },
+          {
+            "type": "table",
+            "headers": [
+              "變數類型",
+              "說明"
+            ],
+            "rows": [
+              [
+                "text",
+                "單行文字輸入"
+              ],
+              [
+                "textarea",
+                "多行文字輸入"
+              ],
+              [
+                "select",
+                "下拉選單，需預先定義選項"
+              ],
+              [
+                "number",
+                "數字輸入"
+              ],
+              [
+                "date",
+                "日期選擇器"
+              ],
+              [
+                "checkbox",
+                "布林值勾選框"
+              ]
+            ]
+          },
+          {
+            "type": "para",
+            "text": "在 System Prompt 中使用 {{變數名稱}} 語法引用變數，例如："
+          },
+          {
+            "type": "code",
+            "text": "你是一位專業翻譯員，請將使用者的文字翻譯為 {{target_language}}。\n翻譯風格：{{style}}"
+          },
+          {
+            "type": "tip",
+            "text": "掛載技能時若該技能定義了輸入變數，系統會彈出表單讓使用者填寫，填寫後的值會存在該對話的技能設定中。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "Code 技能自動註冊為 Gemini Tool",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "Code 類型技能可以定義 **Tool Schema**（Gemini Function Declaration），讓 AI 在對話中自動判斷是否需要呼叫該程式技能，而非每次都觸發。"
+          },
+          {
+            "type": "para",
+            "text": "例如，一個「股價查詢」Code 技能定義了 Tool Schema，AI 收到「台積電股價多少」時會自動呼叫，但收到「今天天氣如何」則不會觸發。這等同於 Gemini 的 Function Calling 機制。"
+          },
+          {
+            "type": "note",
+            "text": "未定義 Tool Schema 的 Code 技能仍按原有的 inject/answer 端點模式運作，不受影響。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "Output Schema（輸出結構定義）",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "技能可以定義 JSON 格式的輸出結構（Output Schema），指引 AI 以固定的 JSON 格式回覆。適合需要結構化資料的場景，如自動產生工單、匯出報表欄位等。"
+          },
+          {
+            "type": "code",
+            "text": "{\n  \"type\": \"object\",\n  \"properties\": {\n    \"summary\": { \"type\": \"string\", \"description\": \"摘要\" },\n    \"score\": { \"type\": \"number\", \"description\": \"評分 0-100\" },\n    \"tags\": { \"type\": \"array\", \"items\": { \"type\": \"string\" } }\n  }\n}"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "速率限制（Rate Limiting）",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "技能可設定使用頻率限制，防止濫用或控制 API 成本："
+          },
+          {
+            "type": "table",
+            "headers": [
+              "設定",
+              "說明"
+            ],
+            "rows": [
+              [
+                "每人上限",
+                "單一使用者在指定時間窗口內可呼叫此技能的最大次數"
+              ],
+              [
+                "全域上限",
+                "所有使用者合計在指定時間窗口內的最大呼叫次數"
+              ],
+              [
+                "時間窗口",
+                "限制的計算週期：每分鐘（minute）、每小時（hour）、每日（day）"
+              ]
+            ]
+          },
+          {
+            "type": "tip",
+            "text": "超過速率限制時，系統會回覆提示訊息，使用者需等待時間窗口重置後再使用。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "版本控制與發佈",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "技能的 Prompt 支援版本控制機制，讓您可以安全地修改和回滾："
+          },
+          {
+            "type": "steps",
+            "items": [
+              {
+                "title": "編輯草稿（Draft）",
+                "desc": "修改 Prompt 時，改動先存入草稿，不影響目前線上版本"
+              },
+              {
+                "title": "發佈（Publish）",
+                "desc": "確認修改無誤後，點選「發佈新版本」，草稿變為正式版本，版本號 +1"
+              },
+              {
+                "title": "查看歷史版本",
+                "desc": "在「版本歷史」頁籤可瀏覽所有已發佈的版本內容"
+              },
+              {
+                "title": "回滾（Rollback）",
+                "desc": "若新版本有問題，可一鍵回滾到任一歷史版本"
+              }
+            ]
+          },
+          {
+            "type": "note",
+            "text": "版本控制僅追蹤 Prompt 與 Workflow 設定的變更，其他欄位（名稱、描述等）修改後即時生效。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "Workflow 工作流程編排",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "Workflow 類型技能使用視覺化拖拉編輯器（React Flow），以 DAG 方式編排多步驟 AI 流程。每個節點代表一個處理步驟，節點之間以連線定義執行順序。"
+          },
+          {
+            "type": "table",
+            "headers": [
+              "節點類型",
+              "說明"
+            ],
+            "rows": [
+              [
+                "🟢 開始（Start）",
+                "流程入口，接收使用者輸入"
+              ],
+              [
+                "🤖 LLM",
+                "呼叫大語言模型處理文字，可設定 System Prompt 與模型"
+              ],
+              [
+                "📚 知識庫（Knowledge Base）",
+                "查詢自建知識庫，取得相關段落"
+              ],
+              [
+                "🔌 DIFY",
+                "查詢 DIFY 知識庫"
+              ],
+              [
+                "🔧 MCP 工具",
+                "呼叫 MCP 伺服器的工具"
+              ],
+              [
+                "✨ 技能（Skill）",
+                "呼叫其他已建立的技能"
+              ],
+              [
+                "💻 程式碼（Code）",
+                "執行自訂 JavaScript 程式碼"
+              ],
+              [
+                "🌐 HTTP 請求",
+                "呼叫外部 REST API"
+              ],
+              [
+                "❓ 條件判斷（Condition）",
+                "根據前一步結果分支（contains / equals / gt / lt 等）"
+              ],
+              [
+                "📝 模板（Template）",
+                "使用模板語法組合多個節點的輸出"
+              ],
+              [
+                "🔴 輸出（Output）",
+                "流程終點，定義最終輸出內容"
+              ]
+            ]
+          },
+          {
+            "type": "para",
+            "text": "節點之間可使用 {{nodeId.output}} 語法引用其他節點的輸出，例如 {{start.input}} 取得使用者原始訊息，{{llm_1.output}} 取得 LLM 節點的回應。"
+          },
+          {
+            "type": "tip",
+            "text": "Workflow 最多允許 50 個節點，執行時以拓撲排序依序處理。條件節點支援 default（符合條件）與 else（不符合）兩條分支路徑。"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "u-kb",
+    "sort_order": 14,
+    "icon": "Database",
+    "icon_color": "text-teal-500",
+    "last_modified": "2026-04-01",
+    "title": "知識庫市集",
+    "sidebar_label": "知識庫市集",
+    "blocks": [
+      {
+        "type": "para",
+        "text": "知識庫市集讓您可以將企業內部文件向量化，建立專屬的語意搜尋資料庫。對話時掛載知識庫，AI 會先從知識庫檢索最相關的段落，再結合自身能力回答，大幅提升對特定領域文件（如 SOP、技術手冊、規格書）的回答準確度。"
+      },
+      {
+        "type": "subsection",
+        "title": "前提條件",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "需要系統管理員授予「允許建立知識庫」權限，以及設定容量與數量上限後，才會在側邊欄「更多功能」選單看到「知識庫市集」入口。"
+          },
+          {
+            "type": "tip",
+            "text": "若無建立權限，仍可使用管理員或其他人共享（permission = use）給您的知識庫進行對話，無需建立自己的知識庫。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "建立知識庫",
+        "blocks": [
+          {
+            "type": "steps",
+            "items": [
+              {
+                "title": "點選「知識庫市集」→「+ 建立知識庫」"
+              },
+              {
+                "title": "填寫名稱、描述（必填名稱）",
+                "desc": "建立後可在詳情頁頂部點選鉛筆圖示快速編輯名稱與描述"
+              },
+              {
+                "title": "選擇 Embedding 維度",
+                "desc": "768 維適合大多數情況；1536 / 3072 精度更高但費用也較高，且建立後無法更改"
+              },
+              {
+                "title": "選擇分塊策略",
+                "desc": "「常規分段」：依段落切分，適合一般文件；「父子分塊」：大塊作背景、小塊用來檢索，適合長篇技術文件"
+              },
+              {
+                "title": "選擇檢索模式",
+                "desc": "「向量檢索」：語意相似度；「全文檢索」：關鍵字比對；「混合檢索」：兩者結合（建議）"
+              },
+              {
+                "title": "選擇 OCR 模型（選填）",
+                "desc": "上傳文件時用來解析圖片/PDF 內圖片的 Gemini 模型，預設使用系統設定的 Flash 模型"
+              },
+              {
+                "title": "點選「建立」，進入知識庫詳情頁"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "上傳文件",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "進入知識庫後，點選「文件」頁籤，拖曳或點選上傳區域選擇檔案。支援格式：**PDF · DOCX · PPTX · XLSX · TXT · CSV · JPG · PNG · GIF · WEBP**（單檔最大 200 MB）。"
+          },
+          {
+            "type": "steps",
+            "items": [
+              {
+                "title": "選取一或多個檔案上傳",
+                "desc": "多檔會循序處理，避免同時佔用 AI 配額"
+              },
+              {
+                "title": "系統自動解析文字並進行 Embedding 向量化",
+                "desc": "圖片與 PDF 中的圖片會先 OCR 轉文字，再一起向量化"
+              },
+              {
+                "title": "狀態變為綠色勾選代表處理完成",
+                "desc": "若出現紅色 ✗ 請查看錯誤訊息，常見原因：檔案格式不符或 AI 服務暫時中斷"
+              }
+            ]
+          },
+          {
+            "type": "note",
+            "text": "大型文件（如含大量圖片的 DOCX）處理時間可能較長，頁面每隔幾秒會自動重新整理狀態，請耐心等待。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "在對話中使用知識庫",
+        "blocks": [
+          {
+            "type": "steps",
+            "items": [
+              {
+                "title": "開啟或新建一個對話"
+              },
+              {
+                "title": "點選頂部工具列的「知識庫」按鈕（綠色）"
+              },
+              {
+                "title": "在下拉選單中勾選一或多個要使用的知識庫，點「確認」"
+              },
+              {
+                "title": "發送訊息，AI 會先檢索知識庫再組合回答",
+                "desc": "回覆中如有引用文件段落，AI 通常會說明來源文件名稱"
+              }
+            ]
+          },
+          {
+            "type": "tip",
+            "text": "可以同時掛載「自建知識庫」＋「DIFY 知識庫」＋「MCP 工具」，AI 會綜合所有來源回答。此外，若知識庫設有標籤（Tags），系統會透過 TAG 自動路由機制，根據訊息內容自動判斷是否啟用對應知識庫。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "召回測試（檢索測試）",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "進入知識庫詳情 → 點選「召回測試」頁籤，輸入任意問題，系統會模擬真實對話的檢索流程，顯示前幾名相關段落、相似度分數及比對方式（向量 / 全文 / 混合），幫助您調整設定參數。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "共享知識庫",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "進入知識庫詳情 → 點選「共享設定」頁籤，可將知識庫共享給特定使用者、角色、部門或組織單位。"
+          },
+          {
+            "type": "table",
+            "headers": [
+              "共享方式",
+              "對象"
+            ],
+            "rows": [
+              [
+                "使用者",
+                "指定單一帳號"
+              ],
+              [
+                "角色",
+                "系統管理員定義的角色群組（如研發部）"
+              ],
+              [
+                "部門",
+                "依 ERP 組織同步的部門代碼"
+              ],
+              [
+                "利潤中心",
+                "依利潤中心共享"
+              ],
+              [
+                "組織課室",
+                "依課室共享"
+              ]
+            ]
+          },
+          {
+            "type": "table",
+            "headers": [
+              "共享權限",
+              "說明"
+            ],
+            "rows": [
+              [
+                "use（僅使用）",
+                "被共享者可在對話中掛載此知識庫，但無法在知識庫市集列表中看到或進入設定頁"
+              ],
+              [
+                "edit（可編輯）",
+                "被共享者可在市集中看到並進入此知識庫，可上傳文件、修改設定"
+              ]
+            ]
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "申請公開",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "若希望全體員工都能看到並使用此知識庫，可在「共享設定」頁籤點選「申請設為公開」，送出申請後需等待系統管理員審核通過，審核後知識庫會對所有人開放（唯讀使用，不可編輯）。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "分段與檢索設定調整",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "進入知識庫詳情 → 點選「分塊與檢索設定」頁籤，可隨時調整以下參數（調整後不需重新上傳文件，下次對話立即生效）："
+          },
+          {
+            "type": "table",
+            "headers": [
+              "參數",
+              "說明",
+              "建議值"
+            ],
+            "rows": [
+              [
+                "分段識別符號",
+                "用來切分段落的符號",
+                "\\n\\n（空白行）"
+              ],
+              [
+                "分段最大長度",
+                "每個 chunk 的字元上限",
+                "512–1024"
+              ],
+              [
+                "重疊長度",
+                "前後 chunk 共享的字元數，避免重要資訊被截斷",
+                "50–100"
+              ],
+              [
+                "初始擷取 Top K",
+                "向量/全文各抓幾條候選結果",
+                "10–20"
+              ],
+              [
+                "最終返回 Top K",
+                "重排序後送給 AI 的最終條數",
+                "3–5"
+              ],
+              [
+                "Score 閾值",
+                "相似度低於此值的結果會被丟棄（0–1）",
+                "0.3–0.5"
+              ],
+              [
+                "OCR 模型",
+                "處理圖片的 Gemini 模型",
+                "Flash（快速省成本）"
+              ]
+            ]
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "知識庫格式感知",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "系統會根據上傳文件的格式自動選擇最佳的解析方式，確保內容被完整擷取並向量化。"
+          },
+          {
+            "type": "table",
+            "headers": [
+              "格式",
+              "解析方式",
+              "備註"
+            ],
+            "rows": [
+              [
+                "PDF",
+                "pdf-parse 文字層 + Gemini OCR（有圖片時）",
+                "掃描件需 OCR，速度較慢"
+              ],
+              [
+                "DOCX / PPTX",
+                "JSZip 解壓縮 XML → 提取段落文字",
+                "保留標題層級與段落結構"
+              ],
+              [
+                "XLSX / CSV",
+                "逐列讀取，保留欄標頭",
+                "大型表格建議先分頁再上傳"
+              ],
+              [
+                "TXT / MD",
+                "直接讀取純文字",
+                "保留換行結構"
+              ],
+              [
+                "JPG / PNG / WEBP / GIF",
+                "Gemini Vision OCR → 轉為文字 chunk",
+                "圖片需設定 OCR 模型才會處理"
+              ]
+            ]
+          },
+          {
+            "type": "tip",
+            "text": "含大量圖表的 PDF 或 PPTX，建議在知識庫設定中指定 OCR 模型（Flash 即可），系統會自動對圖片頁面進行視覺理解，再合併到同一文件的文字 chunk 中。"
+          },
+          {
+            "type": "note",
+            "text": "XLSX 中的公式只會保留計算結果值，不保留公式本身。若需讓 AI 理解公式邏輯，請先將說明另存為 TXT 或 MD 一起上傳。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "設定標籤（Tags）— 讓知識庫在對話中被自動啟用的關鍵",
+        "blocks": [
+          {
+            "type": "note",
+            "text": "**重要：必須為知識庫設定標籤（Tags），AI 才能在對話中透過 TAG 路由機制自動找到並使用它。**未設定標籤的知識庫只能在對話頂部手動勾選掛載，無法被系統自動匹配。"
+          },
+          {
+            "type": "para",
+            "text": "Tags 是讓系統「知道這個知識庫適合回答哪類問題」的關鍵線索。系統每次收到使用者訊息時，會先萃取訊息的意圖標籤，再比對所有知識庫的 Tags，命中的知識庫才會被自動啟用查詢。"
+          },
+          {
+            "type": "para",
+            "text": "如何設定 Tags："
+          },
+          {
+            "type": "steps",
+            "items": [
+              {
+                "title": "進入知識庫詳情頁 → 點選「設定」頁籤"
+              },
+              {
+                "title": "找到「標籤（Tags）」欄位",
+                "desc": "在知識庫名稱、描述下方"
+              },
+              {
+                "title": "輸入標籤文字後按 Enter，可新增多個標籤",
+                "desc": "例如：SOP、製程規範、品質手冊、產品規格"
+              },
+              {
+                "title": "點「儲存設定」完成"
+              }
+            ]
+          },
+          {
+            "type": "table",
+            "headers": [
+              "好的標籤（推薦）",
+              "不好的標籤（避免）",
+              "原因"
+            ],
+            "rows": [
+              [
+                "SOP",
+                "文件",
+                "太模糊，幾乎所有知識庫都符合"
+              ],
+              [
+                "不良分析、品質管制",
+                "資料",
+                "無法讓系統辨識知識庫主題"
+              ],
+              [
+                "原物料採購、供應商",
+                "採購",
+                "具體詞彙比單一詞更精準"
+              ],
+              [
+                "ERP WIP 程式",
+                "程式",
+                "加入領域前綴詞提升比對準確度"
+              ]
+            ]
+          },
+          {
+            "type": "tip",
+            "text": "建議每個知識庫設定 3~6 個精準標籤，涵蓋主題的不同說法（例如「SOP」和「標準作業程序」同時設定）。標籤設定後可回到對話測試，發現 AI 沒有用到預期知識庫時，可再回頭調整標籤。"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "u-research",
+    "sort_order": 15,
+    "icon": "GitFork",
+    "icon_color": "text-indigo-500",
+    "last_modified": "2026-04-01",
+    "title": "深度研究",
+    "sidebar_label": "深度研究",
+    "blocks": [
+      {
+        "type": "para",
+        "text": "「深度研究」讓 AI 針對複雜問題自動拆解成多個子問題、逐一深度調查後，整合產出完整報告。適合競品分析、技術評估、市場調查、法規解析等需要多角度、多來源交叉比對的場景。整個研究在背景非同步執行，不影響您繼續使用聊天。"
+      },
+      {
+        "type": "subsection",
+        "title": "三步驟流程概覽",
+        "blocks": [
+          {
+            "type": "steps",
+            "items": [
+              {
+                "title": "Step 1 — 設定問題",
+                "desc": "輸入主題、選深度、設定全局附件與資料來源，AI 自動推薦相關知識庫"
+              },
+              {
+                "title": "Step 2 — 確認計畫",
+                "desc": "AI 生成子問題清單後，您可編輯問題文字、設定每個子問題的方向提示 / 附件 / 網搜開關 / 知識庫"
+              },
+              {
+                "title": "Step 3 — 即時預覽",
+                "desc": "每個子問題完成後立即顯示答案摘要，全部完成自動整合報告並生成下載檔"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "Step 1：設定問題",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "點選輸入框右側的深度研究按鈕開啟設定面板。若輸入框已輸入問題或附加了檔案，這些內容會自動帶入。"
+          },
+          {
+            "type": "table",
+            "headers": [
+              "設定項目",
+              "說明"
+            ],
+            "rows": [
+              [
+                "研究問題",
+                "輸入您要深入調查的問題或主題，越具體越好"
+              ],
+              [
+                "全局附件",
+                "上傳檔案（PDF / Word / Excel / 圖片等）作為所有子問題的共用背景資料，拖放或點擊 + 附加"
+              ],
+              [
+                "研究深度",
+                "快速 2 個、標準 5 個、深入 8 個、全面 12 個子問題，深度越高耗時越長"
+              ],
+              [
+                "輸出格式",
+                "可多選 Word / PDF / PPT / Excel，完成後每種格式各生成一個下載連結"
+              ],
+              [
+                "整體資料來源",
+                "為所有子問題預設使用的資料來源：自建知識庫 / Dify 知識庫 / MCP 工具（子問題可個別覆蓋）"
+              ],
+              [
+                "自動建議 KB",
+                "輸入問題 1 秒後系統自動分析並預選相關知識庫（橘色「自動建議」標籤）"
+              ],
+              [
+                "引用前次研究",
+                "選擇已完成的研究，其摘要會自動作為本次研究的背景知識，可多選最多 3 筆"
+              ]
+            ]
+          },
+          {
+            "type": "tip",
+            "text": "輸入完問題後稍等 1 秒，系統會自動推薦相關知識庫並預勾選。若推薦不準確，可手動取消勾選。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "Step 2：確認計畫與子問題設定",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "AI 生成研究計畫後進入確認頁，顯示研究主題、目標說明及自動拆解的子問題清單。您可拖曳排序、編輯問題文字、新增或刪除子問題（最多 12 個）。"
+          },
+          {
+            "type": "para",
+            "text": "每個子問題展開後可設定："
+          },
+          {
+            "type": "list",
+            "items": [
+              "**研究方向提示** — 輸入提示文字，例如「只看台灣市場數據」、「聚焦 2024 年後的資料」，引導 AI 研究方向。",
+              "**子問題專屬附件** — 為此子問題額外附加不同的參考文件，僅此子問題使用，不影響其他子問題。",
+              "**網路搜尋開關** — 為此子問題個別啟用或停用網路搜尋（覆蓋任務層級設定）。亮藍色 = 啟用，灰色 = 停用。實際是否啟用網搜還受「無 KB 資料才觸發」的邏輯控制。",
+              "**子問題資料來源（覆蓋任務設定）** — 為此子問題指定不同的自建 KB / Dify KB / MCP 工具，覆蓋 Step 1 設定的任務層級來源。"
+            ]
+          },
+          {
+            "type": "note",
+            "text": "子問題數量越多，Token 消耗越大。標準（5 個）適合大多數需求，若主題複雜才考慮深入（8 個）以上。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "Step 3：即時串流預覽",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "點「確認並開始研究」後立即進入預覽頁，研究在背景執行，畫面即時更新每個子問題的狀態："
+          },
+          {
+            "type": "list",
+            "items": [
+              "研究中（旋轉圖示）— AI 正在針對此子問題搜尋與生成答案",
+              "已完成（綠色勾選）— 顯示答案摘要前 300 字"
+            ]
+          },
+          {
+            "type": "para",
+            "text": "全部子問題完成後，AI 自動整合產出完整報告並生成下載檔，之後可在頂部欄位的研究面板下載。"
+          },
+          {
+            "type": "tip",
+            "text": "可以直接關閉此視窗，研究仍繼續在背景執行。完成後頂部的研究圖示會出現完成提示，對話中也會自動插入研究摘要與下載連結。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "資料來源選用邏輯",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "系統依以下優先順序決定每個子問題使用哪些資料："
+          },
+          {
+            "type": "table",
+            "headers": [
+              "層級",
+              "優先",
+              "說明"
+            ],
+            "rows": [
+              [
+                "子問題層級",
+                "最高",
+                "若子問題有設定個別 KB / Dify / MCP，以子問題設定為準"
+              ],
+              [
+                "任務層級",
+                "次高",
+                "子問題未設定時，使用 Step 1 的整體任務資料來源"
+              ],
+              [
+                "全部 KB",
+                "預設",
+                "任務層級也未設定時，自動搜尋您能存取的所有知識庫"
+              ],
+              [
+                "網路搜尋",
+                "補充",
+                "知識庫無結果且無附件時自動觸發（需有可用的 MCP 搜尋工具）"
+              ]
+            ]
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "修改子問題並重跑（Edit & Re-run）",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "研究完成後，若某些子問題的答案不理想，可以針對特定子問題修改後重跑，**不需要整個任務重頭來過**，其餘子問題的答案原封不動保留。"
+          },
+          {
+            "type": "steps",
+            "items": [
+              {
+                "title": "開啟頂部欄位的研究面板",
+                "desc": "點選頂部欄位的望遠鏡／研究圖示，展開已完成的研究清單"
+              },
+              {
+                "title": "點選 done 研究右側的「↺」按鈕",
+                "desc": "這會開啟 ResearchModal 的「編輯重跑」模式，直接進入 Step 2"
+              },
+              {
+                "title": "選擇要重跑的子問題",
+                "desc": "預設全部為「保留」（灰底顯示舊答案摘要）；點「↺ 重跑」按鈕標記為橘色 = 此子問題將重新執行"
+              },
+              {
+                "title": "修改問題文字 / 方向提示 / 附件 / 網搜開關（選填）",
+                "desc": "展開已標記的子問題，可修改研究方向或附加新文件"
+              },
+              {
+                "title": "點「確認並重跑」",
+                "desc": "只執行被標記的子問題，完成後自動與原有答案合併、重新整合報告、更新下載檔"
+              }
+            ]
+          },
+          {
+            "type": "tip",
+            "text": "重跑完成後，聊天記錄中的研究摘要會自動更新為最新版本，下載檔也會重新生成。"
+          },
+          {
+            "type": "note",
+            "text": "正在執行中（pending / running）的研究無法重跑，請等待當前執行完成後再操作。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "引用前次研究作為背景知識",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "在 Step 1 的「引用前次研究」區塊，可選擇已完成的研究（最近 20 筆）作為本次研究的背景知識。系統會自動將舊研究的摘要（約 800 字）拼接到每個子問題的背景脈絡中，適合「追蹤研究」場景，例如上季分析的延伸、議題的持續追蹤。"
+          },
+          {
+            "type": "note",
+            "text": "「引用前次研究」與「修改子問題重跑」是兩個不同功能：引用是把舊摘要當背景知識，讓新研究有延續性；重跑是直接修改舊研究中不滿意的子問題，在原有報告上更新。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "研究歷史與下載",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "點選頂部欄位的研究圖示可展開研究面板，顯示最近 10 筆研究任務的狀態與操作。"
+          },
+          {
+            "type": "table",
+            "headers": [
+              "狀態",
+              "圖示",
+              "說明"
+            ],
+            "rows": [
+              [
+                "pending",
+                "藍色 Sparkles ✦",
+                "AI 尚未開始，通常在數秒內轉為執行中"
+              ],
+              [
+                "running",
+                "藍色進度條",
+                "正在逐步研究子問題，進度條顯示 N/M 步"
+              ],
+              [
+                "done",
+                "綠色 ✓",
+                "報告已生成，點連結即可下載各格式檔案"
+              ],
+              [
+                "failed",
+                "紅色 ⚠",
+                "發生錯誤，錯誤訊息顯示於下方，可點 ↺ 重跑嘗試修復"
+              ]
+            ]
+          },
+          {
+            "type": "para",
+            "text": "每筆研究右側有兩個按鈕："
+          },
+          {
+            "type": "list",
+            "items": [
+              "（橘色）↺ 編輯並重跑子問題 — 僅 done 狀態顯示",
+              "（灰色）✕ 刪除此研究任務及其下載檔"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "Token 消耗說明",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "深度研究使用 Gemini Pro 模型，Token 消耗明顯高於一般對話，請依實際需求選擇研究深度："
+          },
+          {
+            "type": "table",
+            "headers": [
+              "深度",
+              "子問題數",
+              "預估 Token（僅供參考）",
+              "適用場景"
+            ],
+            "rows": [
+              [
+                "快速",
+                "2",
+                "約 5 k–15 k",
+                "簡單問題、快速了解概況"
+              ],
+              [
+                "標準",
+                "5",
+                "約 15 k–40 k",
+                "大多數一般調查需求"
+              ],
+              [
+                "深入",
+                "8",
+                "約 30 k–70 k",
+                "複雜議題、需多角度驗證"
+              ],
+              [
+                "全面",
+                "12",
+                "約 50 k–120 k",
+                "大型研究報告、需窮舉各面向"
+              ]
+            ]
+          },
+          {
+            "type": "note",
+            "text": "若有管理員設定的每日 / 每週 Token 使用上限，深度研究也受此限制。上限剩餘量可在聊天頁面頂部的金額提示區查看。"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "u-toolbar-toggles",
+    "sort_order": 16,
+    "icon": "Zap",
+    "icon_color": "text-amber-500",
+    "last_modified": "2026-04-01",
+    "title": "頂端列功能開關",
+    "sidebar_label": "頂端列功能開關",
+    "blocks": [
+      {
+        "type": "para",
+        "text": "對話頁面頂端工具列提供四個快速開關，讓您按需求啟用或停用各項輔助功能，每個開關的狀態僅影響當前及後續的新訊息，不會回溯修改已完成的對話。"
+      },
+      {
+        "type": "table",
+        "headers": [
+          "開關 / 按鈕",
+          "圖示",
+          "說明",
+          "停用 / 隱藏時行為"
+        ],
+        "rows": [
+          [
+            "技能 (Skill)",
+            "Sparkles ✦ 紫色",
+            "啟用後，AI 回覆前會先查詢符合的技能 Prompt 並套用",
+            "跳過技能注入，AI 以原始模型回答"
+          ],
+          [
+            "知識庫",
+            "Database 🗄️ 藍色",
+            "啟用後，AI 回覆前會從已掛載的自建知識庫檢索相關段落",
+            "不做知識庫檢索，直接回答"
+          ],
+          [
+            "DIFY 知識庫",
+            "Zap ⚡ 綠色",
+            "啟用後，AI 回覆前會從已掛載的 DIFY 知識庫查詢",
+            "跳過 DIFY 檢索"
+          ],
+          [
+            "MCP 工具",
+            "Globe 🌐 藍色",
+            "啟用後，AI 可呼叫已設定的 MCP 伺服器（搜尋、程式執行等）",
+            "停用所有 MCP 工具呼叫"
+          ],
+          [
+            "AI 戰情室快速入口",
+            "BarChart3 📊 橘色",
+            "點擊後彈出 AI 戰情室主題 / 查詢任務下拉選單，可直接跳入指定查詢頁面",
+            "僅在有「使用 AI 戰情室」權限的帳號才顯示此按鈕"
+          ]
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "操作方式",
+        "blocks": [
+          {
+            "type": "steps",
+            "items": [
+              {
+                "title": "開啟任意對話後，查看頂部工具列",
+                "desc": "工具列位於對話標題下方，包含各功能圖示按鈕"
+              },
+              {
+                "title": "點選對應圖示即可切換開 / 關",
+                "desc": "亮色（藍色/綠色）= 啟用；灰色 = 停用"
+              },
+              {
+                "title": "下次發送訊息即生效",
+                "desc": "無需重新整理頁面，狀態會記憶在瀏覽器 Session 中"
+              }
+            ]
+          },
+          {
+            "type": "tip",
+            "text": "若您只想進行純文字對話且不需要任何外部資料，建議關閉所有開關以降低延遲與 Token 消耗。若對話主題切換（如從「查 SOP」改為「寫程式」），也可即時調整開關組合。"
+          },
+          {
+            "type": "note",
+            "text": "各開關僅在對應功能已設定的情況下才有效果：知識庫開關需先在下拉選單中掛載知識庫；MCP 開關需管理員已設定並啟用 MCP 伺服器；DIFY 知識庫開關需管理員已設定 DIFY API。"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "u-lang",
+    "sort_order": 17,
+    "icon": "Globe",
+    "icon_color": "text-sky-500",
+    "last_modified": "2026-04-01",
+    "title": "語言切換與多語設定",
+    "sidebar_label": "語言切換與多語設定",
+    "blocks": [
+      {
+        "type": "para",
+        "text": "Foxlink GPT to Cortex 完整支援**繁體中文（繁中）、英文（EN）、越南文（VI）**三種語言，涵蓋 UI 介面語言切換及內容多語翻譯兩個層面，讓不同語系的同仁都能流暢使用。"
+      },
+      {
+        "type": "subsection",
+        "title": "切換 UI 介面語言",
+        "blocks": [
+          {
+            "type": "steps",
+            "items": [
+              {
+                "title": "點選左側邊欄底部的「🌐 語言切換」按鈕",
+                "desc": "顯示目前語言名稱（如「繁體中文」），點擊展開語言選單"
+              },
+              {
+                "title": "從選單中選擇目標語言",
+                "desc": "繁體中文 🇹🇼 / English 🇺🇸 / Tiếng Việt 🇻🇳"
+              },
+              {
+                "title": "介面語言立即切換",
+                "desc": "所有 UI 文字、按鈕、提示訊息均切換為所選語言，無需重新整理頁面"
+              }
+            ]
+          },
+          {
+            "type": "para",
+            "text": "語言偏好設定會同步儲存到您的帳號（伺服器端），下次登入後自動套用，與瀏覽器無關。"
+          },
+          {
+            "type": "tip",
+            "text": "對話標題（Session Title）支援三語版本。切換語言後，歷史對話的標題也會自動顯示對應語言版本（若建立時系統已翻譯）。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "內容多語翻譯機制",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "系統各功能中的名稱、說明等文字欄位均支援三語版本（繁中 / EN / VI）。翻譯的觸發方式分為**自動翻譯**和**手動翻譯**兩種，不同功能模組的處理方式不同，請依下表了解各場景的行為："
+          },
+          {
+            "type": "table",
+            "headers": [
+              "功能 / 場景",
+              "翻譯觸發方式",
+              "說明"
+            ],
+            "rows": [
+              [
+                "技能（Skill）名稱 / 說明",
+                "儲存時自動翻譯",
+                "點「儲存」後，系統自動呼叫 AI 翻譯成三語並儲存"
+              ],
+              [
+                "知識庫（KB）名稱 / 說明",
+                "建立時自動翻譯",
+                "點「建立」後自動翻譯，也可事後手動重新翻譯"
+              ],
+              [
+                "對話標題（Session Title）",
+                "重新命名時自動翻譯",
+                "手動改名後系統背景自動翻譯為英文與越南文"
+              ],
+              [
+                "AI 戰情室命名查詢參數標籤",
+                "手動按翻譯按鈕",
+                "參數標籤旁有「↻」按鈕，點擊後 AI 翻譯並填入 EN / VI 欄位"
+              ],
+              [
+                "AI 戰情室圖表標題 / 軸名",
+                "手動按翻譯按鈕",
+                "圖表標題、X / Y 軸名稱旁各有翻譯按鈕，一鍵填入三語"
+              ],
+              [
+                "儀表板名稱",
+                "手動按翻譯按鈕",
+                "編輯儀表板時可點翻譯按鈕自動填入英文與越南文"
+              ]
+            ]
+          },
+          {
+            "type": "note",
+            "text": "自動翻譯在儲存時背景執行，通常只需數秒。若翻譯失敗（如 AI 服務暫時中斷），欄位會保留空白或原語言內容，可事後使用「重新翻譯」功能重跑。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "手動重新翻譯",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "技能市集、知識庫市集等設定頁中，名稱 / 說明欄位下方有一個**「多語翻譯」展開區（Language 圖示）**，點擊展開後可看到三語版本的當前內容，並提供「↻ 重新翻譯」按鈕："
+          },
+          {
+            "type": "steps",
+            "items": [
+              {
+                "title": "展開多語翻譯區（點 Languages 圖示或箭頭）",
+                "desc": "顯示 繁中 / EN / VI 三欄翻譯內容"
+              },
+              {
+                "title": "直接修改任一欄位內容（選用）",
+                "desc": "可手動覆寫自動翻譯的結果"
+              },
+              {
+                "title": "點擊「↻ 重新翻譯」按鈕",
+                "desc": "以目前的繁中內容為基礎，重新呼叫 AI 翻譯，填入 EN 和 VI 欄位"
+              },
+              {
+                "title": "儲存設定使翻譯生效",
+                "desc": ""
+              }
+            ]
+          },
+          {
+            "type": "tip",
+            "text": "手動修改的翻譯內容在儲存後可以再次點「重新翻譯」覆蓋，或保留手動版本不動。翻譯以**繁中版本**為主要來源，若繁中欄位為空，翻譯結果可能不正確。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "各語言版本顯示邏輯",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "當系統以某語言顯示內容（如技能名稱、對話標題）時，使用以下 fallback 順序："
+          },
+          {
+            "type": "table",
+            "headers": [
+              "切換到 / 目前語言",
+              "優先顯示",
+              "備用（若翻譯空白）"
+            ],
+            "rows": [
+              [
+                "繁體中文（繁中）",
+                "name_zh / title_zh",
+                "原始 name / title 欄位"
+              ],
+              [
+                "English（EN）",
+                "name_en / title_en",
+                "繁中版本 → 原始欄位"
+              ],
+              [
+                "Tiếng Việt（VI）",
+                "name_vi / title_vi",
+                "繁中版本 → 原始欄位"
+              ]
+            ]
+          },
+          {
+            "type": "note",
+            "text": "若切換到英文或越南文後，某些技能名稱 / 知識庫名稱仍顯示中文，代表該項目尚未翻譯。可進入設定頁手動觸發翻譯。"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "u-budget",
+    "sort_order": 18,
+    "icon": "DollarSign",
+    "icon_color": "text-emerald-500",
+    "last_modified": "2026-04-01",
+    "title": "對話額度限制",
+    "sidebar_label": "對話額度限制",
+    "blocks": [
+      {
+        "type": "para",
+        "text": "系統管理員可為帳號或角色設定使用金額上限，當用量接近或超過限制時，對話頁面**頂部工具列**會出現金額指示器，讓您隨時掌握自己的用量狀況。"
+      },
+      {
+        "type": "subsection",
+        "title": "指示器顯示位置",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "金額指示器位於**對話頁面頂部工具列右側**，分日 / 週 / 月三種週期，管理員可分別設定，您可能同時看到一個或多個指示器："
+          },
+          {
+            "type": "table",
+            "headers": [
+              "週期",
+              "重設時間",
+              "顯示標籤範例"
+            ],
+            "rows": [
+              [
+                "每日限額",
+                "每天凌晨 00:00 重設",
+                "日 $0.12/$1.00"
+              ],
+              [
+                "每週限額",
+                "每週一 00:00 重設",
+                "週 $3.50/$10.00"
+              ],
+              [
+                "每月限額",
+                "每月 1 日 00:00 重設",
+                "月 $12.80/$50.00"
+              ]
+            ]
+          },
+          {
+            "type": "table",
+            "headers": [
+              "指示器顏色",
+              "意義"
+            ],
+            "rows": [
+              [
+                "灰色（正常）",
+                "目前用量在上限 80% 以內，一切正常，可正常使用"
+              ],
+              [
+                "橘色（接近上限）",
+                "目前用量超過上限的 80%，請留意使用量，即將達到限制"
+              ],
+              [
+                "紅色（已超出）",
+                "當前週期用量已達上限，依限制模式決定後續行為（見下方說明）"
+              ]
+            ]
+          },
+          {
+            "type": "note",
+            "text": "金額計算基於 Token 用量乘以各模型定價。若管理員尚未設定模型定價，顯示金額可能為 $0.000，此情況請洽管理員確認。系統管理員帳號不受金額限制，不會顯示此指示器。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "額度超過後的限制方式",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "管理員可針對每個**角色（Role）或個別使用者**分別設定超過額度後的行為模式："
+          },
+          {
+            "type": "comparison",
+            "items": [
+              {
+                "title": "警告模式（warn）",
+                "desc": "超過額度後仍**可繼續對話**，但頂部指示器會顯示紅色警告，提醒您已超出本週期限額。適合主管或核心業務人員，確保不影響工作。",
+                "example": "",
+                "borderColor": "amber"
+              },
+              {
+                "title": "禁止模式（block）",
+                "desc": "超過額度後**無法繼續發送新訊息**，系統回覆「已達使用上限」提示，需等待下個週期重設後才能繼續使用。",
+                "example": "",
+                "borderColor": "red"
+              }
+            ]
+          },
+          {
+            "type": "tip",
+            "text": "若您在重要工作時突然收到「已達使用上限」拒絕訊息，請洽系統管理員臨時調整限額或切換為警告模式。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "消耗趨勢查看",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "想了解自己過去一段時間的 Token 用量與費用分布？點選頂部工具列的**「📈 消耗趨勢」按鈕（TrendingUp 圖示）**，開啟個人用量統計面板："
+          },
+          {
+            "type": "list",
+            "items": [
+              "折線圖：顯示過去 N 天各模型每日費用走勢（多條線按模型分色）",
+              "時間範圍：可切換查看最近 7 天 / 30 天 / 90 天",
+              "總計：面板頂部顯示所選時間內的總費用及總 Token 數",
+              "各模型彙總：底部表格列出每種模型的輸入 / 輸出 Token 及費用"
+            ]
+          },
+          {
+            "type": "tip",
+            "text": "消耗趨勢讓您一目了然各模型的使用分布，若某天費用明顯偏高，可回到對話歷史找出當天的深度研究或大型文件分析任務加以調整。"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "u-ai-bi",
+    "sort_order": 19,
+    "icon": "BarChart3",
+    "icon_color": "text-orange-500",
+    "last_modified": "2026-04-01",
+    "title": "AI 戰情室",
+    "sidebar_label": "AI 戰情室",
+    "blocks": [
+      {
+        "type": "para",
+        "text": "AI 戰情室是一套以自然語言驅動的企業 ERP 資料查詢與視覺化平台，讓您無需懂 SQL 就能直接對 Oracle ERP 資料庫提問，即時取得報表、圖表，並可儲存常用查詢組合成彈性的 BI 儀表板。**系統透過資料政策控管每位使用者的資料可視範圍**，確保員工只能看到其職責範圍內的 ERP 資料。"
+      },
+      {
+        "type": "table",
+        "headers": [
+          "功能模組",
+          "說明"
+        ],
+        "rows": [
+          [
+            "自然語言查詢",
+            "用中文提問，系統自動生成並執行 SQL，回傳結果與圖表"
+          ],
+          [
+            "資料政策（Data Policy）",
+            "四層過濾機制，依使用者 / 角色 / 組織 / ERP Multi-Org 控管資料可視範圍"
+          ],
+          [
+            "命名查詢 / 報表範本",
+            "儲存常用問題為具名範本，可定義查詢參數與圖表設定"
+          ],
+          [
+            "Schema 欄位選擇器",
+            "從 ERP 資料表欄位清單選取並插入到提問輸入框"
+          ],
+          [
+            "即時圖表建構器",
+            "查詢結果出來後，快速設定長條圖、折線圖、圓餅圖等，支援分組/堆疊/複數 Y 軸/漸層/陰影"
+          ],
+          [
+            "Tableau 拖拉式設計器",
+            "全螢幕拖拉欄位到各 Shelf，視覺化設計圖表，類似 Tableau 操作體驗"
+          ],
+          [
+            "儀表板 Board",
+            "將多個命名查詢的圖表組合成一個可拖拉排版的儀表板"
+          ],
+          [
+            "查詢參數化",
+            "命名查詢可定義填值欄位（下拉選單、日期範圍等），執行時彈窗填入"
+          ],
+          [
+            "分享",
+            "命名查詢與儀表板可分享給指定使用者、角色、部門或組織單位"
+          ]
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "進入 AI 戰情室",
+        "blocks": [
+          {
+            "type": "steps",
+            "items": [
+              {
+                "title": "點選左側邊欄的「AI 戰情室」圖示",
+                "desc": "系統會導向 /dashboard 頁面，左側會顯示可用的主題（Topic）與查詢任務（Design）"
+              },
+              {
+                "title": "從左側選擇主題 → 查詢任務",
+                "desc": "主題是大分類（例：生產異常），任務是具體查詢範圍（例：各廠異常工單統計）"
+              },
+              {
+                "title": "在輸入框輸入自然語言問題",
+                "desc": "例：「請統計本月各廠區不良工單數量，依工廠由高到低排序」"
+              },
+              {
+                "title": "按 Enter 或點擊發送按鈕",
+                "desc": "系統會顯示進度，依序完成向量語意搜尋 → SQL 生成 → ERP 查詢 → 結果呈現"
+              }
+            ]
+          },
+          {
+            "type": "tip",
+            "text": "第一次使用請確認帳號已獲得「使用 AI 戰情室」權限，若未顯示入口請洽系統管理員開通。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "查詢結果解讀",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "查詢完成後，主區域會顯示："
+          },
+          {
+            "type": "table",
+            "headers": [
+              "元素",
+              "說明"
+            ],
+            "rows": [
+              [
+                "圖表頁籤",
+                "若 Design 有預設圖表設定，會自動呈現 ECharts 視覺化圖表"
+              ],
+              [
+                "表格頁籤",
+                "原始查詢結果，欄位標題使用中文說明，支援分頁"
+              ],
+              [
+                "資料筆數",
+                "右上角顯示總筆數（最多回傳 500 筆）"
+              ],
+              [
+                "快取標示",
+                "若顯示「快取命中」代表此問題結果來自快取，回應速度更快"
+              ]
+            ]
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "模型選擇",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "輸入框下方可切換 AI 模型，不同模型影響 SQL 生成品質與回應速度。建議使用預設模型（Gemini Pro），複雜查詢可嘗試切換至 Flash（速度較快但精準度略低）。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "語意搜尋參數（進階）",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "若查詢任務已啟用向量語意搜尋，輸入框下方會出現「向量搜尋參數」展開區，可調整："
+          },
+          {
+            "type": "table",
+            "headers": [
+              "參數",
+              "說明",
+              "預設值"
+            ],
+            "rows": [
+              [
+                "Top K",
+                "取語意最相近的 K 筆向量資料補充至 AI 提示詞",
+                "10"
+              ],
+              [
+                "相似度閾值",
+                "低於此分數的結果不納入（0~1，越大越嚴格）",
+                "0.50"
+              ]
+            ]
+          },
+          {
+            "type": "note",
+            "text": "通常無需調整，使用設計師設定的預設值即可。若查詢結果不符預期，可嘗試降低閾值至 0.30~0.40。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "資料政策（Data Policy）— 資料可視範圍控管",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "AI 戰情室的查詢結果受**資料政策**控管，系統在執行 SQL 前會自動在 WHERE 條件加入使用者所屬的組織過濾條件，確保每位員工只能看到其職責範圍內的 ERP 資料。此機制完全在後端執行，使用者無法繞過。"
+          },
+          {
+            "type": "para",
+            "text": "資料政策採用**四層過濾架構**，由管理員在後台設定："
+          },
+          {
+            "type": "table",
+            "headers": [
+              "層次",
+              "過濾維度",
+              "說明"
+            ],
+            "rows": [
+              [
+                "第 1 層 使用者過濾",
+                "指定使用者帳號",
+                "為特定使用者設定個人化的資料限制，優先級最高"
+              ],
+              [
+                "第 2 層 角色過濾",
+                "角色群組",
+                "為一整個角色（如「廠長」「生管人員」）設定統一過濾條件"
+              ],
+              [
+                "第 3 層 人事組織過濾",
+                "部門 / 利潤中心 / 事業處 / 事業群 / 組織代碼",
+                "依人事系統的組織歸屬自動過濾，支援「依員工組織自動推導」"
+              ],
+              [
+                "第 4 層 ERP Multi-Org 過濾",
+                "製造組織 / 營運單位 / 帳套",
+                "依 Oracle ERP 的 Multi-Org 架構過濾，控管跨廠區資料存取"
+              ]
+            ]
+          },
+          {
+            "type": "comparison",
+            "items": [
+              {
+                "title": "人事組織自動推導",
+                "desc": "第 3 層設定「依員工組織自動推導（auto_from_employee）」時，系統自動讀取登入者在 HR 系統的部門、利潤中心、事業處、事業群歸屬，不需手動逐一指定每位員工，異動職位時自動生效。",
+                "example": "",
+                "borderColor": "blue"
+              },
+              {
+                "title": "ERP Multi-Org 自動推導",
+                "desc": "第 4 層設定「依員工組織自動推導」時，系統對應 Oracle ERP 中的製造組織代碼（如 Z4E）或營運單位，查詢時自動加上 ORGANIZATION_ID 或 ORG_ID 的 WHERE 條件，限制看到的廠區資料。",
+                "example": "",
+                "borderColor": "orange"
+              }
+            ]
+          },
+          {
+            "type": "table",
+            "headers": [
+              "常見組織維度",
+              "說明",
+              "範例"
+            ],
+            "rows": [
+              [
+                "部門代碼（DEPT_CODE）",
+                "依人事系統部門代碼過濾",
+                "只看 MFG01 部門的資料"
+              ],
+              [
+                "利潤中心（Profit Center）",
+                "依利潤中心代碼過濾",
+                "只看所屬利潤中心的損益資料"
+              ],
+              [
+                "事業處（Org Section）",
+                "依事業處代碼過濾",
+                "中國廠 / 台灣廠 / 越南廠分隔"
+              ],
+              [
+                "製造組織（Organization Code）",
+                "對應 ERP mtl_parameters.organization_code",
+                "如 Z4E（漳州廠）、TWE（台灣廠）"
+              ],
+              [
+                "營運單位（Operating Unit）",
+                "對應 Oracle MO 架構的 operating_unit 欄位",
+                "區分不同 Operating Unit 的 AP/AR"
+              ]
+            ]
+          },
+          {
+            "type": "note",
+            "text": "**超級使用者（super_user）**：若管理員為特定使用者或角色設定第 3 / 4 層為「超級使用者（無限制）」，該帳號可查看所有組織的資料，不受組織過濾限制。通常僅授予 IT 管理人員或最高主管。"
+          },
+          {
+            "type": "tip",
+            "text": "若您查詢某廠區資料時顯示空白或數量明顯偏少，很可能是資料政策將您的可視範圍限制在特定組織。請洽系統管理員確認您的資料政策設定。"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "u-ai-bi-query",
+    "sort_order": 20,
+    "icon": "BookMarked",
+    "icon_color": "text-blue-600",
+    "last_modified": "2026-04-01",
+    "title": "命名查詢 / 報表範本",
+    "sidebar_label": "命名查詢 / 報表範本",
+    "blocks": [
+      {
+        "type": "para",
+        "text": "命名查詢讓您把常用的自然語言問題、SQL、圖表設定存下來，下次只需從「我的查詢」清單一鍵載入，省去重複輸入。進階功能可定義查詢參數，執行前彈窗讓您輸入工廠代碼、日期範圍等條件，讓同一份範本適用不同情境。"
+      },
+      {
+        "type": "subsection",
+        "title": "儲存目前查詢",
+        "blocks": [
+          {
+            "type": "steps",
+            "items": [
+              {
+                "title": "執行查詢並取得結果",
+                "desc": "確認查詢結果正確後，頂端工具列的「💾 儲存」按鈕會亮起"
+              },
+              {
+                "title": "點擊「💾 儲存」按鈕",
+                "desc": "開啟「儲存為命名查詢」對話框"
+              },
+              {
+                "title": "填寫基本資訊",
+                "desc": "輸入名稱（必填）、說明（選填）、分類（選填，支援自由輸入或從已有分類選取）"
+              },
+              {
+                "title": "勾選「載入後自動執行」（選用）",
+                "desc": "勾選後，下次載入此查詢時系統會立即執行，不需再按發送"
+              },
+              {
+                "title": "（選用）切換至「查詢參數」頁籤定義參數",
+                "desc": "詳見下方「查詢參數設定」說明"
+              },
+              {
+                "title": "點擊「儲存」完成",
+                "desc": "查詢範本儲存成功後，可在左側「我的查詢」頁籤看到"
+              }
+            ]
+          },
+          {
+            "type": "note",
+            "text": "儲存時系統會自動帶入目前生成的 SQL（鎖定 SQL）、圖表設定及自然語言問題。下次執行時直接使用鎖定的 SQL，不會重新呼叫 AI，速度更快也更穩定。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "載入並執行命名查詢",
+        "blocks": [
+          {
+            "type": "steps",
+            "items": [
+              {
+                "title": "點擊左側邊欄的「我的查詢」頁籤（書籤圖示）",
+                "desc": "顯示所有您建立或他人分享給您的命名查詢，依分類分組展示"
+              },
+              {
+                "title": "點擊要載入的查詢名稱",
+                "desc": "系統自動切換至對應 Design，並將問題帶入輸入框"
+              },
+              {
+                "title": "若查詢有定義參數 → 自動彈出參數填值對話框",
+                "desc": "填入工廠代碼、日期範圍等條件後點「執行查詢」"
+              },
+              {
+                "title": "查詢執行，結果與圖表呈現",
+                "desc": "若有設定圖表，會直接顯示圖表頁籤"
+              }
+            ]
+          },
+          {
+            "type": "tip",
+            "text": "滑鼠移到查詢項目上會出現「編輯」「分享」「刪除」三個操作按鈕，可快速管理查詢。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "編輯命名查詢",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "在「我的查詢」清單中，滑鼠移到查詢名稱上，點擊「編輯」即可修改名稱、說明、分類、鎖定 SQL 及參數定義。也可以直接修改鎖定 SQL 欄位中的 SQL 語法，儲存後立即生效。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "查詢參數設定",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "在儲存或編輯命名查詢時，切換至「查詢參數」頁籤可新增執行前填值的參數："
+          },
+          {
+            "type": "table",
+            "headers": [
+              "欄位",
+              "說明"
+            ],
+            "rows": [
+              [
+                "參數標籤（中文）",
+                "顯示在填值對話框的標籤文字，例如「工廠代碼」"
+              ],
+              [
+                "輸入類型",
+                "單選下拉、多選下拉、日期範圍、數值範圍、自由輸入"
+              ],
+              [
+                "來源 Schema / 來源欄位",
+                "指定從哪個資料表的哪個欄位自動拉取可選值（執行時會查詢 DISTINCT 值）"
+              ],
+              [
+                "注入方式",
+                "WHERE IN / BETWEEN / LIKE / 直接取代文字 — 決定參數如何嵌入到 SQL"
+              ],
+              [
+                "SQL Placeholder",
+                "SQL 中對應的替換標記，例如 :FACTORY_CODE"
+              ],
+              [
+                "必填",
+                "勾選後，若未填值則阻止執行"
+              ]
+            ]
+          },
+          {
+            "type": "tip",
+            "text": "日期範圍類型的參數支援「今天」「本月」「上月」快捷按鈕，使用者不必手動輸入。多選下拉會生成 IN (val1, val2, ...) 語法注入 SQL。"
+          },
+          {
+            "type": "para",
+            "text": "每個參數的「中文標籤」旁有一個「翻譯」按鈕（↻），點擊後系統會自動呼叫 AI 翻譯，將標籤翻成英文（EN）與越南文（VI），填入對應欄位，無需手動輸入多語版本。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "圖表設定（含複數 Y 軸）",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "命名查詢儲存對話框的「圖表設定」頁籤，功能與圖表建構器完全一致，包含："
+          },
+          {
+            "type": "table",
+            "headers": [
+              "功能",
+              "說明"
+            ],
+            "rows": [
+              [
+                "多圖表管理",
+                "可新增多張圖表，各自獨立設定欄位、類型、樣式"
+              ],
+              [
+                "X / Y 軸欄位選擇",
+                "從命名查詢儲存的欄位清單（available_columns）中選取"
+              ],
+              [
+                "分組 / 堆疊維度",
+                "在 Y 軸欄位設定後，可額外指定分組或堆疊維度（bar / line 適用）"
+              ],
+              [
+                "複數 Y 軸（進階）",
+                "啟用後可定義多條 Series，每條獨立設定欄位、聚合、類型（bar/line）、顏色、漸層、陰影、套疊、右軸等"
+              ],
+              [
+                "顏色主題",
+                "全局色票或自訂 Series 顏色"
+              ],
+              [
+                "排序 / 數值門檻",
+                "排序方式與最小值過濾"
+              ],
+              [
+                "三語標題翻譯",
+                "圖表標題、X / Y 軸名稱旁均有翻譯按鈕，一鍵填入英文與越南文"
+              ]
+            ]
+          },
+          {
+            "type": "note",
+            "text": "若儲存時查詢尚未執行（沒有 live 結果欄位），可在「圖表設定」頁籤下方的「手動新增欄位」輸入欄位代碼，讓 X / Y 欄位下拉選單有選項可選，不必重新執行查詢。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "分享命名查詢",
+        "blocks": [
+          {
+            "type": "steps",
+            "items": [
+              {
+                "title": "滑鼠移到查詢名稱，點擊「分享」圖示",
+                "desc": "開啟分享設定對話框"
+              },
+              {
+                "title": "選擇分享對象類型",
+                "desc": "可選：使用者 / 角色 / 部門 / 利潤中心 / 事業處 / 事業群"
+              },
+              {
+                "title": "搜尋並選取對象",
+                "desc": "輸入姓名、帳號或工號搜尋使用者；部門等類型直接從下拉清單選擇"
+              },
+              {
+                "title": "設定權限等級後點「+ 新增」",
+                "desc": ""
+              }
+            ]
+          },
+          {
+            "type": "table",
+            "headers": [
+              "權限等級",
+              "可做的事"
+            ],
+            "rows": [
+              [
+                "使用權限",
+                "可載入執行此查詢、另存為自己的版本，但無法修改原始設定"
+              ],
+              [
+                "管理權限",
+                "可修改查詢設定、管理分享名單（等同擁有者）"
+              ]
+            ]
+          },
+          {
+            "type": "note",
+            "text": "被分享使用者若想修改查詢，點「編輯」時系統會提示「另存為自己的版本」而非覆蓋原版，避免影響其他使用者。"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "u-ai-bi-field",
+    "sort_order": 21,
+    "icon": "Server",
+    "icon_color": "text-violet-500",
+    "last_modified": "2026-04-01",
+    "title": "Schema 欄位選擇器",
+    "sidebar_label": "Schema 欄位選擇器",
+    "blocks": [
+      {
+        "type": "para",
+        "text": "Schema 欄位選擇器讓您直接從目前查詢任務的資料表欄位清單中勾選欄位，點一下即可將欄位名稱或中文說明插入到輸入框的游標位置，不必記住英文欄位名稱，提問更精確。"
+      },
+      {
+        "type": "subsection",
+        "title": "開啟欄位選擇器",
+        "blocks": [
+          {
+            "type": "steps",
+            "items": [
+              {
+                "title": "先從左側選擇一個查詢任務（Design）",
+                "desc": "欄位清單會根據該任務綁定的 Schema 資料表自動載入"
+              },
+              {
+                "title": "點擊頂端工具列的「⊞ 欄位」按鈕",
+                "desc": "右側欄位名稱旁出現 Popover 浮動面板"
+              },
+              {
+                "title": "在搜尋框輸入關鍵字篩選欄位（選用）",
+                "desc": "支援中文說明或英文欄位名稱搜尋"
+              },
+              {
+                "title": "勾選一或多個欄位",
+                "desc": "已勾選的欄位顯示藍底，底部出現「插入游標位置」按鈕"
+              },
+              {
+                "title": "選擇插入方式",
+                "desc": "「中文說明」插入欄位的業務語意名稱（推薦）；「欄位名稱」插入英文欄位代碼（適合需要精確指定時）"
+              },
+              {
+                "title": "點擊「插入游標位置」",
+                "desc": "所選欄位以頓號連接，插入到輸入框目前的游標位置"
+              }
+            ]
+          },
+          {
+            "type": "tip",
+            "text": "插入後可直接接著輸入問題，例如：先插入「工廠代碼、不良數量」後，加上「，請統計本月各廠的合計不良數量由高到低排序」。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "欄位清單說明",
+        "blocks": [
+          {
+            "type": "table",
+            "headers": [
+              "欄位資訊",
+              "說明"
+            ],
+            "rows": [
+              [
+                "中文說明（左側）",
+                "業務語意名稱，以當前 UI 語言（中 / 英 / 越）顯示"
+              ],
+              [
+                "英文代碼（右側灰色）",
+                "資料庫實際欄位名稱（column_name）"
+              ],
+              [
+                "資料表分組",
+                "欄位依所屬資料表分組，標題顯示資料表顯示名稱"
+              ]
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "u-ai-bi-chart",
+    "sort_order": 22,
+    "icon": "BarChart3",
+    "icon_color": "text-purple-600",
+    "last_modified": "2026-04-01",
+    "title": "即時圖表建構器",
+    "sidebar_label": "即時圖表建構器",
+    "blocks": [
+      {
+        "type": "para",
+        "text": "查詢出結果後，您可以使用圖表建構器即時設定圖表類型與欄位對應，系統在瀏覽器端直接聚合計算，不需要重新查詢 ERP，切換維度幾乎即時。設定完成後可儲存到命名查詢，下次直接呈現您自訂的圖表。"
+      },
+      {
+        "type": "subsection",
+        "title": "開啟圖表建構器",
+        "blocks": [
+          {
+            "type": "steps",
+            "items": [
+              {
+                "title": "執行查詢並取得結果",
+                "desc": "有結果後，頂端工具列的「📐 圖表」按鈕才會可用"
+              },
+              {
+                "title": "點擊「📐 圖表」按鈕",
+                "desc": "右側滑出圖表建構器面板，查詢結果和圖表左右並排顯示"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "基本設定",
+        "blocks": [
+          {
+            "type": "table",
+            "headers": [
+              "設定項目",
+              "說明"
+            ],
+            "rows": [
+              [
+                "圖表類型",
+                "📊 長條圖 / 📈 折線圖 / 🍕 圓餅圖 / ⚫ 散佈圖 / 🕸 雷達圖，點擊圖示切換"
+              ],
+              [
+                "X 軸 / 類別欄位",
+                "選擇橫軸（或圓餅標籤）欄位，通常是代碼或時間類欄位"
+              ],
+              [
+                "Y 軸 / 數值欄位",
+                "選擇要聚合計算的數值欄位（單 Y 軸模式）"
+              ],
+              [
+                "聚合函數",
+                "SUM / COUNT / AVG / MAX / MIN / COUNT_DISTINCT"
+              ],
+              [
+                "顯示前幾筆",
+                "取前 N 筆資料，預設 20 筆"
+              ],
+              [
+                "圖表標題",
+                "顯示在圖表上方的標題文字（支援三語翻譯按鈕）"
+              ],
+              [
+                "X / Y 軸標題",
+                "軸名稱說明文字，支援三語翻譯"
+              ]
+            ]
+          },
+          {
+            "type": "tip",
+            "text": "聚合計算在瀏覽器端執行（Client-side），不需重跑 SQL。設定後點「▼ 預覽」即可即時看到圖表效果。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "排序與篩選",
+        "blocks": [
+          {
+            "type": "table",
+            "headers": [
+              "設定項目",
+              "說明"
+            ],
+            "rows": [
+              [
+                "排序依據",
+                "不排序 / 依 X 軸排序 / 依 Y 軸排序"
+              ],
+              [
+                "排序方向",
+                "升冪（ASC）/ 降冪（DESC）"
+              ],
+              [
+                "數值門檻 (min_value)",
+                "排除 Y 軸值 ≤ 此數的資料列，設為 0 可去除零值資料"
+              ],
+              [
+                "圓餅 Top-N",
+                "圓餅圖專用：依值由大到小取前 N 筆（其餘歸為其他或省略）"
+              ]
+            ]
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "多維度設定（分組 / 堆疊）",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "長條圖與折線圖可在 Y 軸欄位之外，再加入「分組維度」或「堆疊維度」，讓同一張圖呈現多個 Series。"
+          },
+          {
+            "type": "table",
+            "headers": [
+              "設定",
+              "效果",
+              "適用場景"
+            ],
+            "rows": [
+              [
+                "分組維度 (Series)",
+                "同一 X 類別下並排多根柱子或多條線，每個維度值一種顏色",
+                "比較各廠 × 各月份的數量"
+              ],
+              [
+                "堆疊維度 (Stack)",
+                "同一 X 類別的柱子向上堆疊，各維度值疊加為整體",
+                "顯示各產品佔每月總量的比例"
+              ],
+              [
+                "分組 + 堆疊同時使用",
+                "每組並排，組內疊色，適合 3D 分析",
+                "廠區 × 機種 × 不良類別"
+              ]
+            ]
+          },
+          {
+            "type": "note",
+            "text": "設定分組或堆疊維度後，圖表建構器會直接傳入原始資料列，由 AiChart 內部在瀏覽器端 pivot 計算，不需重跑 SQL。「複數 Y 軸（進階）」模式啟用時，分組/堆疊維度會自動隱藏（兩者互斥）。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "複數 Y 軸（進階 Method B）",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "當您需要把兩個以上的指標放在同一張圖、或需要「柱狀＋折線」混合圖、或「套疊/子彈圖」效果時，可使用「複數 Y 軸」模式。在圖表建構器的「複數 Y 軸 (進階)」區塊，點「+ 新增 Y 軸 series」加入每一條 Series。"
+          },
+          {
+            "type": "table",
+            "headers": [
+              "每條 Series 設定",
+              "說明"
+            ],
+            "rows": [
+              [
+                "欄位",
+                "該 Series 對應的資料欄位"
+              ],
+              [
+                "聚合函數",
+                "SUM / COUNT / AVG / MAX / MIN / COUNT_DISTINCT，與欄位搭配"
+              ],
+              [
+                "類型 (Bar / Line)",
+                "單張圖可混合柱狀與折線，實現 Combo Chart"
+              ],
+              [
+                "顏色",
+                "點選色塊選擇任意顏色（HTML color picker）"
+              ],
+              [
+                "名稱 (Label)",
+                "顯示在圖例（Legend）的 Series 名稱"
+              ],
+              [
+                "寬度 (Bar only)",
+                "柱子寬度，例如 40%（百分比）或 30（像素）"
+              ],
+              [
+                "漸層",
+                "柱子或折線加上由上到下的漸層填充效果"
+              ],
+              [
+                "陰影",
+                "柱子或折線加上外發光陰影效果，增加立體感"
+              ],
+              [
+                "套疊 (Bar only)",
+                "讓此柱子疊在前一條 Series 上（barGap: -100%），實現子彈圖效果"
+              ],
+              [
+                "平滑 (Line only)",
+                "折線以貝茲曲線圓滑顯示"
+              ],
+              [
+                "面積 (Line only)",
+                "折線下方填滿半透明顏色"
+              ],
+              [
+                "右軸",
+                "讓此 Series 使用右側 Y 軸，適合不同量級的指標並排顯示"
+              ]
+            ]
+          },
+          {
+            "type": "tip",
+            "text": "子彈圖（Bullet Chart）做法：新增兩條 Bar Series，第一條寬度設 60%（背景），第二條寬度設 30%、勾選「套疊」（前景），兩條使用不同顏色，即可呈現目標值vs實際值的子彈圖效果。"
+          },
+          {
+            "type": "note",
+            "text": "啟用複數 Y 軸後，上方的單一 Y 軸欄位與分組/堆疊維度設定均會被忽略，圖表完全由 y_axes 陣列驅動。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "顏色主題",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "在圖表建構器底部可選擇整體色票主題，影響所有 Series 的預設顏色（自訂顏色的 Series 不受影響）："
+          },
+          {
+            "type": "table",
+            "headers": [
+              "主題",
+              "色系說明"
+            ],
+            "rows": [
+              [
+                "預設（Power BI）",
+                "藍橘紫綠，接近 Power BI 預設色票"
+              ],
+              [
+                "藍 (Blue)",
+                "深淺藍色系"
+              ],
+              [
+                "綠 (Green)",
+                "深淺綠色系"
+              ],
+              [
+                "橘 (Orange)",
+                "橘紅黃色系"
+              ],
+              [
+                "紫 (Purple)",
+                "深淺紫色系"
+              ],
+              [
+                "青 (Teal)",
+                "青藍色系"
+              ]
+            ]
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "樣式選項",
+        "blocks": [
+          {
+            "type": "table",
+            "headers": [
+              "圖表類型",
+              "可用樣式"
+            ],
+            "rows": [
+              [
+                "長條圖",
+                "水平長條（Horizontal）、全域陰影（Shadow）"
+              ],
+              [
+                "折線圖",
+                "圓滑曲線（Smooth）、面積填滿（Area）、全域陰影（Shadow）"
+              ],
+              [
+                "圓餅圖",
+                "甜甜圈樣式（Donut）"
+              ],
+              [
+                "全部",
+                "顯示數值標籤（Show Label）、顯示圖例（Show Legend）、顯示格線（Show Grid）"
+              ]
+            ]
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "多圖表",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "同一份查詢結果可以加入多張圖表，分別設定不同的欄位組合。點頂部的「+ 新增」加入第二、第三張圖表，在結果區以頁籤切換。"
+          },
+          {
+            "type": "steps",
+            "items": [
+              {
+                "title": "設定好第一張圖表後點「+ 新增」",
+                "desc": ""
+              },
+              {
+                "title": "切換到新頁籤，設定另一種欄位組合",
+                "desc": "例如：第一張長條圖看「各廠異常數量」，第二張折線圖看「每日趨勢」"
+              },
+              {
+                "title": "點「儲存圖表設定」寫回命名查詢",
+                "desc": ""
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "儲存圖表設定",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "點擊面板右上角的「儲存圖表設定」，系統將所有圖表設定寫入命名查詢（需已儲存命名查詢）。下次載入此命名查詢並執行後，圖表會自動呈現您設定好的樣式。"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "u-ai-bi-shelf",
+    "sort_order": 23,
+    "icon": "Layers",
+    "icon_color": "text-rose-500",
+    "last_modified": "2026-04-01",
+    "title": "Tableau 拖拉式設計器",
+    "sidebar_label": "Tableau 拖拉式設計器",
+    "blocks": [
+      {
+        "type": "para",
+        "text": "Tableau 拖拉式設計器提供類似 Tableau Worksheet 的全螢幕操作介面，讓您把欄位直接拖到各個 Shelf（欄架），即時預覽圖表效果，不需要設定欄位名稱字串，視覺化操作更直覺。完成後點「套用」即可將圖表設定同步到 AI 戰情室。"
+      },
+      {
+        "type": "subsection",
+        "title": "開啟設計器",
+        "blocks": [
+          {
+            "type": "steps",
+            "items": [
+              {
+                "title": "執行查詢並取得結果",
+                "desc": "頂端工具列的「Tableau」按鈕（Layers 圖示）才會亮起"
+              },
+              {
+                "title": "點擊工具列「Tableau」按鈕",
+                "desc": "全螢幕覆蓋層彈出，左側是欄位清單，右側是 Shelf 區域與即時圖表預覽"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "欄位分類",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "系統會自動分析資料，將欄位分類為「維度」與「量值」："
+          },
+          {
+            "type": "table",
+            "headers": [
+              "類型",
+              "顯示色",
+              "判斷邏輯"
+            ],
+            "rows": [
+              [
+                "維度 (Dimension)",
+                "藍色標籤",
+                "取前 30 筆，數值佔比 < 70%（通常是代碼、名稱、日期類）"
+              ],
+              [
+                "量值 (Measure)",
+                "橘色標籤",
+                "取前 30 筆，數值佔比 ≥ 70%（通常是數量、金額、比率類）"
+              ]
+            ]
+          },
+          {
+            "type": "tip",
+            "text": "自動分類可能因資料特性有偏差，例如工廠代碼若全為數字會被歸為量值。您可以手動將任意欄位拖到任何 Shelf，分類僅供參考。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "Shelf 說明",
+        "blocks": [
+          {
+            "type": "table",
+            "headers": [
+              "Shelf",
+              "對應設定",
+              "說明"
+            ],
+            "rows": [
+              [
+                "Columns（X 軸）",
+                "x_field",
+                "橫軸類別欄位，通常拖入維度欄位"
+              ],
+              [
+                "Rows（Y 軸）",
+                "y_field + y_agg",
+                "縱軸量值欄位，右側選聚合函數"
+              ],
+              [
+                "Color（顏色維度）",
+                "series_field",
+                "拖入後產生分組 Series，各維度值用不同顏色"
+              ],
+              [
+                "Size（堆疊維度）",
+                "stack_field",
+                "拖入後產生堆疊效果，各維度值向上疊加"
+              ]
+            ]
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "拖拉操作流程",
+        "blocks": [
+          {
+            "type": "steps",
+            "items": [
+              {
+                "title": "從左側欄位清單抓取欄位",
+                "desc": "長按後拖動，欄位上出現抓取游標（GripVertical 圖示）"
+              },
+              {
+                "title": "拖到目標 Shelf 放開",
+                "desc": "Shelf 出現藍色 hover 高亮時放開即可完成配置"
+              },
+              {
+                "title": "同一 Shelf 可替換欄位",
+                "desc": "再次拖入新欄位到已有欄位的 Shelf，會直接取代"
+              },
+              {
+                "title": "點擊 Shelf 上的 ✕ 移除欄位",
+                "desc": "清空該維度設定"
+              },
+              {
+                "title": "圖表預覽即時更新",
+                "desc": "每次變更 Shelf 配置，右側圖表預覽立刻重新計算並顯示"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "圖表類型與顯示選項",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "設計器頂部工具列提供快速切換圖表類型，以及常用顯示開關："
+          },
+          {
+            "type": "table",
+            "headers": [
+              "選項",
+              "說明"
+            ],
+            "rows": [
+              [
+                "圖表類型",
+                "長條圖 / 折線圖 / 圓餅圖 / 散佈圖 / 雷達圖，點擊切換"
+              ],
+              [
+                "聚合函數 (Y Shelf)",
+                "SUM / COUNT / AVG / MAX / MIN / COUNT_DISTINCT，僅影響 Y Shelf 欄位"
+              ],
+              [
+                "顯示前 N 筆",
+                "設定最多顯示幾筆資料，預設 20 筆"
+              ],
+              [
+                "漸層",
+                "長條圖柱子加上漸層填充"
+              ],
+              [
+                "圓滑 (Line only)",
+                "折線以圓滑曲線顯示"
+              ],
+              [
+                "顯示標籤",
+                "在各資料點上顯示數值"
+              ],
+              [
+                "顯示圖例",
+                "在圖表旁顯示 Series 名稱對照"
+              ],
+              [
+                "顯示格線",
+                "在圖表背景顯示輔助格線"
+              ]
+            ]
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "套用與關閉",
+        "blocks": [
+          {
+            "type": "steps",
+            "items": [
+              {
+                "title": "設計滿意後，點擊右上角「套用」按鈕",
+                "desc": "圖表設定會同步回 AI 戰情室的圖表顯示，並標記為使用者自訂設定"
+              },
+              {
+                "title": "點擊「關閉」或背景遮罩可不儲存直接退出",
+                "desc": ""
+              },
+              {
+                "title": "套用後繼續點「💾 儲存」可將 Tableau 設計的圖表設定永久寫入命名查詢",
+                "desc": ""
+              }
+            ]
+          },
+          {
+            "type": "note",
+            "text": "Tableau 設計器產生的設定與圖表建構器（📐 圖表面板）共用同一份設定結構，可以在兩者之間互相切換精調。"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "u-ai-bi-dashboard",
+    "sort_order": 24,
+    "icon": "Share2",
+    "icon_color": "text-teal-600",
+    "last_modified": "2026-04-01",
+    "title": "儀表板 Dashboard Board",
+    "sidebar_label": "儀表板 Dashboard",
+    "blocks": [
+      {
+        "type": "para",
+        "text": "儀表板讓您把多個命名查詢的圖表組合成一個總覽頁面，類似 Power BI 的 Report Page，每個圖表格（Tile）獨立執行查詢，可拖拉調整位置與大小，分享給指定同仁瀏覽。"
+      },
+      {
+        "type": "subsection",
+        "title": "進入儀表板",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "在 AI 戰情室頂端工具列點擊「⊞」儀表板圖示，或直接訪問 `/dashboard/boards`，即可進入儀表板管理頁面。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "建立新儀表板",
+        "blocks": [
+          {
+            "type": "steps",
+            "items": [
+              {
+                "title": "點擊左側邊欄下方的「+ 新增儀表板」",
+                "desc": ""
+              },
+              {
+                "title": "輸入儀表板名稱（必填）、說明、分類",
+                "desc": "分類用來在左側清單分組，例如「生產」「品質」「人力」"
+              },
+              {
+                "title": "點「建立」完成",
+                "desc": "新儀表板建立後自動選中，進入空白畫布"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "加入圖表 Tile",
+        "blocks": [
+          {
+            "type": "steps",
+            "items": [
+              {
+                "title": "點擊工具列「✏ 編輯佈局」進入編輯模式",
+                "desc": ""
+              },
+              {
+                "title": "從上方「+ 加入查詢...」下拉選擇一個命名查詢",
+                "desc": "系統會在畫布加入一個新的圖表格，預設 6×4 格大小"
+              },
+              {
+                "title": "重複加入多個命名查詢的圖表",
+                "desc": ""
+              },
+              {
+                "title": "拖拉 Tile 標題列調整位置",
+                "desc": "藍色手把（標題列）可拖曳移動"
+              },
+              {
+                "title": "拖拉 Tile 右下角調整大小",
+                "desc": ""
+              },
+              {
+                "title": "點「💾 儲存佈局」完成排版",
+                "desc": ""
+              }
+            ]
+          },
+          {
+            "type": "note",
+            "text": "加入的命名查詢若有定義查詢參數，執行各 Tile 時會各自獨立彈出填值對話框，參數設定不會互相影響。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "執行與重新整理",
+        "blocks": [
+          {
+            "type": "table",
+            "headers": [
+              "操作",
+              "說明"
+            ],
+            "rows": [
+              [
+                "點擊單一 Tile 的 🔄 按鈕",
+                "重新執行該 Tile 的命名查詢並更新圖表"
+              ],
+              [
+                "點擊工具列「🔄 重新整理全部」",
+                "同時觸發所有 Tile 重新查詢（平行執行）"
+              ],
+              [
+                "首次進入儀表板",
+                "Tile 預設不自動執行，需手動點擊「點擊執行查詢」"
+              ],
+              [
+                "命名查詢有設定「載入後自動執行」",
+                "加入 Dashboard 後該 Tile 進入頁面時自動執行"
+              ]
+            ]
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "分享儀表板",
+        "blocks": [
+          {
+            "type": "steps",
+            "items": [
+              {
+                "title": "點擊工具列「🔗 分享」按鈕",
+                "desc": "開啟儀表板分享設定對話框"
+              },
+              {
+                "title": "依照命名查詢分享的相同流程，選擇對象類型與搜尋對象",
+                "desc": ""
+              },
+              {
+                "title": "設定「使用權限」或「管理權限」後點「+ 新增」",
+                "desc": ""
+              }
+            ]
+          },
+          {
+            "type": "table",
+            "headers": [
+              "權限",
+              "說明"
+            ],
+            "rows": [
+              [
+                "使用權限",
+                "可瀏覽、執行儀表板內所有圖表；可另存為自己的版本"
+              ],
+              [
+                "管理權限",
+                "可修改儀表板佈局與分享名單"
+              ]
+            ]
+          },
+          {
+            "type": "tip",
+            "text": "若儀表板包含的命名查詢未分享給對象，對象執行時會出現「查詢無法存取」錯誤。建議儀表板與其包含的命名查詢共享給相同對象。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "複製儀表板",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "對被分享的儀表板，您可以選擇「另存為自己的版本」（Clone）取得一份獨立副本，修改後不影響原始儀表板。Clone 的操作入口在儀表板選項選單中。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "唯讀模式與權限說明",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "儀表板依照您的權限顯示不同操作按鈕："
+          },
+          {
+            "type": "table",
+            "headers": [
+              "您的權限",
+              "能做的事",
+              "介面提示"
+            ],
+            "rows": [
+              [
+                "管理權限（建立者或被授予管理）",
+                "編輯佈局、新增/移除 Tile、調整大小、分享、刪除",
+                "工具列顯示「編輯佈局」「分享」「刪除」按鈕"
+              ],
+              [
+                "使用權限（被分享）",
+                "執行查詢、查看圖表、另存副本（Clone）",
+                "空白畫布時顯示「此儀表板為唯讀」提示，工具列不顯示編輯按鈕"
+              ]
+            ]
+          },
+          {
+            "type": "note",
+            "text": "若您看到「此儀表板為唯讀」提示而非「進入編輯模式加入圖表」，代表您對此儀表板只有使用權限。如需編輯，請聯繫儀表板建立者授予管理權限，或使用「另存副本」建立自己的版本。"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "u-ai-bi-schema",
+    "sort_order": 25,
+    "icon": "Database",
+    "icon_color": "text-cyan-600",
+    "last_modified": "2026-04-01",
+    "title": "Schema 與多資料庫來源",
+    "sidebar_label": "Schema 與多資料庫來源",
+    "blocks": [
+      {
+        "type": "para",
+        "text": "AI 戰情室的自然語言查詢能力，建立在**多資料庫來源（DB Sources）**與 **Schema 知識庫**的設計上。設計者（具備「開發 AI 戰情室」權限的帳號）可以為不同的資料庫連線建立 Schema，讓 AI 知道哪些資料表可查、有哪些欄位、欄位代表什麼業務意義，從而生成精準的 SQL。系統支援 **Oracle、MySQL、MSSQL** 三種資料庫，且同一個查詢專案中可同時引用來自不同資料庫的多個 Schema，實現跨庫查詢。"
+      },
+      {
+        "type": "subsection",
+        "title": "整體架構概覽",
+        "blocks": [
+          {
+            "type": "table",
+            "headers": [
+              "層次",
+              "名稱",
+              "說明"
+            ],
+            "rows": [
+              [
+                "1",
+                "外部資料來源（DB Source）",
+                "系統管理員在後台設定的 Oracle/MySQL/MSSQL 連線，含 Host/Port/帳密/連線池"
+              ],
+              [
+                "2",
+                "戰情專案（Project）",
+                "設計者建立的邏輯分組，一個專案包含多個 Schema + Topic + Design"
+              ],
+              [
+                "3",
+                "Schema 知識庫",
+                "對應到 DB Source 中某個資料表/視圖/子查詢，並說明各欄位業務意義"
+              ],
+              [
+                "4",
+                "Join 定義",
+                "說明 Schema 間的 JOIN 關係，輔助 AI 生成跨表 SQL"
+              ],
+              [
+                "5",
+                "主題 / 查詢任務（Topic / Design）",
+                "終端使用者看到的查詢分類與具體任務，引用一或多個 Schema"
+              ]
+            ]
+          },
+          {
+            "type": "tip",
+            "text": "每個 Schema 各自指定一個 DB Source，因此同一專案的不同 Schema 可以分別來自 Oracle ERP 主機、MySQL 分析資料庫、MSSQL 報表庫等不同系統，AI 生成 SQL 時會路由到正確的資料庫執行。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "Step 1：設定外部資料來源（DB Source）",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "進入後台管理 → 「AI 戰情室 — 外部資料來源」頁籤（系統管理員才能看到）。點擊「+ 新增來源」，填入以下欄位："
+          },
+          {
+            "type": "table",
+            "headers": [
+              "欄位",
+              "說明",
+              "範例"
+            ],
+            "rows": [
+              [
+                "名稱",
+                "此連線的識別用標籤",
+                "ERP Oracle 主機、MySQL 分析庫"
+              ],
+              [
+                "資料庫類型",
+                "Oracle / MySQL / MSSQL",
+                "oracle"
+              ],
+              [
+                "Host",
+                "資料庫伺服器 IP 或網域",
+                "192.168.10.10"
+              ],
+              [
+                "Port",
+                "Oracle=1521，MySQL=3306，MSSQL=1433",
+                "1521"
+              ],
+              [
+                "Service Name（Oracle）",
+                "Oracle Service Name / SID",
+                "ORCL"
+              ],
+              [
+                "Database Name（MySQL/MSSQL）",
+                "目標資料庫名稱",
+                "erp_db"
+              ],
+              [
+                "帳號 / 密碼",
+                "查詢帳號（建議使用唯讀帳號）",
+                "apps / ••••••"
+              ],
+              [
+                "Pool Min / Max",
+                "連線池大小，依查詢頻率調整",
+                "1 / 5"
+              ],
+              [
+                "狀態",
+                "啟用或停用此連線",
+                "啟用"
+              ]
+            ]
+          },
+          {
+            "type": "para",
+            "text": "儲存後，可點擊每個來源的 **Wifi 圖示**測試連線（Ping），確認連線成功後才能在 Schema 中使用。"
+          },
+          {
+            "type": "note",
+            "text": "連線測試會實際執行 SELECT 1 驗證到達目標資料庫的網路與帳密是否正確。若顯示「連線失敗」，請確認防火牆已開放對應 Port 及帳號權限。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "Step 2：在設計者介面建立 Schema",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "具備「開發 AI 戰情室」權限的帳號，在 AI 戰情室底部點擊「⊞ 設計者模式」進入設計面板，選擇目標**專案**後，點擊「Schema 知識庫」頁籤，即可新增 Schema。"
+          },
+          {
+            "type": "table",
+            "headers": [
+              "欄位",
+              "說明"
+            ],
+            "rows": [
+              [
+                "資料表/視圖名稱",
+                "格式為 OWNER.TABLE_NAME（如 APPS.WO_ABNORMAL_V）或純表名（如 WO_ABNORMAL_V）"
+              ],
+              [
+                "顯示名稱（中/英/越）",
+                "AI 提示詞與介面顯示用的友善名稱，儲存後自動翻譯英文/越文"
+              ],
+              [
+                "別名（alias）",
+                "SQL 中引用此 Schema 的短代號，如 wo_abnormal，需為小寫英數字"
+              ],
+              [
+                "來源類型",
+                "Table（實體表）/ View（視圖）/ SQL（自訂子查詢，可做複雜預處理）"
+              ],
+              [
+                "資料來源（DB Source）",
+                "從已設定的 DB Sources 選擇此 Schema 對應哪個資料庫連線"
+              ],
+              [
+                "業務說明（business_notes）",
+                "告訴 AI 此資料表的業務用途，影響 AI 生成 SQL 的準確性"
+              ],
+              [
+                "Join 提示（join_hints）",
+                "說明此表常見的 JOIN 條件，輔助跨表查詢"
+              ],
+              [
+                "基礎過濾條件（Base Conditions）",
+                "每次生成 SQL 都會自動加入的 WHERE 條件，如有效狀態過濾"
+              ]
+            ]
+          },
+          {
+            "type": "tip",
+            "text": "**多資料庫跨庫設計**：同一個專案中，可以新增多個 Schema 各自指定不同的 DB Source。設計者在查詢任務（Design）的 Schema 欄位選擇器中勾選所需 Schema，AI 執行時會分別對各 Schema 對應的 DB Source 下查，再合併結果回傳。這樣可實現如「ERP Oracle + MySQL 分析庫」的跨庫自然語言查詢。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "Step 3：管理 Schema 欄位說明",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "Schema 建立後，點擊欄位清單圖示（Columns）進入欄位說明編輯介面，為每個欄位填入**業務意義說明**（description），這是 AI 正確理解欄位用途的關鍵："
+          },
+          {
+            "type": "table",
+            "headers": [
+              "操作",
+              "說明"
+            ],
+            "rows": [
+              [
+                "手動編輯說明",
+                "逐欄填入中文業務說明，也可補充英文（desc_en）、越文（desc_vi）"
+              ],
+              [
+                "匯出 CSV",
+                "點「匯出 CSV」下載欄位清單，可在 Excel 批次填寫後再匯入"
+              ],
+              [
+                "匯入 CSV",
+                "填好的 CSV（欄位 column_name, description, desc_en, desc_vi）直接匯入更新"
+              ],
+              [
+                "虛擬欄位（Virtual Column）",
+                "定義計算欄位，如 TO_CHAR(order_date, 'YYYYMM') 作為年月分組維度"
+              ],
+              [
+                "Oracle 函數範本",
+                "虛擬欄位提供 Oracle 常用函數範本選單，如 TRUNC/EXTRACT/NVL/ROUND 等"
+              ]
+            ]
+          },
+          {
+            "type": "note",
+            "text": "欄位說明品質直接影響 AI 生成 SQL 的準確性。建議至少為查詢條件欄位、維度欄位、金額欄位填入中文說明。欄位說明可隨時更新，無需重建 Schema。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "從 Oracle 批次匯入 Schema",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "若要快速將多個 Oracle ERP 資料表登錄到 Schema 知識庫，可使用**批次匯入**功能："
+          },
+          {
+            "type": "steps",
+            "items": [
+              {
+                "title": "點擊 Schema 頁籤右上方「從 Oracle 批次匯入」按鈕",
+                "desc": ""
+              },
+              {
+                "title": "選擇資料來源（DB Source）",
+                "desc": "選擇目標 Oracle 連線，通常為 ERP 主機"
+              },
+              {
+                "title": "填寫預設 Owner（Schema Owner）",
+                "desc": "如 APPS，系統在無前綴的表名前自動補上此 Owner"
+              },
+              {
+                "title": "在文字框貼上資料表清單",
+                "desc": "每行一個表名，格式範例：WO_ABNORMAL_V / APPS.MTL_SYSTEM_ITEMS_B / HR.EMPLOYEES（支援混搭不同 Owner）"
+              },
+              {
+                "title": "點「開始匯入」",
+                "desc": "系統向 Oracle Data Dictionary 查詢各表的欄位清單，自動建立 Schema 及欄位（每次最多 50 個表）"
+              },
+              {
+                "title": "查看匯入結果",
+                "desc": "成功的顯示 ✓ 表名 — N 欄；查無此表的顯示 ✗（請確認 Owner 與表名是否正確）"
+              }
+            ]
+          },
+          {
+            "type": "tip",
+            "text": "批次匯入只建立 Schema 骨架與欄位名稱/型態，欄位的**業務意義說明仍需手動補充**（或匯出 CSV 填寫後匯回）。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "複製 Schema 到其他專案",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "設計者可從其他專案複製現有 Schema 到目前專案，避免重複設定相同的 ERP 基礎表：點擊 Schema 清單右上方「複製來源 Schema」按鈕，搜尋並選取其他專案的 Schema 即可複製，複製後可獨立修改不影響原始。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "多資料庫查詢流程（進階）",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "當一個查詢任務（Design）引用了來自不同 DB Source 的多個 Schema 時，查詢流程如下："
+          },
+          {
+            "type": "table",
+            "headers": [
+              "步驟",
+              "說明"
+            ],
+            "rows": [
+              [
+                "1. LLM SQL 生成",
+                "AI 根據使用者問題與所有選取 Schema 的欄位說明，生成各個 Schema 對應的 SQL 片段"
+              ],
+              [
+                "2. 路由執行",
+                "後端依照每個 SQL 片段對應的 source_db_id，向對應的 DB Source 各自發出查詢"
+              ],
+              [
+                "3. 結果合併",
+                "各 DB 回傳結果後，若有跨庫 JOIN 需求則在應用層合併，最終整合回傳給前端"
+              ],
+              [
+                "4. 資料政策套用",
+                "每個 DB 查詢在生成 SQL 時均套用該使用者的資料政策過濾條件，確保資料安全"
+              ]
+            ]
+          },
+          {
+            "type": "note",
+            "text": "目前跨庫 JOIN 需在 LLM Prompt 層面透過業務說明指引 AI 生成分開的查詢再合併，不支援在同一 SQL 語句中跨庫 JOIN（因屬不同資料庫連線）。設計建議：若需跨 Oracle ERP + MySQL 的組合報表，可設計兩個 Design 分別查詢，或透過 ETL 預先將資料同步到單一庫後再設定 Schema。"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "u-help-kb",
+    "sort_order": 26,
+    "icon": "BookMarked",
+    "icon_color": "text-blue-500",
+    "last_modified": "2026-04-01",
+    "title": "AI 回答使用問題",
+    "sidebar_label": "AI 回答使用問題",
+    "blocks": [
+      {
+        "type": "para",
+        "text": "Foxlink GPT to Cortex 內建了一套**使用說明知識庫**，涵蓋系統所有功能的操作方式。您可以直接在對話框向 AI 提問，不需要翻閱說明書，AI 會從知識庫中找到最相關的說明回答您。"
+      },
+      {
+        "type": "subsection",
+        "title": "如何詢問",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "只要在任意對話中，用自然語言描述您的問題即可："
+          },
+          {
+            "type": "card_grid",
+            "cols": 2,
+            "items": [
+              {
+                "emoji": "💬",
+                "title": "怎麼上傳 PDF 檔案？",
+                "tag": {
+                  "color": "blue",
+                  "text": "上傳"
+                },
+                "desc": "",
+                "borderColor": "slate"
+              },
+              {
+                "emoji": "💬",
+                "title": "如何建立自動排程任務？",
+                "tag": {
+                  "color": "blue",
+                  "text": "排程"
+                },
+                "desc": "",
+                "borderColor": "slate"
+              },
+              {
+                "emoji": "💬",
+                "title": "深度研究和一般對話有什麼差別？",
+                "tag": {
+                  "color": "blue",
+                  "text": "深度研究"
+                },
+                "desc": "",
+                "borderColor": "slate"
+              },
+              {
+                "emoji": "💬",
+                "title": "技能（Skill）要怎麼掛載到對話？",
+                "tag": {
+                  "color": "blue",
+                  "text": "技能"
+                },
+                "desc": "",
+                "borderColor": "slate"
+              },
+              {
+                "emoji": "💬",
+                "title": "TAG 路由是什麼意思？",
+                "tag": {
+                  "color": "blue",
+                  "text": "工具"
+                },
+                "desc": "",
+                "borderColor": "slate"
+              },
+              {
+                "emoji": "💬",
+                "title": "知識庫要設定什麼標籤才會被自動啟用？",
+                "tag": {
+                  "color": "blue",
+                  "text": "知識庫"
+                },
+                "desc": "",
+                "borderColor": "slate"
+              },
+              {
+                "emoji": "💬",
+                "title": "對話額度超過後還能繼續使用嗎？",
+                "tag": {
+                  "color": "blue",
+                  "text": "額度"
+                },
+                "desc": "",
+                "borderColor": "slate"
+              },
+              {
+                "emoji": "💬",
+                "title": "如何分享對話給同事？",
+                "tag": {
+                  "color": "blue",
+                  "text": "分享"
+                },
+                "desc": "",
+                "borderColor": "slate"
+              }
+            ]
+          },
+          {
+            "type": "tip",
+            "text": "要讓 AI 優先從說明書回答，可以在問題中加上「使用說明」「怎麼操作」「如何設定」等語詞，系統的 TAG 路由機制會自動偵測並查詢說明書知識庫。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "適合詢問的問題類型",
+        "blocks": [
+          {
+            "type": "table",
+            "headers": [
+              "問題類型",
+              "範例"
+            ],
+            "rows": [
+              [
+                "操作步驟",
+                "「排程任務要怎麼建立？步驟是什麼？」"
+              ],
+              [
+                "功能差異",
+                "「Gemini Pro 和 Flash 有什麼不同？」"
+              ],
+              [
+                "設定說明",
+                "「知識庫的 Embedding 維度要選哪個？」"
+              ],
+              [
+                "工具使用",
+                "「MCP 工具和自建知識庫怎麼一起用？」"
+              ],
+              [
+                "錯誤排解",
+                "「為什麼 AI 沒有使用我掛載的知識庫？」"
+              ],
+              [
+                "概念理解",
+                "「TAG 路由的第一階段和第二階段有什麼區別？」"
+              ]
+            ]
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "說明書知識庫的範圍",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "說明書知識庫涵蓋本使用說明的所有章節（共 21 個），包含："
+          },
+          {
+            "type": "list",
+            "items": [
+              "登入與登出",
+              "介面導覽",
+              "開始對話",
+              "AI 模型選擇",
+              "上傳檔案",
+              "對話歷史",
+              "可用工具 / TAG路由",
+              "自動排程",
+              "圖片生成",
+              "技能 Skill",
+              "知識庫市集",
+              "深度研究",
+              "語言切換",
+              "對話額度",
+              "AI 戰情室",
+              "命名查詢",
+              "Schema 欄位",
+              "圖表建構器",
+              "儀表板",
+              "文件範本"
+            ]
+          },
+          {
+            "type": "note",
+            "text": "說明書知識庫由系統自動維護，每次系統更新後會自動同步最新內容，您不需要做任何設定。"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "u-doc-template",
+    "sort_order": 27,
+    "icon": "LayoutTemplate",
+    "icon_color": "text-indigo-500",
+    "last_modified": "2026-04-01",
+    "title": "文件範本",
+    "sidebar_label": "文件範本",
+    "blocks": [
+      {
+        "type": "para",
+        "text": "**文件範本庫**讓您預先定義帶有**變數佔位符**的 Word、Excel 或 PDF 文件，之後只需填入資料，系統自動輸出格式完整的正式文件。適合會議紀錄、報告、表單等重複性文件的產出。"
+      },
+      {
+        "type": "table",
+        "headers": [
+          "支援格式",
+          "引擎",
+          "說明"
+        ],
+        "rows": [
+          [
+            "Word (DOCX)",
+            "docxtemplater",
+            "保留原始字型、樣式、表格，原生 {{變數}} 替換"
+          ],
+          [
+            "Excel (XLSX)",
+            "ExcelJS",
+            "儲存格佔位符替換，保留公式與格式"
+          ],
+          [
+            "PowerPoint (PPTX)",
+            "JSZip XML 替換",
+            "保留原始品牌設計，支援封面/內頁/封底分類，可重複內頁自動展開多頁，支援行距/列標樣式設定"
+          ],
+          [
+            "PDF",
+            "pdf-lib / AI 重建",
+            "AcroForm 表單欄位優先；無表單時由 AI 識別後重建"
+          ]
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "進入文件範本庫",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "從左側邊欄點選**文件範本**圖示（LayoutTemplate 圖示），進入範本管理頁面。"
+          },
+          {
+            "type": "card_grid",
+            "cols": 3,
+            "items": [
+              {
+                "emoji": "📁",
+                "title": "我的範本",
+                "tag": null,
+                "desc": "您建立的所有範本",
+                "borderColor": "slate"
+              },
+              {
+                "emoji": "🌐",
+                "title": "分享給我 / 公開",
+                "tag": null,
+                "desc": "他人分享或公開的範本",
+                "borderColor": "slate"
+              },
+              {
+                "emoji": "🔍",
+                "title": "搜尋篩選",
+                "tag": null,
+                "desc": "依名稱或格式快速篩選",
+                "borderColor": "slate"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "新增範本（上傳精靈）",
+        "blocks": [
+          {
+            "type": "steps",
+            "items": [
+              {
+                "title": "點選右上角「新增範本」藍色按鈕",
+                "desc": ""
+              },
+              {
+                "title": "拖曳或點選上傳您的文件",
+                "desc": "支援 DOCX、XLSX、PPTX、PDF，系統自動讀取內容"
+              },
+              {
+                "title": "AI 自動分析：識別文件中的變數",
+                "desc": "例如：{{姓名}}、{{日期}}、{{金額}}，並列出建議的變數清單"
+              },
+              {
+                "title": "確認或調整變數設定",
+                "desc": "可修改變數名稱、類型（文字/數字/日期/選項）、是否必填、預設值。若為 PPTX，可在此設定每張投影片的類型"
+              },
+              {
+                "title": "填寫範本名稱、描述、標籤，點選「建立」完成",
+                "desc": ""
+              }
+            ]
+          },
+          {
+            "type": "tip",
+            "text": "AI 識別的變數準確度約 85–95%，建議上傳前先確認文件中的佔位文字清晰，例如「請輸入姓名」比「XXX」更容易被正確識別。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "PPTX 投影片範本設計",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "上傳 PPTX 後，系統會**自動偵測並分類**每張投影片的版型，無需手動設定。支援四種版型，系統依位置和欄數自動判斷："
+          },
+          {
+            "type": "table",
+            "headers": [
+              "版型",
+              "自動判斷條件",
+              "注入的佔位符"
+            ],
+            "rows": [
+              [
+                "cover（封面）",
+                "第 1 張投影片",
+                "{{cover_title}}、{{cover_subtitle}} 等（依原始文字框自動命名）"
+              ],
+              [
+                "bullets（條列）",
+                "非封面/封底，且欄數 < 3",
+                "{{slide_title}}、{{slide_content}}（以 \\n 分隔每條重點）"
+              ],
+              [
+                "3col（三欄）",
+                "非封面/封底，欄數 ≥ 3",
+                "{{slide_title}}、{{col1_title}}、{{col1_content}}（三欄各一組）"
+              ],
+              [
+                "closing（封底）",
+                "最後一張（簡報超過 2 張時）",
+                "{{closing_title}}、{{closing_message}} 等"
+              ]
+            ]
+          },
+          {
+            "type": "para",
+            "text": "AI 提供的 `slides[]` 陣列中，每個元素可指定 `type: \"bullets\"` 或 `type: \"3col\"`，系統根據 type 選擇對應的範本投影片複製並填入資料。"
+          },
+          {
+            "type": "para",
+            "text": "**AI 排版引擎（自動）**會在文件生成前對 slides[] 進行以下處理："
+          },
+          {
+            "type": "card_grid",
+            "cols": 3,
+            "items": [
+              {
+                "emoji": "✂️",
+                "title": "自動拆頁",
+                "tag": null,
+                "desc": "bullets 超過 6 條重點時，自動拆分成下一張，標題加「（續）」",
+                "borderColor": "purple"
+              },
+              {
+                "emoji": "📏",
+                "title": "長句壓縮",
+                "tag": null,
+                "desc": "每條重點超過 30 字時，AI 自動壓縮核心意思",
+                "borderColor": "purple"
+              },
+              {
+                "emoji": "📐",
+                "title": "3欄升級",
+                "tag": null,
+                "desc": "3 個平行條列項目（如方案比較）自動升級為 3col 版型",
+                "borderColor": "purple"
+              },
+              {
+                "emoji": "🔤",
+                "title": "AI 智慧命名",
+                "tag": null,
+                "desc": "AI 自動產生報告標題作為封面名稱，並以「主題_日期」格式命名下載檔案",
+                "borderColor": "purple"
+              },
+              {
+                "emoji": "🚫",
+                "title": "過濾參考文獻",
+                "tag": null,
+                "desc": "Google 搜尋產生的參考來源連結自動過濾，不會出現在簡報中",
+                "borderColor": "purple"
+              }
+            ]
+          },
+          {
+            "type": "tip",
+            "text": "**縮圖預覽：**建立範本後，可在投影片設定卡片上點擊縮圖區塊，上傳各投影片的截圖（直接在 PowerPoint 中「另存新檔 → PNG」即可）。之後在設定畫面就能以圖片預覽確認每張 slide 的版型。"
+          },
+          {
+            "type": "note",
+            "text": "PPTX 生成時，系統以 XML 層級替換佔位符，完整保留原始的背景圖、色彩、字型、Logo，條列重點以真實的段落（<a:p>）展開，非純文字換行，確保 PowerPoint 顯示正確。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "PPTX 樣式設定：行距與列標",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "在**樣式設定**頁籤中，可以針對投影片內容（`slide_content`）設定行距和列標符號。設定後所有自動生成的內頁投影片都會套用。"
+          },
+          {
+            "type": "table",
+            "headers": [
+              "設定項目",
+              "選項",
+              "說明"
+            ],
+            "rows": [
+              [
+                "行距",
+                "沿用 / 1.0 / 1.15 / 1.5 / 2.0 / 2.5 / 3.0",
+                "控制每條重點之間的行間距，「沿用」保留範本原始設定"
+              ],
+              [
+                "列標",
+                "沿用 / 無 / • 圓點 / ✓ 勾選 / ■ 方塊 / ○ 空心圓 / ▸ 三角 / – 短橫 / ★ 星號 / ➤ 箭頭",
+                "每條重點前方的符號，「無」表示無符號，「沿用」保留範本原始設定"
+              ],
+              [
+                "字型大小",
+                "數字 (pt)",
+                "留空 = 保留範本原始大小；填入數字則覆寫所有內容文字"
+              ]
+            ]
+          },
+          {
+            "type": "tip",
+            "text": "這些設定僅影響 override，留空或選「沿用」時完全保留範本 PPTX 原始的格式設定。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "使用範本生成文件",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "共有五種方式可以套用範本產生文件："
+          },
+          {
+            "type": "list",
+            "items": [
+              "**方式 1：在對話輸入框選擇範本** — 點選輸入框左方的「範本」圖示，從彈出清單選擇範本，系統會在訊息前方附加 `[使用範本:名稱]` 標記，AI 自動以對話內容填入變數並在回應中提供下載連結。檔名格式為「AI產生的報告主題_日期.副檔名」（如：美國關稅政策分析_20260329.pptx），封面標題也會自動使用 AI 產生的報告名稱。",
+              "**方式 2：從範本卡片點選「生成」** — 在文件範本庫找到目標範本，點選卡片上的「生成」按鈕，系統彈出填寫表單，依序輸入所有變數後點選「生成」，即可下載完成的文件。",
+              "**方式 3：透過 Skill 技能自動套用** — 在技能市集（Skill）編輯器的「輸入/輸出」頁籤，選擇「輸出範本」。之後在對話中套用此技能時，AI 會強制以 JSON 格式輸出，並自動套用所選範本產生文件，文件下載連結直接顯示在對話中。",
+              "**方式 4：排程任務自動生成** — 在「排程任務」設定中，於「輸出範本」欄位選擇範本。排程執行後，AI 的回應會自動解析為 JSON 並套用範本，生成的文件可透過 Email 附件寄送，也會記錄在任務執行歷史中供下載。亦可在 Prompt 中插入 `{{template:範本ID}}` 標籤來指定範本。",
+              "**方式 5：Pipeline 工作流程節點** — 在 Pipeline（工作流程）編輯器中，於「產生檔案」節點選擇「使用範本」模式，指定目標範本後，上一個節點的 AI JSON 輸出會自動被解析並套用到範本，生成的文件作為後續節點的輸入或最終輸出。"
+            ]
+          },
+          {
+            "type": "note",
+            "text": "方式 3～5（AI 自動套用）要求 AI 輸出符合範本結構的 JSON。系統會將範本的欄位清單注入到 AI 指令中，引導 AI 自動產生正確的 JSON 格式，無需人工手動填表。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "AI 自動填表 — JSON 輸出機制",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "當使用技能綁定範本、排程任務或 Pipeline 節點時，系統會自動在 AI 的系統提示末尾注入範本的欄位說明，格式如下："
+          },
+          {
+            "type": "code",
+            "text": "# 請以下列 JSON 格式輸出（用於文件範本填寫）\n{\n  \"customer_name\": \"（客戶姓名 — text）\",\n  \"order_date\":    \"（訂單日期 — date）\",\n  \"items\": [\n    { \"product_code\": \"（產品代碼）\", \"qty\": \"（數量）\" }\n  ]\n}"
+          },
+          {
+            "type": "para",
+            "text": "PPTX 多版型範本的 JSON 格式如下，`slides` 陣列中每個元素代表一張投影片："
+          },
+          {
+            "type": "code",
+            "text": "{\n  \"cover_title\":     \"2025 Q1 業務報告\",\n  \"cover_presenter\": \"業務發展部\",\n  \"slides\": [\n    {\n      \"type\": \"bullets\",\n      \"slide_title\": \"本季亮點\",\n      \"slide_content\": \"訂單成長 18%\\n新客戶開發 42 家\\n客戶滿意度 4.8 / 5.0\\n市場佔有率提升至 23%\"\n    },\n    {\n      \"type\": \"3col\",\n      \"slide_title\": \"三大策略方向\",\n      \"col1_title\": \"品質提升\",\n      \"col1_content\": \"導入 ISO 驗證\\n零缺陷目標\",\n      \"col2_title\": \"效率優化\",\n      \"col2_content\": \"自動化產線\\n縮短交期 30%\",\n      \"col3_title\": \"市場擴展\",\n      \"col3_content\": \"東南亞佈局\\n電商渠道強化\"\n    }\n  ]\n}"
+          },
+          {
+            "type": "para",
+            "text": "AI 回應後，系統依序執行以下處理流程，確保文件正確生成："
+          },
+          {
+            "type": "card_grid",
+            "cols": 2,
+            "items": [
+              {
+                "emoji": "🔍",
+                "title": "P2 — 格式修復",
+                "tag": null,
+                "desc": "若 AI JSON 解析失敗，Flash 自動重新從回應文字中提取有效 JSON",
+                "borderColor": "slate"
+              },
+              {
+                "emoji": "✅",
+                "title": "P1 — Schema 驗證",
+                "tag": null,
+                "desc": "檢查必填欄位是否齊全，若有缺失則 Flash 嘗試自動補齊",
+                "borderColor": "slate"
+              },
+              {
+                "emoji": "🎨",
+                "title": "P0 — 排版引擎",
+                "tag": null,
+                "desc": "PPTX 專用：自動拆頁、壓縮長句、升級 3col 版型",
+                "borderColor": "slate"
+              },
+              {
+                "emoji": "📄",
+                "title": "文件生成",
+                "tag": null,
+                "desc": "以處理後的 JSON 填入範本，XML 層級替換，保留所有原始樣式",
+                "borderColor": "slate"
+              }
+            ]
+          },
+          {
+            "type": "card_grid",
+            "cols": 2,
+            "items": [
+              {
+                "emoji": "✅",
+                "title": "自動支援 loop 欄位",
+                "tag": null,
+                "desc": "JSON 中若某欄位為陣列，對應到範本的 loop 類型，可自動產生多行表格或多張投影片",
+                "borderColor": "slate"
+              },
+              {
+                "emoji": "✅",
+                "title": "格式完整保留",
+                "tag": null,
+                "desc": "生成的文件保留原始範本的字型、框線、Logo，僅填入 AI 提供的資料",
+                "borderColor": "slate"
+              },
+              {
+                "emoji": "⚠️",
+                "title": "欄位名稱需對應",
+                "tag": null,
+                "desc": "JSON 的 key 必須與範本變數的 key 一致，AI 通常能自動對應，但若範本有更動建議重新測試一次",
+                "borderColor": "slate"
+              },
+              {
+                "emoji": "⚠️",
+                "title": "需有「使用」權限",
+                "tag": null,
+                "desc": "AI 自動生成同樣需要對範本有 use 以上的存取權限，否則生成步驟會失敗",
+                "borderColor": "slate"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "變數類型說明",
+        "blocks": [
+          {
+            "type": "table",
+            "headers": [
+              "類型",
+              "說明",
+              "範例"
+            ],
+            "rows": [
+              [
+                "text",
+                "一般文字",
+                "姓名、部門、說明"
+              ],
+              [
+                "number",
+                "數字，可帶小數",
+                "金額、數量、比率"
+              ],
+              [
+                "date",
+                "日期格式",
+                "2024-01-01"
+              ],
+              [
+                "select",
+                "固定選項清單",
+                "狀態：核准 / 退回 / 審核中"
+              ],
+              [
+                "loop",
+                "重複表格列",
+                "明細清單（每列可有多個子欄位）"
+              ]
+            ]
+          },
+          {
+            "type": "tip",
+            "text": "**loop 類型**適合用於有多筆明細的表格，例如採購清單、出差明細。生成時可動態新增或刪除列數，每列獨立填寫。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "下載範本原始檔",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "若您擁有「使用」以上權限，可點選範本卡片右上角選單的**「下載」**，下載該範本的原始文件（含佔位符）在本機修改後，重新建立新範本使用。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "複製別人的範本（Fork）",
+        "blocks": [
+          {
+            "type": "steps",
+            "items": [
+              {
+                "title": "在公開或被分享的範本卡片點選「複製」圖示",
+                "desc": ""
+              },
+              {
+                "title": "系統建立一份您專屬的副本",
+                "desc": "原始文件、變數 Schema 完整複製，您可自由修改"
+              },
+              {
+                "title": "進入「我的範本」找到複製的副本，點選「編輯」進行調整",
+                "desc": ""
+              }
+            ]
+          },
+          {
+            "type": "tip",
+            "text": "Fork 副本與原始範本相互獨立，修改副本不影響原始範本，也不需要通知原作者。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "分享範本",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "範本擁有者（owner）可將範本分享給其他使用者、部門或職稱群組："
+          },
+          {
+            "type": "table",
+            "headers": [
+              "分享類型",
+              "說明"
+            ],
+            "rows": [
+              [
+                "use（使用）",
+                "被分享者可生成文件、下載原始檔，但不能修改範本設定"
+              ],
+              [
+                "edit（編輯）",
+                "被分享者可修改範本名稱、描述、標籤、變數 Schema"
+              ]
+            ]
+          },
+          {
+            "type": "para",
+            "text": "分享對象可以是："
+          },
+          {
+            "type": "list",
+            "items": [
+              "個別使用者",
+              "部門",
+              "職稱",
+              "成本中心",
+              "分部",
+              "組織群組"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "公開範本",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "您可以將自己的範本設為**全員公開**，讓所有使用者都能在範本庫瀏覽和使用。"
+          },
+          {
+            "type": "steps",
+            "items": [
+              {
+                "title": "開啟範本的「分享設定」",
+                "desc": ""
+              },
+              {
+                "title": "點選「設為公開」開關",
+                "desc": ""
+              },
+              {
+                "title": "確認公告提示後，範本立即對全員可見",
+                "desc": ""
+              }
+            ]
+          },
+          {
+            "type": "note",
+            "text": "公開範本不需要管理員審核，但請確認文件內容無敏感資訊，因為全員均可看到並使用。若需取消公開，再次點選開關即可。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "固定格式模式（Fixed Format Mode）",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "**固定格式模式**讓您精確控制每個變數的字型大小、顏色、粗體，以及儲存格的溢位處理策略。適合公司制式表單、合約、報告等**版面不可隨意伸縮**的場景。"
+          },
+          {
+            "type": "card_grid",
+            "cols": 2,
+            "items": [
+              {
+                "emoji": "📝",
+                "title": "Word (DOCX)",
+                "tag": null,
+                "desc": "每格字型/顏色/粗體精確套用；loop 表格列高可固定（rowHeightPt）",
+                "borderColor": "indigo"
+              },
+              {
+                "emoji": "📊",
+                "title": "Excel (XLSX)",
+                "tag": null,
+                "desc": "每格套用字型樣式；AI 自動從原始範本偵測 cell.font",
+                "borderColor": "indigo"
+              },
+              {
+                "emoji": "📄",
+                "title": "PDF（非表單）",
+                "tag": null,
+                "desc": "疊加模式：保留原始 Logo/框線，在指定座標寫入文字",
+                "borderColor": "indigo"
+              }
+            ]
+          },
+          {
+            "type": "steps",
+            "items": [
+              {
+                "title": "上傳範本時啟用",
+                "desc": "在「新增範本」精靈的 Step 3（確認變數）中，開啟「固定格式模式」開關"
+              },
+              {
+                "title": "或在編輯時啟用",
+                "desc": "開啟範本「編輯」視窗，在標題列右側找到「固定格式模式」切換開關"
+              },
+              {
+                "title": "進入「樣式設定」頁籤調整字型/顏色/溢位",
+                "desc": ""
+              },
+              {
+                "title": "（PDF 專用）進入「版面編輯器」頁籤定義各欄位的填寫位置",
+                "desc": ""
+              }
+            ]
+          },
+          {
+            "type": "tip",
+            "text": "開啟固定格式模式後，系統會自動從原始範本讀取字型樣式作為預設值，您只需覆寫與原始不同的欄位即可。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "樣式設定頁籤",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "在範本「編輯」視窗中點選**「樣式設定」**頁籤，可對每個變數（含 loop 子欄位）設定："
+          },
+          {
+            "type": "table",
+            "headers": [
+              "設定項目",
+              "說明"
+            ],
+            "rows": [
+              [
+                "字型大小 (pt)",
+                "輸入點數，如 10、12、14，留空表示沿用偵測值"
+              ],
+              [
+                "粗體",
+                "勾選即套用 bold"
+              ],
+              [
+                "斜體",
+                "勾選即套用 italic"
+              ],
+              [
+                "顏色",
+                "點選色盤選擇顏色，留空表示沿用偵測值（預設黑色）"
+              ],
+              [
+                "溢位策略",
+                "見下方說明"
+              ],
+              [
+                "最大字數",
+                "配合 truncate / summarize 策略使用，設定觸發上限"
+              ]
+            ]
+          },
+          {
+            "type": "para",
+            "text": "欄位旁的**「已偵測」**綠色徽章，表示該值是系統自動從原始範本讀取的。手動修改後可點選**「重設」**還原為偵測值。"
+          },
+          {
+            "type": "note",
+            "text": "「樣式設定」在固定格式模式**關閉**時不會套用。請先在編輯視窗標題列開啟固定格式模式。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "溢位策略說明",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "當變數內容超出儲存格或欄位空間時，系統依所選策略處理："
+          },
+          {
+            "type": "table",
+            "headers": [
+              "策略",
+              "行為",
+              "適用場景"
+            ],
+            "rows": [
+              [
+                "折行（wrap）",
+                "預設值，內容自動換行，欄高隨內容增長",
+                "說明欄位、備註等無固定行數的格"
+              ],
+              [
+                "截斷（truncate）",
+                "超過「最大字數」後直接截斷並加 …",
+                "簡短標題、代碼欄位，不允許換行"
+              ],
+              [
+                "縮小字型（shrink）",
+                "自動縮小字型大小，使文字擠進原格",
+                "PDF 覆蓋模式的單行格"
+              ],
+              [
+                "AI 摘要（summarize）",
+                "呼叫 Gemini Flash 自動摘要到設定字數內",
+                "長篇說明需要保留語意、不能截斷時"
+              ]
+            ]
+          },
+          {
+            "type": "tip",
+            "text": "AI 摘要策略會自動偵測輸入語言（中文比率 > 30% 使用繁體中文摘要），摘要失敗時會自動 fallback 為截斷策略，不影響文件生成。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "PDF 版面編輯器",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "對於 PDF 格式（非 AcroForm 表單）的固定格式範本，需要用**版面編輯器**手動定義每個欄位的填寫座標。完成定位後，生成時系統以**疊加模式**在原始 PDF 上直接寫入文字，保留 Logo、框線、印章等所有原始視覺元素。"
+          },
+          {
+            "type": "steps",
+            "items": [
+              {
+                "title": "開啟範本編輯視窗，切換到「版面編輯器」頁籤",
+                "desc": "此頁籤僅對 PDF（非 AcroForm）格式的範本顯示"
+              },
+              {
+                "title": "PDF 預覽載入後，在右上方「選擇變數」下拉選取要定位的欄位",
+                "desc": ""
+              },
+              {
+                "title": "在 PDF 預覽畫面上拖曳畫出矩形框",
+                "desc": "框的位置即為該欄位文字的填寫區域，支援跨頁定位"
+              },
+              {
+                "title": "右側面板確認座標，可重複框選覆蓋修正",
+                "desc": ""
+              },
+              {
+                "title": "對所有變數完成定位後，點選「儲存」",
+                "desc": ""
+              }
+            ]
+          },
+          {
+            "type": "card_grid",
+            "cols": 2,
+            "items": [
+              {
+                "emoji": "",
+                "title": "縮放",
+                "tag": null,
+                "desc": "點選 + / − 按鈕或拖動縮放列調整預覽大小",
+                "borderColor": "slate"
+              },
+              {
+                "emoji": "",
+                "title": "換頁",
+                "tag": null,
+                "desc": "點選 ◀ ▶ 按鈕切換 PDF 頁面",
+                "borderColor": "slate"
+              },
+              {
+                "emoji": "",
+                "title": "已定位欄位",
+                "tag": null,
+                "desc": "藍色半透明矩形，點選即選取，右側顯示詳細資訊",
+                "borderColor": "slate"
+              },
+              {
+                "emoji": "",
+                "title": "刪除框位",
+                "tag": null,
+                "desc": "選取矩形後按鍵盤 Delete 或右側「刪除」按鈕",
+                "borderColor": "slate"
+              }
+            ]
+          },
+          {
+            "type": "note",
+            "text": "若有變數尚未定位，生成文件時系統會跳過該欄位並在伺服器記錄警告，其他已定位的欄位仍正常填入。建議上傳後立即完成版面編輯器設定，再分享給他人使用。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "內容模式（Content Mode）",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "每個欄位可設定**內容模式**，控制生成文件時該欄位的取值方式。在「變數設定」頁籤的每個欄位右側，有三個小按鈕可切換模式："
+          },
+          {
+            "type": "card_grid",
+            "cols": 3,
+            "items": [
+              {
+                "emoji": "V",
+                "title": "變數（預設）",
+                "tag": null,
+                "desc": "每次生成時由使用者填入。表單中會顯示此欄位等待輸入。",
+                "borderColor": "blue"
+              },
+              {
+                "emoji": "T",
+                "title": "靜態（固定文字）",
+                "tag": null,
+                "desc": "永遠使用「預設值」欄位的內容，不詢問使用者。適合公司名稱、固定標題。",
+                "borderColor": "amber"
+              },
+              {
+                "emoji": "∅",
+                "title": "清空（保留格式）",
+                "tag": null,
+                "desc": "永遠清空此格內容。PDF 覆蓋模式會畫白色矩形蓋掉原始文字，框線保留。",
+                "borderColor": "slate"
+              }
+            ]
+          },
+          {
+            "type": "tip",
+            "text": "典型用法：上傳一份 PDF 表單，將「標題」設為靜態（保留原始值）、「內容欄位」設為變數（使用者填入）、「填寫範例」設為清空（清除預印文字），即可製作乾淨的可重複使用表單。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "OCR 掃描式 PDF",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "若上傳的 PDF 是**掃描版圖片型**（文字無法直接複製），系統會自動偵測並使用**Gemini Vision OCR**識別欄位位置，同時自動啟用「固定格式模式」，讓您直接在版面編輯器微調座標。"
+          },
+          {
+            "type": "steps",
+            "items": [
+              {
+                "title": "上傳掃描版 PDF",
+                "desc": "系統偵測到文字內容極少（<50字元），自動進入 OCR 流程"
+              },
+              {
+                "title": "等待 Gemini Vision 分析",
+                "desc": "顯示「OCR 掃描中...」狀態，時間約 10-30 秒，取決於頁面複雜度"
+              },
+              {
+                "title": "檢視 OCR 識別結果",
+                "desc": "變數清單顯示「OCR 自動定位」標籤，座標已預先填入"
+              },
+              {
+                "title": "在版面編輯器微調座標",
+                "desc": "OCR 座標為估算值（誤差約 5-15 pt），建議人工確認並拖拉微調"
+              }
+            ]
+          },
+          {
+            "type": "para",
+            "text": "**對現有範本重新 OCR**：若想更新現有 PDF 範本的欄位座標，開啟範本「編輯」→「版面編輯器」頁籤，點選右上角**「OCR 重新掃描」**紫色按鈕。系統重新分析後，會將新偵測到的 pdf_cell 座標合併回現有變數，不影響已手動設定好的其他欄位設定。"
+          },
+          {
+            "type": "table",
+            "headers": [
+              "PDF 類型",
+              "OCR 準確度",
+              "建議做法"
+            ],
+            "rows": [
+              [
+                "白底清晰掃描表單",
+                "~85%",
+                "直接使用，微調 1-2 個座標"
+              ],
+              [
+                "彩色底色表單",
+                "~75%",
+                "使用後逐欄確認座標"
+              ],
+              [
+                "圖文混排複雜版面",
+                "~60%",
+                "以 OCR 結果作參考，手動重新框選"
+              ],
+              [
+                "文字型 PDF（非掃描）",
+                "N/A",
+                "系統自動用 AI 文字分析，不走 OCR"
+              ]
+            ]
+          },
+          {
+            "type": "note",
+            "text": "OCR 功能使用 Gemini Pro 模型，每次約消耗 1,000-3,000 input tokens。大量批次上傳時請注意 API 配額。"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "u-webex-bot",
+    "sort_order": 28,
+    "icon": "MessageSquare",
+    "icon_color": "text-green-500",
+    "last_modified": "2026-04-01",
+    "title": "Webex Bot 使用",
+    "sidebar_label": "Webex Bot 使用",
+    "blocks": [
+      {
+        "type": "para",
+        "text": "Foxlink GPT to Cortex 支援透過 **Cisco Webex** 直接與 AI 對話，享有與 Web 介面相同的問答、工具調用、檔案收發能力，無需開啟瀏覽器，在 Webex 行動裝置上也能隨時使用。"
+      },
+      {
+        "type": "subsection",
+        "title": "開始使用",
+        "blocks": [
+          {
+            "type": "steps",
+            "items": [
+              {
+                "title": "在 Webex 搜尋 Bot 帳號",
+                "desc": "搜尋「Foxlink GPT to Cortex」或 Bot 的 email（請洽管理員取得），點擊後直接傳送訊息"
+              },
+              {
+                "title": "傳送第一則訊息",
+                "desc": "Bot 會在 8 秒內開始處理並回覆，第一次使用會自動建立對話 Session"
+              },
+              {
+                "title": "群組 Room 使用",
+                "desc": "在群組中需要 @Foxlink GPT to Cortex 才會觸發，DM 則直接傳送即可"
+              }
+            ]
+          },
+          {
+            "type": "note",
+            "text": "Bot 採用輪詢模式（每 8 秒），訊息最長延遲約 8 秒才開始處理，請稍待 AI 回應（約 10–30 秒）。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "指令清單",
+        "blocks": [
+          {
+            "type": "table",
+            "headers": [
+              "指令",
+              "功能"
+            ],
+            "rows": [
+              [
+                "?",
+                "列出您目前授權使用的所有工具（技能、知識庫、MCP 工具）"
+              ],
+              [
+                "/new（或：新對話、重置、/clear、/restart...）",
+                "開啟新對話，清除本次 Session 記憶，介面顯示時間戳分隔線"
+              ],
+              [
+                "/help",
+                "顯示 Bot 使用說明"
+              ],
+              [
+                "其他任何文字",
+                "直接送 AI 問答，自動判斷並調用合適工具"
+              ]
+            ]
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "附件支援",
+        "blocks": [
+          {
+            "type": "table",
+            "headers": [
+              "類型",
+              "說明"
+            ],
+            "rows": [
+              [
+                "PDF / Word / Excel / PPT",
+                "AI 直接讀取內容並回答問題"
+              ],
+              [
+                "圖片（JPG / PNG / GIF / WebP）",
+                "AI 進行圖像分析"
+              ],
+              [
+                "音訊（MP3 / WAV / MP4 Audio）",
+                "自動轉錄為文字後分析"
+              ],
+              [
+                "AI 生成的檔案",
+                "xlsx / docx / pdf / pptx 以附件方式回傳"
+              ]
+            ]
+          },
+          {
+            "type": "note",
+            "text": "不支援影片檔（mp4 video / webm）。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "對話記憶與 Session",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "**DM 對話**：每日（台北時區）自動開啟新 Session，同一天的訊息共享上下文記憶。\n**群組 Room**：單一永久 Session，所有成員的對話共享同一記憶。\n傳送 `/new`（或「新對話」、「重置」、`/clear`）可隨時手動清除記憶開始新對話。"
+          },
+          {
+            "type": "tip",
+            "text": "開啟新對話後，Webex 聊天室會顯示時間戳分隔線（━━━ 🔄 新對話開始 ━━━），舊訊息仍保留在歷史中，Foxlink GPT to Cortex 的「對話紀錄」也同步保存，可隨時回顧。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "注意事項",
+        "blocks": [
+          {
+            "type": "list",
+            "items": [
+              "Bot 功能須由管理員在您的帳號設定中開啟「允許使用 Webex Bot」",
+              "您的 Webex 帳號 email 必須與系統中的帳號 email 一致（自動支援 @foxlink.com / @foxlink.com.tw 互轉）",
+              "AI 處理期間 Bot 會先回覆「⏳ 正在分析您的問題，請稍候...」，處理完成後自動刪除該訊息",
+              "Webex 回應格式已針對行動裝置簡化，詳細報表建議使用 Web 介面",
+              "回應超過 4000 字元時會自動截斷，並提示您至 Web 介面查看完整版"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "多語言回應",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "Webex Bot 的所有系統訊息（錯誤提示、指令回應、處理中提示等）會**依照您在網頁端設定的語言偏好**自動切換為對應語言。支援**繁體中文、英文、越南文**三種語言。"
+          },
+          {
+            "type": "table",
+            "headers": [
+              "訊息類型",
+              "語言依據",
+              "說明"
+            ],
+            "rows": [
+              [
+                "帳號未串連（找不到帳號）",
+                "三語同時顯示",
+                "系統無法辨識您的身份，因此中/英/越三語全部列出"
+              ],
+              [
+                "帳號停用 / Bot 未啟用",
+                "依您的語言設定",
+                "系統已辨識您的帳號，依偏好語言回應"
+              ],
+              [
+                "檔案上傳錯誤",
+                "依您的語言設定",
+                "影片拒絕、音訊/圖片權限不足、檔案過大等"
+              ],
+              [
+                "/help 使用說明",
+                "依您的語言設定",
+                "完整翻譯版的指令說明與附件支援資訊"
+              ],
+              [
+                "/new 新對話提示",
+                "依您的語言設定",
+                "分隔線與提示文字"
+              ],
+              [
+                "處理中 / AI 錯誤",
+                "依您的語言設定",
+                "「⏳ 正在分析...」及錯誤訊息"
+              ],
+              [
+                "預算超限通知",
+                "依您的語言設定",
+                "日/週/月使用額度警告"
+              ],
+              [
+                "生成檔案提示",
+                "依您的語言設定",
+                "「📄 已生成：檔名」"
+              ]
+            ]
+          },
+          {
+            "type": "tip",
+            "text": "語言設定方式：登入網頁版 → 右上角語言切換（🌐）→ 選擇繁體中文 / English / Tiếng Việt。設定後 Webex Bot 會自動套用，無需額外操作。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "帳號無法串連時的處理方式",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "若您尚未登入過網頁系統，Bot 會以**中/英/越三語同時顯示**以下錯誤訊息："
+          },
+          {
+            "type": "subsection",
+            "title": "情境一：帳號未串連（找不到帳號）",
+            "blocks": [
+              {
+                "type": "code",
+                "text": "⚠️ 無法串連 Foxlink GPT to Cortex 帳號，以下為可能原因：\n1. 尚未登入過網頁系統產生帳號，請進行第一次登入\n2. 可能帳號無 email 資訊\n3. 網路連線問題\n請檢查以上原因或是洽廠區資訊處理"
+              },
+              {
+                "type": "list",
+                "items": [
+                  "**原因 1**：您尚未登入過 Foxlink GPT 網頁版（`flgpt.foxlink.com.tw`），系統尚未建立帳號。請先用瀏覽器登入一次即可。",
+                  "**原因 2**：您的帳號在系統中沒有 email，或 email 與 Webex 帳號不一致。請聯絡管理員確認。",
+                  "**原因 3**：網路暫時異常，稍後再試。若持續發生請洽廠區資訊處理。"
+                ]
+              }
+            ]
+          },
+          {
+            "type": "subsection",
+            "title": "情境二：帳號已停用",
+            "blocks": [
+              {
+                "type": "code",
+                "text": "⚠️ 您的帳號目前已停用，請聯絡系統管理員。"
+              },
+              {
+                "type": "list",
+                "items": [
+                  "您的帳號已被管理員停用（可能離職、調動或到期），請聯絡系統管理員重新啟用。",
+                  "此訊息會依您帳號的語言設定，以對應語言顯示。"
+                ]
+              }
+            ]
+          },
+          {
+            "type": "subsection",
+            "title": "情境三：Webex Bot 功能未開啟",
+            "blocks": [
+              {
+                "type": "code",
+                "text": "⚠️ 您的帳號目前未開啟 Webex Bot 功能，如需使用請聯絡系統管理員。"
+              },
+              {
+                "type": "list",
+                "items": [
+                  "帳號存在但管理員尚未開啟「允許使用 Webex Bot」選項。請聯絡管理員至後台 → 使用者管理 → 編輯您的帳號 → 開啟 Webex Bot。",
+                  "此訊息會依您帳號的語言設定，以對應語言顯示。"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+];
+
+module.exports = { userSections };

@@ -25,6 +25,7 @@ server/system.db
 server/system.db.bak
 server/uploads/
 data/
+!server/data/
 uploads/
 backups/
 logs/
