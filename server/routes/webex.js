@@ -471,6 +471,7 @@ async function buildToolList(db, user, lang) {
   // DIFY KB
   try {
     const difyAcl = buildAccessFilter('a', 'dify_kb_id', 'd', user);
+    console.log(`[Webex][buildToolList] DIFY params: ${JSON.stringify(difyAcl.params)}`);
     const difyKbs = await db.prepare(
       `SELECT DISTINCT d.name, d.description, d.sort_order, d.name_zh, d.name_en, d.name_vi, d.desc_zh, d.desc_en, d.desc_vi FROM dify_knowledge_bases d
        WHERE d.is_active=1 AND (
@@ -479,6 +480,7 @@ async function buildToolList(db, user, lang) {
        )
        ORDER BY d.sort_order ASC`
     ).all(...difyAcl.params);
+    console.log(`[Webex][buildToolList] DIFY result count: ${difyKbs.length}`);
     if (difyKbs.length > 0) {
       lines.push(l.dify);
       difyKbs.forEach(k => {
@@ -494,6 +496,7 @@ async function buildToolList(db, user, lang) {
   // MCP
   try {
     const mcpAcl = buildAccessFilter('a', 'mcp_server_id', 'm', user);
+    console.log(`[Webex][buildToolList] MCP params: ${JSON.stringify(mcpAcl.params)}`);
     const mcpServers = await db.prepare(
       `SELECT DISTINCT m.name, DBMS_LOB.SUBSTR(m.description, 200, 1) AS description,
               m.name_zh, m.name_en, m.name_vi, m.desc_zh, m.desc_en, m.desc_vi
@@ -504,6 +507,7 @@ async function buildToolList(db, user, lang) {
        )
        ORDER BY m.name ASC`
     ).all(...mcpAcl.params);
+    console.log(`[Webex][buildToolList] MCP result count: ${mcpServers.length}`);
     if (mcpServers.length > 0) {
       lines.push(l.mcp);
       mcpServers.forEach(m => {
@@ -636,6 +640,7 @@ async function loadFunctionDeclarations(db, user) {
   // ── DIFY KB ──────────────────────────────────────────────────────────────────
   try {
     const difyAcl2 = buildAccessFilter('a', 'dify_kb_id', 'd', user);
+    console.log(`[Webex][loadFuncDecl] DIFY params: ${JSON.stringify(difyAcl2.params)}`);
     const difyKbs = await db.prepare(
       `SELECT DISTINCT d.id, d.name, d.api_server, d.api_key, d.description
        FROM dify_knowledge_bases d
@@ -645,6 +650,7 @@ async function loadFunctionDeclarations(db, user) {
        )
        ORDER BY d.sort_order ASC`
     ).all(...difyAcl2.params);
+    console.log(`[Webex][loadFuncDecl] DIFY result count: ${difyKbs.length}`);
 
     for (const kb of difyKbs) {
       const fnName = `dify_kb_${kb.id}`;
@@ -683,6 +689,7 @@ async function loadFunctionDeclarations(db, user) {
   try {
     const mcpClient = require('../services/mcpClient');
     const mcpAcl2 = buildAccessFilter('a', 'mcp_server_id', 'm', user);
+    console.log(`[Webex][loadFuncDecl] MCP params: ${JSON.stringify(mcpAcl2.params)}`);
     const mcpServers = await db.prepare(
       `SELECT DISTINCT m.id, m.name, m.endpoint_url, m.is_active
        FROM mcp_servers m
@@ -692,6 +699,7 @@ async function loadFunctionDeclarations(db, user) {
        )
        ORDER BY m.name ASC`
     ).all(...mcpAcl2.params);
+    console.log(`[Webex][loadFuncDecl] MCP result count: ${mcpServers.length}`);
 
     for (const srv of mcpServers) {
       try {
