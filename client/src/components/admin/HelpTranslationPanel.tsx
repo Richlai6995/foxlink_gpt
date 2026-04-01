@@ -166,12 +166,17 @@ export default function HelpTranslationPanel() {
     setBatchQueueKeys(queueKeys)
     setBatchTranslating(true)
 
+    let notFoundCount = 0
+    const MAX_NOT_FOUND = 3 // Allow up to 3 not-found polls before giving up
+
     const poll = setInterval(async () => {
       try {
         const res = await api.get(`/help/admin/translate/progress/${jobId}`)
         const data = res.data
         if (!data.found) {
-          // Job no longer exists on server (server restarted / expired)
+          notFoundCount++
+          if (notFoundCount < MAX_NOT_FOUND) return // Retry next poll
+          // Job truly gone (server restarted / expired / multi-pod miss)
           clearInterval(poll)
           pollingRef.current = null
           clearActiveJob()
@@ -181,6 +186,7 @@ export default function HelpTranslationPanel() {
           fetchStatus()
           return
         }
+        notFoundCount = 0 // Reset on success
 
         const newProgress: Record<string, TranslationProgress> = {}
         const newResults: Record<string, { ok: boolean; error?: string }> = {}
@@ -227,7 +233,7 @@ export default function HelpTranslationPanel() {
     pollingRef.current = poll
   }
 
-  function startTranslateJob(
+  async function startTranslateJob(
     sectionIds: string[],
     targetLang: string,
     jobId: string,
@@ -235,18 +241,30 @@ export default function HelpTranslationPanel() {
   ) {
     saveActiveJob(jobId, targetLang, sectionIds)
 
-    // Fire POST to start background translation
-    api.post('/help/admin/translate', {
-      sectionIds,
-      targetLang,
-      modelKey: selectedModel,
-      jobId,
-    }).catch(err => {
+    // Set UI state immediately (before await) so button changes right away
+    const queueKeys = new Set(sectionIds.map(id => `${id}-${targetLang}`))
+    setBatchQueueKeys(queueKeys)
+    setBatchTranslating(true)
+
+    try {
+      // Await POST so server registers the job before we start polling
+      await api.post('/help/admin/translate', {
+        sectionIds,
+        targetLang,
+        modelKey: selectedModel,
+        jobId,
+      })
+    } catch (err) {
       console.error('Failed to start translate job:', err)
       clearActiveJob()
+      setBatchTranslating(false)
+      setBatchProgress(null)
+      setBatchQueueKeys(new Set())
       onDone()
-    })
+      return
+    }
 
+    // Server has registered the job; start polling
     startPolling(jobId, targetLang, sectionIds, onDone)
   }
 
