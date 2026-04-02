@@ -61,9 +61,10 @@ export default function CourseEditor() {
   const [showCategoryManager, setShowCategoryManager] = useState(false)
   const [showBatchImport, setShowBatchImport] = useState<number | null>(null) // lessonId
   const [showRecording, setShowRecording] = useState(() => {
-    // Auto-open recording panel after page reload
     return !!sessionStorage.getItem('training_auto_start')
   })
+  const [translating, setTranslating] = useState<string | null>(null)
+  const [translateStatus, setTranslateStatus] = useState<any>(null)
 
   useEffect(() => {
     loadCategories()
@@ -155,9 +156,6 @@ export default function CourseEditor() {
   }
 
   if (loading) return <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: 'var(--t-bg)', color: 'var(--t-text-dim)' }}>載入中...</div>
-
-  const [translating, setTranslating] = useState<string | null>(null)
-  const [translateStatus, setTranslateStatus] = useState<any>(null)
 
   const tabs = [
     { key: 'info', label: '基本資訊', icon: FileText },
