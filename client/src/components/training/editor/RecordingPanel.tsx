@@ -315,51 +315,74 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
     }
   }
 
-  // Process all: upload + AI analyze + generate slides
+  // Process all: AI analyze + generate slides
   const processAll = async () => {
     if (steps.length === 0) return
+
+    const sid = sessionIdRef.current || sessionId
+    const isFromServer = steps.some(s => s.id.startsWith('server_'))
+
     try {
       setProcessing(true)
       setProcessProgress({ current: 0, total: steps.length })
 
-      // 1. Create recording session
-      const sessionRes = await api.post('/training/recording/start', {
-        course_id: courseId,
-        lesson_id: lessonId,
-        config: { target_url: targetUrl, auto_capture: autoCapture }
-      })
-      const sessionId = sessionRes.data.session_id
+      let processingSessionId = sid
 
-      // 2. Upload all steps
-      for (let i = 0; i < steps.length; i++) {
-        const step = steps[i]
-        setProcessProgress({ current: i + 1, total: steps.length })
-        setSteps(prev => prev.map(s => s.id === step.id ? { ...s, status: 'uploading' } : s))
+      if (isFromServer && sid) {
+        // Steps already on server (from Extension recording) — just analyze + generate
+        setProcessProgress({ current: 1, total: 3 })
+        setSteps(prev => prev.map(s => ({ ...s, status: 'analyzing' })))
 
-        try {
-          await api.post(`/training/recording/${sessionId}/step`, {
-            step_number: i + 1,
-            action_type: step.isKeyStep ? 'key_action' : 'screenshot',
-            screenshot_base64: step.imageDataUrl,
-            element_info: step.elementInfo || null,
-            page_url: step.pageUrl || targetUrl,
-            page_title: step.pageTitle || step.note || `步驟 ${i + 1}`
-          })
-          setSteps(prev => prev.map(s => s.id === step.id ? { ...s, status: 'analyzing' } : s))
-        } catch {
-          setSteps(prev => prev.map(s => s.id === step.id ? { ...s, status: 'error' } : s))
+        // Complete session if not already
+        await api.post(`/training/recording/${sid}/complete`).catch(() => {})
+
+        // AI analyze all steps
+        setProcessProgress({ current: 2, total: 3 })
+        await api.post(`/training/recording/${sid}/analyze`)
+
+        // Generate slides
+        setProcessProgress({ current: 3, total: 3 })
+        const genRes = await api.post(`/training/recording/${sid}/generate`)
+
+        setSteps(prev => prev.map(s => ({ ...s, status: 'done' })))
+        setTimeout(() => onComplete(genRes.data), 500)
+      } else {
+        // Steps from Ctrl+V / file upload — need to create session + upload
+        const sessionRes = await api.post('/training/recording/start', {
+          course_id: courseId, lesson_id: lessonId,
+          config: { target_url: targetUrl }
+        })
+        processingSessionId = sessionRes.data.session_id
+
+        // Upload all steps
+        for (let i = 0; i < steps.length; i++) {
+          const step = steps[i]
+          setProcessProgress({ current: i + 1, total: steps.length })
+          setSteps(prev => prev.map(s => s.id === step.id ? { ...s, status: 'uploading' } : s))
+
+          try {
+            await api.post(`/training/recording/${processingSessionId}/step`, {
+              step_number: i + 1,
+              action_type: step.isKeyStep ? 'key_action' : 'screenshot',
+              screenshot_base64: step.imageDataUrl,
+              element_info: step.elementInfo || null,
+              page_url: step.pageUrl || targetUrl,
+              page_title: step.pageTitle || step.note || `步驟 ${i + 1}`
+            })
+            setSteps(prev => prev.map(s => s.id === step.id ? { ...s, status: 'analyzing' } : s))
+          } catch {
+            setSteps(prev => prev.map(s => s.id === step.id ? { ...s, status: 'error' } : s))
+          }
         }
+
+        // Complete + analyze + generate
+        await api.post(`/training/recording/${processingSessionId}/complete`)
+        await api.post(`/training/recording/${processingSessionId}/analyze`)
+        const genRes = await api.post(`/training/recording/${processingSessionId}/generate`)
+
+        setSteps(prev => prev.map(s => ({ ...s, status: 'done' })))
+        setTimeout(() => onComplete(genRes.data), 500)
       }
-
-      // 3. Complete & AI analyze
-      await api.post(`/training/recording/${sessionId}/complete`)
-      await api.post(`/training/recording/${sessionId}/analyze`)
-
-      // 4. Generate slides
-      const genRes = await api.post(`/training/recording/${sessionId}/generate`)
-
-      setSteps(prev => prev.map(s => ({ ...s, status: 'done' })))
-      setTimeout(() => onComplete(genRes.data), 500)
     } catch (e: any) {
       alert(e.response?.data?.error || '處理失敗')
     } finally { setProcessing(false) }
