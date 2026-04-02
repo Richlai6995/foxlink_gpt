@@ -60,7 +60,10 @@ export default function CourseEditor() {
   const [editingSlideId, setEditingSlideId] = useState<number | null>(null)
   const [showCategoryManager, setShowCategoryManager] = useState(false)
   const [showBatchImport, setShowBatchImport] = useState<number | null>(null) // lessonId
-  const [showRecording, setShowRecording] = useState(false)
+  const [showRecording, setShowRecording] = useState(() => {
+    // Auto-open recording panel after page reload
+    return !!sessionStorage.getItem('training_auto_start')
+  })
 
   useEffect(() => {
     loadCategories()

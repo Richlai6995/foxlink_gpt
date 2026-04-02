@@ -241,8 +241,27 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
   const [pulling, setPulling] = useState(false)
   const sessionIdRef = useRef<string | null>(null)
 
-  // Start Extension recording — creates session + notifies Extension
-  const startExtensionRecording = async () => {
+  // Auto-resume after page reload (for Extension reconnect)
+  useEffect(() => {
+    const pending = sessionStorage.getItem('training_auto_start')
+    if (pending) {
+      sessionStorage.removeItem('training_auto_start')
+      // Wait for Extension content script to load
+      setTimeout(() => startExtensionRecordingInternal(), 2000)
+    }
+  }, [])
+
+  // Start Extension recording — reload page first to ensure fresh content script
+  const startExtensionRecording = () => {
+    // Save state to sessionStorage, reload, then auto-start
+    sessionStorage.setItem('training_auto_start', JSON.stringify({
+      courseId, lessonId, targetUrl
+    }))
+    window.location.reload()
+  }
+
+  // Internal start (after reload or when content script is fresh)
+  const startExtensionRecordingInternal = async () => {
     try {
       const res = await api.post('/training/recording/start', {
         course_id: courseId, lesson_id: lessonId,
