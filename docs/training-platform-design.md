@@ -3725,6 +3725,334 @@ ROI 估算（以 50 張投影片課程為例）:
 
 ---
 
+## 16B. 桌面截圖代理程式（Desktop Capture Agent）
+
+### 16B.1 目的
+
+Chrome Extension 只能截取瀏覽器內的畫面，無法截取 Java Applet Forms、Java Web Start 獨立視窗、RDP 遠端桌面等非瀏覽器視窗。桌面代理程式用 Electron 開發，可截取任何 Windows 視窗。
+
+### 16B.2 技術選型
+
+| 方案 | 安裝包大小 | 跨平台 | 技術棧 |
+|------|----------|--------|--------|
+| **Electron（推薦）** | ~80MB | ✅ | JS/TS（同 FOXLINK GPT） |
+| .NET WinForms | ~5MB | ❌ Windows only | C# |
+| Tauri (Rust) | ~3MB | ✅ | Rust + Web（Phase 4） |
+
+### 16B.3 功能
+
+```
+系統匣常駐：
+├── F9 全局快捷鍵 → 螢幕截圖（任何視窗）
+├── F10 開始/停止螢幕錄影
+├── 截圖後進入標註編輯器（跟 Extension §16A 同一套 UI）
+├── 確認後自動上傳到 FOXLINK GPT server
+├── 與 Chrome Extension 共用同一套 server API
+└── 自動登入（存帳密，token 過期自動重連）
+```
+
+### 16B.4 架構
+
+```
+foxlink-training-desktop/
+├── package.json
+├── main.js                     ← Electron main process
+│   ├── Tray（系統匣圖示 + 右鍵選單）
+│   ├── globalShortcut（F9 截圖 / F10 錄影）
+│   ├── desktopCapturer（螢幕截取）
+│   ├── MediaRecorder（螢幕錄影 → WebM）
+│   ├── BrowserWindow（標註編輯器視窗）
+│   └── fetch → server API（上傳）
+├── renderer/
+│   ├── annotation-editor.html  ← 標註編輯器（Canvas）
+│   ├── annotation-editor.js    ← 共用 §16A 的標註工具邏輯
+│   ├── settings.html           ← 設定（server URL + 帳密）
+│   └── capture-selector.html   ← 截圖選區工具
+├── shared/
+│   └── annotation-tools.js     ← 共用模組（Extension + Desktop）
+└── build/
+    └── installer.nsi           ← Windows NSIS 安裝程式
+```
+
+### 16B.5 截圖流程
+
+```
+1. F9 → 螢幕凍結（全螢幕半透明覆蓋）
+2. 選擇截取模式：
+   ├── 全螢幕
+   ├── 框選區域（十字游標拖拉）
+   └── 選擇視窗（hover 高亮 → 點擊選取）
+3. 截取完成 → 開啟標註編輯器視窗
+   ├── 7 種工具（①②③/圈/框/箭頭/文字/畫筆/馬賽克）
+   ├── 跟 Extension 完全相同的 UI
+   └── 用 Canvas 繪製
+4. 確認 → 上傳原圖 + 標註 JSON 到 server
+5. 關閉編輯器 → 繼續操作 → F9 下一張...
+```
+
+### 16B.6 支援截取的視窗類型
+
+```
+├── ✅ Chrome / Edge 瀏覽器
+├── ✅ Oracle Forms (Java Applet 嵌在 IE/瀏覽器)
+├── ✅ Oracle Forms (Java Web Start 獨立視窗)
+├── ✅ RDP 遠端桌面
+├── ✅ VNC
+├── ✅ SAP GUI
+├── ✅ 任何 Windows 桌面程式
+└── ✅ 多螢幕支援
+```
+
+### 16B.7 螢幕錄影功能
+
+```
+F10 開始錄影 → 操作系統 → F10 停止
+├── 錄影格式: WebM（Electron MediaRecorder）
+├── 錄影完成 → 自動上傳到 server
+├── 觸發影片 AI 拆幀流程（見 §16C）
+└── 或手動選擇關鍵幀匯入
+```
+
+### 16B.8 與 Extension 共存
+
+```
+同一個 recording session 可以混用：
+├── 步驟 1-3: Chrome Extension 截瀏覽器頁面
+├── 步驟 4-8: 桌面程式截 Oracle Forms 視窗
+├── 步驟 9: Chrome Extension 截回瀏覽器
+└── 全部截圖進同一個 session → 統一 AI 處理
+```
+
+---
+
+## 16C. 影片 → AI 拆幀（Video Keyframe Extraction）
+
+### 16C.1 目的
+
+錄製 Oracle Forms 等快速操作時，手動逐步截圖困難（Tab 切欄位、F8 查詢等操作很快）。改用螢幕錄影 → AI 自動擷取關鍵幀 → 生成教材。
+
+### 16C.2 技術方案
+
+```
+方案 C（混合，推薦）:
+1. ffmpeg 每 3 秒擷取一幀 + 相鄰幀差異偵測（pixel diff > 閾值）
+2. 粗略幀送 Gemini：「哪些幀是關鍵操作步驟？」
+3. Gemini 篩選 + 排序 → 保留關鍵幀
+4. 關鍵幀再逐張送 Gemini 做 UI 元素辨識
+→ 節省 token + 高品質
+```
+
+### 16C.3 流程
+
+```
+┌─ 影片拆幀流程 ───────────────────────────────────────┐
+│                                                       │
+│  1. 上傳影片（MP4/WebM/AVI，最大 500MB）              │
+│  2. Server 用 ffmpeg 擷取幀：                         │
+│     ├── 每 3 秒固定一幀                               │
+│     ├── 偵測畫面顯著變化（pixel diff > 15%）          │
+│     └── 合併 → 粗略關鍵幀列表（如 50 張）             │
+│  3. Gemini 影片分析（可選）：                          │
+│     ├── 上傳影片 → 分析操作流程                       │
+│     └── 回傳關鍵時間點列表                            │
+│  4. 合併兩者 → 最終關鍵幀列表（如 20 張）             │
+│  5. 使用者在 UI 上勾選/取消勾選                       │
+│  6. 選中的幀 → 匯入錄製 session                       │
+│  7. 後續流程跟截圖一樣（AI 辨識 + 生成投影片）        │
+│                                                       │
+└───────────────────────────────────────────────────────┘
+```
+
+### 16C.4 DB 表
+
+```sql
+CREATE TABLE training_videos (
+    id              VARCHAR2(36) PRIMARY KEY,
+    course_id       NUMBER,
+    filename        VARCHAR2(500),
+    file_url        VARCHAR2(500),
+    duration_seconds NUMBER,
+    file_size_bytes NUMBER,
+    status          VARCHAR2(20) DEFAULT 'uploaded',  -- uploaded | analyzing | completed | failed
+    keyframes_json  CLOB,       -- [{ timestamp, screenshot_url, instruction, selected }]
+    analysis_method VARCHAR2(20) DEFAULT 'hybrid',    -- ffmpeg_diff | gemini_direct | hybrid
+    created_by      NUMBER NOT NULL,
+    created_at      TIMESTAMP DEFAULT SYSTIMESTAMP
+);
+```
+
+### 16C.5 API
+
+```
+POST /api/training/video/upload              ← 上傳影片
+GET  /api/training/video/:id                 ← 取得影片資訊 + 關鍵幀
+POST /api/training/video/:id/analyze         ← 觸發 AI 拆幀分析
+POST /api/training/video/:id/import          ← 匯入選中的關鍵幀到 recording session
+```
+
+### 16C.6 前端 UI
+
+```
+┌─ 影片拆幀面板 ───────────────────────────────────────┐
+│                                                       │
+│  📹 上傳影片  [選擇檔案]                               │
+│  ┌─────────────────────────────────────────┐         │
+│  │  ▶ video_preview.mp4      5:23           │         │
+│  │  ━━━━━━━━━━━●━━━━━━━━━━━━━━━━━━━        │         │
+│  └─────────────────────────────────────────┘         │
+│                                                       │
+│  分析方式: ● 混合模式  ○ 純 ffmpeg  ○ Gemini 影片     │
+│  [🤖 開始分析]                                        │
+│                                                       │
+│  ── 分析結果：20 個關鍵幀 ──                           │
+│                                                       │
+│  ☑ #1  00:03  [縮圖]  「開啟採購選單」                 │
+│  ☑ #2  00:08  [縮圖]  「點擊採購單」                   │
+│  ☐ #3  00:12  [縮圖]  「頁面載入中」(建議跳過)         │
+│  ☑ #4  00:15  [縮圖]  「點擊新增按鈕」                 │
+│  ...                                                  │
+│                                                       │
+│  已選 15/20 張                                        │
+│  [匯入到錄製面板]  [全選]  [取消全選]                  │
+│                                                       │
+└───────────────────────────────────────────────────────┘
+```
+
+### 16C.7 ffmpeg 拆幀命令
+
+```bash
+# 每 3 秒一幀
+ffmpeg -i input.mp4 -vf "fps=1/3" -q:v 2 frame_%04d.jpg
+
+# 場景變化偵測
+ffmpeg -i input.mp4 -vf "select='gt(scene,0.15)'" -vsync vfr frame_%04d.jpg
+
+# 混合：每 3 秒 + 場景變化
+ffmpeg -i input.mp4 -vf "select='isnan(prev_selected_t)+gte(t-prev_selected_t,3)+gt(scene,0.15)'" -vsync vfr frame_%04d.jpg
+```
+
+### 16C.8 Server 依賴
+
+```
+需安裝 ffmpeg（server 端）：
+├── Windows: 下載 ffmpeg.exe 放到 PATH
+├── Docker: apt-get install ffmpeg
+└── 或用 fluent-ffmpeg npm 套件 (需系統有 ffmpeg binary)
+```
+
+---
+
+## 16D. HTML5 單檔匯出
+
+### 16D.1 概述
+
+將課程匯出為一個獨立的 `.html` 檔案，包含所有截圖、投影片資料、播放器 JS，雙擊即可開啟學習。
+
+### 16D.2 匯出內容
+
+```html
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>FOXLINK GPT 登入教學</title>
+  <style>/* 播放器 CSS 內嵌（~20KB）*/</style>
+</head>
+<body>
+  <div id="player"></div>
+  <script>
+    // 課程資料（多語言）
+    const courseData = {
+      title: { "zh-TW": "登入教學", "en": "Login Tutorial", "vi": "..." },
+      slides: {
+        "zh-TW": [
+          {
+            type: "hotspot",
+            image: "data:image/jpeg;base64,...",  // 截圖 base64 內嵌
+            instruction: "步驟 1：輸入帳號",
+            regions: [...],
+            annotations: [...],
+            audio: "data:audio/mp3;base64,..."    // TTS 音訊（可選）
+          },
+          ...
+        ],
+        "en": [...],  // 英文版投影片
+        "vi": [...]   // 越南文版投影片
+      },
+      quiz: {
+        "zh-TW": [...],
+        "en": [...],
+        "vi": [...]
+      },
+      settings: {
+        passScore: 70,
+        languages: ["zh-TW", "en", "vi"]
+      }
+    };
+
+    // 輕量播放器 JS（~30KB，內嵌）
+    // — 語言切換器
+    // — 投影片播放（鍵盤 ←→）
+    // — Hotspot 互動（點擊判定）
+    // — 標註渲染（SVG overlay）
+    // — 翻轉卡片 / 拖放 / 分支
+    // — 音訊播放
+    // — 測驗 + 計分
+    // — 進度存 localStorage
+    // — Responsive（手機/平板/桌面）
+  </script>
+</body>
+</html>
+```
+
+### 16D.3 匯出選項
+
+```
+POST /api/training/courses/:id/export
+Body: {
+  format: "html5",
+  languages: ["zh-TW", "en", "vi"],
+  include_quiz: true,
+  include_audio: true,
+  include_annotations: true,
+  compress_images: true,      // JPEG 80% 壓縮（減少檔案大小）
+  auto_play: false,           // 自動翻頁模式
+  password: null,             // 可選密碼保護
+  expiry_date: null           // 可選有效期限
+}
+Response: {
+  download_url: "/api/training/files/exports/course_1_2026-04-02.html",
+  file_size_bytes: 2800000
+}
+```
+
+### 16D.4 檔案大小估算
+
+```
+6 張截圖（JPEG 80%，每張 ~150KB base64）= 900KB
+播放器 JS + CSS = 50KB
+投影片 JSON（3 語言）= 30KB
+TTS 音訊（可選，6 × 30KB）= 180KB
+標註 SVG 資料 = 5KB
+測驗題 = 5KB
+─────────────────────
+不含音訊 ≈ 1MB
+含音訊 ≈ 1.2MB
+```
+
+### 16D.5 前端入口
+
+CourseEditor header 新增「匯出」按鈕（跟發佈同一排）：
+
+```
+[🗑 刪除] [📷 AI 錄製] [📤 匯出 ▼] [發佈課程] [💾 儲存]
+                          ├── 📄 HTML5 互動教材
+                          ├── 🎬 MP4 影片（Phase 3）
+                          └── 📦 SCORM 包（Phase 3）
+```
+
+---
+
 ## 20. 檔案儲存
 
 ```
@@ -3878,7 +4206,25 @@ Phase 2E — 截圖標註系統
 ├── Server: recording_steps.annotations_json + AI prompt 整合標註
 ├── Server: 標註資訊注入 AI prompt → AI 按步驟編號順序生成說明
 ├── 播放器: SVG 標註渲染層（圈/框/箭頭/編號 疊加在截圖上）
-└── HotspotEditor: 標註管理面板（新增/編輯/顯示切換）
+├── HotspotEditor: 標註管理面板（新增/編輯/顯示切換）
+└── AI 模型選擇器: 從 LLM 設定檔讀取可用 Gemini 模型讓使用者選擇
+
+Phase 2F — 影片 AI 拆幀 + HTML5 匯出
+├── Server: ffmpeg 影片拆幀（每 3 秒 + 場景變化偵測）
+├── Server: Gemini 影片分析 → 關鍵幀篩選
+├── Server: training_videos 表 + 影片上傳/分析/匯入 API
+├── 前端: 影片拆幀面板（上傳 → 分析 → 勾選關鍵幀 → 匯入）
+├── Server: HTML5 單檔匯出 API（多語言內切換 + 互動 + 測驗）
+├── 前端: CourseEditor「匯出」按鈕 + 匯出選項面板
+└── 匯出選項: 語言/測驗/音訊/標註/圖片壓縮/密碼/有效期限
+
+Phase 3 新增:
+├── Electron 桌面截圖代理程式（F9 全局快捷鍵 + 任意視窗截圖）
+├── 桌面程式標註編輯器（複用 Extension Canvas 邏輯）
+├── 桌面螢幕錄影 → 自動上傳 → AI 拆幀
+├── MP4 影片匯出（Puppeteer 錄製 HTML5 播放器）
+├── SCORM 1.2/2004 匯出
+└── Oracle Forms (Java Applet/JWS) 教材錄製完整支援
 ```
 
 ### Phase 3：進階功能
@@ -4017,3 +4363,8 @@ Phase 2E — 截圖標註系統
 | 30 | 截圖標註系統 | **Phase 2E**，Extension 內建 Canvas 標註編輯器（A 方案），7 種工具 |
 | 31 | 步驟編號標記 | **Phase 2E**，①②③ 自動遞增，AI 按編號順序生成說明 |
 | 32 | 標註雙重用途 | AI 提示 + 學員顯示，每個標註可獨立設定顯示/隱藏 |
+| 33 | 桌面截圖代理 | **Phase 3**，Electron 開發，F9 全局快捷鍵截任意視窗 |
+| 34 | 影片 AI 拆幀 | **Phase 2F**，ffmpeg + Gemini 混合方案，影片→關鍵幀→教材 |
+| 35 | HTML5 單檔匯出 | **Phase 2F**，多語言內切換 + 互動 + 測驗 + 離線播放 |
+| 36 | Oracle Forms 支援 | 桌面代理程式截 Java Applet/JWS，或 Win+Shift+S 手動截圖 |
+| 37 | AI 模型選擇 | 從 LLM 模型設定檔讀取 Gemini 模型列表，讓使用者選擇用哪個模型 |
