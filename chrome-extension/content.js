@@ -62,13 +62,25 @@ window.addEventListener('message', (e) => {
   }
 });
 
-// Check initial state
-chrome.runtime.sendMessage({ type: 'GET_STATUS' }, (res) => {
-  if (res?.isRecording) {
-    isRecording = true;
-    toggleBadge(true);
-  }
-});
+// Check initial state — retry multiple times to handle service worker wake-up
+function checkRecordingState() {
+  try {
+    chrome.runtime.sendMessage({ type: 'GET_STATUS' }, (res) => {
+      if (chrome.runtime.lastError) return;
+      if (res?.isRecording && !isRecording) {
+        isRecording = true;
+        toggleBadge(true);
+        console.log('[FOXLINK Training] Recording state detected, showing badge');
+      }
+    });
+  } catch {}
+}
+checkRecordingState();
+setTimeout(checkRecordingState, 500);
+setTimeout(checkRecordingState, 1500);
+setTimeout(checkRecordingState, 3000);
+// Also keep checking every 5 seconds in case recording starts later
+setInterval(checkRecordingState, 5000);
 
 // Click listener — only log clicks, do NOT auto-screenshot
 // Auto-screenshot on every click produces too many unwanted captures.
