@@ -233,6 +233,10 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
     }
   }, [])
 
+  const [serverStepCount, setServerStepCount] = useState(0)
+  const [pulling, setPulling] = useState(false)
+  const sessionIdRef = useRef<string | null>(null)
+
   // Start Extension recording — creates session + notifies Extension
   const startExtensionRecording = async () => {
     try {
@@ -242,21 +246,21 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
       })
       const sid = res.data.session_id
       setSessionId(sid)
+      sessionIdRef.current = sid
       setRecording(true)
+      setServerStepCount(0)
       // Notify Extension via postMessage (content script on this page picks it up)
       window.postMessage({ type: 'FOXLINK_TRAINING_START', sessionId: sid }, '*')
     } catch (e: any) { alert(e.response?.data?.error || '建立錄製階段失敗') }
   }
 
-  const [serverStepCount, setServerStepCount] = useState(0)
-  const [pulling, setPulling] = useState(false)
-
   // Poll server for step count during recording
   useEffect(() => {
-    if (!recording || !sessionId) return
+    if (!recording || !sessionIdRef.current) return
+    const sid = sessionIdRef.current
     const poll = async () => {
       try {
-        const res = await api.get(`/training/recording/${sessionId}`)
+        const res = await api.get(`/training/recording/${sid}`)
         setServerStepCount(res.data.steps_count || res.data.steps?.length || 0)
       } catch {}
     }
@@ -265,36 +269,39 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
     return () => clearInterval(interval)
   }, [recording, sessionId])
 
-  const stopExtensionRecording = async () => {
-    setRecording(false)
-    window.postMessage({ type: 'FOXLINK_TRAINING_STOP' }, '*')
-
-    // Pull all screenshots from server
-    if (!sessionId) return
+  // Pull screenshots from server → load into panel
+  const pullFromServer = async (sid?: string) => {
+    const targetSid = sid || sessionIdRef.current || sessionId
+    if (!targetSid) { alert('無 Session ID，請先開始錄製'); return }
     try {
       setPulling(true)
-      // Wait a moment for last upload to complete
-      await new Promise(r => setTimeout(r, 1500))
-      const res = await api.get(`/training/recording/${sessionId}`)
+      await new Promise(r => setTimeout(r, 1000))
+      const res = await api.get(`/training/recording/${targetSid}`)
       const serverSteps = res.data.steps || []
 
-      // Convert server steps to local CapturedStep format
       const pulled: CapturedStep[] = serverSteps
         .filter((s: any) => s.screenshot_url)
         .map((s: any) => ({
           id: `server_${s.id}`,
-          imageDataUrl: s.screenshot_url, // URL from server (not base64)
-          thumbnail: s.screenshot_url,     // Use same URL for thumbnail
+          imageDataUrl: s.screenshot_url,
+          thumbnail: s.screenshot_url,
           note: s.ai_instruction || s.page_title || '',
           isKeyStep: s.action_type === 'click' || s.action_type === 'key_action',
           pageUrl: s.page_url,
           pageTitle: s.page_title,
-          elementInfo: s.element_json ? JSON.parse(s.element_json) : null,
+          elementInfo: s.element_json ? (() => { try { return JSON.parse(s.element_json) } catch { return null } })() : null,
           status: 'captured' as const
         }))
       setSteps(pulled)
-    } catch (e) { console.error('Pull screenshots failed:', e) }
+      setServerStepCount(pulled.length)
+    } catch (e) { console.error('Pull screenshots failed:', e); alert('拉取截圖失敗') }
     finally { setPulling(false) }
+  }
+
+  const stopExtensionRecording = async () => {
+    setRecording(false)
+    window.postMessage({ type: 'FOXLINK_TRAINING_STOP' }, '*')
+    await pullFromServer()
   }
 
   // Open target window
@@ -457,6 +464,43 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
                     ) : (
                       '點擊開始後，到目標系統操作即可'
                     )}
+                  </div>
+                  {/* Manual pull button */}
+                  {!recording && sessionIdRef.current && steps.length === 0 && !pulling && (
+                    <button onClick={() => pullFromServer()}
+                      className="w-full mt-1 py-1 rounded text-[10px] transition"
+                      style={{ backgroundColor: 'var(--t-accent-subtle)', color: 'var(--t-accent)' }}>
+                      📥 手動拉取截圖
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {/* Manual Session ID input (fallback) */}
+              {!recording && !sessionIdRef.current && (
+                <div className="rounded-lg p-2 text-[10px] space-y-1.5 border" style={{ borderColor: 'var(--t-border)' }}>
+                  <div className="font-medium" style={{ color: 'var(--t-text-dim)' }}>手動輸入 Session ID（從 Extension 取得）</div>
+                  <div className="flex gap-1">
+                    <input
+                      placeholder="Session ID"
+                      className="flex-1 border rounded px-2 py-1 text-[10px]"
+                      style={{ backgroundColor: 'var(--t-bg-input)', borderColor: 'var(--t-border)', color: 'var(--t-text)' }}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter') {
+                          const val = (e.target as HTMLInputElement).value.trim()
+                          if (val) { setSessionId(val); sessionIdRef.current = val; pullFromServer(val) }
+                        }
+                      }}
+                    />
+                    <button onClick={() => {
+                      const input = document.querySelector('input[placeholder="Session ID"]') as HTMLInputElement
+                      const val = input?.value?.trim()
+                      if (val) { setSessionId(val); sessionIdRef.current = val; pullFromServer(val) }
+                    }}
+                      className="px-2 py-1 rounded text-white text-[10px]"
+                      style={{ backgroundColor: 'var(--t-accent-bg)' }}>
+                      拉取
+                    </button>
                   </div>
                 </div>
               )}

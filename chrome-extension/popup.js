@@ -82,6 +82,16 @@ $('screenshotBtn').addEventListener('click', () => {
   setTimeout(refreshStatus, 500);
 });
 
+// Clear screenshots
+$('clearBtn').addEventListener('click', () => {
+  if (!confirm('確定要清除所有截圖紀錄？')) return;
+  chrome.runtime.sendMessage({ type: 'CLEAR_SCREENSHOTS' }, () => {
+    $('screenshotList').innerHTML = '';
+    $('stepCount').textContent = '0';
+    refreshStatus();
+  });
+});
+
 // Logout
 $('logoutBtn').addEventListener('click', () => {
   chrome.storage.local.remove(['serverToken']);
