@@ -85,6 +85,16 @@ $('screenshotBtn').addEventListener('click', () => {
   setTimeout(refreshStatus, 500);
 });
 
+// Force stop — always works regardless of state
+$('forceStopBtn').addEventListener('click', () => {
+  chrome.runtime.sendMessage({ type: 'STOP_RECORDING' });
+  chrome.runtime.sendMessage({ type: 'CLEAR_SCREENSHOTS' });
+  showRecordingState(false);
+  updateStatus('connected', '已強制停止');
+  $('stepCount').textContent = '0';
+  $('screenshotList').innerHTML = '';
+});
+
 // Clear screenshots
 $('clearBtn').addEventListener('click', () => {
   if (!confirm('確定要清除所有截圖紀錄？')) return;

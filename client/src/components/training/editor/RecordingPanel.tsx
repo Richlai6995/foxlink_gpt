@@ -373,7 +373,10 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
               已截 {steps.length} 張
             </span>
           </h3>
-          <button onClick={onClose} style={{ color: 'var(--t-text-muted)' }}><X size={16} /></button>
+          <button onClick={() => {
+            if (recording) { setRecording(false); window.postMessage({ type: 'FOXLINK_TRAINING_STOP' }, '*') }
+            onClose()
+          }} style={{ color: 'var(--t-text-muted)' }}><X size={16} /></button>
         </div>
 
         <div className="flex flex-1 overflow-hidden">
