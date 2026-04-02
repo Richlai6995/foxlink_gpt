@@ -666,15 +666,33 @@ async function verifyLessonAccess(lessonId, user, requireEdit = false) {
   return { lesson, permission: perm.permission, courseId: lesson.course_id };
 }
 
-// GET /api/training/lessons/:lid/slides
+// GET /api/training/lessons/:lid/slides?lang=en
 router.get('/lessons/:lid/slides', async (req, res) => {
   try {
     const check = await verifyLessonAccess(req.params.lid, req.user);
     if (check.error) return res.status(check.status).json({ error: check.error });
 
+    const lang = req.query.lang;
     const slides = await db.prepare(
       'SELECT * FROM course_slides WHERE lesson_id=? ORDER BY sort_order, id'
     ).all(req.params.lid);
+
+    // If non-zh-TW language requested, merge translations
+    if (lang && lang !== 'zh-TW') {
+      for (const slide of slides) {
+        try {
+          const trans = await db.prepare(
+            'SELECT content_json, notes, audio_url FROM slide_translations WHERE slide_id=? AND lang=?'
+          ).get(slide.id, lang);
+          if (trans) {
+            if (trans.content_json) slide.content_json = trans.content_json;
+            if (trans.notes) slide.notes = trans.notes;
+            if (trans.audio_url) slide.audio_url = trans.audio_url;
+          }
+        } catch {}
+      }
+    }
+
     res.json(slides);
   } catch (e) {
     res.status(500).json({ error: e.message });

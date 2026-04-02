@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
+import { useTranslation } from 'react-i18next'
 import api from '../../lib/api'
 import { ArrowLeft, ChevronLeft, ChevronRight, Volume2, VolumeX, BookmarkPlus, MessageSquare, X, List } from 'lucide-react'
 import SlideRenderer from './SlideRenderer'
@@ -24,6 +25,7 @@ interface Lesson {
 export default function CoursePlayer() {
   const { id } = useParams()
   const navigate = useNavigate()
+  const { i18n } = useTranslation()
   const [course, setCourse] = useState<any>(null)
   const [lessons, setLessons] = useState<Lesson[]>([])
   const [allSlides, setAllSlides] = useState<Slide[]>([])
@@ -48,10 +50,11 @@ export default function CoursePlayer() {
       setCourse(courseRes.data)
       setLessons(courseRes.data.lessons || [])
 
-      // Load all slides for all lessons
+      // Load all slides for all lessons (with language)
+      const lang = i18n.language
       const slides: Slide[] = []
       for (const lesson of courseRes.data.lessons || []) {
-        const res = await api.get(`/training/lessons/${lesson.id}/slides`)
+        const res = await api.get(`/training/lessons/${lesson.id}/slides`, { params: { lang } })
         slides.push(...res.data)
       }
       setAllSlides(slides)

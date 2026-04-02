@@ -54,7 +54,7 @@ export default function CourseEditor() {
   const [categories, setCategories] = useState<Category[]>([])
   const [loading, setLoading] = useState(!isNew)
   const [saving, setSaving] = useState(false)
-  const [activeTab, setActiveTab] = useState<'info' | 'lessons' | 'quiz' | 'settings'>('info')
+  const [activeTab, setActiveTab] = useState<'info' | 'lessons' | 'quiz' | 'translate' | 'settings'>('info')
   const [expandedLesson, setExpandedLesson] = useState<number | null>(null)
   const [lessonSlides, setLessonSlides] = useState<Record<number, Slide[]>>({})
   const [editingSlideId, setEditingSlideId] = useState<number | null>(null)
@@ -156,10 +156,14 @@ export default function CourseEditor() {
 
   if (loading) return <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: 'var(--t-bg)', color: 'var(--t-text-dim)' }}>載入中...</div>
 
+  const [translating, setTranslating] = useState<string | null>(null)
+  const [translateStatus, setTranslateStatus] = useState<any>(null)
+
   const tabs = [
     { key: 'info', label: '基本資訊', icon: FileText },
     { key: 'lessons', label: '章節管理', icon: Play },
     { key: 'quiz', label: '題庫', icon: FileText },
+    { key: 'translate', label: '翻譯', icon: FileText },
     { key: 'settings', label: '設定', icon: Settings },
   ] as const
 
@@ -433,6 +437,90 @@ export default function CourseEditor() {
           <div className="text-center text-slate-500 py-20">
             <FileText size={48} className="mx-auto mb-3 opacity-50" />
             <p className="text-sm">題庫管理（開發中）</p>
+          </div>
+        )}
+
+        {/* Translate Tab */}
+        {activeTab === 'translate' && !isNew && (
+          <div className="max-w-2xl space-y-4">
+            <p className="text-xs" style={{ color: 'var(--t-text-dim)' }}>
+              將課程內容（標題、說明、投影片、題目）翻譯成其他語言。使用 AI 自動翻譯，翻譯後可手動編輯。
+            </p>
+
+            {/* Translation actions */}
+            {['en', 'vi'].map(lang => {
+              const langName = lang === 'en' ? 'English' : 'Tiếng Việt'
+              const langFlag = lang === 'en' ? '🇺🇸' : '🇻🇳'
+              const status = translateStatus?.[lang]
+
+              return (
+                <div key={lang} className="border rounded-lg p-4 space-y-3" style={{ borderColor: 'var(--t-border)', backgroundColor: 'var(--t-bg-card)' }}>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="text-lg">{langFlag}</span>
+                      <span className="text-sm font-medium" style={{ color: 'var(--t-text)' }}>{langName}</span>
+                    </div>
+                    <button
+                      onClick={async () => {
+                        try {
+                          setTranslating(lang)
+                          await api.post(`/training/courses/${id}/translate`, { target_lang: lang }, { timeout: 300000 })
+                          // Refresh status
+                          const statusRes = await api.get(`/training/courses/${id}/translate/status`)
+                          setTranslateStatus(statusRes.data)
+                          alert(`${langName} 翻譯完成！`)
+                        } catch (e: any) {
+                          alert(e.response?.data?.error || '翻譯失敗')
+                        } finally { setTranslating(null) }
+                      }}
+                      disabled={translating === lang}
+                      className="flex items-center gap-1.5 text-xs text-white px-3 py-1.5 rounded-lg transition disabled:opacity-50"
+                      style={{ backgroundColor: 'var(--t-accent-bg)' }}
+                    >
+                      {translating === lang ? '翻譯中...' : status?.course_translated ? '重新翻譯' : 'AI 翻譯'}
+                    </button>
+                  </div>
+
+                  {status && (
+                    <div className="text-xs space-y-1" style={{ color: 'var(--t-text-muted)' }}>
+                      <div className="flex items-center gap-2">
+                        <span>課程標題：{status.course_translated ? '✅' : '❌'}</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span>投影片：{status.slides_translated}/{status.slides_total}</span>
+                        <div className="flex-1 h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--t-border)' }}>
+                          <div className="h-full rounded-full" style={{
+                            backgroundColor: status.slides_translated === status.slides_total ? '#22c55e' : 'var(--t-accent)',
+                            width: `${status.slides_total > 0 ? (status.slides_translated / status.slides_total) * 100 : 0}%`
+                          }} />
+                        </div>
+                      </div>
+                      {status.last_translated && (
+                        <div style={{ color: 'var(--t-text-dim)' }}>
+                          上次翻譯：{new Date(status.last_translated).toLocaleString('zh-TW')}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+
+            {/* Load translation status on tab open */}
+            {!translateStatus && (
+              <button
+                onClick={async () => {
+                  try {
+                    const res = await api.get(`/training/courses/${id}/translate/status`)
+                    setTranslateStatus(res.data)
+                  } catch {}
+                }}
+                className="text-xs px-3 py-1.5 rounded-lg transition"
+                style={{ backgroundColor: 'var(--t-accent-subtle)', color: 'var(--t-accent)' }}
+              >
+                載入翻譯狀態
+              </button>
+            )}
           </div>
         )}
 
