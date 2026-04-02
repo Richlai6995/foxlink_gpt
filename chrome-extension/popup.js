@@ -85,6 +85,16 @@ $('screenshotBtn').addEventListener('click', () => {
   setTimeout(refreshStatus, 500);
 });
 
+// Copy Session ID
+$('copySessionBtn').addEventListener('click', () => {
+  const sid = $('sessionId').value;
+  if (sid) {
+    navigator.clipboard.writeText(sid);
+    $('copySessionBtn').textContent = '✓';
+    setTimeout(() => { $('copySessionBtn').textContent = '📋'; }, 1000);
+  }
+});
+
 // Force stop — always works regardless of state
 $('forceStopBtn').addEventListener('click', () => {
   chrome.runtime.sendMessage({ type: 'STOP_RECORDING' });

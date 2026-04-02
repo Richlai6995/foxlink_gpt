@@ -68,7 +68,10 @@
     <!-- Manual start (backup) -->
     <div id="manual-start" class="section">
       <label>Session ID（自動或手動）</label>
-      <input type="text" id="sessionId" placeholder="由訓練平台自動提供" />
+      <div class="flex">
+        <input type="text" id="sessionId" placeholder="由訓練平台自動提供" style="flex:1;" />
+        <button class="btn btn-ghost" id="copySessionBtn" style="width:auto; padding:4px 8px; font-size:10px;" title="複製 Session ID">📋</button>
+      </div>
       <div class="flex mt">
         <button class="btn btn-success" id="startBtn" style="flex:1;">▶ 手動開始</button>
         <button class="btn btn-danger" id="stopBtn" style="flex:1;" disabled>⬛ 停止</button>

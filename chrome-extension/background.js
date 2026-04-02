@@ -3,7 +3,9 @@
 let serverUrl = '';
 let serverToken = '';
 let currentSessionId = null;
+let lastSessionId = null;  // preserved after stop
 let stepCounter = 0;
+let lastStepCount = 0;
 let isRecording = false;
 let recentScreenshots = []; // Store thumbnails for popup preview
 
@@ -19,11 +21,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === 'GET_STATUS') {
     sendResponse({
       isRecording,
-      sessionId: currentSessionId,
-      stepCounter,
+      sessionId: currentSessionId || lastSessionId,
+      stepCounter: isRecording ? stepCounter : lastStepCount,
       serverUrl,
       hasToken: !!serverToken,
-      recentScreenshots: recentScreenshots.slice(-20) // last 20 thumbnails
+      recentScreenshots: recentScreenshots.slice(-20)
     });
   }
 
@@ -44,6 +46,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
   if (msg.type === 'STOP_RECORDING') {
     const sid = currentSessionId;
+    lastSessionId = sid;
+    lastStepCount = stepCounter;
     isRecording = false;
     currentSessionId = null;
     updateBadge();

@@ -478,10 +478,12 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
                 </div>
               )}
 
-              {/* Manual Session ID input (fallback) */}
-              {!recording && !sessionIdRef.current && (
+              {/* Manual Session ID input — always show when not recording */}
+              {!recording && (
                 <div className="rounded-lg p-2 text-[10px] space-y-1.5 border" style={{ borderColor: 'var(--t-border)' }}>
-                  <div className="font-medium" style={{ color: 'var(--t-text-dim)' }}>手動輸入 Session ID（從 Extension 取得）</div>
+                  <div className="font-medium" style={{ color: 'var(--t-text-dim)' }}>
+                    {sessionIdRef.current ? `Session: ${sessionIdRef.current.slice(0, 8)}...` : '手動輸入 Session ID（從 Extension 📋 複製）'}
+                  </div>
                   <div className="flex gap-1">
                     <input
                       placeholder="Session ID"
