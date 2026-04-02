@@ -3,19 +3,54 @@ const $ = (id) => document.getElementById(id);
 let isLoggedIn = false;
 let pollInterval = null;
 
-// Load saved config
-chrome.storage.local.get(['serverUrl', 'serverToken', 'username'], (data) => {
+// Load saved config + auto-login
+chrome.storage.local.get(['serverUrl', 'serverToken', 'username', 'savedPassword'], (data) => {
   if (data.serverUrl) $('serverUrl').value = data.serverUrl;
   if (data.username) $('username').value = data.username;
   if (data.serverToken) {
     isLoggedIn = true;
     showRecordingUI();
+    // Verify token is still valid, auto-re-login if expired
+    verifyOrRelogin(data);
+  } else if (data.savedPassword && data.serverUrl && data.username) {
+    // Has saved credentials but no token → auto-login
+    autoLogin(data.serverUrl, data.username, data.savedPassword);
   }
-  // Retry refreshStatus multiple times to handle service worker wake-up delay
   refreshStatus();
   setTimeout(refreshStatus, 300);
   setTimeout(refreshStatus, 800);
 });
+
+async function verifyOrRelogin(data) {
+  try {
+    const res = await fetch(`${data.serverUrl}/api/auth/user-info`, {
+      headers: { 'Authorization': `Bearer ${data.serverToken}` }
+    });
+    if (res.status === 401 && data.savedPassword) {
+      console.log('[Popup] Token expired, auto re-login...');
+      await autoLogin(data.serverUrl, data.username, data.savedPassword);
+    }
+  } catch {}
+}
+
+async function autoLogin(serverUrl, username, password) {
+  try {
+    const apiBase = serverUrl.replace(/\/$/, '');
+    const res = await fetch(`${apiBase}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password })
+    });
+    if (!res.ok) return;
+    const data = await res.json();
+    chrome.storage.local.set({ serverUrl: apiBase, serverToken: data.token, username });
+    chrome.runtime.sendMessage({ type: 'SET_CONFIG', serverUrl: apiBase, token: data.token });
+    isLoggedIn = true;
+    showRecordingUI();
+    updateStatus('connected', `已連線: ${username}`);
+    console.log('[Popup] Auto-login OK');
+  } catch (e) { console.warn('[Popup] Auto-login failed:', e.message); }
+}
 
 // Login
 $('loginBtn').addEventListener('click', async () => {
@@ -44,7 +79,7 @@ $('loginBtn').addEventListener('click', async () => {
     const data = await res.json();
     const token = data.token;
 
-    chrome.storage.local.set({ serverUrl: apiBase, serverToken: token, username });
+    chrome.storage.local.set({ serverUrl: apiBase, serverToken: token, username, savedPassword: password });
     chrome.runtime.sendMessage({ type: 'SET_CONFIG', serverUrl: apiBase, token });
 
     isLoggedIn = true;
@@ -117,11 +152,11 @@ $('clearBtn').addEventListener('click', () => {
 
 // Logout
 $('logoutBtn').addEventListener('click', () => {
-  chrome.storage.local.remove(['serverToken']);
+  chrome.storage.local.remove(['serverToken', 'savedPassword']);
   chrome.runtime.sendMessage({ type: 'STOP_RECORDING' });
   isLoggedIn = false;
   showLoginUI();
-  updateStatus('disconnected', '已登出');
+  updateStatus('disconnected', '已登出（密碼已清除）');
   stopPolling();
 });
 

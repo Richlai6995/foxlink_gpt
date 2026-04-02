@@ -168,7 +168,18 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             page_title: sender.tab?.title || ''
           })
         });
-        if (!uploadRes.ok) {
+        if (uploadRes.status === 401) {
+          console.warn('[Recorder] Token expired, attempting re-login...');
+          await tryRelogin();
+          // Retry upload with new token
+          const retryRes = await fetch(uploadUrl, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${serverToken}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ step_number: currentStep, action_type: 'screenshot', screenshot_base64: dataUrl, page_url: sender.tab?.url || '', page_title: sender.tab?.title || '' })
+          });
+          if (retryRes.ok) { const r = await retryRes.json(); console.log(`[Recorder] Retry step ${currentStep} OK:`, r); }
+          else console.error(`[Recorder] Retry failed: ${retryRes.status}`);
+        } else if (!uploadRes.ok) {
           const errText = await uploadRes.text();
           console.error(`[Recorder] Upload HTTP ${uploadRes.status}:`, errText.slice(0, 200));
         } else {
@@ -206,6 +217,24 @@ function createThumbnail(dataUrl, callback) {
   // In service worker we can't use DOM canvas, store a truncated version
   // Just store first 200 chars as identifier + step info (popup will show from server)
   callback(dataUrl.slice(0, 100)); // placeholder — popup will fetch from server
+}
+
+// Auto re-login when token expired
+async function tryRelogin() {
+  const data = await chrome.storage.local.get(['serverUrl', 'savedPassword', 'username']);
+  if (!data.serverUrl || !data.username || !data.savedPassword) return;
+  try {
+    const res = await fetch(`${data.serverUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: data.username, password: data.savedPassword })
+    });
+    if (!res.ok) return;
+    const result = await res.json();
+    serverToken = result.token;
+    chrome.storage.local.set({ serverToken: result.token });
+    console.log('[Recorder] Auto re-login OK');
+  } catch (e) { console.error('[Recorder] Auto re-login failed:', e.message); }
 }
 
 // Restore config on startup
