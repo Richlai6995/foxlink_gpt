@@ -355,13 +355,13 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
         // Complete session if not already
         await api.post(`/training/recording/${sid}/complete`).catch(() => {})
 
-        // AI analyze all steps
+        // AI analyze all steps (may take 30-120s for many screenshots)
         setProcessProgress({ current: 2, total: 3 })
-        await api.post(`/training/recording/${sid}/analyze`)
+        await api.post(`/training/recording/${sid}/analyze`, {}, { timeout: 180000 })
 
         // Generate slides
         setProcessProgress({ current: 3, total: 3 })
-        const genRes = await api.post(`/training/recording/${sid}/generate`)
+        const genRes = await api.post(`/training/recording/${sid}/generate`, {}, { timeout: 60000 })
 
         setSteps(prev => prev.map(s => ({ ...s, status: 'done' })))
         setTimeout(() => onComplete(genRes.data), 500)
@@ -396,14 +396,16 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
 
         // Complete + analyze + generate
         await api.post(`/training/recording/${processingSessionId}/complete`)
-        await api.post(`/training/recording/${processingSessionId}/analyze`)
-        const genRes = await api.post(`/training/recording/${processingSessionId}/generate`)
+        await api.post(`/training/recording/${processingSessionId}/analyze`, {}, { timeout: 180000 })
+        const genRes = await api.post(`/training/recording/${processingSessionId}/generate`, {}, { timeout: 60000 })
 
         setSteps(prev => prev.map(s => ({ ...s, status: 'done' })))
         setTimeout(() => onComplete(genRes.data), 500)
       }
     } catch (e: any) {
-      alert(e.response?.data?.error || '處理失敗')
+      const errMsg = e.code === 'ECONNABORTED' ? 'AI 分析超時（截圖太多或網路慢），請重試' : (e.response?.data?.error || e.message || '處理失敗')
+      console.error('[processAll]', e)
+      alert(errMsg)
     } finally { setProcessing(false) }
   }
 
