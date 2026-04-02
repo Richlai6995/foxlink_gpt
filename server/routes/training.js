@@ -1447,7 +1447,7 @@ ${slideContent ? `\n當前投影片內容：\n${slideContent}\n` : ''}
     const { GoogleGenerativeAI } = require('@google/generative-ai');
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
     const flashModel = await db.prepare(
-      `SELECT api_model FROM llm_models WHERE model_role='chat' AND is_active=1 ORDER BY sort_order FETCH FIRST 1 ROWS ONLY`
+      `SELECT api_model FROM llm_models WHERE model_role='chat' AND is_active=1 AND provider_type='gemini' ORDER BY sort_order FETCH FIRST 1 ROWS ONLY`
     ).get();
     const model = genAI.getGenerativeModel({ model: flashModel?.api_model || 'gemini-2.0-flash' });
     const result = await model.generateContent([
@@ -1781,7 +1781,7 @@ router.post('/courses/:id/translate', loadCoursePermission, requirePermission('o
     const { GoogleGenerativeAI } = require('@google/generative-ai');
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
     const flashRow = await db.prepare(
-      `SELECT api_model FROM llm_models WHERE model_role='chat' AND is_active=1 ORDER BY sort_order FETCH FIRST 1 ROWS ONLY`
+      `SELECT api_model FROM llm_models WHERE model_role='chat' AND is_active=1 AND provider_type='gemini' ORDER BY sort_order FETCH FIRST 1 ROWS ONLY`
     ).get();
     const model = genAI.getGenerativeModel({ model: flashRow?.api_model || 'gemini-2.0-flash' });
 
@@ -1983,7 +1983,7 @@ router.post('/ai/analyze-screenshot', upload.single('screenshot'), async (req, r
     const { GoogleGenerativeAI } = require('@google/generative-ai');
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
     const flashRow = await db.prepare(
-      `SELECT api_model FROM llm_models WHERE model_role='chat' AND is_active=1 ORDER BY sort_order FETCH FIRST 1 ROWS ONLY`
+      `SELECT api_model FROM llm_models WHERE model_role='chat' AND is_active=1 AND provider_type='gemini' ORDER BY sort_order FETCH FIRST 1 ROWS ONLY`
     ).get();
     const model = genAI.getGenerativeModel({ model: flashRow?.api_model || 'gemini-2.0-flash' });
 
@@ -2096,7 +2096,7 @@ router.post('/ai/generate-outline', async (req, res) => {
     const { GoogleGenerativeAI } = require('@google/generative-ai');
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
     const flashRow = await db.prepare(
-      `SELECT api_model FROM llm_models WHERE model_role='chat' AND is_active=1 ORDER BY sort_order FETCH FIRST 1 ROWS ONLY`
+      `SELECT api_model FROM llm_models WHERE model_role='chat' AND is_active=1 AND provider_type='gemini' ORDER BY sort_order FETCH FIRST 1 ROWS ONLY`
     ).get();
     const model = genAI.getGenerativeModel({ model: flashRow?.api_model || 'gemini-2.0-flash' });
 
@@ -2145,7 +2145,7 @@ router.post('/ai/batch-analyze', upload.array('screenshots', 50), async (req, re
     const { GoogleGenerativeAI } = require('@google/generative-ai');
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
     const flashRow = await db.prepare(
-      `SELECT api_model FROM llm_models WHERE model_role='chat' AND is_active=1 ORDER BY sort_order FETCH FIRST 1 ROWS ONLY`
+      `SELECT api_model FROM llm_models WHERE model_role='chat' AND is_active=1 AND provider_type='gemini' ORDER BY sort_order FETCH FIRST 1 ROWS ONLY`
     ).get();
     const model = genAI.getGenerativeModel({ model: flashRow?.api_model || 'gemini-2.0-flash' });
 
@@ -2278,7 +2278,7 @@ router.post('/recording/:sessionId/analyze', async (req, res) => {
     const { GoogleGenerativeAI } = require('@google/generative-ai');
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
     const flashRow = await db.prepare(
-      `SELECT api_model FROM llm_models WHERE model_role='chat' AND is_active=1 ORDER BY sort_order FETCH FIRST 1 ROWS ONLY`
+      `SELECT api_model FROM llm_models WHERE model_role='chat' AND is_active=1 AND provider_type='gemini' ORDER BY sort_order FETCH FIRST 1 ROWS ONLY`
     ).get();
     const model = genAI.getGenerativeModel({ model: flashRow?.api_model || 'gemini-2.0-flash' });
 
