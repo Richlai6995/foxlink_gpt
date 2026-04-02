@@ -784,7 +784,9 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
             <div className="flex items-center gap-3">
               <Loader2 size={14} className="animate-spin" style={{ color: 'var(--t-accent)' }} />
               <span className="text-xs" style={{ color: 'var(--t-text-muted)' }}>
-                處理中 {processProgress.current}/{processProgress.total}...
+                {processProgress.current < processProgress.total
+                  ? `AI 分析截圖 ${processProgress.current}/${processProgress.total - 1}...`
+                  : '生成投影片中...'}
               </span>
               <div className="w-32 h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--t-border)' }}>
                 <div className="h-full rounded-full transition-all" style={{
