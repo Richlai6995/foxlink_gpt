@@ -127,6 +127,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === 'MANUAL_SCREENSHOT' && isRecording && currentSessionId) {
     stepCounter++;
     const currentStep = stepCounter;
+    console.log(`[Recorder] MANUAL_SCREENSHOT step ${currentStep}, serverUrl="${serverUrl}", hasToken=${!!serverToken}, sessionId=${currentSessionId}`);
 
     // Hide badge before screenshot, capture, then restore
     const activeTab = sender?.tab?.id;
@@ -154,7 +155,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       });
 
       try {
-        await fetch(`${serverUrl}/api/training/recording/${currentSessionId}/step`, {
+        const uploadUrl = `${serverUrl}/api/training/recording/${currentSessionId}/step`;
+        console.log(`[Recorder] Uploading to: ${uploadUrl}`);
+        const uploadRes = await fetch(uploadUrl, {
           method: 'POST',
           headers: { 'Authorization': `Bearer ${serverToken}`, 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -165,7 +168,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             page_title: sender.tab?.title || ''
           })
         });
-      } catch (err) { console.error('[Recorder] Manual screenshot upload failed:', err); }
+        if (!uploadRes.ok) {
+          const errText = await uploadRes.text();
+          console.error(`[Recorder] Upload HTTP ${uploadRes.status}:`, errText.slice(0, 200));
+        } else {
+          const result = await uploadRes.json();
+          console.log(`[Recorder] Manual step ${currentStep} uploaded OK:`, result);
+        }
+      } catch (err) { console.error('[Recorder] Manual screenshot upload failed:', err.message); }
     });
     }, 150); // delay for badge hide
     sendResponse({ ok: true });
