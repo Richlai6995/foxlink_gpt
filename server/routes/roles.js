@@ -134,8 +134,8 @@ router.post('/', async (req, res) => {
                   allow_image_upload, image_max_mb, allow_scheduled_tasks,
                   allow_create_skill, allow_external_skill, allow_code_skill,
                   can_create_kb, kb_max_size_mb, kb_max_count, can_deep_research,
-                  can_design_ai_select, can_use_ai_dashboard)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+                  can_design_ai_select, can_use_ai_dashboard, training_permission)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .run(name, description || null, is_default ? 1 : 0,
         parseBudget(budget_daily), parseBudget(budget_weekly), parseBudget(budget_monthly),
         quota_exceed_action === 'warn' ? 'warn' : 'block',
@@ -154,7 +154,8 @@ router.post('/', async (req, res) => {
         kb_max_count   != null ? Number(kb_max_count)   : 5,
         can_deep_research !== undefined ? (can_deep_research ? 1 : 0) : 1,
         can_design_ai_select ? 1 : 0,
-        can_use_ai_dashboard ? 1 : 0);
+        can_use_ai_dashboard ? 1 : 0,
+        req.body.training_permission || 'none');
     const roleId = result.lastInsertRowid;
     await _syncAssignments(db, roleId, mcp_server_ids, dify_kb_ids);
     res.json({ id: roleId, success: true });
@@ -189,7 +190,7 @@ router.put('/:id', async (req, res) => {
          allow_image_upload=?, image_max_mb=?, allow_scheduled_tasks=?,
          allow_create_skill=?, allow_external_skill=?, allow_code_skill=?,
          can_create_kb=?, kb_max_size_mb=?, kb_max_count=?, can_deep_research=?,
-         can_design_ai_select=?, can_use_ai_dashboard=?,
+         can_design_ai_select=?, can_use_ai_dashboard=?, training_permission=?,
          updated_at=CURRENT_TIMESTAMP
        WHERE id=?`
     ).run(name, description || null, is_default ? 1 : 0,
@@ -211,6 +212,7 @@ router.put('/:id', async (req, res) => {
       can_deep_research !== undefined ? (can_deep_research ? 1 : 0) : 1,
       can_design_ai_select ? 1 : 0,
       can_use_ai_dashboard ? 1 : 0,
+      req.body.training_permission || 'none',
       id);
     await _syncAssignments(db, id, mcp_server_ids, dify_kb_ids);
     res.json({ success: true });

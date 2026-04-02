@@ -23,7 +23,7 @@ router.get('/', async (req, res) => {
                 u.allow_image_upload, u.image_max_mb, u.allow_scheduled_tasks,
                 u.allow_create_skill, u.allow_external_skill, u.allow_code_skill,
                 u.can_create_kb, u.kb_max_size_mb, u.kb_max_count, u.can_deep_research,
-                u.can_design_ai_select, u.can_use_ai_dashboard,
+                u.can_design_ai_select, u.can_use_ai_dashboard, u.training_permission,
                 u.role_id, r.name AS role_name, u.creation_method,
                 u.budget_daily, u.budget_weekly, u.budget_monthly, u.quota_exceed_action,
                 u.webex_bot_enabled, u.name_manually_set,
@@ -133,6 +133,7 @@ router.put('/:id', async (req, res) => {
     can_create_kb, kb_max_size_mb, kb_max_count,
     can_deep_research,
     can_design_ai_select, can_use_ai_dashboard,
+    training_permission,
     webex_bot_enabled,
     name_manually_set,
     // allow manual override of org fields from UI
@@ -169,6 +170,7 @@ router.put('/:id', async (req, res) => {
       can_deep_research !== undefined ? resolveSkillPerm(can_deep_research) : null,
       resolveSkillPerm(can_design_ai_select !== undefined ? can_design_ai_select : null),
       resolveSkillPerm(can_use_ai_dashboard  !== undefined ? can_use_ai_dashboard  : null),
+      training_permission !== undefined ? (training_permission || null) : null,
       webex_bot_enabled !== undefined ? (webex_bot_enabled ? 1 : 0) : 1,
       name_manually_set !== undefined ? (name_manually_set ? 1 : 0) : 0,
     ];
@@ -194,7 +196,7 @@ router.put('/:id', async (req, res) => {
              budget_daily=?, budget_weekly=?, budget_monthly=?, quota_exceed_action=?,
              allow_create_skill=?, allow_external_skill=?, allow_code_skill=?,
              can_create_kb=?, kb_max_size_mb=?, kb_max_count=?, can_deep_research=?,
-             can_design_ai_select=?, can_use_ai_dashboard=?,
+             can_design_ai_select=?, can_use_ai_dashboard=?, training_permission=?,
              webex_bot_enabled=?, name_manually_set=?`;
     const orgSet = hasOrgOverride
       ? `, dept_code=?, dept_name=?, profit_center=?, profit_center_name=?,

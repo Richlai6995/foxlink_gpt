@@ -206,6 +206,7 @@ interface UserForm {
   can_deep_research: boolean | null
   can_design_ai_select: boolean | null
   can_use_ai_dashboard: boolean | null
+  training_permission: string | null  // null = follow role, 'none' | 'use' | 'edit'
   webex_bot_enabled: boolean
   name_manually_set: boolean
   kb_max_size_mb: string
@@ -240,6 +241,7 @@ const empty: UserForm = {
   can_deep_research: null,
   can_design_ai_select: null,
   can_use_ai_dashboard: null,
+  training_permission: null,
   webex_bot_enabled: true,
   name_manually_set: false,
   kb_max_size_mb: '',
@@ -354,6 +356,7 @@ export default function UserManagement() {
       can_deep_research: u2.can_deep_research == null ? null : u2.can_deep_research === 1,
       can_design_ai_select: u2.can_design_ai_select == null ? null : u2.can_design_ai_select === 1,
       can_use_ai_dashboard: u2.can_use_ai_dashboard == null ? null : u2.can_use_ai_dashboard === 1,
+      training_permission: u2.training_permission || null,
       webex_bot_enabled: u2.webex_bot_enabled !== 0,
       name_manually_set: u2.name_manually_set === 1,
       kb_max_size_mb: u2.kb_max_size_mb != null ? String(u2.kb_max_size_mb) : '',
@@ -870,6 +873,19 @@ export default function UserManagement() {
                       <option value="">{t('users.form.followRoleSetting')}</option>
                       <option value="1">{t('users.form.allowUse')}</option>
                       <option value="0">{t('users.form.deny')}</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-xs text-slate-500 mb-1 block">教育訓練權限</label>
+                    <select
+                      value={form.training_permission || ''}
+                      onChange={e => setForm(p => ({ ...p, training_permission: e.target.value || null }))}
+                      className="input py-1 text-sm"
+                    >
+                      <option value="">{t('users.form.followRoleSetting')}</option>
+                      <option value="edit">編輯權限</option>
+                      <option value="use">使用權限</option>
+                      <option value="none">無權限</option>
                     </select>
                   </div>
                   <div>

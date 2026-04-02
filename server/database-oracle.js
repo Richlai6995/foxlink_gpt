@@ -1552,6 +1552,410 @@ async function runMigrations(db) {
     updated_at     TIMESTAMP     DEFAULT SYSTIMESTAMP,
     CONSTRAINT help_trans_uq UNIQUE (section_id, lang)
   )`);
+
+  // ── Training Platform: 權限欄位 ──────────────────────────────────────────────
+  // training_permission: 'none' | 'use' | 'edit'  (NULL on users = inherit from role)
+  await addCol('ROLES', 'TRAINING_PERMISSION', "VARCHAR2(10) DEFAULT 'none'");
+  await addCol('USERS', 'TRAINING_PERMISSION', 'VARCHAR2(10)');  // NULL = follow role
+
+  // ── Training Platform: 課程分類（樹狀，最多 3 層）─────────────────────────────
+  await createTable('COURSE_CATEGORIES', `CREATE TABLE course_categories (
+    id          NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    parent_id   NUMBER,
+    name        VARCHAR2(200) NOT NULL,
+    sort_order  NUMBER DEFAULT 0,
+    created_by  NUMBER,
+    created_at  TIMESTAMP DEFAULT SYSTIMESTAMP
+  )`);
+
+  // ── Training Platform: 課程主檔 ─────────────────────────────────────────────
+  await createTable('COURSES', `CREATE TABLE courses (
+    id              NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    title           VARCHAR2(500) NOT NULL,
+    description     CLOB,
+    cover_image     VARCHAR2(500),
+    category_id     NUMBER,
+    created_by      NUMBER NOT NULL,
+    status          VARCHAR2(20) DEFAULT 'draft',
+    is_public       NUMBER(1) DEFAULT 0,
+    pass_score      NUMBER DEFAULT 60,
+    max_attempts    NUMBER,
+    time_limit_minutes NUMBER,
+    created_at      TIMESTAMP DEFAULT SYSTIMESTAMP,
+    updated_at      TIMESTAMP DEFAULT SYSTIMESTAMP
+  )`);
+
+  // ── Training Platform: 章節 ─────────────────────────────────────────────────
+  await createTable('COURSE_LESSONS', `CREATE TABLE course_lessons (
+    id          NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    course_id   NUMBER NOT NULL,
+    title       VARCHAR2(500) NOT NULL,
+    sort_order  NUMBER DEFAULT 0,
+    lesson_type VARCHAR2(20) DEFAULT 'slides',
+    created_at  TIMESTAMP DEFAULT SYSTIMESTAMP,
+    updated_at  TIMESTAMP DEFAULT SYSTIMESTAMP
+  )`);
+
+  // ── Training Platform: 投影片 ───────────────────────────────────────────────
+  await createTable('COURSE_SLIDES', `CREATE TABLE course_slides (
+    id              NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    lesson_id       NUMBER NOT NULL,
+    sort_order      NUMBER DEFAULT 0,
+    slide_type      VARCHAR2(30) DEFAULT 'content',
+    content_json    CLOB,
+    audio_url       VARCHAR2(500),
+    notes           CLOB,
+    duration_seconds NUMBER,
+    created_at      TIMESTAMP DEFAULT SYSTIMESTAMP,
+    updated_at      TIMESTAMP DEFAULT SYSTIMESTAMP
+  )`);
+
+  // ── Training Platform: 影片互動節點 ─────────────────────────────────────────
+  await createTable('VIDEO_INTERACTIONS', `CREATE TABLE video_interactions (
+    id                  NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    lesson_id           NUMBER NOT NULL,
+    timestamp_seconds   NUMBER NOT NULL,
+    interaction_type    VARCHAR2(20) NOT NULL,
+    content_json        CLOB NOT NULL,
+    must_answer         NUMBER(1) DEFAULT 1,
+    pause_video         NUMBER(1) DEFAULT 1,
+    sort_order          NUMBER DEFAULT 0,
+    created_at          TIMESTAMP DEFAULT SYSTIMESTAMP
+  )`);
+
+  // ── Training Platform: 分支節點 ─────────────────────────────────────────────
+  await createTable('SLIDE_BRANCHES', `CREATE TABLE slide_branches (
+    id              NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    slide_id        NUMBER NOT NULL,
+    option_text     VARCHAR2(500) NOT NULL,
+    option_index    NUMBER DEFAULT 0,
+    target_slide_id NUMBER,
+    target_lesson_id NUMBER,
+    created_at      TIMESTAMP DEFAULT SYSTIMESTAMP
+  )`);
+
+  // ── Training Platform: 題庫（含評分規則）─────────────────────────────────────
+  await createTable('QUIZ_QUESTIONS', `CREATE TABLE quiz_questions (
+    id              NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    course_id       NUMBER NOT NULL,
+    question_type   VARCHAR2(30) NOT NULL,
+    question_json   CLOB NOT NULL,
+    answer_json     CLOB NOT NULL,
+    scoring_json    CLOB,
+    points          NUMBER DEFAULT 10,
+    explanation     CLOB,
+    sort_order      NUMBER DEFAULT 0,
+    created_at      TIMESTAMP DEFAULT SYSTIMESTAMP,
+    updated_at      TIMESTAMP DEFAULT SYSTIMESTAMP
+  )`);
+
+  // ── Training Platform: 測驗結果 ─────────────────────────────────────────────
+  await createTable('QUIZ_ATTEMPTS', `CREATE TABLE quiz_attempts (
+    id              NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    course_id       NUMBER NOT NULL,
+    user_id         NUMBER NOT NULL,
+    score           NUMBER,
+    total_points    NUMBER,
+    passed          NUMBER(1) DEFAULT 0,
+    answers_json    CLOB,
+    attempt_number  NUMBER DEFAULT 1,
+    started_at      TIMESTAMP DEFAULT SYSTIMESTAMP,
+    completed_at    TIMESTAMP,
+    review_status   VARCHAR2(20) DEFAULT 'auto',
+    reviewed_by     NUMBER,
+    reviewed_at     TIMESTAMP
+  )`);
+
+  // ── Training Platform: 學習進度 ─────────────────────────────────────────────
+  await createTable('USER_COURSE_PROGRESS', `CREATE TABLE user_course_progress (
+    id                  NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    user_id             NUMBER NOT NULL,
+    course_id           NUMBER NOT NULL,
+    lesson_id           NUMBER,
+    current_slide_index NUMBER DEFAULT 0,
+    status              VARCHAR2(20) DEFAULT 'not_started',
+    time_spent_seconds  NUMBER DEFAULT 0,
+    started_at          TIMESTAMP,
+    completed_at        TIMESTAMP,
+    CONSTRAINT uq_user_course_lesson UNIQUE (user_id, course_id, lesson_id)
+  )`);
+
+  // ── Training Platform: 課程分享權限 ─────────────────────────────────────────
+  await createTable('COURSE_ACCESS', `CREATE TABLE course_access (
+    id              VARCHAR2(36) DEFAULT SYS_GUID() PRIMARY KEY,
+    course_id       NUMBER NOT NULL,
+    grantee_type    VARCHAR2(20) NOT NULL,
+    grantee_id      VARCHAR2(100) NOT NULL,
+    permission      VARCHAR2(20) DEFAULT 'view',
+    granted_by      NUMBER,
+    granted_at      TIMESTAMP DEFAULT SYSTIMESTAMP,
+    CONSTRAINT uq_course_access UNIQUE (course_id, grantee_type, grantee_id)
+  )`);
+
+  // ── Training Platform: 學習路徑 ─────────────────────────────────────────────
+  await createTable('LEARNING_PATHS', `CREATE TABLE learning_paths (
+    id          NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    title       VARCHAR2(500) NOT NULL,
+    description CLOB,
+    created_by  NUMBER,
+    is_public   NUMBER(1) DEFAULT 0,
+    status      VARCHAR2(20) DEFAULT 'draft',
+    created_at  TIMESTAMP DEFAULT SYSTIMESTAMP,
+    updated_at  TIMESTAMP DEFAULT SYSTIMESTAMP
+  )`);
+
+  await createTable('LEARNING_PATH_COURSES', `CREATE TABLE learning_path_courses (
+    id                      NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    path_id                 NUMBER NOT NULL,
+    course_id               NUMBER NOT NULL,
+    sort_order              NUMBER DEFAULT 0,
+    is_required             NUMBER(1) DEFAULT 1,
+    prerequisite_course_id  NUMBER,
+    CONSTRAINT uq_path_course UNIQUE (path_id, course_id)
+  )`);
+
+  // ── Training Platform: 培訓專案 ─────────────────────────────────────────────
+  await createTable('TRAINING_PROGRAMS', `CREATE TABLE training_programs (
+    id                  NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    title               VARCHAR2(500) NOT NULL,
+    description         CLOB,
+    purpose             CLOB,
+    created_by          NUMBER,
+    status              VARCHAR2(20) DEFAULT 'draft',
+    start_date          DATE NOT NULL,
+    end_date            DATE NOT NULL,
+    learning_path_id    NUMBER,
+    remind_before_days  NUMBER DEFAULT 3,
+    notify_overdue      NUMBER(1) DEFAULT 1,
+    email_enabled       NUMBER(1) DEFAULT 1,
+    recurrence_type     VARCHAR2(20),
+    recurrence_months   NUMBER,
+    auto_reassign       NUMBER(1) DEFAULT 0,
+    reset_mode          VARCHAR2(20) DEFAULT 'full',
+    is_template         NUMBER(1) DEFAULT 0,
+    template_source_id  NUMBER,
+    created_at          TIMESTAMP DEFAULT SYSTIMESTAMP,
+    updated_at          TIMESTAMP DEFAULT SYSTIMESTAMP
+  )`);
+
+  await createTable('PROGRAM_COURSES', `CREATE TABLE program_courses (
+    id          NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    program_id  NUMBER NOT NULL,
+    course_id   NUMBER NOT NULL,
+    sort_order  NUMBER DEFAULT 0,
+    is_required NUMBER(1) DEFAULT 1,
+    CONSTRAINT uq_program_course UNIQUE (program_id, course_id)
+  )`);
+
+  await createTable('PROGRAM_TARGETS', `CREATE TABLE program_targets (
+    id          NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    program_id  NUMBER NOT NULL,
+    target_type VARCHAR2(20) NOT NULL,
+    target_id   VARCHAR2(100) NOT NULL,
+    CONSTRAINT uq_program_target UNIQUE (program_id, target_type, target_id)
+  )`);
+
+  await createTable('PROGRAM_ASSIGNMENTS', `CREATE TABLE program_assignments (
+    id              NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    program_id      NUMBER NOT NULL,
+    course_id       NUMBER NOT NULL,
+    user_id         NUMBER NOT NULL,
+    status          VARCHAR2(20) DEFAULT 'pending',
+    due_date        DATE,
+    started_at      TIMESTAMP,
+    completed_at    TIMESTAMP,
+    score           NUMBER,
+    passed          NUMBER(1),
+    exempted_by     NUMBER,
+    exempted_reason VARCHAR2(500),
+    created_at      TIMESTAMP DEFAULT SYSTIMESTAMP,
+    CONSTRAINT uq_prog_assign UNIQUE (program_id, course_id, user_id)
+  )`);
+
+  // ── Training Platform: 通知 ─────────────────────────────────────────────────
+  await createTable('TRAINING_NOTIFICATIONS', `CREATE TABLE training_notifications (
+    id          NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    user_id     NUMBER NOT NULL,
+    type        VARCHAR2(30) NOT NULL,
+    title       VARCHAR2(500) NOT NULL,
+    message     CLOB,
+    course_id   NUMBER,
+    link_url    VARCHAR2(500),
+    is_read     NUMBER(1) DEFAULT 0,
+    created_at  TIMESTAMP DEFAULT SYSTIMESTAMP
+  )`);
+
+  await createTable('COURSE_NOTIFICATION_SETTINGS', `CREATE TABLE course_notification_settings (
+    id                  NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    course_id           NUMBER NOT NULL,
+    remind_before_days  NUMBER DEFAULT 3,
+    remind_overdue      NUMBER(1) DEFAULT 1,
+    notify_on_complete  NUMBER(1) DEFAULT 1,
+    notify_on_fail      NUMBER(1) DEFAULT 1,
+    email_enabled       NUMBER(1) DEFAULT 1,
+    CONSTRAINT uq_course_notif UNIQUE (course_id)
+  )`);
+
+  // ── Training Platform: 翻譯表 ───────────────────────────────────────────────
+  await createTable('COURSE_TRANSLATIONS', `CREATE TABLE course_translations (
+    id          NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    course_id   NUMBER NOT NULL,
+    lang        VARCHAR2(10) NOT NULL,
+    title       VARCHAR2(500),
+    description CLOB,
+    translated_at TIMESTAMP DEFAULT SYSTIMESTAMP,
+    is_auto     NUMBER(1) DEFAULT 1,
+    CONSTRAINT uq_course_trans UNIQUE (course_id, lang)
+  )`);
+
+  await createTable('LESSON_TRANSLATIONS', `CREATE TABLE lesson_translations (
+    id          NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    lesson_id   NUMBER NOT NULL,
+    lang        VARCHAR2(10) NOT NULL,
+    title       VARCHAR2(500),
+    translated_at TIMESTAMP DEFAULT SYSTIMESTAMP,
+    is_auto     NUMBER(1) DEFAULT 1,
+    CONSTRAINT uq_lesson_trans UNIQUE (lesson_id, lang)
+  )`);
+
+  await createTable('SLIDE_TRANSLATIONS', `CREATE TABLE slide_translations (
+    id            NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    slide_id      NUMBER NOT NULL,
+    lang          VARCHAR2(10) NOT NULL,
+    content_json  CLOB,
+    notes         CLOB,
+    audio_url     VARCHAR2(500),
+    translated_at TIMESTAMP DEFAULT SYSTIMESTAMP,
+    is_auto       NUMBER(1) DEFAULT 1,
+    CONSTRAINT uq_slide_trans UNIQUE (slide_id, lang)
+  )`);
+
+  await createTable('QUIZ_TRANSLATIONS', `CREATE TABLE quiz_translations (
+    id            NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    question_id   NUMBER NOT NULL,
+    lang          VARCHAR2(10) NOT NULL,
+    question_json CLOB,
+    explanation   CLOB,
+    translated_at TIMESTAMP DEFAULT SYSTIMESTAMP,
+    is_auto       NUMBER(1) DEFAULT 1,
+    CONSTRAINT uq_quiz_trans UNIQUE (question_id, lang)
+  )`);
+
+  await createTable('CATEGORY_TRANSLATIONS', `CREATE TABLE category_translations (
+    id            NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    category_id   NUMBER NOT NULL,
+    lang          VARCHAR2(10) NOT NULL,
+    name          VARCHAR2(200),
+    translated_at TIMESTAMP DEFAULT SYSTIMESTAMP,
+    is_auto       NUMBER(1) DEFAULT 1,
+    CONSTRAINT uq_category_trans UNIQUE (category_id, lang)
+  )`);
+
+  // ── Training Platform: AI 助教對話紀錄 ──────────────────────────────────────
+  await createTable('TUTOR_CONVERSATIONS', `CREATE TABLE tutor_conversations (
+    id              NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    course_id       NUMBER NOT NULL,
+    lesson_id       NUMBER,
+    slide_id        NUMBER,
+    user_id         NUMBER NOT NULL,
+    question        CLOB NOT NULL,
+    answer          CLOB,
+    model_key       VARCHAR2(50),
+    input_tokens    NUMBER DEFAULT 0,
+    output_tokens   NUMBER DEFAULT 0,
+    created_at      TIMESTAMP DEFAULT SYSTIMESTAMP
+  )`);
+
+  // ── Training Platform: 學習筆記 + 書籤 ─────────────────────────────────────
+  await createTable('USER_COURSE_NOTES', `CREATE TABLE user_course_notes (
+    id          NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    user_id     NUMBER NOT NULL,
+    course_id   NUMBER NOT NULL,
+    slide_id    NUMBER,
+    content     CLOB,
+    bookmarked  NUMBER(1) DEFAULT 0,
+    created_at  TIMESTAMP DEFAULT SYSTIMESTAMP,
+    updated_at  TIMESTAMP DEFAULT SYSTIMESTAMP,
+    CONSTRAINT uq_user_slide_note UNIQUE (user_id, slide_id)
+  )`);
+
+  // ── Training Platform: iframe 導引步驟（Phase 2 預留）──────────────────────
+  await createTable('IFRAME_GUIDE_STEPS', `CREATE TABLE iframe_guide_steps (
+    id                NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    lesson_id         NUMBER NOT NULL,
+    sort_order        NUMBER DEFAULT 0,
+    target_url        VARCHAR2(1000) NOT NULL,
+    instruction_text  CLOB,
+    target_selector   VARCHAR2(500),
+    expected_action   VARCHAR2(20),
+    expected_value    VARCHAR2(500),
+    audio_url         VARCHAR2(500),
+    hint_text         CLOB,
+    created_at        TIMESTAMP DEFAULT SYSTIMESTAMP
+  )`);
+
+  // ── Phase 2: 跨系統管理 ─────────────────────────────────────────────────────
+  await createTable('TRAINING_SYSTEMS', `CREATE TABLE training_systems (
+    id              NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    name            VARCHAR2(200) NOT NULL,
+    url             VARCHAR2(1000),
+    description     CLOB,
+    icon            VARCHAR2(50),
+    login_url       VARCHAR2(1000),
+    login_config    CLOB,
+    help_source     VARCHAR2(20) DEFAULT 'manual',
+    created_by      NUMBER,
+    created_at      TIMESTAMP DEFAULT SYSTIMESTAMP
+  )`);
+
+  await createTable('TEACHING_SCRIPTS', `CREATE TABLE teaching_scripts (
+    id              NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    system_id       NUMBER NOT NULL,
+    module          VARCHAR2(200),
+    title           VARCHAR2(500) NOT NULL,
+    steps_json      CLOB,
+    prerequisites   CLOB,
+    estimated_time  NUMBER,
+    sort_order      NUMBER DEFAULT 0,
+    created_by      NUMBER,
+    created_at      TIMESTAMP DEFAULT SYSTIMESTAMP,
+    updated_at      TIMESTAMP DEFAULT SYSTIMESTAMP
+  )`);
+
+  // ── Phase 2: 錄製工作階段 ───────────────────────────────────────────────────
+  await createTable('RECORDING_SESSIONS', `CREATE TABLE recording_sessions (
+    id              VARCHAR2(36) PRIMARY KEY,
+    course_id       NUMBER,
+    lesson_id       NUMBER,
+    system_id       NUMBER,
+    script_id       NUMBER,
+    status          VARCHAR2(20) DEFAULT 'recording',
+    config_json     CLOB,
+    steps_count     NUMBER DEFAULT 0,
+    created_by      NUMBER NOT NULL,
+    created_at      TIMESTAMP DEFAULT SYSTIMESTAMP,
+    completed_at    TIMESTAMP
+  )`);
+
+  await createTable('RECORDING_STEPS', `CREATE TABLE recording_steps (
+    id              NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    session_id      VARCHAR2(36) NOT NULL,
+    step_number     NUMBER NOT NULL,
+    action_type     VARCHAR2(20),
+    screenshot_url  VARCHAR2(500),
+    element_json    CLOB,
+    viewport_json   VARCHAR2(200),
+    page_url        VARCHAR2(1000),
+    page_title      VARCHAR2(500),
+    ai_regions_json CLOB,
+    ai_instruction  CLOB,
+    ai_narration    CLOB,
+    final_regions_json CLOB,
+    final_instruction  CLOB,
+    is_sensitive    NUMBER(1) DEFAULT 0,
+    mask_regions_json CLOB,
+    created_at      TIMESTAMP DEFAULT SYSTIMESTAMP
+  )`);
 }
 
 // ─── Default DB Source migration ───────────────────────────────────────────────

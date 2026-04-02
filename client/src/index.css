@@ -65,3 +65,193 @@ body,
 .prose-chat a { @apply text-blue-600 hover:underline; }
 .prose-chat hr { @apply my-4 border-slate-200; }
 .prose-chat strong { @apply font-semibold; }
+
+/* ═══ Training Platform Theme System ═══ */
+[data-training-theme="dark"] {
+  --t-bg: #0f172a;
+  --t-bg-elevated: #1e293b;
+  --t-bg-card: #1e293b;
+  --t-bg-card-hover: #334155;
+  --t-bg-input: #1e293b;
+  --t-bg-inset: #0f172a;
+  --t-border: #334155;
+  --t-border-subtle: rgba(51,65,85,0.5);
+  --t-text: #f1f5f9;
+  --t-text-secondary: #cbd5e1;
+  --t-text-muted: #94a3b8;
+  --t-text-dim: #64748b;
+  --t-accent: #38bdf8;
+  --t-accent-bg: #0284c7;
+  --t-accent-bg-hover: #0369a1;
+  --t-accent-subtle: rgba(56,189,248,0.12);
+  --t-success: #4ade80;
+  --t-danger: #f87171;
+  --t-warning: #fbbf24;
+  --t-shadow: 0 1px 3px rgba(0,0,0,0.4);
+  --t-gradient-cover: linear-gradient(135deg, rgba(14,49,83,0.4) 0%, #1e293b 100%);
+  --t-scrollbar: #475569;
+  --t-status-draft-bg: rgba(234,179,8,0.2);
+  --t-status-draft-text: #facc15;
+  --t-status-published-bg: rgba(34,197,94,0.2);
+  --t-status-published-text: #4ade80;
+}
+[data-training-theme="light-blue"] {
+  --t-bg: #eff6ff;
+  --t-bg-elevated: #ffffff;
+  --t-bg-card: #ffffff;
+  --t-bg-card-hover: #dbeafe;
+  --t-bg-input: #ffffff;
+  --t-bg-inset: #f0f7ff;
+  --t-border: #bfdbfe;
+  --t-border-subtle: rgba(191,219,254,0.6);
+  --t-text: #1e293b;
+  --t-text-secondary: #334155;
+  --t-text-muted: #475569;
+  --t-text-dim: #64748b;
+  --t-accent: #2563eb;
+  --t-accent-bg: #2563eb;
+  --t-accent-bg-hover: #1d4ed8;
+  --t-accent-subtle: rgba(37,99,235,0.08);
+  --t-success: #16a34a;
+  --t-danger: #dc2626;
+  --t-warning: #d97706;
+  --t-shadow: 0 1px 3px rgba(0,0,0,0.08);
+  --t-gradient-cover: linear-gradient(135deg, rgba(219,234,254,0.6) 0%, #ffffff 100%);
+  --t-scrollbar: #93c5fd;
+  --t-status-draft-bg: rgba(234,179,8,0.15);
+  --t-status-draft-text: #a16207;
+  --t-status-published-bg: rgba(34,197,94,0.15);
+  --t-status-published-text: #15803d;
+}
+[data-training-theme="light-green"] {
+  --t-bg: #ecfdf5;
+  --t-bg-elevated: #ffffff;
+  --t-bg-card: #ffffff;
+  --t-bg-card-hover: #d1fae5;
+  --t-bg-input: #ffffff;
+  --t-bg-inset: #f0fdf9;
+  --t-border: #a7f3d0;
+  --t-border-subtle: rgba(167,243,208,0.6);
+  --t-text: #1e293b;
+  --t-text-secondary: #334155;
+  --t-text-muted: #475569;
+  --t-text-dim: #64748b;
+  --t-accent: #059669;
+  --t-accent-bg: #059669;
+  --t-accent-bg-hover: #047857;
+  --t-accent-subtle: rgba(5,150,105,0.08);
+  --t-success: #16a34a;
+  --t-danger: #dc2626;
+  --t-warning: #d97706;
+  --t-shadow: 0 1px 3px rgba(0,0,0,0.08);
+  --t-gradient-cover: linear-gradient(135deg, rgba(209,250,229,0.6) 0%, #ffffff 100%);
+  --t-scrollbar: #6ee7b7;
+  --t-status-draft-bg: rgba(234,179,8,0.15);
+  --t-status-draft-text: #a16207;
+  --t-status-published-bg: rgba(34,197,94,0.15);
+  --t-status-published-text: #15803d;
+}
+
+/* Training theme utility classes */
+.t-bg { background-color: var(--t-bg); }
+.t-bg-elevated { background-color: var(--t-bg-elevated); }
+.t-bg-card { background-color: var(--t-bg-card); }
+.t-bg-input { background-color: var(--t-bg-input); }
+.t-bg-inset { background-color: var(--t-bg-inset); }
+.t-border { border-color: var(--t-border); }
+.t-border-subtle { border-color: var(--t-border-subtle); }
+.t-text { color: var(--t-text); }
+.t-text-secondary { color: var(--t-text-secondary); }
+.t-text-muted { color: var(--t-text-muted); }
+.t-text-dim { color: var(--t-text-dim); }
+.t-text-accent { color: var(--t-accent); }
+.t-accent-bg { background-color: var(--t-accent-bg); }
+.t-accent-bg:hover { background-color: var(--t-accent-bg-hover); }
+.t-shadow { box-shadow: var(--t-shadow); }
+
+[data-training-theme] ::-webkit-scrollbar-thumb {
+  background: var(--t-scrollbar);
+}
+
+/* Override common Tailwind classes inside training theme scope
+   This avoids having to rewrite every component with inline styles */
+[data-training-theme="light-blue"] .bg-slate-800,
+[data-training-theme="light-green"] .bg-slate-800 {
+  background-color: var(--t-bg-card) !important;
+}
+[data-training-theme="light-blue"] .bg-slate-850,
+[data-training-theme="light-green"] .bg-slate-850,
+[data-training-theme="light-blue"] .bg-slate-900,
+[data-training-theme="light-green"] .bg-slate-900 {
+  background-color: var(--t-bg) !important;
+}
+[data-training-theme="light-blue"] .border-slate-700,
+[data-training-theme="light-green"] .border-slate-700,
+[data-training-theme="light-blue"] .border-slate-700\/50,
+[data-training-theme="light-green"] .border-slate-700\/50 {
+  border-color: var(--t-border) !important;
+}
+[data-training-theme="light-blue"] .border-slate-600,
+[data-training-theme="light-green"] .border-slate-600 {
+  border-color: var(--t-border) !important;
+}
+[data-training-theme="light-blue"] .text-slate-100,
+[data-training-theme="light-green"] .text-slate-100 {
+  color: var(--t-text) !important;
+}
+[data-training-theme="light-blue"] .text-slate-200,
+[data-training-theme="light-green"] .text-slate-200 {
+  color: var(--t-text) !important;
+}
+[data-training-theme="light-blue"] .text-slate-300,
+[data-training-theme="light-green"] .text-slate-300 {
+  color: var(--t-text-secondary) !important;
+}
+[data-training-theme="light-blue"] .text-slate-400,
+[data-training-theme="light-green"] .text-slate-400 {
+  color: var(--t-text-muted) !important;
+}
+[data-training-theme="light-blue"] .text-slate-500,
+[data-training-theme="light-green"] .text-slate-500 {
+  color: var(--t-text-dim) !important;
+}
+[data-training-theme="light-blue"] .text-slate-600,
+[data-training-theme="light-green"] .text-slate-600 {
+  color: var(--t-text-dim) !important;
+}
+[data-training-theme="light-blue"] .text-sky-400,
+[data-training-theme="light-green"] .text-sky-400 {
+  color: var(--t-accent) !important;
+}
+[data-training-theme="light-blue"] .bg-sky-600,
+[data-training-theme="light-green"] .bg-sky-600 {
+  background-color: var(--t-accent-bg) !important;
+}
+[data-training-theme="light-blue"] .hover\:bg-sky-500:hover,
+[data-training-theme="light-green"] .hover\:bg-sky-500:hover {
+  background-color: var(--t-accent-bg-hover) !important;
+}
+[data-training-theme="light-blue"] .bg-sky-600\/20,
+[data-training-theme="light-green"] .bg-sky-600\/20 {
+  background-color: var(--t-accent-subtle) !important;
+}
+[data-training-theme="light-blue"] .bg-slate-700,
+[data-training-theme="light-green"] .bg-slate-700 {
+  background-color: var(--t-bg-inset) !important;
+}
+[data-training-theme="light-blue"] .bg-slate-700\/50,
+[data-training-theme="light-green"] .bg-slate-700\/50 {
+  background-color: var(--t-accent-subtle) !important;
+}
+/* Fix select/option backgrounds in light themes */
+[data-training-theme="light-blue"] select option,
+[data-training-theme="light-green"] select option {
+  background-color: var(--t-bg-card);
+  color: var(--t-text);
+}
+/* Fix placeholder in light themes */
+[data-training-theme="light-blue"] ::placeholder,
+[data-training-theme="light-green"] ::placeholder {
+  color: var(--t-text-dim) !important;
+  opacity: 0.6;
+}

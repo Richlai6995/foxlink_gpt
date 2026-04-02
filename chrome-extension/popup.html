@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { width: 340px; max-height: 500px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0f172a; color: #e2e8f0; padding: 12px; }
+    h1 { font-size: 14px; margin-bottom: 8px; display: flex; align-items: center; gap: 8px; }
+    .section { margin-bottom: 10px; }
+    label { display: block; font-size: 10px; color: #94a3b8; margin-bottom: 3px; }
+    input { width: 100%; background: #1e293b; border: 1px solid #334155; border-radius: 6px; padding: 5px 8px; font-size: 11px; color: #e2e8f0; outline: none; }
+    input:focus { border-color: #38bdf8; }
+    .btn { width: 100%; padding: 7px; border: none; border-radius: 6px; font-size: 11px; font-weight: 600; cursor: pointer; transition: opacity 0.2s; }
+    .btn:hover { opacity: 0.9; }
+    .btn-primary { background: #0284c7; color: white; }
+    .btn-success { background: #059669; color: white; }
+    .btn-danger { background: #dc2626; color: white; }
+    .btn-ghost { background: #334155; color: #e2e8f0; }
+    .btn:disabled { opacity: 0.5; cursor: default; }
+    .status { font-size: 10px; padding: 6px 8px; border-radius: 6px; margin-bottom: 8px; }
+    .status-recording { background: rgba(239, 68, 68, 0.15); color: #f87171; }
+    .status-connected { background: rgba(34, 197, 94, 0.15); color: #4ade80; }
+    .status-disconnected { background: rgba(148, 163, 184, 0.15); color: #94a3b8; }
+    .flex { display: flex; gap: 6px; }
+    .mt { margin-top: 6px; }
+    .info { font-size: 10px; color: #64748b; margin-top: 4px; }
+    .screenshots { max-height: 180px; overflow-y: auto; margin-top: 8px; }
+    .screenshot-item { display: flex; align-items: center; gap: 6px; padding: 4px; border-radius: 4px; margin-bottom: 3px; background: #1e293b; font-size: 10px; }
+    .screenshot-item .num { color: #64748b; width: 20px; text-align: center; font-weight: bold; }
+    .screenshot-item .action { background: #334155; padding: 1px 5px; border-radius: 3px; color: #94a3b8; font-size: 9px; }
+    .screenshot-item .title { flex: 1; color: #cbd5e1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .screenshot-item .time { color: #475569; font-size: 9px; }
+    .counter { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 12px; background: #1e293b; border-radius: 8px; margin-bottom: 8px; }
+    .counter .num { font-size: 28px; font-weight: 800; color: #f87171; }
+    .counter .label { font-size: 10px; color: #94a3b8; }
+    .hint { font-size: 9px; color: #475569; text-align: center; padding: 6px; background: #1e293b; border-radius: 6px; margin-bottom: 8px; line-height: 1.4; }
+  </style>
+</head>
+<body>
+  <h1>🎓 FOXLINK GPT 錄製工具</h1>
+
+  <div id="status-bar" class="status status-disconnected">未連線</div>
+
+  <!-- Login section -->
+  <div id="login-section">
+    <div class="section">
+      <label>Server URL</label>
+      <input type="text" id="serverUrl" placeholder="http://localhost:5173" />
+    </div>
+    <div class="section">
+      <label>帳號</label>
+      <input type="text" id="username" placeholder="ADMIN" />
+    </div>
+    <div class="section">
+      <label>密碼</label>
+      <input type="password" id="password" />
+    </div>
+    <button class="btn btn-primary" id="loginBtn">登入連線</button>
+  </div>
+
+  <!-- Recording section -->
+  <div id="recording-section" style="display:none;">
+
+    <div class="hint">
+      💡 從訓練平台「AI 錄製」→「開始自動錄製」即可自動啟動
+    </div>
+
+    <!-- Manual start (backup) -->
+    <div id="manual-start" class="section">
+      <label>Session ID（自動或手動）</label>
+      <input type="text" id="sessionId" placeholder="由訓練平台自動提供" />
+      <div class="flex mt">
+        <button class="btn btn-success" id="startBtn" style="flex:1;">▶ 手動開始</button>
+        <button class="btn btn-danger" id="stopBtn" style="flex:1;" disabled>⬛ 停止</button>
+      </div>
+    </div>
+
+    <!-- Recording counter -->
+    <div id="recording-counter" style="display:none;">
+      <div class="counter">
+        <div>
+          <div class="num" id="stepCount">0</div>
+          <div class="label">已截圖</div>
+        </div>
+        <div>
+          <button class="btn btn-ghost" id="screenshotBtn" style="width:auto; padding: 6px 12px;">📸 手動截圖</button>
+        </div>
+      </div>
+
+      <!-- Screenshot list -->
+      <div class="screenshots" id="screenshotList"></div>
+    </div>
+
+    <button class="btn btn-ghost mt" id="logoutBtn" style="font-size:10px;">登出</button>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

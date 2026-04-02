@@ -380,7 +380,7 @@ router.get('/sso/user', async (req, res) => {
     let rolePerms = null;
     if (user.role_id) {
       rolePerms = await db.prepare(
-        'SELECT allow_create_skill, allow_external_skill, allow_code_skill, can_create_kb, kb_max_size_mb, kb_max_count, can_deep_research, can_design_ai_select, can_use_ai_dashboard FROM roles WHERE id=?'
+        'SELECT allow_create_skill, allow_external_skill, allow_code_skill, can_create_kb, kb_max_size_mb, kb_max_count, can_deep_research, can_design_ai_select, can_use_ai_dashboard, training_permission FROM roles WHERE id=?'
       ).get(user.role_id);
     }
     const resolveEff = (uv, rv) => {
@@ -402,6 +402,8 @@ router.get('/sso/user', async (req, res) => {
     u.effective_can_deep_research      = user.role === 'admin' || resolveEff(user.can_deep_research, rolePerms?.can_deep_research ?? 1);
     u.effective_can_design_ai_select   = user.role === 'admin' || resolveEff(user.can_design_ai_select,  rolePerms?.can_design_ai_select);
     u.effective_can_use_ai_dashboard   = user.role === 'admin' || resolveEff(user.can_use_ai_dashboard,  rolePerms?.can_use_ai_dashboard);
+    u.effective_training_permission     = user.role === 'admin' ? 'edit'
+      : (user.training_permission || rolePerms?.training_permission || 'none');
     res.json({ token, user: u });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -549,7 +551,7 @@ const createSession = async (res, user) => {
   let rolePerms = null;
   if (user.role_id) {
     rolePerms = await db.prepare(
-      'SELECT allow_create_skill, allow_external_skill, allow_code_skill, can_create_kb, kb_max_size_mb, kb_max_count, can_deep_research, can_design_ai_select, can_use_ai_dashboard FROM roles WHERE id=?'
+      'SELECT allow_create_skill, allow_external_skill, allow_code_skill, can_create_kb, kb_max_size_mb, kb_max_count, can_deep_research, can_design_ai_select, can_use_ai_dashboard, training_permission FROM roles WHERE id=?'
     ).get(user.role_id);
   }
   const resolveEffective = (userVal, roleVal) => {
@@ -700,7 +702,7 @@ router.get('/me', async (req, res) => {
     let rolePerms = null;
     if (user.role_id) {
       rolePerms = await db.prepare(
-        'SELECT allow_create_skill, allow_external_skill, allow_code_skill, can_create_kb, kb_max_size_mb, kb_max_count, can_deep_research, can_design_ai_select, can_use_ai_dashboard FROM roles WHERE id=?'
+        'SELECT allow_create_skill, allow_external_skill, allow_code_skill, can_create_kb, kb_max_size_mb, kb_max_count, can_deep_research, can_design_ai_select, can_use_ai_dashboard, training_permission FROM roles WHERE id=?'
       ).get(user.role_id);
     }
     const resolveEff = (uv, rv) => {

@@ -17,6 +17,8 @@ interface AuthContextType {
   canCreateKb: boolean
   canUseDashboard: boolean
   canDesignAiSelect: boolean
+  canAccessTraining: boolean
+  canEditTraining: boolean
   setLanguage: (lang: LangCode) => Promise<void>
 }
 
@@ -110,6 +112,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const canCreateKb      = isAdmin || (user as any)?.effective_can_create_kb === true
   const canUseDashboard  = isAdmin || (user as any)?.effective_can_use_ai_dashboard === true
   const canDesignAiSelect = isAdmin || (user as any)?.effective_can_design_ai_select === true
+  const trainingPermission: string = (user as any)?.effective_training_permission || 'none'
+  const canAccessTraining = isAdmin || trainingPermission === 'use' || trainingPermission === 'edit'
+  const canEditTraining   = isAdmin || trainingPermission === 'edit'
 
   return (
     <AuthContext.Provider
@@ -125,6 +130,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         canCreateKb,
         canUseDashboard,
         canDesignAiSelect,
+        canAccessTraining,
+        canEditTraining,
         setLanguage,
       }}
     >
