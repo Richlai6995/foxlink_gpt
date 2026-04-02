@@ -359,13 +359,26 @@ export default function CourseEditor() {
                 {/* Expanded: slides list */}
                 {expandedLesson === lesson.id && (
                   <div className="border-t border-slate-700/50 bg-slate-850 px-4 py-3 space-y-2">
-                    {(lessonSlides[lesson.id] || []).map((slide, si) => (
+                    {(lessonSlides[lesson.id] || []).map((slide, si) => {
+                      const slides = lessonSlides[lesson.id] || []
+                      const moveSlide = async (fromIdx: number, toIdx: number) => {
+                        if (toIdx < 0 || toIdx >= slides.length) return
+                        const newSlides = [...slides]
+                        const [moved] = newSlides.splice(fromIdx, 1)
+                        newSlides.splice(toIdx, 0, moved)
+                        setLessonSlides(prev => ({ ...prev, [lesson.id]: newSlides }))
+                        // Save new order to server
+                        const order = newSlides.map((s, idx) => ({ id: s.id, sort_order: idx + 1 }))
+                        api.put(`/training/lessons/${lesson.id}/slides/reorder`, { order }).catch(console.error)
+                      }
+                      return (
                       <div key={slide.id}
-                        className="flex items-center gap-2 bg-slate-800 rounded px-3 py-2 text-xs cursor-pointer hover:bg-slate-750 transition"
+                        className="flex items-center gap-2 rounded px-3 py-2 text-xs cursor-pointer transition"
+                        style={{ backgroundColor: 'var(--t-bg-card)' }}
                         onClick={() => setEditingSlideId(slide.id)}
                       >
-                        <span className="text-slate-500 w-5">{si + 1}.</span>
-                        <span className={`px-1.5 py-0.5 rounded text-[9px] font-medium ${
+                        <span style={{ color: 'var(--t-text-dim)' }} className="w-5">{si + 1}.</span>
+                        <span className={`px-1.5 py-0.5 rounded text-[9px] font-medium shrink-0 ${
                           slide.slide_type === 'hotspot' ? 'bg-red-500/20 text-red-400' :
                           slide.slide_type === 'dragdrop' ? 'bg-purple-500/20 text-purple-400' :
                           slide.slide_type === 'flipcard' ? 'bg-amber-500/20 text-amber-400' :
@@ -375,7 +388,7 @@ export default function CourseEditor() {
                         }`}>
                           {slide.slide_type}
                         </span>
-                        <span className="flex-1 text-slate-300 truncate">
+                        <span className="flex-1 truncate" style={{ color: 'var(--t-text-secondary)' }}>
                           {(() => {
                             try {
                               const blocks = JSON.parse(slide.content_json || '[]')
@@ -384,8 +397,24 @@ export default function CourseEditor() {
                           })()}
                         </span>
                         {slide.audio_url && <span className="text-sky-400 text-[9px]">🔊</span>}
+                        {/* Move up/down */}
                         <button
-                          className="text-slate-600 hover:text-red-400 transition shrink-0"
+                          className="shrink-0 px-1 hover:opacity-70 transition"
+                          style={{ color: 'var(--t-text-dim)' }}
+                          title="上移"
+                          onClick={(e) => { e.stopPropagation(); moveSlide(si, si - 1) }}
+                          disabled={si === 0}
+                        >▲</button>
+                        <button
+                          className="shrink-0 px-1 hover:opacity-70 transition"
+                          style={{ color: 'var(--t-text-dim)' }}
+                          title="下移"
+                          onClick={(e) => { e.stopPropagation(); moveSlide(si, si + 1) }}
+                          disabled={si === slides.length - 1}
+                        >▼</button>
+                        <button
+                          className="shrink-0 hover:text-red-400 transition"
+                          style={{ color: 'var(--t-text-dim)' }}
                           title="刪除投影片"
                           onClick={async (e) => {
                             e.stopPropagation()
@@ -402,7 +431,8 @@ export default function CourseEditor() {
                           <Trash2 size={11} />
                         </button>
                       </div>
-                    ))}
+                      )
+                    })}
                     <button
                       onClick={() => addSlide(lesson.id)}
                       className="w-full flex items-center justify-center gap-1.5 text-xs text-slate-400 hover:text-sky-400 border border-dashed border-slate-700 rounded-lg py-2 transition"
