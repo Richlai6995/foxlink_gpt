@@ -173,7 +173,7 @@ router.post('/categories', async (req, res) => {
       `INSERT INTO course_categories (name, parent_id, sort_order, created_by)
        VALUES (?, ?, ?, ?)`
     ).run(name, parent_id || null, sort_order || 0, req.user.id);
-    res.json({ id: result.lastID, name, parent_id, sort_order: sort_order || 0 });
+    res.json({ id: result.lastInsertRowid, name, parent_id, sort_order: sort_order || 0 });
   } catch (e) {
     console.error('[Training] POST categories:', e.message);
     res.status(500).json({ error: e.message });
@@ -314,7 +314,7 @@ router.post('/courses', async (req, res) => {
     `).run(title, description || null, category_id || null, req.user.id,
            pass_score || 60, max_attempts || null, time_limit_minutes || null);
 
-    res.json({ id: result.lastID, title });
+    res.json({ id: result.lastInsertRowid, title });
   } catch (e) {
     console.error('[Training] POST courses:', e.message);
     res.status(500).json({ error: e.message });
@@ -417,7 +417,7 @@ router.post('/courses/:id/duplicate', loadCoursePermission, requirePermission('o
       VALUES (?, ?, ?, ?, ?, ?, ?)
     `).run(`${src.title} (副本)`, src.description, src.category_id, req.user.id,
            src.pass_score, src.max_attempts, src.time_limit_minutes);
-    const newCourseId = result.lastID;
+    const newCourseId = result.lastInsertRowid;
 
     // Copy lessons + slides
     const lessons = await db.prepare('SELECT * FROM course_lessons WHERE course_id=? ORDER BY sort_order').all(req.courseId);
@@ -425,7 +425,7 @@ router.post('/courses/:id/duplicate', loadCoursePermission, requirePermission('o
       const lr = await db.prepare(
         `INSERT INTO course_lessons (course_id, title, sort_order, lesson_type) VALUES (?,?,?,?)`
       ).run(newCourseId, lesson.title, lesson.sort_order, lesson.lesson_type);
-      const newLessonId = lr.lastID;
+      const newLessonId = lr.lastInsertRowid;
 
       const slides = await db.prepare('SELECT * FROM course_slides WHERE lesson_id=? ORDER BY sort_order').all(lesson.id);
       for (const slide of slides) {
@@ -591,7 +591,7 @@ router.post('/courses/:id/lessons', loadCoursePermission, requirePermission('own
       VALUES (?, ?, ?, ?)
     `).run(req.courseId, title, order, lesson_type || 'slides');
 
-    res.json({ id: result.lastID, title, sort_order: order, lesson_type: lesson_type || 'slides' });
+    res.json({ id: result.lastInsertRowid, title, sort_order: order, lesson_type: lesson_type || 'slides' });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -702,7 +702,7 @@ router.post('/lessons/:lid/slides', async (req, res) => {
       VALUES (?, ?, ?, ?, ?, ?)
     `).run(req.params.lid, order, slide_type || 'content', contentStr, notes || null, duration_seconds || null);
 
-    res.json({ id: result.lastID, sort_order: order, slide_type: slide_type || 'content' });
+    res.json({ id: result.lastInsertRowid, sort_order: order, slide_type: slide_type || 'content' });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -924,7 +924,7 @@ router.post('/lessons/:lid/video-interactions', async (req, res) => {
       VALUES (?, ?, ?, ?, ?, ?)
     `).run(req.params.lid, timestamp_seconds, interaction_type, contentStr,
            must_answer != null ? must_answer : 1, pause_video != null ? pause_video : 1);
-    res.json({ id: result.lastID });
+    res.json({ id: result.lastInsertRowid });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -994,7 +994,7 @@ router.post('/courses/:id/questions', loadCoursePermission, requirePermission('o
       INSERT INTO quiz_questions (course_id, question_type, question_json, answer_json, scoring_json, points, explanation, sort_order)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `).run(req.courseId, question_type, qStr, aStr, sStr, points || 10, explanation || null, order);
-    res.json({ id: result.lastID });
+    res.json({ id: result.lastInsertRowid });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -1153,7 +1153,7 @@ router.post('/notes', async (req, res) => {
         INSERT INTO user_course_notes (user_id, course_id, slide_id, content, bookmarked)
         VALUES (?, ?, ?, ?, ?)
       `).run(req.user.id, course_id, slide_id, content || null, bookmarked ? 1 : 0);
-      res.json({ id: result.lastID });
+      res.json({ id: result.lastInsertRowid });
     }
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -1191,7 +1191,7 @@ router.post('/courses/:id/quiz/start', loadCoursePermission, async (req, res) =>
       INSERT INTO quiz_attempts (course_id, user_id, attempt_number)
       VALUES (?, ?, ?)
     `).run(req.courseId, req.user.id, attemptNum);
-    res.json({ attempt_id: result.lastID, attempt_number: attemptNum });
+    res.json({ attempt_id: result.lastInsertRowid, attempt_number: attemptNum });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -1494,7 +1494,7 @@ router.post('/paths', async (req, res) => {
     const result = await db.prepare(
       'INSERT INTO learning_paths (title, description, created_by) VALUES (?,?,?)'
     ).run(title, description || null, req.user.id);
-    res.json({ id: result.lastID });
+    res.json({ id: result.lastInsertRowid });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -1521,7 +1521,7 @@ router.post('/paths/:id/courses', async (req, res) => {
       INSERT INTO learning_path_courses (path_id, course_id, sort_order, is_required, prerequisite_course_id)
       VALUES (?,?,?,?,?)
     `).run(req.params.id, course_id, (max?.mx || 0) + 1, is_required ?? 1, prerequisite_course_id || null);
-    res.json({ id: result.lastID });
+    res.json({ id: result.lastInsertRowid });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -1560,7 +1560,7 @@ router.post('/programs', async (req, res) => {
     `).run(title, description || null, purpose || null, req.user.id,
            start_date, end_date, learning_path_id || null,
            remind_before_days || 3, email_enabled ?? 1);
-    res.json({ id: result.lastID });
+    res.json({ id: result.lastInsertRowid });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -1590,7 +1590,7 @@ router.post('/programs/:id/targets', async (req, res) => {
     const result = await db.prepare(
       'INSERT INTO program_targets (program_id, target_type, target_id) VALUES (?,?,?)'
     ).run(req.params.id, target_type, target_id);
-    res.json({ id: result.lastID });
+    res.json({ id: result.lastInsertRowid });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -1602,7 +1602,7 @@ router.post('/programs/:id/courses', async (req, res) => {
     const result = await db.prepare(
       'INSERT INTO program_courses (program_id, course_id, sort_order, is_required) VALUES (?,?,?,?)'
     ).run(req.params.id, course_id, (max?.mx || 0) + 1, is_required ?? 1);
-    res.json({ id: result.lastID });
+    res.json({ id: result.lastInsertRowid });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -2239,7 +2239,7 @@ router.post('/recording/:sessionId/step', upload.single('screenshot'), async (re
     // Update session step count
     await db.prepare('UPDATE recording_sessions SET steps_count=steps_count+1 WHERE id=?').run(sessionId);
 
-    res.json({ step_id: result.lastID, screenshot_url: screenshotUrl });
+    res.json({ step_id: result.lastInsertRowid, screenshot_url: screenshotUrl });
   } catch (e) {
     console.error('[Training] recording step:', e.message);
     res.status(500).json({ error: e.message });
@@ -2357,7 +2357,7 @@ router.post('/recording/:sessionId/generate', async (req, res) => {
       const r = await db.prepare(
         `INSERT INTO courses (title, description, created_by) VALUES (?, ?, ?)`
       ).run(`錄製教材 ${new Date().toLocaleDateString('zh-TW')}`, '由 AI 輔助錄製自動生成', req.user.id);
-      courseId = r.lastID;
+      courseId = r.lastInsertRowid;
     }
 
     // Create lesson if not provided
@@ -2365,7 +2365,7 @@ router.post('/recording/:sessionId/generate', async (req, res) => {
       const r = await db.prepare(
         `INSERT INTO course_lessons (course_id, title, sort_order, lesson_type) VALUES (?, ?, ?, ?)`
       ).run(courseId, '錄製章節', 1, 'slides');
-      lessonId = r.lastID;
+      lessonId = r.lastInsertRowid;
     }
 
     // Create slides from steps
@@ -2435,7 +2435,7 @@ router.post('/systems', async (req, res) => {
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `).run(name, url || null, description || null, icon || null, login_url || null,
            login_config ? JSON.stringify(login_config) : null, help_source || 'manual', req.user.id);
-    res.json({ id: result.lastID });
+    res.json({ id: result.lastInsertRowid });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -2476,7 +2476,7 @@ router.post('/systems/:id/scripts', async (req, res) => {
       INSERT INTO teaching_scripts (system_id, module, title, steps_json, prerequisites, estimated_time, created_by)
       VALUES (?, ?, ?, ?, ?, ?, ?)
     `).run(req.params.id, mod || null, title, stepsStr, prerequisites || null, estimated_time || null, req.user.id);
-    res.json({ id: result.lastID });
+    res.json({ id: result.lastInsertRowid });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
