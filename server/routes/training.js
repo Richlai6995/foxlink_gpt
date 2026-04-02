@@ -2426,44 +2426,73 @@ router.post('/recording/:sessionId/generate', async (req, res) => {
       lessonId = r.lastInsertRowid;
     }
 
-    // Create slides from steps
+    // Create slides from steps — every step gets instruction text + screenshot
     let slideCount = 0;
     for (const step of steps) {
       if (!step.screenshot_url) continue;
 
-      const regions = step.ai_regions_json ? JSON.parse(step.ai_regions_json) : [];
+      const regions = step.ai_regions_json ? (() => { try { return JSON.parse(step.ai_regions_json) } catch { return [] } })() : [];
+      const instruction = step.ai_instruction || step.final_instruction || `步驟 ${step.step_number}`;
+      const narration = step.ai_narration || instruction;
+
+      // Build hotspot regions with better feedback
       const hotspotRegions = regions.map((r, i) => ({
         id: `r${i + 1}`,
         shape: 'rect',
         coords: r.coords,
         correct: r.is_primary || false,
-        feedback: r.is_primary ? '正確！' : `這是「${r.label}」，請找到正確的操作位置。`
+        feedback: r.is_primary
+          ? `正確！${r.label ? '這就是「' + r.label + '」。' : ''}`
+          : `這是「${r.label || '其他元素'}」(${r.type || ''})，請找到正確的操作位置。`
       }));
 
       const hasPrimary = regions.some(r => r.is_primary);
       const slideType = hasPrimary ? 'hotspot' : 'content';
 
-      let contentJson;
+      // Build content blocks:
+      // 1. Text instruction (title + description)
+      // 2. Hotspot or Image
+      const blocks = [];
+
+      // Always add instruction text first
+      blocks.push({
+        type: 'text',
+        content: `## 步驟 ${step.step_number}\n\n${instruction}`
+      });
+
       if (slideType === 'hotspot') {
-        contentJson = JSON.stringify([{
+        blocks.push({
           type: 'hotspot',
           image: step.screenshot_url,
-          instruction: step.ai_instruction || step.final_instruction || `步驟 ${step.step_number}`,
+          instruction: instruction,
           regions: hotspotRegions,
           max_attempts: 3,
           show_hint_after: 2
-        }]);
+        });
       } else {
-        contentJson = JSON.stringify([
-          { type: 'image', src: step.screenshot_url, alt: '' },
-          { type: 'text', content: step.ai_instruction || `步驟 ${step.step_number}` }
-        ]);
+        blocks.push({
+          type: 'image',
+          src: step.screenshot_url,
+          alt: instruction
+        });
       }
+
+      // Add callout if there are tips from AI
+      if (regions.length > 0 && !hasPrimary) {
+        const elementList = regions.map(r => `**${r.label}** (${r.type})`).join('、');
+        blocks.push({
+          type: 'callout',
+          variant: 'tip',
+          content: `此畫面包含以下操作元素：${elementList}`
+        });
+      }
+
+      const contentJson = JSON.stringify(blocks);
 
       await db.prepare(`
         INSERT INTO course_slides (lesson_id, sort_order, slide_type, content_json, notes)
         VALUES (?, ?, ?, ?, ?)
-      `).run(lessonId, step.step_number, slideType, contentJson, step.ai_narration || null);
+      `).run(lessonId, step.step_number, slideType, contentJson, narration);
       slideCount++;
     }
 
