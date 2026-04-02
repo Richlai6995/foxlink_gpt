@@ -39,8 +39,7 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
   const [processProgress, setProcessProgress] = useState({ current: 0, total: 0 })
   const [selectedStepId, setSelectedStepId] = useState<string | null>(null)
   const [previewStepId, setPreviewStepId] = useState<string | null>(null)
-  const [autoCapture, setAutoCapture] = useState(false)
-  const targetWindowRef = useRef<Window | null>(null)
+  const [copied, setCopied] = useState(false)
   const panelRef = useRef<HTMLDivElement>(null)
 
   // Auto-focus panel on mount so Ctrl+V works immediately
@@ -304,11 +303,6 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
     await pullFromServer()
   }
 
-  // Open target window
-  const openTarget = () => {
-    targetWindowRef.current = window.open(targetUrl, 'training_target', 'width=1280,height=900')
-  }
-
   // Process all: upload + AI analyze + generate slides
   const processAll = async () => {
     if (steps.length === 0) return
@@ -418,17 +412,19 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
 
             {/* Target URL */}
             <div>
-              <label className="text-[10px] font-medium mb-1 block" style={{ color: 'var(--t-text-dim)' }}>目標 URL（在新分頁開啟）</label>
+              <label className="text-[10px] font-medium mb-1 block" style={{ color: 'var(--t-text-dim)' }}>目標系統 URL</label>
               <div className="flex gap-1">
                 <input value={targetUrl} onChange={e => setTargetUrl(e.target.value)}
                   className="flex-1 border rounded px-2 py-1 text-[10px]"
                   style={{ backgroundColor: 'var(--t-bg-input)', borderColor: 'var(--t-border)', color: 'var(--t-text)' }} />
-                <button onClick={openTarget} className="px-1.5 rounded border" style={{ borderColor: 'var(--t-border)', color: 'var(--t-text-muted)' }}>
-                  <ExternalLink size={10} />
+                <button onClick={() => { navigator.clipboard.writeText(targetUrl); setCopied(true); setTimeout(() => setCopied(false), 1500) }}
+                  className="px-2 py-1 rounded border text-[9px] whitespace-nowrap"
+                  style={{ borderColor: 'var(--t-border)', color: copied ? 'var(--t-success, #16a34a)' : 'var(--t-text-muted)' }}>
+                  {copied ? '✓ 已複製' : '複製'}
                 </button>
               </div>
-              <div className="text-[9px] mt-1" style={{ color: 'var(--t-warning, #d97706)' }}>
-                ⚠ 若目標系統與訓練平台同網域，登入/登出會互相影響。建議使用無痕模式開啟目標系統，或使用正式環境 URL。
+              <div className="text-[9px] mt-1.5 p-1.5 rounded" style={{ backgroundColor: 'var(--t-accent-subtle)', color: 'var(--t-text-secondary)' }}>
+                💡 請自行開啟目標系統（建議用<strong>無痕視窗</strong> Ctrl+Shift+N），避免與訓練平台的登入互相影響。開啟後用 Extension badge 的「截圖」按鈕擷取畫面。
               </div>
             </div>
 
