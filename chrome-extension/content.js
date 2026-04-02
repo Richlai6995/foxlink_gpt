@@ -70,58 +70,21 @@ chrome.runtime.sendMessage({ type: 'GET_STATUS' }, (res) => {
   }
 });
 
-// Click listener
+// Click listener — only log clicks, do NOT auto-screenshot
+// Auto-screenshot on every click produces too many unwanted captures.
+// Screenshots are taken via:
+//   1. Badge "截圖" button (MANUAL_SCREENSHOT)
+//   2. Extension popup "手動截圖" button
+//   3. Training platform "截圖" button
+// Click events are only recorded as metadata (element info), not triggering screenshots.
 document.addEventListener('click', (e) => {
   if (!isRecording) return;
-  console.log('[FOXLINK Training] Click detected, sending to background...');
 
   const el = e.target;
   if (!el || el.closest('#foxlink-training-badge')) return; // ignore badge clicks
 
-  const rect = el.getBoundingClientRect();
-
-  chrome.runtime.sendMessage({
-    type: 'USER_ACTION',
-    action: 'click',
-    element: {
-      tag: el.tagName?.toLowerCase(),
-      text: (el.textContent || '').trim().slice(0, 100),
-      id: el.id || null,
-      className: (el.className?.toString?.() || '').slice(0, 200),
-      selector: generateSelector(el),
-      role: el.getAttribute?.('role') || null,
-      type: el.type || null,
-      rect: {
-        x: Math.round(rect.x),
-        y: Math.round(rect.y),
-        w: Math.round(rect.width),
-        h: Math.round(rect.height)
-      }
-    },
-    viewport: { width: window.innerWidth, height: window.innerHeight },
-    url: window.location.href,
-    title: document.title
-  });
-
+  // Only highlight the clicked element — do NOT auto-screenshot
   highlightElement(el);
-}, true);
-
-// Input listener (don't capture actual values for security)
-document.addEventListener('change', (e) => {
-  if (!isRecording) return;
-  const el = e.target;
-  chrome.runtime.sendMessage({
-    type: 'USER_ACTION',
-    action: 'input',
-    element: {
-      tag: el.tagName?.toLowerCase(),
-      selector: generateSelector(el),
-      type: el.type || null,
-      hasValue: !!el.value
-    },
-    url: window.location.href,
-    title: document.title
-  });
 }, true);
 
 // Navigation listener
@@ -193,36 +156,60 @@ function highlightElement(el) {
   }, 1500);
 }
 
-// Recording badge
+// Recording badge — floating control on target page
 let badgeEl = null;
+let badgeStepCount = 0;
 function toggleBadge(show) {
   if (show && !badgeEl) {
     badgeEl = document.createElement('div');
     badgeEl.id = 'foxlink-training-badge';
     badgeEl.innerHTML = `
-      <div style="display:flex;align-items:center;gap:6px;">
-        <div style="width:8px;height:8px;background:#ef4444;border-radius:50%;animation:pulse 1.5s infinite;"></div>
-        <span>錄製中</span>
-        <button id="foxlink-training-screenshot" style="background:rgba(255,255,255,0.2);border:none;color:white;padding:2px 8px;border-radius:4px;cursor:pointer;font-size:11px;">📸 截圖</button>
+      <div style="display:flex;align-items:center;gap:8px;">
+        <div style="display:flex;align-items:center;gap:4px;">
+          <div style="width:8px;height:8px;background:#ef4444;border-radius:50%;animation:pulse 1.5s infinite;"></div>
+          <span style="font-size:11px;">錄製中</span>
+          <span id="foxlink-badge-count" style="font-size:13px;font-weight:bold;color:#38bdf8;">0</span>
+        </div>
+        <button id="foxlink-training-screenshot" style="background:#2563eb;border:none;color:white;padding:4px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;transition:background 0.2s;">
+          📸 截圖
+        </button>
       </div>
     `;
     badgeEl.style.cssText = `
       position: fixed; top: 8px; right: 8px; z-index: 2147483647;
-      background: rgba(30, 41, 59, 0.95); color: white;
-      padding: 6px 12px; border-radius: 8px; font-size: 12px;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+      background: rgba(15, 23, 42, 0.95); color: white;
+      padding: 8px 14px; border-radius: 10px; font-size: 12px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.4);
       font-family: -apple-system, sans-serif;
+      backdrop-filter: blur(8px);
+      border: 1px solid rgba(255,255,255,0.1);
     `;
     document.body.appendChild(badgeEl);
 
-    // Manual screenshot button
-    badgeEl.querySelector('#foxlink-training-screenshot')?.addEventListener('click', (e) => {
+    // Screenshot button
+    const btn = badgeEl.querySelector('#foxlink-training-screenshot');
+    btn?.addEventListener('click', (e) => {
       e.stopPropagation();
-      console.log('[FOXLINK Training] Manual screenshot button clicked');
-      chrome.runtime.sendMessage({ type: 'MANUAL_SCREENSHOT' });
+      e.preventDefault();
+      chrome.runtime.sendMessage({ type: 'MANUAL_SCREENSHOT' }, () => {
+        badgeStepCount++;
+        updateBadgeCount();
+        // Flash feedback
+        btn.textContent = '✓ 已截圖';
+        btn.style.background = '#059669';
+        setTimeout(() => { btn.textContent = '📸 截圖'; btn.style.background = '#2563eb'; }, 800);
+      });
     });
+    btn?.addEventListener('mouseenter', () => { btn.style.background = '#1d4ed8'; });
+    btn?.addEventListener('mouseleave', () => { btn.style.background = '#2563eb'; });
   } else if (!show && badgeEl) {
     badgeEl.remove();
     badgeEl = null;
+    badgeStepCount = 0;
   }
+}
+
+function updateBadgeCount() {
+  const el = document.getElementById('foxlink-badge-count');
+  if (el) el.textContent = String(badgeStepCount);
 }

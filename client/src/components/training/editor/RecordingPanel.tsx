@@ -418,7 +418,7 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
 
             {/* Target URL */}
             <div>
-              <label className="text-[10px] font-medium mb-1 block" style={{ color: 'var(--t-text-dim)' }}>目標 URL</label>
+              <label className="text-[10px] font-medium mb-1 block" style={{ color: 'var(--t-text-dim)' }}>目標 URL（在新分頁開啟）</label>
               <div className="flex gap-1">
                 <input value={targetUrl} onChange={e => setTargetUrl(e.target.value)}
                   className="flex-1 border rounded px-2 py-1 text-[10px]"
@@ -426,6 +426,9 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
                 <button onClick={openTarget} className="px-1.5 rounded border" style={{ borderColor: 'var(--t-border)', color: 'var(--t-text-muted)' }}>
                   <ExternalLink size={10} />
                 </button>
+              </div>
+              <div className="text-[9px] mt-1" style={{ color: 'var(--t-warning, #d97706)' }}>
+                ⚠ 若目標系統與訓練平台同網域，登入/登出會互相影響。建議使用無痕模式開啟目標系統，或使用正式環境 URL。
               </div>
             </div>
 
