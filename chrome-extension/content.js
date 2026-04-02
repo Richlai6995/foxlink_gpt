@@ -6,6 +6,19 @@ console.log('[FOXLINK Training Extension] Content script loaded on', window.loca
 
 let isRecording = false;
 
+// Safe wrapper for chrome.runtime.sendMessage — handles Extension context invalidated
+function safeSendMessage(msg, callback) {
+  try {
+    if (!chrome.runtime?.id) return; // Extension was unloaded
+    chrome.runtime.sendMessage(msg, (res) => {
+      if (chrome.runtime.lastError) return;
+      if (callback) callback(res);
+    });
+  } catch {
+    // Extension context invalidated — page needs refresh
+  }
+}
+
 // Listen for recording state changes from background
 chrome.runtime.onMessage.addListener((msg) => {
   if (msg.type === 'RECORDING_STATE') {
@@ -45,14 +58,7 @@ window.addEventListener('message', (e) => {
   // Training platform tells Extension to start recording
   if (e.data?.type === 'FOXLINK_TRAINING_START') {
     console.log('[FOXLINK Training] Received START command, sessionId:', e.data.sessionId);
-    chrome.runtime.sendMessage({
-      type: 'START_RECORDING',
-      sessionId: e.data.sessionId
-    }, () => {
-      if (chrome.runtime.lastError) {
-        console.error('[FOXLINK Training] START failed:', chrome.runtime.lastError.message);
-        return;
-      }
+    safeSendMessage({ type: 'START_RECORDING', sessionId: e.data.sessionId }, () => {
       console.log('[FOXLINK Training] Recording started OK');
       isRecording = true;
       toggleBadge(true);
@@ -60,14 +66,11 @@ window.addEventListener('message', (e) => {
   }
   // Training platform tells Extension to stop recording
   if (e.data?.type === 'FOXLINK_TRAINING_STOP') {
-    chrome.runtime.sendMessage({ type: 'STOP_RECORDING' }, () => {
-      isRecording = false;
-      toggleBadge(false);
-    });
+    safeSendMessage({ type: 'STOP_RECORDING' }, () => { isRecording = false; toggleBadge(false); });
   }
   // Training platform requests a manual screenshot
   if (e.data?.type === 'TRAINING_REQUEST_CAPTURE') {
-    chrome.runtime.sendMessage({ type: 'MANUAL_SCREENSHOT' });
+    safeSendMessage({ type: 'MANUAL_SCREENSHOT' });
   }
   // Training platform checks if Extension is installed
   if (e.data?.type === 'FOXLINK_TRAINING_PING') {
@@ -77,16 +80,13 @@ window.addEventListener('message', (e) => {
 
 // Check initial state — retry multiple times to handle service worker wake-up
 function checkRecordingState() {
-  try {
-    chrome.runtime.sendMessage({ type: 'GET_STATUS' }, (res) => {
-      if (chrome.runtime.lastError) return;
-      if (res?.isRecording && !isRecording) {
-        isRecording = true;
-        toggleBadge(true);
-        console.log('[FOXLINK Training] Recording state detected, showing badge');
-      }
-    });
-  } catch {}
+  safeSendMessage({ type: 'GET_STATUS' }, (res) => {
+    if (res?.isRecording && !isRecording) {
+      isRecording = true;
+      toggleBadge(true);
+      console.log('[FOXLINK Training] Recording state detected, showing badge');
+    }
+  });
 }
 checkRecordingState();
 setTimeout(checkRecordingState, 500);
@@ -211,7 +211,7 @@ function toggleBadge(show) {
     btn?.addEventListener('click', (e) => {
       e.stopPropagation();
       e.preventDefault();
-      chrome.runtime.sendMessage({ type: 'MANUAL_SCREENSHOT' }, () => {
+      safeSendMessage({ type: 'MANUAL_SCREENSHOT' }, () => {
         badgeStepCount++;
         updateBadgeCount();
         // Flash feedback
