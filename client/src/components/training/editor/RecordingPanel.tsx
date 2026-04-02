@@ -271,7 +271,8 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
   // Pull screenshots from server → load into panel
   const pullFromServer = async (sid?: string) => {
     const targetSid = sid || sessionIdRef.current || sessionId
-    if (!targetSid) { alert('無 Session ID，請先開始錄製'); return }
+    console.log('[RecordingPanel] pullFromServer called, sid param:', sid, 'ref:', sessionIdRef.current, 'state:', sessionId, 'resolved:', targetSid)
+    if (!targetSid) { alert('無 Session ID。請從 Extension popup 複製 Session ID 後貼入下方欄位再點「拉取」。'); return }
     try {
       setPulling(true)
       await new Promise(r => setTimeout(r, 1000))
@@ -298,9 +299,15 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
   }
 
   const stopExtensionRecording = async () => {
+    console.log('[RecordingPanel] stopExtensionRecording, sessionIdRef:', sessionIdRef.current, 'sessionId state:', sessionId)
+    const sidToUse = sessionIdRef.current || sessionId
     setRecording(false)
     window.postMessage({ type: 'FOXLINK_TRAINING_STOP' }, '*')
-    await pullFromServer()
+    if (sidToUse) {
+      await pullFromServer(sidToUse)
+    } else {
+      console.warn('[RecordingPanel] No sessionId available for pull')
+    }
   }
 
   // Process all: upload + AI analyze + generate slides
