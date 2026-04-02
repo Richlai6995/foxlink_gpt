@@ -31,9 +31,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
   if (msg.type === 'START_RECORDING') {
     currentSessionId = msg.sessionId;
+    lastSessionId = msg.sessionId;
     stepCounter = 0;
     isRecording = true;
     recentScreenshots = [];
+    chrome.storage.local.set({ lastSessionId: msg.sessionId, lastStepCount: 0 });
     updateBadge();
     // Notify all tabs
     chrome.tabs.query({}, tabs => {
@@ -50,6 +52,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     lastStepCount = stepCounter;
     isRecording = false;
     currentSessionId = null;
+    // Persist lastSessionId so it survives service worker restart
+    chrome.storage.local.set({ lastSessionId: sid, lastStepCount: stepCounter });
     updateBadge();
     chrome.tabs.query({}, tabs => {
       tabs.forEach(tab => {
@@ -195,7 +199,9 @@ function createThumbnail(dataUrl, callback) {
 }
 
 // Restore config on startup
-chrome.storage.local.get(['serverUrl', 'serverToken'], (data) => {
+chrome.storage.local.get(['serverUrl', 'serverToken', 'lastSessionId', 'lastStepCount'], (data) => {
   if (data.serverUrl) serverUrl = data.serverUrl;
   if (data.serverToken) serverToken = data.serverToken;
+  if (data.lastSessionId) lastSessionId = data.lastSessionId;
+  if (data.lastStepCount) lastStepCount = data.lastStepCount;
 });

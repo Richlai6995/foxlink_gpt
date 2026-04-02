@@ -468,11 +468,11 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
                     )}
                   </div>
                   {/* Manual pull button */}
-                  {!recording && sessionIdRef.current && steps.length === 0 && !pulling && (
+                  {!recording && sessionIdRef.current && !pulling && (
                     <button onClick={() => pullFromServer()}
                       className="w-full mt-1 py-1 rounded text-[10px] transition"
                       style={{ backgroundColor: 'var(--t-accent-subtle)', color: 'var(--t-accent)' }}>
-                      📥 手動拉取截圖
+                      📥 {steps.length > 0 ? '重新拉取截圖' : '手動拉取截圖'}
                     </button>
                   )}
                 </div>
