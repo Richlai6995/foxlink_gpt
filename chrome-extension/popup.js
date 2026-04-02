@@ -11,7 +11,10 @@ chrome.storage.local.get(['serverUrl', 'serverToken', 'username'], (data) => {
     isLoggedIn = true;
     showRecordingUI();
   }
+  // Retry refreshStatus multiple times to handle service worker wake-up delay
   refreshStatus();
+  setTimeout(refreshStatus, 300);
+  setTimeout(refreshStatus, 800);
 });
 
 // Login
@@ -144,19 +147,25 @@ function stopPolling() {
 }
 
 function refreshStatus() {
-  chrome.runtime.sendMessage({ type: 'GET_STATUS' }, (res) => {
-    if (!res) return;
+  try {
+    chrome.runtime.sendMessage({ type: 'GET_STATUS' }, (res) => {
+      if (chrome.runtime.lastError) {
+        console.warn('GET_STATUS error:', chrome.runtime.lastError.message);
+        return;
+      }
+      if (!res) return;
 
-    if (res.isRecording) {
-      showRecordingState(true);
-      updateStatus('recording', `🔴 錄製中 — ${res.stepCounter} 張截圖`);
-      $('stepCount').textContent = res.stepCounter;
-      if (res.sessionId) $('sessionId').value = res.sessionId;
-      renderScreenshotList(res.recentScreenshots || []);
+      if (res.isRecording) {
+        showRecordingState(true);
+        updateStatus('recording', `🔴 錄製中 — ${res.stepCounter} 張截圖`);
+        $('stepCount').textContent = res.stepCounter;
+        if (res.sessionId) $('sessionId').value = res.sessionId;
+        renderScreenshotList(res.recentScreenshots || []);
     } else if (res.hasToken) {
       updateStatus('connected', res.stepCounter > 0 ? `已連線 — 上次錄製 ${res.stepCounter} 張` : '已連線');
     }
-  });
+    });
+  } catch (e) { console.error('refreshStatus failed:', e); }
 }
 
 function renderScreenshotList(screenshots) {
