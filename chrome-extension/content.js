@@ -44,10 +44,16 @@ chrome.runtime.onMessage.addListener((msg) => {
 window.addEventListener('message', (e) => {
   // Training platform tells Extension to start recording
   if (e.data?.type === 'FOXLINK_TRAINING_START') {
+    console.log('[FOXLINK Training] Received START command, sessionId:', e.data.sessionId);
     chrome.runtime.sendMessage({
       type: 'START_RECORDING',
       sessionId: e.data.sessionId
     }, () => {
+      if (chrome.runtime.lastError) {
+        console.error('[FOXLINK Training] START failed:', chrome.runtime.lastError.message);
+        return;
+      }
+      console.log('[FOXLINK Training] Recording started OK');
       isRecording = true;
       toggleBadge(true);
     });

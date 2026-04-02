@@ -2050,11 +2050,18 @@ router.post('/ai/generate-outline', async (req, res) => {
         ).get(help_section_id);
         if (section?.blocks_json) {
           const blocks = JSON.parse(section.blocks_json);
-          content = blocks.map(b => {
-            if (b.text) return b.text;
-            if (b.items) return b.items.map(i => typeof i === 'string' ? i : `${i.title}: ${i.desc || ''}`).join('\n');
-            return '';
-          }).filter(Boolean).join('\n');
+          const extractText = (bls) => {
+            if (!Array.isArray(bls)) return '';
+            return bls.map(b => {
+              const parts = [];
+              if (b.title) parts.push(b.title);
+              if (b.text) parts.push(b.text);
+              if (b.items) parts.push(b.items.map(i => typeof i === 'string' ? i : `${i.title || ''}${i.desc ? ': ' + i.desc : ''}`).join('\n'));
+              if (b.blocks) parts.push(extractText(b.blocks));
+              return parts.filter(Boolean).join('\n');
+            }).filter(Boolean).join('\n');
+          };
+          content = extractText(blocks);
         }
       } catch {}
       // Fallback: try helpSeedData.js directly
@@ -2064,11 +2071,21 @@ router.post('/ai/generate-outline', async (req, res) => {
           const allSections = [...(seedData.userSections || []), ...(seedData.adminSections || [])];
           const seed = allSections.find(s => s.id === help_section_id);
           if (seed?.blocks) {
-            content = seed.blocks.map(b => {
-              if (b.text) return b.text;
-              if (b.items) return b.items.map(i => typeof i === 'string' ? i : `${i.title || ''}: ${i.desc || ''}`).join('\n');
-              return '';
-            }).filter(Boolean).join('\n');
+            // Recursive block text extraction
+            const extractText = (blocks) => {
+              if (!Array.isArray(blocks)) return '';
+              return blocks.map(b => {
+                const parts = [];
+                if (b.title) parts.push(b.title);
+                if (b.text) parts.push(b.text);
+                if (b.items) parts.push(b.items.map(i => typeof i === 'string' ? i : `${i.title || ''}${i.desc ? ': ' + i.desc : ''}`).join('\n'));
+                if (b.blocks) parts.push(extractText(b.blocks)); // subsection
+                if (b.headers) parts.push(b.headers.join(' | ')); // table
+                if (b.rows) parts.push(b.rows.map(r => r.join(' | ')).join('\n'));
+                return parts.filter(Boolean).join('\n');
+              }).filter(Boolean).join('\n');
+            };
+            content = extractText(seed.blocks);
           }
         } catch (e) { console.warn('[Training] helpSeedData fallback:', e.message); }
       }
