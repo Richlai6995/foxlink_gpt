@@ -194,11 +194,16 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
     const handleMessage = (e: MessageEvent) => {
       // Method 1: content script PONG
       if (e.data?.type === 'FOXLINK_TRAINING_PONG') markConnected()
-      // Extension stopped from popup → auto-pull
+      // Extension stopped from popup → auto-pull (only if we didn't initiate the stop)
       if (e.data?.type === 'FOXLINK_TRAINING_STOPPED' && e.data.sessionId) {
         markConnected()
-        setSessionId(e.data.sessionId)
-        stopExtensionRecording()
+        // Only pull if we're still in recording state (i.e., user stopped from Extension popup, not from this panel)
+        if (recording) {
+          setSessionId(e.data.sessionId)
+          sessionIdRef.current = e.data.sessionId
+          setRecording(false)
+          pullFromServer(e.data.sessionId)
+        }
       }
       // Extension sends captured screenshots (live relay — bonus, not critical)
       if (e.data?.type === 'TRAINING_CAPTURE') {
@@ -493,20 +498,27 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
                   </div>
                   <div className="flex gap-1">
                     <input
-                      placeholder="Session ID"
-                      className="flex-1 border rounded px-2 py-1 text-[10px]"
+                      id="manual-session-input"
+                      defaultValue={sessionIdRef.current || ''}
+                      placeholder="貼上 UUID 格式的 Session ID"
+                      className="flex-1 border rounded px-2 py-1 text-[10px] font-mono"
                       style={{ backgroundColor: 'var(--t-bg-input)', borderColor: 'var(--t-border)', color: 'var(--t-text)' }}
                       onKeyDown={e => {
                         if (e.key === 'Enter') {
                           const val = (e.target as HTMLInputElement).value.trim()
-                          if (val) { setSessionId(val); sessionIdRef.current = val; pullFromServer(val) }
+                          // Validate UUID format
+                          if (val && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val)) {
+                            setSessionId(val); sessionIdRef.current = val; pullFromServer(val)
+                          } else { alert('請貼上正確的 Session ID（UUID 格式）') }
                         }
                       }}
                     />
                     <button onClick={() => {
-                      const input = document.querySelector('input[placeholder="Session ID"]') as HTMLInputElement
+                      const input = document.getElementById('manual-session-input') as HTMLInputElement
                       const val = input?.value?.trim()
-                      if (val) { setSessionId(val); sessionIdRef.current = val; pullFromServer(val) }
+                      if (val && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val)) {
+                        setSessionId(val); sessionIdRef.current = val; pullFromServer(val)
+                      } else { alert('請貼上正確的 Session ID（UUID 格式）') }
                     }}
                       className="px-2 py-1 rounded text-white text-[10px]"
                       style={{ backgroundColor: 'var(--t-accent-bg)' }}>
