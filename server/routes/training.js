@@ -2435,12 +2435,14 @@ router.post('/recording/:sessionId/generate', async (req, res) => {
       const instruction = step.ai_instruction || step.final_instruction || `步驟 ${step.step_number}`;
       const narration = step.ai_narration || instruction;
 
-      // Build hotspot regions with better feedback
+      // Build hotspot regions with label, type, and feedback
       const hotspotRegions = regions.map((r, i) => ({
         id: `r${i + 1}`,
         shape: 'rect',
         coords: r.coords,
         correct: r.is_primary || false,
+        label: r.label || `元素 ${i + 1}`,
+        type: r.type || '',
         feedback: r.is_primary
           ? `正確！${r.label ? '這就是「' + r.label + '」。' : ''}`
           : `這是「${r.label || '其他元素'}」(${r.type || ''})，請找到正確的操作位置。`
