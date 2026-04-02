@@ -119,7 +119,19 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === 'MANUAL_SCREENSHOT' && isRecording && currentSessionId) {
     stepCounter++;
     const currentStep = stepCounter;
+
+    // Hide badge before screenshot, capture, then restore
+    const activeTab = sender?.tab?.id;
+    if (activeTab) {
+      chrome.tabs.sendMessage(activeTab, { type: 'HIDE_BADGE' }).catch(() => {});
+    }
+    // Small delay to ensure badge is hidden before capture
+    setTimeout(() => {
     chrome.tabs.captureVisibleTab(null, { format: 'png' }, async (dataUrl) => {
+      // Restore badge after capture
+      if (activeTab) {
+        chrome.tabs.sendMessage(activeTab, { type: 'SHOW_BADGE' }).catch(() => {});
+      }
       if (chrome.runtime.lastError) return;
 
       createThumbnail(dataUrl, (thumbUrl) => {
@@ -147,6 +159,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         });
       } catch (err) { console.error('[Recorder] Manual screenshot upload failed:', err); }
     });
+    }, 150); // delay for badge hide
     sendResponse({ ok: true });
   }
 

@@ -12,6 +12,13 @@ chrome.runtime.onMessage.addListener((msg) => {
     isRecording = msg.isRecording;
     toggleBadge(isRecording);
   }
+  // Hide/show badge for clean screenshots
+  if (msg.type === 'HIDE_BADGE' && badgeEl) {
+    badgeEl.style.display = 'none';
+  }
+  if (msg.type === 'SHOW_BADGE' && badgeEl) {
+    badgeEl.style.display = '';
+  }
   // Background notifies recording stopped → forward to page
   if (msg.type === 'RECORDING_STOPPED') {
     window.postMessage({
@@ -99,19 +106,14 @@ document.addEventListener('click', (e) => {
   highlightElement(el);
 }, true);
 
-// Navigation listener
+// Navigation listener — log only, no screenshot
 let lastUrl = window.location.href;
 const navObserver = new MutationObserver(() => {
   if (window.location.href !== lastUrl) {
     lastUrl = window.location.href;
     if (isRecording) {
-      chrome.runtime.sendMessage({
-        type: 'USER_ACTION',
-        action: 'navigate',
-        element: null,
-        url: window.location.href,
-        title: document.title
-      });
+      console.log('[FOXLINK Training] Page navigated to:', window.location.href);
+      // Do NOT send USER_ACTION — that triggers unwanted screenshots
     }
   }
 });

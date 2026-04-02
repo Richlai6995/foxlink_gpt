@@ -2041,8 +2041,9 @@ router.post('/ai/generate-outline', async (req, res) => {
 
     let content = help_content || '';
 
-    // If help_section_id provided, read from helpSeedData
+    // If help_section_id provided, read from DB or seed data
     if (help_section_id && !content) {
+      // Try help_translations first
       try {
         const section = await db.prepare(
           `SELECT t.blocks_json FROM help_translations t WHERE t.section_id=? AND t.lang='zh-TW'`
@@ -2056,6 +2057,21 @@ router.post('/ai/generate-outline', async (req, res) => {
           }).filter(Boolean).join('\n');
         }
       } catch {}
+      // Fallback: try helpSeedData.js directly
+      if (!content) {
+        try {
+          const seedData = require('../data/helpSeedData');
+          const allSections = [...(seedData.userSections || []), ...(seedData.adminSections || [])];
+          const seed = allSections.find(s => s.id === help_section_id);
+          if (seed?.blocks) {
+            content = seed.blocks.map(b => {
+              if (b.text) return b.text;
+              if (b.items) return b.items.map(i => typeof i === 'string' ? i : `${i.title || ''}: ${i.desc || ''}`).join('\n');
+              return '';
+            }).filter(Boolean).join('\n');
+          }
+        } catch (e) { console.warn('[Training] helpSeedData fallback:', e.message); }
+      }
     }
 
     if (!content.trim()) return res.status(400).json({ error: '無法取得章節內容' });

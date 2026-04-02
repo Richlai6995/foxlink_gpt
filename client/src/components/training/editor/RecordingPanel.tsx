@@ -631,7 +631,13 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
                 步驟 #{steps.indexOf(selectedStep) + 1}
               </div>
 
-              <img src={selectedStep.thumbnail} alt="" className="w-full rounded border" style={{ borderColor: 'var(--t-border)' }} />
+              <img
+                src={selectedStep.thumbnail} alt=""
+                className="w-full rounded border cursor-pointer hover:opacity-80 transition"
+                style={{ borderColor: 'var(--t-border)' }}
+                onClick={() => setPreviewStepId(selectedStep.id)}
+                title="點擊放大預覽"
+              />
 
               <div>
                 <label className="text-[10px] mb-1 block" style={{ color: 'var(--t-text-dim)' }}>備註 / 操作說明</label>
