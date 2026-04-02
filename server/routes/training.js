@@ -2268,7 +2268,65 @@ router.post('/recording/:sessionId/complete', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// POST /api/training/recording/:sessionId/analyze — AI analyze all steps
+// POST /api/training/recording/:sessionId/analyze-step/:stepId — analyze single step
+router.post('/recording/:sessionId/analyze-step/:stepId', async (req, res) => {
+  try {
+    const step = await db.prepare(
+      'SELECT * FROM recording_steps WHERE id=? AND session_id=?'
+    ).get(req.params.stepId, req.params.sessionId);
+    if (!step) return res.status(404).json({ error: '步驟不存在' });
+    if (!step.screenshot_url) return res.json({ ok: false, error: '無截圖' });
+
+    const filePath = path.join(uploadDir, step.screenshot_url.replace('/api/training/files/', ''));
+    if (!fs.existsSync(filePath)) return res.json({ ok: false, error: '截圖檔案不存在' });
+
+    const imageBase64 = fs.readFileSync(filePath).toString('base64');
+    const elementInfo = step.element_json ? (() => { try { return JSON.parse(step.element_json) } catch { return null } })() : null;
+    const clickInfo = elementInfo?.rect
+      ? `使用者點擊了 (${elementInfo.rect.x}, ${elementInfo.rect.y}) 的 ${elementInfo.tag || ''} 元素「${elementInfo.text || ''}」。`
+      : '';
+
+    const { GoogleGenerativeAI } = require('@google/generative-ai');
+    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+    const flashRow = await db.prepare(
+      `SELECT api_model FROM llm_models WHERE model_role='chat' AND is_active=1 AND provider_type='gemini' ORDER BY sort_order FETCH FIRST 1 ROWS ONLY`
+    ).get();
+    const model = genAI.getGenerativeModel({ model: flashRow?.api_model || 'gemini-2.0-flash' });
+
+    const prompt = `分析這張系統操作截圖（步驟 ${step.step_number}）。${clickInfo}
+識別所有可互動 UI 元素，回傳 JSON：
+{ "regions": [{ "type": "...", "label": "...", "coords": { "x": 0, "y": 0, "w": 0, "h": 0 }, "is_primary": false }],
+  "instruction": "操作說明", "narration": "旁白文字",
+  "sensitive_areas": [{ "type": "password", "coords": { "x": 0, "y": 0, "w": 0, "h": 0 } }] }
+只回傳 JSON。`;
+
+    const result = await model.generateContent([
+      { inlineData: { mimeType: 'image/png', data: imageBase64 } },
+      { text: prompt }
+    ]);
+    const text = result.response.text();
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    const parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : {};
+
+    await db.prepare(`
+      UPDATE recording_steps SET ai_regions_json=?, ai_instruction=?, ai_narration=?,
+             is_sensitive=? WHERE id=?
+    `).run(
+      JSON.stringify(parsed.regions || []),
+      parsed.instruction || null,
+      parsed.narration || null,
+      (parsed.sensitive_areas?.length > 0) ? 1 : 0,
+      step.id
+    );
+
+    res.json({ ok: true, step_id: step.id, ...parsed });
+  } catch (e) {
+    console.error('[Training] analyze step:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/training/recording/:sessionId/analyze — AI analyze all steps (batch)
 router.post('/recording/:sessionId/analyze', async (req, res) => {
   try {
     const steps = await db.prepare(

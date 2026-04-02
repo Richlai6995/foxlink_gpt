@@ -348,22 +348,35 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
       let processingSessionId = sid
 
       if (isFromServer && sid) {
-        // Steps already on server (from Extension recording) — just analyze + generate
-        setProcessProgress({ current: 1, total: 3 })
-        setSteps(prev => prev.map(s => ({ ...s, status: 'analyzing' })))
-
+        // Steps already on server (from Extension recording)
         // Complete session if not already
         await api.post(`/training/recording/${sid}/complete`).catch(() => {})
 
-        // AI analyze all steps (may take 30-120s for many screenshots)
-        setProcessProgress({ current: 2, total: 3 })
-        await api.post(`/training/recording/${sid}/analyze`, {}, { timeout: 180000 })
+        // Get step list from server
+        const sessionRes = await api.get(`/training/recording/${sid}`)
+        const serverSteps = sessionRes.data.steps || []
+        const totalSteps = serverSteps.length
+
+        // AI analyze each step individually (with progress)
+        for (let i = 0; i < serverSteps.length; i++) {
+          const s = serverSteps[i]
+          setProcessProgress({ current: i + 1, total: totalSteps + 1 })
+          setSteps(prev => prev.map(st => st.id === `server_${s.id}` ? { ...st, status: 'analyzing' } : st))
+
+          try {
+            await api.post(`/training/recording/${sid}/analyze-step/${s.id}`, {}, { timeout: 30000 })
+            setSteps(prev => prev.map(st => st.id === `server_${s.id}` ? { ...st, status: 'done' } : st))
+          } catch (err) {
+            console.warn(`[processAll] analyze step ${s.id} failed:`, err)
+            setSteps(prev => prev.map(st => st.id === `server_${s.id}` ? { ...st, status: 'error' } : st))
+            // Continue with next step, don't abort
+          }
+        }
 
         // Generate slides
-        setProcessProgress({ current: 3, total: 3 })
+        setProcessProgress({ current: totalSteps + 1, total: totalSteps + 1 })
         const genRes = await api.post(`/training/recording/${sid}/generate`, {}, { timeout: 60000 })
 
-        setSteps(prev => prev.map(s => ({ ...s, status: 'done' })))
         setTimeout(() => onComplete(genRes.data), 500)
       } else {
         // Steps from Ctrl+V / file upload — need to create session + upload
@@ -394,9 +407,16 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
           }
         }
 
-        // Complete + analyze + generate
+        // Complete + analyze step by step + generate
         await api.post(`/training/recording/${processingSessionId}/complete`)
-        await api.post(`/training/recording/${processingSessionId}/analyze`, {}, { timeout: 180000 })
+        const uploaded = await api.get(`/training/recording/${processingSessionId}`)
+        for (let i = 0; i < (uploaded.data.steps || []).length; i++) {
+          const s = uploaded.data.steps[i]
+          setProcessProgress({ current: steps.length + i + 1, total: steps.length * 2 + 1 })
+          try {
+            await api.post(`/training/recording/${processingSessionId}/analyze-step/${s.id}`, {}, { timeout: 30000 })
+          } catch { console.warn(`analyze step ${s.id} failed, continuing...`) }
+        }
         const genRes = await api.post(`/training/recording/${processingSessionId}/generate`, {}, { timeout: 60000 })
 
         setSteps(prev => prev.map(s => ({ ...s, status: 'done' })))
