@@ -2849,6 +2849,395 @@ AI 偵測截圖中的敏感區域：
 
 ---
 
+## 16A. 截圖標註系統（Annotation Overlay）
+
+### 16A.1 概述
+
+截圖時在畫面上加標註（圈、框、箭頭、編號、文字），標記操作重點和步驟順序。標註有雙重用途：
+1. **給 AI 的提示** — AI 看到紅圈和編號，知道這步驟的重點在哪，生成精準操作說明
+2. **給學員看的引導** — 正式教材上顯示框線、箭頭、步驟編號，輔助學員理解操作流程
+
+### 16A.2 工作流程
+
+```
+┌─ 截圖標註流程 ────────────────────────────────────────────┐
+│                                                            │
+│  1. 使用者在目標系統操作到要截圖的畫面                        │
+│  2. 按 Extension badge「📸 截圖」按鈕                        │
+│  3. 畫面凍結 → 整個頁面蓋上半透明 overlay                    │
+│  4. 頂部出現完整標註工具列：                                  │
+│                                                            │
+│  ┌─ 標註工具列 ─────────────────────────────────────────┐  │
+│  │ [1⃣ 編號] [🔴 圈] [🟩 框] [➡️ 箭頭] [📝 文字]       │  │
+│  │ [✏️ 畫筆] [🔲 馬賽克]                                │  │
+│  │ 顏色: [🔴][🔵][🟢][🟡]  粗細: [─][━][▬]             │  │
+│  │ [↩ 復原] [↪ 重做] [🗑 清除全部]                       │  │
+│  │ [✅ 確認截圖] [✗ 取消]                                │  │
+│  └───────────────────────────────────────────────────────┘  │
+│                                                            │
+│  5. 使用者在凍結畫面上標註：                                  │
+│     ├── 拉一個紅圈圈住「帳號欄位」→ 自動標記 ①              │
+│     ├── 拉一個紅圈圈住「密碼欄位」→ 自動標記 ②              │
+│     ├── 畫一個箭頭指向「登入按鈕」→ 自動標記 ③              │
+│     └── 在旁邊加文字「輸入工號後點登入」                      │
+│                                                            │
+│  6. 按「✅ 確認截圖」→ 截圖（包含標註）+ 標註資料分開存       │
+│     ├── screenshot_raw: 乾淨原圖（不含標註）                 │
+│     ├── screenshot_annotated: 含標註的圖（預覽用）            │
+│     └── annotations_json: 標註資料（座標、類型、文字）        │
+│                                                            │
+│  7. 上傳到 server → AI 分析時帶入標註資訊                     │
+│                                                            │
+└────────────────────────────────────────────────────────────┘
+```
+
+### 16A.3 標註工具
+
+| 工具 | 圖示 | 操作方式 | 產生的標註 |
+|------|------|---------|----------|
+| **步驟編號** | 1⃣ | 點擊位置 → 放置編號圓圈 ①②③... | 自動遞增編號 + 位置 |
+| **圓圈** | 🔴 | 拖拉畫圓 | 圈住重點元素 |
+| **矩形框** | 🟩 | 拖拉畫框 | 框選區域 |
+| **箭頭** | ➡️ | 從起點拖到終點 | 指向目標方向 |
+| **文字** | 📝 | 點擊位置 → 輸入文字 | 說明文字 |
+| **自由畫筆** | ✏️ | 自由繪畫 | 手繪標記 |
+| **馬賽克** | 🔲 | 拖拉選區 → 自動模糊 | 遮蔽敏感資訊 |
+
+### 16A.4 標註屬性
+
+每個標註可設定：
+
+```jsonc
+{
+  "id": "a1",
+  "type": "circle",           // number | circle | rect | arrow | text | freehand | mosaic
+  "coords": {                 // 百分比座標（相對於截圖）
+    "x": 45, "y": 60,         // 圓心/起點
+    "r": 8,                   // 半徑（circle 用）
+    "w": 20, "h": 5,          // 寬高（rect 用）
+    "x2": 45, "y2": 70        // 終點（arrow 用）
+  },
+  "color": "#ef4444",         // 紅/藍/綠/黃
+  "strokeWidth": 3,           // 線條粗細
+  "label": "輸入工號",         // 文字標籤
+  "stepNumber": 1,            // 步驟編號（number 工具自動產生）
+  "purpose": "both",          // ai_hint | display | both
+  "visible": true             // 正式教材是否顯示
+}
+```
+
+### 16A.5 步驟編號系統
+
+步驟編號是核心功能——讓 AI 和學員都知道操作順序：
+
+```
+截圖上的標註：
+  ① 帳號欄位（紅圈 + 編號 1）
+  ② 密碼欄位（紅圈 + 編號 2）
+  ③ 登入按鈕（箭頭 + 編號 3）
+  
+→ AI 收到的 prompt：
+  「截圖上有 3 個標記：
+   步驟 1: 紅圈在 (35%, 42%)，標註「帳號欄位」
+   步驟 2: 紅圈在 (35%, 52%)，標註「密碼欄位」
+   步驟 3: 箭頭指向 (35%, 62%)，標註「登入按鈕」
+   請根據這些步驟標記生成操作說明。」
+
+→ AI 生成的說明：
+  「步驟 1：在帳號欄位輸入您的工號。
+   步驟 2：在密碼欄位輸入密碼。
+   步驟 3：點擊「登入」按鈕完成登入。」
+
+→ 正式教材顯示：
+  截圖上疊加 ①②③ 圓圈 + 箭頭 + 框線
+  下方文字說明對應每個步驟
+```
+
+### 16A.6 Extension 標註編輯器 UI
+
+```
+┌─ 凍結畫面 + 標註編輯器 ──────────────────────────────────┐
+│                                                           │
+│  ┌─ 工具列 ─────────────────────────────────────────────┐│
+│  │ [1⃣] [🔴] [🟩] [➡️] [📝] [✏️] [🔲]                  ││
+│  │ 顏色: [●][●][●][●]  粗細: [─][━]                     ││
+│  │ [↩ 復原] [🗑 清除]        [✅ 確認] [✗ 取消]          ││
+│  └───────────────────────────────────────────────────────┘│
+│                                                           │
+│  ┌─ 凍結的系統畫面 ─────────────────────────────────────┐│
+│  │                                                       ││
+│  │  請用以下方法登入                                      ││
+│  │                                                       ││
+│  │  ① ┌─ 帳號 ──────────┐  ← 紅圈 + 編號 1              ││
+│  │     │ rich_lai         │                               ││
+│  │     └─────────────────┘                               ││
+│  │                                                       ││
+│  │  ② ┌─ 密碼 ──────────┐  ← 紅圈 + 編號 2              ││
+│  │     │ ●●●●●●●●        │                               ││
+│  │     └─────────────────┘                               ││
+│  │                                                       ││
+│  │     ┌───────────────┐                                 ││
+│  │  ③→ │     登入       │  ← 箭頭 + 編號 3               ││
+│  │     └───────────────┘                                 ││
+│  │                                                       ││
+│  │  📝 "輸入工號後點登入"  ← 文字標註                     ││
+│  │                                                       ││
+│  └───────────────────────────────────────────────────────┘│
+│                                                           │
+└───────────────────────────────────────────────────────────┘
+```
+
+### 16A.7 Extension 實作（Canvas Overlay）
+
+```js
+// content.js — 截圖按鈕點擊後
+
+function startAnnotationMode() {
+  // 1. 凍結畫面 — 建立全螢幕 overlay
+  const overlay = document.createElement('div');
+  overlay.id = 'foxlink-annotation-overlay';
+  overlay.style.cssText = `
+    position: fixed; inset: 0; z-index: 2147483646;
+    background: transparent; cursor: crosshair;
+  `;
+
+  // 2. 截取當前畫面為背景
+  // Extension background captureVisibleTab → 傳回 dataUrl
+  // overlay 背景設為該截圖
+
+  // 3. Canvas 層（用於繪製標註）
+  const canvas = document.createElement('canvas');
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+  canvas.style.cssText = 'position:absolute;inset:0;';
+  overlay.appendChild(canvas);
+
+  // 4. 工具列
+  const toolbar = createToolbar(); // DOM 元素
+  overlay.appendChild(toolbar);
+
+  document.body.appendChild(overlay);
+
+  // 5. Canvas 繪圖事件處理
+  const ctx = canvas.getContext('2d');
+  let currentTool = 'number'; // number|circle|rect|arrow|text|freehand|mosaic
+  let currentColor = '#ef4444';
+  let stepCounter = 0;
+  let annotations = [];
+  let isDrawing = false;
+  let startPoint = null;
+
+  canvas.addEventListener('mousedown', (e) => {
+    isDrawing = true;
+    startPoint = { x: e.offsetX, y: e.offsetY };
+
+    if (currentTool === 'number') {
+      stepCounter++;
+      annotations.push({
+        type: 'number',
+        coords: { x: (e.offsetX / canvas.width) * 100, y: (e.offsetY / canvas.height) * 100 },
+        color: currentColor,
+        stepNumber: stepCounter,
+        label: ''
+      });
+      drawNumber(ctx, e.offsetX, e.offsetY, stepCounter, currentColor);
+      isDrawing = false;
+    }
+
+    if (currentTool === 'text') {
+      const text = prompt('輸入標註文字:');
+      if (text) {
+        annotations.push({
+          type: 'text',
+          coords: { x: (e.offsetX / canvas.width) * 100, y: (e.offsetY / canvas.height) * 100 },
+          color: currentColor,
+          label: text
+        });
+        drawText(ctx, e.offsetX, e.offsetY, text, currentColor);
+      }
+      isDrawing = false;
+    }
+  });
+
+  canvas.addEventListener('mousemove', (e) => {
+    if (!isDrawing || !startPoint) return;
+    // 即時預覽（redraw canvas）
+    redrawAll(ctx, annotations);
+    drawPreview(ctx, currentTool, startPoint, { x: e.offsetX, y: e.offsetY }, currentColor);
+  });
+
+  canvas.addEventListener('mouseup', (e) => {
+    if (!isDrawing || !startPoint) return;
+    isDrawing = false;
+    const endPoint = { x: e.offsetX, y: e.offsetY };
+
+    if (currentTool === 'circle') {
+      const r = Math.sqrt((endPoint.x - startPoint.x) ** 2 + (endPoint.y - startPoint.y) ** 2);
+      annotations.push({
+        type: 'circle',
+        coords: {
+          x: (startPoint.x / canvas.width) * 100,
+          y: (startPoint.y / canvas.height) * 100,
+          r: (r / Math.min(canvas.width, canvas.height)) * 100
+        },
+        color: currentColor
+      });
+    }
+    // ... rect, arrow, freehand 類似
+    redrawAll(ctx, annotations);
+    startPoint = null;
+  });
+
+  // 確認按鈕 — 截圖 + 標註一起上傳
+  toolbar.querySelector('#confirm-btn').onclick = () => {
+    // 合成最終圖片（截圖 + canvas 標註）
+    const finalCanvas = document.createElement('canvas');
+    // ... merge screenshot + annotations
+
+    // 上傳: 原圖 + 標註圖 + annotations JSON
+    safeSendMessage({
+      type: 'ANNOTATED_SCREENSHOT',
+      screenshot_raw: rawDataUrl,         // 乾淨原圖
+      screenshot_annotated: mergedDataUrl, // 含標註的圖
+      annotations: annotations             // 標註 JSON
+    });
+
+    overlay.remove();
+  };
+}
+```
+
+### 16A.8 資料儲存
+
+```sql
+-- recording_steps 表擴充
+ALTER TABLE recording_steps ADD annotations_json CLOB;
+-- annotations_json 存標註陣列 JSON
+
+-- course_slides 的 content_json 裡 hotspot block 擴充
+-- 原有 regions 之外新增 annotations 陣列
+{
+  "type": "hotspot",
+  "image": "/api/training/files/recordings/xxx.png",
+  "image_raw": "/api/training/files/recordings/xxx_raw.png",
+  "instruction": "...",
+  "regions": [...],
+  "annotations": [
+    { "type": "number", "coords": {...}, "color": "#ef4444", "stepNumber": 1, "label": "帳號欄位", "visible": true },
+    { "type": "arrow", "coords": {...}, "color": "#3b82f6", "label": "登入按鈕", "visible": true }
+  ]
+}
+```
+
+### 16A.9 AI Prompt 整合
+
+截圖帶標註時，AI 分析的 prompt 增加標註資訊：
+
+```
+分析這張系統操作截圖。
+
+使用者在截圖上做了以下標註（表示操作重點和順序）：
+步驟 ①: 紅色圓圈在座標 (35%, 42%)，標註「帳號欄位」
+步驟 ②: 紅色圓圈在座標 (35%, 52%)，標註「密碼欄位」  
+步驟 ③: 藍色箭頭從 (50%, 55%) 指向 (35%, 62%)，標註「登入按鈕」
+文字標註: 「輸入工號後點登入」在 (60%, 50%)
+
+請根據使用者的標註：
+1. 以標註的步驟編號順序生成操作說明
+2. 標註圈住/指向的元素就是該步驟的主要操作目標（設為 is_primary）
+3. 文字標註作為額外說明補充到操作說明中
+4. 生成旁白時按 ①②③ 順序描述
+
+回傳 JSON...
+```
+
+### 16A.10 播放器渲染標註
+
+```tsx
+// SlideRenderer 或 HotspotBlock 裡渲染標註層
+function AnnotationOverlay({ annotations, visible }) {
+  if (!visible) return null;
+  return (
+    <svg className="absolute inset-0 w-full h-full pointer-events-none" viewBox="0 0 100 100">
+      {annotations.map(a => {
+        switch (a.type) {
+          case 'number':
+            return <g>
+              <circle cx={a.coords.x} cy={a.coords.y} r="2.5" fill={a.color} />
+              <text x={a.coords.x} y={a.coords.y} fill="white" fontSize="2"
+                    textAnchor="middle" dominantBaseline="central" fontWeight="bold">
+                {a.stepNumber}
+              </text>
+              {a.label && <text x={a.coords.x + 4} y={a.coords.y} fill={a.color}
+                                fontSize="1.5">{a.label}</text>}
+            </g>
+          case 'circle':
+            return <circle cx={a.coords.x} cy={a.coords.y} r={a.coords.r}
+                          fill="none" stroke={a.color} strokeWidth="0.3" />
+          case 'rect':
+            return <rect x={a.coords.x} y={a.coords.y} width={a.coords.w} height={a.coords.h}
+                        fill="none" stroke={a.color} strokeWidth="0.3" />
+          case 'arrow':
+            return <line x1={a.coords.x} y1={a.coords.y} x2={a.coords.x2} y2={a.coords.y2}
+                        stroke={a.color} strokeWidth="0.3" markerEnd="url(#arrowhead)" />
+          case 'text':
+            return <text x={a.coords.x} y={a.coords.y} fill={a.color}
+                        fontSize="1.8" fontWeight="600">{a.label}</text>
+        }
+      })}
+      <defs>
+        <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto">
+          <polygon points="0 0, 10 3.5, 0 7" fill="currentColor" />
+        </marker>
+      </defs>
+    </svg>
+  )
+}
+```
+
+### 16A.11 標註編輯器（訓練平台端）
+
+在 HotspotEditor 旁邊或整合進 SlideEditor，讓編輯者可以：
+
+```
+┌─ 標註管理 ──────────────────────────────┐
+│                                          │
+│  ① 帳號欄位    🔴 圈  [顯示✓] [✎] [🗑]  │
+│  ② 密碼欄位    🔴 圈  [顯示✓] [✎] [🗑]  │
+│  ③ 登入按鈕    🔵 箭頭 [顯示✓] [✎] [🗑] │
+│  📝 輸入工號... 文字   [顯示✗] [✎] [🗑]  │
+│                                          │
+│  [+ 新增標註]  [全部顯示/隱藏]            │
+│                                          │
+│  ☑ AI 分析時帶入標註                      │
+│  ☑ 正式教材顯示標註                      │
+│                                          │
+└──────────────────────────────────────────┘
+```
+
+### 16A.12 實作階段
+
+```
+Phase 2E（截圖標註 — 現在做）:
+├── Extension: 截圖後凍結畫面 + Canvas overlay
+├── Extension: 標註工具列（編號/圈/框/箭頭/文字/馬賽克）
+├── Extension: 顏色選擇 + 粗細 + 復原/重做
+├── Extension: 確認後上傳原圖 + 標註 JSON
+├── Server: recording_steps.annotations_json 欄位
+├── Server: AI prompt 整合標註資訊
+├── 播放器: SVG 標註渲染層
+└── HotspotEditor: 標註管理面板
+
+Phase 3+（進階標註）:
+├── 自由畫筆平滑化（Bezier curve）
+├── 馬賽克/模糊工具（Canvas filter）
+├── 標註模板（預設常用標註組合）
+├── 標註動畫（播放時逐步顯示 ①→②→③）
+└── 語音搭配標註步驟同步播放
+```
+
+---
+
 ## 17. 跨系統教材管理
 
 ### 17.1 目標系統登錄
@@ -3480,6 +3869,16 @@ Phase 2D — 跨系統教材管理
 ├── AI 自動生成教學腳本（根據系統 URL）
 ├── 系統登入設定（供 Extension 自動導航）
 └── Oracle ERP / PLM / HR 系統教材專案
+
+Phase 2E — 截圖標註系統
+├── Extension: 截圖後凍結畫面 + Canvas overlay 標註編輯器
+├── Extension: 7 種標註工具（步驟編號①②③/圈/框/箭頭/文字/畫筆/馬賽克）
+├── Extension: 顏色選擇（紅/藍/綠/黃）+ 粗細 + 復原/重做
+├── Extension: 確認後上傳原圖 + 標註 JSON（分開存）
+├── Server: recording_steps.annotations_json + AI prompt 整合標註
+├── Server: 標註資訊注入 AI prompt → AI 按步驟編號順序生成說明
+├── 播放器: SVG 標註渲染層（圈/框/箭頭/編號 疊加在截圖上）
+└── HotspotEditor: 標註管理面板（新增/編輯/顯示切換）
 ```
 
 ### Phase 3：進階功能
@@ -3615,3 +4014,6 @@ Phase 2D — 跨系統教材管理
 | 27 | 學習熱力圖 | **Phase 3**，學員點擊紀錄分析 → 找出易犯錯區域 |
 | 28 | Extension 離線 | **Phase 4**，IndexedDB 快取 → 網路恢復後批次上傳 |
 | 29 | Playwright 全自動 | **Phase 4**，AI 根據腳本自動操作，人只需審核 |
+| 30 | 截圖標註系統 | **Phase 2E**，Extension 內建 Canvas 標註編輯器（A 方案），7 種工具 |
+| 31 | 步驟編號標記 | **Phase 2E**，①②③ 自動遞增，AI 按編號順序生成說明 |
+| 32 | 標註雙重用途 | AI 提示 + 學員顯示，每個標註可獨立設定顯示/隱藏 |
