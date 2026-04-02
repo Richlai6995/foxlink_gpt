@@ -152,6 +152,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
   if (msg.type === 'CLEAR_SCREENSHOTS') {
     recentScreenshots = [];
+    stepCounter = 0;
+    updateBadge();
     sendResponse({ ok: true });
   }
 
