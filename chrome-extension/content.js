@@ -184,7 +184,7 @@ function toggleBadge(show) {
     badgeEl = document.createElement('div');
     badgeEl.id = 'foxlink-training-badge';
     badgeEl.innerHTML = `
-      <div style="display:flex;align-items:center;gap:8px;">
+      <div id="foxlink-badge-drag" style="display:flex;align-items:center;gap:8px;cursor:grab;">
         <div style="display:flex;align-items:center;gap:4px;">
           <div style="width:8px;height:8px;background:#ef4444;border-radius:50%;animation:pulse 1.5s infinite;"></div>
           <span style="font-size:11px;">錄製中</span>
@@ -196,15 +196,38 @@ function toggleBadge(show) {
       </div>
     `;
     badgeEl.style.cssText = `
-      position: fixed; top: 8px; right: 8px; z-index: 2147483647;
+      position: fixed; top: 8px; right: 200px; z-index: 2147483647;
       background: rgba(15, 23, 42, 0.95); color: white;
       padding: 8px 14px; border-radius: 10px; font-size: 12px;
       box-shadow: 0 4px 20px rgba(0,0,0,0.4);
       font-family: -apple-system, sans-serif;
       backdrop-filter: blur(8px);
       border: 1px solid rgba(255,255,255,0.1);
+      user-select: none;
     `;
     document.body.appendChild(badgeEl);
+
+    // Drag support
+    let isDragging = false, dragOffX = 0, dragOffY = 0;
+    const dragHandle = badgeEl.querySelector('#foxlink-badge-drag');
+    dragHandle?.addEventListener('mousedown', (e) => {
+      if (e.target.id === 'foxlink-training-screenshot') return; // don't drag when clicking button
+      isDragging = true;
+      dragOffX = e.clientX - badgeEl.getBoundingClientRect().left;
+      dragOffY = e.clientY - badgeEl.getBoundingClientRect().top;
+      dragHandle.style.cursor = 'grabbing';
+      e.preventDefault();
+    });
+    document.addEventListener('mousemove', (e) => {
+      if (!isDragging || !badgeEl) return;
+      badgeEl.style.left = (e.clientX - dragOffX) + 'px';
+      badgeEl.style.top = (e.clientY - dragOffY) + 'px';
+      badgeEl.style.right = 'auto';
+    });
+    document.addEventListener('mouseup', () => {
+      isDragging = false;
+      if (dragHandle) dragHandle.style.cursor = 'grab';
+    });
 
     // Screenshot button
     const btn = badgeEl.querySelector('#foxlink-training-screenshot');
@@ -214,13 +237,12 @@ function toggleBadge(show) {
       safeSendMessage({ type: 'MANUAL_SCREENSHOT' }, () => {
         badgeStepCount++;
         updateBadgeCount();
-        // Flash feedback
         btn.textContent = '✓ 已截圖';
         btn.style.background = '#059669';
         setTimeout(() => { btn.textContent = '📸 截圖'; btn.style.background = '#2563eb'; }, 800);
       });
     });
-    btn?.addEventListener('mouseenter', () => { btn.style.background = '#1d4ed8'; });
+    btn?.addEventListener('mouseenter', () => { if (!isDragging) btn.style.background = '#1d4ed8'; });
     btn?.addEventListener('mouseleave', () => { btn.style.background = '#2563eb'; });
   } else if (!show && badgeEl) {
     badgeEl.remove();
