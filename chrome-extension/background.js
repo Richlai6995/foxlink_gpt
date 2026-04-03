@@ -124,6 +124,103 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     sendResponse({ ok: true, step: currentStep });
   }
 
+  // ── Phase 2E: Screenshot with annotation mode ──
+  // Captures screenshot, sends it back to content script for annotation overlay
+  // Debounce: prevent double-trigger within 2 seconds
+  if (msg.type === 'MANUAL_SCREENSHOT_WITH_ANNOTATION' && isRecording && currentSessionId) {
+    if (Date.now() - (globalThis._lastAnnotationCapture || 0) < 2000) { sendResponse({ ok: true }); return true; }
+    globalThis._lastAnnotationCapture = Date.now();
+    console.log(`[Recorder] MANUAL_SCREENSHOT_WITH_ANNOTATION — capturing for annotation`);
+    const activeTab = sender?.tab?.id;
+    if (activeTab) {
+      chrome.tabs.sendMessage(activeTab, { type: 'HIDE_BADGE' }).catch(() => {});
+    }
+    setTimeout(() => {
+      chrome.tabs.captureVisibleTab(null, { format: 'png' }, (dataUrl) => {
+        if (activeTab) {
+          chrome.tabs.sendMessage(activeTab, { type: 'SHOW_BADGE' }).catch(() => {});
+        }
+        if (chrome.runtime.lastError) return;
+        // Send screenshot back to content script for annotation overlay
+        if (activeTab) {
+          chrome.tabs.sendMessage(activeTab, {
+            type: 'SCREENSHOT_FOR_ANNOTATION',
+            screenshot: dataUrl,
+            captureMode: msg.captureMode || 'full'
+          }).catch(() => {});
+        }
+      });
+    }, 150);
+    sendResponse({ ok: true });
+  }
+
+  // ── Phase 2E: Annotated screenshot upload ──
+  // Content script finalized annotation → upload raw + annotated + annotations JSON
+  // Phase 3A-1: Only upload CLEAN screenshot + annotations JSON (no burned image)
+  if (msg.type === 'ANNOTATED_SCREENSHOT' && isRecording && currentSessionId) {
+    // Debounce: prevent duplicate upload within 2 seconds
+    if (Date.now() - (globalThis._lastAnnotatedUpload || 0) < 2000) { sendResponse({ ok: true }); return true; }
+    globalThis._lastAnnotatedUpload = Date.now();
+    stepCounter++;
+    const currentStep = stepCounter;
+    console.log(`[Recorder] ANNOTATED_SCREENSHOT step ${currentStep}, annotations: ${(msg.annotations || []).length}`);
+
+    createThumbnail(msg.screenshot_raw, (thumbUrl) => {
+      recentScreenshots.push({
+        step: currentStep,
+        thumbnail: thumbUrl,
+        action: 'annotated',
+        title: msg.title || 'Annotated screenshot',
+        timestamp: Date.now(),
+        annotationCount: (msg.annotations || []).length
+      });
+      updateBadge();
+    });
+
+    (async () => {
+      try {
+        const uploadUrl = `${serverUrl}/api/training/recording/${currentSessionId}/step`;
+        const uploadRes = await fetch(uploadUrl, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${serverToken}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            step_number: msg.step_number || currentStep,
+            action_type: 'screenshot',
+            screenshot_base64: msg.screenshot_raw,  // Always clean
+            annotations_json: JSON.stringify(msg.annotations || []),
+            lang: msg.lang || 'zh-TW',
+            page_url: msg.url || '',
+            page_title: msg.title || ''
+          })
+        });
+        if (uploadRes.status === 401) {
+          await tryRelogin();
+          const retryRes = await fetch(uploadUrl, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${serverToken}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              step_number: msg.step_number || currentStep, action_type: 'screenshot',
+              screenshot_base64: msg.screenshot_raw,
+              annotations_json: JSON.stringify(msg.annotations || []),
+              lang: msg.lang || 'zh-TW',
+              page_url: msg.url || '', page_title: msg.title || ''
+            })
+          });
+          if (retryRes.ok) console.log(`[Recorder] Retry annotated step ${currentStep} OK`);
+          else console.error(`[Recorder] Retry failed: ${retryRes.status}`);
+        } else if (!uploadRes.ok) {
+          const errText = await uploadRes.text();
+          console.error(`[Recorder] Upload HTTP ${uploadRes.status}:`, errText.slice(0, 200));
+        } else {
+          const result = await uploadRes.json();
+          console.log(`[Recorder] Annotated step ${currentStep} uploaded OK:`, result);
+        }
+      } catch (err) { console.error('[Recorder] Annotated screenshot upload failed:', err.message); }
+    })();
+    sendResponse({ ok: true, step: currentStep });
+  }
+
+  // ── Legacy: MANUAL_SCREENSHOT without annotation (from popup or platform) ──
   if (msg.type === 'MANUAL_SCREENSHOT' && isRecording && currentSessionId) {
     stepCounter++;
     const currentStep = stepCounter;

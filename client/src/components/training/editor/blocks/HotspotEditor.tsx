@@ -2,6 +2,8 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import { Trash2, Upload, MousePointer, ClipboardPaste, Wand2 } from 'lucide-react'
 import api from '../../../../lib/api'
 import type { Block } from '../SlideEditor'
+import LanguageImagePanel from './LanguageImagePanel'
+import AnnotationEditor from './AnnotationEditor'
 
 interface Region {
   id: string
@@ -15,18 +17,22 @@ interface Props {
   block: Block
   onChange: (b: Block) => void
   courseId: number
+  slideId?: number
+  blockIdx?: number
 }
 
 type DragMode = null | 'draw' | 'move' | 'resize-br' | 'resize-bl' | 'resize-tr' | 'resize-tl'
 
-export default function HotspotEditor({ block, onChange, courseId }: Props) {
+export default function HotspotEditor({ block, onChange, courseId, slideId, blockIdx }: Props) {
   const [dragMode, setDragMode] = useState<DragMode>(null)
+  const [showAnnotationLayer, setShowAnnotationLayer] = useState(true)
   const [dragStart, setDragStart] = useState<{ x: number; y: number } | null>(null)
   const [dragRegionId, setDragRegionId] = useState<string | null>(null)
   const [dragOrigCoords, setDragOrigCoords] = useState<Region['coords'] | null>(null)
   const [selectedRegion, setSelectedRegion] = useState<string | null>(null)
   const [uploading, setUploading] = useState(false)
   const imgRef = useRef<HTMLDivElement>(null)
+  const imgElRef = useRef<HTMLImageElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
 
   const regions: Region[] = block.regions || []
@@ -242,7 +248,7 @@ export default function HotspotEditor({ block, onChange, courseId }: Props) {
             style={{ borderColor: 'var(--t-border)' }}
             onMouseDown={handleMouseDown}
           >
-            <img src={block.image} alt="" className="w-full" draggable={false} />
+            <img ref={imgElRef} src={block.image} alt="" className="w-full" draggable={false} />
             {regions.map(r => (
               <div
                 key={r.id}
@@ -274,6 +280,15 @@ export default function HotspotEditor({ block, onChange, courseId }: Props) {
                 )}
               </div>
             ))}
+
+            {/* Phase 3A: Annotation layer — toggle visible, drag to edit */}
+            {showAnnotationLayer && block.annotations?.length > 0 && (
+              <AnnotationEditor
+                annotations={block.annotations}
+                onChange={anns => onChange({ ...block, annotations: anns })}
+                imageRef={imgElRef}
+              />
+            )}
           </div>
         ) : (
           <div
@@ -296,6 +311,18 @@ export default function HotspotEditor({ block, onChange, courseId }: Props) {
               style={{ backgroundColor: 'var(--t-accent-subtle)', color: 'var(--t-accent)' }}>
               <Wand2 size={12} /> {aiLoading ? 'AI 辨識中...' : 'AI 一鍵辨識'}
             </button>
+            {block.annotations?.length > 0 && (
+              <button onClick={() => setShowAnnotationLayer(!showAnnotationLayer)}
+                className="flex items-center gap-1 text-[10px] px-2 py-1 rounded-lg transition"
+                style={{
+                  backgroundColor: showAnnotationLayer ? 'rgba(239,68,68,0.12)' : 'var(--t-bg-card)',
+                  color: showAnnotationLayer ? '#ef4444' : 'var(--t-text-dim)',
+                  border: `1px solid ${showAnnotationLayer ? 'rgba(239,68,68,0.3)' : 'var(--t-border)'}`
+                }}
+                title="切換截圖標註參考圖層">
+                {showAnnotationLayer ? '🔴 標註可見' : '⚪ 標註隱藏'} ({block.annotations.length})
+              </button>
+            )}
             <button onClick={() => onChange({ ...block, image: '' })}
               className="text-[10px] text-red-400 hover:text-red-300">
               移除圖片
@@ -371,6 +398,11 @@ export default function HotspotEditor({ block, onChange, courseId }: Props) {
             style={{ backgroundColor: 'var(--t-bg-input)', borderColor: 'var(--t-border)', color: 'var(--t-text)' }} />
         </div>
       </div>
+
+      {/* Phase 3A-2: Language-specific base image management */}
+      {slideId && (
+        <LanguageImagePanel slideId={slideId} blockIndex={blockIdx ?? 0} currentImage={block.image} regions={block.regions || []} />
+      )}
     </div>
   )
 }

@@ -44,6 +44,11 @@ export default function CoursePlayer() {
     loadCourseForPlayer()
   }, [id])
 
+  // Phase 3A-2: Reload slides when language changes (swaps base images)
+  useEffect(() => {
+    if (course) loadCourseForPlayer()
+  }, [i18n.language])
+
   const loadCourseForPlayer = async () => {
     try {
       const courseRes = await api.get(`/training/courses/${id}`)
@@ -131,27 +136,28 @@ export default function CoursePlayer() {
   }
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-900 flex flex-col">
+    <div className="fixed inset-0 z-50 flex flex-col" style={{ backgroundColor: 'var(--t-bg)', color: 'var(--t-text)' }}>
       {/* Top bar */}
-      <div className="bg-slate-800/90 backdrop-blur border-b border-slate-700/50 px-4 py-2 flex items-center gap-3 shrink-0 z-10">
-        <button onClick={() => navigate(`/training/course/${id}`)} className="text-slate-400 hover:text-slate-200">
+      <div className="backdrop-blur border-b px-4 py-2 flex items-center gap-3 shrink-0 z-10"
+        style={{ backgroundColor: 'var(--t-bg-elevated)', borderColor: 'var(--t-border)' }}>
+        <button onClick={() => navigate(`/training/course/${id}`)} style={{ color: 'var(--t-text-muted)' }} className="hover:opacity-70">
           <ArrowLeft size={18} />
         </button>
-        <span className="text-sm font-medium truncate">{course.title}</span>
+        <span className="text-sm font-medium truncate" style={{ color: 'var(--t-text)' }}>{course.title}</span>
         {currentLesson && (
-          <span className="text-xs text-slate-500">— {currentLesson.title}</span>
+          <span className="text-xs" style={{ color: 'var(--t-text-dim)' }}>— {currentLesson.title}</span>
         )}
         <div className="flex-1" />
-        <button onClick={() => setShowOutline(!showOutline)} className="text-slate-400 hover:text-slate-200" title="章節大綱">
+        <button onClick={() => setShowOutline(!showOutline)} style={{ color: showOutline ? 'var(--t-accent)' : 'var(--t-text-muted)' }} className="hover:opacity-70" title="章節大綱">
           <List size={16} />
         </button>
-        <button onClick={() => setAudioMuted(!audioMuted)} className="text-slate-400 hover:text-slate-200" title="音訊">
+        <button onClick={() => setAudioMuted(!audioMuted)} style={{ color: 'var(--t-text-muted)' }} className="hover:opacity-70" title="音訊">
           {audioMuted ? <VolumeX size={16} /> : <Volume2 size={16} />}
         </button>
-        <button onClick={() => setShowNotes(!showNotes)} className="text-slate-400 hover:text-slate-200" title="筆記">
+        <button onClick={() => setShowNotes(!showNotes)} style={{ color: showNotes ? 'var(--t-accent)' : 'var(--t-text-muted)' }} className="hover:opacity-70" title="筆記">
           <BookmarkPlus size={16} />
         </button>
-        <button onClick={() => setShowTutor(!showTutor)} className="text-slate-400 hover:text-sky-400" title="AI 助教">
+        <button onClick={() => setShowTutor(!showTutor)} style={{ color: showTutor ? 'var(--t-accent)' : 'var(--t-text-muted)' }} className="hover:opacity-70" title="AI 助教">
           <MessageSquare size={16} />
         </button>
       </div>
@@ -159,21 +165,23 @@ export default function CoursePlayer() {
       <div className="flex flex-1 overflow-hidden relative">
         {/* Outline sidebar */}
         {showOutline && (
-          <div className="w-56 bg-slate-850 border-r border-slate-700 overflow-y-auto shrink-0 p-3">
-            <h4 className="text-[10px] text-slate-500 font-semibold uppercase mb-2">章節大綱</h4>
+          <div className="w-56 border-r overflow-y-auto shrink-0 p-3" style={{ backgroundColor: 'var(--t-bg-inset)', borderColor: 'var(--t-border)' }}>
+            <h4 className="text-[10px] font-semibold uppercase mb-2" style={{ color: 'var(--t-text-dim)' }}>章節大綱</h4>
             {lessons.map(lesson => {
               const lessonSlides = allSlides.filter(s => s.lesson_id === lesson.id)
               return (
                 <div key={lesson.id} className="mb-2">
-                  <div className="text-xs font-medium text-slate-300 mb-1">{lesson.title}</div>
+                  <div className="text-xs font-medium mb-1" style={{ color: 'var(--t-text)' }}>{lesson.title}</div>
                   {lessonSlides.map(slide => {
                     const idx = allSlides.indexOf(slide)
                     return (
                       <button key={slide.id}
                         onClick={() => { setCurrentIdx(idx); setShowOutline(false) }}
-                        className={`w-full text-left text-[10px] px-2 py-1 rounded transition ${
-                          idx === currentIdx ? 'bg-sky-600/20 text-sky-400' : 'text-slate-500 hover:bg-slate-800'
-                        }`}
+                        className="w-full text-left text-[10px] px-2 py-1 rounded transition"
+                        style={{
+                          backgroundColor: idx === currentIdx ? 'var(--t-accent-subtle)' : 'transparent',
+                          color: idx === currentIdx ? 'var(--t-accent)' : 'var(--t-text-dim)'
+                        }}
                       >
                         {idx + 1}. {slide.slide_type}
                       </button>
@@ -186,27 +194,29 @@ export default function CoursePlayer() {
         )}
 
         {/* Slide content */}
-        <div className="flex-1 overflow-y-auto flex items-center justify-center p-8">
-          <div className="w-full max-w-4xl">
+        <div className="flex-1 overflow-y-auto flex items-start justify-center px-6 py-4" style={{ backgroundColor: 'var(--t-bg)' }}>
+          <div className="w-full max-w-7xl">
             <SlideRenderer slide={currentSlide} />
           </div>
         </div>
 
         {/* Notes panel */}
         {showNotes && (
-          <div className="w-72 bg-slate-850 border-l border-slate-700 p-3 flex flex-col shrink-0">
+          <div className="w-72 border-l p-3 flex flex-col shrink-0" style={{ backgroundColor: 'var(--t-bg-inset)', borderColor: 'var(--t-border)' }}>
             <div className="flex items-center justify-between mb-2">
-              <h4 className="text-xs font-semibold text-slate-400">筆記</h4>
-              <button onClick={() => setShowNotes(false)} className="text-slate-500"><X size={14} /></button>
+              <h4 className="text-xs font-semibold" style={{ color: 'var(--t-text-muted)' }}>筆記</h4>
+              <button onClick={() => setShowNotes(false)} style={{ color: 'var(--t-text-dim)' }}><X size={14} /></button>
             </div>
             <textarea
               value={noteText}
               onChange={e => setNoteText(e.target.value)}
               rows={6}
-              className="w-full bg-slate-800 border border-slate-700 rounded text-xs px-2 py-1.5 resize-none focus:outline-none focus:border-sky-500 flex-1"
+              className="w-full border rounded text-xs px-2 py-1.5 resize-none focus:outline-none flex-1"
+              style={{ backgroundColor: 'var(--t-bg-input)', borderColor: 'var(--t-border)', color: 'var(--t-text)' }}
               placeholder="在此記錄筆記..."
             />
-            <button onClick={saveNote} className="mt-2 text-xs bg-sky-600 hover:bg-sky-500 text-white px-3 py-1.5 rounded transition">
+            <button onClick={saveNote} className="mt-2 text-xs text-white px-3 py-1.5 rounded transition"
+              style={{ backgroundColor: 'var(--t-accent-bg)' }}>
               儲存筆記
             </button>
           </div>
@@ -214,34 +224,38 @@ export default function CoursePlayer() {
 
         {/* AI Tutor panel */}
         {showTutor && (
-          <div className="w-80 bg-slate-850 border-l border-slate-700 flex flex-col shrink-0">
-            <div className="flex items-center justify-between px-3 py-2 border-b border-slate-700">
-              <h4 className="text-xs font-semibold text-sky-400">AI 助教</h4>
-              <button onClick={() => setShowTutor(false)} className="text-slate-500"><X size={14} /></button>
+          <div className="w-80 border-l flex flex-col shrink-0" style={{ backgroundColor: 'var(--t-bg-inset)', borderColor: 'var(--t-border)' }}>
+            <div className="flex items-center justify-between px-3 py-2 border-b" style={{ borderColor: 'var(--t-border)' }}>
+              <h4 className="text-xs font-semibold" style={{ color: 'var(--t-accent)' }}>AI 助教</h4>
+              <button onClick={() => setShowTutor(false)} style={{ color: 'var(--t-text-dim)' }}><X size={14} /></button>
             </div>
             <div className="flex-1 overflow-y-auto p-3 space-y-2">
               {tutorMessages.length === 0 && (
-                <p className="text-xs text-slate-600 text-center py-8">有問題嗎？隨時向 AI 助教提問！</p>
+                <p className="text-xs text-center py-8" style={{ color: 'var(--t-text-dim)' }}>有問題嗎？隨時向 AI 助教提問！</p>
               )}
               {tutorMessages.map((msg, i) => (
-                <div key={i} className={`text-xs rounded-lg px-3 py-2 ${
-                  msg.role === 'user' ? 'bg-sky-600/20 text-sky-100 ml-4' : 'bg-slate-800 text-slate-300 mr-4'
-                }`}>
+                <div key={i} className={`text-xs rounded-lg px-3 py-2 ${msg.role === 'user' ? 'ml-4' : 'mr-4'}`}
+                  style={{
+                    backgroundColor: msg.role === 'user' ? 'var(--t-accent-subtle)' : 'var(--t-bg-card)',
+                    color: 'var(--t-text-secondary)'
+                  }}>
                   {msg.content}
                 </div>
               ))}
-              {tutorLoading && <div className="text-xs text-slate-500 animate-pulse">思考中...</div>}
+              {tutorLoading && <div className="text-xs animate-pulse" style={{ color: 'var(--t-text-dim)' }}>思考中...</div>}
             </div>
-            <div className="border-t border-slate-700 p-2 flex gap-2">
+            <div className="border-t p-2 flex gap-2" style={{ borderColor: 'var(--t-border)' }}>
               <input
                 value={tutorInput}
                 onChange={e => setTutorInput(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && sendTutorMessage()}
-                className="flex-1 bg-slate-800 border border-slate-700 rounded px-2 py-1.5 text-xs focus:outline-none focus:border-sky-500"
+                className="flex-1 border rounded px-2 py-1.5 text-xs focus:outline-none"
+                style={{ backgroundColor: 'var(--t-bg-input)', borderColor: 'var(--t-border)', color: 'var(--t-text)' }}
                 placeholder="輸入問題..."
               />
               <button onClick={sendTutorMessage} disabled={tutorLoading}
-                className="bg-sky-600 text-white px-2 py-1 rounded text-xs disabled:opacity-50">
+                className="text-white px-2 py-1 rounded text-xs disabled:opacity-50"
+                style={{ backgroundColor: 'var(--t-accent-bg)' }}>
                 發送
               </button>
             </div>
@@ -250,25 +264,26 @@ export default function CoursePlayer() {
       </div>
 
       {/* Bottom controls */}
-      <div className="bg-slate-800/90 backdrop-blur border-t border-slate-700/50 px-4 py-2 flex items-center gap-4 shrink-0">
+      <div className="backdrop-blur border-t px-4 py-2 flex items-center gap-4 shrink-0"
+        style={{ backgroundColor: 'var(--t-bg-elevated)', borderColor: 'var(--t-border)' }}>
         <button onClick={goPrev} disabled={currentIdx === 0}
-          className="text-slate-400 hover:text-slate-200 disabled:opacity-30">
+          className="disabled:opacity-30 hover:opacity-70" style={{ color: 'var(--t-text-muted)' }}>
           <ChevronLeft size={20} />
         </button>
 
         {/* Progress bar */}
-        <div className="flex-1 h-1.5 bg-slate-700 rounded-full overflow-hidden">
+        <div className="flex-1 h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--t-border)' }}>
           <div
-            className="h-full bg-sky-500 rounded-full transition-all duration-300"
-            style={{ width: `${((currentIdx + 1) / allSlides.length) * 100}%` }}
+            className="h-full rounded-full transition-all duration-300"
+            style={{ width: `${((currentIdx + 1) / allSlides.length) * 100}%`, backgroundColor: 'var(--t-accent)' }}
           />
         </div>
-        <span className="text-xs text-slate-500 w-16 text-center">
+        <span className="text-xs w-16 text-center" style={{ color: 'var(--t-text-dim)' }}>
           {currentIdx + 1} / {allSlides.length}
         </span>
 
         <button onClick={goNext} disabled={currentIdx === allSlides.length - 1}
-          className="text-slate-400 hover:text-slate-200 disabled:opacity-30">
+          className="disabled:opacity-30 hover:opacity-70" style={{ color: 'var(--t-text-muted)' }}>
           <ChevronRight size={20} />
         </button>
       </div>

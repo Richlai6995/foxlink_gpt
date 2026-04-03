@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { Camera, Square, Play, Loader2, CheckCircle2, AlertCircle, X, ExternalLink,
-         Wand2, Trash2, Star, GripVertical, ClipboardPaste, Plus, Image, Eye } from 'lucide-react'
+         Wand2, Trash2, Star, GripVertical, ClipboardPaste, Plus, Image, Eye, Cpu, Pencil } from 'lucide-react'
 import api from '../../../lib/api'
+import AnnotationOverlay from '../blocks/AnnotationOverlay'
 
 interface Props {
   courseId: number
@@ -16,6 +17,9 @@ interface CapturedStep {
   thumbnail: string             // 縮圖
   note: string                  // 備註
   isKeyStep: boolean            // 重點步驟標記
+  stepNumber?: number           // Phase 3A-2: 手動指定步驟編號（用於多語對應）
+  lang?: string                 // Phase 3A-2: 語言標記 (zh-TW/en/vi)
+  annotations?: any[]           // Phase 3A: 截圖標註 JSON
   pageUrl?: string
   pageTitle?: string
   elementInfo?: any
@@ -39,8 +43,13 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
   const [processProgress, setProcessProgress] = useState({ current: 0, total: 0 })
   const [selectedStepId, setSelectedStepId] = useState<string | null>(null)
   const [previewStepId, setPreviewStepId] = useState<string | null>(null)
+  const [showAnnotations, setShowAnnotations] = useState(true) // toggle annotation layer visibility
   const [copied, setCopied] = useState(false)
   const panelRef = useRef<HTMLDivElement>(null)
+
+  // Phase 2E: AI model selector
+  const [aiModels, setAiModels] = useState<{ id: number; display_name: string; api_model: string }[]>([])
+  const [selectedModel, setSelectedModel] = useState<string>('')
 
   // Auto-focus panel on mount so Ctrl+V works immediately
   useEffect(() => {
@@ -79,6 +88,13 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
       setHelpSections(res.data.map((s: any) => ({ id: s.id, title: s.title })))
     } catch (e) { console.error(e) }
   }
+
+  // Phase 2E: Load available AI models
+  useEffect(() => {
+    api.get('/training/ai/models').then(res => {
+      setAiModels(res.data || [])
+    }).catch(() => {})
+  }, [])
 
   // Add image from various sources
   const addImageFromBlob = useCallback((blob: Blob) => {
@@ -158,6 +174,16 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
     const [moved] = newSteps.splice(fromIdx, 1)
     newSteps.splice(toIdx, 0, moved)
     setSteps(newSteps)
+  }
+
+  // Sort steps by stepNumber then language (zh-TW → en → vi)
+  const sortSteps = (arr: CapturedStep[]) => {
+    const langOrder: Record<string, number> = { 'zh-TW': 0, 'en': 1, 'vi': 2 }
+    return [...arr].sort((a, b) => {
+      const sa = a.stepNumber || 0, sb = b.stepNumber || 0
+      if (sa !== sb) return sa - sb
+      return (langOrder[a.lang || 'zh-TW'] || 0) - (langOrder[b.lang || 'zh-TW'] || 0)
+    })
   }
 
   const clearAll = () => {
@@ -303,14 +329,40 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
       const res = await api.get(`/training/recording/${targetSid}`)
       const serverSteps = res.data.steps || []
 
-      const pulled: CapturedStep[] = serverSteps
-        .filter((s: any) => s.screenshot_url)
-        .map((s: any) => ({
+      // Auto-number: zh-TW screenshots get sequential step numbers (1,2,3...),
+      // en/vi inherit the step_number of the closest zh-TW step (same server step_number or by position)
+      const langOrder: Record<string, number> = { 'zh-TW': 0, 'en': 1, 'vi': 2 }
+      const withScreenshot = serverSteps.filter((s: any) => s.screenshot_url)
+
+      // First pass: assign auto step numbers to zh-TW, keep others as-is
+      const zhSteps = withScreenshot.filter((s: any) => !s.lang || s.lang === 'zh-TW')
+      const otherSteps = withScreenshot.filter((s: any) => s.lang && s.lang !== 'zh-TW')
+
+      // Auto-number zh-TW by DB order
+      zhSteps.forEach((s: any, i: number) => { s._autoStep = i + 1 })
+
+      // For en/vi: match to zh-TW by step_number, or assign sequentially
+      otherSteps.forEach((s: any) => {
+        const match = zhSteps.find((z: any) => z.step_number === s.step_number)
+        s._autoStep = match ? match._autoStep : (s.step_number || 0)
+      })
+
+      // Combine and sort: by _autoStep, then by language order
+      const sorted = [...zhSteps, ...otherSteps].sort((a: any, b: any) => {
+        const stepDiff = (a._autoStep || 0) - (b._autoStep || 0)
+        if (stepDiff !== 0) return stepDiff
+        return (langOrder[a.lang || 'zh-TW'] || 0) - (langOrder[b.lang || 'zh-TW'] || 0)
+      })
+
+      const pulled: CapturedStep[] = sorted.map((s: any) => ({
           id: `server_${s.id}`,
           imageDataUrl: s.screenshot_url,
           thumbnail: s.screenshot_url,
           note: s.ai_instruction || s.page_title || '',
           isKeyStep: s.action_type === 'click' || s.action_type === 'key_action',
+          stepNumber: s._autoStep || s.step_number || 0,
+          lang: s.lang || 'zh-TW',
+          annotations: s.annotations_json ? (() => { try { return JSON.parse(s.annotations_json) } catch { return [] } })() : [],
           pageUrl: s.page_url,
           pageTitle: s.page_title,
           elementInfo: s.element_json ? (() => { try { return JSON.parse(s.element_json) } catch { return null } })() : null,
@@ -332,6 +384,15 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
     } else {
       console.warn('[RecordingPanel] No sessionId available for pull')
     }
+  }
+
+  // Phase 3A: Resume recording — reuse same session, Extension continues uploading
+  const resumeExtensionRecording = () => {
+    const sid = sessionIdRef.current || sessionId
+    if (!sid) return startExtensionRecording() // no session yet, start fresh
+    setRecording(true)
+    setServerStepCount(steps.length)
+    window.postMessage({ type: 'FOXLINK_TRAINING_START', sessionId: sid }, '*')
   }
 
   // Process all: AI analyze + generate slides
@@ -364,7 +425,8 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
           setSteps(prev => prev.map(st => st.id === `server_${s.id}` ? { ...st, status: 'analyzing' } : st))
 
           try {
-            await api.post(`/training/recording/${sid}/analyze-step/${s.id}`, {}, { timeout: 30000 })
+            await api.post(`/training/recording/${sid}/analyze-step/${s.id}`,
+              selectedModel ? { model: selectedModel } : {}, { timeout: 30000 })
             setSteps(prev => prev.map(st => st.id === `server_${s.id}` ? { ...st, status: 'done' } : st))
           } catch (err) {
             console.warn(`[processAll] analyze step ${s.id} failed:`, err)
@@ -394,12 +456,13 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
 
           try {
             await api.post(`/training/recording/${processingSessionId}/step`, {
-              step_number: i + 1,
+              step_number: step.stepNumber || i + 1,
               action_type: step.isKeyStep ? 'key_action' : 'screenshot',
               screenshot_base64: step.imageDataUrl,
+              lang: step.lang || 'zh-TW',
               element_info: step.elementInfo || null,
               page_url: step.pageUrl || targetUrl,
-              page_title: step.pageTitle || step.note || `步驟 ${i + 1}`
+              page_title: step.pageTitle || step.note || `步驟 ${step.stepNumber || i + 1}`
             })
             setSteps(prev => prev.map(s => s.id === step.id ? { ...s, status: 'analyzing' } : s))
           } catch {
@@ -414,7 +477,8 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
           const s = uploaded.data.steps[i]
           setProcessProgress({ current: steps.length + i + 1, total: steps.length * 2 + 1 })
           try {
-            await api.post(`/training/recording/${processingSessionId}/analyze-step/${s.id}`, {}, { timeout: 30000 })
+            await api.post(`/training/recording/${processingSessionId}/analyze-step/${s.id}`,
+              selectedModel ? { model: selectedModel } : {}, { timeout: 30000 })
           } catch { console.warn(`analyze step ${s.id} failed, continuing...`) }
         }
         const genRes = await api.post(`/training/recording/${processingSessionId}/generate`, {}, { timeout: 60000 })
@@ -448,6 +512,17 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
               style={{ backgroundColor: 'var(--t-accent-subtle)', color: 'var(--t-accent)' }}>
               已截 {steps.length} 張
             </span>
+            {/* Toggle annotation layer */}
+            <button onClick={() => setShowAnnotations(!showAnnotations)}
+              className="text-[10px] px-2 py-0.5 rounded transition"
+              style={{
+                backgroundColor: showAnnotations ? 'rgba(239,68,68,0.15)' : 'var(--t-accent-subtle)',
+                color: showAnnotations ? '#ef4444' : 'var(--t-text-dim)',
+                border: `1px solid ${showAnnotations ? 'rgba(239,68,68,0.3)' : 'var(--t-border)'}`
+              }}
+              title="切換截圖標註圖層可見性">
+              {showAnnotations ? '🔴 標註可見' : '⚪ 標註隱藏'}
+            </button>
           </h3>
           <button onClick={() => {
             if (recording) { setRecording(false); window.postMessage({ type: 'FOXLINK_TRAINING_STOP' }, '*') }
@@ -515,10 +590,20 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
                 <div className="rounded-lg p-2 text-[10px] space-y-1.5" style={{ backgroundColor: 'rgba(34,197,94,0.1)', border: '1px solid rgba(34,197,94,0.3)' }}>
                   <div className="font-semibold text-green-500 flex items-center gap-1">✓ Chrome Extension 已連線</div>
                   {!recording ? (
-                    <button onClick={startExtensionRecording}
-                      className="w-full py-1.5 rounded-lg text-white text-[10px] font-medium bg-green-600 hover:bg-green-500 transition">
-                      ▶ 開始自動錄製
-                    </button>
+                    <div className="flex gap-1.5">
+                      <button onClick={startExtensionRecording}
+                        className="flex-1 py-1.5 rounded-lg text-white text-[10px] font-medium bg-green-600 hover:bg-green-500 transition">
+                        ▶ {sessionIdRef.current && steps.length > 0 ? '繼續錄製' : '開始自動錄製'}
+                      </button>
+                      {sessionIdRef.current && steps.length > 0 && (
+                        <button onClick={resumeExtensionRecording}
+                          className="py-1.5 px-3 rounded-lg text-[10px] font-medium transition border"
+                          style={{ borderColor: 'rgba(34,197,94,0.4)', color: '#22c55e' }}
+                          title="用同一個 session 補錄截圖">
+                          + 補錄
+                        </button>
+                      )}
+                    </div>
                   ) : (
                     <button onClick={stopExtensionRecording}
                       className="w-full py-1.5 rounded-lg text-white text-[10px] font-medium bg-red-600 hover:bg-red-500 transition flex items-center justify-center gap-1">
@@ -648,8 +733,30 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
               <div className="grid grid-cols-4 gap-2">
                 {steps.map((step, idx) => (
                   <div key={step.id}
+                    draggable
+                    onDragStart={e => {
+                      e.dataTransfer.effectAllowed = 'move'
+                      ;(e.currentTarget as HTMLElement).style.opacity = '0.4'
+                      ;(e.currentTarget as HTMLElement).dataset.dragIdx = String(idx)
+                    }}
+                    onDragEnd={e => { (e.currentTarget as HTMLElement).style.opacity = '1' }}
+                    onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; (e.currentTarget as HTMLElement).style.outline = '2px solid var(--t-accent)' }}
+                    onDragLeave={e => { (e.currentTarget as HTMLElement).style.outline = '' }}
+                    onDrop={e => {
+                      e.preventDefault()
+                      ;(e.currentTarget as HTMLElement).style.outline = ''
+                      const fromEl = document.querySelector('[data-drag-idx]') as HTMLElement
+                      const fromIdx = fromEl ? Number(fromEl.dataset.dragIdx) : -1
+                      if (fromEl) delete fromEl.dataset.dragIdx
+                      if (fromIdx >= 0 && fromIdx !== idx) {
+                        const newSteps = [...steps]
+                        const [moved] = newSteps.splice(fromIdx, 1)
+                        newSteps.splice(idx, 0, moved)
+                        setSteps(newSteps)
+                      }
+                    }}
                     onClick={() => setSelectedStepId(step.id)}
-                    className={`relative rounded-lg border overflow-hidden cursor-pointer transition group ${
+                    className={`relative rounded-lg border overflow-hidden cursor-grab transition group ${
                       selectedStepId === step.id ? 'ring-2' : ''
                     }`}
                     style={{
@@ -657,12 +764,34 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
                       ringColor: 'var(--t-accent)'
                     }}>
                     {/* Thumbnail */}
-                    <img src={step.thumbnail} alt="" className="w-full aspect-video object-cover" />
+                    <div className="relative w-full aspect-video">
+                      <img src={step.thumbnail} alt="" className="w-full h-full object-cover" />
+                      {/* Annotation layer overlay on thumbnail */}
+                      {showAnnotations && step.annotations && step.annotations.length > 0 && (
+                        <AnnotationOverlay annotations={step.annotations} />
+                      )}
+                      {/* Annotation badge icon */}
+                      {step.annotations && step.annotations.length > 0 && (
+                        <span className="absolute bottom-1 left-1 text-[8px] px-1 py-0.5 rounded"
+                          style={{ backgroundColor: 'rgba(239,68,68,0.8)', color: 'white' }}
+                          title={`${step.annotations.length} 個標註`}>
+                          <Pencil size={8} className="inline" /> {step.annotations.length}
+                        </span>
+                      )}
+                    </div>
 
-                    {/* Step number */}
-                    <div className="absolute top-1 left-1 text-[9px] font-bold px-1.5 py-0.5 rounded"
-                      style={{ backgroundColor: 'var(--t-bg)', color: 'var(--t-text-muted)' }}>
-                      #{idx + 1}
+                    {/* Step number + language badge */}
+                    <div className="absolute top-1 left-1 flex items-center gap-1">
+                      <span className="text-[9px] font-bold px-1.5 py-0.5 rounded"
+                        style={{ backgroundColor: 'var(--t-bg)', color: 'var(--t-text-muted)' }}>
+                        #{step.stepNumber || idx + 1}
+                      </span>
+                      {step.lang && step.lang !== 'zh-TW' && (
+                        <span className="text-[8px] font-bold px-1 py-0.5 rounded"
+                          style={{ backgroundColor: step.lang === 'en' ? '#2563eb' : '#059669', color: 'white' }}>
+                          {step.lang === 'en' ? 'EN' : 'VI'}
+                        </span>
+                      )}
                     </div>
 
                     {/* Key step star */}
@@ -690,7 +819,7 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
                         className="p-1.5 rounded-full bg-white/20 text-white hover:bg-white/30">
                         <Star size={12} />
                       </button>
-                      <button onClick={e => { e.stopPropagation(); removeStep(step.id) }}
+                      <button onClick={e => { e.stopPropagation(); if (confirm('確定刪除此截圖？')) removeStep(step.id) }}
                         className="p-1.5 rounded-full bg-white/20 text-white hover:bg-red-500/50">
                         <Trash2 size={12} />
                       </button>
@@ -736,6 +865,44 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
                 />
               </div>
 
+              {/* Phase 3A-2: Step number + Language — auto-resort on change */}
+              <div className="flex gap-2">
+                <div className="flex-1">
+                  <label className="text-[10px] mb-1 block" style={{ color: 'var(--t-text-dim)' }}>步驟編號</label>
+                  <input type="number" min={1}
+                    value={selectedStep.stepNumber || steps.indexOf(selectedStep) + 1}
+                    onChange={e => {
+                      const newNum = Number(e.target.value)
+                      setSteps(prev => {
+                        const updated = prev.map(s => s.id === selectedStep.id ? { ...s, stepNumber: newNum } : s)
+                        return sortSteps(updated)
+                      })
+                    }}
+                    className="w-full border rounded px-2 py-1 text-[10px]"
+                    style={{ backgroundColor: 'var(--t-bg-input)', borderColor: 'var(--t-border)', color: 'var(--t-text)' }}
+                  />
+                </div>
+                <div className="flex-1">
+                  <label className="text-[10px] mb-1 block" style={{ color: 'var(--t-text-dim)' }}>語言</label>
+                  <select
+                    value={selectedStep.lang || 'zh-TW'}
+                    onChange={e => {
+                      const newLang = e.target.value
+                      setSteps(prev => {
+                        const updated = prev.map(s => s.id === selectedStep.id ? { ...s, lang: newLang } : s)
+                        return sortSteps(updated)
+                      })
+                    }}
+                    className="w-full border rounded px-2 py-1 text-[10px]"
+                    style={{ backgroundColor: 'var(--t-bg-input)', borderColor: 'var(--t-border)', color: 'var(--t-text)' }}
+                  >
+                    <option value="zh-TW">🇹🇼 中文</option>
+                    <option value="en">🇺🇸 EN</option>
+                    <option value="vi">🇻🇳 VI</option>
+                  </select>
+                </div>
+              </div>
+
               <label className="flex items-center gap-1.5 text-[10px] cursor-pointer" style={{ color: 'var(--t-text-secondary)' }}>
                 <input type="checkbox" checked={selectedStep.isKeyStep}
                   onChange={() => toggleKeyStep(selectedStep.id)} className="rounded" />
@@ -757,7 +924,26 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
                 </button>
               </div>
 
-              <button onClick={() => removeStep(selectedStep.id)}
+              {/* Save step changes to server */}
+              {selectedStep.id.startsWith('server_') && (
+                <button onClick={async () => {
+                  const stepDbId = selectedStep.id.replace('server_', '')
+                  const sid = sessionIdRef.current || sessionId
+                  if (!sid) return
+                  try {
+                    await api.put(`/training/recording/${sid}/steps`, {
+                      updates: [{ id: Number(stepDbId), step_number: selectedStep.stepNumber, lang: selectedStep.lang }]
+                    })
+                    alert('已儲存')
+                  } catch (e: any) { alert(e.response?.data?.error || '儲存失敗') }
+                }}
+                  className="w-full text-[10px] py-1.5 rounded font-medium text-white transition"
+                  style={{ backgroundColor: 'var(--t-accent-bg)' }}>
+                  ✓ 確認修改
+                </button>
+              )}
+
+              <button onClick={() => { if (confirm('確定刪除此截圖？')) removeStep(selectedStep.id) }}
                 className="w-full text-[10px] py-1 rounded text-red-400 border border-red-400/30 hover:bg-red-500/10">
                 <Trash2 size={10} className="inline mr-1" /> 刪除此截圖
               </button>
@@ -769,6 +955,48 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
         <div className="border-t px-4 py-3 flex items-center gap-3 shrink-0" style={{ borderColor: 'var(--t-border)' }}>
           {!processing ? (
             <>
+              {/* Phase 2E: AI Model Selector */}
+              {aiModels.length > 0 && (
+                <div className="flex items-center gap-1.5">
+                  <Cpu size={12} style={{ color: 'var(--t-text-dim)' }} />
+                  <select
+                    value={selectedModel}
+                    onChange={e => setSelectedModel(e.target.value)}
+                    className="border rounded px-2 py-1.5 text-[10px]"
+                    style={{ backgroundColor: 'var(--t-bg-input)', borderColor: 'var(--t-border)', color: 'var(--t-text)' }}
+                    title="AI 分析模型"
+                  >
+                    <option value="">自動選擇</option>
+                    {aiModels.map(m => (
+                      <option key={m.id} value={m.api_model}>
+                        {m.display_name || m.api_model}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {/* Save all step order/lang changes to server */}
+              {steps.some(s => s.id.startsWith('server_')) && (
+                <button onClick={async () => {
+                  const sid = sessionIdRef.current || sessionId
+                  if (!sid) return
+                  const updates = steps.filter(s => s.id.startsWith('server_')).map((s, i) => ({
+                    id: Number(s.id.replace('server_', '')),
+                    step_number: s.stepNumber || i + 1,
+                    lang: s.lang || 'zh-TW'
+                  }))
+                  try {
+                    await api.put(`/training/recording/${sid}/steps`, { updates })
+                    alert('所有順序已儲存')
+                  } catch (e: any) { alert(e.response?.data?.error || '儲存失敗') }
+                }}
+                  className="flex items-center gap-1 text-xs px-3 py-2 rounded-lg border transition hover:opacity-80"
+                  style={{ borderColor: 'var(--t-accent)', color: 'var(--t-accent)' }}>
+                  ✓ 確認順序
+                </button>
+              )}
+
               <button onClick={processAll} disabled={steps.length === 0}
                 className="flex items-center gap-1.5 text-white px-4 py-2 rounded-lg text-xs font-medium transition disabled:opacity-40"
                 style={{ backgroundColor: 'var(--t-accent-bg)' }}>
@@ -807,7 +1035,12 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
       {previewStep && (
         <div className="fixed inset-0 z-60 bg-black/80 flex items-center justify-center cursor-pointer"
           onClick={() => setPreviewStepId(null)}>
-          <img src={previewStep.imageDataUrl} alt="" className="max-w-[90vw] max-h-[90vh] rounded-lg" />
+          <div className="relative">
+            <img src={previewStep.imageDataUrl} alt="" className="max-w-[90vw] max-h-[90vh] rounded-lg" />
+            {showAnnotations && previewStep.annotations && previewStep.annotations.length > 0 && (
+              <AnnotationOverlay annotations={previewStep.annotations} />
+            )}
+          </div>
           <button className="absolute top-4 right-4 text-white/80 hover:text-white" onClick={() => setPreviewStepId(null)}>
             <X size={24} />
           </button>

@@ -1,4 +1,6 @@
 import { useState } from 'react'
+import AnnotationOverlay from './AnnotationOverlay'
+import type { Annotation } from './AnnotationOverlay'
 
 interface Region {
   id: string
@@ -15,9 +17,27 @@ export default function HotspotBlock({ block }: { block: any }) {
   const [feedback, setFeedback] = useState<{ text: string; correct: boolean } | null>(null)
   const [completed, setCompleted] = useState(false)
   const [showLabels, setShowLabels] = useState(true)
-  const regions: Region[] = block.regions || []
+  const [zoomed, setZoomed] = useState(false)
+  const allRegions: Region[] = block.regions || []
+  // Only show correct regions as interactive targets — don't display AI-detected non-correct clutter
+  const regions = allRegions.filter(r => r.correct)
+  // Don't render SVG annotations if they're already burned into the image
+  const annotations: Annotation[] = block.annotations_in_image ? [] : (block.annotations || [])
   const maxAttempts = block.max_attempts || 3
   const showHintAfter = block.show_hint_after || 2
+
+  // Phase 3A-1: Use coordinate_system field if available; fallback to heuristic for old data
+  const isPixelCoords = block.coordinate_system === 'pixel' ||
+    (!block.coordinate_system && allRegions.some(r => r.coords.x > 100 || r.coords.y > 100))
+  const imgDim = block.image_dimensions
+  const imgW = isPixelCoords ? (imgDim?.w || Math.max(...allRegions.map(r => r.coords.x + (r.coords.w || 0)), 200) * 1.05) : 100
+  const imgH = isPixelCoords ? (imgDim?.h || Math.max(...allRegions.map(r => r.coords.y + (r.coords.h || 0)), 200) * 1.05) : 100
+  const toPercent = (r: Region['coords']) => {
+    if (!isPixelCoords) return r
+    return { x: r.x / imgW * 100, y: r.y / imgH * 100, w: r.w / imgW * 100, h: r.h / imgH * 100 }
+  }
+
+  const correctRegion = regions[0]
 
   const handleClick = (e: React.MouseEvent<HTMLDivElement>) => {
     if (completed) return
@@ -25,10 +45,11 @@ export default function HotspotBlock({ block }: { block: any }) {
     const x = ((e.clientX - rect.left) / rect.width) * 100
     const y = ((e.clientY - rect.top) / rect.height) * 100
 
-    const hit = regions.find(r =>
-      x >= r.coords.x && x <= r.coords.x + r.coords.w &&
-      y >= r.coords.y && y <= r.coords.y + r.coords.h
-    )
+    // Check ALL regions (including non-correct) for hit detection
+    const hit = allRegions.find(r => {
+      const c = toPercent(r.coords)
+      return x >= c.x && x <= c.x + c.w && y >= c.y && y <= c.y + c.h
+    })
 
     setAttempts(prev => prev + 1)
 
@@ -43,133 +64,197 @@ export default function HotspotBlock({ block }: { block: any }) {
     }
   }
 
-  // After N wrong attempts, show hints
   const showHints = !completed && attempts >= showHintAfter
 
-  return (
-    <div className="space-y-3">
-      {/* Instruction */}
-      {block.instruction && (
-        <div className="flex items-center gap-2">
-          <div className="w-6 h-6 rounded-full bg-sky-500/20 flex items-center justify-center text-sky-400 text-xs font-bold shrink-0">?</div>
-          <p className="text-sm font-medium" style={{ color: 'var(--t-text)' }}>{block.instruction}</p>
+  // Region overlay renderer (shared by normal + zoom view)
+  const renderRegions = () => regions.map((r, idx) => {
+    const isCorrect = r.correct
+    const showThisHint = showHints && isCorrect
+    const isCompleteCorrect = completed && isCorrect
+    const c = toPercent(r.coords)
+    return (
+      <div key={r.id}>
+        <div className="absolute transition-all duration-300" style={{
+          left: `${c.x}%`, top: `${c.y}%`,
+          width: `${c.w}%`, height: `${c.h}%`,
+          border: isCompleteCorrect ? '3px solid #22c55e'
+            : showThisHint ? '2px dashed #facc15'
+            : showLabels && !completed ? '2px solid rgba(59,130,246,0.5)' : 'none',
+          background: isCompleteCorrect ? 'rgba(34,197,94,0.15)'
+            : showThisHint ? 'rgba(250,204,21,0.1)'
+            : showLabels && !completed ? 'rgba(59,130,246,0.05)' : 'transparent',
+          borderRadius: '4px', pointerEvents: 'none', zIndex: 2
+        }}>
+          {(showLabels || showThisHint || isCompleteCorrect) && r.label && (
+            <div className="absolute -top-6 left-0 flex items-center gap-1 whitespace-nowrap" style={{ zIndex: 3 }}>
+              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded shadow-sm" style={{
+                backgroundColor: isCompleteCorrect ? '#22c55e' : isCorrect ? '#3b82f6' : '#64748b', color: 'white'
+              }}>
+                {isCorrect ? '👆' : `${idx + 1}`} {r.label}
+              </span>
+              {r.type && (
+                <span className="text-[8px] px-1 py-0.5 rounded" style={{ backgroundColor: 'rgba(0,0,0,0.6)', color: 'white' }}>{r.type}</span>
+              )}
+            </div>
+          )}
+          {showThisHint && <div className="absolute inset-0 rounded border-2 border-yellow-400 animate-pulse" />}
         </div>
-      )}
-
-      {/* Screenshot with interactive regions */}
-      {block.image ? (
-        <div className="relative select-none rounded-lg overflow-hidden border"
-          style={{ borderColor: 'var(--t-border)', cursor: completed ? 'default' : 'crosshair' }}
-          onClick={handleClick}>
-          <img src={block.image} alt="" className="w-full" draggable={false} />
-
-          {/* Region overlays — visible labels + borders */}
-          {regions.map((r, idx) => {
-            const isCorrect = r.correct
-            const showThisHint = showHints && isCorrect
-            const isCompleteCorrect = completed && isCorrect
-
-            return (
-              <div key={r.id}>
-                {/* Region border — always visible for correct after complete, hint mode, or labels mode */}
-                <div
-                  className="absolute transition-all duration-300"
-                  style={{
-                    left: `${r.coords.x}%`, top: `${r.coords.y}%`,
-                    width: `${r.coords.w}%`, height: `${r.coords.h}%`,
-                    border: isCompleteCorrect ? '3px solid #22c55e'
-                      : showThisHint ? '2px dashed #facc15'
-                      : showLabels && !completed ? '2px solid rgba(59,130,246,0.5)'
-                      : 'none',
-                    background: isCompleteCorrect ? 'rgba(34,197,94,0.15)'
-                      : showThisHint ? 'rgba(250,204,21,0.1)'
-                      : showLabels && !completed ? 'rgba(59,130,246,0.05)'
-                      : 'transparent',
-                    borderRadius: '4px',
-                    pointerEvents: 'none',
-                    zIndex: 2
-                  }}
-                >
-                  {/* Label tag — numbered badge with element name */}
-                  {(showLabels || showThisHint || isCompleteCorrect) && r.label && (
-                    <div
-                      className="absolute -top-6 left-0 flex items-center gap-1 whitespace-nowrap"
-                      style={{ zIndex: 3 }}
-                    >
-                      <span className="text-[10px] font-bold px-1.5 py-0.5 rounded shadow-sm"
-                        style={{
-                          backgroundColor: isCompleteCorrect ? '#22c55e'
-                            : isCorrect ? '#3b82f6'
-                            : '#64748b',
-                          color: 'white'
-                        }}>
-                        {isCorrect ? '👆' : `${idx + 1}`} {r.label}
-                      </span>
-                      {r.type && (
-                        <span className="text-[8px] px-1 py-0.5 rounded"
-                          style={{ backgroundColor: 'rgba(0,0,0,0.6)', color: 'white' }}>
-                          {r.type}
-                        </span>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Pulse animation for hint */}
-                  {showThisHint && (
-                    <div className="absolute inset-0 rounded border-2 border-yellow-400 animate-pulse" />
-                  )}
-                </div>
-
-                {/* Connecting line + step number for correct region (when showing labels) */}
-                {showLabels && isCorrect && !completed && (
-                  <div className="absolute text-[9px] font-bold px-2 py-1 rounded-full shadow-lg animate-bounce"
-                    style={{
-                      left: `${r.coords.x + r.coords.w + 1}%`,
-                      top: `${r.coords.y}%`,
-                      backgroundColor: '#ef4444',
-                      color: 'white',
-                      zIndex: 4
-                    }}>
-                    👆 點這裡
-                  </div>
-                )}
-              </div>
-            )
-          })}
-        </div>
-      ) : (
-        <div className="py-16 text-center border border-dashed rounded-lg"
-          style={{ borderColor: 'var(--t-border)', color: 'var(--t-text-dim)' }}>
-          圖片未設定
-        </div>
-      )}
-
-      {/* Toggle labels button */}
-      {!completed && regions.length > 0 && (
-        <button onClick={() => setShowLabels(!showLabels)}
-          className="text-[10px] px-2 py-1 rounded transition"
-          style={{ backgroundColor: 'var(--t-accent-subtle)', color: 'var(--t-accent)' }}>
-          {showLabels ? '🙈 隱藏標註（自己找）' : '👁 顯示標註'}
-        </button>
-      )}
-
-      {/* Feedback */}
-      {feedback && (
-        <div className={`text-sm px-4 py-2.5 rounded-lg flex items-center gap-2 ${
-          feedback.correct ? 'bg-green-500/15 text-green-300 border border-green-500/30'
-          : 'bg-red-500/15 text-red-300 border border-red-500/30'
-        }`}>
-          <span className="text-lg">{feedback.correct ? '✅' : '❌'}</span>
-          <span>{feedback.text}</span>
-        </div>
-      )}
-
-      {/* Attempt counter */}
-      <div className="flex items-center gap-3 text-[10px]" style={{ color: 'var(--t-text-dim)' }}>
-        <span>嘗試次數: {attempts}/{maxAttempts}</span>
-        {completed && <span className="text-green-400 font-medium">✓ 操作完成</span>}
-        {!completed && attempts >= maxAttempts && <span className="text-red-400">已達最大嘗試次數</span>}
+        {showLabels && isCorrect && !completed && (
+          <div className="absolute text-[9px] font-bold px-2 py-1 rounded-full shadow-lg animate-bounce" style={{
+            left: `${c.x + c.w + 1}%`, top: `${c.y}%`,
+            backgroundColor: '#ef4444', color: 'white', zIndex: 4
+          }}>👆 點這裡</div>
+        )}
       </div>
-    </div>
+    )
+  })
+
+  return (
+    <>
+      <div className="flex gap-5">
+        {/* LEFT: Screenshot — takes most width */}
+        <div className="flex-1 min-w-0">
+          {block.image ? (
+            <div className="relative select-none rounded-lg overflow-hidden border"
+              style={{ borderColor: 'var(--t-border)', cursor: completed ? 'default' : 'crosshair' }}
+              onClick={handleClick}>
+              <img src={block.image} alt="" className="w-full block" draggable={false} />
+
+              {annotations.length > 0 && (
+                <AnnotationOverlay annotations={annotations} visible={showLabels || completed} animateInterval={600} />
+              )}
+
+              {renderRegions()}
+
+              {/* Zoom button */}
+              <button
+                className="absolute top-2 right-2 z-10 w-7 h-7 rounded-full flex items-center justify-center text-white text-xs transition opacity-60 hover:opacity-100"
+                style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}
+                title="放大檢視"
+                onClick={(e) => { e.stopPropagation(); setZoomed(true) }}
+              >🔍</button>
+            </div>
+          ) : (
+            <div className="py-16 text-center border border-dashed rounded-lg"
+              style={{ borderColor: 'var(--t-border)', color: 'var(--t-text-dim)' }}>
+              圖片未設定
+            </div>
+          )}
+        </div>
+
+        {/* RIGHT: Compact info panel */}
+        <div className="w-56 shrink-0 flex flex-col gap-2.5 text-xs">
+          {/* Instruction */}
+          {block.instruction && (
+            <div className="rounded-lg p-2.5 border" style={{ backgroundColor: 'var(--t-bg-card)', borderColor: 'var(--t-border)' }}>
+              <div className="flex items-center gap-1.5 mb-1.5">
+                <span className="w-4 h-4 rounded-full flex items-center justify-center text-[9px] font-bold"
+                  style={{ backgroundColor: 'var(--t-accent-subtle)', color: 'var(--t-accent)' }}>?</span>
+                <span className="text-[10px] font-semibold" style={{ color: 'var(--t-text-muted)' }}>操作說明</span>
+              </div>
+              <p className="text-xs leading-relaxed" style={{ color: 'var(--t-text)' }}>{block.instruction}</p>
+            </div>
+          )}
+
+          {/* Interactive task */}
+          {correctRegion && !completed && (
+            <div className="rounded-lg p-2.5 border-2" style={{ borderColor: 'var(--t-accent)', backgroundColor: 'var(--t-accent-subtle)' }}>
+              <p className="text-[11px] leading-relaxed" style={{ color: 'var(--t-text-secondary)' }}>
+                <span className="font-semibold" style={{ color: 'var(--t-accent)' }}>互動：</span>
+                在左側截圖點擊正確位置
+                {correctRegion.label && <span className="font-medium" style={{ color: 'var(--t-text)' }}>（{correctRegion.label}）</span>}
+              </p>
+            </div>
+          )}
+
+          {/* Completed */}
+          {completed && (
+            <div className="rounded-lg p-2.5 border flex items-center gap-2" style={{ borderColor: '#22c55e', backgroundColor: 'rgba(34,197,94,0.08)' }}>
+              <span>✅</span>
+              <span className="text-xs font-medium" style={{ color: '#22c55e' }}>操作完成</span>
+            </div>
+          )}
+
+          {/* Feedback */}
+          {feedback && (
+            <div className="px-2.5 py-2 rounded-lg flex items-center gap-2 border" style={{
+              backgroundColor: feedback.correct ? 'rgba(34,197,94,0.08)' : 'rgba(239,68,68,0.08)',
+              borderColor: feedback.correct ? 'rgba(34,197,94,0.3)' : 'rgba(239,68,68,0.3)',
+              color: feedback.correct ? 'var(--t-success, #22c55e)' : 'var(--t-danger, #ef4444)'
+            }}>
+              <span>{feedback.correct ? '✅' : '❌'}</span>
+              <span className="text-[11px]">{feedback.text}</span>
+            </div>
+          )}
+
+          {/* Controls */}
+          <div className="flex items-center gap-2">
+            {!completed && regions.length > 0 && (
+              <button onClick={() => setShowLabels(!showLabels)}
+                className="text-[10px] px-2 py-0.5 rounded transition"
+                style={{ backgroundColor: 'var(--t-accent-subtle)', color: 'var(--t-accent)' }}>
+                {showLabels ? '隱藏標註' : '顯示標註'}
+              </button>
+            )}
+            <span className="text-[10px]" style={{ color: 'var(--t-text-dim)' }}>
+              嘗試: {attempts}/{maxAttempts}
+            </span>
+          </div>
+
+          {/* Element list */}
+          {(showLabels || completed) && regions.length > 0 && (
+            <div className="rounded-lg p-2 border space-y-0.5" style={{ backgroundColor: 'var(--t-bg-inset, var(--t-bg-card))', borderColor: 'var(--t-border)' }}>
+              <div className="text-[9px] font-medium mb-1" style={{ color: 'var(--t-text-dim)' }}>畫面元素</div>
+              {regions.map((r, idx) => (
+                <div key={r.id} className="flex items-center gap-1.5 text-[10px]">
+                  <span className="w-3.5 h-3.5 rounded-full flex items-center justify-center text-[7px] font-bold shrink-0"
+                    style={{ backgroundColor: r.correct ? (completed ? '#22c55e' : '#3b82f6') : '#64748b', color: 'white' }}>
+                    {idx + 1}
+                  </span>
+                  <span className="truncate" style={{ color: 'var(--t-text-secondary)' }}>{r.label || `元素 ${idx + 1}`}</span>
+                  {r.type && <span className="text-[8px] px-0.5 rounded shrink-0" style={{ backgroundColor: 'var(--t-accent-subtle)', color: 'var(--t-text-dim)' }}>{r.type}</span>}
+                  {r.correct && <span className="text-[8px] shrink-0" style={{ color: 'var(--t-accent)' }}>目標</span>}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Zoom overlay — full screen lightbox */}
+      {zoomed && block.image && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center"
+          style={{ backgroundColor: 'rgba(0,0,0,0.85)' }}
+          onClick={() => setZoomed(false)}>
+          <div className="relative max-w-[95vw] max-h-[95vh]" onClick={e => e.stopPropagation()}>
+            <div className="relative select-none"
+              style={{ cursor: completed ? 'default' : 'crosshair' }}
+              onClick={handleClick}>
+              <img src={block.image} alt="" className="max-w-[95vw] max-h-[90vh] object-contain rounded-lg" draggable={false} />
+              {annotations.length > 0 && (
+                <AnnotationOverlay annotations={annotations} visible={showLabels || completed} animateInterval={600} />
+              )}
+              {renderRegions()}
+            </div>
+            <button
+              className="absolute -top-3 -right-3 w-8 h-8 rounded-full flex items-center justify-center text-white text-sm"
+              style={{ backgroundColor: 'rgba(239,68,68,0.8)' }}
+              onClick={() => setZoomed(false)}
+              title="關閉"
+            >✕</button>
+            {/* Zoom mode feedback */}
+            {feedback && (
+              <div className="absolute bottom-4 left-1/2 -translate-x-1/2 px-4 py-2 rounded-lg text-sm font-medium"
+                style={{
+                  backgroundColor: feedback.correct ? 'rgba(34,197,94,0.9)' : 'rgba(239,68,68,0.9)',
+                  color: 'white'
+                }}>
+                {feedback.correct ? '✅' : '❌'} {feedback.text}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </>
   )
 }

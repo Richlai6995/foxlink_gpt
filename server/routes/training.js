@@ -10,6 +10,7 @@ const { db } = require('../database-oracle');
 // ─── File upload config ──────────────────────────────────────────────────────
 const localUploads = path.join(__dirname, '..', 'uploads');
 let UPLOAD_ROOT = localUploads;
+const altUploadDir = path.resolve('/app/uploads/training'); // Docker legacy path on Windows
 if (process.env.UPLOAD_DIR) {
   const envDir = path.resolve(process.env.UPLOAD_DIR);
   try { if (!fs.existsSync(envDir)) fs.mkdirSync(envDir, { recursive: true }); UPLOAD_ROOT = envDir; }
@@ -18,8 +19,12 @@ if (process.env.UPLOAD_DIR) {
 const uploadDir = path.join(UPLOAD_ROOT, 'training');
 if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
 
-// Serve training uploads as static files (fallback if main UPLOAD_DIR differs)
+// Serve training uploads — try primary dir first, fallback to alt dir
 router.use('/files', express.static(uploadDir));
+if (fs.existsSync(altUploadDir) && altUploadDir !== uploadDir) {
+  router.use('/files', express.static(altUploadDir));
+  console.log('[Training] Also serving files from fallback:', altUploadDir);
+}
 
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
@@ -677,17 +682,48 @@ router.get('/lessons/:lid/slides', async (req, res) => {
       'SELECT * FROM course_slides WHERE lesson_id=? ORDER BY sort_order, id'
     ).all(req.params.lid);
 
-    // If non-zh-TW language requested, merge translations
+    // If non-zh-TW language requested, merge translations + image overrides
     if (lang && lang !== 'zh-TW') {
       for (const slide of slides) {
         try {
           const trans = await db.prepare(
-            'SELECT content_json, notes, audio_url FROM slide_translations WHERE slide_id=? AND lang=?'
+            'SELECT content_json, notes, audio_url, image_overrides FROM slide_translations WHERE slide_id=? AND lang=?'
           ).get(slide.id, lang);
           if (trans) {
             if (trans.content_json) slide.content_json = trans.content_json;
             if (trans.notes) slide.notes = trans.notes;
             if (trans.audio_url) slide.audio_url = trans.audio_url;
+            // Phase 3A-2: Apply image overrides + region overrides for this language
+            if (trans.image_overrides) {
+              try {
+                const overrides = JSON.parse(trans.image_overrides);
+                const blocks = JSON.parse(slide.content_json || '[]');
+                let changed = false;
+                // Image overrides: { "0": "/img/en_step1.png", ... }
+                for (const [idx, val] of Object.entries(overrides)) {
+                  if (idx === 'region_overrides') continue; // handled below
+                  const block = blocks[Number(idx)];
+                  if (block && typeof val === 'string') {
+                    if (block.image) { block.image = val; changed = true; }
+                    if (block.src) { block.src = val; changed = true; }
+                  }
+                }
+                // Region overrides: { "region_overrides": { "r1": {x,y,w,h}, ... } }
+                const regionOvr = overrides.region_overrides;
+                if (regionOvr) {
+                  for (const block of blocks) {
+                    if (block.regions) {
+                      block.regions = block.regions.map(r => {
+                        const ovr = regionOvr[r.id];
+                        return ovr ? { ...r, coords: { ...r.coords, ...ovr } } : r;
+                      });
+                      changed = true;
+                    }
+                  }
+                }
+                if (changed) slide.content_json = JSON.stringify(blocks);
+              } catch {}
+            }
           }
         } catch {}
       }
@@ -751,11 +787,20 @@ router.put('/slides/:sid', async (req, res) => {
     const { slide_type, content_json, notes, duration_seconds, sort_order } = req.body;
     const contentStr = typeof content_json === 'string' ? content_json : JSON.stringify(content_json);
 
-    await db.prepare(`
-      UPDATE course_slides SET slide_type=?, content_json=?, notes=?,
-             duration_seconds=?, sort_order=?, updated_at=SYSTIMESTAMP
-      WHERE id=?
-    `).run(slide_type, contentStr, notes || null, duration_seconds || null, sort_order, req.params.sid);
+    // Only update sort_order if explicitly provided (avoid nullifying it on content-only saves)
+    if (sort_order !== undefined && sort_order !== null) {
+      await db.prepare(`
+        UPDATE course_slides SET slide_type=?, content_json=?, notes=?,
+               duration_seconds=?, sort_order=?, updated_at=SYSTIMESTAMP
+        WHERE id=?
+      `).run(slide_type, contentStr, notes || null, duration_seconds || null, sort_order, req.params.sid);
+    } else {
+      await db.prepare(`
+        UPDATE course_slides SET slide_type=?, content_json=?, notes=?,
+               duration_seconds=?, updated_at=SYSTIMESTAMP
+        WHERE id=?
+      `).run(slide_type, contentStr, notes || null, duration_seconds || null, req.params.sid);
+    }
     res.json({ ok: true });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -1788,20 +1833,39 @@ router.post('/courses/:id/send-notification', loadCoursePermission, requirePermi
 // Translation
 // ═══════════════════════════════════════════════════════════════════════════════
 
+// POST /courses/:id/translate — SSE streaming progress
 router.post('/courses/:id/translate', loadCoursePermission, requirePermission('owner', 'admin', 'develop'), async (req, res) => {
-  try {
-    const { target_lang } = req.body;
-    if (!target_lang || target_lang === 'zh-TW')
-      return res.status(400).json({ error: 'target_lang must be en or vi' });
+  const { target_lang, model: requestModel } = req.body;
+  if (!target_lang || target_lang === 'zh-TW')
+    return res.status(400).json({ error: 'target_lang must be en or vi' });
 
-    // Translate course title & description
+  // SSE setup
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders?.();
+
+  const send = (type, data) => { res.write(`data: ${JSON.stringify({ type, ...data })}\n\n`); };
+
+  try {
     const course = await db.prepare('SELECT title, description FROM courses WHERE id=?').get(req.courseId);
     const { GoogleGenerativeAI } = require('@google/generative-ai');
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-    const flashRow = await db.prepare(
-      `SELECT api_model FROM llm_models WHERE model_role='chat' AND is_active=1 AND provider_type='gemini' ORDER BY sort_order FETCH FIRST 1 ROWS ONLY`
-    ).get();
-    const model = genAI.getGenerativeModel({ model: flashRow?.api_model || 'gemini-2.0-flash' });
+
+    // Phase 2E: support model selection (from request or system_settings or llm_models)
+    let modelName = requestModel || null;
+    if (!modelName) {
+      const setting = await db.prepare(`SELECT value FROM system_settings WHERE key='training_translate_model'`).get();
+      modelName = setting?.value || null;
+    }
+    if (!modelName) {
+      const flashRow = await db.prepare(
+        `SELECT api_model FROM llm_models WHERE model_role='chat' AND is_active=1 AND provider_type='gemini' ORDER BY sort_order FETCH FIRST 1 ROWS ONLY`
+      ).get();
+      modelName = flashRow?.api_model || 'gemini-2.0-flash';
+    }
+    const model = genAI.getGenerativeModel({ model: modelName });
+    send('status', { message: `使用模型: ${modelName}` });
 
     const langName = target_lang === 'en' ? 'English' : 'Vietnamese';
     const translateText = async (text) => {
@@ -1812,7 +1876,21 @@ router.post('/courses/:id/translate', loadCoursePermission, requirePermission('o
       return r.response.text().trim();
     };
 
-    // Course metadata
+    // Count total work items
+    const lessons = await db.prepare('SELECT id, title FROM course_lessons WHERE course_id=?').all(req.courseId);
+    let totalSlides = 0;
+    const lessonSlideMap = {};
+    for (const lesson of lessons) {
+      const slides = await db.prepare('SELECT id, content_json, notes FROM course_slides WHERE lesson_id=?').all(lesson.id);
+      lessonSlideMap[lesson.id] = slides;
+      totalSlides += slides.length;
+    }
+    const questions = await db.prepare('SELECT id, question_json, explanation FROM quiz_questions WHERE course_id=?').all(req.courseId);
+    const totalItems = 1 + lessons.length + totalSlides + questions.length; // course + lessons + slides + questions
+    let doneItems = 0;
+
+    // 1. Course metadata
+    send('progress', { current: doneItems, total: totalItems, step: '翻譯課程標題...' });
     const titleTrans = await translateText(course.title);
     const descTrans = await translateText(course.description);
     const existingCT = await db.prepare('SELECT id FROM course_translations WHERE course_id=? AND lang=?').get(req.courseId, target_lang);
@@ -1823,10 +1901,13 @@ router.post('/courses/:id/translate', loadCoursePermission, requirePermission('o
       await db.prepare('INSERT INTO course_translations (course_id, lang, title, description, is_auto) VALUES (?,?,?,?,1)')
         .run(req.courseId, target_lang, titleTrans, descTrans);
     }
+    doneItems++;
+    send('progress', { current: doneItems, total: totalItems, step: '課程標題完成' });
 
-    // Translate lessons
-    const lessons = await db.prepare('SELECT id, title FROM course_lessons WHERE course_id=?').all(req.courseId);
+    // 2. Lessons + slides
+    let slidesDone = 0;
     for (const lesson of lessons) {
+      send('progress', { current: doneItems, total: totalItems, step: `翻譯章節「${lesson.title}」...` });
       const lt = await translateText(lesson.title);
       const existingLT = await db.prepare('SELECT id FROM lesson_translations WHERE lesson_id=? AND lang=?').get(lesson.id, target_lang);
       if (existingLT) {
@@ -1834,20 +1915,27 @@ router.post('/courses/:id/translate', loadCoursePermission, requirePermission('o
       } else {
         await db.prepare('INSERT INTO lesson_translations (lesson_id, lang, title, is_auto) VALUES (?,?,?,1)').run(lesson.id, target_lang, lt);
       }
+      doneItems++;
 
-      // Translate slides
-      const slides = await db.prepare('SELECT id, content_json, notes FROM course_slides WHERE lesson_id=?').all(lesson.id);
-      for (const slide of slides) {
+      const slides = lessonSlideMap[lesson.id] || [];
+      for (let si = 0; si < slides.length; si++) {
+        const slide = slides[si];
+        slidesDone++;
+        send('progress', { current: doneItems, total: totalItems, step: `翻譯投影片 ${slidesDone}/${totalSlides}...`, slides_done: slidesDone, slides_total: totalSlides });
+
         let translatedContent = null;
         if (slide.content_json) {
-          const transResult = await model.generateContent(
-            `Translate the text values in this JSON from Traditional Chinese to ${langName}. Keep JSON structure, keys, and type fields unchanged. Do not translate product names. Return only valid JSON:\n\n${slide.content_json}`
-          );
-          translatedContent = transResult.response.text().trim();
-          // Clean potential markdown wrapping
-          translatedContent = translatedContent.replace(/^```json\s*/,'').replace(/```$/,'').trim();
+          try {
+            const transResult = await model.generateContent(
+              `Translate the text values in this JSON from Traditional Chinese to ${langName}. Keep JSON structure, keys, and type fields unchanged. Do not translate product names. Return only valid JSON:\n\n${slide.content_json}`
+            );
+            translatedContent = transResult.response.text().trim().replace(/^```json\s*/,'').replace(/```$/,'').trim();
+          } catch (err) {
+            console.warn(`[Translate] slide ${slide.id} content failed:`, err.message);
+          }
         }
-        const translatedNotes = await translateText(slide.notes);
+        let translatedNotes = null;
+        try { translatedNotes = await translateText(slide.notes); } catch {}
 
         const existingST = await db.prepare('SELECT id FROM slide_translations WHERE slide_id=? AND lang=?').get(slide.id, target_lang);
         if (existingST) {
@@ -1857,32 +1945,39 @@ router.post('/courses/:id/translate', loadCoursePermission, requirePermission('o
           await db.prepare('INSERT INTO slide_translations (slide_id, lang, content_json, notes, is_auto) VALUES (?,?,?,?,1)')
             .run(slide.id, target_lang, translatedContent, translatedNotes);
         }
+        doneItems++;
       }
     }
 
-    // Translate quiz
-    const questions = await db.prepare('SELECT id, question_json, explanation FROM quiz_questions WHERE course_id=?').all(req.courseId);
-    for (const q of questions) {
-      const transQ = await model.generateContent(
-        `Translate the text values in this JSON from Traditional Chinese to ${langName}. Keep JSON structure unchanged. Return only valid JSON:\n\n${q.question_json}`
-      );
-      let translatedQ = transQ.response.text().trim().replace(/^```json\s*/,'').replace(/```$/,'').trim();
-      const translatedExp = await translateText(q.explanation);
+    // 3. Quiz
+    for (let qi = 0; qi < questions.length; qi++) {
+      const q = questions[qi];
+      send('progress', { current: doneItems, total: totalItems, step: `翻譯題目 ${qi + 1}/${questions.length}...` });
+      try {
+        const transQ = await model.generateContent(
+          `Translate the text values in this JSON from Traditional Chinese to ${langName}. Keep JSON structure unchanged. Return only valid JSON:\n\n${q.question_json}`
+        );
+        let translatedQ = transQ.response.text().trim().replace(/^```json\s*/,'').replace(/```$/,'').trim();
+        const translatedExp = await translateText(q.explanation);
 
-      const existingQT = await db.prepare('SELECT id FROM quiz_translations WHERE question_id=? AND lang=?').get(q.id, target_lang);
-      if (existingQT) {
-        await db.prepare('UPDATE quiz_translations SET question_json=?, explanation=?, translated_at=SYSTIMESTAMP, is_auto=1 WHERE id=?')
-          .run(translatedQ, translatedExp, existingQT.id);
-      } else {
-        await db.prepare('INSERT INTO quiz_translations (question_id, lang, question_json, explanation, is_auto) VALUES (?,?,?,?,1)')
-          .run(q.id, target_lang, translatedQ, translatedExp);
-      }
+        const existingQT = await db.prepare('SELECT id FROM quiz_translations WHERE question_id=? AND lang=?').get(q.id, target_lang);
+        if (existingQT) {
+          await db.prepare('UPDATE quiz_translations SET question_json=?, explanation=?, translated_at=SYSTIMESTAMP, is_auto=1 WHERE id=?')
+            .run(translatedQ, translatedExp, existingQT.id);
+        } else {
+          await db.prepare('INSERT INTO quiz_translations (question_id, lang, question_json, explanation, is_auto) VALUES (?,?,?,?,1)')
+            .run(q.id, target_lang, translatedQ, translatedExp);
+        }
+      } catch (err) { console.warn(`[Translate] question ${q.id} failed:`, err.message); }
+      doneItems++;
     }
 
-    res.json({ ok: true, translated: { lessons: lessons.length, questions: questions.length } });
+    send('done', { ok: true, translated: { lessons: lessons.length, slides: totalSlides, questions: questions.length } });
   } catch (e) {
     console.error('[Training] translate:', e.message);
-    res.status(500).json({ error: e.message });
+    send('error', { error: e.message });
+  } finally {
+    res.end();
   }
 });
 
@@ -2226,35 +2321,49 @@ router.post('/recording/start', async (req, res) => {
 });
 
 // POST /api/training/recording/:sessionId/step — Extension uploads a step
+// Phase 2E: supports screenshot_raw_base64 + annotations_json
+// Phase 3A-1: screenshot_base64 is ALWAYS a clean image (no burned annotations).
+// Annotations stored separately in annotations_json. No more screenshot_raw_base64.
 router.post('/recording/:sessionId/step', upload.single('screenshot'), async (req, res) => {
   try {
     const { sessionId } = req.params;
-    const { step_number, action_type, screenshot_base64, element_info, viewport, page_url, page_title } = req.body;
+    const { step_number, action_type, screenshot_base64, screenshot_raw_base64,
+            annotations_json, lang, element_info, viewport, page_url, page_title } = req.body;
 
-    // Save screenshot
+    const dir = path.join(uploadDir, 'recordings');
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+
+    // Save screenshot (always clean — no burned annotations)
     let screenshotUrl = null;
     if (req.file) {
       screenshotUrl = `/api/training/files/${req.file.filename}`;
     } else if (screenshot_base64) {
       const base64Data = screenshot_base64.replace(/^data:image\/\w+;base64,/, '');
       const filename = `rec_${sessionId}_${step_number}_${Date.now()}.png`;
-      const dir = path.join(uploadDir, 'recordings');
-      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
       fs.writeFileSync(path.join(dir, filename), Buffer.from(base64Data, 'base64'));
+      screenshotUrl = `/api/training/files/recordings/${filename}`;
+    }
+
+    // Backward compat: if old extension still sends screenshot_raw_base64, save it as primary
+    if (!screenshotUrl && screenshot_raw_base64) {
+      const rawBase64 = screenshot_raw_base64.replace(/^data:image\/\w+;base64,/, '');
+      const filename = `rec_${sessionId}_${step_number}_${Date.now()}.png`;
+      fs.writeFileSync(path.join(dir, filename), Buffer.from(rawBase64, 'base64'));
       screenshotUrl = `/api/training/files/recordings/${filename}`;
     }
 
     const elementJson = typeof element_info === 'string' ? element_info : JSON.stringify(element_info || null);
     const viewportJson = typeof viewport === 'string' ? viewport : JSON.stringify(viewport || null);
+    const annotationsStr = annotations_json || null;
 
     const result = await db.prepare(`
       INSERT INTO recording_steps (session_id, step_number, action_type, screenshot_url,
-                                    element_json, viewport_json, page_url, page_title)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                                    annotations_json, lang, element_json, viewport_json, page_url, page_title)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(sessionId, step_number || 0, action_type || 'screenshot',
-           screenshotUrl, elementJson, viewportJson, page_url || null, page_title || null);
+           screenshotUrl, annotationsStr, lang || 'zh-TW',
+           elementJson, viewportJson, page_url || null, page_title || null);
 
-    // Update session step count
     await db.prepare('UPDATE recording_sessions SET steps_count=steps_count+1 WHERE id=?').run(sessionId);
 
     res.json({ step_id: result.lastInsertRowid, screenshot_url: screenshotUrl });
@@ -2276,6 +2385,25 @@ router.get('/recording/:sessionId', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// PUT /api/training/recording/:sessionId/steps — batch update step_number + lang
+router.put('/recording/:sessionId/steps', async (req, res) => {
+  try {
+    const { updates } = req.body; // [{ id, step_number, lang }, ...]
+    if (!Array.isArray(updates)) return res.status(400).json({ error: 'updates array required' });
+    for (const u of updates) {
+      if (u.id && (u.step_number !== undefined || u.lang !== undefined)) {
+        const sets = [];
+        const params = [];
+        if (u.step_number !== undefined) { sets.push('step_number=?'); params.push(u.step_number); }
+        if (u.lang !== undefined) { sets.push('lang=?'); params.push(u.lang); }
+        params.push(u.id, req.params.sessionId);
+        await db.prepare(`UPDATE recording_steps SET ${sets.join(',')} WHERE id=? AND session_id=?`).run(...params);
+      }
+    }
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // POST /api/training/recording/:sessionId/complete
 router.post('/recording/:sessionId/complete', async (req, res) => {
   try {
@@ -2287,6 +2415,7 @@ router.post('/recording/:sessionId/complete', async (req, res) => {
 });
 
 // POST /api/training/recording/:sessionId/analyze-step/:stepId — analyze single step
+// Phase 2E: integrates user annotations into AI prompt
 router.post('/recording/:sessionId/analyze-step/:stepId', async (req, res) => {
   try {
     const step = await db.prepare(
@@ -2295,7 +2424,14 @@ router.post('/recording/:sessionId/analyze-step/:stepId', async (req, res) => {
     if (!step) return res.status(404).json({ error: '步驟不存在' });
     if (!step.screenshot_url) return res.json({ ok: false, error: '無截圖' });
 
-    const filePath = path.join(uploadDir, step.screenshot_url.replace('/api/training/files/', ''));
+    // Phase 3A-1: screenshot_url is always clean now; fallback to raw for old data
+    const imgUrl = step.screenshot_raw_url || step.screenshot_url;
+    let filePath = path.join(uploadDir, imgUrl.replace('/api/training/files/', ''));
+    // Fallback to alt upload dir
+    if (!fs.existsSync(filePath) && fs.existsSync(altUploadDir)) {
+      const alt = path.join(altUploadDir, imgUrl.replace('/api/training/files/', ''));
+      if (fs.existsSync(alt)) filePath = alt;
+    }
     if (!fs.existsSync(filePath)) return res.json({ ok: false, error: '截圖檔案不存在' });
 
     const imageBase64 = fs.readFileSync(filePath).toString('base64');
@@ -2304,18 +2440,63 @@ router.post('/recording/:sessionId/analyze-step/:stepId', async (req, res) => {
       ? `使用者點擊了 (${elementInfo.rect.x}, ${elementInfo.rect.y}) 的 ${elementInfo.tag || ''} 元素「${elementInfo.text || ''}」。`
       : '';
 
+    // Phase 2E: Parse user annotations for prompt enrichment
+    let annotationPrompt = '';
+    if (step.annotations_json) {
+      try {
+        const annots = JSON.parse(step.annotations_json);
+        if (annots.length > 0) {
+          const stepAnnots = annots.filter(a => a.type === 'number').sort((a, b) => a.stepNumber - b.stepNumber);
+          const otherAnnots = annots.filter(a => a.type !== 'number');
+          const lines = [];
+          lines.push('使用者在截圖上做了以下標註（表示操作重點和順序）：');
+          stepAnnots.forEach(a => {
+            lines.push(`步驟 ${a.stepNumber}: ${a.type === 'number' ? '編號' : a.type}在座標 (${a.coords.x.toFixed(1)}%, ${a.coords.y.toFixed(1)}%)${a.label ? `，標註「${a.label}」` : ''}`);
+          });
+          otherAnnots.forEach(a => {
+            const typeNames = { circle: '紅色圓圈', rect: '矩形框', arrow: '箭頭', text: '文字標註', freehand: '手繪', mosaic: '馬賽克遮蔽' };
+            const tn = typeNames[a.type] || a.type;
+            if (a.type === 'arrow') {
+              lines.push(`${tn}從 (${a.coords.x.toFixed(1)}%, ${a.coords.y.toFixed(1)}%) 指向 (${a.coords.x2.toFixed(1)}%, ${a.coords.y2.toFixed(1)}%)${a.label ? `，標註「${a.label}」` : ''}`);
+            } else if (a.type === 'text') {
+              lines.push(`文字標註: 「${a.label}」在 (${a.coords.x.toFixed(1)}%, ${a.coords.y.toFixed(1)}%)`);
+            } else if (a.type !== 'mosaic') {
+              lines.push(`${tn}在 (${a.coords.x.toFixed(1)}%, ${a.coords.y.toFixed(1)}%)${a.label ? `，標註「${a.label}」` : ''}`);
+            }
+          });
+          lines.push('');
+          lines.push('請根據使用者的標註：');
+          lines.push('1. 以標註的步驟編號順序生成操作說明');
+          lines.push('2. 標註圈住/指向的元素就是該步驟的主要操作目標（設為 is_primary）');
+          lines.push('3. 文字標註作為額外說明補充到操作說明中');
+          lines.push('4. 生成旁白時按步驟順序描述');
+          annotationPrompt = '\n' + lines.join('\n') + '\n';
+        }
+      } catch { /* ignore parse errors */ }
+    }
+
+    // Phase 2E: model priority — request body > system_settings > llm_models > default
     const { GoogleGenerativeAI } = require('@google/generative-ai');
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-    const flashRow = await db.prepare(
-      `SELECT api_model FROM llm_models WHERE model_role='chat' AND is_active=1 AND provider_type='gemini' ORDER BY sort_order FETCH FIRST 1 ROWS ONLY`
-    ).get();
-    const model = genAI.getGenerativeModel({ model: flashRow?.api_model || 'gemini-2.0-flash' });
+    let modelName = req.body.model || null;
+    if (!modelName) {
+      const setting = await db.prepare(`SELECT value FROM system_settings WHERE key='training_analyze_model'`).get();
+      modelName = setting?.value || null;
+    }
+    if (!modelName) {
+      const flashRow = await db.prepare(
+        `SELECT api_model FROM llm_models WHERE model_role='chat' AND is_active=1 AND provider_type='gemini' ORDER BY sort_order FETCH FIRST 1 ROWS ONLY`
+      ).get();
+      modelName = flashRow?.api_model || 'gemini-2.0-flash';
+    }
+    const model = genAI.getGenerativeModel({ model: modelName });
 
-    const prompt = `分析這張系統操作截圖（步驟 ${step.step_number}）。${clickInfo}
+    const prompt = `分析這張系統操作截圖（步驟 ${step.step_number}）。${clickInfo}${annotationPrompt}
 識別所有可互動 UI 元素，回傳 JSON：
 { "regions": [{ "type": "...", "label": "...", "coords": { "x": 0, "y": 0, "w": 0, "h": 0 }, "is_primary": false }],
   "instruction": "操作說明", "narration": "旁白文字",
   "sensitive_areas": [{ "type": "password", "coords": { "x": 0, "y": 0, "w": 0, "h": 0 } }] }
+注意：coords 的 x, y, w, h 必須是百分比 (0-100)，相對於圖片寬高。x, y 是左上角百分比。
 只回傳 JSON。`;
 
     const result = await model.generateContent([
@@ -2326,18 +2507,31 @@ router.post('/recording/:sessionId/analyze-step/:stepId', async (req, res) => {
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     const parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : {};
 
+    // Phase 3A-1: Normalize coordinates to percentage (0-100) if AI returned pixels
+    const sizeOf = require('image-size');
+    let imgW = 1920, imgH = 1080;
+    try { const dim = sizeOf(fs.readFileSync(filePath)); if (dim.width) { imgW = dim.width; imgH = dim.height; } } catch {}
+
+    const normalizedRegions = (parsed.regions || []).map(r => {
+      const c = r.coords;
+      if (c.x > 100 || c.y > 100 || c.w > 100 || c.h > 100) {
+        return { ...r, coords: { x: c.x / imgW * 100, y: c.y / imgH * 100, w: c.w / imgW * 100, h: c.h / imgH * 100 } };
+      }
+      return r;
+    });
+
     await db.prepare(`
       UPDATE recording_steps SET ai_regions_json=?, ai_instruction=?, ai_narration=?,
              is_sensitive=? WHERE id=?
     `).run(
-      JSON.stringify(parsed.regions || []),
+      JSON.stringify(normalizedRegions),
       parsed.instruction || null,
       parsed.narration || null,
       (parsed.sensitive_areas?.length > 0) ? 1 : 0,
       step.id
     );
 
-    res.json({ ok: true, step_id: step.id, ...parsed });
+    res.json({ ok: true, step_id: step.id, regions: normalizedRegions, instruction: parsed.instruction, narration: parsed.narration });
   } catch (e) {
     console.error('[Training] analyze step:', e.message);
     res.status(500).json({ error: e.message });
@@ -2444,76 +2638,149 @@ router.post('/recording/:sessionId/generate', async (req, res) => {
       lessonId = r.lastInsertRowid;
     }
 
-    // Create slides from steps — every step gets instruction text + screenshot
+    // Phase 3A-2: separate steps by language — zh-TW builds main slides, others become image_overrides
+    const zhSteps = steps.filter(s => !s.lang || s.lang === 'zh-TW');
+    const otherLangSteps = steps.filter(s => s.lang && s.lang !== 'zh-TW');
+
+    // Create slides from zh-TW steps
     let slideCount = 0;
-    for (const step of steps) {
+    const stepToSlideId = {}; // map step_number → slide id (for image_overrides)
+    for (const step of zhSteps) {
       if (!step.screenshot_url) continue;
 
-      const regions = step.ai_regions_json ? (() => { try { return JSON.parse(step.ai_regions_json) } catch { return [] } })() : [];
+      // Phase 3A-1: Simplified slide generation — clean image + annotations layer
+      const aiRegions = step.ai_regions_json ? (() => { try { return JSON.parse(step.ai_regions_json) } catch { return [] } })() : [];
       const instruction = step.ai_instruction || step.final_instruction || `步驟 ${step.step_number}`;
       const narration = step.ai_narration || instruction;
 
-      // Build hotspot regions with label, type, and feedback
-      const hotspotRegions = regions.map((r, i) => ({
-        id: `r${i + 1}`,
-        shape: 'rect',
-        coords: r.coords,
-        correct: r.is_primary || false,
-        label: r.label || `元素 ${i + 1}`,
-        type: r.type || '',
-        feedback: r.is_primary
-          ? `正確！${r.label ? '這就是「' + r.label + '」。' : ''}`
-          : `這是「${r.label || '其他元素'}」(${r.type || ''})，請找到正確的操作位置。`
-      }));
+      // Parse user annotations
+      const userAnnotations = step.annotations_json
+        ? (() => { try { return JSON.parse(step.annotations_json) } catch { return [] } })()
+        : [];
 
-      const hasPrimary = regions.some(r => r.is_primary);
-      const slideType = hasPrimary ? 'hotspot' : 'content';
+      // Only keep AI regions that overlap with user annotation positions (correct targets)
+      // If user annotated specific spots, those are the intended interactive targets
+      const userNumberAnnotations = userAnnotations.filter(a => a.type === 'number');
+      let hotspotRegions;
+      if (userNumberAnnotations.length > 0 && aiRegions.length > 0) {
+        // Match: find AI regions closest to each user number annotation
+        hotspotRegions = userNumberAnnotations.map((ua, i) => {
+          const closest = aiRegions.reduce((best, r) => {
+            const cx = r.coords.x + (r.coords.w || 0) / 2;
+            const cy = r.coords.y + (r.coords.h || 0) / 2;
+            const dist = Math.sqrt((cx - ua.coords.x) ** 2 + (cy - ua.coords.y) ** 2);
+            return dist < best.dist ? { r, dist } : best;
+          }, { r: null, dist: Infinity });
+          if (closest.r && closest.dist < 30) { // within 30% proximity
+            return {
+              id: `r${i + 1}`, shape: 'rect', coords: closest.r.coords,
+              correct: true, label: closest.r.label || ua.label || `步驟 ${ua.stepNumber}`,
+              type: closest.r.type || '',
+              feedback: `正確！${closest.r.label ? '這就是「' + closest.r.label + '」。' : ''}`
+            };
+          }
+          return null;
+        }).filter(Boolean);
+      } else {
+        // No user annotations or no AI regions: only keep is_primary
+        hotspotRegions = aiRegions.filter(r => r.is_primary).map((r, i) => ({
+          id: `r${i + 1}`, shape: 'rect', coords: r.coords,
+          correct: true, label: r.label || `元素 ${i + 1}`, type: r.type || '',
+          feedback: `正確！${r.label ? '這就是「' + r.label + '」。' : ''}`
+        }));
+      }
 
-      // Build content blocks:
-      // 1. Text instruction (title + description)
-      // 2. Hotspot or Image
+      const slideType = hotspotRegions.length > 0 ? 'hotspot' : 'content';
+
+      // Image: always use clean screenshot (Phase 3A-1: screenshot_url is always clean for new data)
+      const displayImage = step.screenshot_raw_url || step.screenshot_url;
+
+      // Read image dimensions
+      const sizeOf = require('image-size');
+      let imageDimensions = null;
+      try {
+        let imgPath = path.join(uploadDir, displayImage.replace('/api/training/files/', ''));
+        if (!fs.existsSync(imgPath) && fs.existsSync(altUploadDir)) {
+          imgPath = path.join(altUploadDir, displayImage.replace('/api/training/files/', ''));
+        }
+        if (fs.existsSync(imgPath)) {
+          const dim = sizeOf(fs.readFileSync(imgPath));
+          if (dim.width) imageDimensions = { w: dim.width, h: dim.height };
+        }
+      } catch {}
+
+      // For old data without raw: detect if annotations are burned into image
+      const hasRaw = !!step.screenshot_raw_url;
+      const slideAnnotations = (hasRaw || !userAnnotations.length) ? userAnnotations.filter(a => a.visible !== false) : [];
+
       const blocks = [];
-
-      // Always add instruction text first
-      blocks.push({
-        type: 'text',
-        content: `## 步驟 ${step.step_number}\n\n${instruction}`
-      });
 
       if (slideType === 'hotspot') {
         blocks.push({
           type: 'hotspot',
-          image: step.screenshot_url,
+          image: displayImage,
           instruction: instruction,
           regions: hotspotRegions,
+          annotations: slideAnnotations,
+          annotations_in_image: !hasRaw && userAnnotations.length > 0,
+          coordinate_system: 'percent',
+          image_dimensions: imageDimensions,
           max_attempts: 3,
           show_hint_after: 2
         });
       } else {
         blocks.push({
-          type: 'image',
-          src: step.screenshot_url,
-          alt: instruction
+          type: 'text',
+          content: `## 步驟 ${step.step_number}\n\n${instruction}`
         });
-      }
-
-      // Add callout if there are tips from AI
-      if (regions.length > 0 && !hasPrimary) {
-        const elementList = regions.map(r => `**${r.label}** (${r.type})`).join('、');
         blocks.push({
-          type: 'callout',
-          variant: 'tip',
-          content: `此畫面包含以下操作元素：${elementList}`
+          type: 'image',
+          src: displayImage,
+          alt: instruction,
+          annotations: slideAnnotations,
+          annotations_in_image: !hasRaw && userAnnotations.length > 0,
+          coordinate_system: 'percent',
+          image_dimensions: imageDimensions
         });
       }
 
       const contentJson = JSON.stringify(blocks);
 
-      await db.prepare(`
+      const slideResult = await db.prepare(`
         INSERT INTO course_slides (lesson_id, sort_order, slide_type, content_json, notes)
         VALUES (?, ?, ?, ?, ?)
       `).run(lessonId, step.step_number, slideType, contentJson, narration);
+      stepToSlideId[step.step_number] = slideResult.lastInsertRowid;
       slideCount++;
+    }
+
+    // Phase 3A-2: Map other-language screenshots to image_overrides
+    for (const langStep of otherLangSteps) {
+      if (!langStep.screenshot_url) continue;
+      const slideId = stepToSlideId[langStep.step_number];
+      if (!slideId) continue;
+
+      const lang = langStep.lang;
+      // Find the image block index (hotspot or image block in content_json)
+      const slide = await db.prepare('SELECT content_json FROM course_slides WHERE id=?').get(slideId);
+      if (!slide) continue;
+      let blocks;
+      try { blocks = JSON.parse(slide.content_json || '[]'); } catch { continue; }
+      const imgBlockIdx = blocks.findIndex(b => b.type === 'hotspot' || b.type === 'image');
+      if (imgBlockIdx < 0) continue;
+
+      // Upsert slide_translations with image_overrides
+      const existing = await db.prepare('SELECT id, image_overrides FROM slide_translations WHERE slide_id=? AND lang=?').get(slideId, lang);
+      let overrides = {};
+      if (existing?.image_overrides) { try { overrides = JSON.parse(existing.image_overrides); } catch {} }
+      overrides[String(imgBlockIdx)] = langStep.screenshot_url;
+      const overridesJson = JSON.stringify(overrides);
+
+      if (existing) {
+        await db.prepare('UPDATE slide_translations SET image_overrides=? WHERE id=?').run(overridesJson, existing.id);
+      } else {
+        await db.prepare('INSERT INTO slide_translations (slide_id, lang, image_overrides) VALUES (?,?,?)').run(slideId, lang, overridesJson);
+      }
     }
 
     res.json({ ok: true, course_id: courseId, lesson_id: lessonId, slides_created: slideCount });
@@ -2521,6 +2788,853 @@ router.post('/recording/:sessionId/generate', async (req, res) => {
     console.error('[Training] generate from recording:', e.message);
     res.status(500).json({ error: e.message });
   }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Phase 2F: HTML5 Single-file Export
+// ═══════════════════════════════════════════════════════════════════════════════
+
+router.post('/courses/:id/export', loadCoursePermission, requirePermission('owner', 'admin', 'develop'), async (req, res) => {
+  try {
+    const { languages = ['zh-TW'], include_quiz = true, include_audio = true, include_annotations = true, compress_images = true } = req.body;
+    const courseId = req.courseId;
+
+    // 1. Load course
+    const course = await db.prepare('SELECT * FROM courses WHERE id=?').get(courseId);
+    if (!course) return res.status(404).json({ error: '課程不存在' });
+
+    // 2. Load lessons
+    const lessons = await db.prepare('SELECT * FROM course_lessons WHERE course_id=? ORDER BY sort_order').all(courseId);
+
+    // 3. Build slide data per language
+    const slidesByLang = {};
+    const titleByLang = {};
+    const descByLang = {};
+
+    for (const lang of languages) {
+      titleByLang[lang] = course.title;
+      descByLang[lang] = course.description;
+
+      // Course translation
+      if (lang !== 'zh-TW') {
+        const ct = await db.prepare('SELECT title, description FROM course_translations WHERE course_id=? AND lang=?').get(courseId, lang);
+        if (ct?.title) titleByLang[lang] = ct.title;
+        if (ct?.description) descByLang[lang] = ct.description;
+      }
+
+      const allSlides = [];
+      for (const lesson of lessons) {
+        let lessonTitle = lesson.title;
+        if (lang !== 'zh-TW') {
+          const lt = await db.prepare('SELECT title FROM lesson_translations WHERE lesson_id=? AND lang=?').get(lesson.id, lang);
+          if (lt?.title) lessonTitle = lt.title;
+        }
+
+        const slides = await db.prepare('SELECT * FROM course_slides WHERE lesson_id=? ORDER BY sort_order').all(lesson.id);
+        for (const slide of slides) {
+          let contentJson = slide.content_json;
+          let notes = slide.notes;
+
+          // Translated content + image overrides
+          if (lang !== 'zh-TW') {
+            const st = await db.prepare('SELECT content_json, notes, image_overrides FROM slide_translations WHERE slide_id=? AND lang=?').get(slide.id, lang);
+            if (st?.content_json) contentJson = st.content_json;
+            if (st?.notes) notes = st.notes;
+            // Phase 3A-2: Apply image overrides for this language
+            if (st?.image_overrides) {
+              try {
+                const overrides = JSON.parse(st.image_overrides);
+                const tmpBlocks = JSON.parse(contentJson || '[]');
+                for (const [idx, val] of Object.entries(overrides)) {
+                  if (idx === 'region_overrides') continue;
+                  const block = tmpBlocks[Number(idx)];
+                  if (block && typeof val === 'string') {
+                    if (block.image) block.image = val;
+                    if (block.src) block.src = val;
+                  }
+                }
+                // Region overrides
+                const regionOvr = overrides.region_overrides;
+                if (regionOvr) {
+                  for (const block of tmpBlocks) {
+                    if (block.regions) {
+                      block.regions = block.regions.map(r => {
+                        const ovr = regionOvr[r.id];
+                        return ovr ? { ...r, coords: { ...r.coords, ...ovr } } : r;
+                      });
+                    }
+                  }
+                }
+                contentJson = JSON.stringify(tmpBlocks);
+              } catch {}
+            }
+          }
+
+          // Parse and embed images as base64
+          let blocks = [];
+          try { blocks = JSON.parse(contentJson || '[]'); } catch {}
+
+          const findFile = (rel) => {
+              const p1 = path.join(uploadDir, rel);
+              if (fs.existsSync(p1)) return p1;
+              if (fs.existsSync(altUploadDir)) {
+                const p2 = path.join(altUploadDir, rel);
+                if (fs.existsSync(p2)) return p2;
+              }
+              return null;
+            };
+
+          for (const block of blocks) {
+            // Safety: if annotations are burned into the image, clear SVG annotations to prevent doubles.
+            // Detection: annotations_in_image flag, OR image URL doesn't contain "_raw" while annotations exist
+            if (block.annotations_in_image ||
+                (block.annotations?.length > 0 && (block.image || block.src) &&
+                 !(block.image || block.src || '').includes('_raw'))) {
+              block.annotations = [];
+            }
+            const imgFields = ['image', 'src'];
+            const sizeOf = require('image-size');
+            for (const field of imgFields) {
+              if (block[field] && block[field].startsWith('/api/training/files/')) {
+                const rel = block[field].replace('/api/training/files/', '');
+                const imgPath = findFile(rel);
+                if (imgPath) {
+                  const buf = fs.readFileSync(imgPath);
+                  // Read actual image dimensions for accurate coordinate conversion
+                  try {
+                    const dim = sizeOf(buf);
+                    if (dim.width && dim.height) { block._imgW = dim.width; block._imgH = dim.height; }
+                  } catch {}
+                  const ext = path.extname(imgPath).toLowerCase();
+                  const mime = ext === '.png' ? 'image/png' : 'image/jpeg';
+                  block[field] = `data:${mime};base64,${buf.toString('base64')}`;
+                }
+              }
+            }
+            // Embed step images
+            if (block.items) {
+              for (const item of block.items) {
+                if (item.image && item.image.startsWith('/api/training/files/')) {
+                  const imgPath = findFile(item.image.replace('/api/training/files/', ''));
+                  if (imgPath) {
+                    item.image = `data:image/png;base64,${fs.readFileSync(imgPath).toString('base64')}`;
+                  }
+                }
+              }
+            }
+            // Remove annotations if not requested
+            if (!include_annotations && block.annotations) {
+              delete block.annotations;
+            }
+          }
+
+          // Audio embed
+          let audioData = null;
+          if (include_audio && slide.audio_url) {
+            const audioPath = findFile(slide.audio_url.replace('/api/training/files/', '')) || path.join(uploadDir, slide.audio_url.replace('/api/training/files/', ''));
+            if (fs.existsSync(audioPath)) {
+              audioData = `data:audio/mpeg;base64,${fs.readFileSync(audioPath).toString('base64')}`;
+            }
+          }
+
+          allSlides.push({
+            lesson: lessonTitle,
+            type: slide.slide_type,
+            blocks,
+            notes,
+            audio: audioData
+          });
+        }
+      }
+      slidesByLang[lang] = allSlides;
+    }
+
+    // 4. Load quiz if requested
+    const quizByLang = {};
+    if (include_quiz) {
+      const questions = await db.prepare('SELECT * FROM quiz_questions WHERE course_id=? ORDER BY sort_order').all(courseId);
+      for (const lang of languages) {
+        const langQuestions = [];
+        for (const q of questions) {
+          let questionJson = q.question_json;
+          let explanation = q.explanation;
+          if (lang !== 'zh-TW') {
+            const qt = await db.prepare('SELECT question_json, explanation FROM quiz_translations WHERE question_id=? AND lang=?').get(q.id, lang);
+            if (qt?.question_json) questionJson = qt.question_json;
+            if (qt?.explanation) explanation = qt.explanation;
+          }
+          langQuestions.push({ question_json: questionJson, explanation, points: q.points });
+        }
+        quizByLang[lang] = langQuestions;
+      }
+    }
+
+    // 5. Build HTML
+    const courseData = {
+      title: titleByLang,
+      description: descByLang,
+      slides: slidesByLang,
+      quiz: quizByLang,
+      settings: {
+        passScore: course.pass_score || 70,
+        languages,
+        exportedAt: new Date().toISOString(),
+        exportedBy: req.user.name || req.user.username
+      }
+    };
+
+    const html = buildExportHtml(courseData);
+
+    // 6. Save and return
+    const exportDir = path.join(uploadDir, 'exports');
+    if (!fs.existsSync(exportDir)) fs.mkdirSync(exportDir, { recursive: true });
+    const filename = `course_${courseId}_${Date.now()}.html`;
+    const filePath = path.join(exportDir, filename);
+    fs.writeFileSync(filePath, html, 'utf-8');
+
+    res.json({
+      ok: true,
+      download_url: `/api/training/files/exports/${filename}`,
+      file_size_bytes: Buffer.byteLength(html, 'utf-8'),
+      filename
+    });
+  } catch (e) {
+    console.error('[Training] export:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+function buildExportHtml(courseData) {
+  const dataJson = JSON.stringify(courseData);
+  return `<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${courseData.title['zh-TW'] || 'FOXLINK 教育訓練'}</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#f1f5f9;color:#1e293b}
+#app{max-width:1200px;margin:0 auto;min-height:100vh;display:flex;flex-direction:column}
+.topbar{background:#fff;border-bottom:1px solid #e2e8f0;padding:10px 20px;display:flex;align-items:center;gap:12px;position:sticky;top:0;z-index:10}
+.topbar h1{font-size:15px;font-weight:600;flex:1}
+.topbar select{border:1px solid #cbd5e1;border-radius:6px;padding:4px 8px;font-size:12px;background:#fff}
+.main{flex:1;padding:20px;display:flex;flex-direction:column;gap:16px}
+.slide-card{background:#fff;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,.08);overflow:hidden}
+.slide-content{display:flex;gap:16px;padding:16px}
+.slide-img-wrap{flex:1;position:relative;border-radius:8px;overflow:hidden;background:#0f172a}
+.slide-img-wrap img{width:100%;display:block}
+.slide-info{width:220px;flex-shrink:0;display:flex;flex-direction:column;gap:10px}
+.info-card{background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px;font-size:13px;line-height:1.6}
+.info-card .label{font-size:10px;font-weight:600;color:#64748b;margin-bottom:4px;text-transform:uppercase}
+.text-block{padding:16px;font-size:14px;line-height:1.7}
+.text-block h1,.text-block h2,.text-block h3{margin:8px 0 4px;color:#1e293b}
+.text-block h2{font-size:16px}
+.callout{padding:12px 16px;border-left:4px solid #0ea5e9;background:rgba(14,165,233,.06);margin:8px 16px;border-radius:0 8px 8px 0;font-size:13px}
+.callout.warning{border-color:#eab308;background:rgba(234,179,8,.06)}
+.callout.important{border-color:#ef4444;background:rgba(239,68,68,.06)}
+.bottom{background:#fff;border-top:1px solid #e2e8f0;padding:10px 20px;display:flex;align-items:center;gap:12px;position:sticky;bottom:0}
+.bottom button{border:none;background:#2563eb;color:#fff;border-radius:8px;padding:8px 16px;font-size:13px;cursor:pointer;font-weight:500}
+.bottom button:hover{background:#1d4ed8}
+.bottom button:disabled{opacity:.3;cursor:default}
+.bottom .bar{flex:1;height:6px;background:#e2e8f0;border-radius:3px;overflow:hidden}
+.bottom .bar div{height:100%;background:#2563eb;border-radius:3px;transition:width .3s}
+.bottom .counter{font-size:12px;color:#64748b;width:60px;text-align:center}
+.regions{position:absolute;inset:0}
+.regions .r{position:absolute;border:2px solid rgba(59,130,246,.5);border-radius:4px;background:rgba(59,130,246,.05);cursor:pointer;transition:.15s}
+.regions .r:hover{background:rgba(59,130,246,.15);border-color:#3b82f6}
+.regions.has-ann .r{border-color:transparent!important;background:transparent!important}
+.regions.has-ann .r:hover{background:rgba(59,130,246,.1)!important;border-color:rgba(59,130,246,.3)!important}
+.regions.has-ann .tag{display:none}
+.regions .r.correct-hit{border-color:#22c55e;background:rgba(34,197,94,.2);animation:pulse-g .6s}
+.regions .r.wrong-hit{border-color:#ef4444;background:rgba(239,68,68,.15);animation:shake .4s}
+.regions .r .tag{position:absolute;top:-22px;left:0;font-size:9px;font-weight:700;background:#3b82f6;color:#fff;padding:1px 6px;border-radius:3px;white-space:nowrap}
+@keyframes pulse-g{0%,100%{box-shadow:0 0 0 0 rgba(34,197,94,.4)}50%{box-shadow:0 0 0 8px rgba(34,197,94,0)}}
+@keyframes shake{0%,100%{transform:translateX(0)}25%{transform:translateX(-4px)}75%{transform:translateX(4px)}}
+/* Annotation SVG */
+.ann-svg{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;overflow:visible}
+/* Quiz */
+.quiz-wrap{background:#fff;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,.08);padding:20px;margin:16px 0}
+.quiz-q{margin-bottom:16px;padding-bottom:16px;border-bottom:1px solid #f1f5f9}
+.quiz-q:last-child{border:none}
+.quiz-q h4{font-size:14px;margin-bottom:8px}
+.quiz-q label{display:block;padding:6px 10px;margin:3px 0;border-radius:6px;cursor:pointer;font-size:13px;border:1px solid #e2e8f0;transition:.15s}
+.quiz-q label:hover{background:#f8fafc}
+.quiz-q label.selected{background:#eff6ff;border-color:#93c5fd}
+.quiz-q label.correct{background:#f0fdf4;border-color:#86efac}
+.quiz-q label.wrong{background:#fef2f2;border-color:#fca5a5}
+.quiz-result{text-align:center;padding:20px;font-size:18px;font-weight:700}
+.quiz-result.pass{color:#16a34a}
+.quiz-result.fail{color:#dc2626}
+.badge{display:inline-block;font-size:10px;font-weight:600;padding:2px 8px;border-radius:4px;background:#eff6ff;color:#2563eb}
+@media(max-width:768px){.slide-content{flex-direction:column}.slide-info{width:100%}}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+(function(){
+const D=${dataJson};
+const langs=D.settings.languages||['zh-TW'];
+let lang=langs[0],idx=0,quizMode=false,quizAnswers={},quizSubmitted=false;
+const $=s=>document.querySelector(s);
+const app=$('#app');
+
+function render(){
+  const slides=D.slides[lang]||[];
+  const title=D.title[lang]||D.title['zh-TW']||'';
+  const desc=D.description[lang]||'';
+  const s=slides[idx];
+
+  let topHtml='<div class="topbar"><h1>'+esc(title)+'</h1>';
+  if(langs.length>1){
+    topHtml+='<select id="langSel">';
+    const ln={'zh-TW':'繁體中文','en':'English','vi':'Tiếng Việt'};
+    langs.forEach(l=>{topHtml+='<option value="'+l+'"'+(l===lang?' selected':'')+'>'+ln[l]+'</option>'});
+    topHtml+='</select>';
+  }
+  topHtml+='<span class="badge">'+esc(D.settings.exportedBy||'')+'</span></div>';
+
+  let mainHtml='<div class="main">';
+  if(quizMode){
+    mainHtml+=renderQuiz();
+  } else if(s){
+    mainHtml+=renderSlide(s,idx);
+  }
+  mainHtml+='</div>';
+
+  const total=slides.length+(D.quiz[lang]?.length?1:0);
+  const cur=quizMode?total:idx+1;
+  let botHtml='<div class="bottom">';
+  botHtml+='<button id="prev" '+(cur<=1?'disabled':'')+'>◀ 上一頁</button>';
+  botHtml+='<div class="bar"><div style="width:'+((cur/total)*100)+'%"></div></div>';
+  botHtml+='<span class="counter">'+cur+' / '+total+'</span>';
+  botHtml+='<button id="next" '+(cur>=total?'disabled':'')+'>下一頁 ▶</button>';
+  botHtml+='</div>';
+
+  app.innerHTML=topHtml+mainHtml+botHtml;
+
+  // Events
+  const langSel=$('#langSel');
+  if(langSel) langSel.onchange=function(){lang=this.value;idx=0;quizMode=false;render()};
+  const prev=$('#prev'),next=$('#next');
+  if(prev) prev.onclick=()=>{if(quizMode){quizMode=false;idx=(D.slides[lang]||[]).length-1}else if(idx>0)idx--;render()};
+  if(next) next.onclick=()=>{const sl=D.slides[lang]||[];if(!quizMode&&idx<sl.length-1)idx++;else if(!quizMode&&idx===sl.length-1&&D.quiz[lang]?.length){quizMode=true}render()};
+}
+
+function renderSlide(s,i){
+  let h='<div class="slide-card">';
+  const blocks=s.blocks||[];
+  let hasImg=false,imgHtml='',infoHtml='';
+  // Collect instruction from hotspot/image block to avoid duplicate with text block
+  let hotspotInstruction='';
+
+  for(const b of blocks){
+    if((b.type==='hotspot'||b.type==='image')&&(b.image||b.src)){
+      hasImg=true;
+      hotspotInstruction=b.instruction||'';
+      const imgSrc=b.image||b.src;
+      imgHtml='<div class="slide-img-wrap" data-slide="'+i+'"><img src="'+imgSrc+'" alt="">';
+      // Annotations SVG (user-drawn step numbers, circles, arrows)
+      // Only render SVG annotations if they're NOT already burned into the image
+      var hasAnnotations=b.annotations?.length>0 && !b.annotations_in_image;
+      if(hasAnnotations){
+        imgHtml+=renderAnnotationsSvg(b.annotations);
+      }
+      // Regions — interactive click areas
+      if(b.regions?.length){
+        // Only show correct region(s) as interactive
+        var correctRegs=b.regions.filter(function(r){return r.correct});
+        if(correctRegs.length>0){
+          // Phase 3A-1: Use coordinate_system if available; fallback to heuristic
+          var isPercent=b.coordinate_system==='percent';
+          var isPixel=!isPercent&&correctRegs.some(function(r){return r.coords.x>100||r.coords.y>100});
+          var sw=100,sh=100;
+          if(isPixel){sw=b._imgW||(b.image_dimensions&&b.image_dimensions.w)||100;sh=b._imgH||(b.image_dimensions&&b.image_dimensions.h)||100;}
+          imgHtml+='<div class="regions'+(hasAnnotations?' has-ann':'')+'">';
+          correctRegs.forEach((r,ri)=>{
+            var cx=r.coords.x/sw*100,cy=r.coords.y/sh*100,cw=r.coords.w/sw*100,ch=r.coords.h/sh*100;
+            imgHtml+='<div class="r" data-idx="'+ri+'" data-correct="1" data-feedback="'+encodeURIComponent(r.feedback||r.label||'')+'" style="left:'+cx.toFixed(2)+'%;top:'+cy.toFixed(2)+'%;width:'+cw.toFixed(2)+'%;height:'+ch.toFixed(2)+'%">'
+              +'<span class="tag">'+esc(r.label||'')+'</span></div>';
+          });
+          imgHtml+='</div>';
+        }
+      }
+      imgHtml+='</div>';
+      // Instruction — only in info panel
+      if(b.instruction){
+        infoHtml+='<div class="info-card"><div class="label">操作說明</div>'+simpleMarkdown(b.instruction)+'</div>';
+      }
+    } else if(b.type==='text'&&b.content){
+      // Skip text block if its content is same as hotspot instruction (avoid duplicate)
+      // Text block from generate is always "## 步驟 N\\n\\n{instruction}" — check overlap
+      // We'll collect and compare later
+      infoHtml+='<!--text:'+esc(b.content)+'-->';
+    } else if(b.type==='callout'){
+      const v=b.variant||'tip';
+      const labels={tip:'提示',warning:'警告',note:'注意',important:'重要'};
+      infoHtml+='<div class="callout '+v+'"><strong>'+labels[v]+'：</strong>'+esc(b.content||'')+'</div>';
+    } else if(b.type==='steps'&&b.items){
+      let st='<div class="info-card"><div class="label">操作步驟</div><ol style="padding-left:16px;margin:4px 0">';
+      b.items.forEach(it=>{st+='<li style="margin:4px 0"><strong>'+esc(it.title||'')+'</strong>'+(it.desc?' — '+esc(it.desc):'')+'</li>'});
+      st+='</ol></div>';
+      infoHtml+=st;
+    }
+  }
+
+  // Remove text block HTML comments (we skip them when hotspot instruction exists to avoid duplicate)
+  if(hotspotInstruction){
+    infoHtml=infoHtml.replace(/<!--text:.*?-->/g,'');
+  } else {
+    // No hotspot instruction — convert text comments to real cards
+    infoHtml=infoHtml.replace(/<!--text:(.*?)-->/g,(m,txt)=>{
+      return '<div class="info-card"><div class="label">步驟說明</div>'+simpleMarkdown(decEsc(txt))+'</div>';
+    });
+  }
+
+  if(hasImg){
+    // Interaction hint
+    const hasCorrect=blocks.some(b=>b.regions?.some(r=>r.correct));
+    if(hasCorrect){
+      infoHtml+='<div class="info-card" style="border-color:#2563eb;background:#eff6ff"><div class="label" style="color:#2563eb">互動練習</div>點擊左側截圖中正確的操作位置</div>';
+    }
+    // Feedback area
+    infoHtml+='<div id="fb-'+i+'" style="display:none" class="info-card"></div>';
+    h+='<div class="slide-content">'+imgHtml+'<div class="slide-info">'+infoHtml+'</div></div>';
+  } else {
+    // Text-only slide
+    for(const b of blocks){
+      if(b.type==='text') h+='<div class="text-block">'+simpleMarkdown(b.content||'')+'</div>';
+      else if(b.type==='callout'){
+        const v=b.variant||'tip';
+        h+='<div class="callout '+v+'"><strong>'+(v==='tip'?'提示':v==='warning'?'警告':'注意')+'：</strong>'+esc(b.content||'')+'</div>';
+      }
+    }
+  }
+
+  // Audio
+  if(s.audio){
+    h+='<div style="padding:8px 16px"><audio controls src="'+s.audio+'" style="height:32px;width:100%"></audio></div>';
+  }
+
+  h+='</div>';
+  return h;
+}
+
+function renderAnnotationsSvg(anns){
+  let svg='<svg class="ann-svg" viewBox="0 0 100 100" preserveAspectRatio="xMidYMid meet"><defs>'
+    +'<marker id="ah" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto"><polygon points="0 0,10 3.5,0 7" fill="currentColor"/></marker></defs>';
+  anns.forEach(a=>{
+    if(a.visible===false)return;
+    const c=a.color||'#ef4444';
+    const sw=((a.strokeWidth||3)/3)*0.3;
+    switch(a.type){
+      case'number':
+        svg+='<circle cx="'+a.coords.x+'" cy="'+a.coords.y+'" r="2.2" fill="'+c+'" stroke="#fff" stroke-width="0.15"/>';
+        svg+='<text x="'+a.coords.x+'" y="'+a.coords.y+'" fill="#fff" font-size="2" text-anchor="middle" dominant-baseline="central" font-weight="bold">'+a.stepNumber+'</text>';
+        if(a.label) svg+='<text x="'+(a.coords.x+3.5)+'" y="'+(a.coords.y+0.5)+'" fill="'+c+'" font-size="1.6" font-weight="600" stroke="#000" stroke-width="0.1" paint-order="stroke">'+esc(a.label)+'</text>';
+        break;
+      case'circle':
+        svg+='<ellipse cx="'+a.coords.x+'" cy="'+a.coords.y+'" rx="'+(a.coords.rx||5)+'" ry="'+(a.coords.ry||5)+'" fill="none" stroke="'+c+'" stroke-width="'+sw+'"/>';
+        break;
+      case'rect':
+        svg+='<rect x="'+a.coords.x+'" y="'+a.coords.y+'" width="'+(a.coords.w||10)+'" height="'+(a.coords.h||5)+'" fill="none" stroke="'+c+'" stroke-width="'+sw+'"/>';
+        break;
+      case'arrow':
+        svg+='<g style="color:'+c+'"><line x1="'+a.coords.x+'" y1="'+a.coords.y+'" x2="'+(a.coords.x2||a.coords.x+10)+'" y2="'+(a.coords.y2||a.coords.y)+'" stroke="'+c+'" stroke-width="'+sw+'" marker-end="url(#ah)"/></g>';
+        break;
+      case'text':
+        svg+='<text x="'+a.coords.x+'" y="'+a.coords.y+'" fill="'+c+'" font-size="2" font-weight="600" stroke="#000" stroke-width="0.1" paint-order="stroke">'+esc(a.label||'')+'</text>';
+        break;
+      case'freehand':
+        if(a.coords.points?.length>1){
+          let d=a.coords.points.map((p,i)=>(i?'L':'M')+' '+p.x+' '+p.y).join(' ');
+          svg+='<path d="'+d+'" fill="none" stroke="'+c+'" stroke-width="'+sw+'" stroke-linecap="round"/>';
+        }
+        break;
+    }
+  });
+  svg+='</svg>';
+  return svg;
+}
+
+function renderQuiz(){
+  const qs=D.quiz[lang]||[];
+  if(!qs.length) return '<div class="quiz-wrap"><p>無測驗題</p></div>';
+  let h='<div class="quiz-wrap"><h3 style="margin-bottom:16px;font-size:16px">測驗</h3>';
+  qs.forEach((q,qi)=>{
+    let qd={};
+    try{qd=JSON.parse(q.question_json)}catch{}
+    h+='<div class="quiz-q"><h4>'+(qi+1)+'. '+esc(qd.question||qd.text||'')+'</h4>';
+    (qd.options||[]).forEach((opt,oi)=>{
+      const sel=quizAnswers[qi]===oi;
+      let cls=sel?'selected':'';
+      if(quizSubmitted){cls=opt.correct?'correct':(sel?'wrong':'');}
+      h+='<label class="'+cls+'" data-q="'+qi+'" data-o="'+oi+'"><input type="radio" name="q'+qi+'" style="margin-right:6px"'+(sel?' checked':'')+'>'+esc(typeof opt==='string'?opt:opt.text||'')+'</label>';
+    });
+    if(quizSubmitted&&q.explanation){
+      h+='<div style="margin-top:8px;font-size:12px;color:#64748b">💡 '+esc(q.explanation)+'</div>';
+    }
+    h+='</div>';
+  });
+  if(!quizSubmitted){
+    h+='<button id="submitQuiz" style="background:#2563eb;color:#fff;border:none;padding:10px 24px;border-radius:8px;font-size:14px;cursor:pointer">提交答案</button>';
+  } else {
+    // Score
+    let score=0,total=0;
+    qs.forEach((q,qi)=>{
+      let qd={};try{qd=JSON.parse(q.question_json)}catch{}
+      const pts=q.points||10;total+=pts;
+      const selOpt=(qd.options||[])[quizAnswers[qi]];
+      if(selOpt&&(selOpt.correct||selOpt.is_correct))score+=pts;
+    });
+    const pass=score>=D.settings.passScore*(total/100);
+    h+='<div class="quiz-result '+(pass?'pass':'fail')+'">'+(pass?'✅ 通過':'❌ 未通過')+' — '+score+'/'+total+' 分</div>';
+  }
+  h+='</div>';
+  return h;
+}
+
+function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
+function decEsc(s){return String(s||'').replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"')}
+function simpleMarkdown(s){
+  var t=esc(s);
+  t=t.split(String.fromCharCode(10)).join('<br>');
+  t=t.replace(new RegExp('([.:' + String.fromCharCode(12290) + '])\\\\s*' + String.fromCharCode(27493,39519),'g'),'$1<br>' + String.fromCharCode(27493,39519));
+  t=t.replace(new RegExp('^## (.+)$','gm'),'<h2 style="font-size:15px;margin:6px 0">$1</h2>');
+  t=t.replace(new RegExp('^### (.+)$','gm'),'<h3 style="font-size:14px;margin:4px 0">$1</h3>');
+  t=t.replace(new RegExp('[*][*](.+?)[*][*]','g'),'<strong>$1</strong>');
+  var bt=String.fromCharCode(96);
+  t=t.replace(new RegExp(bt+'(.+?)'+bt,'g'),'<code style="background:#f1f5f9;padding:1px 4px;border-radius:3px">$1</code>');
+  t=t.replace(new RegExp('^(<br>)+'),'');
+  return t;
+}
+
+// Init
+render();
+
+// Key nav
+document.addEventListener('keydown',e=>{
+  if(e.key==='ArrowRight'||e.key===' '){e.preventDefault();$('#next')?.click()}
+  if(e.key==='ArrowLeft'){e.preventDefault();$('#prev')?.click()}
+});
+
+// Hotspot region click interaction
+document.addEventListener('click',e=>{
+  const region=e.target.closest('.regions .r');
+  if(region){
+    const slideWrap=region.closest('.slide-img-wrap');
+    const si=slideWrap?slideWrap.dataset.slide:'0';
+    const fb=document.getElementById('fb-'+si);
+    const isCorrect=region.dataset.correct==='1';
+    const feedbackText=decodeURIComponent(region.dataset.feedback||'');
+    // Visual feedback
+    region.className='r '+(isCorrect?'correct-hit':'wrong-hit');
+    setTimeout(()=>{region.className='r'},800);
+    // Show feedback
+    if(fb){
+      fb.style.display='block';
+      fb.style.borderColor=isCorrect?'#22c55e':'#ef4444';
+      fb.style.background=isCorrect?'#f0fdf4':'#fef2f2';
+      fb.style.color=isCorrect?'#16a34a':'#dc2626';
+      fb.innerHTML=(isCorrect?'✅ ':'❌ ')+esc(feedbackText||(isCorrect?'正確！':'再試一次'));
+    }
+    return;
+  }
+
+  // Quiz answer selection (event delegation)
+  const label=e.target.closest('label[data-q]');
+  if(label&&!quizSubmitted){
+    quizAnswers[label.dataset.q]=parseInt(label.dataset.o);
+    render();
+  }
+  if(e.target.id==='submitQuiz'){quizSubmitted=true;render();}
+});
+})();
+</script>
+</body>
+</html>`;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Phase 3A: AI Re-analyze a single slide
+// ═══════════════════════════════════════════════════════════════════════════════
+
+router.post('/slides/:sid/ai-analyze', async (req, res) => {
+  try {
+    const slide = await db.prepare('SELECT * FROM course_slides WHERE id=?').get(req.params.sid);
+    if (!slide) return res.status(404).json({ error: '投影片不存在' });
+
+    const check = await verifyLessonAccess(slide.lesson_id, req.user, true);
+    if (check.error) return res.status(check.status).json({ error: check.error });
+
+    // Parse content_json to find the image block
+    let blocks;
+    try { blocks = JSON.parse(slide.content_json || '[]'); } catch { return res.status(400).json({ error: 'Invalid content_json' }); }
+    const imgBlock = blocks.find(b => (b.type === 'hotspot' || b.type === 'image') && (b.image || b.src));
+    if (!imgBlock) return res.status(400).json({ error: '投影片無截圖' });
+
+    const imgUrl = imgBlock.image || imgBlock.src;
+    let filePath = path.join(uploadDir, imgUrl.replace('/api/training/files/', ''));
+    if (!fs.existsSync(filePath) && fs.existsSync(altUploadDir)) {
+      const alt = path.join(altUploadDir, imgUrl.replace('/api/training/files/', ''));
+      if (fs.existsSync(alt)) filePath = alt;
+    }
+    if (!fs.existsSync(filePath)) return res.status(400).json({ error: '截圖檔案不存在' });
+
+    const imageBase64 = fs.readFileSync(filePath).toString('base64');
+
+    // Build annotation prompt from existing annotations
+    let annotationPrompt = '';
+    const annotations = imgBlock.annotations || [];
+    if (annotations.length > 0) {
+      const stepAnnots = annotations.filter(a => a.type === 'number').sort((a, b) => (a.stepNumber || 0) - (b.stepNumber || 0));
+      if (stepAnnots.length > 0) {
+        const lines = ['使用者在截圖上做了以下標註：'];
+        stepAnnots.forEach(a => {
+          lines.push(`步驟 ${a.stepNumber}: 在座標 (${a.coords.x?.toFixed?.(1) || a.coords.x}%, ${a.coords.y?.toFixed?.(1) || a.coords.y}%)${a.label ? `，標註「${a.label}」` : ''}`);
+        });
+        lines.push('請根據標註的步驟順序生成操作說明，標註的元素設為 is_primary。');
+        annotationPrompt = '\n' + lines.join('\n') + '\n';
+      }
+    }
+
+    // AI model selection
+    const { GoogleGenerativeAI } = require('@google/generative-ai');
+    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+    let modelName = req.body.model || null;
+    if (!modelName) {
+      const setting = await db.prepare(`SELECT value FROM system_settings WHERE key='training_analyze_model'`).get();
+      modelName = setting?.value || null;
+    }
+    if (!modelName) {
+      const flashRow = await db.prepare(
+        `SELECT api_model FROM llm_models WHERE model_role='chat' AND is_active=1 AND provider_type='gemini' ORDER BY sort_order FETCH FIRST 1 ROWS ONLY`
+      ).get();
+      modelName = flashRow?.api_model || 'gemini-2.0-flash';
+    }
+    const model = genAI.getGenerativeModel({ model: modelName });
+
+    const prompt = `分析這張系統操作截圖。${annotationPrompt}
+識別所有可互動 UI 元素，回傳 JSON：
+{ "regions": [{ "type": "...", "label": "...", "coords": { "x": 0, "y": 0, "w": 0, "h": 0 }, "is_primary": false }],
+  "instruction": "操作說明", "narration": "旁白文字" }
+注意：coords 的 x, y, w, h 必須是百分比 (0-100)，相對於圖片寬高。
+只回傳 JSON。`;
+
+    const result = await model.generateContent([
+      { inlineData: { mimeType: 'image/png', data: imageBase64 } },
+      { text: prompt }
+    ]);
+    const text = result.response.text();
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    const parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : {};
+
+    // Normalize coordinates
+    const sizeOf = require('image-size');
+    let imgW = 1920, imgH = 1080;
+    try { const dim = sizeOf(fs.readFileSync(filePath)); if (dim.width) { imgW = dim.width; imgH = dim.height; } } catch {}
+
+    const regions = (parsed.regions || []).map(r => {
+      const c = r.coords;
+      if (c.x > 100 || c.y > 100 || c.w > 100 || c.h > 100) {
+        return { ...r, coords: { x: c.x / imgW * 100, y: c.y / imgH * 100, w: c.w / imgW * 100, h: c.h / imgH * 100 } };
+      }
+      return r;
+    });
+
+    // Match user annotations to find correct regions
+    const userNumbers = annotations.filter(a => a.type === 'number');
+    let hotspotRegions;
+    if (userNumbers.length > 0 && regions.length > 0) {
+      hotspotRegions = userNumbers.map((ua, i) => {
+        const closest = regions.reduce((best, r) => {
+          const cx = r.coords.x + (r.coords.w || 0) / 2;
+          const cy = r.coords.y + (r.coords.h || 0) / 2;
+          const dist = Math.sqrt((cx - ua.coords.x) ** 2 + (cy - ua.coords.y) ** 2);
+          return dist < best.dist ? { r, dist } : best;
+        }, { r: null, dist: Infinity });
+        if (closest.r && closest.dist < 30) {
+          return {
+            id: `r${i + 1}`, shape: 'rect', coords: closest.r.coords,
+            correct: true, label: closest.r.label || ua.label || `步驟 ${ua.stepNumber}`,
+            type: closest.r.type || '',
+            feedback: `正確！${closest.r.label ? '這就是「' + closest.r.label + '」。' : ''}`
+          };
+        }
+        return null;
+      }).filter(Boolean);
+    } else {
+      hotspotRegions = regions.filter(r => r.is_primary).map((r, i) => ({
+        id: `r${i + 1}`, shape: 'rect', coords: r.coords,
+        correct: true, label: r.label || `元素 ${i + 1}`, type: r.type || '',
+        feedback: `正確！${r.label ? '這就是「' + r.label + '」。' : ''}`
+      }));
+    }
+
+    // Update the slide's content_json
+    const blockIdx = blocks.indexOf(imgBlock);
+    imgBlock.regions = hotspotRegions;
+    imgBlock.instruction = parsed.instruction || imgBlock.instruction;
+    imgBlock.coordinate_system = 'percent';
+    imgBlock.image_dimensions = { w: imgW, h: imgH };
+    if (hotspotRegions.length > 0 && imgBlock.type === 'image') {
+      imgBlock.type = 'hotspot';
+      imgBlock.max_attempts = imgBlock.max_attempts || 3;
+      imgBlock.show_hint_after = imgBlock.show_hint_after || 2;
+    }
+
+    await db.prepare('UPDATE course_slides SET content_json=?, slide_type=?, notes=COALESCE(?, notes) WHERE id=?')
+      .run(JSON.stringify(blocks), hotspotRegions.length > 0 ? 'hotspot' : slide.slide_type, parsed.narration || null, slide.id);
+
+    res.json({
+      ok: true,
+      instruction: parsed.instruction,
+      narration: parsed.narration,
+      regions: hotspotRegions,
+      block_index: blockIdx
+    });
+  } catch (e) {
+    console.error('[Training] slide ai-analyze:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Phase 3A-2: Language-specific Image Upload
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// POST /api/training/slides/:sid/lang-image — upload language-specific base image
+router.post('/slides/:sid/lang-image', upload.single('file'), async (req, res) => {
+  try {
+    const { lang, block_index } = req.body;
+    if (!lang || lang === 'zh-TW') return res.status(400).json({ error: 'lang must be en or vi' });
+    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+
+    const slide = await db.prepare('SELECT lesson_id FROM course_slides WHERE id=?').get(req.params.sid);
+    if (!slide) return res.status(404).json({ error: '投影片不存在' });
+
+    const check = await verifyLessonAccess(slide.lesson_id, req.user, true);
+    if (check.error) return res.status(check.status).json({ error: check.error });
+
+    const imgUrl = `/api/training/files/course_${check.courseId}/${req.file.filename}`;
+    const idx = block_index || '0';
+
+    // Upsert slide_translations.image_overrides
+    const existing = await db.prepare('SELECT id, image_overrides FROM slide_translations WHERE slide_id=? AND lang=?').get(req.params.sid, lang);
+    let overrides = {};
+    if (existing?.image_overrides) { try { overrides = JSON.parse(existing.image_overrides); } catch {} }
+    overrides[String(idx)] = imgUrl;
+    const overridesJson = JSON.stringify(overrides);
+
+    if (existing) {
+      await db.prepare('UPDATE slide_translations SET image_overrides=? WHERE id=?').run(overridesJson, existing.id);
+    } else {
+      await db.prepare('INSERT INTO slide_translations (slide_id, lang, image_overrides) VALUES (?,?,?)').run(req.params.sid, lang, overridesJson);
+    }
+
+    res.json({ ok: true, image_url: imgUrl, overrides });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// DELETE /api/training/slides/:sid/lang-image — remove language-specific image
+router.delete('/slides/:sid/lang-image', async (req, res) => {
+  try {
+    const { lang, block_index } = req.body;
+    const existing = await db.prepare('SELECT id, image_overrides FROM slide_translations WHERE slide_id=? AND lang=?').get(req.params.sid, lang);
+    if (!existing) return res.json({ ok: true });
+
+    let overrides = {};
+    if (existing.image_overrides) { try { overrides = JSON.parse(existing.image_overrides); } catch {} }
+    delete overrides[String(block_index || '0')];
+    await db.prepare('UPDATE slide_translations SET image_overrides=? WHERE id=?').run(JSON.stringify(overrides), existing.id);
+    res.json({ ok: true, overrides });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/training/slides/:sid/lang-images — get all language image overrides
+router.get('/slides/:sid/lang-images', async (req, res) => {
+  try {
+    const rows = await db.prepare('SELECT lang, image_overrides FROM slide_translations WHERE slide_id=? AND image_overrides IS NOT NULL').all(req.params.sid);
+    const result = {};
+    rows.forEach(r => { try { result[r.lang] = JSON.parse(r.image_overrides); } catch {} });
+    res.json(result);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// PUT /api/training/slides/:sid/region-overrides — save per-language region positions
+router.put('/slides/:sid/region-overrides', async (req, res) => {
+  try {
+    const { lang, region_overrides } = req.body;
+    if (!lang || lang === 'zh-TW') return res.status(400).json({ error: 'lang must be en or vi' });
+
+    const existing = await db.prepare('SELECT id, image_overrides FROM slide_translations WHERE slide_id=? AND lang=?').get(req.params.sid, lang);
+    let overrides = {};
+    if (existing?.image_overrides) { try { overrides = JSON.parse(existing.image_overrides); } catch {} }
+    overrides.region_overrides = region_overrides || {};
+    const overridesJson = JSON.stringify(overrides);
+
+    if (existing) {
+      await db.prepare('UPDATE slide_translations SET image_overrides=? WHERE id=?').run(overridesJson, existing.id);
+    } else {
+      await db.prepare('INSERT INTO slide_translations (slide_id, lang, image_overrides) VALUES (?,?,?)').run(req.params.sid, lang, overridesJson);
+    }
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Phase 2E: AI Model Selector
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// GET /api/training/ai/models — list available Gemini models for training AI features
+router.get('/ai/models', async (req, res) => {
+  try {
+    const models = await db.prepare(
+      `SELECT id, display_name, api_model, model_role, sort_order
+       FROM llm_models WHERE is_active=1 AND provider_type='gemini'
+       ORDER BY sort_order`
+    ).all();
+    res.json(models);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /api/training/ai/settings — read AI model settings
+router.get('/ai/settings', async (req, res) => {
+  try {
+    const keys = ['training_analyze_model', 'training_translate_model'];
+    const result = {};
+    for (const key of keys) {
+      const row = await db.prepare('SELECT value FROM system_settings WHERE key=?').get(key);
+      result[key] = row?.value || '';
+    }
+    res.json(result);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// PUT /api/training/ai/settings — save AI model settings (admin only)
+router.put('/ai/settings', async (req, res) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ error: '需要管理員權限' });
+  try {
+    const { training_analyze_model, training_translate_model } = req.body;
+    const upsert = async (key, value) => {
+      const existing = await db.prepare('SELECT key FROM system_settings WHERE key=?').get(key);
+      if (existing) {
+        await db.prepare('UPDATE system_settings SET value=? WHERE key=?').run(value || '', key);
+      } else {
+        await db.prepare('INSERT INTO system_settings (key, value) VALUES (?,?)').run(key, value || '');
+      }
+    };
+    if (training_analyze_model !== undefined) await upsert('training_analyze_model', training_analyze_model);
+    if (training_translate_model !== undefined) await upsert('training_translate_model', training_translate_model);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════

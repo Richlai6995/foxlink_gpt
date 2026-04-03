@@ -5,6 +5,7 @@ import DragDropBlock from './blocks/DragDropBlock'
 import FlipCardBlock from './blocks/FlipCardBlock'
 import BranchBlock from './blocks/BranchBlock'
 import QuizInlineBlock from './blocks/QuizInlineBlock'
+import AnnotationOverlay from './blocks/AnnotationOverlay'
 
 interface Slide {
   id: number
@@ -41,19 +42,18 @@ function BlockRenderer({ block }: { block: Block }) {
   switch (block.type) {
     case 'text':
       return (
-        <div className="prose prose-invert prose-sm max-w-none">
+        <div className="prose prose-sm max-w-none" style={{ color: 'var(--t-text)' }}>
           <ReactMarkdown>{block.content || ''}</ReactMarkdown>
         </div>
       )
 
     case 'image':
       return (
-        <div>
+        <div className="relative">
           {block.src && <img src={block.src} alt={block.alt || ''} className="max-w-full rounded-lg mx-auto" />}
-          {block.annotations?.length > 0 && (
-            <div className="relative" style={{ marginTop: block.src ? '-100%' : 0 }}>
-              {/* Annotations would be SVG overlays - simplified for now */}
-            </div>
+          {/* Phase 2E: SVG annotation overlay — skip if burned into image */}
+          {block.annotations?.length > 0 && !block.annotations_in_image && (
+            <AnnotationOverlay annotations={block.annotations} />
           )}
         </div>
       )
@@ -77,17 +77,18 @@ function BlockRenderer({ block }: { block: Block }) {
       )
 
     case 'callout': {
-      const colors: Record<string, string> = {
-        tip: 'border-sky-500 bg-sky-500/10 text-sky-200',
-        warning: 'border-yellow-500 bg-yellow-500/10 text-yellow-200',
-        note: 'border-purple-500 bg-purple-500/10 text-purple-200',
-        important: 'border-red-500 bg-red-500/10 text-red-200',
+      const colorMap: Record<string, { border: string; bg: string }> = {
+        tip:       { border: '#0ea5e9', bg: 'rgba(14,165,233,0.08)' },
+        warning:   { border: '#eab308', bg: 'rgba(234,179,8,0.08)' },
+        note:      { border: '#a855f7', bg: 'rgba(168,85,247,0.08)' },
+        important: { border: '#ef4444', bg: 'rgba(239,68,68,0.08)' },
       }
       const labels: Record<string, string> = { tip: '提示', warning: '警告', note: '注意', important: '重要' }
+      const c = colorMap[block.variant] || colorMap.tip
       return (
-        <div className={`border-l-4 rounded-r-lg px-4 py-3 ${colors[block.variant] || colors.tip}`}>
-          <div className="text-xs font-bold mb-1">{labels[block.variant] || '提示'}</div>
-          <div className="text-sm">{block.content}</div>
+        <div className="rounded-r-lg px-4 py-3" style={{ borderLeft: `4px solid ${c.border}`, backgroundColor: c.bg }}>
+          <div className="text-xs font-bold mb-1" style={{ color: c.border }}>{labels[block.variant] || '提示'}</div>
+          <div className="text-sm" style={{ color: 'var(--t-text-secondary)' }}>{block.content}</div>
         </div>
       )
     }

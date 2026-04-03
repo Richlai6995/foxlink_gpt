@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { ArrowLeft, Save, Plus, Trash2, ChevronUp, ChevronDown, Image, Type, MousePointer, GripVertical, Move, RotateCcw, Volume2, Eye, Layers } from 'lucide-react'
+import { ArrowLeft, Save, Plus, Trash2, ChevronUp, ChevronDown, Image, Type, MousePointer, GripVertical, Move, RotateCcw, Volume2, Eye, Layers, Wand2, Loader2 } from 'lucide-react'
 import api from '../../../lib/api'
 import SlideTemplates, { type SlideTemplate } from './SlideTemplates'
 import TextBlockEditor from './blocks/TextBlockEditor'
@@ -46,6 +46,19 @@ export default function SlideEditor({ slideId, courseId, onClose, onSaved }: Pro
   const [showAddBlock, setShowAddBlock] = useState(false)
   const [showTemplates, setShowTemplates] = useState(false)
   const [activeBlockIdx, setActiveBlockIdx] = useState<number | null>(null)
+  const [aiAnalyzing, setAiAnalyzing] = useState(false)
+
+  const aiAnalyze = async () => {
+    try {
+      setAiAnalyzing(true)
+      const res = await api.post(`/training/slides/${slideId}/ai-analyze`, {}, { timeout: 30000 })
+      if (res.data.ok) {
+        await loadSlide() // reload to get updated content
+      }
+    } catch (e: any) {
+      alert(e.response?.data?.error || 'AI 分析失敗')
+    } finally { setAiAnalyzing(false) }
+  }
 
   useEffect(() => {
     loadSlide()
@@ -123,6 +136,13 @@ export default function SlideEditor({ slideId, courseId, onClose, onSaved }: Pro
         <button onClick={() => setShowTemplates(true)}
           className="text-xs px-2 py-1 rounded transition" style={{ color: 'var(--t-text-muted)' }}>
           版型模板
+        </button>
+        <button onClick={aiAnalyze} disabled={aiAnalyzing}
+          className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg border transition hover:opacity-80 disabled:opacity-50"
+          style={{ borderColor: 'var(--t-border)', color: 'var(--t-accent)' }}
+          title="用 AI 重新分析此投影片的截圖，更新操作說明和互動區域">
+          {aiAnalyzing ? <Loader2 size={12} className="animate-spin" /> : <Wand2 size={12} />}
+          {aiAnalyzing ? 'AI 分析中...' : 'AI 分析'}
         </button>
         <button onClick={save} disabled={saving}
           className="flex items-center gap-1.5 text-white px-3 py-1.5 rounded-lg text-xs font-medium transition disabled:opacity-50"
@@ -222,6 +242,8 @@ export default function SlideEditor({ slideId, courseId, onClose, onSaved }: Pro
               block={blocks[activeBlockIdx]}
               onChange={(updated) => updateBlock(activeBlockIdx, updated)}
               courseId={courseId}
+              slideId={slideId}
+              blockIdx={activeBlockIdx}
             />
           ) : (
             <div className="flex flex-col items-center justify-center h-full" style={{ color: 'var(--t-text-dim)' }}>
@@ -241,14 +263,14 @@ export default function SlideEditor({ slideId, courseId, onClose, onSaved }: Pro
 }
 
 // Route to correct block editor
-function BlockEditorSwitch({ block, onChange, courseId }: { block: Block; onChange: (b: Block) => void; courseId: number }) {
+function BlockEditorSwitch({ block, onChange, courseId, slideId, blockIdx }: { block: Block; onChange: (b: Block) => void; courseId: number; slideId?: number; blockIdx?: number }) {
   switch (block.type) {
     case 'text': return <TextBlockEditor block={block} onChange={onChange} />
-    case 'image': return <ImageBlockEditor block={block} onChange={onChange} courseId={courseId} />
+    case 'image': return <ImageBlockEditor block={block} onChange={onChange} courseId={courseId} slideId={slideId} blockIdx={blockIdx} />
     case 'steps': return <StepsEditor block={block} onChange={onChange} />
     case 'callout': return <CalloutEditor block={block} onChange={onChange} />
     case 'video': return <VideoBlockEditor block={block} onChange={onChange} />
-    case 'hotspot': return <HotspotEditor block={block} onChange={onChange} courseId={courseId} />
+    case 'hotspot': return <HotspotEditor block={block} onChange={onChange} courseId={courseId} slideId={slideId} blockIdx={blockIdx} />
     case 'dragdrop': return <DragDropEditor block={block} onChange={onChange} />
     case 'flipcard': return <FlipCardEditor block={block} onChange={onChange} />
     case 'branch': return <BranchEditor block={block} onChange={onChange} />

@@ -237,15 +237,17 @@ async function initializeOracleDB() {
     `${process.env.SYSTEM_DB_HOST}:${process.env.SYSTEM_DB_PORT}/${process.env.SYSTEM_DB_SERVICE_NAME}`;
 
   pool = await oracledb.createPool({
-    poolAlias:     'system_db',   // 明確命名，避免與 ERP pool alias 衝突
+    poolAlias:     'system_db',
     user:          process.env.SYSTEM_DB_USER,
     password:      process.env.SYSTEM_DB_USER_PASSWORD,
     connectString,
-    poolMin:          5,
-    poolMax:          25,
-    poolIncrement:    5,
-    poolTimeout:      60,
+    poolMin:          2,
+    poolMax:          30,
+    poolIncrement:    3,
+    poolTimeout:      120,
     poolPingInterval: 60,
+    queueTimeout:     30000,    // 30s wait before failing (was default 60s)
+    expireTime:       300,      // terminate idle connections after 5 min
   });
 
   console.log('[Oracle] Pool created →', connectString);
@@ -1956,6 +1958,14 @@ async function runMigrations(db) {
     mask_regions_json CLOB,
     created_at      TIMESTAMP DEFAULT SYSTIMESTAMP
   )`);
+
+  // ── Phase 2E: 截圖標註系統 ─────────────────────────────────────────────────
+  await safeAddColumn('RECORDING_STEPS', 'ANNOTATIONS_JSON', 'CLOB');
+  await safeAddColumn('RECORDING_STEPS', 'SCREENSHOT_RAW_URL', 'VARCHAR2(500)');
+
+  // ── Phase 3A-2: 多語底圖 ──────────────────────────────────────────────────
+  await safeAddColumn('RECORDING_STEPS', 'LANG', "VARCHAR2(10) DEFAULT 'zh-TW'");
+  await safeAddColumn('SLIDE_TRANSLATIONS', 'IMAGE_OVERRIDES', 'CLOB');
 }
 
 // ─── Default DB Source migration ───────────────────────────────────────────────

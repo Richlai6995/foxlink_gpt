@@ -249,7 +249,7 @@ export default function CourseList({ editorMode = false }: { editorMode?: boolea
                   {/* Cover */}
                   <div className="h-32 flex items-center justify-center relative" style={{ background: 'var(--t-gradient-cover)' }}>
                     {course.cover_image ? (
-                      <img src={course.cover_image} alt="" className="w-full h-full object-cover" />
+                      <img src={course.cover_image.startsWith('/') ? course.cover_image : '/' + course.cover_image} alt="" className="w-full h-full object-cover" />
                     ) : (
                       <BookOpen size={32} style={{ color: 'var(--t-accent)', opacity: 0.3 }} />
                     )}

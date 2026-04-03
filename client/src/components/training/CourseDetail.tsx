@@ -83,7 +83,7 @@ export default function CourseDetail() {
           <div className="flex gap-6">
             <div className="w-48 h-32 rounded-lg bg-gradient-to-br from-sky-900/40 to-slate-700 flex items-center justify-center shrink-0 overflow-hidden">
               {course.cover_image ? (
-                <img src={course.cover_image} alt="" className="w-full h-full object-cover" />
+                <img src={course.cover_image.startsWith('/') ? course.cover_image : '/' + course.cover_image} alt="" className="w-full h-full object-cover" />
               ) : (
                 <BookOpen size={40} className="text-sky-500/30" />
               )}
@@ -140,16 +140,19 @@ export default function CourseDetail() {
           })}
         </div>
 
-        {/* Start / Continue button */}
-        <div className="mt-8 flex justify-center">
-          <button
-            onClick={() => navigate(`/training/course/${id}/learn`)}
-            className="flex items-center gap-2 bg-sky-600 hover:bg-sky-500 text-white px-8 py-3 rounded-xl text-sm font-semibold transition shadow-lg shadow-sky-600/20"
-          >
-            <Play size={18} />
-            {progress.some(p => p.status === 'in_progress') ? '繼續學習' : '開始學習'}
-          </button>
-        </div>
+      </div>
+
+      {/* Start / Continue button — sticky bottom */}
+      <div className="sticky bottom-0 z-10 py-4 flex justify-center"
+        style={{ background: 'linear-gradient(transparent, var(--t-bg) 30%)' }}>
+        <button
+          onClick={() => navigate(`/training/course/${id}/learn`)}
+          className="flex items-center gap-2 text-white px-10 py-3 rounded-xl text-sm font-semibold transition shadow-lg"
+          style={{ backgroundColor: 'var(--t-accent-bg)', boxShadow: '0 4px 14px rgba(37,99,235,0.3)' }}
+        >
+          <Play size={18} />
+          {progress.some(p => p.status === 'in_progress') ? '▶ 繼續學習' : '▶ 開始學習'}
+        </button>
       </div>
     </div>
   )

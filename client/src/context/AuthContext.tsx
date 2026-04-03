@@ -25,7 +25,9 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | null>(null)
 
 function applyLanguage(u: any) {
-  const lang = (u?.resolved_language || u?.preferred_language || 'zh-TW') as LangCode
+  // Login page selection (localStorage) takes priority over server profile
+  const localPref = localStorage.getItem('preferred_language')
+  const lang = (localPref || u?.resolved_language || u?.preferred_language || 'zh-TW') as LangCode
   if (['zh-TW', 'en', 'vi'].includes(lang)) i18n.changeLanguage(lang)
 }
 
@@ -68,6 +70,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setToken(t)
     setUser(u)
     applyLanguage(u)
+    // Sync login page language choice to server profile
+    const localPref = localStorage.getItem('preferred_language')
+    if (localPref && localPref !== (u?.resolved_language || u?.preferred_language)) {
+      api.put('/auth/language', { language_code: localPref }).catch(() => {})
+    }
   }, [])
 
   const loginWithSsoToken = useCallback(async (ssoToken: string) => {
@@ -78,6 +85,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setToken(t)
     setUser(u)
     applyLanguage(u)
+    const localPref = localStorage.getItem('preferred_language')
+    if (localPref && localPref !== (u?.resolved_language || u?.preferred_language)) {
+      api.put('/auth/language', { language_code: localPref }).catch(() => {})
+    }
   }, [])
 
   const logout = useCallback(async () => {

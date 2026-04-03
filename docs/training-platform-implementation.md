@@ -1,7 +1,7 @@
 # FOXLINK GPT 教育訓練平台 — 實作完成報告
 
-> 日期：2026-04-02（Phase 1）、2026-04-02（Phase 2）
-> 狀態：Phase 1 + Phase 2 實作完成
+> 日期：2026-04-02（Phase 1-2F）、2026-04-03（Phase 3A-1/2/3）
+> 狀態：Phase 1 + Phase 2A-F + Phase 3A 實作完成（Phase 3B 語音導覽已規劃）
 > 設計文件：[training-platform-design.md](training-platform-design.md)
 
 ---
@@ -819,6 +819,94 @@ Admin 後台 →「教育訓練報表」→ 查看完成率、平均分數、部
 | 教學腳本管理 | ✅ 完成 | `teaching_scripts` 表 + CRUD API + 批次匯入 |
 | 錄製工作階段 | ✅ 完成 | `recording_sessions` + `recording_steps` 表 |
 
+### Phase 2E — 截圖標註系統 + AI 模型選擇器
+
+| 項目 | 狀態 | 說明 |
+|------|------|------|
+| Extension 標註編輯器 | ✅ 完成 | 截圖後凍結畫面 + Canvas overlay，7 種標註工具 |
+| 步驟編號 ①②③ | ✅ 完成 | 點擊放置自動遞增編號圓圈，標記操作順序 |
+| 圓圈/矩形框/箭頭 | ✅ 完成 | 拖拉繪製，用於圈住/框選/指向操作元素 |
+| 文字標註 | ✅ 完成 | 點擊位置輸入文字，Enter 確認 |
+| 自由畫筆 | ✅ 完成 | 滑鼠拖拉自由繪製 |
+| 馬賽克遮蔽 | ✅ 完成 | 拖拉選區自動模糊，遮蔽密碼等敏感資訊 |
+| 顏色選擇 (5色) | ✅ 完成 | 紅/藍/綠/黃/白 |
+| 線條粗細 (3段) | ✅ 完成 | 細/中/粗 |
+| 復原/重做/清除 | ✅ 完成 | Ctrl+Z 復原、Ctrl+Y 重做、一鍵清除 |
+| 鍵盤快捷鍵 | ✅ 完成 | 1-7 選工具、Esc 取消 |
+| 跳過標註 | ✅ 完成 | 可跳過直接上傳原圖（不強制標註） |
+| 原圖/標註圖分離儲存 | ✅ 完成 | `screenshot_raw_url` + `screenshot_url` + `annotations_json` |
+| DB Migration | ✅ 完成 | `recording_steps` 新增 `ANNOTATIONS_JSON` + `SCREENSHOT_RAW_URL` |
+| AI Prompt 整合標註 | ✅ 完成 | 分析時帶入標註座標，按①②③順序生成操作說明 |
+| AnnotationOverlay 元件 | ✅ 完成 | SVG 渲染 7 種標註（播放器/編輯器共用） |
+| HotspotBlock 整合 | ✅ 完成 | 播放時疊加 SVG 標註層 |
+| SlideRenderer 整合 | ✅ 完成 | image block 支援 annotations 渲染 |
+| AI 模型選擇器 | ✅ 完成 | `GET /api/training/ai/models` + RecordingPanel 底部下拉選單 |
+| 投影片標註寫入 | ✅ 完成 | generate 時 annotations 寫入 `content_json`（hotspot/image block） |
+
+### Phase 2F — HTML5 匯出 + 進階標註 + 翻譯改進 + UI 優化
+
+| 項目 | 狀態 | 說明 |
+|------|------|------|
+| HTML5 單檔匯出 API | ✅ 完成 | `POST /courses/:id/export` 截圖 base64 內嵌 + 內嵌 JS/CSS 播放器 |
+| 內嵌播放器 | ✅ 完成 | 投影片瀏覽/鍵盤翻頁/Hotspot區域/SVG標註/多語切換/測驗計分/響應式 |
+| 前端匯出面板 | ✅ 完成 | `ExportButton` 下拉：語言勾選 + 測驗/音訊/標註選項 + 一鍵下載 |
+| 標註動畫播放 | ✅ 完成 | `AnnotationOverlay` 新增 `animateInterval` prop，預設 600ms 逐一淡入 |
+| Canvas 真實馬賽克 | ✅ 完成 | Extension 馬賽克讀截圖像素做像素化（非假格子） |
+| 翻譯 SSE 串流 | ✅ 完成 | `translate` 改為 SSE，前端即時顯示 `⏳ 翻譯投影片 3/7...` + 進度條 |
+| AI 模型設定 | ✅ 完成 | `GET/PUT /ai/settings`（training_analyze_model + training_translate_model） |
+| 設定頁籤 UI | ✅ 完成 | CourseEditor「設定」tab：辨識模型/翻譯模型下拉 + 模型比較表 |
+| Hotspot 左圖右文 | ✅ 完成 | 播放器 HotspotBlock 改為左側截圖 + 右側操作說明面板 |
+| 圖片放大 Lightbox | ✅ 完成 | 截圖右上角 🔍 按鈕，點擊全螢幕檢視（可在放大模式操作互動） |
+| CoursePlayer 主題適配 | ✅ 完成 | Topbar/Sidebar/Bottom/Panels 全面改用 `var(--t-*)` 變數 |
+| 投影片拖拉排序 | ✅ 完成 | CourseEditor 投影片列表 ▲▼ 改為 `GripVertical` 拖拉手把 |
+| 截圖重複修復 | ✅ 完成 | 投影片用 `screenshot_raw_url` 原圖，SVG overlay 獨立渲染標註 |
+
+### Phase 3A — 圖層分離 + 多語底圖切換
+
+#### Phase 3A-1 — 圖層分離（核心架構重設計）
+
+| 項目 | 狀態 | 說明 |
+|------|------|------|
+| Extension 不燒圖 | ✅ 完成 | `finalize()` 移除 mergeCanvas，只送乾淨原圖 + annotations JSON |
+| Background 簡化上傳 | ✅ 完成 | 只送 `screenshot_base64`（乾淨圖），不再送 `screenshot_raw_base64` |
+| Server step upload 簡化 | ✅ 完成 | `screenshot_url` 永遠是乾淨圖，不再存 `screenshot_raw_url` |
+| AI 座標標準化 | ✅ 完成 | prompt 要求百分比、回傳後用 `image-size` 驗證、像素自動轉百分比 |
+| AI 只保留使用者標記 | ✅ 完成 | 比對 annotation ①②③ 位置 vs AI region，距離 <30% 才保留 |
+| Generate 簡化 | ✅ 完成 | 新增 `coordinate_system: 'percent'` + `image_dimensions`，`annotations_in_image: false` |
+| HotspotBlock coordinate_system | ✅ 完成 | 優先用欄位判斷，fallback 啟發式（向下相容） |
+| HTML5 匯出 coordinate_system | ✅ 完成 | 同樣用 `coordinate_system` + `image_dimensions` |
+
+#### Phase 3A-2 — 多語底圖切換
+
+| 項目 | 狀態 | 說明 |
+|------|------|------|
+| DB migration | ✅ 完成 | `recording_steps.lang` + `slide_translations.image_overrides` |
+| Extension Badge 語言按鈕 | ✅ 完成 | 錄製 badge 加 [中][EN][VI] 切換，截圖自動帶語言標記 |
+| Step upload 加 lang | ✅ 完成 | 每張截圖存語言標記到 `recording_steps.lang` |
+| Generate 多語分流 | ✅ 完成 | zh-TW 建主投影片，en/vi 截圖寫入 `slide_translations.image_overrides` |
+| Slides 讀取 image_overrides | ✅ 完成 | `GET /lessons/:lid/slides?lang=en` 自動套用語言底圖 |
+| Lang-image upload API | ✅ 完成 | `POST/DELETE/GET /slides/:sid/lang-image` 上傳/刪除/查詢語言底圖 |
+| Export image_overrides | ✅ 完成 | HTML5 匯出時讀 `image_overrides` per-language 底圖 |
+| LanguageImagePanel | ✅ 完成 | HotspotEditor 底部多語底圖管理面板（en/vi tab + 上傳/預覽/刪除） |
+| CoursePlayer 語言重載 | ✅ 完成 | `i18n.language` 變更時重新載入投影片（底圖跟著切換） |
+
+#### Phase 3A-3 — 截圖模式 + 錄製改善 + 標註編輯 + UI 優化
+
+| 項目 | 狀態 | 說明 |
+|------|------|------|
+| 截圖三模式 | ✅ 完成 | Badge [📸全螢幕][⬜矩形選取][🎯智慧偵測]，矩形拖拉裁切，DOM 分析自動裁切 |
+| RecordingPanel 拖拉排序 | ✅ 完成 | 截圖 grid HTML5 drag-drop 排序（取代上下鍵） |
+| 自動排序 | ✅ 完成 | zh-TW 自動遞增編號，en/vi 套用對應中文序號，步驟→語言排列 |
+| 步驟/語言確認按鈕 | ✅ 完成 | 右側「確認修改」+ 底部「確認順序」批次存到 server |
+| 補錄功能 | ✅ 完成 | 停止後「+ 補錄」同一 session 繼續，Extension 截圖追加 |
+| 刪除確認 | ✅ 完成 | 縮圖/右側刪除按鈕加 confirm 對話框 |
+| 截圖防重複 | ✅ 完成 | `manifest.json` all_frames:false + debounce + annotationActive 防重入 |
+| AnnotationEditor | ✅ 完成 | 新元件：SVG 拖拉移動標註 + 選取/刪除/顏色/標籤編輯 |
+| 標註全流程可見 | ✅ 完成 | RecordingPanel 縮圖+預覽 + HotspotEditor 加「標註可見/隱藏」toggle |
+| SlideEditor AI 分析 | ✅ 完成 | Header 加「AI 分析」按鈕，對單張投影片重新分析 |
+| 多語 region 位置微調 | ✅ 完成 | LanguageImagePanel 放大 modal 拖拉綠框 + `PUT region-overrides` API |
+| 登入語言同步 | ✅ 完成 | Login 頁選的語言 → 登入後生效 + 同步存 server |
+
 ---
 
 ## 9. Phase 2 新增檔案清單
@@ -849,6 +937,51 @@ Admin 後台 →「教育訓練報表」→ 查看完成率、平均分數、部
 | `chrome-extension/content.css` | 錄製 badge 動畫 |
 | `chrome-extension/popup.html` | Extension 控制介面 HTML |
 | `chrome-extension/popup.js` | 登入 + 錄製控制邏輯 |
+
+### Phase 2E 新增/修改檔案
+
+| 檔案 | 變更 | 說明 |
+|------|------|------|
+| `chrome-extension/content.js` | 修改 | +350 行：`startAnnotationMode()` 標註編輯器、7種工具、Canvas繪圖、復原/重做 |
+| `chrome-extension/background.js` | 修改 | +80 行：`MANUAL_SCREENSHOT_WITH_ANNOTATION`、`ANNOTATED_SCREENSHOT` 訊息處理 |
+| `server/database-oracle.js` | 修改 | +3 行：`safeAddColumn('RECORDING_STEPS', 'ANNOTATIONS_JSON/SCREENSHOT_RAW_URL')` |
+| `server/routes/training.js` | 修改 | +80 行：step upload 支援 annotations、AI prompt 整合標註、模型選擇、`GET /ai/models` |
+| `client/src/components/training/blocks/AnnotationOverlay.tsx` | **新增** | SVG 標註渲染元件（7 種類型：number/circle/rect/arrow/text/freehand/mosaic） |
+| `client/src/components/training/blocks/HotspotBlock.tsx` | 修改 | +5 行：整合 AnnotationOverlay 顯示 |
+| `client/src/components/training/SlideRenderer.tsx` | 修改 | +5 行：image block 支援 annotations |
+| `client/src/components/training/editor/RecordingPanel.tsx` | 修改 | +25 行：AI 模型選擇下拉 + 傳遞 model 給 server |
+
+### Phase 2F 新增/修改檔案
+
+| 檔案 | 變更 | 說明 |
+|------|------|------|
+| `server/routes/training.js` | 修改 | +250 行：`POST /courses/:id/export` HTML5 匯出 + `buildExportHtml()` 內嵌播放器 |
+| `server/routes/training.js` | 修改 | 翻譯改 SSE 串流進度 + `GET/PUT /ai/settings` 模型設定 API |
+| `client/src/components/training/editor/CourseEditor.tsx` | 修改 | +130 行：`ExportButton` 匯出面板 + `TrainingAISettings` 模型設定 |
+| `client/src/components/training/blocks/AnnotationOverlay.tsx` | 修改 | +30 行：`animateInterval` prop 標註動畫逐步淡入 |
+| `client/src/components/training/blocks/HotspotBlock.tsx` | 修改 | 改為左圖右文版面 + 放大鏡 lightbox + 動畫標註 |
+| `client/src/components/training/SlideRenderer.tsx` | 修改 | text/callout block 改用主題變數（light 主題相容） |
+| `client/src/components/training/CoursePlayer.tsx` | 修改 | 全面改用主題變數（topbar/sidebar/bottom bar/panels） |
+| `chrome-extension/content.js` | 修改 | 馬賽克工具改為讀截圖像素真實模糊 |
+
+### Phase 3A 新增/修改檔案
+
+| 檔案 | 變更 | 說明 |
+|------|------|------|
+| `server/database-oracle.js` | 修改 | +2 行：`recording_steps.LANG` + `slide_translations.IMAGE_OVERRIDES` |
+| `chrome-extension/content.js` | 修改 | `finalize()` 移除 mergeCanvas；Badge 加 [中][EN][VI] 語言按鈕 |
+| `chrome-extension/background.js` | 修改 | `ANNOTATED_SCREENSHOT` 只送乾淨圖 + lang 參數 |
+| `server/routes/training.js` | 修改 | step upload 加 lang / AI 座標標準化 / generate 多語分流 / slides 讀取 image_overrides / export image_overrides / lang-image CRUD API |
+| `client/src/components/training/blocks/HotspotBlock.tsx` | 修改 | `coordinate_system` 判斷 + `image_dimensions` 精確轉換 |
+| `client/src/components/training/CoursePlayer.tsx` | 修改 | `i18n.language` 切換時重載投影片 |
+| `client/src/components/training/editor/blocks/LanguageImagePanel.tsx` | **新增** | 多語底圖管理面板（上傳/預覽/刪除 per-language 底圖） |
+| `client/src/components/training/editor/blocks/HotspotEditor.tsx` | 修改 | 加入 LanguageImagePanel + slideId/blockIdx props |
+| `client/src/components/training/editor/SlideEditor.tsx` | 修改 | BlockEditorSwitch 傳 slideId/blockIdx + AI 分析按鈕 |
+| `client/src/components/training/editor/blocks/AnnotationEditor.tsx` | **新增** | 標註圖層編輯器（SVG 拖拉移動/選取/刪除/顏色/標籤） |
+| `client/src/components/training/editor/RecordingPanel.tsx` | 修改 | 截圖拖拉排序 + 自動排序 + 補錄功能 + 刪除確認 + 標註可見 toggle + 步驟/語言確認按鈕 |
+| `client/src/context/AuthContext.tsx` | 修改 | 登入語言同步（Login 頁選的語言 → 登入後生效 + 存 server） |
+| `chrome-extension/manifest.json` | 修改 | `all_frames: false` 防止 iframe 重複截圖 |
+| `server/routes/training.js` | 修改 | `POST /slides/:sid/ai-analyze` 單張 AI 分析 + `PUT /recording/:sid/steps` 批次更新 + `PUT /slides/:sid/region-overrides` per-language region 位置 |
 
 ---
 
@@ -886,6 +1019,36 @@ Admin 後台 →「教育訓練報表」→ 查看完成率、平均分數、部
 | PUT | `/api/training/scripts/:id` | 編輯腳本 |
 | DELETE | `/api/training/scripts/:id` | 刪除腳本 |
 | POST | `/api/training/scripts/import` | 批次匯入腳本 |
+
+### Phase 2E：截圖標註 + AI 模型選擇
+
+| Method | Path | 說明 |
+|--------|------|------|
+| POST | `/api/training/recording/:sessionId/step` | 上傳步驟（Phase 2E 新增 `screenshot_raw_base64` + `annotations_json` 參數） |
+| POST | `/api/training/recording/:sessionId/analyze-step/:stepId` | AI 分析（Phase 2E 新增 `model` 參數 + 標註整合 prompt） |
+| GET | `/api/training/ai/models` | 取得可用 Gemini 模型列表（Phase 2E 新增） |
+
+### Phase 2F：HTML5 匯出 + AI 模型設定 + 翻譯改進
+
+| Method | Path | 說明 |
+|--------|------|------|
+| POST | `/api/training/courses/:id/export` | HTML5 單檔匯出（截圖 base64 內嵌 + 多語 + 互動 + 測驗） |
+| GET | `/api/training/ai/settings` | 讀取 AI 模型設定（training_analyze_model / training_translate_model） |
+| PUT | `/api/training/ai/settings` | 儲存 AI 模型設定（admin only） |
+| POST | `/api/training/courses/:id/translate` | 翻譯（**改為 SSE 串流**，即時回報每張投影片進度） |
+
+### Phase 3A：圖層分離 + 多語底圖
+
+| Method | Path | 說明 |
+|--------|------|------|
+| POST | `/api/training/slides/:sid/lang-image` | 上傳語言底圖（multipart: lang, block_index, file） |
+| DELETE | `/api/training/slides/:sid/lang-image` | 刪除語言底圖（body: lang, block_index） |
+| GET | `/api/training/slides/:sid/lang-images` | 查詢所有語言底圖 override |
+| POST | `/api/training/recording/:sessionId/step` | 新增 `lang` 參數（Phase 3A-2） |
+| GET | `/api/training/lessons/:lid/slides?lang=` | 新增 `image_overrides` + `region_overrides` 套用 |
+| PUT | `/api/training/recording/:sessionId/steps` | 批次更新步驟 step_number + lang |
+| POST | `/api/training/slides/:sid/ai-analyze` | 單張投影片 AI 重新分析 |
+| PUT | `/api/training/slides/:sid/region-overrides` | 儲存 per-language 互動位置覆蓋 |
 
 ---
 
@@ -995,6 +1158,200 @@ Admin 後台 →「教育訓練報表」→ 查看完成率、平均分數、部
 ├── ✅ Oracle ERP（跨域，Extension 支援）
 ├── ✅ PLM / HR / 任何 Web 系統
 └── ✅ 內部系統（只要瀏覽器能打開的都行）
+```
+
+### 11.5 Phase 2E：截圖標註操作方式
+
+```
+操作步驟：
+
+1. 進入錄製模式（已連線 Chrome Extension）
+2. 在目標系統操作到要截圖的畫面
+3. 點擊頁面右上角 badge 的「📸 截圖」按鈕
+4. 畫面凍結 → 頂部出現完整標註工具列
+
+   標註工具列說明：
+   ┌─────────────────────────────────────────────────────────────┐
+   │ [① 編號] [◯ 圈] [▭ 框] [→ 箭頭] [T 文字] [✎ 畫筆] [▦ 馬賽克]   │
+   │ 顏色: [●紅][●藍][●綠][●黃][●白]  粗細: [─][━][▬]              │
+   │ [↩ 復原] [↪ 重做] [🗑 清除]                                    │
+   │                       [⏭ 跳過標註] [✅ 確認截圖] [✗ 取消]       │
+   └─────────────────────────────────────────────────────────────┘
+
+5. 使用標註工具標記操作重點：
+   a. 選「① 編號」→ 點擊帳號欄位 → 自動標記 ①
+   b. 再點密碼欄位 → 自動標記 ②
+   c. 選「→ 箭頭」→ 從旁邊拖向登入按鈕 → 顯示箭頭
+   d. 選「T 文字」→ 點空白處 → 輸入「輸入工號後點登入」→ Enter
+   e. 如有敏感資訊 → 選「▦ 馬賽克」→ 拖拉覆蓋密碼欄位
+
+6. 標註過程中可隨時：
+   ├── 切換顏色（點色塊）
+   ├── 切換粗細（點粗細按鈕）
+   ├── Ctrl+Z 復原上一步標註
+   ├── Ctrl+Y 重做
+   ├── 按 1-7 快速切換工具
+   └── Esc 取消放棄截圖
+
+7. 確認標註完成 → 點「✅ 確認截圖」
+   ├── 系統自動生成原圖（乾淨無標註）
+   ├── 系統自動生成標註圖（含所有標記）
+   └── 標註資料以 JSON 格式分開存檔
+
+8. 如不需要標註 → 直接點「⏭ 跳過標註」
+   └── 等同舊版直接截圖上傳
+
+標註與 AI 分析的協作：
+  ├── AI 分析時優先使用原圖（避免標註干擾辨識）
+  ├── 同時將標註座標帶入 prompt（告訴 AI 哪裡是重點）
+  ├── AI 按 ①②③ 順序生成操作說明
+  ├── 標註圈住的元素自動設為 is_primary
+  └── 文字標註作為額外說明補充
+
+生成投影片後標註的呈現：
+  ├── 播放器中截圖上疊加 SVG 標註層
+  ├── 步驟編號、圈框箭頭、文字全部可見
+  ├── 學員可點「隱藏標註」挑戰自己找操作點
+  └── 馬賽克區域保持遮蔽（保護敏感資訊）
+```
+
+### 11.6 Phase 2E：AI 模型選擇器
+
+```
+操作步驟：
+
+1. 進入 AI 輔助錄製面板（CourseEditor → AI 錄製）
+2. 底部工具列左側出現模型選擇下拉（🖥 圖示）
+3. 預設「自動選擇」→ 系統使用 llm_models 表排序最前的 Gemini 模型
+4. 可手動選擇特定模型：
+   ├── Gemini 2.0 Flash（預設，速度快，適合大量截圖）
+   ├── Gemini 2.0 Pro（精度高，適合複雜 UI）
+   └── 其他管理員在後台設定的模型
+5. 選擇後點「全部送 AI 處理」
+   └── 所有截圖都用選擇的模型進行分析
+
+適用情境：
+  ├── 簡單系統（按鈕少）→ Flash 即可，速度快
+  ├── 複雜 ERP 畫面（表格/巢狀選單多）→ Pro 更準確
+  └── 大量截圖（>20 張）→ Flash 節省 API 成本
+```
+
+### 11.7 Phase 2F：HTML5 互動教材匯出
+
+```
+操作步驟：
+
+1. 進入課程編輯器（已有投影片的課程）
+2. 點擊 header 右側的「📥 匯出」按鈕
+3. 彈出匯出選項面板：
+
+   ┌─ 匯出 HTML5 互動教材 ──────────┐
+   │                                  │
+   │  包含語言：                       │
+   │  ☑ 🇹🇼 繁體中文（必選）            │
+   │  ☐ 🇺🇸 English                   │
+   │  ☐ 🇻🇳 Tiếng Việt               │
+   │                                  │
+   │  匯出選項：                       │
+   │  ☑ 包含測驗題                     │
+   │  ☑ 包含音訊（增加檔案大小）        │
+   │  ☑ 包含截圖標註                   │
+   │                                  │
+   │  [📥 匯出 HTML5]                 │
+   │  取消                             │
+   └──────────────────────────────────┘
+
+4. 勾選需要的語言和選項
+5. 點擊「匯出 HTML5」
+6. 系統自動：
+   ├── 載入所有投影片、翻譯、測驗
+   ├── 截圖轉 base64 內嵌（不需 server）
+   ├── 生成包含 CSS + JS 播放器的單一 .html 檔
+   └── 自動觸發下載
+
+7. 得到的 .html 檔案可以：
+   ├── 雙擊直接開啟（不需 server/網路）
+   ├── 放在 USB 分享給工廠
+   ├── 上傳到內網靜態伺服器
+   └── Email 寄給學員
+
+HTML5 播放器功能：
+  ├── 投影片瀏覽（鍵盤 ←→ / 按鈕）
+  ├── Hotspot 區域標記（AI 辨識的 UI 元素）
+  ├── SVG 標註渲染（步驟編號/圈/框/箭頭/文字/馬賽克）
+  ├── 多語切換下拉（即時切換 zh-TW/en/vi）
+  ├── 測驗 + 計分（單選 + 解析 + 通過/未通過）
+  ├── 音訊播放（TTS 旁白）
+  ├── 進度條 + 頁碼
+  └── 響應式版面（手機/平板/桌面）
+
+檔案大小估算：
+  6 張截圖 × ~150KB = ~900KB
+  播放器 JS/CSS = ~50KB
+  投影片 JSON（3 語言）= ~30KB
+  TTS 音訊（選配）= ~180KB
+  ─────────────────────
+  不含音訊 ≈ 1MB
+  含音訊 ≈ 1.2MB
+```
+
+### 11.8 Phase 2F：AI 模型設定
+
+```
+操作步驟：
+
+1. 進入課程編輯器 → 點「設定」頁籤
+2. 看到「AI 模型設定」區塊：
+
+   ┌─ AI 模型設定 ──────────────────┐
+   │                                  │
+   │  截圖辨識模型                     │
+   │  用於 AI 分析截圖、辨識 UI 元素    │
+   │  [▼ 自動選擇（系統預設）      ]    │
+   │                                  │
+   │  翻譯模型                         │
+   │  用於翻譯教材到其他語言            │
+   │  [▼ 自動選擇（系統預設）      ]    │
+   │                                  │
+   │  [💾 儲存設定]                    │
+   │                                  │
+   │  模型比較參考                     │
+   │  ┌────────┬──────────┬────┐      │
+   │  │ 模型   │ 速度     │精度│      │
+   │  │ Flash  │ ~3秒/張  │一般│      │
+   │  │ Pro    │ ~8秒/張  │ 高│      │
+   │  └────────┴──────────┴────┘      │
+   └──────────────────────────────────┘
+
+3. 選擇適合的模型 → 儲存
+4. 設定存到 system_settings 表（全系統生效）
+5. 模型優先級：
+   ├── RecordingPanel 手動選擇（單次覆蓋）
+   ├── system_settings 設定（全系統預設）
+   ├── llm_models 表排序第一（DB 預設）
+   └── gemini-2.0-flash（硬編碼 fallback）
+```
+
+### 11.9 Phase 2F：翻譯進度即時顯示
+
+```
+改善前：
+  ├── 點「AI 翻譯」→ 顯示「翻譯中...」
+  ├── 等 30 秒～2 分鐘（無進度資訊）
+  ├── 經常 timeout 失敗
+  └── 投影片進度永遠顯示 0/7
+
+改善後：
+  ├── 點「AI 翻譯」→ SSE 串流連線
+  ├── 即時顯示：⏳ 翻譯投影片 3/7...
+  ├── 進度條同步更新
+  ├── 每張投影片翻譯失敗不中斷（繼續下一張）
+  └── 完成後自動刷新狀態
+
+SSE 事件類型：
+  ├── progress: { current, total, step, slides_done, slides_total }
+  ├── done: { ok, translated: { lessons, slides, questions } }
+  └── error: { error }
 ```
 
 ---
@@ -1219,24 +1576,215 @@ Step 4: 重新發佈
 完全重做: 2 小時
 ```
 
+### 劇本 6：截圖標註完整示範（Phase 2E，3 分鐘完成）
+
+```
+目標：展示截圖標註系統的完整操作流程
+前置：Chrome Extension 已連線，已開啟錄製 session
+
+Step 1: 準備標註
+  ├── 在目標系統操作到登入頁面
+  ├── 點擊 badge「📸 截圖」按鈕
+  └── 畫面凍結，頂部出現標註工具列
+
+Step 2: 標記操作順序
+  ├── 工具列選「① 編號」（預設已選）
+  ├── 點擊帳號輸入框 → 自動出現紅色 ① 圓圈
+  ├── 點擊密碼輸入框 → 自動出現紅色 ② 圓圈
+  └── 點擊登入按鈕 → 自動出現紅色 ③ 圓圈
+
+Step 3: 加入引導標註
+  ├── 切換工具「→ 箭頭」（或按鍵盤 4）
+  ├── 從空白處拖向登入按鈕 → 出現箭頭
+  ├── 切換工具「T 文字」（或按鍵盤 5）
+  ├── 點擊旁邊空白處 → 輸入「輸入工號後點登入」→ Enter
+  ├── 切換顏色為藍色 → 更顯眼
+  └── 不小心多畫了？Ctrl+Z 復原
+
+Step 4: 保護敏感資訊
+  ├── 切換工具「▦ 馬賽克」（或按鍵盤 7）
+  ├── 拖拉覆蓋密碼欄位已輸入的內容
+  └── 密碼區域變成馬賽克格子
+
+Step 5: 確認上傳
+  ├── 檢查標註結果（①②③ + 箭頭 + 文字 + 馬賽克）
+  ├── 點「✅ 確認截圖」
+  ├── badge 顯示截圖數量 +1
+  └── 系統自動上傳：
+      ├── 原圖（無標註，供 AI 辨識用）
+      ├── 標註圖（含所有標記，預覽用）
+      └── 標註 JSON（座標+類型+文字，結構化資料）
+
+Step 6: AI 處理（在錄製面板操作）
+  ├── 停止錄製 → 拉取截圖
+  ├── 底部選擇 AI 模型（如 Gemini 2.0 Flash）
+  ├── 點「全部送 AI 處理」
+  ├── AI 分析時帶入標註資訊：
+  │   ├── 「步驟①: 編號在座標 (35%, 42%)，標註帳號欄位」
+  │   ├── 「步驟②: 編號在座標 (35%, 52%)，標註密碼欄位」
+  │   └── 「步驟③: 編號在座標 (35%, 62%)，標註登入按鈕」
+  └── AI 按①②③順序生成精準操作說明
+
+Step 7: 查看生成結果
+  ├── 投影片上方：操作說明文字
+  │   └── 「步驟1：在帳號欄位輸入您的工號。
+  │        步驟2：在密碼欄位輸入密碼。
+  │        步驟3：點擊登入按鈕完成登入。」
+  ├── 投影片中央：截圖 + SVG 標註層
+  │   └── ①②③ 圓圈 + 箭頭 + 文字 + 馬賽克 全部可見
+  ├── 學員可點「隱藏標註」挑戰自己操作
+  └── 馬賽克永遠遮蔽（保護密碼）
+
+效率提升：
+  無標註：AI 辨識準確率 ~70%，常抓錯主要操作點
+  有標註：AI 辨識準確率 ~95%，①②③ 順序確保說明正確
+  額外時間：每張截圖多花 15-30 秒標註，換來大幅減少後續微調
+```
+
+### 劇本 7：AI 模型選擇比較（Phase 2E）
+
+```
+目標：展示不同 AI 模型對截圖分析的效果差異
+前置：已錄製 10 張 ERP 系統操作截圖
+
+情境 A: 使用 Gemini Flash（快速模式）
+  ├── 底部模型選擇 → 選「Gemini 2.0 Flash」
+  ├── 點「全部送 AI 處理」
+  ├── 處理速度：10 張 × ~3 秒 = 30 秒
+  ├── 辨識結果：
+  │   ├── 簡單頁面（登入/首頁）→ 準確
+  │   ├── 複雜表格頁面 → 可能漏掉小按鈕
+  │   └── 需要微調：~3 張
+  └── 總時間：30 秒 + 5 分鐘微調 ≈ 6 分鐘
+
+情境 B: 使用 Gemini Pro（精準模式）
+  ├── 底部模型選擇 → 選「Gemini 2.0 Pro」
+  ├── 點「全部送 AI 處理」
+  ├── 處理速度：10 張 × ~8 秒 = 80 秒
+  ├── 辨識結果：
+  │   ├── 所有頁面辨識率更高
+  │   ├── 複雜表格也能精確標記每個按鈕
+  │   └── 需要微調：~1 張
+  └── 總時間：80 秒 + 2 分鐘微調 ≈ 3.5 分鐘
+
+建議策略：
+  ├── 大量簡單截圖 → Flash（批次效率高）
+  ├── 少量複雜截圖 → Pro（減少微調時間）
+  └── 有標註的截圖 → Flash 就夠（標註已提供足夠上下文）
+```
+
+### 劇本 8：HTML5 離線教材匯出（Phase 2F，2 分鐘完成）
+
+```
+目標：將「登入與登出」課程匯出為離線 HTML 檔案，發給工廠現場使用
+前置：課程已發佈，7 張投影片，已翻譯英文和越南文
+
+Step 1: 開啟匯出面板
+  ├── 進入課程編輯器
+  ├── 點擊 header 的「📥 匯出」按鈕
+  └── 彈出匯出選項面板
+
+Step 2: 設定匯出選項
+  ├── 語言：勾選 ☑ 繁體中文 ☑ English ☑ Tiếng Việt
+  ├── ☑ 包含測驗題（讓學員自我檢測）
+  ├── ☐ 不含音訊（減少檔案大小，工廠環境噪音大）
+  └── ☑ 包含截圖標註（步驟編號、箭頭指引）
+
+Step 3: 執行匯出
+  ├── 點「匯出 HTML5」
+  ├── 等待 3-5 秒（系統讀取截圖 → base64 編碼 → 組裝 HTML）
+  └── 瀏覽器自動下載 course_1_1712025600000.html
+
+Step 4: 驗證匯出結果
+  ├── 雙擊 .html 檔案 → 瀏覽器開啟
+  ├── 看到完整的教材播放器：
+  │   ┌─ FOXLINK GPT 登入教學 ──── [繁體中文 ▼] ──┐
+  │   │                                             │
+  │   │  [截圖 + 標註 SVG]  [操作說明]              │
+  │   │  ① Language btn     步驟1: 點擊...          │
+  │   │  ② 帳號欄位         步驟2: 輸入...          │
+  │   │                     步驟3: ...               │
+  │   │                                             │
+  │   │ [◀ 上一頁] ████████░░ 1/7 [下一頁 ▶]       │
+  │   └─────────────────────────────────────────────┘
+  │
+  ├── 切換語言下拉 → English → 內容全部切換
+  ├── 鍵盤 → 翻到最後一頁 → 進入測驗
+  ├── 作答 → 提交 → 顯示分數 ✅ 通過
+  └── 確認標註（①②③ 圓圈、箭頭、馬賽克）正常顯示
+
+Step 5: 部署到工廠
+  ├── 方案 A: 複製到 USB → 插到工廠電腦 → 雙擊開啟
+  ├── 方案 B: 上傳到內網 http://training.foxlink.local/
+  ├── 方案 C: Email 寄給各廠區訓練負責人
+  └── 不需安裝任何軟體，任何瀏覽器都能開
+
+結果：
+  ├── 檔案大小 ≈ 1.1MB（7 張截圖 + 3 語言 + 測驗，不含音訊）
+  ├── 完全離線運行（不需 server / 網路）
+  ├── 越南廠學員可切換越南文
+  └── 製作時間：2 分鐘（點幾個勾就好）
+```
+
+### 劇本 9：翻譯 + 匯出完整流程（Phase 2F，10 分鐘完成）
+
+```
+目標：將剛錄製完成的 ERP 採購單教材翻譯成英文越南文，並匯出給海外廠
+
+Step 1: AI 模型設定
+  ├── 課程編輯器 → 設定 tab
+  ├── 截圖辨識模型 → 選「Gemini 2.0 Flash」（已完成辨識，不影響）
+  └── 翻譯模型 → 選「Gemini 2.0 Pro」（翻譯品質較高）
+
+Step 2: 翻譯英文
+  ├── 翻譯 tab → English → 點「AI 翻譯」
+  ├── 即時進度顯示：
+  │   ├── ⏳ 翻譯課程標題...
+  │   ├── ⏳ 翻譯章節「採購單建立」...
+  │   ├── ⏳ 翻譯投影片 3/10...
+  │   └── ⏳ 翻譯題目 2/5...
+  ├── 進度條即時更新 ████████░░ 8/16
+  └── 完成！翻譯 10 張投影片 + 5 題測驗 ≈ 2 分鐘
+
+Step 3: 翻譯越南文
+  ├── Tiếng Việt → 點「AI 翻譯」
+  └── 同樣流程 ≈ 2 分鐘
+
+Step 4: 匯出多語 HTML
+  ├── 匯出 → 勾選 ☑ 繁中 ☑ English ☑ Tiếng Việt
+  ├── ☑ 含測驗 ☑ 含標註
+  └── 下載 ≈ 2MB 的 .html 檔
+
+Step 5: 發送
+  ├── Email 寄給越南廠/印度廠訓練窗口
+  └── 各廠用當地語言閱讀同一份教材
+
+總時間：~10 分鐘（翻譯 4 分鐘 + 匯出 1 分鐘 + 確認 5 分鐘）
+傳統做法：翻譯 + 排版 + 校稿 = 2-3 個工作天
+```
+
 ---
 
-## 13. 後續開發（Phase 3+）
+## 13. 後續開發（Phase 3B+）
 
 以下功能已在設計文件中規劃，尚未實作：
 
-| Phase | 功能 | 說明 |
-|-------|------|------|
-| 3 | 定期複訓 | 自動建立下一期培訓專案 |
-| 3 | iframe 導引模擬 | 嵌入真實系統 + 高亮 + 操作監聽 |
-| 3 | 教材分析儀表板 | 停留時間、中斷點、題目難度分析 |
-| 3 | 教材版本控制 | v1→v2 + 已完成學員升級提示 |
-| 3 | 多人協作錄製 | 分工 + 統一審核 |
-| 3 | 教材模板庫 | 跨課程複用模板 |
-| 3 | 差異更新 | 系統升版 → AI 比對 → 只重做變更步驟 |
-| 3 | 操作回放驗證 | Playwright 重播驗證教材有效性 |
-| 3 | 學習者熱力圖 | 點擊紀錄分析 → 找出易犯錯區域 |
-| 3 | 證書 PDF | pdfkit 生成完課證書 |
-| 4 | Playwright 全自動 | AI 根據腳本自動操作，人只需審核 |
-| 4 | Extension 離線模式 | IndexedDB 快取 → 批次上傳 |
-| 4 | 討論區 / 徽章 | 社群功能 |
+| Phase | 功能 | 設計文件 | 說明 |
+|-------|------|---------|------|
+| **3B** | **即時語音導覽** | **已規劃** | **Gemini Flash 即時語音 + 學習/測驗模式 + 編輯者提示詞 + 語音風格** |
+| 3C | 影片 AI 拆幀 | §16C | ffmpeg + Gemini 混合拆幀→自動生成投影片 |
+| 3C | 桌面截圖代理 | §16B | Electron F9 全局快捷鍵，截 Java Forms 等非瀏覽器系統 |
+| 3C | 進階標註 | §16A.12 | 畫筆平滑化 Bezier、標註模板、語音搭配標註同步播放 |
+| 3 | 定期複訓 | — | 自動建立下一期培訓專案 |
+| 3 | iframe 導引模擬 | — | 嵌入真實系統 + 高亮 + 操作監聽 |
+| 3 | 教材分析儀表板 | — | 停留時間、中斷點、題目難度分析 |
+| 3 | 教材版本控制 | — | v1→v2 + 已完成學員升級提示 |
+| 3 | 多人協作錄製 | — | 分工 + 統一審核 |
+| 3 | 教材模板庫 | — | 跨課程複用模板 |
+| 3 | 差異更新 | — | 系統升版 → AI 比對 → 只重做變更步驟 |
+| 3 | 操作回放驗證 | — | Playwright 重播驗證教材有效性 |
+| 3 | 學習者熱力圖 | — | 點擊紀錄分析 → 找出易犯錯區域 |
+| 3 | 證書 PDF | — | pdfkit 生成完課證書 |
+| 4 | Playwright 全自動 | — | AI 根據腳本自動操作，人只需審核 |
+| 4 | Extension 離線模式 | — | IndexedDB 快取 → 批次上傳 |
+| 4 | 討論區 / 徽章 | — | 社群功能 |

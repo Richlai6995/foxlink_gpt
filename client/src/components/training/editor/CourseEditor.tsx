@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import api from '../../../lib/api'
-import { ArrowLeft, Save, Plus, GripVertical, Trash2, Eye, Upload, ChevronDown, ChevronRight, Settings, FileText, Play, FolderTree, Camera, Images } from 'lucide-react'
+import { ArrowLeft, Save, Plus, GripVertical, Trash2, Eye, Upload, ChevronDown, ChevronRight, Settings, FileText, Play, FolderTree, Camera, Images, Download, Loader2 } from 'lucide-react'
 import SlideEditor from './SlideEditor'
 import CategoryManager from '../CategoryManager'
 import BatchImport from './BatchImport'
@@ -65,6 +65,7 @@ export default function CourseEditor() {
   })
   const [translating, setTranslating] = useState<string | null>(null)
   const [translateStatus, setTranslateStatus] = useState<any>(null)
+  const [translateProgress, setTranslateProgress] = useState<{ step: string; current: number; total: number; slides_done?: number; slides_total?: number } | null>(null)
 
   useEffect(() => {
     loadCategories()
@@ -204,6 +205,9 @@ export default function CourseEditor() {
               style={{ borderColor: 'var(--t-border)', color: 'var(--t-accent)' }}>
               <Camera size={13} /> AI 錄製
             </button>
+          )}
+          {!isNew && (
+            <ExportButton courseId={Number(id)} />
           )}
           {!isNew && course.status === 'draft' && (
             <button onClick={publishCourse}
@@ -356,28 +360,48 @@ export default function CourseEditor() {
                   {expandedLesson === lesson.id ? <ChevronDown size={14} className="text-slate-500" /> : <ChevronRight size={14} className="text-slate-500" />}
                 </div>
 
-                {/* Expanded: slides list */}
+                {/* Expanded: slides list — drag to reorder */}
                 {expandedLesson === lesson.id && (
-                  <div className="border-t border-slate-700/50 bg-slate-850 px-4 py-3 space-y-2">
+                  <div className="border-t border-slate-700/50 bg-slate-850 px-4 py-3 space-y-1">
                     {(lessonSlides[lesson.id] || []).map((slide, si) => {
                       const slides = lessonSlides[lesson.id] || []
-                      const moveSlide = async (fromIdx: number, toIdx: number) => {
-                        if (toIdx < 0 || toIdx >= slides.length) return
-                        const newSlides = [...slides]
-                        const [moved] = newSlides.splice(fromIdx, 1)
-                        newSlides.splice(toIdx, 0, moved)
-                        setLessonSlides(prev => ({ ...prev, [lesson.id]: newSlides }))
-                        // Save new order to server
-                        const order = newSlides.map((s, idx) => ({ id: s.id, sort_order: idx + 1 }))
-                        api.put(`/training/lessons/${lesson.id}/slides/reorder`, { order }).catch(console.error)
-                      }
                       return (
                       <div key={slide.id}
-                        className="flex items-center gap-2 rounded px-3 py-2 text-xs cursor-pointer transition"
+                        draggable
+                        onDragStart={(e) => {
+                          e.dataTransfer.effectAllowed = 'move'
+                          ;(e.currentTarget as HTMLElement).style.opacity = '0.4'
+                          ;(e.currentTarget as HTMLElement).dataset.dragIdx = String(si)
+                        }}
+                        onDragEnd={(e) => { (e.currentTarget as HTMLElement).style.opacity = '1' }}
+                        onDragOver={(e) => {
+                          e.preventDefault()
+                          e.dataTransfer.dropEffect = 'move'
+                          ;(e.currentTarget as HTMLElement).style.borderTop = '2px solid var(--t-accent, #3b82f6)'
+                        }}
+                        onDragLeave={(e) => { (e.currentTarget as HTMLElement).style.borderTop = '' }}
+                        onDrop={async (e) => {
+                          e.preventDefault()
+                          ;(e.currentTarget as HTMLElement).style.borderTop = ''
+                          const fromEl = document.querySelector('[data-drag-idx]') as HTMLElement
+                          const fromIdx = fromEl ? Number(fromEl.dataset.dragIdx) : -1
+                          if (fromEl) delete fromEl.dataset.dragIdx
+                          if (fromIdx < 0 || fromIdx === si) return
+                          const newSlides = [...slides]
+                          const [moved] = newSlides.splice(fromIdx, 1)
+                          newSlides.splice(si, 0, moved)
+                          setLessonSlides(prev => ({ ...prev, [lesson.id]: newSlides }))
+                          const order = newSlides.map((s, idx) => ({ id: s.id, sort_order: idx + 1 }))
+                          api.put(`/training/lessons/${lesson.id}/slides/reorder`, { order }).catch(console.error)
+                        }}
+                        className="flex items-center gap-2 rounded px-2 py-2 text-xs cursor-pointer transition group"
                         style={{ backgroundColor: 'var(--t-bg-card)' }}
                         onClick={() => setEditingSlideId(slide.id)}
                       >
-                        <span style={{ color: 'var(--t-text-dim)' }} className="w-5">{si + 1}.</span>
+                        {/* Drag handle */}
+                        <GripVertical size={12} className="shrink-0 cursor-grab text-slate-400 opacity-40 group-hover:opacity-100 transition"
+                          onMouseDown={e => e.stopPropagation()} />
+                        <span style={{ color: 'var(--t-text-dim)' }} className="w-5 text-center">{si + 1}.</span>
                         <span className={`px-1.5 py-0.5 rounded text-[9px] font-medium shrink-0 ${
                           slide.slide_type === 'hotspot' ? 'bg-red-500/20 text-red-400' :
                           slide.slide_type === 'dragdrop' ? 'bg-purple-500/20 text-purple-400' :
@@ -397,23 +421,8 @@ export default function CourseEditor() {
                           })()}
                         </span>
                         {slide.audio_url && <span className="text-sky-400 text-[9px]">🔊</span>}
-                        {/* Move up/down */}
                         <button
-                          className="shrink-0 px-1 hover:opacity-70 transition"
-                          style={{ color: 'var(--t-text-dim)' }}
-                          title="上移"
-                          onClick={(e) => { e.stopPropagation(); moveSlide(si, si - 1) }}
-                          disabled={si === 0}
-                        >▲</button>
-                        <button
-                          className="shrink-0 px-1 hover:opacity-70 transition"
-                          style={{ color: 'var(--t-text-dim)' }}
-                          title="下移"
-                          onClick={(e) => { e.stopPropagation(); moveSlide(si, si + 1) }}
-                          disabled={si === slides.length - 1}
-                        >▼</button>
-                        <button
-                          className="shrink-0 hover:text-red-400 transition"
+                          className="shrink-0 hover:text-red-400 transition opacity-0 group-hover:opacity-100"
                           style={{ color: 'var(--t-text-dim)' }}
                           title="刪除投影片"
                           onClick={async (e) => {
@@ -492,16 +501,42 @@ export default function CourseEditor() {
                       onClick={async () => {
                         try {
                           setTranslating(lang)
-                          await api.post(`/training/courses/${id}/translate`, { target_lang: lang }, { timeout: 300000 })
-                          // Refresh status
-                          const statusRes = await api.get(`/training/courses/${id}/translate/status`)
-                          setTranslateStatus(statusRes.data)
-                          alert(`${langName} 翻譯完成！`)
+                          setTranslateProgress(null)
+                          // Use fetch + SSE to track progress
+                          const token = localStorage.getItem('token')
+                          const resp = await fetch(`/api/training/courses/${id}/translate`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                            body: JSON.stringify({ target_lang: lang })
+                          })
+                          const reader = resp.body?.getReader()
+                          const decoder = new TextDecoder()
+                          let buf = ''
+                          while (reader) {
+                            const { done, value } = await reader.read()
+                            if (done) break
+                            buf += decoder.decode(value, { stream: true })
+                            const lines = buf.split('\n')
+                            buf = lines.pop() || ''
+                            for (const line of lines) {
+                              if (!line.startsWith('data: ')) continue
+                              try {
+                                const evt = JSON.parse(line.slice(6))
+                                if (evt.type === 'progress') setTranslateProgress(evt)
+                                if (evt.type === 'done') {
+                                  setTranslateProgress(null)
+                                  const statusRes = await api.get(`/training/courses/${id}/translate/status`)
+                                  setTranslateStatus(statusRes.data)
+                                }
+                                if (evt.type === 'error') throw new Error(evt.error)
+                              } catch {}
+                            }
+                          }
                         } catch (e: any) {
-                          alert(e.response?.data?.error || '翻譯失敗')
-                        } finally { setTranslating(null) }
+                          alert(e.message || '翻譯失敗')
+                        } finally { setTranslating(null); setTranslateProgress(null) }
                       }}
-                      disabled={translating === lang}
+                      disabled={!!translating}
                       className="flex items-center gap-1.5 text-xs text-white px-3 py-1.5 rounded-lg transition disabled:opacity-50"
                       style={{ backgroundColor: 'var(--t-accent-bg)' }}
                     >
@@ -509,7 +544,27 @@ export default function CourseEditor() {
                     </button>
                   </div>
 
-                  {status && (
+                  {/* Live progress during translation */}
+                  {translating === lang && translateProgress && (
+                    <div className="text-xs space-y-1.5 p-2 rounded-lg" style={{ backgroundColor: 'var(--t-accent-subtle)' }}>
+                      <div className="flex items-center gap-2" style={{ color: 'var(--t-accent)' }}>
+                        <span className="animate-spin text-[10px]">⏳</span>
+                        <span>{translateProgress.step}</span>
+                      </div>
+                      <div className="flex items-center gap-2" style={{ color: 'var(--t-text-muted)' }}>
+                        <span>{translateProgress.current}/{translateProgress.total}</span>
+                        <div className="flex-1 h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--t-border)' }}>
+                          <div className="h-full rounded-full transition-all" style={{
+                            backgroundColor: 'var(--t-accent)',
+                            width: `${translateProgress.total > 0 ? (translateProgress.current / translateProgress.total) * 100 : 0}%`
+                          }} />
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Status after translation */}
+                  {status && !translating && (
                     <div className="text-xs space-y-1" style={{ color: 'var(--t-text-muted)' }}>
                       <div className="flex items-center gap-2">
                         <span>課程標題：{status.course_translated ? '✅' : '❌'}</span>
@@ -554,10 +609,7 @@ export default function CourseEditor() {
 
         {/* Settings Tab Placeholder */}
         {activeTab === 'settings' && !isNew && (
-          <div className="text-center text-slate-500 py-20">
-            <Settings size={48} className="mx-auto mb-3 opacity-50" />
-            <p className="text-sm">課程設定（開發中）</p>
-          </div>
+          <TrainingAISettings />
         )}
       </div>
 
@@ -614,6 +666,214 @@ export default function CourseEditor() {
           }}
           onClose={() => setShowRecording(false)}
         />
+      )}
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Training AI Settings — 辨識模型 + 翻譯模型設定
+// ═══════════════════════════════════════════════════════════════════════════════
+
+function TrainingAISettings() {
+  const [models, setModels] = useState<{ id: number; display_name: string; api_model: string }[]>([])
+  const [analyzeModel, setAnalyzeModel] = useState('')
+  const [translateModel, setTranslateModel] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [loaded, setLoaded] = useState(false)
+
+  useEffect(() => {
+    Promise.all([
+      api.get('/training/ai/models'),
+      api.get('/training/ai/settings')
+    ]).then(([modelsRes, settingsRes]) => {
+      setModels(modelsRes.data || [])
+      setAnalyzeModel(settingsRes.data?.training_analyze_model || '')
+      setTranslateModel(settingsRes.data?.training_translate_model || '')
+      setLoaded(true)
+    }).catch(() => setLoaded(true))
+  }, [])
+
+  const save = async () => {
+    try {
+      setSaving(true)
+      await api.put('/training/ai/settings', {
+        training_analyze_model: analyzeModel,
+        training_translate_model: translateModel
+      })
+    } catch (e: any) {
+      alert(e.response?.data?.error || '儲存失敗')
+    } finally { setSaving(false) }
+  }
+
+  if (!loaded) return <div className="py-12 text-center text-xs" style={{ color: 'var(--t-text-dim)' }}>載入中...</div>
+
+  return (
+    <div className="max-w-xl space-y-6">
+      <div>
+        <h3 className="text-sm font-semibold mb-1" style={{ color: 'var(--t-text)' }}>AI 模型設定</h3>
+        <p className="text-xs" style={{ color: 'var(--t-text-dim)' }}>
+          設定教育訓練平台使用的 Gemini 模型。留空則自動選擇排序最前的模型。
+        </p>
+      </div>
+
+      {/* Analyze model */}
+      <div className="space-y-1.5">
+        <label className="text-xs font-medium" style={{ color: 'var(--t-text-secondary)' }}>
+          截圖辨識模型
+        </label>
+        <p className="text-[10px]" style={{ color: 'var(--t-text-dim)' }}>
+          用於 AI 分析截圖、辨識 UI 元素、生成操作說明。複雜 ERP 畫面建議用 Pro 模型。
+        </p>
+        <select value={analyzeModel} onChange={e => setAnalyzeModel(e.target.value)}
+          className="w-full border rounded px-3 py-2 text-sm"
+          style={{ backgroundColor: 'var(--t-bg-input)', borderColor: 'var(--t-border)', color: 'var(--t-text)' }}>
+          <option value="">自動選擇（系統預設）</option>
+          {models.map(m => (
+            <option key={m.id} value={m.api_model}>{m.display_name || m.api_model}</option>
+          ))}
+        </select>
+      </div>
+
+      {/* Translate model */}
+      <div className="space-y-1.5">
+        <label className="text-xs font-medium" style={{ color: 'var(--t-text-secondary)' }}>
+          翻譯模型
+        </label>
+        <p className="text-[10px]" style={{ color: 'var(--t-text-dim)' }}>
+          用於將教材翻譯成其他語言（English / Tiếng Việt）。Flash 模型速度快，Pro 模型翻譯品質較高。
+        </p>
+        <select value={translateModel} onChange={e => setTranslateModel(e.target.value)}
+          className="w-full border rounded px-3 py-2 text-sm"
+          style={{ backgroundColor: 'var(--t-bg-input)', borderColor: 'var(--t-border)', color: 'var(--t-text)' }}>
+          <option value="">自動選擇（系統預設）</option>
+          {models.map(m => (
+            <option key={m.id} value={m.api_model}>{m.display_name || m.api_model}</option>
+          ))}
+        </select>
+      </div>
+
+      <button onClick={save} disabled={saving}
+        className="flex items-center gap-1.5 text-xs text-white px-4 py-2 rounded-lg transition disabled:opacity-50"
+        style={{ backgroundColor: 'var(--t-accent-bg)' }}>
+        <Save size={13} /> {saving ? '儲存中...' : '儲存設定'}
+      </button>
+
+      {/* Model comparison info */}
+      <div className="rounded-lg p-3 border text-[11px] space-y-1" style={{ backgroundColor: 'var(--t-bg-inset, var(--t-bg-card))', borderColor: 'var(--t-border)', color: 'var(--t-text-dim)' }}>
+        <div className="font-medium mb-1.5" style={{ color: 'var(--t-text-muted)' }}>模型比較參考</div>
+        <div className="grid grid-cols-3 gap-x-4 gap-y-0.5">
+          <span className="font-medium" style={{ color: 'var(--t-text-secondary)' }}>模型</span>
+          <span className="font-medium" style={{ color: 'var(--t-text-secondary)' }}>速度</span>
+          <span className="font-medium" style={{ color: 'var(--t-text-secondary)' }}>精度</span>
+          <span>Flash</span><span>快 (~3 秒/張)</span><span>一般</span>
+          <span>Pro</span><span>慢 (~8 秒/張)</span><span>高</span>
+        </div>
+        <div className="mt-1.5">建議：大量截圖用 Flash、複雜 ERP 用 Pro、有標註的截圖 Flash 就夠</div>
+      </div>
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Phase 2F: HTML5 Export Button
+// ═══════════════════════════════════════════════════════════════════════════════
+
+function ExportButton({ courseId }: { courseId: number }) {
+  const [open, setOpen] = useState(false)
+  const [exporting, setExporting] = useState(false)
+  const [langs, setLangs] = useState<string[]>(['zh-TW'])
+  const [includeQuiz, setIncludeQuiz] = useState(true)
+  const [includeAudio, setIncludeAudio] = useState(true)
+  const [includeAnnotations, setIncludeAnnotations] = useState(true)
+
+  const doExport = async () => {
+    try {
+      setExporting(true)
+      const res = await api.post(`/training/courses/${courseId}/export`, {
+        languages: langs,
+        include_quiz: includeQuiz,
+        include_audio: includeAudio,
+        include_annotations: includeAnnotations
+      }, { timeout: 120000 })
+
+      if (res.data.download_url) {
+        const a = document.createElement('a')
+        a.href = res.data.download_url
+        a.download = res.data.filename || 'course.html'
+        document.body.appendChild(a)
+        a.click()
+        a.remove()
+        setOpen(false)
+      }
+    } catch (e: any) {
+      alert(e.response?.data?.error || '匯出失敗')
+    } finally { setExporting(false) }
+  }
+
+  const toggleLang = (l: string) => {
+    setLangs(prev => prev.includes(l) ? prev.filter(x => x !== l) : [...prev, l])
+  }
+
+  return (
+    <div className="relative">
+      <button onClick={() => setOpen(!open)}
+        className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg border transition hover:opacity-80"
+        style={{ borderColor: 'var(--t-border)', color: 'var(--t-text-muted)' }}>
+        <Download size={13} /> 匯出
+      </button>
+
+      {open && (
+        <div className="absolute right-0 top-full mt-1 w-64 rounded-lg border shadow-lg z-50 p-3 space-y-3"
+          style={{ backgroundColor: 'var(--t-bg-card)', borderColor: 'var(--t-border)' }}>
+          <div className="text-xs font-semibold" style={{ color: 'var(--t-text)' }}>匯出 HTML5 互動教材</div>
+          <p className="text-[10px]" style={{ color: 'var(--t-text-dim)' }}>
+            產生單一 .html 檔案，離線即可瀏覽（含投影片、互動、標註）
+          </p>
+
+          {/* Language selection */}
+          <div className="space-y-1">
+            <div className="text-[10px] font-medium" style={{ color: 'var(--t-text-muted)' }}>包含語言</div>
+            {[
+              { code: 'zh-TW', label: '繁體中文', flag: '🇹🇼' },
+              { code: 'en', label: 'English', flag: '🇺🇸' },
+              { code: 'vi', label: 'Tiếng Việt', flag: '🇻🇳' },
+            ].map(l => (
+              <label key={l.code} className="flex items-center gap-2 text-[11px] cursor-pointer" style={{ color: 'var(--t-text-secondary)' }}>
+                <input type="checkbox" checked={langs.includes(l.code)} onChange={() => toggleLang(l.code)}
+                  disabled={l.code === 'zh-TW'} className="rounded" />
+                <span>{l.flag} {l.label}</span>
+              </label>
+            ))}
+          </div>
+
+          {/* Options */}
+          <div className="space-y-1">
+            <div className="text-[10px] font-medium" style={{ color: 'var(--t-text-muted)' }}>匯出選項</div>
+            <label className="flex items-center gap-2 text-[11px] cursor-pointer" style={{ color: 'var(--t-text-secondary)' }}>
+              <input type="checkbox" checked={includeQuiz} onChange={() => setIncludeQuiz(!includeQuiz)} className="rounded" />
+              包含測驗題
+            </label>
+            <label className="flex items-center gap-2 text-[11px] cursor-pointer" style={{ color: 'var(--t-text-secondary)' }}>
+              <input type="checkbox" checked={includeAudio} onChange={() => setIncludeAudio(!includeAudio)} className="rounded" />
+              包含音訊（增加檔案大小）
+            </label>
+            <label className="flex items-center gap-2 text-[11px] cursor-pointer" style={{ color: 'var(--t-text-secondary)' }}>
+              <input type="checkbox" checked={includeAnnotations} onChange={() => setIncludeAnnotations(!includeAnnotations)} className="rounded" />
+              包含截圖標註
+            </label>
+          </div>
+
+          <button onClick={doExport} disabled={exporting || langs.length === 0}
+            className="w-full flex items-center justify-center gap-1.5 text-xs text-white py-2 rounded-lg transition disabled:opacity-50"
+            style={{ backgroundColor: 'var(--t-accent-bg)' }}>
+            {exporting ? <><Loader2 size={12} className="animate-spin" /> 匯出中...</> : <><Download size={12} /> 匯出 HTML5</>}
+          </button>
+
+          <button onClick={() => setOpen(false)} className="w-full text-[10px] py-1" style={{ color: 'var(--t-text-dim)' }}>
+            取消
+          </button>
+        </div>
       )}
     </div>
   )
