@@ -4,6 +4,7 @@ import api from '../../../../lib/api'
 import type { Block } from '../SlideEditor'
 import LanguageImagePanel from './LanguageImagePanel'
 import AnnotationEditor from './AnnotationEditor'
+import AnnotationOverlay from '../../blocks/AnnotationOverlay'
 
 interface Region {
   id: string
@@ -281,13 +282,21 @@ export default function HotspotEditor({ block, onChange, courseId, slideId, bloc
               </div>
             ))}
 
-            {/* Phase 3A: Annotation layer — toggle visible, drag to edit */}
+            {/* Phase 3A: Annotation layer — toggle visible */}
             {showAnnotationLayer && block.annotations?.length > 0 && (
               <AnnotationEditor
                 annotations={block.annotations}
                 onChange={anns => onChange({ ...block, annotations: anns })}
                 imageRef={imgElRef}
               />
+            )}
+            {/* Fallback: read-only overlay if annotations_in_image (old data with burned annotations) */}
+            {showAnnotationLayer && (!block.annotations || block.annotations.length === 0) && block.annotations_in_image && (
+              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                <span className="text-[10px] px-2 py-1 rounded" style={{ backgroundColor: 'rgba(0,0,0,0.6)', color: '#fbbf24' }}>
+                  標註已燒入圖片（舊版資料）
+                </span>
+              </div>
             )}
           </div>
         ) : (
@@ -311,18 +320,17 @@ export default function HotspotEditor({ block, onChange, courseId, slideId, bloc
               style={{ backgroundColor: 'var(--t-accent-subtle)', color: 'var(--t-accent)' }}>
               <Wand2 size={12} /> {aiLoading ? 'AI 辨識中...' : 'AI 一鍵辨識'}
             </button>
-            {block.annotations?.length > 0 && (
-              <button onClick={() => setShowAnnotationLayer(!showAnnotationLayer)}
-                className="flex items-center gap-1 text-[10px] px-2 py-1 rounded-lg transition"
-                style={{
-                  backgroundColor: showAnnotationLayer ? 'rgba(239,68,68,0.12)' : 'var(--t-bg-card)',
-                  color: showAnnotationLayer ? '#ef4444' : 'var(--t-text-dim)',
-                  border: `1px solid ${showAnnotationLayer ? 'rgba(239,68,68,0.3)' : 'var(--t-border)'}`
-                }}
-                title="切換截圖標註參考圖層">
-                {showAnnotationLayer ? '🔴 標註可見' : '⚪ 標註隱藏'} ({block.annotations.length})
-              </button>
-            )}
+            <button onClick={() => setShowAnnotationLayer(!showAnnotationLayer)}
+              className="flex items-center gap-1 text-[10px] px-2 py-1 rounded-lg transition"
+              style={{
+                backgroundColor: showAnnotationLayer ? 'rgba(239,68,68,0.12)' : 'var(--t-bg-card)',
+                color: showAnnotationLayer ? '#ef4444' : 'var(--t-text-dim)',
+                border: `1px solid ${showAnnotationLayer ? 'rgba(239,68,68,0.3)' : 'var(--t-border)'}`
+              }}
+              title="切換截圖標註參考圖層">
+              {showAnnotationLayer ? '🔴 標註可見' : '⚪ 標註隱藏'}
+              {block.annotations?.length > 0 ? ` (${block.annotations.length})` : ''}
+            </button>
             <button onClick={() => onChange({ ...block, image: '' })}
               className="text-[10px] text-red-400 hover:text-red-300">
               移除圖片
