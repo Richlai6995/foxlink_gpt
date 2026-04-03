@@ -32,7 +32,11 @@ export default function LanguageImagePanel({ slideId, blockIndex, currentImage, 
   const [saving, setSaving] = useState(false)
   const [regionOverrides, setRegionOverrides] = useState<Record<string, Record<string, any>>>({})
   const [editModal, setEditModal] = useState(false)
-  const [dragging, setDragging] = useState<{ id: string; startX: number; startY: number; origX: number; origY: number } | null>(null)
+  const [dragging, setDragging] = useState<{
+    id: string; mode: 'move' | 'resize';
+    startX: number; startY: number;
+    origX: number; origY: number; origW: number; origH: number
+  } | null>(null)
   const modalImgRef = useRef<HTMLImageElement>(null)
 
   useEffect(() => {
@@ -100,24 +104,47 @@ export default function LanguageImagePanel({ slideId, blockIndex, currentImage, 
     return { x: ((e.clientX - rect.left) / rect.width) * 100, y: ((e.clientY - rect.top) / rect.height) * 100 }
   }
 
-  const onRegionDown = (e: React.MouseEvent, r: Region) => {
+  const startDrag = (e: React.MouseEvent, r: Region, mode: 'move' | 'resize') => {
     e.preventDefault(); e.stopPropagation()
     const pt = toPct(e)
     const eff = getEffectiveRegions().find(er => er.id === r.id)
     if (!eff) return
-    setDragging({ id: r.id, startX: pt.x, startY: pt.y, origX: eff.coords.x, origY: eff.coords.y })
+    setDragging({
+      id: r.id, mode,
+      startX: pt.x, startY: pt.y,
+      origX: eff.coords.x, origY: eff.coords.y,
+      origW: eff.coords.w, origH: eff.coords.h
+    })
   }
 
   const onModalMove = (e: React.MouseEvent) => {
     if (!dragging) return
     const pt = toPct(e)
-    setRegionOverrides(prev => ({
-      ...prev,
-      [activeLang]: {
-        ...(prev[activeLang] || {}),
-        [dragging.id]: { x: dragging.origX + (pt.x - dragging.startX), y: dragging.origY + (pt.y - dragging.startY) }
-      }
-    }))
+    const dx = pt.x - dragging.startX
+    const dy = pt.y - dragging.startY
+
+    if (dragging.mode === 'move') {
+      setRegionOverrides(prev => ({
+        ...prev,
+        [activeLang]: {
+          ...(prev[activeLang] || {}),
+          [dragging.id]: { x: dragging.origX + dx, y: dragging.origY + dy, w: dragging.origW, h: dragging.origH }
+        }
+      }))
+    } else {
+      // resize: change w and h
+      setRegionOverrides(prev => ({
+        ...prev,
+        [activeLang]: {
+          ...(prev[activeLang] || {}),
+          [dragging.id]: {
+            x: dragging.origX, y: dragging.origY,
+            w: Math.max(2, dragging.origW + dx),
+            h: Math.max(2, dragging.origH + dy)
+          }
+        }
+      }))
+    }
   }
 
   const langImage = overrides[activeLang]?.[String(blockIndex)]
@@ -235,24 +262,35 @@ export default function LanguageImagePanel({ slideId, blockIndex, currentImage, 
               <img ref={modalImgRef} src={langImage} alt="" className="w-full" draggable={false}
                 style={{ cursor: dragging ? 'grabbing' : 'default' }} />
 
-              {effectiveRegions.map(r => (
+              {effectiveRegions.map(r => {
+                const isActive = dragging?.id === r.id
+                return (
                 <div key={r.id}
                   className="absolute border-2 rounded transition-shadow"
                   style={{
                     left: `${r.coords.x}%`, top: `${r.coords.y}%`,
                     width: `${r.coords.w}%`, height: `${r.coords.h}%`,
-                    borderColor: dragging?.id === r.id ? '#facc15' : '#22c55e',
-                    background: dragging?.id === r.id ? 'rgba(250,204,21,0.15)' : 'rgba(34,197,94,0.1)',
-                    cursor: 'grab',
-                    boxShadow: dragging?.id === r.id ? '0 0 0 3px rgba(250,204,21,0.4)' : 'none'
+                    borderColor: isActive ? '#facc15' : '#22c55e',
+                    background: isActive ? 'rgba(250,204,21,0.15)' : 'rgba(34,197,94,0.1)',
+                    cursor: dragging?.mode === 'resize' ? 'nwse-resize' : 'grab',
+                    boxShadow: isActive ? '0 0 0 3px rgba(250,204,21,0.4)' : 'none'
                   }}
-                  onMouseDown={e => onRegionDown(e, r)}>
+                  onMouseDown={e => startDrag(e, r, 'move')}>
+                  {/* Label */}
                   <span className="absolute -top-5 left-0 text-[10px] font-bold px-1.5 py-0.5 rounded shadow-sm"
-                    style={{ backgroundColor: dragging?.id === r.id ? '#facc15' : '#22c55e', color: dragging?.id === r.id ? '#000' : '#fff' }}>
+                    style={{ backgroundColor: isActive ? '#facc15' : '#22c55e', color: isActive ? '#000' : '#fff' }}>
                     {r.label || r.id}
                   </span>
+                  {/* Resize handle — bottom-right corner */}
+                  <div
+                    className="absolute -bottom-1 -right-1 w-3 h-3 rounded-sm"
+                    style={{ backgroundColor: '#22c55e', cursor: 'nwse-resize', border: '1px solid white' }}
+                    onMouseDown={e => startDrag(e, r, 'resize')}
+                    title="拖拉調整大小"
+                  />
                 </div>
-              ))}
+                )
+              })}
             </div>
           </div>
         </div>
