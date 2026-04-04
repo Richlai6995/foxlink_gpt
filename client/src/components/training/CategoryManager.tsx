@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Plus, Trash2, Pencil, Check, X, FolderTree, ChevronRight } from 'lucide-react'
 import api from '../../lib/api'
 
@@ -15,6 +16,7 @@ interface Props {
 }
 
 export default function CategoryManager({ onClose, onChanged }: Props) {
+  const { t } = useTranslation()
   const [categories, setCategories] = useState<Category[]>([])
   const [editingId, setEditingId] = useState<number | null>(null)
   const [editName, setEditName] = useState('')
@@ -41,7 +43,7 @@ export default function CategoryManager({ onClose, onChanged }: Props) {
       load()
       onChanged?.()
     } catch (e: any) {
-      alert(e.response?.data?.error || '新增失敗')
+      alert(e.response?.data?.error || t('training.addFailed'))
     }
   }
 
@@ -61,7 +63,7 @@ export default function CategoryManager({ onClose, onChanged }: Props) {
   }
 
   const deleteCategory = async (id: number) => {
-    if (!confirm('確定要刪除此分類？子分類會移到上層。')) return
+    if (!confirm(t('training.confirmDeleteCategory'))) return
     try {
       await api.delete(`/training/categories/${id}`)
       load()
@@ -112,16 +114,16 @@ export default function CategoryManager({ onClose, onChanged }: Props) {
 
         <div className="flex items-center justify-between px-4 py-3 border-b border-slate-700">
           <h3 className="text-sm font-semibold flex items-center gap-2">
-            <FolderTree size={14} className="text-sky-400" /> 課程分類管理
+            <FolderTree size={14} className="text-sky-400" /> {t('training.categoryManage')}
           </h3>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-200"><X size={16} /></button>
         </div>
 
         <div className="flex-1 overflow-y-auto p-3">
           {loading ? (
-            <div className="text-slate-500 text-xs text-center py-6">載入中...</div>
+            <div className="text-slate-500 text-xs text-center py-6">{t('training.loading')}</div>
           ) : categories.length === 0 ? (
-            <div className="text-slate-500 text-xs text-center py-6">尚未建立任何分類</div>
+            <div className="text-slate-500 text-xs text-center py-6">{t('training.noCategories')}</div>
           ) : (
             roots.map(cat => renderCategory(cat, 0))
           )}
@@ -135,14 +137,14 @@ export default function CategoryManager({ onClose, onChanged }: Props) {
               onChange={e => setNewName(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && addCategory()}
               className="flex-1 bg-slate-700 border border-slate-600 rounded px-2 py-1.5 text-xs focus:outline-none focus:border-sky-500"
-              placeholder="新分類名稱"
+              placeholder={t('training.newCategoryName')}
             />
             <select
               value={newParentId || ''}
               onChange={e => setNewParentId(e.target.value ? Number(e.target.value) : null)}
               className="bg-slate-700 border border-slate-600 rounded px-2 py-1.5 text-[10px] w-28"
             >
-              <option value="">頂層分類</option>
+              <option value="">{t('training.topCategory')}</option>
               {categories.filter(c => {
                 // 最多 3 層：只允許選沒有 grandparent 的作為 parent
                 if (!c.parent_id) return true
@@ -157,7 +159,7 @@ export default function CategoryManager({ onClose, onChanged }: Props) {
               <Plus size={13} />
             </button>
           </div>
-          <p className="text-[9px] text-slate-600">分類最多 3 層（大分類 → 中分類 → 小分類）</p>
+          <p className="text-[9px] text-slate-600">{t('training.categoryDepthInfo')}</p>
         </div>
       </div>
     </div>

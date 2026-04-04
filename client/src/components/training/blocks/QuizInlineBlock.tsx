@@ -1,7 +1,9 @@
 import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { CheckCircle2 } from 'lucide-react'
 
 export default function QuizInlineBlock({ block }: { block: any }) {
+  const { t } = useTranslation()
   const questionType = block.question_type || 'single_choice'
   const options: { text: string; correct: boolean }[] = block.options || []
   const [selected, setSelected] = useState<Set<number>>(new Set())
@@ -72,25 +74,25 @@ export default function QuizInlineBlock({ block }: { block: any }) {
           onChange={e => setFillAnswer(e.target.value)}
           disabled={submitted}
           className="w-full bg-slate-850 border border-slate-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-sky-500 disabled:opacity-60"
-          placeholder="輸入答案..."
+          placeholder={t('training.inputAnswer')}
         />
       )}
 
       <div className="flex items-center gap-3">
         <button onClick={submit} disabled={submitted}
           className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-1.5 rounded-lg text-xs font-medium transition disabled:opacity-50">
-          {submitted ? '已作答' : '確認答案'}
+          {submitted ? t('training.answered') : t('training.confirmAnswer')}
         </button>
         {submitted && (
           <span className={`text-sm font-medium ${isCorrect ? 'text-green-400' : 'text-red-400'}`}>
-            {isCorrect ? '✓ 正確' : '✗ 錯誤'}
+            {isCorrect ? t('training.answerCorrect') : t('training.answerWrong')}
           </span>
         )}
         {submitted && block.explanation && (
           <span className="text-xs text-slate-400">— {block.explanation}</span>
         )}
       </div>
-      {block.points && <div className="text-[10px] text-slate-600">配分: {block.points} 分</div>}
+      {block.points && <div className="text-[10px] text-slate-600">{t('training.points')} {block.points}</div>}
     </div>
   )
 }

@@ -1,6 +1,8 @@
 import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 
 export default function DragDropBlock({ block }: { block: any }) {
+  const { t } = useTranslation()
   const items: { id: string; content: string }[] = block.items || []
   const targets: { id: string; label: string; correct_item: string }[] = block.targets || []
   const mode = block.mode || 'ordering'
@@ -73,7 +75,7 @@ export default function DragDropBlock({ block }: { block: any }) {
         /* Matching mode */
         <div className="grid grid-cols-2 gap-4">
           <div>
-            <h4 className="text-xs text-slate-400 font-medium mb-2">拖動項目</h4>
+            <h4 className="text-xs text-slate-400 font-medium mb-2">{t('training.dragItems')}</h4>
             {items.filter(i => !Object.values(placements).includes(i.id)).map(item => (
               <div key={item.id}
                 draggable
@@ -85,7 +87,7 @@ export default function DragDropBlock({ block }: { block: any }) {
             ))}
           </div>
           <div>
-            <h4 className="text-xs text-slate-400 font-medium mb-2">目標區域</h4>
+            <h4 className="text-xs text-slate-400 font-medium mb-2">{t('training.dropTargets')}</h4>
             {targets.map(target => (
               <div key={target.id}
                 onDragOver={e => e.preventDefault()}
@@ -109,11 +111,11 @@ export default function DragDropBlock({ block }: { block: any }) {
       <div className="flex items-center gap-3">
         <button onClick={checkAnswer} disabled={checked}
           className="bg-purple-600 hover:bg-purple-500 text-white px-4 py-1.5 rounded-lg text-xs font-medium transition disabled:opacity-50">
-          {checked ? '已檢查' : '檢查答案'}
+          {checked ? t('training.checked') : t('training.checkAnswer')}
         </button>
         {checked && (
           <span className={`text-sm font-medium ${correct ? 'text-green-400' : 'text-red-400'}`}>
-            {correct ? (block.feedback_correct || '正確！') : (block.feedback_incorrect || '再試一次')}
+            {correct ? (block.feedback_correct || t('training.correct')) : (block.feedback_incorrect || t('training.tryAgain'))}
           </span>
         )}
       </div>

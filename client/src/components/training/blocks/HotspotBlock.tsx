@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
+import { useTranslation } from 'react-i18next'
 import AnnotationOverlay from './AnnotationOverlay'
 import type { Annotation } from './AnnotationOverlay'
 
@@ -23,6 +24,7 @@ interface Props {
 }
 
 export default function HotspotBlock({ block, isLastSlide = false, playerMode = 'learn', slideAudioUrl, onAllComplete }: Props) {
+  const { t } = useTranslation()
   const isTestMode = playerMode === 'test'
   // In test mode, always use guided (step-by-step) regardless of block setting
   const mode: 'guided' | 'explore' = isTestMode ? 'guided' : (block.interaction_mode || 'guided')
@@ -169,7 +171,7 @@ export default function HotspotBlock({ block, isLastSlide = false, playerMode = 
     setAttempts(prev => prev + 1)
 
     if (!hit) {
-      setFeedback({ text: '沒有點到任何區域，請再試一次。', correct: false })
+      setFeedback({ text: t('training.missedRegion'), correct: false })
       setStepAttempts(prev => prev + 1)
       return
     }
@@ -186,10 +188,10 @@ export default function HotspotBlock({ block, isLastSlide = false, playerMode = 
     if (hit.id === currentTarget.id) {
       // Correct — stop current audio immediately
       stopAudio()
-      const correctPhrases = ['太棒了！', '做得好！', '完全正確！', '很好，繼續！']
+      const correctPhrases = t('training.correctPhrases', { returnObjects: true }) as string[]
       const correctText = isTestMode
         ? correctPhrases[currentStep % correctPhrases.length]
-        : (hit.feedback || '正確！')
+        : (hit.feedback || t('training.correct'))
       setFeedback({ text: correctText, correct: true, regionId: hit.id })
       setTransitioning(true)
       setTimeout(() => {
@@ -209,12 +211,12 @@ export default function HotspotBlock({ block, isLastSlide = false, playerMode = 
       setStepAttempts(newStepAttempts)
       if (isTestMode) {
         // Progressive hints: 1-2 → generic, 3+ → test_hint with audio, N+ → highlight
-        const encouragements = ['再想想看！', '差一點！', '不太對，再試試！', '加油！']
+        const encouragements = t('training.incorrectPhrases', { returnObjects: true }) as string[]
         if (newStepAttempts < 3) {
           setFeedback({ text: encouragements[newStepAttempts % encouragements.length], correct: false, regionId: hit.id })
         } else {
-          const hint = (currentTarget as any).test_hint || currentTarget.narration || `請找到「${currentTarget.label || '目標'}」`
-          setFeedback({ text: `💡 提示：${hint}`, correct: false, regionId: hit.id })
+          const hint = (currentTarget as any).test_hint || currentTarget.narration || t('training.findAndClick', { label: currentTarget.label || t('training.target') })
+          setFeedback({ text: `${t('training.hintPrefix')}${hint}`, correct: false, regionId: hit.id })
           // Play test hint audio if available
           if (!muted && (currentTarget as any).test_audio_url && audioRef.current) {
             audioRef.current.src = (currentTarget as any).test_audio_url
@@ -222,13 +224,13 @@ export default function HotspotBlock({ block, isLastSlide = false, playerMode = 
           }
         }
       } else {
-        setFeedback({ text: hit.feedback || `這是「${hit.label || hit.id}」，請找到正確的位置。`, correct: false, regionId: hit.id })
+        setFeedback({ text: hit.feedback || t('training.wrongPosition', { label: hit.label || hit.id }), correct: false, regionId: hit.id })
       }
     }
   }
 
   const handleExploreClick = (hit: Region) => {
-    const desc = (hit as any).explore_desc || hit.feedback || `這是「${hit.label || hit.id}」`
+    const desc = (hit as any).explore_desc || hit.feedback || t('training.thisIs', { label: hit.label || hit.id })
     setFeedback({ text: desc, correct: hit.correct, regionId: hit.id })
     playRegionAudio(hit)
     if (hit.correct) {
@@ -407,14 +409,14 @@ export default function HotspotBlock({ block, isLastSlide = false, playerMode = 
               <button
                 className="absolute top-2 right-2 z-10 w-7 h-7 rounded-full flex items-center justify-center text-white text-xs transition opacity-60 hover:opacity-100"
                 style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}
-                title="放大檢視"
+                title={t('training.zoomView')}
                 onClick={(e) => { e.stopPropagation(); setZoomed(true) }}
               >🔍</button>
             </div>
           ) : (
             <div className="py-16 text-center border border-dashed rounded-lg"
               style={{ borderColor: 'var(--t-border)', color: 'var(--t-text-dim)' }}>
-              圖片未設定
+              {t('training.imageNotSet')}
             </div>
           )}
 
@@ -461,7 +463,7 @@ export default function HotspotBlock({ block, isLastSlide = false, playerMode = 
               <div className="flex items-center gap-1.5 mb-1.5">
                 <span className="w-4 h-4 rounded-full flex items-center justify-center text-[9px] font-bold"
                   style={{ backgroundColor: 'var(--t-accent-subtle)', color: 'var(--t-accent)' }}>?</span>
-                <span className="text-[10px] font-semibold" style={{ color: 'var(--t-text-muted)' }}>操作說明</span>
+                <span className="text-[10px] font-semibold" style={{ color: 'var(--t-text-muted)' }}>{t('training.instruction')}</span>
               </div>
               <p className="text-xs leading-relaxed" style={{ color: 'var(--t-text)' }}>{block.instruction}</p>
             </div>
@@ -479,13 +481,13 @@ export default function HotspotBlock({ block, isLastSlide = false, playerMode = 
                   {currentStep + 1}
                 </span>
                 <span className="text-[10px] font-semibold" style={{ color: isTestMode ? '#f59e0b' : '#3b82f6' }}>
-                  {isTestMode ? '📝 測驗' : '步驟'} {currentStep + 1}/{correctRegions.length}
+                  {isTestMode ? t('training.testMode') : t('training.step')} {currentStep + 1}/{correctRegions.length}
                 </span>
               </div>
               <p className="text-[11px] leading-relaxed" style={{ color: 'var(--t-text)' }}>
                 {isTestMode
-                  ? `請找到並點擊「${currentTarget.label || '目標'}」`
-                  : (currentTarget.narration || `請點擊「${currentTarget.label || '目標'}」`)
+                  ? t('training.findAndClick', { label: currentTarget.label || t('training.target') })
+                  : (currentTarget.narration || t('training.pleaseClick', { label: currentTarget.label || t('training.target') }))
                 }
               </p>
             </div>
@@ -495,8 +497,8 @@ export default function HotspotBlock({ block, isLastSlide = false, playerMode = 
           {mode === 'explore' && !completed && (
             <div className="rounded-lg p-2.5 border-2" style={{ borderColor: '#a855f7', backgroundColor: 'rgba(168,85,247,0.06)' }}>
               <p className="text-[11px] leading-relaxed" style={{ color: 'var(--t-text-secondary)' }}>
-                <span className="font-semibold" style={{ color: '#a855f7' }}>🔍 自由探索：</span>
-                點擊畫面上的任何元素了解功能
+                <span className="font-semibold" style={{ color: '#a855f7' }}>{t('training.exploreHint')}</span>
+                {t('training.exploreDesc')}
               </p>
               <div className="mt-1.5 flex items-center gap-1">
                 <div className="flex-1 h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--t-border)' }}>
@@ -516,25 +518,25 @@ export default function HotspotBlock({ block, isLastSlide = false, playerMode = 
               <div className="flex items-center gap-2">
                 <span>✅</span>
                 <span className="text-xs font-medium" style={{ color: '#22c55e' }}>
-                  {block.completion_message || (mode === 'guided' ? '全部步驟完成！' : '全部探索完畢！')}
+                  {block.completion_message || (mode === 'guided' ? t('training.allStepsComplete') : t('training.allExplored'))}
                 </span>
               </div>
               <div className="flex gap-2">
                 <button onClick={reset}
                   className="flex-1 text-[10px] py-1 rounded transition font-medium"
                   style={{ backgroundColor: 'var(--t-accent-subtle)', color: 'var(--t-accent)' }}>
-                  🔄 再做一次
+                  {t('training.resetRetry')}
                 </button>
                 {!isLastSlide ? (
                   <button
                     onClick={() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight' }))}
                     className="flex-1 text-[10px] py-1 rounded transition font-medium text-white"
                     style={{ backgroundColor: '#22c55e' }}>
-                    下一頁 →
+                    {t('training.nextPage')}
                   </button>
                 ) : (
                   <span className="flex-1 text-[10px] py-1 text-center font-medium" style={{ color: '#22c55e' }}>
-                    🎉 課程完成
+                    {t('training.courseComplete')}
                   </span>
                 )}
               </div>
@@ -558,11 +560,11 @@ export default function HotspotBlock({ block, isLastSlide = false, playerMode = 
             <button onClick={() => setMuted(!muted)}
               className="text-[10px] px-2 py-0.5 rounded transition"
               style={{ backgroundColor: 'var(--t-accent-subtle)', color: muted ? 'var(--t-text-dim)' : 'var(--t-accent)' }}>
-              {muted ? '🔇 靜音' : '🔊 語音'}
+              {muted ? t('training.muted') : t('training.unmuted')}
             </button>
             <span className="text-[10px]" style={{ color: 'var(--t-text-dim)' }}>
-              {mode === 'guided' ? `步驟 ${progress.current}/${progress.total}` : `已探索 ${progress.current}/${progress.total}`}
-              {' · '}嘗試 {attempts}
+              {mode === 'guided' ? `${t('training.step')} ${progress.current}/${progress.total}` : `${t('training.explored')} ${progress.current}/${progress.total}`}
+              {' · '}{t('training.attempts')} {attempts}
             </span>
           </div>
 
@@ -570,7 +572,7 @@ export default function HotspotBlock({ block, isLastSlide = false, playerMode = 
           {correctRegions.length > 0 && (!isTestMode || completed) && (
             <div className="rounded-lg p-2 border space-y-0.5" style={{ backgroundColor: 'var(--t-bg-inset, var(--t-bg-card))', borderColor: 'var(--t-border)' }}>
               <div className="text-[9px] font-medium mb-1" style={{ color: 'var(--t-text-dim)' }}>
-                {mode === 'guided' ? '操作步驟' : '畫面元素'}
+                {mode === 'guided' ? t('training.steps') : t('training.elements')}
               </div>
               {correctRegions.map((r, idx) => {
                 const isDone = mode === 'guided' ? idx < (completed ? correctRegions.length : currentStep) : exploredIds.has(r.id)
@@ -590,7 +592,7 @@ export default function HotspotBlock({ block, isLastSlide = false, playerMode = 
                       fontWeight: isCurrent ? 600 : 400,
                       textDecoration: isDone && !isCurrent ? 'line-through' : 'none'
                     }}>
-                      {r.label || `元素 ${idx + 1}`}
+                      {r.label || t('training.element', { n: idx + 1 })}
                     </span>
                     {r.type && <span className="text-[8px] px-0.5 rounded shrink-0" style={{ backgroundColor: 'var(--t-accent-subtle)', color: 'var(--t-text-dim)' }}>{r.type}</span>}
                   </div>
@@ -622,7 +624,7 @@ export default function HotspotBlock({ block, isLastSlide = false, playerMode = 
               className="absolute -top-3 -right-3 w-8 h-8 rounded-full flex items-center justify-center text-white text-sm"
               style={{ backgroundColor: 'rgba(239,68,68,0.8)' }}
               onClick={() => setZoomed(false)}
-              title="關閉"
+              title={t('training.close')}
             >✕</button>
             {feedback && (
               <div className="absolute bottom-4 left-1/2 -translate-x-1/2 px-4 py-2 rounded-lg text-sm font-medium"

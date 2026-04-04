@@ -25,7 +25,7 @@ interface Lesson {
 export default function CoursePlayer() {
   const { id } = useParams()
   const navigate = useNavigate()
-  const { i18n } = useTranslation()
+  const { t, i18n } = useTranslation()
   const [course, setCourse] = useState<any>(null)
   const [lessons, setLessons] = useState<Lesson[]>([])
   const [allSlides, setAllSlides] = useState<Slide[]>([])
@@ -134,12 +134,12 @@ export default function CoursePlayer() {
       })
       setTutorMessages(prev => [...prev, { role: 'assistant', content: res.data.answer }])
     } catch {
-      setTutorMessages(prev => [...prev, { role: 'assistant', content: '抱歉，AI 助教暫時無法回答。' }])
+      setTutorMessages(prev => [...prev, { role: 'assistant', content: t('training.aiTutorError') }])
     } finally { setTutorLoading(false) }
   }
 
   if (!course || allSlides.length === 0) {
-    return <div className="fixed inset-0 bg-slate-900 flex items-center justify-center text-slate-500">載入中...</div>
+    return <div className="fixed inset-0 bg-slate-900 flex items-center justify-center text-slate-500">{t('training.loading')}</div>
   }
 
   return (
@@ -162,7 +162,7 @@ export default function CoursePlayer() {
               backgroundColor: playerMode === 'learn' ? 'var(--t-accent-bg, #3b82f6)' : 'transparent',
               color: playerMode === 'learn' ? 'white' : 'var(--t-text-dim)'
             }}>
-            📖 學習
+            📖 {t('training.learn')}
           </button>
           <button onClick={() => setPlayerMode('test')}
             className="text-[10px] px-2.5 py-1 font-medium transition"
@@ -170,19 +170,19 @@ export default function CoursePlayer() {
               backgroundColor: playerMode === 'test' ? '#f59e0b' : 'transparent',
               color: playerMode === 'test' ? 'white' : 'var(--t-text-dim)'
             }}>
-            📝 測驗
+            📝 {t('training.test')}
           </button>
         </div>
-        <button onClick={() => setShowOutline(!showOutline)} style={{ color: showOutline ? 'var(--t-accent)' : 'var(--t-text-muted)' }} className="hover:opacity-70" title="章節大綱">
+        <button onClick={() => setShowOutline(!showOutline)} style={{ color: showOutline ? 'var(--t-accent)' : 'var(--t-text-muted)' }} className="hover:opacity-70" title={t('training.outline')}>
           <List size={16} />
         </button>
-        <button onClick={() => setAudioMuted(!audioMuted)} style={{ color: 'var(--t-text-muted)' }} className="hover:opacity-70" title="音訊">
+        <button onClick={() => setAudioMuted(!audioMuted)} style={{ color: 'var(--t-text-muted)' }} className="hover:opacity-70" title={t('training.audio')}>
           {audioMuted ? <VolumeX size={16} /> : <Volume2 size={16} />}
         </button>
-        <button onClick={() => setShowNotes(!showNotes)} style={{ color: showNotes ? 'var(--t-accent)' : 'var(--t-text-muted)' }} className="hover:opacity-70" title="筆記">
+        <button onClick={() => setShowNotes(!showNotes)} style={{ color: showNotes ? 'var(--t-accent)' : 'var(--t-text-muted)' }} className="hover:opacity-70" title={t('training.notes')}>
           <BookmarkPlus size={16} />
         </button>
-        <button onClick={() => setShowTutor(!showTutor)} style={{ color: showTutor ? 'var(--t-accent)' : 'var(--t-text-muted)' }} className="hover:opacity-70" title="AI 助教">
+        <button onClick={() => setShowTutor(!showTutor)} style={{ color: showTutor ? 'var(--t-accent)' : 'var(--t-text-muted)' }} className="hover:opacity-70" title={t('training.aiTutor')}>
           <MessageSquare size={16} />
         </button>
       </div>
@@ -191,7 +191,7 @@ export default function CoursePlayer() {
         {/* Outline sidebar */}
         {showOutline && (
           <div className="w-56 border-r overflow-y-auto shrink-0 p-3" style={{ backgroundColor: 'var(--t-bg-inset)', borderColor: 'var(--t-border)' }}>
-            <h4 className="text-[10px] font-semibold uppercase mb-2" style={{ color: 'var(--t-text-dim)' }}>章節大綱</h4>
+            <h4 className="text-[10px] font-semibold uppercase mb-2" style={{ color: 'var(--t-text-dim)' }}>{t('training.outline')}</h4>
             {lessons.map(lesson => {
               const lessonSlides = allSlides.filter(s => s.lesson_id === lesson.id)
               return (
@@ -229,7 +229,7 @@ export default function CoursePlayer() {
         {showNotes && (
           <div className="w-72 border-l p-3 flex flex-col shrink-0" style={{ backgroundColor: 'var(--t-bg-inset)', borderColor: 'var(--t-border)' }}>
             <div className="flex items-center justify-between mb-2">
-              <h4 className="text-xs font-semibold" style={{ color: 'var(--t-text-muted)' }}>筆記</h4>
+              <h4 className="text-xs font-semibold" style={{ color: 'var(--t-text-muted)' }}>{t('training.notes')}</h4>
               <button onClick={() => setShowNotes(false)} style={{ color: 'var(--t-text-dim)' }}><X size={14} /></button>
             </div>
             <textarea
@@ -238,11 +238,11 @@ export default function CoursePlayer() {
               rows={6}
               className="w-full border rounded text-xs px-2 py-1.5 resize-none focus:outline-none flex-1"
               style={{ backgroundColor: 'var(--t-bg-input)', borderColor: 'var(--t-border)', color: 'var(--t-text)' }}
-              placeholder="在此記錄筆記..."
+              placeholder={t('training.notesPlaceholder')}
             />
             <button onClick={saveNote} className="mt-2 text-xs text-white px-3 py-1.5 rounded transition"
               style={{ backgroundColor: 'var(--t-accent-bg)' }}>
-              儲存筆記
+              {t('training.saveNotes')}
             </button>
           </div>
         )}
@@ -251,12 +251,12 @@ export default function CoursePlayer() {
         {showTutor && (
           <div className="w-80 border-l flex flex-col shrink-0" style={{ backgroundColor: 'var(--t-bg-inset)', borderColor: 'var(--t-border)' }}>
             <div className="flex items-center justify-between px-3 py-2 border-b" style={{ borderColor: 'var(--t-border)' }}>
-              <h4 className="text-xs font-semibold" style={{ color: 'var(--t-accent)' }}>AI 助教</h4>
+              <h4 className="text-xs font-semibold" style={{ color: 'var(--t-accent)' }}>{t('training.aiTutor')}</h4>
               <button onClick={() => setShowTutor(false)} style={{ color: 'var(--t-text-dim)' }}><X size={14} /></button>
             </div>
             <div className="flex-1 overflow-y-auto p-3 space-y-2">
               {tutorMessages.length === 0 && (
-                <p className="text-xs text-center py-8" style={{ color: 'var(--t-text-dim)' }}>有問題嗎？隨時向 AI 助教提問！</p>
+                <p className="text-xs text-center py-8" style={{ color: 'var(--t-text-dim)' }}>{t('training.aiTutorEmpty')}</p>
               )}
               {tutorMessages.map((msg, i) => (
                 <div key={i} className={`text-xs rounded-lg px-3 py-2 ${msg.role === 'user' ? 'ml-4' : 'mr-4'}`}
@@ -267,7 +267,7 @@ export default function CoursePlayer() {
                   {msg.content}
                 </div>
               ))}
-              {tutorLoading && <div className="text-xs animate-pulse" style={{ color: 'var(--t-text-dim)' }}>思考中...</div>}
+              {tutorLoading && <div className="text-xs animate-pulse" style={{ color: 'var(--t-text-dim)' }}>{t('training.aiThinking')}</div>}
             </div>
             <div className="border-t p-2 flex gap-2" style={{ borderColor: 'var(--t-border)' }}>
               <input
@@ -276,12 +276,12 @@ export default function CoursePlayer() {
                 onKeyDown={e => e.key === 'Enter' && sendTutorMessage()}
                 className="flex-1 border rounded px-2 py-1.5 text-xs focus:outline-none"
                 style={{ backgroundColor: 'var(--t-bg-input)', borderColor: 'var(--t-border)', color: 'var(--t-text)' }}
-                placeholder="輸入問題..."
+                placeholder={t('training.inputQuestion')}
               />
               <button onClick={sendTutorMessage} disabled={tutorLoading}
                 className="text-white px-2 py-1 rounded text-xs disabled:opacity-50"
                 style={{ backgroundColor: 'var(--t-accent-bg)' }}>
-                發送
+                {t('training.send')}
               </button>
             </div>
           </div>

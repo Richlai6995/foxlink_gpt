@@ -1,6 +1,8 @@
 import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 
 export default function BranchBlock({ block }: { block: any }) {
+  const { t } = useTranslation()
   const [selected, setSelected] = useState<number | null>(null)
   const options: { text: string; is_best: boolean; target_slide_id: number | null }[] = block.options || []
 
@@ -29,7 +31,7 @@ export default function BranchBlock({ block }: { block: any }) {
                 {String.fromCharCode(65 + idx)}
               </span>
               <span className="text-sm">{opt.text}</span>
-              {selected === idx && opt.is_best && <span className="ml-auto text-green-400 text-xs font-medium">✓ 最佳選擇</span>}
+              {selected === idx && opt.is_best && <span className="ml-auto text-green-400 text-xs font-medium">{t('training.bestChoice')}</span>}
             </div>
           </button>
         ))}

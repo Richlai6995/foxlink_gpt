@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
+import { useTranslation } from 'react-i18next'
 import { useAuth } from '../../context/AuthContext'
 import api from '../../lib/api'
 import { ArrowLeft, BookOpen, Play, FileText, Clock, CheckCircle2, Lock, ChevronRight } from 'lucide-react'
@@ -24,6 +25,7 @@ interface CourseDetail {
 export default function CourseDetail() {
   const { id } = useParams()
   const navigate = useNavigate()
+  const { t } = useTranslation()
   const { user } = useAuth()
   const [course, setCourse] = useState<CourseDetail | null>(null)
   const [loading, setLoading] = useState(true)
@@ -50,8 +52,8 @@ export default function CourseDetail() {
     }
   }
 
-  if (loading) return <div className="min-h-screen flex items-center justify-center">載入中...</div>
-  if (!course) return <div className="min-h-screen flex items-center justify-center">課程不存在</div>
+  if (loading) return <div className="min-h-screen flex items-center justify-center">{t('training.loading')}</div>
+  if (!course) return <div className="min-h-screen flex items-center justify-center">{t('training.courseNotFound')}</div>
 
   const lessonProgress = (lessonId: number) => progress.find(p => p.lesson_id === lessonId)
   const canEdit = ['owner', 'admin', 'develop'].includes(course.permission)
@@ -71,7 +73,7 @@ export default function CourseDetail() {
               onClick={() => navigate(`/training/editor/${id}`)}
               className="text-xs bg-slate-700 hover:bg-slate-600 px-3 py-1.5 rounded-lg transition"
             >
-              編輯課程
+              {t('training.editCourse')}
             </button>
           )}
         </div>
@@ -94,9 +96,9 @@ export default function CourseDetail() {
               <div className="flex items-center gap-4 mt-3 text-xs text-slate-500">
                 <span>{course.creator_name}</span>
                 {course.category_name && <span className="bg-slate-700 px-2 py-0.5 rounded">{course.category_name}</span>}
-                <span>{course.lessons.length} 章節</span>
-                {course.quiz_count > 0 && <span>{course.quiz_count} 題測驗</span>}
-                {course.pass_score > 0 && <span>及格 {course.pass_score} 分</span>}
+                <span>{course.lessons.length} {t('training.chapters')}</span>
+                {course.quiz_count > 0 && <span>{course.quiz_count} {t('training.quizCount')}</span>}
+                {course.pass_score > 0 && <span>{t('training.passScore')} {course.pass_score} 分</span>}
               </div>
             </div>
           </div>
@@ -104,7 +106,7 @@ export default function CourseDetail() {
 
         {/* Lessons */}
         <div className="space-y-2">
-          <h3 className="text-sm font-semibold text-slate-300 mb-3">課程章節</h3>
+          <h3 className="text-sm font-semibold text-slate-300 mb-3">{t('training.courseChapters')}</h3>
           {course.lessons.map((lesson, i) => {
             const lp = lessonProgress(lesson.id)
             return (
@@ -122,9 +124,9 @@ export default function CourseDetail() {
                 <div className="flex-1">
                   <div className="text-sm font-medium">{lesson.title}</div>
                   <div className="text-[10px] text-slate-500 mt-0.5">
-                    {lesson.lesson_type === 'slides' ? '投影片' :
-                     lesson.lesson_type === 'video' ? '影片' :
-                     lesson.lesson_type === 'simulation' ? '操作模擬' : lesson.lesson_type}
+                    {lesson.lesson_type === 'slides' ? t('training.slides') :
+                     lesson.lesson_type === 'video' ? t('training.video') :
+                     lesson.lesson_type === 'simulation' ? t('training.simulation') : lesson.lesson_type}
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
@@ -151,7 +153,7 @@ export default function CourseDetail() {
           style={{ backgroundColor: 'var(--t-accent-bg)', boxShadow: '0 4px 14px rgba(37,99,235,0.3)' }}
         >
           <Play size={18} />
-          {progress.some(p => p.status === 'in_progress') ? '📖 繼續學習' : '📖 開始學習'}
+          {progress.some(p => p.status === 'in_progress') ? `📖 ${t('training.continueLearning')}` : `📖 ${t('training.startLearning')}`}
         </button>
         <button
           onClick={() => navigate(`/training/course/${id}/learn?mode=test`)}
@@ -159,7 +161,7 @@ export default function CourseDetail() {
           style={{ backgroundColor: '#f59e0b', color: 'white', boxShadow: '0 4px 14px rgba(245,158,11,0.3)' }}
         >
           <Play size={18} />
-          📝 練習測驗
+          📝 {t('training.practiceTest')}
         </button>
       </div>
     </div>

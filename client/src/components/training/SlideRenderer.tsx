@@ -1,4 +1,5 @@
 import { useMemo } from 'react'
+import { useTranslation } from 'react-i18next'
 import ReactMarkdown from 'react-markdown'
 import HotspotBlock from './blocks/HotspotBlock'
 import DragDropBlock from './blocks/DragDropBlock'
@@ -21,13 +22,14 @@ interface Block {
 }
 
 export default function SlideRenderer({ slide, isLastSlide = false, playerMode = 'learn' }: { slide: Slide; isLastSlide?: boolean; playerMode?: 'learn' | 'test' }) {
+  const { t } = useTranslation()
   const blocks: Block[] = useMemo(() => {
     try { return JSON.parse(slide.content_json || '[]') }
     catch { return [] }
   }, [slide.content_json])
 
   if (blocks.length === 0) {
-    return <div className="text-center text-slate-600 py-20">（空投影片）</div>
+    return <div className="text-center text-slate-600 py-20">{t('training.emptySlide')}</div>
   }
 
   return (
@@ -40,6 +42,7 @@ export default function SlideRenderer({ slide, isLastSlide = false, playerMode =
 }
 
 function BlockRenderer({ block, isLastSlide = false, playerMode = 'learn', slideAudioUrl }: { block: Block; isLastSlide?: boolean; playerMode?: 'learn' | 'test'; slideAudioUrl?: string | null }) {
+  const { t } = useTranslation()
   switch (block.type) {
     case 'text':
       return (
@@ -84,11 +87,11 @@ function BlockRenderer({ block, isLastSlide = false, playerMode = 'learn', slide
         note:      { border: '#a855f7', bg: 'rgba(168,85,247,0.08)' },
         important: { border: '#ef4444', bg: 'rgba(239,68,68,0.08)' },
       }
-      const labels: Record<string, string> = { tip: '提示', warning: '警告', note: '注意', important: '重要' }
+      const labels: Record<string, string> = { tip: t('training.calloutTip'), warning: t('training.calloutWarning'), note: t('training.calloutNote'), important: t('training.calloutImportant') }
       const c = colorMap[block.variant] || colorMap.tip
       return (
         <div className="rounded-r-lg px-4 py-3" style={{ borderLeft: `4px solid ${c.border}`, backgroundColor: c.bg }}>
-          <div className="text-xs font-bold mb-1" style={{ color: c.border }}>{labels[block.variant] || '提示'}</div>
+          <div className="text-xs font-bold mb-1" style={{ color: c.border }}>{labels[block.variant] || t('training.calloutTip')}</div>
           <div className="text-sm" style={{ color: 'var(--t-text-secondary)' }}>{block.content}</div>
         </div>
       )
@@ -100,7 +103,7 @@ function BlockRenderer({ block, isLastSlide = false, playerMode = 'learn', slide
           {block.src ? (
             <video src={block.src} controls className="w-full max-h-[60vh]" />
           ) : (
-            <div className="py-20 text-center text-slate-600">影片未設定</div>
+            <div className="py-20 text-center text-slate-600">{t('training.videoNotSet')}</div>
           )}
         </div>
       )
@@ -119,6 +122,6 @@ function BlockRenderer({ block, isLastSlide = false, playerMode = 'learn', slide
     case 'quiz_inline': return <QuizInlineBlock block={block} />
 
     default:
-      return <div className="text-slate-500 text-xs">不支援的 block 類型: {block.type}</div>
+      return <div className="text-slate-500 text-xs">{t('training.unsupportedBlock')} {block.type}</div>
   }
 }

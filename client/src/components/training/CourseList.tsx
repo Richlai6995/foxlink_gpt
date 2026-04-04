@@ -102,7 +102,7 @@ export default function CourseList({ editorMode = false }: { editorMode?: boolea
           </button>
           <h1 className="text-lg font-semibold flex items-center gap-2">
             <BookOpen size={20} style={{ color: 'var(--t-accent)' }} />
-            {editorMode ? '我的教材' : t('sidebar.training')}
+            {editorMode ? t('training.myMaterials') : t('sidebar.training')}
           </h1>
           <div className="flex-1" />
 
@@ -114,7 +114,7 @@ export default function CourseList({ editorMode = false }: { editorMode?: boolea
                 type="text"
                 value={search}
                 onChange={e => setSearch(e.target.value)}
-                placeholder="搜尋課程..."
+                placeholder={t('training.searchCourses')}
                 className="border rounded-lg pl-8 pr-3 py-1.5 text-xs w-48 focus:outline-none"
                 style={{ backgroundColor: 'var(--t-bg-input)', borderColor: 'var(--t-border)', color: 'var(--t-text)' }}
               />
@@ -129,10 +129,10 @@ export default function CourseList({ editorMode = false }: { editorMode?: boolea
               className="border rounded-lg px-2 py-1.5 text-xs"
               style={{ backgroundColor: 'var(--t-bg-input)', borderColor: 'var(--t-border)', color: 'var(--t-text)' }}
             >
-              <option value="">全部狀態</option>
-              <option value="draft">草稿</option>
-              <option value="published">已發佈</option>
-              <option value="archived">已封存</option>
+              <option value="">{t('training.allStatus')}</option>
+              <option value="draft">{t('training.draft')}</option>
+              <option value="published">{t('training.published')}</option>
+              <option value="archived">{t('training.archived')}</option>
             </select>
           )}
 
@@ -142,7 +142,7 @@ export default function CourseList({ editorMode = false }: { editorMode?: boolea
               className="flex items-center gap-1.5 text-white px-3 py-1.5 rounded-lg text-xs font-medium transition"
               style={{ backgroundColor: 'var(--t-accent-bg)' }}
             >
-              <Plus size={14} /> 新增課程
+              <Plus size={14} /> {t('training.addCourse')}
             </button>
           )}
 
@@ -152,7 +152,7 @@ export default function CourseList({ editorMode = false }: { editorMode?: boolea
               className="flex items-center gap-1.5 border px-3 py-1.5 rounded-lg text-xs font-medium transition hover:opacity-80"
               style={{ borderColor: 'var(--t-border)', color: 'var(--t-text-secondary)' }}
             >
-              我的教材
+              {t('training.myMaterials')}
             </button>
           )}
           {editorMode && (
@@ -161,7 +161,7 @@ export default function CourseList({ editorMode = false }: { editorMode?: boolea
               className="flex items-center gap-1.5 border px-3 py-1.5 rounded-lg text-xs font-medium transition hover:opacity-80"
               style={{ borderColor: 'var(--t-border)', color: 'var(--t-text-secondary)' }}
             >
-              課程列表
+              {t('training.courseList')}
             </button>
           )}
 
@@ -175,11 +175,11 @@ export default function CourseList({ editorMode = false }: { editorMode?: boolea
           <div className="w-48 shrink-0">
             <div className="sticky top-16">
               <h3 className="text-xs font-semibold uppercase mb-2 flex items-center gap-1.5" style={{ color: 'var(--t-text-muted)' }}>
-                <FolderTree size={12} /> 分類
+                <FolderTree size={12} /> {t('training.category')}
                 {canEdit && (
                   <button onClick={() => setShowCategoryManager(true)}
-                    className="ml-auto flex items-center gap-1 hover:opacity-80 transition" style={{ color: 'var(--t-text-dim)' }} title="管理分類">
-                    <Settings size={11} /> <span className="text-[9px]">管理</span>
+                    className="ml-auto flex items-center gap-1 hover:opacity-80 transition" style={{ color: 'var(--t-text-dim)' }} title={t('training.categoryManage')}>
+                    <Settings size={11} /> <span className="text-[9px]">{t('training.manage')}</span>
                   </button>
                 )}
               </h3>
@@ -191,7 +191,7 @@ export default function CourseList({ editorMode = false }: { editorMode?: boolea
                   color: !selectedCategory ? 'var(--t-accent)' : 'var(--t-text-muted)'
                 }}
               >
-                全部課程
+                {t('training.allCourses')}
               </button>
               {rootCategories.map(cat => (
                 <div key={cat.id}>
@@ -223,17 +223,17 @@ export default function CourseList({ editorMode = false }: { editorMode?: boolea
         {/* Course Grid */}
         <div className="flex-1">
           {loading ? (
-            <div className="flex items-center justify-center py-20 text-slate-500 text-sm">載入中...</div>
+            <div className="flex items-center justify-center py-20 text-slate-500 text-sm">{t('training.loading')}</div>
           ) : courses.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-20 text-slate-500">
               <BookOpen size={48} className="mb-3 opacity-50" />
-              <p className="text-sm">{editorMode ? '尚未建立任何教材' : '目前沒有可用的課程'}</p>
+              <p className="text-sm">{editorMode ? t('training.noMaterials') : t('training.noCourses')}</p>
               {canEdit && editorMode && (
                 <button
                   onClick={() => navigate('/training/editor/new')}
                   className="mt-4 flex items-center gap-1.5 bg-sky-600 hover:bg-sky-500 text-white px-4 py-2 rounded-lg text-sm transition"
                 >
-                  <Plus size={16} /> 建立第一個課程
+                  <Plus size={16} /> {t('training.createFirst')}
                 </button>
               )}
             </div>
@@ -259,7 +259,7 @@ export default function CourseList({ editorMode = false }: { editorMode?: boolea
                           backgroundColor: course.status === 'draft' ? 'var(--t-status-draft-bg)' : 'var(--t-status-published-bg)',
                           color: course.status === 'draft' ? 'var(--t-status-draft-text)' : 'var(--t-status-published-text)'
                         }}>
-                        {course.status === 'draft' ? '草稿' : course.status === 'published' ? '已發佈' : '已封存'}
+                        {course.status === 'draft' ? t('training.draft') : course.status === 'published' ? t('training.published') : t('training.archived')}
                       </span>
                     )}
                   </div>
@@ -280,21 +280,21 @@ export default function CourseList({ editorMode = false }: { editorMode?: boolea
                       {!editorMode && (
                         <span className="ml-auto flex items-center gap-1">
                           {progressIcon(course.my_progress)}
-                          {course.my_progress?.status === 'completed' ? '已完成' :
-                           course.my_progress?.status === 'in_progress' ? '學習中' : '未開始'}
+                          {course.my_progress?.status === 'completed' ? t('training.completed') :
+                           course.my_progress?.status === 'in_progress' ? t('training.inProgress') : t('training.notStarted')}
                         </span>
                       )}
                       {editorMode && (
                         <button
                           className="ml-auto text-red-400/60 hover:text-red-400 transition p-0.5"
-                          title="刪除課程"
+                          title={t('training.deleteCourse')}
                           onClick={async (e) => {
                             e.stopPropagation()
-                            if (!confirm(`確定要刪除「${course.title}」？此操作無法復原。`)) return
+                            if (!confirm(t('training.confirmDelete', { title: course.title }))) return
                             try {
                               await api.delete(`/training/courses/${course.id}`)
                               loadData()
-                            } catch (err: any) { alert(err.response?.data?.error || '刪除失敗') }
+                            } catch (err: any) { alert(err.response?.data?.error || t('training.deleteFailed')) }
                           }}
                         >
                           <Trash2 size={12} />
