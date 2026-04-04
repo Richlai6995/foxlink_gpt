@@ -2113,60 +2113,7 @@ router.post('/courses/:id/translate', loadCoursePermission, requirePermission('o
             .run(slide.id, target_lang, translatedContent, translatedNotes);
         }
 
-        // Auto-generate TTS for translated hotspot narrations
-        if (translatedContent) {
-          try {
-            const transBlocks = JSON.parse(translatedContent);
-            const lesson2 = await db.prepare('SELECT l.course_id FROM course_lessons l WHERE l.id=?').get(slide.lesson_id);
-            const courseId2 = lesson2?.course_id;
-            for (const tb of transBlocks) {
-              if (tb.type !== 'hotspot' || !tb.regions) continue;
-              const { voiceName, langCode, speed, pitch } = await resolveTtsVoice(courseId2, target_lang);
-              const ttsModel2 = await db.prepare(
-                `SELECT api_key_enc FROM llm_models WHERE model_role='tts' AND is_active=1 ORDER BY sort_order FETCH FIRST 1 ROWS ONLY`
-              ).get();
-              if (!ttsModel2) continue;
-              const { decryptKey: dk } = require('../services/llmKeyService');
-              const ttsApiKey = dk(ttsModel2.api_key_enc);
-              const ttsUrl2 = `https://texttospeech.googleapis.com/v1/text:synthesize?key=${ttsApiKey}`;
-              const dir2 = path.join(uploadDir, `course_${courseId2}`);
-              if (!fs.existsSync(dir2)) fs.mkdirSync(dir2, { recursive: true });
-
-              const genAudio = async (text, fileId) => {
-                if (!text) return null;
-                try {
-                  const r = await fetch(ttsUrl2, {
-                    method: 'POST', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ input: { text }, voice: { languageCode: langCode, name: voiceName }, audioConfig: { audioEncoding: 'MP3', speakingRate: speed, pitch } })
-                  });
-                  if (!r.ok) return null;
-                  const { audioContent } = await r.json();
-                  const fn = `tts_${target_lang}_${fileId}_${Date.now()}.mp3`;
-                  fs.writeFileSync(path.join(dir2, fn), Buffer.from(audioContent, 'base64'));
-                  return `/api/training/files/course_${courseId2}/${fn}`;
-                } catch { return null; }
-              };
-
-              // Generate intro audios
-              for (const f of ['slide_narration', 'slide_narration_test', 'slide_narration_explore']) {
-                if (tb[f]) { const u = await genAudio(tb[f], f); if (u) tb[f + '_audio'] = u; }
-              }
-              // Generate region audios
-              for (const reg of tb.regions.filter(r => r.correct)) {
-                if (reg.narration) { const u = await genAudio(reg.narration, reg.id); if (u) reg.audio_url = u; }
-                if (reg.test_hint) { const u = await genAudio(reg.test_hint, `test_${reg.id}`); if (u) reg.test_audio_url = u; }
-                if (reg.explore_desc) { const u = await genAudio(reg.explore_desc, `explore_${reg.id}`); if (u) reg.explore_audio_url = u; }
-              }
-            }
-            // Save updated content with audio URLs
-            const updatedTransContent = JSON.stringify(transBlocks);
-            await db.prepare('UPDATE slide_translations SET content_json=? WHERE slide_id=? AND lang=?')
-              .run(updatedTransContent, slide.id, target_lang);
-          } catch (ttsErr) {
-            console.warn(`[Translate] TTS for slide ${slide.id} ${target_lang}:`, ttsErr.message);
-          }
-        }
-
+        // TTS generation moved to separate "generate-lang-tts" API for speed
         doneItems++;
       }
     }
@@ -4117,7 +4064,7 @@ router.delete('/slides/:sid/lang-regions', async (req, res) => {
 router.get('/ai/models', async (req, res) => {
   try {
     const models = await db.prepare(
-      `SELECT id, display_name, api_model, model_role, sort_order
+      `SELECT id, name AS display_name, api_model, model_role, sort_order
        FROM llm_models WHERE is_active=1 AND provider_type='gemini'
        ORDER BY sort_order`
     ).all();
