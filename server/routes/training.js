@@ -2240,14 +2240,14 @@ router.post('/courses/:id/generate-lang-tts', loadCoursePermission, requirePermi
 
         for (const tb of blocks) {
           if (tb.type !== 'hotspot') continue;
-          // Intro narrations
+          // Intro narrations — always regenerate (overwrite old zh-TW audio URLs)
           for (const f of ['slide_narration', 'slide_narration_test', 'slide_narration_explore']) {
-            if (tb[f] && !tb[f + '_audio']) {
+            if (tb[f]) {
               const url = await genAudio(tb[f], `${slide.id}_${f}`);
               if (url) { tb[f + '_audio'] = url; changed = true; }
             }
           }
-          // Region narrations
+          // Region narrations — always regenerate
           if (tb.regions) {
             for (const reg of tb.regions.filter(r => r.correct)) {
               for (const p of [
@@ -2255,7 +2255,7 @@ router.post('/courses/:id/generate-lang-tts', loadCoursePermission, requirePermi
                 { text: 'test_hint', audio: 'test_audio_url' },
                 { text: 'explore_desc', audio: 'explore_audio_url' },
               ]) {
-                if (reg[p.text] && !reg[p.audio]) {
+                if (reg[p.text]) {
                   const url = await genAudio(reg[p.text], `${slide.id}_${p.text}_${reg.id}`);
                   if (url) { reg[p.audio] = url; changed = true; }
                 }

@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
+import { useTranslation } from 'react-i18next'
 import { ArrowLeft, Save, Plus, Trash2, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Image, Type, MousePointer, GripVertical, Move, RotateCcw, Eye, Layers, Wand2, Loader2 } from 'lucide-react'
 import api from '../../../lib/api'
 import SlideTemplates, { type SlideTemplate } from './SlideTemplates'
@@ -49,6 +50,7 @@ const BLOCK_TYPES = [
 ]
 
 export default function SlideEditor({ slideId, courseId, slideList = [], onSlideChange, onClose, onSaved }: Props) {
+  const { t } = useTranslation()
   const currentSlideIdx = slideList.findIndex(s => s.id === slideId)
   const canGoPrev = currentSlideIdx > 0
   const canGoNext = currentSlideIdx < slideList.length - 1 && currentSlideIdx >= 0
@@ -61,7 +63,7 @@ export default function SlideEditor({ slideId, courseId, slideList = [], onSlide
       if (first?.content) return first.content.slice(0, 30)
       if (first?.text) return first.text.slice(0, 30)
     } catch {}
-    return `投影片 ${idx + 1}`
+    return t('training.slideN', { n: idx + 1 })
   }
   const [blocks, setBlocks] = useState<Block[]>([])
   const [notes, setNotes] = useState('')
@@ -116,7 +118,7 @@ export default function SlideEditor({ slideId, courseId, slideList = [], onSlide
       })
       onSaved?.()
     } catch (e: any) {
-      alert(e.response?.data?.error || '儲存失敗')
+      alert(e.response?.data?.error || t('training.saveFailed'))
     } finally { setSaving(false) }
   }
 
@@ -180,26 +182,26 @@ export default function SlideEditor({ slideId, courseId, slideList = [], onSlide
         )}
 
         <span className="text-sm font-medium truncate max-w-[200px]">
-          {currentSlideIdx >= 0 ? getSlideLabel(slideList[currentSlideIdx], currentSlideIdx) : '投影片編輯'}
+          {currentSlideIdx >= 0 ? getSlideLabel(slideList[currentSlideIdx], currentSlideIdx) : t('training.slideEditor')}
         </span>
         <span className="text-[9px] px-1.5 py-0.5 rounded font-medium" style={{ backgroundColor: 'var(--t-accent-subtle)', color: 'var(--t-accent)' }}>{slideType}</span>
         <div className="flex-1" />
 
         <button onClick={() => setShowTemplates(true)}
           className="text-xs px-2 py-1 rounded transition" style={{ color: 'var(--t-text-muted)' }}>
-          版型模板
+          {t('training.templateSelect')}
         </button>
         <button onClick={aiAnalyze} disabled={aiAnalyzing}
           className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg border transition hover:opacity-80 disabled:opacity-50"
           style={{ borderColor: 'var(--t-border)', color: 'var(--t-accent)' }}
           title="用 AI 重新分析此投影片的截圖，更新操作說明和互動區域">
           {aiAnalyzing ? <Loader2 size={12} className="animate-spin" /> : <Wand2 size={12} />}
-          {aiAnalyzing ? 'AI 分析中...' : 'AI 分析'}
+          {aiAnalyzing ? t('training.aiAnalyzing') : t('training.aiAnalyze')}
         </button>
         <button onClick={save} disabled={saving}
           className="flex items-center gap-1.5 text-white px-3 py-1.5 rounded-lg text-xs font-medium transition disabled:opacity-50"
           style={{ backgroundColor: 'var(--t-accent-bg)' }}>
-          <Save size={13} /> {saving ? '儲存中...' : '儲存'}
+          <Save size={13} /> {saving ? t('training.saving') : t('training.save')}
         </button>
       </div>
 

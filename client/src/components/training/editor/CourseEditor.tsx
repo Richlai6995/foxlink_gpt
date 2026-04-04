@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
+import { useTranslation } from 'react-i18next'
 import api from '../../../lib/api'
 import { ArrowLeft, Save, Plus, GripVertical, Trash2, Eye, Upload, ChevronDown, ChevronRight, Settings, FileText, Play, FolderTree, Camera, Images, Download, Loader2, Copy } from 'lucide-react'
 import SlideEditor from './SlideEditor'
@@ -45,6 +46,7 @@ interface Slide {
 export default function CourseEditor() {
   const { id } = useParams()
   const navigate = useNavigate()
+  const { t } = useTranslation()
   const isNew = !id
 
   const [course, setCourse] = useState<Course>({
@@ -124,7 +126,7 @@ export default function CourseEditor() {
         await api.put(`/training/courses/${id}`, course)
       }
     } catch (e: any) {
-      alert(e.response?.data?.error || '儲存失敗')
+      alert(e.response?.data?.error || t('training.saveFailed'))
     } finally { setSaving(false) }
   }
 
@@ -132,7 +134,7 @@ export default function CourseEditor() {
     if (!id) return
     try {
       const res = await api.post(`/training/courses/${id}/lessons`, {
-        title: `章節 ${lessons.length + 1}`,
+        title: t('training.lessonN', { n: lessons.length + 1 }),
         lesson_type: 'slides'
       })
       setLessons([...lessons, res.data])
@@ -140,7 +142,7 @@ export default function CourseEditor() {
   }
 
   const deleteLesson = async (lessonId: number) => {
-    if (!confirm('確定要刪除此章節？所有投影片將一併刪除。')) return
+    if (!confirm(t('training.confirmDeleteLesson'))) return
     try {
       await api.delete(`/training/lessons/${lessonId}`)
       setLessons(lessons.filter(l => l.id !== lessonId))
@@ -168,15 +170,15 @@ export default function CourseEditor() {
     } catch (e) { console.error(e) }
   }
 
-  if (loading) return <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: 'var(--t-bg)', color: 'var(--t-text-dim)' }}>載入中...</div>
+  if (loading) return <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: 'var(--t-bg)', color: 'var(--t-text-dim)' }}>{t('training.loading')}</div>
 
-  const tabs = [
-    { key: 'info', label: '基本資訊', icon: FileText },
-    { key: 'lessons', label: '章節管理', icon: Play },
-    { key: 'quiz', label: '題庫', icon: FileText },
-    { key: 'translate', label: '翻譯', icon: FileText },
-    { key: 'settings', label: '設定', icon: Settings },
-  ] as const
+  const tabs: { key: 'info' | 'lessons' | 'quiz' | 'translate' | 'settings'; label: string; icon: typeof FileText }[] = [
+    { key: 'info', label: t('training.tabInfo'), icon: FileText },
+    { key: 'lessons', label: t('training.tabLessons'), icon: Play },
+    { key: 'quiz', label: t('training.tabQuiz'), icon: FileText },
+    { key: 'translate', label: t('training.tabTranslate'), icon: FileText },
+    { key: 'settings', label: t('training.tabSettings'), icon: Settings },
+  ]
 
   return (
     <div className="min-h-screen" style={{ backgroundColor: 'var(--t-bg)', color: 'var(--t-text)' }}>
@@ -187,7 +189,7 @@ export default function CourseEditor() {
             <ArrowLeft size={20} />
           </button>
           <h1 className="text-lg font-semibold truncate">
-            {isNew ? '新增課程' : course.title || '編輯課程'}
+            {isNew ? t('training.newCourse') : course.title || t('training.editCourse')}
           </h1>
           {course.status && (
             <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${
@@ -195,27 +197,27 @@ export default function CourseEditor() {
               course.status === 'draft' ? 'bg-yellow-500/20 text-yellow-400' :
               'bg-slate-500/20 text-slate-400'
             }`}>
-              {course.status === 'draft' ? '草稿' : course.status === 'published' ? '已發佈' : '已封存'}
+              {course.status === 'draft' ? t('training.draft') : course.status === 'published' ? t('training.published') : t('training.archived')}
             </span>
           )}
           <div className="flex-1" />
           {!isNew && (
             <button onClick={async () => {
-              if (!confirm('確定要刪除此課程？此操作無法復原，所有章節、投影片、題目都會一併刪除。')) return
+              if (!confirm(t('training.confirmDeleteCourse'))) return
               try {
                 await api.delete(`/training/courses/${id}`)
                 navigate('/training/editor')
-              } catch (e: any) { alert(e.response?.data?.error || '刪除失敗') }
+              } catch (e: any) { alert(e.response?.data?.error || t('training.deleteFailed')) }
             }}
               className="flex items-center gap-1 text-xs text-red-400 hover:text-red-300 hover:bg-red-500/10 px-2 py-1.5 rounded-lg transition">
-              <Trash2 size={13} /> 刪除
+              <Trash2 size={13} /> {t('training.delete')}
             </button>
           )}
           {!isNew && (
             <button onClick={() => setShowRecording(true)}
               className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg border transition hover:opacity-80"
               style={{ borderColor: 'var(--t-border)', color: 'var(--t-accent)' }}>
-              <Camera size={13} /> AI 錄製
+              <Camera size={13} /> {t('training.aiRecording')}
             </button>
           )}
           {!isNew && (
@@ -224,13 +226,13 @@ export default function CourseEditor() {
           {!isNew && course.status === 'draft' && (
             <button onClick={publishCourse}
               className="text-xs bg-green-600 hover:bg-green-500 text-white px-3 py-1.5 rounded-lg transition">
-              發佈課程
+              {t('training.publishCourse')}
             </button>
           )}
           <button onClick={saveCourse} disabled={saving}
             className="flex items-center gap-1.5 text-white px-3 py-1.5 rounded-lg text-xs font-medium transition disabled:opacity-50"
             style={{ backgroundColor: 'var(--t-accent-bg)' }}>
-            <Save size={14} /> {saving ? '儲存中...' : '儲存'}
+            <Save size={14} /> {saving ? t('training.saving') : t('training.save')}
           </button>
         </div>
 
@@ -259,33 +261,33 @@ export default function CourseEditor() {
         {(activeTab === 'info' || isNew) && (
           <div className="space-y-4 max-w-2xl">
             <div>
-              <label className="text-xs mb-1 block" style={{ color: 'var(--t-text-muted)' }}>課程標題 *</label>
+              <label className="text-xs mb-1 block" style={{ color: 'var(--t-text-muted)' }}>{t('training.courseTitle')}</label>
               <input
                 value={course.title}
                 onChange={e => setCourse({ ...course, title: e.target.value })}
                 className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none"
                 style={{ backgroundColor: 'var(--t-bg-input)', borderColor: 'var(--t-border)', color: 'var(--t-text)' }}
-                placeholder="輸入課程標題"
+                placeholder={t('training.courseTitlePlaceholder')}
               />
             </div>
             <div>
-              <label className="text-xs mb-1 block" style={{ color: 'var(--t-text-muted)' }}>描述</label>
+              <label className="text-xs mb-1 block" style={{ color: 'var(--t-text-muted)' }}>{t('training.description')}</label>
               <textarea
                 value={course.description}
                 onChange={e => setCourse({ ...course, description: e.target.value })}
                 rows={3}
                 className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none resize-none"
                 style={{ backgroundColor: 'var(--t-bg-input)', borderColor: 'var(--t-border)', color: 'var(--t-text)' }}
-                placeholder="課程描述..."
+                placeholder={t('training.descriptionPlaceholder')}
               />
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="text-xs text-slate-400 mb-1 flex items-center gap-2">
-                  分類
+                  {t('training.category')}
                   <button onClick={() => setShowCategoryManager(true)}
                     className="text-[10px] text-sky-500 hover:text-sky-400 transition flex items-center gap-0.5">
-                    <FolderTree size={10} /> 管理分類
+                    <FolderTree size={10} /> {t('training.categoryManage')}
                   </button>
                 </label>
                 <select
@@ -294,14 +296,14 @@ export default function CourseEditor() {
                   className="w-full border rounded-lg px-3 py-2 text-sm"
                   style={{ backgroundColor: 'var(--t-bg-input)', borderColor: 'var(--t-border)', color: 'var(--t-text)' }}
                 >
-                  <option value="">未分類</option>
+                  <option value="">{t('training.uncategorized')}</option>
                   {categories.map(c => (
                     <option key={c.id} value={c.id}>{c.parent_id ? '　' : ''}{c.name}</option>
                   ))}
                 </select>
               </div>
               <div>
-                <label className="text-xs mb-1 block" style={{ color: 'var(--t-text-muted)' }}>及格分數</label>
+                <label className="text-xs mb-1 block" style={{ color: 'var(--t-text-muted)' }}>{t('training.passScore')}</label>
                 <input
                   type="number"
                   value={course.pass_score}
@@ -316,7 +318,7 @@ export default function CourseEditor() {
               <div className="pt-4">
                 <button onClick={saveCourse} disabled={saving || !course.title.trim()}
                   className="flex items-center gap-1.5 bg-sky-600 hover:bg-sky-500 text-white px-6 py-2.5 rounded-lg text-sm font-medium transition disabled:opacity-50">
-                  <Plus size={16} /> 建立課程
+                  <Plus size={16} /> {t('training.createCourse')}
                 </button>
               </div>
             )}
@@ -361,9 +363,9 @@ export default function CourseEditor() {
                     onClick={e => e.stopPropagation()}
                     className="bg-slate-700 border-none text-[10px] rounded px-2 py-1"
                   >
-                    <option value="slides">投影片</option>
-                    <option value="video">影片</option>
-                    <option value="simulation">操作模擬</option>
+                    <option value="slides">{t('training.slides')}</option>
+                    <option value="video">{t('training.video')}</option>
+                    <option value="simulation">{t('training.simulation')}</option>
                   </select>
                   <button onClick={e => { e.stopPropagation(); deleteLesson(lesson.id) }}
                     className="text-slate-500 hover:text-red-400 transition">
@@ -429,15 +431,15 @@ export default function CourseEditor() {
                             try {
                               const blocks = JSON.parse(slide.content_json || '[]')
                               const b = blocks[0]
-                              return b?.instruction?.slice(0, 50) || b?.content?.slice(0, 50) || b?.text?.slice(0, 50) || '(空投影片)'
-                            } catch { return '(空投影片)' }
+                              return b?.instruction?.slice(0, 50) || b?.content?.slice(0, 50) || b?.text?.slice(0, 50) || t('training.emptySlide')
+                            } catch { return t('training.emptySlide') }
                           })()}
                         </span>
                         {slide.audio_url && <span className="text-sky-400 text-[9px]">🔊</span>}
                         <button
                           className="shrink-0 hover:text-sky-400 transition opacity-0 group-hover:opacity-100"
                           style={{ color: 'var(--t-text-dim)' }}
-                          title="複製投影片"
+                          title={t('training.duplicateSlide')}
                           onClick={async (e) => {
                             e.stopPropagation()
                             try {
@@ -456,10 +458,10 @@ export default function CourseEditor() {
                         <button
                           className="shrink-0 hover:text-red-400 transition opacity-0 group-hover:opacity-100"
                           style={{ color: 'var(--t-text-dim)' }}
-                          title="刪除投影片"
+                          title={t('training.deleteSlide')}
                           onClick={async (e) => {
                             e.stopPropagation()
-                            if (!confirm('確定要刪除此投影片？')) return
+                            if (!confirm(t('training.confirmDeleteSlide'))) return
                             try {
                               await api.delete(`/training/slides/${slide.id}`)
                               setLessonSlides(prev => ({
@@ -478,14 +480,14 @@ export default function CourseEditor() {
                       onClick={() => addSlide(lesson.id)}
                       className="w-full flex items-center justify-center gap-1.5 text-xs text-slate-400 hover:text-sky-400 border border-dashed border-slate-700 rounded-lg py-2 transition"
                     >
-                      <Plus size={12} /> 新增投影片
+                      <Plus size={12} /> {t('training.addSlide')}
                     </button>
                     <button
                       onClick={() => setShowBatchImport(lesson.id)}
                       className="w-full flex items-center justify-center gap-1.5 text-xs border border-dashed rounded-lg py-2 transition hover:opacity-80"
                       style={{ borderColor: 'var(--t-border)', color: 'var(--t-accent)' }}
                     >
-                      <Images size={12} /> 批次匯入截圖 (AI 辨識)
+                      <Images size={12} /> {t('training.batchImport')}
                     </button>
                   </div>
                 )}
@@ -496,7 +498,7 @@ export default function CourseEditor() {
               onClick={addLesson}
               className="w-full flex items-center justify-center gap-1.5 text-sm text-slate-400 hover:text-sky-400 border border-dashed border-slate-700 rounded-lg py-3 transition"
             >
-              <Plus size={16} /> 新增章節
+              <Plus size={16} /> {t('training.addLesson')}
             </button>
           </div>
         )}
@@ -505,7 +507,7 @@ export default function CourseEditor() {
         {activeTab === 'quiz' && !isNew && (
           <div className="text-center text-slate-500 py-20">
             <FileText size={48} className="mx-auto mb-3 opacity-50" />
-            <p className="text-sm">題庫管理（開發中）</p>
+            <p className="text-sm">{t('training.quizManagement')}</p>
           </div>
         )}
 
@@ -513,7 +515,7 @@ export default function CourseEditor() {
         {activeTab === 'translate' && !isNew && (
           <div className="max-w-2xl space-y-4">
             <p className="text-xs" style={{ color: 'var(--t-text-dim)' }}>
-              將課程內容（標題、說明、投影片、題目）翻譯成其他語言。使用 AI 自動翻譯，翻譯後可手動編輯。
+              {t('training.translateDesc')}
             </p>
 
             {/* Translation actions */}
@@ -565,14 +567,14 @@ export default function CourseEditor() {
                             }
                           }
                         } catch (e: any) {
-                          alert(e.message || '翻譯失敗')
+                          alert(e.message || t('training.translateFailed'))
                         } finally { setTranslating(null); setTranslateProgress(null) }
                       }}
                       disabled={!!translating}
                       className="flex items-center gap-1.5 text-xs text-white px-3 py-1.5 rounded-lg transition disabled:opacity-50"
                       style={{ backgroundColor: 'var(--t-accent-bg)' }}
                     >
-                      {translating === lang ? '翻譯中...' : status?.course_translated ? '重新翻譯' : 'AI 翻譯'}
+                      {translating === lang ? t('training.translating') : status?.course_translated ? t('training.retranslate') : t('training.aiTranslate')}
                     </button>
                   </div>
 
@@ -599,10 +601,10 @@ export default function CourseEditor() {
                   {status && !translating && (
                     <div className="text-xs space-y-1" style={{ color: 'var(--t-text-muted)' }}>
                       <div className="flex items-center gap-2">
-                        <span>課程標題：{status.course_translated ? '✅' : '❌'}</span>
+                        <span>{t('training.courseTranslated')}{status.course_translated ? '✅' : '❌'}</span>
                       </div>
                       <div className="flex items-center gap-2">
-                        <span>投影片：{status.slides_translated}/{status.slides_total}</span>
+                        <span>{t('training.slidesTranslated')}{status.slides_translated}/{status.slides_total}</span>
                         <div className="flex-1 h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--t-border)' }}>
                           <div className="h-full rounded-full" style={{
                             backgroundColor: status.slides_translated === status.slides_total ? '#22c55e' : 'var(--t-accent)',
@@ -612,7 +614,7 @@ export default function CourseEditor() {
                       </div>
                       {status.last_translated && (
                         <div style={{ color: 'var(--t-text-dim)' }}>
-                          上次翻譯：{new Date(status.last_translated).toLocaleString('zh-TW')}
+                          {t('training.lastTranslated')}{new Date(status.last_translated).toLocaleString('zh-TW')}
                         </div>
                       )}
                       {status.course_translated && (
@@ -622,31 +624,31 @@ export default function CourseEditor() {
                             className="flex items-center gap-1 text-[11px] px-3 py-1.5 rounded-lg transition text-white"
                             style={{ backgroundColor: 'var(--t-accent-bg)' }}
                           >
-                            📖 預覽 {langName} 學習
+                            📖 {t('training.previewLearn', { lang: langName })}
                           </button>
                           <button
                             onClick={() => navigate(`/training/course/${id}/learn?lang=${lang}&mode=test`)}
                             className="flex items-center gap-1 text-[11px] px-3 py-1.5 rounded-lg transition text-white"
                             style={{ backgroundColor: '#f59e0b' }}
                           >
-                            📝 預覽 {langName} 測驗
+                            📝 {t('training.previewTest', { lang: langName })}
                           </button>
                           <button
                             onClick={async () => {
                               try {
                                 setTranslating(lang)
-                                setTranslateProgress({ step: `生成 ${langName} 語音...`, current: 0, total: 1 })
+                                setTranslateProgress({ step: t('training.generateLangAudio', { lang: langName }) + '...', current: 0, total: 1 })
                                 await api.post(`/training/courses/${id}/generate-lang-tts`, { target_lang: lang }, { timeout: 120000 })
                                 setTranslateProgress(null)
-                                alert(`${langName} 語音生成完成！`)
-                              } catch (e: any) { alert(e.response?.data?.error || '語音生成失敗') }
+                                alert(t('training.langAudioComplete', { lang: langName }))
+                              } catch (e: any) { alert(e.response?.data?.error || t('training.langAudioFailed')) }
                               finally { setTranslating(null); setTranslateProgress(null) }
                             }}
                             disabled={!!translating}
                             className="flex items-center gap-1 text-[11px] px-3 py-1.5 rounded-lg transition disabled:opacity-50"
                             style={{ backgroundColor: '#22c55e', color: 'white' }}
                           >
-                            🔊 生成 {langName} 語音
+                            🔊 {t('training.generateLangAudio', { lang: langName })}
                           </button>
                         </div>
                       )}
@@ -668,7 +670,7 @@ export default function CourseEditor() {
                 className="text-xs px-3 py-1.5 rounded-lg transition"
                 style={{ backgroundColor: 'var(--t-accent-subtle)', color: 'var(--t-accent)' }}
               >
-                載入翻譯狀態
+                {t('training.loading')}
               </button>
             )}
           </div>
@@ -679,11 +681,11 @@ export default function CourseEditor() {
           <>
             {/* TTS Voice Settings */}
             <div className="rounded-xl p-5 mb-4" style={{ backgroundColor: 'var(--t-bg-card)', border: '1px solid var(--t-border)' }}>
-              <h3 className="text-sm font-semibold mb-1" style={{ color: 'var(--t-text)' }}>🔊 語音導覽設定</h3>
-              <p className="text-[10px] mb-3" style={{ color: 'var(--t-text-dim)' }}>設定本課程 TTS 語音的聲音和語速，所有投影片語音生成時統一使用。</p>
+              <h3 className="text-sm font-semibold mb-1" style={{ color: 'var(--t-text)' }}>{t('training.ttsSettings')}</h3>
+              <p className="text-[10px] mb-3" style={{ color: 'var(--t-text-dim)' }}>{t('training.ttsSettingsDesc')}</p>
               <div className="grid grid-cols-3 gap-4">
                 <div>
-                  <label className="text-xs mb-1 block" style={{ color: 'var(--t-text-dim)' }}>聲音</label>
+                  <label className="text-xs mb-1 block" style={{ color: 'var(--t-text-dim)' }}>{t('training.voice')}</label>
                   <div className="flex gap-1">
                     {(['female', 'male'] as const).map(g => (
                       <button key={g}
@@ -694,15 +696,15 @@ export default function CourseEditor() {
                           color: (course.settings_json?.tts_voice_gender || 'female') === g ? 'var(--t-accent)' : 'var(--t-text-dim)',
                           border: `1px solid ${(course.settings_json?.tts_voice_gender || 'female') === g ? 'var(--t-accent)' : 'var(--t-border)'}`
                         }}>
-                        {g === 'female' ? '👩 女聲' : '👨 男聲'}
+                        {g === 'female' ? t('training.voiceFemale') : t('training.voiceMale')}
                       </button>
                     ))}
                   </div>
                 </div>
                 <div>
-                  <label className="text-xs mb-1 block" style={{ color: 'var(--t-text-dim)' }}>語速</label>
+                  <label className="text-xs mb-1 block" style={{ color: 'var(--t-text-dim)' }}>{t('training.speed')}</label>
                   <div className="flex gap-1">
-                    {[{ v: 0.85, l: '慢' }, { v: 1.0, l: '正常' }, { v: 1.15, l: '快' }].map(s => (
+                    {[{ v: 0.85, l: t('training.speedSlow') }, { v: 1.0, l: t('training.speedNormal') }, { v: 1.15, l: t('training.speedFast') }].map(s => (
                       <button key={s.v}
                         onClick={() => setCourse({ ...course, settings_json: { ...(course.settings_json || {}), tts_speed: s.v } })}
                         className="flex-1 text-[11px] py-1.5 rounded transition font-medium"
@@ -717,20 +719,20 @@ export default function CourseEditor() {
                   </div>
                 </div>
                 <div>
-                  <label className="text-xs mb-1 block" style={{ color: 'var(--t-text-dim)' }}>音調</label>
+                  <label className="text-xs mb-1 block" style={{ color: 'var(--t-text-dim)' }}>{t('training.pitch')}</label>
                   <input type="range" min={-5} max={5} step={1}
                     value={course.settings_json?.tts_pitch || 0}
                     onChange={e => setCourse({ ...course, settings_json: { ...(course.settings_json || {}), tts_pitch: Number(e.target.value) } })}
                     className="w-full" />
                   <div className="flex justify-between text-[9px]" style={{ color: 'var(--t-text-dim)' }}>
-                    <span>低</span><span>{course.settings_json?.tts_pitch || 0}</span><span>高</span>
+                    <span>{t('training.pitchLow')}</span><span>{course.settings_json?.tts_pitch || 0}</span><span>{t('training.pitchHigh')}</span>
                   </div>
                 </div>
               </div>
               <button onClick={saveCourse} disabled={saving}
                 className="mt-3 flex items-center gap-1 text-xs font-medium px-4 py-1.5 rounded-lg transition disabled:opacity-50 text-white"
                 style={{ backgroundColor: 'var(--t-accent-bg)' }}>
-                <Save size={13} /> {saving ? '儲存中...' : '儲存設定'}
+                <Save size={13} /> {saving ? t('training.saving') : t('training.saveSettings')}
               </button>
             </div>
             <TrainingAISettings />
@@ -803,6 +805,7 @@ export default function CourseEditor() {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 function TrainingAISettings() {
+  const { t } = useTranslation()
   const [models, setModels] = useState<{ id: number; display_name: string; api_model: string }[]>([])
   const [analyzeModel, setAnalyzeModel] = useState('')
   const [translateModel, setTranslateModel] = useState('')
@@ -829,33 +832,33 @@ function TrainingAISettings() {
         training_translate_model: translateModel
       })
     } catch (e: any) {
-      alert(e.response?.data?.error || '儲存失敗')
+      alert(e.response?.data?.error || t('training.saveFailed'))
     } finally { setSaving(false) }
   }
 
-  if (!loaded) return <div className="py-12 text-center text-xs" style={{ color: 'var(--t-text-dim)' }}>載入中...</div>
+  if (!loaded) return <div className="py-12 text-center text-xs" style={{ color: 'var(--t-text-dim)' }}>{t('training.loading')}</div>
 
   return (
     <div className="max-w-xl space-y-6">
       <div>
-        <h3 className="text-sm font-semibold mb-1" style={{ color: 'var(--t-text)' }}>AI 模型設定</h3>
+        <h3 className="text-sm font-semibold mb-1" style={{ color: 'var(--t-text)' }}>{t('training.aiModelSettings')}</h3>
         <p className="text-xs" style={{ color: 'var(--t-text-dim)' }}>
-          設定教育訓練平台使用的 Gemini 模型。留空則自動選擇排序最前的模型。
+          {t('training.aiModelSettingsDesc')}
         </p>
       </div>
 
       {/* Analyze model */}
       <div className="space-y-1.5">
         <label className="text-xs font-medium" style={{ color: 'var(--t-text-secondary)' }}>
-          截圖辨識模型
+          {t('training.screenshotModel')}
         </label>
         <p className="text-[10px]" style={{ color: 'var(--t-text-dim)' }}>
-          用於 AI 分析截圖、辨識 UI 元素、生成操作說明。複雜 ERP 畫面建議用 Pro 模型。
+          {t('training.screenshotModelDesc')}
         </p>
         <select value={analyzeModel} onChange={e => setAnalyzeModel(e.target.value)}
           className="w-full border rounded px-3 py-2 text-sm"
           style={{ backgroundColor: 'var(--t-bg-input)', borderColor: 'var(--t-border)', color: 'var(--t-text)' }}>
-          <option value="">自動選擇（系統預設）</option>
+          <option value="">{t('training.autoSelect')}</option>
           {models.map(m => (
             <option key={m.id} value={m.api_model}>{m.display_name || m.api_model}</option>
           ))}
@@ -865,15 +868,15 @@ function TrainingAISettings() {
       {/* Translate model */}
       <div className="space-y-1.5">
         <label className="text-xs font-medium" style={{ color: 'var(--t-text-secondary)' }}>
-          翻譯模型
+          {t('training.translateModel')}
         </label>
         <p className="text-[10px]" style={{ color: 'var(--t-text-dim)' }}>
-          用於將教材翻譯成其他語言（English / Tiếng Việt）。Flash 模型速度快，Pro 模型翻譯品質較高。
+          {t('training.translateModelDesc')}
         </p>
         <select value={translateModel} onChange={e => setTranslateModel(e.target.value)}
           className="w-full border rounded px-3 py-2 text-sm"
           style={{ backgroundColor: 'var(--t-bg-input)', borderColor: 'var(--t-border)', color: 'var(--t-text)' }}>
-          <option value="">自動選擇（系統預設）</option>
+          <option value="">{t('training.autoSelect')}</option>
           {models.map(m => (
             <option key={m.id} value={m.api_model}>{m.display_name || m.api_model}</option>
           ))}
@@ -883,7 +886,7 @@ function TrainingAISettings() {
       <button onClick={save} disabled={saving}
         className="flex items-center gap-1.5 text-xs text-white px-4 py-2 rounded-lg transition disabled:opacity-50"
         style={{ backgroundColor: 'var(--t-accent-bg)' }}>
-        <Save size={13} /> {saving ? '儲存中...' : '儲存設定'}
+        <Save size={13} /> {saving ? t('training.saving') : t('training.saveSettings')}
       </button>
 
       {/* Model comparison info */}
@@ -907,6 +910,7 @@ function TrainingAISettings() {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 function ExportButton({ courseId }: { courseId: number }) {
+  const { t } = useTranslation()
   const [open, setOpen] = useState(false)
   const [exporting, setExporting] = useState(false)
   const [langs, setLangs] = useState<string[]>(['zh-TW'])
@@ -934,7 +938,7 @@ function ExportButton({ courseId }: { courseId: number }) {
         setOpen(false)
       }
     } catch (e: any) {
-      alert(e.response?.data?.error || '匯出失敗')
+      alert(e.response?.data?.error || t('training.exportFailed'))
     } finally { setExporting(false) }
   }
 
@@ -947,22 +951,22 @@ function ExportButton({ courseId }: { courseId: number }) {
       <button onClick={() => setOpen(!open)}
         className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg border transition hover:opacity-80"
         style={{ borderColor: 'var(--t-border)', color: 'var(--t-text-muted)' }}>
-        <Download size={13} /> 匯出
+        <Download size={13} /> {t('training.export')}
       </button>
 
       {open && (
         <div className="absolute right-0 top-full mt-1 w-64 rounded-lg border shadow-lg z-50 p-3 space-y-3"
           style={{ backgroundColor: 'var(--t-bg-card)', borderColor: 'var(--t-border)' }}>
-          <div className="text-xs font-semibold" style={{ color: 'var(--t-text)' }}>匯出 HTML5 互動教材</div>
+          <div className="text-xs font-semibold" style={{ color: 'var(--t-text)' }}>{t('training.exportTitle')}</div>
           <p className="text-[10px]" style={{ color: 'var(--t-text-dim)' }}>
-            產生單一 .html 檔案，離線即可瀏覽（含投影片、互動、標註）
+            {t('training.exportDesc')}
           </p>
 
           {/* Language selection */}
           <div className="space-y-1">
-            <div className="text-[10px] font-medium" style={{ color: 'var(--t-text-muted)' }}>包含語言</div>
+            <div className="text-[10px] font-medium" style={{ color: 'var(--t-text-muted)' }}>{t('training.includeLangs')}</div>
             {[
-              { code: 'zh-TW', label: '繁體中文', flag: '🇹🇼' },
+              { code: 'zh-TW', label: t('training.zhTW'), flag: '🇹🇼' },
               { code: 'en', label: 'English', flag: '🇺🇸' },
               { code: 'vi', label: 'Tiếng Việt', flag: '🇻🇳' },
             ].map(l => (
@@ -976,29 +980,29 @@ function ExportButton({ courseId }: { courseId: number }) {
 
           {/* Options */}
           <div className="space-y-1">
-            <div className="text-[10px] font-medium" style={{ color: 'var(--t-text-muted)' }}>匯出選項</div>
+            <div className="text-[10px] font-medium" style={{ color: 'var(--t-text-muted)' }}>{t('training.exportOptions')}</div>
             <label className="flex items-center gap-2 text-[11px] cursor-pointer" style={{ color: 'var(--t-text-secondary)' }}>
               <input type="checkbox" checked={includeQuiz} onChange={() => setIncludeQuiz(!includeQuiz)} className="rounded" />
-              包含測驗題
+              {t('training.includeQuiz')}
             </label>
             <label className="flex items-center gap-2 text-[11px] cursor-pointer" style={{ color: 'var(--t-text-secondary)' }}>
               <input type="checkbox" checked={includeAudio} onChange={() => setIncludeAudio(!includeAudio)} className="rounded" />
-              包含音訊（增加檔案大小）
+              {t('training.includeAudio')}
             </label>
             <label className="flex items-center gap-2 text-[11px] cursor-pointer" style={{ color: 'var(--t-text-secondary)' }}>
               <input type="checkbox" checked={includeAnnotations} onChange={() => setIncludeAnnotations(!includeAnnotations)} className="rounded" />
-              包含截圖標註
+              {t('training.includeAnnotations')}
             </label>
           </div>
 
           <button onClick={doExport} disabled={exporting || langs.length === 0}
             className="w-full flex items-center justify-center gap-1.5 text-xs text-white py-2 rounded-lg transition disabled:opacity-50"
             style={{ backgroundColor: 'var(--t-accent-bg)' }}>
-            {exporting ? <><Loader2 size={12} className="animate-spin" /> 匯出中...</> : <><Download size={12} /> 匯出 HTML5</>}
+            {exporting ? <><Loader2 size={12} className="animate-spin" /> {t('training.exporting')}</> : <><Download size={12} /> {t('training.exportHtml5')}</>}
           </button>
 
           <button onClick={() => setOpen(false)} className="w-full text-[10px] py-1" style={{ color: 'var(--t-text-dim)' }}>
-            取消
+            {t('training.cancel')}
           </button>
         </div>
       )}
