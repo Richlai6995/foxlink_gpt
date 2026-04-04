@@ -1966,6 +1966,12 @@ async function runMigrations(db) {
   // ── Phase 3A-2: 多語底圖 ──────────────────────────────────────────────────
   await safeAddColumn('RECORDING_STEPS', 'LANG', "VARCHAR2(10) DEFAULT 'zh-TW'");
   await safeAddColumn('SLIDE_TRANSLATIONS', 'IMAGE_OVERRIDES', 'CLOB');
+
+  // ── Phase 3B: 多語獨立 Region ───────────────────────────────────────────────
+  await safeAddColumn('SLIDE_TRANSLATIONS', 'REGIONS_JSON', 'CLOB');
+
+  // ── Phase 3B-3: 課程 TTS 語音設定 ──────────────────────────────────────────
+  await safeAddColumn('COURSES', 'SETTINGS_JSON', 'CLOB');
 }
 
 // ─── Default DB Source migration ───────────────────────────────────────────────

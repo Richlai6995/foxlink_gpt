@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import api from '../../../lib/api'
-import { ArrowLeft, Save, Plus, GripVertical, Trash2, Eye, Upload, ChevronDown, ChevronRight, Settings, FileText, Play, FolderTree, Camera, Images, Download, Loader2 } from 'lucide-react'
+import { ArrowLeft, Save, Plus, GripVertical, Trash2, Eye, Upload, ChevronDown, ChevronRight, Settings, FileText, Play, FolderTree, Camera, Images, Download, Loader2, Copy } from 'lucide-react'
 import SlideEditor from './SlideEditor'
 import CategoryManager from '../CategoryManager'
 import BatchImport from './BatchImport'
@@ -17,6 +17,7 @@ interface Course {
   time_limit_minutes: number | null
   status?: string
   cover_image?: string | null
+  settings_json?: Record<string, any>
 }
 
 interface Lesson {
@@ -83,21 +84,32 @@ export default function CourseEditor() {
     try {
       const res = await api.get(`/training/courses/${id}`)
       const c = res.data
+      let settingsObj = {}
+      if (c.settings_json) { try { settingsObj = typeof c.settings_json === 'string' ? JSON.parse(c.settings_json) : c.settings_json } catch {} }
       setCourse({
         id: c.id, title: c.title, description: c.description || '',
         category_id: c.category_id, pass_score: c.pass_score,
         max_attempts: c.max_attempts, time_limit_minutes: c.time_limit_minutes,
-        status: c.status, cover_image: c.cover_image
+        status: c.status, cover_image: c.cover_image,
+        settings_json: settingsObj
       })
       setLessons(c.lessons || [])
     } catch (e) { console.error(e) } finally { setLoading(false) }
   }
 
-  const loadSlides = async (lessonId: number) => {
-    if (lessonSlides[lessonId]) return
+  const loadSlides = async (lessonId: number, autoSelect = false) => {
+    if (lessonSlides[lessonId]) {
+      if (autoSelect && lessonSlides[lessonId].length > 0) {
+        setEditingSlideId(lessonSlides[lessonId][0].id)
+      }
+      return
+    }
     try {
       const res = await api.get(`/training/lessons/${lessonId}/slides`)
       setLessonSlides(prev => ({ ...prev, [lessonId]: res.data }))
+      if (autoSelect && res.data.length > 0) {
+        setEditingSlideId(res.data[0].id)
+      }
     } catch (e) { console.error(e) }
   }
 
@@ -171,7 +183,7 @@ export default function CourseEditor() {
       {/* Header */}
       <div className="sticky top-0 z-20 backdrop-blur border-b" style={{ backgroundColor: 'color-mix(in srgb, var(--t-bg) 95%, transparent)', borderColor: 'var(--t-border-subtle)' }}>
         <div className="max-w-5xl mx-auto px-4 py-3 flex items-center gap-3">
-          <button onClick={() => navigate('/training/editor')} style={{ color: 'var(--t-text-muted)' }} className="hover:opacity-80">
+          <button onClick={() => navigate(isNew ? '/training/editor' : `/training/course/${id}`)} style={{ color: 'var(--t-text-muted)' }} className="hover:opacity-80">
             <ArrowLeft size={20} />
           </button>
           <h1 className="text-lg font-semibold truncate">
@@ -321,7 +333,7 @@ export default function CourseEditor() {
                   onClick={() => {
                     const nextExpanded = expandedLesson === lesson.id ? null : lesson.id
                     setExpandedLesson(nextExpanded)
-                    if (nextExpanded) loadSlides(lesson.id)
+                    if (nextExpanded) loadSlides(lesson.id, true)
                   }}
                 >
                   <GripVertical size={14} className="text-slate-600 cursor-grab" />
@@ -421,6 +433,25 @@ export default function CourseEditor() {
                           })()}
                         </span>
                         {slide.audio_url && <span className="text-sky-400 text-[9px]">🔊</span>}
+                        <button
+                          className="shrink-0 hover:text-sky-400 transition opacity-0 group-hover:opacity-100"
+                          style={{ color: 'var(--t-text-dim)' }}
+                          title="複製投影片"
+                          onClick={async (e) => {
+                            e.stopPropagation()
+                            try {
+                              const res = await api.post(`/training/slides/${slide.id}/duplicate`)
+                              if (res.data.ok) {
+                                // Reload slides to get the new one
+                                const updated = await api.get(`/training/lessons/${lesson.id}/slides`)
+                                setLessonSlides(prev => ({ ...prev, [lesson.id]: updated.data }))
+                                setEditingSlideId(res.data.id)
+                              }
+                            } catch (err) { console.error(err) }
+                          }}
+                        >
+                          <Copy size={11} />
+                        </button>
                         <button
                           className="shrink-0 hover:text-red-400 transition opacity-0 group-hover:opacity-100"
                           style={{ color: 'var(--t-text-dim)' }}
@@ -583,6 +614,41 @@ export default function CourseEditor() {
                           上次翻譯：{new Date(status.last_translated).toLocaleString('zh-TW')}
                         </div>
                       )}
+                      {status.course_translated && (
+                        <div className="flex gap-2 mt-2 flex-wrap">
+                          <button
+                            onClick={() => navigate(`/training/course/${id}/learn?lang=${lang}`)}
+                            className="flex items-center gap-1 text-[11px] px-3 py-1.5 rounded-lg transition text-white"
+                            style={{ backgroundColor: 'var(--t-accent-bg)' }}
+                          >
+                            📖 預覽 {langName} 學習
+                          </button>
+                          <button
+                            onClick={() => navigate(`/training/course/${id}/learn?lang=${lang}&mode=test`)}
+                            className="flex items-center gap-1 text-[11px] px-3 py-1.5 rounded-lg transition text-white"
+                            style={{ backgroundColor: '#f59e0b' }}
+                          >
+                            📝 預覽 {langName} 測驗
+                          </button>
+                          <button
+                            onClick={async () => {
+                              try {
+                                setTranslating(lang)
+                                setTranslateProgress({ step: `生成 ${langName} 語音...`, current: 0, total: 1 })
+                                await api.post(`/training/courses/${id}/generate-lang-tts`, { target_lang: lang }, { timeout: 120000 })
+                                setTranslateProgress(null)
+                                alert(`${langName} 語音生成完成！`)
+                              } catch (e: any) { alert(e.response?.data?.error || '語音生成失敗') }
+                              finally { setTranslating(null); setTranslateProgress(null) }
+                            }}
+                            disabled={!!translating}
+                            className="flex items-center gap-1 text-[11px] px-3 py-1.5 rounded-lg transition disabled:opacity-50"
+                            style={{ backgroundColor: '#22c55e', color: 'white' }}
+                          >
+                            🔊 生成 {langName} 語音
+                          </button>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -609,7 +675,65 @@ export default function CourseEditor() {
 
         {/* Settings Tab Placeholder */}
         {activeTab === 'settings' && !isNew && (
-          <TrainingAISettings />
+          <>
+            {/* TTS Voice Settings */}
+            <div className="rounded-xl p-5 mb-4" style={{ backgroundColor: 'var(--t-bg-card)', border: '1px solid var(--t-border)' }}>
+              <h3 className="text-sm font-semibold mb-1" style={{ color: 'var(--t-text)' }}>🔊 語音導覽設定</h3>
+              <p className="text-[10px] mb-3" style={{ color: 'var(--t-text-dim)' }}>設定本課程 TTS 語音的聲音和語速，所有投影片語音生成時統一使用。</p>
+              <div className="grid grid-cols-3 gap-4">
+                <div>
+                  <label className="text-xs mb-1 block" style={{ color: 'var(--t-text-dim)' }}>聲音</label>
+                  <div className="flex gap-1">
+                    {(['female', 'male'] as const).map(g => (
+                      <button key={g}
+                        onClick={() => setCourse({ ...course, settings_json: { ...(course.settings_json || {}), tts_voice_gender: g } })}
+                        className="flex-1 text-[11px] py-1.5 rounded transition font-medium"
+                        style={{
+                          backgroundColor: (course.settings_json?.tts_voice_gender || 'female') === g ? 'var(--t-accent-subtle)' : 'transparent',
+                          color: (course.settings_json?.tts_voice_gender || 'female') === g ? 'var(--t-accent)' : 'var(--t-text-dim)',
+                          border: `1px solid ${(course.settings_json?.tts_voice_gender || 'female') === g ? 'var(--t-accent)' : 'var(--t-border)'}`
+                        }}>
+                        {g === 'female' ? '👩 女聲' : '👨 男聲'}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <label className="text-xs mb-1 block" style={{ color: 'var(--t-text-dim)' }}>語速</label>
+                  <div className="flex gap-1">
+                    {[{ v: 0.85, l: '慢' }, { v: 1.0, l: '正常' }, { v: 1.15, l: '快' }].map(s => (
+                      <button key={s.v}
+                        onClick={() => setCourse({ ...course, settings_json: { ...(course.settings_json || {}), tts_speed: s.v } })}
+                        className="flex-1 text-[11px] py-1.5 rounded transition font-medium"
+                        style={{
+                          backgroundColor: (course.settings_json?.tts_speed || 1.0) === s.v ? 'var(--t-accent-subtle)' : 'transparent',
+                          color: (course.settings_json?.tts_speed || 1.0) === s.v ? 'var(--t-accent)' : 'var(--t-text-dim)',
+                          border: `1px solid ${(course.settings_json?.tts_speed || 1.0) === s.v ? 'var(--t-accent)' : 'var(--t-border)'}`
+                        }}>
+                        {s.l}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <label className="text-xs mb-1 block" style={{ color: 'var(--t-text-dim)' }}>音調</label>
+                  <input type="range" min={-5} max={5} step={1}
+                    value={course.settings_json?.tts_pitch || 0}
+                    onChange={e => setCourse({ ...course, settings_json: { ...(course.settings_json || {}), tts_pitch: Number(e.target.value) } })}
+                    className="w-full" />
+                  <div className="flex justify-between text-[9px]" style={{ color: 'var(--t-text-dim)' }}>
+                    <span>低</span><span>{course.settings_json?.tts_pitch || 0}</span><span>高</span>
+                  </div>
+                </div>
+              </div>
+              <button onClick={saveCourse} disabled={saving}
+                className="mt-3 flex items-center gap-1 text-xs font-medium px-4 py-1.5 rounded-lg transition disabled:opacity-50 text-white"
+                style={{ backgroundColor: 'var(--t-accent-bg)' }}>
+                <Save size={13} /> {saving ? '儲存中...' : '儲存設定'}
+              </button>
+            </div>
+            <TrainingAISettings />
+          </>
         )}
       </div>
 

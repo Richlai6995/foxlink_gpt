@@ -12,6 +12,7 @@ interface Slide {
   slide_type: string
   content_json: string
   notes: string | null
+  audio_url?: string | null
 }
 
 interface Block {
@@ -19,7 +20,7 @@ interface Block {
   [key: string]: any
 }
 
-export default function SlideRenderer({ slide }: { slide: Slide }) {
+export default function SlideRenderer({ slide, isLastSlide = false, playerMode = 'learn' }: { slide: Slide; isLastSlide?: boolean; playerMode?: 'learn' | 'test' }) {
   const blocks: Block[] = useMemo(() => {
     try { return JSON.parse(slide.content_json || '[]') }
     catch { return [] }
@@ -32,13 +33,13 @@ export default function SlideRenderer({ slide }: { slide: Slide }) {
   return (
     <div className="space-y-6">
       {blocks.map((block, idx) => (
-        <BlockRenderer key={idx} block={block} />
+        <BlockRenderer key={idx} block={block} isLastSlide={isLastSlide} playerMode={playerMode} slideAudioUrl={slide.audio_url} />
       ))}
     </div>
   )
 }
 
-function BlockRenderer({ block }: { block: Block }) {
+function BlockRenderer({ block, isLastSlide = false, playerMode = 'learn', slideAudioUrl }: { block: Block; isLastSlide?: boolean; playerMode?: 'learn' | 'test'; slideAudioUrl?: string | null }) {
   switch (block.type) {
     case 'text':
       return (
@@ -111,7 +112,7 @@ function BlockRenderer({ block }: { block: Block }) {
         </pre>
       )
 
-    case 'hotspot': return <HotspotBlock block={block} />
+    case 'hotspot': return <HotspotBlock block={block} isLastSlide={isLastSlide} playerMode={playerMode} slideAudioUrl={slideAudioUrl} />
     case 'dragdrop': return <DragDropBlock block={block} />
     case 'flipcard': return <FlipCardBlock block={block} />
     case 'branch': return <BranchBlock block={block} />

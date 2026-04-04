@@ -143,7 +143,7 @@ export default function CourseDetail() {
       </div>
 
       {/* Start / Continue button — sticky bottom */}
-      <div className="sticky bottom-0 z-10 py-4 flex justify-center"
+      <div className="sticky bottom-0 z-10 py-4 flex justify-center gap-3"
         style={{ background: 'linear-gradient(transparent, var(--t-bg) 30%)' }}>
         <button
           onClick={() => navigate(`/training/course/${id}/learn`)}
@@ -151,7 +151,15 @@ export default function CourseDetail() {
           style={{ backgroundColor: 'var(--t-accent-bg)', boxShadow: '0 4px 14px rgba(37,99,235,0.3)' }}
         >
           <Play size={18} />
-          {progress.some(p => p.status === 'in_progress') ? '▶ 繼續學習' : '▶ 開始學習'}
+          {progress.some(p => p.status === 'in_progress') ? '📖 繼續學習' : '📖 開始學習'}
+        </button>
+        <button
+          onClick={() => navigate(`/training/course/${id}/learn?mode=test`)}
+          className="flex items-center gap-2 px-8 py-3 rounded-xl text-sm font-semibold transition shadow-lg"
+          style={{ backgroundColor: '#f59e0b', color: 'white', boxShadow: '0 4px 14px rgba(245,158,11,0.3)' }}
+        >
+          <Play size={18} />
+          📝 練習測驗
         </button>
       </div>
     </div>

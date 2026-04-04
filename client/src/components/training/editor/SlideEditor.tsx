@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { ArrowLeft, Save, Plus, Trash2, ChevronUp, ChevronDown, Image, Type, MousePointer, GripVertical, Move, RotateCcw, Volume2, Eye, Layers, Wand2, Loader2 } from 'lucide-react'
+import { ArrowLeft, Save, Plus, Trash2, ChevronUp, ChevronDown, Image, Type, MousePointer, GripVertical, Move, RotateCcw, Eye, Layers, Wand2, Loader2 } from 'lucide-react'
 import api from '../../../lib/api'
 import SlideTemplates, { type SlideTemplate } from './SlideTemplates'
 import TextBlockEditor from './blocks/TextBlockEditor'
@@ -12,6 +12,7 @@ import QuizInlineEditor from './blocks/QuizInlineEditor'
 import CalloutEditor from './blocks/CalloutEditor'
 import VideoBlockEditor from './blocks/VideoBlockEditor'
 import StepsEditor from './blocks/StepsEditor'
+import AudioPanel from './AudioPanel'
 
 export interface Block {
   type: string
@@ -47,6 +48,7 @@ export default function SlideEditor({ slideId, courseId, onClose, onSaved }: Pro
   const [showTemplates, setShowTemplates] = useState(false)
   const [activeBlockIdx, setActiveBlockIdx] = useState<number | null>(null)
   const [aiAnalyzing, setAiAnalyzing] = useState(false)
+  const [audioUrl, setAudioUrl] = useState<string | null>(null)
 
   const aiAnalyze = async () => {
     try {
@@ -71,10 +73,13 @@ export default function SlideEditor({ slideId, courseId, onClose, onSaved }: Pro
       if (!res) return
       const slide = res.data
       try {
-        setBlocks(JSON.parse(slide.content_json || '[]'))
+        const parsed = JSON.parse(slide.content_json || '[]')
+        setBlocks(parsed)
+        if (parsed.length > 0 && activeBlockIdx === null) setActiveBlockIdx(0)
       } catch { setBlocks([]) }
       setNotes(slide.notes || '')
       setSlideType(slide.slide_type || 'content')
+      setAudioUrl(slide.audio_url || null)
     } catch (e) { console.error(e) }
   }
 
@@ -219,20 +224,15 @@ export default function SlideEditor({ slideId, courseId, onClose, onSaved }: Pro
             </div>
           )}
 
-          {/* Notes (bottom) */}
-          <div className="mt-auto border-t p-3" style={{ borderColor: 'var(--t-border)' }}>
-            <label className="text-[10px] flex items-center gap-1 mb-1" style={{ color: 'var(--t-text-dim)' }}>
-              <Volume2 size={10} /> 旁白文字（TTS 來源）
-            </label>
-            <textarea
-              value={notes}
-              onChange={e => setNotes(e.target.value)}
-              rows={3}
-              className="w-full border rounded text-xs px-2 py-1.5 resize-none focus:outline-none"
-              style={{ backgroundColor: 'var(--t-bg-input)', borderColor: 'var(--t-border)', color: 'var(--t-text)' }}
-              placeholder="輸入旁白文字，可用 TTS 自動生成語音..."
-            />
-          </div>
+          {/* Audio Panel (bottom) */}
+          <AudioPanel
+            slideId={slideId}
+            courseId={courseId}
+            audioUrl={audioUrl}
+            notes={notes}
+            onAudioChange={setAudioUrl}
+            onNotesChange={setNotes}
+          />
         </div>
 
         {/* Block Editor (right) */}

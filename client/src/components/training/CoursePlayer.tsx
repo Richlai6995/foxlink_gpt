@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import api from '../../lib/api'
 import { ArrowLeft, ChevronLeft, ChevronRight, Volume2, VolumeX, BookmarkPlus, MessageSquare, X, List } from 'lucide-react'
@@ -38,6 +38,8 @@ export default function CoursePlayer() {
   const [tutorMessages, setTutorMessages] = useState<{ role: string; content: string }[]>([])
   const [tutorInput, setTutorInput] = useState('')
   const [tutorLoading, setTutorLoading] = useState(false)
+  const [searchParams] = useSearchParams()
+  const [playerMode, setPlayerMode] = useState<'learn' | 'test'>(searchParams.get('mode') === 'test' ? 'test' : 'learn')
   const audioRef = useRef<HTMLAudioElement>(null)
 
   useEffect(() => {
@@ -56,7 +58,8 @@ export default function CoursePlayer() {
       setLessons(courseRes.data.lessons || [])
 
       // Load all slides for all lessons (with language)
-      const lang = i18n.language
+      // URL ?lang= overrides i18n language for preview
+      const lang = searchParams.get('lang') || i18n.language
       const slides: Slide[] = []
       for (const lesson of courseRes.data.lessons || []) {
         const res = await api.get(`/training/lessons/${lesson.id}/slides`, { params: { lang } })
@@ -75,12 +78,16 @@ export default function CoursePlayer() {
   const currentSlide = allSlides[currentIdx]
   const currentLesson = currentSlide ? lessons.find(l => l.id === currentSlide.lesson_id) : null
 
-  // Auto-play audio
+  // Auto-play slide audio (skip for hotspot slides — HotspotBlock manages its own audio)
   useEffect(() => {
-    if (currentSlide?.audio_url && audioRef.current && !audioMuted) {
-      audioRef.current.src = currentSlide.audio_url
-      audioRef.current.play().catch(() => {})
-    }
+    if (!currentSlide?.audio_url || !audioRef.current || audioMuted) return
+    // Check if this is a hotspot slide — let HotspotBlock handle audio
+    try {
+      const blocks = JSON.parse(currentSlide.content_json || '[]')
+      if (blocks.some((b: any) => b.type === 'hotspot')) return
+    } catch {}
+    audioRef.current.src = currentSlide.audio_url
+    audioRef.current.play().catch(() => {})
   }, [currentIdx, currentSlide?.audio_url, audioMuted])
 
   const goNext = () => {
@@ -148,6 +155,24 @@ export default function CoursePlayer() {
           <span className="text-xs" style={{ color: 'var(--t-text-dim)' }}>— {currentLesson.title}</span>
         )}
         <div className="flex-1" />
+        <div className="flex items-center rounded-lg overflow-hidden border" style={{ borderColor: 'var(--t-border)' }}>
+          <button onClick={() => setPlayerMode('learn')}
+            className="text-[10px] px-2.5 py-1 font-medium transition"
+            style={{
+              backgroundColor: playerMode === 'learn' ? 'var(--t-accent-bg, #3b82f6)' : 'transparent',
+              color: playerMode === 'learn' ? 'white' : 'var(--t-text-dim)'
+            }}>
+            📖 學習
+          </button>
+          <button onClick={() => setPlayerMode('test')}
+            className="text-[10px] px-2.5 py-1 font-medium transition"
+            style={{
+              backgroundColor: playerMode === 'test' ? '#f59e0b' : 'transparent',
+              color: playerMode === 'test' ? 'white' : 'var(--t-text-dim)'
+            }}>
+            📝 測驗
+          </button>
+        </div>
         <button onClick={() => setShowOutline(!showOutline)} style={{ color: showOutline ? 'var(--t-accent)' : 'var(--t-text-muted)' }} className="hover:opacity-70" title="章節大綱">
           <List size={16} />
         </button>
@@ -196,7 +221,7 @@ export default function CoursePlayer() {
         {/* Slide content */}
         <div className="flex-1 overflow-y-auto flex items-start justify-center px-6 py-4" style={{ backgroundColor: 'var(--t-bg)' }}>
           <div className="w-full max-w-7xl">
-            <SlideRenderer slide={currentSlide} />
+            <SlideRenderer slide={currentSlide} isLastSlide={currentIdx === allSlides.length - 1} playerMode={playerMode} />
           </div>
         </div>
 

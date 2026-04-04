@@ -69,6 +69,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     localStorage.setItem('user', JSON.stringify(u))
     setToken(t)
     setUser(u)
+    // Ensure current i18n language is persisted (even if user never switched on login page)
+    const currentLang = i18n.language || 'zh-TW'
+    if (!localStorage.getItem('preferred_language')) {
+      localStorage.setItem('preferred_language', currentLang)
+    }
     applyLanguage(u)
     // Sync login page language choice to server profile
     const localPref = localStorage.getItem('preferred_language')
@@ -84,6 +89,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     localStorage.setItem('user', JSON.stringify(u))
     setToken(t)
     setUser(u)
+    const currentLang = i18n.language || 'zh-TW'
+    if (!localStorage.getItem('preferred_language')) {
+      localStorage.setItem('preferred_language', currentLang)
+    }
     applyLanguage(u)
     const localPref = localStorage.getItem('preferred_language')
     if (localPref && localPref !== (u?.resolved_language || u?.preferred_language)) {

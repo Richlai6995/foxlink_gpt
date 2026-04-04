@@ -1,7 +1,7 @@
 # FOXLINK GPT 教育訓練平台 — 實作完成報告
 
-> 日期：2026-04-02（Phase 1-2F）、2026-04-03（Phase 3A-1/2/3）
-> 狀態：Phase 1 + Phase 2A-F + Phase 3A 實作完成（Phase 3B 語音導覽已規劃）
+> 日期：2026-04-02（Phase 1-2F）、2026-04-03（Phase 3A）、2026-04-04（Phase 3B）
+> 狀態：Phase 1 + Phase 2A-F + Phase 3A + Phase 3B 實作完成
 > 設計文件：[training-platform-design.md](training-platform-design.md)
 
 ---
@@ -1765,26 +1765,112 @@ Step 5: 發送
 
 ---
 
-## 13. 後續開發（Phase 3B+）
+### Phase 3B — 互動模式引擎 + 語音導引 + Region 管理改善
+
+> 日期：2026-04-04
+
+#### Phase 3B-1 — 互動區域管理改善
+
+| 項目 | 狀態 | 說明 |
+|------|------|------|
+| 選取/繪製模式分離 | ✅ 完成 | `editorMode: 'select' \| 'draw'`，繪製完自動切回選取 |
+| 繪製預覽 | ✅ 完成 | 拖拉時顯示虛線框預覽 |
+| + 新增區域按鈕 | ✅ 完成 | 在圖片中央快速新增預設框 |
+| Region label 欄位 | ✅ 完成 | 取代純 id 顯示，支援中文標籤 |
+| Region 拖拉排序 | ✅ 完成 | GripVertical 握把 + HTML5 drag-and-drop |
+| 抽換底圖 | ✅ 完成 | 🔄 按鈕直接替換 image，保留 regions/annotations/feedback |
+| 複製投影片 | ✅ 完成 | `POST /slides/:sid/duplicate`，複製全部內容插入原始後面 |
+| 多語獨立 Region | ✅ 完成 | `slide_translations.regions_json` CLOB，各語言完全獨立 region 集合 |
+| 語言 Region 同步工具 | ✅ 完成 | 建立獨立區域 / 從其他語言複製 / 回到繼承 |
+| Annotation 修復 | ✅ 完成 | 不再清空 annotations，editor/player 一律從 block.annotations 讀取 |
+
+#### Phase 3B-2 — 互動模式引擎
+
+| 項目 | 狀態 | 說明 |
+|------|------|------|
+| `interaction_mode` 欄位 | ✅ 完成 | `'guided' \| 'explore'`，Editor 可切換 |
+| 導引模式 Player | ✅ 完成 | currentStep 逐步帶，只 highlight 當前目標，其他暗淡 |
+| 探索模式 Player | ✅ 完成 | 所有區域可點擊，追蹤已探索進度，全部探索完才完成 |
+| 步驟進度條 | ✅ 完成 | 底部 Step 1/4 → 2/4 視覺化圓點進度 |
+| Hover tooltip | ✅ 完成 | 懸停區域顯示名稱浮動提示 |
+| 步驟間動畫 | ✅ 完成 | 綠色 flash + smooth transition |
+| 復習/重做 | ✅ 完成 | 完成後「再做一次」按鈕重置 |
+| 自動下一張 | ✅ 完成 | 完成後「下一頁 →」按鈕，最後一頁顯示「🎉 課程完成」 |
+| 測驗模式 | ✅ 完成 | Player 層級 `📖 學習` / `📝 測驗` 切換，區域/標籤/tooltip 全隱藏 |
+| 測驗漸進式提示 | ✅ 完成 | 1-2 次不提示 → 3 次給文字 → N 次 highlight 位置 |
+| 課程詳情頁測驗入口 | ✅ 完成 | 「📖 繼續學習」旁新增「📝 練習測驗」按鈕 |
+
+#### Phase 3B-3 — 語音導覽系統
+
+| 項目 | 狀態 | 說明 |
+|------|------|------|
+| Region narration/test_hint/explore_desc 欄位 | ✅ 完成 | 每個 region 三種模式各自獨立語音文稿 |
+| `editor_context` 補充說明 | ✅ 完成 | 編輯者填寫系統背景，AI 自然融入腳本 |
+| AI 生成全套導覽腳本 | ✅ 完成 | `POST /slides/:sid/generate-narration` Gemini 一次產出三模式前導 + 每步導覽/測驗/探索文稿 |
+| 自動 TTS 全套生成 | ✅ 完成 | AI 生成文稿後自動逐一 TTS，按鈕文字動態顯示「AI 腳本生成中→TTS 語音生成中」 |
+| 三模式前導語音 | ✅ 完成 | `slide_narration` / `slide_narration_test` / `slide_narration_explore` 各自有音檔 |
+| 前導語音 UI | ✅ 完成 | 導引/測驗/探索各段可編輯 + 🔊 獨立 TTS + audio player |
+| 每步三模式語音 | ✅ 完成 | 學習導引 + 測驗提示 + 探索說明，各自 TTS + audio player |
+| Player 語音時序控制 | ✅ 完成 | 進入投影片→播前導→播完啟動互動→每步播 region 語音 |
+| Hotspot 投影片跳過 slide audio | ✅ 完成 | CoursePlayer 偵測 hotspot block，交由 HotspotBlock 管理語音 |
+| 靜音按鈕生效 | ✅ 完成 | 切靜音立即 pause + 跳過前導，點對時停止當前語音 |
+| 測驗模式動態鼓勵 | ✅ 完成 | 隨機鼓勵/提示語句 + 漸進式播放 test_hint 語音 |
+
+#### Phase 3B-4 — 課程語音設定 + 外語語音
+
+| 項目 | 狀態 | 說明 |
+|------|------|------|
+| 課程 TTS 設定 | ✅ 完成 | `COURSES.SETTINGS_JSON` CLOB，聲音性別/語速/音調 |
+| 設定 tab UI | ✅ 完成 | 👩女聲/👨男聲、慢/正常/快、音調滑桿 |
+| `resolveTtsVoice()` helper | ✅ 完成 | 按語言+性別自動選 voice（zh-TW/en/vi × 男/女） |
+| TTS API 帶入課程設定 | ✅ 完成 | `/slides/:sid/tts` + `/slides/:sid/region-tts` 自動讀課程設定 |
+| 翻譯時自動 TTS | ✅ 完成 | 翻譯流程完成後自動為 hotspot 投影片生成外語 TTS |
+| 獨立外語語音按鈕 | ✅ 完成 | 翻譯 tab「🔊 生成 English 語音」獨立觸發，避免 timeout |
+| `generate-narration` 外語支援 | ✅ 完成 | `lang` 參數讀獨立 regions + 外語截圖，用外語生成腳本 |
+| LanguageImagePanel 語音編輯 | ✅ 完成 | 獨立 regions 下方「✨ AI 生成語音」一鍵外語腳本+TTS |
+| 翻譯 tab 預覽按鈕 | ✅ 完成 | 「📖 預覽 English 學習」「📝 預覽 English 測驗」 |
+| CoursePlayer `?lang=` 參數 | ✅ 完成 | URL 參數強制載入指定語言投影片 |
+| Slide fetch `_intro` 合併 | ✅ 完成 | `regions_json._intro` 覆蓋 hotspot block 前導語音欄位 |
+| `generate-lang-tts` API | ✅ 完成 | `POST /courses/:id/generate-lang-tts` 批次為翻譯版生成 TTS |
+| SlideEditor AudioPanel 整合 | ✅ 完成 | 底部旁白區換用 AudioPanel（TTS+麥克風+STT+上傳） |
+
+#### Phase 3B-5 — 其他改善
+
+| 項目 | 狀態 | 說明 |
+|------|------|------|
+| 抽換底圖 | ✅ 完成 | 🔄 按鈕替換 image，保留 regions/annotations |
+| 複製投影片 | ✅ 完成 | `POST /slides/:sid/duplicate`，CourseEditor 📋 按鈕 |
+| 自動選取第一個 Block | ✅ 完成 | loadSlide 後 `setActiveBlockIdx(0)` |
+| 展開章節自動開第一張 | ✅ 完成 | `loadSlides(lessonId, true)` |
+| 編輯器返回到課程詳情 | ✅ 完成 | 返回鍵導向 `/training/course/:id` |
+| 課程詳情頁測驗入口 | ✅ 完成 | 「📖 繼續學習」+「📝 練習測驗」雙按鈕 |
+| 語言偵測 fallback 改中文 | ✅ 完成 | `detectLang()` 預設 zh-TW，登入時自動存 `preferred_language` |
+| `decryptKey` import 修正 | ✅ 完成 | 改用 `llmKeyService` 而非 `dbCrypto` |
+| Annotation 修復 | ✅ 完成 | 不再清空 annotations，editor/player 一律顯示 |
+
+---
+
+## 13. 後續開發（Phase 3C+）
 
 以下功能已在設計文件中規劃，尚未實作：
 
-| Phase | 功能 | 設計文件 | 說明 |
-|-------|------|---------|------|
-| **3B** | **即時語音導覽** | **已規劃** | **Gemini Flash 即時語音 + 學習/測驗模式 + 編輯者提示詞 + 語音風格** |
-| 3C | 影片 AI 拆幀 | §16C | ffmpeg + Gemini 混合拆幀→自動生成投影片 |
-| 3C | 桌面截圖代理 | §16B | Electron F9 全局快捷鍵，截 Java Forms 等非瀏覽器系統 |
-| 3C | 進階標註 | §16A.12 | 畫筆平滑化 Bezier、標註模板、語音搭配標註同步播放 |
-| 3 | 定期複訓 | — | 自動建立下一期培訓專案 |
-| 3 | iframe 導引模擬 | — | 嵌入真實系統 + 高亮 + 操作監聽 |
-| 3 | 教材分析儀表板 | — | 停留時間、中斷點、題目難度分析 |
-| 3 | 教材版本控制 | — | v1→v2 + 已完成學員升級提示 |
-| 3 | 多人協作錄製 | — | 分工 + 統一審核 |
-| 3 | 教材模板庫 | — | 跨課程複用模板 |
-| 3 | 差異更新 | — | 系統升版 → AI 比對 → 只重做變更步驟 |
-| 3 | 操作回放驗證 | — | Playwright 重播驗證教材有效性 |
-| 3 | 學習者熱力圖 | — | 點擊紀錄分析 → 找出易犯錯區域 |
-| 3 | 證書 PDF | — | pdfkit 生成完課證書 |
-| 4 | Playwright 全自動 | — | AI 根據腳本自動操作，人只需審核 |
-| 4 | Extension 離線模式 | — | IndexedDB 快取 → 批次上傳 |
-| 4 | 討論區 / 徽章 | — | 社群功能 |
+| Phase | 功能 | 說明 |
+|-------|------|------|
+| **3C** | **成績追蹤 + 互動分析** | **每步嘗試次數/用時/正確率寫入 DB + 管理員報表 + 學習者熱力圖** |
+| 3C | 互動成績與測驗整合 | 互動操作分數納入 Phase 1E 測驗成績體系 |
+| 3D | 影片 AI 拆幀 | ffmpeg + Gemini 混合拆幀→自動生成投影片 |
+| 3D | 桌面截圖代理 | Electron F9 全局快捷鍵，截 Java Forms 等非瀏覽器系統 |
+| 3D | 進階標註 | 畫筆平滑化 Bezier、標註模板、語音搭配標註同步播放 |
+| 3 | 定期複訓 | 自動建立下一期培訓專案 |
+| 3 | iframe 導引模擬 | 嵌入真實系統 + 高亮 + 操作監聽 |
+| 3 | 教材分析儀表板 | 停留時間、中斷點、題目難度分析 |
+| 3 | 教材版本控制 | v1→v2 + 已完成學員升級提示 |
+| 3 | PPT 匯入 | .pptx → 自動轉換為投影片 |
+| 3 | 差異更新 | 系統升版 → AI 比對 → 只重做變更步驟 |
+| 3 | 操作回放驗證 | Playwright 重播驗證教材有效性 |
+| 3 | 證書 PDF | pdfkit 生成完課證書 |
+| 4 | Playwright 全自動 | AI 根據腳本自動操作，人只需審核 |
+| 4 | Extension 離線模式 | IndexedDB 快取 → 批次上傳 |
+| 4 | 討論區 / 徽章 / 排行榜 | 社群功能 |
+| 4 | 微學習模式 | 5 分鐘短課程 |
+| 4 | 離線模式 | PWA 快取 |

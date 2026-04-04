@@ -17,11 +17,11 @@ function detectLang(): string {
   const saved = localStorage.getItem('preferred_language')
   if (saved && ['zh-TW', 'en', 'vi'].includes(saved)) return saved
 
-  // 2. 偵測瀏覽器語言
+  // 2. 偵測瀏覽器語言（預設繁體中文，企業系統以中文為主）
   const nav = (navigator.languages?.[0] || navigator.language || '').toLowerCase()
-  if (nav.startsWith('zh')) return 'zh-TW'
   if (nav.startsWith('vi')) return 'vi'
-  return 'en'
+  if (nav.startsWith('en')) return 'en'
+  return 'zh-TW'
 }
 const initLang = detectLang()
 

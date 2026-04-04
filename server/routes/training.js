@@ -361,20 +361,36 @@ router.get('/courses/:id', loadCoursePermission, async (req, res) => {
 // PUT /api/training/courses/:id — update
 router.put('/courses/:id', loadCoursePermission, requirePermission('owner', 'admin', 'develop'), async (req, res) => {
   try {
-    const { title, description, category_id, pass_score, max_attempts, time_limit_minutes } = req.body;
+    const { title, description, category_id, pass_score, max_attempts, time_limit_minutes, settings_json } = req.body;
     await db.prepare(`
       UPDATE courses SET title=?, description=?, category_id=?,
              pass_score=?, max_attempts=?, time_limit_minutes=?,
-             updated_at=SYSTIMESTAMP
+             settings_json=?, updated_at=SYSTIMESTAMP
       WHERE id=?
     `).run(title, description || null, category_id || null,
            pass_score || 60, max_attempts || null, time_limit_minutes || null,
+           settings_json ? (typeof settings_json === 'string' ? settings_json : JSON.stringify(settings_json)) : null,
            req.courseId);
     res.json({ ok: true });
   } catch (e) {
     console.error('[Training] PUT course:', e.message);
     res.status(500).json({ error: e.message });
   }
+});
+
+// GET /api/training/courses/:id/tts-settings — get TTS voice settings
+router.get('/courses/:id/tts-settings', async (req, res) => {
+  try {
+    const row = await db.prepare('SELECT settings_json FROM courses WHERE id=?').get(req.params.id);
+    if (!row) return res.status(404).json({ error: '課程不存在' });
+    let settings = {};
+    if (row.settings_json) { try { settings = JSON.parse(row.settings_json); } catch {} }
+    res.json({
+      tts_voice_gender: settings.tts_voice_gender || 'female',
+      tts_speed: settings.tts_speed || 1.0,
+      tts_pitch: settings.tts_pitch || 0
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // DELETE /api/training/courses/:id
@@ -687,7 +703,7 @@ router.get('/lessons/:lid/slides', async (req, res) => {
       for (const slide of slides) {
         try {
           const trans = await db.prepare(
-            'SELECT content_json, notes, audio_url, image_overrides FROM slide_translations WHERE slide_id=? AND lang=?'
+            'SELECT content_json, notes, audio_url, image_overrides, regions_json FROM slide_translations WHERE slide_id=? AND lang=?'
           ).get(slide.id, lang);
           if (trans) {
             if (trans.content_json) slide.content_json = trans.content_json;
@@ -718,6 +734,38 @@ router.get('/lessons/:lid/slides', async (req, res) => {
                         return ovr ? { ...r, coords: { ...r.coords, ...ovr } } : r;
                       });
                       changed = true;
+                    }
+                  }
+                }
+                if (changed) slide.content_json = JSON.stringify(blocks);
+              } catch {}
+            }
+            // Phase 3B: Independent language regions + intro audio take highest priority
+            if (trans.regions_json) {
+              try {
+                const langRegions = JSON.parse(trans.regions_json);
+                const blocks = JSON.parse(slide.content_json || '[]');
+                let changed = false;
+                for (const [idx, regs] of Object.entries(langRegions)) {
+                  if (idx === '_intro') continue; // handled below
+                  const block = blocks[Number(idx)];
+                  if (block && Array.isArray(regs)) {
+                    block.regions = regs;
+                    changed = true;
+                  }
+                }
+                // Merge _intro (language-specific intro narrations) into hotspot blocks
+                if (langRegions._intro) {
+                  const intro = langRegions._intro;
+                  for (const block of blocks) {
+                    if (block.type === 'hotspot') {
+                      const introFields = ['slide_narration', 'slide_narration_audio',
+                        'slide_narration_test', 'slide_narration_test_audio',
+                        'slide_narration_explore', 'slide_narration_explore_audio',
+                        'completion_message'];
+                      for (const f of introFields) {
+                        if (intro[f]) { block[f] = intro[f]; changed = true; }
+                      }
                     }
                   }
                 }
@@ -824,6 +872,40 @@ router.delete('/slides/:sid', async (req, res) => {
   }
 });
 
+// POST /api/training/slides/:sid/duplicate — copy a slide
+router.post('/slides/:sid/duplicate', async (req, res) => {
+  try {
+    const slide = await db.prepare(
+      'SELECT lesson_id, slide_type, content_json, notes, duration_seconds, sort_order FROM course_slides WHERE id=?'
+    ).get(req.params.sid);
+    if (!slide) return res.status(404).json({ error: '投影片不存在' });
+
+    const check = await verifyLessonAccess(slide.lesson_id, req.user, true);
+    if (check.error) return res.status(check.status).json({ error: check.error });
+
+    // Shift subsequent slides' sort_order to make room
+    const insertOrder = (slide.sort_order || 0) + 1;
+    await db.prepare(
+      'UPDATE course_slides SET sort_order = sort_order + 1 WHERE lesson_id=? AND sort_order >= ?'
+    ).run(slide.lesson_id, insertOrder);
+
+    // Insert duplicate
+    const result = await db.prepare(`
+      INSERT INTO course_slides (lesson_id, slide_type, content_json, notes, duration_seconds, sort_order)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(
+      slide.lesson_id, slide.slide_type, slide.content_json,
+      slide.notes ? slide.notes + ' (副本)' : '(副本)',
+      slide.duration_seconds, insertOrder
+    );
+
+    const newId = result.lastInsertRowId || result.id;
+    res.json({ ok: true, id: newId, sort_order: insertOrder });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // PUT /api/training/lessons/:lid/slides/reorder
 router.put('/lessons/:lid/slides/reorder', async (req, res) => {
   try {
@@ -876,6 +958,31 @@ router.post('/slides/:sid/audio', upload.single('audio'), async (req, res) => {
   }
 });
 
+// ── TTS Helper: resolve voice from course settings ──
+async function resolveTtsVoice(courseId, language) {
+  const voiceMap = {
+    'zh-TW': { female: 'cmn-TW-Wavenet-A', male: 'cmn-TW-Wavenet-C' },
+    'en':    { female: 'en-US-Wavenet-F', male: 'en-US-Wavenet-D' },
+    'vi':    { female: 'vi-VN-Wavenet-A', male: 'vi-VN-Wavenet-B' },
+  };
+  let gender = 'female', speed = 1.0, pitch = 0;
+  if (courseId) {
+    try {
+      const row = await db.prepare('SELECT settings_json FROM courses WHERE id=?').get(courseId);
+      if (row?.settings_json) {
+        const s = JSON.parse(row.settings_json);
+        if (s.tts_voice_gender) gender = s.tts_voice_gender;
+        if (s.tts_speed) speed = s.tts_speed;
+        if (s.tts_pitch !== undefined) pitch = s.tts_pitch;
+      }
+    } catch {}
+  }
+  const lang = language || 'zh-TW';
+  const voiceName = voiceMap[lang]?.[gender] || voiceMap['zh-TW'][gender];
+  const langMap = { 'zh-TW': 'cmn-TW', 'en': 'en-US', 'vi': 'vi-VN' };
+  return { voiceName, langCode: langMap[lang] || 'cmn-TW', speed, pitch };
+}
+
 // POST /api/training/slides/:sid/tts — generate TTS
 router.post('/slides/:sid/tts', async (req, res) => {
   try {
@@ -887,29 +994,26 @@ router.post('/slides/:sid/tts', async (req, res) => {
     const text = req.body.text || slide.notes;
     if (!text) return res.status(400).json({ error: '沒有旁白文字' });
 
-    // Call existing TTS skill endpoint internally
     const ttsModel = await db.prepare(
       `SELECT api_model, api_key_enc FROM llm_models WHERE model_role='tts' AND is_active=1
        ORDER BY sort_order FETCH FIRST 1 ROWS ONLY`
     ).get();
     if (!ttsModel) return res.status(500).json({ error: 'TTS 模型未設定' });
 
-    const { decryptKey } = require('../utils/dbCrypto');
+    const { decryptKey } = require('../services/llmKeyService');
     const apiKey = decryptKey(ttsModel.api_key_enc);
     const language = req.body.language || 'zh-TW';
-    const voice = req.body.voice || ttsModel.api_model || 'cmn-TW-Wavenet-A';
+    const { voiceName, langCode, speed, pitch } = await resolveTtsVoice(check.courseId, language);
 
     const ttsUrl = `https://texttospeech.googleapis.com/v1/text:synthesize?key=${apiKey}`;
-    const langMap = { 'zh-TW': 'cmn-TW', 'en': 'en-US', 'vi': 'vi-VN' };
-    const langCode = langMap[language] || 'cmn-TW';
 
     const ttsRes = await fetch(ttsUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         input: { text },
-        voice: { languageCode: langCode, name: voice },
-        audioConfig: { audioEncoding: 'MP3', speakingRate: req.body.speakingRate || 1.0, pitch: req.body.pitch || 0 }
+        voice: { languageCode: langCode, name: req.body.voice || voiceName },
+        audioConfig: { audioEncoding: 'MP3', speakingRate: req.body.speakingRate || speed, pitch: req.body.pitch ?? pitch }
       })
     });
 
@@ -933,6 +1037,58 @@ router.post('/slides/:sid/tts', async (req, res) => {
     res.json({ audio_url: relativePath });
   } catch (e) {
     console.error('[Training] TTS:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/training/slides/:sid/region-tts — generate TTS for individual regions
+router.post('/slides/:sid/region-tts', async (req, res) => {
+  try {
+    const slide = await db.prepare('SELECT lesson_id, content_json FROM course_slides WHERE id=?').get(req.params.sid);
+    if (!slide) return res.status(404).json({ error: '投影片不存在' });
+    const check = await verifyLessonAccess(slide.lesson_id, req.user, true);
+    if (check.error) return res.status(check.status).json({ error: check.error });
+
+    const { block_index, region_id, text, language } = req.body;
+    if (!text) return res.status(400).json({ error: '沒有語音文稿' });
+
+    const ttsModel = await db.prepare(
+      `SELECT api_model, api_key_enc FROM llm_models WHERE model_role='tts' AND is_active=1
+       ORDER BY sort_order FETCH FIRST 1 ROWS ONLY`
+    ).get();
+    if (!ttsModel) return res.status(500).json({ error: 'TTS 模型未設定' });
+
+    const { decryptKey } = require('../services/llmKeyService');
+    const apiKey = decryptKey(ttsModel.api_key_enc);
+    const lang = language || 'zh-TW';
+    const { voiceName, langCode, speed, pitch } = await resolveTtsVoice(check.courseId, lang);
+
+    const ttsUrl = `https://texttospeech.googleapis.com/v1/text:synthesize?key=${apiKey}`;
+    const ttsRes = await fetch(ttsUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        input: { text },
+        voice: { languageCode: langCode, name: voiceName },
+        audioConfig: { audioEncoding: 'MP3', speakingRate: speed, pitch }
+      })
+    });
+    if (!ttsRes.ok) {
+      const err = await ttsRes.text();
+      return res.status(500).json({ error: `TTS API error: ${err}` });
+    }
+
+    const { audioContent } = await ttsRes.json();
+    const audioBuffer = Buffer.from(audioContent, 'base64');
+    const filename = `tts_region_${region_id || 'r'}_${Date.now()}.mp3`;
+    const dir = path.join(uploadDir, `course_${check.courseId}`);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, filename), audioBuffer);
+
+    const audioUrl = `/api/training/files/course_${check.courseId}/${filename}`;
+    res.json({ audio_url: audioUrl });
+  } catch (e) {
+    console.error('[Training] Region TTS:', e.message);
     res.status(500).json({ error: e.message });
   }
 });
@@ -1945,6 +2101,61 @@ router.post('/courses/:id/translate', loadCoursePermission, requirePermission('o
           await db.prepare('INSERT INTO slide_translations (slide_id, lang, content_json, notes, is_auto) VALUES (?,?,?,?,1)')
             .run(slide.id, target_lang, translatedContent, translatedNotes);
         }
+
+        // Auto-generate TTS for translated hotspot narrations
+        if (translatedContent) {
+          try {
+            const transBlocks = JSON.parse(translatedContent);
+            const lesson2 = await db.prepare('SELECT l.course_id FROM course_lessons l WHERE l.id=?').get(slide.lesson_id);
+            const courseId2 = lesson2?.course_id;
+            for (const tb of transBlocks) {
+              if (tb.type !== 'hotspot' || !tb.regions) continue;
+              const { voiceName, langCode, speed, pitch } = await resolveTtsVoice(courseId2, target_lang);
+              const ttsModel2 = await db.prepare(
+                `SELECT api_key_enc FROM llm_models WHERE model_role='tts' AND is_active=1 ORDER BY sort_order FETCH FIRST 1 ROWS ONLY`
+              ).get();
+              if (!ttsModel2) continue;
+              const { decryptKey: dk } = require('../services/llmKeyService');
+              const ttsApiKey = dk(ttsModel2.api_key_enc);
+              const ttsUrl2 = `https://texttospeech.googleapis.com/v1/text:synthesize?key=${ttsApiKey}`;
+              const dir2 = path.join(uploadDir, `course_${courseId2}`);
+              if (!fs.existsSync(dir2)) fs.mkdirSync(dir2, { recursive: true });
+
+              const genAudio = async (text, fileId) => {
+                if (!text) return null;
+                try {
+                  const r = await fetch(ttsUrl2, {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ input: { text }, voice: { languageCode: langCode, name: voiceName }, audioConfig: { audioEncoding: 'MP3', speakingRate: speed, pitch } })
+                  });
+                  if (!r.ok) return null;
+                  const { audioContent } = await r.json();
+                  const fn = `tts_${target_lang}_${fileId}_${Date.now()}.mp3`;
+                  fs.writeFileSync(path.join(dir2, fn), Buffer.from(audioContent, 'base64'));
+                  return `/api/training/files/course_${courseId2}/${fn}`;
+                } catch { return null; }
+              };
+
+              // Generate intro audios
+              for (const f of ['slide_narration', 'slide_narration_test', 'slide_narration_explore']) {
+                if (tb[f]) { const u = await genAudio(tb[f], f); if (u) tb[f + '_audio'] = u; }
+              }
+              // Generate region audios
+              for (const reg of tb.regions.filter(r => r.correct)) {
+                if (reg.narration) { const u = await genAudio(reg.narration, reg.id); if (u) reg.audio_url = u; }
+                if (reg.test_hint) { const u = await genAudio(reg.test_hint, `test_${reg.id}`); if (u) reg.test_audio_url = u; }
+                if (reg.explore_desc) { const u = await genAudio(reg.explore_desc, `explore_${reg.id}`); if (u) reg.explore_audio_url = u; }
+              }
+            }
+            // Save updated content with audio URLs
+            const updatedTransContent = JSON.stringify(transBlocks);
+            await db.prepare('UPDATE slide_translations SET content_json=? WHERE slide_id=? AND lang=?')
+              .run(updatedTransContent, slide.id, target_lang);
+          } catch (ttsErr) {
+            console.warn(`[Translate] TTS for slide ${slide.id} ${target_lang}:`, ttsErr.message);
+          }
+        }
+
         doneItems++;
       }
     }
@@ -1978,6 +2189,92 @@ router.post('/courses/:id/translate', loadCoursePermission, requirePermission('o
     send('error', { error: e.message });
   } finally {
     res.end();
+  }
+});
+
+// POST /api/training/courses/:id/generate-lang-tts — generate TTS for all translated hotspot slides
+router.post('/courses/:id/generate-lang-tts', loadCoursePermission, requirePermission('owner', 'admin', 'develop'), async (req, res) => {
+  try {
+    const { target_lang } = req.body;
+    if (!target_lang || target_lang === 'zh-TW') return res.status(400).json({ error: 'target_lang required (en/vi)' });
+
+    // Get all slides with translations
+    const lessons = await db.prepare('SELECT id FROM course_lessons WHERE course_id=? ORDER BY sort_order').all(req.courseId);
+    const ttsModel = await db.prepare(
+      `SELECT api_key_enc FROM llm_models WHERE model_role='tts' AND is_active=1 ORDER BY sort_order FETCH FIRST 1 ROWS ONLY`
+    ).get();
+    if (!ttsModel) return res.status(500).json({ error: 'TTS 模型未設定' });
+
+    const { decryptKey } = require('../services/llmKeyService');
+    const ttsApiKey = decryptKey(ttsModel.api_key_enc);
+    const { voiceName, langCode, speed, pitch } = await resolveTtsVoice(req.courseId, target_lang);
+    const ttsUrl = `https://texttospeech.googleapis.com/v1/text:synthesize?key=${ttsApiKey}`;
+    const dir = path.join(uploadDir, `course_${req.courseId}`);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+
+    const genAudio = async (text, fileId) => {
+      if (!text) return null;
+      try {
+        const r = await fetch(ttsUrl, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ input: { text }, voice: { languageCode: langCode, name: voiceName }, audioConfig: { audioEncoding: 'MP3', speakingRate: speed, pitch } })
+        });
+        if (!r.ok) return null;
+        const { audioContent } = await r.json();
+        const fn = `tts_${target_lang}_${fileId}_${Date.now()}.mp3`;
+        fs.writeFileSync(path.join(dir, fn), Buffer.from(audioContent, 'base64'));
+        return `/api/training/files/course_${req.courseId}/${fn}`;
+      } catch { return null; }
+    };
+
+    let generated = 0;
+    for (const lesson of lessons) {
+      const slides = await db.prepare('SELECT id FROM course_slides WHERE lesson_id=? ORDER BY sort_order').all(lesson.id);
+      for (const slide of slides) {
+        const trans = await db.prepare('SELECT id, content_json FROM slide_translations WHERE slide_id=? AND lang=?').get(slide.id, target_lang);
+        if (!trans?.content_json) continue;
+
+        let blocks;
+        try { blocks = JSON.parse(trans.content_json); } catch { continue; }
+        let changed = false;
+
+        for (const tb of blocks) {
+          if (tb.type !== 'hotspot') continue;
+          // Intro narrations
+          for (const f of ['slide_narration', 'slide_narration_test', 'slide_narration_explore']) {
+            if (tb[f] && !tb[f + '_audio']) {
+              const url = await genAudio(tb[f], `${slide.id}_${f}`);
+              if (url) { tb[f + '_audio'] = url; changed = true; }
+            }
+          }
+          // Region narrations
+          if (tb.regions) {
+            for (const reg of tb.regions.filter(r => r.correct)) {
+              for (const p of [
+                { text: 'narration', audio: 'audio_url' },
+                { text: 'test_hint', audio: 'test_audio_url' },
+                { text: 'explore_desc', audio: 'explore_audio_url' },
+              ]) {
+                if (reg[p.text] && !reg[p.audio]) {
+                  const url = await genAudio(reg[p.text], `${slide.id}_${p.text}_${reg.id}`);
+                  if (url) { reg[p.audio] = url; changed = true; }
+                }
+              }
+            }
+          }
+          if (changed) generated++;
+        }
+
+        if (changed) {
+          await db.prepare('UPDATE slide_translations SET content_json=? WHERE id=?').run(JSON.stringify(blocks), trans.id);
+        }
+      }
+    }
+
+    res.json({ ok: true, generated });
+  } catch (e) {
+    console.error('[Training] generate-lang-tts:', e.message);
+    res.status(500).json({ error: e.message });
   }
 });
 
@@ -2143,6 +2440,139 @@ router.post('/ai/analyze-screenshot', upload.single('screenshot'), async (req, r
     res.json(parsed);
   } catch (e) {
     console.error('[Training] AI analyze screenshot:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/training/slides/:sid/generate-narration — AI generates full narration suite
+router.post('/slides/:sid/generate-narration', async (req, res) => {
+  // Phase 1: All DB queries upfront
+  let slideData, checkResult, flashModel, langRegionsData, langImageOverrides;
+  try {
+    const slide = await db.prepare('SELECT lesson_id, content_json FROM course_slides WHERE id=?').get(req.params.sid);
+    if (!slide) return res.status(404).json({ error: '投影片不存在' });
+    const check = await verifyLessonAccess(slide.lesson_id, req.user, true);
+    if (check.error) return res.status(check.status).json({ error: check.error });
+    const flashRow = await db.prepare(
+      `SELECT api_model FROM llm_models WHERE model_role='chat' AND is_active=1 AND provider_type='gemini' ORDER BY sort_order FETCH FIRST 1 ROWS ONLY`
+    ).get();
+    // If lang specified, load independent regions + language image
+    const lang = req.body.lang;
+    if (lang && lang !== 'zh-TW') {
+      const trans = await db.prepare('SELECT regions_json, image_overrides FROM slide_translations WHERE slide_id=? AND lang=?').get(req.params.sid, lang);
+      if (trans?.regions_json) { try { langRegionsData = JSON.parse(trans.regions_json); } catch {} }
+      if (trans?.image_overrides) { try { langImageOverrides = JSON.parse(trans.image_overrides); } catch {} }
+    }
+    slideData = slide;
+    checkResult = check;
+    flashModel = flashRow?.api_model || 'gemini-2.0-flash';
+  } catch (e) {
+    return res.status(500).json({ error: e.message });
+  }
+
+  // Phase 2: Process data + call Gemini
+  try {
+    const { block_index, editor_context, lang } = req.body;
+    const idx = Number(block_index || 0);
+    let blocks;
+    try { blocks = JSON.parse(slideData.content_json || '[]'); } catch { blocks = []; }
+    const block = blocks[idx];
+    if (!block) return res.status(400).json({ error: '找不到指定的 block' });
+
+    // Use independent regions if available for this language
+    const regions = (lang && langRegionsData?.[String(idx)]) || block.regions || [];
+    const correctRegions = regions.filter(r => r.correct);
+    // Use language-specific image if available
+    const langImage = langImageOverrides?.[String(idx)] || null;
+    const regionDesc = correctRegions.map((r, i) =>
+      `步驟${i + 1}: 「${r.label || r.id}」(${r.type || 'element'}) - ${r.feedback || ''}`
+    ).join('\n');
+
+    let imageParts = [];
+    const imageUrl = langImage || block.image;
+    if (imageUrl) {
+      const imgPath = path.join(UPLOAD_ROOT, imageUrl.replace(/^\/api\/training\/files\//, ''));
+      if (fs.existsSync(imgPath)) {
+        const imgBase64 = fs.readFileSync(imgPath).toString('base64');
+        const ext = path.extname(imgPath).toLowerCase();
+        const mimeMap = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.gif': 'image/gif' };
+        imageParts = [{ inlineData: { mimeType: mimeMap[ext] || 'image/png', data: imgBase64 } }];
+      }
+    }
+
+    const langNames = { 'zh-TW': '繁體中文', 'en': 'English', 'vi': 'Tiếng Việt' };
+    const targetLang = lang || 'zh-TW';
+    const targetLangName = langNames[targetLang] || targetLang;
+    const langInstruction = targetLang !== 'zh-TW' ? `\n\n## 重要：請用 ${targetLangName} 生成所有文字內容（narration, test_hint, explore_desc, feedback 等）\n` : '';
+
+    const prompt = `你是教育訓練語音導覽腳本生成專家。請根據以下資訊，生成完整的三種模式語音導覽腳本。${langInstruction}
+
+## 畫面操作指引
+${block.instruction || '（無）'}
+
+## 操作步驟（共 ${correctRegions.length} 步）
+${regionDesc || '（無步驟資訊）'}
+
+## 編輯者補充說明
+${editor_context || '（無）'}
+
+## 請生成以下內容（全部口語化，適合 TTS 朗讀，自然親切）
+
+### 1. 三種模式的前導語音
+- **slide_narration**（🎯 導引模式）：完整介紹畫面功能、操作目的、步驟概述。融入編輯者補充說明。2-4 句。
+- **slide_narration_test**（📝 測驗模式）：簡短告知要完成什麼任務，不劇透步驟細節。1-2 句，帶鼓勵語氣。
+- **slide_narration_explore**（🔍 探索模式）：引導自由探索，提示畫面上有哪些元素可以點擊了解。1-2 句。
+
+### 2. 每個步驟的語音（按 regions 順序）
+每個步驟需要：
+- **narration**：導引模式 — 告訴學員具體操作位置和方法，像老師在旁邊指導。1-2 句。
+- **test_hint**：測驗模式 — 不直接告訴位置，給方向性提示，帶鼓勵語氣。1 句。
+- **explore_desc**：探索模式 — 說明這個元素的功能和用途，像導覽員介紹。1-2 句。
+- **feedback_correct**：點對時的鼓勵回饋。短句，有變化不重複。
+- **feedback_wrong**：點錯時的友善引導回饋。短句。
+
+### 3. 完成訊息
+- **completion_message**：全部完成時的恭喜訊息。1 句。
+
+只回傳 JSON，不要 markdown code fence：
+{
+  "slide_narration": "歡迎來到...",
+  "slide_narration_test": "接下來請...",
+  "slide_narration_explore": "這是...",
+  "regions": [
+    {
+      "id": "步驟對應的 region id",
+      "narration": "請在...",
+      "test_hint": "提示：...",
+      "explore_desc": "這個是...",
+      "feedback_correct": "太棒了！...",
+      "feedback_wrong": "不太對，..."
+    }
+  ],
+  "completion_message": "恭喜！你已經..."
+}`;
+
+    const { GoogleGenerativeAI } = require('@google/generative-ai');
+    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+    const model = genAI.getGenerativeModel({ model: flashModel });
+
+    const result = await model.generateContent({
+      contents: [{ role: 'user', parts: [...imageParts, { text: prompt }] }],
+      generationConfig: { responseMimeType: 'application/json' }
+    });
+    const text = result.response.text();
+
+    let parsed;
+    try {
+      const jsonMatch = text.match(/\{[\s\S]*\}/);
+      parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : JSON.parse(text);
+    } catch {
+      return res.status(500).json({ error: 'AI 回覆格式錯誤', raw: text.slice(0, 500) });
+    }
+
+    res.json(parsed);
+  } catch (e) {
+    console.error('[Training] Generate narration:', e.message);
     res.status(500).json({ error: e.message });
   }
 });
@@ -2709,9 +3139,9 @@ router.post('/recording/:sessionId/generate', async (req, res) => {
         }
       } catch {}
 
-      // For old data without raw: detect if annotations are burned into image
+      // Always keep annotations data — editor will decide how to display
       const hasRaw = !!step.screenshot_raw_url;
-      const slideAnnotations = (hasRaw || !userAnnotations.length) ? userAnnotations.filter(a => a.visible !== false) : [];
+      const slideAnnotations = userAnnotations.filter(a => a.visible !== false);
 
       const blocks = [];
 
@@ -2885,13 +3315,9 @@ router.post('/courses/:id/export', loadCoursePermission, requirePermission('owne
             };
 
           for (const block of blocks) {
-            // Safety: if annotations are burned into the image, clear SVG annotations to prevent doubles.
-            // Detection: annotations_in_image flag, OR image URL doesn't contain "_raw" while annotations exist
-            if (block.annotations_in_image ||
-                (block.annotations?.length > 0 && (block.image || block.src) &&
-                 !(block.image || block.src || '').includes('_raw'))) {
-              block.annotations = [];
-            }
+            // Note: annotations are now always kept as SVG overlay data.
+            // Only skip rendering in HTML if annotations are visually burned into the image
+            // AND there's no separate annotation data (legacy edge case).
             const imgFields = ['image', 'src'];
             const sizeOf = require('image-size');
             for (const field of imgFields) {
@@ -3585,6 +4011,79 @@ router.put('/slides/:sid/region-overrides', async (req, res) => {
     } else {
       await db.prepare('INSERT INTO slide_translations (slide_id, lang, image_overrides) VALUES (?,?,?)').run(req.params.sid, lang, overridesJson);
     }
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Phase 3B: Language-independent Regions
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// GET /api/training/slides/:sid/lang-regions — get all language-specific regions
+router.get('/slides/:sid/lang-regions', async (req, res) => {
+  try {
+    const rows = await db.prepare(
+      'SELECT lang, regions_json FROM slide_translations WHERE slide_id=? AND regions_json IS NOT NULL'
+    ).all(req.params.sid);
+    const result = {};
+    rows.forEach(r => { try { result[r.lang] = JSON.parse(r.regions_json); } catch {} });
+    res.json(result);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// PUT /api/training/slides/:sid/lang-regions — save language-specific independent regions
+router.put('/slides/:sid/lang-regions', async (req, res) => {
+  try {
+    const { lang, block_index, regions, _intro } = req.body;
+    if (!lang) return res.status(400).json({ error: 'lang is required' });
+
+    const slide = await db.prepare('SELECT lesson_id FROM course_slides WHERE id=?').get(req.params.sid);
+    if (!slide) return res.status(404).json({ error: '投影片不存在' });
+
+    const check = await verifyLessonAccess(slide.lesson_id, req.user, true);
+    if (check.error) return res.status(check.status).json({ error: check.error });
+
+    const idx = String(block_index || 0);
+    const existing = await db.prepare(
+      'SELECT id, regions_json FROM slide_translations WHERE slide_id=? AND lang=?'
+    ).get(req.params.sid, lang);
+
+    let regionsMap = {};
+    if (existing?.regions_json) { try { regionsMap = JSON.parse(existing.regions_json); } catch {} }
+    if (regions) regionsMap[idx] = regions;
+    if (_intro) regionsMap._intro = _intro;
+    const regionsStr = JSON.stringify(regionsMap);
+
+    if (existing) {
+      await db.prepare('UPDATE slide_translations SET regions_json=? WHERE id=?').run(regionsStr, existing.id);
+    } else {
+      await db.prepare('INSERT INTO slide_translations (slide_id, lang, regions_json) VALUES (?,?,?)').run(req.params.sid, lang, regionsStr);
+    }
+    res.json({ ok: true, regions_json: regionsMap });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// DELETE /api/training/slides/:sid/lang-regions — remove language-specific regions (revert to inherit)
+router.delete('/slides/:sid/lang-regions', async (req, res) => {
+  try {
+    const { lang, block_index } = req.body;
+    if (!lang) return res.status(400).json({ error: 'lang is required' });
+
+    const existing = await db.prepare(
+      'SELECT id, regions_json FROM slide_translations WHERE slide_id=? AND lang=?'
+    ).get(req.params.sid, lang);
+    if (!existing) return res.json({ ok: true });
+
+    let regionsMap = {};
+    if (existing.regions_json) { try { regionsMap = JSON.parse(existing.regions_json); } catch {} }
+    if (block_index !== undefined) {
+      delete regionsMap[String(block_index)];
+    } else {
+      regionsMap = {}; // clear all
+    }
+
+    const val = Object.keys(regionsMap).length > 0 ? JSON.stringify(regionsMap) : null;
+    await db.prepare('UPDATE slide_translations SET regions_json=? WHERE id=?').run(val, existing.id);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
