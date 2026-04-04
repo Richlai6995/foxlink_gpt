@@ -2242,9 +2242,19 @@ router.post('/courses/:id/generate-lang-tts', loadCoursePermission, requirePermi
     for (const lesson of lessons) {
       const slides = await db.prepare('SELECT id FROM course_slides WHERE lesson_id=? ORDER BY sort_order').all(lesson.id);
       for (const slide of slides) {
-        const trans = await db.prepare('SELECT id, content_json FROM slide_translations WHERE slide_id=? AND lang=?').get(slide.id, target_lang);
-        if (!trans?.content_json) continue;
+        const trans = await db.prepare('SELECT id, content_json, notes, audio_url FROM slide_translations WHERE slide_id=? AND lang=?').get(slide.id, target_lang);
+        if (!trans) continue;
 
+        // Slide-level audio (AudioPanel TTS from translated notes)
+        if (trans.notes) {
+          const url = await genAudio(trans.notes, `slide_${slide.id}_notes`);
+          if (url) {
+            await db.prepare('UPDATE slide_translations SET audio_url=? WHERE id=?').run(url, trans.id);
+            generated++;
+          }
+        }
+
+        if (!trans.content_json) continue;
         let blocks;
         try { blocks = JSON.parse(trans.content_json); } catch { continue; }
         let changed = false;
