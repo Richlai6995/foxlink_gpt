@@ -1,7 +1,7 @@
 # FOXLINK GPT 教育訓練平台 — 實作完成報告
 
-> 日期：2026-04-02（Phase 1-2F）、2026-04-03（Phase 3A）、2026-04-04（Phase 3B）
-> 狀態：Phase 1 + Phase 2A-F + Phase 3A + Phase 3B 實作完成
+> 日期：2026-04-02（Phase 1-2F）、2026-04-03（Phase 3A）、2026-04-04（Phase 3B + i18n）
+> 狀態：Phase 1 + Phase 2A-F + Phase 3A + Phase 3B 實作完成（Phase 3C 規劃中）
 > 設計文件：[training-platform-design.md](training-platform-design.md)
 
 ---
@@ -1850,27 +1850,186 @@ Step 5: 發送
 
 ---
 
-## 13. 後續開發（Phase 3C+）
+### Phase 3B-6 — i18n 教育訓練模組多語化 ✅
 
-以下功能已在設計文件中規劃，尚未實作：
+| 項目 | 狀態 | 說明 |
+|------|------|------|
+| 翻譯 key 建立 | ✅ 完成 | `training` namespace 100+ 個 key（zh-TW/en/vi） |
+| Player 端 i18n | ✅ 完成 | HotspotBlock(29) + CoursePlayer(14) + CourseDetail(12) + SlideRenderer(5) |
+| 互動 Block i18n | ✅ 完成 | DragDrop(5) + Branch(1) + QuizInline(6) |
+| 管理端 i18n | ✅ 完成 | CourseList(18) + CategoryManager(8) |
 
-| Phase | 功能 | 說明 |
-|-------|------|------|
-| **3C** | **成績追蹤 + 互動分析** | **每步嘗試次數/用時/正確率寫入 DB + 管理員報表 + 學習者熱力圖** |
-| 3C | 互動成績與測驗整合 | 互動操作分數納入 Phase 1E 測驗成績體系 |
-| 3D | 影片 AI 拆幀 | ffmpeg + Gemini 混合拆幀→自動生成投影片 |
-| 3D | 桌面截圖代理 | Electron F9 全局快捷鍵，截 Java Forms 等非瀏覽器系統 |
-| 3D | 進階標註 | 畫筆平滑化 Bezier、標註模板、語音搭配標註同步播放 |
-| 3 | 定期複訓 | 自動建立下一期培訓專案 |
-| 3 | iframe 導引模擬 | 嵌入真實系統 + 高亮 + 操作監聽 |
-| 3 | 教材分析儀表板 | 停留時間、中斷點、題目難度分析 |
-| 3 | 教材版本控制 | v1→v2 + 已完成學員升級提示 |
-| 3 | PPT 匯入 | .pptx → 自動轉換為投影片 |
-| 3 | 差異更新 | 系統升版 → AI 比對 → 只重做變更步驟 |
-| 3 | 操作回放驗證 | Playwright 重播驗證教材有效性 |
-| 3 | 證書 PDF | pdfkit 生成完課證書 |
-| 4 | Playwright 全自動 | AI 根據腳本自動操作，人只需審核 |
-| 4 | Extension 離線模式 | IndexedDB 快取 → 批次上傳 |
-| 4 | 討論區 / 徽章 / 排行榜 | 社群功能 |
-| 4 | 微學習模式 | 5 分鐘短課程 |
-| 4 | 離線模式 | PWA 快取 |
+### Phase 3B-7 — 編輯器 UX 改善 ✅
+
+| 項目 | 狀態 | 說明 |
+|------|------|------|
+| AudioPanel 旁白框加大 | ✅ 完成 | rows 3→6 + 可拖拉 resize |
+| SlideEditor 投影片切換 | ✅ 完成 | header ◀ 1/5 ▶ 導航，不用跳出 |
+| 投影片名稱自動顯示 | ✅ 完成 | 優先顯示 instruction 內容摘要 |
+| 外語 regions 拖拉修復 | ✅ 完成 | 繼承模式拖拉自動升級為獨立 regions |
+| Modal region 定位修復 | ✅ 完成 | 兩層 div 結構，百分比座標精確對齊 Player |
+
+---
+
+## 13. Phase 3C — 評分紀錄系統 + 課程上架（規劃中）
+
+> 狀態：規劃完成，待實作
+
+### 3C-1：互動操作紀錄（action_log）
+
+**目的**：記錄學員在 Hotspot 互動中的每步操作，供評分和分析使用。
+
+**資料結構**（參考設計文件 §10.3）：
+
+```js
+// 每次操作記錄
+{
+  timestamp: 1712345678000,
+  step: 0,                    // 當前步驟 index
+  region_id: 'r1',            // 點擊的 region
+  correct: true,              // 是否正確
+  click_coords: { x: 45.2, y: 32.1 },  // 點擊百分比座標
+  attempt_number: 1           // 該步第幾次嘗試
+}
+```
+
+**彙總指標**：
+```js
+{
+  total_time_seconds: 25,
+  steps_completed: 4,
+  total_steps: 4,
+  wrong_clicks: 2,
+  action_log: [...]
+}
+```
+
+**API**：
+```
+POST /training/slides/:sid/interaction-result
+Body: { user_id, slide_id, player_mode, action_log, total_time, score_breakdown }
+```
+
+**DB Schema**：
+```sql
+CREATE TABLE interaction_results (
+  id                NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  user_id           NUMBER NOT NULL,
+  slide_id          NUMBER NOT NULL,
+  course_id         NUMBER NOT NULL,
+  player_mode       VARCHAR2(10),     -- learn | test
+  action_log        CLOB,             -- JSON array
+  total_time_seconds NUMBER,
+  steps_completed   NUMBER,
+  total_steps       NUMBER,
+  wrong_clicks      NUMBER,
+  score             NUMBER,
+  max_score         NUMBER,
+  score_breakdown   CLOB,             -- JSON: per-dimension scores
+  created_at        TIMESTAMP DEFAULT SYSTIMESTAMP
+);
+```
+
+### 3C-2：Rubric 評分引擎
+
+**評分模式**（參考設計文件 §10.2）：
+
+**單步操作**：
+| 維度 | 權重 | 計算方式 |
+|------|------|---------|
+| 正確性 | 70% | 正確 region = 滿分，鄰近 = 3/7，錯誤 = 0 |
+| 嘗試次數 | 30% | 第 1 次 = 滿分，第 2 次 = 2/3，第 3 次+ = 1/3 |
+
+**多步驟操作**（如 Hotspot 導引 4 步）：
+| 維度 | 分數 | 計算方式 |
+|------|------|---------|
+| 步驟正確性 | 每步 2 分 | 正確步驟數 × 分值 |
+| 步驟順序 | 5 分 | 全部正序 = 5，錯 1 步 = 3，錯 2+ = 0 |
+| 效率 | 3 分 | 0 次錯誤 = 3，1-2 次 = 2，3-5 次 = 1，5+ = 0 |
+| 時間 | 2 分 | <30 秒 = 2，30-60 秒 = 1，>60 秒 = 0 |
+
+**實作位置**：`server/services/interactionScorer.js`
+
+### 3C-3：課程上架系統
+
+**課程生命週期**：
+```
+draft（草稿）→ published（已發佈）→ archived（已封存）
+         ↑                          ↓
+         └──────── unpublish ←──────┘
+```
+
+**發佈前檢查**（`POST /courses/:id/publish`）：
+- 至少有 1 個章節
+- 至少有 1 張投影片
+- 每張 Hotspot 投影片至少有 1 個 correct region
+- （選配）是否有語音導覽
+
+**API**：
+```
+POST /training/courses/:id/publish    → status = 'published'
+POST /training/courses/:id/unpublish  → status = 'draft'
+POST /training/courses/:id/archive    → status = 'archived'
+```
+
+**權限**：owner + admin 可發佈/封存
+
+**發佈通知**：發佈時通知被分享的使用者（`training_notifications` type='course_published'）
+
+**CourseEditor UI**：header 加「🚀 發佈」按鈕 + 發佈前 checklist 彈窗
+
+### 3C-4：管理員成績報表
+
+**報表維度**：
+| 維度 | 內容 |
+|------|------|
+| 課程 | 互動完成率、平均嘗試次數、平均用時、平均分數 |
+| 使用者 | per-user 每張投影片的操作結果明細 |
+| 投影片 | 哪張最多人出錯、平均嘗試次數 |
+
+**API**：
+```
+GET /training/courses/:id/interaction-report
+GET /training/courses/:id/interaction-report/:userId
+```
+
+---
+
+## 14. Phase 3D — 分析與進階功能（規劃中）
+
+| 功能 | 說明 |
+|------|------|
+| 學習者操作熱力圖 | 彙總點擊座標 → 截圖上渲染熱力圖 → 找出易犯錯區域 |
+| 教材分析儀表板 | 停留時間、中斷率、題目難度曲線 |
+| 證書 PDF 產出 | pdfkit 生成含姓名、課程、分數、日期的完課證書 |
+| 專案報表匯出 Excel | 培訓專案完成率、各部門進度、逾期統計 |
+
+---
+
+## 15. Phase 3E — 教材工具（規劃中）
+
+| 功能 | 說明 |
+|------|------|
+| 影片 AI 拆幀 | ffmpeg + Gemini 混合拆幀→自動生成投影片 |
+| 桌面截圖代理 | Electron F9 全局快捷鍵，截 Java Forms 等非瀏覽器系統 |
+| PPT 匯入 | .pptx → 自動轉換為投影片 |
+| 教材版本控制 | v1→v2 + 已完成學員可選擇升級 |
+| 差異更新 | 系統升版 → AI 比對新舊截圖 → 只重做有變更步驟 |
+| 教材模板庫 | 跨課程複用模板 |
+| 進階標註 | 畫筆平滑化 Bezier、標註模板、語音搭配標註同步播放 |
+
+---
+
+## 16. Phase 4 — 進階差異化功能（遠期規劃）
+
+| 功能 | 說明 |
+|------|------|
+| Playwright 全自動 | AI 根據腳本自動操作 → 人只需審核 |
+| Extension 離線模式 | IndexedDB 快取 → 批次上傳 |
+| 操作回放驗證 | Playwright 重播 → 驗證教材是否仍有效 |
+| iframe 導引模擬 | 嵌入真實系統 + 高亮 + 操作監聽 |
+| 定期複訓 | 自動建立下一期培訓專案 |
+| 討論區 / 徽章 / 排行榜 | 社群功能 |
+| 微學習模式 | 5 分鐘短課程 |
+| 離線模式 | PWA 快取 |
+| SCORM 匯出 | SCORM 1.2/2004 標準匯出 |

@@ -135,8 +135,8 @@ export default function AudioPanel({ slideId, courseId, audioUrl, notes, onAudio
         <textarea
           value={notes}
           onChange={e => onNotesChange(e.target.value)}
-          rows={3}
-          className="w-full bg-slate-800 border border-slate-700 rounded text-xs px-2 py-1.5 pr-8 resize-none focus:outline-none focus:border-sky-500"
+          rows={6}
+          className="w-full bg-slate-800 border border-slate-700 rounded text-xs px-2 py-1.5 pr-8 resize-y focus:outline-none focus:border-sky-500"
           placeholder="輸入旁白文字（可用語音輸入或 TTS 生成語音）..."
         />
         <button

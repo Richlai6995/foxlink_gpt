@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { ArrowLeft, Save, Plus, Trash2, ChevronUp, ChevronDown, Image, Type, MousePointer, GripVertical, Move, RotateCcw, Eye, Layers, Wand2, Loader2 } from 'lucide-react'
+import { ArrowLeft, Save, Plus, Trash2, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Image, Type, MousePointer, GripVertical, Move, RotateCcw, Eye, Layers, Wand2, Loader2 } from 'lucide-react'
 import api from '../../../lib/api'
 import SlideTemplates, { type SlideTemplate } from './SlideTemplates'
 import TextBlockEditor from './blocks/TextBlockEditor'
@@ -19,9 +19,18 @@ export interface Block {
   [key: string]: any
 }
 
+interface Slide {
+  id: number
+  slide_type?: string
+  content_json?: string
+  [key: string]: any
+}
+
 interface Props {
   slideId: number
   courseId: number
+  slideList?: Slide[]
+  onSlideChange?: (slideId: number) => void
   onClose: () => void
   onSaved?: () => void
 }
@@ -39,7 +48,21 @@ const BLOCK_TYPES = [
   { type: 'quiz_inline', label: '內嵌測驗', icon: Type, color: 'text-blue-400' },
 ]
 
-export default function SlideEditor({ slideId, courseId, onClose, onSaved }: Props) {
+export default function SlideEditor({ slideId, courseId, slideList = [], onSlideChange, onClose, onSaved }: Props) {
+  const currentSlideIdx = slideList.findIndex(s => s.id === slideId)
+  const canGoPrev = currentSlideIdx > 0
+  const canGoNext = currentSlideIdx < slideList.length - 1 && currentSlideIdx >= 0
+
+  const getSlideLabel = (s: Slide, idx: number) => {
+    try {
+      const blocks = JSON.parse(s.content_json || '[]')
+      const first = blocks[0]
+      if (first?.instruction) return first.instruction.slice(0, 30)
+      if (first?.content) return first.content.slice(0, 30)
+      if (first?.text) return first.text.slice(0, 30)
+    } catch {}
+    return `投影片 ${idx + 1}`
+  }
   const [blocks, setBlocks] = useState<Block[]>([])
   const [notes, setNotes] = useState('')
   const [slideType, setSlideType] = useState('content')
@@ -134,7 +157,31 @@ export default function SlideEditor({ slideId, courseId, onClose, onSaved }: Pro
         <button onClick={onClose} style={{ color: 'var(--t-text-muted)' }} className="hover:opacity-80">
           <ArrowLeft size={18} />
         </button>
-        <span className="text-sm font-medium">投影片編輯</span>
+
+        {/* Slide navigation */}
+        {slideList.length > 1 && onSlideChange && (
+          <div className="flex items-center gap-1">
+            <button onClick={() => canGoPrev && onSlideChange(slideList[currentSlideIdx - 1].id)}
+              disabled={!canGoPrev}
+              className="w-6 h-6 rounded flex items-center justify-center transition disabled:opacity-20 hover:bg-white/10"
+              style={{ color: 'var(--t-text-muted)' }}>
+              <ChevronLeft size={16} />
+            </button>
+            <span className="text-[10px] px-1" style={{ color: 'var(--t-text-dim)' }}>
+              {currentSlideIdx + 1}/{slideList.length}
+            </span>
+            <button onClick={() => canGoNext && onSlideChange(slideList[currentSlideIdx + 1].id)}
+              disabled={!canGoNext}
+              className="w-6 h-6 rounded flex items-center justify-center transition disabled:opacity-20 hover:bg-white/10"
+              style={{ color: 'var(--t-text-muted)' }}>
+              <ChevronRight size={16} />
+            </button>
+          </div>
+        )}
+
+        <span className="text-sm font-medium truncate max-w-[200px]">
+          {currentSlideIdx >= 0 ? getSlideLabel(slideList[currentSlideIdx], currentSlideIdx) : '投影片編輯'}
+        </span>
         <span className="text-[9px] px-1.5 py-0.5 rounded font-medium" style={{ backgroundColor: 'var(--t-accent-subtle)', color: 'var(--t-accent)' }}>{slideType}</span>
         <div className="flex-1" />
 

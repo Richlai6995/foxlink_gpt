@@ -265,7 +265,12 @@ export default function LanguageImagePanel({ slideId, blockIndex, currentImage, 
       return
     }
 
-    if (!dragging.id || !hasIndependentRegions) return
+    if (!dragging.id) return
+
+    // Auto-promote to independent regions if still inheriting
+    if (!hasIndependentRegions) {
+      createIndependentRegions()
+    }
 
     if (dragging.mode === 'move') {
       updateLangRegion(dragging.id, {
@@ -287,7 +292,8 @@ export default function LanguageImagePanel({ slideId, blockIndex, currentImage, 
       const pt = toPct(e)
       const x1 = Math.min(dragging.startX, pt.x), y1 = Math.min(dragging.startY, pt.y)
       const w = Math.abs(pt.x - dragging.startX), h = Math.abs(pt.y - dragging.startY)
-      if (w > 1.5 && h > 1.5 && hasIndependentRegions) {
+      if (w > 1.5 && h > 1.5) {
+        if (!hasIndependentRegions) createIndependentRegions()
         const newRegion: Region = {
           id: `r${Date.now()}`,
           shape: 'rect',
@@ -638,13 +644,14 @@ export default function LanguageImagePanel({ slideId, blockIndex, currentImage, 
 
             <div className="flex gap-3" style={{ maxHeight: '85vh' }}>
               {/* Image + draggable regions */}
-              <div className="flex-1 relative overflow-auto rounded-lg"
-                style={{ cursor: modalMode === 'draw' && hasIndependentRegions ? 'crosshair' : (dragging ? 'grabbing' : 'default') }}
-                onMouseDown={handleModalMouseDown}
-                onMouseMove={onModalMove}
-                onMouseUp={onModalUp}
-                onMouseLeave={() => { setDragging(null); setDrawPreview(null) }}>
-                <img ref={modalImgRef} src={langImage || currentImage} alt="" className="w-full" draggable={false} />
+              <div className="flex-1 overflow-auto rounded-lg">
+                <div className="relative w-full"
+                  style={{ cursor: modalMode === 'draw' && hasIndependentRegions ? 'crosshair' : (dragging ? 'grabbing' : 'default') }}
+                  onMouseDown={handleModalMouseDown}
+                  onMouseMove={onModalMove}
+                  onMouseUp={onModalUp}
+                  onMouseLeave={() => { setDragging(null); setDrawPreview(null) }}>
+                <img ref={modalImgRef} src={langImage || currentImage} alt="" className="w-full block" draggable={false} />
 
                 {modalRegions.map(r => {
                   const isActive = dragging?.id === r.id
@@ -676,7 +683,7 @@ export default function LanguageImagePanel({ slideId, blockIndex, currentImage, 
                         <div
                           className="absolute -bottom-1.5 -right-1.5 w-3.5 h-3.5 rounded-sm"
                           style={{ backgroundColor: isSelected ? '#38bdf8' : '#22c55e', cursor: 'nwse-resize', border: '1px solid white' }}
-                          onMouseDown={e => startRegionDrag(e, r, 'resize')}
+                          onMouseDown={e => { e.stopPropagation(); startRegionDrag(e, r, 'resize') }}
                           title="拖拉調整大小"
                         />
                       )}
@@ -689,7 +696,8 @@ export default function LanguageImagePanel({ slideId, blockIndex, currentImage, 
                   <div className="absolute border-2 border-dashed border-sky-400 bg-sky-400/10 rounded pointer-events-none"
                     style={{ left: `${drawPreview.x}%`, top: `${drawPreview.y}%`, width: `${drawPreview.w}%`, height: `${drawPreview.h}%` }} />
                 )}
-              </div>
+                </div>{/* close relative wrapper */}
+              </div>{/* close overflow container */}
 
               {/* Right panel: region properties (only for independent) */}
               {hasIndependentRegions && (

@@ -428,7 +428,8 @@ export default function CourseEditor() {
                           {(() => {
                             try {
                               const blocks = JSON.parse(slide.content_json || '[]')
-                              return blocks[0]?.content?.slice(0, 50) || blocks[0]?.text?.slice(0, 50) || '(空投影片)'
+                              const b = blocks[0]
+                              return b?.instruction?.slice(0, 50) || b?.content?.slice(0, 50) || b?.text?.slice(0, 50) || '(空投影片)'
                             } catch { return '(空投影片)' }
                           })()}
                         </span>
@@ -750,6 +751,8 @@ export default function CourseEditor() {
         <SlideEditor
           slideId={editingSlideId}
           courseId={Number(id)}
+          slideList={expandedLesson ? (lessonSlides[expandedLesson] || []) : []}
+          onSlideChange={(sid) => setEditingSlideId(sid)}
           onClose={() => setEditingSlideId(null)}
           onSaved={() => {
             if (expandedLesson) {
