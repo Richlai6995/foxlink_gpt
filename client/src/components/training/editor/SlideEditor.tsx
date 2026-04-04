@@ -273,15 +273,17 @@ export default function SlideEditor({ slideId, courseId, slideList = [], onSlide
             </div>
           )}
 
-          {/* Audio Panel (bottom) */}
-          <AudioPanel
-            slideId={slideId}
-            courseId={courseId}
-            audioUrl={audioUrl}
-            notes={notes}
-            onAudioChange={setAudioUrl}
-            onNotesChange={setNotes}
-          />
+          {/* Audio Panel (bottom) — hidden for hotspot slides (voice managed by HotspotEditor) */}
+          {!blocks.some(b => b.type === 'hotspot') && (
+            <AudioPanel
+              slideId={slideId}
+              courseId={courseId}
+              audioUrl={audioUrl}
+              notes={notes}
+              onAudioChange={setAudioUrl}
+              onNotesChange={setNotes}
+            />
+          )}
         </div>
 
         {/* Block Editor (right) */}

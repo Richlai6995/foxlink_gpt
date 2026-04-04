@@ -5,6 +5,7 @@ import type { Block } from '../SlideEditor'
 import LanguageImagePanel from './LanguageImagePanel'
 import AnnotationEditor from './AnnotationEditor'
 import AnnotationOverlay from '../../blocks/AnnotationOverlay'
+import VoiceInput from './VoiceInput'
 
 interface Region {
   id: string
@@ -700,34 +701,20 @@ export default function HotspotEditor({ block, onChange, courseId, slideId, bloc
             <div className="rounded p-2 space-y-1.5" style={{ backgroundColor: 'var(--t-bg-card)', border: '1px solid var(--t-border)' }}>
               <label className="text-[10px] font-medium block" style={{ color: 'var(--t-text-secondary)' }}>📢 前導語音</label>
               {[
-                { key: 'slide_narration', audioKey: 'slide_narration_audio', icon: '🎯', label: '導引', color: 'var(--t-accent)', bg: 'var(--t-accent-subtle)', ttsId: 'intro_guided' },
-                { key: 'slide_narration_test', audioKey: 'slide_narration_test_audio', icon: '📝', label: '測驗', color: '#f59e0b', bg: 'rgba(245,158,11,0.12)', ttsId: 'intro_test' },
-                { key: 'slide_narration_explore', audioKey: 'slide_narration_explore_audio', icon: '🔍', label: '探索', color: '#a855f7', bg: 'rgba(168,85,247,0.12)', ttsId: 'intro_explore' },
+                { key: 'slide_narration', audioKey: 'slide_narration_audio', icon: '🎯', label: '導引', color: 'var(--t-accent)', ttsId: 'intro_guided' },
+                { key: 'slide_narration_test', audioKey: 'slide_narration_test_audio', icon: '📝', label: '測驗', color: '#f59e0b', ttsId: 'intro_test' },
+                { key: 'slide_narration_explore', audioKey: 'slide_narration_explore_audio', icon: '🔍', label: '探索', color: '#a855f7', ttsId: 'intro_explore' },
               ].map(m => (
                 <div key={m.key}>
                   <label className="text-[9px]" style={{ color: m.color }}>{m.icon} {m.label}模式</label>
-                  <div className="flex gap-1">
-                    <textarea value={block[m.key] || ''} onChange={e => onChange({ ...block, [m.key]: e.target.value })}
-                      rows={1} className="flex-1 border rounded text-[10px] px-2 py-0.5 resize-none focus:outline-none"
-                      style={{ backgroundColor: 'var(--t-bg-input)', borderColor: 'var(--t-border)', color: 'var(--t-text)' }} />
-                    {block[m.key] && slideId && (
-                      <button onClick={async () => {
-                        try {
-                          setTtsLoading(m.ttsId)
-                          const res = await api.post(`/training/slides/${slideId}/region-tts`, {
-                            block_index: blockIdx ?? 0, region_id: m.ttsId, text: block[m.key]
-                          })
-                          onChange({ ...block, [m.audioKey]: res.data.audio_url })
-                        } catch (e: any) { alert(e.response?.data?.error || 'TTS 失敗') }
-                        finally { setTtsLoading(null) }
-                      }} disabled={ttsLoading === m.ttsId}
-                        className="shrink-0 px-1.5 py-0.5 rounded text-[9px] transition disabled:opacity-50"
-                        style={{ backgroundColor: m.bg, color: m.color }}>
-                        {ttsLoading === m.ttsId ? <Loader2 size={9} className="animate-spin" /> : '🔊'}
-                      </button>
-                    )}
-                  </div>
-                  {block[m.audioKey] && <audio src={block[m.audioKey]} controls className="w-full h-6 mt-0.5" style={{ maxHeight: '24px' }} />}
+                  <textarea value={block[m.key] || ''} onChange={e => onChange({ ...block, [m.key]: e.target.value })}
+                    rows={1} className="w-full border rounded text-[10px] px-2 py-0.5 resize-none focus:outline-none"
+                    style={{ backgroundColor: 'var(--t-bg-input)', borderColor: 'var(--t-border)', color: 'var(--t-text)' }} />
+                  {slideId && (
+                    <VoiceInput text={block[m.key] || ''} audioUrl={block[m.audioKey] || null}
+                      slideId={slideId} regionId={m.ttsId}
+                      onAudioChange={(url: string | null) => onChange({ ...block, [m.audioKey]: url })} />
+                  )}
                 </div>
               ))}
             </div>
@@ -753,60 +740,23 @@ export default function HotspotEditor({ block, onChange, courseId, slideId, bloc
                     style={{ backgroundColor: 'var(--t-accent)', color: 'white' }}>{idx + 1}</span>
                   {r.label || r.id}
                 </div>
-                <div>
-                  <label className="text-[9px]" style={{ color: 'var(--t-text-dim)' }}>📖 學習導引</label>
-                  <div className="flex gap-1">
-                    <input value={(r as any).narration || ''}
-                      onChange={e => updateRegion(r.id, { narration: e.target.value } as any)}
-                      className="flex-1 border rounded px-2 py-0.5 text-[10px] focus:outline-none"
-                      style={{ backgroundColor: 'var(--t-bg-input)', borderColor: 'var(--t-border)', color: 'var(--t-text)' }}
-                      placeholder="學習模式語音導引..." />
-                    {(r as any).narration && (
-                      <button onClick={async () => {
-                        try {
-                          setTtsLoading(r.id)
-                          const res = await api.post(`/training/slides/${slideId}/region-tts`, { block_index: blockIdx ?? 0, region_id: r.id, text: (r as any).narration })
-                          updateRegion(r.id, { audio_url: res.data.audio_url } as any)
-                        } catch (e: any) { alert(e.response?.data?.error || 'TTS 失敗') }
-                        finally { setTtsLoading(null) }
-                      }} disabled={ttsLoading === r.id}
-                        className="shrink-0 px-1.5 py-0.5 rounded text-[9px] transition disabled:opacity-50"
-                        style={{ backgroundColor: 'var(--t-accent-subtle)', color: 'var(--t-accent)' }}>
-                        {ttsLoading === r.id ? <Loader2 size={9} className="animate-spin" /> : '🔊'}
-                      </button>
-                    )}
-                  </div>
-                  {(r as any).audio_url && <audio src={(r as any).audio_url} controls className="w-full h-6 mt-0.5" style={{ maxHeight: '24px' }} />}
-                </div>
                 {[
-                  { field: 'test_hint', audioField: 'test_audio_url', icon: '📝', label: '測驗提示', ph: '測驗模式鼓勵提示...', bg: 'rgba(245,158,11,0.12)', fg: '#f59e0b' },
-                  { field: 'explore_desc', audioField: 'explore_audio_url', icon: '🔍', label: '探索說明', ph: '探索模式元素說明...', bg: 'rgba(168,85,247,0.12)', fg: '#a855f7' },
+                  { field: 'narration', audioField: 'audio_url', icon: '📖', label: '學習導引', ph: '學習模式語音導引...', ttsPrefix: '' },
+                  { field: 'test_hint', audioField: 'test_audio_url', icon: '📝', label: '測驗提示', ph: '測驗模式鼓勵提示...', ttsPrefix: 'test_hint_' },
+                  { field: 'explore_desc', audioField: 'explore_audio_url', icon: '🔍', label: '探索說明', ph: '探索模式元素說明...', ttsPrefix: 'explore_desc_' },
                 ].map(m => (
                   <div key={m.field}>
-                    <label className="text-[9px]" style={{ color: m.fg }}>{m.icon} {m.label}</label>
-                    <div className="flex gap-1">
-                      <input value={(r as any)[m.field] || ''}
-                        onChange={e => updateRegion(r.id, { [m.field]: e.target.value } as any)}
-                        className="flex-1 border rounded px-2 py-0.5 text-[10px] focus:outline-none"
-                        style={{ backgroundColor: 'var(--t-bg-input)', borderColor: 'var(--t-border)', color: 'var(--t-text)' }}
-                        placeholder={m.ph} />
-                      {(r as any)[m.field] && (
-                        <button onClick={async () => {
-                          const ttsId = `${m.field}_${r.id}`
-                          try {
-                            setTtsLoading(ttsId)
-                            const res = await api.post(`/training/slides/${slideId}/region-tts`, { block_index: blockIdx ?? 0, region_id: ttsId, text: (r as any)[m.field] })
-                            updateRegion(r.id, { [m.audioField]: res.data.audio_url } as any)
-                          } catch (e: any) { alert(e.response?.data?.error || 'TTS 失敗') }
-                          finally { setTtsLoading(null) }
-                        }} disabled={ttsLoading === `${m.field}_${r.id}`}
-                          className="shrink-0 px-1.5 py-0.5 rounded text-[9px] transition disabled:opacity-50"
-                          style={{ backgroundColor: m.bg, color: m.fg }}>
-                          {ttsLoading === `${m.field}_${r.id}` ? <Loader2 size={9} className="animate-spin" /> : '🔊'}
-                        </button>
-                      )}
-                    </div>
-                    {(r as any)[m.audioField] && <audio src={(r as any)[m.audioField]} controls className="w-full h-6 mt-0.5" style={{ maxHeight: '24px' }} />}
+                    <label className="text-[9px]" style={{ color: 'var(--t-text-dim)' }}>{m.icon} {m.label}</label>
+                    <input value={(r as any)[m.field] || ''}
+                      onChange={e => updateRegion(r.id, { [m.field]: e.target.value } as any)}
+                      className="w-full border rounded px-2 py-0.5 text-[10px] focus:outline-none"
+                      style={{ backgroundColor: 'var(--t-bg-input)', borderColor: 'var(--t-border)', color: 'var(--t-text)' }}
+                      placeholder={m.ph} />
+                    {slideId && (
+                      <VoiceInput text={(r as any)[m.field] || ''} audioUrl={(r as any)[m.audioField] || null}
+                        slideId={slideId} regionId={`${m.ttsPrefix}${r.id}`}
+                        onAudioChange={(url: string | null) => updateRegion(r.id, { [m.audioField]: url } as any)} />
+                    )}
                   </div>
                 ))}
               </div>
