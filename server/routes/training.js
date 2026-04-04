@@ -750,6 +750,17 @@ router.get('/lessons/:lid/slides', async (req, res) => {
                   if (idx === '_intro') continue; // handled below
                   const block = blocks[Number(idx)];
                   if (block && Array.isArray(regs)) {
+                    // Merge: if independent region lacks voice fields, fill from translated content_json
+                    const transRegions = block.regions || [];
+                    const voiceFields = ['narration', 'audio_url', 'test_hint', 'test_audio_url', 'explore_desc', 'explore_audio_url', 'feedback'];
+                    for (const reg of regs) {
+                      const transMatch = transRegions.find(tr => tr.id === reg.id);
+                      if (transMatch) {
+                        for (const vf of voiceFields) {
+                          if (!reg[vf] && transMatch[vf]) reg[vf] = transMatch[vf];
+                        }
+                      }
+                    }
                     block.regions = regs;
                     changed = true;
                   }
