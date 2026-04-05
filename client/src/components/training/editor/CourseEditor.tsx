@@ -252,11 +252,16 @@ export default function CourseEditor() {
             <ExportButton courseId={Number(id)} />
           )}
           {!isNew && (
-            <button onClick={() => {
-              const a = document.createElement('a')
-              a.href = `/api/training/courses/${id}/export-package`
-              a.download = `course_${id}_export.zip`
-              a.click()
+            <button onClick={async () => {
+              try {
+                const res = await api.get(`/training/courses/${id}/export-package`, { responseType: 'blob' })
+                const url = URL.createObjectURL(res.data)
+                const a = document.createElement('a')
+                a.href = url
+                a.download = `course_${id}_export.zip`
+                a.click()
+                URL.revokeObjectURL(url)
+              } catch (e) { console.error(e) }
             }}
               className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg border transition hover:opacity-80"
               style={{ borderColor: 'var(--t-border)', color: 'var(--t-text-dim)' }}
