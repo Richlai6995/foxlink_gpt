@@ -4729,6 +4729,16 @@ router.get('/courses/:id/export-package', loadCoursePermission, requirePermissio
     res.setHeader('Content-Disposition', `attachment; filename="course_${courseId}_export.zip"`);
 
     const archive = archiver('zip', { zlib: { level: 5 } });
+    archive.on('error', (err) => {
+      console.error('[Export] Archiver error:', err.message);
+      if (!res.headersSent) res.status(500).json({ error: err.message });
+    });
+    archive.on('warning', (err) => {
+      console.warn('[Export] Archiver warning:', err.message);
+    });
+    archive.on('end', () => {
+      console.log(`[Export] Course ${courseId}: ZIP finalized, ${archive.pointer()} bytes`);
+    });
     archive.pipe(res);
     archive.append(JSON.stringify(manifest, null, 2), { name: 'manifest.json' });
 
@@ -4745,7 +4755,7 @@ router.get('/courses/:id/export-package', loadCoursePermission, requirePermissio
       archive.file(filePath, { name: `files/${ref}` });
       filesFound++;
     }
-    console.log(`[Export] Course ${courseId}: ${fileRefs.size} refs, ${filesFound} files found`);
+    console.log(`[Export] Course ${courseId}: ${fileRefs.size} refs, ${filesFound} files queued`);
 
     await archive.finalize();
   } catch (e) {
