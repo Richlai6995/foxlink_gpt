@@ -14,7 +14,7 @@ router.get('/sections', verifyToken, async (req, res) => {
     // Use COALESCE to fallback to zh-TW when target lang translation is missing
     const rows = await db.prepare(`
       SELECT s.id, s.section_type, s.sort_order, s.icon, s.icon_color,
-             s.last_modified,
+             s.last_modified, s.linked_course_id, s.linked_lesson_id,
              COALESCE(t.title, tzh.title)               AS title,
              COALESCE(t.sidebar_label, tzh.sidebar_label) AS sidebar_label,
              COALESCE(t.blocks_json, tzh.blocks_json)     AS blocks_json,
@@ -33,6 +33,8 @@ router.get('/sections', verifyToken, async (req, res) => {
       icon: r.icon,
       iconColor: r.icon_color,
       lastModified: r.last_modified,
+      linkedCourseId: r.linked_course_id || null,
+      linkedLessonId: r.linked_lesson_id || null,
       title: r.title || '',
       sidebarLabel: r.sidebar_label || '',
       blocks: r.blocks_json ? JSON.parse(r.blocks_json) : [],
@@ -55,7 +57,8 @@ router.get('/admin/status', verifyToken, verifyAdmin, async (req, res) => {
     const db = require('../database-oracle').db;
 
     const sections = await db.prepare(`
-      SELECT s.id, s.section_type, s.sort_order, s.icon, s.icon_color, s.last_modified
+      SELECT s.id, s.section_type, s.sort_order, s.icon, s.icon_color, s.last_modified,
+             s.linked_course_id, s.linked_lesson_id
       FROM help_sections s
       ORDER BY s.sort_order
     `).all();
@@ -83,6 +86,8 @@ router.get('/admin/status', verifyToken, verifyAdmin, async (req, res) => {
       icon: s.icon,
       iconColor: s.icon_color,
       lastModified: s.last_modified,
+      linkedCourseId: s.linked_course_id || null,
+      linkedLessonId: s.linked_lesson_id || null,
       translations: transMap[s.id] || {},
     }));
 
@@ -299,6 +304,21 @@ router.post('/admin/seed', verifyToken, verifyAdmin, async (req, res) => {
     res.json({ ok: true, total: userSections.length, inserted });
   } catch (err) {
     console.error('[HelpSections] POST /admin/seed error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PUT /api/help/admin/sections/:id/link — bind training course to help section
+router.put('/admin/sections/:id/link', verifyToken, verifyAdmin, async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const { linked_course_id, linked_lesson_id } = req.body;
+    await db.prepare(`
+      UPDATE help_sections SET linked_course_id=?, linked_lesson_id=? WHERE id=?
+    `).run(linked_course_id || null, linked_lesson_id || null, req.params.id);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[HelpSections] PUT /admin/sections/:id/link error:', err);
     res.status(500).json({ error: err.message });
   }
 });

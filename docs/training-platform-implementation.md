@@ -1,7 +1,7 @@
 # FOXLINK GPT 教育訓練平台 — 實作完成報告
 
-> 日期：2026-04-02（Phase 1-2F）、2026-04-03（Phase 3A）、2026-04-04（Phase 3B + i18n）
-> 狀態：Phase 1 + Phase 2A-F + Phase 3A + Phase 3B 實作完成（Phase 3C 規劃中）
+> 日期：2026-04-02（Phase 1-2F）、2026-04-03（Phase 3A）、2026-04-04（Phase 3B + i18n）、2026-04-05（Phase 3C + 3D-Help）
+> 狀態：Phase 1 + Phase 2A-F + Phase 3A-3C + Phase 3D-Help 實作完成（Phase 3E 規劃中）
 > 設計文件：[training-platform-design.md](training-platform-design.md)
 
 ---
@@ -1871,84 +1871,110 @@ Step 5: 發送
 
 ---
 
-## 13. Phase 3C — 評分紀錄系統 + 課程上架（規劃中）
+## 13. Phase 3C — 評分紀錄系統 + 課程上架（✅ 完成）
 
-> 狀態：規劃完成，待實作
+> 狀態：2026-04-05 實作完成
 
-### 3C-1：互動操作紀錄（action_log）
+### 3C-1：互動操作紀錄 + Server 端持久化
 
-**目的**：記錄學員在 Hotspot 互動中的每步操作，供評分和分析使用。
+**目的**：記錄學員在 Hotspot / DragDrop / QuizInline 互動中的操作，存入 DB 供評分和報表使用。
 
-**資料結構**（參考設計文件 §10.3）：
+**DB Schema**：`interaction_results`（`server/database-oracle.js` 自動建立）
+
+```sql
+CREATE TABLE interaction_results (
+  id                 NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  user_id            NUMBER NOT NULL,
+  slide_id           NUMBER NOT NULL,
+  course_id          NUMBER NOT NULL,
+  block_index        NUMBER DEFAULT 0,       -- 同一 slide 內第幾個互動 block
+  block_type         VARCHAR2(30),            -- hotspot | dragdrop | quiz_inline
+  player_mode        VARCHAR2(10),            -- learn | test
+  action_log         CLOB,                    -- JSON array of click records
+  total_time_seconds NUMBER,
+  steps_completed    NUMBER,
+  total_steps        NUMBER,
+  wrong_clicks       NUMBER,
+  score              NUMBER,                  -- server 端計算
+  max_score          NUMBER,
+  score_breakdown    CLOB,                    -- JSON: per-dimension scores
+  created_at         TIMESTAMP DEFAULT SYSTIMESTAMP
+)
+```
+
+**前端 action_log 收集**（以 HotspotBlock 為例）：
 
 ```js
-// 每次操作記錄
+// 每次 click 推入 actionLogRef.current
 {
-  timestamp: 1712345678000,
-  step: 0,                    // 當前步驟 index
-  region_id: 'r1',            // 點擊的 region
-  correct: true,              // 是否正確
-  click_coords: { x: 45.2, y: 32.1 },  // 點擊百分比座標
-  attempt_number: 1           // 該步第幾次嘗試
+  timestamp: Date.now(),
+  step: currentStep,             // guided 模式 step index / explore 模式 exploredIds.size
+  region_id: hit?.id || null,    // 命中的 region（miss 為 null）
+  correct: true,                 // 是否正確 region
+  click_coords: { x: 45.2, y: 32.1 },  // 百分比座標
+  attempt_number: stepAttempts + 1
 }
 ```
 
-**彙總指標**：
-```js
-{
-  total_time_seconds: 25,
-  steps_completed: 4,
-  total_steps: 4,
-  wrong_clicks: 2,
-  action_log: [...]
-}
+**元件改動**：
+- `HotspotBlock` — `actionLogRef` / `startTimeRef` / `wrongClicksRef`，完成時呼叫 `onInteractionComplete(result)`
+- `DragDropBlock` — checkAnswer 後呼叫 `onInteractionComplete`，回傳 user_answer + correct_answer
+- `QuizInlineBlock` — submit 後呼叫 `onInteractionComplete`，回傳 question_type + answers
+
+**資料流**：
+```
+互動 Block  ──onInteractionComplete──→  SlideRenderer（附 slideId + blockIndex）
+  ──onInteractionComplete──→  CoursePlayer  ──POST /slides/:sid/interaction-result──→  Server
+  Server: interactionScorer 計算分數 → INSERT interaction_results → Response { score, max_score }
+  CoursePlayer: 收到後顯示分數 toast（右上角 4 秒）
 ```
 
 **API**：
 ```
 POST /training/slides/:sid/interaction-result
-Body: { user_id, slide_id, player_mode, action_log, total_time, score_breakdown }
-```
-
-**DB Schema**：
-```sql
-CREATE TABLE interaction_results (
-  id                NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-  user_id           NUMBER NOT NULL,
-  slide_id          NUMBER NOT NULL,
-  course_id         NUMBER NOT NULL,
-  player_mode       VARCHAR2(10),     -- learn | test
-  action_log        CLOB,             -- JSON array
-  total_time_seconds NUMBER,
-  steps_completed   NUMBER,
-  total_steps       NUMBER,
-  wrong_clicks      NUMBER,
-  score             NUMBER,
-  max_score         NUMBER,
-  score_breakdown   CLOB,             -- JSON: per-dimension scores
-  created_at        TIMESTAMP DEFAULT SYSTIMESTAMP
-);
+Body: {
+  block_index, block_type, player_mode,
+  action_log,              // Hotspot 專用
+  total_time_seconds, steps_completed, total_steps, wrong_clicks,
+  interaction_mode,        // Hotspot: guided | explore
+  user_answer,             // DragDrop / QuizInline
+  correct_answer,          // DragDrop / QuizInline
+  mode,                    // DragDrop: ordering | matching
+  question_type,           // QuizInline: single | multi | fill_blank
+  points                   // QuizInline: max points
+}
+Response: { ok, score, max_score, score_breakdown }
 ```
 
 ### 3C-2：Rubric 評分引擎
 
-**評分模式**（參考設計文件 §10.2）：
+**檔案**：`server/services/interactionScorer.js`
+**匯出**：`{ scoreHotspot, scoreDragDrop, scoreQuizInline }`
 
-**單步操作**：
+#### Hotspot — Explore 模式（100 分制）
+
 | 維度 | 權重 | 計算方式 |
 |------|------|---------|
-| 正確性 | 70% | 正確 region = 滿分，鄰近 = 3/7，錯誤 = 0 |
-| 嘗試次數 | 30% | 第 1 次 = 滿分，第 2 次 = 2/3，第 3 次+ = 1/3 |
+| 正確性 | 70% | `(steps_completed / total_steps) × 70` |
+| 嘗試效率 | 30% | 0 錯 = 30，1-2 錯 = 20，3+ 錯 = 10 |
 
-**多步驟操作**（如 Hotspot 導引 4 步）：
-| 維度 | 分數 | 計算方式 |
+#### Hotspot — Guided 模式（動態滿分 = steps×2 + 5 + 3 + 2）
+
+| 維度 | 滿分 | 計算方式 |
 |------|------|---------|
-| 步驟正確性 | 每步 2 分 | 正確步驟數 × 分值 |
-| 步驟順序 | 5 分 | 全部正序 = 5，錯 1 步 = 3，錯 2+ = 0 |
-| 效率 | 3 分 | 0 次錯誤 = 3，1-2 次 = 2，3-5 次 = 1，5+ = 0 |
-| 時間 | 2 分 | <30 秒 = 2，30-60 秒 = 1，>60 秒 = 0 |
+| 步驟正確性 | 每步 2 分 | `steps_completed × 2` |
+| 步驟順序 | 5 分 | 全正序 = 5，錯 1 步 = 3，錯 2+ = 0 |
+| 效率 | 3 分 | 0 錯 = 3，1-2 = 2，3-5 = 1，5+ = 0 |
+| 時間 | 2 分 | <30s = 2，30-60s = 1，>60s = 0 |
 
-**實作位置**：`server/services/interactionScorer.js`
+#### DragDrop（100 分制）
+- Ordering：`(正確位置數 / 總數) × 100`
+- Matching：`(正確配對數 / 總數) × 100`
+
+#### QuizInline
+- Single：全對 = 滿分，錯 = 0
+- Multi：`((正確數 - 錯誤數×0.5) / 總正確數) × points`，下限 0
+- Fill-blank：case-insensitive trim match，支援多個正確答案
 
 ### 3C-3：課程上架系統
 
@@ -1959,43 +1985,464 @@ draft（草稿）→ published（已發佈）→ archived（已封存）
          └──────── unpublish ←──────┘
 ```
 
-**發佈前檢查**（`POST /courses/:id/publish`）：
-- 至少有 1 個章節
-- 至少有 1 張投影片
-- 每張 Hotspot 投影片至少有 1 個 correct region
-- （選配）是否有語音導覽
+#### 發佈前檢查 API
 
-**API**：
 ```
-POST /training/courses/:id/publish    → status = 'published'
-POST /training/courses/:id/unpublish  → status = 'draft'
-POST /training/courses/:id/archive    → status = 'archived'
+GET /training/courses/:id/publish-check
+Response: {
+  checks: [
+    { key: 'has_lessons',      pass: true,  detail: '3 lessons' },
+    { key: 'has_slides',       pass: true,  detail: '12 slides' },
+    { key: 'hotspot_regions',  pass: false, detail: '1 hotspot(s) missing correct region' },
+    { key: 'has_audio',        pass: true,  detail: '8 slides with audio', optional: true }
+  ],
+  can_publish: false   // 必填項全 pass 才為 true
+}
 ```
 
-**權限**：owner + admin 可發佈/封存
+#### 發佈 API（含驗證 + 通知）
 
-**發佈通知**：發佈時通知被分享的使用者（`training_notifications` type='course_published'）
+```
+POST /training/courses/:id/publish
+Body: { force?: boolean }   // force=true 跳過檢查
+```
 
-**CourseEditor UI**：header 加「🚀 發佈」按鈕 + 發佈前 checklist 彈窗
+行為：
+1. 若非 force → 檢查 lessons ≥ 1、slides ≥ 1，不過則 400
+2. `UPDATE courses SET status='published'`
+3. 查 `course_access` 中 `grantee_type='user'` 的所有使用者
+4. 對每人寫入 `training_notifications`（type='course_published'）
+
+#### 取消發佈 / 封存
+
+```
+POST /training/courses/:id/unpublish  → status = 'draft'（owner + admin）
+POST /training/courses/:id/archive    → status = 'archived'（owner + admin）
+```
+
+#### CourseEditor UI 改動
+
+- **草稿狀態**：「發佈課程」綠色按鈕 → 點擊後先 call `publish-check` → 彈出 checklist modal
+  - 每項 ✅/❌ 標記，選配項標黃 ⚠️
+  - 必填項全過 → 「確認發佈」按鈕亮起
+  - 有失敗 → 按鈕 disabled
+- **已發佈狀態**：顯示「取消發佈」黃色按鈕 → confirm 後 call unpublish
 
 ### 3C-4：管理員成績報表
 
-**報表維度**：
-| 維度 | 內容 |
-|------|------|
-| 課程 | 互動完成率、平均嘗試次數、平均用時、平均分數 |
-| 使用者 | per-user 每張投影片的操作結果明細 |
-| 投影片 | 哪張最多人出錯、平均嘗試次數 |
+**檔案**：`client/src/components/training/InteractionReport.tsx`
+**入口**：CourseEditor 新增「成績」tab（`activeTab === 'reports'`）
 
-**API**：
+#### 課程層級 API
+
 ```
 GET /training/courses/:id/interaction-report
-GET /training/courses/:id/interaction-report/:userId
+Response: {
+  summary: { total_users, avg_score, avg_time, completion_rate },
+  slides: [{ slide_id, block_type, attempts, user_count, avg_score, avg_max_score, avg_wrong_clicks, avg_time }],
+  users: [{ user_id, user_name, employee_id, total_interactions, avg_score, total_time }]
+}
 ```
+
+#### 使用者明細 API
+
+```
+GET /training/courses/:id/interaction-report/:userId
+Response: {
+  user: { name, employee_id },
+  results: [{ slide_id, block_type, score, max_score, total_time_seconds, wrong_clicks, steps_completed, total_steps, action_log, score_breakdown, created_at }]
+}
+```
+
+#### 前端 UI
+- **4 張 Summary Card**：參與人數 / 平均分數 / 平均用時 / 完成率
+- **投影片統計表**：每張 slide × block_type 的 attempts / user_count / avg_score / avg_wrong / avg_time
+- **使用者清單**：可點擊展開 per-slide 明細（score / steps / wrong_clicks / time / date）
+
+### 3C-5：多語言修正（附帶修復）
+
+課程/章節/分類的翻譯資料在 translate 流程中已正確寫入 `course_translations` / `lesson_translations` / `category_translations`，但讀取 API 未套用。此次一併修正：
+
+**Server 端**（`training.js`）：
+- `GET /courses`：接受 `?lang=`，batch 查詢 `course_translations` + `category_translations`，merge 回 title / description / category_name
+- `GET /courses/:id`：接受 `?lang=`，merge course title/desc + category_name + lesson titles（`lesson_translations`）
+- `GET /courses/:id/lessons`：接受 `?lang=`，merge `lesson_translations.title`
+
+**前端**：
+- `CourseList.tsx`：`api.get('/training/courses', { params: { lang: i18n.language, ... } })`
+- `CourseDetail.tsx`：`api.get(\`/training/courses/${id}\`, { params: { lang: i18n.language } })`
+- `CoursePlayer.tsx`：course detail API 補帶 `{ params: { lang } }`（slides 本來就有帶）
+
+### 3C 實作檔案總覽
+
+| 檔案 | 變更 |
+|------|------|
+| `server/database-oracle.js` | +`interaction_results` 表 (auto-create on init) |
+| `server/services/interactionScorer.js` | **新建** — `scoreHotspot`(explore/guided), `scoreDragDrop`, `scoreQuizInline` |
+| `server/routes/training.js` | +interaction-result API, 改造 publish (validation+notification), +publish-check, +unpublish, +interaction-report, +interaction-report/:userId, 修正 GET courses/courses/:id/lessons merge 翻譯 |
+| `client/.../blocks/HotspotBlock.tsx` | +`actionLogRef`, `startTimeRef`, `wrongClicksRef`, +`onInteractionComplete` callback |
+| `client/.../blocks/DragDropBlock.tsx` | +`onInteractionComplete` callback, +`startTimeRef` |
+| `client/.../blocks/QuizInlineBlock.tsx` | +`onInteractionComplete` callback, +`startTimeRef` |
+| `client/.../SlideRenderer.tsx` | +`onInteractionComplete` prop 傳遞到 hotspot/dragdrop/quiz_inline |
+| `client/.../CoursePlayer.tsx` | +`handleInteractionComplete` → API submit + score toast, +course detail 帶 lang |
+| `client/.../editor/CourseEditor.tsx` | +publish checklist modal, +unpublish btn, +reports tab, +InteractionReport import |
+| `client/.../InteractionReport.tsx` | **新建** — 課程/投影片/使用者三維度統計報表 |
+| `client/.../CourseList.tsx` | +courses & categories API 帶 `lang` |
+| `client/.../CourseDetail.tsx` | +course detail API 帶 `lang` |
+| `client/src/i18n/locales/{zh-TW,en,vi}.json` | +35 個 i18n keys |
+
+### 3C 測試劇本
+
+#### T1：Hotspot Guided 互動紀錄 + 評分
+
+| 步驟 | 操作 | 預期結果 |
+|------|------|---------|
+| 1 | 建立課程 → 新增章節 → 新增投影片 → 加 Hotspot block（4 個 correct region，guided 模式） | Hotspot 編輯器正常 |
+| 2 | 進入課程播放（learn 模式）→ 到 Hotspot slide | 出現截圖 + 導引提示 |
+| 3 | 依序正確點擊 4 個 region（不犯錯） | 每步 ✅ 反饋 → 完成 → **右上角 toast 顯示分數**（應為滿分） |
+| 4 | 開 DevTools Network → 找 `interaction-result` request | Response: `{ score: 18, max_score: 18, score_breakdown: { steps: {8,8}, order: {5,5}, efficiency: {3,3}, time: {2,2} } }` |
+| 5 | 查 DB：`SELECT * FROM interaction_results ORDER BY id DESC FETCH FIRST 1 ROW ONLY` | 有紀錄，action_log 是 4 筆 JSON，score=18 |
+
+#### T2：Hotspot Guided 錯誤扣分
+
+| 步驟 | 操作 | 預期結果 |
+|------|------|---------|
+| 1 | 同 T1 課程 → 進入 test 模式 | 橘色主題 |
+| 2 | Step 1 先故意點錯 2 次 → 再點對 | 出現 progressive hint（第 3 次顯示提示文字） |
+| 3 | Step 2-4 正確完成 | toast 分數 < 滿分（efficiency + order 被扣） |
+| 4 | 查 DB | wrong_clicks ≥ 2，score < max_score |
+
+#### T3：Hotspot Explore 互動紀錄
+
+| 步驟 | 操作 | 預期結果 |
+|------|------|---------|
+| 1 | 新增 Hotspot block（explore 模式，3 個 correct region） | |
+| 2 | 進入播放 → 直接正確點擊 3 個 region | 每個顯示 explore_desc → 完成 → toast 100/100 |
+| 3 | 重來 → 多點 3 次錯誤再完成 | toast 分數 < 100（efficiency 扣分） |
+
+#### T4：DragDrop 互動紀錄
+
+| 步驟 | 操作 | 預期結果 |
+|------|------|---------|
+| 1 | 新增投影片含 DragDrop block（ordering 模式，4 items） | |
+| 2 | 進入播放 → 排好順序 → 點「檢查答案」 | 顯示正確/錯誤 + **toast 顯示分數** |
+| 3 | 故意排錯 2 個位置 → 檢查 | toast 分數 = 50/100（2/4 正確） |
+| 4 | 查 DB | block_type='dragdrop', score 與前端一致 |
+
+#### T5：QuizInline 互動紀錄
+
+| 步驟 | 操作 | 預期結果 |
+|------|------|---------|
+| 1 | 新增投影片含 QuizInline block（single_choice, 4 選項, 10 分） | |
+| 2 | 播放 → 選正確答案 → 送出 | ✅ 正確 + toast 10/10 |
+| 3 | 播放 → 選錯誤答案 → 送出 | ❌ 錯誤 + toast 0/10 |
+
+#### T6：發佈 Checklist — 空課程
+
+| 步驟 | 操作 | 預期結果 |
+|------|------|---------|
+| 1 | 建立新課程（無章節、無投影片）→ 點「發佈課程」 | 彈出 checklist modal |
+| 2 | 觀察 checklist | ❌ has_lessons, ❌ has_slides, ✅ hotspot_regions（vacuous truth），⚠️ has_audio |
+| 3 | 「確認發佈」按鈕 | **disabled**（can_publish = false） |
+
+#### T7：發佈 Checklist — 完整課程
+
+| 步驟 | 操作 | 預期結果 |
+|------|------|---------|
+| 1 | 使用有章節+投影片+Hotspot(有correct region)的課程 → 點「發佈課程」 | checklist modal |
+| 2 | 觀察 checklist | ✅ has_lessons, ✅ has_slides, ✅ hotspot_regions, ⚠️ has_audio（選配） |
+| 3 | 點「確認發佈」 | modal 關閉 → header badge 變綠 "已發佈" → 發佈按鈕消失 → 出現「取消發佈」黃色按鈕 |
+| 4 | 查 DB：`SELECT * FROM training_notifications WHERE type='course_published' ORDER BY id DESC` | 被分享使用者有收到通知紀錄 |
+
+#### T8：取消發佈
+
+| 步驟 | 操作 | 預期結果 |
+|------|------|---------|
+| 1 | 已發佈課程 → 點「取消發佈」 | confirm 對話框 |
+| 2 | 確認 | badge 變黃 "草稿" → 黃色按鈕消失 → 綠色「發佈課程」重新出現 |
+| 3 | 用一般使用者帳號 → 課程列表 | 該課程不再出現（非 public 且非 owner） |
+
+#### T9：管理員成績報表
+
+| 步驟 | 操作 | 預期結果 |
+|------|------|---------|
+| 1 | 使用 T1-T5 產生過互動紀錄的課程 → CourseEditor → 「成績」tab | |
+| 2 | 觀察 Summary Cards | 參與人數 ≥ 1，平均分數 > 0 |
+| 3 | 觀察投影片統計表 | 有 hotspot / dragdrop / quiz_inline 列，各有 avg_score / avg_time |
+| 4 | 點擊某使用者 row | 展開該使用者的 per-slide 明細表 |
+| 5 | 明細表顯示 | 每行：slide ID / type / score/max / steps / wrong / time / date |
+
+#### T10：多語言 — 課程列表與詳情
+
+| 步驟 | 操作 | 預期結果 |
+|------|------|---------|
+| 1 | 有翻譯的課程（已跑過 translate en） | |
+| 2 | 右上角切換語言為 English | |
+| 3 | 課程列表頁 | 課程 title / description 顯示英文翻譯 |
+| 4 | 點入課程詳情頁 | 課程 title + 章節 title 顯示英文 |
+| 5 | 進入播放 | 課程標題 bar 顯示英文 + slide 內容為英文 |
+| 6 | 切回 zh-TW | 全部恢復中文 |
 
 ---
 
-## 14. Phase 3D — 分析與進階功能（規劃中）
+## 14. Phase 3D-Help — Help 說明書 × 教育訓練無縫整合（✅ 完成）
+
+> 狀態：2026-04-05 設計 + 實作完成
+
+### 設計目標
+
+將 FOXLINK GPT 的使用者說明書（Help 系統）與教育訓練平台無縫整合。每個 Help section 可綁定對應的教材課程/章節，使用者直接在說明書頁面打開 modal 進行互動學習和測驗，含完整評分和成績歷史。
+
+**僅適用於 FOXLINK GPT 本身的說明書**，其他系統仍使用標準教育訓練平台。
+
+### 14-1：DB Schema 改動
+
+```sql
+-- 1. interaction_results 加 session_id（通用，CoursePlayer 也用）
+ALTER TABLE interaction_results ADD session_id VARCHAR2(36);
+
+-- 2. help_sections 加教材綁定
+ALTER TABLE help_sections ADD linked_course_id NUMBER;
+ALTER TABLE help_sections ADD linked_lesson_id NUMBER;  -- NULL = 播放整門課
+```
+
+### 14-2：CoursePlayer 拆分
+
+將現有 `CoursePlayer.tsx` 拆為：
+
+- **`CoursePlayerInner`** — 純 UI + 邏輯（所有功能：音訊、Hotspot、Quiz、AI Tutor、Notes、Outline、鍵盤導航）
+  - Props: `courseId`, `lessonId?`, `onClose`, `sessionId`, `skipAccessCheck?`, `lang`
+- **`CoursePlayer`** — 路由 wrapper（`/training/course/:id/learn`），`useParams()` → `CoursePlayerInner`
+
+兩者功能完全相同，差異僅在容器和關閉行為。
+
+**session_id 通用化**：CoursePlayer 也在每次開啟時生成 `crypto.randomUUID()`，透過 SlideRenderer → Blocks → `POST /interaction-result` 全程傳遞。未來教育訓練報表也能做 session 聚合分析。
+
+### 14-3：HelpTrainingPlayer（modal overlay）
+
+**容器**：`fixed inset-0 z-50`，backdrop `bg-black/70`
+
+**三種尺寸**（右上角按鈕切換）：
+
+| 模式 | 尺寸 | 觸發 |
+|------|------|------|
+| 預設 | `90vw × 90vh` 置中 | 初次打開 |
+| 縮小 | `70vw × 70vh` 置中 | 點「縮小」 |
+| 全螢幕 | `100vw × 100vh` | 點「全螢幕」 |
+
+**ESC 行為**：全螢幕 → 退出全螢幕；非全螢幕 → 關閉 modal。
+
+**內部結構**：
+```
+┌─ HelpTrainingPlayer ─────────────────────────────────────┐
+│ 📖 {course.title}         [🔍縮小] [⬜全螢幕] [✕關閉]   │
+│                                                           │
+│ Tabs: [▶ 教材] [📊 成績紀錄]                              │
+│                                                           │
+│ ┌─ 教材 tab ────────────────────────────────────────────┐ │
+│ │  CoursePlayerInner (完整功能)                          │ │
+│ │  含: learn/test 切換、音訊、AI Tutor、Notes、Outline  │ │
+│ │  含: 互動評分 score toast                              │ │
+│ └───────────────────────────────────────────────────────┘ │
+│                                                           │
+│ ┌─ 成績紀錄 tab ────────────────────────────────────────┐ │
+│ │  #1  📝測驗  92/100  ████████████░░  25s  04-05       │ │
+│ │      ├ Slide #3 hotspot   18/18   8s                  │ │
+│ │      ├ Slide #5 dragdrop  74/100  12s                 │ │
+│ │      └ Slide #7 quiz      10/10   5s                  │ │
+│ │                                                        │ │
+│ │  #2  📖學習  78/100  ████████░░░░░░  42s  04-04       │ │
+│ │      └ (點擊展開)                                      │ │
+│ └───────────────────────────────────────────────────────┘ │
+└───────────────────────────────────────────────────────────┘
+```
+
+### 14-4：權限與資料流
+
+**權限規則**：Help 綁定的教材**跳過 `canUserAccessCourse` 檢查**，所有登入使用者都能學習。
+
+**Draft 課程允許播放**：Help 綁定的課程不需走 publish 流程。
+
+**完整資料流**：
+```
+HelpPage (lang=en)
+  → GET /api/help/sections?lang=en
+    → Response 帶 linked_course_id / linked_lesson_id
+  → 使用者點「Interactive Tutorial」按鈕
+  → HelpTrainingPlayer 打開 (sessionId = crypto.randomUUID())
+    → CoursePlayerInner(courseId, lessonId, skipAccessCheck=true, sessionId, lang)
+      → GET /training/courses/:id?lang=en&help=1          (跳過 access check)
+      → GET /training/lessons/:lid/slides?lang=en          (翻譯 merge)
+      → Hotspot / DragDrop / Quiz 互動
+      → POST /training/slides/:sid/interaction-result      (帶 session_id)
+        → interactionScorer 計算 → INSERT interaction_results
+        → Response → score toast
+    → 切到「成績紀錄」tab
+      → GET /training/courses/:id/my-interaction-history
+        → GROUP BY session_id 聚合
+```
+
+### 14-5：成績歷史 API
+
+```
+GET /training/courses/:id/my-interaction-history?lesson_id=
+```
+
+**權限**：任何登入使用者（只查自己的）
+
+**Response**：
+```json
+{
+  "sessions": [{
+    "session_id": "uuid",
+    "player_mode": "test",
+    "total_score": 92,
+    "total_max": 100,
+    "interactions": 3,
+    "total_time": 25,
+    "started_at": "2026-04-05T14:30:00",
+    "ended_at": "2026-04-05T14:30:25",
+    "details": [
+      { "slide_id": 3, "block_type": "hotspot", "score": 18, "max_score": 18, "total_time_seconds": 8, "wrong_clicks": 0 },
+      { "slide_id": 5, "block_type": "dragdrop", "score": 74, "max_score": 100, "total_time_seconds": 12, "wrong_clicks": 0 },
+      { "slide_id": 7, "block_type": "quiz_inline", "score": 10, "max_score": 10, "total_time_seconds": 5, "wrong_clicks": 0 }
+    ]
+  }]
+}
+```
+
+**SQL**：
+```sql
+SELECT session_id, player_mode,
+       SUM(score) AS total_score, SUM(max_score) AS total_max,
+       COUNT(*) AS interactions,
+       ROUND(SUM(total_time_seconds)) AS total_time,
+       MIN(created_at) AS started_at, MAX(created_at) AS ended_at
+FROM interaction_results
+WHERE user_id=? AND course_id=? AND session_id IS NOT NULL
+GROUP BY session_id, player_mode
+ORDER BY MAX(created_at) DESC
+```
+
+### 14-6：Help 頁面 UI 改動
+
+每個 Help section 標題右側加「互動教學」按鈕（僅當 `linked_course_id` 存在時顯示）：
+
+```
+📖 對話功能                                    [🎓 互動教學]
+────────────────────────────────────────────────────────────
+說明文字 blocks...
+```
+
+### 14-7：Admin 綁定 UI
+
+在 `HelpTranslationPanel` 每個 section 的管理區塊加：
+
+```
+🎓 綁定教材:
+課程: [▼ dropdown — 從 GET /training/courses?my_only=1 取]
+章節: [▼ dropdown — 從所選課程的 lessons 取，含「全部」選項]
+[儲存綁定]
+```
+
+API: `PUT /api/help/admin/sections/:id/link` → body `{ linked_course_id, linked_lesson_id }`
+
+### 14-8：邊界情況處理
+
+| 情況 | 處理 |
+|------|------|
+| 綁定的課程被刪除 | 按鈕不顯示（前端 check linked_course_id 且 course 存在） |
+| 綁定的 lesson 被刪除 | fallback 播整門課（忽略失效的 lesson_id） |
+| 課程無翻譯 | fallback zh-TW（現有機制） |
+| Draft 課程 | 允許播放（Help 專用，不受 publish 限制） |
+
+### 14-9：三語言 i18n keys
+
+| key | zh-TW | en | vi |
+|-----|-------|----|----|
+| `help.interactiveTutorial` | 互動教學 | Interactive Tutorial | Hướng dẫn tương tác |
+| `help.scoreHistory` | 成績紀錄 | Score History | Lịch sử điểm |
+| `help.totalScore` | 總分 | Total Score | Tổng điểm |
+| `help.session` | 第 {{n}} 次 | Attempt #{{n}} | Lần #{{n}} |
+| `help.slideDetail` | 投影片明細 | Slide Details | Chi tiết slide |
+| `help.fullscreen` | 全螢幕 | Fullscreen | Toàn màn hình |
+| `help.shrink` | 縮小 | Shrink | Thu nhỏ |
+| `help.linkCourse` | 綁定教材 | Link Course | Liên kết khóa học |
+| `help.selectCourse` | 選擇課程 | Select Course | Chọn khóa học |
+| `help.selectLesson` | 選擇章節 | Select Lesson | Chọn bài học |
+| `help.allLessons` | 全部章節 | All Lessons | Tất cả bài học |
+| `help.saveLink` | 儲存綁定 | Save Link | Lưu liên kết |
+
+### 14-10：實作檔案清單
+
+| 檔案 | 變更 |
+|------|------|
+| `server/database-oracle.js` | `runMigrations()` 加 3 個 `addCol`：`INTERACTION_RESULTS.SESSION_ID`、`HELP_SECTIONS.LINKED_COURSE_ID`、`HELP_SECTIONS.LINKED_LESSON_ID` |
+| `server/routes/training.js` | `POST /slides/:sid/interaction-result` 接收+存 `session_id`；`loadCoursePermission` 支援 `help=1` 跳過 access check；**新增** `GET /courses/:id/my-interaction-history` session 聚合 API |
+| `server/routes/helpSections.js` | `GET /sections` + `GET /admin/status` 回傳 `linkedCourseId`/`linkedLessonId`；**新增** `PUT /admin/sections/:id/link` |
+| `client/.../CoursePlayer.tsx` | 拆分為 `CoursePlayerInner`（named export，接收 props）+ `CoursePlayer`（default export，路由 wrapper）；兩者都用 `crypto.randomUUID()` 生成 sessionId 並透過 interaction-result API 傳遞 |
+| `client/.../HelpTrainingPlayer.tsx` | **新建** — modal overlay（3 種尺寸）+ 教材/成績雙 tab + `CoursePlayerInner` + `ScoreHistoryPanel`（同檔） |
+| `client/src/pages/HelpPage.tsx` | import `HelpTrainingPlayer`；每個 `linkedCourseId` 存在的 section 標題旁加「🎓 互動教學」按鈕 → 開啟 modal |
+| `client/.../admin/HelpTranslationPanel.tsx` | +`CourseOption` interface；fetchCourses；section 名稱欄加「🎓 綁定教材」inline UI（課程+章節 dropdown + 儲存） |
+| `client/.../HelpBlockRenderer.tsx` | `HelpSectionData` interface +`linkedCourseId`/`linkedLessonId` |
+| `client/src/i18n/locales/{zh-TW,en,vi}.json` | help 區塊各 +7 keys（interactiveTutorial, scoreHistory, courseTab, noHistory, session, fullscreen, shrink） |
+
+### 14-11：測試劇本
+
+#### T1：Admin 綁定教材
+
+| 步驟 | 操作 | 預期 |
+|------|------|------|
+| 1 | Admin → Help 管理 → section `u-chat` | 出現「綁定教材」區塊 |
+| 2 | 課程 dropdown 選「對話功能教學」→ 章節選「基本對話」→ 儲存 | 成功提示 |
+| 3 | 重新整理 → 確認綁定仍在 | linked_course_id + linked_lesson_id 有值 |
+
+#### T2：使用者 Help 頁面看到按鈕
+
+| 步驟 | 操作 | 預期 |
+|------|------|------|
+| 1 | 一般使用者 → Help 頁面 | 已綁定的 section 標題旁出現「🎓 互動教學」按鈕 |
+| 2 | 未綁定的 section | 無按鈕 |
+
+#### T3：打開 HelpTrainingPlayer 完成互動
+
+| 步驟 | 操作 | 預期 |
+|------|------|------|
+| 1 | 點「互動教學」 | modal overlay 開啟（90vw×90vh），顯示教材 tab |
+| 2 | learn/test 模式切換 | 正常切換 |
+| 3 | 完成 Hotspot 互動 | score toast 顯示，音訊正常播放 |
+| 4 | 全螢幕按鈕 | modal 擴展為 100vw×100vh |
+| 5 | ESC | 退出全螢幕（不關閉 modal） |
+| 6 | ESC | 關閉 modal，回到 Help 頁面 |
+
+#### T4：成績歷史
+
+| 步驟 | 操作 | 預期 |
+|------|------|------|
+| 1 | T3 完成後 → 切到「成績紀錄」tab | 顯示 1 筆 session，含總分/用時 |
+| 2 | 展開 session | 看到 per-slide 明細 |
+| 3 | 關閉 modal → 重新打開 → 做第二次測驗 | 成績 tab 顯示 2 筆 session |
+
+#### T5：三語言
+
+| 步驟 | 操作 | 預期 |
+|------|------|------|
+| 1 | 切換語言 English → Help 頁面 | 按鈕顯示「Interactive Tutorial」 |
+| 2 | 打開 player | 課程/章節標題顯示英文，投影片內容英文 |
+| 3 | 成績 tab 欄位標題 | 英文 |
+| 4 | 切 vi → 重複驗證 | 越南文 |
+
+#### T6：權限跳過
+
+| 步驟 | 操作 | 預期 |
+|------|------|------|
+| 1 | 建立 draft 課程，不設 is_public，不加 course_access | |
+| 2 | Admin 綁定到 Help section | |
+| 3 | 一般使用者打開 Help → 點「互動教學」 | **正常播放**（不受 access/publish 限制） |
+
+---
+
+## 15. Phase 3E — 分析與進階功能（規劃中）
 
 | 功能 | 說明 |
 |------|------|
@@ -2006,7 +2453,7 @@ GET /training/courses/:id/interaction-report/:userId
 
 ---
 
-## 15. Phase 3E — 教材工具（規劃中）
+## 16. Phase 3F — 教材工具（規劃中）
 
 | 功能 | 說明 |
 |------|------|
@@ -2020,7 +2467,7 @@ GET /training/courses/:id/interaction-report/:userId
 
 ---
 
-## 16. Phase 4 — 進階差異化功能（遠期規劃）
+## 17. Phase 4 — 進階差異化功能（遠期規劃）
 
 | 功能 | 說明 |
 |------|------|

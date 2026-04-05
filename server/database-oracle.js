@@ -1560,6 +1560,11 @@ async function runMigrations(db) {
   await addCol('ROLES', 'TRAINING_PERMISSION', "VARCHAR2(10) DEFAULT 'none'");
   await addCol('USERS', 'TRAINING_PERMISSION', 'VARCHAR2(10)');  // NULL = follow role
 
+  // ── Phase 3D-Help: session_id + Help 綁定教材 ────────────────────────────────
+  await addCol('INTERACTION_RESULTS', 'SESSION_ID', 'VARCHAR2(36)');
+  await addCol('HELP_SECTIONS', 'LINKED_COURSE_ID', 'NUMBER');
+  await addCol('HELP_SECTIONS', 'LINKED_LESSON_ID', 'NUMBER');
+
   // ── Training Platform: 課程分類（樹狀，最多 3 層）─────────────────────────────
   await createTable('COURSE_CATEGORIES', `CREATE TABLE course_categories (
     id          NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -1785,6 +1790,26 @@ async function runMigrations(db) {
     link_url    VARCHAR2(500),
     is_read     NUMBER(1) DEFAULT 0,
     created_at  TIMESTAMP DEFAULT SYSTIMESTAMP
+  )`);
+
+  // ── Training Platform: 互動評分紀錄 ──────────────────────────────────────────
+  await createTable('INTERACTION_RESULTS', `CREATE TABLE interaction_results (
+    id                 NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    user_id            NUMBER NOT NULL,
+    slide_id           NUMBER NOT NULL,
+    course_id          NUMBER NOT NULL,
+    block_index        NUMBER DEFAULT 0,
+    block_type         VARCHAR2(30),
+    player_mode        VARCHAR2(10),
+    action_log         CLOB,
+    total_time_seconds NUMBER,
+    steps_completed    NUMBER,
+    total_steps        NUMBER,
+    wrong_clicks       NUMBER,
+    score              NUMBER,
+    max_score          NUMBER,
+    score_breakdown    CLOB,
+    created_at         TIMESTAMP DEFAULT SYSTIMESTAMP
   )`);
 
   await createTable('COURSE_NOTIFICATION_SETTINGS', `CREATE TABLE course_notification_settings (

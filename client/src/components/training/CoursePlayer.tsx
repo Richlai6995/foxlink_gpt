@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import api from '../../lib/api'
@@ -22,9 +22,21 @@ interface Lesson {
   lesson_type: string
 }
 
-export default function CoursePlayer() {
-  const { id } = useParams()
-  const navigate = useNavigate()
+// ═══════════════════════════════════════════════════════════════════════════════
+// CoursePlayerInner — shared core (used by route wrapper AND HelpTrainingPlayer)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+interface CoursePlayerInnerProps {
+  courseId: number
+  lessonId?: number | null      // filter to specific lesson
+  lang?: string                 // override i18n language
+  sessionId?: string            // interaction session tracking
+  skipAccessCheck?: boolean     // help=1 bypass
+  onClose: () => void           // close handler (navigate vs modal close)
+  initialMode?: 'learn' | 'test'
+}
+
+export function CoursePlayerInner({ courseId, lessonId, lang: langProp, sessionId, skipAccessCheck, onClose, initialMode = 'learn' }: CoursePlayerInnerProps) {
   const { t, i18n } = useTranslation()
   const [course, setCourse] = useState<any>(null)
   const [lessons, setLessons] = useState<Lesson[]>([])
@@ -38,50 +50,46 @@ export default function CoursePlayer() {
   const [tutorMessages, setTutorMessages] = useState<{ role: string; content: string }[]>([])
   const [tutorInput, setTutorInput] = useState('')
   const [tutorLoading, setTutorLoading] = useState(false)
-  const [searchParams] = useSearchParams()
-  const [playerMode, setPlayerMode] = useState<'learn' | 'test'>(searchParams.get('mode') === 'test' ? 'test' : 'learn')
+  const [playerMode, setPlayerMode] = useState<'learn' | 'test'>(initialMode)
   const audioRef = useRef<HTMLAudioElement>(null)
+  const [scoreToast, setScoreToast] = useState<{ score: number; max: number } | null>(null)
 
-  useEffect(() => {
-    loadCourseForPlayer()
-  }, [id])
+  const lang = langProp || i18n.language
 
-  // Phase 3A-2: Reload slides when language changes (swaps base images)
-  useEffect(() => {
-    if (course) loadCourseForPlayer()
-  }, [i18n.language])
+  useEffect(() => { loadCourseForPlayer() }, [courseId, lang])
 
   const loadCourseForPlayer = async () => {
     try {
-      const courseRes = await api.get(`/training/courses/${id}`)
+      const params: any = { lang }
+      if (skipAccessCheck) params.help = '1'
+      const courseRes = await api.get(`/training/courses/${courseId}`, { params })
       setCourse(courseRes.data)
-      setLessons(courseRes.data.lessons || [])
 
-      // Load all slides for all lessons (with language)
-      // URL ?lang= overrides i18n language for preview
-      const lang = searchParams.get('lang') || i18n.language
+      // Filter to specific lesson if requested
+      const courseLessons: Lesson[] = courseRes.data.lessons || []
+      const targetLessons = lessonId ? courseLessons.filter(l => l.id === lessonId) : courseLessons
+      setLessons(targetLessons)
+
       const slides: Slide[] = []
-      for (const lesson of courseRes.data.lessons || []) {
+      for (const lesson of targetLessons) {
         const res = await api.get(`/training/lessons/${lesson.id}/slides`, { params: { lang } })
         slides.push(...res.data)
       }
       setAllSlides(slides)
+      setCurrentIdx(0)
 
-      // Report progress
-      api.post(`/training/courses/${id}/progress`, { status: 'in_progress' }).catch(() => {})
+      api.post(`/training/courses/${courseId}/progress`, { status: 'in_progress' }).catch(() => {})
     } catch (e) {
       console.error(e)
-      navigate('/training')
+      onClose()
     }
   }
 
   const currentSlide = allSlides[currentIdx]
   const currentLesson = currentSlide ? lessons.find(l => l.id === currentSlide.lesson_id) : null
 
-  // Auto-play slide audio (skip for hotspot slides — HotspotBlock manages its own audio)
   useEffect(() => {
     if (!currentSlide?.audio_url || !audioRef.current || audioMuted) return
-    // Check if this is a hotspot slide — let HotspotBlock handle audio
     try {
       const blocks = JSON.parse(currentSlide.content_json || '[]')
       if (blocks.some((b: any) => b.type === 'hotspot')) return
@@ -90,36 +98,28 @@ export default function CoursePlayer() {
     audioRef.current.play().catch(() => {})
   }, [currentIdx, currentSlide?.audio_url, audioMuted])
 
-  const goNext = () => {
-    if (currentIdx < allSlides.length - 1) setCurrentIdx(currentIdx + 1)
-  }
-  const goPrev = () => {
-    if (currentIdx > 0) setCurrentIdx(currentIdx - 1)
-  }
+  const goNext = () => { if (currentIdx < allSlides.length - 1) setCurrentIdx(currentIdx + 1) }
+  const goPrev = () => { if (currentIdx > 0) setCurrentIdx(currentIdx - 1) }
 
-  // Keyboard nav
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.key === 'ArrowRight' || e.key === ' ') { e.preventDefault(); goNext() }
       if (e.key === 'ArrowLeft') { e.preventDefault(); goPrev() }
-      if (e.key === 'Escape') navigate(`/training/course/${id}`)
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
   }, [currentIdx, allSlides.length])
 
-  // Save note
   const saveNote = async () => {
     if (!currentSlide || !noteText.trim()) return
     await api.post('/training/notes', {
-      course_id: Number(id),
+      course_id: courseId,
       slide_id: currentSlide.id,
       content: noteText,
       bookmarked: false
     }).catch(() => {})
   }
 
-  // AI Tutor
   const sendTutorMessage = async () => {
     if (!tutorInput.trim() || tutorLoading) return
     const msg = tutorInput.trim()
@@ -127,7 +127,7 @@ export default function CoursePlayer() {
     setTutorMessages(prev => [...prev, { role: 'user', content: msg }])
     try {
       setTutorLoading(true)
-      const res = await api.post(`/training/courses/${id}/ai-tutor`, {
+      const res = await api.post(`/training/courses/${courseId}/ai-tutor`, {
         message: msg,
         lesson_id: currentSlide?.lesson_id,
         slide_id: currentSlide?.id
@@ -138,16 +138,32 @@ export default function CoursePlayer() {
     } finally { setTutorLoading(false) }
   }
 
+  const handleInteractionComplete = useCallback(async (slideId: number, result: any) => {
+    try {
+      const res = await api.post(`/training/slides/${slideId}/interaction-result`, {
+        ...result,
+        player_mode: playerMode,
+        session_id: sessionId || null
+      })
+      if (res.data?.score !== undefined) {
+        setScoreToast({ score: res.data.score, max: res.data.max_score })
+        setTimeout(() => setScoreToast(null), 4000)
+      }
+    } catch (e) {
+      console.error('[CoursePlayer] interaction-result submit:', e)
+    }
+  }, [playerMode, sessionId])
+
   if (!course || allSlides.length === 0) {
-    return <div className="fixed inset-0 bg-slate-900 flex items-center justify-center text-slate-500">{t('training.loading')}</div>
+    return <div className="flex-1 flex items-center justify-center" style={{ color: 'var(--t-text-dim)' }}>{t('training.loading')}</div>
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col" style={{ backgroundColor: 'var(--t-bg)', color: 'var(--t-text)' }}>
+    <>
       {/* Top bar */}
       <div className="backdrop-blur border-b px-4 py-2 flex items-center gap-3 shrink-0 z-10"
         style={{ backgroundColor: 'var(--t-bg-elevated)', borderColor: 'var(--t-border)' }}>
-        <button onClick={() => navigate(`/training/course/${id}`)} style={{ color: 'var(--t-text-muted)' }} className="hover:opacity-70">
+        <button onClick={onClose} style={{ color: 'var(--t-text-muted)' }} className="hover:opacity-70">
           <ArrowLeft size={18} />
         </button>
         <span className="text-sm font-medium truncate" style={{ color: 'var(--t-text)' }}>{course.title}</span>
@@ -221,7 +237,7 @@ export default function CoursePlayer() {
         {/* Slide content */}
         <div className="flex-1 overflow-y-auto flex items-start justify-center px-6 py-4" style={{ backgroundColor: 'var(--t-bg)' }}>
           <div className="w-full max-w-7xl">
-            <SlideRenderer slide={currentSlide} isLastSlide={currentIdx === allSlides.length - 1} playerMode={playerMode} audioMuted={audioMuted} />
+            <SlideRenderer slide={currentSlide} isLastSlide={currentIdx === allSlides.length - 1} playerMode={playerMode} audioMuted={audioMuted} onInteractionComplete={handleInteractionComplete} />
           </div>
         </div>
 
@@ -295,18 +311,13 @@ export default function CoursePlayer() {
           className="disabled:opacity-30 hover:opacity-70" style={{ color: 'var(--t-text-muted)' }}>
           <ChevronLeft size={20} />
         </button>
-
-        {/* Progress bar */}
         <div className="flex-1 h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--t-border)' }}>
-          <div
-            className="h-full rounded-full transition-all duration-300"
-            style={{ width: `${((currentIdx + 1) / allSlides.length) * 100}%`, backgroundColor: 'var(--t-accent)' }}
-          />
+          <div className="h-full rounded-full transition-all duration-300"
+            style={{ width: `${((currentIdx + 1) / allSlides.length) * 100}%`, backgroundColor: 'var(--t-accent)' }} />
         </div>
         <span className="text-xs w-16 text-center" style={{ color: 'var(--t-text-dim)' }}>
           {currentIdx + 1} / {allSlides.length}
         </span>
-
         <button onClick={goNext} disabled={currentIdx === allSlides.length - 1}
           className="disabled:opacity-30 hover:opacity-70" style={{ color: 'var(--t-text-muted)' }}>
           <ChevronRight size={20} />
@@ -314,6 +325,50 @@ export default function CoursePlayer() {
       </div>
 
       <audio ref={audioRef} className="hidden" />
+
+      {scoreToast && (
+        <div className="fixed top-20 right-6 z-[60] animate-fade-in-down bg-slate-800 border border-sky-500/30 rounded-xl px-5 py-3 shadow-lg">
+          <div className="text-xs text-slate-400 mb-1">{t('training.interactionScore')}</div>
+          <div className="text-2xl font-bold" style={{ color: 'var(--t-accent)' }}>
+            {scoreToast.score} <span className="text-sm text-slate-500">/ {scoreToast.max}</span>
+          </div>
+        </div>
+      )}
+    </>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// CoursePlayer — route wrapper (/training/course/:id/learn)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+export default function CoursePlayer() {
+  const { id } = useParams()
+  const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const sessionId = useMemo(() => crypto.randomUUID(), [id])
+  const initialMode = searchParams.get('mode') === 'test' ? 'test' as const : 'learn' as const
+
+  // ESC handler for route-based player
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') navigate(`/training/course/${id}`)
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [id])
+
+  if (!id) return null
+
+  return (
+    <div className="fixed inset-0 z-50 flex flex-col" style={{ backgroundColor: 'var(--t-bg)', color: 'var(--t-text)' }}>
+      <CoursePlayerInner
+        courseId={Number(id)}
+        sessionId={sessionId}
+        initialMode={initialMode}
+        lang={searchParams.get('lang') || undefined}
+        onClose={() => navigate(`/training/course/${id}`)}
+      />
     </div>
   )
 }

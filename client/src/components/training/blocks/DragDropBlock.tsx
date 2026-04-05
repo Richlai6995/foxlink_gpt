@@ -1,7 +1,22 @@
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 
-export default function DragDropBlock({ block }: { block: any }) {
+interface DragDropResult {
+  block_type: string
+  block_index: number
+  player_mode: string
+  mode: string
+  user_answer: any
+  correct_answer: any
+  total_time_seconds: number
+}
+
+export default function DragDropBlock({ block, blockIndex = 0, playerMode = 'learn', onInteractionComplete }: {
+  block: any
+  blockIndex?: number
+  playerMode?: string
+  onInteractionComplete?: (result: DragDropResult) => void
+}) {
   const { t } = useTranslation()
   const items: { id: string; content: string }[] = block.items || []
   const targets: { id: string; label: string; correct_item: string }[] = block.targets || []
@@ -13,6 +28,7 @@ export default function DragDropBlock({ block }: { block: any }) {
   const [dragItem, setDragItem] = useState<string | null>(null)
   const [checked, setChecked] = useState(false)
   const [correct, setCorrect] = useState(false)
+  const startTimeRef = useRef<number>(Date.now())
 
   const handleDragStart = (id: string) => setDragItem(id)
 
@@ -35,11 +51,26 @@ export default function DragDropBlock({ block }: { block: any }) {
 
   const checkAnswer = () => {
     setChecked(true)
-    if (mode === 'ordering') {
-      setCorrect(userOrder.every((id, idx) => id === items[idx]?.id))
-    } else {
-      setCorrect(targets.every(t => placements[t.id] === t.correct_item))
-    }
+    const isCorrect = mode === 'ordering'
+      ? userOrder.every((id, idx) => id === items[idx]?.id)
+      : targets.every(t => placements[t.id] === t.correct_item)
+    setCorrect(isCorrect)
+
+    // Fire interaction complete
+    const totalTime = Math.round((Date.now() - startTimeRef.current) / 1000)
+    const correctAnswer = mode === 'ordering'
+      ? items.map(i => i.id)
+      : Object.fromEntries(targets.map(t => [t.id, t.correct_item]))
+    const userAnswer = mode === 'ordering' ? userOrder : placements
+    onInteractionComplete?.({
+      block_type: 'dragdrop',
+      block_index: blockIndex,
+      player_mode: playerMode,
+      mode,
+      user_answer: userAnswer,
+      correct_answer: correctAnswer,
+      total_time_seconds: totalTime
+    })
   }
 
   const itemById = (id: string) => items.find(i => i.id === id)

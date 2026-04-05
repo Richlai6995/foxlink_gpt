@@ -106,6 +106,16 @@ async function canUserAccessCourse(courseId, user) {
 async function loadCoursePermission(req, res, next) {
   const courseId = req.params.id || req.params.courseId;
   if (!courseId) return res.status(400).json({ error: 'Missing course ID' });
+
+  // Help integration: skip access check when help=1 (all logged-in users can learn Help-linked courses)
+  if (req.query.help === '1' || req.body?.help === true) {
+    const course = await db.prepare('SELECT id FROM courses WHERE id=?').get(Number(courseId));
+    if (!course) return res.status(404).json({ error: '課程不存在' });
+    req.coursePermission = 'view';
+    req.courseId = Number(courseId);
+    return next();
+  }
+
   const result = await canUserAccessCourse(courseId, req.user);
   if (!result.access) return res.status(403).json({ error: '權限不足' });
   req.coursePermission = result.permission;
@@ -292,10 +302,39 @@ router.get('/courses', async (req, res) => {
     const progressMap = {};
     for (const p of progressRows) progressMap[p.course_id] = p;
 
-    const result = courses.map(c => ({
-      ...c,
-      my_progress: progressMap[c.id] || null
-    }));
+    // Merge translations if lang != zh-TW
+    const lang = req.query.lang || 'zh-TW';
+    let transMap = {};
+    let catTransMap = {};
+    if (lang !== 'zh-TW') {
+      const courseIds = courses.map(c => c.id);
+      if (courseIds.length > 0) {
+        const placeholders = courseIds.map(() => '?').join(',');
+        const ctRows = await db.prepare(
+          `SELECT course_id, title, description FROM course_translations WHERE lang=? AND course_id IN (${placeholders})`
+        ).all(lang, ...courseIds);
+        for (const ct of ctRows) transMap[ct.course_id] = ct;
+      }
+      const catIds = [...new Set(courses.map(c => c.category_id).filter(Boolean))];
+      if (catIds.length > 0) {
+        const placeholders = catIds.map(() => '?').join(',');
+        const catRows = await db.prepare(
+          `SELECT category_id, name FROM category_translations WHERE lang=? AND category_id IN (${placeholders})`
+        ).all(lang, ...catIds);
+        for (const ct of catRows) catTransMap[ct.category_id] = ct.name;
+      }
+    }
+
+    const result = courses.map(c => {
+      const ct = transMap[c.id];
+      return {
+        ...c,
+        title: ct?.title || c.title,
+        description: ct?.description || c.description,
+        category_name: catTransMap[c.category_id] || c.category_name,
+        my_progress: progressMap[c.id] || null
+      };
+    });
 
     res.json(result);
   } catch (e) {
@@ -346,10 +385,45 @@ router.get('/courses/:id', loadCoursePermission, async (req, res) => {
       'SELECT COUNT(*) AS cnt FROM quiz_questions WHERE course_id = ?'
     ).get(req.courseId);
 
+    // Merge translations if lang != zh-TW
+    const lang = req.query.lang || 'zh-TW';
+    let translatedCourse = { ...course };
+    let translatedLessons = lessons;
+    if (lang !== 'zh-TW') {
+      const ct = await db.prepare(
+        'SELECT title, description FROM course_translations WHERE course_id=? AND lang=?'
+      ).get(req.courseId, lang);
+      if (ct) {
+        if (ct.title) translatedCourse.title = ct.title;
+        if (ct.description) translatedCourse.description = ct.description;
+      }
+      // Category translation
+      if (course.category_id) {
+        const catT = await db.prepare(
+          'SELECT name FROM category_translations WHERE category_id=? AND lang=?'
+        ).get(course.category_id, lang);
+        if (catT?.name) translatedCourse.category_name = catT.name;
+      }
+      // Lesson translations
+      const lessonIds = lessons.map(l => l.id);
+      if (lessonIds.length > 0) {
+        const placeholders = lessonIds.map(() => '?').join(',');
+        const ltRows = await db.prepare(
+          `SELECT lesson_id, title FROM lesson_translations WHERE lang=? AND lesson_id IN (${placeholders})`
+        ).all(lang, ...lessonIds);
+        const ltMap = {};
+        for (const lt of ltRows) ltMap[lt.lesson_id] = lt.title;
+        translatedLessons = lessons.map(l => ({
+          ...l,
+          title: ltMap[l.id] || l.title
+        }));
+      }
+    }
+
     res.json({
-      ...course,
+      ...translatedCourse,
       permission: req.coursePermission,
-      lessons,
+      lessons: translatedLessons,
       quiz_count: quizCount?.cnt || 0
     });
   } catch (e) {
@@ -405,13 +479,113 @@ router.delete('/courses/:id', loadCoursePermission, requirePermission('owner', '
   }
 });
 
-// POST /api/training/courses/:id/publish
+// GET /api/training/courses/:id/publish-check — pre-publish validation
+router.get('/courses/:id/publish-check', loadCoursePermission, requirePermission('owner', 'admin', 'develop'), async (req, res) => {
+  try {
+    const checks = [];
+
+    // 1. At least 1 lesson
+    const lessonCount = await db.prepare(
+      'SELECT COUNT(*) AS cnt FROM course_lessons WHERE course_id=?'
+    ).get(req.courseId);
+    checks.push({ key: 'has_lessons', pass: lessonCount.cnt > 0, detail: `${lessonCount.cnt} lessons` });
+
+    // 2. At least 1 slide
+    const slideCount = await db.prepare(
+      'SELECT COUNT(*) AS cnt FROM course_slides s JOIN course_lessons cl ON cl.id=s.lesson_id WHERE cl.course_id=?'
+    ).get(req.courseId);
+    checks.push({ key: 'has_slides', pass: slideCount.cnt > 0, detail: `${slideCount.cnt} slides` });
+
+    // 3. Hotspot slides must have >= 1 correct region
+    const hotspotSlides = await db.prepare(
+      `SELECT s.id, s.content_json FROM course_slides s
+       JOIN course_lessons cl ON cl.id=s.lesson_id
+       WHERE cl.course_id=?`
+    ).all(req.courseId);
+
+    let hotspotIssues = 0;
+    for (const slide of hotspotSlides) {
+      try {
+        const blocks = JSON.parse(slide.content_json || '[]');
+        for (const block of blocks) {
+          if (block.type === 'hotspot') {
+            const regions = block.regions || [];
+            const hasCorrect = regions.some(r => r.correct);
+            if (!hasCorrect) hotspotIssues++;
+          }
+        }
+      } catch {}
+    }
+    checks.push({ key: 'hotspot_regions', pass: hotspotIssues === 0, detail: hotspotIssues > 0 ? `${hotspotIssues} hotspot(s) missing correct region` : 'OK' });
+
+    // 4. Optional: has audio
+    const audioCount = await db.prepare(
+      `SELECT COUNT(*) AS cnt FROM course_slides s
+       JOIN course_lessons cl ON cl.id=s.lesson_id
+       WHERE cl.course_id=? AND s.audio_url IS NOT NULL`
+    ).get(req.courseId);
+    checks.push({ key: 'has_audio', pass: audioCount.cnt > 0, detail: `${audioCount.cnt} slides with audio`, optional: true });
+
+    const allRequired = checks.filter(c => !c.optional).every(c => c.pass);
+    res.json({ checks, can_publish: allRequired });
+  } catch (e) {
+    console.error('[Training] publish-check:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/training/courses/:id/publish — with validation + notification
 router.post('/courses/:id/publish', loadCoursePermission, requirePermission('owner', 'admin', 'develop'), async (req, res) => {
   try {
+    const { force } = req.body || {};
+
+    // Pre-publish check (unless forced)
+    if (!force) {
+      const lessonCount = await db.prepare('SELECT COUNT(*) AS cnt FROM course_lessons WHERE course_id=?').get(req.courseId);
+      if (lessonCount.cnt === 0) return res.status(400).json({ error: '至少需要 1 個章節' });
+
+      const slideCount = await db.prepare(
+        'SELECT COUNT(*) AS cnt FROM course_slides s JOIN course_lessons cl ON cl.id=s.lesson_id WHERE cl.course_id=?'
+      ).get(req.courseId);
+      if (slideCount.cnt === 0) return res.status(400).json({ error: '至少需要 1 張投影片' });
+    }
+
     await db.prepare(`UPDATE courses SET status='published', updated_at=SYSTIMESTAMP WHERE id=?`).run(req.courseId);
+
+    // Notify shared users
+    try {
+      const course = await db.prepare('SELECT title FROM courses WHERE id=?').get(req.courseId);
+      const accessRows = await db.prepare(
+        `SELECT DISTINCT grantee_id FROM course_access WHERE course_id=? AND grantee_type='user'`
+      ).all(req.courseId);
+      for (const row of accessRows) {
+        await db.prepare(`
+          INSERT INTO training_notifications (user_id, type, title, message, course_id, link_url)
+          VALUES (?, 'course_published', ?, ?, ?, ?)
+        `).run(
+          Number(row.grantee_id), `${course?.title || '課程'} 已發佈`,
+          `課程「${course?.title}」已發佈，可以開始學習。`,
+          req.courseId, `/training/course/${req.courseId}`
+        );
+      }
+    } catch (notifErr) {
+      console.error('[Training] publish notification:', notifErr.message);
+    }
+
     res.json({ ok: true });
   } catch (e) {
     console.error('[Training] publish:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/training/courses/:id/unpublish — revert to draft
+router.post('/courses/:id/unpublish', loadCoursePermission, requirePermission('owner', 'admin'), async (req, res) => {
+  try {
+    await db.prepare(`UPDATE courses SET status='draft', updated_at=SYSTIMESTAMP WHERE id=?`).run(req.courseId);
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('[Training] unpublish:', e.message);
     res.status(500).json({ error: e.message });
   }
 });
@@ -588,6 +762,21 @@ router.get('/courses/:id/lessons', loadCoursePermission, async (req, res) => {
     const lessons = await db.prepare(
       'SELECT * FROM course_lessons WHERE course_id=? ORDER BY sort_order, id'
     ).all(req.courseId);
+
+    // Merge lesson translations
+    const lang = req.query.lang || 'zh-TW';
+    if (lang !== 'zh-TW' && lessons.length > 0) {
+      const placeholders = lessons.map(() => '?').join(',');
+      const ltRows = await db.prepare(
+        `SELECT lesson_id, title FROM lesson_translations WHERE lang=? AND lesson_id IN (${placeholders})`
+      ).all(lang, ...lessons.map(l => l.id));
+      const ltMap = {};
+      for (const lt of ltRows) ltMap[lt.lesson_id] = lt.title;
+      for (const l of lessons) {
+        if (ltMap[l.id]) l.title = ltMap[l.id];
+      }
+    }
+
     res.json(lessons);
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -1397,6 +1586,59 @@ router.delete('/notes/:nid', async (req, res) => {
       .run(req.params.nid, req.user.id);
     res.json({ ok: true });
   } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Interaction Results (Hotspot / DragDrop / QuizInline)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const { scoreHotspot, scoreDragDrop, scoreQuizInline } = require('../services/interactionScorer');
+
+// POST /api/training/slides/:sid/interaction-result
+router.post('/slides/:sid/interaction-result', async (req, res) => {
+  try {
+    const slideId = Number(req.params.sid);
+    const slide = await db.prepare(
+      'SELECT s.id, s.lesson_id, cl.course_id FROM course_slides s JOIN course_lessons cl ON cl.id=s.lesson_id WHERE s.id=?'
+    ).get(slideId);
+    if (!slide) return res.status(404).json({ error: 'Slide not found' });
+
+    const { block_index, block_type, player_mode, action_log, total_time_seconds,
+            steps_completed, total_steps, wrong_clicks,
+            interaction_mode, user_answer, correct_answer, mode: ddMode,
+            question_type, points, session_id } = req.body;
+
+    let result;
+    if (block_type === 'hotspot') {
+      result = scoreHotspot({ action_log, total_steps, steps_completed, wrong_clicks, total_time_seconds, interaction_mode });
+    } else if (block_type === 'dragdrop') {
+      result = scoreDragDrop({ mode: ddMode, user_answer, correct_answer, total_time_seconds });
+    } else if (block_type === 'quiz_inline') {
+      result = scoreQuizInline({ question_type, user_answer, correct_answer, points });
+    } else {
+      result = { score: 0, max_score: 0, breakdown: {} };
+    }
+
+    await db.prepare(`
+      INSERT INTO interaction_results
+        (user_id, slide_id, course_id, block_index, block_type, player_mode,
+         action_log, total_time_seconds, steps_completed, total_steps, wrong_clicks,
+         score, max_score, score_breakdown, session_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      req.user.id, slideId, slide.course_id,
+      block_index || 0, block_type || null, player_mode || null,
+      JSON.stringify(action_log || []), total_time_seconds || 0,
+      steps_completed || 0, total_steps || 0, wrong_clicks || 0,
+      result.score, result.max_score, JSON.stringify(result.breakdown),
+      session_id || null
+    );
+
+    res.json({ ok: true, score: result.score, max_score: result.max_score, score_breakdown: result.breakdown });
+  } catch (e) {
+    console.error('[Training] interaction-result:', e.message);
     res.status(500).json({ error: e.message });
   }
 });
@@ -4204,6 +4446,134 @@ router.post('/scripts/import', async (req, res) => {
     }
     res.json({ ok: true, created });
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Interaction Reports (Admin / Owner)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// GET /api/training/courses/:id/interaction-report — course-level summary + per-slide stats
+router.get('/courses/:id/interaction-report', loadCoursePermission, requirePermission('owner', 'admin'), async (req, res) => {
+  try {
+    // Course summary
+    const summary = await db.prepare(`
+      SELECT COUNT(DISTINCT user_id) AS total_users,
+             ROUND(AVG(score), 1) AS avg_score,
+             ROUND(AVG(total_time_seconds), 1) AS avg_time,
+             ROUND(AVG(CASE WHEN steps_completed = total_steps THEN 1 ELSE 0 END) * 100, 1) AS completion_rate
+      FROM interaction_results WHERE course_id=?
+    `).get(req.courseId);
+
+    // Per-slide stats
+    const slides = await db.prepare(`
+      SELECT ir.slide_id, ir.block_type,
+             COUNT(*) AS attempts,
+             COUNT(DISTINCT ir.user_id) AS user_count,
+             ROUND(AVG(ir.score), 1) AS avg_score,
+             ROUND(AVG(ir.max_score), 1) AS avg_max_score,
+             ROUND(AVG(ir.wrong_clicks), 1) AS avg_wrong_clicks,
+             ROUND(AVG(ir.total_time_seconds), 1) AS avg_time
+      FROM interaction_results ir
+      WHERE ir.course_id=?
+      GROUP BY ir.slide_id, ir.block_type
+      ORDER BY ir.slide_id
+    `).all(req.courseId);
+
+    // Per-user summary
+    const users = await db.prepare(`
+      SELECT ir.user_id, u.name AS user_name, u.employee_id,
+             COUNT(*) AS total_interactions,
+             ROUND(AVG(ir.score), 1) AS avg_score,
+             ROUND(SUM(ir.total_time_seconds), 0) AS total_time
+      FROM interaction_results ir
+      JOIN users u ON u.id = ir.user_id
+      WHERE ir.course_id=?
+      GROUP BY ir.user_id, u.name, u.employee_id
+      ORDER BY u.name
+    `).all(req.courseId);
+
+    res.json({ summary, slides, users });
+  } catch (e) {
+    console.error('[Training] interaction-report:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/training/courses/:id/interaction-report/:userId — per-user detail
+router.get('/courses/:id/interaction-report/:userId', loadCoursePermission, requirePermission('owner', 'admin'), async (req, res) => {
+  try {
+    const userId = Number(req.params.userId);
+    const user = await db.prepare('SELECT name, employee_id FROM users WHERE id=?').get(userId);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    const results = await db.prepare(`
+      SELECT ir.*, cs.sort_order AS slide_order
+      FROM interaction_results ir
+      LEFT JOIN course_slides cs ON cs.id = ir.slide_id
+      WHERE ir.course_id=? AND ir.user_id=?
+      ORDER BY cs.sort_order, ir.created_at
+    `).all(req.courseId, userId);
+
+    // Parse CLOB fields
+    for (const r of results) {
+      try { r.action_log = JSON.parse(r.action_log || '[]'); } catch { r.action_log = []; }
+      try { r.score_breakdown = JSON.parse(r.score_breakdown || '{}'); } catch { r.score_breakdown = {}; }
+    }
+
+    res.json({ user, results });
+  } catch (e) {
+    console.error('[Training] interaction-report user:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/training/courses/:id/my-interaction-history — user's own session-grouped history
+router.get('/courses/:id/my-interaction-history', async (req, res) => {
+  try {
+    const courseId = Number(req.params.id);
+    const lessonId = req.query.lesson_id ? Number(req.query.lesson_id) : null;
+
+    let whereExtra = '';
+    const params = [req.user.id, courseId];
+    if (lessonId) {
+      whereExtra = ` AND ir.slide_id IN (SELECT id FROM course_slides WHERE lesson_id=?)`;
+      params.push(lessonId);
+    }
+
+    // Session-level aggregation
+    const sessions = await db.prepare(`
+      SELECT ir.session_id, ir.player_mode,
+             SUM(ir.score) AS total_score,
+             SUM(ir.max_score) AS total_max,
+             COUNT(*) AS interactions,
+             ROUND(SUM(ir.total_time_seconds)) AS total_time,
+             MIN(ir.created_at) AS started_at,
+             MAX(ir.created_at) AS ended_at
+      FROM interaction_results ir
+      WHERE ir.user_id=? AND ir.course_id=? AND ir.session_id IS NOT NULL${whereExtra}
+      GROUP BY ir.session_id, ir.player_mode
+      ORDER BY MAX(ir.created_at) DESC
+      FETCH FIRST 50 ROWS ONLY
+    `).all(...params);
+
+    // Fetch details for each session
+    for (const s of sessions) {
+      const detailParams = [req.user.id, courseId, s.session_id];
+      if (lessonId) detailParams.push(lessonId);
+      s.details = await db.prepare(`
+        SELECT ir.slide_id, ir.block_type, ir.score, ir.max_score,
+               ir.total_time_seconds, ir.wrong_clicks, ir.steps_completed, ir.total_steps
+        FROM interaction_results ir
+        WHERE ir.user_id=? AND ir.course_id=? AND ir.session_id=?${lessonId ? ' AND ir.slide_id IN (SELECT id FROM course_slides WHERE lesson_id=?)' : ''}
+        ORDER BY ir.created_at
+      `).all(...detailParams);
+    }
+
+    res.json({ sessions });
+  } catch (e) {
+    console.error('[Training] my-interaction-history:', e.message);
+    res.status(500).json({ error: e.message });
+  }
 });
 
 module.exports = router;

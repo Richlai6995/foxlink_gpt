@@ -1,164 +1,224 @@
-# CLAUDE.md
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+# CLAUDE.md — FOXLINK GPT
 
+> 正崴 AI 整合平台 — LLM 對話 + 教育訓練 + AI 工具集
 
-# 角色
-你是一位資深的LLM GPT 對話設計系統設計師。請根據需求描述協助我設計一個適用於使用者對話的網頁, 名稱是「FOXLINK GPT」
+---
 
-## 參考這個專案的子目錄 “refrence_project” 的相關登入機制及畫面及所有程式, 但將網頁改為類似Google Gemini 樣式的LLM對答視窗,程式重點如下:
-*** 保留使用者管理介面的 新增使用者頁簽 功能及邏輯,但是角色權限 僅保留一般使用者及 系統管理員, 所屬群組 (Group) 及 專案根目錄 (Project Root) 不需要
-, 群組管理頁簽不需要, 系統設定頁簽 保留 資料庫維護功能及 郵件伺服器管理 功能 
-*** 使用者登入啟用邏輯與舊專案相同
-*** 使用ENV的GOOGLE API KEY:GEMINI_API_KEY
-*** 預設使用GEMINI 3.0 PRO模型,並可以給使用者切換3.0 FLASH,類似本專案的AI分析功能切換模型
-*** 可以上傳多個 文字檔,Excel,word,ppt ,pdf,圖片,聲音檔案(限制50M),但不允許輸入錄影檔案, 系統要有將聲音轉為文字能力,要有將輸出轉為其他各種輸出檔案的能力
-*** 可以輸出 文字檔,Excel,word,ppt ,pdf及圖片
-*** 回答mark down 必須格式化輸出
-*** 可以複製問答內容
-*** 單一session要有記憶功能
-*** 所有對話要能存留歷史紀錄並可以讓使用者刪除
-*** 建立sqlite db紀錄彙總整理每天一筆每個使用者問答不同llm model之進及出的token數量,包含使用者的工號及姓名,日期,llm model,進/出 token數量. 並可以於系統管理介面查詢
-*** 要記錄使用者的對話紀錄以作為稽核使用,並可以建立敏感用語稽核系統,可以發生時紀錄並通知管理員. 並可以於系統管理介面查詢
-*** 預設管理員帳密請參考ENV的 DEFAULT_ADMIN_ACCOUNT,可以管理及觀看後台的 必須參考 使用者設定 ,系統管理員 才有權限
-*** 可以仿照Gemini自行加上應該有的功能並與我確認
-## 網頁風格
-  * 以藍色/灰色為基調,功能都用簡單的圖片icon表示功能選項,網頁風格以簡單/精簡為設計風格
+## 目錄結構
 
+```
+foxlink_gpt/
+├── server/              # Node.js/Express backend (port 3007)
+├── client/              # React/TypeScript/Vite frontend (port 5173)
+├── chrome-extension/    # Chrome Extension（操作錄製 → AI 生成教材）
+├── docs/                # 所有設計文件 + 實作報告
+├── k8s/                 # Kubernetes 部署 manifests
+├── refrence_project/    # 參考專案（唯讀，勿修改）
+├── docker-compose.yml   # Docker 部署
+├── Dockerfile           # 多階段 Docker build
+└── deploy.sh            # K8s 部署腳本（build → push → apply）
+```
 
-## Reference Project Overview
+## 啟動方式
 
-**正崴雲端智慧發信系統 (Foxlink Cloud Smart Mailing System)** — An enterprise web app for file management, automated document generation, smart email sending, and AI assistance. The `refrence_project/` directory is the **reference implementation** to study and build upon.
-
-## Commands
-
-### Server (Node.js/Express)
 ```bash
-cd refrence_project/server
-npm start         # production
-npm run dev       # development (node --watch)
+cd server && npm run dev    # backend → localhost:3007
+cd client && npm run dev    # frontend → localhost:5173 (proxy → 3007)
 ```
 
-### Client (React/Vite)
+**預設管理員**：帳號 `ADMIN`，密碼見 `server/.env` 的 `DEFAULT_ADMIN_PASSWORD`
+
+## 技術棧
+
+| 層 | 技術 |
+|----|------|
+| DB | **Oracle 23 AI**（`database-oracle.js`）— SQLite (`database.js`) 已廢棄 |
+| Backend | Express + multer + SSE streaming |
+| Frontend | React 18 + Vite + TailwindCSS + lucide-react |
+| AI | `@google/generative-ai` (Gemini Pro/Flash) |
+| Auth | UUID token in-memory Map（非 JWT）— K8s 需 Redis |
+| i18n | i18next（zh-TW / en / vi 三語言） |
+| File Gen | pptxgenjs, docx, pdfkit, xlsx |
+
+---
+
+## 文件索引（docs/）
+
+| 文件 | 內容 |
+|------|------|
+| `training-platform-design.md` | 教育訓練平台設計文件（完整規格） |
+| `training-platform-implementation.md` | 教育訓練平台實作報告（Phase 1–3C） |
+| `hotspot-region-management.md` | Hotspot 區域管理系統設計 |
+| `ai-dashboard-design.md` | AI 戰情室儀表板設計 |
+| `tool-architecture.md` | MCP / DIFY / 技能工具架構 |
+| `deployment-plan.md` | K8s 部署計畫（含 P0 checklist） |
+| `k8s-installation-guide.md` | K8s 安裝步驟 |
+| `k8s-monitor-plan.md` | Loki + Uptime Kuma 監控 |
+| `multiple_db_plan.md` | 多資料庫架構規劃 |
+| `doc-template-plan.md` | 文件模板功能規劃 |
+| `doc-template-feature-spec.md` | 文件模板功能規格 |
+| `share-permission-category-design.md` | 共享權限分類設計 |
+| `data-policy-category-binding-design.md` | 資料政策分類綁定 |
+| `gmail-api-integration-design.md` | Gmail API 整合 |
+| `webex-bot-spec.md` | Webex Bot 規格 |
+| `test-plan-v2-tag-workflow.md` | 標籤工作流測試計畫 |
+
+---
+
+## 多語言規則（重要！）
+
+**所有使用者可見的文字都必須支援 zh-TW / en / vi 三個語言。**
+
+### 前端靜態文字
+- 使用 `t('key')` — i18n key
+- 三個 locale 檔都要同步新增：
+  - `client/src/i18n/locales/zh-TW.json`
+  - `client/src/i18n/locales/en.json`
+  - `client/src/i18n/locales/vi.json`
+
+### DB 動態內容（教育訓練）
+- 課程：`course_translations`（title, description）
+- 章節：`lesson_translations`（title）
+- 投影片：`slide_translations`（content_json, notes, audio_url）
+- 題目：`quiz_translations`
+- 分類：`category_translations`（name）
+- **讀取 API 必須接受 `?lang=` 參數，並 LEFT JOIN 翻譯表 merge 回去**
+- 翻譯流程：CourseEditor 的 Translate tab → `POST /courses/:id/translate` (SSE)
+
+### DB 動態內容（其他功能）
+- 技能/DIFY/KB/MCP/AI戰情 → 各自有 `*_translations` 表
+- Help 系統 → `help_sections` + `help_translations`
+
+---
+
+## Help 系統
+
+使用者說明頁面採 DB 驅動的多語言架構。
+
+- **種子資料**：`server/data/helpSeedData.js`（zh-TW 原始內容 = source of truth）
+- **自動同步**：`server/services/helpAutoSeed.js` — server 啟動時比對 `last_modified`，自動匯入
+- **翻譯**：Admin 介面 `HelpTranslationPanel` 可 LLM 批次翻譯
+- **渲染**：`client/src/components/HelpBlockRenderer.tsx`
+
+### 修改說明內容時的規則
+
+1. 編輯 `server/data/helpSeedData.js` 對應 section
+2. **必須 bump `last_modified`** 為當天日期（`YYYY-MM-DD`）
+3. 這會觸發 server 啟動時自動同步 + Admin 翻譯面板顯示「過期」
+4. 若檔案太大，可編輯 `_helpSeed_part1.js` / `_helpSeed_part2.js` 再跑 `node server/data/mergeSeeds.js`
+
+---
+
+## DB 慣例
+
+- **Oracle + `database-oracle.js`** — `createTable()` 自動 check-if-exists
+- PK: `NUMBER GENERATED ALWAYS AS IDENTITY`
+- JSON 用 `CLOB`
+- 時間戳: `TIMESTAMP DEFAULT SYSTIMESTAMP`
+- Migration: 在 `runMigrations()` 裡用 `ALTER TABLE` + column existence check
+- **不要用 SQLite 的 `database.js`** — 已廢棄
+
+## API 慣例
+
+- 所有路由 `/api/*`
+- Auth: `verifyToken` middleware → `req.user`
+- 錯誤: `catch(e) { res.status(500).json({ error: e.message }) }`
+- SSE: `res.setHeader('Content-Type', 'text/event-stream')` → `res.write('data: ...\n\n')`
+- File upload: multer → `UPLOAD_ROOT/` 或 `course_{id}/`
+
+---
+
+## 部署
+
+### Docker（單機）
+
 ```bash
-cd refrence_project/client
-npm run dev       # dev server at localhost:5173 (proxies /api → localhost:3000)
-npm run build     # tsc -b && vite build
-npm run lint      # eslint
-npm run preview   # preview production build
+docker-compose up -d --build
 ```
 
-### Docker
+- **Services**: Node.js app (port 3007) + Redis 7-alpine
+- **Volumes**: uploads, logs, backups, fonts, skill_runners, Oracle Instant Client
+- **Health check**: `GET /api/health` every 30s
+
+### Kubernetes（正式環境）
+
 ```bash
-docker-compose up -d --build   # build & start all services
+./deploy.sh [tag]
 ```
 
-## Architecture
+1. Build image → push 到 `10.8.93.11:5000/foxlink-gpt:[tag]`
+2. Sync `.env` → K8s secrets
+3. Apply manifests: RBAC, Deployment (3 replicas), Service, Ingress, NFS PVC
+4. Rolling restart + status watch
 
-### Monorepo Layout
-```
-refrence_project/
-├── server/          # Node.js/Express backend
-├── client/          # React/TypeScript/Vite frontend
-├── docs/            # User & admin manuals
-└── docker-compose.yml
-```
+**K8s manifests**（`k8s/` 目錄）：
+- `deployment.yaml` — 主 app（512Mi–2Gi RAM, 500m–2000m CPU）
+- `redis.yaml` — Redis Pod + Service（token store）
+- `nfs-pvc.yaml` — Synology NFS 500Gi（uploads 持久化）
+- `ingress.yaml` — nginx-ingress（SSE timeout 3600s）
+- `loki-stack.yaml` — Grafana + Loki + Fluent Bit（集中式 log）
+- `uptime-kuma.yaml` — 健康監控
 
-### Backend (`server/`)
+**K8s 部署關鍵注意事項**：
+- Token store 必須用 Redis（多 Pod 共享 session）
+- nginx-ingress 需設 `proxy-read-timeout: 3600s`（長 SSE）
+- Uploads 必須用 NFS PVC，不可用 container local
+- Oracle connection pool: `poolMax ≥ 25`（3 pods × 25）
+- SIGTERM graceful shutdown 60s（保護 SSE 連線）
 
-**Entry point**: `server.js` — loads DB, then dynamically requires all route modules after DB init. Services (scheduler, backup, mail cleanup) start after `app.listen()`.
+---
 
-**Database**: `database.js` wraps `sql.js` (pure-JS SQLite) with a custom `DatabaseWrapper`/`StatementWrapper` that mimics `better-sqlite3` API (`.prepare()`, `.run()`, `.get()`, `.all()`). Every write calls `saveDB()` which atomically writes to disk via temp-file rename. **Important**: Always call `.free()` implicitly through the wrappers; direct `sql.js` statements must be freed manually.
+## Chrome Extension（操作錄製工具）
 
-**Auth**: `routes/auth.js` uses UUID tokens stored in an **in-memory Map** (not JWT despite naming). Token passed as `Authorization: Bearer <uuid>`. Login flow: LDAP first (skip for `ADMIN`) → fallback to local DB. LDAP parses `displayName` as `"<employeeId> <name>"`. `verifyToken` middleware exported for use in other routes.
+**位置**：`chrome-extension/`
 
-**Route modules** (all under `/api`):
-- `/auth` — login/logout + `verifyToken` middleware
-- `/users`, `/groups` — user & group CRUD
-- `/projects`, `/folders`, `/files` — file management hierarchy
-- `/ai` — Gemini chat with file context extraction
-- `/admin` — system management, DB backup/restore
-- `/templates`, `/mail`, `/docs` — document generation pipeline
+**功能**：在目標系統上錄製操作步驟 → 自動截圖上傳到 FOXLINK GPT server → AI 辨識生成互動教材。
 
-**Key Services**:
-- `services/gemini.js` — singleton `GeminiService`. Handles multi-modal context: images (inline base64), Office files (manual ZIP/XML extraction via JSZip), PDFs (pdf-parse). AI responses can embed special code blocks (`csv_to_xlsx:`, `html_to_docx:`, `text_to_pdf:`) that trigger server-side file generation.
-- `services/scheduler.js` — singleton `Scheduler`. Loads `doc_schedules` on init, runs cron jobs via `node-cron`. Skips execution if target date folder doesn't exist on disk. Sends notification emails to project members when documents are incomplete.
-- `services/docGenerator.js` — generates HTML/DOCX/PDF from templates with variable substitution.
-- `services/mailService.js` — SMTP via nodemailer, logs all sends to `mail_logs` table, includes auto-cleanup scheduling.
-- `services/backupService.js` — scheduled SQLite DB backup to configured path.
-- `services/projectSyncService.js` — syncs project file listings (local FS scan, optional Google Drive).
+**使用流程**：
+1. `chrome://extensions` → 載入解壓縮（或打包 .crx 發佈）
+2. Popup 輸入 server URL + 登入帳密
+3. 在教育訓練平台點「AI 錄製」→ 取得 Session ID
+4. Extension popup 貼上 Session ID → 開始錄製
+5. 操作目標系統 → 每次 UI 互動自動截圖
+6. 支援手動截圖、矩形裁切、標註模式
+7. 停止錄製 → server 端 AI 處理步驟 → 生成教材
 
-**File Storage**: Local FS under `server/uploads/` (or `FILES_ROOT_DIR` env var in Docker). AI sessions saved as JSON per project: `uploads/project_<id>/_ai_sessions/<uuid>.json`.
+**檔案**：
+- `manifest.json` — Manifest v3, 全域權限
+- `popup.html/popup.js` — 登入 + 錄製控制 UI
+- `content.js` — 頁面注入，截圖 + 標註
+- `background.js` — Service worker
 
-**Schema migrations**: Done inline in `database.js:initSchema()` using `PRAGMA table_info` checks + `ALTER TABLE`. No migration framework.
+---
 
-### Frontend (`client/src/`)
+## 環境變數（server/.env）
 
-**Router**: `App.tsx` — 3 routes: `/login`, `/admin` (admin only), `/workspace/projects`.
+| Key | 用途 |
+|-----|------|
+| `PORT` | Server port（預設 3007） |
+| `GEMINI_API_KEY` | Google Gemini API key |
+| `GEMINI_MODEL_PRO` | 高品質模型（如 `gemini-3-pro-preview`） |
+| `GEMINI_MODEL_FLASH` | 快速模型（如 `gemini-3-flash-preview`） |
+| `DEFAULT_ADMIN_ACCOUNT` | 預設管理員帳號 |
+| `DEFAULT_ADMIN_PASSWORD` | 預設管理員密碼 |
+| `JWT_SECRET` | Token 簽名（名稱歷史遺留，實際是 UUID map） |
+| `ADMIN_NOTIFY_EMAIL` | 管理員通知信箱 |
+| `SMTP_SERVER/PORT/USERNAME/PASSWORD` | SMTP 發信 |
+| `FROM_ADDRESS` | 寄件者信箱 |
+| `LDAP_URL/BASE_DN/MANAGER_DN/MANAGER_PASSWORD` | AD 整合（選配） |
+| `DB_PATH` | SQLite 路徑（已廢棄） |
+| `UPLOAD_DIR` | 上傳檔案根目錄 |
+| `REDIS_URL` | Redis 連線（K8s 必須） |
 
-**Auth**: `context/AuthContext.tsx` stores JWT in `localStorage`. `api.ts` is an axios instance with base `/api` (proxied in dev) that auto-attaches token and redirects to `/login` on 401.
+---
 
-**Pages**:
-- `Login.tsx` — credential form
-- `AdminDashboard.tsx` — user/group/system management (wraps `SystemManagement.tsx`)
-- `ProjectWorkspace.tsx` — main workspace: file browser + AI chat + template/schedule management
+## 關鍵注意事項
 
-**Key Components**:
-- `AIChat.tsx` — multi-turn chat with file attachment support; parses AI response for generated file download links
-- `DocViewer.tsx` — inline HTML document viewer
-- `TemplateManager.tsx` / `ScheduleManager.tsx` — template editor with variable syntax, cron schedule config
-- `SimpleRichTextEditor.tsx` — contenteditable-based rich text for template content
-
-**Types**: All shared types in `client/src/types.ts`. User roles: `'admin' | 'pm' | 'user'`.
-
-## Environment Variables (`server/.env`)
-
-| Key | Purpose |
-|-----|---------|
-| `PORT` | Server port (default 3000) |
-| `JWT_SECRET` | Signing secret (currently unused — tokens are UUID in memory) |
-| `GEMINI_API_KEY` | Required for AI features |
-| `LDAP_URL`, `LDAP_BASE_DN`, `LDAP_MANAGER_DN`, `LDAP_MANAGER_PASSWORD` | AD integration (optional) |
-| `SMTP_SERVER`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `FROM_ADDRESS` | Email sending |
-| `DB_PATH` | SQLite file location (default `server/system.db`) |
-| `FILES_ROOT_DIR` | File storage root (Docker: `/app/local_storage`) |
-
-## Key Patterns
-
-- **DB access in routes**: Always `const { db } = require('../database')` at the top of route files; the `db` object is populated after `init()` completes.
-- **No JWT**: Despite the variable name `JWT_SECRET`, auth uses UUID tokens in a server-side in-memory Map. Sessions are lost on server restart.
-- **sql.js quirk**: `db.prepare(sql).run(params)` frees the statement automatically via `StatementWrapper`. Directly using `dbInstance.prepare()` requires manual `.free()`.
-- **Docker path remapping**: Scheduler remaps `project.local_path` (Windows dev path) to `FILES_ROOT_DIR`-relative path using regex matching on `file_management_container` or `files` path segments.
-- **AI file generation**: Gemini responses with ` ```csv_to_xlsx:filename.xlsx ``` ` blocks are parsed by the `/api/ai` route to generate actual files server-side.
-
-# 使用說明檔案：多語言 Help 系統
-
-使用者說明頁面採用 DB 驅動的多語言架構（zh-TW / en / vi），內容以 block-based JSON 儲存。
-
-## 架構
-- **種子資料**: `server/data/helpSeedData.js` — zh-TW 原始內容（source of truth for code changes）
-- **DB 表**: `help_sections` + `help_translations` — 運行時資料來源
-- **自動同步**: Server 啟動時 `helpAutoSeed.js` 比對 `last_modified`，自動匯入變更段落
-- **翻譯**: Admin 介面 `HelpTranslationPanel` 可用 LLM 批次翻譯、手動編輯
-- **渲染**: `HelpBlockRenderer.tsx` 將 block JSON 渲染為 JSX
-
-## 修改說明內容時的規則（重要！）
-
-當程式碼變更影響到使用者說明時，**必須同步更新 `server/data/helpSeedData.js`**：
-
-1. 找到對應的 section（依 `id` 識別，如 `u-intro`、`u-chat`、`u-model` 等）
-2. 修改該 section 的 `blocks` 陣列內容
-3. **必須 bump `last_modified`** 為當天日期（格式 `YYYY-MM-DD`），這會觸發：
-   - Server 啟動時自動將變更同步到 DB
-   - Admin 翻譯面板顯示 en/vi 版本為「過期」，提示管理員重新翻譯
-4. 若 helpSeedData.js 太大無法一次讀取，可編輯對應的 `_helpSeed_part1.js` 或 `_helpSeed_part2.js`，然後執行 `node server/data/mergeSeeds.js` 重新合併
-
-## Block 類型
-`para`, `tip`, `note`, `table`, `steps`, `code`, `list`, `subsection`, `card_grid`, `comparison`
-
-## 範例：新增一個段落
-```js
-{
-  type: 'para',
-  text: '這是新的說明文字，支援 **粗體** 和 `代碼`'
-}
-```
+1. **`refrence_project/` 是唯讀的**，不要修改
+2. **Auth 是 in-memory UUID Map**，server 重啟會清掉所有 session。K8s 部署需改用 Redis
+3. **sql.js / database.js 已完全廢棄**，只使用 `database-oracle.js`
+4. **AI 檔案生成**：Gemini 回應中的 ` ```generate_xlsx:filename``` ` 代碼塊由 `server/services/fileGenerator.js` 解析並生成檔案
+5. **SSE Streaming**：chat 和翻譯功能使用 SSE，前端需處理 `text/event-stream`
+6. **CJK PDF**：需要 `server/fonts/NotoSansTC-Regular.ttf`
+7. **音訊轉錄**：使用 Gemini Flash（比 Pro 快）
+8. **LDAP displayName 格式**：`"工號 姓名"`（如 `"12345 王小明"`）

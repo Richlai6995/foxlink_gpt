@@ -95,6 +95,8 @@ export interface HelpSectionData {
   sidebarLabel: string
   blocks: HelpBlock[]
   translatedAt?: string
+  linkedCourseId?: number | null
+  linkedLessonId?: number | null
 }
 
 // ── Inline text renderer (handles **bold** and `code`) ───────────────────────

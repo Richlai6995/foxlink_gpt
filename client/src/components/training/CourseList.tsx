@@ -33,7 +33,7 @@ interface Category {
 
 export default function CourseList({ editorMode = false }: { editorMode?: boolean }) {
   const { user, isAdmin, canEditTraining: canEdit } = useAuth()
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const navigate = useNavigate()
 
   const [courses, setCourses] = useState<Course[]>([])
@@ -52,7 +52,7 @@ export default function CourseList({ editorMode = false }: { editorMode?: boolea
   const loadData = async () => {
     try {
       setLoading(true)
-      const params: any = {}
+      const params: any = { lang: i18n.language }
       if (editorMode) params.my_only = '1'
       if (selectedCategory) params.category_id = selectedCategory
       if (statusFilter) params.status = statusFilter
@@ -60,7 +60,7 @@ export default function CourseList({ editorMode = false }: { editorMode?: boolea
 
       const [coursesRes, catsRes] = await Promise.all([
         api.get('/training/courses', { params }),
-        api.get('/training/categories')
+        api.get('/training/categories', { params: { lang: i18n.language } })
       ])
       setCourses(coursesRes.data)
       setCategories(catsRes.data)

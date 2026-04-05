@@ -15,16 +15,30 @@ interface Region {
   audio_url?: string
 }
 
+interface InteractionResult {
+  block_type: string
+  block_index: number
+  player_mode: string
+  interaction_mode: string
+  action_log: any[]
+  total_time_seconds: number
+  steps_completed: number
+  total_steps: number
+  wrong_clicks: number
+}
+
 interface Props {
   block: any
+  blockIndex?: number
   isLastSlide?: boolean
   playerMode?: 'learn' | 'test'
   slideAudioUrl?: string | null
   globalMuted?: boolean
   onAllComplete?: () => void
+  onInteractionComplete?: (result: InteractionResult) => void
 }
 
-export default function HotspotBlock({ block, isLastSlide = false, playerMode = 'learn', slideAudioUrl, globalMuted = false, onAllComplete }: Props) {
+export default function HotspotBlock({ block, blockIndex = 0, isLastSlide = false, playerMode = 'learn', slideAudioUrl, globalMuted = false, onAllComplete, onInteractionComplete }: Props) {
   const { t } = useTranslation()
   const isTestMode = playerMode === 'test'
   // In test mode, always use guided (step-by-step) regardless of block setting
@@ -54,6 +68,9 @@ export default function HotspotBlock({ block, isLastSlide = false, playerMode = 
   const [introPlayed, setIntroPlayed] = useState(false)
   const [introPlaying, setIntroPlaying] = useState(false)
   const audioRef = useRef<HTMLAudioElement>(null)
+  const actionLogRef = useRef<any[]>([])
+  const startTimeRef = useRef<number>(Date.now())
+  const wrongClicksRef = useRef<number>(0)
 
   // Reset when block or playerMode changes
   const resetKey = `${blockKey}_${playerMode}`
@@ -69,6 +86,9 @@ export default function HotspotBlock({ block, isLastSlide = false, playerMode = 
     setHoverRegion(null)
     setIntroPlayed(false)
     setIntroPlaying(false)
+    actionLogRef.current = []
+    startTimeRef.current = Date.now()
+    wrongClicksRef.current = 0
   }
 
   // Coordinate system
@@ -176,7 +196,19 @@ export default function HotspotBlock({ block, isLastSlide = false, playerMode = 
 
     setAttempts(prev => prev + 1)
 
+    // Record action log entry
+    const logEntry = {
+      timestamp: Date.now(),
+      step: mode === 'guided' ? currentStep : exploredIds.size,
+      region_id: hit?.id || null,
+      correct: hit ? (mode === 'guided' ? hit.id === correctRegions[currentStep]?.id : hit.correct) : false,
+      click_coords: { x: Math.round(x * 10) / 10, y: Math.round(y * 10) / 10 },
+      attempt_number: stepAttempts + 1
+    }
+    actionLogRef.current.push(logEntry)
+
     if (!hit) {
+      wrongClicksRef.current++
       setFeedback({ text: t('training.missedRegion'), correct: false })
       setStepAttempts(prev => prev + 1)
       return
@@ -188,6 +220,23 @@ export default function HotspotBlock({ block, isLastSlide = false, playerMode = 
       handleExploreClick(hit)
     }
   }
+
+  const fireInteractionComplete = useCallback((stepsCompleted: number) => {
+    const totalTime = Math.round((Date.now() - startTimeRef.current) / 1000)
+    const result: InteractionResult = {
+      block_type: 'hotspot',
+      block_index: blockIndex,
+      player_mode: playerMode,
+      interaction_mode: mode,
+      action_log: actionLogRef.current,
+      total_time_seconds: totalTime,
+      steps_completed: stepsCompleted,
+      total_steps: correctRegions.length,
+      wrong_clicks: wrongClicksRef.current
+    }
+    onInteractionComplete?.(result)
+    onAllComplete?.()
+  }, [blockIndex, playerMode, mode, correctRegions.length, onInteractionComplete, onAllComplete])
 
   const handleGuidedClick = (hit: Region) => {
     if (!currentTarget) return
@@ -204,7 +253,7 @@ export default function HotspotBlock({ block, isLastSlide = false, playerMode = 
         const nextStep = currentStep + 1
         if (nextStep >= correctRegions.length) {
           setCompleted(true)
-          onAllComplete?.()
+          fireInteractionComplete(nextStep)
         } else {
           setCurrentStep(nextStep)
           setStepAttempts(0)
@@ -213,6 +262,7 @@ export default function HotspotBlock({ block, isLastSlide = false, playerMode = 
         setFeedback(null)
       }, isTestMode ? 800 : 1500)
     } else {
+      wrongClicksRef.current++
       const newStepAttempts = stepAttempts + 1
       setStepAttempts(newStepAttempts)
       if (isTestMode) {
@@ -246,7 +296,7 @@ export default function HotspotBlock({ block, isLastSlide = false, playerMode = 
         if (next.size >= correctRegions.length) {
           setTimeout(() => {
             setCompleted(true)
-            onAllComplete?.()
+            fireInteractionComplete(next.size)
           }, 800)
         }
         return next

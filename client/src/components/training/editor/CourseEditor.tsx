@@ -7,6 +7,7 @@ import SlideEditor from './SlideEditor'
 import CategoryManager from '../CategoryManager'
 import BatchImport from './BatchImport'
 import RecordingPanel from './RecordingPanel'
+import InteractionReport from '../InteractionReport'
 
 interface Course {
   id?: number
@@ -57,7 +58,7 @@ export default function CourseEditor() {
   const [categories, setCategories] = useState<Category[]>([])
   const [loading, setLoading] = useState(!isNew)
   const [saving, setSaving] = useState(false)
-  const [activeTab, setActiveTab] = useState<'info' | 'lessons' | 'quiz' | 'translate' | 'settings'>('info')
+  const [activeTab, setActiveTab] = useState<'info' | 'lessons' | 'quiz' | 'translate' | 'settings' | 'reports'>('info')
   const [expandedLesson, setExpandedLesson] = useState<number | null>(null)
   const [lessonSlides, setLessonSlides] = useState<Record<number, Slide[]>>({})
   const [editingSlideId, setEditingSlideId] = useState<number | null>(null)
@@ -69,6 +70,10 @@ export default function CourseEditor() {
   const [translating, setTranslating] = useState<string | null>(null)
   const [translateStatus, setTranslateStatus] = useState<any>(null)
   const [translateProgress, setTranslateProgress] = useState<{ step: string; current: number; total: number; slides_done?: number; slides_total?: number } | null>(null)
+  const [showPublishCheck, setShowPublishCheck] = useState(false)
+  const [publishChecks, setPublishChecks] = useState<{ key: string; pass: boolean; detail: string; optional?: boolean }[]>([])
+  const [canPublish, setCanPublish] = useState(false)
+  const [publishing, setPublishing] = useState(false)
 
   useEffect(() => {
     loadCategories()
@@ -162,21 +167,44 @@ export default function CourseEditor() {
     } catch (e) { console.error(e) }
   }
 
-  const publishCourse = async () => {
+  const openPublishCheck = async () => {
     if (!id) return
     try {
-      await api.post(`/training/courses/${id}/publish`)
+      const res = await api.get(`/training/courses/${id}/publish-check`)
+      setPublishChecks(res.data.checks || [])
+      setCanPublish(res.data.can_publish)
+      setShowPublishCheck(true)
+    } catch (e) { console.error(e) }
+  }
+
+  const confirmPublish = async () => {
+    if (!id) return
+    try {
+      setPublishing(true)
+      await api.post(`/training/courses/${id}/publish`, { force: true })
       setCourse(prev => ({ ...prev, status: 'published' }))
+      setShowPublishCheck(false)
+    } catch (e: any) {
+      alert(e.response?.data?.error || t('training.publishFailed'))
+    } finally { setPublishing(false) }
+  }
+
+  const unpublishCourse = async () => {
+    if (!id || !confirm(t('training.confirmUnpublish'))) return
+    try {
+      await api.post(`/training/courses/${id}/unpublish`)
+      setCourse(prev => ({ ...prev, status: 'draft' }))
     } catch (e) { console.error(e) }
   }
 
   if (loading) return <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: 'var(--t-bg)', color: 'var(--t-text-dim)' }}>{t('training.loading')}</div>
 
-  const tabs: { key: 'info' | 'lessons' | 'quiz' | 'translate' | 'settings'; label: string; icon: typeof FileText }[] = [
+  const tabs: { key: 'info' | 'lessons' | 'quiz' | 'translate' | 'settings' | 'reports'; label: string; icon: typeof FileText }[] = [
     { key: 'info', label: t('training.tabInfo'), icon: FileText },
     { key: 'lessons', label: t('training.tabLessons'), icon: Play },
     { key: 'quiz', label: t('training.tabQuiz'), icon: FileText },
     { key: 'translate', label: t('training.tabTranslate'), icon: FileText },
+    { key: 'reports', label: t('training.tabReports'), icon: FileText },
     { key: 'settings', label: t('training.tabSettings'), icon: Settings },
   ]
 
@@ -224,9 +252,15 @@ export default function CourseEditor() {
             <ExportButton courseId={Number(id)} />
           )}
           {!isNew && course.status === 'draft' && (
-            <button onClick={publishCourse}
+            <button onClick={openPublishCheck}
               className="text-xs bg-green-600 hover:bg-green-500 text-white px-3 py-1.5 rounded-lg transition">
               {t('training.publishCourse')}
+            </button>
+          )}
+          {!isNew && course.status === 'published' && (
+            <button onClick={unpublishCourse}
+              className="text-xs bg-yellow-600 hover:bg-yellow-500 text-white px-3 py-1.5 rounded-lg transition">
+              {t('training.unpublishCourse')}
             </button>
           )}
           <button onClick={saveCourse} disabled={saving}
@@ -676,6 +710,11 @@ export default function CourseEditor() {
           </div>
         )}
 
+        {/* Reports Tab */}
+        {activeTab === 'reports' && !isNew && id && (
+          <InteractionReport courseId={Number(id)} />
+        )}
+
         {/* Settings Tab Placeholder */}
         {activeTab === 'settings' && !isNew && (
           <>
@@ -795,6 +834,42 @@ export default function CourseEditor() {
           }}
           onClose={() => setShowRecording(false)}
         />
+      )}
+
+      {/* Publish Checklist Modal */}
+      {showPublishCheck && (
+        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center" onClick={() => setShowPublishCheck(false)}>
+          <div className="rounded-xl p-6 max-w-md w-full mx-4 shadow-2xl" onClick={e => e.stopPropagation()}
+            style={{ backgroundColor: 'var(--t-bg-card)', border: '1px solid var(--t-border)' }}>
+            <h2 className="text-lg font-semibold mb-4" style={{ color: 'var(--t-text)' }}>{t('training.publishChecklist')}</h2>
+            <div className="space-y-2 mb-5">
+              {publishChecks.map(check => (
+                <div key={check.key} className="flex items-center gap-3 px-3 py-2 rounded-lg"
+                  style={{ backgroundColor: check.pass ? 'rgba(34,197,94,0.08)' : check.optional ? 'rgba(234,179,8,0.08)' : 'rgba(239,68,68,0.08)' }}>
+                  <span className="text-lg">{check.pass ? '\u2705' : check.optional ? '\u26a0\ufe0f' : '\u274c'}</span>
+                  <div className="flex-1">
+                    <div className="text-sm font-medium" style={{ color: 'var(--t-text)' }}>
+                      {t(`training.check_${check.key}`)}
+                    </div>
+                    <div className="text-[10px]" style={{ color: 'var(--t-text-dim)' }}>{check.detail}</div>
+                  </div>
+                  {check.optional && <span className="text-[9px] px-1.5 py-0.5 rounded bg-yellow-500/20 text-yellow-400">{t('training.optional')}</span>}
+                </div>
+              ))}
+            </div>
+            <div className="flex justify-end gap-2">
+              <button onClick={() => setShowPublishCheck(false)}
+                className="px-4 py-2 text-xs rounded-lg transition"
+                style={{ color: 'var(--t-text-dim)', border: '1px solid var(--t-border)' }}>
+                {t('training.cancel')}
+              </button>
+              <button onClick={confirmPublish} disabled={!canPublish || publishing}
+                className="px-4 py-2 text-xs font-medium text-white rounded-lg transition disabled:opacity-40 bg-green-600 hover:bg-green-500">
+                {publishing ? t('training.publishing') : t('training.confirmPublish')}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )

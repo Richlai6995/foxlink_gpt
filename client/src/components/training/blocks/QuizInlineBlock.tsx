@@ -1,8 +1,24 @@
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { CheckCircle2 } from 'lucide-react'
 
-export default function QuizInlineBlock({ block }: { block: any }) {
+interface QuizInlineResult {
+  block_type: string
+  block_index: number
+  player_mode: string
+  question_type: string
+  user_answer: any
+  correct_answer: any
+  points: number
+  total_time_seconds: number
+}
+
+export default function QuizInlineBlock({ block, blockIndex = 0, playerMode = 'learn', onInteractionComplete }: {
+  block: any
+  blockIndex?: number
+  playerMode?: string
+  onInteractionComplete?: (result: QuizInlineResult) => void
+}) {
   const { t } = useTranslation()
   const questionType = block.question_type || 'single_choice'
   const options: { text: string; correct: boolean }[] = block.options || []
@@ -10,6 +26,7 @@ export default function QuizInlineBlock({ block }: { block: any }) {
   const [fillAnswer, setFillAnswer] = useState('')
   const [submitted, setSubmitted] = useState(false)
   const [isCorrect, setIsCorrect] = useState(false)
+  const startTimeRef = useRef<number>(Date.now())
 
   const toggleOption = (idx: number) => {
     if (submitted) return
@@ -24,16 +41,33 @@ export default function QuizInlineBlock({ block }: { block: any }) {
 
   const submit = () => {
     setSubmitted(true)
+    let correct = false
     if (questionType === 'fill_blank') {
       const answers: string[] = block.correct_answers || []
-      setIsCorrect(answers.some(a => a.toLowerCase().trim() === fillAnswer.toLowerCase().trim()))
+      correct = answers.some(a => a.toLowerCase().trim() === fillAnswer.toLowerCase().trim())
     } else {
       const correctSet = new Set(options.map((o, i) => o.correct ? i : -1).filter(i => i >= 0))
-      setIsCorrect(
-        selected.size === correctSet.size &&
-        [...selected].every(i => correctSet.has(i))
-      )
+      correct = selected.size === correctSet.size && [...selected].every(i => correctSet.has(i))
     }
+    setIsCorrect(correct)
+
+    // Fire interaction complete
+    const totalTime = Math.round((Date.now() - startTimeRef.current) / 1000)
+    const qType = questionType === 'single_choice' ? 'single' : questionType === 'multi_choice' ? 'multi' : 'fill_blank'
+    const userAnswer = questionType === 'fill_blank' ? fillAnswer : [...selected]
+    const correctAnswer = questionType === 'fill_blank'
+      ? (block.correct_answers || [])
+      : options.map((o, i) => o.correct ? i : -1).filter(i => i >= 0)
+    onInteractionComplete?.({
+      block_type: 'quiz_inline',
+      block_index: blockIndex,
+      player_mode: playerMode,
+      question_type: qType,
+      user_answer: userAnswer,
+      correct_answer: correctAnswer,
+      points: block.points || 10,
+      total_time_seconds: totalTime
+    })
   }
 
   return (

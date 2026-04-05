@@ -25,7 +25,7 @@ interface CourseDetail {
 export default function CourseDetail() {
   const { id } = useParams()
   const navigate = useNavigate()
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const { user } = useAuth()
   const [course, setCourse] = useState<CourseDetail | null>(null)
   const [loading, setLoading] = useState(true)
@@ -39,7 +39,7 @@ export default function CourseDetail() {
   const loadCourse = async () => {
     try {
       const [courseRes, progressRes] = await Promise.all([
-        api.get(`/training/courses/${id}`),
+        api.get(`/training/courses/${id}`, { params: { lang: i18n.language } }),
         api.get(`/training/courses/${id}/my-progress`)
       ])
       setCourse(courseRes.data)

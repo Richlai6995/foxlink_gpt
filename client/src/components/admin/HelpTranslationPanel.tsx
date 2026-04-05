@@ -22,6 +22,14 @@ interface SectionStatus {
   iconColor: string
   lastModified: string
   translations: Record<string, TransInfo>
+  linkedCourseId?: number | null
+  linkedLessonId?: number | null
+}
+
+interface CourseOption {
+  id: number
+  title: string
+  lessons?: { id: number; title: string }[]
 }
 
 interface LlmModelOption {
@@ -77,6 +85,14 @@ export default function HelpTranslationPanel() {
   const singleJobIdRef = useRef<Record<string, string>>({})
   const knownErrorsRef = useRef<Set<string>>(new Set())
 
+  // Course linking
+  const [courses, setCourses] = useState<CourseOption[]>([])
+  const [linkingSection, setLinkingSection] = useState<string | null>(null)
+  const [linkCourseId, setLinkCourseId] = useState<number | null>(null)
+  const [linkLessonId, setLinkLessonId] = useState<number | null>(null)
+  const [linkLessons, setLinkLessons] = useState<{ id: number; title: string }[]>([])
+  const [linkSaving, setLinkSaving] = useState(false)
+
   // Edit modal
   const [editModal, setEditModal] = useState<{
     sectionId: string
@@ -117,6 +133,10 @@ export default function HelpTranslationPanel() {
   useEffect(() => {
     fetchStatus()
     fetchModels()
+    // Fetch courses for linking
+    api.get('/training/courses', { params: { my_only: '1' } })
+      .then(res => setCourses(res.data))
+      .catch(() => {})
   }, [fetchStatus, fetchModels])
 
   function isOutdated(section: SectionStatus, lang: string): boolean {
@@ -681,11 +701,60 @@ export default function HelpTranslationPanel() {
                     <span className={`${section.iconColor} flex-shrink-0`}>
                       {getIcon(section.icon, 'sm')}
                     </span>
-                    <div>
+                    <div className="flex-1">
                       <div className="font-medium text-slate-700">
                         {section.translations['zh-TW']?.title || section.id}
                       </div>
                       <div className="text-xs text-slate-400">{section.id}</div>
+                      {/* Course Link badge or edit */}
+                      {linkingSection === section.id ? (
+                        <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
+                          <select value={linkCourseId || ''} onChange={async e => {
+                            const cid = e.target.value ? Number(e.target.value) : null
+                            setLinkCourseId(cid)
+                            setLinkLessonId(null)
+                            if (cid) {
+                              try {
+                                const res = await api.get(`/training/courses/${cid}`)
+                                setLinkLessons(res.data.lessons || [])
+                              } catch { setLinkLessons([]) }
+                            } else { setLinkLessons([]) }
+                          }} className="text-[11px] border rounded px-1.5 py-0.5 max-w-[160px]">
+                            <option value="">-- 無 --</option>
+                            {courses.map(c => <option key={c.id} value={c.id}>{c.title}</option>)}
+                          </select>
+                          {linkCourseId && linkLessons.length > 0 && (
+                            <select value={linkLessonId || ''} onChange={e => setLinkLessonId(e.target.value ? Number(e.target.value) : null)}
+                              className="text-[11px] border rounded px-1.5 py-0.5 max-w-[140px]">
+                              <option value="">全部章節</option>
+                              {linkLessons.map(l => <option key={l.id} value={l.id}>{l.title}</option>)}
+                            </select>
+                          )}
+                          <button onClick={async () => {
+                            setLinkSaving(true)
+                            try {
+                              await api.put(`/help/admin/sections/${section.id}/link`, { linked_course_id: linkCourseId, linked_lesson_id: linkLessonId })
+                              await fetchStatus()
+                              setLinkingSection(null)
+                            } catch (e) { console.error(e) }
+                            finally { setLinkSaving(false) }
+                          }} disabled={linkSaving} className="text-[10px] bg-blue-500 text-white px-2 py-0.5 rounded hover:bg-blue-600 disabled:opacity-50">
+                            {linkSaving ? '...' : '儲存'}
+                          </button>
+                          <button onClick={() => setLinkingSection(null)} className="text-[10px] text-slate-400 hover:text-slate-600">取消</button>
+                        </div>
+                      ) : (
+                        <button onClick={() => {
+                          setLinkingSection(section.id)
+                          setLinkCourseId(section.linkedCourseId || null)
+                          setLinkLessonId(section.linkedLessonId || null)
+                          if (section.linkedCourseId) {
+                            api.get(`/training/courses/${section.linkedCourseId}`).then(res => setLinkLessons(res.data.lessons || [])).catch(() => setLinkLessons([]))
+                          }
+                        }} className="mt-1 text-[10px] text-blue-500 hover:text-blue-700 flex items-center gap-0.5">
+                          🎓 {section.linkedCourseId ? `已綁定 #${section.linkedCourseId}` : '綁定教材'}
+                        </button>
+                      )}
                     </div>
                   </div>
                 </td>

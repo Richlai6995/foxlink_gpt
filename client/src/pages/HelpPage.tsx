@@ -12,7 +12,8 @@ import {
 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import api from '../lib/api'
-import { RenderHelpSections, getIcon, type HelpSectionData } from '../components/HelpBlockRenderer'
+import { RenderHelpSections, RenderHelpSection, getIcon, type HelpSectionData } from '../components/HelpBlockRenderer'
+import HelpTrainingPlayer from '../components/training/HelpTrainingPlayer'
 
 // ── Reusable layout helpers ───────────────────────────────────────────────────
 
@@ -6417,6 +6418,7 @@ export default function HelpPage() {
   const contentRef = useRef<HTMLDivElement>(null)
   const [apiSections, setApiSections] = useState<HelpSectionData[]>([])
   const [loadingApi, setLoadingApi] = useState(false)
+  const [trainingTarget, setTrainingTarget] = useState<{ courseId: number; lessonId?: number | null } | null>(null)
 
   // Fetch user sections from API (multilingual)
   useEffect(() => {
@@ -6538,12 +6540,37 @@ export default function HelpPage() {
                   <Loader2 className="animate-spin text-blue-500" size={24} />
                 </div>
               ) : useApi ? (
-                <RenderHelpSections sections={apiSections} />
+                <>
+                  {apiSections.map(section => (
+                    <div key={section.id} className="relative">
+                      {section.linkedCourseId && (
+                        <div className="float-right mt-2 mr-1">
+                          <button
+                            onClick={() => setTrainingTarget({ courseId: section.linkedCourseId!, lessonId: section.linkedLessonId })}
+                            className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg transition bg-blue-50 text-blue-600 hover:bg-blue-100 border border-blue-200"
+                          >
+                            🎓 {t('help.interactiveTutorial')}
+                          </button>
+                        </div>
+                      )}
+                      <RenderHelpSection section={section} />
+                    </div>
+                  ))}
+                </>
               ) : (
                 <UserManual />
               )
             ) : (
               <AdminManual />
+            )}
+
+            {/* Help Training Player Modal */}
+            {trainingTarget && (
+              <HelpTrainingPlayer
+                courseId={trainingTarget.courseId}
+                lessonId={trainingTarget.lessonId}
+                onClose={() => setTrainingTarget(null)}
+              />
             )}
 
             {/* Footer */}
