@@ -1566,6 +1566,8 @@ async function runMigrations(db) {
   await addCol('HELP_SECTIONS', 'LINKED_LESSON_ID', 'NUMBER');
 
   await addCol('INTERACTION_RESULTS', 'EXAM_TOPIC_ID', 'NUMBER');
+  await addCol('INTERACTION_RESULTS', 'WEIGHTED_SCORE', 'NUMBER');
+  await addCol('INTERACTION_RESULTS', 'WEIGHTED_MAX', 'NUMBER');
 
   // ── Training Platform: 課程分類（樹狀，最多 3 層）─────────────────────────────
   await createTable('COURSE_CATEGORIES', `CREATE TABLE course_categories (

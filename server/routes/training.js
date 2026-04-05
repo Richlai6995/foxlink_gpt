@@ -336,8 +336,8 @@ router.get('/courses', async (req, res) => {
              MAX(last_topic) AS last_exam_topic
       FROM (
         SELECT ir.course_id, ir.session_id,
-               SUM(ir.score) AS session_score,
-               SUM(ir.max_score) AS session_max,
+               SUM(COALESCE(ir.weighted_score, ir.score)) AS session_score,
+               SUM(COALESCE(ir.weighted_max, ir.max_score)) AS session_max,
                MAX(ir.created_at) AS last_at,
                MAX(et.title) AS last_topic
         FROM interaction_results ir
@@ -1719,7 +1719,8 @@ router.post('/slides/:sid/interaction-result', async (req, res) => {
     const { block_index, block_type, player_mode, action_log, total_time_seconds,
             steps_completed, total_steps, wrong_clicks,
             interaction_mode, user_answer, correct_answer, mode: ddMode,
-            question_type, points, session_id, exam_topic_id } = req.body;
+            question_type, points, session_id, exam_topic_id,
+            weighted_max: reqWeightedMax } = req.body;
 
     // Load course scoring config
     const course = await db.prepare('SELECT settings_json FROM courses WHERE id=?').get(slide.course_id);
@@ -1744,15 +1745,18 @@ router.post('/slides/:sid/interaction-result', async (req, res) => {
       INSERT INTO interaction_results
         (user_id, slide_id, course_id, block_index, block_type, player_mode,
          action_log, total_time_seconds, steps_completed, total_steps, wrong_clicks,
-         score, max_score, score_breakdown, session_id, exam_topic_id)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         score, max_score, score_breakdown, session_id, exam_topic_id,
+         weighted_score, weighted_max)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       req.user.id, slideId, slide.course_id,
       block_index || 0, block_type || null, player_mode || null,
       JSON.stringify(action_log || []), total_time_seconds || 0,
       steps_completed || 0, total_steps || 0, wrong_clicks || 0,
       result.score, result.max_score, JSON.stringify(result.breakdown),
-      session_id || null, exam_topic_id || null
+      session_id || null, exam_topic_id || null,
+      reqWeightedMax ? Math.round((result.max_score > 0 ? result.score / result.max_score : 0) * reqWeightedMax) : null,
+      reqWeightedMax ?? null
     );
 
     res.json({ ok: true, score: result.score, max_score: result.max_score, score_breakdown: result.breakdown });
@@ -4659,11 +4663,11 @@ router.get('/courses/:id/my-interaction-history', async (req, res) => {
       params.push(lessonId);
     }
 
-    // Session-level aggregation (with exam_topic_id + title)
+    // Session-level aggregation — use weighted scores when available, fallback to raw
     const sessions = await db.prepare(`
       SELECT ir.session_id, ir.player_mode,
-             SUM(ir.score) AS total_score,
-             SUM(ir.max_score) AS total_max,
+             SUM(COALESCE(ir.weighted_score, ir.score)) AS total_score,
+             SUM(COALESCE(ir.weighted_max, ir.max_score)) AS total_max,
              COUNT(*) AS interactions,
              ROUND(SUM(ir.total_time_seconds)) AS total_time,
              MIN(ir.created_at) AS started_at,

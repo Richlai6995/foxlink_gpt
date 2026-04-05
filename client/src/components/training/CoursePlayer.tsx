@@ -287,19 +287,22 @@ export function CoursePlayerInner({ courseId, lessonId, lang: langProp, sessionI
   // ─── Interaction complete handler ───
   const handleInteractionComplete = useCallback(async (slideId: number, result: any) => {
     try {
+      // Send weighted_max so server can compute weighted_score = ratio × weighted_max
+      const weight = (playerMode === 'test') ? getSlideWeight(slideId, interactiveIndices.length) : undefined
+
       const res = await api.post(`/training/slides/${slideId}/interaction-result`, {
         ...result,
         player_mode: playerMode,
         session_id: sessionId || null,
-        exam_topic_id: examTopic?.id || examTopicId || null
+        exam_topic_id: examTopic?.id || examTopicId || null,
+        weighted_max: weight ?? undefined
       })
 
       if (playerMode === 'test' && examPhase === 'running' && res.data?.score !== undefined) {
         const rawScore = res.data.score
         const rawMax = res.data.max_score
         const ratio = rawMax > 0 ? rawScore / rawMax : 0
-        const weight = getSlideWeight(slideId, interactiveIndices.length)
-        const weightedScore = Math.round(ratio * weight)
+        const weightedScore = Math.round(ratio * (weight || rawMax))
 
         // Find which interactive question # this is
         const slideIdx = allSlides.findIndex(s => s.id === slideId)
