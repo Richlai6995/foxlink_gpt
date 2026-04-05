@@ -4576,4 +4576,348 @@ router.get('/courses/:id/my-interaction-history', async (req, res) => {
   }
 });
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// Course Package Export / Import (環境遷移用)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// GET /api/training/courses/:id/export-package — download ZIP with full course data + files
+router.get('/courses/:id/export-package', loadCoursePermission, requirePermission('owner', 'admin', 'develop'), async (req, res) => {
+  try {
+    const courseId = req.courseId;
+    const archiver = require('archiver');
+
+    // 1. Course metadata
+    const course = await db.prepare('SELECT * FROM courses WHERE id=?').get(courseId);
+    if (!course) return res.status(404).json({ error: '課程不存在' });
+
+    // 2. Lessons
+    const lessons = await db.prepare('SELECT * FROM course_lessons WHERE course_id=? ORDER BY sort_order').all(courseId);
+
+    // 3. Slides (per lesson)
+    const slides = [];
+    for (const lesson of lessons) {
+      const lessonSlides = await db.prepare('SELECT * FROM course_slides WHERE lesson_id=? ORDER BY sort_order').all(lesson.id);
+      slides.push(...lessonSlides.map(s => ({ ...s, _lesson_sort: lesson.sort_order })));
+    }
+
+    // 4. Quiz questions
+    const questions = await db.prepare('SELECT * FROM quiz_questions WHERE course_id=? ORDER BY sort_order').all(courseId);
+
+    // 5. Translations
+    const courseTranslations = await db.prepare('SELECT * FROM course_translations WHERE course_id=?').all(courseId);
+    const lessonIds = lessons.map(l => l.id);
+    let lessonTranslations = [];
+    if (lessonIds.length > 0) {
+      const ph = lessonIds.map(() => '?').join(',');
+      lessonTranslations = await db.prepare(`SELECT * FROM lesson_translations WHERE lesson_id IN (${ph})`).all(...lessonIds);
+    }
+    const slideIds = slides.map(s => s.id);
+    let slideTranslations = [];
+    if (slideIds.length > 0) {
+      const ph = slideIds.map(() => '?').join(',');
+      slideTranslations = await db.prepare(`SELECT * FROM slide_translations WHERE slide_id IN (${ph})`).all(...slideIds);
+    }
+    const questionIds = questions.map(q => q.id);
+    let quizTranslations = [];
+    if (questionIds.length > 0) {
+      const ph = questionIds.map(() => '?').join(',');
+      quizTranslations = await db.prepare(`SELECT * FROM quiz_translations WHERE question_id IN (${ph})`).all(...questionIds);
+    }
+
+    // 6. Slide branches
+    let slideBranches = [];
+    if (slideIds.length > 0) {
+      const ph = slideIds.map(() => '?').join(',');
+      slideBranches = await db.prepare(`SELECT * FROM slide_branches WHERE slide_id IN (${ph})`).all(...slideIds);
+    }
+
+    // 7. Collect referenced files
+    const fileRefs = new Set();
+    const collectFileRefs = (json) => {
+      if (!json) return;
+      const str = typeof json === 'string' ? json : JSON.stringify(json);
+      const matches = str.match(/\/api\/training\/files\/[^"'\s,)}\]]+/g);
+      if (matches) matches.forEach(m => fileRefs.add(m.replace('/api/training/files/', '')));
+    };
+    for (const s of slides) {
+      collectFileRefs(s.content_json);
+      if (s.audio_url) fileRefs.add(s.audio_url.replace('/api/training/files/', ''));
+    }
+    for (const st of slideTranslations) {
+      collectFileRefs(st.content_json);
+      if (st.audio_url) fileRefs.add(st.audio_url.replace('/api/training/files/', ''));
+    }
+    if (course.cover_image) fileRefs.add(course.cover_image.replace('/api/training/files/', ''));
+
+    // Build manifest
+    const manifest = {
+      version: 1,
+      exported_at: new Date().toISOString(),
+      course: {
+        title: course.title,
+        description: course.description,
+        category_name: course.category_id ? (await db.prepare('SELECT name FROM course_categories WHERE id=?').get(course.category_id))?.name : null,
+        pass_score: course.pass_score,
+        max_attempts: course.max_attempts,
+        time_limit_minutes: course.time_limit_minutes,
+        is_public: course.is_public,
+        settings_json: course.settings_json,
+        cover_image: course.cover_image,
+      },
+      lessons: lessons.map(l => ({
+        _orig_id: l.id,
+        title: l.title,
+        sort_order: l.sort_order,
+        lesson_type: l.lesson_type,
+      })),
+      slides: slides.map(s => ({
+        _orig_id: s.id,
+        _orig_lesson_id: s.lesson_id,
+        slide_type: s.slide_type,
+        content_json: s.content_json,
+        notes: s.notes,
+        audio_url: s.audio_url,
+        duration_seconds: s.duration_seconds,
+        sort_order: s.sort_order,
+      })),
+      questions: questions.map(q => ({
+        _orig_id: q.id,
+        question_type: q.question_type,
+        question_json: q.question_json,
+        answer_json: q.answer_json,
+        scoring_json: q.scoring_json,
+        points: q.points,
+        explanation: q.explanation,
+        sort_order: q.sort_order,
+      })),
+      slide_branches: slideBranches.map(b => ({
+        _orig_slide_id: b.slide_id,
+        option_text: b.option_text,
+        option_index: b.option_index,
+        _orig_target_slide_id: b.target_slide_id,
+        _orig_target_lesson_id: b.target_lesson_id,
+      })),
+      translations: {
+        course: courseTranslations.map(ct => ({ lang: ct.lang, title: ct.title, description: ct.description })),
+        lessons: lessonTranslations.map(lt => ({ _orig_lesson_id: lt.lesson_id, lang: lt.lang, title: lt.title })),
+        slides: slideTranslations.map(st => ({
+          _orig_slide_id: st.slide_id, lang: st.lang,
+          content_json: st.content_json, notes: st.notes, audio_url: st.audio_url,
+          image_overrides: st.image_overrides, regions_json: st.regions_json,
+        })),
+        questions: quizTranslations.map(qt => ({
+          _orig_question_id: qt.question_id, lang: qt.lang,
+          question_json: qt.question_json, explanation: qt.explanation,
+        })),
+      },
+    };
+
+    // Stream ZIP response
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', `attachment; filename="course_${courseId}_export.zip"`);
+
+    const archive = archiver('zip', { zlib: { level: 5 } });
+    archive.pipe(res);
+    archive.append(JSON.stringify(manifest, null, 2), { name: 'manifest.json' });
+
+    // Add files
+    const uploadDir = path.join(UPLOAD_ROOT);
+    for (const ref of fileRefs) {
+      const filePath = path.join(uploadDir, ref);
+      if (fs.existsSync(filePath)) {
+        archive.file(filePath, { name: `files/${ref}` });
+      }
+    }
+
+    await archive.finalize();
+  } catch (e) {
+    console.error('[Training] export-package:', e.message);
+    if (!res.headersSent) res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/training/courses/import-package — upload ZIP, create full course
+router.post('/courses/import-package', upload.single('package'), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+    if (req.user.role !== 'admin' && req.user.effective_training_permission !== 'edit')
+      return res.status(403).json({ error: '權限不足' });
+
+    const JSZip = require('jszip');
+    const zip = await JSZip.loadAsync(req.file.buffer);
+
+    const manifestFile = zip.file('manifest.json');
+    if (!manifestFile) return res.status(400).json({ error: 'Invalid package: missing manifest.json' });
+    const manifest = JSON.parse(await manifestFile.async('text'));
+    if (!manifest.version || !manifest.course) return res.status(400).json({ error: 'Invalid manifest format' });
+
+    const c = manifest.course;
+
+    // 1. Find or create category
+    let categoryId = null;
+    if (c.category_name) {
+      const existing = await db.prepare('SELECT id FROM course_categories WHERE name=?').get(c.category_name);
+      if (existing) {
+        categoryId = existing.id;
+      } else {
+        const catResult = await db.prepare('INSERT INTO course_categories (name, created_by) VALUES (?, ?)').run(c.category_name, req.user.id);
+        categoryId = catResult.lastInsertRowid;
+      }
+    }
+
+    // 2. Create course
+    const courseResult = await db.prepare(`
+      INSERT INTO courses (title, description, category_id, pass_score, max_attempts, time_limit_minutes, is_public, settings_json, created_by, status)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft')
+    `).run(
+      c.title, c.description, categoryId,
+      c.pass_score || 60, c.max_attempts || null, c.time_limit_minutes || null,
+      c.is_public || 0, c.settings_json || null, req.user.id
+    );
+    const newCourseId = courseResult.lastInsertRowid;
+
+    // ID mapping
+    const lessonIdMap = {};  // orig_id → new_id
+    const slideIdMap = {};   // orig_id → new_id
+    const questionIdMap = {}; // orig_id → new_id
+
+    // 3. Create lessons
+    for (const l of (manifest.lessons || [])) {
+      const lr = await db.prepare(`
+        INSERT INTO course_lessons (course_id, title, sort_order, lesson_type) VALUES (?, ?, ?, ?)
+      `).run(newCourseId, l.title, l.sort_order || 0, l.lesson_type || 'standard');
+      lessonIdMap[l._orig_id] = lr.lastInsertRowid;
+    }
+
+    // 4. Extract files first (so slides can reference them)
+    const courseDir = `course_${newCourseId}`;
+    const targetDir = path.join(UPLOAD_ROOT, courseDir);
+    if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
+
+    const filePathMap = {}; // old relative path → new relative path
+    const filesFolder = zip.folder('files');
+    if (filesFolder) {
+      const fileEntries = [];
+      filesFolder.forEach((relativePath, file) => {
+        if (!file.dir) fileEntries.push({ relativePath, file });
+      });
+      for (const { relativePath, file } of fileEntries) {
+        const content = await file.async('nodebuffer');
+        const fileName = path.basename(relativePath);
+        const newPath = path.join(targetDir, fileName);
+        fs.writeFileSync(newPath, content);
+        filePathMap[relativePath] = `${courseDir}/${fileName}`;
+      }
+    }
+
+    // Helper: remap file paths in JSON string
+    const remapPaths = (jsonStr) => {
+      if (!jsonStr) return jsonStr;
+      let result = jsonStr;
+      for (const [oldPath, newPath] of Object.entries(filePathMap)) {
+        result = result.split(`/api/training/files/${oldPath}`).join(`/api/training/files/${newPath}`);
+      }
+      return result;
+    };
+
+    // 5. Create slides
+    for (const s of (manifest.slides || [])) {
+      const newLessonId = lessonIdMap[s._orig_lesson_id];
+      if (!newLessonId) continue;
+
+      const contentJson = remapPaths(s.content_json);
+      const audioUrl = s.audio_url ? remapPaths(s.audio_url) : null;
+
+      const sr = await db.prepare(`
+        INSERT INTO course_slides (lesson_id, slide_type, content_json, notes, audio_url, duration_seconds, sort_order)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `).run(newLessonId, s.slide_type || 'content', contentJson, s.notes, audioUrl, s.duration_seconds || null, s.sort_order || 0);
+      slideIdMap[s._orig_id] = sr.lastInsertRowid;
+    }
+
+    // 6. Create quiz questions
+    for (const q of (manifest.questions || [])) {
+      const qr = await db.prepare(`
+        INSERT INTO quiz_questions (course_id, question_type, question_json, answer_json, scoring_json, points, explanation, sort_order)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(newCourseId, q.question_type, q.question_json, q.answer_json, q.scoring_json || null, q.points || 10, q.explanation || null, q.sort_order || 0);
+      questionIdMap[q._orig_id] = qr.lastInsertRowid;
+    }
+
+    // 7. Create slide branches (remap IDs)
+    for (const b of (manifest.slide_branches || [])) {
+      const newSlideId = slideIdMap[b._orig_slide_id];
+      if (!newSlideId) continue;
+      await db.prepare(`
+        INSERT INTO slide_branches (slide_id, option_text, option_index, target_slide_id, target_lesson_id)
+        VALUES (?, ?, ?, ?, ?)
+      `).run(newSlideId, b.option_text, b.option_index || 0,
+        b._orig_target_slide_id ? (slideIdMap[b._orig_target_slide_id] || null) : null,
+        b._orig_target_lesson_id ? (lessonIdMap[b._orig_target_lesson_id] || null) : null
+      );
+    }
+
+    // 8. Import translations
+    const trans = manifest.translations || {};
+
+    for (const ct of (trans.course || [])) {
+      await db.prepare(`INSERT INTO course_translations (course_id, lang, title, description) VALUES (?, ?, ?, ?)`)
+        .run(newCourseId, ct.lang, ct.title, ct.description);
+    }
+
+    for (const lt of (trans.lessons || [])) {
+      const newLessonId = lessonIdMap[lt._orig_lesson_id];
+      if (!newLessonId) continue;
+      await db.prepare(`INSERT INTO lesson_translations (lesson_id, lang, title) VALUES (?, ?, ?)`)
+        .run(newLessonId, lt.lang, lt.title);
+    }
+
+    for (const st of (trans.slides || [])) {
+      const newSlideId = slideIdMap[st._orig_slide_id];
+      if (!newSlideId) continue;
+      const contentJson = remapPaths(st.content_json);
+      const audioUrl = st.audio_url ? remapPaths(st.audio_url) : null;
+      await db.prepare(`
+        INSERT INTO slide_translations (slide_id, lang, content_json, notes, audio_url, image_overrides, regions_json)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `).run(newSlideId, st.lang, contentJson, st.notes || null, audioUrl,
+        st.image_overrides ? remapPaths(st.image_overrides) : null,
+        st.regions_json || null);
+    }
+
+    for (const qt of (trans.questions || [])) {
+      const newQid = questionIdMap[qt._orig_question_id];
+      if (!newQid) continue;
+      await db.prepare(`INSERT INTO quiz_translations (question_id, lang, question_json, explanation) VALUES (?, ?, ?, ?)`)
+        .run(newQid, qt.lang, qt.question_json, qt.explanation || null);
+    }
+
+    // 9. Cover image
+    if (c.cover_image) {
+      const newCover = remapPaths(c.cover_image);
+      await db.prepare('UPDATE courses SET cover_image=? WHERE id=?').run(newCover, newCourseId);
+    }
+
+    res.json({
+      ok: true,
+      course_id: newCourseId,
+      stats: {
+        lessons: Object.keys(lessonIdMap).length,
+        slides: Object.keys(slideIdMap).length,
+        questions: Object.keys(questionIdMap).length,
+        files: Object.keys(filePathMap).length,
+        translations: {
+          course: (trans.course || []).length,
+          lessons: (trans.lessons || []).length,
+          slides: (trans.slides || []).length,
+          questions: (trans.questions || []).length,
+        }
+      }
+    });
+  } catch (e) {
+    console.error('[Training] import-package:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 module.exports = router;

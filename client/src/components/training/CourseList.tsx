@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
 import { useTranslation } from 'react-i18next'
 import api from '../../lib/api'
-import { Plus, Search, ArrowLeft, FolderTree, BookOpen, Clock, CheckCircle2, ChevronRight, Filter, Settings, Trash2 } from 'lucide-react'
+import { Plus, Search, ArrowLeft, FolderTree, BookOpen, Clock, CheckCircle2, ChevronRight, Filter, Settings, Trash2, Upload } from 'lucide-react'
 import CategoryManager from './CategoryManager'
 import ThemePicker from './ThemePicker'
 
@@ -144,6 +144,26 @@ export default function CourseList({ editorMode = false }: { editorMode?: boolea
             >
               <Plus size={14} /> {t('training.addCourse')}
             </button>
+          )}
+          {canEdit && (
+            <label className="flex items-center gap-1.5 border px-3 py-1.5 rounded-lg text-xs font-medium cursor-pointer transition hover:opacity-80"
+              style={{ borderColor: 'var(--t-border)', color: 'var(--t-text-secondary)' }}>
+              <Upload size={13} /> {t('training.importPackage')}
+              <input type="file" accept=".zip" className="hidden" onChange={async e => {
+                const file = e.target.files?.[0]
+                if (!file) return
+                const fd = new FormData()
+                fd.append('package', file)
+                try {
+                  const res = await api.post('/training/courses/import-package', fd)
+                  alert(`${t('training.importSuccess')}\n${t('training.lessons')}: ${res.data.stats.lessons}, ${t('training.slides')}: ${res.data.stats.slides}`)
+                  navigate(`/training/editor/${res.data.course_id}`)
+                } catch (err: any) {
+                  alert(err.response?.data?.error || t('training.importFailed'))
+                }
+                e.target.value = ''
+              }} />
+            </label>
           )}
 
           {!editorMode && canEdit && (

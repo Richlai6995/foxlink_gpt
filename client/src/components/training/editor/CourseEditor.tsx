@@ -251,6 +251,19 @@ export default function CourseEditor() {
           {!isNew && (
             <ExportButton courseId={Number(id)} />
           )}
+          {!isNew && (
+            <button onClick={() => {
+              const a = document.createElement('a')
+              a.href = `/api/training/courses/${id}/export-package`
+              a.download = `course_${id}_export.zip`
+              a.click()
+            }}
+              className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg border transition hover:opacity-80"
+              style={{ borderColor: 'var(--t-border)', color: 'var(--t-text-dim)' }}
+              title={t('training.exportPackage')}>
+              <Download size={13} /> {t('training.exportPackage')}
+            </button>
+          )}
           {!isNew && course.status === 'draft' && (
             <button onClick={openPublishCheck}
               className="text-xs bg-green-600 hover:bg-green-500 text-white px-3 py-1.5 rounded-lg transition">
