@@ -4720,14 +4720,25 @@ router.get('/courses/:id/export-package', loadCoursePermission, requirePermissio
     archive.pipe(res);
     archive.append(JSON.stringify(manifest, null, 2), { name: 'manifest.json' });
 
-    // Add files
-    const uploadDir = path.join(UPLOAD_ROOT);
+    // Add files (try multiple upload roots)
+    let filesFound = 0;
     for (const ref of fileRefs) {
-      const filePath = path.join(uploadDir, ref);
-      if (fs.existsSync(filePath)) {
-        archive.file(filePath, { name: `files/${ref}` });
+      let filePath = path.join(UPLOAD_ROOT, ref);
+      if (!fs.existsSync(filePath)) {
+        // Fallback: try alternative upload dir (Docker legacy)
+        const altPath = path.join(path.resolve('/app/uploads/training'), ref);
+        if (fs.existsSync(altPath)) filePath = altPath;
+        else {
+          // Try relative to localUploads
+          const localPath = path.join(localUploads, ref);
+          if (fs.existsSync(localPath)) filePath = localPath;
+          else { console.warn(`[Export] File not found: ${ref}`); continue; }
+        }
       }
+      archive.file(filePath, { name: `files/${ref}` });
+      filesFound++;
     }
+    console.log(`[Export] Course ${courseId}: ${fileRefs.size} refs, ${filesFound} files found`);
 
     await archive.finalize();
   } catch (e) {
@@ -4809,6 +4820,7 @@ router.post('/courses/import-package', upload.single('package'), async (req, res
         fs.writeFileSync(newPath, content);
         filePathMap[relativePath] = `${courseDir}/${fileName}`;
       }
+      console.log(`[Import] Extracted ${fileEntries.length} files to ${targetDir}`);
     }
 
     // Helper: remap file paths in JSON string
