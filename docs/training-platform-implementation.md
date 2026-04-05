@@ -1,7 +1,7 @@
 # FOXLINK GPT 教育訓練平台 — 實作完成報告
 
-> 日期：2026-04-02（Phase 1-2F）、2026-04-03（Phase 3A）、2026-04-04（Phase 3B + i18n）、2026-04-05（Phase 3C + 3D-Help）
-> 狀態：Phase 1 + Phase 2A-F + Phase 3A-3C + Phase 3D-Help 實作完成（Phase 3E 規劃中）
+> 日期：2026-04-02（Phase 1-2F）、2026-04-03（Phase 3A）、2026-04-04（Phase 3B + i18n）、2026-04-05（Phase 3C + 3D-Help + 3D-Export）
+> 狀態：Phase 1 + Phase 2A-F + Phase 3A-3D 實作完成（Phase 3E 規劃中）
 > 設計文件：[training-platform-design.md](training-platform-design.md)
 
 ---
@@ -2442,7 +2442,182 @@ API: `PUT /api/help/admin/sections/:id/link` → body `{ linked_course_id, linke
 
 ---
 
-## 15. Phase 3E — 分析與進階功能（規劃中）
+## 15. Phase 3D-Export — 課程匯出/匯入封包（✅ 完成）
+
+> 狀態：2026-04-05 實作完成
+
+### 設計目標
+
+支援測試環境 → 正式環境的課程遷移。匯出完整課程封包（ZIP），含所有 metadata + 翻譯 + 引用檔案，匯入時自動重建課程並 remap 所有 ID。
+
+### 15-1：匯出封包格式
+
+```
+course_42_export.zip
+├── manifest.json       ← 課程完整結構化資料
+└── files/              ← 所有引用的圖片/音訊檔案
+    ├── course_42/screenshot1.png
+    ├── course_42/narration.mp3
+    └── ...
+```
+
+**manifest.json 結構**：
+```json
+{
+  "version": 1,
+  "exported_at": "2026-04-05T14:30:00.000Z",
+  "course": {
+    "title": "...", "description": "...", "category_name": "...",
+    "pass_score": 60, "max_attempts": null, "time_limit_minutes": null,
+    "is_public": 0, "settings_json": "...", "cover_image": "..."
+  },
+  "lessons": [
+    { "_orig_id": 1, "title": "...", "sort_order": 0, "lesson_type": "standard" }
+  ],
+  "slides": [
+    { "_orig_id": 10, "_orig_lesson_id": 1, "slide_type": "content",
+      "content_json": "...", "notes": "...", "audio_url": "...",
+      "duration_seconds": null, "sort_order": 0 }
+  ],
+  "questions": [
+    { "_orig_id": 5, "question_type": "single_choice",
+      "question_json": "...", "answer_json": "...", "scoring_json": "...",
+      "points": 10, "explanation": "...", "sort_order": 0 }
+  ],
+  "slide_branches": [
+    { "_orig_slide_id": 10, "option_text": "...", "option_index": 0,
+      "_orig_target_slide_id": 12, "_orig_target_lesson_id": null }
+  ],
+  "translations": {
+    "course": [{ "lang": "en", "title": "...", "description": "..." }],
+    "lessons": [{ "_orig_lesson_id": 1, "lang": "en", "title": "..." }],
+    "slides": [{ "_orig_slide_id": 10, "lang": "en", "content_json": "...",
+                 "notes": "...", "audio_url": "...",
+                 "image_overrides": "...", "regions_json": "..." }],
+    "questions": [{ "_orig_question_id": 5, "lang": "en",
+                    "question_json": "...", "explanation": "..." }]
+  }
+}
+```
+
+### 15-2：匯出 API
+
+```
+GET /training/courses/:id/export-package
+```
+
+**權限**：owner / admin / develop
+
+**行為**：
+1. 查詢 course + lessons + slides + questions + 所有 translations + slide_branches
+2. 掃描所有 content_json / audio_url / cover_image 中的 `/api/training/files/*` 引用
+3. 用 `archiver` 打包 manifest.json + 實體檔案 → stream ZIP 到 response
+
+### 15-3：匯入 API
+
+```
+POST /training/courses/import-package
+Content-Type: multipart/form-data
+Body: package (ZIP file)
+```
+
+**權限**：admin 或 effective_training_permission='edit'
+
+**行為**：
+1. 用 `JSZip` 解壓 → 讀取 manifest.json
+2. 建立/查找 category（by name）
+3. 建立 course（status='draft'，created_by=當前使用者）
+4. 建立 lessons → 記錄 `lessonIdMap[orig → new]`
+5. 解壓 files/ → 寫入 `uploads/course_{新ID}/` → 記錄 `filePathMap`
+6. 建立 slides（content_json / audio_url 路徑重映射）→ 記錄 `slideIdMap`
+7. 建立 questions → 記錄 `questionIdMap`
+8. 建立 slide_branches（target_slide_id / target_lesson_id 重映射）
+9. 匯入所有 translations（ID 全部重映射）
+10. 更新 cover_image 路徑
+
+**Response**：
+```json
+{
+  "ok": true,
+  "course_id": 99,
+  "stats": {
+    "lessons": 3, "slides": 12, "questions": 5, "files": 8,
+    "translations": { "course": 2, "lessons": 6, "slides": 24, "questions": 10 }
+  }
+}
+```
+
+### 15-4：前端 UI
+
+**匯出**：CourseEditor header → 「匯出封包」按鈕（Download icon）→ 直接 `<a>` 下載 ZIP
+
+**匯入**：CourseList editor 模式 → 「匯入封包」按鈕（Upload icon）→ `<input type="file" accept=".zip">` → POST → alert 統計 → navigate 到新課程編輯器
+
+### 15-5：ID 重映射表
+
+| 原始欄位 | 重映射來源 |
+|----------|-----------|
+| `slides._orig_lesson_id` | `lessonIdMap` |
+| `slide_branches._orig_slide_id` | `slideIdMap` |
+| `slide_branches._orig_target_slide_id` | `slideIdMap` |
+| `slide_branches._orig_target_lesson_id` | `lessonIdMap` |
+| `translations.lessons._orig_lesson_id` | `lessonIdMap` |
+| `translations.slides._orig_slide_id` | `slideIdMap` |
+| `translations.questions._orig_question_id` | `questionIdMap` |
+| 所有 `/api/training/files/course_舊ID/` 路徑 | `filePathMap` |
+
+### 15-6：實作檔案
+
+| 檔案 | 變更 |
+|------|------|
+| `server/routes/training.js` | +`GET /courses/:id/export-package`（archiver ZIP stream）+ `POST /courses/import-package`（JSZip 解壓 + 全量重建） |
+| `client/.../editor/CourseEditor.tsx` | header +「匯出封包」按鈕 |
+| `client/.../CourseList.tsx` | editor 模式 +「匯入封包」按鈕（file input + FormData POST） |
+| `client/src/i18n/locales/{zh-TW,en,vi}.json` | +6 keys（exportPackage, importPackage, importSuccess, importFailed, slides, lessons） |
+
+### 15-7：測試劇本
+
+#### T1：匯出課程
+
+| 步驟 | 操作 | 預期 |
+|------|------|------|
+| 1 | 測試環境 → 有內容的課程 → 課程編輯器 | header 有「匯出封包」按鈕 |
+| 2 | 點擊「匯出封包」 | 瀏覽器下載 `course_XX_export.zip` |
+| 3 | 解壓驗證 | 有 `manifest.json` + `files/` 目錄含圖片音訊 |
+| 4 | 檢查 manifest.json | 含 course/lessons/slides/questions/translations 完整資料 |
+
+#### T2：匯入課程（正式環境）
+
+| 步驟 | 操作 | 預期 |
+|------|------|------|
+| 1 | 正式環境 → 教育訓練 → 課程管理 | 有「匯入封包」按鈕 |
+| 2 | 點擊「匯入封包」→ 選擇 T1 下載的 ZIP | 上傳 → alert 顯示統計（章節數/投影片數） |
+| 3 | 自動跳轉到新課程編輯器 | 課程 title 正確，status=draft |
+| 4 | 檢查章節列表 | 章節數量、標題與原始課程一致 |
+| 5 | 展開投影片 | 投影片內容、圖片正常顯示 |
+| 6 | 播放投影片 | Hotspot regions 正確、音訊正常 |
+| 7 | 切到 Translate tab | en/vi 翻譯已匯入 |
+
+#### T3：匯入完整性驗證
+
+| 步驟 | 操作 | 預期 |
+|------|------|------|
+| 1 | 匯入含 quiz 的課程 | 題庫 tab 顯示所有題目 |
+| 2 | 匯入含 slide_branches 的課程 | 分支跳轉 ID 正確（指向新 slide/lesson） |
+| 3 | 匯入含 cover_image 的課程 | 封面圖正常顯示 |
+| 4 | 匯入的課程分類在正式環境不存在 | 自動建立新分類 |
+
+#### T4：三語言播放驗證
+
+| 步驟 | 操作 | 預期 |
+|------|------|------|
+| 1 | 匯入的課程 → 播放（zh-TW） | 中文內容 + 音訊 |
+| 2 | 切換語言 English → 播放 | 英文翻譯內容 + 英文音訊（如有） |
+| 3 | 切換 vi → 播放 | 越南文 |
+
+---
+
+## 16. Phase 3E — 分析與進階功能（規劃中）
 
 | 功能 | 說明 |
 |------|------|
@@ -2453,7 +2628,7 @@ API: `PUT /api/help/admin/sections/:id/link` → body `{ linked_course_id, linke
 
 ---
 
-## 16. Phase 3F — 教材工具（規劃中）
+## 17. Phase 3F — 教材工具（規劃中）
 
 | 功能 | 說明 |
 |------|------|
@@ -2467,7 +2642,7 @@ API: `PUT /api/help/admin/sections/:id/link` → body `{ linked_course_id, linke
 
 ---
 
-## 17. Phase 4 — 進階差異化功能（遠期規劃）
+## 18. Phase 4 — 進階差異化功能（遠期規劃）
 
 | 功能 | 說明 |
 |------|------|
