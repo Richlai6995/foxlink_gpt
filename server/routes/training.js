@@ -4636,8 +4636,12 @@ router.get('/courses/:id/export-package', loadCoursePermission, requirePermissio
     const collectFileRefs = (json) => {
       if (!json) return;
       const str = typeof json === 'string' ? json : JSON.stringify(json);
-      const matches = str.match(/\/api\/training\/files\/[^"'\s,)}\]]+/g);
-      if (matches) matches.forEach(m => fileRefs.add(m.replace('/api/training/files/', '')));
+      // Match both /api/training/files/... and /uploads/training/... formats
+      const matches = str.match(/(?:\/api\/training\/files\/|\/uploads\/training\/)[^"'\s,)}\]]+/g);
+      if (matches) matches.forEach(m => {
+        const ref = m.replace('/api/training/files/', '').replace(/^\/?(uploads\/training\/)/, '');
+        fileRefs.add(ref);
+      });
     };
     for (const s of slides) {
       collectFileRefs(s.content_json);
@@ -4645,9 +4649,17 @@ router.get('/courses/:id/export-package', loadCoursePermission, requirePermissio
     }
     for (const st of slideTranslations) {
       collectFileRefs(st.content_json);
+      collectFileRefs(st.image_overrides);
+      collectFileRefs(st.regions_json);
       if (st.audio_url) fileRefs.add(st.audio_url.replace('/api/training/files/', ''));
     }
-    if (course.cover_image) fileRefs.add(course.cover_image.replace('/api/training/files/', ''));
+    // Cover image — may be stored as /api/training/files/... or /uploads/training/...
+    if (course.cover_image) {
+      const coverRef = course.cover_image
+        .replace('/api/training/files/', '')
+        .replace(/^\/?(uploads\/training\/)/, '');
+      fileRefs.add(coverRef);
+    }
 
     // Build manifest
     const manifest = {
@@ -4818,12 +4830,13 @@ router.post('/courses/import-package', upload.single('package'), async (req, res
       console.log(`[Import] Extracted ${fileEntries.length} files to ${targetDir}`);
     }
 
-    // Helper: remap file paths in JSON string
+    // Helper: remap file paths in JSON string (handles both /api/training/files/ and /uploads/training/)
     const remapPaths = (jsonStr) => {
       if (!jsonStr) return jsonStr;
       let result = jsonStr;
       for (const [oldPath, newPath] of Object.entries(filePathMap)) {
         result = result.split(`/api/training/files/${oldPath}`).join(`/api/training/files/${newPath}`);
+        result = result.split(`/uploads/training/${oldPath}`).join(`/api/training/files/${newPath}`);
       }
       return result;
     };
