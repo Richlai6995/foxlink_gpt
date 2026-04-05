@@ -21,7 +21,7 @@ interface Block {
   [key: string]: any
 }
 
-export default function SlideRenderer({ slide, isLastSlide = false, playerMode = 'learn' }: { slide: Slide; isLastSlide?: boolean; playerMode?: 'learn' | 'test' }) {
+export default function SlideRenderer({ slide, isLastSlide = false, playerMode = 'learn', audioMuted = false }: { slide: Slide; isLastSlide?: boolean; playerMode?: 'learn' | 'test'; audioMuted?: boolean }) {
   const { t } = useTranslation()
   const blocks: Block[] = useMemo(() => {
     try { return JSON.parse(slide.content_json || '[]') }
@@ -35,13 +35,13 @@ export default function SlideRenderer({ slide, isLastSlide = false, playerMode =
   return (
     <div className="space-y-6">
       {blocks.map((block, idx) => (
-        <BlockRenderer key={idx} block={block} isLastSlide={isLastSlide} playerMode={playerMode} slideAudioUrl={slide.audio_url} />
+        <BlockRenderer key={idx} block={block} isLastSlide={isLastSlide} playerMode={playerMode} slideAudioUrl={slide.audio_url} audioMuted={audioMuted} />
       ))}
     </div>
   )
 }
 
-function BlockRenderer({ block, isLastSlide = false, playerMode = 'learn', slideAudioUrl }: { block: Block; isLastSlide?: boolean; playerMode?: 'learn' | 'test'; slideAudioUrl?: string | null }) {
+function BlockRenderer({ block, isLastSlide = false, playerMode = 'learn', slideAudioUrl, audioMuted = false }: { block: Block; isLastSlide?: boolean; playerMode?: 'learn' | 'test'; slideAudioUrl?: string | null; audioMuted?: boolean }) {
   const { t } = useTranslation()
   switch (block.type) {
     case 'text':
@@ -115,7 +115,7 @@ function BlockRenderer({ block, isLastSlide = false, playerMode = 'learn', slide
         </pre>
       )
 
-    case 'hotspot': return <HotspotBlock block={block} isLastSlide={isLastSlide} playerMode={playerMode} slideAudioUrl={slideAudioUrl} />
+    case 'hotspot': return <HotspotBlock block={block} isLastSlide={isLastSlide} playerMode={playerMode} slideAudioUrl={slideAudioUrl} globalMuted={audioMuted} />
     case 'dragdrop': return <DragDropBlock block={block} />
     case 'flipcard': return <FlipCardBlock block={block} />
     case 'branch': return <BranchBlock block={block} />

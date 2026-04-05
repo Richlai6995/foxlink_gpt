@@ -221,7 +221,7 @@ export default function CoursePlayer() {
         {/* Slide content */}
         <div className="flex-1 overflow-y-auto flex items-start justify-center px-6 py-4" style={{ backgroundColor: 'var(--t-bg)' }}>
           <div className="w-full max-w-7xl">
-            <SlideRenderer slide={currentSlide} isLastSlide={currentIdx === allSlides.length - 1} playerMode={playerMode} />
+            <SlideRenderer slide={currentSlide} isLastSlide={currentIdx === allSlides.length - 1} playerMode={playerMode} audioMuted={audioMuted} />
           </div>
         </div>
 

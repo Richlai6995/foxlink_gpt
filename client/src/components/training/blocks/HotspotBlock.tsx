@@ -20,10 +20,11 @@ interface Props {
   isLastSlide?: boolean
   playerMode?: 'learn' | 'test'
   slideAudioUrl?: string | null
+  globalMuted?: boolean
   onAllComplete?: () => void
 }
 
-export default function HotspotBlock({ block, isLastSlide = false, playerMode = 'learn', slideAudioUrl, onAllComplete }: Props) {
+export default function HotspotBlock({ block, isLastSlide = false, playerMode = 'learn', slideAudioUrl, globalMuted = false, onAllComplete }: Props) {
   const { t } = useTranslation()
   const isTestMode = playerMode === 'test'
   // In test mode, always use guided (step-by-step) regardless of block setting
@@ -48,7 +49,7 @@ export default function HotspotBlock({ block, isLastSlide = false, playerMode = 
   const [completed, setCompleted] = useState(false)
   const [hoverRegion, setHoverRegion] = useState<string | null>(null)
   const [zoomed, setZoomed] = useState(false)
-  const [muted, setMuted] = useState(false)
+  const [muted, setMuted] = useState(globalMuted)
   const [transitioning, setTransitioning] = useState(false)
   const [introPlayed, setIntroPlayed] = useState(false)
   const [introPlaying, setIntroPlaying] = useState(false)
@@ -91,6 +92,11 @@ export default function HotspotBlock({ block, isLastSlide = false, playerMode = 
       audioRef.current.onended = null
     }
   }, [])
+
+  // Sync global mute from CoursePlayer header
+  useEffect(() => {
+    setMuted(globalMuted)
+  }, [globalMuted])
 
   // Stop audio when muted — also skip intro if still playing
   useEffect(() => {
