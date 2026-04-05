@@ -4720,20 +4720,15 @@ router.get('/courses/:id/export-package', loadCoursePermission, requirePermissio
     archive.pipe(res);
     archive.append(JSON.stringify(manifest, null, 2), { name: 'manifest.json' });
 
-    // Add files (try multiple upload roots)
+    // Add files (uploadDir = UPLOAD_ROOT/training/, which is where express.static serves from)
     let filesFound = 0;
     for (const ref of fileRefs) {
-      let filePath = path.join(UPLOAD_ROOT, ref);
+      let filePath = path.join(uploadDir, ref);
       if (!fs.existsSync(filePath)) {
         // Fallback: try alternative upload dir (Docker legacy)
-        const altPath = path.join(path.resolve('/app/uploads/training'), ref);
+        const altPath = path.join(altUploadDir, ref);
         if (fs.existsSync(altPath)) filePath = altPath;
-        else {
-          // Try relative to localUploads
-          const localPath = path.join(localUploads, ref);
-          if (fs.existsSync(localPath)) filePath = localPath;
-          else { console.warn(`[Export] File not found: ${ref}`); continue; }
-        }
+        else { console.warn(`[Export] File not found: ${ref} (tried ${uploadDir})`); continue; }
       }
       archive.file(filePath, { name: `files/${ref}` });
       filesFound++;
@@ -4803,7 +4798,7 @@ router.post('/courses/import-package', upload.single('package'), async (req, res
 
     // 4. Extract files first (so slides can reference them)
     const courseDir = `course_${newCourseId}`;
-    const targetDir = path.join(UPLOAD_ROOT, courseDir);
+    const targetDir = path.join(uploadDir, courseDir);
     if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
 
     const filePathMap = {}; // old relative path → new relative path
