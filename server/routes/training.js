@@ -866,9 +866,10 @@ router.put('/courses/:id/lessons/reorder', loadCoursePermission, requirePermissi
 // ═══════════════════════════════════════════════════════════════════════════════
 
 // Helper: verify lesson belongs to an accessible course
-async function verifyLessonAccess(lessonId, user, requireEdit = false) {
+async function verifyLessonAccess(lessonId, user, requireEdit = false, helpBypass = false) {
   const lesson = await db.prepare('SELECT course_id FROM course_lessons WHERE id=?').get(lessonId);
   if (!lesson) return { error: '章節不存在', status: 404 };
+  if (helpBypass) return { lesson, permission: 'view', courseId: lesson.course_id };
   const perm = await canUserAccessCourse(lesson.course_id, user);
   if (!perm.access) return { error: '權限不足', status: 403 };
   if (requireEdit && !['owner', 'admin', 'develop'].includes(perm.permission))
@@ -876,10 +877,10 @@ async function verifyLessonAccess(lessonId, user, requireEdit = false) {
   return { lesson, permission: perm.permission, courseId: lesson.course_id };
 }
 
-// GET /api/training/lessons/:lid/slides?lang=en
+// GET /api/training/lessons/:lid/slides?lang=en&help=1
 router.get('/lessons/:lid/slides', async (req, res) => {
   try {
-    const check = await verifyLessonAccess(req.params.lid, req.user);
+    const check = await verifyLessonAccess(req.params.lid, req.user, false, req.query.help === '1');
     if (check.error) return res.status(check.status).json({ error: check.error });
 
     const lang = req.query.lang;

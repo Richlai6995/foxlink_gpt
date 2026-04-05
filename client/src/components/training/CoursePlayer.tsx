@@ -72,7 +72,9 @@ export function CoursePlayerInner({ courseId, lessonId, lang: langProp, sessionI
 
       const slides: Slide[] = []
       for (const lesson of targetLessons) {
-        const res = await api.get(`/training/lessons/${lesson.id}/slides`, { params: { lang } })
+        const slideParams: any = { lang }
+        if (skipAccessCheck) slideParams.help = '1'
+        const res = await api.get(`/training/lessons/${lesson.id}/slides`, { params: slideParams })
         slides.push(...res.data)
       }
       setAllSlides(slides)
