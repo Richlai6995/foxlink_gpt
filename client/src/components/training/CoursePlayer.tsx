@@ -52,6 +52,19 @@ interface SlideResult {
 // CoursePlayerInner — shared core
 // ═══════════════════════════════════════════════════════════════════════════════
 
+interface ExamTopicConfig {
+  id: number
+  title: string
+  total_score: number
+  pass_score: number
+  time_limit_minutes: number
+  time_limit_enabled: number
+  overtime_action: string
+  scoring_mode: string
+  custom_weights: Record<string, number>
+  lessons: { lesson_id: number }[]
+}
+
 interface CoursePlayerInnerProps {
   courseId: number
   lessonId?: number | null
@@ -60,9 +73,10 @@ interface CoursePlayerInnerProps {
   skipAccessCheck?: boolean
   onClose: () => void
   initialMode?: 'learn' | 'test'
+  examTopicId?: number | null   // if set, use exam topic config instead of course settings
 }
 
-export function CoursePlayerInner({ courseId, lessonId, lang: langProp, sessionId, skipAccessCheck, onClose, initialMode = 'learn' }: CoursePlayerInnerProps) {
+export function CoursePlayerInner({ courseId, lessonId, lang: langProp, sessionId, skipAccessCheck, onClose, initialMode = 'learn', examTopicId }: CoursePlayerInnerProps) {
   const { t, i18n } = useTranslation()
   const [course, setCourse] = useState<any>(null)
   const [lessons, setLessons] = useState<Lesson[]>([])
@@ -79,6 +93,9 @@ export function CoursePlayerInner({ courseId, lessonId, lang: langProp, sessionI
   const [playerMode, setPlayerMode] = useState<'learn' | 'test'>(initialMode)
   const audioRef = useRef<HTMLAudioElement>(null)
   const [scoreToast, setScoreToast] = useState<{ score: number; max: number; label: string } | null>(null)
+
+  // ─── Exam topic override ───
+  const [examTopic, setExamTopic] = useState<ExamTopicConfig | null>(null)
 
   // ─── Exam state ───
   const [examPhase, setExamPhase] = useState<'idle' | 'start' | 'running' | 'result'>('idle')
@@ -104,8 +121,25 @@ export function CoursePlayerInner({ courseId, lessonId, lang: langProp, sessionI
       const courseRes = await api.get(`/training/courses/${courseId}`, { params })
       setCourse(courseRes.data)
 
+      // Load exam topic if specified
+      let topicLessonIds: number[] | null = null
+      if (examTopicId) {
+        try {
+          const topicsRes = await api.get(`/training/courses/${courseId}/exam-topics`, { params: skipAccessCheck ? { help: '1' } : {} })
+          const topic = (topicsRes.data as ExamTopicConfig[]).find(t => t.id === examTopicId)
+          if (topic) {
+            setExamTopic(topic)
+            topicLessonIds = topic.lessons.map(l => l.lesson_id)
+          }
+        } catch {}
+      }
+
       const courseLessons: Lesson[] = courseRes.data.lessons || []
-      const targetLessons = lessonId ? courseLessons.filter(l => l.id === lessonId) : courseLessons
+      let targetLessons = lessonId ? courseLessons.filter(l => l.id === lessonId) : courseLessons
+      // Filter by exam topic lessons
+      if (topicLessonIds) {
+        targetLessons = targetLessons.filter(l => topicLessonIds!.includes(l.id))
+      }
       setLessons(targetLessons)
 
       const slides: Slide[] = []
@@ -125,14 +159,15 @@ export function CoursePlayerInner({ courseId, lessonId, lang: langProp, sessionI
     }
   }
 
-  // ─── Exam config helpers ───
-  const examConfig = course?.settings_json?.exam || {}
+  // ─── Exam config helpers (exam topic overrides course defaults) ───
+  const examConfig = examTopic || course?.settings_json?.exam || {}
   const examTotalScore = examConfig.total_score || 100
+  const examPassScore = examTopic?.pass_score || course?.pass_score || 60
   const examTimeLimit = examConfig.time_limit_minutes || 10
-  const examTimeLimitEnabled = examConfig.time_limit_enabled !== false
+  const examTimeLimitEnabled = examConfig.time_limit_enabled !== false && examConfig.time_limit_enabled !== 0
   const examOvertimeAction = examConfig.overtime_action || 'auto_submit'
   const examScoringMode = examConfig.scoring_mode || 'even'
-  const examCustomWeights = examConfig.custom_weights || {}
+  const examCustomWeights = (typeof examConfig.custom_weights === 'string' ? JSON.parse(examConfig.custom_weights || '{}') : examConfig.custom_weights) || {}
 
   // Calculate per-slide weight
   const getSlideWeight = useCallback((slideId: number, interactiveCount: number) => {
@@ -317,14 +352,15 @@ export function CoursePlayerInner({ courseId, lessonId, lang: langProp, sessionI
       <div className="flex-1 flex items-center justify-center p-8">
         <div className="max-w-md w-full rounded-2xl p-8 text-center" style={{ backgroundColor: 'var(--t-bg-card)', border: '1px solid var(--t-border)' }}>
           <div className="text-4xl mb-4">📝</div>
-          <h2 className="text-lg font-bold mb-2" style={{ color: 'var(--t-text)' }}>{course.title}</h2>
+          <h2 className="text-lg font-bold mb-1" style={{ color: 'var(--t-text)' }}>{examTopic?.title || course.title}</h2>
+          {examTopic && <p className="text-xs mb-2" style={{ color: 'var(--t-text-dim)' }}>{course.title}</p>}
           <div className="space-y-2 mb-6 text-sm" style={{ color: 'var(--t-text-secondary)' }}>
             <p>📊 {t('training.examTotalScore')}: <strong>{examTotalScore} {t('training.examPoints')}</strong></p>
             <p>📋 {t('training.examQuestionCount')}: <strong>{interactiveIndices.length} {t('training.examQuestions')}</strong></p>
             {examTimeLimitEnabled && (
               <p>⏱ {t('training.examTimeLimit')}: <strong>{examTimeLimit} {t('training.examMinutes')}</strong></p>
             )}
-            <p>✅ {t('training.examPassScore')}: <strong>{course.pass_score || 60} {t('training.examPoints')}</strong></p>
+            <p>✅ {t('training.examPassScore')}: <strong>{examPassScore} {t('training.examPoints')}</strong></p>
           </div>
           <div className="text-xs mb-6 px-4 py-3 rounded-lg text-left space-y-1" style={{ backgroundColor: 'var(--t-bg-inset)', color: 'var(--t-text-dim)' }}>
             <p>• {t('training.examHint1')}</p>
@@ -365,7 +401,7 @@ export function CoursePlayerInner({ courseId, lessonId, lang: langProp, sessionI
       }
     })
     const totalFinalMax = fullResults.reduce((s, r) => s + r.weightedMax, 0)
-    const passed = totalWeighted >= (course.pass_score || 60)
+    const passed = totalWeighted >= examPassScore
     const elapsedSec = Math.round((Date.now() - examStartTime) / 1000)
 
     return (
@@ -382,7 +418,7 @@ export function CoursePlayerInner({ courseId, lessonId, lang: langProp, sessionI
             </div>
             <span className={`text-xs font-medium px-3 py-1 rounded-full ${passed ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
               {passed ? `✅ ${t('training.examPassed')}` : `❌ ${t('training.examFailed')}`}
-              {` (${t('training.examPassScore')}: ${course.pass_score || 60})`}
+              {` (${t('training.examPassScore')}: ${examPassScore})`}
             </span>
           </div>
 
@@ -680,7 +716,8 @@ export default function CoursePlayer() {
   const { id } = useParams()
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
-  const sessionId = useMemo(() => crypto.randomUUID(), [id])
+  const examTopicParam = searchParams.get('examTopic')
+  const sessionId = useMemo(() => crypto.randomUUID(), [id, examTopicParam])
   const initialMode = searchParams.get('mode') === 'test' ? 'test' as const : 'learn' as const
 
   useEffect(() => {
@@ -699,6 +736,7 @@ export default function CoursePlayer() {
         courseId={Number(id)}
         sessionId={sessionId}
         initialMode={initialMode}
+        examTopicId={examTopicParam ? Number(examTopicParam) : undefined}
         lang={searchParams.get('lang') || undefined}
         onClose={() => navigate(`/training/course/${id}`)}
       />

@@ -58,7 +58,7 @@ export default function CourseEditor() {
   const [categories, setCategories] = useState<Category[]>([])
   const [loading, setLoading] = useState(!isNew)
   const [saving, setSaving] = useState(false)
-  const [activeTab, setActiveTab] = useState<'info' | 'lessons' | 'quiz' | 'translate' | 'settings' | 'reports'>('info')
+  const [activeTab, setActiveTab] = useState<'info' | 'lessons' | 'quiz' | 'examTopics' | 'translate' | 'settings' | 'reports'>('info')
   const [expandedLesson, setExpandedLesson] = useState<number | null>(null)
   const [lessonSlides, setLessonSlides] = useState<Record<number, Slide[]>>({})
   const [editingSlideId, setEditingSlideId] = useState<number | null>(null)
@@ -199,10 +199,11 @@ export default function CourseEditor() {
 
   if (loading) return <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: 'var(--t-bg)', color: 'var(--t-text-dim)' }}>{t('training.loading')}</div>
 
-  const tabs: { key: 'info' | 'lessons' | 'quiz' | 'translate' | 'settings' | 'reports'; label: string; icon: typeof FileText }[] = [
+  const tabs: { key: 'info' | 'lessons' | 'quiz' | 'examTopics' | 'translate' | 'settings' | 'reports'; label: string; icon: typeof FileText }[] = [
     { key: 'info', label: t('training.tabInfo'), icon: FileText },
     { key: 'lessons', label: t('training.tabLessons'), icon: Play },
     { key: 'quiz', label: t('training.tabQuiz'), icon: FileText },
+    { key: 'examTopics', label: t('training.tabExamTopics'), icon: FileText },
     { key: 'translate', label: t('training.tabTranslate'), icon: FileText },
     { key: 'reports', label: t('training.tabReports'), icon: FileText },
     { key: 'settings', label: t('training.tabSettings'), icon: Settings },
@@ -721,6 +722,11 @@ export default function CourseEditor() {
           </div>
         )}
 
+        {/* Exam Topics Tab */}
+        {activeTab === 'examTopics' && !isNew && id && (
+          <ExamTopicsManager courseId={Number(id)} lessons={lessons} examDefaults={course.settings_json?.exam} passScore={course.pass_score} />
+        )}
+
         {/* Reports Tab */}
         {activeTab === 'reports' && !isNew && id && (
           <InteractionReport courseId={Number(id)} />
@@ -798,11 +804,18 @@ export default function CourseEditor() {
 
                 return (
                   <div className="space-y-4">
-                    <div className="grid grid-cols-3 gap-4">
+                    <div className="grid grid-cols-4 gap-4">
                       <div>
                         <label className="text-[10px] block mb-0.5" style={{ color: 'var(--t-text-dim)' }}>{t('training.totalScore')}</label>
                         <input type="number" min={10} max={1000} value={exam.total_score || 100}
                           onChange={e => updateExam({ total_score: Number(e.target.value) })}
+                          className="w-full border rounded px-2 py-1.5 text-xs"
+                          style={{ backgroundColor: 'var(--t-bg-input)', borderColor: 'var(--t-border)', color: 'var(--t-text)' }} />
+                      </div>
+                      <div>
+                        <label className="text-[10px] block mb-0.5" style={{ color: 'var(--t-text-dim)' }}>{t('training.passScore')}</label>
+                        <input type="number" min={0} max={1000} value={course.pass_score || 60}
+                          onChange={e => setCourse({ ...course, pass_score: Number(e.target.value) })}
                           className="w-full border rounded px-2 py-1.5 text-xs"
                           style={{ backgroundColor: 'var(--t-bg-input)', borderColor: 'var(--t-border)', color: 'var(--t-text)' }} />
                       </div>
@@ -1190,6 +1203,239 @@ function ExportButton({ courseId }: { courseId: number }) {
           <button onClick={() => setOpen(false)} className="w-full text-[10px] py-1" style={{ color: 'var(--t-text-dim)' }}>
             {t('training.cancel')}
           </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ExamTopicsManager
+// ═══════════════════════════════════════════════════════════════════════════════
+
+function ExamTopicsManager({ courseId, lessons, examDefaults, passScore }: {
+  courseId: number
+  lessons: { id: number; title: string }[]
+  examDefaults?: any
+  passScore?: number
+}) {
+  const { t } = useTranslation()
+  const [topics, setTopics] = useState<any[]>([])
+  const [loading, setLoading] = useState(true)
+  const [editing, setEditing] = useState<any | null>(null) // null=closed, {}=new, {id:...}=edit
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => { loadTopics() }, [courseId])
+
+  const loadTopics = async () => {
+    try {
+      setLoading(true)
+      const res = await api.get(`/training/courses/${courseId}/exam-topics`)
+      setTopics(res.data)
+    } catch (e) { console.error(e) }
+    finally { setLoading(false) }
+  }
+
+  const openNew = () => {
+    const defaults = examDefaults || {}
+    setEditing({
+      title: '', description: '',
+      lesson_ids: lessons.map(l => l.id),
+      total_score: defaults.total_score || 100,
+      pass_score: passScore || 60,
+      time_limit_minutes: defaults.time_limit_minutes || 10,
+      time_limit_enabled: defaults.time_limit_enabled !== false,
+      overtime_action: defaults.overtime_action || 'auto_submit',
+      scoring_mode: 'even',
+    })
+  }
+
+  const openEdit = (topic: any) => {
+    setEditing({
+      ...topic,
+      lesson_ids: (topic.lessons || []).map((l: any) => l.lesson_id),
+      time_limit_enabled: topic.time_limit_enabled !== 0,
+    })
+  }
+
+  const saveTopic = async () => {
+    if (!editing?.title?.trim()) return
+    setSaving(true)
+    try {
+      if (editing.id) {
+        await api.put(`/training/exam-topics/${editing.id}`, editing)
+      } else {
+        await api.post(`/training/courses/${courseId}/exam-topics`, editing)
+      }
+      setEditing(null)
+      loadTopics()
+    } catch (e: any) {
+      alert(e.response?.data?.error || 'Error')
+    } finally { setSaving(false) }
+  }
+
+  const deleteTopic = async (id: number) => {
+    if (!confirm(t('training.confirmDeleteExamTopic'))) return
+    try {
+      await api.delete(`/training/exam-topics/${id}`)
+      loadTopics()
+    } catch (e) { console.error(e) }
+  }
+
+  if (loading) return <div className="text-center py-8" style={{ color: 'var(--t-text-dim)' }}>{t('training.loading')}</div>
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-4">
+        <div>
+          <h3 className="text-sm font-semibold" style={{ color: 'var(--t-text)' }}>{t('training.examTopicManagement')}</h3>
+          <p className="text-[10px]" style={{ color: 'var(--t-text-dim)' }}>{t('training.examTopicDesc')}</p>
+        </div>
+        <button onClick={openNew}
+          className="flex items-center gap-1 text-xs font-medium text-white px-3 py-1.5 rounded-lg transition"
+          style={{ backgroundColor: 'var(--t-accent-bg)' }}>
+          + {t('training.addExamTopic')}
+        </button>
+      </div>
+
+      {topics.length === 0 && !editing && (
+        <div className="text-center py-12" style={{ color: 'var(--t-text-dim)' }}>
+          <p className="text-sm">{t('training.noExamTopics')}</p>
+        </div>
+      )}
+
+      <div className="space-y-3">
+        {topics.map(topic => (
+          <div key={topic.id} className="rounded-xl p-4" style={{ backgroundColor: 'var(--t-bg-card)', border: '1px solid var(--t-border)' }}>
+            <div className="flex items-center gap-3">
+              <div className="flex-1">
+                <div className="text-sm font-medium" style={{ color: 'var(--t-text)' }}>{topic.title}</div>
+                <div className="text-[10px] mt-0.5 flex gap-3" style={{ color: 'var(--t-text-dim)' }}>
+                  <span>{t('training.examTotalScore')}: {topic.total_score}</span>
+                  <span>{t('training.passScore')}: {topic.pass_score}</span>
+                  <span>⏱ {topic.time_limit_enabled ? `${topic.time_limit_minutes} min` : t('training.noTimeLimit')}</span>
+                  <span>{(topic.lessons || []).length} {t('training.chaptersIncluded')}</span>
+                </div>
+                {topic.lessons?.length > 0 && (
+                  <div className="text-[9px] mt-1 flex flex-wrap gap-1">
+                    {topic.lessons.map((l: any) => (
+                      <span key={l.lesson_id} className="px-1.5 py-0.5 rounded" style={{ backgroundColor: 'var(--t-accent-subtle)', color: 'var(--t-accent)' }}>
+                        {l.title}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <button onClick={() => openEdit(topic)} className="text-xs px-2 py-1 rounded transition hover:opacity-80"
+                style={{ color: 'var(--t-accent)', border: '1px solid var(--t-border)' }}>
+                {t('training.edit')}
+              </button>
+              <button onClick={() => deleteTopic(topic.id)} className="text-xs text-red-400 hover:text-red-300 px-2 py-1">
+                {t('training.delete')}
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Edit/Create Modal */}
+      {editing && (
+        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center" onClick={() => setEditing(null)}>
+          <div className="rounded-xl p-6 max-w-lg w-full mx-4 shadow-2xl max-h-[80vh] overflow-y-auto"
+            style={{ backgroundColor: 'var(--t-bg-card)', border: '1px solid var(--t-border)' }}
+            onClick={e => e.stopPropagation()}>
+            <h3 className="text-sm font-semibold mb-4" style={{ color: 'var(--t-text)' }}>
+              {editing.id ? t('training.editExamTopic') : t('training.addExamTopic')}
+            </h3>
+
+            <div className="space-y-3">
+              <div>
+                <label className="text-[10px] block mb-0.5" style={{ color: 'var(--t-text-dim)' }}>{t('training.examTopicTitle')}</label>
+                <input value={editing.title} onChange={e => setEditing({ ...editing, title: e.target.value })}
+                  className="w-full border rounded px-2 py-1.5 text-xs"
+                  style={{ backgroundColor: 'var(--t-bg-input)', borderColor: 'var(--t-border)', color: 'var(--t-text)' }} />
+              </div>
+
+              <div>
+                <label className="text-[10px] block mb-1" style={{ color: 'var(--t-text-dim)' }}>{t('training.includedChapters')}</label>
+                <div className="space-y-1">
+                  {lessons.map(l => (
+                    <label key={l.id} className="flex items-center gap-2 text-xs cursor-pointer" style={{ color: 'var(--t-text)' }}>
+                      <input type="checkbox"
+                        checked={(editing.lesson_ids || []).includes(l.id)}
+                        onChange={e => {
+                          const ids = [...(editing.lesson_ids || [])]
+                          if (e.target.checked) ids.push(l.id)
+                          else ids.splice(ids.indexOf(l.id), 1)
+                          setEditing({ ...editing, lesson_ids: ids })
+                        }}
+                        className="rounded" />
+                      {l.title}
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-3 gap-3">
+                <div>
+                  <label className="text-[10px] block mb-0.5" style={{ color: 'var(--t-text-dim)' }}>{t('training.totalScore')}</label>
+                  <input type="number" min={10} max={1000} value={editing.total_score || 100}
+                    onChange={e => setEditing({ ...editing, total_score: Number(e.target.value) })}
+                    className="w-full border rounded px-2 py-1.5 text-xs"
+                    style={{ backgroundColor: 'var(--t-bg-input)', borderColor: 'var(--t-border)', color: 'var(--t-text)' }} />
+                </div>
+                <div>
+                  <label className="text-[10px] block mb-0.5" style={{ color: 'var(--t-text-dim)' }}>{t('training.passScore')}</label>
+                  <input type="number" min={0} max={1000} value={editing.pass_score || 60}
+                    onChange={e => setEditing({ ...editing, pass_score: Number(e.target.value) })}
+                    className="w-full border rounded px-2 py-1.5 text-xs"
+                    style={{ backgroundColor: 'var(--t-bg-input)', borderColor: 'var(--t-border)', color: 'var(--t-text)' }} />
+                </div>
+                <div>
+                  <label className="text-[10px] block mb-0.5" style={{ color: 'var(--t-text-dim)' }}>{t('training.timeLimitMin')}</label>
+                  <input type="number" min={1} max={180} value={editing.time_limit_minutes || 10}
+                    onChange={e => setEditing({ ...editing, time_limit_minutes: Number(e.target.value) })}
+                    className="w-full border rounded px-2 py-1.5 text-xs"
+                    style={{ backgroundColor: 'var(--t-bg-input)', borderColor: 'var(--t-border)', color: 'var(--t-text)' }} />
+                </div>
+              </div>
+
+              <div className="flex items-center gap-4">
+                <label className="flex items-center gap-2 text-[11px] cursor-pointer" style={{ color: 'var(--t-text)' }}>
+                  <input type="checkbox" checked={editing.time_limit_enabled !== false}
+                    onChange={e => setEditing({ ...editing, time_limit_enabled: e.target.checked })}
+                    className="rounded" />
+                  {t('training.enableTimeLimit')}
+                </label>
+                <div className="flex gap-1">
+                  {[{ v: 'auto_submit', l: t('training.autoSubmit') }, { v: 'warn_continue', l: t('training.warnContinue') }].map(opt => (
+                    <button key={opt.v}
+                      onClick={() => setEditing({ ...editing, overtime_action: opt.v })}
+                      className="text-[10px] px-2 py-1 rounded transition"
+                      style={{
+                        backgroundColor: (editing.overtime_action || 'auto_submit') === opt.v ? 'var(--t-accent-subtle)' : 'transparent',
+                        color: (editing.overtime_action || 'auto_submit') === opt.v ? 'var(--t-accent)' : 'var(--t-text-dim)',
+                        border: `1px solid ${(editing.overtime_action || 'auto_submit') === opt.v ? 'var(--t-accent)' : 'var(--t-border)'}`
+                      }}>
+                      {opt.l}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 mt-5">
+              <button onClick={() => setEditing(null)} className="px-4 py-2 text-xs rounded-lg"
+                style={{ color: 'var(--t-text-dim)', border: '1px solid var(--t-border)' }}>
+                {t('training.cancel')}
+              </button>
+              <button onClick={saveTopic} disabled={saving || !editing.title?.trim()}
+                className="px-4 py-2 text-xs font-medium text-white rounded-lg transition disabled:opacity-40"
+                style={{ backgroundColor: 'var(--t-accent-bg)' }}>
+                {saving ? '...' : t('training.save')}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

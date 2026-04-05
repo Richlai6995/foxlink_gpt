@@ -30,6 +30,7 @@ export default function CourseDetail() {
   const [course, setCourse] = useState<CourseDetail | null>(null)
   const [loading, setLoading] = useState(true)
   const [progress, setProgress] = useState<any[]>([])
+  const [examTopics, setExamTopics] = useState<any[]>([])
 
   useEffect(() => {
     if (!id) return
@@ -38,12 +39,14 @@ export default function CourseDetail() {
 
   const loadCourse = async () => {
     try {
-      const [courseRes, progressRes] = await Promise.all([
+      const [courseRes, progressRes, topicsRes] = await Promise.all([
         api.get(`/training/courses/${id}`, { params: { lang: i18n.language } }),
-        api.get(`/training/courses/${id}/my-progress`)
+        api.get(`/training/courses/${id}/my-progress`),
+        api.get(`/training/courses/${id}/exam-topics`).catch(() => ({ data: [] }))
       ])
       setCourse(courseRes.data)
       setProgress(progressRes.data)
+      setExamTopics(topicsRes.data || [])
     } catch (e: any) {
       if (e.response?.status === 403) navigate('/training')
       console.error(e)
@@ -143,6 +146,33 @@ export default function CourseDetail() {
         </div>
 
       </div>
+
+      {/* Exam Topics */}
+      {examTopics.length > 0 && (
+        <div className="mt-6 rounded-xl p-4" style={{ backgroundColor: 'var(--t-bg-card)', border: '1px solid var(--t-border)' }}>
+          <h3 className="text-sm font-semibold mb-3" style={{ color: 'var(--t-text)' }}>📝 {t('training.examTopicList')}</h3>
+          <div className="space-y-2">
+            {examTopics.map((topic: any) => (
+              <div key={topic.id} className="flex items-center gap-3 px-3 py-2.5 rounded-lg transition hover:opacity-90"
+                style={{ backgroundColor: 'var(--t-bg)', border: '1px solid var(--t-border)' }}>
+                <div className="flex-1">
+                  <div className="text-xs font-medium" style={{ color: 'var(--t-text)' }}>{topic.title}</div>
+                  <div className="text-[10px] flex gap-2 mt-0.5" style={{ color: 'var(--t-text-dim)' }}>
+                    <span>{topic.total_score} {t('training.examPoints')}</span>
+                    <span>⏱ {topic.time_limit_enabled ? `${topic.time_limit_minutes} min` : '∞'}</span>
+                    <span>{(topic.lessons || []).length} {t('training.chaptersIncluded')}</span>
+                  </div>
+                </div>
+                <button onClick={() => navigate(`/training/course/${id}/learn?mode=test&examTopic=${topic.id}`)}
+                  className="flex items-center gap-1 text-xs font-medium px-3 py-1.5 rounded-lg text-white transition"
+                  style={{ backgroundColor: '#f59e0b' }}>
+                  <Play size={12} /> {t('training.startExam')}
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Start / Continue button — sticky bottom */}
       <div className="sticky bottom-0 z-10 py-4 flex justify-center gap-3"

@@ -1592,6 +1592,90 @@ router.delete('/notes/:nid', async (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// Exam Topics
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// GET /api/training/courses/:id/exam-topics
+router.get('/courses/:id/exam-topics', loadCoursePermission, async (req, res) => {
+  try {
+    const topics = await db.prepare('SELECT * FROM exam_topics WHERE course_id=? ORDER BY sort_order, id').all(req.courseId);
+    for (const t of topics) {
+      t.lessons = await db.prepare(
+        'SELECT etl.lesson_id, etl.sort_order, cl.title FROM exam_topic_lessons etl JOIN course_lessons cl ON cl.id=etl.lesson_id WHERE etl.exam_topic_id=? ORDER BY etl.sort_order'
+      ).all(t.id);
+      try { t.custom_weights = JSON.parse(t.custom_weights || '{}'); } catch { t.custom_weights = {}; }
+    }
+    res.json(topics);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/training/courses/:id/exam-topics
+router.post('/courses/:id/exam-topics', loadCoursePermission, requirePermission('owner', 'admin', 'develop'), async (req, res) => {
+  try {
+    const { title, description, lesson_ids, total_score, pass_score, time_limit_minutes,
+            time_limit_enabled, overtime_action, scoring_mode, custom_weights } = req.body;
+    if (!title?.trim()) return res.status(400).json({ error: 'Title required' });
+
+    const result = await db.prepare(`
+      INSERT INTO exam_topics (course_id, title, description, total_score, pass_score, time_limit_minutes,
+        time_limit_enabled, overtime_action, scoring_mode, custom_weights, created_by)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(req.courseId, title.trim(), description || null, total_score || 100, pass_score || 60,
+      time_limit_minutes || 10, time_limit_enabled === false ? 0 : 1,
+      overtime_action || 'auto_submit', scoring_mode || 'even',
+      custom_weights ? JSON.stringify(custom_weights) : null, req.user.id);
+
+    const topicId = result.lastInsertRowid;
+    if (Array.isArray(lesson_ids)) {
+      for (let i = 0; i < lesson_ids.length; i++) {
+        await db.prepare('INSERT INTO exam_topic_lessons (exam_topic_id, lesson_id, sort_order) VALUES (?, ?, ?)')
+          .run(topicId, lesson_ids[i], i);
+      }
+    }
+    res.json({ id: topicId });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// PUT /api/training/exam-topics/:tid
+router.put('/exam-topics/:tid', async (req, res) => {
+  try {
+    const topic = await db.prepare('SELECT course_id FROM exam_topics WHERE id=?').get(req.params.tid);
+    if (!topic) return res.status(404).json({ error: 'Not found' });
+
+    const { title, description, lesson_ids, total_score, pass_score, time_limit_minutes,
+            time_limit_enabled, overtime_action, scoring_mode, custom_weights } = req.body;
+
+    await db.prepare(`
+      UPDATE exam_topics SET title=?, description=?, total_score=?, pass_score=?, time_limit_minutes=?,
+        time_limit_enabled=?, overtime_action=?, scoring_mode=?, custom_weights=?
+      WHERE id=?
+    `).run(title, description || null, total_score || 100, pass_score || 60,
+      time_limit_minutes || 10, time_limit_enabled === false ? 0 : 1,
+      overtime_action || 'auto_submit', scoring_mode || 'even',
+      custom_weights ? JSON.stringify(custom_weights) : null, req.params.tid);
+
+    // Rebuild lesson associations
+    if (Array.isArray(lesson_ids)) {
+      await db.prepare('DELETE FROM exam_topic_lessons WHERE exam_topic_id=?').run(req.params.tid);
+      for (let i = 0; i < lesson_ids.length; i++) {
+        await db.prepare('INSERT INTO exam_topic_lessons (exam_topic_id, lesson_id, sort_order) VALUES (?, ?, ?)')
+          .run(req.params.tid, lesson_ids[i], i);
+      }
+    }
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// DELETE /api/training/exam-topics/:tid
+router.delete('/exam-topics/:tid', async (req, res) => {
+  try {
+    await db.prepare('DELETE FROM exam_topic_lessons WHERE exam_topic_id=?').run(req.params.tid);
+    await db.prepare('DELETE FROM exam_topics WHERE id=?').run(req.params.tid);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // Interaction Results (Hotspot / DragDrop / QuizInline)
 // ═══════════════════════════════════════════════════════════════════════════════
 

@@ -1673,6 +1673,32 @@ async function runMigrations(db) {
     reviewed_at     TIMESTAMP
   )`);
 
+  // ── Training Platform: 測驗主題 ─────────────────────────────────────────────
+  await createTable('EXAM_TOPICS', `CREATE TABLE exam_topics (
+    id                 NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    course_id          NUMBER NOT NULL,
+    title              VARCHAR2(500) NOT NULL,
+    description        CLOB,
+    total_score        NUMBER DEFAULT 100,
+    pass_score         NUMBER DEFAULT 60,
+    time_limit_minutes NUMBER DEFAULT 10,
+    time_limit_enabled NUMBER(1) DEFAULT 1,
+    overtime_action    VARCHAR2(20) DEFAULT 'auto_submit',
+    scoring_mode       VARCHAR2(10) DEFAULT 'even',
+    custom_weights     CLOB,
+    sort_order         NUMBER DEFAULT 0,
+    created_by         NUMBER,
+    created_at         TIMESTAMP DEFAULT SYSTIMESTAMP
+  )`);
+
+  await createTable('EXAM_TOPIC_LESSONS', `CREATE TABLE exam_topic_lessons (
+    id              NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    exam_topic_id   NUMBER NOT NULL,
+    lesson_id       NUMBER NOT NULL,
+    sort_order      NUMBER DEFAULT 0,
+    CONSTRAINT uq_etl UNIQUE (exam_topic_id, lesson_id)
+  )`);
+
   // ── Training Platform: 學習進度 ─────────────────────────────────────────────
   await createTable('USER_COURSE_PROGRESS', `CREATE TABLE user_course_progress (
     id                  NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
