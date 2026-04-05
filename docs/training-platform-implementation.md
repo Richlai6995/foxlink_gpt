@@ -1,7 +1,7 @@
 # FOXLINK GPT 教育訓練平台 — 實作完成報告
 
-> 日期：2026-04-02（Phase 1-2F）、2026-04-03（Phase 3A）、2026-04-04（Phase 3B + i18n）、2026-04-05（Phase 3C + 3D-Help + 3D-Export）
-> 狀態：Phase 1 + Phase 2A-F + Phase 3A-3D 實作完成（Phase 3E 規劃中）
+> 日期：2026-04-02（Phase 1-2F）、2026-04-03（Phase 3A）、2026-04-04（Phase 3B + i18n）、2026-04-05（Phase 3C–3D 全部）
+> 狀態：Phase 1 + Phase 2A-F + Phase 3A-3D (含 Help/Export/Exam) 實作完成（Phase 3E 規劃中）
 > 設計文件：[training-platform-design.md](training-platform-design.md)
 
 ---
@@ -2617,7 +2617,199 @@ Body: package (ZIP file)
 
 ---
 
-## 16. Phase 3E — 分析與進階功能（規劃中）
+## 16. Phase 3D-Exam — 測驗系統 + 測驗主題 + 成績紀錄（✅ 完成）
+
+> 狀態：2026-04-05 實作完成
+
+### 16-1：測驗系統重構
+
+**簡化計分**：刪除複雜版評分規則 UI（hotspot 各維度配置），改為配分制：
+
+```
+總分 100 分（可自訂）
+5 題互動投影片 → 每題 20 分（平均 or 自訂）
+每題得分 = interactionScorer 正確比例 × 該題配分
+```
+
+**Learn 模式**：完全不記錄互動成績（不 POST interaction-result），只有 test 模式才計分。
+
+**CourseEditor 設定 tab「測驗設定」**：
+
+| 設定 | 說明 |
+|------|------|
+| 總分 | 預設 100，可自訂 |
+| 及格分數 | `pass_score`，顯示在測驗設定 UI |
+| 時間限制 | N 分鐘，可啟用/關閉 |
+| 超時處理 | 自動結算 / 提醒但允許繼續 |
+| 配分方式 | 平均分配 / 自訂權重 |
+
+存在 `courses.settings_json.exam`。
+
+### 16-2：測驗流程 UI
+
+**起始畫面**（test 模式進入時顯示）：
+- 滿分、題數、時間限制、及格標準
+- 計分說明（每題依正確度比例給分、超時未完成不計分）
+- [開始測驗] 按鈕
+
+**測驗中**：
+- Header 右上角倒數計時器（<2 分鐘紅色閃爍）
+- 只顯示互動投影片（自動跳過純文字/圖片 slide）
+- 完成一題 → toast 顯示配分制分數（如 17/20）→ 2 秒後自動跳下一題
+- 測驗中禁用 Outline/Notes/AI Tutor/鍵盤導航
+
+**結果畫面**：
+- 🏆 總分（大字）+ 及格判定（通過/未通過）+ 用時
+- 每題分數 bar（✅ 滿分 / ⚠️ 部分分 / ❌ 零分）
+- 非滿分的題目可展開「錯題分析」：
+  - Hotspot：步驟完成數 + 錯誤點擊數 + 每次錯誤的位置和命中 region
+  - DragDrop：正確配對/排序數
+  - QuizInline：答對/答錯
+- [重新測驗] 生成新 session_id + 重新倒數
+- [返回]
+
+**超時處理**：
+- `auto_submit`：時間到自動跳到結果畫面，未完成題目 = 0 分
+- `warn_continue`：彈 modal 提醒，可選「立即結算」或「繼續作答」
+
+### 16-3：測驗主題系統
+
+**DB Schema**：
+```sql
+exam_topics (id, course_id, title, description, total_score, pass_score,
+             time_limit_minutes, time_limit_enabled, overtime_action,
+             scoring_mode, custom_weights, sort_order, created_by, created_at)
+
+exam_topic_lessons (id, exam_topic_id, lesson_id, sort_order)  -- junction table
+```
+
+**用途**：一門課可以有多個測驗主題，每個主題包含不同章節組合，各自有獨立的滿分/及格/時間設定。
+
+**CourseEditor「測驗主題」tab**：
+- CRUD 管理（新增/編輯 modal：標題、章節 checkbox 多選、滿分、及格、時間、超時）
+- 新增時預設帶入課程的測驗設定值
+
+**CourseDetail 測驗入口**：
+- 課程詳情頁顯示「📝 測驗主題」列表
+- 每個主題：標題 / 滿分 / 時間 / 章節數 / [開始測驗] 按鈕
+- 點開始 → `?mode=test&examTopic=XX` → CoursePlayerInner 載入 topic config + 篩選章節
+
+### 16-4：成績紀錄與歷史
+
+**DB 新增欄位**：
+```sql
+ALTER TABLE interaction_results ADD exam_topic_id NUMBER;
+ALTER TABLE interaction_results ADD weighted_score NUMBER;
+ALTER TABLE interaction_results ADD weighted_max NUMBER;
+```
+
+- `exam_topic_id`：記錄來自哪個測驗主題
+- `weighted_score` / `weighted_max`：配分制加權分數（前端傳 weighted_max → server 計算 weighted_score = ratio × weighted_max）
+- 歷史查詢用 `COALESCE(weighted_score, score)` 優先用加權分
+
+**CourseDetail「我的測驗紀錄」**：
+- session 列表：序號 / learn|test badge / 測驗主題名稱 / score bar / 分數 / 用時 / 日期時間（到秒）
+- 資料來源：`GET /courses/:id/my-interaction-history`（JOIN exam_topics 回傳 title）
+
+**CourseList 卡片測驗摘要**：
+- 每張課程卡片底部：`📝 3 次測驗 | 平均: 78.5 | 最高: 92/100 (基礎操作)`
+- 資料來源：`GET /courses` 附帶 `my_exam_summary`（server 端 SQL 聚合）
+
+**時間顯示**：所有成績紀錄、InteractionReport、ScoreHistoryPanel 改為 `toLocaleString()`（到時分秒）。
+
+### 16-5：外語 Region 語音編輯
+
+**問題**：LanguageImagePanel 的 region 編輯面板只有 label/correct/feedback，沒有 narration/test_hint/explore_desc 和 VoiceInput → 外語版無法單獨對個別 region 生成語音。
+
+**修正**：region 屬性面板新增三個語音欄位（僅 correct region）：
+- 📖 學習導引（narration）+ VoiceInput（TTS/錄音/上傳）
+- 📝 測驗提示（test_hint）+ VoiceInput
+- 🔍 探索說明（explore_desc）+ VoiceInput
+- VoiceInput 帶 `language` 參數 → 產生對應語言 TTS
+- Region preview 顯示三種語音文字 + 無語音警告
+
+### 16-6：實作檔案
+
+| 檔案 | 變更 |
+|------|------|
+| `server/database-oracle.js` | migration: +exam_topic_id, +weighted_score, +weighted_max on interaction_results; +exam_topics, +exam_topic_lessons 表 |
+| `server/routes/training.js` | interaction-result 存 exam_topic_id + weighted_*; my-interaction-history COALESCE weighted; courses 列表附帶 my_exam_summary; exam-topics CRUD API |
+| `server/services/interactionScorer.js` | config 參數保留（不影響，前端只用 score/max_score 比例） |
+| `client/.../CoursePlayer.tsx` | 測驗起始畫面 + 倒數計時 + 自動跳題 + 結果畫面 + 錯題分析 + examTopicId 支援 + weighted_max POST + learn 模式不 POST |
+| `client/.../editor/CourseEditor.tsx` | 刪複雜版評分 UI → 新測驗設定 + 測驗主題 tab + ExamTopicsManager + pass_score 欄位 |
+| `client/.../CourseDetail.tsx` | 測驗主題列表 + 我的測驗紀錄 + examHistory |
+| `client/.../CourseList.tsx` | 卡片底部 my_exam_summary（次數/平均/最高） |
+| `client/.../HelpTrainingPlayer.tsx` | ScoreHistoryPanel 時間到秒 + exam_topic_title |
+| `client/.../InteractionReport.tsx` | 時間到秒 |
+| `client/.../editor/blocks/LanguageImagePanel.tsx` | region 編輯加 narration/test_hint/explore_desc + VoiceInput |
+| `client/src/i18n/locales/{zh-TW,en,vi}.json` | +60 keys（exam + topic + history + scoring） |
+
+### 16-7：測試劇本
+
+#### T1：測驗設定
+
+| 步驟 | 操作 | 預期 |
+|------|------|------|
+| 1 | CourseEditor → 設定 tab | 顯示「測驗設定」區塊（總分/及格/時間/超時/配分） |
+| 2 | 設定總分 100、及格 60、時間 10 分鐘、自動結算 | |
+| 3 | 儲存 → 重新整理 | 設定值保留 |
+
+#### T2：測驗主題 CRUD
+
+| 步驟 | 操作 | 預期 |
+|------|------|------|
+| 1 | CourseEditor → 測驗主題 tab → [新增] | 彈出 modal，預設帶入測驗設定值 |
+| 2 | 輸入「基礎操作」→ 勾選章節 1+2 → 滿分 100 → 及格 60 → 儲存 | 列表出現新主題 |
+| 3 | 編輯 → 修改及格分數為 70 → 儲存 | 更新成功 |
+| 4 | 刪除 → 確認 | 消失 |
+
+#### T3：測驗流程（配分制）
+
+| 步驟 | 操作 | 預期 |
+|------|------|------|
+| 1 | CourseDetail → 測驗主題「基礎操作」→ [開始測驗] | 起始畫面顯示滿分/題數/時間/及格 |
+| 2 | 點 [開始測驗] | 倒數計時開始，跳到第一題互動投影片 |
+| 3 | 完成 Hotspot | toast：✅ 第 1 題：20/20 → 2 秒後自動跳下一題 |
+| 4 | 故意做錯一題 | toast：⚠️ 第 2 題：12/20 |
+| 5 | 完成所有題 | 結果畫面：總分 92/100 ✅ 通過 |
+| 6 | 展開錯題 | 顯示錯誤點位分析 |
+
+#### T4：成績紀錄一致性
+
+| 步驟 | 操作 | 預期 |
+|------|------|------|
+| 1 | T3 完成後 → 返回 CourseDetail | 「我的測驗紀錄」顯示 #1 test 基礎操作 92/100 日期到秒 |
+| 2 | 課程列表 | 卡片底部：📝 1 次測驗 \| 平均: 92 \| 最高: 92/100 |
+| 3 | Help 嵌入播放 → 成績紀錄 tab | 分數一致（配分制） |
+
+#### T5：Learn 模式不計分
+
+| 步驟 | 操作 | 預期 |
+|------|------|------|
+| 1 | 進入 learn 模式 → 完成 Hotspot | 無 toast、無 score 顯示 |
+| 2 | 查 CourseDetail 測驗紀錄 | 無 learn 模式紀錄 |
+| 3 | 查 DB interaction_results | 無 player_mode='learn' 的新紀錄 |
+
+#### T6：超時處理
+
+| 步驟 | 操作 | 預期 |
+|------|------|------|
+| 1 | 設定時間限制 1 分鐘，自動結算 → 開始測驗 | 倒數開始 |
+| 2 | 等 1 分鐘不操作 | 自動跳到結果畫面，未完成題目 = 0 分 |
+| 3 | 改為「提醒但允許繼續」→ 重來 | 時間到出現 modal：「立即結算」/「繼續作答」 |
+
+#### T7：外語 Region 單獨語音
+
+| 步驟 | 操作 | 預期 |
+|------|------|------|
+| 1 | CourseEditor → 投影片 → Hotspot → 多語底圖 → en tab | |
+| 2 | 點「編輯」→ 選一個 correct region | 右側面板顯示 narration/test_hint/explore_desc + VoiceInput |
+| 3 | 輸入英文文字 → 點 TTS 按鈕 | 生成英文語音 |
+| 4 | 播放課程 en 版 | 該 region 有英文語音 |
+
+---
+
+## 17. Phase 3E — 分析與進階功能（規劃中）
 
 | 功能 | 說明 |
 |------|------|
