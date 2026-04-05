@@ -785,6 +785,123 @@ export default function CourseEditor() {
                 <Save size={13} /> {saving ? t('training.saving') : t('training.saveSettings')}
               </button>
             </div>
+            {/* Scoring Rules */}
+            <div className="rounded-xl p-5 mb-4" style={{ backgroundColor: 'var(--t-bg-card)', border: '1px solid var(--t-border)' }}>
+              <h3 className="text-sm font-semibold mb-1" style={{ color: 'var(--t-text)' }}>{t('training.scoringRules')}</h3>
+              <p className="text-[10px] mb-4" style={{ color: 'var(--t-text-dim)' }}>{t('training.scoringRulesDesc')}</p>
+
+              {(() => {
+                const scoring = course.settings_json?.scoring || {};
+                const updateScoring = (key: string, val: any) => {
+                  setCourse({ ...course, settings_json: { ...(course.settings_json || {}), scoring: { ...scoring, [key]: { ...(scoring[key] || {}), ...val } } } });
+                };
+                const hg = { step_points: 2, order_max: 5, efficiency_max: 3, time_max: 2, time_thresholds: [30, 60], efficiency_thresholds: [0, 2, 5], ...scoring.hotspot_guided };
+                const he = { correctness_weight: 70, efficiency_weight: 30, ...scoring.hotspot_explore };
+                const dd = { partial_credit: true, ...scoring.dragdrop };
+                const qi = { partial_credit: true, wrong_penalty: 0.5, ...scoring.quiz_inline };
+
+                const NumInput = ({ label, value, onChange, min = 0, max = 100, step = 1 }: { label: string; value: number; onChange: (v: number) => void; min?: number; max?: number; step?: number }) => (
+                  <div>
+                    <label className="text-[10px] block mb-0.5" style={{ color: 'var(--t-text-dim)' }}>{label}</label>
+                    <input type="number" min={min} max={max} step={step} value={value}
+                      onChange={e => onChange(Number(e.target.value))}
+                      className="w-full border rounded px-2 py-1 text-xs"
+                      style={{ backgroundColor: 'var(--t-bg-input)', borderColor: 'var(--t-border)', color: 'var(--t-text)' }} />
+                  </div>
+                );
+
+                return (
+                  <div className="space-y-4">
+                    {/* Hotspot Guided */}
+                    <div>
+                      <h4 className="text-xs font-medium mb-2" style={{ color: 'var(--t-accent)' }}>Hotspot — {t('training.guidedMode')}</h4>
+                      <div className="grid grid-cols-4 gap-3">
+                        <NumInput label={t('training.stepPoints')} value={hg.step_points} onChange={v => updateScoring('hotspot_guided', { step_points: v })} max={20} />
+                        <NumInput label={t('training.orderMax')} value={hg.order_max} onChange={v => updateScoring('hotspot_guided', { order_max: v })} max={20} />
+                        <NumInput label={t('training.efficiencyMax')} value={hg.efficiency_max} onChange={v => updateScoring('hotspot_guided', { efficiency_max: v })} max={20} />
+                        <NumInput label={t('training.timeMax')} value={hg.time_max} onChange={v => updateScoring('hotspot_guided', { time_max: v })} max={20} />
+                      </div>
+                      <div className="grid grid-cols-2 gap-3 mt-2">
+                        <div>
+                          <label className="text-[10px] block mb-0.5" style={{ color: 'var(--t-text-dim)' }}>{t('training.timeThresholds')}</label>
+                          <div className="flex gap-1 items-center">
+                            <input type="number" min={5} max={300} value={hg.time_thresholds[0]}
+                              onChange={e => updateScoring('hotspot_guided', { time_thresholds: [Number(e.target.value), hg.time_thresholds[1]] })}
+                              className="w-16 border rounded px-1.5 py-1 text-xs"
+                              style={{ backgroundColor: 'var(--t-bg-input)', borderColor: 'var(--t-border)', color: 'var(--t-text)' }} />
+                            <span className="text-[10px]" style={{ color: 'var(--t-text-dim)' }}>/</span>
+                            <input type="number" min={10} max={600} value={hg.time_thresholds[1]}
+                              onChange={e => updateScoring('hotspot_guided', { time_thresholds: [hg.time_thresholds[0], Number(e.target.value)] })}
+                              className="w-16 border rounded px-1.5 py-1 text-xs"
+                              style={{ backgroundColor: 'var(--t-bg-input)', borderColor: 'var(--t-border)', color: 'var(--t-text)' }} />
+                            <span className="text-[10px]" style={{ color: 'var(--t-text-dim)' }}>sec</span>
+                          </div>
+                        </div>
+                        <div>
+                          <label className="text-[10px] block mb-0.5" style={{ color: 'var(--t-text-dim)' }}>{t('training.efficiencyThresholds')}</label>
+                          <div className="flex gap-1 items-center">
+                            {hg.efficiency_thresholds.map((v: number, i: number) => (
+                              <input key={i} type="number" min={0} max={50} value={v}
+                                onChange={e => { const arr = [...hg.efficiency_thresholds]; arr[i] = Number(e.target.value); updateScoring('hotspot_guided', { efficiency_thresholds: arr }); }}
+                                className="w-12 border rounded px-1 py-1 text-xs"
+                                style={{ backgroundColor: 'var(--t-bg-input)', borderColor: 'var(--t-border)', color: 'var(--t-text)' }} />
+                            ))}
+                            <span className="text-[10px]" style={{ color: 'var(--t-text-dim)' }}>{t('training.wrongClicks')}</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Hotspot Explore */}
+                    <div>
+                      <h4 className="text-xs font-medium mb-2" style={{ color: 'var(--t-accent)' }}>Hotspot — {t('training.exploreMode')}</h4>
+                      <div className="grid grid-cols-2 gap-3">
+                        <NumInput label={t('training.correctnessWeight')} value={he.correctness_weight} onChange={v => updateScoring('hotspot_explore', { correctness_weight: v })} />
+                        <NumInput label={t('training.efficiencyWeight')} value={he.efficiency_weight} onChange={v => updateScoring('hotspot_explore', { efficiency_weight: v })} />
+                      </div>
+                    </div>
+
+                    {/* DragDrop */}
+                    <div>
+                      <h4 className="text-xs font-medium mb-2" style={{ color: 'var(--t-accent)' }}>{t('training.dragdropScoring')}</h4>
+                      <label className="flex items-center gap-2 text-xs cursor-pointer" style={{ color: 'var(--t-text)' }}>
+                        <input type="checkbox" checked={dd.partial_credit}
+                          onChange={e => updateScoring('dragdrop', { partial_credit: e.target.checked })}
+                          className="rounded" />
+                        {t('training.partialCredit')}
+                      </label>
+                    </div>
+
+                    {/* QuizInline */}
+                    <div>
+                      <h4 className="text-xs font-medium mb-2" style={{ color: 'var(--t-accent)' }}>{t('training.quizScoring')}</h4>
+                      <div className="flex items-center gap-4">
+                        <label className="flex items-center gap-2 text-xs cursor-pointer" style={{ color: 'var(--t-text)' }}>
+                          <input type="checkbox" checked={qi.partial_credit}
+                            onChange={e => updateScoring('quiz_inline', { partial_credit: e.target.checked })}
+                            className="rounded" />
+                          {t('training.partialCredit')}
+                        </label>
+                        <div className="flex items-center gap-1">
+                          <span className="text-[10px]" style={{ color: 'var(--t-text-dim)' }}>{t('training.wrongPenalty')}</span>
+                          <input type="number" min={0} max={1} step={0.1} value={qi.wrong_penalty}
+                            onChange={e => updateScoring('quiz_inline', { wrong_penalty: Number(e.target.value) })}
+                            className="w-14 border rounded px-1.5 py-1 text-xs"
+                            style={{ backgroundColor: 'var(--t-bg-input)', borderColor: 'var(--t-border)', color: 'var(--t-text)' }} />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              <button onClick={saveCourse} disabled={saving}
+                className="mt-4 flex items-center gap-1 text-xs font-medium px-4 py-1.5 rounded-lg transition disabled:opacity-50 text-white"
+                style={{ backgroundColor: 'var(--t-accent-bg)' }}>
+                <Save size={13} /> {saving ? t('training.saving') : t('training.saveSettings')}
+              </button>
+            </div>
+
             <TrainingAISettings />
           </>
         )}

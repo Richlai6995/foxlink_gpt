@@ -1611,13 +1611,21 @@ router.post('/slides/:sid/interaction-result', async (req, res) => {
             interaction_mode, user_answer, correct_answer, mode: ddMode,
             question_type, points, session_id } = req.body;
 
+    // Load course scoring config
+    const course = await db.prepare('SELECT settings_json FROM courses WHERE id=?').get(slide.course_id);
+    let scoringConfig = null;
+    try {
+      const settings = typeof course?.settings_json === 'string' ? JSON.parse(course.settings_json) : course?.settings_json;
+      scoringConfig = settings?.scoring || null;
+    } catch {}
+
     let result;
     if (block_type === 'hotspot') {
-      result = scoreHotspot({ action_log, total_steps, steps_completed, wrong_clicks, total_time_seconds, interaction_mode });
+      result = scoreHotspot({ action_log, total_steps, steps_completed, wrong_clicks, total_time_seconds, interaction_mode }, scoringConfig);
     } else if (block_type === 'dragdrop') {
-      result = scoreDragDrop({ mode: ddMode, user_answer, correct_answer, total_time_seconds });
+      result = scoreDragDrop({ mode: ddMode, user_answer, correct_answer, total_time_seconds }, scoringConfig);
     } else if (block_type === 'quiz_inline') {
-      result = scoreQuizInline({ question_type, user_answer, correct_answer, points });
+      result = scoreQuizInline({ question_type, user_answer, correct_answer, points }, scoringConfig);
     } else {
       result = { score: 0, max_score: 0, breakdown: {} };
     }

@@ -147,7 +147,8 @@ export function CoursePlayerInner({ courseId, lessonId, lang: langProp, sessionI
         player_mode: playerMode,
         session_id: sessionId || null
       })
-      if (res.data?.score !== undefined) {
+      // Only show score toast in test mode
+      if (playerMode === 'test' && res.data?.score !== undefined) {
         setScoreToast({ score: res.data.score, max: res.data.max_score })
         setTimeout(() => setScoreToast(null), 4000)
       }
