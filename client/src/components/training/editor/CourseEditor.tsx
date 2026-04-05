@@ -252,27 +252,14 @@ export default function CourseEditor() {
             <ExportButton courseId={Number(id)} />
           )}
           {!isNew && (
-            <button onClick={async () => {
-              try {
-                setSaving(true)
-                const res = await api.get(`/training/courses/${id}/export-package`, { responseType: 'blob', timeout: 300000 })
-                const url = URL.createObjectURL(res.data)
-                const a = document.createElement('a')
-                a.href = url
-                a.download = `course_${id}_export.zip`
-                document.body.appendChild(a)
-                a.click()
-                document.body.removeChild(a)
-                URL.revokeObjectURL(url)
-              } catch (e: any) {
-                console.error(e)
-                alert(t('training.exportFailed'))
-              } finally { setSaving(false) }
-            }} disabled={saving}
-              className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg border transition hover:opacity-80 disabled:opacity-50"
+            <button onClick={() => {
+              const token = localStorage.getItem('token')
+              window.open(`/api/training/courses/${id}/export-package?token=${token}`, '_blank')
+            }}
+              className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg border transition hover:opacity-80"
               style={{ borderColor: 'var(--t-border)', color: 'var(--t-text-dim)' }}
               title={t('training.exportPackage')}>
-              <Download size={13} /> {saving ? '...' : t('training.exportPackage')}
+              <Download size={13} /> {t('training.exportPackage')}
             </button>
           )}
           {!isNew && course.status === 'draft' && (
