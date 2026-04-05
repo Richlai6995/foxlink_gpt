@@ -2847,3 +2847,107 @@ ALTER TABLE interaction_results ADD weighted_max NUMBER;
 | 微學習模式 | 5 分鐘短課程 |
 | 離線模式 | PWA 快取 |
 | SCORM 匯出 | SCORM 1.2/2004 標準匯出 |
+
+---
+
+## 19. Phase 3E — 截圖標註工具 + 封面裁切 + Player UX 改善（2026-04-05）
+
+### 19-1：ScreenshotAnnotator 截圖標註工具
+
+**背景**：Oracle ERP 使用 Java Applet Form，無法使用 Chrome Extension 瀏覽器截圖，只能手動 Win+Shift+S 截圖後 Ctrl+V 貼到 AI 錄製面板。但手動貼上的圖片缺少 Extension 的標註功能（圈框箭頭編號等），導致 AI 無法精確辨識操作重點。
+
+**方案**：在前端建立獨立的 `ScreenshotAnnotator` 全螢幕 Modal，功能對齊 Chrome Extension `content.js` 的 `startAnnotationMode()`，但以 React + SVG 實作，不依賴 Extension。
+
+**功能**：
+- 7 種標註工具：① 步驟編號 / ◯ 圓圈 / ▭ 矩形 / → 箭頭 / T 文字 / ✎ 手繪 / ▦ 馬賽克
+- 百分比座標系 (0-100%) — 與 Extension 完全相容
+- 顏色選擇（7 色）、線寬選擇、文字大小選擇（XS/S/M/L/XL）
+- Undo/Redo（Ctrl+Z / Ctrl+Y，最多 30 步）
+- 拖拉移動已有標註、Delete 刪除選取
+- 選取後可編輯：編號數字、標籤文字、顏色、文字大小
+- 步驟編號自動計算（= 畫面最大編號 + 1），支援手動指定 + Reset 按鈕
+- Aspect ratio 補償：使用 ellipse 代替 circle，解決 `preserveAspectRatio="none"` 造成的橢圓變形
+- 語言選擇（🇹🇼 中 / 🇺🇸 EN / 🇻🇳 VI）+ 步驟編號 — 存回 step metadata
+- 快捷鍵 1-7 切換工具
+
+**入口**：
+- RecordingPanel 步驟卡 hover 的 ✏️ 標註按鈕
+- RecordingPanel 右側 detail panel「標註編輯」按鈕
+
+**Bug fix — processAll 漏傳 annotations**：
+手動 Ctrl+V 貼上的圖片上傳時，原本沒帶 `annotations_json` 參數，已修正。
+
+### 19-2：Player 標註圖層隱藏
+
+**問題**：錄製時的標註（①②③ 圈框箭頭）是幫 AI 辨識用的輔助資訊，學員在導覽/測驗時不應看到。
+
+**修正**：
+- `HotspotBlock.tsx`：移除 `AnnotationOverlay` 渲染（含 zoom overlay），移除相關 import
+- `SlideRenderer.tsx`：image block 移除 `AnnotationOverlay`，移除 import
+- 標註只在 editor（HotspotEditor、RecordingPanel）中顯示
+
+### 19-3：外語圖片 Fallback 機制
+
+**需求**：ERP 系統只有英文介面，但需製作 zh-TW / en / vi 三語教材。截圖只需做一次（存在 zh-TW 主語言），EN/VI 版沿用同一張圖。
+
+**方案**：自動 Fallback 顯示（不複製檔案）
+- **Player 端**：已自動生效 — server `GET /slides` 只在有 `image_overrides` 時才覆蓋 `block.image`，沒有 override 就保持 zh-TW 圖片
+- **Editor 端**：`LanguageImagePanel.tsx` — 沒有上傳獨立底圖時，半透明顯示 zh-TW 圖片 + 「繼承主語言圖片」提示，上傳按鈕改為「上傳獨立底圖（選填）」
+
+### 19-4：HotspotEditor 互動框拖拉修復
+
+**問題**：`AnnotationEditor` 的 SVG overlay 設了 `zIndex: 5` + `pointerEvents: 'all'`，蓋在 region div 上面，導致選取模式下無法拖拉或調整大小。
+
+**修正**：HotspotEditor 的標註層從互動式 `AnnotationEditor` 改為唯讀 `AnnotationOverlay`（預設 `pointerEvents: 'none'`），不阻擋 region 操作。標註編輯統一走 ScreenshotAnnotator。
+
+### 19-5：AI JSON 解析容錯 + 自動重試
+
+**問題**：Gemini API 偶爾回傳不合法 JSON（即使設了 `responseMimeType: 'application/json'`），導致「AI 回覆格式錯誤」。
+
+**修正**：4 個 AI endpoint 統一加固：
+1. Strip markdown code fences（`` ```json ... ``` ``）
+2. 自動重試 3 次，每次間隔 1 秒
+3. 錯誤訊息改為「AI 回覆格式錯誤（已重試 3 次）」
+
+影響的 endpoint：
+- `POST /slides/:sid/generate-narration`（全套導覽腳本）
+- `POST /ai/analyze-screenshot`（AI 分析截圖）
+- `POST /ai/generate-outline`（AI 生成大綱）
+- `POST /ai/generate-quiz`（AI 出題）
+
+### 19-6：課程封面圖片管理 + 裁切工具
+
+**功能**：CourseEditor 基本資訊 tab 新增封面圖片上傳/更換/刪除。
+
+**CoverCropModal 裁切工具**：
+- 16:9 比例預覽框 + 三分構圖格線
+- 拖拉平移圖片位置
+- 滾輪或滑桿縮放（支援 contain 到放大，可縮到 30% contain fit）
+- 圖片小於框時居中，空白處填白色
+- Canvas 裁切輸出 1280px JPEG → 上傳 server
+- Server API：`POST /courses/:id/cover`（已存在）
+
+### 19-7：基本資訊 tab 及格分數移除
+
+**變更**：及格分數欄位從基本資訊 tab 移除，僅保留在「設定」tab 的測驗設定區塊。
+
+### 19-8：測驗模式右側面板 Sticky
+
+**問題**：ERP 截圖很長，測驗題目在右下角，互動區域在上方，兩者無法同時看到。
+
+**修正**：HotspotBlock 右側 info panel 加 `sticky top-4 self-start max-h-[calc(100vh-2rem)] overflow-y-auto`。面板隨頁面捲動黏在視窗頂部，內容太長時面板內部可捲動。
+
+### 19-9：實作檔案
+
+| 檔案 | 變更 |
+|------|------|
+| `client/.../editor/ScreenshotAnnotator.tsx` | **新增** — 全螢幕標註工具 Modal（7 工具 + undo/redo + aspect ratio 補償） |
+| `client/.../editor/CoverCropModal.tsx` | **新增** — 封面圖片 16:9 裁切工具（拖拉+縮放+canvas 輸出） |
+| `client/.../editor/RecordingPanel.tsx` | import ScreenshotAnnotator; 步驟卡 hover 加 ✏️ 標註按鈕; 右側加「標註編輯」按鈕; processAll 補傳 annotations_json; onSave 接收 meta（stepNumber, lang） |
+| `client/.../editor/CourseEditor.tsx` | import CoverCropModal; 基本資訊加封面圖片上傳+裁切; 移除基本資訊 tab 及格分數 |
+| `client/.../blocks/HotspotBlock.tsx` | 移除 AnnotationOverlay import + 渲染; 右側 panel 加 sticky |
+| `client/.../blocks/AnnotationOverlay.tsx` | 無修改（被其他檔案引用方式變更） |
+| `client/.../SlideRenderer.tsx` | 移除 AnnotationOverlay import + image block 標註渲染 |
+| `client/.../editor/blocks/HotspotEditor.tsx` | AnnotationEditor → AnnotationOverlay（read-only, pointerEvents none） |
+| `client/.../editor/blocks/LanguageImagePanel.tsx` | 無 langImage 時顯示 zh-TW 半透明預覽 + 「繼承主語言圖片」提示 |
+| `server/routes/training.js` | 4 個 AI endpoint 加 JSON 解析容錯 + 自動重試 3 次 |

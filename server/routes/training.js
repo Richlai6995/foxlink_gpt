@@ -1990,16 +1990,21 @@ ${content.slice(0, 8000)}
     const { GoogleGenerativeAI } = require('@google/generative-ai');
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
     const model = genAI.getGenerativeModel({ model: modelRow?.api_model || 'gemini-2.0-flash' });
-    const result = await model.generateContent(prompt);
-    const text = result.response.text();
-
-    // Parse JSON from response
-    let questions;
-    try {
-      const jsonMatch = text.match(/\[[\s\S]*\]/);
-      questions = jsonMatch ? JSON.parse(jsonMatch[0]) : JSON.parse(text);
-    } catch {
-      return res.status(500).json({ error: 'AI 回覆格式錯誤', raw: text.slice(0, 500) });
+    let questions, lastRaw = '';
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const result = await model.generateContent(prompt);
+        const text = result.response.text();
+        lastRaw = text;
+        const cleaned = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+        const jsonMatch = cleaned.match(/\[[\s\S]*\]/);
+        questions = jsonMatch ? JSON.parse(jsonMatch[0]) : JSON.parse(cleaned);
+        break;
+      } catch (parseErr) {
+        console.warn(`[Training] AI quiz attempt ${attempt + 1} failed:`, parseErr.message);
+        if (attempt === 2) return res.status(500).json({ error: 'AI 回覆格式錯誤（已重試 3 次）', raw: lastRaw.slice(0, 500) });
+        await new Promise(r => setTimeout(r, 1000));
+      }
     }
 
     res.json({ questions });
@@ -2754,18 +2759,27 @@ router.post('/ai/analyze-screenshot', upload.single('screenshot'), async (req, r
   "sensitive_areas": [{ "type": "password", "coords": { "x": 0, "y": 0, "w": 0, "h": 0 } }]
 }`;
 
-    const result = await model.generateContent([
-      { inlineData: { mimeType: 'image/png', data: imageBase64 } },
-      { text: prompt }
-    ]);
-    const text = result.response.text();
-
-    let parsed;
-    try {
-      const jsonMatch = text.match(/\{[\s\S]*\}/);
-      parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : JSON.parse(text);
-    } catch {
-      return res.status(500).json({ error: 'AI 回覆格式錯誤', raw: text.slice(0, 500) });
+    let parsed, lastRaw = '';
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const result = await model.generateContent([
+          { inlineData: { mimeType: 'image/png', data: imageBase64 } },
+          { text: prompt }
+        ]);
+        const text = result.response.text();
+        lastRaw = text;
+        const cleaned = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+        const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+        parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : JSON.parse(cleaned);
+        break;
+      } catch (parseErr) {
+        console.warn(`[Training] AI analyze attempt ${attempt + 1} failed:`, parseErr.message);
+        if (attempt === 2) {
+          if (req.file) try { fs.unlinkSync(req.file.path); } catch {}
+          return res.status(500).json({ error: 'AI 回覆格式錯誤（已重試 3 次）', raw: lastRaw.slice(0, 500) });
+        }
+        await new Promise(r => setTimeout(r, 1000));
+      }
     }
 
     // Clean up uploaded temp file
@@ -2890,18 +2904,30 @@ ${editor_context || '（無）'}
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
     const model = genAI.getGenerativeModel({ model: flashModel });
 
-    const result = await model.generateContent({
-      contents: [{ role: 'user', parts: [...imageParts, { text: prompt }] }],
-      generationConfig: { responseMimeType: 'application/json' }
-    });
-    const text = result.response.text();
+    // Retry up to 3 times on JSON parse failure (Gemini occasionally returns malformed JSON)
+    let parsed, lastRaw = '';
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const result = await model.generateContent({
+          contents: [{ role: 'user', parts: [...imageParts, { text: prompt }] }],
+          generationConfig: { responseMimeType: 'application/json' }
+        });
+        const text = result.response.text();
+        lastRaw = text;
 
-    let parsed;
-    try {
-      const jsonMatch = text.match(/\{[\s\S]*\}/);
-      parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : JSON.parse(text);
-    } catch {
-      return res.status(500).json({ error: 'AI 回覆格式錯誤', raw: text.slice(0, 500) });
+        // Strip markdown code fences if present
+        const cleaned = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+        const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+        parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : JSON.parse(cleaned);
+        break; // success
+      } catch (parseErr) {
+        console.warn(`[Training] Generate narration attempt ${attempt + 1} failed:`, parseErr.message);
+        if (attempt === 2) {
+          return res.status(500).json({ error: 'AI 回覆格式錯誤（已重試 3 次）', raw: lastRaw.slice(0, 500) });
+        }
+        // Brief delay before retry
+        await new Promise(r => setTimeout(r, 1000));
+      }
     }
 
     res.json(parsed);
@@ -2995,15 +3021,21 @@ ${content.slice(0, 6000)}
 只回傳 JSON 陣列，不要 markdown：
 [{ "order": 1, "instruction": "...", "expected_element": "...", "tips": "...", "action_type": "..." }]`;
 
-    const result = await model.generateContent(prompt);
-    const text = result.response.text();
-
-    let steps;
-    try {
-      const jsonMatch = text.match(/\[[\s\S]*\]/);
-      steps = jsonMatch ? JSON.parse(jsonMatch[0]) : JSON.parse(text);
-    } catch {
-      return res.status(500).json({ error: 'AI 回覆格式錯誤', raw: text.slice(0, 500) });
+    let steps, lastRaw = '';
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const result = await model.generateContent(prompt);
+        const text = result.response.text();
+        lastRaw = text;
+        const cleaned = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+        const jsonMatch = cleaned.match(/\[[\s\S]*\]/);
+        steps = jsonMatch ? JSON.parse(jsonMatch[0]) : JSON.parse(cleaned);
+        break;
+      } catch (parseErr) {
+        console.warn(`[Training] AI outline attempt ${attempt + 1} failed:`, parseErr.message);
+        if (attempt === 2) return res.status(500).json({ error: 'AI 回覆格式錯誤（已重試 3 次）', raw: lastRaw.slice(0, 500) });
+        await new Promise(r => setTimeout(r, 1000));
+      }
     }
 
     res.json({ steps });

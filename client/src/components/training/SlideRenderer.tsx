@@ -6,7 +6,6 @@ import DragDropBlock from './blocks/DragDropBlock'
 import FlipCardBlock from './blocks/FlipCardBlock'
 import BranchBlock from './blocks/BranchBlock'
 import QuizInlineBlock from './blocks/QuizInlineBlock'
-import AnnotationOverlay from './blocks/AnnotationOverlay'
 
 interface Slide {
   id: number
@@ -56,10 +55,7 @@ function BlockRenderer({ block, blockIndex = 0, isLastSlide = false, playerMode 
       return (
         <div className="relative">
           {block.src && <img src={block.src} alt={block.alt || ''} className="max-w-full rounded-lg mx-auto" />}
-          {/* Phase 2E: SVG annotation overlay — skip if burned into image */}
-          {block.annotations?.length > 0 && !block.annotations_in_image && (
-            <AnnotationOverlay annotations={block.annotations} />
-          )}
+          {/* Annotations are for AI recording hints only — hidden in player (learn/test) */}
         </div>
       )
 

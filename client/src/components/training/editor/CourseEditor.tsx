@@ -8,6 +8,7 @@ import CategoryManager from '../CategoryManager'
 import BatchImport from './BatchImport'
 import RecordingPanel from './RecordingPanel'
 import InteractionReport from '../InteractionReport'
+import CoverCropModal from './CoverCropModal'
 
 interface Course {
   id?: number
@@ -58,6 +59,7 @@ export default function CourseEditor() {
   const [categories, setCategories] = useState<Category[]>([])
   const [loading, setLoading] = useState(!isNew)
   const [saving, setSaving] = useState(false)
+  const [coverCropFile, setCoverCropFile] = useState<File | null>(null)
   const [activeTab, setActiveTab] = useState<'info' | 'lessons' | 'quiz' | 'examTopics' | 'translate' | 'settings' | 'reports'>('info')
   const [expandedLesson, setExpandedLesson] = useState<number | null>(null)
   const [lessonSlides, setLessonSlides] = useState<Record<number, Slide[]>>({})
@@ -327,6 +329,73 @@ export default function CourseEditor() {
                 placeholder={t('training.descriptionPlaceholder')}
               />
             </div>
+            {/* Cover Image */}
+            {!isNew && (
+              <div>
+                <label className="text-xs mb-1 block" style={{ color: 'var(--t-text-muted)' }}>封面圖片</label>
+                <div className="flex items-start gap-3">
+                  <div className="relative w-40 h-24 rounded-lg border overflow-hidden group"
+                    style={{ borderColor: 'var(--t-border)', backgroundColor: 'var(--t-bg-inset, var(--t-bg-card))' }}>
+                    {course.cover_image ? (
+                      <>
+                        <img src={course.cover_image.startsWith('/') ? course.cover_image : '/' + course.cover_image}
+                          alt="" className="w-full h-full object-cover" />
+                        <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition flex items-center justify-center gap-2">
+                          <label className="p-1.5 rounded-full bg-white/20 text-white hover:bg-white/30 cursor-pointer" title="更換封面">
+                            <Upload size={14} />
+                            <input type="file" accept="image/*" className="hidden" onChange={e => {
+                              if (e.target.files?.[0]) setCoverCropFile(e.target.files[0])
+                              e.target.value = ''
+                            }} />
+                          </label>
+                          <button onClick={async () => {
+                            if (!confirm('確定移除封面圖片？')) return
+                            try {
+                              await api.post(`/training/courses/${id}/cover`, new FormData())
+                              setCourse({ ...course, cover_image: null })
+                            } catch {}
+                          }}
+                            className="p-1.5 rounded-full bg-white/20 text-white hover:bg-red-500/50" title="移除封面">
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      </>
+                    ) : (
+                      <label className="w-full h-full flex flex-col items-center justify-center cursor-pointer transition hover:opacity-80"
+                        style={{ color: 'var(--t-text-dim)' }}>
+                        <Images size={20} className="mb-1 opacity-40" />
+                        <span className="text-[10px]">上傳封面</span>
+                        <input type="file" accept="image/*" className="hidden" onChange={e => {
+                          if (e.target.files?.[0]) setCoverCropFile(e.target.files[0])
+                          e.target.value = ''
+                        }} />
+                      </label>
+                    )}
+                  </div>
+                  <span className="text-[10px] mt-1" style={{ color: 'var(--t-text-dim)' }}>
+                    選擇圖片後可調整可見範圍
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {/* Cover crop modal */}
+            {coverCropFile && (
+              <CoverCropModal
+                imageFile={coverCropFile}
+                onConfirm={async (blob) => {
+                  const form = new FormData()
+                  form.append('cover', blob, 'cover.jpg')
+                  try {
+                    const res = await api.post(`/training/courses/${id}/cover`, form)
+                    setCourse(prev => ({ ...prev, cover_image: res.data.cover_image }))
+                  } catch (err: any) { alert(err.response?.data?.error || '上傳失敗') }
+                  setCoverCropFile(null)
+                }}
+                onClose={() => setCoverCropFile(null)}
+              />
+            )}
+
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="text-xs text-slate-400 mb-1 flex items-center gap-2">
@@ -347,16 +416,6 @@ export default function CourseEditor() {
                     <option key={c.id} value={c.id}>{c.parent_id ? '　' : ''}{c.name}</option>
                   ))}
                 </select>
-              </div>
-              <div>
-                <label className="text-xs mb-1 block" style={{ color: 'var(--t-text-muted)' }}>{t('training.passScore')}</label>
-                <input
-                  type="number"
-                  value={course.pass_score}
-                  onChange={e => setCourse({ ...course, pass_score: Number(e.target.value) })}
-                  className="w-full border rounded-lg px-3 py-2 text-sm"
-                  style={{ backgroundColor: 'var(--t-bg-input)', borderColor: 'var(--t-border)', color: 'var(--t-text)' }}
-                />
               </div>
             </div>
 

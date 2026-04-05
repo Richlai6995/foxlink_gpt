@@ -3,6 +3,7 @@ import { Camera, Square, Play, Loader2, CheckCircle2, AlertCircle, X, ExternalLi
          Wand2, Trash2, Star, GripVertical, ClipboardPaste, Plus, Image, Eye, Cpu, Pencil } from 'lucide-react'
 import api from '../../../lib/api'
 import AnnotationOverlay from '../blocks/AnnotationOverlay'
+import ScreenshotAnnotator from './ScreenshotAnnotator'
 
 interface Props {
   courseId: number
@@ -45,6 +46,7 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
   const [previewStepId, setPreviewStepId] = useState<string | null>(null)
   const [showAnnotations, setShowAnnotations] = useState(true) // toggle annotation layer visibility
   const [copied, setCopied] = useState(false)
+  const [annotatingStepId, setAnnotatingStepId] = useState<string | null>(null) // 開啟標註工具的 step
   const panelRef = useRef<HTMLDivElement>(null)
 
   // Phase 2E: AI model selector
@@ -459,6 +461,7 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
               step_number: step.stepNumber || i + 1,
               action_type: step.isKeyStep ? 'key_action' : 'screenshot',
               screenshot_base64: step.imageDataUrl,
+              annotations_json: step.annotations?.length ? JSON.stringify(step.annotations) : undefined,
               lang: step.lang || 'zh-TW',
               element_info: step.elementInfo || null,
               page_url: step.pageUrl || targetUrl,
@@ -812,11 +815,15 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
                     {/* Hover actions */}
                     <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition flex items-center justify-center gap-2">
                       <button onClick={e => { e.stopPropagation(); setPreviewStepId(step.id) }}
-                        className="p-1.5 rounded-full bg-white/20 text-white hover:bg-white/30">
+                        className="p-1.5 rounded-full bg-white/20 text-white hover:bg-white/30" title="預覽">
                         <Eye size={12} />
                       </button>
+                      <button onClick={e => { e.stopPropagation(); setAnnotatingStepId(step.id) }}
+                        className="p-1.5 rounded-full bg-white/20 text-white hover:bg-orange-500/50" title="標註編輯">
+                        <Pencil size={12} />
+                      </button>
                       <button onClick={e => { e.stopPropagation(); toggleKeyStep(step.id) }}
-                        className="p-1.5 rounded-full bg-white/20 text-white hover:bg-white/30">
+                        className="p-1.5 rounded-full bg-white/20 text-white hover:bg-white/30" title="重點步驟">
                         <Star size={12} />
                       </button>
                       <button onClick={e => { e.stopPropagation(); if (confirm('確定刪除此截圖？')) removeStep(step.id) }}
@@ -924,6 +931,16 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
                 </button>
               </div>
 
+              {/* 標註編輯 */}
+              <button onClick={() => setAnnotatingStepId(selectedStep.id)}
+                className="w-full text-[10px] py-1.5 rounded font-medium transition flex items-center justify-center gap-1"
+                style={{ backgroundColor: 'rgba(249,115,22,0.15)', color: '#f97316', border: '1px solid rgba(249,115,22,0.3)' }}>
+                <Pencil size={10} /> 標註編輯
+                {selectedStep.annotations && selectedStep.annotations.length > 0 && (
+                  <span className="text-[9px] opacity-70">({selectedStep.annotations.length})</span>
+                )}
+              </button>
+
               {/* Save step changes to server */}
               {selectedStep.id.startsWith('server_') && (
                 <button onClick={async () => {
@@ -1030,6 +1047,30 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
           </span>
         </div>
       </div>
+
+      {/* Screenshot Annotator modal */}
+      {annotatingStepId && (() => {
+        const stepToAnnotate = steps.find(s => s.id === annotatingStepId)
+        if (!stepToAnnotate) return null
+        return (
+          <ScreenshotAnnotator
+            imageUrl={stepToAnnotate.imageDataUrl}
+            annotations={stepToAnnotate.annotations || []}
+            stepNumber={stepToAnnotate.stepNumber || (steps.indexOf(stepToAnnotate) + 1)}
+            lang={stepToAnnotate.lang || 'zh-TW'}
+            onSave={(newAnnotations, meta) => {
+              setSteps(prev => {
+                const updated = prev.map(s => s.id === annotatingStepId
+                  ? { ...s, annotations: newAnnotations, ...(meta?.stepNumber ? { stepNumber: meta.stepNumber } : {}), ...(meta?.lang ? { lang: meta.lang } : {}) }
+                  : s)
+                return sortSteps(updated)
+              })
+              setAnnotatingStepId(null)
+            }}
+            onClose={() => setAnnotatingStepId(null)}
+          />
+        )
+      })()}
 
       {/* Full preview overlay */}
       {previewStep && (

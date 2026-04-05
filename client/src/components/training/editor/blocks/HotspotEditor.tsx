@@ -3,7 +3,6 @@ import { Trash2, Upload, MousePointer, Pen, ClipboardPaste, Wand2, Plus, GripVer
 import api from '../../../../lib/api'
 import type { Block } from '../SlideEditor'
 import LanguageImagePanel from './LanguageImagePanel'
-import AnnotationEditor from './AnnotationEditor'
 import AnnotationOverlay from '../../blocks/AnnotationOverlay'
 import VoiceInput from './VoiceInput'
 
@@ -376,20 +375,9 @@ export default function HotspotEditor({ block, onChange, courseId, slideId, bloc
                 />
               )}
 
-              {/* Phase 3A: Annotation layer — always show if data exists */}
+              {/* Phase 3A: Annotation layer — read-only display, pointerEvents none so regions can be dragged */}
               {showAnnotationLayer && block.annotations?.length > 0 && (
-                <AnnotationEditor
-                  annotations={block.annotations}
-                  onChange={anns => onChange({ ...block, annotations: anns })}
-                  imageRef={imgElRef}
-                />
-              )}
-              {showAnnotationLayer && (!block.annotations || block.annotations.length === 0) && (
-                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                  <span className="text-[10px] px-2 py-1 rounded" style={{ backgroundColor: 'rgba(0,0,0,0.6)', color: '#fbbf24' }}>
-                    無標註資料
-                  </span>
-                </div>
+                <AnnotationOverlay annotations={block.annotations} visible={true} />
               )}
             </div>
           </>

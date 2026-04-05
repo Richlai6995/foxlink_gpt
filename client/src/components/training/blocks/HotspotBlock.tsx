@@ -1,7 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
-import AnnotationOverlay from './AnnotationOverlay'
-import type { Annotation } from './AnnotationOverlay'
 
 interface Region {
   id: string
@@ -45,7 +43,6 @@ export default function HotspotBlock({ block, blockIndex = 0, isLastSlide = fals
   const mode: 'guided' | 'explore' = isTestMode ? 'guided' : (block.interaction_mode || 'guided')
   const allRegions: Region[] = block.regions || []
   const correctRegions = allRegions.filter(r => r.correct)
-  const annotations: Annotation[] = block.annotations || []
   const maxAttempts = block.max_attempts || 3
   const showHintAfter = block.show_hint_after || 2
 
@@ -455,10 +452,6 @@ export default function HotspotBlock({ block, blockIndex = 0, isLastSlide = fals
               onMouseLeave={() => setHoverRegion(null)}>
               <img src={block.image} alt="" className="w-full block" draggable={false} />
 
-              {annotations.length > 0 && !isTestMode && (
-                <AnnotationOverlay annotations={annotations} visible={true} animateInterval={600} />
-              )}
-
               {renderRegions()}
 
               {/* Zoom button */}
@@ -511,8 +504,8 @@ export default function HotspotBlock({ block, blockIndex = 0, isLastSlide = fals
           )}
         </div>
 
-        {/* RIGHT: Info panel */}
-        <div className="w-56 shrink-0 flex flex-col gap-2.5 text-xs">
+        {/* RIGHT: Info panel — sticky so test prompts stay visible when scrolling tall screenshots */}
+        <div className="w-56 shrink-0 flex flex-col gap-2.5 text-xs sticky top-4 self-start max-h-[calc(100vh-2rem)] overflow-y-auto">
           {/* Instruction */}
           {block.instruction && (
             <div className="rounded-lg p-2.5 border" style={{ backgroundColor: 'var(--t-bg-card)', borderColor: 'var(--t-border)' }}>
@@ -671,9 +664,6 @@ export default function HotspotBlock({ block, blockIndex = 0, isLastSlide = fals
               onMouseMove={handleMouseMove}
               onMouseLeave={() => setHoverRegion(null)}>
               <img src={block.image} alt="" className="max-w-[95vw] max-h-[90vh] object-contain rounded-lg" draggable={false} />
-              {annotations.length > 0 && !isTestMode && (
-                <AnnotationOverlay annotations={annotations} visible={true} animateInterval={600} />
-              )}
               {renderRegions(true)}
             </div>
             <button

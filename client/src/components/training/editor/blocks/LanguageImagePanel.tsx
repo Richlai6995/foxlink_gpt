@@ -374,13 +374,24 @@ export default function LanguageImagePanel({ slideId, blockIndex, currentImage, 
                 </button>
               </div>
             ) : (
-              <label className="h-16 flex flex-col items-center justify-center rounded border-2 border-dashed cursor-pointer transition hover:opacity-80"
-                style={{ borderColor: 'var(--t-accent)', color: 'var(--t-accent)' }}>
-                <Upload size={14} />
-                <span className="text-[9px] mt-0.5">{uploading ? '上傳中...' : '上傳底圖'}</span>
-                <input type="file" accept="image/*" className="hidden" disabled={uploading}
-                  onChange={e => { if (e.target.files?.[0]) handleUpload(e.target.files[0]) }} />
-              </label>
+              <div className="space-y-1">
+                {/* Fallback hint — show zh-TW image as preview */}
+                {currentImage && (
+                  <div className="relative">
+                    <img src={currentImage} alt="" className="w-full rounded border opacity-50" style={{ borderColor: 'var(--t-border)', maxHeight: '120px', objectFit: 'contain' }} />
+                    <div className="absolute inset-0 flex items-center justify-center">
+                      <span className="text-[9px] px-2 py-1 rounded bg-black/60 text-white">繼承主語言圖片</span>
+                    </div>
+                  </div>
+                )}
+                <label className="h-12 flex flex-col items-center justify-center rounded border-2 border-dashed cursor-pointer transition hover:opacity-80"
+                  style={{ borderColor: 'var(--t-accent)', color: 'var(--t-accent)' }}>
+                  <Upload size={14} />
+                  <span className="text-[9px] mt-0.5">{uploading ? '上傳中...' : '上傳獨立底圖（選填）'}</span>
+                  <input type="file" accept="image/*" className="hidden" disabled={uploading}
+                    onChange={e => { if (e.target.files?.[0]) handleUpload(e.target.files[0]) }} />
+                </label>
+              </div>
             )}
           </div>
         </div>
