@@ -4744,7 +4744,8 @@ router.post('/courses/import-package', upload.single('package'), async (req, res
       return res.status(403).json({ error: '權限不足' });
 
     const JSZip = require('jszip');
-    const zip = await JSZip.loadAsync(req.file.buffer);
+    const zipData = fs.readFileSync(req.file.path);
+    const zip = await JSZip.loadAsync(zipData);
 
     const manifestFile = zip.file('manifest.json');
     if (!manifestFile) return res.status(400).json({ error: 'Invalid package: missing manifest.json' });
