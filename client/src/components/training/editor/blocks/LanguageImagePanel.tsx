@@ -5,6 +5,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { Upload, Trash2, Globe, Save, Maximize2, X, Copy, Plus, MousePointer, Pen, RotateCcw, Sparkles, Volume2, Loader2 } from 'lucide-react'
 import api from '../../../../lib/api'
+import VoiceInput from './VoiceInput'
 
 interface Region {
   id: string
@@ -574,8 +575,11 @@ export default function LanguageImagePanel({ slideId, blockIndex, currentImage, 
             {independentRegions.filter(r => r.correct).map((r, idx) => (
               <div key={r.id} className="text-[9px] rounded p-1.5 space-y-0.5" style={{ backgroundColor: 'var(--t-bg-card)', border: '1px solid var(--t-border)' }}>
                 <span className="font-medium" style={{ color: 'var(--t-text-secondary)' }}>{idx + 1}. {r.label || r.id}</span>
-                {r.narration && <div style={{ color: 'var(--t-text-dim)' }}>📖 {r.narration.slice(0, 50)}{r.narration.length > 50 ? '...' : ''}</div>}
+                {r.narration && <div style={{ color: 'var(--t-text-dim)' }}>📖 {r.narration.slice(0, 40)}...</div>}
+                {r.test_hint && <div style={{ color: 'var(--t-text-dim)' }}>📝 {r.test_hint.slice(0, 40)}...</div>}
+                {r.explore_desc && <div style={{ color: 'var(--t-text-dim)' }}>🔍 {r.explore_desc.slice(0, 40)}...</div>}
                 {r.audio_url && <audio src={r.audio_url} controls className="w-full h-5" style={{ maxHeight: '20px' }} />}
+                {!r.audio_url && !r.narration && <div style={{ color: '#f59e0b' }}>⚠ 無語音</div>}
               </div>
             ))}
           </div>
@@ -754,6 +758,30 @@ export default function LanguageImagePanel({ slideId, blockIndex, currentImage, 
                           style={{ backgroundColor: '#1e293b', border: '1px solid #334155', color: '#e2e8f0' }}
                           placeholder="點擊後的回饋文字" />
                       </div>
+
+                      {/* Narration / Test Hint / Explore Desc + VoiceInput */}
+                      {selectedModalRegion.correct && [
+                        { field: 'narration', audioField: 'audio_url', icon: '📖', label: '學習導引', ph: '語音導引文字...' },
+                        { field: 'test_hint', audioField: 'test_audio_url', icon: '📝', label: '測驗提示', ph: '提示文字...' },
+                        { field: 'explore_desc', audioField: 'explore_audio_url', icon: '🔍', label: '探索說明', ph: '說明文字...' },
+                      ].map(m => (
+                        <div key={m.field}>
+                          <label className="text-[9px] text-slate-500 block mb-0.5">{m.icon} {m.label}</label>
+                          <input value={selectedModalRegion[m.field] || ''}
+                            onChange={e => updateLangRegion(selectedModalRegion.id, { [m.field]: e.target.value })}
+                            className="w-full rounded px-2 py-1 text-[10px] focus:outline-none"
+                            style={{ backgroundColor: '#1e293b', border: '1px solid #334155', color: '#e2e8f0' }}
+                            placeholder={m.ph} />
+                          <VoiceInput
+                            text={selectedModalRegion[m.field] || ''}
+                            audioUrl={selectedModalRegion[m.audioField] || null}
+                            slideId={slideId}
+                            regionId={`${activeLang}_${m.field === 'narration' ? '' : m.field + '_'}${selectedModalRegion.id}`}
+                            language={activeLang}
+                            onAudioChange={(url: string | null) => updateLangRegion(selectedModalRegion.id, { [m.audioField]: url })}
+                          />
+                        </div>
+                      ))}
                     </div>
                   )}
                 </div>
