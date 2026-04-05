@@ -286,9 +286,12 @@ export function CoursePlayerInner({ courseId, lessonId, lang: langProp, sessionI
 
   // ─── Interaction complete handler ───
   const handleInteractionComplete = useCallback(async (slideId: number, result: any) => {
+    // Learn mode: don't record scores at all
+    if (playerMode !== 'test') return
+
     try {
       // Send weighted_max so server can compute weighted_score = ratio × weighted_max
-      const weight = (playerMode === 'test') ? getSlideWeight(slideId, interactiveIndices.length) : undefined
+      const weight = getSlideWeight(slideId, interactiveIndices.length)
 
       const res = await api.post(`/training/slides/${slideId}/interaction-result`, {
         ...result,
