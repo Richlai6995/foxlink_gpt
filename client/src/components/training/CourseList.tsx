@@ -22,6 +22,7 @@ interface Course {
   created_at: string
   updated_at: string
   my_progress: { status: string; completed_at: string | null } | null
+  my_exam_summary: { exam_count: number; avg_score: number; best_score: number; best_max: number; last_exam_at: string; last_exam_topic: string } | null
 }
 
 interface Category {
@@ -303,6 +304,14 @@ export default function CourseList({ editorMode = false }: { editorMode?: boolea
                           {course.my_progress?.status === 'completed' ? t('training.completed') :
                            course.my_progress?.status === 'in_progress' ? t('training.inProgress') : t('training.notStarted')}
                         </span>
+                      )}
+                      {!editorMode && course.my_exam_summary && (
+                        <div className="w-full mt-1 flex items-center gap-2 text-[9px]" style={{ color: 'var(--t-text-dim)' }}>
+                          <span>📝 {course.my_exam_summary.exam_count}{t('training.examTimesUnit')}</span>
+                          <span>{t('training.examAvg')}: {course.my_exam_summary.avg_score}</span>
+                          <span>{t('training.examBest')}: <strong style={{ color: '#22c55e' }}>{course.my_exam_summary.best_score}/{course.my_exam_summary.best_max}</strong></span>
+                          {course.my_exam_summary.last_exam_topic && <span>({course.my_exam_summary.last_exam_topic})</span>}
+                        </div>
                       )}
                       {editorMode && (
                         <button

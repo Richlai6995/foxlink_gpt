@@ -1565,6 +1565,8 @@ async function runMigrations(db) {
   await addCol('HELP_SECTIONS', 'LINKED_COURSE_ID', 'NUMBER');
   await addCol('HELP_SECTIONS', 'LINKED_LESSON_ID', 'NUMBER');
 
+  await addCol('INTERACTION_RESULTS', 'EXAM_TOPIC_ID', 'NUMBER');
+
   // ── Training Platform: 課程分類（樹狀，最多 3 層）─────────────────────────────
   await createTable('COURSE_CATEGORIES', `CREATE TABLE course_categories (
     id          NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,

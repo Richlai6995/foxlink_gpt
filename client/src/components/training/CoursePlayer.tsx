@@ -290,7 +290,8 @@ export function CoursePlayerInner({ courseId, lessonId, lang: langProp, sessionI
       const res = await api.post(`/training/slides/${slideId}/interaction-result`, {
         ...result,
         player_mode: playerMode,
-        session_id: sessionId || null
+        session_id: sessionId || null,
+        exam_topic_id: examTopic?.id || examTopicId || null
       })
 
       if (playerMode === 'test' && examPhase === 'running' && res.data?.score !== undefined) {

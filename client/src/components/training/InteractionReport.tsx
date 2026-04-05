@@ -227,7 +227,7 @@ export default function InteractionReport({ courseId }: Props) {
                             <td className="py-1 text-right" style={{ color: 'var(--t-text)' }}>{d.wrong_clicks}</td>
                             <td className="py-1 text-right" style={{ color: 'var(--t-text)' }}>{d.total_time_seconds}s</td>
                             <td className="py-1 text-right" style={{ color: 'var(--t-text-dim)' }}>
-                              {d.created_at ? new Date(d.created_at).toLocaleDateString() : '-'}
+                              {d.created_at ? new Date(d.created_at).toLocaleString() : '-'}
                             </td>
                           </tr>
                         ))}

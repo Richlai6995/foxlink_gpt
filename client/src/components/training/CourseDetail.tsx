@@ -31,6 +31,7 @@ export default function CourseDetail() {
   const [loading, setLoading] = useState(true)
   const [progress, setProgress] = useState<any[]>([])
   const [examTopics, setExamTopics] = useState<any[]>([])
+  const [examHistory, setExamHistory] = useState<any[]>([])
 
   useEffect(() => {
     if (!id) return
@@ -39,14 +40,16 @@ export default function CourseDetail() {
 
   const loadCourse = async () => {
     try {
-      const [courseRes, progressRes, topicsRes] = await Promise.all([
+      const [courseRes, progressRes, topicsRes, historyRes] = await Promise.all([
         api.get(`/training/courses/${id}`, { params: { lang: i18n.language } }),
         api.get(`/training/courses/${id}/my-progress`),
-        api.get(`/training/courses/${id}/exam-topics`).catch(() => ({ data: [] }))
+        api.get(`/training/courses/${id}/exam-topics`).catch(() => ({ data: [] })),
+        api.get(`/training/courses/${id}/my-interaction-history`).catch(() => ({ data: { sessions: [] } }))
       ])
       setCourse(courseRes.data)
       setProgress(progressRes.data)
       setExamTopics(topicsRes.data || [])
+      setExamHistory(historyRes.data?.sessions || [])
     } catch (e: any) {
       if (e.response?.status === 403) navigate('/training')
       console.error(e)
@@ -170,6 +173,39 @@ export default function CourseDetail() {
                 </button>
               </div>
             ))}
+          </div>
+        </div>
+      )}
+
+      {/* My Exam History */}
+      {examHistory.length > 0 && (
+        <div className="mt-6 rounded-xl p-4" style={{ backgroundColor: 'var(--t-bg-card)', border: '1px solid var(--t-border)' }}>
+          <h3 className="text-sm font-semibold mb-3" style={{ color: 'var(--t-text)' }}>📊 {t('training.myExamHistory')}</h3>
+          <div className="space-y-1.5">
+            {examHistory.map((s: any, idx: number) => {
+              const pct = s.total_max > 0 ? Math.round((s.total_score / s.total_max) * 100) : 0
+              return (
+                <div key={s.session_id} className="flex items-center gap-3 px-3 py-2 rounded-lg text-xs"
+                  style={{ backgroundColor: 'var(--t-bg)', border: '1px solid var(--t-border)' }}>
+                  <span style={{ color: 'var(--t-text-dim)' }}>#{examHistory.length - idx}</span>
+                  <span className="px-1.5 py-0.5 rounded text-[9px]" style={{
+                    backgroundColor: s.player_mode === 'test' ? 'rgba(245,158,11,0.15)' : 'rgba(59,130,246,0.15)',
+                    color: s.player_mode === 'test' ? '#f59e0b' : '#3b82f6'
+                  }}>{s.player_mode === 'test' ? '📝' : '📖'} {s.player_mode}</span>
+                  {s.exam_topic_title && <span style={{ color: 'var(--t-text)' }}>{s.exam_topic_title}</span>}
+                  <div className="flex-1 h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--t-border)' }}>
+                    <div className="h-full rounded-full" style={{ width: `${pct}%`, backgroundColor: pct >= 80 ? '#22c55e' : pct >= 50 ? '#f59e0b' : '#ef4444' }} />
+                  </div>
+                  <span className="font-bold min-w-[50px] text-right" style={{ color: pct >= 80 ? '#22c55e' : pct >= 50 ? '#f59e0b' : '#ef4444' }}>
+                    {s.total_score}/{s.total_max}
+                  </span>
+                  <span style={{ color: 'var(--t-text-dim)' }}>{s.total_time}s</span>
+                  <span className="min-w-[120px] text-right" style={{ color: 'var(--t-text-dim)' }}>
+                    {s.started_at ? new Date(s.started_at).toLocaleString() : ''}
+                  </span>
+                </div>
+              )
+            })}
           </div>
         </div>
       )}

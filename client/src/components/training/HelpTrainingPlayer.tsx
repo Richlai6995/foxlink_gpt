@@ -160,6 +160,7 @@ function ScoreHistoryPanel({ courseId, lessonId }: { courseId: number; lessonId?
               {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
               <span className="text-xs font-medium" style={{ color: 'var(--t-text)' }}>
                 {t('help.session', { n: sessions.length - idx })}
+                {s.exam_topic_title && <span className="ml-1 text-[10px] font-normal" style={{ color: 'var(--t-text-dim)' }}>— {s.exam_topic_title}</span>}
               </span>
               <span className="text-[10px] px-1.5 py-0.5 rounded" style={{
                 backgroundColor: s.player_mode === 'test' ? 'rgba(245,158,11,0.15)' : 'rgba(59,130,246,0.15)',
@@ -182,7 +183,7 @@ function ScoreHistoryPanel({ courseId, lessonId }: { courseId: number; lessonId?
               </span>
               <span className="text-[10px] min-w-[40px] text-right" style={{ color: 'var(--t-text-dim)' }}>{s.total_time}s</span>
               <span className="text-[10px] min-w-[70px] text-right" style={{ color: 'var(--t-text-dim)' }}>
-                {s.started_at ? new Date(s.started_at).toLocaleDateString() : ''}
+                {s.started_at ? new Date(s.started_at).toLocaleString() : ''}
               </span>
             </button>
 
