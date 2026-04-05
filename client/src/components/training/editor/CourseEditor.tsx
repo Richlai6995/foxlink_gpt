@@ -254,19 +254,25 @@ export default function CourseEditor() {
           {!isNew && (
             <button onClick={async () => {
               try {
-                const res = await api.get(`/training/courses/${id}/export-package`, { responseType: 'blob' })
+                setSaving(true)
+                const res = await api.get(`/training/courses/${id}/export-package`, { responseType: 'blob', timeout: 300000 })
                 const url = URL.createObjectURL(res.data)
                 const a = document.createElement('a')
                 a.href = url
                 a.download = `course_${id}_export.zip`
+                document.body.appendChild(a)
                 a.click()
+                document.body.removeChild(a)
                 URL.revokeObjectURL(url)
-              } catch (e) { console.error(e) }
-            }}
-              className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg border transition hover:opacity-80"
+              } catch (e: any) {
+                console.error(e)
+                alert(t('training.exportFailed'))
+              } finally { setSaving(false) }
+            }} disabled={saving}
+              className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg border transition hover:opacity-80 disabled:opacity-50"
               style={{ borderColor: 'var(--t-border)', color: 'var(--t-text-dim)' }}
               title={t('training.exportPackage')}>
-              <Download size={13} /> {t('training.exportPackage')}
+              <Download size={13} /> {saving ? '...' : t('training.exportPackage')}
             </button>
           )}
           {!isNew && course.status === 'draft' && (
