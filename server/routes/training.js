@@ -2758,7 +2758,7 @@ router.get('/classroom/programs/:id/my-scores', async (req, res) => {
           attempts: attemptCount?.cnt || 0, max_attempts: maxAttempts,
           passed: coursePassed,
           weighted_score: weightedScore,
-          history: examHistory.map((h, i) => ({ attempt: examHistory.length - i, score: h.score, max_score: h.max_score, exam_at: h.exam_at }))
+          history: examHistory.map((h, i) => ({ attempt: examHistory.length - i, score: h.score, max_score: h.max_score, exam_at: h.exam_at, slides: h.slides }))
         }
       });
     }
