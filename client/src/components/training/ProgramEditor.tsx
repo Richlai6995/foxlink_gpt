@@ -211,9 +211,15 @@ export default function ProgramEditor() {
         progId = res.data.id
         // Save courses & targets
         for (const c of courses) {
-          await api.post(`/training/programs/${progId}/courses`, {
-            course_id: c.course_id, is_required: c.is_required
+          const res2 = await api.post(`/training/programs/${progId}/courses`, {
+            course_id: c.course_id, is_required: c.is_required, lesson_ids: c.lesson_ids
           })
+          // Save exam_config if set
+          if (c.exam_config && Object.keys(c.exam_config).length > 0) {
+            await api.put(`/training/programs/${progId}/courses/${res2.data.id}/lessons`, {
+              lesson_ids: c.lesson_ids, exam_config: c.exam_config
+            })
+          }
         }
         for (const t of targets) {
           await api.post(`/training/programs/${progId}/targets`, {
@@ -495,6 +501,7 @@ export default function ProgramEditor() {
                         setUserPickerDisplay(disp)
                       }}
                       placeholder={t('training.program.editor.searchUser')}
+                      apiUrl="/training/users-list"
                     />
                   </div>
                   <button onClick={addTarget} disabled={!selectedTarget}

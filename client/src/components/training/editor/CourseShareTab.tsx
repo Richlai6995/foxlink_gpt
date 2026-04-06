@@ -226,6 +226,7 @@ export default function CourseShareTab({ courseId }: { courseId: number }) {
                 setUserPickerDisplay(disp)
               }}
               placeholder={t('training.share.searchUser')}
+              apiUrl="/training/users-list"
             />
           </div>
         ) : (

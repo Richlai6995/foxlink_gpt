@@ -19,22 +19,23 @@ interface Props {
   onChange: (id: string, display: string) => void
   placeholder?: string
   className?: string
+  apiUrl?: string      // override API endpoint (default: /users)
 }
 
-let cachedUsers: User[] | null = null
+let cachedUsers: Record<string, User[]> = {}
 
-export default function UserPicker({ value, display, onChange, placeholder = '搜尋姓名 / 帳號 / 工號', className = '' }: Props) {
+export default function UserPicker({ value, display, onChange, placeholder = '搜尋姓名 / 帳號 / 工號', className = '', apiUrl = '/users' }: Props) {
   const [open, setOpen] = useState(false)
   const [filter, setFilter] = useState(display)
-  const [users, setUsers] = useState<User[]>(cachedUsers || [])
+  const [users, setUsers] = useState<User[]>(cachedUsers[apiUrl] || [])
   const ref = useRef<HTMLDivElement>(null)
 
-  // 載入全部使用者（只載一次，cache 在 module level）
+  // 載入全部使用者（只載一次，cache 在 module level per apiUrl）
   useEffect(() => {
-    if (cachedUsers) { setUsers(cachedUsers); return }
-    api.get('/users').then(r => {
+    if (cachedUsers[apiUrl]) { setUsers(cachedUsers[apiUrl]); return }
+    api.get(apiUrl).then(r => {
       const list: User[] = r.data || []
-      cachedUsers = list
+      cachedUsers[apiUrl] = list
       setUsers(list)
     }).catch(() => {})
   }, [])

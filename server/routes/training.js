@@ -2564,6 +2564,18 @@ router.put('/assignments/:aid/exempt', async (req, res) => {
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // ═══════════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════════
+// User list for training (publish users can search users for targets)
+// ═══════════════════════════════════════════════════════════════════════════════
+router.get('/users-list', async (req, res) => {
+  try {
+    const rows = await db.prepare(
+      "SELECT id, username, name, employee_id FROM users WHERE status='active' ORDER BY name"
+    ).all();
+    res.json(rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // Slide View Tracking (Phase 5)
 // ═══════════════════════════════════════════════════════════════════════════════
 
