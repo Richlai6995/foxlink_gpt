@@ -195,15 +195,16 @@ export function CoursePlayerInner({ courseId, lessonId, lang: langProp, sessionI
   const programIdParam = new URLSearchParams(window.location.search).get('program_id')
 
   useEffect(() => {
+    const slideId = currentSlide?.id
+    const lessonId = currentSlide?.lesson_id
     slideViewStartRef.current = Date.now()
     return () => {
-      // On leaving a slide, record the view
-      if (currentSlide) {
+      if (slideId) {
         const duration = Math.round((Date.now() - slideViewStartRef.current) / 1000)
         if (duration >= 1) {
-          api.post(`/training/slides/${currentSlide.id}/view`, {
+          api.post(`/training/slides/${slideId}/view`, {
             course_id: courseId,
-            lesson_id: currentSlide.lesson_id,
+            lesson_id: lessonId,
             program_id: programIdParam ? Number(programIdParam) : null,
             duration_seconds: duration
           }).catch(() => {})

@@ -2643,17 +2643,7 @@ router.get('/classroom/programs/:id/my-scores', async (req, res) => {
       let totalSlides = 0, viewedSlides = 0;
       for (const lesson of lessons) {
         const slideCount = await db.prepare('SELECT COUNT(*) AS cnt FROM course_slides WHERE lesson_id=?').get(lesson.id);
-        const viewedCount = await db.prepare(`
-          SELECT COUNT(*) AS cnt FROM user_slide_views
-          WHERE user_id=? AND lesson_id=? AND ${progId ? 'program_id=?' : 'program_id IS NULL'}
-            AND (interaction_done = 1 OR slide_id NOT IN (
-              SELECT cs.id FROM course_slides cs WHERE cs.lesson_id=?
-              AND EXISTS (SELECT 1 FROM JSON_TABLE(cs.content_json, '$[*]' COLUMNS (type VARCHAR2(50) PATH '$.type'))
-                         WHERE type IN ('hotspot','dragdrop','quiz_inline'))
-            ))
-        `).get(userId, lesson.id, ...(progId ? [progId] : []), lesson.id);
-
-        // Simpler: count viewed slides (any view record = viewed for non-interactive, interaction_done=1 for interactive)
+        // Count viewed slides: any view record counts (interaction_done tracked separately)
         const viewed = await db.prepare(`
           SELECT COUNT(*) AS cnt FROM user_slide_views
           WHERE user_id=? AND lesson_id=? AND ${progId ? 'program_id=?' : 'program_id IS NULL'}
@@ -2668,15 +2658,14 @@ router.get('/classroom/programs/:id/my-scores', async (req, res) => {
 
       // Get best exam score (from interaction_results grouped by session_id)
       const bestSession = await db.prepare(`
-        SELECT session_score, session_max, session_at FROM (
-          SELECT SUM(COALESCE(weighted_score, score)) AS session_score,
-                 SUM(COALESCE(weighted_max, max_score)) AS session_max,
-                 MAX(created_at) AS session_at
-          FROM interaction_results
-          WHERE user_id=? AND course_id=? AND session_id IS NOT NULL AND player_mode='test'
-          GROUP BY session_id
-          ORDER BY SUM(COALESCE(weighted_score, score)) DESC
-        ) WHERE ROWNUM = 1
+        SELECT SUM(COALESCE(weighted_score, score)) AS session_score,
+               SUM(COALESCE(weighted_max, max_score)) AS session_max,
+               MAX(created_at) AS session_at
+        FROM interaction_results
+        WHERE user_id=? AND course_id=? AND session_id IS NOT NULL AND player_mode='test'
+        GROUP BY session_id
+        ORDER BY SUM(COALESCE(weighted_score, score)) DESC
+        FETCH FIRST 1 ROW ONLY
       `).get(userId, pc.course_id);
 
       // Get exam attempt count
@@ -2783,7 +2772,9 @@ router.get('/programs/:id/report', async (req, res) => {
         let slideCountSql = 'SELECT COUNT(*) AS cnt FROM course_slides cs JOIN course_lessons cl ON cl.id = cs.lesson_id WHERE cl.course_id=?';
         const scParams = [pc.course_id];
         if (lessonIds && lessonIds.length) {
-          slideCountSql += ` AND cs.lesson_id IN (${lessonIds.join(',')})`;
+          const ph = lessonIds.map(() => '?').join(',');
+          slideCountSql += ` AND cs.lesson_id IN (${ph})`;
+          scParams.push(...lessonIds.map(Number));
         }
         const slideCount = await db.prepare(slideCountSql).get(...scParams);
 
@@ -2798,11 +2789,10 @@ router.get('/programs/:id/report', async (req, res) => {
 
         // Best exam score
         const best = await db.prepare(`
-          SELECT session_score FROM (
-            SELECT SUM(COALESCE(weighted_score, score)) AS session_score
-            FROM interaction_results WHERE user_id=? AND course_id=? AND session_id IS NOT NULL AND player_mode='test'
-            GROUP BY session_id ORDER BY SUM(COALESCE(weighted_score, score)) DESC
-          ) WHERE ROWNUM=1
+          SELECT SUM(COALESCE(weighted_score, score)) AS session_score
+          FROM interaction_results WHERE user_id=? AND course_id=? AND session_id IS NOT NULL AND player_mode='test'
+          GROUP BY session_id ORDER BY SUM(COALESCE(weighted_score, score)) DESC
+          FETCH FIRST 1 ROW ONLY
         `).get(u.user_id, pc.course_id);
 
         const attempts = await db.prepare(
@@ -2899,14 +2889,19 @@ router.get('/programs/:id/report/export', async (req, res) => {
         const lessonIds = pc.lesson_ids ? JSON.parse(pc.lesson_ids) : null;
 
         let scSql = 'SELECT COUNT(*) AS cnt FROM course_slides cs JOIN course_lessons cl ON cl.id=cs.lesson_id WHERE cl.course_id=?';
-        if (lessonIds?.length) scSql += ` AND cs.lesson_id IN (${lessonIds.join(',')})`;
-        const sc = await db.prepare(scSql).get(pc.course_id);
+        const scParams2 = [pc.course_id];
+        if (lessonIds?.length) {
+          const ph = lessonIds.map(() => '?').join(',');
+          scSql += ` AND cs.lesson_id IN (${ph})`;
+          scParams2.push(...lessonIds.map(Number));
+        }
+        const sc = await db.prepare(scSql).get(...scParams2);
         const vc = await db.prepare('SELECT COUNT(*) AS cnt FROM user_slide_views WHERE user_id=? AND course_id=? AND program_id=?').get(u.user_id, pc.course_id, progId);
         const total = sc?.cnt || 0; const viewed = Math.min(vc?.cnt || 0, total);
         browseTotal += total; browseViewed += viewed;
         row.push(`${viewed}/${total}`);
 
-        const best = await db.prepare(`SELECT session_score FROM (SELECT SUM(COALESCE(weighted_score,score)) AS session_score FROM interaction_results WHERE user_id=? AND course_id=? AND session_id IS NOT NULL AND player_mode='test' GROUP BY session_id ORDER BY SUM(COALESCE(weighted_score,score)) DESC) WHERE ROWNUM=1`).get(u.user_id, pc.course_id);
+        const best = await db.prepare(`SELECT SUM(COALESCE(weighted_score,score)) AS session_score FROM interaction_results WHERE user_id=? AND course_id=? AND session_id IS NOT NULL AND player_mode='test' GROUP BY session_id ORDER BY SUM(COALESCE(weighted_score,score)) DESC FETCH FIRST 1 ROW ONLY`).get(u.user_id, pc.course_id);
         const bs = best?.session_score || 0;
         const ratio = bs > 0 ? bs / 100 : 0;
         const weighted = Math.round(ratio * courseTotalScore);
