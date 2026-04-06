@@ -3344,3 +3344,69 @@ ProgramEditor 新增「成績報表」tab。摘要 + 使用者表格 + 展開詳
 | `client/src/components/training/ProgramScorePanel.tsx` | **新增** — 學員成績面板 |
 | `client/src/components/training/ProgramReport.tsx` | **新增** — 管理者報表 |
 | `client/src/i18n/locales/*.json` | scoring + report + locked keys |
+
+---
+
+## 24. Phase 5 追加修復與封存功能（2026-04-07）
+
+### 24-1：完成判斷改為導覽+測驗雙條件
+
+Classroom my-programs 的進度計算不再依賴 `program_assignments.status`，改為即時查詢每門課程的：
+- 導覽完成度（slide views vs total slides）
+- 測驗最佳成績（best session score vs pass_score）
+
+兩者都達標才算該課程「完成」。
+
+### 24-2：返回路由修正
+
+- CoursePlayer：帶 `program_id` 時返回 ProgramView
+- CourseDetail：帶 `program_id` 時返回 ProgramView
+- 解決 Player↔Detail 無限循環
+
+### 24-3：ProgramView 卡片式重寫
+
+課程 tab 從條列改為卡片式（封面+章節列表+測驗主題+按鈕）。Backend 回傳 `lesson_status` + `exam_topics`。
+
+### 24-4：專案測驗設定覆蓋課程設定
+
+`GET /training/program-exam-config` API + CoursePlayer 優先使用 program exam_config。
+
+### 24-5：考試歷史每題明細
+
+Backend 回傳 per-slide 的 `score_breakdown` + `action_log`。ProgramScorePanel 可展開每題分數條+錯誤原因。
+
+### 24-6：課程+專案封存/解封
+
+| 項目 | 說明 |
+|------|------|
+| 課程封存 | `POST /courses/:id/archive` + `/unarchive` |
+| 專案封存 | `PUT /programs/:id/archive` + `/unarchive` |
+| 預設隱藏 | CourseList + ProgramList + GET /programs 排除 archived |
+| 篩選顯示 | 狀態下拉新增「已封存」|
+| 建立日期 | CourseList 卡片 + ProgramList 列表 |
+| 建立者 | ProgramList 列表顯示 creator_name |
+
+### 24-7：其他修復
+
+| 問題 | 修正 |
+|------|------|
+| exam_config 存檔後消失 | GET /programs/:id SELECT 補回 pc.exam_config + JSON parse |
+| UserPicker 403 | 新增 GET /training/users-list + UserPicker apiUrl prop |
+| progress NULL lesson_id | IS NULL 查詢 |
+| exam history slides 被丟棄 | map 補回 h.slides |
+| 練習測驗按鈕缺失 | 移除 exam_topics 條件 |
+
+### 24-8：實作檔案
+
+| 檔案 | 變更 |
+|------|------|
+| `server/routes/training.js` | program-exam-config + archive/unarchive + users-list + exam slides + 進度計算 |
+| `client/src/components/training/CoursePlayer.tsx` | programExamConfig + 返回路由 |
+| `client/src/components/training/CourseDetail.tsx` | program_id 返回 |
+| `client/src/components/training/ProgramView.tsx` | 卡片式+章節+測驗主題 |
+| `client/src/components/training/ProgramScorePanel.tsx` | 每題明細展開 |
+| `client/src/components/training/ProgramList.tsx` | 封存+建立者/日期 |
+| `client/src/components/training/CourseList.tsx` | 封存+建立日期 |
+| `client/src/components/training/ProgramEditor.tsx` | handleSave 補存 exam_config |
+| `client/src/components/common/UserPicker.tsx` | apiUrl prop |
+| `client/src/i18n/locales/*.json` | scoring detail + archive keys |

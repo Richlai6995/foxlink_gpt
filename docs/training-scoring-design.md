@@ -1,7 +1,7 @@
 # FOXLINK GPT 教育訓練 — Phase 5：專案計分 + 學習追蹤 + 成績報表
 
 > 日期：2026-04-07
-> 狀態：Phase 5A–5H 全部實作完成
+> 狀態：Phase 5A–5H 全部實作完成 + 追加修復 + 封存功能
 > 前置：Phase 4A–4F 已完成
 
 ---
@@ -335,3 +335,85 @@ GET  /api/training/programs/:id/report/export
 | `a5104c1` | Phase 5E+5F+5G: 學員成績面板 + 管理者報表 + Excel 匯出 |
 | `b783870` | Phase 5H: 章節鎖定 |
 | `f3e5f10` | Fix: div/zero guard + Excel i18n headers |
+| `290dad0` | 文件更新 |
+| `98f494d` | 完成判斷改為導覽100%+測驗及格 + 返回路由修正 + ProgramView 卡片式重寫 |
+| `8dc8ed4` | 練習測驗按鈕 + progress NULL fix |
+| `34a7431` | exam_config 存檔修正 + UserPicker 403 + /training/users-list |
+| `7a6c19a` | GET /programs/:id 補回 exam_config 欄位 |
+| `dbd19d0` | 專案測驗設定覆蓋課程設定（programExamConfig 優先） |
+| `80580f8` | 考試歷史每題明細（score_breakdown + action_log） |
+| `263aec4` | Fix: exam history slides 被 map 丟棄 |
+| `b3139f7` | 課程+專案封存/解封 + 建立日期/建立者 |
+
+---
+
+## 12. 追加功能與修復（2026-04-07 後半段）
+
+### 12.1 完成判斷改為導覽+測驗雙條件
+
+**變更**：classroom `GET /my-programs` 的進度計算改為：
+- 課程完成 = 導覽 100%（所有投影片已瀏覽）AND 測驗及格（best score ≥ pass_score）
+- 不再依賴 `program_assignments.status`
+
+### 12.2 返回路由修正
+
+- CoursePlayer：`program_id` query → 返回 `/training/classroom/program/:id`
+- CourseDetail：讀 `program_id` query → 返回 ProgramView
+
+### 12.3 ProgramView 卡片式重寫
+
+課程 tab 從條列改為卡片式：
+- 封面圖 + 課程名稱 + 描述
+- 章節列表（導覽進度 + 鎖定狀態）
+- 測驗主題列表（分數 + 時間 + 開始測驗按鈕）
+- 繼續學習 / 練習測驗 按鈕
+
+### 12.4 專案測驗設定覆蓋課程設定
+
+- 新增 `GET /training/program-exam-config` API
+- CoursePlayer examConfig 優先順序：programExamConfig > examTopic > course.settings_json
+- 從專案進入測驗時，佔分/及格/時間全部用專案課程設定
+
+### 12.5 考試歷史每題明細
+
+- Backend：exam history 加入 per-slide 的 score_breakdown + action_log
+- ProgramScorePanel：可展開每次考試的每題得分條 + 錯誤原因
+  - 步驟未完成 / 錯誤點擊 / 具體錯誤操作
+
+### 12.6 課程+專案封存功能
+
+| 操作 | 課程 | 專案 |
+|------|------|------|
+| 封存 | `POST /courses/:id/archive` | `PUT /programs/:id/archive` |
+| 解封 | `POST /courses/:id/unarchive` → draft | `PUT /programs/:id/unarchive` → draft |
+| 預設隱藏 | CourseList 過濾 archived | ProgramList 過濾 + GET /programs 排除 |
+| 篩選顯示 | 狀態下拉「已封存」| 狀態下拉「已封存」|
+
+### 12.7 建立日期/建立者顯示
+
+- CourseList：卡片加建立日期
+- ProgramList：列表加建立者 + 建立日期
+
+### 12.8 其他修復
+
+| 問題 | 修正 |
+|------|------|
+| exam_config 存檔後重新載入消失 | GET /programs/:id SELECT 補回 pc.exam_config |
+| UserPicker 403（非 admin） | 新增 GET /training/users-list + UserPicker apiUrl prop |
+| progress NULL lesson_id | Oracle IS NULL 查詢修正 |
+| exam history slides 被丟棄 | history.map 補回 h.slides |
+
+### 12.9 實作檔案（追加部分）
+
+| 檔案 | 變更 |
+|------|------|
+| `server/routes/training.js` | program-exam-config API + unarchive + archive + users-list + exam history slides + 進度計算 |
+| `client/src/components/training/CoursePlayer.tsx` | programExamConfig 載入+覆蓋 + 返回路由 |
+| `client/src/components/training/CourseDetail.tsx` | program_id 返回路由 |
+| `client/src/components/training/ProgramView.tsx` | 卡片式重寫 + 章節+測驗主題 + 成績 tab |
+| `client/src/components/training/ProgramScorePanel.tsx` | 每題明細展開 |
+| `client/src/components/training/ProgramList.tsx` | 封存/解封 + 建立者/日期 + archived 篩選 |
+| `client/src/components/training/CourseList.tsx` | 封存/解封按鈕 + 建立日期 + 預設隱藏 archived |
+| `client/src/components/training/ProgramEditor.tsx` | handleSave 補存 exam_config |
+| `client/src/components/common/UserPicker.tsx` | apiUrl prop |
+| `client/src/i18n/locales/*.json` | scoring detail + archive/unarchive keys |

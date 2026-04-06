@@ -637,3 +637,12 @@ Classroom API `GET /classroom/my-programs` 增加 auto-enroll 邏輯：
 | GRANTEE_LABELS 硬編碼中文 | 沒用 i18n | 改為 `t('training.grantee.*')` |
 | LOV 選取後不關閉 | useEffect 連鎖清除 selected | 改用 `showDropdown` state 明確控制 |
 | `/training/editor/:id` redirect 遺失 ID | Navigate 不能存取 params | 新增 RedirectEditorId wrapper |
+
+### 12.11 課程+專案封存功能
+
+課程和專案都支援封存/解封操作：
+- 封存後預設不顯示在列表中，需切換篩選才看得到
+- 解封後回到 draft 狀態
+- 封存不影響已指派的 assignment（學員仍可完成學習）
+- 課程和專案列表新增建立日期顯示
+- 專案列表新增建立者顯示
