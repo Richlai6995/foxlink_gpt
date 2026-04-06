@@ -211,7 +211,7 @@ export function CoursePlayerInner({ courseId, lessonId, lang: langProp, sessionI
         }
       }
     }
-  }, [currentIdx, currentSlide?.id])
+  }, [currentIdx, currentSlide?.id, courseId])
 
   // Auto-play audio
   useEffect(() => {

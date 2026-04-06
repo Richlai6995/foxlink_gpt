@@ -2789,7 +2789,8 @@ router.get('/programs/:id/report', async (req, res) => {
 
         // Best exam score
         const best = await db.prepare(`
-          SELECT SUM(COALESCE(weighted_score, score)) AS session_score
+          SELECT SUM(COALESCE(weighted_score, score)) AS session_score,
+                 SUM(COALESCE(weighted_max, max_score)) AS session_max
           FROM interaction_results WHERE user_id=? AND course_id=? AND session_id IS NOT NULL AND player_mode='test'
           GROUP BY session_id ORDER BY SUM(COALESCE(weighted_score, score)) DESC
           FETCH FIRST 1 ROW ONLY
@@ -2800,7 +2801,8 @@ router.get('/programs/:id/report', async (req, res) => {
         ).get(u.user_id, pc.course_id);
 
         const bestScore = best?.session_score || 0;
-        const ratio = bestScore > 0 ? bestScore / 100 : 0;
+        const bestMax = best?.session_max || 100;
+        const ratio = bestMax > 0 ? bestScore / bestMax : 0;
         const weighted = Math.round(ratio * courseTotalScore);
         const passed = ratio * 100 >= coursePassScore;
         if (pc.is_required && !passed) allPassed = false;
@@ -2901,9 +2903,10 @@ router.get('/programs/:id/report/export', async (req, res) => {
         browseTotal += total; browseViewed += viewed;
         row.push(`${viewed}/${total}`);
 
-        const best = await db.prepare(`SELECT SUM(COALESCE(weighted_score,score)) AS session_score FROM interaction_results WHERE user_id=? AND course_id=? AND session_id IS NOT NULL AND player_mode='test' GROUP BY session_id ORDER BY SUM(COALESCE(weighted_score,score)) DESC FETCH FIRST 1 ROW ONLY`).get(u.user_id, pc.course_id);
+        const best = await db.prepare(`SELECT SUM(COALESCE(weighted_score,score)) AS session_score, SUM(COALESCE(weighted_max,max_score)) AS session_max FROM interaction_results WHERE user_id=? AND course_id=? AND session_id IS NOT NULL AND player_mode='test' GROUP BY session_id ORDER BY SUM(COALESCE(weighted_score,score)) DESC FETCH FIRST 1 ROW ONLY`).get(u.user_id, pc.course_id);
         const bs = best?.session_score || 0;
-        const ratio = bs > 0 ? bs / 100 : 0;
+        const bm = best?.session_max || 100;
+        const ratio = bm > 0 ? bs / bm : 0;
         const weighted = Math.round(ratio * courseTotalScore);
         if (pc.is_required && ratio * 100 < coursePassScore) allPassed = false;
         programTotal += weighted; programMax += courseTotalScore;

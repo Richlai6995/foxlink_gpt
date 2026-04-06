@@ -1599,7 +1599,7 @@ async function runMigrations(db) {
     duration_seconds NUMBER DEFAULT 0,
     interaction_done NUMBER(1) DEFAULT 0,
     viewed_at        TIMESTAMP DEFAULT SYSTIMESTAMP,
-    CONSTRAINT uq_slide_view UNIQUE (user_id, slide_id, program_id)
+    CONSTRAINT UQ_SLIDE_VIEW UNIQUE (user_id, slide_id, program_id)
   )`);
 
   // ── Phase 3D-Help: session_id + Help 綁定教材 ────────────────────────────────
