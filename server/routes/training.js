@@ -2577,6 +2577,20 @@ router.get('/users-list', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// GET /api/training/program-exam-config — get exam config override from program_courses
+router.get('/program-exam-config', async (req, res) => {
+  try {
+    const { program_id, course_id } = req.query;
+    if (!program_id || !course_id) return res.json(null);
+    const row = await db.prepare(
+      'SELECT exam_config FROM program_courses WHERE program_id=? AND course_id=?'
+    ).get(Number(program_id), Number(course_id));
+    if (!row?.exam_config) return res.json(null);
+    const config = typeof row.exam_config === 'string' ? JSON.parse(row.exam_config) : row.exam_config;
+    res.json(config);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // Slide View Tracking (Phase 5)
 // ═══════════════════════════════════════════════════════════════════════════════
 

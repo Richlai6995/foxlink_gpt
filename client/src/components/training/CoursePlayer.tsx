@@ -100,6 +100,8 @@ export function CoursePlayerInner({ courseId, lessonId, lang: langProp, sessionI
 
   // ─── Exam topic override ───
   const [examTopic, setExamTopic] = useState<ExamTopicConfig | null>(null)
+  // ─── Program exam config override ───
+  const [programExamConfig, setProgramExamConfig] = useState<any>(null)
 
   // ─── Exam state ───
   const [examPhase, setExamPhase] = useState<'idle' | 'start' | 'running' | 'result'>('idle')
@@ -163,16 +165,26 @@ export function CoursePlayerInner({ courseId, lessonId, lang: langProp, sessionI
       setCurrentIdx(0)
 
       api.post(`/training/courses/${courseId}/progress`, { status: 'in_progress' }).catch(() => {})
+
+      // Load program exam config if coming from a program
+      const progIdParam = new URLSearchParams(window.location.search).get('program_id')
+      if (progIdParam) {
+        try {
+          const pecRes = await api.get('/training/program-exam-config', { params: { program_id: progIdParam, course_id: courseId } })
+          if (pecRes.data) setProgramExamConfig(pecRes.data)
+        } catch {}
+      }
     } catch (e) {
       console.error(e)
       onClose()
     }
   }
 
-  // ─── Exam config helpers (exam topic overrides course defaults) ───
-  const examConfig = examTopic || course?.settings_json?.exam || {}
+  // ─── Exam config helpers ───
+  // Priority: programExamConfig (from program_courses) > examTopic > course settings
+  const examConfig = programExamConfig || examTopic || course?.settings_json?.exam || {}
   const examTotalScore = examConfig.total_score || 100
-  const examPassScore = examTopic?.pass_score || course?.pass_score || 60
+  const examPassScore = programExamConfig?.pass_score || examTopic?.pass_score || course?.pass_score || 60
   const examTimeLimit = examConfig.time_limit_minutes || 10
   const examTimeLimitEnabled = examConfig.time_limit_enabled !== false && examConfig.time_limit_enabled !== 0
   const examOvertimeAction = examConfig.overtime_action || 'auto_submit'
