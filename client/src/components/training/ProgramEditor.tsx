@@ -670,7 +670,6 @@ function ProgramCourseCard({ course, idx, isEditable, isNew, programId, onUpdate
   const updateExamConfig = (patch: Record<string, any>) => {
     const updated = { ...ec, ...patch }
     onUpdate({ ...course, exam_config: updated })
-    // Save to backend if editing
     if (!isNew && course.id && programId) {
       api.put(`/training/programs/${programId}/courses/${course.id}/lessons`, {
         lesson_ids: course.lesson_ids,

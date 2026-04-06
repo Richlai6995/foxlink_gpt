@@ -2244,15 +2244,16 @@ router.get('/programs/:id', async (req, res) => {
       }
     }
     const coursesRaw = await db.prepare(`
-      SELECT pc.id, pc.program_id, pc.course_id, pc.sort_order, pc.is_required, pc.lesson_ids,
+      SELECT pc.id, pc.program_id, pc.course_id, pc.sort_order, pc.is_required, pc.lesson_ids, pc.exam_config,
              c.title AS course_title
       FROM program_courses pc JOIN courses c ON c.id = pc.course_id
       WHERE pc.program_id = ? ORDER BY pc.sort_order
     `).all(req.params.id);
-    // Parse lesson_ids CLOB to array
+    // Parse lesson_ids + exam_config CLOB to objects
     const courses = coursesRaw.map(c => ({
       ...c,
-      lesson_ids: c.lesson_ids ? (typeof c.lesson_ids === 'string' ? JSON.parse(c.lesson_ids) : c.lesson_ids) : null
+      lesson_ids: c.lesson_ids ? (typeof c.lesson_ids === 'string' ? JSON.parse(c.lesson_ids) : c.lesson_ids) : null,
+      exam_config: c.exam_config ? (typeof c.exam_config === 'string' ? JSON.parse(c.exam_config) : c.exam_config) : null
     }));
     const assignmentStats = await db.prepare(`
       SELECT status, COUNT(*) AS cnt FROM program_assignments WHERE program_id=? GROUP BY status
