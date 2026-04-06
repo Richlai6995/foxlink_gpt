@@ -2872,11 +2872,15 @@ router.get('/programs/:id/report/export', async (req, res) => {
       ORDER BY u.name
     `).all(progId);
 
-    // Build Excel
+    // Build Excel — i18n headers based on request language
     const XLSX = require('xlsx');
-    const headers = ['姓名', '工號', '部門', '導覽進度'];
-    for (const c of courses) { headers.push(`${c.course_title} 導覽`, `${c.course_title} 成績`); }
-    headers.push('專案總分', '及格');
+    const lang = req.query.lang || req.headers['accept-language']?.split(',')[0]?.split('-')[0] || 'zh';
+    const labels = lang === 'en' ? { name: 'Name', eid: 'Employee ID', dept: 'Department', browse: 'Browse', browseAll: 'Browse Progress', score: 'Score', total: 'Program Total', pass: 'Pass' }
+      : lang === 'vi' ? { name: 'Tên', eid: 'Mã NV', dept: 'Phòng ban', browse: 'Duyệt', browseAll: 'Tiến độ', score: 'Điểm', total: 'Tổng điểm', pass: 'Đạt' }
+      : { name: '姓名', eid: '工號', dept: '部門', browse: '導覽', browseAll: '導覽進度', score: '成績', total: '專案總分', pass: '及格' };
+    const headers = [labels.name, labels.eid, labels.dept, labels.browseAll];
+    for (const c of courses) { headers.push(`${c.course_title} ${labels.browse}`, `${c.course_title} ${labels.score}`); }
+    headers.push(labels.total, labels.pass);
 
     const rows = [];
     for (const u of users) {
@@ -2915,7 +2919,9 @@ router.get('/programs/:id/report/export', async (req, res) => {
 
       row.splice(3, 0, `${browseViewed}/${browseTotal}`);
       const pPass = allPassed && (programMax > 0 ? programTotal / programMax * 100 >= (program.program_pass_score || 60) : false);
-      row.push(`${programTotal}/${programMax}`, pPass ? '是' : '否');
+      const passYes = lang === 'en' ? 'Yes' : lang === 'vi' ? 'Có' : '是';
+      const passNo = lang === 'en' ? 'No' : lang === 'vi' ? 'Không' : '否';
+      row.push(`${programTotal}/${programMax}`, pPass ? passYes : passNo);
       rows.push(row);
     }
 

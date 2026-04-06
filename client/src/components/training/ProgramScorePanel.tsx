@@ -116,16 +116,19 @@ export default function ProgramScorePanel({ programId }: { programId: number }) 
                   <div>
                     <div className="text-[10px] font-semibold text-slate-500 uppercase mb-1">{t('training.scoring.examHistory')}</div>
                     <div className="space-y-1">
-                      {c.exam.history.map((h, i) => (
-                        <div key={i} className="flex items-center gap-3 text-xs text-slate-600 bg-white px-3 py-1.5 rounded border border-slate-100">
-                          <span className="font-medium w-8">#{h.attempt}</span>
-                          <span className="text-slate-400 flex-1">{formatDate(h.exam_at)}</span>
-                          <span className={`font-medium ${h.score / h.max_score * 100 >= c.pass_score ? 'text-green-600' : 'text-red-500'}`}>
-                            {h.score}/{h.max_score}
-                          </span>
-                          <span>{h.score / h.max_score * 100 >= c.pass_score ? '✅' : '❌'}</span>
-                        </div>
-                      ))}
+                      {c.exam.history.map((h, i) => {
+                        const pct = h.max_score > 0 ? h.score / h.max_score * 100 : 0
+                        return (
+                          <div key={i} className="flex items-center gap-3 text-xs text-slate-600 bg-white px-3 py-1.5 rounded border border-slate-100">
+                            <span className="font-medium w-8">#{h.attempt}</span>
+                            <span className="text-slate-400 flex-1">{formatDate(h.exam_at)}</span>
+                            <span className={`font-medium ${pct >= c.pass_score ? 'text-green-600' : 'text-red-500'}`}>
+                              {h.score}/{h.max_score}
+                            </span>
+                            <span>{pct >= c.pass_score ? '✅' : '❌'}</span>
+                          </div>
+                        )
+                      })}
                     </div>
                   </div>
                 )}
