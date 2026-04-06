@@ -200,12 +200,10 @@ export default function ProgramView() {
                   className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg text-xs font-medium transition">
                   <Play size={13} /> {browsePct > 0 ? t('training.continueLearning') : t('training.startLearning')}
                 </button>
-                {(!a.exam_topics || a.exam_topics.length === 0) && (
-                  <button onClick={() => navigate(`/training/classroom/course/${a.course_id}/learn?mode=test&program_id=${program.id}&assignment_id=${a.id}`)}
-                    className="flex items-center gap-1.5 bg-orange-500 hover:bg-orange-400 text-white px-4 py-2 rounded-lg text-xs font-medium transition">
-                    <Play size={13} /> {t('training.scoring.practiceExam')}
-                  </button>
-                )}
+                <button onClick={() => navigate(`/training/classroom/course/${a.course_id}/learn?mode=test&program_id=${program.id}&assignment_id=${a.id}`)}
+                  className="flex items-center gap-1.5 bg-orange-500 hover:bg-orange-400 text-white px-4 py-2 rounded-lg text-xs font-medium transition">
+                  <Play size={13} /> {t('training.scoring.practiceExam')}
+                </button>
               </div>
             </div>
           )

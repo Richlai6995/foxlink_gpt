@@ -1547,9 +1547,11 @@ router.post('/courses/:id/progress', loadCoursePermission, async (req, res) => {
   try {
     const { lesson_id, current_slide_index, status, time_spent_seconds } = req.body;
 
+    const lid = lesson_id || null;
     const existing = await db.prepare(
-      'SELECT id FROM user_course_progress WHERE user_id=? AND course_id=? AND lesson_id=?'
-    ).get(req.user.id, req.courseId, lesson_id || null);
+      lid ? 'SELECT id FROM user_course_progress WHERE user_id=? AND course_id=? AND lesson_id=?'
+          : 'SELECT id FROM user_course_progress WHERE user_id=? AND course_id=? AND lesson_id IS NULL'
+    ).get(...(lid ? [req.user.id, req.courseId, lid] : [req.user.id, req.courseId]));
 
     if (existing) {
       await db.prepare(`
@@ -1569,6 +1571,7 @@ router.post('/courses/:id/progress', loadCoursePermission, async (req, res) => {
     }
     res.json({ ok: true });
   } catch (e) {
+    console.error('[Progress] error:', e.message);
     res.status(500).json({ error: e.message });
   }
 });
