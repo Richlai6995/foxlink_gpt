@@ -1953,7 +1953,8 @@
       "passed": "Đạt",
       "notPassed": "Không đạt",
       "inProgress": "Đang tiến hành",
-      "notStarted": "Chưa bắt đầu"
+      "notStarted": "Chưa bắt đầu",
+      "locked": "Hoàn thành chương trước"
     },
     "report": {
       "title": "Báo cáo điểm",

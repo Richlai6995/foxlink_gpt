@@ -1,8 +1,8 @@
 # FOXLINK GPT 教育訓練平台 — 實作完成報告
 
-> 日期：2026-04-02（Phase 1-2F）、2026-04-03（Phase 3A）、2026-04-04（Phase 3B + i18n）、2026-04-05（Phase 3C–3D 全部）、2026-04-06~07（Phase 4A–4F 訓練教室+審計修復+追加功能）
-> 狀態：Phase 1–3E + Phase 4A–4F (訓練教室 + 權限改造 + 專案上架 + 預覽權限 + 自動撥放 + 章節選擇) 實作完成
-> 設計文件：[training-platform-design.md](training-platform-design.md)、[training-classroom-design.md](training-classroom-design.md)
+> 日期：2026-04-02（Phase 1-2F）、2026-04-03（Phase 3A）、2026-04-04（Phase 3B + i18n）、2026-04-05（Phase 3C–3D 全部）、2026-04-06~07（Phase 4+5 訓練教室+計分+報表）
+> 狀態：Phase 1–3E + Phase 4A–4F + Phase 5A–5H 全部實作完成
+> 設計文件：[training-platform-design.md](training-platform-design.md)、[training-classroom-design.md](training-classroom-design.md)、[training-scoring-design.md](training-scoring-design.md)
 
 ---
 
@@ -3287,6 +3287,60 @@ cd client && npm run dev    # 確認前端編譯成功
 | `client/src/components/training/SlideRenderer.tsx` | autoPlay + onAutoPlayDone 傳遞 |
 | `client/src/components/admin/UserManagement.tsx` | 權限下拉 |
 | `client/src/components/admin/RoleManagement.tsx` | 權限下拉 |
-| `client/src/i18n/locales/zh-TW.json` | 全部新增 keys |
+| `client/src/i18n/locales/zh-TW.json` | Phase 4+5 全部新增 keys |
 | `client/src/i18n/locales/en.json` | 同上 |
 | `client/src/i18n/locales/vi.json` | 同上 |
+
+---
+
+## 23. Phase 5A–5H：專案計分 + 學習追蹤 + 成績報表（2026-04-07）
+
+> 設計文件：[training-scoring-design.md](training-scoring-design.md)
+
+### 23-1：Phase 5A — DB 基礎
+
+| 項目 | 說明 |
+|------|------|
+| `user_slide_views` 表 | 投影片瀏覽追蹤（user_id + slide_id + program_id UNIQUE） |
+| `program_courses.exam_config` | CLOB — 覆蓋課程測驗設定（佔分/及格/時間/重考/章節配分） |
+| `training_programs.program_pass_score` | 專案及格分數（預設 60） |
+| `training_programs.sequential_lessons` | 章節鎖定開關 |
+
+### 23-2：Phase 5B — 投影片瀏覽追蹤
+
+CoursePlayer 切換投影片時 POST `/slides/:id/view`（含 duration），互動完成時 PUT `/slides/:id/view/done`。
+
+### 23-3：Phase 5C — ProgramEditor 配分 UI
+
+課程卡片新增：佔分、每章節配分（lesson_weights）、及格%、時間限制、重考次數。專案設定新增：及格分數、依序學習開關。
+
+### 23-4：Phase 5D — Backend 成績 API
+
+- `GET /classroom/programs/:id/my-scores` — 學員成績+導覽進度
+- `GET /programs/:id/report` — 管理者報表
+- `GET /programs/:id/report/export` — Excel 匯出
+
+### 23-5：Phase 5E — ProgramScorePanel 學員成績面板
+
+ProgramView 新增「成績與進度」tab。顯示每課程導覽進度 + 測驗 best score + 考試歷史 + 專案總分（雙重及格制）。
+
+### 23-6：Phase 5F+5G — ProgramReport 管理者報表 + Excel 匯出
+
+ProgramEditor 新增「成績報表」tab。摘要 + 使用者表格 + 展開詳細 + 匯出 Excel。
+
+### 23-7：Phase 5H — 章節鎖定
+
+`sequential_lessons = 1` 時，`GET /classroom/programs/:id` 回傳 `lesson_status`（per-lesson done/locked）。ProgramView 顯示鎖頭+提示，CoursePlayer 只載入已解鎖章節。
+
+### 23-8：實作檔案
+
+| 檔案 | 變更 |
+|------|------|
+| `server/database-oracle.js` | `user_slide_views` 表 + `exam_config` + `program_pass_score` + `sequential_lessons` |
+| `server/routes/training.js` | slide view API + my-scores + report + export + 章節鎖定邏輯 |
+| `client/src/components/training/CoursePlayer.tsx` | 瀏覽追蹤 + interaction_done |
+| `client/src/components/training/ProgramEditor.tsx` | 配分 UI + 報表 tab |
+| `client/src/components/training/ProgramView.tsx` | 成績 tab + 章節鎖定 UI |
+| `client/src/components/training/ProgramScorePanel.tsx` | **新增** — 學員成績面板 |
+| `client/src/components/training/ProgramReport.tsx` | **新增** — 管理者報表 |
+| `client/src/i18n/locales/*.json` | scoring + report + locked keys |

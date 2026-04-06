@@ -1953,7 +1953,8 @@
       "passed": "Passed",
       "notPassed": "Not Passed",
       "inProgress": "In Progress",
-      "notStarted": "Not Started"
+      "notStarted": "Not Started",
+      "locked": "Complete previous chapter first"
     },
     "report": {
       "title": "Score Report",

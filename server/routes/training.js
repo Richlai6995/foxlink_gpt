@@ -3037,13 +3037,40 @@ router.get('/classroom/programs/:id', async (req, res) => {
       WHERE pa.program_id = ? AND pa.user_id = ? AND pa.status != 'exempted'
       ORDER BY COALESCE(pc.sort_order, pa.id)
     `).all(req.params.id, req.user.id);
-    // Parse lesson_ids CLOB
-    const assignments = assignmentsRaw.map(a => ({
-      ...a,
-      lesson_ids: a.lesson_ids ? (typeof a.lesson_ids === 'string' ? JSON.parse(a.lesson_ids) : a.lesson_ids) : null
-    }));
+    // Parse lesson_ids CLOB + resolve lesson progress for sequential locking
+    const isSequential = program.sequential_lessons === 1;
+    const assignments = [];
+    for (const a of assignmentsRaw) {
+      const parsed = {
+        ...a,
+        lesson_ids: a.lesson_ids ? (typeof a.lesson_ids === 'string' ? JSON.parse(a.lesson_ids) : a.lesson_ids) : null
+      };
 
-    res.json({ ...program, assignments });
+      // If sequential, compute per-lesson completion
+      if (isSequential) {
+        let lessons = await db.prepare('SELECT id, title, sort_order FROM course_lessons WHERE course_id=? ORDER BY sort_order, id').all(a.course_id);
+        if (parsed.lesson_ids && parsed.lesson_ids.length > 0) {
+          lessons = lessons.filter(l => parsed.lesson_ids.includes(l.id));
+        }
+        const lessonStatus = [];
+        let allPrevDone = true;
+        for (const lesson of lessons) {
+          const slideCount = await db.prepare('SELECT COUNT(*) AS cnt FROM course_slides WHERE lesson_id=?').get(lesson.id);
+          const viewedCount = await db.prepare(
+            `SELECT COUNT(*) AS cnt FROM user_slide_views WHERE user_id=? AND lesson_id=? AND program_id=?`
+          ).get(req.user.id, lesson.id, Number(req.params.id));
+          const total = slideCount?.cnt || 0;
+          const viewed = Math.min(viewedCount?.cnt || 0, total);
+          const done = total > 0 && viewed >= total;
+          lessonStatus.push({ lesson_id: lesson.id, title: lesson.title, total, viewed, done, locked: !allPrevDone });
+          if (!done) allPrevDone = false;
+        }
+        parsed.lesson_status = lessonStatus;
+      }
+      assignments.push(parsed);
+    }
+
+    res.json({ ...program, sequential_lessons: program.sequential_lessons, assignments });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

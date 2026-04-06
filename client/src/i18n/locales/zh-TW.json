@@ -1953,7 +1953,8 @@
       "passed": "及格",
       "notPassed": "未及格",
       "inProgress": "進行中",
-      "notStarted": "未開始"
+      "notStarted": "未開始",
+      "locked": "請先完成前一章節"
     },
     "report": {
       "title": "成績報表",
