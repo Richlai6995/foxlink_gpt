@@ -351,6 +351,7 @@ router.get('/sso/callback', async (req, res) => {
       email: dbUser.email,
       can_design_ai_select: dbUser.can_design_ai_select,
       can_use_ai_dashboard: dbUser.can_use_ai_dashboard,
+      training_permission: dbUser.training_permission,
       role_id: dbUser.role_id,
       dept_code: dbUser.dept_code,
       profit_center: dbUser.profit_center,
@@ -402,7 +403,7 @@ router.get('/sso/user', async (req, res) => {
     u.effective_can_deep_research      = user.role === 'admin' || resolveEff(user.can_deep_research, rolePerms?.can_deep_research ?? 1);
     u.effective_can_design_ai_select   = user.role === 'admin' || resolveEff(user.can_design_ai_select,  rolePerms?.can_design_ai_select);
     u.effective_can_use_ai_dashboard   = user.role === 'admin' || resolveEff(user.can_use_ai_dashboard,  rolePerms?.can_use_ai_dashboard);
-    u.effective_training_permission     = user.role === 'admin' ? 'edit'
+    u.effective_training_permission     = user.role === 'admin' ? 'publish_edit'
       : (user.training_permission || rolePerms?.training_permission || 'none');
     res.json({ token, user: u });
   } catch (e) {
@@ -541,6 +542,7 @@ const createSession = async (res, user) => {
     email: user.email,
     can_design_ai_select: user.can_design_ai_select,
     can_use_ai_dashboard:  user.can_use_ai_dashboard,
+    training_permission:   user.training_permission,
     role_id:       user.role_id,
     dept_code:     user.dept_code,
     profit_center: user.profit_center,
@@ -573,6 +575,8 @@ const createSession = async (res, user) => {
   userWithoutPassword.effective_can_deep_research      = user.role === 'admin' || resolveEffective(user.can_deep_research, rolePerms?.can_deep_research ?? 1);
   userWithoutPassword.effective_can_design_ai_select   = user.role === 'admin' || resolveEffective(user.can_design_ai_select,  rolePerms?.can_design_ai_select);
   userWithoutPassword.effective_can_use_ai_dashboard   = user.role === 'admin' || resolveEffective(user.can_use_ai_dashboard,  rolePerms?.can_use_ai_dashboard);
+  userWithoutPassword.effective_training_permission     = user.role === 'admin' ? 'publish_edit'
+    : (user.training_permission || rolePerms?.training_permission || 'none');
   res.json({ token, user: userWithoutPassword });
 };
 
@@ -724,6 +728,8 @@ router.get('/me', async (req, res) => {
     userWithoutPassword.effective_can_deep_research      = user.role === 'admin' || resolveEff(user.can_deep_research, rolePerms?.can_deep_research ?? 1);
     userWithoutPassword.effective_can_design_ai_select   = user.role === 'admin' || resolveEff(user.can_design_ai_select,  rolePerms?.can_design_ai_select);
     userWithoutPassword.effective_can_use_ai_dashboard   = user.role === 'admin' || resolveEff(user.can_use_ai_dashboard,  rolePerms?.can_use_ai_dashboard);
+    userWithoutPassword.effective_training_permission     = user.role === 'admin' ? 'publish_edit'
+      : (user.training_permission || rolePerms?.training_permission || 'none');
     // Resolve display language: USERS.preferred_language > browser Accept-Language > 'zh-TW'
     let resolvedLanguage = user.preferred_language || null;
     let is_first_lang_detect = false;

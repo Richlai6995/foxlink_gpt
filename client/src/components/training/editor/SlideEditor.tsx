@@ -34,6 +34,7 @@ interface Props {
   onSlideChange?: (slideId: number) => void
   onClose: () => void
   onSaved?: () => void
+  readOnly?: boolean
 }
 
 const BLOCK_TYPES = [
@@ -49,7 +50,7 @@ const BLOCK_TYPES = [
   { type: 'quiz_inline', label: '內嵌測驗', icon: Type, color: 'text-blue-400' },
 ]
 
-export default function SlideEditor({ slideId, courseId, slideList = [], onSlideChange, onClose, onSaved }: Props) {
+export default function SlideEditor({ slideId, courseId, slideList = [], onSlideChange, onClose, onSaved, readOnly = false }: Props) {
   const { t } = useTranslation()
   const currentSlideIdx = slideList.findIndex(s => s.id === slideId)
   const canGoPrev = currentSlideIdx > 0
@@ -154,6 +155,24 @@ export default function SlideEditor({ slideId, courseId, slideList = [], onSlide
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col" style={{ backgroundColor: 'var(--t-bg)', color: 'var(--t-text)' }}>
+      {readOnly && (
+        <style>{`
+          .slide-editor-readonly input,
+          .slide-editor-readonly textarea,
+          .slide-editor-readonly select,
+          .slide-editor-readonly button,
+          .slide-editor-readonly [contenteditable] {
+            pointer-events: none !important;
+            opacity: 0.6;
+          }
+          .slide-editor-readonly audio,
+          .slide-editor-readonly video,
+          .slide-editor-readonly .audio-play-btn {
+            pointer-events: auto !important;
+            opacity: 1 !important;
+          }
+        `}</style>
+      )}
       {/* Header */}
       <div className="border-b px-4 py-2 flex items-center gap-3 shrink-0" style={{ backgroundColor: 'var(--t-bg-elevated)', borderColor: 'var(--t-border)' }}>
         <button onClick={onClose} style={{ color: 'var(--t-text-muted)' }} className="hover:opacity-80">
@@ -185,27 +204,32 @@ export default function SlideEditor({ slideId, courseId, slideList = [], onSlide
           {currentSlideIdx >= 0 ? getSlideLabel(slideList[currentSlideIdx], currentSlideIdx) : t('training.slideEditor')}
         </span>
         <span className="text-[9px] px-1.5 py-0.5 rounded font-medium" style={{ backgroundColor: 'var(--t-accent-subtle)', color: 'var(--t-accent)' }}>{slideType}</span>
+        {readOnly && <span className="text-[10px] px-2 py-0.5 rounded-full bg-yellow-500/20 text-yellow-500 font-medium">READONLY</span>}
         <div className="flex-1" />
 
-        <button onClick={() => setShowTemplates(true)}
-          className="text-xs px-2 py-1 rounded transition" style={{ color: 'var(--t-text-muted)' }}>
-          {t('training.templateSelect')}
-        </button>
-        <button onClick={aiAnalyze} disabled={aiAnalyzing}
-          className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg border transition hover:opacity-80 disabled:opacity-50"
-          style={{ borderColor: 'var(--t-border)', color: 'var(--t-accent)' }}
-          title="用 AI 重新分析此投影片的截圖，更新操作說明和互動區域">
-          {aiAnalyzing ? <Loader2 size={12} className="animate-spin" /> : <Wand2 size={12} />}
-          {aiAnalyzing ? t('training.aiAnalyzing') : t('training.aiAnalyze')}
-        </button>
-        <button onClick={save} disabled={saving}
-          className="flex items-center gap-1.5 text-white px-3 py-1.5 rounded-lg text-xs font-medium transition disabled:opacity-50"
-          style={{ backgroundColor: 'var(--t-accent-bg)' }}>
-          <Save size={13} /> {saving ? t('training.saving') : t('training.save')}
-        </button>
+        {!readOnly && (
+          <>
+            <button onClick={() => setShowTemplates(true)}
+              className="text-xs px-2 py-1 rounded transition" style={{ color: 'var(--t-text-muted)' }}>
+              {t('training.templateSelect')}
+            </button>
+            <button onClick={aiAnalyze} disabled={aiAnalyzing}
+              className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg border transition hover:opacity-80 disabled:opacity-50"
+              style={{ borderColor: 'var(--t-border)', color: 'var(--t-accent)' }}
+              title="用 AI 重新分析此投影片的截圖，更新操作說明和互動區域">
+              {aiAnalyzing ? <Loader2 size={12} className="animate-spin" /> : <Wand2 size={12} />}
+              {aiAnalyzing ? t('training.aiAnalyzing') : t('training.aiAnalyze')}
+            </button>
+            <button onClick={save} disabled={saving}
+              className="flex items-center gap-1.5 text-white px-3 py-1.5 rounded-lg text-xs font-medium transition disabled:opacity-50"
+              style={{ backgroundColor: 'var(--t-accent-bg)' }}>
+              <Save size={13} /> {saving ? t('training.saving') : t('training.save')}
+            </button>
+          </>
+        )}
       </div>
 
-      <div className="flex flex-1 overflow-hidden">
+      <div className={`flex flex-1 overflow-hidden ${readOnly ? 'slide-editor-readonly' : ''}`}>
         {/* Block List (left) */}
         <div className="w-72 border-r flex flex-col overflow-y-auto" style={{ backgroundColor: 'var(--t-bg-inset)', borderColor: 'var(--t-border)' }}>
           <div className="p-3 text-xs font-semibold uppercase flex items-center justify-between" style={{ color: 'var(--t-text-muted)' }}>

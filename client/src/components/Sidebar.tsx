@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { Plus, MessageSquare, Trash2, Pencil, Check, ChevronDown, LogOut, Settings, Cpu, Zap, CalendarClock, HelpCircle, KeyRound, X, Eye, EyeOff, GitFork, Sparkles, Database, Menu, ChevronUp, BarChart3, Globe, FileText, GraduationCap } from 'lucide-react'
+import { Plus, MessageSquare, Trash2, Pencil, Check, ChevronDown, LogOut, Settings, Cpu, Zap, CalendarClock, HelpCircle, KeyRound, X, Eye, EyeOff, GitFork, Sparkles, Database, Menu, ChevronUp, BarChart3, Globe, FileText, GraduationCap, BookOpen } from 'lucide-react'
 import type { ChatSession, ModelType, LlmModel } from '../types'
 import { useAuth } from '../context/AuthContext'
 import { useNavigate } from 'react-router-dom'
@@ -52,7 +52,7 @@ export default function Sidebar({
   onModelChange,
   onRenameSession,
 }: Props) {
-  const { user, logout, isAdmin, canSchedule, canCreateKb, canUseDashboard, canAccessTraining, setLanguage } = useAuth()
+  const { user, logout, isAdmin, canSchedule, canCreateKb, canUseDashboard, canAccessTrainingDev, setLanguage } = useAuth()
   const navigate = useNavigate()
   const { t, i18n } = useTranslation()
   const [hoveredId, setHoveredId] = useState<string | null>(null)
@@ -355,12 +355,16 @@ export default function Sidebar({
                 className="w-full flex items-center gap-2 text-indigo-400 hover:bg-slate-700 px-3 py-2.5 text-xs transition font-medium">
                 <FileText size={13} /> {t('tpl.sidebar')}
               </button>
-              {canAccessTraining && (
-                <button onClick={() => { setShowMenu(false); navigate('/training') }}
+              {canAccessTrainingDev && (
+                <button onClick={() => { setShowMenu(false); navigate('/training/dev') }}
                   className="w-full flex items-center gap-2 text-sky-400 hover:bg-slate-700 px-3 py-2.5 text-xs transition font-medium">
-                  <GraduationCap size={13} /> {t('sidebar.training')}
+                  <BookOpen size={13} /> {t('sidebar.trainingDev')}
                 </button>
               )}
+              <button onClick={() => { setShowMenu(false); navigate('/training/classroom') }}
+                className="w-full flex items-center gap-2 text-cyan-400 hover:bg-slate-700 px-3 py-2.5 text-xs transition font-medium">
+                <GraduationCap size={13} /> {t('sidebar.trainingClassroom')}
+              </button>
               <button onClick={() => { setShowMenu(false); navigate('/help') }}
                 className="w-full flex items-center gap-2 text-emerald-400 hover:bg-slate-700 px-3 py-2.5 text-xs transition font-medium">
                 <HelpCircle size={13} /> {t('sidebar.helpDoc')}

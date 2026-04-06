@@ -94,6 +94,10 @@ export function CoursePlayerInner({ courseId, lessonId, lang: langProp, sessionI
   const audioRef = useRef<HTMLAudioElement>(null)
   const [scoreToast, setScoreToast] = useState<{ score: number; max: number; label: string } | null>(null)
 
+  // ─── Auto-play mode ───
+  const [autoPlaying, setAutoPlaying] = useState(false)
+  const autoPlayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
   // ─── Exam topic override ───
   const [examTopic, setExamTopic] = useState<ExamTopicConfig | null>(null)
 
@@ -136,6 +140,12 @@ export function CoursePlayerInner({ courseId, lessonId, lang: langProp, sessionI
 
       const courseLessons: Lesson[] = courseRes.data.lessons || []
       let targetLessons = lessonId ? courseLessons.filter(l => l.id === lessonId) : courseLessons
+      // Filter by lesson_ids from URL (program course selection)
+      const lessonIdsParam = new URLSearchParams(window.location.search).get('lesson_ids')
+      if (lessonIdsParam) {
+        const ids = lessonIdsParam.split(',').map(Number).filter(n => !isNaN(n))
+        if (ids.length > 0) targetLessons = targetLessons.filter(l => ids.includes(l.id))
+      }
       // Filter by exam topic lessons
       if (topicLessonIds) {
         targetLessons = targetLessons.filter(l => topicLessonIds!.includes(l.id))
@@ -193,6 +203,53 @@ export function CoursePlayerInner({ courseId, lessonId, lang: langProp, sessionI
 
   const goNext = () => { if (currentIdx < allSlides.length - 1) setCurrentIdx(currentIdx + 1) }
   const goPrev = () => { if (currentIdx > 0) setCurrentIdx(currentIdx - 1) }
+
+  // ─── Auto-play: advance after audio ends or timeout ───
+  useEffect(() => {
+    if (!autoPlaying) return
+    if (currentIdx >= allSlides.length - 1) { setAutoPlaying(false); return }
+
+    const slide = allSlides[currentIdx]
+
+    // Check if hotspot block manages its own audio (doesn't use audioRef)
+    let hasHotspot = false
+    try {
+      const blocks = JSON.parse(slide?.content_json || '[]')
+      hasHotspot = blocks.some((b: any) => b.type === 'hotspot')
+    } catch {}
+
+    if (hasHotspot) {
+      // Hotspot slides: HotspotBlock auto-advances through steps and calls onAutoPlayDone when finished
+      return
+    }
+
+    // If slide has audio → wait for it to end, then advance
+    if (audioRef.current && slide?.audio_url && !audioMuted) {
+      const audio = audioRef.current
+      const onEnded = () => {
+        autoPlayTimerRef.current = setTimeout(() => { goNext() }, 1500)
+      }
+      // If audio already ended (short clip), check immediately
+      if (audio.ended && audio.src) {
+        autoPlayTimerRef.current = setTimeout(() => { goNext() }, 1500)
+      } else {
+        audio.addEventListener('ended', onEnded, { once: true })
+      }
+      return () => {
+        audio.removeEventListener('ended', onEnded)
+        if (autoPlayTimerRef.current) { clearTimeout(autoPlayTimerRef.current); autoPlayTimerRef.current = null }
+      }
+    } else {
+      // No audio → advance after 3 seconds
+      autoPlayTimerRef.current = setTimeout(() => { goNext() }, 3000)
+      return () => { if (autoPlayTimerRef.current) { clearTimeout(autoPlayTimerRef.current); autoPlayTimerRef.current = null } }
+    }
+  }, [autoPlaying, currentIdx, allSlides, audioMuted])
+
+  // Stop auto-play on unmount
+  useEffect(() => () => {
+    if (autoPlayTimerRef.current) clearTimeout(autoPlayTimerRef.current)
+  }, [])
 
   // Keyboard nav (learn mode only)
   useEffect(() => {
@@ -527,6 +584,20 @@ export function CoursePlayerInner({ courseId, lessonId, lang: langProp, sessionI
         )}
         <div className="flex-1" />
 
+        {/* Auto-play button (learn mode only) */}
+        {examPhase !== 'running' && playerMode === 'learn' && (
+          <button
+            onClick={() => setAutoPlaying(v => !v)}
+            className={`flex items-center gap-1 text-[10px] px-2.5 py-1 rounded-lg border font-medium transition ${
+              autoPlaying ? 'bg-green-600 text-white border-green-600' : ''
+            }`}
+            style={autoPlaying ? {} : { borderColor: 'var(--t-border)', color: 'var(--t-text-muted)' }}
+            title={t('training.autoPlay')}
+          >
+            {autoPlaying ? '⏸' : '▶'} {t('training.autoPlay')}
+          </button>
+        )}
+
         {/* Countdown timer (exam running) */}
         {examPhase === 'running' && examTimeLimitEnabled && (
           <div className={`flex items-center gap-1 text-sm font-mono font-bold px-2 py-0.5 rounded ${examTimeLeft < 120 ? 'text-red-400 animate-pulse' : ''}`}
@@ -608,7 +679,14 @@ export function CoursePlayerInner({ courseId, lessonId, lang: langProp, sessionI
         {/* Slide content */}
         <div className="flex-1 overflow-y-auto flex items-start justify-center px-6 py-4" style={{ backgroundColor: 'var(--t-bg)' }}>
           <div className="w-full max-w-7xl">
-            <SlideRenderer slide={currentSlide} isLastSlide={currentIdx === allSlides.length - 1} playerMode={playerMode} audioMuted={audioMuted} onInteractionComplete={handleInteractionComplete} />
+            <SlideRenderer slide={currentSlide} isLastSlide={currentIdx === allSlides.length - 1} playerMode={playerMode} audioMuted={audioMuted} autoPlay={autoPlaying}
+              onInteractionComplete={handleInteractionComplete}
+              onAutoPlayDone={() => {
+                // Hotspot auto-play finished all steps → advance to next slide
+                if (autoPlaying && currentIdx < allSlides.length - 1) {
+                  autoPlayTimerRef.current = setTimeout(() => goNext(), 1500)
+                }
+              }} />
           </div>
         </div>
 
@@ -726,14 +804,16 @@ export default function CoursePlayer() {
   const examTopicParam = searchParams.get('examTopic')
   const sessionId = useMemo(() => crypto.randomUUID(), [id, examTopicParam])
   const initialMode = searchParams.get('mode') === 'test' ? 'test' as const : 'learn' as const
+  const fromEditor = searchParams.get('from') === 'editor'
+  const closeTarget = fromEditor ? `/training/dev/courses/${id}` : `/training/course/${id}`
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') navigate(`/training/course/${id}`)
+      if (e.key === 'Escape') navigate(closeTarget)
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [id])
+  }, [id, closeTarget])
 
   if (!id) return null
 
@@ -745,7 +825,7 @@ export default function CoursePlayer() {
         initialMode={initialMode}
         examTopicId={examTopicParam ? Number(examTopicParam) : undefined}
         lang={searchParams.get('lang') || undefined}
-        onClose={() => navigate(`/training/course/${id}`)}
+        onClose={() => navigate(closeTarget)}
       />
     </div>
   )

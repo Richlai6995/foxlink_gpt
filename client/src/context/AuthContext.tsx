@@ -19,6 +19,8 @@ interface AuthContextType {
   canDesignAiSelect: boolean
   canAccessTraining: boolean
   canEditTraining: boolean
+  canAccessTrainingDev: boolean
+  canPublishTraining: boolean
   setLanguage: (lang: LangCode) => Promise<void>
 }
 
@@ -133,8 +135,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const canUseDashboard  = isAdmin || (user as any)?.effective_can_use_ai_dashboard === true
   const canDesignAiSelect = isAdmin || (user as any)?.effective_can_design_ai_select === true
   const trainingPermission: string = (user as any)?.effective_training_permission || 'none'
-  const canAccessTraining = isAdmin || trainingPermission === 'use' || trainingPermission === 'edit'
-  const canEditTraining   = isAdmin || trainingPermission === 'edit'
+  const canAccessTraining = true // 訓練教室：所有登入使用者都可進入
+  const canEditTraining   = isAdmin || trainingPermission === 'publish_edit'
+  const canAccessTrainingDev = isAdmin || ['publish', 'publish_edit'].includes(trainingPermission)
+  const canPublishTraining   = isAdmin || ['publish', 'publish_edit'].includes(trainingPermission)
 
   return (
     <AuthContext.Provider
@@ -152,6 +156,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         canDesignAiSelect,
         canAccessTraining,
         canEditTraining,
+        canAccessTrainingDev,
+        canPublishTraining,
         setLanguage,
       }}
     >

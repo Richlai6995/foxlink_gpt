@@ -33,7 +33,7 @@ interface Category {
 }
 
 export default function CourseList({ editorMode = false }: { editorMode?: boolean }) {
-  const { user, isAdmin, canEditTraining: canEdit } = useAuth()
+  const { user, isAdmin, canEditTraining: canEdit, canAccessTrainingDev } = useAuth()
   const { t, i18n } = useTranslation()
   const navigate = useNavigate()
 
@@ -98,12 +98,14 @@ export default function CourseList({ editorMode = false }: { editorMode?: boolea
       {/* Header */}
       <div className="sticky top-0 z-20 backdrop-blur border-b" style={{ backgroundColor: 'color-mix(in srgb, var(--t-bg) 95%, transparent)', borderColor: 'var(--t-border-subtle)' }}>
         <div className="max-w-7xl mx-auto px-4 py-3 flex items-center gap-3">
-          <button onClick={() => navigate('/chat')} style={{ color: 'var(--t-text-muted)' }} className="hover:opacity-80 transition">
-            <ArrowLeft size={20} />
-          </button>
+          {!editorMode && (
+            <button onClick={() => navigate('/chat')} style={{ color: 'var(--t-text-muted)' }} className="hover:opacity-80 transition">
+              <ArrowLeft size={20} />
+            </button>
+          )}
           <h1 className="text-lg font-semibold flex items-center gap-2">
             <BookOpen size={20} style={{ color: 'var(--t-accent)' }} />
-            {editorMode ? t('training.myMaterials') : t('sidebar.training')}
+            {editorMode ? t('training.dev.coursesTab') : t('sidebar.trainingClassroom')}
           </h1>
           <div className="flex-1" />
 
@@ -139,7 +141,7 @@ export default function CourseList({ editorMode = false }: { editorMode?: boolea
 
           {canEdit && (
             <button
-              onClick={() => navigate('/training/editor/new')}
+              onClick={() => navigate('/training/dev/courses/new')}
               className="flex items-center gap-1.5 text-white px-3 py-1.5 rounded-lg text-xs font-medium transition"
               style={{ backgroundColor: 'var(--t-accent-bg)' }}
             >
@@ -158,7 +160,7 @@ export default function CourseList({ editorMode = false }: { editorMode?: boolea
                 try {
                   const res = await api.post('/training/courses/import-package', fd)
                   alert(`${t('training.importSuccess')}\n${t('training.lessons')}: ${res.data.stats.lessons}, ${t('training.slides')}: ${res.data.stats.slides}`)
-                  navigate(`/training/editor/${res.data.course_id}`)
+                  navigate(`/training/dev/courses/${res.data.course_id}`)
                 } catch (err: any) {
                   alert(err.response?.data?.error || t('training.importFailed'))
                 }
@@ -167,22 +169,13 @@ export default function CourseList({ editorMode = false }: { editorMode?: boolea
             </label>
           )}
 
-          {!editorMode && canEdit && (
+          {!editorMode && canAccessTrainingDev && (
             <button
-              onClick={() => navigate('/training/editor')}
+              onClick={() => navigate('/training/dev')}
               className="flex items-center gap-1.5 border px-3 py-1.5 rounded-lg text-xs font-medium transition hover:opacity-80"
               style={{ borderColor: 'var(--t-border)', color: 'var(--t-text-secondary)' }}
             >
-              {t('training.myMaterials')}
-            </button>
-          )}
-          {editorMode && (
-            <button
-              onClick={() => navigate('/training')}
-              className="flex items-center gap-1.5 border px-3 py-1.5 rounded-lg text-xs font-medium transition hover:opacity-80"
-              style={{ borderColor: 'var(--t-border)', color: 'var(--t-text-secondary)' }}
-            >
-              {t('training.courseList')}
+              {t('training.dev.coursesTab')}
             </button>
           )}
 
@@ -251,7 +244,7 @@ export default function CourseList({ editorMode = false }: { editorMode?: boolea
               <p className="text-sm">{editorMode ? t('training.noMaterials') : t('training.noCourses')}</p>
               {canEdit && editorMode && (
                 <button
-                  onClick={() => navigate('/training/editor/new')}
+                  onClick={() => navigate('/training/dev/courses/new')}
                   className="mt-4 flex items-center gap-1.5 bg-sky-600 hover:bg-sky-500 text-white px-4 py-2 rounded-lg text-sm transition"
                 >
                   <Plus size={16} /> {t('training.createFirst')}
@@ -263,7 +256,7 @@ export default function CourseList({ editorMode = false }: { editorMode?: boolea
               {courses.map(course => (
                 <div
                   key={course.id}
-                  onClick={() => editorMode ? navigate(`/training/editor/${course.id}`) : navigate(`/training/course/${course.id}`)}
+                  onClick={() => editorMode ? navigate(`/training/dev/courses/${course.id}`) : navigate(`/training/classroom/course/${course.id}`)}
                   className="border rounded-xl overflow-hidden cursor-pointer transition group"
                   style={{ backgroundColor: 'var(--t-bg-card)', borderColor: 'var(--t-border-subtle)', boxShadow: 'var(--t-shadow)' }}
                 >

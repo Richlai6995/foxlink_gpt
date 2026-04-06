@@ -9,6 +9,7 @@ import BatchImport from './BatchImport'
 import RecordingPanel from './RecordingPanel'
 import InteractionReport from '../InteractionReport'
 import CoverCropModal from './CoverCropModal'
+import CourseShareTab from './CourseShareTab'
 
 interface Course {
   id?: number
@@ -60,7 +61,7 @@ export default function CourseEditor() {
   const [loading, setLoading] = useState(!isNew)
   const [saving, setSaving] = useState(false)
   const [coverCropFile, setCoverCropFile] = useState<File | null>(null)
-  const [activeTab, setActiveTab] = useState<'info' | 'lessons' | 'quiz' | 'examTopics' | 'translate' | 'settings' | 'reports'>('info')
+  const [activeTab, setActiveTab] = useState<'info' | 'lessons' | 'quiz' | 'examTopics' | 'translate' | 'share' | 'settings' | 'reports'>('info')
   const [expandedLesson, setExpandedLesson] = useState<number | null>(null)
   const [lessonSlides, setLessonSlides] = useState<Record<number, Slide[]>>({})
   const [editingSlideId, setEditingSlideId] = useState<number | null>(null)
@@ -76,6 +77,7 @@ export default function CourseEditor() {
   const [publishChecks, setPublishChecks] = useState<{ key: string; pass: boolean; detail: string; optional?: boolean }[]>([])
   const [canPublish, setCanPublish] = useState(false)
   const [publishing, setPublishing] = useState(false)
+  const [coursePermission, setCoursePermission] = useState<string>('owner') // owner|admin|develop|view
 
   useEffect(() => {
     loadCategories()
@@ -103,6 +105,7 @@ export default function CourseEditor() {
         settings_json: settingsObj
       })
       setLessons(c.lessons || [])
+      if (c.permission) setCoursePermission(c.permission)
     } catch (e) { console.error(e) } finally { setLoading(false) }
   }
 
@@ -128,7 +131,7 @@ export default function CourseEditor() {
       setSaving(true)
       if (isNew) {
         const res = await api.post('/training/courses', course)
-        navigate(`/training/editor/${res.data.id}`, { replace: true })
+        navigate(`/training/dev/courses/${res.data.id}`, { replace: true })
       } else {
         await api.put(`/training/courses/${id}`, course)
       }
@@ -201,22 +204,33 @@ export default function CourseEditor() {
 
   if (loading) return <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: 'var(--t-bg)', color: 'var(--t-text-dim)' }}>{t('training.loading')}</div>
 
-  const tabs: { key: 'info' | 'lessons' | 'quiz' | 'examTopics' | 'translate' | 'settings' | 'reports'; label: string; icon: typeof FileText }[] = [
+  // Permission-based UI control
+  // owner/admin/develop = full edit; view = readonly preview
+  const canEditThis = ['owner', 'admin', 'develop'].includes(coursePermission)
+  const isViewOnly = coursePermission === 'view'
+
+  // Tabs: view-only users can only access info, lessons (readonly), and navigate to learn/quiz for preview
+  // Disabled tabs for view-only: settings, reports, share
+  const disabledTabs = isViewOnly ? ['settings', 'reports', 'share'] as const : []
+
+  const allTabs: { key: 'info' | 'lessons' | 'quiz' | 'examTopics' | 'translate' | 'share' | 'reports' | 'settings'; label: string; icon: typeof FileText; disabled?: boolean }[] = [
     { key: 'info', label: t('training.tabInfo'), icon: FileText },
     { key: 'lessons', label: t('training.tabLessons'), icon: Play },
     { key: 'quiz', label: t('training.tabQuiz'), icon: FileText },
     { key: 'examTopics', label: t('training.tabExamTopics'), icon: FileText },
     { key: 'translate', label: t('training.tabTranslate'), icon: FileText },
+    { key: 'share', label: t('training.tabShare'), icon: FileText, disabled: isViewOnly },
     { key: 'reports', label: t('training.tabReports'), icon: FileText },
-    { key: 'settings', label: t('training.tabSettings'), icon: Settings },
+    { key: 'settings', label: t('training.tabSettings'), icon: Settings, disabled: isViewOnly },
   ]
+  const tabs = allTabs
 
   return (
     <div className="min-h-screen" style={{ backgroundColor: 'var(--t-bg)', color: 'var(--t-text)' }}>
       {/* Header */}
       <div className="sticky top-0 z-20 backdrop-blur border-b" style={{ backgroundColor: 'color-mix(in srgb, var(--t-bg) 95%, transparent)', borderColor: 'var(--t-border-subtle)' }}>
         <div className="max-w-5xl mx-auto px-4 py-3 flex items-center gap-3">
-          <button onClick={() => navigate(isNew ? '/training/editor' : `/training/course/${id}`)} style={{ color: 'var(--t-text-muted)' }} className="hover:opacity-80">
+          <button onClick={() => navigate(isNew ? '/training/dev/courses' : `/training/dev/courses`)} style={{ color: 'var(--t-text-muted)' }} className="hover:opacity-80">
             <ArrowLeft size={20} />
           </button>
           <h1 className="text-lg font-semibold truncate">
@@ -232,29 +246,37 @@ export default function CourseEditor() {
             </span>
           )}
           <div className="flex-1" />
+          {/* Preview: navigate to learn/test */}
           {!isNew && (
+            <button onClick={() => navigate(`/training/course/${id}/learn?from=editor`)}
+              className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg border transition hover:opacity-80"
+              style={{ borderColor: 'var(--t-border)', color: 'var(--t-accent)' }}>
+              <Eye size={13} /> {t('training.preview')}
+            </button>
+          )}
+          {!isNew && canEditThis && (
             <button onClick={async () => {
               if (!confirm(t('training.confirmDeleteCourse'))) return
               try {
                 await api.delete(`/training/courses/${id}`)
-                navigate('/training/editor')
+                navigate('/training/dev/courses')
               } catch (e: any) { alert(e.response?.data?.error || t('training.deleteFailed')) }
             }}
               className="flex items-center gap-1 text-xs text-red-400 hover:text-red-300 hover:bg-red-500/10 px-2 py-1.5 rounded-lg transition">
               <Trash2 size={13} /> {t('training.delete')}
             </button>
           )}
-          {!isNew && (
+          {!isNew && canEditThis && (
             <button onClick={() => setShowRecording(true)}
               className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg border transition hover:opacity-80"
               style={{ borderColor: 'var(--t-border)', color: 'var(--t-accent)' }}>
               <Camera size={13} /> {t('training.aiRecording')}
             </button>
           )}
-          {!isNew && (
+          {!isNew && canEditThis && (
             <ExportButton courseId={Number(id)} />
           )}
-          {!isNew && (
+          {!isNew && canEditThis && (
             <button onClick={() => {
               const token = localStorage.getItem('token')
               window.open(`/api/training/courses/${id}/export-package?token=${token}`, '_blank')
@@ -265,23 +287,25 @@ export default function CourseEditor() {
               <Download size={13} /> {t('training.exportPackage')}
             </button>
           )}
-          {!isNew && course.status === 'draft' && (
+          {!isNew && canEditThis && course.status === 'draft' && (
             <button onClick={openPublishCheck}
               className="text-xs bg-green-600 hover:bg-green-500 text-white px-3 py-1.5 rounded-lg transition">
               {t('training.publishCourse')}
             </button>
           )}
-          {!isNew && course.status === 'published' && (
+          {!isNew && canEditThis && course.status === 'published' && (
             <button onClick={unpublishCourse}
               className="text-xs bg-yellow-600 hover:bg-yellow-500 text-white px-3 py-1.5 rounded-lg transition">
               {t('training.unpublishCourse')}
             </button>
           )}
-          <button onClick={saveCourse} disabled={saving}
-            className="flex items-center gap-1.5 text-white px-3 py-1.5 rounded-lg text-xs font-medium transition disabled:opacity-50"
-            style={{ backgroundColor: 'var(--t-accent-bg)' }}>
-            <Save size={14} /> {saving ? t('training.saving') : t('training.save')}
-          </button>
+          {canEditThis && (
+            <button onClick={saveCourse} disabled={saving}
+              className="flex items-center gap-1.5 text-white px-3 py-1.5 rounded-lg text-xs font-medium transition disabled:opacity-50"
+              style={{ backgroundColor: 'var(--t-accent-bg)' }}>
+              <Save size={14} /> {saving ? t('training.saving') : t('training.save')}
+            </button>
+          )}
         </div>
 
         {/* Tabs */}
@@ -290,11 +314,14 @@ export default function CourseEditor() {
             {tabs.map(tab => (
               <button
                 key={tab.key}
-                onClick={() => setActiveTab(tab.key)}
+                onClick={() => !tab.disabled && setActiveTab(tab.key)}
+                disabled={tab.disabled}
                 className={`px-4 py-2 text-xs font-medium border-b-2 transition ${
-                  activeTab === tab.key
-                    ? 'border-sky-500 text-sky-400'
-                    : 'border-transparent text-slate-400 hover:text-slate-200'
+                  tab.disabled
+                    ? 'border-transparent text-slate-600 opacity-40 cursor-not-allowed'
+                    : activeTab === tab.key
+                      ? 'border-sky-500 text-sky-400'
+                      : 'border-transparent text-slate-400 hover:text-slate-200'
                 }`}
               >
                 {tab.label}
@@ -307,7 +334,7 @@ export default function CourseEditor() {
       <div className="max-w-5xl mx-auto px-4 py-6">
         {/* Info Tab / New Course Form */}
         {(activeTab === 'info' || isNew) && (
-          <div className="space-y-4 max-w-2xl">
+          <div className={`space-y-4 max-w-2xl ${isViewOnly ? 'pointer-events-none opacity-70' : ''}`}>
             <div>
               <label className="text-xs mb-1 block" style={{ color: 'var(--t-text-muted)' }}>{t('training.courseTitle')}</label>
               <input
@@ -443,39 +470,49 @@ export default function CourseEditor() {
                     if (nextExpanded) loadSlides(lesson.id, true)
                   }}
                 >
-                  <GripVertical size={14} className="text-slate-600 cursor-grab" />
+                  {canEditThis && <GripVertical size={14} className="text-slate-600 cursor-grab" />}
                   <div className="w-6 h-6 rounded bg-sky-600/20 flex items-center justify-center text-sky-400 text-xs font-semibold">
                     {i + 1}
                   </div>
-                  <input
-                    value={lesson.title}
-                    onChange={e => {
-                      setLessons(lessons.map(l => l.id === lesson.id ? { ...l, title: e.target.value } : l))
-                    }}
-                    onBlur={() => {
-                      api.put(`/training/lessons/${lesson.id}`, lesson).catch(console.error)
-                    }}
-                    onClick={e => e.stopPropagation()}
-                    className="flex-1 bg-transparent text-sm font-medium focus:outline-none focus:bg-slate-700/50 px-2 py-0.5 rounded"
-                  />
-                  <select
-                    value={lesson.lesson_type}
-                    onChange={e => {
-                      const updated = { ...lesson, lesson_type: e.target.value }
-                      setLessons(lessons.map(l => l.id === lesson.id ? updated : l))
-                      api.put(`/training/lessons/${lesson.id}`, updated).catch(console.error)
-                    }}
-                    onClick={e => e.stopPropagation()}
-                    className="bg-slate-700 border-none text-[10px] rounded px-2 py-1"
-                  >
-                    <option value="slides">{t('training.slides')}</option>
-                    <option value="video">{t('training.video')}</option>
-                    <option value="simulation">{t('training.simulation')}</option>
-                  </select>
-                  <button onClick={e => { e.stopPropagation(); deleteLesson(lesson.id) }}
-                    className="text-slate-500 hover:text-red-400 transition">
-                    <Trash2 size={14} />
-                  </button>
+                  {canEditThis ? (
+                    <input
+                      value={lesson.title}
+                      onChange={e => {
+                        setLessons(lessons.map(l => l.id === lesson.id ? { ...l, title: e.target.value } : l))
+                      }}
+                      onBlur={() => {
+                        api.put(`/training/lessons/${lesson.id}`, lesson).catch(console.error)
+                      }}
+                      onClick={e => e.stopPropagation()}
+                      className="flex-1 bg-transparent text-sm font-medium focus:outline-none focus:bg-slate-700/50 px-2 py-0.5 rounded"
+                    />
+                  ) : (
+                    <span className="flex-1 text-sm font-medium px-2 py-0.5">{lesson.title}</span>
+                  )}
+                  {canEditThis ? (
+                    <select
+                      value={lesson.lesson_type}
+                      onChange={e => {
+                        const updated = { ...lesson, lesson_type: e.target.value }
+                        setLessons(lessons.map(l => l.id === lesson.id ? updated : l))
+                        api.put(`/training/lessons/${lesson.id}`, updated).catch(console.error)
+                      }}
+                      onClick={e => e.stopPropagation()}
+                      className="bg-slate-700 border-none text-[10px] rounded px-2 py-1"
+                    >
+                      <option value="slides">{t('training.slides')}</option>
+                      <option value="video">{t('training.video')}</option>
+                      <option value="simulation">{t('training.simulation')}</option>
+                    </select>
+                  ) : (
+                    <span className="text-[10px] rounded px-2 py-1 bg-slate-700">{lesson.lesson_type}</span>
+                  )}
+                  {canEditThis && (
+                    <button onClick={e => { e.stopPropagation(); deleteLesson(lesson.id) }}
+                      className="text-slate-500 hover:text-red-400 transition">
+                      <Trash2 size={14} />
+                    </button>
+                  )}
                   {expandedLesson === lesson.id ? <ChevronDown size={14} className="text-slate-500" /> : <ChevronRight size={14} className="text-slate-500" />}
                 </div>
 
@@ -486,7 +523,7 @@ export default function CourseEditor() {
                       const slides = lessonSlides[lesson.id] || []
                       return (
                       <div key={slide.id}
-                        draggable
+                        draggable={canEditThis}
                         onDragStart={(e) => {
                           e.dataTransfer.effectAllowed = 'move'
                           ;(e.currentTarget as HTMLElement).style.opacity = '0.4'
@@ -518,8 +555,8 @@ export default function CourseEditor() {
                         onClick={() => setEditingSlideId(slide.id)}
                       >
                         {/* Drag handle */}
-                        <GripVertical size={12} className="shrink-0 cursor-grab text-slate-400 opacity-40 group-hover:opacity-100 transition"
-                          onMouseDown={e => e.stopPropagation()} />
+                        {canEditThis && <GripVertical size={12} className="shrink-0 cursor-grab text-slate-400 opacity-40 group-hover:opacity-100 transition"
+                          onMouseDown={e => e.stopPropagation()} />}
                         <span style={{ color: 'var(--t-text-dim)' }} className="w-5 text-center">{si + 1}.</span>
                         <span className={`px-1.5 py-0.5 rounded text-[9px] font-medium shrink-0 ${
                           slide.slide_type === 'hotspot' ? 'bg-red-500/20 text-red-400' :
@@ -541,70 +578,79 @@ export default function CourseEditor() {
                           })()}
                         </span>
                         {slide.audio_url && <span className="text-sky-400 text-[9px]">🔊</span>}
-                        <button
-                          className="shrink-0 hover:text-sky-400 transition opacity-0 group-hover:opacity-100"
-                          style={{ color: 'var(--t-text-dim)' }}
-                          title={t('training.duplicateSlide')}
-                          onClick={async (e) => {
-                            e.stopPropagation()
-                            try {
-                              const res = await api.post(`/training/slides/${slide.id}/duplicate`)
-                              if (res.data.ok) {
-                                // Reload slides to get the new one
-                                const updated = await api.get(`/training/lessons/${lesson.id}/slides`)
-                                setLessonSlides(prev => ({ ...prev, [lesson.id]: updated.data }))
-                                setEditingSlideId(res.data.id)
-                              }
-                            } catch (err) { console.error(err) }
-                          }}
-                        >
-                          <Copy size={11} />
-                        </button>
-                        <button
-                          className="shrink-0 hover:text-red-400 transition opacity-0 group-hover:opacity-100"
-                          style={{ color: 'var(--t-text-dim)' }}
-                          title={t('training.deleteSlide')}
-                          onClick={async (e) => {
-                            e.stopPropagation()
-                            if (!confirm(t('training.confirmDeleteSlide'))) return
-                            try {
-                              await api.delete(`/training/slides/${slide.id}`)
-                              setLessonSlides(prev => ({
-                                ...prev,
-                                [lesson.id]: (prev[lesson.id] || []).filter(s => s.id !== slide.id)
-                              }))
-                            } catch (err) { console.error(err) }
-                          }}
-                        >
-                          <Trash2 size={11} />
-                        </button>
+                        {canEditThis && (
+                          <button
+                            className="shrink-0 hover:text-sky-400 transition opacity-0 group-hover:opacity-100"
+                            style={{ color: 'var(--t-text-dim)' }}
+                            title={t('training.duplicateSlide')}
+                            onClick={async (e) => {
+                              e.stopPropagation()
+                              try {
+                                const res = await api.post(`/training/slides/${slide.id}/duplicate`)
+                                if (res.data.ok) {
+                                  const updated = await api.get(`/training/lessons/${lesson.id}/slides`)
+                                  setLessonSlides(prev => ({ ...prev, [lesson.id]: updated.data }))
+                                  setEditingSlideId(res.data.id)
+                                }
+                              } catch (err) { console.error(err) }
+                            }}
+                          >
+                            <Copy size={11} />
+                          </button>
+                        )}
+                        {canEditThis && (
+                          <button
+                            className="shrink-0 hover:text-red-400 transition opacity-0 group-hover:opacity-100"
+                            style={{ color: 'var(--t-text-dim)' }}
+                            title={t('training.deleteSlide')}
+                            onClick={async (e) => {
+                              e.stopPropagation()
+                              if (!confirm(t('training.confirmDeleteSlide'))) return
+                              try {
+                                await api.delete(`/training/slides/${slide.id}`)
+                                setLessonSlides(prev => ({
+                                  ...prev,
+                                  [lesson.id]: (prev[lesson.id] || []).filter(s => s.id !== slide.id)
+                                }))
+                              } catch (err) { console.error(err) }
+                            }}
+                          >
+                            <Trash2 size={11} />
+                          </button>
+                        )}
                       </div>
                       )
                     })}
-                    <button
-                      onClick={() => addSlide(lesson.id)}
-                      className="w-full flex items-center justify-center gap-1.5 text-xs text-slate-400 hover:text-sky-400 border border-dashed border-slate-700 rounded-lg py-2 transition"
-                    >
-                      <Plus size={12} /> {t('training.addSlide')}
-                    </button>
-                    <button
-                      onClick={() => setShowBatchImport(lesson.id)}
-                      className="w-full flex items-center justify-center gap-1.5 text-xs border border-dashed rounded-lg py-2 transition hover:opacity-80"
-                      style={{ borderColor: 'var(--t-border)', color: 'var(--t-accent)' }}
-                    >
-                      <Images size={12} /> {t('training.batchImport')}
-                    </button>
+                    {canEditThis && (
+                      <>
+                        <button
+                          onClick={() => addSlide(lesson.id)}
+                          className="w-full flex items-center justify-center gap-1.5 text-xs text-slate-400 hover:text-sky-400 border border-dashed border-slate-700 rounded-lg py-2 transition"
+                        >
+                          <Plus size={12} /> {t('training.addSlide')}
+                        </button>
+                        <button
+                          onClick={() => setShowBatchImport(lesson.id)}
+                          className="w-full flex items-center justify-center gap-1.5 text-xs border border-dashed rounded-lg py-2 transition hover:opacity-80"
+                          style={{ borderColor: 'var(--t-border)', color: 'var(--t-accent)' }}
+                        >
+                          <Images size={12} /> {t('training.batchImport')}
+                        </button>
+                      </>
+                    )}
                   </div>
                 )}
               </div>
             ))}
 
-            <button
-              onClick={addLesson}
-              className="w-full flex items-center justify-center gap-1.5 text-sm text-slate-400 hover:text-sky-400 border border-dashed border-slate-700 rounded-lg py-3 transition"
-            >
-              <Plus size={16} /> {t('training.addLesson')}
-            </button>
+            {canEditThis && (
+              <button
+                onClick={addLesson}
+                className="w-full flex items-center justify-center gap-1.5 text-sm text-slate-400 hover:text-sky-400 border border-dashed border-slate-700 rounded-lg py-3 transition"
+              >
+                <Plus size={16} /> {t('training.addLesson')}
+              </button>
+            )}
           </div>
         )}
 
@@ -787,6 +833,10 @@ export default function CourseEditor() {
         )}
 
         {/* Reports Tab */}
+        {activeTab === 'share' && !isNew && id && (
+          <CourseShareTab courseId={Number(id)} />
+        )}
+
         {activeTab === 'reports' && !isNew && id && (
           <InteractionReport courseId={Number(id)} />
         )}
@@ -978,6 +1028,7 @@ export default function CourseEditor() {
           slideList={expandedLesson ? (lessonSlides[expandedLesson] || []) : []}
           onSlideChange={(sid) => setEditingSlideId(sid)}
           onClose={() => setEditingSlideId(null)}
+          readOnly={isViewOnly}
           onSaved={() => {
             if (expandedLesson) {
               setLessonSlides(prev => ({ ...prev, [expandedLesson]: [] }))

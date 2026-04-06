@@ -206,7 +206,7 @@ interface UserForm {
   can_deep_research: boolean | null
   can_design_ai_select: boolean | null
   can_use_ai_dashboard: boolean | null
-  training_permission: string | null  // null = follow role, 'none' | 'use' | 'edit'
+  training_permission: string | null  // null = follow role, 'none' | 'publish' | 'publish_edit'
   webex_bot_enabled: boolean
   name_manually_set: boolean
   kb_max_size_mb: string
@@ -876,16 +876,16 @@ export default function UserManagement() {
                     </select>
                   </div>
                   <div>
-                    <label className="text-xs text-slate-500 mb-1 block">教育訓練權限</label>
+                    <label className="text-xs text-slate-500 mb-1 block">{t('training.permission.label')}</label>
                     <select
                       value={form.training_permission || ''}
                       onChange={e => setForm(p => ({ ...p, training_permission: e.target.value || null }))}
                       className="input py-1 text-sm"
                     >
                       <option value="">{t('users.form.followRoleSetting')}</option>
-                      <option value="edit">編輯權限</option>
-                      <option value="use">使用權限</option>
-                      <option value="none">無權限</option>
+                      <option value="publish_edit">{t('training.permission.publishEdit')}</option>
+                      <option value="publish">{t('training.permission.publish')}</option>
+                      <option value="none">{t('training.permission.none')}</option>
                     </select>
                   </div>
                   <div>

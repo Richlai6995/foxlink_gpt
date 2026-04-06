@@ -1,8 +1,8 @@
 # FOXLINK GPT 教育訓練平台 — 實作完成報告
 
-> 日期：2026-04-02（Phase 1-2F）、2026-04-03（Phase 3A）、2026-04-04（Phase 3B + i18n）、2026-04-05（Phase 3C–3D 全部）
-> 狀態：Phase 1 + Phase 2A-F + Phase 3A-3D (含 Help/Export/Exam) 實作完成（Phase 3E 規劃中）
-> 設計文件：[training-platform-design.md](training-platform-design.md)
+> 日期：2026-04-02（Phase 1-2F）、2026-04-03（Phase 3A）、2026-04-04（Phase 3B + i18n）、2026-04-05（Phase 3C–3D 全部）、2026-04-06~07（Phase 4A–4F 訓練教室+審計修復+追加功能）
+> 狀態：Phase 1–3E + Phase 4A–4F (訓練教室 + 權限改造 + 專案上架 + 預覽權限 + 自動撥放 + 章節選擇) 實作完成
+> 設計文件：[training-platform-design.md](training-platform-design.md)、[training-classroom-design.md](training-classroom-design.md)
 
 ---
 
@@ -2951,3 +2951,342 @@ ALTER TABLE interaction_results ADD weighted_max NUMBER;
 | `client/.../editor/blocks/HotspotEditor.tsx` | AnnotationEditor → AnnotationOverlay（read-only, pointerEvents none） |
 | `client/.../editor/blocks/LanguageImagePanel.tsx` | 無 langImage 時顯示 zh-TW 半透明預覽 + 「繼承主語言圖片」提示 |
 | `server/routes/training.js` | 4 個 AI endpoint 加 JSON 解析容錯 + 自動重試 3 次 |
+
+---
+
+## 20. Phase 4A–4F：訓練教室 + 權限改造 + 專案上架（2026-04-06）
+
+> 設計文件：[training-classroom-design.md](training-classroom-design.md)
+
+### 20-1：Phase 4A — 權限模型改造 + Sidebar
+
+**權限模型**：`none` / `publish` / `publish_edit`（原 `use` 廢除，`edit` 遷移為 `publish_edit`）
+
+| 項目 | 說明 |
+|------|------|
+| DB migration | `training_permission` 值遷移 + VARCHAR2(20) 擴充 |
+| Backend middleware | admin → `publish_edit`；新增 `canPublish()` / `canEditCourse()` helpers |
+| AuthContext | 新增 `canAccessTrainingDev` / `canPublishTraining`；`canAccessTraining = true`（全員） |
+| Sidebar | 「教育訓練」→「教育訓練課程開發」(BookOpen) + 新增「訓練教室」(GraduationCap) |
+| 使用者管理 | 下拉改為 none / publish / publish_edit + i18n |
+| 路由重組 | `/training/dev/*` + `/training/classroom/*` + 舊路由 redirect |
+
+### 20-2：Phase 4B — 開發區 UI 重構
+
+| 項目 | 說明 |
+|------|------|
+| TrainingDevArea | 兩個 tab：課程管理 / 訓練專案 |
+| CourseList 更新 | 導航路徑改為 `/training/dev/courses/*`；publish 使用者無「新增課程」按鈕 |
+| ProgramList | 訓練專案列表 + 狀態篩選 + 快速操作（發布/暫停/恢復/再版/刪除） |
+
+### 20-3：Phase 4C — 課程分享 UI
+
+| 項目 | 說明 |
+|------|------|
+| CourseShareTab | CourseEditor 新增「分享」tab |
+| 六種 grantee type | user / role / department / cost_center / division / org_group |
+| 兩種權限 | `view`（預覽）/ `develop`（協同開發） |
+
+### 20-4：Phase 4D — 訓練專案管理
+
+| 項目 | 說明 |
+|------|------|
+| ProgramEditor | 建立/編輯專案頁面（基本資訊 + 課程選擇 + 對象選擇 + 通知設定） |
+| Backend CRUD 補完 | PUT/DELETE programs, targets, courses; pause/resume/reactivate |
+| program_targets 擴充 | 新增 public / cost_center / division / org_group |
+| activate 擴充 | 展開新 target types + `send_notification` + in-app + email 通知 |
+| 課程選擇器 | Modal 列出可選課程（自己建立 + 被分享的） |
+
+### 20-5：Phase 4E — 訓練教室
+
+| 項目 | 說明 |
+|------|------|
+| TrainingClassroom | 專案卡片列表（進行中/已完成 分組 + 進度環 + 到期提示） |
+| ProgramView | 專案內課程列表 + assignment 狀態 + 開始/繼續學習按鈕 |
+| Backend API | `GET classroom/my-programs` / `GET classroom/programs/:id` / `PUT assignments/:aid/start,complete` |
+| 整合 CoursePlayer | 帶 `program_id` + `assignment_id` query 進入學習 |
+
+### 20-6：Phase 4F — 通知 + 自動化
+
+| 項目 | 說明 |
+|------|------|
+| trainingCronService | 每日 01:30 AM 執行（Asia/Taipei） |
+| 自動完成 | `end_date < today` 的 active 專案自動改 `completed` |
+| 到期提醒 | `end_date - remind_before_days <= today`，通知未完成者（in-app + email） |
+| 逾期通知 | `end_date` 過後一天，通知未完成者 |
+| 已完成者排除 | 通知邏輯跳過 completed / exempted 的 assignment |
+
+### 20-7：實作檔案
+
+| 檔案 | 變更 |
+|------|------|
+| `server/database-oracle.js` | 權限值遷移 + VARCHAR2(20) 擴充 |
+| `server/routes/training.js` | middleware 更新 + program CRUD 補完 + classroom API + activate 通知 |
+| `server/services/trainingCronService.js` | **新增** — 訓練自動化 cron |
+| `server/server.js` | 註冊 trainingCronService |
+| `client/src/context/AuthContext.tsx` | 新增 canAccessTrainingDev / canPublishTraining |
+| `client/src/components/Sidebar.tsx` | 兩個選單項目 |
+| `client/src/pages/TrainingPage.tsx` | 路由重組 |
+| `client/src/pages/TrainingDevArea.tsx` | **新增** — 開發區容器 |
+| `client/src/pages/TrainingClassroom.tsx` | **新增** — 訓練教室首頁 |
+| `client/src/components/training/ProgramList.tsx` | **新增** — 專案列表 |
+| `client/src/components/training/ProgramEditor.tsx` | **新增** — 專案編輯器 |
+| `client/src/components/training/ProgramView.tsx` | **新增** — 學員端專案詳情 |
+| `client/src/components/training/editor/CourseShareTab.tsx` | **新增** — 課程分享 tab |
+| `client/src/components/training/CourseList.tsx` | 導航路徑更新 + 權限過濾 |
+| `client/src/components/training/CourseDetail.tsx` | 導航路徑更新 |
+| `client/src/components/training/editor/CourseEditor.tsx` | 導航路徑更新 + 分享 tab |
+| `client/src/components/admin/UserManagement.tsx` | 權限下拉選單更新 |
+| `client/src/components/admin/RoleManagement.tsx` | 權限下拉選單更新 |
+| `client/src/i18n/locales/zh-TW.json` | sidebar + permission + program + classroom + share keys |
+| `client/src/i18n/locales/en.json` | 同上 |
+| `client/src/i18n/locales/vi.json` | 同上 |
+
+### 20-8：審計修復（2026-04-06 二次審計）
+
+| 問題 | 嚴重度 | 修正 |
+|------|--------|------|
+| `auth.js` SSO/login/me 三端點回傳 `'edit'` 而非 `'publish_edit'` | CRITICAL | 統一改為 `'publish_edit'`；login 和 `/me` 原本缺少此欄位，已補上 |
+| `training.js` 5 處檢查 `!== 'edit'` 舊值 | CRITICAL | 全部改為 `!== 'publish_edit'` |
+| Program CRUD 13 個 endpoint 缺權限守衛 | CRITICAL | 全部加上 `canPublish(req)` 檢查 |
+| `CourseEditor` activeTab 型別缺 `'share'` | MEDIUM | 加入 union type |
+| `my_only=1` 只顯示自己建的課程，publish 使用者看不到被分享的 | MEDIUM | 擴充 SQL 加入 course_access 六種 grantee type 查詢 |
+| DevArea 對 publish 使用者預設顯示 courses tab | LOW | 自動導向 programs tab |
+| `GET /programs/:id` target label 只解析 3 種 | HIGH | 補完 dept/cost_center/division/org_group 名稱查詢 |
+| 缺少 `paused_at` / `completed_at` 欄位 | LOW | addCol migration + pause/cron 寫入 |
+| UserPicker 介面不匹配（`onSelect` 不存在） | CRITICAL | 改為正確的 `value/display/onChange(id,disp)` |
+| GRANTEE_LABELS 硬編碼中文 | CRITICAL | 改為 `t('training.grantee.*')` + 三語言 7 key |
+| 搜尋過濾大小寫敏感（與 ShareModal 不一致） | MEDIUM | 統一 `toLowerCase()` |
+| `canUserAccessCourse` SQL 查 `'dept'` 但前端存 `'department'` | CRITICAL | SQL 改為 `IN ('dept','department')` 兩者匹配 |
+| `/training/editor/:id` redirect 遺失 course ID | CRITICAL | 新增 `RedirectEditorId` wrapper 提取 param |
+| Cron overdue 只查昨天到期，server 停機會漏發 | MEDIUM | 改為 `< TRUNC(SYSDATE)` + 去重檢查 |
+
+### 20-9：額外修改檔案（審計修復）
+
+| 檔案 | 變更 |
+|------|------|
+| `server/routes/auth.js` | SSO/login/me 三處 `effective_training_permission = 'publish_edit'` |
+| `server/routes/training.js` | 權限值修正 5 處 + 權限守衛 14 處 + `my_only` 查詢擴充 + target label 7 種 + `dept`/`department` 雙匹配 |
+| `server/database-oracle.js` | `paused_at` / `completed_at` 欄位 |
+| `server/services/trainingCronService.js` | overdue 去重 + `completed_at` 寫入 |
+| `client/src/pages/TrainingPage.tsx` | `RedirectEditorId` wrapper |
+| `client/src/pages/TrainingDevArea.tsx` | publish 使用者預設 programs tab |
+| `client/src/components/training/editor/CourseEditor.tsx` | activeTab 加 `'share'` |
+| `client/src/components/training/editor/CourseShareTab.tsx` | UserPicker 介面修正 + i18n grantee labels + 大小寫不敏感搜尋 |
+| `client/src/components/training/ProgramEditor.tsx` | UserPicker 介面修正 + i18n grantee labels + 大小寫不敏感搜尋 |
+| `client/src/components/admin/UserManagement.tsx` | 介面註解更新 |
+| `client/src/i18n/locales/zh-TW.json` | 新增 `training.grantee.*` 7 key |
+| `client/src/i18n/locales/en.json` | 同上 |
+| `client/src/i18n/locales/vi.json` | 同上 |
+
+---
+
+## 21. Phase 4 測試流程
+
+### 前置準備
+
+```bash
+cd server && npm run dev    # 確認 server 啟動無錯誤，看到 [TrainingCron] Scheduled
+cd client && npm run dev    # 確認前端編譯成功
+```
+
+### TC-01：權限模型驗證
+
+| 步驟 | 操作 | 預期結果 |
+|------|------|---------|
+| 1 | 以 ADMIN 登入 → 系統管理 → 使用者管理 | 編輯使用者看到「教育訓練權限」下拉：無權限 / 上架權限 / 上架及編輯權限 |
+| 2 | 建立測試使用者 A，教育訓練權限設為「上架及編輯權限」 | 儲存成功 |
+| 3 | 建立測試使用者 B，教育訓練權限設為「上架權限」 | 儲存成功 |
+| 4 | 建立測試使用者 C，教育訓練權限保持「無權限」 | 儲存成功 |
+
+### TC-02：Sidebar 入口驗證
+
+| 步驟 | 操作 | 預期結果 |
+|------|------|---------|
+| 1 | 以使用者 A 登入 → 更多功能選單 | 看到「教育訓練課程開發」+「訓練教室」 |
+| 2 | 以使用者 B 登入 → 更多功能選單 | 看到「教育訓練課程開發」+「訓練教室」 |
+| 3 | 以使用者 C 登入 → 更多功能選單 | 只看到「訓練教室」，無「教育訓練課程開發」 |
+
+### TC-03：開發區 — 課程管理（使用者 A）
+
+| 步驟 | 操作 | 預期結果 |
+|------|------|---------|
+| 1 | 點「教育訓練課程開發」 | 進入開發區，看到「課程管理」和「訓練專案」兩個 tab |
+| 2 | 課程管理 tab → 點「新增課程」 | 進入 CourseEditor，建立一門測試課程（標題、章節、投影片） |
+| 3 | 儲存後 → 點「分享」tab | 看到分享設定面板 |
+| 4 | 類型選「使用者」→ 搜尋使用者 B → 權限選「預覽」→ 新增 | 分享記錄出現在列表中 |
+| 5 | 再新增一筆：類型「部門」→ 搜尋選擇 → 權限「協同開發」 | 分享記錄出現 |
+| 6 | 修改權限 → 刪除分享 | 操作正常 |
+
+### TC-04：開發區 — 課程可見性（使用者 B）
+
+| 步驟 | 操作 | 預期結果 |
+|------|------|---------|
+| 1 | 以使用者 B 登入 → 教育訓練課程開發 | 預設進入「訓練專案」tab（課程管理 tab 不顯示） |
+| 2 | 如果有課程管理 tab → 點進去 | 看到使用者 A 分享的課程，但無「新增課程」按鈕 |
+
+### TC-05：訓練專案建立（使用者 A 或 B）
+
+| 步驟 | 操作 | 預期結果 |
+|------|------|---------|
+| 1 | 訓練專案 tab → 點「新增專案」 | 進入 ProgramEditor |
+| 2 | 填寫：主題「新人訓練 Q2」、目的「熟悉系統操作」 | 欄位正常 |
+| 3 | 設定有效期間：今天 ~ 一個月後 | 日期選擇正常 |
+| 4 | 點「新增課程」→ 選擇課程 → 勾選必修 | 課程出現在列表中 |
+| 5 | 訓練對象：選「使用者」→ 搜尋使用者 C → 新增 | 對象出現 |
+| 6 | 訓練對象：選「公開（全員）」→ 新增 | 對象出現（公開全員） |
+| 7 | 通知設定：勾選「上架時發送通知」 | 正常 |
+| 8 | 點「儲存」 | 顯示「儲存成功」 |
+| 9 | 點「發布上架」→ 確認 | 顯示上架成功 + 指派人數 |
+
+### TC-06：訓練教室（使用者 C）
+
+| 步驟 | 操作 | 預期結果 |
+|------|------|---------|
+| 1 | 以使用者 C 登入 → 更多功能 → 訓練教室 | 看到「新人訓練 Q2」專案卡片，進度 0% |
+| 2 | 點卡片進入專案 | 看到課程列表，狀態「未開始」，有「開始學習」按鈕 |
+| 3 | 點「開始學習」 | 進入 CoursePlayer 學習頁面 |
+| 4 | 返回專案頁 | 該課程狀態變為「進行中」 |
+
+### TC-07：專案生命週期
+
+| 步驟 | 操作 | 預期結果 |
+|------|------|---------|
+| 1 | 以使用者 A/B 進入訓練專案列表 | 看到「新人訓練 Q2」狀態為「上架中」 |
+| 2 | 點暫停按鈕 | 狀態變為「已暫停」 |
+| 3 | 以使用者 C 進入訓練教室 | 看不到該專案（已暫停） |
+| 4 | 使用者 A/B 點恢復 | 狀態回到「上架中」 |
+
+### TC-08：多語言驗證
+
+| 步驟 | 操作 | 預期結果 |
+|------|------|---------|
+| 1 | 切換語言到 English | Sidebar 顯示「Training Course Development」+「Training Classroom」 |
+| 2 | 進入 ProgramEditor | 所有標籤、按鈕英文化（Training Topic, Purpose, Start Date...） |
+| 3 | 進入 CourseShareTab | 分享面板英文化（Preview, Co-develop, User, Role, Department...） |
+| 4 | 切換語言到 Tiếng Việt | 同上越南文驗證 |
+| 5 | 使用者管理 → 教育訓練權限下拉 | 三語言選項正確 |
+
+### TC-09：舊路由相容
+
+| 步驟 | 操作 | 預期結果 |
+|------|------|---------|
+| 1 | 瀏覽器直接輸入 `/training` | 自動導向 `/training/dev`（有權限）或 `/training/classroom`（無權限） |
+| 2 | 瀏覽器輸入 `/training/editor` | 自動導向 `/training/dev/courses` |
+| 3 | 瀏覽器輸入 `/training/editor/123` | 自動導向 `/training/dev/courses/123` |
+
+---
+
+## 22. Phase 4 追加功能與修復（2026-04-07）
+
+### 22-1：課程預覽權限控制
+
+**功能**：CourseEditor 根據 `coursePermission`（來自 API `GET /courses/:id` 回傳的 `permission` 欄位）控制 UI 的 readonly 行為。
+
+- `canEditThis = ['owner', 'admin', 'develop'].includes(coursePermission)`
+- `isViewOnly = coursePermission === 'view'`
+- Top bar：view 使用者僅顯示「預覽導覽」按鈕
+- 基本資訊 tab：`pointer-events-none opacity-70`
+- 章節管理 tab：標題改純文字、隱藏刪除/拖拉/新增/批次匯入
+- SlideEditor：新增 `readOnly` prop → 隱藏儲存/模板/AI分析按鈕 + 內容區 CSS 鎖定（input/button/select pointer-events-none，但保留 scroll + audio/video 試聽）
+- 分享/設定 tab：disabled 灰色不可點
+- 成績 tab：所有人可看（自己的成績）
+
+### 22-2：預覽導覽 + 返回路由修正
+
+- CourseEditor header 新增「預覽導覽」按鈕 → `navigate('/training/course/:id/learn?from=editor')`
+- CoursePlayer 讀取 `from=editor` → 返回到 `/training/dev/courses/:id`（避免 CourseDetail 循環）
+- CourseDetail 返回改為 `navigate('/training')` 避免 Player↔Detail 無限循環
+
+### 22-3：自動撥放模式
+
+- CoursePlayer header 新增「▶ 自動撥放 / ⏸ 自動撥放」按鈕（learn mode only）
+- 一般投影片：audio ended → 1.5s delay → goNext；無 audio → 3s delay
+- Hotspot 互動投影片：HotspotBlock 新增 `autoPlay` + `onAutoPlayDone` props
+  - Guided mode 自動前進每個 step：region audio ended → ✓ 動畫 800ms → next step
+  - 全部 step 完成 → `onAutoPlayDone()` → CoursePlayer 1.5s → goNext
+- 最後一張自動停止
+
+### 22-4：互動完成動畫（Hotspot ✓ Checkmark）
+
+- HotspotBlock 正確點擊後在 region 中央彈出綠色 ✓ 圓形（48px，bounce 0.6s）
+- Explore mode 已發現區域顯示 32px 版本
+- CSS `@keyframes checkmark-bounce { 0% scale(0) → 50% scale(1.3) → 100% scale(1) }`
+
+### 22-5：訓練專案下架修改
+
+- 新增 `PUT /programs/:id/deactivate`（active/paused → draft）
+- ProgramEditor header「下架修改」按鈕
+- 下架後可修改再重新上架
+
+### 22-6：訓練專案協作
+
+- `GET /programs` 所有 publish/publish_edit 使用者看到所有專案
+- 不再只看自己建的
+
+### 22-7：Auto-Enroll（自動註冊）
+
+- Classroom `GET /classroom/my-programs` 先查 `program_targets` 匹配使用者的 active 專案
+- 若無 assignment → 即時建立
+- 動態條件組合避免 Oracle NULL bind 問題
+- 解決 activate 後新帳號/公開專案看不到的問題
+
+### 22-8：canUserAccessCourse 擴充
+
+- 新增 `program_assignments` 檢查：有 assignment 且專案 active/paused → view 權限
+- 解決被指派學員 `GET /courses/:id` 403 的問題
+
+### 22-9：專案課程章節選擇
+
+- DB：`program_courses` 新增 `lesson_ids` CLOB（JSON array，null=全部）
+- Backend：POST 支援 lesson_ids；新增 PUT `/programs/:id/courses/:cid/lessons`
+- ProgramEditor：課程卡片可展開 → 勾選章節（全選/個別選）
+- ProgramView：帶 `lesson_ids=1,3,5` query 到 CoursePlayer
+- CoursePlayer：讀取 `lesson_ids` 過濾投影片
+
+### 22-10：關鍵修復
+
+| Bug | 修正 |
+|-----|------|
+| Redis session 缺 `training_permission` | SSO+login 兩處 `setSession` 加入 |
+| auth.js 三端點回傳 `'edit'` → `'publish_edit'` | 統一修正 |
+| `grantee_type` dept vs department 不一致 | SQL 改 `IN ('dept','department')` |
+| Oracle `SELECT DISTINCT` + CLOB → ORA-22848 | 改用子查詢 |
+| UserPicker `onSelect` prop 不存在 | 改用 `value/display/onChange` |
+| GRANTEE_LABELS 硬編碼中文 | 改為 `t('training.grantee.*')` |
+| LOV 選取後不關閉/新增後重現 | 改用 `showDropdown` state |
+| `/training/editor/:id` redirect 遺失 ID | RedirectEditorId wrapper |
+| CourseDetail `navigate(-1)` 循環 | 改為 `navigate('/training')` |
+
+### 22-11：實作檔案
+
+**新增/修改檔案清單**：
+
+| 檔案 | 變更 |
+|------|------|
+| `server/database-oracle.js` | 權限遷移 + paused_at/completed_at + lesson_ids |
+| `server/routes/training.js` | 權限守衛 + CRUD 補完 + classroom API + auto-enroll + canUserAccessCourse 擴充 + deactivate + lesson_ids |
+| `server/routes/auth.js` | Redis session 加 training_permission + effective_training_permission 三端點修正 |
+| `server/services/trainingCronService.js` | **新增** — cron 自動完成+提醒+逾期 |
+| `server/server.js` | 註冊 trainingCronService |
+| `client/src/context/AuthContext.tsx` | canAccessTrainingDev / canPublishTraining |
+| `client/src/components/Sidebar.tsx` | 兩選單 + BookOpen icon |
+| `client/src/pages/TrainingPage.tsx` | 路由重組 + RedirectEditorId |
+| `client/src/pages/TrainingDevArea.tsx` | **新增** — 開發區 tab 容器 |
+| `client/src/pages/TrainingClassroom.tsx` | **新增** — 訓練教室首頁 |
+| `client/src/components/training/ProgramList.tsx` | **新增** — 專案列表 |
+| `client/src/components/training/ProgramEditor.tsx` | **新增** — 專案編輯器（含章節選擇） |
+| `client/src/components/training/ProgramView.tsx` | **新增** — 學員端專案詳情 |
+| `client/src/components/training/editor/CourseShareTab.tsx` | **新增** — 課程分享 tab |
+| `client/src/components/training/editor/CourseEditor.tsx` | 分享 tab + 預覽權限控制 + 預覽導覽按鈕 |
+| `client/src/components/training/editor/SlideEditor.tsx` | readOnly prop + READONLY 模式 |
+| `client/src/components/training/CourseList.tsx` | 導航路徑 + 權限過濾 |
+| `client/src/components/training/CourseDetail.tsx` | 導航修正 |
+| `client/src/components/training/CoursePlayer.tsx` | 自動撥放 + from=editor 返回 + lesson_ids 過濾 |
+| `client/src/components/training/blocks/HotspotBlock.tsx` | autoPlay + checkmark 動畫 |
+| `client/src/components/training/SlideRenderer.tsx` | autoPlay + onAutoPlayDone 傳遞 |
+| `client/src/components/admin/UserManagement.tsx` | 權限下拉 |
+| `client/src/components/admin/RoleManagement.tsx` | 權限下拉 |
+| `client/src/i18n/locales/zh-TW.json` | 全部新增 keys |
+| `client/src/i18n/locales/en.json` | 同上 |
+| `client/src/i18n/locales/vi.json` | 同上 |

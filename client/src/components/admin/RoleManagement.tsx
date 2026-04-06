@@ -517,15 +517,15 @@ export default function RoleManagement() {
                     <span className="text-sm text-slate-700">{t('roles.form.allowAiDashboard')}</span>
                   </label>
                   <div className="flex items-center gap-2">
-                    <span className="text-sm text-slate-700">教育訓練權限：</span>
+                    <span className="text-sm text-slate-700">{t('training.permission.label')}：</span>
                     <select
                       value={(form as any).training_permission || 'none'}
                       onChange={e => setForm({ ...form, training_permission: e.target.value } as any)}
                       className="border border-slate-300 rounded-lg px-2 py-1 text-sm"
                     >
-                      <option value="none">無權限</option>
-                      <option value="use">使用權限</option>
-                      <option value="edit">編輯權限</option>
+                      <option value="none">{t('training.permission.none')}</option>
+                      <option value="publish">{t('training.permission.publish')}</option>
+                      <option value="publish_edit">{t('training.permission.publishEdit')}</option>
                     </select>
                   </div>
                   <label className="flex items-center gap-1.5 cursor-pointer select-none">

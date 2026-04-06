@@ -32,11 +32,13 @@ interface Props {
   playerMode?: 'learn' | 'test'
   slideAudioUrl?: string | null
   globalMuted?: boolean
+  autoPlay?: boolean
   onAllComplete?: () => void
   onInteractionComplete?: (result: InteractionResult) => void
+  onAutoPlayDone?: () => void
 }
 
-export default function HotspotBlock({ block, blockIndex = 0, isLastSlide = false, playerMode = 'learn', slideAudioUrl, globalMuted = false, onAllComplete, onInteractionComplete }: Props) {
+export default function HotspotBlock({ block, blockIndex = 0, isLastSlide = false, playerMode = 'learn', slideAudioUrl, globalMuted = false, autoPlay = false, onAllComplete, onInteractionComplete, onAutoPlayDone }: Props) {
   const { t } = useTranslation()
   const isTestMode = playerMode === 'test'
   // In test mode, always use guided (step-by-step) regardless of block setting
@@ -179,6 +181,40 @@ export default function HotspotBlock({ block, blockIndex = 0, isLastSlide = fals
       playRegionAudio(currentTarget)
     }
   }, [currentStep, completed, introPlayed, introPlaying])
+
+  // ─── Auto-play: auto-advance through guided steps ───
+  useEffect(() => {
+    if (!autoPlay || !introPlayed || introPlaying || completed || isTestMode) return
+    if (mode !== 'guided' || !currentTarget) return
+    if (!audioRef.current) return
+
+    const audio = audioRef.current
+    const advanceStep = () => {
+      const nextStep = currentStep + 1
+      if (nextStep >= correctRegions.length) {
+        setCompleted(true)
+        onAutoPlayDone?.()
+      } else {
+        // Show checkmark briefly before advancing
+        setFeedback({ text: '', correct: true, regionId: currentTarget.id })
+        setTimeout(() => {
+          setCurrentStep(nextStep)
+          setFeedback(null)
+        }, 800)
+      }
+    }
+
+    // If region has audio → wait for it to end
+    const regionAudioUrl = (currentTarget as any).audio_url
+    if (regionAudioUrl && !muted) {
+      audio.addEventListener('ended', advanceStep, { once: true })
+      return () => { audio.removeEventListener('ended', advanceStep) }
+    } else {
+      // No audio → advance after 2 seconds
+      const timer = setTimeout(advanceStep, 2000)
+      return () => clearTimeout(timer)
+    }
+  }, [autoPlay, currentStep, introPlayed, introPlaying, completed, isTestMode, mode, muted])
 
   const handleClick = (e: React.MouseEvent<HTMLDivElement>) => {
     if (completed || transitioning) return
@@ -408,14 +444,44 @@ export default function HotspotBlock({ block, blockIndex = 0, isLastSlide = fals
           </div>
         )}
 
-        {/* Explore mode: checkmark for explored */}
-        {mode === 'explore' && isExplored && (
-          <div className="absolute text-[10px] font-bold w-4 h-4 rounded-full flex items-center justify-center shadow"
+        {/* Checkmark animation on correct click */}
+        {justCorrect && (
+          <div className="absolute flex items-center justify-center pointer-events-none"
             style={{
-              left: `${c.x + c.w}%`, top: `${c.y}%`,
-              transform: 'translate(-50%, -50%)',
-              backgroundColor: '#22c55e', color: 'white', zIndex: 5
+              left: `${c.x}%`, top: `${c.y}%`,
+              width: `${c.w}%`, height: `${c.h}%`,
+              zIndex: 10
+            }}>
+            <div style={{
+              width: 48, height: 48,
+              borderRadius: '50%',
+              backgroundColor: '#22c55e',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              color: 'white', fontSize: 28, fontWeight: 'bold',
+              boxShadow: '0 0 20px rgba(34,197,94,0.5)',
+              animation: 'checkmark-bounce 0.6s ease-out'
             }}>✓</div>
+          </div>
+        )}
+
+        {/* Explore mode: checkmark for explored */}
+        {(mode === 'explore' && isExplored && !justCorrect) && (
+          <div className="absolute flex items-center justify-center pointer-events-none"
+            style={{
+              left: `${c.x}%`, top: `${c.y}%`,
+              width: `${c.w}%`, height: `${c.h}%`,
+              zIndex: 5
+            }}>
+            <div style={{
+              width: 32, height: 32,
+              borderRadius: '50%',
+              backgroundColor: '#22c55e',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              color: 'white', fontSize: 18, fontWeight: 'bold',
+              boxShadow: '0 0 10px rgba(34,197,94,0.3)',
+              animation: 'checkmark-bounce 0.6s ease-out'
+            }}>✓</div>
+          </div>
         )}
       </div>
     )
@@ -440,6 +506,13 @@ export default function HotspotBlock({ block, blockIndex = 0, isLastSlide = fals
 
   return (
     <>
+      <style>{`
+        @keyframes checkmark-bounce {
+          0%   { transform: scale(0); opacity: 0 }
+          50%  { transform: scale(1.3) }
+          100% { transform: scale(1); opacity: 1 }
+        }
+      `}</style>
       <audio ref={audioRef} />
       <div className="flex gap-5">
         {/* LEFT: Screenshot */}

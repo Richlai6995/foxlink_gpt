@@ -44,9 +44,10 @@ const upload = multer({ storage, limits: { fileSize: 50 * 1024 * 1024 } });
 router.use(verifyToken);
 
 // Resolve effective_training_permission for current user
+// Values: 'none' | 'publish' | 'publish_edit'
 router.use(async (req, res, next) => {
   if (req.user.role === 'admin') {
-    req.user.effective_training_permission = 'edit';
+    req.user.effective_training_permission = 'publish_edit';
     return next();
   }
   // User-level override takes precedence, then role-level, then 'none'
@@ -66,6 +67,14 @@ router.use(async (req, res, next) => {
   next();
 });
 
+// Permission helpers for Phase 4A
+function canPublish(req) {
+  return ['publish', 'publish_edit'].includes(req.user.effective_training_permission);
+}
+function canEditCourse(req) {
+  return req.user.effective_training_permission === 'publish_edit';
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // Permission helpers
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -84,7 +93,7 @@ async function canUserAccessCourse(courseId, user) {
     SELECT permission FROM course_access WHERE course_id = ? AND (
       (grantee_type = 'user' AND grantee_id = TO_CHAR(?))
       OR (grantee_type = 'role' AND grantee_id = ?)
-      OR (grantee_type = 'dept' AND grantee_id = ? AND ? IS NOT NULL)
+      OR (grantee_type IN ('dept','department') AND grantee_id = ? AND ? IS NOT NULL)
       OR (grantee_type = 'profit_center' AND grantee_id = ? AND ? IS NOT NULL)
       OR (grantee_type = 'org_section' AND grantee_id = ? AND ? IS NOT NULL)
       OR (grantee_type = 'org_group' AND grantee_id = ? AND ? IS NOT NULL)
@@ -99,6 +108,17 @@ async function canUserAccessCourse(courseId, user) {
     user.org_group, user.org_group
   );
   if (access) return { access: true, permission: access.permission };
+
+  // Check program assignments — user assigned to a program containing this course
+  const assignment = await db.prepare(`
+    SELECT pa.id FROM program_assignments pa
+    JOIN training_programs tp ON tp.id = pa.program_id
+    WHERE pa.course_id = ? AND pa.user_id = ? AND pa.status != 'exempted'
+      AND tp.status IN ('active', 'paused')
+    FETCH FIRST 1 ROWS ONLY
+  `).get(courseId, user.id);
+  if (assignment) return { access: true, permission: 'view' };
+
   return { access: false };
 }
 
@@ -168,7 +188,7 @@ router.get('/categories', async (req, res) => {
 // POST /api/training/categories
 router.post('/categories', async (req, res) => {
   try {
-    if (req.user.role !== 'admin' && req.user.effective_training_permission !== 'edit')
+    if (req.user.role !== 'admin' && req.user.effective_training_permission !== 'publish_edit')
       return res.status(403).json({ error: '需要教材編輯權限' });
 
     const { name, parent_id, sort_order } = req.body;
@@ -198,7 +218,7 @@ router.post('/categories', async (req, res) => {
 // PUT /api/training/categories/:id
 router.put('/categories/:id', async (req, res) => {
   try {
-    if (req.user.role !== 'admin' && req.user.effective_training_permission !== 'edit')
+    if (req.user.role !== 'admin' && req.user.effective_training_permission !== 'publish_edit')
       return res.status(403).json({ error: '需要教材編輯權限' });
     const { name, parent_id, sort_order } = req.body;
     await db.prepare(
@@ -214,7 +234,7 @@ router.put('/categories/:id', async (req, res) => {
 // DELETE /api/training/categories/:id
 router.delete('/categories/:id', async (req, res) => {
   try {
-    if (req.user.role !== 'admin' && req.user.effective_training_permission !== 'edit')
+    if (req.user.role !== 'admin' && req.user.effective_training_permission !== 'publish_edit')
       return res.status(403).json({ error: '需要教材編輯權限' });
     // Move children to parent of deleted category
     const cat = await db.prepare('SELECT parent_id FROM course_categories WHERE id=?').get(req.params.id);
@@ -257,8 +277,26 @@ router.get('/courses', async (req, res) => {
     const params = [];
 
     if (my_only === '1') {
-      sql += ` AND c.created_by = ?`;
-      params.push(user.id);
+      // Show own courses + courses shared to this user (for publish users in dev area)
+      sql += ` AND (
+        c.created_by = ?
+        OR EXISTS (
+          SELECT 1 FROM course_access ca WHERE ca.course_id = c.id AND (
+            (ca.grantee_type='user' AND ca.grantee_id=TO_CHAR(?))
+            OR (ca.grantee_type='role' AND ca.grantee_id=?)
+            OR (ca.grantee_type IN ('dept','department') AND ca.grantee_id=? AND ? IS NOT NULL)
+            OR (ca.grantee_type='cost_center' AND ca.grantee_id=? AND ? IS NOT NULL)
+            OR (ca.grantee_type='division' AND ca.grantee_id=? AND ? IS NOT NULL)
+            OR (ca.grantee_type='org_group' AND ca.grantee_id=? AND ? IS NOT NULL)
+          )
+        )
+      )`;
+      params.push(user.id,
+        user.id, user.role,
+        user.dept_code, user.dept_code,
+        user.profit_center, user.profit_center,
+        user.org_section, user.org_section,
+        user.org_group, user.org_group);
     } else if (user.role !== 'admin') {
       // User can see: own + public published + shared
       sql += ` AND (
@@ -268,7 +306,7 @@ router.get('/courses', async (req, res) => {
           SELECT 1 FROM course_access ca WHERE ca.course_id = c.id AND (
             (ca.grantee_type='user' AND ca.grantee_id=TO_CHAR(?))
             OR (ca.grantee_type='role' AND ca.grantee_id=?)
-            OR (ca.grantee_type='dept' AND ca.grantee_id=? AND ? IS NOT NULL)
+            OR (ca.grantee_type IN ('dept','department') AND ca.grantee_id=? AND ? IS NOT NULL)
           )
         )
       )`;
@@ -372,7 +410,7 @@ router.get('/courses', async (req, res) => {
 // POST /api/training/courses — create
 router.post('/courses', async (req, res) => {
   try {
-    if (req.user.role !== 'admin' && req.user.effective_training_permission !== 'edit')
+    if (req.user.role !== 'admin' && req.user.effective_training_permission !== 'publish_edit')
       return res.status(403).json({ error: '需要教材編輯權限' });
 
     const { title, description, category_id, pass_score, max_attempts, time_limit_minutes } = req.body;
@@ -2139,9 +2177,13 @@ router.delete('/paths/:id/courses/:cid', async (req, res) => {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 router.get('/programs', async (req, res) => {
+  if (!canPublish(req)) return res.status(403).json({ error: '需要上架權限' });
   try {
+    // All publish/publish_edit users can see all programs (for collaboration)
     const rows = await db.prepare(`
-      SELECT tp.*, u.name AS creator_name
+      SELECT tp.*, u.name AS creator_name,
+             (SELECT COUNT(*) FROM program_courses pc WHERE pc.program_id = tp.id) AS course_count,
+             (SELECT COUNT(DISTINCT pa.user_id) FROM program_assignments pa WHERE pa.program_id = tp.id) AS target_user_count
       FROM training_programs tp
       LEFT JOIN users u ON u.id = tp.created_by
       ORDER BY tp.created_at DESC
@@ -2151,6 +2193,7 @@ router.get('/programs', async (req, res) => {
 });
 
 router.post('/programs', async (req, res) => {
+  if (!canPublish(req)) return res.status(403).json({ error: '需要上架權限' });
   try {
     const { title, description, purpose, start_date, end_date, learning_path_id,
             remind_before_days, email_enabled } = req.body;
@@ -2166,16 +2209,48 @@ router.post('/programs', async (req, res) => {
 });
 
 router.get('/programs/:id', async (req, res) => {
+  if (!canPublish(req)) return res.status(403).json({ error: '需要上架權限' });
   try {
     const program = await db.prepare('SELECT * FROM training_programs WHERE id=?').get(req.params.id);
     if (!program) return res.status(404).json({ error: '培訓專案不存在' });
 
     const targets = await db.prepare('SELECT * FROM program_targets WHERE program_id=?').all(req.params.id);
-    const courses = await db.prepare(`
-      SELECT pc.*, c.title AS course_title
+    // Resolve target labels
+    for (const t of targets) {
+      if (t.target_type === 'public') {
+        t.target_label = 'all';
+      } else if (t.target_type === 'user') {
+        const u = await db.prepare('SELECT name, employee_id FROM users WHERE id=?').get(Number(t.target_id));
+        t.target_label = u ? `${u.name}${u.employee_id ? ' (' + u.employee_id + ')' : ''}` : t.target_id;
+      } else if (t.target_type === 'role') {
+        const r = await db.prepare('SELECT name FROM roles WHERE id=?').get(Number(t.target_id));
+        t.target_label = r?.name || t.target_id;
+      } else if (t.target_type === 'dept' || t.target_type === 'department') {
+        const d = await db.prepare('SELECT dept_name FROM (SELECT DISTINCT dept_code, dept_name FROM users WHERE dept_code=?) WHERE ROWNUM=1').get(t.target_id);
+        t.target_label = d?.dept_name ? `${d.dept_name} (${t.target_id})` : t.target_id;
+      } else if (t.target_type === 'cost_center') {
+        const d = await db.prepare('SELECT profit_center_name FROM (SELECT DISTINCT profit_center_code, profit_center_name FROM users WHERE profit_center_code=?) WHERE ROWNUM=1').get(t.target_id);
+        t.target_label = d?.profit_center_name ? `${d.profit_center_name} (${t.target_id})` : t.target_id;
+      } else if (t.target_type === 'division') {
+        const d = await db.prepare('SELECT org_section_name FROM (SELECT DISTINCT org_section, org_section_name FROM users WHERE org_section=?) WHERE ROWNUM=1').get(t.target_id);
+        t.target_label = d?.org_section_name ? `${d.org_section_name} (${t.target_id})` : t.target_id;
+      } else if (t.target_type === 'org_group') {
+        t.target_label = t.target_id;
+      } else {
+        t.target_label = t.target_id;
+      }
+    }
+    const coursesRaw = await db.prepare(`
+      SELECT pc.id, pc.program_id, pc.course_id, pc.sort_order, pc.is_required, pc.lesson_ids,
+             c.title AS course_title
       FROM program_courses pc JOIN courses c ON c.id = pc.course_id
       WHERE pc.program_id = ? ORDER BY pc.sort_order
     `).all(req.params.id);
+    // Parse lesson_ids CLOB to array
+    const courses = coursesRaw.map(c => ({
+      ...c,
+      lesson_ids: c.lesson_ids ? (typeof c.lesson_ids === 'string' ? JSON.parse(c.lesson_ids) : c.lesson_ids) : null
+    }));
     const assignmentStats = await db.prepare(`
       SELECT status, COUNT(*) AS cnt FROM program_assignments WHERE program_id=? GROUP BY status
     `).all(req.params.id);
@@ -2186,6 +2261,7 @@ router.get('/programs/:id', async (req, res) => {
 
 // POST /api/training/programs/:id/targets
 router.post('/programs/:id/targets', async (req, res) => {
+  if (!canPublish(req)) return res.status(403).json({ error: '需要上架權限' });
   try {
     const { target_type, target_id } = req.body;
     const result = await db.prepare(
@@ -2197,18 +2273,136 @@ router.post('/programs/:id/targets', async (req, res) => {
 
 // POST /api/training/programs/:id/courses
 router.post('/programs/:id/courses', async (req, res) => {
+  if (!canPublish(req)) return res.status(403).json({ error: '需要上架權限' });
   try {
-    const { course_id, is_required } = req.body;
+    const { course_id, is_required, lesson_ids } = req.body;
     const max = await db.prepare('SELECT MAX(sort_order) AS mx FROM program_courses WHERE program_id=?').get(req.params.id);
+    const lessonIdsJson = lesson_ids && lesson_ids.length > 0 ? JSON.stringify(lesson_ids) : null;
     const result = await db.prepare(
-      'INSERT INTO program_courses (program_id, course_id, sort_order, is_required) VALUES (?,?,?,?)'
-    ).run(req.params.id, course_id, (max?.mx || 0) + 1, is_required ?? 1);
+      'INSERT INTO program_courses (program_id, course_id, sort_order, is_required, lesson_ids) VALUES (?,?,?,?,?)'
+    ).run(req.params.id, course_id, (max?.mx || 0) + 1, is_required ?? 1, lessonIdsJson);
     res.json({ id: result.lastInsertRowid });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// PUT /api/training/programs/:id/courses/:cid/lessons — update lesson selection
+router.put('/programs/:id/courses/:cid/lessons', async (req, res) => {
+  if (!canPublish(req)) return res.status(403).json({ error: '需要上架權限' });
+  try {
+    const { lesson_ids } = req.body;
+    const lessonIdsJson = lesson_ids && lesson_ids.length > 0 ? JSON.stringify(lesson_ids) : null;
+    await db.prepare('UPDATE program_courses SET lesson_ids=? WHERE id=? AND program_id=?')
+      .run(lessonIdsJson, req.params.cid, req.params.id);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// PUT /api/training/programs/:id — update program
+router.put('/programs/:id', async (req, res) => {
+  if (!canPublish(req)) return res.status(403).json({ error: '需要上架權限' });
+  try {
+    const { title, description, purpose, start_date, end_date,
+            remind_before_days, email_enabled, notify_overdue } = req.body;
+    await db.prepare(`
+      UPDATE training_programs
+      SET title=?, description=?, purpose=?,
+          start_date=TO_DATE(?,'YYYY-MM-DD'), end_date=TO_DATE(?,'YYYY-MM-DD'),
+          remind_before_days=?, email_enabled=?, notify_overdue=?,
+          updated_at=SYSTIMESTAMP
+      WHERE id=?
+    `).run(title, description || null, purpose || null,
+           start_date, end_date,
+           remind_before_days ?? 3, email_enabled ?? 1, notify_overdue ?? 1,
+           req.params.id);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// DELETE /api/training/programs/:id — delete program (draft only)
+router.delete('/programs/:id', async (req, res) => {
+  if (!canPublish(req)) return res.status(403).json({ error: '需要上架權限' });
+  try {
+    const prog = await db.prepare('SELECT status FROM training_programs WHERE id=?').get(req.params.id);
+    if (!prog) return res.status(404).json({ error: '專案不存在' });
+    if (prog.status !== 'draft' && prog.status !== 'completed') {
+      return res.status(400).json({ error: '只能刪除草稿或已結束的專案' });
+    }
+    await db.prepare('DELETE FROM program_assignments WHERE program_id=?').run(req.params.id);
+    await db.prepare('DELETE FROM program_targets WHERE program_id=?').run(req.params.id);
+    await db.prepare('DELETE FROM program_courses WHERE program_id=?').run(req.params.id);
+    await db.prepare('DELETE FROM training_programs WHERE id=?').run(req.params.id);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// DELETE /api/training/programs/:id/targets/:tid
+router.delete('/programs/:id/targets/:tid', async (req, res) => {
+  if (!canPublish(req)) return res.status(403).json({ error: '需要上架權限' });
+  try {
+    await db.prepare('DELETE FROM program_targets WHERE id=? AND program_id=?')
+      .run(req.params.tid, req.params.id);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// DELETE /api/training/programs/:id/courses/:cid
+router.delete('/programs/:id/courses/:cid', async (req, res) => {
+  if (!canPublish(req)) return res.status(403).json({ error: '需要上架權限' });
+  try {
+    await db.prepare('DELETE FROM program_courses WHERE id=? AND program_id=?')
+      .run(req.params.cid, req.params.id);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// PUT /api/training/programs/:id/pause
+router.put('/programs/:id/pause', async (req, res) => {
+  if (!canPublish(req)) return res.status(403).json({ error: '需要上架權限' });
+  try {
+    await db.prepare(`UPDATE training_programs SET status='paused', paused_at=SYSTIMESTAMP, updated_at=SYSTIMESTAMP WHERE id=? AND status='active'`)
+      .run(req.params.id);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// PUT /api/training/programs/:id/resume
+router.put('/programs/:id/resume', async (req, res) => {
+  if (!canPublish(req)) return res.status(403).json({ error: '需要上架權限' });
+  try {
+    await db.prepare(`UPDATE training_programs SET status='active', updated_at=SYSTIMESTAMP WHERE id=? AND status='paused'`)
+      .run(req.params.id);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// PUT /api/training/programs/:id/deactivate — 下架（改回 draft，可修改後重新上架）
+router.put('/programs/:id/deactivate', async (req, res) => {
+  if (!canPublish(req)) return res.status(403).json({ error: '需要上架權限' });
+  try {
+    await db.prepare(`UPDATE training_programs SET status='draft', updated_at=SYSTIMESTAMP WHERE id=? AND status IN ('active','paused')`)
+      .run(req.params.id);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// PUT /api/training/programs/:id/reactivate — re-publish with new dates
+router.put('/programs/:id/reactivate', async (req, res) => {
+  if (!canPublish(req)) return res.status(403).json({ error: '需要上架權限' });
+  try {
+    const { start_date, end_date } = req.body;
+    if (!start_date || !end_date) return res.status(400).json({ error: '需要有效期間' });
+    await db.prepare(`
+      UPDATE training_programs
+      SET status='draft', start_date=TO_DATE(?,'YYYY-MM-DD'), end_date=TO_DATE(?,'YYYY-MM-DD'), updated_at=SYSTIMESTAMP
+      WHERE id=?
+    `).run(start_date, end_date, req.params.id);
+    res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // POST /api/training/programs/:id/activate — expand assignments
 router.post('/programs/:id/activate', async (req, res) => {
+  if (!canPublish(req)) return res.status(403).json({ error: '需要上架權限' });
   try {
     const program = await db.prepare('SELECT * FROM training_programs WHERE id=?').get(req.params.id);
     if (!program) return res.status(404).json({ error: '培訓專案不存在' });
@@ -2227,17 +2421,25 @@ router.post('/programs/:id/activate', async (req, res) => {
       courseIds = progCourses.map(c => c.course_id);
     }
 
-    // Resolve target users
+    // Resolve target users (supports all grantee types)
     const targets = await db.prepare('SELECT * FROM program_targets WHERE program_id=?').all(req.params.id);
     const userIdSet = new Set();
     for (const t of targets) {
       let users = [];
-      if (t.target_type === 'user') {
+      if (t.target_type === 'public') {
+        users = await db.prepare("SELECT id FROM users WHERE status='active'").all();
+      } else if (t.target_type === 'user') {
         users = [{ id: Number(t.target_id) }];
-      } else if (t.target_type === 'dept') {
-        users = await db.prepare('SELECT id FROM users WHERE dept_code=? AND status=?').all(t.target_id, 'active');
+      } else if (t.target_type === 'dept' || t.target_type === 'department') {
+        users = await db.prepare("SELECT id FROM users WHERE dept_code=? AND status='active'").all(t.target_id);
       } else if (t.target_type === 'role') {
-        users = await db.prepare('SELECT id FROM users WHERE role=? AND status=?').all(t.target_id, 'active');
+        users = await db.prepare("SELECT id FROM users WHERE role=? AND status='active'").all(t.target_id);
+      } else if (t.target_type === 'cost_center') {
+        users = await db.prepare("SELECT id FROM users WHERE profit_center_code=? AND status='active'").all(t.target_id);
+      } else if (t.target_type === 'division') {
+        users = await db.prepare("SELECT id FROM users WHERE org_section=? AND status='active'").all(t.target_id);
+      } else if (t.target_type === 'org_group') {
+        users = await db.prepare("SELECT id FROM users WHERE org_group=? AND status='active'").all(t.target_id);
       }
       for (const u of users) userIdSet.add(u.id);
     }
@@ -2261,6 +2463,50 @@ router.post('/programs/:id/activate', async (req, res) => {
 
     await db.prepare(`UPDATE training_programs SET status='active', updated_at=SYSTIMESTAMP WHERE id=?`)
       .run(req.params.id);
+
+    // Send notifications if requested
+    const { send_notification } = req.body;
+    if (send_notification && userIdSet.size > 0) {
+      const courseList = await db.prepare(`
+        SELECT c.title FROM program_courses pc JOIN courses c ON c.id=pc.course_id WHERE pc.program_id=? ORDER BY pc.sort_order
+      `).all(req.params.id);
+      const courseTitles = courseList.map(c => c.title).join('、');
+
+      for (const userId of userIdSet) {
+        // In-app notification
+        try {
+          await db.prepare(`
+            INSERT INTO training_notifications (user_id, type, title, message, link_url)
+            VALUES (?, 'program_assigned', ?, ?, ?)
+          `).run(userId, program.title,
+            `您已被指派訓練專案「${program.title}」，包含課程：${courseTitles}`,
+            '/training/classroom');
+        } catch (e) { /* ignore notification insert errors */ }
+      }
+
+      // Email notification (if email_enabled)
+      if (program.email_enabled) {
+        try {
+          const mailService = require('../services/mailService');
+          const targetUsers = await db.prepare(
+            `SELECT email, name FROM users WHERE id IN (${[...userIdSet].join(',')}) AND email IS NOT NULL`
+          ).all();
+          for (const u of targetUsers) {
+            if (!u.email) continue;
+            mailService.sendMail({
+              to: u.email,
+              subject: `[訓練通知] ${program.title}`,
+              html: `<p>${u.name} 您好，</p>
+                <p>您已被指派訓練專案「<b>${program.title}</b>」</p>
+                <p><b>目的</b>：${program.purpose || '—'}</p>
+                <p><b>課程</b>：${courseTitles}</p>
+                <p><b>到期日</b>：${program.end_date}</p>
+                <p>請前往訓練教室完成學習。</p>`
+            }).catch(() => {});
+          }
+        } catch (e) { console.warn('[Training] email notification error:', e.message); }
+      }
+    }
 
     res.json({ ok: true, assignments_created: created, users: userIdSet.size, courses: courseIds.length });
   } catch (e) {
@@ -2305,6 +2551,145 @@ router.put('/assignments/:aid/exempt', async (req, res) => {
     await db.prepare(
       `UPDATE program_assignments SET status='exempted', exempted_by=?, exempted_reason=? WHERE id=?`
     ).run(req.user.id, req.body.reason || null, req.params.aid);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Training Classroom APIs
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// GET /api/training/classroom/my-programs — program-oriented view for learners
+router.get('/classroom/my-programs', async (req, res) => {
+  try {
+    // Auto-enroll: find active programs targeting this user (public, user, role, dept, etc.)
+    // Build conditions dynamically to avoid NULL bind issues
+    const conditions = ["pt.target_type = 'public'"];
+    const params = [];
+    conditions.push(`(pt.target_type = 'user' AND pt.target_id = TO_CHAR(?))`);
+    params.push(req.user.id);
+    if (req.user.role_id) {
+      conditions.push(`(pt.target_type = 'role' AND pt.target_id = TO_CHAR(?))`);
+      params.push(req.user.role_id);
+    }
+    if (req.user.dept_code) {
+      conditions.push(`(pt.target_type IN ('dept','department') AND pt.target_id = ?)`);
+      params.push(req.user.dept_code);
+    }
+    if (req.user.profit_center) {
+      conditions.push(`(pt.target_type = 'cost_center' AND pt.target_id = ?)`);
+      params.push(req.user.profit_center);
+    }
+    if (req.user.org_section) {
+      conditions.push(`(pt.target_type = 'division' AND pt.target_id = ?)`);
+      params.push(req.user.org_section);
+    }
+    if (req.user.org_group) {
+      conditions.push(`(pt.target_type = 'org_group' AND pt.target_id = ?)`);
+      params.push(req.user.org_group);
+    }
+    const sql = `SELECT DISTINCT tp.id
+      FROM training_programs tp
+      JOIN program_targets pt ON pt.program_id = tp.id
+      WHERE tp.status = 'active' AND (${conditions.join(' OR ')})`
+    const publicPrograms = await db.prepare(sql).all(...params);
+
+    for (const prog of publicPrograms) {
+      const existing = await db.prepare(
+        'SELECT id FROM program_assignments WHERE program_id=? AND user_id=? FETCH FIRST 1 ROWS ONLY'
+      ).get(prog.id, req.user.id);
+      if (!existing) {
+        // Create assignments for this user
+        const courses = await db.prepare(
+          'SELECT course_id FROM program_courses WHERE program_id=? ORDER BY sort_order'
+        ).all(prog.id);
+        for (const c of courses) {
+          try {
+            await db.prepare(`
+              INSERT INTO program_assignments (program_id, course_id, user_id, due_date, status)
+              VALUES (?, ?, ?, (SELECT end_date FROM training_programs WHERE id=?), 'pending')
+            `).run(prog.id, c.course_id, req.user.id, prog.id);
+          } catch (e) {
+          }
+        }
+      }
+    }
+
+    // Get distinct programs this user is assigned to (only active programs)
+    const programs = await db.prepare(`
+      SELECT tp.id, tp.title, tp.description, tp.purpose, tp.status,
+             tp.start_date, tp.end_date
+      FROM training_programs tp
+      WHERE tp.id IN (SELECT DISTINCT pa.program_id FROM program_assignments pa WHERE pa.user_id = ?)
+        AND tp.status IN ('active', 'completed')
+      ORDER BY CASE tp.status WHEN 'active' THEN 0 ELSE 1 END, tp.end_date
+    `).all(req.user.id);
+
+    // For each program, get assignment stats
+    for (const prog of programs) {
+      const stats = await db.prepare(`
+        SELECT
+          COUNT(*) AS total,
+          SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) AS completed,
+          SUM(CASE WHEN status = 'in_progress' THEN 1 ELSE 0 END) AS in_progress,
+          SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS pending
+        FROM program_assignments
+        WHERE program_id = ? AND user_id = ? AND status != 'exempted'
+      `).get(prog.id, req.user.id);
+      prog.stats = stats || { total: 0, completed: 0, in_progress: 0, pending: 0 };
+    }
+    res.json(programs);
+  } catch (e) {
+    console.error('[Classroom] ERROR:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/training/classroom/programs/:id — program detail for learner
+router.get('/classroom/programs/:id', async (req, res) => {
+  try {
+    const program = await db.prepare('SELECT * FROM training_programs WHERE id=?').get(req.params.id);
+    if (!program) return res.status(404).json({ error: '專案不存在' });
+
+    const assignmentsRaw = await db.prepare(`
+      SELECT pa.*, c.title AS course_title, c.cover_image, c.description AS course_description,
+             pc.lesson_ids
+      FROM program_assignments pa
+      JOIN courses c ON c.id = pa.course_id
+      LEFT JOIN program_courses pc ON pc.program_id = pa.program_id AND pc.course_id = pa.course_id
+      WHERE pa.program_id = ? AND pa.user_id = ? AND pa.status != 'exempted'
+      ORDER BY COALESCE(pc.sort_order, pa.id)
+    `).all(req.params.id, req.user.id);
+    // Parse lesson_ids CLOB
+    const assignments = assignmentsRaw.map(a => ({
+      ...a,
+      lesson_ids: a.lesson_ids ? (typeof a.lesson_ids === 'string' ? JSON.parse(a.lesson_ids) : a.lesson_ids) : null
+    }));
+
+    res.json({ ...program, assignments });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// PUT /api/training/classroom/assignments/:aid/start
+router.put('/classroom/assignments/:aid/start', async (req, res) => {
+  try {
+    await db.prepare(`
+      UPDATE program_assignments SET status='in_progress', started_at=SYSTIMESTAMP
+      WHERE id=? AND user_id=? AND status='pending'
+    `).run(req.params.aid, req.user.id);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// PUT /api/training/classroom/assignments/:aid/complete
+router.put('/classroom/assignments/:aid/complete', async (req, res) => {
+  try {
+    const { score, passed } = req.body;
+    await db.prepare(`
+      UPDATE program_assignments
+      SET status='completed', completed_at=SYSTIMESTAMP, score=?, passed=?
+      WHERE id=? AND user_id=?
+    `).run(score ?? null, passed ?? null, req.params.aid, req.user.id);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -4926,7 +5311,7 @@ router.get('/courses/:id/export-package', loadCoursePermission, requirePermissio
 router.post('/courses/import-package', upload.single('package'), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
-    if (req.user.role !== 'admin' && req.user.effective_training_permission !== 'edit')
+    if (req.user.role !== 'admin' && req.user.effective_training_permission !== 'publish_edit')
       return res.status(403).json({ error: '權限不足' });
 
     const JSZip = require('jszip');

@@ -1556,9 +1556,30 @@ async function runMigrations(db) {
   )`);
 
   // ── Training Platform: 權限欄位 ──────────────────────────────────────────────
-  // training_permission: 'none' | 'use' | 'edit'  (NULL on users = inherit from role)
-  await addCol('ROLES', 'TRAINING_PERMISSION', "VARCHAR2(10) DEFAULT 'none'");
-  await addCol('USERS', 'TRAINING_PERMISSION', 'VARCHAR2(10)');  // NULL = follow role
+  // training_permission: 'none' | 'publish' | 'publish_edit'  (NULL on users = inherit from role)
+  await addCol('ROLES', 'TRAINING_PERMISSION', "VARCHAR2(20) DEFAULT 'none'");
+  await addCol('USERS', 'TRAINING_PERMISSION', 'VARCHAR2(20)');  // NULL = follow role
+
+  // Phase 4A: 遷移舊權限值 edit→publish_edit, use→none
+  try {
+    await db.run("UPDATE users SET training_permission = 'publish_edit' WHERE training_permission = 'edit'");
+    await db.run("UPDATE users SET training_permission = 'none' WHERE training_permission = 'use'");
+    await db.run("UPDATE roles SET training_permission = 'publish_edit' WHERE training_permission = 'edit'");
+    await db.run("UPDATE roles SET training_permission = 'none' WHERE training_permission = 'use'");
+  } catch (e) { /* migration already applied or column type mismatch — safe to ignore */ }
+
+  // Phase 4A: 擴充欄位長度 (VARCHAR2(10) → VARCHAR2(20))
+  try {
+    await db.run("ALTER TABLE users MODIFY training_permission VARCHAR2(20)");
+    await db.run("ALTER TABLE roles MODIFY training_permission VARCHAR2(20)");
+  } catch (e) { /* already done */ }
+
+  // Phase 4A: training_programs 新增 paused_at / completed_at
+  await addCol('TRAINING_PROGRAMS', 'PAUSED_AT', 'TIMESTAMP');
+  await addCol('TRAINING_PROGRAMS', 'COMPLETED_AT', 'TIMESTAMP');
+
+  // Phase 4: program_courses 新增 lesson_ids（JSON array，null = 全部章節）
+  await addCol('PROGRAM_COURSES', 'LESSON_IDS', 'CLOB');
 
   // ── Phase 3D-Help: session_id + Help 綁定教材 ────────────────────────────────
   await addCol('INTERACTION_RESULTS', 'SESSION_ID', 'VARCHAR2(36)');

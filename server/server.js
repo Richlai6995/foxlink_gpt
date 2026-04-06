@@ -242,6 +242,14 @@ app.get('/api/health', (req, res) => res.json({ status: 'ok', timestamp: new Dat
       console.error('[MetricsCollector] Failed to start:', e.message);
     }
 
+    // Init Training Cron (auto-complete, reminders, overdue)
+    try {
+      const { initTrainingCron } = require('./services/trainingCronService');
+      initTrainingCron(db);
+    } catch (e) {
+      console.error('[TrainingCron] Failed to init:', e.message);
+    }
+
     // Auto-sync Help KB (non-blocking, runs in background)
     setImmediate(async () => {
       try {

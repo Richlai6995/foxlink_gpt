@@ -20,7 +20,7 @@ interface Block {
   [key: string]: any
 }
 
-export default function SlideRenderer({ slide, isLastSlide = false, playerMode = 'learn', audioMuted = false, onInteractionComplete }: { slide: Slide; isLastSlide?: boolean; playerMode?: 'learn' | 'test'; audioMuted?: boolean; onInteractionComplete?: (slideId: number, result: any) => void }) {
+export default function SlideRenderer({ slide, isLastSlide = false, playerMode = 'learn', audioMuted = false, autoPlay = false, onInteractionComplete, onAutoPlayDone }: { slide: Slide; isLastSlide?: boolean; playerMode?: 'learn' | 'test'; audioMuted?: boolean; autoPlay?: boolean; onInteractionComplete?: (slideId: number, result: any) => void; onAutoPlayDone?: () => void }) {
   const { t } = useTranslation()
   const blocks: Block[] = useMemo(() => {
     try { return JSON.parse(slide.content_json || '[]') }
@@ -34,14 +34,15 @@ export default function SlideRenderer({ slide, isLastSlide = false, playerMode =
   return (
     <div className="space-y-6">
       {blocks.map((block, idx) => (
-        <BlockRenderer key={idx} block={block} blockIndex={idx} isLastSlide={isLastSlide} playerMode={playerMode} slideAudioUrl={slide.audio_url} audioMuted={audioMuted}
-          onInteractionComplete={onInteractionComplete ? (result: any) => onInteractionComplete(slide.id, result) : undefined} />
+        <BlockRenderer key={idx} block={block} blockIndex={idx} isLastSlide={isLastSlide} playerMode={playerMode} slideAudioUrl={slide.audio_url} audioMuted={audioMuted} autoPlay={autoPlay}
+          onInteractionComplete={onInteractionComplete ? (result: any) => onInteractionComplete(slide.id, result) : undefined}
+          onAutoPlayDone={onAutoPlayDone} />
       ))}
     </div>
   )
 }
 
-function BlockRenderer({ block, blockIndex = 0, isLastSlide = false, playerMode = 'learn', slideAudioUrl, audioMuted = false, onInteractionComplete }: { block: Block; blockIndex?: number; isLastSlide?: boolean; playerMode?: 'learn' | 'test'; slideAudioUrl?: string | null; audioMuted?: boolean; onInteractionComplete?: (result: any) => void }) {
+function BlockRenderer({ block, blockIndex = 0, isLastSlide = false, playerMode = 'learn', slideAudioUrl, audioMuted = false, autoPlay = false, onInteractionComplete, onAutoPlayDone }: { block: Block; blockIndex?: number; isLastSlide?: boolean; playerMode?: 'learn' | 'test'; slideAudioUrl?: string | null; audioMuted?: boolean; autoPlay?: boolean; onInteractionComplete?: (result: any) => void; onAutoPlayDone?: () => void }) {
   const { t } = useTranslation()
   switch (block.type) {
     case 'text':
@@ -112,7 +113,7 @@ function BlockRenderer({ block, blockIndex = 0, isLastSlide = false, playerMode 
         </pre>
       )
 
-    case 'hotspot': return <HotspotBlock block={block} blockIndex={blockIndex} isLastSlide={isLastSlide} playerMode={playerMode} slideAudioUrl={slideAudioUrl} globalMuted={audioMuted} onInteractionComplete={onInteractionComplete} />
+    case 'hotspot': return <HotspotBlock block={block} blockIndex={blockIndex} isLastSlide={isLastSlide} playerMode={playerMode} slideAudioUrl={slideAudioUrl} globalMuted={audioMuted} autoPlay={autoPlay} onInteractionComplete={onInteractionComplete} onAutoPlayDone={onAutoPlayDone} />
     case 'dragdrop': return <DragDropBlock block={block} blockIndex={blockIndex} playerMode={playerMode} onInteractionComplete={onInteractionComplete} />
     case 'flipcard': return <FlipCardBlock block={block} />
     case 'branch': return <BranchBlock block={block} />

@@ -69,14 +69,23 @@ export default function CourseDetail() {
       {/* Header */}
       <div className="sticky top-0 z-20 backdrop-blur border-b" style={{ backgroundColor: 'color-mix(in srgb, var(--t-bg) 95%, transparent)', borderColor: 'var(--t-border-subtle)' }}>
         <div className="max-w-4xl mx-auto px-4 py-3 flex items-center gap-3">
-          <button onClick={() => navigate('/training')} style={{ color: 'var(--t-text-muted)' }} className="hover:opacity-80">
+          <button onClick={() => {
+            // Smart back: if came from player, go to course list instead of creating a loop
+            const canGoBack = window.history.length > 2
+            if (canGoBack) {
+              // Check if previous URL was learn/quiz to avoid loop
+              navigate('/training')
+            } else {
+              navigate('/training')
+            }
+          }} style={{ color: 'var(--t-text-muted)' }} className="hover:opacity-80">
             <ArrowLeft size={20} />
           </button>
           <h1 className="text-lg font-semibold truncate">{course.title}</h1>
           <div className="flex-1" />
           {canEdit && (
             <button
-              onClick={() => navigate(`/training/editor/${id}`)}
+              onClick={() => navigate(`/training/dev/courses/${id}`)}
               className="text-xs bg-slate-700 hover:bg-slate-600 px-3 py-1.5 rounded-lg transition"
             >
               {t('training.editCourse')}
