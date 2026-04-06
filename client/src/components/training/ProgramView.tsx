@@ -2,7 +2,8 @@ import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import api from '../../lib/api'
-import { ArrowLeft, BookOpen, Calendar, CheckCircle2, Clock, Play } from 'lucide-react'
+import { ArrowLeft, BookOpen, Calendar, CheckCircle2, Clock, Play, BarChart3 } from 'lucide-react'
+import ProgramScorePanel from './ProgramScorePanel'
 
 interface Assignment {
   id: number
@@ -36,6 +37,7 @@ export default function ProgramView() {
   const { t } = useTranslation()
   const [program, setProgram] = useState<ProgramDetail | null>(null)
   const [loading, setLoading] = useState(true)
+  const [activeTab, setActiveTab] = useState<'courses' | 'scores'>('courses')
 
   useEffect(() => { loadProgram() }, [id])
 
@@ -91,8 +93,29 @@ export default function ProgramView() {
         </div>
       </div>
 
-      {/* Course List */}
-      <div className="max-w-4xl mx-auto p-6 space-y-3">
+      {/* Tab bar */}
+      <div className="bg-white border-b border-slate-200 px-6">
+        <div className="max-w-4xl mx-auto flex gap-1">
+          <button onClick={() => setActiveTab('courses')}
+            className={`px-4 py-2.5 text-xs font-medium border-b-2 transition ${activeTab === 'courses' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>
+            {t('training.scoring.coursesTab')}
+          </button>
+          <button onClick={() => setActiveTab('scores')}
+            className={`px-4 py-2.5 text-xs font-medium border-b-2 transition flex items-center gap-1 ${activeTab === 'scores' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>
+            <BarChart3 size={12} /> {t('training.scoring.scoresTab')}
+          </button>
+        </div>
+      </div>
+
+      <div className="max-w-4xl mx-auto p-6">
+        {/* Scores tab */}
+        {activeTab === 'scores' && (
+          <ProgramScorePanel programId={Number(id)} />
+        )}
+
+        {/* Courses tab */}
+        {activeTab === 'courses' && (
+          <div className="space-y-3">
         {program.assignments.map(a => {
           const statusIcon = a.status === 'completed'
             ? <CheckCircle2 size={18} className="text-green-500" />
@@ -146,6 +169,8 @@ export default function ProgramView() {
             </div>
           )
         })}
+          </div>
+        )}
       </div>
     </div>
   )

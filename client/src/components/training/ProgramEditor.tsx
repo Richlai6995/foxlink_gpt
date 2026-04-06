@@ -3,9 +3,10 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import api from '../../lib/api'
 import UserPicker from '../common/UserPicker'
+import ProgramReport from './ProgramReport'
 import {
   ArrowLeft, Save, Play, BookOpen, Users, Plus, X, Trash2,
-  GripVertical, Calendar, Mail, Bell, ChevronUp, ChevronDown
+  GripVertical, Calendar, Mail, Bell, ChevronUp, ChevronDown, BarChart3
 } from 'lucide-react'
 
 type GranteeType = 'public' | 'user' | 'role' | 'department' | 'cost_center' | 'division' | 'org_group'
@@ -79,6 +80,7 @@ export default function ProgramEditor() {
   const [loading, setLoading] = useState(!isNew)
   const [saving, setSaving] = useState(false)
   const [sendNotification, setSendNotification] = useState(true)
+  const [editorTab, setEditorTab] = useState<'settings' | 'report'>('settings')
 
   // Course picker
   const [showCoursePicker, setShowCoursePicker] = useState(false)
@@ -376,6 +378,31 @@ export default function ProgramEditor() {
         </div>
       </div>
 
+      {/* Tab bar (settings / report) */}
+      {!isNew && (
+        <div className="bg-white border-b border-slate-200 px-6">
+          <div className="max-w-4xl mx-auto flex gap-1">
+            <button onClick={() => setEditorTab('settings')}
+              className={`px-4 py-2.5 text-xs font-medium border-b-2 transition ${editorTab === 'settings' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>
+              {t('training.program.editor.settingsTab')}
+            </button>
+            <button onClick={() => setEditorTab('report')}
+              className={`px-4 py-2.5 text-xs font-medium border-b-2 transition flex items-center gap-1 ${editorTab === 'report' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>
+              <BarChart3 size={12} /> {t('training.report.title')}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Report tab */}
+      {editorTab === 'report' && !isNew && id && (
+        <div className="max-w-6xl mx-auto p-6">
+          <ProgramReport programId={Number(id)} />
+        </div>
+      )}
+
+      {/* Settings tab */}
+      {(editorTab === 'settings' || isNew) && (
       <div className="max-w-4xl mx-auto p-6 space-y-6">
         {/* Basic Info */}
         <section className="bg-white rounded-xl border border-slate-200 p-5 space-y-4">
@@ -578,6 +605,7 @@ export default function ProgramEditor() {
           </label>
         </section>
       </div>
+      )}
 
       {/* Course Picker Modal */}
       {showCoursePicker && (
