@@ -1958,7 +1958,11 @@
       "examTopics": "Exam Topics",
       "points": "pts",
       "startExam": "Start Exam",
-      "practiceExam": "Practice Exam"
+      "practiceExam": "Practice Exam",
+      "stepsIncomplete": "Steps incomplete",
+      "wrongClicks": "Wrong clicks",
+      "clickAt": "Click at",
+      "shouldBe": "Should be"
     },
     "report": {
       "title": "Score Report",

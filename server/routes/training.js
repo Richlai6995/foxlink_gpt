@@ -2704,8 +2704,8 @@ router.get('/classroom/programs/:id/my-scores', async (req, res) => {
         WHERE user_id=? AND course_id=? AND session_id IS NOT NULL AND player_mode='test'
       `).get(userId, pc.course_id);
 
-      // Get exam history (all sessions)
-      const examHistory = await db.prepare(`
+      // Get exam history (all sessions) with per-slide details
+      const examHistoryRaw = await db.prepare(`
         SELECT session_id, SUM(COALESCE(weighted_score, score)) AS score,
                SUM(COALESCE(weighted_max, max_score)) AS max_score,
                MAX(created_at) AS exam_at
@@ -2713,6 +2713,28 @@ router.get('/classroom/programs/:id/my-scores', async (req, res) => {
         WHERE user_id=? AND course_id=? AND session_id IS NOT NULL AND player_mode='test'
         GROUP BY session_id ORDER BY MAX(created_at) DESC
       `).all(userId, pc.course_id);
+
+      // Load slide details for each session
+      const examHistory = [];
+      for (const sess of examHistoryRaw) {
+        const slides = await db.prepare(`
+          SELECT ir.slide_id, ir.block_type, ir.score, ir.max_score,
+                 COALESCE(ir.weighted_score, ir.score) AS weighted_score,
+                 COALESCE(ir.weighted_max, ir.max_score) AS weighted_max,
+                 ir.steps_completed, ir.total_steps, ir.wrong_clicks,
+                 ir.score_breakdown, ir.action_log
+          FROM interaction_results ir
+          WHERE ir.session_id = ? AND ir.user_id = ?
+          ORDER BY ir.id
+        `).all(sess.session_id, userId);
+        // Parse CLOB fields
+        const parsedSlides = slides.map(s => ({
+          ...s,
+          score_breakdown: s.score_breakdown ? (typeof s.score_breakdown === 'string' ? JSON.parse(s.score_breakdown) : s.score_breakdown) : null,
+          action_log: s.action_log ? (typeof s.action_log === 'string' ? JSON.parse(s.action_log) : s.action_log) : null
+        }));
+        examHistory.push({ ...sess, slides: parsedSlides });
+      }
 
       const bestScore = bestSession?.session_score || 0;
       const bestMax = bestSession?.session_max || 100;

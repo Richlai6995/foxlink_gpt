@@ -1958,7 +1958,11 @@
       "examTopics": "測驗主題",
       "points": "分",
       "startExam": "開始測驗",
-      "practiceExam": "練習測驗"
+      "practiceExam": "練習測驗",
+      "stepsIncomplete": "步驟未完成",
+      "wrongClicks": "錯誤點擊",
+      "clickAt": "點擊位置",
+      "shouldBe": "應點擊"
     },
     "report": {
       "title": "成績報表",

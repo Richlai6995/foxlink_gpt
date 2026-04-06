@@ -15,6 +15,13 @@ interface ExamHistory {
   score: number
   max_score: number
   exam_at: string
+  slides?: {
+    slide_id: number; block_type: string
+    score: number; max_score: number
+    weighted_score: number; weighted_max: number
+    steps_completed: number; total_steps: number; wrong_clicks: number
+    score_breakdown: any; action_log: any[]
+  }[]
 }
 
 interface CourseScore {
@@ -45,6 +52,7 @@ export default function ProgramScorePanel({ programId }: { programId: number }) 
   const [data, setData] = useState<ScoreData | null>(null)
   const [loading, setLoading] = useState(true)
   const [expandedCourse, setExpandedCourse] = useState<number | null>(null)
+  const [expandedSession, setExpandedSession] = useState<string | null>(null) // session_id
 
   useEffect(() => {
     api.get(`/training/classroom/programs/${programId}/my-scores`)
@@ -111,21 +119,70 @@ export default function ProgramScorePanel({ programId }: { programId: number }) 
                   ))}
                 </div>
 
-                {/* Exam history */}
+                {/* Exam history with slide details */}
                 {c.exam.history.length > 0 && (
                   <div>
                     <div className="text-[10px] font-semibold text-slate-500 uppercase mb-1">{t('training.scoring.examHistory')}</div>
-                    <div className="space-y-1">
+                    <div className="space-y-2">
                       {c.exam.history.map((h, i) => {
                         const pct = h.max_score > 0 ? h.score / h.max_score * 100 : 0
+                        const sessionKey = `${c.course_id}_${i}`
+                        const isExpanded = expandedSession === sessionKey
                         return (
-                          <div key={i} className="flex items-center gap-3 text-xs text-slate-600 bg-white px-3 py-1.5 rounded border border-slate-100">
-                            <span className="font-medium w-8">#{h.attempt}</span>
-                            <span className="text-slate-400 flex-1">{formatDate(h.exam_at)}</span>
-                            <span className={`font-medium ${pct >= c.pass_score ? 'text-green-600' : 'text-red-500'}`}>
-                              {h.score}/{h.max_score}
-                            </span>
-                            <span>{pct >= c.pass_score ? '✅' : '❌'}</span>
+                          <div key={i} className="bg-white rounded-lg border border-slate-100 overflow-hidden">
+                            <div className="flex items-center gap-3 text-xs text-slate-600 px-3 py-2 cursor-pointer hover:bg-slate-50"
+                              onClick={() => setExpandedSession(isExpanded ? null : sessionKey)}>
+                              <span className="font-medium w-8">#{h.attempt}</span>
+                              <span className="text-slate-400 flex-1">{formatDate(h.exam_at)}</span>
+                              <span className={`font-medium ${pct >= c.pass_score ? 'text-green-600' : 'text-red-500'}`}>
+                                {h.score}/{h.max_score}
+                              </span>
+                              <span>{pct >= c.pass_score ? '✅' : '❌'}</span>
+                              {isExpanded ? <ChevronUp size={12} className="text-slate-400" /> : <ChevronDown size={12} className="text-slate-400" />}
+                            </div>
+                            {isExpanded && h.slides && h.slides.length > 0 && (
+                              <div className="border-t border-slate-100 px-3 py-2 bg-slate-50 space-y-1.5">
+                                {h.slides.map((s, si) => {
+                                  const sPct = s.weighted_max > 0 ? s.weighted_score / s.weighted_max * 100 : 0
+                                  const isFullScore = s.weighted_score >= s.weighted_max
+                                  return (
+                                    <div key={si} className="text-[11px]">
+                                      <div className="flex items-center gap-2">
+                                        <span className={isFullScore ? 'text-green-600' : sPct >= 80 ? 'text-orange-500' : 'text-red-500'}>
+                                          {isFullScore ? '✅' : sPct >= 80 ? '⚠️' : '❌'}
+                                        </span>
+                                        <span className="text-slate-500">#{si + 1}</span>
+                                        <span className="px-1.5 py-0.5 rounded text-[9px] font-medium bg-slate-200 text-slate-600">{s.block_type}</span>
+                                        <div className="flex-1 h-1.5 bg-slate-200 rounded-full overflow-hidden">
+                                          <div className={`h-full rounded-full ${isFullScore ? 'bg-green-500' : sPct >= 80 ? 'bg-orange-400' : 'bg-red-400'}`}
+                                            style={{ width: `${sPct}%` }} />
+                                        </div>
+                                        <span className={`font-medium ${isFullScore ? 'text-green-600' : 'text-slate-600'}`}>
+                                          {s.weighted_score}/{s.weighted_max}
+                                        </span>
+                                      </div>
+                                      {/* Error details */}
+                                      {!isFullScore && (
+                                        <div className="ml-6 mt-0.5 text-[10px] text-slate-500 space-y-0.5">
+                                          {s.steps_completed < s.total_steps && (
+                                            <div>{t('training.scoring.stepsIncomplete')}: {s.steps_completed}/{s.total_steps}</div>
+                                          )}
+                                          {s.wrong_clicks > 0 && (
+                                            <div>{t('training.scoring.wrongClicks')}: {s.wrong_clicks}</div>
+                                          )}
+                                          {s.action_log && s.action_log.filter((a: any) => !a.correct).map((a: any, ai: number) => (
+                                            <div key={ai} className="text-red-400">
+                                              ✗ {a.label || a.region_label || `${t('training.scoring.clickAt')} (${Math.round(a.x)}, ${Math.round(a.y)})`}
+                                              {a.target_label && ` → ${t('training.scoring.shouldBe')} ${a.target_label}`}
+                                            </div>
+                                          ))}
+                                        </div>
+                                      )}
+                                    </div>
+                                  )
+                                })}
+                              </div>
+                            )}
                           </div>
                         )
                       })}

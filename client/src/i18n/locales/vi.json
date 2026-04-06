@@ -1958,7 +1958,11 @@
       "examTopics": "Chủ đề thi",
       "points": "điểm",
       "startExam": "Bắt đầu thi",
-      "practiceExam": "Thi thử"
+      "practiceExam": "Thi thử",
+      "stepsIncomplete": "Bước chưa hoàn thành",
+      "wrongClicks": "Nhấp sai",
+      "clickAt": "Nhấp tại",
+      "shouldBe": "Nên nhấp"
     },
     "report": {
       "title": "Báo cáo điểm",
