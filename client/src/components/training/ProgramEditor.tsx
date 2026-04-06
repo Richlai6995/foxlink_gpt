@@ -16,8 +16,17 @@ interface ProgramCourse {
   course_title: string
   sort_order: number
   is_required: number
-  lesson_ids: number[] | null  // null = all lessons
-  lessons?: { id: number; title: string }[]  // fetched on expand
+  lesson_ids: number[] | null
+  lessons?: { id: number; title: string }[]
+  exam_config?: {
+    total_score?: number
+    pass_score?: number
+    time_limit_minutes?: number
+    time_limit_enabled?: boolean
+    overtime_action?: string
+    max_attempts?: number
+    lesson_weights?: Record<string, number>
+  }
 }
 
 interface ProgramTarget {
@@ -33,6 +42,8 @@ interface Program {
   description: string
   purpose: string
   start_date: string
+  program_pass_score: number
+  sequential_lessons: number
   end_date: string
   remind_before_days: number
   email_enabled: number
@@ -60,6 +71,7 @@ export default function ProgramEditor() {
     title: '', description: '', purpose: '',
     start_date: new Date().toISOString().slice(0, 10),
     end_date: '',
+    program_pass_score: 60, sequential_lessons: 0,
     remind_before_days: 3, email_enabled: 1, notify_overdue: 1,
   })
   const [courses, setCourses] = useState<ProgramCourse[]>([])
@@ -98,6 +110,8 @@ export default function ProgramEditor() {
         purpose: p.purpose || '',
         start_date: p.start_date ? new Date(p.start_date).toISOString().slice(0, 10) : '',
         end_date: p.end_date ? new Date(p.end_date).toISOString().slice(0, 10) : '',
+        program_pass_score: p.program_pass_score ?? 60,
+        sequential_lessons: p.sequential_lessons ?? 0,
         remind_before_days: p.remind_before_days ?? 3,
         email_enabled: p.email_enabled ?? 1,
         notify_overdue: p.notify_overdue ?? 1,
@@ -510,6 +524,28 @@ export default function ProgramEditor() {
           )}
         </section>
 
+        {/* Exam Settings */}
+        <section className="bg-white rounded-xl border border-slate-200 p-5 space-y-3">
+          <div className="flex items-center gap-2">
+            <BookOpen size={16} className="text-purple-600" />
+            <h2 className="text-sm font-semibold text-slate-700">{t('training.program.editor.examSection')}</h2>
+          </div>
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2 text-sm text-slate-600">
+              <span>{t('training.program.editor.programPassScore')}</span>
+              <input type="number" min={0} max={100} value={program.program_pass_score}
+                onChange={e => setProgram({ ...program, program_pass_score: Number(e.target.value) })}
+                className="w-16 border border-slate-300 rounded px-2 py-1 text-sm text-center" />
+            </div>
+          </div>
+          <label className="flex items-center gap-2 text-sm text-slate-600">
+            <input type="checkbox" checked={program.sequential_lessons === 1}
+              onChange={e => setProgram({ ...program, sequential_lessons: e.target.checked ? 1 : 0 })}
+              className="w-4 h-4 rounded" />
+            {t('training.program.editor.sequentialLessons')}
+          </label>
+        </section>
+
         {/* Notification Settings */}
         <section className="bg-white rounded-xl border border-slate-200 p-5 space-y-3">
           <div className="flex items-center gap-2">
@@ -594,6 +630,19 @@ function ProgramCourseCard({ course, idx, isEditable, isNew, programId, onUpdate
   const [expanded, setExpanded] = useState(false)
   const [lessons, setLessons] = useState<{ id: number; title: string }[]>(course.lessons || [])
   const [loadingLessons, setLoadingLessons] = useState(false)
+  const ec = course.exam_config || {}
+
+  const updateExamConfig = (patch: Record<string, any>) => {
+    const updated = { ...ec, ...patch }
+    onUpdate({ ...course, exam_config: updated })
+    // Save to backend if editing
+    if (!isNew && course.id && programId) {
+      api.put(`/training/programs/${programId}/courses/${course.id}/lessons`, {
+        lesson_ids: course.lesson_ids,
+        exam_config: updated
+      }).catch(console.error)
+    }
+  }
 
   const loadLessons = async () => {
     if (lessons.length > 0) { setExpanded(true); return }
@@ -685,15 +734,69 @@ function ProgramCourseCard({ course, idx, isEditable, isNew, programId, onUpdate
               disabled={!isEditable} className="w-3.5 h-3.5 rounded" />
             <span className="font-medium">{t('training.program.editor.allLessons')}</span>
           </label>
-          {lessons.map(l => (
-            <label key={l.id} className="flex items-center gap-2 text-xs text-slate-600 pl-4">
-              <input type="checkbox" checked={isLessonSelected(l.id)}
-                onChange={() => toggleLesson(l.id)}
-                disabled={!isEditable || allSelected}
-                className="w-3.5 h-3.5 rounded" />
-              {l.title}
-            </label>
-          ))}
+          {lessons.map(l => {
+            const lw = ec.lesson_weights?.[`lesson_${l.id}`]
+            return (
+              <div key={l.id} className="flex items-center gap-2 text-xs text-slate-600 pl-4">
+                <input type="checkbox" checked={isLessonSelected(l.id)}
+                  onChange={() => toggleLesson(l.id)}
+                  disabled={!isEditable || allSelected}
+                  className="w-3.5 h-3.5 rounded" />
+                <span className="flex-1">{l.title}</span>
+                {isLessonSelected(l.id) && (
+                  <div className="flex items-center gap-1">
+                    <span className="text-[10px] text-slate-400">{t('training.program.editor.lessonScore')}</span>
+                    <input type="number" min={0} value={lw ?? ''}
+                      placeholder={String(Math.round((ec.total_score || 100) / selectedCount))}
+                      onChange={e => {
+                        const val = e.target.value ? Number(e.target.value) : undefined
+                        const weights = { ...(ec.lesson_weights || {}) }
+                        if (val !== undefined) weights[`lesson_${l.id}`] = val
+                        else delete weights[`lesson_${l.id}`]
+                        updateExamConfig({ lesson_weights: weights })
+                      }}
+                      disabled={!isEditable}
+                      className="w-12 border border-slate-200 rounded px-1 py-0.5 text-[11px] text-center" />
+                  </div>
+                )}
+              </div>
+            )
+          })}
+
+          {/* Exam config row */}
+          <div className="flex items-center gap-3 pt-2 mt-2 border-t border-slate-100 text-[11px] text-slate-500 flex-wrap">
+            <div className="flex items-center gap-1">
+              <span>{t('training.program.editor.courseScore')}</span>
+              <input type="number" min={0} value={ec.total_score ?? 100}
+                onChange={e => updateExamConfig({ total_score: Number(e.target.value) })}
+                disabled={!isEditable}
+                className="w-14 border border-slate-200 rounded px-1 py-0.5 text-center" />
+            </div>
+            <div className="flex items-center gap-1">
+              <span>{t('training.program.editor.coursePassScore')}</span>
+              <input type="number" min={0} max={100} value={ec.pass_score ?? 60}
+                onChange={e => updateExamConfig({ pass_score: Number(e.target.value) })}
+                disabled={!isEditable}
+                className="w-12 border border-slate-200 rounded px-1 py-0.5 text-center" />
+              <span>%</span>
+            </div>
+            <div className="flex items-center gap-1">
+              <span>{t('training.program.editor.timeLimit')}</span>
+              <input type="number" min={0} value={ec.time_limit_minutes ?? 10}
+                onChange={e => updateExamConfig({ time_limit_minutes: Number(e.target.value) })}
+                disabled={!isEditable}
+                className="w-12 border border-slate-200 rounded px-1 py-0.5 text-center" />
+              <span>{t('training.program.editor.minutes')}</span>
+            </div>
+            <div className="flex items-center gap-1">
+              <span>{t('training.program.editor.maxAttempts')}</span>
+              <input type="number" min={0} value={ec.max_attempts ?? 0}
+                onChange={e => updateExamConfig({ max_attempts: Number(e.target.value) })}
+                disabled={!isEditable}
+                className="w-12 border border-slate-200 rounded px-1 py-0.5 text-center" />
+              <span className="text-[9px]">(0={t('training.program.editor.unlimited')})</span>
+            </div>
+          </div>
         </div>
       )}
     </div>

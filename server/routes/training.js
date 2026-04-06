@@ -2285,14 +2285,15 @@ router.post('/programs/:id/courses', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// PUT /api/training/programs/:id/courses/:cid/lessons — update lesson selection
+// PUT /api/training/programs/:id/courses/:cid/lessons — update lesson selection + exam config
 router.put('/programs/:id/courses/:cid/lessons', async (req, res) => {
   if (!canPublish(req)) return res.status(403).json({ error: '需要上架權限' });
   try {
-    const { lesson_ids } = req.body;
+    const { lesson_ids, exam_config } = req.body;
     const lessonIdsJson = lesson_ids && lesson_ids.length > 0 ? JSON.stringify(lesson_ids) : null;
-    await db.prepare('UPDATE program_courses SET lesson_ids=? WHERE id=? AND program_id=?')
-      .run(lessonIdsJson, req.params.cid, req.params.id);
+    const examConfigJson = exam_config ? JSON.stringify(exam_config) : null;
+    await db.prepare('UPDATE program_courses SET lesson_ids=?, exam_config=? WHERE id=? AND program_id=?')
+      .run(lessonIdsJson, examConfigJson, req.params.cid, req.params.id);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -2302,17 +2303,20 @@ router.put('/programs/:id', async (req, res) => {
   if (!canPublish(req)) return res.status(403).json({ error: '需要上架權限' });
   try {
     const { title, description, purpose, start_date, end_date,
-            remind_before_days, email_enabled, notify_overdue } = req.body;
+            remind_before_days, email_enabled, notify_overdue,
+            program_pass_score, sequential_lessons } = req.body;
     await db.prepare(`
       UPDATE training_programs
       SET title=?, description=?, purpose=?,
           start_date=TO_DATE(?,'YYYY-MM-DD'), end_date=TO_DATE(?,'YYYY-MM-DD'),
           remind_before_days=?, email_enabled=?, notify_overdue=?,
+          program_pass_score=?, sequential_lessons=?,
           updated_at=SYSTIMESTAMP
       WHERE id=?
     `).run(title, description || null, purpose || null,
            start_date, end_date,
            remind_before_days ?? 3, email_enabled ?? 1, notify_overdue ?? 1,
+           program_pass_score ?? 60, sequential_lessons ?? 0,
            req.params.id);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -2556,6 +2560,381 @@ router.put('/assignments/:aid/exempt', async (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════════
+// Slide View Tracking (Phase 5)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// POST /api/training/slides/:id/view — record slide view (upsert)
+router.post('/slides/:sid/view', async (req, res) => {
+  try {
+    const { course_id, lesson_id, program_id, duration_seconds, interaction_done } = req.body;
+    const slideId = Number(req.params.sid);
+    // Upsert: try insert, on conflict update
+    try {
+      await db.prepare(`
+        INSERT INTO user_slide_views (user_id, slide_id, course_id, lesson_id, program_id, duration_seconds, interaction_done)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `).run(req.user.id, slideId, course_id, lesson_id, program_id || null, duration_seconds || 0, interaction_done ? 1 : 0);
+    } catch (e) {
+      if (e.message?.includes('UQ_SLIDE_VIEW')) {
+        // Already exists — update duration + viewed_at
+        await db.prepare(`
+          UPDATE user_slide_views
+          SET duration_seconds = duration_seconds + ?, viewed_at = SYSTIMESTAMP
+              ${interaction_done ? ', interaction_done = 1' : ''}
+          WHERE user_id = ? AND slide_id = ? AND ${program_id ? 'program_id = ?' : 'program_id IS NULL'}
+        `).run(duration_seconds || 0, req.user.id, slideId, ...(program_id ? [program_id] : []));
+      } else throw e;
+    }
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// PUT /api/training/slides/:sid/view/done — mark interaction done
+router.put('/slides/:sid/view/done', async (req, res) => {
+  try {
+    const { program_id } = req.body;
+    await db.prepare(`
+      UPDATE user_slide_views SET interaction_done = 1, viewed_at = SYSTIMESTAMP
+      WHERE user_id = ? AND slide_id = ? AND ${program_id ? 'program_id = ?' : 'program_id IS NULL'}
+    `).run(req.user.id, Number(req.params.sid), ...(program_id ? [program_id] : []));
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /api/training/classroom/programs/:id/my-scores — learner's scores + progress
+router.get('/classroom/programs/:id/my-scores', async (req, res) => {
+  try {
+    const progId = Number(req.params.id);
+    const userId = req.user.id;
+
+    // Get program info
+    const program = await db.prepare('SELECT program_pass_score FROM training_programs WHERE id=?').get(progId);
+    if (!program) return res.status(404).json({ error: '專案不存在' });
+
+    // Get program courses with exam_config
+    const coursesRaw = await db.prepare(`
+      SELECT pc.id AS pc_id, pc.course_id, pc.lesson_ids, pc.exam_config, pc.is_required,
+             c.title AS course_title, c.pass_score AS course_pass_score
+      FROM program_courses pc
+      JOIN courses c ON c.id = pc.course_id
+      WHERE pc.program_id = ? ORDER BY pc.sort_order
+    `).all(progId);
+
+    const result = [];
+    let programTotal = 0, programMax = 0;
+    let allCoursePassed = true;
+
+    for (const pc of coursesRaw) {
+      const lessonIds = pc.lesson_ids ? JSON.parse(pc.lesson_ids) : null;
+      const examConfig = pc.exam_config ? JSON.parse(pc.exam_config) : {};
+      const courseTotalScore = examConfig.total_score || 100;
+      const coursePassScore = examConfig.pass_score || pc.course_pass_score || 60;
+      const maxAttempts = examConfig.max_attempts || 0;
+
+      // Get lessons for this course (filtered by lesson_ids)
+      let lessons = await db.prepare('SELECT id, title FROM course_lessons WHERE course_id=? ORDER BY sort_order, id').all(pc.course_id);
+      if (lessonIds && lessonIds.length > 0) {
+        lessons = lessons.filter(l => lessonIds.includes(l.id));
+      }
+
+      // Get total slides per lesson
+      const lessonProgress = [];
+      let totalSlides = 0, viewedSlides = 0;
+      for (const lesson of lessons) {
+        const slideCount = await db.prepare('SELECT COUNT(*) AS cnt FROM course_slides WHERE lesson_id=?').get(lesson.id);
+        const viewedCount = await db.prepare(`
+          SELECT COUNT(*) AS cnt FROM user_slide_views
+          WHERE user_id=? AND lesson_id=? AND ${progId ? 'program_id=?' : 'program_id IS NULL'}
+            AND (interaction_done = 1 OR slide_id NOT IN (
+              SELECT cs.id FROM course_slides cs WHERE cs.lesson_id=?
+              AND EXISTS (SELECT 1 FROM JSON_TABLE(cs.content_json, '$[*]' COLUMNS (type VARCHAR2(50) PATH '$.type'))
+                         WHERE type IN ('hotspot','dragdrop','quiz_inline'))
+            ))
+        `).get(userId, lesson.id, ...(progId ? [progId] : []), lesson.id);
+
+        // Simpler: count viewed slides (any view record = viewed for non-interactive, interaction_done=1 for interactive)
+        const viewed = await db.prepare(`
+          SELECT COUNT(*) AS cnt FROM user_slide_views
+          WHERE user_id=? AND lesson_id=? AND ${progId ? 'program_id=?' : 'program_id IS NULL'}
+        `).get(userId, lesson.id, ...(progId ? [progId] : []));
+
+        const total = slideCount?.cnt || 0;
+        const done = Math.min(viewed?.cnt || 0, total);
+        totalSlides += total;
+        viewedSlides += done;
+        lessonProgress.push({ lesson_id: lesson.id, title: lesson.title, total, viewed: done });
+      }
+
+      // Get best exam score (from interaction_results grouped by session_id)
+      const bestSession = await db.prepare(`
+        SELECT session_score, session_max, session_at FROM (
+          SELECT SUM(COALESCE(weighted_score, score)) AS session_score,
+                 SUM(COALESCE(weighted_max, max_score)) AS session_max,
+                 MAX(created_at) AS session_at
+          FROM interaction_results
+          WHERE user_id=? AND course_id=? AND session_id IS NOT NULL AND player_mode='test'
+          GROUP BY session_id
+          ORDER BY SUM(COALESCE(weighted_score, score)) DESC
+        ) WHERE ROWNUM = 1
+      `).get(userId, pc.course_id);
+
+      // Get exam attempt count
+      const attemptCount = await db.prepare(`
+        SELECT COUNT(DISTINCT session_id) AS cnt FROM interaction_results
+        WHERE user_id=? AND course_id=? AND session_id IS NOT NULL AND player_mode='test'
+      `).get(userId, pc.course_id);
+
+      // Get exam history (all sessions)
+      const examHistory = await db.prepare(`
+        SELECT session_id, SUM(COALESCE(weighted_score, score)) AS score,
+               SUM(COALESCE(weighted_max, max_score)) AS max_score,
+               MAX(created_at) AS exam_at
+        FROM interaction_results
+        WHERE user_id=? AND course_id=? AND session_id IS NOT NULL AND player_mode='test'
+        GROUP BY session_id ORDER BY MAX(created_at) DESC
+      `).all(userId, pc.course_id);
+
+      const bestScore = bestSession?.session_score || 0;
+      const bestMax = bestSession?.session_max || 100;
+      const ratio = bestMax > 0 ? bestScore / bestMax : 0;
+      const weightedScore = Math.round(ratio * courseTotalScore);
+      const coursePassed = ratio * 100 >= coursePassScore;
+      if (pc.is_required && !coursePassed) allCoursePassed = false;
+
+      programTotal += weightedScore;
+      programMax += courseTotalScore;
+
+      result.push({
+        course_id: pc.course_id,
+        course_title: pc.course_title,
+        total_score: courseTotalScore,
+        pass_score: coursePassScore,
+        max_attempts: maxAttempts,
+        browse_progress: { total: totalSlides, viewed: viewedSlides, pct: totalSlides > 0 ? Math.round(viewedSlides / totalSlides * 100) : 0, lessons: lessonProgress },
+        exam: {
+          best_score: bestScore, best_max: bestMax,
+          attempts: attemptCount?.cnt || 0, max_attempts: maxAttempts,
+          passed: coursePassed,
+          weighted_score: weightedScore,
+          history: examHistory.map((h, i) => ({ attempt: examHistory.length - i, score: h.score, max_score: h.max_score, exam_at: h.exam_at }))
+        }
+      });
+    }
+
+    const programPassScore = program.program_pass_score || 60;
+    const programPassed = allCoursePassed && (programMax > 0 ? programTotal / programMax * 100 >= programPassScore : false);
+
+    res.json({
+      courses: result,
+      program_total: programTotal,
+      program_max: programMax,
+      program_pass_score: programPassScore,
+      program_passed: programPassed
+    });
+  } catch (e) {
+    console.error('[Scores] my-scores error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/training/programs/:id/report — admin report
+router.get('/programs/:id/report', async (req, res) => {
+  if (!canPublish(req)) return res.status(403).json({ error: '需要上架權限' });
+  try {
+    const progId = Number(req.params.id);
+    const program = await db.prepare('SELECT title, program_pass_score FROM training_programs WHERE id=?').get(progId);
+    if (!program) return res.status(404).json({ error: '專案不存在' });
+
+    // All assigned users
+    const users = await db.prepare(`
+      SELECT DISTINCT pa.user_id, u.name, u.employee_id, u.dept_code
+      FROM program_assignments pa
+      JOIN users u ON u.id = pa.user_id
+      WHERE pa.program_id = ? AND pa.status != 'exempted'
+      ORDER BY u.name
+    `).all(progId);
+
+    // Program courses
+    const courses = await db.prepare(`
+      SELECT pc.course_id, pc.exam_config, pc.lesson_ids, pc.is_required,
+             c.title AS course_title, c.pass_score AS course_pass_score
+      FROM program_courses pc JOIN courses c ON c.id = pc.course_id
+      WHERE pc.program_id = ? ORDER BY pc.sort_order
+    `).all(progId);
+
+    // For each user, get progress + scores
+    const usersReport = [];
+    let totalCompleted = 0, totalPassed = 0, totalNotStarted = 0;
+
+    for (const u of users) {
+      let browseTotal = 0, browseViewed = 0;
+      let programTotal = 0, programMax = 0;
+      let allPassed = true;
+      const courseDetails = [];
+
+      for (const pc of courses) {
+        const examConfig = pc.exam_config ? JSON.parse(pc.exam_config) : {};
+        const courseTotalScore = examConfig.total_score || 100;
+        const coursePassScore = examConfig.pass_score || pc.course_pass_score || 60;
+        const lessonIds = pc.lesson_ids ? JSON.parse(pc.lesson_ids) : null;
+
+        // Slide count
+        let slideCountSql = 'SELECT COUNT(*) AS cnt FROM course_slides cs JOIN course_lessons cl ON cl.id = cs.lesson_id WHERE cl.course_id=?';
+        const scParams = [pc.course_id];
+        if (lessonIds && lessonIds.length) {
+          slideCountSql += ` AND cs.lesson_id IN (${lessonIds.join(',')})`;
+        }
+        const slideCount = await db.prepare(slideCountSql).get(...scParams);
+
+        const viewedCount = await db.prepare(`
+          SELECT COUNT(*) AS cnt FROM user_slide_views WHERE user_id=? AND course_id=? AND program_id=?
+        `).get(u.user_id, pc.course_id, progId);
+
+        const total = slideCount?.cnt || 0;
+        const viewed = Math.min(viewedCount?.cnt || 0, total);
+        browseTotal += total;
+        browseViewed += viewed;
+
+        // Best exam score
+        const best = await db.prepare(`
+          SELECT session_score FROM (
+            SELECT SUM(COALESCE(weighted_score, score)) AS session_score
+            FROM interaction_results WHERE user_id=? AND course_id=? AND session_id IS NOT NULL AND player_mode='test'
+            GROUP BY session_id ORDER BY SUM(COALESCE(weighted_score, score)) DESC
+          ) WHERE ROWNUM=1
+        `).get(u.user_id, pc.course_id);
+
+        const attempts = await db.prepare(
+          "SELECT COUNT(DISTINCT session_id) AS cnt FROM interaction_results WHERE user_id=? AND course_id=? AND session_id IS NOT NULL AND player_mode='test'"
+        ).get(u.user_id, pc.course_id);
+
+        const bestScore = best?.session_score || 0;
+        const ratio = bestScore > 0 ? bestScore / 100 : 0;
+        const weighted = Math.round(ratio * courseTotalScore);
+        const passed = ratio * 100 >= coursePassScore;
+        if (pc.is_required && !passed) allPassed = false;
+        programTotal += weighted;
+        programMax += courseTotalScore;
+
+        courseDetails.push({
+          course_id: pc.course_id, title: pc.course_title,
+          browse_total: total, browse_viewed: viewed,
+          best_score: bestScore, attempts: attempts?.cnt || 0,
+          weighted, total_score: courseTotalScore, passed
+        });
+      }
+
+      const pPassScore = program.program_pass_score || 60;
+      const pPassed = allPassed && (programMax > 0 ? programTotal / programMax * 100 >= pPassScore : false);
+      const status = browseViewed === 0 && programTotal === 0 ? 'not_started' : pPassed ? 'passed' : 'in_progress';
+      if (status === 'not_started') totalNotStarted++;
+      else if (status === 'passed') totalPassed++;
+
+      usersReport.push({
+        user_id: u.user_id, name: u.name, employee_id: u.employee_id, dept_code: u.dept_code,
+        browse_total: browseTotal, browse_viewed: browseViewed, browse_pct: browseTotal > 0 ? Math.round(browseViewed / browseTotal * 100) : 0,
+        courses: courseDetails,
+        program_total: programTotal, program_max: programMax, program_passed: pPassed, status
+      });
+    }
+
+    totalCompleted = usersReport.filter(u => u.browse_pct === 100).length;
+
+    res.json({
+      program_title: program.title,
+      program_pass_score: program.program_pass_score || 60,
+      summary: { total: users.length, completed_browse: totalCompleted, passed: totalPassed, not_started: totalNotStarted },
+      users: usersReport
+    });
+  } catch (e) {
+    console.error('[Report] error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/training/programs/:id/report/export — Excel export
+router.get('/programs/:id/report/export', async (req, res) => {
+  if (!canPublish(req)) return res.status(403).json({ error: '需要上架權限' });
+  try {
+    // Reuse report logic
+    const progId = Number(req.params.id);
+    const reportRes = { json: null };
+    // Inline the report generation (call the same logic)
+    const program = await db.prepare('SELECT title, program_pass_score FROM training_programs WHERE id=?').get(progId);
+    if (!program) return res.status(404).json({ error: '專案不存在' });
+
+    const courses = await db.prepare(`
+      SELECT pc.course_id, pc.exam_config, pc.lesson_ids, pc.is_required,
+             c.title AS course_title, c.pass_score AS course_pass_score
+      FROM program_courses pc JOIN courses c ON c.id = pc.course_id
+      WHERE pc.program_id = ? ORDER BY pc.sort_order
+    `).all(progId);
+
+    const users = await db.prepare(`
+      SELECT DISTINCT pa.user_id, u.name, u.employee_id, u.dept_code,
+             (SELECT name FROM (SELECT DISTINCT dept_code, dept_name AS name FROM users WHERE dept_code IS NOT NULL) WHERE dept_code = u.dept_code AND ROWNUM=1) AS dept_name
+      FROM program_assignments pa
+      JOIN users u ON u.id = pa.user_id
+      WHERE pa.program_id = ? AND pa.status != 'exempted'
+      ORDER BY u.name
+    `).all(progId);
+
+    // Build Excel
+    const XLSX = require('xlsx');
+    const headers = ['姓名', '工號', '部門', '導覽進度'];
+    for (const c of courses) { headers.push(`${c.course_title} 導覽`, `${c.course_title} 成績`); }
+    headers.push('專案總分', '及格');
+
+    const rows = [];
+    for (const u of users) {
+      const row = [u.name, u.employee_id || '', u.dept_name || u.dept_code || ''];
+      let browseTotal = 0, browseViewed = 0, programTotal = 0, programMax = 0;
+      let allPassed = true;
+
+      for (const pc of courses) {
+        const examConfig = pc.exam_config ? JSON.parse(pc.exam_config) : {};
+        const courseTotalScore = examConfig.total_score || 100;
+        const coursePassScore = examConfig.pass_score || pc.course_pass_score || 60;
+        const lessonIds = pc.lesson_ids ? JSON.parse(pc.lesson_ids) : null;
+
+        let scSql = 'SELECT COUNT(*) AS cnt FROM course_slides cs JOIN course_lessons cl ON cl.id=cs.lesson_id WHERE cl.course_id=?';
+        if (lessonIds?.length) scSql += ` AND cs.lesson_id IN (${lessonIds.join(',')})`;
+        const sc = await db.prepare(scSql).get(pc.course_id);
+        const vc = await db.prepare('SELECT COUNT(*) AS cnt FROM user_slide_views WHERE user_id=? AND course_id=? AND program_id=?').get(u.user_id, pc.course_id, progId);
+        const total = sc?.cnt || 0; const viewed = Math.min(vc?.cnt || 0, total);
+        browseTotal += total; browseViewed += viewed;
+        row.push(`${viewed}/${total}`);
+
+        const best = await db.prepare(`SELECT session_score FROM (SELECT SUM(COALESCE(weighted_score,score)) AS session_score FROM interaction_results WHERE user_id=? AND course_id=? AND session_id IS NOT NULL AND player_mode='test' GROUP BY session_id ORDER BY SUM(COALESCE(weighted_score,score)) DESC) WHERE ROWNUM=1`).get(u.user_id, pc.course_id);
+        const bs = best?.session_score || 0;
+        const ratio = bs > 0 ? bs / 100 : 0;
+        const weighted = Math.round(ratio * courseTotalScore);
+        if (pc.is_required && ratio * 100 < coursePassScore) allPassed = false;
+        programTotal += weighted; programMax += courseTotalScore;
+        row.push(bs > 0 ? `${bs}` : '—');
+      }
+
+      row.splice(3, 0, `${browseViewed}/${browseTotal}`);
+      const pPass = allPassed && (programMax > 0 ? programTotal / programMax * 100 >= (program.program_pass_score || 60) : false);
+      row.push(`${programTotal}/${programMax}`, pPass ? '是' : '否');
+      rows.push(row);
+    }
+
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+    XLSX.utils.book_append_sheet(wb, ws, '成績報表');
+    const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(program.title)}_report.xlsx"`);
+    res.send(buf);
+  } catch (e) {
+    console.error('[Export] error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // Training Classroom APIs
 // ═══════════════════════════════════════════════════════════════════════════════
 

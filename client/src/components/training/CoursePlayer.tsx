@@ -190,6 +190,28 @@ export function CoursePlayerInner({ courseId, lessonId, lang: langProp, sessionI
   const currentSlide = allSlides[currentIdx]
   const currentLesson = currentSlide ? lessons.find(l => l.id === currentSlide.lesson_id) : null
 
+  // ─── Slide view tracking (Phase 5) ───
+  const slideViewStartRef = useRef<number>(Date.now())
+  const programIdParam = new URLSearchParams(window.location.search).get('program_id')
+
+  useEffect(() => {
+    slideViewStartRef.current = Date.now()
+    return () => {
+      // On leaving a slide, record the view
+      if (currentSlide) {
+        const duration = Math.round((Date.now() - slideViewStartRef.current) / 1000)
+        if (duration >= 1) {
+          api.post(`/training/slides/${currentSlide.id}/view`, {
+            course_id: courseId,
+            lesson_id: currentSlide.lesson_id,
+            program_id: programIdParam ? Number(programIdParam) : null,
+            duration_seconds: duration
+          }).catch(() => {})
+        }
+      }
+    }
+  }, [currentIdx, currentSlide?.id])
+
   // Auto-play audio
   useEffect(() => {
     if (!currentSlide?.audio_url || !audioRef.current || audioMuted) return
@@ -343,6 +365,11 @@ export function CoursePlayerInner({ courseId, lessonId, lang: langProp, sessionI
 
   // ─── Interaction complete handler ───
   const handleInteractionComplete = useCallback(async (slideId: number, result: any) => {
+    // Mark interaction done for slide view tracking (both learn + test mode)
+    api.put(`/training/slides/${slideId}/view/done`, {
+      program_id: programIdParam ? Number(programIdParam) : null
+    }).catch(() => {})
+
     // Learn mode: don't record scores at all
     if (playerMode !== 'test') return
 

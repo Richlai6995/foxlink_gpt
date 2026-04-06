@@ -1581,6 +1581,27 @@ async function runMigrations(db) {
   // Phase 4: program_courses 新增 lesson_ids（JSON array，null = 全部章節）
   await addCol('PROGRAM_COURSES', 'LESSON_IDS', 'CLOB');
 
+  // Phase 5: program_courses 新增 exam_config（JSON，覆蓋課程測驗設定）
+  await addCol('PROGRAM_COURSES', 'EXAM_CONFIG', 'CLOB');
+
+  // Phase 5: training_programs 新增專案及格分數 + 章節鎖定
+  await addCol('TRAINING_PROGRAMS', 'PROGRAM_PASS_SCORE', "NUMBER DEFAULT 60");
+  await addCol('TRAINING_PROGRAMS', 'SEQUENTIAL_LESSONS', "NUMBER(1) DEFAULT 0");
+
+  // Phase 5: 投影片瀏覽追蹤
+  await createTable('USER_SLIDE_VIEWS', `CREATE TABLE user_slide_views (
+    id               NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    user_id          NUMBER NOT NULL,
+    slide_id         NUMBER NOT NULL,
+    course_id        NUMBER NOT NULL,
+    lesson_id        NUMBER NOT NULL,
+    program_id       NUMBER,
+    duration_seconds NUMBER DEFAULT 0,
+    interaction_done NUMBER(1) DEFAULT 0,
+    viewed_at        TIMESTAMP DEFAULT SYSTIMESTAMP,
+    CONSTRAINT uq_slide_view UNIQUE (user_id, slide_id, program_id)
+  )`);
+
   // ── Phase 3D-Help: session_id + Help 綁定教材 ────────────────────────────────
   await addCol('INTERACTION_RESULTS', 'SESSION_ID', 'VARCHAR2(36)');
   await addCol('HELP_SECTIONS', 'LINKED_COURSE_ID', 'NUMBER');
