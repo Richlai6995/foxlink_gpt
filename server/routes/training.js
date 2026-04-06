@@ -665,6 +665,14 @@ router.post('/courses/:id/archive', loadCoursePermission, requirePermission('own
   }
 });
 
+// POST /api/training/courses/:id/unarchive — restore from archived to draft
+router.post('/courses/:id/unarchive', loadCoursePermission, requirePermission('owner', 'admin'), async (req, res) => {
+  try {
+    await db.prepare(`UPDATE courses SET status='draft', updated_at=SYSTIMESTAMP WHERE id=? AND status='archived'`).run(req.courseId);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // POST /api/training/courses/:id/duplicate
 router.post('/courses/:id/duplicate', loadCoursePermission, requirePermission('owner', 'admin', 'develop'), async (req, res) => {
   try {
@@ -2183,14 +2191,17 @@ router.get('/programs', async (req, res) => {
   if (!canPublish(req)) return res.status(403).json({ error: '需要上架權限' });
   try {
     // All publish/publish_edit users can see all programs (for collaboration)
+    const includeArchived = req.query.status === 'archived'
+    const statusFilter = req.query.status && req.query.status !== 'archived' ? req.query.status : null
     const rows = await db.prepare(`
       SELECT tp.*, u.name AS creator_name,
              (SELECT COUNT(*) FROM program_courses pc WHERE pc.program_id = tp.id) AS course_count,
              (SELECT COUNT(DISTINCT pa.user_id) FROM program_assignments pa WHERE pa.program_id = tp.id) AS target_user_count
       FROM training_programs tp
       LEFT JOIN users u ON u.id = tp.created_by
+      ${includeArchived ? "WHERE tp.status = 'archived'" : statusFilter ? 'WHERE tp.status = ?' : "WHERE tp.status != 'archived'"}
       ORDER BY tp.created_at DESC
-    `).all();
+    `).all(...(statusFilter ? [statusFilter] : []));
     res.json(rows);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -2388,6 +2399,26 @@ router.put('/programs/:id/deactivate', async (req, res) => {
   if (!canPublish(req)) return res.status(403).json({ error: '需要上架權限' });
   try {
     await db.prepare(`UPDATE training_programs SET status='draft', updated_at=SYSTIMESTAMP WHERE id=? AND status IN ('active','paused')`)
+      .run(req.params.id);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// PUT /api/training/programs/:id/archive — 封存
+router.put('/programs/:id/archive', async (req, res) => {
+  if (!canPublish(req)) return res.status(403).json({ error: '需要上架權限' });
+  try {
+    await db.prepare(`UPDATE training_programs SET status='archived', updated_at=SYSTIMESTAMP WHERE id=?`)
+      .run(req.params.id);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// PUT /api/training/programs/:id/unarchive — 解封（回 draft）
+router.put('/programs/:id/unarchive', async (req, res) => {
+  if (!canPublish(req)) return res.status(403).json({ error: '需要上架權限' });
+  try {
+    await db.prepare(`UPDATE training_programs SET status='draft', updated_at=SYSTIMESTAMP WHERE id=? AND status='archived'`)
       .run(req.params.id);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }

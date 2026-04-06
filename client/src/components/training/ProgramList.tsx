@@ -23,7 +23,7 @@ interface Program {
   updated_at: string
 }
 
-type StatusFilter = '' | 'draft' | 'active' | 'paused' | 'completed'
+type StatusFilter = '' | 'draft' | 'active' | 'paused' | 'completed' | 'archived'
 
 export default function ProgramList() {
   const { t } = useTranslation()
@@ -64,7 +64,8 @@ export default function ProgramList() {
   }
 
   const filtered = programs.filter(p => {
-    if (statusFilter && p.status !== statusFilter) return false
+    if (statusFilter) { if (p.status !== statusFilter) return false }
+    else { if (p.status === 'archived') return false } // default: hide archived
     if (search && !p.title.toLowerCase().includes(search.toLowerCase())) return false
     return true
   })
@@ -74,6 +75,7 @@ export default function ProgramList() {
     active:    { label: t('training.program.statusActive'),    color: 'text-green-600',  bg: 'bg-green-50 border-green-200' },
     paused:    { label: t('training.program.statusPaused'),    color: 'text-orange-600', bg: 'bg-orange-50 border-orange-200' },
     completed: { label: t('training.program.statusCompleted'), color: 'text-slate-500',  bg: 'bg-slate-50 border-slate-200' },
+    archived:  { label: t('training.program.statusArchived'),  color: 'text-slate-400',  bg: 'bg-slate-50 border-slate-300' },
   }
 
   const formatDate = (d: string) => d ? new Date(d).toLocaleDateString() : '—'
@@ -109,6 +111,7 @@ export default function ProgramList() {
           <option value="active">{t('training.program.statusActive')}</option>
           <option value="paused">{t('training.program.statusPaused')}</option>
           <option value="completed">{t('training.program.statusCompleted')}</option>
+          <option value="archived">{t('training.program.statusArchived')}</option>
         </select>
 
         {/* New program */}
@@ -150,6 +153,8 @@ export default function ProgramList() {
                       <p className="text-xs text-slate-500 line-clamp-1 mb-2">{prog.purpose}</p>
                     )}
                     <div className="flex items-center gap-4 text-[11px] text-slate-500">
+                      <span>{prog.creator_name}</span>
+                      <span>{formatDate(prog.created_at)}</span>
                       <span className="flex items-center gap-1">
                         <Calendar size={11} /> {formatDate(prog.start_date)} ~ {formatDate(prog.end_date)}
                       </span>
@@ -192,7 +197,22 @@ export default function ProgramList() {
                         <RotateCcw size={14} />
                       </button>
                     )}
-                    {(prog.status === 'draft' || prog.status === 'completed') && (
+                    {prog.status === 'archived' && (
+                      <button onClick={() => handleAction(prog.id, 'unarchive')}
+                        className="text-green-600 hover:bg-green-100 p-1.5 rounded-lg transition" title={t('training.unarchive')}>
+                        <RotateCcw size={14} />
+                      </button>
+                    )}
+                    {prog.status !== 'archived' && (
+                      <button onClick={async () => {
+                        if (!confirm(t('training.confirmArchive'))) return
+                        handleAction(prog.id, 'archive')
+                      }}
+                        className="text-slate-400 hover:bg-slate-100 p-1.5 rounded-lg transition" title={t('training.archive')}>
+                        <Trash2 size={14} className="rotate-45" />
+                      </button>
+                    )}
+                    {(prog.status === 'draft' || prog.status === 'completed' || prog.status === 'archived') && (
                       <button onClick={() => handleAction(prog.id, 'delete')}
                         className="text-red-400 hover:bg-red-100 p-1.5 rounded-lg transition" title={t('training.program.delete')}>
                         <Trash2 size={14} />

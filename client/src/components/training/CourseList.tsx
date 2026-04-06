@@ -63,7 +63,9 @@ export default function CourseList({ editorMode = false }: { editorMode?: boolea
         api.get('/training/courses', { params }),
         api.get('/training/categories', { params: { lang: i18n.language } })
       ])
-      setCourses(coursesRes.data)
+      // Default: hide archived unless explicitly filtering for it
+      const filtered = statusFilter === 'archived' ? coursesRes.data : coursesRes.data.filter((c: any) => c.status !== 'archived')
+      setCourses(filtered)
       setCategories(catsRes.data)
     } catch (e) {
       console.error('Load training data:', e)
@@ -291,6 +293,9 @@ export default function CourseList({ editorMode = false }: { editorMode?: boolea
                         <span className="px-1.5 py-0.5 rounded" style={{ backgroundColor: 'var(--t-accent-subtle)' }}>{course.category_name}</span>
                       )}
                       <span>{course.creator_name}</span>
+                      {editorMode && course.created_at && (
+                        <span>{new Date(course.created_at).toLocaleDateString()}</span>
+                      )}
                       {!editorMode && (
                         <span className="ml-auto flex items-center gap-1">
                           {progressIcon(course.my_progress)}
@@ -307,20 +312,40 @@ export default function CourseList({ editorMode = false }: { editorMode?: boolea
                         </div>
                       )}
                       {editorMode && (
-                        <button
-                          className="ml-auto text-red-400/60 hover:text-red-400 transition p-0.5"
-                          title={t('training.deleteCourse')}
-                          onClick={async (e) => {
-                            e.stopPropagation()
-                            if (!confirm(t('training.confirmDelete', { title: course.title }))) return
-                            try {
-                              await api.delete(`/training/courses/${course.id}`)
-                              loadData()
-                            } catch (err: any) { alert(err.response?.data?.error || t('training.deleteFailed')) }
-                          }}
-                        >
-                          <Trash2 size={12} />
-                        </button>
+                        <span className="ml-auto flex items-center gap-1">
+                          {course.status !== 'archived' ? (
+                            <button className="text-slate-400/60 hover:text-orange-400 transition p-0.5"
+                              title={t('training.archive')}
+                              onClick={async (e) => {
+                                e.stopPropagation()
+                                if (!confirm(t('training.confirmArchive'))) return
+                                try { await api.post(`/training/courses/${course.id}/archive`); loadData() }
+                                catch (err: any) { alert(err.response?.data?.error || 'Error') }
+                              }}>
+                              <ArrowLeft size={12} className="rotate-90" />
+                            </button>
+                          ) : (
+                            <button className="text-green-400/60 hover:text-green-400 transition p-0.5"
+                              title={t('training.unarchive')}
+                              onClick={async (e) => {
+                                e.stopPropagation()
+                                try { await api.post(`/training/courses/${course.id}/unarchive`); loadData() }
+                                catch (err: any) { alert(err.response?.data?.error || 'Error') }
+                              }}>
+                              <ArrowLeft size={12} className="-rotate-90" />
+                            </button>
+                          )}
+                          <button className="text-red-400/60 hover:text-red-400 transition p-0.5"
+                            title={t('training.deleteCourse')}
+                            onClick={async (e) => {
+                              e.stopPropagation()
+                              if (!confirm(t('training.confirmDelete', { title: course.title }))) return
+                              try { await api.delete(`/training/courses/${course.id}`); loadData() }
+                              catch (err: any) { alert(err.response?.data?.error || t('training.deleteFailed')) }
+                            }}>
+                            <Trash2 size={12} />
+                          </button>
+                        </span>
                       )}
                     </div>
                   </div>
