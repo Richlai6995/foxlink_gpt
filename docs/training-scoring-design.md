@@ -1,7 +1,7 @@
 # FOXLINK GPT 教育訓練 — Phase 5：專案計分 + 學習追蹤 + 成績報表
 
 > 日期：2026-04-07
-> 狀態：設計完成，待實作
+> 狀態：Phase 5A–5H 全部實作完成
 > 前置：Phase 4A–4F 已完成
 
 ---
@@ -293,4 +293,45 @@ GET  /api/training/programs/:id/report/export
 | `client/src/components/training/CoursePlayer.tsx` | 投影片瀏覽追蹤 + program exam_config 覆蓋 |
 | `client/src/components/training/ProgramEditor.tsx` | 配分 UI + 報表 tab |
 | `client/src/components/training/ProgramView.tsx` | 成績區塊 |
-| `client/src/i18n/locales/*.json` | 新增 scoring/report keys |
+| `client/src/i18n/locales/*.json` | 新增 scoring/report/locked keys |
+
+---
+
+## 11. 實作完成記錄
+
+### 11.1 實作日期
+
+2026-04-07，全部 8 個 Phase（5A–5H）在同一 session 完成。
+
+### 11.2 審計修復記錄
+
+| 問題 | 嚴重度 | 修正 |
+|------|--------|------|
+| Oracle `JSON_TABLE` 不支援 | CRITICAL | 移除，用簡化版 COUNT 查詢 |
+| `lessonIds.join(',')` SQL injection | CRITICAL | 改用 bind variables `?` |
+| `ROWNUM=1` + `ORDER BY` 不保證排序 | HIGH | 改為 `FETCH FIRST 1 ROW ONLY`（3 處） |
+| CoursePlayer useEffect stale closure | MEDIUM | 提前捕獲 slideId/lessonId |
+| Report/Export 分數比例 hardcoded 100 | CRITICAL | 改用實際 session_max |
+| `UQ_SLIDE_VIEW` 約束名大小寫 | HIGH | 統一大寫 |
+| CoursePlayer useEffect 缺 courseId dependency | MEDIUM | 加入依賴陣列 |
+| i18n key `training.score` 與既有 string 衝突 | HIGH | 改名為 `training.scoring` |
+| ProgramScorePanel division by zero | CRITICAL | 加 `h.max_score > 0` guard |
+| Excel export headers 硬編碼中文 | HIGH | 改為 zh/en/vi 三語根據 request lang |
+| Excel "是/否" 硬編碼 | MEDIUM | 同上，根據 lang 翻譯 |
+
+### 11.3 i18n 統計
+
+- Phase 5 新增 **38 個 i18n key** × 3 語言
+- namespace: `training.scoring.*`（13 key）+ `training.report.*`（11 key）+ `training.program.editor.*`（14 key）
+- 避免與既有 `training.score`（string 型別）衝突，使用 `training.scoring`
+
+### 11.4 Commits
+
+| Commit | 說明 |
+|--------|------|
+| `480421b` | Phase 5A–5D: DB + 瀏覽追蹤 + 配分 UI + Backend API |
+| `dcd8ab3` | Fix: Oracle SQL + SQL injection + stale closure |
+| `96cda52` | Fix: score ratio + constraint name + dependency |
+| `a5104c1` | Phase 5E+5F+5G: 學員成績面板 + 管理者報表 + Excel 匯出 |
+| `b783870` | Phase 5H: 章節鎖定 |
+| `f3e5f10` | Fix: div/zero guard + Excel i18n headers |
