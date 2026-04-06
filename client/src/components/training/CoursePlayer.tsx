@@ -833,7 +833,10 @@ export default function CoursePlayer() {
   const sessionId = useMemo(() => crypto.randomUUID(), [id, examTopicParam])
   const initialMode = searchParams.get('mode') === 'test' ? 'test' as const : 'learn' as const
   const fromEditor = searchParams.get('from') === 'editor'
-  const closeTarget = fromEditor ? `/training/dev/courses/${id}` : `/training/course/${id}`
+  const fromClassroom = searchParams.get('program_id')
+  const closeTarget = fromEditor ? `/training/dev/courses/${id}`
+    : fromClassroom ? `/training/classroom/program/${fromClassroom}`
+    : `/training/course/${id}`
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {

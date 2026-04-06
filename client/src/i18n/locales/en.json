@@ -1954,7 +1954,11 @@
       "notPassed": "Not Passed",
       "inProgress": "In Progress",
       "notStarted": "Not Started",
-      "locked": "Complete previous chapter first"
+      "locked": "Complete previous chapter first",
+      "examTopics": "Exam Topics",
+      "points": "pts",
+      "startExam": "Start Exam",
+      "practiceExam": "Practice Exam"
     },
     "report": {
       "title": "Score Report",

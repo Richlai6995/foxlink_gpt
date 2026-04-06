@@ -1954,7 +1954,11 @@
       "notPassed": "Không đạt",
       "inProgress": "Đang tiến hành",
       "notStarted": "Chưa bắt đầu",
-      "locked": "Hoàn thành chương trước"
+      "locked": "Hoàn thành chương trước",
+      "examTopics": "Chủ đề thi",
+      "points": "điểm",
+      "startExam": "Bắt đầu thi",
+      "practiceExam": "Thi thử"
     },
     "report": {
       "title": "Báo cáo điểm",

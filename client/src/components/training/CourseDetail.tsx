@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { useAuth } from '../../context/AuthContext'
 import api from '../../lib/api'
@@ -70,14 +70,10 @@ export default function CourseDetail() {
       <div className="sticky top-0 z-20 backdrop-blur border-b" style={{ backgroundColor: 'color-mix(in srgb, var(--t-bg) 95%, transparent)', borderColor: 'var(--t-border-subtle)' }}>
         <div className="max-w-4xl mx-auto px-4 py-3 flex items-center gap-3">
           <button onClick={() => {
-            // Smart back: if came from player, go to course list instead of creating a loop
-            const canGoBack = window.history.length > 2
-            if (canGoBack) {
-              // Check if previous URL was learn/quiz to avoid loop
-              navigate('/training')
-            } else {
-              navigate('/training')
-            }
+            const sp = new URLSearchParams(window.location.search)
+            const progId = sp.get('program_id')
+            if (progId) navigate(`/training/classroom/program/${progId}`)
+            else navigate('/training')
           }} style={{ color: 'var(--t-text-muted)' }} className="hover:opacity-80">
             <ArrowLeft size={20} />
           </button>

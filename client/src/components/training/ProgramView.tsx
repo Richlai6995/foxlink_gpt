@@ -20,6 +20,7 @@ interface Assignment {
   passed: number | null
   lesson_ids: number[] | null
   lesson_status?: { lesson_id: number; title: string; total: number; viewed: number; done: boolean; locked: boolean }[]
+  exam_topics?: { id: number; title: string; total_score: number; time_limit_minutes: number }[]
 }
 
 interface ProgramDetail {
@@ -115,79 +116,97 @@ export default function ProgramView() {
           <ProgramScorePanel programId={Number(id)} />
         )}
 
-        {/* Courses tab */}
+        {/* Courses tab — card style */}
         {activeTab === 'courses' && (
-          <div className="space-y-3">
+          <div className="space-y-4">
         {program.assignments.map(a => {
-          const statusIcon = a.status === 'completed'
-            ? <CheckCircle2 size={18} className="text-green-500" />
-            : a.status === 'in_progress'
-              ? <Clock size={18} className="text-blue-500" />
-              : <div className="w-[18px] h-[18px] rounded-full border-2 border-slate-300" />
-
           // For sequential mode: only allow unlocked lessons
           const unlockedLessonIds = a.lesson_status
             ? a.lesson_status.filter(l => !l.locked).map(l => l.lesson_id)
             : a.lesson_ids
-
           const buildLearnUrl = () => {
             const ids = unlockedLessonIds || a.lesson_ids
             const lessonParam = ids ? `&lesson_ids=${ids.join(',')}` : ''
             return `/training/classroom/course/${a.course_id}/learn?program_id=${program.id}&assignment_id=${a.id}${lessonParam}`
           }
+          const browseTotal = a.lesson_status?.reduce((s, l) => s + l.total, 0) || 0
+          const browseViewed = a.lesson_status?.reduce((s, l) => s + l.viewed, 0) || 0
+          const browsePct = browseTotal > 0 ? Math.round(browseViewed / browseTotal * 100) : 0
 
           return (
-            <div key={a.id} className={`bg-white border rounded-xl overflow-hidden transition hover:shadow-sm ${
-              a.status === 'completed' ? 'border-green-200' : 'border-slate-200'
-            }`}>
-              <div className="p-4 flex items-center gap-4">
-                {statusIcon}
-                <div className="flex-1 min-w-0">
-                  <h3 className="text-sm font-medium text-slate-800">{a.course_title}</h3>
-                  {a.course_description && (
-                    <p className="text-xs text-slate-400 line-clamp-1">{a.course_description}</p>
+            <div key={a.id} className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+              {/* Course header card */}
+              <div className="p-5">
+                <div className="flex gap-4">
+                  {a.cover_image && (
+                    <img src={a.cover_image.startsWith('/') ? a.cover_image : '/' + a.cover_image}
+                      className="w-24 h-16 rounded-lg object-cover shrink-0" alt="" />
                   )}
-                  {a.status === 'completed' && a.score !== null && (
-                    <p className="text-xs text-green-600 mt-0.5">
-                      {t('training.classroom.score')}: {a.score}
-                      {a.passed !== null && (a.passed ? ' ✓' : ' ✗')}
-                    </p>
-                  )}
-                </div>
-                <div>
-                  {a.status === 'completed' ? (
-                    <span className="text-xs text-green-600 font-medium px-3 py-1.5 bg-green-50 rounded-lg">
-                      {t('training.completed')}
-                    </span>
-                  ) : a.status === 'in_progress' ? (
-                    <button onClick={() => navigate(buildLearnUrl())}
-                      className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 rounded-lg text-xs font-medium transition">
-                      <Play size={13} /> {t('training.continueLearning')}
-                    </button>
-                  ) : (
-                    <button onClick={async () => { await startAssignment(a.id); navigate(buildLearnUrl()) }}
-                      className="flex items-center gap-1.5 bg-slate-600 hover:bg-slate-500 text-white px-3 py-1.5 rounded-lg text-xs font-medium transition">
-                      <Play size={13} /> {t('training.startLearning')}
-                    </button>
-                  )}
+                  <div className="flex-1 min-w-0">
+                    <h3 className="text-sm font-bold text-slate-800">{a.course_title}</h3>
+                    {a.course_description && <p className="text-xs text-slate-500 mt-0.5 line-clamp-2">{a.course_description}</p>}
+                    <div className="flex items-center gap-3 mt-2 text-[11px] text-slate-500">
+                      <span className="flex items-center gap-1">
+                        {browsePct === 100 ? <CheckCircle2 size={11} className="text-green-500" /> : <Clock size={11} className="text-blue-400" />}
+                        {t('training.scoring.browse')}: {browseViewed}/{browseTotal} ({browsePct}%)
+                      </span>
+                    </div>
+                  </div>
                 </div>
               </div>
 
-              {/* Sequential lesson progress */}
+              {/* Lessons (chapters) */}
               {a.lesson_status && a.lesson_status.length > 0 && (
-                <div className="border-t border-slate-100 px-4 py-2 bg-slate-50 space-y-1">
-                  {a.lesson_status.map(ls => (
-                    <div key={ls.lesson_id} className={`flex items-center gap-2 text-xs py-0.5 ${ls.locked ? 'opacity-40' : ''}`}>
-                      {ls.locked ? <Lock size={11} className="text-slate-400" />
-                        : ls.done ? <CheckCircle2 size={11} className="text-green-500" />
-                        : <Clock size={11} className="text-blue-400" />}
-                      <span className="flex-1 text-slate-600">{ls.title}</span>
-                      <span className="text-slate-400">{ls.viewed}/{ls.total}</span>
-                      {ls.locked && <span className="text-[9px] text-slate-400">{t('training.scoring.locked')}</span>}
-                    </div>
-                  ))}
+                <div className="border-t border-slate-100 px-5 py-3">
+                  <div className="text-[10px] font-semibold text-slate-500 uppercase mb-2">{t('training.scoring.browseDetail')}</div>
+                  <div className="space-y-1">
+                    {a.lesson_status.map(ls => (
+                      <div key={ls.lesson_id} className={`flex items-center gap-2 text-xs py-1 ${ls.locked ? 'opacity-40' : ''}`}>
+                        {ls.locked ? <Lock size={12} className="text-slate-400" />
+                          : ls.done ? <CheckCircle2 size={12} className="text-green-500" />
+                          : <Clock size={12} className="text-blue-400" />}
+                        <span className="flex-1 text-slate-700">{ls.title}</span>
+                        <span className="text-slate-400 text-[11px]">{ls.viewed}/{ls.total}</span>
+                        {ls.locked && <span className="text-[9px] text-orange-400">{t('training.scoring.locked')}</span>}
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
+
+              {/* Exam topics */}
+              {a.exam_topics && a.exam_topics.length > 0 && (
+                <div className="border-t border-slate-100 px-5 py-3">
+                  <div className="text-[10px] font-semibold text-slate-500 uppercase mb-2">{t('training.scoring.examTopics')}</div>
+                  <div className="space-y-1">
+                    {a.exam_topics.map(et => (
+                      <div key={et.id} className="flex items-center gap-2 text-xs py-1">
+                        <BookOpen size={12} className="text-orange-400" />
+                        <span className="flex-1 text-slate-700">{et.title}</span>
+                        <span className="text-slate-400 text-[11px]">{et.total_score}{t('training.scoring.points')} · {et.time_limit_minutes}{t('training.program.editor.minutes')}</span>
+                        <button onClick={() => navigate(`/training/classroom/course/${a.course_id}/learn?mode=test&examTopic=${et.id}&program_id=${program.id}&assignment_id=${a.id}`)}
+                          className="text-[10px] bg-orange-500 hover:bg-orange-400 text-white px-2 py-0.5 rounded transition">
+                          {t('training.scoring.startExam')}
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Action buttons */}
+              <div className="border-t border-slate-100 px-5 py-3 flex items-center justify-center gap-3 bg-slate-50">
+                <button onClick={() => navigate(buildLearnUrl())}
+                  className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg text-xs font-medium transition">
+                  <Play size={13} /> {browsePct > 0 ? t('training.continueLearning') : t('training.startLearning')}
+                </button>
+                {(!a.exam_topics || a.exam_topics.length === 0) && (
+                  <button onClick={() => navigate(`/training/classroom/course/${a.course_id}/learn?mode=test&program_id=${program.id}&assignment_id=${a.id}`)}
+                    className="flex items-center gap-1.5 bg-orange-500 hover:bg-orange-400 text-white px-4 py-2 rounded-lg text-xs font-medium transition">
+                    <Play size={13} /> {t('training.scoring.practiceExam')}
+                  </button>
+                )}
+              </div>
             </div>
           )
         })}

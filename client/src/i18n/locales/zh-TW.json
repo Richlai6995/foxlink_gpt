@@ -1954,7 +1954,11 @@
       "notPassed": "未及格",
       "inProgress": "進行中",
       "notStarted": "未開始",
-      "locked": "請先完成前一章節"
+      "locked": "請先完成前一章節",
+      "examTopics": "測驗主題",
+      "points": "分",
+      "startExam": "開始測驗",
+      "practiceExam": "練習測驗"
     },
     "report": {
       "title": "成績報表",

@@ -3008,18 +3008,35 @@ router.get('/classroom/my-programs', async (req, res) => {
       ORDER BY CASE tp.status WHEN 'active' THEN 0 ELSE 1 END, tp.end_date
     `).all(req.user.id);
 
-    // For each program, get assignment stats
+    // For each program, compute real progress (browse + exam per course)
     for (const prog of programs) {
-      const stats = await db.prepare(`
-        SELECT
-          COUNT(*) AS total,
-          SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) AS completed,
-          SUM(CASE WHEN status = 'in_progress' THEN 1 ELSE 0 END) AS in_progress,
-          SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS pending
-        FROM program_assignments
-        WHERE program_id = ? AND user_id = ? AND status != 'exempted'
-      `).get(prog.id, req.user.id);
-      prog.stats = stats || { total: 0, completed: 0, in_progress: 0, pending: 0 };
+      const courseRows = await db.prepare(`
+        SELECT pc.course_id, pc.lesson_ids, pc.exam_config, c.pass_score AS course_pass_score
+        FROM program_courses pc JOIN courses c ON c.id = pc.course_id
+        WHERE pc.program_id = ?
+      `).all(prog.id);
+      let total = courseRows.length, completed = 0, in_progress = 0;
+      for (const cr of courseRows) {
+        const examConfig = cr.exam_config ? JSON.parse(cr.exam_config) : {};
+        const passScore = examConfig.pass_score || cr.course_pass_score || 60;
+        const lessonIds = cr.lesson_ids ? JSON.parse(cr.lesson_ids) : null;
+
+        // Browse: count total slides vs viewed
+        let slideSql = 'SELECT COUNT(*) AS cnt FROM course_slides cs JOIN course_lessons cl ON cl.id=cs.lesson_id WHERE cl.course_id=?';
+        const slideParams = [cr.course_id];
+        if (lessonIds?.length) { slideSql += ` AND cs.lesson_id IN (${lessonIds.map(() => '?').join(',')})`; slideParams.push(...lessonIds); }
+        const slideCount = await db.prepare(slideSql).get(...slideParams);
+        const viewedCount = await db.prepare('SELECT COUNT(*) AS cnt FROM user_slide_views WHERE user_id=? AND course_id=? AND program_id=?').get(req.user.id, cr.course_id, prog.id);
+        const browseOk = (slideCount?.cnt || 0) > 0 && (viewedCount?.cnt || 0) >= (slideCount?.cnt || 0);
+
+        // Exam: best score
+        const best = await db.prepare(`SELECT SUM(COALESCE(weighted_score,score)) AS s, SUM(COALESCE(weighted_max,max_score)) AS m FROM interaction_results WHERE user_id=? AND course_id=? AND session_id IS NOT NULL AND player_mode='test' GROUP BY session_id ORDER BY SUM(COALESCE(weighted_score,score)) DESC FETCH FIRST 1 ROW ONLY`).get(req.user.id, cr.course_id);
+        const examOk = best && best.m > 0 && (best.s / best.m * 100) >= passScore;
+
+        if (browseOk && examOk) completed++;
+        else if ((viewedCount?.cnt || 0) > 0 || best) in_progress++;
+      }
+      prog.stats = { total, completed, in_progress, pending: total - completed - in_progress };
     }
     res.json(programs);
   } catch (e) {
@@ -3043,7 +3060,7 @@ router.get('/classroom/programs/:id', async (req, res) => {
       WHERE pa.program_id = ? AND pa.user_id = ? AND pa.status != 'exempted'
       ORDER BY COALESCE(pc.sort_order, pa.id)
     `).all(req.params.id, req.user.id);
-    // Parse lesson_ids CLOB + resolve lesson progress for sequential locking
+    // Parse lesson_ids + compute lesson progress + exam topics
     const isSequential = program.sequential_lessons === 1;
     const assignments = [];
     for (const a of assignmentsRaw) {
@@ -3052,27 +3069,32 @@ router.get('/classroom/programs/:id', async (req, res) => {
         lesson_ids: a.lesson_ids ? (typeof a.lesson_ids === 'string' ? JSON.parse(a.lesson_ids) : a.lesson_ids) : null
       };
 
-      // If sequential, compute per-lesson completion
-      if (isSequential) {
-        let lessons = await db.prepare('SELECT id, title, sort_order FROM course_lessons WHERE course_id=? ORDER BY sort_order, id').all(a.course_id);
-        if (parsed.lesson_ids && parsed.lesson_ids.length > 0) {
-          lessons = lessons.filter(l => parsed.lesson_ids.includes(l.id));
-        }
-        const lessonStatus = [];
-        let allPrevDone = true;
-        for (const lesson of lessons) {
-          const slideCount = await db.prepare('SELECT COUNT(*) AS cnt FROM course_slides WHERE lesson_id=?').get(lesson.id);
-          const viewedCount = await db.prepare(
-            `SELECT COUNT(*) AS cnt FROM user_slide_views WHERE user_id=? AND lesson_id=? AND program_id=?`
-          ).get(req.user.id, lesson.id, Number(req.params.id));
-          const total = slideCount?.cnt || 0;
-          const viewed = Math.min(viewedCount?.cnt || 0, total);
-          const done = total > 0 && viewed >= total;
-          lessonStatus.push({ lesson_id: lesson.id, title: lesson.title, total, viewed, done, locked: !allPrevDone });
-          if (!done) allPrevDone = false;
-        }
-        parsed.lesson_status = lessonStatus;
+      // Always compute lesson_status for chapter display
+      let lessons = await db.prepare('SELECT id, title, sort_order FROM course_lessons WHERE course_id=? ORDER BY sort_order, id').all(a.course_id);
+      if (parsed.lesson_ids && parsed.lesson_ids.length > 0) {
+        lessons = lessons.filter(l => parsed.lesson_ids.includes(l.id));
       }
+      const lessonStatus = [];
+      let allPrevDone = true;
+      for (const lesson of lessons) {
+        const slideCount = await db.prepare('SELECT COUNT(*) AS cnt FROM course_slides WHERE lesson_id=?').get(lesson.id);
+        const viewedCount = await db.prepare(
+          'SELECT COUNT(*) AS cnt FROM user_slide_views WHERE user_id=? AND lesson_id=? AND program_id=?'
+        ).get(req.user.id, lesson.id, Number(req.params.id));
+        const total = slideCount?.cnt || 0;
+        const viewed = Math.min(viewedCount?.cnt || 0, total);
+        const done = total > 0 && viewed >= total;
+        lessonStatus.push({ lesson_id: lesson.id, title: lesson.title, total, viewed, done, locked: isSequential && !allPrevDone });
+        if (!done) allPrevDone = false;
+      }
+      parsed.lesson_status = lessonStatus;
+
+      // Get exam topics for this course
+      try {
+        const topics = await db.prepare('SELECT id, title, total_score, time_limit_minutes FROM exam_topics WHERE course_id=? ORDER BY id').all(a.course_id);
+        parsed.exam_topics = topics || [];
+      } catch { parsed.exam_topics = []; }
+
       assignments.push(parsed);
     }
 
