@@ -151,29 +151,25 @@ export default function HotspotBlock({ block, blockIndex = 0, isLastSlide = fals
   // Priority: mode-specific block audio → slide-level audio_url
   useEffect(() => {
     if (introPlayed || completed) return
+    if (mode === 'demo') return // demo handles its own intro below
     const introAudioUrl = isTestMode ? (block.slide_narration_test_audio || slideAudioUrl)
       : mode === 'explore' ? (block.slide_narration_explore_audio || slideAudioUrl)
       : (block.slide_narration_audio || slideAudioUrl) || null
-    console.log('[Demo] intro check:', { introAudioUrl, slideAudioUrl, blockAudio: block.slide_narration_audio, muted, mode, isTestMode })
     if (!introAudioUrl || muted) {
-      console.log('[Demo] SKIP intro — no audio url or muted')
       setIntroPlayed(true)
       return
     }
     setIntroPlaying(true)
     if (audioRef.current) {
-      const audio = audioRef.current
-      const onIntroEnd = () => {
+      audioRef.current.src = introAudioUrl
+      audioRef.current.onended = () => {
         setIntroPlaying(false)
         setIntroPlayed(true)
-        audio.removeEventListener('ended', onIntroEnd)
+        if (audioRef.current) audioRef.current.onended = null
       }
-      audio.addEventListener('ended', onIntroEnd)
-      audio.src = introAudioUrl
-      audio.play().catch(() => {
+      audioRef.current.play().catch(() => {
         setIntroPlaying(false)
         setIntroPlayed(true)
-        audio.removeEventListener('ended', onIntroEnd)
       })
     } else {
       setIntroPlayed(true)
@@ -181,7 +177,6 @@ export default function HotspotBlock({ block, blockIndex = 0, isLastSlide = fals
   }, [introPlayed, completed, muted])
 
   // Auto-play region audio for current guided step (after intro finishes)
-  // Demo mode handles its own audio in the demo effect below
   useEffect(() => {
     if (!introPlayed || introPlaying || completed) return
     if (mode === 'guided' && currentTarget) {
@@ -189,7 +184,7 @@ export default function HotspotBlock({ block, blockIndex = 0, isLastSlide = fals
     }
   }, [currentStep, completed, introPlayed, introPlaying])
 
-  // ─── Auto-play: auto-advance through guided steps ───
+  // ─── Auto-play: auto-advance through guided steps (CoursePlayer autoPlay) ───
   useEffect(() => {
     if (!autoPlay || !introPlayed || introPlaying || completed || isTestMode) return
     if (mode !== 'guided' || !currentTarget) return
@@ -202,7 +197,6 @@ export default function HotspotBlock({ block, blockIndex = 0, isLastSlide = fals
         setCompleted(true)
         onAutoPlayDone?.()
       } else {
-        // Show checkmark briefly before advancing
         setFeedback({ text: '', correct: true, regionId: currentTarget.id })
         setTimeout(() => {
           setCurrentStep(nextStep)
@@ -210,75 +204,99 @@ export default function HotspotBlock({ block, blockIndex = 0, isLastSlide = fals
         }, 800)
       }
     }
-
-    // If region has audio → wait for it to end
     const regionAudioUrl = (currentTarget as any).audio_url
     if (regionAudioUrl && !muted) {
       audio.addEventListener('ended', advanceStep, { once: true })
       return () => { audio.removeEventListener('ended', advanceStep) }
     } else {
-      // No audio → advance after 2 seconds
       const timer = setTimeout(advanceStep, 2000)
       return () => clearTimeout(timer)
     }
   }, [autoPlay, currentStep, introPlayed, introPlaying, completed, isTestMode, mode, muted])
 
-  // ─── Demo mode: auto-advance through all steps (no interaction needed) ───
-  // Uses a separate Audio object to avoid conflicts with intro audio
-  const demoAudioRef = useRef<HTMLAudioElement | null>(null)
+  // ─── Demo mode: single effect that handles ENTIRE flow (intro → steps → done) ───
+  const demoRunningRef = useRef(false)
   useEffect(() => {
-    if (mode !== 'demo' || !introPlayed || introPlaying || completed) return
-    if (!currentTarget) return
+    if (mode !== 'demo') return
+    if (demoRunningRef.current) return // prevent double-invoke
+    demoRunningRef.current = true
 
-    // Guard: if intro audio is still physically playing, wait for it
-    if (audioRef.current && !audioRef.current.paused && !audioRef.current.ended) {
-      const onDone = () => {
-        // Force a re-render to re-trigger this effect
+    let cancelled = false
+
+    const playAudioAsync = (url: string): Promise<void> => {
+      return new Promise((resolve) => {
+        if (!url || muted || cancelled) { resolve(); return }
+        const audio = new Audio(url)
+        audio.onended = () => { audio.onended = null; resolve() }
+        audio.onerror = () => { resolve() }
+        audio.play().catch(() => resolve())
+        // Cleanup on cancel
+        const checkCancel = setInterval(() => {
+          if (cancelled) { audio.pause(); audio.onended = null; clearInterval(checkCancel); resolve() }
+        }, 200)
+        audio.addEventListener('ended', () => clearInterval(checkCancel), { once: true })
+      })
+    }
+
+    const runDemo = async () => {
+      // 1. Play intro
+      const introUrl = block.slide_narration_audio || slideAudioUrl
+      if (introUrl && !muted) {
+        setIntroPlaying(true)
+        await playAudioAsync(introUrl)
+        if (cancelled) return
         setIntroPlaying(false)
-        setIntroPlayed(true)
       }
-      audioRef.current.addEventListener('ended', onDone, { once: true })
-      return () => { audioRef.current?.removeEventListener('ended', onDone) }
-    }
+      setIntroPlayed(true)
 
-    const advanceStep = () => {
-      const nextStep = currentStep + 1
-      if (nextStep >= correctRegions.length) {
-        setCompleted(true)
-        if (isTestMode && onInteractionComplete) {
-          const elapsed = Math.round((Date.now() - startTimeRef.current) / 1000)
-          onInteractionComplete({
-            block_type: 'hotspot', block_index: blockIndex, player_mode: 'test',
-            interaction_mode: 'demo',
-            action_log: correctRegions.map(r => ({ region_id: r.id, label: r.label, correct: true, auto: true })),
-            total_time_seconds: elapsed,
-            steps_completed: correctRegions.length, total_steps: correctRegions.length,
-            wrong_clicks: 0
-          })
+      // 2. Play each step
+      for (let step = 0; step < correctRegions.length; step++) {
+        if (cancelled) return
+        setCurrentStep(step)
+        const region = correctRegions[step]
+        const regionUrl = (region as any).audio_url
+
+        // Play region audio
+        if (regionUrl) {
+          await playAudioAsync(regionUrl)
+        } else {
+          await new Promise(r => setTimeout(r, 3000))
         }
-        onAutoPlayDone?.()
-      } else {
-        setFeedback({ text: '', correct: true, regionId: currentTarget.id })
-        setTimeout(() => {
-          setCurrentStep(nextStep)
+        if (cancelled) return
+
+        // Show checkmark briefly
+        if (step < correctRegions.length - 1) {
+          setFeedback({ text: '', correct: true, regionId: region.id })
+          await new Promise(r => setTimeout(r, 800))
+          if (cancelled) return
           setFeedback(null)
-        }, 800)
+        }
       }
+
+      // 3. Done
+      if (cancelled) return
+      setCompleted(true)
+      if (isTestMode && onInteractionComplete) {
+        const elapsed = Math.round((Date.now() - startTimeRef.current) / 1000)
+        onInteractionComplete({
+          block_type: 'hotspot', block_index: blockIndex, player_mode: 'test',
+          interaction_mode: 'demo',
+          action_log: correctRegions.map(r => ({ region_id: r.id, label: r.label, correct: true, auto: true })),
+          total_time_seconds: elapsed,
+          steps_completed: correctRegions.length, total_steps: correctRegions.length,
+          wrong_clicks: 0
+        })
+      }
+      onAutoPlayDone?.()
     }
 
-    const regionAudioUrl = (currentTarget as any).audio_url
-    if (regionAudioUrl && !muted) {
-      // Use separate Audio object — immune to intro audio conflicts
-      const demoAudio = new Audio(regionAudioUrl)
-      demoAudioRef.current = demoAudio
-      demoAudio.onended = () => { demoAudio.onended = null; advanceStep() }
-      demoAudio.play().catch(() => { advanceStep() })
-      return () => { demoAudio.pause(); demoAudio.onended = null; demoAudioRef.current = null }
-    } else {
-      const timer = setTimeout(advanceStep, 3000)
-      return () => clearTimeout(timer)
+    runDemo()
+
+    return () => {
+      cancelled = true
+      demoRunningRef.current = false
     }
-  }, [mode, currentStep, introPlayed, introPlaying, completed, muted])
+  }, [mode]) // only trigger once when mode is demo
 
   const handleClick = (e: React.MouseEvent<HTMLDivElement>) => {
     if (completed || transitioning || mode === 'demo') return // demo mode: no clicks
