@@ -230,6 +230,17 @@ export default function HotspotBlock({ block, blockIndex = 0, isLastSlide = fals
     if (mode !== 'demo' || !introPlayed || introPlaying || completed) return
     if (!currentTarget) return
 
+    // Guard: if intro audio is still physically playing, wait for it
+    if (audioRef.current && !audioRef.current.paused && !audioRef.current.ended) {
+      const onDone = () => {
+        // Force a re-render to re-trigger this effect
+        setIntroPlaying(false)
+        setIntroPlayed(true)
+      }
+      audioRef.current.addEventListener('ended', onDone, { once: true })
+      return () => { audioRef.current?.removeEventListener('ended', onDone) }
+    }
+
     const advanceStep = () => {
       const nextStep = currentStep + 1
       if (nextStep >= correctRegions.length) {
