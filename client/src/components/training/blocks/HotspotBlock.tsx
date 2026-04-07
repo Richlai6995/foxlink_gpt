@@ -254,11 +254,13 @@ export default function HotspotBlock({ block, blockIndex = 0, isLastSlide = fals
     }
 
     const regionAudioUrl = (currentTarget as any).audio_url
+    console.log('[Demo] step', currentStep, 'audio:', regionAudioUrl, 'muted:', muted)
     if (regionAudioUrl && !muted && audioRef.current) {
       // Wait a tick for playRegionAudio to set src, then attach onended
       const timer = setTimeout(() => {
         if (audioRef.current) {
-          audioRef.current.onended = () => { if (audioRef.current) audioRef.current.onended = null; advanceStep() }
+          console.log('[Demo] attaching onended for step', currentStep, 'src:', audioRef.current.src, 'paused:', audioRef.current.paused)
+          audioRef.current.onended = () => { console.log('[Demo] step', currentStep, 'ended'); if (audioRef.current) audioRef.current.onended = null; advanceStep() }
         }
       }, 100)
       return () => { clearTimeout(timer); if (audioRef.current) audioRef.current.onended = null }
