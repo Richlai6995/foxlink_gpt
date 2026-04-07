@@ -558,6 +558,16 @@ export default function HotspotEditor({ block, onChange, courseId, slideId, bloc
               }}>
               🔍 探索
             </button>
+            <button
+              onClick={() => onChange({ ...block, interaction_mode: 'demo' })}
+              className="flex-1 text-[10px] py-1 rounded transition font-medium"
+              style={{
+                backgroundColor: block.interaction_mode === 'demo' ? 'rgba(34,197,94,0.12)' : 'transparent',
+                color: block.interaction_mode === 'demo' ? '#22c55e' : 'var(--t-text-dim)',
+                border: `1px solid ${block.interaction_mode === 'demo' ? '#22c55e' : 'var(--t-border)'}`
+              }}>
+              📺 展示
+            </button>
           </div>
         </div>
         <div>

@@ -41,8 +41,9 @@ interface Props {
 export default function HotspotBlock({ block, blockIndex = 0, isLastSlide = false, playerMode = 'learn', slideAudioUrl, globalMuted = false, autoPlay = false, onAllComplete, onInteractionComplete, onAutoPlayDone }: Props) {
   const { t } = useTranslation()
   const isTestMode = playerMode === 'test'
-  // In test mode, always use guided (step-by-step) regardless of block setting
-  const mode: 'guided' | 'explore' = isTestMode ? 'guided' : (block.interaction_mode || 'guided')
+  const isDemoMode = block.interaction_mode === 'demo'
+  // In test mode, use guided (step-by-step) unless demo mode
+  const mode: 'guided' | 'explore' | 'demo' = isDemoMode ? 'demo' : (isTestMode ? 'guided' : (block.interaction_mode || 'guided'))
   const allRegions: Region[] = block.regions || []
   const correctRegions = allRegions.filter(r => r.correct)
   const maxAttempts = block.max_attempts || 3
@@ -135,8 +136,8 @@ export default function HotspotBlock({ block, blockIndex = 0, isLastSlide = fals
     let url: string | undefined
     if (forceField) {
       url = r[forceField]
-    } else if (isTestMode) {
-      // Test mode: don't auto-play narration
+    } else if (isTestMode && mode !== 'demo') {
+      // Test mode (non-demo): don't auto-play narration
       return
     } else if (mode === 'explore') {
       url = r.explore_audio_url || r.audio_url
@@ -216,8 +217,50 @@ export default function HotspotBlock({ block, blockIndex = 0, isLastSlide = fals
     }
   }, [autoPlay, currentStep, introPlayed, introPlaying, completed, isTestMode, mode, muted])
 
+  // ─── Demo mode: auto-advance through all steps (no interaction needed) ───
+  useEffect(() => {
+    if (mode !== 'demo' || !introPlayed || introPlaying || completed) return
+    if (!currentTarget || !audioRef.current) return
+
+    const audio = audioRef.current
+    const advanceStep = () => {
+      const nextStep = currentStep + 1
+      if (nextStep >= correctRegions.length) {
+        setCompleted(true)
+        // In test mode, fire interaction complete with full score
+        if (isTestMode && onInteractionComplete) {
+          const elapsed = Math.round((Date.now() - startTimeRef.current) / 1000)
+          onInteractionComplete({
+            block_type: 'hotspot', block_index: blockIndex, player_mode: 'test',
+            interaction_mode: 'demo',
+            action_log: correctRegions.map(r => ({ region_id: r.id, label: r.label, correct: true, auto: true })),
+            total_time_seconds: elapsed,
+            steps_completed: correctRegions.length, total_steps: correctRegions.length,
+            wrong_clicks: 0
+          })
+        }
+        onAutoPlayDone?.()
+      } else {
+        setFeedback({ text: '', correct: true, regionId: currentTarget.id })
+        setTimeout(() => {
+          setCurrentStep(nextStep)
+          setFeedback(null)
+        }, 800)
+      }
+    }
+
+    const regionAudioUrl = (currentTarget as any).audio_url
+    if (regionAudioUrl && !muted) {
+      audio.addEventListener('ended', advanceStep, { once: true })
+      return () => { audio.removeEventListener('ended', advanceStep) }
+    } else {
+      const timer = setTimeout(advanceStep, 3000)
+      return () => clearTimeout(timer)
+    }
+  }, [mode, currentStep, introPlayed, introPlaying, completed, muted])
+
   const handleClick = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (completed || transitioning) return
+    if (completed || transitioning || mode === 'demo') return // demo mode: no clicks
     const rect = e.currentTarget.getBoundingClientRect()
     const x = ((e.clientX - rect.left) / rect.width) * 100
     const y = ((e.clientY - rect.top) / rect.height) * 100
@@ -351,30 +394,31 @@ export default function HotspotBlock({ block, blockIndex = 0, isLastSlide = fals
 
   // In test mode, hints only appear after show_hint_after failures (fallback to highlight)
   const showStepHints = mode === 'guided' && !completed && stepAttempts >= showHintAfter
+  const isGuidedLike = mode === 'guided' || mode === 'demo' // demo uses same visual as guided
 
   // Region rendering
   const renderRegions = (isZoom = false) => allRegions.map((r) => {
     const c = toPercent(r.coords)
-    const isCurrentTarget = mode === 'guided' && currentTarget?.id === r.id
+    const isCurrentTarget = isGuidedLike && currentTarget?.id === r.id
     const isExplored = mode === 'explore' && exploredIds.has(r.id)
     const isHovered = hoverRegion === r.id
     const isHit = feedback?.regionId === r.id
     const justCorrect = isHit && feedback?.correct
 
-    // Guided mode: only show current step + completed steps
-    const guidedVisible = mode === 'guided'
+    // Guided/demo mode: only show current step + completed steps
+    const guidedVisible = isGuidedLike
       ? (isCurrentTarget || correctRegions.findIndex(cr => cr.id === r.id) < currentStep)
       : true
 
-    // Dimming: in guided mode, non-current regions are dimmed
-    const dimmed = mode === 'guided' && !isCurrentTarget && !completed &&
+    // Dimming: in guided/demo mode, non-current regions are dimmed
+    const dimmed = isGuidedLike && !isCurrentTarget && !completed &&
       correctRegions.findIndex(cr => cr.id === r.id) >= currentStep
 
-    // Test mode: hide all region visuals until showStepHints kicks in
-    const testHidden = isTestMode && !completed && !showStepHints &&
+    // Test mode: hide all region visuals until showStepHints kicks in (not for demo)
+    const testHidden = isTestMode && mode !== 'demo' && !completed && !showStepHints &&
       correctRegions.findIndex(cr => cr.id === r.id) >= currentStep
 
-    if (mode === 'guided' && !guidedVisible && !completed) return null
+    if (isGuidedLike && !guidedVisible && !completed) return null
 
     return (
       <div key={r.id}>
