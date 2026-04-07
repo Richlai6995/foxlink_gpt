@@ -62,6 +62,7 @@ cd client && npm run dev    # frontend → localhost:5173 (proxy → 3007)
 | `gmail-api-integration-design.md` | Gmail API 整合 |
 | `webex-bot-spec.md` | Webex Bot 規格 |
 | `test-plan-v2-tag-workflow.md` | 標籤工作流測試計畫 |
+| `llm-performance-optimization.md` | LLM 效能優化（streaming、genConfig、AOAI 相容性） |
 
 ---
 
