@@ -154,7 +154,9 @@ export default function HotspotBlock({ block, blockIndex = 0, isLastSlide = fals
     const introAudioUrl = isTestMode ? (block.slide_narration_test_audio || slideAudioUrl)
       : mode === 'explore' ? (block.slide_narration_explore_audio || slideAudioUrl)
       : (block.slide_narration_audio || slideAudioUrl) || null
+    console.log('[Demo] intro check:', { introAudioUrl, slideAudioUrl, blockAudio: block.slide_narration_audio, muted, mode, isTestMode })
     if (!introAudioUrl || muted) {
+      console.log('[Demo] SKIP intro — no audio url or muted')
       setIntroPlayed(true)
       return
     }
@@ -222,6 +224,7 @@ export default function HotspotBlock({ block, blockIndex = 0, isLastSlide = fals
 
   // ─── Demo mode: auto-advance through all steps (no interaction needed) ───
   useEffect(() => {
+    console.log('[Demo] advance effect:', { mode, introPlayed, introPlaying, completed, step: currentStep, target: currentTarget?.label, muted })
     if (mode !== 'demo' || !introPlayed || introPlaying || completed) return
     if (!currentTarget) return
 
