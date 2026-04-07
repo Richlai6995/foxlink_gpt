@@ -1,7 +1,7 @@
 # FOXLINK GPT 教育訓練平台 — 實作完成報告
 
 > 日期：2026-04-02（Phase 1-2F）、2026-04-03（Phase 3A）、2026-04-04（Phase 3B + i18n）、2026-04-05（Phase 3C–3D 全部）、2026-04-06~07（Phase 4+5 訓練教室+計分+報表）
-> 狀態：Phase 1–3E + Phase 4A–4F + Phase 5A–5H 全部實作完成
+> 狀態：Phase 1–3E + Phase 4A–4F + Phase 5A–5H + 追加功能（demo 展示/計分/章節選擇/TTS 修正）全部實作完成
 > 設計文件：[training-platform-design.md](training-platform-design.md)、[training-classroom-design.md](training-classroom-design.md)、[training-scoring-design.md](training-scoring-design.md)
 
 ---
@@ -3410,3 +3410,42 @@ Backend 回傳 per-slide 的 `score_breakdown` + `action_log`。ProgramScorePane
 | `client/src/components/training/ProgramEditor.tsx` | handleSave 補存 exam_config |
 | `client/src/components/common/UserPicker.tsx` | apiUrl prop |
 | `client/src/i18n/locales/*.json` | scoring detail + archive keys |
+
+---
+
+## 25. 2026-04-07 Session 追加功能
+
+### 25-1：無互動章節瀏覽完成即得分
+
+有 `lesson_weights` 時，無互動章節分數 = 瀏覽完成度 × 章節配分。純閱讀課程瀏覽 100% 自動及格。同步到 my-scores / report / export。
+
+### 25-2：Hotspot demo 展示模式
+
+新增 `interaction_mode: 'demo'`。自動依序高亮+播語音，不需互動。async/await 循序播放，獨立 Audio 物件避免衝突。AI 生成旁白偵測 demo 模式使用解說語氣。
+
+### 25-3：課程章節拖拉排序
+
+CourseEditor 章節列表加 HTML5 drag & drop。
+
+### 25-4：預覽導覽可選擇章節
+
+「預覽導覽」改為 click 下拉選單，支援全部章節或指定章節。
+
+### 25-5：翻譯可選擇特定章節
+
+POST /courses/:id/translate 支援 lesson_ids 過濾。翻譯 tab 新增章節勾選 UI。
+
+### 25-6：TTS 英文縮寫發音修正
+
+preprocessTtsText() 修正 AI/API/MCP/ERP/GPT 等發音。
+
+### 25-7：實作檔案
+
+| 檔案 | 變更 |
+|------|------|
+| `server/routes/training.js` | 無互動計分 + demo AI prompt + TTS preprocessor + translate lesson_ids + users-list + reorder |
+| `client/src/components/training/blocks/HotspotBlock.tsx` | demo mode async 播放 + currentTarget + 右側面板解說 |
+| `client/src/components/training/editor/blocks/HotspotEditor.tsx` | demo 模式按鈕 + AI 覆蓋 feedback |
+| `client/src/components/training/editor/CourseEditor.tsx` | 章節拖拉 + 預覽選章節 + 翻譯選章節 |
+| `client/src/components/training/CoursePlayer.tsx` | lessonId query 傳入 |
+| `client/src/i18n/locales/*.json` | demoStep + translateChapters + previewAll keys |

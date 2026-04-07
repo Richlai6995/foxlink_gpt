@@ -417,3 +417,54 @@ GET  /api/training/programs/:id/report/export
 | `client/src/components/training/ProgramEditor.tsx` | handleSave 補存 exam_config |
 | `client/src/components/common/UserPicker.tsx` | apiUrl prop |
 | `client/src/i18n/locales/*.json` | scoring detail + archive/unarchive keys |
+
+---
+
+## 13. 2026-04-07 Session 追加功能
+
+### 13.1 無互動章節瀏覽完成即得分
+
+- 有 `lesson_weights` 時，無互動章節分數 = 瀏覽完成度 × 章節配分
+- 純閱讀課程瀏覽 100% 自動及格（不需測驗）
+- 同步到 my-scores / report / export 三端點
+
+### 13.2 Hotspot demo 展示模式
+
+新增 `interaction_mode: 'demo'`：
+- 自動依序高亮每個區域 + 播語音，不需學員點擊
+- Learn mode 純展示不計分，Test mode 語音播完自動滿分
+- AI 生成旁白偵測 demo 模式 → 使用解說語氣（不含互動用語）
+- 右側面板顯示綠色「解說」步驟（不顯示互動提示）
+- async/await 循序播放（intro → 步驟 1 → ... → 完成），用獨立 Audio 物件避免衝突
+
+### 13.3 課程章節拖拉排序
+
+CourseEditor 章節列表加 HTML5 drag & drop，拖放後呼叫 PUT /courses/:id/lessons/reorder。
+
+### 13.4 預覽導覽可選擇章節
+
+CourseEditor「預覽導覽」改為 click 下拉選單，可選全部章節或指定章節。CoursePlayer 讀取 `lessonId` query 過濾。
+
+### 13.5 翻譯可選擇特定章節
+
+Backend `POST /courses/:id/translate` 支援 `lesson_ids` 過濾。CourseEditor 翻譯 tab 新增章節勾選 UI。
+
+### 13.6 TTS 英文縮寫發音修正
+
+新增 `preprocessTtsText()` 將 AI→A.I.、API→A.P.I.、MCP→M.C.P.、ERP→E.R.P. 等常見縮寫加點分隔，修正 Google TTS 中文語音的英文縮寫發音問題。
+
+### 13.7 Commits
+
+| Commit | 說明 |
+|--------|------|
+| `98ee0de` | 無互動章節瀏覽完成即得分 + 純閱讀課程自動及格 |
+| `90d0f82` | Hotspot demo 展示模式 — 自動高亮+播音+自動得分 |
+| `c0bbdfc` | 課程章節拖拉排序 |
+| `6602295` | 預覽導覽可選擇章節 |
+| `cd68bb7` | demo 模式 AI 生成旁白不含互動語句 |
+| `920641e` | 翻譯可選擇特定章節 |
+| `ebcda91` | 翻譯章節「全部」checkbox 修正 |
+| `b9a90e3` | 預覽導覽下拉改 click toggle |
+| `c3eb344` | AI 生成旁白覆蓋舊回饋文字 |
+| `4ae29b3`~`690ebc3` | demo mode 多次修復（currentTarget/audio 衝突/async 重寫） |
+| `f39be89` | TTS 英文縮寫發音修正 |
