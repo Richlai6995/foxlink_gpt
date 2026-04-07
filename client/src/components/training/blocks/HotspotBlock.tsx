@@ -180,10 +180,11 @@ export default function HotspotBlock({ block, blockIndex = 0, isLastSlide = fals
     }
   }, [introPlayed, completed, muted])
 
-  // Auto-play region audio for current guided/demo step (after intro finishes)
+  // Auto-play region audio for current guided step (after intro finishes)
+  // Demo mode handles its own audio in the demo effect below
   useEffect(() => {
     if (!introPlayed || introPlaying || completed) return
-    if ((mode === 'guided' || mode === 'demo') && currentTarget) {
+    if (mode === 'guided' && currentTarget) {
       playRegionAudio(currentTarget)
     }
   }, [currentStep, completed, introPlayed, introPlaying])
@@ -256,14 +257,12 @@ export default function HotspotBlock({ block, blockIndex = 0, isLastSlide = fals
     const regionAudioUrl = (currentTarget as any).audio_url
     console.log('[Demo] step', currentStep, 'audio:', regionAudioUrl, 'muted:', muted)
     if (regionAudioUrl && !muted && audioRef.current) {
-      // Wait a tick for playRegionAudio to set src, then attach onended
-      const timer = setTimeout(() => {
-        if (audioRef.current) {
-          console.log('[Demo] attaching onended for step', currentStep, 'src:', audioRef.current.src, 'paused:', audioRef.current.paused)
-          audioRef.current.onended = () => { console.log('[Demo] step', currentStep, 'ended'); if (audioRef.current) audioRef.current.onended = null; advanceStep() }
-        }
-      }, 100)
-      return () => { clearTimeout(timer); if (audioRef.current) audioRef.current.onended = null }
+      const audio = audioRef.current
+      // Play region audio + listen for ended — all in one place to avoid race conditions
+      audio.onended = () => { console.log('[Demo] step', currentStep, 'ended'); audio.onended = null; advanceStep() }
+      audio.src = regionAudioUrl
+      audio.play().catch(() => { audio.onended = null; advanceStep() })
+      return () => { audio.onended = null }
     } else {
       // No audio → advance after 3 seconds
       const timer = setTimeout(advanceStep, 3000)
