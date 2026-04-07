@@ -3852,7 +3852,54 @@ router.post('/slides/:sid/generate-narration', async (req, res) => {
     const targetLangName = langNames[targetLang] || targetLang;
     const langInstruction = targetLang !== 'zh-TW' ? `\n\n## 重要：請用 ${targetLangName} 生成所有文字內容（narration, test_hint, explore_desc, feedback 等）\n` : '';
 
-    const prompt = `你是教育訓練語音導覽腳本生成專家。請根據以下資訊，生成完整的三種模式語音導覽腳本。${langInstruction}
+    const isDemoMode = block.interaction_mode === 'demo';
+    const prompt = isDemoMode
+    ? `你是教育訓練語音導覽腳本生成專家。這是一個「展示模式」投影片，只需要解說，不需要任何互動操作。${langInstruction}
+
+## 畫面說明
+${block.instruction || '（無）'}
+
+## 解說重點（共 ${correctRegions.length} 個）
+${regionDesc || '（無）'}
+
+## 編輯者補充說明
+${editor_context || '（無）'}
+
+## 重要規則
+- 這是純展示模式，**不要**使用「請點擊」「請操作」「試試看」等互動用語
+- 用「這裡是」「接下來看到的是」「畫面上方的是」等解說用語
+- 語氣像導覽員介紹系統功能，不是要求學員操作
+
+## 請生成以下內容（全部口語化，適合 TTS 朗讀）
+
+### 1. 前導語音
+- **slide_narration**：完整介紹這個畫面的功能和用途。2-4 句。
+
+### 2. 每個解說點的語音（按順序）
+每個解說點需要：
+- **narration**：解說這個區域是什麼、有什麼功能。1-2 句。用「這裡是」「這個區域用來」等說明語氣。
+
+### 3. 完成訊息
+- **completion_message**：解說完成的結語。1 句。
+
+只回傳 JSON，不要 markdown code fence：
+{
+  "slide_narration": "現在讓我們來了解...",
+  "slide_narration_test": "",
+  "slide_narration_explore": "",
+  "regions": [
+    {
+      "id": "region id",
+      "narration": "這裡是...",
+      "test_hint": "",
+      "explore_desc": "",
+      "feedback_correct": "",
+      "feedback_wrong": ""
+    }
+  ],
+  "completion_message": "以上就是..."
+}`
+    : `你是教育訓練語音導覽腳本生成專家。請根據以下資訊，生成完整的三種模式語音導覽腳本。${langInstruction}
 
 ## 畫面操作指引
 ${block.instruction || '（無）'}
