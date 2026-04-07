@@ -3213,9 +3213,11 @@ router.get('/classroom/my-programs', async (req, res) => {
       `).all(prog.id);
       let total = courseRows.length, completed = 0, in_progress = 0;
       for (const cr of courseRows) {
-        const examConfig = cr.exam_config ? JSON.parse(cr.exam_config) : {};
+        let examConfig = {};
+        try { if (cr.exam_config) examConfig = typeof cr.exam_config === 'string' ? JSON.parse(cr.exam_config) : cr.exam_config; } catch {}
         const passScore = examConfig.pass_score || cr.course_pass_score || 60;
-        const lessonIds = cr.lesson_ids ? JSON.parse(cr.lesson_ids) : null;
+        let lessonIds = null;
+        try { if (cr.lesson_ids) lessonIds = typeof cr.lesson_ids === 'string' ? JSON.parse(cr.lesson_ids) : cr.lesson_ids; } catch {}
 
         // Browse: count total slides vs viewed
         let slideSql = 'SELECT COUNT(*) AS cnt FROM course_slides cs JOIN course_lessons cl ON cl.id=cs.lesson_id WHERE cl.course_id=?';
@@ -3246,7 +3248,7 @@ router.get('/classroom/my-programs', async (req, res) => {
     }
     res.json(programs);
   } catch (e) {
-    console.error('[Classroom] ERROR:', e.message);
+    console.error('[Classroom] ERROR:', e.message, e.stack?.split('\n').slice(0, 3).join(' '));
     res.status(500).json({ error: e.message });
   }
 });
