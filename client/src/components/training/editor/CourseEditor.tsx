@@ -74,6 +74,7 @@ export default function CourseEditor() {
   const [translateStatus, setTranslateStatus] = useState<any>(null)
   const [translateProgress, setTranslateProgress] = useState<{ step: string; current: number; total: number; slides_done?: number; slides_total?: number } | null>(null)
   const [translateSelectedLessons, setTranslateSelectedLessons] = useState<number[] | null>(null) // null = all
+  const [showPreviewMenu, setShowPreviewMenu] = useState(false)
   const [showPublishCheck, setShowPublishCheck] = useState(false)
   const [publishChecks, setPublishChecks] = useState<{ key: string; pass: boolean; detail: string; optional?: boolean }[]>([])
   const [canPublish, setCanPublish] = useState(false)
@@ -249,23 +250,26 @@ export default function CourseEditor() {
           <div className="flex-1" />
           {/* Preview: dropdown to select chapter */}
           {!isNew && (
-            <div className="relative group">
-              <button className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg border transition hover:opacity-80"
+            <div className="relative">
+              <button onClick={() => setShowPreviewMenu(v => !v)}
+                className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg border transition hover:opacity-80"
                 style={{ borderColor: 'var(--t-border)', color: 'var(--t-accent)' }}>
                 <Eye size={13} /> {t('training.preview')} <ChevronDown size={11} />
               </button>
-              <div className="absolute right-0 top-full mt-1 bg-white border border-slate-200 rounded-lg shadow-xl z-30 min-w-[200px] hidden group-hover:block">
-                <button onClick={() => navigate(`/training/course/${id}/learn?from=editor`)}
+              {showPreviewMenu && (
+              <div className="absolute right-0 top-full mt-1 bg-white border border-slate-200 rounded-lg shadow-xl z-30 min-w-[200px]">
+                <button onClick={() => { setShowPreviewMenu(false); navigate(`/training/course/${id}/learn?from=editor`) }}
                   className="w-full text-left px-3 py-2 text-xs hover:bg-blue-50 font-medium text-slate-700 border-b border-slate-100">
                   {t('training.previewAll')}
                 </button>
                 {lessons.map((l, i) => (
-                  <button key={l.id} onClick={() => navigate(`/training/course/${id}/learn?from=editor&lessonId=${l.id}`)}
+                  <button key={l.id} onClick={() => { setShowPreviewMenu(false); navigate(`/training/course/${id}/learn?from=editor&lessonId=${l.id}`) }}
                     className="w-full text-left px-3 py-1.5 text-xs hover:bg-blue-50 text-slate-600">
                     {i + 1}. {l.title}
                   </button>
                 ))}
               </div>
+              )}
             </div>
           )}
           {!isNew && canEditThis && (
