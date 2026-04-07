@@ -625,11 +625,11 @@ export default function HotspotEditor({ block, onChange, courseId, slideId, bloc
                     const match = updatedRegions.find(r => r.id === aiR.id) ||
                       updatedRegions.filter(r => r.correct)[data.regions.indexOf(aiR)]
                     if (match) {
-                      if (aiR.narration) (match as any).narration = aiR.narration
-                      if (aiR.test_hint) (match as any).test_hint = aiR.test_hint
-                      if (aiR.explore_desc) (match as any).explore_desc = aiR.explore_desc
-                      if (aiR.feedback_correct) match.feedback = aiR.feedback_correct
-                      if (aiR.feedback_wrong) (match as any).feedback_wrong = aiR.feedback_wrong
+                      if (aiR.narration !== undefined) (match as any).narration = aiR.narration || ''
+                      if (aiR.test_hint !== undefined) (match as any).test_hint = aiR.test_hint || ''
+                      if (aiR.explore_desc !== undefined) (match as any).explore_desc = aiR.explore_desc || ''
+                      match.feedback = aiR.feedback_correct || ''
+                      ;(match as any).feedback_wrong = aiR.feedback_wrong || ''
                     }
                   }
                 }
