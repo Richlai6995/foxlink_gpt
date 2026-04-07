@@ -220,14 +220,12 @@ export default function HotspotBlock({ block, blockIndex = 0, isLastSlide = fals
   // ─── Demo mode: auto-advance through all steps (no interaction needed) ───
   useEffect(() => {
     if (mode !== 'demo' || !introPlayed || introPlaying || completed) return
-    if (!currentTarget || !audioRef.current) return
+    if (!currentTarget) return
 
-    const audio = audioRef.current
     const advanceStep = () => {
       const nextStep = currentStep + 1
       if (nextStep >= correctRegions.length) {
         setCompleted(true)
-        // In test mode, fire interaction complete with full score
         if (isTestMode && onInteractionComplete) {
           const elapsed = Math.round((Date.now() - startTimeRef.current) / 1000)
           onInteractionComplete({
@@ -250,10 +248,16 @@ export default function HotspotBlock({ block, blockIndex = 0, isLastSlide = fals
     }
 
     const regionAudioUrl = (currentTarget as any).audio_url
-    if (regionAudioUrl && !muted) {
-      audio.addEventListener('ended', advanceStep, { once: true })
-      return () => { audio.removeEventListener('ended', advanceStep) }
+    if (regionAudioUrl && !muted && audioRef.current) {
+      // Wait a tick for playRegionAudio to set src, then attach onended
+      const timer = setTimeout(() => {
+        if (audioRef.current) {
+          audioRef.current.onended = () => { if (audioRef.current) audioRef.current.onended = null; advanceStep() }
+        }
+      }, 100)
+      return () => { clearTimeout(timer); if (audioRef.current) audioRef.current.onended = null }
     } else {
+      // No audio → advance after 3 seconds
       const timer = setTimeout(advanceStep, 3000)
       return () => clearTimeout(timer)
     }
