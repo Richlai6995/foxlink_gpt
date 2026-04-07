@@ -3413,8 +3413,12 @@ router.post('/courses/:id/translate', loadCoursePermission, requirePermission('o
       return r.response.text().trim();
     };
 
-    // Count total work items
-    const lessons = await db.prepare('SELECT id, title FROM course_lessons WHERE course_id=?').all(req.courseId);
+    // Count total work items (optionally filter by lesson_ids)
+    const { lesson_ids: filterLessonIds } = req.body;
+    let lessons = await db.prepare('SELECT id, title FROM course_lessons WHERE course_id=?').all(req.courseId);
+    if (filterLessonIds && filterLessonIds.length > 0) {
+      lessons = lessons.filter(l => filterLessonIds.includes(l.id));
+    }
     let totalSlides = 0;
     const lessonSlideMap = {};
     for (const lesson of lessons) {

@@ -73,6 +73,7 @@ export default function CourseEditor() {
   const [translating, setTranslating] = useState<string | null>(null)
   const [translateStatus, setTranslateStatus] = useState<any>(null)
   const [translateProgress, setTranslateProgress] = useState<{ step: string; current: number; total: number; slides_done?: number; slides_total?: number } | null>(null)
+  const [translateSelectedLessons, setTranslateSelectedLessons] = useState<number[] | null>(null) // null = all
   const [showPublishCheck, setShowPublishCheck] = useState(false)
   const [publishChecks, setPublishChecks] = useState<{ key: string; pass: boolean; detail: string; optional?: boolean }[]>([])
   const [canPublish, setCanPublish] = useState(false)
@@ -709,6 +710,38 @@ export default function CourseEditor() {
               {t('training.translateDesc')}
             </p>
 
+            {/* Chapter selection for translation */}
+            <div className="border rounded-lg p-3 space-y-2" style={{ borderColor: 'var(--t-border)', backgroundColor: 'var(--t-bg-card)' }}>
+              <div className="text-xs font-medium" style={{ color: 'var(--t-text-muted)' }}>{t('training.translateChapters')}</div>
+              <label className="flex items-center gap-2 text-xs" style={{ color: 'var(--t-text)' }}>
+                <input type="checkbox"
+                  checked={!translateSelectedLessons || translateSelectedLessons.length === 0}
+                  onChange={() => setTranslateSelectedLessons(null)}
+                  className="w-3.5 h-3.5 rounded" />
+                {t('training.previewAll')}
+              </label>
+              {lessons.map((l, i) => (
+                <label key={l.id} className="flex items-center gap-2 text-xs pl-4" style={{ color: 'var(--t-text)' }}>
+                  <input type="checkbox"
+                    checked={!translateSelectedLessons || translateSelectedLessons.includes(l.id)}
+                    onChange={() => {
+                      if (!translateSelectedLessons) {
+                        // Switch from "all" to individual — select only this one
+                        setTranslateSelectedLessons([l.id])
+                      } else if (translateSelectedLessons.includes(l.id)) {
+                        const next = translateSelectedLessons.filter(id => id !== l.id)
+                        setTranslateSelectedLessons(next.length === 0 ? null : next)
+                      } else {
+                        setTranslateSelectedLessons([...translateSelectedLessons, l.id])
+                      }
+                    }}
+                    disabled={!translateSelectedLessons}
+                    className="w-3.5 h-3.5 rounded" />
+                  {i + 1}. {l.title}
+                </label>
+              ))}
+            </div>
+
             {/* Translation actions */}
             {['en', 'vi'].map(lang => {
               const langName = lang === 'en' ? 'English' : 'Tiếng Việt'
@@ -727,12 +760,11 @@ export default function CourseEditor() {
                         try {
                           setTranslating(lang)
                           setTranslateProgress(null)
-                          // Use fetch + SSE to track progress
                           const token = localStorage.getItem('token')
                           const resp = await fetch(`/api/training/courses/${id}/translate`, {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                            body: JSON.stringify({ target_lang: lang })
+                            body: JSON.stringify({ target_lang: lang, lesson_ids: translateSelectedLessons || undefined })
                           })
                           const reader = resp.body?.getReader()
                           const decoder = new TextDecoder()
