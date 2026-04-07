@@ -635,6 +635,26 @@ export default function HotspotBlock({ block, blockIndex = 0, isLastSlide = fals
             </div>
           )}
 
+          {/* Demo mode: current step narration (no interaction prompts) */}
+          {mode === 'demo' && currentTarget && !completed && (
+            <div className="rounded-lg p-2.5 border-2 transition-all duration-300" style={{
+              borderColor: '#22c55e', backgroundColor: 'rgba(34,197,94,0.06)'
+            }}>
+              <div className="flex items-center gap-1.5 mb-1">
+                <span className="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold"
+                  style={{ backgroundColor: '#22c55e', color: 'white' }}>
+                  {currentStep + 1}
+                </span>
+                <span className="text-[10px] font-semibold" style={{ color: '#22c55e' }}>
+                  {t('training.demoStep')} {currentStep + 1}/{correctRegions.length}
+                </span>
+              </div>
+              <p className="text-[11px] leading-relaxed" style={{ color: 'var(--t-text)' }}>
+                {(currentTarget as any).narration || currentTarget.label || ''}
+              </p>
+            </div>
+          )}
+
           {/* Current step instruction (guided / test mode) */}
           {mode === 'guided' && currentTarget && !completed && (
             <div className="rounded-lg p-2.5 border-2 transition-all duration-300" style={{
