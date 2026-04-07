@@ -2499,6 +2499,14 @@ router.post('/programs/:id/activate', async (req, res) => {
       for (const u of users) userIdSet.add(u.id);
     }
 
+    // Clean up orphaned assignments (courses that were removed from program)
+    await db.prepare(`
+      DELETE FROM program_assignments
+      WHERE program_id = ? AND course_id NOT IN (
+        SELECT course_id FROM program_courses WHERE program_id = ?
+      )
+    `).run(req.params.id, req.params.id);
+
     // Create assignments
     let created = 0;
     for (const userId of userIdSet) {
@@ -3166,22 +3174,22 @@ router.get('/classroom/my-programs', async (req, res) => {
     const publicPrograms = await db.prepare(sql).all(...params);
 
     for (const prog of publicPrograms) {
-      const existing = await db.prepare(
-        'SELECT id FROM program_assignments WHERE program_id=? AND user_id=? FETCH FIRST 1 ROWS ONLY'
-      ).get(prog.id, req.user.id);
-      if (!existing) {
-        // Create assignments for this user
-        const courses = await db.prepare(
-          'SELECT course_id FROM program_courses WHERE program_id=? ORDER BY sort_order'
-        ).all(prog.id);
-        for (const c of courses) {
+      // Get current program courses
+      const progCourses = await db.prepare(
+        'SELECT course_id FROM program_courses WHERE program_id=? ORDER BY sort_order'
+      ).all(prog.id);
+      // Check each course — create assignment if missing
+      for (const c of progCourses) {
+        const existing = await db.prepare(
+          'SELECT id FROM program_assignments WHERE program_id=? AND course_id=? AND user_id=? FETCH FIRST 1 ROWS ONLY'
+        ).get(prog.id, c.course_id, req.user.id);
+        if (!existing) {
           try {
             await db.prepare(`
               INSERT INTO program_assignments (program_id, course_id, user_id, due_date, status)
               VALUES (?, ?, ?, (SELECT end_date FROM training_programs WHERE id=?), 'pending')
             `).run(prog.id, c.course_id, req.user.id, prog.id);
-          } catch (e) {
-          }
+          } catch (e) { /* unique constraint */ }
         }
       }
     }
