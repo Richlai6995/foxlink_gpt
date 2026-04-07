@@ -102,7 +102,7 @@ export default function HotspotBlock({ block, blockIndex = 0, isLastSlide = fals
     return { x: r.x / imgW * 100, y: r.y / imgH * 100, w: r.w / imgW * 100, h: r.h / imgH * 100 }
   }
 
-  const currentTarget = mode === 'guided' ? correctRegions[currentStep] : null
+  const currentTarget = (mode === 'guided' || mode === 'demo') ? correctRegions[currentStep] : null
 
   // Stop any current audio
   const stopAudio = useCallback(() => {
