@@ -20,12 +20,24 @@
 async function normalizeModelKey(db, model) {
   if (!model) return model;
   try {
+    // Direct match: api_model, name, or key
     const row = await db.prepare(
       `SELECT key FROM llm_models
-       WHERE (LOWER(api_model)=LOWER(?) OR LOWER(name)=LOWER(?))
+       WHERE (LOWER(api_model)=LOWER(?) OR LOWER(name)=LOWER(?) OR LOWER(key)=LOWER(?))
        AND is_active=1 FETCH FIRST 1 ROWS ONLY`
-    ).get(model, model);
+    ).get(model, model, model);
     if (row?.key) return row.key;
+
+    // Env fallback: 'pro'/'flash' → resolve via env api_model string
+    if (model === 'pro' || model === 'flash') {
+      const envModel = model === 'pro'
+        ? (process.env.GEMINI_MODEL_PRO || 'gemini-3-pro-preview')
+        : (process.env.GEMINI_MODEL_FLASH || 'gemini-3-flash-preview');
+      const row2 = await db.prepare(
+        `SELECT key FROM llm_models WHERE LOWER(api_model)=LOWER(?) AND is_active=1 FETCH FIRST 1 ROWS ONLY`
+      ).get(envModel);
+      if (row2?.key) return row2.key;
+    }
   } catch (_) {}
   return model;
 }
