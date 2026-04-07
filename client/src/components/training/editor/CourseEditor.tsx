@@ -461,7 +461,34 @@ export default function CourseEditor() {
         {activeTab === 'lessons' && !isNew && (
           <div className="space-y-3">
             {lessons.map((lesson, i) => (
-              <div key={lesson.id} className="border rounded-lg overflow-hidden" style={{ backgroundColor: 'var(--t-bg-card)', borderColor: 'var(--t-border-subtle)' }}>
+              <div key={lesson.id}
+                draggable={canEditThis}
+                onDragStart={e => {
+                  e.dataTransfer.effectAllowed = 'move'
+                  ;(e.currentTarget as HTMLElement).style.opacity = '0.4'
+                  ;(e.currentTarget as HTMLElement).dataset.dragIdx = String(i)
+                }}
+                onDragEnd={e => { (e.currentTarget as HTMLElement).style.opacity = '1' }}
+                onDragOver={e => {
+                  e.preventDefault(); e.dataTransfer.dropEffect = 'move'
+                  ;(e.currentTarget as HTMLElement).style.borderTop = '2px solid var(--t-accent, #3b82f6)'
+                }}
+                onDragLeave={e => { (e.currentTarget as HTMLElement).style.borderTop = '' }}
+                onDrop={async e => {
+                  e.preventDefault()
+                  ;(e.currentTarget as HTMLElement).style.borderTop = ''
+                  const fromEl = document.querySelector('[data-drag-idx]') as HTMLElement
+                  const fromIdx = fromEl ? Number(fromEl.dataset.dragIdx) : -1
+                  if (fromEl) delete fromEl.dataset.dragIdx
+                  if (fromIdx < 0 || fromIdx === i) return
+                  const newLessons = [...lessons]
+                  const [moved] = newLessons.splice(fromIdx, 1)
+                  newLessons.splice(i, 0, moved)
+                  setLessons(newLessons)
+                  const order = newLessons.map((l, idx) => ({ id: l.id, sort_order: idx + 1 }))
+                  api.put(`/training/courses/${id}/lessons/reorder`, { order }).catch(console.error)
+                }}
+                className="border rounded-lg overflow-hidden" style={{ backgroundColor: 'var(--t-bg-card)', borderColor: 'var(--t-border-subtle)' }}>
                 <div
                   className="px-4 py-3 flex items-center gap-3 cursor-pointer hover:bg-slate-750"
                   onClick={() => {
