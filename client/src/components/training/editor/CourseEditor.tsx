@@ -715,8 +715,8 @@ export default function CourseEditor() {
               <div className="text-xs font-medium" style={{ color: 'var(--t-text-muted)' }}>{t('training.translateChapters')}</div>
               <label className="flex items-center gap-2 text-xs" style={{ color: 'var(--t-text)' }}>
                 <input type="checkbox"
-                  checked={!translateSelectedLessons || translateSelectedLessons.length === 0}
-                  onChange={() => setTranslateSelectedLessons(null)}
+                  checked={!translateSelectedLessons}
+                  onChange={() => setTranslateSelectedLessons(translateSelectedLessons ? null : [])}
                   className="w-3.5 h-3.5 rounded" />
                 {t('training.previewAll')}
               </label>
@@ -725,12 +725,9 @@ export default function CourseEditor() {
                   <input type="checkbox"
                     checked={!translateSelectedLessons || translateSelectedLessons.includes(l.id)}
                     onChange={() => {
-                      if (!translateSelectedLessons) {
-                        // Switch from "all" to individual — select only this one
-                        setTranslateSelectedLessons([l.id])
-                      } else if (translateSelectedLessons.includes(l.id)) {
-                        const next = translateSelectedLessons.filter(id => id !== l.id)
-                        setTranslateSelectedLessons(next.length === 0 ? null : next)
+                      if (!translateSelectedLessons) return // "all" checked — use "all" checkbox to uncheck
+                      if (translateSelectedLessons.includes(l.id)) {
+                        setTranslateSelectedLessons(translateSelectedLessons.filter(id => id !== l.id))
                       } else {
                         setTranslateSelectedLessons([...translateSelectedLessons, l.id])
                       }
