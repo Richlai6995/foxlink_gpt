@@ -175,10 +175,10 @@ export default function HotspotBlock({ block, blockIndex = 0, isLastSlide = fals
     }
   }, [introPlayed, completed, muted])
 
-  // Auto-play region audio for current guided step (after intro finishes)
+  // Auto-play region audio for current guided/demo step (after intro finishes)
   useEffect(() => {
     if (!introPlayed || introPlaying || completed) return
-    if (mode === 'guided' && currentTarget) {
+    if ((mode === 'guided' || mode === 'demo') && currentTarget) {
       playRegionAudio(currentTarget)
     }
   }, [currentStep, completed, introPlayed, introPlaying])
