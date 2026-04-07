@@ -1233,6 +1233,22 @@ router.post('/slides/:sid/audio', upload.single('audio'), async (req, res) => {
 });
 
 // ── TTS Helper: resolve voice from course settings ──
+// Pre-process text for TTS — fix common pronunciation issues
+function preprocessTtsText(text) {
+  if (!text) return text;
+  return text
+    // "AI" in Chinese context → "A I" with space so TTS reads both letters
+    .replace(/\bAI\b/g, 'A.I.')
+    .replace(/\bAPI\b/g, 'A.P.I.')
+    .replace(/\bMCP\b/g, 'M.C.P.')
+    .replace(/\bSSO\b/g, 'S.S.O.')
+    .replace(/\bERP\b/g, 'E.R.P.')
+    .replace(/\bGPT\b/g, 'G.P.T.')
+    .replace(/\bLLM\b/g, 'L.L.M.')
+    .replace(/\bUI\b/g, 'U.I.')
+    .replace(/\bURL\b/g, 'U.R.L.')
+}
+
 async function resolveTtsVoice(courseId, language) {
   const voiceMap = {
     'zh-TW': { female: 'cmn-TW-Wavenet-A', male: 'cmn-TW-Wavenet-C' },
@@ -1285,7 +1301,7 @@ router.post('/slides/:sid/tts', async (req, res) => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        input: { text },
+        input: { text: preprocessTtsText(text) },
         voice: { languageCode: langCode, name: req.body.voice || voiceName },
         audioConfig: { audioEncoding: 'MP3', speakingRate: req.body.speakingRate || speed, pitch: req.body.pitch ?? pitch }
       })
@@ -1342,7 +1358,7 @@ router.post('/slides/:sid/region-tts', async (req, res) => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        input: { text },
+        input: { text: preprocessTtsText(text) },
         voice: { languageCode: langCode, name: voiceName },
         audioConfig: { audioEncoding: 'MP3', speakingRate: speed, pitch }
       })
@@ -3549,7 +3565,7 @@ router.post('/courses/:id/generate-lang-tts', loadCoursePermission, requirePermi
       try {
         const r = await fetch(ttsUrl, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ input: { text }, voice: { languageCode: langCode, name: voiceName }, audioConfig: { audioEncoding: 'MP3', speakingRate: speed, pitch } })
+          body: JSON.stringify({ input: { text: preprocessTtsText(text) }, voice: { languageCode: langCode, name: voiceName }, audioConfig: { audioEncoding: 'MP3', speakingRate: speed, pitch } })
         });
         if (!r.ok) return null;
         const { audioContent } = await r.json();
