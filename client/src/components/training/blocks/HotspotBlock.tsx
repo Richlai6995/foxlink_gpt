@@ -177,7 +177,7 @@ export default function HotspotBlock({ block, blockIndex = 0, isLastSlide = fals
 
   // Auto-play region audio for current guided/demo step (after intro finishes)
   useEffect(() => {
-    console.log('[HotspotBlock] region audio effect:', { mode, introPlayed, introPlaying, completed, currentStep, hasTarget: !!currentTarget, targetLabel: currentTarget?.label })
+    console.log(`[HotspotBlock] region audio: mode=${mode} introPlayed=${introPlayed} introPlaying=${introPlaying} completed=${completed} step=${currentStep} target=${currentTarget?.label || 'NONE'}`)
     if (!introPlayed || introPlaying || completed) return
     if ((mode === 'guided' || mode === 'demo') && currentTarget) {
       console.log('[HotspotBlock] playing region audio for step', currentStep, currentTarget.label, (currentTarget as any).audio_url)
@@ -221,7 +221,7 @@ export default function HotspotBlock({ block, blockIndex = 0, isLastSlide = fals
 
   // ─── Demo mode: auto-advance through all steps (no interaction needed) ───
   useEffect(() => {
-    console.log('[HotspotBlock] demo effect:', { mode, introPlayed, introPlaying, completed, currentStep, hasTarget: !!currentTarget })
+    console.log(`[HotspotBlock] demo effect: mode=${mode} introPlayed=${introPlayed} introPlaying=${introPlaying} completed=${completed} step=${currentStep} target=${currentTarget?.label || 'NONE'}`)
     if (mode !== 'demo' || !introPlayed || introPlaying || completed) return
     if (!currentTarget) return
 
