@@ -160,15 +160,18 @@ export default function HotspotBlock({ block, blockIndex = 0, isLastSlide = fals
     }
     setIntroPlaying(true)
     if (audioRef.current) {
-      audioRef.current.src = introAudioUrl
-      audioRef.current.onended = () => {
+      const audio = audioRef.current
+      const onIntroEnd = () => {
         setIntroPlaying(false)
         setIntroPlayed(true)
-        if (audioRef.current) audioRef.current.onended = null
+        audio.removeEventListener('ended', onIntroEnd)
       }
-      audioRef.current.play().catch(() => {
+      audio.addEventListener('ended', onIntroEnd)
+      audio.src = introAudioUrl
+      audio.play().catch(() => {
         setIntroPlaying(false)
         setIntroPlayed(true)
+        audio.removeEventListener('ended', onIntroEnd)
       })
     } else {
       setIntroPlayed(true)
@@ -177,10 +180,8 @@ export default function HotspotBlock({ block, blockIndex = 0, isLastSlide = fals
 
   // Auto-play region audio for current guided/demo step (after intro finishes)
   useEffect(() => {
-    console.log(`[HotspotBlock] region audio: mode=${mode} introPlayed=${introPlayed} introPlaying=${introPlaying} completed=${completed} step=${currentStep} target=${currentTarget?.label || 'NONE'}`)
     if (!introPlayed || introPlaying || completed) return
     if ((mode === 'guided' || mode === 'demo') && currentTarget) {
-      console.log('[HotspotBlock] playing region audio for step', currentStep, currentTarget.label, (currentTarget as any).audio_url)
       playRegionAudio(currentTarget)
     }
   }, [currentStep, completed, introPlayed, introPlaying])
@@ -221,12 +222,10 @@ export default function HotspotBlock({ block, blockIndex = 0, isLastSlide = fals
 
   // ─── Demo mode: auto-advance through all steps (no interaction needed) ───
   useEffect(() => {
-    console.log(`[HotspotBlock] demo effect: mode=${mode} introPlayed=${introPlayed} introPlaying=${introPlaying} completed=${completed} step=${currentStep} target=${currentTarget?.label || 'NONE'}`)
     if (mode !== 'demo' || !introPlayed || introPlaying || completed) return
     if (!currentTarget) return
 
     const advanceStep = () => {
-      console.log('[HotspotBlock] demo advanceStep from', currentStep)
       const nextStep = currentStep + 1
       if (nextStep >= correctRegions.length) {
         setCompleted(true)
@@ -252,13 +251,11 @@ export default function HotspotBlock({ block, blockIndex = 0, isLastSlide = fals
     }
 
     const regionAudioUrl = (currentTarget as any).audio_url
-    console.log('[HotspotBlock] demo audio check:', { regionAudioUrl, muted, hasAudioRef: !!audioRef.current })
     if (regionAudioUrl && !muted && audioRef.current) {
       // Wait a tick for playRegionAudio to set src, then attach onended
       const timer = setTimeout(() => {
         if (audioRef.current) {
-          console.log('[HotspotBlock] demo attaching onended, audio src:', audioRef.current.src, 'paused:', audioRef.current.paused)
-          audioRef.current.onended = () => { console.log('[HotspotBlock] demo audio ended!'); if (audioRef.current) audioRef.current.onended = null; advanceStep() }
+          audioRef.current.onended = () => { if (audioRef.current) audioRef.current.onended = null; advanceStep() }
         }
       }, 100)
       return () => { clearTimeout(timer); if (audioRef.current) audioRef.current.onended = null }
