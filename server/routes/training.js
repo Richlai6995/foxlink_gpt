@@ -2699,12 +2699,14 @@ router.get('/classroom/programs/:id/my-scores', async (req, res) => {
         lessons = lessons.filter(l => lessonIds.includes(l.id));
       }
 
-      // Get total slides per lesson
+      // Get total slides per lesson + check if lesson has interactive blocks
       const lessonProgress = [];
       let totalSlides = 0, viewedSlides = 0;
+      let browseOnlyScore = 0; // score from non-interactive lessons (browse completion)
+      const lessonWeights = examConfig.lesson_weights || {};
+
       for (const lesson of lessons) {
         const slideCount = await db.prepare('SELECT COUNT(*) AS cnt FROM course_slides WHERE lesson_id=?').get(lesson.id);
-        // Count viewed slides: any view record counts (interaction_done tracked separately)
         const viewed = await db.prepare(`
           SELECT COUNT(*) AS cnt FROM user_slide_views
           WHERE user_id=? AND lesson_id=? AND ${progId ? 'program_id=?' : 'program_id IS NULL'}
@@ -2714,10 +2716,34 @@ router.get('/classroom/programs/:id/my-scores', async (req, res) => {
         const done = Math.min(viewed?.cnt || 0, total);
         totalSlides += total;
         viewedSlides += done;
-        lessonProgress.push({ lesson_id: lesson.id, title: lesson.title, total, viewed: done });
+
+        // Check if this lesson has any interactive slides (hotspot/dragdrop/quiz_inline)
+        const interactiveCount = await db.prepare(`
+          SELECT COUNT(*) AS cnt FROM course_slides cs
+          WHERE cs.lesson_id = ? AND (
+            cs.content_json LIKE '%"type":"hotspot"%'
+            OR cs.content_json LIKE '%"type":"dragdrop"%'
+            OR cs.content_json LIKE '%"type":"quiz_inline"%'
+          )
+        `).get(lesson.id);
+        const hasInteractive = (interactiveCount?.cnt || 0) > 0;
+
+        // For non-interactive lessons: score = browse completion × lesson weight
+        const lessonWeight = lessonWeights[`lesson_${lesson.id}`] || 0;
+        let lessonBrowseScore = 0;
+        if (!hasInteractive && lessonWeight > 0 && total > 0) {
+          lessonBrowseScore = Math.round((done / total) * lessonWeight);
+          browseOnlyScore += lessonBrowseScore;
+        }
+
+        lessonProgress.push({
+          lesson_id: lesson.id, title: lesson.title, total, viewed: done,
+          has_interactive: hasInteractive, browse_score: lessonBrowseScore, lesson_weight: lessonWeight
+        });
       }
 
       // Get best exam score (from interaction_results grouped by session_id)
+      // This covers ONLY interactive lessons
       const bestSession = await db.prepare(`
         SELECT SUM(COALESCE(weighted_score, score)) AS session_score,
                SUM(COALESCE(weighted_max, max_score)) AS session_max,
@@ -2769,9 +2795,25 @@ router.get('/classroom/programs/:id/my-scores', async (req, res) => {
 
       const bestScore = bestSession?.session_score || 0;
       const bestMax = bestSession?.session_max || 100;
-      const ratio = bestMax > 0 ? bestScore / bestMax : 0;
-      const weightedScore = Math.round(ratio * courseTotalScore);
-      const coursePassed = ratio * 100 >= coursePassScore;
+      const examRatio = bestMax > 0 ? bestScore / bestMax : 0;
+
+      // Calculate interactive lessons' weighted score
+      const interactiveLessonsWeight = lessonProgress
+        .filter(l => l.has_interactive)
+        .reduce((s, l) => s + l.lesson_weight, 0);
+      const interactiveWeightedScore = interactiveLessonsWeight > 0
+        ? Math.round(examRatio * interactiveLessonsWeight)
+        : Math.round(examRatio * courseTotalScore);
+
+      // Total = browse-only score + interactive score
+      // If no lesson_weights configured, fall back to exam-only scoring
+      const hasLessonWeights = Object.keys(lessonWeights).length > 0;
+      const weightedScore = hasLessonWeights
+        ? browseOnlyScore + interactiveWeightedScore
+        : Math.round(examRatio * courseTotalScore);
+
+      const courseScorePct = courseTotalScore > 0 ? (weightedScore / courseTotalScore) * 100 : 0;
+      const coursePassed = courseScorePct >= coursePassScore;
       if (pc.is_required && !coursePassed) allCoursePassed = false;
 
       programTotal += weightedScore;
@@ -2784,6 +2826,7 @@ router.get('/classroom/programs/:id/my-scores', async (req, res) => {
         pass_score: coursePassScore,
         max_attempts: maxAttempts,
         browse_progress: { total: totalSlides, viewed: viewedSlides, pct: totalSlides > 0 ? Math.round(viewedSlides / totalSlides * 100) : 0, lessons: lessonProgress },
+        browse_only_score: browseOnlyScore,
         exam: {
           best_score: bestScore, best_max: bestMax,
           attempts: attemptCount?.cnt || 0, max_attempts: maxAttempts,
@@ -2883,10 +2926,36 @@ router.get('/programs/:id/report', async (req, res) => {
           "SELECT COUNT(DISTINCT session_id) AS cnt FROM interaction_results WHERE user_id=? AND course_id=? AND session_id IS NOT NULL AND player_mode='test'"
         ).get(u.user_id, pc.course_id);
 
+        // Browse-only score for non-interactive lessons
+        const lessonWeights = examConfig.lesson_weights || {};
+        const hasLessonWeights = Object.keys(lessonWeights).length > 0;
+        let browseOnlyScore = 0;
+        if (hasLessonWeights) {
+          let lessonsForCourse = await db.prepare('SELECT id FROM course_lessons WHERE course_id=? ORDER BY sort_order, id').all(pc.course_id);
+          if (lessonIds?.length) lessonsForCourse = lessonsForCourse.filter(l => lessonIds.includes(l.id));
+          for (const les of lessonsForCourse) {
+            const iCnt = await db.prepare(`SELECT COUNT(*) AS cnt FROM course_slides WHERE lesson_id=? AND (content_json LIKE '%"type":"hotspot"%' OR content_json LIKE '%"type":"dragdrop"%' OR content_json LIKE '%"type":"quiz_inline"%')`).get(les.id);
+            if ((iCnt?.cnt || 0) === 0) {
+              const lw = lessonWeights[`lesson_${les.id}`] || 0;
+              if (lw > 0) {
+                const lTotal = await db.prepare('SELECT COUNT(*) AS cnt FROM course_slides WHERE lesson_id=?').get(les.id);
+                const lViewed = await db.prepare('SELECT COUNT(*) AS cnt FROM user_slide_views WHERE user_id=? AND lesson_id=? AND program_id=?').get(u.user_id, les.id, progId);
+                const lt = lTotal?.cnt || 0; const lv = Math.min(lViewed?.cnt || 0, lt);
+                browseOnlyScore += lt > 0 ? Math.round((lv / lt) * lw) : 0;
+              }
+            }
+          }
+        }
+
         const bestScore = best?.session_score || 0;
         const bestMax = best?.session_max || 100;
         const ratio = bestMax > 0 ? bestScore / bestMax : 0;
-        const weighted = Math.round(ratio * courseTotalScore);
+        const interactiveWeight = hasLessonWeights
+          ? Object.entries(lessonWeights).reduce((s, [k, v]) => s + (typeof v === 'number' ? v : 0), 0) - browseOnlyScore
+          : courseTotalScore;
+        const weighted = hasLessonWeights
+          ? browseOnlyScore + Math.round(ratio * (interactiveWeight > 0 ? interactiveWeight : courseTotalScore))
+          : Math.round(ratio * courseTotalScore);
         const passed = ratio * 100 >= coursePassScore;
         if (pc.is_required && !passed) allPassed = false;
         programTotal += weighted;
@@ -2990,12 +3059,32 @@ router.get('/programs/:id/report/export', async (req, res) => {
         browseTotal += total; browseViewed += viewed;
         row.push(`${viewed}/${total}`);
 
+        // Browse-only score for non-interactive lessons
+        const eLessonWeights = examConfig.lesson_weights || {};
+        const eHasLW = Object.keys(eLessonWeights).length > 0;
+        let eBrowseScore = 0;
+        if (eHasLW) {
+          let eLessons = await db.prepare('SELECT id FROM course_lessons WHERE course_id=?').all(pc.course_id);
+          if (lessonIds?.length) eLessons = eLessons.filter(l => lessonIds.includes(l.id));
+          for (const el of eLessons) {
+            const ic = await db.prepare(`SELECT COUNT(*) AS cnt FROM course_slides WHERE lesson_id=? AND (content_json LIKE '%"type":"hotspot"%' OR content_json LIKE '%"type":"dragdrop"%' OR content_json LIKE '%"type":"quiz_inline"%')`).get(el.id);
+            if ((ic?.cnt || 0) === 0) {
+              const lw = eLessonWeights[`lesson_${el.id}`] || 0;
+              if (lw > 0) {
+                const lt = await db.prepare('SELECT COUNT(*) AS cnt FROM course_slides WHERE lesson_id=?').get(el.id);
+                const lv = await db.prepare('SELECT COUNT(*) AS cnt FROM user_slide_views WHERE user_id=? AND lesson_id=? AND program_id=?').get(u.user_id, el.id, progId);
+                eBrowseScore += (lt?.cnt || 0) > 0 ? Math.round((Math.min(lv?.cnt || 0, lt.cnt) / lt.cnt) * lw) : 0;
+              }
+            }
+          }
+        }
         const best = await db.prepare(`SELECT SUM(COALESCE(weighted_score,score)) AS session_score, SUM(COALESCE(weighted_max,max_score)) AS session_max FROM interaction_results WHERE user_id=? AND course_id=? AND session_id IS NOT NULL AND player_mode='test' GROUP BY session_id ORDER BY SUM(COALESCE(weighted_score,score)) DESC FETCH FIRST 1 ROW ONLY`).get(u.user_id, pc.course_id);
         const bs = best?.session_score || 0;
         const bm = best?.session_max || 100;
         const ratio = bm > 0 ? bs / bm : 0;
-        const weighted = Math.round(ratio * courseTotalScore);
-        if (pc.is_required && ratio * 100 < coursePassScore) allPassed = false;
+        const weighted = eHasLW ? eBrowseScore + Math.round(ratio * (courseTotalScore - eBrowseScore)) : Math.round(ratio * courseTotalScore);
+        const scorePct = courseTotalScore > 0 ? (weighted / courseTotalScore) * 100 : 0;
+        if (pc.is_required && scorePct < coursePassScore) allPassed = false;
         programTotal += weighted; programMax += courseTotalScore;
         row.push(bs > 0 ? `${bs}` : '—');
       }
@@ -3112,9 +3201,19 @@ router.get('/classroom/my-programs', async (req, res) => {
         const viewedCount = await db.prepare('SELECT COUNT(*) AS cnt FROM user_slide_views WHERE user_id=? AND course_id=? AND program_id=?').get(req.user.id, cr.course_id, prog.id);
         const browseOk = (slideCount?.cnt || 0) > 0 && (viewedCount?.cnt || 0) >= (slideCount?.cnt || 0);
 
-        // Exam: best score
-        const best = await db.prepare(`SELECT SUM(COALESCE(weighted_score,score)) AS s, SUM(COALESCE(weighted_max,max_score)) AS m FROM interaction_results WHERE user_id=? AND course_id=? AND session_id IS NOT NULL AND player_mode='test' GROUP BY session_id ORDER BY SUM(COALESCE(weighted_score,score)) DESC FETCH FIRST 1 ROW ONLY`).get(req.user.id, cr.course_id);
-        const examOk = best && best.m > 0 && (best.s / best.m * 100) >= passScore;
+        // Check if course has ANY interactive slides
+        let iSql = `SELECT COUNT(*) AS cnt FROM course_slides cs JOIN course_lessons cl ON cl.id=cs.lesson_id WHERE cl.course_id=? AND (cs.content_json LIKE '%"type":"hotspot"%' OR cs.content_json LIKE '%"type":"dragdrop"%' OR cs.content_json LIKE '%"type":"quiz_inline"%')`;
+        const iParams = [cr.course_id];
+        if (lessonIds?.length) { iSql += ` AND cs.lesson_id IN (${lessonIds.map(() => '?').join(',')})`; iParams.push(...lessonIds); }
+        const interactiveSlides = await db.prepare(iSql).get(...iParams);
+        const hasInteractive = (interactiveSlides?.cnt || 0) > 0;
+
+        // Exam: best score (only matters if course has interactive content)
+        let examOk = !hasInteractive; // no interactive = auto pass
+        if (hasInteractive) {
+          const best = await db.prepare(`SELECT SUM(COALESCE(weighted_score,score)) AS s, SUM(COALESCE(weighted_max,max_score)) AS m FROM interaction_results WHERE user_id=? AND course_id=? AND session_id IS NOT NULL AND player_mode='test' GROUP BY session_id ORDER BY SUM(COALESCE(weighted_score,score)) DESC FETCH FIRST 1 ROW ONLY`).get(req.user.id, cr.course_id);
+          examOk = best && best.m > 0 && (best.s / best.m * 100) >= passScore;
+        }
 
         if (browseOk && examOk) completed++;
         else if ((viewedCount?.cnt || 0) > 0 || best) in_progress++;
