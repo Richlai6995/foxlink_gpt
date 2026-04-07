@@ -3224,7 +3224,8 @@ router.get('/classroom/my-programs', async (req, res) => {
         const slideParams = [cr.course_id];
         if (lessonIds?.length) { slideSql += ` AND cs.lesson_id IN (${lessonIds.map(() => '?').join(',')})`; slideParams.push(...lessonIds); }
         const slideCount = await db.prepare(slideSql).get(...slideParams);
-        const viewedCount = await db.prepare('SELECT COUNT(*) AS cnt FROM user_slide_views WHERE user_id=? AND course_id=? AND program_id=?').get(req.user.id, cr.course_id, prog.id);
+        let viewedCount = { cnt: 0 };
+        try { viewedCount = await db.prepare('SELECT COUNT(*) AS cnt FROM user_slide_views WHERE user_id=? AND course_id=? AND program_id=?').get(req.user.id, cr.course_id, prog.id) || { cnt: 0 }; } catch {}
         const browseOk = (slideCount?.cnt || 0) > 0 && (viewedCount?.cnt || 0) >= (slideCount?.cnt || 0);
 
         // Check if course has ANY interactive slides
