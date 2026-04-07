@@ -49,6 +49,22 @@ class WebexService {
     return res.data?.id || null;
   }
 
+  /** 編輯訊息（用於將 typing indicator 更新為實際回覆） */
+  async editMessage(messageId, text, { markdown } = {}) {
+    try {
+      const payload = {};
+      if (markdown) {
+        payload.markdown = markdown;
+      }
+      payload.text = text;
+      await this.client.put(`/messages/${messageId}`, payload);
+      return true;
+    } catch (e) {
+      console.warn(`[Webex] editMessage failed (${e.response?.status || e.message}), will fallback to new message`);
+      return false;
+    }
+  }
+
   /** 刪除訊息（用於撤回 typing indicator） */
   async deleteMessage(messageId) {
     try {

@@ -900,9 +900,10 @@ async function processMessage(db, webex, user, sessionId, roomId, messageText, f
   const { apiModel } = await resolveApiModel(db, 'pro');
   console.log(`[Webex] Calling AI model=${apiModel} user=${user.username} session=${sessionId} tools=${declarations.length}`);
 
-  // Typing indicator：發送「處理中」提示（保留不刪除，避免使用者看到訊息消失）
+  // Typing indicator：發送「處理中」提示，AI 回覆後 edit 為實際內容
+  let typingMsgId = null;
   try {
-    await webex.sendMessage(roomId, t('typing', lang));
+    typingMsgId = await webex.sendMessage(roomId, t('typing', lang));
   } catch (_) {}
 
   let aiText = '';
@@ -1011,9 +1012,18 @@ async function processMessage(db, webex, user, sessionId, roomId, messageText, f
   // 11. 記錄 token
   await upsertTokenUsage(db, user.id, today, 'pro', inputTokens, outputTokens, 0);
 
-  // 12. 送回 Webex 文字回應
+  // 12. 送回 Webex 文字回應（優先 edit typing indicator，fallback 新訊息）
   if (aiText.trim()) {
-    await webex.sendMessage(roomId, aiText, { markdown: aiText });
+    let edited = false;
+    if (typingMsgId) {
+      edited = await webex.editMessage(typingMsgId, aiText, { markdown: aiText });
+    }
+    if (!edited) {
+      await webex.sendMessage(roomId, aiText, { markdown: aiText });
+    }
+  } else if (typingMsgId) {
+    // AI 沒回文字，刪掉 typing indicator
+    await webex.deleteMessage(typingMsgId);
   }
 
   // 13. 送回生成的檔案（使用 file.filePath，包含 timestamp prefix）

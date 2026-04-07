@@ -383,6 +383,7 @@ async function runMigrations(db) {
   // OCI provider + model role
   await addCol('LLM_MODELS', 'MODEL_ROLE',        "VARCHAR2(20) DEFAULT 'chat'");
   await addCol('LLM_MODELS', 'EXTRA_CONFIG_ENC',  'CLOB');
+  await addCol('LLM_MODELS', 'GENERATION_CONFIG', 'CLOB'); // JSON: {temperature, max_output_tokens, top_p, reasoning_effort, thinking_budget, enable_search, enable_streaming}
 
   // AI Schema Source 擴充欄位
   await addCol('AI_SCHEMA_DEFINITIONS', 'ALIAS',            "VARCHAR2(50)");

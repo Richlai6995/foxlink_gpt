@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'react'
 import { Cpu, Plus, Trash2, Pencil, Check, X, RefreshCw, ToggleLeft, ToggleRight, Eye, EyeOff, KeyRound, Zap, Loader2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
-import type { LlmModel, LlmProviderType, LlmModelRole } from '../../types'
+import type { LlmModel, LlmProviderType, LlmModelRole, LlmGenerationConfig } from '../../types'
 import api from '../../lib/api'
 
-interface FormData extends Omit<LlmModel, 'id' | 'created_at' | 'has_api_key' | 'has_extra_config'> {
+interface FormData extends Omit<LlmModel, 'id' | 'created_at' | 'has_api_key' | 'has_extra_config' | 'generation_config'> {
   api_key: string
+  generation_config: LlmGenerationConfig
   // OCI credential fields (plaintext, never stored directly)
   oci_user: string
   oci_fingerprint: string
@@ -21,6 +22,7 @@ const emptyForm = (provider: LlmProviderType = 'gemini'): FormData => ({
   provider_type: provider,
   model_role: 'chat',
   api_key: '',
+  generation_config: {},
   endpoint_url: '', api_version: '2024-08-01-preview',
   deployment_name: '', base_model: '',
   oci_user: '', oci_fingerprint: '', oci_tenancy: '',
@@ -282,6 +284,90 @@ function ModelDialog({ form, editId, isEdit, hasApiKey, hasExtraConfig, onChange
             </div>
           )}
 
+          {/* Generation Config (chat models only) */}
+          {(form.model_role === 'chat' || !form.model_role) && (
+            <div className="border border-slate-200 rounded-lg p-3 space-y-3">
+              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">{t('llm.form.generationConfig')}</p>
+              <div className="grid grid-cols-3 gap-3">
+                <div>
+                  <label className="label">Temperature</label>
+                  <input type="number" step="0.1" min="0" max="2"
+                    value={form.generation_config?.temperature ?? ''}
+                    onChange={(e) => {
+                      const v = e.target.value === '' ? undefined : parseFloat(e.target.value)
+                      onChange({ ...form, generation_config: { ...form.generation_config, temperature: v } })
+                    }}
+                    placeholder={isAzure ? '1.0' : '1.0'} className="input w-full font-mono text-sm" />
+                </div>
+                <div>
+                  <label className="label">Max Output Tokens</label>
+                  <input type="number" step="1024" min="256"
+                    value={form.generation_config?.max_output_tokens ?? ''}
+                    onChange={(e) => {
+                      const v = e.target.value === '' ? undefined : parseInt(e.target.value)
+                      onChange({ ...form, generation_config: { ...form.generation_config, max_output_tokens: v } })
+                    }}
+                    placeholder={isAzure ? '16384' : '65536'} className="input w-full font-mono text-sm" />
+                </div>
+                <div>
+                  <label className="label">Top P</label>
+                  <input type="number" step="0.05" min="0" max="1"
+                    value={form.generation_config?.top_p ?? ''}
+                    onChange={(e) => {
+                      const v = e.target.value === '' ? undefined : parseFloat(e.target.value)
+                      onChange({ ...form, generation_config: { ...form.generation_config, top_p: v } })
+                    }}
+                    placeholder="0.95" className="input w-full font-mono text-sm" />
+                </div>
+              </div>
+              {/* Azure-specific: reasoning_effort */}
+              {isAzure && (
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="label">Reasoning Effort <span className="text-slate-400 font-normal">(GPT-5 / o-series)</span></label>
+                    <select
+                      value={form.generation_config?.reasoning_effort ?? ''}
+                      onChange={(e) => {
+                        const v = e.target.value || undefined
+                        onChange({ ...form, generation_config: { ...form.generation_config, reasoning_effort: v as any } })
+                      }}
+                      className="input w-full"
+                    >
+                      <option value="">{t('llm.form.default')}</option>
+                      <option value="low">Low</option>
+                      <option value="medium">Medium</option>
+                      <option value="high">High</option>
+                    </select>
+                  </div>
+                </div>
+              )}
+              {/* Gemini-specific: thinking_budget, enable_search */}
+              {!isAzure && !isOci && !isCohere && (
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="label">Thinking Budget <span className="text-slate-400 font-normal">(Gemini 2.5+)</span></label>
+                    <input type="number" step="512" min="0"
+                      value={form.generation_config?.thinking_budget ?? ''}
+                      onChange={(e) => {
+                        const v = e.target.value === '' ? undefined : parseInt(e.target.value)
+                        onChange({ ...form, generation_config: { ...form.generation_config, thinking_budget: v } })
+                      }}
+                      placeholder={t('llm.form.unlimited')} className="input w-full font-mono text-sm" />
+                  </div>
+                  <div className="flex items-end pb-1">
+                    <label className="flex items-center gap-2 cursor-pointer text-sm text-slate-700">
+                      <input type="checkbox"
+                        checked={form.generation_config?.enable_search !== false}
+                        onChange={(e) => onChange({ ...form, generation_config: { ...form.generation_config, enable_search: e.target.checked } })}
+                        className="w-4 h-4 accent-blue-600" />
+                      Google Search Grounding
+                    </label>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Description + sort */}
           <div className="grid grid-cols-3 gap-3">
             <div className="col-span-2">
@@ -357,6 +443,9 @@ export default function LlmModelsPanel() {
   }
 
   const openEdit = (m: LlmModel) => {
+    const gc = typeof m.generation_config === 'string'
+      ? (() => { try { return JSON.parse(m.generation_config) } catch { return {} } })()
+      : (m.generation_config || {})
     setForm({
       key: m.key, name: m.name, api_model: m.api_model || '',
       description: m.description || '', is_active: m.is_active ?? 1,
@@ -364,6 +453,7 @@ export default function LlmModelsPanel() {
       provider_type: m.provider_type || 'gemini',
       model_role: m.model_role || 'chat',
       api_key: '',   // never pre-fill
+      generation_config: gc,
       endpoint_url: m.endpoint_url || '', api_version: m.api_version || '2024-08-01-preview',
       deployment_name: m.deployment_name || '', base_model: m.base_model || '',
       // OCI: always blank on load — server never returns plaintext creds
@@ -377,6 +467,11 @@ export default function LlmModelsPanel() {
     try {
       const payload: Record<string, unknown> = { ...form }
       if (!payload.api_key) delete payload.api_key
+      // Clean generation_config: strip undefined values, send null if empty
+      if (form.generation_config) {
+        const gc = Object.fromEntries(Object.entries(form.generation_config).filter(([, v]) => v !== undefined && v !== ''))
+        payload.generation_config = Object.keys(gc).length > 0 ? gc : null
+      }
       // Strip blank OCI fields — server keeps existing if not provided
       if (form.provider_type === 'oci') {
         if (!form.oci_private_key?.trim()) {

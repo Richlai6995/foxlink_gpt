@@ -124,6 +124,35 @@ function makeAzureOpenAIClient(model) {
   };
 }
 
+// ── Convert Gemini inlineData → AOAI image_url content part ─────────────────
+function inlineDataToAoai(part) {
+  const { data, mimeType } = part.inlineData;
+  if (mimeType && mimeType.startsWith('image/')) {
+    return { type: 'image_url', image_url: { url: `data:${mimeType};base64,${data}` } };
+  }
+  return null; // non-image inlineData (e.g. PDF) should have been text-extracted upstream
+}
+
+// ── Convert Gemini-style parts array → AOAI content (string or array) ───────
+function geminiPartsToAoaiContent(parts) {
+  if (!Array.isArray(parts)) return String(parts || '');
+  const contentParts = [];
+  for (const p of parts) {
+    if (p.text) {
+      contentParts.push({ type: 'text', text: p.text });
+    } else if (p.inlineData) {
+      const converted = inlineDataToAoai(p);
+      if (converted) contentParts.push(converted);
+    }
+  }
+  if (contentParts.length === 0) return null;
+  // If only text parts, flatten to simple string for compatibility
+  if (contentParts.every((p) => p.type === 'text')) {
+    return contentParts.map((p) => p.text).join('\n');
+  }
+  return contentParts;
+}
+
 // ── Convert Gemini-style contents → OpenAI messages ──────────────────────────
 function contentsToOpenAI(contents, systemPrompt) {
   const messages = [];
@@ -133,12 +162,8 @@ function contentsToOpenAI(contents, systemPrompt) {
     if (typeof c.parts === 'string') {
       messages.push({ role, content: c.parts });
     } else if (Array.isArray(c.parts)) {
-      // Flatten text parts; skip inlineData (AOAI needs URL or base64 differently)
-      const text = c.parts
-        .filter((p) => p.text)
-        .map((p) => p.text)
-        .join('\n');
-      if (text) messages.push({ role, content: text });
+      const content = geminiPartsToAoaiContent(c.parts);
+      if (content) messages.push({ role, content });
     }
   }
   return messages;
@@ -156,7 +181,7 @@ function contentsToOpenAI(contents, systemPrompt) {
  * @param {string} extraSystem - Additional system instruction text
  * @returns {{ text, inputTokens, outputTokens }}
  */
-async function streamChatAoai(modelRow, history, userParts, onChunk, extraSystem = '') {
+async function streamChatAoai(modelRow, history, userParts, onChunk, extraSystem = '', genConfig = null) {
   const { AzureOpenAI } = require('openai');
   const apiKey = decryptKey(modelRow.api_key_enc);
   if (!apiKey)                throw new Error(`AOAI model "${modelRow.key}" 的 API key 未設定`);
@@ -179,31 +204,29 @@ async function streamChatAoai(modelRow, history, userParts, onChunk, extraSystem
   ].filter(Boolean).join('\n\n---\n\n');
   messages.push({ role: 'system', content: systemPrompt });
 
-  // History
+  // History (with image support via inlineData → image_url conversion)
   for (const h of history) {
     const role = h.role === 'model' ? 'assistant' : 'user';
-    const text = Array.isArray(h.parts)
-      ? h.parts.filter((p) => p.text).map((p) => p.text).join('\n')
-      : String(h.parts || '');
-    if (text) messages.push({ role, content: text });
+    const content = geminiPartsToAoaiContent(h.parts);
+    if (content) messages.push({ role, content });
   }
 
-  // Current user message (text parts only; skip inlineData — AOAI handles differently)
-  const userText = userParts
-    .filter((p) => p.text)
-    .map((p) => p.text)
-    .join('\n');
-  if (userText) messages.push({ role: 'user', content: userText });
+  // Current user message (text + image inlineData → AOAI content array)
+  const userContent = geminiPartsToAoaiContent(userParts);
+  if (userContent) messages.push({ role: 'user', content: userContent });
 
-  // o1/o3/gpt-5.x series: no system role, no streaming, use max_completion_tokens
-  const isO1 = /^o\d/i.test(modelRow.deployment_name || '') || /^gpt-5/i.test(modelRow.deployment_name || '');
+  // o1/o3 series: no system role, no streaming, use max_completion_tokens
+  const isO1 = /^o\d/i.test(modelRow.deployment_name || '');
+  // GPT-5.x series: supports streaming + system role + reasoning_effort
+  const isGpt5 = /^gpt-5/i.test(modelRow.deployment_name || '');
+
   if (isO1) {
-    // o1 doesn't support streaming — do a regular call and simulate chunking
+    // o1/o3 doesn't support streaming — do a regular call and simulate chunking
     const filteredMsgs = messages.filter((m) => m.role !== 'system');
     const resp = await client.chat.completions.create({
       model: modelRow.deployment_name,
       messages: filteredMsgs,
-      max_completion_tokens: 8192,
+      max_completion_tokens: genConfig?.max_output_tokens || 8192,
     });
     const text = resp.choices?.[0]?.message?.content || '';
     onChunk(text);
@@ -214,12 +237,21 @@ async function streamChatAoai(modelRow, history, userParts, onChunk, extraSystem
     };
   }
 
-  const stream = await client.chat.completions.create({
+  const streamOpts = {
     model:    modelRow.deployment_name,
     messages,
     stream:   true,
     stream_options: { include_usage: true },
-  });
+    ...(genConfig?.temperature != null ? { temperature: genConfig.temperature } : {}),
+    ...(genConfig?.top_p != null ? { top_p: genConfig.top_p } : {}),
+    ...(isGpt5 ? {
+      max_completion_tokens: genConfig?.max_output_tokens || 16384,
+      reasoning_effort: genConfig?.reasoning_effort || 'low',
+    } : {
+      ...(genConfig?.max_output_tokens ? { max_tokens: genConfig.max_output_tokens } : {}),
+    }),
+  };
+  const stream = await client.chat.completions.create(streamOpts);
 
   let fullText = '';
   let inputTokens = 0, outputTokens = 0;

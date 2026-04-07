@@ -95,6 +95,8 @@
     "importShare": "匯入分享對話",
     "systemAdmin": "系統管理",
     "scheduledTasks": "排程任務",
+    "reasoning": "推理",
+    "reasoningDefault": "預設",
     "skillMarket": "技能市集",
     "kbMarket": "知識庫市集",
     "aiDashboard": "AI 戰情",
@@ -517,7 +519,10 @@
       "description": "描述",
       "descriptionPlaceholder": "選填描述",
       "optional": "選填",
-      "sortOrder": "排序"
+      "sortOrder": "排序",
+      "generationConfig": "生成參數",
+      "default": "預設",
+      "unlimited": "不限制"
     }
   },
   "skills": {

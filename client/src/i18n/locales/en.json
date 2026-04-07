@@ -95,6 +95,8 @@
     "importShare": "Import Shared Chat",
     "systemAdmin": "System Admin",
     "scheduledTasks": "Scheduled Tasks",
+    "reasoning": "Reasoning",
+    "reasoningDefault": "Default",
     "skillMarket": "Skill Market",
     "kbMarket": "Knowledge Base",
     "aiDashboard": "AI Dashboard",
@@ -517,7 +519,10 @@
       "description": "Description",
       "descriptionPlaceholder": "Optional description",
       "optional": "Optional",
-      "sortOrder": "Sort Order"
+      "sortOrder": "Sort Order",
+      "generationConfig": "Generation Config",
+      "default": "Default",
+      "unlimited": "Unlimited"
     }
   },
   "skills": {

@@ -50,6 +50,9 @@ export default function ChatPage() {
   const [streaming, setStreaming] = useState(false)
   const [streamingContent, setStreamingContent] = useState('')
   const [streamingStatus, setStreamingStatus] = useState('')
+  const [reasoningEffort, setReasoningEffort] = useState<string>(
+    () => localStorage.getItem('reasoningEffort') || ''
+  )
   const abortRef = useRef<(() => void) | null>(null)
   const wasAbortedRef = useRef(false)
   const messageInputRef = useRef<MessageInputHandle>(null)
@@ -472,6 +475,11 @@ export default function ChatPage() {
     localStorage.setItem('model', m)
   }, [])
 
+  const handleReasoningEffortChange = useCallback((v: string) => {
+    setReasoningEffort(v)
+    localStorage.setItem('reasoningEffort', v)
+  }, [])
+
   // ── Skill panel helpers ────────────────────────────────────────────────────
   const openSkillPanel = useCallback(async () => {
     try {
@@ -605,6 +613,7 @@ export default function ChatPage() {
       const formData = new FormData()
       formData.append('message', message)
       formData.append('model', model)
+      if (reasoningEffort) formData.append('reasoning_effort', reasoningEffort)
       files.forEach((f) => formData.append('files', f))
       // Explicit tool selection — always send even if empty (tells backend to skip auto-discover)
       formData.append('mcp_server_ids', JSON.stringify([...selectedMcpIds]))
@@ -798,6 +807,8 @@ export default function ChatPage() {
         onSelectSession={handleSelectSession}
         onDeleteSession={handleDeleteSession}
         onModelChange={handleModelChange}
+        reasoningEffort={reasoningEffort}
+        onReasoningEffortChange={handleReasoningEffortChange}
         onRenameSession={(id, title, titleZh, titleEn, titleVi) => {
           setSessions((prev) => prev.map((s) => s.id === id ? { ...s, title, title_zh: titleZh, title_en: titleEn, title_vi: titleVi } : s))
         }}

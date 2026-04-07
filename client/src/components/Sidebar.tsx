@@ -15,6 +15,8 @@ interface Props {
   onSelectSession: (id: string) => void
   onDeleteSession: (id: string) => void
   onModelChange: (m: ModelType) => void
+  reasoningEffort?: string
+  onReasoningEffortChange?: (v: string) => void
   onRenameSession?: (id: string, title: string, titleZh: string, titleEn: string, titleVi: string) => void
 }
 
@@ -50,6 +52,8 @@ export default function Sidebar({
   onSelectSession,
   onDeleteSession,
   onModelChange,
+  reasoningEffort,
+  onReasoningEffortChange,
   onRenameSession,
 }: Props) {
   const { user, logout, isAdmin, canSchedule, canCreateKb, canUseDashboard, canAccessTrainingDev, setLanguage } = useAuth()
@@ -226,6 +230,33 @@ export default function Sidebar({
             </div>
           )}
         </div>
+
+        {/* Reasoning Effort selector — only for Azure OpenAI GPT-5.x / o-series models */}
+        {currentModelInfo?.provider_type === 'azure_openai' && onReasoningEffortChange && (
+          <div className="mt-1.5 flex items-center gap-1.5">
+            <span className="text-[10px] text-slate-500 whitespace-nowrap">{t('sidebar.reasoning')}</span>
+            <div className="flex gap-0.5 flex-1">
+              {[
+                { value: '', label: t('sidebar.reasoningDefault') },
+                { value: 'low', label: 'Low' },
+                { value: 'medium', label: 'Med' },
+                { value: 'high', label: 'High' },
+              ].map((opt) => (
+                <button
+                  key={opt.value}
+                  onClick={() => onReasoningEffortChange(opt.value)}
+                  className={`flex-1 text-[10px] py-0.5 rounded transition ${
+                    (reasoningEffort || '') === opt.value
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Sessions List */}

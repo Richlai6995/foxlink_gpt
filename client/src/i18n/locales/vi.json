@@ -95,6 +95,8 @@
     "importShare": "Nhập cuộc trò chuyện được chia sẻ",
     "systemAdmin": "Quản trị hệ thống",
     "scheduledTasks": "Lịch tác vụ",
+    "reasoning": "Suy luận",
+    "reasoningDefault": "Mặc định",
     "skillMarket": "Kho kỹ năng",
     "kbMarket": "Kho tri thức",
     "aiDashboard": "Bảng điều khiển AI",
@@ -517,7 +519,10 @@
       "description": "Mô tả",
       "descriptionPlaceholder": "Mô tả tùy chọn",
       "optional": "Tùy chọn",
-      "sortOrder": "Thứ tự sắp xếp"
+      "sortOrder": "Thứ tự sắp xếp",
+      "generationConfig": "Cấu hình tạo nội dung",
+      "default": "Mặc định",
+      "unlimited": "Không giới hạn"
     }
   },
   "skills": {

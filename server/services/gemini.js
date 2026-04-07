@@ -179,27 +179,34 @@ function buildSearchNotice(queries, sources) {
   return notice;
 }
 
-async function streamChat(apiModel, history, userParts, onChunk, extraSystemInstruction = '', disableSearch = false) {
+async function streamChat(apiModel, history, userParts, onChunk, extraSystemInstruction = '', disableSearch = false, genConfig = null) {
   // apiModel is the resolved API model string (e.g. 'gemini-3-pro-preview')
-  console.log(`[Gemini] streamChat model=${apiModel} history=${history.length} userParts=${userParts.length}`);
+  console.log(`[Gemini] streamChat model=${apiModel} history=${history.length} userParts=${userParts.length} genConfig=${JSON.stringify(genConfig)}`);
 
   // Disable Google Search grounding when inline file data is present
   // (Gemini API does not allow mixing googleSearch tool with inlineData parts)
   // Also disable when caller explicitly requests it (e.g. inject skill already provides data)
   const hasInlineData = userParts.some((p) => p.inlineData);
-  const useSearch = !hasInlineData && !disableSearch;
+  const enableSearch = genConfig?.enable_search !== undefined ? genConfig.enable_search : true;
+  const useSearch = !hasInlineData && !disableSearch && enableSearch;
   console.log(`[Gemini] hasInlineData=${hasInlineData}, googleSearch=${useSearch}`);
 
   const fullInstruction = extraSystemInstruction
     ? getSystemInstruction() + '\n\n---\n' + extraSystemInstruction
     : getSystemInstruction();
 
+  // Build generationConfig from DB settings + defaults
+  const generationConfig = {
+    maxOutputTokens: genConfig?.max_output_tokens || 65536,
+    ...(genConfig?.temperature != null ? { temperature: genConfig.temperature } : {}),
+    ...(genConfig?.top_p != null ? { topP: genConfig.top_p } : {}),
+    ...(genConfig?.thinking_budget != null ? { thinkingConfig: { thinkBudget: genConfig.thinking_budget } } : {}),
+  };
+
   const model = genAI.getGenerativeModel({
     model: apiModel,
     systemInstruction: fullInstruction,
-    generationConfig: {
-      maxOutputTokens: 65536,
-    },
+    generationConfig,
     tools: useSearch ? [{ googleSearch: {} }] : undefined,
   });
 
@@ -572,4 +579,113 @@ async function generateWithTools(apiModel, history, userParts, functionDeclarati
   };
 }
 
-module.exports = { streamChat, generateWithImage, generateTextSync, generateWithTools, transcribeAudio, extractTextFromFile, fileToGeminiPart, generateTitle, MODEL_PRO, MODEL_FLASH };
+/**
+ * Streaming version of generateWithTools — streams the final LLM response
+ * while still handling multi-round tool calls.
+ *
+ * Tool-call rounds: Gemini returns function calls (no text) → execute tools → send responses.
+ * Final round: Gemini streams the text answer → onChunk called per chunk.
+ *
+ * @param {string}   apiModel
+ * @param {Array}    history
+ * @param {Array}    userParts
+ * @param {Array}    functionDeclarations
+ * @param {Function} toolHandler    - async (name, args) => string
+ * @param {Function} onChunk        - (chunkText) => void
+ * @param {Function} onToolStatus   - (statusMsg) => void  — optional, notifies caller about tool activity
+ * @param {string}   extraSystemInstruction
+ * @param {object}   opts           - { directAnswerTools: Set }
+ */
+async function generateWithToolsStream(
+  apiModel, history, userParts, functionDeclarations, toolHandler,
+  onChunk, onToolStatus, extraSystemInstruction = '', opts = {}, genConfig = null
+) {
+  const fullInstruction = extraSystemInstruction
+    ? getSystemInstruction() + '\n\n---\n' + extraSystemInstruction
+    : getSystemInstruction();
+
+  const generationConfig = {
+    maxOutputTokens: genConfig?.max_output_tokens || 65536,
+    ...(genConfig?.temperature != null ? { temperature: genConfig.temperature } : {}),
+    ...(genConfig?.top_p != null ? { topP: genConfig.top_p } : {}),
+    ...(genConfig?.thinking_budget != null ? { thinkingConfig: { thinkBudget: genConfig.thinking_budget } } : {}),
+  };
+
+  const model = genAI.getGenerativeModel({
+    model: apiModel,
+    systemInstruction: fullInstruction,
+    generationConfig,
+    tools: functionDeclarations.length > 0 ? [{ functionDeclarations }] : [],
+  });
+
+  const chat = model.startChat({ history });
+  let currentParts = userParts;
+  let inputTokens = 0, outputTokens = 0;
+  let toolCallCount = 0;
+  let fullText = '';
+  const MAX_TOOL_ROUNDS = 10;
+
+  for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+    const result = await chat.sendMessageStream(currentParts);
+
+    for await (const chunk of result.stream) {
+      let chunkText = '';
+      try {
+        chunkText = chunk.text();
+      } catch (e) {
+        const fr = chunk.candidates?.[0]?.finishReason;
+        if (fr === 'MAX_TOKENS') {
+          const msg = '\n\n[⚠️ 回應已達最大 Token 上限，內容可能不完整]';
+          fullText += msg;
+          onChunk(msg);
+        }
+        continue;
+      }
+      if (chunkText) {
+        fullText += chunkText;
+        onChunk(chunkText);
+      }
+    }
+
+    const response = await result.response;
+    const usage = response.usageMetadata || {};
+    inputTokens += usage.promptTokenCount || 0;
+    outputTokens += usage.candidatesTokenCount || 0;
+
+    const fnCalls = response.functionCalls?.() || [];
+    if (fnCalls.length === 0) break; // No more tool calls — done
+
+    // Execute tools
+    const fnResponses = [];
+    let directAnswerText = null;
+    for (const call of fnCalls) {
+      toolCallCount++;
+      if (onToolStatus) onToolStatus(`呼叫工具：${call.name}`);
+      let toolResult;
+      try {
+        toolResult = await toolHandler(call.name, call.args || {});
+      } catch (e) {
+        toolResult = `[Tool error: ${e.message}]`;
+      }
+      if (opts.directAnswerTools?.has(call.name)) {
+        directAnswerText = String(toolResult);
+      }
+      fnResponses.push({
+        functionResponse: {
+          name: call.name,
+          response: { content: String(toolResult) },
+        },
+      });
+    }
+
+    if (directAnswerText !== null) {
+      return { text: directAnswerText, inputTokens, outputTokens, toolCallCount, isDirectAnswer: true };
+    }
+
+    currentParts = fnResponses;
+  }
+
+  return { text: fullText, inputTokens, outputTokens, toolCallCount };
+}
+
+module.exports = { streamChat, generateWithImage, generateTextSync, generateWithTools, generateWithToolsStream, transcribeAudio, extractTextFromFile, fileToGeminiPart, generateTitle, MODEL_PRO, MODEL_FLASH };

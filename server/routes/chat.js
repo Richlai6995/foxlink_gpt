@@ -5,7 +5,7 @@ const path = require('path');
 const fs = require('fs');
 const { v4: uuidv4 } = require('uuid');
 const { verifyToken } = require('./auth');
-const { streamChat, generateWithImage, generateWithTools, transcribeAudio, extractTextFromFile, fileToGeminiPart, generateTitle } = require('../services/gemini');
+const { streamChat, generateWithImage, generateWithTools, generateWithToolsStream, transcribeAudio, extractTextFromFile, fileToGeminiPart, generateTitle } = require('../services/gemini');
 const { streamChatAoai } = require('../services/llmService');
 const { processGenerateBlocks } = require('../services/fileGenerator');
 const { notifyAdminSensitiveKeyword } = require('../services/mailService');
@@ -469,15 +469,22 @@ async function resolveApiModel(db, modelKey) {
   try {
     const row = await db.prepare(
       `SELECT api_model, image_output, provider_type, api_key_enc,
-              endpoint_url, api_version, deployment_name, base_model, key
+              endpoint_url, api_version, deployment_name, base_model, key,
+              generation_config
        FROM llm_models WHERE key=? AND is_active=1`
     ).get(modelKey);
-    if (row?.api_model) return {
-      apiModel:     row.api_model,
-      imageOutput:  !!row.image_output,
-      providerType: row.provider_type || 'gemini',
-      modelRow:     row,
-    };
+    if (row?.api_model) {
+      // Parse generation_config CLOB → object
+      let genConfig = null;
+      try { genConfig = row.generation_config ? JSON.parse(row.generation_config) : null; } catch (_) {}
+      row._genConfig = genConfig;
+      return {
+        apiModel:     row.api_model,
+        imageOutput:  !!row.image_output,
+        providerType: row.provider_type || 'gemini',
+        modelRow:     row,
+      };
+    }
   } catch (e) { }
   if (modelKey === 'flash') return { apiModel: process.env.GEMINI_MODEL_FLASH || 'gemini-2.0-flash',   imageOutput: false, providerType: 'gemini', modelRow: null };
   if (modelKey === 'pro')   return { apiModel: process.env.GEMINI_MODEL_PRO   || 'gemini-1.5-pro',     imageOutput: false, providerType: 'gemini', modelRow: null };
@@ -742,7 +749,7 @@ router.post('/sessions/:id/messages', upload.array('files', 10), async (req, res
     return res.status(404).json({ error: '找不到對話' });
   }
 
-  const { message = '', model } = req.body;
+  const { message = '', model, reasoning_effort: userReasoningEffort } = req.body;
 
   // Explicit tool selection sent by the UI (JSON arrays or undefined)
   // When present (even as '[]'), skip auto-discovery + intent filtering for that category.
@@ -944,6 +951,9 @@ router.post('/sessions/:id/messages', upload.array('files', 10), async (req, res
   const MAX_COMBINED_INPUT = 200000;
 
   try {
+    // ── Timing breakdown ──────────────────────────────────────────────────────
+    const _timing = { start: Date.now(), fileStart: 0, fileEnd: 0, skillStart: 0, skillEnd: 0, llmStart: 0, ttft: 0, llmEnd: 0, postStart: 0, postEnd: 0 };
+
     // Process uploaded files
     const fileMetas = [];
     const userParts = [];
@@ -984,13 +994,20 @@ router.post('/sessions/:id/messages', upload.array('files', 10), async (req, res
       }
     }
 
+    // Early provider detection: Azure OpenAI cannot handle inlineData (base64 files),
+    // so PDFs/images must be text-extracted instead of sent inline.
+    const earlyModel = model || session.model || 'pro';
+    const { providerType: earlyProvider } = await resolveApiModel(db, earlyModel);
+    const isAoaiProvider = earlyProvider === 'azure_openai';
+
+    _timing.fileStart = Date.now();
     for (const file of uploadedFiles) {
       const ext = path.extname(file.originalname).toLowerCase();
       const mimeType = file.mimetype;
       const filePath = file.path;
       const originalName = Buffer.from(file.originalname, 'latin1').toString('utf8');
 
-      console.log(`[Chat] Processing file: "${originalName}" size=${file.size} bytes mime=${mimeType}`);
+      console.log(`[Chat] Processing file: "${originalName}" size=${file.size} bytes mime=${mimeType} provider=${earlyProvider}`);
 
       // Audio → transcribe
       if (mimeType.startsWith('audio/')) {
@@ -1032,8 +1049,9 @@ router.post('/sessions/:id/messages', upload.array('files', 10), async (req, res
 
       // PDF → send as inline data to Gemini (handles images + text natively, better than pdf-parse)
       // Gemini supports inline PDF up to ~20MB; larger files fall back to text extraction
+      // Azure OpenAI cannot handle inlineData, so always use text extraction for AOAI
       const MAX_PDF_INLINE_MB = 15;
-      if (mimeType === 'application/pdf' && file.size <= MAX_PDF_INLINE_MB * 1024 * 1024) {
+      if (mimeType === 'application/pdf' && file.size <= MAX_PDF_INLINE_MB * 1024 * 1024 && !isAoaiProvider) {
         sendEvent({ type: 'status', message: `正在解析: ${originalName}...` });
         userParts.push(await fileToGeminiPart(filePath, mimeType));
         fileMetas.push({ name: originalName, type: 'document' });
@@ -1063,6 +1081,8 @@ router.post('/sessions/:id/messages', upload.array('files', 10), async (req, res
       combinedUserText = combinedUserText.slice(0, MAX_COMBINED_INPUT) + '\n\n[⚠️ 輸入內容過長，已截斷]';
     }
     console.log(`[Chat] Total combined input: ${combinedUserText.length} chars, files=${fileMetas.length}`);
+
+    _timing.fileEnd = Date.now();
 
     if (fileMetas.length > 0) {
       sendEvent({ type: 'files', files: fileMetas });
@@ -1383,6 +1403,8 @@ router.post('/sessions/:id/messages', upload.array('files', 10), async (req, res
 
       return merged;
     };
+
+    _timing.skillStart = Date.now();
 
     // Save user message first
     const userMsgResult = await db
@@ -1772,6 +1794,11 @@ router.post('/sessions/:id/messages', upload.array('files', 10), async (req, res
     let aiText = '';
     const chosenModel = skillModelKey || model || session.model || 'pro';
     const { apiModel, imageOutput, providerType, modelRow } = await resolveApiModel(db, chosenModel);
+    // Merge DB default genConfig with user per-message overrides
+    const genConfig = modelRow?._genConfig ? { ...modelRow._genConfig } : {};
+    if (userReasoningEffort && ['low', 'medium', 'high'].includes(userReasoningEffort)) {
+      genConfig.reasoning_effort = userReasoningEffort;
+    }
     const history = sanitizeHistory(buildHistory(historyMessages, imageOutput));
 
     // Inject skill system prompts into Gemini instruction (+ TAG-routed post_answer hints)
@@ -1858,7 +1885,9 @@ ${hasPreserve ? '- 標記【★保留原文】的欄位：必須完整複製原�
     // Disable Google Search when inject skills have provided data (avoid Gemini overriding with Search)
     const disableSearchForSkill = externalInjectSkills.length > 0 && skillSystemPrompts.length > 0;
 
+    _timing.skillEnd = Date.now();
     console.log(`[Chat] Calling Gemini (model=${chosenModel} → ${apiModel}, imageOutput=${imageOutput}, skills=${sessionSkills.length}) parts=${userParts.length} history=${history.length}`);
+    _timing.llmStart = Date.now();
     const t0 = Date.now();
 
     let text, inputTokens, outputTokens;
@@ -1910,6 +1939,7 @@ ${hasPreserve ? '- 標記【★保留原文】的欄位：必須完整複製原�
       }
 
       displayText = text || (savedImages.length > 0 ? `已生成 ${savedImages.length} 張圖片` : '圖片生成失敗');
+      _timing.llmEnd = Date.now();
       console.log(`[Chat] Image gen done in ${Date.now() - t0}ms, images=${imgResult.images.length} in=${inputTokens} out=${outputTokens}`);
     } else {
       // ── Get user context (role + org fields for mcp_access / dify_access) ──
@@ -2095,38 +2125,56 @@ ${hasPreserve ? '- 標記【★保留原文】的欄位：必須完整複製原�
           }
         }
 
-        // ── TAG-based auto-routing ───────────────────────────────────────────
-        const recentCtx = historyMessages.slice(-4)
-          .map(m => `${m.role === 'user' ? '使用者' : 'AI'}: ${m.content.slice(0, 300)}`).join('\n');
+        // ── Skip auto tool discovery when skills are manually attached ──────
+        // Saves 200-1500ms by avoiding LLM intent classification calls.
+        // Skills define their tool needs via kb_mode / mcp_tool_mode bindings.
+        if (sessionSkills.length > 0) {
+          allDeclarations = [...filteredAllMcpDecls, ...difyDecls, ...selfKbDecls];
+          console.log(`[Chat] Skill-attached: skip auto-routing, mcp=${filteredAllMcpDecls.length} dify=${difyDecls.length} selfkb=${selfKbDecls.length} total=${allDeclarations.length}`);
+        } else {
+          // ── TAG-based auto-routing (only when no skills attached) ─────────
+          const recentCtx = historyMessages.slice(-4)
+            .map(m => `${m.role === 'user' ? '使用者' : 'AI'}: ${m.content.slice(0, 300)}`).join('\n');
 
-        try {
-          const { autoRouteByTags } = require('../services/tagRouter');
-          // Build unified tool list with tags
-          const allToolsWithTags = [
-            ...filteredAllMcpDecls.map(d => {
-              const entry = sm[d.name];
-              const tags = (() => { try { return JSON.parse(entry?.server?.tags || '[]'); } catch { return []; } })();
-              return { ...d, tags, toolType: 'mcp' };
-            }),
-            ...difyDecls.map(d => {
-              const kb = km[d.name];
-              const tags = (() => { try { return JSON.parse(kb?.tags || '[]'); } catch { return []; } })();
-              return { ...d, tags, toolType: kb?.connector_type === 'rest_api' ? 'api' : 'dify' };
-            }),
-            ...selfKbDecls.map(d => {
-              const kb = skm[d.name];
-              const tags = (() => { try { return JSON.parse(kb?.tags || '[]'); } catch { return []; } })();
-              return { ...d, tags, toolType: 'selfkb' };
-            }),
-          ];
+          try {
+            const { autoRouteByTags } = require('../services/tagRouter');
+            // Build unified tool list with tags
+            const allToolsWithTags = [
+              ...filteredAllMcpDecls.map(d => {
+                const entry = sm[d.name];
+                const tags = (() => { try { return JSON.parse(entry?.server?.tags || '[]'); } catch { return []; } })();
+                return { ...d, tags, toolType: 'mcp' };
+              }),
+              ...difyDecls.map(d => {
+                const kb = km[d.name];
+                const tags = (() => { try { return JSON.parse(kb?.tags || '[]'); } catch { return []; } })();
+                return { ...d, tags, toolType: kb?.connector_type === 'rest_api' ? 'api' : 'dify' };
+              }),
+              ...selfKbDecls.map(d => {
+                const kb = skm[d.name];
+                const tags = (() => { try { return JSON.parse(kb?.tags || '[]'); } catch { return []; } })();
+                return { ...d, tags, toolType: 'selfkb' };
+              }),
+            ];
 
-          const hasAnyTags = allToolsWithTags.some(t => t.tags.length > 0);
-          if (hasAnyTags) {
-            const { selected, intentTags, method } = await autoRouteByTags(combinedUserText, recentCtx, allToolsWithTags, db);
-            allDeclarations = selected.map(({ tags, toolType, ...decl }) => decl);
-            console.log(`[Chat] TAG auto-route: method=${method} intentTags=[${intentTags.join(',')}] selected=${allDeclarations.length}/${allToolsWithTags.length}`);
-          } else {
-            // No tags defined anywhere → fallback to existing intent filtering
+            const hasAnyTags = allToolsWithTags.some(t => t.tags.length > 0);
+            if (hasAnyTags) {
+              const { selected, intentTags, method } = await autoRouteByTags(combinedUserText, recentCtx, allToolsWithTags, db);
+              allDeclarations = selected.map(({ tags, toolType, ...decl }) => decl);
+              console.log(`[Chat] TAG auto-route: method=${method} intentTags=[${intentTags.join(',')}] selected=${allDeclarations.length}/${allToolsWithTags.length}`);
+            } else {
+              // No tags defined anywhere → fallback to existing intent filtering
+              const intentCtx = { db, userId: req.user.id };
+              const [mcpDecls, filteredDifyDecls, filteredSelfKbDecls] = await Promise.all([
+                filterMcpDeclsByIntent(combinedUserText, filteredAllMcpDecls, recentCtx, intentCtx),
+                filterDifyDeclsByIntent(combinedUserText, difyDecls, recentCtx, intentCtx),
+                filterDifyDeclsByIntent(combinedUserText, selfKbDecls, recentCtx, intentCtx),
+              ]);
+              allDeclarations = [...mcpDecls, ...filteredDifyDecls, ...filteredSelfKbDecls];
+              console.log(`[Chat] Legacy intent-filter: ${allDeclarations.length} tools`);
+            }
+          } catch (tagErr) {
+            console.warn('[Chat] TAG routing failed, falling back to intent filter:', tagErr.message);
             const intentCtx = { db, userId: req.user.id };
             const [mcpDecls, filteredDifyDecls, filteredSelfKbDecls] = await Promise.all([
               filterMcpDeclsByIntent(combinedUserText, filteredAllMcpDecls, recentCtx, intentCtx),
@@ -2134,17 +2182,7 @@ ${hasPreserve ? '- 標記【★保留原文】的欄位：必須完整複製原�
               filterDifyDeclsByIntent(combinedUserText, selfKbDecls, recentCtx, intentCtx),
             ]);
             allDeclarations = [...mcpDecls, ...filteredDifyDecls, ...filteredSelfKbDecls];
-            console.log(`[Chat] Legacy intent-filter: ${allDeclarations.length} tools`);
           }
-        } catch (tagErr) {
-          console.warn('[Chat] TAG routing failed, falling back to intent filter:', tagErr.message);
-          const intentCtx = { db, userId: req.user.id };
-          const [mcpDecls, filteredDifyDecls, filteredSelfKbDecls] = await Promise.all([
-            filterMcpDeclsByIntent(combinedUserText, filteredAllMcpDecls, recentCtx, intentCtx),
-            filterDifyDeclsByIntent(combinedUserText, difyDecls, recentCtx, intentCtx),
-            filterDifyDeclsByIntent(combinedUserText, selfKbDecls, recentCtx, intentCtx),
-          ]);
-          allDeclarations = [...mcpDecls, ...filteredDifyDecls, ...filteredSelfKbDecls];
         }
       }
 
@@ -2278,17 +2316,19 @@ ${hasPreserve ? '- 標記【★保留原文】的欄位：必須完整複製原�
           try {
             const _onChunk = (chunk) => {
               if (clientDisconnected) throw new Error('CLIENT_DISCONNECTED');
+              if (!_timing.ttft) _timing.ttft = Date.now();
               firstChunkReceived = true; aiText += chunk;
               sendEvent({ type: 'chunk', content: chunk });
             };
             if (providerType === 'azure_openai' && modelRow) {
-              ({ text, inputTokens, outputTokens } = await streamChatAoai(modelRow, history, userParts, _onChunk, finalInstruction));
+              ({ text, inputTokens, outputTokens } = await streamChatAoai(modelRow, history, userParts, _onChunk, finalInstruction, genConfig));
             } else {
-              ({ text, inputTokens, outputTokens } = await streamChat(apiModel, history, userParts, _onChunk, finalInstruction, difyDisableSearch));
+              ({ text, inputTokens, outputTokens } = await streamChat(apiModel, history, userParts, _onChunk, finalInstruction, difyDisableSearch, genConfig));
             }
           } finally {
             clearInterval(keepAliveInterval);
           }
+          _timing.llmEnd = Date.now();
           console.log(`[Chat] DIFY fast-path done in ${Date.now() - t0}ms, kbs=${allDeclarations.length} relevant=${difyIsRelevant} in=${inputTokens} out=${outputTokens} tokens`);
 
         } else if (pureSelfKb) {
@@ -2336,17 +2376,19 @@ ${hasPreserve ? '- 標記【★保留原文】的欄位：必須完整複製原�
           try {
             const _onChunk = (chunk) => {
               if (clientDisconnected) throw new Error('CLIENT_DISCONNECTED');
+              if (!_timing.ttft) _timing.ttft = Date.now();
               firstChunkReceived = true; aiText += chunk;
               sendEvent({ type: 'chunk', content: chunk });
             };
             if (providerType === 'azure_openai' && modelRow) {
-              ({ text, inputTokens, outputTokens } = await streamChatAoai(modelRow, history, userParts, _onChunk, finalInstruction));
+              ({ text, inputTokens, outputTokens } = await streamChatAoai(modelRow, history, userParts, _onChunk, finalInstruction, genConfig));
             } else {
-              ({ text, inputTokens, outputTokens } = await streamChat(apiModel, history, userParts, _onChunk, finalInstruction, selfKbDisableSearch));
+              ({ text, inputTokens, outputTokens } = await streamChat(apiModel, history, userParts, _onChunk, finalInstruction, selfKbDisableSearch, genConfig));
             }
           } finally {
             clearInterval(keepAliveInterval);
           }
+          _timing.llmEnd = Date.now();
           console.log(`[Chat] SelfKB fast-path done in ${Date.now() - t0}ms, kbs=${kbTotal} relevant=${kbIsRelevant} in=${inputTokens} out=${outputTokens} tokens`);
 
         } else {
@@ -2415,18 +2457,29 @@ ${hasPreserve ? '- 標記【★保留原文】的欄位：必須完整複製原�
           );
 
           let isDirectAnswer = false;
-          ({ text, inputTokens, outputTokens, isDirectAnswer } = await generateWithTools(
-            apiModel, history, userParts, allDeclarations, toolHandler, skillExtraInstruction,
-            { directAnswerTools }
+          let firstToolChunk = false;
+          const _onToolChunk = (chunk) => {
+            if (clientDisconnected) throw new Error('CLIENT_DISCONNECTED');
+            if (!_timing.ttft) _timing.ttft = Date.now();
+            if (!firstToolChunk) { firstToolChunk = true; }
+            aiText += chunk;
+            sendEvent({ type: 'chunk', content: chunk });
+          };
+          const _onToolStatus = (msg) => {
+            sendEvent({ type: 'status', message: msg });
+          };
+          ({ text, inputTokens, outputTokens, isDirectAnswer } = await generateWithToolsStream(
+            apiModel, history, userParts, allDeclarations, toolHandler,
+            _onToolChunk, _onToolStatus, skillExtraInstruction,
+            { directAnswerTools }, genConfig
           ));
-          if (text) {
-            // Direct answer mode: ensure newlines render as markdown line breaks
-            const displayText = isDirectAnswer
-              ? text.replace(/\n/g, '  \n')  // trailing 2 spaces = markdown hard line break
-              : text;
+          if (isDirectAnswer && text) {
+            // Direct answer mode: wasn't streamed — send as one chunk
+            const displayText = text.replace(/\n/g, '  \n');
             aiText = displayText;
             sendEvent({ type: 'chunk', content: displayText });
           }
+          _timing.llmEnd = Date.now();
           console.log(`[Chat] Tools+Gemini done in ${Date.now() - t0}ms, tools=${allDeclarations.length} api_called=${calledDifyKbs.size} mcp_called=${Object.keys(serverMap).length > 0 ? 'yes' : 'no'} in=${inputTokens} out=${outputTokens} tokens`);
         }
       } else {
@@ -2449,20 +2502,24 @@ ${hasPreserve ? '- 標記【★保留原文】的欄位：必須完整複製原�
         try {
           const _onChunk = (chunk) => {
             if (clientDisconnected) throw new Error('CLIENT_DISCONNECTED');
+            if (!_timing.ttft) _timing.ttft = Date.now();
             firstChunkReceived = true; aiText += chunk;
             sendEvent({ type: 'chunk', content: chunk });
           };
           const combinedInstruction = [skillExtraInstruction, templateExtraInstruction].filter(Boolean).join('\n\n---\n\n') || skillExtraInstruction;
           if (providerType === 'azure_openai' && modelRow) {
-            ({ text, inputTokens, outputTokens } = await streamChatAoai(modelRow, history, userParts, _onChunk, combinedInstruction));
+            ({ text, inputTokens, outputTokens } = await streamChatAoai(modelRow, history, userParts, _onChunk, combinedInstruction, genConfig));
           } else {
-            ({ text, inputTokens, outputTokens } = await streamChat(apiModel, history, userParts, _onChunk, combinedInstruction, disableSearchForSkill));
+            ({ text, inputTokens, outputTokens } = await streamChat(apiModel, history, userParts, _onChunk, combinedInstruction, disableSearchForSkill, genConfig));
           }
         } finally {
           clearInterval(keepAliveInterval);
         }
+        _timing.llmEnd = Date.now();
         console.log(`[Chat] ${providerType === 'azure_openai' ? 'AOAI' : 'Gemini'} done in ${Date.now() - t0}ms, in=${inputTokens} out=${outputTokens} tokens`);
       }
+
+      _timing.postStart = Date.now();
 
       // Debug: check if response contains generate blocks
       const blockHeaders = text.match(/```generate_\w+:[^\n]+/g);
@@ -2729,6 +2786,18 @@ ${hasPreserve ? '- 標記【★保留原文】的欄位：必須完整複製原�
     const today = new Date().toISOString().split('T')[0];
     const imageCount = imageOutput ? (imgResult?.images?.length || 0) : 0;
     await upsertTokenUsage(db, req.user.id, today, chosenModel, inputTokens, outputTokens, imageCount);
+
+    _timing.postEnd = Date.now();
+
+    // ── Timing summary ────────────────────────────────────────────────────
+    const _t = _timing;
+    const _files  = _t.fileEnd  && _t.fileStart  ? _t.fileEnd  - _t.fileStart  : 0;
+    const _skills = _t.skillEnd && _t.skillStart ? _t.skillEnd - _t.skillStart : 0;
+    const _ttft   = _t.ttft     && _t.llmStart   ? _t.ttft     - _t.llmStart   : 0;
+    const _llm    = _t.llmEnd   && _t.llmStart   ? _t.llmEnd   - _t.llmStart   : 0;
+    const _post   = _t.postEnd  && _t.postStart  ? _t.postEnd  - _t.postStart  : 0;
+    const _total  = _t.postEnd - _t.start;
+    console.log(`[Chat][Timing] model=${chosenModel} files=${_files}ms skills=${_skills}ms ttft=${_ttft}ms llm_total=${_llm}ms post=${_post}ms total=${_total}ms in=${inputTokens} out=${outputTokens}`);
 
     sendEvent({ type: 'usage', inputTokens, outputTokens });
     sendEvent({ type: 'done' });

@@ -377,6 +377,7 @@ router.get('/llm-models', async (req, res) => {
     const rows = await db.prepare(
       `SELECT id, key, name, api_model, description, is_active, sort_order, image_output, created_at,
               provider_type, model_role, endpoint_url, api_version, deployment_name, base_model,
+              generation_config,
               CASE WHEN api_key_enc IS NOT NULL THEN 1 ELSE 0 END AS has_api_key,
               CASE WHEN extra_config_enc IS NOT NULL THEN 1 ELSE 0 END AS has_extra_config
        FROM llm_models ORDER BY sort_order ASC, id ASC`
@@ -396,6 +397,7 @@ router.post('/llm-models', async (req, res) => {
       key, name, api_model, description, is_active, sort_order, image_output,
       provider_type = 'gemini', model_role = 'chat', api_key,
       endpoint_url, api_version, deployment_name, base_model,
+      generation_config,
       // OCI fields
       oci_user, oci_fingerprint, oci_tenancy, oci_region, oci_compartment_id, oci_private_key,
     } = req.body;
@@ -420,18 +422,20 @@ router.post('/llm-models', async (req, res) => {
       });
       extraConfigEnc = encryptKey(ociConfig);
     }
+    const genConfigJson = generation_config ? JSON.stringify(generation_config) : null;
     const result = await db.prepare(
       `INSERT INTO llm_models
          (key, name, api_model, description, is_active, sort_order, image_output,
           provider_type, model_role, api_key_enc, extra_config_enc,
-          endpoint_url, api_version, deployment_name, base_model)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+          endpoint_url, api_version, deployment_name, base_model, generation_config)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
     ).run(
       key.trim(), name.trim(), (api_model || deployment_name || '').trim(),
       description || null, is_active ? 1 : 0, sort_order || 0, image_output ? 1 : 0,
       pt, model_role || 'chat', apiKeyEnc, extraConfigEnc,
       endpoint_url?.trim() || null, api_version?.trim() || null,
       deployment_name?.trim() || null, base_model?.trim() || null,
+      genConfigJson,
     );
     res.json({ id: result.lastInsertRowid });
   } catch (e) {
@@ -449,6 +453,7 @@ router.put('/llm-models/:id', async (req, res) => {
       key, name, api_model, description, is_active, sort_order, image_output,
       provider_type, model_role, api_key,
       endpoint_url, api_version, deployment_name, base_model,
+      generation_config,
       oci_user, oci_fingerprint, oci_tenancy, oci_region, oci_compartment_id, oci_private_key,
     } = req.body;
     const pt = provider_type || 'gemini';
@@ -471,11 +476,12 @@ router.put('/llm-models/:id', async (req, res) => {
       extraConfigEnc = null;
     }
 
+    const genConfigJson = generation_config ? JSON.stringify(generation_config) : null;
     await db.prepare(
       `UPDATE llm_models SET
          key=?, name=?, api_model=?, description=?, is_active=?, sort_order=?, image_output=?,
          provider_type=?, model_role=?, api_key_enc=?, extra_config_enc=?,
-         endpoint_url=?, api_version=?, deployment_name=?, base_model=?
+         endpoint_url=?, api_version=?, deployment_name=?, base_model=?, generation_config=?
        WHERE id=?`
     ).run(
       key.trim(), name.trim(), (api_model || deployment_name || '').trim(),
@@ -483,6 +489,7 @@ router.put('/llm-models/:id', async (req, res) => {
       pt, model_role || 'chat', apiKeyEnc, extraConfigEnc,
       endpoint_url?.trim() || null, api_version?.trim() || null,
       deployment_name?.trim() || null, base_model?.trim() || null,
+      genConfigJson,
       req.params.id,
     );
     res.json({ ok: true });

@@ -108,6 +108,16 @@ export interface SensitiveKeyword {
 export type LlmProviderType = 'gemini' | 'azure_openai' | 'oci' | 'cohere'
 export type LlmModelRole = 'chat' | 'embedding' | 'rerank' | 'tts' | 'stt'
 
+export interface LlmGenerationConfig {
+  temperature?: number
+  max_output_tokens?: number
+  top_p?: number
+  reasoning_effort?: 'low' | 'medium' | 'high'
+  thinking_budget?: number
+  enable_search?: boolean
+  enable_streaming?: boolean
+}
+
 export interface LlmModel {
   id?: number
   key: string
@@ -127,6 +137,7 @@ export interface LlmModel {
   api_version?: string
   deployment_name?: string
   base_model?: string
+  generation_config?: LlmGenerationConfig | string
 }
 
 export interface MailSettings {
