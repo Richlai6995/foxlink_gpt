@@ -864,6 +864,7 @@ export default function CoursePlayer() {
     <div className="fixed inset-0 z-50 flex flex-col" style={{ backgroundColor: 'var(--t-bg)', color: 'var(--t-text)' }}>
       <CoursePlayerInner
         courseId={Number(id)}
+        lessonId={searchParams.get('lessonId') ? Number(searchParams.get('lessonId')) : undefined}
         sessionId={sessionId}
         initialMode={initialMode}
         examTopicId={examTopicParam ? Number(examTopicParam) : undefined}

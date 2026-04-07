@@ -246,13 +246,26 @@ export default function CourseEditor() {
             </span>
           )}
           <div className="flex-1" />
-          {/* Preview: navigate to learn/test */}
+          {/* Preview: dropdown to select chapter */}
           {!isNew && (
-            <button onClick={() => navigate(`/training/course/${id}/learn?from=editor`)}
-              className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg border transition hover:opacity-80"
-              style={{ borderColor: 'var(--t-border)', color: 'var(--t-accent)' }}>
-              <Eye size={13} /> {t('training.preview')}
-            </button>
+            <div className="relative group">
+              <button className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg border transition hover:opacity-80"
+                style={{ borderColor: 'var(--t-border)', color: 'var(--t-accent)' }}>
+                <Eye size={13} /> {t('training.preview')} <ChevronDown size={11} />
+              </button>
+              <div className="absolute right-0 top-full mt-1 bg-white border border-slate-200 rounded-lg shadow-xl z-30 min-w-[200px] hidden group-hover:block">
+                <button onClick={() => navigate(`/training/course/${id}/learn?from=editor`)}
+                  className="w-full text-left px-3 py-2 text-xs hover:bg-blue-50 font-medium text-slate-700 border-b border-slate-100">
+                  {t('training.previewAll')}
+                </button>
+                {lessons.map((l, i) => (
+                  <button key={l.id} onClick={() => navigate(`/training/course/${id}/learn?from=editor&lessonId=${l.id}`)}
+                    className="w-full text-left px-3 py-1.5 text-xs hover:bg-blue-50 text-slate-600">
+                    {i + 1}. {l.title}
+                  </button>
+                ))}
+              </div>
+            </div>
           )}
           {!isNew && canEditThis && (
             <button onClick={async () => {
