@@ -224,8 +224,9 @@ export default function HotspotBlock({ block, blockIndex = 0, isLastSlide = fals
   }, [autoPlay, currentStep, introPlayed, introPlaying, completed, isTestMode, mode, muted])
 
   // ─── Demo mode: auto-advance through all steps (no interaction needed) ───
+  // Uses a separate Audio object to avoid conflicts with intro audio
+  const demoAudioRef = useRef<HTMLAudioElement | null>(null)
   useEffect(() => {
-    console.log('[Demo] advance effect:', { mode, introPlayed, introPlaying, completed, step: currentStep, target: currentTarget?.label, muted })
     if (mode !== 'demo' || !introPlayed || introPlaying || completed) return
     if (!currentTarget) return
 
@@ -255,16 +256,14 @@ export default function HotspotBlock({ block, blockIndex = 0, isLastSlide = fals
     }
 
     const regionAudioUrl = (currentTarget as any).audio_url
-    console.log('[Demo] step', currentStep, 'audio:', regionAudioUrl, 'muted:', muted)
-    if (regionAudioUrl && !muted && audioRef.current) {
-      const audio = audioRef.current
-      // Play region audio + listen for ended — all in one place to avoid race conditions
-      audio.onended = () => { console.log('[Demo] step', currentStep, 'ended'); audio.onended = null; advanceStep() }
-      audio.src = regionAudioUrl
-      audio.play().catch(() => { audio.onended = null; advanceStep() })
-      return () => { audio.onended = null }
+    if (regionAudioUrl && !muted) {
+      // Use separate Audio object — immune to intro audio conflicts
+      const demoAudio = new Audio(regionAudioUrl)
+      demoAudioRef.current = demoAudio
+      demoAudio.onended = () => { demoAudio.onended = null; advanceStep() }
+      demoAudio.play().catch(() => { advanceStep() })
+      return () => { demoAudio.pause(); demoAudio.onended = null; demoAudioRef.current = null }
     } else {
-      // No audio → advance after 3 seconds
       const timer = setTimeout(advanceStep, 3000)
       return () => clearTimeout(timer)
     }
