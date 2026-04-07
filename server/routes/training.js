@@ -3237,8 +3237,9 @@ router.get('/classroom/my-programs', async (req, res) => {
 
         // Exam: best score (only matters if course has interactive content)
         let examOk = !hasInteractive; // no interactive = auto pass
+        let best = null;
         if (hasInteractive) {
-          const best = await db.prepare(`SELECT SUM(COALESCE(weighted_score,score)) AS s, SUM(COALESCE(weighted_max,max_score)) AS m FROM interaction_results WHERE user_id=? AND course_id=? AND session_id IS NOT NULL AND player_mode='test' GROUP BY session_id ORDER BY SUM(COALESCE(weighted_score,score)) DESC FETCH FIRST 1 ROW ONLY`).get(req.user.id, cr.course_id);
+          best = await db.prepare(`SELECT SUM(COALESCE(weighted_score,score)) AS s, SUM(COALESCE(weighted_max,max_score)) AS m FROM interaction_results WHERE user_id=? AND course_id=? AND session_id IS NOT NULL AND player_mode='test' GROUP BY session_id ORDER BY SUM(COALESCE(weighted_score,score)) DESC FETCH FIRST 1 ROW ONLY`).get(req.user.id, cr.course_id);
           examOk = best && best.m > 0 && (best.s / best.m * 100) >= passScore;
         }
 
