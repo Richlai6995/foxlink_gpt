@@ -177,8 +177,10 @@ export default function HotspotBlock({ block, blockIndex = 0, isLastSlide = fals
 
   // Auto-play region audio for current guided/demo step (after intro finishes)
   useEffect(() => {
+    console.log('[HotspotBlock] region audio effect:', { mode, introPlayed, introPlaying, completed, currentStep, hasTarget: !!currentTarget, targetLabel: currentTarget?.label })
     if (!introPlayed || introPlaying || completed) return
     if ((mode === 'guided' || mode === 'demo') && currentTarget) {
+      console.log('[HotspotBlock] playing region audio for step', currentStep, currentTarget.label, (currentTarget as any).audio_url)
       playRegionAudio(currentTarget)
     }
   }, [currentStep, completed, introPlayed, introPlaying])
@@ -219,10 +221,12 @@ export default function HotspotBlock({ block, blockIndex = 0, isLastSlide = fals
 
   // ─── Demo mode: auto-advance through all steps (no interaction needed) ───
   useEffect(() => {
+    console.log('[HotspotBlock] demo effect:', { mode, introPlayed, introPlaying, completed, currentStep, hasTarget: !!currentTarget })
     if (mode !== 'demo' || !introPlayed || introPlaying || completed) return
     if (!currentTarget) return
 
     const advanceStep = () => {
+      console.log('[HotspotBlock] demo advanceStep from', currentStep)
       const nextStep = currentStep + 1
       if (nextStep >= correctRegions.length) {
         setCompleted(true)
@@ -248,11 +252,13 @@ export default function HotspotBlock({ block, blockIndex = 0, isLastSlide = fals
     }
 
     const regionAudioUrl = (currentTarget as any).audio_url
+    console.log('[HotspotBlock] demo audio check:', { regionAudioUrl, muted, hasAudioRef: !!audioRef.current })
     if (regionAudioUrl && !muted && audioRef.current) {
       // Wait a tick for playRegionAudio to set src, then attach onended
       const timer = setTimeout(() => {
         if (audioRef.current) {
-          audioRef.current.onended = () => { if (audioRef.current) audioRef.current.onended = null; advanceStep() }
+          console.log('[HotspotBlock] demo attaching onended, audio src:', audioRef.current.src, 'paused:', audioRef.current.paused)
+          audioRef.current.onended = () => { console.log('[HotspotBlock] demo audio ended!'); if (audioRef.current) audioRef.current.onended = null; advanceStep() }
         }
       }, 100)
       return () => { clearTimeout(timer); if (audioRef.current) audioRef.current.onended = null }
