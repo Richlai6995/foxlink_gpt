@@ -3341,6 +3341,7 @@ const adminSections = [
   { id: 'a-help-translation', label: '說明文件翻譯管理', icon: <Languages size={18} /> },
   { id: 'a-doc-template', label: '文件範本管理', icon: <LayoutTemplate size={18} /> },
   { id: 'a-webex-bot', label: 'Webex Bot 管理', icon: <MessageSquare size={18} /> },
+  { id: 'a-training', label: '教育訓練權限管理', icon: <BookOpen size={18} /> },
 ]
 
 function AdminManual() {
@@ -6402,6 +6403,43 @@ tryLock("webex:msg:{id}", 60s)  ← Redis 分散鎖
           />
         </SubSection>
       </Section>
+
+      <Section id="a-training" icon={<BookOpen size={22} />} iconColor="text-emerald-500" title="教育訓練權限管理">
+        <SubSection title="教育訓練權限設定">
+          <Para>教育訓練功能的權限分為三個層級，可在「角色管理」和「使用者管理」中設定：</Para>
+          <Table
+            headers={['權限', '說明']}
+            rows={[
+              ['無權限', '只能進入訓練教室學習已發佈且有存取權的課程'],
+              ['上架權限', '可發佈自己的課程，但不能編輯他人的課程'],
+              ['上架及編輯權限', '可編輯任何課程、管理課程分享、查看成績報表'],
+            ]}
+          />
+          <TipBox>使用者層級的設定會覆蓋角色層級。若設為「沿用角色設定」，則依角色的教育訓練權限決定。</TipBox>
+        </SubSection>
+
+        <SubSection title="Help 說明書綁定教材">
+          <Para>管理員可以將教育訓練課程綁定到使用者說明書的章節，讓使用者在閱讀說明書時直接進行互動學習。</Para>
+          <div className="space-y-2 my-3">
+            {[
+              { step: '1', text: '進入「系統管理」→「Help 翻譯管理」' },
+              { step: '2', text: '找到要綁定的 Help section，點擊「🎓 綁定教材」' },
+              { step: '3', text: '選擇課程和章節（可選「全部章節」）' },
+              { step: '4', text: '儲存。使用者在 Help 頁面該章節旁會出現「🎓 互動教學」按鈕' },
+            ].map(({ step, text }) => (
+              <div key={step} className="flex items-start gap-3 text-sm text-slate-600">
+                <span className="w-5 h-5 rounded-full bg-emerald-500 text-white text-xs flex items-center justify-center flex-shrink-0 mt-0.5">{step}</span>
+                {text}
+              </div>
+            ))}
+          </div>
+          <NoteBox>Help 綁定的教材不受課程權限限制，所有登入使用者都能學習。課程不需要發佈也能透過 Help 連結存取。</NoteBox>
+        </SubSection>
+
+        <SubSection title="課程分類管理">
+          <Para>管理員可在課程管理頁面管理課程分類（最多三層樹狀結構）。分類名稱支援三語言翻譯。</Para>
+        </SubSection>
+      </Section>
     </div>
   )
 }
@@ -6412,7 +6450,7 @@ type Role = 'user' | 'admin'
 
 export default function HelpPage() {
   const navigate = useNavigate()
-  const { isAdmin } = useAuth()
+  const { isAdmin, canAccessTrainingDev } = useAuth()
   const { t, i18n } = useTranslation()
   const [role, setRole] = useState<Role>(isAdmin ? 'admin' : 'user')
   const contentRef = useRef<HTMLDivElement>(null)
@@ -6430,8 +6468,10 @@ export default function HelpPage() {
       .then(res => {
         if (!cancelled) {
           // Filter to user sections only, and only those that have content
+          // u-training-dev: only visible for users with training publish/edit permission
           const userOnly = (res.data as HelpSectionData[]).filter(
-            s => s.sectionType === 'user' && s.blocks.length > 0
+            s => s.sectionType === 'user' && s.blocks.length > 0 &&
+              (s.id !== 'u-training-dev' || canAccessTrainingDev)
           )
           setApiSections(userOnly)
         }
