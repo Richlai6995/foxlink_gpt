@@ -5706,7 +5706,7 @@ const userSections = [
     "sort_order": 27,
     "icon": "BookOpen",
     "icon_color": "text-violet-500",
-    "last_modified": "2026-04-08",
+    "last_modified": "2026-04-09",
     "title": "教育訓練管理使用手冊",
     "sidebar_label": "教材開發",
     "blocks": [
@@ -5782,42 +5782,42 @@ const userSections = [
             "items": [
               {
                 "title": "📝 基本資訊",
-                "text": "標題、描述、分類、及格分數",
+                "desc": "標題、描述、分類、及格分數",
                 "color": "blue"
               },
               {
                 "title": "📚 章節管理",
-                "text": "新增/刪除/排序章節，管理投影片",
+                "desc": "新增/刪除/排序章節，管理投影片",
                 "color": "green"
               },
               {
                 "title": "❓ 題庫",
-                "text": "建立期末測驗題目（單選/多選/填空/配對/排序）",
+                "desc": "建立期末測驗題目（單選/多選/填空/配對/排序）",
                 "color": "purple"
               },
               {
                 "title": "📝 測驗主題",
-                "text": "建立不同章節組合的測驗，各自設定分數和時間",
+                "desc": "建立不同章節組合的測驗，各自設定分數和時間",
                 "color": "orange"
               },
               {
                 "title": "🌐 翻譯",
-                "text": "AI 一鍵翻譯為英文和越南文",
+                "desc": "AI 一鍵翻譯為英文和越南文",
                 "color": "cyan"
               },
               {
                 "title": "🔗 分享",
-                "text": "設定課程存取權限（使用者/角色/部門/利潤中心）",
+                "desc": "設定課程存取權限（使用者/角色/部門/利潤中心）",
                 "color": "rose"
               },
               {
                 "title": "📊 成績",
-                "text": "學員互動成績報表（課程/投影片/使用者三維度）",
+                "desc": "學員互動成績報表（課程/投影片/使用者三維度）",
                 "color": "teal"
               },
               {
                 "title": "⚙ 設定",
-                "text": "測驗設定（總分/時間/配分）、TTS 聲音、AI 模型",
+                "desc": "測驗設定（總分/時間/配分）、TTS 聲音、AI 模型",
                 "color": "slate"
               }
             ]
