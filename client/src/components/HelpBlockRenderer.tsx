@@ -245,15 +245,15 @@ function Table({ headers, rows }: { headers: string[]; rows: string[][] }) {
       <table className="w-full text-sm">
         <thead>
           <tr className="bg-slate-100">
-            {headers.map((h, i) => (
+            {(headers || []).map((h, i) => (
               <th key={i} className="px-4 py-2.5 text-sm text-left font-semibold text-slate-600">{h}</th>
             ))}
           </tr>
         </thead>
         <tbody>
-          {rows.map((row, ri) => (
+          {(rows || []).map((row, ri) => (
             <tr key={ri} className="border-t border-slate-100 hover:bg-slate-50">
-              {row.map((cell, ci) => (
+              {(row || []).map((cell, ci) => (
                 <td key={ci} className="px-4 py-2.5 text-sm text-left text-slate-600">{renderInlineText(cell)}</td>
               ))}
             </tr>
@@ -307,7 +307,7 @@ function renderBlock(block: HelpBlock, index: number): React.ReactNode {
     case 'steps':
       return (
         <div key={index} className="space-y-3">
-          {block.items.map((item, i) => (
+          {(block.items || []).map((item, i) => (
             <StepItem key={i} num={i + 1} title={item.title} desc={item.desc} />
           ))}
         </div>
@@ -319,7 +319,7 @@ function renderBlock(block: HelpBlock, index: number): React.ReactNode {
     case 'list':
       return (
         <ul key={index} className="list-disc list-inside space-y-1.5 text-sm text-slate-600 leading-6">
-          {block.items.map((item, i) => (
+          {(block.items || []).map((item, i) => (
             <li key={i}>{renderInlineText(item)}</li>
           ))}
         </ul>
@@ -328,7 +328,7 @@ function renderBlock(block: HelpBlock, index: number): React.ReactNode {
     case 'subsection':
       return (
         <SubSectionComp key={index} title={block.title}>
-          {block.blocks.map((b, i) => renderBlock(b, i))}
+          {(block.blocks || []).map((b, i) => renderBlock(b, i))}
         </SubSectionComp>
       )
 
@@ -336,7 +336,7 @@ function renderBlock(block: HelpBlock, index: number): React.ReactNode {
       const gridCols = block.cols === 3 ? 'sm:grid-cols-3' : block.cols === 1 ? '' : 'sm:grid-cols-2'
       return (
         <div key={index} className={`grid grid-cols-1 ${gridCols} gap-3`}>
-          {block.items.map((card, i) => {
+          {(block.items || []).map((card, i) => {
             const cs = getColorSet(card.borderColor)
             return (
               <div key={i} className={`border ${cs.border} rounded-xl p-4 ${cs.bg}`}>
@@ -356,7 +356,7 @@ function renderBlock(block: HelpBlock, index: number): React.ReactNode {
     case 'comparison': {
       return (
         <div key={index} className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          {block.items.map((item, i) => {
+          {(block.items || []).map((item, i) => {
             const cs = getColorSet(item.borderColor)
             return (
               <div key={i} className={`border-2 ${cs.border} rounded-xl p-4 ${cs.bg}`}>
@@ -383,7 +383,7 @@ export function RenderHelpSection({ section }: { section: HelpSectionData }) {
   const icon = ICON_MAP[section.icon] || <BookOpen size={22} />
   return (
     <Section id={section.id} icon={icon} iconColor={section.iconColor} title={section.title}>
-      {section.blocks.map((block, i) => renderBlock(block, i))}
+      {(section.blocks || []).map((block, i) => renderBlock(block, i))}
     </Section>
   )
 }

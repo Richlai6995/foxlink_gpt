@@ -37,7 +37,7 @@ router.get('/sections', verifyToken, async (req, res) => {
       linkedLessonId: r.linked_lesson_id || null,
       title: r.title || '',
       sidebarLabel: r.sidebar_label || '',
-      blocks: r.blocks_json ? JSON.parse(r.blocks_json) : [],
+      blocks: (() => { try { const b = r.blocks_json ? JSON.parse(r.blocks_json) : []; return Array.isArray(b) ? b : []; } catch { return []; } })(),
       translatedAt: r.translated_at,
       actualLang: r.actual_lang,
     }));
@@ -123,7 +123,7 @@ router.get('/admin/sections/:id', verifyToken, verifyAdmin, async (req, res) => 
       transMap[t.lang] = {
         title: t.title,
         sidebarLabel: t.sidebar_label,
-        blocks: t.blocks_json ? JSON.parse(t.blocks_json) : [],
+        blocks: (() => { try { const b = t.blocks_json ? JSON.parse(t.blocks_json) : []; return Array.isArray(b) ? b : []; } catch { return []; } })(),
         translatedAt: t.translated_at,
         updatedAt: t.updated_at,
       };

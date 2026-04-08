@@ -6470,7 +6470,7 @@ export default function HelpPage() {
           // Filter to user sections only, and only those that have content
           // u-training-dev: only visible for users with training publish/edit permission
           const userOnly = (res.data as HelpSectionData[]).filter(
-            s => s.sectionType === 'user' && s.blocks.length > 0 &&
+            s => s.sectionType === 'user' && Array.isArray(s.blocks) && s.blocks.length > 0 &&
               (s.id !== 'u-training-dev' || canAccessTrainingDev)
           )
           setApiSections(userOnly)
