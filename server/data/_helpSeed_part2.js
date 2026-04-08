@@ -2239,6 +2239,7 @@ module.exports = [
               { title: '❓ 題庫', text: '建立期末測驗題目（單選/多選/填空/配對/排序）', color: 'purple' },
               { title: '📝 測驗主題', text: '建立不同章節組合的測驗，各自設定分數和時間', color: 'orange' },
               { title: '🌐 翻譯', text: 'AI 一鍵翻譯為英文和越南文', color: 'cyan' },
+              { title: '🔗 分享', text: '設定課程存取權限（使用者/角色/部門/利潤中心）', color: 'rose' },
               { title: '📊 成績', text: '學員互動成績報表（課程/投影片/使用者三維度）', color: 'teal' },
               { title: '⚙ 設定', text: '測驗設定（總分/時間/配分）、TTS 聲音、AI 模型', color: 'slate' },
             ],

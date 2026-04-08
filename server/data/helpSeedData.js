@@ -12,13 +12,13 @@ const userSections = [
     "sort_order": 1,
     "icon": "BookOpen",
     "icon_color": "text-blue-500",
-    "last_modified": "2026-04-01",
+    "last_modified": "2026-04-08",
     "title": "系統介紹",
     "sidebar_label": "系統介紹",
     "blocks": [
       {
         "type": "para",
-        "text": "Foxlink GPT to Cortex 是正崴精密工業內部專屬的 AI 智慧助理平台，同時整合 **Azure OpenAI (AOAI)** 與 **Google Gemini** 兩大語言模型體系，提供流暢的多語言對話、文件深度分析、多媒體處理、工具調用及自動化排程等功能，協助同仁大幅提升日常工作效率。"
+        "text": "Foxlink GPT to Cortex 是正崴精密工業內部專屬的 AI 智慧助理平台，整合 **Google Gemini**、**Azure OpenAI (AOAI)**、**Oracle OCI** 及 **Cohere** 多種語言模型，提供流暢的多語言對話、文件深度分析、多媒體處理、工具調用及自動化排程等功能，協助同仁大幅提升日常工作效率。"
       },
       {
         "type": "para",
@@ -33,7 +33,7 @@ const userSections = [
         "rows": [
           [
             "多樣語言模型",
-            "支援 AOAI（GPT 系列）與 Gemini（Pro / Flash / Image）多種模型，可依需求自由切換"
+            "支援 Gemini（Pro / Flash / Image）、AOAI（GPT 系列）、OCI 及 Cohere 多種模型，可依需求切換"
           ],
           [
             "智慧對話",
@@ -201,7 +201,7 @@ const userSections = [
     "sort_order": 3,
     "icon": "Settings",
     "icon_color": "text-slate-500",
-    "last_modified": "2026-04-01",
+    "last_modified": "2026-04-08",
     "title": "介面導覽",
     "sidebar_label": "介面導覽",
     "blocks": [
@@ -222,7 +222,7 @@ const userSections = [
               "「+ 新對話」按鈕 — 建立全新對話 Session",
               "AI 模型選擇下拉選單 — 切換 AOAI / Gemini 等模型",
               "對話歷史清單（依今天、昨天、過去 7 天、更早分組）",
-              "「更多功能」折疊選單 — 含匯入分享、系統管理、排程任務、技能市集、知識庫市集、AI 戰情室、使用說明",
+              "「更多功能」折疊選單 — 含匯入分享、系統管理、排程任務、技能市集、知識庫市集、AI 戰情室、文件範本、教育訓練、問題反饋、使用說明",
               "語言切換（中文 / English / Tiếng Việt）",
               "使用者資訊、修改密碼、登出圖示"
             ]
@@ -501,13 +501,13 @@ const userSections = [
     "sort_order": 6,
     "icon": "Cpu",
     "icon_color": "text-purple-500",
-    "last_modified": "2026-04-01",
+    "last_modified": "2026-04-08",
     "title": "選擇 AI 模型",
     "sidebar_label": "選擇 AI 模型",
     "blocks": [
       {
         "type": "para",
-        "text": "系統同時支援 **Azure OpenAI（AOAI）** 及 **Google Gemini** 兩大平台的多種模型，由左側邊欄的模型下拉選單切換。不同模型在能力、速度、費用上各有差異，請依需求選擇。"
+        "text": "系統支援 **Google Gemini**、**Azure OpenAI（AOAI）**、**Oracle OCI** 及 **Cohere** 多平台模型，由左側邊欄的模型下拉選單切換。不同模型在能力、速度、費用上各有差異，請依需求選擇。"
       },
       {
         "type": "card_grid",
@@ -556,8 +556,12 @@ const userSections = [
         ]
       },
       {
+        "type": "para",
+        "text": "部分 AOAI 模型（如 GPT 5.x / o 系列）支援**推理力度**調整（Low / Medium / High），可在模型選擇後看到力度選項，適合需要更深入推理的複雜任務。"
+      },
+      {
         "type": "note",
-        "text": "**模型清單由系統管理員統一維護，**實際可用模型以畫面下拉選單為準，後續將陸續新增更多 AOAI 及 Gemini 模型版本。模型選擇會保存在您的瀏覽器，下次開啟仍會維持上次的選擇；切換模型不會影響當前對話歷史記錄。"
+        "text": "**模型清單由系統管理員統一維護，**實際可用模型以畫面下拉選單為準。除上述模型外，系統也支援 OCI 和 Cohere 平台的模型。模型選擇會保存在您的瀏覽器，下次開啟仍會維持上次的選擇；切換模型不會影響當前對話歷史記錄。"
       },
       {
         "type": "tip",
@@ -570,7 +574,7 @@ const userSections = [
     "sort_order": 7,
     "icon": "Upload",
     "icon_color": "text-teal-500",
-    "last_modified": "2026-04-01",
+    "last_modified": "2026-04-08",
     "title": "上傳檔案",
     "sidebar_label": "上傳檔案",
     "blocks": [
@@ -598,14 +602,14 @@ const userSections = [
               ],
               [
                 "音訊",
-                "MP3、WAV、M4A、OGG、FLAC",
+                "MP3、WAV、M4A、OGG、FLAC、WEBM、MP4、AAC",
                 "自動轉錄為文字後送 AI 分析"
               ]
             ]
           },
           {
             "type": "note",
-            "text": "不支援上傳影片檔案。單檔最大限制為 50MB（依管理員設定可能有所不同）。"
+            "text": "不支援上傳影片檔案。文件類最大約 10MB，音訊類最大約 50MB（實際限制依管理員為每位使用者的設定而有不同）。"
           }
         ]
       },
@@ -5800,6 +5804,11 @@ const userSections = [
                 "title": "🌐 翻譯",
                 "text": "AI 一鍵翻譯為英文和越南文",
                 "color": "cyan"
+              },
+              {
+                "title": "🔗 分享",
+                "text": "設定課程存取權限（使用者/角色/部門/利潤中心）",
+                "color": "rose"
               },
               {
                 "title": "📊 成績",
