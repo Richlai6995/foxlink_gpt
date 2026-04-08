@@ -17,8 +17,12 @@ metadata:
     nginx.ingress.kubernetes.io/limit-connections: "50"
 spec:
   ingressClassName: nginx
+  tls:
+    - hosts:
+        - flgpt.foxlink.com.tw
+      secretName: flgpt-tls
   rules:
-    - host: foxlink-gpt.example.com   # TODO: 替換為實際域名
+    - host: flgpt.foxlink.com.tw
       http:
         paths:
           - path: /
@@ -28,11 +32,6 @@ spec:
                 name: foxlink-gpt
                 port:
                   number: 3007
-  # TLS (有憑證時啟用)
-  # tls:
-  #   - hosts:
-  #       - foxlink-gpt.example.com
-  #     secretName: foxlink-tls
 ---
 # Custom headers ConfigMap (upstream keepalive)
 apiVersion: v1
