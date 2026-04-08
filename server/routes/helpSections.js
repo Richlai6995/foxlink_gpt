@@ -42,6 +42,35 @@ router.get('/sections', verifyToken, async (req, res) => {
       actualLang: r.actual_lang,
     }));
 
+    // Debug: log sections with potential data issues
+    for (const s of sections) {
+      if (!Array.isArray(s.blocks) || s.blocks.length === 0) {
+        console.warn(`[HelpSections] Section "${s.id}" has empty/invalid blocks`);
+      } else {
+        for (let i = 0; i < s.blocks.length; i++) {
+          const block = s.blocks[i];
+          if (block.type === 'card_grid' || block.type === 'comparison') {
+            (block.items || []).forEach((item, j) => {
+              if (!item.desc && item.desc !== '') {
+                console.warn(`[HelpSections] Section "${s.id}" block[${i}] ${block.type} item[${j}] missing desc:`, JSON.stringify(item));
+              }
+            });
+          }
+          if (block.type === 'subsection') {
+            (block.blocks || []).forEach((sub, j) => {
+              if (sub.type === 'card_grid' || sub.type === 'comparison') {
+                (sub.items || []).forEach((item, k) => {
+                  if (!item.desc && item.desc !== '') {
+                    console.warn(`[HelpSections] Section "${s.id}" block[${i}].blocks[${j}] ${sub.type} item[${k}] missing desc:`, JSON.stringify(item));
+                  }
+                });
+              }
+            });
+          }
+        }
+      }
+    }
+
     res.json(sections);
   } catch (err) {
     console.error('[HelpSections] GET /sections error:', err);

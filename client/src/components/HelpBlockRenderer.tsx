@@ -102,6 +102,7 @@ export interface HelpSectionData {
 // ── Inline text renderer (handles **bold** and `code`) ───────────────────────
 
 function renderInlineText(text: string) {
+  if (!text) return null
   // Split by **bold** and `code` patterns
   const parts: React.ReactNode[] = []
   let remaining = text

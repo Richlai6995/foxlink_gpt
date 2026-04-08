@@ -6469,10 +6469,40 @@ export default function HelpPage() {
         if (!cancelled) {
           // Filter to user sections only, and only those that have content
           // u-training-dev: only visible for users with training publish/edit permission
-          const userOnly = (res.data as HelpSectionData[]).filter(
+          const allSections = res.data as HelpSectionData[]
+          // Debug: log raw API response to find data issues
+          console.log('[HelpPage] API returned', allSections.length, 'sections')
+          allSections.forEach(s => {
+            if (!Array.isArray(s.blocks)) {
+              console.warn(`[HelpPage] Section "${s.id}" blocks is not array:`, typeof s.blocks, s.blocks)
+            } else {
+              s.blocks.forEach((block: any, i: number) => {
+                if ((block.type === 'card_grid' || block.type === 'comparison') && block.items) {
+                  block.items.forEach((item: any, j: number) => {
+                    if (item.desc === undefined || item.desc === null) {
+                      console.warn(`[HelpPage] Section "${s.id}" block[${i}] ${block.type} item[${j}] missing desc:`, JSON.stringify(item))
+                    }
+                  })
+                }
+                if (block.type === 'subsection' && block.blocks) {
+                  block.blocks.forEach((sub: any, si: number) => {
+                    if ((sub.type === 'card_grid' || sub.type === 'comparison') && sub.items) {
+                      sub.items.forEach((item: any, j: number) => {
+                        if (item.desc === undefined || item.desc === null) {
+                          console.warn(`[HelpPage] Section "${s.id}" block[${i}].blocks[${si}] ${sub.type} item[${j}] missing desc:`, JSON.stringify(item))
+                        }
+                      })
+                    }
+                  })
+                }
+              })
+            }
+          })
+          const userOnly = allSections.filter(
             s => s.sectionType === 'user' && Array.isArray(s.blocks) && s.blocks.length > 0 &&
               (s.id !== 'u-training-dev' || canAccessTrainingDev)
           )
+          console.log('[HelpPage] Filtered to', userOnly.length, 'user sections:', userOnly.map(s => s.id))
           setApiSections(userOnly)
         }
       })
