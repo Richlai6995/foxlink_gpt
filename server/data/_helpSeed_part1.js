@@ -151,7 +151,7 @@ module.exports = [
 
   {
     id: 'u-chat',
-    sort_order: 4,
+    sort_order: 5,
     icon: 'MessageSquare',
     icon_color: 'text-green-500',
     last_modified: '2026-04-01',
@@ -200,7 +200,7 @@ module.exports = [
 
   {
     id: 'u-model',
-    sort_order: 5,
+    sort_order: 6,
     icon: 'Cpu',
     icon_color: 'text-purple-500',
     last_modified: '2026-04-01',
@@ -249,7 +249,7 @@ module.exports = [
 
   {
     id: 'u-upload',
-    sort_order: 6,
+    sort_order: 7,
     icon: 'Upload',
     icon_color: 'text-teal-500',
     last_modified: '2026-04-01',
@@ -291,7 +291,7 @@ module.exports = [
 
   {
     id: 'u-history',
-    sort_order: 7,
+    sort_order: 8,
     icon: 'History',
     icon_color: 'text-orange-500',
     last_modified: '2026-04-01',
@@ -335,7 +335,7 @@ module.exports = [
 
   {
     id: 'u-tools',
-    sort_order: 8,
+    sort_order: 13,
     icon: 'Terminal',
     icon_color: 'text-cyan-500',
     last_modified: '2026-04-02',
@@ -545,7 +545,7 @@ module.exports = [
 
   {
     id: 'u-schedule',
-    sort_order: 9,
+    sort_order: 25,
     icon: 'Clock',
     icon_color: 'text-green-500',
     last_modified: '2026-04-01',
@@ -687,7 +687,7 @@ module.exports = [
 
   {
     id: 'u-image',
-    sort_order: 10,
+    sort_order: 11,
     icon: 'ImageIcon',
     icon_color: 'text-violet-500',
     last_modified: '2026-04-01',
@@ -765,7 +765,7 @@ module.exports = [
 
   {
     id: 'u-output',
-    sort_order: 11,
+    sort_order: 9,
     icon: 'Download',
     icon_color: 'text-pink-500',
     last_modified: '2026-04-01',
@@ -792,7 +792,7 @@ module.exports = [
 
   {
     id: 'u-share',
-    sort_order: 12,
+    sort_order: 10,
     icon: 'Share2',
     icon_color: 'text-blue-500',
     last_modified: '2026-04-01',
@@ -852,7 +852,7 @@ module.exports = [
 
   {
     id: 'u-skill',
-    sort_order: 13,
+    sort_order: 14,
     icon: 'Sparkles',
     icon_color: 'text-purple-500',
     last_modified: '2026-04-01',
@@ -1131,7 +1131,7 @@ module.exports = [
 
   {
     id: 'u-kb',
-    sort_order: 14,
+    sort_order: 15,
     icon: 'Database',
     icon_color: 'text-teal-500',
     last_modified: '2026-04-01',

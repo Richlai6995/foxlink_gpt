@@ -8,7 +8,7 @@ module.exports = [
   /* ────────────────────────────── u-research ────────────────────────────── */
   {
     id: 'u-research',
-    sort_order: 15,
+    sort_order: 17,
     icon: 'GitFork',
     icon_color: 'text-indigo-500',
     last_modified: '2026-04-01',
@@ -178,7 +178,7 @@ module.exports = [
   /* ────────────────────────────── u-toolbar-toggles ────────────────────────────── */
   {
     id: 'u-toolbar-toggles',
-    sort_order: 16,
+    sort_order: 12,
     icon: 'Zap',
     icon_color: 'text-amber-500',
     last_modified: '2026-04-01',
@@ -219,7 +219,7 @@ module.exports = [
   /* ────────────────────────────── u-lang ────────────────────────────── */
   {
     id: 'u-lang',
-    sort_order: 17,
+    sort_order: 4,
     icon: 'Globe',
     icon_color: 'text-sky-500',
     last_modified: '2026-04-01',
@@ -303,7 +303,7 @@ module.exports = [
   /* ────────────────────────────── u-budget ────────────────────────────── */
   {
     id: 'u-budget',
-    sort_order: 18,
+    sort_order: 30,
     icon: 'DollarSign',
     icon_color: 'text-emerald-500',
     last_modified: '2026-04-01',
@@ -375,7 +375,7 @@ module.exports = [
   /* ────────────────────────────── u-ai-bi ────────────────────────────── */
   {
     id: 'u-ai-bi',
-    sort_order: 19,
+    sort_order: 18,
     icon: 'BarChart3',
     icon_color: 'text-orange-500',
     last_modified: '2026-04-01',
@@ -498,7 +498,7 @@ module.exports = [
   /* ────────────────────────────── u-ai-bi-query ────────────────────────────── */
   {
     id: 'u-ai-bi-query',
-    sort_order: 20,
+    sort_order: 19,
     icon: 'BookMarked',
     icon_color: 'text-blue-600',
     last_modified: '2026-04-01',
@@ -619,7 +619,7 @@ module.exports = [
   /* ────────────────────────────── u-ai-bi-field ────────────────────────────── */
   {
     id: 'u-ai-bi-field',
-    sort_order: 21,
+    sort_order: 20,
     icon: 'Server',
     icon_color: 'text-violet-500',
     last_modified: '2026-04-01',
@@ -666,7 +666,7 @@ module.exports = [
   /* ────────────────────────────── u-ai-bi-chart ────────────────────────────── */
   {
     id: 'u-ai-bi-chart',
-    sort_order: 22,
+    sort_order: 21,
     icon: 'BarChart3',
     icon_color: 'text-purple-600',
     last_modified: '2026-04-01',
@@ -830,7 +830,7 @@ module.exports = [
   /* ────────────────────────────── u-ai-bi-shelf ────────────────────────────── */
   {
     id: 'u-ai-bi-shelf',
-    sort_order: 23,
+    sort_order: 22,
     icon: 'Layers',
     icon_color: 'text-rose-500',
     last_modified: '2026-04-01',
@@ -941,7 +941,7 @@ module.exports = [
   /* ────────────────────────────── u-ai-bi-dashboard ────────────────────────────── */
   {
     id: 'u-ai-bi-dashboard',
-    sort_order: 24,
+    sort_order: 23,
     icon: 'Share2',
     icon_color: 'text-teal-600',
     last_modified: '2026-04-01',
@@ -1056,7 +1056,7 @@ module.exports = [
   /* ────────────────────────────── u-ai-bi-schema ────────────────────────────── */
   {
     id: 'u-ai-bi-schema',
-    sort_order: 25,
+    sort_order: 24,
     icon: 'Database',
     icon_color: 'text-cyan-600',
     last_modified: '2026-04-01',
@@ -1197,7 +1197,7 @@ module.exports = [
   /* ────────────────────────────── u-help-kb ────────────────────────────── */
   {
     id: 'u-help-kb',
-    sort_order: 26,
+    sort_order: 31,
     icon: 'BookMarked',
     icon_color: 'text-blue-500',
     last_modified: '2026-04-01',
@@ -1268,7 +1268,7 @@ module.exports = [
   /* ────────────────────────────── u-doc-template ────────────────────────────── */
   {
     id: 'u-doc-template',
-    sort_order: 27,
+    sort_order: 16,
     icon: 'LayoutTemplate',
     icon_color: 'text-indigo-500',
     last_modified: '2026-04-01',
@@ -1637,7 +1637,7 @@ module.exports = [
   /* ────────────────────────────── u-webex-bot ────────────────────────────── */
   {
     id: 'u-webex-bot',
-    sort_order: 28,
+    sort_order: 29,
     icon: 'MessageSquare',
     icon_color: 'text-green-500',
     last_modified: '2026-04-01',
@@ -1795,7 +1795,7 @@ module.exports = [
   /* ────────────────────────────── u-feedback ────────────────────────────── */
   {
     id: 'u-feedback',
-    sort_order: 29,
+    sort_order: 28,
     icon: 'TicketCheck',
     icon_color: 'text-rose-500',
     last_modified: '2026-04-08',
@@ -2080,7 +2080,7 @@ module.exports = [
   /* ────────────────────────────── u-training ────────────────────────────── */
   {
     id: 'u-training',
-    sort_order: 30,
+    sort_order: 26,
     icon: 'GraduationCap',
     icon_color: 'text-emerald-500',
     last_modified: '2026-04-08',
@@ -2190,7 +2190,7 @@ module.exports = [
   /* ────────────────────────────── u-training-dev ────────────────────────────── */
   {
     id: 'u-training-dev',
-    sort_order: 31,
+    sort_order: 27,
     icon: 'BookOpen',
     icon_color: 'text-violet-500',
     last_modified: '2026-04-08',
