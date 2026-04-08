@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import { Copy, Check, RefreshCw, Download, Cpu, User } from 'lucide-react'
+import { Copy, Check, RefreshCw, Download, Cpu, User, MessageSquarePlus } from 'lucide-react'
 import { useState } from 'react'
 import MarkdownRenderer from './MarkdownRenderer'
 import ResearchProgressCard from './ResearchProgressCard'
@@ -13,6 +13,7 @@ interface Props {
   streamingStatus?: string
   onCopy: (text: string) => void
   onRegenerate?: () => void
+  onFeedback?: (messageContent: string) => void
 }
 
 function GeneratedFileLinks({ files }: { files: GeneratedFile[] }) {
@@ -103,11 +104,13 @@ function MessageBubble({
   msg,
   onCopy,
   onRegenerate,
+  onFeedback,
   isLast,
 }: {
   msg: ChatMessage
   onCopy: (text: string) => void
   onRegenerate?: () => void
+  onFeedback?: (content: string) => void
   isLast?: boolean
 }) {
   const { t } = useTranslation()
@@ -197,6 +200,15 @@ function MessageBubble({
                 {t('common.regenerate')}
               </button>
             )}
+            {onFeedback && (
+              <button
+                onClick={() => onFeedback(typeof msg.content === 'string' ? msg.content : '')}
+                className="text-slate-400 hover:text-rose-400 transition text-xs flex items-center gap-1"
+              >
+                <MessageSquarePlus size={12} />
+                {t('feedback.title')}
+              </button>
+            )}
             {msg.input_tokens !== undefined && msg.output_tokens !== undefined && (
               <span className="text-slate-300 text-xs ml-auto">
                 ↑{msg.input_tokens} ↓{msg.output_tokens} tokens
@@ -238,7 +250,7 @@ function StreamingBubble({ content, status }: { content: string; status?: string
   )
 }
 
-export default function ChatWindow({ messages, streaming, streamingContent, streamingStatus, onCopy, onRegenerate }: Props) {
+export default function ChatWindow({ messages, streaming, streamingContent, streamingStatus, onCopy, onRegenerate, onFeedback }: Props) {
   const { t } = useTranslation()
   const bottomRef = useRef<HTMLDivElement>(null)
   const lastUserMsgRef = useRef<HTMLDivElement>(null)
@@ -305,6 +317,7 @@ export default function ChatWindow({ messages, streaming, streamingContent, stre
               msg={msg}
               onCopy={onCopy}
               onRegenerate={onRegenerate}
+              onFeedback={msg.role === 'assistant' ? onFeedback : undefined}
               isLast={i === messages.length - 1 && msg.role === 'assistant'}
             />
           </div>

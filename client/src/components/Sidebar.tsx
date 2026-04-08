@@ -1,11 +1,12 @@
 import { useState, useEffect, useRef } from 'react'
-import { Plus, MessageSquare, Trash2, Pencil, Check, ChevronDown, LogOut, Settings, Cpu, Zap, CalendarClock, HelpCircle, KeyRound, X, Eye, EyeOff, GitFork, Sparkles, Database, Menu, ChevronUp, BarChart3, Globe, FileText, GraduationCap, BookOpen } from 'lucide-react'
+import { Plus, MessageSquare, Trash2, Pencil, Check, ChevronDown, LogOut, Settings, Cpu, Zap, CalendarClock, HelpCircle, KeyRound, X, Eye, EyeOff, GitFork, Sparkles, Database, Menu, ChevronUp, BarChart3, Globe, FileText, GraduationCap, BookOpen, TicketCheck } from 'lucide-react'
 import type { ChatSession, ModelType, LlmModel } from '../types'
 import { useAuth } from '../context/AuthContext'
 import { useNavigate } from 'react-router-dom'
 import api from '../lib/api'
 import { useTranslation } from 'react-i18next'
 import { SUPPORTED_LANGUAGES, type LangCode } from '../i18n'
+import { useFeedbackNotifications } from '../hooks/useFeedbackNotifications'
 
 interface Props {
   sessions: ChatSession[]
@@ -59,6 +60,7 @@ export default function Sidebar({
   const { user, logout, isAdmin, canSchedule, canCreateKb, canUseDashboard, canAccessTrainingDev, setLanguage } = useAuth()
   const navigate = useNavigate()
   const { t, i18n } = useTranslation()
+  const { unreadCount: feedbackUnread } = useFeedbackNotifications()
   const [hoveredId, setHoveredId] = useState<string | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editingTitle, setEditingTitle] = useState('')
@@ -395,6 +397,16 @@ export default function Sidebar({
               <button onClick={() => { setShowMenu(false); navigate('/training/classroom') }}
                 className="w-full flex items-center gap-2 text-cyan-400 hover:bg-slate-700 px-3 py-2.5 text-xs transition font-medium">
                 <GraduationCap size={13} /> {t('sidebar.trainingClassroom')}
+              </button>
+              <button onClick={() => { setShowMenu(false); navigate('/feedback') }}
+                className="w-full flex items-center gap-2 text-rose-400 hover:bg-slate-700 px-3 py-2.5 text-xs transition font-medium">
+                <TicketCheck size={13} />
+                <span className="flex-1 text-left">{t('sidebar.feedback')}</span>
+                {feedbackUnread > 0 && (
+                  <span className="bg-red-500 text-white text-[10px] font-bold rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1">
+                    {feedbackUnread > 99 ? '99+' : feedbackUnread}
+                  </span>
+                )}
               </button>
               <button onClick={() => { setShowMenu(false); navigate('/help') }}
                 className="w-full flex items-center gap-2 text-emerald-400 hover:bg-slate-700 px-3 py-2.5 text-xs transition font-medium">

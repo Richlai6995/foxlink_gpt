@@ -1476,6 +1476,16 @@ export default function ChatPage() {
           streamingStatus={streamingStatus}
           onCopy={handleCopy}
           onRegenerate={handleRegenerate}
+          onFeedback={(content) => {
+            const desc = content.slice(0, 500)
+            const params = new URLSearchParams({
+              source: 'chat_page',
+              source_session_id: currentSessionId || '',
+              description: `AI 回覆內容:\n${desc}`,
+              category_id: '',
+            })
+            navigate(`/feedback/new?${params.toString()}`)
+          }}
         />
 
         <MessageInput

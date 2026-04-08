@@ -91,6 +91,8 @@ app.get('/api/health', (req, res) => res.json({ status: 'ok', timestamp: new Dat
     console.log('[Route] /api/help OK');
     app.use('/api/training', require('./routes/training'));
     console.log('[Route] /api/training OK');
+    app.use('/api/feedback', require('./routes/feedback'));
+    console.log('[Route] /api/feedback OK');
 
     // Start Webex Bot polling listener (outbound, works behind corporate firewall)
     try {
@@ -122,6 +124,23 @@ app.get('/api/health', (req, res) => res.json({ status: 'ok', timestamp: new Dat
 
     const http = require('http');
     const server = http.createServer(app);
+
+    // Socket.io for feedback real-time chat
+    try {
+      const { initSocket } = require('./services/socketService');
+      initSocket(server);
+    } catch (e) {
+      console.error('[Socket.io] Failed to initialize:', e.message);
+    }
+
+    // Feedback SLA cron job
+    try {
+      const { startSLACron } = require('./services/feedbackSLAService');
+      startSLACron();
+    } catch (e) {
+      console.error('[FeedbackSLA] Failed to start:', e.message);
+    }
+
     let _portRetried = false;
     server.on('error', (err) => {
       if (err.code === 'EADDRINUSE') {

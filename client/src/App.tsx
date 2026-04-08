@@ -14,6 +14,11 @@ import KnowledgeBaseDetailPage from './pages/KnowledgeBaseDetailPage'
 import AiDashboardPage from './pages/AiDashboardPage'
 import DashboardBoardPage from './pages/DashboardBoardPage'
 import TemplatesPage from './pages/TemplatesPage'
+import FeedbackFAB from './components/feedback/FeedbackFAB'
+import FeedbackToast from './components/feedback/FeedbackToast'
+import FeedbackPage from './pages/FeedbackPage'
+import FeedbackNewPage from './pages/FeedbackNewPage'
+import FeedbackDetailPage from './pages/FeedbackDetailPage'
 import { lazy, Suspense } from 'react'
 const TrainingPage = lazy(() => import('./pages/TrainingPage'))
 
@@ -82,10 +87,15 @@ function AppRoutes() {
       <Route path="/dashboard" element={<ProtectedRoute><AiDashboardPage /></ProtectedRoute>} />
       <Route path="/dashboard/boards" element={<ProtectedRoute><DashboardBoardPage /></ProtectedRoute>} />
       <Route path="/templates" element={<ProtectedRoute><TemplatesPage /></ProtectedRoute>} />
+      <Route path="/feedback" element={<ProtectedRoute><FeedbackPage /></ProtectedRoute>} />
+      <Route path="/feedback/new" element={<ProtectedRoute><FeedbackNewPage /></ProtectedRoute>} />
+      <Route path="/feedback/:id" element={<ProtectedRoute><FeedbackDetailPage /></ProtectedRoute>} />
       <Route path="/training/*" element={<ProtectedRoute><Suspense fallback={<div className="flex items-center justify-center h-screen bg-slate-900 text-slate-400">Loading...</div>}><TrainingPage /></Suspense></ProtectedRoute>} />
       <Route path="/reset-password" element={<ResetPasswordPage />} />
       <Route path="*" element={<Navigate to={isAuthenticated ? '/chat' : '/login'} replace />} />
     </Routes>
+    {isAuthenticated && <FeedbackFAB />}
+    {isAuthenticated && <FeedbackToast />}
     </AdminOverrideProvider>
   )
 }

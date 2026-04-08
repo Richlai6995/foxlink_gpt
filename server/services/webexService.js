@@ -65,6 +65,31 @@ class WebexService {
     }
   }
 
+  /** 建立群組 Room */
+  async createRoom(title) {
+    const res = await this.client.post('/rooms', { title });
+    return res.data;
+  }
+
+  /** 加成員到 Room (by email) */
+  async addRoomMember(roomId, personEmail, isModerator = false) {
+    try {
+      await this.client.post('/memberships', { roomId, personEmail, isModerator });
+      return true;
+    } catch (e) {
+      // 409 = 已是成員
+      if (e.response?.status === 409) return true;
+      console.warn(`[Webex] addRoomMember ${personEmail}: ${e.response?.status || e.message}`);
+      return false;
+    }
+  }
+
+  /** 列出 Room 成員 */
+  async listRoomMembers(roomId) {
+    const res = await this.client.get('/memberships', { params: { roomId, max: 200 } });
+    return res.data?.items || [];
+  }
+
   /** 刪除訊息（用於撤回 typing indicator） */
   async deleteMessage(messageId) {
     try {

@@ -1,0 +1,192 @@
+import { useState, useRef, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { useTranslation } from 'react-i18next'
+import api from '../../lib/api'
+import { MessageSquarePlus, X, Send, Loader2, Paperclip } from 'lucide-react'
+import { useFeedbackNotifications } from '../../hooks/useFeedbackNotifications'
+
+interface Category {
+  id: number
+  name: string
+}
+
+export default function FeedbackFAB() {
+  const { t } = useTranslation()
+  const navigate = useNavigate()
+  const { unreadCount } = useFeedbackNotifications()
+  const [open, setOpen] = useState(false)
+  const [subject, setSubject] = useState('')
+  const [description, setDescription] = useState('')
+  const [categoryId, setCategoryId] = useState('')
+  const [shareLink, setShareLink] = useState('')
+  const [categories, setCategories] = useState<Category[]>([])
+  const [files, setFiles] = useState<File[]>([])
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState('')
+  const fileRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (open && categories.length === 0) {
+      api.get('/feedback/categories').then(r => setCategories(r.data)).catch(() => {})
+    }
+  }, [open, categories.length])
+
+  const handlePaste = (e: React.ClipboardEvent) => {
+    const items = e.clipboardData?.items
+    if (!items) return
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].type.startsWith('image/')) {
+        const file = items[i].getAsFile()
+        if (file) { e.preventDefault(); setFiles(prev => [...prev, file]) }
+      }
+    }
+  }
+
+  const buildFormData = (isDraft: boolean) => {
+    const formData = new FormData()
+    formData.append('subject', subject.trim())
+    if (description) formData.append('description', description)
+    if (categoryId) formData.append('category_id', categoryId)
+    if (shareLink) formData.append('share_link', shareLink)
+    formData.append('priority', 'medium')
+    formData.append('source', 'fab')
+    if (isDraft) formData.append('is_draft', 'true')
+    files.forEach(f => formData.append('files', f))
+    return formData
+  }
+
+  const resetForm = () => {
+    setOpen(false); setSubject(''); setDescription(''); setFiles([]); setCategoryId(''); setShareLink(''); setError('')
+  }
+
+  const handleSaveDraft = async () => {
+    if (!subject.trim()) { setError(t('feedback.subjectRequired')); return }
+    setSubmitting(true); setError('')
+    try {
+      const { data } = await api.post('/feedback/tickets', buildFormData(true), { headers: { 'Content-Type': 'multipart/form-data' } })
+      resetForm(); navigate(`/feedback/${data.id}`)
+    } catch (e: any) { setError(e.response?.data?.error || 'Error') }
+    finally { setSubmitting(false) }
+  }
+
+  const handleSubmit = async () => {
+    if (!subject.trim()) { setError(t('feedback.subjectRequired')); return }
+    setSubmitting(true); setError('')
+    try {
+      const { data } = await api.post('/feedback/tickets', buildFormData(false), { headers: { 'Content-Type': 'multipart/form-data' } })
+      resetForm(); navigate(`/feedback/${data.id}`)
+    } catch (e: any) { setError(e.response?.data?.error || 'Error') }
+    finally { setSubmitting(false) }
+  }
+
+  return (
+    <>
+      {/* FAB Button */}
+      <div className="fixed bottom-6 right-6 z-50 group">
+        <button
+          onClick={() => setOpen(!open)}
+          className="w-14 h-14 rounded-full bg-blue-600 hover:bg-blue-700 text-white shadow-lg shadow-blue-600/30 flex items-center justify-center transition-transform hover:scale-105"
+        >
+          {open ? <X size={24} /> : <MessageSquarePlus size={24} />}
+          {!open && unreadCount > 0 && (
+            <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] font-bold rounded-full min-w-[20px] h-[20px] flex items-center justify-center px-1">
+              {unreadCount > 99 ? '99+' : unreadCount}
+            </span>
+          )}
+        </button>
+        {!open && unreadCount > 0 && (
+          <div className="absolute bottom-full right-0 mb-2 px-2.5 py-1 bg-gray-900 text-white text-xs rounded-lg whitespace-nowrap opacity-0 group-hover:opacity-100 transition pointer-events-none">
+            {unreadCount} {t('feedback.unread')}{t('feedback.notifications')}
+          </div>
+        )}
+      </div>
+
+      {/* Quick Form Popover */}
+      {open && (
+        <div className="fixed bottom-24 right-6 z-50 w-96 bg-white border border-gray-200 rounded-2xl shadow-2xl overflow-hidden">
+          <div className="px-4 py-3 border-b border-gray-200 bg-white flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-gray-900">{t('feedback.newTicket')}</h3>
+            <button onClick={() => { setOpen(false); setSubject(''); setDescription(''); setFiles([]); setShareLink(''); setError('') }}
+              className="text-gray-400 hover:text-gray-900 transition">
+              <X size={16} />
+            </button>
+          </div>
+          <div className="p-4 space-y-3 max-h-[60vh] overflow-y-auto">
+            <input
+              type="text"
+              value={subject}
+              onChange={e => setSubject(e.target.value)}
+              onPaste={handlePaste}
+              placeholder={t('feedback.subject') + ' *'}
+              className="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:border-blue-500"
+              autoFocus
+            />
+            <select
+              value={categoryId}
+              onChange={e => setCategoryId(e.target.value)}
+              className="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900"
+            >
+              <option value="">{t('feedback.category')}</option>
+              {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+            <textarea
+              value={description}
+              onChange={e => setDescription(e.target.value)}
+              onPaste={handlePaste}
+              placeholder={t('feedback.description')}
+              rows={3}
+              className="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:border-blue-500 resize-none"
+            />
+            <input
+              type="url"
+              value={shareLink}
+              onChange={e => setShareLink(e.target.value)}
+              placeholder={t('feedback.shareLink') + ' (https://...)'}
+              className="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:border-blue-500"
+            />
+            <div className="flex items-center gap-2">
+              <button onClick={() => fileRef.current?.click()} className="text-gray-400 hover:text-gray-900">
+                <Paperclip size={16} />
+              </button>
+              <input ref={fileRef} type="file" multiple className="hidden" onChange={e => e.target.files && setFiles(prev => [...prev, ...Array.from(e.target.files!)])} />
+              {files.length > 0 && <span className="text-xs text-gray-500">{files.length} 個檔案</span>}
+            </div>
+            {/* 檔案預覽 */}
+            {files.length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                {files.map((f, i) => (
+                  <div key={i} className="relative group">
+                    {f.type.startsWith('image/') ? (
+                      <img src={URL.createObjectURL(f)} alt="" className="w-14 h-14 object-cover rounded-lg border border-gray-200" />
+                    ) : (
+                      <div className="w-14 h-14 flex items-center justify-center rounded-lg border border-gray-200 bg-gray-50 text-[10px] text-gray-400 px-1 text-center">{f.name.slice(0, 10)}</div>
+                    )}
+                    <button onClick={() => setFiles(prev => prev.filter((_, j) => j !== i))}
+                      className="absolute -top-1 -right-1 bg-red-500 rounded-full w-4 h-4 flex items-center justify-center text-white text-[10px] opacity-0 group-hover:opacity-100 transition">×</button>
+                  </div>
+                ))}
+              </div>
+            )}
+            {error && <p className="text-xs text-red-500">{error}</p>}
+          </div>
+          <div className="px-4 py-3 border-t border-gray-200 flex justify-between items-center">
+            <button onClick={() => navigate('/feedback')} className="text-xs text-gray-500 hover:text-blue-600">
+              {t('feedback.myTickets')} →
+            </button>
+            <div className="flex items-center gap-2">
+              <button onClick={handleSaveDraft} disabled={submitting}
+                className="px-3 py-1.5 rounded-lg text-xs font-medium border border-gray-300 text-gray-600 hover:bg-gray-50 disabled:opacity-50">
+                {t('common.save')}
+              </button>
+              <button onClick={handleSubmit} disabled={submitting}
+                className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-medium bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50">
+                {submitting ? <Loader2 size={12} className="animate-spin" /> : <Send size={12} />}
+                {t('feedback.submit')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  )
+}

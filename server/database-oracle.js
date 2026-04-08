@@ -2070,6 +2070,184 @@ async function runMigrations(db) {
 
   // ── Phase 3B-3: 課程 TTS 語音設定 ──────────────────────────────────────────
   await safeAddColumn('COURSES', 'SETTINGS_JSON', 'CLOB');
+
+  // ── 問題反饋平台 ───────────────────────────────────────────────────────────
+
+  await createTable('FEEDBACK_CATEGORIES', `CREATE TABLE feedback_categories (
+    id          NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    name        VARCHAR2(100) NOT NULL,
+    description VARCHAR2(500),
+    icon        VARCHAR2(50),
+    sort_order  NUMBER DEFAULT 0,
+    is_active   NUMBER(1) DEFAULT 1,
+    created_at  TIMESTAMP DEFAULT SYSTIMESTAMP,
+    updated_at  TIMESTAMP DEFAULT SYSTIMESTAMP
+  )`);
+
+  await createTable('FEEDBACK_CATEGORY_TRANSLATIONS', `CREATE TABLE feedback_category_translations (
+    id          NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    category_id NUMBER NOT NULL REFERENCES feedback_categories(id) ON DELETE CASCADE,
+    lang        VARCHAR2(10) NOT NULL,
+    name        VARCHAR2(100) NOT NULL,
+    description VARCHAR2(500),
+    CONSTRAINT uq_fb_cat_trans UNIQUE (category_id, lang)
+  )`);
+
+  await createTable('FEEDBACK_SLA_CONFIGS', `CREATE TABLE feedback_sla_configs (
+    id                    NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    priority              VARCHAR2(20) NOT NULL UNIQUE,
+    first_response_hours  NUMBER NOT NULL,
+    resolution_hours      NUMBER NOT NULL,
+    escalation_enabled    NUMBER(1) DEFAULT 0,
+    escalation_to         NUMBER REFERENCES users(id),
+    created_at            TIMESTAMP DEFAULT SYSTIMESTAMP,
+    updated_at            TIMESTAMP DEFAULT SYSTIMESTAMP
+  )`);
+
+  await createTable('FEEDBACK_TICKETS', `CREATE TABLE feedback_tickets (
+    id                      NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    ticket_no               VARCHAR2(30) NOT NULL UNIQUE,
+    user_id                 NUMBER NOT NULL REFERENCES users(id),
+    applicant_name          VARCHAR2(200),
+    applicant_dept          VARCHAR2(200),
+    applicant_employee_id   VARCHAR2(50),
+    applicant_email         VARCHAR2(200),
+    subject                 VARCHAR2(500) NOT NULL,
+    description             CLOB,
+    share_link              VARCHAR2(1000),
+    category_id             NUMBER REFERENCES feedback_categories(id) ON DELETE SET NULL,
+    priority                VARCHAR2(20) DEFAULT 'medium',
+    tags                    CLOB,
+    status                  VARCHAR2(20) DEFAULT 'open',
+    assigned_to             NUMBER REFERENCES users(id),
+    resolved_by             NUMBER REFERENCES users(id),
+    resolution_note         CLOB,
+    ai_assisted             NUMBER(1) DEFAULT 0,
+    ai_resolved             NUMBER(1) DEFAULT 0,
+    ai_model                VARCHAR2(100),
+    satisfaction_rating     NUMBER(1),
+    satisfaction_comment    VARCHAR2(1000),
+    sla_due_first_response  TIMESTAMP,
+    sla_due_resolution      TIMESTAMP,
+    first_response_at       TIMESTAMP,
+    sla_breached            NUMBER(1) DEFAULT 0,
+    source                  VARCHAR2(50) DEFAULT 'web',
+    source_session_id       VARCHAR2(100),
+    created_at              TIMESTAMP DEFAULT SYSTIMESTAMP,
+    updated_at              TIMESTAMP DEFAULT SYSTIMESTAMP,
+    resolved_at             TIMESTAMP,
+    closed_at               TIMESTAMP,
+    reopened_at             TIMESTAMP
+  )`);
+
+  await createTable('FEEDBACK_ATTACHMENTS', `CREATE TABLE feedback_attachments (
+    id          NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    ticket_id   NUMBER NOT NULL REFERENCES feedback_tickets(id) ON DELETE CASCADE,
+    message_id  NUMBER,
+    file_name   VARCHAR2(500) NOT NULL,
+    file_path   VARCHAR2(1000) NOT NULL,
+    file_size   NUMBER,
+    mime_type   VARCHAR2(100),
+    uploaded_by NUMBER NOT NULL REFERENCES users(id),
+    created_at  TIMESTAMP DEFAULT SYSTIMESTAMP
+  )`);
+
+  await createTable('FEEDBACK_MESSAGES', `CREATE TABLE feedback_messages (
+    id          NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    ticket_id   NUMBER NOT NULL REFERENCES feedback_tickets(id) ON DELETE CASCADE,
+    sender_id   NUMBER NOT NULL REFERENCES users(id),
+    sender_role VARCHAR2(20) NOT NULL,
+    content     CLOB NOT NULL,
+    is_internal NUMBER(1) DEFAULT 0,
+    is_email_sent NUMBER(1) DEFAULT 0,
+    is_system   NUMBER(1) DEFAULT 0,
+    created_at  TIMESTAMP DEFAULT SYSTIMESTAMP
+  )`);
+
+  await createTable('FEEDBACK_AI_ANALYSES', `CREATE TABLE feedback_ai_analyses (
+    id            NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    ticket_id     NUMBER NOT NULL REFERENCES feedback_tickets(id) ON DELETE CASCADE,
+    triggered_by  NUMBER NOT NULL REFERENCES users(id),
+    input_summary CLOB,
+    suggestion    CLOB,
+    rag_sources   CLOB,
+    model         VARCHAR2(100),
+    input_tokens  NUMBER DEFAULT 0,
+    output_tokens NUMBER DEFAULT 0,
+    is_helpful    NUMBER(1),
+    created_at    TIMESTAMP DEFAULT SYSTIMESTAMP
+  )`);
+
+  await createTable('FEEDBACK_NOTIFICATIONS', `CREATE TABLE feedback_notifications (
+    id          NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    user_id     NUMBER NOT NULL REFERENCES users(id),
+    ticket_id   NUMBER NOT NULL REFERENCES feedback_tickets(id) ON DELETE CASCADE,
+    type        VARCHAR2(50) NOT NULL,
+    title       VARCHAR2(500),
+    message     CLOB,
+    is_read     NUMBER(1) DEFAULT 0,
+    created_at  TIMESTAMP DEFAULT SYSTIMESTAMP
+  )`);
+
+  // ── Feedback: 索引 ────────────────────────────────────────────────────────
+  const safeCreateIndex = async (name, ddl) => {
+    try { await db.prepare(ddl).run(); } catch (e) {
+      if (!e.message?.includes('ORA-00955')) console.warn(`[Migration] index ${name}: ${e.message}`);
+    }
+  };
+  await safeCreateIndex('IDX_FB_TICKETS_USER', 'CREATE INDEX idx_fb_tickets_user ON feedback_tickets(user_id)');
+  await safeCreateIndex('IDX_FB_TICKETS_STATUS', 'CREATE INDEX idx_fb_tickets_status ON feedback_tickets(status)');
+  await safeCreateIndex('IDX_FB_TICKETS_CATEGORY', 'CREATE INDEX idx_fb_tickets_category ON feedback_tickets(category_id)');
+  await safeCreateIndex('IDX_FB_TICKETS_CREATED', 'CREATE INDEX idx_fb_tickets_created ON feedback_tickets(created_at)');
+  await safeCreateIndex('IDX_FB_MSG_TICKET', 'CREATE INDEX idx_fb_msg_ticket ON feedback_messages(ticket_id)');
+  await safeCreateIndex('IDX_FB_MSG_CREATED', 'CREATE INDEX idx_fb_msg_created ON feedback_messages(ticket_id, created_at)');
+  await safeCreateIndex('IDX_FB_ATTACH_TICKET', 'CREATE INDEX idx_fb_attach_ticket ON feedback_attachments(ticket_id)');
+  await safeCreateIndex('IDX_FB_NOTIF_USER', 'CREATE INDEX idx_fb_notif_user ON feedback_notifications(user_id, is_read)');
+  await safeCreateIndex('IDX_FB_NOTIF_TICKET', 'CREATE INDEX idx_fb_notif_ticket ON feedback_notifications(ticket_id)');
+
+  // ── Feedback: 預設分類種子資料 ────────────────────────────────────────────
+  try {
+    const catCount = await db.prepare('SELECT COUNT(*) AS cnt FROM feedback_categories').get();
+    if (Number(catCount?.cnt ?? catCount?.CNT ?? 0) === 0) {
+      const defaultCats = [
+        { name: '系統操作問題', icon: 'monitor', sort: 1 },
+        { name: 'AI 回答品質',  icon: 'bot',     sort: 2 },
+        { name: '教育訓練',     icon: 'book-open', sort: 3 },
+        { name: '帳號權限',     icon: 'key',     sort: 4 },
+        { name: '功能建議',     icon: 'lightbulb', sort: 5 },
+        { name: '其他',         icon: 'help-circle', sort: 6 },
+      ];
+      for (const c of defaultCats) {
+        await db.prepare(
+          'INSERT INTO feedback_categories (name, icon, sort_order) VALUES (?, ?, ?)'
+        ).run(c.name, c.icon, c.sort);
+      }
+      console.log('[Migration] Seeded 6 default feedback categories');
+    }
+  } catch (e) {
+    console.warn('[Migration] feedback categories seed:', e.message);
+  }
+
+  // ── Feedback: 預設 SLA 種子資料 ──────────────────────────────────────────
+  try {
+    const slaCount = await db.prepare('SELECT COUNT(*) AS cnt FROM feedback_sla_configs').get();
+    if (Number(slaCount?.cnt ?? slaCount?.CNT ?? 0) === 0) {
+      const defaultSla = [
+        { priority: 'urgent', first: 1,  resolve: 4 },
+        { priority: 'high',   first: 4,  resolve: 8 },
+        { priority: 'medium', first: 8,  resolve: 24 },
+        { priority: 'low',    first: 24, resolve: 72 },
+      ];
+      for (const s of defaultSla) {
+        await db.prepare(
+          'INSERT INTO feedback_sla_configs (priority, first_response_hours, resolution_hours) VALUES (?, ?, ?)'
+        ).run(s.priority, s.first, s.resolve);
+      }
+      console.log('[Migration] Seeded 4 default SLA configs');
+    }
+  } catch (e) {
+    console.warn('[Migration] feedback SLA seed:', e.message);
+  }
 }
 
 // ─── Default DB Source migration ───────────────────────────────────────────────

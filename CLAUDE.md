@@ -61,6 +61,8 @@ cd client && npm run dev    # frontend → localhost:5173 (proxy → 3007)
 | `data-policy-category-binding-design.md` | 資料政策分類綁定 |
 | `gmail-api-integration-design.md` | Gmail API 整合 |
 | `webex-bot-spec.md` | Webex Bot 規格 |
+| `feedback-platform-design.md` | 問題反饋平台設計文件 |
+| `feedback-platform-implementation.md` | 問題反饋平台實施報告（Phase 1–5） |
 | `test-plan-v2-tag-workflow.md` | 標籤工作流測試計畫 |
 | `llm-performance-optimization.md` | LLM 效能優化（streaming、genConfig、AOAI 相容性） |
 

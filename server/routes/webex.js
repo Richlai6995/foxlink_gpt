@@ -1276,6 +1276,81 @@ async function handleWebexMessage(message) {
     return;
   }
 
+  // ── Feedback 指令 ────────────────────────────────────────────────────────
+  if (cmdText.startsWith('feedback ') || cmdText.startsWith('fb ')) {
+    try {
+      const feedbackService = require('../services/feedbackService');
+      const parts = msgText.replace(/^(feedback|fb)\s+/i, '').split(/\s+/);
+      const subCmd = (parts[0] || '').toLowerCase();
+      const ticketNo = parts[1] || '';
+      const restText = parts.slice(2).join(' ');
+
+      if (subCmd === 'list') {
+        const result = await feedbackService.listTickets(db, {
+          userId: user.id, isAdmin: user.role === 'admin',
+          status: 'open,processing,pending_user', sort: 'created_at', order: 'desc', page: 1, limit: 10,
+        });
+        if (result.tickets.length === 0) {
+          await webex.sendMessage(roomId, '目前沒有待處理的工單');
+        } else {
+          const lines = result.tickets.map(t =>
+            `• **${t.ticket_no}** [${t.priority}] ${t.subject} — ${t.status}`
+          );
+          await webex.sendMessage(roomId, `📋 **待處理工單** (${result.total})\n${lines.join('\n')}`, { markdown: true });
+        }
+        return;
+      }
+
+      if (subCmd === 'view' && ticketNo) {
+        const ticket = await feedbackService.getTicketByNo(db, ticketNo.toUpperCase());
+        if (!ticket) { await webex.sendMessage(roomId, `找不到工單 ${ticketNo}`); return; }
+        const md = `🎫 **${ticket.ticket_no}** [${ticket.priority}] ${ticket.status}\n**申請者：** ${ticket.applicant_name}\n**主旨：** ${ticket.subject}\n**建立：** ${ticket.created_at}`;
+        await webex.sendMessage(roomId, md, { markdown: md });
+        return;
+      }
+
+      if (subCmd === 'reply' && ticketNo && restText) {
+        const ticket = await feedbackService.getTicketByNo(db, ticketNo.toUpperCase());
+        if (!ticket) { await webex.sendMessage(roomId, `找不到工單 ${ticketNo}`); return; }
+        if (user.role !== 'admin') { await webex.sendMessage(roomId, '只有管理員可以回覆工單'); return; }
+        await feedbackService.addMessage(db, {
+          ticket_id: ticket.id, sender_id: user.id, sender_role: 'admin', content: restText, is_internal: false,
+        });
+        const { emitNewMessage } = require('../services/socketService');
+        emitNewMessage(ticket.id, { content: restText, sender_role: 'admin', sender_name: user.name });
+        await webex.sendMessage(roomId, `✅ 已回覆 ${ticket.ticket_no}`);
+        return;
+      }
+
+      if (subCmd === 'resolve' && ticketNo) {
+        const ticket = await feedbackService.getTicketByNo(db, ticketNo.toUpperCase());
+        if (!ticket) { await webex.sendMessage(roomId, `找不到工單 ${ticketNo}`); return; }
+        if (user.role !== 'admin') { await webex.sendMessage(roomId, '只有管理員可以結案'); return; }
+        await feedbackService.changeStatus(db, ticket.id, 'resolved', user.id, restText || 'via Webex');
+        await webex.sendMessage(roomId, `✅ 已結案 ${ticket.ticket_no}`);
+        return;
+      }
+
+      if (subCmd === 'assign' && ticketNo) {
+        const ticket = await feedbackService.getTicketByNo(db, ticketNo.toUpperCase());
+        if (!ticket) { await webex.sendMessage(roomId, `找不到工單 ${ticketNo}`); return; }
+        if (user.role !== 'admin') { await webex.sendMessage(roomId, '只有管理員可以接單'); return; }
+        await feedbackService.assignTicket(db, ticket.id, user.id);
+        await webex.sendMessage(roomId, `✅ 已接單 ${ticket.ticket_no}`);
+        return;
+      }
+
+      // 不認識的子指令 → 顯示幫助
+      const helpMd = `🎫 **Feedback 指令**\n• \`feedback list\` — 列出待處理工單\n• \`feedback view #FB-xxx\` — 查看工單\n• \`feedback reply #FB-xxx 回覆內容\` — 回覆\n• \`feedback resolve #FB-xxx [說明]\` — 結案\n• \`feedback assign #FB-xxx\` — 接單`;
+      await webex.sendMessage(roomId, helpMd, { markdown: helpMd });
+      return;
+    } catch (fbErr) {
+      console.error('[Webex] Feedback command error:', fbErr.message);
+      await webex.sendMessage(roomId, `❌ 指令執行失敗: ${fbErr.message}`);
+      return;
+    }
+  }
+
   // 一般訊息 → AI 處理
   const fileUrls = message.files || [];
   console.log(`[Webex] Processing chat: user=${user.username} session=${sessionId} text="${msgText.slice(0, 50)}" files=${fileUrls.length}`);

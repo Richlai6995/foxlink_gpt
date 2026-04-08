@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Users, BarChart3, Shield, AlertTriangle, Database, Mail, ArrowLeft, Cpu, DollarSign, CalendarClock, Plug, Zap, UserCog, Sparkles, Code2, Search, KeyRound, MonitorPlay, Lock, Activity, MessageSquare, Languages, GraduationCap } from 'lucide-react'
+import { Users, BarChart3, Shield, AlertTriangle, Database, Mail, ArrowLeft, Cpu, DollarSign, CalendarClock, Plug, Zap, UserCog, Sparkles, Code2, Search, KeyRound, MonitorPlay, Lock, Activity, MessageSquare, Languages, GraduationCap, TicketCheck } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import UserManagement from '../components/admin/UserManagement'
 import TokenUsagePanel from '../components/admin/TokenUsage'
@@ -27,7 +27,10 @@ import DbSourcesPanel from '../components/admin/DbSourcesPanel'
 import WebexLogsPanel from '../components/admin/WebexLogsPanel'
 import HelpTranslationPanel from '../components/admin/HelpTranslationPanel'
 import TrainingAdmin from '../components/admin/TrainingAdmin'
-type Tab = 'users' | 'roles' | 'tokens' | 'audit' | 'keywords' | 'db' | 'mail' | 'llm' | 'vector-defaults' | 'cost' | 'scheduled' | 'mcp' | 'dify' | 'kb' | 'skills' | 'code-runners' | 'research' | 'api-keys' | 'ai-dashboard' | 'data-permissions' | 'monitor' | 'db-sources' | 'webex-logs' | 'help-translation' | 'training'
+import FeedbackCategoryManager from '../components/feedback/admin/FeedbackCategoryManager'
+import FeedbackSLAConfig from '../components/feedback/admin/FeedbackSLAConfig'
+import FeedbackStatsPanel from '../components/feedback/FeedbackStatsPanel'
+type Tab = 'users' | 'roles' | 'tokens' | 'audit' | 'keywords' | 'db' | 'mail' | 'llm' | 'vector-defaults' | 'cost' | 'scheduled' | 'mcp' | 'dify' | 'kb' | 'skills' | 'code-runners' | 'research' | 'api-keys' | 'ai-dashboard' | 'data-permissions' | 'monitor' | 'db-sources' | 'webex-logs' | 'help-translation' | 'training' | 'feedback'
 
 export default function AdminDashboard() {
   const [activeTab, setActiveTab] = useState<Tab>('users')
@@ -63,6 +66,8 @@ export default function AdminDashboard() {
     { id: 'help-translation', label: '說明文件翻譯', icon: <Languages size={16} className="text-sky-500" /> },
     // ─ 教育訓練 ─
     { id: 'training', label: '教育訓練報表', icon: <GraduationCap size={16} className="text-sky-400" /> },
+    // ─ 問題反饋 ─
+    { id: 'feedback' as Tab, label: t('feedback.title', '問題反饋'), icon: <TicketCheck size={16} className="text-rose-400" /> },
     // ─ 系統維運 ─
     { id: 'monitor', label: t('admin.tabs.monitor', '系統監控'), icon: <Activity size={16} className="text-red-400" /> },
     { id: 'db', label: t('admin.tabs.db'), icon: <Database size={16} className="text-slate-500" /> },
@@ -133,6 +138,15 @@ export default function AdminDashboard() {
           {activeTab === 'db-sources' && <DbSourcesPanel />}
           {activeTab === 'help-translation' && <HelpTranslationPanel />}
           {activeTab === 'training' && <TrainingAdmin />}
+          {activeTab === 'feedback' && (
+            <div className="space-y-8">
+              <FeedbackStatsPanel />
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <FeedbackCategoryManager />
+                <FeedbackSLAConfig />
+              </div>
+            </div>
+          )}
           {activeTab === 'monitor' && <MonitorPage />}
         </main>
       </div>
