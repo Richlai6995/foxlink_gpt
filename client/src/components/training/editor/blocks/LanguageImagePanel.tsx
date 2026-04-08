@@ -3,7 +3,7 @@
  * 每個語言可以擁有完全獨立的 region 集合，或繼承主語言。
  */
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { Upload, Trash2, Globe, Save, Maximize2, X, Copy, Plus, MousePointer, Pen, RotateCcw, Sparkles, Volume2, Loader2, ImagePlus, Columns, Rows, Eye } from 'lucide-react'
+import { Upload, Trash2, Globe, Save, Maximize2, X, Copy, Plus, MousePointer, Pen, RotateCcw, Sparkles, Volume2, Loader2, ImagePlus, Columns, Rows, Eye, RefreshCw } from 'lucide-react'
 import api from '../../../../lib/api'
 import VoiceInput from './VoiceInput'
 
@@ -291,11 +291,31 @@ export default function LanguageImagePanel({ slideId, blockIndex, currentImage, 
       await api.put(`/training/slides/${slideId}/lang-regions`, {
         lang: activeLang,
         block_index: blockIndex,
-        regions: langRegions[activeLang]?.[String(blockIndex)] || []
+        regions: langRegions[activeLang]?.[String(blockIndex)] || [],
+        _intro: langIntro[activeLang] || undefined
       })
     } catch (e: any) { alert(e.response?.data?.error || '儲存失敗') }
     finally { setSaving(false) }
   }
+
+  // Generate TTS for a single text field and return audio URL
+  const genSingleTts = useCallback(async (text: string, regionId: string): Promise<string | null> => {
+    if (!text) return null
+    try {
+      const r = await api.post(`/training/slides/${slideId}/region-tts`, {
+        block_index: blockIndex, region_id: regionId, text, language: activeLang
+      })
+      return r.data.audio_url
+    } catch { return null }
+  }, [slideId, blockIndex, activeLang])
+
+  // Update an intro field + optionally regenerate TTS
+  const updateIntroField = useCallback((field: string, value: string) => {
+    setLangIntro(prev => ({
+      ...prev,
+      [activeLang]: { ...(prev[activeLang] || {}), [field]: value }
+    }))
+  }, [activeLang])
 
   // Update a region in the independent set
   const updateLangRegion = (regionId: string, updates: Partial<Region>) => {
@@ -686,31 +706,88 @@ export default function LanguageImagePanel({ slideId, blockIndex, currentImage, 
               </button>
             </div>
 
-            {/* Intro narration preview */}
+            {/* Intro narration — editable */}
             {langIntro[activeLang] && (
-              <div className="text-[9px] space-y-1 rounded p-1.5" style={{ backgroundColor: 'var(--t-bg-card)', border: '1px solid var(--t-border)' }}>
+              <div className="text-[9px] space-y-1.5 rounded p-1.5" style={{ backgroundColor: 'var(--t-bg-card)', border: '1px solid var(--t-border)' }}>
                 {[
-                  { key: 'slide_narration', audioKey: 'slide_narration_audio', icon: '🎯', label: '導引' },
-                  { key: 'slide_narration_test', audioKey: 'slide_narration_test_audio', icon: '📝', label: '測驗' },
-                  { key: 'slide_narration_explore', audioKey: 'slide_narration_explore_audio', icon: '🔍', label: '探索' },
+                  { key: 'slide_narration', audioKey: 'slide_narration_audio', icon: '🎯', label: '導引', ttsId: 'intro_guided' },
+                  { key: 'slide_narration_test', audioKey: 'slide_narration_test_audio', icon: '📝', label: '測驗', ttsId: 'intro_test' },
+                  { key: 'slide_narration_explore', audioKey: 'slide_narration_explore_audio', icon: '🔍', label: '探索', ttsId: 'intro_explore' },
                 ].map(m => langIntro[activeLang]?.[m.key] && (
-                  <div key={m.key}>
-                    <span style={{ color: 'var(--t-text-dim)' }}>{m.icon} {m.label}:</span>
-                    <span className="ml-1" style={{ color: 'var(--t-text-secondary)' }}>{(langIntro[activeLang][m.key] as string).slice(0, 40)}...</span>
-                    {langIntro[activeLang]?.[m.audioKey] && <audio src={langIntro[activeLang][m.audioKey]} controls className="w-full h-5 mt-0.5" style={{ maxHeight: '20px' }} />}
+                  <div key={m.key} className="space-y-0.5">
+                    <div className="flex items-center gap-1">
+                      <span style={{ color: 'var(--t-text-dim)' }}>{m.icon} {m.label}</span>
+                      <div className="flex-1" />
+                      <button
+                        onClick={async () => {
+                          setTtsLoading(m.key)
+                          const url = await genSingleTts(langIntro[activeLang][m.key], `${activeLang}_${m.ttsId}`)
+                          if (url) updateIntroField(m.audioKey, url)
+                          setTtsLoading(null)
+                        }}
+                        disabled={!!ttsLoading}
+                        className="flex items-center gap-0.5 text-[8px] px-1.5 py-0.5 rounded transition disabled:opacity-40"
+                        style={{ color: '#a855f7', border: '1px solid rgba(168,85,247,0.3)' }}>
+                        {ttsLoading === m.key ? <Loader2 size={8} className="animate-spin" /> : <RefreshCw size={8} />}
+                        TTS
+                      </button>
+                    </div>
+                    <textarea
+                      value={langIntro[activeLang][m.key] || ''}
+                      onChange={e => updateIntroField(m.key, e.target.value)}
+                      rows={2}
+                      className="w-full text-[9px] rounded px-1.5 py-1 resize-y focus:outline-none"
+                      style={{ backgroundColor: 'var(--t-bg-inset, var(--t-bg-card))', border: '1px solid var(--t-border)', color: 'var(--t-text)' }}
+                    />
+                    {langIntro[activeLang]?.[m.audioKey] && <audio src={langIntro[activeLang][m.audioKey]} controls className="w-full h-5" style={{ maxHeight: '20px' }} />}
                   </div>
                 ))}
               </div>
             )}
 
-            {/* Per-region voice preview */}
+            {/* Per-region voice — editable */}
             {independentRegions.filter(r => r.correct).map((r, idx) => (
-              <div key={r.id} className="text-[9px] rounded p-1.5 space-y-0.5" style={{ backgroundColor: 'var(--t-bg-card)', border: '1px solid var(--t-border)' }}>
-                <span className="font-medium" style={{ color: 'var(--t-text-secondary)' }}>{idx + 1}. {r.label || r.id}</span>
-                {r.narration && <div style={{ color: 'var(--t-text-dim)' }}>📖 {r.narration.slice(0, 40)}...</div>}
-                {r.test_hint && <div style={{ color: 'var(--t-text-dim)' }}>📝 {r.test_hint.slice(0, 40)}...</div>}
-                {r.explore_desc && <div style={{ color: 'var(--t-text-dim)' }}>🔍 {r.explore_desc.slice(0, 40)}...</div>}
-                {r.audio_url && <audio src={r.audio_url} controls className="w-full h-5" style={{ maxHeight: '20px' }} />}
+              <div key={r.id} className="text-[9px] rounded p-1.5 space-y-1" style={{ backgroundColor: 'var(--t-bg-card)', border: '1px solid var(--t-border)' }}>
+                <div className="flex items-center gap-1">
+                  <span className="font-medium" style={{ color: 'var(--t-text-secondary)' }}>{idx + 1}. {r.label || r.id}</span>
+                </div>
+                {[
+                  { field: 'narration', audioField: 'audio_url', icon: '📖', label: '導引' },
+                  { field: 'test_hint', audioField: 'test_audio_url', icon: '📝', label: '測驗' },
+                  { field: 'explore_desc', audioField: 'explore_audio_url', icon: '🔍', label: '探索' },
+                ].map(m => (
+                  <div key={m.field} className="space-y-0.5">
+                    <div className="flex items-center gap-1">
+                      <span style={{ color: 'var(--t-text-dim)' }}>{m.icon} {m.label}</span>
+                      <div className="flex-1" />
+                      {r[m.field] && (
+                        <button
+                          onClick={async () => {
+                            const ttsKey = `${r.id}_${m.field}`
+                            setTtsLoading(ttsKey)
+                            const url = await genSingleTts(r[m.field], `${activeLang}_${m.field}_${r.id}`)
+                            if (url) updateLangRegion(r.id, { [m.audioField]: url })
+                            setTtsLoading(null)
+                          }}
+                          disabled={!!ttsLoading}
+                          className="flex items-center gap-0.5 text-[8px] px-1.5 py-0.5 rounded transition disabled:opacity-40"
+                          style={{ color: '#a855f7', border: '1px solid rgba(168,85,247,0.3)' }}>
+                          {ttsLoading === `${r.id}_${m.field}` ? <Loader2 size={8} className="animate-spin" /> : <RefreshCw size={8} />}
+                          TTS
+                        </button>
+                      )}
+                    </div>
+                    <textarea
+                      value={r[m.field] || ''}
+                      onChange={e => updateLangRegion(r.id, { [m.field]: e.target.value })}
+                      rows={1}
+                      className="w-full text-[9px] rounded px-1.5 py-0.5 resize-y focus:outline-none"
+                      style={{ backgroundColor: 'var(--t-bg-inset, var(--t-bg-card))', border: '1px solid var(--t-border)', color: 'var(--t-text)' }}
+                      placeholder={`${m.label}文字...`}
+                    />
+                    {r[m.audioField] && <audio src={r[m.audioField]} controls className="w-full h-5" style={{ maxHeight: '20px' }} />}
+                  </div>
+                ))}
                 {!r.audio_url && !r.narration && <div style={{ color: '#f59e0b' }}>⚠ 無語音</div>}
               </div>
             ))}
