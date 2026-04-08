@@ -15,6 +15,41 @@ export default function FeedbackFAB() {
   const navigate = useNavigate()
   const { unreadCount } = useFeedbackNotifications()
   const [open, setOpen] = useState(false)
+
+  // 可拖動 FAB
+  const [fabPos, setFabPos] = useState({ x: 24, y: 100 }) // 距離右邊24px, 距離底部100px
+  const dragging = useRef(false)
+  const dragStart = useRef({ x: 0, y: 0, startX: 0, startY: 0 })
+
+  const handlePointerDown = (e: React.PointerEvent) => {
+    if (open) return // 開啟表單時不可拖
+    dragging.current = false
+    dragStart.current = { x: e.clientX, y: e.clientY, startX: fabPos.x, startY: fabPos.y }
+    const el = e.currentTarget as HTMLElement
+    el.setPointerCapture(e.pointerId)
+
+    const onMove = (ev: PointerEvent) => {
+      const dx = ev.clientX - dragStart.current.x
+      const dy = ev.clientY - dragStart.current.y
+      if (Math.abs(dx) > 4 || Math.abs(dy) > 4) dragging.current = true
+      if (!dragging.current) return
+      setFabPos({
+        x: Math.max(8, Math.min(window.innerWidth - 72, dragStart.current.startX - dx)),
+        y: Math.max(8, Math.min(window.innerHeight - 72, dragStart.current.startY - dy)),
+      })
+    }
+    const onUp = () => {
+      el.removeEventListener('pointermove', onMove)
+      el.removeEventListener('pointerup', onUp)
+    }
+    el.addEventListener('pointermove', onMove)
+    el.addEventListener('pointerup', onUp)
+  }
+
+  const handleFabClick = () => {
+    if (dragging.current) return // 拖動結束不觸發 click
+    setOpen(!open)
+  }
   const [subject, setSubject] = useState('')
   const [description, setDescription] = useState('')
   const [categoryId, setCategoryId] = useState('')
@@ -81,11 +116,12 @@ export default function FeedbackFAB() {
 
   return (
     <>
-      {/* FAB Button */}
-      <div className="fixed bottom-6 right-6 z-50 group">
+      {/* FAB Button — 可拖動 */}
+      <div className="fixed z-50 group" style={{ right: fabPos.x, bottom: fabPos.y }}>
         <button
-          onClick={() => setOpen(!open)}
-          className="w-14 h-14 rounded-full bg-blue-600 hover:bg-blue-700 text-white shadow-lg shadow-blue-600/30 flex items-center justify-center transition-transform hover:scale-105"
+          onPointerDown={handlePointerDown}
+          onClick={handleFabClick}
+          className="w-14 h-14 rounded-full bg-blue-600 hover:bg-blue-700 text-white shadow-lg shadow-blue-600/30 flex items-center justify-center transition-shadow hover:shadow-xl cursor-grab active:cursor-grabbing touch-none select-none"
         >
           {open ? <X size={24} /> : <MessageSquarePlus size={24} />}
           {!open && unreadCount > 0 && (
@@ -103,7 +139,7 @@ export default function FeedbackFAB() {
 
       {/* Quick Form Popover */}
       {open && (
-        <div className="fixed bottom-24 right-6 z-50 w-96 bg-white border border-gray-200 rounded-2xl shadow-2xl overflow-hidden">
+        <div className="fixed z-50 w-96 bg-white border border-gray-200 rounded-2xl shadow-2xl overflow-hidden" style={{ right: fabPos.x, bottom: fabPos.y + 64 }}>
           <div className="px-4 py-3 border-b border-gray-200 bg-white flex items-center justify-between">
             <h3 className="text-sm font-semibold text-gray-900">{t('feedback.newTicket')}</h3>
             <button onClick={() => { setOpen(false); setSubject(''); setDescription(''); setFiles([]); setShareLink(''); setError('') }}
