@@ -322,6 +322,9 @@ export default function HotspotBlock({ block, blockIndex = 0, isLastSlide = fals
     }
     actionLogRef.current.push(logEntry)
 
+    // If user clicks while intro is still playing, force-end intro so step audio can resume
+    if (introPlaying) { stopAudio(); setIntroPlaying(false); setIntroPlayed(true) }
+
     if (!hit) {
       wrongClicksRef.current++
       setFeedback({ text: t('training.missedRegion'), correct: false })
