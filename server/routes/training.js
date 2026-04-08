@@ -1012,16 +1012,19 @@ router.get('/lessons/:lid/slides', async (req, res) => {
                   if (idx === '_intro') continue; // handled below
                   const block = blocks[Number(idx)];
                   if (block && Array.isArray(regs)) {
-                    // Merge: independent regions keep coords/correct/label, but voice/text fields
-                    // ALWAYS come from translated content_json (regions_json only overrides geometry)
+                    // Independent regions (regions_json) are the source of truth —
+                    // they contain their own label/narration/audio set by LanguageImagePanel.
+                    // Only fall back to translated content_json when a voice field is missing.
                     const transRegions = block.regions || [];
                     const voiceFields = ['narration', 'audio_url', 'test_hint', 'test_audio_url', 'explore_desc', 'explore_audio_url', 'feedback', 'feedback_wrong'];
                     for (const reg of regs) {
                       const transMatch = transRegions.find(tr => tr.id === reg.id);
                       if (transMatch) {
                         for (const vf of voiceFields) {
-                          if (transMatch[vf]) reg[vf] = transMatch[vf];
+                          if (!reg[vf] && transMatch[vf]) reg[vf] = transMatch[vf];
                         }
+                        // Fill label from translated content if not set in regions_json
+                        if (!reg.label && transMatch.label) reg.label = transMatch.label;
                       }
                     }
                     block.regions = regs;
@@ -3506,13 +3509,27 @@ router.post('/courses/:id/translate', loadCoursePermission, requirePermission('o
         let translatedNotes = null;
         try { translatedNotes = await translateText(slide.notes); } catch {}
 
-        const existingST = await db.prepare('SELECT id FROM slide_translations WHERE slide_id=? AND lang=?').get(slide.id, target_lang);
+        const existingST = await db.prepare('SELECT id, regions_json FROM slide_translations WHERE slide_id=? AND lang=?').get(slide.id, target_lang);
         if (existingST) {
           await db.prepare('UPDATE slide_translations SET content_json=?, notes=?, translated_at=SYSTIMESTAMP, is_auto=1 WHERE id=?')
             .run(translatedContent, translatedNotes, existingST.id);
         } else {
           await db.prepare('INSERT INTO slide_translations (slide_id, lang, content_json, notes, is_auto) VALUES (?,?,?,?,1)')
             .run(slide.id, target_lang, translatedContent, translatedNotes);
+        }
+
+        // Translate independent regions_json — single LLM call for entire JSON
+        const regJson = existingST?.regions_json;
+        if (regJson) {
+          try {
+            const transRegResult = await model.generateContent(
+              `Translate all Chinese text values in this JSON to ${langName}. Keep JSON structure, all keys, coords, IDs, booleans, numbers, and audio_url values unchanged. Only translate string values that contain Chinese text (label, narration, feedback, feedback_wrong, test_hint, explore_desc, slide_narration, slide_narration_test, slide_narration_explore, completion_message). Return only valid JSON:\n\n${regJson}`
+            );
+            const transRegStr = transRegResult.response.text().trim().replace(/^```json\s*/, '').replace(/```$/, '').trim();
+            JSON.parse(transRegStr); // validate
+            await db.prepare('UPDATE slide_translations SET regions_json=? WHERE slide_id=? AND lang=?')
+              .run(transRegStr, slide.id, target_lang);
+          } catch (e) { console.warn(`[Translate] regions_json for slide ${slide.id}:`, e.message); }
         }
 
         // TTS generation moved to separate "generate-lang-tts" API for speed
@@ -5387,6 +5404,14 @@ router.post('/slides/:sid/lang-image', upload.single('file'), async (req, res) =
     const check = await verifyLessonAccess(slide.lesson_id, req.user, true);
     if (check.error) return res.status(check.status).json({ error: check.error });
 
+    // Multer may save to course_tmp/ when :sid doesn't match :id — move to correct dir
+    const correctDir = path.join(uploadDir, `course_${check.courseId}`);
+    if (!fs.existsSync(correctDir)) fs.mkdirSync(correctDir, { recursive: true });
+    const correctPath = path.join(correctDir, req.file.filename);
+    if (req.file.path !== correctPath && !fs.existsSync(correctPath)) {
+      fs.renameSync(req.file.path, correctPath);
+    }
+
     const imgUrl = `/api/training/files/course_${check.courseId}/${req.file.filename}`;
     const idx = block_index || '0';
 
@@ -6183,6 +6208,265 @@ router.post('/courses/import-package', upload.single('package'), async (req, res
     });
   } catch (e) {
     console.error('[Training] import-package:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// LESSON QUIZ RESULTS — 章節級測驗成績
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// POST /api/training/lesson-quiz-result — 寫入章節測驗成績
+router.post('/lesson-quiz-result', async (req, res) => {
+  try {
+    const { course_id, lesson_id, session_id, score, max_score, source } = req.body;
+    if (!course_id || !lesson_id) return res.status(400).json({ error: 'Missing course_id or lesson_id' });
+
+    const course = await db.prepare('SELECT pass_score FROM courses WHERE id=?').get(course_id);
+    const passScore = course?.pass_score || 60;
+    const percent = max_score > 0 ? (score / max_score) * 100 : 0;
+    const passed = percent >= passScore ? 1 : 0;
+
+    // Upsert: same user + course + lesson + session → update
+    const sid = session_id || null;
+    const existing = await db.prepare(
+      sid
+        ? 'SELECT id FROM lesson_quiz_results WHERE user_id=? AND course_id=? AND lesson_id=? AND session_id=?'
+        : 'SELECT id FROM lesson_quiz_results WHERE user_id=? AND course_id=? AND lesson_id=? AND session_id IS NULL'
+    ).get(...(sid ? [req.user.id, course_id, lesson_id, sid] : [req.user.id, course_id, lesson_id]));
+
+    if (existing) {
+      await db.prepare(`
+        UPDATE lesson_quiz_results SET score=?, max_score=?, passed=?, completed_at=SYSTIMESTAMP
+        WHERE id=?
+      `).run(score, max_score, passed, existing.id);
+    } else {
+      await db.prepare(`
+        INSERT INTO lesson_quiz_results (user_id, course_id, lesson_id, source, session_id, score, max_score, passed)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(req.user.id, course_id, lesson_id, source || 'classroom', sid, score, max_score, passed);
+    }
+
+    res.json({ ok: true, passed: !!passed, score, max_score, percent: Math.round(percent) });
+  } catch (e) {
+    console.error('[Training] lesson-quiz-result:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/training/lesson-completion-report — 課程章節完成率報表 (admin)
+router.get('/lesson-completion-report', async (req, res) => {
+  try {
+    if (req.user.role !== 'admin' && req.user.effective_training_permission !== 'publish_edit')
+      return res.status(403).json({ error: '權限不足' });
+
+    const { course_id } = req.query;
+    if (!course_id) return res.status(400).json({ error: 'Missing course_id' });
+
+    const course = await db.prepare('SELECT id, title, pass_score, is_public FROM courses WHERE id=?').get(Number(course_id));
+    if (!course) return res.status(404).json({ error: '課程不存在' });
+
+    // 取所有 lesson
+    const lessons = await db.prepare(
+      'SELECT id, title, sort_order FROM course_lessons WHERE course_id=? ORDER BY sort_order'
+    ).all(Number(course_id));
+
+    // 需要完成的人：訓練專案指派 + 公開課程全員
+    let targetUsers;
+    if (course.is_public) {
+      targetUsers = await db.prepare("SELECT id, name, employee_id FROM users WHERE status='active'").all();
+    } else {
+      targetUsers = await db.prepare(`
+        SELECT DISTINCT u.id, u.name, u.employee_id
+        FROM program_assignments pa
+        JOIN program_courses pc ON pc.program_id = pa.program_id AND pc.course_id = pa.course_id
+        JOIN users u ON u.id = pa.user_id
+        WHERE pc.course_id = ? AND pa.status != 'exempted'
+      `).all(Number(course_id));
+    }
+
+    // 每個 lesson 的最佳成績 (per user)
+    const results = await db.prepare(`
+      SELECT lesson_id, user_id, MAX(passed) AS best_passed,
+             MAX(score) AS best_score, MAX(max_score) AS best_max_score,
+             MAX(completed_at) AS last_completed
+      FROM lesson_quiz_results
+      WHERE course_id = ?
+      GROUP BY lesson_id, user_id
+    `).all(Number(course_id));
+
+    // Build lookup: lesson_id → user_id → result
+    const resultMap = {};
+    for (const r of results) {
+      if (!resultMap[r.lesson_id]) resultMap[r.lesson_id] = {};
+      resultMap[r.lesson_id][r.user_id] = r;
+    }
+
+    const lessonReport = lessons.map(l => {
+      const totalUsers = targetUsers.length;
+      const lessonResults = resultMap[l.id] || {};
+      let passedCount = 0;
+      let failedCount = 0;
+      let notAttempted = 0;
+      const userDetails = targetUsers.map(u => {
+        const r = lessonResults[u.id];
+        let status = 'not_attempted';
+        if (r) {
+          if (r.best_passed) { status = 'passed'; passedCount++; }
+          else { status = 'failed'; failedCount++; }
+        } else {
+          notAttempted++;
+        }
+        return {
+          user_id: u.id, name: u.name, employee_id: u.employee_id,
+          status,
+          best_score: r?.best_score ?? null,
+          max_score: r?.best_max_score ?? null,
+          last_completed: r?.last_completed ?? null,
+        };
+      });
+      return {
+        lesson_id: l.id, title: l.title, sort_order: l.sort_order,
+        total_users: totalUsers, passed: passedCount, failed: failedCount, not_attempted: notAttempted,
+        pass_rate: totalUsers > 0 ? Math.round((passedCount / totalUsers) * 100) : 0,
+        users: userDetails,
+      };
+    });
+
+    res.json({
+      course_id: course.id, course_title: course.title, pass_score: course.pass_score,
+      is_public: !!course.is_public, total_target_users: targetUsers.length,
+      lessons: lessonReport,
+    });
+  } catch (e) {
+    console.error('[Training] lesson-completion-report:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/training/help-completion-report — 使用手冊章節完成率報表 (admin)
+// Query: ?lang=&section_ids=id1,id2&dept_code=&profit_center_code=&org_section=&org_group=
+router.get('/help-completion-report', async (req, res) => {
+  try {
+    if (req.user.role !== 'admin' && req.user.effective_training_permission !== 'publish_edit')
+      return res.status(403).json({ error: '權限不足' });
+
+    const lang = req.query.lang || 'zh-TW';
+    const filterSectionIds = req.query.section_ids ? String(req.query.section_ids).split(',').filter(Boolean) : null;
+    const filterDept = req.query.dept_code || null;
+    const filterProfitCenter = req.query.profit_center || null;
+    const filterOrgSection = req.query.org_section || null;
+    const filterOrgGroup = req.query.org_group_name || null;
+
+    // 取所有有連結課程的 help sections
+    const allSections = await db.prepare(`
+      SELECT s.id, s.sort_order, s.linked_course_id, s.linked_lesson_id,
+             COALESCE(t.title, tzh.title) AS title,
+             c.pass_score, c.is_public
+      FROM help_sections s
+      LEFT JOIN help_translations t ON t.section_id = s.id AND t.lang = ?
+      LEFT JOIN help_translations tzh ON tzh.section_id = s.id AND tzh.lang = 'zh-TW'
+      LEFT JOIN courses c ON c.id = s.linked_course_id
+      WHERE s.linked_course_id IS NOT NULL AND s.section_type = 'user'
+      ORDER BY s.sort_order
+    `).all(lang);
+
+    if (!allSections.length) return res.json({ sections: [], users: [], summary: { total: 0, all_passed: 0, some_tested: 0, not_tested: 0 } });
+
+    // 篩選的章節
+    const sections = filterSectionIds ? allSections.filter(s => filterSectionIds.includes(s.id)) : allSections;
+
+    // 取所有使用者（含組織資料）
+    let userQuery = `SELECT id, name, employee_id, dept_code, dept_name, profit_center, profit_center_name, org_section, org_section_name, org_group_name FROM users WHERE status='active'`;
+    const userParams = [];
+    if (filterDept) { userQuery += ' AND dept_code=?'; userParams.push(filterDept); }
+    if (filterProfitCenter) { userQuery += ' AND profit_center=?'; userParams.push(filterProfitCenter); }
+    if (filterOrgSection) { userQuery += ' AND org_section=?'; userParams.push(filterOrgSection); }
+    if (filterOrgGroup) { userQuery += ' AND org_group_name=?'; userParams.push(filterOrgGroup); }
+    const allUsers = await db.prepare(userQuery).all(...userParams);
+
+    // 每個 section 的成績查詢
+    const sectionResults = {}; // section_id → { user_id → result }
+    for (const sec of sections) {
+      if (!sec.linked_lesson_id) { sectionResults[sec.id] = {}; continue; }
+      const results = await db.prepare(`
+        SELECT user_id, MAX(passed) AS best_passed,
+               MAX(score) AS best_score, MAX(max_score) AS best_max_score,
+               MAX(completed_at) AS last_completed
+        FROM lesson_quiz_results
+        WHERE course_id = ? AND lesson_id = ?
+        GROUP BY user_id
+      `).all(sec.linked_course_id, sec.linked_lesson_id);
+      const map = {};
+      for (const r of results) map[r.user_id] = r;
+      sectionResults[sec.id] = map;
+    }
+
+    // 每個 section 的統計 (for section list)
+    const sectionReport = allSections.map(sec => {
+      const isSelected = !filterSectionIds || filterSectionIds.includes(sec.id);
+      const results = sectionResults[sec.id] || {};
+      let passed = 0, failed = 0, notAttempted = 0;
+      for (const u of allUsers) {
+        const r = results[u.id];
+        if (r) { r.best_passed ? passed++ : failed++; }
+        else notAttempted++;
+      }
+      return {
+        section_id: sec.id, title: sec.title, sort_order: sec.sort_order,
+        linked_course_id: sec.linked_course_id, linked_lesson_id: sec.linked_lesson_id,
+        selected: isSelected,
+        total_users: allUsers.length, passed, failed, not_attempted: notAttempted,
+        pass_rate: allUsers.length > 0 ? Math.round((passed / allUsers.length) * 100) : 0,
+      };
+    });
+
+    // User-centric view: 每個 user × 篩選的 sections
+    const userRows = allUsers.map(u => {
+      let passedCount = 0;
+      const sectionStatuses = {};
+      for (const sec of sections) {
+        const r = (sectionResults[sec.id] || {})[u.id];
+        if (r && r.best_passed) { sectionStatuses[sec.id] = 'passed'; passedCount++; }
+        else if (r) { sectionStatuses[sec.id] = 'failed'; }
+        else { sectionStatuses[sec.id] = 'not_attempted'; }
+      }
+      const tested = Object.values(sectionStatuses).some(s => s !== 'not_attempted');
+      return {
+        user_id: u.id, name: u.name, employee_id: u.employee_id,
+        dept_code: u.dept_code, dept_name: u.dept_name,
+        profit_center: u.profit_center, profit_center_name: u.profit_center_name,
+        org_section: u.org_section, org_section_name: u.org_section_name,
+        org_group_name: u.org_group_name,
+        passed_count: passedCount, total_sections: sections.length,
+        all_passed: passedCount === sections.length && sections.length > 0,
+        tested,
+        sections: sectionStatuses,
+      };
+    });
+
+    // Summary stats
+    const totalUsers = userRows.length;
+    const allPassedCount = userRows.filter(u => u.all_passed).length;
+    const someTestedCount = userRows.filter(u => u.tested).length;
+    const notTestedCount = userRows.filter(u => !u.tested).length;
+
+    // Org filter options (for dropdowns)
+    const orgOptions = {
+      depts: [...new Set(allUsers.filter(u => u.dept_code).map(u => JSON.stringify({ code: u.dept_code, name: u.dept_name })))].map(s => JSON.parse(s)),
+      profit_centers: [...new Set(allUsers.filter(u => u.profit_center).map(u => JSON.stringify({ code: u.profit_center, name: u.profit_center_name })))].map(s => JSON.parse(s)),
+      org_sections: [...new Set(allUsers.filter(u => u.org_section).map(u => JSON.stringify({ code: u.org_section, name: u.org_section_name })))].map(s => JSON.parse(s)),
+      org_groups: [...new Set(allUsers.filter(u => u.org_group_name).map(u => u.org_group_name))].filter(Boolean),
+    };
+
+    res.json({
+      sections: sectionReport,
+      users: userRows,
+      summary: { total: totalUsers, all_passed: allPassedCount, some_tested: someTestedCount, not_tested: notTestedCount },
+      org_options: orgOptions,
+    });
+  } catch (e) {
+    console.error('[Training] help-completion-report:', e.message);
     res.status(500).json({ error: e.message });
   }
 });

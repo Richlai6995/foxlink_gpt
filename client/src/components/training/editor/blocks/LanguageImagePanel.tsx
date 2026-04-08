@@ -3,7 +3,7 @@
  * 每個語言可以擁有完全獨立的 region 集合，或繼承主語言。
  */
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { Upload, Trash2, Globe, Save, Maximize2, X, Copy, Plus, MousePointer, Pen, RotateCcw, Sparkles, Volume2, Loader2 } from 'lucide-react'
+import { Upload, Trash2, Globe, Save, Maximize2, X, Copy, Plus, MousePointer, Pen, RotateCcw, Sparkles, Volume2, Loader2, ImagePlus, Columns, Rows, Eye } from 'lucide-react'
 import api from '../../../../lib/api'
 import VoiceInput from './VoiceInput'
 
@@ -54,6 +54,19 @@ export default function LanguageImagePanel({ slideId, blockIndex, currentImage, 
     origX: number; origY: number; origW: number; origH: number
   } | null>(null)
   const modalImgRef = useRef<HTMLImageElement>(null)
+  const [dragOverPreview, setDragOverPreview] = useState(false)
+  const [dragOverModal, setDragOverModal] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  // Composite dialog state
+  const [compositeOpen, setCompositeOpen] = useState(false)
+  const [compLeft, setCompLeft] = useState<string | null>(null)   // data URL or server URL
+  const [compRight, setCompRight] = useState<string | null>(null)
+  const [compDirection, setCompDirection] = useState<'horizontal' | 'vertical'>('horizontal')
+  const [compGap, setCompGap] = useState(4)
+  const [compPreview, setCompPreview] = useState<string | null>(null)
+  const [compUploading, setCompUploading] = useState(false)
+  const compLeftInputRef = useRef<HTMLInputElement>(null)
+  const compRightInputRef = useRef<HTMLInputElement>(null)
 
   // Legacy region overrides (backward compat)
   const [regionOverrides, setRegionOverrides] = useState<Record<string, Record<string, any>>>({})
@@ -83,7 +96,9 @@ export default function LanguageImagePanel({ slideId, blockIndex, currentImage, 
     }).catch(() => {})
   }, [slideId])
 
-  const handleUpload = async (file: File) => {
+  const langImage = overrides[activeLang]?.[String(blockIndex)]
+
+  const handleUpload = useCallback(async (file: File) => {
     try {
       setUploading(true)
       const form = new FormData()
@@ -94,7 +109,7 @@ export default function LanguageImagePanel({ slideId, blockIndex, currentImage, 
       setOverrides(prev => ({ ...prev, [activeLang]: res.data.overrides }))
     } catch (e: any) { alert(e.response?.data?.error || '上傳失敗') }
     finally { setUploading(false) }
-  }
+  }, [activeLang, blockIndex, slideId])
 
   const handleDelete = async () => {
     if (!confirm('確定刪除此語言底圖？')) return
@@ -109,6 +124,116 @@ export default function LanguageImagePanel({ slideId, blockIndex, currentImage, 
       })
     } catch {}
   }
+
+  // --- Drag & drop / clipboard paste ---
+  const onDropFile = useCallback((e: React.DragEvent) => {
+    e.preventDefault(); e.stopPropagation()
+    setDragOverPreview(false); setDragOverModal(false)
+    const file = e.dataTransfer.files?.[0]
+    if (file && file.type.startsWith('image/')) handleUpload(file)
+  }, [handleUpload])
+
+  const onDragOverFile = useCallback((e: React.DragEvent) => {
+    e.preventDefault(); e.stopPropagation()
+  }, [])
+
+  // --- Composite helpers ---
+  const fileToDataUrl = (file: File): Promise<string> =>
+    new Promise(resolve => { const r = new FileReader(); r.onload = () => resolve(r.result as string); r.readAsDataURL(file) })
+
+  const loadImg = (src: string): Promise<HTMLImageElement> =>
+    new Promise((resolve, reject) => { const img = new Image(); img.crossOrigin = 'anonymous'; img.onload = () => resolve(img); img.onerror = reject; img.src = src })
+
+  const onCompSlotFile = useCallback(async (file: File, slot: 'left' | 'right') => {
+    if (!file.type.startsWith('image/')) return
+    const url = await fileToDataUrl(file)
+    if (slot === 'left') setCompLeft(url)
+    else setCompRight(url)
+    setCompPreview(null)
+  }, [])
+
+  // Paste listener — active when modal or composite dialog is open
+  useEffect(() => {
+    if (!editModal && !compositeOpen) return
+    const handler = (e: ClipboardEvent) => {
+      const items = e.clipboardData?.items
+      if (!items) return
+      for (const item of Array.from(items)) {
+        if (item.type.startsWith('image/')) {
+          const file = item.getAsFile()
+          if (!file) continue
+          e.preventDefault()
+          if (compositeOpen) {
+            onCompSlotFile(file, compRight ? 'left' : 'right')
+          } else {
+            handleUpload(file)
+          }
+          return
+        }
+      }
+    }
+    document.addEventListener('paste', handler)
+    return () => document.removeEventListener('paste', handler)
+  }, [editModal, compositeOpen, handleUpload, onCompSlotFile, compRight])
+
+  const openComposite = useCallback(() => {
+    setCompLeft(langImage || currentImage || null)
+    setCompRight(null)
+    setCompPreview(null)
+    setCompDirection('horizontal')
+    setCompGap(4)
+    setCompositeOpen(true)
+  }, [langImage, currentImage])
+
+  const generateComposite = useCallback(async () => {
+    if (!compLeft || !compRight) return
+    try {
+      const [imgL, imgR] = await Promise.all([loadImg(compLeft), loadImg(compRight)])
+      const canvas = document.createElement('canvas')
+      const ctx = canvas.getContext('2d')!
+      const gap = compGap
+
+      if (compDirection === 'horizontal') {
+        const targetH = Math.min(imgL.naturalHeight, imgR.naturalHeight)
+        const scaleL = targetH / imgL.naturalHeight
+        const scaleR = targetH / imgR.naturalHeight
+        const wL = imgL.naturalWidth * scaleL
+        const wR = imgR.naturalWidth * scaleR
+        canvas.width = Math.round(wL + gap + wR)
+        canvas.height = Math.round(targetH)
+        ctx.fillStyle = '#ffffff'
+        ctx.fillRect(0, 0, canvas.width, canvas.height)
+        ctx.drawImage(imgL, 0, 0, wL, targetH)
+        ctx.drawImage(imgR, wL + gap, 0, wR, targetH)
+      } else {
+        const targetW = Math.min(imgL.naturalWidth, imgR.naturalWidth)
+        const scaleL = targetW / imgL.naturalWidth
+        const scaleR = targetW / imgR.naturalWidth
+        const hL = imgL.naturalHeight * scaleL
+        const hR = imgR.naturalHeight * scaleR
+        canvas.width = Math.round(targetW)
+        canvas.height = Math.round(hL + gap + hR)
+        ctx.fillStyle = '#ffffff'
+        ctx.fillRect(0, 0, canvas.width, canvas.height)
+        ctx.drawImage(imgL, 0, 0, targetW, hL)
+        ctx.drawImage(imgR, 0, hL + gap, targetW, hR)
+      }
+      setCompPreview(canvas.toDataURL('image/png'))
+    } catch { alert('圖片載入失敗，請確認圖片是否可存取') }
+  }, [compLeft, compRight, compDirection, compGap])
+
+  const confirmComposite = useCallback(async () => {
+    if (!compPreview) return
+    try {
+      setCompUploading(true)
+      const res = await fetch(compPreview)
+      const blob = await res.blob()
+      const file = new File([blob], `composite_${activeLang}_${Date.now()}.png`, { type: 'image/png' })
+      await handleUpload(file)
+      setCompositeOpen(false)
+    } catch (e: any) { alert('合成上傳失敗') }
+    finally { setCompUploading(false) }
+  }, [compPreview, activeLang, handleUpload])
 
   // --- Independent regions helpers ---
   const hasIndependentRegions = !!(langRegions[activeLang]?.[String(blockIndex)])
@@ -318,7 +443,6 @@ export default function LanguageImagePanel({ slideId, blockIndex, currentImage, 
     setDragging(null)
   }
 
-  const langImage = overrides[activeLang]?.[String(blockIndex)]
   const displayRegions = getDisplayRegions()
   const modalRegions = hasIndependentRegions ? independentRegions : displayRegions
   const selectedModalRegion = modalRegions.find(r => r.id === modalSelected)
@@ -344,56 +468,53 @@ export default function LanguageImagePanel({ slideId, blockIndex, currentImage, 
           </div>
         </div>
 
-        {/* Side-by-side preview */}
-        <div className="flex gap-3">
-          {/* zh-TW */}
-          <div className="flex-1 space-y-1">
-            <div className="text-[9px]" style={{ color: 'var(--t-text-dim)' }}>🇹🇼 主語言</div>
-            {currentImage ? (
-              <img src={currentImage} alt="" className="w-full rounded border" style={{ borderColor: 'var(--t-border)', maxHeight: '150px', objectFit: 'contain' }} />
-            ) : (
-              <div className="h-16 flex items-center justify-center rounded border border-dashed text-[10px]" style={{ borderColor: 'var(--t-border)', color: 'var(--t-text-dim)' }}>無圖片</div>
-            )}
-          </div>
-
-          {/* Target language */}
-          <div className="flex-1 space-y-1">
-            <div className="flex items-center gap-1 text-[9px]" style={{ color: 'var(--t-text-dim)' }}>
-              {LANGS.find(l => l.code === activeLang)?.flag} {activeLang.toUpperCase()}
+        {/* Target language preview — single column with drag & drop */}
+        <div
+          className="relative"
+          onDragOver={e => { onDragOverFile(e); setDragOverPreview(true) }}
+          onDragLeave={() => setDragOverPreview(false)}
+          onDrop={onDropFile}
+        >
+          {langImage ? (
+            <div className="relative group">
+              <img src={langImage} alt="" className="w-full rounded border cursor-pointer"
+                style={{ borderColor: 'var(--t-accent)', maxHeight: '200px', objectFit: 'contain' }}
+                onClick={() => setEditModal(true)} title="點擊放大編輯互動區域" />
+              <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition bg-black/30 rounded pointer-events-none">
+                <span className="text-white text-xs font-medium flex items-center gap-1"><Maximize2 size={14} /> 編輯區域</span>
+              </div>
+              <button onClick={handleDelete}
+                className="absolute top-1 right-1 w-5 h-5 rounded-full bg-red-500 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition"
+                title="刪除此語言底圖">
+                <Trash2 size={10} />
+              </button>
             </div>
-            {langImage ? (
-              <div className="relative group">
-                <img src={langImage} alt="" className="w-full rounded border cursor-pointer" style={{ borderColor: 'var(--t-accent)', maxHeight: '150px', objectFit: 'contain' }}
-                  onClick={() => setEditModal(true)} title="點擊放大編輯互動區域" />
-                <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition bg-black/30 rounded pointer-events-none">
-                  <span className="text-white text-xs font-medium flex items-center gap-1"><Maximize2 size={14} /> 放大編輯</span>
-                </div>
-                <button onClick={handleDelete}
-                  className="absolute top-1 right-1 w-5 h-5 rounded-full bg-red-500 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition">
-                  <Trash2 size={10} />
-                </button>
-              </div>
-            ) : (
-              <div className="space-y-1">
-                {/* Fallback hint — show zh-TW image as preview */}
-                {currentImage && (
-                  <div className="relative">
-                    <img src={currentImage} alt="" className="w-full rounded border opacity-50" style={{ borderColor: 'var(--t-border)', maxHeight: '120px', objectFit: 'contain' }} />
-                    <div className="absolute inset-0 flex items-center justify-center">
-                      <span className="text-[9px] px-2 py-1 rounded bg-black/60 text-white">繼承主語言圖片</span>
-                    </div>
+          ) : (
+            <div className="space-y-1">
+              {currentImage && (
+                <div className="relative">
+                  <img src={currentImage} alt="" className="w-full rounded border opacity-40" style={{ borderColor: 'var(--t-border)', maxHeight: '200px', objectFit: 'contain' }} />
+                  <div className="absolute inset-0 flex items-center justify-center">
+                    <span className="text-[10px] px-2 py-1 rounded bg-black/60 text-white">繼承主語言圖片</span>
                   </div>
-                )}
-                <label className="h-12 flex flex-col items-center justify-center rounded border-2 border-dashed cursor-pointer transition hover:opacity-80"
-                  style={{ borderColor: 'var(--t-accent)', color: 'var(--t-accent)' }}>
-                  <Upload size={14} />
-                  <span className="text-[9px] mt-0.5">{uploading ? '上傳中...' : '上傳獨立底圖（選填）'}</span>
-                  <input type="file" accept="image/*" className="hidden" disabled={uploading}
-                    onChange={e => { if (e.target.files?.[0]) handleUpload(e.target.files[0]) }} />
-                </label>
-              </div>
-            )}
-          </div>
+                </div>
+              )}
+              <label className="h-14 flex flex-col items-center justify-center rounded border-2 border-dashed cursor-pointer transition hover:opacity-80"
+                style={{ borderColor: 'var(--t-accent)', color: 'var(--t-accent)' }}>
+                <Upload size={16} />
+                <span className="text-[10px] mt-0.5">{uploading ? '上傳中...' : '上傳獨立底圖（拖拉或點擊）'}</span>
+                <input type="file" accept="image/*" className="hidden" disabled={uploading}
+                  onChange={e => { if (e.target.files?.[0]) handleUpload(e.target.files[0]) }} />
+              </label>
+            </div>
+          )}
+          {/* Drag overlay */}
+          {dragOverPreview && (
+            <div className="absolute inset-0 z-10 flex items-center justify-center rounded border-2 border-dashed pointer-events-none"
+              style={{ borderColor: 'var(--t-accent)', backgroundColor: 'rgba(59,130,246,0.15)' }}>
+              <span className="text-sm font-medium px-3 py-1.5 rounded-lg bg-blue-600 text-white shadow">放開以抽換底圖</span>
+            </div>
+          )}
         </div>
 
         {/* Region status */}
@@ -644,6 +765,23 @@ export default function LanguageImagePanel({ slideId, blockIndex, currentImage, 
 
               <div className="flex-1" />
 
+              {/* 併排合成 button */}
+              <button onClick={openComposite}
+                className="flex items-center gap-1 text-[11px] px-2.5 py-1 rounded-lg transition"
+                style={{ color: '#a78bfa', border: '1px solid #6d28d9' }}>
+                <Columns size={12} /> 併排合成
+              </button>
+
+              {/* 抽換底圖 button */}
+              <button onClick={() => fileInputRef.current?.click()}
+                className="flex items-center gap-1 text-[11px] px-2.5 py-1 rounded-lg transition"
+                style={{ color: '#94a3b8', border: '1px solid #475569' }}
+                disabled={uploading}>
+                <ImagePlus size={12} /> {uploading ? '上傳中...' : '抽換底圖'}
+              </button>
+              <input ref={fileInputRef} type="file" accept="image/*" className="hidden"
+                onChange={e => { if (e.target.files?.[0]) handleUpload(e.target.files[0]); e.target.value = '' }} />
+
               {hasIndependentRegions && (
                 <button onClick={e => { e.stopPropagation(); saveIndependentRegions() }} disabled={saving}
                   className="flex items-center gap-1 text-xs text-white px-3 py-1.5 rounded-lg transition disabled:opacity-50"
@@ -659,7 +797,10 @@ export default function LanguageImagePanel({ slideId, blockIndex, currentImage, 
 
             <div className="flex gap-3" style={{ maxHeight: '85vh' }}>
               {/* Image + draggable regions */}
-              <div className="flex-1 overflow-auto rounded-lg">
+              <div className="flex-1 overflow-auto rounded-lg relative"
+                onDragOver={e => { onDragOverFile(e); setDragOverModal(true) }}
+                onDragLeave={e => { if (e.currentTarget.contains(e.relatedTarget as Node)) return; setDragOverModal(false) }}
+                onDrop={onDropFile}>
                 <div className="relative w-full"
                   style={{ cursor: modalMode === 'draw' && hasIndependentRegions ? 'crosshair' : (dragging ? 'grabbing' : 'default') }}
                   onMouseDown={handleModalMouseDown}
@@ -712,6 +853,13 @@ export default function LanguageImagePanel({ slideId, blockIndex, currentImage, 
                     style={{ left: `${drawPreview.x}%`, top: `${drawPreview.y}%`, width: `${drawPreview.w}%`, height: `${drawPreview.h}%` }} />
                 )}
                 </div>{/* close relative wrapper */}
+                {/* Modal drag overlay */}
+                {dragOverModal && (
+                  <div className="absolute inset-0 z-20 flex items-center justify-center rounded-lg pointer-events-none"
+                    style={{ border: '3px dashed #3b82f6', backgroundColor: 'rgba(59,130,246,0.18)' }}>
+                    <span className="text-base font-semibold px-4 py-2 rounded-xl bg-blue-600 text-white shadow-lg">放開以抽換底圖</span>
+                  </div>
+                )}
               </div>{/* close overflow container */}
 
               {/* Right panel: region properties (only for independent) */}
@@ -797,6 +945,151 @@ export default function LanguageImagePanel({ slideId, blockIndex, currentImage, 
                   )}
                 </div>
               )}
+            </div>
+            {/* Footer hint */}
+            <div className="text-[10px] text-slate-500 mt-1.5 text-center">
+              💡 拖拉圖片到畫面上 或 Ctrl+V 貼上剪貼簿圖片 可直接抽換底圖
+            </div>
+          </div>
+        </div>
+      )}
+      {/* ═══ Composite Dialog ═══ */}
+      {compositeOpen && (
+        <div className="fixed inset-0 z-[10000] flex items-center justify-center"
+          style={{ backgroundColor: 'rgba(0,0,0,0.9)' }}
+          onClick={() => setCompositeOpen(false)}>
+          <div className="w-[80vw] max-w-[900px] max-h-[90vh] flex flex-col rounded-2xl overflow-hidden"
+            style={{ backgroundColor: '#1e293b', border: '1px solid #334155' }}
+            onClick={e => e.stopPropagation()}>
+            {/* Header */}
+            <div className="flex items-center gap-3 px-5 py-3" style={{ borderBottom: '1px solid #334155' }}>
+              <Columns size={16} className="text-violet-400" />
+              <span className="text-white text-sm font-semibold">併排合成底圖</span>
+              <span className="text-[10px] text-slate-400">將兩張圖片合成為一張底稿</span>
+              <div className="flex-1" />
+              <button onClick={() => setCompositeOpen(false)}
+                className="w-7 h-7 rounded-full flex items-center justify-center text-slate-400 hover:text-white hover:bg-white/10">
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-5 space-y-4">
+              {/* Two image slots */}
+              <div className={`grid gap-4 ${compDirection === 'horizontal' ? 'grid-cols-2' : 'grid-cols-1 max-w-md mx-auto'}`}>
+                {/* Left slot */}
+                {(['left', 'right'] as const).map(slot => {
+                  const img = slot === 'left' ? compLeft : compRight
+                  const label = slot === 'left' ? '圖片 A（左/上）' : '圖片 B（右/下）'
+                  return (
+                    <div key={slot}
+                      className="rounded-xl border-2 border-dashed transition min-h-[160px] flex flex-col items-center justify-center relative"
+                      style={{ borderColor: img ? '#6d28d9' : '#475569', backgroundColor: img ? 'rgba(109,40,217,0.05)' : 'rgba(255,255,255,0.02)' }}
+                      onDragOver={e => { e.preventDefault(); e.stopPropagation() }}
+                      onDrop={e => {
+                        e.preventDefault(); e.stopPropagation()
+                        const file = e.dataTransfer.files?.[0]
+                        if (file) onCompSlotFile(file, slot)
+                      }}>
+                      {img ? (
+                        <div className="relative w-full p-2 group">
+                          <img src={img} alt="" className="w-full max-h-[250px] object-contain rounded-lg" />
+                          <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition bg-black/40 rounded-lg m-2">
+                            <button onClick={() => (slot === 'left' ? compLeftInputRef : compRightInputRef).current?.click()}
+                              className="text-white text-xs px-3 py-1.5 rounded-lg bg-violet-600 hover:bg-violet-500">
+                              重新選擇
+                            </button>
+                          </div>
+                          <div className="text-[9px] text-slate-400 text-center mt-1">{label}</div>
+                        </div>
+                      ) : (
+                        <label className="flex flex-col items-center gap-2 cursor-pointer py-6 w-full"
+                          onClick={() => (slot === 'left' ? compLeftInputRef : compRightInputRef).current?.click()}>
+                          <Upload size={24} className="text-slate-500" />
+                          <span className="text-xs text-slate-400">{label}</span>
+                          <span className="text-[10px] text-slate-500">點擊選擇、拖拉或貼上</span>
+                        </label>
+                      )}
+                      <input ref={slot === 'left' ? compLeftInputRef : compRightInputRef}
+                        type="file" accept="image/*" className="hidden"
+                        onChange={e => { if (e.target.files?.[0]) onCompSlotFile(e.target.files[0], slot); e.target.value = '' }} />
+                    </div>
+                  )
+                })}
+              </div>
+
+              {/* Options row */}
+              <div className="flex items-center gap-4 flex-wrap">
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] text-slate-400">排列：</span>
+                  <button onClick={() => { setCompDirection('horizontal'); setCompPreview(null) }}
+                    className="flex items-center gap-1 text-[10px] px-2.5 py-1 rounded-lg transition"
+                    style={{
+                      backgroundColor: compDirection === 'horizontal' ? 'rgba(139,92,246,0.2)' : 'transparent',
+                      color: compDirection === 'horizontal' ? '#a78bfa' : '#94a3b8',
+                      border: `1px solid ${compDirection === 'horizontal' ? '#7c3aed' : '#475569'}`
+                    }}>
+                    <Columns size={11} /> 左右並排
+                  </button>
+                  <button onClick={() => { setCompDirection('vertical'); setCompPreview(null) }}
+                    className="flex items-center gap-1 text-[10px] px-2.5 py-1 rounded-lg transition"
+                    style={{
+                      backgroundColor: compDirection === 'vertical' ? 'rgba(139,92,246,0.2)' : 'transparent',
+                      color: compDirection === 'vertical' ? '#a78bfa' : '#94a3b8',
+                      border: `1px solid ${compDirection === 'vertical' ? '#7c3aed' : '#475569'}`
+                    }}>
+                    <Rows size={11} /> 上下並排
+                  </button>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] text-slate-400">間距：</span>
+                  {[0, 4, 8, 16].map(g => (
+                    <button key={g} onClick={() => { setCompGap(g); setCompPreview(null) }}
+                      className="text-[10px] px-2 py-0.5 rounded transition"
+                      style={{
+                        backgroundColor: compGap === g ? 'rgba(139,92,246,0.2)' : 'transparent',
+                        color: compGap === g ? '#a78bfa' : '#94a3b8',
+                        border: `1px solid ${compGap === g ? '#7c3aed' : '#475569'}`
+                      }}>
+                      {g}px
+                    </button>
+                  ))}
+                </div>
+                <div className="flex-1" />
+                <button onClick={generateComposite}
+                  disabled={!compLeft || !compRight}
+                  className="flex items-center gap-1.5 text-xs px-4 py-1.5 rounded-lg transition disabled:opacity-30"
+                  style={{ backgroundColor: 'rgba(139,92,246,0.15)', color: '#a78bfa', border: '1px solid #7c3aed' }}>
+                  <Eye size={13} /> 預覽合成
+                </button>
+              </div>
+
+              {/* Preview */}
+              {compPreview && (
+                <div className="space-y-2">
+                  <div className="text-[10px] text-slate-400 font-semibold">合成預覽：</div>
+                  <div className="rounded-xl border overflow-hidden" style={{ borderColor: '#334155' }}>
+                    <img src={compPreview} alt="composite preview" className="w-full max-h-[350px] object-contain bg-white" />
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="flex items-center gap-3 px-5 py-3" style={{ borderTop: '1px solid #334155' }}>
+              <span className="text-[10px] text-slate-500 flex-1">
+                ⚠ 合成後會替換目前的 {activeLang.toUpperCase()} 底圖，既有互動區域座標可能需要重新調整
+              </span>
+              <button onClick={() => setCompositeOpen(false)}
+                className="text-xs px-4 py-1.5 rounded-lg text-slate-400 hover:text-white transition"
+                style={{ border: '1px solid #475569' }}>
+                取消
+              </button>
+              <button onClick={confirmComposite}
+                disabled={!compPreview || compUploading}
+                className="flex items-center gap-1.5 text-xs text-white px-4 py-1.5 rounded-lg transition disabled:opacity-40"
+                style={{ backgroundColor: '#7c3aed' }}>
+                <Save size={13} /> {compUploading ? '上傳中...' : '確認合成並套用'}
+              </button>
             </div>
           </div>
         </div>

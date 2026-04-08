@@ -490,22 +490,14 @@ export default function HotspotBlock({ block, blockIndex = 0, isLastSlide = fals
             opacity: dimmed && !completed ? 0.3 : 1
           }}
         >
-          {/* Label — hidden in test mode until hints or completed */}
-          {!testHidden && (isCurrentTarget || isExplored || (isHovered && !isTestMode) || completed) && r.label && (
-            <div className="absolute -top-6 left-0 flex items-center gap-1 whitespace-nowrap" style={{ zIndex: 4 }}>
-              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded shadow-sm" style={{
-                backgroundColor: justCorrect || isExplored ? '#22c55e' : isCurrentTarget ? '#3b82f6' : '#6366f1',
-                color: 'white'
+          {/* Label — only show step number badge on current target, no text label on boxes */}
+          {!testHidden && isCurrentTarget && r.correct && mode === 'guided' && (
+            <div className="absolute -top-5 left-0 whitespace-nowrap" style={{ zIndex: 4 }}>
+              <span className="text-[9px] font-bold w-4 h-4 rounded-full flex items-center justify-center shadow-sm" style={{
+                backgroundColor: '#3b82f6', color: 'white'
               }}>
-                {mode === 'guided' && r.correct
-                  ? `${correctRegions.findIndex(cr => cr.id === r.id) + 1}. `
-                  : ''
-                }
-                {r.label}
+                {correctRegions.findIndex(cr => cr.id === r.id) + 1}
               </span>
-              {r.type && (
-                <span className="text-[8px] px-1 py-0.5 rounded" style={{ backgroundColor: 'rgba(0,0,0,0.6)', color: 'white' }}>{r.type}</span>
-              )}
             </div>
           )}
           {/* Pulse hint */}
@@ -514,18 +506,7 @@ export default function HotspotBlock({ block, blockIndex = 0, isLastSlide = fals
           )}
         </div>
 
-        {/* Hover tooltip — hidden in test mode */}
-        {isHovered && !completed && !isTestMode && r.label && (
-          <div className="absolute z-[10] pointer-events-none" style={{
-            left: `${c.x + c.w / 2}%`, top: `${c.y - 1}%`,
-            transform: 'translate(-50%, -100%)'
-          }}>
-            <div className="bg-gray-900 text-white text-[10px] px-2 py-1 rounded shadow-lg whitespace-nowrap">
-              {r.label}
-              {r.type && <span className="text-gray-400 ml-1">({r.type})</span>}
-            </div>
-          </div>
-        )}
+        {/* Hover tooltip — removed per UX feedback, no text labels on region boxes */}
 
         {/* Checkmark animation on correct click */}
         {justCorrect && (

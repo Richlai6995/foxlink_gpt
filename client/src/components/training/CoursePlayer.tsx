@@ -343,9 +343,40 @@ export function CoursePlayerInner({ courseId, lessonId, lang: langProp, sessionI
   // ─── Finish exam ───
   const finishExam = useCallback(() => {
     if (examTimerRef.current) clearInterval(examTimerRef.current)
+    const results = [...examResultsRef.current]
     setExamPhase('result')
-    setExamResults([...examResultsRef.current])
-  }, [])
+    setExamResults(results)
+
+    // Submit lesson-level quiz results (aggregate by lesson_id)
+    const lessonScores = new Map<number, { score: number; max: number }>()
+    for (const r of results) {
+      const slide = allSlides[r.slideIndex]
+      if (!slide) continue
+      const lid = slide.lesson_id
+      const prev = lessonScores.get(lid) || { score: 0, max: 0 }
+      prev.score += r.weightedScore
+      prev.max += r.weightedMax
+      lessonScores.set(lid, prev)
+    }
+    // Also fill missing slides with 0
+    for (const idx of interactiveIndices) {
+      const slide = allSlides[idx]
+      if (!slide) continue
+      if (!results.find(r => r.slideIndex === idx)) {
+        const lid = slide.lesson_id
+        const prev = lessonScores.get(lid) || { score: 0, max: 0 }
+        prev.max += getSlideWeight(slide.id, interactiveIndices.length)
+        lessonScores.set(lid, prev)
+      }
+    }
+    const source = skipAccessCheck ? 'help' : 'classroom'
+    lessonScores.forEach((val, lid) => {
+      api.post('/training/lesson-quiz-result', {
+        course_id: courseId, lesson_id: lid, session_id: sessionId,
+        score: val.score, max_score: val.max, source,
+      }).catch(e => console.error('[CoursePlayer] lesson-quiz-result:', e))
+    })
+  }, [allSlides, interactiveIndices, getSlideWeight, courseId, sessionId, skipAccessCheck])
 
   // ─── Restart exam ───
   const restartExam = () => {

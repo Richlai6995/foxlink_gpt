@@ -468,3 +468,108 @@ Backend `POST /courses/:id/translate` 支援 `lesson_ids` 過濾。CourseEditor 
 | `c3eb344` | AI 生成旁白覆蓋舊回饋文字 |
 | `4ae29b3`~`690ebc3` | demo mode 多次修復（currentTarget/audio 衝突/async 重寫） |
 | `f39be89` | TTS 英文縮寫發音修正 |
+
+---
+
+## 14. Phase 5D — 章節測驗成績追蹤（Lesson Quiz Results）
+
+### 14.1 需求背景
+
+使用手冊（Help System）可連結互動教學（linked_course_id + linked_lesson_id），使用者在 HelpTrainingPlayer 中完成測驗後，需要記錄**章節級**的通過狀態。訓練教室也需要以章節為最小單位追蹤成績。
+
+兩套系統（使用手冊 vs 訓練教室）共用同一個 course/lesson 資料結構，但入口不同：
+- 使用手冊：每個 help section 對應一個 lesson
+- 訓練教室：一個 course 可包含多個 lesson
+
+**核心需求**：
+- 知道每個章節（lesson）哪些同仁通過、哪些未通過
+- 只要任一入口通過，即視為該章節已通過
+- 需要完成的人 = 訓練專案指派 + 公開課程全員
+
+### 14.2 資料庫設計
+
+```sql
+LESSON_QUIZ_RESULTS (
+  id              NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  user_id         NUMBER NOT NULL,
+  course_id       NUMBER NOT NULL,
+  lesson_id       NUMBER NOT NULL,
+  source          VARCHAR2(20) DEFAULT 'classroom',  -- 'help' | 'classroom'
+  session_id      VARCHAR2(36),
+  score           NUMBER,
+  max_score       NUMBER,
+  passed          NUMBER(1) DEFAULT 0,
+  completed_at    TIMESTAMP DEFAULT SYSTIMESTAMP,
+  CONSTRAINT uq_lqr UNIQUE (user_id, course_id, lesson_id, session_id)
+)
+```
+
+### 14.3 通過判定邏輯
+
+```
+lesson 通過 = (score / max_score) × 100 >= course.pass_score
+```
+
+- pass_score 繼承自 course 層級（課程設定頁的「及格分數」）
+- 同一 user + lesson 有多次測驗時，取 `MAX(passed)` 判定
+- 不分 source，help 和 classroom 的成績合併計算
+
+### 14.4 寫入時機
+
+**CoursePlayer.tsx — `finishExam()`**：
+- 測驗結束時，將 `examResults` 按 `slide.lesson_id` 分組彙總
+- 每個 lesson 各呼叫一次 `POST /training/lesson-quiz-result`
+- `source` 根據 `skipAccessCheck` prop 判斷：
+  - `skipAccessCheck=true`（HelpTrainingPlayer）→ `source='help'`
+  - `skipAccessCheck=false`（CoursePlayer 正常入口）→ `source='classroom'`
+
+### 14.5 API 端點
+
+| 端點 | 方法 | 用途 |
+|------|------|------|
+| `/training/lesson-quiz-result` | POST | 寫入/更新章節測驗成績（upsert） |
+| `/training/lesson-completion-report?course_id=` | GET | 按課程→章節→人員 的完成率報表（admin） |
+| `/training/help-completion-report` | GET | 按使用手冊章節→人員 的完成率報表（admin） |
+
+### 14.6 「誰需要完成」判定
+
+| 課程類型 | 目標人員 |
+|----------|----------|
+| 公開課程（`is_public=1`） | 所有 `status='active'` 的使用者 |
+| 非公開課程 | `PROGRAM_ASSIGNMENTS` 中被指派且未豁免的使用者 |
+
+### 14.7 報表 UI（Admin）
+
+TrainingAdmin 元件新增兩個 tab：
+
+**「章節完成率」**：
+- 下拉選擇課程
+- 列出每個 lesson 的通過/未通過/未作答人數 + 通過率進度條
+- 點擊展開顯示每位使用者的狀態、最高分、完成時間
+
+**「使用手冊完成率」**：
+- 列出所有有連結互動教學的 help sections
+- 同樣顯示通過/未通過/未作答 + 通過率
+- 點擊展開顯示人員明細
+
+### 14.8 資料流
+
+```
+使用手冊入口                          訓練教室入口
+     │                                    │
+HelpTrainingPlayer                   CoursePlayer
+(skipAccessCheck=true)               (skipAccessCheck=false)
+     │                                    │
+     └──── CoursePlayerInner.finishExam ───┘
+                    │
+            按 lesson_id 分組彙總
+                    │
+        POST /training/lesson-quiz-result
+          source='help' | 'classroom'
+                    │
+            LESSON_QUIZ_RESULTS 表
+                    │
+         ┌──────────┴──────────┐
+    help-completion-report  lesson-completion-report
+    (按使用手冊章節)          (按課程章節)
+```

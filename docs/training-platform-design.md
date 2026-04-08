@@ -1216,6 +1216,239 @@ GET    /api/training/questions/:qid/translation/:lang    ← 取得題目翻譯
 PUT    /api/training/questions/:qid/translation/:lang    ← 手動編輯題目翻譯
 ```
 
+### 8.7 多語底圖編輯器（LanguageImagePanel）
+
+> 日期：2026-04-08
+> 狀態：設計確認，實作完成
+> 元件：`client/src/components/training/editor/blocks/LanguageImagePanel.tsx`
+
+#### 8.7.1 功能概述
+
+投影片編輯器中，每個 image block 的外語版本（en / vi）可以擁有**獨立的底圖**，而不是只能繼承主語言（zh-TW）的圖片。LanguageImagePanel 提供完整的底圖管理 + 互動區域編輯能力。
+
+#### 8.7.2 底圖抽換
+
+外語底圖的上傳/抽換支援三種方式：
+
+| 方式 | 位置 | 說明 |
+|------|------|------|
+| **點擊上傳** | Preview 區 / Modal 工具列 | 傳統 file input，`accept="image/*"` |
+| **拖拉上傳** | Preview 區 / Modal 圖片區 | Drag & drop，帶視覺 overlay 回饋 |
+| **剪貼簿貼上** | Modal 開啟時全域監聽 | `document.addEventListener('paste')` 偵測 `image/*` MIME |
+
+上傳流程：
+```
+使用者選檔 / 拖拉 / 貼上
+    │
+    ▼
+FormData { file, lang, block_index }
+    │
+    ▼
+POST /api/training/slides/:id/lang-image
+    │
+    ▼
+Server 儲存至 uploads/course_{id}/lang_{lang}_{block}_{timestamp}.{ext}
+    │
+    ▼
+回傳 overrides[lang][block_index] = image_url
+```
+
+#### 8.7.3 併排合成（Side-by-Side Composite）
+
+**核心需求**：將兩張圖片（例如主語言截圖 + 外語翻譯截圖）水平併排合成一張底稿，用於需要同時展示原文與翻譯的教材場景。
+
+##### UI 流程
+
+```
+Modal 工具列 → 點擊「併排合成」按鈕
+    │
+    ▼
+開啟 Composite Dialog（覆蓋在 Modal 之上）
+    │
+    ├─ 左圖區塊：預設載入目前的底圖（主語言圖 or 已上傳的外語圖）
+    │   └─ 可拖拉替換 / 點擊重選 / 剪貼簿貼上
+    │
+    ├─ 右圖區塊：空白，等待使用者提供第二張圖
+    │   └─ 同上三種輸入方式
+    │
+    ├─ 排列選項：[左右並排] [上下並排]（預設左右）
+    │
+    ├─ 間距調整：0px / 4px / 8px（預設 4px 白色分隔線）
+    │
+    └─ 預覽 + 操作按鈕
+        ├─ [預覽合成結果] → Canvas 即時渲染
+        └─ [確認合成] → Canvas.toBlob() → 上傳為新底圖
+```
+
+##### 技術實作
+
+```tsx
+// 使用 HTML5 Canvas 合成
+const compositeImages = async (
+  imgLeft: HTMLImageElement,
+  imgRight: HTMLImageElement,
+  direction: 'horizontal' | 'vertical',
+  gap: number
+): Promise<Blob> => {
+  const canvas = document.createElement('canvas')
+  const ctx = canvas.getContext('2d')!
+
+  if (direction === 'horizontal') {
+    // 等高縮放：以較矮的圖為基準
+    const targetH = Math.min(imgLeft.naturalHeight, imgRight.naturalHeight)
+    const scaleL = targetH / imgLeft.naturalHeight
+    const scaleR = targetH / imgRight.naturalHeight
+    const wL = imgLeft.naturalWidth * scaleL
+    const wR = imgRight.naturalWidth * scaleR
+
+    canvas.width = wL + gap + wR
+    canvas.height = targetH
+    // 白底
+    ctx.fillStyle = '#ffffff'
+    ctx.fillRect(0, 0, canvas.width, canvas.height)
+    ctx.drawImage(imgLeft, 0, 0, wL, targetH)
+    ctx.drawImage(imgRight, wL + gap, 0, wR, targetH)
+  } else {
+    // 等寬縮放：以較窄的圖為基準
+    const targetW = Math.min(imgLeft.naturalWidth, imgRight.naturalWidth)
+    const scaleL = targetW / imgLeft.naturalWidth
+    const scaleR = targetW / imgRight.naturalWidth
+    const hL = imgLeft.naturalHeight * scaleL
+    const hR = imgRight.naturalHeight * scaleR
+
+    canvas.width = targetW
+    canvas.height = hL + gap + hR
+    ctx.fillStyle = '#ffffff'
+    ctx.fillRect(0, 0, canvas.width, canvas.height)
+    ctx.drawImage(imgLeft, 0, 0, targetW, hL)
+    ctx.drawImage(imgRight, 0, hL + gap, targetW, hR)
+  }
+
+  return new Promise(resolve => canvas.toBlob(blob => resolve(blob!), 'image/png'))
+}
+```
+
+##### 合成結果處理
+
+```
+Canvas.toBlob('image/png')
+    │
+    ▼
+new File([blob], `composite_${lang}_${Date.now()}.png`)
+    │
+    ▼
+複用 handleUpload(file) → POST /api/training/slides/:id/lang-image
+    │
+    ▼
+替換該語言的底圖，原互動區域座標保留（可能需手動調整）
+```
+
+> ⚠ **注意**：合成後圖片尺寸會改變，既有互動區域的百分比座標可能需要重新定位。UI 上應提示使用者「底圖已更換，請確認互動區域位置」。
+
+#### 8.7.4 Modal 編輯器功能總覽
+
+```
+┌─ Modal Header ──────────────────────────────────────────────────────┐
+│  🇺🇸 EN — 互動區域編輯    3 個區域 · 獨立                            │
+│  [選取] [繪製] [+新增]          [併排合成] [抽換底圖] [儲存] [✕]      │
+├─────────────────────────────────────────┬────────────────────────────┤
+│                                         │  區域列表 (3)              │
+│   ┌──────────────────────────────┐      │  ✓ 帳號輸入                │
+│   │                              │      │  ✓ 密碼輸入                │
+│   │     外語底圖                  │      │  ✗ 錯誤按鈕                │
+│   │     （可拖拉檔案進來抽換）     │      │                            │
+│   │                              │      │  ─────────────             │
+│   │   [區域1]  [區域2]           │      │  編輯：帳號輸入             │
+│   │                [區域3]       │      │  標籤: [帳號輸入]           │
+│   │                              │      │  ☑ 正確區域                │
+│   └──────────────────────────────┘      │  回饋: [請輸入帳號]         │
+│                                         │  📖 學習導引: ...           │
+│   (拖拉圖片進來 = 抽換底圖)              │  📝 測驗提示: ...           │
+│   (Ctrl+V 貼上 = 抽換底圖)              │  🔍 探索說明: ...           │
+├─────────────────────────────────────────┴────────────────────────────┤
+│  提示：拖拉或 Ctrl+V 貼上圖片可直接抽換底圖                            │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+#### 8.7.5 API 路由（底圖相關）
+
+```
+── 多語底圖 ──
+GET    /api/training/slides/:id/lang-images                ← 取得所有語言的底圖 overrides
+POST   /api/training/slides/:id/lang-image                 ← 上傳/抽換語言底圖
+DELETE /api/training/slides/:id/lang-image                  ← 刪除語言底圖
+
+── 獨立互動區域 ──
+GET    /api/training/slides/:id/lang-regions               ← 取得語言獨立區域
+PUT    /api/training/slides/:id/lang-regions               ← 儲存語言獨立區域
+DELETE /api/training/slides/:id/lang-regions               ← 刪除（回到繼承）
+```
+
+#### 8.7.6 已確認設計決策
+
+| 決策 | 說明 |
+|------|------|
+| Canvas 合成而非 Server-side | 前端即時預覽、零延遲，避免 server 安裝 sharp/canvas 套件 |
+| 合成輸出 PNG | 保持無損品質，底圖通常為截圖，PNG 最合適 |
+| 覆蓋式替換 | 合成結果直接替換當前語言底圖，不另存版本 |
+| 等高/等寬縮放 | 避免變形，以較小尺寸為基準等比縮放 |
+| 互動區域座標保留 | 合成後百分比座標不自動調整，提示使用者手動確認 |
+
+#### 8.7.7 底圖上傳路徑修正（Bug Fix）
+
+> 日期：2026-04-08
+
+`POST /api/training/slides/:sid/lang-image` 路由的 multer destination 使用 `req.params.id` 來決定上傳目錄，但此路由只有 `:sid`（slide ID），導致檔案被存到 `course_tmp/` 而非正確的 `course_{courseId}/`。
+
+**修正方式**：multer 先存到暫存目錄，上傳後查詢 slide 對應的 courseId，再用 `fs.renameSync` 將檔案移動到正確目錄。
+
+```
+POST /slides/:sid/lang-image
+    │
+    ▼
+multer 存到 uploads/course_tmp/
+    │
+    ▼
+SELECT course_id FROM course_lessons JOIN course_slides ...
+    │
+    ▼
+fs.renameSync → uploads/course_{courseId}/lang_{lang}_{block}_{ts}.{ext}
+```
+
+#### 8.7.8 regions_json 合併邏輯修正
+
+> 日期：2026-04-08
+
+讀取投影片翻譯內容時，`regions_json`（語言獨立區域）為 **source of truth**，`content_json` 中的 hotspot block 只作為 fallback 填補缺失欄位。
+
+**修正前**（錯誤）：content_json 的 regions 總是覆蓋 regions_json → 導致獨立編輯的語音、回饋等欄位被主語言覆蓋。
+
+**修正後**（正確）：
+```
+regions_json 存在？
+  ├─ 是 → 以 regions_json 為底，只 fill missing（narration/feedback/test_hint/explore_desc 為空時才從 content_json 補）
+  └─ 否 → 直接使用 content_json 中的 regions
+```
+
+#### 8.7.9 翻譯 API 支援 regions_json
+
+> 日期：2026-04-08
+
+`POST /api/training/courses/:id/translate` 翻譯流程新增 regions_json 翻譯步驟：
+
+1. 原有流程：翻譯 content_json（含 block 內文字、hotspot regions 的 label/narration/feedback 等）
+2. **新增**：若投影片有 `regions_json`（語言獨立區域），額外做一次 LLM 呼叫翻譯整個 JSON
+3. 翻譯範圍：`label`、`narration`、`feedback`、`test_hint`、`explore_desc`、intro 的 `narration`
+4. 翻譯結果存入 `slide_translations.regions_json` 欄位
+
+```
+foreach slide:
+  1. 翻譯 content_json → slide_translations.content_json
+  2. 翻譯 notes → slide_translations.notes
+  3. IF regions_json exists:
+       翻譯 regions_json → slide_translations.regions_json  ← 新增
+```
+
 ---
 
 ## 9. AI 輔助出題

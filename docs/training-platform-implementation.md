@@ -1,7 +1,7 @@
 # FOXLINK GPT 教育訓練平台 — 實作完成報告
 
-> 日期：2026-04-02（Phase 1-2F）、2026-04-03（Phase 3A）、2026-04-04（Phase 3B + i18n）、2026-04-05（Phase 3C–3D 全部）、2026-04-06~07（Phase 4+5 訓練教室+計分+報表）
-> 狀態：Phase 1–3E + Phase 4A–4F + Phase 5A–5H + 追加功能（demo 展示/計分/章節選擇/TTS 修正）全部實作完成
+> 日期：2026-04-02（Phase 1-2F）、2026-04-03（Phase 3A）、2026-04-04（Phase 3B + i18n）、2026-04-05（Phase 3C–3D 全部）、2026-04-06~07（Phase 4+5 訓練教室+計分+報表）、2026-04-08（Phase 3B-8 多語底圖編輯器增強 + Bug Fix + 預覽語言 + 翻譯 regions）
+> 狀態：Phase 1–3E + Phase 4A–4F + Phase 5A–5H + 追加功能（demo 展示/計分/章節選擇/TTS 修正）+ Phase 3B-8 + 追加修復全部實作完成
 > 設計文件：[training-platform-design.md](training-platform-design.md)、[training-classroom-design.md](training-classroom-design.md)、[training-scoring-design.md](training-scoring-design.md)
 
 ---
@@ -3449,3 +3449,225 @@ preprocessTtsText() 修正 AI/API/MCP/ERP/GPT 等發音。
 | `client/src/components/training/editor/CourseEditor.tsx` | 章節拖拉 + 預覽選章節 + 翻譯選章節 |
 | `client/src/components/training/CoursePlayer.tsx` | lessonId query 傳入 |
 | `client/src/i18n/locales/*.json` | demoStep + translateChapters + previewAll keys |
+
+---
+
+## 26. Phase 5D — 章節測驗成績追蹤（Lesson Quiz Results）
+
+### 26-1：需求
+
+使用手冊章節可連結互動教學（linked_course_id + linked_lesson_id），測驗完成後需以**章節（lesson）**為最小單位記錄通過狀態。使用手冊和訓練教室兩邊通過任一即算通過。管理者需報表查看各章節各同仁完成情況。
+
+### 26-2：DB — LESSON_QUIZ_RESULTS
+
+新增 `lesson_quiz_results` 表於 `database-oracle.js`：
+
+| 欄位 | 型別 | 說明 |
+|------|------|------|
+| id | NUMBER PK | 自增 |
+| user_id | NUMBER | 使用者 |
+| course_id | NUMBER | 課程 |
+| lesson_id | NUMBER | 章節 |
+| source | VARCHAR2(20) | `'help'` 或 `'classroom'` |
+| session_id | VARCHAR2(36) | 對應 INTERACTION_RESULTS |
+| score | NUMBER | 得分 |
+| max_score | NUMBER | 滿分 |
+| passed | NUMBER(1) | 是否通過 |
+| completed_at | TIMESTAMP | 完成時間 |
+
+UNIQUE 約束：`(user_id, course_id, lesson_id, session_id)`
+
+通過判定：`(score / max_score) × 100 >= course.pass_score`
+
+### 26-3：API 端點
+
+**POST `/training/lesson-quiz-result`**
+- 接收 `course_id, lesson_id, session_id, score, max_score, source`
+- 自動查 `courses.pass_score` 判定通過
+- Upsert 邏輯：同一 user+course+lesson+session 存在則 UPDATE
+- Oracle NULL 處理：`session_id IS NULL` 分支查詢
+
+**GET `/training/lesson-completion-report?course_id=`**
+- Admin 權限（`role=admin` 或 `publish_edit`）
+- 查所有 lesson，計算每個 lesson 的通過/未通過/未作答人數
+- 目標人員：公開課程 → 全員，非公開 → `PROGRAM_ASSIGNMENTS` 指派者
+- 回傳含每位使用者狀態、最高分、完成時間的 userDetails
+
+**GET `/training/help-completion-report`**
+- Admin 權限
+- 查所有 `linked_course_id IS NOT NULL` 的 help_sections
+- 多語言 title 查詢（COALESCE fallback zh-TW）
+- 按各 section 的 linked_lesson_id 查 lesson_quiz_results
+- 回傳與 lesson-completion-report 相同結構的 sectionReport
+
+### 26-4：CoursePlayer 寫入邏輯
+
+`finishExam()` 修改：
+1. 測驗結束後，將 `examResults` 按 `slide.lesson_id` 分組
+2. 每個 lesson 彙總 `weightedScore` / `weightedMax`
+3. 未完成的 slides 補 max（score=0）
+4. 每個 lesson 呼叫 `POST /training/lesson-quiz-result`
+5. `source` 判定：`skipAccessCheck ? 'help' : 'classroom'`
+
+HelpTrainingPlayer 不需額外修改 — 它傳 `skipAccessCheck=true` 給 CoursePlayerInner，finishExam 自動處理。
+
+### 26-5：Admin 報表 UI
+
+TrainingAdmin 元件新增兩個 tab：
+
+| Tab | 功能 |
+|-----|------|
+| 章節完成率 | 選課程 → 列 lesson 通過率 → 展開看每人狀態 |
+| 使用手冊完成率 | 列有連結互動教學的 help sections → 通過率 → 展開看每人狀態 |
+
+UI 元素：
+- 通過率進度條（綠 ≥80% / 橙 ≥50% / 紅 <50%）
+- 狀態 badge（✅通過 / ❌未通過 / ⬜未作答）
+- 展開顯示：姓名、工號、最高分、完成時間
+
+### 26-6：實作檔案
+
+| 檔案 | 變更 |
+|------|------|
+| `server/database-oracle.js` | 新增 `LESSON_QUIZ_RESULTS` 建表 |
+| `server/routes/training.js` | 新增 3 個 API（lesson-quiz-result, lesson-completion-report, help-completion-report） |
+| `client/src/components/training/CoursePlayer.tsx` | `finishExam()` 按 lesson 分組寫入成績 |
+| `client/src/components/admin/TrainingAdmin.tsx` | 新增「章節完成率」「使用手冊完成率」兩個 tab |
+
+---
+
+## 27. Phase 3B-8 — 多語底圖編輯器增強（2026-04-08）
+
+> 設計文件：[training-platform-design.md §8.7](training-platform-design.md)
+
+### 27-1：需求背景
+
+投影片的外語底圖管理需要更便利的操作方式：
+1. 在 Modal 大圖編輯模式下可直接**拖拉檔案**或**剪貼簿貼上**抽換底圖
+2. 支援**併排合成**——將兩張圖片（如主語言截圖 + 外語翻譯截圖）水平/垂直合成為一張底稿
+
+### 27-2：Modal Drag & Drop 抽換底圖
+
+| 項目 | 狀態 | 說明 |
+|------|------|------|
+| Modal 拖拉上傳 | ✅ 完成 | 圖片區域 `onDragOver` / `onDrop` 接收檔案，直接呼叫 `handleUpload` |
+| 拖拉視覺回饋 | ✅ 完成 | `dragOverModal` state 控制藍色虛線 overlay + 「放開以抽換底圖」提示 |
+| `onDragLeave` 防閃爍 | ✅ 完成 | `e.currentTarget.contains(e.relatedTarget)` 過濾子元素觸發的 leave |
+| 剪貼簿貼上 | ✅ 完成 | `document.addEventListener('paste')` 在 Modal 開啟時偵測 `image/*` MIME |
+| 底部操作提示 | ✅ 完成 | Footer 顯示「💡 拖拉圖片到畫面上 或 Ctrl+V 貼上剪貼簿圖片 可直接抽換底圖」 |
+
+### 27-3：併排合成（Side-by-Side Composite）
+
+| 項目 | 狀態 | 說明 |
+|------|------|------|
+| Composite Dialog UI | ✅ 完成 | 全螢幕覆蓋（z-10000），圓角深色面板，Header + Body + Footer 三段式 |
+| 圖片 Slot A/B | ✅ 完成 | 兩個 drop zone，各自支援拖拉/點擊/剪貼簿三種輸入方式 |
+| 左圖預填 | ✅ 完成 | 開啟 dialog 時自動載入目前語言底圖（或主語言圖）作為 Slot A |
+| 排列方向切換 | ✅ 完成 | `horizontal`（左右並排）/ `vertical`（上下並排），按鈕高亮 active 狀態 |
+| 間距調整 | ✅ 完成 | 0px / 4px / 8px / 16px 四段可選 |
+| Canvas 合成引擎 | ✅ 完成 | `generateComposite()` — 等高/等寬縮放 + 白底填充 + `canvas.toDataURL('image/png')` |
+| 即時預覽 | ✅ 完成 | 「預覽合成」按鈕渲染 Canvas 結果顯示於 dialog 底部 |
+| 確認上傳 | ✅ 完成 | `confirmComposite()` — `toBlob()` → `new File()` → 複用 `handleUpload()` |
+| Paste 智慧路由 | ✅ 完成 | compositeOpen 時 paste 自動填入空的 slot（右優先）；否則直接抽換底圖 |
+| 警告提示 | ✅ 完成 | Footer 提示「合成後會替換底圖，既有互動區域座標可能需要重新調整」 |
+
+### 27-4：技術細節
+
+**Canvas 合成邏輯**：
+```
+水平併排：
+  targetH = min(imgL.height, imgR.height)  // 等高基準
+  scaleL = targetH / imgL.height
+  scaleR = targetH / imgR.height
+  canvas.width = wL + gap + wR
+  canvas.height = targetH
+
+垂直併排：
+  targetW = min(imgL.width, imgR.width)    // 等寬基準
+  scaleL = targetW / imgL.width
+  scaleR = targetW / imgR.width
+  canvas.width = targetW
+  canvas.height = hL + gap + hR
+```
+
+**跨域圖片處理**：`img.crossOrigin = 'anonymous'` 確保 server 圖片可被 Canvas 繪製。
+
+**State 管理**：11 個新增 state（compositeOpen, compLeft, compRight, compDirection, compGap, compPreview, compUploading, dragOverPreview, dragOverModal + 2 refs），全部在 LanguageImagePanel 內部管理。
+
+### 27-5：新增 lucide-react icons
+
+| Icon | 用途 |
+|------|------|
+| `ImagePlus` | 「抽換底圖」按鈕 |
+| `Columns` | 「併排合成」按鈕 + dialog header |
+| `Rows` | 「上下並排」選項 |
+| `Eye` | 「預覽合成」按鈕 |
+
+### 27-6：實作檔案
+
+| 檔案 | 變更 |
+|------|------|
+| `client/src/components/training/editor/blocks/LanguageImagePanel.tsx` | 新增 Modal drag & drop + Composite Dialog（+250 行） |
+| `docs/training-platform-design.md` | 新增 §8.7 多語底圖編輯器設計規格 |
+| `docs/training-platform-implementation.md` | 新增本節（§27） |
+
+### 27-7：Bug Fix — lang-image 上傳 401 / 路徑錯誤
+
+| 項目 | 狀態 | 說明 |
+|------|------|------|
+| 根因分析 | ✅ 完成 | multer destination 使用 `req.params.id`，但 `/slides/:sid/lang-image` 只有 `:sid` → 解析為 `undefined` → 存到 `course_tmp/` |
+| fs.renameSync 修正 | ✅ 完成 | 上傳後查詢 slide → lesson → course 取得 courseId，再 `fs.renameSync` 移動到 `course_{courseId}/` |
+| 目錄自動建立 | ✅ 完成 | `fs.mkdirSync(targetDir, { recursive: true })` 確保目標目錄存在 |
+
+**修改檔案**：`server/routes/training.js`（lang-image upload endpoint）
+
+### 27-8：CourseEditor 預覽語言選擇
+
+| 項目 | 狀態 | 說明 |
+|------|------|------|
+| 語言分組下拉選單 | ✅ 完成 | Preview 按鈕下拉選單改為三個語言區塊（🇹🇼 繁體中文 / 🇺🇸 English / 🇻🇳 Tiếng Việt） |
+| 各語言章節列表 | ✅ 完成 | 每個語言區塊下顯示「全部章節」+ 各章節名稱，點擊後帶 `?lang=` 參數開啟 Player |
+| 傳遞 lang 參數 | ✅ 完成 | 點擊預覽項目時 URL 帶入 `?lang=zh-TW` / `?lang=en` / `?lang=vi`，Player 依此載入對應翻譯 |
+
+**修改檔案**：`client/src/components/training/editor/CourseEditor.tsx`
+
+### 27-9：Server 合併邏輯修正（regions_json 優先）
+
+| 項目 | 狀態 | 說明 |
+|------|------|------|
+| 問題 | — | 讀取翻譯投影片時，content_json 中的 regions 會覆蓋 regions_json 獨立編輯的欄位（narration、feedback 等） |
+| 修正邏輯 | ✅ 完成 | `regions_json` 為 source of truth；只在 regions_json 中 narration/feedback/test_hint/explore_desc 為空時，才從 content_json 對應欄位補值 |
+| 影響範圍 | — | `GET /api/training/slides/:id?lang=` 的 merge 邏輯（training.js ~line 1015） |
+
+**修改檔案**：`server/routes/training.js`（slide GET endpoint merge 邏輯）
+
+### 27-10：翻譯 API 支援 regions_json
+
+| 項目 | 狀態 | 說明 |
+|------|------|------|
+| regions_json 翻譯 | ✅ 完成 | translate endpoint 新增步驟：若投影片有 regions_json，額外呼叫 LLM 翻譯整個 JSON |
+| 翻譯欄位 | ✅ 完成 | label、narration、feedback、test_hint、explore_desc、intro narrations |
+| 儲存位置 | ✅ 完成 | 翻譯結果存入 `slide_translations.regions_json` 欄位 |
+| 單次 LLM 呼叫 | ✅ 完成 | 整個 regions_json 作為一個 JSON 丟給 LLM 翻譯，避免多次 API call |
+
+**修改檔案**：`server/routes/training.js`（translate endpoint）
+
+### 27-11：Player 區域標籤移除
+
+| 項目 | 狀態 | 說明 |
+|------|------|------|
+| 移除區域文字標籤 | ✅ 完成 | HotspotBlock 不再在互動區域上方顯示 label 文字，改為僅在當前目標區域顯示步驟數字 badge |
+| 移除 hover tooltip | ✅ 完成 | 區域 hover 時不再顯示 tooltip 文字，避免在測驗模式洩漏提示 |
+| 視覺簡化 | ✅ 完成 | 學習模式下靠步驟 badge（如 ①②③）引導，測驗模式下區域完全隱藏 |
+
+**修改檔案**：`client/src/components/training/blocks/HotspotBlock.tsx`
+
+### 27-12：實作檔案總覽（追加）
+
+| 檔案 | 變更 |
+|------|------|
+| `server/routes/training.js` | lang-image 路徑修正 + merge 邏輯修正 + translate regions_json |
+| `client/src/components/training/editor/CourseEditor.tsx` | 預覽下拉選單三語言分組 |
+| `client/src/components/training/blocks/HotspotBlock.tsx` | 移除區域 label 文字和 hover tooltip |
+| `docs/training-platform-design.md` | 新增 §8.7.7–8.7.9 設計補充 |
+| `docs/training-platform-implementation.md` | 新增 §27-7 至 §27-12 |

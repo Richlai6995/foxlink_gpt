@@ -1896,6 +1896,51 @@ async function runMigrations(db) {
     CONSTRAINT uq_course_notif UNIQUE (course_id)
   )`);
 
+  // ── Training Platform: 章節測驗成績 ─────────────────────────────────────────
+  await createTable('LESSON_QUIZ_RESULTS', `CREATE TABLE lesson_quiz_results (
+    id              NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    user_id         NUMBER NOT NULL,
+    course_id       NUMBER NOT NULL,
+    lesson_id       NUMBER NOT NULL,
+    source          VARCHAR2(20) DEFAULT 'classroom',
+    session_id      VARCHAR2(36),
+    score           NUMBER,
+    max_score       NUMBER,
+    passed          NUMBER(1) DEFAULT 0,
+    completed_at    TIMESTAMP DEFAULT SYSTIMESTAMP,
+    CONSTRAINT uq_lqr UNIQUE (user_id, course_id, lesson_id, session_id)
+  )`);
+
+  // Backfill LESSON_QUIZ_RESULTS from INTERACTION_RESULTS (one-time, only if table is empty)
+  try {
+    const count = await db.prepare('SELECT COUNT(*) AS cnt FROM lesson_quiz_results').get();
+    if (count?.cnt === 0) {
+      const irExists = await db.tableExists('INTERACTION_RESULTS');
+      if (irExists) {
+        const inserted = await db.prepare(`
+          INSERT INTO lesson_quiz_results (user_id, course_id, lesson_id, source, session_id, score, max_score, passed, completed_at)
+          SELECT ir.user_id, ir.course_id, cs.lesson_id,
+                 'classroom', ir.session_id,
+                 SUM(COALESCE(ir.weighted_score, ir.score)),
+                 SUM(COALESCE(ir.weighted_max, ir.max_score)),
+                 CASE WHEN SUM(COALESCE(ir.weighted_max, ir.max_score)) > 0
+                   AND (SUM(COALESCE(ir.weighted_score, ir.score)) / SUM(COALESCE(ir.weighted_max, ir.max_score))) * 100
+                       >= COALESCE(c.pass_score, 60)
+                 THEN 1 ELSE 0 END,
+                 MAX(ir.created_at)
+          FROM interaction_results ir
+          JOIN course_slides cs ON cs.id = ir.slide_id
+          JOIN courses c ON c.id = ir.course_id
+          WHERE ir.player_mode = 'test' AND ir.session_id IS NOT NULL
+          GROUP BY ir.user_id, ir.course_id, cs.lesson_id, ir.session_id, c.pass_score
+        `).run();
+        console.log(`[Migration] Backfilled lesson_quiz_results from interaction_results`);
+      }
+    }
+  } catch (e) {
+    console.warn(`[Migration] lesson_quiz_results backfill: ${e.message}`);
+  }
+
   // ── Training Platform: 翻譯表 ───────────────────────────────────────────────
   await createTable('COURSE_TRANSLATIONS', `CREATE TABLE course_translations (
     id          NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
