@@ -65,6 +65,8 @@ cd client && npm run dev    # frontend → localhost:5173 (proxy → 3007)
 | `feedback-platform-implementation.md` | 問題反饋平台實施報告（Phase 1–5） |
 | `test-plan-v2-tag-workflow.md` | 標籤工作流測試計畫 |
 | `llm-performance-optimization.md` | LLM 效能優化（streaming、genConfig、AOAI 相容性） |
+| `response-optimization.md` | 回應速度優化（Webex webhook/websocket + 網頁版 Phase 2） |
+| `webex-webhook-firewall-setup.md` | Webex Webhook 防火牆與 Nginx 設定（網管操作文件） |
 
 ---
 

@@ -11,6 +11,7 @@ class WebexService {
   constructor(token) {
     this.token = token;
     this._botPersonId = null;
+    this._botDisplayName = null;
 
     this.client = axios.create({
       baseURL: WEBEX_API,
@@ -28,6 +29,18 @@ class WebexService {
     const res = await this.client.get('/people/me');
     this._botPersonId = res.data.id;
     return this._botPersonId;
+  }
+
+  /** 取得 Bot displayName（快取，只呼叫一次 API） */
+  async getBotDisplayName() {
+    if (this._botDisplayName) return this._botDisplayName;
+    try {
+      const res = await this.client.get('/people/me');
+      this._botDisplayName = res.data.displayName || 'FOXLINK GPT';
+    } catch {
+      this._botDisplayName = 'FOXLINK GPT';
+    }
+    return this._botDisplayName;
   }
 
   /** 取得完整 message 物件（webhook 只傳 ID） */

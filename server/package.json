@@ -39,6 +39,7 @@
     "socket.io": "^4.8.3",
     "sql.js": "^1.11.0",
     "uuid": "^9.0.1",
+    "webex-node-bot-framework": "^2.5.1",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {

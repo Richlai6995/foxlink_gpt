@@ -94,10 +94,10 @@ app.get('/api/health', (req, res) => res.json({ status: 'ok', timestamp: new Dat
     app.use('/api/feedback', require('./routes/feedback'));
     console.log('[Route] /api/feedback OK');
 
-    // Start Webex Bot polling listener (outbound, works behind corporate firewall)
+    // Start Webex Bot listener (WebSocket primary, Polling fallback)
     try {
-      const { startPolling } = require('./services/webexListener');
-      startPolling();
+      const { startListener } = require('./services/webexListener');
+      startListener();
     } catch (e) {
       console.error('[WebexListener] Failed to start:', e.message);
     }

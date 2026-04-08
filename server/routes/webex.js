@@ -416,9 +416,13 @@ async function buildToolList(db, user, lang) {
   const pickName = (row) => row[`name_${langSuffix}`] || row.name;
   const pickDesc = (row) => row[`desc_${langSuffix}`] || row.description;
 
-  // Skills
-  try {
-    const skills = await db.prepare(
+  // ── 4 個查詢並行執行（Promise.all）─────────────────────────────────────────
+  const difyAcl = buildAccessFilter('a', 'dify_kb_id', 'd', user);
+  const mcpAcl  = buildAccessFilter('a', 'mcp_server_id', 'm', user);
+
+  const [skills, kbs, difyKbs, mcpServers] = await Promise.all([
+    // Skills
+    db.prepare(
       `SELECT name, description, name_zh, name_en, name_vi, desc_zh, desc_en, desc_vi FROM skills
        WHERE is_public=1
           OR owner_user_id=?
@@ -428,51 +432,29 @@ async function buildToolList(db, user, lang) {
               OR (sa.grantee_type='role' AND sa.grantee_id=TO_CHAR(?)))
           )
        ORDER BY name ASC`
-    ).all(user.id, user.id, user.role_id || 0);
-    if (skills.length > 0) {
-      lines.push(l.skills);
-      skills.forEach(s => {
-        const desc = pickDesc(s) ? ` — ${pickDesc(s).slice(0, 40)}` : '';
-        lines.push(`• ${pickName(s)}${desc}`);
-      });
-      lines.push('');
-    }
-  } catch (e) {
-    console.warn('[Webex] buildToolList skills error:', e.message);
-  }
-
-  // 自建 KB
-  try {
-    const kbs = await db.prepare(
-        `SELECT kb.name, kb.description, kb.name_zh, kb.name_en, kb.name_vi, kb.desc_zh, kb.desc_en, kb.desc_vi FROM knowledge_bases kb
-         WHERE kb.chunk_count>0 AND (
-           kb.creator_id=? OR kb.is_public=1
-           OR EXISTS (
-             SELECT 1 FROM kb_access ka WHERE ka.kb_id=kb.id
-             AND ((ka.grantee_type='user' AND ka.grantee_id=TO_CHAR(?))
-               OR (ka.grantee_type='role' AND ka.grantee_id=TO_CHAR(?))
-               OR (ka.grantee_type='dept' AND ka.grantee_id=? AND ? IS NOT NULL))
-           )
+    ).all(user.id, user.id, user.role_id || 0).catch(e => {
+      console.warn('[Webex] buildToolList skills error:', e.message);
+      return [];
+    }),
+    // 自建 KB
+    db.prepare(
+      `SELECT kb.name, kb.description, kb.name_zh, kb.name_en, kb.name_vi, kb.desc_zh, kb.desc_en, kb.desc_vi FROM knowledge_bases kb
+       WHERE kb.chunk_count>0 AND (
+         kb.creator_id=? OR kb.is_public=1
+         OR EXISTS (
+           SELECT 1 FROM kb_access ka WHERE ka.kb_id=kb.id
+           AND ((ka.grantee_type='user' AND ka.grantee_id=TO_CHAR(?))
+             OR (ka.grantee_type='role' AND ka.grantee_id=TO_CHAR(?))
+             OR (ka.grantee_type='dept' AND ka.grantee_id=? AND ? IS NOT NULL))
          )
-         ORDER BY kb.name ASC`
-      ).all(user.id, user.id, user.role_id || 0, user.dept_code, user.dept_code);
-    if (kbs.length > 0) {
-      lines.push(l.kb);
-      kbs.forEach(k => {
-        const desc = pickDesc(k) ? ` — ${pickDesc(k).slice(0, 40)}` : '';
-        lines.push(`• ${pickName(k)}${desc}`);
-      });
-      lines.push('');
-    }
-  } catch (e) {
-    console.warn('[Webex] buildToolList selfKB error:', e.message);
-  }
-
-  // DIFY KB
-  try {
-    const difyAcl = buildAccessFilter('a', 'dify_kb_id', 'd', user);
-    console.log(`[Webex][buildToolList] DIFY params: ${JSON.stringify(difyAcl.params)}`);
-    const difyKbs = await db.prepare(
+       )
+       ORDER BY kb.name ASC`
+    ).all(user.id, user.id, user.role_id || 0, user.dept_code, user.dept_code).catch(e => {
+      console.warn('[Webex] buildToolList selfKB error:', e.message);
+      return [];
+    }),
+    // DIFY KB
+    db.prepare(
       `SELECT d.name, DBMS_LOB.SUBSTR(d.description, 200, 1) AS description, d.sort_order,
               d.name_zh, d.name_en, d.name_vi,
               DBMS_LOB.SUBSTR(d.desc_zh, 200, 1) AS desc_zh, DBMS_LOB.SUBSTR(d.desc_en, 200, 1) AS desc_en, DBMS_LOB.SUBSTR(d.desc_vi, 200, 1) AS desc_vi
@@ -482,25 +464,12 @@ async function buildToolList(db, user, lang) {
          OR ${difyAcl.clause}
        )
        ORDER BY d.sort_order ASC`
-    ).all(...difyAcl.params);
-    console.log(`[Webex][buildToolList] DIFY result count: ${difyKbs.length}`);
-    if (difyKbs.length > 0) {
-      lines.push(l.dify);
-      difyKbs.forEach(k => {
-        const desc = pickDesc(k) ? ` — ${pickDesc(k).slice(0, 40)}` : '';
-        lines.push(`• ${pickName(k)}${desc}`);
-      });
-      lines.push('');
-    }
-  } catch (e) {
-    console.warn('[Webex] buildToolList dify error:', e.message);
-  }
-
-  // MCP
-  try {
-    const mcpAcl = buildAccessFilter('a', 'mcp_server_id', 'm', user);
-    console.log(`[Webex][buildToolList] MCP params: ${JSON.stringify(mcpAcl.params)}`);
-    const mcpServers = await db.prepare(
+    ).all(...difyAcl.params).catch(e => {
+      console.warn('[Webex] buildToolList dify error:', e.message);
+      return [];
+    }),
+    // MCP
+    db.prepare(
       `SELECT m.name, DBMS_LOB.SUBSTR(m.description, 200, 1) AS description,
               m.name_zh, m.name_en, m.name_vi,
               DBMS_LOB.SUBSTR(m.desc_zh, 200, 1) AS desc_zh, DBMS_LOB.SUBSTR(m.desc_en, 200, 1) AS desc_en, DBMS_LOB.SUBSTR(m.desc_vi, 200, 1) AS desc_vi
@@ -510,18 +479,46 @@ async function buildToolList(db, user, lang) {
          OR ${mcpAcl.clause}
        )
        ORDER BY m.name ASC`
-    ).all(...mcpAcl.params);
-    console.log(`[Webex][buildToolList] MCP result count: ${mcpServers.length}`);
-    if (mcpServers.length > 0) {
-      lines.push(l.mcp);
-      mcpServers.forEach(m => {
-        const desc = pickDesc(m) ? ` — ${pickDesc(m).slice(0, 40)}` : '';
-        lines.push(`• ${pickName(m)}${desc}`);
-      });
-      lines.push('');
-    }
-  } catch (e) {
-    console.warn('[Webex] buildToolList mcp error:', e.message);
+    ).all(...mcpAcl.params).catch(e => {
+      console.warn('[Webex] buildToolList mcp error:', e.message);
+      return [];
+    }),
+  ]);
+
+  if (skills.length > 0) {
+    lines.push(l.skills);
+    skills.forEach(s => {
+      const desc = pickDesc(s) ? ` — ${pickDesc(s).slice(0, 40)}` : '';
+      lines.push(`• ${pickName(s)}${desc}`);
+    });
+    lines.push('');
+  }
+
+  if (kbs.length > 0) {
+    lines.push(l.kb);
+    kbs.forEach(k => {
+      const desc = pickDesc(k) ? ` — ${pickDesc(k).slice(0, 40)}` : '';
+      lines.push(`• ${pickName(k)}${desc}`);
+    });
+    lines.push('');
+  }
+
+  if (difyKbs.length > 0) {
+    lines.push(l.dify);
+    difyKbs.forEach(k => {
+      const desc = pickDesc(k) ? ` — ${pickDesc(k).slice(0, 40)}` : '';
+      lines.push(`• ${pickName(k)}${desc}`);
+    });
+    lines.push('');
+  }
+
+  if (mcpServers.length > 0) {
+    lines.push(l.mcp);
+    mcpServers.forEach(m => {
+      const desc = pickDesc(m) ? ` — ${pickDesc(m).slice(0, 40)}` : '';
+      lines.push(`• ${pickName(m)}${desc}`);
+    });
+    lines.push('');
   }
 
   if (lines.length <= 1) {
@@ -1209,12 +1206,8 @@ async function handleWebexMessage(message) {
      VALUES (?, ?, ?, ?, ?, 'ok', ?, ?, ?)`
   ).run(senderEmail, normalizeEmail(senderEmail), user.id, user.name, user.username, roomType, roomId, msgPreview).catch(() => {});
 
-  // 取得 Bot 名稱（用來剝 mention）
-  let botName = 'FOXLINK GPT';
-  try {
-    const meRes = await webex.client.get('/people/me');
-    botName = meRes.data.displayName || botName;
-  } catch (_) {}
+  // 取得 Bot 名稱（用來剝 mention）— 使用 cache，不再每次呼叫 API
+  const botName = await webex.getBotDisplayName();
 
   // 解析訊息文字（去 mention）
   const rawText = message.text || '';
