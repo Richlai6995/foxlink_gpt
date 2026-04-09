@@ -78,14 +78,20 @@ async function getK8sResource(apiPath, kubectlArgs) {
   try {
     const out = await runCmd('kubectl', kubectlArgs);
     return JSON.parse(out);
-  } catch {}
+  } catch (e) {
+    // kubectl not available — expected in container
+  }
 
   // Fallback: K8s service account API
   if (hasK8sServiceAccount()) {
-    return await k8sApiGet(apiPath);
+    try {
+      return await k8sApiGet(apiPath);
+    } catch (e) {
+      throw new Error(`K8s API ${apiPath} failed: ${e.message}`);
+    }
   }
 
-  throw new Error('kubectl 無法連線且無 K8s service account');
+  throw new Error(`kubectl 無法連線且無 K8s service account (token path exists: ${fs.existsSync(K8S_TOKEN_PATH)}, KUBERNETES_SERVICE_HOST: ${process.env.KUBERNETES_SERVICE_HOST || 'unset'})`);
 }
 
 // ─── Docker API helper (via /var/run/docker.sock, fallback from docker CLI) ──

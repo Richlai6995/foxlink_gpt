@@ -21,20 +21,24 @@ function initSocket(httpServer) {
   // Redis adapter（多 Pod 環境，開發環境無 Redis 則跳過）
   const redisUrl = process.env.REDIS_URL;
   if (redisUrl) {
-    try {
-      const { createAdapter } = require('@socket.io/redis-adapter');
-      const Redis = require('ioredis');
-      const redisOpts = { maxRetriesPerRequest: 1, connectTimeout: 3000, retryStrategy: () => null };
-      const pubClient = new Redis(redisUrl, redisOpts);
-      const subClient = pubClient.duplicate();
-      // 必須加 error handler，否則 ioredis 會拋 unhandled warning
-      pubClient.on('error', (err) => console.warn('[Socket.io] Redis pub error:', err.message));
-      subClient.on('error', (err) => console.warn('[Socket.io] Redis sub error:', err.message));
-      io.adapter(createAdapter(pubClient, subClient));
-      console.log('[Socket.io] Redis adapter connected');
-    } catch (e) {
-      console.warn('[Socket.io] Redis adapter failed, using in-memory:', e.message);
-    }
+    (async () => {
+      try {
+        const { createAdapter } = require('@socket.io/redis-adapter');
+        const Redis = require('ioredis');
+        const redisOpts = { maxRetriesPerRequest: 1, connectTimeout: 3000, lazyConnect: true, retryStrategy: () => null };
+        const pubClient = new Redis(redisUrl, redisOpts);
+        pubClient.on('error', (err) => console.warn('[Socket.io] Redis pub error:', err.message));
+        // Test connection first — if Redis is unreachable, fall back gracefully
+        await pubClient.connect();
+        const subClient = pubClient.duplicate();
+        subClient.on('error', (err) => console.warn('[Socket.io] Redis sub error:', err.message));
+        await subClient.connect();
+        io.adapter(createAdapter(pubClient, subClient));
+        console.log('[Socket.io] Redis adapter connected');
+      } catch (e) {
+        console.warn('[Socket.io] Redis adapter failed, using in-memory:', e.message);
+      }
+    })();
   }
 
   // 認證 middleware

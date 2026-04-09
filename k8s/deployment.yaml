@@ -57,6 +57,7 @@ spec:
         app: foxlink-gpt
     spec:
       serviceAccountName: foxlink-gpt
+      automountServiceAccountToken: true
       terminationGracePeriodSeconds: 60
 
       # ── Init: 等 Redis 就緒再啟動 ─────────────────────────────────────────

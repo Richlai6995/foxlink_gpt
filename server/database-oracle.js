@@ -93,11 +93,13 @@ class OracleStatementWrapper {
   async run(...params) {
     const bindParams = this._bindParams(params);
     const isInsert = /^\s*INSERT\s+/i.test(this.sql);
+    // INSERT-SELECT (INSERT INTO ... SELECT) cannot use RETURNING clause
+    const isInsertSelect = isInsert && /\bSELECT\b/i.test(this.sql);
 
     const conn = await this.pool.getConnection();
     try {
       let result;
-      if (isInsert) {
+      if (isInsert && !isInsertSelect) {
         // Try RETURNING id — STRING bind works for both NUMBER and VARCHAR2 PKs
         try {
           const retIdx = bindParams.length + 1;
@@ -115,7 +117,8 @@ class OracleStatementWrapper {
         } catch (retErr) {
           // ORA-00904: invalid identifier → table has no 'id' column; run plain
           // ORA-22848: cannot use CLOB type with RETURNING clause; run plain
-          if (retErr.errorNum !== 904 && retErr.errorNum !== 22848) normaliseError(retErr);
+          // ORA-03049: RETURNING not valid with INSERT-SELECT; run plain
+          if (retErr.errorNum !== 904 && retErr.errorNum !== 22848 && retErr.errorNum !== 3049) normaliseError(retErr);
           result = await conn.execute(this.sql, bindParams, { autoCommit: true });
         }
       } else {
@@ -300,12 +303,18 @@ async function runMigrations(db) {
   try {
     const conn = await pool.getConnection();
     try {
-      // Check if embedding column has a fixed dimension (indicated by data_length != 0 or check user_tab_cols)
-      const dimRow = await conn.execute(
-        `SELECT vector_dimensions FROM user_tab_columns WHERE table_name='KB_CHUNKS' AND column_name='EMBEDDING'`,
-        [], { outFormat: oracledb.OUT_FORMAT_OBJECT }
-      );
-      const dim = dimRow.rows?.[0]?.VECTOR_DIMENSIONS;
+      // Check if embedding column has a fixed dimension
+      // Try Oracle 23ai vector_dimensions first, fallback to data_length for older versions
+      let dim = null;
+      try {
+        const dimRow = await conn.execute(
+          `SELECT vector_dimensions FROM user_tab_columns WHERE table_name='KB_CHUNKS' AND column_name='EMBEDDING'`,
+          [], { outFormat: oracledb.OUT_FORMAT_OBJECT }
+        );
+        dim = dimRow.rows?.[0]?.VECTOR_DIMENSIONS;
+      } catch {
+        // ORA-00904: vector_dimensions doesn't exist on this Oracle version — skip migration
+      }
       // null or 0 means wildcard; non-null fixed dim means we need to migrate
       if (dim != null && dim !== 0) {
         // Only safe to drop+add when table is empty
@@ -1242,31 +1251,45 @@ async function runMigrations(db) {
   await safeAddColumn('ONLINE_DEPT_SNAPSHOTS', 'PROFIT_CENTER_NAME', 'VARCHAR2(200)');
   await safeAddColumn('ONLINE_DEPT_SNAPSHOTS', 'ORG_SECTION_NAME', 'VARCHAR2(200)');
 
-  // 確保 ONLINE_DEPT_SNAPSHOTS 有唯一約束（multi-pod 去重）
+  // 確保 ONLINE_DEPT_SNAPSHOTS 有唯一索引（multi-pod 去重）
+  // 使用 function-based unique index + NVL 讓 NULL 也參與去重
   try {
-    const constraintExists = await db.prepare(
-      `SELECT COUNT(*) AS CNT FROM user_constraints
-       WHERE constraint_name='UQ_DEPT_SNAP_KEY' AND table_name='ONLINE_DEPT_SNAPSHOTS'`
+    const idxExists = await db.prepare(
+      `SELECT COUNT(*) AS CNT FROM user_indexes
+       WHERE index_name='UQ_DEPT_SNAP_KEY' AND table_name='ONLINE_DEPT_SNAPSHOTS'`
     ).get();
-    if (Number(constraintExists?.CNT ?? 0) === 0) {
-      // 先刪除重複列（保留最小 id 的那筆）
+    if (Number(idxExists?.CNT ?? 0) === 0) {
+      // 也檢查是否曾以 constraint 形式存在
+      const conExists = await db.prepare(
+        `SELECT COUNT(*) AS CNT FROM user_constraints
+         WHERE constraint_name='UQ_DEPT_SNAP_KEY' AND table_name='ONLINE_DEPT_SNAPSHOTS'`
+      ).get();
+      if (Number(conExists?.CNT ?? 0) > 0) {
+        // 舊版 constraint 存在 → 先移除
+        await db.prepare(`ALTER TABLE online_dept_snapshots DROP CONSTRAINT uq_dept_snap_key`).run();
+      }
+      // 用 ROWID 去重（比 NOT IN 更可靠）
       await db.prepare(`
-        DELETE FROM online_dept_snapshots
-        WHERE id NOT IN (
-          SELECT MIN(id) FROM online_dept_snapshots
-          GROUP BY snapshot_id, NVL(profit_center,'~'), NVL(org_section,'~'),
-                   NVL(org_group_name,'~'), NVL(dept_code,'~')
-        ) AND snapshot_id IS NOT NULL
+        DELETE FROM online_dept_snapshots a
+        WHERE a.ROWID > (
+          SELECT MIN(b.ROWID) FROM online_dept_snapshots b
+          WHERE NVL(a.snapshot_id, -1) = NVL(b.snapshot_id, -1)
+            AND NVL(a.profit_center, '~') = NVL(b.profit_center, '~')
+            AND NVL(a.org_section, '~') = NVL(b.org_section, '~')
+            AND NVL(a.org_group_name, '~') = NVL(b.org_group_name, '~')
+            AND NVL(a.dept_code, '~') = NVL(b.dept_code, '~')
+        )
       `).run();
       await db.prepare(`
-        ALTER TABLE online_dept_snapshots
-        ADD CONSTRAINT uq_dept_snap_key
-        UNIQUE (snapshot_id, profit_center, org_section, org_group_name, dept_code)
+        CREATE UNIQUE INDEX uq_dept_snap_key ON online_dept_snapshots (
+          NVL(snapshot_id, -1), NVL(profit_center, '~'), NVL(org_section, '~'),
+          NVL(org_group_name, '~'), NVL(dept_code, '~')
+        )
       `).run();
-      console.log('[Migration] online_dept_snapshots: UNIQUE constraint added');
+      console.log('[Migration] online_dept_snapshots: function-based UNIQUE index added');
     }
   } catch (e) {
-    console.warn('[Migration] online_dept_snapshots unique constraint:', e.message);
+    console.warn('[Migration] online_dept_snapshots unique index:', e.message);
   }
 
   // Service 健康檢查設定
@@ -1403,7 +1426,7 @@ async function runMigrations(db) {
   )`);
 
   // 自動插入預設 ERP 來源（從 env 讀取，僅在表格為空時插入）
-  await migrateDefaultDbSource();
+  await migrateDefaultDbSource(db);
 
   // ai_schema_definitions: 新增 source_db_id（Phase 1 migration）
   await safeAddColumn('AI_SCHEMA_DEFINITIONS', 'SOURCE_DB_ID', 'NUMBER');
@@ -2297,7 +2320,7 @@ async function runMigrations(db) {
 
 // ─── Default DB Source migration ───────────────────────────────────────────────
 
-async function migrateDefaultDbSource() {
+async function migrateDefaultDbSource(db) {
   try {
     const existing = await db.prepare(`SELECT COUNT(*) AS CNT FROM ai_db_sources`).get();
     if (Number(existing?.CNT ?? existing?.cnt ?? 0) > 0) return; // 已有資料，跳過

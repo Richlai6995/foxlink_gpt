@@ -63,7 +63,12 @@ function getStore() {
     connectTimeout: 5000,
     lazyConnect: false,
     retryStrategy(times) {
-      if (times > 10) return null;          // 超過 10 次才放棄
+      if (times > 10) {
+        // 超過 10 次放棄 Redis，降級到 in-memory
+        console.warn('[Redis] 超過 10 次重試，降級為 in-memory store');
+        store = new MemoryStore();
+        return null;
+      }
       return Math.min(times * 500, 3000);   // 500ms, 1s, 1.5s … 最多 3s
     },
   });
