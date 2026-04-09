@@ -5225,12 +5225,12 @@ var langs=D.settings.languages||['zh-TW'];
 var lang=langs[0],idx=0,quizMode=false,quizAnswers={},quizSubmitted=false;
 // Guided tour state (per slide)
 var gStep=0,gCompleted=false,gFeedback=null,gHitRegion=null,gAttempts=0,gStepAttempts=0;
-var autoPlaying=false,muted=false,autoTimer=null;
+var autoPlaying=false,muted=false,autoTimer=null,guidedStarted=false;
 var $=function(s){return document.querySelector(s)};
 var app=$('#app');
 var audio=document.getElementById('globalAudio');
 
-function resetGuided(){gStep=0;gCompleted=false;gFeedback=null;gHitRegion=null;gAttempts=0;gStepAttempts=0;stopAuto()}
+function resetGuided(){gStep=0;gCompleted=false;gFeedback=null;gHitRegion=null;gAttempts=0;gStepAttempts=0;guidedStarted=false;stopAuto()}
 function stopAuto(){autoPlaying=false;if(autoTimer){clearTimeout(autoTimer);autoTimer=null}if(audio){audio.pause();audio.currentTime=0;audio.onended=null}}
 
 function playAudio(url,cb){
@@ -5261,7 +5261,7 @@ function toPercent(b,c){
 
 // Auto-play logic
 function startAuto(){
-  autoPlaying=true;gStep=0;gCompleted=false;gFeedback=null;gHitRegion=null;
+  autoPlaying=true;guidedStarted=true;gStep=0;gCompleted=false;gFeedback=null;gHitRegion=null;
   render();
   var s=getSlides()[idx];
   var hb=getHotspotBlock(s);
@@ -5274,7 +5274,16 @@ function autoAdvance(){
   var s=getSlides()[idx];var hb=getHotspotBlock(s);
   if(!hb){stopAuto();render();return}
   var crs=getCorrectRegions(hb);
-  if(gStep>=crs.length){gCompleted=true;autoPlaying=false;render();return}
+  if(gStep>=crs.length){
+    gCompleted=true;render();
+    // Auto-advance to next slide after delay
+    autoTimer=setTimeout(function(){
+      var sl=getSlides();
+      if(idx<sl.length-1){idx++;resetGuided();autoPlaying=true;guidedStarted=true;render();startAuto()}
+      else{autoPlaying=false;render()}
+    },1500);
+    return;
+  }
   render();
   var region=crs[gStep];
   var regionAudio=region.audio_url||null;
@@ -5333,12 +5342,14 @@ function render(){
   var muteBtn=$('#muteBtn');
   if(muteBtn)muteBtn.onclick=function(){muted=!muted;if(muted&&audio){audio.pause()}render()};
   var prev=$('#prev'),next=$('#next');
-  if(prev)prev.onclick=function(){if(quizMode){quizMode=false;idx=getSlides().length-1}else if(idx>0)idx--;resetGuided();render();playSlideIntro()};
-  if(next)next.onclick=function(){var sl=getSlides();if(!quizMode&&idx<sl.length-1){idx++;resetGuided();render();playSlideIntro()}else if(!quizMode&&idx===sl.length-1&&D.quiz[lang]&&D.quiz[lang].length){quizMode=true;render()}};
+  if(prev)prev.onclick=function(){if(quizMode){quizMode=false;idx=getSlides().length-1}else if(idx>0)idx--;resetGuided();render()};
+  if(next)next.onclick=function(){var sl=getSlides();if(!quizMode&&idx<sl.length-1){idx++;resetGuided();render()}else if(!quizMode&&idx===sl.length-1&&D.quiz[lang]&&D.quiz[lang].length){quizMode=true;render()}};
   var autoBtn=$('#autoPlayBtn');
   if(autoBtn)autoBtn.onclick=function(){if(autoPlaying){stopAuto();render()}else{startAuto()}};
   var resetBtn=$('#resetBtn');
   if(resetBtn)resetBtn.onclick=function(){resetGuided();render()};
+  var startBtn=$('#startGuidedBtn');
+  if(startBtn)startBtn.onclick=function(){guidedStarted=true;render();playSlideIntro()};
 }
 
 function playSlideIntro(){
@@ -5365,7 +5376,7 @@ function renderSlide(s,i){
       var hasAnnotations=b.annotations&&b.annotations.length>0&&!b.annotations_in_image;
       if(hasAnnotations)imgHtml+=renderAnnotationsSvg(b.annotations);
       var correctRegs=getCorrectRegions(b);
-      if(correctRegs.length>0){
+      if(correctRegs.length>0&&guidedStarted){
         imgHtml+='<div class="regions">';
         correctRegs.forEach(function(r,ri){
           var c=toPercent(b,r.coords);
@@ -5415,7 +5426,15 @@ function renderSlide(s,i){
       infoHtml+='<div class="info-card"><div class="label">\\u64cd\\u4f5c\\u8aaa\\u660e</div>'+simpleMarkdown(hb.instruction)+'</div>';
     }
 
-    if(hasGuided){
+    if(hasGuided&&!guidedStarted){
+      // Show start button before guided tour begins
+      infoHtml+='<div style="text-align:center;padding:12px 0">'
+        +'<button class="ctrl-btn" id="startGuidedBtn" style="background:#2563eb;color:#fff;padding:8px 20px;font-size:13px;border-radius:8px">\\u25b6 \\u958b\\u59cb\\u5c0e\\u89bd</button>'
+        +'<div style="margin-top:6px"><button class="ctrl-btn" id="autoPlayBtn" style="font-size:11px">\\u25b6 \\u81ea\\u52d5\\u64ad\\u653e\\u5168\\u90e8</button></div>'
+        +'</div>';
+    }
+
+    if(hasGuided&&guidedStarted){
       infoHtml+='<div class="ctrl-bar">';
       infoHtml+='<button class="ctrl-btn'+(autoPlaying?' auto-active':'')+'" id="autoPlayBtn">'+(autoPlaying?'\\u23f9 \\u505c\\u6b62':'\\u25b6 \\u81ea\\u52d5\\u5c0e\\u89bd')+'</button>';
       if(gCompleted||gStep>0)infoHtml+='<button class="ctrl-btn" id="resetBtn">\\u21ba \\u91cd\\u4f86</button>';
@@ -5423,7 +5442,7 @@ function renderSlide(s,i){
       infoHtml+='</div>';
     }
 
-    if(hasGuided&&!gCompleted){
+    if(hasGuided&&guidedStarted&&!gCompleted){
       var cur=correctRegs2[gStep];
       if(cur){
         var narr=autoPlaying?(cur.narration||cur.label||''):(cur.narration||'\\u8acb\\u9ede\\u64ca\\u300c'+(cur.label||'\\u76ee\\u6a19')+'\\u300d');
@@ -5467,7 +5486,7 @@ function renderSlide(s,i){
 
     h+='<div class="slide-content">'+imgHtml+'<div class="slide-info">'+infoHtml+'</div></div>';
 
-    if(hasGuided&&correctRegs2.length>1){
+    if(hasGuided&&guidedStarted&&correctRegs2.length>1){
       h+='<div class="step-dots">';
       correctRegs2.forEach(function(r,ri){
         var isDone=ri<gStep||gCompleted;
@@ -5572,31 +5591,8 @@ function simpleMarkdown(s){
   return t;
 }
 
-// Init
+// Init — no auto-play on load; user clicks "start" button
 render();
-// First slide intro: browsers block autoplay without user gesture.
-// Try to play; if blocked, play on first click/key anywhere.
-var introPlayed=false;
-function tryPlayFirstIntro(){
-  if(introPlayed)return;
-  introPlayed=true;
-  playSlideIntro();
-}
-(function(){
-  var s=getSlides()[0];if(!s)return;
-  var hb=getHotspotBlock(s);
-  var u=hb?(hb.slide_narration_audio||s.audio||null):(s.audio||null);
-  if(!u||muted){introPlayed=true;return}
-  // Try autoplay
-  audio.src=u;
-  var p=audio.play();
-  if(p&&p.catch){p.catch(function(){
-    // Blocked — wait for user gesture
-    function onGesture(){introPlayed=true;playSlideIntro();document.removeEventListener('click',onGesture);document.removeEventListener('keydown',onGesture)}
-    document.addEventListener('click',onGesture,{once:false});
-    document.addEventListener('keydown',onGesture,{once:false});
-  }).then(function(){introPlayed=true})}
-})();
 
 // Key nav
 document.addEventListener('keydown',function(e){
@@ -5607,7 +5603,7 @@ document.addEventListener('keydown',function(e){
 // Click interaction
 document.addEventListener('click',function(e){
   var imgWrap=e.target.closest&&e.target.closest('#imgWrap');
-  if(imgWrap&&!gCompleted&&!autoPlaying){
+  if(imgWrap&&!gCompleted&&!autoPlaying&&guidedStarted){
     var s=getSlides()[idx];
     var hb=getHotspotBlock(s);
     if(!hb)return;
