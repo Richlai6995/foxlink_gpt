@@ -5230,7 +5230,7 @@ var $=function(s){return document.querySelector(s)};
 var app=$('#app');
 var audio=document.getElementById('globalAudio');
 
-function resetGuided(){gStep=0;gCompleted=false;gFeedback=null;gHitRegion=null;gAttempts=0;gStepAttempts=0;guidedStarted=false;stopAuto()}
+function resetGuided(full){gStep=0;gCompleted=false;gFeedback=null;gHitRegion=null;gAttempts=0;gStepAttempts=0;if(full)guidedStarted=false;stopAuto()}
 function stopAuto(){autoPlaying=false;if(autoTimer){clearTimeout(autoTimer);autoTimer=null}if(audio){audio.pause();audio.currentTime=0;audio.onended=null}}
 
 function playAudio(url,cb){
@@ -5295,8 +5295,7 @@ function autoAdvance(){
     autoTimer=setTimeout(function(){
       if(!autoPlaying)return;
       gStep++;gFeedback=null;gHitRegion=null;
-      if(gStep>=crs.length){gCompleted=true;autoPlaying=false;render()}
-      else{render();autoAdvance()}
+      render();autoAdvance()
     },800);
   });
 }
@@ -5338,16 +5337,16 @@ function render(){
   app.innerHTML=topHtml+mainHtml+botHtml;
 
   var langSel=$('#langSel');
-  if(langSel)langSel.onchange=function(){lang=this.value;idx=0;quizMode=false;resetGuided();render()};
+  if(langSel)langSel.onchange=function(){lang=this.value;idx=0;quizMode=false;resetGuided(true);render()};
   var muteBtn=$('#muteBtn');
   if(muteBtn)muteBtn.onclick=function(){muted=!muted;if(muted&&audio){audio.pause()}render()};
   var prev=$('#prev'),next=$('#next');
-  if(prev)prev.onclick=function(){if(quizMode){quizMode=false;idx=getSlides().length-1}else if(idx>0)idx--;resetGuided();render()};
-  if(next)next.onclick=function(){var sl=getSlides();if(!quizMode&&idx<sl.length-1){idx++;resetGuided();render()}else if(!quizMode&&idx===sl.length-1&&D.quiz[lang]&&D.quiz[lang].length){quizMode=true;render()}};
+  if(prev)prev.onclick=function(){if(quizMode){quizMode=false;idx=getSlides().length-1}else if(idx>0)idx--;resetGuided();render();if(guidedStarted)playSlideIntro()};
+  if(next)next.onclick=function(){var sl=getSlides();if(!quizMode&&idx<sl.length-1){idx++;resetGuided();render();if(guidedStarted)playSlideIntro()}else if(!quizMode&&idx===sl.length-1&&D.quiz[lang]&&D.quiz[lang].length){quizMode=true;render()}};
   var autoBtn=$('#autoPlayBtn');
   if(autoBtn)autoBtn.onclick=function(){if(autoPlaying){stopAuto();render()}else{startAuto()}};
   var resetBtn=$('#resetBtn');
-  if(resetBtn)resetBtn.onclick=function(){resetGuided();render()};
+  if(resetBtn)resetBtn.onclick=function(){resetGuided(true);render()};
   var startBtn=$('#startGuidedBtn');
   if(startBtn)startBtn.onclick=function(){guidedStarted=true;render();playSlideIntro()};
 }
