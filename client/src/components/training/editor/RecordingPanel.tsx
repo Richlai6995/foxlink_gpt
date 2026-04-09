@@ -313,7 +313,6 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
       try {
         const res = await api.get(`/training/recording/${sid}`)
         const count = res.data.steps_count || res.data.steps?.length || 0
-        console.log('[RecordingPanel] poll:', { sid, steps_count: res.data.steps_count, steps_len: res.data.steps?.length, count })
         setServerStepCount(count)
       } catch (e: any) {
         console.error('[RecordingPanel] poll error:', e.response?.status, e.message)
@@ -553,7 +552,7 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
           }} style={{ color: 'var(--t-text-muted)' }}><X size={16} /></button>
         </div>
 
-        <div className="flex flex-1 overflow-hidden">
+        <div className="flex flex-1 overflow-hidden relative">
           {/* Left: Setup + Outline */}
           <div className="w-64 border-r overflow-y-auto p-3 space-y-3 shrink-0" style={{ borderColor: 'var(--t-border)' }}>
             {/* Help section */}
@@ -614,16 +613,23 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
                   <div className="font-semibold text-green-500 flex items-center gap-1">✓ Chrome Extension 已連線</div>
                   {!recording ? (
                     <div className="flex gap-1.5">
-                      <button onClick={startExtensionRecording}
-                        className="flex-1 py-1.5 rounded-lg text-white text-[10px] font-medium bg-green-600 hover:bg-green-500 transition">
-                        ▶ {sessionIdRef.current && steps.length > 0 ? '繼續錄製' : '開始自動錄製'}
-                      </button>
-                      {sessionIdRef.current && steps.length > 0 && (
-                        <button onClick={resumeExtensionRecording}
-                          className="py-1.5 px-3 rounded-lg text-[10px] font-medium transition border"
-                          style={{ borderColor: 'rgba(34,197,94,0.4)', color: '#22c55e' }}
-                          title="用同一個 session 補錄截圖">
-                          + 補錄
+                      {sessionIdRef.current && steps.length > 0 ? (
+                        <>
+                          <button onClick={resumeExtensionRecording}
+                            className="flex-1 py-1.5 rounded-lg text-white text-[10px] font-medium bg-green-600 hover:bg-green-500 transition">
+                            ▶ 繼續錄製
+                          </button>
+                          <button onClick={resumeExtensionRecording}
+                            className="py-1.5 px-3 rounded-lg text-[10px] font-medium transition border"
+                            style={{ borderColor: 'rgba(34,197,94,0.4)', color: '#22c55e' }}
+                            title="用同一個 session 補錄截圖">
+                            + 補錄
+                          </button>
+                        </>
+                      ) : (
+                        <button onClick={startExtensionRecording}
+                          className="flex-1 py-1.5 rounded-lg text-white text-[10px] font-medium bg-green-600 hover:bg-green-500 transition">
+                          ▶ 開始自動錄製
                         </button>
                       )}
                     </div>
@@ -865,11 +871,18 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
             )}
           </div>
 
-          {/* Right: Selected step details */}
+          {/* Right: Selected step details — absolute overlay to avoid squeezing grid */}
           {selectedStep && (
-            <div className="w-56 border-l overflow-y-auto p-3 space-y-3 shrink-0" style={{ borderColor: 'var(--t-border)' }}>
-              <div className="text-xs font-medium" style={{ color: 'var(--t-text-secondary)' }}>
-                步驟 #{steps.indexOf(selectedStep) + 1}
+            <div className="absolute right-0 top-0 bottom-0 w-64 border-l overflow-y-auto p-3 space-y-3 shadow-lg z-10"
+              style={{ borderColor: 'var(--t-border)', backgroundColor: 'var(--t-bg-panel, var(--t-bg))' }}>
+              <div className="flex items-center justify-between">
+                <div className="text-xs font-medium" style={{ color: 'var(--t-text-secondary)' }}>
+                  步驟 #{steps.indexOf(selectedStep) + 1}
+                </div>
+                <button onClick={() => setSelectedStepId(null)} className="p-0.5 rounded hover:bg-black/10 transition"
+                  style={{ color: 'var(--t-text-muted)' }}>
+                  <X size={14} />
+                </button>
               </div>
 
               <img
