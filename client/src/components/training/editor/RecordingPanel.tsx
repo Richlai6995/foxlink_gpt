@@ -312,8 +312,12 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
     const poll = async () => {
       try {
         const res = await api.get(`/training/recording/${sid}`)
-        setServerStepCount(res.data.steps_count || res.data.steps?.length || 0)
-      } catch {}
+        const count = res.data.steps_count || res.data.steps?.length || 0
+        console.log('[RecordingPanel] poll:', { sid, steps_count: res.data.steps_count, steps_len: res.data.steps?.length, count })
+        setServerStepCount(count)
+      } catch (e: any) {
+        console.error('[RecordingPanel] poll error:', e.response?.status, e.message)
+      }
     }
     poll()
     const interval = setInterval(poll, 2000)
@@ -327,14 +331,26 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
     if (!targetSid) { alert('無 Session ID。請從 Extension popup 複製 Session ID 後貼入下方欄位再點「拉取」。'); return }
     try {
       setPulling(true)
-      await new Promise(r => setTimeout(r, 1000))
-      const res = await api.get(`/training/recording/${targetSid}`)
-      const serverSteps = res.data.steps || []
+      // Wait for in-flight uploads, then poll until steps appear (max 10s)
+      const maxWait = 10000, pollInterval = 1500
+      let waited = 0, serverSteps: any[] = []
+      while (waited < maxWait) {
+        await new Promise(r => setTimeout(r, pollInterval))
+        waited += pollInterval
+        const res = await api.get(`/training/recording/${targetSid}`)
+        console.log('[RecordingPanel] pull response:', { status: res.status, steps_count: res.data.steps_count, steps_len: res.data.steps?.length, keys: Object.keys(res.data) })
+        serverSteps = res.data.steps || []
+        if (serverSteps.length > 0) break
+      }
+      if (serverSteps.length === 0) {
+        console.warn('[RecordingPanel] pull: no steps found after', waited, 'ms')
+      }
 
       // Auto-number: zh-TW screenshots get sequential step numbers (1,2,3...),
       // en/vi inherit the step_number of the closest zh-TW step (same server step_number or by position)
       const langOrder: Record<string, number> = { 'zh-TW': 0, 'en': 1, 'vi': 2 }
       const withScreenshot = serverSteps.filter((s: any) => s.screenshot_url)
+      console.log('[RecordingPanel] pull: total steps:', serverSteps.length, 'with screenshot:', withScreenshot.length)
 
       // First pass: assign auto step numbers to zh-TW, keep others as-is
       const zhSteps = withScreenshot.filter((s: any) => !s.lang || s.lang === 'zh-TW')
@@ -370,9 +386,13 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
           elementInfo: s.element_json ? (() => { try { return JSON.parse(s.element_json) } catch { return null } })() : null,
           status: 'captured' as const
         }))
+      console.log('[RecordingPanel] pull: setting', pulled.length, 'steps')
       setSteps(pulled)
       setServerStepCount(pulled.length)
-    } catch (e) { console.error('Pull screenshots failed:', e); alert('拉取截圖失敗') }
+    } catch (e: any) {
+      console.error('Pull screenshots failed:', e, 'response:', e.response?.status, e.response?.data)
+      alert('拉取截圖失敗: ' + (e.response?.data?.error || e.message))
+    }
     finally { setPulling(false) }
   }
 

@@ -360,19 +360,31 @@ function createThumbnail(dataUrl, callback) {
 // Auto re-login when token expired
 async function tryRelogin() {
   const data = await chrome.storage.local.get(['serverUrl', 'savedPassword', 'username']);
-  if (!data.serverUrl || !data.username || !data.savedPassword) return;
+  if (!data.serverUrl || !data.username || !data.savedPassword) {
+    console.warn('[Recorder] tryRelogin: missing credentials — serverUrl:', !!data.serverUrl, 'username:', !!data.username, 'savedPassword:', !!data.savedPassword);
+    return false;
+  }
   try {
+    console.log('[Recorder] tryRelogin: attempting login as', data.username, 'to', data.serverUrl);
     const res = await fetch(`${data.serverUrl}/api/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username: data.username, password: data.savedPassword })
     });
-    if (!res.ok) return;
+    if (!res.ok) {
+      const errText = await res.text().catch(() => '');
+      console.error('[Recorder] tryRelogin: login returned', res.status, errText.slice(0, 200));
+      return false;
+    }
     const result = await res.json();
     serverToken = result.token;
     chrome.storage.local.set({ serverToken: result.token });
-    console.log('[Recorder] Auto re-login OK');
-  } catch (e) { console.error('[Recorder] Auto re-login failed:', e.message); }
+    console.log('[Recorder] Auto re-login OK, new token:', result.token?.slice(0, 8) + '...');
+    return true;
+  } catch (e) {
+    console.error('[Recorder] Auto re-login failed:', e.message);
+    return false;
+  }
 }
 
 // Restore config + recording state on startup (survives service worker restart)

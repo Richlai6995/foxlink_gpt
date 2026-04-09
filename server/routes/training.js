@@ -4257,6 +4257,11 @@ router.post('/recording/:sessionId/step', upload.single('screenshot'), async (re
 
     await db.prepare('UPDATE recording_sessions SET steps_count=steps_count+1 WHERE id=?').run(sessionId);
 
+    console.log(`[Recording DEBUG] INSERT OK: sid="${sessionId}" step_id=${result.lastInsertRowid} screenshot=${screenshotUrl}`);
+    // Verify the insert is readable
+    const verify = await db.prepare('SELECT COUNT(*) AS cnt FROM recording_steps WHERE session_id=?').get(sessionId);
+    console.log(`[Recording DEBUG] Verify: ${verify?.cnt} steps for sid="${sessionId}"`);
+
     res.json({ step_id: result.lastInsertRowid, screenshot_url: screenshotUrl });
   } catch (e) {
     console.error('[Training] recording step:', e.message);
@@ -4267,11 +4272,18 @@ router.post('/recording/:sessionId/step', upload.single('screenshot'), async (re
 // GET /api/training/recording/:sessionId — get session + all steps
 router.get('/recording/:sessionId', async (req, res) => {
   try {
-    const session = await db.prepare('SELECT * FROM recording_sessions WHERE id=?').get(req.params.sessionId);
+    const sid = req.params.sessionId;
+    const session = await db.prepare('SELECT * FROM recording_sessions WHERE id=?').get(sid);
     if (!session) return res.status(404).json({ error: '錄製工作階段不存在' });
     const steps = await db.prepare(
       'SELECT * FROM recording_steps WHERE session_id=? ORDER BY step_number'
-    ).all(req.params.sessionId);
+    ).all(sid);
+    // Debug: if no steps found, check total count and sample
+    if (steps.length === 0) {
+      const total = await db.prepare('SELECT COUNT(*) AS cnt FROM recording_steps WHERE session_id=?').get(sid);
+      const anyStep = await db.prepare('SELECT id, session_id, step_number FROM recording_steps WHERE ROWNUM <= 3 ORDER BY id DESC').get();
+      console.log(`[Recording DEBUG] sid="${sid}" steps=0, count=${total?.cnt}, session.steps_count=${session.steps_count}, latest_step=`, anyStep);
+    }
     res.json({ ...session, steps });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
