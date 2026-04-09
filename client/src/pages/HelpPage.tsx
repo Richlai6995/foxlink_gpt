@@ -6446,7 +6446,7 @@ tryLock("webex:msg:{id}", 60s)  ← Redis 分散鎖
 
 // ── Main HelpPage ─────────────────────────────────────────────────────────────
 
-type Role = 'user' | 'admin'
+type Role = 'user' | 'admin' | 'training-dev'
 
 export default function HelpPage() {
   const navigate = useNavigate()
@@ -6455,22 +6455,20 @@ export default function HelpPage() {
   const [role, setRole] = useState<Role>(isAdmin ? 'admin' : 'user')
   const contentRef = useRef<HTMLDivElement>(null)
   const [apiSections, setApiSections] = useState<HelpSectionData[]>([])
+  const [trainingDevSections, setTrainingDevSections] = useState<HelpSectionData[]>([])
   const [loadingApi, setLoadingApi] = useState(false)
   const [trainingTarget, setTrainingTarget] = useState<{ courseId: number; lessonId?: number | null } | null>(null)
 
-  // Fetch user sections from API (multilingual)
+  // Fetch user sections from API (multilingual) — shared between 'user' and 'training-dev' tabs
   useEffect(() => {
-    if (role !== 'user') return
+    if (role === 'admin') return
     let cancelled = false
     const lang = i18n.language || 'zh-TW'
     setLoadingApi(true)
     api.get('/help/sections', { params: { lang } })
       .then(res => {
         if (!cancelled) {
-          // Filter to user sections only, and only those that have content
-          // u-training-dev: only visible for users with training publish/edit permission
           const allSections = res.data as HelpSectionData[]
-          // Debug: log raw API response to find data issues
           console.log('[HelpPage] API returned', allSections.length, 'sections')
           allSections.forEach(s => {
             if (!Array.isArray(s.blocks)) {
@@ -6500,28 +6498,38 @@ export default function HelpPage() {
           })
           const userOnly = allSections.filter(
             s => s.sectionType === 'user' && Array.isArray(s.blocks) && s.blocks.length > 0 &&
-              (s.id !== 'u-training-dev' || canAccessTrainingDev)
+              s.id !== 'u-training-dev'
           )
           console.log('[HelpPage] Filtered to', userOnly.length, 'user sections:', userOnly.map(s => s.id))
           setApiSections(userOnly)
+          // Extract training-dev section(s) separately
+          const tdSections = allSections.filter(
+            s => s.id === 'u-training-dev' && Array.isArray(s.blocks) && s.blocks.length > 0
+          )
+          setTrainingDevSections(tdSections)
         }
       })
       .catch(err => {
         console.warn('[HelpPage] Failed to load API sections, falling back to hardcoded:', err.message)
-        setApiSections([]) // fallback: show hardcoded
+        setApiSections([])
       })
       .finally(() => { if (!cancelled) setLoadingApi(false) })
     return () => { cancelled = true }
   }, [role, i18n.language])
 
   const useApi = role === 'user' && apiSections.length > 0
+  const useApiTd = role === 'training-dev' && trainingDevSections.length > 0
 
   // Sidebar items
   const sidebarItems = role === 'admin'
     ? adminSections
-    : useApi
-      ? apiSections.map(s => ({ id: s.id, label: s.sidebarLabel, icon: getIcon(s.icon, 'sm') || <BookOpen size={18} /> }))
-      : userSections
+    : role === 'training-dev'
+      ? useApiTd
+        ? trainingDevSections.map(s => ({ id: s.id, label: s.sidebarLabel, icon: getIcon(s.icon, 'sm') || <BookOpen size={18} /> }))
+        : []
+      : useApi
+        ? apiSections.map(s => ({ id: s.id, label: s.sidebarLabel, icon: getIcon(s.icon, 'sm') || <BookOpen size={18} /> }))
+        : userSections
 
   function scrollTo(id: string) {
     const el = document.getElementById(id)
@@ -6568,6 +6576,18 @@ export default function HelpPage() {
               {t('help.roleAdmin')}
             </button>
           )}
+          {canAccessTrainingDev && (
+            <button
+              onClick={() => setRole('training-dev')}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition ${role === 'training-dev'
+                ? 'bg-white text-violet-700 shadow-sm'
+                : 'text-slate-500 hover:text-slate-700'
+                }`}
+            >
+              <BookOpen size={15} />
+              {t('help.roleTrainingDev')}
+            </button>
+          )}
         </div>
       </header>
 
@@ -6596,15 +6616,44 @@ export default function HelpPage() {
         >
           <div className="max-w-3xl mx-auto px-8 py-8">
             {/* Role badge */}
-            <div className={`inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium mb-8 ${role === 'admin'
-              ? 'bg-indigo-100 text-indigo-700 border border-indigo-200'
-              : 'bg-blue-100 text-blue-700 border border-blue-200'
+            <div className={`inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium mb-8 ${
+              role === 'admin'
+                ? 'bg-indigo-100 text-indigo-700 border border-indigo-200'
+                : role === 'training-dev'
+                  ? 'bg-violet-100 text-violet-700 border border-violet-200'
+                  : 'bg-blue-100 text-blue-700 border border-blue-200'
               }`}>
-              {role === 'admin' ? <Settings size={15} /> : <User size={15} />}
-              {role === 'admin' ? t('help.badgeAdmin') : t('help.badgeUser')}
+              {role === 'admin' ? <Settings size={15} /> : role === 'training-dev' ? <BookOpen size={15} /> : <User size={15} />}
+              {role === 'admin' ? t('help.badgeAdmin') : role === 'training-dev' ? t('help.badgeTrainingDev') : t('help.badgeUser')}
             </div>
 
-            {role === 'user' ? (
+            {role === 'training-dev' ? (
+              loadingApi ? (
+                <div className="flex items-center justify-center h-64">
+                  <Loader2 className="animate-spin text-violet-500" size={24} />
+                </div>
+              ) : useApiTd ? (
+                <>
+                  {trainingDevSections.map(section => (
+                    <div key={section.id} className="relative">
+                      {section.linkedCourseId && (
+                        <div className="float-right mt-2 mr-1">
+                          <button
+                            onClick={() => setTrainingTarget({ courseId: section.linkedCourseId!, lessonId: section.linkedLessonId })}
+                            className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg transition bg-violet-50 text-violet-600 hover:bg-violet-100 border border-violet-200"
+                          >
+                            🎓 {t('help.interactiveTutorial')}
+                          </button>
+                        </div>
+                      )}
+                      <RenderHelpSection section={section} />
+                    </div>
+                  ))}
+                </>
+              ) : (
+                <div className="text-slate-400 text-center py-16">{t('help.footerContact')}</div>
+              )
+            ) : role === 'user' ? (
               loadingApi ? (
                 <div className="flex items-center justify-center h-64">
                   <Loader2 className="animate-spin text-blue-500" size={24} />
