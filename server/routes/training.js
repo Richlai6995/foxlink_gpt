@@ -5286,8 +5286,8 @@ function autoAdvance(){
     autoTimer=setTimeout(function(){
       if(!autoPlaying)return;
       gStep++;gFeedback=null;gHitRegion=null;
-      if(gStep>=crs.length){gCompleted=true;autoPlaying=false}
-      render();
+      if(gStep>=crs.length){gCompleted=true;autoPlaying=false;render()}
+      else{render();autoAdvance()}
     },800);
   });
 }
@@ -5574,12 +5574,28 @@ function simpleMarkdown(s){
 
 // Init
 render();
-// Play intro audio on first slide
+// First slide intro: browsers block autoplay without user gesture.
+// Try to play; if blocked, play on first click/key anywhere.
+var introPlayed=false;
+function tryPlayFirstIntro(){
+  if(introPlayed)return;
+  introPlayed=true;
+  playSlideIntro();
+}
 (function(){
   var s=getSlides()[0];if(!s)return;
   var hb=getHotspotBlock(s);
-  if(hb){var u=hb.slide_narration_audio||s.audio||null;if(u&&!muted)playAudio(u)}
-  else if(s.audio&&!muted)playAudio(s.audio);
+  var u=hb?(hb.slide_narration_audio||s.audio||null):(s.audio||null);
+  if(!u||muted){introPlayed=true;return}
+  // Try autoplay
+  audio.src=u;
+  var p=audio.play();
+  if(p&&p.catch){p.catch(function(){
+    // Blocked — wait for user gesture
+    function onGesture(){introPlayed=true;playSlideIntro();document.removeEventListener('click',onGesture);document.removeEventListener('keydown',onGesture)}
+    document.addEventListener('click',onGesture,{once:false});
+    document.addEventListener('keydown',onGesture,{once:false});
+  }).then(function(){introPlayed=true})}
 })();
 
 // Key nav

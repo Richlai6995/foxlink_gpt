@@ -123,10 +123,17 @@ export default function LogViewer({ type, target, onClose }: Props) {
     setJumpToIdx(originalIdx)
   }
 
-  const handleClose = () => {
+  const handleClose = useCallback(() => {
     esRef.current?.close()
     onClose()
-  }
+  }, [onClose])
+
+  // Esc 鍵關閉
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') handleClose() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [handleClose])
 
   const downloadLog = () => {
     const blob = new Blob([lines.join('\n')], { type: 'text/plain' })
@@ -164,7 +171,7 @@ export default function LogViewer({ type, target, onClose }: Props) {
     : null
 
   return (
-    <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-6" onClick={handleClose}>
+    <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-6">
       <div className="bg-slate-900 rounded-xl shadow-2xl w-full max-w-6xl max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
         {/* Header */}
         <div className="flex items-center gap-2 px-4 py-3 border-b border-slate-700 flex-wrap">
