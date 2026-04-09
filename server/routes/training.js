@@ -5135,7 +5135,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;b
 .topbar button.active{background:#2563eb;color:#fff;border-color:#2563eb}
 .main{flex:1;padding:20px;display:flex;flex-direction:column;gap:16px}
 .slide-card{background:#fff;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,.08);overflow:hidden}
-.slide-content{display:flex;gap:16px;padding:16px}
+.slide-content{display:flex;gap:16px;padding:16px;align-items:flex-start}
 .slide-img-wrap{flex:1;position:relative;border-radius:8px;overflow:hidden;background:#0f172a;cursor:pointer;transition:border-color .3s}
 .slide-img-wrap.completed{outline:2px solid #22c55e;outline-offset:-2px;cursor:default}
 .slide-img-wrap img{width:100%;display:block}
