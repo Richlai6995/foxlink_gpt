@@ -119,75 +119,87 @@ function startRectCropMode(screenshotDataUrl) {
   document.body.appendChild(overlay);
 }
 
-// Mode 3: 智慧偵測 — 分析 DOM 找主要內容區域，自動裁切
+// Mode 3: 智慧偵測 — 互動式 hover 選取區域
 function startSmartCropMode(screenshotDataUrl) {
   if (annotationActive) return;
 
-  // Strategy: find the largest <main>, [role="main"], or content-like element
-  const candidates = [
-    document.querySelector('main'),
-    document.querySelector('[role="main"]'),
-    document.querySelector('#content'),
-    document.querySelector('#main-content'),
-    document.querySelector('.main-content'),
-    document.querySelector('#app > div:not(nav):not(header)'),
-    document.querySelector('.content'),
-  ].filter(Boolean);
+  const overlay = document.createElement('div');
+  overlay.style.cssText = `
+    position:fixed;inset:0;z-index:2147483646;cursor:crosshair;
+    font-family:-apple-system,sans-serif;
+  `;
 
-  // Also try: largest element that's not nav/header/footer and > 50% viewport
-  if (candidates.length === 0) {
-    const allEls = document.querySelectorAll('div, section, article');
-    let best = null;
-    let bestArea = 0;
-    allEls.forEach(el => {
-      const r = el.getBoundingClientRect();
-      const area = r.width * r.height;
-      const tag = el.tagName.toLowerCase();
-      const role = el.getAttribute('role') || '';
-      if (['nav', 'header', 'footer', 'aside'].includes(tag) || ['navigation', 'banner'].includes(role)) return;
-      if (r.width < window.innerWidth * 0.4 || r.height < window.innerHeight * 0.3) return;
-      if (area > bestArea) { bestArea = area; best = el; }
-    });
-    if (best) candidates.push(best);
-  }
-
-  if (candidates.length === 0) {
-    // Fallback to full screenshot
-    startAnnotationMode(screenshotDataUrl);
-    return;
-  }
-
-  // Use the first valid candidate
-  const target = candidates[0];
-  const rect = target.getBoundingClientRect();
-  const dpr = window.devicePixelRatio || 1;
-
-  // Add small padding
-  const pad = 4;
-  const cropRect = {
-    x: Math.max(0, Math.round((rect.left - pad) * dpr)),
-    y: Math.max(0, Math.round((rect.top - pad) * dpr)),
-    w: Math.round((rect.width + pad * 2) * dpr),
-    h: Math.round((rect.height + pad * 2) * dpr)
-  };
-
-  // Show brief highlight on detected area
+  // Highlight box (follows hovered element)
   const highlight = document.createElement('div');
   highlight.style.cssText = `
-    position:fixed;z-index:2147483646;pointer-events:none;
-    left:${rect.left}px;top:${rect.top}px;width:${rect.width}px;height:${rect.height}px;
-    border:3px solid #22c55e;border-radius:4px;background:rgba(34,197,94,0.1);
-    transition:opacity 0.3s;
+    position:fixed;z-index:2147483647;pointer-events:none;
+    border:3px solid #22c55e;border-radius:4px;background:rgba(34,197,94,0.12);
+    transition:all 0.1s;display:none;
   `;
-  document.body.appendChild(highlight);
+  overlay.appendChild(highlight);
 
-  setTimeout(() => {
-    highlight.style.opacity = '0';
-    setTimeout(() => {
-      highlight.remove();
-      cropAndAnnotate(screenshotDataUrl, cropRect);
-    }, 300);
-  }, 500);
+  // Instruction hint
+  const hint = document.createElement('div');
+  hint.textContent = '移動滑鼠選取區域，點擊確認 | ESC 取消';
+  hint.style.cssText = 'position:fixed;top:12px;left:50%;transform:translateX(-50%);background:rgba(15,23,42,0.9);color:white;padding:6px 16px;border-radius:8px;font-size:13px;z-index:2147483647;pointer-events:none;';
+  overlay.appendChild(hint);
+
+  let hoveredEl = null;
+
+  overlay.addEventListener('mousemove', (e) => {
+    // Temporarily hide overlay to get element beneath
+    overlay.style.pointerEvents = 'none';
+    const el = document.elementFromPoint(e.clientX, e.clientY);
+    overlay.style.pointerEvents = '';
+
+    if (!el || el === document.body || el === document.documentElement) {
+      highlight.style.display = 'none';
+      hoveredEl = null;
+      return;
+    }
+
+    // Skip tiny elements — walk up to find a meaningful container
+    let target = el;
+    while (target && target !== document.body) {
+      const r = target.getBoundingClientRect();
+      if (r.width >= 60 && r.height >= 40) break;
+      target = target.parentElement;
+    }
+    if (!target || target === document.body) { highlight.style.display = 'none'; hoveredEl = null; return; }
+
+    hoveredEl = target;
+    const r = target.getBoundingClientRect();
+    highlight.style.display = 'block';
+    highlight.style.left = r.left + 'px';
+    highlight.style.top = r.top + 'px';
+    highlight.style.width = r.width + 'px';
+    highlight.style.height = r.height + 'px';
+  });
+
+  overlay.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!hoveredEl) { overlay.remove(); startAnnotationMode(screenshotDataUrl); return; }
+
+    const rect = hoveredEl.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    const pad = 4;
+    const cropRect = {
+      x: Math.max(0, Math.round((rect.left - pad) * dpr)),
+      y: Math.max(0, Math.round((rect.top - pad) * dpr)),
+      w: Math.round((rect.width + pad * 2) * dpr),
+      h: Math.round((rect.height + pad * 2) * dpr)
+    };
+    overlay.remove();
+    cropAndAnnotate(screenshotDataUrl, cropRect);
+  });
+
+  const onKey = (e) => {
+    if (e.key === 'Escape') { overlay.remove(); document.removeEventListener('keydown', onKey); }
+  };
+  document.addEventListener('keydown', onKey);
+
+  document.body.appendChild(overlay);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -202,7 +214,7 @@ function startAnnotationMode(screenshotDataUrl) {
   let currentTool = 'number'; // move|number|circle|rect|arrow|text|freehand|mosaic
   let currentColor = '#ef4444';
   let strokeWidth = 3;
-  let stepCounter = 0;
+  let stepCounter = badgeStepCount; // 從 badge 繼承，避免繼續錄製時步驟號回退
   let annotations = [];
   let undoStack = [];
   let isDrawing = false;
@@ -463,6 +475,8 @@ function startAnnotationMode(screenshotDataUrl) {
 
   // ── 4. Resize canvas to match image ──
   let canvasW, canvasH;
+  // Image display rect within canvas (accounting for object-fit:contain letterboxing)
+  let imgRect = { x: 0, y: 0, w: 0, h: 0 };
   bgImg.onload = () => {
     const rect = canvasWrap.getBoundingClientRect();
     canvasW = rect.width;
@@ -473,6 +487,24 @@ function startAnnotationMode(screenshotDataUrl) {
     canvas.style.height = canvasH + 'px';
     const ctx = canvas.getContext('2d');
     ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+    // Calculate image display area (object-fit:contain)
+    const natW = bgImg.naturalWidth || canvasW;
+    const natH = bgImg.naturalHeight || canvasH;
+    const imgAspect = natW / natH;
+    const cAspect = canvasW / canvasH;
+    if (imgAspect > cAspect) {
+      // Image wider → letterbox top/bottom
+      imgRect.w = canvasW;
+      imgRect.h = canvasW / imgAspect;
+      imgRect.x = 0;
+      imgRect.y = (canvasH - imgRect.h) / 2;
+    } else {
+      // Image taller → letterbox left/right
+      imgRect.h = canvasH;
+      imgRect.w = canvasH * imgAspect;
+      imgRect.y = 0;
+      imgRect.x = (canvasW - imgRect.w) / 2;
+    }
     redrawAll();
   };
   // Fallback if image already loaded
@@ -533,11 +565,15 @@ function startAnnotationMode(screenshotDataUrl) {
   }
 
   function toPct(px, isX) {
-    return isX ? (px / canvasW) * 100 : (px / canvasH) * 100;
+    // Convert canvas pixel to percentage relative to image display area (not full canvas)
+    if (isX) return ((px - imgRect.x) / (imgRect.w || canvasW)) * 100;
+    return ((px - imgRect.y) / (imgRect.h || canvasH)) * 100;
   }
 
   function fromPct(pct, isX) {
-    return isX ? (pct / 100) * canvasW : (pct / 100) * canvasH;
+    // Convert percentage to canvas pixel, accounting for image offset
+    if (isX) return (pct / 100) * (imgRect.w || canvasW) + imgRect.x;
+    return (pct / 100) * (imgRect.h || canvasH) + imgRect.y;
   }
 
   function getCtx() {
@@ -1024,7 +1060,7 @@ function startAnnotationMode(screenshotDataUrl) {
     if (annotations.length === 0) return;
     undoStack = [...annotations];
     annotations = [];
-    stepCounter = 0;
+    stepCounter = badgeStepCount; // 重置為 badge 基數，不是 0
     redrawAll();
   }
 
@@ -1278,23 +1314,28 @@ function generateSelector(el) {
   return path.join(' > ');
 }
 
-// Visual highlight on clicked element
+// Visual highlight on clicked element (single highlight, short duration)
+let _activeHighlight = null;
 function highlightElement(el) {
+  if (annotationActive) return; // 標註模式中不顯示
+  // Remove previous highlight immediately
+  if (_activeHighlight) { _activeHighlight.remove(); _activeHighlight = null; }
   const rect = el.getBoundingClientRect();
-  const overlay = document.createElement('div');
-  overlay.style.cssText = `
-    position: fixed; z-index: 2147483646; pointer-events: none;
+  const hl = document.createElement('div');
+  hl.style.cssText = `
+    position: fixed; z-index: 2147483640; pointer-events: none;
     left: ${rect.x - 2}px; top: ${rect.y - 2}px;
     width: ${rect.width + 4}px; height: ${rect.height + 4}px;
-    border: 2px solid #3b82f6; border-radius: 4px;
-    background: rgba(59, 130, 246, 0.08);
-    transition: opacity 0.5s;
+    border: 2px solid rgba(59,130,246,0.5); border-radius: 4px;
+    background: rgba(59, 130, 246, 0.05);
+    transition: opacity 0.3s;
   `;
-  document.body.appendChild(overlay);
+  document.body.appendChild(hl);
+  _activeHighlight = hl;
   setTimeout(() => {
-    overlay.style.opacity = '0';
-    setTimeout(() => overlay.remove(), 500);
-  }, 1500);
+    hl.style.opacity = '0';
+    setTimeout(() => { hl.remove(); if (_activeHighlight === hl) _activeHighlight = null; }, 300);
+  }, 600);
 }
 
 // Recording badge — floating control on target page

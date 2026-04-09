@@ -58,6 +58,15 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
     setTimeout(() => panelRef.current?.focus(), 100)
   }, [])
 
+  // Protect against accidental page close / refresh when there are unsaved steps
+  useEffect(() => {
+    const handler = (e: BeforeUnloadEvent) => {
+      if (steps.length > 0) { e.preventDefault(); e.returnValue = '' }
+    }
+    window.addEventListener('beforeunload', handler)
+    return () => window.removeEventListener('beforeunload', handler)
+  }, [steps.length])
+
   useEffect(() => {
     loadHelpSections()
     // Listen for paste events
@@ -547,6 +556,9 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
             </button>
           </h3>
           <button onClick={() => {
+            if (steps.length > 0 && !processing) {
+              if (!confirm(`目前有 ${steps.length} 張截圖尚未送 AI 處理，確定要關閉嗎？\n（截圖資料將遺失）`)) return
+            }
             if (recording) { setRecording(false); window.postMessage({ type: 'FOXLINK_TRAINING_STOP' }, '*') }
             onClose()
           }} style={{ color: 'var(--t-text-muted)' }}><X size={16} /></button>

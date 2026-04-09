@@ -59,21 +59,18 @@ function getStore() {
 
   const Redis = require('ioredis');
   const client = new Redis(redisUrl, {
-    maxRetriesPerRequest: 1,
-    connectTimeout: 3000,
+    maxRetriesPerRequest: 3,
+    connectTimeout: 5000,
     lazyConnect: false,
-    retryStrategy: () => null, // no retry, fallback immediately
+    retryStrategy(times) {
+      if (times > 10) return null;          // 超過 10 次才放棄
+      return Math.min(times * 500, 3000);   // 500ms, 1s, 1.5s … 最多 3s
+    },
   });
 
   client.on('connect', () => console.log('[Redis] Connected:', redisUrl));
   client.on('error', (err) => {
-    if (!(store instanceof MemoryStore)) {
-      console.warn('[Redis] Connection failed, falling back to in-memory store:', err.message);
-      store = new MemoryStore();
-      client.removeAllListeners('error');
-      client.on('error', () => {}); // swallow post-disconnect errors
-      client.disconnect();
-    }
+    console.warn('[Redis] error:', err.message);
   });
 
   store = new RedisStore(client);
