@@ -1595,11 +1595,18 @@ async function runMigrations(db) {
     await db.run("UPDATE roles SET training_permission = 'none' WHERE training_permission = 'use'");
   } catch (e) { /* migration already applied or column type mismatch — safe to ignore */ }
 
-  // Phase 4A: 擴充欄位長度 (VARCHAR2(10) → VARCHAR2(20))
-  try {
-    await db.run("ALTER TABLE users MODIFY training_permission VARCHAR2(20)");
-    await db.run("ALTER TABLE roles MODIFY training_permission VARCHAR2(20)");
-  } catch (e) { /* already done */ }
+  // Phase 4A: 擴充欄位長度 → VARCHAR2(20)
+  for (const tbl of ['USERS', 'ROLES']) {
+    try {
+      const r = await db.prepare(
+        `SELECT DATA_LENGTH FROM USER_TAB_COLUMNS WHERE TABLE_NAME=? AND COLUMN_NAME='TRAINING_PERMISSION'`
+      ).get(tbl);
+      if (r && r.data_length < 20) {
+        await db.run(`ALTER TABLE ${tbl} MODIFY TRAINING_PERMISSION VARCHAR2(20)`);
+        console.log(`[Migration] ${tbl}.TRAINING_PERMISSION widened to VARCHAR2(20)`);
+      }
+    } catch (e) { console.warn(`[Migration] ${tbl}.TRAINING_PERMISSION resize: ${e.message}`); }
+  }
 
   // Phase 4A: training_programs 新增 paused_at / completed_at
   await addCol('TRAINING_PROGRAMS', 'PAUSED_AT', 'TIMESTAMP');
