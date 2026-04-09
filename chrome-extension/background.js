@@ -44,7 +44,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === 'START_RECORDING') {
     currentSessionId = msg.sessionId;
     lastSessionId = msg.sessionId;
-    stepCounter = 0;
+    stepCounter = msg.stepCount || 0; // 繼續錄製時從平台傳來的步驟數開始
     isRecording = true;
     recentScreenshots = [];
     persistRecordingState();

@@ -1190,11 +1190,14 @@ chrome.runtime.onMessage.addListener((msg) => {
 window.addEventListener('message', (e) => {
   // Training platform tells Extension to start recording
   if (e.data?.type === 'FOXLINK_TRAINING_START') {
-    console.log('[FOXLINK Training] Received START command, sessionId:', e.data.sessionId);
-    safeSendMessage({ type: 'START_RECORDING', sessionId: e.data.sessionId }, () => {
+    const resumeStepCount = e.data.stepCount || 0;
+    console.log('[FOXLINK Training] Received START command, sessionId:', e.data.sessionId, 'stepCount:', resumeStepCount);
+    safeSendMessage({ type: 'START_RECORDING', sessionId: e.data.sessionId, stepCount: resumeStepCount }, () => {
       console.log('[FOXLINK Training] Recording started OK');
       isRecording = true;
+      badgeStepCount = resumeStepCount; // 從平台繼承步驟數
       toggleBadge(true);
+      updateBadgeCount();
     });
   }
   // Training platform tells Extension to stop recording
@@ -1435,7 +1438,7 @@ function toggleBadge(show) {
   } else if (!show && badgeEl) {
     badgeEl.remove();
     badgeEl = null;
-    badgeStepCount = 0;
+    // 不重置 badgeStepCount — 繼續錄製時需要保留
   }
 }
 

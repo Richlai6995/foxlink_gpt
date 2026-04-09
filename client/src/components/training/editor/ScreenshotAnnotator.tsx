@@ -11,7 +11,7 @@ import { useState, useRef, useCallback, useEffect, useMemo } from 'react'
 import { X, Undo2, Redo2, Check, MousePointer2, Minus, RotateCcw } from 'lucide-react'
 import type { Annotation } from '../blocks/AnnotationOverlay'
 
-type Tool = 'number' | 'circle' | 'rect' | 'arrow' | 'text' | 'freehand' | 'mosaic'
+type Tool = 'move' | 'number' | 'circle' | 'rect' | 'arrow' | 'text' | 'freehand' | 'mosaic'
 
 interface Props {
   imageUrl: string
@@ -23,6 +23,7 @@ interface Props {
 }
 
 const TOOLS: { key: Tool; icon: string; label: string }[] = [
+  { key: 'move', icon: '✥', label: '選取/移動 (V)' },
   { key: 'number', icon: '①', label: '步驟編號' },
   { key: 'circle', icon: '◯', label: '圓圈' },
   { key: 'rect', icon: '▭', label: '矩形' },
@@ -45,7 +46,7 @@ export default function ScreenshotAnnotator({ imageUrl, annotations: initial, st
   const [metaLang, setMetaLang] = useState(initLang || 'zh-TW')
   const [undoStack, setUndoStack] = useState<Annotation[][]>([])
   const [redoStack, setRedoStack] = useState<Annotation[][]>([])
-  const [tool, setTool] = useState<Tool>('number')
+  const [tool, setTool] = useState<Tool>('move')
   const [color, setColor] = useState('#ef4444')
   const [strokeWidth, setStrokeWidth] = useState(3)
   const [fontSize, setFontSize] = useState(2)
@@ -127,9 +128,14 @@ export default function ScreenshotAnnotator({ imageUrl, annotations: initial, st
         setAnnots(prev => prev.filter(a => a.id !== selectedId))
         setSelectedId(null)
       }
-      // Tool shortcuts 1-7
+      // V key → move tool
+      if ((e.key === 'v' || e.key === 'V') && !e.ctrlKey && !e.altKey && !textInput) {
+        setTool('move')
+        return
+      }
+      // Tool shortcuts 1-8
       const num = parseInt(e.key)
-      if (num >= 1 && num <= 7 && !e.ctrlKey && !e.altKey && !textInput) {
+      if (num >= 1 && num <= TOOLS.length && !e.ctrlKey && !e.altKey && !textInput) {
         setTool(TOOLS[num - 1].key)
       }
     }
@@ -148,6 +154,12 @@ export default function ScreenshotAnnotator({ imageUrl, annotations: initial, st
   const handlePointerDown = (e: React.PointerEvent) => {
     if (e.button !== 0) return
     const pt = toPct(e.clientX, e.clientY)
+
+    // Move tool: click empty space to deselect (annotations handle their own startDrag)
+    if (tool === 'move') {
+      setSelectedId(null)
+      return
+    }
 
     // Text tool: show input popup
     if (tool === 'text') {
@@ -627,7 +639,7 @@ export default function ScreenshotAnnotator({ imageUrl, annotations: initial, st
       {/* Canvas area */}
       <div className="flex-1 flex items-center justify-center overflow-hidden p-4">
         <div className="relative max-w-full max-h-full"
-          style={{ cursor: tool === 'text' ? 'text' : 'crosshair' }}>
+          style={{ cursor: tool === 'move' ? 'default' : tool === 'text' ? 'text' : 'crosshair' }}>
           <img src={imageUrl} alt="" className="max-w-[90vw] max-h-[85vh] rounded select-none"
             draggable={false} style={{ display: 'block' }}
             onLoad={e => {

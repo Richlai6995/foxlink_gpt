@@ -421,8 +421,12 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
     const sid = sessionIdRef.current || sessionId
     if (!sid) return startExtensionRecording() // no session yet, start fresh
     setRecording(true)
+    // 計算 zh-TW 步驟的最大步驟號，繼續錄製從 max+1 開始
+    const zhSteps = steps.filter(s => !s.lang || s.lang === 'zh-TW')
+    const maxStep = zhSteps.reduce((max, s) => Math.max(max, s.stepNumber || 0), 0)
+    const resumeCount = maxStep || steps.length
     setServerStepCount(steps.length)
-    window.postMessage({ type: 'FOXLINK_TRAINING_START', sessionId: sid }, '*')
+    window.postMessage({ type: 'FOXLINK_TRAINING_START', sessionId: sid, stepCount: resumeCount }, '*')
   }
 
   // Process all: AI analyze + generate slides
