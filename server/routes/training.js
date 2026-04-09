@@ -1315,8 +1315,14 @@ router.post('/slides/:sid/tts', async (req, res) => {
       return res.status(500).json({ error: `TTS API error: ${err}` });
     }
 
-    const { audioContent } = await ttsRes.json();
-    const audioBuffer = Buffer.from(audioContent, 'base64');
+    const ttsJson = await ttsRes.json();
+    if (!ttsJson.audioContent) {
+      console.error('[Training] TTS: API returned empty audioContent', { sid: req.params.sid, error: ttsJson.error });
+      return res.status(500).json({ error: 'TTS API 回傳空的 audioContent' });
+    }
+    const audioBuffer = Buffer.from(ttsJson.audioContent, 'base64');
+    if (audioBuffer.length < 100) return res.status(500).json({ error: 'TTS 回傳的音訊資料異常（太短）' });
+
     const filename = `tts_${req.params.sid}_${Date.now()}.mp3`;
     const dir = path.join(uploadDir, `course_${check.courseId}`);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
@@ -1371,8 +1377,14 @@ router.post('/slides/:sid/region-tts', async (req, res) => {
       return res.status(500).json({ error: `TTS API error: ${err}` });
     }
 
-    const { audioContent } = await ttsRes.json();
-    const audioBuffer = Buffer.from(audioContent, 'base64');
+    const ttsJson = await ttsRes.json();
+    if (!ttsJson.audioContent) {
+      console.error('[Training] Region TTS: empty audioContent', { region_id, lang });
+      return res.status(500).json({ error: 'TTS API 回傳空的 audioContent' });
+    }
+    const audioBuffer = Buffer.from(ttsJson.audioContent, 'base64');
+    if (audioBuffer.length < 100) return res.status(500).json({ error: 'TTS 回傳的音訊資料異常（太短）' });
+
     const filename = `tts_region_${region_id || 'r'}_${Date.now()}.mp3`;
     const dir = path.join(uploadDir, `course_${check.courseId}`);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
@@ -3589,22 +3601,45 @@ router.post('/courses/:id/generate-lang-tts', loadCoursePermission, requirePermi
     const dir = path.join(uploadDir, `course_${req.courseId}`);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 
-    const genAudio = async (text, fileId) => {
-      if (!text) return null;
-      try {
-        const r = await fetch(ttsUrl, {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ input: { text: preprocessTtsText(text) }, voice: { languageCode: langCode, name: voiceName }, audioConfig: { audioEncoding: 'MP3', speakingRate: speed, pitch } })
-        });
-        if (!r.ok) return null;
-        const { audioContent } = await r.json();
-        const fn = `tts_${target_lang}_${fileId}_${Date.now()}.mp3`;
-        fs.writeFileSync(path.join(dir, fn), Buffer.from(audioContent, 'base64'));
-        return `/api/training/files/course_${req.courseId}/${fn}`;
-      } catch { return null; }
+    const delay = (ms) => new Promise(r => setTimeout(r, ms));
+    const genAudio = async (text, fileId, retries = 2) => {
+      if (!text || !text.trim()) return null;
+      for (let attempt = 0; attempt <= retries; attempt++) {
+        try {
+          if (attempt > 0) await delay(1500 * attempt); // backoff: 1.5s, 3s
+          const r = await fetch(ttsUrl, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ input: { text: preprocessTtsText(text) }, voice: { languageCode: langCode, name: voiceName }, audioConfig: { audioEncoding: 'MP3', speakingRate: speed, pitch } })
+          });
+          if (r.status === 429) {
+            console.warn(`[TTS batch] Rate limited (429) for ${fileId}, attempt ${attempt + 1}`);
+            if (attempt < retries) continue; // retry
+            return null;
+          }
+          if (!r.ok) {
+            const errText = await r.text().catch(() => '');
+            console.error(`[TTS batch] API error ${r.status} for ${fileId}:`, errText.slice(0, 200));
+            return null;
+          }
+          const json = await r.json();
+          if (!json.audioContent) {
+            console.error(`[TTS batch] Empty audioContent for ${fileId}`);
+            return null;
+          }
+          const buf = Buffer.from(json.audioContent, 'base64');
+          if (buf.length < 100) { console.error(`[TTS batch] Audio too short for ${fileId}: ${buf.length}b`); return null; }
+          const fn = `tts_${target_lang}_${fileId}_${Date.now()}.mp3`;
+          fs.writeFileSync(path.join(dir, fn), buf);
+          return `/api/training/files/course_${req.courseId}/${fn}`;
+        } catch (e) {
+          console.error(`[TTS batch] Exception for ${fileId} attempt ${attempt + 1}:`, e.message);
+          if (attempt >= retries) return null;
+        }
+      }
+      return null;
     };
 
-    let generated = 0;
+    let generated = 0, failed = 0;
     for (const lesson of lessons) {
       const slides = await db.prepare('SELECT id FROM course_slides WHERE lesson_id=? ORDER BY sort_order').all(lesson.id);
       for (const slide of slides) {
@@ -3655,9 +3690,12 @@ router.post('/courses/:id/generate-lang-tts', loadCoursePermission, requirePermi
         if (changed) {
           await db.prepare('UPDATE slide_translations SET content_json=? WHERE id=?').run(JSON.stringify(blocks), trans.id);
         }
+        // Throttle between slides to avoid Google TTS rate limiting
+        await delay(300);
       }
     }
 
+    console.log(`[TTS batch] ${target_lang}: generated=${generated} failed=${failed}`);
     res.json({ ok: true, generated });
   } catch (e) {
     console.error('[Training] generate-lang-tts:', e.message);

@@ -642,8 +642,24 @@ export default function HotspotEditor({ block, onChange, courseId, slideId, bloc
                 }
                 onChange(newBlock)
 
-                // ── Auto TTS: generate all audio files ──
+                // ── Auto TTS: generate all audio files (serial with delay + retry) ──
                 setTtsLoading('batch')
+                const ttsCall = async (regionId: string, text: string, retries = 1): Promise<string | null> => {
+                  for (let attempt = 0; attempt <= retries; attempt++) {
+                    try {
+                      if (attempt > 0) await new Promise(r => setTimeout(r, 1500))
+                      const res = await api.post(`/training/slides/${slideId}/region-tts`, {
+                        block_index: blockIdx ?? 0, region_id: regionId, text
+                      })
+                      return res.data.audio_url || null
+                    } catch (err: any) {
+                      console.warn(`[TTS] ${regionId} attempt ${attempt + 1} failed:`, err.response?.status || err.message)
+                      if (attempt >= retries) return null
+                    }
+                  }
+                  return null
+                }
+                let ttsOk = 0, ttsFail = 0
                 try {
                   // 1. Slide-level intro narrations (3 modes)
                   const introFields = [
@@ -653,12 +669,9 @@ export default function HotspotEditor({ block, onChange, courseId, slideId, bloc
                   ]
                   for (const f of introFields) {
                     if ((newBlock as any)[f.text]) {
-                      try {
-                        const ttsRes = await api.post(`/training/slides/${slideId}/region-tts`, {
-                          block_index: blockIdx ?? 0, region_id: f.id, text: (newBlock as any)[f.text]
-                        })
-                        ;(newBlock as any)[f.audio] = ttsRes.data.audio_url
-                      } catch {}
+                      const url = await ttsCall(f.id, (newBlock as any)[f.text])
+                      if (url) { (newBlock as any)[f.audio] = url; ttsOk++ } else ttsFail++
+                      await new Promise(r => setTimeout(r, 300)) // throttle
                     }
                   }
 
@@ -671,16 +684,14 @@ export default function HotspotEditor({ block, onChange, courseId, slideId, bloc
                   for (const r of newBlock.regions.filter((r: any) => r.correct)) {
                     for (const p of pairs) {
                       if ((r as any)[p.textField]) {
-                        try {
-                          const ttsRes = await api.post(`/training/slides/${slideId}/region-tts`, {
-                            block_index: blockIdx ?? 0, region_id: `${p.prefix}${r.id}`, text: (r as any)[p.textField]
-                          })
-                          ;(r as any)[p.audioField] = ttsRes.data.audio_url
-                        } catch {}
+                        const url = await ttsCall(`${p.prefix}${r.id}`, (r as any)[p.textField])
+                        if (url) { (r as any)[p.audioField] = url; ttsOk++ } else ttsFail++
+                        await new Promise(r => setTimeout(r, 300)) // throttle
                       }
                     }
                   }
                   onChange({ ...newBlock })
+                  if (ttsFail > 0) alert(`語音生成完成：${ttsOk} 成功，${ttsFail} 失敗（可重試失敗的項目）`)
                 } catch {}
                 finally { setTtsLoading(null) }
               } catch (e: any) { alert(e.response?.data?.error || 'AI 生成失敗') }
