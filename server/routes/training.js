@@ -4060,8 +4060,31 @@ ${editor_context || '（無）'}
 
         // Strip markdown code fences if present
         const cleaned = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
-        const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
-        parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : JSON.parse(cleaned);
+        // Try direct parse first, then regex extraction, then position-based truncation
+        try {
+          parsed = JSON.parse(cleaned);
+        } catch (directErr) {
+          // Fallback 1: extract outermost { ... } with balanced braces
+          const start = cleaned.indexOf('{');
+          if (start >= 0) {
+            let depth = 0, end = -1;
+            for (let i = start; i < cleaned.length; i++) {
+              if (cleaned[i] === '{') depth++;
+              else if (cleaned[i] === '}') { depth--; if (depth === 0) { end = i; break; } }
+            }
+            if (end > start) {
+              try { parsed = JSON.parse(cleaned.slice(start, end + 1)); } catch {}
+            }
+          }
+          // Fallback 2: error tells us the valid JSON length — truncate there
+          if (!parsed) {
+            const posMatch = directErr.message.match(/position\s+(\d+)/i);
+            if (posMatch) {
+              try { parsed = JSON.parse(cleaned.slice(0, parseInt(posMatch[1]))); } catch {}
+            }
+          }
+          if (!parsed) throw directErr;
+        }
         break; // success
       } catch (parseErr) {
         console.warn(`[Training] Generate narration attempt ${attempt + 1} failed:`, parseErr.message);

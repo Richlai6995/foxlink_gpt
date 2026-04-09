@@ -1289,7 +1289,10 @@ async function runMigrations(db) {
       console.log('[Migration] online_dept_snapshots: function-based UNIQUE index added');
     }
   } catch (e) {
-    console.warn('[Migration] online_dept_snapshots unique index:', e.message);
+    // ORA-00955: index already created by another pod (race condition) — safe to ignore
+    if (!e.message?.includes('ORA-00955')) {
+      console.warn('[Migration] online_dept_snapshots unique index:', e.message);
+    }
   }
 
   // Service 健康檢查設定
