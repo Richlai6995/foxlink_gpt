@@ -3008,6 +3008,46 @@ Response:
 └──────────────────────────────────────────────────────────────┘
 ```
 
+### 16.8 草稿保存系統
+
+錄製和標註編輯耗時較長，需要防止意外遺失。提供草稿保存機制，讓使用者可以中途儲存、下次接續編輯。
+
+#### 16.8.1 儲存機制
+
+```
+儲存草稿 flow:
+1. 無 recording session → 自動建立 POST /recording/start
+2. 已在 server 的步驟（Extension 錄的）
+   → PUT /recording/:sid/steps 更新 annotations_json / stepNumber / lang
+3. 純前端步驟（Ctrl+V / 拖放圖片）
+   → POST /recording/:sid/step 上傳 base64 + annotations
+4. sessionId 存入瀏覽器 sessionStorage 供復原
+```
+
+#### 16.8.2 復原機制
+
+```
+載入草稿 flow:
+1. 開啟 RecordingPanel 時檢查 sessionStorage
+2. 有 pending session → GET /recording/:sid 檢查步驟數
+3. 步驟數 > 0 → 顯示 banner
+   ┌──────────────────────────────────────────────┐
+   │  📋 偵測到未完成的草稿（6 張截圖）            │
+   │                [載入草稿]  [忽略，開新的]      │
+   └──────────────────────────────────────────────┘
+4. 點「載入草稿」→ pullFromServer 拉回含 annotations 的完整資料
+5. 點「忽略」→ 清除 sessionStorage 記錄
+```
+
+#### 16.8.3 安全防護
+
+| 場景 | 防護 |
+|------|------|
+| 點 X 關閉面板 | confirm 對話框：「建議先點儲存草稿再關閉」 |
+| 重整/關閉瀏覽器 | `beforeunload` 事件攔截 |
+| 意外斷線 | Extension 錄製的截圖已在 server，不受影響 |
+| Ctrl+V 貼的圖 | 儲存草稿後上傳到 server，不再依賴記憶體 |
+
 ### 16.6 AI 截圖分析 API
 
 ```

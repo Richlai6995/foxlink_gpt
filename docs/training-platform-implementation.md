@@ -1005,6 +1005,7 @@ Admin 後台 →「教育訓練報表」→ 查看完成率、平均分數、部
 | POST | `/api/training/recording/:sessionId/complete` | 結束錄製 |
 | POST | `/api/training/recording/:sessionId/analyze` | AI 分析所有步驟截圖 |
 | POST | `/api/training/recording/:sessionId/generate` | 從錄製結果生成教材 |
+| PUT | `/api/training/recording/:sessionId/steps` | 批次更新步驟（step_number / lang / annotations_json） |
 
 ### 跨系統管理
 
@@ -1118,16 +1119,29 @@ Admin 後台 →「教育訓練報表」→ 查看完成率、平均分數、部
    自動模式：搭配 Chrome Extension，每次 click 自動截圖上傳
 5. 錄製面板即時顯示已錄製的步驟清單
 6. 完成所有操作後點擊「結束錄製」
-7. 點擊「AI 分析全部」→ Gemini Vision 逐步分析截圖
+7. （選項 A）點擊「💾 儲存草稿」→ 截圖 + 標註存到 server
+   └── 下次開啟面板 → 自動偵測草稿 → 點「載入草稿」接續編輯
+   （選項 B）直接進入步驟 8
+8. 點擊「AI 分析全部」→ Gemini Vision 逐步分析截圖
    └── 自動辨識 UI 元素
    └── 自動生成操作說明
    └── 自動生成旁白文字
    └── 自動偵測敏感資訊
-8. 點擊「生成教材」→ 自動建立所有投影片
-9. 進入編輯器微調
+9. 點擊「生成教材」→ 自動建立所有投影片
+10. 進入編輯器微調
 
 效率提升：完全手動 = 8 小時 → AI 錄製 = 30 分鐘操作 + 30 分鐘微調
 ```
+
+#### 草稿保存實作（2026-04-09）
+
+| 項目 | 說明 |
+|------|------|
+| 儲存草稿 | `saveDraft()` — 建立/更新 recording session，Ctrl+V 的圖片上傳 server，已有步驟更新 annotations |
+| 載入草稿 | 開啟面板時查 sessionStorage → 偵測到 session → banner 提示載入 |
+| API 變更 | `PUT /recording/:sid/steps` 擴充支援 `annotations_json` 欄位 |
+| 防護 | 關閉面板 confirm + `beforeunload` 事件攔截 |
+| 檔案 | `RecordingPanel.tsx` (前端), `training.js` (API) |
 
 ### 11.4 Chrome Extension 使用方式
 

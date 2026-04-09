@@ -5706,7 +5706,7 @@ const userSections = [
     "sort_order": 27,
     "icon": "BookOpen",
     "icon_color": "text-violet-500",
-    "last_modified": "2026-04-09",
+    "last_modified": "2026-04-10",
     "title": "教育訓練管理使用手冊",
     "sidebar_label": "教材開發",
     "blocks": [
@@ -5960,18 +5960,27 @@ const userSections = [
                 "desc": "從 chrome://extensions 載入擴充功能"
               },
               {
-                "title": "登入並取得 Session ID",
-                "desc": "在課程編輯器點擊「AI 錄製」取得 Session ID"
-              },
-              {
                 "title": "開始錄製",
-                "desc": "Extension popup 貼上 Session ID → 開始錄製 → 操作目標系統"
+                "desc": "在課程編輯器點擊「AI 錄製」→ 開始自動錄製 → 切到目標系統操作，每次截圖自動上傳"
               },
               {
-                "title": "停止並生成教材",
-                "desc": "停止錄製 → AI 自動辨識每個操作步驟 → 生成互動投影片"
+                "title": "停止錄製 + 編輯標註",
+                "desc": "停止錄製後拉回截圖，可調整步驟順序、設定語言、使用標註工具（✥ 選取移動 / ① 編號 / ◯ 圈 / ▭ 框 / → 箭頭 / T 文字）"
+              },
+              {
+                "title": "儲存草稿（建議）",
+                "desc": "點擊底部「💾 儲存草稿」按鈕，截圖和標註會存到 server。下次開啟面板時會自動偵測並提示載入，防止編輯中途資料遺失"
+              },
+              {
+                "title": "送 AI 處理",
+                "desc": "編輯完成後點擊「🤖 全部送 AI 處理」→ AI 逐張分析截圖 → 自動生成互動投影片"
               }
             ]
+          },
+          {
+            "type": "callout",
+            "variant": "tip",
+            "text": "繼續錄製時步驟號會自動接續（根據中文版投影片的最後步驟 +1），不需手動調整。截圖方式：全螢幕 📸 / 矩形選取 ⬜ / 智慧偵測 🎯（hover 選取區域後點擊確認）。"
           }
         ]
       },
