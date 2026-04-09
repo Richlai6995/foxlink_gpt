@@ -1598,14 +1598,9 @@ async function runMigrations(db) {
   // Phase 4A: 擴充欄位長度 → VARCHAR2(20)
   for (const tbl of ['USERS', 'ROLES']) {
     try {
-      const r = await db.prepare(
-        `SELECT DATA_LENGTH FROM USER_TAB_COLUMNS WHERE TABLE_NAME=? AND COLUMN_NAME='TRAINING_PERMISSION'`
-      ).get(tbl);
-      if (r && r.data_length < 20) {
-        await db.run(`ALTER TABLE ${tbl} MODIFY TRAINING_PERMISSION VARCHAR2(20)`);
-        console.log(`[Migration] ${tbl}.TRAINING_PERMISSION widened to VARCHAR2(20)`);
-      }
-    } catch (e) { console.warn(`[Migration] ${tbl}.TRAINING_PERMISSION resize: ${e.message}`); }
+      await db.execDDL(`ALTER TABLE ${tbl} MODIFY TRAINING_PERMISSION VARCHAR2(20)`);
+      console.log(`[Migration] ${tbl}.TRAINING_PERMISSION → VARCHAR2(20) OK`);
+    } catch(e) { console.warn(`[Migration] ${tbl}.TRAINING_PERMISSION resize:`, e.message); }
   }
 
   // Phase 4A: training_programs 新增 paused_at / completed_at
