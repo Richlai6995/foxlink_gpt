@@ -5137,7 +5137,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;b
 .slide-card{background:#fff;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,.08);overflow:hidden}
 .slide-content{display:flex;gap:16px;padding:16px}
 .slide-img-wrap{flex:1;position:relative;border-radius:8px;overflow:hidden;background:#0f172a;cursor:pointer;transition:border-color .3s}
-.slide-img-wrap.completed{border:2px solid #22c55e;cursor:default}
+.slide-img-wrap.completed{outline:2px solid #22c55e;outline-offset:-2px;cursor:default}
 .slide-img-wrap img{width:100%;display:block}
 .slide-info{width:240px;flex-shrink:0;display:flex;flex-direction:column;gap:8px}
 .info-card{background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px;font-size:13px;line-height:1.6}
@@ -5250,12 +5250,22 @@ function getHotspotBlock(s){
   return null;
 }
 function getCorrectRegions(b){return(b&&b.regions||[]).filter(function(r){return r.correct})}
+// Coordinate conversion — match HotspotBlock.tsx logic exactly
+function calcCoordSystem(b){
+  var allR=b.regions||[];
+  if(b.coordinate_system==='pixel')return'pixel';
+  if(b.coordinate_system==='percent')return'percent';
+  // Heuristic: if ANY region has coords > 100, treat all as pixel
+  var hasBig=allR.some(function(r){return r.coords.x>100||r.coords.y>100||r.coords.w>100||r.coords.h>100});
+  return hasBig?'pixel':'percent';
+}
 function toPercent(b,c){
-  var isP=b.coordinate_system==='percent';
-  var isPx=!isP&&(c.x>100||c.y>100);
-  if(!isPx)return c;
-  var sw=b._imgW||(b.image_dimensions&&b.image_dimensions.w)||100;
-  var sh=b._imgH||(b.image_dimensions&&b.image_dimensions.h)||100;
+  var sys=calcCoordSystem(b);
+  if(sys==='percent')return c;
+  var dim=b.image_dimensions||{};
+  var allR=b.regions||[];
+  var sw=b._imgW||dim.w||Math.max.apply(null,allR.map(function(r){return r.coords.x+(r.coords.w||0)}).concat([200]))*1.05;
+  var sh=b._imgH||dim.h||Math.max.apply(null,allR.map(function(r){return r.coords.y+(r.coords.h||0)}).concat([200]))*1.05;
   return{x:c.x/sw*100,y:c.y/sh*100,w:c.w/sw*100,h:c.h/sh*100};
 }
 
@@ -5388,11 +5398,11 @@ function renderSlide(s,i){
           }
           else if(ri<gStep){cls+=' done'}
           else{cls+=' dimmed'}
-          imgHtml+='<div class="'+cls+'" style="left:'+c.x.toFixed(2)+'%;top:'+c.y.toFixed(2)+'%;width:'+c.w.toFixed(2)+'%;height:'+c.h.toFixed(2)+'%">';
+          imgHtml+='<div class="'+cls+'" style="left:'+c.x+'%;top:'+c.y+'%;width:'+c.w+'%;height:'+c.h+'%">';
           if(ri===gStep&&!gCompleted)imgHtml+='<span class="tag">'+esc(r.label||(ri+1+''))+'</span>';
           imgHtml+='</div>';
           if((gHitRegion===r.id&&gFeedback&&gFeedback.correct)||ri<gStep||gCompleted){
-            imgHtml+='<div class="checkmark-overlay" style="left:'+c.x.toFixed(2)+'%;top:'+c.y.toFixed(2)+'%;width:'+c.w.toFixed(2)+'%;height:'+c.h.toFixed(2)+'%"><div class="checkmark-circle" style="width:32px;height:32px;font-size:18px">\\u2713</div></div>';
+            imgHtml+='<div class="checkmark-overlay" style="left:'+c.x+'%;top:'+c.y+'%;width:'+c.w+'%;height:'+c.h+'%"><div class="checkmark-circle" style="width:32px;height:32px;font-size:18px">\\u2713</div></div>';
           }
         });
         imgHtml+='</div>';
