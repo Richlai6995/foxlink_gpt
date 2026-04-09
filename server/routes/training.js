@@ -5401,7 +5401,7 @@ function renderSlide(s,i){
           imgHtml+='<div class="'+cls+'" style="left:'+c.x+'%;top:'+c.y+'%;width:'+c.w+'%;height:'+c.h+'%">';
           if(ri===gStep&&!gCompleted)imgHtml+='<span class="tag">'+esc(r.label||(ri+1+''))+'</span>';
           imgHtml+='</div>';
-          if((gHitRegion===r.id&&gFeedback&&gFeedback.correct)||ri<gStep||gCompleted){
+          if(gHitRegion===r.id&&gFeedback&&gFeedback.correct){
             imgHtml+='<div class="checkmark-overlay" style="left:'+c.x+'%;top:'+c.y+'%;width:'+c.w+'%;height:'+c.h+'%"><div class="checkmark-circle" style="width:32px;height:32px;font-size:18px">\\u2713</div></div>';
           }
         });
