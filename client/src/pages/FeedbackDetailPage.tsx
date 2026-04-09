@@ -567,6 +567,29 @@ export default function FeedbackDetailPage() {
                   <div className="text-sm whitespace-pre-wrap text-gray-800">
                     {msg.content}
                   </div>
+                  {/* Inline 附件（圖片 inline + 非圖片檔案連結） */}
+                  {(() => {
+                    const msgAtts = attachments.filter(a => a.message_id === msg.id)
+                    if (msgAtts.length === 0) return null
+                    return (
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {msgAtts.map(att => att.mime_type?.startsWith('image/') ? (
+                          <button key={att.id} onClick={() => setLightboxUrl(`/uploads/${att.file_path}`)}
+                            className="block rounded-lg overflow-hidden border border-gray-200 hover:border-blue-400 transition">
+                            <img src={`/uploads/${att.file_path}`} alt={att.file_name}
+                              className="max-w-[240px] max-h-[180px] object-cover" />
+                          </button>
+                        ) : (
+                          <a key={att.id} href={`/uploads/${att.file_path}`} target="_blank" rel="noopener noreferrer"
+                            className="flex items-center gap-1.5 bg-white border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs text-gray-600 hover:text-blue-600 hover:border-blue-300 transition">
+                            <FileText size={14} className="text-gray-400" />
+                            <span className="truncate max-w-[150px]">{att.file_name}</span>
+                            <Download size={12} className="text-gray-300" />
+                          </a>
+                        ))}
+                      </div>
+                    )
+                  })()}
                 </div>
               </div>
             ))}
@@ -582,17 +605,25 @@ export default function FeedbackDetailPage() {
 
           {/* Chat Input */}
           {canChat && (
-            <div className="border-t border-gray-200 bg-gray-50 px-6 py-3">
+            <div className="border-t border-gray-200 bg-gray-50 px-6 py-3"
+              onDrop={e => { e.preventDefault(); if (e.dataTransfer.files.length > 0) setMsgFiles(prev => [...prev, ...Array.from(e.dataTransfer.files)]) }}
+              onDragOver={e => e.preventDefault()}>
+              {/* 檔案預覽（圖片縮圖 + 非圖片檔名） */}
               {msgFiles.length > 0 && (
                 <div className="flex flex-wrap gap-2 mb-2">
                   {msgFiles.map((f, i) => (
-                    <span key={i} className="inline-flex items-center gap-1 bg-gray-100 rounded px-2 py-1 text-xs text-gray-600">
-                      <Paperclip size={10} />
-                      {f.name.length > 20 ? f.name.slice(0, 17) + '...' : f.name}
-                      <button onClick={() => setMsgFiles(prev => prev.filter((_, j) => j !== i))}>
-                        <X size={10} className="text-gray-400 hover:text-red-500" />
-                      </button>
-                    </span>
+                    <div key={i} className="relative group">
+                      {f.type.startsWith('image/') ? (
+                        <img src={URL.createObjectURL(f)} alt="" className="w-16 h-16 object-cover rounded-lg border border-gray-200" />
+                      ) : (
+                        <div className="flex items-center gap-1.5 bg-white border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs text-gray-600 h-16">
+                          <FileText size={14} className="text-gray-400 shrink-0" />
+                          <span className="truncate max-w-[80px]">{f.name}</span>
+                        </div>
+                      )}
+                      <button onClick={() => setMsgFiles(prev => prev.filter((_, j) => j !== i))}
+                        className="absolute -top-1.5 -right-1.5 bg-red-500 rounded-full w-4 h-4 flex items-center justify-center text-white text-[10px] opacity-0 group-hover:opacity-100 transition">×</button>
+                    </div>
                   ))}
                 </div>
               )}
@@ -603,7 +634,9 @@ export default function FeedbackDetailPage() {
                     onChange={e => handleInputChange(e.target.value)}
                     onKeyDown={handleKeyDown}
                     onPaste={handlePaste}
-                    placeholder={t('feedback.typeMessage')}
+                    onDrop={e => { e.preventDefault(); if (e.dataTransfer.files.length > 0) setMsgFiles(prev => [...prev, ...Array.from(e.dataTransfer.files)]) }}
+                    onDragOver={e => e.preventDefault()}
+                    placeholder={t('feedback.typeMessage') + '（可拖放檔案或 Ctrl+V 貼圖）'}
                     rows={2}
                     className="w-full bg-white border border-gray-300 rounded-lg px-4 py-2 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:border-blue-500 resize-none"
                   />
