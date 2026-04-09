@@ -4827,15 +4827,19 @@ router.post('/recording/:sessionId/generate', async (req, res) => {
 
 router.post('/courses/:id/export', loadCoursePermission, requirePermission('owner', 'admin', 'develop'), async (req, res) => {
   try {
-    const { languages = ['zh-TW'], include_quiz = true, include_audio = true, include_annotations = true, compress_images = true } = req.body;
+    const { languages = ['zh-TW'], include_quiz = true, include_audio = true, include_annotations = true, compress_images = true, lesson_ids } = req.body;
     const courseId = req.courseId;
 
     // 1. Load course
     const course = await db.prepare('SELECT * FROM courses WHERE id=?').get(courseId);
     if (!course) return res.status(404).json({ error: '課程不存在' });
 
-    // 2. Load lessons
-    const lessons = await db.prepare('SELECT * FROM course_lessons WHERE course_id=? ORDER BY sort_order').all(courseId);
+    // 2. Load lessons (filter by lesson_ids if provided)
+    let lessons = await db.prepare('SELECT * FROM course_lessons WHERE course_id=? ORDER BY sort_order').all(courseId);
+    if (Array.isArray(lesson_ids) && lesson_ids.length > 0) {
+      const idSet = new Set(lesson_ids.map(Number));
+      lessons = lessons.filter(l => idSet.has(l.id));
+    }
 
     // 3. Build slide data per language
     const slidesByLang = {};
@@ -4866,38 +4870,123 @@ router.post('/courses/:id/export', loadCoursePermission, requirePermission('owne
           let contentJson = slide.content_json;
           let notes = slide.notes;
 
-          // Translated content + image overrides
+          // Helper to resolve file paths
+          const findFile = (rel) => {
+            const p1 = path.join(uploadDir, rel);
+            if (fs.existsSync(p1)) return p1;
+            if (fs.existsSync(altUploadDir)) {
+              const p2 = path.join(altUploadDir, rel);
+              if (fs.existsSync(p2)) return p2;
+            }
+            return null;
+          };
+          const embedAudioUrl = (url) => {
+            if (!url || !url.startsWith('/api/training/files/')) return url;
+            const ap = findFile(url.replace('/api/training/files/', ''));
+            if (ap) return `data:audio/mpeg;base64,${fs.readFileSync(ap).toString('base64')}`;
+            return null;
+          };
+
+          let slideAudioUrl = slide.audio_url;
+
+          // Translated content + image overrides + regions_json
           if (lang !== 'zh-TW') {
-            const st = await db.prepare('SELECT content_json, notes, image_overrides FROM slide_translations WHERE slide_id=? AND lang=?').get(slide.id, lang);
-            if (st?.content_json) contentJson = st.content_json;
-            if (st?.notes) notes = st.notes;
-            // Phase 3A-2: Apply image overrides for this language
-            if (st?.image_overrides) {
-              try {
-                const overrides = JSON.parse(st.image_overrides);
-                const tmpBlocks = JSON.parse(contentJson || '[]');
-                for (const [idx, val] of Object.entries(overrides)) {
-                  if (idx === 'region_overrides') continue;
-                  const block = tmpBlocks[Number(idx)];
-                  if (block && typeof val === 'string') {
-                    if (block.image) block.image = val;
-                    if (block.src) block.src = val;
-                  }
-                }
-                // Region overrides
-                const regionOvr = overrides.region_overrides;
-                if (regionOvr) {
-                  for (const block of tmpBlocks) {
-                    if (block.regions) {
-                      block.regions = block.regions.map(r => {
-                        const ovr = regionOvr[r.id];
-                        return ovr ? { ...r, coords: { ...r.coords, ...ovr } } : r;
-                      });
+            const st = await db.prepare(
+              'SELECT content_json, notes, audio_url, image_overrides, regions_json FROM slide_translations WHERE slide_id=? AND lang=?'
+            ).get(slide.id, lang);
+            if (st) {
+              // Apply translated content_json — merge back image/hotspot fields from original
+              if (st.content_json) {
+                try {
+                  const origBlocks = JSON.parse(slide.content_json || '[]');
+                  const transBlocks = JSON.parse(st.content_json || '[]');
+                  const preserveFields = ['image', 'src', 'regions', 'coordinate_system', 'image_dimensions',
+                    'interaction_mode', 'max_attempts', 'show_hint_after', 'annotations', 'annotations_in_image',
+                    'slide_narration', 'slide_narration_audio', 'slide_narration_test', 'slide_narration_test_audio',
+                    'slide_narration_explore', 'slide_narration_explore_audio', 'completion_message'];
+                  for (let bi = 0; bi < transBlocks.length && bi < origBlocks.length; bi++) {
+                    const tb = transBlocks[bi], ob = origBlocks[bi];
+                    for (const f of preserveFields) {
+                      if (ob[f] !== undefined && (tb[f] === undefined || tb[f] === null)) tb[f] = ob[f];
+                    }
+                    // Preserve items images
+                    if (ob.items && tb.items) {
+                      for (let ii = 0; ii < tb.items.length && ii < ob.items.length; ii++) {
+                        if (ob.items[ii].image && !tb.items[ii].image) tb.items[ii].image = ob.items[ii].image;
+                      }
                     }
                   }
-                }
-                contentJson = JSON.stringify(tmpBlocks);
-              } catch {}
+                  contentJson = JSON.stringify(transBlocks);
+                } catch { contentJson = st.content_json; }
+              }
+              if (st.notes) notes = st.notes;
+              if (st.audio_url) slideAudioUrl = st.audio_url;
+
+              // Apply image overrides
+              if (st.image_overrides) {
+                try {
+                  const overrides = JSON.parse(st.image_overrides);
+                  const tmpBlocks = JSON.parse(contentJson || '[]');
+                  for (const [idx, val] of Object.entries(overrides)) {
+                    if (idx === 'region_overrides') continue;
+                    const block = tmpBlocks[Number(idx)];
+                    if (block && typeof val === 'string') {
+                      if (block.image) block.image = val;
+                      if (block.src) block.src = val;
+                    }
+                  }
+                  const regionOvr = overrides.region_overrides;
+                  if (regionOvr) {
+                    for (const block of tmpBlocks) {
+                      if (block.regions) {
+                        block.regions = block.regions.map(r => {
+                          const ovr = regionOvr[r.id];
+                          return ovr ? { ...r, coords: { ...r.coords, ...ovr } } : r;
+                        });
+                      }
+                    }
+                  }
+                  contentJson = JSON.stringify(tmpBlocks);
+                } catch {}
+              }
+
+              // Apply regions_json (independent language regions + intro narration)
+              if (st.regions_json) {
+                try {
+                  const langRegions = JSON.parse(st.regions_json);
+                  const tmpBlocks = JSON.parse(contentJson || '[]');
+                  for (const [idx, regs] of Object.entries(langRegions)) {
+                    if (idx === '_intro') {
+                      for (const block of tmpBlocks) {
+                        if (block.type === 'hotspot') {
+                          for (const f of ['slide_narration', 'slide_narration_audio',
+                            'slide_narration_test', 'slide_narration_test_audio',
+                            'slide_narration_explore', 'slide_narration_explore_audio', 'completion_message']) {
+                            if (langRegions._intro[f]) block[f] = langRegions._intro[f];
+                          }
+                        }
+                      }
+                      continue;
+                    }
+                    const block = tmpBlocks[Number(idx)];
+                    if (block && Array.isArray(regs)) {
+                      const existingRegs = block.regions || [];
+                      for (const reg of regs) {
+                        const match = existingRegs.find(er => er.id === reg.id);
+                        if (match) {
+                          for (const vf of ['narration', 'audio_url', 'test_hint', 'test_audio_url',
+                            'explore_desc', 'explore_audio_url', 'feedback', 'feedback_wrong']) {
+                            if (!reg[vf] && match[vf]) reg[vf] = match[vf];
+                          }
+                          if (!reg.label && match.label) reg.label = match.label;
+                        }
+                      }
+                      block.regions = regs;
+                    }
+                  }
+                  contentJson = JSON.stringify(tmpBlocks);
+                } catch {}
+              }
             }
           }
 
@@ -4905,29 +4994,15 @@ router.post('/courses/:id/export', loadCoursePermission, requirePermission('owne
           let blocks = [];
           try { blocks = JSON.parse(contentJson || '[]'); } catch {}
 
-          const findFile = (rel) => {
-              const p1 = path.join(uploadDir, rel);
-              if (fs.existsSync(p1)) return p1;
-              if (fs.existsSync(altUploadDir)) {
-                const p2 = path.join(altUploadDir, rel);
-                if (fs.existsSync(p2)) return p2;
-              }
-              return null;
-            };
-
+          const sizeOf = require('image-size');
           for (const block of blocks) {
-            // Note: annotations are now always kept as SVG overlay data.
-            // Only skip rendering in HTML if annotations are visually burned into the image
-            // AND there's no separate annotation data (legacy edge case).
             const imgFields = ['image', 'src'];
-            const sizeOf = require('image-size');
             for (const field of imgFields) {
               if (block[field] && block[field].startsWith('/api/training/files/')) {
                 const rel = block[field].replace('/api/training/files/', '');
                 const imgPath = findFile(rel);
                 if (imgPath) {
                   const buf = fs.readFileSync(imgPath);
-                  // Read actual image dimensions for accurate coordinate conversion
                   try {
                     const dim = sizeOf(buf);
                     if (dim.width && dim.height) { block._imgW = dim.width; block._imgH = dim.height; }
@@ -4953,15 +5028,26 @@ router.post('/courses/:id/export', loadCoursePermission, requirePermission('owne
             if (!include_annotations && block.annotations) {
               delete block.annotations;
             }
+            // Embed block-level audio (intro narration, etc.)
+            if (include_audio) {
+              for (const af of ['slide_narration_audio', 'slide_narration_test_audio', 'slide_narration_explore_audio']) {
+                if (block[af]) block[af] = embedAudioUrl(block[af]);
+              }
+              // Embed region-level audio
+              if (block.regions) {
+                for (const region of block.regions) {
+                  for (const af of ['audio_url', 'test_audio_url', 'explore_audio_url']) {
+                    if (region[af]) region[af] = embedAudioUrl(region[af]);
+                  }
+                }
+              }
+            }
           }
 
-          // Audio embed
+          // Slide-level audio embed
           let audioData = null;
-          if (include_audio && slide.audio_url) {
-            const audioPath = findFile(slide.audio_url.replace('/api/training/files/', '')) || path.join(uploadDir, slide.audio_url.replace('/api/training/files/', ''));
-            if (fs.existsSync(audioPath)) {
-              audioData = `data:audio/mpeg;base64,${fs.readFileSync(audioPath).toString('base64')}`;
-            }
+          if (include_audio && slideAudioUrl) {
+            audioData = embedAudioUrl(slideAudioUrl);
           }
 
           allSlides.push({
@@ -5044,14 +5130,16 @@ function buildExportHtml(courseData) {
 body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#f1f5f9;color:#1e293b}
 #app{max-width:1200px;margin:0 auto;min-height:100vh;display:flex;flex-direction:column}
 .topbar{background:#fff;border-bottom:1px solid #e2e8f0;padding:10px 20px;display:flex;align-items:center;gap:12px;position:sticky;top:0;z-index:10}
-.topbar h1{font-size:15px;font-weight:600;flex:1}
-.topbar select{border:1px solid #cbd5e1;border-radius:6px;padding:4px 8px;font-size:12px;background:#fff}
+.topbar h1{font-size:15px;font-weight:600;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.topbar select,.topbar button{border:1px solid #cbd5e1;border-radius:6px;padding:4px 8px;font-size:12px;background:#fff;cursor:pointer}
+.topbar button.active{background:#2563eb;color:#fff;border-color:#2563eb}
 .main{flex:1;padding:20px;display:flex;flex-direction:column;gap:16px}
 .slide-card{background:#fff;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,.08);overflow:hidden}
 .slide-content{display:flex;gap:16px;padding:16px}
-.slide-img-wrap{flex:1;position:relative;border-radius:8px;overflow:hidden;background:#0f172a}
+.slide-img-wrap{flex:1;position:relative;border-radius:8px;overflow:hidden;background:#0f172a;cursor:pointer;transition:border-color .3s}
+.slide-img-wrap.completed{border:2px solid #22c55e;cursor:default}
 .slide-img-wrap img{width:100%;display:block}
-.slide-info{width:220px;flex-shrink:0;display:flex;flex-direction:column;gap:10px}
+.slide-info{width:240px;flex-shrink:0;display:flex;flex-direction:column;gap:8px}
 .info-card{background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px;font-size:13px;line-height:1.6}
 .info-card .label{font-size:10px;font-weight:600;color:#64748b;margin-bottom:4px;text-transform:uppercase}
 .text-block{padding:16px;font-size:14px;line-height:1.7}
@@ -5067,17 +5155,43 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;b
 .bottom .bar{flex:1;height:6px;background:#e2e8f0;border-radius:3px;overflow:hidden}
 .bottom .bar div{height:100%;background:#2563eb;border-radius:3px;transition:width .3s}
 .bottom .counter{font-size:12px;color:#64748b;width:60px;text-align:center}
+/* Regions */
 .regions{position:absolute;inset:0}
-.regions .r{position:absolute;border:2px solid rgba(59,130,246,.5);border-radius:4px;background:rgba(59,130,246,.05);cursor:pointer;transition:.15s}
-.regions .r:hover{background:rgba(59,130,246,.15);border-color:#3b82f6}
-.regions.has-ann .r{border-color:transparent!important;background:transparent!important}
-.regions.has-ann .r:hover{background:rgba(59,130,246,.1)!important;border-color:rgba(59,130,246,.3)!important}
-.regions.has-ann .tag{display:none}
-.regions .r.correct-hit{border-color:#22c55e;background:rgba(34,197,94,.2);animation:pulse-g .6s}
-.regions .r.wrong-hit{border-color:#ef4444;background:rgba(239,68,68,.15);animation:shake .4s}
-.regions .r .tag{position:absolute;top:-22px;left:0;font-size:9px;font-weight:700;background:#3b82f6;color:#fff;padding:1px 6px;border-radius:3px;white-space:nowrap}
-@keyframes pulse-g{0%,100%{box-shadow:0 0 0 0 rgba(34,197,94,.4)}50%{box-shadow:0 0 0 8px rgba(34,197,94,0)}}
-@keyframes shake{0%,100%{transform:translateX(0)}25%{transform:translateX(-4px)}75%{transform:translateX(4px)}}
+.region-box{position:absolute;border-radius:4px;transition:all .3s;pointer-events:none}
+.region-box .tag{position:absolute;top:-20px;left:0;font-size:9px;font-weight:700;background:#3b82f6;color:#fff;padding:1px 6px;border-radius:3px;white-space:nowrap}
+.region-box.current{border:2px solid #3b82f6;background:rgba(59,130,246,.08)}
+.region-box.done{border:2px solid rgba(34,197,94,.4);background:rgba(34,197,94,.08)}
+.region-box.dimmed{border:1px solid rgba(100,116,139,.15);background:rgba(0,0,0,.25);opacity:.3}
+.region-box.hit-ok{border:3px solid #22c55e;background:rgba(34,197,94,.2)}
+.region-box.hit-bad{border:3px solid #ef4444;background:rgba(239,68,68,.15);animation:shake .4s}
+/* Step progress */
+.step-dots{display:flex;align-items:center;gap:4px;padding:8px 16px}
+.step-dot{width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#fff;transition:all .3s}
+.step-dot.pending{background:#cbd5e1;color:#64748b}
+.step-dot.current{background:#3b82f6;box-shadow:0 0 0 3px rgba(59,130,246,.3)}
+.step-dot.done{background:#22c55e}
+.step-line{width:12px;height:2px;border-radius:1px;background:#e2e8f0;transition:background .3s}
+.step-line.done{background:#22c55e}
+/* Narration card */
+.narr-card{border:2px solid #3b82f6;background:rgba(59,130,246,.06);border-radius:8px;padding:10px}
+.narr-card.auto{border-color:#22c55e;background:rgba(34,197,94,.06)}
+.narr-card .step-badge{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;font-size:10px;font-weight:700;color:#fff;margin-right:6px}
+/* Feedback */
+.fb-card{border-radius:8px;padding:8px 10px;font-size:12px;display:flex;align-items:flex-start;gap:6px;animation:fadeIn .3s}
+.fb-card.ok{background:rgba(34,197,94,.08);border:1px solid rgba(34,197,94,.3);color:#16a34a}
+.fb-card.err{background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3);color:#dc2626}
+/* Completion */
+.complete-card{border:1px solid #22c55e;background:rgba(34,197,94,.08);border-radius:8px;padding:10px;text-align:center}
+.complete-card .msg{color:#22c55e;font-weight:600;font-size:13px}
+/* Checkmark overlay */
+.checkmark-overlay{position:absolute;display:flex;align-items:center;justify-content:center;pointer-events:none;z-index:10}
+.checkmark-circle{width:48px;height:48px;border-radius:50%;background:#22c55e;display:flex;align-items:center;justify-content:center;color:#fff;font-size:28px;font-weight:bold;box-shadow:0 0 20px rgba(34,197,94,.5);animation:cb .6s ease-out}
+/* Controls bar */
+.ctrl-bar{display:flex;align-items:center;gap:8px;font-size:11px;color:#64748b}
+.ctrl-btn{border:none;background:#eff6ff;color:#2563eb;border-radius:6px;padding:4px 10px;font-size:11px;font-weight:600;cursor:pointer;transition:all .15s}
+.ctrl-btn:hover{background:#dbeafe}
+.ctrl-btn.auto-active{background:#22c55e;color:#fff}
+.ctrl-btn.muted{background:#f1f5f9;color:#94a3b8}
 /* Annotation SVG */
 .ann-svg{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;overflow:visible}
 /* Quiz */
@@ -5094,188 +5208,313 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;b
 .quiz-result.pass{color:#16a34a}
 .quiz-result.fail{color:#dc2626}
 .badge{display:inline-block;font-size:10px;font-weight:600;padding:2px 8px;border-radius:4px;background:#eff6ff;color:#2563eb}
+@keyframes cb{0%{transform:scale(0);opacity:0}50%{transform:scale(1.3)}100%{transform:scale(1);opacity:1}}
+@keyframes shake{0%,100%{transform:translateX(0)}25%{transform:translateX(-4px)}75%{transform:translateX(4px)}}
+@keyframes fadeIn{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:translateY(0)}}
+@keyframes pulse-ring{0%{box-shadow:0 0 0 0 rgba(59,130,246,.4)}100%{box-shadow:0 0 0 8px rgba(59,130,246,0)}}
 @media(max-width:768px){.slide-content{flex-direction:column}.slide-info{width:100%}}
 </style>
 </head>
 <body>
 <div id="app"></div>
+<audio id="globalAudio"></audio>
 <script>
 (function(){
-const D=${dataJson};
-const langs=D.settings.languages||['zh-TW'];
-let lang=langs[0],idx=0,quizMode=false,quizAnswers={},quizSubmitted=false;
-const $=s=>document.querySelector(s);
-const app=$('#app');
+var D=${dataJson};
+var langs=D.settings.languages||['zh-TW'];
+var lang=langs[0],idx=0,quizMode=false,quizAnswers={},quizSubmitted=false;
+// Guided tour state (per slide)
+var gStep=0,gCompleted=false,gFeedback=null,gHitRegion=null,gAttempts=0,gStepAttempts=0;
+var autoPlaying=false,muted=false,autoTimer=null;
+var $=function(s){return document.querySelector(s)};
+var app=$('#app');
+var audio=document.getElementById('globalAudio');
+
+function resetGuided(){gStep=0;gCompleted=false;gFeedback=null;gHitRegion=null;gAttempts=0;gStepAttempts=0;stopAuto()}
+function stopAuto(){autoPlaying=false;if(autoTimer){clearTimeout(autoTimer);autoTimer=null}if(audio){audio.pause();audio.currentTime=0;audio.onended=null}}
+
+function playAudio(url,cb){
+  if(!url||muted||!audio){if(cb)cb();return}
+  audio.pause();audio.currentTime=0;audio.onended=null;
+  audio.src=url;
+  audio.onended=function(){audio.onended=null;if(cb)cb()};
+  audio.play().catch(function(){audio.onended=null;if(cb)cb()});
+}
+
+function getHotspotBlock(s){
+  if(!s)return null;
+  for(var i=0;i<(s.blocks||[]).length;i++){
+    var b=s.blocks[i];
+    if((b.type==='hotspot'||b.type==='image')&&(b.image||b.src)&&b.regions&&b.regions.length)return b;
+  }
+  return null;
+}
+function getCorrectRegions(b){return(b&&b.regions||[]).filter(function(r){return r.correct})}
+function toPercent(b,c){
+  var isP=b.coordinate_system==='percent';
+  var isPx=!isP&&(c.x>100||c.y>100);
+  if(!isPx)return c;
+  var sw=b._imgW||(b.image_dimensions&&b.image_dimensions.w)||100;
+  var sh=b._imgH||(b.image_dimensions&&b.image_dimensions.h)||100;
+  return{x:c.x/sw*100,y:c.y/sh*100,w:c.w/sw*100,h:c.h/sh*100};
+}
+
+// Auto-play logic
+function startAuto(){
+  autoPlaying=true;gStep=0;gCompleted=false;gFeedback=null;gHitRegion=null;
+  render();
+  var s=getSlides()[idx];
+  var hb=getHotspotBlock(s);
+  if(!hb){autoPlaying=false;render();return}
+  var introUrl=hb.slide_narration_audio||s.audio||null;
+  playAudio(introUrl,function(){autoAdvance()});
+}
+function autoAdvance(){
+  if(!autoPlaying)return;
+  var s=getSlides()[idx];var hb=getHotspotBlock(s);
+  if(!hb){stopAuto();render();return}
+  var crs=getCorrectRegions(hb);
+  if(gStep>=crs.length){gCompleted=true;autoPlaying=false;render();return}
+  render();
+  var region=crs[gStep];
+  var regionAudio=region.audio_url||null;
+  playAudio(regionAudio,function(){
+    if(!autoPlaying)return;
+    gHitRegion=region.id;
+    gFeedback={text:region.feedback||'\\u2713',correct:true};
+    render();
+    autoTimer=setTimeout(function(){
+      if(!autoPlaying)return;
+      gStep++;gFeedback=null;gHitRegion=null;
+      if(gStep>=crs.length){gCompleted=true;autoPlaying=false}
+      render();
+    },800);
+  });
+}
+
+function getSlides(){return D.slides[lang]||[]}
 
 function render(){
-  const slides=D.slides[lang]||[];
-  const title=D.title[lang]||D.title['zh-TW']||'';
-  const desc=D.description[lang]||'';
-  const s=slides[idx];
+  var slides=getSlides();
+  var title=D.title[lang]||D.title['zh-TW']||'';
+  var s=slides[idx];
 
-  let topHtml='<div class="topbar"><h1>'+esc(title)+'</h1>';
+  var topHtml='<div class="topbar"><h1>'+esc(title)+'</h1>';
   if(langs.length>1){
     topHtml+='<select id="langSel">';
-    const ln={'zh-TW':'繁體中文','en':'English','vi':'Tiếng Việt'};
-    langs.forEach(l=>{topHtml+='<option value="'+l+'"'+(l===lang?' selected':'')+'>'+ln[l]+'</option>'});
+    var ln={'zh-TW':'\\u7e41\\u9ad4\\u4e2d\\u6587','en':'English','vi':'Ti\\u1ebfng Vi\\u1ec7t'};
+    langs.forEach(function(l){topHtml+='<option value="'+l+'"'+(l===lang?' selected':'')+'>'+ln[l]+'</option>'});
     topHtml+='</select>';
   }
+  topHtml+='<button id="muteBtn" class="'+(muted?'':'active')+'" title="'+(muted?'\\u53d6\\u6d88\\u975c\\u97f3':'\\u975c\\u97f3')+'">'+(muted?'\\ud83d\\udd07':'\\ud83d\\udd0a')+'</button>';
   topHtml+='<span class="badge">'+esc(D.settings.exportedBy||'')+'</span></div>';
 
-  let mainHtml='<div class="main">';
-  if(quizMode){
-    mainHtml+=renderQuiz();
-  } else if(s){
-    mainHtml+=renderSlide(s,idx);
+  var mainHtml='<div class="main">';
+  if(s&&s.lesson){
+    mainHtml+='<div style="font-size:11px;font-weight:600;color:#64748b;padding:0 4px">\\ud83d\\udcd6 '+esc(s.lesson)+'</div>';
   }
+  if(quizMode){mainHtml+=renderQuiz()}
+  else if(s){mainHtml+=renderSlide(s,idx)}
   mainHtml+='</div>';
 
-  const total=slides.length+(D.quiz[lang]?.length?1:0);
-  const cur=quizMode?total:idx+1;
-  let botHtml='<div class="bottom">';
-  botHtml+='<button id="prev" '+(cur<=1?'disabled':'')+'>◀ 上一頁</button>';
+  var total=slides.length+(D.quiz[lang]&&D.quiz[lang].length?1:0);
+  var cur=quizMode?total:idx+1;
+  var botHtml='<div class="bottom">';
+  botHtml+='<button id="prev" '+(cur<=1?'disabled':'')+'>\\u25c0</button>';
   botHtml+='<div class="bar"><div style="width:'+((cur/total)*100)+'%"></div></div>';
   botHtml+='<span class="counter">'+cur+' / '+total+'</span>';
-  botHtml+='<button id="next" '+(cur>=total?'disabled':'')+'>下一頁 ▶</button>';
+  botHtml+='<button id="next" '+(cur>=total?'disabled':'')+'>\\u25b6</button>';
   botHtml+='</div>';
 
   app.innerHTML=topHtml+mainHtml+botHtml;
 
-  // Events
-  const langSel=$('#langSel');
-  if(langSel) langSel.onchange=function(){lang=this.value;idx=0;quizMode=false;render()};
-  const prev=$('#prev'),next=$('#next');
-  if(prev) prev.onclick=()=>{if(quizMode){quizMode=false;idx=(D.slides[lang]||[]).length-1}else if(idx>0)idx--;render()};
-  if(next) next.onclick=()=>{const sl=D.slides[lang]||[];if(!quizMode&&idx<sl.length-1)idx++;else if(!quizMode&&idx===sl.length-1&&D.quiz[lang]?.length){quizMode=true}render()};
+  var langSel=$('#langSel');
+  if(langSel)langSel.onchange=function(){lang=this.value;idx=0;quizMode=false;resetGuided();render()};
+  var muteBtn=$('#muteBtn');
+  if(muteBtn)muteBtn.onclick=function(){muted=!muted;if(muted&&audio){audio.pause()}render()};
+  var prev=$('#prev'),next=$('#next');
+  if(prev)prev.onclick=function(){if(quizMode){quizMode=false;idx=getSlides().length-1}else if(idx>0)idx--;resetGuided();render();playSlideIntro()};
+  if(next)next.onclick=function(){var sl=getSlides();if(!quizMode&&idx<sl.length-1){idx++;resetGuided();render();playSlideIntro()}else if(!quizMode&&idx===sl.length-1&&D.quiz[lang]&&D.quiz[lang].length){quizMode=true;render()}};
+  var autoBtn=$('#autoPlayBtn');
+  if(autoBtn)autoBtn.onclick=function(){if(autoPlaying){stopAuto();render()}else{startAuto()}};
+  var resetBtn=$('#resetBtn');
+  if(resetBtn)resetBtn.onclick=function(){resetGuided();render()};
+}
+
+function playSlideIntro(){
+  var s=getSlides()[idx];if(!s)return;
+  var hb=getHotspotBlock(s);
+  if(hb){var u=hb.slide_narration_audio||s.audio||null;if(u)playAudio(u)}
+  else if(s.audio)playAudio(s.audio);
 }
 
 function renderSlide(s,i){
-  let h='<div class="slide-card">';
-  const blocks=s.blocks||[];
-  let hasImg=false,imgHtml='',infoHtml='';
-  // Collect instruction from hotspot/image block to avoid duplicate with text block
-  let hotspotInstruction='';
+  var h='<div class="slide-card">';
+  var blocks=s.blocks||[];
+  var hb=getHotspotBlock(s);
+  var hasImg=false,imgHtml='',infoHtml='';
+  var hotspotInstruction='';
 
-  for(const b of blocks){
+  for(var bi=0;bi<blocks.length;bi++){
+    var b=blocks[bi];
     if((b.type==='hotspot'||b.type==='image')&&(b.image||b.src)){
       hasImg=true;
       hotspotInstruction=b.instruction||'';
-      const imgSrc=b.image||b.src;
-      imgHtml='<div class="slide-img-wrap" data-slide="'+i+'"><img src="'+imgSrc+'" alt="">';
-      // Annotations SVG (user-drawn step numbers, circles, arrows)
-      // Only render SVG annotations if they're NOT already burned into the image
-      var hasAnnotations=b.annotations?.length>0 && !b.annotations_in_image;
-      if(hasAnnotations){
-        imgHtml+=renderAnnotationsSvg(b.annotations);
-      }
-      // Regions — interactive click areas
-      if(b.regions?.length){
-        // Only show correct region(s) as interactive
-        var correctRegs=b.regions.filter(function(r){return r.correct});
-        if(correctRegs.length>0){
-          // Phase 3A-1: Use coordinate_system if available; fallback to heuristic
-          var isPercent=b.coordinate_system==='percent';
-          var isPixel=!isPercent&&correctRegs.some(function(r){return r.coords.x>100||r.coords.y>100});
-          var sw=100,sh=100;
-          if(isPixel){sw=b._imgW||(b.image_dimensions&&b.image_dimensions.w)||100;sh=b._imgH||(b.image_dimensions&&b.image_dimensions.h)||100;}
-          imgHtml+='<div class="regions'+(hasAnnotations?' has-ann':'')+'">';
-          correctRegs.forEach((r,ri)=>{
-            var cx=r.coords.x/sw*100,cy=r.coords.y/sh*100,cw=r.coords.w/sw*100,ch=r.coords.h/sh*100;
-            imgHtml+='<div class="r" data-idx="'+ri+'" data-correct="1" data-feedback="'+encodeURIComponent(r.feedback||r.label||'')+'" style="left:'+cx.toFixed(2)+'%;top:'+cy.toFixed(2)+'%;width:'+cw.toFixed(2)+'%;height:'+ch.toFixed(2)+'%">'
-              +'<span class="tag">'+esc(r.label||'')+'</span></div>';
-          });
+      var imgSrc=b.image||b.src;
+      imgHtml='<div class="slide-img-wrap'+(gCompleted?' completed':'')+'" id="imgWrap" data-slide="'+i+'"><img src="'+imgSrc+'" alt="">';
+      var hasAnnotations=b.annotations&&b.annotations.length>0&&!b.annotations_in_image;
+      if(hasAnnotations)imgHtml+=renderAnnotationsSvg(b.annotations);
+      var correctRegs=getCorrectRegions(b);
+      if(correctRegs.length>0){
+        imgHtml+='<div class="regions">';
+        correctRegs.forEach(function(r,ri){
+          var c=toPercent(b,r.coords);
+          var cls='region-box';
+          if(gCompleted){cls+=' done'}
+          else if(ri===gStep){
+            cls+=' current';
+            if(gHitRegion===r.id&&gFeedback&&gFeedback.correct)cls+=' hit-ok';
+            else if(gHitRegion===r.id&&gFeedback&&!gFeedback.correct)cls+=' hit-bad';
+          }
+          else if(ri<gStep){cls+=' done'}
+          else{cls+=' dimmed'}
+          imgHtml+='<div class="'+cls+'" style="left:'+c.x.toFixed(2)+'%;top:'+c.y.toFixed(2)+'%;width:'+c.w.toFixed(2)+'%;height:'+c.h.toFixed(2)+'%">';
+          if(ri===gStep&&!gCompleted)imgHtml+='<span class="tag">'+esc(r.label||(ri+1+''))+'</span>';
           imgHtml+='</div>';
-        }
+          if((gHitRegion===r.id&&gFeedback&&gFeedback.correct)||ri<gStep||gCompleted){
+            imgHtml+='<div class="checkmark-overlay" style="left:'+c.x.toFixed(2)+'%;top:'+c.y.toFixed(2)+'%;width:'+c.w.toFixed(2)+'%;height:'+c.h.toFixed(2)+'%"><div class="checkmark-circle" style="width:32px;height:32px;font-size:18px">\\u2713</div></div>';
+          }
+        });
+        imgHtml+='</div>';
       }
       imgHtml+='</div>';
-      // Instruction — only in info panel
-      if(b.instruction){
-        infoHtml+='<div class="info-card"><div class="label">操作說明</div>'+simpleMarkdown(b.instruction)+'</div>';
-      }
     } else if(b.type==='text'&&b.content){
-      // Skip text block if its content is same as hotspot instruction (avoid duplicate)
-      // Text block from generate is always "## 步驟 N\\n\\n{instruction}" — check overlap
-      // We'll collect and compare later
       infoHtml+='<!--text:'+esc(b.content)+'-->';
     } else if(b.type==='callout'){
-      const v=b.variant||'tip';
-      const labels={tip:'提示',warning:'警告',note:'注意',important:'重要'};
-      infoHtml+='<div class="callout '+v+'"><strong>'+labels[v]+'：</strong>'+esc(b.content||'')+'</div>';
+      var v=b.variant||'tip';
+      var labels={tip:'\\u63d0\\u793a',warning:'\\u8b66\\u544a',note:'\\u6ce8\\u610f',important:'\\u91cd\\u8981'};
+      infoHtml+='<div class="callout '+v+'"><strong>'+(labels[v]||v)+'\\uff1a</strong>'+esc(b.content||'')+'</div>';
     } else if(b.type==='steps'&&b.items){
-      let st='<div class="info-card"><div class="label">操作步驟</div><ol style="padding-left:16px;margin:4px 0">';
-      b.items.forEach(it=>{st+='<li style="margin:4px 0"><strong>'+esc(it.title||'')+'</strong>'+(it.desc?' — '+esc(it.desc):'')+'</li>'});
+      var st='<div class="info-card"><div class="label">\\u64cd\\u4f5c\\u6b65\\u9a5f</div><ol style="padding-left:16px;margin:4px 0">';
+      b.items.forEach(function(it){st+='<li style="margin:4px 0"><strong>'+esc(it.title||'')+'</strong>'+(it.desc?' \\u2014 '+esc(it.desc):'')+'</li>'});
       st+='</ol></div>';
       infoHtml+=st;
     }
   }
 
-  // Remove text block HTML comments (we skip them when hotspot instruction exists to avoid duplicate)
-  if(hotspotInstruction){
-    infoHtml=infoHtml.replace(/<!--text:.*?-->/g,'');
-  } else {
-    // No hotspot instruction — convert text comments to real cards
-    infoHtml=infoHtml.replace(/<!--text:(.*?)-->/g,(m,txt)=>{
-      return '<div class="info-card"><div class="label">步驟說明</div>'+simpleMarkdown(decEsc(txt))+'</div>';
-    });
-  }
+  if(hotspotInstruction){infoHtml=infoHtml.replace(/<!--text:.*?-->/g,'')}
+  else{infoHtml=infoHtml.replace(/<!--text:(.*?)-->/g,function(m,txt){
+    return '<div class="info-card"><div class="label">\\u6b65\\u9a5f\\u8aaa\\u660e</div>'+simpleMarkdown(decEsc(txt))+'</div>';
+  })}
 
-  if(hasImg){
-    // Interaction hint
-    const hasCorrect=blocks.some(b=>b.regions?.some(r=>r.correct));
-    if(hasCorrect){
-      infoHtml+='<div class="info-card" style="border-color:#2563eb;background:#eff6ff"><div class="label" style="color:#2563eb">互動練習</div>點擊左側截圖中正確的操作位置</div>';
+  if(hasImg&&hb){
+    var correctRegs2=getCorrectRegions(hb);
+    var hasGuided=correctRegs2.length>0;
+
+    if(hb.instruction){
+      infoHtml+='<div class="info-card"><div class="label">\\u64cd\\u4f5c\\u8aaa\\u660e</div>'+simpleMarkdown(hb.instruction)+'</div>';
     }
-    // Feedback area
-    infoHtml+='<div id="fb-'+i+'" style="display:none" class="info-card"></div>';
-    h+='<div class="slide-content">'+imgHtml+'<div class="slide-info">'+infoHtml+'</div></div>';
-  } else {
-    // Text-only slide
-    for(const b of blocks){
-      if(b.type==='text') h+='<div class="text-block">'+simpleMarkdown(b.content||'')+'</div>';
-      else if(b.type==='callout'){
-        const v=b.variant||'tip';
-        h+='<div class="callout '+v+'"><strong>'+(v==='tip'?'提示':v==='warning'?'警告':'注意')+'：</strong>'+esc(b.content||'')+'</div>';
+
+    if(hasGuided){
+      infoHtml+='<div class="ctrl-bar">';
+      infoHtml+='<button class="ctrl-btn'+(autoPlaying?' auto-active':'')+'" id="autoPlayBtn">'+(autoPlaying?'\\u23f9 \\u505c\\u6b62':'\\u25b6 \\u81ea\\u52d5\\u5c0e\\u89bd')+'</button>';
+      if(gCompleted||gStep>0)infoHtml+='<button class="ctrl-btn" id="resetBtn">\\u21ba \\u91cd\\u4f86</button>';
+      infoHtml+='<span>\\u6b65\\u9a5f '+(gCompleted?correctRegs2.length:gStep+1)+'/'+correctRegs2.length+'</span>';
+      infoHtml+='</div>';
+    }
+
+    if(hasGuided&&!gCompleted){
+      var cur=correctRegs2[gStep];
+      if(cur){
+        var narr=autoPlaying?(cur.narration||cur.label||''):(cur.narration||'\\u8acb\\u9ede\\u64ca\\u300c'+(cur.label||'\\u76ee\\u6a19')+'\\u300d');
+        infoHtml+='<div class="narr-card'+(autoPlaying?' auto':'')+'">'
+          +'<span class="step-badge" style="background:'+(autoPlaying?'#22c55e':'#3b82f6')+'">'+(gStep+1)+'</span>'
+          +'<span style="font-size:11px;font-weight:600;color:'+(autoPlaying?'#22c55e':'#3b82f6')+'">'+(!autoPlaying?'\\u6b65\\u9a5f':'\\u5c0e\\u89bd')+' '+(gStep+1)+'/'+correctRegs2.length+'</span>'
+          +'<p style="font-size:12px;margin-top:6px;line-height:1.5;color:#1e293b">'+esc(narr)+'</p></div>';
       }
     }
+
+    if(gFeedback){
+      infoHtml+='<div class="fb-card '+(gFeedback.correct?'ok':'err')+'">'
+        +'<span>'+(gFeedback.correct?'\\u2705':'\\u274c')+'</span><span>'+esc(gFeedback.text)+'</span></div>';
+    }
+
+    if(gCompleted){
+      var cmsg=hb.completion_message||'\\u6240\\u6709\\u6b65\\u9a5f\\u5df2\\u5b8c\\u6210\\uff01';
+      infoHtml+='<div class="complete-card"><div class="msg">\\u2705 '+esc(cmsg)+'</div>'
+        +'<div style="margin-top:8px;display:flex;gap:8px;justify-content:center">'
+        +'<button class="ctrl-btn" id="resetBtn">\\u21ba \\u91cd\\u8a66</button>'
+        +'<button class="ctrl-btn" style="background:#22c55e;color:#fff" onclick="document.getElementById(\\x27next\\x27).click()">\\u4e0b\\u4e00\\u9801 \\u25b6</button>'
+        +'</div></div>';
+    }
+
+    if(hasGuided){
+      infoHtml+='<div class="info-card" style="padding:8px"><div class="label">\\u64cd\\u4f5c\\u6b65\\u9a5f</div>';
+      correctRegs2.forEach(function(r,ri){
+        var isDone=ri<gStep||gCompleted;
+        var isCur=ri===gStep&&!gCompleted;
+        infoHtml+='<div style="display:flex;align-items:center;gap:6px;padding:3px 4px;border-radius:4px;'
+          +(isCur?'background:rgba(59,130,246,.08)':'')+'"><span class="step-dot'
+          +(isDone?' done':isCur?' current':' pending')+'" style="width:16px;height:16px;font-size:8px">'
+          +(isDone?'\\u2713':(ri+1))+'</span>'
+          +'<span style="font-size:11px;color:'+(isCur?'#3b82f6':isDone?'#64748b':'#94a3b8')
+          +';font-weight:'+(isCur?600:400)
+          +(isDone&&!isCur?';text-decoration:line-through':'')
+          +'">'+esc(r.label||'\\u6b65\\u9a5f '+(ri+1))+'</span></div>';
+      });
+      infoHtml+='</div>';
+    }
+
+    h+='<div class="slide-content">'+imgHtml+'<div class="slide-info">'+infoHtml+'</div></div>';
+
+    if(hasGuided&&correctRegs2.length>1){
+      h+='<div class="step-dots">';
+      correctRegs2.forEach(function(r,ri){
+        var isDone=ri<gStep||gCompleted;
+        var isCur=ri===gStep&&!gCompleted;
+        if(ri>0)h+='<div class="step-line'+(ri<=gStep||gCompleted?' done':'')+'"></div>';
+        h+='<div class="step-dot'+(isDone?' done':isCur?' current':' pending')+'">'+
+          (isDone?'\\u2713':(ri+1))+'</div>';
+      });
+      h+='</div>';
+    }
+  } else if(hasImg){
+    if(hotspotInstruction)infoHtml+='<div class="info-card"><div class="label">\\u8aaa\\u660e</div>'+simpleMarkdown(hotspotInstruction)+'</div>';
+    h+='<div class="slide-content">'+imgHtml+'<div class="slide-info">'+infoHtml+'</div></div>';
+  } else {
+    for(var ti=0;ti<blocks.length;ti++){
+      var tb=blocks[ti];
+      if(tb.type==='text')h+='<div class="text-block">'+simpleMarkdown(tb.content||'')+'</div>';
+      else if(tb.type==='callout'){var tv=tb.variant||'tip';h+='<div class="callout '+tv+'"><strong>'+(tv==='tip'?'\\u63d0\\u793a':tv==='warning'?'\\u8b66\\u544a':'\\u6ce8\\u610f')+'\\uff1a</strong>'+esc(tb.content||'')+'</div>'}
+    }
   }
 
-  // Audio
-  if(s.audio){
-    h+='<div style="padding:8px 16px"><audio controls src="'+s.audio+'" style="height:32px;width:100%"></audio></div>';
-  }
+  if(s.audio){h+='<div style="padding:8px 16px"><audio controls src="'+s.audio+'" style="height:32px;width:100%"></audio></div>'}
 
   h+='</div>';
   return h;
 }
 
 function renderAnnotationsSvg(anns){
-  let svg='<svg class="ann-svg" viewBox="0 0 100 100" preserveAspectRatio="xMidYMid meet"><defs>'
+  var svg='<svg class="ann-svg" viewBox="0 0 100 100" preserveAspectRatio="xMidYMid meet"><defs>'
     +'<marker id="ah" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto"><polygon points="0 0,10 3.5,0 7" fill="currentColor"/></marker></defs>';
-  anns.forEach(a=>{
+  anns.forEach(function(a){
     if(a.visible===false)return;
-    const c=a.color||'#ef4444';
-    const sw=((a.strokeWidth||3)/3)*0.3;
+    var c=a.color||'#ef4444';
+    var sw=((a.strokeWidth||3)/3)*0.3;
     switch(a.type){
       case'number':
         svg+='<circle cx="'+a.coords.x+'" cy="'+a.coords.y+'" r="2.2" fill="'+c+'" stroke="#fff" stroke-width="0.15"/>';
         svg+='<text x="'+a.coords.x+'" y="'+a.coords.y+'" fill="#fff" font-size="2" text-anchor="middle" dominant-baseline="central" font-weight="bold">'+a.stepNumber+'</text>';
-        if(a.label) svg+='<text x="'+(a.coords.x+3.5)+'" y="'+(a.coords.y+0.5)+'" fill="'+c+'" font-size="1.6" font-weight="600" stroke="#000" stroke-width="0.1" paint-order="stroke">'+esc(a.label)+'</text>';
+        if(a.label)svg+='<text x="'+(a.coords.x+3.5)+'" y="'+(a.coords.y+0.5)+'" fill="'+c+'" font-size="1.6" font-weight="600" stroke="#000" stroke-width="0.1" paint-order="stroke">'+esc(a.label)+'</text>';
         break;
-      case'circle':
-        svg+='<ellipse cx="'+a.coords.x+'" cy="'+a.coords.y+'" rx="'+(a.coords.rx||5)+'" ry="'+(a.coords.ry||5)+'" fill="none" stroke="'+c+'" stroke-width="'+sw+'"/>';
-        break;
-      case'rect':
-        svg+='<rect x="'+a.coords.x+'" y="'+a.coords.y+'" width="'+(a.coords.w||10)+'" height="'+(a.coords.h||5)+'" fill="none" stroke="'+c+'" stroke-width="'+sw+'"/>';
-        break;
-      case'arrow':
-        svg+='<g style="color:'+c+'"><line x1="'+a.coords.x+'" y1="'+a.coords.y+'" x2="'+(a.coords.x2||a.coords.x+10)+'" y2="'+(a.coords.y2||a.coords.y)+'" stroke="'+c+'" stroke-width="'+sw+'" marker-end="url(#ah)"/></g>';
-        break;
-      case'text':
-        svg+='<text x="'+a.coords.x+'" y="'+a.coords.y+'" fill="'+c+'" font-size="2" font-weight="600" stroke="#000" stroke-width="0.1" paint-order="stroke">'+esc(a.label||'')+'</text>';
-        break;
+      case'circle':svg+='<ellipse cx="'+a.coords.x+'" cy="'+a.coords.y+'" rx="'+(a.coords.rx||5)+'" ry="'+(a.coords.ry||5)+'" fill="none" stroke="'+c+'" stroke-width="'+sw+'"/>';break;
+      case'rect':svg+='<rect x="'+a.coords.x+'" y="'+a.coords.y+'" width="'+(a.coords.w||10)+'" height="'+(a.coords.h||5)+'" fill="none" stroke="'+c+'" stroke-width="'+sw+'"/>';break;
+      case'arrow':svg+='<g style="color:'+c+'"><line x1="'+a.coords.x+'" y1="'+a.coords.y+'" x2="'+(a.coords.x2||a.coords.x+10)+'" y2="'+(a.coords.y2||a.coords.y)+'" stroke="'+c+'" stroke-width="'+sw+'" marker-end="url(#ah)"/></g>';break;
+      case'text':svg+='<text x="'+a.coords.x+'" y="'+a.coords.y+'" fill="'+c+'" font-size="2" font-weight="600" stroke="#000" stroke-width="0.1" paint-order="stroke">'+esc(a.label||'')+'</text>';break;
       case'freehand':
-        if(a.coords.points?.length>1){
-          let d=a.coords.points.map((p,i)=>(i?'L':'M')+' '+p.x+' '+p.y).join(' ');
+        if(a.coords.points&&a.coords.points.length>1){
+          var d=a.coords.points.map(function(p,pi){return(pi?'L':'M')+' '+p.x+' '+p.y}).join(' ');
           svg+='<path d="'+d+'" fill="none" stroke="'+c+'" stroke-width="'+sw+'" stroke-linecap="round"/>';
         }
         break;
@@ -5286,37 +5525,33 @@ function renderAnnotationsSvg(anns){
 }
 
 function renderQuiz(){
-  const qs=D.quiz[lang]||[];
-  if(!qs.length) return '<div class="quiz-wrap"><p>無測驗題</p></div>';
-  let h='<div class="quiz-wrap"><h3 style="margin-bottom:16px;font-size:16px">測驗</h3>';
-  qs.forEach((q,qi)=>{
-    let qd={};
-    try{qd=JSON.parse(q.question_json)}catch{}
+  var qs=D.quiz[lang]||[];
+  if(!qs.length)return'<div class="quiz-wrap"><p>\\u7121\\u6e2c\\u9a57\\u984c</p></div>';
+  var h='<div class="quiz-wrap"><h3 style="margin-bottom:16px;font-size:16px">\\u6e2c\\u9a57</h3>';
+  qs.forEach(function(q,qi){
+    var qd={};try{qd=JSON.parse(q.question_json)}catch(e){}
     h+='<div class="quiz-q"><h4>'+(qi+1)+'. '+esc(qd.question||qd.text||'')+'</h4>';
-    (qd.options||[]).forEach((opt,oi)=>{
-      const sel=quizAnswers[qi]===oi;
-      let cls=sel?'selected':'';
-      if(quizSubmitted){cls=opt.correct?'correct':(sel?'wrong':'');}
+    (qd.options||[]).forEach(function(opt,oi){
+      var sel=quizAnswers[qi]===oi;
+      var cls=sel?'selected':'';
+      if(quizSubmitted){cls=opt.correct?'correct':(sel?'wrong':'')}
       h+='<label class="'+cls+'" data-q="'+qi+'" data-o="'+oi+'"><input type="radio" name="q'+qi+'" style="margin-right:6px"'+(sel?' checked':'')+'>'+esc(typeof opt==='string'?opt:opt.text||'')+'</label>';
     });
-    if(quizSubmitted&&q.explanation){
-      h+='<div style="margin-top:8px;font-size:12px;color:#64748b">💡 '+esc(q.explanation)+'</div>';
-    }
+    if(quizSubmitted&&q.explanation){h+='<div style="margin-top:8px;font-size:12px;color:#64748b">\\ud83d\\udca1 '+esc(q.explanation)+'</div>'}
     h+='</div>';
   });
   if(!quizSubmitted){
-    h+='<button id="submitQuiz" style="background:#2563eb;color:#fff;border:none;padding:10px 24px;border-radius:8px;font-size:14px;cursor:pointer">提交答案</button>';
+    h+='<button id="submitQuiz" style="background:#2563eb;color:#fff;border:none;padding:10px 24px;border-radius:8px;font-size:14px;cursor:pointer">\\u63d0\\u4ea4\\u7b54\\u6848</button>';
   } else {
-    // Score
-    let score=0,total=0;
-    qs.forEach((q,qi)=>{
-      let qd={};try{qd=JSON.parse(q.question_json)}catch{}
-      const pts=q.points||10;total+=pts;
-      const selOpt=(qd.options||[])[quizAnswers[qi]];
+    var score=0,total=0;
+    qs.forEach(function(q,qi){
+      var qd={};try{qd=JSON.parse(q.question_json)}catch(e){}
+      var pts=q.points||10;total+=pts;
+      var selOpt=(qd.options||[])[quizAnswers[qi]];
       if(selOpt&&(selOpt.correct||selOpt.is_correct))score+=pts;
     });
-    const pass=score>=D.settings.passScore*(total/100);
-    h+='<div class="quiz-result '+(pass?'pass':'fail')+'">'+(pass?'✅ 通過':'❌ 未通過')+' — '+score+'/'+total+' 分</div>';
+    var pass=score>=D.settings.passScore*(total/100);
+    h+='<div class="quiz-result '+(pass?'pass':'fail')+'">'+(pass?'\\u2705 \\u901a\\u904e':'\\u274c \\u672a\\u901a\\u904e')+' \\u2014 '+score+'/'+total+' \\u5206</div>';
   }
   h+='</div>';
   return h;
@@ -5327,7 +5562,7 @@ function decEsc(s){return String(s||'').replace(/&amp;/g,'&').replace(/&lt;/g,'<
 function simpleMarkdown(s){
   var t=esc(s);
   t=t.split(String.fromCharCode(10)).join('<br>');
-  t=t.replace(new RegExp('([.:' + String.fromCharCode(12290) + '])\\\\s*' + String.fromCharCode(27493,39519),'g'),'$1<br>' + String.fromCharCode(27493,39519));
+  t=t.replace(new RegExp('([.:'+String.fromCharCode(12290)+'])\\\\s*'+String.fromCharCode(27493,39519),'g'),'$1<br>'+String.fromCharCode(27493,39519));
   t=t.replace(new RegExp('^## (.+)$','gm'),'<h2 style="font-size:15px;margin:6px 0">$1</h2>');
   t=t.replace(new RegExp('^### (.+)$','gm'),'<h3 style="font-size:14px;margin:4px 0">$1</h3>');
   t=t.replace(new RegExp('[*][*](.+?)[*][*]','g'),'<strong>$1</strong>');
@@ -5339,49 +5574,94 @@ function simpleMarkdown(s){
 
 // Init
 render();
+// Play intro audio on first slide
+(function(){
+  var s=getSlides()[0];if(!s)return;
+  var hb=getHotspotBlock(s);
+  if(hb){var u=hb.slide_narration_audio||s.audio||null;if(u&&!muted)playAudio(u)}
+  else if(s.audio&&!muted)playAudio(s.audio);
+})();
 
 // Key nav
-document.addEventListener('keydown',e=>{
-  if(e.key==='ArrowRight'||e.key===' '){e.preventDefault();$('#next')?.click()}
-  if(e.key==='ArrowLeft'){e.preventDefault();$('#prev')?.click()}
+document.addEventListener('keydown',function(e){
+  if(e.key==='ArrowRight'||e.key===' '){e.preventDefault();var nb=$('#next');if(nb)nb.click()}
+  if(e.key==='ArrowLeft'){e.preventDefault();var pb=$('#prev');if(pb)pb.click()}
 });
 
-// Hotspot region click interaction
-document.addEventListener('click',e=>{
-  const region=e.target.closest('.regions .r');
-  if(region){
-    const slideWrap=region.closest('.slide-img-wrap');
-    const si=slideWrap?slideWrap.dataset.slide:'0';
-    const fb=document.getElementById('fb-'+si);
-    const isCorrect=region.dataset.correct==='1';
-    const feedbackText=decodeURIComponent(region.dataset.feedback||'');
-    // Visual feedback
-    region.className='r '+(isCorrect?'correct-hit':'wrong-hit');
-    setTimeout(()=>{region.className='r'},800);
-    // Show feedback
-    if(fb){
-      fb.style.display='block';
-      fb.style.borderColor=isCorrect?'#22c55e':'#ef4444';
-      fb.style.background=isCorrect?'#f0fdf4':'#fef2f2';
-      fb.style.color=isCorrect?'#16a34a':'#dc2626';
-      fb.innerHTML=(isCorrect?'✅ ':'❌ ')+esc(feedbackText||(isCorrect?'正確！':'再試一次'));
+// Click interaction
+document.addEventListener('click',function(e){
+  var imgWrap=e.target.closest&&e.target.closest('#imgWrap');
+  if(imgWrap&&!gCompleted&&!autoPlaying){
+    var s=getSlides()[idx];
+    var hb=getHotspotBlock(s);
+    if(!hb)return;
+    var crs=getCorrectRegions(hb);
+    if(crs.length===0)return;
+    var rect=imgWrap.getBoundingClientRect();
+    var x=((e.clientX-rect.left)/rect.width)*100;
+    var y=((e.clientY-rect.top)/rect.height)*100;
+
+    var hit=null;
+    crs.forEach(function(r,ri){
+      var c=toPercent(hb,r.coords);
+      if(x>=c.x&&x<=c.x+c.w&&y>=c.y&&y<=c.y+c.h)hit={r:r,i:ri};
+    });
+
+    gAttempts++;
+
+    if(!hit){
+      gStepAttempts++;
+      var hints=['\\u518d\\u8a66\\u4e00\\u6b21','\\u4e0d\\u662f\\u9019\\u88e1\\uff0c\\u8acb\\u4ed4\\u7d30\\u770b\\u770b','\\u63d0\\u793a\\uff1a\\u6ce8\\u610f\\u6a19\\u8a18\\u7684\\u4f4d\\u7f6e'];
+      gFeedback={text:hints[Math.min(gStepAttempts-1,hints.length-1)],correct:false};
+      gHitRegion=null;
+      render();
+      return;
+    }
+
+    if(hit.i===gStep){
+      if(audio){audio.pause();audio.currentTime=0}
+      gFeedback={text:hit.r.feedback||'\\u6b63\\u78ba\\uff01',correct:true};
+      gHitRegion=hit.r.id;
+      render();
+      setTimeout(function(){
+        gStep++;gFeedback=null;gHitRegion=null;gStepAttempts=0;
+        if(gStep>=crs.length){
+          gCompleted=true;
+          render();
+        } else {
+          render();
+          var nextR=crs[gStep];
+          if(nextR&&nextR.audio_url)playAudio(nextR.audio_url);
+        }
+      },1200);
+    } else {
+      gStepAttempts++;
+      var target=crs[gStep];
+      if(gStepAttempts>=3&&target){
+        gFeedback={text:'\\u63d0\\u793a\\uff1a\\u8acb\\u627e\\u5230\\u300c'+(target.label||'\\u76ee\\u6a19')+'\\u300d',correct:false};
+      } else {
+        gFeedback={text:hit.r.feedback_wrong||hit.r.feedback||'\\u4e0d\\u662f\\u9019\\u500b\\uff0c\\u518d\\u8a66\\u8a66',correct:false};
+      }
+      gHitRegion=hit.r.id;
+      render();
+      setTimeout(function(){gHitRegion=null;render()},600);
     }
     return;
   }
 
-  // Quiz answer selection (event delegation)
-  const label=e.target.closest('label[data-q]');
+  var label=e.target.closest&&e.target.closest('label[data-q]');
   if(label&&!quizSubmitted){
     quizAnswers[label.dataset.q]=parseInt(label.dataset.o);
     render();
   }
-  if(e.target.id==='submitQuiz'){quizSubmitted=true;render();}
+  if(e.target.id==='submitQuiz'){quizSubmitted=true;render()}
 });
 })();
 </script>
 </body>
 </html>`;
 }
+
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Phase 3A: AI Re-analyze a single slide

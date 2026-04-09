@@ -307,7 +307,7 @@ export default function CourseEditor() {
             </button>
           )}
           {!isNew && canEditThis && (
-            <ExportButton courseId={Number(id)} />
+            <ExportButton courseId={Number(id)} lessons={lessons} />
           )}
           {!isNew && canEditThis && (
             <button onClick={() => {
@@ -1306,7 +1306,7 @@ function TrainingAISettings() {
 // Phase 2F: HTML5 Export Button
 // ═══════════════════════════════════════════════════════════════════════════════
 
-function ExportButton({ courseId }: { courseId: number }) {
+function ExportButton({ courseId, lessons }: { courseId: number; lessons: { id: number; title: string }[] }) {
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)
   const [exporting, setExporting] = useState(false)
@@ -1314,15 +1314,29 @@ function ExportButton({ courseId }: { courseId: number }) {
   const [includeQuiz, setIncludeQuiz] = useState(true)
   const [includeAudio, setIncludeAudio] = useState(true)
   const [includeAnnotations, setIncludeAnnotations] = useState(true)
+  const [selectedLessons, setSelectedLessons] = useState<number[]>(() => lessons.map(l => l.id))
+
+  // Sync selectedLessons when lessons change
+  useEffect(() => {
+    setSelectedLessons(lessons.map(l => l.id))
+  }, [lessons.length])
+
+  const toggleLesson = (id: number) => {
+    setSelectedLessons(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])
+  }
+  const allSelected = selectedLessons.length === lessons.length
+  const toggleAll = () => setSelectedLessons(allSelected ? [] : lessons.map(l => l.id))
 
   const doExport = async () => {
+    if (selectedLessons.length === 0) return
     try {
       setExporting(true)
       const res = await api.post(`/training/courses/${courseId}/export`, {
         languages: langs,
         include_quiz: includeQuiz,
         include_audio: includeAudio,
-        include_annotations: includeAnnotations
+        include_annotations: includeAnnotations,
+        lesson_ids: selectedLessons.length === lessons.length ? undefined : selectedLessons
       }, { timeout: 120000 })
 
       if (res.data.download_url) {
@@ -1375,6 +1389,26 @@ function ExportButton({ courseId }: { courseId: number }) {
             ))}
           </div>
 
+          {/* Lesson selection */}
+          {lessons.length > 0 && (
+            <div className="space-y-1">
+              <div className="flex items-center justify-between">
+                <div className="text-[10px] font-medium" style={{ color: 'var(--t-text-muted)' }}>{t('training.selectLessons')}</div>
+                <button onClick={toggleAll} className="text-[10px]" style={{ color: 'var(--t-accent)' }}>
+                  {allSelected ? t('training.deselectAll') : t('training.selectAll')}
+                </button>
+              </div>
+              <div className="max-h-32 overflow-y-auto space-y-0.5">
+                {lessons.map((l, i) => (
+                  <label key={l.id} className="flex items-center gap-2 text-[11px] cursor-pointer" style={{ color: 'var(--t-text-secondary)' }}>
+                    <input type="checkbox" checked={selectedLessons.includes(l.id)} onChange={() => toggleLesson(l.id)} className="rounded" />
+                    <span className="truncate">{i + 1}. {l.title}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Options */}
           <div className="space-y-1">
             <div className="text-[10px] font-medium" style={{ color: 'var(--t-text-muted)' }}>{t('training.exportOptions')}</div>
@@ -1392,7 +1426,7 @@ function ExportButton({ courseId }: { courseId: number }) {
             </label>
           </div>
 
-          <button onClick={doExport} disabled={exporting || langs.length === 0}
+          <button onClick={doExport} disabled={exporting || langs.length === 0 || selectedLessons.length === 0}
             className="w-full flex items-center justify-center gap-1.5 text-xs text-white py-2 rounded-lg transition disabled:opacity-50"
             style={{ backgroundColor: 'var(--t-accent-bg)' }}>
             {exporting ? <><Loader2 size={12} className="animate-spin" /> {t('training.exporting')}</> : <><Download size={12} /> {t('training.exportHtml5')}</>}
