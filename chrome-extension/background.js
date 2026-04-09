@@ -8,6 +8,18 @@ let stepCounter = 0;
 let lastStepCount = 0;
 let isRecording = false;
 let recentScreenshots = []; // Store thumbnails for popup preview
+let keepAliveTimer = null;  // Token keep-alive timer
+
+// ── Persist recording state to survive service worker restarts ──
+function persistRecordingState() {
+  chrome.storage.local.set({
+    _isRecording: isRecording,
+    _currentSessionId: currentSessionId,
+    _stepCounter: stepCounter,
+    lastSessionId: lastSessionId || currentSessionId,
+    lastStepCount: isRecording ? stepCounter : lastStepCount,
+  });
+}
 
 // Listen for messages from popup and content script
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
@@ -35,7 +47,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     stepCounter = 0;
     isRecording = true;
     recentScreenshots = [];
-    chrome.storage.local.set({ lastSessionId: msg.sessionId, lastStepCount: 0 });
+    persistRecordingState();
+    startKeepAlive();
     updateBadge();
     // Notify all tabs
     chrome.tabs.query({}, tabs => {
@@ -52,8 +65,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     lastStepCount = stepCounter;
     isRecording = false;
     currentSessionId = null;
-    // Persist lastSessionId so it survives service worker restart
-    chrome.storage.local.set({ lastSessionId: sid, lastStepCount: stepCounter });
+    stopKeepAlive();
+    persistRecordingState();
     updateBadge();
     chrome.tabs.query({}, tabs => {
       tabs.forEach(tab => {
@@ -76,6 +89,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === 'USER_ACTION' && isRecording && currentSessionId) {
     stepCounter++;
     const currentStep = stepCounter;
+    persistRecordingState();
     console.log(`[Recorder] Action: ${msg.action}, step ${currentStep}, uploading to ${serverUrl}`);
     // Capture screenshot of the active tab
     chrome.tabs.captureVisibleTab(null, { format: 'png' }, async (dataUrl) => {
@@ -163,6 +177,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     globalThis._lastAnnotatedUpload = Date.now();
     stepCounter++;
     const currentStep = stepCounter;
+    persistRecordingState();
     console.log(`[Recorder] ANNOTATED_SCREENSHOT step ${currentStep}, annotations: ${(msg.annotations || []).length}`);
 
     createThumbnail(msg.screenshot_raw, (thumbUrl) => {
@@ -224,6 +239,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === 'MANUAL_SCREENSHOT' && isRecording && currentSessionId) {
     stepCounter++;
     const currentStep = stepCounter;
+    persistRecordingState();
     console.log(`[Recorder] MANUAL_SCREENSHOT step ${currentStep}, serverUrl="${serverUrl}", hasToken=${!!serverToken}, sessionId=${currentSessionId}`);
 
     // Hide badge before screenshot, capture, then restore
@@ -299,6 +315,31 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   return true; // async sendResponse
 });
 
+// ── Chrome Commands (keyboard shortcuts from manifest) ──
+chrome.commands.onCommand.addListener((command) => {
+  if (!isRecording || !currentSessionId) return;
+  chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+    if (!tabs[0]?.id) return;
+    if (command === 'take-screenshot') {
+      chrome.tabs.sendMessage(tabs[0].id, { type: 'HIDE_BADGE' }).catch(() => {});
+      setTimeout(() => {
+        chrome.tabs.captureVisibleTab(null, { format: 'png' }, (dataUrl) => {
+          chrome.tabs.sendMessage(tabs[0].id, { type: 'SHOW_BADGE' }).catch(() => {});
+          if (chrome.runtime.lastError || !dataUrl) return;
+          chrome.tabs.sendMessage(tabs[0].id, {
+            type: 'SCREENSHOT_FOR_ANNOTATION',
+            screenshot: dataUrl,
+            captureMode: 'full'
+          }).catch(() => {});
+        });
+      }, 150);
+    } else if (command === 'take-screenshot-direct') {
+      // Direct upload without annotation
+      chrome.tabs.sendMessage(tabs[0].id, { type: 'MANUAL_SCREENSHOT' }).catch(() => {});
+    }
+  });
+});
+
 // Update badge with step count
 function updateBadge() {
   if (isRecording) {
@@ -334,10 +375,75 @@ async function tryRelogin() {
   } catch (e) { console.error('[Recorder] Auto re-login failed:', e.message); }
 }
 
-// Restore config on startup
-chrome.storage.local.get(['serverUrl', 'serverToken', 'lastSessionId', 'lastStepCount'], (data) => {
+// Restore config + recording state on startup (survives service worker restart)
+chrome.storage.local.get([
+  'serverUrl', 'serverToken', 'lastSessionId', 'lastStepCount',
+  '_isRecording', '_currentSessionId', '_stepCounter'
+], (data) => {
   if (data.serverUrl) serverUrl = data.serverUrl;
   if (data.serverToken) serverToken = data.serverToken;
   if (data.lastSessionId) lastSessionId = data.lastSessionId;
   if (data.lastStepCount) lastStepCount = data.lastStepCount;
+
+  // Restore active recording session
+  if (data._isRecording && data._currentSessionId) {
+    isRecording = true;
+    currentSessionId = data._currentSessionId;
+    stepCounter = data._stepCounter || 0;
+    lastSessionId = data._currentSessionId;
+    updateBadge();
+    startKeepAlive();
+    console.log(`[Recorder] Restored recording session: ${currentSessionId}, step ${stepCounter}`);
+  }
 });
+
+// ── Token keep-alive: prevent server token expiry during long recording ──
+// Sends a lightweight API call every 10 minutes to trigger sliding expiration
+function startKeepAlive() {
+  stopKeepAlive();
+  keepAliveTimer = setInterval(async () => {
+    if (!serverUrl || !serverToken) return;
+    try {
+      const res = await fetch(`${serverUrl}/api/auth/user-info`, {
+        headers: { 'Authorization': `Bearer ${serverToken}` }
+      });
+      if (res.status === 401) {
+        console.warn('[Recorder] Keep-alive: token expired, attempting re-login...');
+        await tryRelogin();
+      } else {
+        console.log('[Recorder] Keep-alive OK');
+      }
+    } catch (e) {
+      console.warn('[Recorder] Keep-alive failed:', e.message);
+    }
+  }, 10 * 60 * 1000); // every 10 minutes
+}
+
+function stopKeepAlive() {
+  if (keepAliveTimer) { clearInterval(keepAliveTimer); keepAliveTimer = null; }
+}
+
+// ── Keep service worker alive during recording ──
+// Chrome MV3 kills service workers after ~30s idle. Use chrome.alarms as a heartbeat.
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === 'recording-keepalive') {
+    // Just waking up the service worker is enough — the alarm handler runs in SW context
+    console.log('[Recorder] Alarm keepalive tick, isRecording:', isRecording);
+    if (!isRecording) {
+      chrome.alarms.clear('recording-keepalive');
+    }
+  }
+});
+
+// Start/stop the alarm-based keepalive alongside recording
+const _origStartKeepAlive = startKeepAlive;
+startKeepAlive = function() {
+  _origStartKeepAlive();
+  // Create a periodic alarm to keep SW alive (minimum interval: 0.5 min in MV3)
+  chrome.alarms.create('recording-keepalive', { periodInMinutes: 0.5 });
+};
+const _origStopKeepAlive = stopKeepAlive;
+stopKeepAlive = function() {
+  _origStopKeepAlive();
+  chrome.alarms.clear('recording-keepalive');
+};

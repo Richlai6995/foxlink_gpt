@@ -1,13 +1,14 @@
 {
   "manifest_version": 3,
   "name": "FOXLINK GPT 教育訓練錄製工具",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "錄製系統操作步驟，AI 自動生成互動教材",
   "permissions": [
     "activeTab",
     "tabs",
     "scripting",
-    "storage"
+    "storage",
+    "alarms"
   ],
   "host_permissions": ["<all_urls>"],
   "background": {
@@ -32,5 +33,21 @@
     "16": "icons/icon16.png",
     "48": "icons/icon48.png",
     "128": "icons/icon128.png"
+  },
+  "commands": {
+    "take-screenshot": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+S",
+        "mac": "Command+Shift+S"
+      },
+      "description": "截圖（開啟標註）"
+    },
+    "take-screenshot-direct": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+D",
+        "mac": "Command+Shift+D"
+      },
+      "description": "截圖（直接上傳）"
+    }
   }
 }

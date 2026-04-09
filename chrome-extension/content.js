@@ -199,7 +199,7 @@ function startAnnotationMode(screenshotDataUrl) {
   annotationActive = true;
 
   // State
-  let currentTool = 'number'; // number|circle|rect|arrow|text|freehand|mosaic
+  let currentTool = 'number'; // move|number|circle|rect|arrow|text|freehand|mosaic
   let currentColor = '#ef4444';
   let strokeWidth = 3;
   let stepCounter = 0;
@@ -208,6 +208,11 @@ function startAnnotationMode(screenshotDataUrl) {
   let isDrawing = false;
   let startPoint = null;
   let freehandPoints = [];
+
+  // Move tool state
+  let selectedAnnotation = null; // annotation being dragged
+  let moveStartPct = null;       // drag start in % coords
+  let _lastMousePt = null;       // track cursor for delete key
 
   // ── 1. Create overlay container ──
   const overlay = document.createElement('div');
@@ -229,6 +234,7 @@ function startAnnotationMode(screenshotDataUrl) {
   `;
 
   const tools = [
+    { id: 'move',     icon: '✥', tip: '移動標記 (V)' },
     { id: 'number',   icon: '①', tip: '步驟編號' },
     { id: 'circle',   icon: '◯', tip: '圓圈' },
     { id: 'rect',     icon: '▭', tip: '矩形框' },
@@ -485,7 +491,7 @@ function startAnnotationMode(screenshotDataUrl) {
       btn.style.borderColor = k === id ? '#3b82f6' : 'transparent';
       btn.style.background = k === id ? 'rgba(59,130,246,0.3)' : 'rgba(255,255,255,0.1)';
     });
-    canvas.style.cursor = id === 'text' ? 'text' : 'crosshair';
+    canvas.style.cursor = id === 'move' ? 'default' : id === 'text' ? 'text' : 'crosshair';
   }
 
   function selectColor(hex) {
@@ -536,6 +542,92 @@ function startAnnotationMode(screenshotDataUrl) {
 
   function getCtx() {
     return canvas.getContext('2d');
+  }
+
+  // ── 6b. Hit-test: find annotation under cursor (for move tool) ──
+  function hitTest(px, py) {
+    // px, py in canvas pixel coords — convert to pct
+    const xPct = toPct(px, true);
+    const yPct = toPct(py, false);
+    // Search in reverse order (top-most first)
+    for (let i = annotations.length - 1; i >= 0; i--) {
+      const a = annotations[i];
+      const c = a.coords;
+      switch (a.type) {
+        case 'number': {
+          const rPct = toPct(18, true); // slightly larger hit area than visual
+          if (Math.abs(xPct - c.x) < rPct && Math.abs(yPct - c.y) < toPct(18, false)) return a;
+          break;
+        }
+        case 'circle': {
+          // Point inside ellipse: ((x-cx)/rx)^2 + ((y-cy)/ry)^2 <= 1
+          const dx = (xPct - c.x) / (Math.abs(c.rx) + 1);
+          const dy = (yPct - c.y) / (Math.abs(c.ry) + 1);
+          if (dx * dx + dy * dy <= 1.3) return a; // 1.3 = generous hit
+          break;
+        }
+        case 'rect':
+        case 'mosaic': {
+          const x1 = Math.min(c.x, c.x + c.w), x2 = Math.max(c.x, c.x + c.w);
+          const y1 = Math.min(c.y, c.y + c.h), y2 = Math.max(c.y, c.y + c.h);
+          if (xPct >= x1 && xPct <= x2 && yPct >= y1 && yPct <= y2) return a;
+          break;
+        }
+        case 'arrow': {
+          // Distance from point to line segment
+          const dist = pointToSegDist(xPct, yPct, c.x, c.y, c.x2, c.y2);
+          if (dist < 2.5) return a; // 2.5% tolerance
+          break;
+        }
+        case 'text': {
+          // Approximate bounding box from text position
+          const fontSize = (a.strokeWidth || 3) * 5 + 8;
+          const wPct = toPct(fontSize * (a.label || '').length * 0.6, true);
+          const hPct = toPct(fontSize, false);
+          if (xPct >= c.x - 1 && xPct <= c.x + wPct + 1 && yPct >= c.y - hPct && yPct <= c.y + 1) return a;
+          break;
+        }
+        case 'freehand': {
+          if (c.points) {
+            for (const p of c.points) {
+              if (Math.abs(xPct - p.x) < 1.5 && Math.abs(yPct - p.y) < 1.5) return a;
+            }
+          }
+          break;
+        }
+      }
+    }
+    return null;
+  }
+
+  function pointToSegDist(px, py, x1, y1, x2, y2) {
+    const dx = x2 - x1, dy = y2 - y1;
+    const lenSq = dx * dx + dy * dy;
+    if (lenSq === 0) return Math.sqrt((px - x1) ** 2 + (py - y1) ** 2);
+    let t = ((px - x1) * dx + (py - y1) * dy) / lenSq;
+    t = Math.max(0, Math.min(1, t));
+    const cx = x1 + t * dx, cy = y1 + t * dy;
+    return Math.sqrt((px - cx) ** 2 + (py - cy) ** 2);
+  }
+
+  // Move an annotation by delta in pct coords
+  function moveAnnotation(a, dxPct, dyPct) {
+    const c = a.coords;
+    switch (a.type) {
+      case 'number':
+      case 'text':
+        c.x += dxPct; c.y += dyPct; break;
+      case 'circle':
+        c.x += dxPct; c.y += dyPct; break;
+      case 'rect':
+      case 'mosaic':
+        c.x += dxPct; c.y += dyPct; break;
+      case 'arrow':
+        c.x += dxPct; c.y += dyPct; c.x2 += dxPct; c.y2 += dyPct; break;
+      case 'freehand':
+        if (c.points) c.points.forEach(p => { p.x += dxPct; p.y += dyPct; });
+        break;
+    }
   }
 
   // ── 7. Redraw all annotations ──
@@ -723,6 +815,17 @@ function startAnnotationMode(screenshotDataUrl) {
     if (e.button !== 0) return;
     const pt = getCanvasCoords(e);
 
+    // Move tool: pick up annotation under cursor
+    if (currentTool === 'move') {
+      const hit = hitTest(pt.x, pt.y);
+      if (hit) {
+        selectedAnnotation = hit;
+        moveStartPct = { x: toPct(pt.x, true), y: toPct(pt.y, false) };
+        canvas.style.cursor = 'grabbing';
+      }
+      return;
+    }
+
     if (currentTool === 'number') {
       stepCounter++;
       annotations.push({
@@ -759,8 +862,28 @@ function startAnnotationMode(screenshotDataUrl) {
   });
 
   canvas.addEventListener('mousemove', (e) => {
-    if (!isDrawing || !startPoint) return;
     const pt = getCanvasCoords(e);
+    _lastMousePt = pt;
+
+    // Move tool: drag selected annotation
+    if (currentTool === 'move' && selectedAnnotation && moveStartPct) {
+      const nowPct = { x: toPct(pt.x, true), y: toPct(pt.y, false) };
+      const dx = nowPct.x - moveStartPct.x;
+      const dy = nowPct.y - moveStartPct.y;
+      moveAnnotation(selectedAnnotation, dx, dy);
+      moveStartPct = nowPct;
+      redrawAll();
+      return;
+    }
+
+    // Move tool: update cursor on hover
+    if (currentTool === 'move' && !selectedAnnotation) {
+      const hit = hitTest(pt.x, pt.y);
+      canvas.style.cursor = hit ? 'grab' : 'default';
+      return;
+    }
+
+    if (!isDrawing || !startPoint) return;
 
     if (currentTool === 'freehand') {
       freehandPoints.push({ x: toPct(pt.x, true), y: toPct(pt.y, false) });
@@ -790,6 +913,14 @@ function startAnnotationMode(screenshotDataUrl) {
   });
 
   canvas.addEventListener('mouseup', (e) => {
+    // Move tool: release
+    if (currentTool === 'move' && selectedAnnotation) {
+      selectedAnnotation = null;
+      moveStartPct = null;
+      canvas.style.cursor = 'default';
+      return;
+    }
+
     if (!isDrawing || !startPoint) return;
     isDrawing = false;
     const endPt = getCanvasCoords(e);
@@ -903,8 +1034,25 @@ function startAnnotationMode(screenshotDataUrl) {
     if (e.ctrlKey && e.key === 'z') { e.preventDefault(); undo(); }
     if (e.ctrlKey && e.key === 'y') { e.preventDefault(); redo(); }
     if (e.key === 'Escape') { cleanup(); }
-    // Tool shortcuts: 1-7
-    if (e.key >= '1' && e.key <= '7') {
+    // V key → move tool
+    if (e.key === 'v' || e.key === 'V') { selectTool('move'); }
+    // Delete/Backspace in move mode — remove last clicked annotation
+    if ((e.key === 'Delete' || e.key === 'Backspace') && currentTool === 'move') {
+      // Get cursor position from last known mouse position
+      if (_lastMousePt) {
+        const hit = hitTest(_lastMousePt.x, _lastMousePt.y);
+        if (hit) {
+          const idx = annotations.indexOf(hit);
+          if (idx >= 0) {
+            annotations.splice(idx, 1);
+            if (hit.type === 'number') stepCounter = annotations.filter(a => a.type === 'number').length;
+            redrawAll();
+          }
+        }
+      }
+    }
+    // Tool shortcuts: 1-8 (move, number, circle, rect, arrow, text, freehand, mosaic)
+    if (e.key >= '1' && e.key <= '8') {
       selectTool(tools[Number(e.key) - 1].id);
     }
   });
@@ -1061,6 +1209,30 @@ document.addEventListener('click', (e) => {
   highlightElement(el);
 }, true);
 
+// ── Keyboard shortcut for screenshot ──
+// Ctrl+Shift+S → full screenshot with annotation
+// Ctrl+Shift+D → full screenshot without annotation (direct upload)
+document.addEventListener('keydown', (e) => {
+  if (!isRecording) return;
+  if (annotationActive) return; // don't trigger while annotation overlay is open
+
+  // Ctrl+Shift+S → screenshot with annotation
+  if (e.ctrlKey && e.shiftKey && (e.key === 's' || e.key === 'S')) {
+    e.preventDefault();
+    e.stopPropagation();
+    safeSendMessage({ type: 'MANUAL_SCREENSHOT_WITH_ANNOTATION', lang: badgeLang, captureMode: 'full' });
+    return;
+  }
+
+  // Ctrl+Shift+D → direct screenshot (no annotation, immediate upload)
+  if (e.ctrlKey && e.shiftKey && (e.key === 'd' || e.key === 'D')) {
+    e.preventDefault();
+    e.stopPropagation();
+    safeSendMessage({ type: 'MANUAL_SCREENSHOT' });
+    return;
+  }
+}, true);
+
 // Navigation listener — log only, no screenshot
 let lastUrl = window.location.href;
 const navObserver = new MutationObserver(() => {
@@ -1146,7 +1318,7 @@ function toggleBadge(show) {
           <button class="foxlink-lang-btn" data-lang="vi" style="background:rgba(255,255,255,0.15);border:none;color:#94a3b8;padding:2px 6px;border-radius:4px;cursor:pointer;font-size:10px;font-weight:700;">VI</button>
         </div>
         <div style="display:flex;gap:0;">
-          <button id="foxlink-training-screenshot" data-mode="full" style="background:#2563eb;border:none;color:white;padding:4px 10px;border-radius:6px 0 0 6px;cursor:pointer;font-size:11px;font-weight:600;transition:background 0.2s;">
+          <button id="foxlink-training-screenshot" data-mode="full" style="background:#2563eb;border:none;color:white;padding:4px 10px;border-radius:6px 0 0 6px;cursor:pointer;font-size:11px;font-weight:600;transition:background 0.2s;" title="全螢幕截圖 (Ctrl+Shift+S)">
             📸 全螢幕
           </button>
           <button id="foxlink-capture-rect" data-mode="rect" style="background:#1d4ed8;border:none;border-left:1px solid rgba(255,255,255,0.2);color:white;padding:4px 8px;cursor:pointer;font-size:11px;font-weight:600;transition:background 0.2s;" title="矩形選取截圖">

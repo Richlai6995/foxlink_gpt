@@ -581,7 +581,7 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
                 </button>
               </div>
               <div className="text-[9px] mt-1.5 p-1.5 rounded" style={{ backgroundColor: 'var(--t-accent-subtle)', color: 'var(--t-text-secondary)' }}>
-                💡 請自行開啟目標系統（建議用<strong>無痕視窗</strong> Ctrl+Shift+N），避免與訓練平台的登入互相影響。開啟後用 Extension badge 的「截圖」按鈕擷取畫面。
+                💡 請自行開啟目標系統（建議用<strong>無痕視窗</strong> Ctrl+Shift+N），避免與訓練平台的登入互相影響。開啟後用 Extension badge 的「截圖」按鈕或快捷鍵 <kbd className="px-1 py-0.5 rounded text-[9px]" style={{ backgroundColor: 'var(--t-bg)', border: '1px solid var(--t-border)' }}>Ctrl+Shift+S</kbd> 擷取畫面。
               </div>
             </div>
 
