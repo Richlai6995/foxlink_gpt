@@ -408,6 +408,28 @@ client/src/i18n/locales/*.json — 三語言 feedback.* keys
 - 工單詳情頁分享連結改為明顯藍色按鈕 + 外連 icon
 - FAB 快速開單加分享連結欄位
 
+### 對話附件 inline 顯示
+
+- 訊息泡泡直接 inline 顯示圖片縮圖（max 240×180），點擊 Lightbox 放大
+- 非圖片附件在泡泡中顯示檔名 + 下載 icon
+- 根據 `feedback_attachments.message_id` 匹配訊息
+
+### 對話輸入區拖放/貼圖
+
+- Ctrl+V 剪貼簿貼圖 → 即時縮圖預覽
+- 拖放檔案到輸入區/textarea → 加入附件
+- 圖片有 16×16 縮圖預覽，非圖片顯示檔名
+- hover 顯示紅色 × 刪除按鈕
+- placeholder 提示「可拖放檔案或 Ctrl+V 貼圖」
+
+### FAB 可拖動定位
+
+- 預設位置上移到 bottom:100px 避免擋住送出按鈕
+- 支援 pointer drag 拖動到任意位置（滑鼠+觸控）
+- 表單 popover 跟隨 FAB 位置
+- 拖動 vs 點擊自動區分（移動 > 4px 才算拖動）
+
 ### 使用者手冊
 
-- 新增 `u-feedback` section（第 29 節，14 個 content blocks）到 helpSeedData
+- 新增 `u-feedback` section（第 29 節）到 helpSeedData
+- 包含草稿機制、拖放/貼圖說明、狀態表（含草稿）
