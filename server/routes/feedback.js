@@ -552,6 +552,71 @@ router.delete('/admin/categories/:id', verifyAdmin, async (req, res) => {
   }
 });
 
+// ─── 管理員：分類翻譯 ───────────────────────────────────────────────────────
+
+// Get translations for all categories
+router.get('/admin/categories/translations', verifyAdmin, async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const rows = await db.prepare('SELECT category_id, lang, name, description FROM feedback_category_translations').all();
+    // Group by category_id: { [catId]: { en: { name, desc }, vi: { name, desc } } }
+    const map = {};
+    for (const r of rows) {
+      if (!map[r.category_id]) map[r.category_id] = {};
+      map[r.category_id][r.lang] = { name: r.name, description: r.description };
+    }
+    res.json(map);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Auto-translate a single category (or all if id=all)
+router.post('/admin/categories/:id/translate', verifyAdmin, async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const { translateFields } = require('../services/translationService');
+    const catId = req.params.id;
+
+    // Gather categories to translate
+    let cats;
+    if (catId === 'all') {
+      cats = await db.prepare('SELECT id, name, description FROM feedback_categories WHERE is_active=1').all();
+    } else {
+      const cat = await db.prepare('SELECT id, name, description FROM feedback_categories WHERE id=?').get(Number(catId));
+      if (!cat) return res.status(404).json({ error: '分類不存在' });
+      cats = [cat];
+    }
+
+    const results = [];
+    for (const cat of cats) {
+      try {
+        const translated = await translateFields({ name: cat.name, description: cat.description || '' });
+        // Upsert en + vi translations
+        for (const lang of ['en', 'vi']) {
+          const tName = lang === 'en' ? translated.name_en : translated.name_vi;
+          const tDesc = lang === 'en' ? translated.desc_en : translated.desc_vi;
+          if (!tName) continue;
+          const existing = await db.prepare(
+            'SELECT id FROM feedback_category_translations WHERE category_id=? AND lang=?'
+          ).get(cat.id, lang);
+          if (existing) {
+            await db.prepare(
+              'UPDATE feedback_category_translations SET name=?, description=? WHERE id=?'
+            ).run(tName, tDesc || null, existing.id);
+          } else {
+            await db.prepare(
+              'INSERT INTO feedback_category_translations (category_id, lang, name, description) VALUES (?, ?, ?, ?)'
+            ).run(cat.id, lang, tName, tDesc || null);
+          }
+        }
+        results.push({ id: cat.id, ok: true });
+      } catch (e) {
+        results.push({ id: cat.id, ok: false, error: e.message });
+      }
+    }
+    res.json({ results });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ─── 管理員：SLA 設定 ───────────────────────────────────────────────────────
 
 router.get('/admin/sla-configs', verifyAdmin, async (req, res) => {

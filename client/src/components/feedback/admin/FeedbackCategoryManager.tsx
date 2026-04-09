@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import api from '../../../lib/api'
-import { Plus, Pencil, Trash2, Save, X, GripVertical, Loader2 } from 'lucide-react'
+import { Plus, Pencil, Trash2, Save, X, GripVertical, Loader2, Languages } from 'lucide-react'
 
 interface Category {
   id: number
@@ -12,6 +12,10 @@ interface Category {
   is_active: number
 }
 
+interface TransMap {
+  [catId: number]: { [lang: string]: { name: string; description?: string } }
+}
+
 export default function FeedbackCategoryManager() {
   const { t } = useTranslation()
   const [categories, setCategories] = useState<Category[]>([])
@@ -20,11 +24,17 @@ export default function FeedbackCategoryManager() {
   const [form, setForm] = useState({ name: '', description: '', icon: '', sort_order: 0 })
   const [showAdd, setShowAdd] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [translations, setTranslations] = useState<TransMap>({})
+  const [translatingId, setTranslatingId] = useState<number | 'all' | null>(null)
 
   const load = async () => {
     try {
-      const { data } = await api.get('/feedback/admin/categories')
-      setCategories(data)
+      const [catRes, transRes] = await Promise.all([
+        api.get('/feedback/admin/categories'),
+        api.get('/feedback/admin/categories/translations')
+      ])
+      setCategories(catRes.data)
+      setTranslations(transRes.data)
     } catch {}
     setLoading(false)
   }
@@ -79,16 +89,39 @@ export default function FeedbackCategoryManager() {
     setForm({ name: cat.name, description: cat.description || '', icon: cat.icon || '', sort_order: cat.sort_order || 0 })
   }
 
+  const handleTranslate = async (id: number | 'all') => {
+    setTranslatingId(id)
+    try {
+      await api.post(`/feedback/admin/categories/${id}/translate`)
+      await load()
+    } catch (e: any) {
+      alert(e.response?.data?.error || '翻譯失敗')
+    }
+    setTranslatingId(null)
+  }
+
+  const hasTranslation = (catId: number) => {
+    const t = translations[catId]
+    return t && t.en?.name && t.vi?.name
+  }
+
   if (loading) return <div className="flex justify-center py-10"><Loader2 size={20} className="animate-spin text-gray-400" /></div>
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-semibold text-gray-900">{t('feedback.admin.categoryManagement')}</h3>
-        <button onClick={() => { setShowAdd(true); setForm({ name: '', description: '', icon: '', sort_order: categories.length }) }}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-600 text-white hover:bg-blue-700">
-          <Plus size={12} /> {t('common.add')}
-        </button>
+        <div className="flex items-center gap-2">
+          <button onClick={() => handleTranslate('all')} disabled={translatingId !== null}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-purple-50 text-purple-600 hover:bg-purple-100 border border-purple-200 disabled:opacity-50">
+            {translatingId === 'all' ? <Loader2 size={12} className="animate-spin" /> : <Languages size={12} />}
+            {t('common.translateAll', '全部翻譯')}
+          </button>
+          <button onClick={() => { setShowAdd(true); setForm({ name: '', description: '', icon: '', sort_order: categories.length }) }}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-600 text-white hover:bg-blue-700">
+            <Plus size={12} /> {t('common.add')}
+          </button>
+        </div>
       </div>
 
       {/* Add form */}
@@ -141,6 +174,13 @@ export default function FeedbackCategoryManager() {
                     <span className="text-sm font-medium text-gray-900">{cat.name}</span>
                     {cat.icon && <span className="text-xs text-gray-400">({cat.icon})</span>}
                     <span className="text-[10px] text-gray-300">#{cat.sort_order}</span>
+                    {/* Translation status badges */}
+                    {translations[cat.id]?.en?.name
+                      ? <span className="text-[9px] px-1 py-0.5 rounded bg-blue-50 text-blue-500">EN</span>
+                      : <span className="text-[9px] px-1 py-0.5 rounded bg-gray-100 text-gray-300">EN</span>}
+                    {translations[cat.id]?.vi?.name
+                      ? <span className="text-[9px] px-1 py-0.5 rounded bg-green-50 text-green-500">VI</span>
+                      : <span className="text-[9px] px-1 py-0.5 rounded bg-gray-100 text-gray-300">VI</span>}
                   </div>
                   {cat.description && <p className="text-xs text-gray-400 truncate">{cat.description}</p>}
                 </div>
@@ -148,6 +188,11 @@ export default function FeedbackCategoryManager() {
                   cat.is_active ? 'bg-green-50 text-green-600' : 'bg-gray-100 text-gray-400'
                 }`}>
                   {cat.is_active ? t('common.enabled') : t('common.disabled')}
+                </button>
+                <button onClick={() => handleTranslate(cat.id)} disabled={translatingId !== null}
+                  title={hasTranslation(cat.id) ? '重新翻譯' : '翻譯'}
+                  className={`p-1 transition ${hasTranslation(cat.id) ? 'text-purple-400 hover:text-purple-600' : 'text-gray-300 hover:text-purple-500'}`}>
+                  {translatingId === cat.id ? <Loader2 size={14} className="animate-spin" /> : <Languages size={14} />}
                 </button>
                 <button onClick={() => startEdit(cat)} className="p-1 text-gray-400 hover:text-blue-600"><Pencil size={14} /></button>
                 <button onClick={() => handleDelete(cat.id)} className="p-1 text-gray-400 hover:text-red-500"><Trash2 size={14} /></button>
