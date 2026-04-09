@@ -4288,20 +4288,21 @@ router.get('/recording/:sessionId', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// PUT /api/training/recording/:sessionId/steps — batch update step_number + lang
+// PUT /api/training/recording/:sessionId/steps — batch update step_number + lang + annotations_json
 router.put('/recording/:sessionId/steps', async (req, res) => {
   try {
-    const { updates } = req.body; // [{ id, step_number, lang }, ...]
+    const { updates } = req.body; // [{ id, step_number, lang, annotations_json }, ...]
     if (!Array.isArray(updates)) return res.status(400).json({ error: 'updates array required' });
     for (const u of updates) {
-      if (u.id && (u.step_number !== undefined || u.lang !== undefined)) {
-        const sets = [];
-        const params = [];
-        if (u.step_number !== undefined) { sets.push('step_number=?'); params.push(u.step_number); }
-        if (u.lang !== undefined) { sets.push('lang=?'); params.push(u.lang); }
-        params.push(u.id, req.params.sessionId);
-        await db.prepare(`UPDATE recording_steps SET ${sets.join(',')} WHERE id=? AND session_id=?`).run(...params);
-      }
+      if (!u.id) continue;
+      const sets = [];
+      const params = [];
+      if (u.step_number !== undefined) { sets.push('step_number=?'); params.push(u.step_number); }
+      if (u.lang !== undefined) { sets.push('lang=?'); params.push(u.lang); }
+      if (u.annotations_json !== undefined) { sets.push('annotations_json=?'); params.push(u.annotations_json); }
+      if (sets.length === 0) continue;
+      params.push(u.id, req.params.sessionId);
+      await db.prepare(`UPDATE recording_steps SET ${sets.join(',')} WHERE id=? AND session_id=?`).run(...params);
     }
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }

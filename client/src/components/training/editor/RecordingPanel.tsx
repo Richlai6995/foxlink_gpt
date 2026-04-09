@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { Camera, Square, Play, Loader2, CheckCircle2, AlertCircle, X, ExternalLink,
-         Wand2, Trash2, Star, GripVertical, ClipboardPaste, Plus, Image, Eye, Cpu, Pencil } from 'lucide-react'
+         Wand2, Trash2, Star, GripVertical, ClipboardPaste, Plus, Image, Eye, Cpu, Pencil, Save, FolderOpen } from 'lucide-react'
 import api from '../../../lib/api'
 import AnnotationOverlay from '../blocks/AnnotationOverlay'
 import ScreenshotAnnotator from './ScreenshotAnnotator'
@@ -47,6 +47,8 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
   const [showAnnotations, setShowAnnotations] = useState(true) // toggle annotation layer visibility
   const [copied, setCopied] = useState(false)
   const [annotatingStepId, setAnnotatingStepId] = useState<string | null>(null) // 開啟標註工具的 step
+  const [savingDraft, setSavingDraft] = useState(false)
+  const [draftInfo, setDraftInfo] = useState<{ sessionId: string; count: number } | null>(null)
   const panelRef = useRef<HTMLDivElement>(null)
 
   // Phase 2E: AI model selector
@@ -201,6 +203,97 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
     if (!confirm(`確定要清空所有 ${steps.length} 張截圖？`)) return
     setSteps([])
     setSelectedStepId(null)
+  }
+
+  // ── Save Draft ──────────────────────────────────────────────────────────────
+  const saveDraft = async () => {
+    if (steps.length === 0) return
+    try {
+      setSavingDraft(true)
+      let sid = sessionIdRef.current || sessionId
+
+      // 1. Create session if none exists
+      if (!sid) {
+        const res = await api.post('/training/recording/start', {
+          course_id: courseId, lesson_id: lessonId,
+          config: { target_url: targetUrl, draft: true }
+        })
+        sid = res.data.session_id
+        setSessionId(sid)
+        sessionIdRef.current = sid
+      }
+
+      // 2. Separate: already-on-server steps vs local-only steps
+      const serverSteps = steps.filter(s => s.id.startsWith('server_'))
+      const localSteps = steps.filter(s => !s.id.startsWith('server_'))
+
+      // 3. Update existing server steps (annotations + stepNumber + lang)
+      if (serverSteps.length > 0) {
+        const updates = serverSteps.map((s, i) => ({
+          id: Number(s.id.replace('server_', '')),
+          step_number: s.stepNumber || i + 1,
+          lang: s.lang || 'zh-TW',
+          annotations_json: s.annotations?.length ? JSON.stringify(s.annotations) : null,
+        }))
+        await api.put(`/training/recording/${sid}/steps`, { updates })
+      }
+
+      // 4. Upload local-only steps (Ctrl+V / file) to server
+      for (let i = 0; i < localSteps.length; i++) {
+        const step = localSteps[i]
+        const res = await api.post(`/training/recording/${sid}/step`, {
+          step_number: step.stepNumber || serverSteps.length + i + 1,
+          action_type: step.isKeyStep ? 'key_action' : 'screenshot',
+          screenshot_base64: step.imageDataUrl,
+          annotations_json: step.annotations?.length ? JSON.stringify(step.annotations) : undefined,
+          lang: step.lang || 'zh-TW',
+          page_url: step.pageUrl || targetUrl,
+          page_title: step.pageTitle || step.note || `步驟 ${step.stepNumber || i + 1}`
+        })
+        // Convert to server-backed step
+        setSteps(prev => prev.map(s => s.id === step.id
+          ? { ...s, id: `server_${res.data.step_id}`, imageDataUrl: res.data.screenshot_url || s.imageDataUrl, thumbnail: res.data.screenshot_url || s.thumbnail }
+          : s))
+      }
+
+      // 5. Persist sessionId for draft recovery
+      sessionStorage.setItem('training_draft_session', JSON.stringify({
+        sessionId: sid, courseId, lessonId, savedAt: new Date().toISOString()
+      }))
+
+      alert(`草稿已儲存（${steps.length} 張截圖）`)
+    } catch (e: any) {
+      console.error('[saveDraft]', e)
+      alert('儲存草稿失敗: ' + (e.response?.data?.error || e.message))
+    } finally { setSavingDraft(false) }
+  }
+
+  // ── Draft Detection on Mount ───────────────────────────────────────────────
+  useEffect(() => {
+    const raw = sessionStorage.getItem('training_draft_session')
+    if (!raw) return
+    try {
+      const draft = JSON.parse(raw)
+      if (draft.courseId === courseId && draft.sessionId) {
+        // Check server for step count
+        api.get(`/training/recording/${draft.sessionId}`).then(res => {
+          const count = res.data.steps?.length || 0
+          if (count > 0) setDraftInfo({ sessionId: draft.sessionId, count })
+        }).catch(() => {})
+      }
+    } catch {}
+  }, [courseId])
+
+  const loadDraft = async (draftSessionId: string) => {
+    setSessionId(draftSessionId)
+    sessionIdRef.current = draftSessionId
+    setDraftInfo(null)
+    await pullFromServer(draftSessionId)
+  }
+
+  const dismissDraft = () => {
+    setDraftInfo(null)
+    sessionStorage.removeItem('training_draft_session')
   }
 
   // Generate outline from help section
@@ -561,12 +654,34 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
           </h3>
           <button onClick={() => {
             if (steps.length > 0 && !processing) {
-              if (!confirm(`目前有 ${steps.length} 張截圖尚未送 AI 處理，確定要關閉嗎？\n（截圖資料將遺失）`)) return
+              if (!confirm(`目前有 ${steps.length} 張截圖尚未送 AI 處理，確定要關閉嗎？\n（建議先點「儲存草稿」再關閉）`)) return
             }
             if (recording) { setRecording(false); window.postMessage({ type: 'FOXLINK_TRAINING_STOP' }, '*') }
             onClose()
           }} style={{ color: 'var(--t-text-muted)' }}><X size={16} /></button>
         </div>
+
+        {/* Draft detection banner */}
+        {draftInfo && steps.length === 0 && (
+          <div className="mx-4 mt-2 p-3 rounded-lg border flex items-center justify-between"
+            style={{ backgroundColor: 'rgba(59,130,246,0.08)', borderColor: 'rgba(59,130,246,0.3)' }}>
+            <div className="flex items-center gap-2 text-xs" style={{ color: 'var(--t-text-secondary)' }}>
+              <FolderOpen size={14} className="text-blue-500" />
+              <span>偵測到未完成的草稿（{draftInfo.count} 張截圖）</span>
+            </div>
+            <div className="flex gap-2">
+              <button onClick={() => loadDraft(draftInfo.sessionId)}
+                className="px-3 py-1 text-xs font-medium rounded-lg text-white bg-blue-600 hover:bg-blue-500 transition flex items-center gap-1">
+                <FolderOpen size={12} /> 載入草稿
+              </button>
+              <button onClick={dismissDraft}
+                className="px-3 py-1 text-xs rounded-lg border transition hover:opacity-80"
+                style={{ borderColor: 'var(--t-border)', color: 'var(--t-text-muted)' }}>
+                忽略
+              </button>
+            </div>
+          </div>
+        )}
 
         <div className="flex flex-1 overflow-hidden relative">
           {/* Left: Setup + Outline */}
@@ -1060,6 +1175,16 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
                   className="flex items-center gap-1 text-xs px-3 py-2 rounded-lg border transition hover:opacity-80"
                   style={{ borderColor: 'var(--t-accent)', color: 'var(--t-accent)' }}>
                   ✓ 確認順序
+                </button>
+              )}
+
+              {/* Save Draft */}
+              {steps.length > 0 && (
+                <button onClick={saveDraft} disabled={savingDraft}
+                  className="flex items-center gap-1 text-xs px-3 py-2 rounded-lg border transition hover:opacity-80 disabled:opacity-40"
+                  style={{ borderColor: 'rgba(34,197,94,0.5)', color: '#22c55e' }}>
+                  {savingDraft ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
+                  {savingDraft ? '儲存中...' : '儲存草稿'}
                 </button>
               )}
 
