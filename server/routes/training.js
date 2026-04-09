@@ -1109,8 +1109,18 @@ router.put('/slides/:sid', async (req, res) => {
     const check = await verifyLessonAccess(slide.lesson_id, req.user, true);
     if (check.error) return res.status(check.status).json({ error: check.error });
 
-    const { slide_type, content_json, notes, duration_seconds, sort_order } = req.body;
+    let { slide_type, content_json, notes, duration_seconds, sort_order } = req.body;
     const contentStr = typeof content_json === 'string' ? content_json : JSON.stringify(content_json);
+
+    // Auto-detect slide_type from content_json if blocks contain hotspot
+    if (contentStr) {
+      try {
+        const blocks = JSON.parse(contentStr);
+        if (Array.isArray(blocks) && blocks.some(b => b.type === 'hotspot')) {
+          slide_type = 'hotspot';
+        }
+      } catch {}
+    }
 
     // Only update sort_order if explicitly provided (avoid nullifying it on content-only saves)
     if (sort_order !== undefined && sort_order !== null) {
@@ -5422,8 +5432,14 @@ router.post('/slides/:sid/ai-analyze', async (req, res) => {
       imgBlock.show_hint_after = imgBlock.show_hint_after || 2;
     }
 
-    await db.prepare('UPDATE course_slides SET content_json=?, slide_type=?, notes=COALESCE(?, notes) WHERE id=?')
-      .run(JSON.stringify(blocks), hotspotRegions.length > 0 ? 'hotspot' : slide.slide_type, parsed.narration || null, slide.id);
+    const newSlideType = hotspotRegions.length > 0 ? 'hotspot' : slide.slide_type;
+    if (parsed.narration) {
+      await db.prepare('UPDATE course_slides SET content_json=?, slide_type=?, notes=? WHERE id=?')
+        .run(JSON.stringify(blocks), newSlideType, parsed.narration, slide.id);
+    } else {
+      await db.prepare('UPDATE course_slides SET content_json=?, slide_type=? WHERE id=?')
+        .run(JSON.stringify(blocks), newSlideType, slide.id);
+    }
 
     res.json({
       ok: true,
