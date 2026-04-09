@@ -69,11 +69,28 @@ export default function ScreenshotAnnotator({ imageUrl, annotations: initial, st
   const [freehandPoints, setFreehandPoints] = useState<{ x: number; y: number }[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [dragging, setDragging] = useState<{ id: string; startX: number; startY: number; origCoords: any } | null>(null)
+  const [resizing, setResizing] = useState<{ id: string; handle: string; startX: number; startY: number; origCoords: any } | null>(null)
   const [textInput, setTextInput] = useState<{ x: number; y: number } | null>(null)
   const [textValue, setTextValue] = useState('')
 
   const svgRef = useRef<SVGSVGElement>(null)
+  const imgRef = useRef<HTMLImageElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
+
+  // Keep SVG size synced with image (handles browser zoom / window resize)
+  useEffect(() => {
+    const img = imgRef.current
+    if (!img) return
+    const syncSize = () => {
+      if (svgRef.current && img.clientWidth > 0) {
+        svgRef.current.style.width = img.clientWidth + 'px'
+        svgRef.current.style.height = img.clientHeight + 'px'
+      }
+    }
+    const ro = new ResizeObserver(syncSize)
+    ro.observe(img)
+    return () => ro.disconnect()
+  }, [])
 
   // Convert client coords to percentage (0-100)
   const toPct = useCallback((clientX: number, clientY: number): { x: number; y: number } => {
@@ -300,6 +317,48 @@ export default function ScreenshotAnnotator({ imageUrl, annotations: initial, st
     setDragging(null)
   }
 
+  // Resize handles for rect / circle / mosaic
+  const startResize = (e: React.PointerEvent, ann: Annotation, handle: string) => {
+    e.stopPropagation()
+    const pt = toPct(e.clientX, e.clientY)
+    setSelectedId(ann.id)
+    setResizing({ id: ann.id, handle, startX: pt.x, startY: pt.y, origCoords: { ...ann.coords } })
+    ;(e.target as Element).setPointerCapture?.(e.pointerId)
+  }
+
+  const handleResizeMove = (e: React.PointerEvent) => {
+    if (!resizing) return
+    const pt = toPct(e.clientX, e.clientY)
+    const { handle, origCoords: o } = resizing
+    setAnnots(prev => prev.map(a => {
+      if (a.id !== resizing.id) return a
+      const c = { ...a.coords }
+      if (a.type === 'rect' || a.type === 'mosaic') {
+        // o has x, y, w, h
+        const ox2 = o.x + o.w, oy2 = o.y + o.h
+        if (handle === 'tl') { c.x = pt.x; c.y = pt.y; c.w = ox2 - pt.x; c.h = oy2 - pt.y }
+        if (handle === 'tr') { c.y = pt.y; c.w = pt.x - o.x; c.h = oy2 - pt.y }
+        if (handle === 'bl') { c.x = pt.x; c.w = ox2 - pt.x; c.h = pt.y - o.y }
+        if (handle === 'br') { c.w = pt.x - o.x; c.h = pt.y - o.y }
+      } else if (a.type === 'circle') {
+        // o has x (cx), y (cy), rx, ry — resize from edges
+        if (handle === 'tl' || handle === 'br') {
+          c.rx = Math.abs(pt.x - o.x)
+          c.ry = Math.abs(pt.y - o.y)
+        } else {
+          c.rx = Math.abs(pt.x - o.x)
+          c.ry = Math.abs(pt.y - o.y)
+        }
+      }
+      return { ...a, coords: c }
+    }))
+  }
+
+  const handleResizeEnd = () => {
+    if (resizing) pushUndo()
+    setResizing(null)
+  }
+
   // Delete selected
   const deleteSelected = () => {
     if (!selectedId) return
@@ -311,6 +370,43 @@ export default function ScreenshotAnnotator({ imageUrl, annotations: initial, st
   const selectedAnn = annots.find(a => a.id === selectedId)
 
   // ---------- Render helpers ----------
+
+  const renderResizeHandles = () => {
+    if (!selectedAnn) return null
+    const a = selectedAnn
+    const hr = 0.7 // handle radius in viewBox units
+    const handleStyle = { fill: '#fff', stroke: '#3b82f6', strokeWidth: 0.15, cursor: 'nwse-resize' as const }
+
+    if (a.type === 'rect' || a.type === 'mosaic') {
+      const { x, y, w, h } = a.coords
+      const corners = [
+        { id: 'tl', cx: x, cy: y },
+        { id: 'tr', cx: x + (w || 0), cy: y },
+        { id: 'bl', cx: x, cy: y + (h || 0) },
+        { id: 'br', cx: x + (w || 0), cy: y + (h || 0) },
+      ]
+      return corners.map(c => (
+        <circle key={c.id} cx={c.cx} cy={c.cy} r={hr} {...handleStyle}
+          onPointerDown={e => startResize(e, a, c.id)} />
+      ))
+    }
+
+    if (a.type === 'circle') {
+      const { x, y, rx = 5, ry = 5 } = a.coords
+      const edges = [
+        { id: 'tl', cx: x - rx, cy: y - ry },
+        { id: 'tr', cx: x + rx, cy: y - ry },
+        { id: 'bl', cx: x - rx, cy: y + ry },
+        { id: 'br', cx: x + rx, cy: y + ry },
+      ]
+      return edges.map(c => (
+        <circle key={c.id} cx={c.cx} cy={c.cy} r={hr} {...handleStyle}
+          onPointerDown={e => startResize(e, a, c.id)} />
+      ))
+    }
+
+    return null
+  }
 
   const renderDrawingPreview = () => {
     if (!drawing || !drawStart || !drawCurrent) return null
@@ -422,13 +518,13 @@ export default function ScreenshotAnnotator({ imageUrl, annotations: initial, st
   return (
     <div className="fixed inset-0 z-[70] bg-black/90 flex flex-col" ref={containerRef}>
       {/* Toolbar */}
-      <div className="flex items-center gap-2 px-4 py-2 bg-gray-900/95 border-b border-gray-700 shrink-0 flex-wrap">
+      <div className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-900/95 border-b border-gray-700 shrink-0 overflow-x-auto">
         {/* Tools */}
         <div className="flex items-center gap-0.5 bg-gray-800 rounded-lg p-0.5">
           {TOOLS.map((t, i) => (
             <button key={t.key}
               onClick={() => setTool(t.key)}
-              className={`px-2.5 py-1.5 rounded-md text-sm font-medium transition ${
+              className={`px-2 py-1 rounded text-xs font-medium transition ${
                 tool === t.key ? 'bg-blue-600 text-white' : 'text-gray-300 hover:bg-gray-700'
               }`}
               title={`${t.label} (${i + 1})`}>
@@ -601,7 +697,7 @@ export default function ScreenshotAnnotator({ imageUrl, annotations: initial, st
         <div className="flex-1" />
 
         {/* Step number + Language */}
-        <div className="flex items-center gap-2 px-2 py-1 bg-gray-800/80 rounded-lg border border-gray-700">
+        <div className="flex items-center gap-2 px-2 py-1 bg-gray-800/80 rounded-lg border border-gray-700 shrink-0">
           <div className="flex items-center gap-1">
             <span className="text-[10px] text-gray-400">步驟:</span>
             <input type="number" min={1} value={metaStepNumber}
@@ -627,11 +723,11 @@ export default function ScreenshotAnnotator({ imageUrl, annotations: initial, st
 
         {/* Save / Cancel */}
         <button onClick={onClose}
-          className="px-3 py-1.5 text-sm text-gray-300 hover:bg-gray-700 rounded transition">
+          className="px-2 py-1 text-xs text-gray-300 hover:bg-gray-700 rounded transition shrink-0">
           取消
         </button>
         <button onClick={() => onSave(annots, { stepNumber: metaStepNumber, lang: metaLang })}
-          className="px-3 py-1.5 text-sm text-white bg-blue-600 hover:bg-blue-500 rounded-lg font-medium transition flex items-center gap-1">
+          className="px-3 py-1 text-xs text-white bg-blue-600 hover:bg-blue-500 rounded-lg font-medium transition flex items-center gap-1 shrink-0">
           <Check size={14} /> 確認儲存
         </button>
       </div>
@@ -640,12 +736,12 @@ export default function ScreenshotAnnotator({ imageUrl, annotations: initial, st
       <div className="flex-1 flex items-center justify-center overflow-hidden p-4">
         <div className="relative max-w-full max-h-full"
           style={{ cursor: tool === 'move' ? 'default' : tool === 'text' ? 'text' : 'crosshair' }}>
-          <img src={imageUrl} alt="" className="max-w-[90vw] max-h-[85vh] rounded select-none"
+          <img ref={imgRef} src={imageUrl} alt="" className="max-w-[90vw] max-h-[85vh] rounded select-none"
             draggable={false} style={{ display: 'block' }}
             onLoad={e => {
               const img = e.target as HTMLImageElement
-              // Track aspect ratio for circle compensation
               setImgAspect(img.naturalWidth / img.naturalHeight)
+              // Initial sync (ResizeObserver handles subsequent changes)
               if (svgRef.current) {
                 svgRef.current.style.width = img.clientWidth + 'px'
                 svgRef.current.style.height = img.clientHeight + 'px'
@@ -659,8 +755,8 @@ export default function ScreenshotAnnotator({ imageUrl, annotations: initial, st
             preserveAspectRatio="none"
             style={{ pointerEvents: 'all' }}
             onPointerDown={handlePointerDown}
-            onPointerMove={e => { handlePointerMove(e); handleDragMove(e) }}
-            onPointerUp={() => { handlePointerUp(); handleDragEnd() }}
+            onPointerMove={e => { handlePointerMove(e); handleDragMove(e); handleResizeMove(e) }}
+            onPointerUp={() => { handlePointerUp(); handleDragEnd(); handleResizeEnd() }}
           >
             <defs>
               <marker id="annot-arrowhead" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto">
@@ -679,6 +775,9 @@ export default function ScreenshotAnnotator({ imageUrl, annotations: initial, st
 
             {/* Existing annotations */}
             {annots.map(renderAnnotation)}
+
+            {/* Resize handles for selected annotation */}
+            {renderResizeHandles()}
 
             {/* Drawing preview */}
             {renderDrawingPreview()}
