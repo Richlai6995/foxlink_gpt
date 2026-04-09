@@ -6,7 +6,7 @@ const feedbackService = require('./feedbackService');
 
 // ─── AI 分析 ──────────────────────────────────────────────────────────────────
 
-async function analyzeTicket(db, ticketId, userId, onChunk) {
+async function analyzeTicket(db, ticketId, userId, onChunk, lang) {
   const ticket = await feedbackService.getTicketById(db, ticketId);
   if (!ticket) throw new Error('工單不存在');
 
@@ -14,14 +14,23 @@ async function analyzeTicket(db, ticketId, userId, onChunk) {
   const modelKey = await _getSetting(db, 'feedback_ai_model') || process.env.GEMINI_MODEL_FLASH || 'gemini-2.5-flash';
   const temperature = parseFloat(await _getSetting(db, 'feedback_ai_temperature') || '0.3');
   const maxTokens = parseInt(await _getSetting(db, 'feedback_ai_max_tokens') || '4096', 10);
-  const systemPrompt = await _getSetting(db, 'feedback_ai_system_prompt') ||
-    '你是 FOXLINK 技術支援助手。請根據使用者的問題描述、附件內容和類似歷史工單，提供具體的解決建議。回答要專業、清晰、可操作。如果有參考歷史工單，請標注來源。';
+
+  // 多語 system prompt
+  const langLabel = { 'zh-TW': '繁體中文', 'en': 'English', 'vi': 'Tiếng Việt' }[lang] || '繁體中文';
+  const defaultPrompts = {
+    'zh-TW': '你是 FOXLINK 技術支援助手。請根據使用者的問題描述、附件內容和類似歷史工單，提供具體的解決建議。回答要專業、清晰、可操作。如果有參考歷史工單，請標注來源。',
+    'en': 'You are a FOXLINK technical support assistant. Based on the user\'s issue description, attachments, and similar historical tickets, provide specific resolution suggestions. Be professional, clear, and actionable. Cite sources when referencing historical tickets.',
+    'vi': 'Bạn là trợ lý hỗ trợ kỹ thuật FOXLINK. Dựa trên mô tả vấn đề, tệp đính kèm và các phiếu tương tự trước đây, hãy đưa ra gợi ý giải quyết cụ thể. Trả lời chuyên nghiệp, rõ ràng và có thể thực hiện được. Trích dẫn nguồn khi tham khảo phiếu cũ.',
+  };
+  const systemPrompt = (await _getSetting(db, 'feedback_ai_system_prompt') || defaultPrompts[lang] || defaultPrompts['zh-TW'])
+    + `\n\nIMPORTANT: You MUST respond in ${langLabel}.`;
 
   // 收集附件內容
   const attachments = await feedbackService.listAttachments(db, ticketId);
   let attachmentSummary = '';
   if (attachments.length > 0) {
-    attachmentSummary = `\n\n附件 (${attachments.length} 個): ${attachments.map(a => a.file_name).join(', ')}`;
+    const labels = { 'zh-TW': '附件', 'en': 'Attachments', 'vi': 'Tệp đính kèm' };
+    attachmentSummary = `\n\n${labels[lang] || labels['zh-TW']} (${attachments.length}): ${attachments.map(a => a.file_name).join(', ')}`;
   }
 
   // RAG 搜尋類似工單
@@ -40,15 +49,24 @@ async function analyzeTicket(db, ticketId, userId, onChunk) {
 
     if (searchResults.length > 0) {
       ragSources = searchResults.map(r => ({ ticket_no: r.ticket_no, subject: r.subject, score: r.score }));
-      ragContext = '\n\n以下是類似的歷史問題及解法：\n' +
-        searchResults.map((r, i) => `${i + 1}. [${r.ticket_no}] ${r.subject}\n   解法: ${r.resolution || '(無記錄)'}`).join('\n');
+      const ragHeaders = { 'zh-TW': '以下是類似的歷史問題及解法', 'en': 'Similar historical issues and solutions', 'vi': 'Các vấn đề tương tự và cách giải quyết' };
+      const resLabels = { 'zh-TW': '解法', 'en': 'Solution', 'vi': 'Giải pháp' };
+      const noRecord = { 'zh-TW': '(無記錄)', 'en': '(no record)', 'vi': '(không có)' };
+      ragContext = `\n\n${ragHeaders[lang] || ragHeaders['zh-TW']}：\n` +
+        searchResults.map((r, i) => `${i + 1}. [${r.ticket_no}] ${r.subject}\n   ${resLabels[lang] || resLabels['zh-TW']}: ${r.resolution || noRecord[lang] || noRecord['zh-TW']}`).join('\n');
     }
   } catch (ragErr) {
     console.warn('[FeedbackAI] RAG search error:', ragErr.message);
   }
 
   // 組合 prompt
-  const userPrompt = `問題主旨: ${ticket.subject}\n\n問題說明:\n${ticket.description || '(無說明)'}${attachmentSummary}${ticket.share_link ? '\n\n分享連結: ' + ticket.share_link : ''}${ragContext}`;
+  const promptLabels = {
+    'zh-TW': { subject: '問題主旨', desc: '問題說明', noDesc: '(無說明)', link: '分享連結' },
+    'en': { subject: 'Subject', desc: 'Description', noDesc: '(no description)', link: 'Share link' },
+    'vi': { subject: 'Chủ đề', desc: 'Mô tả', noDesc: '(không có mô tả)', link: 'Liên kết chia sẻ' },
+  };
+  const pl = promptLabels[lang] || promptLabels['zh-TW'];
+  const userPrompt = `${pl.subject}: ${ticket.subject}\n\n${pl.desc}:\n${ticket.description || pl.noDesc}${attachmentSummary}${ticket.share_link ? `\n\n${pl.link}: ` + ticket.share_link : ''}${ragContext}`;
 
   // 呼叫 LLM
   let fullResponse = '';

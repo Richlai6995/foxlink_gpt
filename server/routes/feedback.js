@@ -373,9 +373,10 @@ router.post('/tickets/:id/ai-analyze', async (req, res) => {
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
 
+    const lang = req.query.lang || req.headers['accept-language']?.split(',')[0] || 'zh-TW';
     const result = await feedbackAI.analyzeTicket(db, Number(req.params.id), req.user.id, (chunk) => {
       res.write(`data: ${JSON.stringify({ type: 'chunk', text: chunk })}\n\n`);
-    });
+    }, lang);
 
     res.write(`data: ${JSON.stringify({ type: 'done', ragSources: result.ragSources, model: result.model })}\n\n`);
     res.end();

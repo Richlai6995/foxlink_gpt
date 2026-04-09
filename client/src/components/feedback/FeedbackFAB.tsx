@@ -11,7 +11,7 @@ interface Category {
 }
 
 export default function FeedbackFAB() {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const navigate = useNavigate()
   const { unreadCount } = useFeedbackNotifications()
   const [open, setOpen] = useState(false)
@@ -62,9 +62,9 @@ export default function FeedbackFAB() {
 
   useEffect(() => {
     if (open && categories.length === 0) {
-      api.get('/feedback/categories').then(r => setCategories(r.data)).catch(() => {})
+      api.get(`/feedback/categories?lang=${i18n.language}`).then(r => setCategories(r.data)).catch(() => {})
     }
-  }, [open, categories.length])
+  }, [open, categories.length, i18n.language])
 
   const handlePaste = (e: React.ClipboardEvent) => {
     const items = e.clipboardData?.items

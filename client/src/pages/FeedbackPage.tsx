@@ -38,7 +38,7 @@ const STATUS_OPTIONS = ['open', 'processing', 'pending_user', 'resolved', 'close
 const PRIORITY_OPTIONS = ['urgent', 'high', 'medium', 'low']
 
 export default function FeedbackPage() {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const { isAdmin } = useAuth()
   const navigate = useNavigate()
 
@@ -78,8 +78,8 @@ export default function FeedbackPage() {
   }, [page, search, statusFilter, priorityFilter, categoryFilter, myOnly, isAdmin])
 
   useEffect(() => {
-    api.get('/feedback/categories').then(r => setCategories(r.data)).catch(() => {})
-  }, [])
+    api.get(`/feedback/categories?lang=${i18n.language}`).then(r => setCategories(r.data)).catch(() => {})
+  }, [i18n.language])
 
   useEffect(() => { fetchTickets() }, [fetchTickets])
 

@@ -69,7 +69,7 @@ interface Attachment {
 
 export default function FeedbackDetailPage() {
   const { id } = useParams<{ id: string }>()
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const { isAdmin, user } = useAuth()
   const navigate = useNavigate()
   const chatEndRef = useRef<HTMLDivElement>(null)
@@ -147,8 +147,8 @@ export default function FeedbackDetailPage() {
 
   // 載入分類
   useEffect(() => {
-    api.get('/feedback/categories').then(r => setCategories(r.data)).catch(() => {})
-  }, [])
+    api.get(`/feedback/categories?lang=${i18n.language}`).then(r => setCategories(r.data)).catch(() => {})
+  }, [i18n.language])
 
   // WebSocket 事件驅動更新（取代 polling）
   useEffect(() => {

@@ -11,7 +11,7 @@ interface Category {
 }
 
 export default function FeedbackNewPage() {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -31,8 +31,8 @@ export default function FeedbackNewPage() {
   const sourceSessionId = searchParams.get('source_session_id') || ''
 
   useEffect(() => {
-    api.get('/feedback/categories').then(r => setCategories(r.data)).catch(() => {})
-  }, [])
+    api.get(`/feedback/categories?lang=${i18n.language}`).then(r => setCategories(r.data)).catch(() => {})
+  }, [i18n.language])
 
   const addFiles = (newFiles: FileList | File[]) => {
     const arr = Array.from(newFiles)

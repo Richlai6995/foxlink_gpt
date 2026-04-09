@@ -16,7 +16,7 @@ interface RagSource {
 }
 
 export default function FeedbackAIAnalysis({ ticketId, ticketStatus }: Props) {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const [analyzing, setAnalyzing] = useState(false)
   const [suggestion, setSuggestion] = useState('')
   const [ragSources, setRagSources] = useState<RagSource[]>([])
@@ -33,7 +33,7 @@ export default function FeedbackAIAnalysis({ ticketId, ticketStatus }: Props) {
     setError('')
 
     try {
-      const response = await fetch(`/api/feedback/tickets/${ticketId}/ai-analyze`, {
+      const response = await fetch(`/api/feedback/tickets/${ticketId}/ai-analyze?lang=${i18n.language}`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('token')}`,
@@ -92,7 +92,7 @@ export default function FeedbackAIAnalysis({ ticketId, ticketStatus }: Props) {
 
       {analyzing && (
         <div className="flex items-center gap-2 text-xs text-blue-400 mb-2">
-          <Loader2 size={12} className="animate-spin" /> AI 分析中...
+          <Loader2 size={12} className="animate-spin" /> {t('feedback.aiAnalyzing', 'AI 分析中...')}
         </div>
       )}
 
@@ -121,7 +121,7 @@ export default function FeedbackAIAnalysis({ ticketId, ticketStatus }: Props) {
             </div>
             {ragSources.length > 0 && (
               <div className="px-6 py-3 border-t border-gray-100 text-xs text-gray-500">
-                參考工單：{ragSources.map((s, i) => <span key={i} className="text-blue-600 ml-1">{s.ticket_no}</span>)}
+                {t('feedback.refTickets', '參考工單')}：{ragSources.map((s, i) => <span key={i} className="text-blue-600 ml-1">{s.ticket_no}</span>)}
               </div>
             )}
           </div>
