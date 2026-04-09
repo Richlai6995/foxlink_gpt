@@ -304,7 +304,7 @@ async function snapshotOnlineUsers() {
     const redis = require('./redisClient');
     let sessions = [];
     try { sessions = await redis.getAllSessions() || []; } catch {}
-    const userIds = sessions.map(s => s.id).filter(Boolean);
+    const userIds = [...new Set(sessions.map(s => s.id).filter(Boolean))];
     await db.prepare(
       `INSERT INTO online_user_snapshots (online_count, user_ids) VALUES (?,?)`
     ).run(userIds.length, JSON.stringify(userIds));
