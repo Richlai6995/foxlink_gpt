@@ -181,37 +181,46 @@ botName cache：-1~2s
 
 ---
 
-## Phase 2：網頁版 Chat 回應優化（後續）
+## Phase 2：網頁版 Chat 回應優化（已實作 2026-04-09）
 
-### 2.1 現狀
+### 2.1 優化前瓶頸
 
 網頁版走 `POST /api/chat/sessions/:id/messages` → SSE streaming。
-無 polling 問題，但有以下瓶頸：
 
 | 瓶頸 | 預估影響 | 說明 |
 |------|---------|------|
 | Gemini API 首 token 延遲 | 2~5s | LLM 推理時間，Pro 比 Flash 慢 |
 | System prompt 組裝 | 1~3s | 載入 skills + KB + DIFY + MCP 工具定義 |
 | KB 向量搜尋 | 0.5~2s | embedding + 相似度搜尋 |
-| Oracle 連線池 cold start | 0~2s | poolMin=0 時要重建連線 |
+| Oracle 連線池 cold start | 0~2s | poolMin=2 時偶爾需重建連線 |
 | 附件處理 | 0~3s | 上傳 + 轉檔（有檔案時才觸發） |
 
-### 2.2 計畫優化項目
+### 2.2 已完成優化
+
+| 優化 | 預估省時 | 改動檔案 |
+|------|---------|----------|
+| ✅ DB 查詢並行化：sessionSkills + allAccessibleSkills + userProfile 合併 `Promise.all` | 0.5~1s | `chat.js` |
+| ✅ MCP + DIFY + SelfKB 工具宣告並行載入（auto mode & explicit mode） | 0.5~1.5s | `chat.js` |
+| ✅ External inject skill 呼叫並行化（`Promise.all` 取代 sequential for loop） | 0.5~3s | `chat.js` |
+| ✅ User profile 合併查詢（`preferred_language` + `role_id/dept_code/...` 一次取） | ~100ms | `chat.js` |
+| ✅ Oracle `poolMin` 提高至 5（可透過 `ORACLE_POOL_MIN` env 調整） | 0.5~1s | `database-oracle.js` |
+| ✅ 工具定義 30s TTL 快取（MCP/DIFY/SelfKB declarations） | 0.5~1s | `chat.js`, `mcpClient.js` |
+
+### 2.3 Phase 2 成果
+
+```
+首 token 延遲改善：預估 -2~4s
+  - 並行化省最多（原本 sequential 變 Promise.all）
+  - 快取在 30s 內重複查詢直接命中，省 DB round-trip
+  - Oracle pool 預熱減少 cold start
+```
+
+### 2.4 未來可選優化
 
 | 優化 | 預估省時 | 難度 |
 |------|---------|------|
-| System prompt 組裝並行化（`Promise.all`） | 1~2s | 低 |
-| Oracle `poolMin` 預熱（K8s 啟動時預建連線） | 0.5~1s | 低 |
-| 工具定義短期快取（skills/MCP/DIFY 不需每次查 DB） | 0.5~1s | 中 |
 | KB embedding 結果快取（相同問題短時間內不重算） | 0.5~1s | 中 |
 | Gemini model 自動選擇（簡單問題用 Flash） | 1~3s | 已有，確認邏輯 |
-
-### 2.3 Phase 2 預估成果
-
-```
-首 token 延遲改善：-2~4s
-（具體數字待 Phase 1 完成後 profiling 確認）
-```
 
 ---
 
@@ -229,5 +238,5 @@ botName cache：-1~2s
 
 | Phase | 內容 | 預估 |
 |-------|------|------|
-| Phase 1 | Webex WebSocket + buildToolList 並行 + botName cache | 本次實作 |
-| Phase 2 | 網頁版 system prompt 並行 + Oracle pool + 工具快取 | 下次實作 |
+| Phase 1 | Webex WebSocket + buildToolList 並行 + botName cache | ✅ 已完成 |
+| Phase 2 | 網頁版 system prompt 並行 + Oracle pool + 工具快取 | ✅ 已完成 (2026-04-09) |

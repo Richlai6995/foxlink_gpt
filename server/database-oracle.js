@@ -244,8 +244,8 @@ async function initializeOracleDB() {
     user:          process.env.SYSTEM_DB_USER,
     password:      process.env.SYSTEM_DB_USER_PASSWORD,
     connectString,
-    poolMin:          2,
-    poolMax:          30,
+    poolMin:          parseInt(process.env.ORACLE_POOL_MIN) || 5,   // pre-warm connections to avoid cold start
+    poolMax:          parseInt(process.env.ORACLE_POOL_MAX) || 30,
     poolIncrement:    3,
     poolTimeout:      120,
     poolPingInterval: 60,

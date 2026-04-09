@@ -397,10 +397,22 @@ async function callTool(db, server, sessionId, userId, toolName, args) {
   return resultContent;
 }
 
+// ── Short-term cache for tool declarations (30s TTL) ────────────────────────
+const _mcpDeclCache = new Map();
+const _MCP_CACHE_TTL = 30_000;
+function _mcpCacheKey(ctx) {
+  if (!ctx) return 'null';
+  return `${ctx.userId || ''}:${ctx.roleId || ''}:${ctx.deptCode || ''}`;
+}
+
 /**
  * @param {object|null} userCtx  null = all servers；否則傳 { userId, roleId, deptCode, profitCenter, orgSection, orgGroupName }
  */
 async function getActiveToolDeclarations(db, userCtx = null) {
+  const ck = _mcpCacheKey(userCtx);
+  const cached = _mcpDeclCache.get(ck);
+  if (cached && Date.now() - cached.ts < _MCP_CACHE_TTL) return cached.data;
+
   let servers;
   try {
     if (!userCtx) {
@@ -456,7 +468,9 @@ async function getActiveToolDeclarations(db, userCtx = null) {
     }
   }
 
-  return { functionDeclarations, serverMap };
+  const result = { functionDeclarations, serverMap };
+  _mcpDeclCache.set(ck, { data: result, ts: Date.now() });
+  return result;
 }
 
 module.exports = { listTools, callTool, getActiveToolDeclarations };
