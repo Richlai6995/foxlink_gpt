@@ -3511,25 +3511,46 @@ router.post('/courses/:id/translate', loadCoursePermission, requirePermission('o
       }
       doneItems++;
 
+      // Translate slides in parallel (concurrency=3) for speed
       const slides = lessonSlideMap[lesson.id] || [];
-      for (let si = 0; si < slides.length; si++) {
-        const slide = slides[si];
-        slidesDone++;
-        send('progress', { current: doneItems, total: totalItems, step: `翻譯投影片 ${slidesDone}/${totalSlides}...`, slides_done: slidesDone, slides_total: totalSlides });
-
+      const CONCURRENCY = 3;
+      const translateSlide = async (slide) => {
         let translatedContent = null;
-        if (slide.content_json) {
-          try {
-            const transResult = await model.generateContent(
-              `Translate the text values in this JSON from Traditional Chinese to ${langName}. Keep JSON structure, keys, and type fields unchanged. Do not translate product names. Return only valid JSON:\n\n${slide.content_json}`
-            );
-            translatedContent = transResult.response.text().trim().replace(/^```json\s*/,'').replace(/```$/,'').trim();
-          } catch (err) {
-            console.warn(`[Translate] slide ${slide.id} content failed:`, err.message);
-          }
-        }
         let translatedNotes = null;
-        try { translatedNotes = await translateText(slide.notes); } catch {}
+        const hasContent = !!slide.content_json;
+        const hasNotes = !!slide.notes;
+
+        // Merge content_json + notes into single LLM call when both exist
+        if (hasContent && hasNotes) {
+          try {
+            const merged = await model.generateContent(
+              `Translate from Traditional Chinese to ${langName}. Return a JSON object with two keys: "content" (the translated JSON array) and "notes" (the translated notes string).
+Do not translate product names or technical terms. Keep JSON structure, keys, and type fields unchanged.
+Input:
+{"content": ${slide.content_json}, "notes": ${JSON.stringify(slide.notes)}}
+Return only valid JSON.`
+            );
+            const raw = merged.response.text().trim().replace(/^```json\s*/, '').replace(/```$/, '').trim();
+            const parsed = JSON.parse(raw);
+            translatedContent = typeof parsed.content === 'string' ? parsed.content : JSON.stringify(parsed.content);
+            translatedNotes = parsed.notes || null;
+          } catch (err) {
+            console.warn(`[Translate] slide ${slide.id} merged failed, falling back:`, err.message);
+            try {
+              const r = await model.generateContent(`Translate the text values in this JSON from Traditional Chinese to ${langName}. Keep JSON structure, keys, and type fields unchanged. Do not translate product names. Return only valid JSON:\n\n${slide.content_json}`);
+              translatedContent = r.response.text().trim().replace(/^```json\s*/, '').replace(/```$/, '').trim();
+            } catch {}
+            try { translatedNotes = await translateText(slide.notes); } catch {}
+          }
+        } else {
+          if (hasContent) {
+            try {
+              const r = await model.generateContent(`Translate the text values in this JSON from Traditional Chinese to ${langName}. Keep JSON structure, keys, and type fields unchanged. Do not translate product names. Return only valid JSON:\n\n${slide.content_json}`);
+              translatedContent = r.response.text().trim().replace(/^```json\s*/, '').replace(/```$/, '').trim();
+            } catch (err) { console.warn(`[Translate] slide ${slide.id} content:`, err.message); }
+          }
+          if (hasNotes) { try { translatedNotes = await translateText(slide.notes); } catch {} }
+        }
 
         const existingST = await db.prepare('SELECT id, regions_json FROM slide_translations WHERE slide_id=? AND lang=?').get(slide.id, target_lang);
         if (existingST) {
@@ -3540,7 +3561,7 @@ router.post('/courses/:id/translate', loadCoursePermission, requirePermission('o
             .run(slide.id, target_lang, translatedContent, translatedNotes);
         }
 
-        // Translate independent regions_json — single LLM call for entire JSON
+        // Translate independent regions_json
         const regJson = existingST?.regions_json;
         if (regJson) {
           try {
@@ -3548,14 +3569,20 @@ router.post('/courses/:id/translate', loadCoursePermission, requirePermission('o
               `Translate all Chinese text values in this JSON to ${langName}. Keep JSON structure, all keys, coords, IDs, booleans, numbers, and audio_url values unchanged. Only translate string values that contain Chinese text (label, narration, feedback, feedback_wrong, test_hint, explore_desc, slide_narration, slide_narration_test, slide_narration_explore, completion_message). Return only valid JSON:\n\n${regJson}`
             );
             const transRegStr = transRegResult.response.text().trim().replace(/^```json\s*/, '').replace(/```$/, '').trim();
-            JSON.parse(transRegStr); // validate
+            JSON.parse(transRegStr);
             await db.prepare('UPDATE slide_translations SET regions_json=? WHERE slide_id=? AND lang=?')
               .run(transRegStr, slide.id, target_lang);
           } catch (e) { console.warn(`[Translate] regions_json for slide ${slide.id}:`, e.message); }
         }
+      };
 
-        // TTS generation moved to separate "generate-lang-tts" API for speed
-        doneItems++;
+      // Run slides in batches of CONCURRENCY
+      for (let i = 0; i < slides.length; i += CONCURRENCY) {
+        const batch = slides.slice(i, i + CONCURRENCY);
+        await Promise.all(batch.map(s => translateSlide(s).catch(e => console.warn(`[Translate] slide ${s.id}:`, e.message))));
+        slidesDone += batch.length;
+        doneItems += batch.length;
+        send('progress', { current: doneItems, total: totalItems, step: `翻譯投影片 ${slidesDone}/${totalSlides}...`, slides_done: slidesDone, slides_total: totalSlides });
       }
     }
 
