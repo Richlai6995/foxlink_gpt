@@ -3483,10 +3483,14 @@ router.post('/courses/:id/translate', loadCoursePermission, requirePermission('o
     const totalItems = 1 + lessons.length + totalSlides + questions.length; // course + lessons + slides + questions
     let doneItems = 0;
 
-    // 1. Course metadata
+    const CONCURRENCY = 3;
+
+    // 1. Course metadata — title + description in 1 call
     send('progress', { current: doneItems, total: totalItems, step: '翻譯課程標題...' });
-    const titleTrans = await translateText(course.title);
-    const descTrans = await translateText(course.description);
+    const [titleTrans, descTrans] = await Promise.all([
+      translateText(course.title),
+      translateText(course.description)
+    ]);
     const existingCT = await db.prepare('SELECT id FROM course_translations WHERE course_id=? AND lang=?').get(req.courseId, target_lang);
     if (existingCT) {
       await db.prepare('UPDATE course_translations SET title=?, description=?, translated_at=SYSTIMESTAMP, is_auto=1 WHERE id=?')
@@ -3498,22 +3502,26 @@ router.post('/courses/:id/translate', loadCoursePermission, requirePermission('o
     doneItems++;
     send('progress', { current: doneItems, total: totalItems, step: '課程標題完成' });
 
-    // 2. Lessons + slides
+    // 2. Lessons (titles parallel) + slides
+    // Translate all lesson titles in parallel first
+    send('progress', { current: doneItems, total: totalItems, step: `翻譯 ${lessons.length} 個章節標題...` });
+    await Promise.all(lessons.map(async (lesson) => {
+      try {
+        const lt = await translateText(lesson.title);
+        const existingLT = await db.prepare('SELECT id FROM lesson_translations WHERE lesson_id=? AND lang=?').get(lesson.id, target_lang);
+        if (existingLT) {
+          await db.prepare('UPDATE lesson_translations SET title=?, translated_at=SYSTIMESTAMP, is_auto=1 WHERE id=?').run(lt, existingLT.id);
+        } else {
+          await db.prepare('INSERT INTO lesson_translations (lesson_id, lang, title, is_auto) VALUES (?,?,?,1)').run(lesson.id, target_lang, lt);
+        }
+      } catch (e) { console.warn(`[Translate] lesson ${lesson.id}:`, e.message); }
+    }));
+    doneItems += lessons.length;
+
     let slidesDone = 0;
     for (const lesson of lessons) {
-      send('progress', { current: doneItems, total: totalItems, step: `翻譯章節「${lesson.title}」...` });
-      const lt = await translateText(lesson.title);
-      const existingLT = await db.prepare('SELECT id FROM lesson_translations WHERE lesson_id=? AND lang=?').get(lesson.id, target_lang);
-      if (existingLT) {
-        await db.prepare('UPDATE lesson_translations SET title=?, translated_at=SYSTIMESTAMP, is_auto=1 WHERE id=?').run(lt, existingLT.id);
-      } else {
-        await db.prepare('INSERT INTO lesson_translations (lesson_id, lang, title, is_auto) VALUES (?,?,?,1)').run(lesson.id, target_lang, lt);
-      }
-      doneItems++;
-
       // Translate slides in parallel (concurrency=3) for speed
       const slides = lessonSlideMap[lesson.id] || [];
-      const CONCURRENCY = 3;
       const translateSlide = async (slide) => {
         let translatedContent = null;
         let translatedNotes = null;
@@ -3586,16 +3594,19 @@ Return only valid JSON.`
       }
     }
 
-    // 3. Quiz
-    for (let qi = 0; qi < questions.length; qi++) {
-      const q = questions[qi];
-      send('progress', { current: doneItems, total: totalItems, step: `翻譯題目 ${qi + 1}/${questions.length}...` });
+    // 3. Quiz — parallel in batches of 3
+    const translateQuiz = async (q) => {
       try {
-        const transQ = await model.generateContent(
-          `Translate the text values in this JSON from Traditional Chinese to ${langName}. Keep JSON structure unchanged. Return only valid JSON:\n\n${q.question_json}`
+        // Merge question_json + explanation into 1 LLM call
+        const combined = await model.generateContent(
+          `Translate from Traditional Chinese to ${langName}. Return JSON with two keys: "question_json" (translated JSON) and "explanation" (translated text).
+Input: {"question_json": ${q.question_json}, "explanation": ${JSON.stringify(q.explanation || '')}}
+Return only valid JSON.`
         );
-        let translatedQ = transQ.response.text().trim().replace(/^```json\s*/,'').replace(/```$/,'').trim();
-        const translatedExp = await translateText(q.explanation);
+        const raw = combined.response.text().trim().replace(/^```json\s*/, '').replace(/```$/, '').trim();
+        const parsed = JSON.parse(raw);
+        const translatedQ = typeof parsed.question_json === 'string' ? parsed.question_json : JSON.stringify(parsed.question_json);
+        const translatedExp = parsed.explanation || null;
 
         const existingQT = await db.prepare('SELECT id FROM quiz_translations WHERE question_id=? AND lang=?').get(q.id, target_lang);
         if (existingQT) {
@@ -3606,7 +3617,12 @@ Return only valid JSON.`
             .run(q.id, target_lang, translatedQ, translatedExp);
         }
       } catch (err) { console.warn(`[Translate] question ${q.id} failed:`, err.message); }
-      doneItems++;
+    };
+    for (let i = 0; i < questions.length; i += CONCURRENCY) {
+      const batch = questions.slice(i, i + CONCURRENCY);
+      send('progress', { current: doneItems, total: totalItems, step: `翻譯題目 ${i + 1}-${Math.min(i + CONCURRENCY, questions.length)}/${questions.length}...` });
+      await Promise.all(batch.map(q => translateQuiz(q)));
+      doneItems += batch.length;
     }
 
     send('done', { ok: true, translated: { lessons: lessons.length, slides: totalSlides, questions: questions.length } });
@@ -4251,11 +4267,10 @@ router.post('/ai/batch-analyze', upload.array('screenshots', 50), async (req, re
     ).get();
     const model = genAI.getGenerativeModel({ model: flashRow?.api_model || 'gemini-2.0-flash' });
 
-    const results = [];
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i];
+    // Parallel analysis in batches of 3
+    const BATCH = 3;
+    const analyzeOne = async (file, i) => {
       const imageBase64 = fs.readFileSync(file.path).toString('base64');
-
       const prompt = `分析這張系統操作截圖（第 ${i + 1}/${files.length} 張）。
 識別所有可互動的 UI 元素，回傳 JSON：
 {
@@ -4264,7 +4279,6 @@ router.post('/ai/batch-analyze', upload.array('screenshots', 50), async (req, re
   "narration": "旁白文字（口語化）"
 }
 只回傳 JSON。`;
-
       try {
         const result = await model.generateContent([
           { inlineData: { mimeType: file.mimetype, data: imageBase64 } },
@@ -4273,13 +4287,19 @@ router.post('/ai/batch-analyze', upload.array('screenshots', 50), async (req, re
         const text = result.response.text();
         const jsonMatch = text.match(/\{[\s\S]*\}/);
         const parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : { regions: [], instruction: '', narration: '' };
-        results.push({ index: i, filename: file.originalname, ...parsed });
+        return { index: i, filename: file.originalname, ...parsed };
       } catch (err) {
-        results.push({ index: i, filename: file.originalname, error: err.message, regions: [] });
+        return { index: i, filename: file.originalname, error: err.message, regions: [] };
+      } finally {
+        try { fs.unlinkSync(file.path); } catch {}
       }
+    };
 
-      // Cleanup
-      try { fs.unlinkSync(file.path); } catch {}
+    const results = [];
+    for (let i = 0; i < files.length; i += BATCH) {
+      const batch = files.slice(i, i + BATCH);
+      const batchResults = await Promise.all(batch.map((f, j) => analyzeOne(f, i + j)));
+      results.push(...batchResults);
     }
 
     res.json({ results, total: files.length });
@@ -4554,13 +4574,17 @@ router.post('/recording/:sessionId/analyze', async (req, res) => {
     ).get();
     const model = genAI.getGenerativeModel({ model: flashRow?.api_model || 'gemini-2.0-flash' });
 
+    // Parallel analysis in batches of 3
+    const BATCH = 3;
     let analyzed = 0;
-    for (const step of steps) {
-      if (!step.screenshot_url) continue;
+    const validSteps = steps.filter(s => {
+      if (!s.screenshot_url) return false;
+      const fp = path.join(uploadDir, s.screenshot_url.replace('/api/training/files/', ''));
+      return fs.existsSync(fp);
+    });
 
-      // Read screenshot
+    const analyzeStep = async (step) => {
       const filePath = path.join(uploadDir, step.screenshot_url.replace('/api/training/files/', ''));
-      if (!fs.existsSync(filePath)) continue;
       const imageBase64 = fs.readFileSync(filePath).toString('base64');
 
       const elementInfo = step.element_json ? JSON.parse(step.element_json) : null;
@@ -4598,6 +4622,11 @@ router.post('/recording/:sessionId/analyze', async (req, res) => {
       } catch (err) {
         console.warn(`[Recording] analyze step ${step.step_number}:`, err.message);
       }
+    };
+
+    for (let i = 0; i < validSteps.length; i += BATCH) {
+      const batch = validSteps.slice(i, i + BATCH);
+      await Promise.all(batch.map(s => analyzeStep(s)));
     }
 
     await db.prepare(
