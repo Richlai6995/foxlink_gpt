@@ -14,7 +14,9 @@ metadata:
     # 併發連線優化
     nginx.ingress.kubernetes.io/upstream-keepalive-connections: "100"
     nginx.ingress.kubernetes.io/proxy-next-upstream-timeout: "5"
-    nginx.ingress.kubernetes.io/limit-connections: "50"
+    # ⚠️ 不要加 limit-connections! ingress 看到的 client IP 都是 K8s NAT 後的同一個 (10.244.x.x)，
+    # 全公司用戶會共用同一個 conn quota，瞬間爆 503。
+    # 若要做限流，改用 limit-rps (request rate)，或先設定 externalTrafficPolicy: Local 拿到真實 client IP。
 spec:
   ingressClassName: nginx
   tls:

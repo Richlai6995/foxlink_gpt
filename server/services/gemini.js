@@ -652,9 +652,9 @@ async function generateWithToolsStream(
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
     const result = await model.generateContentStream({ contents });
 
-    // ⭐ 從 raw candidates 收集 parts，保留 thoughtSignature
-    // streaming 時同 index 的 text part 會跨多個 chunk，需累積；其他 part type 取代
-    const partsByIndex = new Map();
+    // ⭐ 模仿 SDK aggregateResponses 邏輯:每個 chunk 把所有 parts 合併成一個 newPart 然後 push,
+    // 但保留 SDK 會丟掉的 thought / thoughtSignature 欄位(這就是原本 bug 根源)。
+    const allParts = [];
     let finishReason = null;
 
     for await (const chunk of result.stream) {
@@ -663,25 +663,44 @@ async function generateWithToolsStream(
       if (cand.finishReason) finishReason = cand.finishReason;
 
       const chunkParts = cand.content?.parts || [];
-      chunkParts.forEach((p, i) => {
+      if (chunkParts.length === 0) continue;
+
+      // 把這個 chunk 的所有 parts 合併成一個 newPart(同 SDK 行為)
+      const newPart = {};
+      for (const p of chunkParts) {
         if (p.text != null) {
-          const existing = partsByIndex.get(i);
-          if (existing && existing.text != null && !existing.functionCall) {
-            existing.text += p.text;
-            if (p.thoughtSignature) existing.thoughtSignature = p.thoughtSignature;
-          } else {
-            partsByIndex.set(i, { ...p });
-          }
-          if (!p.thought) {  // 不要把 thinking 內容串到使用者輸出
-            fullText += p.text;
-            onChunk(p.text);
-          }
-        } else {
-          // functionCall / inlineData / 其他 — 整個取代
-          partsByIndex.set(i, { ...p });
+          newPart.text = p.text;
+          if (p.thought) newPart.thought = true;
         }
-      });
+        if (p.functionCall) newPart.functionCall = p.functionCall;
+        if (p.inlineData) newPart.inlineData = p.inlineData;
+        if (p.executableCode) newPart.executableCode = p.executableCode;
+        if (p.codeExecutionResult) newPart.codeExecutionResult = p.codeExecutionResult;
+        // ⭐ SDK 會丟掉的欄位 — 必須保留
+        if (p.thoughtSignature) newPart.thoughtSignature = p.thoughtSignature;
+      }
+
+      if (Object.keys(newPart).length === 0) continue;
+      allParts.push(newPart);
+
+      // 串流非 thought 文字給使用者
+      if (newPart.text != null && !newPart.thought) {
+        fullText += newPart.text;
+        onChunk(newPart.text);
+      }
     }
+
+    // Debug: log model turn 結構,方便排查 functionCall 為什麼沒被偵測到
+    console.log(`[Gemini][round=${round}] parts=${allParts.length} structure=${
+      allParts.map((p, i) => {
+        const tags = [];
+        if (p.text != null) tags.push(`text(${p.text.length})`);
+        if (p.thought) tags.push('thought');
+        if (p.functionCall) tags.push(`fnCall:${p.functionCall.name}`);
+        if (p.thoughtSignature) tags.push('sig');
+        return `[${i}:${tags.join('+') || 'empty'}]`;
+      }).join(' ')
+    } finishReason=${finishReason}`);
 
     if (finishReason === 'MAX_TOKENS') {
       const msg = '\n\n[⚠️ 回應已達最大 Token 上限，內容可能不完整]';
@@ -697,18 +716,13 @@ async function generateWithToolsStream(
     inputTokens += usage.promptTokenCount || 0;
     outputTokens += usage.candidatesTokenCount || 0;
 
-    // 組出完整 model turn（按 index 排序）
-    const modelParts = [...partsByIndex.entries()]
-      .sort((a, b) => a[0] - b[0])
-      .map(([, p]) => p);
-
-    // ⭐ 關鍵：原樣 append 回 contents，thoughtSignature 還在
-    if (modelParts.length > 0) {
-      contents.push({ role: 'model', parts: modelParts });
+    // ⭐ 關鍵:原樣 append 回 contents,thoughtSignature 還在
+    if (allParts.length > 0) {
+      contents.push({ role: 'model', parts: allParts });
     }
 
-    // 從 modelParts 抓 functionCall（不用 response.functionCalls()）
-    const fnCalls = modelParts
+    // 從 allParts 抓 functionCall(不用 response.functionCalls(),那個會掉 signature)
+    const fnCalls = allParts
       .filter(p => p.functionCall)
       .map(p => p.functionCall);
 
