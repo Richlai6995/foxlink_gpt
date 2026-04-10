@@ -16,7 +16,7 @@ const SYSTEM_PROMPT = `You are a professional technical document translator. You
 ## Rules:
 1. Translate all text values from Traditional Chinese (繁體中文) to the target language
 2. **DO NOT translate** these proper nouns — keep them exactly as-is:
-   - Product names: Foxlink GPT, Cortex, DIFY, MCP, AOAI, Gemini, Oracle, Webex
+   - Product names: Cortex, DIFY, MCP, AOAI, Gemini, Oracle, Webex
    - Technical terms: SSO, LDAP, AD, API, Token, Schema, ETL, PDF, Word, Excel, PPT, PPTX, TXT, SMTP, KB, LLM, System Prompt, Function Calling, Flash, Pro, Session, Fork, Badge, Dashboard, Markdown, Code Runner, URL, JSON, ZIP, CSV
    - Model names: GPT-4o, GPT-4o-mini, gemini-3-pro-preview, gemini-3-flash-preview, gemini-2.5-flash-preview, Imagen 3
 3. Preserve **markdown formatting**: **bold**, \`code\`, etc.

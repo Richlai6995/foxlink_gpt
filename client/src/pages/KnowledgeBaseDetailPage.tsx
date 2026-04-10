@@ -174,7 +174,7 @@ export default function KnowledgeBaseDetailPage() {
           <div className="w-7 h-7 bg-blue-600 rounded-lg flex items-center justify-center">
             <Cpu size={14} className="text-white" />
           </div>
-          <span className="font-bold">Foxlink GPT to Cortex</span>
+          <span className="font-bold">Cortex</span>
           <span className="text-slate-500 text-sm">/ {t('kb.detail.breadcrumbKb')} /</span>
           <span className="text-white text-sm">{kb.name}</span>
         </div>

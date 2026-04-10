@@ -610,10 +610,10 @@ router.post('/forgot-password', async (req, res) => {
     const { sendMail } = require('../services/mailService');
     await sendMail({
       to: user.email,
-      subject: '【FOXLINK GPT】密碼重置請求',
+      subject: '[Cortex] 密碼重置請求',
       html: `
         <div style="font-family:sans-serif;max-width:480px;margin:0 auto">
-          <h2 style="color:#1e40af">FOXLINK GPT 密碼重置</h2>
+          <h2 style="color:#1e40af">Cortex 密碼重置</h2>
           <p>您好 <strong>${user.name || user.username}</strong>，</p>
           <p>我們收到您的密碼重置請求，請點擊下方連結設定新密碼（有效期限 1 小時）：</p>
           <p style="margin:24px 0">

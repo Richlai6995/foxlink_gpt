@@ -733,8 +733,8 @@ router.post('/mail-settings/test', async (req, res) => {
     if (!to) return res.status(400).json({ error: '請輸入收件人' });
     const ok = await sendMail({
       to,
-      subject: '[FOXLINK GPT] 郵件測試',
-      text: '這是 FOXLINK GPT 的郵件設定測試信件。',
+      subject: '[Cortex] 郵件測試',
+      text: '這是 Cortex 的郵件設定測試信件。',
     });
     res.json({ success: ok });
   } catch (e) {

@@ -44,19 +44,19 @@ const MAX_WEBEX_CHARS = 4000; // Webex 實際限制 ~7439 bytes，留餘裕
 const WEBEX_I18N = {
   // 帳號拒絕 — not_found（無 user，三語全發）
   not_found: (email) => [
-    `⚠️ 無法串連 Foxlink GPT to Cortex 帳號（${email}），以下為可能原因：`,
+    `⚠️ 無法串連 Cortex 帳號（${email}），以下為可能原因：`,
     `1. 尚未登入過網頁系統產生帳號，請先透過公司內網登入：https://flgpt.foxlink.com.tw:8443`,
     `2. 可能帳號無 email 資訊`,
     `3. 網路連線問題`,
     `請檢查以上原因或是洽廠區資訊處理`,
     ``,
-    `⚠️ Unable to link Foxlink GPT to Cortex account (${email}). Possible reasons:`,
+    `⚠️ Unable to link Cortex account (${email}). Possible reasons:`,
     `1. You have not logged into the web system to create an account. Please log in via the company intranet first: https://flgpt.foxlink.com.tw:8443`,
     `2. Your account may not have email information.`,
     `3. Network connection issue.`,
     `Please check the above or contact your local IT department.`,
     ``,
-    `⚠️ Không thể liên kết tài khoản Foxlink GPT to Cortex (${email}). Nguyên nhân có thể:`,
+    `⚠️ Không thể liên kết tài khoản Cortex (${email}). Nguyên nhân có thể:`,
     `1. Bạn chưa đăng nhập vào hệ thống web để tạo tài khoản. Vui lòng đăng nhập qua mạng nội bộ công ty trước: https://flgpt.foxlink.com.tw:8443`,
     `2. Tài khoản có thể không có thông tin email.`,
     `3. Sự cố kết nối mạng.`,
@@ -132,7 +132,7 @@ const WEBEX_I18N = {
   // /help
   help: {
     'zh-TW': [
-      '🤖 **FOXLINK GPT Bot 使用說明**\n',
+      '🤖 **Cortex Bot 使用說明**\n',
       '📌 **指令**：',
       '• `?` — 查看您的可用工具清單',
       '• `/new` — 開啟新對話（清除記憶）',
@@ -146,7 +146,7 @@ const WEBEX_I18N = {
       '• 回覆約需 10-30 秒，請稍候',
     ].join('\n'),
     'en': [
-      '🤖 **FOXLINK GPT Bot User Guide**\n',
+      '🤖 **Cortex Bot User Guide**\n',
       '📌 **Commands**:',
       '• `?` — View your available tools',
       '• `/new` — Start a new conversation (clear memory)',
@@ -160,7 +160,7 @@ const WEBEX_I18N = {
       '• Replies may take 10-30 seconds, please wait',
     ].join('\n'),
     'vi': [
-      '🤖 **Hướng dẫn sử dụng FOXLINK GPT Bot**\n',
+      '🤖 **Hướng dẫn sử dụng Cortex Bot**\n',
       '📌 **Lệnh**:',
       '• `?` — Xem danh sách công cụ khả dụng',
       '• `/new` — Bắt đầu cuộc trò chuyện mới (xóa bộ nhớ)',

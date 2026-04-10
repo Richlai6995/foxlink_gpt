@@ -333,7 +333,7 @@ router.post('/tickets/:id/messages', upload.array('files', 5), async (req, res) 
         if (senderRole === 'admin' && ticket.applicant_email) {
           await sendMail({
             to: ticket.applicant_email,
-            subject: `[FOXLINK GPT] 工單回覆 ${ticket.ticket_no} - ${ticket.subject}`,
+            subject: `[Cortex] 工單回覆 ${ticket.ticket_no} - ${ticket.subject}`,
             html: `
               <h3>工單回覆</h3>
               <p><b>單號：</b>${ticket.ticket_no}</p>

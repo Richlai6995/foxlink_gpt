@@ -23,7 +23,7 @@ async function sendWebhook(url, type, message, severity) {
       const emojiMap = { warning: '⚠️', critical: '🔴', emergency: '🚨' };
       const emoji = emojiMap[severity] || '🔴';
       const body = {
-        markdown: `${emoji} **[FOXLINK GPT] ${severity.toUpperCase()} Alert**\n\n${message}`,
+        markdown: `${emoji} **[Cortex] ${severity.toUpperCase()} Alert**\n\n${message}`,
       };
       const res = await fetch(url, {
         method: 'POST',
@@ -39,9 +39,9 @@ async function sendWebhook(url, type, message, severity) {
         '@type': 'MessageCard',
         '@context': 'http://schema.org/extensions',
         themeColor: colorMap[severity] || 'FF0000',
-        summary: `[FOXLINK GPT] ${severity.toUpperCase()} Alert`,
+        summary: `[Cortex] ${severity.toUpperCase()} Alert`,
         sections: [{
-          activityTitle: `[FOXLINK GPT] ${severity.toUpperCase()} Alert`,
+          activityTitle: `[Cortex] ${severity.toUpperCase()} Alert`,
           text: message,
           markdown: true,
         }],
@@ -82,7 +82,7 @@ async function notifyAlert({ db, alertType, severity, resourceName, message, las
         const severityLabel = severity === 'emergency' ? '🔴 EMERGENCY' : '🟠 CRITICAL';
         await sendMail({
           to: adminEmails.join(','),
-          subject: `[FOXLINK GPT Monitor] ${severityLabel} - ${alertType}`,
+          subject: `[Cortex Monitor] ${severityLabel} - ${alertType}`,
           html: `
             <h3>${severityLabel} Alert</h3>
             <p><b>Type:</b> ${alertType}</p>

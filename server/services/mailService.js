@@ -58,7 +58,7 @@ async function notifyAdminSensitiveKeyword({ user, content, keywords, sessionId 
   const adminEmail = process.env.ADMIN_NOTIFY_EMAIL || process.env.FROM_ADDRESS;
   if (!adminEmail) return;
 
-  const subject = `[FOXLINK GPT] 敏感詞彙警示 - 使用者: ${user.name || user.username}`;
+  const subject = `[Cortex] 敏感詞彙警示 - 使用者: ${user.name || user.username}`;
   const html = `
     <h3>偵測到敏感詞彙</h3>
     <p><strong>使用者:</strong> ${user.name || user.username} (${user.username})</p>

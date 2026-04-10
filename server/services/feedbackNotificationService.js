@@ -19,7 +19,7 @@ async function sendTicketEmail(db, type, ticket, extra = {}) {
     const templates = {
       new_ticket: {
         to: () => process.env.ADMIN_NOTIFY_EMAIL,
-        subject: () => `[FOXLINK GPT] 新問題反饋 ${ticket.ticket_no} - ${escapeHtml(ticket.subject)}`,
+        subject: () => `[Cortex] 新問題反饋 ${ticket.ticket_no} - ${escapeHtml(ticket.subject)}`,
         html: () => `
           <h3>新問題反饋</h3>
           <table style="border-collapse:collapse">
@@ -34,7 +34,7 @@ async function sendTicketEmail(db, type, ticket, extra = {}) {
       },
       resolved: {
         to: () => ticket.applicant_email,
-        subject: () => `[FOXLINK GPT] 工單已解決 ${ticket.ticket_no}`,
+        subject: () => `[Cortex] 工單已解決 ${ticket.ticket_no}`,
         html: () => `
           <h3>工單已解決</h3>
           <p><b>單號：</b>${escapeHtml(ticket.ticket_no)}</p>
@@ -44,7 +44,7 @@ async function sendTicketEmail(db, type, ticket, extra = {}) {
       },
       reopened: {
         to: () => process.env.ADMIN_NOTIFY_EMAIL,
-        subject: () => `[FOXLINK GPT] 工單重開 ${ticket.ticket_no}`,
+        subject: () => `[Cortex] 工單重開 ${ticket.ticket_no}`,
         html: () => `
           <h3>工單重開</h3>
           <p><b>單號：</b>${escapeHtml(ticket.ticket_no)}</p>
@@ -134,7 +134,7 @@ async function ensureFeedbackWebexRoom() {
     }
 
     // 3. 建立新 room
-    const room = await webex.createRoom('FOXLINK GPT - 問題反饋通知');
+    const room = await webex.createRoom('Cortex - 問題反饋通知');
     roomId = room.id;
     console.log(`[FeedbackNotif] Created Webex room: ${roomId}`);
 

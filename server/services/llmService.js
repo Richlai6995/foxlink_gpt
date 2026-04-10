@@ -199,7 +199,7 @@ async function streamChatAoai(modelRow, history, userParts, onChunk, extraSystem
 
   // System prompt
   const systemPrompt = [
-    '你是 FOXLINK GPT，一個企業智能助手。請以清晰、專業的繁體中文回答問題，並使用 Markdown 格式化輸出。',
+    '你是 Cortex，一個企業智能助手。請以清晰、專業的繁體中文回答問題，並使用 Markdown 格式化輸出。',
     extraSystem,
   ].filter(Boolean).join('\n\n---\n\n');
   messages.push({ role: 'system', content: systemPrompt });

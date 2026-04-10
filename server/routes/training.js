@@ -2127,7 +2127,7 @@ router.post('/courses/:id/ai-tutor', loadCoursePermission, async (req, res) => {
     }
 
     const course = await db.prepare('SELECT title, description FROM courses WHERE id=?').get(req.courseId);
-    const systemPrompt = `你是 FOXLINK GPT 教育訓練平台的 AI 助教。
+    const systemPrompt = `你是 Cortex 教育訓練平台的 AI 助教。
 學員正在學習課程「${course?.title || ''}」。
 ${slideContent ? `\n當前投影片內容：\n${slideContent}\n` : ''}
 規則：

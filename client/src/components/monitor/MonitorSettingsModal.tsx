@@ -68,13 +68,13 @@ export default function MonitorSettingsModal({ open, onClose }: Props) {
             'Authorization': `Bearer ${url}`,
             'Content-Type': 'application/x-www-form-urlencoded',
           },
-          body: new URLSearchParams({ message: '\n[TEST] Foxlink GPT to Cortex Monitor 測試通知' }),
+          body: new URLSearchParams({ message: '\n[TEST] Cortex Monitor 測試通知' }),
         })
       } else if (type === 'webex') {
         await fetch(url, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ markdown: '✅ **[TEST] Foxlink GPT to Cortex Monitor**\n\n這是一則測試通知' }),
+          body: JSON.stringify({ markdown: '✅ **[TEST] Cortex Monitor**\n\n這是一則測試通知' }),
         })
       } else {
         await fetch(url, {
@@ -83,8 +83,8 @@ export default function MonitorSettingsModal({ open, onClose }: Props) {
           body: JSON.stringify({
             '@type': 'MessageCard',
             themeColor: '0076D7',
-            summary: '[TEST] Foxlink GPT to Cortex Monitor',
-            sections: [{ activityTitle: '[TEST] Foxlink GPT to Cortex Monitor', text: '這是一則測試通知', markdown: true }],
+            summary: '[TEST] Cortex Monitor',
+            sections: [{ activityTitle: '[TEST] Cortex Monitor', text: '這是一則測試通知', markdown: true }],
           }),
         })
       }

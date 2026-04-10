@@ -66,7 +66,7 @@ async function notifyDeparture(user, changedFields) {
 
     await sendMail({
       to: adminEmail,
-      subject: `[FOXLINK GPT] 使用者組織異動通知 — ${user.employee_id} ${user.name || ''}`,
+      subject: `[Cortex] 使用者組織異動通知 — ${user.employee_id} ${user.name || ''}`,
       html: `
         <h3>⚠️ 使用者組織資料異動（可能含離職/調職）</h3>
         <p>工號：<b>${user.employee_id}</b>　姓名：<b>${user.name || ''}</b>　帳號：<b>${user.username || ''}</b></p>

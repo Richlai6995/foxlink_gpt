@@ -36,9 +36,9 @@ class WebexService {
     if (this._botDisplayName) return this._botDisplayName;
     try {
       const res = await this.client.get('/people/me');
-      this._botDisplayName = res.data.displayName || 'FOXLINK GPT';
+      this._botDisplayName = res.data.displayName || 'Cortex';
     } catch {
-      this._botDisplayName = 'FOXLINK GPT';
+      this._botDisplayName = 'Cortex';
     }
     return this._botDisplayName;
   }
