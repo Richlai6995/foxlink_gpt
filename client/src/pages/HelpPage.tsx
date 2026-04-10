@@ -3266,7 +3266,7 @@ function UserManual() {
               <div className="bg-white rounded p-3 text-xs font-mono text-slate-700 whitespace-pre-line mb-2">
                 {[
                   '⚠️ 無法串連 Foxlink GPT to Cortex 帳號，以下為可能原因：',
-                  '1. 尚未登入過網頁系統產生帳號，請進行第一次登入',
+                  '1. 尚未登入過網頁系統產生帳號，請先透過公司內網登入：https://flgpt.foxlink.com.tw:8443',
                   '2. 可能帳號無 email 資訊',
                   '3. 網路連線問題',
                   '請檢查以上原因或是洽廠區資訊處理',
