@@ -77,31 +77,22 @@ export default function ScreenshotAnnotator({ imageUrl, annotations: initial, st
   const imgRef = useRef<HTMLImageElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
 
-  // Keep SVG box (size + position) pixel-aligned with the actual rendered image,
-  // regardless of CSS max-w/max-h scaling, parent flex centering, or zoom.
-  // We MUST set left/top as well — `inset-0` would otherwise stretch/conflict with inline width/height.
+  // Track image natural aspect ratio (for X-stretch compensation on text/circles).
+  // Alignment between SVG and image is now handled purely in CSS (see wrapper structure below):
+  //   - wrapper is `inline-block` → its size shrink-wraps to the image
+  //   - SVG uses `absolute inset-0 w-full h-full` → fills exactly the wrapper = the image
+  // No JS pixel-pushing needed, which eliminates load-order/race-condition drift.
   useEffect(() => {
     const img = imgRef.current
     if (!img) return
-    const syncSize = () => {
-      const svg = svgRef.current
-      if (!svg || img.clientWidth <= 0) return
-      svg.style.width = img.clientWidth + 'px'
-      svg.style.height = img.clientHeight + 'px'
-      svg.style.left = img.offsetLeft + 'px'
-      svg.style.top = img.offsetTop + 'px'
-      svg.style.right = 'auto'
-      svg.style.bottom = 'auto'
+    const updateAspect = () => {
       if (img.naturalWidth && img.naturalHeight) {
         setImgAspect(img.naturalWidth / img.naturalHeight)
       }
     }
-    syncSize()
-    const ro = new ResizeObserver(syncSize)
-    ro.observe(img)
-    // Also sync when the image element actually finishes loading (covers cached + late-load cases)
-    img.addEventListener('load', syncSize)
-    return () => { ro.disconnect(); img.removeEventListener('load', syncSize) }
+    if (img.complete) updateAspect()
+    img.addEventListener('load', updateAspect)
+    return () => img.removeEventListener('load', updateAspect)
   }, [imageUrl])
 
   // Convert client coords to percentage (0-100)
@@ -458,21 +449,32 @@ export default function ScreenshotAnnotator({ imageUrl, annotations: initial, st
 
     switch (a.type) {
       case 'number': {
-        // Use aspect-ratio compensated ellipse so it appears as a circle
-        const baseR = 1.4
-        const { rx, ry } = circleR(baseR)
-        const selRx = isSelected ? rx * 1.25 : rx
-        const selRy = isSelected ? ry * 1.25 : ry
-        const numFontSize = Math.min(rx, ry) * 1.3
+        // baseR is in viewBox-Y units. rx is X-compensated so the ellipse renders as a true circle
+        // (because preserveAspectRatio="none" stretches X by imgAspect).
+        const baseR = 2.4
+        const rx = baseR / imgAspect
+        const ry = baseR
+        const selRx = isSelected ? rx * 1.2 : rx
+        const selRy = isSelected ? ry * 1.2 : ry
+        // fontSize lives in viewBox-Y units; the X stretch is countered by the inverse-scale transform on <text>
+        // so the digit renders as a true square glyph (not squashed flat).
+        const numFontSize = baseR * 1.6
+        const cx = a.coords.x, cy = a.coords.y
+        const compensateX = `translate(${cx} ${cy}) scale(${1 / imgAspect} 1) translate(${-cx} ${-cy})`
+        const labelX = cx + rx + 0.6
+        const labelY = cy + 0.4
+        const compensateLabelX = `translate(${labelX} ${labelY}) scale(${1 / imgAspect} 1) translate(${-labelX} ${-labelY})`
         return (
           <g key={a.id} onPointerDown={e => startDrag(e, a)} style={{ cursor }}>
-            <ellipse cx={a.coords.x} cy={a.coords.y} rx={selRx} ry={selRy}
-              fill={a.color || '#ef4444'} stroke={isSelected ? '#fff' : '#0003'} strokeWidth={0.15} />
-            <text x={a.coords.x} y={a.coords.y} fill="#fff" fontSize={numFontSize} textAnchor="middle"
+            <ellipse cx={cx} cy={cy} rx={selRx} ry={selRy}
+              fill={a.color || '#ef4444'} stroke={isSelected ? '#fff' : '#0006'} strokeWidth={0.25} />
+            <text x={cx} y={cy} transform={compensateX}
+              fill="#fff" fontSize={numFontSize} textAnchor="middle"
               dominantBaseline="central" fontWeight="bold" fontFamily="sans-serif"
               style={{ pointerEvents: 'none' }}>{a.stepNumber}</text>
-            {a.label && <text x={a.coords.x + rx + 1} y={a.coords.y + 0.3} fill={a.color || '#ef4444'}
-              fontSize="1.4" fontWeight="600" fontFamily="sans-serif" stroke="#000" strokeWidth="0.08"
+            {a.label && <text x={labelX} y={labelY} transform={compensateLabelX}
+              fill={a.color || '#ef4444'}
+              fontSize="1.8" fontWeight="600" fontFamily="sans-serif" stroke="#000" strokeWidth="0.12"
               paintOrder="stroke" style={{ pointerEvents: 'none' }}>{a.label}</text>}
           </g>
         )
@@ -494,19 +496,24 @@ export default function ScreenshotAnnotator({ imageUrl, annotations: initial, st
               x1={a.coords.x} y1={a.coords.y} x2={a.coords.x2 ?? a.coords.x + 10} y2={a.coords.y2 ?? a.coords.y}
               stroke={a.color || '#3b82f6'} strokeWidth={sw} markerEnd="url(#annot-arrowhead)"
               strokeDasharray={selDash} />
-            {a.label && <text
-              x={((a.coords.x + (a.coords.x2 ?? a.coords.x + 10)) / 2)}
-              y={((a.coords.y + (a.coords.y2 ?? a.coords.y)) / 2) - 1}
-              fill={a.color || '#3b82f6'} fontSize="1.4" textAnchor="middle" fontWeight="600"
-              fontFamily="sans-serif" stroke="#000" strokeWidth="0.08" paintOrder="stroke"
-              style={{ pointerEvents: 'none' }}>{a.label}</text>}
+            {a.label && (() => {
+              const lx = (a.coords.x + (a.coords.x2 ?? a.coords.x + 10)) / 2
+              const ly = (a.coords.y + (a.coords.y2 ?? a.coords.y)) / 2 - 1
+              return <text x={lx} y={ly}
+                transform={`translate(${lx} ${ly}) scale(${1 / imgAspect} 1) translate(${-lx} ${-ly})`}
+                fill={a.color || '#3b82f6'} fontSize="1.6" textAnchor="middle" fontWeight="600"
+                fontFamily="sans-serif" stroke="#000" strokeWidth="0.1" paintOrder="stroke"
+                style={{ pointerEvents: 'none' }}>{a.label}</text>
+            })()}
           </g>
         )
       case 'text': {
         const fs = a.strokeWidth || 2 // reuse strokeWidth as fontSize for text
         return <text key={a.id} onPointerDown={e => startDrag(e, a)} style={{ cursor }}
-          x={a.coords.x} y={a.coords.y} fill={a.color || '#eab308'} fontSize={fs} fontWeight="600"
-          fontFamily="sans-serif" stroke="#000" strokeWidth="0.1" paintOrder="stroke"
+          x={a.coords.x} y={a.coords.y}
+          transform={`translate(${a.coords.x} ${a.coords.y}) scale(${1 / imgAspect} 1) translate(${-a.coords.x} ${-a.coords.y})`}
+          fill={a.color || '#eab308'} fontSize={fs} fontWeight="600"
+          fontFamily="sans-serif" stroke="#000" strokeWidth="0.12" paintOrder="stroke"
           textDecoration={isSelected ? 'underline' : undefined}>{a.label}</text>
       }
       case 'freehand': {
@@ -746,14 +753,18 @@ export default function ScreenshotAnnotator({ imageUrl, annotations: initial, st
 
       {/* Canvas area */}
       <div className="flex-1 flex items-center justify-center overflow-hidden p-4">
-        <div className="relative max-w-full max-h-full"
+        {/* relative + inline-block wrapper shrink-wraps to the image's actual rendered size,
+            so the SVG with `inset-0 w-full h-full` is guaranteed to fill exactly the image box —
+            no JS needed, no race conditions, no drift. */}
+        <div className="relative inline-block"
           style={{ cursor: tool === 'move' ? 'default' : tool === 'text' ? 'text' : 'crosshair' }}>
-          <img ref={imgRef} src={imageUrl} alt="" className="max-w-[90vw] max-h-[85vh] rounded select-none"
-            draggable={false} style={{ display: 'block' }} />
+          <img ref={imgRef} src={imageUrl} alt=""
+            className="block max-w-[90vw] max-h-[80vh] rounded select-none"
+            draggable={false} />
 
-          {/* SVG overlay — width/height/left/top driven by useEffect to stay pixel-aligned with the img */}
+          {/* SVG overlay — purely CSS-aligned to the image via inset-0 fill of inline-block wrapper */}
           <svg ref={svgRef}
-            className="absolute"
+            className="absolute inset-0 w-full h-full"
             viewBox="0 0 100 100"
             preserveAspectRatio="none"
             style={{ pointerEvents: 'all' }}
