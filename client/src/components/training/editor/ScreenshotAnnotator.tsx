@@ -91,27 +91,27 @@ export default function ScreenshotAnnotator({ imageUrl, annotations: initial, st
       if (img.naturalWidth && img.naturalHeight) {
         setImgAspect(img.naturalWidth / img.naturalHeight)
       }
-      // Dev sanity check: SVG and image rects must be pixel-identical
-      if (import.meta.env.DEV && svgRef.current) {
+      // Always log (incl. prod) — needed for diagnosing alignment issues from user reports
+      if (svgRef.current) {
         const ir = img.getBoundingClientRect()
         const sr = svgRef.current.getBoundingClientRect()
         const drift = Math.max(Math.abs(ir.left - sr.left), Math.abs(ir.top - sr.top),
                                Math.abs(ir.width - sr.width), Math.abs(ir.height - sr.height))
-        console.log('[ScreenshotAnnotator] image natural=%dx%d render=%dx%d aspect=%s drift=%spx annots=%d',
+        console.log('[ScreenshotAnnotator] natural=%dx%d render=%dx%d aspect=%s drift=%spx annots=%d',
           img.naturalWidth, img.naturalHeight,
           Math.round(ir.width), Math.round(ir.height),
           (img.naturalWidth / img.naturalHeight).toFixed(3),
           drift.toFixed(2),
           initial?.length || 0)
         if (drift > 0.5) {
-          console.warn('[ScreenshotAnnotator] SVG/image misaligned!', { img: ir, svg: sr })
+          console.warn('[ScreenshotAnnotator] SVG/image MISALIGNED!', { imgRect: ir, svgRect: sr })
         }
         if (initial?.length) {
-          console.log('[ScreenshotAnnotator] initial annotations sample:', initial.slice(0, 3))
+          console.log('[ScreenshotAnnotator] initial annotations sample:', JSON.stringify(initial.slice(0, 3)))
         }
       }
     }
-    if (img.complete) updateAspect()
+    if (img.complete && img.naturalWidth) updateAspect()
     img.addEventListener('load', updateAspect)
     return () => img.removeEventListener('load', updateAspect)
   }, [imageUrl, initial])
@@ -775,23 +775,23 @@ export default function ScreenshotAnnotator({ imageUrl, annotations: initial, st
         </button>
       </div>
 
-      {/* Canvas area */}
-      <div className="flex-1 flex items-center justify-center overflow-hidden p-4">
-        {/* CSS Grid "stacking" pattern: image and SVG share grid cell (1,1).
-            Grid cell auto-sizes to image's intrinsic (max-w/max-h constrained) box,
-            so SVG with w-full h-full is guaranteed = image box. Robust against
-            inline-block blockification inside flex parents. */}
-        <div className="grid"
+      {/* Canvas area —
+          outer: `grid place-items-center` centers WITHOUT blockifying its child
+                 (flex would blockify inline-block children, breaking shrink-wrap)
+          inner: `relative` block that shrink-wraps to its only in-flow child (the img),
+                 because the SVG is `position: absolute` and removed from flow
+          result: wrapper size ≡ image actual rendered size, SVG inset-0 fills it exactly */}
+      <div className="flex-1 grid place-items-center overflow-hidden p-4 min-h-0">
+        <div className="relative"
           style={{ cursor: tool === 'move' ? 'default' : tool === 'text' ? 'text' : 'crosshair' }}>
           <img ref={imgRef} src={imageUrl} alt=""
             className="block max-w-[90vw] max-h-[80vh] rounded select-none"
-            style={{ gridColumn: '1 / 2', gridRow: '1 / 2' }}
             draggable={false} />
 
-          {/* SVG overlay — sits in same grid cell as image, so its box ≡ image box */}
+          {/* SVG overlay — absolute, removed from flow, so it doesn't fight wrapper sizing */}
           <svg ref={svgRef}
-            className="w-full h-full"
-            style={{ gridColumn: '1 / 2', gridRow: '1 / 2', pointerEvents: 'all' }}
+            className="absolute inset-0 w-full h-full"
+            style={{ pointerEvents: 'all' }}
             viewBox="0 0 100 100"
             preserveAspectRatio="none"
             onPointerDown={handlePointerDown}
@@ -823,15 +823,13 @@ export default function ScreenshotAnnotator({ imageUrl, annotations: initial, st
             {renderDrawingPreview()}
           </svg>
 
-          {/* Text input popup — sits in same grid cell so % positioning matches image box */}
+          {/* Text input popup — absolute % position relative to the wrapper (= image box) */}
           {textInput && (
-            <div className="relative z-10 pointer-events-none"
-              style={{ gridColumn: '1 / 2', gridRow: '1 / 2' }}>
-              <div className="absolute pointer-events-auto" style={{
-                left: `${textInput.x}%`,
-                top: `${textInput.y}%`,
-                transform: 'translate(-4px, -12px)',
-              }}>
+            <div className="absolute z-10" style={{
+              left: `${textInput.x}%`,
+              top: `${textInput.y}%`,
+              transform: 'translate(-4px, -12px)',
+            }}>
               <div className="flex items-center gap-1 bg-gray-900 rounded-lg shadow-lg border border-gray-600 p-1">
                 <input autoFocus value={textValue} onChange={e => setTextValue(e.target.value)}
                   onKeyDown={e => {
@@ -849,7 +847,6 @@ export default function ScreenshotAnnotator({ imageUrl, annotations: initial, st
                   className="p-1 rounded text-gray-400 hover:bg-gray-700">
                   <X size={14} />
                 </button>
-              </div>
               </div>
             </div>
           )}
