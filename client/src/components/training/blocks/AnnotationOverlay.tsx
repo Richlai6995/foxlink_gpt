@@ -40,6 +40,11 @@ interface AnnotationOverlayProps {
   animateInterval?: number;
   /** 選取回調 */
   onSelect?: (annotation: Annotation) => void;
+  /**
+   * 圖片 element ref — 用於把 SVG 尺寸/位置精準 sync 到圖片實際渲染區域。
+   * 沒給的話就退回 fill parent，但會有 aspect-ratio 偏移。
+   */
+  imgRef?: React.RefObject<HTMLImageElement | null>;
 }
 
 const AnnotationOverlay: React.FC<AnnotationOverlayProps> = ({
@@ -48,10 +53,36 @@ const AnnotationOverlay: React.FC<AnnotationOverlayProps> = ({
   interactive = false,
   animateInterval = 0,
   onSelect,
+  imgRef,
 }) => {
   // Animation: reveal annotations one by one
   const [revealCount, setRevealCount] = useState(0);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const svgRef = useRef<SVGSVGElement | null>(null);
+  const [imgAspect, setImgAspect] = useState(1);
+
+  // Sync SVG size + position to image actual render box (handles object-fit, zoom, resize)
+  useEffect(() => {
+    if (!imgRef?.current) return;
+    const img = imgRef.current;
+    const sync = () => {
+      const svg = svgRef.current;
+      if (!svg || !img.clientWidth) return;
+      // Position relative to nearest positioned ancestor (must be same as img's offsetParent)
+      svg.style.width = img.clientWidth + 'px';
+      svg.style.height = img.clientHeight + 'px';
+      svg.style.left = img.offsetLeft + 'px';
+      svg.style.top = img.offsetTop + 'px';
+      if (img.naturalWidth && img.naturalHeight) {
+        setImgAspect(img.naturalWidth / img.naturalHeight);
+      }
+    };
+    sync();
+    const ro = new ResizeObserver(sync);
+    ro.observe(img);
+    img.addEventListener('load', sync);
+    return () => { ro.disconnect(); img.removeEventListener('load', sync); };
+  }, [imgRef]);
 
   const visibleAnnotations = annotations?.filter(a => a.visible !== false) || [];
 
@@ -76,9 +107,16 @@ const AnnotationOverlay: React.FC<AnnotationOverlayProps> = ({
 
   const shownAnnotations = animateInterval > 0 ? visibleAnnotations.slice(0, revealCount) : visibleAnnotations;
 
+  // Aspect-compensated radii: counter the X-stretch from preserveAspectRatio="none"
+  // so circles look round and number badges aren't squashed.
+  const cxR = 2.2 / imgAspect; // number badge rx
+  const cyR = 2.2;             // number badge ry
+
   return (
     <svg
-      className="absolute inset-0 w-full h-full"
+      ref={svgRef}
+      // When imgRef is supplied we drive width/height/left/top via style; otherwise fall back to fill parent.
+      className={imgRef ? 'absolute pointer-events-none' : 'absolute inset-0 w-full h-full'}
       viewBox="0 0 100 100"
       preserveAspectRatio="none"
       style={{ pointerEvents: interactive ? 'auto' : 'none' }}
@@ -108,22 +146,27 @@ const AnnotationOverlay: React.FC<AnnotationOverlayProps> = ({
         const handleClick = interactive ? () => onSelect?.(a) : undefined;
 
         switch (a.type) {
-          case 'number':
+          case 'number': {
+            // Compensate X-stretch (preserveAspectRatio="none") for the badge & text only.
+            // Apply scale around the badge centre so position stays exact.
+            const compTxt = `translate(${a.coords.x} ${a.coords.y}) scale(${1 / imgAspect} 1) translate(${-a.coords.x} ${-a.coords.y})`;
             return (
               <g key={key} onClick={handleClick} style={{ cursor: interactive ? 'pointer' : undefined }}>
-                <circle
+                <ellipse
                   cx={a.coords.x}
                   cy={a.coords.y}
-                  r="2.2"
+                  rx={cxR}
+                  ry={cyR}
                   fill={a.color || '#ef4444'}
                   stroke="#fff"
-                  strokeWidth="0.15"
+                  strokeWidth="0.2"
                 />
                 <text
                   x={a.coords.x}
                   y={a.coords.y}
+                  transform={compTxt}
                   fill="#fff"
-                  fontSize="2"
+                  fontSize="2.6"
                   textAnchor="middle"
                   dominantBaseline="central"
                   fontWeight="bold"
@@ -133,14 +176,15 @@ const AnnotationOverlay: React.FC<AnnotationOverlayProps> = ({
                 </text>
                 {a.label && (
                   <text
-                    x={a.coords.x + 3.5}
+                    x={a.coords.x + cxR + 0.6}
                     y={a.coords.y + 0.5}
+                    transform={`translate(${a.coords.x + cxR + 0.6} ${a.coords.y + 0.5}) scale(${1 / imgAspect} 1) translate(${-(a.coords.x + cxR + 0.6)} ${-(a.coords.y + 0.5)})`}
                     fill={a.color || '#ef4444'}
-                    fontSize="1.6"
+                    fontSize="1.8"
                     fontWeight="600"
                     fontFamily="sans-serif"
                     stroke="#000"
-                    strokeWidth="0.1"
+                    strokeWidth="0.12"
                     paintOrder="stroke"
                   >
                     {a.label}
@@ -148,10 +192,14 @@ const AnnotationOverlay: React.FC<AnnotationOverlayProps> = ({
                 )}
               </g>
             );
+          }
 
           case 'circle': {
-            const rx = a.coords.rx || a.coords.r || 5;
-            const ry = a.coords.ry || a.coords.r || 5;
+            // Note: when only `r` is given (legacy), assume the user expected a round circle
+            // → divide rx by aspect to compensate the X-stretch from preserveAspectRatio="none".
+            const legacyR = a.coords.r;
+            const rx = a.coords.rx ?? (legacyR != null ? legacyR / imgAspect : 5);
+            const ry = a.coords.ry ?? legacyR ?? 5;
             return (
               <ellipse
                 key={key}
@@ -184,7 +232,9 @@ const AnnotationOverlay: React.FC<AnnotationOverlayProps> = ({
               />
             );
 
-          case 'arrow':
+          case 'arrow': {
+            const lx = (a.coords.x + (a.coords.x2 ?? a.coords.x + 10)) / 2;
+            const ly = (a.coords.y + (a.coords.y2 ?? a.coords.y)) / 2 - 1;
             return (
               <g key={key} style={{ color: a.color || '#3b82f6' }}>
                 <line
@@ -200,15 +250,16 @@ const AnnotationOverlay: React.FC<AnnotationOverlayProps> = ({
                 />
                 {a.label && (
                   <text
-                    x={((a.coords.x + (a.coords.x2 ?? a.coords.x + 10)) / 2)}
-                    y={((a.coords.y + (a.coords.y2 ?? a.coords.y)) / 2) - 1}
+                    x={lx}
+                    y={ly}
+                    transform={`translate(${lx} ${ly}) scale(${1 / imgAspect} 1) translate(${-lx} ${-ly})`}
                     fill={a.color || '#3b82f6'}
-                    fontSize="1.4"
+                    fontSize="1.6"
                     textAnchor="middle"
                     fontWeight="600"
                     fontFamily="sans-serif"
                     stroke="#000"
-                    strokeWidth="0.08"
+                    strokeWidth="0.1"
                     paintOrder="stroke"
                   >
                     {a.label}
@@ -216,6 +267,7 @@ const AnnotationOverlay: React.FC<AnnotationOverlayProps> = ({
                 )}
               </g>
             );
+          }
 
           case 'text':
             return (
@@ -223,12 +275,13 @@ const AnnotationOverlay: React.FC<AnnotationOverlayProps> = ({
                 key={key}
                 x={a.coords.x}
                 y={a.coords.y}
+                transform={`translate(${a.coords.x} ${a.coords.y}) scale(${1 / imgAspect} 1) translate(${-a.coords.x} ${-a.coords.y})`}
                 fill={a.color || '#eab308'}
-                fontSize="2"
+                fontSize="2.2"
                 fontWeight="600"
                 fontFamily="sans-serif"
                 stroke="#000"
-                strokeWidth="0.1"
+                strokeWidth="0.12"
                 paintOrder="stroke"
                 onClick={handleClick}
                 style={{ cursor: interactive ? 'pointer' : undefined }}

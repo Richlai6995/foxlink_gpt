@@ -377,7 +377,7 @@ export default function HotspotEditor({ block, onChange, courseId, slideId, bloc
 
               {/* Phase 3A: Annotation layer — read-only display, pointerEvents none so regions can be dragged */}
               {showAnnotationLayer && block.annotations?.length > 0 && (
-                <AnnotationOverlay annotations={block.annotations} visible={true} />
+                <AnnotationOverlay annotations={block.annotations} visible={true} imgRef={imgElRef} />
               )}
             </div>
           </>

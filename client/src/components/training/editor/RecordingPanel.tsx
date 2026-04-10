@@ -5,6 +5,25 @@ import api from '../../../lib/api'
 import AnnotationOverlay from '../blocks/AnnotationOverlay'
 import ScreenshotAnnotator from './ScreenshotAnnotator'
 
+// Tiny wrapper: image + annotation overlay sharing a ref so AnnotationOverlay can sync
+// pixel-exact to the rendered image (avoids the historical aspect-ratio drift bug).
+function AnnotatedImg({ src, annotations, className, fit = 'contain' }: {
+  src: string
+  annotations?: any[]
+  className?: string
+  fit?: 'contain' | 'cover'
+}) {
+  const ref = useRef<HTMLImageElement | null>(null)
+  return (
+    <>
+      <img ref={ref} src={src} alt="" className={`${className || ''} ${fit === 'cover' ? 'object-cover' : 'object-contain'}`} />
+      {annotations && annotations.length > 0 && (
+        <AnnotationOverlay annotations={annotations} imgRef={ref} />
+      )}
+    </>
+  )
+}
+
 interface Props {
   courseId: number
   lessonId: number | null
@@ -924,12 +943,14 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
                       ringColor: 'var(--t-accent)'
                     }}>
                     {/* Thumbnail */}
-                    <div className="relative w-full aspect-video">
-                      <img src={step.thumbnail} alt="" className="w-full h-full object-cover" />
-                      {/* Annotation layer overlay on thumbnail */}
-                      {showAnnotations && step.annotations && step.annotations.length > 0 && (
-                        <AnnotationOverlay annotations={step.annotations} />
-                      )}
+                    <div className="relative w-full aspect-video flex items-center justify-center bg-black/40">
+                      {/* object-contain so SVG overlay aspect-ratio matches the actual image — avoids drift */}
+                      <AnnotatedImg
+                        src={step.thumbnail}
+                        annotations={showAnnotations ? step.annotations : undefined}
+                        className="w-full h-full"
+                        fit="contain"
+                      />
                       {/* Annotation badge icon */}
                       {step.annotations && step.annotations.length > 0 && (
                         <span className="absolute bottom-1 left-1 text-[8px] px-1 py-0.5 rounded"
@@ -1250,11 +1271,13 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
       {previewStep && (
         <div className="fixed inset-0 z-60 bg-black/80 flex items-center justify-center cursor-pointer"
           onClick={() => setPreviewStepId(null)}>
-          <div className="relative">
-            <img src={previewStep.imageDataUrl} alt="" className="max-w-[90vw] max-h-[90vh] rounded-lg" />
-            {showAnnotations && previewStep.annotations && previewStep.annotations.length > 0 && (
-              <AnnotationOverlay annotations={previewStep.annotations} />
-            )}
+          <div className="relative inline-block">
+            <AnnotatedImg
+              src={previewStep.imageDataUrl}
+              annotations={showAnnotations ? previewStep.annotations : undefined}
+              className="max-w-[90vw] max-h-[90vh] rounded-lg block"
+              fit="contain"
+            />
           </div>
           <button className="absolute top-4 right-4 text-white/80 hover:text-white" onClick={() => setPreviewStepId(null)}>
             <X size={24} />
