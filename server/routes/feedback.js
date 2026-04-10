@@ -22,7 +22,11 @@ const storage = multer.diskStorage({
     cb(null, dest);
   },
   filename: (req, file, cb) => {
-    cb(null, `${Date.now()}_${file.originalname}`);
+    // multer 預設 latin1 解碼，中文需轉 utf8
+    const origName = Buffer.from(file.originalname, 'latin1').toString('utf8');
+    // 移除路徑分隔符防止目錄遍歷
+    const safeName = origName.replace(/[/\\]/g, '_');
+    cb(null, `${Date.now()}_${safeName}`);
   }
 });
 const upload = multer({
@@ -104,7 +108,7 @@ router.post('/tickets', upload.array('files', 10), async (req, res) => {
         await feedbackService.addAttachment(db, {
           ticket_id: ticket.id,
           message_id: null,
-          file_name: file.originalname,
+          file_name: Buffer.from(file.originalname, 'latin1').toString('utf8'),
           file_path: `feedback/ticket_${ticket.ticket_no}/${file.filename}`,
           file_size: file.size,
           mime_type: file.mimetype,
@@ -312,7 +316,7 @@ router.post('/tickets/:id/messages', upload.array('files', 5), async (req, res) 
         await feedbackService.addAttachment(db, {
           ticket_id: Number(req.params.id),
           message_id: msg.id,
-          file_name: file.originalname,
+          file_name: Buffer.from(file.originalname, 'latin1').toString('utf8'),
           file_path: `feedback/ticket_${ticket.ticket_no}/${file.filename}`,
           file_size: file.size,
           mime_type: file.mimetype,

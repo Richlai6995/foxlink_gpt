@@ -571,21 +571,34 @@ export default function FeedbackDetailPage() {
                   {(() => {
                     const msgAtts = attachments.filter(a => a.message_id === msg.id)
                     if (msgAtts.length === 0) return null
+                    const canDelete = (isAdmin || msg.sender_id === (user as any)?.id) && canChat
+                    const handleDeleteAtt = async (attId: number) => {
+                      if (!confirm('確認刪除此附件？')) return
+                      try { await api.delete(`/feedback/attachments/${attId}`); fetchAll() } catch {}
+                    }
                     return (
                       <div className="mt-2 flex flex-wrap gap-2">
-                        {msgAtts.map(att => att.mime_type?.startsWith('image/') ? (
-                          <button key={att.id} onClick={() => setLightboxUrl(`/uploads/${att.file_path}`)}
-                            className="block rounded-lg overflow-hidden border border-gray-200 hover:border-blue-400 transition">
-                            <img src={`/uploads/${att.file_path}`} alt={att.file_name}
-                              className="max-w-[240px] max-h-[180px] object-cover" />
-                          </button>
-                        ) : (
-                          <a key={att.id} href={`/uploads/${att.file_path}`} target="_blank" rel="noopener noreferrer"
-                            className="flex items-center gap-1.5 bg-white border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs text-gray-600 hover:text-blue-600 hover:border-blue-300 transition">
-                            <FileText size={14} className="text-gray-400" />
-                            <span className="truncate max-w-[150px]">{att.file_name}</span>
-                            <Download size={12} className="text-gray-300" />
-                          </a>
+                        {msgAtts.map(att => (
+                          <div key={att.id} className="relative group">
+                            {att.mime_type?.startsWith('image/') ? (
+                              <button onClick={() => setLightboxUrl(`/uploads/${att.file_path}`)}
+                                className="block rounded-lg overflow-hidden border border-gray-200 hover:border-blue-400 transition">
+                                <img src={`/uploads/${att.file_path}`} alt={att.file_name}
+                                  className="max-w-[240px] max-h-[180px] object-cover" />
+                              </button>
+                            ) : (
+                              <a href={`/uploads/${att.file_path}`} target="_blank" rel="noopener noreferrer"
+                                className="flex items-center gap-1.5 bg-white border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs text-gray-600 hover:text-blue-600 hover:border-blue-300 transition">
+                                <FileText size={14} className="text-gray-400" />
+                                <span className="truncate max-w-[150px]">{att.file_name}</span>
+                                <Download size={12} className="text-gray-300" />
+                              </a>
+                            )}
+                            {canDelete && (
+                              <button onClick={() => handleDeleteAtt(att.id)}
+                                className="absolute -top-1.5 -right-1.5 bg-red-500 rounded-full w-5 h-5 flex items-center justify-center text-white text-[10px] opacity-0 group-hover:opacity-100 transition shadow">×</button>
+                            )}
+                          </div>
                         ))}
                       </div>
                     )
@@ -605,9 +618,7 @@ export default function FeedbackDetailPage() {
 
           {/* Chat Input */}
           {canChat && (
-            <div className="border-t border-gray-200 bg-gray-50 px-6 py-3"
-              onDrop={e => { e.preventDefault(); if (e.dataTransfer.files.length > 0) setMsgFiles(prev => [...prev, ...Array.from(e.dataTransfer.files)]) }}
-              onDragOver={e => e.preventDefault()}>
+            <div className="border-t border-gray-200 bg-gray-50 px-6 py-3">
               {/* 檔案預覽（圖片縮圖 + 非圖片檔名） */}
               {msgFiles.length > 0 && (
                 <div className="flex flex-wrap gap-2 mb-2">
@@ -634,8 +645,8 @@ export default function FeedbackDetailPage() {
                     onChange={e => handleInputChange(e.target.value)}
                     onKeyDown={handleKeyDown}
                     onPaste={handlePaste}
-                    onDrop={e => { e.preventDefault(); if (e.dataTransfer.files.length > 0) setMsgFiles(prev => [...prev, ...Array.from(e.dataTransfer.files)]) }}
-                    onDragOver={e => e.preventDefault()}
+                    onDrop={e => { e.preventDefault(); e.stopPropagation(); if (e.dataTransfer.files.length > 0) setMsgFiles(prev => [...prev, ...Array.from(e.dataTransfer.files)]) }}
+                    onDragOver={e => { e.preventDefault(); e.stopPropagation() }}
                     placeholder={t('feedback.typeMessage') + '（可拖放檔案或 Ctrl+V 貼圖）'}
                     rows={2}
                     className="w-full bg-white border border-gray-300 rounded-lg px-4 py-2 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:border-blue-500 resize-none"
