@@ -195,6 +195,17 @@ export default function ScreenshotAnnotator({ imageUrl, annotations: initial, st
   const handlePointerDown = (e: React.PointerEvent) => {
     if (e.button !== 0) return
     const pt = toPct(e.clientX, e.clientY)
+    // Diagnostic: dump click → coord conversion (matches chrome ext format for direct comparison)
+    if (svgRef.current && imgRef.current) {
+      const sr = svgRef.current.getBoundingClientRect()
+      const natW = imgRef.current.naturalWidth
+      const natH = imgRef.current.naturalHeight
+      console.log('[ScreenshotAnnotator] click client=(%d,%d) svgRect=(%d,%d,%dx%d) → pct=(%s%%, %s%%) natural=(%d,%d)/(%dx%d)',
+        Math.round(e.clientX), Math.round(e.clientY),
+        Math.round(sr.left), Math.round(sr.top), Math.round(sr.width), Math.round(sr.height),
+        pt.x.toFixed(2), pt.y.toFixed(2),
+        Math.round(pt.x / 100 * natW), Math.round(pt.y / 100 * natH), natW, natH)
+    }
 
     // Move tool: click empty space to deselect (annotations handle their own startDrag)
     if (tool === 'move') {

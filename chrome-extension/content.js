@@ -475,42 +475,50 @@ function startAnnotationMode(screenshotDataUrl) {
 
   // ── 4. Resize canvas to match image ──
   let canvasW, canvasH;
-  // Image display rect within canvas (accounting for object-fit:contain letterboxing)
+  // Image display rect within canvas (accounting for object-fit:contain letterboxing).
+  // Recomputed live via computeImgRect() — never trust a snapshot, layout can change.
   let imgRect = { x: 0, y: 0, w: 0, h: 0 };
-  bgImg.onload = () => {
+
+  function computeImgRect() {
     const rect = canvasWrap.getBoundingClientRect();
     canvasW = rect.width;
     canvasH = rect.height;
+    if (canvasW <= 0 || canvasH <= 0) return;
     canvas.width = canvasW * window.devicePixelRatio;
     canvas.height = canvasH * window.devicePixelRatio;
     canvas.style.width = canvasW + 'px';
     canvas.style.height = canvasH + 'px';
     const ctx = canvas.getContext('2d');
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
-    // Calculate image display area (object-fit:contain)
     const natW = bgImg.naturalWidth || canvasW;
     const natH = bgImg.naturalHeight || canvasH;
+    if (!natW || !natH) return;
     const imgAspect = natW / natH;
     const cAspect = canvasW / canvasH;
     if (imgAspect > cAspect) {
-      // Image wider → letterbox top/bottom
       imgRect.w = canvasW;
       imgRect.h = canvasW / imgAspect;
       imgRect.x = 0;
       imgRect.y = (canvasH - imgRect.h) / 2;
     } else {
-      // Image taller → letterbox left/right
       imgRect.h = canvasH;
       imgRect.w = canvasH * imgAspect;
       imgRect.y = 0;
       imgRect.x = (canvasW - imgRect.w) / 2;
     }
+    console.log('[FOXLINK Annot] computeImgRect canvas=%dx%d natural=%dx%d imgRect=', canvasW, canvasH, natW, natH, imgRect);
     redrawAll();
-  };
-  // Fallback if image already loaded
-  if (bgImg.complete) {
-    setTimeout(() => bgImg.onload?.(), 50);
   }
+
+  bgImg.onload = computeImgRect;
+  if (bgImg.complete) setTimeout(computeImgRect, 50);
+
+  // Live-track layout changes (window resize, devtools open, toolbar wrap, etc.)
+  // — without this, imgRect goes stale and toPct returns wrong percentages.
+  const ro = new ResizeObserver(() => computeImgRect());
+  ro.observe(canvasWrap);
+  window.addEventListener('resize', computeImgRect);
 
   // ── 5. Selection highlights ──
   selectTool('number');
@@ -568,6 +576,19 @@ function startAnnotationMode(screenshotDataUrl) {
     // Convert canvas pixel to percentage relative to image display area (not full canvas)
     if (isX) return ((px - imgRect.x) / (imgRect.w || canvasW)) * 100;
     return ((px - imgRect.y) / (imgRect.h || canvasH)) * 100;
+  }
+
+  // Diagnostic: dump click → stored coord conversion so user can verify alignment
+  function debugClickPos(e, label) {
+    const cp = getCanvasCoords(e);
+    const xPct = toPct(cp.x, true);
+    const yPct = toPct(cp.y, false);
+    const natW = bgImg.naturalWidth, natH = bgImg.naturalHeight;
+    console.log('[FOXLINK Annot] %s client=(%d,%d) canvas=(%d,%d) imgRect={x:%d,y:%d,w:%d,h:%d} → pct=(%s%%, %s%%) natural=(%d,%d)/(%dx%d)',
+      label, e.clientX, e.clientY, Math.round(cp.x), Math.round(cp.y),
+      Math.round(imgRect.x), Math.round(imgRect.y), Math.round(imgRect.w), Math.round(imgRect.h),
+      xPct.toFixed(2), yPct.toFixed(2),
+      Math.round(xPct/100*natW), Math.round(yPct/100*natH), natW, natH);
   }
 
   function fromPct(pct, isX) {
@@ -849,6 +870,7 @@ function startAnnotationMode(screenshotDataUrl) {
   // ── 8. Mouse events ──
   canvas.addEventListener('mousedown', (e) => {
     if (e.button !== 0) return;
+    debugClickPos(e, 'mousedown');
     const pt = getCanvasCoords(e);
 
     // Move tool: pick up annotation under cursor
