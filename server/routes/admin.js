@@ -1144,7 +1144,16 @@ router.get('/cost-stats/summary', async (req, res) => {
     const { startDate, endDate } = req.query;
     if (!startDate || !endDate) return res.status(400).json({ error: '請提供日期區間' });
 
-    const rows = await getCostRows(db, startDate, endDate);
+    const [rows, accountRows] = await Promise.all([
+      getCostRows(db, startDate, endDate),
+      db.prepare(`SELECT profit_center, COUNT(*) AS cnt FROM users WHERE status != 'disabled' GROUP BY profit_center`).all(),
+    ]);
+
+    // Build account count map (all registered accounts per profit_center)
+    const accountMap = {};
+    for (const a of accountRows) {
+      accountMap[a.profit_center || '__NONE__'] = a.cnt;
+    }
 
     // Aggregate by profit_center
     const pcMap = {};
@@ -1176,9 +1185,11 @@ router.get('/cost-stats/summary', async (req, res) => {
 
     const result = Object.values(pcMap).map((pc) => {
       const user_count = pc._user_ids.size;
+      const account_count = accountMap[pc.profit_center || '__NONE__'] || 0;
       const { _user_ids, dept_breakdown, ...rest } = pc;
       return {
         ...rest,
+        account_count,
         user_count,
         avg_cost: user_count > 0 ? pc.cost / user_count : 0,
         dept_breakdown: Object.values(dept_breakdown).sort((a, b) => b.cost - a.cost),
@@ -1198,7 +1209,15 @@ router.get('/cost-stats/monthly', async (req, res) => {
     const { startDate, endDate } = req.query;
     if (!startDate || !endDate) return res.status(400).json({ error: '請提供日期區間' });
 
-    const rows = await getCostRows(db, startDate, endDate);
+    const [rows, accountRows] = await Promise.all([
+      getCostRows(db, startDate, endDate),
+      db.prepare(`SELECT profit_center, COUNT(*) AS cnt FROM users WHERE status != 'disabled' GROUP BY profit_center`).all(),
+    ]);
+
+    const accountMap = {};
+    for (const a of accountRows) {
+      accountMap[a.profit_center || '__NONE__'] = a.cnt;
+    }
 
     // Aggregate by profit_center + month
     const map = {};
@@ -1225,8 +1244,9 @@ router.get('/cost-stats/monthly', async (req, res) => {
 
     const result = Object.values(map).map((m) => {
       const user_count = m._user_ids.size;
+      const account_count = accountMap[m.profit_center || '__NONE__'] || 0;
       const { _user_ids, ...rest } = m;
-      return { ...rest, user_count, avg_cost: user_count > 0 ? m.cost / user_count : 0 };
+      return { ...rest, account_count, user_count, avg_cost: user_count > 0 ? m.cost / user_count : 0 };
     }).sort((a, b) => {
       if (a.month !== b.month) return a.month.localeCompare(b.month);
       return b.cost - a.cost;
@@ -1284,7 +1304,13 @@ router.get('/cost-stats/export/summary', async (req, res) => {
     const { startDate, endDate } = req.query;
     if (!startDate || !endDate) return res.status(400).json({ error: '請提供日期區間' });
 
-    const rows = await getCostRows(db, startDate, endDate);
+    const [rows, accountRows] = await Promise.all([
+      getCostRows(db, startDate, endDate),
+      db.prepare(`SELECT profit_center, COUNT(*) AS cnt FROM users WHERE status != 'disabled' GROUP BY profit_center`).all(),
+    ]);
+    const accountMap = {};
+    for (const a of accountRows) { accountMap[a.profit_center || '__NONE__'] = a.cnt; }
+
     const pcMap = {};
     for (const r of rows) {
       const key = r.profit_center || '__NONE__';
@@ -1301,13 +1327,14 @@ router.get('/cost-stats/export/summary', async (req, res) => {
     }
     const result = Object.values(pcMap).map((pc) => {
       const user_count = pc._user_ids.size;
-      return { ...pc, user_count, avg_cost: user_count > 0 ? pc.cost / user_count : 0 };
+      const account_count = accountMap[pc.profit_center || '__NONE__'] || 0;
+      return { ...pc, account_count, user_count, avg_cost: user_count > 0 ? pc.cost / user_count : 0 };
     }).sort((a, b) => b.cost - a.cost);
 
-    const headers = ['利潤中心代碼', '利潤中心名稱', '事業處代碼', '事業處名稱', '事業群名稱', '使用人數', '費用金額', '人均費用', '幣別'];
+    const headers = ['利潤中心代碼', '利潤中心名稱', '事業處代碼', '事業處名稱', '事業群名稱', '帳號人數', '使用人數', '費用金額', '人均費用', '幣別'];
     const csv = toCsv(headers, result, (r) => [
       r.profit_center, r.profit_center_name, r.org_section, r.org_section_name,
-      r.org_group_name, r.user_count, r.cost?.toFixed(6), r.avg_cost?.toFixed(6), r.currency,
+      r.org_group_name, r.account_count, r.user_count, r.cost?.toFixed(6), r.avg_cost?.toFixed(6), r.currency,
     ]);
 
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
@@ -1325,7 +1352,13 @@ router.get('/cost-stats/export/monthly', async (req, res) => {
     const { startDate, endDate } = req.query;
     if (!startDate || !endDate) return res.status(400).json({ error: '請提供日期區間' });
 
-    const rows = await getCostRows(db, startDate, endDate);
+    const [rows, accountRows] = await Promise.all([
+      getCostRows(db, startDate, endDate),
+      db.prepare(`SELECT profit_center, COUNT(*) AS cnt FROM users WHERE status != 'disabled' GROUP BY profit_center`).all(),
+    ]);
+    const accountMap = {};
+    for (const a of accountRows) { accountMap[a.profit_center || '__NONE__'] = a.cnt; }
+
     const map = {};
     for (const r of rows) {
       const month = r.usage_date ? r.usage_date.slice(0, 7) : '';
@@ -1343,15 +1376,16 @@ router.get('/cost-stats/export/monthly', async (req, res) => {
     }
     const result = Object.values(map).map((m) => {
       const user_count = m._user_ids.size;
-      return { ...m, user_count, avg_cost: user_count > 0 ? m.cost / user_count : 0 };
+      const account_count = accountMap[m.profit_center || '__NONE__'] || 0;
+      return { ...m, account_count, user_count, avg_cost: user_count > 0 ? m.cost / user_count : 0 };
     }).sort((a, b) =>
       a.month !== b.month ? a.month.localeCompare(b.month) : b.cost - a.cost
     );
 
-    const headers = ['利潤中心代碼', '利潤中心名稱', '事業處代碼', '事業處名稱', '事業群名稱', '月份', '使用人數', '費用金額', '人均費用', '幣別'];
+    const headers = ['利潤中心代碼', '利潤中心名稱', '事業處代碼', '事業處名稱', '事業群名稱', '月份', '帳號人數', '使用人數', '費用金額', '人均費用', '幣別'];
     const csv = toCsv(headers, result, (r) => [
       r.profit_center, r.profit_center_name, r.org_section, r.org_section_name,
-      r.org_group_name, r.month, r.user_count, r.cost?.toFixed(6), r.avg_cost?.toFixed(6), r.currency,
+      r.org_group_name, r.month, r.account_count, r.user_count, r.cost?.toFixed(6), r.avg_cost?.toFixed(6), r.currency,
     ]);
 
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');

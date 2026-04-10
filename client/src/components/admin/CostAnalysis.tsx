@@ -18,6 +18,7 @@ interface SummaryRow {
   input_tokens: number
   output_tokens: number
   cost: number
+  account_count: number
   user_count: number
   avg_cost: number
   currency: string
@@ -34,6 +35,7 @@ interface MonthlyRow {
   input_tokens: number
   output_tokens: number
   cost: number
+  account_count: number
   user_count: number
   avg_cost: number
   currency: string
@@ -395,6 +397,7 @@ export default function CostAnalysis() {
                 <th className="px-3 py-2 text-left">事業處代碼</th>
                 <th className="px-3 py-2 text-left">事業處名稱</th>
                 <th className="px-3 py-2 text-left">事業群名稱</th>
+                <th className="px-3 py-2 text-right">帳號人數</th>
                 <th className="px-3 py-2 text-right">使用人數</th>
                 <th className="px-3 py-2 text-right">費用金額</th>
                 <th className="px-3 py-2 text-right">人均費用</th>
@@ -412,13 +415,14 @@ export default function CostAnalysis() {
                   <td className="px-3 py-1.5">{r.org_section}</td>
                   <td className="px-3 py-1.5">{r.org_section_name}</td>
                   <td className="px-3 py-1.5">{r.org_group_name}</td>
+                  <td className="px-3 py-1.5 text-right text-gray-500">{r.account_count}</td>
                   <td className="px-3 py-1.5 text-right">{r.user_count}</td>
                   <td className="px-3 py-1.5 text-right font-medium text-blue-700">{fmtCost(r.cost, r.currency)}</td>
                   <td className="px-3 py-1.5 text-right text-gray-600">{fmtCost(r.avg_cost, r.currency)}</td>
                 </tr>
               ))}
               {summary.length === 0 && (
-                <tr><td colSpan={8} className="px-3 py-4 text-center text-gray-400">無資料</td></tr>
+                <tr><td colSpan={9} className="px-3 py-4 text-center text-gray-400">無資料</td></tr>
               )}
             </tbody>
           </table>
@@ -443,6 +447,7 @@ export default function CostAnalysis() {
                 <th className="px-3 py-2 text-left">事業處名稱</th>
                 <th className="px-3 py-2 text-left">事業群名稱</th>
                 <th className="px-3 py-2 text-left">月份</th>
+                <th className="px-3 py-2 text-right">帳號人數</th>
                 <th className="px-3 py-2 text-right">使用人數</th>
                 <th className="px-3 py-2 text-right">費用金額</th>
                 <th className="px-3 py-2 text-right">人均費用</th>
@@ -457,13 +462,14 @@ export default function CostAnalysis() {
                   <td className="px-3 py-1.5">{r.org_section_name}</td>
                   <td className="px-3 py-1.5">{r.org_group_name}</td>
                   <td className="px-3 py-1.5 font-medium">{r.month}</td>
+                  <td className="px-3 py-1.5 text-right text-gray-500">{r.account_count}</td>
                   <td className="px-3 py-1.5 text-right">{r.user_count}</td>
                   <td className="px-3 py-1.5 text-right font-medium text-blue-700">{fmtCost(r.cost, r.currency)}</td>
                   <td className="px-3 py-1.5 text-right text-gray-600">{fmtCost(r.avg_cost, r.currency)}</td>
                 </tr>
               ))}
               {monthly.length === 0 && (
-                <tr><td colSpan={9} className="px-3 py-4 text-center text-gray-400">無資料</td></tr>
+                <tr><td colSpan={10} className="px-3 py-4 text-center text-gray-400">無資料</td></tr>
               )}
             </tbody>
           </table>
