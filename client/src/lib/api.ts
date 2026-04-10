@@ -21,7 +21,10 @@ api.interceptors.response.use(
     if (error.response?.status === 401) {
       localStorage.removeItem('token')
       localStorage.removeItem('user')
-      window.location.href = '/login'
+      // 已經在 /login 就不要再 reload，避免死循環（沒 token 時某些 hook 還是會打 API → 401 → reload → ...）
+      if (window.location.pathname !== '/login') {
+        window.location.href = '/login'
+      }
     }
     return Promise.reject(error)
   }

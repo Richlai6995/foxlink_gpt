@@ -33,6 +33,8 @@ export function usePageActivity() {
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const report = (pathname: string) => {
+    // 沒 token 不打 — 否則 401 → axios interceptor 強制 reload → 死循環（在 /login 也會觸發）
+    if (!localStorage.getItem('token')) return
     api.post('/auth/activity', {
       page: pathname,
       page_title: getPageTitle(pathname),

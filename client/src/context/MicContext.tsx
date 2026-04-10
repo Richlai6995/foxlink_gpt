@@ -31,6 +31,11 @@ export const MicProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   useEffect(() => {
     let cancelled = false
     const fetchStatus = async () => {
+      // 沒 token 不打 — 否則會 401 → axios interceptor 強制 reload → 死循環
+      if (!localStorage.getItem('token')) {
+        if (!cancelled) setLoaded(true)
+        return
+      }
       try {
         const { data } = await api.get('/transcribe/status')
         if (cancelled) return

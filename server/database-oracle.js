@@ -2600,6 +2600,41 @@ async function dropVectorStorePartition(jobId) {
   }
 }
 
+/**
+ * 偵測 LIST-partitioned 表是否有 DEFAULT partition,有的話回傳其名字。
+ * 因為 user_tab_partitions.high_value 是 LONG type,SQL 層不能 LIKE,
+ * 改用 PL/SQL cursor loop 內 assign 給 LONG 變數再 SUBSTR 比對。
+ */
+async function _findDefaultPartition(conn, tableName) {
+  try {
+    const result = await conn.execute(
+      `DECLARE
+         v_name VARCHAR2(128) := NULL;
+         v_hv   LONG;
+       BEGIN
+         FOR r IN (SELECT partition_name, high_value
+                   FROM user_tab_partitions
+                   WHERE table_name = :t) LOOP
+           v_hv := r.high_value;
+           IF UPPER(SUBSTR(v_hv, 1, 7)) = 'DEFAULT' THEN
+             v_name := r.partition_name;
+             EXIT;
+           END IF;
+         END LOOP;
+         :pname := v_name;
+       END;`,
+      {
+        t: tableName.toUpperCase(),
+        pname: { dir: oracledb.BIND_OUT, type: oracledb.STRING, maxSize: 128 },
+      }
+    );
+    return result.outBinds?.pname || null;
+  } catch (e) {
+    console.warn(`[Partition] _findDefaultPartition(${tableName}):`, e.message);
+    return null;
+  }
+}
+
 /** KB 新增後呼叫 — 為該 kb 加 KB_CHUNKS partition */
 async function addKbChunksPartition(kbId) {
   if (!pool) return;
@@ -2608,12 +2643,26 @@ async function addKbChunksPartition(kbId) {
     if (!await _isPartitioned(conn, 'KB_CHUNKS')) return;
     const pName = _kbPartName(kbId);
     if (await _partitionExists(conn, 'KB_CHUNKS', pName)) return;
-    await conn.execute(
-      `ALTER TABLE kb_chunks ADD PARTITION ${pName} VALUES ('${kbId.replace(/'/g, "''")}')`,
-      [], { autoCommit: true }
-    );
-    console.log(`[Partition] KB_CHUNKS +${pName}`);
+    const escaped = kbId.replace(/'/g, "''");
+
+    // 若表有 DEFAULT partition,必須用 SPLIT(ADD 會 ORA-14323)。
+    // DBA 有可能在後期手動加 DEFAULT partition,所以這裡每次都偵測一次。
+    const defPart = await _findDefaultPartition(conn, 'KB_CHUNKS');
+    if (defPart) {
+      await conn.execute(
+        `ALTER TABLE kb_chunks SPLIT PARTITION ${defPart} VALUES ('${escaped}') INTO (PARTITION ${pName}, PARTITION ${defPart})`,
+        [], { autoCommit: true }
+      );
+      console.log(`[Partition] KB_CHUNKS SPLIT ${defPart} → +${pName}`);
+    } else {
+      await conn.execute(
+        `ALTER TABLE kb_chunks ADD PARTITION ${pName} VALUES ('${escaped}')`,
+        [], { autoCommit: true }
+      );
+      console.log(`[Partition] KB_CHUNKS +${pName}`);
+    }
   } catch (e) {
+    // ORA-14323 已不應該再發生(會走 SPLIT 分支),其他 error 印出觀察
     console.warn(`[Partition] addKbChunksPartition(${kbId}):`, e.message);
   } finally {
     await conn.close();

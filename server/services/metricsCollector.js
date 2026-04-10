@@ -374,21 +374,30 @@ async function snapshotOnlineDept() {
     for (const [key, { count, profit_center_name, org_section_name }] of Object.entries(agg)) {
       const { profit_center, org_section, org_group_name, dept_code } = JSON.parse(key);
       // MERGE：同 snapshot + dept 組合只保留一筆，多 pod 並發只有第一個寫入，後續 UPDATE（值相同不影響）
-      await db.prepare(`
-        MERGE INTO online_dept_snapshots dst
-        USING (SELECT ? AS snap_id, ? AS pc, ? AS os, ? AS og, ? AS dc, ? AS pc_name, ? AS os_name, ? AS cnt FROM dual) src
-        ON (dst.snapshot_id = src.snap_id
-            AND NVL(dst.profit_center,'~')  = NVL(src.pc,'~')
-            AND NVL(dst.org_section,'~')    = NVL(src.os,'~')
-            AND NVL(dst.org_group_name,'~') = NVL(src.og,'~')
-            AND NVL(dst.dept_code,'~')      = NVL(src.dc,'~'))
-        WHEN NOT MATCHED THEN
-          INSERT (snapshot_id, profit_center, org_section, org_group_name, dept_code, profit_center_name, org_section_name, user_count)
-          VALUES (src.snap_id, src.pc, src.os, src.og, src.dc, src.pc_name, src.os_name, src.cnt)
-        WHEN MATCHED THEN
-          UPDATE SET dst.user_count = src.cnt, dst.collected_at = SYSTIMESTAMP,
-                     dst.profit_center_name = src.pc_name, dst.org_section_name = src.os_name
-      `).run(snapId, profit_center || null, org_section || null, org_group_name || null, dept_code || null, profit_center_name || null, org_section_name || null, count);
+      // 注意：DBA 在 online_dept_snapshots 上加了 functional unique index UQ_DEPT_SNAP_KEY
+      // (NVL 5 欄位 — snapshot_id, profit_center, org_section, org_group_name, dept_code)。
+      // Oracle 的 MERGE 在多 pod 並發下不是 atomic：兩個 session 都 SELECT 不存在 → 都 INSERT
+      // → 第二個踩 unique → ORA-00001。這是 race condition,容忍即可（後手敗者的資料跟先手相同）。
+      try {
+        await db.prepare(`
+          MERGE INTO online_dept_snapshots dst
+          USING (SELECT ? AS snap_id, ? AS pc, ? AS os, ? AS og, ? AS dc, ? AS pc_name, ? AS os_name, ? AS cnt FROM dual) src
+          ON (dst.snapshot_id = src.snap_id
+              AND NVL(dst.profit_center,'~')  = NVL(src.pc,'~')
+              AND NVL(dst.org_section,'~')    = NVL(src.os,'~')
+              AND NVL(dst.org_group_name,'~') = NVL(src.og,'~')
+              AND NVL(dst.dept_code,'~')      = NVL(src.dc,'~'))
+          WHEN NOT MATCHED THEN
+            INSERT (snapshot_id, profit_center, org_section, org_group_name, dept_code, profit_center_name, org_section_name, user_count)
+            VALUES (src.snap_id, src.pc, src.os, src.og, src.dc, src.pc_name, src.os_name, src.cnt)
+          WHEN MATCHED THEN
+            UPDATE SET dst.user_count = src.cnt, dst.collected_at = SYSTIMESTAMP,
+                       dst.profit_center_name = src.pc_name, dst.org_section_name = src.os_name
+        `).run(snapId, profit_center || null, org_section || null, org_group_name || null, dept_code || null, profit_center_name || null, org_section_name || null, count);
+      } catch (e) {
+        // 容忍 multi-pod race：另一個 pod 已寫入相同 (snapshot_id, dept) 組合
+        if (!/UNIQUE constraint failed|ORA-00001/i.test(e.message || '')) throw e;
+      }
     }
   } catch (e) {
     console.error('[MetricsCollector] snapshotOnlineDept error:', e.message);
