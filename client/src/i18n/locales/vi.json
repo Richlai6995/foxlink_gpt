@@ -2257,5 +2257,29 @@
       "firstResponseHours": "Phản hồi đầu (giờ)",
       "resolutionHours": "Giải quyết (giờ)"
     }
+  },
+  "voice_input": {
+    "start": "Nhấn để bắt đầu ghi âm",
+    "stop": "Nhấn để dừng (Esc)",
+    "requesting": "Đang khởi động micro...",
+    "recording": "Đang ghi",
+    "processing": "Đang nhận dạng...",
+    "preview": "Nhận dạng trực tiếp",
+    "settingsTitle": "Cài đặt nhập bằng giọng nói",
+    "settingsDesc": "Hiển thị nút micro trong ô chat và phản hồi để người dùng có thể nhập bằng giọng nói.",
+    "enabled": "Bật nhập bằng giọng nói",
+    "preferBackendOnly": "Chỉ dùng nhận dạng phía máy chủ (tắt nhận dạng trực tiếp trên trình duyệt)",
+    "preferBackendOnlyHint": "Bật tùy chọn này nếu mạng nội bộ chặn dịch vụ giọng nói của Google, để tránh độ trễ 2 giây mỗi lần.",
+    "saveSuccess": "Đã lưu",
+    "saveFailed": "Lưu thất bại",
+    "error": {
+      "permission": "Vui lòng cho phép truy cập micro",
+      "no_mic": "Không tìm thấy micro",
+      "transcribe_failed": "Nhận dạng thất bại, vui lòng thử lại",
+      "too_long": "Đã dừng ghi âm (đạt giới hạn)",
+      "unsupported": "Trình duyệt không hỗ trợ ghi âm",
+      "unknown": "Đã xảy ra lỗi",
+      "disabled": "Nhập bằng giọng nói đã bị quản trị viên tắt"
+    }
   }
 }

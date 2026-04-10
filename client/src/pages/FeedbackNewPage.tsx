@@ -1,8 +1,9 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import api from '../lib/api'
 import { ArrowLeft, Upload, X, Loader2 } from 'lucide-react'
+import MicButton from '../components/MicButton'
 
 interface Category {
   id: number
@@ -15,6 +16,8 @@ export default function FeedbackNewPage() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const descriptionRef = useRef<HTMLTextAreaElement>(null)
+  const [voicePreview, setVoicePreview] = useState('')
 
   const [subject, setSubject] = useState('')
   const [description, setDescription] = useState(searchParams.get('description') || '')
@@ -69,6 +72,27 @@ export default function FeedbackNewPage() {
       addFiles(imageFiles)
     }
   }
+
+  // 在游標位置插入文字（語音輸入）
+  const insertAtCursor = useCallback((text: string) => {
+    if (!text) return
+    const ta = descriptionRef.current
+    if (!ta) {
+      setDescription((prev) => (prev ? prev + ' ' + text : text))
+      return
+    }
+    const start = ta.selectionStart ?? description.length
+    const end = ta.selectionEnd ?? description.length
+    setDescription((prev) => prev.slice(0, start) + text + prev.slice(end))
+    requestAnimationFrame(() => {
+      try {
+        ta.focus()
+        const pos = start + text.length
+        ta.selectionStart = ta.selectionEnd = pos
+      } catch {}
+    })
+    setVoicePreview('')
+  }, [description.length])
 
   // Drag & drop
   const handleDrop = (e: React.DragEvent) => {
@@ -175,8 +199,18 @@ export default function FeedbackNewPage() {
 
           {/* Description */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1.5">{t('feedback.description')}</label>
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="block text-sm font-medium text-gray-700">{t('feedback.description')}</label>
+              <MicButton
+                onTranscript={insertAtCursor}
+                onInterim={setVoicePreview}
+                maxDuration={180}
+                source="feedback"
+                size={16}
+              />
+            </div>
             <textarea
+              ref={descriptionRef}
               value={description}
               onChange={e => setDescription(e.target.value)}
               onPaste={handlePaste}
@@ -186,6 +220,12 @@ export default function FeedbackNewPage() {
               className="w-full bg-white border border-gray-300 rounded-lg px-4 py-2.5 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:border-blue-500 resize-y"
               placeholder={t('feedback.description')}
             />
+            {voicePreview && (
+              <div className="mt-1 px-3 py-1 bg-blue-50 border border-blue-100 rounded-lg text-xs text-blue-700 italic flex items-center gap-1.5">
+                <span className="text-blue-400">›</span>
+                <span className="truncate">{voicePreview}</span>
+              </div>
+            )}
           </div>
 
           {/* Share Link */}

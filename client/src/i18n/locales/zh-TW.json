@@ -2257,5 +2257,29 @@
       "firstResponseHours": "首次回應 (小時)",
       "resolutionHours": "解決時限 (小時)"
     }
+  },
+  "voice_input": {
+    "start": "點擊開始錄音",
+    "stop": "點擊停止錄音 (Esc)",
+    "requesting": "正在啟動麥克風...",
+    "recording": "錄音中",
+    "processing": "辨識中...",
+    "preview": "即時辨識",
+    "settingsTitle": "語音輸入設定",
+    "settingsDesc": "在聊天與問題反饋輸入框顯示麥克風按鈕，使用者可用語音轉文字輸入。",
+    "enabled": "啟用語音輸入",
+    "preferBackendOnly": "僅使用後端轉錄（關閉瀏覽器即時辨識）",
+    "preferBackendOnlyHint": "若內網無法連線 Google 語音服務，建議開啟此選項以避免每次延遲 2 秒等待降級。",
+    "saveSuccess": "已儲存",
+    "saveFailed": "儲存失敗",
+    "error": {
+      "permission": "請允許麥克風權限",
+      "no_mic": "找不到麥克風",
+      "transcribe_failed": "辨識失敗，請重試",
+      "too_long": "錄音已達上限，自動停止",
+      "unsupported": "瀏覽器不支援錄音",
+      "unknown": "發生錯誤",
+      "disabled": "管理員已關閉語音輸入"
+    }
   }
 }

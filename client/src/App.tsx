@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider, useAuth } from './context/AuthContext'
 import { AdminOverrideProvider } from './context/AdminOverrideContext'
+import { MicProvider } from './context/MicContext'
 import { usePageActivity } from './lib/usePageActivity'
 import Login from './pages/Login'
 import ChatPage from './pages/ChatPage'
@@ -40,6 +41,7 @@ function AppRoutes() {
   usePageActivity()
   return (
     <AdminOverrideProvider userId={(user as any)?.id ?? null}>
+    <MicProvider>
     <Routes>
       <Route path="/login" element={isAuthenticated ? <Navigate to="/chat" replace /> : <Login />} />
       <Route
@@ -96,6 +98,7 @@ function AppRoutes() {
     </Routes>
     {isAuthenticated && <FeedbackFAB />}
     {isAuthenticated && <FeedbackToast />}
+    </MicProvider>
     </AdminOverrideProvider>
   )
 }

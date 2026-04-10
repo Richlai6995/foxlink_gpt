@@ -2257,5 +2257,29 @@
       "firstResponseHours": "First Response (hours)",
       "resolutionHours": "Resolution (hours)"
     }
+  },
+  "voice_input": {
+    "start": "Click to start recording",
+    "stop": "Click to stop (Esc)",
+    "requesting": "Starting microphone...",
+    "recording": "Recording",
+    "processing": "Transcribing...",
+    "preview": "Live transcription",
+    "settingsTitle": "Voice Input Settings",
+    "settingsDesc": "Show a microphone button in chat and feedback inputs so users can dictate instead of typing.",
+    "enabled": "Enable voice input",
+    "preferBackendOnly": "Backend transcription only (disable in-browser live recognition)",
+    "preferBackendOnlyHint": "Enable this if your network blocks Google's speech service, to avoid the 2-second fallback delay on every recording.",
+    "saveSuccess": "Saved",
+    "saveFailed": "Save failed",
+    "error": {
+      "permission": "Please allow microphone access",
+      "no_mic": "No microphone found",
+      "transcribe_failed": "Transcription failed, please retry",
+      "too_long": "Recording stopped (max length reached)",
+      "unsupported": "Browser does not support recording",
+      "unknown": "An error occurred",
+      "disabled": "Voice input is disabled by admin"
+    }
   }
 }

@@ -3,6 +3,7 @@ import { Send, Paperclip, X, FileText, Image, Music, AlertCircle, Search, Layout
 import { useAuth } from '../context/AuthContext'
 import TemplatePickerPopover from './templates/TemplatePickerPopover'
 import { DocTemplate, TemplateSchema } from '../types'
+import MicButton from './MicButton'
 
 interface Props {
   onSend: (message: string, files: File[]) => void
@@ -56,7 +57,31 @@ const MessageInput = forwardRef<MessageInputHandle, Props>(function MessageInput
   const [tplOutputFmt, setTplOutputFmt] = useState<'pdf' | 'docx'>('pdf')
   const [pptxMode, setPptxMode] = useState<'template' | 'rich'>('template')
   const [pptxTheme, setPptxTheme] = useState<'dark' | 'light' | 'corporate'>('dark')
+  const [voicePreview, setVoicePreview] = useState('')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+
+  // 在游標位置插入文字（語音輸入結果）
+  const insertAtCursor = useCallback((text: string) => {
+    if (!text) return
+    const ta = textareaRef.current
+    if (!ta) {
+      setMessage((prev) => (prev ? prev + ' ' + text : text))
+      return
+    }
+    const start = ta.selectionStart ?? message.length
+    const end = ta.selectionEnd ?? message.length
+    setMessage((prev) => prev.slice(0, start) + text + prev.slice(end))
+    requestAnimationFrame(() => {
+      try {
+        ta.focus()
+        const pos = start + text.length
+        ta.selectionStart = ta.selectionEnd = pos
+        ta.style.height = 'auto'
+        ta.style.height = Math.min(ta.scrollHeight, 200) + 'px'
+      } catch {}
+    })
+    setVoicePreview('')
+  }, [message.length])
 
   // Detect if selected PPTX template has layout_template slides (supports rich mode)
   const isPptxWithLayout = useMemo(() => {
@@ -343,6 +368,16 @@ const MessageInput = forwardRef<MessageInputHandle, Props>(function MessageInput
           className="flex-1 bg-transparent resize-none outline-none text-sm text-slate-800 placeholder-slate-400 py-1 min-h-[36px] max-h-[200px] overflow-y-auto"
         />
 
+        {/* Mic — 語音輸入 */}
+        <div className="flex-shrink-0 mb-0.5">
+          <MicButton
+            onTranscript={insertAtCursor}
+            onInterim={setVoicePreview}
+            maxDuration={60}
+            source="chat"
+          />
+        </div>
+
         {/* Send */}
         <button
           onClick={handleSubmit}
@@ -352,6 +387,14 @@ const MessageInput = forwardRef<MessageInputHandle, Props>(function MessageInput
           <Send size={16} />
         </button>
       </div>
+
+      {/* Voice interim 預覽條 */}
+      {voicePreview && (
+        <div className="mt-1 px-3 py-1 bg-blue-50 border border-blue-100 rounded-lg text-xs text-blue-700 italic flex items-center gap-1.5">
+          <span className="text-blue-400">›</span>
+          <span className="truncate">{voicePreview}</span>
+        </div>
+      )}
 
       <p className="text-center text-slate-400 text-xs mt-2">
         支援 圖片{allowText ? `、PDF/Word/Excel/PPT（限 ${textMaxMb}MB）` : ''}{allowAudio ? `、音訊（限 ${audioMaxMb}MB）` : ''}

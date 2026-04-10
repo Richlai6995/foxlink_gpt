@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Users, BarChart3, Shield, AlertTriangle, Database, Mail, ArrowLeft, Cpu, DollarSign, CalendarClock, Plug, Zap, UserCog, Sparkles, Code2, Search, KeyRound, MonitorPlay, Lock, Activity, MessageSquare, Languages, GraduationCap, TicketCheck } from 'lucide-react'
+import { Users, BarChart3, Shield, AlertTriangle, Database, Mail, ArrowLeft, Cpu, DollarSign, CalendarClock, Plug, Zap, UserCog, Sparkles, Code2, Search, KeyRound, MonitorPlay, Lock, Activity, MessageSquare, Languages, GraduationCap, TicketCheck, Mic } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import UserManagement from '../components/admin/UserManagement'
 import TokenUsagePanel from '../components/admin/TokenUsage'
@@ -30,7 +30,8 @@ import TrainingAdmin from '../components/admin/TrainingAdmin'
 import FeedbackCategoryManager from '../components/feedback/admin/FeedbackCategoryManager'
 import FeedbackSLAConfig from '../components/feedback/admin/FeedbackSLAConfig'
 import FeedbackStatsPanel from '../components/feedback/FeedbackStatsPanel'
-type Tab = 'users' | 'roles' | 'tokens' | 'audit' | 'keywords' | 'db' | 'mail' | 'llm' | 'vector-defaults' | 'cost' | 'scheduled' | 'mcp' | 'dify' | 'kb' | 'skills' | 'code-runners' | 'research' | 'api-keys' | 'ai-dashboard' | 'data-permissions' | 'monitor' | 'db-sources' | 'webex-logs' | 'help-translation' | 'training' | 'feedback'
+import VoiceInputSettingsPanel from '../components/admin/VoiceInputSettings'
+type Tab = 'users' | 'roles' | 'tokens' | 'audit' | 'keywords' | 'db' | 'mail' | 'llm' | 'vector-defaults' | 'cost' | 'scheduled' | 'mcp' | 'dify' | 'kb' | 'skills' | 'code-runners' | 'research' | 'api-keys' | 'ai-dashboard' | 'data-permissions' | 'monitor' | 'db-sources' | 'webex-logs' | 'help-translation' | 'training' | 'feedback' | 'voice-input'
 
 export default function AdminDashboard() {
   const [activeTab, setActiveTab] = useState<Tab>('users')
@@ -73,6 +74,7 @@ export default function AdminDashboard() {
     { id: 'db', label: t('admin.tabs.db'), icon: <Database size={16} className="text-slate-500" /> },
     { id: 'db-sources', label: 'DB 來源管理', icon: <Database size={16} className="text-sky-500" /> },
     { id: 'mail', label: t('admin.tabs.mail'), icon: <Mail size={16} className="text-purple-600" /> },
+    { id: 'voice-input', label: t('voice_input.settingsTitle', '語音輸入'), icon: <Mic size={16} className="text-blue-500" /> },
   ]
 
   return (
@@ -148,6 +150,7 @@ export default function AdminDashboard() {
             </div>
           )}
           {activeTab === 'monitor' && <MonitorPage />}
+          {activeTab === 'voice-input' && <VoiceInputSettingsPanel />}
         </main>
       </div>
     </div>

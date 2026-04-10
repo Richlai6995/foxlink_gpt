@@ -93,6 +93,8 @@ app.get('/api/health', (req, res) => res.json({ status: 'ok', timestamp: new Dat
     console.log('[Route] /api/training OK');
     app.use('/api/feedback', require('./routes/feedback'));
     console.log('[Route] /api/feedback OK');
+    app.use('/api/transcribe', require('./routes/transcribe'));
+    console.log('[Route] /api/transcribe OK');
 
     // Start Webex Bot listener (WebSocket primary, Polling fallback)
     try {

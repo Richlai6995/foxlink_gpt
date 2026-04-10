@@ -127,14 +127,34 @@ async function extractTextFromFile(filePath, mimeType, originalName) {
 
 /**
  * Transcribe audio file using Gemini
+ * @param {string} filePath
+ * @param {string} mimeType
+ * @param {string|number} [langOrTimeout] - language code ('zh-TW' | 'en' | 'vi') OR legacy timeoutMs (number)
+ * @param {number} [timeoutMs] - max wait time
  */
-async function transcribeAudio(filePath, mimeType, timeoutMs = 25 * 60 * 1000) {
+async function transcribeAudio(filePath, mimeType, langOrTimeout, timeoutMs = 25 * 60 * 1000) {
+  // Backward-compat: old callers pass (filePath, mimeType, timeoutMs:number)
+  let lang;
+  if (typeof langOrTimeout === 'number') {
+    timeoutMs = langOrTimeout;
+    lang = undefined;
+  } else {
+    lang = langOrTimeout;
+  }
+
+  const PROMPTS = {
+    'zh-TW': '請完整轉錄這段音訊，使用繁體中文，只回傳轉錄文字，不要加任何說明。',
+    'en':    'Please transcribe this audio completely in English. Return only the transcription, no explanations.',
+    'vi':    'Vui lòng phiên âm hoàn chỉnh đoạn âm thanh này bằng tiếng Việt. Chỉ trả lời nội dung phiên âm, không thêm giải thích.',
+  };
+  const prompt = PROMPTS[lang] || '請完整轉錄這段音訊，只回傳轉錄文字，不要加任何說明。';
+
   const model = genAI.getGenerativeModel({ model: MODEL_FLASH });
   const audioPart = await fileToGeminiPart(filePath, mimeType);
 
   const transcribePromise = model.generateContent([
     audioPart,
-    { text: '請完整轉錄這段音訊，只回傳轉錄文字，不要加任何說明。' },
+    { text: prompt },
   ]);
   const timeoutPromise = new Promise((_, reject) =>
     setTimeout(() => reject(new Error('Audio transcription timeout (5 min)')), timeoutMs)

@@ -12,6 +12,7 @@ import {
 import FeedbackStatusBadge from '../components/feedback/FeedbackStatusBadge'
 import FeedbackPriorityBadge from '../components/feedback/FeedbackPriorityBadge'
 import FeedbackAIAnalysis from '../components/feedback/FeedbackAIAnalysis'
+import MicButton from '../components/MicButton'
 
 interface Ticket {
   id: number
@@ -74,6 +75,8 @@ export default function FeedbackDetailPage() {
   const navigate = useNavigate()
   const chatEndRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const msgTextareaRef = useRef<HTMLTextAreaElement>(null)
+  const [voicePreview, setVoicePreview] = useState('')
 
   const [ticket, setTicket] = useState<Ticket | null>(null)
   const [messages, setMessages] = useState<Message[]>([])
@@ -216,6 +219,27 @@ export default function FeedbackDetailPage() {
       }
     }
   }
+
+  // 語音輸入：游標位置插入
+  const insertVoiceText = useCallback((text: string) => {
+    if (!text) return
+    const ta = msgTextareaRef.current
+    if (!ta) {
+      setMsgContent((prev) => (prev ? prev + ' ' + text : text))
+      return
+    }
+    const start = ta.selectionStart ?? msgContent.length
+    const end = ta.selectionEnd ?? msgContent.length
+    setMsgContent((prev) => prev.slice(0, start) + text + prev.slice(end))
+    requestAnimationFrame(() => {
+      try {
+        ta.focus()
+        const pos = start + text.length
+        ta.selectionStart = ta.selectionEnd = pos
+      } catch {}
+    })
+    setVoicePreview('')
+  }, [msgContent.length])
 
   // Draft save / submit
   const handleDraftSave = async () => {
@@ -655,6 +679,7 @@ export default function FeedbackDetailPage() {
               <div className="flex items-end gap-3">
                 <div className="flex-1 relative">
                   <textarea
+                    ref={msgTextareaRef}
                     value={msgContent}
                     onChange={e => handleInputChange(e.target.value)}
                     onKeyDown={handleKeyDown}
@@ -665,8 +690,24 @@ export default function FeedbackDetailPage() {
                     rows={2}
                     className="w-full bg-white border border-gray-300 rounded-lg px-4 py-2 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:border-blue-500 resize-none"
                   />
+                  {voicePreview && (
+                    <div className="mt-1 px-3 py-1 bg-blue-50 border border-blue-100 rounded-lg text-xs text-blue-700 italic flex items-center gap-1.5">
+                      <span className="text-blue-400">›</span>
+                      <span className="truncate">{voicePreview}</span>
+                    </div>
+                  )}
                 </div>
                 <div className="flex items-center gap-2">
+                  <div className="p-2 rounded-lg bg-gray-100">
+                    <MicButton
+                      onTranscript={insertVoiceText}
+                      onInterim={setVoicePreview}
+                      maxDuration={180}
+                      source="feedback"
+                      size={16}
+                      showInlineStatus={false}
+                    />
+                  </div>
                   <button
                     onClick={() => fileInputRef.current?.click()}
                     className="p-2 rounded-lg bg-gray-100 text-gray-500 hover:text-gray-900 transition"

@@ -839,6 +839,45 @@ router.put('/settings/auto-backup-schedule', async (req, res) => {
   }
 });
 
+// ─── Voice Input (麥克風語音輸入) ────────────────────────────────────────────
+// GET /api/admin/settings/voice-input
+router.get('/settings/voice-input', async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const rows = await db.prepare(
+      `SELECT key, value FROM system_settings WHERE key IN ('voice_input_enabled','voice_input_prefer_backend_only')`
+    ).all();
+    const map = Object.fromEntries(rows.map((r) => [r.key, r.value]));
+    res.json({
+      enabled: map.voice_input_enabled !== '0', // 預設開啟
+      preferBackendOnly: map.voice_input_prefer_backend_only === '1',
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// PUT /api/admin/settings/voice-input
+router.put('/settings/voice-input', async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const { enabled, preferBackendOnly } = req.body || {};
+    const upsert = async (key, value) => {
+      const ex = await db.prepare(`SELECT key FROM system_settings WHERE key=?`).get(key);
+      if (ex) {
+        await db.prepare(`UPDATE system_settings SET value=? WHERE key=?`).run(String(value), key);
+      } else {
+        await db.prepare(`INSERT INTO system_settings (key, value) VALUES (?, ?)`).run(key, String(value));
+      }
+    };
+    await upsert('voice_input_enabled', enabled ? '1' : '0');
+    await upsert('voice_input_prefer_backend_only', preferBackendOnly ? '1' : '0');
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // GET /api/admin/settings/cleanup
 router.get('/settings/cleanup', async (req, res) => {
   try {

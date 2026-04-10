@@ -491,6 +491,51 @@ async function runMigrations(db) {
     console.warn('[Migration] token_usage normalization skipped:', e.message);
   }
 
+  // ── Voice input STT model — 獨立追蹤 STT 用量，方便後台統計 ─────────────────
+  // key=gemini-flash-stt 與一般 Flash 共用 api_model 但獨立記帳
+  // model_role='stt' 避免出現在 chat / OCR / 翻譯 等選擇器（避免污染）
+  // 語音計費跟一般 chat token 不同，必須獨立一列才能單獨設定單價
+  try {
+    const sttRow = await db.prepare(
+      `SELECT id, model_role FROM llm_models WHERE LOWER(key)='gemini-flash-stt'`
+    ).get();
+    const flashApi = process.env.GEMINI_MODEL_FLASH || 'gemini-3-flash-preview';
+    if (!sttRow) {
+      await db.prepare(
+        `INSERT INTO llm_models (key, name, api_model, description, is_active, sort_order, provider_type, model_role)
+         VALUES ('gemini-flash-stt', 'Gemini Flash (語音轉文字)', ?, '麥克風語音輸入專用，獨立記帳，計費方式與一般 chat token 不同。', 1, 99, 'gemini', 'stt')`
+      ).run(flashApi);
+      console.log('[Migration] Seeded llm_models row: gemini-flash-stt (role=stt)');
+    } else if (sttRow.model_role !== 'stt') {
+      // 把舊的 'chat' role 升級成 'stt'，避免出現在 chat / 翻譯 / OCR 選擇器
+      await db.prepare(
+        `UPDATE llm_models SET model_role='stt' WHERE id=?`
+      ).run(sttRow.id);
+      console.log('[Migration] Updated gemini-flash-stt model_role: chat → stt');
+    }
+    // 同步建立 token_prices 條目（沿用 Flash 的當前單價作為基準，admin 之後可調整）
+    const sttPriceExists = await db.prepare(
+      `SELECT id FROM token_prices WHERE LOWER(model)='gemini flash (語音轉文字)' AND end_date IS NULL`
+    ).get();
+    if (!sttPriceExists) {
+      const flashPrice = await db.prepare(
+        `SELECT price_input, price_output, currency FROM token_prices tp
+         JOIN llm_models lm ON LOWER(lm.name)=LOWER(tp.model)
+         WHERE LOWER(lm.key)='flash' AND tp.end_date IS NULL
+         ORDER BY tp.start_date DESC FETCH FIRST 1 ROWS ONLY`
+      ).get();
+      if (flashPrice) {
+        await db.prepare(
+          `INSERT INTO token_prices (model, price_input, price_output, currency, start_date)
+           VALUES ('Gemini Flash (語音轉文字)', ?, ?, ?, TRUNC(SYSDATE))`
+        ).run(flashPrice.price_input, flashPrice.price_output, flashPrice.currency || 'USD');
+        console.log('[Migration] Seeded token_prices row for STT (cloned Flash price)');
+      }
+    }
+  } catch (e) {
+    console.warn('[Migration] STT model seed skipped:', e.message);
+  }
+
   const createTable = async (name, ddl) => {
     try {
       const exists = await db.tableExists(name);
