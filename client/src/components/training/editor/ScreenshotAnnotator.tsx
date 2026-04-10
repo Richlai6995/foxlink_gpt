@@ -97,16 +97,24 @@ export default function ScreenshotAnnotator({ imageUrl, annotations: initial, st
         const sr = svgRef.current.getBoundingClientRect()
         const drift = Math.max(Math.abs(ir.left - sr.left), Math.abs(ir.top - sr.top),
                                Math.abs(ir.width - sr.width), Math.abs(ir.height - sr.height))
+        console.log('[ScreenshotAnnotator] image natural=%dx%d render=%dx%d aspect=%s drift=%spx annots=%d',
+          img.naturalWidth, img.naturalHeight,
+          Math.round(ir.width), Math.round(ir.height),
+          (img.naturalWidth / img.naturalHeight).toFixed(3),
+          drift.toFixed(2),
+          initial?.length || 0)
         if (drift > 0.5) {
-          console.warn('[ScreenshotAnnotator] SVG/image misaligned by', drift.toFixed(2), 'px',
-            { img: ir, svg: sr })
+          console.warn('[ScreenshotAnnotator] SVG/image misaligned!', { img: ir, svg: sr })
+        }
+        if (initial?.length) {
+          console.log('[ScreenshotAnnotator] initial annotations sample:', initial.slice(0, 3))
         }
       }
     }
     if (img.complete) updateAspect()
     img.addEventListener('load', updateAspect)
     return () => img.removeEventListener('load', updateAspect)
-  }, [imageUrl])
+  }, [imageUrl, initial])
 
   // Convert client coords to percentage (0-100)
   const toPct = useCallback((clientX: number, clientY: number): { x: number; y: number } => {
@@ -390,8 +398,11 @@ export default function ScreenshotAnnotator({ imageUrl, annotations: initial, st
   const renderResizeHandles = () => {
     if (!selectedAnn) return null
     const a = selectedAnn
-    const hr = 0.7 // handle radius in viewBox units
-    const handleStyle = { fill: '#fff', stroke: '#3b82f6', strokeWidth: 0.15, cursor: 'nwse-resize' as const }
+    // Aspect-compensated ellipse so handles render as visual circles despite preserveAspectRatio="none"
+    const baseR = 1.0
+    const hrx = baseR / imgAspect
+    const hry = baseR
+    const handleStyle = { fill: '#fff', stroke: '#3b82f6', strokeWidth: 0.2, cursor: 'nwse-resize' as const }
 
     if (a.type === 'rect' || a.type === 'mosaic') {
       const { x, y, w, h } = a.coords
@@ -402,7 +413,7 @@ export default function ScreenshotAnnotator({ imageUrl, annotations: initial, st
         { id: 'br', cx: x + (w || 0), cy: y + (h || 0) },
       ]
       return corners.map(c => (
-        <circle key={c.id} cx={c.cx} cy={c.cy} r={hr} {...handleStyle}
+        <ellipse key={c.id} cx={c.cx} cy={c.cy} rx={hrx} ry={hry} {...handleStyle}
           onPointerDown={e => startResize(e, a, c.id)} />
       ))
     }
@@ -416,7 +427,7 @@ export default function ScreenshotAnnotator({ imageUrl, annotations: initial, st
         { id: 'br', cx: x + rx, cy: y + ry },
       ]
       return edges.map(c => (
-        <circle key={c.id} cx={c.cx} cy={c.cy} r={hr} {...handleStyle}
+        <ellipse key={c.id} cx={c.cx} cy={c.cy} rx={hrx} ry={hry} {...handleStyle}
           onPointerDown={e => startResize(e, a, c.id)} />
       ))
     }
