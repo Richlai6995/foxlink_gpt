@@ -77,20 +77,32 @@ export default function ScreenshotAnnotator({ imageUrl, annotations: initial, st
   const imgRef = useRef<HTMLImageElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
 
-  // Keep SVG size synced with image (handles browser zoom / window resize)
+  // Keep SVG box (size + position) pixel-aligned with the actual rendered image,
+  // regardless of CSS max-w/max-h scaling, parent flex centering, or zoom.
+  // We MUST set left/top as well — `inset-0` would otherwise stretch/conflict with inline width/height.
   useEffect(() => {
     const img = imgRef.current
     if (!img) return
     const syncSize = () => {
-      if (svgRef.current && img.clientWidth > 0) {
-        svgRef.current.style.width = img.clientWidth + 'px'
-        svgRef.current.style.height = img.clientHeight + 'px'
+      const svg = svgRef.current
+      if (!svg || img.clientWidth <= 0) return
+      svg.style.width = img.clientWidth + 'px'
+      svg.style.height = img.clientHeight + 'px'
+      svg.style.left = img.offsetLeft + 'px'
+      svg.style.top = img.offsetTop + 'px'
+      svg.style.right = 'auto'
+      svg.style.bottom = 'auto'
+      if (img.naturalWidth && img.naturalHeight) {
+        setImgAspect(img.naturalWidth / img.naturalHeight)
       }
     }
+    syncSize()
     const ro = new ResizeObserver(syncSize)
     ro.observe(img)
-    return () => ro.disconnect()
-  }, [])
+    // Also sync when the image element actually finishes loading (covers cached + late-load cases)
+    img.addEventListener('load', syncSize)
+    return () => { ro.disconnect(); img.removeEventListener('load', syncSize) }
+  }, [imageUrl])
 
   // Convert client coords to percentage (0-100)
   const toPct = useCallback((clientX: number, clientY: number): { x: number; y: number } => {
@@ -737,20 +749,11 @@ export default function ScreenshotAnnotator({ imageUrl, annotations: initial, st
         <div className="relative max-w-full max-h-full"
           style={{ cursor: tool === 'move' ? 'default' : tool === 'text' ? 'text' : 'crosshair' }}>
           <img ref={imgRef} src={imageUrl} alt="" className="max-w-[90vw] max-h-[85vh] rounded select-none"
-            draggable={false} style={{ display: 'block' }}
-            onLoad={e => {
-              const img = e.target as HTMLImageElement
-              setImgAspect(img.naturalWidth / img.naturalHeight)
-              // Initial sync (ResizeObserver handles subsequent changes)
-              if (svgRef.current) {
-                svgRef.current.style.width = img.clientWidth + 'px'
-                svgRef.current.style.height = img.clientHeight + 'px'
-              }
-            }} />
+            draggable={false} style={{ display: 'block' }} />
 
-          {/* SVG overlay */}
+          {/* SVG overlay — width/height/left/top driven by useEffect to stay pixel-aligned with the img */}
           <svg ref={svgRef}
-            className="absolute inset-0 w-full h-full"
+            className="absolute"
             viewBox="0 0 100 100"
             preserveAspectRatio="none"
             style={{ pointerEvents: 'all' }}
