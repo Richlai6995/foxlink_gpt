@@ -17,6 +17,8 @@ import DashboardBoardPage from './pages/DashboardBoardPage'
 import TemplatesPage from './pages/TemplatesPage'
 import FeedbackFAB from './components/feedback/FeedbackFAB'
 import FeedbackToast from './components/feedback/FeedbackToast'
+import GlobalVoiceInput from './components/GlobalVoiceInput'
+import VoiceHotkeyHint from './components/VoiceHotkeyHint'
 import FeedbackPage from './pages/FeedbackPage'
 import FeedbackNewPage from './pages/FeedbackNewPage'
 import FeedbackDetailPage from './pages/FeedbackDetailPage'
@@ -98,6 +100,8 @@ function AppRoutes() {
     </Routes>
     {isAuthenticated && <FeedbackFAB />}
     {isAuthenticated && <FeedbackToast />}
+    {isAuthenticated && <GlobalVoiceInput />}
+    {isAuthenticated && <VoiceHotkeyHint />}
     </MicProvider>
     </AdminOverrideProvider>
   )

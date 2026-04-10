@@ -9,7 +9,7 @@ import {
   User, Cpu, Zap, Settings, Terminal, Globe,
   ImageIcon, Clock, Share2, GitFork, Sparkles,
   Database, DollarSign, BarChart3, Server, Layers, BookMarked,
-  LayoutTemplate, Lock,
+  LayoutTemplate, Lock, Mic,
 } from 'lucide-react'
 
 // ── Icon mapping (icon name string → React element) ──────────────────────────
@@ -39,6 +39,7 @@ const ICON_MAP: Record<string, React.ReactNode> = {
   Layers: <Layers size={22} />,
   LayoutTemplate: <LayoutTemplate size={22} />,
   Lock: <Lock size={22} />,
+  Mic: <Mic size={22} />,
 }
 
 const ICON_MAP_SMALL: Record<string, React.ReactNode> = {}
@@ -46,7 +47,7 @@ for (const [k] of Object.entries(ICON_MAP)) {
   const Comp = {
     BookOpen, User, Settings, MessageSquare, Cpu, Upload, History, Terminal,
     Clock, ImageIcon, Download, Share2, Sparkles, Database, GitFork, Zap,
-    Globe, DollarSign, BarChart3, BookMarked, Server, Layers, LayoutTemplate, Lock,
+    Globe, DollarSign, BarChart3, BookMarked, Server, Layers, LayoutTemplate, Lock, Mic,
   }[k]
   if (Comp) ICON_MAP_SMALL[k] = <Comp size={18} />
 }
