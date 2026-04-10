@@ -521,21 +521,41 @@ async function generateWithTools(apiModel, history, userParts, functionDeclarati
     tools: functionDeclarations.length > 0 ? [{ functionDeclarations }] : [],
   });
 
-  const chat = model.startChat({ history });
-  let result = await chat.sendMessage(userParts);
-
+  // ⭐ 自管 contents — 不用 chat.startChat()，因為舊 SDK 會洗掉 thoughtSignature
+  // 導致 Gemini 3 thinking model 多輪 tool call 失敗
+  const contents = [...history, { role: 'user', parts: userParts }];
   let inputTokens = 0;
   let outputTokens = 0;
   let toolCallCount = 0;
   const MAX_TOOL_ROUNDS = 10;
+  let lastResponse = null;
 
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
-    const usage = result.response.usageMetadata || {};
+    const result = await model.generateContent({ contents });
+    const response = result.response;
+    lastResponse = response;
+    const usage = response.usageMetadata || {};
     inputTokens += usage.promptTokenCount || 0;
     outputTokens += usage.candidatesTokenCount || 0;
 
-    const fnCalls = result.response.functionCalls?.() || [];
-    if (fnCalls.length === 0) break;
+    // ⭐ 從 candidates 取原始 parts (保留 thoughtSignature)
+    const modelParts = response.candidates?.[0]?.content?.parts || [];
+    if (modelParts.length > 0) {
+      contents.push({ role: 'model', parts: modelParts });
+    }
+
+    const fnCalls = modelParts
+      .filter(p => p.functionCall)
+      .map(p => p.functionCall);
+
+    if (fnCalls.length === 0) {
+      return {
+        text: response.text(),
+        inputTokens,
+        outputTokens,
+        toolCallCount,
+      };
+    }
 
     // Call each tool and collect responses
     const fnResponses = [];
@@ -564,15 +584,18 @@ async function generateWithTools(apiModel, history, userParts, functionDeclarati
       return { text: directAnswerText, inputTokens, outputTokens, toolCallCount, isDirectAnswer: true };
     }
 
-    result = await chat.sendMessage(fnResponses);
+    contents.push({ role: 'user', parts: fnResponses });
   }
 
-  const finalUsage = result.response.usageMetadata || {};
-  inputTokens += finalUsage.promptTokenCount || 0;
-  outputTokens += finalUsage.candidatesTokenCount || 0;
-
+  // 達 MAX_TOOL_ROUNDS 仍未產生最終回答 — 回傳最後一個 response 中的文字（若有）
+  let lastText = '';
+  try {
+    lastText = lastResponse?.text() || '';
+  } catch {
+    lastText = '';
+  }
   return {
-    text: result.response.text(),
+    text: lastText || '[達到工具呼叫上限，未取得最終回答]',
     inputTokens,
     outputTokens,
     toolCallCount,
@@ -618,33 +641,55 @@ async function generateWithToolsStream(
     tools: functionDeclarations.length > 0 ? [{ functionDeclarations }] : [],
   });
 
-  const chat = model.startChat({ history });
-  let currentParts = userParts;
+  // ⭐ 自管 contents — 不用 chat.startChat()，因為舊 SDK 會洗掉 thoughtSignature
+  // 導致 Gemini 3 thinking model 多輪 tool call 失敗
+  const contents = [...history, { role: 'user', parts: userParts }];
   let inputTokens = 0, outputTokens = 0;
   let toolCallCount = 0;
   let fullText = '';
   const MAX_TOOL_ROUNDS = 10;
 
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
-    const result = await chat.sendMessageStream(currentParts);
+    const result = await model.generateContentStream({ contents });
+
+    // ⭐ 從 raw candidates 收集 parts，保留 thoughtSignature
+    // streaming 時同 index 的 text part 會跨多個 chunk，需累積；其他 part type 取代
+    const partsByIndex = new Map();
+    let finishReason = null;
 
     for await (const chunk of result.stream) {
-      let chunkText = '';
-      try {
-        chunkText = chunk.text();
-      } catch (e) {
-        const fr = chunk.candidates?.[0]?.finishReason;
-        if (fr === 'MAX_TOKENS') {
-          const msg = '\n\n[⚠️ 回應已達最大 Token 上限，內容可能不完整]';
-          fullText += msg;
-          onChunk(msg);
+      const cand = chunk.candidates?.[0];
+      if (!cand) continue;
+      if (cand.finishReason) finishReason = cand.finishReason;
+
+      const chunkParts = cand.content?.parts || [];
+      chunkParts.forEach((p, i) => {
+        if (p.text != null) {
+          const existing = partsByIndex.get(i);
+          if (existing && existing.text != null && !existing.functionCall) {
+            existing.text += p.text;
+            if (p.thoughtSignature) existing.thoughtSignature = p.thoughtSignature;
+          } else {
+            partsByIndex.set(i, { ...p });
+          }
+          if (!p.thought) {  // 不要把 thinking 內容串到使用者輸出
+            fullText += p.text;
+            onChunk(p.text);
+          }
+        } else {
+          // functionCall / inlineData / 其他 — 整個取代
+          partsByIndex.set(i, { ...p });
         }
-        continue;
-      }
-      if (chunkText) {
-        fullText += chunkText;
-        onChunk(chunkText);
-      }
+      });
+    }
+
+    if (finishReason === 'MAX_TOKENS') {
+      const msg = '\n\n[⚠️ 回應已達最大 Token 上限，內容可能不完整]';
+      fullText += msg;
+      onChunk(msg);
+    } else if (finishReason && finishReason !== 'STOP' && finishReason !== 'TOOL_USE' && finishReason !== 'TOOL_CALLS') {
+      // 其他異常 finishReason（SAFETY、RECITATION、OTHER 等）
+      console.warn(`[Gemini] Unexpected finishReason: ${finishReason}`);
     }
 
     const response = await result.response;
@@ -652,7 +697,21 @@ async function generateWithToolsStream(
     inputTokens += usage.promptTokenCount || 0;
     outputTokens += usage.candidatesTokenCount || 0;
 
-    const fnCalls = response.functionCalls?.() || [];
+    // 組出完整 model turn（按 index 排序）
+    const modelParts = [...partsByIndex.entries()]
+      .sort((a, b) => a[0] - b[0])
+      .map(([, p]) => p);
+
+    // ⭐ 關鍵：原樣 append 回 contents，thoughtSignature 還在
+    if (modelParts.length > 0) {
+      contents.push({ role: 'model', parts: modelParts });
+    }
+
+    // 從 modelParts 抓 functionCall（不用 response.functionCalls()）
+    const fnCalls = modelParts
+      .filter(p => p.functionCall)
+      .map(p => p.functionCall);
+
     if (fnCalls.length === 0) break; // No more tool calls — done
 
     // Execute tools
@@ -682,7 +741,7 @@ async function generateWithToolsStream(
       return { text: directAnswerText, inputTokens, outputTokens, toolCallCount, isDirectAnswer: true };
     }
 
-    currentParts = fnResponses;
+    contents.push({ role: 'user', parts: fnResponses });
   }
 
   return { text: fullText, inputTokens, outputTokens, toolCallCount };
