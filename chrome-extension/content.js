@@ -573,9 +573,17 @@ function startAnnotationMode(screenshotDataUrl) {
   }
 
   function toPct(px, isX) {
-    // Convert canvas pixel to percentage relative to image display area (not full canvas)
+    // Convert canvas-absolute pixel to percentage relative to image display area.
+    // ⚠️ Use ONLY for absolute positions (x, y), NOT for distances (w, h, rx, ry).
     if (isX) return ((px - imgRect.x) / (imgRect.w || canvasW)) * 100;
     return ((px - imgRect.y) / (imgRect.h || canvasH)) * 100;
+  }
+
+  function distToPct(px, isX) {
+    // Convert canvas pixel DISTANCE (width/height/radius) to percentage of image display area.
+    // No offset subtraction — distances are translation-invariant.
+    if (isX) return (px / (imgRect.w || canvasW)) * 100;
+    return (px / (imgRect.h || canvasH)) * 100;
   }
 
   // Diagnostic: dump click → stored coord conversion so user can verify alignment
@@ -612,8 +620,10 @@ function startAnnotationMode(screenshotDataUrl) {
       const c = a.coords;
       switch (a.type) {
         case 'number': {
-          const rPct = toPct(18, true); // slightly larger hit area than visual
-          if (Math.abs(xPct - c.x) < rPct && Math.abs(yPct - c.y) < toPct(18, false)) return a;
+          // 18px hit radius — use distToPct (distance, not absolute position)
+          const rxPct = distToPct(18, true);
+          const ryPct = distToPct(18, false);
+          if (Math.abs(xPct - c.x) < rxPct && Math.abs(yPct - c.y) < ryPct) return a;
           break;
         }
         case 'circle': {
@@ -637,10 +647,10 @@ function startAnnotationMode(screenshotDataUrl) {
           break;
         }
         case 'text': {
-          // Approximate bounding box from text position
+          // Approximate bounding box from text position — use distToPct (distances)
           const fontSize = (a.strokeWidth || 3) * 5 + 8;
-          const wPct = toPct(fontSize * (a.label || '').length * 0.6, true);
-          const hPct = toPct(fontSize, false);
+          const wPct = distToPct(fontSize * (a.label || '').length * 0.6, true);
+          const hPct = distToPct(fontSize, false);
           if (xPct >= c.x - 1 && xPct <= c.x + wPct + 1 && yPct >= c.y - hPct && yPct <= c.y + 1) return a;
           break;
         }
@@ -991,7 +1001,7 @@ function startAnnotationMode(screenshotDataUrl) {
       if (rx > 3 || ry > 3) {
         annotations.push({
           id: 'a' + Date.now(), type: 'circle',
-          coords: { x: toPct(cx, true), y: toPct(cy, false), rx: toPct(rx, true), ry: toPct(ry, false) },
+          coords: { x: toPct(cx, true), y: toPct(cy, false), rx: distToPct(rx, true), ry: distToPct(ry, false) },
           color: currentColor, strokeWidth, purpose: 'both', visible: true
         });
       }
@@ -1001,7 +1011,7 @@ function startAnnotationMode(screenshotDataUrl) {
       if (Math.abs(w) > 3 || Math.abs(h) > 3) {
         annotations.push({
           id: 'a' + Date.now(), type: 'rect',
-          coords: { x: toPct(startPoint.x, true), y: toPct(startPoint.y, false), w: toPct(w, true), h: toPct(h, false) },
+          coords: { x: toPct(startPoint.x, true), y: toPct(startPoint.y, false), w: distToPct(w, true), h: distToPct(h, false) },
           color: currentColor, strokeWidth, purpose: 'both', visible: true
         });
       }
@@ -1029,7 +1039,7 @@ function startAnnotationMode(screenshotDataUrl) {
       if (Math.abs(w) > 5 || Math.abs(h) > 5) {
         annotations.push({
           id: 'a' + Date.now(), type: 'mosaic',
-          coords: { x: toPct(startPoint.x, true), y: toPct(startPoint.y, false), w: toPct(w, true), h: toPct(h, false) },
+          coords: { x: toPct(startPoint.x, true), y: toPct(startPoint.y, false), w: distToPct(w, true), h: distToPct(h, false) },
           color: '#94a3b8', strokeWidth: 0, purpose: 'display', visible: true
         });
       }
