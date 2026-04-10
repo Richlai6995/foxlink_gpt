@@ -359,6 +359,29 @@ router.post('/tickets/:id/messages', upload.array('files', 5), async (req, res) 
   }
 });
 
+router.delete('/messages/:id', async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const isAdmin = req.user.role === 'admin';
+    const result = await feedbackService.deleteMessage(db, Number(req.params.id), req.user.id, isAdmin);
+
+    // 刪除實體檔案
+    for (const att of (result.attachments || [])) {
+      try {
+        const fullPath = path.join(UPLOAD_DIR, att.file_path);
+        if (fs.existsSync(fullPath)) fs.unlinkSync(fullPath);
+      } catch {}
+    }
+
+    // WebSocket 推送（觸發前端 refresh）
+    emitNewMessage(result.ticket_id, { _deleted: true, id: Number(req.params.id) });
+
+    res.json({ success: true });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
 // ─── AI 分析 ─────────────────────────────────────────────────────────────────
 
 router.post('/tickets/:id/ai-analyze', async (req, res) => {

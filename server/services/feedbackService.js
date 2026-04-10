@@ -354,6 +354,27 @@ async function addMessage(db, { ticket_id, sender_id, sender_role, content, is_i
   return msgId ? await db.prepare('SELECT * FROM feedback_messages WHERE id = ?').get(msgId) : { id: null, ticket_id, sender_id, sender_role, content, is_internal: is_internal ? 1 : 0 };
 }
 
+/** 刪除管理員自己的訊息（含相關附件） */
+async function deleteMessage(db, messageId, userId, isAdmin) {
+  const msg = await db.prepare('SELECT * FROM feedback_messages WHERE id = ?').get(messageId);
+  if (!msg) throw new Error('訊息不存在');
+  if (!isAdmin) throw new Error('只有管理員可以刪除訊息');
+  if (msg.sender_id !== userId) throw new Error('只能刪除自己的訊息');
+  if (msg.sender_role !== 'admin') throw new Error('只能刪除管理員訊息');
+  if (msg.is_system) throw new Error('系統訊息無法刪除');
+
+  // 取得相關附件以便刪檔
+  const atts = await db.prepare('SELECT id, file_path FROM feedback_attachments WHERE message_id = ?').all(messageId);
+
+  // 刪除附件記錄（檔案實體稍後由 route 層處理）
+  await db.prepare('DELETE FROM feedback_attachments WHERE message_id = ?').run(messageId);
+
+  // 刪除訊息
+  await db.prepare('DELETE FROM feedback_messages WHERE id = ?').run(messageId);
+
+  return { ticket_id: msg.ticket_id, attachments: atts };
+}
+
 async function addSystemMessage(db, ticket_id, sender_id, content) {
   await db.prepare(`
     INSERT INTO feedback_messages (ticket_id, sender_id, sender_role, content, is_system)
@@ -544,6 +565,7 @@ module.exports = {
   assignTicket,
   submitSatisfaction,
   addMessage,
+  deleteMessage,
   addSystemMessage,
   listMessages,
   addAttachment,

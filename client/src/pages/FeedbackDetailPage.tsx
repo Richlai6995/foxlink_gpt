@@ -7,7 +7,7 @@ import { useFeedbackSocket } from '../hooks/useFeedbackSocket'
 import {
   ArrowLeft, Send, Paperclip, Lock, Clock, User, Star,
   CheckCircle, RotateCcw, UserCheck, Download, X, Loader2,
-  AlertTriangle, FileText, Image, Upload, Save
+  AlertTriangle, FileText, Image, Upload, Save, Trash2
 } from 'lucide-react'
 import FeedbackStatusBadge from '../components/feedback/FeedbackStatusBadge'
 import FeedbackPriorityBadge from '../components/feedback/FeedbackPriorityBadge'
@@ -549,12 +549,26 @@ export default function FeedbackDetailPage() {
                 msg.is_system ? 'justify-center' :
                 msg.sender_role === 'applicant' ? 'justify-start' : 'justify-end'
               }`}>
-                <div className={`rounded-xl px-4 py-2.5 ${
+                <div className={`relative group/msg rounded-xl px-4 py-2.5 ${
                   msg.is_system ? 'bg-gray-100 text-gray-500 text-center text-xs' :
                   msg.is_internal ? 'max-w-[70%] bg-amber-50 border border-amber-200' :
                   msg.sender_role === 'applicant' ? 'max-w-[70%] bg-gray-100 border border-gray-200' :
                   'max-w-[70%] bg-blue-50 border border-blue-200'
                 }`}>
+                  {/* 管理員可刪除自己的訊息 */}
+                  {!msg.is_system && isAdmin && msg.sender_role === 'admin' && msg.sender_id === (user as any)?.id && (
+                    <button
+                      onClick={async () => {
+                        if (!confirm('確認刪除這則訊息？')) return
+                        try { await api.delete(`/feedback/messages/${msg.id}`); fetchAll() }
+                        catch (e: any) { alert(e.response?.data?.error || 'Error') }
+                      }}
+                      className="absolute -top-2 -right-2 bg-red-500 hover:bg-red-600 rounded-full w-6 h-6 flex items-center justify-center text-white opacity-0 group-hover/msg:opacity-100 transition shadow-lg"
+                      title="刪除訊息"
+                    >
+                      <Trash2 size={12} />
+                    </button>
+                  )}
                   {!msg.is_system && (
                     <div className="flex items-center gap-2 text-xs text-gray-500 mb-1">
                       {msg.is_internal && <Lock size={10} className="text-amber-400" />}
