@@ -787,16 +787,15 @@ export default function ScreenshotAnnotator({ imageUrl, annotations: initial, st
       </div>
 
       {/* Canvas area —
-          outer: `grid place-items-center` centers WITHOUT blockifying its child
-                 (flex would blockify inline-block children, breaking shrink-wrap)
-          inner: `relative` block that shrink-wraps to its only in-flow child (the img),
-                 because the SVG is `position: absolute` and removed from flow
-          result: wrapper size ≡ image actual rendered size, SVG inset-0 fills it exactly */}
-      <div className="flex-1 grid place-items-center overflow-hidden p-4 min-h-0">
-        <div className="relative"
+          outer: scrollable container, image displayed at natural pixel size for 1:1 alignment
+                 with chrome extension (which also displays at native size).
+                 If image > viewport, user scrolls. Center via mx-auto when image fits.
+          inner: `relative` shrink-wrap wrapper; SVG absolute, doesn't fight sizing. */}
+      <div className="flex-1 overflow-auto p-4 min-h-0 bg-black/50">
+        <div className="relative mx-auto w-fit"
           style={{ cursor: tool === 'move' ? 'default' : tool === 'text' ? 'text' : 'crosshair' }}>
           <img ref={imgRef} src={imageUrl} alt=""
-            className="block max-w-[90vw] max-h-[80vh] rounded select-none"
+            className="block rounded select-none"
             draggable={false} />
 
           {/* SVG overlay — absolute, removed from flow, so it doesn't fight wrapper sizing */}
