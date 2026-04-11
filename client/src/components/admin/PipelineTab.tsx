@@ -4,6 +4,7 @@ import {
   Zap, Wrench, BookOpen, Bot, FileOutput, GitMerge, X,
   GripVertical, AlertCircle, CheckCircle2, LayoutTemplate,
 } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import TemplatePickerPopover from '../templates/TemplatePickerPopover'
 import type { DocTemplate } from '../../types'
 
@@ -63,40 +64,32 @@ interface Props {
 
 // ─── Node type config ─────────────────────────────────────────────────────────
 const NODE_TYPES = [
-  { type: 'skill',         icon: Zap,        label: '技能',      color: 'text-amber-500',  bg: 'bg-amber-50  border-amber-200' },
-  { type: 'mcp',           icon: Wrench,      label: 'MCP 工具',  color: 'text-purple-500', bg: 'bg-purple-50 border-purple-200' },
-  { type: 'kb',            icon: BookOpen,    label: '知識庫',    color: 'text-green-500',  bg: 'bg-green-50  border-green-200' },
-  { type: 'ai',            icon: Bot,         label: 'AI 追加',   color: 'text-blue-500',   bg: 'bg-blue-50   border-blue-200' },
-  { type: 'generate_file', icon: FileOutput,  label: '生成檔案',  color: 'text-indigo-500', bg: 'bg-indigo-50 border-indigo-200' },
-  { type: 'condition',     icon: GitBranch,   label: '條件判斷',  color: 'text-rose-500',   bg: 'bg-rose-50   border-rose-200' },
-  { type: 'parallel',      icon: GitMerge,    label: '並行執行',  color: 'text-teal-500',   bg: 'bg-teal-50   border-teal-200' },
+  { type: 'skill',         icon: Zap,        labelKey: 'scheduledTask.pipeline.nodeType.skill',          color: 'text-amber-500',  bg: 'bg-amber-50  border-amber-200' },
+  { type: 'mcp',           icon: Wrench,      labelKey: 'scheduledTask.pipeline.nodeType.mcp',            color: 'text-purple-500', bg: 'bg-purple-50 border-purple-200' },
+  { type: 'kb',            icon: BookOpen,    labelKey: 'scheduledTask.pipeline.nodeType.kb',             color: 'text-green-500',  bg: 'bg-green-50  border-green-200' },
+  { type: 'ai',            icon: Bot,         labelKey: 'scheduledTask.pipeline.nodeType.ai',             color: 'text-blue-500',   bg: 'bg-blue-50   border-blue-200' },
+  { type: 'generate_file', icon: FileOutput,  labelKey: 'scheduledTask.pipeline.nodeType.generate_file',  color: 'text-indigo-500', bg: 'bg-indigo-50 border-indigo-200' },
+  { type: 'condition',     icon: GitBranch,   labelKey: 'scheduledTask.pipeline.nodeType.condition',      color: 'text-rose-500',   bg: 'bg-rose-50   border-rose-200' },
+  { type: 'parallel',      icon: GitMerge,    labelKey: 'scheduledTask.pipeline.nodeType.parallel',       color: 'text-teal-500',   bg: 'bg-teal-50   border-teal-200' },
 ] as const
 
 const FILE_TYPES = ['pdf', 'docx', 'xlsx', 'pptx', 'txt', 'mp3']
 const TEXT_OPS = [
-  { value: 'contains',     label: '包含' },
-  { value: 'not_contains', label: '不包含' },
-  { value: 'equals',       label: '等於' },
-  { value: 'starts_with',  label: '開頭是' },
-  { value: 'ends_with',    label: '結尾是' },
-  { value: 'regex',        label: '正則符合' },
-  { value: 'empty',        label: '為空' },
-  { value: 'length_gt',    label: '長度大於' },
-  { value: 'length_lt',    label: '長度小於' },
-  { value: 'number_gt',    label: '數值大於' },
-  { value: 'number_lt',    label: '數值小於' },
-]
+  'contains', 'not_contains', 'equals', 'starts_with', 'ends_with',
+  'regex', 'empty', 'length_gt', 'length_lt', 'number_gt', 'number_lt',
+] as const
 
 let _uid = 1
 function newId() { return `node_${Date.now()}_${_uid++}` }
 
 // ─── VariablePicker ───────────────────────────────────────────────────────────
 function VarBtn({ onInsert }: { onInsert: (v: string) => void }) {
+  const { t } = useTranslation()
   const [open, setOpen] = useState(false)
   const vars = [
-    { label: 'AI 主輸出', value: '{{ai_output}}' },
-    { label: '今日日期', value: '{{date}}' },
-    { label: '任務名稱', value: '{{task_name}}' },
+    { label: t('scheduledTask.pipeline.vars.aiOutput'), value: '{{ai_output}}' },
+    { label: t('scheduledTask.pipeline.vars.date'), value: '{{date}}' },
+    { label: t('scheduledTask.pipeline.vars.taskName'), value: '{{task_name}}' },
   ]
   return (
     <div className="relative inline-block">
@@ -105,7 +98,7 @@ function VarBtn({ onInsert }: { onInsert: (v: string) => void }) {
         onClick={() => setOpen((o) => !o)}
         className="text-xs px-2 py-0.5 rounded border border-slate-300 text-slate-500 hover:border-blue-400 hover:text-blue-600 transition"
       >
-        + 插入變數
+        {t('scheduledTask.pipeline.insertVar')}
       </button>
       {open && (
         <div className="absolute z-50 top-full left-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg min-w-[160px]">
@@ -135,8 +128,12 @@ function VarInput({
   multiline?: boolean
   allNodeIds?: string[]
 }) {
+  const { t } = useTranslation()
   const insert = useCallback((v: string) => onChange((value || '') + v), [value, onChange])
-  const nodeVars = (allNodeIds || []).map((id) => ({ label: `節點 ${id} 輸出`, value: `{{node_${id}_output}}` }))
+  const nodeVars = (allNodeIds || []).map((id) => ({
+    label: t('scheduledTask.pipeline.vars.nodeOutput', { id }),
+    value: `{{node_${id}_output}}`,
+  }))
 
   return (
     <div className="space-y-1">
@@ -180,6 +177,7 @@ function GenerateFileForm({
   otherIds: string[]
   onChange: (patch: Partial<PipelineNode>) => void
 }) {
+  const { t } = useTranslation()
   const [showPicker, setShowPicker] = useState(false)
   const hasTemplate = !!node.template_id
 
@@ -188,7 +186,7 @@ function GenerateFileForm({
       {/* Template mode toggle */}
       <div>
         <label className="label text-xs flex items-center gap-1.5">
-          <LayoutTemplate size={12} className="text-indigo-500" /> 範本模式
+          <LayoutTemplate size={12} className="text-indigo-500" /> {t('scheduledTask.pipeline.generateFile.templateMode')}
         </label>
         {hasTemplate ? (
           <div className="flex items-center gap-2 bg-indigo-50 border border-indigo-200 rounded-lg px-3 py-1.5 text-xs text-indigo-700">
@@ -201,7 +199,7 @@ function GenerateFileForm({
           <div className="relative inline-block">
             <button type="button" onClick={() => setShowPicker(v => !v)}
               className="flex items-center gap-1.5 text-xs border border-dashed border-slate-300 rounded-lg px-3 py-1.5 text-slate-500 hover:border-indigo-400 hover:text-indigo-600 transition">
-              <LayoutTemplate size={12} /> 選擇範本（可選）
+              <LayoutTemplate size={12} /> {t('scheduledTask.pipeline.generateFile.selectTemplate')}
             </button>
             {showPicker && (
               <TemplatePickerPopover
@@ -220,30 +218,30 @@ function GenerateFileForm({
       {!hasTemplate && (
         <div className="flex gap-2">
           <div>
-            <label className="label text-xs">檔案格式</label>
+            <label className="label text-xs">{t('scheduledTask.pipeline.generateFile.fileFormat')}</label>
             <select className="input text-xs" value={node.output_file || 'pdf'} onChange={(e) => onChange({ output_file: e.target.value })}>
-              {FILE_TYPES.map((t) => <option key={t} value={t}>{t.toUpperCase()}</option>)}
+              {FILE_TYPES.map((ft) => <option key={ft} value={ft}>{ft.toUpperCase()}</option>)}
             </select>
           </div>
           <div className="flex-1">
-            <label className="label text-xs">檔名</label>
-            <input className="input w-full text-xs" value={node.filename || ''} onChange={(e) => onChange({ filename: e.target.value })} placeholder={`報告_{{date}}.${node.output_file || 'pdf'}`} />
+            <label className="label text-xs">{t('scheduledTask.pipeline.generateFile.filename')}</label>
+            <input className="input w-full text-xs" value={node.filename || ''} onChange={(e) => onChange({ filename: e.target.value })} placeholder={`report_{{date}}.${node.output_file || 'pdf'}`} />
           </div>
         </div>
       )}
       {hasTemplate && (
         <div className="flex-1">
-          <label className="label text-xs">檔名（選填）</label>
-          <input className="input w-full text-xs" value={node.filename || ''} onChange={(e) => onChange({ filename: e.target.value })} placeholder={`報告_{{date}}.${node.output_file || 'xlsx'}`} />
+          <label className="label text-xs">{t('scheduledTask.pipeline.generateFile.filenameOptional')}</label>
+          <input className="input w-full text-xs" value={node.filename || ''} onChange={(e) => onChange({ filename: e.target.value })} placeholder={`report_{{date}}.${node.output_file || 'xlsx'}`} />
         </div>
       )}
 
       {/* Data source */}
       <div>
-        <label className="label text-xs">{hasTemplate ? '資料來源（JSON）' : '內容來源'}</label>
+        <label className="label text-xs">{hasTemplate ? t('scheduledTask.pipeline.generateFile.dataSourceJson') : t('scheduledTask.pipeline.generateFile.dataSourceText')}</label>
         <VarInput value={node.input || '{{ai_output}}'} onChange={(v) => onChange({ input: v })} placeholder="{{ai_output}}" allNodeIds={otherIds} />
         {hasTemplate && (
-          <p className="text-[10px] text-slate-400 mt-1">需為 JSON 格式，key 與範本變數對應。</p>
+          <p className="text-[10px] text-slate-400 mt-1">{t('scheduledTask.pipeline.generateFile.jsonHint')}</p>
         )}
       </div>
     </div>
@@ -260,6 +258,7 @@ function NodeForm({
   mcpServers: McpServer[]
   onChange: (patch: Partial<PipelineNode>) => void
 }) {
+  const { t } = useTranslation()
   const otherIds = allNodes.filter((n) => n.id !== node.id).map((n) => n.id)
   const mcpTools = (() => {
     const srv = mcpServers.find((s) => s.name === node.server)
@@ -279,36 +278,39 @@ function NodeForm({
 
   if (node.type === 'skill') return (
     <div className="space-y-3">
-      {sel('name', catalog.skills.map((s) => ({ value: s.name, label: `${s.icon || '⚡'} ${s.name}` })), '技能', '選擇技能…')}
+      {sel('name', catalog.skills.map((s) => ({ value: s.name, label: `${s.icon || '⚡'} ${s.name}` })), t('scheduledTask.pipeline.nodeType.skill'), t('scheduledTask.pipeline.skill.selectPlaceholder'))}
       <div>
-        <label className="label text-xs">輸入來源</label>
+        <label className="label text-xs">{t('scheduledTask.pipeline.skill.inputSource')}</label>
         <VarInput value={node.input || '{{ai_output}}'} onChange={(v) => onChange({ input: v })} placeholder="{{ai_output}}" allNodeIds={otherIds} />
       </div>
       <div className="flex gap-2">
         <div className="flex-1">
-          <label className="label text-xs">輸出為檔案（選填）</label>
+          <label className="label text-xs">{t('scheduledTask.pipeline.skill.outputAsFile')}</label>
           <select className="input w-full text-xs" value={node.output_file || ''} onChange={(e) => onChange({ output_file: e.target.value || undefined })}>
-            <option value="">僅傳入下一節點</option>
-            {FILE_TYPES.map((t) => <option key={t} value={t}>{t.toUpperCase()}</option>)}
+            <option value="">{t('scheduledTask.pipeline.skill.passToNext')}</option>
+            {FILE_TYPES.map((ft) => <option key={ft} value={ft}>{ft.toUpperCase()}</option>)}
           </select>
         </div>
         {node.output_file && (
           <div className="flex-1">
-            <label className="label text-xs">檔名</label>
-            <input className="input w-full text-xs" value={node.filename || ''} onChange={(e) => onChange({ filename: e.target.value })} placeholder={`輸出_{{date}}.${node.output_file}`} />
+            <label className="label text-xs">{t('scheduledTask.pipeline.skill.filename')}</label>
+            <input className="input w-full text-xs" value={node.filename || ''} onChange={(e) => onChange({ filename: e.target.value })} placeholder={`output_{{date}}.${node.output_file}`} />
           </div>
         )}
       </div>
-      {sel('on_fail', [{ value: 'continue', label: '繼續執行' }, { value: 'stop', label: '停止整個流程' }], '失敗時')}
+      {sel('on_fail', [
+        { value: 'continue', label: t('scheduledTask.pipeline.skill.onFailContinue') },
+        { value: 'stop', label: t('scheduledTask.pipeline.skill.onFailStop') },
+      ], t('scheduledTask.pipeline.skill.onFailLabel'))}
     </div>
   )
 
   if (node.type === 'mcp') return (
     <div className="space-y-3">
-      {sel('server', mcpServers.map((s) => ({ value: s.name, label: s.name })), 'MCP 伺服器', '選擇伺服器…')}
-      {node.server && sel('tool', mcpTools.map((t) => ({ value: t.name, label: t.name + (t.description ? ` — ${t.description.slice(0, 40)}` : '') })), '工具', '選擇工具…')}
+      {sel('server', mcpServers.map((s) => ({ value: s.name, label: s.name })), t('scheduledTask.pipeline.mcpNode.server'), t('scheduledTask.pipeline.mcpNode.selectServer'))}
+      {node.server && sel('tool', mcpTools.map((tool) => ({ value: tool.name, label: tool.name + (tool.description ? ` — ${tool.description.slice(0, 40)}` : '') })), t('scheduledTask.pipeline.mcpNode.tool'), t('scheduledTask.pipeline.mcpNode.selectTool'))}
       <div>
-        <label className="label text-xs">參數（key=value，每行一筆）</label>
+        <label className="label text-xs">{t('scheduledTask.pipeline.mcpNode.args')}</label>
         <VarInput
           value={Object.entries(node.args || {}).map(([k, v]) => `${k}=${v}`).join('\n')}
           onChange={(raw) => {
@@ -329,9 +331,9 @@ function NodeForm({
 
   if (node.type === 'kb') return (
     <div className="space-y-3">
-      {sel('name', catalog.kbs.map((k) => ({ value: k.name, label: k.name })), '知識庫', '選擇知識庫…')}
+      {sel('name', catalog.kbs.map((k) => ({ value: k.name, label: k.name })), t('scheduledTask.pipeline.kbNode.label'), t('scheduledTask.pipeline.kbNode.selectKb'))}
       <div>
-        <label className="label text-xs">查詢內容</label>
+        <label className="label text-xs">{t('scheduledTask.pipeline.kbNode.query')}</label>
         <VarInput value={node.query || '{{ai_output}}'} onChange={(v) => onChange({ query: v })} placeholder="{{ai_output}}" allNodeIds={otherIds} />
       </div>
     </div>
@@ -340,20 +342,20 @@ function NodeForm({
   if (node.type === 'ai') return (
     <div className="space-y-3">
       <div>
-        <label className="label text-xs">Prompt</label>
-        <VarInput value={node.prompt || ''} onChange={(v) => onChange({ prompt: v })} placeholder="根據以下內容產出摘要：\n{{ai_output}}" multiline allNodeIds={otherIds} />
+        <label className="label text-xs">{t('scheduledTask.pipeline.aiNode.prompt')}</label>
+        <VarInput value={node.prompt || ''} onChange={(v) => onChange({ prompt: v })} placeholder={t('scheduledTask.pipeline.aiNode.promptPlaceholder', { ao: '{{ai_output}}' })} multiline allNodeIds={otherIds} />
       </div>
       <div className="flex gap-2">
         <div className="flex-1">
-          <label className="label text-xs">輸出為檔案（選填）</label>
+          <label className="label text-xs">{t('scheduledTask.pipeline.skill.outputAsFile')}</label>
           <select className="input w-full text-xs" value={node.output_file || ''} onChange={(e) => onChange({ output_file: e.target.value || undefined })}>
-            <option value="">僅傳入下一節點</option>
-            {FILE_TYPES.map((t) => <option key={t} value={t}>{t.toUpperCase()}</option>)}
+            <option value="">{t('scheduledTask.pipeline.skill.passToNext')}</option>
+            {FILE_TYPES.map((ft) => <option key={ft} value={ft}>{ft.toUpperCase()}</option>)}
           </select>
         </div>
         {node.output_file && (
           <div className="flex-1">
-            <label className="label text-xs">檔名</label>
+            <label className="label text-xs">{t('scheduledTask.pipeline.skill.filename')}</label>
             <input className="input w-full text-xs" value={node.filename || ''} onChange={(e) => onChange({ filename: e.target.value })} placeholder={`output.${node.output_file}`} />
           </div>
         )}
@@ -368,38 +370,38 @@ function NodeForm({
   if (node.type === 'condition') return (
     <div className="space-y-3">
       <div>
-        <label className="label text-xs">判斷方式</label>
+        <label className="label text-xs">{t('scheduledTask.pipeline.conditionNode.method')}</label>
         <div className="flex gap-3">
           {(['ai', 'text'] as const).map((j) => (
             <label key={j} className="flex items-center gap-1.5 cursor-pointer text-xs">
               <input type="radio" checked={(node.judge || 'ai') === j} onChange={() => onChange({ judge: j })} />
-              {j === 'ai' ? '🤖 讓 AI 判斷（推薦）' : '📝 文字條件'}
+              {j === 'ai' ? t('scheduledTask.pipeline.conditionNode.aiOption') : t('scheduledTask.pipeline.conditionNode.textOption')}
             </label>
           ))}
         </div>
       </div>
       {(node.judge || 'ai') === 'ai' ? (
         <div>
-          <label className="label text-xs">判斷問題（AI 只回答 yes/no）</label>
-          <VarInput value={node.prompt || ''} onChange={(v) => onChange({ prompt: v })} placeholder="這段內容是否包含負面財務訊息？" multiline allNodeIds={otherIds} />
+          <label className="label text-xs">{t('scheduledTask.pipeline.conditionNode.aiPrompt')}</label>
+          <VarInput value={node.prompt || ''} onChange={(v) => onChange({ prompt: v })} placeholder={t('scheduledTask.pipeline.conditionNode.aiPromptPlaceholder')} multiline allNodeIds={otherIds} />
         </div>
       ) : (
         <div className="space-y-2">
           <div>
-            <label className="label text-xs">判斷來源</label>
+            <label className="label text-xs">{t('scheduledTask.pipeline.conditionNode.source')}</label>
             <VarInput value={node.input || '{{ai_output}}'} onChange={(v) => onChange({ input: v })} placeholder="{{ai_output}}" allNodeIds={otherIds} />
           </div>
           <div className="flex gap-2">
             <div>
-              <label className="label text-xs">條件</label>
+              <label className="label text-xs">{t('scheduledTask.pipeline.conditionNode.op')}</label>
               <select className="input text-xs" value={node.operator || 'contains'} onChange={(e) => onChange({ operator: e.target.value })}>
-                {TEXT_OPS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                {TEXT_OPS.map((op) => <option key={op} value={op}>{t(`scheduledTask.pipeline.ops.${op}`)}</option>)}
               </select>
             </div>
             {node.operator !== 'empty' && (
               <div className="flex-1">
-                <label className="label text-xs">比對值</label>
-                <input className="input w-full text-xs" value={node.value || ''} onChange={(e) => onChange({ value: e.target.value })} placeholder="關鍵字或數值" />
+                <label className="label text-xs">{t('scheduledTask.pipeline.conditionNode.value')}</label>
+                <input className="input w-full text-xs" value={node.value || ''} onChange={(e) => onChange({ value: e.target.value })} placeholder={t('scheduledTask.pipeline.conditionNode.valuePlaceholder')} />
               </div>
             )}
           </div>
@@ -407,16 +409,16 @@ function NodeForm({
       )}
       <div className="grid grid-cols-2 gap-2">
         <div>
-          <label className="label text-xs flex items-center gap-1"><CheckCircle2 size={10} className="text-green-500" /> 是 → 執行節點</label>
+          <label className="label text-xs flex items-center gap-1"><CheckCircle2 size={10} className="text-green-500" /> {t('scheduledTask.pipeline.conditionNode.then')}</label>
           <select className="input w-full text-xs" value={node.then_id || ''} onChange={(e) => onChange({ then_id: e.target.value || undefined })}>
-            <option value="">繼續下一個</option>
+            <option value="">{t('scheduledTask.pipeline.conditionNode.continueNext')}</option>
             {otherIds.map((id) => <option key={id} value={id}>{allNodes.find((n) => n.id === id)?.label || id}</option>)}
           </select>
         </div>
         <div>
-          <label className="label text-xs flex items-center gap-1"><X size={10} className="text-rose-500" /> 否 → 執行節點</label>
+          <label className="label text-xs flex items-center gap-1"><X size={10} className="text-rose-500" /> {t('scheduledTask.pipeline.conditionNode.else')}</label>
           <select className="input w-full text-xs" value={node.else_id || ''} onChange={(e) => onChange({ else_id: e.target.value || undefined })}>
-            <option value="">繼續下一個</option>
+            <option value="">{t('scheduledTask.pipeline.conditionNode.continueNext')}</option>
             {otherIds.map((id) => <option key={id} value={id}>{allNodes.find((n) => n.id === id)?.label || id}</option>)}
           </select>
         </div>
@@ -426,9 +428,9 @@ function NodeForm({
 
   if (node.type === 'parallel') return (
     <div className="space-y-3">
-      <p className="text-xs text-slate-500">選擇要同時執行的節點（其餘節點不會再執行一次）</p>
+      <p className="text-xs text-slate-500">{t('scheduledTask.pipeline.parallelNode.hint')}</p>
       {otherIds.length === 0 ? (
-        <p className="text-xs text-slate-400">請先新增其他節點</p>
+        <p className="text-xs text-slate-400">{t('scheduledTask.pipeline.parallelNode.addFirst')}</p>
       ) : (
         <div className="space-y-1 max-h-48 overflow-y-auto">
           {otherIds.map((id) => {
@@ -470,18 +472,23 @@ function NodeCard({
   isFirst: boolean
   isLast: boolean
 }) {
+  const { t } = useTranslation()
   const [expanded, setExpanded] = useState(true)
-  const cfg = NODE_TYPES.find((t) => t.type === node.type)!
+  const cfg = NODE_TYPES.find((nt) => nt.type === node.type)!
   const Icon = cfg.icon
 
   const summary = (() => {
-    if (node.type === 'skill') return node.name || '未選擇技能'
-    if (node.type === 'mcp') return node.server ? `${node.server} → ${node.tool || '?'}` : '未設定'
-    if (node.type === 'kb') return node.name || '未選擇知識庫'
-    if (node.type === 'ai') return node.prompt ? node.prompt.slice(0, 40) + '…' : '未設定 Prompt'
-    if (node.type === 'generate_file') return node.template_id ? `範本: ${node.template_name || node.template_id}` : `輸出 ${(node.output_file || 'pdf').toUpperCase()}`
-    if (node.type === 'condition') return (node.judge || 'ai') === 'ai' ? 'AI 判斷' : `${node.operator || 'contains'} "${node.value || ''}"`
-    if (node.type === 'parallel') return `同時執行 ${(node.steps || []).length} 個節點`
+    if (node.type === 'skill') return node.name || t('scheduledTask.pipeline.summary.noSkill')
+    if (node.type === 'mcp') return node.server ? `${node.server} → ${node.tool || '?'}` : t('scheduledTask.pipeline.summary.notSet')
+    if (node.type === 'kb') return node.name || t('scheduledTask.pipeline.summary.noKb')
+    if (node.type === 'ai') return node.prompt ? node.prompt.slice(0, 40) + '…' : t('scheduledTask.pipeline.summary.noPrompt')
+    if (node.type === 'generate_file') return node.template_id
+      ? t('scheduledTask.pipeline.summary.template', { name: node.template_name || node.template_id })
+      : t('scheduledTask.pipeline.summary.output', { format: (node.output_file || 'pdf').toUpperCase() })
+    if (node.type === 'condition') return (node.judge || 'ai') === 'ai'
+      ? t('scheduledTask.pipeline.summary.aiJudge')
+      : `${t(`scheduledTask.pipeline.ops.${node.operator || 'contains'}`)} "${node.value || ''}"`
+    if (node.type === 'parallel') return t('scheduledTask.pipeline.summary.parallelCount', { count: (node.steps || []).length })
     return ''
   })()
 
@@ -495,7 +502,7 @@ function NodeCard({
           className="flex-1 bg-transparent text-xs font-medium text-slate-700 outline-none placeholder:text-slate-400 min-w-0"
           value={node.label || ''}
           onChange={(e) => onUpdate(node.id, { label: e.target.value })}
-          placeholder={cfg.label}
+          placeholder={t(cfg.labelKey)}
         />
         <span className="text-[10px] text-slate-400 shrink-0 hidden sm:block">{summary}</span>
         <div className="flex items-center gap-0.5 shrink-0">
@@ -532,6 +539,7 @@ function NodeCard({
 
 // ─── AddNodeMenu ──────────────────────────────────────────────────────────────
 function AddNodeMenu({ onAdd }: { onAdd: (type: PipelineNode['type']) => void }) {
+  const { t } = useTranslation()
   const [open, setOpen] = useState(false)
   return (
     <div className="relative">
@@ -540,13 +548,13 @@ function AddNodeMenu({ onAdd }: { onAdd: (type: PipelineNode['type']) => void })
         onClick={() => setOpen((o) => !o)}
         className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-dashed border-slate-300 text-slate-500 hover:border-blue-400 hover:text-blue-600 hover:bg-blue-50 transition w-full justify-center"
       >
-        <Plus size={13} /> 新增節點
+        <Plus size={13} /> {t('scheduledTask.pipeline.addNode')}
       </button>
       {open && (
         <>
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
           <div className="absolute z-50 bottom-full mb-1 left-0 right-0 bg-white border border-slate-200 rounded-xl shadow-lg p-2 grid grid-cols-2 gap-1">
-            {NODE_TYPES.map(({ type, icon: Icon, label, color }) => (
+            {NODE_TYPES.map(({ type, icon: Icon, labelKey, color }) => (
               <button
                 key={type}
                 type="button"
@@ -554,7 +562,7 @@ function AddNodeMenu({ onAdd }: { onAdd: (type: PipelineNode['type']) => void })
                 className="flex items-center gap-2 px-2.5 py-2 rounded-lg hover:bg-slate-50 text-xs text-left transition"
               >
                 <Icon size={13} className={color} />
-                <span className="text-slate-700">{label}</span>
+                <span className="text-slate-700">{t(labelKey)}</span>
               </button>
             ))}
           </div>
@@ -566,6 +574,8 @@ function AddNodeMenu({ onAdd }: { onAdd: (type: PipelineNode['type']) => void })
 
 // ─── PipelineTab (main export) ────────────────────────────────────────────────
 export default function PipelineTab({ nodes, onChange, catalog, mcpServers, taskName }: Props) {
+  const { t } = useTranslation()
+
   const update = (id: string, patch: Partial<PipelineNode>) =>
     onChange(nodes.map((n) => n.id === id ? { ...n, ...patch } : n))
 
@@ -580,7 +590,6 @@ export default function PipelineTab({ nodes, onChange, catalog, mcpServers, task
   }
 
   const add = (type: PipelineNode['type']) => {
-    const cfg = NODE_TYPES.find((t) => t.type === type)!
     onChange([...nodes, { id: newId(), type, label: '' }])
   }
 
@@ -588,14 +597,14 @@ export default function PipelineTab({ nodes, onChange, catalog, mcpServers, task
     <div className="space-y-3">
       {/* Description */}
       <p className="text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded px-3 py-2">
-        AI 主分析完成後，依序執行以下節點。每個節點可接收前一節點輸出，支援技能、MCP、知識庫、AI 追加分析及條件判斷。
+        {t('scheduledTask.pipeline.description')}
       </p>
 
       {/* Start node (fixed) */}
       <div className="flex items-center gap-2 px-3 py-2 bg-blue-50 border border-blue-200 rounded-xl">
         <Bot size={14} className="text-blue-500 shrink-0" />
-        <span className="text-xs font-medium text-blue-700">AI 主分析輸出</span>
-        <span className="text-[10px] text-blue-400 ml-auto">起點 — {'{{ai_output}}'}</span>
+        <span className="text-xs font-medium text-blue-700">{t('scheduledTask.pipeline.startLabel')}</span>
+        <span className="text-[10px] text-blue-400 ml-auto">{t('scheduledTask.pipeline.startPoint')}{'{{ai_output}}'}</span>
       </div>
 
       {nodes.length > 0 && (
@@ -638,7 +647,7 @@ export default function PipelineTab({ nodes, onChange, catalog, mcpServers, task
 
       {nodes.length === 0 && (
         <p className="text-center text-xs text-slate-400 py-4">
-          尚無後處理節點。點選上方「新增節點」開始建立 Pipeline。
+          {t('scheduledTask.pipeline.emptyHint')}
         </p>
       )}
     </div>

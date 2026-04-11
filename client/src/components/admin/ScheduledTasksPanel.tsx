@@ -6,6 +6,7 @@ import {
   Zap, BookOpen, Wrench, GitBranch, LayoutTemplate,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import type { TFunction } from 'i18next'
 import api from '../../lib/api'
 import { fmtTW, fmtDateTW } from '../../lib/fmtTW'
 import { useAuth } from '../../context/AuthContext'
@@ -13,7 +14,6 @@ import type { ScheduledTask, TaskRun, DocTemplate } from '../../types'
 import PipelineTab, { type PipelineNode } from './PipelineTab'
 import TemplatePickerPopover from '../templates/TemplatePickerPopover'
 
-const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六']
 const FILE_TYPES = ['xlsx', 'docx', 'pdf', 'pptx', 'foxlink_pptx', 'txt', 'mp3']
 
 interface ToolCatalog {
@@ -23,16 +23,17 @@ interface ToolCatalog {
 const HOURS = Array.from({ length: 24 }, (_, i) => i)
 const MINUTES = [0, 5, 10, 15, 20, 30, 45]
 
-function scheduleLabel(task: ScheduledTask) {
+function scheduleLabel(task: ScheduledTask, t: TFunction) {
   const hh = String(task.schedule_hour).padStart(2, '0')
   const mm = String(task.schedule_minute).padStart(2, '0')
   const time = `${hh}:${mm}`
-  if (task.schedule_type === 'daily') return `每天 ${time}`
-  if (task.schedule_type === 'weekly') return `每週${WEEKDAYS[task.schedule_weekday ?? 1]} ${time}`
-  return `每月 ${task.schedule_monthday} 日 ${time}`
+  const weekdays = t('scheduledTask.weekdaysShort', { returnObjects: true }) as string[]
+  if (task.schedule_type === 'daily') return t('scheduledTask.scheduleLabel.daily', { time })
+  if (task.schedule_type === 'weekly') return t('scheduledTask.scheduleLabel.weekly', { day: weekdays[task.schedule_weekday ?? 1], time })
+  return t('scheduledTask.scheduleLabel.monthly', { day: task.schedule_monthday, time })
 }
 
-const emptyForm = (): Partial<ScheduledTask> => ({
+const emptyForm = (t: TFunction): Partial<ScheduledTask> => ({
   name: '',
   schedule_type: 'daily',
   schedule_hour: 8,
@@ -45,9 +46,13 @@ const emptyForm = (): Partial<ScheduledTask> => ({
   file_type: 'docx',
   filename_template: '{{task_name}}_{{date}}.docx',
   recipients_json: '[]',
-  email_subject: '排程任務執行完成：{{task_name}} ({{date}})',
-  email_body:
-    '您好，\n\n以下為 {{date}}（{{weekday}}）排程任務「{{task_name}}」的執行結果：\n\n{{ai_response}}\n\n如有附件請見附檔。\n\nCortex',
+  email_subject: t('scheduledTask.emailDefault.subject', { tn: '{{task_name}}', d: '{{date}}' }),
+  email_body: t('scheduledTask.emailDefault.body', {
+    tn: '{{task_name}}',
+    d: '{{date}}',
+    wd: '{{weekday}}',
+    ar: '{{ai_response}}',
+  }),
   status: 'active',
   expire_at: '',
   max_runs: 0,
@@ -67,7 +72,7 @@ function TaskFormModal({
 }) {
   const { t } = useTranslation()
   const isEdit = !!task?.id
-  const [form, setForm] = useState<Partial<ScheduledTask>>(task ?? emptyForm())
+  const [form, setForm] = useState<Partial<ScheduledTask>>(() => task ?? emptyForm(t))
   const [section, setSection] = useState<'basic' | 'schedule' | 'ai' | 'tools' | 'pipeline' | 'email'>('basic')
   const [pipelineNodes, setPipelineNodes] = useState<PipelineNode[]>(() => {
     try { return JSON.parse((task as any)?.pipeline_json || '[]') } catch { return [] }
@@ -350,7 +355,9 @@ function TaskFormModal({
                   <div>
                     <label className="label">{t('scheduledTask.form.weekday')}</label>
                     <select className="input" value={form.schedule_weekday ?? 1} onChange={(e) => set('schedule_weekday', Number(e.target.value))}>
-                      {WEEKDAYS.map((d, i) => <option key={i} value={i}>{t('scheduledTask.form.weekdayPrefix')}{d}</option>)}
+                      {(t('scheduledTask.weekdaysShort', { returnObjects: true }) as string[]).map((d, i) => (
+                        <option key={i} value={i}>{t('scheduledTask.form.weekdayPrefix')}{d}</option>
+                      ))}
                     </select>
                   </div>
                 )}
@@ -383,7 +390,7 @@ function TaskFormModal({
                     onChange={onPromptChange}
                     onKeyDown={onPromptKeyDown}
                     onBlur={() => setTimeout(() => setAc((p) => ({ ...p, show: false })), 150)}
-                    placeholder={`例：今天是 {{date}}，先查詢知識庫：\n{{kb:月報知識庫 query="{{task_name}}"}}\n請根據以上內容撰寫摘要報告。`}
+                    placeholder={t('scheduledTask.promptPlaceholderExample', { d: '{{date}}', tn: '{{task_name}}' })}
                   />
                   {ac.show && (
                     <div className="absolute left-0 top-full mt-1 z-50 w-full max-h-52 overflow-y-auto bg-white border border-slate-200 rounded-lg shadow-lg">
@@ -468,7 +475,7 @@ function TaskFormModal({
               {/* ── Output template picker ── */}
               <div>
                 <label className="label flex items-center gap-1.5">
-                  <LayoutTemplate size={13} className="text-indigo-500" /> 輸出範本（選填）
+                  <LayoutTemplate size={13} className="text-indigo-500" /> {t('scheduledTask.outputTemplate.label')}
                 </label>
                 {outputTemplate ? (
                   <div className="flex items-center gap-2 bg-indigo-50 border border-indigo-200 rounded-lg px-3 py-2 text-xs text-indigo-700">
@@ -485,7 +492,7 @@ function TaskFormModal({
                       onClick={() => setShowTemplatePicker(v => !v)}
                       className="flex items-center gap-1.5 text-xs border border-dashed border-slate-300 rounded-lg px-3 py-1.5 text-slate-500 hover:border-indigo-400 hover:text-indigo-600 transition"
                     >
-                      <LayoutTemplate size={13} /> 選擇範本…
+                      <LayoutTemplate size={13} /> {t('scheduledTask.outputTemplate.select')}
                     </button>
                     {showTemplatePicker && (
                       <TemplatePickerPopover
@@ -500,7 +507,7 @@ function TaskFormModal({
                   </div>
                 )}
                 <p className="text-[10px] text-slate-400 mt-1">
-                  選擇後，AI 會依範本變數 schema 輸出 JSON，系統自動填入範本生成檔案。亦可在 Prompt 中使用 <code className="bg-slate-100 px-1 rounded">{'{{template:id}}'}</code> 引用。
+                  {t('scheduledTask.outputTemplate.helpPrefix')} <code className="bg-slate-100 px-1 rounded">{'{{template:id}}'}</code> {t('scheduledTask.outputTemplate.helpSuffix')}
                 </p>
               </div>
             </>
@@ -590,12 +597,12 @@ function TaskFormModal({
                   <Wrench size={12} /> {t('scheduledTask.tools.syntaxTitle')}
                 </p>
                 <div className="space-y-1 text-xs font-mono text-slate-600">
-                  <p><span className="text-amber-600">{'{{skill:名稱}}'}</span> — 呼叫技能並注入結果</p>
-                  <p><span className="text-amber-600">{'{{skill:名稱 input="文字"}}'}</span> — 帶固定輸入呼叫技能</p>
-                  <p><span className="text-blue-600">{'{{kb:名稱}}'}</span> — 查詢知識庫並注入結果</p>
-                  <p><span className="text-blue-600">{'{{kb:名稱 query="查詢詞"}}'}</span> — 帶固定查詢詞</p>
-                  <p><span className="text-slate-400">{'{{mcp:工具名}}'}</span> — 呼叫 MCP 工具</p>
-                  <p><span className="text-slate-400">{'{{dify:名稱}}'}</span> — 呼叫 API 連接器</p>
+                  <p><span className="text-amber-600">{'{{skill:name}}'}</span> — {t('scheduledTask.tools.syntaxSkill')}</p>
+                  <p><span className="text-amber-600">{'{{skill:name input="text"}}'}</span> — {t('scheduledTask.tools.syntaxSkillInput')}</p>
+                  <p><span className="text-blue-600">{'{{kb:name}}'}</span> — {t('scheduledTask.tools.syntaxKb')}</p>
+                  <p><span className="text-blue-600">{'{{kb:name query="keyword"}}'}</span> — {t('scheduledTask.tools.syntaxKbQuery')}</p>
+                  <p><span className="text-slate-400">{'{{mcp:toolName}}'}</span> — {t('scheduledTask.tools.syntaxMcp')}</p>
+                  <p><span className="text-slate-400">{'{{dify:name}}'}</span> — {t('scheduledTask.tools.syntaxDify')}</p>
                 </div>
               </div>
             </div>
@@ -669,6 +676,7 @@ function TaskFormModal({
 
 // ── RunDetailModal ────────────────────────────────────────────────────────────
 function RunDetailModal({ run, onClose }: { run: TaskRun; onClose: () => void }) {
+  const { t } = useTranslation()
   const [fullText, setFullText] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
 
@@ -689,11 +697,11 @@ function RunDetailModal({ run, onClose }: { run: TaskRun; onClose: () => void })
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={onClose}>
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[80vh] flex flex-col" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between px-5 py-3 border-b">
-          <span className="font-semibold text-slate-800 text-sm">執行結果 — {fmtTW(run.run_at)}</span>
+          <span className="font-semibold text-slate-800 text-sm">{t('scheduledTask.runDetail.title')} — {fmtTW(run.run_at)}</span>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-600"><X size={16} /></button>
         </div>
         <div className="overflow-y-auto p-5 flex-1 text-sm text-slate-700 whitespace-pre-wrap">
-          {loading ? '載入中...' : (fullText || '（無內容）')}
+          {loading ? t('common.loading') : (fullText || t('scheduledTask.runDetail.noContent'))}
         </div>
       </div>
     </div>
@@ -777,7 +785,7 @@ function HistoryRow({ taskId }: { taskId: number }) {
                     : (
                       <button onClick={() => setDetailRun(r)}
                         className="text-left text-slate-600 line-clamp-2 hover:text-blue-600 hover:underline cursor-pointer w-full">
-                        {r.response_preview || '（查看全文）'}
+                        {r.response_preview || t('scheduledTask.runDetail.viewFull')}
                       </button>
                     )}
                   <div className="flex flex-col gap-1 mt-1">
@@ -920,7 +928,7 @@ export default function ScheduledTasksPanel() {
   const errMsg = (e: unknown) => {
     const err = e as { response?: { status?: number; data?: { error?: string } }; message?: string }
     const status = err.response?.status
-    const msg = err.response?.data?.error || err.message || '未知錯誤'
+    const msg = err.response?.data?.error || err.message || t('common.unknownError')
     return status ? `[${status}] ${msg}` : msg
   }
 
@@ -1014,7 +1022,7 @@ export default function ScheduledTasksPanel() {
           <button onClick={() => load()} disabled={loading} className="btn-ghost flex items-center gap-1.5">
             <RefreshCw size={14} className={loading ? 'animate-spin' : ''} /> {t('common.refresh')}
           </button>
-          <button onClick={() => setFormTask(emptyForm())} className="btn-primary flex items-center gap-1.5">
+          <button onClick={() => setFormTask(emptyForm(t))} className="btn-primary flex items-center gap-1.5">
             <Plus size={14} /> {t('scheduledTask.addTask')}
           </button>
         </div>
@@ -1065,7 +1073,7 @@ export default function ScheduledTasksPanel() {
                     <td className="px-4 py-3 text-slate-600">
                       <span className="flex items-center gap-1">
                         <Clock size={12} className="text-slate-400" />
-                        {scheduleLabel(task)}
+                        {scheduleLabel(task, t)}
                       </span>
                     </td>
                     <td className="px-4 py-3">

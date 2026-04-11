@@ -36,7 +36,8 @@
     "noData": "Không tìm thấy dữ liệu",
     "unlimited": "Không giới hạn",
     "days": "ngày",
-    "records": "bản ghi"
+    "records": "bản ghi",
+    "unknownError": "Lỗi không xác định"
   },
   "lang": {
     "zh-TW": "繁體中文",
@@ -917,6 +918,7 @@
       "kbBadge": "KB"
     },
     "promptHint": "Nhập / để chọn nhanh công cụ, hoặc đến tab Công cụ để chèn cú pháp.",
+    "promptPlaceholderExample": "ví dụ: Hôm nay là {{d}}, trước tiên truy vấn KB:\n{{kb:KB báo cáo tháng query=\"{{tn}}\"}}\nViết báo cáo tóm tắt dựa trên nội dung trên.",
     "tools": {
       "hint": "Nhấp Chèn để thêm cú pháp vào Prompt (tại vị trí con trỏ). Kỹ năng/KB sẽ được gọi tự động khi thực hiện và kết quả được chèn vào Prompt để AI phân tích.",
       "availableSkills": "Kỹ năng có sẵn",
@@ -926,9 +928,136 @@
       "insert": "Chèn",
       "withParams": "Có tham số",
       "withQuery": "Có truy vấn",
-      "syntaxTitle": "Tham khảo cú pháp"
+      "syntaxTitle": "Tham khảo cú pháp",
+      "syntaxSkill": "Gọi kỹ năng và chèn kết quả",
+      "syntaxSkillInput": "Gọi kỹ năng với đầu vào cố định",
+      "syntaxKb": "Truy vấn KB và chèn kết quả",
+      "syntaxKbQuery": "Với truy vấn cố định",
+      "syntaxMcp": "Gọi công cụ MCP",
+      "syntaxDify": "Gọi API connector"
     },
-    "mp3Label": "Giọng nói MP3"
+    "mp3Label": "Giọng nói MP3",
+    "weekdaysShort": ["CN", "T2", "T3", "T4", "T5", "T6", "T7"],
+    "scheduleLabel": {
+      "daily": "Hàng ngày lúc {{time}}",
+      "weekly": "Mỗi {{day}} lúc {{time}}",
+      "monthly": "Ngày {{day}} hàng tháng lúc {{time}}"
+    },
+    "emailDefault": {
+      "subject": "Lịch tác vụ đã hoàn thành: {{tn}} ({{d}})",
+      "body": "Xin chào,\n\nKết quả thực thi của lịch tác vụ \"{{tn}}\" vào {{d}} ({{wd}}):\n\n{{ar}}\n\nVui lòng xem tệp đính kèm nếu có.\n\nCortex"
+    },
+    "runDetail": {
+      "title": "Kết quả thực thi",
+      "noContent": "(Không có nội dung)",
+      "viewFull": "(Xem toàn bộ)"
+    },
+    "outputTemplate": {
+      "label": "Mẫu đầu ra (tùy chọn)",
+      "select": "Chọn mẫu…",
+      "helpPrefix": "Sau khi chọn, AI sẽ xuất JSON theo schema biến của mẫu và hệ thống tự điền vào mẫu để tạo tệp. Bạn cũng có thể tham chiếu trong Prompt bằng",
+      "helpSuffix": "."
+    },
+    "pipeline": {
+      "description": "Sau khi phân tích AI chính hoàn tất, các nút sau sẽ chạy tuần tự. Mỗi nút có thể nhận đầu ra của nút trước, hỗ trợ kỹ năng, MCP, kho tri thức, phân tích AI bổ sung và phân nhánh điều kiện.",
+      "startLabel": "Đầu ra phân tích AI chính",
+      "startPoint": "Bắt đầu — ",
+      "addNode": "Thêm nút",
+      "emptyHint": "Chưa có nút hậu xử lý. Nhấp \"Thêm nút\" ở trên để bắt đầu xây dựng Pipeline.",
+      "insertVar": "+ Chèn biến",
+      "nodeType": {
+        "skill": "Kỹ năng",
+        "mcp": "Công cụ MCP",
+        "kb": "Kho tri thức",
+        "ai": "AI bổ sung",
+        "generate_file": "Tạo tệp",
+        "condition": "Điều kiện",
+        "parallel": "Song song"
+      },
+      "vars": {
+        "aiOutput": "Đầu ra AI chính",
+        "date": "Ngày hôm nay",
+        "taskName": "Tên tác vụ",
+        "nodeOutput": "Đầu ra nút {{id}}"
+      },
+      "generateFile": {
+        "templateMode": "Chế độ mẫu",
+        "selectTemplate": "Chọn mẫu (tùy chọn)",
+        "fileFormat": "Định dạng tệp",
+        "filename": "Tên tệp",
+        "filenameOptional": "Tên tệp (tùy chọn)",
+        "dataSourceJson": "Nguồn dữ liệu (JSON)",
+        "dataSourceText": "Nguồn nội dung",
+        "jsonHint": "Phải là JSON, key tương ứng với biến mẫu."
+      },
+      "skill": {
+        "selectPlaceholder": "Chọn kỹ năng…",
+        "inputSource": "Nguồn đầu vào",
+        "outputAsFile": "Xuất ra tệp (tùy chọn)",
+        "passToNext": "Chỉ chuyển cho nút tiếp theo",
+        "filename": "Tên tệp",
+        "onFailLabel": "Khi thất bại",
+        "onFailContinue": "Tiếp tục",
+        "onFailStop": "Dừng toàn bộ pipeline"
+      },
+      "mcpNode": {
+        "server": "Máy chủ MCP",
+        "selectServer": "Chọn máy chủ…",
+        "tool": "Công cụ",
+        "selectTool": "Chọn công cụ…",
+        "args": "Tham số (key=value, mỗi dòng một cặp)"
+      },
+      "kbNode": {
+        "label": "Kho tri thức",
+        "selectKb": "Chọn KB…",
+        "query": "Nội dung truy vấn"
+      },
+      "aiNode": {
+        "prompt": "Prompt",
+        "promptPlaceholder": "Tóm tắt nội dung sau:\n{{ao}}"
+      },
+      "conditionNode": {
+        "method": "Phương thức phán đoán",
+        "aiOption": "🤖 Để AI phán đoán (khuyên dùng)",
+        "textOption": "📝 Điều kiện văn bản",
+        "aiPrompt": "Câu hỏi phán đoán (AI chỉ trả lời yes/no)",
+        "aiPromptPlaceholder": "Nội dung này có chứa thông tin tài chính tiêu cực không?",
+        "source": "Nguồn phán đoán",
+        "op": "Điều kiện",
+        "value": "Giá trị so sánh",
+        "valuePlaceholder": "Từ khóa hoặc số",
+        "then": "Có → Chạy nút",
+        "else": "Không → Chạy nút",
+        "continueNext": "Tiếp tục nút sau"
+      },
+      "ops": {
+        "contains": "Chứa",
+        "not_contains": "Không chứa",
+        "equals": "Bằng",
+        "starts_with": "Bắt đầu bằng",
+        "ends_with": "Kết thúc bằng",
+        "regex": "Khớp regex",
+        "empty": "Rỗng",
+        "length_gt": "Độ dài lớn hơn",
+        "length_lt": "Độ dài nhỏ hơn",
+        "number_gt": "Số lớn hơn",
+        "number_lt": "Số nhỏ hơn"
+      },
+      "parallelNode": {
+        "hint": "Chọn các nút chạy song song (những nút này sẽ không chạy lại sau đó).",
+        "addFirst": "Vui lòng thêm nút khác trước"
+      },
+      "summary": {
+        "noSkill": "Chưa chọn kỹ năng",
+        "noKb": "Chưa chọn KB",
+        "notSet": "Chưa cấu hình",
+        "noPrompt": "Chưa đặt Prompt",
+        "template": "Mẫu: {{name}}",
+        "output": "Xuất {{format}}",
+        "aiJudge": "AI phán đoán",
+        "parallelCount": "Chạy song song {{count}} nút"
+      }
+    }
   },
   "mcp": {
     "title": "Quản lý máy chủ MCP",

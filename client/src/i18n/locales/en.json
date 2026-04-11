@@ -36,7 +36,8 @@
     "noData": "No data found",
     "unlimited": "Unlimited",
     "days": "days",
-    "records": "records"
+    "records": "records",
+    "unknownError": "Unknown error"
   },
   "lang": {
     "zh-TW": "繁體中文",
@@ -917,6 +918,7 @@
       "kbBadge": "KB"
     },
     "promptHint": "Type / to quickly select tools, or go to the Tools tab to insert syntax.",
+    "promptPlaceholderExample": "e.g. Today is {{d}}, first query the knowledge base:\n{{kb:Monthly Report KB query=\"{{tn}}\"}}\nWrite a summary report based on the above content.",
     "tools": {
       "hint": "Click Insert to add syntax to the Prompt (at cursor). Skills/KBs will be called automatically at execution time and results injected into the Prompt for AI analysis.",
       "availableSkills": "Available Skills",
@@ -926,9 +928,136 @@
       "insert": "Insert",
       "withParams": "With Params",
       "withQuery": "With Query",
-      "syntaxTitle": "Syntax Reference"
+      "syntaxTitle": "Syntax Reference",
+      "syntaxSkill": "Call skill and inject result",
+      "syntaxSkillInput": "Call skill with fixed input",
+      "syntaxKb": "Query KB and inject result",
+      "syntaxKbQuery": "With fixed query",
+      "syntaxMcp": "Call MCP tool",
+      "syntaxDify": "Call API connector"
     },
-    "mp3Label": "MP3 Voice"
+    "mp3Label": "MP3 Voice",
+    "weekdaysShort": ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"],
+    "scheduleLabel": {
+      "daily": "Daily at {{time}}",
+      "weekly": "Every {{day}} at {{time}}",
+      "monthly": "Day {{day}} of month at {{time}}"
+    },
+    "emailDefault": {
+      "subject": "Scheduled task completed: {{tn}} ({{d}})",
+      "body": "Hello,\n\nThe execution result of scheduled task \"{{tn}}\" on {{d}} ({{wd}}):\n\n{{ar}}\n\nSee attachments if any.\n\nCortex"
+    },
+    "runDetail": {
+      "title": "Run Result",
+      "noContent": "(No content)",
+      "viewFull": "(View full)"
+    },
+    "outputTemplate": {
+      "label": "Output Template (optional)",
+      "select": "Select template…",
+      "helpPrefix": "After selection, AI will output JSON based on template variable schema and the system auto-fills the template. You can also reference it in the Prompt with",
+      "helpSuffix": "."
+    },
+    "pipeline": {
+      "description": "After the main AI analysis, the following nodes run in order. Each node receives the previous node's output and supports skills, MCP, knowledge bases, additional AI analysis, and conditional branching.",
+      "startLabel": "Main AI Analysis Output",
+      "startPoint": "Start — ",
+      "addNode": "Add Node",
+      "emptyHint": "No post-processing nodes yet. Click \"Add Node\" above to start building the pipeline.",
+      "insertVar": "+ Insert Variable",
+      "nodeType": {
+        "skill": "Skill",
+        "mcp": "MCP Tool",
+        "kb": "Knowledge Base",
+        "ai": "AI Follow-up",
+        "generate_file": "Generate File",
+        "condition": "Condition",
+        "parallel": "Parallel"
+      },
+      "vars": {
+        "aiOutput": "Main AI Output",
+        "date": "Today's Date",
+        "taskName": "Task Name",
+        "nodeOutput": "Node {{id}} output"
+      },
+      "generateFile": {
+        "templateMode": "Template Mode",
+        "selectTemplate": "Select template (optional)",
+        "fileFormat": "File Format",
+        "filename": "Filename",
+        "filenameOptional": "Filename (optional)",
+        "dataSourceJson": "Data Source (JSON)",
+        "dataSourceText": "Content Source",
+        "jsonHint": "Must be JSON. Keys should match template variables."
+      },
+      "skill": {
+        "selectPlaceholder": "Select skill…",
+        "inputSource": "Input Source",
+        "outputAsFile": "Output as File (optional)",
+        "passToNext": "Pass to next node only",
+        "filename": "Filename",
+        "onFailLabel": "On Failure",
+        "onFailContinue": "Continue",
+        "onFailStop": "Stop entire pipeline"
+      },
+      "mcpNode": {
+        "server": "MCP Server",
+        "selectServer": "Select server…",
+        "tool": "Tool",
+        "selectTool": "Select tool…",
+        "args": "Parameters (key=value, one per line)"
+      },
+      "kbNode": {
+        "label": "Knowledge Base",
+        "selectKb": "Select KB…",
+        "query": "Query"
+      },
+      "aiNode": {
+        "prompt": "Prompt",
+        "promptPlaceholder": "Summarize the following content:\n{{ao}}"
+      },
+      "conditionNode": {
+        "method": "Judgment Method",
+        "aiOption": "🤖 AI judgment (recommended)",
+        "textOption": "📝 Text condition",
+        "aiPrompt": "Judgment question (AI only answers yes/no)",
+        "aiPromptPlaceholder": "Does this contain negative financial information?",
+        "source": "Source",
+        "op": "Operator",
+        "value": "Comparison Value",
+        "valuePlaceholder": "Keyword or number",
+        "then": "Yes → Run Node",
+        "else": "No → Run Node",
+        "continueNext": "Continue next"
+      },
+      "ops": {
+        "contains": "Contains",
+        "not_contains": "Does not contain",
+        "equals": "Equals",
+        "starts_with": "Starts with",
+        "ends_with": "Ends with",
+        "regex": "Regex match",
+        "empty": "Is empty",
+        "length_gt": "Length greater than",
+        "length_lt": "Length less than",
+        "number_gt": "Number greater than",
+        "number_lt": "Number less than"
+      },
+      "parallelNode": {
+        "hint": "Select nodes to run in parallel (they won't run again afterwards).",
+        "addFirst": "Add other nodes first"
+      },
+      "summary": {
+        "noSkill": "No skill selected",
+        "noKb": "No KB selected",
+        "notSet": "Not configured",
+        "noPrompt": "No prompt",
+        "template": "Template: {{name}}",
+        "output": "Output {{format}}",
+        "aiJudge": "AI judgment",
+        "parallelCount": "Run {{count}} nodes in parallel"
+      }
+    }
   },
   "mcp": {
     "title": "MCP Server Management",

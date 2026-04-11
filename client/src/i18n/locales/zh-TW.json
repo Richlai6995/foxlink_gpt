@@ -36,7 +36,8 @@
     "noData": "查無資料",
     "unlimited": "不限",
     "days": "天",
-    "records": "筆"
+    "records": "筆",
+    "unknownError": "未知錯誤"
   },
   "lang": {
     "zh-TW": "繁體中文",
@@ -917,6 +918,7 @@
       "kbBadge": "知識庫"
     },
     "promptHint": "輸入 / 快速選擇工具，或前往「工具引用」頁簽插入語法。",
+    "promptPlaceholderExample": "例:今天是 {{d}},先查詢知識庫:\n{{kb:月報知識庫 query=\"{{tn}}\"}}\n請根據以上內容撰寫摘要報告。",
     "tools": {
       "hint": "點擊「插入」將語法加入 Prompt（光標位置）。技能/知識庫在執行時會自動被呼叫並將結果注入 Prompt 中，再一起傳給 AI 分析。",
       "availableSkills": "可用技能",
@@ -926,9 +928,136 @@
       "insert": "插入",
       "withParams": "帶參數",
       "withQuery": "帶查詢",
-      "syntaxTitle": "語法說明"
+      "syntaxTitle": "語法說明",
+      "syntaxSkill": "呼叫技能並注入結果",
+      "syntaxSkillInput": "帶固定輸入呼叫技能",
+      "syntaxKb": "查詢知識庫並注入結果",
+      "syntaxKbQuery": "帶固定查詢詞",
+      "syntaxMcp": "呼叫 MCP 工具",
+      "syntaxDify": "呼叫 API 連接器"
     },
-    "mp3Label": "MP3 語音"
+    "mp3Label": "MP3 語音",
+    "weekdaysShort": ["日", "一", "二", "三", "四", "五", "六"],
+    "scheduleLabel": {
+      "daily": "每天 {{time}}",
+      "weekly": "每週{{day}} {{time}}",
+      "monthly": "每月 {{day}} 日 {{time}}"
+    },
+    "emailDefault": {
+      "subject": "排程任務執行完成：{{tn}} ({{d}})",
+      "body": "您好，\n\n以下為 {{d}}（{{wd}}）排程任務「{{tn}}」的執行結果：\n\n{{ar}}\n\n如有附件請見附檔。\n\nCortex"
+    },
+    "runDetail": {
+      "title": "執行結果",
+      "noContent": "（無內容）",
+      "viewFull": "（查看全文）"
+    },
+    "outputTemplate": {
+      "label": "輸出範本（選填）",
+      "select": "選擇範本…",
+      "helpPrefix": "選擇後,AI 會依範本變數 schema 輸出 JSON,系統自動填入範本生成檔案。亦可在 Prompt 中使用",
+      "helpSuffix": "引用。"
+    },
+    "pipeline": {
+      "description": "AI 主分析完成後,依序執行以下節點。每個節點可接收前一節點輸出,支援技能、MCP、知識庫、AI 追加分析及條件判斷。",
+      "startLabel": "AI 主分析輸出",
+      "startPoint": "起點 — ",
+      "addNode": "新增節點",
+      "emptyHint": "尚無後處理節點。點選上方「新增節點」開始建立 Pipeline。",
+      "insertVar": "+ 插入變數",
+      "nodeType": {
+        "skill": "技能",
+        "mcp": "MCP 工具",
+        "kb": "知識庫",
+        "ai": "AI 追加",
+        "generate_file": "生成檔案",
+        "condition": "條件判斷",
+        "parallel": "並行執行"
+      },
+      "vars": {
+        "aiOutput": "AI 主輸出",
+        "date": "今日日期",
+        "taskName": "任務名稱",
+        "nodeOutput": "節點 {{id}} 輸出"
+      },
+      "generateFile": {
+        "templateMode": "範本模式",
+        "selectTemplate": "選擇範本(可選)",
+        "fileFormat": "檔案格式",
+        "filename": "檔名",
+        "filenameOptional": "檔名(選填)",
+        "dataSourceJson": "資料來源(JSON)",
+        "dataSourceText": "內容來源",
+        "jsonHint": "需為 JSON 格式,key 與範本變數對應。"
+      },
+      "skill": {
+        "selectPlaceholder": "選擇技能…",
+        "inputSource": "輸入來源",
+        "outputAsFile": "輸出為檔案(選填)",
+        "passToNext": "僅傳入下一節點",
+        "filename": "檔名",
+        "onFailLabel": "失敗時",
+        "onFailContinue": "繼續執行",
+        "onFailStop": "停止整個流程"
+      },
+      "mcpNode": {
+        "server": "MCP 伺服器",
+        "selectServer": "選擇伺服器…",
+        "tool": "工具",
+        "selectTool": "選擇工具…",
+        "args": "參數(key=value,每行一筆)"
+      },
+      "kbNode": {
+        "label": "知識庫",
+        "selectKb": "選擇知識庫…",
+        "query": "查詢內容"
+      },
+      "aiNode": {
+        "prompt": "Prompt",
+        "promptPlaceholder": "根據以下內容產出摘要:\n{{ao}}"
+      },
+      "conditionNode": {
+        "method": "判斷方式",
+        "aiOption": "🤖 讓 AI 判斷(推薦)",
+        "textOption": "📝 文字條件",
+        "aiPrompt": "判斷問題(AI 只回答 yes/no)",
+        "aiPromptPlaceholder": "這段內容是否包含負面財務訊息?",
+        "source": "判斷來源",
+        "op": "條件",
+        "value": "比對值",
+        "valuePlaceholder": "關鍵字或數值",
+        "then": "是 → 執行節點",
+        "else": "否 → 執行節點",
+        "continueNext": "繼續下一個"
+      },
+      "ops": {
+        "contains": "包含",
+        "not_contains": "不包含",
+        "equals": "等於",
+        "starts_with": "開頭是",
+        "ends_with": "結尾是",
+        "regex": "正則符合",
+        "empty": "為空",
+        "length_gt": "長度大於",
+        "length_lt": "長度小於",
+        "number_gt": "數值大於",
+        "number_lt": "數值小於"
+      },
+      "parallelNode": {
+        "hint": "選擇要同時執行的節點(其餘節點不會再執行一次)",
+        "addFirst": "請先新增其他節點"
+      },
+      "summary": {
+        "noSkill": "未選擇技能",
+        "noKb": "未選擇知識庫",
+        "notSet": "未設定",
+        "noPrompt": "未設定 Prompt",
+        "template": "範本:{{name}}",
+        "output": "輸出 {{format}}",
+        "aiJudge": "AI 判斷",
+        "parallelCount": "同時執行 {{count}} 個節點"
+      }
+    }
   },
   "mcp": {
     "title": "MCP 伺服器管理",
