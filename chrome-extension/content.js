@@ -1038,17 +1038,40 @@ function startAnnotationMode(screenshotDataUrl) {
         // Text background — width = widest line, height = N lines
         let maxW = 0;
         for (const ln of lines) maxW = Math.max(maxW, ctx.measureText(ln).width);
-        const bgX = x - 2;
-        const bgY = y - fontSize + 2;
-        const bgW = maxW + 4;
-        const bgH = (lines.length - 1) * lineHeight + fontSize + 4;
-        ctx.fillStyle = 'rgba(0,0,0,0.5)';
-        ctx.fillRect(bgX, bgY, bgW, bgH);
-        // Each line
+        const padX = 6, padY = 4;
+        const bgX = x - padX;
+        const bgY = y - fontSize + 2 - padY;
+        const bgW = maxW + padX * 2;
+        const bgH = (lines.length - 1) * lineHeight + fontSize + padY * 2;
+        // WCAG contrast — pick bg + outline that maximizes readability vs. text color
+        const L = relLuminance(a.color || '#ffffff');
+        const preferDark = (L + 0.05) / 0.05 >= 1.05 / (L + 0.05);
+        const bgFill     = preferDark ? 'rgba(0,0,0,0.85)'       : 'rgba(255,255,255,0.92)';
+        const strokeCol  = preferDark ? 'rgba(0,0,0,0.95)'       : 'rgba(255,255,255,0.95)';
+        // Rounded background pill
+        ctx.save();
+        ctx.fillStyle = bgFill;
+        if (ctx.roundRect) {
+          ctx.beginPath();
+          ctx.roundRect(bgX, bgY, bgW, bgH, 5);
+          ctx.fill();
+        } else {
+          ctx.fillRect(bgX, bgY, bgW, bgH);
+        }
+        // Text outline (stroke) then colored fill — glyph-level contrast boost
+        ctx.lineWidth = Math.max(2, Math.round(fontSize / 9));
+        ctx.strokeStyle = strokeCol;
+        ctx.lineJoin = 'round';
+        ctx.miterLimit = 2;
+        for (let i = 0; i < lines.length; i++) {
+          const yy = y + i * lineHeight;
+          ctx.strokeText(lines[i], x, yy);
+        }
         ctx.fillStyle = a.color;
         for (let i = 0; i < lines.length; i++) {
           ctx.fillText(lines[i], x, y + i * lineHeight);
         }
+        ctx.restore();
         break;
       }
       case 'freehand': {
