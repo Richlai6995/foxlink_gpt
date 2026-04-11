@@ -91,30 +91,11 @@ export default function ScreenshotAnnotator({ imageUrl, annotations: initial, st
       if (img.naturalWidth && img.naturalHeight) {
         setImgAspect(img.naturalWidth / img.naturalHeight)
       }
-      // Always log (incl. prod) — needed for diagnosing alignment issues from user reports
-      if (svgRef.current) {
-        const ir = img.getBoundingClientRect()
-        const sr = svgRef.current.getBoundingClientRect()
-        const drift = Math.max(Math.abs(ir.left - sr.left), Math.abs(ir.top - sr.top),
-                               Math.abs(ir.width - sr.width), Math.abs(ir.height - sr.height))
-        console.log('[ScreenshotAnnotator] natural=%dx%d render=%dx%d aspect=%s drift=%spx annots=%d',
-          img.naturalWidth, img.naturalHeight,
-          Math.round(ir.width), Math.round(ir.height),
-          (img.naturalWidth / img.naturalHeight).toFixed(3),
-          drift.toFixed(2),
-          initial?.length || 0)
-        if (drift > 0.5) {
-          console.warn('[ScreenshotAnnotator] SVG/image MISALIGNED!', { imgRect: ir, svgRect: sr })
-        }
-        if (initial?.length) {
-          console.log('[ScreenshotAnnotator] initial annotations sample:', JSON.stringify(initial.slice(0, 3)))
-        }
-      }
     }
     if (img.complete && img.naturalWidth) updateAspect()
     img.addEventListener('load', updateAspect)
     return () => img.removeEventListener('load', updateAspect)
-  }, [imageUrl, initial])
+  }, [imageUrl])
 
   // Convert client coords to percentage (0-100)
   const toPct = useCallback((clientX: number, clientY: number): { x: number; y: number } => {
@@ -195,17 +176,6 @@ export default function ScreenshotAnnotator({ imageUrl, annotations: initial, st
   const handlePointerDown = (e: React.PointerEvent) => {
     if (e.button !== 0) return
     const pt = toPct(e.clientX, e.clientY)
-    // Diagnostic: dump click → coord conversion (matches chrome ext format for direct comparison)
-    if (svgRef.current && imgRef.current) {
-      const sr = svgRef.current.getBoundingClientRect()
-      const natW = imgRef.current.naturalWidth
-      const natH = imgRef.current.naturalHeight
-      console.log('[ScreenshotAnnotator] click client=(%d,%d) svgRect=(%d,%d,%dx%d) → pct=(%s%%, %s%%) natural=(%d,%d)/(%dx%d)',
-        Math.round(e.clientX), Math.round(e.clientY),
-        Math.round(sr.left), Math.round(sr.top), Math.round(sr.width), Math.round(sr.height),
-        pt.x.toFixed(2), pt.y.toFixed(2),
-        Math.round(pt.x / 100 * natW), Math.round(pt.y / 100 * natH), natW, natH)
-    }
 
     // Move tool: click empty space to deselect (annotations handle their own startDrag)
     if (tool === 'move') {

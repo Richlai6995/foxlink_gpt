@@ -225,6 +225,8 @@ function startAnnotationMode(screenshotDataUrl) {
   let selectedAnnotation = null; // annotation being dragged
   let moveStartPct = null;       // drag start in % coords
   let _lastMousePt = null;       // track cursor for delete key
+  let resizeHandle = null;       // 'tl'|'tr'|'bl'|'br'|'l'|'r'|'t'|'b' when actively resizing
+  let resizeStartCoords = null;  // snapshot of annotation coords at resize start
 
   // ── 1. Create overlay container ──
   const overlay = document.createElement('div');
@@ -507,7 +509,6 @@ function startAnnotationMode(screenshotDataUrl) {
       imgRect.y = 0;
       imgRect.x = (canvasW - imgRect.w) / 2;
     }
-    console.log('[FOXLINK Annot] computeImgRect canvas=%dx%d natural=%dx%d imgRect=', canvasW, canvasH, natW, natH, imgRect);
     redrawAll();
   }
 
@@ -527,11 +528,19 @@ function startAnnotationMode(screenshotDataUrl) {
 
   function selectTool(id) {
     currentTool = id;
+    // Switching away from move tool clears selection so handles disappear
+    if (id !== 'move') {
+      selectedAnnotation = null;
+      resizeHandle = null;
+      resizeStartCoords = null;
+      moveStartPct = null;
+    }
     Object.entries(toolBtns).forEach(([k, btn]) => {
       btn.style.borderColor = k === id ? '#3b82f6' : 'transparent';
       btn.style.background = k === id ? 'rgba(59,130,246,0.3)' : 'rgba(255,255,255,0.1)';
     });
     canvas.style.cursor = id === 'move' ? 'default' : id === 'text' ? 'text' : 'crosshair';
+    redrawAll();
   }
 
   function selectColor(hex) {
@@ -584,19 +593,6 @@ function startAnnotationMode(screenshotDataUrl) {
     // No offset subtraction — distances are translation-invariant.
     if (isX) return (px / (imgRect.w || canvasW)) * 100;
     return (px / (imgRect.h || canvasH)) * 100;
-  }
-
-  // Diagnostic: dump click → stored coord conversion so user can verify alignment
-  function debugClickPos(e, label) {
-    const cp = getCanvasCoords(e);
-    const xPct = toPct(cp.x, true);
-    const yPct = toPct(cp.y, false);
-    const natW = bgImg.naturalWidth, natH = bgImg.naturalHeight;
-    console.log('[FOXLINK Annot] %s client=(%d,%d) canvas=(%d,%d) imgRect={x:%d,y:%d,w:%d,h:%d} → pct=(%s%%, %s%%) natural=(%d,%d)/(%dx%d)',
-      label, e.clientX, e.clientY, Math.round(cp.x), Math.round(cp.y),
-      Math.round(imgRect.x), Math.round(imgRect.y), Math.round(imgRect.w), Math.round(imgRect.h),
-      xPct.toFixed(2), yPct.toFixed(2),
-      Math.round(xPct/100*natW), Math.round(yPct/100*natH), natW, natH);
   }
 
   function fromPct(pct, isX) {
@@ -710,6 +706,114 @@ function startAnnotationMode(screenshotDataUrl) {
     const ctx = getCtx();
     ctx.clearRect(0, 0, canvasW, canvasH);
     annotations.forEach(a => drawAnnotation(ctx, a));
+    // Draw resize handles for selected annotation
+    if (selectedAnnotation && currentTool === 'move') {
+      drawResizeHandles(ctx, selectedAnnotation);
+    }
+  }
+
+  // Compute the canvas-pixel bounding box of an annotation (for resize handle layout).
+  // Returns {x1, y1, x2, y2} in canvas px, or null if type doesn't support resize.
+  function annotPxBox(a) {
+    const c = a.coords;
+    if (a.type === 'rect' || a.type === 'mosaic') {
+      const x1 = fromPct(c.x, true);
+      const y1 = fromPct(c.y, false);
+      const x2 = x1 + fromPctDist(c.w, true);
+      const y2 = y1 + fromPctDist(c.h, false);
+      return { x1: Math.min(x1, x2), y1: Math.min(y1, y2), x2: Math.max(x1, x2), y2: Math.max(y1, y2) };
+    }
+    if (a.type === 'circle') {
+      const cx = fromPct(c.x, true);
+      const cy = fromPct(c.y, false);
+      const rx = Math.abs(fromPctDist(c.rx, true));
+      const ry = Math.abs(fromPctDist(c.ry, false));
+      return { x1: cx - rx, y1: cy - ry, x2: cx + rx, y2: cy + ry };
+    }
+    return null;
+  }
+
+  // Get handle positions {id → {x, y}} for an annotation
+  function handlePositions(a) {
+    const b = annotPxBox(a);
+    if (!b) return {};
+    const mx = (b.x1 + b.x2) / 2;
+    const my = (b.y1 + b.y2) / 2;
+    return {
+      tl: { x: b.x1, y: b.y1 }, tr: { x: b.x2, y: b.y1 },
+      bl: { x: b.x1, y: b.y2 }, br: { x: b.x2, y: b.y2 },
+      t:  { x: mx,   y: b.y1 }, b:  { x: mx,   y: b.y2 },
+      l:  { x: b.x1, y: my   }, r:  { x: b.x2, y: my   },
+    };
+  }
+
+  function drawResizeHandles(ctx, a) {
+    const handles = handlePositions(a);
+    const ids = Object.keys(handles);
+    if (ids.length === 0) return;
+    ctx.save();
+    ctx.fillStyle = '#fff';
+    ctx.strokeStyle = '#3b82f6';
+    ctx.lineWidth = 1.5;
+    const r = 5;
+    for (const id of ids) {
+      const h = handles[id];
+      ctx.beginPath();
+      ctx.rect(h.x - r, h.y - r, r * 2, r * 2);
+      ctx.fill();
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  // Hit-test resize handles. Returns handle id or null.
+  function hitTestHandle(px, py) {
+    if (!selectedAnnotation) return null;
+    const handles = handlePositions(selectedAnnotation);
+    const tol = 8; // generous hit area
+    for (const id of Object.keys(handles)) {
+      const h = handles[id];
+      if (Math.abs(px - h.x) <= tol && Math.abs(py - h.y) <= tol) return id;
+    }
+    return null;
+  }
+
+  // Cursor for each handle
+  const HANDLE_CURSORS = {
+    tl: 'nwse-resize', br: 'nwse-resize',
+    tr: 'nesw-resize', bl: 'nesw-resize',
+    t: 'ns-resize', b: 'ns-resize',
+    l: 'ew-resize', r: 'ew-resize',
+  };
+
+  // Apply resize delta in % coords to the annotation
+  function applyResize(a, handleId, startCoords, dxPct, dyPct) {
+    const c = a.coords;
+    if (a.type === 'rect' || a.type === 'mosaic') {
+      // Normalize: track left/top/right/bottom in pct
+      let l = startCoords.x, t = startCoords.y;
+      let r = startCoords.x + startCoords.w;
+      let b = startCoords.y + startCoords.h;
+      if (handleId.includes('l')) l += dxPct;
+      if (handleId.includes('r')) r += dxPct;
+      if (handleId.includes('t')) t += dyPct;
+      if (handleId.includes('b')) b += dyPct;
+      c.x = Math.min(l, r);
+      c.y = Math.min(t, b);
+      c.w = Math.abs(r - l);
+      c.h = Math.abs(b - t);
+    } else if (a.type === 'circle') {
+      // Resize from corner: rx/ry follow corner offset
+      let rx = startCoords.rx, ry = startCoords.ry;
+      if (handleId.includes('l') || handleId.includes('r')) {
+        rx = Math.max(0.5, startCoords.rx + (handleId.includes('r') ? dxPct : -dxPct));
+      }
+      if (handleId.includes('t') || handleId.includes('b')) {
+        ry = Math.max(0.5, startCoords.ry + (handleId.includes('b') ? dyPct : -dyPct));
+      }
+      c.rx = rx;
+      c.ry = ry;
+    }
   }
 
   function drawAnnotation(ctx, a) {
@@ -888,17 +992,30 @@ function startAnnotationMode(screenshotDataUrl) {
   // ── 8. Mouse events ──
   canvas.addEventListener('mousedown', (e) => {
     if (e.button !== 0) return;
-    debugClickPos(e, 'mousedown');
     const pt = getCanvasCoords(e);
 
-    // Move tool: pick up annotation under cursor
+    // Move tool: resize handle takes priority over hit-test
     if (currentTool === 'move') {
+      // 1. Resize handle of currently selected annotation
+      const handleId = hitTestHandle(pt.x, pt.y);
+      if (handleId && selectedAnnotation) {
+        resizeHandle = handleId;
+        resizeStartCoords = { ...selectedAnnotation.coords };
+        moveStartPct = { x: toPct(pt.x, true), y: toPct(pt.y, false) };
+        canvas.style.cursor = HANDLE_CURSORS[handleId] || 'nwse-resize';
+        return;
+      }
+      // 2. Body of an annotation → start drag
       const hit = hitTest(pt.x, pt.y);
       if (hit) {
         selectedAnnotation = hit;
         moveStartPct = { x: toPct(pt.x, true), y: toPct(pt.y, false) };
         canvas.style.cursor = 'grabbing';
+      } else {
+        // Click empty space → deselect
+        selectedAnnotation = null;
       }
+      redrawAll();
       return;
     }
 
@@ -941,6 +1058,16 @@ function startAnnotationMode(screenshotDataUrl) {
     const pt = getCanvasCoords(e);
     _lastMousePt = pt;
 
+    // Move tool: actively resizing
+    if (currentTool === 'move' && resizeHandle && selectedAnnotation && resizeStartCoords && moveStartPct) {
+      const nowPct = { x: toPct(pt.x, true), y: toPct(pt.y, false) };
+      const dxPct = nowPct.x - moveStartPct.x;
+      const dyPct = nowPct.y - moveStartPct.y;
+      applyResize(selectedAnnotation, resizeHandle, resizeStartCoords, dxPct, dyPct);
+      redrawAll();
+      return;
+    }
+
     // Move tool: drag selected annotation
     if (currentTool === 'move' && selectedAnnotation && moveStartPct) {
       const nowPct = { x: toPct(pt.x, true), y: toPct(pt.y, false) };
@@ -952,8 +1079,10 @@ function startAnnotationMode(screenshotDataUrl) {
       return;
     }
 
-    // Move tool: update cursor on hover
-    if (currentTool === 'move' && !selectedAnnotation) {
+    // Move tool: update cursor on hover (handle priority over body)
+    if (currentTool === 'move') {
+      const handleId = hitTestHandle(pt.x, pt.y);
+      if (handleId) { canvas.style.cursor = HANDLE_CURSORS[handleId] || 'nwse-resize'; return; }
       const hit = hitTest(pt.x, pt.y);
       canvas.style.cursor = hit ? 'grab' : 'default';
       return;
@@ -989,11 +1118,18 @@ function startAnnotationMode(screenshotDataUrl) {
   });
 
   canvas.addEventListener('mouseup', (e) => {
-    // Move tool: release
-    if (currentTool === 'move' && selectedAnnotation) {
-      selectedAnnotation = null;
+    // Move tool: end resize (keep selection so handles stay visible)
+    if (currentTool === 'move' && resizeHandle) {
+      resizeHandle = null;
+      resizeStartCoords = null;
       moveStartPct = null;
       canvas.style.cursor = 'default';
+      return;
+    }
+    // Move tool: end drag (keep selection so handles stay visible for resize)
+    if (currentTool === 'move' && selectedAnnotation && moveStartPct) {
+      moveStartPct = null;
+      canvas.style.cursor = 'grab';
       return;
     }
 
@@ -1112,18 +1248,21 @@ function startAnnotationMode(screenshotDataUrl) {
     if (e.key === 'Escape') { cleanup(); }
     // V key → move tool
     if (e.key === 'v' || e.key === 'V') { selectTool('move'); }
-    // Delete/Backspace in move mode — remove last clicked annotation
+    // Delete/Backspace in move mode — remove selected annotation (fallback to hovered)
     if ((e.key === 'Delete' || e.key === 'Backspace') && currentTool === 'move') {
-      // Get cursor position from last known mouse position
-      if (_lastMousePt) {
-        const hit = hitTest(_lastMousePt.x, _lastMousePt.y);
-        if (hit) {
-          const idx = annotations.indexOf(hit);
-          if (idx >= 0) {
-            annotations.splice(idx, 1);
-            if (hit.type === 'number') stepCounter = annotations.filter(a => a.type === 'number').length;
-            redrawAll();
+      let target = selectedAnnotation;
+      if (!target && _lastMousePt) target = hitTest(_lastMousePt.x, _lastMousePt.y);
+      if (target) {
+        const idx = annotations.indexOf(target);
+        if (idx >= 0) {
+          annotations.splice(idx, 1);
+          if (target.type === 'number') stepCounter = annotations.filter(a => a.type === 'number').length;
+          if (selectedAnnotation === target) {
+            selectedAnnotation = null;
+            resizeHandle = null;
+            resizeStartCoords = null;
           }
+          redrawAll();
         }
       }
     }
