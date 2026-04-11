@@ -623,22 +623,55 @@ export default function HotspotEditor({ block, onChange, courseId, slideId, bloc
           {/* AI Generate button */}
           <button
             onClick={async () => {
+              // Confirm: this wipes all existing AI-generated content
+              const hasExisting = block.slide_narration || block.slide_narration_audio ||
+                regions.some((r: any) => r.narration || r.audio_url || r.test_hint || r.explore_desc)
+              if (hasExisting && !window.confirm(
+                '重新生成會清除現有的導覽腳本與語音檔，無法復原。\n\n確定要重新生成嗎?'
+              )) return
               try {
                 setNarrationLoading(true)
+                // ── Step 1: wipe all existing narration + audio fields so AI result is authoritative ──
+                // (previously we merged with `!== undefined` which left stale values behind)
+                const wipedRegions = regions.map(r => {
+                  const w: any = { ...r }
+                  w.narration = ''
+                  w.test_hint = ''
+                  w.explore_desc = ''
+                  w.audio_url = ''
+                  w.test_audio_url = ''
+                  w.explore_audio_url = ''
+                  w.feedback = ''
+                  w.feedback_wrong = ''
+                  return w
+                })
+                onChange({
+                  ...block,
+                  regions: wipedRegions,
+                  slide_narration: '',
+                  slide_narration_test: '',
+                  slide_narration_explore: '',
+                  slide_narration_audio: '',
+                  slide_narration_test_audio: '',
+                  slide_narration_explore_audio: '',
+                  completion_message: ''
+                })
+
                 const res = await api.post(`/training/slides/${slideId}/generate-narration`, {
                   block_index: blockIdx ?? 0,
                   editor_context: block.editor_context || ''
                 }, { timeout: 60000 })
                 const data = res.data
-                const updatedRegions = [...regions]
+                // ── Step 2: fill fresh values from AI (absent = stays empty, NOT legacy value) ──
+                const updatedRegions = wipedRegions.map(r => ({ ...r }))
                 if (data.regions?.length > 0) {
                   for (const aiR of data.regions) {
                     const match = updatedRegions.find(r => r.id === aiR.id) ||
                       updatedRegions.filter(r => r.correct)[data.regions.indexOf(aiR)]
                     if (match) {
-                      if (aiR.narration !== undefined) (match as any).narration = aiR.narration || ''
-                      if (aiR.test_hint !== undefined) (match as any).test_hint = aiR.test_hint || ''
-                      if (aiR.explore_desc !== undefined) (match as any).explore_desc = aiR.explore_desc || ''
+                      ;(match as any).narration = aiR.narration || ''
+                      ;(match as any).test_hint = aiR.test_hint || ''
+                      ;(match as any).explore_desc = aiR.explore_desc || ''
                       match.feedback = aiR.feedback_correct || ''
                       ;(match as any).feedback_wrong = aiR.feedback_wrong || ''
                     }
@@ -646,9 +679,12 @@ export default function HotspotEditor({ block, onChange, courseId, slideId, bloc
                 }
                 const newBlock = {
                   ...block, regions: updatedRegions,
-                  slide_narration: data.slide_narration || block.slide_narration || '',
+                  slide_narration: data.slide_narration || '',
                   slide_narration_test: data.slide_narration_test || '',
                   slide_narration_explore: data.slide_narration_explore || '',
+                  slide_narration_audio: '',
+                  slide_narration_test_audio: '',
+                  slide_narration_explore_audio: '',
                   completion_message: data.completion_message || ''
                 }
                 onChange(newBlock)
