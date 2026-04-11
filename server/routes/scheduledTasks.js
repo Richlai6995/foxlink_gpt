@@ -220,6 +220,15 @@ router.post('/:id/run-now', async (req, res) => {
 router.get('/tools-catalog', async (req, res) => {
   if (!await checkPermission(req, res)) return;
   const db = getDb();
+  // Map UI lang code to DB column suffix (DB wrapper lowercases all keys)
+  const lang = String(req.query.lang || 'zh-TW').toLowerCase();
+  const suffix = lang.startsWith('en') ? 'en' : lang.startsWith('vi') ? 'vi' : 'zh';
+  // Localize a row: prefer name_{suffix} / desc_{suffix}, fallback to name / description
+  const localize = (row) => ({
+    ...row,
+    name: row[`name_${suffix}`] || row.name,
+    description: row[`desc_${suffix}`] || row.description,
+  });
   try {
     // Skills: try full query with skill_access; fallback to simple query if table missing
     let skills;
@@ -229,7 +238,7 @@ router.get('/tools-catalog', async (req, res) => {
       ).get(req.user.id);
       const u = userProfile || {};
       skills = await db.prepare(
-        `SELECT id, name, icon, type, description FROM skills
+        `SELECT id, name, icon, type, description, name_zh, name_en, name_vi, desc_zh, desc_en, desc_vi FROM skills
          WHERE owner_user_id=?
             OR is_public=1
             OR EXISTS (
@@ -255,7 +264,7 @@ router.get('/tools-catalog', async (req, res) => {
       // Fallback: skill_access table may not exist yet (pending migration restart)
       console.warn('[tools-catalog] skill_access fallback:', _.message);
       skills = await db.prepare(
-        `SELECT id, name, icon, type, description FROM skills
+        `SELECT id, name, icon, type, description, name_zh, name_en, name_vi, desc_zh, desc_en, desc_vi FROM skills
          WHERE owner_user_id=? OR is_public=1
          ORDER BY name ASC`
       ).all(req.user.id);
@@ -263,7 +272,7 @@ router.get('/tools-catalog', async (req, res) => {
 
     // KBs — knowledge_bases has no is_active; use creator/public/kb_access filter
     const kbs = await db.prepare(
-      `SELECT kb.id, kb.name, kb.description FROM knowledge_bases kb
+      `SELECT kb.id, kb.name, kb.description, kb.name_zh, kb.name_en, kb.name_vi, kb.desc_zh, kb.desc_en, kb.desc_vi FROM knowledge_bases kb
        WHERE kb.creator_id=?
           OR kb.is_public=1
           OR ? IN (SELECT id FROM users WHERE role='admin')
@@ -276,7 +285,10 @@ router.get('/tools-catalog', async (req, res) => {
        ORDER BY kb.name ASC`
     ).all(req.user.id, req.user.id, req.user.id, req.user.id);
 
-    res.json({ skills, kbs });
+    res.json({
+      skills: skills.map(localize),
+      kbs: kbs.map(localize),
+    });
   } catch (e) {
     console.error('[tools-catalog] error:', e.message);
     res.status(500).json({ error: e.message });

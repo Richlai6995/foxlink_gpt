@@ -70,7 +70,7 @@ function TaskFormModal({
   onClose: () => void
   onSaved: (t: ScheduledTask) => void
 }) {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const isEdit = !!task?.id
   const [form, setForm] = useState<Partial<ScheduledTask>>(() => task ?? emptyForm(t))
   const [section, setSection] = useState<'basic' | 'schedule' | 'ai' | 'tools' | 'pipeline' | 'email'>('basic')
@@ -112,12 +112,12 @@ function TaskFormModal({
     }
   }, [models])
 
-  // Load tool catalog
+  // Load tool catalog (re-fetch when language changes so skill/KB names are localized)
   useEffect(() => {
-    api.get('/scheduled-tasks/tools-catalog')
+    api.get('/scheduled-tasks/tools-catalog', { params: { lang: i18n.language } })
       .then((r) => setCatalog(r.data))
       .catch((e) => console.error('[tools-catalog]', e?.response?.data?.error || e?.message))
-  }, [])
+  }, [i18n.language])
 
   // Load MCP servers (for pipeline MCP nodes)
   useEffect(() => {

@@ -38,4 +38,15 @@ i18n
     interpolation: { escapeValue: false },
   })
 
+// Sync <html lang="..."> so that browser-native widgets like <input type="date">
+// render their placeholder / picker UI in the right language.
+function syncHtmlLang(lng: string) {
+  if (typeof document === 'undefined') return
+  // Use BCP 47 codes the browser understands
+  const map: Record<string, string> = { 'zh-TW': 'zh-Hant-TW', en: 'en', vi: 'vi' }
+  document.documentElement.lang = map[lng] || lng
+}
+syncHtmlLang(initLang)
+i18n.on('languageChanged', syncHtmlLang)
+
 export default i18n
