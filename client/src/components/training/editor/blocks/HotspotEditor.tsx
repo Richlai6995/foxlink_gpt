@@ -427,7 +427,18 @@ export default function HotspotEditor({ block, onChange, courseId, slideId, bloc
               {showAnnotationLayer ? '🔴 標註可見' : '⚪ 標註隱藏'}
               {block.annotations?.length > 0 ? ` (${block.annotations.length})` : ''}
             </button>
-            <button onClick={() => onChange({ ...block, image: '' })}
+            <button onClick={() => {
+              const hasRegions = (regions?.length || 0) > 0
+              const hasAnnots = (block.annotations?.length || 0) > 0
+              let msg = '確定要移除這張圖片嗎?'
+              if (hasRegions || hasAnnots) {
+                const parts = []
+                if (hasRegions) parts.push(`${regions.length} 個熱點區域`)
+                if (hasAnnots) parts.push(`${block.annotations.length} 個標註`)
+                msg += `\n\n⚠️ 同時會失去依附在圖上的 ${parts.join('、')},此動作無法復原。`
+              }
+              if (window.confirm(msg)) onChange({ ...block, image: '' })
+            }}
               className="text-[10px] text-red-400 hover:text-red-300">
               移除圖片
             </button>
