@@ -600,9 +600,17 @@ function startAnnotationMode(screenshotDataUrl) {
   }
 
   function fromPct(pct, isX) {
-    // Convert percentage to canvas pixel, accounting for image offset
+    // Convert percentage to canvas pixel ABSOLUTE position (adds letterbox offset).
+    // ⚠️ Use ONLY for absolute positions (x, y), NOT for distances (w, h, rx, ry).
     if (isX) return (pct / 100) * (imgRect.w || canvasW) + imgRect.x;
     return (pct / 100) * (imgRect.h || canvasH) + imgRect.y;
+  }
+
+  function fromPctDist(pct, isX) {
+    // Convert percentage DISTANCE (width/height/radius) to canvas pixel distance.
+    // No offset addition — distances are translation-invariant.
+    if (isX) return (pct / 100) * (imgRect.w || canvasW);
+    return (pct / 100) * (imgRect.h || canvasH);
   }
 
   function getCtx() {
@@ -736,8 +744,8 @@ function startAnnotationMode(screenshotDataUrl) {
       case 'circle': {
         const cx = fromPct(a.coords.x, true);
         const cy = fromPct(a.coords.y, false);
-        const rx = fromPct(a.coords.rx, true);
-        const ry = fromPct(a.coords.ry, false);
+        const rx = fromPctDist(a.coords.rx, true);
+        const ry = fromPctDist(a.coords.ry, false);
         ctx.beginPath();
         ctx.ellipse(cx, cy, Math.abs(rx), Math.abs(ry), 0, 0, Math.PI * 2);
         ctx.stroke();
@@ -746,8 +754,8 @@ function startAnnotationMode(screenshotDataUrl) {
       case 'rect': {
         const x = fromPct(a.coords.x, true);
         const y = fromPct(a.coords.y, false);
-        const w = fromPct(a.coords.w, true);
-        const h = fromPct(a.coords.h, false);
+        const w = fromPctDist(a.coords.w, true);
+        const h = fromPctDist(a.coords.h, false);
         ctx.strokeRect(x, y, w, h);
         break;
       }
@@ -787,8 +795,8 @@ function startAnnotationMode(screenshotDataUrl) {
       case 'mosaic': {
         const x = fromPct(a.coords.x, true);
         const y = fromPct(a.coords.y, false);
-        const w = fromPct(a.coords.w, true);
-        const h = fromPct(a.coords.h, false);
+        const w = fromPctDist(a.coords.w, true);
+        const h = fromPctDist(a.coords.h, false);
         // Real pixelation mosaic — sample from background image
         const blockSize = 12;
         const rx = Math.min(x, x + w);
