@@ -152,7 +152,10 @@ export default function LanguageImagePanel({ slideId, blockIndex, currentImage, 
     setCompPreview(null)
   }, [])
 
-  // Paste listener — active when modal or composite dialog is open
+  // Paste listener — active when modal or composite dialog is open.
+  // ⚠️ Uses capture phase + stopImmediatePropagation to BLOCK the HotspotEditor's
+  // global paste listener from running, otherwise a Ctrl+V inside the lang-image
+  // modal would ALSO overwrite the master block.image (leaking VI image onto ZH).
   useEffect(() => {
     if (!editModal && !compositeOpen) return
     const handler = (e: ClipboardEvent) => {
@@ -163,6 +166,7 @@ export default function LanguageImagePanel({ slideId, blockIndex, currentImage, 
           const file = item.getAsFile()
           if (!file) continue
           e.preventDefault()
+          e.stopImmediatePropagation() // block HotspotEditor's paste from overwriting master image
           if (compositeOpen) {
             onCompSlotFile(file, compRight ? 'left' : 'right')
           } else {
@@ -172,8 +176,10 @@ export default function LanguageImagePanel({ slideId, blockIndex, currentImage, 
         }
       }
     }
-    document.addEventListener('paste', handler)
-    return () => document.removeEventListener('paste', handler)
+    // capture=true ensures we run BEFORE any bubble-phase listeners registered
+    // by parents like HotspotEditor (which listens in bubble phase).
+    document.addEventListener('paste', handler, true)
+    return () => document.removeEventListener('paste', handler, true)
   }, [editModal, compositeOpen, handleUpload, onCompSlotFile, compRight])
 
   const openComposite = useCallback(() => {
