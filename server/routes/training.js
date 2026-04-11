@@ -6222,12 +6222,29 @@ router.get('/courses/:id/interaction-report', loadCoursePermission, requirePermi
              ROUND(AVG(ir.score), 1) AS avg_score,
              ROUND(AVG(ir.max_score), 1) AS avg_max_score,
              ROUND(AVG(ir.wrong_clicks), 1) AS avg_wrong_clicks,
-             ROUND(AVG(ir.total_time_seconds), 1) AS avg_time
+             ROUND(AVG(ir.total_time_seconds), 1) AS avg_time,
+             MAX(cs.sort_order) AS slide_order,
+             MAX(cs.content_json) AS slide_content_json
       FROM interaction_results ir
+      LEFT JOIN course_slides cs ON cs.id = ir.slide_id
       WHERE ir.course_id=?
       GROUP BY ir.slide_id, ir.block_type
       ORDER BY ir.slide_id
     `).all(req.courseId);
+    // Extract slide title from content_json (first block's instruction/content/text)
+    for (const s of slides) {
+      let title = null;
+      try {
+        const blocks = JSON.parse(s.slide_content_json || '[]');
+        const first = blocks[0];
+        if (first) {
+          const raw = first.instruction || first.content || first.text || '';
+          if (raw) title = String(raw).slice(0, 40);
+        }
+      } catch {}
+      s.slide_title = title;
+      delete s.slide_content_json;
+    }
 
     // Per-user summary
     const users = await db.prepare(`
@@ -6257,17 +6274,28 @@ router.get('/courses/:id/interaction-report/:userId', loadCoursePermission, requ
     if (!user) return res.status(404).json({ error: 'User not found' });
 
     const results = await db.prepare(`
-      SELECT ir.*, cs.sort_order AS slide_order
+      SELECT ir.*, cs.sort_order AS slide_order, cs.content_json AS slide_content_json
       FROM interaction_results ir
       LEFT JOIN course_slides cs ON cs.id = ir.slide_id
       WHERE ir.course_id=? AND ir.user_id=?
       ORDER BY cs.sort_order, ir.created_at
     `).all(req.courseId, userId);
 
-    // Parse CLOB fields
+    // Parse CLOB fields + extract slide title
     for (const r of results) {
       try { r.action_log = JSON.parse(r.action_log || '[]'); } catch { r.action_log = []; }
       try { r.score_breakdown = JSON.parse(r.score_breakdown || '{}'); } catch { r.score_breakdown = {}; }
+      let title = null;
+      try {
+        const blocks = JSON.parse(r.slide_content_json || '[]');
+        const first = blocks[0];
+        if (first) {
+          const raw = first.instruction || first.content || first.text || '';
+          if (raw) title = String(raw).slice(0, 40);
+        }
+      } catch {}
+      r.slide_title = title;
+      delete r.slide_content_json;
     }
 
     res.json({ user, results });
@@ -6315,11 +6343,27 @@ router.get('/courses/:id/my-interaction-history', async (req, res) => {
       if (lessonId) detailParams.push(lessonId);
       s.details = await db.prepare(`
         SELECT ir.slide_id, ir.block_type, ir.score, ir.max_score,
-               ir.total_time_seconds, ir.wrong_clicks, ir.steps_completed, ir.total_steps
+               ir.total_time_seconds, ir.wrong_clicks, ir.steps_completed, ir.total_steps,
+               cs.sort_order AS slide_order, cs.content_json AS slide_content_json
         FROM interaction_results ir
+        LEFT JOIN course_slides cs ON cs.id = ir.slide_id
         WHERE ir.user_id=? AND ir.course_id=? AND ir.session_id=?${lessonId ? ' AND ir.slide_id IN (SELECT id FROM course_slides WHERE lesson_id=?)' : ''}
         ORDER BY ir.created_at
       `).all(...detailParams);
+      // Extract slide title from content_json (first block's instruction/content/text)
+      for (const d of s.details) {
+        let title = null;
+        try {
+          const blocks = JSON.parse(d.slide_content_json || '[]');
+          const first = blocks[0];
+          if (first) {
+            const raw = first.instruction || first.content || first.text || '';
+            if (raw) title = String(raw).slice(0, 40);
+          }
+        } catch {}
+        d.slide_title = title;
+        delete d.slide_content_json; // don't ship CLOB to client
+      }
     }
 
     res.json({ sessions });

@@ -16,6 +16,8 @@ interface Summary {
 
 interface SlideStats {
   slide_id: number
+  slide_title?: string | null
+  slide_order?: number
   block_type: string
   attempts: number
   user_count: number
@@ -36,6 +38,7 @@ interface UserStats {
 
 interface UserDetail {
   slide_id: number
+  slide_title?: string | null
   block_type: string
   score: number
   max_score: number
@@ -148,7 +151,9 @@ export default function InteractionReport({ courseId }: Props) {
             {slides.map((s, idx) => (
               <tr key={`${s.slide_id}-${s.block_type}`}
                 style={{ backgroundColor: idx % 2 === 0 ? 'var(--t-bg)' : 'var(--t-bg-card)' }}>
-                <td className="px-4 py-2" style={{ color: 'var(--t-text)' }}>#{s.slide_id}</td>
+                <td className="px-4 py-2 max-w-[260px] truncate" title={s.slide_title || `#${s.slide_id}`} style={{ color: 'var(--t-text)' }}>
+                  {s.slide_title || `#${s.slide_id}`}
+                </td>
                 <td className="px-4 py-2">
                   <span className="px-1.5 py-0.5 rounded text-[9px] font-medium bg-sky-500/15 text-sky-400">{s.block_type}</span>
                 </td>
@@ -214,7 +219,9 @@ export default function InteractionReport({ courseId }: Props) {
                       <tbody>
                         {(userDetails[u.user_id] || []).map((d, i) => (
                           <tr key={i}>
-                            <td className="py-1" style={{ color: 'var(--t-text)' }}>#{d.slide_id}</td>
+                            <td className="py-1 max-w-[240px] truncate" title={d.slide_title || `#${d.slide_id}`} style={{ color: 'var(--t-text)' }}>
+                              {d.slide_title || `#${d.slide_id}`}
+                            </td>
                             <td className="py-1">
                               <span className="px-1 py-0.5 rounded text-[9px] bg-sky-500/15 text-sky-400">{d.block_type}</span>
                             </td>

@@ -107,7 +107,9 @@ interface SessionData {
   total_time: number
   started_at: string
   ended_at: string
-  details: { slide_id: number; block_type: string; score: number; max_score: number; total_time_seconds: number; wrong_clicks: number; steps_completed: number; total_steps: number }[]
+  exam_topic_id?: number | null
+  exam_topic_title?: string | null
+  details: { slide_id: number; slide_title?: string | null; slide_order?: number; block_type: string; score: number; max_score: number; total_time_seconds: number; wrong_clicks: number; steps_completed: number; total_steps: number }[]
 }
 
 function ScoreHistoryPanel({ courseId, lessonId }: { courseId: number; lessonId?: number | null }) {
@@ -203,7 +205,9 @@ function ScoreHistoryPanel({ courseId, lessonId }: { courseId: number; lessonId?
                   <tbody>
                     {s.details.map((d, i) => (
                       <tr key={i}>
-                        <td className="py-1" style={{ color: 'var(--t-text)' }}>#{d.slide_id}</td>
+                        <td className="py-1 max-w-[240px] truncate" title={d.slide_title || `#${d.slide_id}`} style={{ color: 'var(--t-text)' }}>
+                          {d.slide_title || `#${d.slide_id}`}
+                        </td>
                         <td className="py-1">
                           <span className="px-1 py-0.5 rounded text-[9px] bg-sky-500/15 text-sky-400">{d.block_type}</span>
                         </td>
