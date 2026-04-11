@@ -688,10 +688,10 @@ export default function ScreenshotAnnotator({ imageUrl, annotations: initial, st
                 {selectedAnn.type === 'text' ? (
                   <textarea value={selectedAnn.label || ''}
                     onChange={e => updateSelected({ label: e.target.value })}
-                    rows={2}
-                    className="bg-gray-800 border border-gray-600 rounded px-1.5 py-0.5 text-xs text-white w-40 resize-y leading-tight"
-                    style={{ minHeight: 36, fontFamily: 'inherit' }}
-                    placeholder={'文字內容...\nShift+Enter 換行'}
+                    rows={3}
+                    className="bg-gray-800 border border-gray-600 rounded px-1.5 py-0.5 text-xs text-white w-48 resize-y leading-tight"
+                    style={{ minHeight: 50, fontFamily: 'inherit' }}
+                    placeholder={'文字內容\n(Enter 可換行)'}
                     onClick={e => e.stopPropagation()}
                     onKeyDown={e => e.stopPropagation()} />
                 ) : (
@@ -830,17 +830,18 @@ export default function ScreenshotAnnotator({ imageUrl, annotations: initial, st
               <div className="flex items-start gap-1 bg-gray-900 rounded-lg shadow-lg border border-gray-600 p-1">
                 <textarea autoFocus value={textValue} onChange={e => setTextValue(e.target.value)}
                   onKeyDown={e => {
-                    if (e.key === 'Enter' && !e.shiftKey) {
+                    // Ctrl/Cmd+Enter to submit; plain Enter inserts newline (textarea default)
+                    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
                       e.preventDefault()
                       confirmText()
                     }
                     if (e.key === 'Escape') { setTextInput(null); setTextValue('') }
                     e.stopPropagation()
                   }}
-                  rows={2}
-                  className="bg-gray-800 border border-gray-600 rounded px-2 py-1 text-sm text-white w-48 resize-y leading-tight"
-                  style={{ minHeight: 44, fontFamily: 'inherit' }}
-                  placeholder={'輸入文字...\nShift+Enter 換行'} />
+                  rows={3}
+                  className="bg-gray-800 border border-gray-600 rounded px-2 py-1 text-sm text-white w-56 resize-y leading-tight"
+                  style={{ minHeight: 60, fontFamily: 'inherit' }}
+                  placeholder={'輸入文字 (Enter 換行)\nCtrl+Enter 或點 ✓ 送出'} />
                 <button onClick={confirmText}
                   className="p-1 rounded bg-blue-600 text-white hover:bg-blue-500">
                   <Check size={14} />

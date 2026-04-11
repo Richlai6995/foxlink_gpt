@@ -460,23 +460,74 @@ function startAnnotationMode(screenshotDataUrl) {
   canvas.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;cursor:crosshair;';
   canvasWrap.appendChild(canvas);
 
-  // Text input overlay (hidden until text tool) — multi-line textarea
-  const textInput = document.createElement('textarea');
-  textInput.placeholder = '輸入標註文字\nShift+Enter 換行 / Enter 確認';
-  textInput.rows = 2;
-  textInput.style.cssText = `
+  // Text input wrapper (hidden until text tool) — multi-line textarea + submit button
+  const textInputWrap = document.createElement('div');
+  textInputWrap.style.cssText = `
     position: absolute; display: none; z-index: 20;
-    background: rgba(0,0,0,0.75); color: #fff; border: 2px solid #3b82f6;
-    padding: 4px 8px; font-size: 16px; border-radius: 4px; outline: none;
-    min-width: 180px; min-height: 50px; font-family: inherit; resize: both;
-    line-height: 1.3; white-space: pre;
+    background: rgba(0,0,0,0.85); border: 2px solid #3b82f6;
+    border-radius: 6px; padding: 4px; box-shadow: 0 4px 12px rgba(0,0,0,0.4);
   `;
+  const textInput = document.createElement('textarea');
+  textInput.placeholder = '輸入標註文字 (Enter 換行)\nCtrl+Enter 或點 ✓ 送出 / Esc 取消';
+  textInput.rows = 3;
+  textInput.style.cssText = `
+    display: block; background: transparent; color: #fff; border: none;
+    padding: 4px 6px; font-size: 16px; outline: none; font-family: inherit;
+    min-width: 220px; min-height: 70px; resize: both;
+    line-height: 1.4; white-space: pre;
+  `;
+  textInputWrap.appendChild(textInput);
+  // Submit button row
+  const textInputBtnRow = document.createElement('div');
+  textInputBtnRow.style.cssText = 'display:flex;gap:4px;justify-content:flex-end;padding:2px 2px 0;';
+  const textInputConfirm = document.createElement('button');
+  textInputConfirm.textContent = '✓ 確認';
+  textInputConfirm.style.cssText = `
+    padding: 3px 10px; border: none; border-radius: 4px;
+    background: #3b82f6; color: #fff; font-size: 11px; font-weight: 600;
+    cursor: pointer;
+  `;
+  const textInputCancel = document.createElement('button');
+  textInputCancel.textContent = '取消';
+  textInputCancel.style.cssText = `
+    padding: 3px 10px; border: 1px solid rgba(255,255,255,0.3); border-radius: 4px;
+    background: transparent; color: #cbd5e1; font-size: 11px;
+    cursor: pointer;
+  `;
+  textInputBtnRow.appendChild(textInputCancel);
+  textInputBtnRow.appendChild(textInputConfirm);
+  textInputWrap.appendChild(textInputBtnRow);
   // Auto-resize to fit content as user types
   textInput.addEventListener('input', () => {
     textInput.style.height = 'auto';
     textInput.style.height = (textInput.scrollHeight + 4) + 'px';
   });
-  canvasWrap.appendChild(textInput);
+  canvasWrap.appendChild(textInputWrap);
+
+  // Shared commit helper — creates annotation from current textInput value
+  const commitTextAnnotation = () => {
+    const text = textInput.value.replace(/\s+$/, '');
+    if (text) {
+      annotations.push({
+        id: 'a' + Date.now(), type: 'text',
+        coords: textInput._coords,
+        color: currentColor, strokeWidth, label: text,
+        purpose: 'both', visible: true
+      });
+      undoStack = [];
+      redrawAll();
+    }
+    textInputWrap.style.display = 'none';
+    textInput.value = '';
+    textInput.style.height = '';
+  };
+  const cancelTextInput = () => {
+    textInputWrap.style.display = 'none';
+    textInput.value = '';
+    textInput.style.height = '';
+  };
+  textInputConfirm.addEventListener('click', (e) => { e.stopPropagation(); commitTextAnnotation(); });
+  textInputCancel.addEventListener('click', (e) => { e.stopPropagation(); cancelTextInput(); });
 
   overlay.appendChild(canvasWrap);
   document.body.appendChild(overlay);
@@ -1058,14 +1109,19 @@ function startAnnotationMode(screenshotDataUrl) {
     }
 
     if (currentTool === 'text') {
-      textInput.style.display = 'block';
-      textInput.style.left = pt.x + 'px';
-      textInput.style.top = pt.y + 'px';
-      textInput.style.borderColor = currentColor;
+      // If already editing another text, commit it before opening new one
+      if (textInputWrap.style.display === 'block' && textInput.value.trim()) {
+        commitTextAnnotation();
+      }
+      textInputWrap.style.display = 'block';
+      textInputWrap.style.left = pt.x + 'px';
+      textInputWrap.style.top = pt.y + 'px';
+      textInputWrap.style.borderColor = currentColor;
       textInput.style.color = currentColor;
       textInput.value = '';
-      textInput.focus();
+      textInput.style.height = '';
       textInput._coords = { x: toPct(pt.x, true), y: toPct(pt.y, false) };
+      setTimeout(() => textInput.focus(), 0);
       return;
     }
 
@@ -1215,33 +1271,22 @@ function startAnnotationMode(screenshotDataUrl) {
     redrawAll();
   });
 
-  // Text input handler — Enter submit, Shift+Enter newline, Esc cancel
+  // Text input handler — Ctrl+Enter submit, Enter newline, Esc cancel
+  // (Writing-mode UX: plain Enter behaves like a normal textarea to allow easy multi-line input)
   textInput.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    // Prevent global shortcuts (1-8, V, Delete) from firing while typing
+    e.stopPropagation();
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
       e.preventDefault();
-      // Trim trailing blank lines but keep internal newlines
-      const text = textInput.value.replace(/\s+$/, '');
-      if (text) {
-        annotations.push({
-          id: 'a' + Date.now(), type: 'text',
-          coords: textInput._coords,
-          color: currentColor, strokeWidth, label: text,
-          purpose: 'both', visible: true
-        });
-        undoStack = [];
-        redrawAll();
-      }
-      textInput.style.display = 'none';
-      textInput.value = '';
-      textInput.style.height = '';
+      commitTextAnnotation();
     } else if (e.key === 'Escape') {
       e.preventDefault();
-      textInput.style.display = 'none';
-      textInput.value = '';
-      textInput.style.height = '';
+      cancelTextInput();
     }
-    // Shift+Enter falls through → textarea inserts newline natively
+    // Plain Enter falls through → textarea inserts newline natively
   });
+  // Don't let keyup bubble either (some hotkey code uses keyup)
+  textInput.addEventListener('keyup', (e) => e.stopPropagation());
 
   // ── 9. Undo / Redo / Clear ──
   function undo() {
@@ -1270,7 +1315,7 @@ function startAnnotationMode(screenshotDataUrl) {
 
   // Keyboard shortcuts
   overlay.addEventListener('keydown', (e) => {
-    if (textInput.style.display !== 'none') return; // don't capture when typing
+    if (textInputWrap.style.display === 'block') return; // don't capture when typing
     if (e.ctrlKey && e.key === 'z') { e.preventDefault(); undo(); }
     if (e.ctrlKey && e.key === 'y') { e.preventDefault(); redo(); }
     if (e.key === 'Escape') { cleanup(); }
