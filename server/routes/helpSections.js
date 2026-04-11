@@ -87,8 +87,12 @@ router.get('/admin/status', verifyToken, verifyAdmin, async (req, res) => {
 
     const sections = await db.prepare(`
       SELECT s.id, s.section_type, s.sort_order, s.icon, s.icon_color, s.last_modified,
-             s.linked_course_id, s.linked_lesson_id
+             s.linked_course_id, s.linked_lesson_id,
+             c.title  AS linked_course_title,
+             l.title  AS linked_lesson_title
       FROM help_sections s
+      LEFT JOIN courses        c ON c.id = s.linked_course_id
+      LEFT JOIN course_lessons l ON l.id = s.linked_lesson_id
       ORDER BY s.sort_order
     `).all();
 
@@ -117,6 +121,8 @@ router.get('/admin/status', verifyToken, verifyAdmin, async (req, res) => {
       lastModified: s.last_modified,
       linkedCourseId: s.linked_course_id || null,
       linkedLessonId: s.linked_lesson_id || null,
+      linkedCourseTitle: s.linked_course_title || null,
+      linkedLessonTitle: s.linked_lesson_title || null,
       translations: transMap[s.id] || {},
     }));
 

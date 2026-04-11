@@ -496,15 +496,17 @@ function startAnnotationMode(screenshotDataUrl) {
   const textInputWrap = document.createElement('div');
   textInputWrap.style.cssText = `
     position: absolute; display: none; z-index: 20;
-    background: rgba(0,0,0,0.85); border: 2px solid #3b82f6;
-    border-radius: 6px; padding: 4px; box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+    background: rgba(0,0,0,0.82); border: 2px solid #3b82f6;
+    border-radius: 6px; padding: 4px; box-shadow: 0 6px 18px rgba(0,0,0,0.5);
+    backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
   `;
   const textInput = document.createElement('textarea');
   textInput.placeholder = '輸入標註文字 (Enter 換行)\nCtrl+Enter 或點 ✓ 送出 / Esc 取消';
   textInput.rows = 3;
   textInput.style.cssText = `
     display: block; background: transparent; color: #fff; border: none;
-    padding: 4px 6px; font-size: 16px; outline: none; font-family: inherit;
+    padding: 4px 6px; font-size: 16px; font-weight: 700;
+    outline: none; font-family: inherit;
     min-width: 220px; min-height: 70px; resize: both;
     line-height: 1.4; white-space: pre;
   `;
@@ -523,9 +525,47 @@ function startAnnotationMode(screenshotDataUrl) {
   textInputCancel.textContent = '取消';
   textInputCancel.style.cssText = `
     padding: 3px 10px; border: 1px solid rgba(255,255,255,0.3); border-radius: 4px;
-    background: transparent; color: #cbd5e1; font-size: 11px;
+    background: transparent; color: #e2e8f0; font-size: 11px;
     cursor: pointer;
   `;
+
+  // WCAG relative luminance — 0 (black) ~ 1 (white)
+  const relLuminance = (hex) => {
+    const m = /^#?([a-f0-9]{6})$/i.exec(hex || '');
+    if (!m) return 0.5;
+    const n = parseInt(m[1], 16);
+    const chs = [(n >> 16) & 0xff, (n >> 8) & 0xff, n & 0xff].map(v => {
+      const s = v / 255;
+      return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+    });
+    return 0.2126 * chs[0] + 0.7152 * chs[1] + 0.0722 * chs[2];
+  };
+
+  // Apply adaptive theme to text input. Picks black vs white background by
+  // whichever gives better WCAG contrast against the current text color,
+  // then adds a pixel text-outline so glyphs pop regardless of backdrop.
+  const applyTextInputTheme = () => {
+    const L = relLuminance(currentColor);
+    const contrastBlack = (L + 0.05) / 0.05;
+    const contrastWhite = 1.05 / (L + 0.05);
+    const preferDark = contrastBlack >= contrastWhite;
+    // Outline shadow — opposite of bg, 4-direction 1px stroke + soft glow
+    const outlineCol = preferDark ? '0,0,0' : '255,255,255';
+    const outline = `
+      -1px -1px 0 rgba(${outlineCol},0.9),
+       1px -1px 0 rgba(${outlineCol},0.9),
+      -1px  1px 0 rgba(${outlineCol},0.9),
+       1px  1px 0 rgba(${outlineCol},0.9),
+       0    0   4px rgba(${outlineCol},0.8)
+    `;
+    textInputWrap.style.background = preferDark ? 'rgba(0,0,0,0.82)' : 'rgba(255,255,255,0.92)';
+    textInputWrap.style.borderColor = currentColor;
+    textInput.style.color = currentColor;
+    textInput.style.textShadow = outline;
+    textInput.style.caretColor = currentColor;
+    textInputCancel.style.color = preferDark ? '#e2e8f0' : '#475569';
+    textInputCancel.style.borderColor = preferDark ? 'rgba(255,255,255,0.35)' : 'rgba(0,0,0,0.25)';
+  };
   textInputBtnRow.appendChild(textInputCancel);
   textInputBtnRow.appendChild(textInputConfirm);
   textInputWrap.appendChild(textInputBtnRow);
@@ -656,6 +696,10 @@ function startAnnotationMode(screenshotDataUrl) {
       btn.style.borderColor = k === hex ? '#fff' : 'transparent';
       btn.style.transform = k === hex ? 'scale(1.2)' : 'scale(1)';
     });
+    // Live-update text input theme if user switches color mid-edit
+    if (textInputWrap.style.display === 'block') {
+      applyTextInputTheme();
+    }
   }
 
   function selectWidth(val) {
@@ -1168,8 +1212,7 @@ function startAnnotationMode(screenshotDataUrl) {
       textInputWrap.style.display = 'block';
       textInputWrap.style.left = pt.x + 'px';
       textInputWrap.style.top = pt.y + 'px';
-      textInputWrap.style.borderColor = currentColor;
-      textInput.style.color = currentColor;
+      applyTextInputTheme();
       textInput.style.fontSize = textFontSize + 'px'; // live preview
       textInput.value = '';
       textInput.style.height = '';

@@ -520,7 +520,7 @@ export default function HotspotBlock({ block, blockIndex = 0, isLastSlide = fals
               zIndex: 10
             }}>
             <div style={{
-              width: 48, height: 48,
+              width: 48, height: 48, flexShrink: 0,
               borderRadius: '50%',
               backgroundColor: '#22c55e',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -540,7 +540,7 @@ export default function HotspotBlock({ block, blockIndex = 0, isLastSlide = fals
               zIndex: 5
             }}>
             <div style={{
-              width: 32, height: 32,
+              width: 32, height: 32, flexShrink: 0,
               borderRadius: '50%',
               backgroundColor: '#22c55e',
               display: 'flex', alignItems: 'center', justifyContent: 'center',

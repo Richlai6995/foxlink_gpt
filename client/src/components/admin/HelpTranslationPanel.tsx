@@ -24,6 +24,8 @@ interface SectionStatus {
   translations: Record<string, TransInfo>
   linkedCourseId?: number | null
   linkedLessonId?: number | null
+  linkedCourseTitle?: string | null
+  linkedLessonTitle?: string | null
 }
 
 interface CourseOption {
@@ -751,8 +753,14 @@ export default function HelpTranslationPanel() {
                           if (section.linkedCourseId) {
                             api.get(`/training/courses/${section.linkedCourseId}`).then(res => setLinkLessons(res.data.lessons || [])).catch(() => setLinkLessons([]))
                           }
-                        }} className="mt-1 text-[10px] text-blue-500 hover:text-blue-700 flex items-center gap-0.5">
-                          🎓 {section.linkedCourseId ? `已綁定 #${section.linkedCourseId}` : '綁定教材'}
+                        }} className="mt-1 text-[10px] text-blue-500 hover:text-blue-700 flex items-center gap-0.5 text-left"
+                          title={section.linkedCourseId ? `#${section.linkedCourseId}${section.linkedLessonId ? ` / #${section.linkedLessonId}` : ''}` : ''}
+                        >
+                          🎓 {section.linkedCourseId
+                            ? (section.linkedCourseTitle
+                                ? `${section.linkedCourseTitle}${section.linkedLessonTitle ? ` › ${section.linkedLessonTitle}` : ''}`
+                                : `已綁定 #${section.linkedCourseId}`)
+                            : '綁定教材'}
                         </button>
                       )}
                     </div>
