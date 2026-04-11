@@ -214,6 +214,7 @@ function startAnnotationMode(screenshotDataUrl) {
   let currentTool = 'number'; // move|number|circle|rect|arrow|text|freehand|mosaic
   let currentColor = '#ef4444';
   let strokeWidth = 3;
+  let textFontSize = 16; // Canvas-pixel font size for text tool (independent from strokeWidth)
   let stepCounter = badgeStepCount; // 從 badge 繼承，避免繼續錄製時步驟號回退
   let annotations = [];
   let undoStack = [];
@@ -345,6 +346,37 @@ function startAnnotationMode(screenshotDataUrl) {
     widthBtns[w.val] = btn;
   });
   toolbar.appendChild(widthGroup);
+
+  // Text font size selector (shown only when text tool is active)
+  const FONT_SIZES = [
+    { val: 12, label: 'XS' },
+    { val: 14, label: 'S' },
+    { val: 18, label: 'M' },
+    { val: 24, label: 'L' },
+    { val: 32, label: 'XL' },
+  ];
+  const textSizeGroup = document.createElement('div');
+  textSizeGroup.style.cssText = 'display:none;gap:3px;align-items:center;margin-left:6px;';
+  const textSizeLabel = document.createElement('span');
+  textSizeLabel.textContent = '字級:';
+  textSizeLabel.style.cssText = 'color:rgba(255,255,255,0.6);font-size:11px;margin-right:2px;';
+  textSizeGroup.appendChild(textSizeLabel);
+  const textSizeBtns = {};
+  FONT_SIZES.forEach(s => {
+    const btn = document.createElement('button');
+    btn.textContent = s.label;
+    btn.title = `${s.val}px`;
+    btn.style.cssText = `
+      min-width: 28px; height: 28px; padding: 0 6px;
+      border: 2px solid transparent; border-radius: 4px;
+      background: rgba(255,255,255,0.1); color: #fff; font-size: 11px; font-weight: 600;
+      cursor: pointer; display: flex; align-items: center; justify-content: center;
+    `;
+    btn.addEventListener('click', () => selectTextSize(s.val));
+    textSizeGroup.appendChild(btn);
+    textSizeBtns[s.val] = btn;
+  });
+  toolbar.appendChild(textSizeGroup);
 
   // Separator
   const sep3 = sep1.cloneNode();
@@ -511,7 +543,7 @@ function startAnnotationMode(screenshotDataUrl) {
       annotations.push({
         id: 'a' + Date.now(), type: 'text',
         coords: textInput._coords,
-        color: currentColor, strokeWidth, label: text,
+        color: currentColor, strokeWidth, fontSize: textFontSize, label: text,
         purpose: 'both', visible: true
       });
       undoStack = [];
@@ -582,6 +614,7 @@ function startAnnotationMode(screenshotDataUrl) {
   selectTool('number');
   selectColor('#ef4444');
   selectWidth(3);
+  selectTextSize(16);
 
   function selectTool(id) {
     currentTool = id;
@@ -596,8 +629,25 @@ function startAnnotationMode(screenshotDataUrl) {
       btn.style.borderColor = k === id ? '#3b82f6' : 'transparent';
       btn.style.background = k === id ? 'rgba(59,130,246,0.3)' : 'rgba(255,255,255,0.1)';
     });
+    // Swap toolbar groups: text tool shows font-size selector, others show stroke width
+    const isText = id === 'text';
+    widthGroup.style.display = isText ? 'none' : 'flex';
+    textSizeGroup.style.display = isText ? 'flex' : 'none';
     canvas.style.cursor = id === 'move' ? 'default' : id === 'text' ? 'text' : 'crosshair';
     redrawAll();
+  }
+
+  function selectTextSize(val) {
+    textFontSize = val;
+    Object.entries(textSizeBtns).forEach(([k, btn]) => {
+      const active = Number(k) === val;
+      btn.style.borderColor = active ? '#3b82f6' : 'transparent';
+      btn.style.background = active ? 'rgba(59,130,246,0.3)' : 'rgba(255,255,255,0.1)';
+    });
+    // Reflect size in live textarea if open
+    if (textInputWrap.style.display === 'block') {
+      textInput.style.fontSize = val + 'px';
+    }
   }
 
   function selectColor(hex) {
@@ -709,7 +759,8 @@ function startAnnotationMode(screenshotDataUrl) {
         }
         case 'text': {
           // Approximate bounding box from text position — multi-line aware
-          const fontSize = (a.strokeWidth || 3) * 5 + 8;
+          // New annotations: a.fontSize (px); legacy: derived from strokeWidth
+          const fontSize = a.fontSize || ((a.strokeWidth || 3) * 5 + 8);
           const lines = String(a.label || '').split('\n');
           const longest = lines.reduce((m, ln) => Math.max(m, ln.length), 0);
           const lineHeight = fontSize * 1.25;
@@ -934,7 +985,8 @@ function startAnnotationMode(screenshotDataUrl) {
       case 'text': {
         const x = fromPct(a.coords.x, true);
         const y = fromPct(a.coords.y, false);
-        const fontSize = (a.strokeWidth || 3) * 5 + 8;
+        // New annotations: a.fontSize (px); legacy: derived from strokeWidth
+        const fontSize = a.fontSize || ((a.strokeWidth || 3) * 5 + 8);
         const lineHeight = Math.round(fontSize * 1.25);
         ctx.font = `bold ${fontSize}px sans-serif`;
         ctx.textBaseline = 'alphabetic';
@@ -1118,6 +1170,7 @@ function startAnnotationMode(screenshotDataUrl) {
       textInputWrap.style.top = pt.y + 'px';
       textInputWrap.style.borderColor = currentColor;
       textInput.style.color = currentColor;
+      textInput.style.fontSize = textFontSize + 'px'; // live preview
       textInput.value = '';
       textInput.style.height = '';
       textInput._coords = { x: toPct(pt.x, true), y: toPct(pt.y, false) };
