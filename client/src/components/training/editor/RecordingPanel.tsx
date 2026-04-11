@@ -226,10 +226,13 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
 
   // ── Save Draft ──────────────────────────────────────────────────────────────
   const saveDraft = async () => {
-    if (steps.length === 0) return
+    // Allow empty local state IF there's an existing session — user may have deleted everything
+    // and wants the server-side draft cleared as well. Otherwise, nothing to do.
+    if (steps.length === 0 && !sessionIdRef.current && !sessionId) return
     try {
       setSavingDraft(true)
       let sid = sessionIdRef.current || sessionId
+      const isNewSession = !sid
 
       // 1. Create session if none exists
       if (!sid) {
@@ -242,11 +245,31 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
         sessionIdRef.current = sid
       }
 
-      // 2. Separate: already-on-server steps vs local-only steps
+      // 2. Diff against server to find steps user deleted locally.
+      //    (Skip diff for brand new sessions — nothing on server yet.)
+      if (!isNewSession) {
+        try {
+          const serverRes = await api.get(`/training/recording/${sid}`)
+          const serverIds: number[] = (serverRes.data.steps || []).map((s: any) => s.id)
+          const localIds = new Set(
+            steps
+              .filter(s => s.id.startsWith('server_'))
+              .map(s => Number(s.id.replace('server_', '')))
+          )
+          const toDelete = serverIds.filter(id => !localIds.has(id))
+          if (toDelete.length > 0) {
+            await api.delete(`/training/recording/${sid}/steps`, { data: { ids: toDelete } })
+          }
+        } catch (e) {
+          console.warn('[saveDraft] diff-delete failed (continuing):', e)
+        }
+      }
+
+      // 3. Separate: already-on-server steps vs local-only steps
       const serverSteps = steps.filter(s => s.id.startsWith('server_'))
       const localSteps = steps.filter(s => !s.id.startsWith('server_'))
 
-      // 3. Update existing server steps (annotations + stepNumber + lang)
+      // 4. Update existing server steps (annotations + stepNumber + lang)
       if (serverSteps.length > 0) {
         const updates = serverSteps.map((s, i) => ({
           id: Number(s.id.replace('server_', '')),
@@ -257,7 +280,7 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
         await api.put(`/training/recording/${sid}/steps`, { updates })
       }
 
-      // 4. Upload local-only steps (Ctrl+V / file) to server
+      // 5. Upload local-only steps (Ctrl+V / file) to server
       for (let i = 0; i < localSteps.length; i++) {
         const step = localSteps[i]
         const res = await api.post(`/training/recording/${sid}/step`, {
@@ -275,7 +298,7 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
           : s))
       }
 
-      // 5. Persist sessionId for draft recovery
+      // 6. Persist sessionId for draft recovery
       sessionStorage.setItem('training_draft_session', JSON.stringify({
         sessionId: sid, courseId, lessonId, savedAt: new Date().toISOString()
       }))

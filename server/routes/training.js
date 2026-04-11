@@ -4426,6 +4426,51 @@ router.put('/recording/:sessionId/steps', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// DELETE /api/training/recording/:sessionId/steps — bulk delete (for draft sync)
+// Body: { ids: number[] } — step IDs to remove (must belong to this session)
+// Also unlinks the screenshot files on disk best-effort.
+router.delete('/recording/:sessionId/steps', async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    const { ids } = req.body || {};
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return res.json({ ok: true, deleted: 0 });
+    }
+    let deleted = 0;
+    for (const rawId of ids) {
+      const id = Number(rawId);
+      if (!id) continue;
+      // Fetch screenshot_url BEFORE delete so we can unlink the file
+      const row = await db.prepare(
+        'SELECT screenshot_url FROM recording_steps WHERE id=? AND session_id=?'
+      ).get(id, sessionId);
+      if (!row) continue;
+      const result = await db.prepare(
+        'DELETE FROM recording_steps WHERE id=? AND session_id=?'
+      ).run(id, sessionId);
+      if (result.changes > 0 || result.lastInsertRowid !== undefined) deleted++;
+      // Best-effort file unlink
+      if (row.screenshot_url) {
+        try {
+          const rel = String(row.screenshot_url).replace(/^\/api\/training\/files\//, '');
+          const abs = path.join(UPLOAD_ROOT, 'training', rel);
+          if (fs.existsSync(abs)) fs.unlinkSync(abs);
+        } catch (err) {
+          console.warn('[Training] unlink step file failed:', err.message);
+        }
+      }
+    }
+    // Refresh session steps_count to reality (avoid drift)
+    await db.prepare(
+      'UPDATE recording_sessions SET steps_count=(SELECT COUNT(*) FROM recording_steps WHERE session_id=?) WHERE id=?'
+    ).run(sessionId, sessionId);
+    res.json({ ok: true, deleted });
+  } catch (e) {
+    console.error('[Training] delete steps:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // POST /api/training/recording/:sessionId/complete
 router.post('/recording/:sessionId/complete', async (req, res) => {
   try {
