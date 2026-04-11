@@ -877,10 +877,40 @@ export default function CourseEditor() {
                               try {
                                 setTranslating(lang)
                                 setTranslateProgress({ step: t('training.generateLangAudio', { lang: langName }) + '...', current: 0, total: 1 })
-                                await api.post(`/training/courses/${id}/generate-lang-tts`, { target_lang: lang }, { timeout: 120000 })
+                                const token = localStorage.getItem('token')
+                                const resp = await fetch(`/api/training/courses/${id}/generate-lang-tts`, {
+                                  method: 'POST',
+                                  headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                                  body: JSON.stringify({ target_lang: lang }),
+                                })
+                                const reader = resp.body?.getReader()
+                                const decoder = new TextDecoder()
+                                let buf = ''
+                                let doneEvt: any = null
+                                let errEvt: any = null
+                                while (reader) {
+                                  const { done, value } = await reader.read()
+                                  if (done) break
+                                  buf += decoder.decode(value, { stream: true })
+                                  const lines = buf.split('\n')
+                                  buf = lines.pop() || ''
+                                  for (const line of lines) {
+                                    if (!line.startsWith('data: ')) continue
+                                    try {
+                                      const evt = JSON.parse(line.slice(6))
+                                      if (evt.type === 'progress') setTranslateProgress(evt)
+                                      if (evt.type === 'status') setTranslateProgress({ step: evt.message, current: 0, total: 1 })
+                                      if (evt.type === 'done') doneEvt = evt
+                                      if (evt.type === 'error') errEvt = evt
+                                    } catch {}
+                                  }
+                                }
                                 setTranslateProgress(null)
-                                alert(t('training.langAudioComplete', { lang: langName }))
-                              } catch (e: any) { alert(e.response?.data?.error || t('training.langAudioFailed')) }
+                                if (errEvt) { alert(errEvt.error || t('training.langAudioFailed')); return }
+                                const gen = doneEvt?.generated ?? 0
+                                const fail = doneEvt?.failed ?? 0
+                                alert(`${t('training.langAudioComplete', { lang: langName })}\n(${gen} ✅ / ${fail} ❌)`)
+                              } catch (e: any) { alert(e.message || t('training.langAudioFailed')) }
                               finally { setTranslating(null); setTranslateProgress(null) }
                             }}
                             disabled={!!translating}

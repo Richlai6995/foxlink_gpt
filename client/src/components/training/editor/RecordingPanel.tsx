@@ -587,22 +587,32 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
         const serverSteps = sessionRes.data.steps || []
         const totalSteps = serverSteps.length
 
-        // AI analyze each step individually (with progress)
-        for (let i = 0; i < serverSteps.length; i++) {
-          const s = serverSteps[i]
-          setProcessProgress({ current: i + 1, total: totalSteps + 1 })
-          setSteps(prev => prev.map(st => st.id === `server_${s.id}` ? { ...st, status: 'analyzing' } : st))
-
-          try {
-            await api.post(`/training/recording/${sid}/analyze-step/${s.id}`,
-              selectedModel ? { model: selectedModel } : {}, { timeout: 30000 })
-            setSteps(prev => prev.map(st => st.id === `server_${s.id}` ? { ...st, status: 'done' } : st))
-          } catch (err) {
-            console.warn(`[processAll] analyze step ${s.id} failed:`, err)
-            setSteps(prev => prev.map(st => st.id === `server_${s.id}` ? { ...st, status: 'error' } : st))
-            // Continue with next step, don't abort
+        // AI analyze steps in parallel (worker pool, concurrency=5) for speed
+        const ANALYZE_CONCURRENCY = 5
+        let analyzeIdx = 0
+        let analyzeDone = 0
+        const analyzeWorker = async () => {
+          while (true) {
+            const myIdx = analyzeIdx++
+            if (myIdx >= serverSteps.length) return
+            const s = serverSteps[myIdx]
+            setSteps(prev => prev.map(st => st.id === `server_${s.id}` ? { ...st, status: 'analyzing' } : st))
+            try {
+              await api.post(`/training/recording/${sid}/analyze-step/${s.id}`,
+                selectedModel ? { model: selectedModel } : {}, { timeout: 60000 })
+              setSteps(prev => prev.map(st => st.id === `server_${s.id}` ? { ...st, status: 'done' } : st))
+            } catch (err) {
+              console.warn(`[processAll] analyze step ${s.id} failed:`, err)
+              setSteps(prev => prev.map(st => st.id === `server_${s.id}` ? { ...st, status: 'error' } : st))
+              // Continue with next step, don't abort
+            }
+            analyzeDone++
+            setProcessProgress({ current: analyzeDone, total: totalSteps + 1 })
           }
         }
+        await Promise.all(
+          Array.from({ length: Math.min(ANALYZE_CONCURRENCY, serverSteps.length) }, () => analyzeWorker())
+        )
 
         // Generate slides
         setProcessProgress({ current: totalSteps + 1, total: totalSteps + 1 })
@@ -643,14 +653,27 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
         // Complete + analyze step by step + generate
         await api.post(`/training/recording/${processingSessionId}/complete`)
         const uploaded = await api.get(`/training/recording/${processingSessionId}`)
-        for (let i = 0; i < (uploaded.data.steps || []).length; i++) {
-          const s = uploaded.data.steps[i]
-          setProcessProgress({ current: steps.length + i + 1, total: steps.length * 2 + 1 })
-          try {
-            await api.post(`/training/recording/${processingSessionId}/analyze-step/${s.id}`,
-              selectedModel ? { model: selectedModel } : {}, { timeout: 30000 })
-          } catch { console.warn(`analyze step ${s.id} failed, continuing...`) }
+        const uploadedSteps = uploaded.data.steps || []
+        // Parallel analyze (worker pool, concurrency=5)
+        const UL_CONCURRENCY = 5
+        let ulIdx = 0
+        let ulDone = 0
+        const ulWorker = async () => {
+          while (true) {
+            const myIdx = ulIdx++
+            if (myIdx >= uploadedSteps.length) return
+            const s = uploadedSteps[myIdx]
+            try {
+              await api.post(`/training/recording/${processingSessionId}/analyze-step/${s.id}`,
+                selectedModel ? { model: selectedModel } : {}, { timeout: 60000 })
+            } catch { console.warn(`analyze step ${s.id} failed, continuing...`) }
+            ulDone++
+            setProcessProgress({ current: steps.length + ulDone, total: steps.length * 2 + 1 })
+          }
         }
+        await Promise.all(
+          Array.from({ length: Math.min(UL_CONCURRENCY, uploadedSteps.length) }, () => ulWorker())
+        )
         const genRes = await api.post(`/training/recording/${processingSessionId}/generate`, {}, { timeout: 60000 })
 
         setSteps(prev => prev.map(s => ({ ...s, status: 'done' })))

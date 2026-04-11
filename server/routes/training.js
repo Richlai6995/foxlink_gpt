@@ -40,6 +40,19 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage, limits: { fileSize: 50 * 1024 * 1024 } });
 
+// ─── Concurrency limiter (used by translate / TTS batch / etc.) ──────────────
+function pLimit(n) {
+  let active = 0;
+  const queue = [];
+  const next = () => {
+    if (active >= n || queue.length === 0) return;
+    active++;
+    const { fn, resolve, reject } = queue.shift();
+    Promise.resolve().then(fn).then(resolve, reject).finally(() => { active--; next(); });
+  };
+  return (fn) => new Promise((resolve, reject) => { queue.push({ fn, resolve, reject }); next(); });
+}
+
 // All routes require auth
 router.use(verifyToken);
 
@@ -3452,7 +3465,7 @@ router.post('/courses/:id/translate', loadCoursePermission, requirePermission('o
       const flashRow = await db.prepare(
         `SELECT api_model FROM llm_models WHERE model_role='chat' AND is_active=1 AND provider_type='gemini' ORDER BY sort_order FETCH FIRST 1 ROWS ONLY`
       ).get();
-      modelName = flashRow?.api_model || 'gemini-2.0-flash';
+      modelName = flashRow?.api_model || process.env.GEMINI_MODEL_FLASH || 'gemini-3-flash-preview';
     }
     const model = genAI.getGenerativeModel({ model: modelName });
     send('status', { message: `使用模型: ${modelName}` });
@@ -3483,9 +3496,13 @@ router.post('/courses/:id/translate', loadCoursePermission, requirePermission('o
     const totalItems = 1 + lessons.length + totalSlides + questions.length; // course + lessons + slides + questions
     let doneItems = 0;
 
-    const CONCURRENCY = 3;
+    const CONCURRENCY = 10;    // parallel LLM calls (paid Gemini tier)
+    const SLIDE_BATCH = 5;     // slides packed per LLM call
+    const QUIZ_BATCH = 5;      // quiz questions packed per LLM call
 
-    // 1. Course metadata — title + description in 1 call
+    const stripFence = (s) => s.trim().replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```$/, '').trim();
+
+    // 1. Course metadata — title + description in parallel
     send('progress', { current: doneItems, total: totalItems, step: '翻譯課程標題...' });
     const [titleTrans, descTrans] = await Promise.all([
       translateText(course.title),
@@ -3502,8 +3519,7 @@ router.post('/courses/:id/translate', loadCoursePermission, requirePermission('o
     doneItems++;
     send('progress', { current: doneItems, total: totalItems, step: '課程標題完成' });
 
-    // 2. Lessons (titles parallel) + slides
-    // Translate all lesson titles in parallel first
+    // 2. Lessons — titles all parallel
     send('progress', { current: doneItems, total: totalItems, step: `翻譯 ${lessons.length} 個章節標題...` });
     await Promise.all(lessons.map(async (lesson) => {
       try {
@@ -3518,112 +3534,280 @@ router.post('/courses/:id/translate', loadCoursePermission, requirePermission('o
     }));
     doneItems += lessons.length;
 
-    let slidesDone = 0;
+    // 3. Slides — flatten across lessons
+    // regions_json source = zh-TW row (master). Content/notes source = course_slides (master).
+    // If any source field is null/empty, target is wiped to match — we always full re-translate.
+    const allSlides = [];
     for (const lesson of lessons) {
-      // Translate slides in parallel (concurrency=3) for speed
-      const slides = lessonSlideMap[lesson.id] || [];
-      const translateSlide = async (slide) => {
-        let translatedContent = null;
-        let translatedNotes = null;
-        const hasContent = !!slide.content_json;
-        const hasNotes = !!slide.notes;
-
-        // Merge content_json + notes into single LLM call when both exist
-        if (hasContent && hasNotes) {
-          try {
-            const merged = await model.generateContent(
-              `Translate from Traditional Chinese to ${langName}. Return a JSON object with two keys: "content" (the translated JSON array) and "notes" (the translated notes string).
-Do not translate product names or technical terms. Keep JSON structure, keys, and type fields unchanged.
-Input:
-{"content": ${slide.content_json}, "notes": ${JSON.stringify(slide.notes)}}
-Return only valid JSON.`
-            );
-            const raw = merged.response.text().trim().replace(/^```json\s*/, '').replace(/```$/, '').trim();
-            const parsed = JSON.parse(raw);
-            translatedContent = typeof parsed.content === 'string' ? parsed.content : JSON.stringify(parsed.content);
-            translatedNotes = parsed.notes || null;
-          } catch (err) {
-            console.warn(`[Translate] slide ${slide.id} merged failed, falling back:`, err.message);
-            try {
-              const r = await model.generateContent(`Translate the text values in this JSON from Traditional Chinese to ${langName}. Keep JSON structure, keys, and type fields unchanged. Do not translate product names. Return only valid JSON:\n\n${slide.content_json}`);
-              translatedContent = r.response.text().trim().replace(/^```json\s*/, '').replace(/```$/, '').trim();
-            } catch {}
-            try { translatedNotes = await translateText(slide.notes); } catch {}
-          }
-        } else {
-          if (hasContent) {
-            try {
-              const r = await model.generateContent(`Translate the text values in this JSON from Traditional Chinese to ${langName}. Keep JSON structure, keys, and type fields unchanged. Do not translate product names. Return only valid JSON:\n\n${slide.content_json}`);
-              translatedContent = r.response.text().trim().replace(/^```json\s*/, '').replace(/```$/, '').trim();
-            } catch (err) { console.warn(`[Translate] slide ${slide.id} content:`, err.message); }
-          }
-          if (hasNotes) { try { translatedNotes = await translateText(slide.notes); } catch {} }
-        }
-
-        const existingST = await db.prepare('SELECT id, regions_json FROM slide_translations WHERE slide_id=? AND lang=?').get(slide.id, target_lang);
-        if (existingST) {
-          await db.prepare('UPDATE slide_translations SET content_json=?, notes=?, translated_at=SYSTIMESTAMP, is_auto=1 WHERE id=?')
-            .run(translatedContent, translatedNotes, existingST.id);
-        } else {
-          await db.prepare('INSERT INTO slide_translations (slide_id, lang, content_json, notes, is_auto) VALUES (?,?,?,?,1)')
-            .run(slide.id, target_lang, translatedContent, translatedNotes);
-        }
-
-        // Translate independent regions_json
-        const regJson = existingST?.regions_json;
-        if (regJson) {
-          try {
-            const transRegResult = await model.generateContent(
-              `Translate all Chinese text values in this JSON to ${langName}. Keep JSON structure, all keys, coords, IDs, booleans, numbers, and audio_url values unchanged. Only translate string values that contain Chinese text (label, narration, feedback, feedback_wrong, test_hint, explore_desc, slide_narration, slide_narration_test, slide_narration_explore, completion_message). Return only valid JSON:\n\n${regJson}`
-            );
-            const transRegStr = transRegResult.response.text().trim().replace(/^```json\s*/, '').replace(/```$/, '').trim();
-            JSON.parse(transRegStr);
-            await db.prepare('UPDATE slide_translations SET regions_json=? WHERE slide_id=? AND lang=?')
-              .run(transRegStr, slide.id, target_lang);
-          } catch (e) { console.warn(`[Translate] regions_json for slide ${slide.id}:`, e.message); }
-        }
-      };
-
-      // Run slides in batches of CONCURRENCY
-      for (let i = 0; i < slides.length; i += CONCURRENCY) {
-        const batch = slides.slice(i, i + CONCURRENCY);
-        await Promise.all(batch.map(s => translateSlide(s).catch(e => console.warn(`[Translate] slide ${s.id}:`, e.message))));
-        slidesDone += batch.length;
-        doneItems += batch.length;
-        send('progress', { current: doneItems, total: totalItems, step: `翻譯投影片 ${slidesDone}/${totalSlides}...`, slides_done: slidesDone, slides_total: totalSlides });
+      for (const slide of lessonSlideMap[lesson.id] || []) {
+        const zhTwRow = await db.prepare(
+          `SELECT regions_json FROM slide_translations WHERE slide_id=? AND lang='zh-TW'`
+        ).get(slide.id);
+        const existingST = await db.prepare(
+          'SELECT id FROM slide_translations WHERE slide_id=? AND lang=?'
+        ).get(slide.id, target_lang);
+        allSlides.push({
+          id: slide.id,
+          content_json: slide.content_json || null,
+          notes: slide.notes || null,
+          regions_json: zhTwRow?.regions_json || null,  // SOURCE from zh-TW
+          existing_st_id: existingST?.id || null,
+        });
       }
     }
 
-    // 3. Quiz — parallel in batches of 3
-    const translateQuiz = async (q) => {
-      try {
-        // Merge question_json + explanation into 1 LLM call
-        const combined = await model.generateContent(
-          `Translate from Traditional Chinese to ${langName}. Return JSON with two keys: "question_json" (translated JSON) and "explanation" (translated text).
-Input: {"question_json": ${q.question_json}, "explanation": ${JSON.stringify(q.explanation || '')}}
-Return only valid JSON.`
-        );
-        const raw = combined.response.text().trim().replace(/^```json\s*/, '').replace(/```$/, '').trim();
-        const parsed = JSON.parse(raw);
-        const translatedQ = typeof parsed.question_json === 'string' ? parsed.question_json : JSON.stringify(parsed.question_json);
-        const translatedExp = parsed.explanation || null;
-
-        const existingQT = await db.prepare('SELECT id FROM quiz_translations WHERE question_id=? AND lang=?').get(q.id, target_lang);
-        if (existingQT) {
-          await db.prepare('UPDATE quiz_translations SET question_json=?, explanation=?, translated_at=SYSTIMESTAMP, is_auto=1 WHERE id=?')
-            .run(translatedQ, translatedExp, existingQT.id);
-        } else {
-          await db.prepare('INSERT INTO quiz_translations (question_id, lang, question_json, explanation, is_auto) VALUES (?,?,?,?,1)')
-            .run(q.id, target_lang, translatedQ, translatedExp);
-        }
-      } catch (err) { console.warn(`[Translate] question ${q.id} failed:`, err.message); }
+    // Build the JSON payload sent to LLM for ONE slide — only include fields that have source text
+    const buildSlidePayload = (s) => {
+      const o = { id: s.id };
+      if (s.content_json) { try { o.content = JSON.parse(s.content_json); } catch { o.content = s.content_json; } }
+      if (s.notes) o.notes = s.notes;
+      if (s.regions_json) { try { o.regions = JSON.parse(s.regions_json); } catch { /* skip */ } }
+      return o;
     };
-    for (let i = 0; i < questions.length; i += CONCURRENCY) {
-      const batch = questions.slice(i, i + CONCURRENCY);
-      send('progress', { current: doneItems, total: totalItems, step: `翻譯題目 ${i + 1}-${Math.min(i + CONCURRENCY, questions.length)}/${questions.length}...` });
-      await Promise.all(batch.map(q => translateQuiz(q)));
+
+    // Extract translated fields from LLM response; throw if any expected field is missing
+    // so the slide falls through to single-retry (avoids wiping a field on partial LLM responses).
+    const extractSlideResult = (src, resp) => {
+      const out = { content: null, notes: null, regions: null };
+      if (src.content_json) {
+        if (resp?.content == null) throw new Error('missing content in response');
+        out.content = typeof resp.content === 'string' ? resp.content : JSON.stringify(resp.content);
+        try { JSON.parse(out.content); } catch { throw new Error('invalid content JSON'); }
+      }
+      if (src.notes) {
+        // notes can legitimately be a short/empty string — accept anything string-y
+        out.notes = typeof resp?.notes === 'string' ? resp.notes : (resp?.notes ? String(resp.notes) : null);
+      }
+      if (src.regions_json) {
+        if (resp?.regions == null) throw new Error('missing regions in response');
+        out.regions = typeof resp.regions === 'string' ? resp.regions : JSON.stringify(resp.regions);
+        try { JSON.parse(out.regions); } catch { throw new Error('invalid regions JSON'); }
+      }
+      return out;
+    };
+
+    // Full overwrite — null wipes existing (user wants fresh re-translate every run)
+    const writeSlideTranslation = async (slide, t) => {
+      if (slide.existing_st_id) {
+        await db.prepare(
+          `UPDATE slide_translations
+           SET content_json=?, notes=?, regions_json=?,
+               translated_at=SYSTIMESTAMP, is_auto=1
+           WHERE id=?`
+        ).run(t.content, t.notes, t.regions, slide.existing_st_id);
+      } else {
+        await db.prepare(
+          'INSERT INTO slide_translations (slide_id, lang, content_json, notes, regions_json, is_auto) VALUES (?,?,?,?,?,1)'
+        ).run(slide.id, target_lang, t.content, t.notes, t.regions);
+      }
+    };
+
+    // Shared slide-translation prompt header
+    const slidePromptHeader = `Translate from Traditional Chinese to ${langName}.
+Rules:
+- Do not translate product names, technical identifiers, or code-like tokens.
+- Keep JSON structure, keys, type fields, booleans, numbers, IDs, coords, and audio_url values unchanged.
+- For the "regions" object, only translate these string fields if present: label, narration, feedback, feedback_wrong, test_hint, explore_desc, slide_narration, slide_narration_test, slide_narration_explore, completion_message. Leave everything else (coords, id, correct, audio_url) untouched.
+- Only translate fields that appear in the input. Do not invent fields.`;
+
+    // Translate one slide (used for single-item batches and as fallback for failed multi-item batches)
+    const translateOneSlide = async (slide) => {
+      const payload = buildSlidePayload(slide);
+      if (Object.keys(payload).length === 1) { // only has id — nothing to translate
+        return { content: null, notes: null, regions: null };
+      }
+      const prompt = `${slidePromptHeader}
+
+Input (a single slide object):
+${JSON.stringify(payload)}
+
+Return a JSON object with the SAME "id" and translated fields. Return only valid JSON, no code fences.`;
+      const r = await model.generateContent(prompt);
+      const parsed = JSON.parse(stripFence(r.response.text()));
+      return extractSlideResult(slide, parsed);
+    };
+
+    // Translate a batch of N slides in one LLM call; on any failure, retry the batch one-by-one
+    const translateSlideBatch = async (batch) => {
+      if (batch.length === 1) {
+        try {
+          const t = await translateOneSlide(batch[0]);
+          await writeSlideTranslation(batch[0], t);
+          return 1;
+        } catch (e) {
+          console.warn(`[Translate] slide ${batch[0].id} failed:`, e.message);
+          return 0;
+        }
+      }
+      const payload = batch.map(buildSlidePayload);
+      const prompt = `${slidePromptHeader}
+
+Input is an array of ${batch.length} slide objects. Translate each one independently.
+
+Input:
+${JSON.stringify(payload)}
+
+Return a JSON array of ${batch.length} objects in the SAME order, each with the original "id" and translated fields. Return only valid JSON, no code fences.`;
+      let arr;
+      try {
+        const r = await model.generateContent(prompt);
+        arr = JSON.parse(stripFence(r.response.text()));
+        if (!Array.isArray(arr)) throw new Error('batch response not an array');
+        if (arr.length !== batch.length) throw new Error(`batch length mismatch: got ${arr.length}, want ${batch.length}`);
+      } catch (err) {
+        // Whole-batch failure — retry every slide singly
+        console.warn(`[Translate] batch of ${batch.length} slides failed (${err.message}), retrying one-by-one`);
+        let ok = 0;
+        for (const slide of batch) {
+          try {
+            const t = await translateOneSlide(slide);
+            await writeSlideTranslation(slide, t);
+            ok++;
+          } catch (e) { console.warn(`[Translate] slide ${slide.id} single retry failed:`, e.message); }
+        }
+        return ok;
+      }
+
+      // Per-slide apply; queue any item that's missing / malformed for single retry
+      const byId = new Map(arr.map(x => [Number(x?.id), x]));
+      const retryList = [];
+      let ok = 0;
+      for (const slide of batch) {
+        const resp = byId.get(Number(slide.id));
+        if (!resp) { console.warn(`[Translate] slide ${slide.id} missing in batch response`); retryList.push(slide); continue; }
+        try {
+          const t = extractSlideResult(slide, resp);
+          await writeSlideTranslation(slide, t);
+          ok++;
+        } catch (e) {
+          console.warn(`[Translate] slide ${slide.id} extract failed (${e.message}), queuing retry`);
+          retryList.push(slide);
+        }
+      }
+      if (retryList.length > 0) {
+        console.warn(`[Translate] batch partial (${ok}/${batch.length}), retrying ${retryList.length} singly`);
+        for (const slide of retryList) {
+          try {
+            const t = await translateOneSlide(slide);
+            await writeSlideTranslation(slide, t);
+            ok++;
+          } catch (e) { console.warn(`[Translate] slide ${slide.id} single retry failed:`, e.message); }
+        }
+      }
+      return ok;
+    };
+
+    // Quiz batch — same shape
+    const writeQuizTranslation = async (q, translatedQ, translatedExp) => {
+      const existingQT = await db.prepare('SELECT id FROM quiz_translations WHERE question_id=? AND lang=?').get(q.id, target_lang);
+      if (existingQT) {
+        await db.prepare('UPDATE quiz_translations SET question_json=?, explanation=?, translated_at=SYSTIMESTAMP, is_auto=1 WHERE id=?')
+          .run(translatedQ, translatedExp, existingQT.id);
+      } else {
+        await db.prepare('INSERT INTO quiz_translations (question_id, lang, question_json, explanation, is_auto) VALUES (?,?,?,?,1)')
+          .run(q.id, target_lang, translatedQ, translatedExp);
+      }
+    };
+
+    const translateOneQuiz = async (q) => {
+      const r = await model.generateContent(
+        `Translate from Traditional Chinese to ${langName}. Return JSON with two keys: "question_json" (translated JSON) and "explanation" (translated text). Do not translate product names. Keep JSON structure, keys, booleans, numbers, IDs unchanged.
+Input: {"question_json": ${q.question_json}, "explanation": ${JSON.stringify(q.explanation || '')}}
+Return only valid JSON, no code fences.`
+      );
+      const parsed = JSON.parse(stripFence(r.response.text()));
+      const translatedQ = typeof parsed.question_json === 'string' ? parsed.question_json : JSON.stringify(parsed.question_json);
+      const translatedExp = parsed.explanation || null;
+      await writeQuizTranslation(q, translatedQ, translatedExp);
+    };
+
+    const translateQuizBatch = async (batch) => {
+      if (batch.length === 1) {
+        try { await translateOneQuiz(batch[0]); return 1; }
+        catch (e) { console.warn(`[Translate] question ${batch[0].id} failed:`, e.message); return 0; }
+      }
+      const payload = batch.map(q => ({
+        id: q.id,
+        question: (() => { try { return JSON.parse(q.question_json); } catch { return q.question_json; } })(),
+        explanation: q.explanation || null,
+      }));
+      const prompt = `Translate from Traditional Chinese to ${langName}.
+Rules:
+- Do not translate product names or technical identifiers.
+- Keep JSON structure, keys, booleans, numbers, IDs unchanged.
+- Input is an array of ${batch.length} quiz question objects.
+
+Input:
+${JSON.stringify(payload)}
+
+Return a JSON array of ${batch.length} objects in the SAME order, each with original "id" and translated "question" and "explanation". Return only valid JSON, no code fences.`;
+      try {
+        const r = await model.generateContent(prompt);
+        const arr = JSON.parse(stripFence(r.response.text()));
+        if (!Array.isArray(arr) || arr.length !== batch.length) throw new Error('quiz batch length mismatch');
+        const byId = new Map(arr.map(x => [Number(x?.id), x]));
+        let ok = 0;
+        for (const q of batch) {
+          const resp = byId.get(Number(q.id));
+          if (!resp) break;
+          const translatedQ = typeof resp.question === 'string' ? resp.question : JSON.stringify(resp.question);
+          const translatedExp = resp.explanation || null;
+          await writeQuizTranslation(q, translatedQ, translatedExp);
+          ok++;
+        }
+        if (ok === batch.length) return ok;
+        for (const q of batch.slice(ok)) {
+          try { await translateOneQuiz(q); ok++; }
+          catch (e) { console.warn(`[Translate] question ${q.id} single retry failed:`, e.message); }
+        }
+        return ok;
+      } catch (err) {
+        console.warn(`[Translate] quiz batch of ${batch.length} failed (${err.message}), retrying one-by-one`);
+        let ok = 0;
+        for (const q of batch) {
+          try { await translateOneQuiz(q); ok++; }
+          catch (e) { console.warn(`[Translate] question ${q.id} single retry failed:`, e.message); }
+        }
+        return ok;
+      }
+    };
+
+    // Chunk helpers
+    const chunk = (arr, size) => {
+      const out = [];
+      for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+      return out;
+    };
+    const slideBatches = chunk(allSlides, SLIDE_BATCH);
+    const quizBatches = chunk(questions, QUIZ_BATCH);
+
+    // Run slide batches + quiz batches in parallel with shared CONCURRENCY limiter
+    const limit = pLimit(CONCURRENCY);
+    let slidesDoneCount = 0;
+    let quizDoneCount = 0;
+
+    const slideJobs = slideBatches.map(batch => limit(async () => {
+      await translateSlideBatch(batch);
+      slidesDoneCount += batch.length;
       doneItems += batch.length;
-    }
+      send('progress', {
+        current: doneItems, total: totalItems,
+        step: `翻譯投影片 ${slidesDoneCount}/${totalSlides}...`,
+        slides_done: slidesDoneCount, slides_total: totalSlides,
+      });
+    }));
+
+    const quizJobs = quizBatches.map(batch => limit(async () => {
+      await translateQuizBatch(batch);
+      quizDoneCount += batch.length;
+      doneItems += batch.length;
+      send('progress', {
+        current: doneItems, total: totalItems,
+        step: `翻譯題目 ${quizDoneCount}/${questions.length}...`,
+      });
+    }));
+
+    await Promise.all([...slideJobs, ...quizJobs]);
 
     send('done', { ok: true, translated: { lessons: lessons.length, slides: totalSlides, questions: questions.length } });
   } catch (e) {
@@ -3634,18 +3818,24 @@ Return only valid JSON.`
   }
 });
 
-// POST /api/training/courses/:id/generate-lang-tts — generate TTS for all translated hotspot slides
+// POST /api/training/courses/:id/generate-lang-tts — SSE streaming, parallel TTS generation
 router.post('/courses/:id/generate-lang-tts', loadCoursePermission, requirePermission('owner', 'admin', 'develop'), async (req, res) => {
-  try {
-    const { target_lang } = req.body;
-    if (!target_lang || target_lang === 'zh-TW') return res.status(400).json({ error: 'target_lang required (en/vi)' });
+  const { target_lang } = req.body;
+  if (!target_lang || target_lang === 'zh-TW') return res.status(400).json({ error: 'target_lang required (en/vi)' });
 
-    // Get all slides with translations
+  // SSE setup
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders?.();
+  const send = (type, data) => { res.write(`data: ${JSON.stringify({ type, ...data })}\n\n`); };
+
+  try {
     const lessons = await db.prepare('SELECT id FROM course_lessons WHERE course_id=? ORDER BY sort_order').all(req.courseId);
     const ttsModel = await db.prepare(
       `SELECT api_key_enc FROM llm_models WHERE model_role='tts' AND is_active=1 ORDER BY sort_order FETCH FIRST 1 ROWS ONLY`
     ).get();
-    if (!ttsModel) return res.status(500).json({ error: 'TTS 模型未設定' });
+    if (!ttsModel) { send('error', { error: 'TTS 模型未設定' }); return res.end(); }
 
     const { decryptKey } = require('../services/llmKeyService');
     const ttsApiKey = decryptKey(ttsModel.api_key_enc);
@@ -3666,7 +3856,7 @@ router.post('/courses/:id/generate-lang-tts', loadCoursePermission, requirePermi
           });
           if (r.status === 429) {
             console.warn(`[TTS batch] Rate limited (429) for ${fileId}, attempt ${attempt + 1}`);
-            if (attempt < retries) continue; // retry
+            if (attempt < retries) continue;
             return null;
           }
           if (!r.ok) {
@@ -3675,10 +3865,7 @@ router.post('/courses/:id/generate-lang-tts', loadCoursePermission, requirePermi
             return null;
           }
           const json = await r.json();
-          if (!json.audioContent) {
-            console.error(`[TTS batch] Empty audioContent for ${fileId}`);
-            return null;
-          }
+          if (!json.audioContent) { console.error(`[TTS batch] Empty audioContent for ${fileId}`); return null; }
           const buf = Buffer.from(json.audioContent, 'base64');
           if (buf.length < 100) { console.error(`[TTS batch] Audio too short for ${fileId}: ${buf.length}b`); return null; }
           const fn = `tts_${target_lang}_${fileId}_${Date.now()}.mp3`;
@@ -3692,37 +3879,51 @@ router.post('/courses/:id/generate-lang-tts', loadCoursePermission, requirePermi
       return null;
     };
 
-    let generated = 0, failed = 0;
+    // ─── Phase 1: preload all slides and build a flat task list ───────────────
+    send('status', { message: '掃描投影片...' });
+    const slideEntries = []; // { transId, blocks, notesText, notesUrl, contentChanged }
+    const tasks = [];        // { kind, text, fileId, apply: (url) => void }
+
     for (const lesson of lessons) {
       const slides = await db.prepare('SELECT id FROM course_slides WHERE lesson_id=? ORDER BY sort_order').all(lesson.id);
       for (const slide of slides) {
-        const trans = await db.prepare('SELECT id, content_json, notes, audio_url FROM slide_translations WHERE slide_id=? AND lang=?').get(slide.id, target_lang);
+        const trans = await db.prepare(
+          'SELECT id, content_json, notes, audio_url FROM slide_translations WHERE slide_id=? AND lang=?'
+        ).get(slide.id, target_lang);
         if (!trans) continue;
 
-        // Slide-level audio (AudioPanel TTS from translated notes)
-        if (trans.notes) {
-          const url = await genAudio(trans.notes, `slide_${slide.id}_notes`);
-          if (url) {
-            await db.prepare('UPDATE slide_translations SET audio_url=? WHERE id=?').run(url, trans.id);
-            generated++;
-          }
+        const entry = { transId: trans.id, blocks: null, notesUrl: null, contentChanged: false };
+        slideEntries.push(entry);
+
+        // Slide-level notes audio
+        if (trans.notes && trans.notes.trim()) {
+          tasks.push({
+            kind: 'slide_notes',
+            text: trans.notes,
+            fileId: `slide_${slide.id}_notes`,
+            apply: (url) => { entry.notesUrl = url; },
+          });
         }
 
         if (!trans.content_json) continue;
         let blocks;
         try { blocks = JSON.parse(trans.content_json); } catch { continue; }
-        let changed = false;
+        entry.blocks = blocks;
 
         for (const tb of blocks) {
           if (tb.type !== 'hotspot') continue;
-          // Intro narrations — always regenerate (overwrite old zh-TW audio URLs)
+          // Intro narrations
           for (const f of ['slide_narration', 'slide_narration_test', 'slide_narration_explore']) {
             if (tb[f]) {
-              const url = await genAudio(tb[f], `${slide.id}_${f}`);
-              if (url) { tb[f + '_audio'] = url; changed = true; }
+              tasks.push({
+                kind: 'intro',
+                text: tb[f],
+                fileId: `${slide.id}_${f}`,
+                apply: (url) => { tb[f + '_audio'] = url; entry.contentChanged = true; },
+              });
             }
           }
-          // Region narrations — always regenerate
+          // Region narrations
           if (tb.regions) {
             for (const reg of tb.regions.filter(r => r.correct)) {
               for (const p of [
@@ -3731,28 +3932,63 @@ router.post('/courses/:id/generate-lang-tts', loadCoursePermission, requirePermi
                 { text: 'explore_desc', audio: 'explore_audio_url' },
               ]) {
                 if (reg[p.text]) {
-                  const url = await genAudio(reg[p.text], `${slide.id}_${p.text}_${reg.id}`);
-                  if (url) { reg[p.audio] = url; changed = true; }
+                  tasks.push({
+                    kind: 'region',
+                    text: reg[p.text],
+                    fileId: `${slide.id}_${p.text}_${reg.id}`,
+                    apply: (url) => { reg[p.audio] = url; entry.contentChanged = true; },
+                  });
                 }
               }
             }
           }
-          if (changed) generated++;
         }
-
-        if (changed) {
-          await db.prepare('UPDATE slide_translations SET content_json=? WHERE id=?').run(JSON.stringify(blocks), trans.id);
-        }
-        // Throttle between slides to avoid Google TTS rate limiting
-        await delay(300);
       }
     }
 
-    console.log(`[TTS batch] ${target_lang}: generated=${generated} failed=${failed}`);
-    res.json({ ok: true, generated });
+    const total = tasks.length;
+    send('progress', { current: 0, total, step: `準備生成 ${total} 個語音檔...` });
+
+    if (total === 0) {
+      send('done', { ok: true, generated: 0, failed: 0 });
+      return res.end();
+    }
+
+    // ─── Phase 2: run all TTS tasks in parallel with pLimit(10) ───────────────
+    const TTS_CONCURRENCY = 10;
+    const limit = pLimit(TTS_CONCURRENCY);
+    let done = 0, generated = 0, failed = 0;
+
+    await Promise.all(tasks.map(task => limit(async () => {
+      const url = await genAudio(task.text, task.fileId);
+      if (url) { task.apply(url); generated++; }
+      else { failed++; }
+      done++;
+      send('progress', {
+        current: done, total,
+        step: `生成語音 ${done}/${total}(成功 ${generated},失敗 ${failed})...`,
+        generated, failed,
+      });
+    })));
+
+    // ─── Phase 3: flush DB updates per slide ──────────────────────────────────
+    send('status', { message: '寫入資料庫...' });
+    for (const entry of slideEntries) {
+      if (entry.notesUrl) {
+        await db.prepare('UPDATE slide_translations SET audio_url=? WHERE id=?').run(entry.notesUrl, entry.transId);
+      }
+      if (entry.contentChanged && entry.blocks) {
+        await db.prepare('UPDATE slide_translations SET content_json=? WHERE id=?').run(JSON.stringify(entry.blocks), entry.transId);
+      }
+    }
+
+    console.log(`[TTS batch] ${target_lang}: generated=${generated} failed=${failed} total=${total}`);
+    send('done', { ok: true, generated, failed, total });
+    res.end();
   } catch (e) {
     console.error('[Training] generate-lang-tts:', e.message);
-    res.status(500).json({ error: e.message });
+    try { send('error', { error: e.message }); } catch {}
+    try { res.end(); } catch {}
   }
 });
 
@@ -3873,7 +4109,7 @@ router.post('/ai/analyze-screenshot', upload.single('screenshot'), async (req, r
     const flashRow = await db.prepare(
       `SELECT api_model FROM llm_models WHERE model_role='chat' AND is_active=1 AND provider_type='gemini' ORDER BY sort_order FETCH FIRST 1 ROWS ONLY`
     ).get();
-    const model = genAI.getGenerativeModel({ model: flashRow?.api_model || 'gemini-2.0-flash' });
+    const model = genAI.getGenerativeModel({ model: flashRow?.api_model || process.env.GEMINI_MODEL_FLASH || 'gemini-3-flash-preview' });
 
     const clickInfo = clickCoords ? `使用者剛點擊了位於 (x:${clickCoords.x}px, y:${clickCoords.y}px) 的元素。` : '';
 
@@ -3952,7 +4188,7 @@ router.post('/slides/:sid/generate-narration', async (req, res) => {
     }
     slideData = slide;
     checkResult = check;
-    flashModel = flashRow?.api_model || 'gemini-2.0-flash';
+    flashModel = flashRow?.api_model || process.env.GEMINI_MODEL_FLASH || 'gemini-3-flash-preview';
   } catch (e) {
     return res.status(500).json({ error: e.message });
   }
@@ -4210,7 +4446,7 @@ router.post('/ai/generate-outline', async (req, res) => {
     const flashRow = await db.prepare(
       `SELECT api_model FROM llm_models WHERE model_role='chat' AND is_active=1 AND provider_type='gemini' ORDER BY sort_order FETCH FIRST 1 ROWS ONLY`
     ).get();
-    const model = genAI.getGenerativeModel({ model: flashRow?.api_model || 'gemini-2.0-flash' });
+    const model = genAI.getGenerativeModel({ model: flashRow?.api_model || process.env.GEMINI_MODEL_FLASH || 'gemini-3-flash-preview' });
 
     const prompt = `根據以下系統操作說明文件，拆解成詳細的操作步驟清單。
 ${system_url ? `目標系統 URL: ${system_url}` : ''}
@@ -4265,7 +4501,7 @@ router.post('/ai/batch-analyze', upload.array('screenshots', 50), async (req, re
     const flashRow = await db.prepare(
       `SELECT api_model FROM llm_models WHERE model_role='chat' AND is_active=1 AND provider_type='gemini' ORDER BY sort_order FETCH FIRST 1 ROWS ONLY`
     ).get();
-    const model = genAI.getGenerativeModel({ model: flashRow?.api_model || 'gemini-2.0-flash' });
+    const model = genAI.getGenerativeModel({ model: flashRow?.api_model || process.env.GEMINI_MODEL_FLASH || 'gemini-3-flash-preview' });
 
     // Parallel analysis in batches of 3
     const BATCH = 3;
@@ -4554,7 +4790,7 @@ router.post('/recording/:sessionId/analyze-step/:stepId', async (req, res) => {
       const flashRow = await db.prepare(
         `SELECT api_model FROM llm_models WHERE model_role='chat' AND is_active=1 AND provider_type='gemini' ORDER BY sort_order FETCH FIRST 1 ROWS ONLY`
       ).get();
-      modelName = flashRow?.api_model || 'gemini-2.0-flash';
+      modelName = flashRow?.api_model || process.env.GEMINI_MODEL_FLASH || 'gemini-3-flash-preview';
     }
     const model = genAI.getGenerativeModel({ model: modelName });
 
@@ -4617,7 +4853,7 @@ router.post('/recording/:sessionId/analyze', async (req, res) => {
     const flashRow = await db.prepare(
       `SELECT api_model FROM llm_models WHERE model_role='chat' AND is_active=1 AND provider_type='gemini' ORDER BY sort_order FETCH FIRST 1 ROWS ONLY`
     ).get();
-    const model = genAI.getGenerativeModel({ model: flashRow?.api_model || 'gemini-2.0-flash' });
+    const model = genAI.getGenerativeModel({ model: flashRow?.api_model || process.env.GEMINI_MODEL_FLASH || 'gemini-3-flash-preview' });
 
     // Parallel analysis in batches of 3
     const BATCH = 3;
@@ -5784,7 +6020,7 @@ router.post('/slides/:sid/ai-analyze', async (req, res) => {
       const flashRow = await db.prepare(
         `SELECT api_model FROM llm_models WHERE model_role='chat' AND is_active=1 AND provider_type='gemini' ORDER BY sort_order FETCH FIRST 1 ROWS ONLY`
       ).get();
-      modelName = flashRow?.api_model || 'gemini-2.0-flash';
+      modelName = flashRow?.api_model || process.env.GEMINI_MODEL_FLASH || 'gemini-3-flash-preview';
     }
     const model = genAI.getGenerativeModel({ model: modelName });
 
