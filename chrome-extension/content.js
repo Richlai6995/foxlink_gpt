@@ -460,16 +460,22 @@ function startAnnotationMode(screenshotDataUrl) {
   canvas.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;cursor:crosshair;';
   canvasWrap.appendChild(canvas);
 
-  // Text input overlay (hidden until text tool)
-  const textInput = document.createElement('input');
-  textInput.type = 'text';
-  textInput.placeholder = '輸入標註文字，按 Enter 確認';
+  // Text input overlay (hidden until text tool) — multi-line textarea
+  const textInput = document.createElement('textarea');
+  textInput.placeholder = '輸入標註文字\nShift+Enter 換行 / Enter 確認';
+  textInput.rows = 2;
   textInput.style.cssText = `
     position: absolute; display: none; z-index: 20;
-    background: rgba(0,0,0,0.7); color: #fff; border: 2px solid #3b82f6;
+    background: rgba(0,0,0,0.75); color: #fff; border: 2px solid #3b82f6;
     padding: 4px 8px; font-size: 16px; border-radius: 4px; outline: none;
-    min-width: 150px; font-family: inherit;
+    min-width: 180px; min-height: 50px; font-family: inherit; resize: both;
+    line-height: 1.3; white-space: pre;
   `;
+  // Auto-resize to fit content as user types
+  textInput.addEventListener('input', () => {
+    textInput.style.height = 'auto';
+    textInput.style.height = (textInput.scrollHeight + 4) + 'px';
+  });
   canvasWrap.appendChild(textInput);
 
   overlay.appendChild(canvasWrap);
@@ -651,11 +657,14 @@ function startAnnotationMode(screenshotDataUrl) {
           break;
         }
         case 'text': {
-          // Approximate bounding box from text position — use distToPct (distances)
+          // Approximate bounding box from text position — multi-line aware
           const fontSize = (a.strokeWidth || 3) * 5 + 8;
-          const wPct = distToPct(fontSize * (a.label || '').length * 0.6, true);
-          const hPct = distToPct(fontSize, false);
-          if (xPct >= c.x - 1 && xPct <= c.x + wPct + 1 && yPct >= c.y - hPct && yPct <= c.y + 1) return a;
+          const lines = String(a.label || '').split('\n');
+          const longest = lines.reduce((m, ln) => Math.max(m, ln.length), 0);
+          const lineHeight = fontSize * 1.25;
+          const wPct = distToPct(fontSize * longest * 0.6, true);
+          const hPct = distToPct(lineHeight * lines.length, false);
+          if (xPct >= c.x - 1 && xPct <= c.x + wPct + 1 && yPct >= c.y - distToPct(fontSize, false) && yPct <= c.y + hPct - distToPct(fontSize, false) + 1) return a;
           break;
         }
         case 'freehand': {
@@ -875,13 +884,24 @@ function startAnnotationMode(screenshotDataUrl) {
         const x = fromPct(a.coords.x, true);
         const y = fromPct(a.coords.y, false);
         const fontSize = (a.strokeWidth || 3) * 5 + 8;
+        const lineHeight = Math.round(fontSize * 1.25);
         ctx.font = `bold ${fontSize}px sans-serif`;
-        // Text background
-        const metrics = ctx.measureText(a.label);
+        ctx.textBaseline = 'alphabetic';
+        const lines = String(a.label || '').split('\n');
+        // Text background — width = widest line, height = N lines
+        let maxW = 0;
+        for (const ln of lines) maxW = Math.max(maxW, ctx.measureText(ln).width);
+        const bgX = x - 2;
+        const bgY = y - fontSize + 2;
+        const bgW = maxW + 4;
+        const bgH = (lines.length - 1) * lineHeight + fontSize + 4;
         ctx.fillStyle = 'rgba(0,0,0,0.5)';
-        ctx.fillRect(x - 2, y - fontSize + 2, metrics.width + 4, fontSize + 4);
+        ctx.fillRect(bgX, bgY, bgW, bgH);
+        // Each line
         ctx.fillStyle = a.color;
-        ctx.fillText(a.label, x, y);
+        for (let i = 0; i < lines.length; i++) {
+          ctx.fillText(lines[i], x, y + i * lineHeight);
+        }
         break;
       }
       case 'freehand': {
@@ -1195,24 +1215,32 @@ function startAnnotationMode(screenshotDataUrl) {
     redrawAll();
   });
 
-  // Text input handler
+  // Text input handler — Enter submit, Shift+Enter newline, Esc cancel
   textInput.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && textInput.value.trim()) {
-      annotations.push({
-        id: 'a' + Date.now(), type: 'text',
-        coords: textInput._coords,
-        color: currentColor, strokeWidth, label: textInput.value.trim(),
-        purpose: 'both', visible: true
-      });
-      undoStack = [];
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      // Trim trailing blank lines but keep internal newlines
+      const text = textInput.value.replace(/\s+$/, '');
+      if (text) {
+        annotations.push({
+          id: 'a' + Date.now(), type: 'text',
+          coords: textInput._coords,
+          color: currentColor, strokeWidth, label: text,
+          purpose: 'both', visible: true
+        });
+        undoStack = [];
+        redrawAll();
+      }
       textInput.style.display = 'none';
       textInput.value = '';
-      redrawAll();
-    }
-    if (e.key === 'Escape') {
+      textInput.style.height = '';
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
       textInput.style.display = 'none';
       textInput.value = '';
+      textInput.style.height = '';
     }
+    // Shift+Enter falls through → textarea inserts newline natively
   });
 
   // ── 9. Undo / Redo / Clear ──

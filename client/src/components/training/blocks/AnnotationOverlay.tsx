@@ -269,7 +269,9 @@ const AnnotationOverlay: React.FC<AnnotationOverlayProps> = ({
             );
           }
 
-          case 'text':
+          case 'text': {
+            const textLines = String(a.label || '').split('\n');
+            const textLh = 2.2 * 1.25;
             return (
               <text
                 key={key}
@@ -286,9 +288,12 @@ const AnnotationOverlay: React.FC<AnnotationOverlayProps> = ({
                 onClick={handleClick}
                 style={{ cursor: interactive ? 'pointer' : undefined }}
               >
-                {a.label}
+                {textLines.map((ln, i) => (
+                  <tspan key={i} x={a.coords.x} dy={i === 0 ? 0 : textLh}>{ln || ' '}</tspan>
+                ))}
               </text>
             );
+          }
 
           case 'freehand': {
             if (!a.coords.points?.length) return null;

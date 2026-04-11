@@ -514,12 +514,18 @@ export default function ScreenshotAnnotator({ imageUrl, annotations: initial, st
         )
       case 'text': {
         const fs = a.strokeWidth || 2 // reuse strokeWidth as fontSize for text
+        const lh = fs * 1.25 // line height in viewBox-Y units
+        const lines = String(a.label || '').split('\n')
         return <text key={a.id} onPointerDown={e => startDrag(e, a)} style={{ cursor }}
           x={a.coords.x} y={a.coords.y}
           transform={`translate(${a.coords.x} ${a.coords.y}) scale(${1 / imgAspect} 1) translate(${-a.coords.x} ${-a.coords.y})`}
           fill={a.color || '#eab308'} fontSize={fs} fontWeight="600"
           fontFamily="sans-serif" stroke="#000" strokeWidth="0.12" paintOrder="stroke"
-          textDecoration={isSelected ? 'underline' : undefined}>{a.label}</text>
+          textDecoration={isSelected ? 'underline' : undefined}>
+          {lines.map((ln, i) => (
+            <tspan key={i} x={a.coords.x} dy={i === 0 ? 0 : lh}>{ln || ' '}</tspan>
+          ))}
+        </text>
       }
       case 'freehand': {
         if (!a.coords.points?.length) return null
@@ -673,16 +679,27 @@ export default function ScreenshotAnnotator({ imageUrl, annotations: initial, st
               </div>
             )}
 
-            {/* Label (for number, text, arrow) */}
+            {/* Label (for number, text, arrow) — text type uses multi-line textarea */}
             {(selectedAnn.type === 'number' || selectedAnn.type === 'text' || selectedAnn.type === 'arrow') && (
-              <div className="flex items-center gap-1">
-                <span className="text-[10px] text-gray-400">
+              <div className="flex items-start gap-1">
+                <span className="text-[10px] text-gray-400 mt-0.5">
                   {selectedAnn.type === 'text' ? '內容:' : '標籤:'}
                 </span>
-                <input value={selectedAnn.label || ''} onChange={e => updateSelected({ label: e.target.value })}
-                  className="bg-gray-800 border border-gray-600 rounded px-1.5 py-0.5 text-xs text-white w-28"
-                  placeholder={selectedAnn.type === 'text' ? '文字內容...' : '標籤...'}
-                  onClick={e => e.stopPropagation()} />
+                {selectedAnn.type === 'text' ? (
+                  <textarea value={selectedAnn.label || ''}
+                    onChange={e => updateSelected({ label: e.target.value })}
+                    rows={2}
+                    className="bg-gray-800 border border-gray-600 rounded px-1.5 py-0.5 text-xs text-white w-40 resize-y leading-tight"
+                    style={{ minHeight: 36, fontFamily: 'inherit' }}
+                    placeholder={'文字內容...\nShift+Enter 換行'}
+                    onClick={e => e.stopPropagation()}
+                    onKeyDown={e => e.stopPropagation()} />
+                ) : (
+                  <input value={selectedAnn.label || ''} onChange={e => updateSelected({ label: e.target.value })}
+                    className="bg-gray-800 border border-gray-600 rounded px-1.5 py-0.5 text-xs text-white w-28"
+                    placeholder="標籤..."
+                    onClick={e => e.stopPropagation()} />
+                )}
               </div>
             )}
 
@@ -810,15 +827,20 @@ export default function ScreenshotAnnotator({ imageUrl, annotations: initial, st
               top: `${textInput.y}%`,
               transform: 'translate(-4px, -12px)',
             }}>
-              <div className="flex items-center gap-1 bg-gray-900 rounded-lg shadow-lg border border-gray-600 p-1">
-                <input autoFocus value={textValue} onChange={e => setTextValue(e.target.value)}
+              <div className="flex items-start gap-1 bg-gray-900 rounded-lg shadow-lg border border-gray-600 p-1">
+                <textarea autoFocus value={textValue} onChange={e => setTextValue(e.target.value)}
                   onKeyDown={e => {
-                    if (e.key === 'Enter') confirmText()
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault()
+                      confirmText()
+                    }
                     if (e.key === 'Escape') { setTextInput(null); setTextValue('') }
                     e.stopPropagation()
                   }}
-                  className="bg-gray-800 border border-gray-600 rounded px-2 py-1 text-sm text-white w-40"
-                  placeholder="輸入文字..." />
+                  rows={2}
+                  className="bg-gray-800 border border-gray-600 rounded px-2 py-1 text-sm text-white w-48 resize-y leading-tight"
+                  style={{ minHeight: 44, fontFamily: 'inherit' }}
+                  placeholder={'輸入文字...\nShift+Enter 換行'} />
                 <button onClick={confirmText}
                   className="p-1 rounded bg-blue-600 text-white hover:bg-blue-500">
                   <Check size={14} />
