@@ -43,13 +43,23 @@ export default function HotspotEditor({ block, onChange, courseId, slideId, bloc
 
   const regions: Region[] = block.regions || []
 
+  // ⚠️ Refs for block + onChange — the paste listener below is mounted once (deps: courseId)
+  // and captures closures on mount. Without refs, pasting after any drag/edit would
+  // commit a STALE block, wiping out all user edits since mount.
+  const blockRef = useRef(block)
+  const onChangeRef = useRef(onChange)
+  useEffect(() => { blockRef.current = block }, [block])
+  useEffect(() => { onChangeRef.current = onChange }, [onChange])
+
   const uploadImageFile = async (file: File | Blob, filename?: string) => {
     try {
       setUploading(true)
       const form = new FormData()
       form.append('file', file, filename || 'pasted_image.png')
       const res = await api.post(`/training/courses/${courseId}/upload`, form)
-      onChange({ ...block, image: res.data.url })
+      // Read from refs so we always merge against the LATEST block/onChange,
+      // not whatever was captured in a stale closure.
+      onChangeRef.current({ ...blockRef.current, image: res.data.url })
     } catch (err) { console.error(err) }
     finally { setUploading(false) }
   }
@@ -75,6 +85,7 @@ export default function HotspotEditor({ block, onChange, courseId, slideId, bloc
     }
     document.addEventListener('paste', handlePaste)
     return () => document.removeEventListener('paste', handlePaste)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [courseId])
 
   // Convert mouse event to % coords on the image
