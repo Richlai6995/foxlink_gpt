@@ -839,22 +839,83 @@ export default function HotspotEditor({ block, onChange, courseId, slideId, bloc
                 { textField: 'test_hint', audioField: 'test_audio_url', prefix: 'test_hint_' },
                 { textField: 'explore_desc', audioField: 'explore_audio_url', prefix: 'explore_desc_' },
               ]
-              const hasPending = correctRegs.some((r: any) => pairs.some(p => r[p.textField] && !r[p.audioField]))
-              if (!hasPending) return alert('所有語音已生成完畢')
-              setTtsLoading('batch')
-              try {
-                for (const r of correctRegs) {
-                  for (const p of pairs) {
-                    if ((r as any)[p.textField] && !(r as any)[p.audioField]) {
-                      const res = await api.post(`/training/slides/${slideId}/region-tts`, {
-                        block_index: blockIdx ?? 0, region_id: `${p.prefix}${r.id}`, text: (r as any)[p.textField]
-                      })
-                      updateRegion(r.id, { [p.audioField]: res.data.audio_url } as any)
-                    }
+              // Slide-level (block) intro narrations — also covered by "一鍵生成"
+              const blockLevelPairs = [
+                { textField: 'slide_narration', audioField: 'slide_narration_audio', ttsId: 'intro_guided' },
+                { textField: 'slide_narration_test', audioField: 'slide_narration_test_audio', ttsId: 'intro_test' },
+                { textField: 'slide_narration_explore', audioField: 'slide_narration_explore_audio', ttsId: 'intro_explore' },
+              ]
+              // Build task list
+              type Task = { level: 'block' | 'region'; regionId?: string; audioField: string; text: string; ttsId: string }
+              const tasks: Task[] = []
+              // 1. Block-level intros
+              for (const bp of blockLevelPairs) {
+                if ((block as any)[bp.textField] && !(block as any)[bp.audioField]) {
+                  tasks.push({ level: 'block', audioField: bp.audioField, text: (block as any)[bp.textField], ttsId: bp.ttsId })
+                }
+              }
+              // 2. Region-level narrations
+              for (const r of correctRegs) {
+                for (const p of pairs) {
+                  if ((r as any)[p.textField] && !(r as any)[p.audioField]) {
+                    tasks.push({
+                      level: 'region',
+                      regionId: r.id,
+                      audioField: p.audioField,
+                      text: (r as any)[p.textField],
+                      ttsId: `${p.prefix}${r.id}`,
+                    })
                   }
                 }
-              } catch (e: any) { alert(e.response?.data?.error || 'TTS 批次生成失敗') }
-              finally { setTtsLoading(null) }
+              }
+              if (tasks.length === 0) return alert('所有語音已生成完畢')
+              setTtsLoading('batch')
+              // Accumulate URLs per region (and block-level) in local maps, commit once at end.
+              // (Calling updateRegion/onChange inside the loop races: each call merges against
+              //  the previous parent render, so later writes stomp earlier ones.)
+              const regionUpdates: Record<string, any> = {}
+              const blockUpdates: Record<string, string> = {}
+              let okCount = 0, failCount = 0
+              const failed: string[] = []
+              for (const t of tasks) {
+                // Per-task try/catch — one failure must not stop the rest
+                try {
+                  const res = await api.post(`/training/slides/${slideId}/region-tts`, {
+                    block_index: blockIdx ?? 0, region_id: t.ttsId, text: t.text,
+                  })
+                  if (res.data?.audio_url) {
+                    if (t.level === 'block') {
+                      blockUpdates[t.audioField] = res.data.audio_url
+                    } else if (t.regionId) {
+                      if (!regionUpdates[t.regionId]) regionUpdates[t.regionId] = {}
+                      regionUpdates[t.regionId][t.audioField] = res.data.audio_url
+                    }
+                    okCount++
+                  } else {
+                    failCount++
+                    failed.push(t.ttsId)
+                  }
+                } catch (e: any) {
+                  failCount++
+                  failed.push(t.ttsId)
+                  console.warn('[Batch TTS] failed:', t.ttsId, e.response?.status || e.message)
+                }
+                // Throttle to avoid overwhelming the TTS service
+                await new Promise(r => setTimeout(r, 300))
+              }
+              // Single commit: merge block-level + region-level audio URLs in one onChange
+              const hasBlockUpdates = Object.keys(blockUpdates).length > 0
+              const hasRegionUpdates = Object.keys(regionUpdates).length > 0
+              if (hasBlockUpdates || hasRegionUpdates) {
+                const newRegions = hasRegionUpdates
+                  ? regions.map(r => regionUpdates[r.id] ? { ...r, ...regionUpdates[r.id] } : r)
+                  : regions
+                onChange({ ...block, ...blockUpdates, regions: newRegions })
+              }
+              setTtsLoading(null)
+              if (failCount > 0) {
+                alert(`批次 TTS 完成：${okCount} 成功，${failCount} 失敗\n失敗的項目：${failed.slice(0, 5).join(', ')}${failed.length > 5 ? '...' : ''}\n\n可點擊個別項目旁的 TTS 按鈕重試失敗的。`)
+              }
             }}
             disabled={ttsLoading === 'batch'}
             className="w-full flex items-center justify-center gap-1.5 text-[11px] font-medium px-3 py-1.5 rounded-lg transition disabled:opacity-50"
