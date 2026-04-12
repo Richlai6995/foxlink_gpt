@@ -2201,7 +2201,7 @@ module.exports = [
     sort_order: 27,
     icon: 'BookOpen',
     icon_color: 'text-violet-500',
-    last_modified: '2026-04-10',
+    last_modified: '2026-04-12',
     title: '教育訓練管理使用手冊',
     sidebar_label: '教材開發',
     blocks: [
