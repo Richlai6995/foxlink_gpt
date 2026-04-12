@@ -1,0 +1,39 @@
+# Webex Webhook Ingress — 對外開放，只接受 POST /api/webex/webhook
+# 安全性由 application 層 HMAC 驗簽保護（accessControl middleware + webex.js signature check）
+# 這是 ingress 層安全網：即使 Express 掛了，外網也只能碰這條路徑
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: foxlink-gpt-webhook
+  namespace: foxlink
+  annotations:
+    # 小 body（webhook payload 很小）
+    nginx.ingress.kubernetes.io/proxy-body-size: "1m"
+    # 短 timeout（Webex 要求 15s 內回 200）
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "30"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "30"
+    # 只允許 POST，其他 method 回 403
+    nginx.ingress.kubernetes.io/server-snippet: |
+      location = /api/webex/webhook {
+        limit_except POST {
+          deny all;
+        }
+        proxy_pass http://upstream_balancer;
+      }
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - flgpt.foxlink.com.tw
+      secretName: flgpt-tls
+  rules:
+    - host: flgpt.foxlink.com.tw
+      http:
+        paths:
+          - path: /api/webex/webhook
+            pathType: Exact
+            backend:
+              service:
+                name: foxlink-gpt
+                port:
+                  number: 3007

@@ -14,12 +14,30 @@ const { init } = require('./database-oracle');
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-app.use(cors());
+// ── CORS ──
+const allowedOrigins = (process.env.CORS_ALLOWED_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean);
+app.use(cors(
+  allowedOrigins.length === 0
+    ? {} // no restriction (backward compat / dev)
+    : {
+        origin: (origin, cb) => {
+          // No origin = non-browser (curl / webhook / server-to-server) → allow
+          if (!origin || allowedOrigins.includes(origin)) return cb(null, true);
+          cb(new Error('CORS blocked'));
+        },
+        credentials: true,
+      }
+));
+
 app.use(express.json({
   limit: '100mb',
   verify: (req, _res, buf) => { req.rawBody = buf; }, // for Webex HMAC verification
 }));
 app.use(express.urlencoded({ limit: '100mb', extended: true }));
+
+// ── External Access Control ──
+const { createAccessControl } = require('./middleware/accessControl');
+app.use(createAccessControl());
 
 // Serve uploaded files statically
 const UPLOAD_DIR = process.env.UPLOAD_DIR

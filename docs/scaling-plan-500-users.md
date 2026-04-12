@@ -248,7 +248,73 @@ ORA_POOL_INCREMENT=5
 
 ---
 
-## 8. 後續追蹤
+## 8. 外網存取控制
+
+### 背景
+
+為 Webex webhook 開通對外 port 後，整站變成外網可存取。需限制為「只有 webhook 能從外網進來」。
+
+### 架構：雙層防禦
+
+```
+外網請求 → [Ingress 層] → [Express middleware 層] → 路由
+              │                    │
+              │ whitelist-source-range    │ EXTERNAL_ACCESS_MODE
+              │ (內網 IP only)            │ (webhook_only / full / internal_only)
+              │                    │
+              └─ ingress-webhook.yaml     └─ middleware/accessControl.js
+                 (只開 /api/webex/webhook)    (env-driven, 可即時切換模式)
+```
+
+### 三個模式
+
+| 模式 | 外網看網頁 | 外網打 API | Webhook | 切換方式 |
+|------|-----------|-----------|---------|---------|
+| `internal_only` | 403 | 403 | 403 | 改 env + restart |
+| `webhook_only` | 403 | 403 | POST 放行 + HMAC 驗簽 | 改 env + restart |
+| `full` | 可以 | 需 token | 放行 + HMAC | 改 env + restart |
+
+### Env 參數
+
+```env
+EXTERNAL_ACCESS_MODE=webhook_only
+INTERNAL_NETWORKS=10.0.0.0/8,172.16.0.0/12,192.168.0.0/16
+EXTERNAL_ALLOWED_PATHS=/api/webex/webhook
+INTERNAL_ONLY_PATHS=/uploads,/api/v1
+EXTERNAL_LOGIN_RATE_LIMIT=10
+CORS_ALLOWED_ORIGINS=https://flgpt.foxlink.com.tw:8443
+```
+
+### `full` 模式安全措施
+
+- `/uploads/*`, `/api/v1/*` 即使 full 模式也限內網（INTERNAL_ONLY_PATHS）
+- `/api/auth/login` 有 per-IP rate limit（EXTERNAL_LOGIN_RATE_LIMIT 次/分鐘）
+- 其餘 API 靠 `verifyToken` middleware 保護
+- CORS 限制允許的 origin
+
+### 前置條件
+
+**`externalTrafficPolicy: Local` 必須先做**，否則 ingress / middleware 看到的 IP 全是 `10.244.x.x`，落在 `10.0.0.0/8` 內 → 外網流量被判定為內網 → 等於沒擋。
+
+```bash
+# 查詢現況
+kubectl get svc -n ingress-nginx ingress-nginx-controller -o jsonpath='{.spec.externalTrafficPolicy}'
+# 若為空或 Cluster，執行：
+kubectl patch svc -n ingress-nginx ingress-nginx-controller \
+  -p '{"spec":{"externalTrafficPolicy":"Local"}}'
+```
+
+### 檔案清單
+
+| 檔案 | 用途 |
+|------|------|
+| `server/middleware/accessControl.js` | Express middleware（主控） |
+| `k8s/ingress.yaml` | 內網 ingress（whitelist-source-range） |
+| `k8s/ingress-webhook.yaml` | Webhook ingress（對外，Exact path） |
+
+---
+
+## 9. 後續追蹤
 
 - [ ] 跟 DBA 約討論時間 (週/日:____)
 - [ ] 跟網管討論 LB / firewall 設定 (週/日:____)
