@@ -69,8 +69,28 @@ async function autoSeedHelp(db) {
     }
   }
 
-  if (upserted > 0) {
-    console.log(`[HelpAutoSeed] Upserted ${upserted} sections, skipped ${skipped} (unchanged)`);
+  // --- Cleanup: remove DB sections that no longer exist in seed data ---
+  let removed = 0;
+  try {
+    const seedIds = userSections.map(s => s.id);
+    const dbRows = await db.prepare(
+      "SELECT id FROM help_sections WHERE section_type = 'user'"
+    ).all();
+    const dbSections = Array.isArray(dbRows) ? dbRows : (dbRows?.rows || []);
+    for (const row of dbSections) {
+      if (!seedIds.includes(row.id)) {
+        await db.prepare('DELETE FROM help_translations WHERE section_id = ?').run(row.id);
+        await db.prepare('DELETE FROM help_sections WHERE id = ?').run(row.id);
+        removed++;
+        console.log(`[HelpAutoSeed] Removed orphan section: ${row.id}`);
+      }
+    }
+  } catch (err) {
+    console.error('[HelpAutoSeed] Cleanup error:', err.message);
+  }
+
+  if (upserted > 0 || removed > 0) {
+    console.log(`[HelpAutoSeed] Upserted ${upserted}, removed ${removed}, skipped ${skipped}`);
   } else {
     console.log(`[HelpAutoSeed] All ${skipped} sections up-to-date`);
   }
