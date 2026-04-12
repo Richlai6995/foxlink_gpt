@@ -70,6 +70,11 @@ export default function LanguageImagePanel({ slideId, blockIndex, currentImage, 
   const [compUploading, setCompUploading] = useState(false)
   const compLeftInputRef = useRef<HTMLInputElement>(null)
   const compRightInputRef = useRef<HTMLInputElement>(null)
+  const modalAudioRef = useRef<HTMLAudioElement>(null)
+  // Bulk coords transform
+  const [coordsOffsetX, setCoordsOffsetX] = useState(0)
+  const [coordsOffsetY, setCoordsOffsetY] = useState(0)
+  const [coordsScale, setCoordsScale] = useState(100)
 
   // Legacy region overrides (backward compat)
   const [regionOverrides, setRegionOverrides] = useState<Record<string, Record<string, any>>>({})
@@ -1007,6 +1012,61 @@ export default function LanguageImagePanel({ slideId, blockIndex, currentImage, 
               </button>
             </div>
 
+            {/* Bulk coords transform (only for independent) */}
+            {hasIndependentRegions && (
+              <div className="flex items-center gap-2 mb-1 flex-wrap">
+                <span className="text-[10px] text-slate-400">整體座標調整:</span>
+                <label className="text-[10px] text-slate-400 flex items-center gap-1">
+                  X偏移
+                  <input type="number" value={coordsOffsetX} onChange={e => setCoordsOffsetX(Number(e.target.value))}
+                    className="w-14 text-[10px] px-1 py-0.5 rounded bg-white/10 text-white border border-slate-600 text-center" step={1} />%
+                </label>
+                <label className="text-[10px] text-slate-400 flex items-center gap-1">
+                  Y偏移
+                  <input type="number" value={coordsOffsetY} onChange={e => setCoordsOffsetY(Number(e.target.value))}
+                    className="w-14 text-[10px] px-1 py-0.5 rounded bg-white/10 text-white border border-slate-600 text-center" step={1} />%
+                </label>
+                <label className="text-[10px] text-slate-400 flex items-center gap-1">
+                  縮放
+                  <input type="number" value={coordsScale} onChange={e => setCoordsScale(Number(e.target.value))}
+                    className="w-16 text-[10px] px-1 py-0.5 rounded bg-white/10 text-white border border-slate-600 text-center" step={5} min={10} max={500} />%
+                </label>
+                <button
+                  onClick={() => {
+                    if (coordsOffsetX === 0 && coordsOffsetY === 0 && coordsScale === 100) return
+                    const key = String(blockIndex)
+                    const scale = coordsScale / 100
+                    setLangRegions(prev => {
+                      const current = prev[activeLang]?.[key] || []
+                      return {
+                        ...prev,
+                        [activeLang]: {
+                          ...(prev[activeLang] || {}),
+                          [key]: current.map(r => ({
+                            ...r,
+                            coords: {
+                              x: r.coords.x + coordsOffsetX,
+                              y: r.coords.y + coordsOffsetY,
+                              w: r.coords.w * scale,
+                              h: r.coords.h * scale,
+                            }
+                          }))
+                        }
+                      }
+                    })
+                    setCoordsOffsetX(0); setCoordsOffsetY(0); setCoordsScale(100)
+                  }}
+                  className="text-[10px] px-2 py-0.5 rounded transition"
+                  style={{ color: '#38bdf8', border: '1px solid #38bdf8' }}
+                  disabled={coordsOffsetX === 0 && coordsOffsetY === 0 && coordsScale === 100}>
+                  套用
+                </button>
+              </div>
+            )}
+
+            {/* Hidden audio for region click preview */}
+            <audio ref={modalAudioRef} className="hidden" />
+
             <div className="flex gap-3" style={{ maxHeight: '85vh' }}>
               {/* Image + draggable regions */}
               <div className="flex-1 overflow-auto rounded-lg relative"
@@ -1037,7 +1097,15 @@ export default function LanguageImagePanel({ slideId, blockIndex, currentImage, 
                         boxShadow: isActive || isSelected ? `0 0 0 3px ${isActive ? 'rgba(250,204,21,0.4)' : 'rgba(56,189,248,0.3)'}` : 'none'
                       }}
                       onMouseDown={e => { e.stopPropagation(); startRegionDrag(e, r, 'move') }}
-                      onClick={e => { e.stopPropagation(); setModalSelected(r.id) }}>
+                      onClick={e => {
+                        e.stopPropagation(); setModalSelected(r.id)
+                        // Auto-play region audio on click
+                        if (r.audio_url && modalAudioRef.current) {
+                          modalAudioRef.current.src = r.audio_url
+                          modalAudioRef.current.play().catch(() => {})
+                        }
+                      }}
+                      title={r.narration ? `${r.label || r.id}\n${r.narration.slice(0, 80)}${r.narration.length > 80 ? '...' : ''}` : r.label || r.id}>
                       {/* Label */}
                       <span className="absolute -top-5 left-0 text-[10px] font-bold px-1.5 py-0.5 rounded shadow-sm whitespace-nowrap"
                         style={{
