@@ -11,56 +11,44 @@
 | 項目 | 現值 | 備註 |
 |------|------|------|
 | 線上用戶峰值 | ~84 | 2026-04-10 觀察 |
-| K8s pods (`foxlink-gpt`) | 4 replicas | `512Mi-2Gi` RAM, `500m-2000m` CPU |
+| K8s pods (`foxlink-gpt`) | 4 replicas | `768Mi-2Gi` RAM, `500m-2000m` CPU |
 | K8s nodes | 4 (1 master + 3 workers) | flgptm01 / flgptn01-03 |
 | Oracle 連線池 (`poolMax`) | ≥ 25 (per pod) | 4 pods × 25 = 100 connections |
-| ingress-nginx-controller | **1 replica** ⚠️ | 30 天內已重啟 3 次 |
+| ingress-nginx-controller | 2 replicas ✅ | flgptn01 + flgptn03，已解決單點故障 |
 | ingress 限流 | 已移除 (原本 limit-connections=50) | NAT IP 全用戶共用,直接全爆 |
-| `externalTrafficPolicy` | 預設 (Cluster) | client IP 被 SNAT 成 `10.244.x.x`,看不到真實 IP |
+| `externalTrafficPolicy` | **Local** ✅ | 真實 client IP 已可見（10.64.x / 192.168.x / 10.40.x） |
+| 外網存取控制 | **webhook_only** ✅ | 雙層��禦：ingress whitelist + Express middleware |
 | Gemini API quota | 預設(未申請提升) | Pro 約 600 RPM/project |
 
 ---
 
 ## 2. 五個瓶頸 (依嚴重程度排序)
 
-### 🔴 P0-A:無真實 client IP → 無法做有意義的限流
+### ✅ P0-A:無真實 client IP → 無法做有意義的限流（已解決）
 
-**現狀**:nginx-ingress 看到的 client IP 全部是 K8s NAT 後的 `10.244.3.0`。
+> **2026-04-12 已完成** — `externalTrafficPolicy: Local` 已套用
 
-**影響**:
-- 任何 per-IP 的 rate limit / connection limit 都會把所有用戶當成同一人 → 加任何限流就秒爆 503(本日事件)
-- DDoS / abuse 偵測完全失效
-- audit log 拿不到真實來源 IP
+**原始狀況**:nginx-ingress 看到的 client IP 全部是 K8s NAT 後的 `10.244.3.0`。
 
-**修法**:
+**已執行的修法**:
 ```bash
 kubectl patch svc -n ingress-nginx ingress-nginx-controller \
   -p '{"spec":{"externalTrafficPolicy":"Local"}}'
 ```
 
-**副作用 / 風險**:
-- `Local` 模式只有跑著 ingress pod 的 node 會接到流量
-- 若 LoadBalancer EXTERNAL-IP `10.8.93.20` 由 MetalLB / 硬體 LB 提供,需確認 LB 知道哪個 node 有 ingress pod(MetalLB 有自動 healthcheck;硬體 LB 要手動確認)
-- 沒分到流量的 node 上的 service 連線會多一跳跨 node(影響極小)
+**驗證結果**（2026-04-12）:
+- ingress access log 可見真實 client IP：`10.64.152.18`、`192.168.23.12`、`10.40.130.27`
+- 外網公網 IP 也可見：`111.243.21.242`、`1.169.176.49`、`1.161.190.215`
+- 確認 LB 健康檢查正常，無流量中斷
 
-**驗證方式**:套用後從外部訪問 → 看 ingress controller log 中的 `client:` 欄是不是公司辦公室真實 IP 段(例如 10.8.x.x)。
+### ✅ P0-B:ingress controller 只有 1 replica = 單點故障（已解決）
 
-### 🔴 P0-B:ingress controller 只有 1 replica = 單點故障
+> **已完成** — 目前 2 replicas，分布在 flgptn01 + flgptn03，0 restarts
 
 ```
-ingress-nginx-controller-6f6854dbb8-sf5dc   1/1     Running     3 (30d ago)
+ingress-nginx-controller-688dd5d8df-5c26f   1/1   Running   0   flgptn03
+ingress-nginx-controller-688dd5d8df-fww69   1/1   Running   0   flgptn01
 ```
-
-**Restarts=3** 代表這 30 天裡 ingress 已經掛過 3 次,每次掛掉 = 全站離線。500 用戶等級不能容忍。
-
-**修法**:
-```bash
-kubectl scale deploy -n ingress-nginx ingress-nginx-controller --replicas=2
-```
-
-或更穩定的方式 — 改 ingress-nginx 的 deployment yaml 設定 `replicas: 2` + Pod anti-affinity 強制分散到不同 node。
-
-**注意**:跑 2 個 ingress controller 會有 leader election 的考量(metric / leader-only 任務),預設設定下兩個都會接流量,沒問題。
 
 ### 🟡 P1-A:Pod 數量不夠
 
@@ -153,8 +141,9 @@ ORA_POOL_INCREMENT=5
 
 | 優先 | 項目 | 負責 | 預估工時 | Blocker |
 |------|------|------|----------|---------|
-| 🔴 P0 | `externalTrafficPolicy: Local` | DevOps | 30 min | 需確認 LB 行為 |
-| 🔴 P0 | ingress controller replicas=2 | DevOps | 10 min | 無 |
+| ✅ P0 | `externalTrafficPolicy: Local` | DevOps | 30 min | ~~需確認 LB 行為~~ 已完成 2026-04-12 |
+| ✅ P0 | ingress controller replicas=2 | DevOps | 10 min | 已完成 |
+| ✅ P0 | 外網存取控制（webhook_only 模式） | DevOps | 2 hr | 已完成 2026-04-12 |
 | 🟡 P1 | 加裝 metrics-server | DevOps | 30 min | 無 |
 | 🟡 P1 | HPA 設定(4→12 pods)| DevOps | 1 hr | 需 P1 metrics-server |
 | 🟡 P1 | Oracle sessions/processes 提升 | **DBA** | 半天(含重啟) | 需 DBA 配合,挑離峰時段 |
@@ -218,13 +207,14 @@ ORA_POOL_INCREMENT=5
 ### 風險
 
 - **Oracle 改 sessions 需重啟 DB**:服務中斷視窗約 5~10 分鐘,需公告
-- **`externalTrafficPolicy: Local` 切換**:可能造成短暫流量分布不均,觀察 10 分鐘確認
+- ~~**`externalTrafficPolicy: Local` 切換**:可能造成短暫流量分布不均~~ → 已完成,運作正常
 - **HPA 自動擴縮**:若 Gemini quota 沒提升,擴更多 pod 也只是更多 pod 一起 429
-- **Ingress controller 從 1 → 2 replicas**:若兩個 controller 之間 leader election 設定不對,可能出現重複 metric 上報
+- ~~**Ingress controller 從 1 → 2 replicas**~~ → 已完成,運作正常
+- **`externalTrafficPolicy` 被重設風險**:若 ingress-nginx 升級或重建 service 時 `externalTrafficPolicy` 被重設為 `Cluster`,所有外網 IP 會被判定為內網（10.244.x.x ⊂ 10.0.0.0/8）→ 存取控制失效。建議將 `externalTrafficPolicy: Local` 寫入 ingress-nginx service YAML 版控
 
 ### 假設
 
-- 假設 K8s nodes 還有資源跑 12 pods × 2Gi RAM = 24Gi(請確認 `kubectl top nodes`)
+- 假設 K8s nodes 還有資源跑 12 pods × 2Gi RAM = 24Gi — **2026-04-12 確認**:4 node 都 CPU <3%, Memory <11%,資源充足
 - 假設 Oracle 23 AI 機器規格能撐 600 sessions
 - 假設 Gemini API 用量不會線性,因為很多查詢會被 DIFY KB / skill cache 吸收
 
@@ -250,9 +240,11 @@ ORA_POOL_INCREMENT=5
 
 ## 8. 外網存取控制
 
+> **2026-04-12 已實施完成**
+
 ### 背景
 
-為 Webex webhook 開通對外 port 後，整站變成外網可存取。需限制為「只有 webhook 能從外網進來」。
+為 Webex webhook 開通對外 port（8443）後，整站變成外網可存取。需限制為「只有 webhook 能從外網進來」，同時保留未來全面開放外網的彈性。
 
 ### 架構：雙層防禦
 
@@ -268,57 +260,136 @@ ORA_POOL_INCREMENT=5
 
 ### 三個模式
 
-| 模式 | 外網看網頁 | 外網打 API | Webhook | 切換方式 |
-|------|-----------|-----------|---------|---------|
-| `internal_only` | 403 | 403 | 403 | 改 env + restart |
-| `webhook_only` | 403 | 403 | POST 放行 + HMAC 驗簽 | 改 env + restart |
-| `full` | 可以 | 需 token | 放行 + HMAC | 改 env + restart |
+| 模式 | 外網看網頁 | 外網打 API | Webhook | `/uploads` | `/api/v1` |
+|------|-----------|-----------|---------|-----------|-----------|
+| `internal_only` | 403 | 403 | 403 | 403 | 403 |
+| `webhook_only` ← **目前** | 403 | 403 | POST 放行 + HMAC | 403 | 403 |
+| `full` | 可以 | 需 token | 放行 + HMAC | **永遠 403** | **永遠 403** |
 
 ### Env 參數
 
 ```env
-EXTERNAL_ACCESS_MODE=webhook_only
+# ─── External Access Control ───
+EXTERNAL_ACCESS_MODE=webhook_only          # internal_only | webhook_only | full
 INTERNAL_NETWORKS=10.0.0.0/8,172.16.0.0/12,192.168.0.0/16
-EXTERNAL_ALLOWED_PATHS=/api/webex/webhook
-INTERNAL_ONLY_PATHS=/uploads,/api/v1
-EXTERNAL_LOGIN_RATE_LIMIT=10
+EXTERNAL_ALLOWED_PATHS=/api/webex/webhook  # webhook_only 模式放行的路徑
+INTERNAL_ONLY_PATHS=/uploads,/api/v1       # 即使 full 模式也永遠限內網
+EXTERNAL_LOGIN_RATE_LIMIT=10               # full 模式：login 防暴力（次/分鐘/IP）
+
+# ─── CORS ───
 CORS_ALLOWED_ORIGINS=https://flgpt.foxlink.com.tw:8443
 ```
 
+### 2026-04-12 實施結果
+
+| 驗證項目 | 結果 |
+|---------|------|
+| 內網 `GET /api/health` | ✅ 200 |
+| 外網 `POST /api/webex/webhook` | ✅ 200（放行，HMAC 驗簽保護） |
+| 外網 `GET /`（網頁） | ✅ 403（擋住） |
+| 外網 `GET /uploads/*` | ✅ 403（擋住） |
+| 外網 `GET /api/v1/*` | ✅ 403（擋住） |
+| 外網 `GET /api/webex/webhook` | ✅ 403（只允許 POST） |
+| 被擋外網 IP（驗證時觀察到） | `111.243.21.242`, `1.169.176.49`, `1.161.190.215`（公網用戶，預期行為） |
+| 內網用戶 IP 範圍 | `10.64.x`, `10.40.x`, `192.168.23.x`（全部正常放行） |
+
 ### `full` 模式安全措施
 
-- `/uploads/*`, `/api/v1/*` 即使 full 模式也限內網（INTERNAL_ONLY_PATHS）
-- `/api/auth/login` 有 per-IP rate limit（EXTERNAL_LOGIN_RATE_LIMIT 次/分鐘）
-- 其餘 API 靠 `verifyToken` middleware 保護
-- CORS 限制允許的 origin
+當未來需要全面開放外網時，`full` 模式內建以下保護：
+
+1. **`/uploads/*`, `/api/v1/*` 永遠限內網**（`INTERNAL_ONLY_PATHS`）— 靜態檔案和 external KB API 不對外
+2. **`/api/auth/login` per-IP rate limit**（`EXTERNAL_LOGIN_RATE_LIMIT` 次/分鐘）— 防暴力破解
+3. **所有其他 API 需 token**（`verifyToken` middleware）— 沒登入打不了
+4. **CORS origin 限制**（`CORS_ALLOWED_ORIGINS`）— 防跨站請求偽造
+5. **Webex webhook HMAC 驗簽**（`crypto.timingSafeEqual`）— 不受模式切換影響
+
+### 未來開放外網 SOP
+
+當決定讓外網用戶直接使用網頁版時，執行以下步驟：
+
+**1. 修改 K8s server/.env**
+```bash
+# 在 flgptm01 上
+cd ~/foxlink_gpt
+vi server/.env
+# 改 EXTERNAL_ACCESS_MODE=full
+# 確認 CORS_ALLOWED_ORIGINS=https://flgpt.foxlink.com.tw:8443
+# 確認 EXTERNAL_LOGIN_RATE_LIMIT=10（或更嚴格）
+```
+
+**2. 修改 ingress（移除內網 whitelist）**
+```bash
+# 把 ingress.yaml 的 whitelist-source-range 註解掉或移除
+kubectl annotate ingress -n foxlink foxlink-gpt \
+  nginx.ingress.kubernetes.io/whitelist-source-range-
+```
+
+**3. 重新部署**
+```bash
+./deploy.sh
+```
+
+**4. 驗證**
+```bash
+# 從外網瀏覽器開 https://flgpt.foxlink.com.tw:8443 → 應看到登入頁
+# 確認 /uploads 仍然 403
+curl -sk https://flgpt.foxlink.com.tw:8443/uploads/test -w "%{http_code}"
+# 確認 login rate limit（連續快速打 > 10 次應 429）
+```
+
+**5. 回滾（如果出問題）**
+```bash
+# 改回 webhook_only
+vi server/.env  # EXTERNAL_ACCESS_MODE=webhook_only
+# 加回 whitelist
+kubectl annotate ingress -n foxlink foxlink-gpt \
+  nginx.ingress.kubernetes.io/whitelist-source-range="10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
+./deploy.sh
+```
 
 ### 前置條件
 
-**`externalTrafficPolicy: Local` 必須先做**，否則 ingress / middleware 看到的 IP 全是 `10.244.x.x`，落在 `10.0.0.0/8` 內 → 外網流量被判定為內網 → 等於沒擋。
+**`externalTrafficPolicy: Local`** — 已於 2026-04-12 確認為 `Local`，真實 client IP 可見。若此值被重設為 `Cluster`，所有外網 IP 會顯示為 `10.244.x.x`，落在 `INTERNAL_NETWORKS` 範圍內 → 等於沒擋。
 
 ```bash
-# 查詢現況
+# 驗證指令
 kubectl get svc -n ingress-nginx ingress-nginx-controller -o jsonpath='{.spec.externalTrafficPolicy}'
-# 若為空或 Cluster，執行：
-kubectl patch svc -n ingress-nginx ingress-nginx-controller \
-  -p '{"spec":{"externalTrafficPolicy":"Local"}}'
+# 應回傳 Local
 ```
 
 ### 檔案清單
 
 | 檔案 | 用途 |
 |------|------|
-| `server/middleware/accessControl.js` | Express middleware（主控） |
-| `k8s/ingress.yaml` | 內網 ingress（whitelist-source-range） |
-| `k8s/ingress-webhook.yaml` | Webhook ingress（對外，Exact path） |
+| `server/middleware/accessControl.js` | Express middleware（主控，env-driven） |
+| `k8s/ingress.yaml` | 內網 ingress（`whitelist-source-range`） |
+| `k8s/ingress-webhook.yaml` | Webhook ingress（對外，`pathType: Exact`） |
 
 ---
 
-## 9. 後續追蹤
+## 9. 已知問��
 
+### TLS 證書警告
+
+ingress controller log 持續出現：
+```
+Error getting SSL certificate "foxlink/foxlink-wildcard-tls": local SSL certificate foxlink/foxlink-wildcard-tls was not found. Using default certificate
+```
+目前使用的 TLS secret 是 `flgpt-tls`（ingress.yaml 中設定），`foxlink-wildcard-tls` 可能是其他服務的殘留設定。不影響功能但建議排查清除。
+
+---
+
+## 10. 後續追蹤
+
+### 已完成
+- [x] P0-A: `externalTrafficPolicy: Local` — 2026-04-12 確認已是 Local
+- [x] P0-B: ingress controller replicas=2 — 2026-04-12 確認已是 2 replicas
+- [x] 外網存取控制��webhook_only 模式 + 雙層防禦）— 2026-04-12 實施完成
+
+### 待辦
 - [ ] 跟 DBA 約討論時間 (週/日:____)
 - [ ] 跟網管討論 LB / firewall 設定 (週/日:____)
 - [ ] 申請 Gemini API quota 提升 (PM 負責,日期:____)
-- [ ] P0 兩項 (externalTrafficPolicy + ingress replicas=2) 預定執行日:____
 - [ ] HPA 上線預定日:____
 - [ ] 第一次 stress test (k6 / Locust 模擬 500 用戶) 預定日:____
+- [ ] 排查 `foxlink-wildcard-tls` 證書警告
