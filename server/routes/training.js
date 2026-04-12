@@ -4070,6 +4070,80 @@ router.post('/courses/:id/generate-lang-tts', loadCoursePermission, requirePermi
   }
 });
 
+// POST /api/training/courses/:id/reseed-all-lang-regions — bulk sync all independent regions from translations
+router.post('/courses/:id/reseed-all-lang-regions', loadCoursePermission, requirePermission('owner', 'admin', 'develop'), async (req, res) => {
+  const { target_lang } = req.body;
+  if (!target_lang || target_lang === 'zh-TW') return res.status(400).json({ error: 'target_lang required (en/vi)' });
+
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders?.();
+  const send = (type, data) => { res.write(`data: ${JSON.stringify({ type, ...data })}\n\n`); };
+
+  try {
+    const VOICE_FIELDS = ['label', 'narration', 'audio_url', 'feedback', 'feedback_wrong',
+      'test_hint', 'test_audio_url', 'explore_desc', 'explore_audio_url'];
+    const INTRO_FIELDS = [
+      'slide_narration', 'slide_narration_audio', 'slide_narration_test', 'slide_narration_test_audio',
+      'slide_narration_explore', 'slide_narration_explore_audio', 'completion_message'
+    ];
+
+    // Find all slides with independent regions for this lang
+    const lessons = await db.prepare('SELECT id FROM course_lessons WHERE course_id=? ORDER BY sort_order').all(req.courseId);
+    const allSlideIds = [];
+    for (const lesson of lessons) {
+      const slides = await db.prepare('SELECT id FROM course_slides WHERE lesson_id=? ORDER BY sort_order').all(lesson.id);
+      allSlideIds.push(...slides.map(s => s.id));
+    }
+
+    let synced = 0, skipped = 0;
+    const total = allSlideIds.length;
+    for (let i = 0; i < allSlideIds.length; i++) {
+      const sid = allSlideIds[i];
+      const row = await db.prepare(
+        'SELECT id, content_json, regions_json FROM slide_translations WHERE slide_id=? AND lang=?'
+      ).get(sid, target_lang);
+      if (!row?.regions_json || !row?.content_json) { skipped++; continue; }
+
+      let regMap, blocks;
+      try { regMap = JSON.parse(row.regions_json); blocks = JSON.parse(row.content_json); } catch { skipped++; continue; }
+
+      let changed = false;
+      for (const [idx, regs] of Object.entries(regMap)) {
+        if (idx === '_intro' || !Array.isArray(regs)) continue;
+        const block = blocks[Number(idx)];
+        if (!block?.regions) continue;
+        for (const reg of regs) {
+          const src = block.regions.find(tr => tr.id === reg.id);
+          if (!src) continue;
+          for (const f of VOICE_FIELDS) { if (src[f] !== undefined && src[f] !== reg[f]) { reg[f] = src[f]; changed = true; } }
+        }
+        if (block.type === 'hotspot') {
+          const intro = regMap._intro || {};
+          for (const f of INTRO_FIELDS) { if (block[f] !== undefined) { intro[f] = block[f]; changed = true; } }
+          if (changed) regMap._intro = intro;
+        }
+      }
+      if (changed) {
+        await db.prepare('UPDATE slide_translations SET regions_json=? WHERE id=?').run(JSON.stringify(regMap), row.id);
+        synced++;
+      } else { skipped++; }
+
+      if ((i + 1) % 5 === 0 || i === total - 1) {
+        send('progress', { current: i + 1, total, step: `同步獨立區域 ${i + 1}/${total}...`, synced, skipped });
+      }
+    }
+
+    send('done', { ok: true, synced, skipped, total });
+    res.end();
+  } catch (e) {
+    console.error('[Training] reseed-all-lang-regions:', e.message);
+    try { send('error', { error: e.message }); } catch {}
+    try { res.end(); } catch {}
+  }
+});
+
 // GET translation status
 router.get('/courses/:id/translate/status', loadCoursePermission, async (req, res) => {
   try {

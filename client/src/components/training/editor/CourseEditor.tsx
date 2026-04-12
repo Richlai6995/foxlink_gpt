@@ -933,6 +933,48 @@ export default function CourseEditor() {
                           >
                             🔊 {t('training.generateLangAudio', { lang: langName })}
                           </button>
+                          <button
+                            onClick={async () => {
+                              try {
+                                setTranslating(lang)
+                                setTranslateProgress({ step: '同步所有獨立區域...', current: 0, total: 1 })
+                                const token = localStorage.getItem('token')
+                                const resp = await fetch(`/api/training/courses/${id}/reseed-all-lang-regions`, {
+                                  method: 'POST',
+                                  headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                                  body: JSON.stringify({ target_lang: lang }),
+                                })
+                                const reader = resp.body?.getReader()
+                                const decoder = new TextDecoder()
+                                let buf = ''
+                                while (reader) {
+                                  const { done, value } = await reader.read()
+                                  if (done) break
+                                  buf += decoder.decode(value, { stream: true })
+                                  const lines = buf.split('\n')
+                                  buf = lines.pop() || ''
+                                  for (const line of lines) {
+                                    if (!line.startsWith('data: ')) continue
+                                    try {
+                                      const evt = JSON.parse(line.slice(6))
+                                      if (evt.type === 'progress') setTranslateProgress(evt)
+                                      if (evt.type === 'done') {
+                                        setTranslateProgress(null)
+                                        alert(`同步完成：${evt.synced} 張更新，${evt.skipped} 張跳過`)
+                                      }
+                                      if (evt.type === 'error') throw new Error(evt.error)
+                                    } catch {}
+                                  }
+                                }
+                              } catch (e: any) { alert(e.message || '同步失敗') }
+                              finally { setTranslating(null); setTranslateProgress(null) }
+                            }}
+                            disabled={!!translating}
+                            className="flex items-center gap-1 text-[11px] px-3 py-1.5 rounded-lg transition disabled:opacity-50"
+                            style={{ backgroundColor: '#a855f7', color: 'white' }}
+                          >
+                            🔄 同步所有獨立區域
+                          </button>
                         </div>
                       )}
                     </div>
