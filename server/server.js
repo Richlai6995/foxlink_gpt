@@ -22,8 +22,12 @@ app.use(cors(
     : {
         origin: (origin, cb) => {
           // No origin = non-browser (curl / webhook / server-to-server) → allow
-          if (!origin || allowedOrigins.includes(origin)) return cb(null, true);
-          cb(new Error('CORS blocked'));
+          // chrome-extension:// = Chrome Extension → allow
+          if (!origin || allowedOrigins.includes(origin) || origin.startsWith('chrome-extension://')) {
+            return cb(null, true);
+          }
+          // Disallowed origin: don't throw (causes 500), just omit CORS headers → browser blocks response
+          cb(null, false);
         },
         credentials: true,
       }
