@@ -581,15 +581,15 @@ export default function CourseEditor() {
                 {/* Expanded: slides list — drag to reorder */}
                 {expandedLesson === lesson.id && (
                   <div className="border-t border-slate-700/50 bg-slate-850 px-4 py-3 space-y-1">
-                    {(lessonSlides[lesson.id] || []).map((slide, si) => {
-                      const slides = lessonSlides[lesson.id] || []
+                    {(lessonSlides[lesson.id] || []).filter(Boolean).map((slide, si) => {
+                      const slides = (lessonSlides[lesson.id] || []).filter(Boolean)
                       return (
                       <div key={slide.id}
                         draggable={canEditThis}
                         onDragStart={(e) => {
                           e.dataTransfer.effectAllowed = 'move'
+                          e.dataTransfer.setData('text/plain', String(si))
                           ;(e.currentTarget as HTMLElement).style.opacity = '0.4'
-                          ;(e.currentTarget as HTMLElement).dataset.dragIdx = String(si)
                         }}
                         onDragEnd={(e) => { (e.currentTarget as HTMLElement).style.opacity = '1' }}
                         onDragOver={(e) => {
@@ -601,12 +601,11 @@ export default function CourseEditor() {
                         onDrop={async (e) => {
                           e.preventDefault()
                           ;(e.currentTarget as HTMLElement).style.borderTop = ''
-                          const fromEl = document.querySelector('[data-drag-idx]') as HTMLElement
-                          const fromIdx = fromEl ? Number(fromEl.dataset.dragIdx) : -1
-                          if (fromEl) delete fromEl.dataset.dragIdx
-                          if (fromIdx < 0 || fromIdx === si) return
+                          const fromIdx = Number(e.dataTransfer.getData('text/plain'))
+                          if (isNaN(fromIdx) || fromIdx < 0 || fromIdx >= slides.length || fromIdx === si) return
                           const newSlides = [...slides]
                           const [moved] = newSlides.splice(fromIdx, 1)
+                          if (!moved) return
                           newSlides.splice(si, 0, moved)
                           setLessonSlides(prev => ({ ...prev, [lesson.id]: newSlides }))
                           const order = newSlides.map((s, idx) => ({ id: s.id, sort_order: idx + 1 }))
