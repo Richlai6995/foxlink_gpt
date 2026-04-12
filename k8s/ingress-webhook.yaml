@@ -12,14 +12,8 @@ metadata:
     # 短 timeout（Webex 要求 15s 內回 200）
     nginx.ingress.kubernetes.io/proxy-read-timeout: "30"
     nginx.ingress.kubernetes.io/proxy-send-timeout: "30"
-    # 只允許 POST，其他 method 回 403
-    nginx.ingress.kubernetes.io/server-snippet: |
-      location = /api/webex/webhook {
-        limit_except POST {
-          deny all;
-        }
-        proxy_pass http://upstream_balancer;
-      }
+    # POST-only 限制由 application 層 accessControl middleware 處理
+    # （nginx-ingress 預設禁用 server-snippet，不用 snippet）
 spec:
   ingressClassName: nginx
   tls:
