@@ -74,6 +74,8 @@ export default function CourseEditor() {
   const [translateStatus, setTranslateStatus] = useState<any>(null)
   const [translateProgress, setTranslateProgress] = useState<{ step: string; current: number; total: number; slides_done?: number; slides_total?: number } | null>(null)
   const [translateSelectedLessons, setTranslateSelectedLessons] = useState<number[] | null>(null) // null = all
+  const [syncRegionsOnTranslate, setSyncRegionsOnTranslate] = useState(true)
+  const [syncRegionsAudioOnTts, setSyncRegionsAudioOnTts] = useState(true)
   const [showPreviewMenu, setShowPreviewMenu] = useState(false)
   const [showPublishCheck, setShowPublishCheck] = useState(false)
   const [publishChecks, setPublishChecks] = useState<{ key: string; pass: boolean; detail: string; optional?: boolean }[]>([])
@@ -780,7 +782,7 @@ export default function CourseEditor() {
                           const resp = await fetch(`/api/training/courses/${id}/translate`, {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                            body: JSON.stringify({ target_lang: lang, lesson_ids: translateSelectedLessons || undefined })
+                            body: JSON.stringify({ target_lang: lang, lesson_ids: translateSelectedLessons || undefined, sync_regions: syncRegionsOnTranslate })
                           })
                           const reader = resp.body?.getReader()
                           const decoder = new TextDecoder()
@@ -815,6 +817,18 @@ export default function CourseEditor() {
                     >
                       {translating === lang ? t('training.translating') : status?.course_translated ? t('training.retranslate') : t('training.aiTranslate')}
                     </button>
+                  </div>
+
+                  {/* Sync checkboxes */}
+                  <div className="flex flex-col gap-1 mt-1">
+                    <label className="flex items-center gap-1.5 text-[10px] cursor-pointer" style={{ color: 'var(--t-text-dim)' }}>
+                      <input type="checkbox" checked={syncRegionsOnTranslate} onChange={e => setSyncRegionsOnTranslate(e.target.checked)} className="w-3 h-3" />
+                      同步更新已獨立的區域（保留位置，更新文字）
+                    </label>
+                    <label className="flex items-center gap-1.5 text-[10px] cursor-pointer" style={{ color: 'var(--t-text-dim)' }}>
+                      <input type="checkbox" checked={syncRegionsAudioOnTts} onChange={e => setSyncRegionsAudioOnTts(e.target.checked)} className="w-3 h-3" />
+                      生成語音時同步更新已獨立的區域語音
+                    </label>
                   </div>
 
                   {/* Live progress during translation */}
@@ -881,7 +895,7 @@ export default function CourseEditor() {
                                 const resp = await fetch(`/api/training/courses/${id}/generate-lang-tts`, {
                                   method: 'POST',
                                   headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                                  body: JSON.stringify({ target_lang: lang }),
+                                  body: JSON.stringify({ target_lang: lang, sync_regions_audio: syncRegionsAudioOnTts }),
                                 })
                                 const reader = resp.body?.getReader()
                                 const decoder = new TextDecoder()

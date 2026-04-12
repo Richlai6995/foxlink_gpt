@@ -3809,7 +3809,48 @@ Return a JSON array of ${batch.length} objects in the SAME order, each with orig
 
     await Promise.all([...slideJobs, ...quizJobs]);
 
-    send('done', { ok: true, translated: { lessons: lessons.length, slides: totalSlides, questions: questions.length } });
+    // Optional: sync independent regions text from translated content
+    let syncedCount = 0;
+    if (req.body.sync_regions) {
+      send('progress', { current: doneItems, total: totalItems, step: '同步獨立區域文字...' });
+      const VOICE_FIELDS = ['label', 'narration', 'audio_url', 'feedback', 'feedback_wrong',
+        'test_hint', 'test_audio_url', 'explore_desc', 'explore_audio_url'];
+      const INTRO_FIELDS = [
+        'slide_narration', 'slide_narration_audio', 'slide_narration_test', 'slide_narration_test_audio',
+        'slide_narration_explore', 'slide_narration_explore_audio', 'completion_message'
+      ];
+      for (const slide of allSlides) {
+        const row = await db.prepare(
+          'SELECT id, content_json, regions_json FROM slide_translations WHERE slide_id=? AND lang=?'
+        ).get(slide.id, target_lang);
+        if (!row?.regions_json || !row?.content_json) continue;
+        let regMap, blocks;
+        try { regMap = JSON.parse(row.regions_json); blocks = JSON.parse(row.content_json); } catch { continue; }
+        let changed = false;
+        for (const [idx, regs] of Object.entries(regMap)) {
+          if (idx === '_intro' || !Array.isArray(regs)) continue;
+          const block = blocks[Number(idx)];
+          if (!block?.regions) continue;
+          for (const reg of regs) {
+            const src = block.regions.find(tr => tr.id === reg.id);
+            if (!src) continue;
+            for (const f of VOICE_FIELDS) { if (src[f] !== undefined && src[f] !== reg[f]) { reg[f] = src[f]; changed = true; } }
+          }
+          // Sync intro
+          if (block.type === 'hotspot') {
+            const intro = regMap._intro || {};
+            for (const f of INTRO_FIELDS) { if (block[f] !== undefined) { intro[f] = block[f]; changed = true; } }
+            if (changed) regMap._intro = intro;
+          }
+        }
+        if (changed) {
+          await db.prepare('UPDATE slide_translations SET regions_json=? WHERE id=?').run(JSON.stringify(regMap), row.id);
+          syncedCount++;
+        }
+      }
+    }
+
+    send('done', { ok: true, translated: { lessons: lessons.length, slides: totalSlides, questions: questions.length }, synced_regions: syncedCount });
   } catch (e) {
     console.error('[Training] translate:', e.message);
     send('error', { error: e.message });
@@ -3982,8 +4023,45 @@ router.post('/courses/:id/generate-lang-tts', loadCoursePermission, requirePermi
       }
     }
 
-    console.log(`[TTS batch] ${target_lang}: generated=${generated} failed=${failed} total=${total}`);
-    send('done', { ok: true, generated, failed, total });
+    // Optional: sync audio URLs to independent regions
+    let syncedAudioCount = 0;
+    if (req.body.sync_regions_audio) {
+      send('status', { message: '同步獨立區域語音...' });
+      const AUDIO_FIELDS = ['audio_url', 'test_audio_url', 'explore_audio_url'];
+      const INTRO_AUDIO = ['slide_narration_audio', 'slide_narration_test_audio', 'slide_narration_explore_audio'];
+      for (const entry of slideEntries) {
+        if (!entry.blocks) continue;
+        // Read the same slide's regions_json
+        const row = await db.prepare('SELECT id, regions_json FROM slide_translations WHERE id=?').get(entry.transId);
+        if (!row?.regions_json) continue;
+        let regMap;
+        try { regMap = JSON.parse(row.regions_json); } catch { continue; }
+        let changed = false;
+        for (const [idx, regs] of Object.entries(regMap)) {
+          if (idx === '_intro' || !Array.isArray(regs)) continue;
+          const block = entry.blocks[Number(idx)];
+          if (!block?.regions) continue;
+          for (const reg of regs) {
+            const src = block.regions.find(tr => tr.id === reg.id);
+            if (!src) continue;
+            for (const f of AUDIO_FIELDS) { if (src[f] && src[f] !== reg[f]) { reg[f] = src[f]; changed = true; } }
+          }
+          // Sync intro audio
+          if (block.type === 'hotspot') {
+            const intro = regMap._intro || {};
+            for (const f of INTRO_AUDIO) { if (block[f] && block[f] !== intro[f]) { intro[f] = block[f]; changed = true; } }
+            if (changed) regMap._intro = intro;
+          }
+        }
+        if (changed) {
+          await db.prepare('UPDATE slide_translations SET regions_json=? WHERE id=?').run(JSON.stringify(regMap), row.id);
+          syncedAudioCount++;
+        }
+      }
+    }
+
+    console.log(`[TTS batch] ${target_lang}: generated=${generated} failed=${failed} total=${total} synced_audio=${syncedAudioCount}`);
+    send('done', { ok: true, generated, failed, total, synced_audio: syncedAudioCount });
     res.end();
   } catch (e) {
     console.error('[Training] generate-lang-tts:', e.message);
