@@ -3685,3 +3685,91 @@ UI 元素：
 | `client/src/components/training/blocks/HotspotBlock.tsx` | 移除區域 label 文字和 hover tooltip |
 | `docs/training-platform-design.md` | 新增 §8.7.7–8.7.9 設計補充 |
 | `docs/training-platform-implementation.md` | 新增 §27-7 至 §27-12 |
+
+## 28. Phase 3B-9 — 翻譯效能優化 + 獨立區域翻譯 Seed 工作流（2026-04-12）
+
+### 28-1：翻譯效能優化
+
+| 項目 | 狀態 | 說明 |
+|------|------|------|
+| Slide Batching | ✅ 完成 | 5 張 slide 打包成一次 LLM call，content+notes+regions 合併 payload |
+| CONCURRENCY 提升 | ✅ 完成 | 3 → 10，slides + quiz 共用 limiter 同時並行 |
+| Batch 失敗 Fallback | ✅ 完成 | JSON parse 或長度不符 → 整批退回逐張重試，Map<id> 校驗順序 |
+| extractSlideResult 防護 | ✅ 完成 | 對缺欄位 throw → 避免 partial response 誤清既有翻譯 |
+| regions_json source | ✅ 完成 | 改讀 `slide_translations WHERE lang='zh-TW'`（master），full overwrite |
+| Model fallback 統一 | ✅ 完成 | 全檔 7 處改用 `env GEMINI_MODEL_FLASH \|\| 'gemini-3-flash-preview'` |
+| Quiz Batching | ✅ 完成 | 5 題/call，同樣有 batch+single fallback |
+| TTS 改 SSE | ✅ 完成 | `generate-lang-tts` 改 SSE streaming，pLimit(10) 並行 |
+| TTS Phase 設計 | ✅ 完成 | Phase 1 preload task list → Phase 2 pLimit(10) → Phase 3 flush DB |
+| Recording 並行化 | ✅ 完成 | Worker pool concurrency=5，timeout 30s → 60s |
+| pLimit 共用工具 | ✅ 完成 | training.js 頂層 `function pLimit(n)` |
+
+### 28-2：獨立區域翻譯 Seed（LanguageImagePanel 核心修正）
+
+| 項目 | 狀態 | 說明 |
+|------|------|------|
+| `GET /lang-regions` 擴充 | ✅ 完成 | 回傳新增 `_translated` 欄位：從 content_json 解析 hotspot regions + intro + translated_at |
+| `createIndependentRegions` 改寫 | ✅ 完成 | 優先從翻譯結果 seed（text + audio_url），fallback 到 zh-TW |
+| Inherit 顯示翻譯文字 | ✅ 完成 | `getDisplayRegions()` 在 inherit 模式下返回翻譯 regions 而非 zh-TW |
+| Inherit 唯讀語音預覽 | ✅ 完成 | 翻譯 intro + per-region narration 文字 + audio player（唯讀） |
+| 按鈕文字動態 | ✅ 完成 | 有翻譯「(使用翻譯結果)」/ 無翻譯「(從主語言複製)」 |
+| Auto-promote 修正 | ✅ 完成 | 拖拉觸發 auto-promote 也走翻譯 seed（同一 function） |
+| Intro seed | ✅ 完成 | slide_narration / _test / _explore + audio + completion_message 全帶 |
+| 翻譯時間戳 | ✅ 完成 | `_translated_at` 顯示在提示文字旁 |
+
+### 28-3：語言 Tab Badge + 語音模式切換
+
+| 項目 | 狀態 | 說明 |
+|------|------|------|
+| Status Badge | ✅ 完成 | ✓(有翻譯) ★(有獨立區域) 🔊(有語音) 在語言 tab 按鈕上 |
+| Voice Mode Tabs | ✅ 完成 | [全部][🎯 導引][📝 測驗][🔍 探索] 過濾 intro + per-region 欄位 |
+
+### 28-4：從翻譯結果同步（Re-seed）
+
+| 項目 | 狀態 | 說明 |
+|------|------|------|
+| `POST /slides/:sid/reseed-lang-regions` | ✅ 完成 | id-match merge: keep coords, sync text+audio from content_json |
+| 前端按鈕 | ✅ 完成 | 獨立區域 header「🔄 從翻譯結果同步」，confirm 後呼叫 API |
+
+### 28-5：翻譯/TTS 自動同步獨立區域
+
+| 項目 | 狀態 | 說明 |
+|------|------|------|
+| Translate `sync_regions` flag | ✅ 完成 | 翻譯完後自動 sync 所有已有 regions_json 的 slide |
+| TTS `sync_regions_audio` flag | ✅ 完成 | TTS 完後自動 sync audio URL 到 regions_json |
+| CourseEditor Checkboxes | ✅ 完成 | 兩個 checkbox（預設勾選），在翻譯 tab 的 sync 區塊 |
+
+### 28-6：Bulk Re-seed
+
+| 項目 | 狀態 | 說明 |
+|------|------|------|
+| `POST /courses/:id/reseed-all-lang-regions` | ✅ 完成 | SSE endpoint，遍歷全課程 slides，sync text+audio |
+| 前端按鈕 | ✅ 完成 | 翻譯 tab「🔄 同步所有獨立區域」紫色按鈕，SSE 進度 + alert |
+
+### 28-7：Modal 語音預覽 + 整體座標調整
+
+| 項目 | 狀態 | 說明 |
+|------|------|------|
+| 點擊播放語音 | ✅ 完成 | Region click → auto-play audio_url via hidden `<audio>` ref |
+| Narration Tooltip | ✅ 完成 | Hover 顯示 label + narration 前 80 字 |
+| 整體座標調整 | ✅ 完成 | X偏移/Y偏移(%) + 縮放(%) → 套用按鈕一次性 apply |
+
+### 28-8：Diff 模式
+
+| 項目 | 狀態 | 說明 |
+|------|------|------|
+| Diff Toggle | ✅ 完成 | 「📊 Diff 模式」button，展開/收合 |
+| Side-by-side | ✅ 完成 | 左：zh-TW 主語言 / 右：翻譯或獨立區域 |
+| Per-region 比較 | ✅ 完成 | narration / test_hint / explore_desc / feedback 四欄位 |
+| 視覺標記 | ✅ 完成 | 有翻譯=綠底，未翻譯=紅底「未翻譯」 |
+
+### 28-9：實作檔案
+
+| 檔案 | 變更 |
+|------|------|
+| `server/routes/training.js` | pLimit 工具、translate batching+concurrency、TTS SSE+pLimit(10)、recording worker pool、model fallback 統一、`GET /lang-regions` 擴充 `_translated`、`POST /reseed-lang-regions`、`POST /reseed-all-lang-regions`、translate `sync_regions`、TTS `sync_regions_audio` |
+| `client/src/components/training/editor/blocks/LanguageImagePanel.tsx` | translatedBlocks state、createIndependentRegions 翻譯 seed、getDisplayRegions inherit 翻譯、唯讀語音預覽、status badge、voice mode tabs、re-seed 按鈕、modal audio preview + coords transform、diff mode、timestamps |
+| `client/src/components/training/editor/CourseEditor.tsx` | TTS SSE consumer、sync checkboxes、bulk re-seed 按鈕 |
+| `client/src/components/training/editor/recordingpanel.tsx` | Worker pool concurrency=5, timeout 60s |
+| `docs/training-platform-design.md` | §8.7.10 翻譯效能優化 + 獨立區域翻譯 Seed 工作流 |
+| `docs/training-platform-implementation.md` | §28 Phase 3B-9 |

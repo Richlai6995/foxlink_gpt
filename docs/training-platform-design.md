@@ -1449,6 +1449,64 @@ foreach slide:
        翻譯 regions_json → slide_translations.regions_json  ← 新增
 ```
 
+#### 8.7.10 翻譯效能優化 + 獨立區域翻譯 Seed 工作流
+
+> 日期：2026-04-12
+
+##### 翻譯效能優化
+
+| 項目 | Before | After | 加速倍率 |
+|------|--------|-------|---------|
+| Slide 翻譯 | 逐張 LLM call, CONCURRENCY=3 | **Batching 5 張/call**, CONCURRENCY=10, slides+quiz 同步並行 | ~6× |
+| TTS 語音生成 | 同步 POST + 120s timeout | **SSE 流式 + pLimit(10) 並行** | ~10× |
+| Recording 分析 | 逐步 30s timeout | **Worker pool concurrency=5, 60s timeout** | ~5× |
+| 模型版本 | gemini-2.0-flash (hardcoded) | **env GEMINI_MODEL_FLASH (gemini-3-flash-preview)** | ~1.3× |
+
+翻譯流程改動：
+- content_json + notes + regions_json 合併成**單一 LLM call** per slide（不再分開呼叫）
+- Batch 失敗自動 **fallback 到逐張重試**，Map<id> 校驗 LLM 回傳順序
+- `extractSlideResult` 對缺欄位 throw，避免 partial response 誤清既有欄位
+- regions_json source 改讀 **zh-TW row**（master），full overwrite 語義
+
+##### 獨立區域翻譯 Seed 工作流
+
+**問題**：使用者按「建立獨立區域」時，原本從 zh-TW 主語言複製 → 得到中文 regions，必須逐張逐欄重新翻譯。
+
+**解法**：`GET /slides/:sid/lang-regions` 擴充回傳 `_translated` 欄位（從 `slide_translations.content_json` 解析 hotspot block 的 translated regions + intro），前端 seed 優先使用翻譯結果。
+
+```
+createIndependentRegions() 資料來源:
+  有翻譯 → slide_translations.content_json (en/vi) 的 regions + intro + audio_url
+  無翻譯 → fallback 到 zh-TW block.regions（舊行為）
+```
+
+##### 新增 API 路由
+
+```
+POST /slides/:sid/reseed-lang-regions        ← 單張 slide 同步: keep coords, update text+audio
+POST /courses/:id/reseed-all-lang-regions    ← 整課程 bulk sync (SSE)
+```
+
+##### 翻譯/TTS Sync Flags
+
+`POST /courses/:id/translate` 新增 `sync_regions: true` flag → 翻譯完自動同步已存在的 regions_json
+`POST /courses/:id/generate-lang-tts` 新增 `sync_regions_audio: true` flag → TTS 完自動同步 audio URL
+
+##### LanguageImagePanel 新增功能
+
+| 功能 | 說明 |
+|------|------|
+| 翻譯 Seed | 建立獨立區域自動帶入翻譯文字+語音 |
+| Inherit 顯示翻譯 | 繼承模式下顯示翻譯文字而非 zh-TW |
+| 唯讀語音預覽 | Inherit 模式下預覽翻譯 intro + region narration + audio player |
+| Status Badge | 語言 tab 顯示 ✓(翻譯) ★(獨立) 🔊(語音) |
+| Mode 切換 | [全部][🎯 導引][📝 測驗][🔍 探索] 過濾語音欄位 |
+| 從翻譯結果同步 | 按鈕一鍵 re-seed（保留座標更新文字+音檔） |
+| Modal 語音預覽 | 點擊 region 自動播放 audio_url + narration tooltip |
+| 整體座標調整 | X偏移/Y偏移/縮放 → 批次套用到所有 region |
+| Diff 模式 | zh-TW vs 翻譯 side-by-side 文字比較 |
+| 翻譯時間戳 | 顯示 translated_at |
+
 ---
 
 ## 9. AI 輔助出題
