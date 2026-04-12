@@ -215,7 +215,7 @@ function startAnnotationMode(screenshotDataUrl) {
   let currentColor = '#ef4444';
   let strokeWidth = 3;
   let textFontSize = 16; // Canvas-pixel font size for text tool (independent from strokeWidth)
-  let stepCounter = badgeStepCount; // 從 badge 繼承，避免繼續錄製時步驟號回退
+  let stepCounter = markerBase; // 從 markerBase 起算（popup 的「標記起始值」）
   let annotations = [];
   let undoStack = [];
   let isDrawing = false;
@@ -1428,7 +1428,7 @@ function startAnnotationMode(screenshotDataUrl) {
     if (annotations.length === 0) return;
     undoStack = [...annotations];
     annotations = [];
-    stepCounter = badgeStepCount; // 重置為 badge 基數，不是 0
+    stepCounter = markerBase; // 重置為標記起始值
     redrawAll();
   }
 
@@ -1516,7 +1516,12 @@ function startAnnotationMode(screenshotDataUrl) {
 chrome.runtime.onMessage.addListener((msg) => {
   if (msg.type === 'RECORDING_STATE') {
     isRecording = msg.isRecording;
+    if (msg.isRecording) {
+      if (msg.stepCount !== undefined) badgeStepCount = msg.stepCount;
+      if (msg.markerStart !== undefined) markerBase = msg.markerStart;
+    }
     toggleBadge(isRecording);
+    updateBadgeCount();
   }
   // Hide/show badge for clean screenshots
   if (msg.type === 'HIDE_BADGE' && badgeEl) {
@@ -1567,6 +1572,7 @@ window.addEventListener('message', (e) => {
       console.log('[FOXLINK Training] Recording started OK');
       isRecording = true;
       badgeStepCount = resumeStepCount; // 從平台繼承步驟數
+      markerBase = e.data.markerStart || resumeStepCount; // 標記起始值（平台可傳，否則同步步驟數）
       toggleBadge(true);
       updateBadgeCount();
     });
@@ -1715,6 +1721,7 @@ function highlightElement(el) {
 // Recording badge — floating control on target page
 let badgeEl = null;
 let badgeStepCount = 0;
+let markerBase = 0; // 標記起始值（①②③ 從 markerBase+1 開始）
 let badgeLang = 'zh-TW'; // Phase 3A-2: current screenshot language
 function toggleBadge(show) {
   if (show && !badgeEl) {

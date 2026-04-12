@@ -50,10 +50,16 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     persistRecordingState();
     startKeepAlive();
     updateBadge();
-    // Notify all tabs
+    // Notify all tabs (pass stepCount + markerStart so content.js can sync)
+    const markerStart = msg.markerStart || 0;
     chrome.tabs.query({}, tabs => {
       tabs.forEach(tab => {
-        chrome.tabs.sendMessage(tab.id, { type: 'RECORDING_STATE', isRecording: true }).catch(() => {});
+        chrome.tabs.sendMessage(tab.id, {
+          type: 'RECORDING_STATE',
+          isRecording: true,
+          stepCount: stepCounter,
+          markerStart
+        }).catch(() => {});
       });
     });
     sendResponse({ ok: true });

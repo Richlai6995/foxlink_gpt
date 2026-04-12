@@ -1103,7 +1103,7 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
                 />
               </div>
 
-              {/* Phase 3A-2: Step number + Language — auto-resort on change */}
+              {/* Phase 3A-2: Step number + Language — duplicate alert, no auto-resort */}
               <div className="flex gap-2">
                 <div className="flex-1">
                   <label className="text-[10px] mb-1 block" style={{ color: 'var(--t-text-dim)' }}>步驟編號</label>
@@ -1111,10 +1111,19 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
                     value={selectedStep.stepNumber || steps.indexOf(selectedStep) + 1}
                     onChange={e => {
                       const newNum = Number(e.target.value)
-                      setSteps(prev => {
-                        const updated = prev.map(s => s.id === selectedStep.id ? { ...s, stepNumber: newNum } : s)
-                        return sortSteps(updated)
-                      })
+                      if (!newNum || newNum < 1) return
+                      // 檢查同語言是否有重複編號（排除自己）
+                      const conflict = steps.find(s =>
+                        s.id !== selectedStep.id &&
+                        s.stepNumber === newNum &&
+                        (s.lang || 'zh-TW') === (selectedStep.lang || 'zh-TW')
+                      )
+                      if (conflict) {
+                        alert(`步驟編號 ${newNum} 已被使用（${conflict.lang || 'zh-TW'}），請選擇其他編號`)
+                        return
+                      }
+                      // 只改這一張，不動其他步驟的編號和順序
+                      setSteps(prev => prev.map(s => s.id === selectedStep.id ? { ...s, stepNumber: newNum } : s))
                     }}
                     className="w-full border rounded px-2 py-1 text-[10px]"
                     style={{ backgroundColor: 'var(--t-bg-input)', borderColor: 'var(--t-border)', color: 'var(--t-text)' }}
@@ -1126,10 +1135,8 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
                     value={selectedStep.lang || 'zh-TW'}
                     onChange={e => {
                       const newLang = e.target.value
-                      setSteps(prev => {
-                        const updated = prev.map(s => s.id === selectedStep.id ? { ...s, lang: newLang } : s)
-                        return sortSteps(updated)
-                      })
+                      // 只改語言，不重排
+                      setSteps(prev => prev.map(s => s.id === selectedStep.id ? { ...s, lang: newLang } : s))
                     }}
                     className="w-full border rounded px-2 py-1 text-[10px]"
                     style={{ backgroundColor: 'var(--t-bg-input)', borderColor: 'var(--t-border)', color: 'var(--t-text)' }}
@@ -1300,12 +1307,11 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
             stepNumber={stepToAnnotate.stepNumber || (steps.indexOf(stepToAnnotate) + 1)}
             lang={stepToAnnotate.lang || 'zh-TW'}
             onSave={(newAnnotations, meta) => {
-              setSteps(prev => {
-                const updated = prev.map(s => s.id === annotatingStepId
+              setSteps(prev =>
+                prev.map(s => s.id === annotatingStepId
                   ? { ...s, annotations: newAnnotations, ...(meta?.stepNumber ? { stepNumber: meta.stepNumber } : {}), ...(meta?.lang ? { lang: meta.lang } : {}) }
                   : s)
-                return sortSteps(updated)
-              })
+              )
               setAnnotatingStepId(null)
             }}
             onClose={() => setAnnotatingStepId(null)}

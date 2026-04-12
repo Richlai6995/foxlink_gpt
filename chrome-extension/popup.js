@@ -98,7 +98,15 @@ $('startBtn').addEventListener('click', () => {
   const sessionId = $('sessionId').value.trim();
   if (!sessionId) return alert('請輸入 Session ID（從訓練平台取得）');
 
-  chrome.runtime.sendMessage({ type: 'START_RECORDING', sessionId }, () => {
+  const startStep = parseInt($('startStep').value) || 0;
+  const startMarker = parseInt($('startMarker').value) || 0;
+
+  chrome.runtime.sendMessage({
+    type: 'START_RECORDING',
+    sessionId,
+    stepCount: startStep,
+    markerStart: startMarker
+  }, () => {
     showRecordingState(true);
   });
 });

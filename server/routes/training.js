@@ -4753,11 +4753,23 @@ router.post('/recording/:sessionId/step', upload.single('screenshot'), async (re
     const viewportJson = typeof viewport === 'string' ? viewport : JSON.stringify(viewport || null);
     const annotationsStr = annotations_json || null;
 
+    // 防重複 step_number：若已存在同編號則自動取 MAX+1
+    let finalStepNumber = Number(step_number) || 0;
+    const existing = await db.prepare(
+      'SELECT COUNT(*) AS cnt FROM recording_steps WHERE session_id=? AND step_number=?'
+    ).get(sessionId, finalStepNumber);
+    if (existing?.cnt > 0) {
+      const maxRow = await db.prepare(
+        'SELECT MAX(step_number) AS mx FROM recording_steps WHERE session_id=?'
+      ).get(sessionId);
+      finalStepNumber = (maxRow?.mx || 0) + 1;
+    }
+
     const result = await db.prepare(`
       INSERT INTO recording_steps (session_id, step_number, action_type, screenshot_url,
                                     annotations_json, lang, element_json, viewport_json, page_url, page_title)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(sessionId, step_number || 0, action_type || 'screenshot',
+    `).run(sessionId, finalStepNumber, action_type || 'screenshot',
            screenshotUrl, annotationsStr, lang || 'zh-TW',
            elementJson, viewportJson, page_url || null, page_title || null);
 
@@ -5079,9 +5091,29 @@ router.post('/recording/:sessionId/generate', async (req, res) => {
     const session = await db.prepare('SELECT * FROM recording_sessions WHERE id=?').get(req.params.sessionId);
     if (!session) return res.status(404).json({ error: '錄製工作階段不存在' });
 
-    const steps = await db.prepare(
-      'SELECT * FROM recording_steps WHERE session_id=? ORDER BY step_number'
+    // 按 id（插入順序）取出，然後重新編號消除重複 step_number
+    const rawSteps = await db.prepare(
+      'SELECT * FROM recording_steps WHERE session_id=? ORDER BY step_number, id'
     ).all(req.params.sessionId);
+
+    // 檢查是否有重複 step_number，有的話按順序重新編號
+    const seenNumbers = new Set();
+    let hasDuplicates = false;
+    for (const s of rawSteps) {
+      if (seenNumbers.has(s.step_number)) { hasDuplicates = true; break; }
+      seenNumbers.add(s.step_number);
+    }
+    const steps = rawSteps;
+    if (hasDuplicates) {
+      console.log(`[Training] generate: detected duplicate step_numbers in session ${req.params.sessionId}, renumbering...`);
+      for (let i = 0; i < steps.length; i++) {
+        const newNum = i + 1;
+        if (steps[i].step_number !== newNum) {
+          await db.prepare('UPDATE recording_steps SET step_number=? WHERE id=?').run(newNum, steps[i].id);
+          steps[i].step_number = newNum;
+        }
+      }
+    }
 
     let courseId = session.course_id;
     let lessonId = session.lesson_id;
