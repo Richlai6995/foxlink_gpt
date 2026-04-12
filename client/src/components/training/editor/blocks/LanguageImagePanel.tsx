@@ -44,6 +44,7 @@ export default function LanguageImagePanel({ slideId, blockIndex, currentImage, 
   const [copyDropdown, setCopyDropdown] = useState(false)
   const [narrationLoading, setNarrationLoading] = useState(false)
   const [ttsLoading, setTtsLoading] = useState<string | null>(null)
+  const [voiceMode, setVoiceMode] = useState<'all' | 'guided' | 'test' | 'explore'>('all')
   // Language-specific intro narrations stored in langRegions[lang]._intro
   const [langIntro, setLangIntro] = useState<Record<string, any>>({})
   const [editModal, setEditModal] = useState(false)
@@ -505,17 +506,25 @@ export default function LanguageImagePanel({ slideId, blockIndex, currentImage, 
           <Globe size={12} style={{ color: 'var(--t-accent)' }} />
           <span className="text-[11px] font-semibold" style={{ color: 'var(--t-text-muted)' }}>多語底圖 & 互動區域</span>
           <div className="flex gap-1 ml-auto">
-            {LANGS.map(l => (
-              <button key={l.code} onClick={() => { setActiveLang(l.code); setModalSelected(null) }}
-                className="text-[10px] px-2 py-0.5 rounded transition"
-                style={{
-                  backgroundColor: activeLang === l.code ? 'var(--t-accent-bg)' : 'var(--t-bg-card)',
-                  color: activeLang === l.code ? 'white' : 'var(--t-text-dim)',
-                  border: `1px solid ${activeLang === l.code ? 'var(--t-accent)' : 'var(--t-border)'}`
-                }}>
-                {l.flag} {l.code.toUpperCase()}
-              </button>
-            ))}
+            {LANGS.map(l => {
+              const tb = translatedBlocks[l.code]?.[String(blockIndex)]
+              const hasT = !!(tb?.regions?.length)
+              const hasAudio = !!(tb?.intro?.slide_narration_audio)
+              const hasIndep = !!(langRegions[l.code]?.[String(blockIndex)])
+              return (
+                <button key={l.code} onClick={() => { setActiveLang(l.code); setModalSelected(null) }}
+                  className="text-[10px] px-2 py-0.5 rounded transition flex items-center gap-0.5"
+                  style={{
+                    backgroundColor: activeLang === l.code ? 'var(--t-accent-bg)' : 'var(--t-bg-card)',
+                    color: activeLang === l.code ? 'white' : 'var(--t-text-dim)',
+                    border: `1px solid ${activeLang === l.code ? 'var(--t-accent)' : 'var(--t-border)'}`
+                  }}>
+                  {l.flag} {l.code.toUpperCase()}
+                  {hasIndep ? ' ★' : hasT ? ' ✓' : ''}
+                  {hasAudio ? ' 🔊' : ''}
+                </button>
+              )
+            })}
           </div>
         </div>
 
@@ -697,11 +706,29 @@ export default function LanguageImagePanel({ slideId, blockIndex, currentImage, 
         {/* ═══ Voice editing for independent regions ═══ */}
         {hasIndependentRegions && (
           <div className="border-t pt-2 mt-2 space-y-2" style={{ borderColor: 'var(--t-border)' }}>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <Volume2 size={10} style={{ color: 'var(--t-accent)' }} />
               <span className="text-[10px] font-semibold" style={{ color: 'var(--t-text-muted)' }}>
                 {LANGS.find(l => l.code === activeLang)?.flag} {activeLang.toUpperCase()} 語音導覽
               </span>
+              {/* Mode filter tabs */}
+              <div className="flex gap-0.5 ml-1">
+                {([
+                  { key: 'all', label: '全部' },
+                  { key: 'guided', label: '🎯 導引' },
+                  { key: 'test', label: '📝 測驗' },
+                  { key: 'explore', label: '🔍 探索' },
+                ] as const).map(m => (
+                  <button key={m.key} onClick={() => setVoiceMode(m.key)}
+                    className="text-[8px] px-1.5 py-0.5 rounded transition"
+                    style={{
+                      backgroundColor: voiceMode === m.key ? 'var(--t-accent-subtle)' : 'transparent',
+                      color: voiceMode === m.key ? 'var(--t-accent)' : 'var(--t-text-dim)',
+                    }}>
+                    {m.label}
+                  </button>
+                ))}
+              </div>
               <div className="flex-1" />
               <button
                 onClick={async () => {
@@ -797,10 +824,10 @@ export default function LanguageImagePanel({ slideId, blockIndex, currentImage, 
             {langIntro[activeLang] && (
               <div className="text-[9px] space-y-1.5 rounded p-1.5" style={{ backgroundColor: 'var(--t-bg-card)', border: '1px solid var(--t-border)' }}>
                 {[
-                  { key: 'slide_narration', audioKey: 'slide_narration_audio', icon: '🎯', label: '導引', ttsId: 'intro_guided' },
-                  { key: 'slide_narration_test', audioKey: 'slide_narration_test_audio', icon: '📝', label: '測驗', ttsId: 'intro_test' },
-                  { key: 'slide_narration_explore', audioKey: 'slide_narration_explore_audio', icon: '🔍', label: '探索', ttsId: 'intro_explore' },
-                ].map(m => langIntro[activeLang]?.[m.key] && (
+                  { key: 'slide_narration', audioKey: 'slide_narration_audio', icon: '🎯', label: '導引', ttsId: 'intro_guided', mode: 'guided' as const },
+                  { key: 'slide_narration_test', audioKey: 'slide_narration_test_audio', icon: '📝', label: '測驗', ttsId: 'intro_test', mode: 'test' as const },
+                  { key: 'slide_narration_explore', audioKey: 'slide_narration_explore_audio', icon: '🔍', label: '探索', ttsId: 'intro_explore', mode: 'explore' as const },
+                ].filter(m => voiceMode === 'all' || voiceMode === m.mode).map(m => langIntro[activeLang]?.[m.key] && (
                   <div key={m.key} className="space-y-0.5">
                     <div className="flex items-center gap-1">
                       <span style={{ color: 'var(--t-text-dim)' }}>{m.icon} {m.label}</span>
@@ -839,10 +866,10 @@ export default function LanguageImagePanel({ slideId, blockIndex, currentImage, 
                   <span className="font-medium" style={{ color: 'var(--t-text-secondary)' }}>{idx + 1}. {r.label || r.id}</span>
                 </div>
                 {[
-                  { field: 'narration', audioField: 'audio_url', icon: '📖', label: '導引' },
-                  { field: 'test_hint', audioField: 'test_audio_url', icon: '📝', label: '測驗' },
-                  { field: 'explore_desc', audioField: 'explore_audio_url', icon: '🔍', label: '探索' },
-                ].map(m => (
+                  { field: 'narration', audioField: 'audio_url', icon: '📖', label: '導引', mode: 'guided' as const },
+                  { field: 'test_hint', audioField: 'test_audio_url', icon: '📝', label: '測驗', mode: 'test' as const },
+                  { field: 'explore_desc', audioField: 'explore_audio_url', icon: '🔍', label: '探索', mode: 'explore' as const },
+                ].filter(m => voiceMode === 'all' || voiceMode === m.mode).map(m => (
                   <div key={m.field} className="space-y-0.5">
                     <div className="flex items-center gap-1">
                       <span style={{ color: 'var(--t-text-dim)' }}>{m.icon} {m.label}</span>
