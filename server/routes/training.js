@@ -6380,7 +6380,7 @@ router.get('/slides/:sid/lang-regions', async (req, res) => {
 
     // 2. Translated block data — extract hotspot regions + intro from content_json per lang
     const transRows = await db.prepare(
-      `SELECT lang, content_json FROM slide_translations WHERE slide_id=? AND content_json IS NOT NULL AND lang<>'zh-TW'`
+      `SELECT lang, content_json, TO_CHAR(translated_at,'YYYY-MM-DD HH24:MI:SS') AS translated_at FROM slide_translations WHERE slide_id=? AND content_json IS NOT NULL AND lang<>'zh-TW'`
     ).all(req.params.sid);
     const _translated = {};
     const INTRO_FIELDS = [
@@ -6404,6 +6404,7 @@ router.get('/slides/:sid/lang-regions', async (req, res) => {
         };
       });
       if (Object.keys(langBlocks).length > 0) {
+        langBlocks._translated_at = row.translated_at || null;
         _translated[row.lang] = langBlocks;
       }
     }

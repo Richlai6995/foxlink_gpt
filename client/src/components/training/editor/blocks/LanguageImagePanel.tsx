@@ -71,6 +71,7 @@ export default function LanguageImagePanel({ slideId, blockIndex, currentImage, 
   const compLeftInputRef = useRef<HTMLInputElement>(null)
   const compRightInputRef = useRef<HTMLInputElement>(null)
   const modalAudioRef = useRef<HTMLAudioElement>(null)
+  const [diffMode, setDiffMode] = useState(false)
   // Bulk coords transform
   const [coordsOffsetX, setCoordsOffsetX] = useState(0)
   const [coordsOffsetY, setCoordsOffsetY] = useState(0)
@@ -675,6 +676,11 @@ export default function LanguageImagePanel({ slideId, blockIndex, currentImage, 
             : hasTranslation
               ? '已有翻譯結果。點「建立獨立區域」會帶入翻譯文字和語音，您只需調整框的位置。'
               : '點「建立獨立區域」可為此語言建立獨立的互動區域集合（從主語言複製為起點）。'}
+          {translatedBlocks[activeLang]?._translated_at && (
+            <span className="ml-1" style={{ color: 'var(--t-text-dim)' }}>
+              · 翻譯: {translatedBlocks[activeLang]._translated_at}
+            </span>
+          )}
         </p>
 
         {/* ═══ Translated voice preview (readonly, inherit mode) ═══ */}
@@ -931,6 +937,76 @@ export default function LanguageImagePanel({ slideId, blockIndex, currentImage, 
                 {!r.audio_url && !r.narration && <div style={{ color: '#f59e0b' }}>⚠ 無語音</div>}
               </div>
             ))}
+          </div>
+        )}
+
+        {/* ═══ Diff mode: zh-TW vs translated/independent ═══ */}
+        {(hasTranslation || hasIndependentRegions) && (
+          <div className="border-t pt-1 mt-1" style={{ borderColor: 'var(--t-border)' }}>
+            <button onClick={() => setDiffMode(!diffMode)}
+              className="text-[9px] px-2 py-0.5 rounded transition flex items-center gap-1"
+              style={{ color: diffMode ? 'var(--t-accent)' : 'var(--t-text-dim)', border: `1px solid ${diffMode ? 'var(--t-accent)' : 'var(--t-border)'}` }}>
+              <Eye size={9} /> {diffMode ? '收合 Diff' : '📊 Diff 模式'}
+            </button>
+            {diffMode && (
+              <div className="mt-1.5 space-y-1 text-[9px]">
+                <div className="grid grid-cols-2 gap-1 font-semibold mb-1" style={{ color: 'var(--t-text-muted)' }}>
+                  <span>🇹🇼 主語言 (zh-TW)</span>
+                  <span>{LANGS.find(l => l.code === activeLang)?.flag} {activeLang.toUpperCase()} {hasIndependentRegions ? '(獨立)' : '(翻譯)'}</span>
+                </div>
+                {/* Intro diff */}
+                {(() => {
+                  const zhIntro = regions[0] || {} as any // main block's intro fields live on the block itself
+                  const tgtIntro = hasIndependentRegions ? (langIntro[activeLang] || {}) : (translatedBlock?.intro || {})
+                  const fields = [
+                    { key: 'slide_narration', label: '🎯 導引 Intro' },
+                    { key: 'slide_narration_test', label: '📝 測驗 Intro' },
+                    { key: 'slide_narration_explore', label: '🔍 探索 Intro' },
+                  ]
+                  return fields.map(f => {
+                    // intro fields are on the parent block, accessed via regions prop's parent
+                    // For diff, we need to get zh-TW intro from the block itself — pass through props or use regions[0]
+                    // Actually the zh-TW intro is NOT in regions — it's on the hotspot block
+                    // We don't have direct access here. Skip intro diff for now, only do region text diff.
+                    return null
+                  })
+                })()}
+                {/* Per-region diff */}
+                {regions.filter(r => r.correct).map((zhR, idx) => {
+                  const tgtR = hasIndependentRegions
+                    ? independentRegions.find(r => r.id === zhR.id)
+                    : translatedBlock?.regions?.find((r: any) => r.id === zhR.id)
+                  return (
+                    <div key={zhR.id} className="rounded p-1" style={{ backgroundColor: 'var(--t-bg-card)', border: '1px solid var(--t-border)' }}>
+                      <div className="font-medium mb-0.5" style={{ color: 'var(--t-text-secondary)' }}>{idx + 1}. {zhR.label || zhR.id}</div>
+                      {[
+                        { field: 'narration', icon: '📖' },
+                        { field: 'test_hint', icon: '📝' },
+                        { field: 'explore_desc', icon: '🔍' },
+                        { field: 'feedback', icon: '✅' },
+                      ].map(f => {
+                        const zhVal = zhR[f.field] || ''
+                        const tgtVal = tgtR?.[f.field] || ''
+                        if (!zhVal && !tgtVal) return null
+                        return (
+                          <div key={f.field} className="grid grid-cols-2 gap-1 mb-0.5">
+                            <div className="rounded px-1 py-0.5" style={{ backgroundColor: 'rgba(59,130,246,0.06)', color: 'var(--t-text)' }}>
+                              <span style={{ color: 'var(--t-text-dim)' }}>{f.icon}</span> {zhVal || <span className="italic opacity-40">—</span>}
+                            </div>
+                            <div className="rounded px-1 py-0.5" style={{
+                              backgroundColor: tgtVal && tgtVal !== zhVal ? 'rgba(34,197,94,0.08)' : 'rgba(239,68,68,0.06)',
+                              color: 'var(--t-text)'
+                            }}>
+                              {tgtVal || <span className="italic opacity-40" style={{ color: '#ef4444' }}>未翻譯</span>}
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )
+                })}
+              </div>
+            )}
           </div>
         )}
       </div>
