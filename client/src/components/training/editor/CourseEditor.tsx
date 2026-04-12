@@ -877,6 +877,18 @@ export default function CourseEditor() {
                           }} />
                         </div>
                       </div>
+                      {status.untranslated_slides?.length > 0 && (
+                        <div className="mt-1 p-2 rounded-lg text-[11px] space-y-0.5" style={{ backgroundColor: 'var(--t-bg-hover)' }}>
+                          <div className="font-medium text-amber-400 mb-1">⚠ 未翻譯投影片：</div>
+                          {status.untranslated_slides.map((s: any) => (
+                            <div key={s.id} className="flex items-center gap-2" style={{ color: 'var(--t-text-dim)' }}>
+                              <span className="text-slate-500">#{s.sort_order}</span>
+                              <span className="px-1 py-0.5 rounded text-[9px] bg-slate-600/30 text-slate-400">{s.slide_type}</span>
+                              <span className="truncate">{s.lesson_title}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                       {status.last_translated && (
                         <div style={{ color: 'var(--t-text-dim)' }}>
                           {t('training.lastTranslated')}{new Date(status.last_translated).toLocaleString('zh-TW')}

@@ -4173,11 +4173,22 @@ router.get('/courses/:id/translate/status', loadCoursePermission, async (req, re
         )`
       ).get(lang, ...lessonFilter.params);
 
+      // Find untranslated slides with lesson context
+      const untranslated = await db.prepare(
+        `SELECT cs.id, cs.sort_order, cs.slide_type, cl.id AS lesson_id, cl.title AS lesson_title
+         FROM course_slides cs
+         JOIN course_lessons cl ON cs.lesson_id = cl.id
+         WHERE cs.${lessonFilter.clause}
+           AND cs.id NOT IN (SELECT slide_id FROM slide_translations WHERE lang=?)
+         ORDER BY cl.sort_order, cs.sort_order`
+      ).all(...lessonFilter.params, lang);
+
       status[lang] = {
         course_translated: !!ct,
         slides_total: slideTotal?.total || 0,
         slides_translated: slideTrans?.cnt || 0,
-        last_translated: ct?.translated_at || null
+        last_translated: ct?.translated_at || null,
+        untranslated_slides: untranslated || []
       };
     }
     res.json(status);
