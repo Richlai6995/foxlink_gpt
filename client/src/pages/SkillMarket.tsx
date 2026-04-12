@@ -53,6 +53,7 @@ interface Skill {
 }
 
 interface Model { key: string; name: string }
+interface LovItem { id: string | number; name: string; name_zh?: string; name_en?: string; name_vi?: string }
 
 const ICONS = [
   // AI / 技術
@@ -156,10 +157,10 @@ export default function SkillMarket() {
     const [viewingSkill, setViewingSkill] = useState<Skill | null>(null)
     const [sharingSkill, setSharingSkill] = useState<Skill | null>(null)
     const [editorTab, setEditorTab] = useState<'basic' | 'tools' | 'io' | 'advanced' | 'history'>('basic')
-    const [availableKbs, setAvailableKbs] = useState<{id: string; name: string}[]>([])
-    const [availableDifyKbs, setAvailableDifyKbs] = useState<{id: number; name: string}[]>([])
-    const [availableMcpServers, setAvailableMcpServers] = useState<{id: number; name: string}[]>([])
-    const [availableSkillsList, setAvailableSkillsList] = useState<{id: number; name: string}[]>([])
+    const [availableKbs, setAvailableKbs] = useState<LovItem[]>([])
+    const [availableDifyKbs, setAvailableDifyKbs] = useState<LovItem[]>([])
+    const [availableMcpServers, setAvailableMcpServers] = useState<LovItem[]>([])
+    const [availableSkillsList, setAvailableSkillsList] = useState<LovItem[]>([])
     const [versionHistory, setVersionHistory] = useState<any[]>([])
     const [showVersions, setShowVersions] = useState(false)
     const [trans, setTrans] = useState<TranslationData>({})
@@ -182,10 +183,11 @@ export default function SkillMarket() {
             ])
             setSkills(skillsRes.data)
             setModels(modelsRes.data)
-            setAvailableKbs(kbRes.data.map((k: any) => ({ id: k.id, name: k.name })))
-            setAvailableDifyKbs(difyRes.data.map((k: any) => ({ id: k.id, name: k.name })))
-            setAvailableMcpServers(mcpRes.data.map((s: any) => ({ id: s.id, name: s.name })))
-            setAvailableSkillsList(skillsRes.data.map((s: any) => ({ id: s.id, name: s.name })))
+            const pickLov = (d: any) => ({ id: d.id, name: d.name, name_zh: d.name_zh, name_en: d.name_en, name_vi: d.name_vi })
+            setAvailableKbs(kbRes.data.map(pickLov))
+            setAvailableDifyKbs(difyRes.data.map(pickLov))
+            setAvailableMcpServers(mcpRes.data.map(pickLov))
+            setAvailableSkillsList(skillsRes.data.map(pickLov))
         } catch (e: any) {
             setError(e.response?.data?.error || t('skills.loadFailed'))
         } finally {
@@ -660,11 +662,11 @@ export default function SkillMarket() {
                                             <div className="space-y-1 max-h-40 overflow-y-auto border rounded p-2">
                                                 {availableKbs.map(kb => (
                                                     <label key={kb.id} className="flex items-center gap-2 text-sm">
-                                                        <input type="checkbox" checked={form.self_kb_ids.includes(kb.id)}
+                                                        <input type="checkbox" checked={form.self_kb_ids.includes(kb.id as string)}
                                                             onChange={e => setField('self_kb_ids', e.target.checked
-                                                                ? [...form.self_kb_ids, kb.id]
+                                                                ? [...form.self_kb_ids, kb.id as string]
                                                                 : form.self_kb_ids.filter(x => x !== kb.id))} />
-                                                        {kb.name}
+                                                        {localName(kb)}
                                                     </label>
                                                 ))}
                                                 {availableKbs.length === 0 && <span className="text-xs text-slate-400">{t('skills.noKbAvailable')}</span>}
@@ -677,11 +679,11 @@ export default function SkillMarket() {
                                             <div className="space-y-1 max-h-40 overflow-y-auto border rounded p-2">
                                                 {availableDifyKbs.map(kb => (
                                                     <label key={kb.id} className="flex items-center gap-2 text-sm">
-                                                        <input type="checkbox" checked={form.dify_kb_ids.includes(kb.id)}
+                                                        <input type="checkbox" checked={form.dify_kb_ids.includes(kb.id as number)}
                                                             onChange={e => setField('dify_kb_ids', e.target.checked
-                                                                ? [...form.dify_kb_ids, kb.id]
+                                                                ? [...form.dify_kb_ids, kb.id as number]
                                                                 : form.dify_kb_ids.filter(x => x !== kb.id))} />
-                                                        {kb.name}
+                                                        {localName(kb)}
                                                     </label>
                                                 ))}
                                                 {availableDifyKbs.length === 0 && <span className="text-xs text-slate-400">{t('skills.noApiConnector')}</span>}

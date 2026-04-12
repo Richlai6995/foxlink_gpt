@@ -29,13 +29,15 @@ import {
 /*  Types                                                              */
 /* ------------------------------------------------------------------ */
 
+interface LovItem { id: string | number; name: string; name_zh?: string; name_en?: string; name_vi?: string }
+
 interface WorkflowEditorProps {
   value: string
   onChange: (json: string) => void
-  availableKbs?: { id: string; name: string }[]
-  availableDifyKbs?: { id: number; name: string }[]
-  availableMcpServers?: { id: number; name: string }[]
-  availableSkills?: { id: number; name: string }[]
+  availableKbs?: LovItem[]
+  availableDifyKbs?: LovItem[]
+  availableMcpServers?: LovItem[]
+  availableSkills?: LovItem[]
   availableModels?: { key: string; name: string }[]
 }
 
@@ -306,10 +308,10 @@ interface NodeConfigPanelProps {
   node: Node
   onChange: (data: Record<string, unknown>) => void
   onDelete: () => void
-  availableKbs: { id: string; name: string }[]
-  availableDifyKbs: { id: number; name: string }[]
-  availableMcpServers: { id: number; name: string }[]
-  availableSkills: { id: number; name: string }[]
+  availableKbs: LovItem[]
+  availableDifyKbs: LovItem[]
+  availableMcpServers: LovItem[]
+  availableSkills: LovItem[]
   availableModels: { key: string; name: string }[]
   allNodes: Node[]
 }
@@ -318,7 +320,12 @@ function NodeConfigPanel({
   node, onChange, availableKbs, availableDifyKbs,
   availableMcpServers, availableSkills, availableModels, allNodes,
 }: NodeConfigPanelProps) {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
+  const ln = (item: LovItem) => {
+    if (i18n.language === 'en') return item.name_en || item.name
+    if (i18n.language === 'vi') return item.name_vi || item.name
+    return item.name_zh || item.name
+  }
   const d = node.data as Record<string, unknown>
   const nodeType = d.nodeType as string
   const set = (field: string, value: unknown) => onChange({ [field]: value })
@@ -369,7 +376,7 @@ function NodeConfigPanel({
           <SelectInput
             value={d.kb_id as string}
             onChange={v => set('kb_id', v)}
-            options={availableKbs.map(k => ({ value: k.id, label: k.name }))}
+            options={availableKbs.map(k => ({ value: k.id as string, label: ln(k) }))}
             placeholder={t('workflow.selectKb')}
           />
           <FieldLabel>{t('workflow.labelQuery')}</FieldLabel>
@@ -384,7 +391,7 @@ function NodeConfigPanel({
           <SelectInput
             value={String(d.dify_kb_id ?? '')}
             onChange={v => set('dify_kb_id', v ? parseInt(v) : null)}
-            options={availableDifyKbs.map(k => ({ value: String(k.id), label: k.name }))}
+            options={availableDifyKbs.map(k => ({ value: String(k.id), label: ln(k) }))}
             placeholder={t('workflow.selectApiConnector')}
           />
           <FieldLabel>{t('workflow.labelQuery')}</FieldLabel>
@@ -399,7 +406,7 @@ function NodeConfigPanel({
           <SelectInput
             value={String(d.server_id ?? '')}
             onChange={v => set('server_id', v ? parseInt(v) : null)}
-            options={availableMcpServers.map(s => ({ value: String(s.id), label: s.name }))}
+            options={availableMcpServers.map(s => ({ value: String(s.id), label: ln(s) }))}
             placeholder={t('workflow.selectMcpServer')}
           />
           <FieldLabel>{t('workflow.labelToolName')}</FieldLabel>
@@ -416,7 +423,7 @@ function NodeConfigPanel({
           <SelectInput
             value={String(d.skill_id ?? '')}
             onChange={v => set('skill_id', v ? parseInt(v) : null)}
-            options={availableSkills.map(s => ({ value: String(s.id), label: s.name }))}
+            options={availableSkills.map(s => ({ value: String(s.id), label: ln(s) }))}
             placeholder={t('workflow.selectSkill')}
           />
           <FieldLabel>{t('workflow.labelInput')}</FieldLabel>
