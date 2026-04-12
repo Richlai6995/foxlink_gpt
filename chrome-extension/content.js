@@ -261,10 +261,15 @@ function startAnnotationMode(screenshotDataUrl) {
 
   const colors = [
     { hex: '#ef4444', name: '紅' },
-    { hex: '#3b82f6', name: '藍' },
-    { hex: '#22c55e', name: '綠' },
+    { hex: '#f97316', name: '橙' },
     { hex: '#eab308', name: '黃' },
+    { hex: '#22c55e', name: '綠' },
+    { hex: '#06b6d4', name: '青' },
+    { hex: '#3b82f6', name: '藍' },
+    { hex: '#a855f7', name: '紫' },
+    { hex: '#ec4899', name: '粉' },
     { hex: '#ffffff', name: '白' },
+    { hex: '#000000', name: '黑' },
   ];
 
   const widths = [
@@ -299,55 +304,93 @@ function startAnnotationMode(screenshotDataUrl) {
   sep1.style.cssText = 'width:1px;height:24px;background:rgba(255,255,255,0.2);margin:0 4px;';
   toolbar.appendChild(sep1);
 
-  // Color buttons
-  const colorGroup = document.createElement('div');
-  colorGroup.style.cssText = 'display:flex;gap:3px;align-items:center;';
-  const colorLabel = document.createElement('span');
-  colorLabel.textContent = '顏色:';
-  colorLabel.style.cssText = 'color:rgba(255,255,255,0.6);font-size:11px;margin-right:2px;';
-  colorGroup.appendChild(colorLabel);
+  // ── Color popover ──
+  const colorWrap = document.createElement('div');
+  colorWrap.style.cssText = 'position:relative;';
+  const colorTrigger = document.createElement('button');
+  colorTrigger.title = '顏色';
+  colorTrigger.style.cssText = `
+    width: 30px; height: 30px; border-radius: 6px; cursor: pointer;
+    border: 2px solid rgba(255,255,255,0.3);
+    background: ${currentColor}; transition: all 0.15s;
+  `;
+  const colorPop = document.createElement('div');
+  colorPop.style.cssText = `
+    position: absolute; top: 100%; left: 50%; transform: translateX(-50%);
+    margin-top: 6px; background: rgba(15,23,42,0.97);
+    border: 1px solid rgba(255,255,255,0.2); border-radius: 8px;
+    padding: 8px; z-index: 20; display: none;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+  `;
+  const colorGrid = document.createElement('div');
+  colorGrid.style.cssText = 'display:grid;grid-template-columns:repeat(5,1fr);gap:4px;';
   const colorBtns = {};
   colors.forEach(c => {
-    const btn = document.createElement('button');
-    btn.style.cssText = `
-      width: 22px; height: 22px; border-radius: 50%;
-      border: 2px solid transparent; cursor: pointer;
+    const swatch = document.createElement('button');
+    swatch.style.cssText = `
+      width: 24px; height: 24px; border-radius: 50%; cursor: pointer;
+      border: 2px solid ${c.hex === currentColor ? '#fff' : 'transparent'};
       background: ${c.hex}; transition: all 0.15s;
+      box-shadow: inset 0 0 0 1px rgba(255,255,255,0.15);
     `;
-    btn.title = c.name;
-    btn.addEventListener('click', () => selectColor(c.hex));
-    colorGroup.appendChild(btn);
-    colorBtns[c.hex] = btn;
+    swatch.title = c.name;
+    swatch.addEventListener('click', (e) => { e.stopPropagation(); selectColor(c.hex); colorPop.style.display = 'none'; });
+    colorGrid.appendChild(swatch);
+    colorBtns[c.hex] = swatch;
   });
-  toolbar.appendChild(colorGroup);
+  colorPop.appendChild(colorGrid);
+  colorWrap.appendChild(colorTrigger);
+  colorWrap.appendChild(colorPop);
+  toolbar.appendChild(colorWrap);
+  colorTrigger.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const isOpen = colorPop.style.display !== 'none';
+    closeAllPopovers();
+    if (!isOpen) colorPop.style.display = 'block';
+  });
 
-  // Separator
-  const sep2 = sep1.cloneNode();
-  toolbar.appendChild(sep2);
-
-  // Width buttons
-  const widthGroup = document.createElement('div');
-  widthGroup.style.cssText = 'display:flex;gap:3px;align-items:center;';
-  const widthLabel = document.createElement('span');
-  widthLabel.textContent = '粗細:';
-  widthLabel.style.cssText = 'color:rgba(255,255,255,0.6);font-size:11px;margin-right:2px;';
-  widthGroup.appendChild(widthLabel);
+  // ── Width / Font-size popover ──
+  const widthWrap = document.createElement('div');
+  widthWrap.style.cssText = 'position:relative;margin-left:2px;';
+  const widthTrigger = document.createElement('button');
+  widthTrigger.title = '粗細 / 字級';
+  widthTrigger.textContent = '━';
+  widthTrigger.style.cssText = `
+    width: 30px; height: 30px; border-radius: 6px; cursor: pointer;
+    border: 2px solid rgba(255,255,255,0.3);
+    background: rgba(255,255,255,0.1); color: #fff; font-size: 14px;
+    display: flex; align-items: center; justify-content: center; transition: all 0.15s;
+  `;
+  const widthPop = document.createElement('div');
+  widthPop.style.cssText = `
+    position: absolute; top: 100%; left: 50%; transform: translateX(-50%);
+    margin-top: 6px; background: rgba(15,23,42,0.97);
+    border: 1px solid rgba(255,255,255,0.2); border-radius: 8px;
+    padding: 8px; z-index: 20; display: none;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.5); min-width: 130px;
+  `;
+  // Width row
+  const widthSecLabel = document.createElement('div');
+  widthSecLabel.textContent = '粗細';
+  widthSecLabel.style.cssText = 'color:rgba(255,255,255,0.5);font-size:10px;margin-bottom:4px;';
+  widthPop.appendChild(widthSecLabel);
+  const widthRow = document.createElement('div');
+  widthRow.style.cssText = 'display:flex;gap:4px;';
   const widthBtns = {};
   widths.forEach(w => {
     const btn = document.createElement('button');
     btn.textContent = w.label;
     btn.style.cssText = `
-      width: 28px; height: 28px; border: 2px solid transparent; border-radius: 4px;
+      flex:1; height: 30px; border: 2px solid ${w.val === strokeWidth ? '#3b82f6' : 'transparent'}; border-radius: 4px;
       background: rgba(255,255,255,0.1); color: #fff; font-size: 14px;
       cursor: pointer; display: flex; align-items: center; justify-content: center;
     `;
-    btn.addEventListener('click', () => selectWidth(w.val));
-    widthGroup.appendChild(btn);
+    btn.addEventListener('click', (e) => { e.stopPropagation(); selectWidth(w.val); });
+    widthRow.appendChild(btn);
     widthBtns[w.val] = btn;
   });
-  toolbar.appendChild(widthGroup);
-
-  // Text font size selector (shown only when text tool is active)
+  widthPop.appendChild(widthRow);
+  // Font-size row (visible when text tool active)
   const FONT_SIZES = [
     { val: 12, label: 'XS' },
     { val: 14, label: 'S' },
@@ -355,40 +398,52 @@ function startAnnotationMode(screenshotDataUrl) {
     { val: 24, label: 'L' },
     { val: 32, label: 'XL' },
   ];
-  const textSizeGroup = document.createElement('div');
-  textSizeGroup.style.cssText = 'display:none;gap:3px;align-items:center;margin-left:6px;';
-  const textSizeLabel = document.createElement('span');
-  textSizeLabel.textContent = '字級:';
-  textSizeLabel.style.cssText = 'color:rgba(255,255,255,0.6);font-size:11px;margin-right:2px;';
-  textSizeGroup.appendChild(textSizeLabel);
+  const textSizeSection = document.createElement('div');
+  textSizeSection.style.cssText = 'display:none;margin-top:8px;border-top:1px solid rgba(255,255,255,0.1);padding-top:8px;';
+  const textSizeSecLabel = document.createElement('div');
+  textSizeSecLabel.textContent = '字級';
+  textSizeSecLabel.style.cssText = 'color:rgba(255,255,255,0.5);font-size:10px;margin-bottom:4px;';
+  textSizeSection.appendChild(textSizeSecLabel);
+  const textSizeRow = document.createElement('div');
+  textSizeRow.style.cssText = 'display:flex;gap:4px;';
   const textSizeBtns = {};
   FONT_SIZES.forEach(s => {
     const btn = document.createElement('button');
     btn.textContent = s.label;
     btn.title = `${s.val}px`;
     btn.style.cssText = `
-      min-width: 28px; height: 28px; padding: 0 6px;
-      border: 2px solid transparent; border-radius: 4px;
+      flex:1; height: 28px; border: 2px solid ${s.val === textFontSize ? '#3b82f6' : 'transparent'}; border-radius: 4px;
       background: rgba(255,255,255,0.1); color: #fff; font-size: 11px; font-weight: 600;
       cursor: pointer; display: flex; align-items: center; justify-content: center;
     `;
-    btn.addEventListener('click', () => selectTextSize(s.val));
-    textSizeGroup.appendChild(btn);
+    btn.addEventListener('click', (e) => { e.stopPropagation(); selectTextSize(s.val); });
+    textSizeRow.appendChild(btn);
     textSizeBtns[s.val] = btn;
   });
-  toolbar.appendChild(textSizeGroup);
+  textSizeSection.appendChild(textSizeRow);
+  widthPop.appendChild(textSizeSection);
+  widthWrap.appendChild(widthTrigger);
+  widthWrap.appendChild(widthPop);
+  toolbar.appendChild(widthWrap);
+  widthTrigger.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const isOpen = widthPop.style.display !== 'none';
+    closeAllPopovers();
+    if (!isOpen) widthPop.style.display = 'block';
+  });
 
-  // Separator
-  const sep3 = sep1.cloneNode();
-  toolbar.appendChild(sep3);
+  // Close all popovers helper
+  function closeAllPopovers() { colorPop.style.display = 'none'; widthPop.style.display = 'none'; }
 
-  // Action buttons
+  // ── Action buttons (icon-only) ──
+  const sep2 = document.createElement('div');
+  sep2.style.cssText = 'width:1px;height:24px;background:rgba(255,255,255,0.2);margin:0 2px;';
+  toolbar.appendChild(sep2);
   const actionGroup = document.createElement('div');
-  actionGroup.style.cssText = 'display:flex;gap:4px;align-items:center;';
-
-  const undoBtn = makeActionBtn('↩ 復原', () => undo());
-  const redoBtn = makeActionBtn('↪ 重做', () => redo());
-  const clearBtn = makeActionBtn('🗑 清除', () => clearAll());
+  actionGroup.style.cssText = 'display:flex;gap:2px;align-items:center;';
+  const undoBtn = makeActionBtn('↩', () => undo(), '復原');
+  const redoBtn = makeActionBtn('↪', () => redo(), '重做');
+  const clearBtn = makeActionBtn('🗑', () => clearAll(), '清除');
   actionGroup.appendChild(undoBtn);
   actionGroup.appendChild(redoBtn);
   actionGroup.appendChild(clearBtn);
@@ -680,7 +735,6 @@ function startAnnotationMode(screenshotDataUrl) {
 
   function selectTool(id) {
     currentTool = id;
-    // Switching away from move tool clears selection so handles disappear
     if (id !== 'move') {
       selectedAnnotation = null;
       resizeHandle = null;
@@ -691,11 +745,10 @@ function startAnnotationMode(screenshotDataUrl) {
       btn.style.borderColor = k === id ? '#3b82f6' : 'transparent';
       btn.style.background = k === id ? 'rgba(59,130,246,0.3)' : 'rgba(255,255,255,0.1)';
     });
-    // Swap toolbar groups: text tool shows font-size selector, others show stroke width
-    const isText = id === 'text';
-    widthGroup.style.display = isText ? 'none' : 'flex';
-    textSizeGroup.style.display = isText ? 'flex' : 'none';
+    // text tool → show font-size section in width popover
+    textSizeSection.style.display = id === 'text' ? 'block' : 'none';
     canvas.style.cursor = id === 'move' ? 'default' : id === 'text' ? 'text' : 'crosshair';
+    closeAllPopovers();
     redrawAll();
   }
 
@@ -714,11 +767,10 @@ function startAnnotationMode(screenshotDataUrl) {
 
   function selectColor(hex) {
     currentColor = hex;
+    colorTrigger.style.background = hex;
     Object.entries(colorBtns).forEach(([k, btn]) => {
       btn.style.borderColor = k === hex ? '#fff' : 'transparent';
-      btn.style.transform = k === hex ? 'scale(1.2)' : 'scale(1)';
     });
-    // Live-update text input theme if user switches color mid-edit
     if (textInputWrap.style.display === 'block') {
       applyTextInputTheme();
     }
@@ -729,15 +781,19 @@ function startAnnotationMode(screenshotDataUrl) {
     Object.entries(widthBtns).forEach(([k, btn]) => {
       btn.style.borderColor = Number(k) === val ? '#3b82f6' : 'transparent';
     });
+    const w = widths.find(w => w.val === val);
+    if (w) widthTrigger.textContent = w.label;
   }
 
-  function makeActionBtn(label, onClick) {
+  function makeActionBtn(icon, onClick, tip) {
     const btn = document.createElement('button');
-    btn.textContent = label;
+    btn.textContent = icon;
+    btn.title = tip || '';
     btn.style.cssText = `
-      padding: 4px 10px; border: 1px solid rgba(255,255,255,0.2); border-radius: 4px;
-      background: transparent; color: #cbd5e1; font-size: 12px;
+      width: 30px; height: 30px; border: 1px solid rgba(255,255,255,0.2); border-radius: 4px;
+      background: transparent; color: #cbd5e1; font-size: 14px;
       cursor: pointer; transition: all 0.15s;
+      display: flex; align-items: center; justify-content: center;
     `;
     btn.addEventListener('click', onClick);
     btn.addEventListener('mouseenter', () => btn.style.background = 'rgba(255,255,255,0.1)');
@@ -1203,6 +1259,7 @@ function startAnnotationMode(screenshotDataUrl) {
 
   // ── 8. Mouse events ──
   canvas.addEventListener('mousedown', (e) => {
+    closeAllPopovers();
     if (e.button !== 0) return;
     const pt = getCanvasCoords(e);
 
