@@ -533,7 +533,7 @@ export default function ChatPage() {
         if (vars.length > 0) {
           setSkillVarModal({
             skillId: sk.id,
-            skillName: sk.name,
+            skillName: localName(sk),
             variables: vars,
             values: {},
           })
@@ -905,13 +905,13 @@ export default function ChatPage() {
                     }
                     <button onClick={() => setMcpHidden(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n })}
                       className={`w-4 h-4 rounded-full flex items-center justify-center flex-shrink-0 bg-blue-500 hover:bg-blue-700 text-white transition-all ${isHid ? '' : 'opacity-0 group-hover:opacity-100'}`}
-                      title={isHid ? '取消隱藏' : '隱藏'}>
+                      title={isHid ? t('common.unhide') : t('common.hide')}>
                       {isHid ? <Eye size={9} /> : <EyeOff size={9} />}
                     </button>
                     <div className="flex-1 min-w-0 cursor-pointer" onClick={() => { if (!isHid) setSelectedMcpIds(prev => { const n = new Set(prev); picked ? n.delete(id) : n.add(id); return n }) }}>
                       <p className="text-xs font-medium text-slate-800 whitespace-nowrap flex items-center gap-1">
                         {localName(s)}
-                        {isOverrideTool('mcp', id) && <FlaskConical size={10} className="text-orange-400 flex-shrink-0" title="測試模式" />}
+                        {isOverrideTool('mcp', id) && <FlaskConical size={10} className="text-orange-400 flex-shrink-0" title={t('common.testMode')} />}
                       </p>
                       {localDesc(s) && <p className="text-xs text-slate-400 whitespace-nowrap">{localDesc(s)}</p>}
                     </div>
@@ -937,7 +937,7 @@ export default function ChatPage() {
                         {t('chat.topbar.mcpEmpty')}
                         {isAdmin && <div className="mt-2"><a href="/admin" className="text-blue-500 hover:underline flex items-center justify-center gap-1"><Settings size={10} />前往設定授權</a></div>}
                       </div>
-                    ) : <>{_vis.map(s => <McpRow key={s.id} s={s} isHid={false} />)}{_hid.length > 0 && <><div className="px-2 pt-1.5 pb-0.5 text-xs text-slate-400 border-t border-slate-100 mt-1">已隱藏 ({_hid.length})</div>{_hid.map(s => <McpRow key={s.id} s={s} isHid={true} />)}</>}</>}
+                    ) : <>{_vis.map(s => <McpRow key={s.id} s={s} isHid={false} />)}{_hid.length > 0 && <><div className="px-2 pt-1.5 pb-0.5 text-xs text-slate-400 border-t border-slate-100 mt-1">{t('common.hidden')} ({_hid.length})</div>{_hid.map(s => <McpRow key={s.id} s={s} isHid={true} />)}</>}</>}
                   </div>
                   <div className="p-2 border-t border-slate-100 flex justify-between items-center">
                     <button onClick={() => setSelectedMcpIds(new Set())} className="text-xs text-slate-400 hover:text-red-500 px-2 py-1">{t('chat.topbar.clear')}</button>
@@ -986,13 +986,13 @@ export default function ChatPage() {
                     }
                     <button onClick={() => setDifyHidden(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n })}
                       className={`w-4 h-4 rounded-full flex items-center justify-center flex-shrink-0 bg-blue-500 hover:bg-blue-700 text-white transition-all ${isHid ? '' : 'opacity-0 group-hover:opacity-100'}`}
-                      title={isHid ? '取消隱藏' : '隱藏'}>
+                      title={isHid ? t('common.unhide') : t('common.hide')}>
                       {isHid ? <Eye size={9} /> : <EyeOff size={9} />}
                     </button>
                     <div className="flex-1 min-w-0 cursor-pointer" onClick={() => { if (!isHid) setSelectedDifyIds(prev => { const n = new Set(prev); picked ? n.delete(id) : n.add(id); return n }) }}>
                       <p className="text-xs font-medium text-slate-800 whitespace-nowrap flex items-center gap-1">
                         {localName(s)}
-                        {isOverrideTool('dify', id) && <FlaskConical size={10} className="text-orange-400 flex-shrink-0" title="測試模式" />}
+                        {isOverrideTool('dify', id) && <FlaskConical size={10} className="text-orange-400 flex-shrink-0" title={t('common.testMode')} />}
                       </p>
                       {localDesc(s) && <p className="text-xs text-slate-400 whitespace-nowrap">{localDesc(s)}</p>}
                     </div>
@@ -1018,7 +1018,7 @@ export default function ChatPage() {
                         {t('chat.topbar.difyEmpty')}
                         {isAdmin && <div className="mt-2"><a href="/admin" className="text-blue-500 hover:underline flex items-center justify-center gap-1"><Settings size={10} />前往設定授權</a></div>}
                       </div>
-                    ) : <>{_vis.map(s => <DifyRow key={s.id} s={s} isHid={false} />)}{_hid.length > 0 && <><div className="px-2 pt-1.5 pb-0.5 text-xs text-slate-400 border-t border-slate-100 mt-1">已隱藏 ({_hid.length})</div>{_hid.map(s => <DifyRow key={s.id} s={s} isHid={true} />)}</>}</>}
+                    ) : <>{_vis.map(s => <DifyRow key={s.id} s={s} isHid={false} />)}{_hid.length > 0 && <><div className="px-2 pt-1.5 pb-0.5 text-xs text-slate-400 border-t border-slate-100 mt-1">{t('common.hidden')} ({_hid.length})</div>{_hid.map(s => <DifyRow key={s.id} s={s} isHid={true} />)}</>}</>}
                   </div>
                   <div className="p-2 border-t border-slate-100 flex justify-between items-center">
                     <button onClick={() => setSelectedDifyIds(new Set())} className="text-xs text-slate-400 hover:text-red-500 px-2 py-1">{t('chat.topbar.clear')}</button>
@@ -1067,13 +1067,13 @@ export default function ChatPage() {
                     }
                     <button onClick={() => setKbHidden(prev => { const n = new Set(prev); n.has(sid) ? n.delete(sid) : n.add(sid); return n })}
                       className={`w-4 h-4 rounded-full flex items-center justify-center flex-shrink-0 bg-blue-500 hover:bg-blue-700 text-white transition-all ${isHid ? '' : 'opacity-0 group-hover:opacity-100'}`}
-                      title={isHid ? '取消隱藏' : '隱藏'}>
+                      title={isHid ? t('common.unhide') : t('common.hide')}>
                       {isHid ? <Eye size={9} /> : <EyeOff size={9} />}
                     </button>
                     <div className="flex-1 min-w-0 cursor-pointer" onClick={() => { if (!isHid) setSelectedKbIds(prev => { const n = new Set(prev); picked ? n.delete(sid) : n.add(sid); return n }) }}>
                       <p className="text-xs font-medium text-slate-800 whitespace-nowrap flex items-center gap-1">
                         {localName(s)}
-                        {isOverrideTool('kb', sid) && <FlaskConical size={10} className="text-orange-400 flex-shrink-0" title="測試模式" />}
+                        {isOverrideTool('kb', sid) && <FlaskConical size={10} className="text-orange-400 flex-shrink-0" title={t('common.testMode')} />}
                       </p>
                       {localDesc(s) && <p className="text-xs text-slate-400 whitespace-nowrap">{localDesc(s)}</p>}
                     </div>
@@ -1099,7 +1099,7 @@ export default function ChatPage() {
                         {t('chat.topbar.kbEmpty')}
                         {isAdmin && <div className="mt-2"><a href="/admin" className="text-blue-500 hover:underline flex items-center justify-center gap-1"><Settings size={10} />前往設定授權</a></div>}
                       </div>
-                    ) : <>{_vis.map(s => <KbRow key={s.id} s={s} isHid={false} />)}{_hid.length > 0 && <><div className="px-2 pt-1.5 pb-0.5 text-xs text-slate-400 border-t border-slate-100 mt-1">已隱藏 ({_hid.length})</div>{_hid.map(s => <KbRow key={s.id} s={s} isHid={true} />)}</>}</>}
+                    ) : <>{_vis.map(s => <KbRow key={s.id} s={s} isHid={false} />)}{_hid.length > 0 && <><div className="px-2 pt-1.5 pb-0.5 text-xs text-slate-400 border-t border-slate-100 mt-1">{t('common.hidden')} ({_hid.length})</div>{_hid.map(s => <KbRow key={s.id} s={s} isHid={true} />)}</>}</>}
                   </div>
                   <div className="p-2 border-t border-slate-100 flex justify-between items-center">
                     <button onClick={() => setSelectedKbIds(new Set())} className="text-xs text-slate-400 hover:text-red-500 px-2 py-1">{t('chat.topbar.clear')}</button>
@@ -1115,7 +1115,7 @@ export default function ChatPage() {
               {/* Attached skill badges */}
               {sessionSkills.map(sk => (
                 <span key={sk.id} className="inline-flex items-center gap-1 text-xs px-2 py-0.5 bg-purple-100 text-purple-700 border border-purple-200 rounded-full font-medium">
-                  {sk.icon} {sk.name}
+                  {sk.icon} {localName(sk)}
                 </span>
               ))}
               <button
@@ -1133,8 +1133,9 @@ export default function ChatPage() {
               {/* Skill selection dropdown panel */}
               {showSkillPanel && (() => {
                 const _base = applyOrder(allSkills, skillOrder)
-                const _vis = _base.filter(sk => !skillHidden.has(sk.id) && (!skillSearch || sk.name.includes(skillSearch) || (sk.description||'').includes(skillSearch)))
-                const _hid = _base.filter(sk => skillHidden.has(sk.id) && (!skillSearch || sk.name.includes(skillSearch) || (sk.description||'').includes(skillSearch)))
+                const _skMatch = (sk: any) => !skillSearch || localName(sk).includes(skillSearch) || (localDesc(sk)||'').includes(skillSearch)
+                const _vis = _base.filter(sk => !skillHidden.has(sk.id) && _skMatch(sk))
+                const _hid = _base.filter(sk => skillHidden.has(sk.id) && _skMatch(sk))
                 return (
                   <div className="absolute top-full right-0 mt-1 w-80 bg-white border border-slate-200 rounded-xl shadow-2xl z-50">
                     <div className="p-3 border-b border-slate-100">
@@ -1180,7 +1181,7 @@ export default function ChatPage() {
                               </button>
                               <button onClick={() => setSkillHidden(prev => { const n = new Set(prev); n.add(sk.id); return n })}
                                 className="w-4 h-4 rounded-full flex items-center justify-center flex-shrink-0 bg-blue-500 hover:bg-blue-700 text-white transition-all opacity-0 group-hover:opacity-100"
-                                title="隱藏">
+                                title={t('common.hide')}>
                                 <EyeOff size={9} />
                               </button>
                               <span className="text-lg leading-none flex-shrink-0">{sk.icon}</span>
@@ -1192,14 +1193,14 @@ export default function ChatPage() {
                           )
                         })}
                         {_hid.length > 0 && <>
-                          <div className="px-2 pt-1.5 pb-0.5 text-xs text-slate-400 border-t border-slate-100 mt-1">已隱藏 ({_hid.length})</div>
+                          <div className="px-2 pt-1.5 pb-0.5 text-xs text-slate-400 border-t border-slate-100 mt-1">{t('common.hidden')} ({_hid.length})</div>
                           {_hid.map(sk => (
                             <div key={sk.id} className="flex items-center gap-2 px-2 py-1.5 rounded-lg border border-transparent opacity-40 hover:opacity-70 transition group">
                               {!skillSearch && <GripVertical size={12} className="text-slate-300 flex-shrink-0" />}
                               <div className="w-4 h-4 flex-shrink-0" />
                               <button onClick={() => setSkillHidden(prev => { const n = new Set(prev); n.delete(sk.id); return n })}
                                 className="w-4 h-4 rounded-full flex items-center justify-center flex-shrink-0 bg-blue-500 hover:bg-blue-700 text-white transition-all"
-                                title="取消隱藏">
+                                title={t('common.unhide')}>
                                 <Eye size={9} />
                               </button>
                               <span className="text-lg leading-none flex-shrink-0">{sk.icon}</span>

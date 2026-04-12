@@ -34,11 +34,11 @@ const TYPE_ICONS = {
   skill: <Sparkles size={12} className="text-purple-500 flex-shrink-0" />,
 }
 
-const TYPE_LABELS: Record<string, string> = {
-  mcp: 'MCP',
-  dify: 'API 連接器',
-  kb: '自建知識庫',
-  skill: '技能',
+const TYPE_LABEL_KEYS: Record<string, string> = {
+  mcp: 'adminOverride.typeMcp',
+  dify: 'adminOverride.typeDify',
+  kb: 'adminOverride.typeKb',
+  skill: 'adminOverride.typeSkill',
 }
 
 export default function AdminOverridePopover() {
@@ -129,7 +129,7 @@ export default function AdminOverridePopover() {
       <div>
         <div className="px-3 py-1 text-xs font-semibold text-slate-500 flex items-center gap-1.5 bg-slate-50 border-y border-slate-100">
           {TYPE_ICONS[type]}
-          {TYPE_LABELS[type]}
+          {t(TYPE_LABEL_KEYS[type])}
         </div>
         {unauthorized.map((item) => (
           <div key={item.id} className="flex items-center gap-2 px-3 py-2 hover:bg-slate-50">
@@ -144,7 +144,7 @@ export default function AdminOverridePopover() {
               className="flex items-center gap-1 text-xs px-2 py-1 bg-blue-50 text-blue-600 hover:bg-blue-100 rounded-lg flex-shrink-0 border border-blue-200"
             >
               <Plus size={10} />
-              加入
+              {t('adminOverride.addBtn')}
             </button>
           </div>
         ))}
@@ -156,17 +156,17 @@ export default function AdminOverridePopover() {
     <div className="border-t border-slate-100 mt-1">
       <div className="px-3 py-1 text-xs font-semibold text-slate-500 bg-orange-50 border-y border-orange-100 flex items-center gap-1">
         <FlaskConical size={11} className="text-orange-500" />
-        已加入測試（{overrideTools.length}）
+        {t('adminOverride.addedSection', { count: overrideTools.length })}
       </div>
       {overrideTools.map((tool) => (
         <div key={`${tool.type}-${tool.id}`} className="flex items-center gap-2 px-3 py-1.5 hover:bg-slate-50">
           {TYPE_ICONS[tool.type]}
           <span className="flex-1 text-xs text-slate-700 truncate">{tool.name_zh || tool.name}</span>
-          <span className="text-xs text-slate-400 mr-1">{TYPE_LABELS[tool.type]}</span>
+          <span className="text-xs text-slate-400 mr-1">{t(TYPE_LABEL_KEYS[tool.type])}</span>
           <button
             onClick={() => removeTool(tool.type, tool.id)}
             className="text-slate-400 hover:text-red-500 flex-shrink-0"
-            title="移除"
+            title={t('adminOverride.remove')}
           >
             <X size={12} />
           </button>
@@ -194,7 +194,7 @@ export default function AdminOverridePopover() {
             ? 'text-orange-600 border-orange-300 bg-orange-50 hover:bg-orange-100'
             : 'text-slate-400 border-slate-200 hover:text-orange-500 hover:border-orange-300'
         }`}
-        title="管理員測試模式 — 加入未授權工具"
+        title={t('adminOverride.triggerTitle')}
       >
         <FlaskConical size={13} />
         {overrideCount > 0 && (
@@ -212,7 +212,7 @@ export default function AdminOverridePopover() {
           <div className="p-3 border-b border-slate-100 flex items-center justify-between">
             <span className="text-sm font-semibold text-slate-800 flex items-center gap-1.5">
               <FlaskConical size={14} className="text-orange-500" />
-              管理員測試模式
+              {t('adminOverride.title')}
             </span>
             <button onClick={() => setOpen(false)} className="text-slate-400 hover:text-slate-600">
               <X size={14} />
@@ -229,7 +229,7 @@ export default function AdminOverridePopover() {
                   : 'text-slate-500 hover:text-slate-700'
               }`}
             >
-              工具
+              {t('adminOverride.tabTools')}
               {overrideTools.length > 0 && (
                 <span className="ml-1 px-1.5 py-0.5 bg-orange-100 text-orange-600 rounded-full text-xs">
                   {overrideTools.length}
@@ -244,7 +244,7 @@ export default function AdminOverridePopover() {
                   : 'text-slate-500 hover:text-slate-700'
               }`}
             >
-              文件範本
+              {t('adminOverride.tabTemplates')}
               {overrideTemplates.length > 0 && (
                 <span className="ml-1 px-1.5 py-0.5 bg-orange-100 text-orange-600 rounded-full text-xs">
                   {overrideTemplates.length}
@@ -256,13 +256,13 @@ export default function AdminOverridePopover() {
           {/* Content */}
           <div className="max-h-72 overflow-y-auto">
             {loading ? (
-              <div className="text-center py-8 text-slate-400 text-xs">載入中...</div>
+              <div className="text-center py-8 text-slate-400 text-xs">{t('adminOverride.loading')}</div>
             ) : activeTab === 'tools' ? (
               <>
                 {noUnauthorizedTools && overrideTools.length === 0 ? (
                   <div className="text-center py-6 text-slate-400 text-xs px-4">
                     <FlaskConical size={24} className="mx-auto mb-2 opacity-30" />
-                    所有工具皆已授權，無需測試模式
+                    {t('adminOverride.allAuthorized')}
                   </div>
                 ) : (
                   <>
@@ -284,7 +284,7 @@ export default function AdminOverridePopover() {
                 {unauthorizedTemplatesFiltered.length === 0 && overrideTemplates.length === 0 ? (
                   <div className="text-center py-6 text-slate-400 text-xs px-4">
                     <FileText size={24} className="mx-auto mb-2 opacity-30" />
-                    所有範本皆已授權
+                    {t('adminOverride.allTemplatesAuthorized')}
                   </div>
                 ) : (
                   <>
@@ -302,7 +302,7 @@ export default function AdminOverridePopover() {
                               className="flex items-center gap-1 text-xs px-2 py-1 bg-blue-50 text-blue-600 hover:bg-blue-100 rounded-lg flex-shrink-0 border border-blue-200"
                             >
                               <Plus size={10} />
-                              加入
+                              {t('adminOverride.addBtn')}
                             </button>
                           </div>
                         ))}
@@ -312,7 +312,7 @@ export default function AdminOverridePopover() {
                       <div className="border-t border-slate-100 mt-1">
                         <div className="px-3 py-1 text-xs font-semibold text-slate-500 bg-orange-50 border-y border-orange-100 flex items-center gap-1">
                           <FlaskConical size={11} className="text-orange-500" />
-                          已加入測試（{overrideTemplates.length}）
+                          {t('adminOverride.addedSection', { count: overrideTemplates.length })}
                         </div>
                         {overrideTemplates.map((tpl) => (
                           <div key={tpl.id} className="flex items-center gap-2 px-3 py-1.5 hover:bg-slate-50">
@@ -322,7 +322,7 @@ export default function AdminOverridePopover() {
                             <button
                               onClick={() => removeTemplate(String(tpl.id))}
                               className="text-slate-400 hover:text-red-500 flex-shrink-0"
-                              title="移除"
+                              title={t('adminOverride.remove')}
                             >
                               <X size={12} />
                             </button>
@@ -338,7 +338,7 @@ export default function AdminOverridePopover() {
 
           {/* Footer */}
           <div className="p-2 border-t border-slate-100 flex items-center justify-between">
-            <span className="text-xs text-slate-400">登出後自動清除</span>
+            <span className="text-xs text-slate-400">{t('adminOverride.footer')}</span>
             {overrideCount > 0 && (
               <button
                 className="text-xs text-slate-500 hover:text-red-500 px-2 py-1"
@@ -350,7 +350,7 @@ export default function AdminOverridePopover() {
                   setOpen(false)
                 }}
               >
-                清除全部
+                {t('adminOverride.clearAll')}
               </button>
             )}
           </div>

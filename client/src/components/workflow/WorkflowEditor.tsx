@@ -1,4 +1,5 @@
 import { useCallback, useState, useRef, useMemo, useEffect } from 'react'
+import { useTranslation } from 'react-i18next'
 import {
   ReactFlow,
   Background,
@@ -40,7 +41,7 @@ interface WorkflowEditorProps {
 
 interface NodeDef {
   type: string
-  label: string
+  labelKey: string
   icon: LucideIcon
   color: string
   borderColor: string
@@ -51,17 +52,17 @@ interface NodeDef {
 /* ------------------------------------------------------------------ */
 
 const NODE_DEFS: NodeDef[] = [
-  { type: 'start', label: '開始', icon: Play, color: 'bg-green-100 text-green-700', borderColor: 'border-green-400' },
-  { type: 'llm', label: 'LLM', icon: Brain, color: 'bg-blue-100 text-blue-700', borderColor: 'border-blue-400' },
-  { type: 'knowledge_base', label: '知識庫', icon: BookOpen, color: 'bg-purple-100 text-purple-700', borderColor: 'border-purple-400' },
-  { type: 'dify', label: 'API', icon: Database, color: 'bg-orange-100 text-orange-700', borderColor: 'border-orange-400' },
-  { type: 'mcp_tool', label: 'MCP 工具', icon: Wrench, color: 'bg-slate-100 text-slate-700', borderColor: 'border-slate-400' },
-  { type: 'skill', label: '技能', icon: Zap, color: 'bg-yellow-100 text-yellow-700', borderColor: 'border-yellow-400' },
-  { type: 'code', label: '程式碼', icon: Code2, color: 'bg-gray-100 text-gray-700', borderColor: 'border-gray-400' },
-  { type: 'http_request', label: 'HTTP', icon: Globe, color: 'bg-cyan-100 text-cyan-700', borderColor: 'border-cyan-400' },
-  { type: 'condition', label: '條件', icon: GitBranch, color: 'bg-red-100 text-red-700', borderColor: 'border-red-400' },
-  { type: 'template', label: '範本', icon: FileText, color: 'bg-indigo-100 text-indigo-700', borderColor: 'border-indigo-400' },
-  { type: 'output', label: '輸出', icon: Flag, color: 'bg-emerald-100 text-emerald-700', borderColor: 'border-emerald-400' },
+  { type: 'start', labelKey: 'workflow.nodeStart', icon: Play, color: 'bg-green-100 text-green-700', borderColor: 'border-green-400' },
+  { type: 'llm', labelKey: 'workflow.nodeLlm', icon: Brain, color: 'bg-blue-100 text-blue-700', borderColor: 'border-blue-400' },
+  { type: 'knowledge_base', labelKey: 'workflow.nodeKnowledgeBase', icon: BookOpen, color: 'bg-purple-100 text-purple-700', borderColor: 'border-purple-400' },
+  { type: 'dify', labelKey: 'workflow.nodeApi', icon: Database, color: 'bg-orange-100 text-orange-700', borderColor: 'border-orange-400' },
+  { type: 'mcp_tool', labelKey: 'workflow.nodeMcpTool', icon: Wrench, color: 'bg-slate-100 text-slate-700', borderColor: 'border-slate-400' },
+  { type: 'skill', labelKey: 'workflow.nodeSkill', icon: Zap, color: 'bg-yellow-100 text-yellow-700', borderColor: 'border-yellow-400' },
+  { type: 'code', labelKey: 'workflow.nodeCode', icon: Code2, color: 'bg-gray-100 text-gray-700', borderColor: 'border-gray-400' },
+  { type: 'http_request', labelKey: 'workflow.nodeHttp', icon: Globe, color: 'bg-cyan-100 text-cyan-700', borderColor: 'border-cyan-400' },
+  { type: 'condition', labelKey: 'workflow.nodeCondition', icon: GitBranch, color: 'bg-red-100 text-red-700', borderColor: 'border-red-400' },
+  { type: 'template', labelKey: 'workflow.nodeTemplate', icon: FileText, color: 'bg-indigo-100 text-indigo-700', borderColor: 'border-indigo-400' },
+  { type: 'output', labelKey: 'workflow.nodeOutput', icon: Flag, color: 'bg-emerald-100 text-emerald-700', borderColor: 'border-emerald-400' },
 ]
 
 const getNodeDef = (nodeType: string) => NODE_DEFS.find(n => n.type === nodeType) || NODE_DEFS[0]
@@ -71,8 +72,10 @@ const getNodeDef = (nodeType: string) => NODE_DEFS.find(n => n.type === nodeType
 /* ------------------------------------------------------------------ */
 
 function WorkflowNode({ data, selected }: { data: Record<string, unknown>; selected?: boolean }) {
+  const { t } = useTranslation()
   const def = getNodeDef(data.nodeType as string)
   const Icon = def.icon
+  const defLabel = t(def.labelKey)
   return (
     <div
       className={`px-3 py-2 rounded-lg border-2 shadow-sm min-w-[140px] bg-white transition-colors ${
@@ -86,9 +89,9 @@ function WorkflowNode({ data, selected }: { data: Record<string, unknown>; selec
         </div>
         <div className="flex flex-col min-w-0">
           <span className="text-sm font-medium truncate max-w-[120px]">
-            {(data.label as string) || def.label}
+            {(data.label as string) || defLabel}
           </span>
-          <span className="text-[10px] text-slate-400">{def.label}</span>
+          <span className="text-[10px] text-slate-400">{defLabel}</span>
         </div>
       </div>
       {(data.nodeType as string) === 'condition' ? (
@@ -108,8 +111,8 @@ function WorkflowNode({ data, selected }: { data: Record<string, unknown>; selec
             style={{ left: '70%' }}
           />
           <div className="flex justify-between mt-1 px-2 text-[9px] text-slate-400">
-            <span>是</span>
-            <span>否</span>
+            <span>{t('workflow.condYes')}</span>
+            <span>{t('workflow.condNo')}</span>
           </div>
         </>
       ) : (
@@ -205,6 +208,7 @@ interface ConditionRule {
 function ConditionRulesEditor({
   rules, onChange, allNodes,
 }: { rules: ConditionRule[]; onChange: (r: ConditionRule[]) => void; allNodes: Node[] }) {
+  const { t } = useTranslation()
   const safeRules = Array.isArray(rules) && rules.length > 0 ? rules : [{ field: '', op: '==', value: '', target: '' }]
 
   const updateRule = (idx: number, patch: Partial<ConditionRule>) => {
@@ -220,18 +224,18 @@ function ConditionRulesEditor({
   }
 
   const opOptions = [
-    { value: '==', label: '等於' },
-    { value: '!=', label: '不等於' },
-    { value: '>', label: '大於' },
-    { value: '<', label: '小於' },
-    { value: '>=', label: '大於等於' },
-    { value: '<=', label: '小於等於' },
-    { value: 'contains', label: '包含' },
-    { value: 'not_contains', label: '不包含' },
-    { value: 'starts_with', label: '開頭為' },
-    { value: 'ends_with', label: '結尾為' },
-    { value: 'is_empty', label: '為空' },
-    { value: 'is_not_empty', label: '不為空' },
+    { value: '==', label: t('workflow.opEquals') },
+    { value: '!=', label: t('workflow.opNotEquals') },
+    { value: '>', label: t('workflow.opGt') },
+    { value: '<', label: t('workflow.opLt') },
+    { value: '>=', label: t('workflow.opGte') },
+    { value: '<=', label: t('workflow.opLte') },
+    { value: 'contains', label: t('workflow.opContains') },
+    { value: 'not_contains', label: t('workflow.opNotContains') },
+    { value: 'starts_with', label: t('workflow.opStartsWith') },
+    { value: 'ends_with', label: t('workflow.opEndsWith') },
+    { value: 'is_empty', label: t('workflow.opIsEmpty') },
+    { value: 'is_not_empty', label: t('workflow.opIsNotEmpty') },
   ]
 
   const nodeOptions = allNodes.map(n => ({
@@ -244,7 +248,7 @@ function ConditionRulesEditor({
       {safeRules.map((rule, idx) => (
         <div key={idx} className="p-2 bg-slate-50 rounded border border-slate-100 space-y-1.5">
           <div className="flex items-center justify-between">
-            <span className="text-[10px] text-slate-400 font-medium">規則 {idx + 1}</span>
+            <span className="text-[10px] text-slate-400 font-medium">{t('workflow.ruleLabel', { n: idx + 1 })}</span>
             {safeRules.length > 1 && (
               <button onClick={() => removeRule(idx)} className="text-red-400 hover:text-red-600">
                 <X size={12} />
@@ -255,7 +259,7 @@ function ConditionRulesEditor({
             type="text"
             value={rule.field || ''}
             onChange={e => updateRule(idx, { field: e.target.value })}
-            placeholder="欄位名稱"
+            placeholder={t('workflow.fieldName')}
             className="w-full px-2 py-1 text-xs border border-slate-200 rounded"
           />
           <div className="flex gap-1">
@@ -270,7 +274,7 @@ function ConditionRulesEditor({
               type="text"
               value={rule.value || ''}
               onChange={e => updateRule(idx, { value: e.target.value })}
-              placeholder="值"
+              placeholder={t('workflow.value')}
               className="flex-1 px-2 py-1 text-xs border border-slate-200 rounded"
             />
           </div>
@@ -279,7 +283,7 @@ function ConditionRulesEditor({
             onChange={e => updateRule(idx, { target: e.target.value })}
             className="w-full px-2 py-1 text-xs border border-slate-200 rounded bg-white"
           >
-            <option value="">目標節點...</option>
+            <option value="">{t('workflow.targetNode')}</option>
             {nodeOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
           </select>
         </div>
@@ -288,7 +292,7 @@ function ConditionRulesEditor({
         onClick={addRule}
         className="w-full px-2 py-1 text-xs text-blue-600 hover:bg-blue-50 rounded border border-dashed border-blue-300"
       >
-        + 新增規則
+        {t('workflow.addRule')}
       </button>
     </div>
   )
@@ -314,6 +318,7 @@ function NodeConfigPanel({
   node, onChange, availableKbs, availableDifyKbs,
   availableMcpServers, availableSkills, availableModels, allNodes,
 }: NodeConfigPanelProps) {
+  const { t } = useTranslation()
   const d = node.data as Record<string, unknown>
   const nodeType = d.nodeType as string
   const set = (field: string, value: unknown) => onChange({ [field]: value })
@@ -321,13 +326,13 @@ function NodeConfigPanel({
   return (
     <div className="space-y-0.5">
       {/* Label — always shown */}
-      <FieldLabel>節點名稱</FieldLabel>
-      <TextInput value={d.label as string} onChange={v => set('label', v)} placeholder="節點名稱" />
+      <FieldLabel>{t('workflow.labelNodeName')}</FieldLabel>
+      <TextInput value={d.label as string} onChange={v => set('label', v)} placeholder={t('workflow.labelNodeName')} />
 
       {/* start */}
       {nodeType === 'start' && (
         <>
-          <FieldLabel>變數 (JSON 陣列)</FieldLabel>
+          <FieldLabel>{t('workflow.labelVariables')}</FieldLabel>
           <TextArea
             value={d.variables as string || '[]'}
             onChange={v => set('variables', v)}
@@ -341,18 +346,18 @@ function NodeConfigPanel({
       {/* llm */}
       {nodeType === 'llm' && (
         <>
-          <FieldLabel>模型</FieldLabel>
+          <FieldLabel>{t('workflow.labelModel')}</FieldLabel>
           <SelectInput
             value={d.model_key as string}
             onChange={v => set('model_key', v)}
             options={availableModels.map(m => ({ value: m.key, label: m.name }))}
-            placeholder="選擇模型..."
+            placeholder={t('workflow.selectModel')}
           />
-          <FieldLabel>系統提示詞</FieldLabel>
-          <TextArea value={d.system_prompt as string} onChange={v => set('system_prompt', v)} placeholder="你是一位..." rows={4} />
-          <FieldLabel>使用者提示詞</FieldLabel>
+          <FieldLabel>{t('workflow.labelSystemPrompt')}</FieldLabel>
+          <TextArea value={d.system_prompt as string} onChange={v => set('system_prompt', v)} placeholder="You are..." rows={4} />
+          <FieldLabel>{t('workflow.labelUserPrompt')}</FieldLabel>
           <TextArea value={d.user_prompt as string} onChange={v => set('user_prompt', v)} placeholder="{{input}}" rows={3} />
-          <FieldLabel>溫度 (Temperature)</FieldLabel>
+          <FieldLabel>{t('workflow.labelTemperature')}</FieldLabel>
           <SliderInput value={d.temperature as number ?? 0.7} onChange={v => set('temperature', v)} />
         </>
       )}
@@ -360,14 +365,14 @@ function NodeConfigPanel({
       {/* knowledge_base */}
       {nodeType === 'knowledge_base' && (
         <>
-          <FieldLabel>知識庫</FieldLabel>
+          <FieldLabel>{t('workflow.labelKnowledgeBase')}</FieldLabel>
           <SelectInput
             value={d.kb_id as string}
             onChange={v => set('kb_id', v)}
             options={availableKbs.map(k => ({ value: k.id, label: k.name }))}
-            placeholder="選擇知識庫..."
+            placeholder={t('workflow.selectKb')}
           />
-          <FieldLabel>查詢</FieldLabel>
+          <FieldLabel>{t('workflow.labelQuery')}</FieldLabel>
           <TextArea value={d.query as string} onChange={v => set('query', v)} placeholder="{{input}}" rows={2} />
         </>
       )}
@@ -375,14 +380,14 @@ function NodeConfigPanel({
       {/* dify */}
       {nodeType === 'dify' && (
         <>
-          <FieldLabel>API 連接器</FieldLabel>
+          <FieldLabel>{t('workflow.labelApiConnector')}</FieldLabel>
           <SelectInput
             value={String(d.dify_kb_id ?? '')}
             onChange={v => set('dify_kb_id', v ? parseInt(v) : null)}
             options={availableDifyKbs.map(k => ({ value: String(k.id), label: k.name }))}
-            placeholder="選擇 API 連接器..."
+            placeholder={t('workflow.selectApiConnector')}
           />
-          <FieldLabel>查詢</FieldLabel>
+          <FieldLabel>{t('workflow.labelQuery')}</FieldLabel>
           <TextArea value={d.query as string} onChange={v => set('query', v)} placeholder="{{input}}" rows={2} />
         </>
       )}
@@ -390,16 +395,16 @@ function NodeConfigPanel({
       {/* mcp_tool */}
       {nodeType === 'mcp_tool' && (
         <>
-          <FieldLabel>MCP 伺服器</FieldLabel>
+          <FieldLabel>{t('workflow.labelMcpServer')}</FieldLabel>
           <SelectInput
             value={String(d.server_id ?? '')}
             onChange={v => set('server_id', v ? parseInt(v) : null)}
             options={availableMcpServers.map(s => ({ value: String(s.id), label: s.name }))}
-            placeholder="選擇 MCP 伺服器..."
+            placeholder={t('workflow.selectMcpServer')}
           />
-          <FieldLabel>工具名稱</FieldLabel>
+          <FieldLabel>{t('workflow.labelToolName')}</FieldLabel>
           <TextInput value={d.tool_name as string} onChange={v => set('tool_name', v)} placeholder="tool_name" />
-          <FieldLabel>參數 (JSON)</FieldLabel>
+          <FieldLabel>{t('workflow.labelArgs')}</FieldLabel>
           <TextArea value={d.args as string || '{}'} onChange={v => set('args', v)} placeholder='{"key":"value"}' mono rows={4} />
         </>
       )}
@@ -407,14 +412,14 @@ function NodeConfigPanel({
       {/* skill */}
       {nodeType === 'skill' && (
         <>
-          <FieldLabel>技能</FieldLabel>
+          <FieldLabel>{t('workflow.labelSkill')}</FieldLabel>
           <SelectInput
             value={String(d.skill_id ?? '')}
             onChange={v => set('skill_id', v ? parseInt(v) : null)}
             options={availableSkills.map(s => ({ value: String(s.id), label: s.name }))}
-            placeholder="選擇技能..."
+            placeholder={t('workflow.selectSkill')}
           />
-          <FieldLabel>輸入</FieldLabel>
+          <FieldLabel>{t('workflow.labelInput')}</FieldLabel>
           <TextArea value={d.input as string} onChange={v => set('input', v)} placeholder="{{input}}" rows={3} />
         </>
       )}
@@ -422,7 +427,7 @@ function NodeConfigPanel({
       {/* code */}
       {nodeType === 'code' && (
         <>
-          <FieldLabel>程式碼</FieldLabel>
+          <FieldLabel>{t('workflow.labelCode')}</FieldLabel>
           <TextArea
             value={d.code as string}
             onChange={v => set('code', v)}
@@ -438,7 +443,7 @@ function NodeConfigPanel({
         <>
           <FieldLabel>URL</FieldLabel>
           <TextInput value={d.url as string} onChange={v => set('url', v)} placeholder="https://api.example.com/..." />
-          <FieldLabel>方法</FieldLabel>
+          <FieldLabel>{t('workflow.labelMethod')}</FieldLabel>
           <SelectInput
             value={d.method as string || 'GET'}
             onChange={v => set('method', v)}
@@ -460,7 +465,7 @@ function NodeConfigPanel({
       {/* condition */}
       {nodeType === 'condition' && (
         <>
-          <FieldLabel>條件規則</FieldLabel>
+          <FieldLabel>{t('workflow.labelConditionRules')}</FieldLabel>
           <ConditionRulesEditor
             rules={d.rules as ConditionRule[] || []}
             onChange={v => set('rules', v)}
@@ -472,11 +477,11 @@ function NodeConfigPanel({
       {/* template */}
       {nodeType === 'template' && (
         <>
-          <FieldLabel>範本內容</FieldLabel>
+          <FieldLabel>{t('workflow.labelTemplateContent')}</FieldLabel>
           <TextArea
             value={d.template as string}
             onChange={v => set('template', v)}
-            placeholder="使用 {{variable}} 插入變數&#10;&#10;例：您好 {{name}}，以下是查詢結果：&#10;{{result}}"
+            placeholder={t('workflow.templatePlaceholder')}
             rows={8}
           />
         </>
@@ -485,7 +490,7 @@ function NodeConfigPanel({
       {/* output */}
       {nodeType === 'output' && (
         <>
-          <FieldLabel>輸出格式</FieldLabel>
+          <FieldLabel>{t('workflow.labelOutputFormat')}</FieldLabel>
           <TextArea
             value={d.format as string}
             onChange={v => set('format', v)}
@@ -503,6 +508,7 @@ function NodeConfigPanel({
 /* ------------------------------------------------------------------ */
 
 function NodePalette() {
+  const { t } = useTranslation()
   const onDragStart = (e: React.DragEvent, type: string) => {
     e.dataTransfer.setData('application/workflow-node-type', type)
     e.dataTransfer.effectAllowed = 'move'
@@ -510,7 +516,7 @@ function NodePalette() {
 
   return (
     <div className="w-40 bg-white border-r border-slate-200 p-2 overflow-y-auto flex-shrink-0">
-      <div className="text-xs font-semibold text-slate-500 mb-2 px-1 uppercase tracking-wide">節點類型</div>
+      <div className="text-xs font-semibold text-slate-500 mb-2 px-1 uppercase tracking-wide">{t('workflow.nodeTypes')}</div>
       {NODE_DEFS.map(nt => {
         const Icon = nt.icon
         return (
@@ -521,7 +527,7 @@ function NodePalette() {
             className="flex items-center gap-2 px-2 py-1.5 rounded cursor-grab hover:bg-slate-50 active:cursor-grabbing mb-0.5 text-sm select-none transition-colors"
           >
             <div className={`p-1 rounded ${nt.color}`}><Icon size={12} /></div>
-            <span className="text-slate-700">{nt.label}</span>
+            <span className="text-slate-700">{t(nt.labelKey)}</span>
           </div>
         )
       })}
@@ -537,6 +543,7 @@ function WorkflowEditorInner({
   value, onChange, availableKbs = [], availableDifyKbs = [],
   availableMcpServers = [], availableSkills = [], availableModels = [],
 }: WorkflowEditorProps) {
+  const { t } = useTranslation()
   const reactFlowInstance = useReactFlow()
   const reactFlowWrapper = useRef<HTMLDivElement>(null)
 
@@ -552,7 +559,7 @@ function WorkflowEditorInner({
           data: {
             ...n.data,
             nodeType: n.type || n.data?.nodeType,
-            label: n.data?.label || getNodeDef(n.type || n.data?.nodeType || 'start').label,
+            label: n.data?.label || t(getNodeDef(n.type || n.data?.nodeType || 'start').labelKey),
           },
         })),
         edges: (parsed.edges || []).map((e: any, i: number) => ({
@@ -632,7 +639,7 @@ function WorkflowEditorInner({
         id,
         type: 'workflowNode',
         position,
-        data: { nodeType: type, label: def.label },
+        data: { nodeType: type, label: t(def.labelKey) },
       }
       setNodes(nds => [...nds, newNode])
     },
@@ -731,7 +738,7 @@ function WorkflowEditorInner({
           onClick={syncToParent}
           className="absolute top-3 right-3 z-10 px-3 py-1.5 bg-blue-500 text-white text-xs font-medium rounded-md shadow hover:bg-blue-600 transition-colors flex items-center gap-1"
         >
-          儲存工作流
+          {t('workflow.saveWorkflow')}
         </button>
       </div>
 
@@ -748,20 +755,20 @@ function WorkflowEditorInner({
                   <div className={`p-1 rounded ${def.color}`}><Icon size={12} /></div>
                 )
               })()}
-              <span className="text-sm font-semibold text-slate-700">節點設定</span>
+              <span className="text-sm font-semibold text-slate-700">{t('workflow.nodeConfig')}</span>
             </div>
             <div className="flex gap-0.5">
               <button
                 onClick={() => deleteNode(selectedNode.id)}
                 className="p-1.5 text-red-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
-                title="刪除節點"
+                title={t('workflow.deleteNode')}
               >
                 <Trash2 size={14} />
               </button>
               <button
                 onClick={() => setSelectedNodeId(null)}
                 className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-50 rounded transition-colors"
-                title="關閉"
+                title={t('workflow.close')}
               >
                 <X size={14} />
               </button>

@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import { useTranslation } from 'react-i18next'
 import { Plus, Search, Globe, Lock, GitFork, Send, Pencil, Trash2, Clock, X, ChevronDown, Zap, ArrowLeft, MessageSquare, Code2, Eye, Share2, History, CheckCircle, XCircle, LayoutTemplate } from 'lucide-react'
 import api from '../lib/api'
 import { fmtTW } from '../lib/fmtTW'
@@ -104,6 +105,38 @@ const EMPTY_FORM = {
 export default function SkillMarket() {
     const navigate = useNavigate()
     const { user: currentUser } = useAuth()
+    const { t, i18n } = useTranslation()
+    const localName = (sk: any) => {
+        if (i18n.language === 'en') return sk.name_en || sk.name
+        if (i18n.language === 'vi') return sk.name_vi || sk.name
+        return sk.name_zh || sk.name
+    }
+    const localDesc = (sk: any) => {
+        if (i18n.language === 'en') return sk.desc_en || sk.description
+        if (i18n.language === 'vi') return sk.desc_vi || sk.description
+        return sk.desc_zh || sk.description
+    }
+    const typeLabel = (type: string) => {
+        const map: Record<string, string> = {
+            builtin: t('skills.typeBuiltin'), external: t('skills.typeExternal'),
+            code: t('skills.typeCode'), workflow: t('skills.typeWorkflow'),
+        }
+        return map[type] || type
+    }
+    const typeLabelFull = (type: string) => {
+        const map: Record<string, string> = {
+            builtin: t('skills.typeBuiltinPrompt'), external: t('skills.typeExternalEndpoint'),
+            code: t('skills.typeCodeRunner'), workflow: t('skills.typeWorkflow'),
+        }
+        return map[type] || type
+    }
+    const codeStatusLabel = (status: string) => {
+        const map: Record<string, string> = {
+            running: t('skills.codeStatusRunning'), error: t('skills.codeStatusError'),
+            stopped: t('skills.codeStatusStopped'),
+        }
+        return map[status] || status
+    }
     const [skills, setSkills] = useState<Skill[]>([])
     const [models, setModels] = useState<Model[]>([])
     const [loading, setLoading] = useState(false)
@@ -154,7 +187,7 @@ export default function SkillMarket() {
             setAvailableMcpServers(mcpRes.data.map((s: any) => ({ id: s.id, name: s.name })))
             setAvailableSkillsList(skillsRes.data.map((s: any) => ({ id: s.id, name: s.name })))
         } catch (e: any) {
-            setError(e.response?.data?.error || '載入失敗')
+            setError(e.response?.data?.error || t('skills.loadFailed'))
         } finally {
             setLoading(false)
         }
@@ -205,7 +238,7 @@ export default function SkillMarket() {
     }
 
     const save = async () => {
-        if (!form.name.trim()) return setError('名稱必填')
+        if (!form.name.trim()) return setError(t('skills.nameRequired'))
         setSaving(true)
         setError('')
         // Auto-flush any pending tag/package input before save
@@ -246,7 +279,7 @@ export default function SkillMarket() {
             setShowEditor(false)
             load()
         } catch (e: any) {
-            setError(e.response?.data?.error || '儲存失敗')
+            setError(e.response?.data?.error || t('skills.saveFailed'))
         } finally {
             setSaving(false)
             setTranslating(false)
@@ -257,26 +290,26 @@ export default function SkillMarket() {
 
     const handlePublish = async () => {
         if (!editingSkill) return
-        const note = prompt('版本備注 (選填):')
+        const note = prompt(t('skills.versionNote'))
         try {
             await api.post(`/skills/${editingSkill.id}/publish`, { change_note: note || '' })
-            alert('已發布')
+            alert(t('skills.published'))
             loadVersionHistory(editingSkill.id)
             load()
-        } catch (e: any) { alert(e.response?.data?.error || '發布失敗') }
+        } catch (e: any) { alert(e.response?.data?.error || t('skills.publishFailed')) }
     }
 
     const handleRollback = async (version: number) => {
-        if (!editingSkill || !confirm(`確定要回滾到 v${version}？`)) return
+        if (!editingSkill || !confirm(t('skills.rollbackConfirm', { version }))) return
         try {
             await api.post(`/skills/${editingSkill.id}/rollback/${version}`)
-            alert(`已回滾到 v${version}`)
+            alert(t('skills.rolledBack', { version }))
             const res = await api.get(`/skills/${editingSkill.id}`)
             setEditingSkill(res.data)
             setField('system_prompt', res.data.system_prompt || '')
             setField('workflow_json', res.data.workflow_json || '')
             loadVersionHistory(editingSkill.id)
-        } catch (e: any) { alert(e.response?.data?.error || '回滾失敗') }
+        } catch (e: any) { alert(e.response?.data?.error || t('skills.rollbackFailed')) }
     }
 
     const loadVersionHistory = async (id: number) => {
@@ -287,16 +320,16 @@ export default function SkillMarket() {
     }
 
     const del = async (sk: Skill) => {
-        if (!confirm(`確定刪除 "${sk.name}"？`)) return
-        try { await api.delete(`/skills/${sk.id}`); load() } catch (e: any) { setError(e.response?.data?.error || '刪除失敗') }
+        if (!confirm(t('skills.deleteConfirm', { name: localName(sk) }))) return
+        try { await api.delete(`/skills/${sk.id}`); load() } catch (e: any) { setError(e.response?.data?.error || t('skills.deleteFailed')) }
     }
 
     const fork = async (sk: Skill) => {
-        try { await api.post(`/skills/${sk.id}/fork`); load() } catch (e: any) { setError(e.response?.data?.error || 'Fork 失敗') }
+        try { await api.post(`/skills/${sk.id}/fork`); load() } catch (e: any) { setError(e.response?.data?.error || t('skills.forkFailed')) }
     }
 
     const requestPublic = async (sk: Skill) => {
-        try { await api.post(`/skills/${sk.id}/request-public`); load() } catch (e: any) { setError(e.response?.data?.error || '申請失敗') }
+        try { await api.post(`/skills/${sk.id}/request-public`); load() } catch (e: any) { setError(e.response?.data?.error || t('skills.applyFailed')) }
     }
 
     const addTag = () => {
@@ -329,13 +362,13 @@ export default function SkillMarket() {
                             <ArrowLeft size={18} />
                         </button>
                         <div>
-                            <h1 className="text-2xl font-bold text-slate-800 flex items-center gap-2"><Zap size={22} className="text-blue-500" />技能市集</h1>
-                            <p className="text-sm text-slate-500 mt-0.5">建立並分享 AI Skill，讓對話更強大</p>
+                            <h1 className="text-2xl font-bold text-slate-800 flex items-center gap-2"><Zap size={22} className="text-blue-500" />{t('skills.title')}</h1>
+                            <p className="text-sm text-slate-500 mt-0.5">{t('skills.subtitle')}</p>
                         </div>
                     </div>
                     {canCreateSkill && (
                         <button onClick={openCreate} className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 transition">
-                            <Plus size={15} />建立技能
+                            <Plus size={15} />{t('skills.createSkill')}
                         </button>
                     )}
                 </div>
@@ -344,27 +377,27 @@ export default function SkillMarket() {
                 <div className="flex gap-2 mb-6">
                     <div className="relative flex-1 max-w-sm">
                         <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                        <input value={q} onChange={e => setQ(e.target.value)} placeholder="搜尋技能名稱..."
+                        <input value={q} onChange={e => setQ(e.target.value)} placeholder={t('skills.searchPlaceholder')}
                             className="pl-8 pr-3 py-2 border border-slate-200 rounded-lg text-sm w-full focus:outline-none focus:ring-2 focus:ring-blue-300" />
                     </div>
                     <select value={typeFilter} onChange={e => setTypeFilter(e.target.value)}
                         className="border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-300">
-                        <option value="">全部類型</option>
-                        <option value="builtin">內建</option>
-                        <option value="external">外部</option>
-                        <option value="code">內部程式</option>
-                        <option value="workflow">工作流</option>
+                        <option value="">{t('skills.typeAll')}</option>
+                        <option value="builtin">{t('skills.typeBuiltin')}</option>
+                        <option value="external">{t('skills.typeExternal')}</option>
+                        <option value="code">{t('skills.typeCode')}</option>
+                        <option value="workflow">{t('skills.typeWorkflow')}</option>
                     </select>
                 </div>
 
                 {error && <div className="mb-4 p-3 bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg">{error}<button className="ml-2 text-red-400 hover:text-red-600" onClick={() => setError('')}><X size={13} /></button></div>}
 
-                {loading && <div className="text-center py-12 text-slate-400">載入中...</div>}
+                {loading && <div className="text-center py-12 text-slate-400">{t('skills.loading')}</div>}
 
                 {/* My Skills */}
                 {mySkills.length > 0 && (
                     <section className="mb-8">
-                        <h2 className="text-sm font-semibold text-slate-600 mb-3 uppercase tracking-wide">我的技能</h2>
+                        <h2 className="text-sm font-semibold text-slate-600 mb-3 uppercase tracking-wide">{t('skills.mySkills')}</h2>
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                             {mySkills.map(sk => <SkillCard key={sk.id} skill={sk} onEdit={() => openEdit(sk)} onDelete={() => del(sk)} onFork={() => fork(sk)} onRequestPublic={() => requestPublic(sk)} onUse={() => navigate(`/chat?skillId=${sk.id}`)} onShare={() => setSharingSkill(sk)} isOwner />)}
                         </div>
@@ -374,7 +407,7 @@ export default function SkillMarket() {
                 {/* Shared Skills */}
                 {sharedSkills.length > 0 && (
                     <section className="mb-8">
-                        <h2 className="text-sm font-semibold text-slate-600 mb-3 uppercase tracking-wide">共享給我的技能</h2>
+                        <h2 className="text-sm font-semibold text-slate-600 mb-3 uppercase tracking-wide">{t('skills.sharedSkills')}</h2>
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                             {sharedSkills.map(sk => (
                                 <SkillCard key={sk.id} skill={sk}
@@ -391,7 +424,7 @@ export default function SkillMarket() {
                 {/* Public Skills */}
                 {publicSkills.length > 0 && (
                     <section>
-                        <h2 className="text-sm font-semibold text-slate-600 mb-3 uppercase tracking-wide">公開技能</h2>
+                        <h2 className="text-sm font-semibold text-slate-600 mb-3 uppercase tracking-wide">{t('skills.publicSkills')}</h2>
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                             {publicSkills.map(sk => (
                                 <SkillCard key={sk.id} skill={sk}
@@ -408,7 +441,7 @@ export default function SkillMarket() {
                 {!loading && skills.length === 0 && (
                     <div className="text-center py-20 text-slate-400">
                         <Zap size={40} className="mx-auto mb-3 opacity-30" />
-                        <p>還沒有技能，點擊「建立技能」開始</p>
+                        <p>{t('skills.emptyHint')}</p>
                     </div>
                 )}
 
@@ -418,18 +451,18 @@ export default function SkillMarket() {
                         <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl my-8">
                             <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
                                 <div className="flex items-center gap-4">
-                                    <h3 className="font-semibold text-slate-800">{editingSkill ? '編輯技能' : '建立技能'}</h3>
+                                    <h3 className="font-semibold text-slate-800">{editingSkill ? t('skills.editSkill') : t('skills.createSkill')}</h3>
                                 </div>
                                 <button onClick={() => setShowEditor(false)} className="p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100"><X size={16} /></button>
                             </div>
                             {/* Tab bar */}
                             <div className="flex gap-1 border-b border-slate-100 px-6 pt-2">
                                 {([
-                                    ['basic', '基本資訊'],
-                                    ['tools', '工具綁定'],
-                                    ['io', '輸入/輸出'],
-                                    ['advanced', '進階設定'],
-                                    ...(editingSkill ? [['history', '版本歷史']] : []),
+                                    ['basic', t('skills.tabBasic')],
+                                    ['tools', t('skills.tabTools')],
+                                    ['io', t('skills.tabIO')],
+                                    ['advanced', t('skills.tabAdvanced')],
+                                    ...(editingSkill ? [['history', t('skills.tabHistory')]] : []),
                                 ] as [typeof editorTab, string][]).map(([key, label]) => (
                                     <button key={key} onClick={() => setEditorTab(key)}
                                         className={`px-3 py-2 text-xs font-medium transition border-b-2 ${editorTab === key ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>
@@ -444,7 +477,7 @@ export default function SkillMarket() {
                                     <div className="space-y-4">
                                         <div className="flex gap-3">
                                             <div>
-                                                <label className="block text-xs font-medium text-slate-600 mb-1">圖示</label>
+                                                <label className="block text-xs font-medium text-slate-600 mb-1">{t('skills.labelIcon')}</label>
                                                 <div className="relative">
                                                     <button type="button"
                                                         onClick={() => setShowIconPicker(p => !p)}
@@ -468,13 +501,13 @@ export default function SkillMarket() {
                                                 </div>
                                             </div>
                                             <div className="flex-1">
-                                                <label className="block text-xs font-medium text-slate-600 mb-1">名稱 *</label>
+                                                <label className="block text-xs font-medium text-slate-600 mb-1">{t('skills.labelName')}</label>
                                                 <input value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))}
                                                     className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300" />
                                             </div>
                                         </div>
                                         <div>
-                                            <label className="block text-xs font-medium text-slate-600 mb-1">描述</label>
+                                            <label className="block text-xs font-medium text-slate-600 mb-1">{t('skills.labelDesc')}</label>
                                             <textarea value={form.description} rows={2} onChange={e => setForm(p => ({ ...p, description: e.target.value }))}
                                                 className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 resize-none" />
                                         </div>
@@ -489,30 +522,30 @@ export default function SkillMarket() {
 
                                         {/* Type */}
                                         <div>
-                                            <label className="block text-xs font-medium text-slate-600 mb-1">類型</label>
+                                            <label className="block text-xs font-medium text-slate-600 mb-1">{t('skills.labelType')}</label>
                                             <div className="flex gap-2 flex-wrap">
-                                                {(['builtin', 'external'] as const).map(t => (
-                                                    <button key={t} onClick={() => setForm(p => ({ ...p, type: t }))}
-                                                        className={`px-4 py-1.5 rounded-lg text-sm border transition ${form.type === t ? 'bg-blue-600 text-white border-blue-600' : 'border-slate-200 text-slate-600 hover:border-blue-300'}`}>
-                                                        {t === 'builtin' ? '內建 Prompt' : '外部 Endpoint'}
+                                                {(['builtin', 'external'] as const).map(tp => (
+                                                    <button key={tp} onClick={() => setForm(p => ({ ...p, type: tp }))}
+                                                        className={`px-4 py-1.5 rounded-lg text-sm border transition ${form.type === tp ? 'bg-blue-600 text-white border-blue-600' : 'border-slate-200 text-slate-600 hover:border-blue-300'}`}>
+                                                        {typeLabelFull(tp)}
                                                     </button>
                                                 ))}
                                                 {canCodeSkill && (
                                                     <button onClick={() => setForm(p => ({ ...p, type: 'code' }))}
                                                         className={`px-4 py-1.5 rounded-lg text-sm border transition flex items-center gap-1 ${form.type === 'code' ? 'bg-emerald-600 text-white border-emerald-600' : 'border-slate-200 text-slate-600 hover:border-emerald-300'}`}>
-                                                        <Code2 size={13} />內部程式
+                                                        <Code2 size={13} />{t('skills.typeCodeRunner')}
                                                     </button>
                                                 )}
                                                 <button onClick={() => setForm(p => ({ ...p, type: 'workflow' }))}
                                                     className={`px-4 py-1.5 rounded-lg text-sm border transition ${form.type === 'workflow' ? 'bg-orange-600 text-white border-orange-600' : 'border-slate-200 text-slate-600 hover:border-orange-300'}`}>
-                                                    工作流
+                                                    {t('skills.typeWorkflow')}
                                                 </button>
                                             </div>
                                         </div>
 
                                         {/* Tags */}
                                         <div>
-                                            <label className="block text-xs font-medium text-slate-600 mb-1">標籤 *</label>
+                                            <label className="block text-xs font-medium text-slate-600 mb-1">{t('skills.labelTags')}</label>
                                             <div className="flex gap-2 flex-wrap mb-2">
                                                 {form.tags.map(t => (
                                                     <span key={t} className="inline-flex items-center gap-1 px-2 py-0.5 bg-slate-100 rounded text-xs text-slate-600">
@@ -523,18 +556,18 @@ export default function SkillMarket() {
                                             <div className="flex gap-2">
                                                 <input value={tagInput} onChange={e => setTagInput(e.target.value)}
                                                     onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), addTag())}
-                                                    placeholder="輸入標籤後按 Enter"
+                                                    placeholder={t('skills.tagPlaceholder')}
                                                     className="flex-1 border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300" />
-                                                <button onClick={addTag} className="px-3 py-1.5 border border-slate-200 rounded-lg text-sm text-slate-600 hover:border-blue-300">新增</button>
+                                                <button onClick={addTag} className="px-3 py-1.5 border border-slate-200 rounded-lg text-sm text-slate-600 hover:border-blue-300">{t('skills.add')}</button>
                                             </div>
                                         </div>
 
                                         {/* System Prompt (builtin) */}
                                         {form.type === 'builtin' && (
                                             <div>
-                                                <label className="block text-xs font-medium text-slate-600 mb-1">System Prompt</label>
+                                                <label className="block text-xs font-medium text-slate-600 mb-1">{t('skills.labelSystemPrompt')}</label>
                                                 <textarea value={form.system_prompt} rows={6} onChange={e => setForm(p => ({ ...p, system_prompt: e.target.value }))}
-                                                    placeholder="輸入給 AI 的角色設定與指令..."
+                                                    placeholder={t('skills.systemPromptPlaceholder')}
                                                     className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-300 resize-y" />
                                             </div>
                                         )}
@@ -543,13 +576,13 @@ export default function SkillMarket() {
                                         {form.type === 'external' && (
                                             <div className="space-y-3">
                                                 <div>
-                                                    <label className="block text-xs font-medium text-slate-600 mb-1">Endpoint URL</label>
+                                                    <label className="block text-xs font-medium text-slate-600 mb-1">{t('skills.labelEndpointUrl')}</label>
                                                     <input value={form.endpoint_url} onChange={e => setForm(p => ({ ...p, endpoint_url: e.target.value }))}
                                                         placeholder="https://your-service.com/skill"
                                                         className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300" />
                                                 </div>
                                                 <div>
-                                                    <label className="block text-xs font-medium text-slate-600 mb-1">Bearer Token（選填）</label>
+                                                    <label className="block text-xs font-medium text-slate-600 mb-1">{t('skills.labelBearerToken')}</label>
                                                     <input type="password" value={form.endpoint_secret} onChange={e => setForm(p => ({ ...p, endpoint_secret: e.target.value }))}
                                                         className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300" />
                                                 </div>
@@ -560,17 +593,17 @@ export default function SkillMarket() {
                                         {form.type === 'code' && (
                                             <div className="space-y-3">
                                                 <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-700">
-                                                    儲存後請至後台「Code Runners」頁簽啟動此 Skill。handler 需 export 一個 async function，回傳 {'{ system_prompt }'} 或 {'{ content }'}。
+                                                    {t('skills.codeRunnerHint')}
                                                 </div>
                                                 <div>
-                                                    <label className="block text-xs font-medium text-slate-600 mb-1">Node.js Handler 程式碼</label>
+                                                    <label className="block text-xs font-medium text-slate-600 mb-1">{t('skills.labelCodeHandler')}</label>
                                                     <textarea value={form.code_snippet} rows={12}
                                                         onChange={e => setForm(p => ({ ...p, code_snippet: e.target.value }))}
-                                                        placeholder={`// 範例\nmodule.exports = async function handler(body) {\n  const { user_message } = body;\n  // 可 require 已安裝的 npm 套件\n  return { system_prompt: '相關資訊：' + user_message };\n};`}
+                                                        placeholder={`// example\nmodule.exports = async function handler(body) {\n  const { user_message } = body;\n  return { system_prompt: 'info: ' + user_message };\n};`}
                                                         className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-emerald-300 resize-y bg-slate-950 text-emerald-300" />
                                                 </div>
                                                 <div>
-                                                    <label className="block text-xs font-medium text-slate-600 mb-1">NPM 套件（安裝後才可 require）</label>
+                                                    <label className="block text-xs font-medium text-slate-600 mb-1">{t('skills.labelNpmPackages')}</label>
                                                     <div className="flex flex-wrap gap-1 mb-2">
                                                         {form.code_packages.map(p => (
                                                             <span key={p} className="inline-flex items-center gap-1 px-2 py-0.5 bg-emerald-100 rounded text-xs text-emerald-700">
@@ -581,9 +614,9 @@ export default function SkillMarket() {
                                                     <div className="flex gap-2">
                                                         <input value={pkgInput} onChange={e => setPkgInput(e.target.value)}
                                                             onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), addPkg())}
-                                                            placeholder="axios, mssql... 後按 Enter"
+                                                            placeholder={t('skills.pkgPlaceholder')}
                                                             className="flex-1 border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-300" />
-                                                        <button type="button" onClick={addPkg} className="px-3 py-1.5 border border-slate-200 rounded-lg text-sm text-slate-600 hover:border-emerald-300">新增</button>
+                                                        <button type="button" onClick={addPkg} className="px-3 py-1.5 border border-slate-200 rounded-lg text-sm text-slate-600 hover:border-emerald-300">{t('skills.add')}</button>
                                                     </div>
                                                 </div>
                                             </div>
@@ -592,7 +625,7 @@ export default function SkillMarket() {
                                         {/* Workflow editor */}
                                         {form.type === 'workflow' && (
                                             <div className="mt-3">
-                                                <label className="block text-xs text-slate-500 mb-1">工作流程編輯器</label>
+                                                <label className="block text-xs text-slate-500 mb-1">{t('skills.labelWorkflowEditor')}</label>
                                                 <WorkflowEditor
                                                     value={form.workflow_json}
                                                     onChange={(json) => setField('workflow_json', json)}
@@ -612,18 +645,18 @@ export default function SkillMarket() {
                                     <div className="space-y-4">
                                         {/* MCP Tool Mode */}
                                         <div>
-                                            <label className="block text-xs text-slate-500 mb-1">MCP 工具模式</label>
+                                            <label className="block text-xs text-slate-500 mb-1">{t('skills.labelMcpToolMode')}</label>
                                             <select value={form.mcp_tool_mode} onChange={e => setField('mcp_tool_mode', e.target.value)}
                                                 className="w-full border rounded px-3 py-2 text-sm">
-                                                <option value="append">附加</option>
-                                                <option value="exclusive">獨佔</option>
-                                                <option value="disable">停用</option>
+                                                <option value="append">{t('skills.modeAppend')}</option>
+                                                <option value="exclusive">{t('skills.modeExclusive')}</option>
+                                                <option value="disable">{t('skills.modeDisable')}</option>
                                             </select>
                                         </div>
 
                                         {/* Self KB binding */}
                                         <div>
-                                            <label className="block text-xs text-slate-500 mb-1">自建知識庫綁定</label>
+                                            <label className="block text-xs text-slate-500 mb-1">{t('skills.labelSelfKb')}</label>
                                             <div className="space-y-1 max-h-40 overflow-y-auto border rounded p-2">
                                                 {availableKbs.map(kb => (
                                                     <label key={kb.id} className="flex items-center gap-2 text-sm">
@@ -634,13 +667,13 @@ export default function SkillMarket() {
                                                         {kb.name}
                                                     </label>
                                                 ))}
-                                                {availableKbs.length === 0 && <span className="text-xs text-slate-400">無可用知識庫</span>}
+                                                {availableKbs.length === 0 && <span className="text-xs text-slate-400">{t('skills.noKbAvailable')}</span>}
                                             </div>
                                         </div>
 
                                         {/* API Connector binding */}
                                         <div>
-                                            <label className="block text-xs text-slate-500 mb-1">API 連接器綁定</label>
+                                            <label className="block text-xs text-slate-500 mb-1">{t('skills.labelApiConnector')}</label>
                                             <div className="space-y-1 max-h-40 overflow-y-auto border rounded p-2">
                                                 {availableDifyKbs.map(kb => (
                                                     <label key={kb.id} className="flex items-center gap-2 text-sm">
@@ -651,18 +684,18 @@ export default function SkillMarket() {
                                                         {kb.name}
                                                     </label>
                                                 ))}
-                                                {availableDifyKbs.length === 0 && <span className="text-xs text-slate-400">無可用 API 連接器</span>}
+                                                {availableDifyKbs.length === 0 && <span className="text-xs text-slate-400">{t('skills.noApiConnector')}</span>}
                                             </div>
                                         </div>
 
                                         {/* KB Mode */}
                                         <div>
-                                            <label className="block text-xs text-slate-500 mb-1">知識庫模式</label>
+                                            <label className="block text-xs text-slate-500 mb-1">{t('skills.labelKbMode')}</label>
                                             <select value={form.kb_mode} onChange={e => setField('kb_mode', e.target.value)}
                                                 className="w-full border rounded px-3 py-2 text-sm">
-                                                <option value="append">附加 (加入可用清單)</option>
-                                                <option value="exclusive">獨佔 (只用這些)</option>
-                                                <option value="disable">停用 (不使用知識庫)</option>
+                                                <option value="append">{t('skills.kbModeAppend')}</option>
+                                                <option value="exclusive">{t('skills.kbModeExclusive')}</option>
+                                                <option value="disable">{t('skills.kbModeDisable')}</option>
                                             </select>
                                         </div>
                                     </div>
@@ -673,36 +706,36 @@ export default function SkillMarket() {
                                     <div className="space-y-4">
                                         {/* prompt_variables */}
                                         <div>
-                                            <label className="block text-xs text-slate-500 mb-1">輸入變數 (prompt_variables)</label>
+                                            <label className="block text-xs text-slate-500 mb-1">{t('skills.labelPromptVars')}</label>
                                             <textarea value={form.prompt_variables} onChange={e => setField('prompt_variables', e.target.value)}
                                                 className="w-full border rounded px-3 py-2 text-xs font-mono h-32 resize-y"
-                                                placeholder='[{"name":"department","label":"部門","type":"select","options":["HR","IT"],"required":true}]' />
-                                            <p className="text-xs text-slate-400 mt-1">JSON 陣列。type: text/select/number/date/date_range/textarea/checkbox</p>
+                                                placeholder='[{"name":"department","label":"Dept","type":"select","options":["HR","IT"],"required":true}]' />
+                                            <p className="text-xs text-slate-400 mt-1">{t('skills.promptVarsHint')}</p>
                                         </div>
 
                                         {/* tool_schema (code/external skills) */}
                                         {(form.type === 'code' || form.type === 'external') && (
                                             <div>
-                                                <label className="block text-xs text-slate-500 mb-1">Tool Schema (Gemini Function Declaration)</label>
+                                                <label className="block text-xs text-slate-500 mb-1">{t('skills.labelToolSchema')}</label>
                                                 <textarea value={form.tool_schema} onChange={e => setField('tool_schema', e.target.value)}
                                                     className="w-full border rounded px-3 py-2 text-xs font-mono h-32 resize-y"
-                                                    placeholder='{"description":"查詢出勤","parameters":{"type":"object","properties":{"employee_id":{"type":"string"}}}}' />
-                                                <p className="text-xs text-slate-400 mt-1">定義後，LLM 會自動判斷何時呼叫此技能的程式</p>
+                                                    placeholder='{"description":"query attendance","parameters":{"type":"object","properties":{"employee_id":{"type":"string"}}}}' />
+                                                <p className="text-xs text-slate-400 mt-1">{t('skills.toolSchemaHint')}</p>
                                             </div>
                                         )}
 
                                         {/* output_schema */}
                                         <div>
-                                            <label className="block text-xs text-slate-500 mb-1">輸出格式 (Output Schema)</label>
+                                            <label className="block text-xs text-slate-500 mb-1">{t('skills.labelOutputSchema')}</label>
                                             <textarea value={form.output_schema} onChange={e => setField('output_schema', e.target.value)}
                                                 className="w-full border rounded px-3 py-2 text-xs font-mono h-32 resize-y"
                                                 placeholder='{"type":"object","properties":{"summary":{"type":"string"},"items":{"type":"array"}}}' />
-                                            <p className="text-xs text-slate-400 mt-1">JSON Schema，LLM 會按此格式輸出</p>
+                                            <p className="text-xs text-slate-400 mt-1">{t('skills.outputSchemaHint')}</p>
                                         </div>
 
                                         {/* output_template_id */}
                                         <div>
-                                            <label className="block text-xs text-slate-500 mb-1">輸出範本</label>
+                                            <label className="block text-xs text-slate-500 mb-1">{t('skills.labelOutputTemplate')}</label>
                                             <div className="relative">
                                                 {outputTemplate ? (
                                                     <div className="flex items-center gap-2 px-3 py-2 border border-blue-300 bg-blue-50 rounded-lg text-sm">
@@ -714,7 +747,7 @@ export default function SkillMarket() {
                                                 ) : (
                                                     <button type="button" onClick={() => setShowTemplatePicker(true)}
                                                         className="flex items-center gap-2 px-3 py-2 border border-dashed border-slate-300 rounded-lg text-sm text-slate-500 hover:border-blue-400 hover:text-blue-600 transition w-full">
-                                                        <LayoutTemplate size={14} />選擇輸出範本（選填）
+                                                        <LayoutTemplate size={14} />{t('skills.selectOutputTemplate')}
                                                     </button>
                                                 )}
                                                 {showTemplatePicker && (
@@ -726,7 +759,7 @@ export default function SkillMarket() {
                                                     </div>
                                                 )}
                                             </div>
-                                            <p className="text-xs text-slate-400 mt-1">選擇後 AI 會強制輸出 JSON 並套用此範本產生文件</p>
+                                            <p className="text-xs text-slate-400 mt-1">{t('skills.outputTemplateHint')}</p>
                                         </div>
                                     </div>
                                 )}
@@ -736,10 +769,10 @@ export default function SkillMarket() {
                                     <div className="space-y-4">
                                         {/* model_key */}
                                         <div>
-                                            <label className="block text-xs text-slate-500 mb-1">指定模型</label>
+                                            <label className="block text-xs text-slate-500 mb-1">{t('skills.labelModel')}</label>
                                             <select value={form.model_key} onChange={e => setField('model_key', e.target.value)}
                                                 className="w-full border rounded px-3 py-2 text-sm">
-                                                <option value="">預設</option>
+                                                <option value="">{t('skills.modelDefault')}</option>
                                                 {models.map(m => <option key={m.key} value={m.key}>{m.name}</option>)}
                                             </select>
                                         </div>
@@ -747,12 +780,12 @@ export default function SkillMarket() {
                                         {/* endpoint_mode */}
                                         {(form.type === 'external' || form.type === 'code') && (
                                             <div>
-                                                <label className="block text-xs text-slate-500 mb-1">回應模式</label>
+                                                <label className="block text-xs text-slate-500 mb-1">{t('skills.labelEndpointMode')}</label>
                                                 <select value={form.endpoint_mode} onChange={e => setField('endpoint_mode', e.target.value as any)}
                                                     className="w-full border rounded px-3 py-2 text-sm">
-                                                    <option value="inject">注入 (結果送入 LLM)</option>
-                                                    <option value="answer">直答 (直接回傳，跳過 LLM)</option>
-                                                    <option value="post_answer">後處理 (LLM 回答後再呼叫，適合 TTS)</option>
+                                                    <option value="inject">{t('skills.endpointModeInject')}</option>
+                                                    <option value="answer">{t('skills.endpointModeAnswer')}</option>
+                                                    <option value="post_answer">{t('skills.endpointModePostAnswer')}</option>
                                                 </select>
                                             </div>
                                         )}
@@ -760,22 +793,22 @@ export default function SkillMarket() {
                                         {/* Rate Limiting */}
                                         <div className="grid grid-cols-3 gap-3">
                                             <div>
-                                                <label className="block text-xs text-slate-500 mb-1">每用戶上限</label>
+                                                <label className="block text-xs text-slate-500 mb-1">{t('skills.labelRateLimitPerUser')}</label>
                                                 <input type="number" value={form.rate_limit_per_user} onChange={e => setField('rate_limit_per_user', e.target.value)}
-                                                    className="w-full border rounded px-3 py-2 text-sm" placeholder="不限" min={0} />
+                                                    className="w-full border rounded px-3 py-2 text-sm" placeholder={t('skills.rateLimitNoLimit')} min={0} />
                                             </div>
                                             <div>
-                                                <label className="block text-xs text-slate-500 mb-1">全域上限</label>
+                                                <label className="block text-xs text-slate-500 mb-1">{t('skills.labelRateLimitGlobal')}</label>
                                                 <input type="number" value={form.rate_limit_global} onChange={e => setField('rate_limit_global', e.target.value)}
-                                                    className="w-full border rounded px-3 py-2 text-sm" placeholder="不限" min={0} />
+                                                    className="w-full border rounded px-3 py-2 text-sm" placeholder={t('skills.rateLimitNoLimit')} min={0} />
                                             </div>
                                             <div>
-                                                <label className="block text-xs text-slate-500 mb-1">時間窗口</label>
+                                                <label className="block text-xs text-slate-500 mb-1">{t('skills.labelRateLimitWindow')}</label>
                                                 <select value={form.rate_limit_window} onChange={e => setField('rate_limit_window', e.target.value)}
                                                     className="w-full border rounded px-3 py-2 text-sm">
-                                                    <option value="minute">每分鐘</option>
-                                                    <option value="hour">每小時</option>
-                                                    <option value="day">每天</option>
+                                                    <option value="minute">{t('skills.rateLimitMinute')}</option>
+                                                    <option value="hour">{t('skills.rateLimitHour')}</option>
+                                                    <option value="day">{t('skills.rateLimitDay')}</option>
                                                 </select>
                                             </div>
                                         </div>
@@ -788,9 +821,9 @@ export default function SkillMarket() {
                                         {/* Publish button */}
                                         <div className="flex items-center gap-2">
                                             <button onClick={handlePublish} className="px-3 py-1.5 bg-green-500 text-white text-sm rounded hover:bg-green-600">
-                                                發布版本
+                                                {t('skills.publishVersion')}
                                             </button>
-                                            <span className="text-xs text-slate-500">當前版本: v{editingSkill?.prompt_version || 1}</span>
+                                            <span className="text-xs text-slate-500">{t('skills.currentVersion', { version: editingSkill?.prompt_version || 1 })}</span>
                                         </div>
 
                                         {/* Version list */}
@@ -802,10 +835,10 @@ export default function SkillMarket() {
                                                         <span className="text-xs text-slate-400 ml-2">{v.changed_by_name} · {fmtTW(v.created_at)}</span>
                                                         {v.change_note && <span className="text-xs text-slate-500 ml-2">{v.change_note}</span>}
                                                     </div>
-                                                    <button onClick={() => handleRollback(v.version)} className="text-xs text-blue-500 hover:underline">回滾</button>
+                                                    <button onClick={() => handleRollback(v.version)} className="text-xs text-blue-500 hover:underline">{t('skills.rollback')}</button>
                                                 </div>
                                             ))}
-                                            {versionHistory.length === 0 && <p className="text-xs text-slate-400 text-center py-4">尚無發布歷史</p>}
+                                            {versionHistory.length === 0 && <p className="text-xs text-slate-400 text-center py-4">{t('skills.noVersionHistory')}</p>}
                                         </div>
                                     </div>
                                 )}
@@ -814,10 +847,10 @@ export default function SkillMarket() {
                             </div>
                             {editorTab !== 'history' && (
                             <div className="flex justify-end gap-2 px-6 py-4 border-t border-slate-100">
-                                <button onClick={() => setShowEditor(false)} className="px-4 py-2 rounded-lg text-sm text-slate-600 hover:bg-slate-100">取消</button>
+                                <button onClick={() => setShowEditor(false)} className="px-4 py-2 rounded-lg text-sm text-slate-600 hover:bg-slate-100">{t('skills.cancel')}</button>
                                 <button onClick={save} disabled={saving}
                                     className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 disabled:opacity-50">
-                                    {saving ? '儲存中...' : '儲存'}
+                                    {saving ? t('skills.saving') : t('skills.save')}
                                 </button>
                             </div>
                             )}
@@ -836,7 +869,7 @@ export default function SkillMarket() {
                             <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
                                 <div className="flex items-center gap-2">
                                     <Eye size={16} className="text-blue-500" />
-                                    <h3 className="font-semibold text-slate-800">技能詳情（唯讀）</h3>
+                                    <h3 className="font-semibold text-slate-800">{t('skills.viewDetail')}</h3>
                                 </div>
                                 <button onClick={() => setViewingSkill(null)} className="p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100"><X size={16} /></button>
                             </div>
@@ -844,15 +877,15 @@ export default function SkillMarket() {
                                 <div className="flex items-center gap-3">
                                     <span className="text-3xl">{viewingSkill.icon}</span>
                                     <div>
-                                        <p className="font-semibold text-slate-800 text-base">{viewingSkill.name}</p>
-                                        <p className="text-slate-500 text-xs">{viewingSkill.description}</p>
+                                        <p className="font-semibold text-slate-800 text-base">{localName(viewingSkill)}</p>
+                                        <p className="text-slate-500 text-xs">{localDesc(viewingSkill)}</p>
                                     </div>
                                 </div>
                                 <div className="grid grid-cols-2 gap-3">
-                                    <div><span className="text-xs text-slate-400 block">類型</span><p className="text-slate-700">{viewingSkill.type === 'builtin' ? '內建 Prompt' : viewingSkill.type === 'external' ? '外部 Endpoint' : viewingSkill.type === 'workflow' ? '工作流' : '內部程式'}</p></div>
-                                    <div><span className="text-xs text-slate-400 block">端點模式</span><p className="text-slate-700">{viewingSkill.endpoint_mode}</p></div>
-                                    {viewingSkill.model_key && <div><span className="text-xs text-slate-400 block">指定模型</span><p className="text-slate-700">{viewingSkill.model_key}</p></div>}
-                                    <div><span className="text-xs text-slate-400 block">MCP 工具模式</span><p className="text-slate-700">{viewingSkill.mcp_tool_mode}</p></div>
+                                    <div><span className="text-xs text-slate-400 block">{t('skills.viewType')}</span><p className="text-slate-700">{typeLabelFull(viewingSkill.type)}</p></div>
+                                    <div><span className="text-xs text-slate-400 block">{t('skills.viewEndpointMode')}</span><p className="text-slate-700">{viewingSkill.endpoint_mode}</p></div>
+                                    {viewingSkill.model_key && <div><span className="text-xs text-slate-400 block">{t('skills.viewModel')}</span><p className="text-slate-700">{viewingSkill.model_key}</p></div>}
+                                    <div><span className="text-xs text-slate-400 block">{t('skills.viewMcpToolMode')}</span><p className="text-slate-700">{viewingSkill.mcp_tool_mode}</p></div>
                                 </div>
                                 {viewingSkill.my_share_type === 'develop' && viewingSkill.system_prompt && (
                                     <div>
@@ -865,25 +898,25 @@ export default function SkillMarket() {
                                 )}
                                 {viewingSkill.my_share_type === 'develop' && viewingSkill.type === 'code' && viewingSkill.code_snippet && (
                                     <div>
-                                        <p className="text-xs text-slate-400 mb-1">程式碼</p>
+                                        <p className="text-xs text-slate-400 mb-1">{t('skills.viewCode')}</p>
                                         <pre className="bg-slate-950 rounded-lg p-3 text-xs text-emerald-300 whitespace-pre-wrap font-mono max-h-64 overflow-y-auto">{viewingSkill.code_snippet}</pre>
                                     </div>
                                 )}
                                 {viewingSkill.my_share_type !== 'develop' && (
-                                    <p className="text-xs text-slate-400 italic">需要「開發」權限才能查看程式碼與設定細節</p>
+                                    <p className="text-xs text-slate-400 italic">{t('skills.viewNeedDevPerm')}</p>
                                 )}
                                 {viewingSkill.tags && viewingSkill.tags.length > 0 && (
                                     <div className="flex flex-wrap gap-1">
                                         {viewingSkill.tags.map(t => <span key={t} className="px-2 py-0.5 bg-slate-100 text-slate-600 rounded-full text-xs">{t}</span>)}
                                     </div>
                                 )}
-                                <p className="text-xs text-slate-400">建立者：{viewingSkill.owner_name || '—'}</p>
+                                <p className="text-xs text-slate-400">{t('skills.viewCreator', { name: viewingSkill.owner_name || '—' })}</p>
                             </div>
                             <div className="flex justify-end gap-2 px-6 py-4 border-t border-slate-100">
                                 {viewingSkill.my_share_type === 'develop' && (
-                                    <button onClick={() => { fork(viewingSkill); setViewingSkill(null) }} className="px-4 py-2 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 flex items-center gap-1.5"><GitFork size={14} />Fork 一份</button>
+                                    <button onClick={() => { fork(viewingSkill); setViewingSkill(null) }} className="px-4 py-2 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 flex items-center gap-1.5"><GitFork size={14} />{t('skills.btnFork')}</button>
                                 )}
-                                <button onClick={() => setViewingSkill(null)} className="px-4 py-2 bg-slate-100 text-slate-700 rounded-lg text-sm hover:bg-slate-200">關閉</button>
+                                <button onClick={() => setViewingSkill(null)} className="px-4 py-2 bg-slate-100 text-slate-700 rounded-lg text-sm hover:bg-slate-200">{t('skills.close')}</button>
                             </div>
                         </div>
                     </div>
@@ -893,14 +926,14 @@ export default function SkillMarket() {
     )
 }
 
-// ── Grantee type labels ───────────────────────────────────────────────────────
-const GRANTEE_TYPE_LABELS: Record<string, string> = {
-    user: '使用者',
-    role: '角色',
-    dept: '部門',
-    profit_center: '利潤中心',
-    org_section: '事業處',
-    org_group: '事業群',
+// ── Grantee type labels (i18n keys) ──────────────────────────────────────────
+const GRANTEE_TYPE_KEYS: Record<string, string> = {
+    user: 'skills.shareGranteeUser',
+    role: 'skills.shareGranteeRole',
+    dept: 'skills.shareGranteeDept',
+    profit_center: 'skills.shareGranteeProfitCenter',
+    org_section: 'skills.shareGranteeOrgSection',
+    org_group: 'skills.shareGranteeOrgGroup',
 }
 
 interface GrantRecord {
@@ -923,6 +956,12 @@ interface OrgLov {
 }
 
 function SkillShareModal({ skill, onClose }: { skill: Skill; onClose: () => void }) {
+    const { t, i18n } = useTranslation()
+    const localName = (sk: any) => {
+        if (i18n.language === 'en') return sk.name_en || sk.name
+        if (i18n.language === 'vi') return sk.name_vi || sk.name
+        return sk.name_zh || sk.name
+    }
     const [grants, setGrants] = useState<GrantRecord[]>([])
     const [loadingGrants, setLoadingGrants] = useState(false)
     const [submitting, setSubmitting] = useState(false)
@@ -942,7 +981,7 @@ function SkillShareModal({ skill, onClose }: { skill: Skill; onClose: () => void
             const res = await api.get(`/skills/${skill.id}/access`)
             setGrants(res.data)
         } catch (e: any) {
-            setError(e.response?.data?.error || '載入共享設定失敗')
+            setError(e.response?.data?.error || t('skills.shareLoadFailed'))
         } finally {
             setLoadingGrants(false)
         }
@@ -985,7 +1024,7 @@ function SkillShareModal({ skill, onClose }: { skill: Skill; onClose: () => void
 
     const handleAdd = async () => {
         const finalId = granteeType === 'user' ? granteeId : granteeId.trim()
-        if (!finalId) return setError('請填寫共享對象')
+        if (!finalId) return setError(t('skills.shareFillTarget'))
         setSubmitting(true)
         setError('')
         try {
@@ -996,7 +1035,7 @@ function SkillShareModal({ skill, onClose }: { skill: Skill; onClose: () => void
             setGranteeId('')
             setUserDisplay('')
         } catch (e: any) {
-            setError(e.response?.data?.error || '新增失敗')
+            setError(e.response?.data?.error || t('skills.shareAddFailed'))
         } finally {
             setSubmitting(false)
         }
@@ -1009,7 +1048,7 @@ function SkillShareModal({ skill, onClose }: { skill: Skill; onClose: () => void
             })
             setGrants(Array.isArray(res.data) ? res.data : grants)
         } catch (e: any) {
-            setError(e.response?.data?.error || '更新失敗')
+            setError(e.response?.data?.error || t('skills.shareUpdateFailed'))
         }
     }
 
@@ -1018,12 +1057,12 @@ function SkillShareModal({ skill, onClose }: { skill: Skill; onClose: () => void
             await api.delete(`/skills/${skill.id}/access/${grantId}`)
             setGrants(prev => prev.filter(g => g.id !== grantId))
         } catch (e: any) {
-            setError(e.response?.data?.error || '刪除失敗')
+            setError(e.response?.data?.error || t('skills.shareDeleteFailed'))
         }
     }
 
     const getGranteeDisplay = (grant: GrantRecord) => {
-        if (grant.grantee_type === 'role') return grant.grantee_id === 'admin' ? '系統管理員' : '一般使用者'
+        if (grant.grantee_type === 'role') return grant.grantee_id === 'admin' ? t('skills.shareRoleAdmin') : t('skills.shareRoleUser')
         return grant.grantee_name || grant.grantee_id
     }
 
@@ -1034,7 +1073,7 @@ function SkillShareModal({ skill, onClose }: { skill: Skill; onClose: () => void
                 <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
                     <div className="flex items-center gap-2">
                         <Share2 size={16} className="text-blue-500" />
-                        <h3 className="font-semibold text-slate-800">共享設定 — {skill.name}</h3>
+                        <h3 className="font-semibold text-slate-800">{t('skills.shareSettings', { name: localName(skill) })}</h3>
                     </div>
                     <button onClick={onClose} className="p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100"><X size={16} /></button>
                 </div>
@@ -1049,15 +1088,15 @@ function SkillShareModal({ skill, onClose }: { skill: Skill; onClose: () => void
 
                     {/* Add form */}
                     <div className="space-y-3">
-                        <p className="text-xs font-medium text-slate-600 uppercase tracking-wide">新增共享對象</p>
+                        <p className="text-xs font-medium text-slate-600 uppercase tracking-wide">{t('skills.shareAddTitle')}</p>
                         <div className="flex gap-2">
                             <select
                                 value={granteeType}
                                 onChange={e => handleTypeChange(e.target.value)}
                                 className="border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 shrink-0"
                             >
-                                {Object.entries(GRANTEE_TYPE_LABELS).map(([val, label]) => (
-                                    <option key={val} value={val}>{label}</option>
+                                {Object.entries(GRANTEE_TYPE_KEYS).map(([val, key]) => (
+                                    <option key={val} value={val}>{t(key)}</option>
                                 ))}
                             </select>
 
@@ -1074,7 +1113,7 @@ function SkillShareModal({ skill, onClose }: { skill: Skill; onClose: () => void
                                     onChange={e => setGranteeId(e.target.value)}
                                     className="flex-1 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
                                 >
-                                    <option value="">請選擇角色</option>
+                                    <option value="">{t('skills.shareSelectRole')}</option>
                                     {roles.map(r => <option key={r.id} value={String(r.id)}>{r.name}</option>)}
                                 </select>
                             ) : (
@@ -1087,8 +1126,8 @@ function SkillShareModal({ skill, onClose }: { skill: Skill; onClose: () => void
                                             setGranteeId(v.trim()) // free-text fallback
                                         }}
                                         placeholder={orgOptions.length > 0
-                                            ? `篩選${GRANTEE_TYPE_LABELS[granteeType]}...`
-                                            : `輸入${GRANTEE_TYPE_LABELS[granteeType]}代碼/名稱`}
+                                            ? t('skills.shareFilterPlaceholder', { type: t(GRANTEE_TYPE_KEYS[granteeType]) })
+                                            : t('skills.shareInputPlaceholder', { type: t(GRANTEE_TYPE_KEYS[granteeType]) })}
                                         className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
                                     />
                                     {orgOptions.length > 0 && (
@@ -1111,33 +1150,33 @@ function SkillShareModal({ skill, onClose }: { skill: Skill; onClose: () => void
                                 onChange={e => setShareType(e.target.value as 'use' | 'develop')}
                                 className="border border-slate-200 rounded-lg px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 shrink-0"
                             >
-                                <option value="use">使用</option>
-                                <option value="develop">開發</option>
+                                <option value="use">{t('skills.shareTypeUse')}</option>
+                                <option value="develop">{t('skills.shareTypeDevelop')}</option>
                             </select>
                             <button
                                 onClick={handleAdd}
                                 disabled={submitting}
                                 className="px-3 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 disabled:opacity-50 shrink-0 flex items-center gap-1"
                             >
-                                <Plus size={14} />{submitting ? '...' : '新增'}
+                                <Plus size={14} />{submitting ? '...' : t('skills.add')}
                             </button>
                         </div>
                     </div>
 
                     {/* Grants list */}
                     <div>
-                        <p className="text-xs font-medium text-slate-600 uppercase tracking-wide mb-2">已共享對象</p>
+                        <p className="text-xs font-medium text-slate-600 uppercase tracking-wide mb-2">{t('skills.shareGrantedList')}</p>
                         {loadingGrants ? (
-                            <p className="text-sm text-slate-400 py-4 text-center">載入中...</p>
+                            <p className="text-sm text-slate-400 py-4 text-center">{t('skills.loading')}</p>
                         ) : grants.length === 0 ? (
-                            <p className="text-sm text-slate-400 py-4 text-center">尚未設定任何共享對象</p>
+                            <p className="text-sm text-slate-400 py-4 text-center">{t('skills.shareEmpty')}</p>
                         ) : (
                             <div className="space-y-2 max-h-64 overflow-y-auto">
                                 {grants.map(g => (
                                     <div key={g.id} className="flex items-center justify-between py-2 px-3 bg-slate-50 rounded-lg border border-slate-100">
                                         <div className="flex items-center gap-2 min-w-0">
                                             <span className="text-xs px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded font-medium shrink-0">
-                                                {GRANTEE_TYPE_LABELS[g.grantee_type] || g.grantee_type}
+                                                {GRANTEE_TYPE_KEYS[g.grantee_type] ? t(GRANTEE_TYPE_KEYS[g.grantee_type]) : g.grantee_type}
                                             </span>
                                             <span className="text-sm text-slate-700 truncate">{getGranteeDisplay(g)}</span>
                                         </div>
@@ -1147,13 +1186,13 @@ function SkillShareModal({ skill, onClose }: { skill: Skill; onClose: () => void
                                                 onChange={e => handleChangeShareType(g, e.target.value as 'use' | 'develop')}
                                                 className={`text-xs border rounded px-1.5 py-0.5 ${g.share_type === 'develop' ? 'bg-amber-50 border-amber-300 text-amber-700' : 'bg-slate-50 border-slate-200 text-slate-600'}`}
                                             >
-                                                <option value="use">使用</option>
-                                                <option value="develop">開發</option>
+                                                <option value="use">{t('skills.shareTypeUse')}</option>
+                                                <option value="develop">{t('skills.shareTypeDevelop')}</option>
                                             </select>
                                             <button
                                                 onClick={() => handleDelete(g.id)}
                                                 className="p-1 rounded hover:bg-red-50 text-slate-400 hover:text-red-500 transition"
-                                                title="移除共享"
+                                                title={t('skills.shareRemove')}
                                             >
                                                 <Trash2 size={13} />
                                             </button>
@@ -1166,7 +1205,7 @@ function SkillShareModal({ skill, onClose }: { skill: Skill; onClose: () => void
                 </div>
 
                 <div className="flex justify-end px-6 py-4 border-t border-slate-100">
-                    <button onClick={onClose} className="px-4 py-2 bg-slate-100 text-slate-700 rounded-lg text-sm hover:bg-slate-200">關閉</button>
+                    <button onClick={onClose} className="px-4 py-2 bg-slate-100 text-slate-700 rounded-lg text-sm hover:bg-slate-200">{t('skills.close')}</button>
                 </div>
             </div>
         </div>
@@ -1184,11 +1223,36 @@ function SkillCard({ skill, onEdit, onDelete, onFork, onRequestPublic, onUse, on
     onShare?: () => void
     isOwner: boolean
 }) {
+    const { t, i18n } = useTranslation()
+    const localName = (sk: any) => {
+        if (i18n.language === 'en') return sk.name_en || sk.name
+        if (i18n.language === 'vi') return sk.name_vi || sk.name
+        return sk.name_zh || sk.name
+    }
+    const localDesc = (sk: any) => {
+        if (i18n.language === 'en') return sk.desc_en || sk.description
+        if (i18n.language === 'vi') return sk.desc_vi || sk.description
+        return sk.desc_zh || sk.description
+    }
+    const typeLabel = (type: string) => {
+        const map: Record<string, string> = {
+            builtin: t('skills.typeBuiltin'), external: t('skills.typeExternal'),
+            code: t('skills.typeCode'), workflow: t('skills.typeWorkflow'),
+        }
+        return map[type] || type
+    }
+    const codeStatusLabel = (status: string) => {
+        const map: Record<string, string> = {
+            running: t('skills.codeStatusRunning'), error: t('skills.codeStatusError'),
+            stopped: t('skills.codeStatusStopped'),
+        }
+        return map[status] || status
+    }
     const statusBadge = skill.is_public && skill.is_admin_approved
-        ? <span className="flex items-center gap-1 text-xs text-emerald-600"><Globe size={10} />公開</span>
+        ? <span className="flex items-center gap-1 text-xs text-emerald-600"><Globe size={10} />{t('skills.statusPublic')}</span>
         : skill.pending_approval
-            ? <span className="flex items-center gap-1 text-xs text-amber-600"><Clock size={10} />審核中</span>
-            : <span className="flex items-center gap-1 text-xs text-slate-400"><Lock size={10} />私人</span>
+            ? <span className="flex items-center gap-1 text-xs text-amber-600"><Clock size={10} />{t('skills.statusPending')}</span>
+            : <span className="flex items-center gap-1 text-xs text-slate-400"><Lock size={10} />{t('skills.statusPrivate')}</span>
 
     return (
         <div className="bg-white border border-slate-200 rounded-xl p-4 hover:shadow-md transition group">
@@ -1196,17 +1260,17 @@ function SkillCard({ skill, onEdit, onDelete, onFork, onRequestPublic, onUse, on
                 <div className="text-3xl leading-none mt-0.5">{skill.icon}</div>
                 <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
-                        <h3 className="font-semibold text-slate-800 text-sm truncate">{skill.name}</h3>
+                        <h3 className="font-semibold text-slate-800 text-sm truncate">{localName(skill)}</h3>
                         <span className={`shrink-0 text-xs px-1.5 py-0.5 rounded font-medium ${skill.type === 'external' ? 'bg-purple-100 text-purple-700' : skill.type === 'code' ? 'bg-emerald-100 text-emerald-700' : skill.type === 'workflow' ? 'bg-orange-100 text-orange-700' : 'bg-blue-100 text-blue-700'}`}>
-                            {skill.type === 'external' ? '外部' : skill.type === 'code' ? '程式' : skill.type === 'workflow' ? '工作流' : '內建'}
+                            {typeLabel(skill.type)}
                         </span>
                         {skill.type === 'code' && skill.code_status && (
                             <span className={`shrink-0 text-xs px-1.5 py-0.5 rounded ${skill.code_status === 'running' ? 'bg-emerald-50 text-emerald-600' : skill.code_status === 'error' ? 'bg-red-50 text-red-600' : 'bg-slate-100 text-slate-500'}`}>
-                                {skill.code_status === 'running' ? '運行中' : skill.code_status === 'error' ? '錯誤' : '已停止'}
+                                {codeStatusLabel(skill.code_status)}
                             </span>
                         )}
                     </div>
-                    <p className="text-xs text-slate-500 mt-0.5 line-clamp-2">{skill.description || '—'}</p>
+                    <p className="text-xs text-slate-500 mt-0.5 line-clamp-2">{localDesc(skill) || '—'}</p>
                 </div>
             </div>
 
@@ -1223,42 +1287,42 @@ function SkillCard({ skill, onEdit, onDelete, onFork, onRequestPublic, onUse, on
                 </div>
                 <div className="flex items-center gap-1">
                     {onUse && (
-                        <button onClick={onUse} title="在對話中使用" className="p-1 rounded hover:bg-purple-50 text-slate-400 hover:text-purple-600 transition">
+                        <button onClick={onUse} title={t('skills.btnUseInChat')} className="p-1 rounded hover:bg-purple-50 text-slate-400 hover:text-purple-600 transition">
                             <MessageSquare size={13} />
                         </button>
                     )}
                     {!isOwner && onView && (
-                        <button onClick={onView} title="檢視內容" className="p-1 rounded hover:bg-blue-50 text-slate-400 hover:text-blue-600 transition">
+                        <button onClick={onView} title={t('skills.btnView')} className="p-1 rounded hover:bg-blue-50 text-slate-400 hover:text-blue-600 transition">
                             <Eye size={13} />
                         </button>
                     )}
                     {!isOwner && onFork && (
-                        <button onClick={onFork} title="Fork 一份" className="p-1 rounded hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition">
+                        <button onClick={onFork} title={t('skills.btnFork')} className="p-1 rounded hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition">
                             <GitFork size={13} />
                         </button>
                     )}
                     {onEdit && (
-                        <button onClick={onEdit} title="編輯" className="p-1 rounded hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition">
+                        <button onClick={onEdit} title={t('skills.btnEdit')} className="p-1 rounded hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition">
                             <Pencil size={13} />
                         </button>
                     )}
                     {isOwner && !skill.is_public && !skill.pending_approval && onRequestPublic && (
-                        <button onClick={onRequestPublic} title="申請公開" className="p-1 rounded hover:bg-slate-100 text-slate-400 hover:text-emerald-600 transition">
+                        <button onClick={onRequestPublic} title={t('skills.btnRequestPublic')} className="p-1 rounded hover:bg-slate-100 text-slate-400 hover:text-emerald-600 transition">
                             <Send size={13} />
                         </button>
                     )}
                     {isOwner && onShare && (
-                        <button onClick={onShare} title="共享設定" className="p-1 rounded hover:bg-blue-50 text-slate-400 hover:text-blue-600 transition">
+                        <button onClick={onShare} title={t('skills.btnShare')} className="p-1 rounded hover:bg-blue-50 text-slate-400 hover:text-blue-600 transition">
                             <Share2 size={13} />
                         </button>
                     )}
                     {isOwner && onDelete && (
-                        <button onClick={onDelete} title="刪除" className="p-1 rounded hover:bg-red-50 text-slate-400 hover:text-red-500 transition">
+                        <button onClick={onDelete} title={t('skills.btnDelete')} className="p-1 rounded hover:bg-red-50 text-slate-400 hover:text-red-500 transition">
                             <Trash2 size={13} />
                         </button>
                     )}
                     {isOwner && onFork && (
-                        <button onClick={onFork} title="複製一份" className="p-1 rounded hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition">
+                        <button onClick={onFork} title={t('skills.btnCopy')} className="p-1 rounded hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition">
                             <GitFork size={13} />
                         </button>
                     )}
@@ -1284,6 +1348,7 @@ interface SkillCallLog {
 }
 
 function SkillCallHistory({ skillId }: { skillId: number }) {
+    const { t } = useTranslation()
     const [logs, setLogs] = useState<SkillCallLog[]>([])
     const [loading, setLoading] = useState(true)
 
@@ -1293,17 +1358,17 @@ function SkillCallHistory({ skillId }: { skillId: number }) {
         }).catch(() => {}).finally(() => setLoading(false))
     }, [skillId])
 
-    if (loading) return <div className="px-6 py-8 text-center text-slate-400 text-sm">載入中...</div>
+    if (loading) return <div className="px-6 py-8 text-center text-slate-400 text-sm">{t('skills.callHistoryLoading')}</div>
     if (logs.length === 0) return (
         <div className="px-6 py-10 text-center text-slate-400">
             <History size={32} className="mx-auto mb-3 opacity-30" />
-            <p className="text-sm">尚無呼叫紀錄</p>
+            <p className="text-sm">{t('skills.callHistoryEmpty')}</p>
         </div>
     )
 
     return (
         <div className="px-6 py-4 max-h-96 overflow-y-auto">
-            <p className="text-xs text-slate-400 mb-3">最近 100 筆呼叫紀錄</p>
+            <p className="text-xs text-slate-400 mb-3">{t('skills.callHistoryRecent')}</p>
             <div className="space-y-2">
                 {logs.map((log) => (
                     <div key={log.id} className={`rounded-lg px-4 py-3 border text-sm ${log.status === 'ok' ? 'bg-green-50 border-green-100' : 'bg-red-50 border-red-100'}`}>
@@ -1318,7 +1383,7 @@ function SkillCallHistory({ skillId }: { skillId: number }) {
                             <span className="text-xs text-slate-400 whitespace-nowrap">{log.called_at}</span>
                         </div>
                         {log.query_preview && <p className="text-xs text-slate-600 truncate">Q: {log.query_preview}</p>}
-                        {log.error_msg && <p className="text-xs text-red-600 truncate">錯誤: {log.error_msg}</p>}
+                        {log.error_msg && <p className="text-xs text-red-600 truncate">{t('skills.callHistoryError', { msg: log.error_msg })}</p>}
                     </div>
                 ))}
             </div>

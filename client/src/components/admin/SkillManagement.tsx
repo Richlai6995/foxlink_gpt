@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
+import { useTranslation } from 'react-i18next'
 import { CheckCircle, XCircle, Clock, Globe, Lock, Pencil, X, ChevronDown } from 'lucide-react'
 import api from '../../lib/api'
 
@@ -24,6 +25,24 @@ interface Skill {
 }
 
 export default function SkillManagement() {
+    const { t, i18n } = useTranslation()
+    const localName = (sk: any) => {
+        if (i18n.language === 'en') return sk.name_en || sk.name
+        if (i18n.language === 'vi') return sk.name_vi || sk.name
+        return sk.name_zh || sk.name
+    }
+    const localDesc = (sk: any) => {
+        if (i18n.language === 'en') return sk.desc_en || sk.description
+        if (i18n.language === 'vi') return sk.desc_vi || sk.description
+        return sk.desc_zh || sk.description
+    }
+    const typeLabel = (type: string) => {
+        const map: Record<string, string> = {
+            builtin: t('skills.typeBuiltin'), external: t('skills.typeExternal'),
+            code: t('skills.typeCode'), workflow: t('skills.typeWorkflow'),
+        }
+        return map[type] || type
+    }
     const [skills, setSkills] = useState<Skill[]>([])
     const [loading, setLoading] = useState(false)
     const [error, setError] = useState('')
@@ -36,7 +55,7 @@ export default function SkillManagement() {
             const res = await api.get('/admin/skills')
             setSkills(res.data)
         } catch (e: any) {
-            setError(e.response?.data?.error || '載入失敗')
+            setError(e.response?.data?.error || t('skills.loadFailed'))
         } finally {
             setLoading(false)
         }
@@ -46,12 +65,12 @@ export default function SkillManagement() {
 
     const approve = async (id: number) => {
         try { await api.put(`/admin/skills/${id}/approve`); load() }
-        catch (e: any) { setError(e.response?.data?.error || '審核失敗') }
+        catch (e: any) { setError(e.response?.data?.error || t('skills.adminApproveFailed')) }
     }
 
     const reject = async (id: number) => {
         try { await api.put(`/admin/skills/${id}/reject`); load() }
-        catch (e: any) { setError(e.response?.data?.error || '操作失敗') }
+        catch (e: any) { setError(e.response?.data?.error || t('skills.adminRejectFailed')) }
     }
 
     const saveEdit = async () => {
@@ -65,7 +84,7 @@ export default function SkillManagement() {
             setEditingSkill(null)
             load()
         } catch (e: any) {
-            setError(e.response?.data?.error || '儲存失敗')
+            setError(e.response?.data?.error || t('skills.adminSaveFailed'))
         } finally {
             setSaving(false)
         }
@@ -77,8 +96,8 @@ export default function SkillManagement() {
     return (
         <div>
             <div className="flex items-center justify-between mb-5">
-                <h2 className="text-lg font-semibold text-slate-800">技能管理</h2>
-                <span className="text-xs text-slate-400">{skills.length} 個技能</span>
+                <h2 className="text-lg font-semibold text-slate-800">{t('skills.adminTitle')}</h2>
+                <span className="text-xs text-slate-400">{t('skills.adminCount', { count: skills.length })}</span>
             </div>
 
             {error && (
@@ -91,7 +110,7 @@ export default function SkillManagement() {
             {pending.length > 0 && (
                 <div className="mb-6">
                     <h3 className="text-sm font-semibold text-amber-700 mb-3 flex items-center gap-1.5">
-                        <Clock size={14} />待審核 ({pending.length})
+                        <Clock size={14} />{t('skills.adminPending', { count: pending.length })}
                     </h3>
                     <div className="space-y-2">
                         {pending.map(sk => (
@@ -99,17 +118,17 @@ export default function SkillManagement() {
                                 <span className="text-xl">{sk.icon}</span>
                                 <div className="flex-1 min-w-0">
                                     <div className="flex items-center gap-2">
-                                        <span className="font-medium text-sm text-slate-800">{sk.name}</span>
-                                        <span className={`text-xs px-1.5 py-0.5 rounded ${sk.type === 'external' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>{sk.type === 'external' ? '外部' : '內建'}</span>
+                                        <span className="font-medium text-sm text-slate-800">{localName(sk)}</span>
+                                        <span className={`text-xs px-1.5 py-0.5 rounded ${sk.type === 'external' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>{typeLabel(sk.type)}</span>
                                     </div>
-                                    <p className="text-xs text-slate-500 truncate">{sk.description || '—'} · 建立者: {sk.owner_name || sk.owner_username}</p>
+                                    <p className="text-xs text-slate-500 truncate">{localDesc(sk) || '—'} · {t('skills.adminCreator', { name: sk.owner_name || sk.owner_username })}</p>
                                 </div>
                                 <div className="flex gap-2">
                                     <button onClick={() => approve(sk.id)} className="flex items-center gap-1 px-3 py-1.5 text-xs bg-emerald-600 text-white rounded-lg hover:bg-emerald-700">
-                                        <CheckCircle size={12} />核准
+                                        <CheckCircle size={12} />{t('skills.adminApprove')}
                                     </button>
                                     <button onClick={() => reject(sk.id)} className="flex items-center gap-1 px-3 py-1.5 text-xs bg-red-50 text-red-600 border border-red-200 rounded-lg hover:bg-red-100">
-                                        <XCircle size={12} />拒絕
+                                        <XCircle size={12} />{t('skills.adminReject')}
                                     </button>
                                 </div>
                             </div>
@@ -124,40 +143,40 @@ export default function SkillManagement() {
                     <table className="w-full text-sm">
                         <thead className="bg-slate-50 border-b border-slate-200">
                             <tr>
-                                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600">技能</th>
-                                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600">類型</th>
-                                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600">建立者</th>
-                                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600">狀態</th>
-                                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600">操作</th>
+                                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600">{t('skills.adminColSkill')}</th>
+                                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600">{t('skills.adminColType')}</th>
+                                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600">{t('skills.adminColCreator')}</th>
+                                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600">{t('skills.adminColStatus')}</th>
+                                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600">{t('skills.adminColAction')}</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
                             {loading && (
-                                <tr><td colSpan={5} className="px-4 py-8 text-center text-slate-400 text-sm">載入中...</td></tr>
+                                <tr><td colSpan={5} className="px-4 py-8 text-center text-slate-400 text-sm">{t('skills.loading')}</td></tr>
                             )}
                             {!loading && others.map(sk => (
                                 <tr key={sk.id} className="hover:bg-slate-50">
                                     <td className="px-4 py-3">
                                         <span className="mr-2 text-lg">{sk.icon}</span>
-                                        <span className="font-medium text-slate-800">{sk.name}</span>
-                                        {sk.description && <p className="text-xs text-slate-400 mt-0.5 line-clamp-1">{sk.description}</p>}
+                                        <span className="font-medium text-slate-800">{localName(sk)}</span>
+                                        {sk.description && <p className="text-xs text-slate-400 mt-0.5 line-clamp-1">{localDesc(sk)}</p>}
                                     </td>
                                     <td className="px-4 py-3">
                                         <span className={`text-xs px-1.5 py-0.5 rounded ${sk.type === 'external' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>
-                                            {sk.type === 'external' ? '外部' : '內建'}
+                                            {typeLabel(sk.type)}
                                         </span>
                                     </td>
                                     <td className="px-4 py-3 text-slate-600 text-xs">{sk.owner_name || sk.owner_username || '—'}</td>
                                     <td className="px-4 py-3">
                                         {sk.is_public && sk.is_admin_approved
-                                            ? <span className="flex items-center gap-1 text-xs text-emerald-600"><Globe size={11} />公開</span>
-                                            : <span className="flex items-center gap-1 text-xs text-slate-400"><Lock size={11} />私人</span>}
+                                            ? <span className="flex items-center gap-1 text-xs text-emerald-600"><Globe size={11} />{t('skills.statusPublic')}</span>
+                                            : <span className="flex items-center gap-1 text-xs text-slate-400"><Lock size={11} />{t('skills.statusPrivate')}</span>}
                                     </td>
                                     <td className="px-4 py-3">
                                         <div className="flex gap-1">
                                             {sk.is_public && sk.is_admin_approved
-                                                ? <button onClick={() => reject(sk.id)} title="取消公開" className="p-1 rounded hover:bg-red-50 text-slate-400 hover:text-red-500"><XCircle size={14} /></button>
-                                                : <button onClick={() => approve(sk.id)} title="設為公開" className="p-1 rounded hover:bg-emerald-50 text-slate-400 hover:text-emerald-600"><CheckCircle size={14} /></button>
+                                                ? <button onClick={() => reject(sk.id)} title={t('skills.adminRevokePublic')} className="p-1 rounded hover:bg-red-50 text-slate-400 hover:text-red-500"><XCircle size={14} /></button>
+                                                : <button onClick={() => approve(sk.id)} title={t('skills.adminSetPublic')} className="p-1 rounded hover:bg-emerald-50 text-slate-400 hover:text-emerald-600"><CheckCircle size={14} /></button>
                                             }
                                         </div>
                                     </td>
