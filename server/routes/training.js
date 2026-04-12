@@ -6216,14 +6216,47 @@ router.put('/slides/:sid/region-overrides', async (req, res) => {
 // Phase 3B: Language-independent Regions
 // ═══════════════════════════════════════════════════════════════════════════════
 
-// GET /api/training/slides/:sid/lang-regions — get all language-specific regions
+// GET /api/training/slides/:sid/lang-regions — get independent regions + translated block data
 router.get('/slides/:sid/lang-regions', async (req, res) => {
   try {
+    // 1. Independent regions (existing)
     const rows = await db.prepare(
       'SELECT lang, regions_json FROM slide_translations WHERE slide_id=? AND regions_json IS NOT NULL'
     ).all(req.params.sid);
     const result = {};
     rows.forEach(r => { try { result[r.lang] = JSON.parse(r.regions_json); } catch {} });
+
+    // 2. Translated block data — extract hotspot regions + intro from content_json per lang
+    const transRows = await db.prepare(
+      `SELECT lang, content_json FROM slide_translations WHERE slide_id=? AND content_json IS NOT NULL AND lang<>'zh-TW'`
+    ).all(req.params.sid);
+    const _translated = {};
+    const INTRO_FIELDS = [
+      'slide_narration', 'slide_narration_audio',
+      'slide_narration_test', 'slide_narration_test_audio',
+      'slide_narration_explore', 'slide_narration_explore_audio',
+      'completion_message'
+    ];
+    for (const row of transRows) {
+      let blocks;
+      try { blocks = JSON.parse(row.content_json); } catch { continue; }
+      if (!Array.isArray(blocks)) continue;
+      const langBlocks = {};
+      blocks.forEach((block, idx) => {
+        if (block.type !== 'hotspot') return;
+        const intro = {};
+        for (const f of INTRO_FIELDS) { if (block[f]) intro[f] = block[f]; }
+        langBlocks[String(idx)] = {
+          regions: block.regions || [],
+          intro: Object.keys(intro).length > 0 ? intro : null,
+        };
+      });
+      if (Object.keys(langBlocks).length > 0) {
+        _translated[row.lang] = langBlocks;
+      }
+    }
+    result._translated = _translated;
+
     res.json(result);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

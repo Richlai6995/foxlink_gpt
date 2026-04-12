@@ -39,6 +39,8 @@ export default function LanguageImagePanel({ slideId, blockIndex, currentImage, 
   const [saving, setSaving] = useState(false)
   // Independent language regions: { "en": { "0": [...regions] }, "vi": { "0": [...] } }
   const [langRegions, setLangRegions] = useState<Record<string, Record<string, Region[]>>>({})
+  // Translated block data: { "en": { "0": { regions: [...], intro: {...} } } }
+  const [translatedBlocks, setTranslatedBlocks] = useState<Record<string, Record<string, any>>>({})
   const [copyDropdown, setCopyDropdown] = useState(false)
   const [narrationLoading, setNarrationLoading] = useState(false)
   const [ttsLoading, setTtsLoading] = useState<string | null>(null)
@@ -83,13 +85,15 @@ export default function LanguageImagePanel({ slideId, blockIndex, currentImage, 
       setRegionOverrides(rOvr)
     }).catch(() => {})
 
-    // Load independent language regions + intro
+    // Load independent language regions + intro + translated blocks
     api.get(`/training/slides/${slideId}/lang-regions`).then(res => {
       const data = res.data || {}
-      setLangRegions(data)
+      const { _translated, ...langData } = data
+      setLangRegions(langData)
+      setTranslatedBlocks(_translated || {})
       // Extract _intro per language
       const intros: Record<string, any> = {}
-      for (const [lang, val] of Object.entries(data)) {
+      for (const [lang, val] of Object.entries(langData)) {
         if ((val as any)?._intro) intros[lang] = (val as any)._intro
       }
       setLangIntro(intros)
@@ -245,8 +249,13 @@ export default function LanguageImagePanel({ slideId, blockIndex, currentImage, 
   const hasIndependentRegions = !!(langRegions[activeLang]?.[String(blockIndex)])
   const independentRegions: Region[] = langRegions[activeLang]?.[String(blockIndex)] || []
 
+  const translatedBlock = translatedBlocks[activeLang]?.[String(blockIndex)]
+  const hasTranslation = !!(translatedBlock?.regions?.length)
+
   const getDisplayRegions = (): Region[] => {
     if (hasIndependentRegions) return independentRegions
+    // Translated regions take priority in inherit mode
+    if (hasTranslation) return translatedBlock.regions
     // Fallback: main regions with legacy coordinate overrides
     const ovr = regionOverrides[activeLang] || {}
     return regions.map(r => ({
@@ -256,12 +265,28 @@ export default function LanguageImagePanel({ slideId, blockIndex, currentImage, 
   }
 
   const createIndependentRegions = () => {
-    // Copy from main language as starting point
-    const copied = regions.map(r => ({ ...r }))
+    let seedRegions: Region[]
+    let seedIntro: any = null
+
+    if (hasTranslation) {
+      // Seed from translated content (English text + audio URLs)
+      seedRegions = translatedBlock.regions.map((r: any) => ({ ...r }))
+      seedIntro = translatedBlock.intro || null
+    } else {
+      // Fallback: copy from main language (zh-TW)
+      seedRegions = regions.map(r => ({ ...r }))
+    }
+
     setLangRegions(prev => ({
       ...prev,
-      [activeLang]: { ...(prev[activeLang] || {}), [String(blockIndex)]: copied }
+      [activeLang]: { ...(prev[activeLang] || {}), [String(blockIndex)]: seedRegions }
     }))
+    if (seedIntro) {
+      setLangIntro(prev => ({
+        ...prev,
+        [activeLang]: { ...(prev[activeLang] || {}), ...seedIntro }
+      }))
+    }
   }
 
   const copyFromLanguage = (sourceLang: string) => {
@@ -568,12 +593,14 @@ export default function LanguageImagePanel({ slideId, blockIndex, currentImage, 
               </>
             ) : (
               <>
-                <span style={{ color: 'var(--t-text-dim)' }}>📋 繼承主語言 ({regions.length} 個區域)</span>
+                <span style={{ color: 'var(--t-text-dim)' }}>
+                  {hasTranslation ? '🌐' : '📋'} {hasTranslation ? `翻譯結果 (${translatedBlock.regions.length} 個區域)` : `繼承主語言 (${regions.length} 個區域)`}
+                </span>
                 <div className="flex-1" />
                 <button onClick={createIndependentRegions}
                   className="flex items-center gap-1 px-2 py-0.5 rounded transition"
                   style={{ color: 'var(--t-accent)', border: '1px solid var(--t-accent)' }}>
-                  <Copy size={10} /> 建立獨立區域
+                  <Copy size={10} /> {hasTranslation ? '建立獨立區域(使用翻譯結果)' : '建立獨立區域(從主語言複製)'}
                 </button>
                 <div className="relative">
                   <button onClick={() => setCopyDropdown(!copyDropdown)}
@@ -610,8 +637,62 @@ export default function LanguageImagePanel({ slideId, blockIndex, currentImage, 
         <p className="text-[9px]" style={{ color: 'var(--t-text-dim)' }}>
           {hasIndependentRegions
             ? '此語言擁有獨立的互動區域。點「編輯」可在大圖上新增/刪除/調整區域。'
-            : '點「建立獨立區域」可為此語言建立獨立的互動區域集合（從主語言複製為起點）。'}
+            : hasTranslation
+              ? '已有翻譯結果。點「建立獨立區域」會帶入翻譯文字和語音，您只需調整框的位置。'
+              : '點「建立獨立區域」可為此語言建立獨立的互動區域集合（從主語言複製為起點）。'}
         </p>
+
+        {/* ═══ Translated voice preview (readonly, inherit mode) ═══ */}
+        {!hasIndependentRegions && hasTranslation && (
+          <div className="border-t pt-2 mt-2 space-y-2" style={{ borderColor: 'var(--t-border)' }}>
+            <div className="flex items-center gap-2">
+              <Volume2 size={10} style={{ color: '#22c55e' }} />
+              <span className="text-[10px] font-semibold" style={{ color: 'var(--t-text-muted)' }}>
+                {LANGS.find(l => l.code === activeLang)?.flag} {activeLang.toUpperCase()} 語音導覽（翻譯結果預覽）
+              </span>
+            </div>
+            <p className="text-[8px]" style={{ color: 'var(--t-text-dim)' }}>
+              唯讀預覽。需調整框位置？先「建立獨立區域」。
+            </p>
+            {/* Translated intro preview */}
+            {translatedBlock.intro && (
+              <div className="text-[9px] space-y-1.5 rounded p-1.5" style={{ backgroundColor: 'var(--t-bg-card)', border: '1px solid var(--t-border)' }}>
+                {[
+                  { key: 'slide_narration', audioKey: 'slide_narration_audio', icon: '🎯', label: '導引' },
+                  { key: 'slide_narration_test', audioKey: 'slide_narration_test_audio', icon: '📝', label: '測驗' },
+                  { key: 'slide_narration_explore', audioKey: 'slide_narration_explore_audio', icon: '🔍', label: '探索' },
+                ].map(m => translatedBlock.intro[m.key] && (
+                  <div key={m.key} className="space-y-0.5">
+                    <span style={{ color: 'var(--t-text-dim)' }}>{m.icon} {m.label}</span>
+                    <div className="text-[9px] rounded px-1.5 py-1 opacity-80" style={{ backgroundColor: 'var(--t-bg-inset, var(--t-bg-card))', border: '1px solid var(--t-border)', color: 'var(--t-text)' }}>
+                      {translatedBlock.intro[m.key]}
+                    </div>
+                    {translatedBlock.intro[m.audioKey] && <audio src={translatedBlock.intro[m.audioKey]} controls className="w-full h-5" style={{ maxHeight: '20px' }} />}
+                  </div>
+                ))}
+              </div>
+            )}
+            {/* Translated per-region preview */}
+            {translatedBlock.regions.filter((r: any) => r.correct).map((r: any, idx: number) => (
+              <div key={r.id} className="text-[9px] rounded p-1.5 space-y-1" style={{ backgroundColor: 'var(--t-bg-card)', border: '1px solid var(--t-border)' }}>
+                <span className="font-medium" style={{ color: 'var(--t-text-secondary)' }}>{idx + 1}. {r.label || r.id}</span>
+                {[
+                  { field: 'narration', audioField: 'audio_url', icon: '📖', label: '導引' },
+                  { field: 'test_hint', audioField: 'test_audio_url', icon: '📝', label: '測驗' },
+                  { field: 'explore_desc', audioField: 'explore_audio_url', icon: '🔍', label: '探索' },
+                ].map(m => r[m.field] && (
+                  <div key={m.field} className="space-y-0.5">
+                    <span style={{ color: 'var(--t-text-dim)' }}>{m.icon} {m.label}</span>
+                    <div className="text-[9px] rounded px-1.5 py-0.5 opacity-80" style={{ backgroundColor: 'var(--t-bg-inset, var(--t-bg-card))', border: '1px solid var(--t-border)', color: 'var(--t-text)' }}>
+                      {r[m.field]}
+                    </div>
+                    {r[m.audioField] && <audio src={r[m.audioField]} controls className="w-full h-5" style={{ maxHeight: '20px' }} />}
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
+        )}
 
         {/* ═══ Voice editing for independent regions ═══ */}
         {hasIndependentRegions && (
