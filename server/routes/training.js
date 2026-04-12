@@ -4148,17 +4148,31 @@ router.post('/courses/:id/reseed-all-lang-regions', loadCoursePermission, requir
 router.get('/courses/:id/translate/status', loadCoursePermission, async (req, res) => {
   try {
     const langs = ['en', 'vi'];
+    // Support ?lesson_ids=1,2,3 to filter by selected lessons
+    const lessonIdParam = req.query.lesson_ids;
+    const lessonIds = lessonIdParam ? String(lessonIdParam).split(',').map(Number).filter(n => !isNaN(n)) : null;
+
     const status = {};
     for (const lang of langs) {
       const ct = await db.prepare('SELECT translated_at FROM course_translations WHERE course_id=? AND lang=?').get(req.courseId, lang);
-      const slideTotal = await db.prepare(`
-        SELECT COUNT(*) AS total FROM course_slides WHERE lesson_id IN (SELECT id FROM course_lessons WHERE course_id=?)
-      `).get(req.courseId);
-      const slideTrans = await db.prepare(`
-        SELECT COUNT(*) AS cnt FROM slide_translations WHERE lang=? AND slide_id IN (
-          SELECT id FROM course_slides WHERE lesson_id IN (SELECT id FROM course_lessons WHERE course_id=?)
-        )
-      `).get(lang, req.courseId);
+
+      let lessonFilter;
+      if (lessonIds && lessonIds.length > 0) {
+        const placeholders = lessonIds.map(() => '?').join(',');
+        lessonFilter = { clause: `lesson_id IN (${placeholders})`, params: lessonIds };
+      } else {
+        lessonFilter = { clause: 'lesson_id IN (SELECT id FROM course_lessons WHERE course_id=?)', params: [req.courseId] };
+      }
+
+      const slideTotal = await db.prepare(
+        `SELECT COUNT(*) AS total FROM course_slides WHERE ${lessonFilter.clause}`
+      ).get(...lessonFilter.params);
+      const slideTrans = await db.prepare(
+        `SELECT COUNT(*) AS cnt FROM slide_translations WHERE lang=? AND slide_id IN (
+          SELECT id FROM course_slides WHERE ${lessonFilter.clause}
+        )`
+      ).get(lang, ...lessonFilter.params);
+
       status[lang] = {
         course_translated: !!ct,
         slides_total: slideTotal?.total || 0,

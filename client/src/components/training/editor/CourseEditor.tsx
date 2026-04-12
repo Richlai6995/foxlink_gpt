@@ -74,6 +74,13 @@ export default function CourseEditor() {
   const [translateStatus, setTranslateStatus] = useState<any>(null)
   const [translateProgress, setTranslateProgress] = useState<{ step: string; current: number; total: number; slides_done?: number; slides_total?: number } | null>(null)
   const [translateSelectedLessons, setTranslateSelectedLessons] = useState<number[] | null>(null) // null = all
+  const fetchTranslateStatus = async (lessonIds?: number[] | null) => {
+    try {
+      const params = lessonIds && lessonIds.length > 0 ? `?lesson_ids=${lessonIds.join(',')}` : ''
+      const res = await api.get(`/training/courses/${id}/translate/status${params}`)
+      setTranslateStatus(res.data)
+    } catch {}
+  }
   const [syncRegionsOnTranslate, setSyncRegionsOnTranslate] = useState(true)
   const [syncRegionsAudioOnTts, setSyncRegionsAudioOnTts] = useState(true)
   const [showPreviewMenu, setShowPreviewMenu] = useState(false)
@@ -736,7 +743,11 @@ export default function CourseEditor() {
               <label className="flex items-center gap-2 text-xs" style={{ color: 'var(--t-text)' }}>
                 <input type="checkbox"
                   checked={!translateSelectedLessons}
-                  onChange={() => setTranslateSelectedLessons(translateSelectedLessons ? null : [])}
+                  onChange={() => {
+                    const next = translateSelectedLessons ? null : []
+                    setTranslateSelectedLessons(next)
+                    fetchTranslateStatus(next)
+                  }}
                   className="w-3.5 h-3.5 rounded" />
                 {t('training.previewAll')}
               </label>
@@ -746,11 +757,14 @@ export default function CourseEditor() {
                     checked={!translateSelectedLessons || translateSelectedLessons.includes(l.id)}
                     onChange={() => {
                       if (!translateSelectedLessons) return // "all" checked — use "all" checkbox to uncheck
+                      let next: number[]
                       if (translateSelectedLessons.includes(l.id)) {
-                        setTranslateSelectedLessons(translateSelectedLessons.filter(id => id !== l.id))
+                        next = translateSelectedLessons.filter(id => id !== l.id)
                       } else {
-                        setTranslateSelectedLessons([...translateSelectedLessons, l.id])
+                        next = [...translateSelectedLessons, l.id]
                       }
+                      setTranslateSelectedLessons(next)
+                      fetchTranslateStatus(next)
                     }}
                     disabled={!translateSelectedLessons}
                     className="w-3.5 h-3.5 rounded" />
@@ -799,8 +813,7 @@ export default function CourseEditor() {
                                 if (evt.type === 'progress') setTranslateProgress(evt)
                                 if (evt.type === 'done') {
                                   setTranslateProgress(null)
-                                  const statusRes = await api.get(`/training/courses/${id}/translate/status`)
-                                  setTranslateStatus(statusRes.data)
+                                  fetchTranslateStatus(translateSelectedLessons)
                                 }
                                 if (evt.type === 'error') throw new Error(evt.error)
                               } catch {}
@@ -985,12 +998,7 @@ export default function CourseEditor() {
             {/* Load translation status on tab open */}
             {!translateStatus && (
               <button
-                onClick={async () => {
-                  try {
-                    const res = await api.get(`/training/courses/${id}/translate/status`)
-                    setTranslateStatus(res.data)
-                  } catch {}
-                }}
+                onClick={() => fetchTranslateStatus(translateSelectedLessons)}
                 className="text-xs px-3 py-1.5 rounded-lg transition"
                 style={{ backgroundColor: 'var(--t-accent-subtle)', color: 'var(--t-accent)' }}
               >
