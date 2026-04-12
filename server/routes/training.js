@@ -6293,6 +6293,69 @@ router.put('/slides/:sid/lang-regions', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// POST /api/training/slides/:sid/reseed-lang-regions — sync independent regions text+audio from latest translation, keep coords
+router.post('/slides/:sid/reseed-lang-regions', async (req, res) => {
+  try {
+    const { lang, block_index } = req.body;
+    if (!lang) return res.status(400).json({ error: 'lang is required' });
+
+    const slide = await db.prepare('SELECT lesson_id FROM course_slides WHERE id=?').get(req.params.sid);
+    if (!slide) return res.status(404).json({ error: '投影片不存在' });
+    const check = await verifyLessonAccess(slide.lesson_id, req.user, true);
+    if (check.error) return res.status(check.status).json({ error: check.error });
+
+    const trans = await db.prepare(
+      'SELECT id, content_json, regions_json FROM slide_translations WHERE slide_id=? AND lang=?'
+    ).get(req.params.sid, lang);
+    if (!trans?.content_json) return res.status(400).json({ error: '該語言尚未翻譯' });
+    if (!trans.regions_json) return res.status(400).json({ error: '該語言沒有獨立區域' });
+
+    let blocks;
+    try { blocks = JSON.parse(trans.content_json); } catch { return res.status(400).json({ error: 'content_json parse error' }); }
+    let regionsMap;
+    try { regionsMap = JSON.parse(trans.regions_json); } catch { return res.status(400).json({ error: 'regions_json parse error' }); }
+
+    const idx = String(block_index || 0);
+    const independentRegs = regionsMap[idx];
+    if (!Array.isArray(independentRegs)) return res.status(400).json({ error: `block_index ${idx} 沒有獨立區域` });
+
+    const block = blocks[Number(idx)];
+    if (!block || block.type !== 'hotspot') return res.status(400).json({ error: `block ${idx} 不是 hotspot` });
+    const translatedRegs = block.regions || [];
+
+    // Merge: keep independent coords, sync text + audio from translated
+    const VOICE_FIELDS = ['label', 'narration', 'audio_url', 'feedback', 'feedback_wrong',
+      'test_hint', 'test_audio_url', 'explore_desc', 'explore_audio_url'];
+    for (const reg of independentRegs) {
+      const src = translatedRegs.find(tr => tr.id === reg.id);
+      if (!src) continue;
+      for (const f of VOICE_FIELDS) {
+        if (src[f] !== undefined) reg[f] = src[f];
+      }
+    }
+
+    // Sync intro
+    const INTRO_FIELDS = [
+      'slide_narration', 'slide_narration_audio',
+      'slide_narration_test', 'slide_narration_test_audio',
+      'slide_narration_explore', 'slide_narration_explore_audio',
+      'completion_message'
+    ];
+    const intro = regionsMap._intro || {};
+    let introChanged = false;
+    for (const f of INTRO_FIELDS) {
+      if (block[f] !== undefined) { intro[f] = block[f]; introChanged = true; }
+    }
+    if (introChanged) regionsMap._intro = intro;
+
+    regionsMap[idx] = independentRegs;
+    const regionsStr = JSON.stringify(regionsMap);
+    await db.prepare('UPDATE slide_translations SET regions_json=? WHERE id=?').run(regionsStr, trans.id);
+
+    res.json({ ok: true, regions_json: regionsMap });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // DELETE /api/training/slides/:sid/lang-regions — remove language-specific regions (revert to inherit)
 router.delete('/slides/:sid/lang-regions', async (req, res) => {
   try {

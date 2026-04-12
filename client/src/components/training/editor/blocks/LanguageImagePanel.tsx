@@ -594,6 +594,27 @@ export default function LanguageImagePanel({ slideId, blockIndex, currentImage, 
                   style={{ backgroundColor: '#22c55e' }}>
                   <Save size={10} /> {saving ? '...' : '儲存'}
                 </button>
+                {hasTranslation && (
+                  <button
+                    onClick={async () => {
+                      if (!confirm('將用最新翻譯覆蓋文字和語音，座標保持不變。確定？')) return
+                      try {
+                        setSaving(true)
+                        const res = await api.post(`/training/slides/${slideId}/reseed-lang-regions`, {
+                          lang: activeLang, block_index: blockIndex
+                        })
+                        const data = res.data.regions_json || {}
+                        setLangRegions(prev => ({ ...prev, [activeLang]: data }))
+                        if (data._intro) setLangIntro(prev => ({ ...prev, [activeLang]: data._intro }))
+                      } catch (e: any) { alert(e.response?.data?.error || '同步失敗') }
+                      finally { setSaving(false) }
+                    }}
+                    disabled={saving}
+                    className="flex items-center gap-1 px-2 py-0.5 rounded transition disabled:opacity-50"
+                    style={{ color: '#a855f7', border: '1px solid rgba(168,85,247,0.3)' }}>
+                    <RefreshCw size={10} /> 從翻譯結果同步
+                  </button>
+                )}
                 <button onClick={revertToInherit}
                   className="flex items-center gap-1 px-2 py-0.5 rounded transition text-orange-400"
                   style={{ border: '1px solid var(--t-border)' }}>
