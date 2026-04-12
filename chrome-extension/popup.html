@@ -73,16 +73,6 @@
         <button class="btn btn-ghost" id="copySessionBtn" style="width:auto; padding:4px 8px; font-size:10px;" title="複製 Session ID">📋</button>
       </div>
       <div class="flex mt">
-        <div style="flex:1;">
-          <label>步驟起始值</label>
-          <input type="number" id="startStep" min="0" value="0" placeholder="0" />
-        </div>
-        <div style="flex:1;">
-          <label>標記起始值</label>
-          <input type="number" id="startMarker" min="0" value="0" placeholder="0" />
-        </div>
-      </div>
-      <div class="flex mt">
         <button class="btn btn-success" id="startBtn" style="flex:1;">▶ 手動開始</button>
         <button class="btn btn-danger" id="stopBtn" style="flex:1;" disabled>⬛ 停止</button>
       </div>
@@ -97,6 +87,16 @@
         </div>
         <div>
           <button class="btn btn-ghost" id="screenshotBtn" style="width:auto; padding: 6px 12px;">📸 手動截圖</button>
+        </div>
+      </div>
+      <div class="flex" style="margin-bottom:6px;">
+        <div style="flex:1;">
+          <label>步驟起始值</label>
+          <input type="number" id="startStep" min="0" value="0" placeholder="0" />
+        </div>
+        <div style="flex:1;">
+          <label>標記起始值</label>
+          <input type="number" id="startMarker" min="0" value="0" placeholder="0" />
         </div>
       </div>
 

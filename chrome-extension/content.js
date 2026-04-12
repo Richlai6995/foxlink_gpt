@@ -438,9 +438,31 @@ function startAnnotationMode(screenshotDataUrl) {
   const metaGroup = document.createElement('div');
   metaGroup.style.cssText = 'display:flex;gap:6px;align-items:center;margin-right:8px;';
 
+  // 標記起始值：控制下一個 ①②③ 的號碼
+  const markerLabel = document.createElement('span');
+  markerLabel.textContent = '標記:';
+  markerLabel.style.cssText = 'color:rgba(255,255,255,0.6);font-size:11px;';
+  metaGroup.appendChild(markerLabel);
+
+  const markerInput = document.createElement('input');
+  markerInput.type = 'number';
+  markerInput.min = '0';
+  markerInput.value = String(stepCounter);
+  markerInput.title = '下一個數字標記 = 此值 + 1';
+  markerInput.style.cssText = `
+    width: 42px; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2);
+    border-radius: 4px; color: #fff; font-size: 12px; text-align: center; padding: 2px 4px;
+    outline: none;
+  `;
+  markerInput.addEventListener('change', () => {
+    const v = parseInt(markerInput.value);
+    if (!isNaN(v) && v >= 0) stepCounter = v;
+  });
+  metaGroup.appendChild(markerInput);
+
   const stepLabel = document.createElement('span');
   stepLabel.textContent = '步驟:';
-  stepLabel.style.cssText = 'color:rgba(255,255,255,0.6);font-size:11px;';
+  stepLabel.style.cssText = 'color:rgba(255,255,255,0.6);font-size:11px;margin-left:4px;';
   metaGroup.appendChild(stepLabel);
 
   const stepInput = document.createElement('input');
@@ -1222,6 +1244,7 @@ function startAnnotationMode(screenshotDataUrl) {
         purpose: 'both',
         visible: true
       });
+      markerInput.value = String(stepCounter); // 同步顯示目前標記號碼
       undoStack = [];
       redrawAll();
       return;
@@ -1411,7 +1434,7 @@ function startAnnotationMode(screenshotDataUrl) {
   function undo() {
     if (annotations.length === 0) return;
     const removed = annotations.pop();
-    if (removed.type === 'number') stepCounter--;
+    if (removed.type === 'number') { stepCounter--; markerInput.value = String(stepCounter); }
     undoStack.push(removed);
     redrawAll();
   }
@@ -1419,7 +1442,7 @@ function startAnnotationMode(screenshotDataUrl) {
   function redo() {
     if (undoStack.length === 0) return;
     const restored = undoStack.pop();
-    if (restored.type === 'number') stepCounter++;
+    if (restored.type === 'number') { stepCounter++; markerInput.value = String(stepCounter); }
     annotations.push(restored);
     redrawAll();
   }
@@ -1429,6 +1452,7 @@ function startAnnotationMode(screenshotDataUrl) {
     undoStack = [...annotations];
     annotations = [];
     stepCounter = markerBase; // 重置為標記起始值
+    markerInput.value = String(stepCounter);
     redrawAll();
   }
 
@@ -1522,6 +1546,10 @@ chrome.runtime.onMessage.addListener((msg) => {
     }
     toggleBadge(isRecording);
     updateBadgeCount();
+  }
+  // 錄製中即時調整標記起始值
+  if (msg.type === 'SET_MARKER_BASE') {
+    if (msg.markerStart !== undefined) markerBase = msg.markerStart;
   }
   // Hide/show badge for clean screenshots
   if (msg.type === 'HIDE_BADGE' && badgeEl) {

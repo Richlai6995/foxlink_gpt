@@ -121,6 +121,21 @@ $('stopBtn').addEventListener('click', () => {
   });
 });
 
+// 錄製中即時調整起始值 → 同步到 background + content
+$('startStep').addEventListener('change', () => {
+  const v = parseInt($('startStep').value) || 0;
+  chrome.runtime.sendMessage({ type: 'SET_STEP_OFFSET', stepCount: v });
+});
+$('startMarker').addEventListener('change', () => {
+  const v = parseInt($('startMarker').value) || 0;
+  // 傳給所有 tab 的 content.js 更新 markerBase
+  chrome.tabs.query({}, tabs => {
+    tabs.forEach(tab => {
+      chrome.tabs.sendMessage(tab.id, { type: 'SET_MARKER_BASE', markerStart: v }).catch(() => {});
+    });
+  });
+});
+
 // Manual screenshot
 $('screenshotBtn').addEventListener('click', () => {
   chrome.runtime.sendMessage({ type: 'MANUAL_SCREENSHOT' });

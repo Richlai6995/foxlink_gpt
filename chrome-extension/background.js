@@ -311,6 +311,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     sendResponse({ ok: true });
   }
 
+  // 錄製中即時調整步驟起始值
+  if (msg.type === 'SET_STEP_OFFSET') {
+    stepCounter = msg.stepCount || 0;
+    persistRecordingState();
+    updateBadge();
+    sendResponse({ ok: true });
+  }
+
   if (msg.type === 'CLEAR_SCREENSHOTS') {
     recentScreenshots = [];
     stepCounter = 0;
