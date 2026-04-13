@@ -227,7 +227,13 @@
     "addUser": "Thêm người dùng",
     "editUser": "Chỉnh sửa người dùng",
     "deleteUser": "Xóa người dùng",
-    "searchPlaceholder": "Tìm kiếm theo tên / mã NV / email / phòng ban / trung tâm lợi nhuận / bộ phận / nhóm",
+    "searchPlaceholder": "Tìm tên / mã NV / email / phòng ban / trung tâm lợi nhuận / bộ phận / nhóm",
+    "filter": {
+      "mixedName": "Tên CJK+EN hỗn hợp",
+      "enName": "Tên có tiếng Anh",
+      "noEid": "Không có mã NV",
+      "noEmail": "Không có Email"
+    },
     "cols": {
       "username": "Tài khoản",
       "name": "Họ tên",

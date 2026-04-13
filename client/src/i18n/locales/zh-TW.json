@@ -227,7 +227,13 @@
     "addUser": "新增使用者",
     "editUser": "編輯使用者",
     "deleteUser": "刪除使用者",
-    "searchPlaceholder": "搜尋 姓名 / 工號 / Email / 部門名稱 / 利潤中心名稱 / 事業處名稱 / 事業群名稱",
+    "searchPlaceholder": "搜尋 姓名 / 工號 / Email / 部門 / 利潤中心 / 事業處 / 事業群",
+    "filter": {
+      "mixedName": "姓名中英混雜",
+      "enName": "姓名含英文",
+      "noEid": "無工號",
+      "noEmail": "無 Email"
+    },
     "cols": {
       "username": "帳號",
       "name": "姓名",

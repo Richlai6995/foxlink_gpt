@@ -227,7 +227,13 @@
     "addUser": "Add User",
     "editUser": "Edit User",
     "deleteUser": "Delete User",
-    "searchPlaceholder": "Search by name / employee ID / email / dept / profit center / section / group",
+    "searchPlaceholder": "Search name / employee ID / email / dept / profit center / section / group",
+    "filter": {
+      "mixedName": "Mixed CJK+EN name",
+      "enName": "Name has English",
+      "noEid": "No Employee ID",
+      "noEmail": "No Email"
+    },
     "cols": {
       "username": "Account",
       "name": "Name",

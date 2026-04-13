@@ -269,6 +269,7 @@ export default function UserManagement() {
   const [syncingAll, setSyncingAll] = useState(false)
   const [syncMsg, setSyncMsg] = useState('')
   const [search, setSearch] = useState('')
+  const [quickFilter, setQuickFilter] = useState<'mixed_name' | 'en_name' | 'no_eid' | 'no_email' | ''>('')
 
   const load = async () => {
     const [usersRes, rolesRes, policiesRes, assignRes] = await Promise.all([
@@ -290,11 +291,15 @@ export default function UserManagement() {
   useEffect(() => { load() }, [])
 
   // search filter
-  const filtered = search.trim()
-    ? users.filter((u) => {
+  const hasEnChar = (s: string) => /[a-zA-Z]/.test(s)
+  const hasCjk = (s: string) => /[\u4e00-\u9fff\u3400-\u4dbf]/.test(s)
+
+  const filtered = users.filter((u) => {
+    const u2 = u as any
+    // keyword search
+    if (search.trim()) {
       const q = search.trim().toLowerCase()
-      const u2 = u as any
-      return (
+      const match =
         u.username?.toLowerCase().includes(q) ||
         u.name?.toLowerCase().includes(q) ||
         (u.employee_id || '').toLowerCase().includes(q) ||
@@ -303,9 +308,16 @@ export default function UserManagement() {
         (u2.profit_center_name || '').toLowerCase().includes(q) ||
         (u2.org_section_name || '').toLowerCase().includes(q) ||
         (u2.org_group_name || '').toLowerCase().includes(q)
-      )
-    })
-    : users
+      if (!match) return false
+    }
+    // quick filters
+    const name = u.name || ''
+    if (quickFilter === 'mixed_name') return hasCjk(name) && hasEnChar(name)
+    if (quickFilter === 'en_name') return hasEnChar(name)
+    if (quickFilter === 'no_eid') return !u.employee_id
+    if (quickFilter === 'no_email') return !u.email
+    return true
+  })
 
   const openNew = () => {
     setForm(empty)
@@ -503,23 +515,43 @@ export default function UserManagement() {
       {/* Org Sync Schedule Panel */}
       <OrgSyncPanel />
 
-      {/* Search bar */}
-      <div className="mb-3 flex items-center gap-2 bg-slate-50 rounded-xl px-4 py-2.5 border border-slate-200">
+      {/* Search bar + quick filters */}
+      <div className="mb-3 flex flex-wrap items-center gap-2 bg-slate-50 rounded-xl px-4 py-2.5 border border-slate-200">
         <Search size={15} className="text-slate-400 shrink-0" />
         <input
           type="text"
           value={search}
           onChange={e => setSearch(e.target.value)}
           placeholder={t('users.searchPlaceholder')}
-          className="flex-1 bg-transparent text-sm outline-none text-slate-700 placeholder:text-slate-400"
+          className="bg-transparent text-sm outline-none text-slate-700 placeholder:text-slate-400"
+          style={{ width: 260 }}
         />
         {search && (
           <button onClick={() => setSearch('')} className="text-slate-400 hover:text-slate-600">
             <X size={14} />
           </button>
         )}
-        {search && (
-          <span className="text-xs text-slate-500 shrink-0">{filtered.length} / {users.length}</span>
+        <span className="w-px h-5 bg-slate-300 mx-1 shrink-0" />
+        {([
+          { key: 'mixed_name', label: t('users.filter.mixedName', '姓名中英混雜') },
+          { key: 'en_name', label: t('users.filter.enName', '姓名含英文') },
+          { key: 'no_eid', label: t('users.filter.noEid', '無工號') },
+          { key: 'no_email', label: t('users.filter.noEmail', '無 Email') },
+        ] as const).map((f) => (
+          <button
+            key={f.key}
+            onClick={() => setQuickFilter(quickFilter === f.key ? '' : f.key)}
+            className={`px-2.5 py-1 rounded-full text-xs font-medium border transition ${
+              quickFilter === f.key
+                ? 'bg-blue-600 text-white border-blue-600'
+                : 'bg-white text-slate-600 border-slate-300 hover:border-blue-400 hover:text-blue-600'
+            }`}
+          >
+            {f.label}
+          </button>
+        ))}
+        {(search || quickFilter) && (
+          <span className="text-xs text-slate-500 shrink-0 ml-auto">{filtered.length} / {users.length}</span>
         )}
       </div>
 
@@ -988,8 +1020,13 @@ export default function UserManagement() {
       )}
 
       {/* Table */}
+      <style>{`
+        .user-table-wrap::-webkit-scrollbar { height: 14px; }
+        .user-table-wrap::-webkit-scrollbar-thumb { background: #94a3b8; border-radius: 7px; border: 3px solid #fff; }
+        .user-table-wrap::-webkit-scrollbar-track { background: #f1f5f9; }
+      `}</style>
       <div className="bg-white rounded-xl border border-slate-200 overflow-hidden flex flex-col" style={{ maxHeight: 'calc(100vh - 260px)' }}>
-        <div className="overflow-auto flex-1">
+        <div className="overflow-auto flex-1 user-table-wrap">
           <table className="w-full text-sm whitespace-nowrap">
             <thead className="bg-slate-50 border-b border-slate-200 sticky top-0 z-10">
               <tr>
@@ -997,6 +1034,7 @@ export default function UserManagement() {
                 <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600">{t('users.cols.name')}</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600">{t('users.cols.employeeId')}</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600">Email</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600">{t('users.cols.action')}</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600">{t('users.cols.systemRole')}</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600">{t('users.cols.mcpDifyRole')}</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600 text-center" title={t('users.form.textUpload')}><FileText size={13} className="inline" /></th>
@@ -1006,7 +1044,6 @@ export default function UserManagement() {
                 <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600" title={t('users.cols.budget')}>{t('users.cols.budget')}</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600">{t('users.cols.creation')}</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600">{t('users.cols.status')}</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600">{t('users.cols.action')}</th>
                 {/* Org columns */}
                 <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600 bg-green-50 border-l border-green-200">{t('users.cols.deptCode')}</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600 bg-green-50">{t('users.cols.deptName')}</th>
@@ -1033,6 +1070,27 @@ export default function UserManagement() {
                     <td className="px-4 py-3">{u.name}</td>
                     <td className="px-4 py-3 text-slate-500">{u.employee_id || '-'}</td>
                     <td className="px-4 py-3 text-slate-500">{u.email || '-'}</td>
+                    {/* Actions — moved after Email */}
+                    <td className="px-4 py-3">
+                      <div className="flex gap-1">
+                        <button onClick={() => openEdit(u)} className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-500 hover:text-blue-600 transition" title={t('common.edit')}>
+                          <Edit size={14} />
+                        </button>
+                        <button onClick={() => handleDelete(u.id, u.username)} className="p-1.5 hover:bg-red-50 rounded-lg text-slate-500 hover:text-red-600 transition" title={t('common.delete')}>
+                          <Trash2 size={14} />
+                        </button>
+                        {u.employee_id && (
+                          <button
+                            onClick={() => handleSyncOne(u.id)}
+                            disabled={syncingId === u.id}
+                            className="p-1.5 hover:bg-green-50 rounded-lg text-slate-500 hover:text-green-600 transition"
+                            title={t('users.syncOrg')}
+                          >
+                            <RefreshCw size={14} className={syncingId === u.id ? 'animate-spin' : ''} />
+                          </button>
+                        )}
+                      </div>
+                    </td>
                     <td className="px-4 py-3">
                       <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${u.role === 'admin' ? 'bg-purple-100 text-purple-700' : 'bg-slate-100 text-slate-700'}`}>
                         {u.role === 'admin' ? t('users.adminRole') : t('users.normalUser')}
@@ -1091,26 +1149,6 @@ export default function UserManagement() {
                         {u.status === 'active' ? <Check size={12} /> : <X size={12} />}
                         {u.status === 'active' ? t('users.status.active') : t('users.status.inactive')}
                       </span>
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex gap-1">
-                        <button onClick={() => openEdit(u)} className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-500 hover:text-blue-600 transition" title={t('common.edit')}>
-                          <Edit size={14} />
-                        </button>
-                        <button onClick={() => handleDelete(u.id, u.username)} className="p-1.5 hover:bg-red-50 rounded-lg text-slate-500 hover:text-red-600 transition" title={t('common.delete')}>
-                          <Trash2 size={14} />
-                        </button>
-                        {u.employee_id && (
-                          <button
-                            onClick={() => handleSyncOne(u.id)}
-                            disabled={syncingId === u.id}
-                            className="p-1.5 hover:bg-green-50 rounded-lg text-slate-500 hover:text-green-600 transition"
-                            title={t('users.syncOrg')}
-                          >
-                            <RefreshCw size={14} className={syncingId === u.id ? 'animate-spin' : ''} />
-                          </button>
-                        )}
-                      </div>
                     </td>
                     {/* Org columns */}
                     <td className="px-4 py-3 text-slate-500 text-xs bg-green-50/40 border-l border-green-100">{u2.dept_code || '-'}</td>
