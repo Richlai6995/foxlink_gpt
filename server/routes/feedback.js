@@ -325,29 +325,8 @@ router.post('/tickets/:id/messages', upload.array('files', 5), async (req, res) 
       }
     }
 
-    // Email 通知（非內部備註時）
+    // 對話訊息不發 email（避免轟炸），只靠站內通知 + WebSocket + Webex
     const isInternalBool = is_internal === 'true' || is_internal === true;
-    if (!isInternalBool) {
-      try {
-        const { sendMail } = require('../services/mailService');
-        if (senderRole === 'admin' && ticket.applicant_email) {
-          await sendMail({
-            to: ticket.applicant_email,
-            subject: `[Cortex] 工單回覆 ${ticket.ticket_no} - ${ticket.subject}`,
-            html: `
-              <h3>工單回覆</h3>
-              <p><b>單號：</b>${ticket.ticket_no}</p>
-              <p><b>主旨：</b>${ticket.subject}</p>
-              <p><b>回覆內容：</b></p>
-              <p>${content}</p>
-            `,
-          });
-          if (msg.id) await db.prepare('UPDATE feedback_messages SET is_email_sent = 1 WHERE id = ?').run(msg.id);
-        }
-      } catch (mailErr) {
-        console.warn('[Feedback] message mail error:', mailErr.message);
-      }
-    }
 
     // WebSocket: 推送新訊息 + Webex 通知
     emitNewMessage(Number(req.params.id), msg);

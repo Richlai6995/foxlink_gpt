@@ -223,16 +223,14 @@ async function onTicketCreated(db, ticket) {
 async function onTicketResolved(db, ticket, note, resolverName) {
   await Promise.allSettled([
     notifyUser(db, ticket.user_id, ticket, 'resolved', `工單已解決: ${ticket.ticket_no}`, note || '您的問題已被解決'),
-    sendTicketEmail(db, 'resolved', ticket, { note }),
-    // Webex 不通知結案（減少 noise）
+    // Email/Webex 不通知結案（減少 noise），只站內通知
   ]);
 }
 
 async function onTicketReopened(db, ticket) {
   await Promise.allSettled([
     notifyAdmins(db, ticket, 'reopened', `工單重開: ${ticket.ticket_no}`, `申請者表示問題尚未解決`),
-    sendTicketEmail(db, 'reopened', ticket),
-    // Webex 不通知重開（減少 noise）
+    // Email/Webex 不通知重開（減少 noise），只站內通知
   ]);
 }
 
