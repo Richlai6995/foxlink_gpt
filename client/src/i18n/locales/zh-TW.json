@@ -2640,6 +2640,15 @@
       "chat_page": "AI 對話",
       "webex": "Webex"
     },
+    "fab": {
+      "pendingReply": "待回覆",
+      "noNotifications": "目前沒有新通知",
+      "justNow": "剛剛",
+      "minsAgo": "{{n}} 分鐘前",
+      "hrsAgo": "{{n}} 小時前",
+      "daysAgo": "{{n}} 天前",
+      "files": "個檔案"
+    },
     "admin": {
       "categoryManagement": "分類管理",
       "slaConfig": "SLA 設定",

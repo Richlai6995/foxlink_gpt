@@ -2640,6 +2640,15 @@
       "chat_page": "AI Chat",
       "webex": "Webex"
     },
+    "fab": {
+      "pendingReply": "Pending Reply",
+      "noNotifications": "No new notifications",
+      "justNow": "Just now",
+      "minsAgo": "{{n}}m ago",
+      "hrsAgo": "{{n}}h ago",
+      "daysAgo": "{{n}}d ago",
+      "files": "files"
+    },
     "admin": {
       "categoryManagement": "Category Management",
       "slaConfig": "SLA Settings",

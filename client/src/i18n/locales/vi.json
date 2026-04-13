@@ -2640,6 +2640,15 @@
       "chat_page": "AI Chat",
       "webex": "Webex"
     },
+    "fab": {
+      "pendingReply": "Chờ phản hồi",
+      "noNotifications": "Không có thông báo mới",
+      "justNow": "Vừa xong",
+      "minsAgo": "{{n}} phút trước",
+      "hrsAgo": "{{n}} giờ trước",
+      "daysAgo": "{{n}} ngày trước",
+      "files": "tệp"
+    },
     "admin": {
       "categoryManagement": "Quản lý danh mục",
       "slaConfig": "Cài đặt SLA",
