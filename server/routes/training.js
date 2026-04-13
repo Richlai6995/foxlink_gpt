@@ -4355,14 +4355,14 @@ router.post('/ai/analyze-screenshot', upload.single('screenshot'), async (req, r
    - coords: { x, y, w, h } 百分比座標（相對於圖片左上角，0-100）
    - type: button | input | link | select | checkbox | tab | menu | icon
    - label: 元素的文字或功能說明（繁體中文）
-   - is_primary: 是否為此畫面的主要操作點${clickCoords ? '（使用者剛點擊的元素 = true）' : ''}
+   - is_primary: 是否為此畫面的主要操作點${clickCoords ? '（使用者剛點擊的元素 = true）' : '（至少要有一個 region 設為 true）'}
 3. 生成此畫面的操作說明（instruction，1-2 句）
 4. 生成旁白文字（narration，口語化，適合 TTS 朗讀）
 5. 偵測是否包含敏感資訊（密碼欄位、個資、帳號密碼）
 
 只回傳 JSON，不要 markdown code fence：
 {
-  "regions": [{ "type": "...", "label": "...", "coords": { "x": 0, "y": 0, "w": 0, "h": 0 }, "is_primary": false }],
+  "regions": [{ "type": "...", "label": "...", "coords": { "x": 0, "y": 0, "w": 0, "h": 0 }, "is_primary": true }],
   "instruction": "...",
   "narration": "...",
   "sensitive_areas": [{ "type": "password", "coords": { "x": 0, "y": 0, "w": 0, "h": 0 } }]
@@ -4742,9 +4742,9 @@ router.post('/ai/batch-analyze', upload.array('screenshots', 50), async (req, re
     const analyzeOne = async (file, i) => {
       const imageBase64 = fs.readFileSync(file.path).toString('base64');
       const prompt = `分析這張系統操作截圖（第 ${i + 1}/${files.length} 張）。
-識別所有可互動的 UI 元素，回傳 JSON：
+識別所有可互動的 UI 元素，回傳 JSON。至少要有一個 region 的 is_primary 設為 true（此畫面最重要的操作目標）：
 {
-  "regions": [{ "type": "button|input|link|select", "label": "...", "coords": { "x": 0, "y": 0, "w": 0, "h": 0 }, "is_primary": false }],
+  "regions": [{ "type": "button|input|link|select", "label": "...", "coords": { "x": 0, "y": 0, "w": 0, "h": 0 }, "is_primary": true }],
   "instruction": "這個畫面的操作說明",
   "narration": "旁白文字（口語化）"
 }
@@ -5032,8 +5032,8 @@ router.post('/recording/:sessionId/analyze-step/:stepId', async (req, res) => {
     const model = genAI.getGenerativeModel({ model: modelName });
 
     const prompt = `分析這張系統操作截圖（步驟 ${step.step_number}）。${clickInfo}${annotationPrompt}
-識別所有可互動 UI 元素，回傳 JSON：
-{ "regions": [{ "type": "...", "label": "...", "coords": { "x": 0, "y": 0, "w": 0, "h": 0 }, "is_primary": false }],
+識別所有可互動 UI 元素，回傳 JSON。至少要有一個 region 的 is_primary 設為 true（此畫面最重要的操作目標）：
+{ "regions": [{ "type": "...", "label": "...", "coords": { "x": 0, "y": 0, "w": 0, "h": 0 }, "is_primary": true }],
   "instruction": "操作說明", "narration": "旁白文字",
   "sensitive_areas": [{ "type": "password", "coords": { "x": 0, "y": 0, "w": 0, "h": 0 } }] }
 注意：coords 的 x, y, w, h 必須是百分比 (0-100)，相對於圖片寬高。x, y 是左上角百分比。
@@ -5111,8 +5111,8 @@ router.post('/recording/:sessionId/analyze', async (req, res) => {
         : '';
 
       const prompt = `分析這張系統操作截圖（步驟 ${step.step_number}）。${clickInfo}
-識別所有可互動 UI 元素，回傳 JSON：
-{ "regions": [{ "type": "...", "label": "...", "coords": { "x": 0, "y": 0, "w": 0, "h": 0 }, "is_primary": false }],
+識別所有可互動 UI 元素，回傳 JSON。至少要有一個 region 的 is_primary 設為 true（此畫面最重要的操作目標）：
+{ "regions": [{ "type": "...", "label": "...", "coords": { "x": 0, "y": 0, "w": 0, "h": 0 }, "is_primary": true }],
   "instruction": "操作說明", "narration": "旁白文字",
   "sensitive_areas": [{ "type": "password", "coords": { "x": 0, "y": 0, "w": 0, "h": 0 } }] }
 只回傳 JSON。`;
@@ -5211,8 +5211,7 @@ router.post('/recording/:sessionId/generate', async (req, res) => {
         ? (() => { try { return JSON.parse(step.annotations_json) } catch { return [] } })()
         : [];
 
-      // Only keep AI regions that overlap with user annotation positions (correct targets)
-      // If user annotated specific spots, those are the intended interactive targets
+      // Build hotspot regions from AI regions + user annotations
       const userNumberAnnotations = userAnnotations.filter(a => a.type === 'number');
       let hotspotRegions;
       if (userNumberAnnotations.length > 0 && aiRegions.length > 0) {
@@ -5224,7 +5223,7 @@ router.post('/recording/:sessionId/generate', async (req, res) => {
             const dist = Math.sqrt((cx - ua.coords.x) ** 2 + (cy - ua.coords.y) ** 2);
             return dist < best.dist ? { r, dist } : best;
           }, { r: null, dist: Infinity });
-          if (closest.r && closest.dist < 30) { // within 30% proximity
+          if (closest.r && closest.dist < 50) { // within 50% proximity (relaxed from 30)
             return {
               id: `r${i + 1}`, shape: 'rect', coords: closest.r.coords,
               correct: true, label: closest.r.label || ua.label || `步驟 ${ua.stepNumber}`,
@@ -5232,18 +5231,30 @@ router.post('/recording/:sessionId/generate', async (req, res) => {
               feedback: `正確！${closest.r.label ? '這就是「' + closest.r.label + '」。' : ''}`
             };
           }
-          return null;
-        }).filter(Boolean);
-      } else {
-        // No user annotations or no AI regions: only keep is_primary
-        hotspotRegions = aiRegions.filter(r => r.is_primary).map((r, i) => ({
+          // Fallback: use user annotation coords directly as region
+          return {
+            id: `r${i + 1}`, shape: 'rect',
+            coords: { x: Math.max(0, ua.coords.x - 3), y: Math.max(0, ua.coords.y - 3), w: 6, h: 6 },
+            correct: true, label: ua.label || `步驟 ${ua.stepNumber || i + 1}`,
+            type: '', feedback: `正確！`
+          };
+        });
+      } else if (aiRegions.length > 0) {
+        // No user annotations: prefer is_primary, fallback to first region
+        const primary = aiRegions.filter(r => r.is_primary);
+        const source = primary.length > 0 ? primary : [aiRegions[0]];
+        hotspotRegions = source.map((r, i) => ({
           id: `r${i + 1}`, shape: 'rect', coords: r.coords,
           correct: true, label: r.label || `元素 ${i + 1}`, type: r.type || '',
           feedback: `正確！${r.label ? '這就是「' + r.label + '」。' : ''}`
         }));
+      } else {
+        // No AI regions at all: empty (will still be hotspot with full-image fallback)
+        hotspotRegions = [];
       }
 
-      const slideType = hotspotRegions.length > 0 ? 'hotspot' : 'content';
+      // 錄製截圖一律生成 hotspot 投影片（有截圖就是互動教材）
+      const slideType = 'hotspot';
 
       // Image: always use clean screenshot (Phase 3A-1: screenshot_url is always clean for new data)
       const displayImage = step.screenshot_raw_url || step.screenshot_url;
