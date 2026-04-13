@@ -362,6 +362,8 @@
     "typeSensitive": "Chỉ nhạy cảm",
     "query": "Truy vấn",
     "contentSearch": "Tìm kiếm nội dung cuộc trò chuyện...",
+    "userSearch": "Tìm người dùng",
+    "userSearchPlaceholder": "Tên / Mã NV / Email",
     "isSensitive": "Nhạy cảm",
     "sensitiveWords": "Từ khóa",
     "content": "Nội dung",

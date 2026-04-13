@@ -563,13 +563,13 @@ router.put('/kb-public-requests/:id', async (req, res) => {
 router.get('/audit-logs', async (req, res) => {
   try {
     const db = require('../database-oracle').db;
-    const { startDate, endDate, userId, sensitive, source } = req.query;
+    const { startDate, endDate, userId, sensitive, source, userSearch } = req.query;
 
     let sql = `
       SELECT al.id, al.session_id, al.content, al.has_sensitive,
              al.sensitive_keywords, al.notified, al.created_at,
              al.source,
-             u.username, u.name, u.employee_id
+             u.username, u.name, u.employee_id, u.email
       FROM audit_logs al
       JOIN users u ON al.user_id = u.id
       WHERE 1=1
@@ -578,6 +578,11 @@ router.get('/audit-logs', async (req, res) => {
     if (startDate) { sql += ` AND TRUNC(al.created_at) >= TO_DATE(?, 'YYYY-MM-DD')`; params.push(startDate); }
     if (endDate) { sql += ` AND TRUNC(al.created_at) <= TO_DATE(?, 'YYYY-MM-DD')`; params.push(endDate); }
     if (userId) { sql += ' AND al.user_id = ?'; params.push(userId); }
+    if (userSearch) {
+      const kw = `%${userSearch.trim()}%`;
+      sql += ` AND (LOWER(u.name) LIKE LOWER(?) OR LOWER(u.employee_id) LIKE LOWER(?) OR LOWER(u.email) LIKE LOWER(?) OR LOWER(u.username) LIKE LOWER(?))`;
+      params.push(kw, kw, kw, kw);
+    }
     if (sensitive === '1') { sql += ' AND al.has_sensitive = 1'; }
     if (source) { sql += ' AND al.source = ?'; params.push(source); }
     sql += ' ORDER BY al.created_at DESC FETCH FIRST 500 ROWS ONLY';

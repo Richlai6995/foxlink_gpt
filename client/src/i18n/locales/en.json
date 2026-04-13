@@ -362,6 +362,8 @@
     "typeSensitive": "Sensitive Only",
     "query": "Query",
     "contentSearch": "Search conversation content...",
+    "userSearch": "User Search",
+    "userSearchPlaceholder": "Name / Employee ID / Email",
     "isSensitive": "Sensitive",
     "sensitiveWords": "Keywords",
     "content": "Content",

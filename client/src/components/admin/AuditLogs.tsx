@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Shield, AlertTriangle, RefreshCw, Download, Search, MessageSquare, Monitor } from 'lucide-react'
+import { Shield, AlertTriangle, RefreshCw, Download, Search, MessageSquare, Monitor, User } from 'lucide-react'
 import type { AuditLog } from '../../types'
 import api from '../../lib/api'
 import { fmtTW } from '../../lib/fmtTW'
@@ -16,6 +16,7 @@ export default function AuditLogs() {
     endDate: new Date().toISOString().split('T')[0],
     sensitive: '',
     source: '',
+    userSearch: '',
   })
 
   const load = async () => {
@@ -26,6 +27,7 @@ export default function AuditLogs() {
       if (filters.endDate) params.set('endDate', filters.endDate)
       if (filters.sensitive) params.set('sensitive', filters.sensitive)
       if (filters.source) params.set('source', filters.source)
+      if (filters.userSearch.trim()) params.set('userSearch', filters.userSearch.trim())
       const res = await api.get(`/admin/audit-logs?${params}`)
       setLogs(res.data)
     } catch (e) {
@@ -114,6 +116,21 @@ export default function AuditLogs() {
             <option value="webex">Webex Bot</option>
             <option value="web">Web UI</option>
           </select>
+        </div>
+        <div>
+          <label className="label">{t('audit.userSearch', '使用者查詢')}</label>
+          <div className="relative">
+            <User size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input
+              type="text"
+              value={filters.userSearch}
+              onChange={(e) => setFilters((p) => ({ ...p, userSearch: e.target.value }))}
+              onKeyDown={(e) => e.key === 'Enter' && load()}
+              placeholder={t('audit.userSearchPlaceholder', '姓名/工號/Email')}
+              className="input pl-8"
+              style={{ minWidth: 180 }}
+            />
+          </div>
         </div>
         <div className="flex items-end">
           <button onClick={load} className="btn-primary">{t('audit.query')}</button>

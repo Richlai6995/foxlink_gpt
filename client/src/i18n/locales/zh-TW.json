@@ -362,6 +362,8 @@
     "typeSensitive": "僅敏感詞",
     "query": "查詢",
     "contentSearch": "搜尋對話內容關鍵字...",
+    "userSearch": "使用者查詢",
+    "userSearchPlaceholder": "姓名/工號/Email",
     "isSensitive": "是否敏感",
     "sensitiveWords": "敏感詞",
     "content": "對話內容",
