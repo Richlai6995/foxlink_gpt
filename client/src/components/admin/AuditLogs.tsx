@@ -120,14 +120,14 @@ export default function AuditLogs() {
         <div>
           <label className="label">{t('audit.userSearch', '使用者查詢')}</label>
           <div className="relative">
-            <User size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+            {!filters.userSearch && <User size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />}
             <input
               type="text"
               value={filters.userSearch}
               onChange={(e) => setFilters((p) => ({ ...p, userSearch: e.target.value }))}
               onKeyDown={(e) => e.key === 'Enter' && load()}
               placeholder={t('audit.userSearchPlaceholder', '姓名/工號/Email')}
-              className="input pl-8"
+              className={`input ${filters.userSearch ? '' : 'pl-8'}`}
               style={{ minWidth: 180 }}
             />
           </div>
