@@ -730,7 +730,7 @@ const userSections = [
     "sort_order": 7,
     "icon": "Upload",
     "icon_color": "text-teal-500",
-    "last_modified": "2026-04-08",
+    "last_modified": "2026-04-13",
     "title": "上傳檔案",
     "sidebar_label": "上傳檔案",
     "blocks": [
@@ -748,7 +748,7 @@ const userSections = [
             "rows": [
               [
                 "文件",
-                "PDF、DOCX、XLSX、PPTX、TXT、CSV",
+                "PDF、DOC / DOCX、XLS / XLSX、PPT / PPTX、TXT、CSV",
                 "AI 直接讀取文件內容進行分析"
               ],
               [
@@ -7043,7 +7043,7 @@ const userSections = [
     "sort_order": 29,
     "icon": "MessageSquare",
     "icon_color": "text-green-500",
-    "last_modified": "2026-04-01",
+    "last_modified": "2026-04-13",
     "title": "Webex Bot 使用",
     "sidebar_label": "Webex Bot 使用",
     "blocks": [
@@ -7129,7 +7129,7 @@ const userSections = [
                 "AI 進行圖像分析"
               ],
               [
-                "音訊（MP3 / WAV / MP4 Audio）",
+                "音訊（MP3 / WAV / M4A / OGG / FLAC / AAC / WebM）",
                 "自動轉錄為文字後分析"
               ],
               [

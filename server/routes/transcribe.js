@@ -33,6 +33,7 @@ const ALLOWED_AUDIO_MIMES = new Set([
   'audio/mpeg', 'audio/mp3',
   'audio/wav',  'audio/x-wav',
   'audio/aac',
+  'audio/flac', 'audio/x-flac',
 ]);
 
 // 上限：feedback 最長 180s，opus 約 4MB；wav 比較大，留 20MB ceiling

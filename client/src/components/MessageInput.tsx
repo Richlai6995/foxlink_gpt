@@ -35,10 +35,15 @@ const ALLOWED_TYPES = [
   'audio/mpeg',
   'audio/mp3',
   'audio/wav',
+  'audio/x-wav',
   'audio/ogg',
   'audio/webm',
   'audio/mp4',
+  'audio/x-m4a',
+  'audio/m4a',
   'audio/aac',
+  'audio/flac',
+  'audio/x-flac',
 ]
 
 function getFileIcon(type: string) {
@@ -108,7 +113,7 @@ const MessageInput = forwardRef<MessageInputHandle, Props>(function MessageInput
         setFileError('不允許上傳影片檔案')
         continue
       }
-      if (!ALLOWED_TYPES.includes(f.type) && !f.type.startsWith('text/')) {
+      if (!ALLOWED_TYPES.includes(f.type) && !f.type.startsWith('text/') && !f.type.startsWith('audio/')) {
         setFileError(`不支援的檔案格式: ${f.name}`)
         continue
       }
