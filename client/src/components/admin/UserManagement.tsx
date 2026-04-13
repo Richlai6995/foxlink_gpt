@@ -550,6 +550,14 @@ export default function UserManagement() {
             {f.label}
           </button>
         ))}
+        {quickFilter && (
+          <button
+            onClick={() => setQuickFilter('')}
+            className="px-2 py-1 rounded-full text-xs font-medium border border-red-300 text-red-500 hover:bg-red-50 transition flex items-center gap-1"
+          >
+            <X size={12} /> {t('common.clear', '清除')}
+          </button>
+        )}
         {(search || quickFilter) && (
           <span className="text-xs text-slate-500 shrink-0 ml-auto">{filtered.length} / {users.length}</span>
         )}
