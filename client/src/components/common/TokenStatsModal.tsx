@@ -74,8 +74,8 @@ export default function TokenStatsModal({ onClose }: Props) {
           return params.map(p => `${p.marker} ${p.seriesName}: <b>$${p.value.toFixed(4)}</b>`).join('<br/>')
         },
       },
-      legend: { type: 'scroll' as const, bottom: 0, textStyle: { fontSize: 11 } },
-      grid: { top: 20, right: 20, bottom: 50, left: 60 },
+      legend: { type: 'plain' as const, bottom: 0, textStyle: { fontSize: 11 }, width: '90%', left: 'center' },
+      grid: { top: 20, right: 20, bottom: 70, left: 60 },
       xAxis: {
         type: 'category' as const,
         data: dates.map(d => d.slice(5)), // show MM-DD
@@ -182,7 +182,7 @@ export default function TokenStatsModal({ onClose }: Props) {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {rows.map((r, i) => (
+                    {[...rows].sort((a, b) => b.usage_date.localeCompare(a.usage_date)).map((r, i) => (
                       <tr key={i} className="hover:bg-slate-50">
                         <td className="px-4 py-2 text-slate-600">{r.usage_date}</td>
                         <td className="px-4 py-2">
