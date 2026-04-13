@@ -23,6 +23,7 @@ export default function TokenStatsModal({ onClose }: Props) {
   const [rows, setRows] = useState<Row[]>([])
   const [days, setDays] = useState(30)
   const [loading, setLoading] = useState(true)
+  const [tab, setTab] = useState<'chart' | 'detail'>('chart')
 
   useEffect(() => {
     setLoading(true)
@@ -118,68 +119,91 @@ export default function TokenStatsModal({ onClose }: Props) {
           </div>
         </div>
 
-        {/* Summary stats */}
-        <div className="flex gap-6 px-5 py-3 bg-slate-50 border-b text-sm shrink-0">
-          <div>
-            <span className="text-slate-500 text-xs">{t('tokenStats.totalCost')}</span>
-            <div className="font-bold text-blue-600">${totalCost.toFixed(4)} USD</div>
-          </div>
-          <div>
-            <span className="text-slate-500 text-xs">{t('tokenStats.totalTokens')}</span>
-            <div className="font-bold text-slate-700">{totalTokens.toLocaleString()}</div>
-          </div>
-          <div>
-            <span className="text-slate-500 text-xs">{t('tokenStats.modelCount')}</span>
-            <div className="font-bold text-slate-700">
-              {new Set(rows.map(r => r.model_name || r.model)).size}
+        {/* Summary stats + Tabs */}
+        <div className="flex items-center justify-between px-5 py-2.5 bg-slate-50 border-b shrink-0">
+          <div className="flex gap-5 text-sm">
+            <div>
+              <span className="text-slate-500 text-xs">{t('tokenStats.totalCost')}</span>
+              <div className="font-bold text-blue-600">${totalCost.toFixed(4)} USD</div>
+            </div>
+            <div>
+              <span className="text-slate-500 text-xs">{t('tokenStats.totalTokens')}</span>
+              <div className="font-bold text-slate-700">{totalTokens.toLocaleString()}</div>
+            </div>
+            <div>
+              <span className="text-slate-500 text-xs">{t('tokenStats.modelCount')}</span>
+              <div className="font-bold text-slate-700">
+                {new Set(rows.map(r => r.model_name || r.model)).size}
+              </div>
             </div>
           </div>
+          <div className="flex gap-1 bg-slate-200/70 rounded-lg p-0.5">
+            <button
+              onClick={() => setTab('chart')}
+              className={`px-3 py-1 rounded-md text-xs font-medium transition ${tab === 'chart' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+            >
+              {t('tokenStats.tabChart')}
+            </button>
+            <button
+              onClick={() => setTab('detail')}
+              className={`px-3 py-1 rounded-md text-xs font-medium transition ${tab === 'detail' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+            >
+              {t('tokenStats.tabDetail')}
+            </button>
+          </div>
         </div>
 
-        {/* Chart */}
-        <div className="p-5 shrink-0">
-          {loading ? (
-            <div className="animate-pulse h-60 bg-slate-100 rounded" />
-          ) : rows.length === 0 ? (
-            <div className="text-center text-slate-400 py-16 text-sm">{t('tokenStats.noData')}</div>
+        {/* Tab content */}
+        <div className="flex-1 min-h-0 overflow-auto">
+          {tab === 'chart' ? (
+            <div className="p-5">
+              {loading ? (
+                <div className="animate-pulse h-72 bg-slate-100 rounded" />
+              ) : rows.length === 0 ? (
+                <div className="text-center text-slate-400 py-20 text-sm">{t('tokenStats.noData')}</div>
+              ) : (
+                <ReactECharts option={chartOption} style={{ height: 350 }} opts={{ renderer: 'svg' }} />
+              )}
+            </div>
           ) : (
-            <ReactECharts option={chartOption} style={{ height: 280 }} opts={{ renderer: 'svg' }} />
+            <div>
+              {loading ? (
+                <div className="animate-pulse h-40 m-5 bg-slate-100 rounded" />
+              ) : rows.length === 0 ? (
+                <div className="text-center text-slate-400 py-20 text-sm">{t('tokenStats.noData')}</div>
+              ) : (
+                <table className="w-full text-xs">
+                  <thead className="bg-slate-50 sticky top-0">
+                    <tr>
+                      <th className="text-left px-4 py-2.5 text-slate-500">{t('tokenStats.date')}</th>
+                      <th className="text-left px-4 py-2.5 text-slate-500">{t('tokenStats.model')}</th>
+                      <th className="text-right px-4 py-2.5 text-slate-500">{t('tokenStats.inputTokens')}</th>
+                      <th className="text-right px-4 py-2.5 text-slate-500">{t('tokenStats.outputTokens')}</th>
+                      <th className="text-right px-4 py-2.5 text-slate-500">{t('tokenStats.cost')}</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {rows.map((r, i) => (
+                      <tr key={i} className="hover:bg-slate-50">
+                        <td className="px-4 py-2 text-slate-600">{r.usage_date}</td>
+                        <td className="px-4 py-2">
+                          <span className="px-1.5 py-0.5 bg-blue-50 text-blue-700 rounded text-[10px]">
+                            {r.model_name || r.model}
+                          </span>
+                        </td>
+                        <td className="px-4 py-2 text-right text-slate-600">{r.input_tokens.toLocaleString()}</td>
+                        <td className="px-4 py-2 text-right text-slate-600">{r.output_tokens.toLocaleString()}</td>
+                        <td className="px-4 py-2 text-right font-mono text-green-700">
+                          {r.cost > 0 ? `$${r.cost.toFixed(4)}` : '-'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
           )}
         </div>
-
-        {/* Detail table */}
-        {!loading && rows.length > 0 && (
-          <div className="border-t flex-1 overflow-auto min-h-0">
-            <table className="w-full text-xs">
-              <thead className="bg-slate-50 sticky top-0">
-                <tr>
-                  <th className="text-left px-3 py-2 text-slate-500">{t('tokenStats.date')}</th>
-                  <th className="text-left px-3 py-2 text-slate-500">{t('tokenStats.model')}</th>
-                  <th className="text-right px-3 py-2 text-slate-500">{t('tokenStats.inputTokens')}</th>
-                  <th className="text-right px-3 py-2 text-slate-500">{t('tokenStats.outputTokens')}</th>
-                  <th className="text-right px-3 py-2 text-slate-500">{t('tokenStats.cost')}</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-50">
-                {rows.map((r, i) => (
-                  <tr key={i} className="hover:bg-slate-50">
-                    <td className="px-3 py-1.5 text-slate-600">{r.usage_date}</td>
-                    <td className="px-3 py-1.5">
-                      <span className="px-1.5 py-0.5 bg-blue-50 text-blue-700 rounded text-[10px]">
-                        {r.model_name || r.model}
-                      </span>
-                    </td>
-                    <td className="px-3 py-1.5 text-right text-slate-600">{r.input_tokens.toLocaleString()}</td>
-                    <td className="px-3 py-1.5 text-right text-slate-600">{r.output_tokens.toLocaleString()}</td>
-                    <td className="px-3 py-1.5 text-right font-mono text-green-700">
-                      {r.cost > 0 ? `$${r.cost.toFixed(4)}` : '-'}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
       </div>
     </div>
   )

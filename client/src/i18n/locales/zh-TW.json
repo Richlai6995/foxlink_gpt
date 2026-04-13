@@ -1834,7 +1834,9 @@
     "model": "模型",
     "inputTokens": "輸入 Tokens",
     "outputTokens": "輸出 Tokens",
-    "cost": "費用 (USD)"
+    "cost": "費用 (USD)",
+    "tabChart": "圖表",
+    "tabDetail": "明細"
   },
   "tpl": {
     "title": "文件範本庫",

@@ -1834,7 +1834,9 @@
     "model": "Model",
     "inputTokens": "Input Tokens",
     "outputTokens": "Output Tokens",
-    "cost": "Cost (USD)"
+    "cost": "Cost (USD)",
+    "tabChart": "Chart",
+    "tabDetail": "Detail"
   },
   "tpl": {
     "title": "Document Templates",

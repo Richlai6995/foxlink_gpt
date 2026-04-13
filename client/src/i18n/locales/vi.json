@@ -1834,7 +1834,9 @@
     "model": "Mô hình",
     "inputTokens": "Tokens đầu vào",
     "outputTokens": "Tokens đầu ra",
-    "cost": "Chi phí (USD)"
+    "cost": "Chi phí (USD)",
+    "tabChart": "Biểu đồ",
+    "tabDetail": "Chi tiết"
   },
   "tpl": {
     "title": "Thư viện mẫu tài liệu",
