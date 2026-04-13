@@ -1100,6 +1100,66 @@ router.post('/lessons/:lid/slides', async (req, res) => {
   }
 });
 
+// PUT /api/training/slides/move — batch move slides to another lesson (same course)
+// MUST be before /slides/:sid to avoid Express matching 'move' as :sid
+router.put('/slides/move', async (req, res) => {
+  try {
+    const { slide_ids, target_lesson_id } = req.body;
+    if (!Array.isArray(slide_ids) || !slide_ids.length || !target_lesson_id)
+      return res.status(400).json({ error: 'slide_ids array and target_lesson_id required' });
+
+    // Verify target lesson access
+    const targetCheck = await verifyLessonAccess(target_lesson_id, req.user, true);
+    if (targetCheck.error) return res.status(targetCheck.status).json({ error: targetCheck.error });
+    const targetCourseId = targetCheck.courseId;
+
+    // Verify all slides exist and belong to the same course
+    const numIds = slide_ids.map(Number);
+    const placeholders = numIds.map(() => '?').join(',');
+    const slides = await db.prepare(
+      `SELECT cs.id, cs.lesson_id, cl.course_id
+       FROM course_slides cs JOIN course_lessons cl ON cl.id = cs.lesson_id
+       WHERE cs.id IN (${placeholders})`
+    ).all(...numIds);
+
+    if (slides.length !== numIds.length)
+      return res.status(404).json({ error: '部分投影片不存在' });
+
+    const wrongCourse = slides.find(s => s.course_id !== targetCourseId);
+    if (wrongCourse)
+      return res.status(400).json({ error: '不可跨課程搬移投影片' });
+
+    const targetLessonId = Number(target_lesson_id);
+    const alreadyInTarget = slides.filter(s => s.lesson_id === targetLessonId);
+    if (alreadyInTarget.length === slides.length)
+      return res.json({ ok: true, moved: 0 });
+
+    // Get max sort_order in target lesson
+    const maxRow = await db.prepare(
+      'SELECT MAX(sort_order) AS mx FROM course_slides WHERE lesson_id=?'
+    ).get(targetLessonId);
+    let nextOrder = (maxRow?.mx || 0) + 1;
+
+    // Move slides
+    for (const sid of numIds) {
+      const s = slides.find(x => x.id === sid);
+      if (s.lesson_id === targetLessonId) continue;
+      await db.prepare(
+        'UPDATE course_slides SET lesson_id=?, sort_order=?, updated_at=SYSTIMESTAMP WHERE id=?'
+      ).run(targetLessonId, nextOrder++, sid);
+    }
+
+    const moved = numIds.filter(sid => {
+      const s = slides.find(x => x.id === sid);
+      return s.lesson_id !== targetLessonId;
+    }).length;
+
+    res.json({ ok: true, moved });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // GET /api/training/slides/:sid
 router.get('/slides/:sid', async (req, res) => {
   try {
@@ -1219,63 +1279,6 @@ router.put('/lessons/:lid/slides/reorder', async (req, res) => {
         .run(item.sort_order, item.id, req.params.lid);
     }
     res.json({ ok: true });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// PUT /api/training/slides/move — batch move slides to another lesson (same course)
-router.put('/slides/move', async (req, res) => {
-  try {
-    const { slide_ids, target_lesson_id } = req.body;
-    if (!Array.isArray(slide_ids) || !slide_ids.length || !target_lesson_id)
-      return res.status(400).json({ error: 'slide_ids array and target_lesson_id required' });
-
-    // Verify target lesson access
-    const targetCheck = await verifyLessonAccess(target_lesson_id, req.user, true);
-    if (targetCheck.error) return res.status(targetCheck.status).json({ error: targetCheck.error });
-    const targetCourseId = targetCheck.courseId;
-
-    // Verify all slides exist and belong to the same course
-    const placeholders = slide_ids.map(() => '?').join(',');
-    const slides = await db.prepare(
-      `SELECT cs.id, cs.lesson_id, cl.course_id
-       FROM course_slides cs JOIN course_lessons cl ON cl.id = cs.lesson_id
-       WHERE cs.id IN (${placeholders})`
-    ).all(...slide_ids);
-
-    if (slides.length !== slide_ids.length)
-      return res.status(404).json({ error: '部分投影片不存在' });
-
-    const wrongCourse = slides.find(s => s.course_id !== targetCourseId);
-    if (wrongCourse)
-      return res.status(400).json({ error: '不可跨課程搬移投影片' });
-
-    const alreadyInTarget = slides.filter(s => s.lesson_id === target_lesson_id);
-    if (alreadyInTarget.length === slides.length)
-      return res.json({ ok: true, moved: 0 });
-
-    // Get max sort_order in target lesson
-    const maxRow = await db.prepare(
-      'SELECT MAX(sort_order) AS mx FROM course_slides WHERE lesson_id=?'
-    ).get(target_lesson_id);
-    let nextOrder = (maxRow?.mx || 0) + 1;
-
-    // Move slides
-    for (const sid of slide_ids) {
-      const s = slides.find(x => x.id === sid);
-      if (s.lesson_id === target_lesson_id) continue; // already there
-      await db.prepare(
-        'UPDATE course_slides SET lesson_id=?, sort_order=?, updated_at=SYSTIMESTAMP WHERE id=?'
-      ).run(target_lesson_id, nextOrder++, sid);
-    }
-
-    const moved = slide_ids.filter(sid => {
-      const s = slides.find(x => x.id === sid);
-      return s.lesson_id !== target_lesson_id;
-    }).length;
-
-    res.json({ ok: true, moved });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
