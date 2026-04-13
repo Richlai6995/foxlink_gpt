@@ -70,9 +70,8 @@ export default function TokenStatsModal({ onClose }: Props) {
     const chartOption = {
       tooltip: {
         trigger: 'axis' as const,
-        formatter: (params: { seriesName: string; value: number }[]) => {
-          const lines = params.map(p => `${p.seriesName}: $${p.value.toFixed(4)}`)
-          return lines.join('<br/>')
+        formatter: (params: { seriesName: string; value: number; marker: string }[]) => {
+          return params.map(p => `${p.marker} ${p.seriesName}: <b>$${p.value.toFixed(4)}</b>`).join('<br/>')
         },
       },
       legend: { type: 'scroll' as const, bottom: 0, textStyle: { fontSize: 11 } },
