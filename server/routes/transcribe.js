@@ -16,6 +16,7 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const { verifyToken } = require('./auth');
+const { budgetGuard } = require('../middleware/budgetGuard');
 const { transcribeAudio } = require('../services/gemini');
 
 const UPLOAD_DIR = process.env.UPLOAD_DIR
@@ -71,7 +72,7 @@ router.get('/status', verifyToken, async (req, res) => {
 });
 
 // ── POST /api/transcribe ─────────────────────────────────────────────────────
-router.post('/', verifyToken, upload.single('audio'), async (req, res) => {
+router.post('/', verifyToken, upload.single('audio'), budgetGuard, async (req, res) => {
   if (!req.file) {
     return res.status(400).json({ error: 'No audio file uploaded' });
   }

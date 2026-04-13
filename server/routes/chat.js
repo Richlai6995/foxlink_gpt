@@ -9,6 +9,7 @@ const { streamChat, generateWithImage, generateWithTools, generateWithToolsStrea
 const { streamChatAoai } = require('../services/llmService');
 const { processGenerateBlocks } = require('../services/fileGenerator');
 const { notifyAdminSensitiveKeyword } = require('../services/mailService');
+const { budgetGuard } = require('../middleware/budgetGuard');
 const mcpClient = require('../services/mcpClient');
 
 // ── Pending TTS map: sessionId → { aiResponse, skill, timestamp } ────────────
@@ -775,7 +776,7 @@ router.delete('/sessions/:id', async (req, res) => {
 });
 
 // POST /api/chat/sessions/:id/messages  (SSE streaming)
-router.post('/sessions/:id/messages', upload.array('files', 10), async (req, res) => {
+router.post('/sessions/:id/messages', upload.array('files', 10), budgetGuard, async (req, res) => {
   const db = require('../database-oracle').db;
   const sessionId = req.params.id;
 
@@ -862,79 +863,7 @@ router.post('/sessions/:id/messages', upload.array('files', 10), async (req, res
     }
   }
 
-  // Budget limit check (admin exempt)
-  // NOTE: requires token prices configured in admin panel for cost to be non-null.
-  // cost=NULL rows (unconfigured model) are treated as $0 by SQL SUM; budget still enforces on non-null rows.
-  if (req.user.role !== 'admin') {
-    const budgetRow = await db.prepare(
-      `SELECT u.budget_daily, u.budget_weekly, u.budget_monthly,
-              u.quota_exceed_action AS user_action,
-              r.budget_daily AS role_daily, r.budget_weekly AS role_weekly, r.budget_monthly AS role_monthly,
-              r.quota_exceed_action AS role_action
-       FROM users u LEFT JOIN roles r ON r.id = u.role_id WHERE u.id = ?`
-    ).get(req.user.id);
-
-    if (budgetRow) {
-      const limitD = budgetRow.budget_daily ?? budgetRow.role_daily;
-      const limitW = budgetRow.budget_weekly ?? budgetRow.role_weekly;
-      const limitM = budgetRow.budget_monthly ?? budgetRow.role_monthly;
-      // user action overrides role action; default 'block'
-      const exceedAction = budgetRow.user_action || budgetRow.role_action || 'block';
-
-      const now = new Date();
-      const todayStr = now.toISOString().slice(0, 10);
-
-      console.log(`[Budget] user=${req.user.id}(${req.user.username}) limitD=${limitD} limitW=${limitW} limitM=${limitM} action=${exceedAction} date=${todayStr}`);
-
-      const sumCost = (rows) => {
-        const { total, images } = rows || {};
-        if ((total || 0) > 0) return total;
-        return (images || 0) * 0.04;
-      };
-
-      const D = `TO_DATE(?, 'YYYY-MM-DD')`;
-      if (limitD != null) {
-        const row = await db.prepare(
-          `SELECT COALESCE(SUM(cost),0) AS total, COALESCE(SUM(image_count),0) AS images
-           FROM token_usage WHERE user_id=? AND usage_date=${D}`
-        ).get(req.user.id, todayStr);
-        const spent = sumCost(row);
-        console.log(`[Budget] daily spent=${spent} limit=${limitD}`);
-        if (spent >= limitD && exceedAction !== 'warn') {
-          return res.status(429).json({ error: `當日使用金額已達上限 $${limitD}（已使用 $${spent.toFixed(4)}），請明日再試。` });
-        }
-      }
-
-      if (limitW != null) {
-        const dow = now.getDay();
-        const monday = new Date(now);
-        monday.setDate(now.getDate() + (dow === 0 ? -6 : 1 - dow));
-        const mondayStr = monday.toISOString().slice(0, 10);
-        const row = await db.prepare(
-          `SELECT COALESCE(SUM(cost),0) AS total, COALESCE(SUM(image_count),0) AS images
-           FROM token_usage WHERE user_id=? AND usage_date>=${D} AND usage_date<=${D}`
-        ).get(req.user.id, mondayStr, todayStr);
-        const spent = sumCost(row);
-        console.log(`[Budget] weekly spent=${spent} limit=${limitW}`);
-        if (spent >= limitW && exceedAction !== 'warn') {
-          return res.status(429).json({ error: `本週使用金額已達上限 $${limitW}（已使用 $${spent.toFixed(4)}），請下週一再試。` });
-        }
-      }
-
-      if (limitM != null) {
-        const firstOfMonth = `${todayStr.slice(0, 7)}-01`;
-        const row = await db.prepare(
-          `SELECT COALESCE(SUM(cost),0) AS total, COALESCE(SUM(image_count),0) AS images
-           FROM token_usage WHERE user_id=? AND usage_date>=${D} AND usage_date<=${D}`
-        ).get(req.user.id, firstOfMonth, todayStr);
-        const spent = sumCost(row);
-        console.log(`[Budget] monthly spent=${spent} limit=${limitM}`);
-        if (spent >= limitM && exceedAction !== 'warn') {
-          return res.status(429).json({ error: `本月使用金額已達上限 $${limitM}（已使用 $${spent.toFixed(4)}），請下月一日再試。` });
-        }
-      }
-    }
-  }
+  // Budget limit check is now handled by budgetGuard middleware (before this handler)
 
   // Setup SSE
   res.setHeader('Content-Type', 'text/event-stream');

@@ -11,6 +11,7 @@ const { v4: uuid } = require('uuid');
 const { verifyToken } = require('./auth');
 const { runResearchJob, rerunSections, generatePlan, searchUserKbs, suggestKbs } = require('../services/researchService');
 const { upsertTokenUsage } = require('../services/tokenService');
+const { budgetGuard } = require('../middleware/budgetGuard');
 const { UPLOAD_DIR } = require('../config/paths');
 const MODEL_FLASH = process.env.GEMINI_MODEL_FLASH || 'gemini-2.0-flash';
 
@@ -57,7 +58,7 @@ router.post('/upload-files', researchUpload.array('files', 10), async (req, res)
 });
 
 // ── POST /api/research/plan  (generate plan, not persisted) ───────────────────
-router.post('/plan', async (req, res) => {
+router.post('/plan', budgetGuard, async (req, res) => {
   const db = getDb();
   try {
     const ok = await checkPermission(db, req.user);
@@ -88,7 +89,7 @@ router.post('/plan', async (req, res) => {
 });
 
 // ── POST /api/research/jobs  (confirm plan → create + start job) ──────────────
-router.post('/jobs', async (req, res) => {
+router.post('/jobs', budgetGuard, async (req, res) => {
   const db = getDb();
   try {
     const ok = await checkPermission(db, req.user);
@@ -402,7 +403,7 @@ router.get('/jobs/:id', async (req, res) => {
 
 // ── POST /api/research/jobs/:id/rerun-sections ────────────────────────────────
 // Body: { section_ids: [1,3,...], sq_overrides: [{id,question,hint,files,use_web_search}] }
-router.post('/jobs/:id/rerun-sections', async (req, res) => {
+router.post('/jobs/:id/rerun-sections', budgetGuard, async (req, res) => {
   const db = getDb();
   try {
     const job = await db.prepare(

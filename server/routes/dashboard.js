@@ -10,6 +10,7 @@
 const express = require('express');
 const router = express.Router();
 const { verifyToken, verifyAdmin } = require('./auth');
+const { budgetGuard } = require('../middleware/budgetGuard');
 const { translateFields, translateDescription, batchTranslateDescriptions } = require('../services/translationService');
 
 router.use(verifyToken);
@@ -1516,7 +1517,7 @@ router.get('/etl/jobs/:id/logs', requireDesigner, async (req, res) => {
 // ─── AI 查詢 (SSE Streaming) ──────────────────────────────────────────────────
 
 // POST /api/dashboard/query
-router.post('/query', requireDashboard, async (req, res) => {
+router.post('/query', requireDashboard, budgetGuard, async (req, res) => {
   const { design_id, question, vector_top_k, vector_similarity_threshold, model_key, lang, override_sql } = req.body;
   if (!design_id || !question?.trim()) {
     return res.status(400).json({ error: 'design_id 與 question 為必填' });
