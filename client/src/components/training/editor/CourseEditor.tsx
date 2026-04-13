@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import api from '../../../lib/api'
-import { ArrowLeft, Save, Plus, GripVertical, Trash2, Eye, Upload, ChevronDown, ChevronRight, Settings, FileText, Play, FolderTree, Camera, Images, Download, Loader2, Copy } from 'lucide-react'
+import { ArrowLeft, Save, Plus, GripVertical, Trash2, Eye, Upload, ChevronDown, ChevronRight, Settings, FileText, Play, FolderTree, Camera, Images, Download, Loader2, Copy, MoveRight } from 'lucide-react'
 import SlideEditor from './SlideEditor'
 import CategoryManager from '../CategoryManager'
 import BatchImport from './BatchImport'
@@ -74,6 +74,9 @@ export default function CourseEditor() {
   const [translateStatus, setTranslateStatus] = useState<any>(null)
   const [translateProgress, setTranslateProgress] = useState<{ step: string; current: number; total: number; slides_done?: number; slides_total?: number } | null>(null)
   const [translateSelectedLessons, setTranslateSelectedLessons] = useState<number[] | null>(null) // null = all
+  const [selectedSlides, setSelectedSlides] = useState<Set<number>>(new Set())
+  const [moveTargetLesson, setMoveTargetLesson] = useState<number | null>(null) // modal open when non-null
+  const [movingSlides, setMovingSlides] = useState(false)
   const fetchTranslateStatus = async (lessonIds?: number[] | null) => {
     try {
       const params = lessonIds && lessonIds.length > 0 ? `?lesson_ids=${lessonIds.join(',')}` : ''
@@ -588,6 +591,29 @@ export default function CourseEditor() {
                 {/* Expanded: slides list — drag to reorder */}
                 {expandedLesson === lesson.id && (
                   <div className="border-t border-slate-700/50 bg-slate-850 px-4 py-3 space-y-1">
+                    {/* Selection toolbar — shows when slides are selected in this lesson */}
+                    {canEditThis && selectedSlides.size > 0 && (lessonSlides[lesson.id] || []).some(s => selectedSlides.has(s.id)) && (
+                      <div className="flex items-center gap-2 px-2 py-1.5 rounded mb-1"
+                        style={{ backgroundColor: 'var(--t-accent-muted, rgba(56,189,248,0.1))' }}>
+                        <span className="text-[10px] font-medium" style={{ color: 'var(--t-accent)' }}>
+                          {t('training.selectedCount', { count: selectedSlides.size })}
+                        </span>
+                        <button
+                          onClick={() => setMoveTargetLesson(-1)}
+                          className="flex items-center gap-1 text-[10px] px-2 py-1 rounded font-medium transition hover:opacity-80"
+                          style={{ backgroundColor: 'var(--t-accent)', color: '#fff' }}
+                        >
+                          <MoveRight size={10} /> {t('training.moveSlides')}
+                        </button>
+                        <button
+                          onClick={() => setSelectedSlides(new Set())}
+                          className="text-[10px] px-2 py-1 rounded transition hover:opacity-80"
+                          style={{ color: 'var(--t-text-dim)' }}
+                        >
+                          {t('common.cancel')}
+                        </button>
+                      </div>
+                    )}
                     {(lessonSlides[lesson.id] || []).filter(Boolean).map((slide, si) => {
                       const slides = (lessonSlides[lesson.id] || []).filter(Boolean)
                       return (
@@ -618,10 +644,30 @@ export default function CourseEditor() {
                           const order = newSlides.map((s, idx) => ({ id: s.id, sort_order: idx + 1 }))
                           api.put(`/training/lessons/${lesson.id}/slides/reorder`, { order }).catch(console.error)
                         }}
-                        className="flex items-center gap-2 rounded px-2 py-2 text-xs cursor-pointer transition group"
-                        style={{ backgroundColor: 'var(--t-bg-card)' }}
+                        className={`flex items-center gap-2 rounded px-2 py-2 text-xs cursor-pointer transition group ${
+                          selectedSlides.has(slide.id) ? 'ring-1 ring-sky-500/50' : ''
+                        }`}
+                        style={{ backgroundColor: selectedSlides.has(slide.id) ? 'var(--t-accent-muted, rgba(56,189,248,0.08))' : 'var(--t-bg-card)' }}
                         onClick={() => setEditingSlideId(slide.id)}
                       >
+                        {/* Checkbox for multi-select */}
+                        {canEditThis && (
+                          <input
+                            type="checkbox"
+                            checked={selectedSlides.has(slide.id)}
+                            onChange={(e) => {
+                              e.stopPropagation()
+                              setSelectedSlides(prev => {
+                                const next = new Set(prev)
+                                if (next.has(slide.id)) next.delete(slide.id)
+                                else next.add(slide.id)
+                                return next
+                              })
+                            }}
+                            onClick={e => e.stopPropagation()}
+                            className="shrink-0 rounded accent-sky-500 cursor-pointer"
+                          />
+                        )}
                         {/* Drag handle */}
                         {canEditThis && <GripVertical size={12} className="shrink-0 cursor-grab text-slate-400 opacity-40 group-hover:opacity-100 transition"
                           onMouseDown={e => e.stopPropagation()} />}
@@ -680,6 +726,7 @@ export default function CourseEditor() {
                                   ...prev,
                                   [lesson.id]: (prev[lesson.id] || []).filter(s => s.id !== slide.id)
                                 }))
+                                setSelectedSlides(prev => { const n = new Set(prev); n.delete(slide.id); return n })
                               } catch (err) { console.error(err) }
                             }}
                           >
@@ -1293,6 +1340,81 @@ export default function CourseEditor() {
               <button onClick={confirmPublish} disabled={!canPublish || publishing}
                 className="px-4 py-2 text-xs font-medium text-white rounded-lg transition disabled:opacity-40 bg-green-600 hover:bg-green-500">
                 {publishing ? t('training.publishing') : t('training.confirmPublish')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Move Slides Modal */}
+      {moveTargetLesson !== null && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center"
+          onClick={() => setMoveTargetLesson(null)}>
+          <div className="rounded-xl p-5 w-full max-w-sm shadow-xl"
+            style={{ backgroundColor: 'var(--t-bg-card)', border: '1px solid var(--t-border)' }}
+            onClick={e => e.stopPropagation()}>
+            <h3 className="text-sm font-semibold mb-3" style={{ color: 'var(--t-text)' }}>
+              {t('training.moveSlidesTitle')}
+            </h3>
+            <p className="text-[10px] mb-3" style={{ color: 'var(--t-text-dim)' }}>
+              {t('training.selectedCount', { count: selectedSlides.size })}
+            </p>
+            <label className="text-[10px] block mb-1" style={{ color: 'var(--t-text-dim)' }}>
+              {t('training.targetLesson')}
+            </label>
+            <select
+              value={moveTargetLesson === -1 ? '' : moveTargetLesson ?? ''}
+              onChange={e => setMoveTargetLesson(Number(e.target.value) || null)}
+              className="w-full border rounded px-2 py-2 text-xs mb-4"
+              style={{ backgroundColor: 'var(--t-bg-input)', borderColor: 'var(--t-border)', color: 'var(--t-text)' }}
+            >
+              <option value="">--</option>
+              {lessons.map((l, li) => (
+                <option key={l.id} value={l.id}>
+                  {li + 1}. {l.title}
+                </option>
+              ))}
+            </select>
+            <div className="flex justify-end gap-2">
+              <button onClick={() => setMoveTargetLesson(null)}
+                className="px-4 py-2 text-xs rounded-lg"
+                style={{ color: 'var(--t-text-dim)', border: '1px solid var(--t-border)' }}>
+                {t('common.cancel')}
+              </button>
+              <button
+                disabled={!moveTargetLesson || moveTargetLesson === -1 || movingSlides}
+                onClick={async () => {
+                  if (!moveTargetLesson || moveTargetLesson === -1) return
+                  setMovingSlides(true)
+                  try {
+                    const res = await api.put('/training/slides/move', {
+                      slide_ids: Array.from(selectedSlides),
+                      target_lesson_id: moveTargetLesson
+                    })
+                    const affectedLessons = new Set<number>()
+                    affectedLessons.add(moveTargetLesson)
+                    for (const [lid, slides] of Object.entries(lessonSlides)) {
+                      if ((slides as Slide[]).some(s => selectedSlides.has(s.id))) affectedLessons.add(Number(lid))
+                    }
+                    for (const lid of affectedLessons) {
+                      try {
+                        const r = await api.get(`/training/lessons/${lid}/slides`)
+                        setLessonSlides(prev => ({ ...prev, [lid]: r.data }))
+                      } catch {}
+                    }
+                    setSelectedSlides(new Set())
+                    setMoveTargetLesson(null)
+                    alert(t('training.moveSuccess', { count: res.data.moved }))
+                  } catch (err: any) {
+                    alert(err.response?.data?.error || 'Move failed')
+                  } finally {
+                    setMovingSlides(false)
+                  }
+                }}
+                className="px-4 py-2 text-xs font-medium text-white rounded-lg transition disabled:opacity-40 flex items-center gap-1"
+                style={{ backgroundColor: 'var(--t-accent-bg)' }}>
+                {movingSlides ? <Loader2 size={12} className="animate-spin" /> : <MoveRight size={12} />}
+                {t('training.moveSlides')}
               </button>
             </div>
           </div>

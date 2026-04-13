@@ -1224,6 +1224,63 @@ router.put('/lessons/:lid/slides/reorder', async (req, res) => {
   }
 });
 
+// PUT /api/training/slides/move — batch move slides to another lesson (same course)
+router.put('/slides/move', async (req, res) => {
+  try {
+    const { slide_ids, target_lesson_id } = req.body;
+    if (!Array.isArray(slide_ids) || !slide_ids.length || !target_lesson_id)
+      return res.status(400).json({ error: 'slide_ids array and target_lesson_id required' });
+
+    // Verify target lesson access
+    const targetCheck = await verifyLessonAccess(target_lesson_id, req.user, true);
+    if (targetCheck.error) return res.status(targetCheck.status).json({ error: targetCheck.error });
+    const targetCourseId = targetCheck.courseId;
+
+    // Verify all slides exist and belong to the same course
+    const placeholders = slide_ids.map(() => '?').join(',');
+    const slides = await db.prepare(
+      `SELECT cs.id, cs.lesson_id, cl.course_id
+       FROM course_slides cs JOIN course_lessons cl ON cl.id = cs.lesson_id
+       WHERE cs.id IN (${placeholders})`
+    ).all(...slide_ids);
+
+    if (slides.length !== slide_ids.length)
+      return res.status(404).json({ error: '部分投影片不存在' });
+
+    const wrongCourse = slides.find(s => s.course_id !== targetCourseId);
+    if (wrongCourse)
+      return res.status(400).json({ error: '不可跨課程搬移投影片' });
+
+    const alreadyInTarget = slides.filter(s => s.lesson_id === target_lesson_id);
+    if (alreadyInTarget.length === slides.length)
+      return res.json({ ok: true, moved: 0 });
+
+    // Get max sort_order in target lesson
+    const maxRow = await db.prepare(
+      'SELECT MAX(sort_order) AS mx FROM course_slides WHERE lesson_id=?'
+    ).get(target_lesson_id);
+    let nextOrder = (maxRow?.mx || 0) + 1;
+
+    // Move slides
+    for (const sid of slide_ids) {
+      const s = slides.find(x => x.id === sid);
+      if (s.lesson_id === target_lesson_id) continue; // already there
+      await db.prepare(
+        'UPDATE course_slides SET lesson_id=?, sort_order=?, updated_at=SYSTIMESTAMP WHERE id=?'
+      ).run(target_lesson_id, nextOrder++, sid);
+    }
+
+    const moved = slide_ids.filter(sid => {
+      const s = slides.find(x => x.id === sid);
+      return s.lesson_id !== target_lesson_id;
+    }).length;
+
+    res.json({ ok: true, moved });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // Slide Audio
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -4778,17 +4835,8 @@ router.post('/recording/:sessionId/step', upload.single('screenshot'), async (re
     const viewportJson = typeof viewport === 'string' ? viewport : JSON.stringify(viewport || null);
     const annotationsStr = annotations_json || null;
 
-    // 防重複 step_number：若已存在同編號則自動取 MAX+1
-    let finalStepNumber = Number(step_number) || 0;
-    const existing = await db.prepare(
-      'SELECT COUNT(*) AS cnt FROM recording_steps WHERE session_id=? AND step_number=?'
-    ).get(sessionId, finalStepNumber);
-    if (existing?.cnt > 0) {
-      const maxRow = await db.prepare(
-        'SELECT MAX(step_number) AS mx FROM recording_steps WHERE session_id=?'
-      ).get(sessionId);
-      finalStepNumber = (maxRow?.mx || 0) + 1;
-    }
+    // 直接使用使用者指定的 step_number，不做防重複或自動遞增
+    const finalStepNumber = Number(step_number) || 0;
 
     const result = await db.prepare(`
       INSERT INTO recording_steps (session_id, step_number, action_type, screenshot_url,
@@ -5121,24 +5169,8 @@ router.post('/recording/:sessionId/generate', async (req, res) => {
       'SELECT * FROM recording_steps WHERE session_id=? ORDER BY step_number, id'
     ).all(req.params.sessionId);
 
-    // 檢查是否有重複 step_number，有的話按順序重新編號
-    const seenNumbers = new Set();
-    let hasDuplicates = false;
-    for (const s of rawSteps) {
-      if (seenNumbers.has(s.step_number)) { hasDuplicates = true; break; }
-      seenNumbers.add(s.step_number);
-    }
+    // 直接使用原始 step_number，不做重新編號
     const steps = rawSteps;
-    if (hasDuplicates) {
-      console.log(`[Training] generate: detected duplicate step_numbers in session ${req.params.sessionId}, renumbering...`);
-      for (let i = 0; i < steps.length; i++) {
-        const newNum = i + 1;
-        if (steps[i].step_number !== newNum) {
-          await db.prepare('UPDATE recording_steps SET step_number=? WHERE id=?').run(newNum, steps[i].id);
-          steps[i].step_number = newNum;
-        }
-      }
-    }
 
     let courseId = session.course_id;
     let lessonId = session.lesson_id;
