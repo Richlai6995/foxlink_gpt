@@ -119,7 +119,7 @@ export default function TokenStatsModal({ onClose }: Props) {
         </div>
 
         {/* Summary stats */}
-        <div className="flex gap-6 px-5 py-3 bg-slate-50 border-b text-sm">
+        <div className="flex gap-6 px-5 py-3 bg-slate-50 border-b text-sm shrink-0">
           <div>
             <span className="text-slate-500 text-xs">{t('tokenStats.totalCost')}</span>
             <div className="font-bold text-blue-600">${totalCost.toFixed(4)} USD</div>
@@ -137,7 +137,7 @@ export default function TokenStatsModal({ onClose }: Props) {
         </div>
 
         {/* Chart */}
-        <div className="p-5 flex-shrink min-h-0">
+        <div className="p-5 shrink-0">
           {loading ? (
             <div className="animate-pulse h-60 bg-slate-100 rounded" />
           ) : rows.length === 0 ? (
@@ -149,7 +149,7 @@ export default function TokenStatsModal({ onClose }: Props) {
 
         {/* Detail table */}
         {!loading && rows.length > 0 && (
-          <div className="border-t flex-shrink overflow-auto min-h-0">
+          <div className="border-t flex-1 overflow-auto min-h-0">
             <table className="w-full text-xs">
               <thead className="bg-slate-50 sticky top-0">
                 <tr>
