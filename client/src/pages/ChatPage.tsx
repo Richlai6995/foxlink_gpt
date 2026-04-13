@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useSearchParams, useNavigate } from 'react-router-dom'
-import { Square, AlertTriangle, Share2, Copy, Check, X, Sparkles, Search, Plus, Plug, Zap, Database, CheckCircle, BarChart3, ChevronDown, RefreshCw, TrendingUp, GripVertical, Eye, EyeOff, FlaskConical, Settings } from 'lucide-react'
+import { Square, AlertTriangle, Share2, Copy, Check, X, Sparkles, Search, Plus, Plug, Zap, Database, CheckCircle, BarChart3, ChevronDown, RefreshCw, TrendingUp, GripVertical, Eye, EyeOff, FlaskConical, Settings, PanelLeft } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import Sidebar from '../components/Sidebar'
 import { fmtTW } from '../lib/fmtTW'
@@ -53,6 +53,32 @@ export default function ChatPage() {
   const [reasoningEffort, setReasoningEffort] = useState<string>(
     () => localStorage.getItem('reasoningEffort') || ''
   )
+
+  // Sidebar collapse state
+  const isMobile = typeof window !== 'undefined' && window.innerWidth < 768
+  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(
+    () => {
+      if (isMobile) return true
+      const saved = localStorage.getItem('sidebarCollapsed')
+      return saved === 'true'
+    }
+  )
+  const toggleSidebar = useCallback(() => {
+    setSidebarCollapsed(prev => {
+      const next = !prev
+      localStorage.setItem('sidebarCollapsed', String(next))
+      return next
+    })
+  }, [])
+
+  // Listen for resize — auto-collapse on mobile
+  useEffect(() => {
+    const onResize = () => {
+      if (window.innerWidth < 768) setSidebarCollapsed(true)
+    }
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [])
   const abortRef = useRef<(() => void) | null>(null)
   const wasAbortedRef = useRef(false)
   const messageInputRef = useRef<MessageInputHandle>(null)
@@ -812,10 +838,12 @@ export default function ChatPage() {
         onRenameSession={(id, title, titleZh, titleEn, titleVi) => {
           setSessions((prev) => prev.map((s) => s.id === id ? { ...s, title, title_zh: titleZh, title_en: titleEn, title_vi: titleVi } : s))
         }}
+        collapsed={sidebarCollapsed}
+        onToggleCollapse={toggleSidebar}
       />
 
       <div
-        className="fixed inset-y-0 left-72 right-0 flex flex-col overflow-hidden bg-slate-50"
+        className={`fixed inset-y-0 right-0 flex flex-col overflow-hidden bg-slate-50 transition-all duration-300 ${sidebarCollapsed ? 'left-16' : 'left-72'}`}
         onDragEnter={handleDragEnter}
         onDragLeave={handleDragLeave}
         onDragOver={handleDragOver}

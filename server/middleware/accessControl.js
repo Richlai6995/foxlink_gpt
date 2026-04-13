@@ -38,7 +38,13 @@ function getClientIp(req) {
   return req.ip || req.connection?.remoteAddress || '';
 }
 
+function isLoopback(ip) {
+  const v4 = ip.replace(/^::ffff:/, '');
+  return ip === '::1' || v4 === '127.0.0.1' || v4.startsWith('127.');
+}
+
 function isInternal(ip, cidrs) {
+  if (isLoopback(ip)) return true;
   return cidrs.some(cidr => isInCIDR(ip, cidr));
 }
 

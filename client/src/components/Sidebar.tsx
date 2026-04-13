@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { Plus, MessageSquare, Trash2, Pencil, Check, ChevronDown, LogOut, Settings, Cpu, Zap, CalendarClock, HelpCircle, KeyRound, X, Eye, EyeOff, GitFork, Sparkles, Database, Menu, ChevronUp, BarChart3, Globe, FileText, GraduationCap, BookOpen, TicketCheck } from 'lucide-react'
+import { Plus, MessageSquare, Trash2, Pencil, Check, ChevronDown, LogOut, Settings, Cpu, Zap, CalendarClock, HelpCircle, KeyRound, X, Eye, EyeOff, GitFork, Sparkles, Database, Menu, ChevronUp, BarChart3, Globe, FileText, GraduationCap, BookOpen, TicketCheck, PanelLeftClose, PanelLeft, SquarePen } from 'lucide-react'
 import type { ChatSession, ModelType, LlmModel } from '../types'
 import { useAuth } from '../context/AuthContext'
 import { useNavigate } from 'react-router-dom'
@@ -19,6 +19,8 @@ interface Props {
   reasoningEffort?: string
   onReasoningEffortChange?: (v: string) => void
   onRenameSession?: (id: string, title: string, titleZh: string, titleEn: string, titleVi: string) => void
+  collapsed: boolean
+  onToggleCollapse: () => void
 }
 
 function groupSessions(sessions: ChatSession[], t: (k: string) => string) {
@@ -56,6 +58,8 @@ export default function Sidebar({
   reasoningEffort,
   onReasoningEffortChange,
   onRenameSession,
+  collapsed,
+  onToggleCollapse,
 }: Props) {
   const { user, logout, isAdmin, canSchedule, canCreateKb, canUseDashboard, canAccessTrainingDev, setLanguage } = useAuth()
   const navigate = useNavigate()
@@ -171,11 +175,83 @@ export default function Sidebar({
     return s.title_zh || s.title
   }
 
+  // Cycle language: zh-TW → en → vi → zh-TW
+  const cycleLang = () => {
+    const codes = SUPPORTED_LANGUAGES.map(l => l.code)
+    const idx = codes.indexOf(i18n.language as LangCode)
+    const next = codes[(idx + 1) % codes.length]
+    handleLangChange(next as LangCode)
+  }
+
+  const langLabel = SUPPORTED_LANGUAGES.find(l => l.code === i18n.language)?.label || i18n.language
+
+  // ─── Collapsed icon rail ───
+  if (collapsed) {
+    return (
+      <div className="fixed inset-y-0 left-0 w-16 bg-slate-900 flex flex-col items-center border-r border-slate-800 z-30 py-3 gap-1 transition-all duration-300">
+        {/* Toggle open */}
+        <button
+          onClick={onToggleCollapse}
+          className="w-10 h-10 flex items-center justify-center text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition"
+          title={t('sidebar.moreFeatures')}
+        >
+          <PanelLeft size={20} />
+        </button>
+
+        {/* New chat */}
+        <button
+          onClick={onNewChat}
+          className="w-10 h-10 flex items-center justify-center text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition mt-1"
+          title={t('sidebar.newChat')}
+        >
+          <SquarePen size={20} />
+        </button>
+
+        {/* Spacer */}
+        <div className="flex-1" />
+
+        {/* Language cycle */}
+        <button
+          onClick={cycleLang}
+          className="w-10 h-10 flex items-center justify-center text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition"
+          title={langLabel}
+        >
+          <Globe size={18} />
+        </button>
+
+        {/* User avatar */}
+        <div
+          className="w-8 h-8 bg-blue-700 rounded-full flex items-center justify-center text-white text-xs font-bold cursor-default"
+          title={user?.name || user?.username || ''}
+        >
+          {(user?.name || user?.username || '?').charAt(0).toUpperCase()}
+        </div>
+
+        {/* Logout */}
+        <button
+          onClick={logout}
+          className="w-10 h-10 flex items-center justify-center text-slate-500 hover:text-red-400 transition"
+          title={t('sidebar.logout')}
+        >
+          <LogOut size={18} />
+        </button>
+      </div>
+    )
+  }
+
+  // ─── Expanded sidebar ───
   return (
-    <div className="fixed inset-y-0 left-0 w-72 bg-slate-900 flex flex-col border-r border-slate-800 z-30">
+    <div className="fixed inset-y-0 left-0 w-72 bg-slate-900 flex flex-col border-r border-slate-800 z-30 transition-all duration-300">
       {/* Header */}
       <div className="p-4 border-b border-slate-800">
         <div className="flex items-center gap-2 mb-4">
+          <button
+            onClick={onToggleCollapse}
+            className="w-8 h-8 flex items-center justify-center text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition flex-shrink-0"
+            title="收合側邊欄"
+          >
+            <PanelLeftClose size={18} />
+          </button>
           <img src="/favicon.png" alt="Cortex" className="w-8 h-8 object-contain flex-shrink-0" />
           <span className="text-white font-bold text-lg">Cortex</span>
         </div>

@@ -93,7 +93,7 @@ export default function TokenStatsModal({ onClose }: Props) {
 
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={onClose}>
-      <div className="bg-white rounded-xl shadow-2xl w-full max-w-3xl flex flex-col" onClick={e => e.stopPropagation()}>
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-3 border-b">
           <div className="flex items-center gap-2">
@@ -137,7 +137,7 @@ export default function TokenStatsModal({ onClose }: Props) {
         </div>
 
         {/* Chart */}
-        <div className="p-5">
+        <div className="p-5 flex-shrink min-h-0">
           {loading ? (
             <div className="animate-pulse h-60 bg-slate-100 rounded" />
           ) : rows.length === 0 ? (
@@ -149,7 +149,7 @@ export default function TokenStatsModal({ onClose }: Props) {
 
         {/* Detail table */}
         {!loading && rows.length > 0 && (
-          <div className="border-t max-h-48 overflow-auto">
+          <div className="border-t flex-shrink overflow-auto min-h-0">
             <table className="w-full text-xs">
               <thead className="bg-slate-50 sticky top-0">
                 <tr>
