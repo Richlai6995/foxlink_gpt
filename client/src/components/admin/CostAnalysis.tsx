@@ -119,6 +119,7 @@ export default function CostAnalysis() {
   const [startDate, setStartDate] = useState(thirtyDaysAgo)
   const [endDate, setEndDate] = useState(today)
   const [includeAllPC, setIncludeAllPC] = useState(false)
+  const [onlyFoxlinkGroup, setOnlyFoxlinkGroup] = useState(true)
   const [summary, setSummary] = useState<SummaryRow[]>([])
   const [monthly, setMonthly] = useState<MonthlyRow[]>([])
   const [employees, setEmployees] = useState<EmpRow[]>([])
@@ -137,7 +138,7 @@ export default function CostAnalysis() {
     setLoading(true)
     setError('')
     try {
-      const incParam = includeAllPC ? '&includeAllPC=1' : ''
+      const incParam = includeAllPC ? `&includeAllPC=1&onlyFoxlinkGroup=${onlyFoxlinkGroup ? '1' : '0'}` : ''
       const [s, m, e, t] = await Promise.all([
         api.get(`/admin/cost-stats/summary?startDate=${startDate}&endDate=${endDate}${incParam}`),
         api.get(`/admin/cost-stats/monthly?startDate=${startDate}&endDate=${endDate}${incParam}`),
@@ -156,7 +157,7 @@ export default function CostAnalysis() {
     } finally {
       setLoading(false)
     }
-  }, [startDate, endDate, includeAllPC])
+  }, [startDate, endDate, includeAllPC, onlyFoxlinkGroup])
 
   useEffect(() => { load() }, [])
 
@@ -232,7 +233,7 @@ export default function CostAnalysis() {
 
   // ── CSV export URLs ──────────────────────────────────────────────────────
   const qs = `startDate=${startDate}&endDate=${endDate}`
-  const incQs = includeAllPC ? '&includeAllPC=1' : ''
+  const incQs = includeAllPC ? `&includeAllPC=1&onlyFoxlinkGroup=${onlyFoxlinkGroup ? '1' : '0'}` : ''
   const empExportUrl = `/api/admin/cost-stats/export/employees?${qs}${selectedPC ? `&profitCenter=${selectedPC}` : ''}${selectedDept ? `&deptCode=${selectedDept}` : ''}`
   const summaryExportUrl = `/api/admin/cost-stats/export/summary?${qs}${incQs}`
   const monthlyExportUrl = `/api/admin/cost-stats/export/monthly?${qs}${incQs}`
@@ -281,6 +282,13 @@ export default function CostAnalysis() {
             onChange={(e) => setIncludeAllPC(e.target.checked)}
             className="rounded" />
           包含無帳號利潤中心
+        </label>
+        <label className={`flex items-center gap-1.5 text-sm cursor-pointer select-none ${includeAllPC ? 'text-gray-700' : 'text-gray-400'}`}>
+          <input type="checkbox" checked={onlyFoxlinkGroup}
+            disabled={!includeAllPC}
+            onChange={(e) => setOnlyFoxlinkGroup(e.target.checked)}
+            className="rounded" />
+          僅限正崴集團
         </label>
         {error && <span className="text-xs text-red-600">{error}</span>}
         {(selectedPC || selectedDept) && (

@@ -1198,7 +1198,7 @@ router.get('/cost-stats/employees', async (req, res) => {
 router.get('/cost-stats/summary', async (req, res) => {
   try {
     const db = require('../database-oracle').db;
-    const { startDate, endDate, includeAllPC } = req.query;
+    const { startDate, endDate, includeAllPC, onlyFoxlinkGroup } = req.query;
     if (!startDate || !endDate) return res.status(400).json({ error: '請提供日期區間' });
 
     const { getIndirectEmpCountByPC, getAllProfitCenters } = require('../services/erpDb');
@@ -1207,7 +1207,7 @@ router.get('/cost-stats/summary', async (req, res) => {
       getCostRows(db, startDate, endDate),
       db.prepare(`SELECT profit_center, COUNT(*) AS cnt FROM users WHERE status != 'disabled' GROUP BY profit_center`).all(),
       getIndirectEmpCountByPC(),
-      includeAllPC === '1' ? getAllProfitCenters() : Promise.resolve([]),
+      includeAllPC === '1' ? getAllProfitCenters(onlyFoxlinkGroup !== '0') : Promise.resolve([]),
     ]);
 
     // Build account count map (all registered accounts per profit_center)
@@ -1295,7 +1295,7 @@ router.get('/cost-stats/summary', async (req, res) => {
 router.get('/cost-stats/monthly', async (req, res) => {
   try {
     const db = require('../database-oracle').db;
-    const { startDate, endDate, includeAllPC } = req.query;
+    const { startDate, endDate, includeAllPC, onlyFoxlinkGroup } = req.query;
     if (!startDate || !endDate) return res.status(400).json({ error: '請提供日期區間' });
 
     const { getIndirectEmpCountByPC, getAllProfitCenters } = require('../services/erpDb');
@@ -1304,7 +1304,7 @@ router.get('/cost-stats/monthly', async (req, res) => {
       getCostRows(db, startDate, endDate),
       db.prepare(`SELECT profit_center, COUNT(*) AS cnt FROM users WHERE status != 'disabled' GROUP BY profit_center`).all(),
       getIndirectEmpCountByPC(),
-      includeAllPC === '1' ? getAllProfitCenters() : Promise.resolve([]),
+      includeAllPC === '1' ? getAllProfitCenters(onlyFoxlinkGroup !== '0') : Promise.resolve([]),
     ]);
 
     const accountMap = {};
@@ -1420,7 +1420,7 @@ router.get('/cost-stats/export/employees', async (req, res) => {
 router.get('/cost-stats/export/summary', async (req, res) => {
   try {
     const db = require('../database-oracle').db;
-    const { startDate, endDate, includeAllPC } = req.query;
+    const { startDate, endDate, includeAllPC, onlyFoxlinkGroup } = req.query;
     if (!startDate || !endDate) return res.status(400).json({ error: '請提供日期區間' });
 
     const { getIndirectEmpCountByPC, getAllProfitCenters } = require('../services/erpDb');
@@ -1429,7 +1429,7 @@ router.get('/cost-stats/export/summary', async (req, res) => {
       getCostRows(db, startDate, endDate),
       db.prepare(`SELECT profit_center, COUNT(*) AS cnt FROM users WHERE status != 'disabled' GROUP BY profit_center`).all(),
       getIndirectEmpCountByPC(),
-      includeAllPC === '1' ? getAllProfitCenters() : Promise.resolve([]),
+      includeAllPC === '1' ? getAllProfitCenters(onlyFoxlinkGroup !== '0') : Promise.resolve([]),
     ]);
     const accountMap = {};
     for (const a of accountRows) { accountMap[a.profit_center || '__NONE__'] = a.cnt; }
@@ -1492,7 +1492,7 @@ router.get('/cost-stats/export/summary', async (req, res) => {
 router.get('/cost-stats/export/monthly', async (req, res) => {
   try {
     const db = require('../database-oracle').db;
-    const { startDate, endDate, includeAllPC } = req.query;
+    const { startDate, endDate, includeAllPC, onlyFoxlinkGroup } = req.query;
     if (!startDate || !endDate) return res.status(400).json({ error: '請提供日期區間' });
 
     const { getIndirectEmpCountByPC, getAllProfitCenters } = require('../services/erpDb');
@@ -1501,7 +1501,7 @@ router.get('/cost-stats/export/monthly', async (req, res) => {
       getCostRows(db, startDate, endDate),
       db.prepare(`SELECT profit_center, COUNT(*) AS cnt FROM users WHERE status != 'disabled' GROUP BY profit_center`).all(),
       getIndirectEmpCountByPC(),
-      includeAllPC === '1' ? getAllProfitCenters() : Promise.resolve([]),
+      includeAllPC === '1' ? getAllProfitCenters(onlyFoxlinkGroup !== '0') : Promise.resolve([]),
     ]);
     const accountMap = {};
     for (const a of accountRows) { accountMap[a.profit_center || '__NONE__'] = a.cnt; }

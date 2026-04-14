@@ -150,18 +150,19 @@ async function getIndirectEmpCountByPC() {
 }
 
 /**
- * 正崴集團所有利潤中心清單 (去重)
- * 來源: APPS.FL_ORG_EMP_DEPT_MV where CO_GROUP='正崴集團'
+ * 所有利潤中心清單 (去重)
+ * 來源: APPS.FL_ORG_EMP_DEPT_MV
+ * @param {boolean} onlyFoxlinkGroup - true 則限 CO_GROUP='正崴集團'
  */
-async function getAllProfitCenters() {
+async function getAllProfitCenters(onlyFoxlinkGroup = false) {
   if (!isConfigured()) return [];
   initClient();
   const sql = `
     SELECT DISTINCT PROFIT_CENTER, PROFIT_CENTER_NAME,
            ORG_SECTION, ORG_SECTION_NAME, ORG_GROUP_NAME
     FROM APPS.FL_ORG_EMP_DEPT_MV
-    WHERE CO_GROUP = '正崴集團'
-      AND PROFIT_CENTER IS NOT NULL
+    WHERE PROFIT_CENTER IS NOT NULL
+      ${onlyFoxlinkGroup ? `AND CO_GROUP = '正崴集團'` : ''}
   `;
   try {
     const result = await execute(sql);
