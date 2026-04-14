@@ -1,7 +1,7 @@
 /**
  * Help page seed data — zh-TW (source of truth)
  * Auto-extracted from HelpPage.tsx
- * Generated: 2026-04-12
+ * Generated: 2026-04-13
  *
  * Block types: para, tip, note, table, steps, code, list, subsection, card_grid, comparison
  */
@@ -201,43 +201,30 @@ const userSections = [
     "sort_order": 3,
     "icon": "Settings",
     "icon_color": "text-slate-500",
-    "last_modified": "2026-04-13",
+    "last_modified": "2026-04-08",
     "title": "介面導覽",
     "sidebar_label": "介面導覽",
     "blocks": [
       {
         "type": "para",
-        "text": "主畫面分為兩大區域：**左側邊欄**（導航與功能入口）與**中央對話區域**（對話主體）。左側邊欄支援**展開 / 折疊**切換，折疊後可獲得更大的對話空間。"
+        "text": "主畫面分為兩大區域：**左側邊欄**（導航與功能入口）與**中央對話區域**（對話主體）。"
       },
       {
         "type": "card_grid",
         "cols": 1,
         "items": [
           {
-            "title": "左側邊欄（展開模式）",
+            "title": "左側邊欄",
             "borderColor": "slate",
             "desc": "",
             "items": [
-              "收合按鈕（☰） — 點擊可折疊側邊欄，增加對話區域空間",
-              "Cortex Logo 及品牌識別",
+              "Foxlink GPT to Cortex Logo 及品牌識別",
               "「+ 新對話」按鈕 — 建立全新對話 Session",
               "AI 模型選擇下拉選單 — 切換 AOAI / Gemini 等模型",
               "對話歷史清單（依今天、昨天、過去 7 天、更早分組）",
               "「更多功能」折疊選單 — 含匯入分享、系統管理、排程任務、技能市集、知識庫市集、AI 戰情室、文件範本、教育訓練、問題反饋、使用說明",
               "語言切換（中文 / English / Tiếng Việt）",
               "使用者資訊、修改密碼、登出圖示"
-            ]
-          },
-          {
-            "title": "左側邊欄（折疊模式）",
-            "borderColor": "slate",
-            "desc": "折疊後側邊欄縮為圖示列，僅保留最常用的功能：",
-            "items": [
-              "展開按鈕 — 點擊恢復完整側邊欄",
-              "新對話按鈕（✏️） — 快速建立新對話",
-              "語言切換按鈕（🌐） — 點擊一次即輪替切換下一種語言（中文 → English → Tiếng Việt）",
-              "使用者頭像 — 顯示目前登入身分",
-              "登出按鈕"
             ]
           },
           {
@@ -260,10 +247,6 @@ const userSections = [
       },
       {
         "type": "tip",
-        "text": "側邊欄的展開 / 折疊狀態會自動記住，下次開啟瀏覽器時會維持上次的設定。手機等小螢幕裝置（寬度 < 768px）會預設折疊以節省空間。"
-      },
-      {
-        "type": "tip",
         "text": "部分頂部工具列功能（如 AI 戰情室、排程任務）只有具備對應權限的帳號才會顯示，若有需要請洽系統管理員開通。"
       }
     ]
@@ -273,7 +256,7 @@ const userSections = [
     "sort_order": 4,
     "icon": "Globe",
     "icon_color": "text-sky-500",
-    "last_modified": "2026-04-13",
+    "last_modified": "2026-04-01",
     "title": "語言切換與多語設定",
     "sidebar_label": "語言切換與多語設定",
     "blocks": [
@@ -286,39 +269,19 @@ const userSections = [
         "title": "切換 UI 介面語言",
         "blocks": [
           {
-            "type": "para",
-            "text": "語言切換有兩種方式，依側邊欄的展開 / 折疊狀態而不同："
-          },
-          {
-            "type": "subsection",
-            "title": "側邊欄展開時",
-            "blocks": [
+            "type": "steps",
+            "items": [
               {
-                "type": "steps",
-                "items": [
-                  {
-                    "title": "點選左側邊欄底部的「🌐 語言切換」按鈕",
-                    "desc": "顯示目前語言名稱（如「繁體中文」），點擊展開語言選單"
-                  },
-                  {
-                    "title": "從選單中選擇目標語言",
-                    "desc": "繁體中文 🇹🇼 / English 🇺🇸 / Tiếng Việt 🇻🇳"
-                  },
-                  {
-                    "title": "介面語言立即切換",
-                    "desc": "所有 UI 文字、按鈕、提示訊息均切換為所選語言，無需重新整理頁面"
-                  }
-                ]
-              }
-            ]
-          },
-          {
-            "type": "subsection",
-            "title": "側邊欄折疊時",
-            "blocks": [
+                "title": "點選左側邊欄底部的「🌐 語言切換」按鈕",
+                "desc": "顯示目前語言名稱（如「繁體中文」），點擊展開語言選單"
+              },
               {
-                "type": "para",
-                "text": "折疊模式下，點擊 🌐 圖示按鈕即可**輪替切換**語言：中文 → English → Tiếng Việt → 中文，每按一次切換至下一種語言。"
+                "title": "從選單中選擇目標語言",
+                "desc": "繁體中文 🇹🇼 / English 🇺🇸 / Tiếng Việt 🇻🇳"
+              },
+              {
+                "title": "介面語言立即切換",
+                "desc": "所有 UI 文字、按鈕、提示訊息均切換為所選語言，無需重新整理頁面"
               }
             ]
           },
@@ -730,7 +693,7 @@ const userSections = [
     "sort_order": 7,
     "icon": "Upload",
     "icon_color": "text-teal-500",
-    "last_modified": "2026-04-13",
+    "last_modified": "2026-04-08",
     "title": "上傳檔案",
     "sidebar_label": "上傳檔案",
     "blocks": [
@@ -748,7 +711,7 @@ const userSections = [
             "rows": [
               [
                 "文件",
-                "PDF、DOC / DOCX、XLS / XLSX、PPT / PPTX、TXT、CSV",
+                "PDF、DOCX、XLSX、PPTX、TXT、CSV",
                 "AI 直接讀取文件內容進行分析"
               ],
               [
@@ -1647,7 +1610,7 @@ const userSections = [
     "sort_order": 14,
     "icon": "Sparkles",
     "icon_color": "text-purple-500",
-    "last_modified": "2026-04-01",
+    "last_modified": "2026-04-13",
     "title": "技能 Skill",
     "sidebar_label": "技能 Skill",
     "blocks": [
@@ -1709,6 +1672,10 @@ const userSections = [
               [
                 "answer（直接回答）",
                 "Skill 執行結果直接作為最終回覆，完全略過 AI。適合需要精準固定格式輸出的場景。"
+              ],
+              [
+                "post_answer（後處理）",
+                "AI 先正常回答使用者，回答完成後才呼叫此技能做後處理。適合不影響主要對話但需要額外動作的場景，例如語音合成（TTS）、自動寫入外部系統、產生報表檔案等。"
               ]
             ]
           },
@@ -1935,67 +1902,156 @@ const userSections = [
             "text": "技能可以定義輸入變數，讓使用者在掛載技能到對話時填寫自訂參數，這些參數會自動注入到 System Prompt 中。例如，翻譯技能可設定「目標語言」變數，掛載時讓使用者選擇「日文」或「韓文」。"
           },
           {
+            "type": "para",
+            "text": "輸入變數的定義格式為 **JSON 陣列**，在技能編輯器的「輸入/輸出」頁籤中設定。每個變數是一個物件，包含以下屬性："
+          },
+          {
             "type": "table",
             "headers": [
-              "變數類型",
+              "屬性",
+              "必填",
               "說明"
             ],
             "rows": [
               [
+                "name",
+                "✅",
+                "變數識別名稱（英文），用於 System Prompt 中的 {{name}} 對應替換"
+              ],
+              [
+                "label",
+                "❌",
+                "顯示在表單上的中文標籤，未設定時以 name 代替"
+              ],
+              [
+                "type",
+                "✅",
+                "輸入元件類型（見下方類型表）"
+              ],
+              [
+                "required",
+                "❌",
+                "是否為必填，設為 true 時表單欄位旁顯示紅色星號"
+              ],
+              [
+                "options",
+                "❌",
+                "type 為 select 時的選項陣列，如 [\"選項A\", \"選項B\"]"
+              ],
+              [
+                "default",
+                "❌",
+                "預設值，使用者未填寫時自動帶入"
+              ],
+              [
+                "placeholder",
+                "❌",
+                "輸入框的提示文字（浮水印）"
+              ]
+            ]
+          },
+          {
+            "type": "table",
+            "headers": [
+              "type 值",
+              "表單元件",
+              "適用場景"
+            ],
+            "rows": [
+              [
                 "text",
-                "單行文字輸入"
+                "單行文字輸入框",
+                "名稱、關鍵字等短文字"
               ],
               [
                 "textarea",
-                "多行文字輸入"
+                "多行文字區域（20 行高）",
+                "長段描述、背景資料、條件說明"
               ],
               [
                 "select",
-                "下拉選單，需預先定義選項"
+                "下拉選單",
+                "固定選項，需搭配 options 屬性"
               ],
               [
                 "number",
-                "數字輸入"
+                "數字輸入框",
+                "數量、分數、金額等數值"
               ],
               [
                 "date",
-                "日期選擇器"
+                "日期選擇器",
+                "起始日、截止日"
+              ],
+              [
+                "date_range",
+                "日期區間選擇器",
+                "報表期間、統計區間"
               ],
               [
                 "checkbox",
-                "布林值勾選框"
+                "布林值勾選框",
+                "開關型設定（是/否）"
               ]
             ]
           },
           {
             "type": "para",
-            "text": "在 System Prompt 中使用 {{變數名稱}} 語法引用變數，例如："
+            "text": "**完整範例 — 會議紀錄生成器技能：**"
           },
           {
             "type": "code",
-            "text": "你是一位專業翻譯員，請將使用者的文字翻譯為 {{target_language}}。\n翻譯風格：{{style}}"
+            "text": "[\n  {\n    \"name\": \"meeting_title\",\n    \"label\": \"會議名稱\",\n    \"type\": \"text\",\n    \"required\": true,\n    \"placeholder\": \"例如：Q2 產品規劃會議\"\n  },\n  {\n    \"name\": \"participants\",\n    \"label\": \"與會人員\",\n    \"type\": \"textarea\",\n    \"placeholder\": \"每行一位，含職稱\"\n  },\n  {\n    \"name\": \"output_lang\",\n    \"label\": \"輸出語言\",\n    \"type\": \"select\",\n    \"options\": [\"繁體中文\", \"English\", \"日本語\"],\n    \"default\": \"繁體中文\",\n    \"required\": true\n  },\n  {\n    \"name\": \"meeting_date\",\n    \"label\": \"會議日期\",\n    \"type\": \"date\"\n  },\n  {\n    \"name\": \"include_action_items\",\n    \"label\": \"包含待辦事項\",\n    \"type\": \"checkbox\",\n    \"default\": true\n  }\n]"
+          },
+          {
+            "type": "para",
+            "text": "在 System Prompt 中使用 **{{變數名稱}}** 語法引用變數值，例如："
+          },
+          {
+            "type": "code",
+            "text": "你是專業的會議記錄員。\n會議名稱：{{meeting_title}}\n會議日期：{{meeting_date}}\n與會人員：\n{{participants}}\n\n請根據使用者提供的會議內容整理出結構化的會議紀錄。\n輸出語言：{{output_lang}}\n是否列出待辦事項：{{include_action_items}}"
+          },
+          {
+            "type": "note",
+            "text": "變數值是 **對話（Session）級別** 的，同一個對話中技能變數只填一次，之後每次發訊息都會沿用相同的值。若需更改，可重新選擇技能觸發填寫視窗。Workflow 類型技能也可使用 {{var.變數名稱}} 語法在節點中引用變數。"
           },
           {
             "type": "tip",
-            "text": "掛載技能時若該技能定義了輸入變數，系統會彈出表單讓使用者填寫，填寫後的值會存在該對話的技能設定中。"
+            "text": "掛載技能時若該技能定義了輸入變數，系統會自動彈出表單讓使用者填寫。若所有變數都有 default 值，使用者可直接確認不需逐一填寫。"
           }
         ]
       },
       {
         "type": "subsection",
-        "title": "Code 技能自動註冊為 Gemini Tool",
+        "title": "Tool Schema — Code / 外部技能自動註冊為 Gemini Tool",
         "blocks": [
           {
             "type": "para",
-            "text": "Code 類型技能可以定義 **Tool Schema**（Gemini Function Declaration），讓 AI 在對話中自動判斷是否需要呼叫該程式技能，而非每次都觸發。"
+            "text": "Code 與外部（External）類型的技能可以在「輸入/輸出」頁籤定義 **Tool Schema**（Gemini Function Declaration），讓 AI 在對話中自動判斷是否需要呼叫該技能，而非每次都觸發。這等同於 Gemini 的 Function Calling 機制。"
           },
           {
             "type": "para",
-            "text": "例如，一個「股價查詢」Code 技能定義了 Tool Schema，AI 收到「台積電股價多少」時會自動呼叫，但收到「今天天氣如何」則不會觸發。這等同於 Gemini 的 Function Calling 機制。"
+            "text": "例如，一個「股價查詢」Code 技能定義了 Tool Schema，AI 收到「台積電股價多少」時會自動呼叫，但收到「今天天氣如何」則不會觸發。"
+          },
+          {
+            "type": "para",
+            "text": "Tool Schema 格式為 **JSON 物件**，包含技能的描述及參數定義："
+          },
+          {
+            "type": "code",
+            "text": "{\n  \"description\": \"查詢指定員工的出勤紀錄，回傳遲到、早退、請假等統計\",\n  \"parameters\": {\n    \"type\": \"object\",\n    \"properties\": {\n      \"employee_id\": {\n        \"type\": \"string\",\n        \"description\": \"員工工號\"\n      },\n      \"month\": {\n        \"type\": \"string\",\n        \"description\": \"查詢月份，格式 YYYY-MM\"\n      }\n    },\n    \"required\": [\"employee_id\"]\n  }\n}"
+          },
+          {
+            "type": "list",
+            "items": [
+              "**description**：AI 用來判斷何時該呼叫此技能的依據，寫得越精準，AI 判斷越準確",
+              "**parameters**：遵循 JSON Schema 格式，定義技能接受的輸入參數",
+              "**required**：指定哪些參數是必要的，AI 呼叫時一定會提供"
+            ]
           },
           {
             "type": "note",
-            "text": "未定義 Tool Schema 的 Code 技能仍按原有的 inject/answer 端點模式運作，不受影響。"
+            "text": "未定義 Tool Schema 的 Code / 外部技能仍按原有的 inject / answer / post_answer 端點模式運作，不受影響。有定義 Tool Schema 時，AI 會自行決定是否呼叫，無需每次都觸發。"
           }
         ]
       },
@@ -2005,11 +2061,111 @@ const userSections = [
         "blocks": [
           {
             "type": "para",
-            "text": "技能可以定義 JSON 格式的輸出結構（Output Schema），指引 AI 以固定的 JSON 格式回覆。適合需要結構化資料的場景，如自動產生工單、匯出報表欄位等。"
+            "text": "技能可以在「輸入/輸出」頁籤定義 **Output Schema**（JSON Schema 格式），指引 AI 以固定的 JSON 結構回覆。適合需要結構化資料的場景，如自動產生工單、匯出報表欄位、與下游系統對接等。"
+          },
+          {
+            "type": "para",
+            "text": "**運作方式**：系統會將 Output Schema 以文字指令注入到 AI 的 System Prompt 中，告知 AI「請嚴格按照以下 JSON Schema 格式回答」。這是一種**軟約束** — AI 會盡量遵守，但不保證 100% 完全符合。"
+          },
+          {
+            "type": "para",
+            "text": "**範例 — 產品品質檢核報告：**"
           },
           {
             "type": "code",
-            "text": "{\n  \"type\": \"object\",\n  \"properties\": {\n    \"summary\": { \"type\": \"string\", \"description\": \"摘要\" },\n    \"score\": { \"type\": \"number\", \"description\": \"評分 0-100\" },\n    \"tags\": { \"type\": \"array\", \"items\": { \"type\": \"string\" } }\n  }\n}"
+            "text": "{\n  \"type\": \"object\",\n  \"properties\": {\n    \"product_name\": {\n      \"type\": \"string\",\n      \"description\": \"產品名稱\"\n    },\n    \"inspection_result\": {\n      \"type\": \"string\",\n      \"enum\": [\"PASS\", \"FAIL\", \"CONDITIONAL\"],\n      \"description\": \"檢驗結果\"\n    },\n    \"defects\": {\n      \"type\": \"array\",\n      \"description\": \"發現的缺陷列表\",\n      \"items\": {\n        \"type\": \"object\",\n        \"properties\": {\n          \"category\": { \"type\": \"string\", \"description\": \"缺陷類別\" },\n          \"severity\": { \"type\": \"string\", \"enum\": [\"critical\", \"major\", \"minor\"] },\n          \"description\": { \"type\": \"string\", \"description\": \"缺陷描述\" }\n        }\n      }\n    },\n    \"score\": {\n      \"type\": \"number\",\n      \"description\": \"品質評分 0-100\"\n    },\n    \"recommendations\": {\n      \"type\": \"array\",\n      \"items\": { \"type\": \"string\" },\n      \"description\": \"改善建議\"\n    }\n  }\n}"
+          },
+          {
+            "type": "para",
+            "text": "AI 收到使用者訊息後，會根據此 Schema 回覆結構化的 JSON，例如："
+          },
+          {
+            "type": "code",
+            "text": "{\n  \"product_name\": \"FX-200 連接器\",\n  \"inspection_result\": \"CONDITIONAL\",\n  \"defects\": [\n    {\n      \"category\": \"外觀\",\n      \"severity\": \"minor\",\n      \"description\": \"端子表面有輕微刮痕\"\n    }\n  ],\n  \"score\": 82,\n  \"recommendations\": [\n    \"建議調整衝壓模具間隙\",\n    \"加強來料端子外觀抽檢\"\n  ]\n}"
+          },
+          {
+            "type": "list",
+            "items": [
+              "**type**：定義資料型態（object、array、string、number、boolean）",
+              "**properties**：物件的子欄位定義，每個欄位可設定 type 和 description",
+              "**enum**：限制欄位只能使用指定的值（如 \"PASS\"、\"FAIL\"）",
+              "**items**：陣列中每個元素的結構定義",
+              "**description**：欄位說明，幫助 AI 理解該欄位應填入什麼內容"
+            ]
+          },
+          {
+            "type": "tip",
+            "text": "Output Schema 搭配「輸出範本」使用效果更佳 — AI 先按 Schema 輸出 JSON，系統再自動套用文件範本產生 PPTX / DOCX / PDF 等檔案。"
+          },
+          {
+            "type": "note",
+            "text": "Output Schema 為軟約束，AI 會盡力遵守但不保證格式完全正確。若對格式精確度要求極高，建議搭配 Code 技能做後處理驗證。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "輸出範本綁定（Output Template）",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "技能可以在「輸入/輸出」頁籤綁定一個**文件範本**，讓 AI 的回覆自動套用範本產生 PPTX / DOCX / PDF / XLSX 等檔案。適合需要固定格式輸出的場景，如檢驗報告、會議紀錄、訓練教材等。"
+          },
+          {
+            "type": "steps",
+            "items": [
+              {
+                "title": "先建立文件範本",
+                "desc": "在「文件範本」功能中定義範本結構與欄位"
+              },
+              {
+                "title": "編輯技能 →「輸入/輸出」頁籤",
+                "desc": "在「輸出範本」欄位點選選取對應的範本"
+              },
+              {
+                "title": "（建議）同時設定 Output Schema",
+                "desc": "讓 AI 輸出的 JSON 欄位與範本預期的欄位對齊，產生的檔案內容更準確"
+              },
+              {
+                "title": "使用者對話時",
+                "desc": "AI 回覆後系統自動將 JSON 套入範本，在聊天室產生可下載的檔案"
+              }
+            ]
+          },
+          {
+            "type": "tip",
+            "text": "輸出範本特別適合搭配 post_answer 端點模式的技能 — AI 先正常回答，後處理技能再產生報表檔案。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "進階設定",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "在技能編輯器的「進階設定」頁籤可以配置以下選項："
+          },
+          {
+            "type": "table",
+            "headers": [
+              "設定",
+              "說明"
+            ],
+            "rows": [
+              [
+                "指定模型（Model）",
+                "覆蓋預設對話模型。例如，需要高品質推理的技能可指定 Pro 模型，簡單文字處理的可指定 Flash 節省成本。留空則使用系統預設模型。"
+              ],
+              [
+                "端點模式（Endpoint Mode）",
+                "外部 / Code 技能的執行時機：inject（注入到 AI 前）、answer（直接回答）、post_answer（AI 回答後再執行）。詳見「端點模式」章節。"
+              ],
+              [
+                "速率限制",
+                "每人上限、全域上限、時間窗口。詳見「速率限制」章節。"
+              ]
+            ]
           }
         ]
       },
@@ -2151,6 +2307,143 @@ const userSections = [
           {
             "type": "tip",
             "text": "Workflow 最多允許 50 個節點，執行時以拓撲排序依序處理。條件節點支援 default（符合條件）與 else（不符合）兩條分支路徑。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "Code 技能運作機制",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "Code 類型技能在平台內以**獨立 Node.js 子程序**運作，每個技能擁有獨立的 Express 伺服器與連接埠（Port 40100–40999），與主程式完全隔離。"
+          },
+          {
+            "type": "table",
+            "headers": [
+              "機制",
+              "說明"
+            ],
+            "rows": [
+              [
+                "啟動",
+                "儲存技能程式碼後手動啟動，系統自動安裝 NPM 套件、分配 Port、啟動子程序"
+              ],
+              [
+                "狀態",
+                "技能卡片即時顯示：🟢 running（運行中）、🔴 error（異常）、⚪ stopped（已停止）"
+              ],
+              [
+                "熱更新",
+                "系統每 30 秒健康檢查，若偵測到程式碼有變動（例如其他 Pod 修改），自動重新載入"
+              ],
+              [
+                "NPM 套件",
+                "在「NPM 套件」欄位加入需要的套件名稱（如 axios、lodash），系統會自動 npm install"
+              ],
+              [
+                "日誌",
+                "可在技能市集點選技能查看即時 Log 輸出（stdout / stderr / 啟動 / 健康檢查紀錄）"
+              ]
+            ]
+          },
+          {
+            "type": "para",
+            "text": "程式碼撰寫格式如下："
+          },
+          {
+            "type": "code",
+            "text": "async function handler(body) {\n  // body.user_message — 使用者訊息\n  // body.user_id     — 使用者 ID\n  // body.session_id  — 對話 Session ID\n  // body.args        — Tool Schema 呼叫時 AI 傳入的參數（JSON）\n\n  const result = await fetchSomeData(body.user_message);\n\n  return {\n    // inject 模式 → 回傳 system_prompt 注入 AI\n    system_prompt: `以下是查詢結果：${JSON.stringify(result)}`,\n    // 或 answer 模式 → 回傳 content 直接作為回覆\n    // content: `查詢結果：${result}`\n  };\n}"
+          },
+          {
+            "type": "note",
+            "text": "Code 技能需要管理員授予「允許程式技能」權限才能建立。程式碼在隔離的子程序中執行，無法存取主程式的資料庫連線或檔案系統。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "呼叫紀錄（Call Logs）",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "每個技能會自動記錄最近 100 筆呼叫紀錄，方便技能擁有者追蹤使用狀況與除錯。在技能市集的技能詳情頁可查看。"
+          },
+          {
+            "type": "table",
+            "headers": [
+              "欄位",
+              "說明"
+            ],
+            "rows": [
+              [
+                "使用者",
+                "呼叫此技能的使用者名稱"
+              ],
+              [
+                "狀態",
+                "🟢 OK（成功）或 🔴 Error（失敗）"
+              ],
+              [
+                "耗時",
+                "技能執行時間（毫秒）"
+              ],
+              [
+                "查詢預覽",
+                "使用者訊息的前段摘要"
+              ],
+              [
+                "錯誤訊息",
+                "失敗時的錯誤原因"
+              ],
+              [
+                "時間",
+                "呼叫時間戳記"
+              ]
+            ]
+          },
+          {
+            "type": "tip",
+            "text": "呼叫紀錄僅技能擁有者和管理員可查看，一般使用者無法看到他人的使用紀錄。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "技能編輯器頁籤總覽",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "編輯技能時，編輯器分為五個頁籤，各頁籤的功能如下："
+          },
+          {
+            "type": "table",
+            "headers": [
+              "頁籤",
+              "內容"
+            ],
+            "rows": [
+              [
+                "基本資訊",
+                "名稱、說明、圖示、技能類型、Tags 標籤、System Prompt（內建類型）、端點 URL（外部類型）、程式碼（Code 類型）、工作流程編輯器（Workflow 類型）"
+              ],
+              [
+                "工具綁定",
+                "MCP 工具模式與伺服器選擇、自建知識庫綁定、API 連接器（Dify）綁定、知識庫模式"
+              ],
+              [
+                "輸入/輸出",
+                "Prompt 輸入變數（prompt_variables）定義、Tool Schema（Gemini Function Declaration）、Output Schema（輸出結構）、輸出範本綁定"
+              ],
+              [
+                "進階設定",
+                "指定模型覆蓋、端點模式（inject / answer / post_answer）、速率限制（每人 / 全域 / 時間窗口）"
+              ],
+              [
+                "版本歷史",
+                "發佈新版本、查看歷史版本清單、一鍵回滾到指定版本（僅編輯現有技能時顯示）"
+              ]
+            ]
           }
         ]
       }
@@ -6650,7 +6943,7 @@ const userSections = [
     "sort_order": 28,
     "icon": "TicketCheck",
     "icon_color": "text-rose-500",
-    "last_modified": "2026-04-13",
+    "last_modified": "2026-04-09",
     "title": "問題反饋（工單系統）",
     "sidebar_label": "問題反饋",
     "blocks": [
@@ -6666,31 +6959,9 @@ const userSections = [
             "type": "list",
             "items": [
               "**方式一 — Sidebar 選單**：左側 Sidebar 展開「更多功能」→ 點選「問題反饋」進入工單列表",
-              "**方式二 — 右下角浮動按鈕**：在任何頁面右下角都有一個半透明的圓形按鈕，點擊可查看待回覆通知或快速開立工單，不需離開當前頁面",
+              "**方式二 — 右下角浮動按鈕（FAB）**：在任何頁面右下角都有一個藍色按鈕，點擊可快速開立工單，不需離開當前頁面",
               "**方式三 — AI 對話頁**：在 AI 回覆下方有「問題反饋」按鈕，可直接將 AI 回覆內容帶入工單描述"
             ]
-          }
-        ]
-      },
-      {
-        "type": "subsection",
-        "title": "浮動按鈕功能",
-        "blocks": [
-          {
-            "type": "para",
-            "text": "右下角的浮動按鈕是快速存取工單的入口，點擊後會顯示一個兩段式面板："
-          },
-          {
-            "type": "list",
-            "items": [
-              "**待回覆通知清單**：當有管理員回覆您的工單時，按鈕會顯示紅色數字徽章。點開後會列出所有未讀通知，點擊任一筆可直接跳到該工單的對話頁面",
-              "**建立新工單**：清單下方的「+ 建立工單」按鈕可切換到快速開單表單，填寫主旨、分類、說明後即可送出",
-              "**我的工單**：點擊可前往完整的工單列表頁面"
-            ]
-          },
-          {
-            "type": "tip",
-            "text": "浮動按鈕可以拖曳移動位置，方便您調整到不影響操作的位置。"
           }
         ]
       },
@@ -7030,7 +7301,7 @@ const userSections = [
               ],
               [
                 "如何快速開單？",
-                "使用右下角浮動按鈕，點擊後選擇「+ 建立工單」即可快速開單，不需離開當前頁面。按鈕有紅色數字時代表有待回覆的工單通知。"
+                "使用右下角藍色浮動按鈕（FAB），不用離開當前頁面就能開單。"
               ]
             ]
           }
@@ -7043,7 +7314,7 @@ const userSections = [
     "sort_order": 29,
     "icon": "MessageSquare",
     "icon_color": "text-green-500",
-    "last_modified": "2026-04-13",
+    "last_modified": "2026-04-01",
     "title": "Webex Bot 使用",
     "sidebar_label": "Webex Bot 使用",
     "blocks": [
@@ -7129,7 +7400,7 @@ const userSections = [
                 "AI 進行圖像分析"
               ],
               [
-                "音訊（MP3 / WAV / M4A / OGG / FLAC / AAC / WebM）",
+                "音訊（MP3 / WAV / MP4 Audio）",
                 "自動轉錄為文字後分析"
               ],
               [
