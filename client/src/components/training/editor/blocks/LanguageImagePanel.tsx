@@ -1014,15 +1014,17 @@ export default function LanguageImagePanel({ slideId, blockIndex, currentImage, 
       {/* ═══ Full-screen modal for region editing ═══ */}
       {editModal && (langImage || currentImage) && (
         <div className="fixed inset-0 z-[9999] flex items-center justify-center"
-          style={{ backgroundColor: 'rgba(0,0,0,0.85)' }}
+          style={{ backgroundColor: 'rgba(0,0,0,0.7)' }}
           onClick={() => setEditModal(false)}>
-          <div className="relative w-[92vw] max-h-[92vh] flex flex-col" onClick={e => e.stopPropagation()}>
+          <div className="relative w-[92vw] max-h-[92vh] flex flex-col rounded-xl p-3 shadow-2xl"
+            style={{ backgroundColor: 'var(--t-bg-elevated)', border: '1px solid var(--t-border)' }}
+            onClick={e => e.stopPropagation()}>
             {/* Header */}
             <div className="flex items-center gap-3 mb-2 flex-wrap">
-              <span className="text-white text-sm font-semibold">
+              <span className="text-sm font-semibold" style={{ color: 'var(--t-text)' }}>
                 {LANGS.find(l => l.code === activeLang)?.flag} {activeLang.toUpperCase()} — 互動區域編輯
               </span>
-              <span className="text-[10px] text-slate-400">
+              <span className="text-[10px]" style={{ color: 'var(--t-text-muted)' }}>
                 {modalRegions.length} 個區域
                 {hasIndependentRegions ? ' · 獨立' : ' · 繼承（唯讀）'}
               </span>
@@ -1033,24 +1035,24 @@ export default function LanguageImagePanel({ slideId, blockIndex, currentImage, 
                   <button onClick={() => setModalMode('select')}
                     className="flex items-center gap-1 text-[10px] px-2 py-0.5 rounded transition"
                     style={{
-                      backgroundColor: modalMode === 'select' ? 'rgba(56,189,248,0.2)' : 'transparent',
-                      color: modalMode === 'select' ? '#38bdf8' : '#94a3b8',
-                      border: `1px solid ${modalMode === 'select' ? '#38bdf8' : '#475569'}`
+                      backgroundColor: modalMode === 'select' ? 'var(--t-accent-subtle)' : 'transparent',
+                      color: modalMode === 'select' ? 'var(--t-accent)' : 'var(--t-text-muted)',
+                      border: `1px solid ${modalMode === 'select' ? 'var(--t-accent)' : 'var(--t-border)'}`
                     }}>
                     <MousePointer size={10} /> 選取
                   </button>
                   <button onClick={() => setModalMode('draw')}
                     className="flex items-center gap-1 text-[10px] px-2 py-0.5 rounded transition"
                     style={{
-                      backgroundColor: modalMode === 'draw' ? 'rgba(34,197,94,0.2)' : 'transparent',
-                      color: modalMode === 'draw' ? '#22c55e' : '#94a3b8',
-                      border: `1px solid ${modalMode === 'draw' ? '#22c55e' : '#475569'}`
+                      backgroundColor: modalMode === 'draw' ? 'rgba(34,197,94,0.15)' : 'transparent',
+                      color: modalMode === 'draw' ? '#22c55e' : 'var(--t-text-muted)',
+                      border: `1px solid ${modalMode === 'draw' ? '#22c55e' : 'var(--t-border)'}`
                     }}>
                     <Pen size={10} /> 繪製
                   </button>
                   <button onClick={addLangRegionAtCenter}
                     className="flex items-center gap-1 text-[10px] px-2 py-0.5 rounded transition"
-                    style={{ color: '#94a3b8', border: '1px solid #475569' }}>
+                    style={{ color: 'var(--t-text-muted)', border: '1px solid var(--t-border)' }}>
                     <Plus size={10} /> 新增
                   </button>
                 </div>
@@ -1061,14 +1063,14 @@ export default function LanguageImagePanel({ slideId, blockIndex, currentImage, 
               {/* 併排合成 button */}
               <button onClick={openComposite}
                 className="flex items-center gap-1 text-[11px] px-2.5 py-1 rounded-lg transition"
-                style={{ color: '#a78bfa', border: '1px solid #6d28d9' }}>
+                style={{ color: '#a78bfa', border: '1px solid #a78bfa' }}>
                 <Columns size={12} /> 併排合成
               </button>
 
               {/* 抽換底圖 button */}
               <button onClick={() => fileInputRef.current?.click()}
                 className="flex items-center gap-1 text-[11px] px-2.5 py-1 rounded-lg transition"
-                style={{ color: '#94a3b8', border: '1px solid #475569' }}
+                style={{ color: 'var(--t-text-muted)', border: '1px solid var(--t-border)' }}
                 disabled={uploading}>
                 <ImagePlus size={12} /> {uploading ? '上傳中...' : '抽換底圖'}
               </button>
@@ -1083,7 +1085,10 @@ export default function LanguageImagePanel({ slideId, blockIndex, currentImage, 
                 </button>
               )}
               <button onClick={() => setEditModal(false)}
-                className="w-8 h-8 rounded-full flex items-center justify-center text-white hover:bg-white/10">
+                className="w-8 h-8 rounded-full flex items-center justify-center transition"
+                style={{ color: 'var(--t-text-muted)' }}
+                onMouseEnter={e => { e.currentTarget.style.backgroundColor = 'var(--t-bg-card-hover)' }}
+                onMouseLeave={e => { e.currentTarget.style.backgroundColor = 'transparent' }}>
                 <X size={18} />
               </button>
             </div>
@@ -1091,21 +1096,27 @@ export default function LanguageImagePanel({ slideId, blockIndex, currentImage, 
             {/* Bulk coords transform (only for independent) */}
             {hasIndependentRegions && (
               <div className="flex items-center gap-2 mb-1 flex-wrap">
-                <span className="text-[10px] text-slate-400">整體座標調整:</span>
-                <label className="text-[10px] text-slate-400 flex items-center gap-1">
+                <span className="text-[10px]" style={{ color: 'var(--t-text-muted)' }}>整體座標調整:</span>
+                <label className="text-[10px] flex items-center gap-1" style={{ color: 'var(--t-text-muted)' }}>
                   X偏移
                   <input type="number" value={coordsOffsetX} onChange={e => setCoordsOffsetX(Number(e.target.value))}
-                    className="w-14 text-[10px] px-1 py-0.5 rounded bg-white/10 text-white border border-slate-600 text-center" step={1} />%
+                    className="w-14 text-[10px] px-1 py-0.5 rounded text-center"
+                    style={{ backgroundColor: 'var(--t-bg-input)', border: '1px solid var(--t-border)', color: 'var(--t-text)' }}
+                    step={1} />%
                 </label>
-                <label className="text-[10px] text-slate-400 flex items-center gap-1">
+                <label className="text-[10px] flex items-center gap-1" style={{ color: 'var(--t-text-muted)' }}>
                   Y偏移
                   <input type="number" value={coordsOffsetY} onChange={e => setCoordsOffsetY(Number(e.target.value))}
-                    className="w-14 text-[10px] px-1 py-0.5 rounded bg-white/10 text-white border border-slate-600 text-center" step={1} />%
+                    className="w-14 text-[10px] px-1 py-0.5 rounded text-center"
+                    style={{ backgroundColor: 'var(--t-bg-input)', border: '1px solid var(--t-border)', color: 'var(--t-text)' }}
+                    step={1} />%
                 </label>
-                <label className="text-[10px] text-slate-400 flex items-center gap-1">
+                <label className="text-[10px] flex items-center gap-1" style={{ color: 'var(--t-text-muted)' }}>
                   縮放
                   <input type="number" value={coordsScale} onChange={e => setCoordsScale(Number(e.target.value))}
-                    className="w-16 text-[10px] px-1 py-0.5 rounded bg-white/10 text-white border border-slate-600 text-center" step={5} min={10} max={500} />%
+                    className="w-16 text-[10px] px-1 py-0.5 rounded text-center"
+                    style={{ backgroundColor: 'var(--t-bg-input)', border: '1px solid var(--t-border)', color: 'var(--t-text)' }}
+                    step={5} min={10} max={500} />%
                 </label>
                 <button
                   onClick={() => {
@@ -1133,7 +1144,7 @@ export default function LanguageImagePanel({ slideId, blockIndex, currentImage, 
                     setCoordsOffsetX(0); setCoordsOffsetY(0); setCoordsScale(100)
                   }}
                   className="text-[10px] px-2 py-0.5 rounded transition"
-                  style={{ color: '#38bdf8', border: '1px solid #38bdf8' }}
+                  style={{ color: 'var(--t-accent)', border: '1px solid var(--t-accent)' }}
                   disabled={coordsOffsetX === 0 && coordsOffsetY === 0 && coordsScale === 100}>
                   套用
                 </button>
@@ -1222,15 +1233,15 @@ export default function LanguageImagePanel({ slideId, blockIndex, currentImage, 
               {hasIndependentRegions && (
                 <div className="w-64 shrink-0 flex flex-col gap-2 overflow-y-auto" style={{ maxHeight: '85vh' }}>
                   {/* Region list */}
-                  <div className="rounded-lg p-2 space-y-1" style={{ backgroundColor: 'rgba(255,255,255,0.05)', border: '1px solid #334155' }}>
-                    <div className="text-[10px] text-slate-400 font-semibold mb-1">區域列表 ({independentRegions.length})</div>
+                  <div className="rounded-lg p-2 space-y-1" style={{ backgroundColor: 'var(--t-bg-card)', border: '1px solid var(--t-border)' }}>
+                    <div className="text-[10px] font-semibold mb-1" style={{ color: 'var(--t-text-muted)' }}>區域列表 ({independentRegions.length})</div>
                     {independentRegions.map(r => (
                       <div key={r.id}
                         onClick={() => setModalSelected(r.id)}
                         className="flex items-center gap-1.5 px-2 py-1 rounded text-[10px] cursor-pointer transition"
                         style={{
-                          backgroundColor: modalSelected === r.id ? 'rgba(56,189,248,0.15)' : 'transparent',
-                          color: '#e2e8f0'
+                          backgroundColor: modalSelected === r.id ? 'var(--t-accent-subtle)' : 'transparent',
+                          color: 'var(--t-text)'
                         }}>
                         <span className={`w-2 h-2 rounded-full shrink-0 ${r.correct ? 'bg-green-500' : 'bg-red-500'}`} />
                         <span className="truncate flex-1">{r.label || r.id}</span>
@@ -1241,36 +1252,36 @@ export default function LanguageImagePanel({ slideId, blockIndex, currentImage, 
                       </div>
                     ))}
                     {independentRegions.length === 0 && (
-                      <div className="text-[10px] text-slate-500 py-2 text-center">尚無區域</div>
+                      <div className="text-[10px] py-2 text-center" style={{ color: 'var(--t-text-dim)' }}>尚無區域</div>
                     )}
                   </div>
 
                   {/* Selected region properties */}
                   {selectedModalRegion && (
-                    <div className="rounded-lg p-2 space-y-2" style={{ backgroundColor: 'rgba(255,255,255,0.05)', border: '1px solid #334155' }}>
-                      <div className="text-[10px] text-slate-400 font-semibold">編輯：{selectedModalRegion.label || selectedModalRegion.id}</div>
+                    <div className="rounded-lg p-2 space-y-2" style={{ backgroundColor: 'var(--t-bg-card)', border: '1px solid var(--t-border)' }}>
+                      <div className="text-[10px] font-semibold" style={{ color: 'var(--t-text-muted)' }}>編輯：{selectedModalRegion.label || selectedModalRegion.id}</div>
                       <div>
-                        <label className="text-[9px] text-slate-500 block mb-0.5">標籤名稱</label>
+                        <label className="text-[9px] block mb-0.5" style={{ color: 'var(--t-text-dim)' }}>標籤名稱</label>
                         <input value={selectedModalRegion.label || ''}
                           onChange={e => updateLangRegion(selectedModalRegion.id, { label: e.target.value })}
                           className="w-full rounded px-2 py-1 text-[10px] focus:outline-none"
-                          style={{ backgroundColor: '#1e293b', border: '1px solid #334155', color: '#e2e8f0' }}
+                          style={{ backgroundColor: 'var(--t-bg-input)', border: '1px solid var(--t-border)', color: 'var(--t-text)' }}
                           placeholder="例：帳號、密碼" />
                       </div>
                       <label className="flex items-center gap-2 text-[10px]">
                         <input type="checkbox" checked={selectedModalRegion.correct || false}
                           onChange={e => updateLangRegion(selectedModalRegion.id, { correct: e.target.checked })}
                           className="rounded" />
-                        <span style={{ color: selectedModalRegion.correct ? '#4ade80' : '#f87171' }}>
+                        <span style={{ color: selectedModalRegion.correct ? '#16a34a' : '#dc2626' }}>
                           {selectedModalRegion.correct ? '正確區域' : '錯誤區域'}
                         </span>
                       </label>
                       <div>
-                        <label className="text-[9px] text-slate-500 block mb-0.5">回饋文字</label>
+                        <label className="text-[9px] block mb-0.5" style={{ color: 'var(--t-text-dim)' }}>回饋文字</label>
                         <input value={selectedModalRegion.feedback || ''}
                           onChange={e => updateLangRegion(selectedModalRegion.id, { feedback: e.target.value })}
                           className="w-full rounded px-2 py-1 text-[10px] focus:outline-none"
-                          style={{ backgroundColor: '#1e293b', border: '1px solid #334155', color: '#e2e8f0' }}
+                          style={{ backgroundColor: 'var(--t-bg-input)', border: '1px solid var(--t-border)', color: 'var(--t-text)' }}
                           placeholder="點擊後的回饋文字" />
                       </div>
 
@@ -1281,11 +1292,11 @@ export default function LanguageImagePanel({ slideId, blockIndex, currentImage, 
                         { field: 'explore_desc', audioField: 'explore_audio_url', icon: '🔍', label: '探索說明', ph: '說明文字...' },
                       ].map(m => (
                         <div key={m.field}>
-                          <label className="text-[9px] text-slate-500 block mb-0.5">{m.icon} {m.label}</label>
+                          <label className="text-[9px] block mb-0.5" style={{ color: 'var(--t-text-dim)' }}>{m.icon} {m.label}</label>
                           <input value={selectedModalRegion[m.field] || ''}
                             onChange={e => updateLangRegion(selectedModalRegion.id, { [m.field]: e.target.value })}
                             className="w-full rounded px-2 py-1 text-[10px] focus:outline-none"
-                            style={{ backgroundColor: '#1e293b', border: '1px solid #334155', color: '#e2e8f0' }}
+                            style={{ backgroundColor: 'var(--t-bg-input)', border: '1px solid var(--t-border)', color: 'var(--t-text)' }}
                             placeholder={m.ph} />
                           <VoiceInput
                             text={selectedModalRegion[m.field] || ''}
@@ -1303,7 +1314,7 @@ export default function LanguageImagePanel({ slideId, blockIndex, currentImage, 
               )}
             </div>
             {/* Footer hint */}
-            <div className="text-[10px] text-slate-500 mt-1.5 text-center">
+            <div className="text-[10px] mt-1.5 text-center" style={{ color: 'var(--t-text-dim)' }}>
               💡 拖拉圖片到畫面上 或 Ctrl+V 貼上剪貼簿圖片 可直接抽換底圖
             </div>
           </div>
@@ -1312,19 +1323,22 @@ export default function LanguageImagePanel({ slideId, blockIndex, currentImage, 
       {/* ═══ Composite Dialog ═══ */}
       {compositeOpen && (
         <div className="fixed inset-0 z-[10000] flex items-center justify-center"
-          style={{ backgroundColor: 'rgba(0,0,0,0.9)' }}
+          style={{ backgroundColor: 'rgba(0,0,0,0.7)' }}
           onClick={() => setCompositeOpen(false)}>
-          <div className="w-[80vw] max-w-[900px] max-h-[90vh] flex flex-col rounded-2xl overflow-hidden"
-            style={{ backgroundColor: '#1e293b', border: '1px solid #334155' }}
+          <div className="w-[80vw] max-w-[900px] max-h-[90vh] flex flex-col rounded-2xl overflow-hidden shadow-2xl"
+            style={{ backgroundColor: 'var(--t-bg-elevated)', border: '1px solid var(--t-border)' }}
             onClick={e => e.stopPropagation()}>
             {/* Header */}
-            <div className="flex items-center gap-3 px-5 py-3" style={{ borderBottom: '1px solid #334155' }}>
-              <Columns size={16} className="text-violet-400" />
-              <span className="text-white text-sm font-semibold">併排合成底圖</span>
-              <span className="text-[10px] text-slate-400">將兩張圖片合成為一張底稿</span>
+            <div className="flex items-center gap-3 px-5 py-3" style={{ borderBottom: '1px solid var(--t-border)' }}>
+              <Columns size={16} style={{ color: '#a78bfa' }} />
+              <span className="text-sm font-semibold" style={{ color: 'var(--t-text)' }}>併排合成底圖</span>
+              <span className="text-[10px]" style={{ color: 'var(--t-text-muted)' }}>將兩張圖片合成為一張底稿</span>
               <div className="flex-1" />
               <button onClick={() => setCompositeOpen(false)}
-                className="w-7 h-7 rounded-full flex items-center justify-center text-slate-400 hover:text-white hover:bg-white/10">
+                className="w-7 h-7 rounded-full flex items-center justify-center transition"
+                style={{ color: 'var(--t-text-muted)' }}
+                onMouseEnter={e => { e.currentTarget.style.backgroundColor = 'var(--t-bg-card-hover)' }}
+                onMouseLeave={e => { e.currentTarget.style.backgroundColor = 'transparent' }}>
                 <X size={16} />
               </button>
             </div>
@@ -1339,7 +1353,7 @@ export default function LanguageImagePanel({ slideId, blockIndex, currentImage, 
                   return (
                     <div key={slot}
                       className="rounded-xl border-2 border-dashed transition min-h-[160px] flex flex-col items-center justify-center relative"
-                      style={{ borderColor: img ? '#6d28d9' : '#475569', backgroundColor: img ? 'rgba(109,40,217,0.05)' : 'rgba(255,255,255,0.02)' }}
+                      style={{ borderColor: img ? '#a78bfa' : 'var(--t-border)', backgroundColor: img ? 'rgba(167,139,250,0.06)' : 'var(--t-bg-inset)' }}
                       onDragOver={e => { e.preventDefault(); e.stopPropagation() }}
                       onDrop={e => {
                         e.preventDefault(); e.stopPropagation()
@@ -1355,14 +1369,14 @@ export default function LanguageImagePanel({ slideId, blockIndex, currentImage, 
                               重新選擇
                             </button>
                           </div>
-                          <div className="text-[9px] text-slate-400 text-center mt-1">{label}</div>
+                          <div className="text-[9px] text-center mt-1" style={{ color: 'var(--t-text-muted)' }}>{label}</div>
                         </div>
                       ) : (
                         <label className="flex flex-col items-center gap-2 cursor-pointer py-6 w-full"
                           onClick={() => (slot === 'left' ? compLeftInputRef : compRightInputRef).current?.click()}>
-                          <Upload size={24} className="text-slate-500" />
-                          <span className="text-xs text-slate-400">{label}</span>
-                          <span className="text-[10px] text-slate-500">點擊選擇、拖拉或貼上</span>
+                          <Upload size={24} style={{ color: 'var(--t-text-dim)' }} />
+                          <span className="text-xs" style={{ color: 'var(--t-text-muted)' }}>{label}</span>
+                          <span className="text-[10px]" style={{ color: 'var(--t-text-dim)' }}>點擊選擇、拖拉或貼上</span>
                         </label>
                       )}
                       <input ref={slot === 'left' ? compLeftInputRef : compRightInputRef}
@@ -1376,35 +1390,35 @@ export default function LanguageImagePanel({ slideId, blockIndex, currentImage, 
               {/* Options row */}
               <div className="flex items-center gap-4 flex-wrap">
                 <div className="flex items-center gap-2">
-                  <span className="text-[10px] text-slate-400">排列：</span>
+                  <span className="text-[10px]" style={{ color: 'var(--t-text-muted)' }}>排列：</span>
                   <button onClick={() => { setCompDirection('horizontal'); setCompPreview(null) }}
                     className="flex items-center gap-1 text-[10px] px-2.5 py-1 rounded-lg transition"
                     style={{
-                      backgroundColor: compDirection === 'horizontal' ? 'rgba(139,92,246,0.2)' : 'transparent',
-                      color: compDirection === 'horizontal' ? '#a78bfa' : '#94a3b8',
-                      border: `1px solid ${compDirection === 'horizontal' ? '#7c3aed' : '#475569'}`
+                      backgroundColor: compDirection === 'horizontal' ? 'rgba(139,92,246,0.15)' : 'transparent',
+                      color: compDirection === 'horizontal' ? '#a78bfa' : 'var(--t-text-muted)',
+                      border: `1px solid ${compDirection === 'horizontal' ? '#a78bfa' : 'var(--t-border)'}`
                     }}>
                     <Columns size={11} /> 左右並排
                   </button>
                   <button onClick={() => { setCompDirection('vertical'); setCompPreview(null) }}
                     className="flex items-center gap-1 text-[10px] px-2.5 py-1 rounded-lg transition"
                     style={{
-                      backgroundColor: compDirection === 'vertical' ? 'rgba(139,92,246,0.2)' : 'transparent',
-                      color: compDirection === 'vertical' ? '#a78bfa' : '#94a3b8',
-                      border: `1px solid ${compDirection === 'vertical' ? '#7c3aed' : '#475569'}`
+                      backgroundColor: compDirection === 'vertical' ? 'rgba(139,92,246,0.15)' : 'transparent',
+                      color: compDirection === 'vertical' ? '#a78bfa' : 'var(--t-text-muted)',
+                      border: `1px solid ${compDirection === 'vertical' ? '#a78bfa' : 'var(--t-border)'}`
                     }}>
                     <Rows size={11} /> 上下並排
                   </button>
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className="text-[10px] text-slate-400">間距：</span>
+                  <span className="text-[10px]" style={{ color: 'var(--t-text-muted)' }}>間距：</span>
                   {[0, 4, 8, 16].map(g => (
                     <button key={g} onClick={() => { setCompGap(g); setCompPreview(null) }}
                       className="text-[10px] px-2 py-0.5 rounded transition"
                       style={{
-                        backgroundColor: compGap === g ? 'rgba(139,92,246,0.2)' : 'transparent',
-                        color: compGap === g ? '#a78bfa' : '#94a3b8',
-                        border: `1px solid ${compGap === g ? '#7c3aed' : '#475569'}`
+                        backgroundColor: compGap === g ? 'rgba(139,92,246,0.15)' : 'transparent',
+                        color: compGap === g ? '#a78bfa' : 'var(--t-text-muted)',
+                        border: `1px solid ${compGap === g ? '#a78bfa' : 'var(--t-border)'}`
                       }}>
                       {g}px
                     </button>
@@ -1414,7 +1428,7 @@ export default function LanguageImagePanel({ slideId, blockIndex, currentImage, 
                 <button onClick={generateComposite}
                   disabled={!compLeft || !compRight}
                   className="flex items-center gap-1.5 text-xs px-4 py-1.5 rounded-lg transition disabled:opacity-30"
-                  style={{ backgroundColor: 'rgba(139,92,246,0.15)', color: '#a78bfa', border: '1px solid #7c3aed' }}>
+                  style={{ backgroundColor: 'rgba(139,92,246,0.12)', color: '#a78bfa', border: '1px solid #a78bfa' }}>
                   <Eye size={13} /> 預覽合成
                 </button>
               </div>
@@ -1422,8 +1436,8 @@ export default function LanguageImagePanel({ slideId, blockIndex, currentImage, 
               {/* Preview */}
               {compPreview && (
                 <div className="space-y-2">
-                  <div className="text-[10px] text-slate-400 font-semibold">合成預覽：</div>
-                  <div className="rounded-xl border overflow-hidden" style={{ borderColor: '#334155' }}>
+                  <div className="text-[10px] font-semibold" style={{ color: 'var(--t-text-muted)' }}>合成預覽：</div>
+                  <div className="rounded-xl border overflow-hidden" style={{ borderColor: 'var(--t-border)' }}>
                     <img src={compPreview} alt="composite preview" className="w-full max-h-[350px] object-contain bg-white" />
                   </div>
                 </div>
@@ -1431,13 +1445,13 @@ export default function LanguageImagePanel({ slideId, blockIndex, currentImage, 
             </div>
 
             {/* Footer */}
-            <div className="flex items-center gap-3 px-5 py-3" style={{ borderTop: '1px solid #334155' }}>
-              <span className="text-[10px] text-slate-500 flex-1">
+            <div className="flex items-center gap-3 px-5 py-3" style={{ borderTop: '1px solid var(--t-border)' }}>
+              <span className="text-[10px] flex-1" style={{ color: 'var(--t-text-dim)' }}>
                 ⚠ 合成後會替換目前的 {activeLang.toUpperCase()} 底圖，既有互動區域座標可能需要重新調整
               </span>
               <button onClick={() => setCompositeOpen(false)}
-                className="text-xs px-4 py-1.5 rounded-lg text-slate-400 hover:text-white transition"
-                style={{ border: '1px solid #475569' }}>
+                className="text-xs px-4 py-1.5 rounded-lg transition"
+                style={{ color: 'var(--t-text-muted)', border: '1px solid var(--t-border)' }}>
                 取消
               </button>
               <button onClick={confirmComposite}
