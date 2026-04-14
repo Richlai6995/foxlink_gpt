@@ -1092,6 +1092,19 @@ function toCsv(headers, rows, getRow) {
   return lines.join('\r\n');
 }
 
+// GET /api/admin/cost-stats/total-accounts — 系統總帳號數 (不含 admin、不含 disabled)
+router.get('/cost-stats/total-accounts', async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const row = await db.prepare(
+      `SELECT COUNT(*) AS cnt FROM users WHERE status != 'disabled' AND (role IS NULL OR role != 'admin')`
+    ).get();
+    res.json({ total: row?.cnt || 0 });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // POST /api/admin/cost-stats/refresh-org-cache — refresh Oracle org data for all users
 router.post('/cost-stats/refresh-org-cache', async (req, res) => {
   try {
@@ -1231,7 +1244,7 @@ router.get('/cost-stats/summary', async (req, res) => {
       pcMap[key].dept_breakdown[dk].cost += r.cost || 0;
     }
 
-    const result = Object.values(pcMap).map((pc) => {
+    let result = Object.values(pcMap).map((pc) => {
       const user_count = pc._user_ids.size;
       const account_count = accountMap[pc.profit_center || '__NONE__'] || 0;
       const indirect_emp_count = indirectMap.get(pc.profit_center || '') || 0;
@@ -1268,6 +1281,9 @@ router.get('/cost-stats/summary', async (req, res) => {
         });
       }
     }
+
+    // 過濾三項皆 0 的利潤中心
+    result = result.filter((r) => r.indirect_emp_count || r.account_count || r.user_count);
 
     res.json(result);
   } catch (e) {
@@ -1319,7 +1335,7 @@ router.get('/cost-stats/monthly', async (req, res) => {
       map[key]._user_ids.add(r.user_id);
     }
 
-    const result = Object.values(map).map((m) => {
+    let result = Object.values(map).map((m) => {
       const user_count = m._user_ids.size;
       const account_count = accountMap[m.profit_center || '__NONE__'] || 0;
       const indirect_emp_count = indirectMap.get(m.profit_center || '') || 0;
@@ -1351,6 +1367,9 @@ router.get('/cost-stats/monthly', async (req, res) => {
         });
       }
     }
+
+    // 過濾三項皆 0 的列
+    result = result.filter((r) => r.indirect_emp_count || r.account_count || r.user_count);
 
     res.json(result);
   } catch (e) {
@@ -1429,7 +1448,7 @@ router.get('/cost-stats/export/summary', async (req, res) => {
       pcMap[key].cost += r.cost || 0;
       pcMap[key]._user_ids.add(r.user_id);
     }
-    const result = Object.values(pcMap).map((pc) => {
+    let result = Object.values(pcMap).map((pc) => {
       const user_count = pc._user_ids.size;
       const account_count = accountMap[pc.profit_center || '__NONE__'] || 0;
       const indirect_emp_count = indirectMap.get(pc.profit_center || '') || 0;
@@ -1452,6 +1471,8 @@ router.get('/cost-stats/export/summary', async (req, res) => {
         });
       }
     }
+
+    result = result.filter((r) => r.indirect_emp_count || r.account_count || r.user_count);
 
     const headers = ['利潤中心代碼', '利潤中心名稱', '事業處代碼', '事業處名稱', '事業群名稱', '間接員工數', '帳號人數', '使用人數', '費用金額', '人均費用', '幣別'];
     const csv = toCsv(headers, result, (r) => [
@@ -1500,7 +1521,7 @@ router.get('/cost-stats/export/monthly', async (req, res) => {
       map[key].cost += r.cost || 0;
       map[key]._user_ids.add(r.user_id);
     }
-    const result = Object.values(map).map((m) => {
+    let result = Object.values(map).map((m) => {
       const user_count = m._user_ids.size;
       const account_count = accountMap[m.profit_center || '__NONE__'] || 0;
       const indirect_emp_count = indirectMap.get(m.profit_center || '') || 0;
@@ -1526,6 +1547,8 @@ router.get('/cost-stats/export/monthly', async (req, res) => {
         });
       }
     }
+
+    result = result.filter((r) => r.indirect_emp_count || r.account_count || r.user_count);
 
     const headers = ['利潤中心代碼', '利潤中心名稱', '事業處代碼', '事業處名稱', '事業群名稱', '月份', '間接員工數', '帳號人數', '使用人數', '費用金額', '人均費用', '幣別'];
     const csv = toCsv(headers, result, (r) => [

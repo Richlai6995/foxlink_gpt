@@ -122,6 +122,7 @@ export default function CostAnalysis() {
   const [summary, setSummary] = useState<SummaryRow[]>([])
   const [monthly, setMonthly] = useState<MonthlyRow[]>([])
   const [employees, setEmployees] = useState<EmpRow[]>([])
+  const [totalAccounts, setTotalAccounts] = useState<number | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
@@ -137,14 +138,16 @@ export default function CostAnalysis() {
     setError('')
     try {
       const incParam = includeAllPC ? '&includeAllPC=1' : ''
-      const [s, m, e] = await Promise.all([
+      const [s, m, e, t] = await Promise.all([
         api.get(`/admin/cost-stats/summary?startDate=${startDate}&endDate=${endDate}${incParam}`),
         api.get(`/admin/cost-stats/monthly?startDate=${startDate}&endDate=${endDate}${incParam}`),
         api.get(`/admin/cost-stats/employees?startDate=${startDate}&endDate=${endDate}`),
+        api.get(`/admin/cost-stats/total-accounts`),
       ])
       setSummary(s.data)
       setMonthly(m.data)
       setEmployees(e.data)
+      setTotalAccounts(t.data?.total ?? null)
       setSelectedPC(null)
       setSelectedDept(null)
     } catch (e: unknown) {
@@ -294,6 +297,7 @@ export default function CostAnalysis() {
           <span>總費用: <strong className="text-blue-700">{fmtCost(totalCost, currency)}</strong></span>
           <span>利潤中心數: <strong>{summary.length}</strong></span>
           <span>員工人數: <strong>{employees.length}</strong></span>
+          <span>帳號人數: <strong>{totalAccounts ?? '-'}</strong></span>
           {selectedPC && (
             <span className="text-blue-600 font-medium">
               篩選中: {summary.find(r => r.profit_center === selectedPC)?.profit_center_name || selectedPC}
