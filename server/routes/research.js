@@ -39,7 +39,8 @@ async function checkPermission(db, user) {
 }
 
 // ── POST /api/research/upload-files  (upload attachments for research) ────────
-router.post('/upload-files', researchUpload.array('files', 10), async (req, res) => {
+const RESEARCH_MAX_FILES = parseInt(process.env.RESEARCH_MAX_FILES || '10', 10);
+router.post('/upload-files', researchUpload.array('files', RESEARCH_MAX_FILES), async (req, res) => {
   try {
     const researchDir = path.join(UPLOAD_DIR, 'research_files');
     fs.mkdirSync(researchDir, { recursive: true });

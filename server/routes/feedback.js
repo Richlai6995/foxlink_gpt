@@ -83,7 +83,8 @@ router.get('/tickets', async (req, res) => {
   }
 });
 
-router.post('/tickets', upload.array('files', 10), async (req, res) => {
+const FEEDBACK_MAX_FILES = parseInt(process.env.FEEDBACK_MAX_FILES || '10', 10);
+router.post('/tickets', upload.array('files', FEEDBACK_MAX_FILES), async (req, res) => {
   try {
     const db = require('../database-oracle').db;
     const { subject, description, share_link, category_id, priority, tags, source, source_session_id, is_draft } = req.body;
@@ -427,7 +428,7 @@ router.get('/search', async (req, res) => {
 
 // ─── 附件 ────────────────────────────────────────────────────────────────────
 
-router.post('/tickets/:id/attachments', upload.array('files', 10), async (req, res) => {
+router.post('/tickets/:id/attachments', upload.array('files', FEEDBACK_MAX_FILES), async (req, res) => {
   try {
     const db = require('../database-oracle').db;
     const ticket = await feedbackService.getTicketById(db, Number(req.params.id));

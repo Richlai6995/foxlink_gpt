@@ -776,7 +776,8 @@ router.delete('/sessions/:id', async (req, res) => {
 });
 
 // POST /api/chat/sessions/:id/messages  (SSE streaming)
-router.post('/sessions/:id/messages', upload.array('files', 10), budgetGuard, async (req, res) => {
+const CHAT_MAX_FILES_PER_MESSAGE = parseInt(process.env.CHAT_MAX_FILES_PER_MESSAGE || '10', 10);
+router.post('/sessions/:id/messages', upload.array('files', CHAT_MAX_FILES_PER_MESSAGE), budgetGuard, async (req, res) => {
   const db = require('../database-oracle').db;
   const sessionId = req.params.id;
 
