@@ -166,6 +166,12 @@ function ProjectShareModal({ project, onClose }: { project: AiSelectProject; onC
   useEffect(() => { load() }, [project.id])
 
   const resolveGranteeName = (s: AiProjectShare) => {
+    if (s.grantee_type === 'user') {
+      const extra = [s.grantee_username, s.grantee_employee_id].filter(Boolean).join(' · ')
+      const base = s.grantee_name || s.grantee_id
+      return extra ? `${base} (${extra})` : base
+    }
+    if (s.grantee_name) return s.grantee_name
     const lov = getOrgLov(s.grantee_type, roles, orgs)
     const found = lov.find(o => o.value === String(s.grantee_id))
     return found ? found.label : s.grantee_id
@@ -236,6 +242,12 @@ function ShareModal({ design, onClose }: { design: AiSelectDesign; onClose: () =
   useEffect(() => { load() }, [design.id])
 
   const granteeLabel = (s: AiDashboardShare) => {
+    if (s.grantee_type === 'user') {
+      const extra = [s.grantee_username, s.grantee_employee_id].filter(Boolean).join(' · ')
+      const base = s.grantee_name || s.grantee_id
+      return extra ? `${base} (${extra})` : base
+    }
+    if (s.grantee_name) return s.grantee_name
     const lov = getOrgLov(s.grantee_type, roles, orgs)
     const found = lov.find(o => o.value === String(s.grantee_id))
     return found ? found.label : s.grantee_id

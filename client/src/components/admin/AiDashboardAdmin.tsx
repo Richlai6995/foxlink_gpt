@@ -122,10 +122,16 @@ function ProjectSharePanel({ project, onClose }: { project: AiSelectProject; onC
             <p className="text-xs text-gray-400 text-center py-2">尚無分享設定</p>
           ) : (
             <div className="space-y-1.5">
-              {shares.map(s => (
+              {shares.map(s => {
+                const userExtra = s.grantee_type === 'user'
+                  ? [s.grantee_username, s.grantee_employee_id].filter(Boolean).join(' · ')
+                  : ''
+                const displayName = s.grantee_name || s.grantee_id
+                return (
                 <div key={s.id} className="flex items-center justify-between bg-gray-50 rounded-lg px-3 py-2">
                   <div className="text-sm text-gray-800 truncate flex-1">
-                    {(s as any).grantee_name || s.grantee_id}
+                    {displayName}
+                    {userExtra && <span className="text-xs text-gray-400 ml-2">({userExtra})</span>}
                   </div>
                   <div className="flex items-center gap-2 ml-2 flex-shrink-0">
                     <span className="text-xs text-gray-400">{GRANTEE_LABELS[s.grantee_type] || s.grantee_type} · {s.grantee_id}</span>
@@ -137,7 +143,8 @@ function ProjectSharePanel({ project, onClose }: { project: AiSelectProject; onC
                     </button>
                   </div>
                 </div>
-              ))}
+                )
+              })}
             </div>
           )}
         </div>

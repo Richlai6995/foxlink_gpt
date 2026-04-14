@@ -284,6 +284,9 @@ export interface AiProjectShare {
   share_type: 'use' | 'develop'
   grantee_type: string
   grantee_id: string
+  grantee_name?: string
+  grantee_username?: string
+  grantee_employee_id?: string
   granted_by?: number
   created_at?: string
 }
@@ -339,6 +342,9 @@ export interface AiDashboardShare {
   share_type: 'use' | 'develop'
   grantee_type: string
   grantee_id: string
+  grantee_name?: string
+  grantee_username?: string
+  grantee_employee_id?: string
   created_at?: string
 }
 
