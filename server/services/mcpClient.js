@@ -232,9 +232,37 @@ async function withStdio(command, argsExtra = [], envExtra = {}, fn) {
   const args   = [...parts.slice(1), ...argsExtra];
   const env    = { ...process.env, ...envExtra };
 
-  const proc = spawn(cmd, args, { env, stdio: ['pipe', 'pipe', 'pipe'] });
+  let proc;
+  try {
+    proc = spawn(cmd, args, { env, stdio: ['pipe', 'pipe', 'pipe'] });
+  } catch (e) {
+    throw new Error(`MCP spawn failed: ${e.message} (cmd=${cmd})`);
+  }
+
   const pending = new Map();
+  let spawnErr = null;
+  let stderrBuf = '';
   let buf = '';
+
+  const failAllPending = (err) => {
+    for (const { reject } of pending.values()) reject(err);
+    pending.clear();
+  };
+
+  proc.on('error', (e) => {
+    spawnErr = new Error(`MCP spawn error: ${e.code || ''} ${e.message} (cmd=${cmd})`);
+    console.error('[MCP stdio spawn]', spawnErr.message);
+    failAllPending(spawnErr);
+  });
+
+  proc.on('exit', (code, sig) => {
+    if (code !== 0 || sig) {
+      const tail = stderrBuf.trim().slice(-500);
+      const err = new Error(`MCP process exited code=${code} sig=${sig}${tail ? `; stderr: ${tail}` : ''}`);
+      if (!spawnErr) spawnErr = err;
+      failAllPending(err);
+    }
+  });
 
   proc.stdout.on('data', chunk => {
     buf += chunk.toString();
@@ -254,9 +282,15 @@ async function withStdio(command, argsExtra = [], envExtra = {}, fn) {
     }
   });
 
-  proc.stderr.on('data', d => console.error('[MCP stdio stderr]', d.toString().trim()));
+  proc.stderr.on('data', d => {
+    const s = d.toString();
+    stderrBuf += s;
+    if (stderrBuf.length > 4000) stderrBuf = stderrBuf.slice(-4000);
+    console.error('[MCP stdio stderr]', s.trim());
+  });
 
   async function stdioRpc(method, params = {}) {
+    if (spawnErr) throw spawnErr;
     const body = makeRpcBody(method, params);
     const reqId = JSON.parse(body).id;
     const responsePromise = new Promise((resolve, reject) => {
@@ -265,7 +299,12 @@ async function withStdio(command, argsExtra = [], envExtra = {}, fn) {
         if (pending.has(reqId)) { pending.delete(reqId); reject(new Error('MCP stdio timeout')); }
       }, 60000);
     });
-    proc.stdin.write(body + '\n');
+    try {
+      proc.stdin.write(body + '\n');
+    } catch (e) {
+      pending.delete(reqId);
+      throw new Error(`MCP stdin write failed: ${e.message}`);
+    }
     return responsePromise;
   }
 

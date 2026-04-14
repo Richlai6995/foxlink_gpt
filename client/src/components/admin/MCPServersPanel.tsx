@@ -200,7 +200,8 @@ export default function MCPServersPanel() {
       setSyncMsg(prev => ({ ...prev, [s.id]: t('mcp.syncSuccess', { count: res.data.tool_count }) }))
       await load()
     } catch (e: any) {
-      setSyncMsg(prev => ({ ...prev, [s.id]: `✗ ${e.response?.data?.error || t('mcp.syncFailed')}` }))
+      const errMsg = e.response?.data?.error || e.message || 'Unknown error'
+      setSyncMsg(prev => ({ ...prev, [s.id]: t('mcp.syncFailed', { error: errMsg }) }))
     } finally {
       setSyncingId(null)
     }
