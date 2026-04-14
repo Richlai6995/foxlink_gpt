@@ -43,6 +43,7 @@ function detectLangFromHeader(acceptLanguage) {
 }
 
 const redis = require('../services/redisClient');
+const { buildSessionPayload } = require('../services/sessionBuilder');
 
 // ── SSO / OIDC Config ──────────────────────────────────────────────
 // Runtime check (not cached at module load) so env changes take effect after restart
@@ -342,21 +343,8 @@ router.get('/sso/callback', async (req, res) => {
 
     // 3. Create session (same as local/LDAP login)
     const sessionToken = uuidv4();
-    await redis.setSession(sessionToken, {
-      id: dbUser.id,
-      username: dbUser.username,
-      role: dbUser.role,
-      name: dbUser.name,
-      employee_id: dbUser.employee_id,
-      email: dbUser.email,
-      can_design_ai_select: dbUser.can_design_ai_select,
-      can_use_ai_dashboard: dbUser.can_use_ai_dashboard,
-      training_permission: dbUser.training_permission,
-      role_id: dbUser.role_id,
-      dept_code: dbUser.dept_code,
-      profit_center: dbUser.profit_center,
-      org_section: dbUser.org_section,
-    }, dbUser.role === 'admin');
+    const ssoSessionPayload = await buildSessionPayload(db, dbUser.id);
+    await redis.setSession(sessionToken, ssoSessionPayload, dbUser.role === 'admin');
 
     // Redirect to frontend with token
     res.redirect(`${baseUrl}/login?sso_token=${sessionToken}`);
@@ -533,21 +521,8 @@ router.post('/login', async (req, res) => {
 const createSession = async (res, user) => {
   const db = require('../database-oracle').db;
   const token = uuidv4();
-  await redis.setSession(token, {
-    id: user.id,
-    username: user.username,
-    role: user.role,
-    name: user.name,
-    employee_id: user.employee_id,
-    email: user.email,
-    can_design_ai_select: user.can_design_ai_select,
-    can_use_ai_dashboard:  user.can_use_ai_dashboard,
-    training_permission:   user.training_permission,
-    role_id:       user.role_id,
-    dept_code:     user.dept_code,
-    profit_center: user.profit_center,
-    org_section:   user.org_section,
-  }, user.role === 'admin');
+  const sessionPayload = await buildSessionPayload(db, user.id);
+  await redis.setSession(token, sessionPayload, user.role === 'admin');
   const { password: _, ...userWithoutPassword } = user;
   // Resolve effective skill permissions (user setting overrides role default)
   let rolePerms = null;
@@ -664,6 +639,7 @@ router.post('/change-password', async (req, res) => {
   const token = req.headers.authorization?.split(' ')[1];
   const session = token ? await redis.getSession(token) : null;
   if (!session) return res.status(401).json({ error: 'Unauthorized' });
+  if (session._impersonation) return res.status(403).json({ error: '模擬登入中不可變更密碼，請先退出模擬' });
 
   const { old_password, new_password } = req.body;
   if (!old_password || !new_password) return res.status(400).json({ error: '請填寫舊密碼與新密碼' });
@@ -850,5 +826,87 @@ const verifyAdmin = (req, res, next) => {
   }
   next();
 };
+
+// ─── Impersonation (admin-only) ──────────────────────────────────────
+// POST /api/auth/impersonate — admin 切換身分到目標 user，建立新 token
+router.post('/impersonate', verifyToken, verifyAdmin, async (req, res) => {
+  try {
+    const { target_user_id } = req.body || {};
+    if (!target_user_id) return res.status(400).json({ error: 'target_user_id required' });
+    if (Number(target_user_id) === Number(req.user.id)) return res.status(400).json({ error: '不能模擬自己' });
+    if (req.user._impersonation) return res.status(400).json({ error: '已在模擬中，請先退出' });
+
+    const db = require('../database-oracle').db;
+    const target = await buildSessionPayload(db, target_user_id);
+    if (!target) return res.status(404).json({ error: '使用者不存在' });
+
+    const adminToken = req.headers.authorization.split(' ')[1];
+    const newToken = uuidv4();
+    await redis.setSession(newToken, {
+      ...target,
+      _impersonation: {
+        original_user_id: req.user.id,
+        original_username: req.user.username,
+        original_token: adminToken,
+        started_at: new Date().toISOString(),
+      },
+    }, false);
+
+    await db.prepare(
+      `INSERT INTO audit_logs (user_id, session_id, content, has_sensitive) VALUES (?, NULL, ?, 0)`
+    ).run(
+      target.id,
+      JSON.stringify({
+        action: 'impersonate_start',
+        impersonated_by: req.user.id,
+        impersonated_by_username: req.user.username,
+      })
+    );
+
+    res.json({ token: newToken });
+  } catch (e) {
+    console.error('[impersonate] error:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/auth/impersonate/exit — 退出模擬，切回原管理員 token
+router.post('/impersonate/exit', verifyToken, async (req, res) => {
+  try {
+    const imp = req.user._impersonation;
+    if (!imp) return res.status(400).json({ error: '不在模擬中' });
+
+    const db = require('../database-oracle').db;
+    await db.prepare(
+      `INSERT INTO audit_logs (user_id, session_id, content, has_sensitive) VALUES (?, NULL, ?, 0)`
+    ).run(
+      req.user.id,
+      JSON.stringify({ action: 'impersonate_end', impersonated_by: imp.original_user_id })
+    );
+
+    const currentToken = req.headers.authorization.split(' ')[1];
+    await redis.delSession(currentToken);
+
+    const originalSession = await redis.getSession(imp.original_token);
+    if (!originalSession) return res.status(401).json({ error: '原管理員 session 已過期，請重新登入' });
+    res.json({ token: imp.original_token });
+  } catch (e) {
+    console.error('[impersonate/exit] error:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/auth/impersonate/status — 前端查詢是否在模擬中
+router.get('/impersonate/status', verifyToken, (req, res) => {
+  const imp = req.user._impersonation;
+  if (!imp) return res.json({ impersonating: false });
+  res.json({
+    impersonating: true,
+    original_username: imp.original_username,
+    target_username:   req.user.username,
+    target_name:       req.user.name,
+    started_at:        imp.started_at,
+  });
+});
 
 module.exports = { router, verifyToken, verifyAdmin };

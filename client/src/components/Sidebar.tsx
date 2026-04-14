@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
-import { Plus, MessageSquare, Trash2, Pencil, Check, ChevronDown, LogOut, Settings, Cpu, Zap, CalendarClock, HelpCircle, KeyRound, X, Eye, EyeOff, GitFork, Sparkles, Database, Menu, ChevronUp, BarChart3, Globe, FileText, GraduationCap, BookOpen, TicketCheck, PanelLeftClose, PanelLeft, SquarePen } from 'lucide-react'
+import { Plus, MessageSquare, Trash2, Pencil, Check, ChevronDown, LogOut, Settings, Cpu, Zap, CalendarClock, HelpCircle, KeyRound, X, Eye, EyeOff, GitFork, Sparkles, Database, Menu, ChevronUp, BarChart3, Globe, FileText, GraduationCap, BookOpen, TicketCheck, PanelLeftClose, PanelLeft, SquarePen, UserCog } from 'lucide-react'
+import ImpersonateDialog from './ImpersonateDialog'
 import type { ChatSession, ModelType, LlmModel } from '../types'
 import { useAuth } from '../context/AuthContext'
 import { useNavigate } from 'react-router-dom'
@@ -61,7 +62,20 @@ export default function Sidebar({
   collapsed,
   onToggleCollapse,
 }: Props) {
-  const { user, logout, isAdmin, canSchedule, canCreateKb, canUseDashboard, canAccessTrainingDev, setLanguage } = useAuth()
+  const { user, logout, isAdmin, canSchedule, canCreateKb, canUseDashboard, canAccessTrainingDev, setLanguage, impersonation, exitImpersonate } = useAuth()
+  const [showImpersonate, setShowImpersonate] = useState(false)
+  const [exitingImp, setExitingImp] = useState(false)
+
+  const handleExitImpersonate = async () => {
+    if (exitingImp) return
+    setExitingImp(true)
+    try {
+      await exitImpersonate()
+    } catch (e: any) {
+      alert(e?.response?.data?.error || t('sidebar.impersonateExitFailed'))
+      setExitingImp(false)
+    }
+  }
   const navigate = useNavigate()
   const { t, i18n } = useTranslation()
   const { unreadCount: feedbackUnread } = useFeedbackNotifications()
@@ -533,6 +547,28 @@ export default function Sidebar({
             </div>
           </div>
           <div className="flex items-center gap-1">
+            {isAdmin && !impersonation && (
+              <button
+                onClick={() => setShowImpersonate(true)}
+                title={t('sidebar.impersonate')}
+                className="text-slate-500 hover:text-amber-400 transition"
+              >
+                <UserCog size={15} />
+              </button>
+            )}
+            {impersonation && (
+              <button
+                onClick={handleExitImpersonate}
+                disabled={exitingImp}
+                title={t('sidebar.impersonateBanner', {
+                  target: impersonation.target_name || impersonation.target_username,
+                  origin: impersonation.original_username,
+                })}
+                className="text-amber-400 hover:text-amber-300 transition disabled:opacity-50 animate-pulse"
+              >
+                <UserCog size={15} />
+              </button>
+            )}
             <button
               onClick={() => setShowChangePw(true)}
               title={isManualAccount ? t('sidebar.changePassword') : t('sidebar.adPasswordNote')}
@@ -664,6 +700,10 @@ export default function Sidebar({
             </form>}
           </div>
         </div>
+      )}
+
+      {showImpersonate && (
+        <ImpersonateDialog onClose={() => setShowImpersonate(false)} />
       )}
     </div>
   )

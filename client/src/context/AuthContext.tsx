@@ -5,6 +5,14 @@ import i18n from '../i18n'
 import type { LangCode } from '../i18n'
 import { clearAdminOverrideStorage } from './AdminOverrideContext'
 
+export interface ImpersonationStatus {
+  impersonating: true
+  original_username: string
+  target_username: string
+  target_name: string
+  started_at: string
+}
+
 interface AuthContextType {
   user: User | null
   token: string | null
@@ -22,6 +30,9 @@ interface AuthContextType {
   canAccessTrainingDev: boolean
   canPublishTraining: boolean
   setLanguage: (lang: LangCode) => Promise<void>
+  impersonation: ImpersonationStatus | null
+  startImpersonate: (targetUserId: number) => Promise<void>
+  exitImpersonate: () => Promise<void>
 }
 
 const AuthContext = createContext<AuthContextType | null>(null)
@@ -39,6 +50,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return saved ? JSON.parse(saved) : null
   })
   const [token, setToken] = useState<string | null>(() => localStorage.getItem('token'))
+  const [impersonation, setImpersonation] = useState<ImpersonationStatus | null>(null)
 
   // Apply language from cached user on initial load
   useEffect(() => {
@@ -62,6 +74,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setUser(null)
       }
     })
+    api.get('/auth/impersonate/status')
+      .then((r) => { if (r.data?.impersonating) setImpersonation(r.data) })
+      .catch(() => {})
   }, [])
 
   const login = useCallback(async (username: string, password: string) => {
@@ -113,6 +128,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     i18n.changeLanguage('zh-TW')
   }, [user])
 
+  const startImpersonate = useCallback(async (targetUserId: number) => {
+    const res = await api.post('/auth/impersonate', { target_user_id: targetUserId })
+    const newToken = res.data?.token
+    if (!newToken) throw new Error('No token returned')
+    localStorage.setItem('token', newToken)
+    localStorage.removeItem('user')
+    window.location.href = '/'
+  }, [])
+
+  const exitImpersonate = useCallback(async () => {
+    const res = await api.post('/auth/impersonate/exit')
+    const origToken = res.data?.token
+    if (!origToken) throw new Error('No original token returned')
+    localStorage.setItem('token', origToken)
+    localStorage.removeItem('user')
+    window.location.href = '/'
+  }, [])
+
   const setLanguage = useCallback(async (lang: LangCode) => {
     // Optimistic: update UI immediately, then persist to server
     i18n.changeLanguage(lang)
@@ -159,6 +192,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         canAccessTrainingDev,
         canPublishTraining,
         setLanguage,
+        impersonation,
+        startImpersonate,
+        exitImpersonate,
       }}
     >
       {children}

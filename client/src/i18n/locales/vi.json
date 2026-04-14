@@ -132,7 +132,19 @@
     "passwordUpdated": "Mật khẩu đã được cập nhật",
     "updateFailed": "Cập nhật thất bại",
     "confirmChange": "Xác nhận thay đổi",
-    "updating": "Đang cập nhật..."
+    "updating": "Đang cập nhật...",
+    "impersonate": "Đăng nhập mô phỏng",
+    "impersonateTitle": "Đăng nhập mô phỏng người dùng",
+    "impersonateDesc": "Chọn một người dùng để đăng nhập dưới danh nghĩa họ nhằm gỡ lỗi. Mọi thao tác đều được ghi vào nhật ký kiểm toán.",
+    "impersonateSearch": "Tìm người dùng (tài khoản / tên / mã nhân viên)",
+    "impersonateEmpty": "Không tìm thấy người dùng phù hợp",
+    "impersonateLoading": "Đang tìm...",
+    "impersonateSelect": "Đăng nhập với danh nghĩa này",
+    "impersonateConfirm": "Đăng nhập với danh nghĩa {{name}}?",
+    "impersonateFailed": "Đăng nhập mô phỏng thất bại",
+    "impersonateBanner": "Đang mô phỏng: {{target}} (quản trị viên gốc: {{origin}})",
+    "impersonateExit": "Thoát mô phỏng",
+    "impersonateExitFailed": "Thoát mô phỏng thất bại"
   },
   "chat": {
     "startPrompt": "Bắt đầu một cuộc trò chuyện mới",

@@ -132,7 +132,19 @@
     "passwordUpdated": "Password updated successfully",
     "updateFailed": "Update failed",
     "confirmChange": "Confirm Change",
-    "updating": "Updating..."
+    "updating": "Updating...",
+    "impersonate": "Impersonate User",
+    "impersonateTitle": "Impersonate a User",
+    "impersonateDesc": "Pick a user to sign in as, for debugging. All actions are recorded in the audit log.",
+    "impersonateSearch": "Search user (username / name / employee ID)",
+    "impersonateEmpty": "No matching users",
+    "impersonateLoading": "Searching...",
+    "impersonateSelect": "Sign in as this user",
+    "impersonateConfirm": "Sign in as {{name}}?",
+    "impersonateFailed": "Impersonation failed",
+    "impersonateBanner": "Impersonating: {{target}} (admin: {{origin}})",
+    "impersonateExit": "Exit impersonation",
+    "impersonateExitFailed": "Failed to exit impersonation"
   },
   "chat": {
     "startPrompt": "Start a new conversation",

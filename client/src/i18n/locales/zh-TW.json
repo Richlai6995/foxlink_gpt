@@ -132,7 +132,19 @@
     "passwordUpdated": "密碼已成功更新",
     "updateFailed": "更新失敗",
     "confirmChange": "確認變更",
-    "updating": "更新中..."
+    "updating": "更新中...",
+    "impersonate": "模擬登入",
+    "impersonateTitle": "模擬使用者登入",
+    "impersonateDesc": "選擇一位使用者，以其身分登入系統進行測試。所有操作會被記錄在稽核日誌。",
+    "impersonateSearch": "搜尋使用者（帳號 / 姓名 / 工號）",
+    "impersonateEmpty": "找不到符合的使用者",
+    "impersonateLoading": "搜尋中...",
+    "impersonateSelect": "以此身分登入",
+    "impersonateConfirm": "確定要以 {{name}} 身分登入？",
+    "impersonateFailed": "模擬登入失敗",
+    "impersonateBanner": "模擬登入中：{{target}}（原管理員：{{origin}}）",
+    "impersonateExit": "退出模擬",
+    "impersonateExitFailed": "退出模擬失敗"
   },
   "chat": {
     "startPrompt": "開始一個新的對話吧",
