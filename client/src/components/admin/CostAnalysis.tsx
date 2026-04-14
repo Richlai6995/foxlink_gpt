@@ -20,9 +20,11 @@ interface SummaryRow {
   cost: number
   account_count: number
   user_count: number
+  indirect_emp_count: number
   avg_cost: number
   currency: string
   dept_breakdown: { dept_code: string; dept_name: string; cost: number }[]
+  no_account?: boolean
 }
 
 interface MonthlyRow {
@@ -37,8 +39,10 @@ interface MonthlyRow {
   cost: number
   account_count: number
   user_count: number
+  indirect_emp_count: number
   avg_cost: number
   currency: string
+  no_account?: boolean
 }
 
 interface EmpRow {
@@ -114,6 +118,7 @@ export default function CostAnalysis() {
 
   const [startDate, setStartDate] = useState(thirtyDaysAgo)
   const [endDate, setEndDate] = useState(today)
+  const [includeAllPC, setIncludeAllPC] = useState(false)
   const [summary, setSummary] = useState<SummaryRow[]>([])
   const [monthly, setMonthly] = useState<MonthlyRow[]>([])
   const [employees, setEmployees] = useState<EmpRow[]>([])
@@ -131,9 +136,10 @@ export default function CostAnalysis() {
     setLoading(true)
     setError('')
     try {
+      const incParam = includeAllPC ? '&includeAllPC=1' : ''
       const [s, m, e] = await Promise.all([
-        api.get(`/admin/cost-stats/summary?startDate=${startDate}&endDate=${endDate}`),
-        api.get(`/admin/cost-stats/monthly?startDate=${startDate}&endDate=${endDate}`),
+        api.get(`/admin/cost-stats/summary?startDate=${startDate}&endDate=${endDate}${incParam}`),
+        api.get(`/admin/cost-stats/monthly?startDate=${startDate}&endDate=${endDate}${incParam}`),
         api.get(`/admin/cost-stats/employees?startDate=${startDate}&endDate=${endDate}`),
       ])
       setSummary(s.data)
@@ -147,7 +153,7 @@ export default function CostAnalysis() {
     } finally {
       setLoading(false)
     }
-  }, [startDate, endDate])
+  }, [startDate, endDate, includeAllPC])
 
   useEffect(() => { load() }, [])
 
@@ -223,9 +229,10 @@ export default function CostAnalysis() {
 
   // ── CSV export URLs ──────────────────────────────────────────────────────
   const qs = `startDate=${startDate}&endDate=${endDate}`
+  const incQs = includeAllPC ? '&includeAllPC=1' : ''
   const empExportUrl = `/api/admin/cost-stats/export/employees?${qs}${selectedPC ? `&profitCenter=${selectedPC}` : ''}${selectedDept ? `&deptCode=${selectedDept}` : ''}`
-  const summaryExportUrl = `/api/admin/cost-stats/export/summary?${qs}`
-  const monthlyExportUrl = `/api/admin/cost-stats/export/monthly?${qs}`
+  const summaryExportUrl = `/api/admin/cost-stats/export/summary?${qs}${incQs}`
+  const monthlyExportUrl = `/api/admin/cost-stats/export/monthly?${qs}${incQs}`
 
   // ── Chart handlers ───────────────────────────────────────────────────────
   const handlePieClick = (data: { profit_center?: string } | null) => {
@@ -266,6 +273,12 @@ export default function CostAnalysis() {
           <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
           {loading ? '載入中...' : '查詢'}
         </button>
+        <label className="flex items-center gap-1.5 text-sm text-gray-700 cursor-pointer select-none">
+          <input type="checkbox" checked={includeAllPC}
+            onChange={(e) => setIncludeAllPC(e.target.checked)}
+            className="rounded" />
+          包含無帳號利潤中心
+        </label>
         {error && <span className="text-xs text-red-600">{error}</span>}
         {(selectedPC || selectedDept) && (
           <button onClick={() => { setSelectedPC(null); setSelectedDept(null) }}
@@ -397,6 +410,7 @@ export default function CostAnalysis() {
                 <th className="px-3 py-2 text-left">事業處代碼</th>
                 <th className="px-3 py-2 text-left">事業處名稱</th>
                 <th className="px-3 py-2 text-left">事業群名稱</th>
+                <th className="px-3 py-2 text-right">間接員工數</th>
                 <th className="px-3 py-2 text-right">帳號人數</th>
                 <th className="px-3 py-2 text-right">使用人數</th>
                 <th className="px-3 py-2 text-right">費用金額</th>
@@ -408,13 +422,18 @@ export default function CostAnalysis() {
                 <tr key={i}
                   onClick={() => { setSelectedPC(r.profit_center === selectedPC ? null : r.profit_center); setSelectedDept(null) }}
                   className={`cursor-pointer border-b transition-colors ${selectedPC === r.profit_center ? 'bg-blue-100 font-medium' :
+                    r.no_account ? 'bg-gray-100 text-gray-500 hover:bg-gray-200' :
                     i % 2 === 1 ? 'bg-blue-50 hover:bg-blue-100' : 'hover:bg-gray-50'
                     }`}>
-                  <td className="px-3 py-1.5">{r.profit_center}</td>
+                  <td className="px-3 py-1.5">
+                    {r.profit_center}
+                    {r.no_account && <span className="ml-1 text-[10px] text-gray-400">(無帳號)</span>}
+                  </td>
                   <td className="px-3 py-1.5">{r.profit_center_name}</td>
                   <td className="px-3 py-1.5">{r.org_section}</td>
                   <td className="px-3 py-1.5">{r.org_section_name}</td>
                   <td className="px-3 py-1.5">{r.org_group_name}</td>
+                  <td className="px-3 py-1.5 text-right text-gray-600">{r.indirect_emp_count}</td>
                   <td className="px-3 py-1.5 text-right text-gray-500">{r.account_count}</td>
                   <td className="px-3 py-1.5 text-right">{r.user_count}</td>
                   <td className="px-3 py-1.5 text-right font-medium text-blue-700">{fmtCost(r.cost, r.currency)}</td>
@@ -422,7 +441,7 @@ export default function CostAnalysis() {
                 </tr>
               ))}
               {summary.length === 0 && (
-                <tr><td colSpan={9} className="px-3 py-4 text-center text-gray-400">無資料</td></tr>
+                <tr><td colSpan={10} className="px-3 py-4 text-center text-gray-400">無資料</td></tr>
               )}
             </tbody>
           </table>
@@ -447,6 +466,7 @@ export default function CostAnalysis() {
                 <th className="px-3 py-2 text-left">事業處名稱</th>
                 <th className="px-3 py-2 text-left">事業群名稱</th>
                 <th className="px-3 py-2 text-left">月份</th>
+                <th className="px-3 py-2 text-right">間接員工數</th>
                 <th className="px-3 py-2 text-right">帳號人數</th>
                 <th className="px-3 py-2 text-right">使用人數</th>
                 <th className="px-3 py-2 text-right">費用金額</th>
@@ -455,13 +475,20 @@ export default function CostAnalysis() {
             </thead>
             <tbody>
               {(selectedPC ? monthly.filter((r) => r.profit_center === selectedPC) : monthly).map((r, i) => (
-                <tr key={i} className={`border-b ${i % 2 === 1 ? 'bg-blue-50' : ''}`}>
-                  <td className="px-3 py-1.5">{r.profit_center}</td>
+                <tr key={i} className={`border-b ${
+                  r.no_account ? 'bg-gray-100 text-gray-500' :
+                  i % 2 === 1 ? 'bg-blue-50' : ''
+                }`}>
+                  <td className="px-3 py-1.5">
+                    {r.profit_center}
+                    {r.no_account && <span className="ml-1 text-[10px] text-gray-400">(無帳號)</span>}
+                  </td>
                   <td className="px-3 py-1.5">{r.profit_center_name}</td>
                   <td className="px-3 py-1.5">{r.org_section}</td>
                   <td className="px-3 py-1.5">{r.org_section_name}</td>
                   <td className="px-3 py-1.5">{r.org_group_name}</td>
                   <td className="px-3 py-1.5 font-medium">{r.month}</td>
+                  <td className="px-3 py-1.5 text-right text-gray-600">{r.indirect_emp_count}</td>
                   <td className="px-3 py-1.5 text-right text-gray-500">{r.account_count}</td>
                   <td className="px-3 py-1.5 text-right">{r.user_count}</td>
                   <td className="px-3 py-1.5 text-right font-medium text-blue-700">{fmtCost(r.cost, r.currency)}</td>
@@ -469,7 +496,7 @@ export default function CostAnalysis() {
                 </tr>
               ))}
               {monthly.length === 0 && (
-                <tr><td colSpan={10} className="px-3 py-4 text-center text-gray-400">無資料</td></tr>
+                <tr><td colSpan={11} className="px-3 py-4 text-center text-gray-400">無資料</td></tr>
               )}
             </tbody>
           </table>

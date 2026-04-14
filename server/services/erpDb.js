@@ -120,4 +120,62 @@ async function getEmployeeOrgData(employeeNos) {
   }
 }
 
-module.exports = { isConfigured, execute, getEmployeeOrgData };
+/**
+ * 間接員工人數 by 利潤中心
+ * 條件: CURRENT_FLAG='Y', DIT_CODE='I', END_DATE IS NULL
+ * 回傳 Map<profit_center, count>
+ */
+async function getIndirectEmpCountByPC() {
+  if (!isConfigured()) return new Map();
+  initClient();
+  const sql = `
+    SELECT PROFIT_CENTER, COUNT(1) AS CNT
+    FROM foxfl.fl_emp_exp_all
+    WHERE CURRENT_FLAG = 'Y'
+      AND DIT_CODE = 'I'
+      AND END_DATE IS NULL
+    GROUP BY PROFIT_CENTER
+  `;
+  try {
+    const result = await execute(sql);
+    const map = new Map();
+    for (const r of (result?.rows || [])) {
+      map.set(r.PROFIT_CENTER || '', r.CNT || 0);
+    }
+    return map;
+  } catch (e) {
+    console.error('[ERP] getIndirectEmpCountByPC error:', e.message);
+    return new Map();
+  }
+}
+
+/**
+ * 正崴集團所有利潤中心清單 (去重)
+ * 來源: APPS.FL_ORG_EMP_DEPT_MV where CO_GROUP='正崴集團'
+ */
+async function getAllProfitCenters() {
+  if (!isConfigured()) return [];
+  initClient();
+  const sql = `
+    SELECT DISTINCT PROFIT_CENTER, PROFIT_CENTER_NAME,
+           ORG_SECTION, ORG_SECTION_NAME, ORG_GROUP_NAME
+    FROM APPS.FL_ORG_EMP_DEPT_MV
+    WHERE CO_GROUP = '正崴集團'
+      AND PROFIT_CENTER IS NOT NULL
+  `;
+  try {
+    const result = await execute(sql);
+    return (result?.rows || []).map((r) => ({
+      profit_center: r.PROFIT_CENTER || '',
+      profit_center_name: r.PROFIT_CENTER_NAME || '',
+      org_section: r.ORG_SECTION || '',
+      org_section_name: r.ORG_SECTION_NAME || '',
+      org_group_name: r.ORG_GROUP_NAME || '',
+    }));
+  } catch (e) {
+    console.error('[ERP] getAllProfitCenters error:', e.message);
+    return [];
+  }
+}
+
+module.exports = { isConfigured, execute, getEmployeeOrgData, getIndirectEmpCountByPC, getAllProfitCenters };

@@ -1181,16 +1181,20 @@ router.get('/cost-stats/employees', async (req, res) => {
   }
 });
 
-// GET /api/admin/cost-stats/summary?startDate=&endDate=
+// GET /api/admin/cost-stats/summary?startDate=&endDate=&includeAllPC=1
 router.get('/cost-stats/summary', async (req, res) => {
   try {
     const db = require('../database-oracle').db;
-    const { startDate, endDate } = req.query;
+    const { startDate, endDate, includeAllPC } = req.query;
     if (!startDate || !endDate) return res.status(400).json({ error: '請提供日期區間' });
 
-    const [rows, accountRows] = await Promise.all([
+    const { getIndirectEmpCountByPC, getAllProfitCenters } = require('../services/erpDb');
+
+    const [rows, accountRows, indirectMap, allPCs] = await Promise.all([
       getCostRows(db, startDate, endDate),
       db.prepare(`SELECT profit_center, COUNT(*) AS cnt FROM users WHERE status != 'disabled' GROUP BY profit_center`).all(),
+      getIndirectEmpCountByPC(),
+      includeAllPC === '1' ? getAllProfitCenters() : Promise.resolve([]),
     ]);
 
     // Build account count map (all registered accounts per profit_center)
@@ -1230,15 +1234,40 @@ router.get('/cost-stats/summary', async (req, res) => {
     const result = Object.values(pcMap).map((pc) => {
       const user_count = pc._user_ids.size;
       const account_count = accountMap[pc.profit_center || '__NONE__'] || 0;
+      const indirect_emp_count = indirectMap.get(pc.profit_center || '') || 0;
       const { _user_ids, dept_breakdown, ...rest } = pc;
       return {
         ...rest,
         account_count,
         user_count,
+        indirect_emp_count,
         avg_cost: user_count > 0 ? pc.cost / user_count : 0,
         dept_breakdown: Object.values(dept_breakdown).sort((a, b) => b.cost - a.cost),
+        no_account: false,
       };
     }).sort((a, b) => b.cost - a.cost);
+
+    // 補上「無帳號利潤中心」(includeAllPC=1 且 ERP 有設定時)
+    if (includeAllPC === '1' && allPCs.length > 0) {
+      const existing = new Set(result.map((r) => r.profit_center));
+      for (const pc of allPCs) {
+        if (existing.has(pc.profit_center)) continue;
+        result.push({
+          profit_center: pc.profit_center,
+          profit_center_name: pc.profit_center_name || '(未設定)',
+          org_section: pc.org_section,
+          org_section_name: pc.org_section_name,
+          org_group_name: pc.org_group_name,
+          input_tokens: 0, output_tokens: 0, cost: 0, currency: 'USD',
+          account_count: 0,
+          user_count: 0,
+          indirect_emp_count: indirectMap.get(pc.profit_center) || 0,
+          avg_cost: 0,
+          dept_breakdown: [],
+          no_account: true,
+        });
+      }
+    }
 
     res.json(result);
   } catch (e) {
@@ -1246,16 +1275,20 @@ router.get('/cost-stats/summary', async (req, res) => {
   }
 });
 
-// GET /api/admin/cost-stats/monthly?startDate=&endDate=
+// GET /api/admin/cost-stats/monthly?startDate=&endDate=&includeAllPC=1
 router.get('/cost-stats/monthly', async (req, res) => {
   try {
     const db = require('../database-oracle').db;
-    const { startDate, endDate } = req.query;
+    const { startDate, endDate, includeAllPC } = req.query;
     if (!startDate || !endDate) return res.status(400).json({ error: '請提供日期區間' });
 
-    const [rows, accountRows] = await Promise.all([
+    const { getIndirectEmpCountByPC, getAllProfitCenters } = require('../services/erpDb');
+
+    const [rows, accountRows, indirectMap, allPCs] = await Promise.all([
       getCostRows(db, startDate, endDate),
       db.prepare(`SELECT profit_center, COUNT(*) AS cnt FROM users WHERE status != 'disabled' GROUP BY profit_center`).all(),
+      getIndirectEmpCountByPC(),
+      includeAllPC === '1' ? getAllProfitCenters() : Promise.resolve([]),
     ]);
 
     const accountMap = {};
@@ -1289,12 +1322,35 @@ router.get('/cost-stats/monthly', async (req, res) => {
     const result = Object.values(map).map((m) => {
       const user_count = m._user_ids.size;
       const account_count = accountMap[m.profit_center || '__NONE__'] || 0;
+      const indirect_emp_count = indirectMap.get(m.profit_center || '') || 0;
       const { _user_ids, ...rest } = m;
-      return { ...rest, account_count, user_count, avg_cost: user_count > 0 ? m.cost / user_count : 0 };
+      return { ...rest, account_count, user_count, indirect_emp_count, avg_cost: user_count > 0 ? m.cost / user_count : 0, no_account: false };
     }).sort((a, b) => {
       if (a.month !== b.month) return a.month.localeCompare(b.month);
       return b.cost - a.cost;
     });
+
+    // 補上「無帳號利潤中心」— month 用 '-' 表示期間內無使用
+    if (includeAllPC === '1' && allPCs.length > 0) {
+      const existing = new Set(result.map((r) => r.profit_center));
+      for (const pc of allPCs) {
+        if (existing.has(pc.profit_center)) continue;
+        result.push({
+          profit_center: pc.profit_center,
+          profit_center_name: pc.profit_center_name || '(未設定)',
+          org_section: pc.org_section,
+          org_section_name: pc.org_section_name,
+          org_group_name: pc.org_group_name,
+          month: '-',
+          input_tokens: 0, output_tokens: 0, cost: 0, currency: 'USD',
+          account_count: 0,
+          user_count: 0,
+          indirect_emp_count: indirectMap.get(pc.profit_center) || 0,
+          avg_cost: 0,
+          no_account: true,
+        });
+      }
+    }
 
     res.json(result);
   } catch (e) {
@@ -1341,16 +1397,20 @@ router.get('/cost-stats/export/employees', async (req, res) => {
   }
 });
 
-// GET /api/admin/cost-stats/export/summary?startDate=&endDate=  → CSV
+// GET /api/admin/cost-stats/export/summary?startDate=&endDate=&includeAllPC=1  → CSV
 router.get('/cost-stats/export/summary', async (req, res) => {
   try {
     const db = require('../database-oracle').db;
-    const { startDate, endDate } = req.query;
+    const { startDate, endDate, includeAllPC } = req.query;
     if (!startDate || !endDate) return res.status(400).json({ error: '請提供日期區間' });
 
-    const [rows, accountRows] = await Promise.all([
+    const { getIndirectEmpCountByPC, getAllProfitCenters } = require('../services/erpDb');
+
+    const [rows, accountRows, indirectMap, allPCs] = await Promise.all([
       getCostRows(db, startDate, endDate),
       db.prepare(`SELECT profit_center, COUNT(*) AS cnt FROM users WHERE status != 'disabled' GROUP BY profit_center`).all(),
+      getIndirectEmpCountByPC(),
+      includeAllPC === '1' ? getAllProfitCenters() : Promise.resolve([]),
     ]);
     const accountMap = {};
     for (const a of accountRows) { accountMap[a.profit_center || '__NONE__'] = a.cnt; }
@@ -1372,13 +1432,31 @@ router.get('/cost-stats/export/summary', async (req, res) => {
     const result = Object.values(pcMap).map((pc) => {
       const user_count = pc._user_ids.size;
       const account_count = accountMap[pc.profit_center || '__NONE__'] || 0;
-      return { ...pc, account_count, user_count, avg_cost: user_count > 0 ? pc.cost / user_count : 0 };
+      const indirect_emp_count = indirectMap.get(pc.profit_center || '') || 0;
+      return { ...pc, account_count, user_count, indirect_emp_count, avg_cost: user_count > 0 ? pc.cost / user_count : 0 };
     }).sort((a, b) => b.cost - a.cost);
 
-    const headers = ['利潤中心代碼', '利潤中心名稱', '事業處代碼', '事業處名稱', '事業群名稱', '帳號人數', '使用人數', '費用金額', '人均費用', '幣別'];
+    if (includeAllPC === '1' && allPCs.length > 0) {
+      const existing = new Set(result.map((r) => r.profit_center));
+      for (const pc of allPCs) {
+        if (existing.has(pc.profit_center)) continue;
+        result.push({
+          profit_center: pc.profit_center,
+          profit_center_name: pc.profit_center_name || '(未設定)',
+          org_section: pc.org_section, org_section_name: pc.org_section_name,
+          org_group_name: pc.org_group_name,
+          cost: 0, currency: 'USD',
+          account_count: 0, user_count: 0,
+          indirect_emp_count: indirectMap.get(pc.profit_center) || 0,
+          avg_cost: 0,
+        });
+      }
+    }
+
+    const headers = ['利潤中心代碼', '利潤中心名稱', '事業處代碼', '事業處名稱', '事業群名稱', '間接員工數', '帳號人數', '使用人數', '費用金額', '人均費用', '幣別'];
     const csv = toCsv(headers, result, (r) => [
       r.profit_center, r.profit_center_name, r.org_section, r.org_section_name,
-      r.org_group_name, r.account_count, r.user_count, r.cost?.toFixed(6), r.avg_cost?.toFixed(6), r.currency,
+      r.org_group_name, r.indirect_emp_count, r.account_count, r.user_count, r.cost?.toFixed(6), r.avg_cost?.toFixed(6), r.currency,
     ]);
 
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
@@ -1389,16 +1467,20 @@ router.get('/cost-stats/export/summary', async (req, res) => {
   }
 });
 
-// GET /api/admin/cost-stats/export/monthly?startDate=&endDate=  → CSV
+// GET /api/admin/cost-stats/export/monthly?startDate=&endDate=&includeAllPC=1  → CSV
 router.get('/cost-stats/export/monthly', async (req, res) => {
   try {
     const db = require('../database-oracle').db;
-    const { startDate, endDate } = req.query;
+    const { startDate, endDate, includeAllPC } = req.query;
     if (!startDate || !endDate) return res.status(400).json({ error: '請提供日期區間' });
 
-    const [rows, accountRows] = await Promise.all([
+    const { getIndirectEmpCountByPC, getAllProfitCenters } = require('../services/erpDb');
+
+    const [rows, accountRows, indirectMap, allPCs] = await Promise.all([
       getCostRows(db, startDate, endDate),
       db.prepare(`SELECT profit_center, COUNT(*) AS cnt FROM users WHERE status != 'disabled' GROUP BY profit_center`).all(),
+      getIndirectEmpCountByPC(),
+      includeAllPC === '1' ? getAllProfitCenters() : Promise.resolve([]),
     ]);
     const accountMap = {};
     for (const a of accountRows) { accountMap[a.profit_center || '__NONE__'] = a.cnt; }
@@ -1421,15 +1503,34 @@ router.get('/cost-stats/export/monthly', async (req, res) => {
     const result = Object.values(map).map((m) => {
       const user_count = m._user_ids.size;
       const account_count = accountMap[m.profit_center || '__NONE__'] || 0;
-      return { ...m, account_count, user_count, avg_cost: user_count > 0 ? m.cost / user_count : 0 };
+      const indirect_emp_count = indirectMap.get(m.profit_center || '') || 0;
+      return { ...m, account_count, user_count, indirect_emp_count, avg_cost: user_count > 0 ? m.cost / user_count : 0 };
     }).sort((a, b) =>
       a.month !== b.month ? a.month.localeCompare(b.month) : b.cost - a.cost
     );
 
-    const headers = ['利潤中心代碼', '利潤中心名稱', '事業處代碼', '事業處名稱', '事業群名稱', '月份', '帳號人數', '使用人數', '費用金額', '人均費用', '幣別'];
+    if (includeAllPC === '1' && allPCs.length > 0) {
+      const existing = new Set(result.map((r) => r.profit_center));
+      for (const pc of allPCs) {
+        if (existing.has(pc.profit_center)) continue;
+        result.push({
+          profit_center: pc.profit_center,
+          profit_center_name: pc.profit_center_name || '(未設定)',
+          org_section: pc.org_section, org_section_name: pc.org_section_name,
+          org_group_name: pc.org_group_name,
+          month: '-',
+          cost: 0, currency: 'USD',
+          account_count: 0, user_count: 0,
+          indirect_emp_count: indirectMap.get(pc.profit_center) || 0,
+          avg_cost: 0,
+        });
+      }
+    }
+
+    const headers = ['利潤中心代碼', '利潤中心名稱', '事業處代碼', '事業處名稱', '事業群名稱', '月份', '間接員工數', '帳號人數', '使用人數', '費用金額', '人均費用', '幣別'];
     const csv = toCsv(headers, result, (r) => [
       r.profit_center, r.profit_center_name, r.org_section, r.org_section_name,
-      r.org_group_name, r.month, r.account_count, r.user_count, r.cost?.toFixed(6), r.avg_cost?.toFixed(6), r.currency,
+      r.org_group_name, r.month, r.indirect_emp_count, r.account_count, r.user_count, r.cost?.toFixed(6), r.avg_cost?.toFixed(6), r.currency,
     ]);
 
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
