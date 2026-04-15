@@ -2653,12 +2653,14 @@ async function _findDefaultPartition(conn, tableName) {
  */
 async function _rebuildUnusableIndexes(conn, tableName) {
   try {
+    // 全域 outFormat 是 OBJECT(line 14),所以用欄位名取值,不能用 row[0]
     const idx = await conn.execute(
       `SELECT index_name FROM user_indexes WHERE table_name = :t AND status = 'UNUSABLE'`,
       { t: tableName.toUpperCase() }
     );
     for (const row of (idx.rows || [])) {
-      const name = row[0];
+      const name = row.INDEX_NAME;
+      if (!name) continue;
       try {
         await conn.execute(`ALTER INDEX ${name} REBUILD`, [], { autoCommit: true });
         console.log(`[Partition] REBUILD index ${name}`);
@@ -2673,7 +2675,9 @@ async function _rebuildUnusableIndexes(conn, tableName) {
       { t: tableName.toUpperCase() }
     );
     for (const row of (parts.rows || [])) {
-      const [iname, pname] = row;
+      const iname = row.INDEX_NAME;
+      const pname = row.PARTITION_NAME;
+      if (!iname || !pname) continue;
       try {
         await conn.execute(`ALTER INDEX ${iname} REBUILD PARTITION ${pname}`, [], { autoCommit: true });
         console.log(`[Partition] REBUILD ${iname}.${pname}`);
