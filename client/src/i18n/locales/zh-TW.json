@@ -2718,6 +2718,9 @@
       "daysAgo": "{{n}} 天前",
       "files": "個檔案"
     },
+    "noReplyYet": "尚無對話回應",
+    "senderAdmin": "管理員",
+    "senderUser": "使用者",
     "admin": {
       "categoryManagement": "分類管理",
       "slaConfig": "SLA 設定",

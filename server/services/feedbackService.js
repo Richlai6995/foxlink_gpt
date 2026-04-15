@@ -130,9 +130,12 @@ async function getTicketById(db, id) {
   `).get(id);
 }
 
-async function listTickets(db, { userId, isAdmin, status, priority, category_id, search, assigned_to, date_from, date_to, sort, order, page, limit }) {
+async function listTickets(db, { userId, isAdmin, isAdminUser, status, priority, category_id, search, assigned_to, date_from, date_to, sort, order, page, limit }) {
   const conditions = [];
   const binds = [];
+
+  // 是否可以看 internal note：預設以 isAdminUser 判斷；若未提供則 fallback 回 isAdmin
+  const canSeeInternal = typeof isAdminUser === 'boolean' ? isAdminUser : !!isAdmin;
 
   if (!isAdmin) {
     conditions.push('t.user_id = ?');
@@ -182,12 +185,28 @@ async function listTickets(db, { userId, isAdmin, status, priority, category_id,
   ).get(...binds);
   const total = Number(countRow?.cnt ?? countRow?.CNT ?? 0);
 
+  // 最新一則非系統訊息（一般使用者過濾 internal note）
+  const internalFilter = canSeeInternal ? '' : 'AND is_internal = 0';
+
   const rows = await db.prepare(`
     SELECT t.*, c.name AS category_name, c.icon AS category_icon,
-           u.username AS assigned_username, u.name AS assigned_name
+           u.username AS assigned_username, u.name AS assigned_name,
+           DBMS_LOB.SUBSTR(lm.content, 500, 1) AS last_message_content,
+           lm.sender_role AS last_message_role,
+           lm.is_internal AS last_message_is_internal,
+           lm.created_at  AS last_message_at,
+           lu.name        AS last_message_sender_name,
+           lu.username    AS last_message_sender_username
     FROM feedback_tickets t
     LEFT JOIN feedback_categories c ON c.id = t.category_id
     LEFT JOIN users u ON u.id = t.assigned_to
+    LEFT JOIN (
+      SELECT ticket_id, content, sender_role, sender_id, is_internal, created_at,
+             ROW_NUMBER() OVER (PARTITION BY ticket_id ORDER BY created_at DESC, id DESC) AS rn
+      FROM feedback_messages
+      WHERE is_system = 0 ${internalFilter}
+    ) lm ON lm.ticket_id = t.id AND lm.rn = 1
+    LEFT JOIN users lu ON lu.id = lm.sender_id
     ${where}
     ORDER BY t.${sortCol} ${sortOrder}
     OFFSET ${offset} ROWS FETCH NEXT ${lim} ROWS ONLY

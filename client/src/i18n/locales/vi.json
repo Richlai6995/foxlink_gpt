@@ -2718,6 +2718,9 @@
       "daysAgo": "{{n}} ngày trước",
       "files": "tệp"
     },
+    "noReplyYet": "Chưa có phản hồi",
+    "senderAdmin": "Quản trị viên",
+    "senderUser": "Người dùng",
     "admin": {
       "categoryManagement": "Quản lý danh mục",
       "slaConfig": "Cài đặt SLA",

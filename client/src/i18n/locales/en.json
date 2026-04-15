@@ -2718,6 +2718,9 @@
       "daysAgo": "{{n}}d ago",
       "files": "files"
     },
+    "noReplyYet": "No replies yet",
+    "senderAdmin": "Admin",
+    "senderUser": "User",
     "admin": {
       "categoryManagement": "Category Management",
       "slaConfig": "SLA Settings",

@@ -26,6 +26,12 @@ interface Ticket {
   created_at: string
   updated_at: string
   sla_breached: number
+  last_message_content: string | null
+  last_message_role: string | null
+  last_message_is_internal: number | null
+  last_message_at: string | null
+  last_message_sender_name: string | null
+  last_message_sender_username: string | null
 }
 
 interface Category {
@@ -94,6 +100,16 @@ export default function FeedbackPage() {
     if (!d) return '-'
     return new Date(d).toLocaleString('zh-TW', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
   }
+
+  const stripMarkdown = (s: string) =>
+    s
+      .replace(/```[\s\S]*?```/g, ' ')
+      .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ')
+      .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/[*_`>#~]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim()
 
   return (
     <div className="min-h-screen bg-white text-gray-900">
@@ -269,6 +285,31 @@ export default function FeedbackPage() {
                         </span>
                       )}
                     </div>
+                    {ticket.last_message_content ? (
+                      <div className="mt-2 flex items-start gap-2 px-2.5 py-1.5 bg-gray-50 border-l-2 border-blue-300 rounded text-xs">
+                        <MessageSquare size={11} className="mt-0.5 text-blue-400 flex-shrink-0" />
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-1.5 mb-0.5 text-[11px]">
+                            <span className={`font-medium ${ticket.last_message_role === 'admin' ? 'text-blue-600' : 'text-gray-700'}`}>
+                              {ticket.last_message_sender_name || (ticket.last_message_role === 'admin' ? t('feedback.senderAdmin') : t('feedback.senderUser'))}
+                            </span>
+                            {ticket.last_message_is_internal === 1 && (
+                              <span className="px-1 py-0.5 rounded bg-amber-100 text-amber-700 text-[10px]">
+                                {t('feedback.internalNote')}
+                              </span>
+                            )}
+                            <span className="text-gray-400">· {formatDate(ticket.last_message_at || '')}</span>
+                          </div>
+                          <p className="text-gray-600 line-clamp-1">
+                            {stripMarkdown(ticket.last_message_content)}
+                          </p>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="mt-2 text-xs text-gray-400 italic">
+                        {t('feedback.noReplyYet')}
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>

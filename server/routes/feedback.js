@@ -65,6 +65,7 @@ router.get('/tickets', async (req, res) => {
     const result = await feedbackService.listTickets(db, {
       userId: req.user.id,
       isAdmin: isAdmin && !my,
+      isAdminUser: isAdmin,
       status: req.query.status,
       priority: req.query.priority,
       category_id: req.query.category_id,
