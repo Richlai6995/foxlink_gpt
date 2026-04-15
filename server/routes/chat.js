@@ -11,6 +11,7 @@ const { processGenerateBlocks } = require('../services/fileGenerator');
 const { notifyAdminSensitiveKeyword } = require('../services/mailService');
 const { budgetGuard } = require('../middleware/budgetGuard');
 const mcpClient = require('../services/mcpClient');
+const { classifyUpload, canonicalMimeForKind, TEXT_HARD_CAP_BYTES } = require('../utils/uploadFileTypes');
 
 // ── Pending TTS map: sessionId → { aiResponse, skill, timestamp } ────────────
 // When a post_answer TTS skill returns { pending:true } (no voice pref given),
@@ -63,7 +64,7 @@ async function getSelfKbDeclarations(db, userId) {
   if (cached) return cached;
   try {
     const user = await db.prepare(
-      'SELECT role, dept_code, profit_center, org_section, org_group_name, role_id FROM users WHERE id=?'
+      'SELECT role, dept_code, profit_center, org_section, org_group_name, role_id, factory_code FROM users WHERE id=?'
     ).get(userId);
     if (!user) return { declarations: [], kbMap: {} };
 
@@ -87,6 +88,7 @@ async function getSelfKbDeclarations(db, userId) {
               OR (ka.grantee_type='dept'      AND ka.grantee_id=? AND ? IS NOT NULL)
               OR (ka.grantee_type='profit_center' AND ka.grantee_id=? AND ? IS NOT NULL)
               OR (ka.grantee_type='org_section'   AND ka.grantee_id=? AND ? IS NOT NULL)
+              OR (ka.grantee_type='factory'       AND ka.grantee_id=? AND ? IS NOT NULL)
               OR (ka.grantee_type='org_group'     AND ka.grantee_id=? AND ? IS NOT NULL)
             )
           )
@@ -98,6 +100,7 @@ async function getSelfKbDeclarations(db, userId) {
         user.dept_code, user.dept_code,
         user.profit_center, user.profit_center,
         user.org_section, user.org_section,
+        user.factory_code, user.factory_code,
         user.org_group_name, user.org_group_name,
       );
     }
@@ -268,7 +271,7 @@ async function getDifyFunctionDeclarations(db, userCtx) {
         `SELECT ${connectorCols} FROM dify_knowledge_bases d WHERE d.is_active=1 ORDER BY d.sort_order ASC`
       ).all();
     } else {
-      const { userId, roleId, deptCode, profitCenter, orgSection, orgGroupName } = userCtx;
+      const { userId, roleId, deptCode, profitCenter, orgSection, orgGroupName, factoryCode } = userCtx;
       kbs = await db.prepare(
         `SELECT DISTINCT ${connectorCols}
          FROM dify_knowledge_bases d
@@ -281,6 +284,7 @@ async function getDifyFunctionDeclarations(db, userCtx) {
                OR (a.grantee_type='department'  AND a.grantee_id=? AND ? IS NOT NULL)
                OR (a.grantee_type='cost_center' AND a.grantee_id=? AND ? IS NOT NULL)
                OR (a.grantee_type='division'    AND a.grantee_id=? AND ? IS NOT NULL)
+               OR (a.grantee_type='factory'     AND a.grantee_id=? AND ? IS NOT NULL)
                OR (a.grantee_type='org_group'   AND a.grantee_id=? AND ? IS NOT NULL)
              )
            )
@@ -292,6 +296,7 @@ async function getDifyFunctionDeclarations(db, userCtx) {
         deptCode, deptCode,
         profitCenter, profitCenter,
         orgSection, orgSection,
+        factoryCode, factoryCode,
         orgGroupName, orgGroupName
       );
     }
@@ -492,9 +497,10 @@ const upload = multer({
   dest: path.join(UPLOAD_DIR, 'tmp'),
   limits: { fileSize: 500 * 1024 * 1024 }, // 500MB ceiling; per-user limits enforced below
   fileFilter: (req, file, cb) => {
-    // Reject video files
-    if (file.mimetype.startsWith('video/')) {
-      return cb(new Error('不允許上傳影片檔案'), false);
+    const name = Buffer.from(file.originalname, 'latin1').toString('utf8');
+    const c = classifyUpload(name, file.mimetype);
+    if (!c.ok) {
+      return cb(new Error(c.reason || '不支援的檔案格式'), false);
     }
     cb(null, true);
   },
@@ -777,7 +783,18 @@ router.delete('/sessions/:id', async (req, res) => {
 
 // POST /api/chat/sessions/:id/messages  (SSE streaming)
 const CHAT_MAX_FILES_PER_MESSAGE = parseInt(process.env.CHAT_MAX_FILES_PER_MESSAGE || '10', 10);
-router.post('/sessions/:id/messages', upload.array('files', CHAT_MAX_FILES_PER_MESSAGE), budgetGuard, async (req, res) => {
+// Wrap multer to return JSON on upload rejection (fileFilter errors, size limits, etc.).
+// Without this, Express default handler returns HTML 500 → frontend JSON.parse fails.
+const uploadChatFiles = (req, res, next) => {
+  upload.array('files', CHAT_MAX_FILES_PER_MESSAGE)(req, res, (err) => {
+    if (!err) return next();
+    const status = err.code === 'LIMIT_FILE_SIZE' ? 413
+                 : err.code === 'LIMIT_FILE_COUNT' ? 413
+                 : 400;
+    return res.status(status).json({ error: err.message || '檔案上傳失敗' });
+  });
+};
+router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, res) => {
   const db = require('../database-oracle').db;
   const sessionId = req.params.id;
 
@@ -829,8 +846,18 @@ router.post('/sessions/:id/messages', upload.array('files', CHAT_MAX_FILES_PER_M
   const isTextFile = (m) => !isImageMime(m) && !isAudioMime(m);
 
   for (const file of uploadedFiles) {
-    const mimeType = file.mimetype;
     const originalName = Buffer.from(file.originalname, 'latin1').toString('utf8');
+
+    // Normalize empty / octet-stream mime to a canonical value so downstream
+    // mime-based branching (image inline / audio transcribe / PDF inline /
+    // Office extractor) works even when the browser didn't set mime properly.
+    // fileFilter already validated via classifyUpload; we just align mime here.
+    if (!file.mimetype || file.mimetype === 'application/octet-stream') {
+      const canonical = canonicalMimeForKind(classifyUpload(originalName, file.mimetype));
+      if (canonical) file.mimetype = canonical;
+    }
+    const mimeType = file.mimetype;
+
     if (isAudioMime(mimeType)) {
       if (!userPerms.allow_audio_upload) {
         fs.unlinkSync(file.path);
@@ -856,10 +883,16 @@ router.post('/sessions/:id/messages', upload.array('files', CHAT_MAX_FILES_PER_M
         fs.unlinkSync(file.path);
         return res.status(403).json({ error: `無文字檔上傳權限，請聯絡管理員開啟。(${originalName})` });
       }
-      const maxBytes = (userPerms.text_max_mb || 10) * 1024 * 1024;
+      const userMax = (userPerms.text_max_mb || 10) * 1024 * 1024;
+      // Hard 5MB cap only for newly-supported code/config/log/special types;
+      // PDF / Office / plain doc keep user's text_max_mb (backward compat).
+      const cls = classifyUpload(originalName, mimeType);
+      const applyHardCap = cls.ok && cls.kind === 'text' && cls.subtype && cls.subtype !== 'doc';
+      const maxBytes = applyHardCap ? Math.min(userMax, TEXT_HARD_CAP_BYTES) : userMax;
       if (file.size > maxBytes) {
         fs.unlinkSync(file.path);
-        return res.status(413).json({ error: `文字檔超過上限 ${userPerms.text_max_mb || 10}MB。(${originalName})` });
+        const capMb = (maxBytes / 1024 / 1024).toFixed(1);
+        return res.status(413).json({ error: `檔案超過上限 ${capMb}MB。(${originalName})` });
       }
     }
   }
@@ -1397,7 +1430,7 @@ router.post('/sessions/:id/messages', upload.array('files', CHAT_MAX_FILES_PER_M
         ORDER BY id ASC
       `).all(req.user.id),
       db.prepare(
-        `SELECT preferred_language, role_id, dept_code, profit_center, org_section, org_group_name FROM users WHERE id=?`
+        `SELECT preferred_language, role_id, dept_code, profit_center, org_section, org_group_name, factory_code FROM users WHERE id=?`
       ).get(req.user.id),
     ]);
 
@@ -1928,6 +1961,7 @@ ${hasPreserve ? '- 標記【★保留原文】的欄位：必須完整複製原�
         profitCenter: _userProfile?.profit_center  || null,
         orgSection:   _userProfile?.org_section    || null,
         orgGroupName: _userProfile?.org_group_name || null,
+        factoryCode:  _userProfile?.factory_code   || null,
       };
 
       // Shared maps for toolHandler (populated below regardless of mode)

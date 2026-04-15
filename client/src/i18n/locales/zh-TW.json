@@ -203,6 +203,20 @@
       "chatting": "對話中"
     }
   },
+  "grantee": {
+    "type": {
+      "user": "使用者",
+      "role": "角色",
+      "factory": "廠區",
+      "department": "部門",
+      "cost_center": "利潤中心",
+      "division": "事業處",
+      "org_group": "事業群"
+    },
+    "searchPlaceholder": "輸入代碼或名稱搜尋...",
+    "noMatch": "無符合項目",
+    "loading": "載入中..."
+  },
   "admin": {
     "title": "系統管理",
     "backToChat": "返回聊天",
@@ -229,7 +243,33 @@
       "mail": "郵件設定",
       "llm": "LLM 模型設定",
       "vectorDefaults": "向量預設模型",
-      "factoryLanguages": "廠區語言設定"
+      "factoryLanguages": "廠區語言設定",
+      "factoryTranslations": "廠區翻譯"
+    },
+    "factoryTrans": {
+      "title": "廠區翻譯管理",
+      "searchPlaceholder": "搜尋代碼或名稱...",
+      "overwriteMode": "覆寫已有翻譯",
+      "llmTranslate": "LLM 批次翻譯 en/vi",
+      "refreshCache": "重刷 ERP 快取",
+      "refreshFailed": "重刷 ERP 快取失敗",
+      "saveFailed": "儲存失敗",
+      "translateFailed": "LLM 翻譯失敗",
+      "confirmOverwrite": "確定用 LLM 覆寫所有 en/vi 翻譯？",
+      "confirmTranslate": "確定用 LLM 批次翻譯缺少的 en/vi？",
+      "cacheInfo": "ERP 快取 {{size}} 筆，{{age}} 分鐘前載入",
+      "cacheNotLoaded": "ERP 快取未載入",
+      "notTranslated": "(未翻譯)",
+      "noMatch": "無符合的廠區",
+      "empty": "ERP 無資料",
+      "col": {
+        "code": "代碼",
+        "zhTW": "繁中 (ERP)",
+        "en": "English",
+        "vi": "Tiếng Việt",
+        "updatedAt": "更新時間"
+      },
+      "footerHint": "zh-TW 名稱來自 ERP FND_FLEX_VALUES_VL (flex value set 1008041)，唯讀；en / vi 為本地翻譯。"
     }
   },
   "users": {
@@ -2146,6 +2186,7 @@
       "public": "公開（全員）",
       "user": "使用者",
       "role": "角色",
+      "factory": "廠區",
       "department": "部門",
       "cost_center": "利潤中心",
       "division": "處級",

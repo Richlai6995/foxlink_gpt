@@ -4,6 +4,7 @@ const fs      = require('fs');
 const router  = express.Router();
 const { verifyToken } = require('./auth');
 const { translateFields } = require('../services/translationService');
+const { resolveGranteeNamesInRows, getLangFromReq } = require('../services/granteeNameResolver');
 
 // ── Service key middleware（供外部 skill handler 呼叫，不走 user token）──────
 function verifyServiceKey(req, res, next) {
@@ -308,6 +309,7 @@ async function canUserAccessSkill(db, skillId, user) {
             OR (sa.grantee_type='dept' AND sa.grantee_id=? AND ? IS NOT NULL)
             OR (sa.grantee_type='profit_center' AND sa.grantee_id=? AND ? IS NOT NULL)
             OR (sa.grantee_type='org_section' AND sa.grantee_id=? AND ? IS NOT NULL)
+            OR (sa.grantee_type='factory' AND sa.grantee_id=? AND ? IS NOT NULL)
             OR (sa.grantee_type='org_group' AND sa.grantee_id=? AND ? IS NOT NULL)
         )
     `).get(
@@ -316,6 +318,7 @@ async function canUserAccessSkill(db, skillId, user) {
         user.dept_code, user.dept_code,
         user.profit_center, user.profit_center,
         user.org_section, user.org_section,
+        user.factory_code, user.factory_code,
         user.org_group_name, user.org_group_name
     );
     return !!access;
@@ -329,6 +332,7 @@ async function hasDevAccess(db, skillId, user) {
             OR (sa.grantee_type='dept' AND sa.grantee_id=? AND ? IS NOT NULL)
             OR (sa.grantee_type='profit_center' AND sa.grantee_id=? AND ? IS NOT NULL)
             OR (sa.grantee_type='org_section' AND sa.grantee_id=? AND ? IS NOT NULL)
+            OR (sa.grantee_type='factory' AND sa.grantee_id=? AND ? IS NOT NULL)
             OR (sa.grantee_type='org_group' AND sa.grantee_id=? AND ? IS NOT NULL)
         )
     `).get(
@@ -337,6 +341,7 @@ async function hasDevAccess(db, skillId, user) {
         user.dept_code, user.dept_code,
         user.profit_center, user.profit_center,
         user.org_section, user.org_section,
+        user.factory_code, user.factory_code,
         user.org_group_name, user.org_group_name
     );
     return !!access;
@@ -348,7 +353,7 @@ router.get('/', async (req, res) => {
         const db = require('../database-oracle').db;
         const { tag, type, q } = req.query;
         const userProfile = await db.prepare(
-            'SELECT id, role, dept_code, profit_center, org_section, org_group_name FROM users WHERE id=?'
+            'SELECT id, role, dept_code, profit_center, org_section, org_group_name, factory_code FROM users WHERE id=?'
         ).get(req.user.id);
         if (!userProfile) return res.status(403).json({ error: '使用者不存在' });
 
@@ -365,6 +370,7 @@ router.get('/', async (req, res) => {
             OR (sa.grantee_type='dept' AND sa.grantee_id=? AND ? IS NOT NULL)
             OR (sa.grantee_type='profit_center' AND sa.grantee_id=? AND ? IS NOT NULL)
             OR (sa.grantee_type='org_section' AND sa.grantee_id=? AND ? IS NOT NULL)
+            OR (sa.grantee_type='factory' AND sa.grantee_id=? AND ? IS NOT NULL)
             OR (sa.grantee_type='org_group' AND sa.grantee_id=? AND ? IS NOT NULL)
           )
         )
@@ -376,6 +382,7 @@ router.get('/', async (req, res) => {
             userProfile.dept_code, userProfile.dept_code,
             userProfile.profit_center, userProfile.profit_center,
             userProfile.org_section, userProfile.org_section,
+            userProfile.factory_code, userProfile.factory_code,
             userProfile.org_group_name, userProfile.org_group_name,
         ];
         if (type) { sql += ` AND s.type = ?`; params.push(type); }
@@ -398,6 +405,7 @@ router.get('/', async (req, res) => {
                     OR (sa.grantee_type='dept' AND sa.grantee_id=? AND ? IS NOT NULL)
                     OR (sa.grantee_type='profit_center' AND sa.grantee_id=? AND ? IS NOT NULL)
                     OR (sa.grantee_type='org_section' AND sa.grantee_id=? AND ? IS NOT NULL)
+                    OR (sa.grantee_type='factory' AND sa.grantee_id=? AND ? IS NOT NULL)
                     OR (sa.grantee_type='org_group' AND sa.grantee_id=? AND ? IS NOT NULL)
                 )
             `).all(
@@ -406,6 +414,7 @@ router.get('/', async (req, res) => {
                 userProfile.dept_code, userProfile.dept_code,
                 userProfile.profit_center, userProfile.profit_center,
                 userProfile.org_section, userProfile.org_section,
+                userProfile.factory_code, userProfile.factory_code,
                 userProfile.org_group_name, userProfile.org_group_name
             );
             for (const r of devRows) developSet.add(r.skill_id);
@@ -426,7 +435,7 @@ router.get('/unauthorized', async (req, res) => {
     try {
         const db = require('../database-oracle').db;
         const userProfile = await db.prepare(
-            'SELECT id, role, dept_code, profit_center, org_section, org_group_name FROM users WHERE id=?'
+            'SELECT id, role, dept_code, profit_center, org_section, org_group_name, factory_code FROM users WHERE id=?'
         ).get(req.user.id);
         if (!userProfile) return res.json([]);
 
@@ -443,6 +452,7 @@ router.get('/unauthorized', async (req, res) => {
                 OR (sa.grantee_type='dept' AND sa.grantee_id=? AND ? IS NOT NULL)
                 OR (sa.grantee_type='profit_center' AND sa.grantee_id=? AND ? IS NOT NULL)
                 OR (sa.grantee_type='org_section' AND sa.grantee_id=? AND ? IS NOT NULL)
+                OR (sa.grantee_type='factory' AND sa.grantee_id=? AND ? IS NOT NULL)
                 OR (sa.grantee_type='org_group' AND sa.grantee_id=? AND ? IS NOT NULL)
               )
             )
@@ -453,6 +463,7 @@ router.get('/unauthorized', async (req, res) => {
             userProfile.dept_code, userProfile.dept_code,
             userProfile.profit_center, userProfile.profit_center,
             userProfile.org_section, userProfile.org_section,
+            userProfile.factory_code, userProfile.factory_code,
             userProfile.org_group_name, userProfile.org_group_name,
         );
         const authorizedSet = new Set(authRows.map(r => r.id));
@@ -548,7 +559,7 @@ router.get('/:id', async (req, res) => {
         let isDevelop = isOwner || isAdmin;
         if (!isOwner && !isAdmin) {
             const userProfile = await db.prepare(
-                'SELECT id, role, dept_code, profit_center, org_section, org_group_name FROM users WHERE id=?'
+                'SELECT id, role, dept_code, profit_center, org_section, org_group_name, factory_code FROM users WHERE id=?'
             ).get(req.user.id);
             if (!s.is_public) {
                 const hasAccess = userProfile && await canUserAccessSkill(db, req.params.id, userProfile);
@@ -573,7 +584,7 @@ router.put('/:id', async (req, res) => {
         const isAdmin = req.user.role === 'admin';
         if (!isOwner && !isAdmin) {
             const userProfile = await db.prepare(
-                'SELECT id, role, dept_code, profit_center, org_section, org_group_name FROM users WHERE id=?'
+                'SELECT id, role, dept_code, profit_center, org_section, org_group_name, factory_code FROM users WHERE id=?'
             ).get(req.user.id);
             const isDev = userProfile && await hasDevAccess(db, req.params.id, userProfile);
             if (!isDev) return res.status(403).json({ error: '需要「開發」權限才能編輯' });
@@ -700,7 +711,7 @@ router.post('/:id/fork', async (req, res) => {
         if (!isOwner && !isAdmin) {
             // Public skills without develop access → cannot fork
             const userProfile = await db.prepare(
-                'SELECT id, role, dept_code, profit_center, org_section, org_group_name FROM users WHERE id=?'
+                'SELECT id, role, dept_code, profit_center, org_section, org_group_name, factory_code FROM users WHERE id=?'
             ).get(req.user.id);
             const isDev = userProfile && await hasDevAccess(db, req.params.id, userProfile);
             if (!isDev) return res.status(403).json({ error: '需要「開發」權限才能 Fork 此技能' });
@@ -750,6 +761,7 @@ router.get('/:id/access', async (req, res) => {
             WHERE sa.skill_id = ?
             ORDER BY sa.granted_at DESC
         `).all(req.params.id);
+        await resolveGranteeNamesInRows(grants, getLangFromReq(req), db);
         res.json(grants);
     } catch (e) {
         res.status(500).json({ error: e.message });
@@ -800,6 +812,7 @@ router.post('/:id/access', async (req, res) => {
             WHERE sa.skill_id = ?
             ORDER BY sa.granted_at DESC
         `).all(req.params.id);
+        await resolveGranteeNamesInRows(grants, getLangFromReq(req), db);
         res.json(grants);
     } catch (e) {
         res.status(500).json({ error: e.message });

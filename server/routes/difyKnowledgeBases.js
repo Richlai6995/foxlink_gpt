@@ -5,6 +5,7 @@ const router = express.Router();
 const { verifyToken } = require('./auth');
 const { translateFields } = require('../services/translationService');
 const { testConnector, parseJson } = require('../services/apiConnectorService');
+const { resolveGranteeNamesInRows, getLangFromReq } = require('../services/granteeNameResolver');
 
 router.use(verifyToken);
 
@@ -90,7 +91,7 @@ router.get('/my', async (req, res) => {
     const publicIdSet = new Set(publicKbs.map(k => k.id));
 
     const u = await db.prepare(
-      `SELECT role_id, dept_code, profit_center, org_section, org_group_name FROM users WHERE id=?`
+      `SELECT role_id, dept_code, profit_center, org_section, org_group_name, factory_code FROM users WHERE id=?`
     ).get(req.user.id);
     if (!u) return res.json(publicKbs);
 
@@ -104,6 +105,7 @@ router.get('/my', async (req, res) => {
          OR (a.grantee_type='department'  AND a.grantee_id=? AND ? IS NOT NULL)
          OR (a.grantee_type='cost_center' AND a.grantee_id=? AND ? IS NOT NULL)
          OR (a.grantee_type='division'    AND a.grantee_id=? AND ? IS NOT NULL)
+         OR (a.grantee_type='factory'     AND a.grantee_id=? AND ? IS NOT NULL)
          OR (a.grantee_type='org_group'   AND a.grantee_id=? AND ? IS NOT NULL)
        )`
     ).all(
@@ -112,6 +114,7 @@ router.get('/my', async (req, res) => {
       u.dept_code, u.dept_code,
       u.profit_center, u.profit_center,
       u.org_section, u.org_section,
+      u.factory_code, u.factory_code,
       u.org_group_name, u.org_group_name
     );
     const privateIds = accessibleIds.map(r => r.dify_kb_id).filter(id => !publicIdSet.has(id));
@@ -148,7 +151,7 @@ router.get('/unauthorized', async (req, res) => {
     const authorizedSet = new Set(publicIds.map(r => r.id));
 
     const u = await db.prepare(
-      `SELECT role_id, dept_code, profit_center, org_section, org_group_name FROM users WHERE id=?`
+      `SELECT role_id, dept_code, profit_center, org_section, org_group_name, factory_code FROM users WHERE id=?`
     ).get(req.user.id);
     if (u) {
       const granted = await db.prepare(
@@ -160,6 +163,7 @@ router.get('/unauthorized', async (req, res) => {
            OR (a.grantee_type='department'  AND a.grantee_id=? AND ? IS NOT NULL)
            OR (a.grantee_type='cost_center' AND a.grantee_id=? AND ? IS NOT NULL)
            OR (a.grantee_type='division'    AND a.grantee_id=? AND ? IS NOT NULL)
+           OR (a.grantee_type='factory'     AND a.grantee_id=? AND ? IS NOT NULL)
            OR (a.grantee_type='org_group'   AND a.grantee_id=? AND ? IS NOT NULL)
          )`
       ).all(
@@ -168,6 +172,7 @@ router.get('/unauthorized', async (req, res) => {
         u.dept_code, u.dept_code,
         u.profit_center, u.profit_center,
         u.org_section, u.org_section,
+        u.factory_code, u.factory_code,
         u.org_group_name, u.org_group_name
       );
       granted.forEach(r => authorizedSet.add(r.dify_kb_id));
@@ -195,6 +200,7 @@ router.get('/:id/access', async (req, res) => {
        FROM dify_access a LEFT JOIN users u ON u.id = a.granted_by
        WHERE a.dify_kb_id=? ORDER BY a.granted_at DESC`
     ).all(req.params.id);
+    await resolveGranteeNamesInRows(grants, getLangFromReq(req), db);
     res.json(grants);
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -207,7 +213,7 @@ router.post('/:id/access', async (req, res) => {
   const db = getDb();
   try {
     const { grantee_type, grantee_id, share_type = 'use' } = req.body;
-    const validTypes = ['user', 'role', 'department', 'cost_center', 'division', 'org_group'];
+    const validTypes = ['user', 'role', 'factory', 'department', 'cost_center', 'division', 'org_group'];
     if (!validTypes.includes(grantee_type) || !grantee_id) {
       return res.status(400).json({ error: '請選擇有效的共享對象' });
     }
@@ -233,6 +239,7 @@ router.post('/:id/access', async (req, res) => {
        FROM dify_access a LEFT JOIN users u ON u.id = a.granted_by
        WHERE a.dify_kb_id=? ORDER BY a.granted_at DESC`
     ).all(req.params.id);
+    await resolveGranteeNamesInRows(grants, getLangFromReq(req), db);
     res.json(grants);
   } catch (e) {
     res.status(500).json({ error: e.message });

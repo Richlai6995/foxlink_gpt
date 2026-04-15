@@ -6,6 +6,7 @@ const path = require('path');
 const fs = require('fs');
 const { verifyToken } = require('./auth');
 const { db } = require('../database-oracle');
+const { resolveGranteeNamesInRows, getLangFromReq } = require('../services/granteeNameResolver');
 
 // ─── File upload config ──────────────────────────────────────────────────────
 const localUploads = path.join(__dirname, '..', 'uploads');
@@ -102,23 +103,28 @@ async function canUserAccessCourse(courseId, user) {
   if (course.is_public === 1 && course.status === 'published')
     return { access: true, permission: 'view' };
 
+  // 支援新舊 grantee_type 命名（新：cost_center/division；舊：profit_center/org_section；dept/department 已存在）
+  // role 比對用 role_id（不是字串 role），與 share POST 送進來的值一致
   const access = await db.prepare(`
     SELECT permission FROM course_access WHERE course_id = ? AND (
       (grantee_type = 'user' AND grantee_id = TO_CHAR(?))
-      OR (grantee_type = 'role' AND grantee_id = ?)
-      OR (grantee_type IN ('dept','department') AND grantee_id = ? AND ? IS NOT NULL)
-      OR (grantee_type = 'profit_center' AND grantee_id = ? AND ? IS NOT NULL)
-      OR (grantee_type = 'org_section' AND grantee_id = ? AND ? IS NOT NULL)
+      OR (grantee_type = 'role' AND grantee_id = TO_CHAR(?) AND ? IS NOT NULL)
+      OR (grantee_type IN ('dept','department')         AND grantee_id = ? AND ? IS NOT NULL)
+      OR (grantee_type IN ('cost_center','profit_center') AND grantee_id = ? AND ? IS NOT NULL)
+      OR (grantee_type IN ('division','org_section')   AND grantee_id = ? AND ? IS NOT NULL)
+      OR (grantee_type = 'factory'   AND grantee_id = ? AND ? IS NOT NULL)
       OR (grantee_type = 'org_group' AND grantee_id = ? AND ? IS NOT NULL)
     ) ORDER BY CASE permission WHEN 'develop' THEN 0 ELSE 1 END
     FETCH FIRST 1 ROWS ONLY
   `).get(
     courseId,
-    user.id, user.role,
+    user.id,
+    user.role_id || 0, user.role_id || null,
     user.dept_code, user.dept_code,
     user.profit_center, user.profit_center,
     user.org_section, user.org_section,
-    user.org_group, user.org_group
+    user.factory_code, user.factory_code,
+    user.org_group_name, user.org_group_name
   );
   if (access) return { access: true, permission: access.permission };
 
@@ -296,20 +302,24 @@ router.get('/courses', async (req, res) => {
         OR EXISTS (
           SELECT 1 FROM course_access ca WHERE ca.course_id = c.id AND (
             (ca.grantee_type='user' AND ca.grantee_id=TO_CHAR(?))
-            OR (ca.grantee_type='role' AND ca.grantee_id=?)
-            OR (ca.grantee_type IN ('dept','department') AND ca.grantee_id=? AND ? IS NOT NULL)
-            OR (ca.grantee_type='cost_center' AND ca.grantee_id=? AND ? IS NOT NULL)
-            OR (ca.grantee_type='division' AND ca.grantee_id=? AND ? IS NOT NULL)
+            OR (ca.grantee_type='role' AND ca.grantee_id=TO_CHAR(?) AND ? IS NOT NULL)
+            OR (ca.grantee_type IN ('dept','department')           AND ca.grantee_id=? AND ? IS NOT NULL)
+            OR (ca.grantee_type IN ('cost_center','profit_center') AND ca.grantee_id=? AND ? IS NOT NULL)
+            OR (ca.grantee_type IN ('division','org_section')      AND ca.grantee_id=? AND ? IS NOT NULL)
+            OR (ca.grantee_type='factory'   AND ca.grantee_id=? AND ? IS NOT NULL)
             OR (ca.grantee_type='org_group' AND ca.grantee_id=? AND ? IS NOT NULL)
           )
         )
       )`;
       params.push(user.id,
-        user.id, user.role,
+        user.id,
+        user.role_id || 0, user.role_id || null,
         user.dept_code, user.dept_code,
         user.profit_center, user.profit_center,
         user.org_section, user.org_section,
-        user.org_group, user.org_group);
+        user.factory_code, user.factory_code,
+        user.org_group_name, user.org_group_name,
+      );
     } else if (user.role !== 'admin') {
       // User can see: own + public published + shared
       sql += ` AND (
@@ -318,12 +328,24 @@ router.get('/courses', async (req, res) => {
         OR EXISTS (
           SELECT 1 FROM course_access ca WHERE ca.course_id = c.id AND (
             (ca.grantee_type='user' AND ca.grantee_id=TO_CHAR(?))
-            OR (ca.grantee_type='role' AND ca.grantee_id=?)
-            OR (ca.grantee_type IN ('dept','department') AND ca.grantee_id=? AND ? IS NOT NULL)
+            OR (ca.grantee_type='role' AND ca.grantee_id=TO_CHAR(?) AND ? IS NOT NULL)
+            OR (ca.grantee_type IN ('dept','department')           AND ca.grantee_id=? AND ? IS NOT NULL)
+            OR (ca.grantee_type IN ('cost_center','profit_center') AND ca.grantee_id=? AND ? IS NOT NULL)
+            OR (ca.grantee_type IN ('division','org_section')      AND ca.grantee_id=? AND ? IS NOT NULL)
+            OR (ca.grantee_type='factory'   AND ca.grantee_id=? AND ? IS NOT NULL)
+            OR (ca.grantee_type='org_group' AND ca.grantee_id=? AND ? IS NOT NULL)
           )
         )
       )`;
-      params.push(user.id, user.id, user.role, user.dept_code, user.dept_code);
+      params.push(
+        user.id, user.id,
+        user.role_id || 0, user.role_id || null,
+        user.dept_code, user.dept_code,
+        user.profit_center, user.profit_center,
+        user.org_section, user.org_section,
+        user.factory_code, user.factory_code,
+        user.org_group_name, user.org_group_name,
+      );
     }
 
     if (category_id) {
@@ -629,18 +651,44 @@ router.post('/courses/:id/publish', loadCoursePermission, requirePermission('own
 
     await db.prepare(`UPDATE courses SET status='published', updated_at=SYSTIMESTAMP WHERE id=?`).run(req.courseId);
 
-    // Notify shared users
+    // Notify shared users — 展開所有組織層分享到實際 user IDs
     try {
       const course = await db.prepare('SELECT title FROM courses WHERE id=?').get(req.courseId);
-      const accessRows = await db.prepare(
+      const userIds = new Set();
+
+      // 1) 直接分享到 user
+      const directUsers = await db.prepare(
         `SELECT DISTINCT grantee_id FROM course_access WHERE course_id=? AND grantee_type='user'`
       ).all(req.courseId);
-      for (const row of accessRows) {
+      for (const r of directUsers) { const n = Number(r.grantee_id); if (Number.isFinite(n)) userIds.add(n); }
+
+      // 2) 組織層分享 → 展開到 user
+      //    course_access 同時接受 dept/department (別名)
+      const orgExpansions = [
+        { types: ['role'],                  col: 'role_id' },
+        { types: ['dept', 'department'],    col: 'dept_code' },
+        { types: ['cost_center'],           col: 'profit_center' },
+        { types: ['division'],              col: 'org_section' },
+        { types: ['factory'],               col: 'factory_code' },
+        { types: ['org_group'],             col: 'org_group_name' },
+      ];
+      for (const { types, col } of orgExpansions) {
+        const typePh = types.map(() => '?').join(',');
+        const rows = await db.prepare(
+          `SELECT u.id FROM users u
+           WHERE u.${col} IS NOT NULL AND EXISTS (
+             SELECT 1 FROM course_access ca WHERE ca.course_id=? AND ca.grantee_type IN (${typePh}) AND ca.grantee_id = u.${col}
+           )`
+        ).all(req.courseId, ...types);
+        for (const r of rows) userIds.add(Number(r.id));
+      }
+
+      for (const uid of userIds) {
         await db.prepare(`
           INSERT INTO training_notifications (user_id, type, title, message, course_id, link_url)
           VALUES (?, 'course_published', ?, ?, ?, ?)
         `).run(
-          Number(row.grantee_id), `${course?.title || '課程'} 已發佈`,
+          uid, `${course?.title || '課程'} 已發佈`,
           `課程「${course?.title}」已發佈，可以開始學習。`,
           req.courseId, `/training/course/${req.courseId}`
         );
@@ -774,6 +822,7 @@ router.get('/courses/:id/access', loadCoursePermission, requirePermission('owner
       WHERE ca.course_id = ?
       ORDER BY ca.granted_at DESC
     `).all(req.courseId);
+    await resolveGranteeNamesInRows(rows, getLangFromReq(req), db);
     res.json(rows);
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -2356,12 +2405,18 @@ router.get('/programs/:id', async (req, res) => {
       } else if (t.target_type === 'dept' || t.target_type === 'department') {
         const d = await db.prepare('SELECT dept_name FROM (SELECT DISTINCT dept_code, dept_name FROM users WHERE dept_code=?) WHERE ROWNUM=1').get(t.target_id);
         t.target_label = d?.dept_name ? `${d.dept_name} (${t.target_id})` : t.target_id;
-      } else if (t.target_type === 'cost_center') {
-        const d = await db.prepare('SELECT profit_center_name FROM (SELECT DISTINCT profit_center_code, profit_center_name FROM users WHERE profit_center_code=?) WHERE ROWNUM=1').get(t.target_id);
+      } else if (t.target_type === 'cost_center' || t.target_type === 'profit_center') {
+        const d = await db.prepare('SELECT profit_center_name FROM (SELECT DISTINCT profit_center, profit_center_name FROM users WHERE profit_center=?) WHERE ROWNUM=1').get(t.target_id);
         t.target_label = d?.profit_center_name ? `${d.profit_center_name} (${t.target_id})` : t.target_id;
-      } else if (t.target_type === 'division') {
+      } else if (t.target_type === 'division' || t.target_type === 'org_section') {
         const d = await db.prepare('SELECT org_section_name FROM (SELECT DISTINCT org_section, org_section_name FROM users WHERE org_section=?) WHERE ROWNUM=1').get(t.target_id);
         t.target_label = d?.org_section_name ? `${d.org_section_name} (${t.target_id})` : t.target_id;
+      } else if (t.target_type === 'factory') {
+        try {
+          const factoryCache = require('../services/factoryCache');
+          const name = await factoryCache.resolveFactoryName(t.target_id, 'zh-TW', db);
+          t.target_label = (name && name !== t.target_id) ? `${t.target_id} ${name}` : t.target_id;
+        } catch { t.target_label = t.target_id; }
       } else if (t.target_type === 'org_group') {
         t.target_label = t.target_id;
       } else {
@@ -2586,13 +2641,16 @@ router.post('/programs/:id/activate', async (req, res) => {
       } else if (t.target_type === 'dept' || t.target_type === 'department') {
         users = await db.prepare("SELECT id FROM users WHERE dept_code=? AND status='active'").all(t.target_id);
       } else if (t.target_type === 'role') {
-        users = await db.prepare("SELECT id FROM users WHERE role=? AND status='active'").all(t.target_id);
-      } else if (t.target_type === 'cost_center') {
-        users = await db.prepare("SELECT id FROM users WHERE profit_center_code=? AND status='active'").all(t.target_id);
-      } else if (t.target_type === 'division') {
+        // target_id 儲存 role_id（數字），需轉換
+        users = await db.prepare("SELECT id FROM users WHERE role_id=? AND status='active'").all(Number(t.target_id));
+      } else if (t.target_type === 'cost_center' || t.target_type === 'profit_center') {
+        users = await db.prepare("SELECT id FROM users WHERE profit_center=? AND status='active'").all(t.target_id);
+      } else if (t.target_type === 'division' || t.target_type === 'org_section') {
         users = await db.prepare("SELECT id FROM users WHERE org_section=? AND status='active'").all(t.target_id);
+      } else if (t.target_type === 'factory') {
+        users = await db.prepare("SELECT id FROM users WHERE factory_code=? AND status='active'").all(t.target_id);
       } else if (t.target_type === 'org_group') {
-        users = await db.prepare("SELECT id FROM users WHERE org_group=? AND status='active'").all(t.target_id);
+        users = await db.prepare("SELECT id FROM users WHERE org_group_name=? AND status='active'").all(t.target_id);
       }
       for (const u of users) userIdSet.add(u.id);
     }
@@ -3254,16 +3312,20 @@ router.get('/classroom/my-programs', async (req, res) => {
       params.push(req.user.dept_code);
     }
     if (req.user.profit_center) {
-      conditions.push(`(pt.target_type = 'cost_center' AND pt.target_id = ?)`);
+      conditions.push(`(pt.target_type IN ('cost_center','profit_center') AND pt.target_id = ?)`);
       params.push(req.user.profit_center);
     }
     if (req.user.org_section) {
-      conditions.push(`(pt.target_type = 'division' AND pt.target_id = ?)`);
+      conditions.push(`(pt.target_type IN ('division','org_section') AND pt.target_id = ?)`);
       params.push(req.user.org_section);
     }
-    if (req.user.org_group) {
+    if (req.user.factory_code) {
+      conditions.push(`(pt.target_type = 'factory' AND pt.target_id = ?)`);
+      params.push(req.user.factory_code);
+    }
+    if (req.user.org_group_name) {
       conditions.push(`(pt.target_type = 'org_group' AND pt.target_id = ?)`);
-      params.push(req.user.org_group);
+      params.push(req.user.org_group_name);
     }
     const sql = `SELECT DISTINCT tp.id
       FROM training_programs tp

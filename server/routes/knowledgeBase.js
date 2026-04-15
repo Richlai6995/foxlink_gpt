@@ -34,6 +34,7 @@ const { verifyToken } = require('./auth');
 const { embedText, toVectorStr } = require('../services/kbEmbedding');
 const { parseDocument, chunkDocument } = require('../services/kbDocParser');
 const { translateFields } = require('../services/translationService');
+const { resolveGranteeNamesInRows, getLangFromReq } = require('../services/granteeNameResolver');
 
 router.use(verifyToken);
 
@@ -141,7 +142,7 @@ function uuid() { return crypto.randomUUID(); }
  * Returns the kb row or null.
  */
 async function getAccessibleKb(db, kbId, userId) {
-  const user = await db.prepare('SELECT role, dept_code, profit_center, org_section, org_group_name, role_id FROM users WHERE id=?').get(userId);
+  const user = await db.prepare('SELECT role, dept_code, profit_center, org_section, org_group_name, role_id, factory_code FROM users WHERE id=?').get(userId);
   if (!user) return null;
 
   if (user.role === 'admin') {
@@ -161,6 +162,7 @@ async function getAccessibleKb(db, kbId, userId) {
             OR (ka.grantee_type='dept'      AND ka.grantee_id=? AND ? IS NOT NULL)
             OR (ka.grantee_type='profit_center' AND ka.grantee_id=? AND ? IS NOT NULL)
             OR (ka.grantee_type='org_section'   AND ka.grantee_id=? AND ? IS NOT NULL)
+            OR (ka.grantee_type='factory'       AND ka.grantee_id=? AND ? IS NOT NULL)
             OR (ka.grantee_type='org_group'     AND ka.grantee_id=? AND ? IS NOT NULL)
           )
         )
@@ -172,6 +174,7 @@ async function getAccessibleKb(db, kbId, userId) {
     user.dept_code, user.dept_code,
     user.profit_center, user.profit_center,
     user.org_section, user.org_section,
+    user.factory_code, user.factory_code,
     user.org_group_name, user.org_group_name,
   );
   return kb || null;
@@ -188,7 +191,7 @@ async function getEditableKb(db, kbId, userId, userRole) {
   if (!kb) return null;
   if (String(kb.creator_id) === String(userId)) return kb;
   // shared edit permission check
-  const user = await db.prepare('SELECT dept_code, profit_center, org_section, org_group_name, role_id FROM users WHERE id=?').get(userId);
+  const user = await db.prepare('SELECT dept_code, profit_center, org_section, org_group_name, role_id, factory_code FROM users WHERE id=?').get(userId);
   if (!user) return null;
   const access = await db.prepare(`
     SELECT 1 FROM kb_access WHERE kb_id=? AND permission='edit' AND (
@@ -197,6 +200,7 @@ async function getEditableKb(db, kbId, userId, userRole) {
       OR (grantee_type='dept'       AND grantee_id=? AND ? IS NOT NULL)
       OR (grantee_type='profit_center' AND grantee_id=? AND ? IS NOT NULL)
       OR (grantee_type='org_section'   AND grantee_id=? AND ? IS NOT NULL)
+      OR (grantee_type='factory'       AND grantee_id=? AND ? IS NOT NULL)
       OR (grantee_type='org_group'     AND grantee_id=? AND ? IS NOT NULL)
     )
   `).get(
@@ -205,6 +209,7 @@ async function getEditableKb(db, kbId, userId, userRole) {
     user.dept_code, user.dept_code,
     user.profit_center, user.profit_center,
     user.org_section, user.org_section,
+    user.factory_code, user.factory_code,
     user.org_group_name, user.org_group_name,
   );
   return access ? kb : null;
@@ -242,16 +247,29 @@ async function getQuota(db, userId) {
 }
 
 // ─── GET /api/kb/orgs  (組織選項供共享使用) ────────────────────────────────────
+// Query: ?lang=zh-TW|en|vi
+// 見 docs/factory-share-layer-plan.md §3.3
 router.get('/orgs', async (req, res) => {
   const db = getDb();
   try {
-    const [depts, pcs, sections, groups] = await Promise.all([
+    const lang = (req.query.lang || 'zh-TW').toString();
+    const factoryCache = require('../services/factoryCache');
+
+    const [depts, pcs, sections, groups, factories] = await Promise.all([
       db.prepare(`SELECT DISTINCT dept_code AS code, dept_name AS name FROM users WHERE dept_code IS NOT NULL ORDER BY dept_name`).all(),
       db.prepare(`SELECT DISTINCT profit_center AS code, profit_center_name AS name FROM users WHERE profit_center IS NOT NULL ORDER BY profit_center_name`).all(),
       db.prepare(`SELECT DISTINCT org_section AS code, org_section_name AS name FROM users WHERE org_section IS NOT NULL ORDER BY org_section_name`).all(),
       db.prepare(`SELECT DISTINCT org_group_name AS name FROM users WHERE org_group_name IS NOT NULL ORDER BY org_group_name`).all(),
+      factoryCache.listFactories(lang, db).catch(() => []),
     ]);
-    res.json({ depts, profit_centers: pcs, org_sections: sections, org_groups: groups });
+    const groupsOut = (groups || []).map(g => ({ code: null, name: g.name }));
+    res.json({
+      depts,
+      profit_centers: pcs,
+      org_sections: sections,
+      org_groups: groupsOut,
+      factories,
+    });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -337,7 +355,7 @@ router.get('/', async (req, res) => {
   const uid = req.user.id;
   try {
     const user = await db.prepare(
-      'SELECT role, dept_code, profit_center, org_section, org_group_name, role_id FROM users WHERE id=?'
+      'SELECT role, dept_code, profit_center, org_section, org_group_name, role_id, factory_code FROM users WHERE id=?'
     ).get(uid);
     if (!user) return res.json([]);
 
@@ -363,6 +381,7 @@ router.get('/', async (req, res) => {
                 OR (ka.grantee_type='dept'          AND ka.grantee_id=? AND ? IS NOT NULL)
                 OR (ka.grantee_type='profit_center' AND ka.grantee_id=? AND ? IS NOT NULL)
                 OR (ka.grantee_type='org_section'   AND ka.grantee_id=? AND ? IS NOT NULL)
+                OR (ka.grantee_type='factory'       AND ka.grantee_id=? AND ? IS NOT NULL)
                 OR (ka.grantee_type='org_group'     AND ka.grantee_id=? AND ? IS NOT NULL)
               )
             )
@@ -374,6 +393,7 @@ router.get('/', async (req, res) => {
         user.dept_code, user.dept_code,
         user.profit_center, user.profit_center,
         user.org_section, user.org_section,
+        user.factory_code, user.factory_code,
         user.org_group_name, user.org_group_name,
       );
     }
@@ -397,7 +417,7 @@ router.get('/unauthorized', async (req, res) => {
   try {
     const uid = req.user.id;
     const user = await db.prepare(
-      'SELECT role, dept_code, profit_center, org_section, org_group_name, role_id FROM users WHERE id=?'
+      'SELECT role, dept_code, profit_center, org_section, org_group_name, role_id, factory_code FROM users WHERE id=?'
     ).get(uid);
     if (!user) return res.json([]);
 
@@ -413,6 +433,7 @@ router.get('/unauthorized', async (req, res) => {
             OR (ka.grantee_type='dept'          AND ka.grantee_id=? AND ? IS NOT NULL)
             OR (ka.grantee_type='profit_center' AND ka.grantee_id=? AND ? IS NOT NULL)
             OR (ka.grantee_type='org_section'   AND ka.grantee_id=? AND ? IS NOT NULL)
+            OR (ka.grantee_type='factory'       AND ka.grantee_id=? AND ? IS NOT NULL)
             OR (ka.grantee_type='org_group'     AND ka.grantee_id=? AND ? IS NOT NULL)
           )
         )
@@ -422,6 +443,7 @@ router.get('/unauthorized', async (req, res) => {
       user.dept_code, user.dept_code,
       user.profit_center, user.profit_center,
       user.org_section, user.org_section,
+      user.factory_code, user.factory_code,
       user.org_group_name, user.org_group_name,
     );
     const authorizedSet = new Set(authorizedRows.map(r => r.id));
@@ -820,6 +842,7 @@ router.get('/:id/access', async (req, res) => {
        LEFT JOIN users u ON u.id = ka.granted_by_uid
        WHERE ka.kb_id=? ORDER BY ka.granted_at DESC`
     ).all(req.params.id);
+    await resolveGranteeNamesInRows(grants, getLangFromReq(req), db);
     res.json(grants);
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -837,7 +860,7 @@ router.post('/:id/access', async (req, res) => {
     }
 
     const { grantee_type, grantee_id, permission = 'use' } = req.body;
-    const validTypes = ['user', 'role', 'dept', 'profit_center', 'org_section', 'org_group'];
+    const validTypes = ['user', 'role', 'factory', 'dept', 'profit_center', 'org_section', 'org_group'];
     if (!validTypes.includes(grantee_type) || !grantee_id) {
       return res.status(400).json({ error: '請選擇有效的共享對象' });
     }

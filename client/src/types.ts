@@ -573,7 +573,7 @@ export interface AiSavedQueryShare {
   id: number
   query_id: number
   share_type: 'use' | 'manage'
-  grantee_type: 'user' | 'role' | 'department' | 'cost_center' | 'division' | 'org_group'
+  grantee_type: 'user' | 'role' | 'factory' | 'department' | 'cost_center' | 'division' | 'org_group'
   grantee_id: string
   granted_by?: number
   created_at?: string
@@ -701,7 +701,7 @@ export interface AiReportDashboardShare {
   id: number
   dashboard_id: number
   share_type: 'use' | 'manage'
-  grantee_type: 'user' | 'role' | 'department' | 'cost_center' | 'division' | 'org_group'
+  grantee_type: 'user' | 'role' | 'factory' | 'department' | 'cost_center' | 'division' | 'org_group'
   grantee_id: string
   granted_by?: number
   created_at?: string
@@ -710,11 +710,34 @@ export interface AiReportDashboardShare {
 
 // ── 通用分享 Modal 的 grantee 搜尋結果 ────────────────────────────────────────
 
+export type GranteeType = 'user' | 'role' | 'factory' | 'department' | 'cost_center' | 'division' | 'org_group'
+
 export interface ShareGrantee {
-  type: 'user' | 'role' | 'department' | 'cost_center' | 'division' | 'org_group'
+  type: GranteeType
   id: string
   name: string
   sub?: string    // 副標題（e.g. 工號、部門代碼）
+}
+
+// ── 統一分享 LOV 回傳格式 (見 docs/factory-share-layer-plan.md §3.3) ─────────
+export interface GranteeLovOption {
+  code: string | null    // org_group 可能為 null
+  name: string
+}
+
+export interface OrgLovResponse {
+  depts: GranteeLovOption[]
+  profit_centers: GranteeLovOption[]
+  org_sections: GranteeLovOption[]
+  org_groups: GranteeLovOption[]
+  factories: GranteeLovOption[]
+}
+
+// ── ShareGranteePicker 共用元件選取結果 ───────────────────────────────────
+export interface GranteeSelection {
+  type: GranteeType
+  id: string      // user: user.id, role: role.id, 其他: code / name
+  label: string   // 顯示用 "{code} {name}" 或 "{name}"
 }
 
 // ── Document Templates ────────────────────────────────────────────────────────

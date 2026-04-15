@@ -49,16 +49,18 @@ async function checkAccess(db, templateId, user) {
       (grantee_type='department'  AND grantee_id=?) OR
       (grantee_type='cost_center' AND grantee_id=?) OR
       (grantee_type='division'    AND grantee_id=?) OR
+      (grantee_type='factory'     AND grantee_id=?) OR
       (grantee_type='org_group'   AND grantee_id=?)
     )
   `).all(
     templateId,
     String(user.id),
-    user.role_id   || '',
-    user.department || '',
-    user.profit_center || '',
-    user.org_section || '',
-    user.org_group   || ''
+    String(user.role_id || ''),
+    user.dept_code       || '',
+    user.profit_center   || '',
+    user.org_section     || '',
+    user.factory_code    || '',
+    user.org_group_name  || ''
   );
 
   if (shares.some(s => s.share_type === 'edit')) return 'edit';
@@ -2894,10 +2896,11 @@ async function listTemplates(db, user, { search, format, tag } = {}) {
   // Oracle NJS-044: empty string '' is invalid bind value → null
   const n = (v) => (v && String(v).trim()) ? String(v) : null;
   const role = n(user.role_id);
-  const dept = n(user.department);
+  const dept = n(user.dept_code);       // fix: 原寫 user.department (不存在)
   const cc   = n(user.profit_center);
   const div  = n(user.org_section);
-  const og   = n(user.org_group);
+  const fac  = n(user.factory_code);
+  const og   = n(user.org_group_name);  // fix: 原寫 user.org_group (不存在)
 
   // Oracle wrapper ONLY supports positional ? params (converts to :1 :2 ...).
   // Named bind objects are NOT supported → use array params in SQL order.
@@ -2909,6 +2912,7 @@ async function listTemplates(db, user, { search, format, tag } = {}) {
       (${alias}.grantee_type='department'  AND ${alias}.grantee_id=?) OR
       (${alias}.grantee_type='cost_center' AND ${alias}.grantee_id=?) OR
       (${alias}.grantee_type='division'    AND ${alias}.grantee_id=?) OR
+      (${alias}.grantee_type='factory'     AND ${alias}.grantee_id=?) OR
       (${alias}.grantee_type='org_group'   AND ${alias}.grantee_id=?)
     )`;
 
@@ -2939,14 +2943,12 @@ async function listTemplates(db, user, { search, format, tag } = {}) {
         )
       )
     `;
-    // Params in SQL order:
-    // CASE: uid, uid role dept cc div og (7)
-    // WHERE: uid, uid role dept cc div og (7)
+    // Params in SQL order — 8 binds per granteeClause (uid + 7 types)
     params = [
-      uid,                          // CASE creator_id
-      uid, role, dept, cc, div, og, // CASE grantee (s)
-      uid,                          // WHERE creator_id
-      uid, role, dept, cc, div, og, // WHERE grantee (s2)
+      uid,                                    // CASE creator_id
+      uid, role, dept, cc, div, fac, og,      // CASE grantee (s)
+      uid,                                    // WHERE creator_id
+      uid, role, dept, cc, div, fac, og,      // WHERE grantee (s2)
     ];
   }
 

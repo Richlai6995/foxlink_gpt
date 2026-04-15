@@ -203,6 +203,20 @@
       "chatting": "Chatting"
     }
   },
+  "grantee": {
+    "type": {
+      "user": "User",
+      "role": "Role",
+      "factory": "Factory",
+      "department": "Department",
+      "cost_center": "Profit Center",
+      "division": "Division",
+      "org_group": "Org Group"
+    },
+    "searchPlaceholder": "Search by code or name...",
+    "noMatch": "No matches",
+    "loading": "Loading..."
+  },
   "admin": {
     "title": "System Administration",
     "backToChat": "Back to Chat",
@@ -229,7 +243,33 @@
       "mail": "Mail Settings",
       "llm": "LLM Model Settings",
       "vectorDefaults": "Vector Defaults",
-      "factoryLanguages": "Factory Language Settings"
+      "factoryLanguages": "Factory Language Settings",
+      "factoryTranslations": "Factory Translations"
+    },
+    "factoryTrans": {
+      "title": "Factory Translations",
+      "searchPlaceholder": "Search code or name...",
+      "overwriteMode": "Overwrite existing",
+      "llmTranslate": "LLM Translate en/vi",
+      "refreshCache": "Refresh ERP Cache",
+      "refreshFailed": "Failed to refresh ERP cache",
+      "saveFailed": "Save failed",
+      "translateFailed": "LLM translation failed",
+      "confirmOverwrite": "Overwrite all en/vi translations with LLM?",
+      "confirmTranslate": "Use LLM to fill missing en/vi translations?",
+      "cacheInfo": "ERP cache: {{size}} entries, loaded {{age}} min ago",
+      "cacheNotLoaded": "ERP cache not loaded",
+      "notTranslated": "(not translated)",
+      "noMatch": "No matching factories",
+      "empty": "No data from ERP",
+      "col": {
+        "code": "Code",
+        "zhTW": "zh-TW (ERP)",
+        "en": "English",
+        "vi": "Tiếng Việt",
+        "updatedAt": "Updated"
+      },
+      "footerHint": "zh-TW names come from ERP FND_FLEX_VALUES_VL (flex value set 1008041), read-only; en / vi are local translations."
     }
   },
   "users": {
@@ -2146,6 +2186,7 @@
       "public": "Public (All Users)",
       "user": "User",
       "role": "Role",
+      "factory": "Factory",
       "department": "Department",
       "cost_center": "Cost Center",
       "division": "Division",

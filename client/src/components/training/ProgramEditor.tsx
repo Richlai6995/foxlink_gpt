@@ -9,7 +9,7 @@ import {
   GripVertical, Calendar, Mail, Bell, ChevronUp, ChevronDown, BarChart3
 } from 'lucide-react'
 
-type GranteeType = 'public' | 'user' | 'role' | 'department' | 'cost_center' | 'division' | 'org_group'
+type GranteeType = 'public' | 'user' | 'role' | 'factory' | 'department' | 'cost_center' | 'division' | 'org_group'
 
 interface ProgramCourse {
   id?: number
@@ -58,7 +58,7 @@ interface AvailableCourse {
   status: string
 }
 
-const GRANTEE_KEYS: GranteeType[] = ['public', 'user', 'role', 'department', 'cost_center', 'division', 'org_group']
+const GRANTEE_KEYS: GranteeType[] = ['public', 'user', 'role', 'factory', 'department', 'cost_center', 'division', 'org_group']
 
 export default function ProgramEditor() {
   const { id } = useParams()
@@ -171,6 +171,10 @@ export default function ProgramEditor() {
     } else if (targetType === 'division') {
       setTargetOptions((orgs?.org_sections || []).filter((d: any) =>
         !searchVal || d.code.toLowerCase().includes(s) || (d.name || '').toLowerCase().includes(s))
+        .map((d: any) => ({ id: d.code, name: d.name || d.code, sub: d.code })))
+    } else if (targetType === 'factory') {
+      setTargetOptions((orgs?.factories || []).filter((d: any) =>
+        !searchVal || (d.code || '').toLowerCase().includes(s) || (d.name || '').toLowerCase().includes(s))
         .map((d: any) => ({ id: d.code, name: d.name || d.code, sub: d.code })))
     } else if (targetType === 'org_group') {
       setTargetOptions((orgs?.org_groups || []).filter((d: any) =>

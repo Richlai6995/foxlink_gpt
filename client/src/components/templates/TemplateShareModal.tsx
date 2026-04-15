@@ -1,8 +1,14 @@
+/**
+ * TemplateShareModal — 文件模板分享設定
+ * 使用共用元件 ShareGranteePicker (見 docs/factory-share-layer-plan.md §3.2)
+ */
 import { useState, useEffect } from 'react'
-import { X, Trash2, Search } from 'lucide-react'
+import { X, Trash2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import api from '../../lib/api'
+import ShareGranteePicker from '../common/ShareGranteePicker'
 import { DocTemplate, DocTemplateShare } from '../../types'
+import type { GranteeSelection } from '../../types'
 
 interface Props {
   template: DocTemplate
@@ -10,47 +16,16 @@ interface Props {
   onPublicChange: (isPublic: boolean) => void
 }
 
-interface OrgOption { code?: string; name: string }
-interface OrgData {
-  depts: OrgOption[]
-  profit_centers: OrgOption[]
-  org_sections: OrgOption[]
-  org_groups: OrgOption[]
-}
-
 export default function TemplateShareModal({ template, onClose, onPublicChange }: Props) {
   const { t } = useTranslation()
 
-  const GRANTEE_TYPES = [
-    { value: 'user',       label: t('tpl.share.granteeUser'),       icon: '👤' },
-    { value: 'role',       label: t('tpl.share.granteeRole'),       icon: '👥' },
-    { value: 'department', label: t('tpl.share.granteeDepartment'), icon: '🏢' },
-    { value: 'cost_center',label: t('tpl.share.granteeCostCenter'), icon: '💰' },
-    { value: 'division',   label: t('tpl.share.granteeDivision'),   icon: '🏭' },
-    { value: 'org_group',  label: t('tpl.share.granteeOrgGroup'),   icon: '🌐' },
-  ]
+  const [shares, setShares] = useState<DocTemplateShare[]>([])
+  const [selected, setSelected] = useState<GranteeSelection | null>(null)
+  const [shareType, setShareType] = useState<'use' | 'edit'>('use')
+  const [adding, setAdding] = useState(false)
+  const [isPublic, setIsPublic] = useState(template.is_public === 1)
 
-  const [shares, setShares]           = useState<DocTemplateShare[]>([])
-  const [orgs, setOrgs]               = useState<OrgData>({ depts: [], profit_centers: [], org_sections: [], org_groups: [] })
-  const [roles, setRoles]             = useState<{ id: number; name: string }[]>([])
-  const [granteeType, setGranteeType] = useState<string>('user')
-  const [granteeId, setGranteeId]     = useState('')
-  const [shareType, setShareType]     = useState<'use' | 'edit'>('use')
-  const [userSearch, setUserSearch]   = useState('')
-  const [userResults, setUserResults] = useState<{ id: number; name: string; username: string }[]>([])
-  const [adding, setAdding]           = useState(false)
-  const [isPublic, setIsPublic]       = useState(template.is_public === 1)
-
-  useEffect(() => {
-    fetchShares()
-    api.get('/kb/orgs').then(r => setOrgs(r.data)).catch(() => {})
-    api.get('/roles').then(r => setRoles(r.data || [])).catch(() => {})
-  }, [])
-
-  useEffect(() => {
-    if (granteeType !== 'user') { setUserSearch(''); setUserResults([]); setGranteeId('') }
-    else { setGranteeId('') }
-  }, [granteeType])
+  useEffect(() => { fetchShares() }, [])
 
   const fetchShares = async () => {
     try {
@@ -59,38 +34,16 @@ export default function TemplateShareModal({ template, onClose, onPublicChange }
     } catch { /* ignore */ }
   }
 
-  useEffect(() => {
-    if (granteeType !== 'user' || userSearch.length < 2) { setUserResults([]); return }
-    const timer = setTimeout(async () => {
-      try {
-        const { data } = await api.get(`/users?search=${encodeURIComponent(userSearch)}&limit=10`)
-        setUserResults(data.users || data || [])
-      } catch { /* ignore */ }
-    }, 300)
-    return () => clearTimeout(timer)
-  }, [userSearch, granteeType])
-
-  const getLovOptions = (): { id: string; label: string }[] => {
-    if (granteeType === 'role')        return roles.map(r => ({ id: String(r.id), label: r.name }))
-    if (granteeType === 'department')  return orgs.depts.map(d => ({ id: d.code || '', label: `${d.code} ${d.name}` }))
-    if (granteeType === 'cost_center') return orgs.profit_centers.map(d => ({ id: d.code || '', label: `${d.code} ${d.name}` }))
-    if (granteeType === 'division')    return orgs.org_sections.map(d => ({ id: d.code || '', label: `${d.code} ${d.name}` }))
-    if (granteeType === 'org_group')   return orgs.org_groups.map(d => ({ id: d.name || '', label: d.name }))
-    return []
-  }
-
   const addShare = async () => {
-    if (!granteeId) return
+    if (!selected) return
     setAdding(true)
     try {
       await api.post(`/doc-templates/${template.id}/shares`, {
         share_type: shareType,
-        grantee_type: granteeType,
-        grantee_id: String(granteeId),
+        grantee_type: selected.type,
+        grantee_id: selected.id,
       })
-      setGranteeId('')
-      setUserSearch('')
-      setUserResults([])
+      setSelected(null)
       await fetchShares()
     } catch { /* ignore */ } finally { setAdding(false) }
   }
@@ -102,11 +55,8 @@ export default function TemplateShareModal({ template, onClose, onPublicChange }
 
   const togglePublic = async () => {
     const next = !isPublic
-    if (next) {
-      if (!window.confirm(t('tpl.share.publicConfirm'))) return
-    } else {
-      if (!window.confirm(t('tpl.share.unpublicConfirm'))) return
-    }
+    const msg = next ? t('tpl.share.publicConfirm') : t('tpl.share.unpublicConfirm')
+    if (!window.confirm(msg)) return
     try {
       await api.put(`/doc-templates/${template.id}`, { is_public: next ? 1 : 0 })
       setIsPublic(next)
@@ -114,7 +64,13 @@ export default function TemplateShareModal({ template, onClose, onPublicChange }
     } catch { /* ignore */ }
   }
 
-  const lovOptions = getLovOptions()
+  const iconFor = (type: string) => {
+    const map: Record<string, string> = {
+      user: '👤', role: '👥', factory: '🏭',
+      department: '🏢', cost_center: '💰', division: '🏭', org_group: '🌐',
+    }
+    return map[type] || '👥'
+  }
 
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
@@ -128,71 +84,19 @@ export default function TemplateShareModal({ template, onClose, onPublicChange }
           {/* Add share */}
           <div>
             <div className="text-xs font-medium text-slate-700 mb-2">{t('tpl.share.addTarget')}</div>
-            <div className="flex gap-2 flex-wrap">
-              <select
-                className="text-xs border rounded px-2 py-1.5"
-                value={granteeType}
-                onChange={e => setGranteeType(e.target.value)}
-              >
-                {GRANTEE_TYPES.map(gt => (
-                  <option key={gt.value} value={gt.value}>{gt.icon} {gt.label}</option>
-                ))}
-              </select>
-              <select
-                className="text-xs border rounded px-2 py-1.5"
-                value={shareType}
-                onChange={e => setShareType(e.target.value as 'use' | 'edit')}
-              >
-                <option value="use">{t('tpl.share.permUse')}</option>
-                <option value="edit">{t('tpl.share.permEdit')}</option>
-              </select>
-            </div>
-            <div className="mt-2 relative">
-              {granteeType === 'user' ? (
-                <>
-                  <div className="relative">
-                    <Search size={13} className="absolute left-2 top-2 text-slate-400" />
-                    <input
-                      className="w-full border rounded pl-7 pr-3 py-1.5 text-xs"
-                      placeholder={t('tpl.share.searchUser')}
-                      value={userSearch}
-                      onChange={e => { setUserSearch(e.target.value); setGranteeId('') }}
-                    />
-                  </div>
-                  {userResults.length > 0 && (
-                    <div className="absolute z-10 w-full bg-white border rounded shadow mt-0.5 max-h-40 overflow-auto">
-                      {userResults.map(u => (
-                        <button
-                          key={u.id}
-                          className="w-full text-left px-3 py-1.5 text-xs hover:bg-blue-50"
-                          onClick={() => { setGranteeId(String(u.id)); setUserSearch(`${u.name} (${u.username})`); setUserResults([]) }}
-                        >
-                          {u.name} <span className="text-slate-400">{u.username}</span>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </>
-              ) : (
-                <select
-                  className="w-full border rounded px-3 py-1.5 text-xs"
-                  value={granteeId}
-                  onChange={e => setGranteeId(e.target.value)}
-                >
-                  <option value="">-- {t('tpl.share.selectPlaceholder', { type: GRANTEE_TYPES.find(gt => gt.value === granteeType)?.label })} --</option>
-                  {lovOptions.map(o => (
-                    <option key={o.id} value={o.id}>{o.label}</option>
-                  ))}
-                </select>
-              )}
-            </div>
-            <button
-              onClick={addShare}
-              disabled={adding || !granteeId}
-              className="mt-2 px-3 py-1.5 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
-            >
-              {adding ? t('tpl.share.adding') : t('tpl.share.addShare')}
-            </button>
+            <ShareGranteePicker
+              value={selected}
+              onChange={setSelected}
+              shareType={shareType}
+              onShareTypeChange={v => setShareType(v as 'use' | 'edit')}
+              shareTypeOptions={[
+                { value: 'use',  label: t('tpl.share.permUse') },
+                { value: 'edit', label: t('tpl.share.permEdit') },
+              ]}
+              onAdd={addShare}
+              adding={adding}
+              orgsUrl="/kb/orgs"
+            />
           </div>
 
           {/* Current shares */}
@@ -200,21 +104,19 @@ export default function TemplateShareModal({ template, onClose, onPublicChange }
             <div>
               <div className="text-xs font-medium text-slate-700 mb-2">{t('tpl.share.currentShares')}</div>
               <div className="space-y-1">
-                {shares.map(s => {
-                  const gt = GRANTEE_TYPES.find(g => g.value === s.grantee_type)
-                  return (
-                    <div key={s.id} className="flex items-center gap-2 text-xs bg-slate-50 border rounded px-3 py-1.5">
-                      <span>{gt?.icon}</span>
-                      <span className="flex-1">{s.grantee_name || s.grantee_id}</span>
-                      <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${s.share_type === 'edit' ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700'}`}>
-                        {s.share_type === 'edit' ? t('tpl.share.permEdit') : t('tpl.share.permUse')}
-                      </span>
-                      <button onClick={() => removeShare(s.id)} className="text-red-400 hover:text-red-600">
-                        <Trash2 size={12} />
-                      </button>
-                    </div>
-                  )
-                })}
+                {shares.map(s => (
+                  <div key={s.id} className="flex items-center gap-2 text-xs bg-slate-50 border rounded px-3 py-1.5">
+                    <span>{iconFor(s.grantee_type)}</span>
+                    <span className="flex-1">{s.grantee_name || s.grantee_id}</span>
+                    <span className="text-slate-400 text-[10px]">{t(`grantee.type.${s.grantee_type}`)}</span>
+                    <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${s.share_type === 'edit' ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700'}`}>
+                      {s.share_type === 'edit' ? t('tpl.share.permEdit') : t('tpl.share.permUse')}
+                    </span>
+                    <button onClick={() => removeShare(s.id)} className="text-red-400 hover:text-red-600">
+                      <Trash2 size={12} />
+                    </button>
+                  </div>
+                ))}
               </div>
             </div>
           )}

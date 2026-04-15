@@ -49,15 +49,33 @@ async function execSkill(node, vars, db, context) {
   const { userId, sessionId } = context;
   const input = interpolate(node.input || '{{ai_output}}', vars);
 
+  // 先撈 user 組織欄位，skill_access 檢查含組織/廠區層
+  const u = await db.prepare(
+    `SELECT role, dept_code, profit_center, org_section, org_group_name, factory_code FROM users WHERE id=?`
+  ).get(userId ?? 0) || {};
+
   const skill = await db.prepare(
     `SELECT * FROM skills
      WHERE UPPER(name)=UPPER(?)
        AND (owner_user_id=? OR is_public=1
             OR EXISTS (SELECT 1 FROM skill_access sa WHERE sa.skill_id=skills.id
               AND ((sa.grantee_type='user' AND sa.grantee_id=TO_CHAR(?))
-               OR  (sa.grantee_type='role' AND sa.grantee_id=(SELECT role FROM users WHERE id=?)))))
+               OR  (sa.grantee_type='role' AND sa.grantee_id=?)
+               OR  (sa.grantee_type='dept'          AND sa.grantee_id=? AND ? IS NOT NULL)
+               OR  (sa.grantee_type='profit_center' AND sa.grantee_id=? AND ? IS NOT NULL)
+               OR  (sa.grantee_type='org_section'   AND sa.grantee_id=? AND ? IS NOT NULL)
+               OR  (sa.grantee_type='factory'       AND sa.grantee_id=? AND ? IS NOT NULL)
+               OR  (sa.grantee_type='org_group'     AND sa.grantee_id=? AND ? IS NOT NULL))))
      FETCH FIRST 1 ROWS ONLY`
-  ).get(node.name, userId ?? 0, userId ?? 0, userId ?? 0);
+  ).get(
+    node.name, userId ?? 0,
+    userId ?? 0, u.role || null,
+    u.dept_code || null, u.dept_code || null,
+    u.profit_center || null, u.profit_center || null,
+    u.org_section || null, u.org_section || null,
+    u.factory_code || null, u.factory_code || null,
+    u.org_group_name || null, u.org_group_name || null,
+  );
 
   if (!skill) throw new Error(`技能「${node.name}」不存在或無存取權`);
 

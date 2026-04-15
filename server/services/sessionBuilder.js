@@ -15,10 +15,12 @@ async function buildSessionPayload(db, userId) {
     can_design_ai_select: u.can_design_ai_select,
     can_use_ai_dashboard: u.can_use_ai_dashboard,
     training_permission:  u.training_permission,
-    role_id:       u.role_id,
-    dept_code:     u.dept_code,
-    profit_center: u.profit_center,
-    org_section:   u.org_section,
+    role_id:         u.role_id,
+    dept_code:       u.dept_code,
+    profit_center:   u.profit_center,
+    org_section:     u.org_section,
+    org_group_name:  u.org_group_name,
+    factory_code:    u.factory_code,
   };
 }
 

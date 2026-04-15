@@ -76,6 +76,8 @@ app.get('/api/health', (req, res) => res.json({ status: 'ok', timestamp: new Dat
     app.use('/api/chat', require('./routes/chat'));
     console.log('[Route] /api/chat OK');
     app.use('/api/admin', require('./routes/admin'));
+
+    app.use('/api/admin/factory-translations', require('./routes/factoryTranslations'));
     console.log('[Route] /api/admin OK');
     app.use('/api/scheduled-tasks', require('./routes/scheduledTasks'));
     console.log('[Route] /api/scheduled-tasks OK');
@@ -310,6 +312,17 @@ app.get('/api/health', (req, res) => res.json({ status: 'ok', timestamp: new Dat
         await autoSeedHelp(db);
       } catch (e) {
         console.error('[HelpAutoSeed] Failed:', e.message);
+      }
+    });
+
+    // Warm-up factory code cache from ERP (FND_FLEX_VALUES_VL)
+    // 見 docs/factory-share-layer-plan.md §2.2
+    setImmediate(async () => {
+      try {
+        const factoryCache = require('./services/factoryCache');
+        await factoryCache.getFactoryMap();
+      } catch (e) {
+        console.error('[FactoryCache] Warm-up failed:', e.message);
       }
     });
 

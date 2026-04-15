@@ -457,7 +457,7 @@ async function getActiveToolDeclarations(db, userCtx = null) {
     if (!userCtx) {
       servers = await db.prepare(`SELECT * FROM mcp_servers WHERE is_active=1`).all();
     } else {
-      const { userId, roleId, deptCode, profitCenter, orgSection, orgGroupName } = userCtx;
+      const { userId, roleId, deptCode, profitCenter, orgSection, orgGroupName, factoryCode } = userCtx;
       servers = await db.prepare(
         `SELECT DISTINCT m.* FROM mcp_servers m
          WHERE m.is_active=1 AND (
@@ -469,6 +469,7 @@ async function getActiveToolDeclarations(db, userCtx = null) {
                OR (a.grantee_type='department'  AND a.grantee_id=? AND ? IS NOT NULL)
                OR (a.grantee_type='cost_center' AND a.grantee_id=? AND ? IS NOT NULL)
                OR (a.grantee_type='division'    AND a.grantee_id=? AND ? IS NOT NULL)
+               OR (a.grantee_type='factory'     AND a.grantee_id=? AND ? IS NOT NULL)
                OR (a.grantee_type='org_group'   AND a.grantee_id=? AND ? IS NOT NULL)
              )
            )
@@ -479,6 +480,7 @@ async function getActiveToolDeclarations(db, userCtx = null) {
         deptCode, deptCode,
         profitCenter, profitCenter,
         orgSection, orgSection,
+        factoryCode, factoryCode,
         orgGroupName, orgGroupName
       );
     }

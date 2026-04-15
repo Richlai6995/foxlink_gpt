@@ -68,13 +68,29 @@ router.post('/plan', budgetGuard, async (req, res) => {
     const { question, depth = 5 } = req.body;
     if (!question?.trim()) return res.status(400).json({ error: '請輸入研究問題' });
 
+    const u = req.user;
     const kbRow = await db.prepare(`
       SELECT COUNT(*) AS cnt FROM knowledge_bases kb
       WHERE kb.chunk_count > 0 AND (
         kb.creator_id=? OR kb.is_public=1
-        OR EXISTS (SELECT 1 FROM kb_access ka WHERE ka.kb_id=kb.id AND ka.grantee_type='user' AND ka.grantee_id=TO_CHAR(?))
+        OR EXISTS (SELECT 1 FROM kb_access ka WHERE ka.kb_id=kb.id AND (
+          (ka.grantee_type='user' AND ka.grantee_id=TO_CHAR(?))
+          OR (ka.grantee_type='role' AND ka.grantee_id=TO_CHAR(?))
+          OR (ka.grantee_type='dept'          AND ka.grantee_id=? AND ? IS NOT NULL)
+          OR (ka.grantee_type='profit_center' AND ka.grantee_id=? AND ? IS NOT NULL)
+          OR (ka.grantee_type='org_section'   AND ka.grantee_id=? AND ? IS NOT NULL)
+          OR (ka.grantee_type='factory'       AND ka.grantee_id=? AND ? IS NOT NULL)
+          OR (ka.grantee_type='org_group'     AND ka.grantee_id=? AND ? IS NOT NULL)
+        ))
       )
-    `).get(req.user.id, req.user.id);
+    `).get(
+      u.id, u.id, u.role_id || 0,
+      u.dept_code || null, u.dept_code || null,
+      u.profit_center || null, u.profit_center || null,
+      u.org_section || null, u.org_section || null,
+      u.factory_code || null, u.factory_code || null,
+      u.org_group_name || null, u.org_group_name || null,
+    );
     const hasKb = Number(kbRow?.cnt || 0) > 0;
 
     const { plan, inputTokens, outputTokens } = await generatePlan(question.trim(), depth, hasKb);
@@ -175,7 +191,7 @@ router.get('/accessible-resources', async (req, res) => {
     const userId = req.user.id;
     const isAdmin = req.user.role === 'admin';
     const uRow = isAdmin ? null : await db.prepare(
-      `SELECT role_id, dept_code, profit_center, org_section, org_group_name FROM users WHERE id=?`
+      `SELECT role_id, dept_code, profit_center, org_section, org_group_name, factory_code FROM users WHERE id=?`
     ).get(userId);
     const roleId = uRow?.role_id ? Number(uRow.role_id) : null;
 
@@ -196,11 +212,23 @@ router.get('/accessible-resources', async (req, res) => {
             SELECT 1 FROM kb_access ka WHERE ka.kb_id=kb.id AND (
               (ka.grantee_type='user' AND ka.grantee_id=TO_CHAR(?))
               OR (ka.grantee_type='role' AND ka.grantee_id=TO_CHAR(?))
+              OR (ka.grantee_type='dept'          AND ka.grantee_id=? AND ? IS NOT NULL)
+              OR (ka.grantee_type='profit_center' AND ka.grantee_id=? AND ? IS NOT NULL)
+              OR (ka.grantee_type='org_section'   AND ka.grantee_id=? AND ? IS NOT NULL)
+              OR (ka.grantee_type='factory'       AND ka.grantee_id=? AND ? IS NOT NULL)
+              OR (ka.grantee_type='org_group'     AND ka.grantee_id=? AND ? IS NOT NULL)
             )
           )
         )
         ORDER BY kb.name
-      `).all(userId, userId, roleId);
+      `).all(
+        userId, userId, roleId,
+        uRow?.dept_code || null, uRow?.dept_code || null,
+        uRow?.profit_center || null, uRow?.profit_center || null,
+        uRow?.org_section || null, uRow?.org_section || null,
+        uRow?.factory_code || null, uRow?.factory_code || null,
+        uRow?.org_group_name || null, uRow?.org_group_name || null,
+      );
     }
 
     // Dify KBs — 改走 dify_access
@@ -220,6 +248,7 @@ router.get('/accessible-resources', async (req, res) => {
           OR (a.grantee_type='department'  AND a.grantee_id=? AND ? IS NOT NULL)
           OR (a.grantee_type='cost_center' AND a.grantee_id=? AND ? IS NOT NULL)
           OR (a.grantee_type='division'    AND a.grantee_id=? AND ? IS NOT NULL)
+          OR (a.grantee_type='factory'     AND a.grantee_id=? AND ? IS NOT NULL)
           OR (a.grantee_type='org_group'   AND a.grantee_id=? AND ? IS NOT NULL)
         )
         ORDER BY d.sort_order, d.name
@@ -229,6 +258,7 @@ router.get('/accessible-resources', async (req, res) => {
         uRow?.dept_code, uRow?.dept_code,
         uRow?.profit_center, uRow?.profit_center,
         uRow?.org_section, uRow?.org_section,
+        uRow?.factory_code, uRow?.factory_code,
         uRow?.org_group_name, uRow?.org_group_name
       );
     }
@@ -250,6 +280,7 @@ router.get('/accessible-resources', async (req, res) => {
           OR (a.grantee_type='department'  AND a.grantee_id=? AND ? IS NOT NULL)
           OR (a.grantee_type='cost_center' AND a.grantee_id=? AND ? IS NOT NULL)
           OR (a.grantee_type='division'    AND a.grantee_id=? AND ? IS NOT NULL)
+          OR (a.grantee_type='factory'     AND a.grantee_id=? AND ? IS NOT NULL)
           OR (a.grantee_type='org_group'   AND a.grantee_id=? AND ? IS NOT NULL)
         )
         ORDER BY m.name
@@ -259,6 +290,7 @@ router.get('/accessible-resources', async (req, res) => {
         uRow?.dept_code, uRow?.dept_code,
         uRow?.profit_center, uRow?.profit_center,
         uRow?.org_section, uRow?.org_section,
+        uRow?.factory_code, uRow?.factory_code,
         uRow?.org_group_name, uRow?.org_group_name
       );
     }

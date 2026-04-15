@@ -1627,6 +1627,17 @@ async function runMigrations(db) {
     CONSTRAINT help_trans_uq UNIQUE (section_id, lang)
   )`);
 
+  // ── Factory Code Translations (en / vi only — zh-TW 來自 ERP FND_FLEX_VALUES_VL) ──
+  // 見 docs/factory-share-layer-plan.md §2.1
+  await createTable('FACTORY_CODE_TRANSLATIONS', `CREATE TABLE factory_code_translations (
+    id            NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    factory_code  VARCHAR2(30)  NOT NULL,
+    lang          VARCHAR2(10)  NOT NULL,
+    factory_name  NVARCHAR2(200) NOT NULL,
+    updated_at    TIMESTAMP     DEFAULT SYSTIMESTAMP,
+    CONSTRAINT factory_trans_uq UNIQUE (factory_code, lang)
+  )`);
+
   // ── Training Platform: 權限欄位 ──────────────────────────────────────────────
   // training_permission: 'none' | 'publish' | 'publish_edit'  (NULL on users = inherit from role)
   await addCol('ROLES', 'TRAINING_PERMISSION', "VARCHAR2(20) DEFAULT 'none'");

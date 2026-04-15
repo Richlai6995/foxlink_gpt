@@ -234,7 +234,7 @@ router.get('/tools-catalog', async (req, res) => {
     let skills;
     try {
       const userProfile = await db.prepare(
-        'SELECT role, dept_code, profit_center, org_section, org_group_name FROM users WHERE id=?'
+        'SELECT role, dept_code, profit_center, org_section, org_group_name, factory_code FROM users WHERE id=?'
       ).get(req.user.id);
       const u = userProfile || {};
       skills = await db.prepare(
@@ -248,6 +248,7 @@ router.get('/tools-catalog', async (req, res) => {
                 OR (sa.grantee_type='dept' AND sa.grantee_id=? AND ? IS NOT NULL)
                 OR (sa.grantee_type='profit_center' AND sa.grantee_id=? AND ? IS NOT NULL)
                 OR (sa.grantee_type='org_section' AND sa.grantee_id=? AND ? IS NOT NULL)
+                OR (sa.grantee_type='factory' AND sa.grantee_id=? AND ? IS NOT NULL)
                 OR (sa.grantee_type='org_group' AND sa.grantee_id=? AND ? IS NOT NULL)
               )
             )
@@ -258,6 +259,7 @@ router.get('/tools-catalog', async (req, res) => {
         u.dept_code, u.dept_code,
         u.profit_center, u.profit_center,
         u.org_section, u.org_section,
+        u.factory_code, u.factory_code,
         u.org_group_name, u.org_group_name,
       );
     } catch (_) {
@@ -271,6 +273,9 @@ router.get('/tools-catalog', async (req, res) => {
     }
 
     // KBs — knowledge_bases has no is_active; use creator/public/kb_access filter
+    const kbUser = await db.prepare(
+      'SELECT role, role_id, dept_code, profit_center, org_section, org_group_name, factory_code FROM users WHERE id=?'
+    ).get(req.user.id) || {};
     const kbs = await db.prepare(
       `SELECT kb.id, kb.name, kb.description, kb.name_zh, kb.name_en, kb.name_vi, kb.desc_zh, kb.desc_en, kb.desc_vi FROM knowledge_bases kb
        WHERE kb.creator_id=?
@@ -279,11 +284,23 @@ router.get('/tools-catalog', async (req, res) => {
           OR EXISTS (
             SELECT 1 FROM kb_access ka WHERE ka.kb_id=kb.id AND (
               (ka.grantee_type='user' AND ka.grantee_id=TO_CHAR(?))
-              OR (ka.grantee_type='role' AND ka.grantee_id=(SELECT role FROM users WHERE id=?))
+              OR (ka.grantee_type='role' AND ka.grantee_id=TO_CHAR(?))
+              OR (ka.grantee_type='dept'          AND ka.grantee_id=? AND ? IS NOT NULL)
+              OR (ka.grantee_type='profit_center' AND ka.grantee_id=? AND ? IS NOT NULL)
+              OR (ka.grantee_type='org_section'   AND ka.grantee_id=? AND ? IS NOT NULL)
+              OR (ka.grantee_type='factory'       AND ka.grantee_id=? AND ? IS NOT NULL)
+              OR (ka.grantee_type='org_group'     AND ka.grantee_id=? AND ? IS NOT NULL)
             )
           )
        ORDER BY kb.name ASC`
-    ).all(req.user.id, req.user.id, req.user.id, req.user.id);
+    ).all(
+      req.user.id, req.user.id, req.user.id, kbUser.role_id || 0,
+      kbUser.dept_code || null, kbUser.dept_code || null,
+      kbUser.profit_center || null, kbUser.profit_center || null,
+      kbUser.org_section || null, kbUser.org_section || null,
+      kbUser.factory_code || null, kbUser.factory_code || null,
+      kbUser.org_group_name || null, kbUser.org_group_name || null,
+    );
 
     res.json({
       skills: skills.map(localize),

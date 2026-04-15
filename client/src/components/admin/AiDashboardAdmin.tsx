@@ -6,56 +6,28 @@ import { useState, useEffect } from 'react'
 import { Pause, Play, Share2, Trash2, Plus, CheckCircle, XCircle } from 'lucide-react'
 import api from '../../lib/api'
 import type { AiSelectProject, AiProjectShare } from '../../types'
-import UserPicker from '../common/UserPicker'
-
-const GRANTEE_LABELS: Record<string, string> = {
-  user: '使用者', role: '角色', department: '部門', cost_center: '利潤中心', division: '事業處',
-}
+import ShareGranteePicker from '../common/ShareGranteePicker'
+import type { GranteeSelection as GranteeSelectionType } from '../../types'
+import { useTranslation } from 'react-i18next'
 
 function ProjectSharePanel({ project, onClose }: { project: AiSelectProject; onClose: () => void }) {
+  const { t } = useTranslation()
   const [shares, setShares] = useState<AiProjectShare[]>([])
-  const [granteeType, setGranteeType] = useState('user')
+  const [selected, setSelected] = useState<GranteeSelectionType | null>(null)
   const [shareType, setShareType] = useState<'use' | 'develop'>('use')
-  const [selected, setSelected] = useState<{ id: string; name: string } | null>(null)
-  const [search, setSearch] = useState('')
-  const [roleOptions, setRoleOptions] = useState<{ id: string; name: string }[]>([])
-  const [orgs, setOrgs] = useState<{ depts: any[]; profit_centers: any[]; org_sections: any[] } | null>(null)
-  const [orgOptions, setOrgOptions] = useState<{ id: string; name: string }[]>([])
-  const [userPickerId, setUserPickerId] = useState('')
-  const [userPickerDisplay, setUserPickerDisplay] = useState('')
   const [loading, setLoading] = useState(false)
 
   const load = () => api.get(`/dashboard/projects/${project.id}/shares`).then(r => setShares(r.data)).catch(() => {})
-  useEffect(() => { load(); api.get('/dashboard/orgs').then(r => setOrgs(r.data)).catch(() => {}) }, [project.id])
-
-  // Load role options when type=role + search changes
-  useEffect(() => {
-    if (granteeType !== 'role') return
-    api.get('/roles').then((r: any) => {
-      const filtered = (r.data || []).filter((rl: any) => !search || rl.name.toLowerCase().includes(search.toLowerCase()))
-      setRoleOptions(filtered.map((rl: any) => ({ id: String(rl.id), name: rl.name })))
-    }).catch(() => {})
-  }, [granteeType, search])
-
-  // Build org options
-  useEffect(() => {
-    if (!orgs) return
-    if (granteeType === 'department') setOrgOptions((orgs.depts || []).filter((d: any) => !search || d.code.includes(search) || d.name?.includes(search)).map((d: any) => ({ id: d.code, name: d.name || d.code })))
-    else if (granteeType === 'cost_center') setOrgOptions((orgs.profit_centers || []).filter((d: any) => !search || d.code.includes(search) || d.name?.includes(search)).map((d: any) => ({ id: d.code, name: d.name || d.code })))
-    else if (granteeType === 'division') setOrgOptions((orgs.org_sections || []).filter((d: any) => !search || d.code.includes(search) || d.name?.includes(search)).map((d: any) => ({ id: d.code, name: d.name || d.code })))
-    else setOrgOptions([])
-  }, [granteeType, search, orgs])
-
-  const resetForm = () => { setSelected(null); setSearch(''); setUserPickerId(''); setUserPickerDisplay('') }
-  const changeType = (t: string) => { setGranteeType(t); resetForm() }
+  useEffect(() => { load() }, [project.id])
 
   const add = async () => {
-    const granteeId = selected?.id || ''
-    if (!granteeId.trim()) return
+    if (!selected) return
     setLoading(true)
     try {
-      await api.post(`/dashboard/projects/${project.id}/shares`, { grantee_type: granteeType, grantee_id: granteeId, share_type: shareType })
-      resetForm()
+      await api.post(`/dashboard/projects/${project.id}/shares`, {
+        grantee_type: selected.type, grantee_id: selected.id, share_type: shareType,
+      })
+      setSelected(null)
       load()
     } catch (e: any) { alert(e?.response?.data?.error || '新增失敗') }
     finally { setLoading(false) }
@@ -65,10 +37,6 @@ function ProjectSharePanel({ project, onClose }: { project: AiSelectProject; onC
     await api.delete(`/dashboard/projects/${project.id}/shares/${shareId}`)
     load()
   }
-
-  const isOrgType = ['department', 'cost_center', 'division'].includes(granteeType)
-  const showOptions = (granteeType === 'role' || isOrgType) && !selected
-  const currentOptions = granteeType === 'role' ? roleOptions : orgOptions
 
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
@@ -80,61 +48,30 @@ function ProjectSharePanel({ project, onClose }: { project: AiSelectProject; onC
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
           <div className="bg-gray-50 rounded-xl p-3 space-y-2">
             <p className="text-xs text-gray-500 font-medium">新增分享對象</p>
-            <div className="flex gap-2">
-              <select className="border border-gray-200 rounded-lg px-2 py-1.5 text-sm flex-shrink-0"
-                value={granteeType} onChange={e => changeType(e.target.value)}>
-                {Object.entries(GRANTEE_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-              </select>
-              {granteeType === 'user' ? (
-                <UserPicker value={userPickerId} display={userPickerDisplay}
-                  onChange={(id, display) => { setUserPickerId(id); setUserPickerDisplay(display); setSelected(id ? { id, name: display } : null) }}
-                  placeholder="搜尋姓名/帳號/工號" className="flex-1 border border-gray-200 rounded-lg px-2 py-1.5 text-sm" />
-              ) : (
-                <div className="relative flex-1">
-                  <input value={selected ? selected.name : search}
-                    onChange={e => { setSearch(e.target.value); setSelected(null) }}
-                    placeholder={`搜尋${GRANTEE_LABELS[granteeType]}`}
-                    className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm" />
-                  {showOptions && currentOptions.length > 0 && (
-                    <div className="absolute z-10 w-full bg-white border border-gray-200 rounded-lg shadow-lg mt-1 max-h-36 overflow-y-auto">
-                      {currentOptions.map(o => (
-                        <button key={o.id} type="button" onClick={() => { setSelected(o); setSearch('') }}
-                          className="w-full text-left px-3 py-1.5 text-xs hover:bg-blue-50 flex justify-between">
-                          <span>{o.name}</span><span className="text-gray-400 font-mono">{o.id}</span>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-              <select value={shareType} onChange={e => setShareType(e.target.value as any)}
-                className="border border-gray-200 rounded-lg px-2 py-1.5 text-sm flex-shrink-0">
-                <option value="use">使用</option>
-                <option value="develop">開發及使用</option>
-              </select>
-              <button onClick={add} disabled={loading || !selected}
-                className="flex items-center gap-1 text-xs bg-blue-600 text-white rounded-lg px-3 py-1.5 hover:bg-blue-700 disabled:opacity-40 whitespace-nowrap">
-                <Plus size={12} /> 新增
-              </button>
-            </div>
+            <ShareGranteePicker
+              value={selected}
+              onChange={setSelected}
+              shareType={shareType}
+              onShareTypeChange={v => setShareType(v as 'use' | 'develop')}
+              shareTypeOptions={[
+                { value: 'use',     label: '使用' },
+                { value: 'develop', label: '開發及使用' },
+              ]}
+              onAdd={add}
+              adding={loading}
+            />
           </div>
           {shares.length === 0 ? (
             <p className="text-xs text-gray-400 text-center py-2">尚無分享設定</p>
           ) : (
             <div className="space-y-1.5">
-              {shares.map(s => {
-                const userExtra = s.grantee_type === 'user'
-                  ? [s.grantee_username, s.grantee_employee_id].filter(Boolean).join(' · ')
-                  : ''
-                const displayName = s.grantee_name || s.grantee_id
-                return (
+              {shares.map(s => (
                 <div key={s.id} className="flex items-center justify-between bg-gray-50 rounded-lg px-3 py-2">
                   <div className="text-sm text-gray-800 truncate flex-1">
-                    {displayName}
-                    {userExtra && <span className="text-xs text-gray-400 ml-2">({userExtra})</span>}
+                    {s.grantee_name || s.grantee_id}
                   </div>
                   <div className="flex items-center gap-2 ml-2 flex-shrink-0">
-                    <span className="text-xs text-gray-400">{GRANTEE_LABELS[s.grantee_type] || s.grantee_type} · {s.grantee_id}</span>
+                    <span className="text-xs text-gray-400">{t(`grantee.type.${s.grantee_type}`, { defaultValue: s.grantee_type })}</span>
                     <span className={`text-xs px-1.5 py-0.5 rounded ${s.share_type === 'develop' ? 'bg-amber-100 text-amber-600' : 'bg-green-100 text-green-600'}`}>
                       {s.share_type === 'develop' ? '開發及使用' : '使用'}
                     </span>
@@ -143,8 +80,7 @@ function ProjectSharePanel({ project, onClose }: { project: AiSelectProject; onC
                     </button>
                   </div>
                 </div>
-                )
-              })}
+              ))}
             </div>
           )}
         </div>

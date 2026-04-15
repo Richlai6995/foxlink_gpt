@@ -8,6 +8,7 @@ const { v4: uuid } = require('uuid');
 const { verifyToken } = require('./auth');
 const { db } = require('../database-oracle');
 const svc = require('../services/docTemplateService');
+const { resolveGranteeNamesInRows, getLangFromReq } = require('../services/granteeNameResolver');
 
 const router = express.Router();
 router.use(verifyToken);
@@ -493,6 +494,7 @@ router.get('/:id/shares', async (req, res) => {
       ...s,
       grantee_name: s.grantee_type === 'user' ? (userMap[Number(s.grantee_id)] || s.grantee_id) : s.grantee_id,
     }));
+    await resolveGranteeNamesInRows(result, getLangFromReq(req), db);
 
     res.json(result);
   } catch (e) {

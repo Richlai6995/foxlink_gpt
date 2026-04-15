@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Users, BarChart3, Shield, AlertTriangle, Database, Mail, ArrowLeft, Cpu, DollarSign, CalendarClock, Plug, Zap, UserCog, Sparkles, Code2, Search, KeyRound, MonitorPlay, Lock, Activity, MessageSquare, Languages, GraduationCap, TicketCheck, Mic } from 'lucide-react'
+import { Users, BarChart3, Shield, AlertTriangle, Database, Mail, ArrowLeft, Cpu, DollarSign, CalendarClock, Plug, Zap, UserCog, Sparkles, Code2, Search, KeyRound, MonitorPlay, Lock, Activity, MessageSquare, Languages, GraduationCap, TicketCheck, Mic, Factory } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import UserManagement from '../components/admin/UserManagement'
 import TokenUsagePanel from '../components/admin/TokenUsage'
@@ -26,12 +26,13 @@ import MonitorPage from '../components/monitor/MonitorPage'
 import DbSourcesPanel from '../components/admin/DbSourcesPanel'
 import WebexLogsPanel from '../components/admin/WebexLogsPanel'
 import HelpTranslationPanel from '../components/admin/HelpTranslationPanel'
+import FactoryTranslationsPanel from '../components/admin/FactoryTranslationsPanel'
 import TrainingAdmin from '../components/admin/TrainingAdmin'
 import FeedbackCategoryManager from '../components/feedback/admin/FeedbackCategoryManager'
 import FeedbackSLAConfig from '../components/feedback/admin/FeedbackSLAConfig'
 import FeedbackStatsPanel from '../components/feedback/FeedbackStatsPanel'
 import VoiceInputSettingsPanel from '../components/admin/VoiceInputSettings'
-type Tab = 'users' | 'roles' | 'tokens' | 'audit' | 'keywords' | 'db' | 'mail' | 'llm' | 'vector-defaults' | 'cost' | 'scheduled' | 'mcp' | 'dify' | 'kb' | 'skills' | 'code-runners' | 'research' | 'api-keys' | 'ai-dashboard' | 'data-permissions' | 'monitor' | 'db-sources' | 'webex-logs' | 'help-translation' | 'training' | 'feedback' | 'voice-input'
+type Tab = 'users' | 'roles' | 'tokens' | 'audit' | 'keywords' | 'db' | 'mail' | 'llm' | 'vector-defaults' | 'cost' | 'scheduled' | 'mcp' | 'dify' | 'kb' | 'skills' | 'code-runners' | 'research' | 'api-keys' | 'ai-dashboard' | 'data-permissions' | 'monitor' | 'db-sources' | 'webex-logs' | 'help-translation' | 'factory-translations' | 'training' | 'feedback' | 'voice-input'
 
 export default function AdminDashboard() {
   const [activeTab, setActiveTab] = useState<Tab>('users')
@@ -65,6 +66,7 @@ export default function AdminDashboard() {
     { id: 'scheduled', label: t('admin.tabs.scheduled'), icon: <CalendarClock size={16} className="text-cyan-500" /> },
     { id: 'webex-logs', label: 'Webex Bot 日誌', icon: <MessageSquare size={16} className="text-purple-500" /> },
     { id: 'help-translation', label: '說明文件翻譯', icon: <Languages size={16} className="text-sky-500" /> },
+    { id: 'factory-translations', label: t('admin.tabs.factoryTranslations', '廠區翻譯'), icon: <Factory size={16} className="text-indigo-500" /> },
     // ─ 教育訓練 ─
     { id: 'training', label: '教育訓練報表', icon: <GraduationCap size={16} className="text-sky-400" /> },
     // ─ 問題反饋 ─
@@ -139,6 +141,7 @@ export default function AdminDashboard() {
           {activeTab === 'data-permissions' && <DataPermissionsPanel />}
           {activeTab === 'db-sources' && <DbSourcesPanel />}
           {activeTab === 'help-translation' && <HelpTranslationPanel />}
+          {activeTab === 'factory-translations' && <FactoryTranslationsPanel />}
           {activeTab === 'training' && <TrainingAdmin />}
           {activeTab === 'feedback' && (
             <div className="space-y-8">

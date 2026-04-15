@@ -284,6 +284,7 @@ function buildAccessFilter(accessAlias, fkCol, tableAlias, user) {
       OR (${a}.grantee_type='department'  AND ${a}.grantee_id=? AND ? IS NOT NULL)
       OR (${a}.grantee_type='cost_center' AND ${a}.grantee_id=? AND ? IS NOT NULL)
       OR (${a}.grantee_type='division'    AND ${a}.grantee_id=? AND ? IS NOT NULL)
+      OR (${a}.grantee_type='factory'     AND ${a}.grantee_id=? AND ? IS NOT NULL)
       OR (${a}.grantee_type='org_group'   AND ${a}.grantee_id=? AND ? IS NOT NULL)
     )
   )`;
@@ -293,6 +294,7 @@ function buildAccessFilter(accessAlias, fkCol, tableAlias, user) {
     user.dept_code ?? null, user.dept_code ?? null,
     user.profit_center ?? null, user.profit_center ?? null,
     user.org_section ?? null, user.org_section ?? null,
+    user.factory_code ?? null, user.factory_code ?? null,
     user.org_group_name ?? null, user.org_group_name ?? null,
   ];
   return { clause, params };
@@ -429,10 +431,22 @@ async function buildToolList(db, user, lang) {
           OR EXISTS (
             SELECT 1 FROM skill_access sa WHERE sa.skill_id=skills.id
             AND ((sa.grantee_type='user' AND sa.grantee_id=TO_CHAR(?))
-              OR (sa.grantee_type='role' AND sa.grantee_id=TO_CHAR(?)))
+              OR (sa.grantee_type='role' AND sa.grantee_id=TO_CHAR(?))
+              OR (sa.grantee_type='dept'          AND sa.grantee_id=? AND ? IS NOT NULL)
+              OR (sa.grantee_type='profit_center' AND sa.grantee_id=? AND ? IS NOT NULL)
+              OR (sa.grantee_type='org_section'   AND sa.grantee_id=? AND ? IS NOT NULL)
+              OR (sa.grantee_type='factory'       AND sa.grantee_id=? AND ? IS NOT NULL)
+              OR (sa.grantee_type='org_group'     AND sa.grantee_id=? AND ? IS NOT NULL))
           )
        ORDER BY name ASC`
-    ).all(user.id, user.id, user.role_id || 0).catch(e => {
+    ).all(
+      user.id, user.id, user.role_id || 0,
+      user.dept_code || null, user.dept_code || null,
+      user.profit_center || null, user.profit_center || null,
+      user.org_section || null, user.org_section || null,
+      user.factory_code || null, user.factory_code || null,
+      user.org_group_name || null, user.org_group_name || null,
+    ).catch(e => {
       console.warn('[Webex] buildToolList skills error:', e.message);
       return [];
     }),
@@ -445,11 +459,22 @@ async function buildToolList(db, user, lang) {
            SELECT 1 FROM kb_access ka WHERE ka.kb_id=kb.id
            AND ((ka.grantee_type='user' AND ka.grantee_id=TO_CHAR(?))
              OR (ka.grantee_type='role' AND ka.grantee_id=TO_CHAR(?))
-             OR (ka.grantee_type='dept' AND ka.grantee_id=? AND ? IS NOT NULL))
+             OR (ka.grantee_type='dept'          AND ka.grantee_id=? AND ? IS NOT NULL)
+             OR (ka.grantee_type='profit_center' AND ka.grantee_id=? AND ? IS NOT NULL)
+             OR (ka.grantee_type='org_section'   AND ka.grantee_id=? AND ? IS NOT NULL)
+             OR (ka.grantee_type='factory'       AND ka.grantee_id=? AND ? IS NOT NULL)
+             OR (ka.grantee_type='org_group'     AND ka.grantee_id=? AND ? IS NOT NULL))
          )
        )
        ORDER BY kb.name ASC`
-    ).all(user.id, user.id, user.role_id || 0, user.dept_code, user.dept_code).catch(e => {
+    ).all(
+      user.id, user.id, user.role_id || 0,
+      user.dept_code || null, user.dept_code || null,
+      user.profit_center || null, user.profit_center || null,
+      user.org_section || null, user.org_section || null,
+      user.factory_code || null, user.factory_code || null,
+      user.org_group_name || null, user.org_group_name || null,
+    ).catch(e => {
       console.warn('[Webex] buildToolList selfKB error:', e.message);
       return [];
     }),
@@ -568,10 +593,22 @@ async function loadFunctionDeclarations(db, user) {
            OR EXISTS (SELECT 1 FROM kb_access ka WHERE ka.kb_id=kb.id AND (
              (ka.grantee_type='user' AND ka.grantee_id=TO_CHAR(?))
              OR (ka.grantee_type='role' AND ka.grantee_id=TO_CHAR(?))
+             OR (ka.grantee_type='dept'          AND ka.grantee_id=? AND ? IS NOT NULL)
+             OR (ka.grantee_type='profit_center' AND ka.grantee_id=? AND ? IS NOT NULL)
+             OR (ka.grantee_type='org_section'   AND ka.grantee_id=? AND ? IS NOT NULL)
+             OR (ka.grantee_type='factory'       AND ka.grantee_id=? AND ? IS NOT NULL)
+             OR (ka.grantee_type='org_group'     AND ka.grantee_id=? AND ? IS NOT NULL)
            ))
          )
          ORDER BY kb.name ASC`
-      ).all(user.id, user.id, user.role_id || 0);
+      ).all(
+        user.id, user.id, user.role_id || 0,
+        user.dept_code || null, user.dept_code || null,
+        user.profit_center || null, user.profit_center || null,
+        user.org_section || null, user.org_section || null,
+        user.factory_code || null, user.factory_code || null,
+        user.org_group_name || null, user.org_group_name || null,
+      );
 
     for (const kb of kbs) {
       const fnName = `selfkb_${kb.id.replace(/-/g, '_')}`;

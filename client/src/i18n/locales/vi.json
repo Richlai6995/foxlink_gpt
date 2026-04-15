@@ -203,6 +203,20 @@
       "chatting": "Đang trò chuyện"
     }
   },
+  "grantee": {
+    "type": {
+      "user": "Người dùng",
+      "role": "Vai trò",
+      "factory": "Nhà máy",
+      "department": "Phòng ban",
+      "cost_center": "Trung tâm lợi nhuận",
+      "division": "Khối sản xuất",
+      "org_group": "Nhóm tổ chức"
+    },
+    "searchPlaceholder": "Tìm theo mã hoặc tên...",
+    "noMatch": "Không có kết quả",
+    "loading": "Đang tải..."
+  },
   "admin": {
     "title": "Quản trị hệ thống",
     "backToChat": "Quay lại trò chuyện",
@@ -229,7 +243,33 @@
       "mail": "Cài đặt email",
       "llm": "Cài đặt mô hình LLM",
       "vectorDefaults": "Mô hình vector mặc định",
-      "factoryLanguages": "Cài đặt ngôn ngữ nhà máy"
+      "factoryLanguages": "Cài đặt ngôn ngữ nhà máy",
+      "factoryTranslations": "Bản dịch nhà máy"
+    },
+    "factoryTrans": {
+      "title": "Quản lý bản dịch nhà máy",
+      "searchPlaceholder": "Tìm mã hoặc tên...",
+      "overwriteMode": "Ghi đè bản dịch hiện có",
+      "llmTranslate": "LLM dịch hàng loạt en/vi",
+      "refreshCache": "Tải lại cache ERP",
+      "refreshFailed": "Tải lại cache ERP thất bại",
+      "saveFailed": "Lưu thất bại",
+      "translateFailed": "LLM dịch thất bại",
+      "confirmOverwrite": "Xác nhận ghi đè tất cả bản dịch en/vi bằng LLM?",
+      "confirmTranslate": "Xác nhận dùng LLM dịch bổ sung các en/vi còn thiếu?",
+      "cacheInfo": "Cache ERP: {{size}} mục, tải {{age}} phút trước",
+      "cacheNotLoaded": "Cache ERP chưa tải",
+      "notTranslated": "(chưa dịch)",
+      "noMatch": "Không có nhà máy phù hợp",
+      "empty": "Không có dữ liệu ERP",
+      "col": {
+        "code": "Mã",
+        "zhTW": "Trung (ERP)",
+        "en": "English",
+        "vi": "Tiếng Việt",
+        "updatedAt": "Cập nhật"
+      },
+      "footerHint": "Tên zh-TW lấy từ ERP FND_FLEX_VALUES_VL (flex value set 1008041), chỉ đọc; en / vi là bản dịch cục bộ."
     }
   },
   "users": {
@@ -2146,6 +2186,7 @@
       "public": "Công khai (Tất cả)",
       "user": "Người dùng",
       "role": "Vai trò",
+      "factory": "Nhà máy",
       "department": "Phòng ban",
       "cost_center": "Trung tâm chi phí",
       "division": "Bộ phận",

@@ -7,6 +7,8 @@ import api from '../lib/api'
 import { fmtTW } from '../lib/fmtTW'
 import TranslationFields, { type TranslationData } from '../components/common/TranslationFields'
 import UserPicker from '../components/common/UserPicker'
+import ShareGranteePicker from '../components/common/ShareGranteePicker'
+import type { GranteeSelection as SkillGranteeSelection } from '../types'
 import TagInput from '../components/common/TagInput'
 import WorkflowEditor from '../components/workflow/WorkflowEditor'
 import TemplatePickerPopover from '../components/templates/TemplatePickerPopover'
@@ -957,6 +959,19 @@ interface OrgLov {
     org_groups: { name: string }[]
 }
 
+// skills 後端用舊 grantee_type 名稱 (dept/profit_center/org_section)，共用元件用標準名稱
+// 見 docs/factory-share-layer-plan.md §3.2 「skills 歷史命名」
+const SKILL_STD_TO_LEGACY: Record<string, string> = {
+    department:  'dept',
+    cost_center: 'profit_center',
+    division:    'org_section',
+}
+const SKILL_LEGACY_TO_STD: Record<string, string> = {
+    dept:          'department',
+    profit_center: 'cost_center',
+    org_section:   'division',
+}
+
 function SkillShareModal({ skill, onClose }: { skill: Skill; onClose: () => void }) {
     const { t, i18n } = useTranslation()
     const localName = (sk: any) => {
@@ -968,14 +983,8 @@ function SkillShareModal({ skill, onClose }: { skill: Skill; onClose: () => void
     const [loadingGrants, setLoadingGrants] = useState(false)
     const [submitting, setSubmitting] = useState(false)
     const [error, setError] = useState('')
-    const [granteeType, setGranteeType] = useState<string>('user')
-    const [granteeId, setGranteeId] = useState<string>('')
+    const [selected, setSelected] = useState<SkillGranteeSelection | null>(null)
     const [shareType, setShareType] = useState<'use' | 'develop'>('use')
-    const [userDisplay, setUserDisplay] = useState<string>('')
-    const [roles, setRoles] = useState<{ id: number; name: string }[]>([])
-    const [orgs, setOrgs] = useState<OrgLov | null>(null)
-    const [orgSearch, setOrgSearch] = useState('')
-    const [orgOptions, setOrgOptions] = useState<{ id: string; name: string; sub?: string }[]>([])
 
     const loadGrants = useCallback(async () => {
         setLoadingGrants(true)
@@ -991,51 +1000,17 @@ function SkillShareModal({ skill, onClose }: { skill: Skill; onClose: () => void
 
     useEffect(() => { loadGrants() }, [loadGrants])
 
-    useEffect(() => {
-        api.get('/roles').then(r => setRoles(r.data || [])).catch(() => {})
-        api.get('/dashboard/orgs').then(r => setOrgs(r.data)).catch(() => {})
-    }, [])
-
-    // 計算 org LOV 選項
-    useEffect(() => {
-        if (!orgs) { setOrgOptions([]); return }
-        const q = orgSearch.toLowerCase()
-        if (granteeType === 'dept') {
-            setOrgOptions(orgs.depts.filter(d => !q || d.code.toLowerCase().includes(q) || (d.name || '').toLowerCase().includes(q))
-                .map(d => ({ id: d.code, name: d.name || d.code, sub: d.code })))
-        } else if (granteeType === 'profit_center') {
-            setOrgOptions(orgs.profit_centers.filter(d => !q || d.code.toLowerCase().includes(q) || (d.name || '').toLowerCase().includes(q))
-                .map(d => ({ id: d.code, name: d.name || d.code, sub: d.code })))
-        } else if (granteeType === 'org_section') {
-            setOrgOptions(orgs.org_sections.filter(d => !q || d.code.toLowerCase().includes(q) || (d.name || '').toLowerCase().includes(q))
-                .map(d => ({ id: d.code, name: d.name || d.code, sub: d.code })))
-        } else if (granteeType === 'org_group') {
-            setOrgOptions(orgs.org_groups.filter(d => !q || d.name.toLowerCase().includes(q))
-                .map(d => ({ id: d.name, name: d.name })))
-        } else {
-            setOrgOptions([])
-        }
-    }, [granteeType, orgSearch, orgs])
-
-    const handleTypeChange = (t: string) => {
-        setGranteeType(t)
-        setGranteeId('')
-        setUserDisplay('')
-        setOrgSearch('')
-    }
-
     const handleAdd = async () => {
-        const finalId = granteeType === 'user' ? granteeId : granteeId.trim()
-        if (!finalId) return setError(t('skills.shareFillTarget'))
+        if (!selected) return setError(t('skills.shareFillTarget'))
         setSubmitting(true)
         setError('')
         try {
+            const legacyType = SKILL_STD_TO_LEGACY[selected.type] || selected.type
             const res = await api.post(`/skills/${skill.id}/access`, {
-                grantee_type: granteeType, grantee_id: finalId, share_type: shareType
+                grantee_type: legacyType, grantee_id: selected.id, share_type: shareType
             })
             setGrants(Array.isArray(res.data) ? res.data : grants)
-            setGranteeId('')
-            setUserDisplay('')
+            setSelected(null)
         } catch (e: any) {
             setError(e.response?.data?.error || t('skills.shareAddFailed'))
         } finally {
@@ -1091,78 +1066,18 @@ function SkillShareModal({ skill, onClose }: { skill: Skill; onClose: () => void
                     {/* Add form */}
                     <div className="space-y-3">
                         <p className="text-xs font-medium text-slate-600 uppercase tracking-wide">{t('skills.shareAddTitle')}</p>
-                        <div className="flex gap-2">
-                            <select
-                                value={granteeType}
-                                onChange={e => handleTypeChange(e.target.value)}
-                                className="border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 shrink-0"
-                            >
-                                {Object.entries(GRANTEE_TYPE_KEYS).map(([val, key]) => (
-                                    <option key={val} value={val}>{t(key)}</option>
-                                ))}
-                            </select>
-
-                            {granteeType === 'user' ? (
-                                <UserPicker
-                                    value={granteeId}
-                                    display={userDisplay}
-                                    onChange={(id, disp) => { setGranteeId(id); setUserDisplay(disp) }}
-                                    className="flex-1"
-                                />
-                            ) : granteeType === 'role' ? (
-                                <select
-                                    value={granteeId}
-                                    onChange={e => setGranteeId(e.target.value)}
-                                    className="flex-1 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
-                                >
-                                    <option value="">{t('skills.shareSelectRole')}</option>
-                                    {roles.map(r => <option key={r.id} value={String(r.id)}>{r.name}</option>)}
-                                </select>
-                            ) : (
-                                <div className="flex-1 relative">
-                                    <input
-                                        value={orgSearch || granteeId}
-                                        onChange={e => {
-                                            const v = e.target.value
-                                            setOrgSearch(v)
-                                            setGranteeId(v.trim()) // free-text fallback
-                                        }}
-                                        placeholder={orgOptions.length > 0
-                                            ? t('skills.shareFilterPlaceholder', { type: t(GRANTEE_TYPE_KEYS[granteeType]) })
-                                            : t('skills.shareInputPlaceholder', { type: t(GRANTEE_TYPE_KEYS[granteeType]) })}
-                                        className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
-                                    />
-                                    {orgOptions.length > 0 && (
-                                        <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg z-20 max-h-40 overflow-y-auto">
-                                            {orgOptions.map(opt => (
-                                                <button key={opt.id} type="button"
-                                                    onClick={() => { setGranteeId(opt.id); setOrgSearch(opt.name); setOrgOptions([]) }}
-                                                    className="w-full text-left px-3 py-1.5 text-sm hover:bg-blue-50 flex items-center justify-between text-slate-700">
-                                                    <span>{opt.name}</span>
-                                                    {opt.sub && <span className="text-xs text-slate-400">{opt.sub}</span>}
-                                                </button>
-                                            ))}
-                                        </div>
-                                    )}
-                                </div>
-                            )}
-
-                            <select
-                                value={shareType}
-                                onChange={e => setShareType(e.target.value as 'use' | 'develop')}
-                                className="border border-slate-200 rounded-lg px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 shrink-0"
-                            >
-                                <option value="use">{t('skills.shareTypeUse')}</option>
-                                <option value="develop">{t('skills.shareTypeDevelop')}</option>
-                            </select>
-                            <button
-                                onClick={handleAdd}
-                                disabled={submitting}
-                                className="px-3 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 disabled:opacity-50 shrink-0 flex items-center gap-1"
-                            >
-                                <Plus size={14} />{submitting ? '...' : t('skills.add')}
-                            </button>
-                        </div>
+                        <ShareGranteePicker
+                            value={selected}
+                            onChange={setSelected}
+                            shareType={shareType}
+                            onShareTypeChange={v => setShareType(v as 'use' | 'develop')}
+                            shareTypeOptions={[
+                                { value: 'use',     label: t('skills.shareTypeUse') },
+                                { value: 'develop', label: t('skills.shareTypeDevelop') },
+                            ]}
+                            onAdd={handleAdd}
+                            adding={submitting}
+                        />
                     </div>
 
                     {/* Grants list */}

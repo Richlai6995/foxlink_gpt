@@ -6,9 +6,10 @@ import React, { useState, useEffect, useRef } from 'react'
 import { Plus, Save, Trash2, Play, RefreshCw, ChevronDown, ChevronRight, Eye, Link2, Edit3, Square, Pause, Share2, Copy, Upload, FolderOpen, Filter, X, Download, FileUp, PenLine, FunctionSquare, Languages, RotateCcw } from 'lucide-react'
 import api from '../../lib/api'
 import { fmtTW } from '../../lib/fmtTW'
-import type { AiSchemaDef, AiSchemaJoin, AiSelectTopic, AiSelectDesign, AiEtlJob, AiEtlRunLog, AiDashboardShare, AiSelectProject, AiProjectShare, DbSource } from '../../types'
+import type { AiSchemaDef, AiSchemaJoin, AiSelectTopic, AiSelectDesign, AiEtlJob, AiEtlRunLog, AiDashboardShare, AiSelectProject, AiProjectShare, DbSource, GranteeSelection as GranteeSelectionType } from '../../types'
 import TranslationFields, { type TranslationData } from '../common/TranslationFields'
 import UserPicker from '../common/UserPicker'
+import ShareGranteePicker from '../common/ShareGranteePicker'
 
 // ── Project Selector ──────────────────────────────────────────────────────────
 function ProjectSelector({
@@ -72,7 +73,7 @@ function ProjectSelector({
 type OrgData = { depts: {code:string;name:string}[]; profit_centers: {code:string;name:string}[]; org_sections: {code:string;name:string}[]; org_groups: {name:string}[] }
 
 const GRANTEE_TYPE_LABEL: Record<string, string> = {
-  user: '使用者', role: '角色', department: '部門', cost_center: '利潤中心', division: '事業處', org_group: '事業群'
+  user: '使用者', role: '角色', factory: '廠區', department: '部門', cost_center: '利潤中心', division: '事業處', org_group: '事業群'
 }
 
 function useOrgData() {
@@ -97,61 +98,41 @@ function getOrgLov(granteeType: string, roles: {id:number;name:string}[], orgs: 
 type ShareForm = { grantee_type: string; grantee_id: string; share_type: 'use' | 'develop' }
 
 function ShareFormBody({
-  form, setForm, onAdd, loading, roles, orgs
+  form, setForm, onAdd, loading
 }: {
   form: ShareForm
   setForm: React.Dispatch<React.SetStateAction<ShareForm>>
   onAdd: () => void
   loading: boolean
-  roles: {id:number;name:string}[]
-  orgs: OrgData
+  roles?: {id:number;name:string}[]
+  orgs?: OrgData
 }) {
-  const [userDisplay, setUserDisplay] = useState('')
-  const lovOptions = getOrgLov(form.grantee_type, roles, orgs)
+  const [selected, setSelected] = useState<GranteeSelectionType | null>(null)
 
-  const changeType = (t: string) => {
-    setForm(p => ({ ...p, grantee_type: t, grantee_id: '' }))
-    setUserDisplay('')
-  }
+  // 同步 selected → form (grantee_type + grantee_id) 讓外部的 onAdd 還能用
+  useEffect(() => {
+    if (selected) {
+      setForm(p => ({ ...p, grantee_type: selected.type, grantee_id: selected.id }))
+    } else {
+      setForm(p => ({ ...p, grantee_id: '' }))
+    }
+  }, [selected])
 
   return (
     <div className="bg-gray-50 rounded-xl p-3 space-y-2">
       <p className="text-xs text-gray-500 font-medium">新增分享</p>
-      <div className="flex gap-2 flex-wrap">
-        <select className="input py-1.5 text-sm" value={form.grantee_type} onChange={e => changeType(e.target.value)}>
-          {Object.entries(GRANTEE_TYPE_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-        </select>
-
-        {form.grantee_type === 'user' ? (
-          <UserPicker
-            value={form.grantee_id}
-            display={userDisplay}
-            onChange={(id, disp) => { setForm(p => ({ ...p, grantee_id: id })); setUserDisplay(disp) }}
-            className="flex-1 min-w-40"
-          />
-        ) : (
-          <select className="input py-1.5 text-sm flex-1" value={form.grantee_id}
-            onChange={e => { const v = e.target.value; setForm(p => ({ ...p, grantee_id: v })) }}>
-            <option value="">請選擇...</option>
-            {lovOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-          </select>
-        )}
-      </div>
-      <div className="flex items-center gap-4">
-        <div className="flex gap-3">
-          {(['use', 'develop'] as const).map(v => (
-            <label key={v} className="flex items-center gap-1.5 text-xs cursor-pointer">
-              <input type="radio" value={v} checked={form.share_type === v}
-                onChange={() => setForm(p => ({ ...p, share_type: v }))} />
-              {v === 'use' ? '使用（查詢）' : '開發及使用'}
-            </label>
-          ))}
-        </div>
-        <button onClick={onAdd} disabled={loading || !form.grantee_id.trim()}
-          className="btn-primary text-xs py-1.5 px-3 flex items-center gap-1 ml-auto">
-          <Plus size={12} /> {loading ? '新增中...' : '新增'}
-        </button>
-      </div>
+      <ShareGranteePicker
+        value={selected}
+        onChange={setSelected}
+        shareType={form.share_type}
+        onShareTypeChange={v => setForm(p => ({ ...p, share_type: v as 'use' | 'develop' }))}
+        shareTypeOptions={[
+          { value: 'use',     label: '使用（查詢）' },
+          { value: 'develop', label: '開發及使用' },
+        ]}
+        onAdd={() => { onAdd(); setSelected(null) }}
+        adding={loading}
+      />
     </div>
   )
 }

@@ -12,6 +12,7 @@ const router = express.Router();
 const { verifyToken, verifyAdmin } = require('./auth');
 const { budgetGuard } = require('../middleware/budgetGuard');
 const { translateFields, translateDescription, batchTranslateDescriptions } = require('../services/translationService');
+const { resolveGranteeNamesInRows, getLangFromReq } = require('../services/granteeNameResolver');
 
 router.use(verifyToken);
 
@@ -40,12 +41,14 @@ async function canAccessProject(db, projectId, user, shareType = 'any') {
        (grantee_type='department' AND grantee_id=?) OR
        (grantee_type='cost_center' AND grantee_id=?) OR
        (grantee_type='division' AND grantee_id=?) OR
+       (grantee_type='factory' AND grantee_id=?) OR
        (grantee_type='org_group' AND grantee_id=?)
      )`
   ).all(
     projectId,
     String(user.id), String(user.role_id || ''), String(user.dept_code || ''),
     String(user.profit_center || ''), String(user.org_section || ''),
+    String(user.factory_code || ''),
     String(user.org_group_name || '')
   );
   if (shareType === 'any') return shares.length > 0;
@@ -73,6 +76,7 @@ async function canAccessDesign(db, design, user) {
       (grantee_type='department' AND grantee_id=?) OR
       (grantee_type='cost_center' AND grantee_id=?) OR
       (grantee_type='division' AND grantee_id=?) OR
+      (grantee_type='factory' AND grantee_id=?) OR
       (grantee_type='org_group' AND grantee_id=?)
     )`
   ).all(
@@ -82,12 +86,15 @@ async function canAccessDesign(db, design, user) {
     String(user.dept_code || ''),
     String(user.profit_center || ''),
     String(user.org_section || ''),
+    String(user.factory_code || ''),
     String(user.org_group_name || '')
   );
   return shares.length > 0;
 }
 
 // ─── Permission middleware ────────────────────────────────────────────────────
+// 存在性檢查：使用者有任何可見的 project share（不含 org_group 因 middleware 僅為入口判斷，
+// 細緻檢查由下游 SQL 處理）
 async function requireDashboard(req, res, next) {
   try {
     const u = req.user;
@@ -97,12 +104,24 @@ async function requireDashboard(req, res, next) {
       const role = await db.prepare('SELECT can_use_ai_dashboard FROM roles WHERE id=?').get(u.role_id);
       if (role?.can_use_ai_dashboard == 1) return next();
     }
-    // 若使用者或其角色有任何專案分享記錄，也允許通過
+    // 若使用者或其角色 / 部門 / 利潤中心 / 事業處 / 廠區 / 事業群 有任何專案分享記錄，也允許通過
     const sharedCount = await db.prepare(
       `SELECT COUNT(*) CNT FROM ai_project_shares WHERE
-        (grantee_type='user' AND grantee_id=?) OR
-        (grantee_type='role' AND grantee_id=?)`
-    ).get(String(u.id), String(u.role_id || ''));
+        (grantee_type='user'        AND grantee_id=?) OR
+        (grantee_type='role'        AND grantee_id=?) OR
+        (grantee_type='department'  AND grantee_id=? AND ? IS NOT NULL) OR
+        (grantee_type='cost_center' AND grantee_id=? AND ? IS NOT NULL) OR
+        (grantee_type='division'    AND grantee_id=? AND ? IS NOT NULL) OR
+        (grantee_type='factory'     AND grantee_id=? AND ? IS NOT NULL) OR
+        (grantee_type='org_group'   AND grantee_id=? AND ? IS NOT NULL)`
+    ).get(
+      String(u.id), String(u.role_id || ''),
+      u.dept_code || null, u.dept_code || null,
+      u.profit_center || null, u.profit_center || null,
+      u.org_section || null, u.org_section || null,
+      u.factory_code || null, u.factory_code || null,
+      u.org_group_name || null, u.org_group_name || null,
+    );
     if (sharedCount?.CNT > 0) return next();
     return res.status(403).json({ error: '無 AI 戰情查詢權限' });
   } catch (e) { next(e); }
@@ -117,12 +136,24 @@ async function requireDesigner(req, res, next) {
       const role = await db.prepare('SELECT can_design_ai_select FROM roles WHERE id=?').get(u.role_id);
       if (role?.can_design_ai_select == 1) return next();
     }
-    // 若使用者或其角色有任何「開發」分享記錄，也允許通過
+    // 有任何「開發」分享記錄（含組織層級）即允許
     const devSharedCount = await db.prepare(
       `SELECT COUNT(*) CNT FROM ai_project_shares WHERE share_type='develop' AND (
-        (grantee_type='user' AND grantee_id=?) OR
-        (grantee_type='role' AND grantee_id=?))`
-    ).get(String(u.id), String(u.role_id || ''));
+        (grantee_type='user'        AND grantee_id=?) OR
+        (grantee_type='role'        AND grantee_id=?) OR
+        (grantee_type='department'  AND grantee_id=? AND ? IS NOT NULL) OR
+        (grantee_type='cost_center' AND grantee_id=? AND ? IS NOT NULL) OR
+        (grantee_type='division'    AND grantee_id=? AND ? IS NOT NULL) OR
+        (grantee_type='factory'     AND grantee_id=? AND ? IS NOT NULL) OR
+        (grantee_type='org_group'   AND grantee_id=? AND ? IS NOT NULL))`
+    ).get(
+      String(u.id), String(u.role_id || ''),
+      u.dept_code || null, u.dept_code || null,
+      u.profit_center || null, u.profit_center || null,
+      u.org_section || null, u.org_section || null,
+      u.factory_code || null, u.factory_code || null,
+      u.org_group_name || null, u.org_group_name || null,
+    );
     if (devSharedCount?.CNT > 0) return next();
     return res.status(403).json({ error: '無 AI 戰情設計權限' });
   } catch (e) { next(e); }
@@ -156,13 +187,14 @@ router.get('/projects', async (req, res) => {
                 (s.grantee_type='role' AND s.grantee_id=?) OR
                 (s.grantee_type='department' AND s.grantee_id=?) OR
                 (s.grantee_type='cost_center' AND s.grantee_id=?) OR
-                (s.grantee_type='division' AND s.grantee_id=?)
+                (s.grantee_type='division' AND s.grantee_id=?) OR
+                (s.grantee_type='factory' AND s.grantee_id=?)
               )
             )
          ORDER BY p.id ASC`
       ).all(
         u.id, String(u.id), String(u.role_id || ''), String(u.dept_code || ''),
-        String(u.profit_center || ''), String(u.org_section || '')
+        String(u.profit_center || ''), String(u.org_section || ''), String(u.factory_code || '')
       );
     }
     res.json(projects);
@@ -232,16 +264,17 @@ router.get('/projects/:id/shares', async (req, res) => {
     if (!await canEditProject(db, req.params.id, req.user)) return res.status(403).json({ error: '無權限' });
     const shares = await db.prepare(
       `SELECT a.*,
-         CASE WHEN a.grantee_type='user'        THEN (SELECT name FROM users WHERE id=TO_NUMBER(a.grantee_id))
+         CASE WHEN a.grantee_type='user'        THEN (SELECT employee_id || ' ' || name FROM users WHERE id=TO_NUMBER(a.grantee_id))
               WHEN a.grantee_type='role'        THEN (SELECT name FROM roles WHERE id=TO_NUMBER(a.grantee_id))
-              WHEN a.grantee_type='department'  THEN (SELECT MAX(dept_name) FROM users WHERE dept_code=a.grantee_id)
-              WHEN a.grantee_type='cost_center' THEN (SELECT MAX(profit_center_name) FROM users WHERE profit_center=a.grantee_id)
-              WHEN a.grantee_type='division'    THEN (SELECT MAX(org_section_name) FROM users WHERE org_section=a.grantee_id)
+              WHEN a.grantee_type='department'  THEN a.grantee_id || ' ' || NVL((SELECT MAX(dept_name) FROM users WHERE dept_code=a.grantee_id), '')
+              WHEN a.grantee_type='cost_center' THEN a.grantee_id || ' ' || NVL((SELECT MAX(profit_center_name) FROM users WHERE profit_center=a.grantee_id), '')
+              WHEN a.grantee_type='division'    THEN a.grantee_id || ' ' || NVL((SELECT MAX(org_section_name) FROM users WHERE org_section=a.grantee_id), '')
               ELSE a.grantee_id END AS grantee_name,
          CASE WHEN a.grantee_type='user' THEN (SELECT username    FROM users WHERE id=TO_NUMBER(a.grantee_id)) END AS grantee_username,
          CASE WHEN a.grantee_type='user' THEN (SELECT employee_id FROM users WHERE id=TO_NUMBER(a.grantee_id)) END AS grantee_employee_id
        FROM ai_project_shares a WHERE a.project_id=? ORDER BY a.id ASC`
     ).all(req.params.id);
+    await resolveGranteeNamesInRows(shares, getLangFromReq(req), db);
     res.json(shares);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -312,7 +345,7 @@ router.get('/topics', requireDashboard, async (req, res) => {
         topicBinds = [project_id];
       }
     } else {
-      const userBinds = [String(u.id), String(u.role_id || ''), String(u.dept_code || ''), String(u.profit_center || ''), String(u.org_section || '')];
+      const userBinds = [String(u.id), String(u.role_id || ''), String(u.dept_code || ''), String(u.profit_center || ''), String(u.org_section || ''), String(u.factory_code || '')];
       projectFilter = `AND (
         t.project_id IS NULL
         OR EXISTS (
@@ -325,7 +358,8 @@ router.get('/topics', requireDashboard, async (req, res) => {
                 (s.grantee_type='role' AND s.grantee_id=?) OR
                 (s.grantee_type='department' AND s.grantee_id=?) OR
                 (s.grantee_type='cost_center' AND s.grantee_id=?) OR
-                (s.grantee_type='division' AND s.grantee_id=?)
+                (s.grantee_type='division' AND s.grantee_id=?) OR
+                (s.grantee_type='factory' AND s.grantee_id=?)
               )
             )
           )
@@ -338,7 +372,8 @@ router.get('/topics', requireDashboard, async (req, res) => {
             (ds.grantee_type='role' AND ds.grantee_id=?) OR
             (ds.grantee_type='department' AND ds.grantee_id=?) OR
             (ds.grantee_type='cost_center' AND ds.grantee_id=?) OR
-            (ds.grantee_type='division' AND ds.grantee_id=?)
+            (ds.grantee_type='division' AND ds.grantee_id=?) OR
+            (ds.grantee_type='factory' AND ds.grantee_id=?)
           )
         )
       )`;
@@ -355,8 +390,8 @@ router.get('/topics', requireDashboard, async (req, res) => {
 
     // 設計可見條件：有 project 層存取 OR 有 ai_dashboard_shares 直接分享
     const userBindsForDesign = u.role === 'admin' ? null : [
-      u.id, String(u.id), String(u.role_id || ''), String(u.dept_code || ''), String(u.profit_center || ''), String(u.org_section || ''),
-      String(u.id), String(u.role_id || ''), String(u.dept_code || ''), String(u.profit_center || ''), String(u.org_section || ''),
+      u.id, String(u.id), String(u.role_id || ''), String(u.dept_code || ''), String(u.profit_center || ''), String(u.org_section || ''), String(u.factory_code || ''),
+      String(u.id), String(u.role_id || ''), String(u.dept_code || ''), String(u.profit_center || ''), String(u.org_section || ''), String(u.factory_code || ''),
     ];
     const designsWhereClause = u.role === 'admin' ? '' : `AND (
       EXISTS (
@@ -369,7 +404,8 @@ router.get('/topics', requireDashboard, async (req, res) => {
             (s.grantee_type='role' AND s.grantee_id=?) OR
             (s.grantee_type='department' AND s.grantee_id=?) OR
             (s.grantee_type='cost_center' AND s.grantee_id=?) OR
-            (s.grantee_type='division' AND s.grantee_id=?)
+            (s.grantee_type='division' AND s.grantee_id=?) OR
+            (s.grantee_type='factory' AND s.grantee_id=?)
           ))
         )
       )
@@ -378,7 +414,8 @@ router.get('/topics', requireDashboard, async (req, res) => {
         (ds.grantee_type='role' AND ds.grantee_id=?) OR
         (ds.grantee_type='department' AND ds.grantee_id=?) OR
         (ds.grantee_type='cost_center' AND ds.grantee_id=?) OR
-        (ds.grantee_type='division' AND ds.grantee_id=?)
+        (ds.grantee_type='division' AND ds.grantee_id=?) OR
+        (ds.grantee_type='factory' AND ds.grantee_id=?)
       ))
     )`;
     const designs = await db.prepare(
@@ -418,12 +455,13 @@ router.get('/designer/topics', requireDesigner, async (req, res) => {
             (sh.grantee_type='role' AND sh.grantee_id=?) OR
             (sh.grantee_type='department' AND sh.grantee_id=?) OR
             (sh.grantee_type='cost_center' AND sh.grantee_id=?) OR
-            (sh.grantee_type='division' AND sh.grantee_id=?)
+            (sh.grantee_type='division' AND sh.grantee_id=?) OR
+            (sh.grantee_type='factory' AND sh.grantee_id=?)
           )
         )
       )
     ))`;
-    let binds = u.role === 'admin' ? [] : [u.id, u.id, String(u.id), String(u.role_id || ''), String(u.dept_code || ''), String(u.profit_center || ''), String(u.org_section || '')];
+    let binds = u.role === 'admin' ? [] : [u.id, u.id, String(u.id), String(u.role_id || ''), String(u.dept_code || ''), String(u.profit_center || ''), String(u.org_section || ''), String(u.factory_code || '')];
     if (project_id) {
       filter += ' AND t.project_id=?';
       binds.push(project_id);
@@ -724,14 +762,33 @@ router.get('/designer/schemas', requireDesigner, async (req, res) => {
     const u = req.user;
     let filter = '';
     let binds = [];
+    // 共用 develop 分享條件（含組織層）
+    const DEV_SHARE = `(
+      (sh.grantee_type='user'        AND sh.grantee_id=?) OR
+      (sh.grantee_type='role'        AND sh.grantee_id=?) OR
+      (sh.grantee_type='department'  AND sh.grantee_id=? AND ? IS NOT NULL) OR
+      (sh.grantee_type='cost_center' AND sh.grantee_id=? AND ? IS NOT NULL) OR
+      (sh.grantee_type='division'    AND sh.grantee_id=? AND ? IS NOT NULL) OR
+      (sh.grantee_type='factory'     AND sh.grantee_id=? AND ? IS NOT NULL) OR
+      (sh.grantee_type='org_group'   AND sh.grantee_id=? AND ? IS NOT NULL)
+    )`;
+    const devShareBinds = [
+      String(u.id), String(u.role_id || ''),
+      u.dept_code || null, u.dept_code || null,
+      u.profit_center || null, u.profit_center || null,
+      u.org_section || null, u.org_section || null,
+      u.factory_code || null, u.factory_code || null,
+      u.org_group_name || null, u.org_group_name || null,
+    ];
+
     if (all === 'true') {
       // 查全部（供跨專案複製 schema 用），非 admin 只能看自己有存取權的
       if (u.role !== 'admin') {
         filter = `WHERE s.created_by=? OR EXISTS (
           SELECT 1 FROM ai_select_projects p WHERE p.id=s.project_id AND (
-            p.created_by=? OR EXISTS (SELECT 1 FROM ai_project_shares sh WHERE sh.project_id=p.id AND sh.share_type='develop' AND ((sh.grantee_type='user' AND sh.grantee_id=?) OR (sh.grantee_type='role' AND sh.grantee_id=?)))
+            p.created_by=? OR EXISTS (SELECT 1 FROM ai_project_shares sh WHERE sh.project_id=p.id AND sh.share_type='develop' AND ${DEV_SHARE})
           ))`;
-        binds = [u.id, u.id, String(u.id), String(u.role_id || '')];
+        binds = [u.id, u.id, ...devShareBinds];
       }
     } else if (project_id) {
       // 包含指定專案的 schema，以及沒有指定專案（共用）的 schema
@@ -741,14 +798,11 @@ router.get('/designer/schemas', requireDesigner, async (req, res) => {
       filter = `WHERE (s.project_id IS NULL AND s.created_by=?) OR EXISTS (
         SELECT 1 FROM ai_select_projects p WHERE p.id=s.project_id AND (
           p.created_by=? OR EXISTS (
-            SELECT 1 FROM ai_project_shares sh WHERE sh.project_id=p.id AND sh.share_type='develop' AND (
-              (sh.grantee_type='user' AND sh.grantee_id=?) OR
-              (sh.grantee_type='role' AND sh.grantee_id=?)
-            )
+            SELECT 1 FROM ai_project_shares sh WHERE sh.project_id=p.id AND sh.share_type='develop' AND ${DEV_SHARE}
           )
         )
       )`;
-      binds = [u.id, u.id, String(u.id), String(u.role_id || '')];
+      binds = [u.id, u.id, ...devShareBinds];
     }
     const schemas = await db.prepare(`SELECT s.* FROM ai_schema_definitions s ${filter} ORDER BY s.id ASC`).all(...binds);
     const columns = await db.prepare(`SELECT * FROM ai_schema_columns ORDER BY schema_id ASC, id ASC`).all();
@@ -1255,13 +1309,24 @@ router.get('/designer/joins', requireDesigner, async (req, res) => {
         SELECT 1 FROM ai_select_projects p WHERE p.id=j.project_id AND (
           p.created_by=? OR EXISTS (
             SELECT 1 FROM ai_project_shares sh WHERE sh.project_id=p.id AND sh.share_type='develop' AND (
-              (sh.grantee_type='user' AND sh.grantee_id=?) OR
-              (sh.grantee_type='role' AND sh.grantee_id=?)
+              (sh.grantee_type='user'        AND sh.grantee_id=?) OR
+              (sh.grantee_type='role'        AND sh.grantee_id=?) OR
+              (sh.grantee_type='department'  AND sh.grantee_id=? AND ? IS NOT NULL) OR
+              (sh.grantee_type='cost_center' AND sh.grantee_id=? AND ? IS NOT NULL) OR
+              (sh.grantee_type='division'    AND sh.grantee_id=? AND ? IS NOT NULL) OR
+              (sh.grantee_type='factory'     AND sh.grantee_id=? AND ? IS NOT NULL) OR
+              (sh.grantee_type='org_group'   AND sh.grantee_id=? AND ? IS NOT NULL)
             )
           )
         )
       )`;
-      binds = [u.id, String(u.id), String(u.role_id || '')];
+      binds = [u.id, String(u.id), String(u.role_id || ''),
+        u.dept_code || null, u.dept_code || null,
+        u.profit_center || null, u.profit_center || null,
+        u.org_section || null, u.org_section || null,
+        u.factory_code || null, u.factory_code || null,
+        u.org_group_name || null, u.org_group_name || null,
+      ];
     }
     const joins = await db.prepare(
       `SELECT j.*,
@@ -1348,13 +1413,24 @@ router.get('/etl/jobs', requireDesigner, async (req, res) => {
         SELECT 1 FROM ai_select_projects p WHERE p.id=j.project_id AND (
           p.created_by=? OR EXISTS (
             SELECT 1 FROM ai_project_shares sh WHERE sh.project_id=p.id AND sh.share_type='develop' AND (
-              (sh.grantee_type='user' AND sh.grantee_id=?) OR
-              (sh.grantee_type='role' AND sh.grantee_id=?)
+              (sh.grantee_type='user'        AND sh.grantee_id=?) OR
+              (sh.grantee_type='role'        AND sh.grantee_id=?) OR
+              (sh.grantee_type='department'  AND sh.grantee_id=? AND ? IS NOT NULL) OR
+              (sh.grantee_type='cost_center' AND sh.grantee_id=? AND ? IS NOT NULL) OR
+              (sh.grantee_type='division'    AND sh.grantee_id=? AND ? IS NOT NULL) OR
+              (sh.grantee_type='factory'     AND sh.grantee_id=? AND ? IS NOT NULL) OR
+              (sh.grantee_type='org_group'   AND sh.grantee_id=? AND ? IS NOT NULL)
             )
           )
         )
       )`;
-      binds = [u.id, String(u.id), String(u.role_id || '')];
+      binds = [u.id, String(u.id), String(u.role_id || ''),
+        u.dept_code || null, u.dept_code || null,
+        u.profit_center || null, u.profit_center || null,
+        u.org_section || null, u.org_section || null,
+        u.factory_code || null, u.factory_code || null,
+        u.org_group_name || null, u.org_group_name || null,
+      ];
     }
     const jobs = await db.prepare(
       `SELECT j.*,
@@ -1731,16 +1807,30 @@ router.delete('/history', requireDashboard, async (req, res) => {
 });
 
 // GET /api/dashboard/orgs — 組織選項 (供分享設定的 LOV 使用)
+// Query: ?lang=zh-TW|en|vi  (factory_name 依此語系解析；其他欄位維持 DB 原值)
+// 見 docs/factory-share-layer-plan.md §3.3
 router.get('/orgs', async (req, res) => {
   const db = require('../database-oracle').db;
   try {
-    const [depts, pcs, sections, groups] = await Promise.all([
+    const lang = (req.query.lang || 'zh-TW').toString();
+    const factoryCache = require('../services/factoryCache');
+
+    const [depts, pcs, sections, groups, factories] = await Promise.all([
       db.prepare(`SELECT DISTINCT dept_code AS code, dept_name AS name FROM users WHERE dept_code IS NOT NULL ORDER BY dept_code`).all(),
       db.prepare(`SELECT DISTINCT profit_center AS code, profit_center_name AS name FROM users WHERE profit_center IS NOT NULL ORDER BY profit_center`).all(),
       db.prepare(`SELECT DISTINCT org_section AS code, org_section_name AS name FROM users WHERE org_section IS NOT NULL ORDER BY org_section`).all(),
       db.prepare(`SELECT DISTINCT org_group_name AS name FROM users WHERE org_group_name IS NOT NULL ORDER BY org_group_name`).all(),
+      factoryCache.listFactories(lang, db).catch(() => []),
     ]);
-    res.json({ depts, profit_centers: pcs, org_sections: sections, org_groups: groups });
+    // org_groups 補 code:null 保持統一格式
+    const groupsOut = (groups || []).map(g => ({ code: null, name: g.name }));
+    res.json({
+      depts,
+      profit_centers: pcs,
+      org_sections: sections,
+      org_groups: groupsOut,
+      factories,
+    });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -1757,16 +1847,17 @@ router.get('/designs/:id/shares', async (req, res) => {
     }
     const shares = await db.prepare(
       `SELECT a.*,
-         CASE WHEN a.grantee_type='user'        THEN (SELECT name FROM users WHERE id=TO_NUMBER(a.grantee_id))
+         CASE WHEN a.grantee_type='user'        THEN (SELECT employee_id || ' ' || name FROM users WHERE id=TO_NUMBER(a.grantee_id))
               WHEN a.grantee_type='role'        THEN (SELECT name FROM roles WHERE id=TO_NUMBER(a.grantee_id))
-              WHEN a.grantee_type='department'  THEN (SELECT MAX(dept_name) FROM users WHERE dept_code=a.grantee_id)
-              WHEN a.grantee_type='cost_center' THEN (SELECT MAX(profit_center_name) FROM users WHERE profit_center=a.grantee_id)
-              WHEN a.grantee_type='division'    THEN (SELECT MAX(org_section_name) FROM users WHERE org_section=a.grantee_id)
+              WHEN a.grantee_type='department'  THEN a.grantee_id || ' ' || NVL((SELECT MAX(dept_name) FROM users WHERE dept_code=a.grantee_id), '')
+              WHEN a.grantee_type='cost_center' THEN a.grantee_id || ' ' || NVL((SELECT MAX(profit_center_name) FROM users WHERE profit_center=a.grantee_id), '')
+              WHEN a.grantee_type='division'    THEN a.grantee_id || ' ' || NVL((SELECT MAX(org_section_name) FROM users WHERE org_section=a.grantee_id), '')
               ELSE a.grantee_id END AS grantee_name,
          CASE WHEN a.grantee_type='user' THEN (SELECT username    FROM users WHERE id=TO_NUMBER(a.grantee_id)) END AS grantee_username,
          CASE WHEN a.grantee_type='user' THEN (SELECT employee_id FROM users WHERE id=TO_NUMBER(a.grantee_id)) END AS grantee_employee_id
        FROM ai_dashboard_shares a WHERE a.design_id=? ORDER BY a.id ASC`
     ).all(req.params.id);
+    await resolveGranteeNamesInRows(shares, getLangFromReq(req), db);
     res.json(shares);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -2183,12 +2274,14 @@ async function canAccessSavedQuery(db, query, user) {
       (grantee_type='department' AND grantee_id=?) OR
       (grantee_type='cost_center' AND grantee_id=?) OR
       (grantee_type='division' AND grantee_id=?) OR
+      (grantee_type='factory' AND grantee_id=?) OR
       (grantee_type='org_group' AND grantee_id=?)
     )`
   ).all(
     query.id,
     String(user.id), String(user.role_id || ''), String(user.dept_code || ''),
     String(user.profit_center || ''), String(user.org_section || ''),
+    String(user.factory_code || ''),
     String(user.org_group_name || '')
   );
   return shares.length > 0;
@@ -2204,12 +2297,14 @@ async function canManageSavedQuery(db, query, user) {
       (grantee_type='department' AND grantee_id=?) OR
       (grantee_type='cost_center' AND grantee_id=?) OR
       (grantee_type='division' AND grantee_id=?) OR
+      (grantee_type='factory' AND grantee_id=?) OR
       (grantee_type='org_group' AND grantee_id=?)
     )`
   ).all(
     query.id,
     String(user.id), String(user.role_id || ''), String(user.dept_code || ''),
     String(user.profit_center || ''), String(user.org_section || ''),
+    String(user.factory_code || ''),
     String(user.org_group_name || '')
   );
   return shares.length > 0;
@@ -2222,7 +2317,8 @@ router.get('/saved-queries', requireDashboard, async (req, res) => {
     const user = req.user;
     const uid = String(user.id), rid = String(user.role_id || ''),
           dept = String(user.dept_code || ''), pc = String(user.profit_center || ''),
-          div = String(user.org_section || ''), og = String(user.org_group_name || '');
+          div = String(user.org_section || ''), og = String(user.org_group_name || ''),
+          fac = String(user.factory_code || '');
     const rows = await db.prepare(`
       SELECT sq.*, u.name as creator_name, u.employee_id as creator_emp_id,
              d.name as design_name, d.name_en as design_name_en, d.name_vi as design_name_vi,
@@ -2235,6 +2331,7 @@ router.get('/saved-queries', requireDashboard, async (req, res) => {
                                  (grantee_type='department' AND grantee_id=?) OR
                                  (grantee_type='cost_center' AND grantee_id=?) OR
                                  (grantee_type='division' AND grantee_id=?) OR
+                                 (grantee_type='factory' AND grantee_id=?) OR
                                  (grantee_type='org_group' AND grantee_id=?)
                                )) THEN 1
                   ELSE 0 END AS can_manage
@@ -2252,13 +2349,14 @@ router.get('/saved-queries', requireDashboard, async (req, res) => {
               (grantee_type='department' AND grantee_id=?) OR
               (grantee_type='cost_center' AND grantee_id=?) OR
               (grantee_type='division' AND grantee_id=?) OR
+              (grantee_type='factory' AND grantee_id=?) OR
               (grantee_type='org_group' AND grantee_id=?)
           )
         )
       ORDER BY sq.category NULLS LAST, sq.sort_order, sq.name
     `).all(
-      user.id, uid, rid, dept, pc, div, og,
-      user.id, uid, rid, dept, pc, div, og
+      user.id, uid, rid, dept, pc, div, fac, og,
+      user.id, uid, rid, dept, pc, div, fac, og
     );
     const isAdmin = user.role === 'admin';
     res.json(rows.map(r => ({ ...r, can_manage: isAdmin ? 1 : r.can_manage })));
@@ -2442,6 +2540,7 @@ router.get('/saved-queries/:id/shares', requireDashboard, async (req, res) => {
     if (!await canManageSavedQuery(db, query, req.user))
       return res.status(403).json({ error: '無管理權限' });
     const shares = await db.prepare(`SELECT * FROM ai_saved_query_shares WHERE query_id=? ORDER BY id`).all(req.params.id);
+    await resolveGranteeNamesInRows(shares, getLangFromReq(req), db);
     res.json(shares);
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -2469,6 +2568,7 @@ router.post('/saved-queries/:id/shares', requireDashboard, async (req, res) => {
       ).run(req.params.id, grantee_type, String(grantee_id), share_type || 'use', req.user.id);
     }
     const shares = await db.prepare(`SELECT * FROM ai_saved_query_shares WHERE query_id=? ORDER BY id`).all(req.params.id);
+    await resolveGranteeNamesInRows(shares, getLangFromReq(req), db);
     res.json(shares);
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -2555,12 +2655,14 @@ async function canAccessDashboard(db, board, user) {
       (grantee_type='department' AND grantee_id=?) OR
       (grantee_type='cost_center' AND grantee_id=?) OR
       (grantee_type='division' AND grantee_id=?) OR
+      (grantee_type='factory' AND grantee_id=?) OR
       (grantee_type='org_group' AND grantee_id=?)
     )`
   ).all(
     board.id,
     String(user.id), String(user.role_id || ''), String(user.dept_code || ''),
     String(user.profit_center || ''), String(user.org_section || ''),
+    String(user.factory_code || ''),
     String(user.org_group_name || '')
   );
   return shares.length > 0;
@@ -2576,12 +2678,14 @@ async function canManageDashboard(db, board, user) {
       (grantee_type='department' AND grantee_id=?) OR
       (grantee_type='cost_center' AND grantee_id=?) OR
       (grantee_type='division' AND grantee_id=?) OR
+      (grantee_type='factory' AND grantee_id=?) OR
       (grantee_type='org_group' AND grantee_id=?)
     )`
   ).all(
     board.id,
     String(user.id), String(user.role_id || ''), String(user.dept_code || ''),
     String(user.profit_center || ''), String(user.org_section || ''),
+    String(user.factory_code || ''),
     String(user.org_group_name || '')
   );
   return shares.length > 0;
@@ -2594,7 +2698,8 @@ router.get('/report-dashboards', requireDashboard, async (req, res) => {
     const user = req.user;
     const uid = String(user.id), rid = String(user.role_id || ''),
           dept = String(user.dept_code || ''), pc = String(user.profit_center || ''),
-          div = String(user.org_section || ''), og = String(user.org_group_name || '');
+          div = String(user.org_section || ''), og = String(user.org_group_name || ''),
+          fac = String(user.factory_code || '');
     const rows = await db.prepare(`
       SELECT rd.*, u.name as creator_name,
              CASE WHEN rd.user_id = ? THEN 1
@@ -2605,6 +2710,7 @@ router.get('/report-dashboards', requireDashboard, async (req, res) => {
                                  (grantee_type='department' AND grantee_id=?) OR
                                  (grantee_type='cost_center' AND grantee_id=?) OR
                                  (grantee_type='division' AND grantee_id=?) OR
+                                 (grantee_type='factory' AND grantee_id=?) OR
                                  (grantee_type='org_group' AND grantee_id=?)
                                )) THEN 1
                   ELSE 0 END AS can_manage
@@ -2620,13 +2726,14 @@ router.get('/report-dashboards', requireDashboard, async (req, res) => {
               (grantee_type='department' AND grantee_id=?) OR
               (grantee_type='cost_center' AND grantee_id=?) OR
               (grantee_type='division' AND grantee_id=?) OR
+              (grantee_type='factory' AND grantee_id=?) OR
               (grantee_type='org_group' AND grantee_id=?)
           )
         )
       ORDER BY rd.category NULLS LAST, rd.sort_order, rd.name
     `).all(
-      user.id, uid, rid, dept, pc, div, og,
-      user.id, uid, rid, dept, pc, div, og
+      user.id, uid, rid, dept, pc, div, fac, og,
+      user.id, uid, rid, dept, pc, div, fac, og
     );
     const isAdmin = user.role === 'admin';
     res.json(rows.map(r => ({ ...r, can_manage: isAdmin ? 1 : r.can_manage })));
@@ -2797,6 +2904,7 @@ router.get('/report-dashboards/:id/shares', requireDashboard, async (req, res) =
     if (!board || !await canManageDashboard(db, board, req.user))
       return res.status(403).json({ error: '無管理權限' });
     const shares = await db.prepare(`SELECT * FROM ai_report_dashboard_shares WHERE dashboard_id=? ORDER BY id`).all(req.params.id);
+    await resolveGranteeNamesInRows(shares, getLangFromReq(req), db);
     res.json(shares);
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -2822,6 +2930,7 @@ router.post('/report-dashboards/:id/shares', requireDashboard, async (req, res) 
       ).run(req.params.id, grantee_type, String(grantee_id), share_type || 'use', req.user.id);
     }
     const shares = await db.prepare(`SELECT * FROM ai_report_dashboard_shares WHERE dashboard_id=? ORDER BY id`).all(req.params.id);
+    await resolveGranteeNamesInRows(shares, getLangFromReq(req), db);
     res.json(shares);
   } catch (e) {
     res.status(500).json({ error: e.message });

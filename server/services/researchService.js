@@ -38,8 +38,26 @@ async function searchSpecificKbs(db, userId, kbIds, query, topK = 6) {
 
 async function searchKbsInternal(db, userId, kbIds, query, topK) {
   try {
-    const user = await db.prepare('SELECT role, role_id FROM users WHERE id=?').get(userId);
+    // 含完整組織欄位，供 kb_access 比對（使用 kb 舊 grantee_type：dept/profit_center/org_section）
+    const user = await db.prepare(
+      `SELECT role, role_id, dept_code, profit_center, org_section, org_group_name, factory_code FROM users WHERE id=?`
+    ).get(userId);
     if (!user) return '';
+
+    const orgBinds = [
+      user.dept_code, user.dept_code,
+      user.profit_center, user.profit_center,
+      user.org_section, user.org_section,
+      user.factory_code, user.factory_code,
+      user.org_group_name, user.org_group_name,
+    ];
+    const orgClause = `
+      OR (ka.grantee_type='dept'          AND ka.grantee_id=? AND ? IS NOT NULL)
+      OR (ka.grantee_type='profit_center' AND ka.grantee_id=? AND ? IS NOT NULL)
+      OR (ka.grantee_type='org_section'   AND ka.grantee_id=? AND ? IS NOT NULL)
+      OR (ka.grantee_type='factory'       AND ka.grantee_id=? AND ? IS NOT NULL)
+      OR (ka.grantee_type='org_group'     AND ka.grantee_id=? AND ? IS NOT NULL)
+    `;
 
     let kbs;
     if (kbIds && kbIds.length) {
@@ -61,10 +79,11 @@ async function searchKbsInternal(db, userId, kbIds, query, topK) {
               SELECT 1 FROM kb_access ka WHERE ka.kb_id=kb.id AND (
                 (ka.grantee_type='user' AND ka.grantee_id=TO_CHAR(?))
                 OR (ka.grantee_type='role' AND ka.grantee_id=TO_CHAR(?))
+                ${orgClause}
               )
             )
           )
-        `).all(...kbIds, userId, userId, user.role_id);
+        `).all(...kbIds, userId, userId, user.role_id, ...orgBinds);
       }
     } else {
       // All accessible KBs
@@ -84,11 +103,12 @@ async function searchKbsInternal(db, userId, kbIds, query, topK) {
               SELECT 1 FROM kb_access ka WHERE ka.kb_id=kb.id AND (
                 (ka.grantee_type='user' AND ka.grantee_id=TO_CHAR(?))
                 OR (ka.grantee_type='role' AND ka.grantee_id=TO_CHAR(?))
+                ${orgClause}
               )
             )
           )
           FETCH FIRST 5 ROWS ONLY
-        `).all(userId, userId, user.role_id);
+        `).all(userId, userId, user.role_id, ...orgBinds);
       }
     }
 
@@ -309,7 +329,9 @@ async function extractFilesContext(files) {
  */
 async function suggestKbs(db, userId, question) {
   try {
-    const user = await db.prepare('SELECT role, role_id FROM users WHERE id=?').get(userId);
+    const user = await db.prepare(
+      `SELECT role, role_id, dept_code, profit_center, org_section, org_group_name, factory_code FROM users WHERE id=?`
+    ).get(userId);
     if (!user) return [];
 
     let kbs;
@@ -327,10 +349,22 @@ async function suggestKbs(db, userId, question) {
           OR EXISTS (SELECT 1 FROM kb_access ka WHERE ka.kb_id=kb.id AND (
             (ka.grantee_type='user' AND ka.grantee_id=TO_CHAR(?))
             OR (ka.grantee_type='role' AND ka.grantee_id=TO_CHAR(?))
+            OR (ka.grantee_type='dept'          AND ka.grantee_id=? AND ? IS NOT NULL)
+            OR (ka.grantee_type='profit_center' AND ka.grantee_id=? AND ? IS NOT NULL)
+            OR (ka.grantee_type='org_section'   AND ka.grantee_id=? AND ? IS NOT NULL)
+            OR (ka.grantee_type='factory'       AND ka.grantee_id=? AND ? IS NOT NULL)
+            OR (ka.grantee_type='org_group'     AND ka.grantee_id=? AND ? IS NOT NULL)
           ))
         )
         FETCH FIRST 20 ROWS ONLY
-      `).all(userId, userId, user.role_id || 0);
+      `).all(
+        userId, userId, user.role_id || 0,
+        user.dept_code || null, user.dept_code || null,
+        user.profit_center || null, user.profit_center || null,
+        user.org_section || null, user.org_section || null,
+        user.factory_code || null, user.factory_code || null,
+        user.org_group_name || null, user.org_group_name || null,
+      );
     }
 
     const embedding = await embedText(question, kbs[0]?.embedding_dims || 768);

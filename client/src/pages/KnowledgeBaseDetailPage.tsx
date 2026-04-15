@@ -13,6 +13,8 @@ import { fmtTW, fmtDateTW } from '../lib/fmtTW'
 import { useAuth } from '../context/AuthContext'
 import TranslationFields, { type TranslationData } from '../components/common/TranslationFields'
 import UserPicker from '../components/common/UserPicker'
+import ShareGranteePicker from '../components/common/ShareGranteePicker'
+import type { GranteeSelection as GranteeSelectionType } from '../types'
 import TagInput from '../components/common/TagInput'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -52,6 +54,7 @@ interface SearchResult {
 interface Grant {
   id: string; grantee_type: string; grantee_id: string
   granted_by_name: string; granted_at: string; permission: string
+  grantee_name?: string
 }
 
 interface OrgOption { code?: string; name: string }
@@ -853,15 +856,24 @@ function SettingsTab({ kb, onSaved, isOwner }: { kb: KnowledgeBase; onSaved: () 
 
 // ─── Share Tab ─────────────────────────────────────────────────────────────────
 
+// KB 後端用舊 grantee_type 名稱 (dept/profit_center/org_section)，共用元件用標準名稱，POST/顯示時做對應
+// 見 docs/factory-share-layer-plan.md §3.2 「KB 歷史命名」
+const KB_TYPE_TO_STANDARD: Record<string, string> = {
+  dept:          'department',
+  profit_center: 'cost_center',
+  org_section:   'division',
+}
+const STANDARD_TO_KB_TYPE: Record<string, string> = {
+  department:  'dept',
+  cost_center: 'profit_center',
+  division:    'org_section',
+}
+
 function ShareTab({ kb, isOwner }: { kb: KnowledgeBase; isOwner: boolean }) {
   const { t } = useTranslation()
   const [grants, setGrants]       = useState<Grant[]>([])
   const [loading, setLoading]     = useState(true)
-  const [orgs, setOrgs]           = useState<{ depts: OrgOption[]; profit_centers: OrgOption[]; org_sections: OrgOption[]; org_groups: OrgOption[] }>({ depts: [], profit_centers: [], org_sections: [], org_groups: [] })
-  const [roles, setRoles]         = useState<{ id: number; name: string }[]>([])
-  const [granteeType, setGranteeType] = useState<string>('user')
-  const [granteeId,   setGranteeId]   = useState<string>('')
-  const [userDisplay, setUserDisplay] = useState<string>('')
+  const [selected, setSelected]   = useState<GranteeSelectionType | null>(null)
   const [permission,  setPermission]  = useState<'use' | 'edit'>('use')
   const [adding, setAdding]       = useState(false)
   const [msg, setMsg]             = useState('')
@@ -870,26 +882,25 @@ function ShareTab({ kb, isOwner }: { kb: KnowledgeBase; isOwner: boolean }) {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const [grantsRes, orgsRes, rolesRes] = await Promise.all([
-        api.get(`/kb/${kb.id}/access`),
-        api.get('/kb/orgs'),
-        api.get('/roles'),
-      ])
+      const grantsRes = await api.get(`/kb/${kb.id}/access`)
       setGrants(grantsRes.data)
-      setOrgs(orgsRes.data)
-      setRoles(rolesRes.data || [])
     } finally { setLoading(false) }
   }, [kb.id])
 
   useEffect(() => { load() }, [load])
 
-
   const addGrant = async () => {
-    if (!granteeId) { setMsg(t('kb.share.granteeRequired')); return }
+    if (!selected) { setMsg(t('kb.share.granteeRequired')); return }
     setAdding(true); setMsg('')
     try {
-      await api.post(`/kb/${kb.id}/access`, { grantee_type: granteeType, grantee_id: granteeId, permission })
-      setGranteeId(''); setUserDisplay('')
+      // 標準 type → KB 舊型別
+      const kbType = STANDARD_TO_KB_TYPE[selected.type] || selected.type
+      await api.post(`/kb/${kb.id}/access`, {
+        grantee_type: kbType,
+        grantee_id: selected.id,
+        permission,
+      })
+      setSelected(null)
       await load()
       setMsg(t('kb.share.addGrantOk'))
       setTimeout(() => setMsg(''), 2000)
@@ -916,33 +927,18 @@ function ShareTab({ kb, isOwner }: { kb: KnowledgeBase; isOwner: boolean }) {
     } finally { setRequestingPublic(false) }
   }
 
-  const granteeTypeLabel: Record<string, string> = {
-    user:          t('kb.share.granteeTypeUser'),
-    role:          t('kb.share.granteeTypeRole'),
-    dept:          t('kb.share.granteeTypeDept'),
-    profit_center: t('kb.share.granteeTypeProfitCenter'),
-    org_section:   t('kb.share.granteeTypeOrgSection'),
-    org_group:     t('kb.share.granteeTypeOrgGroup'),
-  }
-
   const typeIcon = (type: string) => {
     if (type === 'user') return <User size={12} />
     return <Building2 size={12} />
   }
 
   const getLabel = (g: Grant) => {
+    if (g.grantee_name) return g.grantee_name
     if (g.grantee_type === 'user') return t('kb.share.granteeUser', { id: g.grantee_id })
     if (g.grantee_type === 'role') return t('kb.share.granteeRole', { id: g.grantee_id })
-    return `${granteeTypeLabel[g.grantee_type] || g.grantee_type}: ${g.grantee_id}`
-  }
-
-  const getOrgOptions = (): { id: string; label: string }[] => {
-    if (granteeType === 'role') return roles.map((r) => ({ id: String(r.id), label: r.name }))
-    if (granteeType === 'dept') return orgs.depts.map((d) => ({ id: d.code || '', label: `${d.code} ${d.name}` }))
-    if (granteeType === 'profit_center') return orgs.profit_centers.map((d) => ({ id: d.code || '', label: `${d.code} ${d.name}` }))
-    if (granteeType === 'org_section') return orgs.org_sections.map((d) => ({ id: d.code || '', label: `${d.code} ${d.name}` }))
-    if (granteeType === 'org_group') return orgs.org_groups.map((d) => ({ id: d.name || '', label: d.name }))
-    return []
+    const standardType = KB_TYPE_TO_STANDARD[g.grantee_type] || g.grantee_type
+    const typeLabel = t(`grantee.type.${standardType}`, { defaultValue: standardType })
+    return `${typeLabel}: ${g.grantee_id}`
   }
 
   return (
@@ -972,38 +968,19 @@ function ShareTab({ kb, isOwner }: { kb: KnowledgeBase; isOwner: boolean }) {
       {isOwner && (
         <div className="border border-slate-200 rounded-xl p-4 space-y-3">
           <div className="text-sm font-semibold text-slate-700">{t('kb.share.addGrantTitle')}</div>
-          <div className="flex gap-2 flex-wrap">
-            <select value={granteeType} onChange={(e) => { setGranteeType(e.target.value); setGranteeId('') }}
-              className="border border-slate-300 rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-              {Object.entries(granteeTypeLabel).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-            </select>
-
-            {granteeType === 'user' ? (
-              <UserPicker
-                value={granteeId}
-                display={userDisplay}
-                onChange={(id, disp) => { setGranteeId(id); setUserDisplay(disp) }}
-                className="flex-1 min-w-48"
-              />
-            ) : (
-              <select value={granteeId} onChange={(e) => setGranteeId(e.target.value)}
-                className="flex-1 border border-slate-300 rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-                <option value="">{t('kb.share.orgSelectPlaceholder')}</option>
-                {getOrgOptions().map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
-              </select>
-            )}
-
-            <select value={permission} onChange={(e) => setPermission(e.target.value as 'use' | 'edit')}
-              className="border border-slate-300 rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-              <option value="use">{t('kb.share.permUse')}</option>
-              <option value="edit">{t('kb.share.permEdit')}</option>
-            </select>
-
-            <button onClick={addGrant} disabled={adding || !granteeId}
-              className="flex items-center gap-1 px-3 py-1.5 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 disabled:opacity-50 transition">
-              <Plus size={13} /> {t('kb.share.addBtn')}
-            </button>
-          </div>
+          <ShareGranteePicker
+            value={selected}
+            onChange={setSelected}
+            shareType={permission}
+            onShareTypeChange={v => setPermission(v as 'use' | 'edit')}
+            shareTypeOptions={[
+              { value: 'use',  label: t('kb.share.permUse') },
+              { value: 'edit', label: t('kb.share.permEdit') },
+            ]}
+            onAdd={addGrant}
+            adding={adding}
+            orgsUrl="/kb/orgs"
+          />
           <p className="text-xs text-slate-400">{t('kb.share.permDesc')}</p>
           {msg && <span className={`text-sm ${msg.toLowerCase().includes('fail') || msg.includes('失') ? 'text-red-500' : 'text-green-600'}`}>{msg}</span>}
         </div>
