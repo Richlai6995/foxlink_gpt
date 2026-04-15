@@ -3,6 +3,8 @@ const { GoogleGenerativeAI } = require('@google/generative-ai');
 const fs = require('fs');
 const path = require('path');
 
+const { classifyUpload } = require('../utils/uploadFileTypes');
+
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
 
 const MODEL_PRO = process.env.GEMINI_MODEL_PRO || 'gemini-3-pro-preview';
@@ -114,9 +116,34 @@ async function extractTextFromFile(filePath, mimeType, originalName) {
       return text;
     }
 
-    if (mimeType.startsWith('text/')) {
+    // text/* or code/config/log files (extension-based fallback for empty/octet-stream mimes)
+    const c = classifyUpload(originalName, mimeType);
+    if (c.ok && c.kind === 'text') {
+      // Jupyter notebook: extract only cell sources, skip base64 outputs
+      if (c.ext === '.ipynb') {
+        try {
+          const raw = fs.readFileSync(filePath, 'utf-8');
+          const nb = JSON.parse(raw);
+          const cells = Array.isArray(nb.cells) ? nb.cells : [];
+          const lang = (nb.metadata && nb.metadata.kernelspec && nb.metadata.kernelspec.language) || 'python';
+          let out = `[Jupyter: ${originalName}] (language=${lang}, cells=${cells.length})\n`;
+          for (let i = 0; i < cells.length; i++) {
+            const cell = cells[i];
+            const src = Array.isArray(cell.source) ? cell.source.join('') : String(cell.source || '');
+            if (!src.trim()) continue;
+            out += `\n# Cell ${i + 1} [${cell.cell_type || 'unknown'}]\n${src}\n`;
+            if (out.length > MAX_EXTRACTED_CHARS) break;
+          }
+          return truncate(out, originalName);
+        } catch (err) {
+          console.warn(`[Gemini] .ipynb parse failed for "${originalName}": ${err.message} — falling back to raw text`);
+        }
+      }
       const raw = fs.readFileSync(filePath, 'utf-8');
-      return truncate(`[Text: ${originalName}]\n${raw}`, originalName);
+      const tagMap = { code: 'Code', config: 'Config', log: 'Log', special: 'Config', doc: 'Text' };
+      const tag = tagMap[c.subtype] || 'Text';
+      const header = c.ext ? `[${tag}: ${originalName}${c.ext ? ` (${c.ext})` : ''}]` : `[${tag}: ${originalName}]`;
+      return truncate(`${header}\n${raw}`, originalName);
     }
   } catch (e) {
     console.error(`[Gemini] extractTextFromFile FAILED for "${originalName}":`, e.message);

@@ -4,6 +4,13 @@ import { useAuth } from '../context/AuthContext'
 import TemplatePickerPopover from './templates/TemplatePickerPopover'
 import { DocTemplate, TemplateSchema } from '../types'
 import MicButton from './MicButton'
+import {
+  classifyUpload,
+  isEnvFile,
+  buildAcceptAttr,
+  TEXT_HARD_CAP_BYTES,
+  TEXT_WARN_BYTES,
+} from '../lib/uploadFileTypes'
 
 interface Props {
   onSend: (message: string, files: File[]) => void
@@ -18,33 +25,7 @@ export interface MessageInputHandle {
   getFiles: () => File[]
 }
 
-const ALLOWED_TYPES = [
-  'text/plain',
-  'text/csv',
-  'application/pdf',
-  'application/msword',
-  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  'application/vnd.ms-excel',
-  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-  'application/vnd.ms-powerpoint',
-  'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-  'image/jpeg',
-  'image/png',
-  'image/gif',
-  'image/webp',
-  'audio/mpeg',
-  'audio/mp3',
-  'audio/wav',
-  'audio/x-wav',
-  'audio/ogg',
-  'audio/webm',
-  'audio/mp4',
-  'audio/x-m4a',
-  'audio/m4a',
-  'audio/aac',
-  'audio/flac',
-  'audio/x-flac',
-]
+const ACCEPT_ATTR = buildAcceptAttr()
 
 function getFileIcon(type: string) {
   if (type.startsWith('image/')) return <Image size={14} className="text-blue-400" />
@@ -106,40 +87,58 @@ const MessageInput = forwardRef<MessageInputHandle, Props>(function MessageInput
   const audioMaxMb: number = u?.audio_max_mb || 50
 
   const handleFiles = useCallback((newFiles: File[]) => {
-    setFileError('')
     const valid: File[] = []
+    const warnings: string[] = []
+    let errMsg = ''
+    const setErr = (m: string) => { errMsg = m }
     for (const f of newFiles) {
-      if (f.type.startsWith('video/')) {
-        setFileError('不允許上傳影片檔案')
+      const c = classifyUpload(f.name, f.type)
+      if (!c.ok) {
+        setErr(c.reason || `不支援的檔案格式: ${f.name}`)
         continue
       }
-      if (!ALLOWED_TYPES.includes(f.type) && !f.type.startsWith('text/') && !f.type.startsWith('audio/')) {
-        setFileError(`不支援的檔案格式: ${f.name}`)
-        continue
-      }
-      if (f.type.startsWith('audio/')) {
-        if (!allowAudio) {
-          setFileError(`無聲音檔上傳權限，請聯絡管理員開啟`)
-          continue
-        }
+      if (c.kind === 'audio') {
+        if (!allowAudio) { setErr(`無聲音檔上傳權限，請聯絡管理員開啟`); continue }
         if (f.size > audioMaxMb * 1024 * 1024) {
-          setFileError(`${f.name} 超過聲音檔上限 ${audioMaxMb}MB`)
+          setErr(`${f.name} 超過聲音檔上限 ${audioMaxMb}MB`)
           continue
         }
-      } else if (!f.type.startsWith('image/')) {
-        // text-type file
-        if (!allowText) {
-          setFileError(`無文字檔上傳權限，請聯絡管理員開啟`)
+      } else if (c.kind === 'text' || c.kind === 'pdf' || c.kind === 'office') {
+        if (!allowText) { setErr(`無文字檔上傳權限，請聯絡管理員開啟`); continue }
+        const userMax = textMaxMb * 1024 * 1024
+        // 5MB hard cap 只套用在新增的 code/config/log/special；PDF/Office/doc 沿用 text_max_mb
+        const isNewTextType = c.kind === 'text' && !!c.subtype && c.subtype !== 'doc'
+        const maxBytes = isNewTextType ? Math.min(userMax, TEXT_HARD_CAP_BYTES) : userMax
+        if (f.size > maxBytes) {
+          const capMb = (maxBytes / 1024 / 1024).toFixed(1)
+          setErr(`${f.name} 超過檔案上限 ${capMb}MB`)
           continue
         }
-        if (f.size > textMaxMb * 1024 * 1024) {
-          setFileError(`${f.name} 超過文字檔上限 ${textMaxMb}MB`)
-          continue
+        if (c.kind === 'text' && isEnvFile(c.basename)) {
+          const proceed = window.confirm(
+            `⚠️ ${f.name}\n\n此類檔案常含 API key／密碼／連線字串。\n請務必確認檔案不含機敏資訊後再上傳。\n\n仍要上傳嗎？`
+          )
+          if (!proceed) continue
+        }
+        if (
+          c.kind === 'text' &&
+          (c.subtype === 'code' || c.subtype === 'config' || c.subtype === 'log') &&
+          f.size > TEXT_WARN_BYTES
+        ) {
+          warnings.push(`${f.name} 較大 (${(f.size / 1024).toFixed(0)}KB)，將增加 token 用量`)
         }
       }
+      // image：無額外前端檢查
       valid.push(f)
     }
     setFiles((prev) => [...prev, ...valid])
+    if (errMsg) {
+      setFileError(errMsg)
+    } else if (warnings.length) {
+      setFileError(`提示：${warnings.join('；')}`)
+    } else {
+      setFileError('')
+    }
   }, [allowText, textMaxMb, allowAudio, audioMaxMb])
 
   useImperativeHandle(ref, () => ({
@@ -350,7 +349,7 @@ const MessageInput = forwardRef<MessageInputHandle, Props>(function MessageInput
           type="file"
           multiple
           className="hidden"
-          accept={ALLOWED_TYPES.join(',')}
+          accept={ACCEPT_ATTR}
           onChange={(e) => {
             if (e.target.files) handleFiles(Array.from(e.target.files))
             e.target.value = ''

@@ -1,7 +1,7 @@
 /**
  * Help page seed data — zh-TW (source of truth)
  * Auto-extracted from HelpPage.tsx
- * Generated: 2026-04-13
+ * Generated: 2026-04-15
  *
  * Block types: para, tip, note, table, steps, code, list, subsection, card_grid, comparison
  */
@@ -12,7 +12,7 @@ const userSections = [
     "sort_order": 1,
     "icon": "BookOpen",
     "icon_color": "text-blue-500",
-    "last_modified": "2026-04-08",
+    "last_modified": "2026-04-15",
     "title": "系統介紹",
     "sidebar_label": "系統介紹",
     "blocks": [
@@ -45,7 +45,7 @@ const userSections = [
           ],
           [
             "文件分析",
-            "可上傳 PDF、Word、Excel、PowerPoint、圖片，AI 直接閱讀並分析內容"
+            "可上傳 PDF、Word、Excel、PowerPoint、圖片、程式原始碼、設定檔（YAML/JSON/Dockerfile 等）、Jupyter Notebook 等多種格式，AI 直接閱讀並分析內容"
           ],
           [
             "工具調用",
@@ -693,7 +693,7 @@ const userSections = [
     "sort_order": 7,
     "icon": "Upload",
     "icon_color": "text-teal-500",
-    "last_modified": "2026-04-08",
+    "last_modified": "2026-04-15",
     "title": "上傳檔案",
     "sidebar_label": "上傳檔案",
     "blocks": [
@@ -711,24 +711,93 @@ const userSections = [
             "rows": [
               [
                 "文件",
-                "PDF、DOCX、XLSX、PPTX、TXT、CSV",
+                "PDF、DOCX、XLSX、PPTX、TXT、CSV、TSV、MD、RST、TEX",
                 "AI 直接讀取文件內容進行分析"
               ],
               [
                 "圖片",
-                "JPG、PNG、GIF、WEBP",
+                "JPG、PNG、GIF、WEBP、BMP、TIFF、HEIC、AVIF、ICO",
                 "AI 可辨識圖片中的文字與內容"
               ],
               [
                 "音訊",
-                "MP3、WAV、M4A、OGG、FLAC、WEBM、MP4、AAC",
+                "MP3、WAV、M4A、OGG、FLAC、WEBM、MP4、AAC、OPUS、WMA",
                 "自動轉錄為文字後送 AI 分析"
+              ],
+              [
+                "程式原始碼",
+                "PY、JS、TS、JSX、TSX、JAVA、KT、C、H、CPP、HPP、CS、GO、RS、PHP、RB、SWIFT、DART、LUA、PL、R、SQL、SH、BASH、PS1、BAT、HTML、CSS、SCSS、VUE、SVELTE、XML、SVG、GRAPHQL 等 100+ 種",
+                "AI 以 UTF-8 讀取原始碼進行審查、除錯、改寫、翻譯"
+              ],
+              [
+                "設定檔",
+                "YML、YAML、TOML、JSON、JSONC、INI、CONF、CFG、PROPERTIES、ENV、LOCK、PROTO 等",
+                "AI 解讀並協助修改設定"
+              ],
+              [
+                "Log / Diff",
+                "LOG、OUT、DIFF、PATCH",
+                "協助分析錯誤 log、Code Review diff"
+              ],
+              [
+                "Jupyter Notebook",
+                "IPYNB",
+                "僅讀取 cell 原始碼，自動跳過輸出的 base64 圖片/大型輸出"
+              ],
+              [
+                "無副檔名特殊檔",
+                "Dockerfile、Makefile、Jenkinsfile、Gemfile、Pipfile、Vagrantfile、Caddyfile、Brewfile、BUILD、WORKSPACE、.gitignore、.env.local、.eslintrc 等",
+                "常見的 build／dev config，可直接上傳"
               ]
             ]
           },
           {
             "type": "note",
-            "text": "不支援上傳影片檔案。文件類最大約 10MB，音訊類最大約 50MB（實際限制依管理員為每位使用者的設定而有不同）。"
+            "text": "**禁止上傳**：影片檔（.mp4/.avi/.mov 等）、執行檔（.exe/.dll/.so/.msi/.dmg/.apk/.ipa 等）、私鑰憑證（.pem/.key/.p12/.pfx/.keystore/.jks）、壓縮檔（.zip/.rar/.7z/.tar/.gz/.bz2/.xz）。若需分享壓縮內容，請先解壓後再上傳個別檔案。"
+          },
+          {
+            "type": "tip",
+            "text": "上傳 `.env`、`.env.local`、`.env.production` 等環境變數檔時，系統會跳出確認視窗提醒您確認檔案不含 API key／密碼／連線字串等機敏資訊，再送出 AI 分析。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "大小限制",
+        "blocks": [
+          {
+            "type": "table",
+            "headers": [
+              "類型",
+              "單檔上限",
+              "備註"
+            ],
+            "rows": [
+              [
+                "文件（PDF/Word/Excel/PPTX/TXT/CSV 等）",
+                "依管理員設定（預設約 10MB）",
+                "可請管理員提高上限"
+              ],
+              [
+                "圖片",
+                "依管理員設定（預設約 10MB）",
+                ""
+              ],
+              [
+                "音訊",
+                "依管理員設定（預設約 50MB）",
+                "需管理員授權音訊上傳"
+              ],
+              [
+                "程式碼／設定／Log／Jupyter",
+                "**最多 5MB**（hard limit）",
+                "避免塞爆 AI context；超過請先裁切"
+              ]
+            ]
+          },
+          {
+            "type": "note",
+            "text": "上傳 >500KB 的程式碼／設定／log 檔時前端會顯示提示「將增加 token 用量」，不擋上傳但提醒您可先裁切重點段落。單一訊息最多可附加 10 個檔案（管理員可調整 CHAT_MAX_FILES_PER_MESSAGE）。"
           }
         ]
       },
