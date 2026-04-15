@@ -33,6 +33,7 @@ interface AuthContextType {
   impersonation: ImpersonationStatus | null
   startImpersonate: (targetUserId: number) => Promise<void>
   exitImpersonate: () => Promise<void>
+  refreshImpersonation: () => Promise<void>
 }
 
 const AuthContext = createContext<AuthContextType | null>(null)
@@ -75,8 +76,28 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     })
     api.get('/auth/impersonate/status')
-      .then((r) => { if (r.data?.impersonating) setImpersonation(r.data) })
-      .catch(() => {})
+      .then((r) => setImpersonation(r.data?.impersonating ? r.data : null))
+      .catch(() => setImpersonation(null))
+  }, [])
+
+  // 防呆：另一個分頁 / 視窗改了 localStorage.token（例如重新登入）會把 impersonation token 蓋掉，
+  // 但本分頁的 React state 還停留在「模擬中」，導致 exit 按鈕誤觸發 → 「不在模擬中」。
+  // 監聽 storage 事件，token 一變立刻重抓 impersonation 狀態同步。
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      if (e.key !== 'token') return
+      setToken(e.newValue)
+      if (!e.newValue) {
+        setUser(null)
+        setImpersonation(null)
+        return
+      }
+      api.get('/auth/impersonate/status')
+        .then((r) => setImpersonation(r.data?.impersonating ? r.data : null))
+        .catch(() => setImpersonation(null))
+    }
+    window.addEventListener('storage', onStorage)
+    return () => window.removeEventListener('storage', onStorage)
   }, [])
 
   const login = useCallback(async (username: string, password: string) => {
@@ -146,6 +167,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     window.location.href = '/'
   }, [])
 
+  const refreshImpersonation = useCallback(async () => {
+    try {
+      const r = await api.get('/auth/impersonate/status')
+      setImpersonation(r.data?.impersonating ? r.data : null)
+    } catch {
+      setImpersonation(null)
+    }
+  }, [])
+
   const setLanguage = useCallback(async (lang: LangCode) => {
     // Optimistic: update UI immediately, then persist to server
     i18n.changeLanguage(lang)
@@ -195,6 +225,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         impersonation,
         startImpersonate,
         exitImpersonate,
+        refreshImpersonation,
       }}
     >
       {children}

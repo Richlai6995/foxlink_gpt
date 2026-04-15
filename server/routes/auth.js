@@ -874,7 +874,11 @@ router.post('/impersonate', verifyToken, verifyAdmin, async (req, res) => {
 router.post('/impersonate/exit', verifyToken, async (req, res) => {
   try {
     const imp = req.user._impersonation;
-    if (!imp) return res.status(400).json({ error: '不在模擬中' });
+    if (!imp) {
+      const tk = (req.headers.authorization || '').split(' ')[1] || '';
+      console.warn('[impersonate/exit] 拒絕:session 沒有 _impersonation。token=' + tk.slice(0, 8) + '..., user_id=' + req.user.id + ', username=' + req.user.username + ', role=' + req.user.role + '。可能成因:多分頁登入覆寫 token。');
+      return res.status(400).json({ error: '不在模擬中' });
+    }
 
     const db = require('../database-oracle').db;
     await db.prepare(

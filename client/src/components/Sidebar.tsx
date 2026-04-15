@@ -62,7 +62,7 @@ export default function Sidebar({
   collapsed,
   onToggleCollapse,
 }: Props) {
-  const { user, logout, isAdmin, canSchedule, canCreateKb, canUseDashboard, canAccessTrainingDev, setLanguage, impersonation, exitImpersonate } = useAuth()
+  const { user, logout, isAdmin, canSchedule, canCreateKb, canUseDashboard, canAccessTrainingDev, setLanguage, impersonation, exitImpersonate, refreshImpersonation } = useAuth()
   const [showImpersonate, setShowImpersonate] = useState(false)
   const [exitingImp, setExitingImp] = useState(false)
 
@@ -72,7 +72,15 @@ export default function Sidebar({
     try {
       await exitImpersonate()
     } catch (e: any) {
-      alert(e?.response?.data?.error || t('sidebar.impersonateExitFailed'))
+      const status = e?.response?.status
+      const msg = e?.response?.data?.error
+      // 前後端 state 不一致(server 已不在模擬,但前端按鈕還顯示):靜默修復,不嚇使用者
+      if (status === 400 && typeof msg === 'string' && msg.includes('不在模擬中')) {
+        await refreshImpersonation()
+        setExitingImp(false)
+        return
+      }
+      alert(msg || t('sidebar.impersonateExitFailed'))
       setExitingImp(false)
     }
   }
@@ -566,7 +574,7 @@ export default function Sidebar({
                 })}
                 className="text-amber-400 hover:text-amber-300 transition disabled:opacity-50 animate-pulse"
               >
-                <UserCog size={15} />
+                <LogOut size={15} />
               </button>
             )}
             <button
