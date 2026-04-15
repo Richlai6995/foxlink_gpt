@@ -250,11 +250,12 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
       if (!isNewSession) {
         try {
           const serverRes = await api.get(`/training/recording/${sid}`)
-          const serverIds: number[] = (serverRes.data.steps || []).map((s: any) => s.id)
+          const serverIds: number[] = (serverRes.data.steps || []).map((s: any) => Number(s.id)).filter((n: number) => !isNaN(n))
           const localIds = new Set(
             steps
               .filter(s => s.id.startsWith('server_'))
               .map(s => Number(s.id.replace('server_', '')))
+              .filter(n => !isNaN(n))
           )
           const toDelete = serverIds.filter(id => !localIds.has(id))
           if (toDelete.length > 0) {
@@ -468,6 +469,8 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
   }, [recording, sessionId])
 
   // Pull screenshots from server → load into panel
+  // 規則：step_number / lang 完全照 Chrome Extension 送來的值，不改；
+  // 排序：step_number 升序 → lang (zh-TW → en → vi)
   const pullFromServer = async (sid?: string) => {
     const targetSid = sid || sessionIdRef.current || sessionId
     console.log('[RecordingPanel] pullFromServer called, sid param:', sid, 'ref:', sessionIdRef.current, 'state:', sessionId, 'resolved:', targetSid)
@@ -489,28 +492,14 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
         console.warn('[RecordingPanel] pull: no steps found after', waited, 'ms')
       }
 
-      // Auto-number: zh-TW screenshots get sequential step numbers (1,2,3...),
-      // en/vi inherit the step_number of the closest zh-TW step (same server step_number or by position)
+      // 尊重 Chrome Extension 上傳時帶的 step_number，不要重編
       const langOrder: Record<string, number> = { 'zh-TW': 0, 'en': 1, 'vi': 2 }
       const withScreenshot = serverSteps.filter((s: any) => s.screenshot_url)
       console.log('[RecordingPanel] pull: total steps:', serverSteps.length, 'with screenshot:', withScreenshot.length)
 
-      // First pass: assign auto step numbers to zh-TW, keep others as-is
-      const zhSteps = withScreenshot.filter((s: any) => !s.lang || s.lang === 'zh-TW')
-      const otherSteps = withScreenshot.filter((s: any) => s.lang && s.lang !== 'zh-TW')
-
-      // Auto-number zh-TW by DB order
-      zhSteps.forEach((s: any, i: number) => { s._autoStep = i + 1 })
-
-      // For en/vi: match to zh-TW by step_number, or assign sequentially
-      otherSteps.forEach((s: any) => {
-        const match = zhSteps.find((z: any) => z.step_number === s.step_number)
-        s._autoStep = match ? match._autoStep : (s.step_number || 0)
-      })
-
-      // Combine and sort: by _autoStep, then by language order
-      const sorted = [...zhSteps, ...otherSteps].sort((a: any, b: any) => {
-        const stepDiff = (a._autoStep || 0) - (b._autoStep || 0)
+      // Sort by server step_number, then by language order
+      const sorted = [...withScreenshot].sort((a: any, b: any) => {
+        const stepDiff = (a.step_number || 0) - (b.step_number || 0)
         if (stepDiff !== 0) return stepDiff
         return (langOrder[a.lang || 'zh-TW'] || 0) - (langOrder[b.lang || 'zh-TW'] || 0)
       })
@@ -521,7 +510,7 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
           thumbnail: s.screenshot_url,
           note: s.ai_instruction || s.page_title || '',
           isKeyStep: s.action_type === 'click' || s.action_type === 'key_action',
-          stepNumber: s._autoStep || s.step_number || 0,
+          stepNumber: s.step_number || 0,
           lang: s.lang || 'zh-TW',
           annotations: s.annotations_json ? (() => { try { return JSON.parse(s.annotations_json) } catch { return [] } })() : [],
           pageUrl: s.page_url,
@@ -552,9 +541,11 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
   }
 
   // Phase 3A: Resume recording — reuse same session, Extension continues uploading
-  const resumeExtensionRecording = () => {
+  const resumeExtensionRecording = async () => {
     const sid = sessionIdRef.current || sessionId
     if (!sid) return startExtensionRecording() // no session yet, start fresh
+    // 先把本地刪除/修改同步到 server，避免繼續錄製後 pull 把已刪的圖拉回來
+    try { await saveDraft() } catch (e) { console.warn('[resume] saveDraft failed:', e) }
     setRecording(true)
     // 計算 zh-TW 步驟的最大步驟號，繼續錄製從 max+1 開始
     const zhSteps = steps.filter(s => !s.lang || s.lang === 'zh-TW')
@@ -855,7 +846,7 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
                   </div>
                   {/* Manual pull button */}
                   {!recording && sessionIdRef.current && !pulling && (
-                    <button onClick={() => pullFromServer()}
+                    <button onClick={() => pullFromServer(undefined, { merge: false })}
                       className="w-full mt-1 py-1 rounded text-[10px] transition"
                       style={{ backgroundColor: 'var(--t-accent-subtle)', color: 'var(--t-accent)' }}>
                       📥 {steps.length > 0 ? '重新拉取截圖' : '手動拉取截圖'}
@@ -882,7 +873,7 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
                           const val = (e.target as HTMLInputElement).value.trim()
                           // Validate UUID format
                           if (val && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val)) {
-                            setSessionId(val); sessionIdRef.current = val; pullFromServer(val)
+                            setSessionId(val); sessionIdRef.current = val; pullFromServer(val, { merge: false })
                           } else { alert('請貼上正確的 Session ID（UUID 格式）') }
                         }
                       }}
@@ -891,7 +882,7 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
                       const input = document.getElementById('manual-session-input') as HTMLInputElement
                       const val = input?.value?.trim()
                       if (val && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val)) {
-                        setSessionId(val); sessionIdRef.current = val; pullFromServer(val)
+                        setSessionId(val); sessionIdRef.current = val; pullFromServer(val, { merge: false })
                       } else { alert('請貼上正確的 Session ID（UUID 格式）') }
                     }}
                       className="px-2 py-1 rounded text-white text-[10px]"
@@ -1122,8 +1113,8 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
                         alert(`步驟編號 ${newNum} 已被使用（${conflict.lang || 'zh-TW'}），請選擇其他編號`)
                         return
                       }
-                      // 只改這一張，不動其他步驟的編號和順序
-                      setSteps(prev => prev.map(s => s.id === selectedStep.id ? { ...s, stepNumber: newNum } : s))
+                      // 改步驟編號後依規則 3 重新排序（step_number → lang）
+                      setSteps(prev => sortSteps(prev.map(s => s.id === selectedStep.id ? { ...s, stepNumber: newNum } : s)))
                     }}
                     className="w-full border rounded px-2 py-1 text-[10px]"
                     style={{ backgroundColor: 'var(--t-bg-input)', borderColor: 'var(--t-border)', color: 'var(--t-text)' }}
@@ -1135,8 +1126,8 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
                     value={selectedStep.lang || 'zh-TW'}
                     onChange={e => {
                       const newLang = e.target.value
-                      // 只改語言，不重排
-                      setSteps(prev => prev.map(s => s.id === selectedStep.id ? { ...s, lang: newLang } : s))
+                      // 改語言後依規則 3 重新排序（step_number → lang）
+                      setSteps(prev => sortSteps(prev.map(s => s.id === selectedStep.id ? { ...s, lang: newLang } : s)))
                     }}
                     className="w-full border rounded px-2 py-1 text-[10px]"
                     style={{ backgroundColor: 'var(--t-bg-input)', borderColor: 'var(--t-border)', color: 'var(--t-text)' }}
@@ -1307,11 +1298,13 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
             stepNumber={stepToAnnotate.stepNumber || (steps.indexOf(stepToAnnotate) + 1)}
             lang={stepToAnnotate.lang || 'zh-TW'}
             onSave={(newAnnotations, meta) => {
-              setSteps(prev =>
-                prev.map(s => s.id === annotatingStepId
+              const changedOrder = !!(meta?.stepNumber || meta?.lang)
+              setSteps(prev => {
+                const next = prev.map(s => s.id === annotatingStepId
                   ? { ...s, annotations: newAnnotations, ...(meta?.stepNumber ? { stepNumber: meta.stepNumber } : {}), ...(meta?.lang ? { lang: meta.lang } : {}) }
                   : s)
-              )
+                return changedOrder ? sortSteps(next) : next
+              })
               setAnnotatingStepId(null)
             }}
             onClose={() => setAnnotatingStepId(null)}
