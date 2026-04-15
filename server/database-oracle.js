@@ -2602,7 +2602,7 @@ async function dropVectorStorePartition(jobId) {
     if (!await _isPartitioned(conn, 'AI_VECTOR_STORE')) return;
     const pName = `P_JOB_${jobId}`;
     if (!await _partitionExists(conn, 'AI_VECTOR_STORE', pName)) return;
-    await conn.execute(`ALTER TABLE ai_vector_store DROP PARTITION ${pName}`, [], { autoCommit: true });
+    await conn.execute(`ALTER TABLE ai_vector_store DROP PARTITION ${pName} UPDATE GLOBAL INDEXES`, [], { autoCommit: true });
     console.log(`[Partition] AI_VECTOR_STORE -${pName}`);
   } catch (e) {
     console.warn(`[Partition] dropVectorStorePartition(${jobId}):`, e.message);
@@ -2646,6 +2646,46 @@ async function _findDefaultPartition(conn, tableName) {
   }
 }
 
+/**
+ * 掃描 table 上所有 UNUSABLE 的 index / index partition,REBUILD 修復。
+ * SPLIT/DROP PARTITION 沒帶 UPDATE GLOBAL INDEXES 時 global index 會壞掉,
+ * 之後任何 INSERT 都會 ORA-01502。這個 helper 負責收尾。
+ */
+async function _rebuildUnusableIndexes(conn, tableName) {
+  try {
+    const idx = await conn.execute(
+      `SELECT index_name FROM user_indexes WHERE table_name = :t AND status = 'UNUSABLE'`,
+      { t: tableName.toUpperCase() }
+    );
+    for (const row of (idx.rows || [])) {
+      const name = row[0];
+      try {
+        await conn.execute(`ALTER INDEX ${name} REBUILD`, [], { autoCommit: true });
+        console.log(`[Partition] REBUILD index ${name}`);
+      } catch (e) {
+        console.warn(`[Partition] REBUILD ${name} failed:`, e.message);
+      }
+    }
+    const parts = await conn.execute(
+      `SELECT index_name, partition_name FROM user_ind_partitions
+        WHERE index_name IN (SELECT index_name FROM user_indexes WHERE table_name = :t)
+          AND status = 'UNUSABLE'`,
+      { t: tableName.toUpperCase() }
+    );
+    for (const row of (parts.rows || [])) {
+      const [iname, pname] = row;
+      try {
+        await conn.execute(`ALTER INDEX ${iname} REBUILD PARTITION ${pname}`, [], { autoCommit: true });
+        console.log(`[Partition] REBUILD ${iname}.${pname}`);
+      } catch (e) {
+        console.warn(`[Partition] REBUILD ${iname}.${pname} failed:`, e.message);
+      }
+    }
+  } catch (e) {
+    console.warn(`[Partition] _rebuildUnusableIndexes(${tableName}):`, e.message);
+  }
+}
+
 /** KB 新增後呼叫 — 為該 kb 加 KB_CHUNKS partition */
 async function addKbChunksPartition(kbId) {
   if (!pool) return;
@@ -2660,11 +2700,14 @@ async function addKbChunksPartition(kbId) {
     // DBA 有可能在後期手動加 DEFAULT partition,所以這裡每次都偵測一次。
     const defPart = await _findDefaultPartition(conn, 'KB_CHUNKS');
     if (defPart) {
+      // UPDATE GLOBAL INDEXES 必加,否則 SPLIT 後 PK / 其他 global index 會變 UNUSABLE,
+      // 接著任何 INSERT 都會 ORA-01502。DBA 加 DEFAULT partition 後第一次 SPLIT 就遇到。
       await conn.execute(
-        `ALTER TABLE kb_chunks SPLIT PARTITION ${defPart} VALUES ('${escaped}') INTO (PARTITION ${pName}, PARTITION ${defPart})`,
+        `ALTER TABLE kb_chunks SPLIT PARTITION ${defPart} VALUES ('${escaped}') INTO (PARTITION ${pName}, PARTITION ${defPart}) UPDATE GLOBAL INDEXES`,
         [], { autoCommit: true }
       );
       console.log(`[Partition] KB_CHUNKS SPLIT ${defPart} → +${pName}`);
+      await _rebuildUnusableIndexes(conn, 'KB_CHUNKS');
     } else {
       await conn.execute(
         `ALTER TABLE kb_chunks ADD PARTITION ${pName} VALUES ('${escaped}')`,
@@ -2688,8 +2731,9 @@ async function dropKbChunksPartition(kbId) {
     if (!await _isPartitioned(conn, 'KB_CHUNKS')) return;
     const pName = _kbPartName(kbId);
     if (!await _partitionExists(conn, 'KB_CHUNKS', pName)) return;
-    await conn.execute(`ALTER TABLE kb_chunks DROP PARTITION ${pName}`, [], { autoCommit: true });
+    await conn.execute(`ALTER TABLE kb_chunks DROP PARTITION ${pName} UPDATE GLOBAL INDEXES`, [], { autoCommit: true });
     console.log(`[Partition] KB_CHUNKS -${pName}`);
+    await _rebuildUnusableIndexes(conn, 'KB_CHUNKS');
   } catch (e) {
     console.warn(`[Partition] dropKbChunksPartition(${kbId}):`, e.message);
   } finally {
