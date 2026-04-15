@@ -1679,7 +1679,7 @@ const userSections = [
     "sort_order": 14,
     "icon": "Sparkles",
     "icon_color": "text-purple-500",
-    "last_modified": "2026-04-13",
+    "last_modified": "2026-04-15",
     "title": "技能 Skill",
     "sidebar_label": "技能 Skill",
     "blocks": [
@@ -1861,7 +1861,7 @@ const userSections = [
         "blocks": [
           {
             "type": "para",
-            "text": "不想公開給全員、只想分享給特定同事？可在技能卡片選單點「分享」，選擇分享對象（使用者 / 角色 / 部門）後設定「使用」或「管理」權限，對方可在技能市集的「分享給我」區找到此技能。"
+            "text": "不想公開給全員、只想分享給特定同事？可在技能卡片選單點「分享」，選擇分享對象（使用者 / 角色 / 廠區 / 部門 / 利潤中心 / 事業處 / 事業群）後設定「使用」或「管理」權限，對方可在技能市集的「分享給我」區找到此技能。"
           }
         ]
       },
@@ -2523,7 +2523,7 @@ const userSections = [
     "sort_order": 15,
     "icon": "Database",
     "icon_color": "text-teal-500",
-    "last_modified": "2026-04-01",
+    "last_modified": "2026-04-15",
     "title": "知識庫市集",
     "sidebar_label": "知識庫市集",
     "blocks": [
@@ -2657,7 +2657,7 @@ const userSections = [
         "blocks": [
           {
             "type": "para",
-            "text": "進入知識庫詳情 → 點選「共享設定」頁籤，可將知識庫共享給特定使用者、角色、部門或組織單位。"
+            "text": "進入知識庫詳情 → 點選「共享設定」頁籤，可將知識庫共享給特定使用者、角色、廠區、部門、利潤中心、事業處或事業群。"
           },
           {
             "type": "table",
@@ -2675,6 +2675,10 @@ const userSections = [
                 "系統管理員定義的角色群組（如研發部）"
               ],
               [
+                "廠區",
+                "依 ERP 廠區代碼（FACTORY_CODE）共享，如 TCC、Z4E 等製造廠"
+              ],
+              [
                 "部門",
                 "依 ERP 組織同步的部門代碼"
               ],
@@ -2683,8 +2687,12 @@ const userSections = [
                 "依利潤中心共享"
               ],
               [
-                "組織課室",
-                "依課室共享"
+                "事業處",
+                "依事業處（org_section）共享"
+              ],
+              [
+                "事業群",
+                "依事業群（org_group）共享"
               ]
             ]
           },
@@ -2761,7 +2769,7 @@ const userSections = [
               [
                 "Score 閾值",
                 "相似度低於此值的結果會被丟棄（0–1）",
-                "0.3–0.5"
+                "預設 0（不過濾）"
               ],
               [
                 "OCR 模型",
@@ -2769,6 +2777,10 @@ const userSections = [
                 "Flash（快速省成本）"
               ]
             ]
+          },
+          {
+            "type": "tip",
+            "text": "Score 閾值為什麼預設是 0？因為不同檢索模式（向量 / 全文 / 混合）與不同 embedding 模型的分數分布差異很大（向量通常 0.5–0.9、全文分數範圍不固定、混合為融合後再正規化），任何硬編碼預設值都可能誤殺合理結果；因此預設 0（全部保留），讓召回結果完整交給後續的重排序與 LLM 判斷。建議先用「召回測試」觀察您實際資料的分數分布，再決定是否調高（例如向量模式可試 0.3–0.5 過濾明顯不相關的內容）。"
           }
         ]
       },
@@ -2903,7 +2915,7 @@ const userSections = [
     "sort_order": 16,
     "icon": "LayoutTemplate",
     "icon_color": "text-indigo-500",
-    "last_modified": "2026-04-01",
+    "last_modified": "2026-04-15",
     "title": "文件範本",
     "sidebar_label": "文件範本",
     "blocks": [
@@ -3355,7 +3367,7 @@ const userSections = [
         "blocks": [
           {
             "type": "para",
-            "text": "範本擁有者（owner）可將範本分享給其他使用者、部門或職稱群組："
+            "text": "範本擁有者（owner）可將範本分享給其他使用者、角色、廠區、部門、利潤中心、事業處或事業群："
           },
           {
             "type": "table",
@@ -3382,11 +3394,12 @@ const userSections = [
             "type": "list",
             "items": [
               "個別使用者",
+              "角色",
+              "廠區（ERP FACTORY_CODE）",
               "部門",
-              "職稱",
-              "成本中心",
-              "分部",
-              "組織群組"
+              "利潤中心",
+              "事業處",
+              "事業群"
             ]
           }
         ]
@@ -4107,7 +4120,7 @@ const userSections = [
     "sort_order": 18,
     "icon": "BarChart3",
     "icon_color": "text-orange-500",
-    "last_modified": "2026-04-01",
+    "last_modified": "2026-04-15",
     "title": "AI 戰情室",
     "sidebar_label": "AI 戰情室",
     "blocks": [
@@ -4156,7 +4169,7 @@ const userSections = [
           ],
           [
             "分享",
-            "命名查詢與儀表板可分享給指定使用者、角色、部門或組織單位"
+            "命名查詢與儀表板可分享給指定使用者、角色、廠區、部門、利潤中心、事業處或事業群"
           ]
         ]
       },
@@ -4381,7 +4394,7 @@ const userSections = [
     "sort_order": 19,
     "icon": "BookMarked",
     "icon_color": "text-blue-600",
-    "last_modified": "2026-04-01",
+    "last_modified": "2026-04-15",
     "title": "命名查詢 / 報表範本",
     "sidebar_label": "命名查詢 / 報表範本",
     "blocks": [
@@ -4584,11 +4597,11 @@ const userSections = [
               },
               {
                 "title": "選擇分享對象類型",
-                "desc": "可選：使用者 / 角色 / 部門 / 利潤中心 / 事業處 / 事業群"
+                "desc": "可選：使用者 / 角色 / 廠區 / 部門 / 利潤中心 / 事業處 / 事業群（廠區用於跨廠共享，以 ERP 廠區代碼為單位）"
               },
               {
                 "title": "搜尋並選取對象",
-                "desc": "輸入姓名、帳號或工號搜尋使用者；部門等類型直接從下拉清單選擇"
+                "desc": "輸入姓名、帳號或工號搜尋使用者；廠區、部門等類型可輸入代碼或名稱即時過濾下拉清單"
               },
               {
                 "title": "設定權限等級後點「+ 新增」",
@@ -5257,7 +5270,7 @@ const userSections = [
     "sort_order": 23,
     "icon": "Share2",
     "icon_color": "text-teal-600",
-    "last_modified": "2026-04-01",
+    "last_modified": "2026-04-15",
     "title": "儀表板 Dashboard Board",
     "sidebar_label": "儀表板 Dashboard",
     "blocks": [
@@ -5380,8 +5393,12 @@ const userSections = [
                 "desc": "開啟儀表板分享設定對話框"
               },
               {
-                "title": "依照命名查詢分享的相同流程，選擇對象類型與搜尋對象",
-                "desc": ""
+                "title": "選擇分享對象類型",
+                "desc": "可選：使用者 / 角色 / 廠區 / 部門 / 利潤中心 / 事業處 / 事業群（廠區用於跨廠共享，以 ERP 廠區代碼為單位）"
+              },
+              {
+                "title": "搜尋並選取對象",
+                "desc": "輸入姓名、帳號或工號搜尋使用者；廠區、部門等類型可輸入代碼或名稱即時過濾下拉清單"
               },
               {
                 "title": "設定「使用權限」或「管理權限」後點「+ 新增」",
@@ -6526,7 +6543,7 @@ const userSections = [
               },
               {
                 "title": "🔗 分享",
-                "desc": "設定課程存取權限（使用者/角色/部門/利潤中心）",
+                "desc": "設定課程存取權限（使用者/角色/廠區/部門/利潤中心/事業處/事業群）",
                 "color": "rose"
               },
               {

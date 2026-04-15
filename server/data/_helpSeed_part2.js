@@ -378,7 +378,7 @@ module.exports = [
     sort_order: 18,
     icon: 'BarChart3',
     icon_color: 'text-orange-500',
-    last_modified: '2026-04-01',
+    last_modified: '2026-04-15',
     title: 'AI 戰情室',
     sidebar_label: 'AI 戰情室',
     blocks: [
@@ -395,7 +395,7 @@ module.exports = [
           ['Tableau 拖拉式設計器', '全螢幕拖拉欄位到各 Shelf，視覺化設計圖表，類似 Tableau 操作體驗'],
           ['儀表板 Board', '將多個命名查詢的圖表組合成一個可拖拉排版的儀表板'],
           ['查詢參數化', '命名查詢可定義填值欄位（下拉選單、日期範圍等），執行時彈窗填入'],
-          ['分享', '命名查詢與儀表板可分享給指定使用者、角色、部門或組織單位'],
+          ['分享', '命名查詢與儀表板可分享給指定使用者、角色、廠區、部門、利潤中心、事業處或事業群'],
         ],
       },
       {
@@ -501,7 +501,7 @@ module.exports = [
     sort_order: 19,
     icon: 'BookMarked',
     icon_color: 'text-blue-600',
-    last_modified: '2026-04-01',
+    last_modified: '2026-04-15',
     title: '命名查詢 / 報表範本',
     sidebar_label: '命名查詢 / 報表範本',
     blocks: [
@@ -597,8 +597,8 @@ module.exports = [
             type: 'steps',
             items: [
               { title: '滑鼠移到查詢名稱，點擊「分享」圖示', desc: '開啟分享設定對話框' },
-              { title: '選擇分享對象類型', desc: '可選：使用者 / 角色 / 部門 / 利潤中心 / 事業處 / 事業群' },
-              { title: '搜尋並選取對象', desc: '輸入姓名、帳號或工號搜尋使用者；部門等類型直接從下拉清單選擇' },
+              { title: '選擇分享對象類型', desc: '可選：使用者 / 角色 / 廠區 / 部門 / 利潤中心 / 事業處 / 事業群（廠區用於跨廠共享，以 ERP 廠區代碼為單位）' },
+              { title: '搜尋並選取對象', desc: '輸入姓名、帳號或工號搜尋使用者；廠區、部門等類型可輸入代碼或名稱即時過濾下拉清單' },
               { title: '設定權限等級後點「+ 新增」', desc: '' },
             ],
           },
@@ -944,7 +944,7 @@ module.exports = [
     sort_order: 23,
     icon: 'Share2',
     icon_color: 'text-teal-600',
-    last_modified: '2026-04-01',
+    last_modified: '2026-04-15',
     title: '儀表板 Dashboard Board',
     sidebar_label: '儀表板 Dashboard',
     blocks: [
@@ -1012,7 +1012,8 @@ module.exports = [
             type: 'steps',
             items: [
               { title: '點擊工具列「🔗 分享」按鈕', desc: '開啟儀表板分享設定對話框' },
-              { title: '依照命名查詢分享的相同流程，選擇對象類型與搜尋對象', desc: '' },
+              { title: '選擇分享對象類型', desc: '可選：使用者 / 角色 / 廠區 / 部門 / 利潤中心 / 事業處 / 事業群（廠區用於跨廠共享，以 ERP 廠區代碼為單位）' },
+              { title: '搜尋並選取對象', desc: '輸入姓名、帳號或工號搜尋使用者；廠區、部門等類型可輸入代碼或名稱即時過濾下拉清單' },
               { title: '設定「使用權限」或「管理權限」後點「+ 新增」', desc: '' },
             ],
           },
@@ -1271,7 +1272,7 @@ module.exports = [
     sort_order: 16,
     icon: 'LayoutTemplate',
     icon_color: 'text-indigo-500',
-    last_modified: '2026-04-01',
+    last_modified: '2026-04-15',
     title: '文件範本',
     sidebar_label: '文件範本',
     blocks: [
@@ -1461,7 +1462,7 @@ module.exports = [
         type: 'subsection',
         title: '分享範本',
         blocks: [
-          { type: 'para', text: '範本擁有者（owner）可將範本分享給其他使用者、部門或職稱群組：' },
+          { type: 'para', text: '範本擁有者（owner）可將範本分享給其他使用者、角色、廠區、部門、利潤中心、事業處或事業群：' },
           {
             type: 'table',
             headers: ['分享類型', '說明'],
@@ -1473,7 +1474,7 @@ module.exports = [
           { type: 'para', text: '分享對象可以是：' },
           {
             type: 'list',
-            items: ['個別使用者', '部門', '職稱', '成本中心', '分部', '組織群組'],
+            items: ['個別使用者', '角色', '廠區（ERP FACTORY_CODE）', '部門', '利潤中心', '事業處', '事業群'],
           },
         ],
       },
@@ -2282,7 +2283,7 @@ module.exports = [
               { title: '❓ 題庫', desc: '建立期末測驗題目（單選/多選/填空/配對/排序）', color: 'purple' },
               { title: '📝 測驗主題', desc: '建立不同章節組合的測驗，各自設定分數和時間', color: 'orange' },
               { title: '🌐 翻譯', desc: 'AI 一鍵翻譯為英文和越南文', color: 'cyan' },
-              { title: '🔗 分享', desc: '設定課程存取權限（使用者/角色/部門/利潤中心）', color: 'rose' },
+              { title: '🔗 分享', desc: '設定課程存取權限（使用者/角色/廠區/部門/利潤中心/事業處/事業群）', color: 'rose' },
               { title: '📊 成績', desc: '學員互動成績報表（課程/投影片/使用者三維度）', color: 'teal' },
               { title: '⚙ 設定', desc: '測驗設定（總分/時間/配分）、TTS 聲音、AI 模型', color: 'slate' },
             ],
