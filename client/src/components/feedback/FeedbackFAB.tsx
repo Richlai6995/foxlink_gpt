@@ -124,15 +124,31 @@ export default function FeedbackFAB() {
     }
   }, [open, view, categories.length, i18n.language])
 
+  const renamePastedFile = (file: File, idx: number): File => {
+    const d = new Date()
+    const pad = (n: number) => String(n).padStart(2, '0')
+    const stamp = `${pad(d.getMonth() + 1)}${pad(d.getDate())}${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`
+    const suffix = idx > 0 ? `_${idx}` : ''
+    const m = (file.name || '').match(/\.[^.]+$/)
+    const ext = m ? m[0] : (file.type.startsWith('image/') ? `.${file.type.split('/')[1].replace('jpeg', 'jpg')}` : '.bin')
+    const baseRaw = (file.name || '').replace(/\.[^.]+$/, '').trim()
+    const base = !baseRaw || /^image$/i.test(baseRaw) ? 'paste' : baseRaw
+    return new File([file], `${base}_${stamp}${suffix}${ext}`, { type: file.type })
+  }
+
   const handlePaste = (e: React.ClipboardEvent) => {
     const items = e.clipboardData?.items
     if (!items) return
+    const pasted: File[] = []
     for (let i = 0; i < items.length; i++) {
       if (items[i].type.startsWith('image/')) {
-        const file = items[i].getAsFile()
-        if (file) { e.preventDefault(); setFiles(prev => [...prev, file]) }
+        const f = items[i].getAsFile()
+        if (f) pasted.push(f)
       }
     }
+    if (pasted.length === 0) return
+    e.preventDefault()
+    setFiles(prev => [...prev, ...pasted.map((f, i) => renamePastedFile(f, i))])
   }
 
   const buildFormData = (isDraft: boolean) => {

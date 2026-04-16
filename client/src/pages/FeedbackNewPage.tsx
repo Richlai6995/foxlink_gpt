@@ -56,7 +56,19 @@ export default function FeedbackNewPage() {
     setPreviews(prev => prev.filter((_, i) => i !== idx))
   }
 
-  // Ctrl+V paste handler
+  // Ctrl+V paste handler — 重命名貼上的圖片，避免預設檔名全是 image.png
+  const renamePastedFile = (file: File, idx: number): File => {
+    const d = new Date()
+    const pad = (n: number) => String(n).padStart(2, '0')
+    const stamp = `${pad(d.getMonth() + 1)}${pad(d.getDate())}${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`
+    const suffix = idx > 0 ? `_${idx}` : ''
+    const m = (file.name || '').match(/\.[^.]+$/)
+    const ext = m ? m[0] : (file.type.startsWith('image/') ? `.${file.type.split('/')[1].replace('jpeg', 'jpg')}` : '.bin')
+    const baseRaw = (file.name || '').replace(/\.[^.]+$/, '').trim()
+    const base = !baseRaw || /^image$/i.test(baseRaw) ? 'paste' : baseRaw
+    return new File([file], `${base}_${stamp}${suffix}${ext}`, { type: file.type })
+  }
+
   const handlePaste = (e: React.ClipboardEvent) => {
     const items = e.clipboardData?.items
     if (!items) return
@@ -69,7 +81,7 @@ export default function FeedbackNewPage() {
     }
     if (imageFiles.length > 0) {
       e.preventDefault()
-      addFiles(imageFiles)
+      addFiles(imageFiles.map((f, i) => renamePastedFile(f, i)))
     }
   }
 

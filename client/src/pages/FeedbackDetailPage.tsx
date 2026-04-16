@@ -7,11 +7,12 @@ import { useFeedbackSocket } from '../hooks/useFeedbackSocket'
 import {
   ArrowLeft, Send, Paperclip, Lock, Clock, User, Star,
   CheckCircle, RotateCcw, UserCheck, Download, X, Loader2,
-  AlertTriangle, FileText, Image, Upload, Save, Trash2
+  AlertTriangle, FileText, Image, Upload, Save, Trash2, Archive
 } from 'lucide-react'
 import FeedbackStatusBadge from '../components/feedback/FeedbackStatusBadge'
 import FeedbackPriorityBadge from '../components/feedback/FeedbackPriorityBadge'
 import FeedbackAIAnalysis from '../components/feedback/FeedbackAIAnalysis'
+import TicketArchiveModal from '../components/feedback/admin/TicketArchiveModal'
 import MicButton from '../components/MicButton'
 
 interface Ticket {
@@ -91,6 +92,9 @@ export default function FeedbackDetailPage() {
 
   // Image lightbox
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null)
+
+  // Archive snapshot modal (admin only)
+  const [showArchive, setShowArchive] = useState(false)
 
   // Draft editing
   const [draftSubject, setDraftSubject] = useState('')
@@ -206,18 +210,32 @@ export default function FeedbackDetailPage() {
     }
   }
 
+  const renamePastedFile = (file: File, idx: number): File => {
+    const d = new Date()
+    const pad = (n: number) => String(n).padStart(2, '0')
+    const stamp = `${pad(d.getMonth() + 1)}${pad(d.getDate())}${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`
+    const suffix = idx > 0 ? `_${idx}` : ''
+    const m = (file.name || '').match(/\.[^.]+$/)
+    const ext = m ? m[0] : (file.type.startsWith('image/') ? `.${file.type.split('/')[1].replace('jpeg', 'jpg')}` : '.bin')
+    // image.png / Image.png / (empty) → paste_<stamp>
+    const baseRaw = (file.name || '').replace(/\.[^.]+$/, '').trim()
+    const base = !baseRaw || /^image$/i.test(baseRaw) ? 'paste' : baseRaw
+    return new File([file], `${base}_${stamp}${suffix}${ext}`, { type: file.type })
+  }
+
   const handlePaste = (e: React.ClipboardEvent) => {
     const items = e.clipboardData?.items
     if (!items) return
+    const pasted: File[] = []
     for (let i = 0; i < items.length; i++) {
       if (items[i].type.startsWith('image/')) {
-        const file = items[i].getAsFile()
-        if (file) {
-          e.preventDefault()
-          setMsgFiles(prev => [...prev, file])
-        }
+        const f = items[i].getAsFile()
+        if (f) pasted.push(f)
       }
     }
+    if (pasted.length === 0) return
+    e.preventDefault()
+    setMsgFiles(prev => [...prev, ...pasted.map((f, i) => renamePastedFile(f, i))])
   }
 
   // 語音輸入：游標位置插入
@@ -299,12 +317,16 @@ export default function FeedbackDetailPage() {
   const handleDraftPaste = (e: React.ClipboardEvent) => {
     const items = e.clipboardData?.items
     if (!items) return
+    const pasted: File[] = []
     for (let i = 0; i < items.length; i++) {
       if (items[i].type.startsWith('image/')) {
-        const file = items[i].getAsFile()
-        if (file) { e.preventDefault(); setDraftFiles(prev => [...prev, file]) }
+        const f = items[i].getAsFile()
+        if (f) pasted.push(f)
       }
     }
+    if (pasted.length === 0) return
+    e.preventDefault()
+    setDraftFiles(prev => [...prev, ...pasted.map((f, i) => renamePastedFile(f, i))])
   }
 
   const handleAssign = async () => {
@@ -439,8 +461,20 @@ export default function FeedbackDetailPage() {
               {t('feedback.close')}
             </button>
           )}
+          {isAdmin && !isDraft && (
+            <button
+              onClick={() => setShowArchive(true)}
+              className="p-1.5 rounded-lg text-gray-400 hover:text-gray-900 hover:bg-gray-100 transition"
+              title={t('feedback.archiveTitle') || '歷史快照'}
+            >
+              <Archive size={14} />
+            </button>
+          )}
         </div>
       </div>
+      {showArchive && ticket && (
+        <TicketArchiveModal ticketId={ticket.id} onClose={() => setShowArchive(false)} />
+      )}
 
       {/* Main Content */}
       <div className="flex-1 flex overflow-hidden">

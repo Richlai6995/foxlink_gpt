@@ -62,6 +62,34 @@ class WebexService {
     return res.data?.id || null;
   }
 
+  /**
+   * DM 給指定使用者（by email）。Webex 自動建立 1-on-1 direct room，
+   * 不需預先 create。parentId 帶入可串 thread。
+   * @returns {string|null} message id（可存為 thread parent）
+   */
+  async sendDirectMessage(toPersonEmail, markdown, { parentId } = {}) {
+    if (!toPersonEmail) return null;
+    try {
+      const payload = { toPersonEmail, markdown };
+      if (parentId) payload.parentId = parentId;
+      const res = await this.client.post('/messages', payload);
+      return res.data?.id || null;
+    } catch (e) {
+      // parentId 指向對方看不到的 room → Webex 400；fallback 不帶 parentId 重送
+      if (parentId && e.response?.status === 400) {
+        try {
+          const res = await this.client.post('/messages', { toPersonEmail, markdown });
+          return res.data?.id || null;
+        } catch (e2) {
+          console.warn(`[Webex] sendDirectMessage ${toPersonEmail} retry failed: ${e2.response?.status || e2.message}`);
+          return null;
+        }
+      }
+      console.warn(`[Webex] sendDirectMessage ${toPersonEmail}: ${e.response?.status || e.message}`);
+      return null;
+    }
+  }
+
   /** 編輯訊息（用於將 typing indicator 更新為實際回覆） */
   async editMessage(messageId, text, { markdown } = {}) {
     try {

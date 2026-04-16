@@ -15,6 +15,7 @@ async function buildSessionPayload(db, userId) {
     can_design_ai_select: u.can_design_ai_select,
     can_use_ai_dashboard: u.can_use_ai_dashboard,
     training_permission:  u.training_permission,
+    is_erp_admin:    u.is_erp_admin === 1 || u.is_erp_admin === '1',
     role_id:         u.role_id,
     dept_code:       u.dept_code,
     profit_center:   u.profit_center,

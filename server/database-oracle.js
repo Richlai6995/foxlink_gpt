@@ -297,6 +297,12 @@ async function runMigrations(db) {
   await addCol('KB_DOCUMENTS', 'CHUNK_COUNT', 'NUMBER DEFAULT 0');
   // kb_chunks missing parent_content
   await addCol('KB_CHUNKS', 'PARENT_CONTENT', 'CLOB');
+  await addCol('KB_CHUNKS', 'METADATA', 'CLOB');
+  // Feedback Webex B 方案：DM thread parent message id
+  await addCol('FEEDBACK_TICKETS', 'WEBEX_PARENT_MESSAGE_ID', 'VARCHAR2(100)');
+  // ERP 分流：分類 flag + 使用者 ERP 管理員 flag
+  await addCol('FEEDBACK_CATEGORIES', 'IS_ERP', 'NUMBER(1) DEFAULT 0');
+  await addCol('USERS', 'IS_ERP_ADMIN', 'NUMBER(1) DEFAULT 0');
   // kb_chunks.embedding: Oracle 23ai does not support MODIFY on VECTOR columns.
   // Detect if embedding is still fixed-dim (VECTOR(768,*)) by checking vector_precision in data dict.
   // If so: drop and re-add as VECTOR(*, FLOAT32) (safe only when table is empty).
@@ -2325,6 +2331,19 @@ async function runMigrations(db) {
     created_at  TIMESTAMP DEFAULT SYSTIMESTAMP
   )`);
 
+  // feedback_conversation_archive: 工單結案/重開的完整原始快照（append-only, 永久保留）
+  await createTable('FEEDBACK_CONVERSATION_ARCHIVE', `CREATE TABLE feedback_conversation_archive (
+    id                NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    ticket_id         NUMBER NOT NULL,
+    ticket_no         VARCHAR2(30) NOT NULL,
+    snapshot_at       TIMESTAMP DEFAULT SYSTIMESTAMP,
+    snapshot_trigger  VARCHAR2(30),
+    triggered_by      NUMBER,
+    messages_json     CLOB,
+    attachments_json  CLOB,
+    ticket_snapshot   CLOB
+  )`);
+
   // ── Feedback: 索引 ────────────────────────────────────────────────────────
   const safeCreateIndex = async (name, ddl) => {
     try { await db.prepare(ddl).run(); } catch (e) {
@@ -2340,6 +2359,23 @@ async function runMigrations(db) {
   await safeCreateIndex('IDX_FB_ATTACH_TICKET', 'CREATE INDEX idx_fb_attach_ticket ON feedback_attachments(ticket_id)');
   await safeCreateIndex('IDX_FB_NOTIF_USER', 'CREATE INDEX idx_fb_notif_user ON feedback_notifications(user_id, is_read)');
   await safeCreateIndex('IDX_FB_NOTIF_TICKET', 'CREATE INDEX idx_fb_notif_ticket ON feedback_notifications(ticket_id)');
+  await safeCreateIndex('IDX_FCA_TICKET', 'CREATE INDEX idx_fca_ticket ON feedback_conversation_archive(ticket_id)');
+  await safeCreateIndex('IDX_FCA_NO', 'CREATE INDEX idx_fca_no ON feedback_conversation_archive(ticket_no)');
+  await safeCreateIndex('IDX_FCA_SNAPSHOT_AT', 'CREATE INDEX idx_fca_snapshot_at ON feedback_conversation_archive(snapshot_at)');
+
+  // One-time cleanup: drop feedback-admin KB (被公開單一 KB 架構取代)
+  try {
+    const adminKb = await db.prepare("SELECT id FROM knowledge_bases WHERE name='feedback-admin'").get();
+    const adminKbId = adminKb?.id ?? adminKb?.ID;
+    if (adminKbId) {
+      await db.prepare('DELETE FROM kb_chunks WHERE kb_id=?').run(adminKbId);
+      await db.prepare('DELETE FROM kb_documents WHERE kb_id=?').run(adminKbId);
+      await db.prepare('DELETE FROM knowledge_bases WHERE id=?').run(adminKbId);
+      console.log('[Migration] Dropped legacy feedback-admin KB');
+    }
+  } catch (e) {
+    console.warn('[Migration] drop feedback-admin KB:', e.message);
+  }
 
   // ── Feedback: 預設分類種子資料 ────────────────────────────────────────────
   try {
@@ -2384,6 +2420,90 @@ async function runMigrations(db) {
   } catch (e) {
     console.warn('[Migration] feedback SLA seed:', e.message);
   }
+
+  // ── ERP Tools: PL/SQL FUNCTION/PROCEDURE 工具化 ─────────────────────────────
+  await createTable('ERP_TOOLS', `CREATE TABLE erp_tools (
+    id                  NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    code                VARCHAR2(120) UNIQUE NOT NULL,
+    name                VARCHAR2(200) NOT NULL,
+    description         CLOB,
+    tags                CLOB,
+    db_owner            VARCHAR2(30)  NOT NULL,
+    package_name        VARCHAR2(128),
+    object_name         VARCHAR2(128) NOT NULL,
+    overload            VARCHAR2(10),
+    routine_type        VARCHAR2(20)  NOT NULL,
+    metadata_json       CLOB,
+    metadata_hash       VARCHAR2(64),
+    metadata_checked_at TIMESTAMP,
+    metadata_drifted    NUMBER(1) DEFAULT 0,
+    access_mode         VARCHAR2(20) DEFAULT 'READ_ONLY',
+    requires_approval   NUMBER(1) DEFAULT 0,
+    allow_llm_auto      NUMBER(1) DEFAULT 1,
+    allow_inject        NUMBER(1) DEFAULT 0,
+    allow_manual        NUMBER(1) DEFAULT 1,
+    params_json         CLOB,
+    returns_json        CLOB,
+    tool_schema_json    CLOB,
+    inject_config_json  CLOB,
+    max_rows_llm        NUMBER DEFAULT 50,
+    max_rows_ui         NUMBER DEFAULT 1000,
+    timeout_sec         NUMBER DEFAULT 30,
+    proxy_skill_id      NUMBER,
+    enabled             NUMBER(1) DEFAULT 1,
+    created_by          NUMBER,
+    created_at          TIMESTAMP DEFAULT SYSTIMESTAMP,
+    updated_at          TIMESTAMP DEFAULT SYSTIMESTAMP
+  )`);
+  try { await db.prepare(`CREATE INDEX idx_erp_tools_code ON erp_tools(code)`).run(); } catch (_) {}
+  try { await db.prepare(`CREATE INDEX idx_erp_tools_object ON erp_tools(db_owner, package_name, object_name)`).run(); } catch (_) {}
+
+  await createTable('ERP_TOOL_TRANSLATIONS', `CREATE TABLE erp_tool_translations (
+    id                  NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    tool_id             NUMBER NOT NULL REFERENCES erp_tools(id) ON DELETE CASCADE,
+    lang                VARCHAR2(10) NOT NULL,
+    name                VARCHAR2(200),
+    description         CLOB,
+    params_labels_json  CLOB,
+    updated_at          TIMESTAMP DEFAULT SYSTIMESTAMP,
+    CONSTRAINT uq_erp_tool_lang UNIQUE (tool_id, lang)
+  )`);
+
+  await createTable('ERP_TOOL_AUDIT_LOG', `CREATE TABLE erp_tool_audit_log (
+    id                NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    tool_id           NUMBER NOT NULL REFERENCES erp_tools(id) ON DELETE CASCADE,
+    user_id           NUMBER,
+    session_id        VARCHAR2(36),
+    trigger_source    VARCHAR2(30),
+    access_mode       VARCHAR2(20),
+    input_json        CLOB,
+    output_sample     CLOB,
+    result_cache_key  VARCHAR2(100),
+    duration_ms       NUMBER,
+    rows_returned     NUMBER,
+    error_code        VARCHAR2(20),
+    error_message     VARCHAR2(2000),
+    created_at        TIMESTAMP DEFAULT SYSTIMESTAMP
+  )`);
+  try { await db.prepare(`CREATE INDEX idx_erp_audit_tool_time ON erp_tool_audit_log(tool_id, created_at DESC)`).run(); } catch (_) {}
+  try { await db.prepare(`CREATE INDEX idx_erp_audit_user_time ON erp_tool_audit_log(user_id, created_at DESC)`).run(); } catch (_) {}
+
+  await createTable('ERP_TOOL_PENDING_APPROVAL', `CREATE TABLE erp_tool_pending_approval (
+    id                   VARCHAR2(36) PRIMARY KEY,
+    tool_id              NUMBER NOT NULL REFERENCES erp_tools(id) ON DELETE CASCADE,
+    user_id              NUMBER,
+    session_id           VARCHAR2(36),
+    input_json           CLOB,
+    reason               VARCHAR2(500),
+    status               VARCHAR2(20) DEFAULT 'pending',
+    approved_by          NUMBER,
+    approved_at          TIMESTAMP,
+    execution_result_id  NUMBER,
+    expires_at           TIMESTAMP,
+    created_at           TIMESTAMP DEFAULT SYSTIMESTAMP
+  )`);
+
+  await safeAddColumn('skills', 'erp_tool_id', 'NUMBER');
 }
 
 // ─── Default DB Source migration ───────────────────────────────────────────────

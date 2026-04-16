@@ -26,7 +26,7 @@ router.get('/', async (req, res) => {
                 u.can_design_ai_select, u.can_use_ai_dashboard, u.training_permission,
                 u.role_id, r.name AS role_name, u.creation_method,
                 u.budget_daily, u.budget_weekly, u.budget_monthly, u.quota_exceed_action,
-                u.webex_bot_enabled, u.name_manually_set,
+                u.webex_bot_enabled, u.name_manually_set, u.is_erp_admin,
                 ${ORG_COLS}
          FROM users u
          LEFT JOIN roles r ON r.id = u.role_id`;
@@ -136,6 +136,7 @@ router.put('/:id', async (req, res) => {
     training_permission,
     webex_bot_enabled,
     name_manually_set,
+    is_erp_admin,
     // allow manual override of org fields from UI
     dept_code, dept_name, profit_center, profit_center_name,
     org_section, org_section_name, org_group_name, factory_code, org_end_date,
@@ -173,6 +174,7 @@ router.put('/:id', async (req, res) => {
       training_permission !== undefined ? (training_permission || null) : null,
       webex_bot_enabled !== undefined ? (webex_bot_enabled ? 1 : 0) : 1,
       name_manually_set !== undefined ? (name_manually_set ? 1 : 0) : 0,
+      is_erp_admin !== undefined ? (is_erp_admin ? 1 : 0) : 0,
     ];
 
     const orgParams = [
@@ -197,7 +199,7 @@ router.put('/:id', async (req, res) => {
              allow_create_skill=?, allow_external_skill=?, allow_code_skill=?,
              can_create_kb=?, kb_max_size_mb=?, kb_max_count=?, can_deep_research=?,
              can_design_ai_select=?, can_use_ai_dashboard=?, training_permission=?,
-             webex_bot_enabled=?, name_manually_set=?`;
+             webex_bot_enabled=?, name_manually_set=?, is_erp_admin=?`;
     const orgSet = hasOrgOverride
       ? `, dept_code=?, dept_name=?, profit_center=?, profit_center_name=?,
            org_section=?, org_section_name=?, org_group_name=?, factory_code=?, org_end_date=${D}`

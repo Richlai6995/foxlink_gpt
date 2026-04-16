@@ -83,6 +83,34 @@ async function generateTicketNo() {
 
 ## 3. DB Schema
 
+### 3.0 ERP 分流（2026-04 新增）
+
+為了把 ERP 類別工單與 Cortex 一般工單分開處理（不同的接單群組、不同的知識庫），schema 增加兩個 flag：
+
+- `feedback_categories.is_erp NUMBER(1) DEFAULT 0` — 分類層級；建單時工單歸屬此分類的工單走 ERP 分流
+- `users.is_erp_admin NUMBER(1) DEFAULT 0` — 使用者層級；可以獨立於 `role='admin'` 存在（並存模型）
+
+影響：
+- **Webex 群組**：ERP 工單通知到 `Cortex - ERP問題反饋通知`，其他走原 `Cortex - 問題反饋通知`
+- **知識庫**：ERP 工單結案後進 `feedback-erp` KB（獨立召回），其他走 `feedback-public`
+- **工單可見性**（見 §1 可見性矩陣）：Cortex admin 看全部；純 ERP admin 只看 ERP + 自己建的；純使用者只看自己
+
+#### 可見性矩陣
+
+| 身份 | role | is_erp_admin | 可見範圍 |
+|------|------|--------------|---------|
+| Cortex admin | admin | 0 | 全部工單 |
+| 雙重 admin | admin | 1 | 全部工單（同 Cortex admin）+ 加入 ERP webex room |
+| ERP admin | user | 1 | 自己建的 + 所有 ERP 分類工單 |
+| 一般使用者 | user | 0 | 僅自己建的 |
+
+#### Webex Room 成員
+- `Cortex - 問題反饋通知`：`role='admin'`（所有 Cortex 管理員）
+- `Cortex - ERP問題反饋通知`：`is_erp_admin=1`（所有 ERP 管理員）
+- 兩邊可重疊（雙重 admin 會同時在兩個 room）
+
+---
+
 ### 3.1 FEEDBACK_CATEGORIES — 問題分類
 
 ```sql
@@ -93,6 +121,7 @@ CREATE TABLE feedback_categories (
   icon          VARCHAR2(50),           -- lucide icon name
   sort_order    NUMBER DEFAULT 0,
   is_active     NUMBER(1) DEFAULT 1,
+  is_erp        NUMBER(1) DEFAULT 0,    -- ERP 分類 flag（2026-04 新增）
   created_at    TIMESTAMP DEFAULT SYSTIMESTAMP,
   updated_at    TIMESTAMP DEFAULT SYSTIMESTAMP
 );
@@ -567,63 +596,140 @@ ChatPage 每條 AI 回覆下方加按鈕：「回答有誤？提交反饋」
 
 ---
 
-## 9. 工單 RAG 隱私分級
+## 9. 工單 RAG 隱私分級（2026-04 升級）
 
-### 9.1 雙 KB 架構
+> **升級重點**：雙 KB 架構廢除 → 單一 `feedback-public` KB（脫敏完整對話 + 附件）+ `feedback_conversation_archive` 表（原始快照，admin only）
+>
+> **動機**：使用者透過對話紀錄學習解題方法，所以完整對話 + 附件都要進 KB；但敏感資料（人名/工號/email）必須脫敏。雙 KB 內容幾乎相同只是脫敏級別差異，維護成本高不划算。
 
-復用現有 Knowledge Base 系統，自動建立兩個 KB：
-
-| KB | 存取權限 | 內容 |
-|----|---------|------|
-| `feedback-public` | 所有使用者 | 脫敏內容：問題分類+主旨+脫敏描述+解決方案 |
-| `feedback-admin` | 僅管理員 | 完整原文：含申請者資訊+內部備註+完整對話 |
-
-### 9.2 脫敏規則
-
-```javascript
-function sanitizeForPublicKB(ticket, messages) {
-  let content = ticket.description;
-  
-  // 移除個人資訊
-  content = content.replace(ticket.applicant_name, '[使用者]');
-  content = content.replace(ticket.applicant_employee_id, '[工號]');
-  content = content.replace(ticket.applicant_email, '[email]');
-  content = content.replace(ticket.applicant_dept, '[部門]');
-  
-  // 移除常見個人資訊 pattern
-  content = content.replace(/\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z]{2,}\b/gi, '[email]');
-  content = content.replace(/\b\d{4,6}\b/g, (match) => {
-    // 保留錯誤碼，移除疑似工號
-    return match.length <= 6 ? '[ID]' : match;
-  });
-  
-  return {
-    subject: ticket.subject,
-    category: ticket.category_name,
-    description: content,
-    resolution: ticket.resolution_note || extractResolution(messages),
-    tags: ticket.tags
-  };
-}
-```
-
-### 9.3 同步觸發
-
-工單結案時（status → `resolved` 或 `closed`）自動觸發：
-
-1. 脫敏處理 → 寫入 `feedback-public` KB
-2. 完整內容 → 寫入 `feedback-admin` KB
-3. Embedding 使用現有 `kbEmbedding.js` pipeline
-
-### 9.4 搜尋 API
+### 9.1 架構
 
 ```
-GET /api/feedback/search?q=...
-  → if req.user.role === 'admin'
-      搜 feedback-admin KB（完整結果）
-  → else
-      搜 feedback-public KB（脫敏結果）
+┌─────────────────────────────────────────┐
+│ feedback-public KB（向量檢索來源）       │
+│  - 完整對話逐則（LLM 脫敏後）            │
+│  - 附件 → 圖片 caption / 文件解析文字   │
+│  - parent/child chunk（細粒度召回）     │
+│  - 所有使用者可搜                        │
+└─────────────────────────────────────────┘
+                  ⇅
+┌─────────────────────────────────────────┐
+│ feedback_conversation_archive（歸檔）    │
+│  - 完整原始對話（不脫敏、含 internal）   │
+│  - 附件原檔 URL                         │
+│  - Admin UI 讀取（不進 RAG，永久保留）  │
+└─────────────────────────────────────────┘
 ```
+
+### 9.2 Chunk 切法（parent/child）
+
+單張工單拆成多個 child chunks，每個 child 的 `parent_content` 存完整工單脫敏摘要；檢索時撈 child（細粒度命中），自動回傳 parent_content 給 LLM 組上下文。
+
+```
+kb_documents
+  └─ filename = 'feedback:FB-202604071430'
+  └─ content  = 脫敏後的工單摘要（parent summary）
+
+kb_chunks (全部 chunk_type='child', parent_id=null,
+           parent_content=<工單摘要>)
+  ├─ position=0    type=header       問題主旨 + 描述
+  ├─ position=1..N type=message      對話逐則（申請者/客服，is_internal 跳過）
+  ├─ position=N+1..M type=attachment 附件 caption（圖片 Vision / 文件解析）
+  └─ position=M+1  type=resolution   最終解決方案（召回權重高）
+
+metadata: { ticket_no, category, priority, position_type,
+            message_id, sender_role, attachment_id,
+            attachment_url, mime_type, resolved_at }
+```
+
+### 9.3 脫敏規則（LLM-based，regex fallback）
+
+- **替換**：人名（中/英/越）→ `[使用者]`、工號 → `[工號]`、email → `[email]`
+- **保留**：部門代號、機台 SN、錯誤訊息、URL、IP、路徑、SQL、code snippet、時間、金額、技術術語
+- **Prompt 特性**：
+  - system prompt 明確列出 REPLACE / KEEP UNCHANGED 清單
+  - `temperature = 0` 可重現
+  - 不確定的 token 不替換（保守）
+  - 不解釋、不摘要、不翻譯，輸出純脫敏文本
+- **失敗 fallback**：LLM timeout / 錯誤 → 降級到 regex（`applicant_*` 已知欄位 + email pattern）
+- **實作檔**：`server/services/feedbackRedactor.js`
+
+### 9.4 附件處理
+
+`server/services/feedbackAttachmentProcessor.js` 依 ext 分派：
+
+| 類型 | 處理方式 | 重用 |
+|------|---------|------|
+| 圖片 (jpg/png/gif/webp/bmp) | Gemini Vision OCR + caption | `kbDocParser.imageToText` |
+| PDF / DOCX / XLSX / PPTX | 文件解析（Gemini Vision PDF / XML 抽取） | `kbDocParser.parseDocument` |
+| TXT / MD / CSV / JSON | 直接讀取（前 20KB） | fs.readFileSync |
+| 其他 | skip | — |
+
+附件原檔保留在 UPLOAD_DIR，KB 只存 caption 文字；召回時透過 `metadata.attachment_url` 附下載連結。
+
+### 9.5 結案時執行流
+
+```
+PUT /tickets/:id/resolve
+  ├─ [同步] feedbackService.changeStatus → 'resolved'
+  ├─ [同步] feedback_conversation_archive snapshot（CLOB insert，快）
+  ├─ [背景] syncTicketToKB（60–90 秒）
+  │    ├─ 拉 messages + attachments
+  │    ├─ 附件 → Vision / doc parser → caption
+  │    ├─ Gemini Flash redaction pass（parent + 每個 chunk）
+  │    ├─ 切 parent-content + N 個 child chunks
+  │    ├─ embedBatch → INSERT kb_chunks
+  │    └─ UPDATE kb_documents / knowledge_bases 統計
+  └─ [背景] sendTicketWebex（DM + 群組 summary，詳見 §11）
+```
+
+同步寫 archive、背景跑 KB，確保使用者結案 UX 順暢。
+
+### 9.6 archive 表
+
+```sql
+CREATE TABLE feedback_conversation_archive (
+  id                NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  ticket_id         NUMBER NOT NULL,
+  ticket_no         VARCHAR2(30) NOT NULL,
+  snapshot_at       TIMESTAMP DEFAULT SYSTIMESTAMP,
+  snapshot_trigger  VARCHAR2(30),  -- 'resolved'|'reopened'|'closed'|'manual'|'migration'
+  triggered_by      NUMBER,
+  messages_json     CLOB,      -- 完整對話（含 internal_notes、system events）
+  attachments_json  CLOB,      -- [{url, filename, size, mime}]
+  ticket_snapshot   CLOB       -- 工單當時的 subject/description/status 等
+);
+CREATE INDEX idx_fca_ticket ON feedback_conversation_archive(ticket_id);
+CREATE INDEX idx_fca_no ON feedback_conversation_archive(ticket_no);
+CREATE INDEX idx_fca_snapshot_at ON feedback_conversation_archive(snapshot_at);
+```
+
+- **Append-only**：每次 resolve/reopen/close 都寫新一筆，不覆蓋舊的
+- **永久保留**：將來容量大可用 `PARTITION BY RANGE (snapshot_at)` 做年度分區
+- **Admin UI**：工單詳情頁 Archive icon → Modal 顯示歷史快照列表 + 完整對話
+- **權限**：僅 `role=admin` 可查 `GET /feedback/tickets/:id/archive` 和 `GET /feedback/archive/:snapshotId`
+
+### 9.7 搜尋 API
+
+```
+GET /api/feedback/search?q=<query>&limit=<N>
+  → searchFeedbackKB(db, query, limit)
+  → 撈 child chunks（chunk_type != 'parent'）
+  → 回傳 { ticket_no, subject, resolution, chunk_content,
+          parent_content, score, category, position_type,
+          attachment_url }
+```
+
+所有使用者走同一端點、同一 KB，差別只在 admin 可另外透過 archive API 取得未脫敏原文。
+
+### 9.8 歷史回填
+
+`server/scripts/backfillFeedbackKB.js` 一次性掃所有 `status IN ('resolved', 'closed')` 工單：
+
+1. 寫 archive snapshot（`trigger='migration'`）
+2. `syncTicketToKB` 同步 KB
+
+支援 `--dry-run` / `--resume` / `--force` / `--from-ticket-id=N` / `--limit=N`。進度寫 `server/tmp/backfill-progress.json` 支援中斷續跑。
 
 ---
 
@@ -631,17 +737,25 @@ GET /api/feedback/search?q=...
 
 ### 10.1 通知觸發矩陣
 
-| 事件 | Email | Webex Bot | 站內通知 | WebSocket |
-|------|-------|-----------|---------|-----------|
-| 新工單建立 | ✅ 全部管理員 | ✅ 管理員群組 | ✅ 全部管理員 | ✅ `feedback:admin` |
+> **2026-04 升級**：Webex 改走 B 方案（狀態機分流），降低管理員群組噪音。規則：
+> - 新工單 / 未指派留言 → 群組（公開招領）
+> - `assigned_to` 填入後 → DM 接單者（thread 串接）
+> - 結案/重開 → DM 雙方 + 群組發一則 summary
+> - 轉單 → 舊 assignee DM「轉出」+ 新 assignee DM「接單 + 上下文」
+
+| 事件 | Email | Webex | 站內通知 | WebSocket |
+|------|-------|-------|---------|-----------|
+| 新工單建立 | ✅ 全部管理員 | ✅ 群組（招領） | ✅ 全部管理員 | ✅ `feedback:admin` |
+| 工單被接單 | ✅ 申請者 | ✅ 群組 summary + DM 接單者 | ✅ 申請者 | ✅ `ticket:{id}` |
 | 管理員回應 | ✅ 申請者 | — | ✅ 申請者 | ✅ `ticket:{id}` |
-| 申請者追問 | ✅ 已接單管理員 | ✅ 管理員群組 | ✅ 全部管理員 | ✅ `ticket:{id}` |
-| 工單被接單 | ✅ 申請者 | — | ✅ 申請者 | ✅ `ticket:{id}` |
-| 狀態變更 | ✅ 雙方 | ✅ 管理員群組 | ✅ 雙方 | ✅ `ticket:{id}` |
-| 工單結案 | ✅ 雙方 | ✅ 管理員群組 | ✅ 雙方 | ✅ `ticket:{id}` |
-| 工單重開 | ✅ 全部管理員 | ✅ 管理員群組 | ✅ 全部管理員 | ✅ `feedback:admin` |
-| SLA 即將到期 | ✅ 已接單管理員 | ✅ 管理員群組 | ✅ 全部管理員 | ✅ `feedback:admin` |
-| SLA 已逾期 | ✅ 全部管理員 | ✅ 管理員群組 | ✅ 全部管理員 | ✅ `feedback:admin` |
+| 申請者追問（已指派） | ✅ assignee | ✅ DM assignee（thread） | ✅ 全部管理員 | ✅ `ticket:{id}` |
+| 申請者追問（未指派） | ✅ 全部管理員 | ✅ 群組 | ✅ 全部管理員 | ✅ `ticket:{id}` |
+| 狀態變更 | ✅ 雙方 | ✅ DM 雙方 | ✅ 雙方 | ✅ `ticket:{id}` |
+| 工單結案 | ✅ 雙方 | ✅ DM 雙方 + 群組 summary | ✅ 雙方 | ✅ `ticket:{id}` |
+| 工單重開 | ✅ assignee | ✅ DM assignee + 群組 summary | ✅ 全部管理員 | ✅ `feedback:admin` |
+| 轉單 | ✅ 新舊 assignee | ✅ DM 新舊 assignee | ✅ 新舊 assignee | ✅ `ticket:{id}` |
+| SLA 即將到期 | ✅ assignee | ✅ DM assignee | ✅ 全部管理員 | ✅ `feedback:admin` |
+| SLA 已逾期 | ✅ 全部管理員 | ✅ 群組 + DM assignee | ✅ 全部管理員 | ✅ `feedback:admin` |
 | AI 分析完成 | — | — | ✅ 申請者 | ✅ `ticket:{id}` |
 
 ### 10.2 Email 模板
@@ -683,22 +797,94 @@ const emailTemplates = {
 | `@bot resolve #FB-xxx 結案說明` | 結案工單 |
 | `@bot assign #FB-xxx` | 自行接單 |
 
-### 11.2 推播格式
+### 11.2 分流策略（2026-04 升級：B 方案）
+
+**問題**：原本所有管理員都在同一個 feedback group，每則對話都廣播，噪音大。
+
+**解法**：依工單狀態 + `assigned_to` 分流：
+
+```
+┌─────────────────────────────────────────────────────────┐
+│ Stage 1 — 招領階段（assigned_to IS NULL）                │
+│   所有 Webex 通知 → 管理員群組（所有 admin 都在）        │
+│   目的：讓團隊看到工單、認領                              │
+│                                                          │
+│   - 新工單：群組廣播 + @mention 所有 admin              │
+│   - 申請者追問：群組廣播                                 │
+│   - 首次 admin 回覆 → assigned_to 自動填入 → 切到 Stage 2│
+└─────────────────────────────────────────────────────────┘
+                         ↓
+┌─────────────────────────────────────────────────────────┐
+│ Stage 2 — 處理階段（assigned_to 已設定）                 │
+│   對話類通知 → DM 接單者（不擾動群組）                   │
+│   關鍵里程碑 → 群組發簡短 summary                        │
+│                                                          │
+│   - 申請者追問：DM assignee（parentId thread）           │
+│   - admin 回覆 applicant：可選 DM applicant              │
+│   - 認領事件：群組 summary「FB-xxx 已由 [X] 認領」      │
+│   - 結案：DM 雙方 + 群組 summary                         │
+│   - 重開：DM assignee + 群組 summary                     │
+│   - 轉單：舊 DM「轉出」+ 新 DM「接單」+ 群組靜音         │
+│   - SLA 逾期：群組 + DM assignee                         │
+└─────────────────────────────────────────────────────────┘
+```
+
+### 11.3 Webex API 對應
+
+| 場景 | API | 說明 |
+|------|-----|------|
+| 群組廣播 | `POST /messages { roomId, markdown }` | `roomId` 存 `system_settings.feedback_webex_room_id` |
+| DM 1-on-1 | `POST /messages { toPersonEmail, markdown, parentId? }` | 自動建立 direct room，不需預先 create |
+| Thread | `parentId=<first_message_id>` | 同工單後續 DM 串成 thread（見 §11.5） |
+
+### 11.4 Schema 異動
+
+```sql
+ALTER TABLE feedback_tickets ADD webex_parent_message_id VARCHAR2(100);
+```
+
+首次 DM 該 assignee 時，將回傳的 Webex `message.id` 寫入此欄位，後續同工單的 DM 帶 `parentId` 串接 thread。轉單時清空或覆寫。
+
+### 11.5 Fallback 規則
+
+若 `assigned_to` 使用者沒設定 webex email 或 email 在 Webex 找不到人：
+- fallback 回群組 + `@mention` 該 admin
+- 記 `console.warn` 供維運追查
+
+### 11.6 推播格式
+
+**群組廣播（新工單）**
 
 ```markdown
-🎫 **新問題反饋**
+🎫 **新問題反饋** `FB-202604071430`
 ━━━━━━━━━━━━━━
-**單號：** FB-202604071430
-**申請者：** 王小明 (資訊部)
-**分類：** 系統操作問題
-**優先級：** 🔴 urgent
-**主旨：** 登入後畫面空白
+**申請者**：[使用者] (資訊部)
+**分類**：系統操作問題
+**優先級**：🔴 urgent
+**主旨**：登入後畫面空白
 
 > 今天早上開始，登入系統後畫面一片空白...
 
-🔗 [查看詳情](https://foxlink-gpt.example.com/feedback/FB-202604071430)
-━━━━━━━━━━━━━━
-回覆：`@bot reply #FB-202604071430 你的回覆`
+🔗 [查看詳情 / 認領](https://foxlink-gpt.example.com/feedback/FB-202604071430)
+```
+
+**DM 接單者（申請者追問）**
+
+```markdown
+💬 **FB-202604071430** 申請者追問
+
+> 還是一樣空白，清了 cache 也沒用
+
+🔗 [回覆](https://foxlink-gpt.example.com/feedback/FB-202604071430)
+```
+
+**群組 summary（結案）**
+
+```markdown
+✅ **FB-202604071430** 已結案 — by [X]
+
+**解法**：清除瀏覽器 cookies + 重新登入即可。
+已同步進公開知識庫。
 ```
 
 ---

@@ -209,6 +209,7 @@ interface UserForm {
   training_permission: string | null  // null = follow role, 'none' | 'publish' | 'publish_edit'
   webex_bot_enabled: boolean
   name_manually_set: boolean
+  is_erp_admin: boolean
   kb_max_size_mb: string
   kb_max_count: string
   role_id: number | null
@@ -244,6 +245,7 @@ const empty: UserForm = {
   training_permission: null,
   webex_bot_enabled: true,
   name_manually_set: false,
+  is_erp_admin: false,
   kb_max_size_mb: '',
   kb_max_count: '',
   role_id: null,
@@ -371,6 +373,7 @@ export default function UserManagement() {
       training_permission: u2.training_permission || null,
       webex_bot_enabled: u2.webex_bot_enabled !== 0,
       name_manually_set: u2.name_manually_set === 1,
+      is_erp_admin: u2.is_erp_admin === 1,
       kb_max_size_mb: u2.kb_max_size_mb != null ? String(u2.kb_max_size_mb) : '',
       kb_max_count: u2.kb_max_count != null ? String(u2.kb_max_count) : '',
     })
@@ -722,6 +725,15 @@ export default function UserManagement() {
                       className="w-4 h-4 accent-blue-600"
                     />
                     允許使用 Webex Bot
+                  </label>
+                  <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={form.is_erp_admin}
+                      onChange={e => setForm(p => ({ ...p, is_erp_admin: e.target.checked }))}
+                      className="w-4 h-4 accent-orange-600"
+                    />
+                    <span>ERP 管理員 <span className="text-[11px] text-gray-500">（加入 ERP Webex 群組、可處理 ERP 分類工單）</span></span>
                   </label>
                 </div>
               </div>

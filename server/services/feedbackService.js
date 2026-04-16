@@ -110,7 +110,7 @@ async function submitTicket(db, id) {
 
 async function getTicketByNo(db, ticket_no) {
   return db.prepare(`
-    SELECT t.*, c.name AS category_name, c.icon AS category_icon,
+    SELECT t.*, c.name AS category_name, c.icon AS category_icon, c.is_erp AS category_is_erp,
            u.username AS assigned_username, u.name AS assigned_name
     FROM feedback_tickets t
     LEFT JOIN feedback_categories c ON c.id = t.category_id
@@ -121,7 +121,7 @@ async function getTicketByNo(db, ticket_no) {
 
 async function getTicketById(db, id) {
   return db.prepare(`
-    SELECT t.*, c.name AS category_name, c.icon AS category_icon,
+    SELECT t.*, c.name AS category_name, c.icon AS category_icon, c.is_erp AS category_is_erp,
            u.username AS assigned_username, u.name AS assigned_name
     FROM feedback_tickets t
     LEFT JOIN feedback_categories c ON c.id = t.category_id
@@ -130,7 +130,7 @@ async function getTicketById(db, id) {
   `).get(id);
 }
 
-async function listTickets(db, { userId, isAdmin, isAdminUser, status, priority, category_id, search, assigned_to, date_from, date_to, sort, order, page, limit }) {
+async function listTickets(db, { userId, isAdmin, isAdminUser, isErpAdmin, status, priority, category_id, search, assigned_to, date_from, date_to, sort, order, page, limit }) {
   const conditions = [];
   const binds = [];
 
@@ -138,8 +138,14 @@ async function listTickets(db, { userId, isAdmin, isAdminUser, status, priority,
   const canSeeInternal = typeof isAdminUser === 'boolean' ? isAdminUser : !!isAdmin;
 
   if (!isAdmin) {
-    conditions.push('t.user_id = ?');
-    binds.push(userId);
+    if (isErpAdmin) {
+      // ERP 管理員（非系統 admin）：可以看自己的工單 + 所有 ERP 分類工單
+      conditions.push('(t.user_id = ? OR c.is_erp = 1)');
+      binds.push(userId);
+    } else {
+      conditions.push('t.user_id = ?');
+      binds.push(userId);
+    }
   }
   if (status) {
     const statuses = status.split(',').map(s => s.trim());
@@ -181,7 +187,7 @@ async function listTickets(db, { userId, isAdmin, isAdminUser, status, priority,
   const offset = (pg - 1) * lim;
 
   const countRow = await db.prepare(
-    `SELECT COUNT(*) AS cnt FROM feedback_tickets t ${where}`
+    `SELECT COUNT(*) AS cnt FROM feedback_tickets t LEFT JOIN feedback_categories c ON c.id = t.category_id ${where}`
   ).get(...binds);
   const total = Number(countRow?.cnt ?? countRow?.CNT ?? 0);
 
@@ -189,7 +195,7 @@ async function listTickets(db, { userId, isAdmin, isAdminUser, status, priority,
   const internalFilter = canSeeInternal ? '' : 'AND is_internal = 0';
 
   const rows = await db.prepare(`
-    SELECT t.*, c.name AS category_name, c.icon AS category_icon,
+    SELECT t.*, c.name AS category_name, c.icon AS category_icon, c.is_erp AS category_is_erp,
            u.username AS assigned_username, u.name AS assigned_name,
            DBMS_LOB.SUBSTR(lm.content, 500, 1) AS last_message_content,
            lm.sender_role AS last_message_role,
@@ -459,14 +465,14 @@ async function listAllCategories(db) {
   return db.prepare('SELECT * FROM feedback_categories ORDER BY sort_order ASC, id ASC').all();
 }
 
-async function createCategory(db, { name, description, icon, sort_order }) {
+async function createCategory(db, { name, description, icon, sort_order, is_erp }) {
   const result = await db.prepare(
-    'INSERT INTO feedback_categories (name, description, icon, sort_order) VALUES (?, ?, ?, ?)'
-  ).run(name, description || null, icon || null, sort_order || 0);
+    'INSERT INTO feedback_categories (name, description, icon, sort_order, is_erp) VALUES (?, ?, ?, ?, ?)'
+  ).run(name, description || null, icon || null, sort_order || 0, is_erp ? 1 : 0);
   return db.prepare('SELECT * FROM feedback_categories WHERE id = ?').get(result.lastInsertRowid);
 }
 
-async function updateCategory(db, id, { name, description, icon, sort_order, is_active }) {
+async function updateCategory(db, id, { name, description, icon, sort_order, is_active, is_erp }) {
   const sets = [];
   const binds = [];
   if (name !== undefined) { sets.push('name = ?'); binds.push(name); }
@@ -474,6 +480,7 @@ async function updateCategory(db, id, { name, description, icon, sort_order, is_
   if (icon !== undefined) { sets.push('icon = ?'); binds.push(icon); }
   if (sort_order !== undefined) { sets.push('sort_order = ?'); binds.push(sort_order); }
   if (is_active !== undefined) { sets.push('is_active = ?'); binds.push(is_active ? 1 : 0); }
+  if (is_erp !== undefined) { sets.push('is_erp = ?'); binds.push(is_erp ? 1 : 0); }
   if (sets.length === 0) return null;
   sets.push('updated_at = SYSTIMESTAMP');
   binds.push(id);
@@ -483,6 +490,16 @@ async function updateCategory(db, id, { name, description, icon, sort_order, is_
 
 async function deleteCategory(db, id) {
   await db.prepare('DELETE FROM feedback_categories WHERE id = ?').run(id);
+}
+
+/** 批次更新分類順序：ids 為從上到下的完整順序 */
+async function reorderCategories(db, ids) {
+  if (!Array.isArray(ids) || ids.length === 0) return;
+  for (let i = 0; i < ids.length; i++) {
+    await db.prepare(
+      'UPDATE feedback_categories SET sort_order = ?, updated_at = SYSTIMESTAMP WHERE id = ?'
+    ).run(i + 1, Number(ids[i]));
+  }
 }
 
 // ─── SLA 管理 ─────────────────────────────────────────────────────────────────
@@ -595,6 +612,7 @@ module.exports = {
   createCategory,
   updateCategory,
   deleteCategory,
+  reorderCategories,
   listSlaConfigs,
   updateSlaConfig,
   getStats,

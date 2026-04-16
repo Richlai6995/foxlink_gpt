@@ -39,8 +39,7 @@ async function analyzeTicket(db, ticketId, userId, onChunk, lang) {
   try {
     // 優先用 KB embedding 向量搜尋，fallback 到關鍵字比對
     const { searchFeedbackKB } = require('./feedbackKBSync');
-    const isAdmin = await _isAdmin(db, userId);
-    let searchResults = await searchFeedbackKB(db, ticket.subject + ' ' + (ticket.description || ''), isAdmin, 5);
+    let searchResults = await searchFeedbackKB(db, ticket.subject + ' ' + (ticket.description || ''), 5);
 
     // Fallback: 如果 KB 沒資料，用關鍵字比對
     if (searchResults.length === 0) {

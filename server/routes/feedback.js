@@ -42,6 +42,22 @@ const upload = multer({
 
 router.use(verifyToken);
 
+// ─── Permission helpers ──────────────────────────────────────────────────────
+
+/** 可處理工單：Cortex admin 或（ERP admin + 該工單是 ERP 分類） */
+function canManageTicket(user, ticket) {
+  if (!ticket) return false;
+  if (user.role === 'admin') return true;
+  const isErp = ticket.category_is_erp === 1 || ticket.category_is_erp === '1';
+  return !!(user.is_erp_admin && isErp);
+}
+
+/** 可檢視：可處理 或 申請者本人 */
+function canViewTicket(user, ticket) {
+  if (!ticket) return false;
+  return canManageTicket(user, ticket) || ticket.user_id === user.id;
+}
+
 // ─── 分類（公開）─────────────────────────────────────────────────────────────
 
 router.get('/categories', async (req, res) => {
@@ -61,11 +77,13 @@ router.get('/tickets', async (req, res) => {
   try {
     const db = require('../database-oracle').db;
     const isAdmin = req.user.role === 'admin';
+    const isErpAdmin = !!req.user.is_erp_admin;
     const my = req.query.my === 'true';
     const result = await feedbackService.listTickets(db, {
       userId: req.user.id,
       isAdmin: isAdmin && !my,
       isAdminUser: isAdmin,
+      isErpAdmin,
       status: req.query.status,
       priority: req.query.priority,
       category_id: req.query.category_id,
@@ -136,7 +154,7 @@ router.get('/tickets/:id', async (req, res) => {
     const ticket = await feedbackService.getTicketById(db, Number(req.params.id));
     if (!ticket) return res.status(404).json({ error: '工單不存在' });
     // 非管理員只能看自己的
-    if (req.user.role !== 'admin' && ticket.user_id !== req.user.id) {
+    if (!canViewTicket(req.user, ticket)) {
       return res.status(403).json({ error: '無權限查看' });
     }
     res.json(ticket);
@@ -150,7 +168,7 @@ router.put('/tickets/:id', async (req, res) => {
     const db = require('../database-oracle').db;
     const ticket = await feedbackService.getTicketById(db, Number(req.params.id));
     if (!ticket) return res.status(404).json({ error: '工單不存在' });
-    if (req.user.role !== 'admin' && ticket.user_id !== req.user.id) {
+    if (!canViewTicket(req.user, ticket)) {
       return res.status(403).json({ error: '無權限修改' });
     }
     const updated = await feedbackService.updateTicket(db, Number(req.params.id), req.body);
@@ -170,11 +188,17 @@ router.put('/tickets/:id/status', async (req, res) => {
     if (!status) return res.status(400).json({ error: 'status 為必填' });
     const ticket = await feedbackService.getTicketById(db, Number(req.params.id));
     if (!ticket) return res.status(404).json({ error: '工單不存在' });
-    if (req.user.role !== 'admin' && ticket.user_id !== req.user.id) {
+    if (!canViewTicket(req.user, ticket)) {
       return res.status(403).json({ error: '無權限操作' });
     }
     const updated = await feedbackService.changeStatus(db, Number(req.params.id), status, req.user.id, note);
     emitStatusChanged(Number(req.params.id), { ticketId: Number(req.params.id), oldStatus: ticket.status, newStatus: status, changedBy: req.user.id });
+    // 結案（closed）也寫一筆 archive snapshot
+    if (status === 'closed') {
+      const feedbackArchive = require('../services/feedbackArchive');
+      feedbackArchive.writeSnapshot(db, Number(req.params.id), 'closed', req.user.id)
+        .catch(e => console.warn('[FeedbackArchive] closed snapshot error:', e.message));
+    }
     res.json(updated);
   } catch (e) {
     res.status(400).json({ error: e.message });
@@ -198,9 +222,20 @@ router.put('/tickets/:id/submit', async (req, res) => {
 router.put('/tickets/:id/assign', async (req, res) => {
   try {
     const db = require('../database-oracle').db;
-    if (req.user.role !== 'admin') return res.status(403).json({ error: '需要管理員權限' });
+    const before = await feedbackService.getTicketById(db, Number(req.params.id));
+    if (!before) return res.status(404).json({ error: '工單不存在' });
+    if (!canManageTicket(req.user, before)) return res.status(403).json({ error: '需要管理員權限' });
+    const oldAssigneeId = before.assigned_to || null;
     const updated = await feedbackService.assignTicket(db, Number(req.params.id), req.user.id);
     emitTicketAssigned(Number(req.params.id), { ticketId: Number(req.params.id), assignedTo: req.user.id });
+
+    // Webex 分流：首次認領 or 轉單
+    const actorName = req.user.name || req.user.username;
+    if (!oldAssigneeId) {
+      feedbackNotif.onTicketAssigned(db, updated, req.user.id, actorName).catch(e => console.warn('[Feedback] onTicketAssigned error:', e.message));
+    } else if (oldAssigneeId !== req.user.id) {
+      feedbackNotif.onTicketReassigned(db, updated, oldAssigneeId, req.user.id, actorName).catch(e => console.warn('[Feedback] onTicketReassigned error:', e.message));
+    }
     res.json(updated);
   } catch (e) {
     res.status(400).json({ error: e.message });
@@ -212,12 +247,16 @@ router.put('/tickets/:id/resolve', async (req, res) => {
     const db = require('../database-oracle').db;
     const ticket = await feedbackService.getTicketById(db, Number(req.params.id));
     if (!ticket) return res.status(404).json({ error: '工單不存在' });
-    if (req.user.role !== 'admin' && ticket.user_id !== req.user.id) {
+    if (!canViewTicket(req.user, ticket)) {
       return res.status(403).json({ error: '無權限操作' });
     }
     const { note } = req.body;
     const updated = await feedbackService.changeStatus(db, Number(req.params.id), 'resolved', req.user.id, note);
     feedbackNotif.onTicketResolved(db, updated, note, req.user.name || req.user.username).catch(() => {});
+    // Archive snapshot（同步寫入完整原始 + 附件清單，永久保留）
+    const feedbackArchive = require('../services/feedbackArchive');
+    feedbackArchive.writeSnapshot(db, Number(req.params.id), 'resolved', req.user.id)
+      .catch(e => console.warn('[FeedbackArchive] resolve snapshot error:', e.message));
     // KB sync（背景執行）
     const { syncTicketToKB } = require('../services/feedbackKBSync');
     syncTicketToKB(db, Number(req.params.id)).catch(e => console.warn('[FeedbackKB] sync error:', e.message));
@@ -246,6 +285,10 @@ router.put('/tickets/:id/reopen', async (req, res) => {
 
     const updated = await feedbackService.changeStatus(db, Number(req.params.id), 'reopened', req.user.id);
     feedbackNotif.onTicketReopened(db, updated).catch(() => {});
+    // Archive snapshot（reopen 前保存最終 resolved 狀態）
+    const feedbackArchive = require('../services/feedbackArchive');
+    feedbackArchive.writeSnapshot(db, Number(req.params.id), 'reopened', req.user.id)
+      .catch(e => console.warn('[FeedbackArchive] reopen snapshot error:', e.message));
     emitStatusChanged(Number(req.params.id), { ticketId: Number(req.params.id), oldStatus: 'resolved', newStatus: 'reopened' });
     res.json(updated);
   } catch (e) {
@@ -276,10 +319,10 @@ router.get('/tickets/:id/messages', async (req, res) => {
     const db = require('../database-oracle').db;
     const ticket = await feedbackService.getTicketById(db, Number(req.params.id));
     if (!ticket) return res.status(404).json({ error: '工單不存在' });
-    if (req.user.role !== 'admin' && ticket.user_id !== req.user.id) {
+    if (!canViewTicket(req.user, ticket)) {
       return res.status(403).json({ error: '無權限查看' });
     }
-    const messages = await feedbackService.listMessages(db, Number(req.params.id), req.user.role === 'admin');
+    const messages = await feedbackService.listMessages(db, Number(req.params.id), canManageTicket(req.user, ticket));
     res.json(messages);
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -291,7 +334,7 @@ router.post('/tickets/:id/messages', upload.array('files', 5), async (req, res) 
     const db = require('../database-oracle').db;
     const ticket = await feedbackService.getTicketById(db, Number(req.params.id));
     if (!ticket) return res.status(404).json({ error: '工單不存在' });
-    if (req.user.role !== 'admin' && ticket.user_id !== req.user.id) {
+    if (!canViewTicket(req.user, ticket)) {
       return res.status(403).json({ error: '無權限操作' });
     }
     if (ticket.status === 'closed') return res.status(400).json({ error: '已結案，無法新增訊息' });
@@ -299,7 +342,8 @@ router.post('/tickets/:id/messages', upload.array('files', 5), async (req, res) 
     const { content, is_internal } = req.body;
     if (!content) return res.status(400).json({ error: '訊息內容為必填' });
 
-    const senderRole = req.user.role === 'admin' ? 'admin' : 'applicant';
+    // 非工單擁有者且可處理 → 算客服回覆；否則為申請者補充
+    const senderRole = (req.user.id !== ticket.user_id && canManageTicket(req.user, ticket)) ? 'admin' : 'applicant';
     const msg = await feedbackService.addMessage(db, {
       ticket_id: Number(req.params.id),
       sender_id: req.user.id,
@@ -330,9 +374,20 @@ router.post('/tickets/:id/messages', upload.array('files', 5), async (req, res) 
     // 對話訊息不發 email（避免轟炸），只靠站內通知 + WebSocket + Webex
     const isInternalBool = is_internal === 'true' || is_internal === true;
 
+    // addMessage 內部可能 auto-assign，重抓最新狀態
+    const refreshed = await feedbackService.getTicketById(db, Number(req.params.id));
+    const actorName = req.user.name || req.user.username;
+
     // WebSocket: 推送新訊息 + Webex 通知
     emitNewMessage(Number(req.params.id), msg);
-    feedbackNotif.onNewMessage(db, ticket, req.user.name || req.user.username, content, isInternalBool, senderRole).catch(() => {});
+
+    // 首次 admin 非 internal 回覆 → 觸發 auto-assign webex 流程
+    if (senderRole === 'admin' && !isInternalBool && !ticket.assigned_to && refreshed.assigned_to === req.user.id) {
+      emitTicketAssigned(Number(req.params.id), { ticketId: Number(req.params.id), assignedTo: req.user.id });
+      feedbackNotif.onTicketAssigned(db, refreshed, req.user.id, actorName).catch(e => console.warn('[Feedback] onTicketAssigned error:', e.message));
+    }
+
+    feedbackNotif.onNewMessage(db, refreshed, actorName, content, isInternalBool, senderRole).catch(() => {});
 
     res.status(201).json(msg);
   } catch (e) {
@@ -370,7 +425,7 @@ router.post('/tickets/:id/ai-analyze', async (req, res) => {
     const db = require('../database-oracle').db;
     const ticket = await feedbackService.getTicketById(db, Number(req.params.id));
     if (!ticket) return res.status(404).json({ error: '工單不存在' });
-    if (req.user.role !== 'admin' && ticket.user_id !== req.user.id) {
+    if (!canViewTicket(req.user, ticket)) {
       return res.status(403).json({ error: '無權限操作' });
     }
 
@@ -415,13 +470,53 @@ router.get('/search', async (req, res) => {
     const db = require('../database-oracle').db;
     const { searchFeedbackKB } = require('../services/feedbackKBSync');
     const feedbackAI = require('../services/feedbackAIService');
-    const isAdmin = req.user.role === 'admin';
     // 優先向量搜尋，fallback 關鍵字
-    let results = await searchFeedbackKB(db, req.query.q || '', isAdmin, Number(req.query.limit) || 5);
+    let results = await searchFeedbackKB(db, req.query.q || '', Number(req.query.limit) || 5);
     if (results.length === 0) {
       results = await feedbackAI.searchSimilarTickets(db, req.query.q || '', req.user.id, Number(req.query.limit) || 5);
     }
     res.json(results);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── 歷史快照（archive）admin only ────────────────────────────────────────────
+
+router.get('/tickets/:id/archive', async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: '需要管理員權限' });
+    const db = require('../database-oracle').db;
+    const feedbackArchive = require('../services/feedbackArchive');
+    const list = await feedbackArchive.listSnapshots(db, Number(req.params.id));
+    res.json(list);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.get('/archive/:snapshotId', async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: '需要管理員權限' });
+    const db = require('../database-oracle').db;
+    const feedbackArchive = require('../services/feedbackArchive');
+    const snap = await feedbackArchive.getSnapshot(db, Number(req.params.snapshotId));
+    if (!snap) return res.status(404).json({ error: '快照不存在' });
+    // 解析 JSON 欄位後回傳
+    const parse = (s) => { try { return JSON.parse(s || 'null'); } catch { return null; } };
+    res.json({
+      id: snap.id,
+      ticket_id: snap.ticket_id,
+      ticket_no: snap.ticket_no,
+      snapshot_at: snap.snapshot_at,
+      snapshot_trigger: snap.snapshot_trigger,
+      triggered_by: snap.triggered_by,
+      triggered_by_name: snap.triggered_by_name,
+      triggered_by_username: snap.triggered_by_username,
+      messages: parse(snap.messages_json) || [],
+      attachments: parse(snap.attachments_json) || [],
+      ticket_snapshot: parse(snap.ticket_snapshot),
+    });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -434,7 +529,7 @@ router.post('/tickets/:id/attachments', upload.array('files', FEEDBACK_MAX_FILES
     const db = require('../database-oracle').db;
     const ticket = await feedbackService.getTicketById(db, Number(req.params.id));
     if (!ticket) return res.status(404).json({ error: '工單不存在' });
-    if (req.user.role !== 'admin' && ticket.user_id !== req.user.id) {
+    if (!canViewTicket(req.user, ticket)) {
       return res.status(403).json({ error: '無權限操作' });
     }
 
@@ -467,7 +562,7 @@ router.get('/tickets/:id/attachments', async (req, res) => {
     const db = require('../database-oracle').db;
     const ticket = await feedbackService.getTicketById(db, Number(req.params.id));
     if (!ticket) return res.status(404).json({ error: '工單不存在' });
-    if (req.user.role !== 'admin' && ticket.user_id !== req.user.id) {
+    if (!canViewTicket(req.user, ticket)) {
       return res.status(403).json({ error: '無權限查看' });
     }
     const attachments = await feedbackService.listAttachments(db, Number(req.params.id));
@@ -535,6 +630,19 @@ router.post('/admin/categories', verifyAdmin, async (req, res) => {
     const db = require('../database-oracle').db;
     const cat = await feedbackService.createCategory(db, req.body);
     res.status(201).json(cat);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// 批次更新分類順序（drag-and-drop）— 須在 /:id 之前註冊，否則會被當成 id='reorder'
+router.put('/admin/categories/reorder', verifyAdmin, async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const ids = req.body?.ids;
+    if (!Array.isArray(ids) || ids.length === 0) return res.status(400).json({ error: 'ids (array) 為必填' });
+    await feedbackService.reorderCategories(db, ids);
+    res.json({ success: true });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

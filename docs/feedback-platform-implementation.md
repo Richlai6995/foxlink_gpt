@@ -433,3 +433,231 @@ client/src/i18n/locales/*.json — 三語言 feedback.* keys
 
 - 新增 `u-feedback` section（第 29 節）到 helpSeedData
 - 包含草稿機制、拖放/貼圖說明、狀態表（含草稿）
+
+---
+
+## ERP 分流 + 分類管理升級（2026-04）
+
+背景：ERP 類問題需要獨立處理團隊（非 IT 的 ERP 管理員）+ 獨立知識庫，不應與 Cortex 一般工單混在一起。
+
+### Migration
+- `feedback_categories.is_erp NUMBER(1) DEFAULT 0` — 分類 ERP flag
+- `users.is_erp_admin NUMBER(1) DEFAULT 0` — 使用者 ERP 管理員 flag
+
+### 身份模型（並存獨立 flag）
+- `role`（admin / user）保持原樣
+- `is_erp_admin` 獨立，可與 `role='admin'` 共存
+- **Cortex admin**（`role='admin'`）可見所有工單、加入 `Cortex - 問題反饋通知` room
+- **ERP admin**（`is_erp_admin=1`）只看自己 + ERP 分類工單、加入 `Cortex - ERP問題反饋通知` room
+- 兩者可重疊 → 雙重 admin 兩邊 room 都進
+
+### Webex 雙 Room（`feedbackNotificationService.js`）
+- 新增 `ensureFeedbackErpWebexRoom()` + `_syncErpAdminMembers()`
+- 新增 `system_settings.feedback_erp_webex_room_id`
+- `_sendToRoom(ticket, md)` 依 `ticket.category_is_erp` 分派 room
+- `notifyAdmins` 依 ticket 類型決定通知對象：
+  - ERP 工單 → Cortex admin + ERP admin
+  - 非 ERP → 僅 Cortex admin
+
+### 雙 KB（`feedbackKBSync.js`）
+- `PUBLIC_KB_NAME = 'feedback-public'` + 新增 `ERP_KB_NAME = 'feedback-erp'`
+- `ensureFeedbackKB(db, name)` 支援指定名稱
+- `syncTicketToKB` 依 `ticket.category_is_erp` 選 KB；兩邊都有同單號 doc 時刪舊立新（category 可能被改）
+- `searchFeedbackKB(db, query, limit, { kbName })` 使用者可手動選擇搜哪個 KB（UI 在一般 KB 列表選擇）
+- 兩個 KB 皆 `is_public=1`，使用者在知識庫列表看得到
+
+### 工單可見性（`feedbackService.listTickets`）
+- 新增參數 `isErpAdmin`，邏輯：
+  - `isAdmin=true` → 全部
+  - `isAdmin=false AND isErpAdmin=true` → `t.user_id = userId OR c.is_erp = 1`
+  - 其他 → 僅 `t.user_id = userId`
+- `COUNT(*)` query 加 LEFT JOIN `feedback_categories` 才能過濾
+- `getTicketById` / listTickets 主 SELECT 帶回 `category_is_erp` 供後續分流判斷
+- Session payload (`sessionBuilder.js`) 加 `is_erp_admin` → `req.user.is_erp_admin`
+
+### 使用者管理（`routes/users.js` + UI）
+- `PUT /api/users/:id` 支援 `is_erp_admin` 欄位
+- `UserManagement.tsx` 權限區塊新增 ERP 管理員 checkbox（橘色 accent）
+
+### 分類管理升級（`FeedbackCategoryManager.tsx`）
+- **Icon picker**：內建 ~55 個常用 lucide icon grid + 搜尋 + 支援自訂名稱
+- **拖曳排序**：HTML5 native drag-and-drop；drop 後呼叫 `PUT /feedback/admin/categories/reorder { ids }`，server 依陣列順序設 `sort_order = 1..N`
+- **ERP flag checkbox**：新增/編輯都有，列表顯示橘色 `ERP` 徽章
+
+### API 新增
+- `PUT /feedback/admin/categories/reorder` → `{ ids: [1,3,2,4] }`
+- 現有 `POST`/`PUT` `/feedback/admin/categories` 支援 `is_erp` 欄位
+
+### 保留的相容性考量
+- 舊分類 `is_erp` 預設 0（不影響現有流程）
+- 未設 `is_erp_admin` 的 user 行為不變
+- Webex Bot 未啟用時 ERP room 建立邏輯一樣 graceful skip
+
+---
+
+## KB 架構升級 + Webex 分流（2026-04）
+
+背景：使用者透過對話紀錄學習解題方法，原架構雙 KB（`feedback-public` 脫敏 / `feedback-admin` 完整）只有摘要、不含完整對話與附件，且管理員群組所有人都收到每則留言，噪音大。
+
+升級切成 4 個 PR，漸進上線：
+
+### PR 1 — Archive 表 + admin KB 廢除 ✅
+
+**DB migration**
+- 新增 `feedback_conversation_archive`（append-only 完整原始快照，永久保留）
+- 新增 `kb_chunks.metadata CLOB` 欄位（存 `ticket_no / position_type / attachment_url` 等）
+- 一次性清理：DELETE 舊 `feedback-admin` KB + chunks/documents
+
+**新增檔案**
+- `server/services/feedbackArchive.js` — `writeSnapshot / listSnapshots / getSnapshot`
+- `client/src/components/feedback/admin/TicketArchiveModal.tsx` — 歷史快照查閱 UI
+
+**修改檔案**
+- `server/routes/feedback.js`
+  - `PUT /tickets/:id/resolve` / `reopen` 同步寫 archive snapshot
+  - `PUT /tickets/:id/status`（closed）寫 snapshot
+  - 新端點 `GET /tickets/:id/archive`（admin only，列快照）
+  - 新端點 `GET /archive/:snapshotId`（admin only，讀快照全文）
+- `server/services/feedbackKBSync.js` — 移除雙 KB 分支，`searchFeedbackKB(db, query, limit)` 簡化 signature
+- `server/services/feedbackAIService.js` — 配合新 signature
+- `client/src/pages/FeedbackDetailPage.tsx` — header 加 Archive icon button（admin）
+- i18n 新增 `feedback.archiveTitle / noSnapshots / selectSnapshot`（3 語系）
+
+### PR 2 — KB 內容升級（對話 + 附件 + LLM 脫敏 + parent/child）✅
+
+**新增檔案**
+- `server/services/feedbackRedactor.js`
+  - LLM 脫敏（Gemini Flash，temperature=0）
+  - system prompt 明確列出 REPLACE（人名/工號/email）和 KEEP（部門/機台 SN/技術內容）
+  - `redactSafe()` 失敗自動 fallback regex
+- `server/services/feedbackAttachmentProcessor.js`
+  - 圖片 → `kbDocParser.imageToText`（Gemini Vision OCR）
+  - PDF/DOCX/XLSX/PPTX → `kbDocParser.parseDocument`
+  - TXT/MD/CSV → 直接讀取前 20KB
+  - 循序跑 400ms 間隔保護 rate limit
+- `server/scripts/feedbackRedactionDemo.js` — 脫敏 before/after 對照
+- `server/scripts/testFeedbackKBSync.js` — 單張工單同步實測
+
+**重寫 `server/services/feedbackKBSync.js`**
+- 每張工單拆成多個 child chunks：
+  - `header` × 1（問題描述）
+  - `message` × N（對話逐則，`is_internal` / `is_system` 跳過）
+  - `attachment` × M（附件 caption）
+  - `resolution` × 1（最終解決方案）
+- 所有 child 的 `parent_content` 存完整脫敏工單摘要
+- metadata 欄位：`ticket_no / category / position_type / message_id / sender_role / attachment_id / attachment_url / mime_type / resolved_at`
+- 脫敏 pipeline：parent summary + 每個 chunk 循序過 LLM（200ms gap）
+- `embedBatch` 一次處理所有 chunks
+- 單張工單同步約 60–90 秒，fire-and-forget 背景執行
+
+**實測結果**
+- FB-202604080944：6 chunks（含 1 附件 Vision OCR）
+- FB-202604081014：5 chunks
+- 跨工單檢索「問題處理進度」→ 兩張都命中相近 chunk（score ≥ 0.81）
+
+### PR 3 — 歷史回填 migration ✅
+
+**新增檔案**
+- `server/scripts/backfillFeedbackKB.js`
+
+**功能**
+- `--dry-run` / `--resume` / `--force` / `--from-ticket-id=N` / `--limit=N`
+- 掃所有 `status IN ('resolved', 'closed')` 工單
+- 每張：先寫 archive snapshot（`trigger='migration'`）→ 再 syncTicketToKB
+- 進度寫 `server/tmp/backfill-progress.json`，中斷可 `--resume` 續跑
+- 失敗不中斷整批，記到 `progress.failed[]`
+- 每張間 1.5s 保護 rate limit
+
+**Idempotent**
+- Archive：判斷 `(ticket_id, trigger='migration')` 已存在則跳過（除非 `--force`）
+- KB sync：本身 `DELETE + INSERT`，可無限重跑
+
+**Prod 執行建議**
+```bash
+kubectl exec -it <pod> -- node server/scripts/backfillFeedbackKB.js --dry-run
+kubectl exec -it <pod> -- node server/scripts/backfillFeedbackKB.js --limit=5
+kubectl exec -it <pod> -- node server/scripts/backfillFeedbackKB.js | tee /tmp/backfill.log
+```
+
+每張 60–90 秒，1000 張 ≈ 20–25 小時，建議離峰或分批跑。
+
+### PR 4 — Webex 分流（B 方案）✅
+
+**目的**：降低管理員群組噪音，已指派的工單改 DM 給接單者；群組只保留招領 + 結案/重開 summary。
+
+**Migration**
+- `feedback_tickets.webex_parent_message_id VARCHAR2(100)` — DM thread parent message id
+
+**修改檔案**
+- `server/services/webexService.js`
+  - 新增 `sendDirectMessage(toPersonEmail, markdown, { parentId? })`
+  - 遇到 `parentId` 指向對方看不到的 room → catch 400 自動 fallback 不帶 parentId 重送
+- `server/services/feedbackNotificationService.js` — 整體重寫
+  - 新增 `_sendToRoom` / `_sendDm` / `_recordWebexParent` / `_clearWebexParent` helper
+  - 新增 event handlers：
+    - `onTicketAssigned(db, ticket, assignerId, assignerName)` — 群組 summary + DM assignee 起 thread + 存 parent id
+    - `onTicketReassigned(db, ticket, oldAssigneeId, newAssigneeId, actorName)` — 舊 assignee DM「轉出」+ 新 assignee DM「接單 + 上下文」+ 改存新 parent id
+  - 強化 event handlers：
+    - `onTicketResolved` — 加 DM applicant + DM assignee（thread 接續）+ 群組 summary + 清 parent id
+    - `onTicketReopened` — 加 DM assignee + 群組 summary + 清 parent id（下次 admin 回覆會重起 thread）
+    - `onNewMessage` — 已指派 → DM assignee (thread)；未指派 → 群組；admin 回覆只站內通知 applicant
+  - 新訊息模板 `_tplNewTicket / _tplNewMessage / _tplAssignedGroup / _tplAssignedDm / _tplResolvedGroup / _tplResolvedDmApplicant / _tplResolvedDmAssignee / _tplReopenedGroup / _tplReopenedDmAssignee / _tplReassignedOld / _tplReassignedNew`
+- `server/routes/feedback.js`
+  - `PUT /tickets/:id/assign` — 判斷首次認領 / 轉單 → 觸發對應事件
+  - `POST /tickets/:id/messages` — 抓 `addMessage` 前後 `assigned_to` 差異，admin 首次回覆自動指派時觸發 `onTicketAssigned`；`onNewMessage` 帶最新 ticket 確保 Stage 分流正確
+
+**Fallback 規則**
+- `assigned_to` 使用者無 email → `_sendDm` 回傳 null，`onNewMessage` 改走群組
+- `WEBEX_BOT_TOKEN` 未設 → 所有 `_sendToRoom` / `_sendDm` 直接 return null，無副作用
+
+**關鍵點**
+- Thread 只在 admin DM room 中串；applicant DM room 是不同的 direct room，不共用 parent id
+- `webex_parent_message_id` 生命週期：`onTicketAssigned` / `onTicketReassigned` 寫入 → `onTicketResolved` / `onTicketReopened` 清空 → 下次 re-assign 重新寫
+
+---
+
+## 架構決策紀錄
+
+| 決策 | 選項 | 最終 | 理由 |
+|------|------|------|------|
+| KB 分級 | 雙 KB（public 脫敏 / admin 完整） vs 單 KB + archive 表 | **單 KB + archive** | 雙 KB 內容幾乎一樣只差脫敏級別，維護成本高；admin 要原文走 archive 表即可 |
+| 脫敏方式 | 純 regex vs LLM vs 混合 | **LLM + regex fallback** | LLM 能處理對話內「其他同事姓名」等 regex 抓不到的情況；fallback 保底 |
+| 脫敏範圍 | 嚴格（含部門/機台 SN）vs 寬鬆（只人名/工號/email） | **寬鬆** | 部門/機台對技術分類有用，不影響個資；人名/工號/email 只有 admin 透過 archive 看 |
+| Chunk 切法 | 整包 1 chunk vs parent/child | **parent/child** | 細粒度召回 + 回傳 parent 給 LLM 組上下文，品質顯著提升 |
+| 附件處理 | 原圖存 KB vs 文字描述 | **文字描述（Vision caption）** | 原圖 embedding 成本高、用處低；caption 可 embed 可搜尋，原檔連結放 metadata |
+| Archive 保留期 | 定期清 vs 永久 | **永久（未來 partition）** | 稽核/爭議需要，純 CLOB 容量成本可接受 |
+| Webex 分流 | 群組 @mention vs 狀態機 DM vs 每工單 room | **狀態機 DM（B 方案）** | 噪音最低，接單者專注，團隊仍能看到招領/結案 summary |
+| KB sync 時機 | 即時 vs 結案時 | **結案時** | 對話過程含誤解/走錯路，不是最終「知識」；即時 re-embed 成本高 |
+
+---
+
+## 脫敏 Prompt 設計
+
+`server/services/feedbackRedactor.js` system prompt 設計要點：
+
+```
+TASK: Replace personal identifiers with bracketed placeholders.
+       DO NOT change any other content.
+
+REPLACE:
+- Personal names (中/英/越) → [使用者]
+- Employee IDs → [工號]
+- Email addresses → [email]
+
+KEEP UNCHANGED:
+- Department codes (e.g., FEC01)
+- Machine SN (e.g., SN12345)
+- Error codes, URLs, IP, paths, SQL, code
+- Dates, times, amounts, technical terms
+
+RULES:
+- Output MUST have same structure (newlines, markdown)
+- Do NOT explain, summarize, or reword
+- Do NOT translate
+- If unsure whether a token is PII, leave it unchanged
+- Output ONLY the redacted text
+```
+
+`generationConfig: { temperature: 0, topP: 1 }` 確保可重現。
+
+**已知限制**：LLM 偶爾對超短（< 5 char）或純技術內容誤判 → regex fallback 保底。
