@@ -1063,6 +1063,7 @@ router.get('/chat-sessions', async (req, res) => {
  */
 async function getCostRows(db, startDate, endDate) {
   // Read org fields directly from users table
+  // 排除：已離職（org_end_date IS NOT NULL）/ 手動停用（status = 'disabled'）
   try {
     return await db.prepare(`
       SELECT tu.user_id, u.employee_id, u.name AS user_name, u.email AS user_email,
@@ -1076,6 +1077,8 @@ async function getCostRows(db, startDate, endDate) {
       FROM token_usage tu
       JOIN users u ON tu.user_id = u.id
       WHERE tu.usage_date BETWEEN TO_DATE(?, 'YYYY-MM-DD') AND TO_DATE(?, 'YYYY-MM-DD')
+        AND u.org_end_date IS NULL
+        AND (u.status IS NULL OR u.status != 'disabled')
       ORDER BY tu.usage_date
     `).all(startDate, endDate);
   } catch (e) {
@@ -1120,7 +1123,10 @@ async function aggregateEmployees(db, startDate, endDate, { showAll } = {}) {
     const [erpEmps, allUsers] = await Promise.all([
       getAllIndirectEmployees(),
       db.prepare(
-        `SELECT employee_id FROM users WHERE employee_id IS NOT NULL AND status != 'disabled'`
+        `SELECT employee_id FROM users
+         WHERE employee_id IS NOT NULL
+           AND (status IS NULL OR status != 'disabled')
+           AND org_end_date IS NULL`
       ).all(),
     ]);
     const userSet = new Set(allUsers.map((u) => String(u.employee_id)));
@@ -1163,12 +1169,15 @@ function toCsv(headers, rows, getRow) {
   return lines.join('\r\n');
 }
 
-// GET /api/admin/cost-stats/total-accounts — 系統總帳號數 (不含 admin、不含 disabled)
+// GET /api/admin/cost-stats/total-accounts — 系統總帳號數 (不含 admin、disabled、已離職)
 router.get('/cost-stats/total-accounts', async (req, res) => {
   try {
     const db = require('../database-oracle').db;
     const row = await db.prepare(
-      `SELECT COUNT(*) AS cnt FROM users WHERE status != 'disabled' AND (role IS NULL OR role != 'admin')`
+      `SELECT COUNT(*) AS cnt FROM users
+       WHERE (status IS NULL OR status != 'disabled')
+         AND (role IS NULL OR role != 'admin')
+         AND org_end_date IS NULL`
     ).get();
     res.json({ total: row?.cnt || 0 });
   } catch (e) {
@@ -1254,7 +1263,7 @@ router.get('/cost-stats/summary', async (req, res) => {
 
     const [rows, accountRows, indirectMap, allPCs] = await Promise.all([
       getCostRows(db, startDate, endDate),
-      db.prepare(`SELECT profit_center, COUNT(*) AS cnt FROM users WHERE status != 'disabled' GROUP BY profit_center`).all(),
+      db.prepare(`SELECT profit_center, COUNT(*) AS cnt FROM users WHERE (status IS NULL OR status != 'disabled') AND org_end_date IS NULL GROUP BY profit_center`).all(),
       getIndirectEmpCountByPC(),
       includeAllPC === '1' ? getAllProfitCenters(onlyFoxlinkGroup !== '0') : Promise.resolve([]),
     ]);
@@ -1351,7 +1360,7 @@ router.get('/cost-stats/monthly', async (req, res) => {
 
     const [rows, accountRows, indirectMap, allPCs] = await Promise.all([
       getCostRows(db, startDate, endDate),
-      db.prepare(`SELECT profit_center, COUNT(*) AS cnt FROM users WHERE status != 'disabled' GROUP BY profit_center`).all(),
+      db.prepare(`SELECT profit_center, COUNT(*) AS cnt FROM users WHERE (status IS NULL OR status != 'disabled') AND org_end_date IS NULL GROUP BY profit_center`).all(),
       getIndirectEmpCountByPC(),
       includeAllPC === '1' ? getAllProfitCenters(onlyFoxlinkGroup !== '0') : Promise.resolve([]),
     ]);
@@ -1465,7 +1474,7 @@ router.get('/cost-stats/export/summary', async (req, res) => {
 
     const [rows, accountRows, indirectMap, allPCs] = await Promise.all([
       getCostRows(db, startDate, endDate),
-      db.prepare(`SELECT profit_center, COUNT(*) AS cnt FROM users WHERE status != 'disabled' GROUP BY profit_center`).all(),
+      db.prepare(`SELECT profit_center, COUNT(*) AS cnt FROM users WHERE (status IS NULL OR status != 'disabled') AND org_end_date IS NULL GROUP BY profit_center`).all(),
       getIndirectEmpCountByPC(),
       includeAllPC === '1' ? getAllProfitCenters(onlyFoxlinkGroup !== '0') : Promise.resolve([]),
     ]);
@@ -1537,7 +1546,7 @@ router.get('/cost-stats/export/monthly', async (req, res) => {
 
     const [rows, accountRows, indirectMap, allPCs] = await Promise.all([
       getCostRows(db, startDate, endDate),
-      db.prepare(`SELECT profit_center, COUNT(*) AS cnt FROM users WHERE status != 'disabled' GROUP BY profit_center`).all(),
+      db.prepare(`SELECT profit_center, COUNT(*) AS cnt FROM users WHERE (status IS NULL OR status != 'disabled') AND org_end_date IS NULL GROUP BY profit_center`).all(),
       getIndirectEmpCountByPC(),
       includeAllPC === '1' ? getAllProfitCenters(onlyFoxlinkGroup !== '0') : Promise.resolve([]),
     ]);
