@@ -15,6 +15,7 @@ router.get('/sections', verifyToken, async (req, res) => {
     const rows = await db.prepare(`
       SELECT s.id, s.section_type, s.sort_order, s.icon, s.icon_color,
              s.last_modified, s.linked_course_id, s.linked_lesson_id,
+             l.is_mandatory                            AS linked_lesson_mandatory,
              COALESCE(t.title, tzh.title)               AS title,
              COALESCE(t.sidebar_label, tzh.sidebar_label) AS sidebar_label,
              COALESCE(t.blocks_json, tzh.blocks_json)     AS blocks_json,
@@ -23,6 +24,7 @@ router.get('/sections', verifyToken, async (req, res) => {
       FROM help_sections s
       LEFT JOIN help_translations t   ON t.section_id = s.id AND t.lang = ?
       LEFT JOIN help_translations tzh ON tzh.section_id = s.id AND tzh.lang = 'zh-TW'
+      LEFT JOIN course_lessons l      ON l.id = s.linked_lesson_id
       ORDER BY s.sort_order
     `).all(lang);
 
@@ -35,6 +37,7 @@ router.get('/sections', verifyToken, async (req, res) => {
       lastModified: r.last_modified,
       linkedCourseId: r.linked_course_id || null,
       linkedLessonId: r.linked_lesson_id || null,
+      linkedLessonMandatory: r.linked_lesson_mandatory == null ? null : Number(r.linked_lesson_mandatory),
       title: r.title || '',
       sidebarLabel: r.sidebar_label || '',
       blocks: (() => { try { const b = r.blocks_json ? JSON.parse(r.blocks_json) : []; return Array.isArray(b) ? b : []; } catch { return []; } })(),

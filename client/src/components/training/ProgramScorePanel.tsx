@@ -8,6 +8,9 @@ interface LessonProgress {
   title: string
   total: number
   viewed: number
+  is_mandatory?: number
+  lesson_weight?: number
+  not_counted?: boolean
 }
 
 interface ExamHistory {
@@ -30,6 +33,7 @@ interface CourseScore {
   total_score: number
   pass_score: number
   max_attempts: number
+  only_count_mandatory?: boolean
   browse_progress: { total: number; viewed: number; pct: number; lessons: LessonProgress[] }
   exam: {
     best_score: number; best_max: number
@@ -110,13 +114,24 @@ export default function ProgramScorePanel({ programId }: { programId: number }) 
                 {/* Lesson browse progress */}
                 <div>
                   <div className="text-[10px] font-semibold text-slate-500 uppercase mb-1">{t('training.scoring.browseDetail')}</div>
-                  {c.browse_progress.lessons.map(l => (
-                    <div key={l.lesson_id} className="flex items-center gap-2 text-xs text-slate-600 py-0.5">
-                      {l.viewed >= l.total ? <CheckCircle2 size={11} className="text-green-500" /> : <Clock size={11} className="text-slate-400" />}
-                      <span className="flex-1">{l.title}</span>
-                      <span className="text-slate-400">{l.viewed}/{l.total}</span>
-                    </div>
-                  ))}
+                  {c.browse_progress.lessons.map(l => {
+                    const mandatory = (l.is_mandatory ?? 1) === 1
+                    return (
+                      <div key={l.lesson_id} className={`flex items-center gap-2 text-xs py-0.5 ${l.not_counted ? 'opacity-60' : 'text-slate-600'}`}>
+                        {l.viewed >= l.total ? <CheckCircle2 size={11} className="text-green-500" /> : <Clock size={11} className="text-slate-400" />}
+                        <span className="flex-1">{l.title}</span>
+                        <span className={`text-[9px] px-1.5 py-0.5 rounded-full border ${
+                          mandatory ? 'bg-red-50 text-red-600 border-red-200' : 'bg-slate-100 text-slate-500 border-slate-200'
+                        }`}>
+                          {mandatory ? t('training.lessonMandatory') : t('training.lessonOptional')}
+                        </span>
+                        {l.not_counted && (
+                          <span className="text-[9px] text-slate-400">{t('training.notCounted')}</span>
+                        )}
+                        <span className="text-slate-400">{l.viewed}/{l.total}</span>
+                      </div>
+                    )
+                  })}
                 </div>
 
                 {/* Exam history with slide details */}

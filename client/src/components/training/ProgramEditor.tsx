@@ -18,7 +18,7 @@ interface ProgramCourse {
   sort_order: number
   is_required: number
   lesson_ids: number[] | null
-  lessons?: { id: number; title: string }[]
+  lessons?: { id: number; title: string; is_mandatory?: number; score_weight?: number }[]
   exam_config?: {
     total_score?: number
     pass_score?: number
@@ -27,6 +27,8 @@ interface ProgramCourse {
     overtime_action?: string
     max_attempts?: number
     lesson_weights?: Record<string, number>
+    lesson_mandatory?: Record<string, number>
+    only_count_mandatory?: boolean
   }
 }
 
@@ -687,11 +689,52 @@ function ProgramCourseCard({ course, idx, isEditable, isNew, programId, onUpdate
     setLoadingLessons(true)
     try {
       const res = await api.get(`/training/courses/${course.course_id}`)
-      const ls = (res.data.lessons || []).map((l: any) => ({ id: l.id, title: l.title }))
+      const ls = (res.data.lessons || []).map((l: any) => ({
+        id: l.id, title: l.title,
+        is_mandatory: l.is_mandatory ?? 1,
+        score_weight: l.score_weight ?? 10
+      }))
       setLessons(ls)
-      onUpdate({ ...course, lessons: ls })
+      // Seed exam_config.lesson_weights from course defaults when unset
+      const existingWeights = ec.lesson_weights || {}
+      const seededWeights: Record<string, number> = { ...existingWeights }
+      let seedChanged = false
+      for (const l of ls) {
+        const key = `lesson_${l.id}`
+        if (seededWeights[key] == null) {
+          seededWeights[key] = l.score_weight
+          seedChanged = true
+        }
+      }
+      if (seedChanged) {
+        onUpdate({ ...course, lessons: ls, exam_config: { ...ec, lesson_weights: seededWeights } })
+      } else {
+        onUpdate({ ...course, lessons: ls })
+      }
     } catch (e) { console.error(e) }
     finally { setLoadingLessons(false); setExpanded(true) }
+  }
+
+  // Effective mandatory: override → fallback to course default
+  const isLessonMandatory = (l: { id: number; is_mandatory?: number }) => {
+    const ov = ec.lesson_mandatory?.[`lesson_${l.id}`]
+    if (ov === 0 || ov === 1) return ov === 1
+    return (l.is_mandatory ?? 1) === 1
+  }
+
+  const toggleMandatory = (lessonId: number, courseDefault: number) => {
+    const key = `lesson_${lessonId}`
+    const current = ec.lesson_mandatory?.[key]
+    const effective = current === 0 ? false : current === 1 ? true : (courseDefault ?? 1) === 1
+    const nextVal = effective ? 0 : 1
+    const lm = { ...(ec.lesson_mandatory || {}) }
+    // If toggled back to course default, drop the override
+    if (nextVal === (courseDefault ?? 1)) {
+      delete lm[key]
+    } else {
+      lm[key] = nextVal
+    }
+    updateExamConfig({ lesson_mandatory: lm })
   }
 
   const selectedIds = course.lesson_ids || []
@@ -772,34 +815,67 @@ function ProgramCourseCard({ course, idx, isEditable, isNew, programId, onUpdate
               disabled={!isEditable} className="w-3.5 h-3.5 rounded" />
             <span className="font-medium">{t('training.program.editor.allLessons')}</span>
           </label>
-          {lessons.map(l => {
-            const lw = ec.lesson_weights?.[`lesson_${l.id}`]
-            return (
-              <div key={l.id} className="flex items-center gap-2 text-xs text-slate-600 pl-4">
-                <input type="checkbox" checked={isLessonSelected(l.id)}
-                  onChange={() => toggleLesson(l.id)}
-                  disabled={!isEditable || allSelected}
-                  className="w-3.5 h-3.5 rounded" />
-                <span className="flex-1">{l.title}</span>
-                {isLessonSelected(l.id) && (
-                  <div className="flex items-center gap-1">
-                    <span className="text-[10px] text-slate-400">{t('training.program.editor.lessonScore')}</span>
-                    <input type="number" min={0} value={lw ?? ''}
-                      placeholder={String(Math.round((ec.total_score || 100) / selectedCount))}
-                      onChange={e => {
-                        const val = e.target.value ? Number(e.target.value) : undefined
-                        const weights = { ...(ec.lesson_weights || {}) }
-                        if (val !== undefined) weights[`lesson_${l.id}`] = val
-                        else delete weights[`lesson_${l.id}`]
-                        updateExamConfig({ lesson_weights: weights })
-                      }}
-                      disabled={!isEditable}
-                      className="w-12 border border-slate-200 rounded px-1 py-0.5 text-[11px] text-center" />
-                  </div>
-                )}
-              </div>
-            )
-          })}
+          {(() => {
+            // Pre-compute mandatory-only weight sum for rescale preview
+            const selectedLessons = lessons.filter(l => isLessonSelected(l.id))
+            const mandatoryWeightSum = selectedLessons
+              .filter(l => isLessonMandatory(l))
+              .reduce((s, l) => s + (ec.lesson_weights?.[`lesson_${l.id}`] ?? l.score_weight ?? 0), 0)
+            return lessons.map(l => {
+              const lw = ec.lesson_weights?.[`lesson_${l.id}`]
+              const mandatory = isLessonMandatory(l)
+              const selected = isLessonSelected(l.id)
+              const weightVal = lw ?? l.score_weight ?? 0
+              const rescalePct = ec.only_count_mandatory && mandatory && mandatoryWeightSum > 0
+                ? Math.round((weightVal / mandatoryWeightSum) * 100)
+                : null
+              const greyOut = ec.only_count_mandatory && !mandatory
+              return (
+                <div key={l.id} className={`flex items-center gap-2 text-xs pl-4 ${greyOut ? 'opacity-50' : 'text-slate-600'}`}>
+                  <input type="checkbox" checked={selected}
+                    onChange={() => toggleLesson(l.id)}
+                    disabled={!isEditable || allSelected}
+                    className="w-3.5 h-3.5 rounded" />
+                  <span className="flex-1">{l.title}</span>
+                  <button
+                    type="button"
+                    disabled={!isEditable}
+                    onClick={() => toggleMandatory(l.id, l.is_mandatory ?? 1)}
+                    className={`text-[10px] px-1.5 py-0.5 rounded-full border transition ${
+                      mandatory
+                        ? 'bg-red-50 text-red-600 border-red-200 hover:bg-red-100'
+                        : 'bg-slate-100 text-slate-500 border-slate-200 hover:bg-slate-200'
+                    } ${!isEditable ? 'cursor-not-allowed' : 'cursor-pointer'}`}
+                    title={t('training.lessonMandatoryHint')}
+                  >
+                    {mandatory ? t('training.lessonMandatory') : t('training.lessonOptional')}
+                  </button>
+                  {selected && (
+                    <div className="flex items-center gap-1">
+                      <span className="text-[10px] text-slate-400">{t('training.program.editor.lessonScore')}</span>
+                      <input type="number" min={0} value={lw ?? ''}
+                        placeholder={String(l.score_weight ?? 10)}
+                        onChange={e => {
+                          const val = e.target.value ? Number(e.target.value) : undefined
+                          const weights = { ...(ec.lesson_weights || {}) }
+                          if (val !== undefined) weights[`lesson_${l.id}`] = val
+                          else delete weights[`lesson_${l.id}`]
+                          updateExamConfig({ lesson_weights: weights })
+                        }}
+                        disabled={!isEditable}
+                        className="w-12 border border-slate-200 rounded px-1 py-0.5 text-[11px] text-center" />
+                      {rescalePct !== null && (
+                        <span className="text-[9px] text-red-500">{t('training.mandatoryWeightPreview', { pct: rescalePct })}</span>
+                      )}
+                      {greyOut && (
+                        <span className="text-[9px] text-slate-400">{t('training.notCounted')}</span>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )
+            })
+          })()}
 
           {/* Exam config row */}
           <div className="flex items-center gap-3 pt-2 mt-2 border-t border-slate-100 text-[11px] text-slate-500 flex-wrap">
@@ -834,6 +910,13 @@ function ProgramCourseCard({ course, idx, isEditable, isNew, programId, onUpdate
                 className="w-12 border border-slate-200 rounded px-1 py-0.5 text-center" />
               <span className="text-[9px]">(0={t('training.program.editor.unlimited')})</span>
             </div>
+            <label className="flex items-center gap-1 cursor-pointer select-none" title={t('training.onlyCountMandatoryHint')}>
+              <input type="checkbox" checked={!!ec.only_count_mandatory}
+                onChange={e => updateExamConfig({ only_count_mandatory: e.target.checked })}
+                disabled={!isEditable}
+                className="w-3 h-3 rounded" />
+              <span className="font-medium text-red-500">{t('training.onlyCountMandatory')}</span>
+            </label>
           </div>
         </div>
       )}

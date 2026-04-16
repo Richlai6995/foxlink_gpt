@@ -1673,6 +1673,10 @@ async function runMigrations(db) {
   await addCol('TRAINING_PROGRAMS', 'PROGRAM_PASS_SCORE', "NUMBER DEFAULT 60");
   await addCol('TRAINING_PROGRAMS', 'SEQUENTIAL_LESSONS', "NUMBER(1) DEFAULT 0");
 
+  // Phase 6: course_lessons 新增必修標記 + 章節配分權重（Program 可於 exam_config 覆蓋）
+  await addCol('COURSE_LESSONS', 'IS_MANDATORY', 'NUMBER(1) DEFAULT 1');
+  await addCol('COURSE_LESSONS', 'SCORE_WEIGHT', 'NUMBER DEFAULT 10');
+
   // Phase 5: 投影片瀏覽追蹤
   await createTable('USER_SLIDE_VIEWS', `CREATE TABLE user_slide_views (
     id               NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,

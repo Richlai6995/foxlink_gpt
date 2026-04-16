@@ -29,6 +29,8 @@ interface Lesson {
   title: string
   sort_order: number
   lesson_type: string
+  is_mandatory?: number
+  score_weight?: number
 }
 
 interface Category {
@@ -578,6 +580,52 @@ export default function CourseEditor() {
                     </select>
                   ) : (
                     <span className="text-[10px] rounded px-2 py-1 bg-slate-700">{lesson.lesson_type}</span>
+                  )}
+                  {/* Mandatory toggle + score weight */}
+                  {canEditThis ? (
+                    <label
+                      onClick={e => e.stopPropagation()}
+                      className="flex items-center gap-1 text-[10px] cursor-pointer select-none"
+                      title={t('training.lessonMandatoryHint')}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={(lesson.is_mandatory ?? 1) === 1}
+                        onChange={e => {
+                          const updated = { ...lesson, is_mandatory: e.target.checked ? 1 : 0 }
+                          setLessons(lessons.map(l => l.id === lesson.id ? updated : l))
+                          api.put(`/training/lessons/${lesson.id}`, updated).catch(console.error)
+                        }}
+                        className="w-3 h-3 rounded"
+                      />
+                      <span className={(lesson.is_mandatory ?? 1) === 1 ? 'text-red-400 font-medium' : 'text-slate-400'}>
+                        {t('training.lessonMandatory')}
+                      </span>
+                    </label>
+                  ) : (
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded ${(lesson.is_mandatory ?? 1) === 1 ? 'bg-red-500/15 text-red-400' : 'bg-slate-500/15 text-slate-400'}`}>
+                      {(lesson.is_mandatory ?? 1) === 1 ? t('training.lessonMandatory') : t('training.lessonOptional')}
+                    </span>
+                  )}
+                  {canEditThis ? (
+                    <div onClick={e => e.stopPropagation()} className="flex items-center gap-1 text-[10px] text-slate-400">
+                      <span>{t('training.lessonScore')}</span>
+                      <input
+                        type="number"
+                        min={0}
+                        value={lesson.score_weight ?? 10}
+                        onChange={e => {
+                          const v = Number(e.target.value)
+                          setLessons(lessons.map(l => l.id === lesson.id ? { ...l, score_weight: v } : l))
+                        }}
+                        onBlur={() => {
+                          api.put(`/training/lessons/${lesson.id}`, lesson).catch(console.error)
+                        }}
+                        className="w-12 bg-slate-700 border border-slate-600 rounded px-1 py-0.5 text-center text-[10px]"
+                      />
+                    </div>
+                  ) : (
+                    <span className="text-[10px] text-slate-400">{t('training.lessonScore')} {lesson.score_weight ?? 10}</span>
                   )}
                   {canEditThis && (
                     <button onClick={e => { e.stopPropagation(); deleteLesson(lesson.id) }}
@@ -1236,6 +1284,19 @@ export default function CourseEditor() {
                         {t('training.customWeightsHint')}
                       </div>
                     )}
+
+                    {/* Only count mandatory lessons */}
+                    <label className="flex items-start gap-2 text-[11px] cursor-pointer select-none" style={{ color: 'var(--t-text)' }}>
+                      <input type="checkbox" checked={!!exam.only_count_mandatory}
+                        onChange={e => updateExam({ only_count_mandatory: e.target.checked })}
+                        className="mt-0.5 rounded" />
+                      <span>
+                        <span className="font-medium">{t('training.onlyCountMandatory')}</span>
+                        <span className="block text-[10px] mt-0.5" style={{ color: 'var(--t-text-dim)' }}>
+                          {t('training.onlyCountMandatoryHint')}
+                        </span>
+                      </span>
+                    </label>
                   </div>
                 );
               })()}

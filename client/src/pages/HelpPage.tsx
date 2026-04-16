@@ -6637,7 +6637,18 @@ export default function HelpPage() {
                   {trainingDevSections.map(section => (
                     <div key={section.id} className="relative">
                       {section.linkedCourseId && (
-                        <div className="float-right mt-2 mr-1">
+                        <div className="float-right mt-2 mr-1 flex items-center gap-2">
+                          {section.linkedLessonMandatory != null && (
+                            <span className={`text-[10px] font-medium px-2 py-1 rounded-full border ${
+                              section.linkedLessonMandatory === 1
+                                ? 'bg-red-50 text-red-600 border-red-200'
+                                : 'bg-slate-100 text-slate-500 border-slate-200'
+                            }`}>
+                              {section.linkedLessonMandatory === 1
+                                ? t('training.lessonMandatory')
+                                : t('training.lessonOptional')}
+                            </span>
+                          )}
                           <button
                             onClick={() => setTrainingTarget({ courseId: section.linkedCourseId!, lessonId: section.linkedLessonId })}
                             className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg transition bg-violet-50 text-violet-600 hover:bg-violet-100 border border-violet-200"
@@ -6663,7 +6674,18 @@ export default function HelpPage() {
                   {apiSections.map(section => (
                     <div key={section.id} className="relative">
                       {section.linkedCourseId && (
-                        <div className="float-right mt-2 mr-1">
+                        <div className="float-right mt-2 mr-1 flex items-center gap-2">
+                          {section.linkedLessonMandatory != null && (
+                            <span className={`text-[10px] font-medium px-2 py-1 rounded-full border ${
+                              section.linkedLessonMandatory === 1
+                                ? 'bg-red-50 text-red-600 border-red-200'
+                                : 'bg-slate-100 text-slate-500 border-slate-200'
+                            }`}>
+                              {section.linkedLessonMandatory === 1
+                                ? t('training.lessonMandatory')
+                                : t('training.lessonOptional')}
+                            </span>
+                          )}
                           <button
                             onClick={() => setTrainingTarget({ courseId: section.linkedCourseId!, lessonId: section.linkedLessonId })}
                             className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg transition bg-blue-50 text-blue-600 hover:bg-blue-100 border border-blue-200"

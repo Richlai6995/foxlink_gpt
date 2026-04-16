@@ -920,7 +920,7 @@ router.get('/courses/:id/lessons', loadCoursePermission, async (req, res) => {
 // POST /api/training/courses/:id/lessons
 router.post('/courses/:id/lessons', loadCoursePermission, requirePermission('owner', 'admin', 'develop'), async (req, res) => {
   try {
-    const { title, lesson_type, sort_order } = req.body;
+    const { title, lesson_type, sort_order, is_mandatory, score_weight } = req.body;
     if (!title) return res.status(400).json({ error: 'title required' });
 
     // Auto sort_order: max + 1
@@ -930,12 +930,19 @@ router.post('/courses/:id/lessons', loadCoursePermission, requirePermission('own
       order = (max?.mx || 0) + 1;
     }
 
-    const result = await db.prepare(`
-      INSERT INTO course_lessons (course_id, title, sort_order, lesson_type)
-      VALUES (?, ?, ?, ?)
-    `).run(req.courseId, title, order, lesson_type || 'slides');
+    const mand = is_mandatory === 0 ? 0 : 1;
+    const weight = Number.isFinite(Number(score_weight)) ? Number(score_weight) : 10;
 
-    res.json({ id: result.lastInsertRowid, title, sort_order: order, lesson_type: lesson_type || 'slides' });
+    const result = await db.prepare(`
+      INSERT INTO course_lessons (course_id, title, sort_order, lesson_type, is_mandatory, score_weight)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(req.courseId, title, order, lesson_type || 'slides', mand, weight);
+
+    res.json({
+      id: result.lastInsertRowid, title, sort_order: order,
+      lesson_type: lesson_type || 'slides',
+      is_mandatory: mand, score_weight: weight
+    });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -944,17 +951,20 @@ router.post('/courses/:id/lessons', loadCoursePermission, requirePermission('own
 // PUT /api/training/lessons/:lid
 router.put('/lessons/:lid', async (req, res) => {
   try {
-    const lesson = await db.prepare('SELECT course_id FROM course_lessons WHERE id=?').get(req.params.lid);
+    const lesson = await db.prepare('SELECT course_id, is_mandatory, score_weight FROM course_lessons WHERE id=?').get(req.params.lid);
     if (!lesson) return res.status(404).json({ error: '章節不存在' });
 
     const perm = await canUserAccessCourse(lesson.course_id, req.user);
     if (!perm.access || !['owner', 'admin', 'develop'].includes(perm.permission))
       return res.status(403).json({ error: '權限不足' });
 
-    const { title, lesson_type, sort_order } = req.body;
+    const { title, lesson_type, sort_order, is_mandatory, score_weight } = req.body;
+    const mand = is_mandatory === undefined ? (lesson.is_mandatory ?? 1) : (is_mandatory ? 1 : 0);
+    const weight = score_weight === undefined ? (lesson.score_weight ?? 10)
+      : (Number.isFinite(Number(score_weight)) ? Number(score_weight) : (lesson.score_weight ?? 10));
     await db.prepare(
-      'UPDATE course_lessons SET title=?, lesson_type=?, sort_order=?, updated_at=SYSTIMESTAMP WHERE id=?'
-    ).run(title, lesson_type, sort_order, req.params.lid);
+      'UPDATE course_lessons SET title=?, lesson_type=?, sort_order=?, is_mandatory=?, score_weight=?, updated_at=SYSTIMESTAMP WHERE id=?'
+    ).run(title, lesson_type, sort_order, mand, weight, req.params.lid);
     res.json({ ok: true });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -2853,10 +2863,11 @@ router.get('/classroom/programs/:id/my-scores', async (req, res) => {
     const program = await db.prepare('SELECT program_pass_score FROM training_programs WHERE id=?').get(progId);
     if (!program) return res.status(404).json({ error: '專案不存在' });
 
-    // Get program courses with exam_config
+    // Get program courses with exam_config (+ course settings_json for fallback defaults)
     const coursesRaw = await db.prepare(`
       SELECT pc.id AS pc_id, pc.course_id, pc.lesson_ids, pc.exam_config, pc.is_required,
-             c.title AS course_title, c.pass_score AS course_pass_score
+             c.title AS course_title, c.pass_score AS course_pass_score,
+             c.settings_json AS course_settings_json
       FROM program_courses pc
       JOIN courses c ON c.id = pc.course_id
       WHERE pc.program_id = ? ORDER BY pc.sort_order
@@ -2869,12 +2880,21 @@ router.get('/classroom/programs/:id/my-scores', async (req, res) => {
     for (const pc of coursesRaw) {
       const lessonIds = pc.lesson_ids ? JSON.parse(pc.lesson_ids) : null;
       const examConfig = pc.exam_config ? JSON.parse(pc.exam_config) : {};
+      // Fallback: if program's exam_config.only_count_mandatory is unset, inherit from course
+      if (examConfig.only_count_mandatory === undefined && pc.course_settings_json) {
+        try {
+          const cs = typeof pc.course_settings_json === 'string' ? JSON.parse(pc.course_settings_json) : pc.course_settings_json;
+          if (cs?.exam?.only_count_mandatory !== undefined) {
+            examConfig.only_count_mandatory = !!cs.exam.only_count_mandatory;
+          }
+        } catch {}
+      }
       const courseTotalScore = examConfig.total_score || 100;
       const coursePassScore = examConfig.pass_score || pc.course_pass_score || 60;
       const maxAttempts = examConfig.max_attempts || 0;
 
-      // Get lessons for this course (filtered by lesson_ids)
-      let lessons = await db.prepare('SELECT id, title FROM course_lessons WHERE course_id=? ORDER BY sort_order, id').all(pc.course_id);
+      // Get lessons for this course (filtered by lesson_ids), include mandatory + default weight
+      let lessons = await db.prepare('SELECT id, title, is_mandatory, score_weight FROM course_lessons WHERE course_id=? ORDER BY sort_order, id').all(pc.course_id);
       if (lessonIds && lessonIds.length > 0) {
         lessons = lessons.filter(l => lessonIds.includes(l.id));
       }
@@ -2882,8 +2902,10 @@ router.get('/classroom/programs/:id/my-scores', async (req, res) => {
       // Get total slides per lesson + check if lesson has interactive blocks
       const lessonProgress = [];
       let totalSlides = 0, viewedSlides = 0;
-      let browseOnlyScore = 0; // score from non-interactive lessons (browse completion)
+      let browseOnlyScore = 0; // score from non-interactive lessons (browse completion), using effective weights
       const lessonWeights = examConfig.lesson_weights || {};
+      const lessonMandatoryOverride = examConfig.lesson_mandatory || {};
+      const onlyCountMandatory = !!examConfig.only_count_mandatory;
 
       for (const lesson of lessons) {
         const slideCount = await db.prepare('SELECT COUNT(*) AS cnt FROM course_slides WHERE lesson_id=?').get(lesson.id);
@@ -2908,17 +2930,29 @@ router.get('/classroom/programs/:id/my-scores', async (req, res) => {
         `).get(lesson.id);
         const hasInteractive = (interactiveCount?.cnt || 0) > 0;
 
-        // For non-interactive lessons: score = browse completion × lesson weight
-        const lessonWeight = lessonWeights[`lesson_${lesson.id}`] || 0;
+        // Effective mandatory: program override → course default (1=mandatory)
+        const ovMand = lessonMandatoryOverride[`lesson_${lesson.id}`];
+        const mandatory = (ovMand === 0 || ovMand === 1) ? ovMand === 1 : (lesson.is_mandatory ?? 1) === 1;
+
+        // Effective weight: program override → course default (SCORE_WEIGHT)
+        const baseWeight = lessonWeights[`lesson_${lesson.id}`] != null
+          ? Number(lessonWeights[`lesson_${lesson.id}`])
+          : (lesson.score_weight ?? 0);
+        const effectiveWeight = (onlyCountMandatory && !mandatory) ? 0 : baseWeight;
+
+        // For non-interactive lessons: score = browse completion × effective weight
         let lessonBrowseScore = 0;
-        if (!hasInteractive && lessonWeight > 0 && total > 0) {
-          lessonBrowseScore = Math.round((done / total) * lessonWeight);
+        if (!hasInteractive && effectiveWeight > 0 && total > 0) {
+          lessonBrowseScore = Math.round((done / total) * effectiveWeight);
           browseOnlyScore += lessonBrowseScore;
         }
 
         lessonProgress.push({
           lesson_id: lesson.id, title: lesson.title, total, viewed: done,
-          has_interactive: hasInteractive, browse_score: lessonBrowseScore, lesson_weight: lessonWeight
+          has_interactive: hasInteractive, browse_score: lessonBrowseScore,
+          lesson_weight: effectiveWeight, base_weight: baseWeight,
+          is_mandatory: mandatory ? 1 : 0,
+          not_counted: onlyCountMandatory && !mandatory
         });
       }
 
@@ -2977,20 +3011,25 @@ router.get('/classroom/programs/:id/my-scores', async (req, res) => {
       const bestMax = bestSession?.session_max || 100;
       const examRatio = bestMax > 0 ? bestScore / bestMax : 0;
 
-      // Calculate interactive lessons' weighted score
+      // Calculate interactive lessons' weighted score (using effective weights)
       const interactiveLessonsWeight = lessonProgress
         .filter(l => l.has_interactive)
         .reduce((s, l) => s + l.lesson_weight, 0);
-      const interactiveWeightedScore = interactiveLessonsWeight > 0
-        ? Math.round(examRatio * interactiveLessonsWeight)
-        : Math.round(examRatio * courseTotalScore);
 
-      // Total = browse-only score + interactive score
-      // If no lesson_weights configured, fall back to exam-only scoring
-      const hasLessonWeights = Object.keys(lessonWeights).length > 0;
-      const weightedScore = hasLessonWeights
-        ? browseOnlyScore + interactiveWeightedScore
-        : Math.round(examRatio * courseTotalScore);
+      // Sum of all included effective weights (used to normalize)
+      const totalEffectiveWeight = lessonProgress.reduce((s, l) => s + l.lesson_weight, 0);
+
+      let weightedScore;
+      if (totalEffectiveWeight > 0) {
+        // Normalize: earned / weightSum × courseTotalScore
+        // (rescales proportions to the configured total score, handles only_count_mandatory)
+        const interactiveEarned = examRatio * interactiveLessonsWeight;
+        const earnedTotal = browseOnlyScore + interactiveEarned;
+        weightedScore = Math.round((earnedTotal / totalEffectiveWeight) * courseTotalScore);
+      } else {
+        // Fallback: no configured weights → use exam ratio directly
+        weightedScore = Math.round(examRatio * courseTotalScore);
+      }
 
       const courseScorePct = courseTotalScore > 0 ? (weightedScore / courseTotalScore) * 100 : 0;
       const coursePassed = courseScorePct >= coursePassScore;
@@ -3005,6 +3044,7 @@ router.get('/classroom/programs/:id/my-scores', async (req, res) => {
         total_score: courseTotalScore,
         pass_score: coursePassScore,
         max_attempts: maxAttempts,
+        only_count_mandatory: onlyCountMandatory,
         browse_progress: { total: totalSlides, viewed: viewedSlides, pct: totalSlides > 0 ? Math.round(viewedSlides / totalSlides * 100) : 0, lessons: lessonProgress },
         browse_only_score: browseOnlyScore,
         exam: {

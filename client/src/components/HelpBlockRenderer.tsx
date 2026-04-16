@@ -98,6 +98,7 @@ export interface HelpSectionData {
   translatedAt?: string
   linkedCourseId?: number | null
   linkedLessonId?: number | null
+  linkedLessonMandatory?: number | null
 }
 
 // ── Inline text renderer (handles **bold** and `code`) ───────────────────────
