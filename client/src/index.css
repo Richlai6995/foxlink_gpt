@@ -292,6 +292,25 @@ html[data-theme] [data-region="sidebar"] .hover\:bg-slate-800:hover {
   background-color: var(--t-bg-card-hover) !important;
 }
 
+/* Dark-dimmed sidebar 文字提亮 — 原本 text-slate-400/500/600 在暖灰底下太暗
+   （主區用 --t-text-dim 夠用，但 sidebar 的對比不夠）
+   特異性 [0,3,1] 高於 main 區的 text override [0,2,1]，在 sidebar 區內會贏 */
+html[data-theme="dark-dimmed"] [data-region="sidebar"] .text-slate-400,
+html[data-theme="dark-dimmed"] [data-region="sidebar"] .text-slate-300,
+html[data-theme="dark-dimmed"] [data-region="sidebar"] .text-slate-200 {
+  color: var(--t-text) !important;        /* 主要按鈕 / 項目文字 → 近白 */
+}
+html[data-theme="dark-dimmed"] [data-region="sidebar"] .text-slate-500,
+html[data-theme="dark-dimmed"] [data-region="sidebar"] .text-slate-600 {
+  color: var(--t-text-secondary) !important;  /* 分組 label / employee_id → 亮灰 */
+}
+/* Sidebar hover text — 保持同級或更亮 */
+html[data-theme="dark-dimmed"] [data-region="sidebar"] .hover\:text-slate-200:hover,
+html[data-theme="dark-dimmed"] [data-region="sidebar"] .hover\:text-slate-300:hover,
+html[data-theme="dark-dimmed"] [data-region="sidebar"] .hover\:text-white:hover {
+  color: #ffffff !important;
+}
+
 /* ─── dark-dimmed 專屬：把原本用白底的頁面全面 flip 成深色 ─────────────
    Admin / Help / Chat 輸入區等 UI 原本設計為 light，dark-dimmed 時要全暗
    涵蓋 slate / gray / neutral / zinc / stone 五個 scale */
