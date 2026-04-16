@@ -1,4 +1,27 @@
 {
+  "theme": {
+    "title": "Giao diện",
+    "dark": {
+      "label": "Tối",
+      "desc": "Nền tối (mặc định)"
+    },
+    "darkDimmed": {
+      "label": "Tối dịu",
+      "desc": "Chính navy đậm, thanh bên xám dịu"
+    },
+    "lightBlue": {
+      "label": "Xanh dương",
+      "desc": "Nền trắng pha xanh dương"
+    },
+    "lightGreen": {
+      "label": "Xanh lá",
+      "desc": "Nền trắng pha xanh lá"
+    },
+    "lightYellow": {
+      "label": "Vàng",
+      "desc": "Nền trắng pha vàng"
+    }
+  },
   "common": {
     "cancel": "Hủy",
     "close": "Đóng",
@@ -133,6 +156,7 @@
     "updateFailed": "Cập nhật thất bại",
     "confirmChange": "Xác nhận thay đổi",
     "updating": "Đang cập nhật...",
+    "theme": "Đổi giao diện",
     "impersonate": "Đăng nhập mô phỏng",
     "impersonateTitle": "Đăng nhập mô phỏng người dùng",
     "impersonateDesc": "Chọn một người dùng để đăng nhập dưới danh nghĩa họ nhằm gỡ lỗi. Mọi thao tác đều được ghi vào nhật ký kiểm toán.",

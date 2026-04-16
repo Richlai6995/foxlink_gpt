@@ -500,7 +500,7 @@ export default function AiDashboardPage() {
   return (
     <div className="h-screen bg-gray-50 flex">
       {/* 左側欄 — 主題/任務 */}
-      <div className="w-64 bg-white border-r border-gray-200 flex flex-col flex-shrink-0">
+      <div data-region="sidebar" className="w-64 bg-white border-r border-gray-200 flex flex-col flex-shrink-0">
         <div className="p-4 border-b border-gray-200 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <BarChart3 size={16} className="text-orange-400" />

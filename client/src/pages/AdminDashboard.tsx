@@ -100,7 +100,7 @@ export default function AdminDashboard() {
 
       <div className="flex h-[calc(100vh-52px)]">
         {/* Sidebar */}
-        <nav className="w-56 bg-white border-r border-slate-200 py-4 overflow-y-auto">
+        <nav data-region="sidebar" className="w-56 bg-white border-r border-slate-200 py-4 overflow-y-auto">
           {tabs.map((t) => (
             <button
               key={t.id}

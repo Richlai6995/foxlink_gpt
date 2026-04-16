@@ -5,7 +5,6 @@ import { useTranslation } from 'react-i18next'
 import api from '../../lib/api'
 import { Plus, Search, ArrowLeft, FolderTree, BookOpen, Clock, CheckCircle2, ChevronRight, Filter, Settings, Trash2, Upload } from 'lucide-react'
 import CategoryManager from './CategoryManager'
-import ThemePicker from './ThemePicker'
 
 interface Course {
   id: number
@@ -180,15 +179,13 @@ export default function CourseList({ editorMode = false }: { editorMode?: boolea
               {t('training.dev.coursesTab')}
             </button>
           )}
-
-          <ThemePicker />
         </div>
       </div>
 
       <div className="max-w-7xl mx-auto px-4 py-6 flex gap-6">
         {/* Category Sidebar */}
         {(categories.length > 0 || canEdit) && (
-          <div className="w-48 shrink-0">
+          <div data-region="sidebar" className="w-48 shrink-0">
             <div className="sticky top-16">
               <h3 className="text-xs font-semibold uppercase mb-2 flex items-center gap-1.5" style={{ color: 'var(--t-text-muted)' }}>
                 <FolderTree size={12} /> {t('training.category')}

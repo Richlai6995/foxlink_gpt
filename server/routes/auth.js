@@ -742,6 +742,26 @@ router.put('/language', async (req, res, next) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// PUT /api/auth/theme — self-service UI theme update
+const VALID_THEMES = ['dark', 'dark-dimmed', 'light-blue', 'light-green', 'light-yellow'];
+router.put('/theme', async (req, res, next) => {
+  const token = req.headers.authorization?.split(' ')[1];
+  const session = token ? await redis.getSession(token) : null;
+  if (!session) return res.status(401).json({ error: 'Unauthorized' });
+  req.user = session;
+  next();
+}, async (req, res) => {
+  const { theme } = req.body;
+  if (!VALID_THEMES.includes(theme)) {
+    return res.status(400).json({ error: `不支援的主題，可用: ${VALID_THEMES.join(', ')}` });
+  }
+  try {
+    const db = require('../database-oracle').db;
+    await db.prepare('UPDATE users SET theme=? WHERE id=?').run(theme, req.user.id);
+    res.json({ ok: true, theme });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // POST /api/auth/activity — 前端定期上報目前所在頁面，存入 session
 router.post('/activity', async (req, res) => {
   const token = req.headers.authorization?.split(' ')[1];

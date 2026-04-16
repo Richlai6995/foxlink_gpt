@@ -6593,7 +6593,7 @@ export default function HelpPage() {
 
       <div className="flex flex-1 overflow-hidden">
         {/* Left TOC */}
-        <nav className="w-56 bg-white border-r border-slate-200 overflow-y-auto flex-shrink-0 py-4 px-3">
+        <nav data-region="sidebar" className="w-56 bg-white border-r border-slate-200 overflow-y-auto flex-shrink-0 py-4 px-3">
           <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider px-2 mb-3">{t('help.toc')}</p>
           <div className="space-y-0.5">
             {sidebarItems.map((s) => (

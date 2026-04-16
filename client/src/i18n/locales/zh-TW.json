@@ -1,4 +1,27 @@
 {
+  "theme": {
+    "title": "主題風格",
+    "dark": {
+      "label": "深色",
+      "desc": "深色底（預設）"
+    },
+    "darkDimmed": {
+      "label": "深色（護眼）",
+      "desc": "主深 navy，側邊柔和深灰"
+    },
+    "lightBlue": {
+      "label": "藍色調",
+      "desc": "白底藍色調"
+    },
+    "lightGreen": {
+      "label": "綠色調",
+      "desc": "白底綠色調"
+    },
+    "lightYellow": {
+      "label": "黃色調",
+      "desc": "白底黃色調"
+    }
+  },
   "common": {
     "cancel": "取消",
     "close": "關閉",
@@ -133,6 +156,7 @@
     "updateFailed": "更新失敗",
     "confirmChange": "確認變更",
     "updating": "更新中...",
+    "theme": "切換主題",
     "impersonate": "模擬登入",
     "impersonateTitle": "模擬使用者登入",
     "impersonateDesc": "選擇一位使用者，以其身分登入系統進行測試。所有操作會被記錄在稽核日誌。",

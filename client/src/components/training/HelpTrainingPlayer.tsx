@@ -3,7 +3,6 @@ import { useTranslation } from 'react-i18next'
 import api from '../../lib/api'
 import { X, Maximize2, Minimize2, Play, BarChart3, ChevronDown, ChevronRight } from 'lucide-react'
 import { CoursePlayerInner } from './CoursePlayer'
-import type { TrainingTheme } from './TrainingThemeContext'
 
 interface Props {
   courseId: number
@@ -40,7 +39,6 @@ export default function HelpTrainingPlayer({ courseId, lessonId, onClose }: Prop
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70" onClick={onClose}>
         <div
-          data-training-theme={(localStorage.getItem('foxlink-training-theme') || 'dark') as TrainingTheme}
           className={`${sizeStyles[sizeMode]} flex flex-col rounded-xl overflow-hidden shadow-2xl transition-all duration-300`}
           style={{ backgroundColor: 'var(--t-bg)', color: 'var(--t-text)', border: sizeMode === 'fullscreen' ? 'none' : '1px solid var(--t-border)' }}
           onClick={e => e.stopPropagation()}

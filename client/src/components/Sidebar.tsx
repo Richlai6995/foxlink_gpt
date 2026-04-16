@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { Plus, MessageSquare, Trash2, Pencil, Check, ChevronDown, LogOut, Settings, Cpu, Zap, CalendarClock, HelpCircle, KeyRound, X, Eye, EyeOff, GitFork, Sparkles, Database, Menu, ChevronUp, BarChart3, Globe, FileText, GraduationCap, BookOpen, TicketCheck, PanelLeftClose, PanelLeft, SquarePen, UserCog } from 'lucide-react'
 import ImpersonateDialog from './ImpersonateDialog'
+import ThemePicker from './ThemePicker'
 import type { ChatSession, ModelType, LlmModel } from '../types'
 import { useAuth } from '../context/AuthContext'
 import { useNavigate } from 'react-router-dom'
@@ -210,7 +211,7 @@ export default function Sidebar({
   // ─── Collapsed icon rail ───
   if (collapsed) {
     return (
-      <div className="fixed inset-y-0 left-0 w-16 bg-slate-900 flex flex-col items-center border-r border-slate-800 z-30 py-3 gap-1 transition-all duration-300">
+      <div data-region="sidebar" className="fixed inset-y-0 left-0 w-16 bg-slate-900 flex flex-col items-center border-r border-slate-800 z-30 py-3 gap-1 transition-all duration-300">
         {/* Toggle open */}
         <button
           onClick={onToggleCollapse}
@@ -263,7 +264,7 @@ export default function Sidebar({
 
   // ─── Expanded sidebar ───
   return (
-    <div className="fixed inset-y-0 left-0 w-72 bg-slate-900 flex flex-col border-r border-slate-800 z-30 transition-all duration-300">
+    <div data-region="sidebar" className="fixed inset-y-0 left-0 w-72 bg-slate-900 flex flex-col border-r border-slate-800 z-30 transition-all duration-300">
       {/* Header */}
       <div className="p-4 border-b border-slate-800">
         <div className="flex items-center gap-2 mb-4">
@@ -555,6 +556,7 @@ export default function Sidebar({
             </div>
           </div>
           <div className="flex items-center gap-1">
+            <ThemePicker title={t('sidebar.theme', '切換主題')} />
             {isAdmin && !impersonation && (
               <button
                 onClick={() => setShowImpersonate(true)}

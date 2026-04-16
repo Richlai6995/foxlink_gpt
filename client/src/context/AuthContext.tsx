@@ -4,6 +4,21 @@ import api from '../lib/api'
 import i18n from '../i18n'
 import type { LangCode } from '../i18n'
 import { clearAdminOverrideStorage } from './AdminOverrideContext'
+import { useTheme, DEFAULT_THEME } from './ThemeContext'
+import type { UITheme } from './ThemeContext'
+
+const VALID_THEMES: UITheme[] = ['dark', 'dark-dimmed', 'light-blue', 'light-green', 'light-yellow']
+function applyUserTheme(u: any, setTheme: (t: UITheme) => void) {
+  const t = u?.theme
+  if (t && VALID_THEMES.includes(t)) {
+    // 只有當 localStorage 沒設或跟 server 不同時才套用 — 避免覆蓋使用者剛在本地改的值
+    const local = localStorage.getItem('foxlink-theme') as UITheme | null
+    if (!local || local !== t) setTheme(t)
+  } else if (!localStorage.getItem('foxlink-theme')) {
+    // 伺服器沒值且本地也沒值 → 保持預設
+    setTheme(DEFAULT_THEME)
+  }
+}
 
 export interface ImpersonationStatus {
   impersonating: true
@@ -46,6 +61,7 @@ function applyLanguage(u: any) {
 }
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { setTheme } = useTheme()
   const [user, setUser] = useState<User | null>(() => {
     const saved = localStorage.getItem('user')
     return saved ? JSON.parse(saved) : null
@@ -67,6 +83,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       localStorage.setItem('user', JSON.stringify(u))
       setUser(u)
       applyLanguage(u)
+      applyUserTheme(u, setTheme)
     }).catch((e) => {
       if (e.response?.status === 401) {
         localStorage.removeItem('token')
@@ -113,6 +130,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       localStorage.setItem('preferred_language', currentLang)
     }
     applyLanguage(u)
+    applyUserTheme(u, setTheme)
     // Sync login page language choice to server profile
     const localPref = localStorage.getItem('preferred_language')
     if (localPref && localPref !== (u?.resolved_language || u?.preferred_language)) {
@@ -132,6 +150,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       localStorage.setItem('preferred_language', currentLang)
     }
     applyLanguage(u)
+    applyUserTheme(u, setTheme)
     const localPref = localStorage.getItem('preferred_language')
     if (localPref && localPref !== (u?.resolved_language || u?.preferred_language)) {
       api.put('/auth/language', { language_code: localPref }).catch(() => {})

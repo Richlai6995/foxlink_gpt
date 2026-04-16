@@ -13,6 +13,7 @@ export interface User {
   status: UserStatus
   start_date?: string
   end_date?: string
+  theme?: 'dark' | 'dark-dimmed' | 'light-blue' | 'light-green' | 'light-yellow'
 }
 
 export interface AuthState {

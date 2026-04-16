@@ -8,6 +8,35 @@
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Cortex</title>
+    <script>
+      // Apply theme synchronously before first paint to avoid FOUC
+      (function() {
+        try {
+          var valid = ['dark','dark-dimmed','light-blue','light-green','light-yellow'];
+          var t = localStorage.getItem('foxlink-theme');
+          if (!valid.includes(t)) {
+            // Migrate legacy training-only key
+            var legacy = localStorage.getItem('foxlink-training-theme');
+            if (valid.includes(legacy)) {
+              t = legacy;
+              localStorage.setItem('foxlink-theme', t);
+            } else {
+              // Fallback: read from cached user
+              var u = localStorage.getItem('user');
+              if (u) {
+                try {
+                  var parsed = JSON.parse(u);
+                  if (valid.includes(parsed && parsed.theme)) t = parsed.theme;
+                } catch(_) {}
+              }
+            }
+          }
+          document.documentElement.setAttribute('data-theme', valid.includes(t) ? t : 'dark');
+        } catch(_) {
+          document.documentElement.setAttribute('data-theme', 'dark');
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

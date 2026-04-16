@@ -145,7 +145,7 @@ function MessageBubble({
               ))}
             </div>
           )}
-          <div className="bg-blue-600 text-white px-4 py-3 rounded-2xl rounded-tr-sm text-sm leading-relaxed whitespace-pre-wrap break-words min-w-0 w-full">
+          <div data-chat-bubble="user" className="bg-blue-600 text-white px-4 py-3 rounded-2xl rounded-tr-sm text-sm leading-relaxed whitespace-pre-wrap break-words min-w-0 w-full">
             {msg.content ?? ''}
           </div>
           {hover && (
@@ -176,7 +176,7 @@ function MessageBubble({
         <Cpu size={14} className="text-white" />
       </div>
       <div className="flex-1 max-w-[85%]">
-        <div className="bg-white border border-slate-200 rounded-2xl rounded-tl-sm px-5 py-4 shadow-sm overflow-hidden break-words">
+        <div data-chat-bubble="assistant" className="bg-white border border-slate-200 rounded-2xl rounded-tl-sm px-5 py-4 shadow-sm overflow-hidden break-words">
           {(msg.content ?? '').startsWith('__RESEARCH_JOB__:')
             ? <ResearchProgressCard jobId={(msg.content ?? '').slice('__RESEARCH_JOB__:'.length)} />
             : <><MarkdownRenderer content={msg.content ?? ''} /><GeneratedFileLinks files={msg.generated_files || []} /></>
@@ -228,7 +228,7 @@ function StreamingBubble({ content, status }: { content: string; status?: string
         <Cpu size={14} className="text-white animate-pulse" />
       </div>
       <div className="flex-1 max-w-[85%]">
-        <div className="bg-white border border-blue-200 rounded-2xl rounded-tl-sm px-5 py-4 shadow-sm overflow-hidden break-words">
+        <div data-chat-bubble="assistant" className="bg-white border border-blue-200 rounded-2xl rounded-tl-sm px-5 py-4 shadow-sm overflow-hidden break-words">
           {content ? (
             <MarkdownRenderer content={content} />
           ) : (
@@ -309,7 +309,7 @@ export default function ChatWindow({ messages, streaming, streamingContent, stre
   const lastUserIdx = messages.map((m) => m.role).lastIndexOf('user')
 
   return (
-    <div className="flex-1 min-w-0 overflow-y-auto overflow-x-hidden bg-slate-50 pl-4 pr-4 py-6">
+    <div data-region="chat" className="flex-1 min-w-0 overflow-y-auto overflow-x-hidden bg-slate-50 pl-4 pr-4 py-6">
       <div className="max-w-3xl mx-auto space-y-6">
         {messages.map((msg, i) => (
           <div key={msg.id} ref={i === lastUserIdx ? lastUserMsgRef : undefined}>

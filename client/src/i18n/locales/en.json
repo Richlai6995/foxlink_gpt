@@ -1,4 +1,27 @@
 {
+  "theme": {
+    "title": "Theme",
+    "dark": {
+      "label": "Dark",
+      "desc": "Dark background (default)"
+    },
+    "darkDimmed": {
+      "label": "Dark Dimmed",
+      "desc": "Deep navy main, soft gray sidebar"
+    },
+    "lightBlue": {
+      "label": "Light Blue",
+      "desc": "White base with blue tint"
+    },
+    "lightGreen": {
+      "label": "Light Green",
+      "desc": "White base with green tint"
+    },
+    "lightYellow": {
+      "label": "Light Yellow",
+      "desc": "White base with yellow tint"
+    }
+  },
   "common": {
     "cancel": "Cancel",
     "close": "Close",
@@ -133,6 +156,7 @@
     "updateFailed": "Update failed",
     "confirmChange": "Confirm Change",
     "updating": "Updating...",
+    "theme": "Switch theme",
     "impersonate": "Impersonate User",
     "impersonateTitle": "Impersonate a User",
     "impersonateDesc": "Pick a user to sign in as, for debugging. All actions are recorded in the audit log.",

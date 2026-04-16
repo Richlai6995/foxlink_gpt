@@ -66,14 +66,22 @@ body,
 .prose-chat hr { @apply my-4 border-slate-200; }
 .prose-chat strong { @apply font-semibold; }
 
-/* ═══ Training Platform Theme System ═══ */
-[data-training-theme="dark"] {
+/* ═══ Global UI Theme System ═══
+   四種主題：dark（預設，等同目前配色）/ light-blue / light-green / light-yellow
+   CSS variables 定義於 <html data-theme="xxx">
+   Light 主題用 [data-theme^="light-"] 一次覆蓋所有 dark Tailwind class */
+
+html[data-theme="dark"] {
   --t-bg: #0f172a;
   --t-bg-elevated: #1e293b;
   --t-bg-card: #1e293b;
   --t-bg-card-hover: #334155;
   --t-bg-input: #1e293b;
   --t-bg-inset: #0f172a;
+  --t-sidebar-bg: #0f172a;        /* 與主區同色（行為不變）*/
+  --t-sidebar-border: #1e293b;
+  --t-chat-bubble-assistant: #1e293b;
+  --t-chat-bubble-user: #0284c7;
   --t-border: #334155;
   --t-border-subtle: rgba(51,65,85,0.5);
   --t-text: #f1f5f9;
@@ -95,13 +103,53 @@ body,
   --t-status-published-bg: rgba(34,197,94,0.2);
   --t-status-published-text: #4ade80;
 }
-[data-training-theme="light-blue"] {
+
+html[data-theme="dark-dimmed"] {
+  /* 三層底色（拉大對比讓卡片明顯浮出）*/
+  --t-bg: #07090d;            /* L0：最深（頁面底、chat 主區）*/
+  --t-bg-card: #2a313d;       /* L1：卡片、列表項目（拉亮，明顯浮出）*/
+  --t-bg-card-hover: #343c4a; /* L2：hover / 選中 */
+  --t-bg-elevated: #2a313d;
+  --t-bg-input: #1a2620;      /* 輸入框：深底微綠（護眼，降對比）*/
+  --t-bg-inset: #07090d;      /* 嵌套 section 回到底色 */
+  /* 側區：暖調深灰（護眼、降對比）*/
+  --t-sidebar-bg: #1c1e24;
+  --t-sidebar-border: #2a2d35;
+  --t-chat-bubble-assistant: #2a313d;
+  --t-chat-bubble-user: #1f6feb;
+  --t-border: #4a525e;        /* 邊框更亮，卡片邊界明顯 */
+  --t-border-subtle: rgba(74,82,94,0.6);
+  --t-input-focus: #56d364;   /* Input focus 綠色高亮 */
+  --t-text: #c9d1d9;
+  --t-text-secondary: #b1bac4;
+  --t-text-muted: #8b949e;
+  --t-text-dim: #6e7681;
+  --t-accent: #58a6ff;
+  --t-accent-bg: #1f6feb;
+  --t-accent-bg-hover: #388bfd;
+  --t-accent-subtle: rgba(56,139,253,0.12);
+  --t-success: #56d364;
+  --t-danger: #ff7b72;
+  --t-warning: #e3b341;
+  --t-shadow: 0 1px 3px rgba(0,0,0,0.35);
+  --t-gradient-cover: linear-gradient(135deg, rgba(22,27,34,0.5) 0%, #1c1e24 100%);
+  --t-scrollbar: #3d434c;
+  --t-status-draft-bg: rgba(227,179,65,0.18);
+  --t-status-draft-text: #e3b341;
+  --t-status-published-bg: rgba(86,211,100,0.18);
+  --t-status-published-text: #56d364;
+}
+html[data-theme="light-blue"] {
   --t-bg: #eff6ff;
   --t-bg-elevated: #ffffff;
   --t-bg-card: #ffffff;
   --t-bg-card-hover: #dbeafe;
-  --t-bg-input: #ffffff;
+  --t-bg-input: #f5f9ff;        /* 極淡藍 tint，降低純白與彩底的對比 */
   --t-bg-inset: #f0f7ff;
+  --t-sidebar-bg: #ffffff;
+  --t-sidebar-border: #bfdbfe;
+  --t-chat-bubble-assistant: #ffffff;
+  --t-chat-bubble-user: #2563eb;
   --t-border: #bfdbfe;
   --t-border-subtle: rgba(191,219,254,0.6);
   --t-text: #1e293b;
@@ -123,13 +171,17 @@ body,
   --t-status-published-bg: rgba(34,197,94,0.15);
   --t-status-published-text: #15803d;
 }
-[data-training-theme="light-green"] {
+html[data-theme="light-green"] {
   --t-bg: #ecfdf5;
   --t-bg-elevated: #ffffff;
   --t-bg-card: #ffffff;
   --t-bg-card-hover: #d1fae5;
-  --t-bg-input: #ffffff;
+  --t-bg-input: #f5fdf8;        /* 極淡綠 tint */
   --t-bg-inset: #f0fdf9;
+  --t-sidebar-bg: #ffffff;
+  --t-sidebar-border: #a7f3d0;
+  --t-chat-bubble-assistant: #ffffff;
+  --t-chat-bubble-user: #059669;
   --t-border: #a7f3d0;
   --t-border-subtle: rgba(167,243,208,0.6);
   --t-text: #1e293b;
@@ -151,8 +203,40 @@ body,
   --t-status-published-bg: rgba(34,197,94,0.15);
   --t-status-published-text: #15803d;
 }
+html[data-theme="light-yellow"] {
+  --t-bg: #fffbeb;
+  --t-bg-elevated: #ffffff;
+  --t-bg-card: #ffffff;
+  --t-bg-card-hover: #fef3c7;
+  --t-bg-input: #fffdf0;        /* 極淡奶黃 tint */
+  --t-bg-inset: #fefce8;
+  --t-sidebar-bg: #ffffff;
+  --t-sidebar-border: #fde68a;
+  --t-chat-bubble-assistant: #ffffff;
+  --t-chat-bubble-user: #d97706;
+  --t-border: #fde68a;
+  --t-border-subtle: rgba(253,230,138,0.6);
+  --t-text: #1e293b;
+  --t-text-secondary: #334155;
+  --t-text-muted: #475569;
+  --t-text-dim: #64748b;
+  --t-accent: #d97706;
+  --t-accent-bg: #d97706;
+  --t-accent-bg-hover: #b45309;
+  --t-accent-subtle: rgba(217,119,6,0.08);
+  --t-success: #16a34a;
+  --t-danger: #dc2626;
+  --t-warning: #ca8a04;
+  --t-shadow: 0 1px 3px rgba(0,0,0,0.08);
+  --t-gradient-cover: linear-gradient(135deg, rgba(253,230,138,0.6) 0%, #ffffff 100%);
+  --t-scrollbar: #fcd34d;
+  --t-status-draft-bg: rgba(234,179,8,0.15);
+  --t-status-draft-text: #a16207;
+  --t-status-published-bg: rgba(34,197,94,0.15);
+  --t-status-published-text: #15803d;
+}
 
-/* Training theme utility classes */
+/* Utility classes (read CSS variables) */
 .t-bg { background-color: var(--t-bg); }
 .t-bg-elevated { background-color: var(--t-bg-elevated); }
 .t-bg-card { background-color: var(--t-bg-card); }
@@ -169,91 +253,788 @@ body,
 .t-accent-bg:hover { background-color: var(--t-accent-bg-hover); }
 .t-shadow { box-shadow: var(--t-shadow); }
 
-[data-training-theme] ::-webkit-scrollbar-thumb {
+html[data-theme] ::-webkit-scrollbar-thumb {
   background: var(--t-scrollbar);
 }
 
-/* Override common Tailwind classes inside training theme scope
-   This avoids having to rewrite every component with inline styles */
-[data-training-theme="light-blue"] .bg-slate-800,
-[data-training-theme="light-green"] .bg-slate-800 {
-  background-color: var(--t-bg-card) !important;
+/* 確保全局頁面底跟著主題（某些頁面沒包 bg 類，讓 body 掛著主題底）*/
+html[data-theme="dark-dimmed"] body,
+html[data-theme="dark-dimmed"] #root {
+  background-color: var(--t-bg);
+  color: var(--t-text);
 }
-[data-training-theme="light-blue"] .bg-slate-850,
-[data-training-theme="light-green"] .bg-slate-850,
-[data-training-theme="light-blue"] .bg-slate-900,
-[data-training-theme="light-green"] .bg-slate-900 {
+html[data-theme^="light-"] body,
+html[data-theme^="light-"] #root {
+  background-color: var(--t-bg);
+  color: var(--t-text);
+}
+
+/* ─── Sidebar regions — 各側區統一用 data-region="sidebar" 標記 ─────────────
+   所有主題都吃 --t-sidebar-bg（dark 主題預設 = --t-bg 所以視覺不變）
+   dark-dimmed 主題才會分層（主區深 navy vs 側區暖深灰） */
+html[data-theme] [data-region="sidebar"] {
+  background-color: var(--t-sidebar-bg) !important;
+  border-color: var(--t-sidebar-border);
+}
+/* 側區內部用了 bg-slate-900 / bg-slate-800 的元素也跟著側區底 */
+html[data-theme] [data-region="sidebar"] .bg-slate-950,
+html[data-theme] [data-region="sidebar"] .bg-slate-900,
+html[data-theme] [data-region="sidebar"] .bg-slate-850,
+html[data-theme] [data-region="sidebar"] .bg-slate-800 {
+  background-color: var(--t-sidebar-bg) !important;
+}
+/* Sidebar 內的卡片/懸浮層（popover、dropdown、model selector）
+   用 hover / elevated 色做微微分層，才看得出深淺 */
+html[data-theme] [data-region="sidebar"] .bg-slate-700,
+html[data-theme] [data-region="sidebar"] .bg-slate-700\/50,
+html[data-theme] [data-region="sidebar"] .hover\:bg-slate-700:hover,
+html[data-theme] [data-region="sidebar"] .hover\:bg-slate-800:hover {
+  background-color: var(--t-bg-card-hover) !important;
+}
+
+/* ─── dark-dimmed 專屬：把原本用白底的頁面全面 flip 成深色 ─────────────
+   Admin / Help / Chat 輸入區等 UI 原本設計為 light，dark-dimmed 時要全暗
+   涵蓋 slate / gray / neutral / zinc / stone 五個 scale */
+
+/* ── 背景：兩層架構 ──
+   L0（最深 --t-bg）= 頁面底：純 .bg-white（無 border/shadow）、bg-gray-50 等「off-white」
+   L1（稍亮 --t-bg-card）= 卡片 / 列表項目：.bg-white 搭配 border / shadow 的組合
+   這樣卡片會明顯浮出頁面底，而不是糊成一片 */
+
+/* L0：頁面底 — 淺灰 off-white（bg-gray-50 / bg-slate-50 / bg-gray-100 多為頁面主區 */
+html[data-theme="dark-dimmed"] .bg-slate-50,
+html[data-theme="dark-dimmed"] .bg-slate-100,
+html[data-theme="dark-dimmed"] .bg-gray-50,
+html[data-theme="dark-dimmed"] .bg-gray-100,
+html[data-theme="dark-dimmed"] .bg-neutral-50,
+html[data-theme="dark-dimmed"] .bg-neutral-100,
+html[data-theme="dark-dimmed"] .bg-zinc-50,
+html[data-theme="dark-dimmed"] .bg-zinc-100,
+html[data-theme="dark-dimmed"] .bg-stone-50,
+html[data-theme="dark-dimmed"] .bg-stone-100 {
   background-color: var(--t-bg) !important;
 }
-[data-training-theme="light-blue"] .border-slate-700,
-[data-training-theme="light-green"] .border-slate-700,
-[data-training-theme="light-blue"] .border-slate-700\/50,
-[data-training-theme="light-green"] .border-slate-700\/50 {
-  border-color: var(--t-border) !important;
+
+/* L0：純 .bg-white (沒 border/shadow/rounded) = 頁面主 wrapper → 最深 */
+html[data-theme="dark-dimmed"] .bg-white {
+  background-color: var(--t-bg) !important;
 }
-[data-training-theme="light-blue"] .border-slate-600,
-[data-training-theme="light-green"] .border-slate-600 {
-  border-color: var(--t-border) !important;
+
+/* L1：.bg-white 搭配卡片特徵（border / shadow / rounded-xl|2xl）→ 卡片色（深灰浮出）*/
+html[data-theme="dark-dimmed"] .bg-white.border,
+html[data-theme="dark-dimmed"] .bg-white.border-2,
+html[data-theme="dark-dimmed"] .bg-white.shadow,
+html[data-theme="dark-dimmed"] .bg-white.shadow-sm,
+html[data-theme="dark-dimmed"] .bg-white.shadow-md,
+html[data-theme="dark-dimmed"] .bg-white.shadow-lg,
+html[data-theme="dark-dimmed"] .bg-white.shadow-xl,
+html[data-theme="dark-dimmed"] .bg-white.shadow-2xl,
+html[data-theme="dark-dimmed"] .bg-white.rounded-xl,
+html[data-theme="dark-dimmed"] .bg-white.rounded-2xl {
+  background-color: var(--t-bg-card) !important;
 }
-[data-training-theme="light-blue"] .text-slate-100,
-[data-training-theme="light-green"] .text-slate-100 {
+/* 只有 .border 沒 shadow 的卡片 → 補上「inset 微光 + 外陰影」雙層立體
+   inset 白光讓卡片上緣有輕微高光，外陰影讓它從深底浮出來 */
+html[data-theme="dark-dimmed"] .bg-white.border {
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.04),
+    0 1px 2px rgba(0,0,0,0.5),
+    0 4px 12px rgba(0,0,0,0.3);
+}
+/* 同樣處理 rounded-lg 卡片 (TemplateCard pattern) */
+html[data-theme="dark-dimmed"] .bg-white.rounded-lg {
+  background-color: var(--t-bg-card) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.04),
+    0 1px 2px rgba(0,0,0,0.5),
+    0 4px 12px rgba(0,0,0,0.3);
+}
+
+/* L1：同理處理 bg-gray-50 / bg-slate-50 當卡片用的情況 */
+html[data-theme="dark-dimmed"] .bg-gray-50.border,
+html[data-theme="dark-dimmed"] .bg-gray-50.shadow,
+html[data-theme="dark-dimmed"] .bg-gray-50.shadow-sm,
+html[data-theme="dark-dimmed"] .bg-gray-50.rounded-xl,
+html[data-theme="dark-dimmed"] .bg-gray-50.rounded-2xl,
+html[data-theme="dark-dimmed"] .bg-slate-50.border,
+html[data-theme="dark-dimmed"] .bg-slate-50.shadow,
+html[data-theme="dark-dimmed"] .bg-slate-50.rounded-xl,
+html[data-theme="dark-dimmed"] .bg-slate-50.rounded-2xl {
+  background-color: var(--t-bg-card) !important;
+}
+
+/* L2：.bg-gray-200 / .bg-slate-200 多為 toggle / progress 底 → hover 階 */
+html[data-theme="dark-dimmed"] .bg-slate-200,
+html[data-theme="dark-dimmed"] .bg-slate-300,
+html[data-theme="dark-dimmed"] .bg-gray-200,
+html[data-theme="dark-dimmed"] .bg-gray-300,
+html[data-theme="dark-dimmed"] .bg-neutral-200,
+html[data-theme="dark-dimmed"] .bg-zinc-200 {
+  background-color: var(--t-bg-card-hover) !important;
+}
+
+/* bg-white 半透明（toast / overlay 用） */
+html[data-theme="dark-dimmed"] .bg-white\/90,
+html[data-theme="dark-dimmed"] .bg-white\/80 {
+  background-color: rgba(28,33,40,0.9) !important;
+}
+
+/* ── Hover 淺底（含 .bg-white.border.hover:bg-* 組合，特異性要夠高才能蓋掉卡片色）── */
+html[data-theme="dark-dimmed"] .hover\:bg-slate-50:hover,
+html[data-theme="dark-dimmed"] .hover\:bg-slate-100:hover,
+html[data-theme="dark-dimmed"] .hover\:bg-slate-200:hover,
+html[data-theme="dark-dimmed"] .hover\:bg-gray-50:hover,
+html[data-theme="dark-dimmed"] .hover\:bg-gray-100:hover,
+html[data-theme="dark-dimmed"] .hover\:bg-gray-200:hover,
+html[data-theme="dark-dimmed"] .hover\:bg-neutral-50:hover,
+html[data-theme="dark-dimmed"] .hover\:bg-neutral-100:hover,
+html[data-theme="dark-dimmed"] .bg-white.hover\:bg-gray-50:hover,
+html[data-theme="dark-dimmed"] .bg-white.hover\:bg-slate-50:hover,
+html[data-theme="dark-dimmed"] .bg-white.border.hover\:bg-gray-50:hover,
+html[data-theme="dark-dimmed"] .bg-white.border.hover\:bg-slate-50:hover,
+html[data-theme="dark-dimmed"] .bg-white.shadow-sm.hover\:bg-gray-50:hover,
+html[data-theme="dark-dimmed"] .bg-white.shadow.hover\:bg-gray-50:hover {
+  background-color: var(--t-bg-card-hover) !important;
+}
+html[data-theme="dark-dimmed"] .hover\:bg-blue-50:hover,
+html[data-theme="dark-dimmed"] .hover\:bg-indigo-50:hover,
+html[data-theme="dark-dimmed"] .hover\:bg-green-50:hover,
+html[data-theme="dark-dimmed"] .hover\:bg-emerald-50:hover,
+html[data-theme="dark-dimmed"] .hover\:bg-red-50:hover,
+html[data-theme="dark-dimmed"] .hover\:bg-amber-50:hover,
+html[data-theme="dark-dimmed"] .hover\:bg-rose-50:hover,
+html[data-theme="dark-dimmed"] .hover\:bg-purple-50:hover {
+  background-color: var(--t-accent-subtle) !important;
+}
+
+/* ── 色彩感 tint 淺底（badge / section）→ 半透 accent ── */
+html[data-theme="dark-dimmed"] .bg-blue-50,
+html[data-theme="dark-dimmed"] .bg-blue-100,
+html[data-theme="dark-dimmed"] .bg-indigo-50,
+html[data-theme="dark-dimmed"] .bg-indigo-100,
+html[data-theme="dark-dimmed"] .bg-sky-50,
+html[data-theme="dark-dimmed"] .bg-cyan-50,
+html[data-theme="dark-dimmed"] .bg-green-50,
+html[data-theme="dark-dimmed"] .bg-green-100,
+html[data-theme="dark-dimmed"] .bg-emerald-50,
+html[data-theme="dark-dimmed"] .bg-emerald-100,
+html[data-theme="dark-dimmed"] .bg-amber-50,
+html[data-theme="dark-dimmed"] .bg-yellow-50,
+html[data-theme="dark-dimmed"] .bg-orange-50,
+html[data-theme="dark-dimmed"] .bg-rose-50,
+html[data-theme="dark-dimmed"] .bg-red-50,
+html[data-theme="dark-dimmed"] .bg-purple-50,
+html[data-theme="dark-dimmed"] .bg-purple-100,
+html[data-theme="dark-dimmed"] .bg-pink-50 {
+  background-color: var(--t-accent-subtle) !important;
+}
+
+/* ── 文字 — 深色字 → 亮色字 ── */
+html[data-theme="dark-dimmed"] .text-slate-600,
+html[data-theme="dark-dimmed"] .text-slate-700,
+html[data-theme="dark-dimmed"] .text-slate-800,
+html[data-theme="dark-dimmed"] .text-slate-900,
+html[data-theme="dark-dimmed"] .text-gray-600,
+html[data-theme="dark-dimmed"] .text-gray-700,
+html[data-theme="dark-dimmed"] .text-gray-800,
+html[data-theme="dark-dimmed"] .text-gray-900,
+html[data-theme="dark-dimmed"] .text-neutral-700,
+html[data-theme="dark-dimmed"] .text-neutral-800,
+html[data-theme="dark-dimmed"] .text-neutral-900,
+html[data-theme="dark-dimmed"] .text-zinc-700,
+html[data-theme="dark-dimmed"] .text-zinc-800,
+html[data-theme="dark-dimmed"] .text-zinc-900,
+html[data-theme="dark-dimmed"] .text-black {
   color: var(--t-text) !important;
 }
-[data-training-theme="light-blue"] .text-slate-200,
-[data-training-theme="light-green"] .text-slate-200 {
-  color: var(--t-text) !important;
-}
-[data-training-theme="light-blue"] .text-slate-300,
-[data-training-theme="light-green"] .text-slate-300 {
-  color: var(--t-text-secondary) !important;
-}
-[data-training-theme="light-blue"] .text-slate-400,
-[data-training-theme="light-green"] .text-slate-400 {
+html[data-theme="dark-dimmed"] .text-slate-500,
+html[data-theme="dark-dimmed"] .text-gray-500,
+html[data-theme="dark-dimmed"] .text-neutral-500,
+html[data-theme="dark-dimmed"] .text-zinc-500 {
   color: var(--t-text-muted) !important;
 }
-[data-training-theme="light-blue"] .text-slate-500,
-[data-training-theme="light-green"] .text-slate-500 {
+html[data-theme="dark-dimmed"] .text-slate-400,
+html[data-theme="dark-dimmed"] .text-gray-400,
+html[data-theme="dark-dimmed"] .text-neutral-400,
+html[data-theme="dark-dimmed"] .text-zinc-400 {
   color: var(--t-text-dim) !important;
 }
-[data-training-theme="light-blue"] .text-slate-600,
-[data-training-theme="light-green"] .text-slate-600 {
-  color: var(--t-text-dim) !important;
+/* 色彩 tint 的文字（如 text-blue-700 / text-green-800）— 深底下需要稍亮一點 */
+html[data-theme="dark-dimmed"] .text-blue-700,
+html[data-theme="dark-dimmed"] .text-blue-800,
+html[data-theme="dark-dimmed"] .text-blue-900,
+html[data-theme="dark-dimmed"] .text-indigo-700,
+html[data-theme="dark-dimmed"] .text-indigo-800 {
+  color: #79b8ff !important;
 }
-[data-training-theme="light-blue"] .text-sky-400,
-[data-training-theme="light-green"] .text-sky-400 {
+html[data-theme="dark-dimmed"] .text-green-700,
+html[data-theme="dark-dimmed"] .text-green-800,
+html[data-theme="dark-dimmed"] .text-emerald-700,
+html[data-theme="dark-dimmed"] .text-emerald-800 {
+  color: #85e89d !important;
+}
+html[data-theme="dark-dimmed"] .text-red-700,
+html[data-theme="dark-dimmed"] .text-red-800,
+html[data-theme="dark-dimmed"] .text-rose-700 {
+  color: #ff9492 !important;
+}
+html[data-theme="dark-dimmed"] .text-amber-700,
+html[data-theme="dark-dimmed"] .text-amber-800,
+html[data-theme="dark-dimmed"] .text-yellow-700 {
+  color: #ffd33d !important;
+}
+html[data-theme="dark-dimmed"] .text-purple-700,
+html[data-theme="dark-dimmed"] .text-purple-800 {
+  color: #d2a8ff !important;
+}
+html[data-theme="dark-dimmed"] .text-orange-700,
+html[data-theme="dark-dimmed"] .text-orange-800 {
+  color: #ffab70 !important;
+}
+
+/* ── 邊框 ── */
+html[data-theme="dark-dimmed"] .border-slate-100,
+html[data-theme="dark-dimmed"] .border-slate-200,
+html[data-theme="dark-dimmed"] .border-slate-300,
+html[data-theme="dark-dimmed"] .border-gray-100,
+html[data-theme="dark-dimmed"] .border-gray-200,
+html[data-theme="dark-dimmed"] .border-gray-300,
+html[data-theme="dark-dimmed"] .border-neutral-200,
+html[data-theme="dark-dimmed"] .border-zinc-200 {
+  border-color: var(--t-border) !important;
+}
+/* 淺 tint 邊框（100/200）— 純裝飾性，深底下難以辨識 → 扁平到 accent-subtle
+   300+ 保留原色（通常有語意，例如 border-red-400 = 錄音中警示）*/
+html[data-theme="dark-dimmed"] .border-blue-100,
+html[data-theme="dark-dimmed"] .border-blue-200,
+html[data-theme="dark-dimmed"] .border-indigo-100,
+html[data-theme="dark-dimmed"] .border-indigo-200,
+html[data-theme="dark-dimmed"] .border-green-100,
+html[data-theme="dark-dimmed"] .border-green-200,
+html[data-theme="dark-dimmed"] .border-emerald-100,
+html[data-theme="dark-dimmed"] .border-emerald-200,
+html[data-theme="dark-dimmed"] .border-amber-100,
+html[data-theme="dark-dimmed"] .border-amber-200,
+html[data-theme="dark-dimmed"] .border-red-100,
+html[data-theme="dark-dimmed"] .border-red-200,
+html[data-theme="dark-dimmed"] .border-rose-100,
+html[data-theme="dark-dimmed"] .border-rose-200,
+html[data-theme="dark-dimmed"] .border-purple-100,
+html[data-theme="dark-dimmed"] .border-purple-200,
+html[data-theme="dark-dimmed"] .border-sky-100,
+html[data-theme="dark-dimmed"] .border-sky-200 {
+  border-color: var(--t-accent-subtle) !important;
+}
+/* 純 `border` class 沒指定顏色 → Tailwind 預設淺灰邊框，深底下看起來像白色；改成 --t-border */
+html[data-theme="dark-dimmed"] .border {
+  border-color: var(--t-border);
+}
+
+/* 中色階 tint 文字（400~600）— 深底下要亮一點才看得到 */
+html[data-theme="dark-dimmed"] .text-blue-500,
+html[data-theme="dark-dimmed"] .text-blue-600,
+html[data-theme="dark-dimmed"] .text-indigo-500,
+html[data-theme="dark-dimmed"] .text-indigo-600,
+html[data-theme="dark-dimmed"] .text-sky-600 {
   color: var(--t-accent) !important;
 }
-[data-training-theme="light-blue"] .bg-sky-600,
-[data-training-theme="light-green"] .bg-sky-600 {
-  background-color: var(--t-accent-bg) !important;
+html[data-theme="dark-dimmed"] .text-green-600,
+html[data-theme="dark-dimmed"] .text-emerald-600 {
+  color: #56d364 !important;
 }
-[data-training-theme="light-blue"] .hover\:bg-sky-500:hover,
-[data-training-theme="light-green"] .hover\:bg-sky-500:hover {
-  background-color: var(--t-accent-bg-hover) !important;
+html[data-theme="dark-dimmed"] .text-red-500,
+html[data-theme="dark-dimmed"] .text-red-600,
+html[data-theme="dark-dimmed"] .text-rose-500,
+html[data-theme="dark-dimmed"] .text-rose-600 {
+  color: #ff7b72 !important;
 }
-[data-training-theme="light-blue"] .bg-sky-600\/20,
-[data-training-theme="light-green"] .bg-sky-600\/20 {
-  background-color: var(--t-accent-subtle) !important;
+html[data-theme="dark-dimmed"] .text-amber-500,
+html[data-theme="dark-dimmed"] .text-amber-600,
+html[data-theme="dark-dimmed"] .text-yellow-600 {
+  color: #e3b341 !important;
 }
-[data-training-theme="light-blue"] .bg-slate-700,
-[data-training-theme="light-green"] .bg-slate-700 {
-  background-color: var(--t-bg-inset) !important;
+html[data-theme="dark-dimmed"] .text-orange-500,
+html[data-theme="dark-dimmed"] .text-orange-600 {
+  color: #f2994a !important;
 }
-[data-training-theme="light-blue"] .bg-slate-700\/50,
-[data-training-theme="light-green"] .bg-slate-700\/50 {
-  background-color: var(--t-accent-subtle) !important;
+html[data-theme="dark-dimmed"] .text-purple-500,
+html[data-theme="dark-dimmed"] .text-purple-600 {
+  color: #bc8cff !important;
 }
-/* Fix select/option backgrounds in light themes */
-[data-training-theme="light-blue"] select option,
-[data-training-theme="light-green"] select option {
+html[data-theme="dark-dimmed"] .divide-slate-200 > *,
+html[data-theme="dark-dimmed"] .divide-slate-100 > *,
+html[data-theme="dark-dimmed"] .divide-gray-200 > *,
+html[data-theme="dark-dimmed"] .divide-gray-100 > * {
+  border-color: var(--t-border) !important;
+}
+
+/* ── Inputs / Textarea / Select — 深綠底護眼 ── */
+html[data-theme="dark-dimmed"] input[type="text"],
+html[data-theme="dark-dimmed"] input[type="search"],
+html[data-theme="dark-dimmed"] input[type="email"],
+html[data-theme="dark-dimmed"] input[type="url"],
+html[data-theme="dark-dimmed"] input[type="password"],
+html[data-theme="dark-dimmed"] input[type="number"],
+html[data-theme="dark-dimmed"] input[type="tel"],
+html[data-theme="dark-dimmed"] input[type="date"],
+html[data-theme="dark-dimmed"] input[type="datetime-local"],
+html[data-theme="dark-dimmed"] input[type="time"],
+html[data-theme="dark-dimmed"] input:not([type]),
+html[data-theme="dark-dimmed"] textarea,
+html[data-theme="dark-dimmed"] select {
+  background-color: var(--t-bg-input) !important;
+  color: var(--t-text) !important;
+}
+/* 含 bg-* class 的 input 也一起吃（特異性加高以戰勝 bg 類 override）*/
+html[data-theme="dark-dimmed"] input.bg-white,
+html[data-theme="dark-dimmed"] textarea.bg-white,
+html[data-theme="dark-dimmed"] select.bg-white,
+html[data-theme="dark-dimmed"] input.bg-slate-50,
+html[data-theme="dark-dimmed"] textarea.bg-slate-50,
+html[data-theme="dark-dimmed"] input.bg-gray-50,
+html[data-theme="dark-dimmed"] textarea.bg-gray-50,
+html[data-theme="dark-dimmed"] input.bg-slate-100,
+html[data-theme="dark-dimmed"] input.bg-gray-100 {
+  background-color: var(--t-bg-input) !important;
+  color: var(--t-text) !important;
+}
+html[data-theme="dark-dimmed"] .focus\:bg-white:focus {
+  background-color: var(--t-bg-input) !important;
+}
+
+/* Input focus — 綠色高亮邊框（護眼 + 視覺反饋）*/
+html[data-theme="dark-dimmed"] input:focus,
+html[data-theme="dark-dimmed"] textarea:focus,
+html[data-theme="dark-dimmed"] select:focus {
+  border-color: var(--t-input-focus) !important;
+  outline: none;
+}
+html[data-theme="dark-dimmed"] .focus\:border-blue-400:focus,
+html[data-theme="dark-dimmed"] .focus\:border-blue-500:focus,
+html[data-theme="dark-dimmed"] .focus\:border-sky-400:focus,
+html[data-theme="dark-dimmed"] .focus\:border-sky-500:focus {
+  border-color: var(--t-input-focus) !important;
+}
+html[data-theme="dark-dimmed"] .focus\:ring-blue-400:focus,
+html[data-theme="dark-dimmed"] .focus\:ring-blue-500:focus,
+html[data-theme="dark-dimmed"] .focus\:ring-sky-400:focus,
+html[data-theme="dark-dimmed"] .focus\:ring-sky-500:focus,
+html[data-theme="dark-dimmed"] .focus-within\:ring-blue-400:focus-within {
+  --tw-ring-color: var(--t-input-focus) !important;
+}
+html[data-theme="dark-dimmed"] .focus-within\:border-blue-400:focus-within,
+html[data-theme="dark-dimmed"] .focus-within\:border-sky-400:focus-within {
+  border-color: var(--t-input-focus) !important;
+}
+html[data-theme="dark-dimmed"] ::placeholder {
+  color: var(--t-text-dim) !important;
+  opacity: 0.6;
+}
+html[data-theme="dark-dimmed"] select option {
   background-color: var(--t-bg-card);
   color: var(--t-text);
 }
-/* Fix placeholder in light themes */
-[data-training-theme="light-blue"] ::placeholder,
-[data-training-theme="light-green"] ::placeholder {
+/* Shadow — 淺陰影在深底下幾乎看不到，加深一點 */
+html[data-theme="dark-dimmed"] .shadow-sm,
+html[data-theme="dark-dimmed"] .shadow-md {
+  box-shadow: 0 2px 6px rgba(0,0,0,0.35) !important;
+}
+html[data-theme="dark-dimmed"] .shadow-xl,
+html[data-theme="dark-dimmed"] .shadow-2xl {
+  box-shadow: 0 10px 25px rgba(0,0,0,0.5), 0 4px 10px rgba(0,0,0,0.25) !important;
+}
+
+/* ─── Chat 區域 & 氣泡 — dark-dimmed 專屬：全面改為深色 ─────────────────
+   其他主題保留原本的淡底 chat 介面以維持可讀性（dark / light-* 皆不變）*/
+html[data-theme="dark-dimmed"] [data-region="chat"] {
+  background-color: var(--t-bg) !important;
+}
+html[data-theme="dark-dimmed"] [data-chat-bubble="assistant"] {
+  background-color: var(--t-chat-bubble-assistant) !important;
+  border-color: var(--t-border) !important;
+  color: var(--t-text);
+}
+html[data-theme="dark-dimmed"] [data-chat-bubble="user"] {
+  background-color: var(--t-chat-bubble-user) !important;
+}
+/* dark-dimmed chat 區裡的 markdown prose 顏色也要調整 */
+html[data-theme="dark-dimmed"] [data-chat-bubble="assistant"] .prose-chat {
+  color: var(--t-text);
+}
+html[data-theme="dark-dimmed"] [data-chat-bubble="assistant"] .prose-chat code {
+  background-color: rgba(88,166,255,0.12);
+  color: var(--t-accent);
+}
+html[data-theme="dark-dimmed"] [data-chat-bubble="assistant"] .prose-chat th {
+  background-color: var(--t-bg-card-hover);
+  border-color: var(--t-border);
+}
+html[data-theme="dark-dimmed"] [data-chat-bubble="assistant"] .prose-chat td {
+  border-color: var(--t-border);
+}
+html[data-theme="dark-dimmed"] [data-chat-bubble="assistant"] .prose-chat blockquote {
+  border-color: var(--t-accent);
+  color: var(--t-text-muted);
+}
+html[data-theme="dark-dimmed"] [data-chat-bubble="assistant"] .prose-chat hr {
+  border-color: var(--t-border);
+}
+html[data-theme="dark-dimmed"] [data-chat-bubble="assistant"] .prose-chat a {
+  color: var(--t-accent);
+}
+
+/* ─── Light themes override hardcoded dark Tailwind classes ────────────────
+   所有 [data-theme^="light-"] 選擇器 = 三種 light 主題一次吃
+   避免逐元件重寫 inline style */
+
+/* Backgrounds — deep slate (rail / elevated) */
+html[data-theme^="light-"] .bg-slate-950,
+html[data-theme^="light-"] .bg-slate-900 {
+  background-color: var(--t-bg) !important;
+}
+html[data-theme^="light-"] .bg-slate-850,
+html[data-theme^="light-"] .bg-slate-800 {
+  background-color: var(--t-bg-card) !important;
+}
+html[data-theme^="light-"] .bg-slate-700 {
+  background-color: var(--t-bg-inset) !important;
+}
+html[data-theme^="light-"] .bg-slate-600 {
+  background-color: var(--t-bg-card-hover) !important;
+}
+html[data-theme^="light-"] .bg-slate-900\/50,
+html[data-theme^="light-"] .bg-slate-900\/60,
+html[data-theme^="light-"] .bg-slate-900\/80,
+html[data-theme^="light-"] .bg-slate-800\/50,
+html[data-theme^="light-"] .bg-slate-800\/60,
+html[data-theme^="light-"] .bg-slate-800\/80 {
+  background-color: var(--t-bg-card) !important;
+}
+html[data-theme^="light-"] .bg-slate-700\/50,
+html[data-theme^="light-"] .bg-slate-700\/60 {
+  background-color: var(--t-accent-subtle) !important;
+}
+html[data-theme^="light-"] .bg-black,
+html[data-theme^="light-"] .bg-black\/50,
+html[data-theme^="light-"] .bg-black\/60 {
+  /* modal overlay — keep dim but lighter */
+  background-color: rgba(15, 23, 42, 0.35) !important;
+}
+html[data-theme^="light-"] .bg-black\/20,
+html[data-theme^="light-"] .bg-black\/30,
+html[data-theme^="light-"] .bg-black\/40 {
+  background-color: rgba(15, 23, 42, 0.1) !important;
+}
+
+/* hover variants */
+html[data-theme^="light-"] .hover\:bg-slate-800:hover,
+html[data-theme^="light-"] .hover\:bg-slate-700:hover {
+  background-color: var(--t-bg-card-hover) !important;
+}
+html[data-theme^="light-"] .hover\:bg-slate-700\/50:hover {
+  background-color: var(--t-accent-subtle) !important;
+}
+
+/* Borders */
+html[data-theme^="light-"] .border-slate-900,
+html[data-theme^="light-"] .border-slate-800,
+html[data-theme^="light-"] .border-slate-700,
+html[data-theme^="light-"] .border-slate-600,
+html[data-theme^="light-"] .border-slate-700\/50,
+html[data-theme^="light-"] .border-slate-800\/50,
+html[data-theme^="light-"] .border-slate-600\/50 {
+  border-color: var(--t-border) !important;
+}
+html[data-theme^="light-"] .border-white\/10,
+html[data-theme^="light-"] .border-white\/20,
+html[data-theme^="light-"] .border-white\/5 {
+  border-color: var(--t-border-subtle) !important;
+}
+
+/* Text —
+   ⚠️ 不要把 .text-white 全局映到 --t-text，否則 .bg-blue-600.text-white 這種
+   「深色實底按鈕 + 白字」會被誤傷成「藍底深字」看不清。
+   .text-white 只在「明確在淺底上」時才會有問題，下面針對性處理。 */
+html[data-theme^="light-"] .text-slate-50,
+html[data-theme^="light-"] .text-slate-100,
+html[data-theme^="light-"] .text-slate-200 {
+  color: var(--t-text) !important;
+}
+html[data-theme^="light-"] .text-slate-300 {
+  color: var(--t-text-secondary) !important;
+}
+html[data-theme^="light-"] .text-slate-400 {
+  color: var(--t-text-muted) !important;
+}
+html[data-theme^="light-"] .text-slate-500,
+html[data-theme^="light-"] .text-slate-600 {
+  color: var(--t-text-dim) !important;
+}
+
+/* hover text */
+html[data-theme^="light-"] .hover\:text-white:hover,
+html[data-theme^="light-"] .hover\:text-slate-100:hover,
+html[data-theme^="light-"] .hover\:text-slate-200:hover,
+html[data-theme^="light-"] .hover\:text-slate-300:hover {
+  color: var(--t-text) !important;
+}
+
+/* Accent — sky (dark 主題用的強調色) → 各主題 accent */
+html[data-theme^="light-"] .text-sky-300,
+html[data-theme^="light-"] .text-sky-400,
+html[data-theme^="light-"] .text-sky-500 {
+  color: var(--t-accent) !important;
+}
+
+/* ── 400 色階彩色文字（blue/cyan/teal/emerald/amber/orange/rose/purple/indigo）
+   在深底看得到，但在 light 主題白底下會褪成看不清 → 映到對應 600/700 深色階 ── */
+html[data-theme^="light-"] .text-blue-300,
+html[data-theme^="light-"] .text-blue-400 {
+  color: #1d4ed8 !important;  /* blue-700 */
+}
+html[data-theme^="light-"] .text-indigo-300,
+html[data-theme^="light-"] .text-indigo-400 {
+  color: #4338ca !important;  /* indigo-700 */
+}
+html[data-theme^="light-"] .text-cyan-300,
+html[data-theme^="light-"] .text-cyan-400 {
+  color: #0e7490 !important;  /* cyan-700 */
+}
+html[data-theme^="light-"] .text-teal-300,
+html[data-theme^="light-"] .text-teal-400 {
+  color: #0f766e !important;  /* teal-700 */
+}
+html[data-theme^="light-"] .text-emerald-300,
+html[data-theme^="light-"] .text-emerald-400 {
+  color: #047857 !important;  /* emerald-700 */
+}
+html[data-theme^="light-"] .text-green-300,
+html[data-theme^="light-"] .text-green-400 {
+  color: #15803d !important;  /* green-700 */
+}
+html[data-theme^="light-"] .text-amber-300,
+html[data-theme^="light-"] .text-amber-400 {
+  color: #b45309 !important;  /* amber-700 */
+}
+html[data-theme^="light-"] .text-yellow-300,
+html[data-theme^="light-"] .text-yellow-400 {
+  color: #a16207 !important;  /* yellow-700 */
+}
+html[data-theme^="light-"] .text-orange-300,
+html[data-theme^="light-"] .text-orange-400 {
+  color: #c2410c !important;  /* orange-700 */
+}
+html[data-theme^="light-"] .text-rose-300,
+html[data-theme^="light-"] .text-rose-400 {
+  color: #be123c !important;  /* rose-700 */
+}
+html[data-theme^="light-"] .text-red-300,
+html[data-theme^="light-"] .text-red-400 {
+  color: #b91c1c !important;  /* red-700 */
+}
+html[data-theme^="light-"] .text-purple-300,
+html[data-theme^="light-"] .text-purple-400 {
+  color: #6b21a8 !important;  /* purple-700 */
+}
+html[data-theme^="light-"] .text-pink-300,
+html[data-theme^="light-"] .text-pink-400 {
+  color: #9d174d !important;  /* pink-700 */
+}
+
+/* ── 所有深色實底按鈕：強制白字（light 主題下才適用，dark/dark-dimmed 不影響）
+   包含 hover 狀態與 selected 狀態的彩色 fill ── */
+html[data-theme^="light-"] .bg-blue-500,
+html[data-theme^="light-"] .bg-blue-600,
+html[data-theme^="light-"] .bg-blue-700,
+html[data-theme^="light-"] .bg-blue-800,
+html[data-theme^="light-"] .bg-sky-500,
+html[data-theme^="light-"] .bg-sky-600,
+html[data-theme^="light-"] .bg-sky-700,
+html[data-theme^="light-"] .bg-indigo-500,
+html[data-theme^="light-"] .bg-indigo-600,
+html[data-theme^="light-"] .bg-indigo-700,
+html[data-theme^="light-"] .bg-cyan-600,
+html[data-theme^="light-"] .bg-cyan-700,
+html[data-theme^="light-"] .bg-teal-600,
+html[data-theme^="light-"] .bg-teal-700,
+html[data-theme^="light-"] .bg-emerald-600,
+html[data-theme^="light-"] .bg-emerald-700,
+html[data-theme^="light-"] .bg-green-600,
+html[data-theme^="light-"] .bg-green-700,
+html[data-theme^="light-"] .bg-amber-600,
+html[data-theme^="light-"] .bg-amber-700,
+html[data-theme^="light-"] .bg-orange-500,
+html[data-theme^="light-"] .bg-orange-600,
+html[data-theme^="light-"] .bg-orange-700,
+html[data-theme^="light-"] .bg-red-500,
+html[data-theme^="light-"] .bg-red-600,
+html[data-theme^="light-"] .bg-red-700,
+html[data-theme^="light-"] .bg-rose-500,
+html[data-theme^="light-"] .bg-rose-600,
+html[data-theme^="light-"] .bg-rose-700,
+html[data-theme^="light-"] .bg-pink-600,
+html[data-theme^="light-"] .bg-pink-700,
+html[data-theme^="light-"] .bg-purple-500,
+html[data-theme^="light-"] .bg-purple-600,
+html[data-theme^="light-"] .bg-purple-700,
+html[data-theme^="light-"] .bg-violet-600,
+html[data-theme^="light-"] .bg-violet-700,
+html[data-theme^="light-"] .bg-fuchsia-600,
+html[data-theme^="light-"] .bg-slate-800,
+html[data-theme^="light-"] .bg-slate-900 {
+  color: #ffffff !important;
+}
+/* hover 後仍是深彩色底的也保持白字 */
+html[data-theme^="light-"] .hover\:bg-blue-600:hover,
+html[data-theme^="light-"] .hover\:bg-blue-700:hover,
+html[data-theme^="light-"] .hover\:bg-indigo-700:hover,
+html[data-theme^="light-"] .hover\:bg-sky-700:hover,
+html[data-theme^="light-"] .hover\:bg-red-700:hover,
+html[data-theme^="light-"] .hover\:bg-green-700:hover {
+  color: #ffffff !important;
+}
+/* 深彩底按鈕內的 icon（通常靠 currentColor / text-white 跟 text 走） */
+html[data-theme^="light-"] .bg-blue-500 svg,
+html[data-theme^="light-"] .bg-blue-600 svg,
+html[data-theme^="light-"] .bg-blue-700 svg,
+html[data-theme^="light-"] .bg-sky-600 svg,
+html[data-theme^="light-"] .bg-indigo-600 svg,
+html[data-theme^="light-"] .bg-green-600 svg,
+html[data-theme^="light-"] .bg-red-600 svg,
+html[data-theme^="light-"] .bg-rose-600 svg,
+html[data-theme^="light-"] .bg-purple-600 svg {
+  color: #ffffff;
+}
+html[data-theme^="light-"] .bg-sky-500,
+html[data-theme^="light-"] .bg-sky-600,
+html[data-theme^="light-"] .bg-sky-700 {
+  background-color: var(--t-accent-bg) !important;
+}
+html[data-theme^="light-"] .hover\:bg-sky-500:hover,
+html[data-theme^="light-"] .hover\:bg-sky-600:hover,
+html[data-theme^="light-"] .hover\:bg-sky-700:hover {
+  background-color: var(--t-accent-bg-hover) !important;
+}
+html[data-theme^="light-"] .bg-sky-600\/20,
+html[data-theme^="light-"] .bg-sky-500\/20 {
+  background-color: var(--t-accent-subtle) !important;
+}
+
+/* Blue accents (used widely in main app) — 保留 blue 但讓深底變淺 */
+html[data-theme^="light-"] .bg-blue-900\/30,
+html[data-theme^="light-"] .bg-blue-800\/30,
+html[data-theme^="light-"] .bg-blue-700\/30 {
+  background-color: var(--t-accent-subtle) !important;
+}
+html[data-theme^="light-"] .bg-blue-900\/50,
+html[data-theme^="light-"] .bg-blue-800\/50 {
+  background-color: var(--t-accent-subtle) !important;
+}
+html[data-theme^="light-"] .text-blue-300,
+html[data-theme^="light-"] .text-blue-400 {
+  color: var(--t-accent) !important;
+}
+
+/* Form controls */
+html[data-theme^="light-"] select option {
+  background-color: var(--t-bg-card);
+  color: var(--t-text);
+}
+html[data-theme^="light-"] ::placeholder {
   color: var(--t-text-dim) !important;
   opacity: 0.6;
+}
+
+/* Inputs — 各 light 主題吃自己的 tinted bg（極淡同色系，微降純白對比）*/
+html[data-theme^="light-"] input.bg-slate-900,
+html[data-theme^="light-"] input.bg-slate-800,
+html[data-theme^="light-"] textarea.bg-slate-900,
+html[data-theme^="light-"] textarea.bg-slate-800,
+html[data-theme^="light-"] select.bg-slate-900,
+html[data-theme^="light-"] select.bg-slate-800,
+html[data-theme^="light-"] input.bg-white,
+html[data-theme^="light-"] textarea.bg-white,
+html[data-theme^="light-"] select.bg-white {
+  background-color: var(--t-bg-input) !important;
+  color: var(--t-text) !important;
+}
+/* 未指定 bg class 的原生 input 也套（比預設 UA 白更柔）*/
+html[data-theme^="light-"] input[type="text"]:not([class*="bg-"]),
+html[data-theme^="light-"] input[type="search"]:not([class*="bg-"]),
+html[data-theme^="light-"] input[type="email"]:not([class*="bg-"]),
+html[data-theme^="light-"] input[type="password"]:not([class*="bg-"]),
+html[data-theme^="light-"] input[type="number"]:not([class*="bg-"]),
+html[data-theme^="light-"] textarea:not([class*="bg-"]),
+html[data-theme^="light-"] select:not([class*="bg-"]) {
+  background-color: var(--t-bg-input);
+}
+
+/* Divide / ring */
+html[data-theme^="light-"] .divide-slate-800 > *,
+html[data-theme^="light-"] .divide-slate-700 > * {
+  border-color: var(--t-border) !important;
+}
+html[data-theme^="light-"] .ring-slate-700,
+html[data-theme^="light-"] .ring-slate-600 {
+  --tw-ring-color: var(--t-border) !important;
+}
+
+/* Gradient covers (training course card / login page 用到) */
+html[data-theme^="light-"] .bg-gradient-to-br.from-slate-900,
+html[data-theme^="light-"] .bg-gradient-to-b.from-slate-900,
+html[data-theme^="light-"] .bg-gradient-to-r.from-slate-900 {
+  background-image: var(--t-gradient-cover) !important;
+}
+
+/* Gray / neutral / zinc / stone 家族 — 部分元件混用這些 scale */
+html[data-theme^="light-"] .bg-gray-900,
+html[data-theme^="light-"] .bg-gray-800,
+html[data-theme^="light-"] .bg-neutral-900,
+html[data-theme^="light-"] .bg-neutral-800,
+html[data-theme^="light-"] .bg-zinc-900,
+html[data-theme^="light-"] .bg-zinc-800,
+html[data-theme^="light-"] .bg-stone-900,
+html[data-theme^="light-"] .bg-stone-800 {
+  background-color: var(--t-bg-card) !important;
+}
+html[data-theme^="light-"] .bg-gray-700,
+html[data-theme^="light-"] .bg-neutral-700,
+html[data-theme^="light-"] .bg-zinc-700,
+html[data-theme^="light-"] .bg-stone-700 {
+  background-color: var(--t-bg-inset) !important;
+}
+html[data-theme^="light-"] .text-gray-100,
+html[data-theme^="light-"] .text-gray-200,
+html[data-theme^="light-"] .text-neutral-100,
+html[data-theme^="light-"] .text-neutral-200,
+html[data-theme^="light-"] .text-zinc-100,
+html[data-theme^="light-"] .text-zinc-200 {
+  color: var(--t-text) !important;
+}
+html[data-theme^="light-"] .text-gray-300,
+html[data-theme^="light-"] .text-gray-400,
+html[data-theme^="light-"] .text-neutral-300,
+html[data-theme^="light-"] .text-neutral-400,
+html[data-theme^="light-"] .text-zinc-300,
+html[data-theme^="light-"] .text-zinc-400 {
+  color: var(--t-text-secondary) !important;
+}
+html[data-theme^="light-"] .text-gray-500,
+html[data-theme^="light-"] .text-gray-600,
+html[data-theme^="light-"] .text-neutral-500 {
+  color: var(--t-text-dim) !important;
+}
+html[data-theme^="light-"] .border-gray-700,
+html[data-theme^="light-"] .border-gray-800,
+html[data-theme^="light-"] .border-neutral-700,
+html[data-theme^="light-"] .border-zinc-700 {
+  border-color: var(--t-border) !important;
+}
+
+/* Shadow — 深主題用深陰影，淺主題用較淡陰影 */
+html[data-theme^="light-"] .shadow-2xl,
+html[data-theme^="light-"] .shadow-xl {
+  box-shadow: 0 10px 25px rgba(15, 23, 42, 0.12), 0 4px 10px rgba(15, 23, 42, 0.05) !important;
 }
 
 /* Feedback toast slide-in animation */

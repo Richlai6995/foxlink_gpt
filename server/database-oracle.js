@@ -382,6 +382,9 @@ async function runMigrations(db) {
   await addCol('USERS',  'CAN_DEEP_RESEARCH', 'NUMBER(1)');
   await addCol('ROLES',  'CAN_DEEP_RESEARCH', 'NUMBER(1) DEFAULT 1');
 
+  // ── UI Theme preference (dark | light-blue | light-green | light-yellow) ──
+  await addCol('USERS',  'THEME', "VARCHAR2(20) DEFAULT 'dark'");
+
   // ── LLM Models — multi-provider (Gemini + Azure OpenAI) ────────────────────
   await addCol('LLM_MODELS', 'PROVIDER_TYPE',    "VARCHAR2(20) DEFAULT 'gemini'");
   await addCol('LLM_MODELS', 'API_KEY_ENC',       'VARCHAR2(600)');
