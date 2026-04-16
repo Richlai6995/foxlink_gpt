@@ -1084,6 +1084,77 @@ async function getCostRows(db, startDate, endDate) {
   }
 }
 
+/**
+ * 聚合員工費用清單（JSON + CSV 共用）
+ * @param {*} db
+ * @param {string} startDate
+ * @param {string} endDate
+ * @param {object} opts { showAll: boolean }
+ * @returns {Promise<Array>} 每筆含 has_account/has_usage
+ */
+async function aggregateEmployees(db, startDate, endDate, { showAll } = {}) {
+  const rows = await getCostRows(db, startDate, endDate);
+
+  // 由用量資料聚合
+  const empMap = {};
+  for (const r of rows) {
+    const key = r.employee_id || `uid_${r.user_id}`;
+    if (!empMap[key]) {
+      empMap[key] = {
+        user_id: r.user_id, employee_id: r.employee_id, user_name: r.user_name,
+        user_email: r.user_email, dept_code: r.dept_code, dept_name: r.dept_name,
+        profit_center: r.profit_center, profit_center_name: r.profit_center_name,
+        org_section: r.org_section, org_section_name: r.org_section_name,
+        org_group_name: r.org_group_name, factory_code: r.factory_code,
+        input_tokens: 0, output_tokens: 0, cost: 0, currency: r.currency || 'USD',
+        has_account: true, has_usage: true,
+      };
+    }
+    empMap[key].input_tokens += r.input_tokens || 0;
+    empMap[key].output_tokens += r.output_tokens || 0;
+    empMap[key].cost += r.cost || 0;
+  }
+
+  if (showAll) {
+    const { getAllIndirectEmployees } = require('../services/erpDb');
+    const [erpEmps, allUsers] = await Promise.all([
+      getAllIndirectEmployees(),
+      db.prepare(
+        `SELECT employee_id FROM users WHERE employee_id IS NOT NULL AND status != 'disabled'`
+      ).all(),
+    ]);
+    const userSet = new Set(allUsers.map((u) => String(u.employee_id)));
+
+    for (const e of erpEmps) {
+      const empId = String(e.EMPLOYEE_NO);
+      if (empMap[empId]) {
+        // 已有用量，補 has_account 判定（理論上必為 true）
+        empMap[empId].has_account = userSet.has(empId);
+        continue;
+      }
+      empMap[empId] = {
+        user_id: null,
+        employee_id: empId,
+        user_name: e.C_NAME || '',
+        user_email: e.EMAIL || '',
+        dept_code: e.DEPT_CODE || '',
+        dept_name: e.DEPT_NAME || '',
+        profit_center: e.PROFIT_CENTER || '',
+        profit_center_name: e.PROFIT_CENTER_NAME || '',
+        org_section: e.ORG_SECTION || '',
+        org_section_name: e.ORG_SECTION_NAME || '',
+        org_group_name: e.ORG_GROUP_NAME || '',
+        factory_code: e.FACTORY_CODE || '',
+        input_tokens: 0, output_tokens: 0, cost: 0, currency: 'USD',
+        has_account: userSet.has(empId),
+        has_usage: false,
+      };
+    }
+  }
+
+  return Object.values(empMap);
+}
+
 function toCsv(headers, rows, getRow) {
   const lines = [headers.join(',')];
   for (const r of rows) {
@@ -1152,37 +1223,15 @@ router.post('/cost-stats/refresh-org-cache', async (req, res) => {
   }
 });
 
-// GET /api/admin/cost-stats/employees?startDate=&endDate=&profitCenter=&orgSection=
+// GET /api/admin/cost-stats/employees?startDate=&endDate=&profitCenter=&orgSection=&showAllEmployees=1
 router.get('/cost-stats/employees', async (req, res) => {
   try {
     const db = require('../database-oracle').db;
-    const { startDate, endDate, profitCenter, orgSection, deptCode } = req.query;
+    const { startDate, endDate, profitCenter, orgSection, deptCode, showAllEmployees } = req.query;
     if (!startDate || !endDate) return res.status(400).json({ error: '請提供日期區間' });
 
-    let rows = await getCostRows(db, startDate, endDate);
+    let result = await aggregateEmployees(db, startDate, endDate, { showAll: showAllEmployees === '1' });
 
-    // Aggregate by employee
-    const empMap = {};
-    for (const r of rows) {
-      const key = r.employee_id || `uid_${r.user_id}`;
-      if (!empMap[key]) {
-        empMap[key] = {
-          user_id: r.user_id, employee_id: r.employee_id, user_name: r.user_name,
-          user_email: r.user_email, dept_code: r.dept_code, dept_name: r.dept_name,
-          profit_center: r.profit_center, profit_center_name: r.profit_center_name,
-          org_section: r.org_section, org_section_name: r.org_section_name,
-          org_group_name: r.org_group_name, factory_code: r.factory_code,
-          input_tokens: 0, output_tokens: 0, cost: 0, currency: r.currency || 'USD',
-        };
-      }
-      empMap[key].input_tokens += r.input_tokens || 0;
-      empMap[key].output_tokens += r.output_tokens || 0;
-      empMap[key].cost += r.cost || 0;
-    }
-
-    let result = Object.values(empMap);
-
-    // Filters
     if (profitCenter) result = result.filter((r) => r.profit_center === profitCenter);
     if (orgSection) result = result.filter((r) => r.org_section === orgSection);
     if (deptCode) result = result.filter((r) => r.dept_code === deptCode);
@@ -1377,32 +1426,21 @@ router.get('/cost-stats/monthly', async (req, res) => {
   }
 });
 
-// GET /api/admin/cost-stats/export/employees?startDate=&endDate=...  → CSV
+// GET /api/admin/cost-stats/export/employees?startDate=&endDate=...&showAllEmployees=1  → CSV
 router.get('/cost-stats/export/employees', async (req, res) => {
   try {
     const db = require('../database-oracle').db;
-    const { startDate, endDate, profitCenter, deptCode } = req.query;
+    const { startDate, endDate, profitCenter, deptCode, showAllEmployees } = req.query;
     if (!startDate || !endDate) return res.status(400).json({ error: '請提供日期區間' });
 
-    let rows = await getCostRows(db, startDate, endDate);
-    const empMap = {};
-    for (const r of rows) {
-      const key = r.employee_id || `uid_${r.user_id}`;
-      if (!empMap[key]) {
-        empMap[key] = { ...r, input_tokens: 0, output_tokens: 0, cost: 0 };
-      }
-      empMap[key].input_tokens += r.input_tokens || 0;
-      empMap[key].output_tokens += r.output_tokens || 0;
-      empMap[key].cost += r.cost || 0;
-    }
-    let result = Object.values(empMap);
+    let result = await aggregateEmployees(db, startDate, endDate, { showAll: showAllEmployees === '1' });
     if (profitCenter) result = result.filter((r) => r.profit_center === profitCenter);
     if (deptCode) result = result.filter((r) => r.dept_code === deptCode);
     result.sort((a, b) => (b.cost || 0) - (a.cost || 0));
 
-    const headers = ['工號', '姓名', '部門代碼', '部門名稱', '利潤中心代碼', '利潤中心名稱', '事業處代碼', '事業處名稱', '事業群名稱', '廠區', 'Input Tokens', 'Output Tokens', '費用金額', '幣別'];
+    const headers = ['工號', '姓名', '有帳號', '部門代碼', '部門名稱', '利潤中心代碼', '利潤中心名稱', '事業處代碼', '事業處名稱', '事業群名稱', '廠區', 'Input Tokens', 'Output Tokens', '費用金額', '幣別'];
     const csv = toCsv(headers, result, (r) => [
-      r.employee_id, r.user_name, r.dept_code, r.dept_name,
+      r.employee_id, r.user_name, r.has_account ? 'Y' : 'N', r.dept_code, r.dept_name,
       r.profit_center, r.profit_center_name, r.org_section, r.org_section_name,
       r.org_group_name, r.factory_code, r.input_tokens, r.output_tokens,
       r.cost?.toFixed(6), r.currency,

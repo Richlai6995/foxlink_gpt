@@ -46,7 +46,7 @@ interface MonthlyRow {
 }
 
 interface EmpRow {
-  user_id: number
+  user_id: number | null
   employee_id: string
   user_name: string
   user_email: string
@@ -62,6 +62,8 @@ interface EmpRow {
   output_tokens: number
   cost: number
   currency: string
+  has_account?: boolean
+  has_usage?: boolean
 }
 
 // ─── Colors ────────────────────────────────────────────────────────────────
@@ -120,6 +122,7 @@ export default function CostAnalysis() {
   const [endDate, setEndDate] = useState(today)
   const [includeAllPC, setIncludeAllPC] = useState(false)
   const [onlyFoxlinkGroup, setOnlyFoxlinkGroup] = useState(true)
+  const [showAllEmployees, setShowAllEmployees] = useState(false)
   const [summary, setSummary] = useState<SummaryRow[]>([])
   const [monthly, setMonthly] = useState<MonthlyRow[]>([])
   const [employees, setEmployees] = useState<EmpRow[]>([])
@@ -139,10 +142,11 @@ export default function CostAnalysis() {
     setError('')
     try {
       const incParam = includeAllPC ? `&includeAllPC=1&onlyFoxlinkGroup=${onlyFoxlinkGroup ? '1' : '0'}` : ''
+      const empParam = showAllEmployees ? `&showAllEmployees=1` : ''
       const [s, m, e, t] = await Promise.all([
         api.get(`/admin/cost-stats/summary?startDate=${startDate}&endDate=${endDate}${incParam}`),
         api.get(`/admin/cost-stats/monthly?startDate=${startDate}&endDate=${endDate}${incParam}`),
-        api.get(`/admin/cost-stats/employees?startDate=${startDate}&endDate=${endDate}`),
+        api.get(`/admin/cost-stats/employees?startDate=${startDate}&endDate=${endDate}${empParam}`),
         api.get(`/admin/cost-stats/total-accounts`),
       ])
       setSummary(s.data)
@@ -157,7 +161,7 @@ export default function CostAnalysis() {
     } finally {
       setLoading(false)
     }
-  }, [startDate, endDate, includeAllPC, onlyFoxlinkGroup])
+  }, [startDate, endDate, includeAllPC, onlyFoxlinkGroup, showAllEmployees])
 
   useEffect(() => { load() }, [])
 
@@ -234,7 +238,7 @@ export default function CostAnalysis() {
   // ── CSV export URLs ──────────────────────────────────────────────────────
   const qs = `startDate=${startDate}&endDate=${endDate}`
   const incQs = includeAllPC ? `&includeAllPC=1&onlyFoxlinkGroup=${onlyFoxlinkGroup ? '1' : '0'}` : ''
-  const empExportUrl = `/api/admin/cost-stats/export/employees?${qs}${selectedPC ? `&profitCenter=${selectedPC}` : ''}${selectedDept ? `&deptCode=${selectedDept}` : ''}`
+  const empExportUrl = `/api/admin/cost-stats/export/employees?${qs}${selectedPC ? `&profitCenter=${selectedPC}` : ''}${selectedDept ? `&deptCode=${selectedDept}` : ''}${showAllEmployees ? `&showAllEmployees=1` : ''}`
   const summaryExportUrl = `/api/admin/cost-stats/export/summary?${qs}${incQs}`
   const monthlyExportUrl = `/api/admin/cost-stats/export/monthly?${qs}${incQs}`
 
@@ -290,6 +294,12 @@ export default function CostAnalysis() {
             className="rounded" />
           僅限正崴集團
         </label>
+        <label className="flex items-center gap-1.5 text-sm text-gray-700 cursor-pointer select-none">
+          <input type="checkbox" checked={showAllEmployees}
+            onChange={(e) => setShowAllEmployees(e.target.checked)}
+            className="rounded" />
+          顯示所有員工（含未使用/無帳號）
+        </label>
         {error && <span className="text-xs text-red-600">{error}</span>}
         {(selectedPC || selectedDept) && (
           <button onClick={() => { setSelectedPC(null); setSelectedDept(null) }}
@@ -306,6 +316,12 @@ export default function CostAnalysis() {
           <span>利潤中心數: <strong>{summary.length}</strong></span>
           <span>員工人數: <strong>{employees.length}</strong></span>
           <span>帳號人數: <strong>{totalAccounts ?? '-'}</strong></span>
+          {showAllEmployees && (
+            <>
+              <span className="text-red-600">未使用: <strong>{employees.filter(e => e.has_usage === false).length}</strong></span>
+              <span className="text-orange-600">無帳號: <strong>{employees.filter(e => e.has_account === false).length}</strong></span>
+            </>
+          )}
           {selectedPC && (
             <span className="text-blue-600 font-medium">
               篩選中: {summary.find(r => r.profit_center === selectedPC)?.profit_center_name || selectedPC}
@@ -530,6 +546,7 @@ export default function CostAnalysis() {
               <tr className="bg-blue-600 text-white">
                 <th className="px-3 py-2 text-left">工號</th>
                 <th className="px-3 py-2 text-left">姓名</th>
+                <th className="px-3 py-2 text-center">有帳號</th>
                 <th className="px-3 py-2 text-left">部門代碼</th>
                 <th className="px-3 py-2 text-left">部門名稱</th>
                 <th className="px-3 py-2 text-left">利潤中心</th>
@@ -542,23 +559,36 @@ export default function CostAnalysis() {
               </tr>
             </thead>
             <tbody>
-              {filteredEmps.map((r, i) => (
-                <tr key={i} className={`border-b ${i % 2 === 1 ? 'bg-blue-50' : ''}`}>
-                  <td className="px-3 py-1.5 font-mono">{r.employee_id || '-'}</td>
-                  <td className="px-3 py-1.5">{r.user_name}</td>
-                  <td className="px-3 py-1.5">{r.dept_code || '-'}</td>
-                  <td className="px-3 py-1.5">{r.dept_name || '-'}</td>
-                  <td className="px-3 py-1.5">{r.profit_center_name || r.profit_center || '-'}</td>
-                  <td className="px-3 py-1.5">{r.org_section_name || r.org_section || '-'}</td>
-                  <td className="px-3 py-1.5">{r.org_group_name || '-'}</td>
-                  <td className="px-3 py-1.5">{r.factory_code || '-'}</td>
-                  <td className="px-3 py-1.5 text-right">{fmtTokens(r.input_tokens)}</td>
-                  <td className="px-3 py-1.5 text-right">{fmtTokens(r.output_tokens)}</td>
-                  <td className="px-3 py-1.5 text-right font-medium text-blue-700">{fmtCost(r.cost, r.currency)}</td>
-                </tr>
-              ))}
+              {filteredEmps.map((r, i) => {
+                const noUsage = r.has_usage === false
+                return (
+                  <tr key={i} className={`border-b ${
+                    noUsage ? 'bg-gray-50 text-gray-500' :
+                    i % 2 === 1 ? 'bg-blue-50' : ''
+                  }`}>
+                    <td className="px-3 py-1.5 font-mono">{r.employee_id || '-'}</td>
+                    <td className="px-3 py-1.5">{r.user_name}</td>
+                    <td className="px-3 py-1.5 text-center">
+                      {r.has_account === false ? (
+                        <span className="inline-block px-1.5 py-0.5 rounded text-[10px] bg-red-100 text-red-700 font-medium">無</span>
+                      ) : (
+                        <span className="inline-block px-1.5 py-0.5 rounded text-[10px] bg-green-100 text-green-700 font-medium">✓</span>
+                      )}
+                    </td>
+                    <td className="px-3 py-1.5">{r.dept_code || '-'}</td>
+                    <td className="px-3 py-1.5">{r.dept_name || '-'}</td>
+                    <td className="px-3 py-1.5">{r.profit_center_name || r.profit_center || '-'}</td>
+                    <td className="px-3 py-1.5">{r.org_section_name || r.org_section || '-'}</td>
+                    <td className="px-3 py-1.5">{r.org_group_name || '-'}</td>
+                    <td className="px-3 py-1.5">{r.factory_code || '-'}</td>
+                    <td className="px-3 py-1.5 text-right">{fmtTokens(r.input_tokens)}</td>
+                    <td className="px-3 py-1.5 text-right">{fmtTokens(r.output_tokens)}</td>
+                    <td className="px-3 py-1.5 text-right font-medium text-blue-700">{fmtCost(r.cost, r.currency)}</td>
+                  </tr>
+                )
+              })}
               {filteredEmps.length === 0 && (
-                <tr><td colSpan={11} className="px-3 py-4 text-center text-gray-400">無資料</td></tr>
+                <tr><td colSpan={12} className="px-3 py-4 text-center text-gray-400">無資料</td></tr>
               )}
             </tbody>
           </table>

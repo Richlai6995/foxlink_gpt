@@ -83,7 +83,7 @@ async function getEmployeeOrgData(employeeNos) {
       EE.EMPLOYEE_NO,
       EE.EMAIL,
       EE.DEPT_CODE,
-      EE.DEPT_NAME,
+      ED.DEPT_DESC AS DEPT_NAME,
       EE.PROFIT_CENTER,
       OCF.PROFIT_CENTER_NAME,
       OCF.ORG_SECTION,
@@ -179,4 +179,56 @@ async function getAllProfitCenters(onlyFoxlinkGroup = false) {
   }
 }
 
-module.exports = { isConfigured, execute, getEmployeeOrgData, getIndirectEmpCountByPC, getAllProfitCenters };
+/**
+ * 所有在職「間接員工」清單（CURRENT_FLAG='Y', DIT_CODE='I', END_DATE IS NULL）
+ * 用於「顯示所有員工」分析：找出未建立帳號 / 未使用系統的人
+ * 不限正崴集團（依需求）
+ */
+async function getAllIndirectEmployees() {
+  if (!isConfigured()) return [];
+  initClient();
+
+  const sql = `
+    SELECT
+      EE.C_NAME,
+      EE.EMPLOYEE_NO,
+      EE.EMAIL,
+      EE.DEPT_CODE,
+      ED.DEPT_DESC AS DEPT_NAME,
+      EE.PROFIT_CENTER,
+      OCF.PROFIT_CENTER_NAME,
+      OCF.ORG_SECTION,
+      OCF.ORG_SECTION_NAME,
+      OCF.ORG_GROUP_NAME,
+      ED.FACTORY_CODE
+    FROM FL_EMP_EXP_ALL EE,
+         FL_EMP_DEPT ED,
+         (
+           SELECT CF.ORG_GROUP_NAME,
+                  CF.ORG_SECTION,
+                  CF.ORG_SECTION_NAME,
+                  CF.PROFIT_CENTER,
+                  CF.PROFIT_CENTER_NAME
+           FROM org_code_factory CF
+           WHERE CF.DATE_TO IS NULL
+           GROUP BY CF.ORG_GROUP_NAME, CF.ORG_SECTION, CF.ORG_SECTION_NAME,
+                    CF.PROFIT_CENTER, CF.PROFIT_CENTER_NAME
+         ) OCF
+    WHERE ED.STOP_DATE IS NULL
+      AND EE.CURRENT_FLAG = 'Y'
+      AND EE.END_DATE IS NULL
+      AND EE.DIT_CODE = 'I'
+      AND EE.DEPT_CODE = ED.DEPT_CODE
+      AND EE.PROFIT_CENTER = OCF.PROFIT_CENTER(+)
+  `;
+
+  try {
+    const result = await execute(sql);
+    return result ? result.rows : [];
+  } catch (e) {
+    console.error('[ERP] getAllIndirectEmployees error:', e.message);
+    return [];
+  }
+}
+
+module.exports = { isConfigured, execute, getEmployeeOrgData, getIndirectEmpCountByPC, getAllProfitCenters, getAllIndirectEmployees };
