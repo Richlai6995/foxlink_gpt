@@ -2504,6 +2504,20 @@ async function runMigrations(db) {
   )`);
 
   await safeAddColumn('skills', 'erp_tool_id', 'NUMBER');
+
+  // ERP Tool v2 欄位
+  await safeAddColumn('erp_tools', 'rate_limit_per_user', 'NUMBER');
+  await safeAddColumn('erp_tools', 'rate_limit_global',   'NUMBER');
+  await safeAddColumn('erp_tools', 'rate_limit_window',   "VARCHAR2(20) DEFAULT 'minute'");
+  await safeAddColumn('erp_tools', 'allow_dry_run',       'NUMBER(1) DEFAULT 1');
+
+  // Backfill:為舊 ERP tool 補建代理 skill row
+  try {
+    const proxySvc = require('./services/erpToolProxySkill');
+    await proxySvc.backfillAll(db);
+  } catch (e) {
+    console.warn('[Migration] erp proxy skill backfill skipped:', e.message);
+  }
 }
 
 // ─── Default DB Source migration ───────────────────────────────────────────────

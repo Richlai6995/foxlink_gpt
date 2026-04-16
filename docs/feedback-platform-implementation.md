@@ -661,3 +661,40 @@ RULES:
 `generationConfig: { temperature: 0, topP: 1 }` 確保可重現。
 
 **已知限制**：LLM 偶爾對超短（< 5 char）或純技術內容誤判 → regex fallback 保底。
+
+---
+
+## Help 手冊同步更新（2026-04-17）
+
+配合 PR 1-5 功能完成，同步更新使用者手冊與管理員手冊。
+
+### 使用者手冊（`u-feedback`，DB seed）
+
+編輯 `server/data/_helpSeed_part2.js` 的 `u-feedback` section，`last_modified` bump 至 `2026-04-17`。
+
+**新增 subsection**
+- **結案工單如何幫助其他人**：脫敏進 KB、附件 Vision 索引、細粒度檢索、知識庫列表可見
+- **ERP 類問題特殊處理**：選 ERP 分類 → 通知不同團隊、進獨立 KB、處理流程不變
+- **管理員指引 pointer**：一行說明「設定部分請參考管理員手冊 → 問題反饋管理」
+
+**修改**
+- 附件上傳 subsection 加：`Ctrl+V 貼上的截圖會自動加上時戳命名（paste_MMDDHHmmss.ext）`
+- FAQ 更新可見性說明（含 Cortex admin / ERP admin 分別）、知識庫脫敏 FAQ
+- 移除原「管理員專屬功能」subsection（設定內容遷移到 admin 手冊）
+
+### 管理員手冊（`a-feedback`，React JSX）
+
+在 `client/src/pages/HelpPage.tsx` 的 `AdminManual` 新增 `a-feedback` section。
+
+**涵蓋**
+- 身份與可見性矩陣表（Cortex admin / 雙重 / ERP admin / 一般）
+- 分類管理操作（icon picker / drag 排序 / ERP flag / 翻譯）
+- ERP 分流架構對照表（Webex room / 群組成員 / 站內通知 / 知識庫 / 接單權限）
+- 指派 ERP 管理員操作步驟
+- Webex 分流狀態機（B 方案 Stage 1 / 2 + 轉單流程）
+- 知識庫架構（feedback-public / feedback-erp / archive 表 + 結案執行流）
+- 歷史工單快照（Archive）admin 操作說明
+- 歷史回填腳本 `backfillFeedbackKB.js` 用法 + 參數 + 特性表
+- 脫敏規則表（REPLACE / KEEP 對照）
+- 問題排除表（7 種常見問題 + 原因 + 解法）
+- 相關檔案清單表

@@ -292,24 +292,66 @@ html[data-theme] [data-region="sidebar"] .hover\:bg-slate-800:hover {
   background-color: var(--t-bg-card-hover) !important;
 }
 
-/* Dark-dimmed sidebar 文字提亮 — 原本 text-slate-400/500/600 在暖灰底下太暗
-   （主區用 --t-text-dim 夠用，但 sidebar 的對比不夠）
-   特異性 [0,3,1] 高於 main 區的 text override [0,2,1]，在 sidebar 區內會贏 */
-html[data-theme="dark-dimmed"] [data-region="sidebar"] .text-slate-400,
+/* ── Sidebar 深色底下的文字提亮 — 套用到 dark 與 dark-dimmed ──
+   Admin 側欄原本設計為 light UI（bg-white + text-slate-600 深字），
+   我強制把 bg flip 成 sidebar-bg（dark 下是 #0f172a，dark-dimmed 是 #1c1e24），
+   但原本的 slate-600/700 深字在深底上變成看不到。這裡統一flip。
+   只 flip「原本深字」色階（600+），不動 300/400 淺字（主 Sidebar 用的，在 dark 下本來就顯眼）*/
+html[data-theme="dark"] [data-region="sidebar"] .text-slate-600,
+html[data-theme="dark"] [data-region="sidebar"] .text-slate-700,
+html[data-theme="dark"] [data-region="sidebar"] .text-slate-800,
+html[data-theme="dark"] [data-region="sidebar"] .text-slate-900,
+html[data-theme="dark"] [data-region="sidebar"] .text-gray-600,
+html[data-theme="dark"] [data-region="sidebar"] .text-gray-700,
+html[data-theme="dark"] [data-region="sidebar"] .text-gray-800,
+html[data-theme="dark"] [data-region="sidebar"] .text-gray-900,
+html[data-theme="dark"] [data-region="sidebar"] .text-black,
+html[data-theme="dark-dimmed"] [data-region="sidebar"] .text-slate-200,
 html[data-theme="dark-dimmed"] [data-region="sidebar"] .text-slate-300,
-html[data-theme="dark-dimmed"] [data-region="sidebar"] .text-slate-200 {
-  color: var(--t-text) !important;        /* 主要按鈕 / 項目文字 → 近白 */
-}
+html[data-theme="dark-dimmed"] [data-region="sidebar"] .text-slate-400,
 html[data-theme="dark-dimmed"] [data-region="sidebar"] .text-slate-500,
-html[data-theme="dark-dimmed"] [data-region="sidebar"] .text-slate-600 {
-  color: var(--t-text-secondary) !important;  /* 分組 label / employee_id → 亮灰 */
+html[data-theme="dark-dimmed"] [data-region="sidebar"] .text-slate-600,
+html[data-theme="dark-dimmed"] [data-region="sidebar"] .text-slate-700,
+html[data-theme="dark-dimmed"] [data-region="sidebar"] .text-slate-800,
+html[data-theme="dark-dimmed"] [data-region="sidebar"] .text-slate-900,
+html[data-theme="dark-dimmed"] [data-region="sidebar"] .text-gray-400,
+html[data-theme="dark-dimmed"] [data-region="sidebar"] .text-gray-500,
+html[data-theme="dark-dimmed"] [data-region="sidebar"] .text-gray-600,
+html[data-theme="dark-dimmed"] [data-region="sidebar"] .text-gray-700,
+html[data-theme="dark-dimmed"] [data-region="sidebar"] .text-gray-800,
+html[data-theme="dark-dimmed"] [data-region="sidebar"] .text-gray-900,
+html[data-theme="dark-dimmed"] [data-region="sidebar"] .text-black {
+  color: #e6edf3 !important;   /* 近白，高對比 */
 }
-/* Sidebar hover text — 保持同級或更亮 */
+
+/* 次要小字（label、工號）— 稍暗保層次 */
+html[data-theme="dark"] [data-region="sidebar"] .text-slate-500.text-xs,
+html[data-theme="dark"] [data-region="sidebar"] .text-slate-600.text-xs,
+html[data-theme="dark"] [data-region="sidebar"] .text-gray-500.text-xs,
+html[data-theme="dark"] [data-region="sidebar"] .text-gray-600.text-xs,
+html[data-theme="dark-dimmed"] [data-region="sidebar"] .text-slate-400.text-xs,
+html[data-theme="dark-dimmed"] [data-region="sidebar"] .text-slate-500.text-xs,
+html[data-theme="dark-dimmed"] [data-region="sidebar"] .text-slate-600.text-xs,
+html[data-theme="dark-dimmed"] [data-region="sidebar"] .text-gray-400.text-xs,
+html[data-theme="dark-dimmed"] [data-region="sidebar"] .text-gray-500.text-xs,
+html[data-theme="dark-dimmed"] [data-region="sidebar"] .text-gray-600.text-xs {
+  color: #b1bac4 !important;
+}
+
+/* Hover text — 全白 */
+html[data-theme="dark"] [data-region="sidebar"] .hover\:text-slate-700:hover,
+html[data-theme="dark"] [data-region="sidebar"] .hover\:text-slate-800:hover,
+html[data-theme="dark"] [data-region="sidebar"] .hover\:text-slate-900:hover,
+html[data-theme="dark-dimmed"] [data-region="sidebar"] .hover\:text-slate-100:hover,
 html[data-theme="dark-dimmed"] [data-region="sidebar"] .hover\:text-slate-200:hover,
 html[data-theme="dark-dimmed"] [data-region="sidebar"] .hover\:text-slate-300:hover,
+html[data-theme="dark-dimmed"] [data-region="sidebar"] .hover\:text-slate-700:hover,
+html[data-theme="dark-dimmed"] [data-region="sidebar"] .hover\:text-slate-800:hover,
 html[data-theme="dark-dimmed"] [data-region="sidebar"] .hover\:text-white:hover {
   color: #ffffff !important;
 }
+
+/* Active tab（Admin 的 text-blue-600）保留藍色強調，由主區 text-blue override 處理 */
 
 /* ─── dark-dimmed 專屬：把原本用白底的頁面全面 flip 成深色 ─────────────
    Admin / Help / Chat 輸入區等 UI 原本設計為 light，dark-dimmed 時要全暗

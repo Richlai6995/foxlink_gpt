@@ -7,6 +7,10 @@ import { fmtTW } from '../lib/fmtTW'
 import ChatWindow from '../components/ChatWindow'
 import MessageInput, { type MessageInputHandle } from '../components/MessageInput'
 import ResearchModal from '../components/ResearchModal'
+import ErpConfirmDialog, { type PendingErpConfirm } from '../components/chat/ErpConfirmDialog'
+import ErpToolPicker from '../components/chat/ErpToolPicker'
+import ErpToolInvokeModal, { type ResultMode } from '../components/chat/ErpToolInvokeModal'
+import type { ErpTool } from '../components/admin/ErpToolsPanel'
 import type { ChatSession, ChatMessage, ModelType, GeneratedFile, LlmModel } from '../types'
 import api from '../lib/api'
 import { copyText } from '../lib/clipboard'
@@ -50,6 +54,11 @@ export default function ChatPage() {
   const [streaming, setStreaming] = useState(false)
   const [streamingContent, setStreamingContent] = useState('')
   const [streamingStatus, setStreamingStatus] = useState('')
+  const [erpPendingConfirm, setErpPendingConfirm] = useState<PendingErpConfirm | null>(null)
+  const [erpExecutedNotices, setErpExecutedNotices] = useState<Array<{ tool_code: string; rows: number; duration_ms: number; at: number }>>([])
+  const [erpPickerOpen, setErpPickerOpen] = useState(false)
+  const [erpInvoking, setErpInvoking] = useState<ErpTool | null>(null)
+  const [erpPendingContext, setErpPendingContext] = useState<string | null>(null)
   const [reasoningEffort, setReasoningEffort] = useState<string>(
     () => localStorage.getItem('reasoningEffort') || ''
   )
@@ -150,11 +159,13 @@ export default function ChatPage() {
   const [selectedMcpIds,  setSelectedMcpIds]  = useState<Set<number>>(new Set())
   const [selectedDifyIds, setSelectedDifyIds] = useState<Set<number>>(new Set())
   const [selectedKbIds,   setSelectedKbIds]   = useState<Set<string>>(new Set())
+  const [selectedErpIds,  setSelectedErpIds]  = useState<Set<number>>(new Set())
   const [showMcpPanel,    setShowMcpPanel]    = useState(false)
   const [showDifyPanel,   setShowDifyPanel]   = useState(false)
   const [showKbPanel,     setShowKbPanel]     = useState(false)
   const [allMcpServers,   setAllMcpServers]   = useState<ToolItem[]>([])
   const [allDifyKbs,      setAllDifyKbs]      = useState<ToolItem[]>([])
+  const [allErpTools,     setAllErpTools]     = useState<ErpTool[]>([])
   const [allSelfKbs,      setAllSelfKbs]      = useState<ToolItem[]>([])
   const mcpPanelRef      = useRef<HTMLDivElement>(null)
   const difyPanelRef     = useRef<HTMLDivElement>(null)
@@ -169,7 +180,14 @@ export default function ChatPage() {
   const [difyOrder,   setDifyOrder]   = useState<number[]>([])
   const [difyHidden,  setDifyHidden]  = useState<Set<number>>(new Set())
   const [difySearch,  setDifySearch]  = useState('')
+  const [showDifyHiddenSection, setShowDifyHiddenSection] = useState(false)
+  const [showMcpHiddenSection, setShowMcpHiddenSection] = useState(false)
+  const [showKbHiddenSection, setShowKbHiddenSection] = useState(false)
+  const [showSkillHiddenSection, setShowSkillHiddenSection] = useState(false)
   const difyDragSrc = useRef<number | null>(null)
+  const [erpOrder,    setErpOrder]    = useState<number[]>([])
+  const [erpHidden,   setErpHidden]   = useState<Set<number>>(new Set())
+  const erpDragSrc = useRef<number | null>(null)
   const [kbOrder,     setKbOrder]     = useState<string[]>([])
   const [kbHidden,    setKbHidden]    = useState<Set<string>>(new Set())
   const [kbSearch,    setKbSearch]    = useState('')
@@ -189,17 +207,21 @@ export default function ChatPage() {
         .map(t => ({ id: t.id as number, name: t.name_zh || t.name, description: t.description || null, _isOverride: true } as any))
       setAllMcpServers([...authorized, ...overrideMcps])
     } catch {}
-    setShowMcpPanel(true); setShowDifyPanel(false); setShowKbPanel(false)
+    setShowMcpPanel(true); setShowDifyPanel(false); setShowKbPanel(false); setShowMcpHiddenSection(false)
   }, [overrideTools])
   const openDifyPanel = useCallback(async () => {
     try {
-      const r = await api.get('/dify-kb/my')
+      const [r, er] = await Promise.all([
+        api.get('/dify-kb/my'),
+        api.get('/erp-tools/my/list').catch(() => ({ data: [] })),
+      ])
       const authorized: ToolItem[] = r.data || []
       const overrideDify = overrideTools.filter(t => t.type === 'dify' && !authorized.some(a => String(a.id) === String(t.id)))
         .map(t => ({ id: t.id as number, name: t.name_zh || t.name, description: t.description || null, _isOverride: true } as any))
       setAllDifyKbs([...authorized, ...overrideDify])
+      setAllErpTools(er.data || [])
     } catch {}
-    setShowDifyPanel(true); setShowMcpPanel(false); setShowKbPanel(false)
+    setShowDifyPanel(true); setShowMcpPanel(false); setShowKbPanel(false); setShowDifyHiddenSection(false)
   }, [overrideTools])
   const openKbPanel = useCallback(async () => {
     try {
@@ -209,7 +231,7 @@ export default function ChatPage() {
         .map(t => ({ id: t.id as string, name: t.name_zh || t.name, description: t.description || null, chunk_count: 1, _isOverride: true } as any))
       setAllSelfKbs([...authorized, ...overrideKbs])
     } catch {}
-    setShowKbPanel(true); setShowMcpPanel(false); setShowDifyPanel(false)
+    setShowKbPanel(true); setShowMcpPanel(false); setShowDifyPanel(false); setShowKbHiddenSection(false)
   }, [overrideTools])
 
   // Close tool panels on outside click
@@ -233,6 +255,8 @@ export default function ChatPage() {
       setMcpHidden(new Set(JSON.parse(localStorage.getItem(`fl_mcp_hidden_${uid}`) || '[]')))
       setDifyOrder(JSON.parse(localStorage.getItem(`fl_dify_order_${uid}`) || '[]'))
       setDifyHidden(new Set(JSON.parse(localStorage.getItem(`fl_dify_hidden_${uid}`) || '[]')))
+      setErpOrder(JSON.parse(localStorage.getItem(`fl_erp_order_${uid}`) || '[]'))
+      setErpHidden(new Set(JSON.parse(localStorage.getItem(`fl_erp_hidden_${uid}`) || '[]')))
       setKbOrder(JSON.parse(localStorage.getItem(`fl_kb_order_${uid}`) || '[]'))
       setKbHidden(new Set(JSON.parse(localStorage.getItem(`fl_kb_hidden_${uid}`) || '[]')))
       setSkillOrder(JSON.parse(localStorage.getItem(`fl_skill_order_${uid}`) || '[]'))
@@ -248,11 +272,13 @@ export default function ChatPage() {
     localStorage.setItem(`fl_mcp_hidden_${uid}`,   JSON.stringify([...mcpHidden]))
     localStorage.setItem(`fl_dify_order_${uid}`,   JSON.stringify(difyOrder))
     localStorage.setItem(`fl_dify_hidden_${uid}`,  JSON.stringify([...difyHidden]))
+    localStorage.setItem(`fl_erp_order_${uid}`,    JSON.stringify(erpOrder))
+    localStorage.setItem(`fl_erp_hidden_${uid}`,   JSON.stringify([...erpHidden]))
     localStorage.setItem(`fl_kb_order_${uid}`,     JSON.stringify(kbOrder))
     localStorage.setItem(`fl_kb_hidden_${uid}`,    JSON.stringify([...kbHidden]))
     localStorage.setItem(`fl_skill_order_${uid}`,  JSON.stringify(skillOrder))
     localStorage.setItem(`fl_skill_hidden_${uid}`, JSON.stringify([...skillHidden]))
-  }, [mcpOrder, mcpHidden, difyOrder, difyHidden, kbOrder, kbHidden, skillOrder, skillHidden, user])
+  }, [mcpOrder, mcpHidden, difyOrder, difyHidden, erpOrder, erpHidden, kbOrder, kbHidden, skillOrder, skillHidden, user])
 
   interface BudgetPeriod { limit: number; spent: number; remaining: number; exceeded: boolean }
   interface BudgetInfo { isAdmin: boolean; daily: BudgetPeriod | null; weekly: BudgetPeriod | null; monthly: BudgetPeriod | null }
@@ -339,6 +365,7 @@ export default function ChatPage() {
       setSelectedMcpIds(new Set((res.data.used_mcp_ids || []).map(Number)))
       setSelectedDifyIds(new Set((res.data.used_dify_ids || []).map(Number)))
       setSelectedKbIds(new Set(res.data.used_kb_ids || []))
+      setSelectedErpIds(new Set((res.data.used_erp_tool_ids || []).map(Number)))
       // Sync model selector to the session's model (important for image-gen sessions)
       if (res.data.session?.model) {
         setModel(res.data.session.model as ModelType)
@@ -510,13 +537,14 @@ export default function ChatPage() {
   const openSkillPanel = useCallback(async () => {
     try {
       const res = await api.get('/skills')
-      const authorized: Skill[] = res.data || []
+      // 過濾 erp_proc 代理 row(ERP 工具走獨立 🛢 按鈕,不在技能面板列出)
+      const authorized: Skill[] = (res.data || []).filter((s: any) => s.type !== 'erp_proc')
       const overrideSkillItems = overrideTools.filter(t => t.type === 'skill' && !authorized.some(a => String(a.id) === String(t.id)))
         .map(t => ({ id: Number(t.id), name: t.name_zh || t.name, icon: t.icon || '🔧', description: t.description || '', type: t.skill_type || 'prompt', _isOverride: true } as any))
       setAllSkills([...authorized, ...overrideSkillItems])
     } catch { }
     setSkillSearch('')
-    setShowSkillPanel(true)
+    setShowSkillPanel(true); setShowSkillHiddenSection(false)
   }, [overrideTools])
 
   const doSaveSkills = useCallback(async (skillVariables?: Record<number, Record<string, any>>) => {
@@ -645,6 +673,7 @@ export default function ChatPage() {
       formData.append('mcp_server_ids', JSON.stringify([...selectedMcpIds]))
       formData.append('dify_kb_ids',    JSON.stringify([...selectedDifyIds]))
       formData.append('self_kb_ids',    JSON.stringify([...selectedKbIds]))
+      formData.append('erp_tool_ids',   JSON.stringify([...selectedErpIds]))
 
       // ── AbortController 在 fetch 之前設好，停止按鈕可立即生效 ──
       const controller = new AbortController()
@@ -742,6 +771,14 @@ export default function ChatPage() {
                   filename: event.filename || 'output.mp3',
                   publicUrl: event.audio_url,
                 })
+              } else if (event.type === 'erp_confirm') {
+                setErpPendingConfirm({
+                  tool_id: event.tool_id,
+                  tool_code: event.tool_code,
+                  confirmation_token: event.confirmation_token,
+                  summary: event.summary,
+                  args: event.args || {},
+                })
               } else if (event.type === 'error') {
                 streamError = event.message || '發生錯誤'
                 streamDone = true
@@ -806,7 +843,7 @@ export default function ChatPage() {
         abortRef.current = null
       }
     },
-    [streaming, currentSessionId, model, loadSessions, pendingSkillIds, selectedMcpIds, selectedDifyIds, selectedKbIds]
+    [streaming, currentSessionId, model, loadSessions, pendingSkillIds, selectedMcpIds, selectedDifyIds, selectedKbIds, selectedErpIds]
   )
 
   const handleCopy = useCallback((text: string) => {
@@ -965,7 +1002,7 @@ export default function ChatPage() {
                         {t('chat.topbar.mcpEmpty')}
                         {isAdmin && <div className="mt-2"><a href="/admin" className="text-blue-500 hover:underline flex items-center justify-center gap-1"><Settings size={10} />前往設定授權</a></div>}
                       </div>
-                    ) : <>{_vis.map(s => <McpRow key={s.id} s={s} isHid={false} />)}{_hid.length > 0 && <><div className="px-2 pt-1.5 pb-0.5 text-xs text-slate-400 border-t border-slate-100 mt-1">{t('common.hidden')} ({_hid.length})</div>{_hid.map(s => <McpRow key={s.id} s={s} isHid={true} />)}</>}</>}
+                    ) : <>{_vis.map(s => <McpRow key={s.id} s={s} isHid={false} />)}{_hid.length > 0 && <><button onClick={() => setShowMcpHiddenSection(p => !p)} className="w-full px-2 pt-1.5 pb-0.5 text-xs text-slate-400 border-t border-slate-100 mt-1 flex items-center gap-1 hover:text-slate-600"><ChevronDown size={12} className={`transition ${showMcpHiddenSection ? '' : '-rotate-90'}`} />{t('common.hidden')} ({_hid.length})</button>{showMcpHiddenSection && _hid.map(s => <McpRow key={s.id} s={s} isHid={true} />)}</>}</>}
                   </div>
                   <div className="p-2 border-t border-slate-100 flex justify-between items-center">
                     <button onClick={() => setSelectedMcpIds(new Set())} className="text-xs text-slate-400 hover:text-red-500 px-2 py-1">{t('chat.topbar.clear')}</button>
@@ -978,14 +1015,19 @@ export default function ChatPage() {
 
           {/* ── API Connectors button (was DIFY KB) ── */}
           <div className="relative" ref={difyPanelRef}>
-            <button
-              onClick={openDifyPanel}
-              className={`inline-flex items-center gap-1.5 text-xs border rounded-lg px-2.5 py-1 transition ${selectedDifyIds.size > 0 ? 'text-amber-600 border-amber-300 bg-amber-50 hover:bg-amber-100' : 'text-slate-500 border-slate-200 hover:text-amber-600 hover:border-amber-300'}`}
-              title={t('chat.topbar.dify')}
-            >
-              <Zap size={13} />
-              {selectedDifyIds.size > 0 ? t('chat.topbar.difyCount', { count: selectedDifyIds.size }) : t('chat.topbar.dify')}
-            </button>
+            {(() => {
+              const apiTotal = selectedDifyIds.size + selectedErpIds.size
+              return (
+                <button
+                  onClick={openDifyPanel}
+                  className={`inline-flex items-center gap-1.5 text-xs border rounded-lg px-2.5 py-1 transition ${apiTotal > 0 ? 'text-amber-600 border-amber-300 bg-amber-50 hover:bg-amber-100' : 'text-slate-500 border-slate-200 hover:text-amber-600 hover:border-amber-300'}`}
+                  title={t('chat.topbar.dify')}
+                >
+                  <Zap size={13} />
+                  {apiTotal > 0 ? t('chat.topbar.difyCount', { count: apiTotal }) : t('chat.topbar.dify')}
+                </button>
+              )
+            })()}
             {showDifyPanel && (() => {
               const _q = difySearch.toLowerCase()
               const _base = applyOrder(allDifyKbs, difyOrder)
@@ -1040,16 +1082,93 @@ export default function ChatPage() {
                         className="w-full pl-7 pr-3 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-300" />
                     </div>
                   </div>
-                  <div className="max-h-56 overflow-y-auto p-2 space-y-0.5">
-                    {allDifyKbs.length === 0 ? (
+                  <div className="max-h-72 overflow-y-auto p-2 space-y-0.5">
+                    {/* DIFY / REST 區 */}
+                    {allDifyKbs.length > 0 && (
+                      <div className="px-2 pt-0.5 pb-1 text-[10px] font-medium text-slate-500 uppercase tracking-wider">DIFY / REST</div>
+                    )}
+                    {allDifyKbs.length === 0 && allErpTools.length === 0 ? (
                       <div className="text-center py-6 text-slate-400 text-xs">
                         {t('chat.topbar.difyEmpty')}
                         {isAdmin && <div className="mt-2"><a href="/admin" className="text-blue-500 hover:underline flex items-center justify-center gap-1"><Settings size={10} />前往設定授權</a></div>}
                       </div>
-                    ) : <>{_vis.map(s => <DifyRow key={s.id} s={s} isHid={false} />)}{_hid.length > 0 && <><div className="px-2 pt-1.5 pb-0.5 text-xs text-slate-400 border-t border-slate-100 mt-1">{t('common.hidden')} ({_hid.length})</div>{_hid.map(s => <DifyRow key={s.id} s={s} isHid={true} />)}</>}</>}
+                    ) : (
+                      <>
+                        {_vis.map(s => <DifyRow key={s.id} s={s} isHid={false} />)}
+                        {_hid.length > 0 && <>
+                          <button onClick={() => setShowDifyHiddenSection(p => !p)}
+                            className="w-full px-2 pt-1.5 pb-0.5 text-xs text-slate-400 border-t border-slate-100 mt-1 flex items-center gap-1 hover:text-slate-600">
+                            <ChevronDown size={12} className={`transition ${showDifyHiddenSection ? '' : '-rotate-90'}`} />
+                            {t('common.hidden')} ({_hid.length})
+                          </button>
+                          {showDifyHiddenSection && _hid.map(s => <DifyRow key={s.id} s={s} isHid={true} />)}
+                        </>}
+                      </>
+                    )}
+
+                    {/* ERP Procedure 區 */}
+                    {allErpTools.length > 0 && (() => {
+                      const erpQ = difySearch.toLowerCase()
+                      const erpBase = applyOrder(allErpTools.map(e => ({ ...e, id: e.id as number })), erpOrder)
+                      const erpMatch = (e: ErpTool) => !erpQ || e.name.toLowerCase().includes(erpQ) || e.code.toLowerCase().includes(erpQ) || (e.description || '').toLowerCase().includes(erpQ)
+                      const erpVis = erpBase.filter(e => !erpHidden.has(e.id) && erpMatch(e))
+                      const erpHid = erpBase.filter(e => erpHidden.has(e.id) && erpMatch(e))
+                      const ErpRow = ({ e, isHid }: { e: ErpTool; isHid: boolean }) => {
+                        const id = e.id; const picked = !isHid && selectedErpIds.has(id)
+                        return (
+                          <div key={id} draggable={!erpQ}
+                            onDragStart={() => { erpDragSrc.current = id }}
+                            onDragOver={ev => ev.preventDefault()}
+                            onDrop={() => {
+                              if (erpDragSrc.current == null || erpDragSrc.current === id) return
+                              const ids = applyOrder(allErpTools.map(x => ({ ...x, id: x.id as number })), erpOrder).map(x => x.id)
+                              const f = ids.indexOf(erpDragSrc.current!); const tt = ids.indexOf(id)
+                              if (f !== -1 && tt !== -1) setErpOrder(reorderArr(ids, f, tt))
+                              erpDragSrc.current = null
+                            }}
+                            className={`flex items-center gap-2 px-2 py-1.5 rounded-lg border transition group ${isHid ? 'opacity-40 border-transparent' : picked ? 'bg-amber-50 border-amber-200' : 'hover:bg-slate-50 border-transparent'}`}
+                          >
+                            {!erpQ && <GripVertical size={12} className="text-slate-300 cursor-grab flex-shrink-0" />}
+                            {!isHid
+                              ? <button onClick={() => setSelectedErpIds(prev => { const n = new Set(prev); picked ? n.delete(id) : n.add(id); return n })} className={`w-4 h-4 rounded border flex items-center justify-center flex-shrink-0 ${picked ? 'bg-amber-500 border-amber-500' : 'border-slate-300'}`}>{picked && <Check size={10} className="text-white" />}</button>
+                              : <div className="w-4 h-4 flex-shrink-0" />
+                            }
+                            <button onClick={() => setErpHidden(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n })}
+                              className={`w-4 h-4 rounded-full flex items-center justify-center flex-shrink-0 bg-blue-500 hover:bg-blue-700 text-white transition-all ${isHid ? '' : 'opacity-0 group-hover:opacity-100'}`}
+                              title={isHid ? t('common.unhide') : t('common.hide')}>
+                              {isHid ? <Eye size={9} /> : <EyeOff size={9} />}
+                            </button>
+                            <div className="flex-1 min-w-0 cursor-pointer" onClick={() => { if (!isHid) setSelectedErpIds(prev => { const n = new Set(prev); picked ? n.delete(id) : n.add(id); return n }) }}>
+                              <p className="text-xs font-medium text-slate-800 whitespace-nowrap flex items-center gap-1">
+                                {e.name}
+                                {e.access_mode === 'WRITE' && <span className="text-[9px] px-1 rounded bg-red-50 text-red-700 border border-red-200">WRITE</span>}
+                              </p>
+                              <p className="text-[10px] text-slate-400 font-mono whitespace-nowrap">{e.code}</p>
+                            </div>
+                          </div>
+                        )
+                      }
+                      return (
+                        <>
+                          <div className="px-2 pt-2 pb-1 text-[10px] font-medium text-slate-500 uppercase tracking-wider border-t border-slate-100 mt-2 flex items-center gap-1">
+                            <Database size={10} /> ERP Procedure
+                          </div>
+                          {erpVis.map(e => <ErpRow key={e.id} e={e} isHid={false} />)}
+                          {erpHid.length > 0 && <>
+                            <button onClick={() => setShowDifyHiddenSection(p => !p)}
+                              className="w-full px-2 pt-1.5 pb-0.5 text-xs text-slate-400 border-t border-slate-100 mt-1 flex items-center gap-1 hover:text-slate-600">
+                              <ChevronDown size={12} className={`transition ${showDifyHiddenSection ? '' : '-rotate-90'}`} />
+                              {t('common.hidden')} ({erpHid.length})
+                            </button>
+                            {showDifyHiddenSection && erpHid.map(e => <ErpRow key={e.id} e={e} isHid={true} />)}
+                          </>}
+                        </>
+                      )
+                    })()}
                   </div>
                   <div className="p-2 border-t border-slate-100 flex justify-between items-center">
-                    <button onClick={() => setSelectedDifyIds(new Set())} className="text-xs text-slate-400 hover:text-red-500 px-2 py-1">{t('chat.topbar.clear')}</button>
+                    <button onClick={() => { setSelectedDifyIds(new Set()); setSelectedErpIds(new Set()) }}
+                      className="text-xs text-slate-400 hover:text-red-500 px-2 py-1">{t('chat.topbar.clear')}</button>
                     <button onClick={() => setShowDifyPanel(false)} className="px-3 py-1.5 text-xs bg-amber-500 text-white rounded-lg hover:bg-amber-600">{t('chat.topbar.confirm')}</button>
                   </div>
                 </div>
@@ -1127,7 +1246,7 @@ export default function ChatPage() {
                         {t('chat.topbar.kbEmpty')}
                         {isAdmin && <div className="mt-2"><a href="/admin" className="text-blue-500 hover:underline flex items-center justify-center gap-1"><Settings size={10} />前往設定授權</a></div>}
                       </div>
-                    ) : <>{_vis.map(s => <KbRow key={s.id} s={s} isHid={false} />)}{_hid.length > 0 && <><div className="px-2 pt-1.5 pb-0.5 text-xs text-slate-400 border-t border-slate-100 mt-1">{t('common.hidden')} ({_hid.length})</div>{_hid.map(s => <KbRow key={s.id} s={s} isHid={true} />)}</>}</>}
+                    ) : <>{_vis.map(s => <KbRow key={s.id} s={s} isHid={false} />)}{_hid.length > 0 && <><button onClick={() => setShowKbHiddenSection(p => !p)} className="w-full px-2 pt-1.5 pb-0.5 text-xs text-slate-400 border-t border-slate-100 mt-1 flex items-center gap-1 hover:text-slate-600"><ChevronDown size={12} className={`transition ${showKbHiddenSection ? '' : '-rotate-90'}`} />{t('common.hidden')} ({_hid.length})</button>{showKbHiddenSection && _hid.map(s => <KbRow key={s.id} s={s} isHid={true} />)}</>}</>}
                   </div>
                   <div className="p-2 border-t border-slate-100 flex justify-between items-center">
                     <button onClick={() => setSelectedKbIds(new Set())} className="text-xs text-slate-400 hover:text-red-500 px-2 py-1">{t('chat.topbar.clear')}</button>
@@ -1221,8 +1340,12 @@ export default function ChatPage() {
                           )
                         })}
                         {_hid.length > 0 && <>
-                          <div className="px-2 pt-1.5 pb-0.5 text-xs text-slate-400 border-t border-slate-100 mt-1">{t('common.hidden')} ({_hid.length})</div>
-                          {_hid.map(sk => (
+                          <button onClick={() => setShowSkillHiddenSection(p => !p)}
+                            className="w-full px-2 pt-1.5 pb-0.5 text-xs text-slate-400 border-t border-slate-100 mt-1 flex items-center gap-1 hover:text-slate-600">
+                            <ChevronDown size={12} className={`transition ${showSkillHiddenSection ? '' : '-rotate-90'}`} />
+                            {t('common.hidden')} ({_hid.length})
+                          </button>
+                          {showSkillHiddenSection && _hid.map(sk => (
                             <div key={sk.id} className="flex items-center gap-2 px-2 py-1.5 rounded-lg border border-transparent opacity-40 hover:opacity-70 transition group">
                               {!skillSearch && <GripVertical size={12} className="text-slate-300 flex-shrink-0" />}
                               <div className="w-4 h-4 flex-shrink-0" />
@@ -1517,9 +1640,28 @@ export default function ChatPage() {
           }}
         />
 
+        {/* ERP context chip(ask_with 模式) */}
+        {erpPendingContext && (
+          <div className="mx-3 -mb-2 px-3 py-1.5 bg-sky-50 border border-sky-200 rounded-t-lg text-xs text-sky-800 flex items-center justify-between">
+            <div className="flex items-center gap-1.5">
+              <Database size={12} /> 已附加 ERP 查詢結果,下一則訊息會自動帶上
+            </div>
+            <button onClick={() => setErpPendingContext(null)}
+              className="text-sky-500 hover:text-sky-700">
+              <X size={12} />
+            </button>
+          </div>
+        )}
+
         <MessageInput
           ref={messageInputRef}
-          onSend={handleSend}
+          onSend={async (message, files) => {
+            const final = erpPendingContext
+              ? `${erpPendingContext}\n\n${message}`
+              : message
+            if (erpPendingContext) setErpPendingContext(null)
+            await handleSend(final, files)
+          }}
           disabled={streaming}
           canResearch={canResearch}
           onResearch={() => {
@@ -1529,6 +1671,7 @@ export default function ChatPage() {
             setResearchInitialFiles(f)
             setShowResearchModal(true)
           }}
+          onErpTool={() => setErpPickerOpen(true)}
         />
       </div>
 
@@ -1667,6 +1810,80 @@ export default function ChatPage() {
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* ERP 手動觸發 Picker */}
+      {erpPickerOpen && (
+        <ErpToolPicker
+          onPick={(t) => { setErpPickerOpen(false); setErpInvoking(t) }}
+          onClose={() => setErpPickerOpen(false)}
+        />
+      )}
+
+      {/* ERP 參數填寫 + 執行 */}
+      {erpInvoking && (
+        <ErpToolInvokeModal
+          tool={erpInvoking}
+          sessionId={currentSessionId || null}
+          onClose={() => setErpInvoking(null)}
+          onDone={({ mode, tool, inputs, result, cache_key }) => {
+            setErpInvoking(null)
+            const resultJson = '```json\n' + JSON.stringify(result, null, 2).slice(0, 8000) + '\n```'
+            const inputsJson = Object.keys(inputs || {}).length
+              ? '\n參數:\n```json\n' + JSON.stringify(inputs, null, 2) + '\n```'
+              : ''
+
+            if (mode === 'view') {
+              if (!currentSessionId) return
+              const content = `**ERP 工具結果:${tool.name}** (\`${tool.code}\`)${inputsJson}\n\n結果:\n${resultJson}${cache_key ? `\n\n_完整結果 key: \`${cache_key}\`_` : ''}`
+              setMessages((prev) => [...prev, {
+                id: Date.now(),
+                session_id: currentSessionId,
+                role: 'assistant',
+                content,
+                created_at: new Date().toISOString(),
+              } as any])
+            } else if (mode === 'ai_explain') {
+              const msg = `我剛才呼叫了 ERP 工具「${tool.name}」(${tool.code})${inputsJson}\n\n結果:\n${resultJson}\n\n請用繁體中文解釋這份資料的含義。`
+              handleSend(msg, [])
+            } else if (mode === 'ask_with') {
+              const ctx = `[參考資料] ERP 工具 ${tool.code} 的執行結果:${inputsJson}\n${resultJson}`
+              setErpPendingContext(ctx)
+            }
+          }}
+        />
+      )}
+
+      {/* ERP WRITE 確認對話框 */}
+      <ErpConfirmDialog
+        pending={erpPendingConfirm}
+        sessionId={currentSessionId || null}
+        onClose={() => setErpPendingConfirm(null)}
+        onExecuted={(payload) => {
+          const ts = Date.now()
+          setErpExecutedNotices((arr) => [
+            ...arr,
+            { tool_code: payload.tool_code, rows: payload.rows_returned, duration_ms: payload.duration_ms, at: ts },
+          ])
+          setTimeout(() => {
+            setErpExecutedNotices((arr) => arr.filter((n) => n.at !== ts))
+          }, 4000)
+        }}
+      />
+
+      {/* ERP 執行結果 toast */}
+      {erpExecutedNotices.length > 0 && (
+        <div className="fixed bottom-4 right-4 z-[55] space-y-2">
+          {erpExecutedNotices.map((n) => (
+            <div key={n.at} className="bg-emerald-600 text-white rounded-lg shadow-lg px-4 py-2 text-sm flex items-center gap-2">
+              <CheckCircle size={14} />
+              <div>
+                <div className="font-medium">ERP 已執行:{n.tool_code}</div>
+                <div className="text-xs opacity-90">{n.rows} 列 · {n.duration_ms}ms</div>
+              </div>
+            </div>
+          ))}
         </div>
       )}
     </>

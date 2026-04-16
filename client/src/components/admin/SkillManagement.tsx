@@ -53,7 +53,8 @@ export default function SkillManagement() {
         setLoading(true)
         try {
             const res = await api.get('/admin/skills')
-            setSkills(res.data)
+            // 過濾 erp_proc 代理 row(ERP 工具在 API panel 獨立管理)
+            setSkills((res.data || []).filter((s: any) => s.type !== 'erp_proc'))
         } catch (e: any) {
             setError(e.response?.data?.error || t('skills.loadFailed'))
         } finally {

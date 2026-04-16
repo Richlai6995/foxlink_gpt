@@ -83,6 +83,8 @@ app.get('/api/health', (req, res) => res.json({ status: 'ok', timestamp: new Dat
     console.log('[Route] /api/scheduled-tasks OK');
     app.use('/api/mcp-servers', require('./routes/mcpServers'));
     console.log('[Route] /api/mcp-servers OK');
+    app.use('/api/erp-tools', require('./routes/erpTools'));
+    console.log('[Route] /api/erp-tools OK');
     app.use('/api/dify-kb', require('./routes/difyKnowledgeBases'));
     console.log('[Route] /api/dify-kb OK');
     app.use('/api/roles', require('./routes/roles'));
@@ -293,6 +295,14 @@ app.get('/api/health', (req, res) => res.json({ status: 'ok', timestamp: new Dat
       initTrainingCron(db);
     } catch (e) {
       console.error('[TrainingCron] Failed to init:', e.message);
+    }
+
+    // Init ERP Tool metadata drift check cron
+    try {
+      const { initErpToolCron } = require('./services/erpToolCronService');
+      initErpToolCron(db);
+    } catch (e) {
+      console.error('[ErpToolCron] Failed to init:', e.message);
     }
 
     // Auto-sync Help KB (non-blocking, runs in background)

@@ -1,7 +1,7 @@
 # 使用者手冊章節結構與審計紀錄
 
-> 最後審計日期：2026-04-08
-> 章節總數：一般使用者 31 個 + 管理員 30 個
+> 最後審計日期：2026-04-17
+> 章節總數：一般使用者 31 個 + 管理員 31 個
 
 ---
 
@@ -16,7 +16,7 @@
 | **工具** | 13–16 | 需要額外操作的輔助工具 | u-tools(13) 可用工具、u-skill(14) 技能市集、u-kb(15) 知識庫市集、u-doc-template(16) 文件範本 |
 | **進階** | 17–25 | 進階功能，需額外權限 | u-research(17) 深度研究、u-ai-bi(18) AI 戰情室、u-ai-bi-query(19)~u-ai-bi-schema(24) 戰情子章節、u-schedule(25) 自動排程 |
 | **教育訓練** | 26–27 | 教育訓練專區 | u-training(26) 訓練教室、u-training-dev(27) 教材開發 ※權限限定 |
-| **輔助** | 28–31 | 不常用/特定場景 | u-feedback(28) 問題反饋、u-webex-bot(29) Webex Bot、u-budget(30) 使用額度、u-help-kb(31) 說明書KB |
+| **輔助** | 28–32 | 不常用/特定場景 | u-feedback(28) 問題反饋、u-webex-bot(29) Webex Bot、u-budget(30) 使用額度、u-help-kb(31) 說明書KB、u-erp-tools(32) ERP 工具 |
 
 ### 新增章節規則
 
@@ -61,6 +61,7 @@ s.id !== 'u-xxx' || somePermissionFlag
 | | a-cost-analysis | 費用分析 |
 | **整合服務** | a-mcp | MCP 伺服器管理 |
 | | a-dify | API 連接器整合 |
+| | a-erp-tools | ERP 工具管理 |
 | | a-llm | LLM 模型管理 |
 | **資料權限** | a-data-permissions | 資料權限管理 |
 | | a-db-sources | AI 戰情外部資料來源 |

@@ -80,7 +80,7 @@ export default function AdminOverridePopover() {
       if (mcpR.status === 'fulfilled') setUnauthorizedMcp(mcpR.value.data || [])
       if (difyR.status === 'fulfilled') setUnauthorizedDify(difyR.value.data || [])
       if (kbR.status === 'fulfilled') setUnauthorizedKb(kbR.value.data || [])
-      if (skillR.status === 'fulfilled') setUnauthorizedSkills(skillR.value.data || [])
+      if (skillR.status === 'fulfilled') setUnauthorizedSkills((skillR.value.data || []).filter((s: any) => s.type !== 'erp_proc'))
       if (tplR.status === 'fulfilled') setUnauthorizedTemplates(tplR.value.data || [])
     } finally {
       setLoading(false)

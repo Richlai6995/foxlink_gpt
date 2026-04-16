@@ -685,13 +685,14 @@ router.get('/sessions/:id', async (req, res) => {
     `).all(req.params.id);
 
     // Restore tool selections from stored context (primary) + call logs (fallback)
-    let usedMcpIds = [], usedDifyIds = [], usedKbIds = [];
+    let usedMcpIds = [], usedDifyIds = [], usedKbIds = [], usedErpIds = [];
     if (session.tools_context_json) {
       try {
         const ctx = JSON.parse(session.tools_context_json);
         usedMcpIds  = (ctx.mcp  || []).map(Number);
         usedDifyIds = (ctx.dify || []).map(Number);
         usedKbIds   = ctx.kb    || [];
+        usedErpIds  = (ctx.erp  || []).map(Number);
       } catch {}
     }
     // Fallback: if tools_context_json was empty, try call logs
@@ -704,7 +705,9 @@ router.get('/sessions/:id', async (req, res) => {
       usedDifyIds = raw.map(r => Number(r.kb_id));
     }
 
-    res.json({ session, messages, skills, used_mcp_ids: usedMcpIds, used_dify_ids: usedDifyIds, used_kb_ids: usedKbIds });
+    res.json({ session, messages, skills,
+      used_mcp_ids: usedMcpIds, used_dify_ids: usedDifyIds, used_kb_ids: usedKbIds,
+      used_erp_tool_ids: usedErpIds });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -822,11 +825,12 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
   const userMcpIds   = parseIds(req.body.mcp_server_ids);  // number[] | null
   const userDifyIds  = parseIds(req.body.dify_kb_ids);      // number[] | null
   const userSelfKbIds = parseIds(req.body.self_kb_ids);     // string[] | null
-  const explicitMode = userMcpIds !== null || userDifyIds !== null || userSelfKbIds !== null;
+  const userErpToolIds = parseIds(req.body.erp_tool_ids);   // number[] | null
+  const explicitMode = userMcpIds !== null || userDifyIds !== null || userSelfKbIds !== null || userErpToolIds !== null;
   // 儲存工具選擇到 session（供歷史載入時恢復）
   if (explicitMode) {
     try {
-      const ctx = JSON.stringify({ mcp: userMcpIds || [], dify: userDifyIds || [], kb: userSelfKbIds || [] });
+      const ctx = JSON.stringify({ mcp: userMcpIds || [], dify: userDifyIds || [], kb: userSelfKbIds || [], erp: userErpToolIds || [] });
       await require('../database-oracle').db.prepare(
         `UPDATE chat_sessions SET tools_context_json=? WHERE id=?`
       ).run(ctx, sessionId);
@@ -1632,6 +1636,47 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
           console.error(`[Skill] Workflow "${sk.name}" error:`, e.message);
           skillSystemPrompts.push(`# Workflow Error: ${sk.name}\n工作流執行失敗: ${e.message}`);
         }
+      } else if (sk.type === 'erp_proc' && (sk.erp_tool_id || sk.ERP_TOOL_ID)) {
+        // ── ERP Inject:每輪對話前自動執行,結果塞 system prompt ───────────────
+        const erpToolId = sk.erp_tool_id || sk.ERP_TOOL_ID;
+        try {
+          const toolRow = await db.prepare(
+            `SELECT name, allow_inject, inject_config_json FROM erp_tools WHERE id=? AND enabled=1`
+          ).get(erpToolId);
+          const allowInject = Number(toolRow?.allow_inject ?? toolRow?.ALLOW_INJECT ?? 0);
+          if (!toolRow || !allowInject) continue;
+
+          const injectConfigRaw = toolRow.inject_config_json || toolRow.INJECT_CONFIG_JSON;
+          let injectConfig = {};
+          try { injectConfig = JSON.parse(injectConfigRaw || '{}') || {}; } catch (_) {}
+
+          const erpExec = require('../services/erpToolExecutor');
+          const injectResult = await erpExec.execute(db, erpToolId, {}, req.user, {
+            trigger_source: 'inject',
+            session_id: sessionId,
+          });
+          const label = toolRow.name || toolRow.NAME || sk.name;
+          const payload = injectResult?.result ?? injectResult;
+
+          // result_template 優先;否則 JSON dump
+          let rendered;
+          if (injectConfig.result_template && typeof injectConfig.result_template === 'string') {
+            rendered = injectConfig.result_template.replace(/\{\{(\w+(?:\.\w+)*)\}\}/g, (_, path) => {
+              const parts = path.split('.');
+              let v = payload;
+              for (const p of parts) v = v?.[p];
+              return v === null || v === undefined ? '' : String(v);
+            });
+          } else {
+            rendered = '```json\n' + JSON.stringify(payload, null, 2) + '\n```';
+          }
+          skillSystemPrompts.push(`# ERP 即時資訊:${label}\n${rendered}`);
+          console.log(`[ErpInject] Injected "${label}" id=${erpToolId} rows=${injectResult?.rows_returned ?? 0}`);
+        } catch (e) {
+          console.warn(`[ErpInject] "${sk.name}" failed: ${e.message}`);
+          // Inject 失敗不 block 對話,僅塞降級訊息
+          skillSystemPrompts.push(`# ERP 即時資訊:${sk.name}\n[此工具暫時無法取得即時資料]`);
+        }
       }
     }
 
@@ -1649,6 +1694,21 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
           console.log(`[Skill] Registered code skill "${sk.name}" as Gemini tool: ${toolName}`);
         } catch (e) {
           console.warn(`[Skill] Failed to parse tool_schema for "${sk.name}":`, e.message);
+        }
+      } else if (sk.type === 'erp_proc' && sk.tool_schema && (sk.erp_tool_id || sk.ERP_TOOL_ID)) {
+        const erpId = Number(sk.erp_tool_id || sk.ERP_TOOL_ID);
+        // explicit mode:只允許 topbar 白名單內的 ERP tool
+        // auto mode(使用者沒動 topbar):透過 TAG router / session_skills 進到 allSkillsToProcess 即 OK
+        if (explicitMode) {
+          if (!Array.isArray(userErpToolIds) || !userErpToolIds.map(Number).includes(erpId)) continue;
+        }
+        try {
+          const schema = JSON.parse(sk.tool_schema);
+          const toolName = schema.name || `erp_tool_${erpId}`;
+          codeSkillToolMap[toolName] = sk;
+          console.log(`[Skill] Registered ERP tool "${sk.name}" as Gemini tool: ${toolName}`);
+        } catch (e) {
+          console.warn(`[Skill] Failed to parse ERP tool_schema for "${sk.name}":`, e.message);
         }
       }
     }
@@ -2421,6 +2481,41 @@ ${hasPreserve ? '- 標記【★保留原文】的欄位：必須完整複製原�
             // ── Code skill tool handling ──────────────────────────────────
             if (codeSkillToolMap[toolName]) {
               const sk = codeSkillToolMap[toolName];
+
+              // ── ERP proc 分支 ────────────────────────────────────────
+              if (sk.type === 'erp_proc') {
+                const erpToolId = sk.erp_tool_id || sk.ERP_TOOL_ID;
+                sendEvent({ type: 'status', message: `呼叫 ERP：${sk.name}` });
+                try {
+                  const erpExec = require('../services/erpToolExecutor');
+                  const out = await erpExec.execute(db, erpToolId, args || {}, req.user, {
+                    trigger_source: 'llm_tool_call',
+                    session_id: sessionId,
+                  });
+                  if (out.requires_confirmation) {
+                    sendEvent({
+                      type: 'erp_confirm',
+                      tool_id: erpToolId,
+                      tool_code: toolName,
+                      confirmation_token: out.confirmation_token,
+                      summary: out.summary,
+                      args: args || {},
+                    });
+                    return `[等待使用者確認 WRITE 操作] ${out.summary}。使用者同意後會手動確認執行,你現在不用再呼叫此工具。`;
+                  }
+                  const summary = {
+                    ok: true,
+                    duration_ms: out.duration_ms,
+                    rows_returned: out.rows_returned,
+                    cache_key: out.cache_key,
+                    result: out.result,
+                  };
+                  return JSON.stringify(summary);
+                } catch (e) {
+                  return `[ERP 工具執行失敗: ${e.message}]`;
+                }
+              }
+
               sendEvent({ type: 'status', message: `執行技能程式：${sk.name}` });
               const _t0 = Date.now();
               try {

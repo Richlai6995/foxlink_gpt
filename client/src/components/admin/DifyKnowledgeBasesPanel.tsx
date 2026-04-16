@@ -9,6 +9,7 @@ import api from '../../lib/api'
 import TranslationFields, { type TranslationData } from '../common/TranslationFields'
 import TagInput from '../common/TagInput'
 import ShareModal from '../dashboard/ShareModal'
+import ErpToolsPanel from './ErpToolsPanel'
 
 /* ── Types ─────────────────────────────────────────────────────────────────── */
 interface ApiConnector {
@@ -342,16 +343,20 @@ export default function DifyKnowledgeBasesPanel() {
           { v: 'all', l: '全部' },
           { v: 'dify', l: 'DIFY' },
           { v: 'rest_api', l: 'REST API' },
+          { v: 'erp_proc', l: 'ERP Procedure' },
         ].map(f => (
           <button key={f.v} onClick={() => setFilterType(f.v)}
             className={`px-3 py-1.5 text-xs rounded-lg border transition ${filterType === f.v
               ? 'bg-blue-50 border-blue-300 text-blue-700 font-medium'
               : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'}`}>
-            {f.l} {f.v === 'all' ? `(${kbs.length})` : `(${kbs.filter(k => (k.connector_type || 'dify') === f.v).length})`}
+            {f.l} {f.v === 'all' || f.v === 'erp_proc' ? '' : `(${kbs.filter(k => (k.connector_type || 'dify') === f.v).length})`}
+            {f.v === 'all' ? `(${kbs.length})` : ''}
           </button>
         ))}
       </div>
 
+      {filterType === 'erp_proc' ? <ErpToolsPanel /> : (
+      <>
       {/* Test controls */}
       <div className="flex gap-2 items-center">
         <input value={testQuery} onChange={e => setTestQuery(e.target.value)}
@@ -948,6 +953,8 @@ export default function DifyKnowledgeBasesPanel() {
         <ShareModal title={`API 連接器 — ${shareKb.name}`}
           sharesUrl={`/dify-kb/${shareKb.id}/access`}
           onClose={() => setShareKb(null)} />
+      )}
+      </>
       )}
     </div>
   )

@@ -9,6 +9,7 @@ import {
   Wand2, ImageIcon, Clock, Share2, GitFork, Lock, Sparkles, Code2, Package, Play, Square,
   Paperclip, Search, Server, BookMarked, Wifi, WifiOff, CheckCircle, Loader2, Layers, Activity,
   Key, ShieldCheck, LayoutTemplate, FileSpreadsheet, File, FlaskConical, Languages,
+  TicketCheck, GripVertical,
 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import api from '../lib/api'
@@ -62,6 +63,14 @@ function NoteBox({ children }: { children: React.ReactNode }) {
       <Info size={16} className="text-amber-500 flex-shrink-0 mt-0.5" />
       <p className="text-amber-700 text-sm leading-6">{children}</p>
     </div>
+  )
+}
+
+function ListBlock({ items }: { items: string[] }) {
+  return (
+    <ul className="list-disc list-inside space-y-1 text-sm text-slate-600 leading-6">
+      {items.map((item, i) => <li key={i} dangerouslySetInnerHTML={{ __html: item.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/`(.*?)`/g, '<code class="bg-slate-100 px-1 rounded text-xs">$1</code>') }} />)}
+    </ul>
   )
 }
 
@@ -3323,6 +3332,7 @@ const adminSections = [
   { id: 'a-audit', label: '稽核與敏感詞', icon: <Shield size={18} /> },
   { id: 'a-mcp', label: 'MCP 伺服器', icon: <Globe size={18} /> },
   { id: 'a-dify', label: 'API 連接器', icon: <Zap size={18} /> },
+  { id: 'a-erp-tools', label: 'ERP 工具管理', icon: <Database size={18} /> },
   { id: 'a-kb', label: '自建知識庫管理', icon: <Database size={18} /> },
   { id: 'a-skill', label: '技能市集管理', icon: <Sparkles size={18} /> },
   { id: 'a-code-runners', label: 'Code Runners', icon: <Code2 size={18} /> },
@@ -3341,6 +3351,7 @@ const adminSections = [
   { id: 'a-help-translation', label: '說明文件翻譯管理', icon: <Languages size={18} /> },
   { id: 'a-doc-template', label: '文件範本管理', icon: <LayoutTemplate size={18} /> },
   { id: 'a-webex-bot', label: 'Webex Bot 管理', icon: <MessageSquare size={18} /> },
+  { id: 'a-feedback', label: '問題反饋管理', icon: <TicketCheck size={18} /> },
   { id: 'a-training', label: '教育訓練權限管理', icon: <BookOpen size={18} /> },
 ]
 
@@ -4426,6 +4437,160 @@ generate_txt:供應商週報_{{date}}.txt
           />
           <NoteBox>若知識庫連線失敗（API Key 過期或網路問題），系統仍會正常回答問題，只是不會引用該知識庫的內容。建議定期點選「測試」確認連線狀態。</NoteBox>
         </SubSection>
+      </Section>
+
+      <Section id="a-erp-tools" icon={<Database size={22} />} iconColor="text-sky-600" title="ERP 工具管理">
+        <Para>
+          ERP 工具將 Oracle ERP 的 <strong>FUNCTION / PROCEDURE</strong> 包裝成平台可呼叫的工具，
+          讓 LLM 透過 Gemini function calling 自動呼叫，或由使用者手動觸發。
+          管理介面位於「<strong>API 連接器管理</strong>」tab → 子類 chip <strong>ERP Procedure</strong>。
+        </Para>
+
+        <div className="border-2 border-red-400 bg-red-50 rounded-xl p-4 mb-4">
+          <div className="flex items-center gap-2 mb-2">
+            <AlertTriangle size={16} className="text-red-600" />
+            <span className="font-bold text-red-700">安全提醒：WRITE 型工具會實際修改 ERP 資料</span>
+          </div>
+          <p className="text-sm text-red-700">
+            註冊 WRITE 型工具前請確認 DB 帳號權限與預期行為一致。平台預設會要求使用者手動確認才會執行，
+            LLM 無法繞過；但錯誤的工具註冊仍會造成資料異動。建議所有 WRITE 型工具都搭配 audit log 定期稽核。
+          </p>
+        </div>
+
+        <SubSection title="註冊流程（四步）">
+          <ol className="space-y-3 text-sm">
+            <li>
+              <strong>1. 輸入 ERP 物件三元組</strong>
+              <p className="text-slate-600 mt-1">Owner（Schema，如 APPS）、Package（選填，如 HR_PKG）、Function/Procedure 名稱（如 GET_EMP_INFO）。按「查詢 metadata」。</p>
+            </li>
+            <li>
+              <strong>2. 選擇 Overload（若有多個簽章）</strong>
+              <p className="text-slate-600 mt-1">系統會列出所有 overload，含參數清單、回傳型別。若任一 overload 含不支援型別（如 RECORD / TABLE OF）會標灰。</p>
+            </li>
+            <li>
+              <strong>3. 設定基本資訊</strong>
+              <p className="text-slate-600 mt-1">code（給 LLM 呼叫的識別字，自動產生可改）、顯示名稱、描述（給 LLM 看的）、tags（TAG router 用）。</p>
+            </li>
+            <li>
+              <strong>4. 設定每個參數的 AI Hint 與 LOV</strong>
+              <p className="text-slate-600 mt-1">AI Hint 是給 LLM 看的參數說明；LOV 是使用者手動觸發時的下拉來源。</p>
+            </li>
+          </ol>
+        </SubSection>
+
+        <SubSection title="三種呼叫入口（獨立開關）">
+          <Table
+            headers={['入口', '欄位', '說明']}
+            rows={[
+              ['LLM 自動呼叫', 'allow_llm_auto', '透過 Gemini function calling，LLM 在對話中自主決定是否呼叫。WRITE 型預設關閉；開啟後仍會在對話中跳確認框'],
+              ['使用者手動觸發', 'allow_manual', '對話輸入框左側 🛢 ERP 按鈕可立即執行，適合精確查詢'],
+              ['Inject（自動注入）', 'allow_inject', '每輪對話前平台自動跑一次，結果塞 system prompt。適合當前使用者狀態、今日指標等固定 context'],
+            ]}
+          />
+          <NoteBox>Inject 模式的限制：所有參數必須設「固定值」或「系統值」（如當前使用者工號、當前日期），不能需要使用者輸入或 AI 提取。註冊時會驗證，不合規會擋下。</NoteBox>
+        </SubSection>
+
+        <SubSection title="LOV（List Of Values）— 四種來源">
+          <Table
+            headers={['類型', '用途', '範例']}
+            rows={[
+              ['static', '固定選項清單', '是/否、有效/停用'],
+              ['sql', 'ERP DB 查詢（禁 DML）', 'SELECT emp_no v, emp_name l FROM fl_employee WHERE factory=:factory'],
+              ['system', '系統值自動帶', '當前使用者工號 / 部門 / 廠區'],
+              ['erp_tool', '鏈式：另一個已註冊 ERP tool 的回傳值', '「員工清單」工具當「薪資查詢」的 LOV'],
+            ]}
+          />
+          <NoteBox>SQL LOV 會自動套上 <code>ROWNUM &lt;= ERP_TOOL_LOV_MAX_ROWS</code>（預設 500）防爆，且禁止 UPDATE/DELETE/INSERT 等 DML 關鍵字。可引用系統值當 bind：<code>{'{'} name: 'factory', source: 'system_user_factory' {'}'}</code>。</NoteBox>
+        </SubSection>
+
+        <SubSection title="Access Mode 與安全設計">
+          <Table
+            headers={['欄位', '用途']}
+            rows={[
+              ['access_mode', 'READ_ONLY / WRITE，手動勾選；僅影響 UI 標記與預設行為，不檢查 procedure 實際邏輯'],
+              ['requires_approval', 'WRITE 型可設「需 admin 審批」（v2 規劃，目前走一次性確認 token）'],
+              ['allow_llm_auto', 'WRITE 型預設關閉；關閉時 LLM 仍可看到 tool_schema，但呼叫會被攔截要求使用者手動確認'],
+              ['rate_limit_per_user', '每使用者呼叫上限（次數）；時窗 minute/hour/day 可選；留空=不限'],
+              ['rate_limit_global', '全域呼叫上限（次數）；留空=不限'],
+              ['allow_dry_run', 'WRITE 型可開啟；執行時用 SAVEPOINT 包起來，結束後 ROLLBACK，用於預覽'],
+              ['timeout_sec', 'Oracle 呼叫逾時（預設 30 秒）'],
+              ['max_rows_llm / max_rows_ui', 'LLM 看到的最多列數（預設 50）/ UI 表格最多列數（預設 1000），超過自動截斷並標記；完整結果暫存 Redis 30 分鐘'],
+            ]}
+          />
+        </SubSection>
+
+        <SubSection title="執行歷史與稽核">
+          <Para>
+            ERP Procedure 工具列上方的「執行歷史」按鈕可查看所有工具的呼叫紀錄，每個工具列右側的「歷史」圖示則顯示單一工具的歷史。
+            記錄內容：時間、工具、觸發來源（LLM / 手動 / Inject / 試跑）、使用者、參數、輸出樣本、耗時、錯誤碼。
+          </Para>
+          <NoteBox>完整結果快取存於 Redis，TTL 預設 1800 秒（由 <code>ERP_TOOL_RESULT_CACHE_TTL</code> 控制），過期後只能看 audit log 裡的樣本。WRITE 型必寫 audit log 不可關。</NoteBox>
+        </SubSection>
+
+        <SubSection title="Metadata Drift 自動檢查">
+          <Para>
+            系統每小時背景執行一次 metadata 比對（由 <code>ERP_TOOL_METADATA_CHECK_CRON</code> 控制），
+            若 DBA 改了 procedure 簽章導致 hash 不一致，列表的 tool 會顯示橘色「metadata 已變動」徽章。
+          </Para>
+          <Para>
+            Admin 也可在編輯畫面手動觸發「重新同步 metadata」，查看新舊差異後決定是否更新參數定義。
+            注意：簽章變動通常需要一併更新 LOV 設定和 AI Hint，不只是 hash 對齊。
+          </Para>
+        </SubSection>
+
+        <SubSection title="多語化翻譯">
+          <Para>
+            編輯畫面底部有「翻譯（en / vi）」按鈕，會透過 LLM 自動翻譯：工具名稱、描述、每個參數的 ai_hint。
+            翻譯結果存於 <code>erp_tool_translations</code>，顯示於管理介面預覽。
+            （給 LLM 看的 tool_schema 目前仍用 zh-TW 原始版，避免 LLM 混淆多語言工具名）
+          </Para>
+        </SubSection>
+
+        <SubSection title="代理 skill row 機制（技術說明）">
+          <Para>
+            每個 erp_tool 註冊時，後端會在 <code>skills</code> 表自動建立一筆 <code>type='erp_proc'</code> 的代理 row，
+            帶著 tool_schema 與 erp_tool_id 反查。這讓 chat.js 的現有 tool-calling 管線（TAG router、function declaration 註冊、toolHandler 分派）能直接復用。
+          </Para>
+          <NoteBox>這筆代理 row 不會出現在「技能管理」與「技能市集」UI 中（前端已過濾）。刪除 ERP 工具時會自動 cascade 刪除對應 skill row。</NoteBox>
+        </SubSection>
+
+        <SubSection title="環境變數">
+          <Table
+            headers={['變數名', '用途', '預設值']}
+            rows={[
+              ['ERP_DB_HOST / PORT / SERVICE_NAME / USER / USER_PASSWORD', 'ERP Oracle 連線', '必填'],
+              ['ERP_ALLOWED_SCHEMAS', 'Owner 白名單（逗號分隔）；留空或設 * = 不限制', '空（不限）'],
+              ['ERP_TOOL_LOV_MAX_ROWS', 'LOV SQL 強制 ROWNUM 上限', '500'],
+              ['ERP_TOOL_RESULT_CACHE_TTL', '完整結果 Redis 快取秒數', '1800（30 分鐘）'],
+              ['ERP_TOOL_METADATA_CHECK_CRON', 'drift 背景檢查 cron 表達式（Asia/Taipei）', '0 * * * *（每小時）'],
+              ['ERP_TOOL_DEFAULT_TIMEOUT_SEC', 'Oracle 呼叫預設逾時秒數', '30'],
+            ]}
+          />
+        </SubSection>
+
+        <SubSection title="MVP 支援的 PL/SQL 型別">
+          <Para>
+            <strong>支援：</strong>VARCHAR2、CHAR、NUMBER、INTEGER、FLOAT、BINARY_FLOAT、BINARY_DOUBLE、PLS_INTEGER、DATE、TIMESTAMP、CLOB、NCLOB、SYS_REFCURSOR。
+          </Para>
+          <Para>
+            <strong>不支援（v1）：</strong>PL/SQL RECORD、TABLE OF、OBJECT TYPE 等複合型別（data_level &gt; 0）。inspect 時會標灰，無法註冊該 overload。
+          </Para>
+        </SubSection>
+
+        <SubSection title="使用者端呈現">
+          <Para>
+            使用者在對話頁可用三個方式觸發 ERP 工具，詳見一般使用者手冊「ERP 工具呼叫」章節：
+          </Para>
+          <ul className="list-disc ml-5 space-y-1 text-sm text-slate-700">
+            <li><strong>Topbar ⚡ API 連接器按鈕</strong>：打開 popup 選擇啟用的工具（DIFY / REST / ERP 三區混合），勾選後 LLM 會自動使用</li>
+            <li><strong>輸入框左側 🛢 ERP 按鈕</strong>：立即執行，填參數 → 執行 → 選擇顯示結果 / AI 解釋 / 以此提問</li>
+            <li><strong>WRITE 確認對話框</strong>：LLM 呼叫 WRITE 型工具時，平台自動跳紅色確認框，使用者可選填原因後執行</li>
+          </ul>
+        </SubSection>
+
+        <NoteBox>
+          完整技術設計見 <code>docs/erp-tools-design.md</code>。API 路由列於 <code>server/routes/erpTools.js</code>，核心邏輯於 <code>server/services/erpToolExecutor.js</code>。
+        </NoteBox>
       </Section>
 
       <Section id="a-llm" icon={<Cpu size={22} />} iconColor="text-violet-500" title="LLM 模型管理">
@@ -6399,6 +6564,234 @@ tryLock("webex:msg:{id}", 60s)  ← Redis 分散鎖
               ['「使用金額已達上限」訊息', '用戶超過 daily/weekly/monthly 預算', '調整使用者或角色的預算設定'],
               ['首則訊息延遲較長', '正常現象，最長等待一個 Polling 週期', 'WEBEX_POLL_INTERVAL_MS 可調小（預設 8000ms）'],
               ['AI 回傳下載連結而非附件', 'WEBEX_SYSTEM_SUFFIX 未正確注入', '確認 webex.js 中 WEBEX_SYSTEM_SUFFIX 包含檔案生成規則（第 6-9 條）'],
+            ]}
+          />
+        </SubSection>
+      </Section>
+
+      <Section id="a-feedback" icon={<TicketCheck size={22} />} iconColor="text-rose-500" title="問題反饋管理">
+        <Para>
+          問題反饋平台完整的後台設定說明。涵蓋分類管理、ERP 分流、Webex 雙群組、知識庫架構、歷史回填、工單可見性權限等。使用者端的建單 / 對話 / 滿意度等操作說明請參考使用者手冊「問題反饋」。
+        </Para>
+
+        <SubSection title="身份與可見性矩陣">
+          <Para>
+            反饋系統有三種身份，採用<strong>並存獨立 flag</strong>模型（角色 + <code className="bg-slate-100 px-1 rounded text-xs">is_erp_admin</code> 可同時存在）：
+          </Para>
+          <Table
+            headers={['身份', 'role', 'is_erp_admin', '可見工單範圍', '所屬 Webex 群組']}
+            rows={[
+              ['Cortex admin', 'admin', '0', '全部工單', 'Cortex - 問題反饋通知'],
+              ['雙重 admin', 'admin', '1', '全部工單', '兩個都加入'],
+              ['ERP admin', 'user', '1', '自己建的 + 所有 ERP 分類工單', 'Cortex - ERP問題反饋通知'],
+              ['一般使用者', 'user', '0', '僅自己建的', '—'],
+            ]}
+          />
+          <NoteBox>
+            ERP admin 不需要是系統 admin，可以是廠內 ERP 團隊成員。但他們能接單、回覆、結案 ERP 分類工單，並看到該類工單的內部備註（與 Cortex admin 等同）。
+          </NoteBox>
+        </SubSection>
+
+        <SubSection title="分類管理（後台 → 問題反饋 → 分類管理）">
+          <Para>新增 / 編輯 / 停用分類。每個分類包含：</Para>
+          <Table
+            headers={['欄位', '說明']}
+            rows={[
+              ['名稱', '顯示給使用者看的分類名稱；可透過翻譯按鈕批次產生英越語版本'],
+              ['Icon', '內建 55 個常用 lucide icon grid picker，支援搜尋；也可手輸自訂名稱'],
+              ['描述', '選填，用於管理者自行備忘分類用途'],
+              ['排序', '拖曳列前的 ≡ 手把調整順序（drop 後自動呼叫 reorder API 寫入）'],
+              ['啟用 / 停用', '停用後使用者建單時看不到此分類（舊工單仍保留分類資訊）'],
+              ['ERP 分類', '勾選後此分類的工單走 ERP 分流（詳見下一段）'],
+            ]}
+          />
+          <TipBox>
+            新增分類時 <code className="bg-slate-100 px-1 rounded text-xs">sort_order</code> 自動填入現有最大值 + 1，避免跟既有分類碰撞。拖曳後系統會批次重寫所有分類的 sort_order 為 1..N。
+          </TipBox>
+        </SubSection>
+
+        <SubSection title="ERP 分流架構">
+          <Para>
+            勾選分類的 <strong>ERP 分類</strong>（<code className="bg-slate-100 px-1 rounded text-xs">is_erp=1</code>）後，該分類的所有工單會走獨立處理流程，與 Cortex 一般工單完全隔離。
+          </Para>
+          <Table
+            headers={['面向', 'Cortex 一般工單', 'ERP 工單']}
+            rows={[
+              ['Webex Room', 'Cortex - 問題反饋通知', 'Cortex - ERP問題反饋通知'],
+              ['群組成員', '所有 role=admin 的使用者', '所有 is_erp_admin=1 的使用者'],
+              ['站內通知對象', '僅 Cortex admin', 'Cortex admin + ERP admin'],
+              ['結案後知識庫', 'feedback-public', 'feedback-erp'],
+              ['接單權限', 'Cortex admin', 'Cortex admin OR ERP admin'],
+              ['工單可見範圍', 'Cortex admin 可見全部', 'Cortex admin 可見；ERP admin 可見自己 + ERP 工單'],
+            ]}
+          />
+          <NoteBox>
+            Webex Room 由系統在首次有對應類型工單建立時自動建立（透過 Bot Token 呼叫 Webex API），Room ID 存於 <code className="bg-amber-100 px-1 rounded text-xs">system_settings</code> 表的 <code className="bg-amber-100 px-1 rounded text-xs">feedback_webex_room_id</code> / <code className="bg-amber-100 px-1 rounded text-xs">feedback_erp_webex_room_id</code>。
+          </NoteBox>
+        </SubSection>
+
+        <SubSection title="指派 ERP 管理員（使用者管理）">
+          <Para>
+            在<strong>後台 → 使用者管理 → 編輯使用者 → 功能權限</strong>區塊，勾選 <strong>「ERP 管理員」</strong> 即可讓該使用者：
+          </Para>
+          <ListBlock items={[
+            '加入 Cortex - ERP問題反饋通知 Webex 群組（首次會自動邀請）',
+            '在工單列表看到所有 ERP 分類工單（即使非自己建立）',
+            '可接單、回覆、結案、加內部備註（ERP 分類）',
+            '收到 ERP 工單的 Webex DM / 站內通知 / 工單指派事件',
+          ]} />
+          <NoteBox>
+            可以同時勾 <strong>系統管理員 (role=admin)</strong> 和 <strong>ERP 管理員</strong>，該使用者兩邊群組都會收到通知。一般 Cortex admin 不勾 ERP admin 的話，不會收到 ERP 分類工單的 Webex 通知。
+          </NoteBox>
+        </SubSection>
+
+        <SubSection title="Webex 分流狀態機（B 方案）">
+          <Para>為降低群組噪音，依工單狀態 + <code className="bg-slate-100 px-1 rounded text-xs">assigned_to</code> 決定通知走群組還是 DM：</Para>
+          <CodeBlock>{`Stage 1 — 未指派（招領階段）
+  新工單 / 申請者追問 → 發到對應群組廣播
+  目的：讓團隊看見、方便認領
+
+首次 admin 回覆 → assigned_to 自動填入 → 進入 Stage 2
+
+Stage 2 — 已指派（處理階段）
+  申請者追問 → DM 接單者（webex_parent_message_id 串 thread）
+  admin 回覆 applicant → 站內通知 + 可選 DM applicant
+  認領 / 結案 / 重開 / 轉單 → 群組發簡短 summary + DM 相關人
+
+轉單（admin B 強搶 assign）
+  舊 assignee DM：「本單已轉給 [新]，不用再跟進」
+  新 assignee DM：「您接到 FB-xxxx，上下文：...」
+  群組靜音`}</CodeBlock>
+          <TipBox>
+            DM thread 的 parent message id 存於 <code className="bg-slate-100 px-1 rounded text-xs">feedback_tickets.webex_parent_message_id</code>，讓接單者的 DM 全部串在同一個 thread。結案 / 重開會清除此欄位，下次 re-assign 會起新 thread。
+          </TipBox>
+          <NoteBox>
+            若 assignee 沒有 webex email 或找不到，會 fallback 改發到群組（避免通知遺失）。
+          </NoteBox>
+        </SubSection>
+
+        <SubSection title="知識庫架構">
+          <Para>
+            工單結案後會自動同步進公開知識庫供其他使用者 RAG 檢索。**完整未脫敏原文**另存於 archive 表（僅 admin 可讀）。
+          </Para>
+          <Table
+            headers={['儲存位置', '內容', '誰能讀取']}
+            rows={[
+              ['feedback-public KB', '非 ERP 工單：脫敏後的對話逐則 + 附件 Vision caption + 解決方案', '所有使用者（RAG / 知識庫搜尋）'],
+              ['feedback-erp KB', 'ERP 工單：同上脫敏後內容，但獨立檢索空間', '所有使用者（RAG / 知識庫搜尋）'],
+              ['feedback_conversation_archive 表', '完整原始對話（含 internal notes、附件原檔連結、時間戳）、append-only', '僅管理員（透過工單詳情右上 Archive 圖示查看）'],
+            ]}
+          />
+          <Para>結案時的執行流：</Para>
+          <CodeBlock>{`PUT /tickets/:id/resolve
+  ├─ [同步] feedback_conversation_archive 寫入完整原始 snapshot
+  ├─ [背景 60-90s] syncTicketToKB:
+  │    ├─ 附件 → Gemini Vision caption / doc parser
+  │    ├─ 每段文字 → Gemini Flash 脫敏（人名/工號/email → placeholder）
+  │    ├─ 切 parent-content + N 個 child chunks
+  │    └─ embedBatch + INSERT 到 feedback-public or feedback-erp KB
+  └─ [背景] Webex 分流通知（DM + 群組 summary）`}</CodeBlock>
+          <NoteBox>
+            脫敏用 Gemini Flash 跑一次 redaction pass，若失敗會 fallback 到 regex（基於 ticket.applicant_* 欄位 + email pattern）。結案 UX 不會被 KB 同步卡住 — 是 fire-and-forget 背景跑。
+          </NoteBox>
+        </SubSection>
+
+        <SubSection title="歷史工單快照（Archive）">
+          <Para>
+            Admin 在工單詳情頁右上角可點 <code className="bg-slate-100 px-1 rounded text-xs">Archive</code> 圖示，看到該工單每次結案 / 重開 / 手動觸發的完整快照列表，內容含：
+          </Para>
+          <ListBlock items={[
+            '完整對話（含 internal notes、system events）— 未脫敏',
+            '附件原檔連結（檔名、大小、mime、下載 URL）',
+            '工單當時的狀態快照（subject/description/priority/assigned_to 等）',
+            '觸發時間、觸發者、觸發類型（resolved / reopened / closed / migration）',
+          ]} />
+          <TipBox>
+            Archive 表是 <strong>append-only</strong>，永久保留；若工單被 reopen 再結案，會累積兩筆快照，可對比前後解法差異。未來容量大時可用 <code className="bg-slate-100 px-1 rounded text-xs">PARTITION BY RANGE (snapshot_at)</code> 做年度分區。
+          </TipBox>
+        </SubSection>
+
+        <SubSection title="歷史工單 KB 回填（backfillFeedbackKB.js）">
+          <Para>當 KB 架構升級後要把之前結案的工單一次性塞進新架構，用這個腳本：</Para>
+          <CodeBlock>{`# 預覽目標數量 + 預估時間
+node server/scripts/backfillFeedbackKB.js --dry-run
+
+# 小批次驗證（前 5 張）
+node server/scripts/backfillFeedbackKB.js --limit=5
+
+# 全量跑（每張 60-90 秒）
+node server/scripts/backfillFeedbackKB.js | tee /tmp/backfill.log
+
+# 中斷後續跑
+node server/scripts/backfillFeedbackKB.js --resume
+
+# 強制覆蓋既有 archive / KB（例如改了脫敏 prompt 要重跑）
+node server/scripts/backfillFeedbackKB.js --force`}</CodeBlock>
+          <Table
+            headers={['特性', '說明']}
+            rows={[
+              ['Idempotent', 'archive 判斷 (ticket_id, trigger=migration) 已存在則 skip；KB sync 本身 DELETE+INSERT 可無限重跑'],
+              ['續跑', '進度即時寫 server/tmp/backfill-progress.json，Ctrl+C 後 --resume 續跑'],
+              ['Rate limit 保護', '每張工單間隔 1.5 秒；附件 Vision / 脫敏 LLM 串流內循序跑'],
+              ['失敗不中斷', '單張失敗記到 progress.failed[] 繼續下一張，全部跑完再看清單'],
+            ]}
+          />
+          <NoteBox>
+            K8s 生產環境執行：<code className="bg-amber-100 px-1 rounded text-xs">kubectl exec -it &lt;pod&gt; -- node server/scripts/backfillFeedbackKB.js --dry-run</code>。1000 張工單約 20-25 小時，建議離峰或分 limit 批次跑。
+          </NoteBox>
+        </SubSection>
+
+        <SubSection title="脫敏規則">
+          <Table
+            headers={['類別', '處理', '範例']}
+            rows={[
+              ['人名（中/英/越）', '→ [使用者]', '王小明、John Smith、Nguyen Van A'],
+              ['工號', '→ [工號]', '8793, A12345'],
+              ['Email', '→ [email]', 'user@foxlink.com'],
+              ['部門代號', '保留', 'FEC01, PCB3'],
+              ['機台 SN', '保留', 'SN12345, M001'],
+              ['錯誤碼 / URL / IP / 路徑 / SQL', '保留', '原樣不動'],
+              ['日期 / 時間 / 金額 / 技術術語', '保留', '原樣不動'],
+            ]}
+          />
+          <Para>
+            實作於 <code className="bg-slate-100 px-1 rounded text-xs">server/services/feedbackRedactor.js</code>，使用 Gemini Flash + temperature=0 確保可重現。LLM timeout / 失敗自動 fallback 到 regex。脫敏 prompt 是 system instruction 層級，明確列出 REPLACE / KEEP 清單。
+          </Para>
+          <TipBox>
+            要調整脫敏範圍（例如未來想連部門代號也遮）編輯 <code className="bg-slate-100 px-1 rounded text-xs">feedbackRedactor.js</code> 的 SYSTEM_PROMPT，然後用 <code className="bg-slate-100 px-1 rounded text-xs">backfillFeedbackKB.js --force</code> 重跑所有歷史工單。
+          </TipBox>
+        </SubSection>
+
+        <SubSection title="問題排除">
+          <Table
+            headers={['問題', '原因', '解法']}
+            rows={[
+              ['ERP 工單通知還是發到 Cortex 群組', 'ticket.category_is_erp 欄位沒帶（舊 code 或 JOIN 漏）', '確認 getTicketById / getTicketByNo / listTickets 都 SELECT c.is_erp AS category_is_erp'],
+              ['ERP 管理員 checkbox 永遠未勾', 'GET /users SELECT 清單沒包 is_erp_admin 欄位', '檢查 server/routes/users.js 的 SELECT'],
+              ['拖曳排序後跳回原位', 'PUT /admin/categories/reorder 被 /:id 搶走路由', '確認 reorder 端點在 /:id 之前註冊'],
+              ['ERP admin 點通知進工單空白', '工單詳情 API 權限漏認 ERP admin', '使用 canManageTicket / canViewTicket helper 取代 role !== admin 判斷'],
+              ['貼上截圖都叫 image.png', '瀏覽器 clipboard File 預設名', '已在前端 renamePastedFile 加時戳 paste_MMDDHHmmss[_idx].ext'],
+              ['ERP room 沒建立', 'WEBEX_BOT_TOKEN 未設 / 該類型工單還沒建立過', 'Bot Token 設好後第一張 ERP 工單就會觸發 ensureFeedbackErpWebexRoom'],
+              ['已結案工單沒進 KB', '結案後背景 sync 失敗（embed / vision API 錯誤）', '查 server log 的 [FeedbackKB] sync error；可用 backfillFeedbackKB.js --from-ticket-id=N 補'],
+            ]}
+          />
+        </SubSection>
+
+        <SubSection title="相關檔案">
+          <Table
+            headers={['檔案', '用途']}
+            rows={[
+              ['server/services/feedbackService.js', '工單 CRUD + 分類管理 + reorderCategories'],
+              ['server/routes/feedback.js', 'API 路由 + permission helper (canView/canManageTicket)'],
+              ['server/services/feedbackNotificationService.js', 'Email / Webex / 站內通知 + 雙 room + 狀態機分流'],
+              ['server/services/feedbackKBSync.js', '結案同步到 feedback-public / feedback-erp KB'],
+              ['server/services/feedbackArchive.js', 'archive 快照寫入 + 查詢'],
+              ['server/services/feedbackRedactor.js', 'LLM 脫敏 + regex fallback'],
+              ['server/services/feedbackAttachmentProcessor.js', '圖片 Vision caption + 文件 parser 分派'],
+              ['server/scripts/backfillFeedbackKB.js', '歷史工單一次性回填'],
+              ['server/scripts/feedbackRedactionDemo.js', '脫敏 before/after 對照 demo'],
+              ['docs/feedback-platform-design.md', '完整設計文件（含 ERP 分流架構、可見性矩陣、雙 KB）'],
+              ['docs/feedback-platform-implementation.md', 'Phase 1-5 實作報告 + 決策紀錄'],
             ]}
           />
         </SubSection>

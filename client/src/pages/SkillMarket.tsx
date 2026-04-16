@@ -183,7 +183,8 @@ export default function SkillMarket() {
                 api.get('/dify-kb/my').catch(() => ({ data: [] })),
                 api.get('/mcp-servers/my').catch(() => ({ data: [] })),
             ])
-            setSkills(skillsRes.data)
+            // 過濾 erp_proc 代理 row(ERP 工具在 chat 手動觸發 UI 獨立呈現)
+            setSkills((skillsRes.data || []).filter((s: any) => s.type !== 'erp_proc'))
             setModels(modelsRes.data)
             const pickLov = (d: any) => ({ id: d.id, name: d.name, name_zh: d.name_zh, name_en: d.name_en, name_vi: d.name_vi })
             setAvailableKbs(kbRes.data.map(pickLov))

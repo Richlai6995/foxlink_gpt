@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useImperativeHandle, forwardRef, useMemo } from 'react'
-import { Send, Paperclip, X, FileText, Image, Music, AlertCircle, Search, LayoutTemplate, Sparkles, Palette } from 'lucide-react'
+import { Send, Paperclip, X, FileText, Image, Music, AlertCircle, Search, LayoutTemplate, Sparkles, Palette, Database } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import TemplatePickerPopover from './templates/TemplatePickerPopover'
 import { DocTemplate, TemplateSchema } from '../types'
@@ -15,6 +15,7 @@ import {
 interface Props {
   onSend: (message: string, files: File[]) => void
   onResearch?: () => void
+  onErpTool?: () => void
   disabled?: boolean
   canResearch?: boolean
 }
@@ -33,7 +34,7 @@ function getFileIcon(type: string) {
   return <FileText size={14} className="text-slate-400" />
 }
 
-const MessageInput = forwardRef<MessageInputHandle, Props>(function MessageInput({ onSend, onResearch, disabled, canResearch }, ref) {
+const MessageInput = forwardRef<MessageInputHandle, Props>(function MessageInput({ onSend, onResearch, onErpTool, disabled, canResearch }, ref) {
   const { user } = useAuth()
   const [message, setMessage] = useState('')
   const [files, setFiles] = useState<File[]>([])
@@ -342,6 +343,18 @@ const MessageInput = forwardRef<MessageInputHandle, Props>(function MessageInput
             title="深度研究"
           >
             <Search size={18} />
+          </button>
+        )}
+
+        {/* ERP Tool 手動觸發 */}
+        {onErpTool && (
+          <button
+            onClick={onErpTool}
+            disabled={disabled}
+            className="text-slate-400 hover:text-sky-600 transition p-1 flex-shrink-0 mb-0.5 disabled:opacity-50"
+            title="ERP 工具"
+          >
+            <Database size={18} />
           </button>
         )}
         <input

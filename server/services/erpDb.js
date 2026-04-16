@@ -231,4 +231,11 @@ async function getAllIndirectEmployees() {
   }
 }
 
-module.exports = { isConfigured, execute, getEmployeeOrgData, getIndirectEmpCountByPC, getAllProfitCenters, getAllIndirectEmployees };
+async function getConnection() {
+  if (!isConfigured()) throw new Error('ERP DB not configured');
+  initClient();
+  const oracledb = getOracledb();
+  return await oracledb.getConnection(getConfig());
+}
+
+module.exports = { isConfigured, execute, getConnection, getOracledb, getEmployeeOrgData, getIndirectEmpCountByPC, getAllProfitCenters, getAllIndirectEmployees };
