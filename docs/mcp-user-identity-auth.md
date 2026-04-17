@@ -381,6 +381,43 @@ MCP stdio server 自 `process.env.MCP_USER_TOKEN` 讀取，用公鑰驗簽。
 - 看到新增「stdio session cache / pool」→ **拒絕 PR**
 - 看到 `spawn()` 的呼叫位置從 `withStdio` 內移到模組頂層（變 global singleton）→ **拒絕 PR**
 
+### 3.4 自我驗證工具（因尚無 MCP 團隊對接，我方先實作）
+
+目前還沒有真實的 MCP server 能驗收 FOXLINK GPT 發出的 JWT。為了確保簽發邏輯正確、未來給 MCP 團隊聯合測試時有基準，**本階段一併實作以下兩個工具**：
+
+#### (a) Admin API — Token 測試／驗證 endpoint
+
+定義於 `server/routes/mcpServers.js`，僅 admin 可用：
+
+| Endpoint | 用途 |
+|---|---|
+| `GET  /api/mcp-servers/public-key` | 回傳 `foxlink-gpt-public.pem` 內容 + SHA-256 fingerprint。UI 用它做「下載公鑰」按鈕。 |
+| `POST /api/mcp-servers/test-token` | body `{ email, name?, sub?, dept? }` → 用私鑰簽發一顆 JWT 回傳。給 MCP 團隊驗證時拿這顆 token 丟進自己的驗簽流程。 |
+| `POST /api/mcp-servers/verify-token` | body `{ token }` → 用公鑰驗簽,回傳 decoded claims 或錯誤原因。讓 admin 直接在 UI 上測「我剛發出去的 token 長什麼樣」。 |
+
+UI 對應：
+- Modal 的「使用者身份認證」區塊放「下載公鑰」+「產生測試 Token」兩個按鈕
+- 產生測試 token 後,顯示 raw JWT（可複製）+ decode 後的 claims 表格
+
+#### (b) CLI 驗證腳本
+
+`server/scripts/verify-mcp-token.js`：
+
+```bash
+# 基本用法：貼 token 進去，用 env 的公鑰解
+node server/scripts/verify-mcp-token.js eyJhbGciOiJSUzI1NiJ9...
+
+# 明確指定公鑰檔
+MCP_JWT_PUBLIC_KEY_PATH=./certs/foxlink-gpt-public.pem \
+  node server/scripts/verify-mcp-token.js <token>
+```
+
+輸出：
+- 驗簽通過 → 印出 header + claims（JSON）+ `iat/exp` 對應的 UTC/Local 時間
+- 驗簽失敗 → 明確指出原因（簽章錯、過期、iss 不符、alg 不是 RS256 等）
+
+這個腳本讓 MCP 團隊將來要 onboarding 時有個「不依賴自己環境」的驗證工具。
+
 ---
 
 ## 4. 金鑰管理
@@ -478,7 +515,9 @@ MCP 端定期拉取公鑰，自動 rotation，無需手動分發。
 - [ ] 驗證過期 token（人工塞一個 `exp` 已過的）會被拒
 - [ ] 驗證 `iss != "foxlink-gpt"` 會被拒
 - [ ] 驗證 `alg` 切換攻擊防護：把 JWT header 改成 `"alg":"HS256"` 並用公鑰當 secret 簽 → 必須被拒
+- [ ] 驗簽時設定 `clockTolerance` / `leeway` / `ClockSkew` ≥ **30 秒**（避免 NTP 漂移造成假陰性，見 §2.5 / §2.6）
 - [ ] 缺 `X-User-Token` 時回 `401` 而非 `500`
+- [ ] （建議）在 MCP 自己的 log 紀錄 `jti`，方便與 FOXLINK GPT 端 `mcp_call_logs` 對齊單次呼叫
 - [ ] stdio 模式 MCP 改自 `process.env.MCP_USER_TOKEN` 讀取驗簽
 
 ### 回覆我方的問題
@@ -501,11 +540,13 @@ MCP 端定期拉取公鑰，自動 rotation，無需手動分發。
 
 ## 8. 時程預估（FOXLINK GPT 端）
 
-| 項目 | 時間 |
-|---|---|
-| 產生 RSA key pair + env 設定 | 0.5 day |
-| 核心實作（4 個 transport + userCtx pass-through + RS256 簽發） | 0.5 day |
-| chat.js 呼叫端串接 userCtx | 0.5 day |
-| 與 MCP 團隊聯合測試（RS256 驗簽 + 過期/alg 切換攻擊測試） | 0.5 day |
-| 文件更新（CLAUDE.md / tool-architecture.md） | 0.5 day |
-| **合計** | **~2.5 day** |
+| Phase | 項目 | 時間 |
+|---|---|---|
+| **0** | 產生 RSA key pair + `.gitignore` + `.env.example` + 安裝 `jsonwebtoken`/`uuid`  | 0.5 day |
+| **1** | Schema migration（`send_user_token` + `mcp_call_logs` 欄位） + `mcpClient.js` 簽發邏輯 + 4 個 transport 的 `userCtx` pass-through + email 缺失 throw + chat.js 串接 | 1 day |
+| **2** | `routes/mcpServers.js` 加 `public-key` / `test-token` / `verify-token` 三個 admin endpoint + CRUD 支援 `send_user_token` | 0.5 day |
+| **3** | `McpServersPanel.tsx` Modal 認證區塊 + 卡片 icon + 三語 i18n | 0.5 day |
+| **4** | CLI 驗證腳本 `verify-mcp-token.js` + 文件更新（本文件 + CLAUDE.md + tool-architecture.md + `server/certs/README.md`） | 0.5 day |
+| | **合計** | **~3 day** |
+
+> 本階段**不含**與 MCP 團隊聯合測試（目前尚無 MCP 對接對象）。待首個 MCP 團隊 onboarding 時，再用 §3.4 的測試工具做驗證。
