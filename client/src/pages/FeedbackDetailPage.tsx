@@ -703,7 +703,7 @@ export default function FeedbackDetailPage() {
 
           {/* Chat Input */}
           {canChat && (
-            <div className="border-t border-gray-200 bg-gray-50 px-6 py-3">
+            <div className="border-t border-gray-200 bg-gray-50 px-6 py-3" onPaste={handlePaste}>
               {/* 檔案預覽（圖片縮圖 + 非圖片檔名） */}
               {msgFiles.length > 0 && (
                 <div className="flex flex-wrap gap-2 mb-2">
@@ -756,7 +756,11 @@ export default function FeedbackDetailPage() {
                     />
                   </div>
                   <button
-                    onClick={() => fileInputRef.current?.click()}
+                    onClick={() => {
+                      fileInputRef.current?.click()
+                      const refocus = () => { window.removeEventListener('focus', refocus); setTimeout(() => msgTextareaRef.current?.focus(), 50) }
+                      window.addEventListener('focus', refocus)
+                    }}
                     className="p-2 rounded-lg bg-gray-100 text-gray-500 hover:text-gray-900 transition"
                     title={t('feedback.attachFiles')}
                   >
@@ -767,7 +771,11 @@ export default function FeedbackDetailPage() {
                     type="file"
                     multiple
                     className="hidden"
-                    onChange={e => e.target.files && setMsgFiles(prev => [...prev, ...Array.from(e.target.files!)])}
+                    onChange={e => {
+                      if (e.target.files) setMsgFiles(prev => [...prev, ...Array.from(e.target.files!)])
+                      e.target.value = ''
+                      msgTextareaRef.current?.focus()
+                    }}
                   />
                   {isAdmin && (
                     <button
