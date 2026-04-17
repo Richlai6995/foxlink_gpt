@@ -63,16 +63,17 @@ function _buildChunks(ticket, messages, attResults) {
     meta: {},
   });
 
-  // 1..N. 對話（非 internal、非 system）
+  // 1..N. 對話（含 internal notes — admin 解題紀錄也進 KB）
   for (const m of messages) {
-    if (m.is_internal || m.is_system) continue;
+    if (m.is_system) continue;
     const content = m.content?.trim();
     if (!content) continue;
     const roleLabel = m.sender_role === 'admin' ? '客服' : '申請者';
-    const body = `【${roleLabel}】${m.sender_name || ''}\n${content}`;
+    const tag = m.is_internal ? '【內部解題紀錄】' : `【${roleLabel}】`;
+    const body = `${tag}${m.is_internal ? '' : (m.sender_name || '')}\n${content}`;
     chunks.push({
       content: body.slice(0, MAX_CHUNK_CHARS),
-      position_type: 'message',
+      position_type: m.is_internal ? 'admin_note' : 'message',
       meta: { message_id: m.id, sender_role: m.sender_role },
     });
   }

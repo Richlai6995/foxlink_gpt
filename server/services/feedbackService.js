@@ -428,10 +428,20 @@ async function addAttachment(db, { ticket_id, message_id, file_name, file_path, 
   return db.prepare('SELECT * FROM feedback_attachments WHERE id = ?').get(result.lastInsertRowid);
 }
 
-async function listAttachments(db, ticket_id) {
-  return db.prepare(
-    'SELECT * FROM feedback_attachments WHERE ticket_id = ? ORDER BY created_at ASC'
-  ).all(ticket_id);
+async function listAttachments(db, ticket_id, isAdmin) {
+  if (isAdmin) {
+    return db.prepare(
+      'SELECT * FROM feedback_attachments WHERE ticket_id = ? ORDER BY created_at ASC'
+    ).all(ticket_id);
+  }
+  // 非 admin：過濾掉掛在 internal message 上的附件
+  return db.prepare(`
+    SELECT a.* FROM feedback_attachments a
+    LEFT JOIN feedback_messages m ON m.id = a.message_id
+    WHERE a.ticket_id = ?
+      AND (a.message_id IS NULL OR m.is_internal = 0 OR m.is_internal IS NULL)
+    ORDER BY a.created_at ASC
+  `).all(ticket_id);
 }
 
 async function deleteAttachment(db, id, userId, isAdmin) {

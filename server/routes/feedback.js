@@ -565,7 +565,7 @@ router.get('/tickets/:id/attachments', async (req, res) => {
     if (!canViewTicket(req.user, ticket)) {
       return res.status(403).json({ error: '無權限查看' });
     }
-    const attachments = await feedbackService.listAttachments(db, Number(req.params.id));
+    const attachments = await feedbackService.listAttachments(db, Number(req.params.id), canManageTicket(req.user, ticket));
     res.json(attachments);
   } catch (e) {
     res.status(500).json({ error: e.message });

@@ -110,6 +110,9 @@ export default function FeedbackDetailPage() {
   // Resolve modal
   const [showResolve, setShowResolve] = useState(false)
   const [resolveNote, setResolveNote] = useState('')
+  const [adminResolveNote, setAdminResolveNote] = useState('')
+  const [adminResolveFiles, setAdminResolveFiles] = useState<File[]>([])
+  const adminResolveFileRef = useRef<HTMLInputElement>(null)
 
   // Satisfaction modal
   const [showSatisfaction, setShowSatisfaction] = useState(false)
@@ -340,9 +343,19 @@ export default function FeedbackDetailPage() {
 
   const handleResolve = async () => {
     try {
+      // 如果有 admin 內部解題紀錄 → 先 POST 一條 internal message + 附件
+      if (isAdmin && (adminResolveNote.trim() || adminResolveFiles.length > 0)) {
+        const fd = new FormData()
+        fd.append('content', adminResolveNote.trim() || '(內部解題附件)')
+        fd.append('is_internal', 'true')
+        for (const f of adminResolveFiles) fd.append('files', f)
+        await api.post(`/feedback/tickets/${id}/messages`, fd)
+      }
       await api.put(`/feedback/tickets/${id}/resolve`, { note: resolveNote })
       setShowResolve(false)
       setResolveNote('')
+      setAdminResolveNote('')
+      setAdminResolveFiles([])
       fetchAll()
     } catch (e: any) {
       alert(e.response?.data?.error || 'Error')
@@ -776,7 +789,7 @@ export default function FeedbackDetailPage() {
               </div>
               {isAdmin && isInternal && (
                 <p className="text-xs text-amber-400 mt-1 flex items-center gap-1">
-                  <Lock size={10} /> {t('feedback.internalNote')}
+                  <Lock size={10} /> {t('feedback.internalNote')} — 訊息與附件使用者不可見，結案後會進知識庫
                 </p>
               )}
             </div>
@@ -955,15 +968,58 @@ export default function FeedbackDetailPage() {
       {/* Resolve Modal */}
       {showResolve && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowResolve(false)}>
-          <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-xl w-full max-w-md" onClick={e => e.stopPropagation()}>
+          <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-xl w-full max-w-lg" onClick={e => e.stopPropagation()}>
             <h3 className="text-lg font-semibold mb-4">{t('feedback.resolve')}</h3>
+            <label className="block text-xs font-medium text-gray-500 mb-1">{t('feedback.resolutionNote')}</label>
             <textarea
               value={resolveNote}
               onChange={e => setResolveNote(e.target.value)}
               placeholder={t('feedback.resolutionNote')}
-              rows={4}
+              rows={3}
               className="w-full bg-white border border-gray-300 rounded-lg px-4 py-2 text-sm text-gray-900 focus:outline-none focus:border-blue-500 resize-none"
             />
+            {/* Admin-only: 內部解題紀錄 + 附件 */}
+            {isAdmin && (
+              <div className="mt-4 pt-4 border-t border-dashed border-amber-300 bg-amber-50/50 -mx-6 px-6 pb-1">
+                <div className="flex items-center gap-1.5 mb-2">
+                  <Lock size={12} className="text-amber-500" />
+                  <span className="text-xs font-semibold text-amber-700">管理員內部解題紀錄</span>
+                  <span className="text-[10px] text-amber-400">（使用者看不到，會進知識庫）</span>
+                </div>
+                <textarea
+                  value={adminResolveNote}
+                  onChange={e => setAdminResolveNote(e.target.value)}
+                  placeholder="解題步驟、SOP 參考、根因分析..."
+                  rows={3}
+                  className="w-full bg-white border border-amber-200 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-amber-400 resize-none"
+                />
+                <div className="flex items-center gap-2 mt-2">
+                  <input ref={adminResolveFileRef} type="file" multiple className="hidden" onChange={e => {
+                    if (e.target.files) setAdminResolveFiles(prev => [...prev, ...Array.from(e.target.files!)])
+                    e.target.value = ''
+                  }} />
+                  <button type="button" onClick={() => adminResolveFileRef.current?.click()}
+                    className="flex items-center gap-1 px-2 py-1 rounded text-xs bg-amber-100 text-amber-700 hover:bg-amber-200">
+                    <Paperclip size={10} /> 上傳內部附件
+                  </button>
+                  {adminResolveFiles.length > 0 && (
+                    <span className="text-[10px] text-amber-500">{adminResolveFiles.length} 個檔案</span>
+                  )}
+                </div>
+                {adminResolveFiles.length > 0 && (
+                  <div className="flex flex-wrap gap-1 mt-1.5">
+                    {adminResolveFiles.map((f, i) => (
+                      <span key={i} className="inline-flex items-center gap-1 text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded">
+                        {f.name}
+                        <button onClick={() => setAdminResolveFiles(prev => prev.filter((_, j) => j !== i))} className="text-amber-400 hover:text-red-500">
+                          <X size={8} />
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
             <div className="flex justify-end gap-3 mt-4">
               <button onClick={() => setShowResolve(false)} className="px-4 py-2 rounded-lg text-sm bg-gray-100 text-gray-600">
                 {t('common.cancel')}

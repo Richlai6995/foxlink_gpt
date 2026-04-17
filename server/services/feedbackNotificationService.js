@@ -94,7 +94,8 @@ async function _getUserInfo(db, userId) {
 async function _sendToRoom(ticket, markdown) {
   try {
     if (!process.env.WEBEX_BOT_TOKEN) return null;
-    const isErp = !!(ticket && (ticket.category_is_erp === 1 || ticket.category_is_erp === '1'));
+    const isErp = !!(ticket && Number(ticket.category_is_erp) === 1);
+    console.log(`[FeedbackNotif] _sendToRoom isErp=${isErp} (category_is_erp=${ticket?.category_is_erp}, ticket_no=${ticket?.ticket_no})`);
     const roomId = isErp ? await ensureFeedbackErpWebexRoom() : await ensureFeedbackWebexRoom();
     if (!roomId) return null;
     const { getWebexService } = require('./webexService');
@@ -273,7 +274,7 @@ async function _syncErpAdminMembers(db, webex, roomId) {
 
 async function notifyAdmins(db, ticket, type, title, message) {
   try {
-    const isErp = !!(ticket && (ticket.category_is_erp === 1 || ticket.category_is_erp === '1'));
+    const isErp = !!(ticket && Number(ticket.category_is_erp) === 1);
     // ERP 工單：通知 Cortex admin + ERP admin
     // 非 ERP 工單：只通知 Cortex admin（ERP admin 看不到，不必通知）
     const sql = isErp
