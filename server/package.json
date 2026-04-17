@@ -23,6 +23,7 @@
     "form-data": "^4.0.5",
     "ioredis": "^5.10.0",
     "jsdom": "^28.1.0",
+    "jsonwebtoken": "^9.0.3",
     "jszip": "^3.10.1",
     "ldapjs": "^3.0.7",
     "mammoth": "^1.8.0",

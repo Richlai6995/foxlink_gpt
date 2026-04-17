@@ -2579,6 +2579,13 @@ async function runMigrations(db) {
   } catch (e) {
     console.warn('[Migration] erp tool_schema regen:', e.message);
   }
+
+  // ── MCP User Identity (RS256 JWT) ──────────────────────────────────────────
+  // per-server 開關:admin 明確勾選才發 X-User-Token,預設 0 保守(舊 MCP 不會壞)
+  await safeAddColumn('MCP_SERVERS',   'SEND_USER_TOKEN', 'NUMBER(1) DEFAULT 0');
+  // mcp_call_logs 追加欄位:事後審計用,可與 MCP 端 log 對齊單次呼叫
+  await safeAddColumn('MCP_CALL_LOGS', 'USER_EMAIL',      'VARCHAR2(200)');
+  await safeAddColumn('MCP_CALL_LOGS', 'JTI',             'VARCHAR2(64)');
 }
 
 // ─── Default DB Source migration ───────────────────────────────────────────────

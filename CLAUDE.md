@@ -215,6 +215,8 @@ docker-compose up -d --build
 | `DB_PATH` | SQLite 路徑（已廢棄） |
 | `UPLOAD_DIR` | 上傳檔案根目錄 |
 | `REDIS_URL` | Redis 連線（K8s 必須） |
+| `MCP_JWT_PRIVATE_KEY_PATH` | MCP User Identity JWT 私鑰 PEM 路徑（簽發 X-User-Token） |
+| `MCP_JWT_PUBLIC_KEY_PATH` | MCP User Identity JWT 公鑰 PEM 路徑（驗證 / 下載給 MCP 團隊） |
 
 ---
 
@@ -228,3 +230,9 @@ docker-compose up -d --build
 6. **CJK PDF**：需要 `server/fonts/NotoSansTC-Regular.ttf`
 7. **音訊轉錄**：使用 Gemini Flash（比 Pro 快）
 8. **LDAP displayName 格式**：`"工號 姓名"`（如 `"12345 王小明"`）
+9. **MCP User Identity（RS256 JWT）**：per-server `mcp_servers.send_user_token=1` 才會簽發 `X-User-Token` header。私鑰僅 FOXLINK GPT 持有（`server/certs/mcp-jwt-private.pem`），公鑰給 MCP 團隊驗簽。詳見 [docs/mcp-user-identity-auth.md](docs/mcp-user-identity-auth.md)。
+    - 簽發邏輯：`signUserToken` 在 [server/services/mcpClient.js](server/services/mcpClient.js)
+    - email 缺失 → throw `MCP_JWT_EMAIL_REQUIRED`（不 fallback）
+    - stdio 必須 per-call spawn（token 在 env，5min 後過期）
+    - CLI 驗證：`node server/scripts/verify-mcp-token.js <token>`
+    - Admin UI 提供公鑰下載 + 測試 token 產生（MCP 伺服器編輯 Modal 內）

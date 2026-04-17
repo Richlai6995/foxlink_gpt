@@ -8,9 +8,16 @@
  *   - streamable-http  : Single endpoint, response may be JSON or SSE stream (MCP 2025 spec)
  *   - stdio            : Spawn subprocess, communicate via stdin/stdout JSON-RPC
  *   - auto             : Try transports in order until one works
+ *
+ * User Identity (RS256 JWT in X-User-Token header)
+ *   See docs/mcp-user-identity-auth.md
+ *   per-server 開關: mcp_servers.send_user_token = 1
  */
 
 const { spawn } = require('child_process');
+const { randomUUID } = require('crypto');
+const fs  = require('fs');
+const jwt = require('jsonwebtoken');
 
 let _reqId = 1;
 
@@ -20,13 +27,82 @@ const INIT_PARAMS = {
   clientInfo: { name: 'FOXLINK-GPT', version: '1.0' },
 };
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
+// ── JWT private key: lazy-load once, warn (not crash) if missing ─────────────
 
-function makeAuthHeaders(apiKey) {
+let _privateKey = null;
+let _privateKeyLoaded = false;
+function getPrivateKey() {
+  if (_privateKeyLoaded) return _privateKey;
+  _privateKeyLoaded = true;
+
+  const keyPath = process.env.MCP_JWT_PRIVATE_KEY_PATH;
+  if (!keyPath) {
+    console.warn('[mcp-jwt] MCP_JWT_PRIVATE_KEY_PATH not set — X-User-Token disabled (send_user_token=1 servers will throw at runtime)');
+    return null;
+  }
+  try {
+    _privateKey = fs.readFileSync(keyPath, 'utf8');
+    console.error('[mcp-jwt] private key loaded from', keyPath);
+  } catch (e) {
+    console.warn(`[mcp-jwt] failed to load private key from ${keyPath}: ${e.message} — X-User-Token disabled`);
+  }
+  return _privateKey;
+}
+
+/** Sign an RS256 JWT for the given user ctx. Throws on missing email / private key. */
+function signUserToken(userCtx) {
+  if (!userCtx?.email) {
+    const err = new Error('MCP_JWT_EMAIL_REQUIRED: user has no email but MCP requires X-User-Token');
+    err.code = 'MCP_JWT_EMAIL_REQUIRED';
+    throw err;
+  }
+  const privateKey = getPrivateKey();
+  if (!privateKey) {
+    const err = new Error('MCP_JWT_PRIVATE_KEY_NOT_CONFIGURED: send_user_token=1 but private key not loaded — set MCP_JWT_PRIVATE_KEY_PATH');
+    err.code = 'MCP_JWT_PRIVATE_KEY_NOT_CONFIGURED';
+    throw err;
+  }
+  const jti = randomUUID();
+  const token = jwt.sign(
+    {
+      jti,
+      sub:   String(userCtx.employee_id || userCtx.id),
+      email: userCtx.email,
+      name:  userCtx.name || null,
+      dept:  userCtx.dept_code || null,
+    },
+    privateKey,
+    { algorithm: 'RS256', expiresIn: '5m', issuer: 'foxlink-gpt' }
+  );
+  return { token, jti };
+}
+
+/**
+ * Prepare auth context for a single MCP session.
+ * - api_key → Layer 1 (service identity)
+ * - server.send_user_token=1 AND userCtx given → Layer 2 (sign RS256 JWT)
+ * - send_user_token=1 but no userCtx → do NOT sign (e.g. tools/list is service-level)
+ */
+function prepareAuthCtx(server, userCtx) {
+  const ctx = { apiKey: server.api_key || null, userToken: null, jti: null };
+  const wantsUserToken = server.send_user_token === 1 || server.send_user_token === true;
+  if (wantsUserToken && userCtx) {
+    const signed = signUserToken(userCtx);
+    ctx.userToken = signed.token;
+    ctx.jti = signed.jti;
+  }
+  return ctx;
+}
+
+function makeAuthHeaders(authCtx) {
   const h = {};
-  if (apiKey) h['Authorization'] = `Bearer ${apiKey}`;
+  if (authCtx?.apiKey)    h['Authorization']   = `Bearer ${authCtx.apiKey}`;
+  if (authCtx?.userToken) h['X-User-Token']    = authCtx.userToken;
   return h;
 }
+
+// Eager-load on module init so startup logs surface immediately
+getPrivateKey();
 
 function makeRpcBody(method, params) {
   return JSON.stringify({ jsonrpc: '2.0', id: _reqId++, method, params });
@@ -60,10 +136,10 @@ async function* parseSseStream(reader) {
 
 // ── Transport: http-post ──────────────────────────────────────────────────────
 
-async function httpPostRpc(url, apiKey, method, params = {}) {
+async function httpPostRpc(url, authCtx, method, params = {}) {
   const res = await fetch(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...makeAuthHeaders(apiKey) },
+    headers: { 'Content-Type': 'application/json', ...makeAuthHeaders(authCtx) },
     body: makeRpcBody(method, params),
     signal: AbortSignal.timeout(60000),
   });
@@ -73,15 +149,15 @@ async function httpPostRpc(url, apiKey, method, params = {}) {
   return data.result;
 }
 
-async function withHttpPost(url, apiKey, fn) {
+async function withHttpPost(url, authCtx, fn) {
   // initialize is optional — ignore errors
-  try { await httpPostRpc(url, apiKey, 'initialize', INIT_PARAMS); } catch (_) {}
-  return fn((method, params) => httpPostRpc(url, apiKey, method, params));
+  try { await httpPostRpc(url, authCtx, 'initialize', INIT_PARAMS); } catch (_) {}
+  return fn((method, params) => httpPostRpc(url, authCtx, method, params));
 }
 
 // ── Transport: streamable-http ────────────────────────────────────────────────
 
-async function streamableHttpRpc(url, apiKey, method, params = {}) {
+async function streamableHttpRpc(url, authCtx, method, params = {}) {
   const body = makeRpcBody(method, params);
   const reqId = JSON.parse(body).id;
 
@@ -90,7 +166,7 @@ async function streamableHttpRpc(url, apiKey, method, params = {}) {
     headers: {
       'Content-Type': 'application/json',
       'Accept': 'application/json, text/event-stream',
-      ...makeAuthHeaders(apiKey),
+      ...makeAuthHeaders(authCtx),
     },
     body,
     signal: AbortSignal.timeout(60000),
@@ -116,9 +192,9 @@ async function streamableHttpRpc(url, apiKey, method, params = {}) {
   }
 }
 
-async function withStreamableHttp(url, apiKey, fn) {
-  try { await streamableHttpRpc(url, apiKey, 'initialize', INIT_PARAMS); } catch (_) {}
-  return fn((method, params) => streamableHttpRpc(url, apiKey, method, params));
+async function withStreamableHttp(url, authCtx, fn) {
+  try { await streamableHttpRpc(url, authCtx, 'initialize', INIT_PARAMS); } catch (_) {}
+  return fn((method, params) => streamableHttpRpc(url, authCtx, method, params));
 }
 
 // ── Transport: http-sse ───────────────────────────────────────────────────────
@@ -126,11 +202,11 @@ async function withStreamableHttp(url, apiKey, fn) {
 // 2. POST requests to that endpoint URL
 // 3. Responses arrive via SSE stream matched by request id
 
-async function withHttpSse(sseUrl, apiKey, fn) {
+async function withHttpSse(sseUrl, authCtx, fn) {
   const controller = new AbortController();
 
   const sseRes = await fetch(sseUrl, {
-    headers: { Accept: 'text/event-stream', ...makeAuthHeaders(apiKey) },
+    headers: { Accept: 'text/event-stream', ...makeAuthHeaders(authCtx) },
     signal: controller.signal,
   });
   if (!sseRes.ok) throw new Error(`MCP SSE ${sseRes.status}: ${sseRes.statusText}`);
@@ -187,7 +263,7 @@ async function withHttpSse(sseUrl, apiKey, fn) {
 
     const postRes = await fetch(postUrl, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...makeAuthHeaders(apiKey) },
+      headers: { 'Content-Type': 'application/json', ...makeAuthHeaders(authCtx) },
       body,
     });
     if (!postRes.ok) throw new Error(`MCP POST ${postRes.status}: ${postRes.statusText}`);
@@ -226,11 +302,17 @@ function parseCommand(commandStr) {
   return parts;
 }
 
-async function withStdio(command, argsExtra = [], envExtra = {}, fn) {
+async function withStdio(command, argsExtra = [], envExtra = {}, authCtx, fn) {
   const parts  = parseCommand(command);
   const cmd    = parts[0];
   const args   = [...parts.slice(1), ...argsExtra];
-  const env    = { ...process.env, ...envExtra };
+  // stdio MCP has no HTTP headers — inject auth via env vars instead.
+  // Token is signed ONCE per spawn; stdio process must be short-lived (per-call)
+  // because env vars are immutable after spawn and JWT exp = 5min. See §3.3.
+  const extraEnv = {};
+  if (authCtx?.apiKey)    extraEnv.MCP_API_KEY    = authCtx.apiKey;
+  if (authCtx?.userToken) extraEnv.MCP_USER_TOKEN = authCtx.userToken;
+  const env = { ...process.env, ...envExtra, ...extraEnv };
 
   let proc;
   try {
@@ -319,9 +401,8 @@ async function withStdio(command, argsExtra = [], envExtra = {}, fn) {
 // ── Auto-detect ───────────────────────────────────────────────────────────────
 // Tries transports in order and updates server.transport_type in DB on success
 
-async function withAutoDetect(db, server, fn) {
+async function withAutoDetect(db, server, authCtx, fn) {
   const url    = server.url;
-  const apiKey = server.api_key;
   const isSSEUrl = /\/sse\b/.test(url);
 
   const attempts = isSSEUrl
@@ -333,11 +414,11 @@ async function withAutoDetect(db, server, fn) {
     try {
       let result;
       if (transport === 'http-post') {
-        result = await withHttpPost(url, apiKey, fn);
+        result = await withHttpPost(url, authCtx, fn);
       } else if (transport === 'streamable-http') {
-        result = await withStreamableHttp(url, apiKey, fn);
+        result = await withStreamableHttp(url, authCtx, fn);
       } else {
-        result = await withHttpSse(url, apiKey, fn);
+        result = await withHttpSse(url, authCtx, fn);
       }
       // Success — persist detected transport
       if (db && server.id) {
@@ -363,21 +444,28 @@ function getTransport(server) {
   return (server.transport_type || 'http-post').toLowerCase();
 }
 
-async function withSession(db, server, fn) {
+/**
+ * @param {object}      db        Oracle wrapper
+ * @param {object}      server    mcp_servers row
+ * @param {function}    fn        async (rpc) => result
+ * @param {object|null} authCtx   from prepareAuthCtx(server, userCtx); null = service-level (no user token)
+ */
+async function withSession(db, server, fn, authCtx = null) {
+  // Fallback: if caller didn't prepare authCtx (e.g. listTools sync path), build service-level one
+  const ctx = authCtx || prepareAuthCtx(server, null);
   const t = getTransport(server);
-  const url    = server.url;
-  const apiKey = server.api_key;
+  const url = server.url;
 
-  if (t === 'auto')             return withAutoDetect(db, server, fn);
-  if (t === 'http-sse')         return withHttpSse(url, apiKey, fn);
-  if (t === 'streamable-http')  return withStreamableHttp(url, apiKey, fn);
+  if (t === 'auto')            return withAutoDetect(db, server, ctx, fn);
+  if (t === 'http-sse')        return withHttpSse(url, ctx, fn);
+  if (t === 'streamable-http') return withStreamableHttp(url, ctx, fn);
   if (t === 'stdio') {
     const args = server.args_json ? JSON.parse(server.args_json) : [];
     const env  = server.env_json  ? JSON.parse(server.env_json)  : {};
-    return withStdio(server.command || url, args, env, fn);
+    return withStdio(server.command || url, args, env, ctx, fn);
   }
   // default: http-post
-  return withHttpPost(url, apiKey, fn);
+  return withHttpPost(url, ctx, fn);
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
@@ -395,17 +483,25 @@ async function listTools(db, server) {
   return tools;
 }
 
-async function callTool(db, server, sessionId, userId, toolName, args) {
+/**
+ * @param {object|null} userCtx { id, email, name, employee_id, dept_code }
+ *   Required when server.send_user_token=1. Pass null only for service-level calls.
+ */
+async function callTool(db, server, sessionId, userId, toolName, args, userCtx = null) {
   const startMs = Date.now();
   let status = 'ok';
   let errorMsg = null;
   let responsePreview = null;
   let resultContent = null;
+  let authCtx = null;
 
   try {
+    // Sign up-front so we have jti for logging even if the RPC fails
+    authCtx = prepareAuthCtx(server, userCtx);
+
     const result = await withSession(db, server, (rpc) =>
       rpc('tools/call', { name: toolName, arguments: args })
-    );
+    , authCtx);
 
     const content = result.content || [];
     const textParts = content.filter(c => c.type === 'text').map(c => c.text).join('\n');
@@ -423,10 +519,12 @@ async function callTool(db, server, sessionId, userId, toolName, args) {
   try {
     await db.prepare(
       `INSERT INTO mcp_call_logs
-        (server_id, session_id, user_id, tool_name, arguments_json, response_preview, status, error_msg, duration_ms, called_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, SYSTIMESTAMP)`
+        (server_id, session_id, user_id, user_email, jti, tool_name, arguments_json, response_preview, status, error_msg, duration_ms, called_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, SYSTIMESTAMP)`
     ).run(
-      server.id, sessionId || null, userId || null, toolName,
+      server.id, sessionId || null, userId || null,
+      userCtx?.email || null, authCtx?.jti || null,
+      toolName,
       JSON.stringify(args), responsePreview, status, errorMsg, durationMs,
     );
   } catch (logErr) {
@@ -514,4 +612,39 @@ async function getActiveToolDeclarations(db, userCtx = null) {
   return result;
 }
 
-module.exports = { listTools, callTool, getActiveToolDeclarations };
+// ── Public-key helpers (for admin endpoints in routes/mcpServers.js) ─────────
+
+function getPublicKey() {
+  const keyPath = process.env.MCP_JWT_PUBLIC_KEY_PATH;
+  if (!keyPath) return null;
+  try { return fs.readFileSync(keyPath, 'utf8'); }
+  catch (e) {
+    console.warn(`[mcp-jwt] failed to read public key from ${keyPath}: ${e.message}`);
+    return null;
+  }
+}
+
+/** Verify a token with the public key. Returns decoded claims or throws. */
+function verifyUserToken(token) {
+  const pub = getPublicKey();
+  if (!pub) {
+    const err = new Error('MCP_JWT_PUBLIC_KEY_NOT_CONFIGURED: set MCP_JWT_PUBLIC_KEY_PATH');
+    err.code = 'MCP_JWT_PUBLIC_KEY_NOT_CONFIGURED';
+    throw err;
+  }
+  return jwt.verify(token, pub, {
+    algorithms: ['RS256'],
+    issuer: 'foxlink-gpt',
+    clockTolerance: 30,
+  });
+}
+
+module.exports = {
+  listTools,
+  callTool,
+  getActiveToolDeclarations,
+  // exposed for Admin API (Phase 2) and CLI script (Phase 4):
+  signUserToken,
+  verifyUserToken,
+  getPublicKey,
+};

@@ -143,7 +143,11 @@ async function execMcp(node, vars, db, context) {
     args[k] = typeof v === 'string' ? interpolate(v, vars) : v;
   }
 
-  const result = await mcpClient.callTool(db, server, context.sessionId, context.userId, node.tool, args);
+  const u = context.user || {};
+  const mcpUserCtx = u.id ? {
+    id: u.id, email: u.email || '', name: u.name || '', employee_id: u.employee_id || '', dept_code: u.dept_code || '',
+  } : null;
+  const result = await mcpClient.callTool(db, server, context.sessionId, context.userId, node.tool, args, mcpUserCtx);
   return result || '';
 }
 

@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import {
   Plus, RefreshCw, Trash2, Edit2, ChevronDown, ChevronRight,
-  Plug, ToggleLeft, ToggleRight, AlertCircle, CheckCircle, Clock, Share2, Globe, ShieldCheck
+  Plug, ToggleLeft, ToggleRight, AlertCircle, CheckCircle, Clock, Share2, Globe, ShieldCheck,
+  KeyRound, Download, Copy, Check
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import api from '../../lib/api'
@@ -21,6 +22,7 @@ interface McpServer {
   is_active: number
   is_public: number
   public_approved: number
+  send_user_token: number
   response_mode: 'inject' | 'answer' | null
   transport_type: TransportType | null
   command: string | null
@@ -56,6 +58,7 @@ const TRANSPORT_TYPES: TransportType[] = ['http-post', 'http-sse', 'streamable-h
 
 const emptyForm = {
   name: '', url: '', api_key: '', description: '', is_active: true, is_public: false,
+  send_user_token: false,
   response_mode: 'inject' as 'inject' | 'answer',
   transport_type: 'http-post' as TransportType,
   command: '', args_json: '', env_json: '',
@@ -92,6 +95,70 @@ export default function MCPServersPanel() {
   const [shareServer, setShareServer] = useState<McpServer | null>(null)
   const [tags, setTags] = useState<string[]>([])
 
+  // ── MCP User Identity (RS256 JWT) test tools ─────────────────────────────
+  const [pubKeyBusy, setPubKeyBusy] = useState(false)
+  const [pubKeyCopied, setPubKeyCopied] = useState(false)
+  const [pubKeyErr, setPubKeyErr] = useState('')
+  const [testTokenOpen, setTestTokenOpen] = useState(false)
+  const [testForm, setTestForm] = useState({ email: '', name: '', sub: '', dept: '' })
+  const [testTokenBusy, setTestTokenBusy] = useState(false)
+  const [testTokenErr, setTestTokenErr] = useState('')
+  const [testTokenResult, setTestTokenResult] = useState<{ token: string; jti: string; claims: any } | null>(null)
+  const [tokenCopied, setTokenCopied] = useState(false)
+
+  const downloadPublicKey = async () => {
+    setPubKeyErr(''); setPubKeyBusy(true)
+    try {
+      const res = await api.get('/mcp-servers/public-key')
+      const blob = new Blob([res.data.pem], { type: 'application/x-pem-file' })
+      const a = document.createElement('a')
+      a.href = URL.createObjectURL(blob)
+      a.download = 'foxlink-gpt-public.pem'
+      a.click()
+      URL.revokeObjectURL(a.href)
+    } catch (e: any) {
+      setPubKeyErr(e.response?.data?.detail || e.response?.data?.error || t('mcp.form.publicKeyNotConfigured'))
+    } finally { setPubKeyBusy(false) }
+  }
+
+  const copyPublicKey = async () => {
+    setPubKeyErr('')
+    try {
+      const res = await api.get('/mcp-servers/public-key')
+      await navigator.clipboard.writeText(res.data.pem)
+      setPubKeyCopied(true)
+      setTimeout(() => setPubKeyCopied(false), 2000)
+    } catch (e: any) {
+      setPubKeyErr(e.response?.data?.detail || e.response?.data?.error || t('mcp.form.publicKeyNotConfigured'))
+    }
+  }
+
+  const openTestTokenModal = () => {
+    setTestForm({ email: '', name: '', sub: '', dept: '' })
+    setTestTokenResult(null)
+    setTestTokenErr('')
+    setTestTokenOpen(true)
+  }
+
+  const generateTestToken = async () => {
+    setTestTokenErr(''); setTestTokenBusy(true); setTestTokenResult(null)
+    try {
+      const res = await api.post('/mcp-servers/test-token', testForm)
+      setTestTokenResult(res.data)
+    } catch (e: any) {
+      const code = e.response?.data?.error
+      if (code === 'MCP_JWT_PRIVATE_KEY_NOT_CONFIGURED') setTestTokenErr(t('mcp.form.privateKeyNotConfigured'))
+      else setTestTokenErr(e.response?.data?.detail || e.response?.data?.error || e.message)
+    } finally { setTestTokenBusy(false) }
+  }
+
+  const copyToken = async () => {
+    if (!testTokenResult) return
+    await navigator.clipboard.writeText(testTokenResult.token)
+    setTokenCopied(true)
+    setTimeout(() => setTokenCopied(false), 2000)
+  }
+
   const load = async () => {
     try {
       setLoading(true)
@@ -120,6 +187,7 @@ export default function MCPServersPanel() {
     setForm({
       name: s.name, url: s.url || '', api_key: s.api_key || '', description: s.description || '',
       is_active: !!s.is_active, is_public: !!s.is_public,
+      send_user_token: !!s.send_user_token,
       response_mode: (s.response_mode as 'inject' | 'answer') || 'inject',
       transport_type: (s.transport_type as TransportType) || 'http-post',
       command: s.command || '', args_json: s.args_json || '', env_json: s.env_json || '',
@@ -298,6 +366,16 @@ export default function MCPServersPanel() {
                     s.public_approved === 1
                       ? <span className="flex items-center gap-1 text-xs px-2 py-0.5 bg-green-50 text-green-700 rounded-full font-medium"><Globe size={11} /> {t('mcp.public')}</span>
                       : <span className="flex items-center gap-1 text-xs px-2 py-0.5 bg-amber-50 text-amber-700 rounded-full font-medium"><Globe size={11} /> {t('mcp.pendingApproval')}</span>
+                  )}
+
+                  {/* User Identity 認證啟用 badge */}
+                  {s.send_user_token === 1 && (
+                    <span
+                      className="flex items-center gap-1 text-xs px-2 py-0.5 bg-indigo-50 text-indigo-700 rounded-full font-medium"
+                      title={t('mcp.form.sendUserTokenHint')}
+                    >
+                      <KeyRound size={11} /> X-User-Token
+                    </span>
                   )}
 
                   {/* Actions */}
@@ -569,6 +647,48 @@ export default function MCPServersPanel() {
                     : t('mcp.form.modeInjectDesc')}
                 </p>
               </div>
+              {/* ── 使用者身份認證（RS256 JWT X-User-Token） ─────────────────── */}
+              <div className="border border-indigo-100 bg-indigo-50/50 rounded-lg px-3 py-3 space-y-2">
+                <div className="flex items-center gap-1.5 text-xs font-semibold text-indigo-900">
+                  <KeyRound size={13} /> {t('mcp.form.userAuthTitle')}
+                </div>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={form.send_user_token}
+                    onChange={e => setForm(p => ({ ...p, send_user_token: e.target.checked }))}
+                    className="rounded"
+                  />
+                  <span className="text-sm text-slate-800 font-medium">{t('mcp.form.sendUserToken')}</span>
+                </label>
+                <p className="text-xs text-slate-600 leading-relaxed">{t('mcp.form.sendUserTokenHint')}</p>
+                <div className="flex flex-wrap gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={downloadPublicKey}
+                    disabled={pubKeyBusy}
+                    className="flex items-center gap-1 text-xs px-2.5 py-1.5 bg-white border border-indigo-200 text-indigo-700 rounded hover:bg-indigo-50 transition disabled:opacity-50"
+                  >
+                    <Download size={12} /> {t('mcp.form.downloadPublicKey')}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={copyPublicKey}
+                    className="flex items-center gap-1 text-xs px-2.5 py-1.5 bg-white border border-indigo-200 text-indigo-700 rounded hover:bg-indigo-50 transition"
+                  >
+                    {pubKeyCopied ? <><Check size={12} /> {t('mcp.form.copied')}</> : <><Copy size={12} /> {t('mcp.form.copyPublicKey')}</>}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={openTestTokenModal}
+                    className="flex items-center gap-1 text-xs px-2.5 py-1.5 bg-white border border-indigo-200 text-indigo-700 rounded hover:bg-indigo-50 transition"
+                  >
+                    <KeyRound size={12} /> {t('mcp.form.testToken')}
+                  </button>
+                </div>
+                {pubKeyErr && <p className="text-xs text-red-600 mt-1">{pubKeyErr}</p>}
+              </div>
+
               <label className="flex items-center gap-2 cursor-pointer">
                 <input
                   type="checkbox"
@@ -617,6 +737,105 @@ export default function MCPServersPanel() {
           sharesUrl={`/mcp-servers/${shareServer.id}/access`}
           onClose={() => setShareServer(null)}
         />
+      )}
+
+      {/* Test Token Modal */}
+      {testTokenOpen && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-[60]">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-lg max-h-[90vh] flex flex-col">
+            <div className="px-6 pt-6 pb-2 shrink-0 flex items-center gap-2">
+              <KeyRound size={16} className="text-indigo-600" />
+              <h3 className="text-base font-semibold text-slate-800">{t('mcp.form.testTokenTitle')}</h3>
+            </div>
+            <div className="overflow-y-auto flex-1 px-6 pb-2 space-y-3">
+              <p className="text-xs text-slate-500">{t('mcp.form.testTokenDesc')}</p>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">{t('mcp.form.testEmail')} *</label>
+                <input
+                  value={testForm.email}
+                  onChange={e => setTestForm(p => ({ ...p, email: e.target.value }))}
+                  placeholder="peter.wang@foxlink.com"
+                  className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">{t('mcp.form.testName')}</label>
+                  <input
+                    value={testForm.name}
+                    onChange={e => setTestForm(p => ({ ...p, name: e.target.value }))}
+                    placeholder="王小明"
+                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">{t('mcp.form.testSub')}</label>
+                  <input
+                    value={testForm.sub}
+                    onChange={e => setTestForm(p => ({ ...p, sub: e.target.value }))}
+                    placeholder="12345"
+                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">{t('mcp.form.testDept')}</label>
+                <input
+                  value={testForm.dept}
+                  onChange={e => setTestForm(p => ({ ...p, dept: e.target.value }))}
+                  placeholder="IT-01"
+                  className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+
+              <button
+                type="button"
+                onClick={generateTestToken}
+                disabled={testTokenBusy || !testForm.email}
+                className="w-full px-4 py-2 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition disabled:opacity-50 flex items-center justify-center gap-1.5"
+              >
+                {testTokenBusy ? <RefreshCw size={14} className="animate-spin" /> : <KeyRound size={14} />}
+                {t('mcp.form.generate')}
+              </button>
+
+              {testTokenErr && <p className="text-xs text-red-600">{testTokenErr}</p>}
+
+              {testTokenResult && (
+                <div className="space-y-2 pt-1">
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-xs font-medium text-slate-600">{t('mcp.form.rawJwt')}</label>
+                      <button
+                        type="button"
+                        onClick={copyToken}
+                        className="flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-800"
+                      >
+                        {tokenCopied ? <><Check size={11} /> {t('mcp.form.copied')}</> : <><Copy size={11} /> {t('mcp.form.copyPublicKey').replace(/key/i, 'token')}</>}
+                      </button>
+                    </div>
+                    <textarea
+                      readOnly
+                      value={testTokenResult.token}
+                      rows={3}
+                      className="w-full font-mono text-[10px] border border-slate-200 rounded px-2 py-1.5 bg-slate-50 resize-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-600 mb-1">{t('mcp.form.decodedClaims')}</label>
+                    <pre className="font-mono text-[11px] border border-slate-200 rounded px-2 py-1.5 bg-slate-50 overflow-x-auto">
+{JSON.stringify(testTokenResult.claims, null, 2)}
+                    </pre>
+                  </div>
+                </div>
+              )}
+            </div>
+            <div className="flex justify-end gap-2 px-6 py-4 border-t border-slate-100 shrink-0">
+              <button onClick={() => setTestTokenOpen(false)} className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-lg transition">
+                {t('common.close')}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )

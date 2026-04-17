@@ -45,7 +45,7 @@ router.post('/', async (req, res) => {
   const db = getDb();
   try {
     const { name, url, api_key, description, is_active, response_mode,
-            transport_type, command, args_json, env_json, tags,
+            transport_type, command, args_json, env_json, tags, send_user_token,
             name_zh, name_en, name_vi, desc_zh, desc_en, desc_vi } = req.body;
     const tt = transport_type || 'http-post';
     if (!name) return res.status(400).json({ error: '名稱為必填' });
@@ -53,11 +53,12 @@ router.post('/', async (req, res) => {
     if (tt === 'stdio' && !command) return res.status(400).json({ error: 'stdio 模式需填寫指令' });
     if (tags !== undefined && !Array.isArray(tags)) return res.status(400).json({ error: 'tags 必須為陣列' });
     const tagsStr = JSON.stringify(tags || []);
+    const sendUserToken = send_user_token ? 1 : 0;
 
     const result = await db.prepare(
-      `INSERT INTO mcp_servers (name, url, api_key, description, is_active, response_mode, transport_type, command, args_json, env_json, tags) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO mcp_servers (name, url, api_key, description, is_active, response_mode, transport_type, command, args_json, env_json, tags, send_user_token) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(name, url || null, api_key || null, description || null, is_active !== false ? 1 : 0, response_mode || 'inject',
-          tt, command || null, args_json || null, env_json || null, tagsStr);
+          tt, command || null, args_json || null, env_json || null, tagsStr, sendUserToken);
 
     const newId = result.lastInsertRowid;
     const trans = (name_zh !== undefined)
@@ -83,7 +84,7 @@ router.put('/:id', async (req, res) => {
     if (!server) return res.status(404).json({ error: '找不到 MCP 伺服器' });
 
     const { name, url, api_key, description, is_active, response_mode,
-            transport_type, command, args_json, env_json, tags,
+            transport_type, command, args_json, env_json, tags, send_user_token,
             name_zh, name_en, name_vi, desc_zh, desc_en, desc_vi, is_public } = req.body;
     if (tags !== undefined && !Array.isArray(tags)) return res.status(400).json({ error: 'tags 必須為陣列' });
     const finalName = name ?? server.name;
@@ -93,8 +94,9 @@ router.put('/:id', async (req, res) => {
     const newIsPublic = is_public !== undefined ? (is_public ? 1 : 0) : (server.is_public || 0);
     // 若取消公開則同步重置核准狀態
     const newPublicApproved = newIsPublic ? (server.public_approved || 0) : 0;
+    const finalSendUserToken = send_user_token !== undefined ? (send_user_token ? 1 : 0) : (server.send_user_token || 0);
     await db.prepare(
-      `UPDATE mcp_servers SET name=?, url=?, api_key=?, description=?, is_active=?, response_mode=?, transport_type=?, command=?, args_json=?, env_json=?, tags=?, is_public=?, public_approved=?, updated_at=SYSTIMESTAMP WHERE id=?`
+      `UPDATE mcp_servers SET name=?, url=?, api_key=?, description=?, is_active=?, response_mode=?, transport_type=?, command=?, args_json=?, env_json=?, tags=?, is_public=?, public_approved=?, send_user_token=?, updated_at=SYSTIMESTAMP WHERE id=?`
     ).run(
       finalName,
       url !== undefined ? (url || null) : server.url,
@@ -108,6 +110,7 @@ router.put('/:id', async (req, res) => {
       env_json !== undefined ? (env_json || null) : server.env_json,
       finalTags,
       newIsPublic, newPublicApproved,
+      finalSendUserToken,
       req.params.id,
     );
 
@@ -436,6 +439,81 @@ router.post('/:id/translate', async (req, res) => {
     res.json(trans);
   } catch (e) {
     res.status(500).json({ error: e.message });
+  }
+});
+
+// ── MCP User Identity (RS256 JWT) — admin 驗證與下載工具 ────────────────────
+// See docs/mcp-user-identity-auth.md §3.4
+
+const crypto = require('crypto');
+
+// GET /api/mcp-servers/public-key
+//   回傳目前 MCP User Identity 驗證用的 RSA 公鑰 PEM + SHA-256 fingerprint。
+router.get('/public-key', async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  try {
+    const pem = mcpClient.getPublicKey();
+    if (!pem) {
+      return res.status(503).json({
+        error: 'MCP_JWT_PUBLIC_KEY_NOT_CONFIGURED',
+        detail: 'MCP_JWT_PUBLIC_KEY_PATH 未設定或讀取失敗。請在 server/.env 設定後重啟。',
+      });
+    }
+    const fingerprint = crypto
+      .createHash('sha256')
+      .update(pem.replace(/\s/g, ''))
+      .digest('hex')
+      .match(/.{2}/g).join(':').toUpperCase();
+    res.json({
+      pem,
+      fingerprint_sha256: fingerprint,
+      algorithm: 'RS256',
+      issuer: 'foxlink-gpt',
+      exp_seconds: 300,
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/mcp-servers/test-token
+//   body: { email, name?, sub?, dept? }
+//   回傳一顆剛簽發的 JWT + decoded preview。給 MCP 團隊驗證對接用。
+router.post('/test-token', async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  try {
+    const { email, name, sub, dept } = req.body || {};
+    if (!email) return res.status(400).json({ error: 'email 為必填（MCP 權限判斷依據）' });
+    const { token, jti } = mcpClient.signUserToken({
+      id: sub || 0,
+      employee_id: sub || null,
+      email,
+      name: name || null,
+      dept_code: dept || null,
+    });
+    // 用自己公鑰解回去,給前端預覽 claims(確保簽發正確)
+    const claims = mcpClient.verifyUserToken(token);
+    res.json({ token, jti, claims });
+  } catch (e) {
+    const status = e.code === 'MCP_JWT_EMAIL_REQUIRED' ? 400
+      : e.code === 'MCP_JWT_PRIVATE_KEY_NOT_CONFIGURED' ? 503
+      : 500;
+    res.status(status).json({ error: e.code || 'INTERNAL', detail: e.message });
+  }
+});
+
+// POST /api/mcp-servers/verify-token
+//   body: { token }
+//   用公鑰驗簽,回 decoded claims 或錯誤原因。
+router.post('/verify-token', async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  try {
+    const { token } = req.body || {};
+    if (!token) return res.status(400).json({ error: 'token 為必填' });
+    const claims = mcpClient.verifyUserToken(token);
+    res.json({ valid: true, claims });
+  } catch (e) {
+    res.json({ valid: false, error: e.name || 'Error', detail: e.message });
   }
 });
 

@@ -152,6 +152,7 @@ class WorkflowEngine {
     this.db = db;
     this.userId = context.userId;
     this.sessionId = context.sessionId;
+    this.user = context.user || null;  // full user row for MCP X-User-Token signing
     this.nodeOutputs = {};   // nodeId -> output string
     this.executionLog = [];  // { nodeId, type, duration, status, output_preview?, error? }
     this._userInput = '';
@@ -480,7 +481,11 @@ class WorkflowEngine {
     }
 
     const mcpClient = getMcpClient();
-    const result = await mcpClient.callTool(this.db, server, this.sessionId, this.userId, tool_name, args);
+    const u = this.user || {};
+    const mcpUserCtx = u.id ? {
+      id: u.id, email: u.email || '', name: u.name || '', employee_id: u.employee_id || '', dept_code: u.dept_code || '',
+    } : null;
+    const result = await mcpClient.callTool(this.db, server, this.sessionId, this.userId, tool_name, args, mcpUserCtx);
     return typeof result === 'string' ? result : JSON.stringify(result);
   }
 

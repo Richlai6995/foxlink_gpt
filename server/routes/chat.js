@@ -1732,7 +1732,7 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
           const ssRow = await db.prepare('SELECT variables_json FROM session_skills WHERE session_id=? AND skill_id=?').get(sessionId, sk.id);
           const vars = (() => { try { return JSON.parse(ssRow?.variables_json || '{}'); } catch { return {}; } })();
 
-          const engine = new WorkflowEngine(db, { userId: req.user.id, sessionId });
+          const engine = new WorkflowEngine(db, { userId: req.user.id, sessionId, user: req.user });
           const { output, log } = await engine.execute(workflow, combinedUserText, vars);
 
           if (output) {
@@ -2764,7 +2764,15 @@ ${hasPreserve ? '- 標記【★保留原文】的欄位：必須完整複製原�
             const entry = serverMap[toolName];
             if (!entry) return `[未知工具: ${toolName}]`;
             sendEvent({ type: 'status', message: `呼叫工具：${toolName}` });
-            return await mcpClient.callTool(db, entry.server, sessionId, req.user.id, entry.originalName, args);
+            // userCtx 只在 server.send_user_token=1 時才會被用來簽 X-User-Token JWT
+            const mcpUserCtx = {
+              id: req.user.id,
+              email: req.user.email || '',
+              name: req.user.name || '',
+              employee_id: req.user.employee_id || '',
+              dept_code: req.user.dept_code || '',
+            };
+            return await mcpClient.callTool(db, entry.server, sessionId, req.user.id, entry.originalName, args, mcpUserCtx);
           };
 
           // Build set of tool names that should bypass LLM and return raw result directly

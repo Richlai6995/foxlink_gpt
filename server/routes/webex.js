@@ -738,7 +738,8 @@ async function loadFunctionDeclarations(db, user) {
           });
           handlers[fnName] = async (args) => {
             try {
-              const result = await mcpClient.callTool(db, srv, null, user.id, tool.name, args);
+              const mcpUserCtx = { id: user.id, email: user.email || '', name: user.name || '', employee_id: user.employee_id || '', dept_code: user.dept_code || '' };
+              const result = await mcpClient.callTool(db, srv, null, user.id, tool.name, args, mcpUserCtx);
               return typeof result === 'string' ? result : JSON.stringify(result, null, 2);
             } catch (e) {
               return `[MCP "${tool.name}" 錯誤: ${e.message}]`;

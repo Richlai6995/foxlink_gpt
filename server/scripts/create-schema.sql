@@ -285,34 +285,37 @@ CREATE TABLE scheduled_task_runs (
 -- ─── MCP SERVERS ──────────────────────────────────────────────────────────────
 BEGIN EXECUTE IMMEDIATE '
 CREATE TABLE mcp_servers (
-  id            NUMBER GENERATED AS IDENTITY PRIMARY KEY,
-  name          VARCHAR2(200) NOT NULL,
-  url           VARCHAR2(1000) NOT NULL,
-  api_key       VARCHAR2(500),
-  description   CLOB,
-  is_active     NUMBER(1) DEFAULT 1,
-  tools_json    CLOB,
-  tags          CLOB DEFAULT ''[]'',
-  last_synced_at TIMESTAMP,
-  created_at    TIMESTAMP DEFAULT SYSTIMESTAMP,
-  updated_at    TIMESTAMP DEFAULT SYSTIMESTAMP
+  id               NUMBER GENERATED AS IDENTITY PRIMARY KEY,
+  name             VARCHAR2(200) NOT NULL,
+  url              VARCHAR2(1000) NOT NULL,
+  api_key          VARCHAR2(500),
+  description      CLOB,
+  is_active        NUMBER(1) DEFAULT 1,
+  send_user_token  NUMBER(1) DEFAULT 0,
+  tools_json       CLOB,
+  tags             CLOB DEFAULT ''[]'',
+  last_synced_at   TIMESTAMP,
+  created_at       TIMESTAMP DEFAULT SYSTIMESTAMP,
+  updated_at       TIMESTAMP DEFAULT SYSTIMESTAMP
 )'; EXCEPTION WHEN OTHERS THEN IF SQLCODE = -955 THEN NULL; ELSE RAISE; END IF; END;
 /
 
 -- ─── MCP CALL LOGS ────────────────────────────────────────────────────────────
 BEGIN EXECUTE IMMEDIATE '
 CREATE TABLE mcp_call_logs (
-  id              NUMBER GENERATED AS IDENTITY PRIMARY KEY,
-  server_id       NUMBER NOT NULL REFERENCES mcp_servers(id) ON DELETE CASCADE,
-  session_id      VARCHAR2(36),
-  user_id         NUMBER REFERENCES users(id) ON DELETE SET NULL,
-  tool_name       VARCHAR2(200) NOT NULL,
-  arguments_json  CLOB,
+  id               NUMBER GENERATED AS IDENTITY PRIMARY KEY,
+  server_id        NUMBER NOT NULL REFERENCES mcp_servers(id) ON DELETE CASCADE,
+  session_id       VARCHAR2(36),
+  user_id          NUMBER REFERENCES users(id) ON DELETE SET NULL,
+  user_email       VARCHAR2(200),
+  jti              VARCHAR2(64),
+  tool_name        VARCHAR2(200) NOT NULL,
+  arguments_json   CLOB,
   response_preview VARCHAR2(2000),
-  status          VARCHAR2(20) DEFAULT ''ok'',
-  error_msg       CLOB,
-  duration_ms     NUMBER,
-  called_at       TIMESTAMP DEFAULT SYSTIMESTAMP
+  status           VARCHAR2(20) DEFAULT ''ok'',
+  error_msg        CLOB,
+  duration_ms      NUMBER,
+  called_at        TIMESTAMP DEFAULT SYSTIMESTAMP
 )'; EXCEPTION WHEN OTHERS THEN IF SQLCODE = -955 THEN NULL; ELSE RAISE; END IF; END;
 /
 
