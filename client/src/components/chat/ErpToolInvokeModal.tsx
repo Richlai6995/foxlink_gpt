@@ -52,7 +52,7 @@ export default function ErpToolInvokeModal({ tool, sessionId, onClose, onDone }:
   const [pendingSummary, setPendingSummary] = useState<string | null>(null)
   const [viewMode, setViewMode] = useState<'table' | 'json'>('table')
 
-  const inParams = tool.params.filter(p => p.in_out === 'IN' || p.in_out === 'IN/OUT')
+  const inParams = tool.params.filter(p => (p.in_out === 'IN' || p.in_out === 'IN/OUT') && (p as any).visible !== false)
 
   useEffect(() => {
     const init: Record<string, any> = {}
@@ -152,15 +152,22 @@ export default function ErpToolInvokeModal({ tool, sessionId, onClose, onDone }:
             <div className="text-xs text-slate-400">此工具無輸入參數</div>
           ) : (
             <div className="space-y-2">
-              {inParams.map(p => (
+              {inParams.map(p => {
+                const locked = (p as any).editable === false
+                return (
                 <div key={p.name} className="grid grid-cols-4 gap-2 items-start">
                   <label className="text-xs text-slate-600 pt-1.5">
                     <span className="font-mono">{p.name}</span>
-                    {p.required && <span className="text-red-600 ml-0.5">*</span>}
+                    {p.required && !locked && <span className="text-red-600 ml-0.5">*</span>}
+                    {locked && <span className="text-amber-600 ml-0.5">🔒</span>}
                     <div className="text-[10px] text-slate-400">{p.data_type}{p.data_length ? `(${p.data_length})` : ''}</div>
                   </label>
                   <div className="col-span-3">
-                    {p.lov_config?.type === 'static' ? (
+                    {locked ? (
+                      <div className="w-full bg-slate-100 border border-slate-200 rounded px-2 py-1 text-sm text-slate-600 font-mono">
+                        {inputs[p.name] ?? '(系統自動帶入)'}
+                      </div>
+                    ) : p.lov_config?.type === 'static' ? (
                       <select value={inputs[p.name] ?? ''}
                         onChange={e => setInputs({ ...inputs, [p.name]: e.target.value })}
                         className="w-full border border-slate-300 rounded px-2 py-1 text-sm">
@@ -197,7 +204,8 @@ export default function ErpToolInvokeModal({ tool, sessionId, onClose, onDone }:
                     )}
                   </div>
                 </div>
-              ))}
+                )
+              })}
             </div>
           )}
 

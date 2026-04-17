@@ -49,6 +49,13 @@ function generateToolSchema(tool) {
   for (const p of params) {
     const io = (p.in_out || 'IN').toUpperCase();
     if (io === 'OUT') continue;
+
+    // visible=false → 完全不放進 schema,LLM 不知道有這個參數
+    if (p.visible === false) continue;
+
+    // editable=false → 不放進 properties(LLM 無法傳值),但固定值資訊寫進工具 description
+    if (p.editable === false) continue;
+
     const jsType = oracleTypeToJsonSchemaType(p.data_type);
     const descParts = [];
     if (p.ai_hint) descParts.push(p.ai_hint);
@@ -80,6 +87,24 @@ function generateToolSchema(tool) {
     if (p.required && !hasDefault && !hasInjectSource) {
       required.push(p.name);
     }
+  }
+
+  // editable=false 且 visible=true 的參數:在 description 補充固定值資訊
+  const lockedParams = params.filter(p => {
+    const io = (p.in_out || 'IN').toUpperCase();
+    return io !== 'OUT' && p.visible !== false && p.editable === false;
+  });
+  if (lockedParams.length > 0) {
+    const lockedInfo = lockedParams.map(p => {
+      const cfg = p.default_config;
+      let val = '';
+      if (cfg?.mode === 'fixed') val = cfg.fixed_value;
+      else if (cfg?.mode === 'preset') val = `系統值(${cfg.preset})`;
+      else if (p.inject_source) val = `系統值(${p.inject_source})`;
+      else if (p.default_value != null) val = p.default_value;
+      return `${p.ai_hint || p.name}=${val || '自動'}`;
+    }).join('、');
+    desc.push(`固定參數(不可修改):${lockedInfo}`);
   }
 
   const desc = [tool.description || tool.name];

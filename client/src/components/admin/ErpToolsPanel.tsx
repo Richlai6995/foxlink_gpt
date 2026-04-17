@@ -55,6 +55,8 @@ export interface ErpParam {
   lov_config: any
   inject_value: any
   inject_source: string | null
+  visible?: boolean
+  editable?: boolean
 }
 
 export interface ErpReturns {

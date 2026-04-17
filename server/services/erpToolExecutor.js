@@ -42,6 +42,16 @@ function coerceInput(raw, param) {
 }
 
 function resolveParamInput(param, userInputs, userCtx) {
+  // editable=false → 強制用 default/inject,忽略 user/LLM 傳入值
+  if (param.editable === false) {
+    if (param.inject_source) return resolveExtendedSystemParam(param.inject_source, userCtx);
+    if (param.inject_value !== null && param.inject_value !== undefined) return param.inject_value;
+    const resolved = resolveDefaultConfig(param, userCtx);
+    if (resolved !== null && resolved !== undefined) return resolved;
+    if (param.default_value !== null && param.default_value !== undefined) return param.default_value;
+    return null;
+  }
+
   if (param.inject_source) {
     return resolveExtendedSystemParam(param.inject_source, userCtx);
   }

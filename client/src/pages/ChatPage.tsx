@@ -1117,7 +1117,7 @@ export default function ChatPage() {
                       const ErpRow = ({ e, isHid }: { e: ErpTool; isHid: boolean }) => {
                         const id = e.id; const picked = !isHid && selectedErpIds.has(id)
                         const infoOpen = erpInfoOpen === id
-                        const inParams = e.params?.filter(p => p.in_out === 'IN' || p.in_out === 'IN/OUT') || []
+                        const inParams = e.params?.filter(p => (p.in_out === 'IN' || p.in_out === 'IN/OUT') && p.visible !== false) || []
                         const outParams = e.params?.filter(p => p.in_out === 'OUT' || p.in_out === 'IN/OUT') || []
                         return (
                           <div key={id}>
@@ -1173,7 +1173,8 @@ export default function ChatPage() {
                                         {inParams.map(p => (
                                           <tr key={p.name} className="border-b border-sky-100 last:border-0">
                                             <td className="py-0.5 pr-1 font-mono text-slate-700 whitespace-nowrap">
-                                              {p.name}{p.required ? <span className="text-red-500 ml-0.5">*</span> : ''}
+                                              {p.editable === false && <span className="text-amber-600 mr-0.5">🔒</span>}
+                                              {p.name}{p.required && p.editable !== false ? <span className="text-red-500 ml-0.5">*</span> : ''}
                                             </td>
                                             <td className="py-0.5 pr-1 text-slate-500 whitespace-nowrap">{p.data_type}{p.data_length ? `(${p.data_length})` : ''}</td>
                                             <td className="py-0.5 text-slate-600">
@@ -1708,8 +1709,9 @@ export default function ChatPage() {
                 <Database size={11} /> 已啟用的 ERP 工具 — 輸入提示
               </div>
               {selected.map(e => {
-                const inP = (e.params?.filter(p => p.in_out === 'IN' || p.in_out === 'IN/OUT') || [])
+                const inP = (e.params?.filter(p => (p.in_out === 'IN' || p.in_out === 'IN/OUT') && p.visible !== false) || [])
                 const autoParams = inP.filter(p => {
+                  if (p.editable === false) return true
                   const cfg = (p as any).default_config
                   return (cfg?.mode === 'preset') || (cfg?.mode === 'fixed' && cfg.fixed_value) || p.inject_source
                 })

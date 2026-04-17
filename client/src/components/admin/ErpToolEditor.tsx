@@ -481,6 +481,12 @@ export default function ErpToolEditor({ tool, allowedSchemas, onClose, onSaved }
                         }`}>{p.in_out}</span>
                         <span className="text-xs text-slate-500">{p.data_type}{p.data_length ? `(${p.data_length})` : ''}</span>
                         {p.required && <span className="text-[10px] text-red-600">*</span>}
+                        {(p as any).visible === false && (
+                          <span className="text-[10px] bg-slate-200 text-slate-600 px-1.5 py-0.5 rounded">隱藏</span>
+                        )}
+                        {(p as any).editable === false && (
+                          <span className="text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded">🔒 鎖定</span>
+                        )}
                         {p.lov_config?.type && (
                           <span className="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded">
                             LOV: {p.lov_config.type}
@@ -651,9 +657,33 @@ function ParamDetailEditor({
 }) {
   const lovType = param.lov_config?.type || 'none'
   const canInput = param.in_out === 'IN' || param.in_out === 'IN/OUT'
+  const isVisible = (param as any).visible !== false
+  const isEditable = (param as any).editable !== false
 
   return (
     <div className="px-4 py-3 bg-slate-50 border-t border-slate-200 space-y-3">
+      {/* 可見 / 可變更 */}
+      {canInput && (
+        <div className="flex gap-4 items-center border border-slate-200 rounded px-3 py-2 bg-white">
+          <label className="flex items-center gap-1.5 text-xs text-slate-700">
+            <input type="checkbox" checked={isVisible}
+              onChange={e => onChange({ visible: e.target.checked } as any)} />
+            使用者可看到
+          </label>
+          <label className="flex items-center gap-1.5 text-xs text-slate-700">
+            <input type="checkbox" checked={isEditable}
+              onChange={e => onChange({ editable: e.target.checked } as any)} />
+            使用者可變更
+          </label>
+          {!isVisible && (
+            <span className="text-[10px] text-slate-500 ml-auto">隱藏：使用者看不到，LLM 也不知道，值由系統自動帶入</span>
+          )}
+          {isVisible && !isEditable && (
+            <span className="text-[10px] text-amber-700 ml-auto">🔒 鎖定：使用者看得到但不能改，LLM 也無法變更</span>
+          )}
+        </div>
+      )}
+
       <div className="grid grid-cols-2 gap-3">
         <div>
           <label className="text-xs text-slate-500">AI Hint(給 LLM 的參數說明)</label>
@@ -662,7 +692,7 @@ function ParamDetailEditor({
             placeholder="台灣員工工號,8 碼數字" />
         </div>
         <div>
-          <label className="text-xs text-slate-500">預設值</label>
+          <label className="text-xs text-slate-500">預設值{!isEditable && <span className="text-amber-700 ml-1">(鎖定值)</span>}</label>
           <DefaultValueEditor param={param} onChange={onChange} />
         </div>
       </div>
