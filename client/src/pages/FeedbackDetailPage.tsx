@@ -760,26 +760,22 @@ export default function FeedbackDetailPage() {
                   </div>
                   <button
                     onClick={() => {
-                      fileInputRef.current?.click()
-                      const refocus = () => { window.removeEventListener('focus', refocus); setTimeout(() => msgTextareaRef.current?.focus(), 50) }
-                      window.addEventListener('focus', refocus)
+                      const inp = document.createElement('input')
+                      inp.type = 'file'
+                      inp.multiple = true
+                      inp.onchange = () => {
+                        if (inp.files && inp.files.length > 0) {
+                          setMsgFiles(prev => [...prev, ...Array.from(inp.files!)])
+                        }
+                        setTimeout(() => msgTextareaRef.current?.focus(), 50)
+                      }
+                      inp.click()
                     }}
                     className="p-2 rounded-lg bg-gray-100 text-gray-500 hover:text-gray-900 transition"
                     title={t('feedback.attachFiles')}
                   >
                     <Paperclip size={16} />
                   </button>
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    multiple
-                    className="hidden"
-                    onChange={e => {
-                      if (e.target.files) setMsgFiles(prev => [...prev, ...Array.from(e.target.files!)])
-                      e.target.value = ''
-                      msgTextareaRef.current?.focus()
-                    }}
-                  />
                   {canManage && (
                     <button
                       onClick={() => setIsInternal(!isInternal)}
