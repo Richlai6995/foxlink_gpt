@@ -95,9 +95,9 @@ export default function CourseList({ editorMode = false }: { editorMode?: boolea
   }
 
   return (
-    <div className="min-h-screen" style={{ backgroundColor: 'var(--t-bg)', color: 'var(--t-text)' }}>
+    <div className="min-h-screen">
       {/* Header */}
-      <div className="sticky top-0 z-20 backdrop-blur border-b" style={{ backgroundColor: 'color-mix(in srgb, var(--t-bg) 95%, transparent)', borderColor: 'var(--t-border-subtle)' }}>
+      <div className="sticky top-0 z-20 backdrop-blur border-b border-slate-200 bg-white/95">
         <div className="max-w-7xl mx-auto px-4 py-3 flex items-center gap-3">
           {!editorMode && (
             <button onClick={() => navigate('/chat')} style={{ color: 'var(--t-text-muted)' }} className="hover:opacity-80 transition">

@@ -10,8 +10,14 @@ export function useTrainingTheme() {
   return useTheme()
 }
 
-// 舊版 Provider 仍被某些檔案 import — 現在是 no-op（實際 Provider 在 App 根層）
-// 保留 h-full wrapper 讓 training 頁面正確撐滿視窗高度
+// dark 模式：Training 頁面跟其他頁面（Chat/Admin/Help）一樣用白底
+// → data-surface="light" 局部覆蓋 CSS 變數成淺色
+// dark-dimmed / light-*：跟全局走，不覆蓋
 export function TrainingThemeProvider({ children }: { children: React.ReactNode }) {
-  return <div className="h-full">{children}</div>
+  const { theme } = useTheme()
+  return (
+    <div className="h-full" data-surface={theme === 'dark' ? 'light' : undefined}>
+      {children}
+    </div>
+  )
 }

@@ -236,6 +236,40 @@ html[data-theme="light-yellow"] {
   --t-status-published-text: #15803d;
 }
 
+/* ── Training pages in dark mode: 局部覆蓋 CSS 變數為淺色 ──
+   dark 模式下 Training 頁面應跟其他頁面一樣用白底（sidebar 深、content 淺）。
+   Training 內 19 個元件全用 var(--t-*) inline style，不可能改完。
+   用 data-surface="light" 局部覆蓋所有 CSS 變數值，讓子層讀到淺色。
+   dark-dimmed / light-* 不設此 attribute → 跟全局走。 */
+[data-surface="light"] {
+  --t-bg: #f8fafc;
+  --t-bg-elevated: #ffffff;
+  --t-bg-card: #ffffff;
+  --t-bg-card-hover: #f1f5f9;
+  --t-bg-input: #ffffff;
+  --t-bg-inset: #f8fafc;
+  --t-border: #e2e8f0;
+  --t-border-subtle: rgba(226,232,240,0.5);
+  --t-text: #1e293b;
+  --t-text-secondary: #334155;
+  --t-text-muted: #64748b;
+  --t-text-dim: #94a3b8;
+  --t-accent: #2563eb;
+  --t-accent-bg: #2563eb;
+  --t-accent-bg-hover: #1d4ed8;
+  --t-accent-subtle: rgba(37,99,235,0.08);
+  --t-success: #16a34a;
+  --t-danger: #dc2626;
+  --t-warning: #d97706;
+  --t-shadow: 0 1px 3px rgba(0,0,0,0.08);
+  --t-gradient-cover: linear-gradient(135deg, rgba(219,234,254,0.3) 0%, #ffffff 100%);
+  --t-scrollbar: #cbd5e1;
+  --t-status-draft-bg: rgba(234,179,8,0.12);
+  --t-status-draft-text: #a16207;
+  --t-status-published-bg: rgba(34,197,94,0.12);
+  --t-status-published-text: #15803d;
+}
+
 /* Utility classes (read CSS variables) */
 .t-bg { background-color: var(--t-bg); }
 .t-bg-elevated { background-color: var(--t-bg-elevated); }

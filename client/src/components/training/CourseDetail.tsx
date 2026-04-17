@@ -65,9 +65,9 @@ export default function CourseDetail() {
   const canEdit = ['owner', 'admin', 'develop'].includes(course.permission)
 
   return (
-    <div className="min-h-screen" style={{ backgroundColor: 'var(--t-bg)', color: 'var(--t-text)' }}>
+    <div className="min-h-screen bg-slate-50 text-slate-800">
       {/* Header */}
-      <div className="sticky top-0 z-20 backdrop-blur border-b" style={{ backgroundColor: 'color-mix(in srgb, var(--t-bg) 95%, transparent)', borderColor: 'var(--t-border-subtle)' }}>
+      <div className="sticky top-0 z-20 backdrop-blur border-b border-slate-200 bg-white/95">
         <div className="max-w-4xl mx-auto px-4 py-3 flex items-center gap-3">
           <button onClick={() => {
             const sp = new URLSearchParams(window.location.search)
