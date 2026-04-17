@@ -299,7 +299,9 @@ async function runMigrations(db) {
   await addCol('KB_CHUNKS', 'PARENT_CONTENT', 'CLOB');
   await addCol('KB_CHUNKS', 'METADATA', 'CLOB');
   // Feedback Webex B 方案：DM thread parent message id
-  await addCol('FEEDBACK_TICKETS', 'WEBEX_PARENT_MESSAGE_ID', 'VARCHAR2(100)');
+  await addCol('FEEDBACK_TICKETS', 'WEBEX_PARENT_MESSAGE_ID', 'VARCHAR2(200)');
+  // 欄位可能已存在但長度不夠（100→200），嘗試擴大
+  try { await db.prepare('ALTER TABLE feedback_tickets MODIFY webex_parent_message_id VARCHAR2(200)').run(); } catch {}
   // ERP 分流：分類 flag + 使用者 ERP 管理員 flag
   await addCol('FEEDBACK_CATEGORIES', 'IS_ERP', 'NUMBER(1) DEFAULT 0');
   await addCol('USERS', 'IS_ERP_ADMIN', 'NUMBER(1) DEFAULT 0');
