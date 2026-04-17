@@ -537,7 +537,12 @@ function startAnnotationMode(screenshotDataUrl) {
   metaGroup.appendChild(langLabel);
 
   const langSelect = document.createElement('select');
-  langSelect.innerHTML = '<option value="zh-TW">🇹🇼 中</option><option value="en">🇺🇸 EN</option><option value="vi">🇻🇳 VI</option>';
+  // option 用白底黑字（下拉展開時才看得見）；select 自己保持深底白字
+  langSelect.innerHTML = `
+    <option value="zh-TW" style="background:#fff;color:#000;">🇹🇼 中</option>
+    <option value="en" style="background:#fff;color:#000;">🇺🇸 EN</option>
+    <option value="vi" style="background:#fff;color:#000;">🇻🇳 VI</option>
+  `;
   langSelect.value = badgeLang || 'zh-TW';
   langSelect.style.cssText = `
     background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2);
