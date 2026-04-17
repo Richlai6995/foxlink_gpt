@@ -1819,10 +1819,13 @@ function toggleBadge(show) {
           <span style="font-size:11px;">錄製中</span>
           <span id="foxlink-badge-count" style="font-size:13px;font-weight:bold;color:#38bdf8;">0</span>
         </div>
-        <div id="foxlink-lang-group" style="display:flex;gap:2px;">
-          <button class="foxlink-lang-btn" data-lang="zh-TW" style="background:#2563eb;border:none;color:white;padding:2px 6px;border-radius:4px;cursor:pointer;font-size:10px;font-weight:700;">中</button>
-          <button class="foxlink-lang-btn" data-lang="en" style="background:rgba(255,255,255,0.15);border:none;color:#94a3b8;padding:2px 6px;border-radius:4px;cursor:pointer;font-size:10px;font-weight:700;">EN</button>
-          <button class="foxlink-lang-btn" data-lang="vi" style="background:rgba(255,255,255,0.15);border:none;color:#94a3b8;padding:2px 6px;border-radius:4px;cursor:pointer;font-size:10px;font-weight:700;">VI</button>
+        <div style="display:flex;align-items:center;gap:4px;padding:2px 6px;border-radius:6px;background:rgba(234,179,8,0.15);border:1px solid rgba(234,179,8,0.3);">
+          <span style="font-size:10px;color:#fcd34d;font-weight:600;">📝 截圖語言:</span>
+          <div id="foxlink-lang-group" style="display:flex;gap:3px;">
+            <button class="foxlink-lang-btn" data-lang="zh-TW" style="background:#2563eb;border:2px solid white;color:white;padding:3px 10px;border-radius:5px;cursor:pointer;font-size:12px;font-weight:800;">中</button>
+            <button class="foxlink-lang-btn" data-lang="en" style="background:rgba(255,255,255,0.15);border:2px solid transparent;color:#94a3b8;padding:3px 10px;border-radius:5px;cursor:pointer;font-size:12px;font-weight:800;">EN</button>
+            <button class="foxlink-lang-btn" data-lang="vi" style="background:rgba(255,255,255,0.15);border:2px solid transparent;color:#94a3b8;padding:3px 10px;border-radius:5px;cursor:pointer;font-size:12px;font-weight:800;">VI</button>
+          </div>
         </div>
         <div style="display:flex;gap:0;">
           <button id="foxlink-training-screenshot" data-mode="full" style="background:#2563eb;border:none;color:white;padding:4px 10px;border-radius:6px 0 0 6px;cursor:pointer;font-size:11px;font-weight:600;transition:background 0.2s;" title="全螢幕截圖 (Ctrl+Shift+S)">
@@ -1880,6 +1883,7 @@ function toggleBadge(show) {
           const isActive = b.dataset.lang === badgeLang;
           b.style.background = isActive ? '#2563eb' : 'rgba(255,255,255,0.15)';
           b.style.color = isActive ? 'white' : '#94a3b8';
+          b.style.border = isActive ? '2px solid white' : '2px solid transparent';
         });
       });
     });

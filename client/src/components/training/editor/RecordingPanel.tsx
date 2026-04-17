@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { Camera, Square, Play, Loader2, CheckCircle2, AlertCircle, X, ExternalLink,
          Wand2, Trash2, Star, GripVertical, ClipboardPaste, Plus, Image, Eye, Cpu, Pencil, Save, FolderOpen } from 'lucide-react'
 import api from '../../../lib/api'
@@ -68,7 +68,18 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
   const [annotatingStepId, setAnnotatingStepId] = useState<string | null>(null) // 開啟標註工具的 step
   const [savingDraft, setSavingDraft] = useState(false)
   const [draftInfo, setDraftInfo] = useState<{ sessionId: string; count: number } | null>(null)
+  const [isDirty, setIsDirty] = useState(false) // E: local edits pending save to DB
   const panelRef = useRef<HTMLDivElement>(null)
+
+  // B+C: duplicate (step_number, lang) 偵測 — processAll 前 confirm 用,tile badge 顯示用
+  const dupKeySet = useMemo(() => {
+    const count: Record<string, number> = {}
+    steps.forEach(s => {
+      const k = `${s.stepNumber || 0}|${s.lang || 'zh-TW'}`
+      count[k] = (count[k] || 0) + 1
+    })
+    return new Set(Object.entries(count).filter(([, n]) => n > 1).map(([k]) => k))
+  }, [steps])
 
   // Phase 2E: AI model selector
   const [aiModels, setAiModels] = useState<{ id: number; display_name: string; api_model: string }[]>([])
@@ -79,14 +90,16 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
     setTimeout(() => panelRef.current?.focus(), 100)
   }, [])
 
-  // Protect against accidental page close / refresh when there are unsaved steps
+  // E: 只在 local 有未 flush 編輯時警告，避免 user 不知情離開造成資料遺失
   useEffect(() => {
     const handler = (e: BeforeUnloadEvent) => {
-      if (steps.length > 0) { e.preventDefault(); e.returnValue = '' }
+      if (isDirty || (steps.length > 0 && steps.some(s => !s.id.startsWith('server_')))) {
+        e.preventDefault(); e.returnValue = ''
+      }
     }
     window.addEventListener('beforeunload', handler)
     return () => window.removeEventListener('beforeunload', handler)
-  }, [steps.length])
+  }, [isDirty, steps])
 
   useEffect(() => {
     loadHelpSections()
@@ -189,15 +202,18 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
   // Step operations
   const removeStep = (id: string) => {
     setSteps(prev => prev.filter(s => s.id !== id))
+    setIsDirty(true)
     if (selectedStepId === id) setSelectedStepId(null)
   }
 
   const updateStepNote = (id: string, note: string) => {
     setSteps(prev => prev.map(s => s.id === id ? { ...s, note } : s))
+    setIsDirty(true)
   }
 
   const toggleKeyStep = (id: string) => {
     setSteps(prev => prev.map(s => s.id === id ? { ...s, isKeyStep: !s.isKeyStep } : s))
+    setIsDirty(true)
   }
 
   const moveStep = (fromIdx: number, toIdx: number) => {
@@ -206,6 +222,7 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
     const [moved] = newSteps.splice(fromIdx, 1)
     newSteps.splice(toIdx, 0, moved)
     setSteps(newSteps)
+    setIsDirty(true)
   }
 
   // Sort steps by stepNumber then language (zh-TW → en → vi)
@@ -225,7 +242,8 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
   }
 
   // ── Save Draft ──────────────────────────────────────────────────────────────
-  const saveDraft = async () => {
+  const saveDraft = async (opts?: { silent?: boolean }) => {
+    const silent = !!opts?.silent
     // Allow empty local state IF there's an existing session — user may have deleted everything
     // and wants the server-side draft cleared as well. Otherwise, nothing to do.
     if (steps.length === 0 && !sessionIdRef.current && !sessionId) return
@@ -304,10 +322,12 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
         sessionId: sid, courseId, lessonId, savedAt: new Date().toISOString()
       }))
 
-      alert(`草稿已儲存（${steps.length} 張截圖）`)
+      setIsDirty(false)  // E: flush 完成，清 dirty flag
+      if (!silent) alert(`草稿已儲存（${steps.length} 張截圖）`)
     } catch (e: any) {
       console.error('[saveDraft]', e)
-      alert('儲存草稿失敗: ' + (e.response?.data?.error || e.message))
+      if (!silent) alert('儲存草稿失敗: ' + (e.response?.data?.error || e.message))
+      else throw e  // silent 模式拋回去讓呼叫端決定怎麼處理
     } finally { setSavingDraft(false) }
   }
 
@@ -520,6 +540,7 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
         }))
       console.log('[RecordingPanel] pull: setting', pulled.length, 'steps')
       setSteps(pulled)
+      setIsDirty(false)  // E: 剛從 server 拉回來,跟 DB 同步
       setServerStepCount(pulled.length)
     } catch (e: any) {
       console.error('Pull screenshots failed:', e, 'response:', e.response?.status, e.response?.data)
@@ -559,6 +580,21 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
   const processAll = async () => {
     if (steps.length === 0) return
 
+    // B: 送 AI 前 pre-check (step_number, lang) 重複,每組只會保留最後一筆
+    if (dupKeySet.size > 0) {
+      const lines = [...dupKeySet].map(k => {
+        const [num, lang] = k.split('|')
+        const count = steps.filter(s => `${s.stepNumber || 0}|${s.lang || 'zh-TW'}` === k).length
+        return `  • 步驟 ${num} - ${lang} (共 ${count} 筆)`
+      }).join('\n')
+      const ok = confirm(
+        `發現以下「步驟+語言」重複:\n\n${lines}\n\n` +
+        `送 AI 處理時，每組只會保留「排序最後」的一筆，其他會被覆蓋遺失。\n\n` +
+        `建議先取消,回去調整編號/語言；或直接繼續。`
+      )
+      if (!ok) return
+    }
+
     const sid = sessionIdRef.current || sessionId
     const isFromServer = steps.some(s => s.id.startsWith('server_'))
 
@@ -570,6 +606,11 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
 
       if (isFromServer && sid) {
         // Steps already on server (from Extension recording)
+        // 先把 user 在 UI 改過的 lang / step_number / annotations flush 回 DB，
+        // 否則 /generate 會讀到 Extension 錄製當下的舊 lang，造成前端顯示正確
+        // 但實際產出按舊資料分類（例如 EN 被當成 VI）。
+        try { await saveDraft({ silent: true }) } catch (e) { console.warn('[processAll] saveDraft pre-analyze failed (continuing):', e) }
+
         // Complete session if not already
         await api.post(`/training/recording/${sid}/complete`).catch(() => {})
 
@@ -609,6 +650,13 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
         setProcessProgress({ current: totalSteps + 1, total: totalSteps + 1 })
         const genRes = await api.post(`/training/recording/${sid}/generate`, {}, { timeout: 60000 })
 
+        // G: 顯示 server audit warnings (重複 / 跳過 等)
+        const warnings = genRes.data?.audit?.warnings as string[] | undefined
+        if (warnings && warnings.length > 0) {
+          alert(`課程已產生,但請注意以下狀況:\n\n• ${warnings.join('\n• ')}`)
+        }
+
+        setIsDirty(false)  // E: 已送 AI 成功,local state 跟產出同步
         setTimeout(() => onComplete(genRes.data), 500)
       } else {
         // Steps from Ctrl+V / file upload — need to create session + upload
@@ -667,7 +715,14 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
         )
         const genRes = await api.post(`/training/recording/${processingSessionId}/generate`, {}, { timeout: 60000 })
 
+        // G: 顯示 server audit warnings
+        const warnings2 = genRes.data?.audit?.warnings as string[] | undefined
+        if (warnings2 && warnings2.length > 0) {
+          alert(`課程已產生,但請注意以下狀況:\n\n• ${warnings2.join('\n• ')}`)
+        }
+
         setSteps(prev => prev.map(s => ({ ...s, status: 'done' })))
+        setIsDirty(false)
         setTimeout(() => onComplete(genRes.data), 500)
       }
     } catch (e: any) {
@@ -969,6 +1024,7 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
                         const [moved] = newSteps.splice(fromIdx, 1)
                         newSteps.splice(idx, 0, moved)
                         setSteps(newSteps)
+                        setIsDirty(true)
                       }
                     }}
                     onClick={() => setSelectedStepId(step.id)}
@@ -999,18 +1055,35 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
                     </div>
 
                     {/* Step number + language badge */}
-                    <div className="absolute top-1 left-1 flex items-center gap-1">
-                      <span className="text-[9px] font-bold px-1.5 py-0.5 rounded"
-                        style={{ backgroundColor: 'var(--t-bg)', color: 'var(--t-text-muted)' }}>
-                        #{step.stepNumber || idx + 1}
-                      </span>
-                      {step.lang && step.lang !== 'zh-TW' && (
-                        <span className="text-[8px] font-bold px-1 py-0.5 rounded"
-                          style={{ backgroundColor: step.lang === 'en' ? '#2563eb' : '#059669', color: 'white' }}>
-                          {step.lang === 'en' ? 'EN' : 'VI'}
-                        </span>
-                      )}
-                    </div>
+                    {(() => {
+                      const dupKey = `${step.stepNumber || 0}|${step.lang || 'zh-TW'}`
+                      const isDup = dupKeySet.has(dupKey)
+                      return (
+                        <div className="absolute top-1 left-1 flex items-center gap-1">
+                          <span className="text-[9px] font-bold px-1.5 py-0.5 rounded"
+                            style={{
+                              backgroundColor: isDup ? '#ea580c' : 'var(--t-bg)',
+                              color: isDup ? 'white' : 'var(--t-text-muted)',
+                            }}
+                            title={isDup ? `步驟 ${step.stepNumber} 的 ${step.lang || 'zh-TW'} 有多筆,送 AI 後只會保留最後一筆` : undefined}>
+                            #{step.stepNumber || idx + 1}
+                          </span>
+                          {step.lang && step.lang !== 'zh-TW' && (
+                            <span className="text-[8px] font-bold px-1 py-0.5 rounded"
+                              style={{ backgroundColor: step.lang === 'en' ? '#2563eb' : '#059669', color: 'white' }}>
+                              {step.lang === 'en' ? 'EN' : 'VI'}
+                            </span>
+                          )}
+                          {isDup && (
+                            <span className="text-[8px] font-bold px-1 py-0.5 rounded animate-pulse"
+                              style={{ backgroundColor: '#f59e0b', color: 'white' }}
+                              title="此 (步驟+語言) 有重複,送 AI 會遺失一筆">
+                              ⚠ DUP
+                            </span>
+                          )}
+                        </div>
+                      )
+                    })()}
 
                     {/* Key step star */}
                     {step.isKeyStep && (
@@ -1115,6 +1188,7 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
                       }
                       // 改步驟編號後依規則 3 重新排序（step_number → lang）
                       setSteps(prev => sortSteps(prev.map(s => s.id === selectedStep.id ? { ...s, stepNumber: newNum } : s)))
+                      setIsDirty(true)
                     }}
                     className="w-full border rounded px-2 py-1 text-[10px]"
                     style={{ backgroundColor: 'var(--t-bg-input)', borderColor: 'var(--t-border)', color: 'var(--t-text)' }}
@@ -1128,6 +1202,7 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
                       const newLang = e.target.value
                       // 改語言後依規則 3 重新排序（step_number → lang）
                       setSteps(prev => sortSteps(prev.map(s => s.id === selectedStep.id ? { ...s, lang: newLang } : s)))
+                      setIsDirty(true)
                     }}
                     className="w-full border rounded px-2 py-1 text-[10px]"
                     style={{ backgroundColor: 'var(--t-bg-input)', borderColor: 'var(--t-border)', color: 'var(--t-text)' }}
@@ -1245,7 +1320,7 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
 
               {/* Save Draft */}
               {steps.length > 0 && (
-                <button onClick={saveDraft} disabled={savingDraft}
+                <button onClick={() => saveDraft()} disabled={savingDraft}
                   className="flex items-center gap-1 text-xs px-3 py-2 rounded-lg border transition hover:opacity-80 disabled:opacity-40"
                   style={{ borderColor: 'rgba(34,197,94,0.5)', color: '#22c55e' }}>
                   {savingDraft ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
@@ -1305,6 +1380,7 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
                   : s)
                 return changedOrder ? sortSteps(next) : next
               })
+              setIsDirty(true)
               setAnnotatingStepId(null)
             }}
             onClose={() => setAnnotatingStepId(null)}

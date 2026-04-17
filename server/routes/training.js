@@ -5152,7 +5152,11 @@ router.post('/recording/:sessionId/analyze-step/:stepId', async (req, res) => {
       ).get();
       modelName = flashRow?.api_model || process.env.GEMINI_MODEL_FLASH || 'gemini-3-flash-preview';
     }
-    const model = genAI.getGenerativeModel({ model: modelName });
+    // A: 強制 Gemini 回純 JSON，避免裸 escape / 多餘文字造成 JSON.parse 炸掉
+    const model = genAI.getGenerativeModel({
+      model: modelName,
+      generationConfig: { responseMimeType: 'application/json' },
+    });
 
     const prompt = `分析這張系統操作截圖（步驟 ${step.step_number}）。${clickInfo}${annotationPrompt}
 識別所有可互動 UI 元素，回傳 JSON。至少要有一個 region 的 is_primary 設為 true（此畫面最重要的操作目標）：
@@ -5162,25 +5166,37 @@ router.post('/recording/:sessionId/analyze-step/:stepId', async (req, res) => {
 注意：coords 的 x, y, w, h 必須是百分比 (0-100)，相對於圖片寬高。x, y 是左上角百分比。
 只回傳 JSON。`;
 
-    const tGemini = Date.now();
-    console.log(`${tag} calling Gemini model=${modelName} image_bytes=${imageBase64.length}`);
-    const result = await model.generateContent([
-      { inlineData: { mimeType: 'image/png', data: imageBase64 } },
-      { text: prompt }
-    ]);
-    const text = result.response.text();
-    const geminiMs = Date.now() - tGemini;
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) {
-      console.warn(`${tag} Gemini returned NO JSON block (${geminiMs}ms). text_preview="${(text || '').slice(0, 200)}"`);
-    }
-    let parsed = {};
-    if (jsonMatch) {
+    // D: JSON mode 失敗時重試一次（網路 glitch / 模型偶發 formatting issue）
+    const MAX_ATTEMPTS = 2;
+    let parsed = null;
+    let lastErr = null;
+    let geminiMs = 0;
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS && !parsed; attempt++) {
+      const tGemini = Date.now();
+      console.log(`${tag} calling Gemini model=${modelName} image_bytes=${imageBase64.length} attempt=${attempt}/${MAX_ATTEMPTS}`);
       try {
-        parsed = JSON.parse(jsonMatch[0]);
-      } catch (je) {
-        console.warn(`${tag} Gemini JSON.parse FAILED (${geminiMs}ms): ${je.message}. raw="${jsonMatch[0].slice(0, 200)}"`);
+        const result = await model.generateContent([
+          { inlineData: { mimeType: 'image/png', data: imageBase64 } },
+          { text: prompt }
+        ]);
+        const text = result.response.text();
+        geminiMs = Date.now() - tGemini;
+        // JSON mode → text 應該是純 JSON。保留 jsonMatch 當 fallback 以防模型偶爾掺雜說明文字
+        const jsonText = text.trim().startsWith('{') ? text.trim() : (text.match(/\{[\s\S]*\}/)?.[0] || '');
+        if (!jsonText) {
+          console.warn(`${tag} attempt=${attempt} Gemini returned NO JSON (${geminiMs}ms). text_preview="${(text || '').slice(0, 200)}"`);
+          lastErr = new Error('no_json_in_response');
+          continue;
+        }
+        parsed = JSON.parse(jsonText);
+      } catch (e) {
+        lastErr = e;
+        console.warn(`${tag} attempt=${attempt} Gemini FAILED (${Date.now() - tGemini}ms): ${e.message}`);
       }
+    }
+    if (!parsed) {
+      console.warn(`${tag} all ${MAX_ATTEMPTS} Gemini attempts failed — slide 會沒有 AI 標註 / 說明。last_error=${lastErr?.message}`);
+      parsed = {};
     }
 
     // Phase 3A-1: Normalize coordinates to percentage (0-100) if AI returned pixels
@@ -5523,7 +5539,41 @@ router.post('/recording/:sessionId/generate', async (req, res) => {
     }
     console.log(`${gtag} DONE ${Date.now() - tGen}ms — slides_created=${slideCount} overrides_applied=${overrideApplied} override_skipped=${JSON.stringify(overrideSkip)}`);
 
-    res.json({ ok: true, course_id: courseId, lesson_id: lessonId, slides_created: slideCount });
+    // G: 產生 audit trail，讓前端知道每個 slide 是哪個 step_id 產出的、哪些步驟有重複
+    const dupGroups = {};
+    for (const s of steps) {
+      const k = `${s.step_number}|${s.lang || 'zh-TW'}`;
+      if (!dupGroups[k]) dupGroups[k] = [];
+      dupGroups[k].push(s.id);
+    }
+    const duplicates = Object.entries(dupGroups)
+      .filter(([, ids]) => ids.length > 1)
+      .map(([k, ids]) => {
+        const [num, lang] = k.split('|');
+        return { step_number: Number(num), lang, step_ids: ids, winner: ids[ids.length - 1] };
+      });
+
+    const warnings = [];
+    if (duplicates.length > 0) warnings.push(`發現 ${duplicates.length} 組重複 (step_number, lang)，每組只保留最後一筆`);
+    if (skipped.no_url.length > 0) warnings.push(`${skipped.no_url.length} 筆 zh-TW 因 screenshot_url 為 NULL 被跳過`);
+    if (overrideSkip.no_slide > 0) warnings.push(`${overrideSkip.no_slide} 筆非 zh-TW 因為對應的 zh-TW slide 不存在被跳過`);
+
+    res.json({
+      ok: true,
+      course_id: courseId,
+      lesson_id: lessonId,
+      slides_created: slideCount,
+      audit: {
+        total_steps: steps.length,
+        zh_steps: zhSteps.length,
+        other_lang_steps: otherLangSteps.length,
+        overrides_applied: overrideApplied,
+        override_skipped: overrideSkip,
+        step_to_slide: stepToSlideId,
+        duplicates,
+        warnings,
+      }
+    });
   } catch (e) {
     console.error(`${gtag} ERROR ${Date.now() - tGen}ms:`, e.message, e.stack);
     res.status(500).json({ error: e.message });
