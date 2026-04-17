@@ -2,7 +2,7 @@
 /**
  * Help KB Auto-Sync
  * 啟動時自動將 data/helpContent.js 的使用者說明書向量化，
- * 存入一個系統公開的知識庫「FOXLINK GPT 使用說明書」。
+ * 存入一個系統公開的知識庫「Cortex 使用說明書」。
  * 採 MD5 hash 機制，內容不變時跳過，避免重複 embedding。
  */
 
@@ -16,7 +16,7 @@ const { tryLock, unlock } = require('./redisClient');
 const LOCK_KEY = 'lock:help_kb_sync';
 const LOCK_TTL = 600; // 10 分鐘（足夠完成 21 章節 embedding）
 
-const KB_NAME = 'FOXLINK GPT 使用說明書';
+const KB_NAME = 'Cortex 使用說明書';
 const KB_TAGS = JSON.stringify(['使用說明', '操作手冊', '功能教學', '如何使用', 'FOXLINK GPT']);
 
 /** 取得 admin user id（用於系統 KB 的 creator_id） */

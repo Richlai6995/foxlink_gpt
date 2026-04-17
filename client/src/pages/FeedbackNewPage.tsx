@@ -163,7 +163,7 @@ export default function FeedbackNewPage() {
         </div>
       </div>
 
-      <div className="max-w-3xl mx-auto px-6 py-8">
+      <div className="max-w-3xl mx-auto px-6 py-8" onPaste={handlePaste}>
         <div className="space-y-5">
           {/* Subject */}
           <div>
@@ -172,7 +172,6 @@ export default function FeedbackNewPage() {
               type="text"
               value={subject}
               onChange={e => setSubject(e.target.value)}
-              onPaste={handlePaste}
               className="w-full bg-white border border-gray-300 rounded-lg px-4 py-2.5 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:border-blue-500"
               placeholder={t('feedback.subject')}
               autoFocus
@@ -225,7 +224,6 @@ export default function FeedbackNewPage() {
               ref={descriptionRef}
               value={description}
               onChange={e => setDescription(e.target.value)}
-              onPaste={handlePaste}
               onDrop={handleDrop}
               onDragOver={e => e.preventDefault()}
               rows={6}

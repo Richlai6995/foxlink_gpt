@@ -531,7 +531,7 @@ export default function FeedbackDetailPage() {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">{t('feedback.description')}</label>
-                  <textarea value={draftDesc} onChange={e => setDraftDesc(e.target.value)} onPaste={handleDraftPaste}
+                  <textarea value={draftDesc} onChange={e => setDraftDesc(e.target.value)}
                     onDrop={e => { e.preventDefault(); if (e.dataTransfer.files.length > 0) setDraftFiles(prev => [...prev, ...Array.from(e.dataTransfer.files)]) }}
                     onDragOver={e => e.preventDefault()}
                     rows={5} className="w-full border border-gray-300 rounded-lg px-4 py-2 text-sm text-gray-900 focus:outline-none focus:border-blue-500 resize-y"
@@ -733,7 +733,6 @@ export default function FeedbackDetailPage() {
                     value={msgContent}
                     onChange={e => handleInputChange(e.target.value)}
                     onKeyDown={handleKeyDown}
-                    onPaste={handlePaste}
                     onDrop={e => { e.preventDefault(); e.stopPropagation(); if (e.dataTransfer.files.length > 0) setMsgFiles(prev => [...prev, ...Array.from(e.dataTransfer.files)]) }}
                     onDragOver={e => { e.preventDefault(); e.stopPropagation() }}
                     placeholder={t('feedback.typeMessage') + '（可拖放檔案或 Ctrl+V 貼圖）'}
