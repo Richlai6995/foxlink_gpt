@@ -407,6 +407,7 @@ router.put('/:id', async (req, res) => {
         tags: b.tags ?? cur.tags,
         proxy_skill_id: cur.proxy_skill_id,
         created_by: req.user.id,
+        endpoint_mode: b.endpoint_mode ?? cur.endpoint_mode ?? 'tool',
       });
     } catch (e) {
       console.warn('[ErpTools] proxy skill update failed:', e.message);

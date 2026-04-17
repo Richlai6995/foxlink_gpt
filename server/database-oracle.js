@@ -2526,6 +2526,34 @@ async function runMigrations(db) {
   } catch (e) {
     console.warn('[Migration] erp proxy skill is_public fix:', e.message);
   }
+
+  // 重新生成所有 ERP tool 的 tool_schema_json（讓 default_config 生效）
+  try {
+    const schemaGen = require('./services/erpToolSchemaGen');
+    const allTools = await db.prepare(`SELECT id, code, name, description, access_mode, params_json, endpoint_mode, proxy_skill_id FROM erp_tools`).all();
+    for (const row of (allTools || [])) {
+      try {
+        const id = row.id || row.ID;
+        const params = JSON.parse(row.params_json || row.PARAMS_JSON || '[]');
+        const schema = schemaGen.generateToolSchema({
+          code: row.code || row.CODE,
+          name: row.name || row.NAME,
+          description: row.description || row.DESCRIPTION,
+          access_mode: row.access_mode || row.ACCESS_MODE,
+          params,
+        });
+        const schemaStr = JSON.stringify(schema);
+        await db.prepare(`UPDATE erp_tools SET tool_schema_json = ? WHERE id = ?`).run(schemaStr, id);
+        const pid = row.proxy_skill_id || row.PROXY_SKILL_ID;
+        if (pid) {
+          await db.prepare(`UPDATE skills SET tool_schema = ? WHERE id = ?`).run(schemaStr, pid);
+        }
+      } catch (_) {}
+    }
+    if (allTools?.length) console.log(`[Migration] Regenerated tool_schema for ${allTools.length} ERP tools`);
+  } catch (e) {
+    console.warn('[Migration] erp tool_schema regen:', e.message);
+  }
 }
 
 // ─── Default DB Source migration ───────────────────────────────────────────────
