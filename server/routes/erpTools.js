@@ -19,6 +19,7 @@ const executor = require('../services/erpToolExecutor');
 const resultCache = require('../services/erpToolResultCache');
 const proxySkill = require('../services/erpToolProxySkill');
 const erpDb = require('../services/erpDb');
+const { resolveGranteeNamesInRows, getLangFromReq } = require('../services/granteeNameResolver');
 
 router.use(verifyToken);
 
@@ -675,7 +676,14 @@ router.get('/:id/access', async (req, res) => {
     const row = await db.prepare(`SELECT proxy_skill_id FROM erp_tools WHERE id = ?`).get(req.params.id);
     const pid = row?.proxy_skill_id ?? row?.PROXY_SKILL_ID;
     if (!pid) return res.json([]);
-    const shares = await db.prepare(`SELECT * FROM skill_access WHERE skill_id = ? ORDER BY granted_at DESC`).all(pid);
+    const shares = await db.prepare(`
+      SELECT a.*, u.name AS granted_by_name
+      FROM skill_access a
+      LEFT JOIN users u ON u.id = a.granted_by
+      WHERE a.skill_id = ?
+      ORDER BY a.granted_at DESC
+    `).all(pid);
+    await resolveGranteeNamesInRows(shares, getLangFromReq(req), db);
     res.json(shares);
   } catch (e) {
     res.status(500).json({ error: e.message });

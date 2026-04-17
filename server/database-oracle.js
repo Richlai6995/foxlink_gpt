@@ -2519,6 +2519,13 @@ async function runMigrations(db) {
   } catch (e) {
     console.warn('[Migration] erp proxy skill backfill skipped:', e.message);
   }
+
+  // 修正:ERP proxy skill 預設改非公開(需透過分享或手動公開)
+  try {
+    await db.prepare(`UPDATE skills SET is_public = 0 WHERE type = 'erp_proc' AND is_public = 1`).run();
+  } catch (e) {
+    console.warn('[Migration] erp proxy skill is_public fix:', e.message);
+  }
 }
 
 // ─── Default DB Source migration ───────────────────────────────────────────────

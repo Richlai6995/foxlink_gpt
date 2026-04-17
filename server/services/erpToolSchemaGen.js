@@ -57,6 +57,16 @@ function generateToolSchema(tool) {
       descParts.push('合法值:' + p.lov_config.items.map(i => i.value).join(', '));
     }
 
+    // 有預設值 → 告訴 LLM 不用問
+    const cfg = p.default_config;
+    const hasDefault = cfg && cfg.mode !== 'none';
+    const hasInjectSource = p.inject_source || p.inject_value != null;
+    if (hasDefault || hasInjectSource) {
+      if (cfg?.mode === 'fixed') descParts.push(`預設值:${cfg.fixed_value}，使用者未提供時自動使用預設值`);
+      else if (cfg?.mode === 'preset') descParts.push(`預設值:系統自動帶入(${cfg.preset})，使用者未提供時自動使用預設值`);
+      else if (hasInjectSource) descParts.push('系統自動帶入，不需使用者提供');
+    }
+
     properties[p.name] = {
       type: jsType,
       description: descParts.join('；'),
@@ -66,7 +76,10 @@ function generateToolSchema(tool) {
       properties[p.name].enum = p.lov_config.items.map(i => String(i.value));
     }
 
-    if (p.required) required.push(p.name);
+    // 有預設/inject 的參數不列為 required
+    if (p.required && !hasDefault && !hasInjectSource) {
+      required.push(p.name);
+    }
   }
 
   const desc = [tool.description || tool.name];
