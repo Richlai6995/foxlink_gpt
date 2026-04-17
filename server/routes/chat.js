@@ -1707,7 +1707,30 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
           try { injectConfig = JSON.parse(injectConfigRaw || '{}') || {}; } catch (_) {}
 
           if (erpMode === 'answer') {
-            // ── Answer 模式:直接執行 → 格式化結果 → 直達使用者(跳過 LLM) ──
+            // ── Answer 模式:先檢查有沒有需要使用者輸入的 required 參數 ──
+            const toolParamsRaw = toolRow.params_json || toolRow.PARAMS_JSON || '[]';
+            const toolParams = JSON.parse(toolParamsRaw);
+            const needsUserInput = toolParams.some(tp => {
+              const io = (tp.in_out || 'IN').toUpperCase();
+              if (io === 'OUT') return false;
+              if (tp.visible === false || tp.editable === false) return false;
+              if (tp.inject_source || tp.inject_value != null) return false;
+              const cfg = tp.default_config;
+              if (cfg && cfg.mode !== 'none') return false;
+              if (tp.default_value != null) return false;
+              return tp.required;
+            });
+            if (needsUserInput) {
+              // 有使用者輸入參數 → 降級為 tool 模式(LLM function calling)
+              console.log(`[ErpAnswer] "${sk.name}" has user-input params, fallback to tool mode`);
+              try {
+                const schema = JSON.parse(sk.tool_schema);
+                const fallbackName = schema.name || `erp_tool_${erpToolId}`;
+                codeSkillToolMap[fallbackName] = sk;
+              } catch (_) {}
+              continue;
+            }
+            // ── 所有參數可自動帶入 → 直接執行 → 格式化直達使用者 ──
             sendEvent({ type: 'status', message: `查詢 ERP：${sk.name}` });
             const erpExec = require('../services/erpToolExecutor');
             const ansResult = await erpExec.execute(db, erpToolId, {}, req.user, {
