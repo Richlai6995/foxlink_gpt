@@ -7,7 +7,7 @@ import { useFeedbackSocket } from '../hooks/useFeedbackSocket'
 import {
   ArrowLeft, Send, Paperclip, Lock, Clock, User, Star,
   CheckCircle, RotateCcw, UserCheck, Download, X, Loader2,
-  AlertTriangle, FileText, Image, Upload, Save, Trash2, Archive
+  AlertTriangle, FileText, Image, Upload, Save, Trash2, Archive, UserCog, Search
 } from 'lucide-react'
 import FeedbackStatusBadge from '../components/feedback/FeedbackStatusBadge'
 import FeedbackPriorityBadge from '../components/feedback/FeedbackPriorityBadge'
@@ -119,6 +119,13 @@ export default function FeedbackDetailPage() {
   const [showSatisfaction, setShowSatisfaction] = useState(false)
   const [rating, setRating] = useState(0)
   const [satisfactionComment, setSatisfactionComment] = useState('')
+
+  // Reassign modal
+  const [showAssignee, setShowAssignee] = useState(false)
+  const [eligibleAssignees, setEligibleAssignees] = useState<Array<{ id: number; name: string; username: string; employee_id: string; role: string; is_erp_admin: number }>>([])
+  const [assigneeLoading, setAssigneeLoading] = useState(false)
+  const [assigneeSearch, setAssigneeSearch] = useState('')
+  const [assigneeSubmitting, setAssigneeSubmitting] = useState(false)
 
   const isOwner = ticket?.user_id === (user as any)?.id
   // ERP admin 可管理 ERP 分類工單（顯示 Lock / 接單 / 結案 admin 欄位等）
@@ -335,12 +342,45 @@ export default function FeedbackDetailPage() {
     setDraftFiles(prev => [...prev, ...pasted.map((f, i) => renamePastedFile(f, i))])
   }
 
-  const handleAssign = async () => {
+  const handleAssign = async (targetUserId?: number) => {
     try {
-      await api.put(`/feedback/tickets/${id}/assign`)
+      const body = targetUserId ? { assigned_to: targetUserId } : {}
+      await api.put(`/feedback/tickets/${id}/assign`, body)
       fetchAll()
     } catch (e: any) {
       alert(e.response?.data?.error || 'Error')
+    }
+  }
+
+  const openAssigneeModal = async () => {
+    setShowAssignee(true)
+    setAssigneeSearch('')
+    setAssigneeLoading(true)
+    try {
+      const r = await api.get(`/feedback/tickets/${id}/eligible-assignees`)
+      setEligibleAssignees(r.data || [])
+    } catch (e: any) {
+      alert(e.response?.data?.error || 'Error')
+      setShowAssignee(false)
+    } finally {
+      setAssigneeLoading(false)
+    }
+  }
+
+  const handleReassign = async (targetUserId: number) => {
+    if (targetUserId === ticket?.assigned_to) {
+      setShowAssignee(false)
+      return
+    }
+    setAssigneeSubmitting(true)
+    try {
+      await api.put(`/feedback/tickets/${id}/assign`, { assigned_to: targetUserId })
+      setShowAssignee(false)
+      fetchAll()
+    } catch (e: any) {
+      alert(e.response?.data?.error || 'Error')
+    } finally {
+      setAssigneeSubmitting(false)
     }
   }
 
@@ -453,7 +493,7 @@ export default function FeedbackDetailPage() {
         </div>
         <div className="flex items-center gap-2 shrink-0">
           {canManage && !ticket.assigned_to && !isDraft && (
-            <button onClick={handleAssign} className="px-3 py-1.5 rounded-lg text-xs font-medium bg-green-600 hover:bg-green-700 text-white transition flex items-center gap-1">
+            <button onClick={() => handleAssign()} className="px-3 py-1.5 rounded-lg text-xs font-medium bg-green-600 hover:bg-green-700 text-white transition flex items-center gap-1">
               <UserCheck size={12} /> {t('feedback.assign')}
             </button>
           )}
@@ -829,13 +869,24 @@ export default function FeedbackDetailPage() {
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-gray-400">{t('feedback.assignedTo')}</span>
-                  {ticket.assigned_name ? (
-                    <span className="font-medium text-green-700 flex items-center gap-1">
-                      <UserCheck size={12} className="text-green-500" /> {ticket.assigned_name}
-                    </span>
-                  ) : (
-                    <span className="text-orange-400 text-xs italic">{t('feedback.statusLabels.open')}</span>
-                  )}
+                  <span className="flex items-center gap-1.5">
+                    {ticket.assigned_name ? (
+                      <span className="font-medium text-green-700 flex items-center gap-1">
+                        <UserCheck size={12} className="text-green-500" /> {ticket.assigned_name}
+                      </span>
+                    ) : (
+                      <span className="text-orange-400 text-xs italic">{t('feedback.statusLabels.open')}</span>
+                    )}
+                    {canManage && !isDraft && ticket.status !== 'closed' && (
+                      <button
+                        onClick={openAssigneeModal}
+                        className="p-0.5 rounded text-gray-400 hover:text-blue-600 hover:bg-blue-50 transition"
+                        title={t('feedback.reassign') || '轉派處理者'}
+                      >
+                        <UserCog size={12} />
+                      </button>
+                    )}
+                  </span>
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-gray-400">{t('feedback.createdAt')}</span>
@@ -1073,6 +1124,85 @@ export default function FeedbackDetailPage() {
               >
                 {t('feedback.submit')}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Reassign Modal */}
+      {showAssignee && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => !assigneeSubmitting && setShowAssignee(false)}>
+          <div className="bg-white border border-gray-200 rounded-xl shadow-xl w-full max-w-md flex flex-col max-h-[80vh]" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-5 py-3 border-b border-gray-100">
+              <h3 className="text-base font-semibold flex items-center gap-2">
+                <UserCog size={16} className="text-blue-600" />
+                {t('feedback.reassign') || '轉派處理者'}
+              </h3>
+              <button onClick={() => setShowAssignee(false)} className="text-gray-400 hover:text-gray-600" disabled={assigneeSubmitting}>
+                <X size={16} />
+              </button>
+            </div>
+            <div className="p-4 border-b border-gray-100">
+              <div className="relative">
+                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                <input
+                  type="text"
+                  value={assigneeSearch}
+                  onChange={e => setAssigneeSearch(e.target.value)}
+                  placeholder={t('feedback.searchAssignee') || '搜尋姓名 / 工號 / 帳號'}
+                  className="w-full pl-9 pr-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:border-blue-500"
+                  autoFocus
+                />
+              </div>
+            </div>
+            <div className="flex-1 overflow-y-auto px-2 py-2">
+              {assigneeLoading ? (
+                <div className="flex justify-center py-8 text-gray-400">
+                  <Loader2 size={20} className="animate-spin" />
+                </div>
+              ) : (() => {
+                const kw = assigneeSearch.trim().toLowerCase()
+                const list = eligibleAssignees.filter(u => {
+                  if (!kw) return true
+                  return (u.name || '').toLowerCase().includes(kw)
+                    || (u.username || '').toLowerCase().includes(kw)
+                    || (u.employee_id || '').toLowerCase().includes(kw)
+                })
+                if (list.length === 0) {
+                  return <div className="text-center text-xs text-gray-400 py-8">{t('feedback.noAssigneeFound') || '查無符合的處理者'}</div>
+                }
+                return list.map(u => {
+                  const isCurrent = u.id === ticket?.assigned_to
+                  return (
+                    <button
+                      key={u.id}
+                      onClick={() => handleReassign(u.id)}
+                      disabled={assigneeSubmitting || isCurrent}
+                      className={`w-full text-left px-3 py-2 rounded-lg flex items-center justify-between transition ${
+                        isCurrent ? 'bg-green-50 cursor-default' : 'hover:bg-blue-50'
+                      } disabled:opacity-60`}
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-semibold ${
+                          u.role === 'admin' ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'
+                        }`}>
+                          {(u.name || u.username || '?').slice(0, 1)}
+                        </div>
+                        <div className="min-w-0">
+                          <div className="text-sm font-medium text-gray-900 truncate">
+                            {u.name || u.username}
+                            {u.employee_id && <span className="ml-1 text-xs text-gray-400">({u.employee_id})</span>}
+                          </div>
+                          <div className="text-xs text-gray-400">
+                            {u.role === 'admin' ? 'Admin' : (u.is_erp_admin ? 'ERP Admin' : '')}
+                          </div>
+                        </div>
+                      </div>
+                      {isCurrent && <span className="text-xs text-green-600 shrink-0">{t('feedback.currentAssignee') || '目前'}</span>}
+                    </button>
+                  )
+                })
+              })()}
             </div>
           </div>
         </div>

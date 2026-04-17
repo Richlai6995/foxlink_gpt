@@ -225,20 +225,59 @@ router.put('/tickets/:id/assign', async (req, res) => {
     const before = await feedbackService.getTicketById(db, Number(req.params.id));
     if (!before) return res.status(404).json({ error: '工單不存在' });
     if (!canManageTicket(req.user, before)) return res.status(403).json({ error: '需要管理員權限' });
+
     const oldAssigneeId = before.assigned_to || null;
-    const updated = await feedbackService.assignTicket(db, Number(req.params.id), req.user.id);
-    emitTicketAssigned(Number(req.params.id), { ticketId: Number(req.params.id), assignedTo: req.user.id });
+    // 預設認領給自己；若 body 帶 assigned_to 則轉派給指定使用者
+    const rawTarget = req.body && req.body.assigned_to;
+    const targetUserId = rawTarget != null && rawTarget !== '' ? Number(rawTarget) : req.user.id;
+    if (!Number.isFinite(targetUserId)) return res.status(400).json({ error: 'assigned_to 無效' });
+
+    // 轉派他人時：必須驗證目標也具備處理權限（admin 或 ERP admin + ERP 工單）
+    if (targetUserId !== req.user.id) {
+      const target = await db.prepare(`SELECT id, role, is_erp_admin, status FROM users WHERE id = ?`).get(targetUserId);
+      if (!target) return res.status(400).json({ error: '指定的處理者不存在' });
+      if (target.status && target.status !== 'active') return res.status(400).json({ error: '指定的處理者已停用' });
+      const targetCanManage = canManageTicket(
+        { role: target.role, is_erp_admin: target.is_erp_admin === 1 || target.is_erp_admin === '1' },
+        before
+      );
+      if (!targetCanManage) return res.status(400).json({ error: '指定的處理者無此工單管理權限' });
+    }
+
+    const updated = await feedbackService.assignTicket(db, Number(req.params.id), targetUserId);
+    emitTicketAssigned(Number(req.params.id), { ticketId: Number(req.params.id), assignedTo: targetUserId });
 
     // Webex 分流：首次認領 or 轉單
     const actorName = req.user.name || req.user.username;
     if (!oldAssigneeId) {
-      feedbackNotif.onTicketAssigned(db, updated, req.user.id, actorName).catch(e => console.warn('[Feedback] onTicketAssigned error:', e.message));
-    } else if (oldAssigneeId !== req.user.id) {
-      feedbackNotif.onTicketReassigned(db, updated, oldAssigneeId, req.user.id, actorName).catch(e => console.warn('[Feedback] onTicketReassigned error:', e.message));
+      feedbackNotif.onTicketAssigned(db, updated, targetUserId, actorName).catch(e => console.warn('[Feedback] onTicketAssigned error:', e.message));
+    } else if (oldAssigneeId !== targetUserId) {
+      feedbackNotif.onTicketReassigned(db, updated, oldAssigneeId, targetUserId, actorName).catch(e => console.warn('[Feedback] onTicketReassigned error:', e.message));
     }
     res.json(updated);
   } catch (e) {
     res.status(400).json({ error: e.message });
+  }
+});
+
+// 取得可指派的處理者清單（admin + 該工單若為 ERP 分類則加上 ERP admin）
+router.get('/tickets/:id/eligible-assignees', async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const ticket = await feedbackService.getTicketById(db, Number(req.params.id));
+    if (!ticket) return res.status(404).json({ error: '工單不存在' });
+    if (!canManageTicket(req.user, ticket)) return res.status(403).json({ error: '需要管理員權限' });
+
+    const isErp = ticket.category_is_erp === 1 || ticket.category_is_erp === '1';
+    const sql = `SELECT id, username, name, employee_id, email, role, is_erp_admin
+                 FROM users
+                 WHERE (status IS NULL OR status = 'active')
+                   AND (role = 'admin'${isErp ? ' OR is_erp_admin = 1' : ''})
+                 ORDER BY role DESC, name ASC`;
+    const rows = await db.prepare(sql).all();
+    res.json(rows);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
   }
 });
 
