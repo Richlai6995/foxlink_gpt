@@ -632,6 +632,30 @@ router.get('/results/:cacheKey', async (req, res) => {
   }
 });
 
+// ── GET /api/erp-tools/:id/schema-debug :檢查當前 tool_schema 與 proxy skill schema ──
+router.get('/:id/schema-debug', async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const db = getDb();
+  try {
+    const row = await db.prepare(`SELECT tool_schema_json, params_json, proxy_skill_id FROM erp_tools WHERE id=?`).get(req.params.id);
+    if (!row) return res.status(404).json({ error: 'not found' });
+    const pid = row.proxy_skill_id || row.PROXY_SKILL_ID;
+    let proxySchema = null;
+    if (pid) {
+      const sk = await db.prepare(`SELECT tool_schema, endpoint_mode FROM skills WHERE id=?`).get(pid);
+      proxySchema = { tool_schema: parseJson(sk?.tool_schema || sk?.TOOL_SCHEMA, null), endpoint_mode: sk?.endpoint_mode || sk?.ENDPOINT_MODE };
+    }
+    res.json({
+      erp_tool_schema: parseJson(row.tool_schema_json || row.TOOL_SCHEMA_JSON, null),
+      erp_params: parseJson(row.params_json || row.PARAMS_JSON, []),
+      proxy_skill_id: pid,
+      proxy: proxySchema,
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ── GET /api/erp-tools/config/check ──────────────────────────────────────────
 router.get('/config/check', async (req, res) => {
   res.json({

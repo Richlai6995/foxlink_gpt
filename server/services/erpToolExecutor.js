@@ -58,8 +58,14 @@ function resolveParamInput(param, userInputs, userCtx) {
   if (param.inject_value !== null && param.inject_value !== undefined) {
     return param.inject_value;
   }
-  if (userInputs && Object.prototype.hasOwnProperty.call(userInputs, param.name)) {
-    return userInputs[param.name];
+  if (userInputs) {
+    // 精確匹配
+    if (Object.prototype.hasOwnProperty.call(userInputs, param.name)) return userInputs[param.name];
+    // case-insensitive fallback（Gemini 有時回傳小寫 key）
+    const lower = param.name.toLowerCase();
+    for (const k of Object.keys(userInputs)) {
+      if (k.toLowerCase() === lower) return userInputs[k];
+    }
   }
   // default_config 動態 preset 優先;否則 fallback 到舊 default_value
   const resolved = resolveDefaultConfig(param, userCtx);
