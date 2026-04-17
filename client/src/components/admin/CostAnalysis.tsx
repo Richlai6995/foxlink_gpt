@@ -5,7 +5,14 @@ import {
   Cell as BarCell,
 } from 'recharts'
 import { RefreshCw, Download } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import api from '../../lib/api'
+
+function fmtFactory(code?: string | null, name?: string | null, otherCount?: number) {
+  if (!code) return '-'
+  const tail = otherCount && otherCount > 0 ? ` (+${otherCount})` : ''
+  return `${code}${name ? ' ' + name : ''}${tail}`
+}
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 
@@ -15,6 +22,9 @@ interface SummaryRow {
   org_section: string
   org_section_name: string
   org_group_name: string
+  factory_code?: string
+  factory_name?: string
+  factory_other_count?: number
   input_tokens: number
   output_tokens: number
   cost: number
@@ -33,6 +43,9 @@ interface MonthlyRow {
   org_section: string
   org_section_name: string
   org_group_name: string
+  factory_code?: string
+  factory_name?: string
+  factory_other_count?: number
   month: string
   input_tokens: number
   output_tokens: number
@@ -58,6 +71,7 @@ interface EmpRow {
   org_section_name: string
   org_group_name: string
   factory_code: string
+  factory_name?: string
   input_tokens: number
   output_tokens: number
   cost: number
@@ -115,6 +129,7 @@ function ExportBtn({ href, label, filename }: { href: string; label: string; fil
 // ─── Main Component ────────────────────────────────────────────────────────
 
 export default function CostAnalysis() {
+  const { i18n } = useTranslation()
   const today = new Date().toISOString().slice(0, 10)
   const thirtyDaysAgo = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10)
 
@@ -143,10 +158,11 @@ export default function CostAnalysis() {
     try {
       const incParam = includeAllPC ? `&includeAllPC=1&onlyFoxlinkGroup=${onlyFoxlinkGroup ? '1' : '0'}` : ''
       const empParam = showAllEmployees ? `&showAllEmployees=1` : ''
+      const langParam = `&lang=${encodeURIComponent(i18n.language || 'zh-TW')}`
       const [s, m, e, t] = await Promise.all([
-        api.get(`/admin/cost-stats/summary?startDate=${startDate}&endDate=${endDate}${incParam}`),
-        api.get(`/admin/cost-stats/monthly?startDate=${startDate}&endDate=${endDate}${incParam}`),
-        api.get(`/admin/cost-stats/employees?startDate=${startDate}&endDate=${endDate}${empParam}`),
+        api.get(`/admin/cost-stats/summary?startDate=${startDate}&endDate=${endDate}${incParam}${langParam}`),
+        api.get(`/admin/cost-stats/monthly?startDate=${startDate}&endDate=${endDate}${incParam}${langParam}`),
+        api.get(`/admin/cost-stats/employees?startDate=${startDate}&endDate=${endDate}${empParam}${langParam}`),
         api.get(`/admin/cost-stats/total-accounts`),
       ])
       setSummary(s.data)
@@ -161,7 +177,7 @@ export default function CostAnalysis() {
     } finally {
       setLoading(false)
     }
-  }, [startDate, endDate, includeAllPC, onlyFoxlinkGroup, showAllEmployees])
+  }, [startDate, endDate, includeAllPC, onlyFoxlinkGroup, showAllEmployees, i18n.language])
 
   useEffect(() => { load() }, [])
 
@@ -238,9 +254,10 @@ export default function CostAnalysis() {
   // ── CSV export URLs ──────────────────────────────────────────────────────
   const qs = `startDate=${startDate}&endDate=${endDate}`
   const incQs = includeAllPC ? `&includeAllPC=1&onlyFoxlinkGroup=${onlyFoxlinkGroup ? '1' : '0'}` : ''
-  const empExportUrl = `/api/admin/cost-stats/export/employees?${qs}${selectedPC ? `&profitCenter=${selectedPC}` : ''}${selectedDept ? `&deptCode=${selectedDept}` : ''}${showAllEmployees ? `&showAllEmployees=1` : ''}`
-  const summaryExportUrl = `/api/admin/cost-stats/export/summary?${qs}${incQs}`
-  const monthlyExportUrl = `/api/admin/cost-stats/export/monthly?${qs}${incQs}`
+  const langQs = `&lang=${encodeURIComponent(i18n.language || 'zh-TW')}`
+  const empExportUrl = `/api/admin/cost-stats/export/employees?${qs}${selectedPC ? `&profitCenter=${selectedPC}` : ''}${selectedDept ? `&deptCode=${selectedDept}` : ''}${showAllEmployees ? `&showAllEmployees=1` : ''}${langQs}`
+  const summaryExportUrl = `/api/admin/cost-stats/export/summary?${qs}${incQs}${langQs}`
+  const monthlyExportUrl = `/api/admin/cost-stats/export/monthly?${qs}${incQs}${langQs}`
 
   // ── Chart handlers ───────────────────────────────────────────────────────
   const handlePieClick = (data: { profit_center?: string } | null) => {
@@ -438,6 +455,7 @@ export default function CostAnalysis() {
                 <th className="px-3 py-2 text-left">事業處代碼</th>
                 <th className="px-3 py-2 text-left">事業處名稱</th>
                 <th className="px-3 py-2 text-left">事業群名稱</th>
+                <th className="px-3 py-2 text-left">廠區</th>
                 <th className="px-3 py-2 text-right">間接員工數</th>
                 <th className="px-3 py-2 text-right">帳號人數</th>
                 <th className="px-3 py-2 text-right">使用人數</th>
@@ -461,6 +479,9 @@ export default function CostAnalysis() {
                   <td className="px-3 py-1.5">{r.org_section}</td>
                   <td className="px-3 py-1.5">{r.org_section_name}</td>
                   <td className="px-3 py-1.5">{r.org_group_name}</td>
+                  <td className="px-3 py-1.5" title={r.factory_other_count ? `含另外 ${r.factory_other_count} 個廠區` : ''}>
+                    {fmtFactory(r.factory_code, r.factory_name, r.factory_other_count)}
+                  </td>
                   <td className="px-3 py-1.5 text-right text-gray-600">{r.indirect_emp_count}</td>
                   <td className="px-3 py-1.5 text-right text-gray-500">{r.account_count}</td>
                   <td className="px-3 py-1.5 text-right">{r.user_count}</td>
@@ -469,7 +490,7 @@ export default function CostAnalysis() {
                 </tr>
               ))}
               {summary.length === 0 && (
-                <tr><td colSpan={10} className="px-3 py-4 text-center text-gray-400">無資料</td></tr>
+                <tr><td colSpan={11} className="px-3 py-4 text-center text-gray-400">無資料</td></tr>
               )}
             </tbody>
           </table>
@@ -494,6 +515,7 @@ export default function CostAnalysis() {
                 <th className="px-3 py-2 text-left">事業處名稱</th>
                 <th className="px-3 py-2 text-left">事業群名稱</th>
                 <th className="px-3 py-2 text-left">月份</th>
+                <th className="px-3 py-2 text-left">廠區</th>
                 <th className="px-3 py-2 text-right">間接員工數</th>
                 <th className="px-3 py-2 text-right">帳號人數</th>
                 <th className="px-3 py-2 text-right">使用人數</th>
@@ -516,6 +538,9 @@ export default function CostAnalysis() {
                   <td className="px-3 py-1.5">{r.org_section_name}</td>
                   <td className="px-3 py-1.5">{r.org_group_name}</td>
                   <td className="px-3 py-1.5 font-medium">{r.month}</td>
+                  <td className="px-3 py-1.5" title={r.factory_other_count ? `含另外 ${r.factory_other_count} 個廠區` : ''}>
+                    {fmtFactory(r.factory_code, r.factory_name, r.factory_other_count)}
+                  </td>
                   <td className="px-3 py-1.5 text-right text-gray-600">{r.indirect_emp_count}</td>
                   <td className="px-3 py-1.5 text-right text-gray-500">{r.account_count}</td>
                   <td className="px-3 py-1.5 text-right">{r.user_count}</td>
@@ -524,7 +549,7 @@ export default function CostAnalysis() {
                 </tr>
               ))}
               {monthly.length === 0 && (
-                <tr><td colSpan={11} className="px-3 py-4 text-center text-gray-400">無資料</td></tr>
+                <tr><td colSpan={12} className="px-3 py-4 text-center text-gray-400">無資料</td></tr>
               )}
             </tbody>
           </table>
@@ -580,7 +605,7 @@ export default function CostAnalysis() {
                     <td className="px-3 py-1.5">{r.profit_center_name || r.profit_center || '-'}</td>
                     <td className="px-3 py-1.5">{r.org_section_name || r.org_section || '-'}</td>
                     <td className="px-3 py-1.5">{r.org_group_name || '-'}</td>
-                    <td className="px-3 py-1.5">{r.factory_code || '-'}</td>
+                    <td className="px-3 py-1.5">{fmtFactory(r.factory_code, r.factory_name)}</td>
                     <td className="px-3 py-1.5 text-right">{fmtTokens(r.input_tokens)}</td>
                     <td className="px-3 py-1.5 text-right">{fmtTokens(r.output_tokens)}</td>
                     <td className="px-3 py-1.5 text-right font-medium text-blue-700">{fmtCost(r.cost, r.currency)}</td>

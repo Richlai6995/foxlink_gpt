@@ -1092,10 +1092,10 @@ async function getCostRows(db, startDate, endDate) {
  * @param {*} db
  * @param {string} startDate
  * @param {string} endDate
- * @param {object} opts { showAll: boolean }
- * @returns {Promise<Array>} 每筆含 has_account/has_usage
+ * @param {object} opts { showAll: boolean, lang: string }
+ * @returns {Promise<Array>} 每筆含 has_account/has_usage/factory_name
  */
-async function aggregateEmployees(db, startDate, endDate, { showAll } = {}) {
+async function aggregateEmployees(db, startDate, endDate, { showAll, lang } = {}) {
   const rows = await getCostRows(db, startDate, endDate);
 
   // 由用量資料聚合
@@ -1158,7 +1158,22 @@ async function aggregateEmployees(db, startDate, endDate, { showAll } = {}) {
     }
   }
 
-  return Object.values(empMap);
+  const result = Object.values(empMap);
+
+  // 批次解析廠區名稱（分享功能同一套 factoryCache）
+  try {
+    const { batchResolveFactoryNames } = require('../services/factoryCache');
+    const codes = result.map((r) => r.factory_code).filter(Boolean);
+    const nameMap = await batchResolveFactoryNames(codes, lang || 'zh-TW', db);
+    for (const r of result) {
+      r.factory_name = r.factory_code ? (nameMap.get(r.factory_code) || '') : '';
+    }
+  } catch (e) {
+    console.warn('[CostStats] factory name resolve failed:', e.message);
+    for (const r of result) r.factory_name = '';
+  }
+
+  return result;
 }
 
 function toCsv(headers, rows, getRow) {
@@ -1239,7 +1254,8 @@ router.get('/cost-stats/employees', async (req, res) => {
     const { startDate, endDate, profitCenter, orgSection, deptCode, showAllEmployees } = req.query;
     if (!startDate || !endDate) return res.status(400).json({ error: '請提供日期區間' });
 
-    let result = await aggregateEmployees(db, startDate, endDate, { showAll: showAllEmployees === '1' });
+    const lang = req.query.lang || req.headers['accept-language']?.split(',')[0] || 'zh-TW';
+    let result = await aggregateEmployees(db, startDate, endDate, { showAll: showAllEmployees === '1', lang });
 
     if (profitCenter) result = result.filter((r) => r.profit_center === profitCenter);
     if (orgSection) result = result.filter((r) => r.org_section === orgSection);
@@ -1287,6 +1303,7 @@ router.get('/cost-stats/summary', async (req, res) => {
           org_group_name: r.org_group_name || '',
           input_tokens: 0, output_tokens: 0, cost: 0, currency: r.currency || 'USD',
           _user_ids: new Set(),
+          _factory_codes: new Map(), // code -> Set<user_id> (決定主力廠區)
           dept_breakdown: {},
         };
       }
@@ -1294,6 +1311,12 @@ router.get('/cost-stats/summary', async (req, res) => {
       pcMap[key].output_tokens += r.output_tokens || 0;
       pcMap[key].cost += r.cost || 0;
       pcMap[key]._user_ids.add(r.user_id);
+      if (r.factory_code) {
+        if (!pcMap[key]._factory_codes.has(r.factory_code)) {
+          pcMap[key]._factory_codes.set(r.factory_code, new Set());
+        }
+        pcMap[key]._factory_codes.get(r.factory_code).add(r.user_id);
+      }
       // dept breakdown
       const dk = r.dept_code || '__';
       if (!pcMap[key].dept_breakdown[dk]) {
@@ -1306,9 +1329,18 @@ router.get('/cost-stats/summary', async (req, res) => {
       const user_count = pc._user_ids.size;
       const account_count = accountMap[pc.profit_center || '__NONE__'] || 0;
       const indirect_emp_count = indirectMap.get(pc.profit_center || '') || 0;
-      const { _user_ids, dept_breakdown, ...rest } = pc;
+      // 主力廠區：該 PC 員工數最多的 factory_code
+      let factory_code = '';
+      let factory_top = 0;
+      for (const [code, uset] of pc._factory_codes) {
+        if (uset.size > factory_top) { factory_code = code; factory_top = uset.size; }
+      }
+      const factory_other_count = Math.max(0, pc._factory_codes.size - 1);
+      const { _user_ids, _factory_codes, dept_breakdown, ...rest } = pc;
       return {
         ...rest,
+        factory_code,
+        factory_other_count,
         account_count,
         user_count,
         indirect_emp_count,
@@ -1330,6 +1362,8 @@ router.get('/cost-stats/summary', async (req, res) => {
           org_section_name: pc.org_section_name,
           org_group_name: pc.org_group_name,
           input_tokens: 0, output_tokens: 0, cost: 0, currency: 'USD',
+          factory_code: '',
+          factory_other_count: 0,
           account_count: 0,
           user_count: 0,
           indirect_emp_count: indirectMap.get(pc.profit_center) || 0,
@@ -1342,6 +1376,18 @@ router.get('/cost-stats/summary', async (req, res) => {
 
     // 過濾三項皆 0 的利潤中心
     result = result.filter((r) => r.indirect_emp_count || r.account_count || r.user_count);
+
+    // 批次解析廠區名稱
+    try {
+      const { batchResolveFactoryNames } = require('../services/factoryCache');
+      const lang = req.query.lang || req.headers['accept-language']?.split(',')[0] || 'zh-TW';
+      const codes = result.map((r) => r.factory_code).filter(Boolean);
+      const nameMap = await batchResolveFactoryNames(codes, lang, db);
+      for (const r of result) r.factory_name = r.factory_code ? (nameMap.get(r.factory_code) || '') : '';
+    } catch (e) {
+      console.warn('[CostStats] summary factory resolve failed:', e.message);
+      for (const r of result) r.factory_name = '';
+    }
 
     res.json(result);
   } catch (e) {
@@ -1385,20 +1431,33 @@ router.get('/cost-stats/monthly', async (req, res) => {
           month,
           input_tokens: 0, output_tokens: 0, cost: 0, currency: r.currency || 'USD',
           _user_ids: new Set(),
+          _factory_codes: new Map(),
         };
       }
       map[key].input_tokens += r.input_tokens || 0;
       map[key].output_tokens += r.output_tokens || 0;
       map[key].cost += r.cost || 0;
       map[key]._user_ids.add(r.user_id);
+      if (r.factory_code) {
+        if (!map[key]._factory_codes.has(r.factory_code)) {
+          map[key]._factory_codes.set(r.factory_code, new Set());
+        }
+        map[key]._factory_codes.get(r.factory_code).add(r.user_id);
+      }
     }
 
     let result = Object.values(map).map((m) => {
       const user_count = m._user_ids.size;
       const account_count = accountMap[m.profit_center || '__NONE__'] || 0;
       const indirect_emp_count = indirectMap.get(m.profit_center || '') || 0;
-      const { _user_ids, ...rest } = m;
-      return { ...rest, account_count, user_count, indirect_emp_count, avg_cost: user_count > 0 ? m.cost / user_count : 0, no_account: false };
+      let factory_code = '';
+      let factory_top = 0;
+      for (const [code, uset] of m._factory_codes) {
+        if (uset.size > factory_top) { factory_code = code; factory_top = uset.size; }
+      }
+      const factory_other_count = Math.max(0, m._factory_codes.size - 1);
+      const { _user_ids, _factory_codes, ...rest } = m;
+      return { ...rest, factory_code, factory_other_count, account_count, user_count, indirect_emp_count, avg_cost: user_count > 0 ? m.cost / user_count : 0, no_account: false };
     }).sort((a, b) => {
       if (a.month !== b.month) return a.month.localeCompare(b.month);
       return b.cost - a.cost;
@@ -1417,6 +1476,8 @@ router.get('/cost-stats/monthly', async (req, res) => {
           org_group_name: pc.org_group_name,
           month: '-',
           input_tokens: 0, output_tokens: 0, cost: 0, currency: 'USD',
+          factory_code: '',
+          factory_other_count: 0,
           account_count: 0,
           user_count: 0,
           indirect_emp_count: indirectMap.get(pc.profit_center) || 0,
@@ -1428,6 +1489,18 @@ router.get('/cost-stats/monthly', async (req, res) => {
 
     // 過濾三項皆 0 的列
     result = result.filter((r) => r.indirect_emp_count || r.account_count || r.user_count);
+
+    // 批次解析廠區名稱
+    try {
+      const { batchResolveFactoryNames } = require('../services/factoryCache');
+      const lang = req.query.lang || req.headers['accept-language']?.split(',')[0] || 'zh-TW';
+      const codes = result.map((r) => r.factory_code).filter(Boolean);
+      const nameMap = await batchResolveFactoryNames(codes, lang, db);
+      for (const r of result) r.factory_name = r.factory_code ? (nameMap.get(r.factory_code) || '') : '';
+    } catch (e) {
+      console.warn('[CostStats] monthly factory resolve failed:', e.message);
+      for (const r of result) r.factory_name = '';
+    }
 
     res.json(result);
   } catch (e) {
@@ -1442,16 +1515,17 @@ router.get('/cost-stats/export/employees', async (req, res) => {
     const { startDate, endDate, profitCenter, deptCode, showAllEmployees } = req.query;
     if (!startDate || !endDate) return res.status(400).json({ error: '請提供日期區間' });
 
-    let result = await aggregateEmployees(db, startDate, endDate, { showAll: showAllEmployees === '1' });
+    const lang = req.query.lang || req.headers['accept-language']?.split(',')[0] || 'zh-TW';
+    let result = await aggregateEmployees(db, startDate, endDate, { showAll: showAllEmployees === '1', lang });
     if (profitCenter) result = result.filter((r) => r.profit_center === profitCenter);
     if (deptCode) result = result.filter((r) => r.dept_code === deptCode);
     result.sort((a, b) => (b.cost || 0) - (a.cost || 0));
 
-    const headers = ['工號', '姓名', '有帳號', '部門代碼', '部門名稱', '利潤中心代碼', '利潤中心名稱', '事業處代碼', '事業處名稱', '事業群名稱', '廠區', 'Input Tokens', 'Output Tokens', '費用金額', '幣別'];
+    const headers = ['工號', '姓名', '有帳號', '部門代碼', '部門名稱', '利潤中心代碼', '利潤中心名稱', '事業處代碼', '事業處名稱', '事業群名稱', '廠區代碼', '廠區名稱', 'Input Tokens', 'Output Tokens', '費用金額', '幣別'];
     const csv = toCsv(headers, result, (r) => [
       r.employee_id, r.user_name, r.has_account ? 'Y' : 'N', r.dept_code, r.dept_name,
       r.profit_center, r.profit_center_name, r.org_section, r.org_section_name,
-      r.org_group_name, r.factory_code, r.input_tokens, r.output_tokens,
+      r.org_group_name, r.factory_code, r.factory_name, r.input_tokens, r.output_tokens,
       r.cost?.toFixed(6), r.currency,
     ]);
 
@@ -1490,16 +1564,25 @@ router.get('/cost-stats/export/summary', async (req, res) => {
           org_section: r.org_section || '', org_section_name: r.org_section_name || '',
           org_group_name: r.org_group_name || '', cost: 0, currency: r.currency || 'USD',
           _user_ids: new Set(),
+          _factory_codes: new Map(),
         };
       }
       pcMap[key].cost += r.cost || 0;
       pcMap[key]._user_ids.add(r.user_id);
+      if (r.factory_code) {
+        if (!pcMap[key]._factory_codes.has(r.factory_code)) pcMap[key]._factory_codes.set(r.factory_code, new Set());
+        pcMap[key]._factory_codes.get(r.factory_code).add(r.user_id);
+      }
     }
     let result = Object.values(pcMap).map((pc) => {
       const user_count = pc._user_ids.size;
       const account_count = accountMap[pc.profit_center || '__NONE__'] || 0;
       const indirect_emp_count = indirectMap.get(pc.profit_center || '') || 0;
-      return { ...pc, account_count, user_count, indirect_emp_count, avg_cost: user_count > 0 ? pc.cost / user_count : 0 };
+      let factory_code = '';
+      let ft = 0;
+      for (const [c, s] of pc._factory_codes) { if (s.size > ft) { factory_code = c; ft = s.size; } }
+      const factory_other_count = Math.max(0, pc._factory_codes.size - 1);
+      return { ...pc, factory_code, factory_other_count, account_count, user_count, indirect_emp_count, avg_cost: user_count > 0 ? pc.cost / user_count : 0 };
     }).sort((a, b) => b.cost - a.cost);
 
     if (includeAllPC === '1' && allPCs.length > 0) {
@@ -1512,6 +1595,7 @@ router.get('/cost-stats/export/summary', async (req, res) => {
           org_section: pc.org_section, org_section_name: pc.org_section_name,
           org_group_name: pc.org_group_name,
           cost: 0, currency: 'USD',
+          factory_code: '', factory_other_count: 0,
           account_count: 0, user_count: 0,
           indirect_emp_count: indirectMap.get(pc.profit_center) || 0,
           avg_cost: 0,
@@ -1521,10 +1605,22 @@ router.get('/cost-stats/export/summary', async (req, res) => {
 
     result = result.filter((r) => r.indirect_emp_count || r.account_count || r.user_count);
 
-    const headers = ['利潤中心代碼', '利潤中心名稱', '事業處代碼', '事業處名稱', '事業群名稱', '間接員工數', '帳號人數', '使用人數', '費用金額', '人均費用', '幣別'];
+    // 批次解析廠區名稱
+    try {
+      const { batchResolveFactoryNames } = require('../services/factoryCache');
+      const lang = req.query.lang || req.headers['accept-language']?.split(',')[0] || 'zh-TW';
+      const codes = result.map((r) => r.factory_code).filter(Boolean);
+      const nameMap = await batchResolveFactoryNames(codes, lang, db);
+      for (const r of result) r.factory_name = r.factory_code ? (nameMap.get(r.factory_code) || '') : '';
+    } catch (e) {
+      for (const r of result) r.factory_name = '';
+    }
+
+    const headers = ['利潤中心代碼', '利潤中心名稱', '事業處代碼', '事業處名稱', '事業群名稱', '廠區代碼', '廠區名稱', '其他廠區數', '間接員工數', '帳號人數', '使用人數', '費用金額', '人均費用', '幣別'];
     const csv = toCsv(headers, result, (r) => [
       r.profit_center, r.profit_center_name, r.org_section, r.org_section_name,
-      r.org_group_name, r.indirect_emp_count, r.account_count, r.user_count, r.cost?.toFixed(6), r.avg_cost?.toFixed(6), r.currency,
+      r.org_group_name, r.factory_code, r.factory_name, r.factory_other_count || 0,
+      r.indirect_emp_count, r.account_count, r.user_count, r.cost?.toFixed(6), r.avg_cost?.toFixed(6), r.currency,
     ]);
 
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
@@ -1563,16 +1659,25 @@ router.get('/cost-stats/export/monthly', async (req, res) => {
           org_section: r.org_section || '', org_section_name: r.org_section_name || '',
           org_group_name: r.org_group_name || '', month, cost: 0, currency: r.currency || 'USD',
           _user_ids: new Set(),
+          _factory_codes: new Map(),
         };
       }
       map[key].cost += r.cost || 0;
       map[key]._user_ids.add(r.user_id);
+      if (r.factory_code) {
+        if (!map[key]._factory_codes.has(r.factory_code)) map[key]._factory_codes.set(r.factory_code, new Set());
+        map[key]._factory_codes.get(r.factory_code).add(r.user_id);
+      }
     }
     let result = Object.values(map).map((m) => {
       const user_count = m._user_ids.size;
       const account_count = accountMap[m.profit_center || '__NONE__'] || 0;
       const indirect_emp_count = indirectMap.get(m.profit_center || '') || 0;
-      return { ...m, account_count, user_count, indirect_emp_count, avg_cost: user_count > 0 ? m.cost / user_count : 0 };
+      let factory_code = '';
+      let ft = 0;
+      for (const [c, s] of m._factory_codes) { if (s.size > ft) { factory_code = c; ft = s.size; } }
+      const factory_other_count = Math.max(0, m._factory_codes.size - 1);
+      return { ...m, factory_code, factory_other_count, account_count, user_count, indirect_emp_count, avg_cost: user_count > 0 ? m.cost / user_count : 0 };
     }).sort((a, b) =>
       a.month !== b.month ? a.month.localeCompare(b.month) : b.cost - a.cost
     );
@@ -1588,6 +1693,7 @@ router.get('/cost-stats/export/monthly', async (req, res) => {
           org_group_name: pc.org_group_name,
           month: '-',
           cost: 0, currency: 'USD',
+          factory_code: '', factory_other_count: 0,
           account_count: 0, user_count: 0,
           indirect_emp_count: indirectMap.get(pc.profit_center) || 0,
           avg_cost: 0,
@@ -1597,10 +1703,22 @@ router.get('/cost-stats/export/monthly', async (req, res) => {
 
     result = result.filter((r) => r.indirect_emp_count || r.account_count || r.user_count);
 
-    const headers = ['利潤中心代碼', '利潤中心名稱', '事業處代碼', '事業處名稱', '事業群名稱', '月份', '間接員工數', '帳號人數', '使用人數', '費用金額', '人均費用', '幣別'];
+    // 批次解析廠區名稱
+    try {
+      const { batchResolveFactoryNames } = require('../services/factoryCache');
+      const lang = req.query.lang || req.headers['accept-language']?.split(',')[0] || 'zh-TW';
+      const codes = result.map((r) => r.factory_code).filter(Boolean);
+      const nameMap = await batchResolveFactoryNames(codes, lang, db);
+      for (const r of result) r.factory_name = r.factory_code ? (nameMap.get(r.factory_code) || '') : '';
+    } catch (e) {
+      for (const r of result) r.factory_name = '';
+    }
+
+    const headers = ['利潤中心代碼', '利潤中心名稱', '事業處代碼', '事業處名稱', '事業群名稱', '月份', '廠區代碼', '廠區名稱', '其他廠區數', '間接員工數', '帳號人數', '使用人數', '費用金額', '人均費用', '幣別'];
     const csv = toCsv(headers, result, (r) => [
       r.profit_center, r.profit_center_name, r.org_section, r.org_section_name,
-      r.org_group_name, r.month, r.indirect_emp_count, r.account_count, r.user_count, r.cost?.toFixed(6), r.avg_cost?.toFixed(6), r.currency,
+      r.org_group_name, r.month, r.factory_code, r.factory_name, r.factory_other_count || 0,
+      r.indirect_emp_count, r.account_count, r.user_count, r.cost?.toFixed(6), r.avg_cost?.toFixed(6), r.currency,
     ]);
 
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
