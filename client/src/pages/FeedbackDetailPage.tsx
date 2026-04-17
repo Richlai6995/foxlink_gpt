@@ -46,6 +46,7 @@ interface Ticket {
   updated_at: string
   resolved_at: string
   closed_at: string
+  category_is_erp: number
 }
 
 interface Message {
@@ -120,6 +121,8 @@ export default function FeedbackDetailPage() {
   const [satisfactionComment, setSatisfactionComment] = useState('')
 
   const isOwner = ticket?.user_id === (user as any)?.id
+  // ERP admin 可管理 ERP 分類工單（顯示 Lock / 接單 / 結案 admin 欄位等）
+  const canManage = isAdmin || (!!((user as any)?.is_erp_admin) && Number(ticket?.category_is_erp) === 1)
 
   // WebSocket 即時連線
   const { typingUsers, lastEvent, sendTyping, sendStopTyping } = useFeedbackSocket(id ? Number(id) : undefined)
@@ -344,7 +347,7 @@ export default function FeedbackDetailPage() {
   const handleResolve = async () => {
     try {
       // 如果有 admin 內部解題紀錄 → 先 POST 一條 internal message + 附件
-      if (isAdmin && (adminResolveNote.trim() || adminResolveFiles.length > 0)) {
+      if (canManage && (adminResolveNote.trim() || adminResolveFiles.length > 0)) {
         const fd = new FormData()
         fd.append('content', adminResolveNote.trim() || '(內部解題附件)')
         fd.append('is_internal', 'true')
@@ -426,7 +429,7 @@ export default function FeedbackDetailPage() {
   const canChat = !['closed', 'draft'].includes(ticket.status)
   const canResolve = ['processing', 'open', 'pending_user', 'reopened'].includes(ticket.status)
   const canReopen = ticket.status === 'resolved' && isOwner
-  const canClose = ticket.status === 'resolved' && isAdmin
+  const canClose = ticket.status === 'resolved' && canManage
 
   return (
     <div className="min-h-screen bg-white text-gray-900 flex flex-col">
@@ -449,17 +452,17 @@ export default function FeedbackDetailPage() {
           <h1 className="text-base font-semibold truncate mt-0.5">{ticket.subject}</h1>
         </div>
         <div className="flex items-center gap-2 shrink-0">
-          {isAdmin && !ticket.assigned_to && !isDraft && (
+          {canManage && !ticket.assigned_to && !isDraft && (
             <button onClick={handleAssign} className="px-3 py-1.5 rounded-lg text-xs font-medium bg-green-600 hover:bg-green-700 text-white transition flex items-center gap-1">
               <UserCheck size={12} /> {t('feedback.assign')}
             </button>
           )}
-          {isAdmin && !isDraft && ticket.status === 'processing' && (
+          {canManage && !isDraft && ticket.status === 'processing' && (
             <button onClick={() => handleStatusChange('pending_user')} className="px-3 py-1.5 rounded-lg text-xs font-medium bg-purple-600 hover:bg-purple-700 text-white transition">
               {t('feedback.statusLabels.pending_user')}
             </button>
           )}
-          {canResolve && (isAdmin || isOwner) && (
+          {canResolve && (canManage || isOwner) && (
             <button onClick={() => setShowResolve(true)} className="px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-600 hover:bg-blue-700 text-white transition flex items-center gap-1">
               <CheckCircle size={12} /> {t('feedback.resolve')}
             </button>
@@ -474,7 +477,7 @@ export default function FeedbackDetailPage() {
               {t('feedback.close')}
             </button>
           )}
-          {isAdmin && !isDraft && (
+          {canManage && !isDraft && (
             <button
               onClick={() => setShowArchive(true)}
               className="p-1.5 rounded-lg text-gray-400 hover:text-gray-900 hover:bg-gray-100 transition"
@@ -627,7 +630,7 @@ export default function FeedbackDetailPage() {
                   'max-w-[70%] bg-blue-50 border border-blue-200'
                 }`}>
                   {/* 管理員可刪除自己的訊息 */}
-                  {!msg.is_system && isAdmin && msg.sender_role === 'admin' && msg.sender_id === (user as any)?.id && (
+                  {!msg.is_system && canManage && msg.sender_role === 'admin' && msg.sender_id === (user as any)?.id && (
                     <button
                       onClick={async () => {
                         if (!confirm('確認刪除這則訊息？')) return
@@ -777,7 +780,7 @@ export default function FeedbackDetailPage() {
                       msgTextareaRef.current?.focus()
                     }}
                   />
-                  {isAdmin && (
+                  {canManage && (
                     <button
                       onClick={() => setIsInternal(!isInternal)}
                       className={`p-2 rounded-lg transition ${isInternal ? 'bg-amber-600 text-white' : 'bg-gray-100 text-gray-500 hover:text-gray-900'}`}
@@ -795,7 +798,7 @@ export default function FeedbackDetailPage() {
                   </button>
                 </div>
               </div>
-              {isAdmin && isInternal && (
+              {canManage && isInternal && (
                 <p className="text-xs text-amber-400 mt-1 flex items-center gap-1">
                   <Lock size={10} /> {t('feedback.internalNote')} — 訊息與附件使用者不可見，結案後會進知識庫
                 </p>
@@ -986,8 +989,8 @@ export default function FeedbackDetailPage() {
               rows={3}
               className="w-full bg-white border border-gray-300 rounded-lg px-4 py-2 text-sm text-gray-900 focus:outline-none focus:border-blue-500 resize-none"
             />
-            {/* Admin-only: 內部解題紀錄 + 附件 */}
-            {isAdmin && (
+            {/* Admin / ERP admin: 內部解題紀錄 + 附件 */}
+            {canManage && (
               <div className="mt-4 pt-4 border-t border-dashed border-amber-300 bg-amber-50/50 -mx-6 px-6 pb-1">
                 <div className="flex items-center gap-1.5 mb-2">
                   <Lock size={12} className="text-amber-500" />
