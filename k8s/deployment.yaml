@@ -130,6 +130,12 @@ spec:
             - name: docker-sock
               mountPath: /var/run/docker.sock
               readOnly: true
+            # ── MCP JWT key pair（只讀）──
+            # Secret: mcp-jwt-keys（由 deploy.sh 自動從 server/certs/*.pem 同步）
+            # .env 需設 MCP_JWT_PRIVATE_KEY_PATH=/app/certs/mcp-jwt-private.pem
+            - name: mcp-jwt-keys
+              mountPath: /app/certs
+              readOnly: true
 
           # ── Resources ────────────────────────────────────────────────────
           resources:
@@ -177,6 +183,11 @@ spec:
           hostPath:
             path: /var/run/docker.sock
             type: ""
+        - name: mcp-jwt-keys
+          secret:
+            secretName: mcp-jwt-keys
+            optional: true   # 暫允許未建立時 pod 照常啟動(send_user_token=1 才會用到)
+            defaultMode: 0400
 ---
 apiVersion: v1
 kind: Service

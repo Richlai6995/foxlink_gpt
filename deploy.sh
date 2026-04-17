@@ -38,6 +38,25 @@ else
   echo "  ⚠️  server/.env not found, skipping Secret sync"
 fi
 
+# ── MCP JWT key pair(RS256 X-User-Token 簽發用)───────────────────────────
+# pem 是 gitignore 的,不在 image 內 → 改走 K8s Secret 掛成檔案到 /app/certs
+CERTS_DIR="$(dirname "$0")/server/certs"
+PRIV_KEY="${CERTS_DIR}/mcp-jwt-private.pem"
+PUB_KEY="${CERTS_DIR}/foxlink-gpt-public.pem"
+echo "▶ Syncing MCP JWT Secret"
+if [ -f "${PRIV_KEY}" ] && [ -f "${PUB_KEY}" ]; then
+  kubectl delete secret mcp-jwt-keys -n ${NAMESPACE} --ignore-not-found
+  kubectl create secret generic mcp-jwt-keys \
+    --from-file=mcp-jwt-private.pem="${PRIV_KEY}" \
+    --from-file=foxlink-gpt-public.pem="${PUB_KEY}" \
+    -n ${NAMESPACE}
+  echo "  Secret mcp-jwt-keys updated (2 pem files)"
+else
+  echo "  ⚠️  server/certs/*.pem not found — skipping (MCP X-User-Token 功能將失效)"
+  echo "      產生方式: cd server/certs && openssl genrsa -out mcp-jwt-private.pem 2048"
+  echo "                openssl rsa -in mcp-jwt-private.pem -pubout -out foxlink-gpt-public.pem"
+fi
+
 echo "▶ Applying K8s manifests (RBAC, Deployment, Service...)"
 kubectl apply -f "$(dirname "$0")/k8s/deployment.yaml"
 
