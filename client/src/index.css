@@ -304,43 +304,31 @@ html[data-theme="dark-dimmed"] #root {
   color: var(--t-text);
 }
 
-/* ─── Sidebar regions — 各側區統一用 data-region="sidebar" 標記 ─────────────
-   所有主題都吃 --t-sidebar-bg（dark 主題預設 = --t-bg 所以視覺不變）
-   dark-dimmed 主題才會分層（主區深 navy vs 側區暖深灰） */
-html[data-theme] [data-region="sidebar"] {
+/* ─── Sidebar regions — data-region="sidebar" 標記 ──────────────────────────
+   只在 dark-dimmed 才覆蓋 sidebar bg（暖灰分層）。
+   dark 模式：主 Sidebar 靠自己的 bg-slate-900 保持深色；
+   內容頁 sidebar（Admin/Help/Dashboard）保留原本的 bg-white 白底。
+   light 主題：所有 sidebar 保持 bg-white 白底。 */
+html[data-theme="dark-dimmed"] [data-region="sidebar"] {
   background-color: var(--t-sidebar-bg) !important;
   border-color: var(--t-sidebar-border);
 }
-/* 側區內部用了 bg-slate-900 / bg-slate-800 的元素也跟著側區底 */
-html[data-theme] [data-region="sidebar"] .bg-slate-950,
-html[data-theme] [data-region="sidebar"] .bg-slate-900,
-html[data-theme] [data-region="sidebar"] .bg-slate-850,
-html[data-theme] [data-region="sidebar"] .bg-slate-800 {
+html[data-theme="dark-dimmed"] [data-region="sidebar"] .bg-slate-950,
+html[data-theme="dark-dimmed"] [data-region="sidebar"] .bg-slate-900,
+html[data-theme="dark-dimmed"] [data-region="sidebar"] .bg-slate-850,
+html[data-theme="dark-dimmed"] [data-region="sidebar"] .bg-slate-800 {
   background-color: var(--t-sidebar-bg) !important;
 }
-/* Sidebar 內的卡片/懸浮層（popover、dropdown、model selector）
-   用 hover / elevated 色做微微分層，才看得出深淺 */
-html[data-theme] [data-region="sidebar"] .bg-slate-700,
-html[data-theme] [data-region="sidebar"] .bg-slate-700\/50,
-html[data-theme] [data-region="sidebar"] .hover\:bg-slate-700:hover,
-html[data-theme] [data-region="sidebar"] .hover\:bg-slate-800:hover {
+html[data-theme="dark-dimmed"] [data-region="sidebar"] .bg-slate-700,
+html[data-theme="dark-dimmed"] [data-region="sidebar"] .bg-slate-700\/50,
+html[data-theme="dark-dimmed"] [data-region="sidebar"] .hover\:bg-slate-700:hover,
+html[data-theme="dark-dimmed"] [data-region="sidebar"] .hover\:bg-slate-800:hover {
   background-color: var(--t-bg-card-hover) !important;
 }
 
-/* ── Sidebar 深色底下的文字提亮 — 套用到 dark 與 dark-dimmed ──
-   Admin 側欄原本設計為 light UI（bg-white + text-slate-600 深字），
-   我強制把 bg flip 成 sidebar-bg（dark 下是 #0f172a，dark-dimmed 是 #1c1e24），
-   但原本的 slate-600/700 深字在深底上變成看不到。這裡統一flip。
-   只 flip「原本深字」色階（600+），不動 300/400 淺字（主 Sidebar 用的，在 dark 下本來就顯眼）*/
-html[data-theme="dark"] [data-region="sidebar"] .text-slate-600,
-html[data-theme="dark"] [data-region="sidebar"] .text-slate-700,
-html[data-theme="dark"] [data-region="sidebar"] .text-slate-800,
-html[data-theme="dark"] [data-region="sidebar"] .text-slate-900,
-html[data-theme="dark"] [data-region="sidebar"] .text-gray-600,
-html[data-theme="dark"] [data-region="sidebar"] .text-gray-700,
-html[data-theme="dark"] [data-region="sidebar"] .text-gray-800,
-html[data-theme="dark"] [data-region="sidebar"] .text-gray-900,
-html[data-theme="dark"] [data-region="sidebar"] .text-black,
+/* ── Sidebar 深色底下的文字提亮 — 只在 dark-dimmed ──
+   dark 模式：內容 sidebar 保持白底 + 深字（不需提亮）；主 Sidebar 用 text-slate-300/400 本來就亮。
+   dark-dimmed 模式：所有 sidebar 暖灰底 → 文字需提亮。 */
 html[data-theme="dark-dimmed"] [data-region="sidebar"] .text-slate-200,
 html[data-theme="dark-dimmed"] [data-region="sidebar"] .text-slate-300,
 html[data-theme="dark-dimmed"] [data-region="sidebar"] .text-slate-400,
@@ -360,10 +348,6 @@ html[data-theme="dark-dimmed"] [data-region="sidebar"] .text-black {
 }
 
 /* 次要小字（label、工號）— 稍暗保層次 */
-html[data-theme="dark"] [data-region="sidebar"] .text-slate-500.text-xs,
-html[data-theme="dark"] [data-region="sidebar"] .text-slate-600.text-xs,
-html[data-theme="dark"] [data-region="sidebar"] .text-gray-500.text-xs,
-html[data-theme="dark"] [data-region="sidebar"] .text-gray-600.text-xs,
 html[data-theme="dark-dimmed"] [data-region="sidebar"] .text-slate-400.text-xs,
 html[data-theme="dark-dimmed"] [data-region="sidebar"] .text-slate-500.text-xs,
 html[data-theme="dark-dimmed"] [data-region="sidebar"] .text-slate-600.text-xs,
@@ -374,9 +358,6 @@ html[data-theme="dark-dimmed"] [data-region="sidebar"] .text-gray-600.text-xs {
 }
 
 /* Hover text — 全白 */
-html[data-theme="dark"] [data-region="sidebar"] .hover\:text-slate-700:hover,
-html[data-theme="dark"] [data-region="sidebar"] .hover\:text-slate-800:hover,
-html[data-theme="dark"] [data-region="sidebar"] .hover\:text-slate-900:hover,
 html[data-theme="dark-dimmed"] [data-region="sidebar"] .hover\:text-slate-100:hover,
 html[data-theme="dark-dimmed"] [data-region="sidebar"] .hover\:text-slate-200:hover,
 html[data-theme="dark-dimmed"] [data-region="sidebar"] .hover\:text-slate-300:hover,
