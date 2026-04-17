@@ -66,6 +66,12 @@ function resolveParamInput(param, userInputs, userCtx) {
     for (const k of Object.keys(userInputs)) {
       if (k.toLowerCase() === lower) return userInputs[k];
     }
+    // 去 P_ 前綴比對（Gemini 有時去掉 Oracle 前綴）
+    const stripped = lower.replace(/^p_/, '');
+    for (const k of Object.keys(userInputs)) {
+      const kl = k.toLowerCase().replace(/^p_/, '');
+      if (kl === stripped) return userInputs[k];
+    }
   }
   // default_config 動態 preset 優先;否則 fallback 到舊 default_value
   const resolved = resolveDefaultConfig(param, userCtx);
