@@ -258,13 +258,8 @@ html[data-theme] ::-webkit-scrollbar-thumb {
 }
 
 /* 確保全局頁面底跟著主題（某些頁面沒包 bg 類，讓 body 掛著主題底）*/
-html[data-theme="dark-dimmed"] body,
-html[data-theme="dark-dimmed"] #root {
-  background-color: var(--t-bg);
-  color: var(--t-text);
-}
-html[data-theme^="light-"] body,
-html[data-theme^="light-"] #root {
+html[data-theme] body,
+html[data-theme] #root {
   background-color: var(--t-bg);
   color: var(--t-text);
 }

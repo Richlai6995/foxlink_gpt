@@ -11,6 +11,7 @@ export function useTrainingTheme() {
 }
 
 // 舊版 Provider 仍被某些檔案 import — 現在是 no-op（實際 Provider 在 App 根層）
+// 保留 h-full wrapper 讓 training 頁面正確撐滿視窗高度
 export function TrainingThemeProvider({ children }: { children: React.ReactNode }) {
-  return <>{children}</>
+  return <div className="h-full">{children}</div>
 }
