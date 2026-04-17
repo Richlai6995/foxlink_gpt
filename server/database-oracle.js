@@ -303,6 +303,29 @@ async function runMigrations(db) {
   // ERP 分流：分類 flag + 使用者 ERP 管理員 flag
   await addCol('FEEDBACK_CATEGORIES', 'IS_ERP', 'NUMBER(1) DEFAULT 0');
   await addCol('USERS', 'IS_ERP_ADMIN', 'NUMBER(1) DEFAULT 0');
+
+  // 重命名 feedback KB
+  try {
+    const renameMap = [
+      ['feedback-public', 'Cortex 問題工單知識庫', 'Cortex 問題工單知識庫（脫敏）',
+       'Cortex Ticket Knowledge Base', 'Cơ sở tri thức phiếu Cortex',
+       'Cortex feedback ticket KB (redacted)', 'Cơ sở tri thức phiếu phản hồi Cortex (đã ẩn danh)'],
+      ['feedback-erp', 'ERP 問題工單知識庫', 'ERP 問題工單知識庫（脫敏）',
+       'ERP Ticket Knowledge Base', 'Cơ sở tri thức phiếu ERP',
+       'ERP feedback ticket KB (redacted)', 'Cơ sở tri thức phiếu phản hồi ERP (đã ẩn danh)'],
+    ];
+    for (const [oldName, newName, desc, nameEn, nameVi, descEn, descVi] of renameMap) {
+      const r = await db.prepare('SELECT id FROM knowledge_bases WHERE name = ?').get(oldName);
+      if (r) {
+        await db.prepare('UPDATE knowledge_bases SET name=?, description=?, name_zh=?, name_en=?, name_vi=?, desc_zh=?, desc_en=?, desc_vi=? WHERE id=?')
+          .run(newName, desc, newName, nameEn, nameVi, desc, descEn, descVi, r.id);
+        console.log(`[Migration] KB renamed: ${oldName} → ${newName}`);
+      }
+    }
+  } catch (e) {
+    console.warn('[Migration] KB rename:', e.message);
+  }
+
   // kb_chunks.embedding: Oracle 23ai does not support MODIFY on VECTOR columns.
   // Detect if embedding is still fixed-dim (VECTOR(768,*)) by checking vector_precision in data dict.
   // If so: drop and re-add as VECTOR(*, FLOAT32) (safe only when table is empty).

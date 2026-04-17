@@ -14,8 +14,11 @@ const { embedText, embedBatch, toVectorStr } = require('./kbEmbedding');
 const { processAttachments } = require('./feedbackAttachmentProcessor');
 const { redactSafe, fallbackRegexRedact } = require('./feedbackRedactor');
 
-const PUBLIC_KB_NAME = 'feedback-public';
-const ERP_KB_NAME = 'feedback-erp';
+const PUBLIC_KB_NAME = 'Cortex 問題工單知識庫';
+const ERP_KB_NAME = 'ERP 問題工單知識庫';
+
+// 舊名稱（migration rename 用）
+const _OLD_NAMES = ['feedback-public', 'feedback-erp'];
 
 function _kbNameForTicket(ticket) {
   return (ticket?.category_is_erp === 1 || ticket?.category_is_erp === '1') ? ERP_KB_NAME : PUBLIC_KB_NAME;
@@ -140,12 +143,22 @@ async function ensureFeedbackKB(db, name = PUBLIC_KB_NAME) {
 
   const id = uuid();
   const dims = 768;
-  const desc = name === ERP_KB_NAME ? '問題反饋 ERP 知識庫（脫敏）' : '問題反饋公開知識庫（脫敏）';
+  const isErp = name === ERP_KB_NAME;
+  const desc = isErp ? 'ERP 問題工單知識庫（脫敏）' : 'Cortex 問題工單知識庫（脫敏）';
   await db.prepare(`
     INSERT INTO knowledge_bases
-      (id, creator_id, name, description, embedding_dims, chunk_strategy, retrieval_mode, top_k_return, score_threshold, is_public)
-    VALUES (?, ?, ?, ?, ?, 'parent_child', 'vector', 5, 0.3, ?)
-  `).run(id, creatorId, name, desc, dims, 1);
+      (id, creator_id, name, description, embedding_dims, chunk_strategy, retrieval_mode, top_k_return, score_threshold, is_public,
+       name_zh, name_en, name_vi, desc_zh, desc_en, desc_vi)
+    VALUES (?, ?, ?, ?, ?, 'parent_child', 'vector', 5, 0.3, ?,
+            ?, ?, ?, ?, ?, ?)
+  `).run(id, creatorId, name, desc, dims, 1,
+    name,
+    isErp ? 'ERP Ticket Knowledge Base' : 'Cortex Ticket Knowledge Base',
+    isErp ? 'Cơ sở tri thức phiếu ERP' : 'Cơ sở tri thức phiếu Cortex',
+    desc,
+    isErp ? 'ERP feedback ticket KB (redacted)' : 'Cortex feedback ticket KB (redacted)',
+    isErp ? 'Cơ sở tri thức phiếu phản hồi ERP (đã ẩn danh)' : 'Cơ sở tri thức phiếu phản hồi Cortex (đã ẩn danh)',
+  );
 
   console.log(`[FeedbackKB] Created KB: ${name} (id=${id})`);
   return { id, embedding_dims: dims };
