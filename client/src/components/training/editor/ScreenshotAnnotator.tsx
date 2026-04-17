@@ -8,6 +8,7 @@
  *   2. Extension 截圖事後修改標註
  */
 import { useState, useRef, useCallback, useEffect, useMemo } from 'react'
+import { createPortal } from 'react-dom'
 import { X, Undo2, Redo2, Check, MousePointer2, Minus, RotateCcw } from 'lucide-react'
 import type { Annotation } from '../blocks/AnnotationOverlay'
 
@@ -545,7 +546,7 @@ export default function ScreenshotAnnotator({ imageUrl, annotations: initial, st
     }
   }
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-[70] bg-black/90 flex flex-col" ref={containerRef}>
       {/* Toolbar */}
       <div className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-900/95 border-b border-gray-700 shrink-0 overflow-x-auto">
@@ -864,6 +865,7 @@ export default function ScreenshotAnnotator({ imageUrl, annotations: initial, st
         <span>Ctrl+Z 復原 | Ctrl+Y 重做</span>
         <span>Esc 取消</span>
       </div>
-    </div>
+    </div>,
+    document.body
   )
 }
