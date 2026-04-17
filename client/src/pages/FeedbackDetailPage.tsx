@@ -1005,16 +1005,19 @@ export default function FeedbackDetailPage() {
                   className="w-full bg-white border border-amber-200 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-amber-400 resize-none"
                 />
                 <div className="mt-2 space-y-2">
-                  <label className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs bg-amber-100 text-amber-700 hover:bg-amber-200 cursor-pointer">
-                    <Paperclip size={10} /> 上傳內部附件
-                    <input type="file" multiple className="sr-only" onChange={e => {
-                      const files = e.target.files
-                      if (files && files.length > 0) {
-                        setAdminResolveFiles(prev => [...prev, ...Array.from(files)])
+                  <button type="button" onClick={() => {
+                    const inp = document.createElement('input')
+                    inp.type = 'file'
+                    inp.multiple = true
+                    inp.onchange = () => {
+                      if (inp.files && inp.files.length > 0) {
+                        setAdminResolveFiles(prev => [...prev, ...Array.from(inp.files!)])
                       }
-                      e.target.value = ''
-                    }} />
-                  </label>
+                    }
+                    inp.click()
+                  }} className="flex items-center gap-1 px-2 py-1 rounded text-xs bg-amber-100 text-amber-700 hover:bg-amber-200">
+                    <Paperclip size={10} /> 上傳內部附件
+                  </button>
                   {adminResolveFiles.length > 0 && (
                     <div className="flex flex-wrap gap-1.5">
                       {adminResolveFiles.map((f, i) => (
