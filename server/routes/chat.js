@@ -1796,13 +1796,32 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
             });
             const formatted = formatErpResultForUser(sk.name, ansResult?.result ?? ansResult, ansResult?.cache_key);
             sendEvent({ type: 'chunk', content: formatted });
-            sendEvent({ type: 'done' });
             // 存 AI 訊息
             try {
               await db.prepare(
                 `INSERT INTO chat_messages (session_id, role, content) VALUES (?, 'assistant', ?)`
               ).run(sessionId, formatted);
             } catch (_) {}
+            // 自動命名對話(跟一般 chat 一樣)
+            try {
+              const sessionRow = await db.prepare(`SELECT title FROM chat_sessions WHERE id=?`).get(sessionId);
+              const curTitle = sessionRow?.title || sessionRow?.TITLE || '';
+              const DEFAULT_TITLES = new Set(['新對話', 'New Chat', 'Cuộc trò chuyện mới']);
+              if (!curTitle || DEFAULT_TITLES.has(curTitle)) {
+                const quickTitle = combinedUserText.slice(0, 30).replace(/\n/g, ' ') || sk.name;
+                await db.prepare(`UPDATE chat_sessions SET title=?, updated_at=SYSTIMESTAMP WHERE id=?`).run(quickTitle, sessionId);
+                sendEvent({ type: 'title', title: quickTitle });
+                generateTitle(combinedUserText, formatted).then(async ({ title: llmTitle, title_zh, title_en, title_vi }) => {
+                  if (llmTitle) {
+                    await db.prepare(`UPDATE chat_sessions SET title=?, title_zh=?, title_en=?, title_vi=? WHERE id=?`)
+                      .run(llmTitle, title_zh || llmTitle, title_en || llmTitle, title_vi || llmTitle, sessionId);
+                  }
+                }).catch(() => {});
+              } else {
+                await db.prepare(`UPDATE chat_sessions SET updated_at=SYSTIMESTAMP WHERE id=?`).run(sessionId);
+              }
+            } catch (_) {}
+            sendEvent({ type: 'done' });
             res.end();
             return;
           }
