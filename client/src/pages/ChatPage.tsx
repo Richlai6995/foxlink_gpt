@@ -187,6 +187,7 @@ export default function ChatPage() {
   const difyDragSrc = useRef<number | null>(null)
   const [erpOrder,    setErpOrder]    = useState<number[]>([])
   const [erpHidden,   setErpHidden]   = useState<Set<number>>(new Set())
+  const [erpInfoOpen, setErpInfoOpen] = useState<number | null>(null)
   const erpDragSrc = useRef<number | null>(null)
   const [kbOrder,     setKbOrder]     = useState<string[]>([])
   const [kbHidden,    setKbHidden]    = useState<Set<string>>(new Set())
@@ -1115,36 +1116,92 @@ export default function ChatPage() {
                       const erpHid = erpBase.filter(e => erpHidden.has(e.id) && erpMatch(e))
                       const ErpRow = ({ e, isHid }: { e: ErpTool; isHid: boolean }) => {
                         const id = e.id; const picked = !isHid && selectedErpIds.has(id)
+                        const infoOpen = erpInfoOpen === id
+                        const inParams = e.params?.filter(p => p.in_out === 'IN' || p.in_out === 'IN/OUT') || []
+                        const outParams = e.params?.filter(p => p.in_out === 'OUT' || p.in_out === 'IN/OUT') || []
                         return (
-                          <div key={id} draggable={!erpQ}
-                            onDragStart={() => { erpDragSrc.current = id }}
-                            onDragOver={ev => ev.preventDefault()}
-                            onDrop={() => {
-                              if (erpDragSrc.current == null || erpDragSrc.current === id) return
-                              const ids = applyOrder(allErpTools.map(x => ({ ...x, id: x.id as number })), erpOrder).map(x => x.id)
-                              const f = ids.indexOf(erpDragSrc.current!); const tt = ids.indexOf(id)
-                              if (f !== -1 && tt !== -1) setErpOrder(reorderArr(ids, f, tt))
-                              erpDragSrc.current = null
-                            }}
-                            className={`flex items-center gap-2 px-2 py-1.5 rounded-lg border transition group ${isHid ? 'opacity-40 border-transparent' : picked ? 'bg-amber-50 border-amber-200' : 'hover:bg-slate-50 border-transparent'}`}
-                          >
-                            {!erpQ && <GripVertical size={12} className="text-slate-300 cursor-grab flex-shrink-0" />}
-                            {!isHid
-                              ? <button onClick={() => setSelectedErpIds(prev => { const n = new Set(prev); picked ? n.delete(id) : n.add(id); return n })} className={`w-4 h-4 rounded border flex items-center justify-center flex-shrink-0 ${picked ? 'bg-amber-500 border-amber-500' : 'border-slate-300'}`}>{picked && <Check size={10} className="text-white" />}</button>
-                              : <div className="w-4 h-4 flex-shrink-0" />
-                            }
-                            <button onClick={() => setErpHidden(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n })}
-                              className={`w-4 h-4 rounded-full flex items-center justify-center flex-shrink-0 bg-blue-500 hover:bg-blue-700 text-white transition-all ${isHid ? '' : 'opacity-0 group-hover:opacity-100'}`}
-                              title={isHid ? t('common.unhide') : t('common.hide')}>
-                              {isHid ? <Eye size={9} /> : <EyeOff size={9} />}
-                            </button>
-                            <div className="flex-1 min-w-0 cursor-pointer" onClick={() => { if (!isHid) setSelectedErpIds(prev => { const n = new Set(prev); picked ? n.delete(id) : n.add(id); return n }) }}>
-                              <p className="text-xs font-medium text-slate-800 whitespace-nowrap flex items-center gap-1">
-                                {e.name}
-                                {e.access_mode === 'WRITE' && <span className="text-[9px] px-1 rounded bg-red-50 text-red-700 border border-red-200">WRITE</span>}
-                              </p>
-                              <p className="text-[10px] text-slate-400 font-mono whitespace-nowrap">{e.code}</p>
+                          <div key={id}>
+                            <div draggable={!erpQ}
+                              onDragStart={() => { erpDragSrc.current = id }}
+                              onDragOver={ev => ev.preventDefault()}
+                              onDrop={() => {
+                                if (erpDragSrc.current == null || erpDragSrc.current === id) return
+                                const ids = applyOrder(allErpTools.map(x => ({ ...x, id: x.id as number })), erpOrder).map(x => x.id)
+                                const f = ids.indexOf(erpDragSrc.current!); const tt = ids.indexOf(id)
+                                if (f !== -1 && tt !== -1) setErpOrder(reorderArr(ids, f, tt))
+                                erpDragSrc.current = null
+                              }}
+                              className={`flex items-center gap-2 px-2 py-1.5 rounded-lg border transition group ${isHid ? 'opacity-40 border-transparent' : picked ? 'bg-amber-50 border-amber-200' : 'hover:bg-slate-50 border-transparent'}`}
+                            >
+                              {!erpQ && <GripVertical size={12} className="text-slate-300 cursor-grab flex-shrink-0" />}
+                              {!isHid
+                                ? <button onClick={() => setSelectedErpIds(prev => { const n = new Set(prev); picked ? n.delete(id) : n.add(id); return n })} className={`w-4 h-4 rounded border flex items-center justify-center flex-shrink-0 ${picked ? 'bg-amber-500 border-amber-500' : 'border-slate-300'}`}>{picked && <Check size={10} className="text-white" />}</button>
+                                : <div className="w-4 h-4 flex-shrink-0" />
+                              }
+                              <button onClick={() => setErpHidden(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n })}
+                                className={`w-4 h-4 rounded-full flex items-center justify-center flex-shrink-0 bg-blue-500 hover:bg-blue-700 text-white transition-all ${isHid ? '' : 'opacity-0 group-hover:opacity-100'}`}
+                                title={isHid ? t('common.unhide') : t('common.hide')}>
+                                {isHid ? <Eye size={9} /> : <EyeOff size={9} />}
+                              </button>
+                              <div className="flex-1 min-w-0 cursor-pointer" onClick={() => { if (!isHid) setSelectedErpIds(prev => { const n = new Set(prev); picked ? n.delete(id) : n.add(id); return n }) }}>
+                                <p className="text-xs font-medium text-slate-800 whitespace-nowrap flex items-center gap-1">
+                                  {e.name}
+                                  {e.access_mode === 'WRITE' && <span className="text-[9px] px-1 rounded bg-red-50 text-red-700 border border-red-200">WRITE</span>}
+                                </p>
+                                <p className="text-[10px] text-slate-400 font-mono whitespace-nowrap">{e.code}</p>
+                              </div>
+                              {!isHid && (
+                                <button onClick={(ev) => { ev.stopPropagation(); setErpInfoOpen(infoOpen ? null : id) }}
+                                  className={`w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 text-[10px] font-bold transition ${infoOpen ? 'bg-sky-500 text-white' : 'bg-slate-200 text-slate-500 hover:bg-sky-100 hover:text-sky-600'}`}
+                                  title="查看參數說明">
+                                  ?
+                                </button>
+                              )}
                             </div>
+                            {infoOpen && !isHid && (
+                              <div className="ml-7 mr-2 mb-1 px-2.5 py-2 bg-sky-50 border border-sky-200 rounded-lg text-[11px] space-y-1.5">
+                                {e.description && <div className="text-slate-600">{e.description}</div>}
+                                <div className="font-mono text-[10px] text-slate-400">
+                                  {e.db_owner}.{e.package_name ? `${e.package_name}.` : ''}{e.object_name}
+                                  {e.routine_type === 'FUNCTION' && e.returns && <span className="ml-1">→ {(e.returns as any).data_type}</span>}
+                                </div>
+                                {inParams.length > 0 && (
+                                  <div>
+                                    <div className="text-[10px] font-medium text-sky-700 mb-0.5">輸入參數</div>
+                                    <table className="w-full text-[10px]">
+                                      <tbody>
+                                        {inParams.map(p => (
+                                          <tr key={p.name} className="border-b border-sky-100 last:border-0">
+                                            <td className="py-0.5 pr-1 font-mono text-slate-700 whitespace-nowrap">
+                                              {p.name}{p.required ? <span className="text-red-500 ml-0.5">*</span> : ''}
+                                            </td>
+                                            <td className="py-0.5 pr-1 text-slate-500 whitespace-nowrap">{p.data_type}{p.data_length ? `(${p.data_length})` : ''}</td>
+                                            <td className="py-0.5 text-slate-600">
+                                              {p.ai_hint || '-'}
+                                              {(p as any).default_config?.mode === 'preset' && <span className="ml-1 text-sky-600">(預設:{(p as any).default_config.preset})</span>}
+                                              {p.lov_config?.type && <span className="ml-1 text-purple-600">[{p.lov_config.type === 'static' ? '選單' : p.lov_config.type === 'sql' ? 'SQL查詢' : p.lov_config.type}]</span>}
+                                            </td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                )}
+                                {outParams.length > 0 && (
+                                  <div>
+                                    <div className="text-[10px] font-medium text-emerald-700 mb-0.5">輸出參數</div>
+                                    <div className="flex flex-wrap gap-1">
+                                      {outParams.map(p => (
+                                        <span key={p.name} className="px-1.5 py-0.5 bg-emerald-100 text-emerald-700 rounded font-mono">{p.name} ({p.data_type})</span>
+                                      ))}
+                                    </div>
+                                  </div>
+                                )}
+                                {inParams.length === 0 && outParams.length === 0 && (
+                                  <div className="text-slate-400">無參數</div>
+                                )}
+                              </div>
+                            )}
                           </div>
                         )
                       }
@@ -1639,6 +1696,29 @@ export default function ChatPage() {
             navigate(`/feedback/new?${params.toString()}`)
           }}
         />
+
+        {/* ERP 已啟用工具的參數提示 */}
+        {selectedErpIds.size > 0 && allErpTools.length > 0 && !streaming && (
+          <div className="mx-3 -mb-1 px-3 py-1.5 bg-sky-50/80 border border-sky-200 rounded-t-lg text-[11px] text-sky-800 space-y-0.5">
+            <div className="flex items-center gap-1 font-medium text-sky-700">
+              <Database size={11} /> 已啟用的 ERP 工具 — 輸入提示
+            </div>
+            {allErpTools.filter(e => selectedErpIds.has(e.id)).map(e => {
+              const inP = e.params?.filter(p => p.in_out === 'IN' || p.in_out === 'IN/OUT') || []
+              if (inP.length === 0) return null
+              return (
+                <div key={e.id}>
+                  <span className="font-medium">{e.name}</span>
+                  <span className="text-sky-600 ml-1">
+                    {inP.map(p =>
+                      `${p.ai_hint || p.name}${p.required ? '*' : ''}`
+                    ).join('、')}
+                  </span>
+                </div>
+              )
+            })}
+          </div>
+        )}
 
         {/* ERP context chip(ask_with 模式) */}
         {erpPendingContext && (
