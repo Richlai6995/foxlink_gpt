@@ -47,10 +47,13 @@ MCP 團隊提出的關鍵考量：
 ## 2. 提案：RS256 短效 JWT 夾在 `X-User-Token` header
 
 ### 2.1 設計原則
-- **零 schema 變動**（不動 `mcp_servers` 表）
 - **與現有 api_key 認證並存**（`Authorization: Bearer <api_key>` 繼續代表服務信任，`X-User-Token` 另外代表 user 身份）
 - **非對稱金鑰（RS256）**：FOXLINK GPT 持私鑰簽發，MCP 端只需公鑰驗證 → MCP 無法偽造 token
 - **短效 token**（5 min exp）→ 洩漏後影響面小，不需 revoke 機制
+- **Per-server 開關 `send_user_token`**（新增 `mcp_servers.send_user_token NUMBER(1) DEFAULT 0`）→ admin 可決定特定 MCP server 是否收 `X-User-Token`
+  - 預設 `0`（不發）→ 現有 MCP / 不認證的 MCP 升級後不會壞
+  - 新增 server 時 Modal 預設也是 `0`，admin 明確勾選才啟用
+  - 這讓**漸進啟用**可行：MCP 團隊確認驗證 ready 後,再個別開啟該 server 的開關
 
 ### 2.2 認證雙層架構
 
@@ -98,6 +101,7 @@ X-User-Token: eyJhbGciOiJSUzI1NiJ9.eyJlbWFpbCI6...              ← 使用者身
 | **iss** | `"foxlink-gpt"` | Issuer，固定值 |
 | **exp** | `iat + 300` | 5 分鐘有效期 |
 | **iat** | 簽發時 UTC epoch | 標準 |
+| **jti** | UUID v4 | JWT ID，每次簽發唯一，方便 MCP 端做 replay 防禦 + 審計 log 對照 |
 
 **Custom claims payload**:
 
@@ -106,6 +110,7 @@ X-User-Token: eyJhbGciOiJSUzI1NiJ9.eyJlbWFpbCI6...              ← 使用者身
   "iss": "foxlink-gpt",
   "iat": 1744689600,
   "exp": 1744689900,
+  "jti": "e3b0c442-98fc-1c14-9afb-4c8996fb9242",  // 每次簽發唯一
   "sub": "12345",                    // 員工編號（若無則 user id）
   "email": "peter.wang@foxlink.com", // MCP 做權限判斷的主要依據
   "name":  "王小明",
@@ -135,6 +140,7 @@ function verifyUserToken(req) {
   const claims = jwt.verify(token, PUBLIC_KEY, {
     algorithms: ['RS256'],   // 重要：只接受 RS256，防止 alg 切換攻擊
     issuer: 'foxlink-gpt',
+    clockTolerance: 30,      // 容忍 30 秒時鐘誤差，避免 pod 間 NTP 不同步造成假陰性
   });
 
   return claims;
@@ -170,6 +176,7 @@ def verify_user_token(request):
         PUBLIC_KEY,
         algorithms=["RS256"],   # 只接受 RS256
         issuer="foxlink-gpt",
+        leeway=30,              # 容忍 30 秒時鐘誤差
     )
     return claims
     # → {"sub": "12345", "email": "peter.wang@foxlink.com", "name": "王小明", "dept": "IT-01"}
@@ -195,7 +202,7 @@ func VerifyUserToken(r *http.Request) (*jwt.RegisteredClaims, error) {
             return nil, fmt.Errorf("unexpected signing method: %v", t.Header["alg"])
         }
         return publicKey, nil
-    }, jwt.WithIssuer("foxlink-gpt"))
+    }, jwt.WithIssuer("foxlink-gpt"), jwt.WithLeeway(30*time.Second))  // 30s clock skew
 
     if err != nil {
         return nil, err
@@ -224,6 +231,7 @@ var validationParams = new TokenValidationParameters {
     ValidateAudience = false,
     IssuerSigningKey = securityKey,
     ValidAlgorithms = new[] { "RS256" },
+    ClockSkew = TimeSpan.FromSeconds(30),  // 容忍 30 秒時鐘誤差
 };
 
 var handler = new JwtSecurityTokenHandler();
@@ -245,6 +253,8 @@ var email = principal.FindFirst("email")?.Value;
 
 > **⚠️ 重要安全提醒**：MCP 端驗簽時**務必限定 `algorithms: ['RS256']`**。若不限定，攻擊者可將 JWT header 改為 `"alg":"HS256"` 並用公鑰（公開的）當作 HMAC secret 簽名 → 通過驗證。這是 JWT 已知攻擊向量（CVE-2016-5431）。
 
+> **⏱️ 時鐘誤差提醒**：MCP 端驗簽**務必設 `clockTolerance` / `leeway` ≥ 30 秒**（見 §2.5 各語言範例）。K8s pod 間 NTP 不一定完全同步，token `exp` 只有 5 分鐘，沒 tolerance 很容易遇到「剛簽發就過期」的假陰性。
+
 ---
 
 ## 3. 實作範圍（FOXLINK GPT 端）
@@ -252,53 +262,92 @@ var email = principal.FindFirst("email")?.Value;
 ### 3.1 改動檔案
 | 檔案 | 改動 |
 |---|---|
-| `server/services/mcpClient.js` | `makeAuthHeaders()` 加 `userCtx` 參數，用私鑰簽 RS256 JWT 夾 `X-User-Token`；`withSession` / `callTool` signature 加 `userCtx` |
+| `server/database-oracle.js` | `mcp_servers` 加欄位 `send_user_token NUMBER(1) DEFAULT 0`；`mcp_call_logs` 加 `user_email VARCHAR2(200)` + `jti VARCHAR2(64)`（事後追查用） |
+| `server/services/mcpClient.js` | `makeAuthHeaders(apiKey, userCtx, sendUserToken)` 用私鑰簽 RS256 JWT 夾 `X-User-Token`；`withSession` / `callTool` signature 加 `userCtx`；email 缺失時 throw；`send_user_token=0` 時直接不簽 |
+| `server/services/mcpClient.js` | 啟動時嘗試載入私鑰，讀不到僅 warn（不 crash）；runtime 若 `send_user_token=1` 但私鑰未載入 → throw `MCP_JWT_PRIVATE_KEY_NOT_CONFIGURED` |
 | `server/routes/chat.js` | 呼叫 `mcpClient.callTool` 時傳 `{ id, email, name, employee_id, dept_code }` |
-| `server/.env` | 新增 `MCP_JWT_PRIVATE_KEY_PATH=./certs/mcp-jwt-private.pem` |
+| `server/routes/mcpServers.js` | CRUD 支援 `send_user_token`；新增 admin endpoints：`GET /public-key`、`POST /test-token`、`POST /verify-token` |
+| `server/scripts/verify-mcp-token.js` | CLI 驗證工具：`node verify-mcp-token.js <token>` → 用公鑰解出 claims 印出 |
+| `client/src/components/admin/McpServersPanel.tsx` | Modal 新增「使用者身份認證」區塊（checkbox + 公鑰下載 + 測試 token）；列表卡片加 🔐 icon |
+| `client/src/i18n/locales/{zh-TW,en,vi}.json` | 新增 `mcp.form.sendUserToken` 等 i18n keys |
+| `server/.env` | 新增 `MCP_JWT_PRIVATE_KEY_PATH=./certs/mcp-jwt-private.pem`、`MCP_JWT_PUBLIC_KEY_PATH=./certs/foxlink-gpt-public.pem` |
 | `server/certs/` | 存放私鑰（`.gitignore` 排除），公鑰發給 MCP 團隊 |
+| `server/certs/README.md` | 給運維的金鑰產生指引 |
 
 ### 3.2 核心程式碼片段
 
 ```js
 // server/services/mcpClient.js
-const jwt = require('jsonwebtoken');
-const fs  = require('fs');
+const jwt  = require('jsonwebtoken');
+const fs   = require('fs');
+const { randomUUID } = require('crypto');
 
-// 啟動時載入私鑰（僅 FOXLINK GPT 持有）
+// 啟動時嘗試載入私鑰（僅 FOXLINK GPT 持有）
+// 載入失敗 → warn（不 crash），dev 環境不塞 key 也能跑
 let _privateKey = null;
+let _privateKeyLoaded = false;
 function getPrivateKey() {
-  if (!_privateKey) {
-    const keyPath = process.env.MCP_JWT_PRIVATE_KEY_PATH;
-    if (!keyPath) return null;
+  if (_privateKeyLoaded) return _privateKey;
+  _privateKeyLoaded = true;
+
+  const keyPath = process.env.MCP_JWT_PRIVATE_KEY_PATH;
+  if (!keyPath) {
+    console.warn('[mcp-jwt] MCP_JWT_PRIVATE_KEY_PATH not set — X-User-Token disabled');
+    return null;
+  }
+  try {
     _privateKey = fs.readFileSync(keyPath, 'utf8');
+    console.log('[mcp-jwt] private key loaded from', keyPath);
+  } catch (e) {
+    console.warn('[mcp-jwt] failed to load private key:', e.message, '— X-User-Token disabled');
   }
   return _privateKey;
 }
 
-function makeAuthHeaders(apiKey, userCtx) {
+/**
+ * @param {string|null} apiKey          服務 api key (Layer 1)
+ * @param {object|null} userCtx         { id, email, name, employee_id, dept_code }
+ * @param {boolean}     sendUserToken   server.send_user_token === 1
+ */
+function makeAuthHeaders(apiKey, userCtx, sendUserToken) {
   const h = {};
 
   // Layer 1: 服務身份（現有邏輯不變）
   if (apiKey) h['Authorization'] = `Bearer ${apiKey}`;
 
-  // Layer 2: 使用者身份（RS256 JWT）
-  const privateKey = getPrivateKey();
-  if (userCtx?.email && privateKey) {
-    h['X-User-Token'] = jwt.sign(
-      {
-        sub:   String(userCtx.employee_id || userCtx.id),
-        email: userCtx.email,
-        name:  userCtx.name,
-        dept:  userCtx.dept_code || null,
-      },
-      privateKey,
-      { algorithm: 'RS256', expiresIn: '5m', issuer: 'foxlink-gpt' }
-    );
+  // Layer 2: 使用者身份（RS256 JWT）— 僅在 per-server 開關啟用時才簽發
+  if (!sendUserToken) return h;
+
+  if (!userCtx?.email) {
+    // Fail fast：配置要求發 token，但 user 沒 email → 拒絕呼叫
+    const err = new Error('MCP_JWT_EMAIL_REQUIRED: user has no email but MCP requires X-User-Token');
+    err.code = 'MCP_JWT_EMAIL_REQUIRED';
+    throw err;
   }
 
+  const privateKey = getPrivateKey();
+  if (!privateKey) {
+    const err = new Error('MCP_JWT_PRIVATE_KEY_NOT_CONFIGURED: send_user_token=1 but private key not loaded');
+    err.code = 'MCP_JWT_PRIVATE_KEY_NOT_CONFIGURED';
+    throw err;
+  }
+
+  h['X-User-Token'] = jwt.sign(
+    {
+      jti:   randomUUID(),
+      sub:   String(userCtx.employee_id || userCtx.id),
+      email: userCtx.email,
+      name:  userCtx.name || null,
+      dept:  userCtx.dept_code || null,
+    },
+    privateKey,
+    { algorithm: 'RS256', expiresIn: '5m', issuer: 'foxlink-gpt' }
+  );
   return h;
 }
 ```
+
+> **審計紀錄**：`mcp_call_logs` 在寫入時，把當次簽發的 `jti` 和 `user_email` 一併寫入，方便事後跟 MCP 端的 log 對照（MCP 那邊若紀錄了 `jti` → 兩邊可對齊單一次呼叫）。
 
 ### 3.3 stdio transport 處理
 
