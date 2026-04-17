@@ -1737,7 +1737,7 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
 
         try {
           const toolRow = await db.prepare(
-            `SELECT name, endpoint_mode, inject_config_json FROM erp_tools WHERE id=? AND enabled=1`
+            `SELECT name, endpoint_mode, inject_config_json, params_json FROM erp_tools WHERE id=? AND enabled=1`
           ).get(erpToolId);
           if (!toolRow) continue;
 
@@ -1830,7 +1830,7 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
           skillSystemPrompts.push(`# ERP 即時資訊:${label}\n${rendered}`);
           console.log(`[ErpInject] Injected "${label}" id=${erpToolId} rows=${injectResult?.rows_returned ?? 0}`);
         } catch (e) {
-          console.warn(`[ErpInject] "${sk.name}" failed: ${e.message}`);
+          console.warn(`[Erp${erpMode === 'answer' ? 'Answer' : 'Inject'}] "${sk.name}" failed: ${e.message}`);
           if (erpMode === 'answer') {
             sendEvent({ type: 'chunk', content: `⚠️ ERP 工具「${sk.name}」執行失敗：${e.message}` });
             sendEvent({ type: 'done' }); res.end(); return;
