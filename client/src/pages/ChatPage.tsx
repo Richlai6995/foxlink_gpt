@@ -1698,27 +1698,65 @@ export default function ChatPage() {
         />
 
         {/* ERP 已啟用工具的參數提示 */}
-        {selectedErpIds.size > 0 && allErpTools.length > 0 && !streaming && (
-          <div className="mx-3 -mb-1 px-3 py-1.5 bg-sky-50/80 border border-sky-200 rounded-t-lg text-[11px] text-sky-800 space-y-0.5">
-            <div className="flex items-center gap-1 font-medium text-sky-700">
-              <Database size={11} /> 已啟用的 ERP 工具 — 輸入提示
+        {selectedErpIds.size > 0 && allErpTools.length > 0 && !streaming && (() => {
+          const selected = allErpTools.filter(e => selectedErpIds.has(e.id))
+          if (selected.length === 0) return null
+
+          return (
+            <div className="mx-3 -mb-1 px-3 py-1.5 bg-sky-50/80 border border-sky-200 rounded-t-lg text-[11px] text-sky-800 space-y-1">
+              <div className="flex items-center gap-1 font-medium text-sky-700">
+                <Database size={11} /> 已啟用的 ERP 工具 — 輸入提示
+              </div>
+              {selected.map(e => {
+                const inP = (e.params?.filter(p => p.in_out === 'IN' || p.in_out === 'IN/OUT') || [])
+                const autoParams = inP.filter(p => {
+                  const cfg = (p as any).default_config
+                  return (cfg?.mode === 'preset') || (cfg?.mode === 'fixed' && cfg.fixed_value) || p.inject_source
+                })
+                const needInput = inP.filter(p => !autoParams.includes(p))
+                if (inP.length === 0) return null
+
+                const presetLabel = (p: any) => {
+                  const cfg = p.default_config
+                  if (!cfg) return ''
+                  if (cfg.mode === 'fixed') return `=${cfg.fixed_value}`
+                  if (cfg.mode === 'preset') {
+                    const labels: Record<string, string> = {
+                      today: '今天', yesterday: '昨天', tomorrow: '明天', now: '當下時間',
+                      this_week_start: '本週一', this_month_start: '本月1日',
+                      last_month_start: '上月1日', this_year_start: '今年初',
+                      current_year: '今年', current_month: '當月', current_day: '當日',
+                      system_user_id: '使用者ID', system_user_employee_id: '工號',
+                      system_user_name: '姓名', system_user_email: 'Email',
+                      system_user_dept: '部門', system_user_factory: '廠區',
+                    }
+                    return `=${labels[cfg.preset] || cfg.preset}`
+                  }
+                  return ''
+                }
+
+                return (
+                  <div key={e.id} className="leading-relaxed">
+                    <span className="font-medium">{e.name}</span>
+                    {needInput.length > 0 && (
+                      <span className="text-sky-700 ml-1">
+                        請提供：{needInput.map(p => `${p.ai_hint || p.name}${p.required ? '*' : ''}`).join('、')}
+                      </span>
+                    )}
+                    {autoParams.length > 0 && (
+                      <span className="text-slate-500 ml-1">
+                        （已自動帶入：{autoParams.map(p => `${p.ai_hint || p.name}${presetLabel(p)}`).join('、')}）
+                      </span>
+                    )}
+                    {needInput.length === 0 && autoParams.length > 0 && (
+                      <span className="text-emerald-600 ml-1">✓ 所有參數已自動帶入,直接提問即可</span>
+                    )}
+                  </div>
+                )
+              })}
             </div>
-            {allErpTools.filter(e => selectedErpIds.has(e.id)).map(e => {
-              const inP = e.params?.filter(p => p.in_out === 'IN' || p.in_out === 'IN/OUT') || []
-              if (inP.length === 0) return null
-              return (
-                <div key={e.id}>
-                  <span className="font-medium">{e.name}</span>
-                  <span className="text-sky-600 ml-1">
-                    {inP.map(p =>
-                      `${p.ai_hint || p.name}${p.required ? '*' : ''}`
-                    ).join('、')}
-                  </span>
-                </div>
-              )
-            })}
-          </div>
-        )}
+          )
+        })()}
 
         {/* ERP context chip(ask_with 模式) */}
         {erpPendingContext && (
