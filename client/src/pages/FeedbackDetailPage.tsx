@@ -1004,31 +1004,33 @@ export default function FeedbackDetailPage() {
                   rows={3}
                   className="w-full bg-white border border-amber-200 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-amber-400 resize-none"
                 />
-                <div className="flex items-center gap-2 mt-2">
-                  <input ref={adminResolveFileRef} type="file" multiple className="hidden" onChange={e => {
-                    if (e.target.files) setAdminResolveFiles(prev => [...prev, ...Array.from(e.target.files!)])
-                    e.target.value = ''
-                  }} />
-                  <button type="button" onClick={() => adminResolveFileRef.current?.click()}
-                    className="flex items-center gap-1 px-2 py-1 rounded text-xs bg-amber-100 text-amber-700 hover:bg-amber-200">
+                <div className="mt-2 space-y-2">
+                  <label className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs bg-amber-100 text-amber-700 hover:bg-amber-200 cursor-pointer">
                     <Paperclip size={10} /> 上傳內部附件
-                  </button>
+                    <input type="file" multiple className="sr-only" onChange={e => {
+                      const files = e.target.files
+                      if (files && files.length > 0) {
+                        setAdminResolveFiles(prev => [...prev, ...Array.from(files)])
+                      }
+                      e.target.value = ''
+                    }} />
+                  </label>
                   {adminResolveFiles.length > 0 && (
-                    <span className="text-[10px] text-amber-500">{adminResolveFiles.length} 個檔案</span>
+                    <div className="flex flex-wrap gap-1.5">
+                      {adminResolveFiles.map((f, i) => (
+                        <div key={i} className="inline-flex items-center gap-1.5 text-xs bg-amber-100 text-amber-800 px-2 py-1 rounded border border-amber-200">
+                          <FileText size={12} className="text-amber-500 shrink-0" />
+                          <span className="truncate max-w-[180px]">{f.name}</span>
+                          <span className="text-amber-400 text-[10px]">({(f.size / 1024).toFixed(0)}KB)</span>
+                          <button type="button" onClick={() => setAdminResolveFiles(prev => prev.filter((_, j) => j !== i))}
+                            className="text-amber-400 hover:text-red-500 ml-0.5">
+                            <X size={10} />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
                   )}
                 </div>
-                {adminResolveFiles.length > 0 && (
-                  <div className="flex flex-wrap gap-1 mt-1.5">
-                    {adminResolveFiles.map((f, i) => (
-                      <span key={i} className="inline-flex items-center gap-1 text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded">
-                        {f.name}
-                        <button onClick={() => setAdminResolveFiles(prev => prev.filter((_, j) => j !== i))} className="text-amber-400 hover:text-red-500">
-                          <X size={8} />
-                        </button>
-                      </span>
-                    ))}
-                  </div>
-                )}
               </div>
             )}
             <div className="flex justify-end gap-3 mt-4">
