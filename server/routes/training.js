@@ -4,6 +4,8 @@ const { v4: uuidv4 } = require('uuid');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
+const POD = process.env.HOSTNAME || os.hostname();
 const { verifyToken } = require('./auth');
 const { db } = require('../database-oracle');
 const { resolveGranteeNamesInRows, getLangFromReq } = require('../services/granteeNameResolver');
@@ -5062,22 +5064,38 @@ router.post('/recording/:sessionId/complete', async (req, res) => {
 // POST /api/training/recording/:sessionId/analyze-step/:stepId — analyze single step
 // Phase 2E: integrates user annotations into AI prompt
 router.post('/recording/:sessionId/analyze-step/:stepId', async (req, res) => {
+  const t0 = Date.now();
+  const sid = req.params.sessionId;
+  const stepId = req.params.stepId;
+  const tag = `[AnalyzeStep pod=${POD} sid=${sid.slice(0, 8)} step_id=${stepId}]`;
   try {
     const step = await db.prepare(
       'SELECT * FROM recording_steps WHERE id=? AND session_id=?'
-    ).get(req.params.stepId, req.params.sessionId);
-    if (!step) return res.status(404).json({ error: '步驟不存在' });
-    if (!step.screenshot_url) return res.json({ ok: false, error: '無截圖' });
+    ).get(stepId, sid);
+    if (!step) {
+      console.warn(`${tag} SKIP: step not found in DB`);
+      return res.status(404).json({ error: '步驟不存在' });
+    }
+    console.log(`${tag} START step_number=${step.step_number} lang=${step.lang} url=${step.screenshot_url}`);
+    if (!step.screenshot_url) {
+      console.warn(`${tag} SKIP: screenshot_url is NULL (step_number=${step.step_number} lang=${step.lang})`);
+      return res.json({ ok: false, error: '無截圖', reason: 'null_url', step_id: step.id });
+    }
 
     // Phase 3A-1: screenshot_url is always clean now; fallback to raw for old data
     const imgUrl = step.screenshot_raw_url || step.screenshot_url;
     let filePath = path.join(uploadDir, imgUrl.replace('/api/training/files/', ''));
+    const triedPaths = [filePath];
     // Fallback to alt upload dir
     if (!fs.existsSync(filePath) && fs.existsSync(altUploadDir)) {
       const alt = path.join(altUploadDir, imgUrl.replace('/api/training/files/', ''));
+      triedPaths.push(alt);
       if (fs.existsSync(alt)) filePath = alt;
     }
-    if (!fs.existsSync(filePath)) return res.json({ ok: false, error: '截圖檔案不存在' });
+    if (!fs.existsSync(filePath)) {
+      console.warn(`${tag} SKIP: file NOT FOUND on NFS. tried=${JSON.stringify(triedPaths)} url=${imgUrl}`);
+      return res.json({ ok: false, error: '截圖檔案不存在', reason: 'file_missing', step_id: step.id, tried: triedPaths });
+    }
 
     const imageBase64 = fs.readFileSync(filePath).toString('base64');
     const elementInfo = step.element_json ? (() => { try { return JSON.parse(step.element_json) } catch { return null } })() : null;
@@ -5144,13 +5162,26 @@ router.post('/recording/:sessionId/analyze-step/:stepId', async (req, res) => {
 注意：coords 的 x, y, w, h 必須是百分比 (0-100)，相對於圖片寬高。x, y 是左上角百分比。
 只回傳 JSON。`;
 
+    const tGemini = Date.now();
+    console.log(`${tag} calling Gemini model=${modelName} image_bytes=${imageBase64.length}`);
     const result = await model.generateContent([
       { inlineData: { mimeType: 'image/png', data: imageBase64 } },
       { text: prompt }
     ]);
     const text = result.response.text();
+    const geminiMs = Date.now() - tGemini;
     const jsonMatch = text.match(/\{[\s\S]*\}/);
-    const parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : {};
+    if (!jsonMatch) {
+      console.warn(`${tag} Gemini returned NO JSON block (${geminiMs}ms). text_preview="${(text || '').slice(0, 200)}"`);
+    }
+    let parsed = {};
+    if (jsonMatch) {
+      try {
+        parsed = JSON.parse(jsonMatch[0]);
+      } catch (je) {
+        console.warn(`${tag} Gemini JSON.parse FAILED (${geminiMs}ms): ${je.message}. raw="${jsonMatch[0].slice(0, 200)}"`);
+      }
+    }
 
     // Phase 3A-1: Normalize coordinates to percentage (0-100) if AI returned pixels
     const sizeOf = require('image-size');
@@ -5176,9 +5207,10 @@ router.post('/recording/:sessionId/analyze-step/:stepId', async (req, res) => {
       step.id
     );
 
+    console.log(`${tag} OK regions=${normalizedRegions.length} has_instruction=${!!parsed.instruction} total=${Date.now() - t0}ms`);
     res.json({ ok: true, step_id: step.id, regions: normalizedRegions, instruction: parsed.instruction, narration: parsed.narration });
   } catch (e) {
-    console.error('[Training] analyze step:', e.message);
+    console.error(`${tag} ERROR ${Date.now() - t0}ms:`, e.message, e.stack);
     res.status(500).json({ error: e.message });
   }
 });
@@ -5265,17 +5297,24 @@ router.post('/recording/:sessionId/analyze', async (req, res) => {
 
 // POST /api/training/recording/:sessionId/generate — create slides from recording
 router.post('/recording/:sessionId/generate', async (req, res) => {
+  const tGen = Date.now();
+  const sid = req.params.sessionId;
+  const gtag = `[Generate pod=${POD} sid=${sid.slice(0, 8)}]`;
   try {
-    const session = await db.prepare('SELECT * FROM recording_sessions WHERE id=?').get(req.params.sessionId);
-    if (!session) return res.status(404).json({ error: '錄製工作階段不存在' });
+    const session = await db.prepare('SELECT * FROM recording_sessions WHERE id=?').get(sid);
+    if (!session) {
+      console.warn(`${gtag} session NOT FOUND`);
+      return res.status(404).json({ error: '錄製工作階段不存在' });
+    }
 
     // 按 id（插入順序）取出，然後重新編號消除重複 step_number
     const rawSteps = await db.prepare(
       'SELECT * FROM recording_steps WHERE session_id=? ORDER BY step_number, id'
-    ).all(req.params.sessionId);
+    ).all(sid);
 
     // 直接使用原始 step_number，不做重新編號
     const steps = rawSteps;
+    console.log(`${gtag} START total_steps=${steps.length} step_numbers=${JSON.stringify(steps.map(s => ({ id: s.id, num: s.step_number, lang: s.lang, has_url: !!s.screenshot_url })))}`);
 
     let courseId = session.course_id;
     let lessonId = session.lesson_id;
@@ -5299,12 +5338,25 @@ router.post('/recording/:sessionId/generate', async (req, res) => {
     // Phase 3A-2: separate steps by language — zh-TW builds main slides, others become image_overrides
     const zhSteps = steps.filter(s => !s.lang || s.lang === 'zh-TW');
     const otherLangSteps = steps.filter(s => s.lang && s.lang !== 'zh-TW');
+    console.log(`${gtag} split: zh=${zhSteps.length} other=${otherLangSteps.length} course_id=${courseId} lesson_id=${lessonId}`);
+
+    // Detect duplicate step_number in zh-TW (will collide on sort_order + stepToSlideId)
+    const zhStepNums = zhSteps.map(s => s.step_number);
+    const dupStepNums = zhStepNums.filter((n, i) => zhStepNums.indexOf(n) !== i);
+    if (dupStepNums.length > 0) {
+      console.warn(`${gtag} DUPLICATE zh-TW step_numbers detected: ${JSON.stringify([...new Set(dupStepNums)])} — slides will collide on sort_order`);
+    }
 
     // Create slides from zh-TW steps
     let slideCount = 0;
+    const skipped = { no_url: [], ok: [] };
     const stepToSlideId = {}; // map step_number → slide id (for image_overrides)
     for (const step of zhSteps) {
-      if (!step.screenshot_url) continue;
+      if (!step.screenshot_url) {
+        skipped.no_url.push({ step_id: step.id, step_number: step.step_number });
+        console.warn(`${gtag} SKIP zh step_id=${step.id} step_number=${step.step_number}: screenshot_url is NULL`);
+        continue;
+      }
 
       // Phase 3A-1: Simplified slide generation — clean image + annotations layer
       const aiRegions = step.ai_regions_json ? (() => { try { return JSON.parse(step.ai_regions_json) } catch { return [] } })() : [];
@@ -5419,24 +5471,41 @@ router.post('/recording/:sessionId/generate', async (req, res) => {
         INSERT INTO course_slides (lesson_id, sort_order, slide_type, content_json, notes)
         VALUES (?, ?, ?, ?, ?)
       `).run(lessonId, step.step_number, slideType, contentJson, narration);
+      const prevSlideId = stepToSlideId[step.step_number];
+      if (prevSlideId) {
+        console.warn(`${gtag} OVERWRITE stepToSlideId[${step.step_number}]: prev=${prevSlideId} new=${slideResult.lastInsertRowid} — later en/vi image_overrides will only bind to new one`);
+      }
       stepToSlideId[step.step_number] = slideResult.lastInsertRowid;
+      skipped.ok.push({ step_id: step.id, step_number: step.step_number, slide_id: slideResult.lastInsertRowid });
       slideCount++;
     }
+    console.log(`${gtag} zh slides: created=${slideCount} skipped=${skipped.no_url.length} mapping=${JSON.stringify(stepToSlideId)}`);
 
     // Phase 3A-2: Map other-language screenshots to image_overrides
+    let overrideApplied = 0;
+    const overrideSkip = { no_url: 0, no_slide: 0, no_content: 0, no_image_block: 0, json_parse: 0 };
     for (const langStep of otherLangSteps) {
-      if (!langStep.screenshot_url) continue;
+      if (!langStep.screenshot_url) {
+        overrideSkip.no_url++;
+        console.warn(`${gtag} SKIP other-lang step_id=${langStep.id} step_number=${langStep.step_number} lang=${langStep.lang}: screenshot_url is NULL`);
+        continue;
+      }
       const slideId = stepToSlideId[langStep.step_number];
-      if (!slideId) continue;
+      if (!slideId) {
+        overrideSkip.no_slide++;
+        console.warn(`${gtag} SKIP other-lang step_id=${langStep.id} step_number=${langStep.step_number} lang=${langStep.lang}: no zh-TW slide mapped for this step_number`);
+        continue;
+      }
 
       const lang = langStep.lang;
       // Find the image block index (hotspot or image block in content_json)
       const slide = await db.prepare('SELECT content_json FROM course_slides WHERE id=?').get(slideId);
-      if (!slide) continue;
+      if (!slide) { overrideSkip.no_content++; continue; }
       let blocks;
-      try { blocks = JSON.parse(slide.content_json || '[]'); } catch { continue; }
+      try { blocks = JSON.parse(slide.content_json || '[]'); }
+      catch { overrideSkip.json_parse++; console.warn(`${gtag} other-lang step_id=${langStep.id} slide_id=${slideId} content_json parse failed`); continue; }
       const imgBlockIdx = blocks.findIndex(b => b.type === 'hotspot' || b.type === 'image');
-      if (imgBlockIdx < 0) continue;
+      if (imgBlockIdx < 0) { overrideSkip.no_image_block++; console.warn(`${gtag} other-lang step_id=${langStep.id} slide_id=${slideId}: no hotspot/image block in content`); continue; }
 
       // Upsert slide_translations with image_overrides
       const existing = await db.prepare('SELECT id, image_overrides FROM slide_translations WHERE slide_id=? AND lang=?').get(slideId, lang);
@@ -5450,11 +5519,13 @@ router.post('/recording/:sessionId/generate', async (req, res) => {
       } else {
         await db.prepare('INSERT INTO slide_translations (slide_id, lang, image_overrides) VALUES (?,?,?)').run(slideId, lang, overridesJson);
       }
+      overrideApplied++;
     }
+    console.log(`${gtag} DONE ${Date.now() - tGen}ms — slides_created=${slideCount} overrides_applied=${overrideApplied} override_skipped=${JSON.stringify(overrideSkip)}`);
 
     res.json({ ok: true, course_id: courseId, lesson_id: lessonId, slides_created: slideCount });
   } catch (e) {
-    console.error('[Training] generate from recording:', e.message);
+    console.error(`${gtag} ERROR ${Date.now() - tGen}ms:`, e.message, e.stack);
     res.status(500).json({ error: e.message });
   }
 });
