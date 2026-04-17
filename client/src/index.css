@@ -300,8 +300,8 @@ html[data-theme="dark-dimmed"] #root {
   background-color: var(--t-bg);
   color: var(--t-text);
 }
-html[data-theme^="light-"] body,
-html[data-theme^="light-"] #root {
+:is(html[data-theme^="light-"], [data-surface="light"]) body,
+:is(html[data-theme^="light-"], [data-surface="light"]) #root {
   background-color: var(--t-bg);
 }
 
@@ -762,70 +762,72 @@ html[data-theme="dark-dimmed"] [data-chat-bubble="assistant"] .prose-chat a {
 }
 
 /* ─── Light themes override hardcoded dark Tailwind classes ────────────────
-   所有 [data-theme^="light-"] 選擇器 = 三種 light 主題一次吃
+   :is(html[data-theme^="light-"], [data-surface="light"]) 選擇器 =
+     1) 三種 light 主題一次吃
+     2) Training 頁面在 dark 主題下透過 data-surface="light" 局部翻轉成淺色
    避免逐元件重寫 inline style */
 
 /* Backgrounds — deep slate (rail / elevated) */
-html[data-theme^="light-"] .bg-slate-950,
-html[data-theme^="light-"] .bg-slate-900 {
+:is(html[data-theme^="light-"], [data-surface="light"]) .bg-slate-950,
+:is(html[data-theme^="light-"], [data-surface="light"]) .bg-slate-900 {
   background-color: var(--t-bg) !important;
 }
-html[data-theme^="light-"] .bg-slate-850,
-html[data-theme^="light-"] .bg-slate-800 {
+:is(html[data-theme^="light-"], [data-surface="light"]) .bg-slate-850,
+:is(html[data-theme^="light-"], [data-surface="light"]) .bg-slate-800 {
   background-color: var(--t-bg-card) !important;
 }
-html[data-theme^="light-"] .bg-slate-700 {
+:is(html[data-theme^="light-"], [data-surface="light"]) .bg-slate-700 {
   background-color: var(--t-bg-inset) !important;
 }
-html[data-theme^="light-"] .bg-slate-600 {
+:is(html[data-theme^="light-"], [data-surface="light"]) .bg-slate-600 {
   background-color: var(--t-bg-card-hover) !important;
 }
-html[data-theme^="light-"] .bg-slate-900\/50,
-html[data-theme^="light-"] .bg-slate-900\/60,
-html[data-theme^="light-"] .bg-slate-900\/80,
-html[data-theme^="light-"] .bg-slate-800\/50,
-html[data-theme^="light-"] .bg-slate-800\/60,
-html[data-theme^="light-"] .bg-slate-800\/80 {
+:is(html[data-theme^="light-"], [data-surface="light"]) .bg-slate-900\/50,
+:is(html[data-theme^="light-"], [data-surface="light"]) .bg-slate-900\/60,
+:is(html[data-theme^="light-"], [data-surface="light"]) .bg-slate-900\/80,
+:is(html[data-theme^="light-"], [data-surface="light"]) .bg-slate-800\/50,
+:is(html[data-theme^="light-"], [data-surface="light"]) .bg-slate-800\/60,
+:is(html[data-theme^="light-"], [data-surface="light"]) .bg-slate-800\/80 {
   background-color: var(--t-bg-card) !important;
 }
-html[data-theme^="light-"] .bg-slate-700\/50,
-html[data-theme^="light-"] .bg-slate-700\/60 {
+:is(html[data-theme^="light-"], [data-surface="light"]) .bg-slate-700\/50,
+:is(html[data-theme^="light-"], [data-surface="light"]) .bg-slate-700\/60 {
   background-color: var(--t-accent-subtle) !important;
 }
-html[data-theme^="light-"] .bg-black,
-html[data-theme^="light-"] .bg-black\/50,
-html[data-theme^="light-"] .bg-black\/60 {
+:is(html[data-theme^="light-"], [data-surface="light"]) .bg-black,
+:is(html[data-theme^="light-"], [data-surface="light"]) .bg-black\/50,
+:is(html[data-theme^="light-"], [data-surface="light"]) .bg-black\/60 {
   /* modal overlay — keep dim but lighter */
   background-color: rgba(15, 23, 42, 0.35) !important;
 }
-html[data-theme^="light-"] .bg-black\/20,
-html[data-theme^="light-"] .bg-black\/30,
-html[data-theme^="light-"] .bg-black\/40 {
+:is(html[data-theme^="light-"], [data-surface="light"]) .bg-black\/20,
+:is(html[data-theme^="light-"], [data-surface="light"]) .bg-black\/30,
+:is(html[data-theme^="light-"], [data-surface="light"]) .bg-black\/40 {
   background-color: rgba(15, 23, 42, 0.1) !important;
 }
 
 /* hover variants */
-html[data-theme^="light-"] .hover\:bg-slate-800:hover,
-html[data-theme^="light-"] .hover\:bg-slate-700:hover {
+:is(html[data-theme^="light-"], [data-surface="light"]) .hover\:bg-slate-800:hover,
+:is(html[data-theme^="light-"], [data-surface="light"]) .hover\:bg-slate-700:hover {
   background-color: var(--t-bg-card-hover) !important;
 }
-html[data-theme^="light-"] .hover\:bg-slate-700\/50:hover {
+:is(html[data-theme^="light-"], [data-surface="light"]) .hover\:bg-slate-700\/50:hover {
   background-color: var(--t-accent-subtle) !important;
 }
 
 /* Borders */
-html[data-theme^="light-"] .border-slate-900,
-html[data-theme^="light-"] .border-slate-800,
-html[data-theme^="light-"] .border-slate-700,
-html[data-theme^="light-"] .border-slate-600,
-html[data-theme^="light-"] .border-slate-700\/50,
-html[data-theme^="light-"] .border-slate-800\/50,
-html[data-theme^="light-"] .border-slate-600\/50 {
+:is(html[data-theme^="light-"], [data-surface="light"]) .border-slate-900,
+:is(html[data-theme^="light-"], [data-surface="light"]) .border-slate-800,
+:is(html[data-theme^="light-"], [data-surface="light"]) .border-slate-700,
+:is(html[data-theme^="light-"], [data-surface="light"]) .border-slate-600,
+:is(html[data-theme^="light-"], [data-surface="light"]) .border-slate-700\/50,
+:is(html[data-theme^="light-"], [data-surface="light"]) .border-slate-800\/50,
+:is(html[data-theme^="light-"], [data-surface="light"]) .border-slate-600\/50 {
   border-color: var(--t-border) !important;
 }
-html[data-theme^="light-"] .border-white\/10,
-html[data-theme^="light-"] .border-white\/20,
-html[data-theme^="light-"] .border-white\/5 {
+:is(html[data-theme^="light-"], [data-surface="light"]) .border-white\/10,
+:is(html[data-theme^="light-"], [data-surface="light"]) .border-white\/20,
+:is(html[data-theme^="light-"], [data-surface="light"]) .border-white\/5 {
   border-color: var(--t-border-subtle) !important;
 }
 
@@ -833,285 +835,285 @@ html[data-theme^="light-"] .border-white\/5 {
    ⚠️ 不要把 .text-white 全局映到 --t-text，否則 .bg-blue-600.text-white 這種
    「深色實底按鈕 + 白字」會被誤傷成「藍底深字」看不清。
    .text-white 只在「明確在淺底上」時才會有問題，下面針對性處理。 */
-html[data-theme^="light-"] .text-slate-50,
-html[data-theme^="light-"] .text-slate-100,
-html[data-theme^="light-"] .text-slate-200 {
+:is(html[data-theme^="light-"], [data-surface="light"]) .text-slate-50,
+:is(html[data-theme^="light-"], [data-surface="light"]) .text-slate-100,
+:is(html[data-theme^="light-"], [data-surface="light"]) .text-slate-200 {
   color: var(--t-text) !important;
 }
-html[data-theme^="light-"] .text-slate-300 {
+:is(html[data-theme^="light-"], [data-surface="light"]) .text-slate-300 {
   color: var(--t-text-secondary) !important;
 }
-html[data-theme^="light-"] .text-slate-400 {
+:is(html[data-theme^="light-"], [data-surface="light"]) .text-slate-400 {
   color: var(--t-text-muted) !important;
 }
-html[data-theme^="light-"] .text-slate-500,
-html[data-theme^="light-"] .text-slate-600 {
+:is(html[data-theme^="light-"], [data-surface="light"]) .text-slate-500,
+:is(html[data-theme^="light-"], [data-surface="light"]) .text-slate-600 {
   color: var(--t-text-dim) !important;
 }
 
 /* hover text */
-html[data-theme^="light-"] .hover\:text-white:hover,
-html[data-theme^="light-"] .hover\:text-slate-100:hover,
-html[data-theme^="light-"] .hover\:text-slate-200:hover,
-html[data-theme^="light-"] .hover\:text-slate-300:hover {
+:is(html[data-theme^="light-"], [data-surface="light"]) .hover\:text-white:hover,
+:is(html[data-theme^="light-"], [data-surface="light"]) .hover\:text-slate-100:hover,
+:is(html[data-theme^="light-"], [data-surface="light"]) .hover\:text-slate-200:hover,
+:is(html[data-theme^="light-"], [data-surface="light"]) .hover\:text-slate-300:hover {
   color: var(--t-text) !important;
 }
 
 /* Accent — sky (dark 主題用的強調色) → 各主題 accent */
-html[data-theme^="light-"] .text-sky-300,
-html[data-theme^="light-"] .text-sky-400,
-html[data-theme^="light-"] .text-sky-500 {
+:is(html[data-theme^="light-"], [data-surface="light"]) .text-sky-300,
+:is(html[data-theme^="light-"], [data-surface="light"]) .text-sky-400,
+:is(html[data-theme^="light-"], [data-surface="light"]) .text-sky-500 {
   color: var(--t-accent) !important;
 }
 
 /* ── 400 色階彩色文字（blue/cyan/teal/emerald/amber/orange/rose/purple/indigo）
    在深底看得到，但在 light 主題白底下會褪成看不清 → 映到對應 600/700 深色階 ── */
-html[data-theme^="light-"] .text-blue-300,
-html[data-theme^="light-"] .text-blue-400 {
+:is(html[data-theme^="light-"], [data-surface="light"]) .text-blue-300,
+:is(html[data-theme^="light-"], [data-surface="light"]) .text-blue-400 {
   color: #1d4ed8 !important;  /* blue-700 */
 }
-html[data-theme^="light-"] .text-indigo-300,
-html[data-theme^="light-"] .text-indigo-400 {
+:is(html[data-theme^="light-"], [data-surface="light"]) .text-indigo-300,
+:is(html[data-theme^="light-"], [data-surface="light"]) .text-indigo-400 {
   color: #4338ca !important;  /* indigo-700 */
 }
-html[data-theme^="light-"] .text-cyan-300,
-html[data-theme^="light-"] .text-cyan-400 {
+:is(html[data-theme^="light-"], [data-surface="light"]) .text-cyan-300,
+:is(html[data-theme^="light-"], [data-surface="light"]) .text-cyan-400 {
   color: #0e7490 !important;  /* cyan-700 */
 }
-html[data-theme^="light-"] .text-teal-300,
-html[data-theme^="light-"] .text-teal-400 {
+:is(html[data-theme^="light-"], [data-surface="light"]) .text-teal-300,
+:is(html[data-theme^="light-"], [data-surface="light"]) .text-teal-400 {
   color: #0f766e !important;  /* teal-700 */
 }
-html[data-theme^="light-"] .text-emerald-300,
-html[data-theme^="light-"] .text-emerald-400 {
+:is(html[data-theme^="light-"], [data-surface="light"]) .text-emerald-300,
+:is(html[data-theme^="light-"], [data-surface="light"]) .text-emerald-400 {
   color: #047857 !important;  /* emerald-700 */
 }
-html[data-theme^="light-"] .text-green-300,
-html[data-theme^="light-"] .text-green-400 {
+:is(html[data-theme^="light-"], [data-surface="light"]) .text-green-300,
+:is(html[data-theme^="light-"], [data-surface="light"]) .text-green-400 {
   color: #15803d !important;  /* green-700 */
 }
-html[data-theme^="light-"] .text-amber-300,
-html[data-theme^="light-"] .text-amber-400 {
+:is(html[data-theme^="light-"], [data-surface="light"]) .text-amber-300,
+:is(html[data-theme^="light-"], [data-surface="light"]) .text-amber-400 {
   color: #b45309 !important;  /* amber-700 */
 }
-html[data-theme^="light-"] .text-yellow-300,
-html[data-theme^="light-"] .text-yellow-400 {
+:is(html[data-theme^="light-"], [data-surface="light"]) .text-yellow-300,
+:is(html[data-theme^="light-"], [data-surface="light"]) .text-yellow-400 {
   color: #a16207 !important;  /* yellow-700 */
 }
-html[data-theme^="light-"] .text-orange-300,
-html[data-theme^="light-"] .text-orange-400 {
+:is(html[data-theme^="light-"], [data-surface="light"]) .text-orange-300,
+:is(html[data-theme^="light-"], [data-surface="light"]) .text-orange-400 {
   color: #c2410c !important;  /* orange-700 */
 }
-html[data-theme^="light-"] .text-rose-300,
-html[data-theme^="light-"] .text-rose-400 {
+:is(html[data-theme^="light-"], [data-surface="light"]) .text-rose-300,
+:is(html[data-theme^="light-"], [data-surface="light"]) .text-rose-400 {
   color: #be123c !important;  /* rose-700 */
 }
-html[data-theme^="light-"] .text-red-300,
-html[data-theme^="light-"] .text-red-400 {
+:is(html[data-theme^="light-"], [data-surface="light"]) .text-red-300,
+:is(html[data-theme^="light-"], [data-surface="light"]) .text-red-400 {
   color: #b91c1c !important;  /* red-700 */
 }
-html[data-theme^="light-"] .text-purple-300,
-html[data-theme^="light-"] .text-purple-400 {
+:is(html[data-theme^="light-"], [data-surface="light"]) .text-purple-300,
+:is(html[data-theme^="light-"], [data-surface="light"]) .text-purple-400 {
   color: #6b21a8 !important;  /* purple-700 */
 }
-html[data-theme^="light-"] .text-pink-300,
-html[data-theme^="light-"] .text-pink-400 {
+:is(html[data-theme^="light-"], [data-surface="light"]) .text-pink-300,
+:is(html[data-theme^="light-"], [data-surface="light"]) .text-pink-400 {
   color: #9d174d !important;  /* pink-700 */
 }
 
 /* ── 所有深色實底按鈕：強制白字（light 主題下才適用，dark/dark-dimmed 不影響）
    包含 hover 狀態與 selected 狀態的彩色 fill ── */
-html[data-theme^="light-"] .bg-blue-500,
-html[data-theme^="light-"] .bg-blue-600,
-html[data-theme^="light-"] .bg-blue-700,
-html[data-theme^="light-"] .bg-blue-800,
-html[data-theme^="light-"] .bg-sky-500,
-html[data-theme^="light-"] .bg-sky-600,
-html[data-theme^="light-"] .bg-sky-700,
-html[data-theme^="light-"] .bg-indigo-500,
-html[data-theme^="light-"] .bg-indigo-600,
-html[data-theme^="light-"] .bg-indigo-700,
-html[data-theme^="light-"] .bg-cyan-600,
-html[data-theme^="light-"] .bg-cyan-700,
-html[data-theme^="light-"] .bg-teal-600,
-html[data-theme^="light-"] .bg-teal-700,
-html[data-theme^="light-"] .bg-emerald-600,
-html[data-theme^="light-"] .bg-emerald-700,
-html[data-theme^="light-"] .bg-green-600,
-html[data-theme^="light-"] .bg-green-700,
-html[data-theme^="light-"] .bg-amber-600,
-html[data-theme^="light-"] .bg-amber-700,
-html[data-theme^="light-"] .bg-orange-500,
-html[data-theme^="light-"] .bg-orange-600,
-html[data-theme^="light-"] .bg-orange-700,
-html[data-theme^="light-"] .bg-red-500,
-html[data-theme^="light-"] .bg-red-600,
-html[data-theme^="light-"] .bg-red-700,
-html[data-theme^="light-"] .bg-rose-500,
-html[data-theme^="light-"] .bg-rose-600,
-html[data-theme^="light-"] .bg-rose-700,
-html[data-theme^="light-"] .bg-pink-600,
-html[data-theme^="light-"] .bg-pink-700,
-html[data-theme^="light-"] .bg-purple-500,
-html[data-theme^="light-"] .bg-purple-600,
-html[data-theme^="light-"] .bg-purple-700,
-html[data-theme^="light-"] .bg-violet-600,
-html[data-theme^="light-"] .bg-violet-700,
-html[data-theme^="light-"] .bg-fuchsia-600,
-html[data-theme^="light-"] .bg-slate-800,
-html[data-theme^="light-"] .bg-slate-900 {
+:is(html[data-theme^="light-"], [data-surface="light"]) .bg-blue-500,
+:is(html[data-theme^="light-"], [data-surface="light"]) .bg-blue-600,
+:is(html[data-theme^="light-"], [data-surface="light"]) .bg-blue-700,
+:is(html[data-theme^="light-"], [data-surface="light"]) .bg-blue-800,
+:is(html[data-theme^="light-"], [data-surface="light"]) .bg-sky-500,
+:is(html[data-theme^="light-"], [data-surface="light"]) .bg-sky-600,
+:is(html[data-theme^="light-"], [data-surface="light"]) .bg-sky-700,
+:is(html[data-theme^="light-"], [data-surface="light"]) .bg-indigo-500,
+:is(html[data-theme^="light-"], [data-surface="light"]) .bg-indigo-600,
+:is(html[data-theme^="light-"], [data-surface="light"]) .bg-indigo-700,
+:is(html[data-theme^="light-"], [data-surface="light"]) .bg-cyan-600,
+:is(html[data-theme^="light-"], [data-surface="light"]) .bg-cyan-700,
+:is(html[data-theme^="light-"], [data-surface="light"]) .bg-teal-600,
+:is(html[data-theme^="light-"], [data-surface="light"]) .bg-teal-700,
+:is(html[data-theme^="light-"], [data-surface="light"]) .bg-emerald-600,
+:is(html[data-theme^="light-"], [data-surface="light"]) .bg-emerald-700,
+:is(html[data-theme^="light-"], [data-surface="light"]) .bg-green-600,
+:is(html[data-theme^="light-"], [data-surface="light"]) .bg-green-700,
+:is(html[data-theme^="light-"], [data-surface="light"]) .bg-amber-600,
+:is(html[data-theme^="light-"], [data-surface="light"]) .bg-amber-700,
+:is(html[data-theme^="light-"], [data-surface="light"]) .bg-orange-500,
+:is(html[data-theme^="light-"], [data-surface="light"]) .bg-orange-600,
+:is(html[data-theme^="light-"], [data-surface="light"]) .bg-orange-700,
+:is(html[data-theme^="light-"], [data-surface="light"]) .bg-red-500,
+:is(html[data-theme^="light-"], [data-surface="light"]) .bg-red-600,
+:is(html[data-theme^="light-"], [data-surface="light"]) .bg-red-700,
+:is(html[data-theme^="light-"], [data-surface="light"]) .bg-rose-500,
+:is(html[data-theme^="light-"], [data-surface="light"]) .bg-rose-600,
+:is(html[data-theme^="light-"], [data-surface="light"]) .bg-rose-700,
+:is(html[data-theme^="light-"], [data-surface="light"]) .bg-pink-600,
+:is(html[data-theme^="light-"], [data-surface="light"]) .bg-pink-700,
+:is(html[data-theme^="light-"], [data-surface="light"]) .bg-purple-500,
+:is(html[data-theme^="light-"], [data-surface="light"]) .bg-purple-600,
+:is(html[data-theme^="light-"], [data-surface="light"]) .bg-purple-700,
+:is(html[data-theme^="light-"], [data-surface="light"]) .bg-violet-600,
+:is(html[data-theme^="light-"], [data-surface="light"]) .bg-violet-700,
+:is(html[data-theme^="light-"], [data-surface="light"]) .bg-fuchsia-600,
+:is(html[data-theme^="light-"], [data-surface="light"]) .bg-slate-800,
+:is(html[data-theme^="light-"], [data-surface="light"]) .bg-slate-900 {
   color: #ffffff !important;
 }
 /* hover 後仍是深彩色底的也保持白字 */
-html[data-theme^="light-"] .hover\:bg-blue-600:hover,
-html[data-theme^="light-"] .hover\:bg-blue-700:hover,
-html[data-theme^="light-"] .hover\:bg-indigo-700:hover,
-html[data-theme^="light-"] .hover\:bg-sky-700:hover,
-html[data-theme^="light-"] .hover\:bg-red-700:hover,
-html[data-theme^="light-"] .hover\:bg-green-700:hover {
+:is(html[data-theme^="light-"], [data-surface="light"]) .hover\:bg-blue-600:hover,
+:is(html[data-theme^="light-"], [data-surface="light"]) .hover\:bg-blue-700:hover,
+:is(html[data-theme^="light-"], [data-surface="light"]) .hover\:bg-indigo-700:hover,
+:is(html[data-theme^="light-"], [data-surface="light"]) .hover\:bg-sky-700:hover,
+:is(html[data-theme^="light-"], [data-surface="light"]) .hover\:bg-red-700:hover,
+:is(html[data-theme^="light-"], [data-surface="light"]) .hover\:bg-green-700:hover {
   color: #ffffff !important;
 }
 /* 深彩底按鈕內的 icon（通常靠 currentColor / text-white 跟 text 走） */
-html[data-theme^="light-"] .bg-blue-500 svg,
-html[data-theme^="light-"] .bg-blue-600 svg,
-html[data-theme^="light-"] .bg-blue-700 svg,
-html[data-theme^="light-"] .bg-sky-600 svg,
-html[data-theme^="light-"] .bg-indigo-600 svg,
-html[data-theme^="light-"] .bg-green-600 svg,
-html[data-theme^="light-"] .bg-red-600 svg,
-html[data-theme^="light-"] .bg-rose-600 svg,
-html[data-theme^="light-"] .bg-purple-600 svg {
+:is(html[data-theme^="light-"], [data-surface="light"]) .bg-blue-500 svg,
+:is(html[data-theme^="light-"], [data-surface="light"]) .bg-blue-600 svg,
+:is(html[data-theme^="light-"], [data-surface="light"]) .bg-blue-700 svg,
+:is(html[data-theme^="light-"], [data-surface="light"]) .bg-sky-600 svg,
+:is(html[data-theme^="light-"], [data-surface="light"]) .bg-indigo-600 svg,
+:is(html[data-theme^="light-"], [data-surface="light"]) .bg-green-600 svg,
+:is(html[data-theme^="light-"], [data-surface="light"]) .bg-red-600 svg,
+:is(html[data-theme^="light-"], [data-surface="light"]) .bg-rose-600 svg,
+:is(html[data-theme^="light-"], [data-surface="light"]) .bg-purple-600 svg {
   color: #ffffff;
 }
-html[data-theme^="light-"] .bg-sky-500,
-html[data-theme^="light-"] .bg-sky-600,
-html[data-theme^="light-"] .bg-sky-700 {
+:is(html[data-theme^="light-"], [data-surface="light"]) .bg-sky-500,
+:is(html[data-theme^="light-"], [data-surface="light"]) .bg-sky-600,
+:is(html[data-theme^="light-"], [data-surface="light"]) .bg-sky-700 {
   background-color: var(--t-accent-bg) !important;
 }
-html[data-theme^="light-"] .hover\:bg-sky-500:hover,
-html[data-theme^="light-"] .hover\:bg-sky-600:hover,
-html[data-theme^="light-"] .hover\:bg-sky-700:hover {
+:is(html[data-theme^="light-"], [data-surface="light"]) .hover\:bg-sky-500:hover,
+:is(html[data-theme^="light-"], [data-surface="light"]) .hover\:bg-sky-600:hover,
+:is(html[data-theme^="light-"], [data-surface="light"]) .hover\:bg-sky-700:hover {
   background-color: var(--t-accent-bg-hover) !important;
 }
-html[data-theme^="light-"] .bg-sky-600\/20,
-html[data-theme^="light-"] .bg-sky-500\/20 {
+:is(html[data-theme^="light-"], [data-surface="light"]) .bg-sky-600\/20,
+:is(html[data-theme^="light-"], [data-surface="light"]) .bg-sky-500\/20 {
   background-color: var(--t-accent-subtle) !important;
 }
 
 /* Blue accents (used widely in main app) — 保留 blue 但讓深底變淺 */
-html[data-theme^="light-"] .bg-blue-900\/30,
-html[data-theme^="light-"] .bg-blue-800\/30,
-html[data-theme^="light-"] .bg-blue-700\/30 {
+:is(html[data-theme^="light-"], [data-surface="light"]) .bg-blue-900\/30,
+:is(html[data-theme^="light-"], [data-surface="light"]) .bg-blue-800\/30,
+:is(html[data-theme^="light-"], [data-surface="light"]) .bg-blue-700\/30 {
   background-color: var(--t-accent-subtle) !important;
 }
-html[data-theme^="light-"] .bg-blue-900\/50,
-html[data-theme^="light-"] .bg-blue-800\/50 {
+:is(html[data-theme^="light-"], [data-surface="light"]) .bg-blue-900\/50,
+:is(html[data-theme^="light-"], [data-surface="light"]) .bg-blue-800\/50 {
   background-color: var(--t-accent-subtle) !important;
 }
-html[data-theme^="light-"] .text-blue-300,
-html[data-theme^="light-"] .text-blue-400 {
+:is(html[data-theme^="light-"], [data-surface="light"]) .text-blue-300,
+:is(html[data-theme^="light-"], [data-surface="light"]) .text-blue-400 {
   color: var(--t-accent) !important;
 }
 
 /* Form controls */
-html[data-theme^="light-"] select option {
+:is(html[data-theme^="light-"], [data-surface="light"]) select option {
   background-color: var(--t-bg-card);
   color: var(--t-text);
 }
-html[data-theme^="light-"] ::placeholder {
+:is(html[data-theme^="light-"], [data-surface="light"]) ::placeholder {
   color: var(--t-text-dim) !important;
   opacity: 0.6;
 }
 
 /* Inputs — 各 light 主題吃自己的 tinted bg（極淡同色系，微降純白對比）*/
-html[data-theme^="light-"] input.bg-slate-900,
-html[data-theme^="light-"] input.bg-slate-800,
-html[data-theme^="light-"] textarea.bg-slate-900,
-html[data-theme^="light-"] textarea.bg-slate-800,
-html[data-theme^="light-"] select.bg-slate-900,
-html[data-theme^="light-"] select.bg-slate-800,
-html[data-theme^="light-"] input.bg-white,
-html[data-theme^="light-"] textarea.bg-white,
-html[data-theme^="light-"] select.bg-white {
+:is(html[data-theme^="light-"], [data-surface="light"]) input.bg-slate-900,
+:is(html[data-theme^="light-"], [data-surface="light"]) input.bg-slate-800,
+:is(html[data-theme^="light-"], [data-surface="light"]) textarea.bg-slate-900,
+:is(html[data-theme^="light-"], [data-surface="light"]) textarea.bg-slate-800,
+:is(html[data-theme^="light-"], [data-surface="light"]) select.bg-slate-900,
+:is(html[data-theme^="light-"], [data-surface="light"]) select.bg-slate-800,
+:is(html[data-theme^="light-"], [data-surface="light"]) input.bg-white,
+:is(html[data-theme^="light-"], [data-surface="light"]) textarea.bg-white,
+:is(html[data-theme^="light-"], [data-surface="light"]) select.bg-white {
   background-color: var(--t-bg-input) !important;
   color: var(--t-text) !important;
 }
 /* 未指定 bg class 的原生 input 也套（比預設 UA 白更柔）*/
-html[data-theme^="light-"] input[type="text"]:not([class*="bg-"]),
-html[data-theme^="light-"] input[type="search"]:not([class*="bg-"]),
-html[data-theme^="light-"] input[type="email"]:not([class*="bg-"]),
-html[data-theme^="light-"] input[type="password"]:not([class*="bg-"]),
-html[data-theme^="light-"] input[type="number"]:not([class*="bg-"]),
-html[data-theme^="light-"] textarea:not([class*="bg-"]),
-html[data-theme^="light-"] select:not([class*="bg-"]) {
+:is(html[data-theme^="light-"], [data-surface="light"]) input[type="text"]:not([class*="bg-"]),
+:is(html[data-theme^="light-"], [data-surface="light"]) input[type="search"]:not([class*="bg-"]),
+:is(html[data-theme^="light-"], [data-surface="light"]) input[type="email"]:not([class*="bg-"]),
+:is(html[data-theme^="light-"], [data-surface="light"]) input[type="password"]:not([class*="bg-"]),
+:is(html[data-theme^="light-"], [data-surface="light"]) input[type="number"]:not([class*="bg-"]),
+:is(html[data-theme^="light-"], [data-surface="light"]) textarea:not([class*="bg-"]),
+:is(html[data-theme^="light-"], [data-surface="light"]) select:not([class*="bg-"]) {
   background-color: var(--t-bg-input);
 }
 
 /* Divide / ring */
-html[data-theme^="light-"] .divide-slate-800 > *,
-html[data-theme^="light-"] .divide-slate-700 > * {
+:is(html[data-theme^="light-"], [data-surface="light"]) .divide-slate-800 > *,
+:is(html[data-theme^="light-"], [data-surface="light"]) .divide-slate-700 > * {
   border-color: var(--t-border) !important;
 }
-html[data-theme^="light-"] .ring-slate-700,
-html[data-theme^="light-"] .ring-slate-600 {
+:is(html[data-theme^="light-"], [data-surface="light"]) .ring-slate-700,
+:is(html[data-theme^="light-"], [data-surface="light"]) .ring-slate-600 {
   --tw-ring-color: var(--t-border) !important;
 }
 
 /* Gradient covers (training course card / login page 用到) */
-html[data-theme^="light-"] .bg-gradient-to-br.from-slate-900,
-html[data-theme^="light-"] .bg-gradient-to-b.from-slate-900,
-html[data-theme^="light-"] .bg-gradient-to-r.from-slate-900 {
+:is(html[data-theme^="light-"], [data-surface="light"]) .bg-gradient-to-br.from-slate-900,
+:is(html[data-theme^="light-"], [data-surface="light"]) .bg-gradient-to-b.from-slate-900,
+:is(html[data-theme^="light-"], [data-surface="light"]) .bg-gradient-to-r.from-slate-900 {
   background-image: var(--t-gradient-cover) !important;
 }
 
 /* Gray / neutral / zinc / stone 家族 — 部分元件混用這些 scale */
-html[data-theme^="light-"] .bg-gray-900,
-html[data-theme^="light-"] .bg-gray-800,
-html[data-theme^="light-"] .bg-neutral-900,
-html[data-theme^="light-"] .bg-neutral-800,
-html[data-theme^="light-"] .bg-zinc-900,
-html[data-theme^="light-"] .bg-zinc-800,
-html[data-theme^="light-"] .bg-stone-900,
-html[data-theme^="light-"] .bg-stone-800 {
+:is(html[data-theme^="light-"], [data-surface="light"]) .bg-gray-900,
+:is(html[data-theme^="light-"], [data-surface="light"]) .bg-gray-800,
+:is(html[data-theme^="light-"], [data-surface="light"]) .bg-neutral-900,
+:is(html[data-theme^="light-"], [data-surface="light"]) .bg-neutral-800,
+:is(html[data-theme^="light-"], [data-surface="light"]) .bg-zinc-900,
+:is(html[data-theme^="light-"], [data-surface="light"]) .bg-zinc-800,
+:is(html[data-theme^="light-"], [data-surface="light"]) .bg-stone-900,
+:is(html[data-theme^="light-"], [data-surface="light"]) .bg-stone-800 {
   background-color: var(--t-bg-card) !important;
 }
-html[data-theme^="light-"] .bg-gray-700,
-html[data-theme^="light-"] .bg-neutral-700,
-html[data-theme^="light-"] .bg-zinc-700,
-html[data-theme^="light-"] .bg-stone-700 {
+:is(html[data-theme^="light-"], [data-surface="light"]) .bg-gray-700,
+:is(html[data-theme^="light-"], [data-surface="light"]) .bg-neutral-700,
+:is(html[data-theme^="light-"], [data-surface="light"]) .bg-zinc-700,
+:is(html[data-theme^="light-"], [data-surface="light"]) .bg-stone-700 {
   background-color: var(--t-bg-inset) !important;
 }
-html[data-theme^="light-"] .text-gray-100,
-html[data-theme^="light-"] .text-gray-200,
-html[data-theme^="light-"] .text-neutral-100,
-html[data-theme^="light-"] .text-neutral-200,
-html[data-theme^="light-"] .text-zinc-100,
-html[data-theme^="light-"] .text-zinc-200 {
+:is(html[data-theme^="light-"], [data-surface="light"]) .text-gray-100,
+:is(html[data-theme^="light-"], [data-surface="light"]) .text-gray-200,
+:is(html[data-theme^="light-"], [data-surface="light"]) .text-neutral-100,
+:is(html[data-theme^="light-"], [data-surface="light"]) .text-neutral-200,
+:is(html[data-theme^="light-"], [data-surface="light"]) .text-zinc-100,
+:is(html[data-theme^="light-"], [data-surface="light"]) .text-zinc-200 {
   color: var(--t-text) !important;
 }
-html[data-theme^="light-"] .text-gray-300,
-html[data-theme^="light-"] .text-gray-400,
-html[data-theme^="light-"] .text-neutral-300,
-html[data-theme^="light-"] .text-neutral-400,
-html[data-theme^="light-"] .text-zinc-300,
-html[data-theme^="light-"] .text-zinc-400 {
+:is(html[data-theme^="light-"], [data-surface="light"]) .text-gray-300,
+:is(html[data-theme^="light-"], [data-surface="light"]) .text-gray-400,
+:is(html[data-theme^="light-"], [data-surface="light"]) .text-neutral-300,
+:is(html[data-theme^="light-"], [data-surface="light"]) .text-neutral-400,
+:is(html[data-theme^="light-"], [data-surface="light"]) .text-zinc-300,
+:is(html[data-theme^="light-"], [data-surface="light"]) .text-zinc-400 {
   color: var(--t-text-secondary) !important;
 }
-html[data-theme^="light-"] .text-gray-500,
-html[data-theme^="light-"] .text-gray-600,
-html[data-theme^="light-"] .text-neutral-500 {
+:is(html[data-theme^="light-"], [data-surface="light"]) .text-gray-500,
+:is(html[data-theme^="light-"], [data-surface="light"]) .text-gray-600,
+:is(html[data-theme^="light-"], [data-surface="light"]) .text-neutral-500 {
   color: var(--t-text-dim) !important;
 }
-html[data-theme^="light-"] .border-gray-700,
-html[data-theme^="light-"] .border-gray-800,
-html[data-theme^="light-"] .border-neutral-700,
-html[data-theme^="light-"] .border-zinc-700 {
+:is(html[data-theme^="light-"], [data-surface="light"]) .border-gray-700,
+:is(html[data-theme^="light-"], [data-surface="light"]) .border-gray-800,
+:is(html[data-theme^="light-"], [data-surface="light"]) .border-neutral-700,
+:is(html[data-theme^="light-"], [data-surface="light"]) .border-zinc-700 {
   border-color: var(--t-border) !important;
 }
 
 /* Shadow — 深主題用深陰影，淺主題用較淡陰影 */
-html[data-theme^="light-"] .shadow-2xl,
-html[data-theme^="light-"] .shadow-xl {
+:is(html[data-theme^="light-"], [data-surface="light"]) .shadow-2xl,
+:is(html[data-theme^="light-"], [data-surface="light"]) .shadow-xl {
   box-shadow: 0 10px 25px rgba(15, 23, 42, 0.12), 0 4px 10px rgba(15, 23, 42, 0.05) !important;
 }
 
