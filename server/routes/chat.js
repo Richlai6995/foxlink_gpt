@@ -14,6 +14,45 @@ const mcpClient = require('../services/mcpClient');
 const { classifyUpload, canonicalMimeForKind, TEXT_HARD_CAP_BYTES } = require('../utils/uploadFileTypes');
 
 /**
+ * ERP Answer 模式:用 Flash LLM 快速從使用者訊息中抽取參數值。
+ * 只抽需要使用者輸入的 required 參數,回傳 { PARAM_NAME: value }。
+ */
+async function extractErpParamsWithFlash(db, userMessage, params) {
+  const { createClient } = require('../services/llmService');
+  const client = await createClient(db, 'flash');
+
+  const paramDesc = params.map(p => {
+    const hint = p.ai_hint || p.name;
+    const type = p.data_type || 'VARCHAR2';
+    return `- ${p.name} (${type}): ${hint}`;
+  }).join('\n');
+
+  const prompt = `從以下使用者訊息中提取參數值。只回傳 JSON 物件,不要多餘文字。
+如果訊息中找不到某個參數的值,該欄位設為 null。
+
+需要提取的參數:
+${paramDesc}
+
+使用者訊息:
+${userMessage}
+
+回傳格式範例: {"PARAM1": "value1", "PARAM2": 123}
+只回傳 JSON:`;
+
+  const raw = (await client.generate([{ role: 'user', parts: [{ text: prompt }] }]))
+    .trim()
+    .replace(/^```json\s*|^```\s*|```\s*$/gm, '')
+    .trim();
+
+  try {
+    return JSON.parse(raw);
+  } catch (e) {
+    console.warn(`[ErpAnswer] Flash returned non-JSON: ${raw.slice(0, 200)}`);
+    return {};
+  }
+}
+
+/**
  * ERP answer 模式:拆解 executor 回傳 JSON 為使用者可讀 Markdown。
  * 不直接丟 JSON,而是拆出 function_return、每個 OUT param 的 cursor/scalar。
  */
@@ -1707,10 +1746,10 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
           try { injectConfig = JSON.parse(injectConfigRaw || '{}') || {}; } catch (_) {}
 
           if (erpMode === 'answer') {
-            // ── Answer 模式:先檢查有沒有需要使用者輸入的 required 參數 ──
+            // ── Answer 模式:檢查是否有需要使用者輸入的 required 參數 ──
             const toolParamsRaw = toolRow.params_json || toolRow.PARAMS_JSON || '[]';
             const toolParams = JSON.parse(toolParamsRaw);
-            const needsUserInput = toolParams.some(tp => {
+            const userInputParams = toolParams.filter(tp => {
               const io = (tp.in_out || 'IN').toUpperCase();
               if (io === 'OUT') return false;
               if (tp.visible === false || tp.editable === false) return false;
@@ -1720,20 +1759,38 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
               if (tp.default_value != null) return false;
               return tp.required;
             });
-            if (needsUserInput) {
-              // 有使用者輸入參數 → 降級為 tool 模式(LLM function calling)
-              console.log(`[ErpAnswer] "${sk.name}" has user-input params, fallback to tool mode`);
+
+            let extractedArgs = {};
+            if (userInputParams.length > 0) {
+              // ── 用 Flash 從使用者訊息中快速抽取參數 ──
+              sendEvent({ type: 'status', message: `解析參數中…` });
               try {
-                const schema = JSON.parse(sk.tool_schema);
-                const fallbackName = schema.name || `erp_tool_${erpToolId}`;
-                codeSkillToolMap[fallbackName] = sk;
-              } catch (_) {}
-              continue;
+                extractedArgs = await extractErpParamsWithFlash(db, combinedUserText, userInputParams);
+                console.log(`[ErpAnswer] Flash extracted: ${JSON.stringify(extractedArgs)}`);
+              } catch (exErr) {
+                console.warn(`[ErpAnswer] Flash extraction failed: ${exErr.message}, fallback to tool mode`);
+              }
+              // 檢查是否全部 required 都抽到
+              const missing = userInputParams.filter(tp => {
+                const val = extractedArgs[tp.name];
+                return val === null || val === undefined || val === '';
+              });
+              if (missing.length > 0) {
+                // 抽取不完整 → 降級為 tool 模式
+                console.log(`[ErpAnswer] Missing params after extraction: ${missing.map(p => p.name).join(',')}, fallback to tool mode`);
+                try {
+                  const schema = JSON.parse(sk.tool_schema);
+                  const fallbackName = schema.name || `erp_tool_${erpToolId}`;
+                  codeSkillToolMap[fallbackName] = sk;
+                } catch (_) {}
+                continue;
+              }
             }
-            // ── 所有參數可自動帶入 → 直接執行 → 格式化直達使用者 ──
+
+            // ── 直接執行(全自動帶入 + Flash 抽取) → 格式化直達使用者 ──
             sendEvent({ type: 'status', message: `查詢 ERP：${sk.name}` });
             const erpExec = require('../services/erpToolExecutor');
-            const ansResult = await erpExec.execute(db, erpToolId, {}, req.user, {
+            const ansResult = await erpExec.execute(db, erpToolId, extractedArgs, req.user, {
               trigger_source: 'answer',
               session_id: sessionId,
             });
