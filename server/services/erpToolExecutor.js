@@ -51,10 +51,68 @@ function resolveParamInput(param, userInputs, userCtx) {
   if (userInputs && Object.prototype.hasOwnProperty.call(userInputs, param.name)) {
     return userInputs[param.name];
   }
+  // default_config 動態 preset 優先;否則 fallback 到舊 default_value
+  const resolved = resolveDefaultConfig(param, userCtx);
+  if (resolved !== null && resolved !== undefined) return resolved;
   if (param.default_value !== null && param.default_value !== undefined) {
     return param.default_value;
   }
   return null;
+}
+
+// ── 動態預設值解析 ─────────────────────────────────────────────────────────
+function resolveDefaultConfig(param, userCtx) {
+  const cfg = param.default_config;
+  if (!cfg || cfg.mode === 'none') return null;
+  if (cfg.mode === 'fixed') return cfg.fixed_value ?? null;
+  if (cfg.mode === 'preset') return resolvePreset(cfg.preset, userCtx);
+  return null;
+}
+
+function resolvePreset(preset, userCtx) {
+  const now = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Taipei' }));
+  const pad = (n) => String(n).padStart(2, '0');
+  const dateStr = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  const timeStr = (d) => `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+
+  switch (preset) {
+    // 日期
+    case 'today':            return dateStr(now);
+    case 'yesterday': {
+      const d = new Date(now); d.setDate(d.getDate() - 1); return dateStr(d);
+    }
+    case 'tomorrow': {
+      const d = new Date(now); d.setDate(d.getDate() + 1); return dateStr(d);
+    }
+    case 'this_week_start': {
+      const d = new Date(now); const day = d.getDay() || 7;
+      d.setDate(d.getDate() - day + 1); return dateStr(d);
+    }
+    case 'this_month_start': {
+      return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-01`;
+    }
+    case 'last_month_start': {
+      const d = new Date(now); d.setMonth(d.getMonth() - 1);
+      return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-01`;
+    }
+    case 'this_year_start':  return `${now.getFullYear()}-01-01`;
+    case 'last_year_start':  return `${now.getFullYear() - 1}-01-01`;
+    // 時間
+    case 'now':              return `${dateStr(now)} ${timeStr(now)}`;
+    // 數字
+    case 'current_year':     return now.getFullYear();
+    case 'current_month':    return now.getMonth() + 1;
+    case 'current_day':      return now.getDate();
+    // 系統值
+    case 'system_user_id':          return userCtx?.id ?? null;
+    case 'system_user_employee_id': return userCtx?.employee_id ?? null;
+    case 'system_user_name':        return userCtx?.name ?? null;
+    case 'system_user_email':       return userCtx?.email ?? null;
+    case 'system_user_dept':        return userCtx?.dept_code ?? null;
+    case 'system_user_factory':     return userCtx?.factory_code ?? null;
+    case 'system_user_profit_center': return userCtx?.profit_center ?? null;
+    default: return null;
+  }
 }
 
 // ── WRITE 型確認 token ────────────────────────────────────────────────────────

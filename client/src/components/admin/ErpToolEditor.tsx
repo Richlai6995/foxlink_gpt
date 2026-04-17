@@ -561,6 +561,87 @@ export default function ErpToolEditor({ tool, allowedSchemas, onClose, onSaved }
   )
 }
 
+const DATE_PRESETS = [
+  { v: 'today',            l: '今天' },
+  { v: 'yesterday',        l: '昨天' },
+  { v: 'tomorrow',         l: '明天' },
+  { v: 'this_week_start',  l: '本週一' },
+  { v: 'this_month_start', l: '本月 1 日' },
+  { v: 'last_month_start', l: '上月 1 日' },
+  { v: 'this_year_start',  l: '今年 1 月 1 日' },
+  { v: 'last_year_start',  l: '去年 1 月 1 日' },
+  { v: 'now',              l: '當下日期時間' },
+]
+
+const NUMBER_PRESETS = [
+  { v: 'current_year',  l: '今年（如 2026）' },
+  { v: 'current_month', l: '當月（如 4）' },
+  { v: 'current_day',   l: '當日（如 17）' },
+]
+
+const USER_PRESETS = [
+  { v: 'system_user_id',            l: '當前使用者 ID' },
+  { v: 'system_user_employee_id',   l: '當前使用者工號' },
+  { v: 'system_user_name',          l: '當前使用者姓名' },
+  { v: 'system_user_email',         l: '當前使用者 Email' },
+  { v: 'system_user_dept',          l: '當前使用者部門' },
+  { v: 'system_user_factory',       l: '當前使用者廠區' },
+  { v: 'system_user_profit_center', l: '當前使用者利潤中心' },
+]
+
+function getPresetsForType(dataType: string) {
+  const t = (dataType || '').toUpperCase()
+  if (t === 'DATE' || t.startsWith('TIMESTAMP')) return [...DATE_PRESETS, ...USER_PRESETS]
+  if (t === 'NUMBER' || t === 'INTEGER' || t === 'FLOAT' || t === 'PLS_INTEGER') return [...NUMBER_PRESETS, ...USER_PRESETS]
+  return USER_PRESETS
+}
+
+function DefaultValueEditor({ param, onChange }: { param: ErpParam; onChange: (p: Partial<ErpParam>) => void }) {
+  const cfg = (param as any).default_config || { mode: param.default_value ? 'fixed' : 'none' }
+  const mode = cfg.mode || 'none'
+  const presets = getPresetsForType(param.data_type)
+
+  const setConfig = (patch: any) => {
+    const next = { ...cfg, ...patch }
+    onChange({ default_config: next } as any)
+  }
+
+  return (
+    <div className="mt-0.5 space-y-1">
+      <select value={mode}
+        onChange={e => {
+          const m = e.target.value
+          if (m === 'none') { onChange({ default_config: { mode: 'none' }, default_value: null } as any) }
+          else if (m === 'fixed') { setConfig({ mode: 'fixed', fixed_value: param.default_value || '' }) }
+          else if (m === 'preset') { setConfig({ mode: 'preset', preset: presets[0]?.v || 'today' }) }
+        }}
+        className="w-full border border-slate-300 rounded px-2 py-1 text-xs">
+        <option value="none">無預設值</option>
+        <option value="fixed">固定值</option>
+        <option value="preset">動態預設</option>
+      </select>
+
+      {mode === 'fixed' && (
+        <input value={cfg.fixed_value ?? param.default_value ?? ''}
+          onChange={e => {
+            setConfig({ fixed_value: e.target.value })
+            onChange({ default_value: e.target.value || null })
+          }}
+          className="w-full border border-slate-300 rounded px-2 py-1 text-xs"
+          placeholder="輸入固定預設值" />
+      )}
+
+      {mode === 'preset' && (
+        <select value={cfg.preset || ''}
+          onChange={e => setConfig({ preset: e.target.value })}
+          className="w-full border border-slate-300 rounded px-2 py-1 text-xs">
+          {presets.map(p => <option key={p.v} value={p.v}>{p.l}</option>)}
+        </select>
+      )}
+    </div>
+  )
+}
+
 function ParamDetailEditor({
   param, onChange, onLovChange,
 }: {
@@ -582,9 +663,7 @@ function ParamDetailEditor({
         </div>
         <div>
           <label className="text-xs text-slate-500">預設值</label>
-          <input value={param.default_value ?? ''}
-            onChange={e => onChange({ default_value: e.target.value || null })}
-            className="w-full border border-slate-300 rounded px-2 py-1 text-xs mt-0.5" />
+          <DefaultValueEditor param={param} onChange={onChange} />
         </div>
       </div>
 

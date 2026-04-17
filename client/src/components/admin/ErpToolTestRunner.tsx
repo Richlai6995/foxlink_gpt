@@ -3,6 +3,27 @@ import { X, Play, AlertTriangle, ShieldAlert, CheckCircle, Clock, RotateCcw } fr
 import api from '../../lib/api'
 import type { ErpTool } from './ErpToolsPanel'
 
+function resolvePresetClient(preset: string): string {
+  const now = new Date()
+  const pad = (n: number) => String(n).padStart(2, '0')
+  const ds = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+  switch (preset) {
+    case 'today': return ds(now)
+    case 'yesterday': { const d = new Date(now); d.setDate(d.getDate() - 1); return ds(d) }
+    case 'tomorrow': { const d = new Date(now); d.setDate(d.getDate() + 1); return ds(d) }
+    case 'this_week_start': { const d = new Date(now); const day = d.getDay() || 7; d.setDate(d.getDate() - day + 1); return ds(d) }
+    case 'this_month_start': return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-01`
+    case 'last_month_start': { const d = new Date(now); d.setMonth(d.getMonth() - 1); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-01` }
+    case 'this_year_start': return `${now.getFullYear()}-01-01`
+    case 'last_year_start': return `${now.getFullYear() - 1}-01-01`
+    case 'now': return `${ds(now)} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`
+    case 'current_year': return String(now.getFullYear())
+    case 'current_month': return String(now.getMonth() + 1)
+    case 'current_day': return String(now.getDate())
+    default: return ''
+  }
+}
+
 interface Props {
   tool: ErpTool
   onClose: () => void
@@ -18,11 +39,18 @@ export default function ErpToolTestRunner({ tool, onClose }: Props) {
   const [pendingSummary, setPendingSummary] = useState<string | null>(null)
   const [viewMode, setViewMode] = useState<'table' | 'json'>('table')
 
-  // 預設值
+  // 預設值（固定值 + 動態 preset 前端解析）
   useEffect(() => {
     const init: Record<string, any> = {}
     for (const p of tool.params) {
-      if (p.default_value != null) init[p.name] = p.default_value
+      const cfg = (p as any).default_config
+      if (cfg?.mode === 'preset') {
+        init[p.name] = resolvePresetClient(cfg.preset)
+      } else if (cfg?.mode === 'fixed' && cfg.fixed_value != null) {
+        init[p.name] = cfg.fixed_value
+      } else if (p.default_value != null) {
+        init[p.name] = p.default_value
+      }
     }
     setInputs(init)
   }, [tool])
