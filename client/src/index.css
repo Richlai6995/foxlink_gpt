@@ -257,10 +257,16 @@ html[data-theme] ::-webkit-scrollbar-thumb {
   background: var(--t-scrollbar);
 }
 
-/* 確保全局頁面底跟著主題（某些頁面沒包 bg 類，讓 body 掛著主題底）*/
+/* 確保全局頁面底跟著主題
+   ⚠️ 只設 background，不動 color — dark 模式很多頁面中間是白底（ChatPage、Admin 等），
+   body color 設白色會讓白底上文字消失。
+   只有 dark-dimmed 全頁面深色才需要 body 設亮字。 */
 html[data-theme] body,
 html[data-theme] #root {
   background-color: var(--t-bg);
+}
+html[data-theme="dark-dimmed"] body,
+html[data-theme="dark-dimmed"] #root {
   color: var(--t-text);
 }
 
