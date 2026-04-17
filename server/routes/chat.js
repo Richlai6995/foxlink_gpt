@@ -13,6 +13,60 @@ const { budgetGuard } = require('../middleware/budgetGuard');
 const mcpClient = require('../services/mcpClient');
 const { classifyUpload, canonicalMimeForKind, TEXT_HARD_CAP_BYTES } = require('../utils/uploadFileTypes');
 
+/**
+ * ERP answer 模式:拆解 executor 回傳 JSON 為使用者可讀 Markdown。
+ * 不直接丟 JSON,而是拆出 function_return、每個 OUT param 的 cursor/scalar。
+ */
+function formatErpResultForUser(toolName, result, cacheKey) {
+  if (!result) return `**${toolName}**\n\n(無資料)`;
+  const lines = [`**${toolName}** 查詢結果\n`];
+
+  if (result.function_return !== undefined && result.function_return !== null) {
+    lines.push(`**回傳值：** \`${result.function_return}\`\n`);
+  }
+
+  if (result.params) {
+    for (const [name, v] of Object.entries(result.params)) {
+      if (v && typeof v === 'object' && Array.isArray(v.rows)) {
+        const rows = v.rows;
+        if (rows.length === 0) {
+          lines.push(`**${name}：** (空)\n`);
+          continue;
+        }
+        const cols = Object.keys(rows[0]);
+        const header = '| ' + cols.join(' | ') + ' |';
+        const sep = '| ' + cols.map(() => '---').join(' | ') + ' |';
+        const body = rows.slice(0, 100).map(r =>
+          '| ' + cols.map(c => {
+            const val = r[c];
+            if (val === null || val === undefined) return '-';
+            const s = String(val);
+            return s.length > 60 ? s.slice(0, 57) + '...' : s;
+          }).join(' | ') + ' |'
+        ).join('\n');
+        lines.push(`**${name}** (${v.total_fetched || rows.length} 列${v.truncated ? '，已截斷' : ''})：\n`);
+        lines.push(header);
+        lines.push(sep);
+        lines.push(body);
+        if (rows.length > 100) lines.push(`\n_...僅顯示前 100 列_`);
+        lines.push('');
+      } else if (v === null || v === undefined) {
+        lines.push(`**${name}：** -\n`);
+      } else if (typeof v === 'string' && v.length > 500) {
+        lines.push(`**${name}：**\n\`\`\`\n${v.slice(0, 500)}...\n\`\`\`\n`);
+      } else {
+        lines.push(`**${name}：** \`${v}\`\n`);
+      }
+    }
+  }
+
+  if (cacheKey) {
+    lines.push(`\n_完整結果 cache: \`${cacheKey}\`（30 分鐘內有效）_`);
+  }
+
+  return lines.join('\n');
+}
+
 // ── Pending TTS map: sessionId → { aiResponse, skill, timestamp } ────────────
 // When a post_answer TTS skill returns { pending:true } (no voice pref given),
 // we store the AI response here and wait for the user's next message with voice keywords.
@@ -1637,19 +1691,43 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
           skillSystemPrompts.push(`# Workflow Error: ${sk.name}\n工作流執行失敗: ${e.message}`);
         }
       } else if (sk.type === 'erp_proc' && (sk.erp_tool_id || sk.ERP_TOOL_ID)) {
-        // ── ERP Inject:每輪對話前自動執行,結果塞 system prompt ───────────────
+        // ── ERP Inject / Answer:依 endpoint_mode 處理 ───────────────
         const erpToolId = sk.erp_tool_id || sk.ERP_TOOL_ID;
+        const erpMode = (sk.endpoint_mode || sk.ENDPOINT_MODE || 'tool').toLowerCase();
+        if (erpMode !== 'inject' && erpMode !== 'answer') continue;
+
         try {
           const toolRow = await db.prepare(
-            `SELECT name, allow_inject, inject_config_json FROM erp_tools WHERE id=? AND enabled=1`
+            `SELECT name, endpoint_mode, inject_config_json FROM erp_tools WHERE id=? AND enabled=1`
           ).get(erpToolId);
-          const allowInject = Number(toolRow?.allow_inject ?? toolRow?.ALLOW_INJECT ?? 0);
-          if (!toolRow || !allowInject) continue;
+          if (!toolRow) continue;
 
           const injectConfigRaw = toolRow.inject_config_json || toolRow.INJECT_CONFIG_JSON;
           let injectConfig = {};
           try { injectConfig = JSON.parse(injectConfigRaw || '{}') || {}; } catch (_) {}
 
+          if (erpMode === 'answer') {
+            // ── Answer 模式:直接執行 → 格式化結果 → 直達使用者(跳過 LLM) ──
+            sendEvent({ type: 'status', message: `查詢 ERP：${sk.name}` });
+            const erpExec = require('../services/erpToolExecutor');
+            const ansResult = await erpExec.execute(db, erpToolId, {}, req.user, {
+              trigger_source: 'answer',
+              session_id: sessionId,
+            });
+            const formatted = formatErpResultForUser(sk.name, ansResult?.result ?? ansResult, ansResult?.cache_key);
+            sendEvent({ type: 'chunk', content: formatted });
+            sendEvent({ type: 'done' });
+            // 存 AI 訊息
+            try {
+              await db.prepare(
+                `INSERT INTO chat_messages (session_id, role, content) VALUES (?, 'assistant', ?)`
+              ).run(sessionId, formatted);
+            } catch (_) {}
+            res.end();
+            return;
+          }
+
+          // ── Inject 模式 ──
           const erpExec = require('../services/erpToolExecutor');
           const injectResult = await erpExec.execute(db, erpToolId, {}, req.user, {
             trigger_source: 'inject',
@@ -1658,7 +1736,6 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
           const label = toolRow.name || toolRow.NAME || sk.name;
           const payload = injectResult?.result ?? injectResult;
 
-          // result_template 優先;否則 JSON dump
           let rendered;
           if (injectConfig.result_template && typeof injectConfig.result_template === 'string') {
             rendered = injectConfig.result_template.replace(/\{\{(\w+(?:\.\w+)*)\}\}/g, (_, path) => {
@@ -1674,7 +1751,10 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
           console.log(`[ErpInject] Injected "${label}" id=${erpToolId} rows=${injectResult?.rows_returned ?? 0}`);
         } catch (e) {
           console.warn(`[ErpInject] "${sk.name}" failed: ${e.message}`);
-          // Inject 失敗不 block 對話,僅塞降級訊息
+          if (erpMode === 'answer') {
+            sendEvent({ type: 'chunk', content: `⚠️ ERP 工具「${sk.name}」執行失敗：${e.message}` });
+            sendEvent({ type: 'done' }); res.end(); return;
+          }
           skillSystemPrompts.push(`# ERP 即時資訊:${sk.name}\n[此工具暫時無法取得即時資料]`);
         }
       }
@@ -1697,8 +1777,9 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
         }
       } else if (sk.type === 'erp_proc' && sk.tool_schema && (sk.erp_tool_id || sk.ERP_TOOL_ID)) {
         const erpId = Number(sk.erp_tool_id || sk.ERP_TOOL_ID);
-        // explicit mode:只允許 topbar 白名單內的 ERP tool
-        // auto mode(使用者沒動 topbar):透過 TAG router / session_skills 進到 allSkillsToProcess 即 OK
+        const erpMode = (sk.endpoint_mode || sk.ENDPOINT_MODE || 'tool').toLowerCase();
+        // 只有 tool 模式才註冊為 Gemini function;inject/answer 已在上面的 skill 迴圈處理
+        if (erpMode !== 'tool') continue;
         if (explicitMode) {
           if (!Array.isArray(userErpToolIds) || !userErpToolIds.map(Number).includes(erpId)) continue;
         }

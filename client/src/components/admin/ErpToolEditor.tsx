@@ -57,9 +57,8 @@ export default function ErpToolEditor({ tool, allowedSchemas, onClose, onSaved }
     description: tool?.description || '',
     tags: (tool?.tags || []).join(', '),
     access_mode: (tool?.access_mode || 'READ_ONLY') as 'READ_ONLY' | 'WRITE',
-    allow_llm_auto: tool ? !!tool.allow_llm_auto : true,
+    endpoint_mode: (tool as any)?.endpoint_mode || 'tool',
     allow_manual: tool ? !!tool.allow_manual : true,
-    allow_inject: tool ? !!tool.allow_inject : false,
     requires_approval: tool ? !!tool.requires_approval : false,
     max_rows_llm: tool?.max_rows_llm || 50,
     max_rows_ui: tool?.max_rows_ui || 1000,
@@ -146,9 +145,10 @@ export default function ErpToolEditor({ tool, allowedSchemas, onClose, onSaved }
         metadata_hash: metadataHash,
         metadata_snapshot: inspectResult ? { owner: inspectResult.owner, package: inspectResult.package_name, name: inspectResult.object_name, overload: selectedOverload } : null,
         access_mode: form.access_mode,
-        allow_llm_auto: form.allow_llm_auto,
+        endpoint_mode: form.endpoint_mode,
+        allow_llm_auto: form.endpoint_mode === 'tool',
         allow_manual: form.allow_manual,
-        allow_inject: form.allow_inject,
+        allow_inject: form.endpoint_mode === 'inject',
         requires_approval: form.requires_approval,
         params,
         returns,
@@ -340,32 +340,51 @@ export default function ErpToolEditor({ tool, allowedSchemas, onClose, onSaved }
                     onChange={e => setForm({ ...form, enabled: e.target.checked })} /> 啟用
                 </label>
               </div>
+              <div className="col-span-2">
+                <div className="text-xs text-slate-500 mb-1">回應模式</div>
+                <div className="grid grid-cols-3 gap-2">
+                  {[
+                    { v: 'tool', l: '工具（Tool）', d: 'LLM 透過 function calling 自主決定呼叫' },
+                    { v: 'inject', l: '注入（Inject）', d: '每輪對話前自動跑，結果塞 system prompt' },
+                    { v: 'answer', l: '直達（Answer）', d: 'TAG 匹配後直接執行，結果直達使用者' },
+                  ].map(m => (
+                    <label key={m.v} className={`border rounded-lg p-2 cursor-pointer transition ${form.endpoint_mode === m.v ? 'border-sky-400 bg-sky-50' : 'border-slate-200 hover:border-slate-300'}`}>
+                      <div className="flex items-center gap-1.5">
+                        <input type="radio" name="endpoint_mode" checked={form.endpoint_mode === m.v}
+                          onChange={() => setForm({ ...form, endpoint_mode: m.v })} />
+                        <span className="text-xs font-medium">{m.l}</span>
+                      </div>
+                      <div className="text-[10px] text-slate-500 mt-0.5 ml-5">{m.d}</div>
+                    </label>
+                  ))}
+                </div>
+              </div>
               <div className="col-span-2 grid grid-cols-2 gap-2">
                 <label className="flex items-center gap-1.5 text-xs text-slate-600">
                   <input type="checkbox" checked={form.allow_manual}
                     onChange={e => setForm({ ...form, allow_manual: e.target.checked })} />
-                  允許使用者手動觸發(對話 UI 中)
-                </label>
-                <label className="flex items-center gap-1.5 text-xs text-slate-600">
-                  <input type="checkbox" checked={form.allow_llm_auto}
-                    onChange={e => setForm({ ...form, allow_llm_auto: e.target.checked })} />
-                  允許 LLM 自動呼叫(function calling)
-                </label>
-                <label className="flex items-center gap-1.5 text-xs text-slate-600">
-                  <input type="checkbox" checked={form.allow_inject}
-                    onChange={e => setForm({ ...form, allow_inject: e.target.checked })} />
-                  允許 Inject(每輪對話前自動跑)
+                  允許使用者手動觸發（🛢 按鈕，與回應模式獨立）
                 </label>
                 <label className="flex items-center gap-1.5 text-xs text-slate-600">
                   <input type="checkbox" checked={form.requires_approval}
                     onChange={e => setForm({ ...form, requires_approval: e.target.checked })} />
-                  需 admin 審批(WRITE 建議開啟)
+                  需 admin 審批（WRITE 建議開啟）
                 </label>
               </div>
-              {form.access_mode === 'WRITE' && form.allow_llm_auto && (
+              {form.access_mode === 'WRITE' && form.endpoint_mode === 'tool' && (
                 <div className="col-span-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded p-2">
                   <AlertTriangle size={12} className="inline mr-1" />
-                  WRITE 型開啟 LLM 自動呼叫:LLM 觸發時仍會要求使用者手動確認才實際執行
+                  WRITE 型工具模式：LLM 觸發時仍會要求使用者手動確認才實際執行
+                </div>
+              )}
+              {form.endpoint_mode === 'inject' && (
+                <div className="col-span-2 text-xs text-blue-700 bg-blue-50 border border-blue-200 rounded p-2">
+                  注入模式：所有 IN 參數必須設「固定值」或「系統值」，不能需要使用者輸入
+                </div>
+              )}
+              {form.endpoint_mode === 'answer' && (
+                <div className="col-span-2 text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded p-2">
+                  直達模式：TAG 匹配後自動執行，結果格式化為 Markdown 表格直接顯示，不經 LLM 生成
                 </div>
               )}
             </div>

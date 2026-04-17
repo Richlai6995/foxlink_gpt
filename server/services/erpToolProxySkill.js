@@ -33,7 +33,7 @@ async function createProxySkill(db, erpTool, createdBy) {
     INSERT INTO skills
       (name, description, icon, type, tool_schema, tags,
        is_public, is_admin_approved, owner_user_id, erp_tool_id, endpoint_mode)
-    VALUES (?, ?, ?, 'erp_proc', ?, ?, 1, 1, ?, ?, 'tool')
+    VALUES (?, ?, ?, 'erp_proc', ?, ?, 1, 1, ?, ?, ?)
   `).run(
     erpTool.name,
     erpTool.description || null,
@@ -41,7 +41,8 @@ async function createProxySkill(db, erpTool, createdBy) {
     toolSchema,
     tags,
     createdBy || null,
-    erpTool.id
+    erpTool.id,
+    erpTool.endpoint_mode || 'tool'
   );
   const skillId = ins.lastInsertRowid;
   await db.prepare(`UPDATE erp_tools SET proxy_skill_id = ? WHERE id = ?`).run(skillId, erpTool.id);
@@ -70,10 +71,11 @@ async function updateProxySkill(db, erpTool) {
   await db.prepare(`
     UPDATE skills
     SET name = ?, description = ?, tool_schema = ?, tags = ?, icon = ?,
-        type = 'erp_proc', endpoint_mode = 'tool', is_public = 1, is_admin_approved = 1
+        type = 'erp_proc', endpoint_mode = ?, is_admin_approved = 1
     WHERE id = ?
   `).run(
     erpTool.name, erpTool.description || null, toolSchema, tags, ICON,
+    erpTool.endpoint_mode || 'tool',
     proxySkillId
   );
   return proxySkillId;

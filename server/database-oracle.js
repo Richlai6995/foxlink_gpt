@@ -2510,6 +2510,7 @@ async function runMigrations(db) {
   await safeAddColumn('erp_tools', 'rate_limit_global',   'NUMBER');
   await safeAddColumn('erp_tools', 'rate_limit_window',   "VARCHAR2(20) DEFAULT 'minute'");
   await safeAddColumn('erp_tools', 'allow_dry_run',       'NUMBER(1) DEFAULT 1');
+  await safeAddColumn('erp_tools', 'endpoint_mode',       "VARCHAR2(20) DEFAULT 'tool'");
 
   // Backfill:為舊 ERP tool 補建代理 skill row
   try {

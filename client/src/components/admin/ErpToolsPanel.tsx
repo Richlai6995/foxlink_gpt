@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react'
-import { Plus, Trash2, Edit2, Database, AlertTriangle, Play, ShieldAlert, Zap, Eye, History } from 'lucide-react'
+import { Plus, Trash2, Edit2, Database, AlertTriangle, Play, ShieldAlert, Zap, Eye, History, Share2, Globe, ToggleLeft, ToggleRight } from 'lucide-react'
 import api from '../../lib/api'
 import { fmtTW } from '../../lib/fmtTW'
 import ErpToolEditor from './ErpToolEditor'
 import ErpToolTestRunner from './ErpToolTestRunner'
 import ErpToolAuditLogPanel from './ErpToolAuditLogPanel'
+import ShareModal from '../dashboard/ShareModal'
 
 export interface ErpTool {
   id: number
@@ -34,6 +35,7 @@ export interface ErpTool {
   timeout_sec: number
   proxy_skill_id: number | null
   enabled: number
+  is_public?: number
   created_at: string
   updated_at: string
 }
@@ -69,6 +71,7 @@ export default function ErpToolsPanel() {
   const [creating, setCreating] = useState(false)
   const [testing, setTesting] = useState<ErpTool | null>(null)
   const [auditToolId, setAuditToolId] = useState<number | 'all' | null>(null)
+  const [sharing, setSharing] = useState<ErpTool | null>(null)
   const [config, setConfig] = useState<{ erp_configured: boolean; allowed_schemas: string[] } | null>(null)
 
   const load = async () => {
@@ -96,6 +99,15 @@ export default function ErpToolsPanel() {
       await load()
     } catch (e: any) {
       alert(e.response?.data?.error || '刪除失敗')
+    }
+  }
+
+  const toggle = async (t: ErpTool, field: 'enabled' | 'is_public', value: boolean) => {
+    try {
+      await api.put(`/erp-tools/${t.id}/toggle`, { field, value })
+      await load()
+    } catch (e: any) {
+      alert(e.response?.data?.error || '操作失敗')
     }
   }
 
@@ -183,6 +195,11 @@ export default function ErpToolsPanel() {
                         <AlertTriangle size={10} /> metadata 已變動
                       </span>
                     ) : null}
+                    {t.is_public ? (
+                      <span className="px-1.5 py-0.5 text-[10px] rounded bg-green-50 text-green-700 flex items-center gap-1">
+                        <Globe size={10} /> 公開
+                      </span>
+                    ) : null}
                     {t.allow_llm_auto ? (
                       <span className="px-1.5 py-0.5 text-[10px] rounded bg-purple-50 text-purple-700 flex items-center gap-1">
                         <Zap size={10} /> LLM
@@ -204,7 +221,7 @@ export default function ErpToolsPanel() {
                     {t.metadata_checked_at && <> · metadata 檢查 {fmtTW(t.metadata_checked_at)}</>}
                   </div>
                 </div>
-                <div className="flex gap-1 flex-shrink-0">
+                <div className="flex gap-1 flex-shrink-0 items-center">
                   <button onClick={() => setTesting(t)} className="p-1.5 text-slate-400 hover:text-sky-600 hover:bg-sky-50 rounded" title="試跑">
                     <Play size={14} />
                   </button>
@@ -213,6 +230,19 @@ export default function ErpToolsPanel() {
                   </button>
                   <button onClick={() => setEditing(t)} className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-50 rounded" title="編輯">
                     <Edit2 size={14} />
+                  </button>
+                  <button onClick={() => setSharing(t)} className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded" title="分享設定">
+                    <Share2 size={14} />
+                  </button>
+                  <button onClick={() => toggle(t, 'is_public', !t.is_public)}
+                    className={`p-1.5 rounded ${t.is_public ? 'text-green-600 hover:bg-green-50' : 'text-slate-400 hover:bg-slate-50'}`}
+                    title={t.is_public ? '公開(點擊取消)' : '非公開(點擊公開)'}>
+                    <Globe size={14} />
+                  </button>
+                  <button onClick={() => toggle(t, 'enabled', !t.enabled)}
+                    className="p-1.5 text-slate-400 hover:bg-slate-50 rounded"
+                    title={t.enabled ? '停用' : '啟用'}>
+                    {t.enabled ? <ToggleRight size={16} className="text-green-600" /> : <ToggleLeft size={16} className="text-slate-400" />}
                   </button>
                   <button onClick={() => remove(t)} className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded" title="刪除">
                     <Trash2 size={14} />
@@ -245,6 +275,14 @@ export default function ErpToolsPanel() {
           tools={tools}
           initialToolId={auditToolId === 'all' ? undefined : auditToolId}
           onClose={() => setAuditToolId(null)}
+        />
+      )}
+
+      {sharing && (
+        <ShareModal
+          title={`ERP 工具 — ${sharing.name}`}
+          sharesUrl={`/erp-tools/${sharing.id}/access`}
+          onClose={() => setSharing(null)}
         />
       )}
     </div>

@@ -70,6 +70,7 @@ function serializeTool(row, lang) {
     rate_limit_global:   get('rate_limit_global')   ?? null,
     rate_limit_window:   get('rate_limit_window')   || 'minute',
     allow_dry_run:       Number(get('allow_dry_run') ?? 1),
+    endpoint_mode:       get('endpoint_mode') || 'tool',
     proxy_skill_id: get('proxy_skill_id'),
     enabled: Number(get('enabled') ?? 1),
     created_at: get('created_at'),
@@ -122,8 +123,17 @@ router.get('/', async (req, res) => {
   if (!requireAdmin(req, res)) return;
   const db = getDb();
   try {
-    const rows = await db.prepare(`SELECT * FROM erp_tools ORDER BY created_at DESC`).all();
-    res.json(rows.map(r => serializeTool(r)));
+    const rows = await db.prepare(`
+      SELECT t.*, s.is_public AS is_public, s.is_admin_approved AS is_admin_approved
+      FROM erp_tools t
+      LEFT JOIN skills s ON s.id = t.proxy_skill_id
+      ORDER BY t.created_at DESC
+    `).all();
+    res.json(rows.map(r => {
+      const t = serializeTool(r);
+      t.is_public = Number(r.is_public ?? r.IS_PUBLIC ?? 1);
+      return t;
+    }));
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -265,7 +275,7 @@ router.post('/', async (req, res) => {
          params_json, returns_json, tool_schema_json, inject_config_json,
          max_rows_llm, max_rows_ui, timeout_sec,
          rate_limit_per_user, rate_limit_global, rate_limit_window, allow_dry_run,
-         enabled, created_by)
+         endpoint_mode, enabled, created_by)
       VALUES (?, ?, ?, ?,
               ?, ?, ?, ?, ?,
               ?, ?, SYSTIMESTAMP, 0,
@@ -273,7 +283,7 @@ router.post('/', async (req, res) => {
               ?, ?, ?, ?,
               ?, ?, ?,
               ?, ?, ?, ?,
-              ?, ?)
+              ?, ?, ?)
     `).run(
       code, b.name || code, b.description || null, JSON.stringify(b.tags || []),
       String(b.db_owner).toUpperCase(),
@@ -295,6 +305,7 @@ router.post('/', async (req, res) => {
       b.rate_limit_global   == null ? null : Number(b.rate_limit_global),
       b.rate_limit_window   || 'minute',
       b.allow_dry_run === 0 ? 0 : 1,
+      b.endpoint_mode || 'tool',
       b.enabled === false ? 0 : 1,
       req.user.id
     );
@@ -359,7 +370,7 @@ router.put('/:id', async (req, res) => {
         tool_schema_json = ?, inject_config_json = ?,
         max_rows_llm = ?, max_rows_ui = ?, timeout_sec = ?,
         rate_limit_per_user = ?, rate_limit_global = ?, rate_limit_window = ?, allow_dry_run = ?,
-        enabled = ?, updated_at = SYSTIMESTAMP
+        endpoint_mode = ?, enabled = ?, updated_at = SYSTIMESTAMP
       WHERE id = ?
     `).run(
       code, b.name ?? cur.name, b.description ?? cur.description,
@@ -381,6 +392,7 @@ router.put('/:id', async (req, res) => {
         : (b.rate_limit_global == null ? null : Number(b.rate_limit_global)),
       b.rate_limit_window ?? cur.rate_limit_window ?? 'minute',
       (b.allow_dry_run ?? cur.allow_dry_run ?? 1) ? 1 : 0,
+      b.endpoint_mode ?? cur.endpoint_mode ?? 'tool',
       (b.enabled ?? cur.enabled) ? 1 : 0,
       req.params.id
     );
@@ -626,6 +638,79 @@ router.get('/config/check', async (req, res) => {
     lov_max_rows: parseInt(process.env.ERP_TOOL_LOV_MAX_ROWS || '500', 10),
     result_cache_ttl: parseInt(process.env.ERP_TOOL_RESULT_CACHE_TTL || '1800', 10),
   });
+});
+
+// ── PUT /api/erp-tools/:id/toggle — 快速啟用/停用/公開 ────────────────────────
+router.put('/:id/toggle', async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const db = getDb();
+  try {
+    const { field, value } = req.body;
+    const allowed = ['enabled', 'is_public'];
+    if (!allowed.includes(field)) return res.status(400).json({ error: '不允許的欄位' });
+
+    if (field === 'is_public') {
+      // 公開/非公開存在代理 skill row
+      const row = await db.prepare(`SELECT proxy_skill_id FROM erp_tools WHERE id = ?`).get(req.params.id);
+      const pid = row?.proxy_skill_id ?? row?.PROXY_SKILL_ID;
+      if (pid) {
+        await db.prepare(`UPDATE skills SET is_public = ?, is_admin_approved = ? WHERE id = ?`)
+          .run(value ? 1 : 0, value ? 1 : 0, pid);
+      }
+    } else {
+      await db.prepare(`UPDATE erp_tools SET ${field} = ?, updated_at = SYSTIMESTAMP WHERE id = ?`)
+        .run(value ? 1 : 0, req.params.id);
+    }
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── GET/POST/DELETE /api/erp-tools/:id/access — 分享(proxy 到 skill_access) ──
+router.get('/:id/access', async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const db = getDb();
+  try {
+    const row = await db.prepare(`SELECT proxy_skill_id FROM erp_tools WHERE id = ?`).get(req.params.id);
+    const pid = row?.proxy_skill_id ?? row?.PROXY_SKILL_ID;
+    if (!pid) return res.json([]);
+    const shares = await db.prepare(`SELECT * FROM skill_access WHERE skill_id = ? ORDER BY granted_at DESC`).all(pid);
+    res.json(shares);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.post('/:id/access', async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const db = getDb();
+  try {
+    const row = await db.prepare(`SELECT proxy_skill_id FROM erp_tools WHERE id = ?`).get(req.params.id);
+    const pid = row?.proxy_skill_id ?? row?.PROXY_SKILL_ID;
+    if (!pid) return res.status(404).json({ error: '代理 skill 不存在，請重新儲存此 ERP 工具' });
+    const { grantee_type, grantee_id, share_type } = req.body;
+    const id = require('crypto').randomUUID();
+    await db.prepare(`
+      INSERT INTO skill_access (id, skill_id, grantee_type, grantee_id, granted_by, share_type)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(id, pid, grantee_type, String(grantee_id), req.user.id, share_type || 'use');
+    res.status(201).json({ id });
+  } catch (e) {
+    if (e.message?.includes('SKILL_ACCESS_UQ')) return res.status(409).json({ error: '已存在相同授權' });
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.delete('/:id/access/:accessId', async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const db = getDb();
+  try {
+    await db.prepare(`DELETE FROM skill_access WHERE id = ?`).run(req.params.accessId);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 module.exports = router;
