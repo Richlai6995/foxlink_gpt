@@ -774,6 +774,94 @@ router.post('/:id/reparse-all', async (req, res) => {
   }
 });
 
+// ─── GET /api/kb/admin/health/oversized-docs  (admin only) ───────────────────
+// Health check: find documents whose chunks exceed the configured max_size.
+// These were produced by the pre-2026-04-18 chunker that didn't split
+// oversized paragraphs. Reparsing with the current code fixes them.
+router.get('/admin/health/oversized-docs', async (req, res) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ error: '僅限管理員' });
+  const threshold = Math.max(256, Number(req.query.threshold) || 1100); // default 1100 = 1024 + slack
+  const db = getDb();
+  try {
+    const rows = await db.prepare(`
+      SELECT c.kb_id, c.doc_id,
+             kb.name     AS kb_name,
+             kb.creator_id,
+             u.name      AS creator_name,
+             d.filename,
+             d.file_type,
+             d.file_size,
+             d.status,
+             COUNT(*) AS chunk_count,
+             MAX(DBMS_LOB.GETLENGTH(c.content)) AS max_chunk_len,
+             SUM(CASE WHEN DBMS_LOB.GETLENGTH(c.content) > ? THEN 1 ELSE 0 END) AS oversized_count
+      FROM kb_chunks c
+      JOIN kb_documents d ON d.id = c.doc_id
+      JOIN knowledge_bases kb ON kb.id = c.kb_id
+      LEFT JOIN users u ON u.id = kb.creator_id
+      GROUP BY c.kb_id, c.doc_id, kb.name, kb.creator_id, u.name, d.filename, d.file_type, d.file_size, d.status
+      HAVING SUM(CASE WHEN DBMS_LOB.GETLENGTH(c.content) > ? THEN 1 ELSE 0 END) > 0
+      ORDER BY MAX(DBMS_LOB.GETLENGTH(c.content)) DESC
+    `).all(threshold, threshold);
+    res.json({ threshold, count: rows.length, docs: rows });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── POST /api/kb/admin/health/reparse-oversized  (admin only) ───────────────
+// Trigger reparse for every doc found by /oversized-docs. Respects each doc's
+// existing parse_mode / pdf_ocr_mode (no mode change — just rechunk via the
+// fixed chunker).
+router.post('/admin/health/reparse-oversized', async (req, res) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ error: '僅限管理員' });
+  const threshold = Math.max(256, Number(req.body?.threshold) || 1100);
+  const db = getDb();
+  try {
+    const rows = await db.prepare(`
+      SELECT c.kb_id, c.doc_id
+      FROM kb_chunks c
+      GROUP BY c.kb_id, c.doc_id
+      HAVING MAX(DBMS_LOB.GETLENGTH(c.content)) > ?
+    `).all(threshold);
+
+    const queued = [];
+    const failed = [];
+
+    for (const r of rows) {
+      const kb = await db.prepare('SELECT * FROM knowledge_bases WHERE id=?').get(r.kb_id);
+      const doc = await db.prepare('SELECT * FROM kb_documents WHERE id=? AND kb_id=?').get(r.doc_id, r.kb_id);
+      if (!kb || !doc) { failed.push({ ...r, reason: 'kb_or_doc_missing' }); continue; }
+
+      const filePath = _resolveDocFilePath(r.kb_id, doc);
+      if (!filePath) { failed.push({ kb_id: r.kb_id, doc_id: r.doc_id, filename: doc.filename, reason: 'file_missing' }); continue; }
+
+      const parseMode  = doc.parse_mode    || kb.parse_mode    || 'text_only';
+      const pdfOcrMode = doc.pdf_ocr_mode  || kb.pdf_ocr_mode  || 'off';
+
+      await db.prepare('DELETE FROM kb_chunks WHERE doc_id=?').run(r.doc_id);
+      await db.prepare(`
+        UPDATE kb_documents SET status='processing', chunk_count=0, error_msg=NULL,
+          updated_at=SYSTIMESTAMP WHERE id=?
+      `).run(r.doc_id);
+
+      queued.push({ kb_id: r.kb_id, doc_id: r.doc_id, filename: doc.filename });
+
+      // Fire background reparse — don't await; respond fast
+      setImmediate(() => {
+        processDocument(db, kb, doc.id, filePath, doc.file_type, parseMode, pdfOcrMode).catch((e) => {
+          console.error('[KB] health-reparse error:', doc.id, e.message);
+          db.prepare("UPDATE kb_documents SET status='error', error_msg=? WHERE id=?").run(e.message, doc.id).catch(() => {});
+        });
+      });
+    }
+
+    res.status(202).json({ threshold, queued: queued.length, failed: failed.length, queued_docs: queued, failed_docs: failed });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // Resolve the stored file path for a document — prefers stored_filename, falls back
 // to scanning the KB directory for a file whose name contains the sanitized stem.
 function _resolveDocFilePath(kbId, doc) {
