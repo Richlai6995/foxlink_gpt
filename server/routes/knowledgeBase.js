@@ -966,16 +966,20 @@ router.post('/:id/search', async (req, res) => {
       `).all(req.params.id, likeQuery, topK * 2);
 
       if (mode === 'fulltext') {
-        results = ftRows.map((r) => ({ ...r, score: 0.5, match_type: 'fulltext' }));
+        results = ftRows.map((r) => ({ ...r, score: 0.8, match_type: 'fulltext' }));
       } else {
-        // Hybrid: merge & deduplicate, boost chunks found by both methods
+        // Hybrid merge — fulltext 是「精確字串命中」訊號極強，分數要高於 vector 的
+        // typical 上限（0.6-0.7）才會出現在最終 topK；否則 fulltext-only 永遠被擠走。
+        //  - 兩個方法都命中 → 0.95（最強）
+        //  - 只 fulltext → 0.85（強於 vector 正常分數）
+        //  - 只 vector → 保持原分（0.5-0.7 左右）
         const vecIds = new Set(results.map((r) => r.id));
         for (const r of ftRows) {
           if (vecIds.has(r.id)) {
             const existing = results.find((x) => x.id === r.id);
-            if (existing) { existing.score = Math.min(1, existing.score + 0.15); existing.match_type = 'hybrid'; }
+            if (existing) { existing.score = 0.95; existing.match_type = 'hybrid'; }
           } else {
-            results.push({ ...r, score: 0.4, match_type: 'fulltext' });
+            results.push({ ...r, score: 0.85, match_type: 'fulltext' });
           }
         }
       }
