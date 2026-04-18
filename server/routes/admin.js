@@ -312,8 +312,7 @@ router.post('/llm-models/test', async (req, res) => {
     // Gemini
     const geminiKey = resolvedApiKey || process.env.GEMINI_API_KEY;
     if (!geminiKey) return res.status(400).json({ ok: false, error: 'Gemini API Key 未設定（DB 及 env 皆無）' });
-    const { GoogleGenerativeAI } = require('@google/generative-ai');
-    const genAI     = new GoogleGenerativeAI(geminiKey);
+    const { getGenerativeModel, extractText, embedContent } = require('../services/geminiClient');
     const modelName = api_model?.trim() || process.env.GEMINI_MODEL_FLASH || 'gemini-2.0-flash';
     const model_role = req.body.model_role || 'chat';
 
@@ -322,9 +321,8 @@ router.post('/llm-models/test', async (req, res) => {
     }
 
     if (model_role === 'embedding') {
-      const embModel = genAI.getGenerativeModel({ model: modelName });
-      const result   = await embModel.embedContent('test');
-      const dims     = result.embedding?.values?.length ?? 0;
+      const vec = await embedContent('test', { model: modelName });
+      const dims = vec?.length ?? 0;
       return res.json({ ok: true, reply: `Embedding 成功，維度：${dims}`, model: modelName });
     }
 
@@ -359,9 +357,9 @@ router.post('/llm-models/test', async (req, res) => {
       return res.json({ ok: true, reply: 'STT 設定已儲存（測試需實際音訊檔案，跳過自動測試）', model: modelName });
     }
 
-    const model  = genAI.getGenerativeModel({ model: modelName });
+    const model  = getGenerativeModel({ model: modelName, apiKey: geminiKey });
     const result = await model.generateContent('Reply with the single word: OK');
-    const reply  = result.response.text()?.trim() || '(no reply)';
+    const reply  = extractText(result)?.trim() || '(no reply)';
     return res.json({ ok: true, reply, model: api_model });
 
   } catch (e) {

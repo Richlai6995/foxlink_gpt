@@ -7,7 +7,6 @@
  *   const client = await createClient(db, modelKey);
  *   const text = await client.generate(messages, systemPrompt);
  */
-const { GoogleGenerativeAI } = require('@google/generative-ai');
 const { getGenerativeModel, extractText, extractUsage, PROVIDER: GEMINI_PROVIDER } = require('./geminiClient');
 const { decryptKey } = require('./llmKeyService');
 

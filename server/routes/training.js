@@ -2211,14 +2211,13 @@ ${content.slice(0, 8000)}
       `SELECT api_model FROM llm_models WHERE key=? AND is_active=1`
     ).get(key);
 
-    const { GoogleGenerativeAI } = require('@google/generative-ai');
-    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-    const model = genAI.getGenerativeModel({ model: modelRow?.api_model || 'gemini-2.0-flash' });
+    const { getGenerativeModel, extractText } = require('../services/geminiClient');
+    const model = getGenerativeModel({ model: modelRow?.api_model || 'gemini-2.0-flash' });
     let questions, lastRaw = '';
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
         const result = await model.generateContent(prompt);
-        const text = result.response.text();
+        const text = extractText(result);
         lastRaw = text;
         const cleaned = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
         const jsonMatch = cleaned.match(/\[[\s\S]*\]/);
@@ -2269,25 +2268,24 @@ ${slideContent ? `\n當前投影片內容：\n${slideContent}\n` : ''}
 2. 回答要簡潔
 3. 用繁體中文回答`;
 
-    const { GoogleGenerativeAI } = require('@google/generative-ai');
-    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+    const { getGenerativeModel, extractText, extractUsage } = require('../services/geminiClient');
     const flashModel = await db.prepare(
       `SELECT api_model FROM llm_models WHERE model_role='chat' AND is_active=1 AND provider_type='gemini' ORDER BY sort_order FETCH FIRST 1 ROWS ONLY`
     ).get();
-    const model = genAI.getGenerativeModel({ model: flashModel?.api_model || 'gemini-2.0-flash' });
+    const model = getGenerativeModel({ model: flashModel?.api_model || 'gemini-2.0-flash' });
     const result = await model.generateContent([
       { text: systemPrompt },
       { text: message }
     ]);
-    const answer = result.response.text();
-    const usage = result.response.usageMetadata || {};
+    const answer = extractText(result);
+    const usage = extractUsage(result);
 
     // Log conversation
     await db.prepare(`
       INSERT INTO tutor_conversations (course_id, lesson_id, slide_id, user_id, question, answer, model_key, input_tokens, output_tokens)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(req.courseId, lesson_id || null, slide_id || null, req.user.id,
-           message, answer, 'flash', usage.promptTokenCount || 0, usage.candidatesTokenCount || 0);
+           message, answer, 'flash', usage.inputTokens, usage.outputTokens);
 
     res.json({ answer });
   } catch (e) {
@@ -3616,8 +3614,7 @@ router.post('/courses/:id/translate', loadCoursePermission, requirePermission('o
 
   try {
     const course = await db.prepare('SELECT title, description FROM courses WHERE id=?').get(req.courseId);
-    const { GoogleGenerativeAI } = require('@google/generative-ai');
-    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+    const { getGenerativeModel, extractText } = require('../services/geminiClient');
 
     // Phase 2E: support model selection (from request or system_settings or llm_models)
     let modelName = requestModel || null;
@@ -3631,7 +3628,7 @@ router.post('/courses/:id/translate', loadCoursePermission, requirePermission('o
       ).get();
       modelName = flashRow?.api_model || process.env.GEMINI_MODEL_FLASH || 'gemini-3-flash-preview';
     }
-    const model = genAI.getGenerativeModel({ model: modelName });
+    const model = getGenerativeModel({ model: modelName });
     send('status', { message: `使用模型: ${modelName}` });
 
     const langName = target_lang === 'en' ? 'English' : 'Vietnamese';
@@ -3640,7 +3637,7 @@ router.post('/courses/:id/translate', loadCoursePermission, requirePermission('o
       const r = await model.generateContent(
         `Translate the following Traditional Chinese text to ${langName}. Do not translate product names or technical terms. Return only the translation:\n\n${text}`
       );
-      return r.response.text().trim();
+      return extractText(r).trim();
     };
 
     // Count total work items (optionally filter by lesson_ids)
@@ -3787,7 +3784,7 @@ ${JSON.stringify(payload)}
 
 Return a JSON object with the SAME "id" and translated fields. Return only valid JSON, no code fences.`;
       const r = await model.generateContent(prompt);
-      const parsed = JSON.parse(stripFence(r.response.text()));
+      const parsed = JSON.parse(stripFence(extractText(r)));
       return extractSlideResult(slide, parsed);
     };
 
@@ -3815,7 +3812,7 @@ Return a JSON array of ${batch.length} objects in the SAME order, each with the 
       let arr;
       try {
         const r = await model.generateContent(prompt);
-        arr = JSON.parse(stripFence(r.response.text()));
+        arr = JSON.parse(stripFence(extractText(r)));
         if (!Array.isArray(arr)) throw new Error('batch response not an array');
         if (arr.length !== batch.length) throw new Error(`batch length mismatch: got ${arr.length}, want ${batch.length}`);
       } catch (err) {
@@ -3879,7 +3876,7 @@ Return a JSON array of ${batch.length} objects in the SAME order, each with the 
 Input: {"question_json": ${q.question_json}, "explanation": ${JSON.stringify(q.explanation || '')}}
 Return only valid JSON, no code fences.`
       );
-      const parsed = JSON.parse(stripFence(r.response.text()));
+      const parsed = JSON.parse(stripFence(extractText(r)));
       const translatedQ = typeof parsed.question_json === 'string' ? parsed.question_json : JSON.stringify(parsed.question_json);
       const translatedExp = parsed.explanation || null;
       await writeQuizTranslation(q, translatedQ, translatedExp);
@@ -3907,7 +3904,7 @@ ${JSON.stringify(payload)}
 Return a JSON array of ${batch.length} objects in the SAME order, each with original "id" and translated "question" and "explanation". Return only valid JSON, no code fences.`;
       try {
         const r = await model.generateContent(prompt);
-        const arr = JSON.parse(stripFence(r.response.text()));
+        const arr = JSON.parse(stripFence(extractText(r)));
         if (!Array.isArray(arr) || arr.length !== batch.length) throw new Error('quiz batch length mismatch');
         const byId = new Map(arr.map(x => [Number(x?.id), x]));
         let ok = 0;
@@ -4445,12 +4442,11 @@ router.post('/ai/analyze-screenshot', upload.single('screenshot'), async (req, r
     const clickCoords = req.body.click_coords || null;
     const context = req.body.context || '';
 
-    const { GoogleGenerativeAI } = require('@google/generative-ai');
-    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+    const { getGenerativeModel, extractText } = require('../services/geminiClient');
     const flashRow = await db.prepare(
       `SELECT api_model FROM llm_models WHERE model_role='chat' AND is_active=1 AND provider_type='gemini' ORDER BY sort_order FETCH FIRST 1 ROWS ONLY`
     ).get();
-    const model = genAI.getGenerativeModel({ model: flashRow?.api_model || process.env.GEMINI_MODEL_FLASH || 'gemini-3-flash-preview' });
+    const model = getGenerativeModel({ model: flashRow?.api_model || process.env.GEMINI_MODEL_FLASH || 'gemini-3-flash-preview' });
 
     const clickInfo = clickCoords ? `使用者剛點擊了位於 (x:${clickCoords.x}px, y:${clickCoords.y}px) 的元素。` : '';
 
@@ -4482,7 +4478,7 @@ router.post('/ai/analyze-screenshot', upload.single('screenshot'), async (req, r
           { inlineData: { mimeType: 'image/png', data: imageBase64 } },
           { text: prompt }
         ]);
-        const text = result.response.text();
+        const text = extractText(result);
         lastRaw = text;
         const cleaned = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
         const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
@@ -4663,9 +4659,8 @@ ${editor_context || '（無）'}
   "completion_message": "恭喜！你已經..."
 }`;
 
-    const { GoogleGenerativeAI } = require('@google/generative-ai');
-    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-    const model = genAI.getGenerativeModel({ model: flashModel });
+    const { getGenerativeModel, extractText } = require('../services/geminiClient');
+    const model = getGenerativeModel({ model: flashModel });
 
     // Retry up to 3 times on JSON parse failure (Gemini occasionally returns malformed JSON)
     let parsed, lastRaw = '';
@@ -4675,7 +4670,7 @@ ${editor_context || '（無）'}
           contents: [{ role: 'user', parts: [...imageParts, { text: prompt }] }],
           generationConfig: { responseMimeType: 'application/json' }
         });
-        const text = result.response.text();
+        const text = extractText(result);
         lastRaw = text;
 
         // Strip markdown code fences if present
@@ -4782,12 +4777,11 @@ router.post('/ai/generate-outline', async (req, res) => {
 
     if (!content.trim()) return res.status(400).json({ error: '無法取得章節內容' });
 
-    const { GoogleGenerativeAI } = require('@google/generative-ai');
-    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+    const { getGenerativeModel, extractText: extractLLMText } = require('../services/geminiClient');
     const flashRow = await db.prepare(
       `SELECT api_model FROM llm_models WHERE model_role='chat' AND is_active=1 AND provider_type='gemini' ORDER BY sort_order FETCH FIRST 1 ROWS ONLY`
     ).get();
-    const model = genAI.getGenerativeModel({ model: flashRow?.api_model || process.env.GEMINI_MODEL_FLASH || 'gemini-3-flash-preview' });
+    const model = getGenerativeModel({ model: flashRow?.api_model || process.env.GEMINI_MODEL_FLASH || 'gemini-3-flash-preview' });
 
     const prompt = `根據以下系統操作說明文件，拆解成詳細的操作步驟清單。
 ${system_url ? `目標系統 URL: ${system_url}` : ''}
@@ -4811,7 +4805,7 @@ ${content.slice(0, 6000)}
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
         const result = await model.generateContent(prompt);
-        const text = result.response.text();
+        const text = extractLLMText(result);
         lastRaw = text;
         const cleaned = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
         const jsonMatch = cleaned.match(/\[[\s\S]*\]/);
@@ -4837,12 +4831,11 @@ router.post('/ai/batch-analyze', upload.array('screenshots', 50), async (req, re
     const files = req.files || [];
     if (files.length === 0) return res.status(400).json({ error: '需提供截圖檔案' });
 
-    const { GoogleGenerativeAI } = require('@google/generative-ai');
-    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+    const { getGenerativeModel, extractText } = require('../services/geminiClient');
     const flashRow = await db.prepare(
       `SELECT api_model FROM llm_models WHERE model_role='chat' AND is_active=1 AND provider_type='gemini' ORDER BY sort_order FETCH FIRST 1 ROWS ONLY`
     ).get();
-    const model = genAI.getGenerativeModel({ model: flashRow?.api_model || process.env.GEMINI_MODEL_FLASH || 'gemini-3-flash-preview' });
+    const model = getGenerativeModel({ model: flashRow?.api_model || process.env.GEMINI_MODEL_FLASH || 'gemini-3-flash-preview' });
 
     // Parallel analysis in batches of 3
     const BATCH = 3;
@@ -4861,7 +4854,7 @@ router.post('/ai/batch-analyze', upload.array('screenshots', 50), async (req, re
           { inlineData: { mimeType: file.mimetype, data: imageBase64 } },
           { text: prompt }
         ]);
-        const text = result.response.text();
+        const text = extractText(result);
         const jsonMatch = text.match(/\{[\s\S]*\}/);
         const parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : { regions: [], instruction: '', narration: '' };
         return { index: i, filename: file.originalname, ...parsed };
@@ -5139,8 +5132,7 @@ router.post('/recording/:sessionId/analyze-step/:stepId', async (req, res) => {
     }
 
     // Phase 2E: model priority — request body > system_settings > llm_models > default
-    const { GoogleGenerativeAI } = require('@google/generative-ai');
-    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+    const { getGenerativeModel, extractText } = require('../services/geminiClient');
     let modelName = req.body.model || null;
     if (!modelName) {
       const setting = await db.prepare(`SELECT value FROM system_settings WHERE key='training_analyze_model'`).get();
@@ -5153,7 +5145,7 @@ router.post('/recording/:sessionId/analyze-step/:stepId', async (req, res) => {
       modelName = flashRow?.api_model || process.env.GEMINI_MODEL_FLASH || 'gemini-3-flash-preview';
     }
     // A: 強制 Gemini 回純 JSON，避免裸 escape / 多餘文字造成 JSON.parse 炸掉
-    const model = genAI.getGenerativeModel({
+    const model = getGenerativeModel({
       model: modelName,
       generationConfig: { responseMimeType: 'application/json' },
     });
@@ -5179,7 +5171,7 @@ router.post('/recording/:sessionId/analyze-step/:stepId', async (req, res) => {
           { inlineData: { mimeType: 'image/png', data: imageBase64 } },
           { text: prompt }
         ]);
-        const text = result.response.text();
+        const text = extractText(result);
         geminiMs = Date.now() - tGemini;
         // JSON mode → text 應該是純 JSON。保留 jsonMatch 當 fallback 以防模型偶爾掺雜說明文字
         const jsonText = text.trim().startsWith('{') ? text.trim() : (text.match(/\{[\s\S]*\}/)?.[0] || '');
@@ -5238,12 +5230,11 @@ router.post('/recording/:sessionId/analyze', async (req, res) => {
       'SELECT * FROM recording_steps WHERE session_id=? ORDER BY step_number'
     ).all(req.params.sessionId);
 
-    const { GoogleGenerativeAI } = require('@google/generative-ai');
-    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+    const { getGenerativeModel, extractText } = require('../services/geminiClient');
     const flashRow = await db.prepare(
       `SELECT api_model FROM llm_models WHERE model_role='chat' AND is_active=1 AND provider_type='gemini' ORDER BY sort_order FETCH FIRST 1 ROWS ONLY`
     ).get();
-    const model = genAI.getGenerativeModel({ model: flashRow?.api_model || process.env.GEMINI_MODEL_FLASH || 'gemini-3-flash-preview' });
+    const model = getGenerativeModel({ model: flashRow?.api_model || process.env.GEMINI_MODEL_FLASH || 'gemini-3-flash-preview' });
 
     // Parallel analysis in batches of 3
     const BATCH = 3;
@@ -5275,7 +5266,7 @@ router.post('/recording/:sessionId/analyze', async (req, res) => {
           { inlineData: { mimeType: 'image/png', data: imageBase64 } },
           { text: prompt }
         ]);
-        const text = result.response.text();
+        const text = extractText(result);
         const jsonMatch = text.match(/\{[\s\S]*\}/);
         const parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : {};
 
@@ -6487,8 +6478,7 @@ router.post('/slides/:sid/ai-analyze', async (req, res) => {
     }
 
     // AI model selection
-    const { GoogleGenerativeAI } = require('@google/generative-ai');
-    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+    const { getGenerativeModel, extractText } = require('../services/geminiClient');
     let modelName = req.body.model || null;
     if (!modelName) {
       const setting = await db.prepare(`SELECT value FROM system_settings WHERE key='training_analyze_model'`).get();
@@ -6500,7 +6490,7 @@ router.post('/slides/:sid/ai-analyze', async (req, res) => {
       ).get();
       modelName = flashRow?.api_model || process.env.GEMINI_MODEL_FLASH || 'gemini-3-flash-preview';
     }
-    const model = genAI.getGenerativeModel({ model: modelName });
+    const model = getGenerativeModel({ model: modelName });
 
     const prompt = `分析這張系統操作截圖。${annotationPrompt}
 識別所有可互動 UI 元素，回傳 JSON：
@@ -6513,7 +6503,7 @@ router.post('/slides/:sid/ai-analyze', async (req, res) => {
       { inlineData: { mimeType: 'image/png', data: imageBase64 } },
       { text: prompt }
     ]);
-    const text = result.response.text();
+    const text = extractText(result);
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     const parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : {};
 

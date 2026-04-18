@@ -248,10 +248,9 @@ router.post('/kb/chat', async (req, res) => {
     }
 
     // Call Gemini
-    const { GoogleGenerativeAI } = require('@google/generative-ai');
-    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+    const { getGenerativeModel, extractText, extractUsage } = require('../services/geminiClient');
     const modelName = model || process.env.GEMINI_MODEL_FLASH || 'gemini-2.0-flash';
-    const geminiModel = genAI.getGenerativeModel({ model: modelName });
+    const geminiModel = getGenerativeModel({ model: modelName });
 
     const prompt = `你是一個知識庫助手，請根據以下知識庫內容回答使用者的問題。若知識庫內容不足以回答，請說明。
 
@@ -260,10 +259,10 @@ ${context}
 使用者問題：${question}`;
 
     const result = await geminiModel.generateContent(prompt);
-    const answer = result.response.text();
-    const usage  = result.response.usageMetadata || {};
-    const inTok  = usage.promptTokenCount || 0;
-    const outTok = usage.candidatesTokenCount || 0;
+    const answer = extractText(result);
+    const usage  = extractUsage(result);
+    const inTok  = usage.inputTokens;
+    const outTok = usage.outputTokens;
 
     // Record token usage under KB owner
     if ((inTok || outTok) && kb.created_by) {

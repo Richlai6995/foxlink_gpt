@@ -96,23 +96,22 @@ async function analyzeTicket(db, ticketId, userId, onChunk, lang) {
   } catch (llmErr) {
     // fallback: 用 gemini 直接
     try {
-      const { GoogleGenerativeAI } = require('@google/generative-ai');
-      const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-      const model = genAI.getGenerativeModel({ model: modelKey });
+      const { getGenerativeModel, extractText, extractUsage } = require('./geminiClient');
+      const model = getGenerativeModel({ model: modelKey });
       const result = await model.generateContentStream({
         contents: [{ role: 'user', parts: [{ text: systemPrompt + '\n\n' + userPrompt }] }],
         generationConfig: { temperature, maxOutputTokens: maxTokens },
       });
       for await (const chunk of result.stream) {
-        const text = chunk.text();
+        const text = extractText(chunk);
         if (text) {
           fullResponse += text;
           if (onChunk) onChunk(text);
         }
       }
-      const usage = await result.response;
-      inputTokens = usage?.usageMetadata?.promptTokenCount || 0;
-      outputTokens = usage?.usageMetadata?.candidatesTokenCount || 0;
+      const usage = extractUsage(await result.response);
+      inputTokens = usage.inputTokens;
+      outputTokens = usage.outputTokens;
     } catch (fallbackErr) {
       throw new Error('AI 分析失敗: ' + fallbackErr.message);
     }

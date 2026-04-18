@@ -209,13 +209,9 @@ router.post('/llm-translate', async (req, res) => {
 
 // ─── Internal: LLM batch translate ───────────────────────────────────────────
 async function _llmTranslateBatch(items, targetLang) {
-  const { GoogleGenerativeAI } = require('@google/generative-ai');
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) throw new Error('GEMINI_API_KEY not configured');
-
+  const { getGenerativeModel, extractText } = require('../services/geminiClient');
   const modelName = process.env.GEMINI_MODEL_FLASH || 'gemini-2.5-flash-preview-05-20';
-  const genAI = new GoogleGenerativeAI(apiKey);
-  const model = genAI.getGenerativeModel({
+  const model = getGenerativeModel({
     model: modelName,
     generationConfig: {
       temperature: 0.1,
@@ -240,7 +236,7 @@ Rules:
     contents: [{ role: 'user', parts: [{ text: prompt }] }],
     systemInstruction: { parts: [{ text: systemPrompt }] },
   });
-  let text = result.response.text().trim();
+  let text = extractText(result).trim();
   if (text.startsWith('```')) {
     text = text.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '');
   }

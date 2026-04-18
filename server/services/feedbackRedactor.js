@@ -9,18 +9,9 @@
 
 'use strict';
 
-const { GoogleGenerativeAI } = require('@google/generative-ai');
+const { getGenerativeModel, extractText } = require('./geminiClient');
 
 const MODEL_FLASH = process.env.GEMINI_MODEL_FLASH || 'gemini-2.0-flash';
-
-let _client = null;
-function _getClient() {
-  if (!_client) {
-    if (!process.env.GEMINI_API_KEY) throw new Error('GEMINI_API_KEY not set');
-    _client = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-  }
-  return _client;
-}
 
 const SYSTEM_PROMPT = `You are a PII redaction engine for IT support ticket archives.
 
@@ -56,8 +47,7 @@ async function redactText(text, opts = {}) {
   if (text.length < 5) return text; // 太短不值得 LLM
 
   const model = opts.model || MODEL_FLASH;
-  const client = _getClient();
-  const gm = client.getGenerativeModel({
+  const gm = getGenerativeModel({
     model,
     systemInstruction: SYSTEM_PROMPT,
     generationConfig: {
@@ -72,7 +62,7 @@ async function redactText(text, opts = {}) {
     new Promise((_, reject) => setTimeout(() => reject(new Error('redact timeout')), timeoutMs)),
   ]);
 
-  const out = result.response?.text?.() || '';
+  const out = extractText(result) || '';
   if (!out.trim()) throw new Error('redact returned empty');
   return out;
 }

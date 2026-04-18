@@ -3030,14 +3030,13 @@ async function ocrPdfFields(pdfBuf, model) {
 }`;
 
   try {
-    const { GoogleGenerativeAI } = require('@google/generative-ai');
-    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
-    const m = genAI.getGenerativeModel({ model: useModel });
+    const { getGenerativeModel, extractText } = require('./geminiClient');
+    const m = getGenerativeModel({ model: useModel });
     const result = await m.generateContent([
       { inlineData: { data: base64, mimeType: 'application/pdf' } },
       prompt,
     ]);
-    const raw = result.response.text().trim();
+    const raw = extractText(result).trim();
     let cleaned = raw.replace(/```(?:json)?\s*/gi, '').replace(/```/g, '').trim();
     const match = cleaned.match(/\{[\s\S]*\}/);
     if (match) cleaned = match[0];

@@ -1412,13 +1412,12 @@ ${podLogs ? `## 最近 Logs (last 50 lines)\n\`\`\`\n${podLogs}\n\`\`\`\n` : ''}
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
 
-    const { GoogleGenerativeAI } = require('@google/generative-ai');
-    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-    const model = genAI.getGenerativeModel({ model: modelName });
+    const { getGenerativeModel, extractText } = require('../services/geminiClient');
+    const model = getGenerativeModel({ model: modelName });
 
     const result = await model.generateContentStream(prompt);
     for await (const chunk of result.stream) {
-      const text = chunk.text();
+      const text = extractText(chunk);
       if (text) {
         res.write(`data: ${JSON.stringify({ text })}\n\n`);
       }

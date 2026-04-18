@@ -17,7 +17,7 @@ require('dotenv').config();
 const crypto = require('crypto');
 const cron = require('node-cron');
 const oracledb = require('oracledb');
-const { GoogleGenerativeAI } = require('@google/generative-ai');
+const { getGenerativeModel, embedContent, extractText, extractUsage, getStudioGenAI } = require('./geminiClient');
 const { upsertTokenUsage } = require('./tokenService');
 
 // ─── 常數 ─────────────────────────────────────────────────────────────────────
@@ -41,8 +41,6 @@ const SQL_TIMEOUT_SEC  = parseInt(process.env.DASHBOARD_SQL_TIMEOUT_SEC || '30')
 const MAX_ROWS         = parseInt(process.env.DASHBOARD_MAX_ROWS || '500');
 const VECTOR_TOP_K     = parseInt(process.env.DASHBOARD_VECTOR_TOP_K || '10');
 const ETL_MAX_ROWS     = parseInt(process.env.DASHBOARD_ETL_MAX_ROWS || '1000000');
-
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
 // ─── ERP SQL 唯讀保護 ─────────────────────────────────────────────────────────
 // 在連線層攔截，所有對 ERP 的 execute() 皆經過此驗證（防禦縱深）
@@ -270,20 +268,16 @@ async function setCachedResult(db, designId, question, sql, result, ttlMinutes) 
 
 // ─── Embedding ────────────────────────────────────────────────────────────────
 async function getEmbedding(text, dims = DEFAULT_DIMS, modelOverride = null) {
-  const model = genAI.getGenerativeModel({ model: modelOverride || EMBEDDING_MODEL });
-  const result = await model.embedContent({
-    content: { parts: [{ text }], role: 'user' },
-    taskType: 'RETRIEVAL_QUERY',
-    outputDimensionality: dims,
-  });
-  return result.embedding.values;
+  return await embedContent(text, { model: modelOverride || EMBEDDING_MODEL, dims });
 }
 
 // 批次 embedding — 一次最多 100 筆（Gemini API 限制）
 // 回傳 { embeddings: number[][], tokenCount: number }
+// 注意：batchEmbedContents 為 AI Studio 專用 API，Vertex AI 模式下不可用。
 const EMBED_BATCH_SIZE = 100;
 async function getBatchEmbeddings(texts, dims = DEFAULT_DIMS, modelOverride = null) {
-  const model = genAI.getGenerativeModel({ model: modelOverride || EMBEDDING_MODEL });
+  const studio = getStudioGenAI();
+  const model = studio.getGenerativeModel({ model: modelOverride || EMBEDDING_MODEL });
   const result = await model.batchEmbedContents({
     requests: texts.map(text => ({
       content: { parts: [{ text }], role: 'user' },
@@ -360,20 +354,20 @@ async function translateQueryForEmbedding(question, triggerIntent) {
     ? `This vector store contains: ${triggerIntent}`
     : 'product/item description data';
   try {
-    const model = genAI.getGenerativeModel({ model: flashModel });
+    const model = getGenerativeModel({ model: flashModel });
     const result = await model.generateContent(
       `Extract semantic search keywords from the following query relevant to: ${context}\n` +
       `Return ONLY English keywords for semantic similarity search — no codes, dates, quantities, or field names.\n` +
       `Query: "${question}"\n` +
       `English keywords only:`
     );
-    const translated = result.response.text().trim().replace(/^["']|["']$/g, '');
-    const usage = result.response.usageMetadata || {};
+    const translated = extractText(result).trim().replace(/^["']|["']$/g, '');
+    const usage = extractUsage(result);
     console.log(`[Dashboard] Embedding query translation: "${question}" → "${translated}"`);
     return {
       query: translated || question,
-      inputTokens: usage.promptTokenCount || 0,
-      outputTokens: usage.candidatesTokenCount || 0,
+      inputTokens: usage.inputTokens,
+      outputTokens: usage.outputTokens,
       model: flashModel,
     };
   } catch (e) {
@@ -394,7 +388,7 @@ async function checkVectorTriggers(question, jobs) {
 
   const flashModel = process.env.GEMINI_MODEL_FLASH || 'gemini-2.0-flash';
   try {
-    const model = genAI.getGenerativeModel({ model: flashModel });
+    const model = getGenerativeModel({ model: flashModel });
     const lines = withIntent.map((j, i) => `${i + 1}. [${j.name}]: ${j.triggerIntent}`).join('\n');
     const result = await model.generateContent(
       `Given this user query, determine which semantic vector searches are necessary.\n` +
@@ -404,7 +398,7 @@ async function checkVectorTriggers(question, jobs) {
       `Vector stores:\n${lines}\n\n` +
       `Reply with one line per store, format: "1: YES" or "1: NO". Nothing else.`
     );
-    const text = result.response.text().trim();
+    const text = extractText(result).trim();
     const triggered = new Set(alwaysRun);
     for (const line of text.split('\n')) {
       const m = line.match(/^(\d+):\s*(YES|NO)/i);
@@ -1178,9 +1172,9 @@ async function runDashboardQuery({ designId, question, userId, user, isDesigner,
     // 3. 組裝 Prompt + 4. Gemini 生成 SQL
     send('status', { message: 'AI 生成 SQL 中...' });
     const prompt = await buildPrompt(db, design, question, vectorResults, design._skipReason, lang);
-    const sqlModel = genAI.getGenerativeModel({ model: sqlApiModel });
+    const sqlModel = getGenerativeModel({ model: sqlApiModel });
     genResult = await sqlModel.generateContent(prompt);
-    let generatedSql = genResult.response.text().trim();
+    let generatedSql = extractText(genResult).trim();
 
     // 清除可能的 markdown code block 包裹（含多行 / 任意 fence 格式）
     generatedSql = generatedSql
@@ -1195,12 +1189,12 @@ async function runDashboardQuery({ designId, question, userId, user, isDesigner,
   }
 
   if (genResult) {
-    const usage = genResult.response.usageMetadata;
+    const usage = extractUsage(genResult);
     send('sql_preview', {
       sql: safeSql,
       cached: false,
-      prompt_tokens: usage?.promptTokenCount,
-      output_tokens: usage?.candidatesTokenCount,
+      prompt_tokens: usage.inputTokens,
+      output_tokens: usage.outputTokens,
     });
   }
 
@@ -1290,9 +1284,9 @@ async function runDashboardQuery({ designId, question, userId, user, isDesigner,
   // 9. Token 計費（SQL 生成 + embedding translation 用量）
   try {
     const today = new Date().toISOString().slice(0, 10);
-    const sqlUsage = genResult.response.usageMetadata;
-    const sqlIn  = sqlUsage?.promptTokenCount     || 0;
-    const sqlOut = sqlUsage?.candidatesTokenCount || 0;
+    const sqlUsage = extractUsage(genResult);
+    const sqlIn  = sqlUsage.inputTokens;
+    const sqlOut = sqlUsage.outputTokens;
     if (sqlIn || sqlOut) {
       await upsertTokenUsage(db, userId, today, sqlModelKey, sqlIn, sqlOut, 0);
     }
@@ -1873,9 +1867,9 @@ async function queryDashboardDesignSync(db, userId, designId, question, modelKey
 
   // 6. Generate SQL via Gemini
   const prompt = await buildPrompt(db, design, question, [], null, 'zh-TW');
-  const sqlModel = genAI.getGenerativeModel({ model: sqlApiModel });
+  const sqlModel = getGenerativeModel({ model: sqlApiModel });
   const genResult = await sqlModel.generateContent(prompt);
-  let generatedSql = genResult.response.text().trim()
+  let generatedSql = extractText(genResult).trim()
     .replace(/^```[\w]*\r?\n?/im, '')
     .replace(/\r?\n?```\s*$/im, '')
     .trim()
