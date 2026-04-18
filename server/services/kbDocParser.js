@@ -436,17 +436,58 @@ async function parsePptx(filePath, ocrModel = null) {
   return { text: parts.join('\n\n'), ocrInputTokens, ocrOutputTokens };
 }
 
+// Compute the tight bounding range of actually-populated cells.
+// Excel often stores bloated !ref (e.g. A1:XEX16436) when users trigger
+// phantom formatting — sheet_to_csv would iterate 100M+ empty cells and block
+// the event loop for minutes. Override with the true occupied range.
+function _tightenSheetRange(sheet) {
+  let minR = Infinity, maxR = -Infinity, minC = Infinity, maxC = -Infinity;
+  for (const k of Object.keys(sheet)) {
+    if (k.startsWith('!')) continue;
+    const m = k.match(/^([A-Z]+)(\d+)$/);
+    if (!m) continue;
+    let c = 0;
+    for (const ch of m[1]) c = c * 26 + (ch.charCodeAt(0) - 64);
+    c -= 1;
+    const r = parseInt(m[2], 10) - 1;
+    if (r < minR) minR = r;
+    if (r > maxR) maxR = r;
+    if (c < minC) minC = c;
+    if (c > maxC) maxC = c;
+  }
+  if (minR === Infinity) return null; // empty sheet
+  return { s: { r: minR, c: minC }, e: { r: maxR, c: maxC } };
+}
+
+// Return sheet_to_csv over the tight range (skips phantom blank cells).
+function _sheetToCsvTight(sheet, xlsx) {
+  const tight = _tightenSheetRange(sheet);
+  if (!tight) return '';
+  const origRef = sheet['!ref'];
+  sheet['!ref'] = xlsx.utils.encode_range(tight);
+  try {
+    return xlsx.utils.sheet_to_csv(sheet, { blankrows: false });
+  } finally {
+    if (origRef !== undefined) sheet['!ref'] = origRef;
+  }
+}
+
+// Yield control to the event loop so other HTTP requests (e.g. the client's
+// status-poll GET) don't get starved while we crunch through many sheets.
+const _yieldEventLoop = () => new Promise((r) => setImmediate(r));
+
 async function parseExcel(filePath, ocrModel = null) {
   const JSZip = require('jszip');
   const xlsx  = require('xlsx');
 
-  // Text: sheet data → CSV
+  // Text: sheet data → CSV (use tight range to skip phantom empty cells)
   const wb = xlsx.readFile(filePath);
   const parts = [];
   for (const sheetName of wb.SheetNames) {
     const sheet = wb.Sheets[sheetName];
-    const csv = xlsx.utils.sheet_to_csv(sheet, { blankrows: false });
+    const csv = _sheetToCsvTight(sheet, xlsx);
     if (csv.trim()) parts.push(`[工作表: ${sheetName}]\n${csv}`);
+    await _yieldEventLoop();
   }
 
   // OCR embedded images (parallel)
@@ -664,7 +705,8 @@ async function parseExcelFormatAware(filePath, ocrModel = null) {
       if (r && s !== undefined) addrStyle[r] = parseInt(s);
     }
 
-    const range = xlsx.utils.decode_range(sheet['!ref']);
+    // Use tight range (actual occupied cells) to avoid phantom-range blow-up
+    const range = _tightenSheetRange(sheet) || xlsx.utils.decode_range(sheet['!ref']);
     const rows  = [];
     for (let R = range.s.r; R <= range.e.r; R++) {
       const rowCells = [];
@@ -680,6 +722,7 @@ async function parseExcelFormatAware(filePath, ocrModel = null) {
       rows.push(rowCells.join(','));
     }
     if (rows.length) parts.push(`[工作表: ${name}]\n${rows.join('\n')}`);
+    await _yieldEventLoop();
   }
 
   // 4. OCR embedded images (parallel)
