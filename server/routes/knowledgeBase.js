@@ -1150,9 +1150,10 @@ router.get('/:id/retrieval-tests', async (req, res) => {
   }
 });
 
-// Embed concurrency — Gemini embedding-001 has stricter RPM limit than
-// generation models; 8 keeps safely under paid tier 1500 RPM for big docs.
-const EMBED_CONCURRENCY = Number(process.env.KB_EMBED_CONCURRENCY || 8);
+// Embed concurrency — Vertex AI 企業配額約 2000+ RPM 實測；20 並發
+// 對應 ~1500 RPM，穩定不撞上限。若走 AI Studio free tier (100 RPM)
+// 需改 env KB_EMBED_CONCURRENCY=2 以下才不會 429。
+const EMBED_CONCURRENCY = Number(process.env.KB_EMBED_CONCURRENCY || 20);
 
 // Is this a rate-limit / quota error from the Gemini API?
 function _isRateLimitError(e) {

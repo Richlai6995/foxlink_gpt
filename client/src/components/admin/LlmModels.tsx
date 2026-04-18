@@ -281,6 +281,12 @@ function ModelDialog({ form, editId, isEdit, hasApiKey, hasExtraConfig, onChange
               {!isAzure && !isCohere && (
                 <p className="text-xs text-slate-400 mt-0.5">{t('llm.useEnv')}</p>
               )}
+              {form.provider_type === 'gemini' && (
+                <div className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-xs text-amber-800">
+                  <span className="font-semibold">{t('llm.vertexHint.title')}</span>
+                  <span className="whitespace-pre-line">{'\n'}{t('llm.vertexHint.body')}</span>
+                </div>
+              )}
             </div>
           )}
 

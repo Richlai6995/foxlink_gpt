@@ -570,6 +570,10 @@
     "keySet": "已設定",
     "keyNotSet": "未設定",
     "useEnv": "使用 env",
+    "vertexHint": {
+      "title": "💡 Gemini 認證由 server .env 的 GEMINI_PROVIDER 決定：",
+      "body": "• studio (AI Studio)：使用此 API Key 或 env GEMINI_API_KEY\n• vertex (Vertex AI 企業級)：忽略此欄位，統一走 GCP Service Account\n模型名若 Vertex AI 不認得會自動 alias（例如 gemini-3-*-preview → gemini-2.5-*）"
+    },
     "ociSet": "OCI 已設定",
     "noModels": "尚未設定任何模型",
     "deleteConfirm": "確定刪除此模型設定？",

@@ -570,6 +570,10 @@
     "keySet": "Set",
     "keyNotSet": "Not set",
     "useEnv": "Use env",
+    "vertexHint": {
+      "title": "💡 Gemini auth is controlled by GEMINI_PROVIDER in server .env:",
+      "body": "• studio (AI Studio): uses this API Key or env GEMINI_API_KEY\n• vertex (Vertex AI enterprise): ignores this field, uses GCP Service Account\nUnsupported model names auto-alias (e.g. gemini-3-*-preview → gemini-2.5-*)"
+    },
     "ociSet": "OCI configured",
     "noModels": "No models configured",
     "deleteConfirm": "Delete this model configuration?",

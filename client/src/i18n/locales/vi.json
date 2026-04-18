@@ -570,6 +570,10 @@
     "keySet": "Đã cài đặt",
     "keyNotSet": "Chưa cài đặt",
     "useEnv": "Dùng env",
+    "vertexHint": {
+      "title": "💡 Xác thực Gemini được quyết định bởi GEMINI_PROVIDER trong server .env:",
+      "body": "• studio (AI Studio): dùng API Key này hoặc env GEMINI_API_KEY\n• vertex (Vertex AI doanh nghiệp): bỏ qua trường này, dùng GCP Service Account\nTên model không được hỗ trợ sẽ tự động ánh xạ (ví dụ gemini-3-*-preview → gemini-2.5-*)"
+    },
     "ociSet": "OCI đã cài đặt",
     "noModels": "Chưa cấu hình mô hình nào",
     "deleteConfirm": "Xóa cấu hình mô hình này?",
