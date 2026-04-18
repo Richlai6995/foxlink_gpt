@@ -961,6 +961,7 @@
     },
     "docs": {
       "uploadParseLabel": "Parse mode for this upload:",
+      "uploadPdfOcrLabel": "PDF OCR:",
       "uploadParseDefault": "Use KB default ({{mode}})",
       "parseModeTextOnly": "Text Only",
       "parseModeFormatAware": "Format-aware",
@@ -977,7 +978,11 @@
       "noChunks": "No chunk data",
       "parentChunkLabel": "Parent chunk:",
       "prevPage": "Prev",
-      "nextPage": "Next"
+      "nextPage": "Next",
+      "reparseBtn": "Re-parse",
+      "reparseSelectMode": "Select PDF OCR mode:",
+      "reparseConfirmBtn": "Re-parse now",
+      "reparseFailed": "Re-parse failed"
     },
     "settings": {
       "basicSection": "Basic Information",
@@ -1022,6 +1027,19 @@
       "parseModeFormatAware": "Format-aware",
       "parseModeFormatAwareDesc": "Annotates color semantics (error/warning/pending/normal/info)",
       "parseModeNote": "Applies to PDF · DOCX · XLSX. PPTX and images are always text-only. Can be overridden per upload.",
+      "pdfOcrLabel": "PDF OCR Mode (default)",
+      "pdfOcrNote": "Applies to PDF only. Auto detects images per page (≥5% area) and OCRs only those pages; pure scanned PDFs auto-escalate to full OCR. Force OCRs every page (slower).",
+      "pdfOcr": {
+        "off": "Off",
+        "offDesc": "Extract embedded text layer only, fastest. May miss text inside images.",
+        "auto": "Auto",
+        "autoDesc": "OCR only pages that contain images; others use text layer. Recommended.",
+        "force": "Force",
+        "forceDesc": "OCR every page. Use for scanned docs or when text layer is unreliable."
+      },
+      "reparseAllConfirm": "Settings changed. Re-parse all {{count}} documents in this KB with the new settings?",
+      "reparseAllQueued": "Queued {{count}} documents for re-parse (running in background)",
+      "reparseAllFailed": "Batch re-parse failed",
       "saveBtn": "Save Settings",
       "saving": "Saving...",
       "savedOk": "Settings saved",

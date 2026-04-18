@@ -961,6 +961,7 @@
     },
     "docs": {
       "uploadParseLabel": "本次上傳格式解析：",
+      "uploadPdfOcrLabel": "PDF OCR：",
       "uploadParseDefault": "依知識庫預設（{{mode}}）",
       "parseModeTextOnly": "純文字",
       "parseModeFormatAware": "格式感知",
@@ -977,7 +978,11 @@
       "noChunks": "無分塊資料",
       "parentChunkLabel": "父段落:",
       "prevPage": "上頁",
-      "nextPage": "下頁"
+      "nextPage": "下頁",
+      "reparseBtn": "重新解析",
+      "reparseSelectMode": "選擇 PDF OCR 模式：",
+      "reparseConfirmBtn": "確定重新解析",
+      "reparseFailed": "重新解析失敗"
     },
     "settings": {
       "basicSection": "基本資訊",
@@ -1022,6 +1027,19 @@
       "parseModeFormatAware": "格式感知",
       "parseModeFormatAwareDesc": "標注顏色語義（異常/注意/待確認/正常/資訊）",
       "parseModeNote": "適用 PDF · DOCX · XLSX。PPTX 與圖片固定為純文字模式。上傳時可個別覆蓋此設定。",
+      "pdfOcrLabel": "PDF OCR 模式（預設）",
+      "pdfOcrNote": "僅適用 PDF。Auto 會先偵測每頁是否有圖片（面積 ≥ 5%），有圖才 OCR；純掃描檔自動轉為全頁 OCR。Force 每頁都 OCR（較慢）。",
+      "pdfOcr": {
+        "off": "關閉",
+        "offDesc": "只抽取 PDF 內嵌文字層，最快。有圖的頁可能漏文字。",
+        "auto": "自動",
+        "autoDesc": "有圖片的頁才 OCR，其餘用文字層。推薦。",
+        "force": "強制",
+        "forceDesc": "每頁都 OCR，適合掃描檔或完全不信任文字層時。"
+      },
+      "reparseAllConfirm": "設定已變更，是否用新設定重新解析此知識庫的所有 {{count}} 個文件？",
+      "reparseAllQueued": "已排入重新解析 {{count}} 個文件，背景處理中",
+      "reparseAllFailed": "批次重新解析失敗",
       "saveBtn": "儲存設定",
       "saving": "儲存中...",
       "savedOk": "設定已儲存",

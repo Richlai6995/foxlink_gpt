@@ -961,6 +961,7 @@
     },
     "docs": {
       "uploadParseLabel": "Chế độ phân tích lần tải này:",
+      "uploadPdfOcrLabel": "OCR PDF:",
       "uploadParseDefault": "Dùng mặc định KB ({{mode}})",
       "parseModeTextOnly": "Chỉ văn bản",
       "parseModeFormatAware": "Nhận biết định dạng",
@@ -977,7 +978,11 @@
       "noChunks": "Không có dữ liệu đoạn",
       "parentChunkLabel": "Đoạn cha:",
       "prevPage": "Trước",
-      "nextPage": "Tiếp"
+      "nextPage": "Tiếp",
+      "reparseBtn": "Phân tích lại",
+      "reparseSelectMode": "Chọn chế độ OCR PDF:",
+      "reparseConfirmBtn": "Phân tích lại ngay",
+      "reparseFailed": "Phân tích lại thất bại"
     },
     "settings": {
       "basicSection": "Thông tin cơ bản",
@@ -1022,6 +1027,19 @@
       "parseModeFormatAware": "Nhận biết định dạng",
       "parseModeFormatAwareDesc": "Chú thích ngữ nghĩa màu sắc (lỗi/cảnh báo/chờ xác nhận/bình thường/thông tin)",
       "parseModeNote": "Áp dụng cho PDF · DOCX · XLSX. PPTX và ảnh luôn ở chế độ văn bản thuần. Có thể ghi đè khi tải lên.",
+      "pdfOcrLabel": "Chế độ OCR PDF (mặc định)",
+      "pdfOcrNote": "Chỉ áp dụng cho PDF. Auto phát hiện ảnh ở mỗi trang (≥5% diện tích) và chỉ OCR các trang đó; PDF scan thuần tự động chuyển sang OCR toàn bộ. Force OCR mọi trang (chậm hơn).",
+      "pdfOcr": {
+        "off": "Tắt",
+        "offDesc": "Chỉ trích xuất lớp văn bản nhúng, nhanh nhất. Có thể bỏ sót văn bản trong ảnh.",
+        "auto": "Tự động",
+        "autoDesc": "OCR các trang có ảnh; các trang còn lại dùng lớp văn bản. Khuyến nghị.",
+        "force": "Bắt buộc",
+        "forceDesc": "OCR mọi trang. Dùng cho tài liệu scan hoặc khi lớp văn bản không đáng tin."
+      },
+      "reparseAllConfirm": "Cài đặt đã thay đổi. Phân tích lại toàn bộ {{count}} tài liệu của KB này theo cài đặt mới?",
+      "reparseAllQueued": "Đã xếp {{count}} tài liệu vào hàng đợi phân tích lại (chạy nền)",
+      "reparseAllFailed": "Phân tích lại hàng loạt thất bại",
       "saveBtn": "Lưu cài đặt",
       "saving": "Đang lưu...",
       "savedOk": "Đã lưu cài đặt",

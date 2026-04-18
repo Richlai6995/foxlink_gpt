@@ -36,6 +36,7 @@ interface CreateForm {
   retrieval_mode: string
   ocr_model: string
   parse_mode: string
+  pdf_ocr_mode: 'off' | 'auto' | 'force'
 }
 
 const emptyForm = (): CreateForm => ({
@@ -46,6 +47,7 @@ const emptyForm = (): CreateForm => ({
   retrieval_mode: 'hybrid',
   ocr_model: '',
   parse_mode: 'text_only',
+  pdf_ocr_mode: 'off',
 })
 
 function formatBytes(bytes: number) {
@@ -314,6 +316,18 @@ export default function KnowledgeBasePage() {
                 >
                   <option value="text_only">{t('kb.createModal.parseModeTextOnly')}</option>
                   <option value="format_aware">{t('kb.createModal.parseModeFormatAware')}</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">{t('kb.settings.pdfOcrLabel')}</label>
+                <select
+                  value={form.pdf_ocr_mode}
+                  onChange={(e) => setForm({ ...form, pdf_ocr_mode: e.target.value as 'off' | 'auto' | 'force' })}
+                  className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="off">{t('kb.settings.pdfOcr.off')}</option>
+                  <option value="auto">{t('kb.settings.pdfOcr.auto')}</option>
+                  <option value="force">{t('kb.settings.pdfOcr.force')}</option>
                 </select>
               </div>
             </div>

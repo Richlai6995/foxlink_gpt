@@ -2576,7 +2576,7 @@ const userSections = [
     "sort_order": 15,
     "icon": "Database",
     "icon_color": "text-teal-500",
-    "last_modified": "2026-04-15",
+    "last_modified": "2026-04-18",
     "title": "知識庫市集",
     "sidebar_label": "知識庫市集",
     "blocks": [
@@ -2627,6 +2627,10 @@ const userSections = [
               {
                 "title": "選擇 OCR 模型（選填）",
                 "desc": "上傳文件時用來解析圖片/PDF 內圖片的 Gemini 模型，預設使用系統設定的 Flash 模型"
+              },
+              {
+                "title": "選擇 PDF OCR 模式（預設 Off）",
+                "desc": "Off：只抽文字層，最快，適合絕大多數有文字層的 PDF。Auto：有圖片（面積 ≥5%）的頁才 OCR，平衡速度與完整度；純掃描檔自動升級為 Force。Force：每頁都 OCR，適合掃描檔或文字層不可信任時。"
               },
               {
                 "title": "點選「建立」，進入知識庫詳情頁"
@@ -2855,8 +2859,8 @@ const userSections = [
             "rows": [
               [
                 "PDF",
-                "pdf-parse 文字層 + Gemini OCR（有圖片時）",
-                "掃描件需 OCR，速度較慢"
+                "依 PDF OCR 模式：Off（只抽文字層，最快）/ Auto（有圖片的頁才 OCR）/ Force（每頁都 OCR）",
+                "掃描檔 Auto 會自動偵測並升級為 Force；OCR 每頁並行 20，速度快"
               ],
               [
                 "DOCX / PPTX",
@@ -2882,7 +2886,7 @@ const userSections = [
           },
           {
             "type": "tip",
-            "text": "含大量圖表的 PDF 或 PPTX，建議在知識庫設定中指定 OCR 模型（Flash 即可），系統會自動對圖片頁面進行視覺理解，再合併到同一文件的文字 chunk 中。"
+            "text": "含大量圖表的 PDF：在知識庫設定 → 解析設定 → 「PDF OCR 模式」選擇 Auto，系統會自動偵測每頁是否有圖片（面積 ≥ 5%），只對含圖片的頁面送 Gemini OCR，其他頁用文字層，兼顧速度與完整度。純掃描檔自動升級為 Force；若文字層不可信任（舊版 PDF、轉檔不完整），可直接選 Force 每頁 OCR。上傳時可 per-file 覆蓋預設。每個文件也能單獨「重新解析」或在設定變更時批次重新解析。"
           },
           {
             "type": "note",

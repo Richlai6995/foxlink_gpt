@@ -299,6 +299,7 @@ router.post('/', async (req, res) => {
     score_threshold = 0,
     ocr_model      = null,
     parse_mode     = 'text_only',
+    pdf_ocr_mode   = 'off',
     tags,
     name_zh, name_en, name_vi, desc_zh, desc_en, desc_vi,
   } = req.body;
@@ -317,8 +318,8 @@ router.post('/', async (req, res) => {
          embedding_model, embedding_dims,
          chunk_strategy, chunk_config,
          retrieval_mode, rerank_model,
-         top_k_fetch, top_k_return, score_threshold, ocr_model, parse_mode, tags)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         top_k_fetch, top_k_return, score_threshold, ocr_model, parse_mode, pdf_ocr_mode, tags)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       id, req.user.id, name.trim(), description || null,
       await require('../services/llmDefaults').resolveDefaultModel(db, 'embedding'),
@@ -329,6 +330,7 @@ router.post('/', async (req, res) => {
       Number(top_k_fetch), Number(top_k_return), Number(score_threshold),
       ocr_model || null,
       ['text_only', 'format_aware'].includes(parse_mode) ? parse_mode : 'text_only',
+      ['off', 'auto', 'force'].includes(pdf_ocr_mode) ? pdf_ocr_mode : 'off',
       tagsStr,
     );
     // Auto-translate
@@ -486,7 +488,7 @@ router.put('/:id', async (req, res) => {
       chunk_strategy, chunk_config,
       retrieval_mode, rerank_model,
       top_k_fetch, top_k_return, score_threshold,
-      ocr_model, parse_mode, tags,
+      ocr_model, parse_mode, pdf_ocr_mode, tags,
       name_zh, name_en, name_vi, desc_zh, desc_en, desc_vi,
     } = req.body;
 
@@ -498,7 +500,7 @@ router.put('/:id', async (req, res) => {
           chunk_strategy=?, chunk_config=?,
           retrieval_mode=?, rerank_model=?,
           top_k_fetch=?, top_k_return=?, score_threshold=?,
-          ocr_model=?, parse_mode=?,
+          ocr_model=?, parse_mode=?, pdf_ocr_mode=?,
           tags=?,
           updated_at=SYSTIMESTAMP
       WHERE id=?
@@ -514,6 +516,7 @@ router.put('/:id', async (req, res) => {
       score_threshold != null ? Number(score_threshold) : target.score_threshold,
       ocr_model !== undefined ? (ocr_model || null) : target.ocr_model,
       parse_mode !== undefined ? (['text_only','format_aware'].includes(parse_mode) ? parse_mode : 'text_only') : (target.parse_mode || 'text_only'),
+      pdf_ocr_mode !== undefined ? (['off','auto','force'].includes(pdf_ocr_mode) ? pdf_ocr_mode : 'off') : (target.pdf_ocr_mode || 'off'),
       tags !== undefined ? JSON.stringify(tags || []) : (target.tags || '[]'),
       req.params.id,
     );
@@ -596,6 +599,11 @@ router.post('/:id/documents', upload.array('files', 20), async (req, res) => {
       const v = req.body?.parse_mode;
       return ['text_only', 'format_aware'].includes(v) ? v : (target.parse_mode || 'text_only');
     })();
+    // Per-upload pdf_ocr_mode override; falls back to KB-level default
+    const uploadPdfOcrMode = (() => {
+      const v = req.body?.pdf_ocr_mode;
+      return ['off', 'auto', 'force'].includes(v) ? v : (target.pdf_ocr_mode || 'off');
+    })();
 
     if (!req.files || req.files.length === 0) {
       return res.status(400).json({ error: '未選擇任何檔案' });
@@ -619,19 +627,20 @@ router.post('/:id/documents', upload.array('files', 20), async (req, res) => {
       usedBytes += file.size;
       const docId = uuid();
       const ext   = path.extname(originalName).toLowerCase().replace('.', '');
+      const storedFilename = path.basename(file.path);
       await db.prepare(`
-        INSERT INTO kb_documents (id, kb_id, filename, file_type, file_size, status, parse_mode)
-        VALUES (?, ?, ?, ?, ?, 'processing', ?)
-      `).run(docId, req.params.id, originalName, ext, file.size, uploadParseMode);
+        INSERT INTO kb_documents (id, kb_id, filename, file_type, file_size, status, parse_mode, pdf_ocr_mode, stored_filename)
+        VALUES (?, ?, ?, ?, ?, 'processing', ?, ?, ?)
+      `).run(docId, req.params.id, originalName, ext, file.size, uploadParseMode, uploadPdfOcrMode, storedFilename);
 
       created.push({ id: docId, filename: originalName, status: 'processing' });
-      toProcess.push({ docId, filePath: file.path, ext, parseMode: uploadParseMode });
+      toProcess.push({ docId, filePath: file.path, ext, parseMode: uploadParseMode, pdfOcrMode: uploadPdfOcrMode });
     }
 
     // Process sequentially to avoid Gemini API rate limits when multiple files are uploaded
     setImmediate(async () => {
       for (const item of toProcess) {
-        await processDocument(db, target, item.docId, item.filePath, item.ext, item.parseMode).catch((e) => {
+        await processDocument(db, target, item.docId, item.filePath, item.ext, item.parseMode, item.pdfOcrMode).catch((e) => {
           console.error('[KB] processDocument error:', e.message);
         });
       }
@@ -671,6 +680,118 @@ router.delete('/:id/documents/:docId', async (req, res) => {
     res.status(500).json({ error: e.message });
   }
 });
+
+// ─── POST /api/kb/:id/documents/:docId/reparse  ──────────────────────────────
+// Re-parse a single document with optional new pdf_ocr_mode / parse_mode override.
+router.post('/:id/documents/:docId/reparse', async (req, res) => {
+  const db = getDb();
+  try {
+    const target = await getEditableKb(db, req.params.id, req.user.id, req.user.role);
+    if (!target) return res.status(403).json({ error: '無編輯權限' });
+
+    const doc = await db.prepare('SELECT * FROM kb_documents WHERE id=? AND kb_id=?').get(req.params.docId, req.params.id);
+    if (!doc) return res.status(404).json({ error: '找不到文件' });
+
+    const filePath = _resolveDocFilePath(req.params.id, doc);
+    if (!filePath) return res.status(410).json({ error: '原始檔案已遺失，無法重新解析' });
+
+    const pdfOcrMode = ['off', 'auto', 'force'].includes(req.body?.pdf_ocr_mode)
+      ? req.body.pdf_ocr_mode : (doc.pdf_ocr_mode || target.pdf_ocr_mode || 'off');
+    const parseMode = ['text_only', 'format_aware'].includes(req.body?.parse_mode)
+      ? req.body.parse_mode : (doc.parse_mode || target.parse_mode || 'text_only');
+
+    // Delete existing chunks, update doc mode, mark processing
+    await db.prepare('DELETE FROM kb_chunks WHERE doc_id=?').run(req.params.docId);
+    await db.prepare(`
+      UPDATE kb_documents SET status='processing', chunk_count=0, error_msg=NULL,
+        parse_mode=?, pdf_ocr_mode=?, updated_at=SYSTIMESTAMP WHERE id=?
+    `).run(parseMode, pdfOcrMode, req.params.docId);
+    await updateKbStats(db, req.params.id);
+
+    setImmediate(() => {
+      processDocument(db, target, doc.id, filePath, doc.file_type, parseMode, pdfOcrMode).catch((e) => {
+        console.error('[KB] reparse processDocument error:', e.message);
+        db.prepare("UPDATE kb_documents SET status='error', error_msg=? WHERE id=?").run(e.message, doc.id).catch(() => {});
+      });
+    });
+
+    res.status(202).json({ id: doc.id, status: 'processing', parse_mode: parseMode, pdf_ocr_mode: pdfOcrMode });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── POST /api/kb/:id/reparse-all  ────────────────────────────────────────────
+// Re-parse ALL documents in the KB. Used when the user changes KB-level pdf_ocr_mode.
+router.post('/:id/reparse-all', async (req, res) => {
+  const db = getDb();
+  try {
+    const target = await getEditableKb(db, req.params.id, req.user.id, req.user.role);
+    if (!target) return res.status(403).json({ error: '無編輯權限' });
+
+    const pdfOcrMode = ['off', 'auto', 'force'].includes(req.body?.pdf_ocr_mode)
+      ? req.body.pdf_ocr_mode : (target.pdf_ocr_mode || 'off');
+    const parseMode = ['text_only', 'format_aware'].includes(req.body?.parse_mode)
+      ? req.body.parse_mode : (target.parse_mode || 'text_only');
+
+    const docs = await db.prepare('SELECT * FROM kb_documents WHERE kb_id=?').all(req.params.id);
+    const reparsable = [];
+    const skipped = [];
+    for (const doc of docs) {
+      const fp = _resolveDocFilePath(req.params.id, doc);
+      if (fp) reparsable.push({ doc, filePath: fp });
+      else skipped.push({ id: doc.id, filename: doc.filename, reason: 'file_missing' });
+    }
+
+    // Reset status for all reparsable docs
+    for (const { doc } of reparsable) {
+      await db.prepare('DELETE FROM kb_chunks WHERE doc_id=?').run(doc.id);
+      await db.prepare(`
+        UPDATE kb_documents SET status='processing', chunk_count=0, error_msg=NULL,
+          parse_mode=?, pdf_ocr_mode=?, updated_at=SYSTIMESTAMP WHERE id=?
+      `).run(parseMode, pdfOcrMode, doc.id);
+    }
+    await updateKbStats(db, req.params.id);
+
+    // Fire sequentially in background
+    setImmediate(async () => {
+      for (const { doc, filePath } of reparsable) {
+        await processDocument(db, target, doc.id, filePath, doc.file_type, parseMode, pdfOcrMode).catch((e) => {
+          console.error('[KB] reparse-all error:', doc.id, e.message);
+          db.prepare("UPDATE kb_documents SET status='error', error_msg=? WHERE id=?").run(e.message, doc.id).catch(() => {});
+        });
+      }
+    });
+
+    res.status(202).json({
+      queued: reparsable.length,
+      skipped,
+      parse_mode: parseMode,
+      pdf_ocr_mode: pdfOcrMode,
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Resolve the stored file path for a document — prefers stored_filename, falls back
+// to scanning the KB directory for a file whose name contains the sanitized stem.
+function _resolveDocFilePath(kbId, doc) {
+  const kbDir = path.join(UPLOAD_BASE, 'kb', kbId);
+  if (!fs.existsSync(kbDir)) return null;
+  if (doc.stored_filename) {
+    const p = path.join(kbDir, doc.stored_filename);
+    if (fs.existsSync(p)) return p;
+  }
+  // Legacy fallback: find first file whose name includes the sanitized stem.
+  const ext = path.extname(doc.filename);
+  const stem = path.basename(doc.filename, ext).replace(/[^a-zA-Z0-9\u4e00-\u9fff_-]/g, '_');
+  try {
+    const files = fs.readdirSync(kbDir);
+    const match = files.find((f) => f.includes(stem) && f.endsWith(ext));
+    return match ? path.join(kbDir, match) : null;
+  } catch { return null; }
+}
 
 // ─── GET /api/kb/:id/documents/:docId/chunks  ─────────────────────────────────
 router.get('/:id/documents/:docId/chunks', async (req, res) => {
@@ -941,15 +1062,21 @@ router.get('/:id/retrieval-tests', async (req, res) => {
   }
 });
 
+// Embed concurrency — shared with PDF OCR Gemini calls; default 20.
+const EMBED_CONCURRENCY = Number(process.env.KB_EMBED_CONCURRENCY || 20);
+
 // ─── Background: process a document ──────────────────────────────────────────
-async function processDocument(db, kb, docId, filePath, fileType, parseMode = null) {
+async function processDocument(db, kb, docId, filePath, fileType, parseMode = null, pdfOcrMode = null) {
   try {
     console.log(`[KB] Processing doc ${docId} (${fileType})`);
 
-    // Parse document → text (may include OCR for embedded images)
-    const effectiveOcrModel = kb.ocr_model || await require('../services/llmDefaults').resolveDefaultModel(db, 'ocr');
-    const effectiveParseMode = parseMode || kb.parse_mode || 'text_only';
-    const { text: rawText, ocrInputTokens, ocrOutputTokens } = await parseDocument(filePath, fileType, effectiveOcrModel, effectiveParseMode);
+    // Parse document → text (may include OCR for embedded images / per-page PDF OCR)
+    const effectiveOcrModel  = kb.ocr_model || await require('../services/llmDefaults').resolveDefaultModel(db, 'ocr');
+    const effectiveParseMode = parseMode   || kb.parse_mode    || 'text_only';
+    const effectivePdfOcrMode = pdfOcrMode || kb.pdf_ocr_mode || 'off';
+    const { text: rawText, ocrInputTokens, ocrOutputTokens } = await parseDocument(
+      filePath, fileType, effectiveOcrModel, effectiveParseMode, effectivePdfOcrMode,
+    );
     const wordCount = rawText.split(/\s+/).filter(Boolean).length;
 
     // Update content in db
@@ -968,27 +1095,29 @@ async function processDocument(db, kb, docId, filePath, fileType, parseMode = nu
     console.log(`[KB] Doc ${docId}: ${chunks.length} chunks, embedding...`);
 
     const dims = kb.embedding_dims || 768;
-    let chunkCount = 0;
     let totalEmbedTokens = 0;
 
-    for (let i = 0; i < chunks.length; i++) {
-      const chunk = chunks[i];
-      const chunkId = uuid();
-      const chunkTokens = Math.ceil(chunk.content.length / 4);
+    // Parallel embed with concurrency limit, then sequential INSERT (Oracle pool single conn).
+    const { default: pLimit } = await import('p-limit');
+    const limit = pLimit(EMBED_CONCURRENCY);
 
-      // Embed with retry
-      let embedding = null;
+    const embedded = await Promise.all(chunks.map((chunk, i) => limit(async () => {
+      let emb = null;
       for (let attempt = 0; attempt < 3; attempt++) {
         try {
-          const emb = await embedText(chunk.content, { dims });
-          embedding  = toVectorStr(emb);
+          emb = await embedText(chunk.content, { dims });
           break;
         } catch (e) {
           if (attempt === 2) throw e;
           await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
         }
       }
+      return { index: i, chunk, embedding: toVectorStr(emb) };
+    })));
 
+    for (const { index: i, chunk, embedding } of embedded) {
+      const chunkId = uuid();
+      const chunkTokens = Math.ceil(chunk.content.length / 4);
       await db.prepare(`
         INSERT INTO kb_chunks (id, doc_id, kb_id, parent_id, chunk_type, content, parent_content, position, token_count, embedding)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, TO_VECTOR(?))
@@ -1001,12 +1130,9 @@ async function processDocument(db, kb, docId, filePath, fileType, parseMode = nu
         chunkTokens,
         embedding,
       );
-      chunkCount++;
       totalEmbedTokens += chunkTokens;
-
-      // Throttle
-      if (i < chunks.length - 1) await new Promise((r) => setTimeout(r, 100));
     }
+    const chunkCount = embedded.length;
 
     await db.prepare(`
       UPDATE kb_documents SET status='ready', chunk_count=?, updated_at=SYSTIMESTAMP WHERE id=?

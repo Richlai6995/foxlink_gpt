@@ -135,45 +135,242 @@ async function imageToText(imageBuffer, mimeType = 'image/png', ocrModel = null)
 
 // ─── Document parsers ─────────────────────────────────────────────────────────
 
-// PDF: use Gemini native PDF understanding (handles text + embedded images/OCR).
-// Falls back to pdf-parse (text-layer only) if file too large or Gemini fails.
-// Returns { text, ocrInputTokens, ocrOutputTokens }
-const PDF_GEMINI_MAX_MB = Number(process.env.KB_PDF_OCR_MAX_MB || 18);
+// PDF parse mode: 'off' = text-layer only (fast, may miss image text)
+//                 'auto' = per-page — pages with images ≥5% get OCR, others use text layer
+//                 'force' = every page OCR (scanned docs / strong requirement)
+// Auto also auto-detects pure-scan PDFs (≥90% pages have <30 chars text) → force-OCR all.
+const PDF_OCR_PAGE_CONCURRENCY = Number(process.env.KB_PDF_OCR_CONCURRENCY || 20);
+const PDF_IMAGE_AREA_THRESHOLD  = 0.05;  // 5% of page area → treat as content image
+const PDF_SCAN_CHARS_THRESHOLD  = 30;    // <30 chars per page → likely scanned
+const PDF_SCAN_RATIO_THRESHOLD  = 0.9;   // ≥90% of pages below → treat as scanned
 
-async function parsePdf(filePath, ocrModel = null) {
-  const buf = fs.readFileSync(filePath);
-  const sizeMb = buf.length / (1024 * 1024);
+const PDF_PROMPT_TEXT_ONLY = '請完整提取此 PDF 頁面中所有內容，包括文字、表格、圖片中的文字與說明。保持段落結構，表格以文字形式呈現，圖片標記為 [圖片文字: <內容>]。只輸出頁面內容，不要加入額外說明或前言。';
+const PDF_PROMPT_FORMAT_AWARE = `請完整提取此 PDF 頁面中所有內容，並依照以下規則標注視覺格式：
+1. 紅色文字或紅色底色 → 在該文字後緊接標注 [紅色]
+2. 橙色文字或橙色底色 → 在該文字後緊接標注 [橙色]
+3. 黃色底色或黃色螢光標記 → 在該文字後緊接標注 [黃色]
+4. 綠色文字或綠色底色 → 在該文字後緊接標注 [綠色]
+5. 藍色或青色文字/底色 → 在該文字後緊接標注 [藍色]
+6. 刪除線文字 → 在該文字後緊接標注 [刪除線]
+7. 表格：以文字形式逐列呈現，保留欄位名稱與對應值
+8. 圖片中的文字：標記為 [圖片文字: <內容>]
+9. 如果某段落沒有特殊格式，直接輸出純文字即可。僅輸出頁面內容，不加額外說明或前言。`;
 
-  if (sizeMb <= PDF_GEMINI_MAX_MB) {
+// Per-page analysis — text layer + image area ratio (CTM-tracked).
+async function _analyzePdfPage(page, OPS) {
+  const viewport = page.getViewport({ scale: 1 });
+  const pageArea = Math.abs(viewport.width * viewport.height) || 1;
+
+  const tc = await page.getTextContent();
+  const text = tc.items.map((x) => x.str || '').join(' ').trim();
+
+  const ops = await page.getOperatorList();
+  let m = [1, 0, 0, 1, 0, 0];
+  const stack = [];
+  let totalImageArea = 0;
+  for (let i = 0; i < ops.fnArray.length; i++) {
+    const fn = ops.fnArray[i];
+    const args = ops.argsArray[i];
+    if (fn === OPS.save) {
+      stack.push([...m]);
+    } else if (fn === OPS.restore) {
+      m = stack.pop() || [1, 0, 0, 1, 0, 0];
+    } else if (fn === OPS.transform) {
+      const [A, B, C, D, E, F] = args;
+      const [a, b, c, d, e, f] = m;
+      m = [a * A + c * B, b * A + d * B, a * C + c * D, b * C + d * D, a * E + c * F + e, b * E + d * F + f];
+    } else if (fn === OPS.paintImageXObject || fn === OPS.paintInlineImageXObject) {
+      // Image painted at CTM — rendered area is |det(CTM[0..3])|
+      totalImageArea += Math.abs(m[0] * m[3] - m[1] * m[2]);
+    }
+  }
+  return { text, imgAreaRatio: totalImageArea / pageArea };
+}
+
+// OCR a single-page PDF via Gemini — 3 retries before giving up.
+async function _ocrSinglePagePdf(pdfBytes, ocrModel, prompt) {
+  const { GoogleGenerativeAI } = require('@google/generative-ai');
+  const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+  const model = genAI.getGenerativeModel({
+    model: ocrModel || process.env.KB_OCR_MODEL || process.env.GEMINI_MODEL_FLASH || 'gemini-2.0-flash',
+  });
+  const b64 = Buffer.from(pdfBytes).toString('base64');
+
+  let lastErr;
+  for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      const { GoogleGenerativeAI } = require('@google/generative-ai');
-      const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-      const model = genAI.getGenerativeModel({
-        model: ocrModel || process.env.KB_OCR_MODEL || process.env.GEMINI_MODEL_FLASH || 'gemini-2.0-flash',
-      });
       const result = await model.generateContent([
-        { inlineData: { data: buf.toString('base64'), mimeType: 'application/pdf' } },
-        {
-          text: '請完整提取此 PDF 文件中所有內容，包括文字、表格、圖片中的文字與說明。保持段落結構，表格以文字形式呈現，圖片標記為 [圖片文字: <內容>]。',
-        },
+        { inlineData: { data: b64, mimeType: 'application/pdf' } },
+        { text: prompt },
       ]);
       const usage = result.response.usageMetadata || {};
       return {
         text: result.response.text().trim(),
-        ocrInputTokens: usage.promptTokenCount || 0,
-        ocrOutputTokens: usage.candidatesTokenCount || 0,
+        inputTokens: usage.promptTokenCount || 0,
+        outputTokens: usage.candidatesTokenCount || 0,
       };
     } catch (e) {
-      console.warn(`[KBParser] PDF Gemini OCR failed (${sizeMb.toFixed(1)}MB), fallback to text-only:`, e.message);
+      lastErr = e;
+      if (attempt < 2) await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
     }
-  } else {
-    console.log(`[KBParser] PDF too large for Gemini OCR (${sizeMb.toFixed(1)}MB > ${PDF_GEMINI_MAX_MB}MB), using text-only`);
+  }
+  throw lastErr || new Error('OCR failed');
+}
+
+// Smart PDF parser — per-page text/OCR decision based on mode.
+async function parsePdfSmart(filePath, { ocrModel = null, pdfOcrMode = 'off', formatAware = false } = {}) {
+  const buf = fs.readFileSync(filePath);
+
+  // Mode 'off' → fast pdf-parse text-layer only
+  if (!pdfOcrMode || pdfOcrMode === 'off') {
+    const pdfParse = require('pdf-parse');
+    const data = await pdfParse(buf);
+    return { text: data.text || '', ocrInputTokens: 0, ocrOutputTokens: 0 };
   }
 
-  // Fallback: pdf-parse text layer only
-  const pdfParse = require('pdf-parse');
-  const data = await pdfParse(buf);
-  return { text: data.text || '', ocrInputTokens: 0, ocrOutputTokens: 0 };
+  const prompt = formatAware ? PDF_PROMPT_FORMAT_AWARE : PDF_PROMPT_TEXT_ONLY;
+
+  const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
+  const { PDFDocument } = require('pdf-lib');
+
+  let pdfDoc;
+  try {
+    pdfDoc = await pdfjs.getDocument({
+      data: new Uint8Array(buf),
+      disableWorker: true,
+      useSystemFonts: true,
+      isEvalSupported: false,
+    }).promise;
+  } catch (e) {
+    console.warn(`[KBParser] pdfjs load failed: ${e.message} — fallback to text-only`);
+    const pdfParse = require('pdf-parse');
+    const data = await pdfParse(buf);
+    return { text: data.text || '', ocrInputTokens: 0, ocrOutputTokens: 0 };
+  }
+
+  const numPages = pdfDoc.numPages;
+  const OPS = pdfjs.OPS;
+
+  // First pass: per-page text + image area ratio
+  const pageInfo = [];
+  for (let i = 1; i <= numPages; i++) {
+    try {
+      const page = await pdfDoc.getPage(i);
+      const info = await _analyzePdfPage(page, OPS);
+      pageInfo.push({ pageNum: i, ...info });
+      page.cleanup();
+    } catch (e) {
+      console.warn(`[KBParser] analyzePage ${i} failed: ${e.message}`);
+      pageInfo.push({ pageNum: i, text: '', imgAreaRatio: 0 });
+    }
+  }
+
+  // Auto-detect scanned: in 'auto' mode, if ≥90% of pages have <30 chars → scanned → force OCR
+  let effectiveMode = pdfOcrMode;
+  if (pdfOcrMode === 'auto') {
+    const sparsePages = pageInfo.filter((p) => p.text.length < PDF_SCAN_CHARS_THRESHOLD).length;
+    if (sparsePages / numPages >= PDF_SCAN_RATIO_THRESHOLD) {
+      effectiveMode = 'force';
+      console.log(`[KBParser] scanned PDF detected (${sparsePages}/${numPages} sparse pages) → force OCR`);
+    }
+  }
+
+  const needsOcr = (p) => {
+    if (effectiveMode === 'force') return true;
+    if (effectiveMode === 'auto') return p.imgAreaRatio >= PDF_IMAGE_AREA_THRESHOLD;
+    return false;
+  };
+  const ocrPageCount = pageInfo.filter(needsOcr).length;
+  console.log(`[KBParser] PDF ${numPages} pages, ${ocrPageCount} need OCR (mode=${effectiveMode}, formatAware=${formatAware})`);
+
+  if (ocrPageCount === 0) {
+    return {
+      text: pageInfo.map((p) => p.text).filter(Boolean).join('\n\n'),
+      ocrInputTokens: 0,
+      ocrOutputTokens: 0,
+    };
+  }
+
+  let srcPdf;
+  try {
+    srcPdf = await PDFDocument.load(buf, { ignoreEncryption: true });
+  } catch (e) {
+    console.warn(`[KBParser] pdf-lib load failed: ${e.message} — using text layer only`);
+    return {
+      text: pageInfo.map((p) => p.text).filter(Boolean).join('\n\n'),
+      ocrInputTokens: 0,
+      ocrOutputTokens: 0,
+    };
+  }
+
+  // Second pass: OCR pages in parallel (p-limit concurrency)
+  const { default: pLimit } = await import('p-limit');
+  const limit = pLimit(PDF_OCR_PAGE_CONCURRENCY);
+  let ocrInputTokens = 0;
+  let ocrOutputTokens = 0;
+
+  const results = await Promise.all(pageInfo.map((p) => limit(async () => {
+    if (!needsOcr(p)) return p.text;
+    try {
+      const dst = await PDFDocument.create();
+      const [copied] = await dst.copyPages(srcPdf, [p.pageNum - 1]);
+      dst.addPage(copied);
+      const singleBytes = await dst.save();
+      const r = await _ocrSinglePagePdf(singleBytes, ocrModel, prompt);
+      ocrInputTokens += r.inputTokens;
+      ocrOutputTokens += r.outputTokens;
+      return r.text || p.text; // fallback to text layer if OCR returns empty
+    } catch (e) {
+      console.warn(`[KBParser] OCR page ${p.pageNum} failed: ${e.message} — using text layer`);
+      return p.text;
+    }
+  })));
+
+  return {
+    text: results.filter(Boolean).join('\n\n'),
+    ocrInputTokens,
+    ocrOutputTokens,
+  };
+}
+
+// Backwards-compatible wrapper — default mode='off' preserves the old fast path.
+async function parsePdf(filePath, ocrModel = null, pdfOcrMode = 'off') {
+  return parsePdfSmart(filePath, { ocrModel, pdfOcrMode, formatAware: false });
+}
+
+// OCR all images in a zip archive that match pathRegex — in parallel (p-limit 20).
+// Returns image texts in archive's iteration order (stable within same zip).
+const IMG_OCR_CONCURRENCY = Number(process.env.KB_IMG_OCR_CONCURRENCY || 20);
+async function _ocrImagesInZip(zip, pathRegex, ocrModel) {
+  const targets = [];
+  for (const [name, file] of Object.entries(zip.files)) {
+    if (pathRegex.test(name) && /\.(png|jpg|jpeg|gif|webp|bmp)$/i.test(name)) {
+      targets.push({ name, file });
+    }
+  }
+  if (targets.length === 0) return { imgTexts: [], ocrInputTokens: 0, ocrOutputTokens: 0 };
+
+  const { default: pLimit } = await import('p-limit');
+  const limit = pLimit(IMG_OCR_CONCURRENCY);
+  let ocrInputTokens = 0;
+  let ocrOutputTokens = 0;
+
+  const texts = await Promise.all(targets.map(({ name, file }) => limit(async () => {
+    try {
+      const imgBuf = await file.async('nodebuffer');
+      const ext  = path.extname(name).slice(1).toLowerCase();
+      const mime = ext === 'jpg' ? 'image/jpeg' : `image/${ext}`;
+      const { text: txt, inputTokens, outputTokens } = await imageToText(imgBuf, mime, ocrModel);
+      ocrInputTokens += inputTokens;
+      ocrOutputTokens += outputTokens;
+      return txt ? `[圖片文字]\n${txt}` : '';
+    } catch (e) {
+      console.warn(`[KBParser] image OCR ${name} failed: ${e.message}`);
+      return '';
+    }
+  })));
+
+  return { imgTexts: texts.filter(Boolean), ocrInputTokens, ocrOutputTokens };
 }
 
 async function parseDocx(filePath, ocrModel = null) {
@@ -194,20 +391,8 @@ async function parseDocx(filePath, ocrModel = null) {
       .trim();
   }
 
-  // OCR images
-  const imgTexts = [];
-  let ocrInputTokens = 0, ocrOutputTokens = 0;
-  for (const [name, file] of Object.entries(zip.files)) {
-    if (/^word\/media\//i.test(name) && /\.(png|jpg|jpeg|gif|webp|bmp)$/i.test(name)) {
-      const imgBuf = await file.async('nodebuffer');
-      const ext  = path.extname(name).slice(1).toLowerCase();
-      const mime = ext === 'jpg' ? 'image/jpeg' : `image/${ext}`;
-      const { text: txt, inputTokens, outputTokens } = await imageToText(imgBuf, mime, ocrModel);
-      ocrInputTokens += inputTokens;
-      ocrOutputTokens += outputTokens;
-      if (txt) imgTexts.push(`[圖片文字]\n${txt}`);
-    }
-  }
+  // OCR images (parallel)
+  const { imgTexts, ocrInputTokens, ocrOutputTokens } = await _ocrImagesInZip(zip, /^word\/media\//i, ocrModel);
 
   return {
     text: [mainText, ...imgTexts].filter(Boolean).join('\n\n'),
@@ -244,19 +429,9 @@ async function parsePptx(filePath, ocrModel = null) {
     if (txt) parts.push(txt);
   }
 
-  // OCR images
-  let ocrInputTokens = 0, ocrOutputTokens = 0;
-  for (const [name, file] of Object.entries(zip.files)) {
-    if (/^ppt\/media\//i.test(name) && /\.(png|jpg|jpeg|gif|webp|bmp)$/i.test(name)) {
-      const imgBuf = await file.async('nodebuffer');
-      const ext  = path.extname(name).slice(1).toLowerCase();
-      const mime = ext === 'jpg' ? 'image/jpeg' : `image/${ext}`;
-      const { text: txt, inputTokens, outputTokens } = await imageToText(imgBuf, mime, ocrModel);
-      ocrInputTokens += inputTokens;
-      ocrOutputTokens += outputTokens;
-      if (txt) parts.push(`[圖片文字]\n${txt}`);
-    }
-  }
+  // OCR images (parallel)
+  const { imgTexts, ocrInputTokens, ocrOutputTokens } = await _ocrImagesInZip(zip, /^ppt\/media\//i, ocrModel);
+  parts.push(...imgTexts);
 
   return { text: parts.join('\n\n'), ocrInputTokens, ocrOutputTokens };
 }
@@ -274,22 +449,15 @@ async function parseExcel(filePath, ocrModel = null) {
     if (csv.trim()) parts.push(`[工作表: ${sheetName}]\n${csv}`);
   }
 
-  // OCR: images embedded in xl/media/
+  // OCR embedded images (parallel)
   let ocrInputTokens = 0, ocrOutputTokens = 0;
   try {
     const buf = fs.readFileSync(filePath);
     const zip = await JSZip.loadAsync(buf);
-    for (const [name, file] of Object.entries(zip.files)) {
-      if (/^xl\/media\//i.test(name) && /\.(png|jpg|jpeg|gif|webp|bmp)$/i.test(name)) {
-        const imgBuf = await file.async('nodebuffer');
-        const ext  = path.extname(name).slice(1).toLowerCase();
-        const mime = ext === 'jpg' ? 'image/jpeg' : `image/${ext}`;
-        const { text: txt, inputTokens, outputTokens } = await imageToText(imgBuf, mime, ocrModel);
-        ocrInputTokens += inputTokens;
-        ocrOutputTokens += outputTokens;
-        if (txt) parts.push(`[圖片文字]\n${txt}`);
-      }
-    }
+    const r = await _ocrImagesInZip(zip, /^xl\/media\//i, ocrModel);
+    parts.push(...r.imgTexts);
+    ocrInputTokens = r.ocrInputTokens;
+    ocrOutputTokens = r.ocrOutputTokens;
   } catch (e) {
     console.warn('[KBParser] Excel image OCR error:', e.message);
   }
@@ -305,11 +473,11 @@ async function parseExcel(filePath, ocrModel = null) {
  * @param {string} [parseMode]  'text_only' (default) | 'format_aware'
  * @returns {Promise<{ text: string, ocrInputTokens: number, ocrOutputTokens: number }>}
  */
-async function parseDocument(filePath, fileType, ocrModel = null, parseMode = 'text_only') {
+async function parseDocument(filePath, fileType, ocrModel = null, parseMode = 'text_only', pdfOcrMode = 'off') {
   const ext = (fileType || path.extname(filePath)).toLowerCase().replace(/^\./, '');
   const fa = parseMode === 'format_aware';
   switch (ext) {
-    case 'pdf':  return fa ? parsePdfFormatAware(filePath, ocrModel)  : parsePdf(filePath, ocrModel);
+    case 'pdf':  return fa ? parsePdfFormatAware(filePath, ocrModel, pdfOcrMode) : parsePdf(filePath, ocrModel, pdfOcrMode);
     case 'docx': return fa ? parseDocxFormatAware(filePath, ocrModel) : parseDocx(filePath, ocrModel);
     case 'xlsx': case 'xls': return fa ? parseExcelFormatAware(filePath, ocrModel) : parseExcel(filePath, ocrModel);
     case 'pptx': return await parsePptx(filePath, ocrModel); // pptx: no colour metadata, always text_only
@@ -428,44 +596,8 @@ function chunkParentChild(text, cfg = {}) {
 
 // ─── Format-aware document parsers ───────────────────────────────────────────
 
-async function parsePdfFormatAware(filePath, ocrModel = null) {
-  const buf = fs.readFileSync(filePath);
-  const sizeMb = buf.length / (1024 * 1024);
-
-  if (sizeMb <= PDF_GEMINI_MAX_MB) {
-    try {
-      const { GoogleGenerativeAI } = require('@google/generative-ai');
-      const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-      const model = genAI.getGenerativeModel({
-        model: ocrModel || process.env.KB_OCR_MODEL || process.env.GEMINI_MODEL_FLASH || 'gemini-2.0-flash',
-      });
-      const result = await model.generateContent([
-        { inlineData: { data: buf.toString('base64'), mimeType: 'application/pdf' } },
-        {
-          text: `請完整提取此 PDF 文件中所有內容，並依照以下規則標注視覺格式：
-1. 紅色文字或紅色底色 → 在該文字後緊接標注 [紅色]
-2. 橙色文字或橙色底色 → 在該文字後緊接標注 [橙色]
-3. 黃色底色或黃色螢光標記 → 在該文字後緊接標注 [黃色]
-4. 綠色文字或綠色底色 → 在該文字後緊接標注 [綠色]
-5. 藍色或青色文字/底色 → 在該文字後緊接標注 [藍色]
-6. 刪除線文字 → 在該文字後緊接標注 [刪除線]
-7. 表格：以文字形式逐列呈現，保留欄位名稱與對應值
-8. 圖片中的文字：標記為 [圖片文字: <內容>]
-9. 如果某段落沒有特殊格式，直接輸出純文字即可。僅輸出文件內容，不加額外說明或前言。`,
-        },
-      ]);
-      const usage = result.response.usageMetadata || {};
-      return {
-        text: result.response.text().trim(),
-        ocrInputTokens: usage.promptTokenCount || 0,
-        ocrOutputTokens: usage.candidatesTokenCount || 0,
-      };
-    } catch (e) {
-      console.warn(`[KBParser] PDF format-aware Gemini failed, fallback to text_only:`, e.message);
-    }
-  }
-  // Fallback to text_only
-  return parsePdf(filePath, ocrModel);
+async function parsePdfFormatAware(filePath, ocrModel = null, pdfOcrMode = 'off') {
+  return parsePdfSmart(filePath, { ocrModel, pdfOcrMode, formatAware: true });
 }
 
 async function parseDocxFormatAware(filePath, ocrModel = null) {
@@ -486,20 +618,8 @@ async function parseDocxFormatAware(filePath, ocrModel = null) {
     mainText = paragraphs.join('\n');
   }
 
-  // OCR images (same as parseDocx)
-  const imgTexts = [];
-  let ocrInputTokens = 0, ocrOutputTokens = 0;
-  for (const [name, file] of Object.entries(zip.files)) {
-    if (/^word\/media\//i.test(name) && /\.(png|jpg|jpeg|gif|webp|bmp)$/i.test(name)) {
-      const imgBuf = await file.async('nodebuffer');
-      const ext  = path.extname(name).slice(1).toLowerCase();
-      const mime = ext === 'jpg' ? 'image/jpeg' : `image/${ext}`;
-      const { text: txt, inputTokens, outputTokens } = await imageToText(imgBuf, mime, ocrModel);
-      ocrInputTokens += inputTokens;
-      ocrOutputTokens += outputTokens;
-      if (txt) imgTexts.push(`[圖片文字]\n${txt}`);
-    }
-  }
+  // OCR images (parallel)
+  const { imgTexts, ocrInputTokens, ocrOutputTokens } = await _ocrImagesInZip(zip, /^word\/media\//i, ocrModel);
 
   return {
     text: [mainText, ...imgTexts].filter(Boolean).join('\n\n'),
@@ -562,20 +682,13 @@ async function parseExcelFormatAware(filePath, ocrModel = null) {
     if (rows.length) parts.push(`[工作表: ${name}]\n${rows.join('\n')}`);
   }
 
-  // 4. OCR embedded images
+  // 4. OCR embedded images (parallel)
   let ocrInputTokens = 0, ocrOutputTokens = 0;
   try {
-    for (const [name, file] of Object.entries(zip.files)) {
-      if (/^xl\/media\//i.test(name) && /\.(png|jpg|jpeg|gif|webp|bmp)$/i.test(name)) {
-        const imgBuf = await file.async('nodebuffer');
-        const ext  = path.extname(name).slice(1).toLowerCase();
-        const mime = ext === 'jpg' ? 'image/jpeg' : `image/${ext}`;
-        const { text: txt, inputTokens, outputTokens } = await imageToText(imgBuf, mime, ocrModel);
-        ocrInputTokens += inputTokens;
-        ocrOutputTokens += outputTokens;
-        if (txt) parts.push(`[圖片文字]\n${txt}`);
-      }
-    }
+    const r = await _ocrImagesInZip(zip, /^xl\/media\//i, ocrModel);
+    parts.push(...r.imgTexts);
+    ocrInputTokens = r.ocrInputTokens;
+    ocrOutputTokens = r.ocrOutputTokens;
   } catch (e) {
     console.warn('[KBParser] Excel format-aware image OCR error:', e.message);
   }

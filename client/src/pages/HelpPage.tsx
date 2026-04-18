@@ -3789,7 +3789,9 @@ function AdminManual() {
               ['KB_EMBEDDING_MODEL', '向量化使用的 Embedding 模型', 'gemini-embedding-001'],
               ['KB_EMBEDDING_DIMS', '預設 Embedding 維度', '768'],
               ['KB_OCR_MODEL', '圖片 / PDF OCR 使用的 Gemini 模型（可被每個 KB 的設定覆蓋）', 'gemini-3-flash-preview'],
-              ['KB_PDF_OCR_MAX_MB', 'PDF 以 Gemini 解析的最大檔案大小，超過則 fallback 純文字層', '18 MB'],
+              ['KB_PDF_OCR_CONCURRENCY', 'PDF per-page OCR 並發數（auto / force 模式）', '20'],
+              ['KB_IMG_OCR_CONCURRENCY', 'DOCX / PPTX / XLSX 嵌入圖 OCR 並發數', '20'],
+              ['KB_EMBED_CONCURRENCY', 'Embedding 並發數', '20'],
               ['KB_RERANK_MODEL', '混合檢索重排序模型', 'gemini-2.0-flash'],
               ['KB_RERANK_TOP_K_FETCH', '初始擷取 Top K', '10'],
               ['KB_RERANK_TOP_K_RETURN', '最終返回 Top K', '3'],
@@ -5708,7 +5710,9 @@ cd ~/foxlink_gpt && git pull
             rows={[
               ['KB_EMBEDDING_MODEL', 'Embedding 向量化模型 ID', 'gemini-embedding-001', '對應後台「向量預設模型設定」中 model_role=embedding 的模型'],
               ['KB_OCR_MODEL', 'OCR 圖文辨識模型 ID', 'gemini-3-flash-preview', '用於 PDF 掃描版 OCR，建議用 Flash（速度快）'],
-              ['KB_PDF_OCR_MAX_MB', 'PDF OCR 最大檔案大小（MB）', '18', '超過此大小的 PDF 跳過 OCR，改用純文字解析'],
+              ['KB_PDF_OCR_CONCURRENCY', 'PDF per-page OCR 並發數', '20', 'auto / force 模式下每頁 OCR 的並發數'],
+              ['KB_IMG_OCR_CONCURRENCY', 'DOCX/PPTX/XLSX 嵌入圖 OCR 並發數', '20', ''],
+              ['KB_EMBED_CONCURRENCY', 'Chunk embedding 並發數', '20', '每個文件切塊後向量化的並發數'],
               ['KB_EMBEDDING_DIMS', 'Embedding 向量維度', '768', '需與 Embedding 模型輸出維度一致；改動後需重建所有 KB 索引'],
               ['KB_RERANK_MODEL', 'Rerank 重排序模型 ID', 'gemini-2.5-flash', '混合檢索的第二階段重排序，建議 Flash 系列'],
               ['KB_RERANK_TOP_K_FETCH', 'Rerank 前取回候選數', '10', '向量/全文檢索各取 10 筆後送 Rerank'],
@@ -5849,7 +5853,9 @@ DASHBOARD_ETL_MAX_ROWS=1000000
 # ─── Knowledge Base ───────────────────────────────────────────────
 KB_EMBEDDING_MODEL=gemini-embedding-001
 KB_OCR_MODEL=gemini-3-flash-preview
-KB_PDF_OCR_MAX_MB=18
+KB_PDF_OCR_CONCURRENCY=20
+KB_IMG_OCR_CONCURRENCY=20
+KB_EMBED_CONCURRENCY=20
 KB_EMBEDDING_DIMS=768
 KB_RERANK_MODEL=gemini-2.5-flash
 KB_RERANK_TOP_K_FETCH=10

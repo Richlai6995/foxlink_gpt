@@ -404,6 +404,13 @@ async function runMigrations(db) {
   await addCol('KNOWLEDGE_BASES', 'PARSE_MODE',         "VARCHAR2(20) DEFAULT 'text_only'");
   await addCol('KB_DOCUMENTS',    'PARSE_MODE',         "VARCHAR2(20)");
 
+  // PDF OCR mode — off (text-layer only) | auto (per-page image detection) | force (every page OCR)
+  await addCol('KNOWLEDGE_BASES', 'PDF_OCR_MODE', "VARCHAR2(10) DEFAULT 'off'");
+  await addCol('KB_DOCUMENTS',    'PDF_OCR_MODE', "VARCHAR2(10)");
+
+  // KB_DOCUMENTS stored file path (for re-parse) — relative to UPLOAD_BASE/kb/<kb_id>/
+  await addCol('KB_DOCUMENTS', 'STORED_FILENAME', 'VARCHAR2(500)');
+
   // ── Chat session multilingual titles ───────────────────────────────────────
   await addCol('CHAT_SESSIONS', 'TITLE_ZH', 'VARCHAR2(200)');
   await addCol('CHAT_SESSIONS', 'TITLE_EN', 'VARCHAR2(200)');

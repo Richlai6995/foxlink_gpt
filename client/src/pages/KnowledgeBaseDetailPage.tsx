@@ -27,6 +27,7 @@ interface KnowledgeBase {
   top_k_fetch: number; top_k_return: number; score_threshold: number
   ocr_model: string | null
   parse_mode: string | null
+  pdf_ocr_mode: string | null
   is_public: number; public_status: string
   doc_count: number; chunk_count: number; total_size_bytes: number
   creator_id: number; creator_name: string; is_owner: boolean; can_edit: boolean
@@ -38,6 +39,7 @@ interface KbDocument {
   id: string; filename: string; file_type: string; file_size: number
   word_count: number | null; chunk_count: number; status: string
   error_msg: string | null; created_at: string
+  parse_mode?: string | null; pdf_ocr_mode?: string | null
 }
 
 interface KbChunk {
@@ -309,11 +311,14 @@ function DocumentsTab({ kb, onRefresh, isOwner }: { kb: KnowledgeBase; onRefresh
   const [loading, setLoading] = useState(true)
   const [uploading, setUploading] = useState(false)
   const [uploadParseMode, setUploadParseMode] = useState<string>('') // '' = use KB default
+  const [uploadPdfOcrMode, setUploadPdfOcrMode] = useState<string>('') // '' = use KB default
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [chunks, setChunks] = useState<KbChunk[]>([])
   const [chunksLoading, setChunksLoading] = useState(false)
   const [chunkPage, setChunkPage] = useState(1)
   const [chunkTotal, setChunkTotal] = useState(0)
+  const [reparseId, setReparseId] = useState<string | null>(null) // doc being reparsed (popover open)
+  const [reparseMode, setReparseMode] = useState<string>('')       // chosen pdf_ocr_mode for reparse
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const loadDocs = useCallback(async () => {
@@ -356,6 +361,7 @@ function DocumentsTab({ kb, onRefresh, isOwner }: { kb: KnowledgeBase; onRefresh
     const fd = new FormData()
     Array.from(files).forEach((f) => fd.append('files', f))
     if (uploadParseMode) fd.append('parse_mode', uploadParseMode)
+    if (uploadPdfOcrMode) fd.append('pdf_ocr_mode', uploadPdfOcrMode)
     try {
       await api.post(`/kb/${kb.id}/documents`, fd, { headers: { 'Content-Type': 'multipart/form-data' } })
       await loadDocs()
@@ -378,6 +384,21 @@ function DocumentsTab({ kb, onRefresh, isOwner }: { kb: KnowledgeBase; onRefresh
     } catch (e: any) { alert(e.response?.data?.error || t('kb.docs.deleteFailed')) }
   }
 
+  const openReparse = (doc: KbDocument) => {
+    setReparseId(doc.id)
+    setReparseMode(doc.pdf_ocr_mode || kb.pdf_ocr_mode || 'off')
+  }
+
+  const handleReparse = async (doc: KbDocument) => {
+    try {
+      await api.post(`/kb/${kb.id}/documents/${doc.id}/reparse`, { pdf_ocr_mode: reparseMode })
+      setReparseId(null)
+      await loadDocs()
+    } catch (e: any) {
+      alert(e.response?.data?.error || t('kb.docs.reparseFailed'))
+    }
+  }
+
   const statusIcon = (status: string) => {
     if (status === 'ready')      return <CheckCircle size={14} className="text-green-500" />
     if (status === 'error')      return <XCircle size={14} className="text-red-500" />
@@ -387,13 +408,15 @@ function DocumentsTab({ kb, onRefresh, isOwner }: { kb: KnowledgeBase; onRefresh
   const parseModeLabel = kb.parse_mode === 'format_aware'
     ? t('kb.docs.parseModeFormatAware')
     : t('kb.docs.parseModeTextOnly')
+  const pdfOcrModeKey = (kb.pdf_ocr_mode as 'off' | 'auto' | 'force') || 'off'
+  const pdfOcrModeLabel = t(`kb.settings.pdfOcr.${pdfOcrModeKey}`)
 
   return (
     <div className="p-5 space-y-4">
       {isOwner && (
         <div className="space-y-2">
           {/* Per-upload parse mode override */}
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <span className="text-xs text-slate-500 whitespace-nowrap">{t('kb.docs.uploadParseLabel')}</span>
             <select
               value={uploadParseMode}
@@ -403,6 +426,17 @@ function DocumentsTab({ kb, onRefresh, isOwner }: { kb: KnowledgeBase; onRefresh
               <option value="">{t('kb.docs.uploadParseDefault', { mode: parseModeLabel })}</option>
               <option value="text_only">{t('kb.docs.parseModeTextOnly')}</option>
               <option value="format_aware">{t('kb.docs.parseModeFormatAware')}</option>
+            </select>
+            <span className="text-xs text-slate-500 whitespace-nowrap">{t('kb.docs.uploadPdfOcrLabel')}</span>
+            <select
+              value={uploadPdfOcrMode}
+              onChange={(e) => setUploadPdfOcrMode(e.target.value)}
+              className="text-xs border border-slate-200 rounded-lg px-2 py-1 bg-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+            >
+              <option value="">{t('kb.docs.uploadParseDefault', { mode: pdfOcrModeLabel })}</option>
+              <option value="off">{t('kb.settings.pdfOcr.off')}</option>
+              <option value="auto">{t('kb.settings.pdfOcr.auto')}</option>
+              <option value="force">{t('kb.settings.pdfOcr.force')}</option>
             </select>
           </div>
           <div
@@ -456,6 +490,15 @@ function DocumentsTab({ kb, onRefresh, isOwner }: { kb: KnowledgeBase; onRefresh
                       {expandedId === doc.id ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
                     </button>
                   )}
+                  {isOwner && doc.status !== 'processing' && (
+                    <button
+                      onClick={() => openReparse(doc)}
+                      title={t('kb.docs.reparseBtn')}
+                      className="p-1 text-slate-300 hover:text-blue-500 transition"
+                    >
+                      <RefreshCw size={13} />
+                    </button>
+                  )}
                   {isOwner && (
                     <button onClick={() => handleDelete(doc)} className="p-1 text-slate-300 hover:text-red-500 transition">
                       <Trash2 size={13} />
@@ -463,6 +506,42 @@ function DocumentsTab({ kb, onRefresh, isOwner }: { kb: KnowledgeBase; onRefresh
                   )}
                 </div>
               </div>
+
+              {reparseId === doc.id && (
+                <div className="border-t border-slate-100 bg-blue-50/40 px-4 py-3 space-y-2">
+                  <div className="text-xs text-slate-600 font-medium">{t('kb.docs.reparseSelectMode')}</div>
+                  <div className="grid grid-cols-3 gap-2">
+                    {(['off', 'auto', 'force'] as const).map((m) => (
+                      <label
+                        key={m}
+                        className={`border rounded-lg p-2 cursor-pointer transition text-xs ${
+                          reparseMode === m ? 'border-blue-500 bg-blue-100/60' : 'border-slate-200 hover:border-slate-300 bg-white'
+                        }`}
+                      >
+                        <input
+                          type="radio"
+                          className="sr-only"
+                          value={m}
+                          checked={reparseMode === m}
+                          onChange={() => setReparseMode(m)}
+                        />
+                        <div className="font-medium text-slate-700">{t(`kb.settings.pdfOcr.${m}`)}</div>
+                        <div className="text-slate-400 mt-0.5 leading-snug">{t(`kb.settings.pdfOcr.${m}Desc`)}</div>
+                      </label>
+                    ))}
+                  </div>
+                  <div className="flex items-center gap-2 justify-end pt-1">
+                    <button
+                      onClick={() => setReparseId(null)}
+                      className="text-xs px-3 py-1 text-slate-500 hover:text-slate-700"
+                    >{t('common.cancel')}</button>
+                    <button
+                      onClick={() => handleReparse(doc)}
+                      className="text-xs px-3 py-1 bg-blue-500 text-white rounded hover:bg-blue-600"
+                    >{t('kb.docs.reparseConfirmBtn')}</button>
+                  </div>
+                </div>
+              )}
 
               {expandedId === doc.id && (
                 <div className="border-t border-slate-100 bg-slate-50 px-4 py-3">
@@ -544,6 +623,7 @@ function SettingsTab({ kb, onSaved, isOwner }: { kb: KnowledgeBase; onSaved: () 
   const [scoreThr,   setScoreThr]   = useState(String(kb.score_threshold ?? 0))
   const [ocrModel,      setOcrModel]      = useState(kb.ocr_model ?? '')
   const [parseMode,     setParseMode]     = useState(kb.parse_mode ?? 'text_only')
+  const [pdfOcrMode,    setPdfOcrMode]    = useState<'off' | 'auto' | 'force'>(((kb.pdf_ocr_mode || 'off') as 'off' | 'auto' | 'force'))
   const [useRerank,     setUseRerank]     = useState(kb.rerank_model !== 'disabled')
   const [rerankModel,   setRerankModel]   = useState(kb.rerank_model === 'disabled' ? '' : (kb.rerank_model ?? ''))
   const [llmModels,     setLlmModels]     = useState<{ key: string; name: string; api_model: string; model_role: string | null }[]>([])
@@ -570,6 +650,8 @@ function SettingsTab({ kb, onSaved, isOwner }: { kb: KnowledgeBase; onSaved: () 
 
   const save = async () => {
     setSaving(true); setMsg('')
+    const pdfOcrModeChanged = (kb.pdf_ocr_mode || 'off') !== pdfOcrMode
+    const parseModeChanged = (kb.parse_mode || 'text_only') !== parseMode
     try {
       await api.put(`/kb/${kb.id}`, {
         name:             kbName.trim() || kb.name,
@@ -584,10 +666,27 @@ function SettingsTab({ kb, onSaved, isOwner }: { kb: KnowledgeBase; onSaved: () 
         score_threshold:  Number(scoreThr),
         ocr_model:        ocrModel || null,
         parse_mode:       parseMode || 'text_only',
+        pdf_ocr_mode:     pdfOcrMode,
       })
       setMsg(t('kb.settings.savedOk'))
       onSaved()
       setTimeout(() => setMsg(''), 2000)
+
+      // If pdf_ocr_mode or parse_mode changed, offer batch reparse
+      if ((pdfOcrModeChanged || parseModeChanged) && (kb.doc_count || 0) > 0) {
+        if (confirm(t('kb.settings.reparseAllConfirm', { count: kb.doc_count }))) {
+          try {
+            const res = await api.post(`/kb/${kb.id}/reparse-all`, {
+              pdf_ocr_mode: pdfOcrMode,
+              parse_mode:   parseMode,
+            })
+            setMsg(t('kb.settings.reparseAllQueued', { count: res.data.queued }))
+            setTimeout(() => setMsg(''), 4000)
+          } catch (e: any) {
+            setMsg(e.response?.data?.error || t('kb.settings.reparseAllFailed'))
+          }
+        }
+      }
     } catch (e: any) {
       setMsg(e.response?.data?.error || t('kb.settings.saveFailed'))
     } finally { setSaving(false) }
@@ -838,6 +937,29 @@ function SettingsTab({ kb, onSaved, isOwner }: { kb: KnowledgeBase; onSaved: () 
               ))}
             </div>
             <p className="mt-1.5 text-xs text-slate-400">{t('kb.settings.parseModeNote')}</p>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-slate-600 mb-1">{t('kb.settings.pdfOcrLabel')}</label>
+            <div className="grid grid-cols-3 gap-2">
+              {(['off', 'auto', 'force'] as const).map((val) => (
+                <label
+                  key={val}
+                  className={`cursor-pointer border rounded-lg p-2.5 transition ${!isOwner ? 'opacity-60 cursor-not-allowed' : ''} ${pdfOcrMode === val ? 'border-blue-500 bg-blue-50' : 'border-slate-200 hover:border-slate-300'}`}
+                >
+                  <input
+                    type="radio"
+                    className="sr-only"
+                    value={val}
+                    checked={pdfOcrMode === val}
+                    disabled={!isOwner}
+                    onChange={() => setPdfOcrMode(val)}
+                  />
+                  <div className="text-xs font-medium text-slate-700">{t(`kb.settings.pdfOcr.${val}`)}</div>
+                  <div className="text-xs text-slate-400 mt-0.5 leading-snug">{t(`kb.settings.pdfOcr.${val}Desc`)}</div>
+                </label>
+              ))}
+            </div>
+            <p className="mt-1.5 text-xs text-slate-400">{t('kb.settings.pdfOcrNote')}</p>
           </div>
         </div>
       </div>
