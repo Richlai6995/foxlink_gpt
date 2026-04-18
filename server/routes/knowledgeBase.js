@@ -1150,8 +1150,15 @@ router.get('/:id/retrieval-tests', async (req, res) => {
   }
 });
 
-// Embed concurrency — shared with PDF OCR Gemini calls; default 20.
-const EMBED_CONCURRENCY = Number(process.env.KB_EMBED_CONCURRENCY || 20);
+// Embed concurrency — Gemini embedding-001 has stricter RPM limit than
+// generation models; 8 keeps safely under paid tier 1500 RPM for big docs.
+const EMBED_CONCURRENCY = Number(process.env.KB_EMBED_CONCURRENCY || 8);
+
+// Is this a rate-limit / quota error from the Gemini API?
+function _isRateLimitError(e) {
+  const s = String(e?.message || e || '');
+  return /\b429\b|Too Many Requests|RESOURCE_EXHAUSTED|quota|rate limit/i.test(s);
+}
 
 // ─── Background: process a document ──────────────────────────────────────────
 async function processDocument(db, kb, docId, filePath, fileType, parseMode = null, pdfOcrMode = null) {
@@ -1191,13 +1198,18 @@ async function processDocument(db, kb, docId, filePath, fileType, parseMode = nu
 
     const embedded = await Promise.all(chunks.map((chunk, i) => limit(async () => {
       let emb = null;
-      for (let attempt = 0; attempt < 3; attempt++) {
+      // 5 retries; longer backoff with jitter on 429 to avoid thundering herd
+      for (let attempt = 0; attempt < 5; attempt++) {
         try {
           emb = await embedText(chunk.content, { dims });
           break;
         } catch (e) {
-          if (attempt === 2) throw e;
-          await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
+          if (attempt === 4) throw e;
+          const base = _isRateLimitError(e)
+            ? Math.min(60000, 5000 * Math.pow(2, attempt))  // 5s, 10s, 20s, 40s, cap 60s
+            : 1000 * (attempt + 1);                          // 1s, 2s, 3s, 4s
+          const jitter = Math.floor(Math.random() * 1000);
+          await new Promise((r) => setTimeout(r, base + jitter));
         }
       }
       return { index: i, chunk, embedding: toVectorStr(emb) };

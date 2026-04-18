@@ -187,7 +187,13 @@ async function _analyzePdfPage(page, OPS) {
   return { text, imgAreaRatio: totalImageArea / pageArea };
 }
 
-// OCR a single-page PDF via Gemini — 3 retries before giving up.
+// Detect Gemini rate-limit / quota errors.
+function _isRateLimitError(e) {
+  const s = String(e?.message || e || '');
+  return /\b429\b|Too Many Requests|RESOURCE_EXHAUSTED|quota|rate limit/i.test(s);
+}
+
+// OCR a single-page PDF via Gemini — 5 retries with 429-aware backoff.
 async function _ocrSinglePagePdf(pdfBytes, ocrModel, prompt) {
   const { GoogleGenerativeAI } = require('@google/generative-ai');
   const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
@@ -197,7 +203,7 @@ async function _ocrSinglePagePdf(pdfBytes, ocrModel, prompt) {
   const b64 = Buffer.from(pdfBytes).toString('base64');
 
   let lastErr;
-  for (let attempt = 0; attempt < 3; attempt++) {
+  for (let attempt = 0; attempt < 5; attempt++) {
     try {
       const result = await model.generateContent([
         { inlineData: { data: b64, mimeType: 'application/pdf' } },
@@ -211,7 +217,13 @@ async function _ocrSinglePagePdf(pdfBytes, ocrModel, prompt) {
       };
     } catch (e) {
       lastErr = e;
-      if (attempt < 2) await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
+      if (attempt < 4) {
+        const base = _isRateLimitError(e)
+          ? Math.min(60000, 5000 * Math.pow(2, attempt))
+          : 1000 * (attempt + 1);
+        const jitter = Math.floor(Math.random() * 1000);
+        await new Promise((r) => setTimeout(r, base + jitter));
+      }
     }
   }
   throw lastErr || new Error('OCR failed');
