@@ -1,11 +1,9 @@
 require('dotenv').config();
-const { GoogleGenerativeAI } = require('@google/generative-ai');
 const fs = require('fs');
 const path = require('path');
 
 const { classifyUpload } = require('../utils/uploadFileTypes');
-
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
+const { getGenerativeModel, extractText, extractUsage } = require('./geminiClient');
 
 const MODEL_PRO = process.env.GEMINI_MODEL_PRO || 'gemini-3-pro-preview';
 const MODEL_FLASH = process.env.GEMINI_MODEL_FLASH || 'gemini-3-flash-preview';
@@ -176,7 +174,7 @@ async function transcribeAudio(filePath, mimeType, langOrTimeout, timeoutMs = 25
   };
   const prompt = PROMPTS[lang] || '請完整轉錄這段音訊，只回傳轉錄文字，不要加任何說明。';
 
-  const model = genAI.getGenerativeModel({ model: MODEL_FLASH });
+  const model = getGenerativeModel({ model: MODEL_FLASH });
   const audioPart = await fileToGeminiPart(filePath, mimeType);
 
   const transcribePromise = model.generateContent([
@@ -188,11 +186,11 @@ async function transcribeAudio(filePath, mimeType, langOrTimeout, timeoutMs = 25
   );
 
   const result = await Promise.race([transcribePromise, timeoutPromise]);
-  const usage = result.response.usageMetadata || {};
+  const usage = extractUsage(result);
   return {
-    text: result.response.text(),
-    inputTokens: usage.promptTokenCount || 0,
-    outputTokens: usage.candidatesTokenCount || 0,
+    text: extractText(result),
+    inputTokens: usage.inputTokens,
+    outputTokens: usage.outputTokens,
   };
 }
 
@@ -250,7 +248,7 @@ async function streamChat(apiModel, history, userParts, onChunk, extraSystemInst
     ...(genConfig?.thinking_budget != null ? { thinkingConfig: { thinkBudget: genConfig.thinking_budget } } : {}),
   };
 
-  const model = genAI.getGenerativeModel({
+  const model = getGenerativeModel({
     model: apiModel,
     systemInstruction: fullInstruction,
     generationConfig,
@@ -263,24 +261,23 @@ async function streamChat(apiModel, history, userParts, onChunk, extraSystemInst
 
   let fullText = '';
   let searchUsed = false;
+  let finishedEarly = false;
   for await (const chunk of result.stream) {
-    let chunkText = '';
-    try {
-      chunkText = chunk.text();
-    } catch (e) {
-      const fr = chunk.candidates?.[0]?.finishReason;
-      console.warn(`[Gemini] chunk.text() 失敗 finishReason=${fr}:`, e.message);
+    // extractText 統一處理兩個 SDK（AI Studio .text() / Vertex AI candidates.parts）；
+    // 若完全無 text，檢查 finishReason 判斷是否異常終止。
+    const chunkText = extractText(chunk);
+    const fr = chunk.candidates?.[0]?.finishReason;
+    if (!chunkText && fr && fr !== 'STOP') {
       if (fr === 'MAX_TOKENS') {
         console.warn(`[Gemini] 已達 maxOutputTokens 上限，輸出被截斷`);
         fullText += '\n\n[⚠️ 回應已達最大 Token 上限，內容可能不完整]';
         onChunk('\n\n[⚠️ 回應已達最大 Token 上限，內容可能不完整]');
-        break;
-      }
-      if (fr && fr !== 'STOP') {
+      } else {
+        console.warn(`[Gemini] chunk 異常 finishReason=${fr}`);
         throw new Error(`Gemini 回應被攔截 (finishReason: ${fr})`);
       }
-      // STOP with empty text → just skip
-      continue;
+      finishedEarly = true;
+      break;
     }
     if (chunkText) {
       fullText += chunkText;
@@ -292,7 +289,7 @@ async function streamChat(apiModel, history, userParts, onChunk, extraSystemInst
   }
 
   const response = await result.response;
-  const usage = response.usageMetadata || {};
+  const usage = extractUsage(response);
 
   // Append search notice if grounding was triggered
   if (searchUsed) {
@@ -308,10 +305,22 @@ async function streamChat(apiModel, history, userParts, onChunk, extraSystemInst
     }
   }
 
+  // 若完全無 text 產出且沒有異常，最後 fallback 從 response 抽一次（偶爾 stream chunk 全空）
+  if (!fullText && !finishedEarly) {
+    const finalText = extractText(response);
+    if (finalText) {
+      fullText = finalText;
+      onChunk(finalText);
+    } else {
+      const fr = response.candidates?.[0]?.finishReason;
+      console.warn(`[Gemini] stream 結束但 fullText 為空，finishReason=${fr}`);
+    }
+  }
+
   return {
     text: fullText,
-    inputTokens: usage.promptTokenCount || 0,
-    outputTokens: usage.candidatesTokenCount || 0,
+    inputTokens: usage.inputTokens,
+    outputTokens: usage.outputTokens,
   };
 }
 
@@ -439,7 +448,7 @@ function getSystemInstruction() {
  */
 async function generateWithImage(apiModel, history, userParts) {
   console.log(`[Gemini] generateWithImage model=${apiModel}`);
-  const model = genAI.getGenerativeModel({
+  const model = getGenerativeModel({
     model: apiModel,
     generationConfig: {
       responseModalities: ['TEXT', 'IMAGE'],
@@ -453,16 +462,14 @@ async function generateWithImage(apiModel, history, userParts) {
   ];
 
   const result = await model.generateContent({ contents });
-  const response = result.response;
-  const usage = response.usageMetadata || {};
+  const response = result.response || result;
+  const usage = extractUsage(result);
 
   let text = '';
   const images = [];
-  // rawParts: ordered list of non-thought parts for verbatim history replay
-  // Images stored by index (imageIdx) so caller can substitute filename refs
   const rawParts = [];
   for (const part of (response.candidates?.[0]?.content?.parts || [])) {
-    if (part.thought) continue;  // skip internal thought parts
+    if (part.thought) continue;
     if (part.text) {
       text += part.text;
       rawParts.push({ _type: 'text', text: part.text, thoughtSignature: part.thoughtSignature || null });
@@ -477,8 +484,8 @@ async function generateWithImage(apiModel, history, userParts) {
     text,
     images,
     rawParts,
-    inputTokens: usage.promptTokenCount || 0,
-    outputTokens: usage.candidatesTokenCount || 0,
+    inputTokens: usage.inputTokens,
+    outputTokens: usage.outputTokens,
   };
 }
 
@@ -488,15 +495,15 @@ async function generateWithImage(apiModel, history, userParts) {
 async function generateTitle(userMessage, aiResponse) {
   const fallback = userMessage.trim().slice(0, 30);
   try {
-    const model = genAI.getGenerativeModel({ model: MODEL_FLASH });
+    const model = getGenerativeModel({ model: MODEL_FLASH });
     const prompt =
       `Based on the conversation below, generate a concise title in THREE languages.\n` +
       `Reply ONLY with valid JSON — no markdown, no extra text:\n` +
       `{"zh":"繁體中文標題（10字以內）","en":"English title (max 8 words)","vi":"tiêu đề tiếng Việt (tối đa 10 từ)"}\n\n` +
       `User: ${userMessage.slice(0, 300)}\nAI: ${aiResponse.slice(0, 300)}`;
     const result = await model.generateContent(prompt);
-    const raw = result.response.text().trim();
-    const usage = result.response.usageMetadata || {};
+    const raw = extractText(result).trim();
+    const usage = extractUsage(result);
     // Parse JSON — strip any accidental markdown fences
     const jsonStr = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
     let parsed;
@@ -511,8 +518,8 @@ async function generateTitle(userMessage, aiResponse) {
     const title = isZh ? title_zh : isVi ? title_vi : title_en;
     return {
       title, title_zh, title_en, title_vi,
-      inputTokens: usage.promptTokenCount || 0,
-      outputTokens: usage.candidatesTokenCount || 0,
+      inputTokens: usage.inputTokens,
+      outputTokens: usage.outputTokens,
       model: MODEL_FLASH,
     };
   } catch (e) {
@@ -530,7 +537,7 @@ async function generateTitle(userMessage, aiResponse) {
  * @returns {Promise<{text, inputTokens, outputTokens}>}
  */
 async function generateTextSync(apiModel, history, prompt) {
-  const model = genAI.getGenerativeModel({
+  const model = getGenerativeModel({
     model: apiModel,
     systemInstruction: getSystemInstruction(),
   });
@@ -539,12 +546,11 @@ async function generateTextSync(apiModel, history, prompt) {
     { role: 'user', parts: [{ text: prompt }] },
   ];
   const result = await model.generateContent({ contents });
-  const response = result.response;
-  const usage = response.usageMetadata || {};
+  const usage = extractUsage(result);
   return {
-    text: response.text(),
-    inputTokens: usage.promptTokenCount || 0,
-    outputTokens: usage.candidatesTokenCount || 0,
+    text: extractText(result),
+    inputTokens: usage.inputTokens,
+    outputTokens: usage.outputTokens,
   };
 }
 
@@ -562,7 +568,7 @@ async function generateWithTools(apiModel, history, userParts, functionDeclarati
   const fullInstruction = extraSystemInstruction
     ? getSystemInstruction() + '\n\n---\n' + extraSystemInstruction
     : getSystemInstruction();
-  const model = genAI.getGenerativeModel({
+  const model = getGenerativeModel({
     model: apiModel,
     systemInstruction: fullInstruction,
     tools: functionDeclarations.length > 0 ? [{ functionDeclarations }] : [],
@@ -579,11 +585,11 @@ async function generateWithTools(apiModel, history, userParts, functionDeclarati
 
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
     const result = await model.generateContent({ contents });
-    const response = result.response;
+    const response = result.response || result;
     lastResponse = response;
-    const usage = response.usageMetadata || {};
-    inputTokens += usage.promptTokenCount || 0;
-    outputTokens += usage.candidatesTokenCount || 0;
+    const usage = extractUsage(result);
+    inputTokens += usage.inputTokens;
+    outputTokens += usage.outputTokens;
 
     // ⭐ 從 candidates 取原始 parts (保留 thoughtSignature)
     const modelParts = response.candidates?.[0]?.content?.parts || [];
@@ -597,7 +603,7 @@ async function generateWithTools(apiModel, history, userParts, functionDeclarati
 
     if (fnCalls.length === 0) {
       return {
-        text: response.text(),
+        text: extractText(response),
         inputTokens,
         outputTokens,
         toolCallCount,
@@ -635,12 +641,7 @@ async function generateWithTools(apiModel, history, userParts, functionDeclarati
   }
 
   // 達 MAX_TOOL_ROUNDS 仍未產生最終回答 — 回傳最後一個 response 中的文字（若有）
-  let lastText = '';
-  try {
-    lastText = lastResponse?.text() || '';
-  } catch {
-    lastText = '';
-  }
+  const lastText = extractText(lastResponse) || '';
   return {
     text: lastText || '[達到工具呼叫上限，未取得最終回答]',
     inputTokens,
@@ -681,7 +682,7 @@ async function generateWithToolsStream(
     ...(genConfig?.thinking_budget != null ? { thinkingConfig: { thinkBudget: genConfig.thinking_budget } } : {}),
   };
 
-  const model = genAI.getGenerativeModel({
+  const model = getGenerativeModel({
     model: apiModel,
     systemInstruction: fullInstruction,
     generationConfig,
@@ -759,9 +760,9 @@ async function generateWithToolsStream(
     }
 
     const response = await result.response;
-    const usage = response.usageMetadata || {};
-    inputTokens += usage.promptTokenCount || 0;
-    outputTokens += usage.candidatesTokenCount || 0;
+    const usage = extractUsage(response);
+    inputTokens += usage.inputTokens;
+    outputTokens += usage.outputTokens;
 
     // ⭐ 關鍵:原樣 append 回 contents,thoughtSignature 還在
     if (allParts.length > 0) {
