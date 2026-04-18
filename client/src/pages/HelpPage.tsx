@@ -9,7 +9,7 @@ import {
   Wand2, ImageIcon, Clock, Share2, GitFork, Lock, Sparkles, Code2, Package, Play, Square,
   Paperclip, Search, Server, BookMarked, Wifi, WifiOff, CheckCircle, Loader2, Layers, Activity,
   Key, ShieldCheck, LayoutTemplate, FileSpreadsheet, File, FlaskConical, Languages,
-  TicketCheck, GripVertical,
+  TicketCheck, GripVertical, KeyRound,
 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import api from '../lib/api'
@@ -1664,8 +1664,9 @@ function UserManual() {
 
       <Section id="u-toolbar-toggles" icon={<Zap size={22} />} iconColor="text-amber-500" title="頂端列功能開關">
         <Para>
-          對話頁面頂端工具列提供四個快速開關，讓您按需求啟用或停用各項輔助功能，
-          每個開關的狀態僅影響當前及後續的新訊息，不會回溯修改已完成的對話。
+          對話頁面頂端工具列提供多個快速入口（技能、知識庫、API 連接器、MCP 工具、AI 戰情室），
+          讓您按需求啟用或停用各項輔助功能。每個開關的狀態僅影響當前及後續的新訊息，
+          不會回溯修改已完成的對話。
         </Para>
 
         <Table
@@ -1673,25 +1674,53 @@ function UserManual() {
           rows={[
             ['技能 (Skill)', 'Sparkles ✦ 紫色', '啟用後，AI 回覆前會先查詢符合的技能 Prompt 並套用', '跳過技能注入，AI 以原始模型回答'],
             ['知識庫', 'Database 🗄️ 藍色', '啟用後，AI 回覆前會從已掛載的自建知識庫檢索相關段落', '不做知識庫檢索，直接回答'],
-            ['API 連接器', 'Zap ⚡ 綠色', '啟用後，AI 回覆前會從已掛載的 API 連接器查詢', '跳過 API 連接器檢索'],
-            ['MCP 工具', 'Globe 🌐 藍色', '啟用後，AI 可呼叫已設定的 MCP 伺服器（搜尋、程式執行等）', '停用所有 MCP 工具呼叫'],
+            ['API 連接器', 'Zap ⚡ 琥珀色', '啟用後，AI 可呼叫已掛載的 DIFY / REST API 與 ERP Procedure 工具；面板內分「DIFY / REST」與「ERP Procedure」兩區', '跳過所有 API 連接器呼叫'],
+            ['MCP 工具', 'Globe 🌐 青色', '啟用後，AI 可呼叫已設定的 MCP 伺服器（搜尋、程式執行等）', '停用所有 MCP 工具呼叫'],
             ['AI 戰情室快速入口', 'BarChart3 📊 橘色', '點擊後彈出 AI 戰情室主題 / 查詢任務下拉選單，可直接跳入指定查詢頁面', '僅在有「使用 AI 戰情室」權限的帳號才顯示此按鈕'],
           ]}
         />
 
-        <SubSection title="操作方式">
+        <SubSection title="基本操作">
           <div className="space-y-3">
             <StepItem num={1} title="開啟任意對話後，查看頂部工具列" desc="工具列位於對話標題下方，包含各功能圖示按鈕" />
-            <StepItem num={2} title="點選對應圖示即可切換開 / 關" desc="亮色（藍色/綠色）= 啟用；灰色 = 停用" />
-            <StepItem num={3} title="下次發送訊息即生效" desc="無需重新整理頁面，狀態會記憶在瀏覽器 Session 中" />
+            <StepItem num={2} title="點選按鈕開啟選項面板" desc="技能、知識庫、API 連接器、MCP 四個按鈕會彈出下拉面板，可勾選要啟用的項目；按鈕上會顯示已勾選的數量" />
+            <StepItem num={3} title="下次發送訊息即生效" desc="無需重新整理頁面，勾選狀態會記憶在瀏覽器 Session 中" />
           </div>
           <TipBox>
-            若您只想進行純文字對話且不需要任何外部資料，建議關閉所有開關以降低延遲與 Token 消耗。
-            若對話主題切換（如從「查 SOP」改為「寫程式」），也可即時調整開關組合。
+            若您只想進行純文字對話且不需要任何外部資料，建議清空所有勾選以降低延遲與 Token 消耗。
+            若對話主題切換（如從「查 SOP」改為「寫程式」），也可即時調整勾選組合。
+          </TipBox>
+        </SubSection>
+
+        <SubSection title="面板內：排序、隱藏、摺疊">
+          <Para>
+            技能、知識庫、API 連接器、MCP 四個下拉面板都支援<strong>個人化排序 + 隱藏不常用項目</strong>，
+            讓常用工具留在最上方，雜訊項目收進摺疊區。所有設定會記憶在瀏覽器本機（localStorage），
+            每個帳號 / 瀏覽器各自獨立。
+          </Para>
+          <Table
+            headers={['功能', '操作方式', '效果']}
+            rows={[
+              ['上下拖曳排序', '滑鼠按住每列最左邊的「≡」握把（GripVertical 圖示），上下拖到目標位置放開', '該項目移到新位置，排序立即生效並寫入本機'],
+              ['隱藏項目', '將滑鼠移到該列 → 左側握把旁會出現藍色圓形「👁️‍🗨️ 關眼」按鈕，點擊即隱藏', '項目從主清單消失，轉移到面板底部「已隱藏 (N)」摺疊區'],
+              ['顯示已隱藏區', '面板底部的「▾ 已隱藏 (N)」列，點擊展開 / 收合', '展開後可看到所有被隱藏的項目（半透明顯示）'],
+              ['取消隱藏', '在「已隱藏」區中，點擊該列的藍色「👁️ 開眼」按鈕', '項目回到主清單，回復可勾選狀態'],
+              ['搜尋', '面板頂部搜尋框輸入關鍵字', '搜尋模式下不顯示拖曳握把，暫停排序以避免誤觸'],
+            ]}
+          />
+          <NoteBox>
+            隱藏的項目<strong>不會</strong>同步到伺服器或其他裝置，僅存在目前瀏覽器。
+            清除瀏覽器資料（或換裝置）後，全部項目會重新顯示。
+          </NoteBox>
+          <TipBox>
+            ERP Procedure 每列末端有「?」按鈕，點擊可展開該 Procedure 的輸入 / 輸出參數說明、
+            資料型別與 AI 提示（ai_hint），方便了解該工具的功能範圍。
+            「🔒」圖示代表該參數不可由使用者覆寫（預設值由管理員鎖定）。
           </TipBox>
           <NoteBox>
-            各開關僅在對應功能已設定的情況下才有效果：知識庫開關需先在下拉選單中掛載知識庫；
-            MCP 開關需管理員已設定並啟用 MCP 伺服器；API 連接器開關需管理員已設定 API 連接器。
+            各面板僅在對應功能已設定的情況下才有項目可選：知識庫需管理員或您本人已建立；
+            API 連接器需管理員已設定 DIFY / REST 或 ERP Procedure；MCP 需管理員已啟用 MCP 伺服器。
+            若面板為空，下方會有「前往設定」連結（僅管理員可見）。
           </NoteBox>
         </SubSection>
       </Section>
@@ -4324,8 +4353,116 @@ generate_txt:供應商週報_{{date}}.txt
               ['標籤（Tags）', '必填，否則無法自動路由', '如「ERP」「工單」「庫存」，以逗號分隔'],
               ['啟用', '—', '關閉後 AI 對話不會呼叫此伺服器的工具'],
               ['公開', '—', '勾選後申請公開，需管理員核准，所有使用者可在側邊欄選取'],
+              ['傳送使用者身份（X-User-Token）', '—', '勾選後，每次呼叫此 MCP 會加上 RS256 JWT Header，內含使用者 email / 工號 / 部門（5 分鐘有效）。MCP 端以公鑰驗簽後可做資料權限判斷。預設關閉，漸進啟用'],
             ]}
           />
+        </SubSection>
+
+        <SubSection title="使用者身份認證（X-User-Token）">
+          <Para>
+            若 MCP 伺服器需要自行做資料權限判斷（例如依員工 email 查 AD group 決定可查詢的資料範圍），
+            可啟用此功能，讓 Cortex 在每次 `tools/call` 時於 HTTP Header 夾帶一顆短效 RS256 JWT。
+            採非對稱金鑰架構：Cortex 端持有<strong>私鑰</strong>簽發，MCP 端只需<strong>公鑰</strong>驗證，
+            MCP 即使被攻破也無法偽造任何使用者身份。
+          </Para>
+
+          <div className="border-2 border-indigo-400 bg-indigo-50 rounded-xl p-4 mb-3">
+            <div className="flex items-center gap-2 mb-2">
+              <KeyRound size={16} className="text-indigo-600" />
+              <span className="font-bold text-indigo-700">Per-server 漸進啟用</span>
+            </div>
+            <p className="text-sm text-indigo-700">
+              此功能為 <strong>per-MCP 開關</strong>，預設<strong>關閉</strong>。舊 MCP 或不需要使用者身份判斷的 MCP 不受影響。
+              只有確認對接的 MCP 團隊已實作驗簽邏輯後，才在對應 server 上勾選啟用。
+            </p>
+          </div>
+
+          <Para>JWT Claims 規格：</Para>
+          <Table
+            headers={['Claim', '值', '說明']}
+            rows={[
+              ['alg', 'RS256', 'RSA-SHA256，Header 內限定，防 alg 切換攻擊（CVE-2016-5431）'],
+              ['iss', '"foxlink-gpt"', 'Issuer 固定值，MCP 端需驗證'],
+              ['exp', 'iat + 300', '5 分鐘有效期，每次呼叫重新簽'],
+              ['jti', 'UUID v4', '唯一識別，MCP 可拿去做 replay 防禦 / log 對齊'],
+              ['sub', '員工編號', '無員工編號時為 Cortex 內部 user id'],
+              ['email', 'user email', 'MCP 做權限判斷的主要依據（最可靠）'],
+              ['name', '姓名', '可能為 null'],
+              ['dept', '部門代碼', 'dept_code，可能為 null；建議拿 email 自行查 AD 取最新值'],
+            ]}
+          />
+
+          <SubSection title="Modal 內建工具">
+            <div className="space-y-2">
+              {[
+                { icon: <Download size={13} />, label: '下載公鑰', desc: '下載 foxlink-gpt-public.pem，寄給 MCP 團隊用於驗簽。公鑰可公開，洩漏不會造成安全問題' },
+                { icon: <Copy size={13} />, label: '複製公鑰', desc: '把公鑰內容複製到剪貼簿，方便貼進 email 或文件' },
+                { icon: <KeyRound size={13} />, label: '產生測試 Token', desc: '輸入 email / name / sub / dept 後，即時簽發一顆 JWT + 顯示 decoded claims，提供給 MCP 團隊驗證他們的驗簽流程' },
+              ].map((item, i) => (
+                <div key={i} className="flex gap-3 p-3 bg-slate-50 rounded-lg">
+                  <span className="text-slate-400 flex-shrink-0 mt-0.5">{item.icon}</span>
+                  <div>
+                    <span className="text-sm font-medium text-slate-700">{item.label}：</span>
+                    <span className="text-sm text-slate-500">{item.desc}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </SubSection>
+
+          <SubSection title="給 MCP 開發團隊的完整規格書">
+            <Para>
+              當有 MCP 團隊準備對接時，請將以下三樣一起寄給他們：
+            </Para>
+            <Table
+              headers={['交付物', '位置', '說明']}
+              rows={[
+                ['規格書 PDF', 'docs/mcp-integration-spec.pdf', '8 頁完整對接規格，含 5 種語言（Node/Python/Go/C#/Java）驗簽範例 + 最小可執行 Node 範本 + 驗收 checklist'],
+                ['公鑰 PEM', 'docs/foxlink-gpt-public.pem 或 UI 下載按鈕', 'MCP 團隊用於驗簽的公鑰（可公開分享）'],
+                ['測試 Token', 'UI「產生測試 Token」即時產', '5 分鐘內有效，提供給 MCP 驗證他們的驗簽流程是否正確'],
+              ]}
+            />
+          </SubSection>
+
+          <SubSection title="對接流程">
+            <div className="space-y-3">
+              <StepItem num={1} title="MCP 團隊 Kickoff" desc="寄送規格書 PDF + 公鑰 + 測試 Token，約定 transport、URL、api_key 格式" />
+              <StepItem num={2} title="MCP 端實作驗簽" desc="對方依據規格書實作；必做驗證：algorithms=['RS256']、iss='foxlink-gpt'、clockTolerance 30s、exp 未過期" />
+              <StepItem num={3} title="聯合測試（未啟用開關）" desc="admin 在 UI 新增 MCP server 但先不勾 send_user_token，確認 service-level 通（api_key 層）" />
+              <StepItem num={4} title="切換啟用開關" desc="勾選「傳送使用者身份」→ 儲存 → 列表卡片會出現紫色 🔐 X-User-Token badge；在對話中呼叫此 MCP 的工具，MCP 端應能解出 email claim" />
+              <StepItem num={5} title="審計驗證" desc="呼叫記錄（call logs）會新增 user_email 和 jti 欄位，可與 MCP 端 log 對齊單次呼叫" />
+            </div>
+          </SubSection>
+
+          <SubSection title="stdio 模式的特殊處理">
+            <NoteBox>
+              stdio 子程序沒有 HTTP header，Cortex 會透過<strong>環境變數</strong>傳遞：
+              `MCP_API_KEY`（服務身份）+ `MCP_USER_TOKEN`（使用者 JWT）。
+              因此 stdio MCP <strong>每次 tools/call 都必須重新 spawn 一個新子程序</strong>
+              （token exp 只有 5 分鐘，env var 一旦 spawn 就不能改）。不可 keep-alive 或 process pool。
+            </NoteBox>
+          </SubSection>
+
+          <SubSection title="錯誤排查">
+            <Table
+              headers={['症狀', '可能原因', '解法']}
+              rows={[
+                ['呼叫 MCP 時回 MCP_JWT_EMAIL_REQUIRED', '使用者 email 為空但該 MCP 已啟用 send_user_token', '到使用者管理幫該帳號補 email；或暫時關掉 send_user_token'],
+                ['呼叫 MCP 時回 MCP_JWT_PRIVATE_KEY_NOT_CONFIGURED', 'server 啟動時讀不到私鑰', '檢查 env: MCP_JWT_PRIVATE_KEY_PATH 是否指向正確的 .pem 檔；K8s 需掛 Secret mcp-jwt-keys 到 /app/certs'],
+                ['MCP 端回 401 invalid algorithm', 'MCP 驗簽沒限定 RS256 或限定成 HS256', '規格書 §4 步驟 3：algorithms=[\'RS256\'] 必須鎖死'],
+                ['MCP 端回 401 jwt expired', 'Cortex 與 MCP server 時鐘差異 > 30 秒', '確認兩端 NTP 同步；或請對方把 clockTolerance / leeway 調到 60 秒'],
+                ['產生測試 Token 按鈕回 503', '後端私鑰未載入', '檢查 server log 是否有 [mcp-jwt] private key loaded 訊息；未載入代表 env 沒設或檔案不存在'],
+              ]}
+            />
+          </SubSection>
+
+          <SubSection title="金鑰輪替（Rotation）">
+            <Para>
+              建議每年輪替一次 key pair，或有可接觸私鑰的人員離職時即時輪替。詳細 SOP 見
+              `server/certs/README.md` 及 `docs/mcp-user-identity-auth.md §4.3`。
+              輪替期間 MCP 端需同時接受新舊兩把公鑰，待所有 MCP 部署完畢後 Cortex 才切換私鑰。
+            </Para>
+          </SubSection>
         </SubSection>
 
         <SubSection title="公開核准">
