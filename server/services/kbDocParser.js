@@ -378,18 +378,9 @@ async function parseDocx(filePath, ocrModel = null) {
   const buf = fs.readFileSync(filePath);
   const zip = await JSZip.loadAsync(buf);
 
-  // Main text
-  let mainText = '';
+  // Main text — single-pass, yields every 1MB
   const docXml = await zip.file('word/document.xml')?.async('text');
-  if (docXml) {
-    mainText = docXml
-      .replace(/<w:br[^>]*\/>/g, '\n')
-      .replace(/<\/w:p>/g, '\n')
-      .replace(/<[^>]+>/g, ' ')
-      .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'")
-      .replace(/ {2,}/g, ' ')
-      .trim();
-  }
+  const mainText = await _stripDocxBodyXml(docXml);
 
   // OCR images (parallel)
   const { imgTexts, ocrInputTokens, ocrOutputTokens } = await _ocrImagesInZip(zip, /^word\/media\//i, ocrModel);
@@ -475,6 +466,24 @@ function _sheetToCsvTight(sheet, xlsx) {
 // Yield control to the event loop so other HTTP requests (e.g. the client's
 // status-poll GET) don't get starved while we crunch through many sheets.
 const _yieldEventLoop = () => new Promise((r) => setImmediate(r));
+
+// DOCX body XML → plain text.
+// V8's native regex is very fast — a 6-replace chain on a 1MB XML is ~10ms.
+// We keep that approach (don't reinvent it in JS) but yield between passes
+// so a pathologically huge document.xml (tens of MB) doesn't starve other
+// HTTP requests while each O(n) regex pass runs.
+async function _stripDocxBodyXml(xml) {
+  if (!xml) return '';
+  let t = xml.replace(/<w:br[^>]*\/>/g, '\n');    await _yieldEventLoop();
+  t = t.replace(/<\/w:p>/g, '\n');                await _yieldEventLoop();
+  t = t.replace(/<[^>]+>/g, ' ');                 await _yieldEventLoop();
+  t = t.replace(/&amp;/g, '&')
+       .replace(/&lt;/g, '<')
+       .replace(/&gt;/g, '>')
+       .replace(/&quot;/g, '"')
+       .replace(/&apos;/g, "'");                  await _yieldEventLoop();
+  return t.replace(/ {2,}/g, ' ').trim();
+}
 
 async function parseExcel(filePath, ocrModel = null) {
   const JSZip = require('jszip');
@@ -652,9 +661,12 @@ async function parseDocxFormatAware(filePath, ocrModel = null) {
     const paragraphs = [];
     const paraRegex = /<w:p[ >][\s\S]*?<\/w:p>/g;
     let pm;
+    let count = 0;
     while ((pm = paraRegex.exec(docXml)) !== null) {
       const txt = extractParaFormatAware(pm[0]);
       if (txt.trim()) paragraphs.push(txt);
+      // Yield every 500 paragraphs so huge docs don't starve the event loop
+      if (++count % 500 === 0) await _yieldEventLoop();
     }
     mainText = paragraphs.join('\n');
   }

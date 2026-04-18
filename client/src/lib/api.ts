@@ -2,7 +2,7 @@ import axios from 'axios'
 
 const api = axios.create({
   baseURL: '/api',
-  timeout: 30000,
+  timeout: 300000, // 5 min — KB 上傳/解析、SSE 長回應、xlsx/pdf 大檔都需要
 })
 
 api.interceptors.request.use((config) => {
