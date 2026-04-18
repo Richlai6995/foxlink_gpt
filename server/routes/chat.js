@@ -279,15 +279,17 @@ async function executeSelfKbSearch(db, kb, query, { userId, sessionId } = {}) {
       `).all(kb.id, likeQ, topK * 2);
 
       if (mode === 'fulltext') {
-        results = ftRows.map((r) => ({ ...r, score: 0.5, match_type: 'fulltext' }));
+        results = ftRows.map((r) => ({ ...r, score: 0.8, match_type: 'fulltext' }));
       } else {
+        // Hybrid merge — 精確字串命中極強訊號，分數必須高於 vector 正常上限
+        // 否則 fulltext-only 的結果會被 vector topK 擠出去
         const vecIds = new Set(results.map((r) => r.id));
         for (const r of ftRows) {
           if (vecIds.has(r.id)) {
             const ex = results.find((x) => x.id === r.id);
-            if (ex) { ex.score = Math.min(1, ex.score + 0.15); ex.match_type = 'hybrid'; }
+            if (ex) { ex.score = 0.95; ex.match_type = 'hybrid'; }
           } else {
-            results.push({ ...r, score: 0.4, match_type: 'fulltext' });
+            results.push({ ...r, score: 0.85, match_type: 'fulltext' });
           }
         }
       }

@@ -140,15 +140,15 @@ router.post('/kb/search', async (req, res) => {
       `).all(kb.id, likeQ, topK * 2);
 
       if (mode === 'fulltext') {
-        results = ftRows.map((r) => ({ ...r, score: 0.5, match_type: 'fulltext' }));
+        results = ftRows.map((r) => ({ ...r, score: 0.8, match_type: 'fulltext' }));
       } else {
         const vecIds = new Set(results.map((r) => r.id));
         for (const r of ftRows) {
           if (vecIds.has(r.id)) {
             const ex = results.find((x) => x.id === r.id);
-            if (ex) { ex.score = Math.min(1, ex.score + 0.15); ex.match_type = 'hybrid'; }
+            if (ex) { ex.score = 0.95; ex.match_type = 'hybrid'; }
           } else {
-            results.push({ ...r, score: 0.4, match_type: 'fulltext' });
+            results.push({ ...r, score: 0.85, match_type: 'fulltext' });
           }
         }
       }
@@ -220,15 +220,15 @@ router.post('/kb/chat', async (req, res) => {
       `).all(kb.id, likeQ, topK * 2);
 
       if (mode === 'fulltext') {
-        results = ftRows.map((r) => ({ ...r, score: 0.5 }));
+        results = ftRows.map((r) => ({ ...r, score: 0.8 }));
       } else {
         const vecIds = new Set(results.map((r) => r.id));
         for (const r of ftRows) {
           if (vecIds.has(r.id)) {
             const ex = results.find((x) => x.id === r.id);
-            if (ex) ex.score = Math.min(1, ex.score + 0.15);
+            if (ex) ex.score = 0.95;
           } else {
-            results.push({ ...r, score: 0.4 });
+            results.push({ ...r, score: 0.85 });
           }
         }
       }

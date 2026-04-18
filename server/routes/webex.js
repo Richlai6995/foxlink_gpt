@@ -646,17 +646,18 @@ async function loadFunctionDeclarations(db, user) {
           if (mode === 'fulltext' || mode === 'hybrid') {
             const likeQ = `%${query.replace(/[%_]/g, '\\$&')}%`;
             const ftRows = await db.prepare(
-              `SELECT c.content, d.filename, 0.5 AS score
+              `SELECT c.content, d.filename
                FROM kb_chunks c JOIN kb_documents d ON d.id=c.doc_id
                WHERE c.kb_id=? AND c.chunk_type!='parent' AND UPPER(c.content) LIKE UPPER(?)
                FETCH FIRST ? ROWS ONLY`
             ).all(kb.id, likeQ, topK);
             if (mode === 'fulltext') {
-              results = ftRows.map(r => ({ ...r, score: 0.5 }));
+              results = ftRows.map(r => ({ ...r, score: 0.8 }));
             } else {
+              // 精確字串命中是極強訊號，分數要高過 vector 的典型分布
               const vIds = new Set(results.map(r => r.content?.slice(0, 50)));
               for (const r of ftRows) {
-                if (!vIds.has(r.content?.slice(0, 50))) results.push(r);
+                if (!vIds.has(r.content?.slice(0, 50))) results.push({ ...r, score: 0.85 });
               }
             }
           }
