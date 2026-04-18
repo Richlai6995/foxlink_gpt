@@ -57,6 +57,20 @@ else
   echo "                openssl rsa -in mcp-jwt-private.pem -pubout -out foxlink-gpt-public.pem"
 fi
 
+# ── GCP Vertex AI Service Account JSON (Gemini 企業級認證)───────────────────
+VERTEX_SA_JSON="${CERTS_DIR}/vertex-ai-sa.json"
+echo "▶ Syncing GCP Vertex AI Secret"
+if [ -f "${VERTEX_SA_JSON}" ]; then
+  kubectl delete secret gcp-vertex-sa -n ${NAMESPACE} --ignore-not-found
+  kubectl create secret generic gcp-vertex-sa \
+    --from-file=key.json="${VERTEX_SA_JSON}" \
+    -n ${NAMESPACE}
+  echo "  Secret gcp-vertex-sa updated"
+else
+  echo "  ⚠️  server/certs/vertex-ai-sa.json not found — GEMINI_PROVIDER=vertex 會失敗；"
+  echo "      GCP Console > IAM > Service Accounts 下載 JSON 到此路徑"
+fi
+
 echo "▶ Applying K8s manifests (RBAC, Deployment, Service...)"
 kubectl apply -f "$(dirname "$0")/k8s/deployment.yaml"
 

@@ -97,6 +97,10 @@ spec:
               value: "/opt/oracle/instantclient"
             - name: LD_LIBRARY_PATH
               value: "/opt/oracle/instantclient"
+            # ── GCP Vertex AI SA JSON 絕對路徑（覆蓋 envFrom 的相對路徑）──
+            # Secret gcp-vertex-sa 掛在 /app/gcp,裡面的 file name = key.json
+            - name: GOOGLE_APPLICATION_CREDENTIALS
+              value: /app/gcp/key.json
 
           envFrom:
             - secretRef:
@@ -135,6 +139,12 @@ spec:
             # .env 需設 MCP_JWT_PRIVATE_KEY_PATH=/app/certs/mcp-jwt-private.pem
             - name: mcp-jwt-keys
               mountPath: /app/certs
+              readOnly: true
+            # ── GCP Vertex AI Service Account JSON（只讀）──
+            # Secret: gcp-vertex-sa（由 deploy.sh 自動從 server/certs/vertex-ai-sa.json 同步）
+            # env GOOGLE_APPLICATION_CREDENTIALS=/app/gcp/key.json 指向這裡
+            - name: gcp-vertex-sa
+              mountPath: /app/gcp
               readOnly: true
 
           # ── Resources ────────────────────────────────────────────────────
@@ -187,6 +197,11 @@ spec:
           secret:
             secretName: mcp-jwt-keys
             optional: true   # 暫允許未建立時 pod 照常啟動(send_user_token=1 才會用到)
+            defaultMode: 0400
+        - name: gcp-vertex-sa
+          secret:
+            secretName: gcp-vertex-sa
+            optional: true   # 沒設時 GEMINI_PROVIDER=vertex 會失敗，但 pod 仍可啟動 fallback 到 AI Studio
             defaultMode: 0400
 ---
 apiVersion: v1

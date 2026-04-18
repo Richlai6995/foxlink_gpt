@@ -85,3 +85,7 @@ server/certs/*.key
 # 對外交付的公鑰副本(給 MCP 團隊)亦不進版控,避免後續誤 commit 私鑰同名檔案
 docs/*.pem
 docs/*.key
+
+# ─── GCP Service Account JSON (Vertex AI auth) ────────────────────────────────
+server/certs/*.json
+server/certs/*-sa.json

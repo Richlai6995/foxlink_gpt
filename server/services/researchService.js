@@ -8,7 +8,7 @@
 
 const path = require('path');
 const fs   = require('fs');
-const { GoogleGenerativeAI } = require('@google/generative-ai');
+const { getGenerativeModel, extractText, extractUsage } = require('./geminiClient');
 const { embedText, toVectorStr } = require('./kbEmbedding');
 const { generateFile } = require('./fileGenerator');
 const { upsertTokenUsage } = require('./tokenService');
@@ -412,17 +412,16 @@ async function generatePlan(question, depth, hasKb, llmClient = null) {
   }
 
   // fallback: direct Gemini env
-  const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-  const model = genAI.getGenerativeModel({
+  const model = getGenerativeModel({
     model: MODEL_FLASH,
     generationConfig: { responseMimeType: 'application/json' },
   });
   const result = await model.generateContent(prompt);
-  const usage  = result.response.usageMetadata || {};
+  const usage  = extractUsage(result);
   return {
-    plan: JSON.parse(result.response.text().trim()),
-    inputTokens:  usage.promptTokenCount     || 0,
-    outputTokens: usage.candidatesTokenCount || 0,
+    plan: JSON.parse(extractText(result).trim()),
+    inputTokens:  usage.inputTokens,
+    outputTokens: usage.outputTokens,
   };
 }
 
@@ -434,7 +433,6 @@ async function generatePlan(question, depth, hasKb, llmClient = null) {
 async function generateSection(question, kbContext, difyContext, mcpDecls, useWebSearch, language,
   globalFileContext = '', sqFileContext = '', hint = '', dashboardDecls = [],
   db = null, userId = null, modelKey = null, llmClient = null) {
-  const genAI = llmClient ? null : new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
   const isZh = language === 'zh-TW';
   const langHint = isZh ? '請以繁體中文詳細回答。' : 'Please answer in detail in English.';
 
@@ -471,7 +469,7 @@ async function generateSection(question, kbContext, difyContext, mcpDecls, useWe
     return { answer: answer.trim(), inputTokens: 0, outputTokens: 0 };
   }
 
-  const model = genAI.getGenerativeModel({ model: MODEL_PRO });
+  const model = getGenerativeModel({ model: MODEL_PRO });
   let totalIn = 0, totalOut = 0;
 
   // ── Function calling loop (max 5 turns) ──────────────────────────────────
@@ -480,18 +478,19 @@ async function generateSection(question, kbContext, difyContext, mcpDecls, useWe
 
   for (let turn = 0; turn < MAX_TURNS; turn++) {
     const result = await model.generateContent({ contents, ...(tools.length ? { tools } : {}) });
-    const usage = result.response.usageMetadata || {};
-    totalIn  += usage.promptTokenCount     || 0;
-    totalOut += usage.candidatesTokenCount || 0;
+    const usage = extractUsage(result);
+    totalIn  += usage.inputTokens;
+    totalOut += usage.outputTokens;
 
-    const candidate = result.response.candidates?.[0];
+    const response = result.response || result;
+    const candidate = response.candidates?.[0];
     const parts = candidate?.content?.parts || [];
     const fnCalls = parts.filter((p) => p.functionCall);
 
     if (!fnCalls.length) {
       // No more function calls — extract final text
       const answer = parts.map((p) => p.text || '').join('').trim()
-        || result.response.text().trim();
+        || extractText(result).trim();
       return { answer, inputTokens: totalIn, outputTokens: totalOut };
     }
 
@@ -532,7 +531,6 @@ async function generateSection(question, kbContext, difyContext, mcpDecls, useWe
  * Synthesize all section answers into a final Markdown report.
  */
 async function synthesizeReport(title, sections, language, llmClient = null) {
-  const genAI = llmClient ? null : new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
   const langHint = language === 'zh-TW'
     ? '請以繁體中文撰寫完整研究報告。'
     : 'Please write a complete research report in English.';
@@ -561,13 +559,13 @@ ${sectionsText}
     return { report: report.trim(), inputTokens: 0, outputTokens: 0 };
   }
 
-  const model  = genAI.getGenerativeModel({ model: MODEL_PRO });
+  const model  = getGenerativeModel({ model: MODEL_PRO });
   const result = await model.generateContent(prompt);
-  const usage  = result.response.usageMetadata || {};
+  const usage  = extractUsage(result);
   return {
-    report:       result.response.text().trim(),
-    inputTokens:  usage.promptTokenCount     || 0,
-    outputTokens: usage.candidatesTokenCount || 0,
+    report:       extractText(result).trim(),
+    inputTokens:  usage.inputTokens,
+    outputTokens: usage.outputTokens,
   };
 }
 

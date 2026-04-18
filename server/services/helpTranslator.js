@@ -3,7 +3,7 @@
  * Uses LLM models (from llm_models table) to translate help content blocks
  */
 require('dotenv').config();
-const { GoogleGenerativeAI } = require('@google/generative-ai');
+const { getGenerativeModel, extractText } = require('./geminiClient');
 const { decryptKey } = require('./llmKeyService');
 
 const LANG_NAMES = {
@@ -69,14 +69,14 @@ const MAX_RETRIES = 3;
 async function callLLM(payload, targetLang, modelInfo, signal) {
   const langName = LANG_NAMES[targetLang] || targetLang;
 
-  const genAI = new GoogleGenerativeAI(modelInfo.apiKey);
-  const model = genAI.getGenerativeModel({
+  const model = getGenerativeModel({
     model: modelInfo.apiModel,
     generationConfig: {
       temperature: 0.1,
       maxOutputTokens: 65536,
       responseMimeType: 'application/json',
     },
+    apiKey: modelInfo.apiKey, // Studio-mode override; ignored in Vertex mode
   });
 
   const prompt = `Translate the following help documentation content from Traditional Chinese to ${langName}.
@@ -93,7 +93,7 @@ ${JSON.stringify(payload)}`;
         systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
       });
 
-      const text = result.response.text();
+      const text = extractText(result);
       let cleaned = text.trim();
       if (cleaned.startsWith('```')) {
         cleaned = cleaned.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '');

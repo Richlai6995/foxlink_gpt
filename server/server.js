@@ -5,6 +5,7 @@ process.env.NLS_LANG = 'AMERICAN_AMERICA.AL32UTF8';
 
 require('dotenv').config();
 require('./services/logger'); // File-based logging + process lifecycle tracking
+require('./services/geminiClient').logStartupInfo(); // [GeminiClient] provider=... line
 const express = require('express');
 const cors = require('cors');
 const path = require('path');

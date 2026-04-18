@@ -109,9 +109,8 @@ function extractParaFormatAware(paraXml) {
 // Returns { text, inputTokens, outputTokens }
 async function imageToText(imageBuffer, mimeType = 'image/png', ocrModel = null) {
   try {
-    const { GoogleGenerativeAI } = require('@google/generative-ai');
-    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-    const model = genAI.getGenerativeModel({
+    const { getGenerativeModel, extractText, extractUsage } = require('./geminiClient');
+    const model = getGenerativeModel({
       model: ocrModel || process.env.KB_OCR_MODEL || process.env.GEMINI_MODEL_FLASH || 'gemini-2.0-flash',
     });
     const result = await model.generateContent([
@@ -120,12 +119,12 @@ async function imageToText(imageBuffer, mimeType = 'image/png', ocrModel = null)
         text: '請將這張圖片中的所有文字完整提取出來。如果是表格請保持表格格式，如果是圖表請描述圖表內容與數據。只輸出圖片中包含的資訊，不要加入額外說明。如果圖片沒有文字內容，輸出「(無文字)」。',
       },
     ]);
-    const txt = result.response.text().trim();
-    const usage = result.response.usageMetadata || {};
+    const txt = extractText(result).trim();
+    const usage = extractUsage(result);
     return {
       text: txt === '(無文字)' ? '' : txt,
-      inputTokens: usage.promptTokenCount || 0,
-      outputTokens: usage.candidatesTokenCount || 0,
+      inputTokens: usage.inputTokens,
+      outputTokens: usage.outputTokens,
     };
   } catch (e) {
     console.warn('[KBParser] imageToText error:', e.message);
@@ -195,9 +194,8 @@ function _isRateLimitError(e) {
 
 // OCR a single-page PDF via Gemini — 5 retries with 429-aware backoff.
 async function _ocrSinglePagePdf(pdfBytes, ocrModel, prompt) {
-  const { GoogleGenerativeAI } = require('@google/generative-ai');
-  const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-  const model = genAI.getGenerativeModel({
+  const { getGenerativeModel, extractText, extractUsage } = require('./geminiClient');
+  const model = getGenerativeModel({
     model: ocrModel || process.env.KB_OCR_MODEL || process.env.GEMINI_MODEL_FLASH || 'gemini-2.0-flash',
   });
   const b64 = Buffer.from(pdfBytes).toString('base64');
@@ -209,11 +207,11 @@ async function _ocrSinglePagePdf(pdfBytes, ocrModel, prompt) {
         { inlineData: { data: b64, mimeType: 'application/pdf' } },
         { text: prompt },
       ]);
-      const usage = result.response.usageMetadata || {};
+      const usage = extractUsage(result);
       return {
-        text: result.response.text().trim(),
-        inputTokens: usage.promptTokenCount || 0,
-        outputTokens: usage.candidatesTokenCount || 0,
+        text: extractText(result).trim(),
+        inputTokens: usage.inputTokens,
+        outputTokens: usage.outputTokens,
       };
     } catch (e) {
       lastErr = e;

@@ -8,6 +8,7 @@
  *   const text = await client.generate(messages, systemPrompt);
  */
 const { GoogleGenerativeAI } = require('@google/generative-ai');
+const { getGenerativeModel, extractText, extractUsage, PROVIDER: GEMINI_PROVIDER } = require('./geminiClient');
 const { decryptKey } = require('./llmKeyService');
 
 // ── Resolve model row from DB ─────────────────────────────────────────────────
@@ -27,47 +28,52 @@ async function resolveModel(db, modelKey) {
 }
 
 // ── Gemini streaming wrapper ──────────────────────────────────────────────────
+// Vertex AI 模式下忽略 per-model api_key_enc，一律走 service account；
+// 只有 studio 模式才讀 DB 裡的 API key 欄位。
 function makeGeminiClient(model) {
-  const apiKey = model.api_key_enc
-    ? (decryptKey(model.api_key_enc) || process.env.GEMINI_API_KEY)
-    : process.env.GEMINI_API_KEY;
-  if (!apiKey) throw new Error('Gemini API key 未設定');
-
-  const genAI       = new GoogleGenerativeAI(apiKey);
   const imageOutput = !!model.image_output;
   const apiModel    = model.api_model;
+
+  // Studio-only: allow per-model override API key; Vertex 無此概念
+  let studioKey = null;
+  if (GEMINI_PROVIDER !== 'vertex') {
+    studioKey = model.api_key_enc
+      ? (decryptKey(model.api_key_enc) || process.env.GEMINI_API_KEY)
+      : process.env.GEMINI_API_KEY;
+    if (!studioKey) throw new Error('Gemini API key 未設定');
+  }
+
+  const makeModel = (systemPrompt) => getGenerativeModel({
+    model: apiModel,
+    ...(systemPrompt ? { systemInstruction: systemPrompt } : {}),
+    ...(studioKey ? { apiKey: studioKey } : {}),
+  });
 
   return {
     provider:    'gemini',
     apiModel,
     imageOutput,
-    genAI,
+    geminiProvider: GEMINI_PROVIDER,
     // Single-turn generate (returns text)
     async generate(contents, systemPrompt) {
-      const m = genAI.getGenerativeModel({
-        model: apiModel,
-        ...(systemPrompt ? { systemInstruction: systemPrompt } : {}),
-      });
+      const m = makeModel(systemPrompt);
       const result = await m.generateContent({ contents });
-      return result.response.text();
+      return extractText(result);
     },
     // Streaming generate — yields chunks, returns { text, usage }
     async *stream(contents, systemPrompt) {
-      const m = genAI.getGenerativeModel({
-        model: apiModel,
-        ...(systemPrompt ? { systemInstruction: systemPrompt } : {}),
-      });
+      const m = makeModel(systemPrompt);
       const result = await m.generateContentStream({ contents });
       let fullText = '';
       for await (const chunk of result.stream) {
-        const t = chunk.text?.() ?? '';
+        const t = extractText(chunk);
         if (t) { fullText += t; yield t; }
       }
-      const usage = (await result.response).usageMetadata || {};
+      const usage = extractUsage(await result.response);
       return {
         text: fullText,
-        inputTokens:  usage.promptTokenCount     || 0,
-        outputTokens: usage.candidatesTokenCount || 0,
+        inputTokens:  usage.inputTokens,
+        outputTokens: usage.outputTokens,
       };
     },
   };
