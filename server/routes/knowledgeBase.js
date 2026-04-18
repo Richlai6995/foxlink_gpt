@@ -951,19 +951,30 @@ router.post('/:id/search', async (req, res) => {
       }));
     }
 
-    // Full-text search
+    // Full-text search — tokenize query, rank by weighted token hits
+    // （避免整串 query 做 LIKE 必然 0 命中；以 token 長度當權重讓罕見專名排前）
     if (mode === 'fulltext' || mode === 'hybrid') {
-      const likeQuery = `%${query.replace(/[%_]/g, '\\$&')}%`;
+      const tokens = (query.match(/[\u4e00-\u9fa5]{2,6}|[A-Za-z0-9][A-Za-z0-9_.-]{1,}/g) || [])
+        .filter((t) => t.length >= 2 && !/^(我要|你要|我想|所有|幫我|請問|告訴|是否|可以|什麼|怎麼)$/.test(t));
+      if (tokens.length === 0 && query.trim()) tokens.push(query.trim());
+      const useTokens = tokens.slice(0, 8);
+      const caseExprs = useTokens.map((t) =>
+        `CASE WHEN UPPER(c.content) LIKE UPPER(?) THEN ${Math.max(1, t.length)} ELSE 0 END`
+      );
+      const hitScoreExpr = caseExprs.join(' + ');
+      const likeClauses = useTokens.map(() => 'UPPER(c.content) LIKE UPPER(?)').join(' OR ');
+      const likeParams = useTokens.map((t) => `%${t.replace(/[%_]/g, '\\$&')}%`);
       const ftRows = await db.prepare(`
         SELECT c.id, c.doc_id, c.chunk_type, c.position, c.content,
                c.parent_content, d.filename,
-               1 AS vector_score
+               1 AS vector_score,
+               ${hitScoreExpr} AS hit_score
         FROM kb_chunks c
         JOIN kb_documents d ON d.id = c.doc_id
-        WHERE c.kb_id=? AND c.chunk_type != 'parent'
-          AND UPPER(c.content) LIKE UPPER(?)
+        WHERE c.kb_id=? AND c.chunk_type != 'parent' AND (${likeClauses})
+        ORDER BY hit_score DESC
         FETCH FIRST ? ROWS ONLY
-      `).all(req.params.id, likeQuery, topK * 2);
+      `).all(...likeParams, req.params.id, ...likeParams, topK * 2);
 
       if (mode === 'fulltext') {
         results = ftRows.map((r) => ({ ...r, score: 0.8, match_type: 'fulltext' }));

@@ -270,13 +270,30 @@ async function executeSelfKbSearch(db, kb, query, { userId, sessionId } = {}) {
     }
 
     if (mode === 'fulltext' || mode === 'hybrid') {
-      const likeQ = `%${query.replace(/[%_]/g, '\\$&')}%`;
+      // Tokenize query：中文 2-6 字群組 + 英數 2+ 字。每個 chunk 依「命中幾個 token」
+      // 排序 — 命中罕見專名（如「鍾漢成」）的 chunk 會排前，不會被「分機」這類
+      // 每個 chunk 都有的常見字稀釋。
+      // 避免直接 LIKE %整段使用者訊息% 永遠 0 命中的 bug。
+      const tokens = (query.match(/[\u4e00-\u9fa5]{2,6}|[A-Za-z0-9][A-Za-z0-9_.-]{1,}/g) || [])
+        .filter((t) => t.length >= 2 && !/^(我要|你要|我想|所有|幫我|請問|告訴|是否|可以|什麼|怎麼)$/.test(t));
+      if (tokens.length === 0 && query.trim()) tokens.push(query.trim());
+      const useTokens = tokens.slice(0, 8);
+      // 每個 token CASE WHEN 命中加分（長 token=罕見專名權重高）
+      const caseExprs = useTokens.map((t) =>
+        `CASE WHEN UPPER(c.content) LIKE UPPER(?) THEN ${Math.max(1, t.length)} ELSE 0 END`
+      );
+      const hitScoreExpr = caseExprs.join(' + ');
+      const likeClauses = useTokens.map(() => 'UPPER(c.content) LIKE UPPER(?)').join(' OR ');
+      const likeParams = useTokens.map((t) => `%${t.replace(/[%_]/g, '\\$&')}%`);
+      // 同一組 params 用兩次 — 一次 CASE WHEN 算分、一次 WHERE 過濾
       const ftRows = await db.prepare(`
-        SELECT c.id, c.content, c.parent_content, d.filename, 1 AS vector_score
+        SELECT c.id, c.content, c.parent_content, d.filename, 1 AS vector_score,
+               ${hitScoreExpr} AS hit_score
         FROM kb_chunks c JOIN kb_documents d ON d.id = c.doc_id
-        WHERE c.kb_id=? AND c.chunk_type != 'parent' AND UPPER(c.content) LIKE UPPER(?)
+        WHERE c.kb_id=? AND c.chunk_type != 'parent' AND (${likeClauses})
+        ORDER BY hit_score DESC
         FETCH FIRST ? ROWS ONLY
-      `).all(kb.id, likeQ, topK * 2);
+      `).all(...likeParams, kb.id, ...likeParams, topK * 2);
 
       if (mode === 'fulltext') {
         results = ftRows.map((r) => ({ ...r, score: 0.8, match_type: 'fulltext' }));
