@@ -559,8 +559,60 @@ function preprocessText(text, { replaceWhitespace = true, removeUrls = false } =
 }
 
 /**
+ * Split a single oversized paragraph into sub-chunks ≤ max_size.
+ * Tries progressively finer delimiters: '\n' → ',' → ' ' → hard char split.
+ * Applies `overlap` at every cut point so context isn't lost between sub-chunks.
+ * Returns an array of sub-chunks, each ≤ max_size.
+ */
+function _splitOversizedPara(para, max_size, overlap) {
+  if (para.length <= max_size) return [para];
+
+  // Try delimiters in order: newline → comma → space → hard split
+  const delimiters = ['\n', ',', ' '];
+  for (const delim of delimiters) {
+    if (!para.includes(delim)) continue;
+    const parts = para.split(delim);
+    if (parts.length < 2) continue;
+
+    const out = [];
+    let cur = '';
+    for (const p of parts) {
+      if (!cur) {
+        cur = p;
+      } else if ((cur + delim + p).length <= max_size) {
+        cur += delim + p;
+      } else {
+        out.push(cur);
+        const tail = overlap > 0 && cur.length > overlap ? cur.slice(-overlap) : '';
+        cur = tail ? tail + delim + p : p;
+      }
+    }
+    if (cur) out.push(cur);
+
+    // If any produced sub-chunk is still oversized, recurse into next delimiter.
+    if (out.some((c) => c.length > max_size)) {
+      const flat = [];
+      for (const c of out) {
+        flat.push(..._splitOversizedPara(c, max_size, overlap));
+      }
+      return flat;
+    }
+    return out;
+  }
+
+  // Last resort: hard character-level split with overlap
+  const out = [];
+  const step = Math.max(1, max_size - overlap);
+  for (let i = 0; i < para.length; i += step) {
+    out.push(para.slice(i, i + max_size));
+  }
+  return out;
+}
+
+/**
  * Regular / paragraph chunking.
  * Splits by separator, merges paragraphs up to max_size, adds overlap.
+ * Paragraphs larger than max_size are themselves split by finer delimiters.
  * @returns {{ content: string }[]}
  */
 function chunkRegular(text, cfg = {}) {
@@ -573,7 +625,16 @@ function chunkRegular(text, cfg = {}) {
 
   const processed = preprocessText(text, { removeUrls: remove_urls });
   const sep = separator.replace(/\\n/g, '\n').replace(/\\t/g, '\t');
-  const paras = processed.split(sep).map((s) => s.trim()).filter(Boolean);
+  const rawParas = processed.split(sep).map((s) => s.trim()).filter(Boolean);
+
+  // Pre-expand oversized paragraphs so the merge loop below only deals with
+  // paragraphs that already fit. Without this, a 15KB sheet CSV becomes one
+  // giant unsplittable chunk and the embedding averages 15KB of content.
+  const paras = [];
+  for (const p of rawParas) {
+    if (p.length <= max_size) { paras.push(p); continue; }
+    paras.push(..._splitOversizedPara(p, max_size, overlap));
+  }
 
   const chunks = [];
   let current = '';
@@ -585,10 +646,12 @@ function chunkRegular(text, cfg = {}) {
       current += sep + para;
     } else {
       chunks.push(current);
-      const overlapText = overlap > 0 && current.length > overlap
-        ? current.slice(-overlap)
-        : '';
-      current = overlapText ? overlapText + sep + para : para;
+      // Apply overlap only if the resulting chunk still fits — otherwise
+      // we'd create an oversized chunk (paragraph is already ≤ max_size
+      // after the pre-expansion above).
+      const tail = overlap > 0 && current.length > overlap ? current.slice(-overlap) : '';
+      const withOverlap = tail ? tail + sep + para : para;
+      current = withOverlap.length <= max_size ? withOverlap : para;
     }
   }
   if (current.trim()) chunks.push(current.trim());
@@ -622,7 +685,15 @@ function chunkParentChild(text, cfg = {}) {
   const result = [];
   for (const parent of parents) {
     const childSep  = child_separator.replace(/\\n/g, '\n');
-    const childParts = parent.split(childSep).map((s) => s.trim()).filter(Boolean);
+    const rawChildParts = parent.split(childSep).map((s) => s.trim()).filter(Boolean);
+
+    // Pre-expand oversized child parts (same issue as regular chunking)
+    const childParts = [];
+    for (const p of rawChildParts) {
+      if (p.length <= child_max_size) { childParts.push(p); continue; }
+      childParts.push(..._splitOversizedPara(p, child_max_size, 0));
+    }
+
     const children  = [];
     let cur = '';
     for (const part of childParts) {
