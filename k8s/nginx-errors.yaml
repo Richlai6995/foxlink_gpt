@@ -67,8 +67,8 @@ data:
       <h1>服務目前無法提供</h1>
       <p>很抱歉造成您的不便。</p>
       <div class="contact">
-        <p>如需協助，請聯絡正崴資訊部</p>
-        <p>分機 <strong>5888</strong> 或來信 <a href="mailto:it@foxlink.com.tw">it@foxlink.com.tw</a></p>
+        <p>如需協助，請聯絡正崴<strong>當地資訊協助</strong></p>
+        <p>或聯絡<strong>總部 Cortex 管理員</strong>協助</p>
       </div>
       <hr>
       <p class="ref">Ref: <span id="ref"></span></p>
