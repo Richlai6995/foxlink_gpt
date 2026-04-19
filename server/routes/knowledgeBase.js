@@ -299,7 +299,7 @@ router.post('/', async (req, res) => {
     score_threshold = 0,
     ocr_model      = null,
     parse_mode     = 'text_only',
-    pdf_ocr_mode   = 'off',
+    pdf_ocr_mode   = 'auto',
     tags,
     name_zh, name_en, name_vi, desc_zh, desc_en, desc_vi,
   } = req.body;

@@ -414,7 +414,7 @@ async function runMigrations(db) {
   await addCol('KB_DOCUMENTS',    'PARSE_MODE',         "VARCHAR2(20)");
 
   // PDF OCR mode — off (text-layer only) | auto (per-page image detection) | force (every page OCR)
-  await addCol('KNOWLEDGE_BASES', 'PDF_OCR_MODE', "VARCHAR2(10) DEFAULT 'off'");
+  await addCol('KNOWLEDGE_BASES', 'PDF_OCR_MODE', "VARCHAR2(10) DEFAULT 'auto'");
   await addCol('KB_DOCUMENTS',    'PDF_OCR_MODE', "VARCHAR2(10)");
 
   // KB_DOCUMENTS stored file path (for re-parse) — relative to UPLOAD_BASE/kb/<kb_id>/

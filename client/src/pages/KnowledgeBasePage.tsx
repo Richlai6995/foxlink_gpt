@@ -47,7 +47,7 @@ const emptyForm = (): CreateForm => ({
   retrieval_mode: 'hybrid',
   ocr_model: '',
   parse_mode: 'text_only',
-  pdf_ocr_mode: 'off',
+  pdf_ocr_mode: 'auto',
 })
 
 function formatBytes(bytes: number) {
