@@ -219,7 +219,7 @@ async function _fulltextSearchOracleText(db, kb, query, topK, cfg) {
   }
 
   const tokens = extractTokens(effectiveQuery, cfg.token_stopwords);
-  if (tokens.length === 0) return { rows: [], tokens: [] };
+  if (tokens.length === 0) return { rows: [], tokens: [], synonymsApplied, effectiveQuery };
 
   const ctxQuery = _buildOracleTextQuery(tokens, cfg);
   try {
@@ -241,6 +241,8 @@ async function _fulltextSearchOracleText(db, kb, query, topK, cfg) {
       })),
       tokens,
       ctxQuery,
+      synonymsApplied,
+      effectiveQuery,
     };
   } catch (e) {
     // ORA-20000 (index not built), ORA-29800, ORA-29902 等 Oracle Text 錯誤 → 透傳給上層
@@ -400,6 +402,8 @@ async function retrieveKbChunks(db, opts = {}) {
 
   let backendUsed = cfg.backend || 'like';
   let ctxQueryUsed = null;
+  let synonymsAppliedUsed = [];
+  let effectiveQueryUsed = query;
   if (mode === 'fulltext' || mode === 'hybrid') {
     if (cfg.backend === 'oracle_text') {
       try {
@@ -407,6 +411,8 @@ async function retrieveKbChunks(db, opts = {}) {
         ftRows = ft.rows;
         tokens = ft.tokens;
         ctxQueryUsed = ft.ctxQuery;
+        synonymsAppliedUsed = ft.synonymsApplied || [];
+        effectiveQueryUsed = ft.effectiveQuery || query;
       } catch (e) {
         console.warn('[KbRetrieval] oracle_text failed, fallback to LIKE:', e.message);
         backendUsed = 'like (fallback)';
@@ -454,6 +460,9 @@ async function retrieveKbChunks(db, opts = {}) {
     mode,
     tokens_extracted: tokens,
     ctx_query:       ctxQueryUsed,
+    synonym_thesaurus: cfg.synonym_thesaurus || null,
+    synonyms_applied: synonymsAppliedUsed,
+    effective_query: effectiveQueryUsed,
     fusion_method:   cfg.fusion_method,
     vec_fetched:     vectorRows.length,
     ft_fetched:      ftRows.length,

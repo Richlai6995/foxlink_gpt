@@ -24,6 +24,9 @@ interface DebugStats {
   tokens_extracted: string[]
   ctx_query: string | null
   fusion_method: string
+  synonym_thesaurus?: string | null
+  synonyms_applied?: string[]
+  effective_query?: string
   vec_fetched: number
   ft_fetched: number
   fused: number
@@ -255,6 +258,23 @@ export default function KbRetrievalDebug() {
             {stats.ctx_query && (
               <div className="text-xs text-slate-500">
                 CONTAINS query: <code className="bg-slate-200 px-1 rounded">{stats.ctx_query}</code>
+              </div>
+            )}
+            {stats.synonym_thesaurus && (
+              <div className="text-xs text-slate-500">
+                同義詞字典: <code className="bg-purple-100 text-purple-700 px-1 rounded">{stats.synonym_thesaurus}</code>
+                {stats.synonyms_applied && stats.synonyms_applied.length > 0 ? (
+                  <> — 展開 {stats.synonyms_applied.map((s, i) => (
+                    <code key={i} className="ml-1 bg-purple-100 text-purple-700 px-1 rounded">{s}</code>
+                  ))}</>
+                ) : (
+                  <span className="text-orange-600"> — query 未命中任何 phrase（沒展開）</span>
+                )}
+              </div>
+            )}
+            {stats.effective_query && stats.effective_query !== stats.tokens_extracted.join(' ') && stats.synonyms_applied && stats.synonyms_applied.length > 0 && (
+              <div className="text-xs text-slate-500">
+                Effective query: <code className="bg-slate-200 px-1 rounded">{stats.effective_query}</code>
               </div>
             )}
           </div>
