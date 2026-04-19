@@ -242,7 +242,7 @@ module.exports = [
     sort_order: 4,
     icon: 'Globe',
     icon_color: 'text-sky-500',
-    last_modified: '2026-04-01',
+    last_modified: '2026-04-20',
     title: '語言切換與多語設定',
     sidebar_label: '語言切換與多語設定',
     blocks: [
@@ -261,6 +261,7 @@ module.exports = [
           },
           { type: 'para', text: '語言偏好設定會同步儲存到您的帳號（伺服器端），下次登入後自動套用，與瀏覽器無關。' },
           { type: 'tip', text: '對話標題（Session Title）支援三語版本。切換語言後，歷史對話的標題也會自動顯示對應語言版本（若建立時系統已翻譯）。' },
+          { type: 'note', text: '**UI 語言 = AI 回答語言**：您設定的介面語言會同步影響 AI 對話的輸出語言。即使您用中文提問、或知識庫內容是英文，AI 仍會使用您設定的語言回答。只有在您明確要求翻譯（如「翻成日文」「translate to French」）時才會例外。' },
         ],
       },
       {
