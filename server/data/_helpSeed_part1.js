@@ -1427,7 +1427,7 @@ module.exports = [
     sort_order: 15,
     icon: 'Database',
     icon_color: 'text-teal-500',
-    last_modified: '2026-04-19',
+    last_modified: '2026-04-20',
     title: '知識庫市集',
     sidebar_label: '知識庫市集',
     blocks: [
@@ -1495,43 +1495,6 @@ module.exports = [
         title: '召回測試（檢索測試）',
         blocks: [
           { type: 'para', text: '進入知識庫詳情 → 點選「召回測試」頁籤，輸入任意問題，系統會模擬真實對話的檢索流程，顯示前幾名相關段落、相似度分數及比對方式（向量 / 全文 / 混合），幫助您調整設定參數。' },
-        ],
-      },
-      {
-        type: 'subsection',
-        title: '進階檢索設定（覆寫系統預設）',
-        blocks: [
-          { type: 'para', text: '在 KB 設定頁捲到底部可展開「進階檢索設定」摺疊區，勾選「啟用此 KB 的專屬檢索設定」後可覆寫系統預設：' },
-          {
-            type: 'table',
-            headers: ['參數', '用途'],
-            rows: [
-              ['Backend', 'LIKE（保守）vs Oracle Text WORLD_LEXER（中文精度高，推薦）'],
-              ['Score Fusion', 'Weighted 權重和 vs RRF Reciprocal Rank Fusion（推薦，更穩健）'],
-              ['Vector / Fulltext 權重', '僅 Weighted 模式下生效，控制向量 vs 全文的貢獻'],
-              ['最低 FT Score / Vector Cutoff', '過濾低分結果；空值 = 沿用系統預設'],
-              ['Fuzzy 模糊匹配', '開啟 Oracle Text 模糊比對，誤召率高，預設關'],
-              ['同義詞字典', '下拉選擇 Admin 端建立的字典（如 foxlink_syn）'],
-              ['Multi-vector', '啟用 title+body 雙向量加權檢索（需補 title 向量）'],
-            ],
-          },
-          { type: 'tip', text: '空欄位會沿用系統預設。關掉「啟用此 KB 的專屬檢索設定」可清除整個覆寫回到系統預設。' },
-        ],
-      },
-      {
-        type: 'subsection',
-        title: '重新解析此 KB / 補 title 向量',
-        blocks: [
-          { type: 'para', text: 'KB 設定頁底部提供兩顆維護按鈕：' },
-          {
-            type: 'table',
-            headers: ['按鈕', '用途', '成本'],
-            rows: [
-              ['重新解析此 KB（橘）', '所有文件重新 chunk + embedding。用於 chunker 邏輯更新後套用', '高（需 API 費用 + 時間）'],
-              ['補 title 向量（紫）', '僅為啟用 Multi-vector 後的 chunks 補 title_embedding，不動 body', '低（只 embed heading 文字）'],
-            ],
-          },
-          { type: 'note', text: '重新解析期間該 KB 的文件狀態會變 processing，檢索暫時受影響。建議離峰時段跑。' },
         ],
       },
       {
