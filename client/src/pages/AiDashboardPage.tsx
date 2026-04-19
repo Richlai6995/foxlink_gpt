@@ -34,8 +34,50 @@ import type {
 type ViewMode = 'chart' | 'table'
 type SidebarTab = 'topics' | 'history' | 'saved'
 
+// ── Last-Result localStorage cache（設計圖表時避免重跑查詢）───────────────────
+const RESULT_CACHE_TTL_MS = 30 * 60 * 1000  // 30 分鐘
+const RESULT_CACHE_MAX_BYTES = 2 * 1024 * 1024  // 2MB（超過降級只存 question）
+const resultCacheKey = (userId: number | string, designId: number) =>
+  `ai-dash-last-${userId}-${designId}`
+
+type CachedPayload = {
+  question: string
+  result: any | null  // null → degraded（只有 question，需手動 requery）
+  userChartConfig: any | null
+  ts: number
+}
+
+function loadCachedResult(userId: number | string | undefined, designId: number): CachedPayload | null {
+  if (!userId) return null
+  try {
+    const raw = localStorage.getItem(resultCacheKey(userId, designId))
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as CachedPayload
+    if (!parsed.ts || Date.now() - parsed.ts > RESULT_CACHE_TTL_MS) {
+      localStorage.removeItem(resultCacheKey(userId, designId))
+      return null
+    }
+    return parsed
+  } catch { return null }
+}
+
+function saveCachedResult(userId: number | string | undefined, designId: number, payload: CachedPayload) {
+  if (!userId) return
+  try {
+    const key = resultCacheKey(userId, designId)
+    const json = JSON.stringify(payload)
+    if (json.length > RESULT_CACHE_MAX_BYTES) {
+      // degraded: 結果太大,只保留 question + chart config
+      const degraded: CachedPayload = { ...payload, result: null }
+      localStorage.setItem(key, JSON.stringify(degraded))
+    } else {
+      localStorage.setItem(key, json)
+    }
+  } catch { /* 配額滿 / private mode — 忽略 */ }
+}
+
 export default function AiDashboardPage() {
-  const { isAdmin, canUseDashboard, canDesignAiSelect } = useAuth()
+  const { user, isAdmin, canUseDashboard, canDesignAiSelect } = useAuth()
   const navigate = useNavigate()
   const { t, i18n } = useTranslation()
   const [searchParams] = useSearchParams()
@@ -62,6 +104,8 @@ export default function AiDashboardPage() {
   const [loading, setLoading] = useState(false)
   const [statusMsg, setStatusMsg] = useState('')
   const [result, setResult] = useState<AiQueryResult | null>(null)
+  // restore 自 localStorage 時的 timestamp；非 null 代表「目前顯示的是快取結果」
+  const [restoredFrom, setRestoredFrom] = useState<number | null>(null)
   const [viewMode, setViewMode] = useState<ViewMode>('chart')
   const [activeChartIdx, setActiveChartIdx] = useState(0)
 
@@ -185,6 +229,14 @@ export default function AiDashboardPage() {
   const [pendingQuery, setPendingQuery] = useState<AiSavedQuery | null>(null)
   // 使用者自訂的 chart_config（覆蓋 design 預設）
   const [userChartConfig, setUserChartConfig] = useState<AiChartConfig | null>(null)
+  // 使用者調整 chart 設計時同步更新 cache，讓切走再切回來保留 ChartBuilder 調好的狀態
+  useEffect(() => {
+    if (!selectedDesign?.id || !result || !user?.id) return
+    saveCachedResult(user.id, selectedDesign.id, {
+      question, result, userChartConfig, ts: Date.now(),
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userChartConfig])
   // 目前載入執行的命名查詢 id（Tableau 自動存檔用）
   const [loadedSqId, setLoadedSqId] = useState<number | null>(null)
   // 從 Tableau 另存為新查詢時帶入的 chart_config（新存才用，一般儲存不帶圖表設定）
@@ -238,18 +290,29 @@ export default function AiDashboardPage() {
 
   const selectDesign = (d: AiSelectDesign) => {
     setSelectedDesign(d)
-    setResult(null)
     setDevSql('')
     setDevTokens(null)
     setDevDuration(null)
     setDevVectorResults([])
-    setQuestion('')
-    setUserChartConfig(null)
     setLoadedSqId(null)
     setShowChartBuilder(false)
     // 帶入任務設定的向量搜尋預設值
     setAdvTopK(d.vector_top_k != null ? String(d.vector_top_k) : '')
     setAdvThreshold(d.vector_similarity_threshold != null ? String(d.vector_similarity_threshold) : '')
+
+    // 嘗試從 localStorage 還原最近結果（30 分鐘內）
+    const cached = loadCachedResult(user?.id, d.id!)
+    if (cached) {
+      setQuestion(cached.question || '')
+      setUserChartConfig(cached.userChartConfig || null)
+      setResult(cached.result || null)  // degraded 時 result 為 null → 使用者需按重新查詢
+      setRestoredFrom(cached.ts)
+    } else {
+      setQuestion('')
+      setUserChartConfig(null)
+      setResult(null)
+      setRestoredFrom(null)
+    }
   }
 
   const handleQuery = async () => {
@@ -331,15 +394,22 @@ export default function AiDashboardPage() {
     } else if ('results' in data) {
       setDevVectorResults(data.results || [])
     } else if ('rows' in data) {
-      setResult({
+      const newResult: AiQueryResult = {
         rows: data.rows,
         columns: data.columns || (data.rows.length > 0 ? Object.keys(data.rows[0]) : []),
         column_labels: data.column_labels || {},
         row_count: data.row_count,
         chart_config: data.chart_config ? (typeof data.chart_config === 'string' ? JSON.parse(data.chart_config) : data.chart_config) : null,
-      })
+      }
+      setResult(newResult)
       setStatusMsg('')
       setActiveChartIdx(0)
+      setRestoredFrom(null)
+      if (selectedDesign?.id) {
+        saveCachedResult(user?.id, selectedDesign.id, {
+          question, result: newResult, userChartConfig, ts: Date.now(),
+        })
+      }
     } else if ('error' in data) {
       setStatusMsg('錯誤：' + data.error)
     }
@@ -435,15 +505,22 @@ export default function AiDashboardPage() {
             const cfg = data.chart_config
               ? (typeof data.chart_config === 'string' ? JSON.parse(data.chart_config) : data.chart_config)
               : null
-            setResult({
+            const newResult: AiQueryResult = {
               rows: data.rows,
               columns: data.columns || (data.rows.length > 0 ? Object.keys(data.rows[0]) : []),
               column_labels: data.column_labels || {},
               row_count: data.row_count,
               chart_config: cfg,
-            })
+            }
+            setResult(newResult)
             setStatusMsg('')
             setActiveChartIdx(0)
+            setRestoredFrom(null)
+            if (selectedDesign?.id) {
+              saveCachedResult(user?.id, selectedDesign.id, {
+                question: q, result: newResult, userChartConfig, ts: Date.now(),
+              })
+            }
           }
           else if (event === 'error') setStatusMsg('錯誤：' + (data.error || data.message || '未知錯誤'))
         } catch {}
@@ -1016,6 +1093,34 @@ export default function AiDashboardPage() {
                   {statusMsg}
                 </p>
               )}
+            </div>
+          )}
+
+          {/* ── 快取結果通知 bar（restored from localStorage）──────────────── */}
+          {restoredFrom && selectedDesign && (
+            <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-2 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2 text-xs text-amber-800">
+                <History size={13} className="text-amber-500 flex-shrink-0" />
+                <span>
+                  {result
+                    ? t('aiDash.cachedNotice', { mins: Math.max(1, Math.round((Date.now() - restoredFrom) / 60000)) })
+                    : t('aiDash.cachedDegraded')}
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => handleQuerySse(question)}
+                  disabled={loading || !question.trim()}
+                  className="flex items-center gap-1 text-xs px-2.5 py-1 rounded-lg bg-amber-500 hover:bg-amber-600 disabled:opacity-40 text-white transition">
+                  <RefreshCw size={11} className={loading ? 'animate-spin' : ''} /> {t('aiDash.requeryNow')}
+                </button>
+                <button
+                  onClick={() => setRestoredFrom(null)}
+                  title={t('aiDash.dismissNotice')}
+                  className="text-amber-400 hover:text-amber-600 p-0.5">
+                  <X size={12} />
+                </button>
+              </div>
             </div>
           )}
 
