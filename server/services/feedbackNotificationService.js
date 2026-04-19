@@ -74,7 +74,9 @@ async function sendTicketEmail(db, type, ticket, extra = {}) {
 const PRIORITY_EMOJI = { urgent: '🔴', high: '🟠', medium: '🔵', low: '⚪' };
 
 function _ticketLink(ticket) {
-  const base = process.env.PUBLIC_URL || process.env.APP_URL || process.env.WEBEX_PUBLIC_URL || '';
+  const explicit = process.env.PUBLIC_URL || process.env.APP_URL || '';
+  const isProd = process.env.NODE_ENV === 'production';
+  const base = explicit || (isProd ? (process.env.WEBEX_PUBLIC_URL || '') : `http://localhost:${process.env.CLIENT_DEV_PORT || 5173}`);
   const tail = `/feedback/${ticket.id}`;
   return base ? `${base.replace(/\/$/, '')}${tail}` : tail;
 }
