@@ -3363,6 +3363,8 @@ const adminSections = [
   { id: 'a-dify', label: 'API 連接器', icon: <Zap size={18} /> },
   { id: 'a-erp-tools', label: 'ERP 工具管理', icon: <Database size={18} /> },
   { id: 'a-kb', label: '自建知識庫管理', icon: <Database size={18} /> },
+  { id: 'a-kb-retrieval', label: 'KB 檢索架構 v2', icon: <Search size={18} /> },
+  { id: 'a-kb-synonyms', label: 'KB 同義詞字典', icon: <BookOpen size={18} /> },
   { id: 'a-skill', label: '技能市集管理', icon: <Sparkles size={18} /> },
   { id: 'a-code-runners', label: 'Code Runners', icon: <Code2 size={18} /> },
   { id: 'a-llm', label: 'LLM 模型管理', icon: <Cpu size={18} /> },
@@ -3801,6 +3803,165 @@ function AdminManual() {
             ]}
           />
           <NoteBox>KB_ALLOW_USER_CREATE=false 只是系統預設值，管理員仍可個別為使用者或角色開啟「允許建立知識庫」。</NoteBox>
+        </SubSection>
+      </Section>
+
+      <Section id="a-kb-retrieval" icon={<Search size={22} />} iconColor="text-teal-500" title="KB 檢索架構 v2">
+        <Para>
+          v2 架構（2026-04-19 上線）把 KB 檢索從寫死的 LIKE + JS hack 升級為 Oracle 23 AI 的 hybrid vector + WORLD_LEXER text search，
+          並導入 multi-vector、同義詞、per-KB 可調參數等能力。Admin 後台提供 3 個相關 tab：
+        </Para>
+
+        <SubSection title="Tab 1：KB 檢索設定（系統預設）">
+          <Para>影響全系統所有 KB（除非該 KB 在進階檢索自己覆寫）。7 大區塊：</Para>
+          <Table
+            headers={['區塊', '可調內容', '建議']}
+            rows={[
+              ['檢索後端', 'Backend (LIKE / Oracle Text)', 'oracle_text 精度好很多'],
+              ['Score Fusion', 'weighted（權重和）/ rrf（Reciprocal Rank Fusion）', 'rrf 更穩健'],
+              ['Fulltext Query Op', 'ACCUM / AND / OR', 'ACCUM 最自然'],
+              ['Weighted 權重', 'Vector / Fulltext / Match Boost（0–1）', '僅 weighted 模式生效'],
+              ['TopK / 門檻', 'Fetch / Return / Score 門檻 / Vector cutoff / FT 最低分', '預設 0 不過濾'],
+              ['Tokenize 停用詞', 'LIKE/tokenize 忽略的高頻詞（分機、地址…）', '已預設常見詞'],
+              ['Multi-vector', '全域啟用 title+body 雙向量加權 + 權重', '需搭配 per-KB 補 title 向量'],
+              ['維護操作', 'Orphan cleanup 狀態、cleanup cron 下拉、rebuild vector index', 'cron 預設每小時整點'],
+            ]}
+          />
+          <TipBox>儲存後 60 秒內快取失效。即時驗證：到「KB 檢索調校」頁跑 query 即可。</TipBox>
+        </SubSection>
+
+        <SubSection title="Tab 2：KB 檢索調校（debug 頁）">
+          <Para>選 KB + query → 執行後並排顯示 <strong>Vector / Fulltext / Fused / Rerank</strong> 四階段 top-N 結果。</Para>
+          <Para>檢索摘要包含：</Para>
+          <ListBlock items={[
+            'Backend / Mode / Fusion / Elapsed',
+            'Vector / Fulltext / Fused / After threshold / Rerank / Final 各階段條數',
+            'Tokens 實際 tokenize 結果',
+            'CONTAINS query 實際送到 Oracle 的字串',
+            '同義詞字典與展開詞（若啟用）',
+            'Effective query（展開後完整 query）',
+          ]} />
+          <Para>最下方「解析後的 config」摺疊可展開看 kb 覆寫 + system defaults + hardcoded 合併後的最終值。</Para>
+        </SubSection>
+
+        <SubSection title="Tab 3：子字串 Grep（繞 index 診斷）">
+          <Para>debug 頁上的黃色 Grep 區塊，直接對 kb_chunks.content 做 LIKE，不走 vector / ftx。</Para>
+          <Para>用途：分辨「parser 掉資料」vs「資料存在但 index 查不到」。</Para>
+          <Table
+            headers={['命中數', '診斷']}
+            rows={[
+              ['0', 'parser/chunker 把內容吃掉了 → 檢查 parse_mode / 重 parse'],
+              ['>0 但 Fulltext 找不到', 'index 問題 → rebuild ftx / 等 SYNC 完成'],
+              ['>0 且 Fulltext 也找到', '內容 OK → 可能是 rerank/topK 排序問題'],
+            ]}
+          />
+        </SubSection>
+
+        <SubSection title="Per-KB 覆寫（KB 設定頁內）">
+          <Para>任一 KB 設定頁捲到底 → 展開「進階檢索設定（覆寫系統預設）」摺疊區 → 勾選啟用後可覆寫：</Para>
+          <ListBlock items={[
+            'Backend / Fusion / 權重 / TopK 各欄位（留空 = 沿用系統預設）',
+            'Fuzzy 模糊匹配（Oracle Text 誤召率高，預設關）',
+            '同義詞字典（下拉挑 admin 已建立的字典）',
+            'Multi-vector（per-KB 啟用 title+body 加權）',
+          ]} />
+          <NoteBox>空欄位會沿用系統預設。關掉上方開關可清除整個覆寫回到系統預設。</NoteBox>
+        </SubSection>
+
+        <SubSection title="Multi-vector（title + body 加權）">
+          <Para>每個 chunk 額外用 heading 做一份 embedding。查詢時加權公式：<code>title_weight × sim(title) + body_weight × sim(body)</code>。</Para>
+          <Para>Title 抽取啟發式（自動偵測）：</Para>
+          <ListBlock items={[
+            '[工作表: XXX] — xlsx sheet 標題',
+            '# / ## / ### Markdown heading',
+            '【XXX】 中文標題格式',
+            '第一行 ≤ 80 字且非獨行（視為短 heading）',
+          ]} />
+          <Para>啟用步驟：</Para>
+          <div className="space-y-3">
+            <StepItem num={1} title="Admin → KB 檢索設定 → 勾「啟用 Multi-vector」+ 調權重 → 儲存" desc="預設 title_weight=0.3, body_weight=0.7" />
+            <StepItem num={2} title="每個要啟用的 KB：進階檢索設定 → 勾「啟用 Multi-vector」" desc="新上傳的 chunks 會自動 embed title 向量" />
+            <StepItem num={3} title="既有 chunks：KB 設定頁底部 紫色「補 title 向量」按鈕" desc="只 embed title 不動 body，費用低很多" />
+          </div>
+          <TipBox>對 heading 明顯的文件（SOP、技術手冊、help KB）效益最大。純表格資料（分機表）效益有限。</TipBox>
+        </SubSection>
+
+        <SubSection title="Chunker 工作表硬分段（xlsx 特例）">
+          <Para>v2 chunker 偵測 xlsx parser 產生的 <code>[工作表: XXX]</code> 標記，強制 flush 分段，避免小 sheet（如只有 5 人的香港分機 sheet）被併到前一個大 chunk 訊號被稀釋。</Para>
+          <Para>套用方式：<strong>現有 xlsx KB 需重新解析</strong>（KB 設定頁底部 橘色「重新解析此 KB」按鈕，會消耗 Vertex API 費用+時間）。未來新上傳的 xlsx 自動生效。</Para>
+        </SubSection>
+
+        <SubSection title="踩坑紀錄 & 防範">
+          <Table
+            headers={['項目', '說明']}
+            rows={[
+              ['chat / webex / research SELECT 必須含 retrieval_config', '少撈這欄 → 所有 per-KB 覆寫（同義詞、multi-vector、權重）全 noop。新增相關功能時 grep 所有 SELECT FROM knowledge_bases 務必加上'],
+              ['ftx SYNC (ON COMMIT) 拖慢上傳', 'v2 改成 EVERY "SYSDATE+1/1440"，每分鐘背景 sync。查詢最多 1 分鐘 lag；若 Oracle 帳號缺 CREATE JOB 權限會 fallback ON COMMIT'],
+              ['CTX_THES 權限缺失', 'FOXLINK Oracle 帳號無 EXECUTE ON CTXSYS.CTX_THES。同義詞改用自建表 + query-time OR 展開'],
+            ]}
+          />
+          <NoteBox>完整架構與 commits 對照表：docs/kb-retrieval-architecture-v2.md</NoteBox>
+        </SubSection>
+      </Section>
+
+      <Section id="a-kb-synonyms" icon={<BookOpen size={22} />} iconColor="text-emerald-500" title="KB 同義詞字典">
+        <Para>
+          解決「Carson Chung」vs「鍾漢成」、「ERP」vs「Oracle EBS」這類 query 拼寫不同但指同一實體的檢索漏網問題。
+          字典改用自建追蹤表 + query-time OR 展開，無需 Oracle CTX_THES 權限。
+        </Para>
+
+        <SubSection title="運作原理">
+          <Para>在 query 送到 Oracle Text CONTAINS 之前，系統先掃字典 term ↔ related 關係：</Para>
+          <ListBlock items={[
+            'query 子字串命中任一 term → 自動在 query 尾端補 related',
+            'query 子字串命中任一 related → 自動在 query 尾端補 term',
+            '雙向、大小寫不敏感、支援多字 phrase（如 "Carson Chung"）',
+          ]} />
+          <Para>例：字典有 <code>鍾漢成 ↔ Carson Chung</code>，query 「Carson Chung 分機?」自動改寫為「Carson Chung 分機? 鍾漢成」後再 tokenize，展開的三 token 一起送 CONTAINS。</Para>
+          <NoteBox>chat 端還會把同義詞關係當 hint 塞進 LLM context：「『X』=『Y』同一實體，請統合所有寫法對應的 chunks」，避免 LLM 只看其中一筆就下結論。</NoteBox>
+        </SubSection>
+
+        <SubSection title="建立字典 + 加同義詞">
+          <div className="space-y-3">
+            <StepItem num={1} title="Admin → KB 同義詞字典" />
+            <StepItem num={2} title="左側「新增字典」輸入英數字底線名稱" desc="例 foxlink_syn、product_alias。命名規則：開頭字母、30 字內、英數字與底線" />
+            <StepItem num={3} title="建立後選中字典 → 右側加 term ↔ related 關係" desc="例 term=鍾漢成 related=Carson Chung；可建多條" />
+            <StepItem num={4} title="到 KB 設定頁 → 進階檢索 → 下拉選取字典名稱 → 儲存" desc="或到 KB 檢索設定系統預設處設定，對所有 KB 套用" />
+          </div>
+        </SubSection>
+
+        <SubSection title="驗證字典有沒生效">
+          <Para>到 KB 檢索調校頁 → 選 KB → 輸入同義詞觸發 query → 執行。</Para>
+          <Para>檢索摘要會多顯示：</Para>
+          <ListBlock items={[
+            '同義詞字典: XXX — 展開 [YYY]（若命中）',
+            '同義詞字典: XXX — query 未命中任何 phrase（沒命中，橘字提示）',
+            'Effective query: 原 query + 展開詞',
+            'CONTAINS query: 最終送 Oracle 的字串',
+          ]} />
+        </SubSection>
+
+        <SubSection title="適用場景">
+          <Table
+            headers={['場景', '字典範例', '效益']}
+            rows={[
+              ['中英人名對照', '鍾漢成 ↔ Carson Chung', '英文名員工查得到中文紀錄'],
+              ['技術縮寫', 'ERP ↔ Enterprise Resource Planning', '簡稱/全名都能搜'],
+              ['產品代號', 'FL-X100 ↔ 連接器 X100 系列', '規格書/口語都命中'],
+              ['廠區代碼', 'TCC ↔ 台中廠', '代碼和中文名互通'],
+              ['部門別名', 'RD ↔ 研發部 ↔ R&D', '三種寫法等價'],
+            ]}
+          />
+        </SubSection>
+
+        <SubSection title="實作備註">
+          <Para>原本計畫用 Oracle CTX_THES 存字典並靠 CONTAINS SYN(term, thes) 自動展開，但 FOXLINK Oracle 帳號缺 EXECUTE ON CTXSYS.CTX_THES 權限（<code>PLS-00201</code>）→ 改用自建追蹤表 <code>kb_thesauri</code> 和 <code>kb_thesaurus_synonyms</code>，query-time 在應用層手動 OR 展開。</Para>
+          <ListBlock items={[
+            '零 Oracle 權限要求（不用動 DBA）',
+            '跨 Oracle 版本穩定（CTX view 欄位名版本差異多）',
+            'Debug 可直接看 SQL（SYN() 展開在 Oracle 內部看不到）',
+            '雙向 + 多字 phrase 支援比 CTX_THES.SYN 更靈活',
+          ]} />
         </SubSection>
       </Section>
 
