@@ -84,27 +84,39 @@ async function listSynonyms(db, thesaurus) {
 }
 
 /**
- * 查某字典對 token 的所有同義詞（雙向：term→related 和 related→term）。
- * 供 kbRetrieval._buildOracleTextQuery 使用。
- * @returns string[]  不包含 token 本身
+ * 對完整 query 字串做 phrase-level 同義詞展開。
+ * 掃整個字典的 term/related，若 query 子字串命中 → 把對應同義詞加到 query 尾。
+ * 處理多字 phrase（如 "Carson Chung"），比單 token 展開更精確。
+ *
+ * 例：query="Carson Chung 分機" + 字典(鍾漢成↔Carson Chung)
+ *     → 展開後 query="Carson Chung 分機 鍾漢成"
+ * tokenize 後 {Carson} ACCUM {Chung} ACCUM {鍾漢成} → 雙廠命中
  */
-async function lookupExpansion(db, thesaurus, token) {
-  if (!thesaurus || !token) return [];
+async function expandQuery(db, thesaurus, query) {
+  if (!thesaurus || !query) return { expanded: query, added: [] };
   try {
     const rows = await db.prepare(`
-      SELECT related AS syn FROM kb_thesaurus_synonyms
-      WHERE thesaurus=? AND term=?
-      UNION
-      SELECT term AS syn FROM kb_thesaurus_synonyms
-      WHERE thesaurus=? AND related=?
-    `).all(thesaurus, token, thesaurus, token);
-    const tokenLc = token.toLowerCase();
-    return rows
-      .map((r) => ((r.SYN ?? r.syn) || '').trim())
-      .filter((s) => s && s.toLowerCase() !== tokenLc);
+      SELECT term, related FROM kb_thesaurus_synonyms WHERE thesaurus=?
+    `).all(thesaurus);
+
+    const qLc = query.toLowerCase();
+    const added = new Set();
+    for (const r of rows) {
+      const term = ((r.TERM ?? r.term) || '').trim();
+      const rel  = ((r.RELATED ?? r.related) || '').trim();
+      // 雙向：query 含 term → 加 related；query 含 related → 加 term
+      if (term && qLc.includes(term.toLowerCase())) added.add(rel);
+      if (rel  && qLc.includes(rel.toLowerCase()))  added.add(term);
+    }
+    // 去掉空 / 已經在 query 裡的
+    const addedList = [...added].filter((s) => s && !qLc.includes(s.toLowerCase()));
+    return {
+      expanded: addedList.length > 0 ? `${query} ${addedList.join(' ')}` : query,
+      added: addedList,
+    };
   } catch (e) {
-    console.warn('[kbSynonyms] lookupExpansion error:', e.message);
-    return [];
+    console.warn('[kbSynonyms] expandQuery error:', e.message);
+    return { expanded: query, added: [] };
   }
 }
 
@@ -115,5 +127,5 @@ module.exports = {
   addSynonym,
   removeSynonym,
   listSynonyms,
-  lookupExpansion,
+  expandQuery,
 };
