@@ -1,52 +1,62 @@
 {
-  "version": 1,
+  "version": 2,
   "description": "KB Retrieval 回歸測試金標 — 每次改 kbRetrieval.js 或 backend 都跑這個",
+  "setup_notes": [
+    "執行前需確保以下資料存在（Admin UI 手動建立過即可）：",
+    "1. KB 同義詞字典 'foxlink_syn' 存在且包含: (term='鍾漢成', related='Carson Chung')",
+    "2. KB '正崴通訊錄' 的 retrieval_config.synonym_thesaurus = 'foxlink_syn'",
+    "若上述未設定，同義詞相關測試會 FAIL"
+  ],
   "queries": [
     {
       "kb_name": "正崴通訊錄",
       "query": "鍾漢成 分機?",
-      "expected_chunk_keywords_any": [
-        "鍾漢成"
-      ],
+      "expected_chunk_keywords_any": ["鍾漢成"],
       "expected_min_hits": 2,
-      "notes": "鍾漢成 在富東 + 香港，預期至少 2 個 chunks 命中"
+      "notes": "Phase 1 基礎: 鍾漢成 在富東 + 香港，預期至少 2 個 chunks 命中"
     },
     {
       "kb_name": "正崴通訊錄",
       "query": "我要所有廠區 鍾漢成 分機?",
-      "expected_chunk_keywords_any": [
-        "鍾漢成"
-      ],
+      "expected_chunk_keywords_any": ["鍾漢成"],
       "expected_min_hits": 2,
       "notes": "整段 query 測試 tokenize 有效；不會被 LIKE 整串 0 命中誤殺"
     },
     {
       "kb_name": "正崴通訊錄無格式感知",
       "query": "鍾漢成 分機",
-      "expected_chunk_keywords_any": [
-        "鍾漢成"
-      ],
+      "expected_chunk_keywords_any": ["鍾漢成"],
       "expected_min_hits": 2,
       "notes": "text_only 解析的 KB 也要 work"
     },
     {
       "kb_name": "正崴通訊錄無格式感知",
       "query": "我要所有廠區 鍾漢成 分機?",
-      "expected_chunk_keywords_any": [
-        "鍾漢成",
-        "香港"
-      ],
+      "expected_chunk_keywords_any": ["鍾漢成", "香港"],
       "expected_min_hits": 3,
       "notes": "長 query 含多 token，要能撈到香港 chunk"
     },
     {
       "kb_name": "正崴通訊錄",
       "query": "富東廠區",
-      "expected_chunk_keywords_any": [
-        "富東"
-      ],
+      "expected_chunk_keywords_any": ["富東"],
       "expected_min_hits": 1,
       "notes": "特定廠區查詢"
+    },
+    {
+      "kb_name": "正崴通訊錄",
+      "query": "Carson Chung 分機?",
+      "expected_chunk_keywords_any": ["鍾漢成", "Carson Chung"],
+      "expected_min_hits": 2,
+      "expected_synonyms_applied": ["鍾漢成"],
+      "notes": "Phase 3b 同義詞: 英文名 'Carson Chung' 應展開成 '鍾漢成'，撈到富東 + 香港兩個 chunks"
+    },
+    {
+      "kb_name": "正崴通訊錄",
+      "query": "852-2628-1066",
+      "expected_chunk_keywords_any": ["鍾漢成", "Carson Chung", "852-2628-1066"],
+      "expected_min_hits": 1,
+      "notes": "Phase 3a chunker: 香港 sheet 因工作表硬分段成獨立小 chunk，電話號碼可被精準檢索"
     }
   ]
 }
