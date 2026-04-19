@@ -274,14 +274,26 @@ async function executeSelfKbSearch(db, kb, query, { userId, sessionId } = {}) {
       // 排序 — 命中罕見專名（如「鍾漢成」）的 chunk 會排前，不會被「分機」這類
       // 每個 chunk 都有的常見字稀釋。
       // 避免直接 LIKE %整段使用者訊息% 永遠 0 命中的 bug。
-      const tokens = (query.match(/[\u4e00-\u9fa5]{2,6}|[A-Za-z0-9][A-Za-z0-9_.-]{1,}/g) || [])
-        .filter((t) => t.length >= 2 && !/^(我要|你要|我想|所有|幫我|請問|告訴|是否|可以|什麼|怎麼)$/.test(t));
+      // CJK 優先用 3+ 字 token（避開「分機」、「地址」等通用 2 字詞把專名訊號稀釋）；
+      // 若沒有 3+ 字 CJK token，fallback 回 2+ 字。英數 2+ 字照常。
+      const cjk3 = query.match(/[\u4e00-\u9fa5]{3,6}/g) || [];
+      const cjk2 = query.match(/[\u4e00-\u9fa5]{2}/g) || [];
+      const latin = query.match(/[A-Za-z0-9][A-Za-z0-9_.-]+/g) || [];
+      let tokens = [...cjk3, ...latin];
+      if (tokens.filter((t) => /[\u4e00-\u9fa5]/.test(t)).length === 0) {
+        // 沒有 CJK 3+ 字 token 時才用 2 字 CJK
+        tokens = [...cjk2, ...latin];
+      }
+      tokens = tokens.filter((t) => t.length >= 2 && !/^(我要|你要|我想|所有|幫我|請問|告訴|是否|可以|什麼|怎麼|分機|地址|電話|傳真|資料|哪些|每個)$/.test(t));
       if (tokens.length === 0 && query.trim()) tokens.push(query.trim());
       const useTokens = tokens.slice(0, 8);
-      // 每個 token CASE WHEN 命中加分（長 token=罕見專名權重高）
-      const caseExprs = useTokens.map((t) =>
-        `CASE WHEN UPPER(c.content) LIKE UPPER(?) THEN ${Math.max(1, t.length)} ELSE 0 END`
-      );
+      // 每個 token CASE WHEN 命中加分；權重 = length² 讓罕見專名（3-6 字）遠大於
+      // 一般 2 字詞。例：鍾漢成 3² = 9，分機 2² = 4，避免「分機」這類每 chunk
+      // 都有的常見詞把專名訊號沖淡。
+      const caseExprs = useTokens.map((t) => {
+        const w = Math.max(1, t.length * t.length);
+        return `CASE WHEN UPPER(c.content) LIKE UPPER(?) THEN ${w} ELSE 0 END`;
+      });
       const hitScoreExpr = caseExprs.join(' + ');
       const likeClauses = useTokens.map(() => 'UPPER(c.content) LIKE UPPER(?)').join(' OR ');
       const likeParams = useTokens.map((t) => `%${t.replace(/[%_]/g, '\\$&')}%`);
@@ -295,18 +307,24 @@ async function executeSelfKbSearch(db, kb, query, { userId, sessionId } = {}) {
         FETCH FIRST ? ROWS ONLY
       `).all(...likeParams, kb.id, ...likeParams, topK * 2);
 
+      // fulltext 分數以「fetched rows 實際最高 hit_score」標準化
+      // （不用所有 token 權重總和，避免 0 命中 token 稀釋比例）
+      // → top chunks 得 1.0，其他按比例遞減
+      const actualMaxHit = Math.max(1, ...ftRows.map((r) => r.hit_score || 0));
+      const ftScore = (r) => 0.5 + 0.5 * ((r.hit_score || 0) / actualMaxHit);
       if (mode === 'fulltext') {
-        results = ftRows.map((r) => ({ ...r, score: 0.8, match_type: 'fulltext' }));
+        results = ftRows.map((r) => ({ ...r, score: ftScore(r), match_type: 'fulltext' }));
       } else {
-        // Hybrid merge — 精確字串命中極強訊號，分數必須高於 vector 正常上限
-        // 否則 fulltext-only 的結果會被 vector topK 擠出去
+        // Hybrid merge：hybrid = vector 0.4 + fulltext 0.6 線性加權
+        // fulltext-only → score = ftScore(r)（沒 vector 分數，直接用）
         const vecIds = new Set(results.map((r) => r.id));
         for (const r of ftRows) {
+          const fts = ftScore(r);
           if (vecIds.has(r.id)) {
             const ex = results.find((x) => x.id === r.id);
-            if (ex) { ex.score = 0.95; ex.match_type = 'hybrid'; }
+            if (ex) { ex.score = 0.4 * ex.score + 0.6 * fts + 0.1; ex.match_type = 'hybrid'; }
           } else {
-            results.push({ ...r, score: 0.85, match_type: 'fulltext' });
+            results.push({ ...r, score: fts, match_type: 'fulltext' });
           }
         }
       }

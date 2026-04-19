@@ -954,13 +954,22 @@ router.post('/:id/search', async (req, res) => {
     // Full-text search — tokenize query, rank by weighted token hits
     // （避免整串 query 做 LIKE 必然 0 命中；以 token 長度當權重讓罕見專名排前）
     if (mode === 'fulltext' || mode === 'hybrid') {
-      const tokens = (query.match(/[\u4e00-\u9fa5]{2,6}|[A-Za-z0-9][A-Za-z0-9_.-]{1,}/g) || [])
-        .filter((t) => t.length >= 2 && !/^(我要|你要|我想|所有|幫我|請問|告訴|是否|可以|什麼|怎麼)$/.test(t));
+      // CJK 優先 3+ 字，避免「分機」等通用 2 字詞稀釋專名訊號
+      const cjk3 = query.match(/[\u4e00-\u9fa5]{3,6}/g) || [];
+      const cjk2 = query.match(/[\u4e00-\u9fa5]{2}/g) || [];
+      const latin = query.match(/[A-Za-z0-9][A-Za-z0-9_.-]+/g) || [];
+      let tokens = [...cjk3, ...latin];
+      if (tokens.filter((t) => /[\u4e00-\u9fa5]/.test(t)).length === 0) {
+        tokens = [...cjk2, ...latin];
+      }
+      tokens = tokens.filter((t) => t.length >= 2 && !/^(我要|你要|我想|所有|幫我|請問|告訴|是否|可以|什麼|怎麼|分機|地址|電話|傳真|資料|哪些|每個)$/.test(t));
       if (tokens.length === 0 && query.trim()) tokens.push(query.trim());
       const useTokens = tokens.slice(0, 8);
-      const caseExprs = useTokens.map((t) =>
-        `CASE WHEN UPPER(c.content) LIKE UPPER(?) THEN ${Math.max(1, t.length)} ELSE 0 END`
-      );
+      // 權重 = length² 讓罕見專名遠大於一般 2 字詞
+      const caseExprs = useTokens.map((t) => {
+        const w = Math.max(1, t.length * t.length);
+        return `CASE WHEN UPPER(c.content) LIKE UPPER(?) THEN ${w} ELSE 0 END`;
+      });
       const hitScoreExpr = caseExprs.join(' + ');
       const likeClauses = useTokens.map(() => 'UPPER(c.content) LIKE UPPER(?)').join(' OR ');
       const likeParams = useTokens.map((t) => `%${t.replace(/[%_]/g, '\\$&')}%`);
@@ -976,21 +985,21 @@ router.post('/:id/search', async (req, res) => {
         FETCH FIRST ? ROWS ONLY
       `).all(...likeParams, req.params.id, ...likeParams, topK * 2);
 
+      // 以「fetched rows 實際最高 hit_score」標準化，top 得 1.0
+      const actualMaxHit = Math.max(1, ...ftRows.map((r) => r.hit_score || 0));
+      const ftScore = (r) => 0.5 + 0.5 * ((r.hit_score || 0) / actualMaxHit);
       if (mode === 'fulltext') {
-        results = ftRows.map((r) => ({ ...r, score: 0.8, match_type: 'fulltext' }));
+        results = ftRows.map((r) => ({ ...r, score: ftScore(r), match_type: 'fulltext' }));
       } else {
-        // Hybrid merge — fulltext 是「精確字串命中」訊號極強，分數要高於 vector 的
-        // typical 上限（0.6-0.7）才會出現在最終 topK；否則 fulltext-only 永遠被擠走。
-        //  - 兩個方法都命中 → 0.95（最強）
-        //  - 只 fulltext → 0.85（強於 vector 正常分數）
-        //  - 只 vector → 保持原分（0.5-0.7 左右）
+        // Hybrid = 0.4 * vector + 0.6 * fulltext + 0.1 boost
         const vecIds = new Set(results.map((r) => r.id));
         for (const r of ftRows) {
+          const fts = ftScore(r);
           if (vecIds.has(r.id)) {
             const existing = results.find((x) => x.id === r.id);
-            if (existing) { existing.score = 0.95; existing.match_type = 'hybrid'; }
+            if (existing) { existing.score = 0.4 * existing.score + 0.6 * fts + 0.1; existing.match_type = 'hybrid'; }
           } else {
-            results.push({ ...r, score: 0.85, match_type: 'fulltext' });
+            results.push({ ...r, score: fts, match_type: 'fulltext' });
           }
         }
       }
