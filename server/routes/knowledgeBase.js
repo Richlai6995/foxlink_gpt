@@ -461,6 +461,15 @@ router.get('/unauthorized', async (req, res) => {
   }
 });
 
+// ─── GET /api/kb/thesauri-names — KB 設定頁 LOV（必須在 /:id 之前，避免被匹配）
+router.get('/thesauri-names', async (req, res) => {
+  try {
+    const db = getDb();
+    const rows = await db.prepare(`SELECT name FROM kb_thesauri ORDER BY name`).all();
+    res.json(rows.map((r) => r.NAME ?? r.name));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ─── GET /api/kb/:id  ──────────────────────────────────────────────────────────
 router.get('/:id', async (req, res) => {
   const db = getDb();
@@ -693,15 +702,6 @@ router.delete('/:id/documents/:docId', async (req, res) => {
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
-});
-
-// ─── GET /api/kb/thesauri-names — 所有使用者都能看字典列表（用於 KB 設定 LOV）
-router.get('/thesauri-names', async (req, res) => {
-  try {
-    const db = getDb();
-    const rows = await db.prepare(`SELECT name FROM kb_thesauri ORDER BY name`).all();
-    res.json(rows.map((r) => r.NAME ?? r.name));
-  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ─── POST /api/kb/:id/documents/:docId/reparse  ──────────────────────────────
