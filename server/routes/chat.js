@@ -278,8 +278,10 @@ async function executeSelfKbSearch(db, kb, query, { userId, sessionId } = {}) {
         synonymHint = `\n\n【同義詞字典提示】下列詞彙為同一實體，回答時請**統合所有寫法對應的 chunks**，不要漏：\n${pairs.join('\n')}\n`;
       }
     }
-
-    return `【來自知識庫「${kb.name}」的相關內容】${synonymHint}\n\n${chunks.join('\n\n---\n\n')}`;
+    const finalResult = `【來自知識庫「${kb.name}」的相關內容】${synonymHint}\n\n${chunks.join('\n\n---\n\n')}`;
+    console.log(`[SelfKB] synonymHint=${synonymHint ? 'YES' : 'NO'} applied=${JSON.stringify(stats?.synonyms_applied || [])} thes=${stats?.synonym_thesaurus || 'null'} chunks=${results.length}`);
+    console.log(`[SelfKB] context preview (first 600 chars):\n${finalResult.slice(0, 600)}\n…（共 ${finalResult.length} 字）`);
+    return finalResult;
   } catch (e) {
     console.error(`[SelfKB] Search failed for KB "${kb.name}":`, e.message);
     return `[知識庫「${kb.name}」查詢失敗: ${e.message}]`;
