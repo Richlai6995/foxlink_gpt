@@ -489,11 +489,24 @@ router.put('/:id', async (req, res) => {
       retrieval_mode, rerank_model,
       top_k_fetch, top_k_return, score_threshold,
       ocr_model, parse_mode, pdf_ocr_mode, tags,
+      retrieval_config,
       name_zh, name_en, name_vi, desc_zh, desc_en, desc_vi,
     } = req.body;
 
     const finalName = name ?? target.name;
     const finalDesc = description !== undefined ? description : target.description;
+    let finalRetrievalConfig = target.retrieval_config;
+    if (retrieval_config !== undefined) {
+      if (retrieval_config === null || retrieval_config === '') {
+        finalRetrievalConfig = null;
+      } else if (typeof retrieval_config === 'object') {
+        finalRetrievalConfig = JSON.stringify(retrieval_config);
+      } else if (typeof retrieval_config === 'string') {
+        try { JSON.parse(retrieval_config); finalRetrievalConfig = retrieval_config; }
+        catch { return res.status(400).json({ error: 'retrieval_config 不是合法 JSON' }); }
+      }
+    }
+
     await db.prepare(`
       UPDATE knowledge_bases
       SET name=?, description=?,
@@ -501,7 +514,7 @@ router.put('/:id', async (req, res) => {
           retrieval_mode=?, rerank_model=?,
           top_k_fetch=?, top_k_return=?, score_threshold=?,
           ocr_model=?, parse_mode=?, pdf_ocr_mode=?,
-          tags=?,
+          tags=?, retrieval_config=?,
           updated_at=SYSTIMESTAMP
       WHERE id=?
     `).run(
@@ -518,6 +531,7 @@ router.put('/:id', async (req, res) => {
       parse_mode !== undefined ? (['text_only','format_aware'].includes(parse_mode) ? parse_mode : 'text_only') : (target.parse_mode || 'text_only'),
       pdf_ocr_mode !== undefined ? (['off','auto','force'].includes(pdf_ocr_mode) ? pdf_ocr_mode : 'off') : (target.pdf_ocr_mode || 'off'),
       tags !== undefined ? JSON.stringify(tags || []) : (target.tags || '[]'),
+      finalRetrievalConfig,
       req.params.id,
     );
 

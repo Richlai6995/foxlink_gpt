@@ -400,6 +400,20 @@ async function retrieveKbChunks(db, opts = {}) {
     elapsed_ms:      Date.now() - t0,
   };
 
+  if (debug) {
+    const slim = (r) => ({
+      id: r.id, filename: r.filename, score: r.score, match_type: r.match_type,
+      content: (r.content || '').slice(0, 400),
+    });
+    stats.stages = {
+      vector:   vectorRows.slice(0, 20).map(slim),
+      fulltext: ftRows.slice(0, 20).map(slim),
+      fused:    fused.slice(0, 20).map(slim),
+      rerank:   rerank.results.slice(0, 20).map((r) => ({ ...slim(r), rerank_score: r.rerank_score })),
+    };
+    stats.resolved_config = cfg;
+  }
+
   return { results, stats, rerankApplied: rerank.rerankApplied };
 }
 

@@ -28,6 +28,7 @@ interface KnowledgeBase {
   ocr_model: string | null
   parse_mode: string | null
   pdf_ocr_mode: string | null
+  retrieval_config: string | null
   is_public: number; public_status: string
   doc_count: number; chunk_count: number; total_size_bytes: number
   creator_id: number; creator_name: string; is_owner: boolean; can_edit: boolean
@@ -631,6 +632,36 @@ function SettingsTab({ kb, onSaved, isOwner }: { kb: KnowledgeBase; onSaved: () 
   const [msg,           setMsg]           = useState('')
   const [kbTags,        setKbTags]        = useState<string[]>(() => { try { return JSON.parse(kb.tags || '[]') } catch { return [] } })
 
+  // ── 進階檢索覆寫（retrieval_config）──────────────────────────────────────
+  const parseRc = () => {
+    try { return kb.retrieval_config ? JSON.parse(kb.retrieval_config) : null } catch { return null }
+  }
+  const initialRc = parseRc()
+  const [rcEnabled, setRcEnabled] = useState(!!initialRc)
+  const [rcShow,    setRcShow]    = useState(!!initialRc)
+  const [rcBackend, setRcBackend] = useState<'like' | 'oracle_text' | ''>(initialRc?.backend ?? '')
+  const [rcFusion,  setRcFusion]  = useState<'weighted' | 'rrf' | ''>(initialRc?.fusion_method ?? '')
+  const [rcVecW,    setRcVecW]    = useState<string>(initialRc?.vector_weight   != null ? String(initialRc.vector_weight)   : '')
+  const [rcFtW,     setRcFtW]     = useState<string>(initialRc?.fulltext_weight != null ? String(initialRc.fulltext_weight) : '')
+  const [rcFuzzy,   setRcFuzzy]   = useState<boolean>(!!initialRc?.fuzzy)
+  const [rcSyn,     setRcSyn]     = useState<string>(initialRc?.synonym_thesaurus ?? '')
+  const [rcMinFt,   setRcMinFt]   = useState<string>(initialRc?.min_ft_score   != null ? String(initialRc.min_ft_score)   : '')
+  const [rcVecCut,  setRcVecCut]  = useState<string>(initialRc?.vec_cutoff     != null ? String(initialRc.vec_cutoff)     : '')
+
+  const buildRetrievalConfig = (): Record<string, unknown> | null => {
+    if (!rcEnabled) return null
+    const out: Record<string, unknown> = {}
+    if (rcBackend)                                       out.backend           = rcBackend
+    if (rcFusion)                                        out.fusion_method     = rcFusion
+    if (rcVecW   !== '' && !Number.isNaN(+rcVecW))       out.vector_weight     = +rcVecW
+    if (rcFtW    !== '' && !Number.isNaN(+rcFtW))        out.fulltext_weight   = +rcFtW
+    if (rcMinFt  !== '' && !Number.isNaN(+rcMinFt))      out.min_ft_score      = +rcMinFt
+    if (rcVecCut !== '' && !Number.isNaN(+rcVecCut))     out.vec_cutoff        = +rcVecCut
+    if (rcFuzzy)                                         out.fuzzy             = true
+    if (rcSyn.trim())                                    out.synonym_thesaurus = rcSyn.trim()
+    return Object.keys(out).length > 0 ? out : null
+  }
+
   useEffect(() => {
     api.get('/admin/llm-models').then((res) => {
       const all = (res.data as { key: string; name: string; api_model: string; image_output: number; is_active: number; model_role: string | null }[])
@@ -667,6 +698,7 @@ function SettingsTab({ kb, onSaved, isOwner }: { kb: KnowledgeBase; onSaved: () 
         ocr_model:        ocrModel || null,
         parse_mode:       parseMode || 'text_only',
         pdf_ocr_mode:     pdfOcrMode,
+        retrieval_config: buildRetrievalConfig(),
       })
       setMsg(t('kb.settings.savedOk'))
       onSaved()
@@ -900,6 +932,121 @@ function SettingsTab({ kb, onSaved, isOwner }: { kb: KnowledgeBase; onSaved: () 
           </div>
         </div>
       </div>
+
+      {/* 進階檢索設定（覆寫系統預設）*/}
+      {isOwner && (
+        <div>
+          <button
+            type="button"
+            onClick={() => setRcShow((v) => !v)}
+            className="w-full flex items-center justify-between text-sm font-semibold text-slate-700 mb-3 py-1"
+          >
+            <span className="flex items-center gap-2">
+              <Target size={15} className="text-purple-500" />
+              進階檢索設定（覆寫系統預設）
+              {rcEnabled && <span className="text-[10px] px-1.5 py-0.5 bg-purple-100 text-purple-700 rounded">已啟用</span>}
+            </span>
+            {rcShow ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
+          </button>
+          {rcShow && (
+            <div className="border border-slate-200 rounded-xl p-4 space-y-3">
+              <label className="flex items-center gap-2 text-sm text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={rcEnabled}
+                  onChange={(e) => setRcEnabled(e.target.checked)}
+                />
+                啟用此 KB 的專屬檢索設定
+                <span className="text-xs text-slate-400">未啟用則沿用系統預設</span>
+              </label>
+
+              {rcEnabled && (
+                <div className="grid grid-cols-2 gap-3 pt-2">
+                  <div>
+                    <label className="block text-xs text-slate-500 mb-1">Backend</label>
+                    <select
+                      className="w-full border border-slate-300 rounded-lg px-2.5 py-1.5 text-sm"
+                      value={rcBackend}
+                      onChange={(e) => setRcBackend(e.target.value as any)}
+                    >
+                      <option value="">— 跟隨系統預設 —</option>
+                      <option value="like">LIKE</option>
+                      <option value="oracle_text">Oracle Text</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs text-slate-500 mb-1">Score Fusion</label>
+                    <select
+                      className="w-full border border-slate-300 rounded-lg px-2.5 py-1.5 text-sm"
+                      value={rcFusion}
+                      onChange={(e) => setRcFusion(e.target.value as any)}
+                    >
+                      <option value="">— 跟隨系統預設 —</option>
+                      <option value="weighted">Weighted</option>
+                      <option value="rrf">RRF</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs text-slate-500 mb-1">Vector 權重（0–1，留空 = 預設）</label>
+                    <input
+                      type="number" step="0.05" min="0" max="1"
+                      className="w-full border border-slate-300 rounded-lg px-2.5 py-1.5 text-sm"
+                      value={rcVecW}
+                      onChange={(e) => setRcVecW(e.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-slate-500 mb-1">Fulltext 權重（0–1）</label>
+                    <input
+                      type="number" step="0.05" min="0" max="1"
+                      className="w-full border border-slate-300 rounded-lg px-2.5 py-1.5 text-sm"
+                      value={rcFtW}
+                      onChange={(e) => setRcFtW(e.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-slate-500 mb-1">最低 FT Score (0–1)</label>
+                    <input
+                      type="number" step="0.05" min="0" max="1"
+                      className="w-full border border-slate-300 rounded-lg px-2.5 py-1.5 text-sm"
+                      value={rcMinFt}
+                      onChange={(e) => setRcMinFt(e.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-slate-500 mb-1">Vector Cutoff (0–1)</label>
+                    <input
+                      type="number" step="0.05" min="0" max="1"
+                      className="w-full border border-slate-300 rounded-lg px-2.5 py-1.5 text-sm"
+                      value={rcVecCut}
+                      onChange={(e) => setRcVecCut(e.target.value)}
+                    />
+                  </div>
+                  <div className="col-span-2">
+                    <label className="flex items-center gap-2 text-sm text-slate-700">
+                      <input type="checkbox" checked={rcFuzzy} onChange={(e) => setRcFuzzy(e.target.checked)} />
+                      啟用 Fuzzy 模糊匹配（僅 Oracle Text）
+                    </label>
+                  </div>
+                  <div className="col-span-2">
+                    <label className="block text-xs text-slate-500 mb-1">同義詞字典名稱（CTX_THES）</label>
+                    <input
+                      type="text"
+                      className="w-full border border-slate-300 rounded-lg px-2.5 py-1.5 text-sm"
+                      value={rcSyn}
+                      onChange={(e) => setRcSyn(e.target.value)}
+                      placeholder="留空 = 不使用"
+                    />
+                  </div>
+                  <p className="col-span-2 text-xs text-slate-400">
+                    空欄位會沿用系統預設。關掉上方開關可清除整個覆寫。
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* OCR Model + Parse Mode */}
       <div>

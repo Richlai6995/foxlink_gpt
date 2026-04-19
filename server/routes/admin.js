@@ -1027,6 +1027,164 @@ router.put('/settings/template-model', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// KB Retrieval Settings（v2 Phase 3）
+// ─────────────────────────────────────────────────────────────────────────────
+
+// GET /api/admin/settings/kb-retrieval
+router.get('/settings/kb-retrieval', async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const { HARDCODED_DEFAULTS } = require('../services/kbRetrieval');
+    const rows = await db.prepare(
+      `SELECT key, value FROM system_settings WHERE key IN ('kb_retrieval_defaults','kb_cleanup_cron','kb_cleanup_enabled')`
+    ).all();
+    const map = Object.fromEntries(rows.map((r) => [r.KEY ?? r.key, r.VALUE ?? r.value]));
+    let defaults = {};
+    try { defaults = map.kb_retrieval_defaults ? JSON.parse(map.kb_retrieval_defaults) : {}; } catch (_) {}
+    res.json({
+      defaults: { ...HARDCODED_DEFAULTS, ...defaults },
+      hardcoded: HARDCODED_DEFAULTS,
+      cleanup_cron: map.kb_cleanup_cron || '0 * * * *',
+      cleanup_enabled: map.kb_cleanup_enabled !== '0',
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// PUT /api/admin/settings/kb-retrieval
+router.put('/settings/kb-retrieval', async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const cron = require('node-cron');
+    const { invalidateSystemDefaultsCache } = require('../services/kbRetrieval');
+    const { defaults, cleanup_cron, cleanup_enabled } = req.body || {};
+
+    if (defaults && typeof defaults === 'object') {
+      const json = JSON.stringify(defaults);
+      const ex = await db.prepare(`SELECT key FROM system_settings WHERE key='kb_retrieval_defaults'`).get();
+      if (ex) await db.prepare(`UPDATE system_settings SET value=? WHERE key='kb_retrieval_defaults'`).run(json);
+      else    await db.prepare(`INSERT INTO system_settings (key,value) VALUES ('kb_retrieval_defaults',?)`).run(json);
+      invalidateSystemDefaultsCache();
+    }
+
+    if (cleanup_cron !== undefined) {
+      if (!cron.validate(cleanup_cron)) return res.status(400).json({ error: 'cron 表達式無效' });
+      const ex = await db.prepare(`SELECT key FROM system_settings WHERE key='kb_cleanup_cron'`).get();
+      if (ex) await db.prepare(`UPDATE system_settings SET value=? WHERE key='kb_cleanup_cron'`).run(cleanup_cron);
+      else    await db.prepare(`INSERT INTO system_settings (key,value) VALUES ('kb_cleanup_cron',?)`).run(cleanup_cron);
+    }
+
+    if (cleanup_enabled !== undefined) {
+      const val = cleanup_enabled ? '1' : '0';
+      const ex = await db.prepare(`SELECT key FROM system_settings WHERE key='kb_cleanup_enabled'`).get();
+      if (ex) await db.prepare(`UPDATE system_settings SET value=? WHERE key='kb_cleanup_enabled'`).run(val);
+      else    await db.prepare(`INSERT INTO system_settings (key,value) VALUES ('kb_cleanup_enabled',?)`).run(val);
+    }
+
+    // 重啟 scheduler（cron 或 enabled 改變時）
+    if (cleanup_cron !== undefined || cleanup_enabled !== undefined) {
+      try {
+        const { startScheduler, stopScheduler } = require('../services/kbMaintenance');
+        if (cleanup_enabled === false) stopScheduler();
+        else await startScheduler(db);
+      } catch (e) {
+        console.warn('[admin/kb-retrieval] restart scheduler failed:', e.message);
+      }
+    }
+
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/admin/kb/maintenance/cleanup-orphan — 手動觸發 orphan 清理
+router.post('/kb/maintenance/cleanup-orphan', async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const { cleanupOrphanChunks, refreshChunkCounts } = require('../services/kbMaintenance');
+    const r = await cleanupOrphanChunks(db);
+    if (r.removed > 0) await refreshChunkCounts(db);
+    res.json({ ok: true, ...r });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /api/admin/kb/maintenance/stats — dim 分布 + orphan 數
+router.get('/kb/maintenance/stats', async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const { dimMigrationStats } = require('../services/kbMaintenance');
+    const dims = await dimMigrationStats(db);
+    const orphanRow = await db.prepare(
+      `SELECT COUNT(*) AS cnt FROM kb_chunks c
+       WHERE NOT EXISTS (SELECT 1 FROM kb_documents d WHERE d.id = c.doc_id)`
+    ).get();
+    res.json({
+      dims,
+      orphan_count: Number(orphanRow?.CNT ?? orphanRow?.cnt ?? 0),
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/admin/kb/debug-search — 管理員調校頁用：跑檢索並回傳完整中間階段
+router.post('/kb/debug-search', async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const { retrieveKbChunks } = require('../services/kbRetrieval');
+    const { kb_id, query, topK, config_override } = req.body || {};
+    if (!kb_id || !query) return res.status(400).json({ error: 'kb_id + query 必填' });
+    const kb = await db.prepare(`SELECT * FROM knowledge_bases WHERE id=?`).get(kb_id);
+    if (!kb) return res.status(404).json({ error: 'KB 不存在' });
+
+    // Optional runtime config override (不存 DB)
+    if (config_override && typeof config_override === 'object') {
+      kb.retrieval_config = JSON.stringify(config_override);
+    }
+
+    const { results, stats } = await retrieveKbChunks(db, {
+      kb, query, topK: topK ? Number(topK) : undefined,
+      source: 'admin-debug', userId: req.user?.id, debug: true,
+    });
+    res.json({ results, stats });
+  } catch (e) {
+    console.error('[admin/kb/debug-search]', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/admin/kb/list-simple — debug 頁 dropdown 用
+router.get('/kb/list-simple', async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const rows = await db.prepare(
+      `SELECT id, name, chunk_count, embedding_dims FROM knowledge_bases ORDER BY name`
+    ).all();
+    res.json(rows.map((r) => ({
+      id: r.ID ?? r.id,
+      name: r.NAME ?? r.name,
+      chunk_count: r.CHUNK_COUNT ?? r.chunk_count,
+      embedding_dims: r.EMBEDDING_DIMS ?? r.embedding_dims,
+    })));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/admin/kb/maintenance/rebuild-vector-index — 呼叫 Oracle 重建 vector index（Phase 2 IVF）
+router.post('/kb/maintenance/rebuild-vector-index', async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const t0 = Date.now();
+    // 先 DROP（若存在）再 CREATE；IVF + NEIGHBOR PARTITIONS
+    try { await db.prepare(`DROP INDEX kb_chunks_vidx`).run(); } catch (_) {}
+    await db.prepare(
+      `CREATE VECTOR INDEX kb_chunks_vidx ON kb_chunks(embedding)
+       ORGANIZATION NEIGHBOR PARTITIONS
+       DISTANCE COSINE
+       WITH TARGET ACCURACY 90`
+    ).run();
+    res.json({ ok: true, elapsed_ms: Date.now() - t0 });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // GET /api/admin/chat-sessions (all users, for admin view)
 router.get('/chat-sessions', async (req, res) => {
   try {

@@ -10,6 +10,8 @@ import DbMaintenance from '../components/admin/DbMaintenance'
 import MailSettingsPanel from '../components/admin/MailSettings'
 import LlmModelsPanel from '../components/admin/LlmModels'
 import VectorDefaultsPanel from '../components/admin/VectorDefaultsPanel'
+import KbRetrievalSettings from '../components/admin/KbRetrievalSettings'
+import KbRetrievalDebug from '../components/admin/KbRetrievalDebug'
 import CostAnalysis from '../components/admin/CostAnalysis'
 import ScheduledTasksPanel from '../components/admin/ScheduledTasksPanel'
 import MCPServersPanel from '../components/admin/MCPServersPanel'
@@ -32,7 +34,7 @@ import FeedbackCategoryManager from '../components/feedback/admin/FeedbackCatego
 import FeedbackSLAConfig from '../components/feedback/admin/FeedbackSLAConfig'
 import FeedbackStatsPanel from '../components/feedback/FeedbackStatsPanel'
 import VoiceInputSettingsPanel from '../components/admin/VoiceInputSettings'
-type Tab = 'users' | 'roles' | 'tokens' | 'audit' | 'keywords' | 'db' | 'mail' | 'llm' | 'vector-defaults' | 'cost' | 'scheduled' | 'mcp' | 'dify' | 'kb' | 'skills' | 'code-runners' | 'research' | 'api-keys' | 'ai-dashboard' | 'data-permissions' | 'monitor' | 'db-sources' | 'webex-logs' | 'help-translation' | 'factory-translations' | 'training' | 'feedback' | 'voice-input'
+type Tab = 'users' | 'roles' | 'tokens' | 'audit' | 'keywords' | 'db' | 'mail' | 'llm' | 'vector-defaults' | 'kb-retrieval' | 'kb-debug' | 'cost' | 'scheduled' | 'mcp' | 'dify' | 'kb' | 'skills' | 'code-runners' | 'research' | 'api-keys' | 'ai-dashboard' | 'data-permissions' | 'monitor' | 'db-sources' | 'webex-logs' | 'help-translation' | 'factory-translations' | 'training' | 'feedback' | 'voice-input'
 
 export default function AdminDashboard() {
   const [activeTab, setActiveTab] = useState<Tab>('users')
@@ -60,6 +62,8 @@ export default function AdminDashboard() {
     { id: 'kb', label: t('admin.tabs.kb'), icon: <Database size={16} className="text-violet-500" /> },
     { id: 'dify', label: t('admin.tabs.apiConnectors'), icon: <Zap size={16} className="text-orange-500" /> },
     { id: 'vector-defaults', label: t('admin.tabs.vectorDefaults'), icon: <Cpu size={16} className="text-teal-600" /> },
+    { id: 'kb-retrieval', label: 'KB 檢索設定', icon: <Search size={16} className="text-teal-500" /> },
+    { id: 'kb-debug', label: 'KB 檢索調校', icon: <Search size={16} className="text-purple-500" /> },
     // ─ 整合與排程 ─
     { id: 'mcp', label: t('admin.tabs.mcp'), icon: <Plug size={16} className="text-indigo-500" /> },
     { id: 'api-keys', label: t('admin.tabs.apiKeys'), icon: <KeyRound size={16} className="text-yellow-600" /> },
@@ -128,6 +132,8 @@ export default function AdminDashboard() {
           {activeTab === 'mail' && <MailSettingsPanel />}
           {activeTab === 'llm' && <LlmModelsPanel />}
           {activeTab === 'vector-defaults' && <VectorDefaultsPanel />}
+          {activeTab === 'kb-retrieval' && <KbRetrievalSettings />}
+          {activeTab === 'kb-debug' && <KbRetrievalDebug />}
           {activeTab === 'cost' && <CostAnalysis />}
           {activeTab === 'scheduled' && <ScheduledTasksPanel />}
           {activeTab === 'mcp' && <MCPServersPanel />}
