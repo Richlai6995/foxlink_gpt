@@ -1112,9 +1112,28 @@ function SettingsTab({ kb, onSaved, isOwner }: { kb: KnowledgeBase; onSaved: () 
       </div>
 
       {isOwner && (
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 flex-wrap">
           <button onClick={save} disabled={saving} className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 transition disabled:opacity-50">
             <Save size={14} /> {saving ? t('kb.settings.saving') : t('kb.settings.saveBtn')}
+          </button>
+          <button
+            onClick={async () => {
+              if (!confirm(`確定要重新解析此 KB 所有 ${kb.doc_count} 個文件嗎？\n會重新 chunk + embedding（需要 API 費用 + 時間）。\n適用於：chunker 邏輯有更新、想套用最新切塊策略。`)) return
+              setSaving(true); setMsg('')
+              try {
+                const res = await api.post(`/kb/${kb.id}/reparse-all`)
+                setMsg(`已排入 ${res.data.queued} 個文件重新解析`)
+                onSaved()
+                setTimeout(() => setMsg(''), 4000)
+              } catch (e: any) {
+                setMsg(e.response?.data?.error || '重新解析失敗')
+              } finally { setSaving(false) }
+            }}
+            disabled={saving || (kb.doc_count || 0) === 0}
+            className="flex items-center gap-1.5 px-4 py-2 bg-amber-600 text-white text-sm rounded-lg hover:bg-amber-700 transition disabled:opacity-50"
+            title="重新 chunk + embedding 所有文件"
+          >
+            <RefreshCw size={14} /> 重新解析此 KB
           </button>
           {msg && <span className={`text-sm ${msg.toLowerCase().includes('fail') || msg.includes('失') ? 'text-red-500' : 'text-green-600'}`}>{msg}</span>}
         </div>
