@@ -450,7 +450,7 @@ function DocumentsTab({ kb, onRefresh, isOwner }: { kb: KnowledgeBase; onRefresh
               ref={fileInputRef}
               type="file"
               multiple
-              accept=".pdf,.docx,.pptx,.xlsx,.xls,.txt,.md,.csv,.jpg,.jpeg,.png,.gif,.webp,.bmp"
+              accept=".pdf,.docx,.doc,.pptx,.ppt,.xlsx,.xls,.txt,.md,.csv,.jpg,.jpeg,.png,.gif,.webp,.bmp"
               className="hidden"
               onChange={(e) => handleUpload(e.target.files)}
             />

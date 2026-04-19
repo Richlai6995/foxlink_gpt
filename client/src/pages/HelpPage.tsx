@@ -1320,7 +1320,7 @@ function UserManual() {
         <SubSection title="上傳文件">
           <Para>
             進入知識庫後，點選「文件」頁籤，拖曳或點選上傳區域選擇檔案。
-            支援格式：<strong>PDF · DOCX · PPTX · XLSX · TXT · CSV · JPG · PNG · GIF · WEBP</strong>（單檔最大 200 MB）。
+            支援格式：<strong>PDF · DOCX/DOC · PPTX/PPT · XLSX/XLS · TXT · CSV · JPG · PNG · GIF · WEBP</strong>（單檔最大 200 MB）。
           </Para>
           <div className="space-y-2">
             <StepItem num={1} title="選取一或多個檔案上傳" desc="多檔會循序處理，避免同時佔用 AI 配額" />

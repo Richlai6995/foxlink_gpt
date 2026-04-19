@@ -19,10 +19,14 @@ FROM node:20-slim AS runner
 
 # Install Oracle Client dependency + utilities
 # node:20-slim = Debian Bookworm (glibc 2.36) → libaio1t64 (not libaio1)
+# LibreOffice impress = .ppt → .pptx conversion (for legacy Office support)
+#   headless-only 子集：core + impress；不裝 writer/calc（.doc 走 word-extractor pure JS、
+#   .xls 靠 xlsx lib 已能讀）。整體增加約 ~250MB。
 RUN apt-get update \
     && apt-get install -y --no-install-recommends tzdata fontconfig \
     && (apt-get install -y --no-install-recommends libaio1t64 2>/dev/null \
         || apt-get install -y --no-install-recommends libaio1) \
+    && apt-get install -y --no-install-recommends libreoffice-impress libreoffice-core \
     && rm -rf /var/lib/apt/lists/*
 
 # Timezone

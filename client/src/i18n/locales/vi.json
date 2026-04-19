@@ -970,7 +970,7 @@
       "parseModeTextOnly": "Chỉ văn bản",
       "parseModeFormatAware": "Nhận biết định dạng",
       "dropZoneText": "Kéo thả hoặc nhấp để tải tài liệu lên",
-      "dropZoneHint": "Hỗ trợ PDF · DOCX · PPTX · XLSX · TXT · CSV · JPG · PNG · GIF · WEBP (tối đa 200 MB)",
+      "dropZoneHint": "Hỗ trợ PDF · DOCX/DOC · PPTX/PPT · XLSX/XLS · TXT · CSV · JPG · PNG · GIF · WEBP (tối đa 200 MB)",
       "uploading": "Đang tải lên...",
       "uploadFailed": "Tải lên thất bại",
       "loading": "Đang tải...",

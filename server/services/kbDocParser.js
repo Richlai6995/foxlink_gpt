@@ -402,6 +402,64 @@ async function parseDocx(filePath, ocrModel = null) {
   };
 }
 
+/**
+ * Legacy Word 97-2003 (.doc) parser — word-extractor npm, pure JS
+ * 不支援嵌入圖 OCR（Word 97 binary 嵌圖複雜，成本不值得）；如需圖片解析，user 應改存 .docx。
+ */
+async function parseDoc(filePath) {
+  const WordExtractor = require('word-extractor');
+  const extractor = new WordExtractor();
+  try {
+    const doc = await extractor.extract(filePath);
+    const text = [
+      doc.getHeaders(),
+      doc.getBody(),
+      doc.getFootnotes(),
+      doc.getEndnotes(),
+      doc.getFooters(),
+    ].filter(Boolean).join('\n\n').trim();
+    return { text: text || '(無文字內容)', ocrInputTokens: 0, ocrOutputTokens: 0 };
+  } catch (e) {
+    throw new Error(`.doc 解析失敗：${e.message}（檔案可能損壞或加密）`);
+  }
+}
+
+/**
+ * Legacy PowerPoint 97-2003 (.ppt) parser
+ * 作法：用 LibreOffice headless 轉成 .pptx，再走 parsePptx。
+ * 環境：Docker image 已裝 libreoffice-impress + libreoffice-core。
+ * 用 `timeout 60` 保險避免 soffice hang。
+ */
+async function parsePpt(filePath, ocrModel = null) {
+  const { execFile } = require('child_process');
+  const { promisify } = require('util');
+  const execFileAsync = promisify(execFile);
+  const os = require('os');
+
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ppt2pptx-'));
+  try {
+    // soffice --headless --convert-to pptx --outdir <tmp> <input.ppt>
+    await execFileAsync('soffice', [
+      '--headless', '--convert-to', 'pptx', '--outdir', tmpDir, filePath,
+    ], { timeout: 90000 });
+    const base = path.basename(filePath, path.extname(filePath));
+    const pptxPath = path.join(tmpDir, `${base}.pptx`);
+    if (!fs.existsSync(pptxPath)) {
+      throw new Error('LibreOffice 未產出 .pptx（轉檔失敗）');
+    }
+    const result = await parsePptx(pptxPath, ocrModel);
+    return result;
+  } catch (e) {
+    if (e.code === 'ENOENT') {
+      throw new Error('.ppt 需要 LibreOffice，但 image 未安裝（soffice not found）');
+    }
+    throw new Error(`.ppt 解析失敗：${e.message}`);
+  } finally {
+    // 清 tmp dir
+    try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (_) {}
+  }
+}
+
 async function parsePptx(filePath, ocrModel = null) {
   const JSZip = require('jszip');
   const buf = fs.readFileSync(filePath);
@@ -539,8 +597,10 @@ async function parseDocument(filePath, fileType, ocrModel = null, parseMode = 't
   switch (ext) {
     case 'pdf':  return fa ? parsePdfFormatAware(filePath, ocrModel, pdfOcrMode) : parsePdf(filePath, ocrModel, pdfOcrMode);
     case 'docx': return fa ? parseDocxFormatAware(filePath, ocrModel) : parseDocx(filePath, ocrModel);
+    case 'doc':  return await parseDoc(filePath); // legacy Word 97-2003 via word-extractor (pure JS)
     case 'xlsx': case 'xls': return fa ? parseExcelFormatAware(filePath, ocrModel) : parseExcel(filePath, ocrModel);
-    case 'pptx': return await parsePptx(filePath, ocrModel); // pptx: no colour metadata, always text_only
+    case 'pptx': return await parsePptx(filePath, ocrModel);
+    case 'ppt':  return await parsePpt(filePath, ocrModel); // legacy PPT 97-2003 via LibreOffice convert → pptx
     case 'jpg': case 'jpeg': case 'png': case 'gif': case 'webp': case 'bmp': {
       const imgBuf = fs.readFileSync(filePath);
       const mime = (ext === 'jpg' || ext === 'jpeg') ? 'image/jpeg' : `image/${ext}`;

@@ -970,7 +970,7 @@
       "parseModeTextOnly": "Text Only",
       "parseModeFormatAware": "Format-aware",
       "dropZoneText": "Drag or click to upload documents",
-      "dropZoneHint": "Supports PDF · DOCX · PPTX · XLSX · TXT · CSV · JPG · PNG · GIF · WEBP (max 200 MB)",
+      "dropZoneHint": "Supports PDF · DOCX/DOC · PPTX/PPT · XLSX/XLS · TXT · CSV · JPG · PNG · GIF · WEBP (max 200 MB)",
       "uploading": "Uploading...",
       "uploadFailed": "Upload failed",
       "loading": "Loading...",

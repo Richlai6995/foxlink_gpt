@@ -2576,7 +2576,7 @@ const userSections = [
     "sort_order": 15,
     "icon": "Database",
     "icon_color": "text-teal-500",
-    "last_modified": "2026-04-20",
+    "last_modified": "2026-04-21",
     "title": "知識庫市集",
     "sidebar_label": "知識庫市集",
     "blocks": [
@@ -2641,7 +2641,7 @@ const userSections = [
         "blocks": [
           {
             "type": "para",
-            "text": "進入知識庫後，點選「文件」頁籤，拖曳或點選上傳區域選擇檔案。支援格式：**PDF · DOCX · PPTX · XLSX · TXT · CSV · JPG · PNG · GIF · WEBP**（單檔最大 200 MB）。"
+            "text": "進入知識庫後，點選「文件」頁籤，拖曳或點選上傳區域選擇檔案。支援格式：**PDF · DOCX/DOC · PPTX/PPT · XLSX/XLS · TXT · CSV · JPG · PNG · GIF · WEBP**（單檔最大 200 MB）。舊版 Office 97-2003 格式（.doc/.ppt/.xls）也支援，系統會自動解析。"
           },
           {
             "type": "steps",
