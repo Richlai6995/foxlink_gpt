@@ -332,27 +332,12 @@ export default function KbRetrievalSettings() {
         )}
 
         {/* Cron */}
-        <div className="bg-white rounded-xl border border-slate-200 p-4 space-y-3">
-          <label className="flex items-center gap-2 text-sm text-slate-700">
-            <input
-              type="checkbox"
-              checked={data.cleanup_enabled}
-              onChange={(e) => setData({ ...data, cleanup_enabled: e.target.checked })}
-            />
-            啟用 orphan 定期清理
-          </label>
-          <div>
-            <label className="text-xs text-slate-500">Cron 表達式</label>
-            <input
-              className="input w-full font-mono"
-              value={data.cleanup_cron}
-              onChange={(e) => setData({ ...data, cleanup_cron: e.target.value })}
-              disabled={!data.cleanup_enabled}
-              placeholder="0 * * * *"
-            />
-            <p className="text-xs text-slate-400 mt-1">預設整點跑一次。儲存後立即套用。</p>
-          </div>
-        </div>
+        <CronSection
+          enabled={data.cleanup_enabled}
+          cron={data.cleanup_cron}
+          onEnabledChange={(v) => setData({ ...data, cleanup_enabled: v })}
+          onCronChange={(v) => setData({ ...data, cleanup_cron: v })}
+        />
 
         {/* Rebuild vector index */}
         <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-start gap-3">
@@ -391,6 +376,65 @@ function SliderField({ label, value, onChange, disabled }: { label: string; valu
         disabled={disabled}
         className="w-full accent-blue-600"
       />
+    </div>
+  )
+}
+
+const CRON_PRESETS: { label: string; value: string }[] = [
+  { label: '每 15 分鐘',      value: '*/15 * * * *' },
+  { label: '每 30 分鐘',      value: '*/30 * * * *' },
+  { label: '每小時（整點）',  value: '0 * * * *' },
+  { label: '每 3 小時',       value: '0 */3 * * *' },
+  { label: '每 6 小時',       value: '0 */6 * * *' },
+  { label: '每天凌晨 2 點',   value: '0 2 * * *' },
+  { label: '每週一凌晨 3 點', value: '0 3 * * 1' },
+]
+
+function CronSection({
+  enabled, cron, onEnabledChange, onCronChange,
+}: {
+  enabled: boolean; cron: string
+  onEnabledChange: (v: boolean) => void; onCronChange: (v: string) => void
+}) {
+  const matchedPreset = CRON_PRESETS.find((p) => p.value === cron)
+  const [mode, setMode] = useState<'preset' | 'custom'>(matchedPreset ? 'preset' : 'custom')
+  return (
+    <div className="bg-white rounded-xl border border-slate-200 p-4 space-y-3">
+      <label className="flex items-center gap-2 text-sm text-slate-700">
+        <input
+          type="checkbox"
+          checked={enabled}
+          onChange={(e) => onEnabledChange(e.target.checked)}
+        />
+        啟用 orphan 定期清理
+      </label>
+      <div className={enabled ? '' : 'opacity-50 pointer-events-none'}>
+        <label className="text-xs text-slate-500">執行頻率</label>
+        <div className="flex gap-2 mt-1">
+          <select
+            className="input flex-1"
+            value={mode === 'preset' ? cron : '__custom__'}
+            onChange={(e) => {
+              if (e.target.value === '__custom__') { setMode('custom') }
+              else { setMode('preset'); onCronChange(e.target.value) }
+            }}
+          >
+            {CRON_PRESETS.map((p) => (
+              <option key={p.value} value={p.value}>{p.label}（{p.value}）</option>
+            ))}
+            <option value="__custom__">— 自訂 cron 表達式 —</option>
+          </select>
+        </div>
+        {mode === 'custom' && (
+          <input
+            className="input w-full font-mono mt-2"
+            value={cron}
+            onChange={(e) => onCronChange(e.target.value)}
+            placeholder="0 * * * *"
+          />
+        )}
+        <p className="text-xs text-slate-400 mt-1.5">儲存後立即套用。欄位格式：分 時 日 月 週。</p>
+      </div>
     </div>
   )
 }

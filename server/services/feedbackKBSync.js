@@ -145,11 +145,14 @@ async function ensureFeedbackKB(db, name = PUBLIC_KB_NAME) {
   const dims = 768;
   const isErp = name === ERP_KB_NAME;
   const desc = isErp ? 'ERP 問題工單知識庫（脫敏）' : 'Cortex 問題工單知識庫（脫敏）';
+  // retrieval_mode / top_k_return / score_threshold 不寫死 —
+  // 讓 DB column default + admin「KB 檢索設定」系統預設接手。
+  // 保留 chunk_strategy='parent_child'（工單結構需要 parent-child chunking）。
   await db.prepare(`
     INSERT INTO knowledge_bases
-      (id, creator_id, name, description, embedding_dims, chunk_strategy, retrieval_mode, top_k_return, score_threshold, is_public,
+      (id, creator_id, name, description, embedding_dims, chunk_strategy, is_public,
        name_zh, name_en, name_vi, desc_zh, desc_en, desc_vi)
-    VALUES (?, ?, ?, ?, ?, 'parent_child', 'vector', 5, 0.3, ?,
+    VALUES (?, ?, ?, ?, ?, 'parent_child', ?,
             ?, ?, ?, ?, ?, ?)
   `).run(id, creatorId, name, desc, dims, 1,
     name,

@@ -656,6 +656,32 @@ async function runMigrations(db) {
     }
   } catch (e) { console.warn('[Migration] switch defaults to oracle_text:', e.message); }
 
+  // ── v2 Phase 3a: 清掉 system-seeded KB 的 hardcoded retrieval 設定 ──────────
+  //    讓 admin「KB 檢索設定」系統預設能對它們生效。
+  //    只改仍為原始 seed 值的欄位，避免覆蓋管理員已調整的內容。
+  try {
+    const SYS_KB_NAMES = ['Cortex 使用說明書', 'Cortex 問題工單知識庫', 'ERP 問題工單知識庫'];
+    for (const nm of SYS_KB_NAMES) {
+      // Help KB seed 原本為 retrieval_mode='hybrid', top_k_fetch=15, top_k_return=5, score_threshold=0.3
+      // Feedback KB seed 原本為 retrieval_mode='vector', top_k_return=5, score_threshold=0.3
+      const r = await db.prepare(`
+        UPDATE knowledge_bases
+        SET retrieval_mode = NULL,
+            top_k_fetch     = NULL,
+            top_k_return    = NULL,
+            score_threshold = NULL
+        WHERE name = ?
+          AND retrieval_config IS NULL
+          AND (
+            (retrieval_mode = 'hybrid' AND top_k_fetch = 15 AND top_k_return = 5 AND score_threshold = 0.3)
+            OR
+            (retrieval_mode = 'vector' AND top_k_return = 5 AND score_threshold = 0.3)
+          )
+      `).run(nm);
+      if (r?.changes) console.log(`[Migration] 系統 KB "${nm}" retrieval 參數重設為預設`);
+    }
+  } catch (e) { console.warn('[Migration] reset system KB retrieval:', e.message); }
+
   // ── Chat session multilingual titles ───────────────────────────────────────
   await addCol('CHAT_SESSIONS', 'TITLE_ZH', 'VARCHAR2(200)');
   await addCol('CHAT_SESSIONS', 'TITLE_EN', 'VARCHAR2(200)');

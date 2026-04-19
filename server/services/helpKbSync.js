@@ -40,22 +40,21 @@ async function getOrCreateKb(db) {
 
   const id = uuid();
   const creatorId = await getAdminUserId(db);
+  // 不寫死 retrieval_mode / top_k_* / score_threshold / rerank_model —
+  // 讓 DB column default + system_settings.kb_retrieval_defaults 接手，
+  // admin 於「KB 檢索設定」改預設時會對系統 KB 生效。
   await db.prepare(`
     INSERT INTO knowledge_bases
       (id, creator_id, name, description,
        embedding_model, embedding_dims,
        chunk_strategy, chunk_config,
-       retrieval_mode, rerank_model,
-       top_k_fetch, top_k_return, score_threshold,
        ocr_model, parse_mode, tags, is_public)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     id, creatorId, KB_NAME,
     '系統自動生成的使用說明向量庫，供 AI 回答「如何使用 FOXLINK GPT」的問題。',
     DEFAULT_EMBED_MODEL, 768,
     'regular', JSON.stringify({ max_size: 1024, overlap: 50 }),
-    'hybrid', null,
-    15, 5, 0.3,
     null, 'text_only',
     KB_TAGS, 1,
   );
