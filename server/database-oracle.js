@@ -692,6 +692,7 @@ async function runMigrations(db) {
   // ── v2 Phase 3c: Multi-vector per chunk — title_embedding 欄位 ─────────────
   await addCol('KB_CHUNKS', 'TITLE_EMBEDDING', 'VECTOR(768, FLOAT32)');
 
+
   // ── v2 Phase 3a: 清掉 system-seeded KB 的 hardcoded retrieval 設定 ──────────
   //    讓 admin「KB 檢索設定」系統預設能對它們生效。
   //    只改仍為原始 seed 值的欄位，避免覆蓋管理員已調整的內容。
@@ -906,6 +907,24 @@ async function runMigrations(db) {
       }
     }
   };
+
+  // ── v2 Phase 3b: 同義詞字典追蹤表（繞過 CTX view 版本相容問題）─────────────
+  await createTable('kb_thesauri', `
+    CREATE TABLE kb_thesauri (
+      name        VARCHAR2(30) PRIMARY KEY,
+      created_at  TIMESTAMP DEFAULT SYSTIMESTAMP
+    )
+  `);
+  await createTable('kb_thesaurus_synonyms', `
+    CREATE TABLE kb_thesaurus_synonyms (
+      id          NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+      thesaurus   VARCHAR2(30) NOT NULL,
+      term        VARCHAR2(200) NOT NULL,
+      related     VARCHAR2(200) NOT NULL,
+      created_at  TIMESTAMP DEFAULT SYSTIMESTAMP,
+      CONSTRAINT uq_kb_thes_syn UNIQUE (thesaurus, term, related)
+    )
+  `);
 
   // ── External API Keys ──────────────────────────────────────────────────────
   await createTable('API_KEYS', `CREATE TABLE api_keys (
