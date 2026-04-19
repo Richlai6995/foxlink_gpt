@@ -565,6 +565,9 @@ async function runMigrations(db) {
 
   // ── v2 Phase 2: Oracle Text WORLD_LEXER + 重建 kb_chunks_ftx ───────────────
   // 直接用內建 CTXSYS.WORLD_LEXER（不用 CTX_DDL.CREATE_PREFERENCE，省 CTXAPP role）
+  // SYNC 策略：Phase 3a 改為 EVERY 每 1 分鐘背景 sync（原 ON COMMIT 在 bulk insert 時
+  //   每筆 chunk 都 reindex，上傳大檔嚴重變慢）。查詢最多 1 分鐘 lag。
+  const FTX_SYNC_FLAG = 'kb_ftx_sync_mode_v2';
   try {
     const paramRow = await db.prepare(`
       SELECT CASE WHEN count(*) > 0 THEN 'EXISTS' ELSE 'MISSING' END AS st
@@ -584,22 +587,52 @@ async function runMigrations(db) {
       usesWorldLexer = lexerName.includes('world');
     } catch (_) {}
 
-    if (indexState === 'MISSING' || !usesWorldLexer) {
+    // 讀取過往 SYNC mode（避免重複 drop/recreate）
+    const syncFlagRow = await db.prepare(
+      `SELECT value FROM system_settings WHERE key=?`
+    ).get(FTX_SYNC_FLAG).catch(() => null);
+    const syncMode = syncFlagRow?.VALUE || syncFlagRow?.value || null; // 'every' 表示已切換
+
+    // 要重建的情境：index 不存在、非 WORLD_LEXER、或還沒切 async sync
+    const needRebuild = (indexState === 'MISSING') || !usesWorldLexer || syncMode !== 'every';
+
+    if (needRebuild) {
       if (indexState === 'EXISTS') {
-        console.log('[Migration] Rebuild kb_chunks_ftx with CTXSYS.WORLD_LEXER...');
+        console.log('[Migration] Rebuild kb_chunks_ftx (WORLD_LEXER + SYNC EVERY)...');
         await db.prepare('DROP INDEX kb_chunks_ftx').run().catch((e) => {
           if (!/ORA-01418/.test(e.message)) console.warn('[Migration] drop old ftx:', e.message);
         });
       } else {
-        console.log('[Migration] Create kb_chunks_ftx with CTXSYS.WORLD_LEXER...');
+        console.log('[Migration] Create kb_chunks_ftx (WORLD_LEXER + SYNC EVERY)...');
       }
-      // GLOBAL domain index（LIST partition 不支援 LOCAL domain index 在某些 Oracle 版本）
-      await db.prepare(`
-        CREATE INDEX kb_chunks_ftx ON kb_chunks(content)
-        INDEXTYPE IS CTXSYS.CONTEXT
-        PARAMETERS ('LEXER CTXSYS.WORLD_LEXER SYNC (ON COMMIT)')
-      `).run();
-      console.log('[Migration] kb_chunks_ftx ✓ (WORLD_LEXER, GLOBAL)');
+
+      // 嘗試 SYNC EVERY（每 1 分鐘背景 sync；需 CREATE JOB 權限）→ 失敗 fallback ON COMMIT
+      let syncMethod = 'EVERY "SYSDATE+1/1440"';
+      let succeeded = false;
+      try {
+        await db.prepare(`
+          CREATE INDEX kb_chunks_ftx ON kb_chunks(content)
+          INDEXTYPE IS CTXSYS.CONTEXT
+          PARAMETERS ('LEXER CTXSYS.WORLD_LEXER SYNC (${syncMethod})')
+        `).run();
+        succeeded = true;
+        // 標記切換完成
+        const ex = await db.prepare(`SELECT key FROM system_settings WHERE key=?`).get(FTX_SYNC_FLAG);
+        if (ex) await db.prepare(`UPDATE system_settings SET value='every' WHERE key=?`).run(FTX_SYNC_FLAG);
+        else    await db.prepare(`INSERT INTO system_settings (key,value) VALUES (?, 'every')`).run(FTX_SYNC_FLAG);
+        console.log('[Migration] kb_chunks_ftx ✓ (WORLD_LEXER, SYNC EVERY 1 min)');
+      } catch (e) {
+        console.warn('[Migration] SYNC EVERY 失敗（可能無 CREATE JOB 權限），fallback ON COMMIT:', e.message);
+        syncMethod = 'ON COMMIT';
+        await db.prepare(`
+          CREATE INDEX kb_chunks_ftx ON kb_chunks(content)
+          INDEXTYPE IS CTXSYS.CONTEXT
+          PARAMETERS ('LEXER CTXSYS.WORLD_LEXER SYNC (ON COMMIT)')
+        `).run();
+        succeeded = true;
+        console.log('[Migration] kb_chunks_ftx ✓ (WORLD_LEXER, SYNC ON COMMIT — 慢，但可用)');
+      }
+      if (!succeeded) throw new Error('ftx 建立失敗');
     }
   } catch (e) {
     console.warn('[Migration] WORLD_LEXER / kb_chunks_ftx:', e.message);
