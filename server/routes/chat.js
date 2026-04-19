@@ -248,7 +248,7 @@ async function executeSelfKbSearch(db, kb, query, { userId, sessionId } = {}) {
   try {
     const { retrieveKbChunks } = require('../services/kbRetrieval');
     const { results, stats, rerankApplied } = await retrieveKbChunks(db, {
-      kb, query, userId, sessionId, source: 'chat',
+      kb, query, userId, sessionId, source: 'chat', debug: true,
     });
     console.log(`[SelfKB] KB "${kb.name}" done in ${stats.elapsed_ms}ms results=${results.length} rerank=${rerankApplied}`);
     if (results.length === 0) return `[知識庫「${kb.name}」未找到相關內容]`;
@@ -258,7 +258,28 @@ async function executeSelfKbSearch(db, kb, query, { userId, sessionId } = {}) {
       const context = r.parent_content ? `上下文：${r.parent_content.slice(0, 300)}\n\n片段：` : '';
       return `[${i + 1}] 來源: ${r.filename} (相關度 ${displayScore})\n${context}${r.content}`;
     });
-    return `【來自知識庫「${kb.name}」的相關內容】\n\n${chunks.join('\n\n---\n\n')}`;
+
+    // 若套用了同義詞字典，告訴 LLM 這些詞是同一個實體，避免漏掉只寫另一種寫法的 chunk
+    let synonymHint = '';
+    if (stats?.synonyms_applied?.length > 0 && stats?.synonym_thesaurus) {
+      const pairs = [];
+      try {
+        const { listSynonyms } = require('../services/kbSynonyms');
+        const all = await listSynonyms(db, stats.synonym_thesaurus);
+        const qLc = (query || '').toLowerCase();
+        for (const s of all) {
+          const appeared = stats.synonyms_applied.some((a) => a === s.term || a === s.related)
+            || qLc.includes(s.term.toLowerCase())
+            || qLc.includes(s.related.toLowerCase());
+          if (appeared) pairs.push(`「${s.term}」=「${s.related}」`);
+        }
+      } catch (_) {}
+      if (pairs.length > 0) {
+        synonymHint = `\n\n【同義詞字典提示】下列詞彙為同一實體，回答時請**統合所有寫法對應的 chunks**，不要漏：\n${pairs.join('\n')}\n`;
+      }
+    }
+
+    return `【來自知識庫「${kb.name}」的相關內容】${synonymHint}\n\n${chunks.join('\n\n---\n\n')}`;
   } catch (e) {
     console.error(`[SelfKB] Search failed for KB "${kb.name}":`, e.message);
     return `[知識庫「${kb.name}」查詢失敗: ${e.message}]`;
