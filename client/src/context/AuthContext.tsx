@@ -82,6 +82,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const u = r.data
       localStorage.setItem('user', JSON.stringify(u))
       setUser(u)
+      // Server 的 preferred_language 是權威值（另一裝置改過也同步過來）
+      const serverLang = u?.resolved_language || u?.preferred_language
+      if (serverLang && ['zh-TW','en','vi'].includes(serverLang)) {
+        localStorage.setItem('preferred_language', serverLang)
+      }
       applyLanguage(u)
       applyUserTheme(u, setTheme)
     }).catch((e) => {
@@ -198,9 +203,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const setLanguage = useCallback(async (lang: LangCode) => {
     // Optimistic: update UI immediately, then persist to server
     i18n.changeLanguage(lang)
+    // 同步 localStorage 的 preferred_language，避免 refresh 後 UI（讀 localStorage）
+    // 跟後端 chat（讀 DB）用不同語言答題
+    localStorage.setItem('preferred_language', lang)
     setUser((prev) => {
       if (!prev) return prev
-      const updated = { ...prev, resolved_language: lang } as any
+      const updated = { ...prev, resolved_language: lang, preferred_language: lang } as any
       localStorage.setItem('user', JSON.stringify(updated))
       return updated
     })
