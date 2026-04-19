@@ -79,6 +79,27 @@ export default function AiDashboardPage() {
     setHistoryLoading(true)
     try { setHistory((await api.get('/dashboard/history?limit=100')).data) } catch { } finally { setHistoryLoading(false) }
   }
+
+  // 切 design 時：若該 design 在 history 裡 < 3 筆，lazy-load 該 design 專屬的最近 10 筆補上
+  useEffect(() => {
+    if (!selectedDesign) return
+    const cnt = history.filter(h => h.design_id === selectedDesign.id).length
+    if (cnt >= 3) return
+    let cancelled = false
+    ;(async () => {
+      try {
+        const r = await api.get(`/dashboard/history?design_id=${selectedDesign.id}&limit=10`)
+        const extra: AiDashboardHistory[] = r.data || []
+        if (cancelled || !extra.length) return
+        setHistory(prev => {
+          const ids = new Set(prev.map(h => h.id))
+          return [...prev, ...extra.filter(e => !ids.has(e.id))]
+        })
+      } catch {}
+    })()
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedDesign?.id])
   const deleteHistory = async (id: number, e: React.MouseEvent) => {
     e.stopPropagation()
     await api.delete(`/dashboard/history/${id}`)
