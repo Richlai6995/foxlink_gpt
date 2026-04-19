@@ -1143,7 +1143,11 @@ router.post('/kb/debug-search', async (req, res) => {
       kb, query, topK: topK ? Number(topK) : undefined,
       source: 'admin-debug', userId: req.user?.id, debug: true,
     });
-    res.json({ results, stats });
+    // 回傳 KB 名稱做辨識，避免前端 state 不同步誤判
+    res.json({
+      kb_info: { id: kb.ID ?? kb.id, name: kb.NAME ?? kb.name },
+      results, stats,
+    });
   } catch (e) {
     console.error('[admin/kb/debug-search]', e);
     res.status(500).json({ error: e.message });

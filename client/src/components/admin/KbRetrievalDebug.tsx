@@ -57,6 +57,7 @@ export default function KbRetrievalDebug() {
   const [busy,   setBusy]   = useState(false)
   const [err,    setErr]    = useState('')
   const [stats,  setStats]  = useState<DebugStats | null>(null)
+  const [resKbName, setResKbName] = useState<string>('')
   const [ovBackend, setOvBackend] = useState<'' | 'like' | 'oracle_text'>('')
   const [ovFusion,  setOvFusion]  = useState<'' | 'weighted' | 'rrf'>('')
 
@@ -97,6 +98,7 @@ export default function KbRetrievalDebug() {
         config_override: Object.keys(config_override).length > 0 ? config_override : undefined,
       })
       setStats(res.data.stats)
+      setResKbName(res.data.kb_info?.name || '')
     } catch (e: any) {
       setErr(e.response?.data?.error || '查詢失敗')
     } finally { setBusy(false) }
@@ -227,7 +229,10 @@ export default function KbRetrievalDebug() {
         <>
           {/* Summary */}
           <div className="bg-slate-50 rounded-xl border border-slate-200 p-4 space-y-2">
-            <div className="text-sm font-medium text-slate-700">檢索摘要</div>
+            <div className="text-sm font-medium text-slate-700 flex items-center justify-between">
+              <span>檢索摘要</span>
+              {resKbName && <span className="text-xs text-blue-600">KB: {resKbName}</span>}
+            </div>
             <div className="grid grid-cols-4 gap-3 text-xs">
               <Stat label="Backend" value={stats.backend} />
               <Stat label="Mode" value={stats.mode} />
