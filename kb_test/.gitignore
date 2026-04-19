@@ -1,2 +1,8 @@
-# Test PDFs — dev fixtures, drop your own here
+# Test files — dev fixtures, drop your own here
 *.pdf
+*.xlsx
+*.xls
+*.docx
+*.doc
+*.pptx
+*.ppt
