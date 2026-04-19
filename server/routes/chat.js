@@ -184,12 +184,12 @@ async function getSelfKbDeclarations(db, userId) {
     let kbs;
     if (user.role === 'admin') {
       kbs = await db.prepare(
-        `SELECT id, name, description, tags, retrieval_mode, embedding_dims, top_k_return, score_threshold
+        `SELECT id, name, description, tags, retrieval_mode, embedding_dims, top_k_return, score_threshold, retrieval_config
          FROM knowledge_bases WHERE chunk_count > 0 ORDER BY name ASC`
       ).all();
     } else {
       kbs = await db.prepare(`
-        SELECT kb.id, kb.name, kb.description, kb.tags, kb.retrieval_mode, kb.embedding_dims, kb.top_k_return, kb.score_threshold
+        SELECT kb.id, kb.name, kb.description, kb.tags, kb.retrieval_mode, kb.embedding_dims, kb.top_k_return, kb.score_threshold, kb.retrieval_config
         FROM knowledge_bases kb
         WHERE kb.chunk_count > 0 AND (
           kb.creator_id=?

@@ -586,7 +586,7 @@ async function loadFunctionDeclarations(db, user) {
   // ── 自建 KB ─────────────────────────────────────────────────────────────────
   try {
     const kbs = await db.prepare(
-        `SELECT kb.id, kb.name, kb.description, kb.retrieval_mode, kb.embedding_dims, kb.top_k_return, kb.score_threshold
+        `SELECT kb.id, kb.name, kb.description, kb.retrieval_mode, kb.embedding_dims, kb.top_k_return, kb.score_threshold, kb.retrieval_config
          FROM knowledge_bases kb
          WHERE kb.chunk_count>0 AND (
            kb.creator_id=? OR kb.is_public=1

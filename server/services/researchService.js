@@ -65,12 +65,12 @@ async function searchKbsInternal(db, userId, kbIds, query, topK) {
       const idPlaceholders = kbIds.map(() => '?').join(',');
       if (user.role === 'admin') {
         kbs = await db.prepare(
-          `SELECT id, embedding_dims, retrieval_mode, top_k_return, score_threshold
+          `SELECT id, embedding_dims, retrieval_mode, top_k_return, score_threshold, retrieval_config
            FROM knowledge_bases WHERE chunk_count > 0 AND id IN (${idPlaceholders})`
         ).all(...kbIds);
       } else {
         kbs = await db.prepare(`
-          SELECT kb.id, kb.embedding_dims, kb.retrieval_mode, kb.top_k_return, kb.score_threshold
+          SELECT kb.id, kb.embedding_dims, kb.retrieval_mode, kb.top_k_return, kb.score_threshold, kb.retrieval_config
           FROM knowledge_bases kb
           WHERE kb.chunk_count > 0 AND kb.id IN (${idPlaceholders}) AND (
             kb.creator_id=?
@@ -89,12 +89,12 @@ async function searchKbsInternal(db, userId, kbIds, query, topK) {
       // All accessible KBs
       if (user.role === 'admin') {
         kbs = await db.prepare(
-          `SELECT id, embedding_dims, retrieval_mode, top_k_return, score_threshold
+          `SELECT id, embedding_dims, retrieval_mode, top_k_return, score_threshold, retrieval_config
            FROM knowledge_bases WHERE chunk_count > 0 FETCH FIRST 5 ROWS ONLY`
         ).all();
       } else {
         kbs = await db.prepare(`
-          SELECT kb.id, kb.embedding_dims, kb.retrieval_mode, kb.top_k_return, kb.score_threshold
+          SELECT kb.id, kb.embedding_dims, kb.retrieval_mode, kb.top_k_return, kb.score_threshold, kb.retrieval_config
           FROM knowledge_bases kb
           WHERE kb.chunk_count > 0 AND (
             kb.creator_id=?
@@ -337,12 +337,12 @@ async function suggestKbs(db, userId, question) {
     let kbs;
     if (user.role === 'admin') {
       kbs = await db.prepare(
-        `SELECT id, embedding_dims, top_k_return, score_threshold
+        `SELECT id, embedding_dims, top_k_return, score_threshold, retrieval_config
          FROM knowledge_bases WHERE chunk_count > 0 ORDER BY name FETCH FIRST 20 ROWS ONLY`
       ).all();
     } else {
       kbs = await db.prepare(`
-        SELECT kb.id, kb.embedding_dims, kb.top_k_return, kb.score_threshold
+        SELECT kb.id, kb.embedding_dims, kb.top_k_return, kb.score_threshold, kb.retrieval_config
         FROM knowledge_bases kb
         WHERE kb.chunk_count > 0 AND (
           kb.creator_id=? OR kb.is_public=1
