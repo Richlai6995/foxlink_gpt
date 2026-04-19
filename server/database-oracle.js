@@ -376,21 +376,30 @@ async function runMigrations(db) {
   await addCol('LLM_MODELS', 'IMAGE_OUTPUT', 'NUMBER(1) DEFAULT 0');
   // kb_access permission level (use = chat-only, edit = can edit + visible in marketplace)
   await addCol('KB_ACCESS', 'PERMISSION', "VARCHAR2(10) DEFAULT 'use'");
-  // Drop kb_chunks_vidx: global vector index can't handle mixed embedding dimensions (768 vs 3072).
-  // KB searches use VECTOR_DISTANCE() with partition pruning (kb_id filter), so brute-force is fine.
+  // 2026-04-19 修正：v1 這邊會無條件 drop kb_chunks_vidx（因為當時混合維度無法建 index）。
+  // v2 Phase 2 已經在下方重建正確的 768-dim IVF index，這裡改成「只在真的有非 768 維度資料」時才 drop。
   try {
-    const conn2 = await pool.getConnection();
-    try {
-      await conn2.execute(`DROP INDEX kb_chunks_vidx`, [], { autoCommit: true });
-      console.log('[Migration] Dropped kb_chunks_vidx (mixed-dimension KBs require brute-force scan)');
-    } catch (e) {
-      if (!e.message.includes('ORA-01418')) // ORA-01418 = index does not exist, ignore
-        console.warn('[Migration] kb_chunks_vidx drop:', e.message);
-    } finally {
-      await conn2.close();
+    const mixed = await db.prepare(`
+      SELECT MIN(VECTOR_DIMENSION_COUNT(embedding)) AS min_d,
+             MAX(VECTOR_DIMENSION_COUNT(embedding)) AS max_d
+      FROM kb_chunks WHERE embedding IS NOT NULL
+    `).get().catch(() => null);
+    const minD = Number(mixed?.MIN_D ?? mixed?.min_d ?? 768);
+    const maxD = Number(mixed?.MAX_D ?? mixed?.max_d ?? 768);
+    if (minD !== maxD || minD !== 768) {
+      // 真的有混合維度 → drop（v2 Phase 2 接下來會 re-embed + 重建）
+      const conn2 = await pool.getConnection();
+      try {
+        await conn2.execute(`DROP INDEX kb_chunks_vidx`, [], { autoCommit: true });
+        console.log('[Migration] Dropped kb_chunks_vidx (mixed-dimension detected, v2 Phase 2 will rebuild)');
+      } catch (e) {
+        if (!e.message.includes('ORA-01418')) console.warn('[Migration] kb_chunks_vidx drop:', e.message);
+      } finally {
+        await conn2.close();
+      }
     }
   } catch (e) {
-    console.warn('[Migration] kb_chunks_vidx drop pool error:', e.message);
+    console.warn('[Migration] kb_chunks_vidx conditional drop:', e.message);
   }
 
   // knowledge_bases stats columns (in case old deployment missing them)
@@ -518,6 +527,134 @@ async function runMigrations(db) {
       }
     }
   } catch (e) { console.warn('[Migration] FK/trigger setup:', e.message); }
+
+  // ── v2 Phase 2: re-embed 非 768 dim chunks 到 768（HNSW/IVF 要求 fixed dim）──
+  try {
+    const non768 = await db.prepare(`
+      SELECT c.id, c.content, c.kb_id
+      FROM kb_chunks c
+      WHERE VECTOR_DIMENSION_COUNT(c.embedding) != 768
+        AND c.content IS NOT NULL
+      FETCH FIRST 500 ROWS ONLY
+    `).all().catch(() => []);
+    if (non768.length > 0) {
+      console.log(`[Migration] 發現 ${non768.length} 個非 768 dim chunks，re-embed 中...`);
+      let done = 0;
+      let lastErr = null;
+      try {
+        const { embedContent } = require('./services/geminiClient');
+        for (const row of non768) {
+          try {
+            const content = row.CONTENT || row.content;
+            const vec = await embedContent(content, { dims: 768 });
+            await db.prepare('UPDATE kb_chunks SET embedding = TO_VECTOR(?) WHERE id = ?')
+              .run(JSON.stringify(vec), row.ID || row.id);
+            done++;
+          } catch (e) {
+            lastErr = e;
+          }
+        }
+        // 對應的 KB 也改 dims
+        await db.prepare(`UPDATE knowledge_bases SET embedding_dims = 768 WHERE embedding_dims != 768`).run();
+        console.log(`[Migration] Re-embed 完成: ${done}/${non768.length}` + (lastErr ? ` (last error: ${lastErr.message})` : ''));
+      } catch (e) {
+        console.warn('[Migration] re-embed pipeline 失敗:', e.message);
+      }
+    }
+  } catch (e) { console.warn('[Migration] non-768 check:', e.message); }
+
+  // ── v2 Phase 2: Oracle Text WORLD_LEXER + 重建 kb_chunks_ftx ───────────────
+  // 直接用內建 CTXSYS.WORLD_LEXER（不用 CTX_DDL.CREATE_PREFERENCE，省 CTXAPP role）
+  try {
+    const paramRow = await db.prepare(`
+      SELECT CASE WHEN count(*) > 0 THEN 'EXISTS' ELSE 'MISSING' END AS st
+      FROM user_indexes WHERE index_name='KB_CHUNKS_FTX'
+    `).get();
+    const indexState = paramRow?.ST || paramRow?.st || 'MISSING';
+
+    // 檢查 index 是否用 WORLD_LEXER（需要 CTXSYS 權限才能查 ctx_user_index_values，
+    // 所以 fallback：只要有 index 就再重建一次確保是 WORLD_LEXER — idempotent safe）
+    let usesWorldLexer = false;
+    try {
+      const lexerRow = await db.prepare(`
+        SELECT ixv_value FROM ctx_user_index_values
+        WHERE ixv_index='KB_CHUNKS_FTX' AND ixv_class='LEXER' AND ROWNUM=1
+      `).get();
+      const lexerName = (lexerRow?.IXV_VALUE || lexerRow?.ixv_value || '').toLowerCase();
+      usesWorldLexer = lexerName.includes('world');
+    } catch (_) {}
+
+    if (indexState === 'MISSING' || !usesWorldLexer) {
+      if (indexState === 'EXISTS') {
+        console.log('[Migration] Rebuild kb_chunks_ftx with CTXSYS.WORLD_LEXER...');
+        await db.prepare('DROP INDEX kb_chunks_ftx').run().catch((e) => {
+          if (!/ORA-01418/.test(e.message)) console.warn('[Migration] drop old ftx:', e.message);
+        });
+      } else {
+        console.log('[Migration] Create kb_chunks_ftx with CTXSYS.WORLD_LEXER...');
+      }
+      // GLOBAL domain index（LIST partition 不支援 LOCAL domain index 在某些 Oracle 版本）
+      await db.prepare(`
+        CREATE INDEX kb_chunks_ftx ON kb_chunks(content)
+        INDEXTYPE IS CTXSYS.CONTEXT
+        PARAMETERS ('LEXER CTXSYS.WORLD_LEXER SYNC (ON COMMIT)')
+      `).run();
+      console.log('[Migration] kb_chunks_ftx ✓ (WORLD_LEXER, GLOBAL)');
+    }
+  } catch (e) {
+    console.warn('[Migration] WORLD_LEXER / kb_chunks_ftx:', e.message);
+  }
+
+  // ── v2 Phase 2: Rebuild vector index (IVF) 若全 chunks 皆 768 ──────────────
+  try {
+    const dimCheck = await db.prepare(`
+      SELECT MIN(VECTOR_DIMENSION_COUNT(embedding)) AS min_d,
+             MAX(VECTOR_DIMENSION_COUNT(embedding)) AS max_d,
+             COUNT(*) AS total
+      FROM kb_chunks WHERE embedding IS NOT NULL
+    `).get().catch(() => null);
+    const minD = Number(dimCheck?.MIN_D ?? dimCheck?.min_d ?? 0);
+    const maxD = Number(dimCheck?.MAX_D ?? dimCheck?.max_d ?? 0);
+    const total = Number(dimCheck?.TOTAL ?? dimCheck?.total ?? 0);
+
+    const vIdxExists = await db.prepare(`
+      SELECT COUNT(*) AS C FROM user_indexes WHERE index_name='KB_CHUNKS_VIDX'
+    `).get().catch(() => ({ C: 0 }));
+    const hasVIdx = Number(vIdxExists?.C || vIdxExists?.c || 0) > 0;
+
+    if (total > 0 && minD === 768 && maxD === 768 && !hasVIdx) {
+      console.log('[Migration] Creating vector index kb_chunks_vidx (IVF, 768 dim, COSINE)...');
+      await db.prepare(`
+        CREATE VECTOR INDEX kb_chunks_vidx ON kb_chunks(embedding)
+        ORGANIZATION NEIGHBOR PARTITIONS
+        DISTANCE COSINE
+        WITH TARGET ACCURACY 90
+      `).run();
+      console.log('[Migration] kb_chunks_vidx ✓ (IVF NEIGHBOR PARTITIONS)');
+    } else if (total > 0 && (minD !== 768 || maxD !== 768)) {
+      console.warn(`[Migration] ⚠️  chunks dims 不一致 (min=${minD} max=${maxD})，跳過 vector index；需手動 re-embed`);
+    }
+  } catch (e) {
+    console.warn('[Migration] vector index:', e.message);
+  }
+
+  // ── v2 Phase 2: 切 system default backend 到 oracle_text + RRF ──────────────
+  try {
+    const row = await db.prepare(
+      `SELECT value FROM system_settings WHERE key='kb_retrieval_defaults'`
+    ).get();
+    if (row?.value) {
+      const cur = JSON.parse(row.value);
+      let changed = false;
+      if (cur.backend === 'like') { cur.backend = 'oracle_text'; changed = true; }
+      if (cur.fusion_method !== 'rrf') { cur.fusion_method = 'rrf'; changed = true; }
+      if (changed) {
+        await db.prepare(`UPDATE system_settings SET value=? WHERE key='kb_retrieval_defaults'`)
+          .run(JSON.stringify(cur));
+        console.log('[Migration] system_settings.kb_retrieval_defaults → backend=oracle_text, fusion=rrf');
+      }
+    }
+  } catch (e) { console.warn('[Migration] switch defaults to oracle_text:', e.message); }
 
   // ── Chat session multilingual titles ───────────────────────────────────────
   await addCol('CHAT_SESSIONS', 'TITLE_ZH', 'VARCHAR2(200)');

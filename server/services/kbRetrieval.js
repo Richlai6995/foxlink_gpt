@@ -125,6 +125,64 @@ async function _vectorSearch(db, kb, query, fetchK, cfg) {
   }));
 }
 
+// ─── Backend: Oracle Text CONTAINS + SCORE (Phase 2 主力) ─────────────────────
+
+/**
+ * Convert tokens → Oracle Text query string.
+ * e.g. tokens=[鍾漢成, 分機] op=accum → "{鍾漢成} ACCUM {分機}"
+ * Fuzzy 前綴 `?` 可選；synonym 以 SYN(term, thesaurus) 包裝。
+ */
+function _buildOracleTextQuery(tokens, cfg) {
+  const op = (cfg.fulltext_query_op || 'accum').toUpperCase();
+  const validOp = ['ACCUM', 'AND', 'OR'].includes(op) ? op : 'ACCUM';
+  const parts = tokens.map((t) => {
+    // 去掉 `{` `}` 避免 Oracle Text syntax 衝突
+    const safe = String(t).replace(/[{}]/g, '');
+    let tok = `{${safe}}`;
+    if (cfg.fuzzy) tok = `?${tok}`;
+    if (cfg.synonym_thesaurus) tok = `SYN(${safe}, ${cfg.synonym_thesaurus})`;
+    return tok;
+  });
+  // NEAR 模式：把前兩個 token 包 NEAR
+  if (cfg.use_proximity && parts.length >= 2) {
+    const dist = Number(cfg.proximity_distance) || 10;
+    const bare = tokens.map((t) => String(t).replace(/[{}]/g, ''));
+    return `NEAR((${bare.slice(0, 2).join(', ')}), ${dist})`;
+  }
+  return parts.join(` ${validOp} `);
+}
+
+async function _fulltextSearchOracleText(db, kb, query, topK, cfg) {
+  const tokens = extractTokens(query, cfg.token_stopwords);
+  if (tokens.length === 0) return { rows: [], tokens: [] };
+
+  const ctxQuery = _buildOracleTextQuery(tokens, cfg);
+  try {
+    const rows = await db.prepare(`
+      SELECT c.id, c.doc_id, c.chunk_type, c.position, c.content, c.parent_content,
+             d.filename,
+             SCORE(1) AS ft_raw_score
+      FROM kb_chunks c JOIN kb_documents d ON d.id = c.doc_id
+      WHERE c.kb_id=? AND c.chunk_type != 'parent'
+        AND CONTAINS(c.content, ?, 1) > 0
+      ORDER BY SCORE(1) DESC
+      FETCH FIRST ? ROWS ONLY
+    `).all(kb.id, ctxQuery, topK * 2);
+    // SCORE() 範圍 0-100，轉成 hit_score 方便跟 LIKE backend 共用 fusion 邏輯
+    return {
+      rows: rows.map((r) => ({
+        ...r,
+        hit_score: Number(r.FT_RAW_SCORE || r.ft_raw_score || 0),
+      })),
+      tokens,
+      ctxQuery,
+    };
+  } catch (e) {
+    // ORA-20000 (index not built), ORA-29800, ORA-29902 等 Oracle Text 錯誤 → 透傳給上層
+    throw new Error(`oracle_text search failed: ${e.message}`);
+  }
+}
+
 async function _fulltextSearchLike(db, kb, query, topK, cfg) {
   const tokens = extractTokens(query, cfg.token_stopwords);
   if (tokens.length === 0) return { rows: [], tokens: [] };
@@ -275,11 +333,27 @@ async function retrieveKbChunks(db, opts = {}) {
     }
   }
 
+  let backendUsed = cfg.backend || 'like';
+  let ctxQueryUsed = null;
   if (mode === 'fulltext' || mode === 'hybrid') {
-    // Phase 1: 只支援 LIKE backend
-    const ft = await _fulltextSearchLike(db, kb, query, topK, cfg);
-    ftRows = ft.rows;
-    tokens = ft.tokens;
+    if (cfg.backend === 'oracle_text') {
+      try {
+        const ft = await _fulltextSearchOracleText(db, kb, query, topK, cfg);
+        ftRows = ft.rows;
+        tokens = ft.tokens;
+        ctxQueryUsed = ft.ctxQuery;
+      } catch (e) {
+        console.warn('[KbRetrieval] oracle_text failed, fallback to LIKE:', e.message);
+        backendUsed = 'like (fallback)';
+        const ft = await _fulltextSearchLike(db, kb, query, topK, cfg);
+        ftRows = ft.rows;
+        tokens = ft.tokens;
+      }
+    } else {
+      const ft = await _fulltextSearchLike(db, kb, query, topK, cfg);
+      ftRows = ft.rows;
+      tokens = ft.tokens;
+    }
   }
 
   let fused;
@@ -311,9 +385,11 @@ async function retrieveKbChunks(db, opts = {}) {
   } catch (_) {}
 
   const stats = {
-    backend:         cfg.backend,
+    backend:         backendUsed,
     mode,
     tokens_extracted: tokens,
+    ctx_query:       ctxQueryUsed,
+    fusion_method:   cfg.fusion_method,
     vec_fetched:     vectorRows.length,
     ft_fetched:      ftRows.length,
     fused:           fused.length,
