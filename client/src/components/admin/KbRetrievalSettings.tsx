@@ -57,6 +57,7 @@ export default function KbRetrievalSettings() {
   const [msg,     setMsg]     = useState<{ ok: boolean; text: string } | null>(null)
   const [busy,    setBusy]    = useState<string | null>(null)
   const [stopwordsText, setStopwordsText] = useState('')
+  const [thesauri,      setThesauri]      = useState<string[]>([])
 
   const load = async () => {
     setLoading(true)
@@ -68,6 +69,10 @@ export default function KbRetrievalSettings() {
       setData(a.data)
       setStats(b.data)
       setStopwordsText((a.data.defaults.token_stopwords || []).join(','))
+      try {
+        const t = await api.get('/admin/kb/thesauri')
+        setThesauri((t.data || []).map((x: { name: string }) => x.name))
+      } catch { /* ignore */ }
     } catch (e: any) {
       setMsg({ ok: false, text: e.response?.data?.error || '載入失敗' })
     } finally { setLoading(false) }
@@ -222,15 +227,17 @@ export default function KbRetrievalSettings() {
             />
           </div>
           <div>
-            <label className="text-xs text-slate-500">同義詞字典（thesaurus 名稱）</label>
-            <input
-              type="text"
+            <label className="text-xs text-slate-500">同義詞字典</label>
+            <select
               className="input w-full"
-              placeholder="如 foxlink_syn（需 Admin UI 先建立）"
               value={d.synonym_thesaurus || ''}
               onChange={(e) => patch({ synonym_thesaurus: e.target.value || null })}
               disabled={d.backend !== 'oracle_text'}
-            />
+            >
+              <option value="">— 不使用 —</option>
+              {thesauri.map((n) => (<option key={n} value={n}>{n}</option>))}
+            </select>
+            <p className="text-xs text-slate-400 mt-0.5">管理於「KB 同義詞字典」tab</p>
           </div>
         </div>
       </div>

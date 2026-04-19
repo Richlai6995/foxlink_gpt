@@ -695,6 +695,15 @@ router.delete('/:id/documents/:docId', async (req, res) => {
   }
 });
 
+// ─── GET /api/kb/thesauri-names — 所有使用者都能看字典列表（用於 KB 設定 LOV）
+router.get('/thesauri-names', async (req, res) => {
+  try {
+    const db = getDb();
+    const rows = await db.prepare(`SELECT name FROM kb_thesauri ORDER BY name`).all();
+    res.json(rows.map((r) => r.NAME ?? r.name));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ─── POST /api/kb/:id/documents/:docId/reparse  ──────────────────────────────
 // Re-parse a single document with optional new pdf_ocr_mode / parse_mode override.
 router.post('/:id/documents/:docId/reparse', async (req, res) => {

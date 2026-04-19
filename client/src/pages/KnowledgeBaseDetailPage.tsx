@@ -628,6 +628,7 @@ function SettingsTab({ kb, onSaved, isOwner }: { kb: KnowledgeBase; onSaved: () 
   const [useRerank,     setUseRerank]     = useState(kb.rerank_model !== 'disabled')
   const [rerankModel,   setRerankModel]   = useState(kb.rerank_model === 'disabled' ? '' : (kb.rerank_model ?? ''))
   const [llmModels,     setLlmModels]     = useState<{ key: string; name: string; api_model: string; model_role: string | null }[]>([])
+  const [thesauri,      setThesauri]      = useState<string[]>([])
   const [saving,        setSaving]        = useState(false)
   const [msg,           setMsg]           = useState('')
   const [kbTags,        setKbTags]        = useState<string[]>(() => { try { return JSON.parse(kb.tags || '[]') } catch { return [] } })
@@ -675,6 +676,7 @@ function SettingsTab({ kb, onSaved, isOwner }: { kb: KnowledgeBase; onSaved: () 
         setOcrModel(flash?.api_model ?? nonImage[0].api_model)
       }
     }).catch(() => {})
+    api.get('/kb/thesauri-names').then((r) => setThesauri(r.data || [])).catch(() => {})
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const rerankModels = llmModels.filter((m) => m.model_role === 'rerank')
@@ -1040,14 +1042,18 @@ function SettingsTab({ kb, onSaved, isOwner }: { kb: KnowledgeBase; onSaved: () 
                     </p>
                   </div>
                   <div className="col-span-2">
-                    <label className="block text-xs text-slate-500 mb-1">同義詞字典名稱（CTX_THES）</label>
-                    <input
-                      type="text"
+                    <label className="block text-xs text-slate-500 mb-1">同義詞字典名稱</label>
+                    <select
                       className="w-full border border-slate-300 rounded-lg px-2.5 py-1.5 text-sm"
                       value={rcSyn}
                       onChange={(e) => setRcSyn(e.target.value)}
-                      placeholder="留空 = 不使用"
-                    />
+                    >
+                      <option value="">— 不使用 —</option>
+                      {thesauri.map((n) => (<option key={n} value={n}>{n}</option>))}
+                    </select>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      字典管理於 Admin → 「KB 同義詞字典」
+                    </p>
                   </div>
                   <p className="col-span-2 text-xs text-slate-400">
                     空欄位會沿用系統預設。關掉上方開關可清除整個覆寫。
