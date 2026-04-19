@@ -287,9 +287,11 @@ router.post('/', async (req, res) => {
     return res.status(403).json({ error: `已達知識庫數量上限 (${quota.maxCount} 個)` });
   }
 
+  // v2 架構後所有 KB 統一 768 dim（HNSW/IVF 需固定維度；Matryoshka embedding 讓 768
+  // 對 1536/3072 的精度損失 < 2%，不值得額外成本）。忽略前端傳入值，強制 768。
+  const embedding_dims = 768;
   const {
     name, description,
-    embedding_dims = 768,
     chunk_strategy = 'regular',
     chunk_config   = {},
     retrieval_mode = 'hybrid',
@@ -306,8 +308,9 @@ router.post('/', async (req, res) => {
   const tagsStr = JSON.stringify(tags || []);
 
   if (!name?.trim()) return res.status(400).json({ error: '知識庫名稱為必填' });
-  if (![768, 1536, 3072].includes(Number(embedding_dims))) {
-    return res.status(400).json({ error: '維度必須為 768 / 1536 / 3072' });
+  // 維度已強制 768（上方覆寫），此驗證保留當護欄
+  if (Number(embedding_dims) !== 768) {
+    return res.status(400).json({ error: '維度已統一為 768（v2 架構）' });
   }
 
   try {

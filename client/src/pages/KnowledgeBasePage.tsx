@@ -250,30 +250,16 @@ export default function KnowledgeBasePage() {
               translating={translating}
             />
 
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs font-medium text-slate-600 mb-1">{t('kb.createModal.embeddingDims')}</label>
-                <select
-                  value={form.embedding_dims}
-                  onChange={(e) => setForm({ ...form, embedding_dims: Number(e.target.value) })}
-                  className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value={768}>{t('kb.createModal.dims768')}</option>
-                  <option value={1536}>{t('kb.createModal.dims1536')}</option>
-                  <option value={3072}>{t('kb.createModal.dims3072')}</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-slate-600 mb-1">{t('kb.createModal.chunkStrategy')}</label>
-                <select
-                  value={form.chunk_strategy}
-                  onChange={(e) => setForm({ ...form, chunk_strategy: e.target.value })}
-                  className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value="regular">{t('kb.createModal.strategyRegular')}</option>
-                  <option value="parent_child">{t('kb.createModal.strategyParentChild')}</option>
-                </select>
-              </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">{t('kb.createModal.chunkStrategy')}</label>
+              <select
+                value={form.chunk_strategy}
+                onChange={(e) => setForm({ ...form, chunk_strategy: e.target.value })}
+                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="regular">{t('kb.createModal.strategyRegular')}</option>
+                <option value="parent_child">{t('kb.createModal.strategyParentChild')}</option>
+              </select>
             </div>
 
             <div>
@@ -330,10 +316,6 @@ export default function KnowledgeBasePage() {
                   <option value="force">{t('kb.settings.pdfOcr.force')}</option>
                 </select>
               </div>
-            </div>
-
-            <div className="bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 text-xs text-blue-600">
-              {t('kb.createModal.dimHint')}
             </div>
 
             {error && <p className="text-red-500 text-sm">{error}</p>}
