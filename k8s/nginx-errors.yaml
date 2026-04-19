@@ -7,13 +7,13 @@
 #   1. 頁面內容絕不提及 IP、網段、whitelist、地區、權限不足等字眼
 #   2. 不顯示對方 client IP（避免 NAT 偵測）
 #   3. 403 / 404 回應一致 → 攻擊者無法 differentiate「被擋 vs 路徑不存在」
-#   4. 不暴露技術棧（nginx / K8s / Foxlink GPT）
-#   5. Ref code 是隨機字串，內部 SOP 對應「= IP 被擋」，外部看不出意義
+#   4. 不暴露技術棧（nginx / K8s）
+#   5. 三語並陳（zh-TW / EN / VI）配合越南廠區
 #
 # 內部辨識方式：
 #   - 看到此頁 = ingress 層被擋（whitelist 或路徑不存在）
-#   - 內部 wiki 記載 Ref code 前綴對照表（不寫在頁面上）
-#   - ingress access log 接 Loki 可直接查 client IP + 拒絕原因
+#   - 排查工具：ingress-nginx access log 接 Loki，直接查 client IP + 拒絕原因
+#     例：kubectl logs -n ingress-nginx -l app.kubernetes.io/name=ingress-nginx | grep <IP>
 
 apiVersion: v1
 kind: ConfigMap
@@ -46,39 +46,35 @@ data:
         }
         h1 {
           color: #34495e;
-          font-weight: 400;
-          font-size: 28px;
-          margin: 0 0 24px;
+          font-weight: 500;
+          font-size: 24px;
+          margin: 0 0 12px;
         }
-        p { margin: 10px 0; color: #555 }
-        .contact { margin-top: 32px }
-        .contact strong { color: #2c3e50 }
-        a { color: #2980b9; text-decoration: none }
-        a:hover { text-decoration: underline }
-        hr { border: 0; border-top: 1px solid #ecf0f1; margin: 40px 0 20px }
-        .ref {
-          color: #95a5a6;
-          font-size: 12px;
-          font-family: "SF Mono", Menlo, Consolas, monospace;
-        }
+        p { margin: 6px 0; color: #555 }
+        .lang { margin: 32px 0 }
+        .lang:first-of-type { margin-top: 0 }
+        .lang strong { color: #2c3e50 }
       </style>
     </head>
     <body>
-      <h1>服務目前無法提供</h1>
-      <p>很抱歉造成您的不便。</p>
-      <div class="contact">
+      <section class="lang" lang="zh-TW">
+        <h1>服務目前無法提供</h1>
+        <p>很抱歉造成您的不便。</p>
         <p>如需協助，請聯絡正崴<strong>當地資訊協助</strong></p>
         <p>或聯絡<strong>總部 Cortex 管理員</strong>協助</p>
-      </div>
-      <hr>
-      <p class="ref">Ref: <span id="ref"></span></p>
-      <script>
-        // Ref code 給內部 IT 對 log 用，外部看不出意義
-        // 前綴 FX 是內部識別 marker（內部 SOP 知道：FX = Foxlink GPT 系統的拒絕頁）
-        var rand = Math.random().toString(36).slice(2, 10).toUpperCase();
-        var ts = new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '');
-        document.getElementById('ref').textContent = 'FX-' + rand + '-' + ts;
-      </script>
+      </section>
+      <section class="lang" lang="en">
+        <h1>Service Currently Unavailable</h1>
+        <p>We apologize for the inconvenience.</p>
+        <p>For assistance, please contact your <strong>local Foxlink IT support</strong></p>
+        <p>or contact the <strong>HQ Cortex administrator</strong>.</p>
+      </section>
+      <section class="lang" lang="vi">
+        <h1>Dịch vụ hiện không khả dụng</h1>
+        <p>Chúng tôi xin lỗi vì sự bất tiện này.</p>
+        <p>Để được hỗ trợ, vui lòng liên hệ <strong>bộ phận IT Foxlink tại địa phương</strong></p>
+        <p>hoặc liên hệ <strong>quản trị viên Cortex tại trụ sở chính</strong>.</p>
+      </section>
     </body>
     </html>
 
