@@ -43,6 +43,12 @@ interface DebugStats {
 
 type Stage = 'vector' | 'fulltext' | 'fused' | 'rerank'
 
+interface GrepResult {
+  total: number
+  returned: number
+  chunks: { id: string; filename: string; chunk_type: string; length: number; preview: string }[]
+}
+
 export default function KbRetrievalDebug() {
   const [kbs,    setKbs]    = useState<KbOpt[]>([])
   const [kbId,   setKbId]   = useState('')
@@ -54,12 +60,28 @@ export default function KbRetrievalDebug() {
   const [ovBackend, setOvBackend] = useState<'' | 'like' | 'oracle_text'>('')
   const [ovFusion,  setOvFusion]  = useState<'' | 'weighted' | 'rrf'>('')
 
+  // Chunk grep
+  const [grepText, setGrepText] = useState('')
+  const [grepBusy, setGrepBusy] = useState(false)
+  const [grepRes,  setGrepRes]  = useState<GrepResult | null>(null)
+
   useEffect(() => {
     api.get('/admin/kb/list-simple').then((r) => {
       setKbs(r.data)
       if (r.data.length > 0) setKbId(r.data[0].id)
     }).catch((e) => setErr(e.response?.data?.error || '載入 KB 列表失敗'))
   }, [])
+
+  const runGrep = async () => {
+    if (!kbId || !grepText.trim()) return
+    setGrepBusy(true); setErr(''); setGrepRes(null)
+    try {
+      const r = await api.post('/admin/kb/chunk-grep', { kb_id: kbId, substring: grepText, limit: 30 })
+      setGrepRes(r.data)
+    } catch (e: any) {
+      setErr(e.response?.data?.error || 'grep 失敗')
+    } finally { setGrepBusy(false) }
+  }
 
   const run = async () => {
     if (!kbId || !query.trim()) return
@@ -151,6 +173,51 @@ export default function KbRetrievalDebug() {
             </select>
           </div>
         </div>
+      </div>
+
+      {/* Chunk Grep — 繞過 index 直接 LIKE */}
+      <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 space-y-3">
+        <div className="text-sm font-medium text-amber-900 flex items-center gap-2">
+          🔬 子字串 Grep（繞過 vector / ftx，直接查 kb_chunks.content）
+        </div>
+        <p className="text-xs text-amber-800">
+          診斷 chunk 是否真的存在於 DB。例：搜 <code>鍾漢成</code> 看該 KB 有幾個 chunks 含這三個字，
+          若 0 → parser/chunker 掉了資料；若 &gt;0 但 fulltext 找不到 → index 問題。
+        </p>
+        <div className="flex gap-2">
+          <input
+            className="input flex-1"
+            placeholder="輸入子字串（完全符合）"
+            value={grepText}
+            onChange={(e) => setGrepText(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter' && !grepBusy) runGrep() }}
+          />
+          <button
+            onClick={runGrep}
+            disabled={grepBusy || !kbId || !grepText.trim()}
+            className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-sm font-medium disabled:opacity-50"
+          >
+            {grepBusy ? '查詢中…' : 'Grep'}
+          </button>
+        </div>
+        {grepRes && (
+          <div className="space-y-2">
+            <div className="text-xs text-amber-900">
+              共 <strong>{grepRes.total}</strong> 個 chunks 命中（顯示前 {grepRes.returned}）
+            </div>
+            <div className="space-y-1 max-h-80 overflow-y-auto">
+              {grepRes.chunks.map((c) => (
+                <div key={c.id} className="bg-white rounded border border-amber-200 p-2 text-[11px]">
+                  <div className="flex items-center justify-between text-slate-500 mb-1">
+                    <span className="truncate">{c.filename} · {c.chunk_type}</span>
+                    <span className="font-mono">{c.length.toLocaleString()} chars</span>
+                  </div>
+                  <div className="text-slate-700 line-clamp-4 leading-snug whitespace-pre-wrap">{c.preview}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       {err && <div className="text-sm text-red-500">{err}</div>}

@@ -1150,6 +1150,44 @@ router.post('/kb/debug-search', async (req, res) => {
   }
 });
 
+// POST /api/admin/kb/chunk-grep — 繞過 vector / ftx，直接 LIKE 搜 chunks
+//   用途：診斷「chunk 到底存不存在」vs「chunk 存在但 index 找不到」
+router.post('/kb/chunk-grep', async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const { kb_id, substring, limit } = req.body || {};
+    if (!kb_id || !substring) return res.status(400).json({ error: 'kb_id + substring 必填' });
+    const n = Math.min(Number(limit) || 20, 100);
+    const rows = await db.prepare(`
+      SELECT c.id AS id, d.filename AS filename, c.chunk_type AS chunk_type,
+             DBMS_LOB.SUBSTR(c.content, 800, 1) AS preview,
+             DBMS_LOB.GETLENGTH(c.content) AS clen
+      FROM kb_chunks c JOIN kb_documents d ON d.id = c.doc_id
+      WHERE c.kb_id = ?
+        AND DBMS_LOB.INSTR(c.content, ?) > 0
+      FETCH FIRST ${n} ROWS ONLY
+    `).all(kb_id, substring);
+    const countRow = await db.prepare(`
+      SELECT COUNT(*) AS C FROM kb_chunks c
+      WHERE c.kb_id = ? AND DBMS_LOB.INSTR(c.content, ?) > 0
+    `).get(kb_id, substring);
+    res.json({
+      total: Number(countRow?.C ?? countRow?.c ?? 0),
+      returned: rows.length,
+      chunks: rows.map((r) => ({
+        id: r.ID ?? r.id,
+        filename: r.FILENAME ?? r.filename,
+        chunk_type: r.CHUNK_TYPE ?? r.chunk_type,
+        length: Number(r.CLEN ?? r.clen ?? 0),
+        preview: r.PREVIEW ?? r.preview,
+      })),
+    });
+  } catch (e) {
+    console.error('[admin/kb/chunk-grep]', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // GET /api/admin/kb/list-simple — debug 頁 dropdown 用
 router.get('/kb/list-simple', async (req, res) => {
   try {
