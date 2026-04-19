@@ -100,7 +100,7 @@ async function lookupExpansion(db, thesaurus, token) {
     `).all(thesaurus, token, thesaurus, token);
     const tokenLc = token.toLowerCase();
     return rows
-      .map((r) => (r.SYN ?? r.syn || '').trim())
+      .map((r) => ((r.SYN ?? r.syn) || '').trim())
       .filter((s) => s && s.toLowerCase() !== tokenLc);
   } catch (e) {
     console.warn('[kbSynonyms] lookupExpansion error:', e.message);
