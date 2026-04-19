@@ -407,17 +407,17 @@ MCP JSON-RPC level 可用 `error` object 回應:
 
 2. **直接跟維運拿**:`rich_lai@foxlink.com` 索取
 
-3. **參考本文件範例**(僅供 dev 環境測試用,正式部署請以管線輸送的為準):
+3. **參考本文件範例**(正式部署請以實際發給你的檔案為準):
 
    ```
    -----BEGIN PUBLIC KEY-----
-   MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAuLoC6xQZim67KoGVhM7k
-   /OWAhzfA0AYpmRvO28VY4A6eHlmlzjWyyO1aAiobVROWt41Guwc032PcCq2E9HcH
-   3ZSO87p1823FP3AZvQnYz6BK+WCHaV4ouI5DbdpxYgQiyvK5lqL4KRWP23B1MAlT
-   kx9wiOhVyht+o5fZok/c4LItvYDF+5Yy7GtBOGKImgV13l3Sl0LGsg/AiYJbY0IX
-   u3FUahuRaSIGrDDZ5sDK6qHbovf5QiaW5yAI5KF2zuP3bL0lZYUmi95tUXMrXfDk
-   fJ9ACwB7ACOIaskM8GeznRSLHGy0mtONWuFzBHRehok71w2tAbGizxc4kNSK15rY
-   XwIDAQAB
+   MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAtwVX/aXN11Ozq+sW2nDV
+   jmqRdJHL7/0OQNrSY2gRTI23s/Lne/7HSnu1XXuVg1I5qALHW64zzZ9BrmeB8zj9
+   8hSozn75yN6Pr5Hxwo38ibYZTDp7NVYZYwdZSwyUca9itMTIdx6SSNvIoYewEsY1
+   juZwG2s+ee292kDpEAfPW/uah66K2O4VyRT8x7/6rv/ar+T1VNlRJXeWj8hCzCOG
+   L/RG9BtvX7q3qvd/ikFbl7h32jhachar/IjcMD4hPHPxwFtZT9HXvQTjI3C7MW1+
+   7hns/9u1SRDxote6UR5tDAjFuyYM+B60PYCu4XxIm2iOzRJKV7Qt9qkRywy0QHog
+   wwIDAQAB
    -----END PUBLIC KEY-----
    ```
 
