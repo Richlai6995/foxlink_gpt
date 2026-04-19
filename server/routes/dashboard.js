@@ -13,6 +13,8 @@ const { verifyToken, verifyAdmin } = require('./auth');
 const { budgetGuard } = require('../middleware/budgetGuard');
 const { translateFields, translateDescription, batchTranslateDescriptions } = require('../services/translationService');
 const { resolveGranteeNamesInRows, getLangFromReq } = require('../services/granteeNameResolver');
+const { getGenerativeModel, extractText, extractUsage } = require('../services/geminiClient');
+const { upsertTokenUsage } = require('../services/tokenService');
 
 router.use(verifyToken);
 
@@ -422,6 +424,7 @@ router.get('/topics', requireDashboard, async (req, res) => {
       `SELECT d.id, d.topic_id, d.name, d.description, d.vector_search_enabled, d.chart_config,
               d.is_public, d.created_by, d.is_suspended,
               d.vector_top_k, d.vector_similarity_threshold,
+              d.few_shot_examples,
               d.name_zh, d.name_en, d.name_vi, d.desc_zh, d.desc_en, d.desc_vi
        FROM ai_select_designs d
        WHERE d.is_suspended=0 ${designsWhereClause}
@@ -1029,6 +1032,101 @@ router.post('/designer/designs/:id/translate', requireDesigner, async (req, res)
       .run(trans.name_zh, trans.name_en, trans.name_vi, trans.desc_zh, trans.desc_en, trans.desc_vi, req.params.id);
     res.json(trans);
   } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/dashboard/designer/designs/:id/generate-examples — AI 產生 few-shot 範例（三語）
+router.post('/designer/designs/:id/generate-examples', requireDesigner, async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const designId = req.params.id;
+    const count = Math.min(Math.max(parseInt(req.body?.count) || 4, 1), 8);
+
+    const design = await db.prepare(`SELECT * FROM ai_select_designs WHERE id=?`).get(designId);
+    if (!design) return res.status(404).json({ error: '任務不存在' });
+
+    const schemaIds = design.target_schema_ids
+      ? (typeof design.target_schema_ids === 'string' ? JSON.parse(design.target_schema_ids) : design.target_schema_ids)
+      : [];
+    if (!schemaIds.length) return res.status(400).json({ error: '此任務尚未綁定 schema，無法生成範例' });
+
+    // 組 schema 文字（table + 前 30 欄 description）
+    let schemaText = '';
+    for (const sid of schemaIds) {
+      const s = await db.prepare(`SELECT table_name, display_name, alias, business_notes FROM ai_schema_definitions WHERE id=?`).get(sid);
+      if (!s) continue;
+      const cols = await db.prepare(
+        `SELECT column_name, data_type, description FROM ai_schema_columns WHERE schema_id=? ORDER BY id ASC`
+      ).all(sid);
+      const alias = s.alias || s.table_name.split('.').pop().toLowerCase();
+      schemaText += `\n## 表: ${s.table_name}（${s.display_name || ''}）別名: ${alias}\n`;
+      if (s.business_notes) schemaText += `說明: ${s.business_notes}\n`;
+      schemaText += cols.slice(0, 30).map(c =>
+        `- ${alias}.${c.column_name} (${c.data_type || '?'}) ${c.description || ''}`
+      ).join('\n') + '\n';
+      if (cols.length > 30) schemaText += `... 另有 ${cols.length - 30} 個欄位省略\n`;
+    }
+
+    const prompt = `你是一個 Oracle ERP 資料庫查詢助手的教練。任務是根據下方 schema 產生 ${count} 個多樣化的 few-shot 範例，用於引導使用者和 LLM 學習如何查詢此任務。
+
+## 任務背景
+任務名稱: ${design.name}
+任務描述: ${design.description || '（無）'}
+${design.system_prompt ? `\n既有 System Prompt:\n${design.system_prompt.slice(0, 1000)}\n` : ''}
+
+## 可用 schema
+${schemaText}
+
+## 要求
+1. 產出 ${count} 個**不同類型**的範例，涵蓋：列表查詢 / 分組統計 / 排序 / 條件篩選 / 聚合（避免全部同類型）
+2. 每個範例要提供三語 q（zh/en/vi）和對應 Oracle SQL
+3. 問題用**自然口語**，不要太冗長（zh 約 10-25 字、en 約 5-15 字、vi 約 8-20 字）
+4. SQL 必須是**合法 Oracle 語法**、只能 SELECT、使用上方 schema 的 alias、ROWNUM 或 FETCH FIRST 限筆數
+5. 輸出**純 JSON 陣列**，格式：
+\`\`\`json
+[
+  {"q_zh": "...", "q_en": "...", "q_vi": "...", "sql": "SELECT ..."}
+]
+\`\`\`
+6. **不要加任何說明文字**，只回 JSON（可包在 \`\`\`json fence 內）`;
+
+    const modelId = process.env.GEMINI_MODEL_FLASH || 'gemini-2.5-flash';
+    const model = await getGenerativeModel({ model: modelId, generationConfig: { temperature: 0.8, responseMimeType: 'application/json' } });
+    // 直接傳 string prompt — Vertex 和 Studio 都支援，避免 [{text}] 在 Vertex 400
+    const result = await model.generateContent(prompt);
+    const text = extractText(result) || '';
+
+    // 記錄 token
+    try {
+      const usage = extractUsage(result);
+      if (usage && req.user?.id) {
+        const today = new Date().toISOString().slice(0, 10);
+        await upsertTokenUsage(db, req.user.id, today, modelId, usage.inputTokens || 0, usage.outputTokens || 0);
+      }
+    } catch (_) {}
+
+    // 解析 JSON（容忍 ```json fence）
+    let jsonText = text.trim();
+    const fenceMatch = jsonText.match(/```(?:json)?\s*([\s\S]*?)```/);
+    if (fenceMatch) jsonText = fenceMatch[1].trim();
+    let parsed;
+    try { parsed = JSON.parse(jsonText); } catch (e) {
+      return res.status(500).json({ error: 'LLM 回應非合法 JSON', raw: text.slice(0, 500) });
+    }
+    if (!Array.isArray(parsed)) return res.status(500).json({ error: 'LLM 回應非陣列' });
+
+    // 清理格式
+    const cleaned = parsed.map(x => ({
+      q_zh: typeof x.q_zh === 'string' ? x.q_zh.trim() : '',
+      q_en: typeof x.q_en === 'string' ? x.q_en.trim() : '',
+      q_vi: typeof x.q_vi === 'string' ? x.q_vi.trim() : '',
+      sql: typeof x.sql === 'string' ? x.sql.trim() : '',
+    })).filter(x => x.q_zh && x.sql);
+
+    res.json({ examples: cleaned, model: modelId });
+  } catch (e) {
+    console.error('[generate-examples]', e);
     res.status(500).json({ error: e.message });
   }
 });

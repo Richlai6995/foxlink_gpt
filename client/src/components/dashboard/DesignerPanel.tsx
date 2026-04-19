@@ -1875,6 +1875,7 @@ function DesignManager({ projectId }: { projectId: number | null }) {
   const [topicForm, setTopicForm] = useState({ name: '', description: '', icon: '', sort_order: '0', form_project_id: undefined as number | undefined, policy_category_id: undefined as number | undefined })
   const [policyCategories, setPolicyCategories] = useState<{ id: number; name: string }[]>([])
   const [loading, setLoading] = useState(false)
+  const [generatingExamples, setGeneratingExamples] = useState(false)
   const topicFormRef = useRef<HTMLDivElement>(null)
   const iconInputRef = useRef<HTMLInputElement>(null)
   const [projects, setProjects] = useState<AiSelectProject[]>([])
@@ -2354,9 +2355,72 @@ function DesignManager({ projectId }: { projectId: number | null }) {
                 onChange={e => setDesignForm(p => ({ ...p, system_prompt: e.target.value }))} />
             </div>
             <div>
-              <label className="text-xs text-gray-400 mb-1 block">Few-shot 範例（JSON）</label>
-              <textarea className="input py-1.5 text-sm font-mono resize-none" rows={4}
-                placeholder='[{"q":"計畫異常數量","sql":"SELECT COUNT(*) FROM ..."}]'
+              {(() => {
+                // 判斷是否為空 / 無效 → 顯示警示
+                const raw = (designForm.few_shot_examples || '').trim()
+                let isEmpty = false
+                try {
+                  const parsed = raw ? JSON.parse(raw) : []
+                  isEmpty = !Array.isArray(parsed) || parsed.length === 0
+                } catch { isEmpty = true }
+
+                const genExamples = async () => {
+                  if (!editDesign?.id) {
+                    alert('請先儲存此任務（含 schema），再使用 AI 生成範例')
+                    return
+                  }
+                  if (designForm.target_schema_ids.length === 0) {
+                    alert('此任務尚未綁定 schema，無法生成範例')
+                    return
+                  }
+                  setGeneratingExamples(true)
+                  try {
+                    const r = await api.post(`/dashboard/designer/designs/${editDesign.id}/generate-examples`, { count: 4 })
+                    const examples = r.data?.examples || []
+                    if (!examples.length) {
+                      alert('AI 未產出有效範例，請重試或檢查 system_prompt')
+                    } else {
+                      // 若已有內容，詢問是要追加還是覆蓋
+                      let merged = examples
+                      if (!isEmpty) {
+                        const append = confirm(`已有 ${raw.length} 字元的範例。\n\n確定 = 覆蓋\n取消 = 追加到現有陣列後`)
+                        if (!append) {
+                          try {
+                            const existing = JSON.parse(raw)
+                            if (Array.isArray(existing)) merged = [...existing, ...examples]
+                          } catch {}
+                        }
+                      }
+                      setDesignForm(p => ({ ...p, few_shot_examples: JSON.stringify(merged, null, 2) }))
+                    }
+                  } catch (e: any) {
+                    alert('生成失敗: ' + (e?.response?.data?.error || e.message))
+                  } finally {
+                    setGeneratingExamples(false)
+                  }
+                }
+
+                return (
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-xs text-gray-400">Few-shot 範例（JSON，多語支援 q_zh / q_en / q_vi）</label>
+                    <div className="flex items-center gap-2">
+                      {isEmpty && (
+                        <span className="text-xs text-amber-600 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded">
+                          ⚠️ 尚無範例，使用者將看不到引導 chip
+                        </span>
+                      )}
+                      <button type="button"
+                        onClick={genExamples}
+                        disabled={generatingExamples}
+                        className="text-xs px-2 py-0.5 rounded bg-purple-100 hover:bg-purple-200 text-purple-700 border border-purple-200 disabled:opacity-50 flex items-center gap-1">
+                        {generatingExamples ? '生成中…' : '✨ AI 生成'}
+                      </button>
+                    </div>
+                  </div>
+                )
+              })()}
+              <textarea className="input py-1.5 text-sm font-mono resize-none" rows={6}
+                placeholder='[{"q_zh":"計畫異常數量","q_en":"Abnormal plan count","q_vi":"Số lượng kế hoạch bất thường","sql":"SELECT COUNT(*) FROM ..."}]'
                 value={designForm.few_shot_examples}
                 onChange={e => setDesignForm(p => ({ ...p, few_shot_examples: e.target.value }))} />
             </div>

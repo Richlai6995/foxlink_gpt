@@ -680,9 +680,14 @@ async function buildPrompt(db, design, question, vectorResults, skipReason, lang
     }
   } catch (_) { /* 格式錯誤就略過 */ }
   if (fewShots.length) {
+    // 依查詢語言挑 q_*，fallback 到 q_zh → q → q_en → q_vi
+    const ll = (lang || '').toLowerCase();
+    const langKey = ll.startsWith('en') ? 'q_en' : ll.startsWith('vi') ? 'q_vi' : 'q_zh';
     fewShotContext = '\n## 範例問答：\n';
     fewShots.forEach(ex => {
-      fewShotContext += `問：${ex.q}\nSQL：${ex.sql}\n\n`;
+      const q = ex[langKey] || ex.q_zh || ex.q || ex.q_en || ex.q_vi;
+      if (!q || !ex.sql) return;
+      fewShotContext += `問：${q}\nSQL：${ex.sql}\n\n`;
     });
   }
 

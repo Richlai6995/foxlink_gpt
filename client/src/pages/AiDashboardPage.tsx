@@ -72,6 +72,8 @@ export default function AiDashboardPage() {
   const [expandedHistory, setExpandedHistory] = useState<number | null>(null)
 
   useEffect(() => { if (sidebarTab === 'history') loadHistory() }, [sidebarTab])
+  // mount 時預先載入歷史，讓「最近問過」chip 有資料可顯示
+  useEffect(() => { loadHistory() }, [])
 
   const loadHistory = async () => {
     setHistoryLoading(true)
@@ -849,6 +851,96 @@ export default function AiDashboardPage() {
                   {loading ? t('aiDash.querying') : t('aiDash.queryBtn')}
                 </button>
               </div>
+              {/* 範例問題 chip — few_shot（多語言）+ 使用者最近問過 + 空時 fallback */}
+              {(() => {
+                // 1) 解析 few_shot_examples
+                const lang = i18n.language.startsWith('en') ? 'en' : i18n.language.startsWith('vi') ? 'vi' : 'zh'
+                const parseFew = (): { q: string; sql?: string }[] => {
+                  const raw = selectedDesign.few_shot_examples
+                  if (!raw) return []
+                  let arr: any = null
+                  try {
+                    arr = typeof raw === 'string' ? JSON.parse(raw) : raw
+                    if (typeof arr === 'string') arr = JSON.parse(arr)
+                  } catch { return [] }
+                  if (!Array.isArray(arr)) return []
+                  return arr.map((x: any) => {
+                    if (!x) return null
+                    const q = x[`q_${lang}`] || x.q_zh || x.q || x.q_en || x.q_vi
+                    if (typeof q !== 'string' || !q.trim()) return null
+                    return { q: q.trim(), sql: typeof x.sql === 'string' ? x.sql : undefined }
+                  }).filter(Boolean) as { q: string; sql?: string }[]
+                }
+                const few = parseFew()
+
+                // 2) 此任務最近問過（前 3 筆去重）
+                const recent: string[] = []
+                const seen = new Set<string>()
+                for (const h of history) {
+                  if (h.design_id !== selectedDesign.id) continue
+                  const q = (h.question || '').trim()
+                  if (!q || seen.has(q)) continue
+                  seen.add(q); recent.push(q)
+                  if (recent.length >= 3) break
+                }
+
+                // 3) fallback 通用提示（few 與 recent 都空時才顯示）
+                const fallback = (few.length === 0 && recent.length === 0)
+                  ? [t('aiDash.genericExample1'), t('aiDash.genericExample2'), t('aiDash.genericExample3')]
+                  : []
+
+                if (few.length === 0 && recent.length === 0 && fallback.length === 0) return null
+
+                const chipBase = 'text-xs px-2.5 py-1 rounded-full border transition disabled:opacity-50 max-w-[320px] truncate'
+                const fillQ = (q: string) => { setQuestion(q); textareaRef.current?.focus() }
+
+                return (
+                  <div className="mt-3 pt-3 border-t border-gray-100 space-y-2">
+                    {few.length > 0 && (
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className="text-xs text-gray-400 mr-1">💡 {t('aiDash.exampleQuestions')}</span>
+                        {few.map((ex, i) => (
+                          <button key={`f-${i}`} type="button"
+                            onClick={() => fillQ(ex.q)}
+                            disabled={loading}
+                            title={devMode && ex.sql ? `${ex.q}\n\n${t('aiDash.exampleSqlHint')}:\n${ex.sql}` : ex.q}
+                            className={`${chipBase} bg-orange-50 hover:bg-orange-100 text-orange-700 border-orange-200`}>
+                            {ex.q}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    {recent.length > 0 && (
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className="text-xs text-gray-400 mr-1">🕘 {t('aiDash.recentQuestions')}</span>
+                        {recent.map((q, i) => (
+                          <button key={`r-${i}`} type="button"
+                            onClick={() => fillQ(q)}
+                            disabled={loading}
+                            title={q}
+                            className={`${chipBase} bg-gray-50 hover:bg-gray-100 text-gray-600 border-gray-200`}>
+                            {q}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    {fallback.length > 0 && (
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className="text-xs text-gray-400 mr-1">💭 {t('aiDash.tryAsking')}</span>
+                        {fallback.map((q, i) => (
+                          <button key={`g-${i}`} type="button"
+                            onClick={() => fillQ(q)}
+                            disabled={loading}
+                            title={q}
+                            className={`${chipBase} bg-blue-50 hover:bg-blue-100 text-blue-600 border-blue-200`}>
+                            {q}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )
+              })()}
               {/* Model 選擇器 */}
               {models.length > 0 && (
                 <div className="flex items-center gap-2 mt-2">
