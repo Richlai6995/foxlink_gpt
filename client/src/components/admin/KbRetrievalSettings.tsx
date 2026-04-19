@@ -27,6 +27,7 @@ interface RetrievalDefaults {
   default_top_k_return: number
   default_score_threshold: number
   debug: boolean
+  use_multi_vector: boolean
 }
 
 interface DimRow {
@@ -256,6 +257,22 @@ export default function KbRetrievalSettings() {
           value={stopwordsText}
           onChange={(e) => setStopwordsText(e.target.value)}
         />
+      </div>
+
+      {/* Multi-vector */}
+      <div className="bg-white rounded-xl border border-slate-200 p-4 space-y-3">
+        <label className="flex items-center gap-2 text-sm text-slate-700">
+          <input type="checkbox" checked={d.use_multi_vector} onChange={(e) => patch({ use_multi_vector: e.target.checked })} />
+          啟用 Multi-vector（title + body 加權）
+        </label>
+        <p className="text-xs text-slate-400">
+          每個 chunk 額外用 heading 做一份 embedding，查詢時加權 `title_weight × sim(title) + body_weight × sim(body)`。
+          chunks 沒 heading 時自動退回單向量。<strong>需 per-KB 回溯填值</strong>（KB 設定頁「補 title 向量」按鈕），或新上傳/重解析的 chunks 會自動補。
+        </p>
+        <div className="grid grid-cols-2 gap-3">
+          <SliderField label="Title 權重" value={d.title_weight} onChange={(v) => patch({ title_weight: v })} disabled={!d.use_multi_vector} />
+          <SliderField label="Body 權重"  value={d.body_weight}  onChange={(v) => patch({ body_weight: v })}  disabled={!d.use_multi_vector} />
+        </div>
       </div>
 
       {/* Debug */}

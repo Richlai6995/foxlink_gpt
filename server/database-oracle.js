@@ -689,6 +689,9 @@ async function runMigrations(db) {
     }
   } catch (e) { console.warn('[Migration] switch defaults to oracle_text:', e.message); }
 
+  // ── v2 Phase 3c: Multi-vector per chunk — title_embedding 欄位 ─────────────
+  await addCol('KB_CHUNKS', 'TITLE_EMBEDDING', 'VECTOR(768, FLOAT32)');
+
   // ── v2 Phase 3a: 清掉 system-seeded KB 的 hardcoded retrieval 設定 ──────────
   //    讓 admin「KB 檢索設定」系統預設能對它們生效。
   //    只改仍為原始 seed 值的欄位，避免覆蓋管理員已調整的內容。

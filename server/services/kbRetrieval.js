@@ -18,6 +18,34 @@
 
 const { embedText, toVectorStr } = require('./kbEmbedding');
 
+// ─── Title extraction（Multi-vector Phase 3c）─────────────────────────────────
+/**
+ * 從 chunk content 抽出 title（heading）。
+ * 命中一種就回傳 { title }，不然回 null（該 chunk 不建 title_embedding）。
+ * 範例命中：
+ *   - `[工作表: 香港]\n...`           → title = `[工作表: 香港]`
+ *   - `# 章節標題\n...`                → title = `章節標題`
+ *   - `【Gemini Pro】...`              → title = `【Gemini Pro】`
+ *   - 前 80 字內的單行短句              → title = 該行
+ */
+function extractTitle(content) {
+  if (!content) return null;
+  const firstLine = String(content).split('\n')[0].trim();
+  if (!firstLine) return null;
+  // [工作表: XXX]
+  if (/^\[工作表:\s*[^\]]+\]$/.test(firstLine)) return firstLine;
+  // Markdown heading
+  const mdMatch = firstLine.match(/^#{1,6}\s+(.+)$/);
+  if (mdMatch) return mdMatch[1].trim();
+  // 【標題】
+  if (/^【[^】]{1,60}】/.test(firstLine)) return firstLine;
+  // 短單行（可能是 heading） — 至少有第二行（避免把單行 chunk 整個當 title）
+  const idxNl = content.indexOf('\n');
+  if (idxNl > 0 && firstLine.length <= 80) return firstLine;
+  return null;
+}
+
+
 // ─── Hardcoded fallback defaults（最後一道防線）─────────────────────────────────
 const HARDCODED_DEFAULTS = {
   backend:             'like',
@@ -41,6 +69,7 @@ const HARDCODED_DEFAULTS = {
   default_top_k_return: 5,
   default_score_threshold: 0,
   debug:               false,
+  use_multi_vector:    false,  // Phase 3c: 啟用 title_embedding 加權
 };
 
 // system_settings.kb_retrieval_defaults 快取（避免每次 retrieval 都讀 DB）
@@ -109,6 +138,31 @@ function extractTokens(query, stopwords) {
 async function _vectorSearch(db, kb, query, fetchK, cfg) {
   const qEmb = await embedText(query, { dims: kb.embedding_dims || 768 });
   const qVecStr = toVectorStr(qEmb);
+
+  // Multi-vector: 若 KB 啟用且 chunks 有 title_embedding，走加權 title+body 公式
+  if (cfg.use_multi_vector) {
+    const tW = Number(cfg.title_weight) || 0.3;
+    const bW = Number(cfg.body_weight)  || 0.7;
+    const rows = await db.prepare(`
+      SELECT c.id, c.doc_id, c.chunk_type, c.position, c.content, c.parent_content,
+             d.filename,
+             (CASE WHEN c.title_embedding IS NULL
+               THEN VECTOR_DISTANCE(c.embedding, TO_VECTOR(?), COSINE)
+               ELSE ? * VECTOR_DISTANCE(c.title_embedding, TO_VECTOR(?), COSINE)
+                  + ? * VECTOR_DISTANCE(c.embedding,       TO_VECTOR(?), COSINE)
+             END) AS vector_score
+      FROM kb_chunks c JOIN kb_documents d ON d.id = c.doc_id
+      WHERE c.kb_id=? AND c.chunk_type != 'parent'
+      ORDER BY vector_score ASC
+      FETCH FIRST ? ROWS ONLY
+    `).all(qVecStr, tW, qVecStr, bW, qVecStr, kb.id, fetchK);
+    return rows.map((r) => ({
+      ...r,
+      score:       1 - (r.vector_score || 0),
+      match_type:  'vector-mv',
+    }));
+  }
+
   const rows = await db.prepare(`
     SELECT c.id, c.doc_id, c.chunk_type, c.position, c.content, c.parent_content,
            d.filename,
@@ -421,6 +475,7 @@ module.exports = {
   retrieveKbChunks,
   resolveConfig,
   extractTokens,
+  extractTitle,
   invalidateSystemDefaultsCache,
   HARDCODED_DEFAULTS,
 };

@@ -1123,8 +1123,18 @@ async function processDocument(db, kb, docId, filePath, fileType, parseMode = nu
     const { default: pLimit } = await import('p-limit');
     const limit = pLimit(EMBED_CONCURRENCY);
 
+    // Phase 3c: KB 啟用 multi-vector 時，額外 embed title vector（若能抽出 heading）
+    const { extractTitle } = require('../services/kbRetrieval');
+    let useMultiVector = false;
+    try {
+      const rc = kb.retrieval_config ? JSON.parse(kb.retrieval_config) : null;
+      if (rc?.use_multi_vector === true) useMultiVector = true;
+    } catch (_) {}
+
     const embedded = await Promise.all(chunks.map((chunk, i) => limit(async () => {
       let emb = null;
+      let titleEmb = null;
+      const title = useMultiVector ? extractTitle(chunk.content) : null;
       // 5 retries; longer backoff with jitter on 429 to avoid thundering herd
       for (let attempt = 0; attempt < 5; attempt++) {
         try {
@@ -1139,15 +1149,23 @@ async function processDocument(db, kb, docId, filePath, fileType, parseMode = nu
           await new Promise((r) => setTimeout(r, base + jitter));
         }
       }
-      return { index: i, chunk, embedding: toVectorStr(emb) };
+      if (title) {
+        try { titleEmb = await embedText(title, { dims }); }
+        catch (e) { console.warn(`[KB] title embed failed for chunk ${i}:`, e.message); }
+      }
+      return {
+        index: i, chunk,
+        embedding: toVectorStr(emb),
+        title_embedding: titleEmb ? toVectorStr(titleEmb) : null,
+      };
     })));
 
-    for (const { index: i, chunk, embedding } of embedded) {
+    for (const { index: i, chunk, embedding, title_embedding } of embedded) {
       const chunkId = uuid();
       const chunkTokens = Math.ceil(chunk.content.length / 4);
       await db.prepare(`
-        INSERT INTO kb_chunks (id, doc_id, kb_id, parent_id, chunk_type, content, parent_content, position, token_count, embedding)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, TO_VECTOR(?))
+        INSERT INTO kb_chunks (id, doc_id, kb_id, parent_id, chunk_type, content, parent_content, position, token_count, embedding, title_embedding)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, TO_VECTOR(?), ${title_embedding ? 'TO_VECTOR(?)' : 'NULL'})
       `).run(
         chunkId, docId, kb.id, null,
         chunk.chunk_type || 'regular',
@@ -1156,6 +1174,7 @@ async function processDocument(db, kb, docId, filePath, fileType, parseMode = nu
         i,
         chunkTokens,
         embedding,
+        ...(title_embedding ? [title_embedding] : []),
       );
       totalEmbedTokens += chunkTokens;
     }

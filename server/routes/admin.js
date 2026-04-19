@@ -1265,6 +1265,50 @@ router.get('/kb/list-simple', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// POST /api/admin/kb/:id/backfill-title-embeddings — Phase 3c: 為現有 chunks 補 title_embedding
+//   不 re-parse、不改 body embedding；只對每個 chunk extract title + embed + UPDATE。
+//   適用：既有 KB 開啟 multi-vector 後的回溯填值。
+router.post('/kb/:id/backfill-title-embeddings', async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const { extractTitle } = require('../services/kbRetrieval');
+    const { embedText, toVectorStr } = require('../services/kbEmbedding');
+
+    const kb = await db.prepare(`SELECT * FROM knowledge_bases WHERE id=?`).get(req.params.id);
+    if (!kb) return res.status(404).json({ error: 'KB 不存在' });
+    const dims = Number(kb.EMBEDDING_DIMS ?? kb.embedding_dims) || 768;
+
+    const rows = await db.prepare(`
+      SELECT id, content FROM kb_chunks
+      WHERE kb_id=? AND title_embedding IS NULL AND chunk_type != 'parent'
+    `).all(req.params.id);
+
+    res.json({ queued: rows.length, message: '背景處理中，請由 server log 觀察進度' });
+
+    // 背景處理（不阻塞 HTTP）
+    setImmediate(async () => {
+      let done = 0, skipped = 0, failed = 0;
+      const t0 = Date.now();
+      for (const r of rows) {
+        const content = r.CONTENT ?? r.content;
+        const title = extractTitle(content);
+        if (!title) { skipped++; continue; }
+        try {
+          const emb = await embedText(title, { dims });
+          await db.prepare(`UPDATE kb_chunks SET title_embedding=TO_VECTOR(?) WHERE id=?`)
+            .run(toVectorStr(emb), r.ID ?? r.id);
+          done++;
+          if (done % 50 === 0) console.log(`[backfill-title] KB ${kb.NAME ?? kb.name}: ${done}/${rows.length} done`);
+        } catch (e) {
+          failed++;
+          console.warn(`[backfill-title] ${r.ID ?? r.id}:`, e.message);
+        }
+      }
+      console.log(`[backfill-title] KB ${kb.NAME ?? kb.name} 完成: done=${done} skipped=${skipped} failed=${failed} in ${Date.now()-t0}ms`);
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // POST /api/admin/kb/maintenance/rebuild-vector-index — 呼叫 Oracle 重建 vector index（Phase 2 IVF）
 router.post('/kb/maintenance/rebuild-vector-index', async (req, res) => {
   try {

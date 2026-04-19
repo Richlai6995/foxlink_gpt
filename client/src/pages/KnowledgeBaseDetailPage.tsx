@@ -647,6 +647,7 @@ function SettingsTab({ kb, onSaved, isOwner }: { kb: KnowledgeBase; onSaved: () 
   const [rcSyn,     setRcSyn]     = useState<string>(initialRc?.synonym_thesaurus ?? '')
   const [rcMinFt,   setRcMinFt]   = useState<string>(initialRc?.min_ft_score   != null ? String(initialRc.min_ft_score)   : '')
   const [rcVecCut,  setRcVecCut]  = useState<string>(initialRc?.vec_cutoff     != null ? String(initialRc.vec_cutoff)     : '')
+  const [rcMv,      setRcMv]      = useState<boolean>(!!initialRc?.use_multi_vector)
 
   const buildRetrievalConfig = (): Record<string, unknown> | null => {
     if (!rcEnabled) return null
@@ -659,6 +660,7 @@ function SettingsTab({ kb, onSaved, isOwner }: { kb: KnowledgeBase; onSaved: () 
     if (rcVecCut !== '' && !Number.isNaN(+rcVecCut))     out.vec_cutoff        = +rcVecCut
     if (rcFuzzy)                                         out.fuzzy             = true
     if (rcSyn.trim())                                    out.synonym_thesaurus = rcSyn.trim()
+    if (rcMv)                                            out.use_multi_vector  = true
     return Object.keys(out).length > 0 ? out : null
   }
 
@@ -1029,6 +1031,15 @@ function SettingsTab({ kb, onSaved, isOwner }: { kb: KnowledgeBase; onSaved: () 
                     </label>
                   </div>
                   <div className="col-span-2">
+                    <label className="flex items-center gap-2 text-sm text-slate-700">
+                      <input type="checkbox" checked={rcMv} onChange={(e) => setRcMv(e.target.checked)} />
+                      啟用 Multi-vector（title + body 加權向量檢索）
+                    </label>
+                    <p className="text-xs text-slate-400 pl-6 mt-0.5">
+                      啟用後新上傳 chunks 會自動 embed title 向量；既有 chunks 需按上方「補 title 向量」回填。
+                    </p>
+                  </div>
+                  <div className="col-span-2">
                     <label className="block text-xs text-slate-500 mb-1">同義詞字典名稱（CTX_THES）</label>
                     <input
                       type="text"
@@ -1134,6 +1145,24 @@ function SettingsTab({ kb, onSaved, isOwner }: { kb: KnowledgeBase; onSaved: () 
             title="重新 chunk + embedding 所有文件"
           >
             <RefreshCw size={14} /> 重新解析此 KB
+          </button>
+          <button
+            onClick={async () => {
+              if (!confirm(`為此 KB 所有無 title_embedding 的 chunks 補 title 向量？\n只 embed title（不重 body），費用低很多。\n前提：KB 已啟用 Multi-vector（進階檢索設定 → use_multi_vector）。`)) return
+              setSaving(true); setMsg('')
+              try {
+                const res = await api.post(`/admin/kb/${kb.id}/backfill-title-embeddings`)
+                setMsg(`已排入 ${res.data.queued} 個 chunks 背景補 title 向量`)
+                setTimeout(() => setMsg(''), 4000)
+              } catch (e: any) {
+                setMsg(e.response?.data?.error || '補 title 向量失敗')
+              } finally { setSaving(false) }
+            }}
+            disabled={saving || (kb.chunk_count || 0) === 0}
+            className="flex items-center gap-1.5 px-4 py-2 bg-purple-600 text-white text-sm rounded-lg hover:bg-purple-700 transition disabled:opacity-50"
+            title="只補 title_embedding，不動 body embedding"
+          >
+            <Target size={14} /> 補 title 向量
           </button>
           {msg && <span className={`text-sm ${msg.toLowerCase().includes('fail') || msg.includes('失') ? 'text-red-500' : 'text-green-600'}`}>{msg}</span>}
         </div>
