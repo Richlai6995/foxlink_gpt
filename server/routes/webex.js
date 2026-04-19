@@ -245,9 +245,9 @@ const WEBEX_SYSTEM_SUFFIX_BASE = `
 `;
 
 const WEBEX_LANG_INSTRUCTION = {
-  'zh-TW': '\n\n---\n請使用繁體中文回答，除非使用者在問題中明確指定輸出語言（例如翻譯任務）。',
-  'en':    '\n\n---\nPlease respond in English, unless the user explicitly specifies a different output language (e.g., translation tasks).',
-  'vi':    '\n\n---\nVui lòng trả lời bằng Tiếng Việt, trừ khi người dùng chỉ định rõ ngôn ngữ đầu ra khác (ví dụ: nhiệm vụ dịch thuật).',
+  'zh-TW': '\n\n---\n【輸出語言】必須使用「繁體中文」回答所有內容。即使輸入或資料是別的語言，回答仍必須是繁體中文。專有名詞可保留原文。唯一例外：使用者明確要求翻譯成特定語言（如「翻成日文」）。',
+  'en':    '\n\n---\n[Output Language] You MUST respond in English for all content, even if the input or data is in another language. Proper nouns can stay in original. Only exception: user explicitly asks for translation to a specific language (e.g., "translate to Japanese").',
+  'vi':    '\n\n---\n[Ngôn ngữ đầu ra] BẮT BUỘC trả lời bằng Tiếng Việt cho mọi nội dung, ngay cả khi đầu vào hoặc dữ liệu bằng ngôn ngữ khác. Danh từ riêng có thể giữ nguyên gốc. Ngoại lệ duy nhất: người dùng yêu cầu dịch sang ngôn ngữ cụ thể (ví dụ: "dịch sang tiếng Nhật").',
 };
 
 function getWebexSystemSuffix(lang) {
