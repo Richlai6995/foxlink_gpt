@@ -1,0 +1,52 @@
+{
+  "version": 1,
+  "description": "KB Retrieval 回歸測試金標 — 每次改 kbRetrieval.js 或 backend 都跑這個",
+  "queries": [
+    {
+      "kb_name": "正崴通訊錄",
+      "query": "鍾漢成 分機?",
+      "expected_chunk_keywords_any": [
+        "鍾漢成"
+      ],
+      "expected_min_hits": 2,
+      "notes": "鍾漢成 在富東 + 香港，預期至少 2 個 chunks 命中"
+    },
+    {
+      "kb_name": "正崴通訊錄",
+      "query": "我要所有廠區 鍾漢成 分機?",
+      "expected_chunk_keywords_any": [
+        "鍾漢成"
+      ],
+      "expected_min_hits": 2,
+      "notes": "整段 query 測試 tokenize 有效；不會被 LIKE 整串 0 命中誤殺"
+    },
+    {
+      "kb_name": "正崴通訊錄無格式感知",
+      "query": "鍾漢成 分機",
+      "expected_chunk_keywords_any": [
+        "鍾漢成"
+      ],
+      "expected_min_hits": 2,
+      "notes": "text_only 解析的 KB 也要 work"
+    },
+    {
+      "kb_name": "正崴通訊錄無格式感知",
+      "query": "我要所有廠區 鍾漢成 分機?",
+      "expected_chunk_keywords_any": [
+        "鍾漢成",
+        "香港"
+      ],
+      "expected_min_hits": 3,
+      "notes": "長 query 含多 token，要能撈到香港 chunk"
+    },
+    {
+      "kb_name": "正崴通訊錄",
+      "query": "富東廠區",
+      "expected_chunk_keywords_any": [
+        "富東"
+      ],
+      "expected_min_hits": 1,
+      "notes": "特定廠區查詢"
+    }
+  ]
+}

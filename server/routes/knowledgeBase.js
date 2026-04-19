@@ -914,146 +914,34 @@ router.post('/:id/search', async (req, res) => {
     const {
       query,
       retrieval_mode,
-      top_k = kb.top_k_return || 5,
-      score_threshold = kb.score_threshold || 0,
+      top_k,
+      score_threshold,
     } = req.body;
 
     if (!query?.trim()) return res.status(400).json({ error: '請輸入查詢文字' });
 
-    const mode  = retrieval_mode || kb.retrieval_mode || 'hybrid';
-    const topK  = Math.min(Number(top_k), 50);
-    const dims  = kb.embedding_dims || 768;
-    const t0    = Date.now();
+    // 若 request 覆寫 retrieval_mode，臨時塞進 kb 物件（service 會認）
+    const kbWithOverride = retrieval_mode ? { ...kb, retrieval_mode } : kb;
 
-    let results = [];
+    const { retrieveKbChunks } = require('../services/kbRetrieval');
+    const { results, stats, rerankApplied } = await retrieveKbChunks(db, {
+      kb:        kbWithOverride,
+      query,
+      topK:      top_k != null ? Number(top_k) : undefined,
+      scoreThreshold: score_threshold != null ? Number(score_threshold) : undefined,
+      userId:    req.user.id,
+      source:    'search',
+      debug:     !!req.body.debug,
+    });
 
-    // Vector search
-    if (mode === 'vector' || mode === 'hybrid') {
-      const qEmb   = await embedText(query, { dims });
-      const qVecStr = toVectorStr(qEmb);
-      const fetchK = Math.min(topK * 3, 100); // fetch more, filter by score later
-      const rows   = await db.prepare(`
-        SELECT c.id, c.doc_id, c.chunk_type, c.position, c.content,
-               c.parent_content,
-               d.filename,
-               VECTOR_DISTANCE(c.embedding, TO_VECTOR(?), COSINE) AS vector_score
-        FROM kb_chunks c
-        JOIN kb_documents d ON d.id = c.doc_id
-        WHERE c.kb_id=? AND c.chunk_type != 'parent'
-        ORDER BY vector_score ASC
-        FETCH FIRST ? ROWS ONLY
-      `).all(qVecStr, req.params.id, fetchK);
-
-      results = rows.map((r) => ({
-        ...r,
-        score: 1 - (r.vector_score || 0), // convert distance → similarity
-        match_type: 'vector',
-      }));
-    }
-
-    // Full-text search — tokenize query, rank by weighted token hits
-    // （避免整串 query 做 LIKE 必然 0 命中；以 token 長度當權重讓罕見專名排前）
-    if (mode === 'fulltext' || mode === 'hybrid') {
-      // CJK 優先 3+ 字，避免「分機」等通用 2 字詞稀釋專名訊號
-      const cjk3 = query.match(/[\u4e00-\u9fa5]{3,6}/g) || [];
-      const cjk2 = query.match(/[\u4e00-\u9fa5]{2}/g) || [];
-      const latin = query.match(/[A-Za-z0-9][A-Za-z0-9_.-]+/g) || [];
-      let tokens = [...cjk3, ...latin];
-      if (tokens.filter((t) => /[\u4e00-\u9fa5]/.test(t)).length === 0) {
-        tokens = [...cjk2, ...latin];
-      }
-      tokens = tokens.filter((t) => t.length >= 2 && !/^(我要|你要|我想|所有|幫我|請問|告訴|是否|可以|什麼|怎麼|分機|地址|電話|傳真|資料|哪些|每個)$/.test(t));
-      if (tokens.length === 0 && query.trim()) tokens.push(query.trim());
-      const useTokens = tokens.slice(0, 8);
-      // 權重 = length² 讓罕見專名遠大於一般 2 字詞
-      const caseExprs = useTokens.map((t) => {
-        const w = Math.max(1, t.length * t.length);
-        return `CASE WHEN UPPER(c.content) LIKE UPPER(?) THEN ${w} ELSE 0 END`;
-      });
-      const hitScoreExpr = caseExprs.join(' + ');
-      const likeClauses = useTokens.map(() => 'UPPER(c.content) LIKE UPPER(?)').join(' OR ');
-      const likeParams = useTokens.map((t) => `%${t.replace(/[%_]/g, '\\$&')}%`);
-      const ftRows = await db.prepare(`
-        SELECT c.id, c.doc_id, c.chunk_type, c.position, c.content,
-               c.parent_content, d.filename,
-               1 AS vector_score,
-               ${hitScoreExpr} AS hit_score
-        FROM kb_chunks c
-        JOIN kb_documents d ON d.id = c.doc_id
-        WHERE c.kb_id=? AND c.chunk_type != 'parent' AND (${likeClauses})
-        ORDER BY hit_score DESC
-        FETCH FIRST ? ROWS ONLY
-      `).all(...likeParams, req.params.id, ...likeParams, topK * 2);
-
-      // 以「fetched rows 實際最高 hit_score」標準化，top 得 1.0
-      const actualMaxHit = Math.max(1, ...ftRows.map((r) => r.hit_score || 0));
-      const ftScore = (r) => 0.5 + 0.5 * ((r.hit_score || 0) / actualMaxHit);
-      if (mode === 'fulltext') {
-        results = ftRows.map((r) => ({ ...r, score: ftScore(r), match_type: 'fulltext' }));
-      } else {
-        // Hybrid = 0.4 * vector + 0.6 * fulltext + 0.1 boost
-        const vecIds = new Set(results.map((r) => r.id));
-        for (const r of ftRows) {
-          const fts = ftScore(r);
-          if (vecIds.has(r.id)) {
-            const existing = results.find((x) => x.id === r.id);
-            if (existing) { existing.score = 0.4 * existing.score + 0.6 * fts + 0.1; existing.match_type = 'hybrid'; }
-          } else {
-            results.push({ ...r, score: fts, match_type: 'fulltext' });
-          }
-        }
-      }
-    }
-
-    // Filter by score threshold
-    results = results
-      .filter((r) => r.score >= Number(score_threshold))
-      .sort((a, b) => b.score - a.score);
-
-    // ── Rerank ──────────────────────────────────────────────────────────────
-    // Use kb.rerank_model (llm_models key) if configured, otherwise try any active rerank model
-    // Special value 'disabled' = explicitly skip rerank
-    let rerankApplied = false;
-    try {
-      const rerankKey = kb.rerank_model;
-      if (rerankKey === 'disabled') throw Object.assign(new Error('rerank disabled'), { _skip: true });
-      const rerankRow = rerankKey
-        ? await db.prepare(`SELECT id, api_model, extra_config_enc FROM llm_models WHERE key=? AND model_role='rerank' AND is_active=1`).get(rerankKey)
-        : await db.prepare(`SELECT id, api_model, extra_config_enc FROM llm_models WHERE model_role='rerank' AND is_active=1 AND ROWNUM=1`).get();
-
-      if (rerankRow?.extra_config_enc && results.length > 1) {
-        const { decryptKey } = require('../services/llmKeyService');
-        const creds = JSON.parse(decryptKey(rerankRow.extra_config_enc));
-        const { rerankOci } = require('../services/ociAi');
-        const fetchForRerank = results.slice(0, Math.min(results.length, topK * 3));
-        const docs = fetchForRerank.map((r) => r.content || '');
-        const rerankResp = await rerankOci(creds, rerankRow.api_model, query.trim(), docs, fetchForRerank.length);
-        const ranked = rerankResp?.results || rerankResp?.rankings || [];
-        if (ranked.length > 0) {
-          results = ranked.map((item) => {
-            const orig = fetchForRerank[item.index ?? item.resultIndex ?? 0];
-            return { ...orig, rerank_score: item.relevanceScore ?? item.score ?? 0 };
-          }).sort((a, b) => b.rerank_score - a.rerank_score);
-          rerankApplied = true;
-        }
-      }
-    } catch (e) {
-      if (!e._skip) console.warn('[KB Search] Rerank failed, using original order:', e.message);
-    }
-
-    results = results.slice(0, topK);
-
-    const elapsed = Date.now() - t0;
-
-    // Save retrieval test record
-    try {
-      await db.prepare(`
-        INSERT INTO kb_retrieval_tests (id, kb_id, user_id, query_text, retrieval_mode, top_k, score_threshold, results_json, elapsed_ms)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(uuid(), req.params.id, req.user.id, query.slice(0, 500), mode, topK, score_threshold, JSON.stringify(results.map((r) => ({ id: r.id, score: r.score, content: r.content?.slice(0, 200) }))), elapsed);
-    } catch (_) {}
-
-    res.json({ results, elapsed_ms: elapsed, mode, query, rerank_applied: rerankApplied });
+    res.json({
+      results,
+      elapsed_ms:    stats.elapsed_ms,
+      mode:          stats.mode,
+      query,
+      rerank_applied: rerankApplied,
+      stats:         req.body.debug ? stats : undefined,
+    });
   } catch (e) {
     console.error('[KB Search]', e);
     res.status(500).json({ error: e.message });

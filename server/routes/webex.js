@@ -623,49 +623,13 @@ async function loadFunctionDeclarations(db, user) {
       });
       handlers[fnName] = async (args) => {
         try {
-          const { embedText, toVectorStr } = require('../services/kbEmbedding');
-          const query = args.query || '';
-          const topK = Math.min(Number(kb.top_k_return) || 5, 10);
-          const dims = kb.embedding_dims || 768;
-          const thresh = Number(kb.score_threshold) || 0;
-          const mode = kb.retrieval_mode || 'hybrid';
-
-          let results = [];
-          if (mode === 'vector' || mode === 'hybrid') {
-            const qEmb = await embedText(query, { dims });
-            const qVecStr = toVectorStr(qEmb);
-            const rows = await db.prepare(
-              `SELECT c.content, d.filename,
-                      VECTOR_DISTANCE(c.embedding, TO_VECTOR(?), COSINE) AS vs
-               FROM kb_chunks c JOIN kb_documents d ON d.id=c.doc_id
-               WHERE c.kb_id=? AND c.chunk_type != 'parent'
-               ORDER BY vs ASC FETCH FIRST ? ROWS ONLY`
-            ).all(qVecStr, kb.id, topK * 2);
-            results = rows.map(r => ({ ...r, score: 1 - (r.vs || 0) }));
-          }
-          if (mode === 'fulltext' || mode === 'hybrid') {
-            const likeQ = `%${query.replace(/[%_]/g, '\\$&')}%`;
-            const ftRows = await db.prepare(
-              `SELECT c.content, d.filename
-               FROM kb_chunks c JOIN kb_documents d ON d.id=c.doc_id
-               WHERE c.kb_id=? AND c.chunk_type!='parent' AND UPPER(c.content) LIKE UPPER(?)
-               FETCH FIRST ? ROWS ONLY`
-            ).all(kb.id, likeQ, topK);
-            if (mode === 'fulltext') {
-              results = ftRows.map(r => ({ ...r, score: 0.8 }));
-            } else {
-              // 精確字串命中是極強訊號，分數要高過 vector 的典型分布
-              const vIds = new Set(results.map(r => r.content?.slice(0, 50)));
-              for (const r of ftRows) {
-                if (!vIds.has(r.content?.slice(0, 50))) results.push({ ...r, score: 0.85 });
-              }
-            }
-          }
-
-          results = results.filter(r => r.score >= thresh).sort((a, b) => b.score - a.score).slice(0, topK);
+          const { retrieveKbChunks } = require('../services/kbRetrieval');
+          const { results } = await retrieveKbChunks(db, {
+            kb, query: args.query || '', source: 'webex',
+          });
           if (results.length === 0) return `[知識庫「${kb.name}」未找到相關內容]`;
           return `【知識庫「${kb.name}」結果】\n\n` + results.map((r, i) =>
-            `[${i + 1}] 來源: ${r.filename} (${(r.score * 100).toFixed(0)}%)\n${r.content}`
+            `[${i + 1}] 來源: ${r.filename} (${((r.score || 0) * 100).toFixed(0)}%)\n${r.content}`
           ).join('\n\n---\n\n');
         } catch (e) {
           return `[知識庫「${kb.name}」查詢失敗: ${e.message}]`;

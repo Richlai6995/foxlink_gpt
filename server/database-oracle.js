@@ -411,6 +411,114 @@ async function runMigrations(db) {
   // KB_DOCUMENTS stored file path (for re-parse) — relative to UPLOAD_BASE/kb/<kb_id>/
   await addCol('KB_DOCUMENTS', 'STORED_FILENAME', 'VARCHAR2(500)');
 
+  // ── v2 檢索架構：retrieval_config CLOB + system defaults + orphan FK/trigger ────
+  // 1) 每 KB 可覆寫檢索參數（backend / weights / fuzzy / synonym 等），JSON 存 CLOB
+  await addCol('KNOWLEDGE_BASES', 'RETRIEVAL_CONFIG', 'CLOB');
+
+  // 2) 系統級 KB 檢索預設值（JSON in value column）
+  try {
+    const existing = await db.prepare(
+      `SELECT value FROM system_settings WHERE key='kb_retrieval_defaults'`
+    ).get();
+    if (!existing) {
+      const defaults = {
+        backend:             'like',              // Phase 1: 仍用 LIKE；Phase 2 改 oracle_text
+        use_hybrid_sql:      false,
+        vector_weight:       0.4,
+        fulltext_weight:     0.6,
+        match_boost:         0.1,
+        title_weight:        0.3,
+        body_weight:         0.7,
+        fulltext_query_op:   'accum',
+        fuzzy:               false,
+        synonym_thesaurus:   null,
+        use_proximity:       false,
+        proximity_distance:  10,
+        min_ft_score:        0.2,
+        vec_cutoff:          0.7,
+        fusion_method:       'weighted',          // weighted | rrf
+        rrf_k:               60,
+        token_stopwords:     ['分機','地址','電話','傳真','資料','哪些','每個','我要','你要','所有','幫我','請問','告訴','是否','可以','什麼','怎麼'],
+        default_top_k_fetch: 20,
+        default_top_k_return:5,
+        default_score_threshold: 0,
+        debug:               false,
+      };
+      await db.prepare(
+        `INSERT INTO system_settings (key, value) VALUES ('kb_retrieval_defaults', ?)`
+      ).run(JSON.stringify(defaults));
+      console.log('[Migration] Inserted system_settings.kb_retrieval_defaults');
+    }
+  } catch (e) { console.warn('[Migration] kb_retrieval_defaults seed:', e.message); }
+
+  // 3) Orphan cleanup cron 預設（hourly）
+  try {
+    const existing = await db.prepare(
+      `SELECT value FROM system_settings WHERE key='kb_cleanup_cron'`
+    ).get();
+    if (!existing) {
+      await db.prepare(
+        `INSERT INTO system_settings (key, value) VALUES ('kb_cleanup_cron', '0 * * * *')`
+      ).run();
+    }
+    const enabled = await db.prepare(
+      `SELECT value FROM system_settings WHERE key='kb_cleanup_enabled'`
+    ).get();
+    if (!enabled) {
+      await db.prepare(
+        `INSERT INTO system_settings (key, value) VALUES ('kb_cleanup_enabled', '1')`
+      ).run();
+    }
+  } catch (e) { console.warn('[Migration] kb_cleanup_cron seed:', e.message); }
+
+  // 4) 清光既有 orphan chunks（FK 要加前必做）
+  try {
+    const cnt = await db.prepare(
+      `SELECT COUNT(*) AS C FROM kb_chunks c WHERE NOT EXISTS
+       (SELECT 1 FROM kb_documents d WHERE d.id = c.doc_id)`
+    ).get();
+    const orphans = Number(cnt?.C ?? cnt?.c ?? 0);
+    if (orphans > 0) {
+      console.log(`[Migration] 發現 ${orphans} 個 orphan kb_chunks，清除中...`);
+      await db.prepare(
+        `DELETE FROM kb_chunks WHERE NOT EXISTS
+         (SELECT 1 FROM kb_documents WHERE id = kb_chunks.doc_id)`
+      ).run();
+      console.log(`[Migration] Orphan chunks 已清除: ${orphans} 筆`);
+    }
+  } catch (e) { console.warn('[Migration] orphan cleanup pre-FK:', e.message); }
+
+  // 5) 加 FK：kb_chunks.doc_id → kb_documents.id ON DELETE CASCADE
+  //    若 LIST partition 不允許，改用 trigger
+  try {
+    const fkExists = await db.prepare(
+      `SELECT COUNT(*) AS C FROM user_constraints
+       WHERE table_name='KB_CHUNKS' AND constraint_type='R'
+         AND constraint_name = 'FK_KB_CHUNKS_DOC'`
+    ).get();
+    if (Number(fkExists?.C ?? fkExists?.c ?? 0) === 0) {
+      try {
+        await db.prepare(
+          `ALTER TABLE kb_chunks ADD CONSTRAINT fk_kb_chunks_doc
+           FOREIGN KEY (doc_id) REFERENCES kb_documents(id) ON DELETE CASCADE`
+        ).run();
+        console.log('[Migration] 加 FK kb_chunks.doc_id → kb_documents.id ON DELETE CASCADE ✓');
+      } catch (fkErr) {
+        console.warn('[Migration] FK 加失敗，改用 trigger:', fkErr.message);
+        // Fallback: trigger
+        await db.prepare(`
+          CREATE OR REPLACE TRIGGER trg_kb_docs_cascade_chunks
+          AFTER DELETE ON kb_documents
+          FOR EACH ROW
+          BEGIN
+            DELETE FROM kb_chunks WHERE doc_id = :OLD.id;
+          END;
+        `).run();
+        console.log('[Migration] Trigger trg_kb_docs_cascade_chunks 建立 ✓');
+      }
+    }
+  } catch (e) { console.warn('[Migration] FK/trigger setup:', e.message); }
+
   // ── Chat session multilingual titles ───────────────────────────────────────
   await addCol('CHAT_SESSIONS', 'TITLE_ZH', 'VARCHAR2(200)');
   await addCol('CHAT_SESSIONS', 'TITLE_EN', 'VARCHAR2(200)');

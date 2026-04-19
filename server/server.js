@@ -235,6 +235,21 @@ app.get('/api/health', (req, res) => res.json({ status: 'ok', timestamp: new Dat
       console.error('[Cleanup] Failed to start scheduler:', e.message);
     }
 
+    // KB maintenance scheduler（orphan chunks cleanup, Phase 1 of kb-retrieval v2）
+    try {
+      const enabledRow = await db.prepare(`SELECT value FROM system_settings WHERE key='kb_cleanup_enabled'`).get();
+      if (enabledRow?.value !== '0') {
+        const { startScheduler, runOnce } = require('./services/kbMaintenance');
+        await startScheduler(db);
+        // 啟動時先跑一次（保底；DB 層的 FK/trigger 正常狀況應該會是 0 筆）
+        if (process.env.KB_CLEANUP_ON_STARTUP !== 'false') {
+          runOnce(db).catch((e) => console.warn('[KbMaintenance] startup run:', e.message));
+        }
+      }
+    } catch (e) {
+      console.error('[KbMaintenance] Failed to start scheduler:', e.message);
+    }
+
     // Backup scheduler (Oracle mode: schedule-settings preserved, actual backup disabled)
     try {
       const rows = await db.prepare(

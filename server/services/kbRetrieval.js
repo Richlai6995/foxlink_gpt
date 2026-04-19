@@ -1,0 +1,336 @@
+'use strict';
+/**
+ * 統一 KB 檢索 service（v2 Phase 1）
+ *
+ * 對外：retrieveKbChunks(db, opts) → { results, stats }
+ *
+ * 職責：
+ *   1. 讀 config（kb.retrieval_config > system_settings.kb_retrieval_defaults > hardcoded）
+ *   2. Vector search + Fulltext search（依 backend 決定）
+ *   3. Score fusion（weighted / rrf）
+ *   4. Rerank（若 kb.rerank_model 設定且有 creds）
+ *   5. Filter threshold + topK + log kb_retrieval_tests
+ *
+ * Phase 1: backend = 'like'（保留現有 tokenized-LIKE 邏輯）
+ * Phase 2: 加 backend = 'oracle_text'（CONTAINS + SCORE + HNSW）
+ * Phase 3: 加 multi-vector + synonym
+ */
+
+const { embedText, toVectorStr } = require('./kbEmbedding');
+
+// ─── Hardcoded fallback defaults（最後一道防線）─────────────────────────────────
+const HARDCODED_DEFAULTS = {
+  backend:             'like',
+  use_hybrid_sql:      false,
+  vector_weight:       0.4,
+  fulltext_weight:     0.6,
+  match_boost:         0.1,
+  title_weight:        0.3,
+  body_weight:         0.7,
+  fulltext_query_op:   'accum',
+  fuzzy:               false,
+  synonym_thesaurus:   null,
+  use_proximity:       false,
+  proximity_distance:  10,
+  min_ft_score:        0.2,
+  vec_cutoff:          0.7,
+  fusion_method:       'weighted', // weighted | rrf
+  rrf_k:               60,
+  token_stopwords:     ['分機','地址','電話','傳真','資料','哪些','每個','我要','你要','所有','幫我','請問','告訴','是否','可以','什麼','怎麼'],
+  default_top_k_fetch: 20,
+  default_top_k_return: 5,
+  default_score_threshold: 0,
+  debug:               false,
+};
+
+// system_settings.kb_retrieval_defaults 快取（避免每次 retrieval 都讀 DB）
+let _systemDefaultsCache = null;
+let _systemDefaultsCacheAt = 0;
+const SYSTEM_CACHE_TTL_MS = 60 * 1000; // 1 min
+
+async function _getSystemDefaults(db) {
+  const now = Date.now();
+  if (_systemDefaultsCache && (now - _systemDefaultsCacheAt) < SYSTEM_CACHE_TTL_MS) {
+    return _systemDefaultsCache;
+  }
+  try {
+    const row = await db.prepare(
+      `SELECT value FROM system_settings WHERE key='kb_retrieval_defaults'`
+    ).get();
+    const parsed = row?.value ? JSON.parse(row.value) : {};
+    _systemDefaultsCache = parsed;
+    _systemDefaultsCacheAt = now;
+    return parsed;
+  } catch (e) {
+    console.warn('[KbRetrieval] load system defaults failed:', e.message);
+    return {};
+  }
+}
+
+function invalidateSystemDefaultsCache() {
+  _systemDefaultsCache = null;
+  _systemDefaultsCacheAt = 0;
+}
+
+async function resolveConfig(db, kb) {
+  const sysDefaults = await _getSystemDefaults(db);
+  let kbConfig = {};
+  if (kb?.retrieval_config) {
+    try {
+      kbConfig = typeof kb.retrieval_config === 'string'
+        ? JSON.parse(kb.retrieval_config)
+        : kb.retrieval_config;
+    } catch (e) {
+      console.warn('[KbRetrieval] invalid kb.retrieval_config for kb', kb?.id, ':', e.message);
+    }
+  }
+  return { ...HARDCODED_DEFAULTS, ...sysDefaults, ...kbConfig };
+}
+
+// ─── Token 萃取（LIKE backend 用）─────────────────────────────────────────────
+
+function extractTokens(query, stopwords) {
+  const cjk3 = query.match(/[\u4e00-\u9fa5]{3,6}/g) || [];
+  const cjk2 = query.match(/[\u4e00-\u9fa5]{2}/g) || [];
+  const latin = query.match(/[A-Za-z0-9][A-Za-z0-9_.-]+/g) || [];
+  let tokens = [...cjk3, ...latin];
+  if (tokens.filter((t) => /[\u4e00-\u9fa5]/.test(t)).length === 0) {
+    // 沒 3+ 字 CJK token → fallback 2 字
+    tokens = [...cjk2, ...latin];
+  }
+  const stopSet = new Set((stopwords || []).map((s) => s.trim()).filter(Boolean));
+  tokens = tokens.filter((t) => t.length >= 2 && !stopSet.has(t));
+  if (tokens.length === 0 && query.trim()) tokens.push(query.trim());
+  return tokens.slice(0, 8);
+}
+
+// ─── Backend: LIKE（Phase 1 主力）──────────────────────────────────────────────
+
+async function _vectorSearch(db, kb, query, fetchK, cfg) {
+  const qEmb = await embedText(query, { dims: kb.embedding_dims || 768 });
+  const qVecStr = toVectorStr(qEmb);
+  const rows = await db.prepare(`
+    SELECT c.id, c.doc_id, c.chunk_type, c.position, c.content, c.parent_content,
+           d.filename,
+           VECTOR_DISTANCE(c.embedding, TO_VECTOR(?), COSINE) AS vector_score
+    FROM kb_chunks c JOIN kb_documents d ON d.id = c.doc_id
+    WHERE c.kb_id=? AND c.chunk_type != 'parent'
+    ORDER BY vector_score ASC
+    FETCH FIRST ? ROWS ONLY
+  `).all(qVecStr, kb.id, fetchK);
+  return rows.map((r) => ({
+    ...r,
+    score:       1 - (r.vector_score || 0),
+    match_type:  'vector',
+  }));
+}
+
+async function _fulltextSearchLike(db, kb, query, topK, cfg) {
+  const tokens = extractTokens(query, cfg.token_stopwords);
+  if (tokens.length === 0) return { rows: [], tokens: [] };
+
+  const caseExprs = tokens.map((t) => {
+    const w = Math.max(1, t.length * t.length);
+    return `CASE WHEN UPPER(c.content) LIKE UPPER(?) THEN ${w} ELSE 0 END`;
+  });
+  const hitScoreExpr = caseExprs.join(' + ');
+  const likeClauses = tokens.map(() => 'UPPER(c.content) LIKE UPPER(?)').join(' OR ');
+  const likeParams = tokens.map((t) => `%${t.replace(/[%_]/g, '\\$&')}%`);
+  const rows = await db.prepare(`
+    SELECT c.id, c.doc_id, c.chunk_type, c.position, c.content, c.parent_content,
+           d.filename,
+           ${hitScoreExpr} AS hit_score
+    FROM kb_chunks c JOIN kb_documents d ON d.id = c.doc_id
+    WHERE c.kb_id=? AND c.chunk_type != 'parent' AND (${likeClauses})
+    ORDER BY hit_score DESC
+    FETCH FIRST ? ROWS ONLY
+  `).all(...likeParams, kb.id, ...likeParams, topK * 2);
+  return { rows, tokens };
+}
+
+// ─── Score fusion ─────────────────────────────────────────────────────────────
+
+function _fuseWeighted(vectorRows, ftRows, cfg) {
+  const results = [...vectorRows];
+  const actualMaxHit = Math.max(1, ...ftRows.map((r) => Number(r.hit_score || r.HIT_SCORE || 0)));
+  const ftScore = (r) => 0.5 + 0.5 * ((Number(r.hit_score || r.HIT_SCORE || 0)) / actualMaxHit);
+
+  const vecIds = new Set(results.map((r) => r.id));
+  for (const r of ftRows) {
+    const fts = ftScore(r);
+    if (vecIds.has(r.id)) {
+      const ex = results.find((x) => x.id === r.id);
+      if (ex) {
+        ex.score = cfg.vector_weight * ex.score + cfg.fulltext_weight * fts + cfg.match_boost;
+        ex.match_type = 'hybrid';
+      }
+    } else {
+      results.push({ ...r, score: fts, match_type: 'fulltext' });
+    }
+  }
+  return results;
+}
+
+function _fuseRRF(vectorRows, ftRows, cfg) {
+  // Reciprocal Rank Fusion: rrf_score = sum_i(1 / (k + rank_i))
+  const k = Number(cfg.rrf_k || 60);
+  const score = new Map(); // id → rrf_score
+  const row   = new Map();
+
+  vectorRows.forEach((r, i) => {
+    const s = 1 / (k + i + 1);
+    score.set(r.id, (score.get(r.id) || 0) + s);
+    row.set(r.id, { ...r, match_type: 'vector' });
+  });
+  ftRows.forEach((r, i) => {
+    const s = 1 / (k + i + 1);
+    const prev = score.get(r.id);
+    score.set(r.id, (prev || 0) + s);
+    if (prev !== undefined) {
+      const existing = row.get(r.id);
+      if (existing) existing.match_type = 'hybrid';
+    } else {
+      row.set(r.id, { ...r, match_type: 'fulltext' });
+    }
+  });
+
+  const results = [];
+  for (const [id, s] of score.entries()) {
+    results.push({ ...row.get(id), score: s });
+  }
+  return results;
+}
+
+// ─── Rerank ───────────────────────────────────────────────────────────────────
+
+async function _rerank(db, kb, query, results, topK, debug) {
+  try {
+    const rerankKey = kb.rerank_model;
+    if (rerankKey === 'disabled') return { results, rerankApplied: false, reason: 'disabled' };
+    const rerankRow = rerankKey
+      ? await db.prepare(`SELECT api_model, extra_config_enc FROM llm_models WHERE key=? AND model_role='rerank' AND is_active=1`).get(rerankKey)
+      : await db.prepare(`SELECT api_model, extra_config_enc FROM llm_models WHERE model_role='rerank' AND is_active=1 AND ROWNUM=1`).get();
+    if (!rerankRow?.extra_config_enc || results.length <= 1) return { results, rerankApplied: false };
+
+    const { decryptKey } = require('./llmKeyService');
+    const creds = JSON.parse(decryptKey(rerankRow.extra_config_enc));
+    const { rerankOci } = require('./ociAi');
+    const fetchForRerank = results.slice(0, Math.min(results.length, topK * 3));
+    const docs = fetchForRerank.map((r) => r.content || '');
+    const resp = await rerankOci(creds, rerankRow.api_model, query, docs, fetchForRerank.length);
+    const ranked = resp?.results || resp?.rankings || [];
+    if (ranked.length === 0) return { results, rerankApplied: false };
+
+    const reranked = ranked.map((item) => {
+      const idx = item.index ?? item.resultIndex ?? 0;
+      const orig = fetchForRerank[idx];
+      return { ...orig, rerank_score: item.relevanceScore ?? item.score ?? 0 };
+    }).sort((a, b) => b.rerank_score - a.rerank_score);
+
+    return { results: reranked, rerankApplied: true, model: rerankRow.api_model };
+  } catch (e) {
+    if (debug) console.warn('[KbRetrieval] Rerank error:', e.message);
+    return { results, rerankApplied: false, error: e.message };
+  }
+}
+
+// ─── Retrieval 主函式 ─────────────────────────────────────────────────────────
+
+/**
+ * @param {object} db   Oracle DB wrapper (same as rest of app)
+ * @param {object} opts
+ * @param {object} opts.kb             kb row
+ * @param {string} opts.query          user query
+ * @param {number} [opts.topK]         override topK
+ * @param {number} [opts.scoreThreshold]
+ * @param {string} [opts.userId]       for retrieval_tests log
+ * @param {string} [opts.sessionId]    for retrieval_tests log
+ * @param {string} [opts.source='api'] 'chat' | 'search' | 'webex' | 'external_api'
+ * @param {boolean}[opts.debug]        force debug stats regardless of kb config
+ * @returns {{results: Array, stats: Object, rerankApplied: boolean}}
+ */
+async function retrieveKbChunks(db, opts = {}) {
+  const t0 = Date.now();
+  const { kb, query, source = 'api', userId, sessionId } = opts;
+  if (!kb || !query?.trim()) {
+    return { results: [], stats: { error: 'missing kb or query', elapsed_ms: 0 }, rerankApplied: false };
+  }
+
+  const cfg    = await resolveConfig(db, kb);
+  const debug  = opts.debug === true || cfg.debug === true;
+  const mode   = kb.retrieval_mode || 'hybrid';
+  const topK   = Math.min(Number(opts.topK || kb.top_k_return) || cfg.default_top_k_return || 5, 20);
+  const fetchK = Math.min(topK * 3, Number(cfg.default_top_k_fetch) || 20);
+  const thresh = (opts.scoreThreshold != null ? Number(opts.scoreThreshold)
+                  : Number(kb.score_threshold)) || cfg.default_score_threshold || 0;
+
+  let vectorRows = [];
+  let ftRows = [];
+  let tokens = [];
+
+  if (mode === 'vector' || mode === 'hybrid') {
+    try { vectorRows = await _vectorSearch(db, kb, query, fetchK, cfg); }
+    catch (e) {
+      console.error('[KbRetrieval] vector search error:', e.message);
+    }
+  }
+
+  if (mode === 'fulltext' || mode === 'hybrid') {
+    // Phase 1: 只支援 LIKE backend
+    const ft = await _fulltextSearchLike(db, kb, query, topK, cfg);
+    ftRows = ft.rows;
+    tokens = ft.tokens;
+  }
+
+  let fused;
+  if (mode === 'vector') fused = vectorRows;
+  else if (mode === 'fulltext') {
+    const actualMaxHit = Math.max(1, ...ftRows.map((r) => Number(r.hit_score || r.HIT_SCORE || 0)));
+    fused = ftRows.map((r) => ({ ...r, score: 0.5 + 0.5 * ((Number(r.hit_score || r.HIT_SCORE || 0)) / actualMaxHit), match_type: 'fulltext' }));
+  } else {
+    // hybrid
+    fused = cfg.fusion_method === 'rrf'
+      ? _fuseRRF(vectorRows, ftRows, cfg)
+      : _fuseWeighted(vectorRows, ftRows, cfg);
+  }
+
+  let filtered = fused
+    .filter((r) => r.score >= thresh)
+    .sort((a, b) => b.score - a.score);
+
+  const rerank = await _rerank(db, kb, query, filtered, topK, debug);
+  let results = rerank.results.slice(0, topK);
+
+  // Log to kb_retrieval_tests（best-effort）
+  try {
+    const uuid = require('crypto').randomUUID();
+    await db.prepare(`
+      INSERT INTO kb_retrieval_tests (id, kb_id, user_id, query_text, retrieval_mode, top_k, elapsed_ms, source)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(uuid, kb.id, userId || null, (query || '').slice(0, 500), mode, topK, Date.now() - t0, source);
+  } catch (_) {}
+
+  const stats = {
+    backend:         cfg.backend,
+    mode,
+    tokens_extracted: tokens,
+    vec_fetched:     vectorRows.length,
+    ft_fetched:      ftRows.length,
+    fused:           fused.length,
+    after_threshold: filtered.length,
+    rerank_applied:  rerank.rerankApplied,
+    rerank_model:    rerank.model,
+    final:           results.length,
+    elapsed_ms:      Date.now() - t0,
+  };
+
+  return { results, stats, rerankApplied: rerank.rerankApplied };
+}
+
+module.exports = {
+  retrieveKbChunks,
+  resolveConfig,
+  extractTokens,
+  invalidateSystemDefaultsCache,
+  HARDCODED_DEFAULTS,
+};

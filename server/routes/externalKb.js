@@ -108,53 +108,12 @@ router.post('/kb/search', async (req, res) => {
     const kb = await getAccessibleKb(db, kb_id, req.allowedKbIds);
     if (!kb) return res.status(404).json({ error: 'KB not found or not accessible' });
 
-    const { embedText, toVectorStr } = require('../services/kbEmbedding');
-    const mode   = kb.retrieval_mode || 'hybrid';
-    const topK   = Math.min(Number(top_k) || Number(kb.top_k_return) || 5, 20);
-    const dims   = kb.embedding_dims || 768;
-    const thresh = Number(kb.score_threshold) || 0;
-
-    let results = [];
-
-    if (mode === 'vector' || mode === 'hybrid') {
-      const qEmb    = await embedText(query, { dims });
-      const qVecStr = toVectorStr(qEmb);
-      const fetchK  = Math.min(topK * 3, 60);
-      const rows = await db.prepare(`
-        SELECT c.id, c.content, c.parent_content, d.filename,
-               VECTOR_DISTANCE(c.embedding, TO_VECTOR(?), COSINE) AS vector_score
-        FROM kb_chunks c JOIN kb_documents d ON d.id = c.doc_id
-        WHERE c.kb_id = ? AND c.chunk_type != 'parent'
-        ORDER BY vector_score ASC FETCH FIRST ? ROWS ONLY
-      `).all(qVecStr, kb.id, fetchK);
-      results = rows.map((r) => ({ ...r, score: 1 - (r.vector_score || 0), match_type: 'vector' }));
-    }
-
-    if (mode === 'fulltext' || mode === 'hybrid') {
-      const likeQ = `%${query.replace(/[%_]/g, '\\$&')}%`;
-      const ftRows = await db.prepare(`
-        SELECT c.id, c.content, c.parent_content, d.filename, 1 AS vector_score
-        FROM kb_chunks c JOIN kb_documents d ON d.id = c.doc_id
-        WHERE c.kb_id = ? AND c.chunk_type != 'parent' AND UPPER(c.content) LIKE UPPER(?)
-        FETCH FIRST ? ROWS ONLY
-      `).all(kb.id, likeQ, topK * 2);
-
-      if (mode === 'fulltext') {
-        results = ftRows.map((r) => ({ ...r, score: 0.8, match_type: 'fulltext' }));
-      } else {
-        const vecIds = new Set(results.map((r) => r.id));
-        for (const r of ftRows) {
-          if (vecIds.has(r.id)) {
-            const ex = results.find((x) => x.id === r.id);
-            if (ex) { ex.score = 0.95; ex.match_type = 'hybrid'; }
-          } else {
-            results.push({ ...r, score: 0.85, match_type: 'fulltext' });
-          }
-        }
-      }
-    }
-
-    results = results.filter((r) => r.score >= thresh).sort((a, b) => b.score - a.score).slice(0, topK);
+    const { retrieveKbChunks } = require('../services/kbRetrieval');
+    const { results } = await retrieveKbChunks(db, {
+      kb, query,
+      topK:   top_k != null ? Number(top_k) : undefined,
+      source: 'external_api',
+    });
 
     res.json({
       kb_id: kb.id,
@@ -165,7 +124,7 @@ router.post('/kb/search', async (req, res) => {
         content:      r.content,
         context:      r.parent_content || null,
         filename:     r.filename,
-        score:        parseFloat(r.score.toFixed(4)),
+        score:        parseFloat((r.score || 0).toFixed(4)),
         match_type:   r.match_type,
       })),
     });
@@ -188,53 +147,11 @@ router.post('/kb/chat', async (req, res) => {
     const kb = await getAccessibleKb(db, kb_id, req.allowedKbIds);
     if (!kb) return res.status(404).json({ error: 'KB not found or not accessible' });
 
-    // Reuse search logic inline (avoids HTTP round-trip)
-    const { embedText, toVectorStr } = require('../services/kbEmbedding');
-    const mode   = kb.retrieval_mode || 'hybrid';
-    const topK   = Math.min(Number(kb.top_k_return) || 5, 20);
-    const dims   = kb.embedding_dims || 768;
-    const thresh = Number(kb.score_threshold) || 0;
-
-    let results = [];
-
-    if (mode === 'vector' || mode === 'hybrid') {
-      const qEmb    = await embedText(question, { dims });
-      const qVecStr = toVectorStr(qEmb);
-      const rows = await db.prepare(`
-        SELECT c.id, c.content, c.parent_content, d.filename,
-               VECTOR_DISTANCE(c.embedding, TO_VECTOR(?), COSINE) AS vector_score
-        FROM kb_chunks c JOIN kb_documents d ON d.id = c.doc_id
-        WHERE c.kb_id = ? AND c.chunk_type != 'parent'
-        ORDER BY vector_score ASC FETCH FIRST ? ROWS ONLY
-      `).all(qVecStr, kb.id, topK * 3);
-      results = rows.map((r) => ({ ...r, score: 1 - (r.vector_score || 0) }));
-    }
-
-    if (mode === 'fulltext' || mode === 'hybrid') {
-      const likeQ = `%${question.replace(/[%_]/g, '\\$&')}%`;
-      const ftRows = await db.prepare(`
-        SELECT c.id, c.content, c.parent_content, d.filename, 1 AS vector_score
-        FROM kb_chunks c JOIN kb_documents d ON d.id = c.doc_id
-        WHERE c.kb_id = ? AND c.chunk_type != 'parent' AND UPPER(c.content) LIKE UPPER(?)
-        FETCH FIRST ? ROWS ONLY
-      `).all(kb.id, likeQ, topK * 2);
-
-      if (mode === 'fulltext') {
-        results = ftRows.map((r) => ({ ...r, score: 0.8 }));
-      } else {
-        const vecIds = new Set(results.map((r) => r.id));
-        for (const r of ftRows) {
-          if (vecIds.has(r.id)) {
-            const ex = results.find((x) => x.id === r.id);
-            if (ex) ex.score = 0.95;
-          } else {
-            results.push({ ...r, score: 0.85 });
-          }
-        }
-      }
-    }
-
-    results = results.filter((r) => r.score >= thresh).sort((a, b) => b.score - a.score).slice(0, topK);
+    const { retrieveKbChunks } = require('../services/kbRetrieval');
+    const retrieveResult = await retrieveKbChunks(db, {
+      kb, query: question, source: 'external_api',
+    });
+    const results = retrieveResult.results;
 
     let context = '';
     if (results.length === 0) {
