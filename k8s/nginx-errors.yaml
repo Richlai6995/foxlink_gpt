@@ -4,15 +4,21 @@
 # 由 ingress-nginx 將 403/404 路由到本服務，回傳通用「服務無法提供」頁面。
 #
 # 安全設計（重要！絕對不可違反）：
-#   1. 頁面內容絕不提及 IP、網段、whitelist、地區、權限不足等字眼
-#   2. 不顯示對方 client IP（避免 NAT 偵測）
-#   3. 403 / 404 回應一致 → 攻擊者無法 differentiate「被擋 vs 路徑不存在」
-#   4. 不暴露技術棧（nginx / K8s）
+#   1. 頁面文字絕不提及 whitelist / 允許網段 / 地區 / 權限不足等暗示卡控機制的字眼
+#      （顯示 client IP 是為了讓 IT 對 log 用，不是揭露機制）
+#   2. 403 / 404 回應一致 → 攻擊者無法 differentiate「被擋 vs 路徑不存在」
+#   3. 不暴露技術棧（nginx / K8s）— server_tokens off
+#   4. client IP 顯示前用 regex 白名單過濾（防 XSS，異常值顯示 "invalid"）
 #   5. 三語並陳（zh-TW / EN / VI）配合越南廠區
+#
+# 顯示 client IP 的考量（業界做法 - AWS S3 / GitHub Enterprise 同款）：
+#   - 對方拿不到資訊就只能猜，反而變成多次刷新攻擊 / 騷擾 IT 電話
+#   - 對方拿到 IP → 可以截圖給 IT → IT 對 ingress log 一查就知道哪條規則擋的
+#   - 文案用「您的連線位置」而非「您的 IP 不被允許」，不暗示卡控邏輯
 #
 # 內部辨識方式：
 #   - 看到此頁 = ingress 層被擋（whitelist 或路徑不存在）
-#   - 排查工具：ingress-nginx access log 接 Loki，直接查 client IP + 拒絕原因
+#   - 排查工具：對方提供畫面截圖 → 看 IP → 對 ingress access log
 #     例：kubectl logs -n ingress-nginx -l app.kubernetes.io/name=ingress-nginx | grep <IP>
 
 apiVersion: v1
@@ -54,24 +60,40 @@ data:
         .lang { margin: 32px 0 }
         .lang:first-of-type { margin-top: 0 }
         .lang strong { color: #2c3e50 }
+        .ip {
+          margin: 14px 0;
+          padding: 10px 14px;
+          background: #f4f6f8;
+          border-radius: 6px;
+          color: #2c3e50;
+          font-size: 14px;
+        }
+        .ip code {
+          font-family: "SF Mono", Menlo, Consolas, monospace;
+          color: #c0392b;
+          font-weight: 500;
+        }
       </style>
     </head>
     <body>
       <section class="lang" lang="zh-TW">
         <h1>服務目前無法提供</h1>
         <p>很抱歉造成您的不便。</p>
+        <p class="ip">您的連線位置：<code>__CLIENT_IP__</code></p>
         <p>如需協助，請聯絡正崴<strong>當地資訊協助</strong></p>
         <p>或聯絡<strong>總部 Cortex 管理員</strong>協助</p>
       </section>
       <section class="lang" lang="en">
         <h1>Service Currently Unavailable</h1>
         <p>We apologize for the inconvenience.</p>
+        <p class="ip">Your connection address: <code>__CLIENT_IP__</code></p>
         <p>For assistance, please contact your <strong>local Foxlink IT support</strong></p>
         <p>or contact the <strong>HQ Cortex administrator</strong>.</p>
       </section>
       <section class="lang" lang="vi">
         <h1>Dịch vụ hiện không khả dụng</h1>
         <p>Chúng tôi xin lỗi vì sự bất tiện này.</p>
+        <p class="ip">Địa chỉ kết nối của bạn: <code>__CLIENT_IP__</code></p>
         <p>Để được hỗ trợ, vui lòng liên hệ <strong>bộ phận IT Foxlink tại địa phương</strong></p>
         <p>hoặc liên hệ <strong>quản trị viên Cortex tại trụ sở chính</strong>.</p>
       </section>
@@ -79,6 +101,15 @@ data:
     </html>
 
   default.conf: |
+    # client IP 顯示用 — 嚴格白名單字元防 XSS
+    # ingress-nginx 會在 X-Forwarded-For 放真實 client IP（trust ingress 設定）
+    # 但仍然 regex 過濾，只允許 IP 合法字元，異常值顯示 "invalid"
+    map $http_x_forwarded_for $client_ip_display {
+      default                      "invalid";
+      ""                           "unknown";
+      "~^[0-9a-fA-F\.\:, ]+$"      $http_x_forwarded_for;
+    }
+
     server {
       listen 8080 default_server;
       server_name _;
@@ -110,6 +141,12 @@ data:
         internal;
         root /usr/share/nginx/html;
         default_type text/html;
+
+        # 把 HTML 裡的 __CLIENT_IP__ placeholder 替換成 client IP
+        # sub_filter_once off → 三段語言每段都有，全部替換
+        sub_filter '__CLIENT_IP__' '$client_ip_display';
+        sub_filter_once off;
+        sub_filter_types text/html;
       }
     }
 
