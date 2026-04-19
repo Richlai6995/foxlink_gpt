@@ -7,7 +7,7 @@ metadata:
     # ── 外網存取限制（內網 only，webhook 走 ingress-webhook.yaml）──
     # ⚠️  前置條件：externalTrafficPolicy: Local，否則 IP 全是 10.244.x.x = 無效
     # 根據實際內網網段調整（目前涵蓋所有 RFC1918）
-    nginx.ingress.kubernetes.io/whitelist-source-range: "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
+    nginx.ingress.kubernetes.io/whitelist-source-range: "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,193.11.2.0/24,193.11.6.0/24"
     # SSE streaming 必要設定
     nginx.ingress.kubernetes.io/proxy-buffering: "off"
     nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
