@@ -1192,6 +1192,63 @@ router.post('/kb/chunk-grep', async (req, res) => {
   }
 });
 
+// ─── 同義詞字典管理（Phase 3b）────────────────────────────────────────────────
+
+router.get('/kb/thesauri', async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const { listThesauri } = require('../services/kbSynonyms');
+    res.json(await listThesauri(db));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post('/kb/thesauri', async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const { createThesaurus } = require('../services/kbSynonyms');
+    const { name } = req.body || {};
+    await createThesaurus(db, name);
+    res.json({ ok: true });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+router.delete('/kb/thesauri/:name', async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const { dropThesaurus } = require('../services/kbSynonyms');
+    await dropThesaurus(db, req.params.name);
+    res.json({ ok: true });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+router.get('/kb/thesauri/:name/synonyms', async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const { listSynonyms } = require('../services/kbSynonyms');
+    res.json(await listSynonyms(db, req.params.name));
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+router.post('/kb/thesauri/:name/synonyms', async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const { addSynonym } = require('../services/kbSynonyms');
+    const { term, related } = req.body || {};
+    await addSynonym(db, req.params.name, term, related);
+    res.json({ ok: true });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+router.delete('/kb/thesauri/:name/synonyms', async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const { removeSynonym } = require('../services/kbSynonyms');
+    const { term, related } = req.body || {};
+    await removeSynonym(db, req.params.name, term, related);
+    res.json({ ok: true });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
 // GET /api/admin/kb/list-simple — debug 頁 dropdown 用
 router.get('/kb/list-simple', async (req, res) => {
   try {
