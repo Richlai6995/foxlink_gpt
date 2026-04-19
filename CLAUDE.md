@@ -68,6 +68,7 @@ cd client && npm run dev    # frontend → localhost:5173 (proxy → 3007)
 | `response-optimization.md` | 回應速度優化（Webex webhook/websocket + 網頁版 Phase 2） |
 | `webex-webhook-firewall-setup.md` | Webex Webhook 防火牆與 Nginx 設定（網管操作文件） |
 | `erp-tools-design.md` | ERP FUNCTION/PROCEDURE 工具化設計（LLM tool-calling + 手動 + Inject） |
+| `kb-retrieval-architecture-v2.md` | **KB 檢索 v2 架構實作紀錄**（Phase 1/2/3a/3b/3c + 踩坑 + config 索引） |
 
 ---
 
@@ -236,3 +237,10 @@ docker-compose up -d --build
     - stdio 必須 per-call spawn（token 在 env，5min 後過期）
     - CLI 驗證：`node server/scripts/verify-mcp-token.js <token>`
     - Admin UI 提供公鑰下載 + 測試 token 產生（MCP 伺服器編輯 Modal 內）
+10. **KB 檢索 v2 架構（Phase 1-3c）**：核心在 [server/services/kbRetrieval.js](server/services/kbRetrieval.js) 單一入口 `retrieveKbChunks(db, opts)`。
+    - **SELECT 必須含 `retrieval_config`** — chat/webex/research/外部 caller 載 KB 時務必帶這個 CLOB 欄位；少撈會讓所有 per-KB 檢索覆寫 noop（同義詞、multi-vector、權重等）
+    - Config 優先序：`kb.retrieval_config > system_settings.kb_retrieval_defaults > HARDCODED_DEFAULTS`
+    - Schema 補充：`kb_chunks.title_embedding VECTOR(768, FLOAT32)`（multi-vector）、`kb_thesauri` / `kb_thesaurus_synonyms`（同義詞追蹤表）
+    - Oracle Text 索引 `kb_chunks_ftx` 用 `SYNC (EVERY "SYSDATE+1/1440")`，查詢最多 1 分鐘 lag，**解決 bulk insert 慢問題**
+    - 同義詞改用 app-level query-time OR 展開（`kbSynonyms.expandQuery`），不走 CTX_THES（權限缺）
+    - chat 把同義詞 hint 塞進 LLM context：「X=Y 同一實體，請統合對應 chunks」

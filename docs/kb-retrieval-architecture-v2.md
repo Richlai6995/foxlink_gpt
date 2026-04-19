@@ -1,438 +1,269 @@
 # KB Retrieval 架構升級計畫 v2
 
-> 狀態：**規劃階段（待 Phase 1 開工）**
+> 狀態：**已實作完成（Phase 1 / 2 / 3a / 3b / 3c 上線）**
 > 建立日期：2026-04-19
-> 上次更新：2026-04-19
-> 負責人：rich_lai / Claude
+> 最後更新：2026-04-19
+> 負責：rich_lai / Claude
 
 ---
 
 ## 1. 背景與目標
 
-### 現況痛點
+### 現況痛點（已全部處理）
 
-1. **Fulltext 用 `LIKE %query%`** — 寫死在 4 個檔（chat / knowledgeBase / externalKb / webex）
-2. **Tokenize + hit_score 是 JS 端 hack** — length² / actual_max / stopword list 全寫死
-3. **Hybrid score fusion 寫死**（0.4 vec + 0.6 ft + 0.1 boost）
-4. **Oracle Text 索引 `kb_chunks_ftx` 存在但沒用到**（BASIC_LEXER 預設，中文不能 tokenize）
-5. **Vector column 是 `VECTOR(*, FLOAT32)` wildcard** — 無法建 Oracle 23 AI 的 HNSW index
-6. **Orphan chunks 累積** — kb_chunks 對 kb_documents 沒 FK，刪 doc 不會 cascade
-7. **參數全寫死** — 無 admin UI 可調
+1. ~~Fulltext 用 `LIKE %query%` 寫死在 4 個檔~~ ✅ 統一到 `services/kbRetrieval.js`
+2. ~~Tokenize + hit_score 是 JS 端 hack~~ ✅ 全 config 驅動，CJK ≥3 字優先 + actual_max 正規化
+3. ~~Hybrid score fusion 寫死~~ ✅ 支援 Weighted + RRF 兩種 fusion，可調權重
+4. ~~Oracle Text 索引 `kb_chunks_ftx` 存在但沒用到~~ ✅ WORLD_LEXER + SYNC EVERY 1min
+5. ~~Vector column 是 `VECTOR(*, FLOAT32)` wildcard~~ ✅ 強制統一 768 dim + IVF vector index
+6. ~~Orphan chunks 累積~~ ✅ FK + trigger + hourly cron 三層防護
+7. ~~參數全寫死~~ ✅ 三層 admin UI（系統級 / per-KB 覆寫 / 調校 debug 頁）
 
-### 升級目標
+### 新增亮點
 
-- ✅ 把 Oracle 23 AI 的 **vector + text hybrid search + SCORE** 用好用滿
-- ✅ 統一 `services/kbRetrieval.js` 單一 service，消除 4 處 copy-paste
-- ✅ 所有 tuning 參數走 config，**絕不寫死**
-- ✅ Orphan chunks 自動處理（DB FK + 定時清理）
-- ✅ Multi-vector per chunk（title + body）提升結構化文件精度
-- ✅ Admin UI 可調整所有參數
-
-### 非目標（不在這次範圍）
-
-- ❌ Property Graph / Select AI（對 KB 檢索無直接關聯）
-- ❌ DBMS_VECTOR_CHAIN（複雜度過高，延後）
-- ❌ Binary quantization（儲存優化，未來再評估）
+- ✅ **同義詞字典**（繞過 CTX_THES 權限問題，改 query-time 展開）
+- ✅ **Multi-vector per chunk**（title + body 加權向量檢索）
+- ✅ **Chunker 工作表邊界硬分段**（小 sheet 不被併到大 chunk 被稀釋）
 
 ---
 
-## 2. 確認的設計決策
+## 2. 實際實作（對照原規劃決策）
 
-| # | 項目 | 決定 |
-|---|------|------|
-| 1 | Lexer | **WORLD_LEXER**（中英混雜最佳） |
-| 2 | 預設 fulltext query op | **ACCUM**（多詞累積相似度） |
-| 3 | 預設 fuzzy | **OFF**（per-KB opt-in） |
-| 4 | Vector weight 預設 | **0.4**（fulltext 0.6 + match boost 0.1） |
-| 5 | retrieval_config 存哪 | **`knowledge_bases.retrieval_config CLOB`**（JSON） |
-| 6 | 舊欄位（score_threshold 等） | **保留，向後相容**，retrieval_config 優先 |
-| 7 | LIKE backend 留多久 | **永久當 fallback** |
-| 8 | FK 加不上 partition 怎辦 | **改用 trigger** 保證 DB 層 cascade |
-| 9 | Orphan cleanup 頻率 | **hourly cron** |
-| 10 | 同義詞字典 | **Phase 3 一起做** |
-| 11 | Vector index 方案 | **強制統一 768 + HNSW**（方案 B） |
-| 12 | 非 768 KB 遷移 | **強制全遷 768**（現有資料少） |
-| 13 | Multi-vector per chunk | **做**（Phase 3） |
+| # | 項目 | 規劃 | 實際 |
+|---|------|------|------|
+| 1 | Lexer | WORLD_LEXER | ✅ 如規劃（CTXSYS.WORLD_LEXER 直接用） |
+| 2 | 預設 fulltext query op | ACCUM | ✅ 如規劃 |
+| 3 | 預設 fuzzy | OFF | ✅ 如規劃 |
+| 4 | Vector weight 預設 | 0.4 | ✅ 如規劃 |
+| 5 | retrieval_config 存哪 | KB row CLOB | ✅ 如規劃 |
+| 6 | 舊欄位（score_threshold 等） | 保留 | ✅ 如規劃，並加 system-seeded KB 重設為 NULL migration |
+| 7 | LIKE backend 留多久 | 永久 fallback | ✅ oracle_text 失敗自動退 LIKE |
+| 8 | FK 加不上 partition | 改 trigger | ✅ FK 直接加上，無需 trigger |
+| 9 | Orphan cleanup 頻率 | hourly cron | ✅ + admin UI 提供 7 種預設 + 自訂 cron |
+| 10 | 同義詞字典 | Phase 3 一起做 | ✅ **改手動追蹤表 + query-time OR 展開**（CTX_THES 權限缺失） |
+| 11 | Vector index 方案 | 統一 768 + HNSW | ⚠️ **改為 IVF (ORGANIZATION NEIGHBOR PARTITIONS)**（LIST partition 不支援 HNSW LOCAL） |
+| 12 | 非 768 KB 遷移 | 強制全遷 768 | ✅ migration 直接 re-embed |
+| 13 | Multi-vector per chunk | 做（Phase 3） | ✅ 完成，含 backfill endpoint |
 
 ---
 
-## 3. 核心架構
+## 3. 實際架構
 
-### 3.1 新增檔案
+### 3.1 檔案清單
 
 ```
 server/
 ├── services/
-│   ├── kbRetrieval.js            ← 統一 retrieval service（hybrid SQL / score fusion / rerank）
-│   ├── kbMaintenance.js          ← orphan cleanup / dim migration / stats helper
-│   ├── kbSynonyms.js             ← CTX_THES 同義詞字典管理（Phase 3）
-│   └── kbChunkRouter.js          ← Multi-vector chunk 路由（Phase 3）
+│   ├── kbRetrieval.js            ✅ 統一 retrieval service（oracle_text + LIKE 雙 backend）
+│   ├── kbMaintenance.js          ✅ orphan cleanup + dim stats + hourly cron
+│   └── kbSynonyms.js             ✅ 追蹤表 CRUD + query-time 展開（不走 CTX_THES）
 ├── routes/
-│   └── knowledgeBase.js          ← 加 admin endpoints
-└── database-oracle.js            ← migration: FK / HNSW / CTX index rebuild
+│   ├── knowledgeBase.js          ✅ PUT /kb/:id 接 retrieval_config、reparse-all、thesauri-names
+│   └── admin.js                  ✅ /admin/settings/kb-retrieval、/admin/kb/{maintenance,debug-search,chunk-grep,thesauri,backfill-title}
+└── database-oracle.js            ✅ 完整 migration: 欄位 / FK / WORLD_LEXER / IVF / system defaults / 追蹤表
 
 client/src/
 ├── components/admin/
-│   └── KbRetrievalSettings.tsx   ← 系統級檢索設定 tab
+│   ├── KbRetrievalSettings.tsx   ✅ 系統級設定 panel + cron 下拉 + 維護操作
+│   ├── KbRetrievalDebug.tsx      ✅ 4 階段並排 + Grep 工具 + 同義詞 trace
+│   └── KbSynonyms.tsx            ✅ 字典 CRUD + 同義詞 term ↔ related 編輯
 └── pages/
-    └── KnowledgeBaseDetailPage.tsx ← per-KB 進階檢索區塊 + debug 工具
-
-docs/
-└── kb-retrieval-architecture-v2.md  ← 此文件（計畫 → 之後更新為實作紀錄）
+    └── KnowledgeBaseDetailPage.tsx ✅ per-KB 進階檢索摺疊區 + 重解析 + 補 title 向量按鈕
 ```
 
-### 3.2 `kbRetrieval.js` 對外介面
+### 3.2 兩個 backend（oracle_text 為主，LIKE 為 fallback）
 
-```javascript
-const { retrieveKbChunks } = require('../services/kbRetrieval');
-
-const { results, stats } = await retrieveKbChunks(db, {
-  kb,                 // DB row（含 retrieval_config）
-  query,              // 使用者原始 query
-  topK,               // 想要幾筆（可覆寫 kb.top_k_return）
-  scoreThreshold,     // 覆寫（可選）
-  sessionId,          // retrieval_tests 紀錄用
-  userId,
-  source,             // 'chat' | 'search' | 'webex' | 'external_api'
-  debug,              // true → stats 回傳詳細資訊
-});
-
-// results: Array<{ id, content, parent_content, filename, score, match_type, rerank_score? }>
-// stats: { backend, vec_fetched, ft_fetched, merged, after_rerank, final, elapsed_ms, tokens_extracted, synonyms_applied }
+**oracle_text：**
+```sql
+SELECT c.id, c.content, d.filename, SCORE(1) AS ft_raw_score
+FROM kb_chunks c JOIN kb_documents d ON d.id = c.doc_id
+WHERE c.kb_id=? AND c.chunk_type != 'parent'
+  AND CONTAINS(c.content, ?, 1) > 0
+ORDER BY SCORE(1) DESC
+FETCH FIRST ? ROWS ONLY
 ```
+CONTAINS query 由 `_buildOracleTextQuery(tokens, cfg)` 組成，支援 ACCUM / AND / OR、fuzzy 前綴、NEAR proximity。
 
-### 3.3 Single-SQL Hybrid Query（Oracle 23 AI 關鍵）
+**LIKE fallback：** 維持原 tokenize + length² 加權 CASE WHEN 邏輯，提供極端環境（Oracle Text 壞）時保底。
+
+### 3.3 Multi-vector 搜尋 SQL
 
 ```sql
-SELECT c.id, c.content, c.parent_content, d.filename,
-       VECTOR_DISTANCE(c.embedding, :qvec, COSINE)         AS vec_dist,
-       SCORE(1)                                            AS ft_score,
-       (:ft_weight * NVL(SCORE(1), 0) / 100 +
-        :vec_weight * (1 - VECTOR_DISTANCE(c.embedding, :qvec, COSINE))) AS hybrid_score
-FROM kb_chunks c JOIN kb_documents d ON d.id = c.doc_id
-WHERE c.kb_id = :kb_id
-  AND c.chunk_type != 'parent'
-  AND (CONTAINS(c.content, :text_query, 1) > 0
-       OR VECTOR_DISTANCE(c.embedding, :qvec, COSINE) < :vec_cutoff)
-ORDER BY hybrid_score DESC
-FETCH APPROX FIRST :top_k ROWS ONLY   -- 23 AI HNSW optimization
+SELECT c.id, ..., 
+  (CASE WHEN c.title_embedding IS NULL
+    THEN VECTOR_DISTANCE(c.embedding, TO_VECTOR(?), COSINE)
+    ELSE :title_weight * VECTOR_DISTANCE(c.title_embedding, TO_VECTOR(?), COSINE)
+       + :body_weight  * VECTOR_DISTANCE(c.embedding,       TO_VECTOR(?), COSINE)
+  END) AS vector_score
+FROM kb_chunks c ...
+ORDER BY vector_score ASC
+FETCH FIRST ? ROWS ONLY
 ```
+title_embedding IS NULL → 自動退回單向量（不強制所有 chunks 都有 title）。
 
-優點：
-- Oracle 優化器同時用 HNSW + CTXSYS.CONTEXT 雙索引
-- 一次 round-trip
-- 權重參數綁定（config 驅動）
-- 加 `FETCH APPROX FIRST` 讓 HNSW 走 ANN path
+### 3.4 同義詞展開（query-time）
 
----
+實作在 `kbSynonyms.expandQuery(db, thesaurus, query)`：
+1. 掃字典所有 `term / related` 對
+2. 若 query 子字串（case-insensitive）命中 term → 加 related；反向亦同
+3. 回傳 `{ expanded, added[] }`
 
-## 4. 實作 Phase
+展開後的 query 走一般 `extractTokens` + `_buildOracleTextQuery`，所以同義詞會自然出現在 CONTAINS 的 ACCUM 表達式中。
 
-### Phase 1 — 抽 service + 修 orphan + config 化（1.5 天）
-
-**目標**：無行為改變，只是重構 + 開 config 介面 + 修 orphan 根源。
-
-- [ ] 建立 `services/kbRetrieval.js`，內含：
-  - 現有 LIKE-based tokenize 邏輯（as `backend: "like"`）
-  - config 讀取優先序：`kb.retrieval_config` > `system_settings.kb_retrieval_defaults` > hardcoded fallback
-- [ ] Migration：
-  - `ALTER TABLE knowledge_bases ADD retrieval_config CLOB`
-  - 寫入 `system_settings.kb_retrieval_defaults` 初始值
-  - **清空 orphan chunks**（前置步驟）
-  - 加 FK `kb_chunks.doc_id → kb_documents.id ON DELETE CASCADE`
-    - 如 partitioned LIST 不允許 → 改建 `TRIGGER trg_kb_documents_cascade AFTER DELETE ON kb_documents`
-- [ ] 建立 `services/kbMaintenance.js`：
-  - `cleanupOrphanChunks()` — 回傳清除筆數
-  - `dimMigrationStats()` — 各 KB 目前維度分布
-  - `rebuildVectorIndex()` — 用於 dim 統一後重建 HNSW
-- [ ] 註冊 hourly cron（用現有 scheduled task 系統）：
-  - 頻率從 `system_settings.kb_cleanup_cron` 讀（預設 `0 * * * *`）
-  - log 每次清了幾筆 → `metrics` 或 log 檔
-- [ ] 改 4 處 caller：`chat.js` / `knowledgeBase.js` / `externalKb.js` / `webex.js`
-  - 全部呼叫 `retrieveKbChunks(db, opts)`
-  - 統一 log 格式 `[KbRetrieval]` prefix
-- [ ] 啟動時跑一次 orphan cleanup（除非 `KB_CLEANUP_ON_STARTUP=false`）
-
-**上線準則**：所有現有搜尋功能行為一致，orphan 不再累積，dev 環境測過。
-
-### Phase 2 — Oracle 23 AI Text + HNSW（2 天）
-
-**目標**：導入 Oracle 23 AI 的 single-SQL hybrid + HNSW index + 全新 Oracle Text 索引。
-
-- [ ] **統一維度到 768** migration：
-  - 掃描 `knowledge_bases` 裡所有 `embedding_dims != 768` 的 KB
-  - 若有資料：執行「dim 遷移」— 重新 embed 所有 chunks 為 768
-  - 若無資料：直接 UPDATE `embedding_dims = 768`
-  - `ALTER TABLE kb_chunks MODIFY embedding VECTOR(768, FLOAT32)`
-- [ ] Rebuild Oracle Text index：
-  ```sql
-  EXEC CTX_DDL.CREATE_PREFERENCE('foxlink_world_lexer', 'WORLD_LEXER');
-  DROP INDEX kb_chunks_ftx;
-  CREATE INDEX kb_chunks_ftx ON kb_chunks(content)
-    INDEXTYPE IS CTXSYS.CONTEXT
-    PARAMETERS ('LEXER foxlink_world_lexer SYNC (ON COMMIT)')
-    LOCAL;
-  ```
-- [ ] Build HNSW index：
-  ```sql
-  CREATE VECTOR INDEX kb_chunks_vidx ON kb_chunks(embedding)
-    ORGANIZATION INMEMORY NEIGHBOR GRAPH
-    DISTANCE COSINE
-    WITH TARGET ACCURACY 95
-    PARAMETERS (TYPE HNSW, NEIGHBORS 40, EFCONSTRUCTION 500);
-  ```
-- [ ] `kbRetrieval.js` 加 `backend: "oracle_text"`：
-  - Single-SQL hybrid query
-  - Query 轉換 → Oracle Text 語法（escape + ACCUM 包裝）
-  - Support fuzzy opt-in（`?token`）
-  - Support CTX_THES（`SYN(term, thesaurus_name)`）
-  - Support NEAR proximity（`NEAR((token1, token2), N)`）
-- [ ] System default 切成 `backend: "oracle_text"`
-- [ ] Fallback 路徑：若 CONTAINS 失敗（e.g. index 未建），log 警告 + 自動用 LIKE
-
-**上線準則**：搜尋精度 ≥ Phase 1 且 latency 下降。所有既有查詢照常工作。
-
-### Phase 3 — Multi-vector + 同義詞 + Admin UI（2 天）
-
-**目標**：提升精度（multi-vector）+ 使用者自助（admin UI）。
-
-- [ ] Multi-vector per chunk：
-  - schema: `kb_chunks` 加 `title_embedding VECTOR(768, FLOAT32)` 欄位（nullable）
-  - Chunker 偵測 heading / 標題 structure → 抽取 title + body
-  - Embed: 雙 embedding（title + body）
-  - Search SQL:
-    ```sql
-    ORDER BY
-      :title_weight * (1 - VECTOR_DISTANCE(c.title_embedding, :qvec, COSINE)) +
-      :body_weight  * (1 - VECTOR_DISTANCE(c.embedding,       :qvec, COSINE)) +
-      ...
-    ```
-  - 預設 `title_weight=0.3, body_weight=0.7`（可調）
-  - 既有 KB 重建 embedding 時自動填 title_embedding（若能從 chunk content 抽出 heading）
-- [ ] Synonym dictionary (CTX_THES)：
-  - `services/kbSynonyms.js`: CRUD 同義詞（建立/讀取/刪除字典、加/刪 relation）
-  - Per-KB 設定 `retrieval_config.synonym_thesaurus`
-  - Admin UI tab「同義詞字典管理」
-- [ ] Admin UI 增強：
-  - **系統級 KB 檢索設定** tab（/admin 下）
-    - backend radio, weights sliders, topK inputs, stopwords textarea
-    - 「清 Orphan Chunks」按鈕 + 顯示上次清除時間 / 筆數
-    - 「Rebuild Vector Index」按鈕（維護用）
-  - **Per-KB 進階檢索設定** 摺疊區（KB 設定頁）
-    - 覆寫 backend / weights / fuzzy / synonym_thesaurus
-    - 所有欄位初始顯示「使用系統預設」
-  - **KB 檢索調校** 獨立頁
-    - 輸入 query + 選 KB → 並排顯示 vector / fulltext / hybrid / rerank 各階段 top 10
-    - 顯示完整 stats（elapsed, tokens, synonym matches）
-    - 存 test queries 方便之後 A/B 比較
-
-**上線準則**：admin 可自調所有參數，multi-vector 對結構化文件精度提升可驗證。
-
-### Phase 4 — 清理 + 文件 + 監控（1 天）
-
-- [ ] 移除 4 個 caller 殘留的 inline retrieval code
-- [ ] 移除 JS 端 tokenize / hit_score 的 hacky code（全進 service）
-- [ ] 新增 metrics 紀錄：retrieval latency p50/p95、命中率、rerank usage rate
-- [ ] Update `docs/kb-retrieval-architecture-v2.md` — 從「計畫」更新為「現況」，加實作細節
-- [ ] 寫 migration runbook（給 K8S 部署用）
+搭配：chat 端 `executeSelfKbSearch` 會把「這些詞是同一實體」當 hint 塞進給 LLM 的 context，避免 LLM 只看其中一種寫法的 chunk 就下結論。
 
 ---
 
-## 5. Config Schema
+## 4. Commits 對照表
 
-### 5.1 `knowledge_bases.retrieval_config` CLOB（JSON）
+| Phase | Commit | 內容 |
+|---|---|---|
+| Phase 1 | `a7c4a1e` | 抽 `services/kbRetrieval` + orphan FK + golden queries |
+| Phase 2 | `bfe7457` | WORLD_LEXER + IVF vector index + oracle_text backend |
+| Phase 3a | `c2459d3` | Admin UI 三件套（系統 / per-KB / debug） |
+| 3a+ | `d3d26a6` | System KB 吃預設 + cron 下拉 |
+| 3a+ | `3288f91` | ftx SYNC EVERY 1min（解決上傳變慢） |
+| 3a+ | `8e2e6c6` | Grep 診斷工具 |
+| 3a+ | `e45c648` | Excel 工作表邊界硬分段 |
+| 3a+ | `66ecf75` | 「重新解析此 KB」按鈕 |
+| 3a+ | `805d5f0` | Debug 頁加 KB 名稱標注 |
+| Phase 3b | `dbf8dce` | 同義詞字典管理（CTX_THES） |
+| 3b+ | `0b534ce` | 改用追蹤表取代 CTX view 查詢 |
+| 3b+ | `1062b6c` | 改 query-time OR 展開（繞 CTX_THES 權限） |
+| 3b+ | `0e6a993` | 修 `??` / `\|\|` 混用括號 |
+| 3b+ | `5f17cf1` | Phrase-level 展開（支援 "Carson Chung" 多字） |
+| 3b+ | `5c6f90f` | Debug stats 顯示同義詞展開結果 |
+| 3b+ | `8bf1dea` | 同義詞字典欄位改 LOV 下拉 |
+| 3b+ | `2bdebdb` | `/thesauri-names` 路由順序修正 |
+| 3b+ | `7f77530` | 同義詞 hint 塞進 LLM context |
+| 3b+ | `248a7ef` | Debug log 確認 hint 是否觸發 |
+| 3b+ | `8083648` | **chat/webex/research SELECT 補 retrieval_config**（per-KB 覆寫從未生效的根因） |
+| Phase 3c | `6ed259f` | Multi-vector per chunk（title + body 加權檢索） |
+
+---
+
+## 5. Config Schema（實際）
+
+### 5.1 `knowledge_bases.retrieval_config` CLOB (JSON)
 
 ```json
 {
   "backend":              "oracle_text",
-  "use_hybrid_sql":       true,
+  "fusion_method":        "rrf",
   "vector_weight":        0.4,
   "fulltext_weight":      0.6,
-  "match_boost":          0.1,
   "title_weight":         0.3,
   "body_weight":          0.7,
   "fulltext_query_op":    "accum",
   "fuzzy":                false,
-  "synonym_thesaurus":    null,
+  "synonym_thesaurus":    "foxlink_syn",
   "use_proximity":        false,
   "proximity_distance":   10,
   "min_ft_score":         0.2,
   "vec_cutoff":           0.7,
-  "token_stopwords":      null,
+  "rrf_k":                60,
+  "use_multi_vector":     true,
+  "token_stopwords":      ["..."],
   "debug":                false
 }
 ```
 
-### 5.2 `system_settings.kb_retrieval_defaults`
-
-同 schema，作為 fallback。初始值：
-
-```json
-{
-  "backend":           "oracle_text",
-  "use_hybrid_sql":    true,
-  "vector_weight":     0.4,
-  "fulltext_weight":   0.6,
-  "match_boost":       0.1,
-  "title_weight":      0.3,
-  "body_weight":       0.7,
-  "fulltext_query_op": "accum",
-  "fuzzy":             false,
-  "synonym_thesaurus": null,
-  "use_proximity":     false,
-  "proximity_distance": 10,
-  "min_ft_score":      0.2,
-  "vec_cutoff":        0.7,
-  "token_stopwords":   ["分機","地址","電話","傳真","資料","哪些","每個","我要","你要","所有"],
-  "debug":             false,
-  "default_top_k_fetch":    20,
-  "default_top_k_return":   5,
-  "default_score_threshold": 0
-}
-```
-
-### 5.3 Config resolution 優先序
+### 5.2 Config resolution 優先序
 
 ```
-kb.retrieval_config?.X
-  > system_settings.kb_retrieval_defaults?.X
-  > code-level fallback default
+kb.retrieval_config.X  > system_settings.kb_retrieval_defaults.X  > HARDCODED_DEFAULTS.X
 ```
+
+`HARDCODED_DEFAULTS` 定義在 [server/services/kbRetrieval.js](../server/services/kbRetrieval.js)。
 
 ---
 
-## 6. Migration 注意事項
+## 6. 踩坑紀錄 / Lessons Learned
 
-### 6.1 風險對照表
+### 6.1 chat 的 SELECT 漏欄位（Phase 3 最大教訓）
 
-| 步驟 | 風險 | 對策 |
-|------|------|------|
-| 清 orphan 後加 FK | ALTER TABLE 可能失敗（若 partition 限制） | 失敗就 fallback 改 trigger |
-| 統一 768 需重新 embed 所有 KB | 大量 API 呼叫費用 / 時間 | **現在資料少** 成本低；若有多 KB 在 Vertex AI 配額內 ~10 分 |
-| Rebuild Oracle Text index | 重建期間 fulltext 暫不可用 | backend 自動退回 LIKE；dev 先跑；K8S 夜間跑 |
-| Build HNSW index | 需要 SGA 足夠記憶體（估 300MB per 100K chunks） | 檢查 K8S Pod memory limit；監控 SGA 使用率 |
-| 23 AI single-SQL 查詢 plan | 優化器可能選錯 | 加 hint、跑 EXPLAIN PLAN 驗證 |
-| FK + LIST PARTITION 不相容 | 部分 Oracle 版本限制 | 用 `AFTER DELETE` trigger 替代 |
+在 Phase 3a–3b 搞了一圈「為什麼 per-KB 同義詞沒生效」，最後發現 `chat.js` / `webex.js` / `researchService.js` 的 `SELECT FROM knowledge_bases` 沒有把 `retrieval_config` 欄位撈出來。
 
-### 6.2 Rollback 方案
+→ `retrieveKbChunks` 收到的 `kb.retrieval_config = undefined`
+→ `resolveConfig` 退回純系統預設
+→ **所有 per-KB 覆寫完全沒作用**（同義詞、multi-vector、fuzzy、權重全部 noop）
 
-| 階段 | Rollback 方式 |
-|------|--------------|
-| Phase 1 | `GEMINI_PROVIDER=studio` 切回舊 SDK；service 換回 inline code（保留 git tag 備用） |
-| Phase 2 | `system_settings.kb_retrieval_defaults.backend = "like"` 立即生效，oracle_text 禁用 |
-| HNSW 失敗 | DROP INDEX `kb_chunks_vidx`，service 自動退回暴力掃描 |
-| FK 失敗 | DROP CONSTRAINT + DROP TRIGGER，僅保留 hourly cron 清 orphan |
+fix：`8083648` 在所有 caller SELECT 補上 retrieval_config。
 
-### 6.3 K8S 部署步驟
+**防範**：未來新增 retrieval_config 用到的參數，務必 grep 所有 `SELECT ... FROM knowledge_bases` 加上該欄位；或重構為固定 `SELECT *`（有 CLOB 成本需評估）。
 
-1. dev 完整跑過 Phase N
-2. `./deploy.sh` build image
-3. Migration 自動跑（於 `runMigrations()` 時）
-4. **如果 Phase 2**: 先停用 backend 切換（fulltext 仍走 LIKE），等 index 重建完成再切
-5. 監控 pod log：`[KbRetrieval]` 事件
-6. 有問題 env 改 `backend=like` 立即回退
+### 6.2 CTX_THES 權限缺失
 
----
+原規劃直接用 Oracle Text 的 `CTX_THES.CREATE_THESAURUS + SYN()`，FOXLINK 帳號缺 `EXECUTE ON CTXSYS.CTX_THES`（`PLS-00201`）→ 改為自建追蹤表 + query-time 手動 OR 展開。意外的好處：雙向、支援多字 phrase、debug 可看 SQL。
 
-## 7. 監控與可觀察性
+### 6.3 chunker 小 sheet 被稀釋
 
-### 7.1 必要 metrics（Prometheus / Grafana）
+`chunkRegular` 原本只按 `\n\n` 合併；Excel 的小 sheet（如香港只有 5 人）被塞到前一個 sheet 的 chunk 尾端，整個 chunk 語意訊號被大 sheet 的資料淹沒，vector 分數查不到。
 
-| Metric | 意義 | 警告閾值 |
-|--------|------|---------|
-| `kb_retrieval_latency_ms{backend,source}` p95 | 檢索延遲 | > 2000ms |
-| `kb_retrieval_results_total{backend,source}` | 總檢索次數 | - |
-| `kb_retrieval_zero_results_ratio` | 零結果率 | > 5% |
-| `kb_retrieval_rerank_usage_ratio` | rerank 套用率 | - |
-| `kb_orphan_cleaned_total` | 累計清除 orphan 數 | - |
-| `kb_orphan_current` | 當前 orphan 數 | > 10000 |
-| `kb_hnsw_index_size_mb` | HNSW 記憶體 | > 1GB |
-| `gemini_embedding_errors_total{code}` | embedding 失敗 | 429 > 0 / min |
+fix：遇到 `[工作表: XXX]` paragraph 強制 flush 開新 chunk。每個 sheet 至少一個獨立 chunk。
 
-### 7.2 日誌格式
+### 6.4 ftx SYNC (ON COMMIT) 導致上傳變慢
 
-統一 prefix `[KbRetrieval]`：
+`node-oracledb autoCommit: true` 搭 `SYNC (ON COMMIT)`，每插一筆 chunk 觸發一次 ftx reindex。50 chunks 檔案 = 50 次 sync。
 
-```
-[KbRetrieval] kb=xxx source=chat query="鍾漢成" backend=oracle_text
-  tokens=[鍾漢成] vec_fetched=30 ft_score_max=95 merged=15 rerank=cohere
-  final=5 elapsed=234ms
-```
+fix：改 `SYNC (EVERY "SYSDATE+1/1440")` 每 1 分鐘背景 sync，insert 恢復正常，查詢最多 1 分鐘 lag。失敗 fallback ON COMMIT。
 
-### 7.3 KB 檢索調校頁（admin）
+### 6.5 `??` 混用 `||` 必須加括號
 
-讓管理員能不用看 log 就能：
-- 看最近 N 次檢索的 stats
-- 比對同 query 不同 config 的結果差異
-- 匯出「金標資料」（已知正確答案的 query 集合），跑 regression test
+Node 嚴格模式 `SyntaxError: Unexpected token '||'`。寫成 `(a ?? b) || c`。
+
+### 6.6 Express `/thesauri-names` 路由順序
+
+Express 按註冊順序 match，`/:id` 會先吃掉 `/thesauri-names`。要放 `/:id` 之前。
 
 ---
 
-## 8. 測試策略
+## 7. Config UI 路徑快速索引
 
-### 8.1 Golden query set
-
-建立 `tests/kb_retrieval_golden.json`：
-
-```json
-[
-  {
-    "kb_name": "正崴通訊錄",
-    "query": "鍾漢成 分機?",
-    "expected_chunk_ids_must_contain": ["<富東_chunk_id>", "<香港_chunk_id>"],
-    "expected_min_score": 0.8,
-    "notes": "鍾漢成 在富東 30131 + 香港 852-2628-1066"
-  }
-]
-```
-
-跑 script `node kb_test/regression.js` 比對實際結果。
-
-### 8.2 Phase 結束前的驗收 checklist
-
-每個 Phase 結束：
-- [ ] 所有 golden queries pass
-- [ ] 既有功能（chat / search / external api）無 regression
-- [ ] p95 latency ≤ 之前的 1.2×（Phase 1）or 顯著下降（Phase 2+）
-- [ ] Orphan 數 = 0
-- [ ] Admin UI 功能全 work
+| 功能 | 位置 |
+|------|------|
+| 系統級檢索預設 | Admin → **KB 檢索設定** |
+| Per-KB 覆寫 | KB 設定頁 → **進階檢索設定（覆寫系統預設）** 摺疊區 |
+| 檢索調校 debug 頁 | Admin → **KB 檢索調校** |
+| 子字串 Grep 診斷 | Admin → KB 檢索調校 → 黃色 Grep 區塊 |
+| 同義詞字典管理 | Admin → **KB 同義詞字典** |
+| Orphan cleanup 設定 | Admin → KB 檢索設定 → 維護操作區塊 |
+| Rebuild vector index | Admin → KB 檢索設定 → Rebuild kb_chunks_vidx 按鈕 |
+| 重新解析此 KB | KB 設定頁底部 橘色按鈕 |
+| 補 title 向量 | KB 設定頁底部 紫色按鈕 |
 
 ---
 
-## 9. 未來方向（本次不做，記錄備忘）
+## 8. 未來方向（尚未做，但已評估）
 
 | 項目 | 何時考慮 | 預期收益 |
 |------|---------|---------|
-| Binary quantization | chunks > 1M 時 | 儲存省 32x |
 | HyDE query transformation | 精度仍不足時 | +5-10% |
 | Multi-query expansion | 同上 | +5-10% |
-| Reciprocal Rank Fusion (RRF) | 取代 weighted sum | +2-5% 更穩健 |
+| Binary quantization | chunks > 1M 時 | 儲存省 32x |
 | Query caching (Redis) | 重複 query 多時 | latency -80% for cached |
-| Async rerank | rerank 成瓶頸時 | latency -30% |
+| HNSW index (vs IVF) | 如未來升 Oracle 支援 HNSW + LIST partition | +10-30% recall |
 | Custom rerank model | Cohere 不夠好時 | +5-10% |
-| DBMS_VECTOR_CHAIN | DB 端 pipeline 時 | 資料不出 DB |
-| Graph-augmented RAG | 大型企業知識圖時 | 關係推理 |
 
 ---
 
-## 10. 決策紀錄（歷史追溯）
+## 9. 監控指標建議（尚未埋點）
 
-| 日期 | 決策 | 理由 |
-|------|------|------|
-| 2026-04-19 | 採 WORLD_LEXER + ACCUM + fuzzy OFF | 使用者中英混用，ACCUM 最自然，fuzzy 誤召率高 |
-| 2026-04-19 | 強制統一 768 dim + HNSW | Oracle 23 AI vector index 要求 fixed dim；Matryoshka 讓 768 precision 損失 < 2%；HNSW 速度收益 50-100× |
-| 2026-04-19 | retrieval_config 存 KB row JSON | 簡單、不用多表 |
-| 2026-04-19 | 舊欄位保留向後相容 | 低成本 |
-| 2026-04-19 | Orphan cleanup 三層保護（FK / code / cron） | DB 層保證 + code 冗餘 + cron 兜底 |
-| 2026-04-19 | Multi-vector 納入 Phase 3 | +15-25% 結構化文件精度，一次到位 |
+以下需在 Prometheus / Grafana 補：
+
+- `kb_retrieval_latency_ms{backend,source}` p50/p95 (> 2000ms 警報)
+- `kb_retrieval_zero_results_ratio` (> 5% 警報)
+- `kb_orphan_current` (> 10000 警報)
+- `kb_retrieval_rerank_usage_ratio` 統計
+- `kb_synonym_expanded_ratio` 有開字典的 query 有多少比例真的展開了
 
 ---
 
-## 11. 參考資料
+## 10. 參考資料
 
 - Oracle 23 AI Vector Search Guide: https://docs.oracle.com/en/database/oracle/oracle-database/23/vecse/
 - Oracle Text CONTAINS Reference: https://docs.oracle.com/en/database/oracle/oracle-database/23/ccref/
 - HNSW paper: https://arxiv.org/abs/1603.09320
 - Gemini embedding Matryoshka: https://ai.google.dev/gemini-api/docs/embeddings
 - Cohere rerank API: https://docs.cohere.com/reference/rerank
-- 本次前序問題診斷: [docs/kb-performance-analysis-2026-04-18.md](./kb-performance-analysis-2026-04-18.md)
+- 效能診斷報告: [docs/kb-performance-analysis-2026-04-18.md](./kb-performance-analysis-2026-04-18.md)

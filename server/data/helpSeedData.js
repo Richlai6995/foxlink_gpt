@@ -1,7 +1,7 @@
 /**
  * Help page seed data — zh-TW (source of truth)
  * Auto-extracted from HelpPage.tsx
- * Generated: 2026-04-18
+ * Generated: 2026-04-19
  *
  * Block types: para, tip, note, table, steps, code, list, subsection, card_grid, comparison
  */
@@ -2629,10 +2629,6 @@ const userSections = [
                 "desc": "上傳文件時用來解析圖片/PDF 內圖片的 Gemini 模型，預設使用系統設定的 Flash 模型"
               },
               {
-                "title": "選擇 PDF OCR 模式（預設 Off）",
-                "desc": "Off：只抽文字層，最快，適合絕大多數有文字層的 PDF。Auto：有圖片（面積 ≥5%）的頁才 OCR，平衡速度與完整度；純掃描檔自動升級為 Force。Force：每頁都 OCR，適合掃描檔或文字層不可信任時。"
-              },
-              {
                 "title": "點選「建立」，進入知識庫詳情頁"
               }
             ]
@@ -2648,30 +2644,6 @@ const userSections = [
             "text": "進入知識庫後，點選「文件」頁籤，拖曳或點選上傳區域選擇檔案。支援格式：**PDF · DOCX · PPTX · XLSX · TXT · CSV · JPG · PNG · GIF · WEBP**（單檔最大 200 MB）。"
           },
           {
-            "type": "para",
-            "text": "上傳區上方有兩個下拉選單可針對**本次上傳**覆寫知識庫預設："
-          },
-          {
-            "type": "table",
-            "headers": [
-              "選項",
-              "用途",
-              "何時需要覆寫"
-            ],
-            "rows": [
-              [
-                "格式解析（parse_mode）",
-                "純文字 / 格式感知（保留顏色標註）",
-                "一般上傳用 KB 預設；只有少數 DOCX/XLSX 需要用顏色標示異常欄位時才切格式感知"
-              ],
-              [
-                "PDF OCR 模式",
-                "Off / Auto / Force",
-                "KB 預設通常是 Off（最快）；這次剛好要傳掃描檔 → 臨時選 Force；要傳圖文混合 PDF → 選 Auto"
-              ]
-            ]
-          },
-          {
             "type": "steps",
             "items": [
               {
@@ -2680,7 +2652,7 @@ const userSections = [
               },
               {
                 "title": "系統自動解析文字並進行 Embedding 向量化",
-                "desc": "圖片與 PDF 中的圖片會依 PDF OCR 模式處理；DOCX/PPTX/XLSX 嵌入圖片則並行送 OCR"
+                "desc": "圖片與 PDF 中的圖片會先 OCR 轉文字，再一起向量化"
               },
               {
                 "title": "狀態變為綠色勾選代表處理完成",
@@ -2690,67 +2662,7 @@ const userSections = [
           },
           {
             "type": "note",
-            "text": "處理時間：一般 2MB PDF 約 5-30 秒（依模式而定）、1MB XLSX 分機表約 3-5 秒。頁面每隔幾秒會自動重新整理狀態，請耐心等待。如果處理超過數分鐘沒完成，可能檔案有特殊格式問題，請聯絡系統管理員檢查 log。"
-          }
-        ]
-      },
-      {
-        "type": "subsection",
-        "title": "重新解析文件",
-        "blocks": [
-          {
-            "type": "para",
-            "text": "已上傳的文件可以隨時用新的 **PDF OCR 模式**重新解析，**不需刪除重傳**。適用情境："
-          },
-          {
-            "type": "table",
-            "headers": [
-              "情境",
-              "建議做法"
-            ],
-            "rows": [
-              [
-                "原本用 Off 上傳，發現 PDF 裡的流程圖/架構圖文字沒抽到",
-                "點該文件的「↻ 重新解析」→ 選 Auto → 確定。只該文件重跑，不影響其他文件"
-              ],
-              [
-                "原本用 Off 上傳，發現整份都是掃描版空白",
-                "重新解析 → 選 Force（系統會逐頁 OCR）"
-              ],
-              [
-                "KB 裡已有 10 份文件，想全部換成 Auto 模式",
-                "進「設定」頁籤改 PDF OCR 模式 → 儲存時跳出確認對話框 → 點「確定」批次重新解析全部文件"
-              ],
-              [
-                "某份文件解析壞掉（內容奇怪、少很多字）",
-                "重新解析一次就會覆蓋舊 chunks"
-              ]
-            ]
-          },
-          {
-            "type": "steps",
-            "items": [
-              {
-                "title": "文件清單每筆右方有「↻」（RefreshCw）圖示",
-                "desc": "只有擁有者/有 edit 權限者看得到"
-              },
-              {
-                "title": "點擊後下方展開選擇模式的區塊（off / auto / force）",
-                "desc": "預設會帶入該文件當前使用的模式"
-              },
-              {
-                "title": "選好模式點「確定重新解析」",
-                "desc": "系統會刪除該文件原本的 chunks、重新跑 parse → embed → 儲存"
-              },
-              {
-                "title": "狀態變成 processing → 等待完成",
-                "desc": "處理中該文件不能再次重新解析，避免衝突"
-              }
-            ]
-          },
-          {
-            "type": "tip",
-            "text": "批次重新解析特別適合在 Phase 1 部署後，使用者反應搜尋不到某些內容時，你把該 KB 從 Off 升級到 Auto，一鍵重新解析全部既有文件，Tags 和 chunk_count 都會同步更新。"
+            "text": "大型文件（如含大量圖片的 DOCX）處理時間可能較長，頁面每隔幾秒會自動重新整理狀態，請耐心等待。"
           }
         ]
       },
@@ -2789,6 +2701,91 @@ const userSections = [
           {
             "type": "para",
             "text": "進入知識庫詳情 → 點選「召回測試」頁籤，輸入任意問題，系統會模擬真實對話的檢索流程，顯示前幾名相關段落、相似度分數及比對方式（向量 / 全文 / 混合），幫助您調整設定參數。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "進階檢索設定（覆寫系統預設）",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "在 KB 設定頁捲到底部可展開「進階檢索設定」摺疊區，勾選「啟用此 KB 的專屬檢索設定」後可覆寫系統預設："
+          },
+          {
+            "type": "table",
+            "headers": [
+              "參數",
+              "用途"
+            ],
+            "rows": [
+              [
+                "Backend",
+                "LIKE（保守）vs Oracle Text WORLD_LEXER（中文精度高，推薦）"
+              ],
+              [
+                "Score Fusion",
+                "Weighted 權重和 vs RRF Reciprocal Rank Fusion（推薦，更穩健）"
+              ],
+              [
+                "Vector / Fulltext 權重",
+                "僅 Weighted 模式下生效，控制向量 vs 全文的貢獻"
+              ],
+              [
+                "最低 FT Score / Vector Cutoff",
+                "過濾低分結果；空值 = 沿用系統預設"
+              ],
+              [
+                "Fuzzy 模糊匹配",
+                "開啟 Oracle Text 模糊比對，誤召率高，預設關"
+              ],
+              [
+                "同義詞字典",
+                "下拉選擇 Admin 端建立的字典（如 foxlink_syn）"
+              ],
+              [
+                "Multi-vector",
+                "啟用 title+body 雙向量加權檢索（需補 title 向量）"
+              ]
+            ]
+          },
+          {
+            "type": "tip",
+            "text": "空欄位會沿用系統預設。關掉「啟用此 KB 的專屬檢索設定」可清除整個覆寫回到系統預設。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "重新解析此 KB / 補 title 向量",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "KB 設定頁底部提供兩顆維護按鈕："
+          },
+          {
+            "type": "table",
+            "headers": [
+              "按鈕",
+              "用途",
+              "成本"
+            ],
+            "rows": [
+              [
+                "重新解析此 KB（橘）",
+                "所有文件重新 chunk + embedding。用於 chunker 邏輯更新後套用",
+                "高（需 API 費用 + 時間）"
+              ],
+              [
+                "補 title 向量（紫）",
+                "僅為啟用 Multi-vector 後的 chunks 補 title_embedding，不動 body",
+                "低（只 embed heading 文字）"
+              ]
+            ]
+          },
+          {
+            "type": "note",
+            "text": "重新解析期間該 KB 的文件狀態會變 processing，檢索暫時受影響。建議離峰時段跑。"
           }
         ]
       },
@@ -2868,74 +2865,54 @@ const userSections = [
       },
       {
         "type": "subsection",
-        "title": "分段、檢索與解析設定",
+        "title": "分段與檢索設定調整",
         "blocks": [
           {
             "type": "para",
-            "text": "進入知識庫詳情 → 點選「設定」頁籤。分段/檢索類參數調整後不需重新解析，下次對話立即生效；解析類參數（parse_mode、pdf_ocr_mode）改動會跳出確認對話框，可一鍵批次重新解析既有文件。"
+            "text": "進入知識庫詳情 → 點選「分塊與檢索設定」頁籤，可隨時調整以下參數（調整後不需重新上傳文件，下次對話立即生效）："
           },
           {
             "type": "table",
             "headers": [
-              "類別",
               "參數",
               "說明",
-              "建議值 / 改動影響"
+              "建議值"
             ],
             "rows": [
               [
-                "分段",
                 "分段識別符號",
                 "用來切分段落的符號",
-                "\\n\\n（空白行）｜改動不影響既有 chunks"
+                "\\n\\n（空白行）"
               ],
               [
-                "分段",
                 "分段最大長度",
                 "每個 chunk 的字元上限",
-                "512–1024｜改動不影響既有 chunks"
+                "512–1024"
               ],
               [
-                "分段",
                 "重疊長度",
-                "前後 chunk 共享的字元數",
-                "50–100｜改動不影響既有 chunks"
+                "前後 chunk 共享的字元數，避免重要資訊被截斷",
+                "50–100"
               ],
               [
-                "檢索",
                 "初始擷取 Top K",
-                "向量/全文各抓幾條候選",
-                "10–20｜下次查詢立即生效"
+                "向量/全文各抓幾條候選結果",
+                "10–20"
               ],
               [
-                "檢索",
                 "最終返回 Top K",
                 "重排序後送給 AI 的最終條數",
-                "3–5｜下次查詢立即生效"
+                "3–5"
               ],
               [
-                "檢索",
                 "Score 閾值",
-                "相似度低於此值的結果丟棄（0–1）",
-                "預設 0（不過濾）｜下次查詢立即生效"
+                "相似度低於此值的結果會被丟棄（0–1）",
+                "預設 0（不過濾）"
               ],
               [
-                "解析",
                 "OCR 模型",
                 "處理圖片的 Gemini 模型",
-                "Flash（快速省成本）｜只影響新上傳或重新解析"
-              ],
-              [
-                "解析",
-                "格式解析模式（parse_mode）",
-                "純文字 / 格式感知",
-                "格式感知會標註顏色語義，僅 DOCX/XLSX 有效｜改動後會提示批次重新解析"
-              ],
-              [
-                "解析",
-                "PDF OCR 模式（pdf_ocr_mode）",
-                "Off / Auto / Force — PDF 每頁是否送 Gemini 做視覺理解",
-                "Off（預設，最快）｜改動後會提示批次重新解析，可一鍵套用到全部既有文件"
+                "Flash（快速省成本）"
               ]
             ]
           },
@@ -2963,8 +2940,8 @@ const userSections = [
             "rows": [
               [
                 "PDF",
-                "依 PDF OCR 模式：Off（只抽文字層，最快）/ Auto（有圖片的頁才 OCR）/ Force（每頁都 OCR）",
-                "掃描檔 Auto 會自動偵測並升級為 Force；OCR 每頁並行 20，速度快"
+                "pdf-parse 文字層 + Gemini OCR（有圖片時）",
+                "掃描件需 OCR，速度較慢"
               ],
               [
                 "DOCX / PPTX",
@@ -2990,7 +2967,7 @@ const userSections = [
           },
           {
             "type": "tip",
-            "text": "含大量圖表的 PDF：在知識庫設定 → 解析設定 → 「PDF OCR 模式」選擇 Auto，系統會自動偵測每頁是否有圖片（面積 ≥ 5%），只對含圖片的頁面送 Gemini OCR，其他頁用文字層，兼顧速度與完整度。純掃描檔自動升級為 Force；若文字層不可信任（舊版 PDF、轉檔不完整），可直接選 Force 每頁 OCR。上傳時可 per-file 覆蓋預設。每個文件也能單獨「重新解析」或在設定變更時批次重新解析。"
+            "text": "含大量圖表的 PDF 或 PPTX，建議在知識庫設定中指定 OCR 模型（Flash 即可），系統會自動對圖片頁面進行視覺理解，再合併到同一文件的文字 chunk 中。"
           },
           {
             "type": "note",
@@ -8521,6 +8498,227 @@ const userSections = [
                 "某個工具找不到了",
                 "可能被管理員停用或取消授權，請聯繫管理員"
               ]
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "u-kb-admin-retrieval",
+    "sort_order": 33,
+    "icon": "Search",
+    "icon_color": "text-teal-500",
+    "last_modified": "2026-04-19",
+    "title": "KB 檢索調校（管理員）",
+    "sidebar_label": "KB 檢索調校",
+    "blocks": [
+      {
+        "type": "note",
+        "text": "此章節為**管理員專用**。一般使用者僅看得到掛載知識庫的功能。"
+      },
+      {
+        "type": "para",
+        "text": "Admin 後台提供三個 KB 檢索相關 tab，讓管理員監控、調整與除錯所有 KB 的檢索行為。"
+      },
+      {
+        "type": "subsection",
+        "title": "KB 檢索設定（系統預設）",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "影響全系統所有 KB（除非該 KB 自己覆寫）。主要面板："
+          },
+          {
+            "type": "table",
+            "headers": [
+              "區塊",
+              "內容"
+            ],
+            "rows": [
+              [
+                "檢索後端",
+                "Backend (LIKE / Oracle Text)、Score Fusion (Weighted / RRF)、Fulltext Query Op (ACCUM / AND / OR)、RRF k"
+              ],
+              [
+                "Weighted Fusion 權重",
+                "Vector / Fulltext / Match Boost（僅 Weighted 模式生效）"
+              ],
+              [
+                "Oracle Text 進階選項",
+                "Fuzzy 模糊、Proximity NEAR、同義詞字典下拉"
+              ],
+              [
+                "TopK / 門檻",
+                "Fetch / Return / Score 門檻 / Vector cutoff / FT 最低分"
+              ],
+              [
+                "Tokenize 停用詞",
+                "不列入 LIKE/tokenize 的常見高頻詞（分機、地址、我要…）"
+              ],
+              [
+                "Multi-vector",
+                "全域啟用 title+body 加權向量檢索 + 權重調整"
+              ],
+              [
+                "維護操作",
+                "Orphan chunks 狀態表、立即清理、cleanup cron 下拉、Rebuild vector index"
+              ]
+            ]
+          },
+          {
+            "type": "tip",
+            "text": "儲存後 60 秒內會快取失效。即時看新設定：到「KB 檢索調校」頁重跑即可。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "KB 檢索調校（debug 頁）",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "選 KB + query → 執行後並排顯示 Vector / Fulltext / Fused / Rerank 四階段 top-N 結果，以及完整檢索摘要："
+          },
+          {
+            "type": "list",
+            "items": [
+              "Backend / Mode / Fusion / Elapsed",
+              "Vector / Fulltext / Fused / After threshold / Rerank / Final 各階段條數",
+              "Tokens 實際 tokenize 結果",
+              "CONTAINS query 實際送到 Oracle 的字串",
+              "同義詞字典與展開詞（若啟用）",
+              "Effective query（展開後完整 query）"
+            ]
+          },
+          {
+            "type": "para",
+            "text": "最下方還有「解析後的 config」摺疊區，展開可看 kb 覆寫 + system defaults + hardcoded 最終合併結果。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "子字串 Grep（繞 index 診斷）",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "debug 頁有一個黃色「子字串 Grep」區塊，直接對 kb_chunks.content 做 LIKE 查詢，不走 vector / ftx。"
+          },
+          {
+            "type": "para",
+            "text": "用途：分辨「parser 掉資料」vs「資料存在但 index 查不到」的問題。"
+          },
+          {
+            "type": "table",
+            "headers": [
+              "命中數",
+              "代表"
+            ],
+            "rows": [
+              [
+                "0",
+                "parser/chunker 把內容吃掉了 → 檢查 parse_mode / 重 parse"
+              ],
+              [
+                ">0 但 Fulltext 找不到",
+                "index 問題 → 重建 ftx 或重啟 Oracle Text sync"
+              ],
+              [
+                ">0 且 Fulltext 也找到",
+                "內容 OK → 可能是 rerank/topK 排序問題"
+              ]
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "u-kb-synonyms",
+    "sort_order": 34,
+    "icon": "BookOpen",
+    "icon_color": "text-emerald-500",
+    "last_modified": "2026-04-19",
+    "title": "同義詞字典（管理員）",
+    "sidebar_label": "KB 同義詞字典",
+    "blocks": [
+      {
+        "type": "note",
+        "text": "此章節為**管理員專用**，一般使用者看不到字典管理 tab。但 KB 擁有者可於 KB 設定頁下拉選取已建立的字典。"
+      },
+      {
+        "type": "para",
+        "text": "同義詞字典讓 KB 查詢時自動展開同義詞，解決「Carson Chung」vs「鍾漢成」這類 query 拼寫不同但指同一實體的問題。"
+      },
+      {
+        "type": "subsection",
+        "title": "運作原理",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "在 query 送到 Oracle Text CONTAINS 之前，系統先掃字典所有 term ↔ related 關係："
+          },
+          {
+            "type": "list",
+            "items": [
+              "query 子字串命中任一 term → 自動在 query 尾端補 related",
+              "query 子字串命中任一 related → 自動在 query 尾端補 term",
+              "雙向、支援多字 phrase（如 \"Carson Chung\"）"
+            ]
+          },
+          {
+            "type": "para",
+            "text": "例：字典有 `鍾漢成 ↔ Carson Chung`，query 「Carson Chung 分機?」會被改寫為「Carson Chung 分機? 鍾漢成」後再 tokenize。"
+          },
+          {
+            "type": "note",
+            "text": "同義詞關係也會在 chat 回答時作為 hint 餵給 LLM，告訴 AI 這些詞是同一實體，避免 LLM 只看其中一筆 chunk 就下結論。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "建立字典 + 加同義詞",
+        "blocks": [
+          {
+            "type": "steps",
+            "items": [
+              {
+                "title": "Admin → KB 同義詞字典",
+                "desc": ""
+              },
+              {
+                "title": "新增字典",
+                "desc": "左側「新增字典」輸入英數字底線名稱（例 foxlink_syn）→ 建立"
+              },
+              {
+                "title": "選中字典 → 右側加 term ↔ related 關係",
+                "desc": "例：term=鍾漢成 related=Carson Chung；可建多條"
+              },
+              {
+                "title": "回 KB 設定頁 → 進階檢索 → 下拉挑字典名稱 → 儲存",
+                "desc": "亦可在系統級 KB 檢索設定統一指定"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "實作備註",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "原本計畫使用 Oracle CTX_THES 儲存字典，但 FOXLINK Oracle 帳號缺 `EXECUTE ON CTXSYS.CTX_THES` 權限，改用自建追蹤表 `kb_thesauri` + `kb_thesaurus_synonyms` 搭配 query-time 手動展開。優點："
+          },
+          {
+            "type": "list",
+            "items": [
+              "零權限要求（無需動 DBA）",
+              "跨 Oracle 版本穩定",
+              "Query debug 可以直接看 SQL，完全可觀測",
+              "雙向 + 多字 phrase 支援比 CTX_THES.SYN 更靈活"
             ]
           }
         ]

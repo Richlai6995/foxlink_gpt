@@ -279,8 +279,9 @@ async function executeSelfKbSearch(db, kb, query, { userId, sessionId } = {}) {
       }
     }
     const finalResult = `【來自知識庫「${kb.name}」的相關內容】${synonymHint}\n\n${chunks.join('\n\n---\n\n')}`;
-    console.log(`[SelfKB] synonymHint=${synonymHint ? 'YES' : 'NO'} applied=${JSON.stringify(stats?.synonyms_applied || [])} thes=${stats?.synonym_thesaurus || 'null'} chunks=${results.length}`);
-    console.log(`[SelfKB] context preview (first 600 chars):\n${finalResult.slice(0, 600)}\n…（共 ${finalResult.length} 字）`);
+    if (stats?.synonym_thesaurus) {
+      console.log(`[SelfKB] thes=${stats.synonym_thesaurus} applied=${JSON.stringify(stats.synonyms_applied || [])} hint=${synonymHint ? 'YES' : 'NO'}`);
+    }
     return finalResult;
   } catch (e) {
     console.error(`[SelfKB] Search failed for KB "${kb.name}":`, e.message);
