@@ -186,18 +186,22 @@ async function _vectorSearch(db, kb, query, fetchK, cfg) {
  * e.g. tokens=[鍾漢成, 分機] op=accum → "{鍾漢成} ACCUM {分機}"
  * Fuzzy 前綴 `?` 可選；synonym 以 SYN(term, thesaurus) 包裝。
  */
-function _buildOracleTextQuery(tokens, cfg) {
+/**
+ * tokens + 每個 token 的同義詞 → Oracle Text query
+ * 同義詞改用我們自己的 kb_thesaurus_synonyms 表展開（繞 CTXSYS.CTX_THES 權限問題）
+ */
+function _buildOracleTextQuery(tokens, cfg, expansions = {}) {
   const op = (cfg.fulltext_query_op || 'accum').toUpperCase();
   const validOp = ['ACCUM', 'AND', 'OR'].includes(op) ? op : 'ACCUM';
   const parts = tokens.map((t) => {
-    // 去掉 `{` `}` 避免 Oracle Text syntax 衝突
     const safe = String(t).replace(/[{}]/g, '');
-    let tok = `{${safe}}`;
-    if (cfg.fuzzy) tok = `?${tok}`;
-    if (cfg.synonym_thesaurus) tok = `SYN(${safe}, ${cfg.synonym_thesaurus})`;
-    return tok;
+    const syns = (expansions[t] || []).map((s) => String(s).replace(/[{}]/g, ''));
+    // 每個 token 自己 + 同義詞 全部 OR 在一起
+    const alts = [safe, ...syns];
+    let block = alts.length === 1 ? `{${safe}}` : `(${alts.map((a) => `{${a}}`).join(' OR ')})`;
+    if (cfg.fuzzy) block = alts.length === 1 ? `?${block}` : `(${alts.map((a) => `?{${a}}`).join(' OR ')})`;
+    return block;
   });
-  // NEAR 模式：把前兩個 token 包 NEAR
   if (cfg.use_proximity && parts.length >= 2) {
     const dist = Number(cfg.proximity_distance) || 10;
     const bare = tokens.map((t) => String(t).replace(/[{}]/g, ''));
@@ -210,7 +214,21 @@ async function _fulltextSearchOracleText(db, kb, query, topK, cfg) {
   const tokens = extractTokens(query, cfg.token_stopwords);
   if (tokens.length === 0) return { rows: [], tokens: [] };
 
-  const ctxQuery = _buildOracleTextQuery(tokens, cfg);
+  // 若有指定同義詞字典，用我們自己的追蹤表展開每個 token
+  let expansions = {};
+  if (cfg.synonym_thesaurus) {
+    try {
+      const { lookupExpansion } = require('./kbSynonyms');
+      for (const tk of tokens) {
+        const alts = await lookupExpansion(db, cfg.synonym_thesaurus, tk);
+        if (alts.length > 0) expansions[tk] = alts;
+      }
+    } catch (e) {
+      console.warn('[kbRetrieval] synonym lookup failed:', e.message);
+    }
+  }
+
+  const ctxQuery = _buildOracleTextQuery(tokens, cfg, expansions);
   try {
     const rows = await db.prepare(`
       SELECT c.id, c.doc_id, c.chunk_type, c.position, c.content, c.parent_content,

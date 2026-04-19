@@ -49,7 +49,7 @@ export default function KbSynonyms() {
       await loadList()
       setSelected(newName.trim())
     } catch (e: any) {
-      setErr(e.response?.data?.error || '建立失敗（可能缺 CTX_THES 權限）')
+      setErr(e.response?.data?.error || '建立失敗')
     } finally { setBusy(false) }
   }
 
@@ -94,11 +94,12 @@ export default function KbSynonyms() {
     <div className="space-y-6 max-w-4xl">
       <div className="flex items-center gap-2">
         <BookOpen size={18} className="text-slate-600" />
-        <h2 className="text-base font-semibold text-slate-800">同義詞字典（CTX_THES）</h2>
+        <h2 className="text-base font-semibold text-slate-800">同義詞字典</h2>
       </div>
       <p className="text-xs text-slate-500">
-        建立 Oracle Text 同義詞字典後，在 KB 檢索設定 /「進階檢索」填入字典名稱。
-        查 "鍾漢成" 會自動展開 "Carson Chung" 等同義詞（雙向）。
+        建立字典後，在 KB 檢索設定 /「進階檢索」填字典名稱。
+        查「鍾漢成」會自動 OR 展開「Carson Chung」等同義詞（雙向）。
+        展開邏輯在 server query-time，無需 Oracle CTX_THES 權限。
       </p>
       {err && <div className="text-sm text-red-500 bg-red-50 border border-red-200 rounded p-2">{err}</div>}
 
