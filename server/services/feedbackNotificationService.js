@@ -74,8 +74,8 @@ async function sendTicketEmail(db, type, ticket, extra = {}) {
 const PRIORITY_EMOJI = { urgent: '🔴', high: '🟠', medium: '🔵', low: '⚪' };
 
 function _ticketLink(ticket) {
-  const base = process.env.PUBLIC_URL || process.env.APP_URL || '';
-  const tail = `/feedback/${ticket.ticket_no}`;
+  const base = process.env.PUBLIC_URL || process.env.APP_URL || process.env.WEBEX_PUBLIC_URL || '';
+  const tail = `/feedback/${ticket.id}`;
   return base ? `${base.replace(/\/$/, '')}${tail}` : tail;
 }
 
