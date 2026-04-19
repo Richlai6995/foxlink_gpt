@@ -649,8 +649,18 @@ function chunkRegular(text, cfg = {}) {
   const chunks = [];
   let current = '';
 
+  // xlsx parser 在每個 sheet 開頭插入 `[工作表: XXX]`。
+  // 小 sheet 若被併入前一個 chunk，訊號會被稀釋（Matryoshka embedding 對 1000+
+  // 字的混合內容語意區分度差）。遇到 sheet 邊界強制切開 chunk。
+  const SHEET_BOUNDARY_RE = /^\[工作表:\s/;
+
   for (const para of paras) {
+    const isSheetBoundary = SHEET_BOUNDARY_RE.test(para);
     if (!current) {
+      current = para;
+    } else if (isSheetBoundary) {
+      // 硬分段：flush 現有 chunk，新 sheet 開新 chunk（不帶 overlap）
+      chunks.push(current);
       current = para;
     } else if ((current + sep + para).length <= max_size) {
       current += sep + para;
