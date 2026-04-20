@@ -4,6 +4,7 @@ import type { TFunction } from 'i18next'
 import { X, Play, ShieldAlert, AlertTriangle, CheckCircle, Eye, Sparkles, MessageSquare, Table2, FileJson, Languages, Copy } from 'lucide-react'
 import api from '../../lib/api'
 import type { ErpTool } from '../admin/ErpToolsPanel'
+import ErpLovCombobox from './ErpLovCombobox'
 
 function resolvePresetClient(preset: string): string {
   const now = new Date()
@@ -276,14 +277,12 @@ export default function ErpToolInvokeModal({ tool, sessionId, onClose, onDone }:
                         {inputs[p.name] ?? t('erpInvoke.autoFilled', '(系統自動帶入)')}
                       </div>
                     ) : p.lov_config?.type === 'static' ? (
-                      <select value={inputs[p.name] ?? ''}
-                        onChange={e => onInputChange(p.name, e.target.value)}
-                        className="w-full border border-slate-300 rounded px-2 py-1 text-sm">
-                        <option value="">{t('erpInvoke.selectPlaceholder', '-- 請選擇 --')}</option>
-                        {p.lov_config.items.map((it: any, i: number) => (
-                          <option key={i} value={it.value}>{it.label || it.value}</option>
-                        ))}
-                      </select>
+                      <ErpLovCombobox
+                        items={(p.lov_config.items || []).map((it: any) => ({ value: String(it.value), label: it.label || String(it.value) }))}
+                        value={inputs[p.name] ?? ''}
+                        onChange={v => onInputChange(p.name, v)}
+                        placeholder={`-- ${t('erpInvoke.selectPlaceholder', '請選擇')} --`}
+                      />
                     ) : p.lov_config?.type && blocked ? (
                       <div className="w-full border border-amber-200 bg-amber-50 rounded px-2 py-1 text-xs text-amber-800">
                         {t('erpInvoke.missingDepsHint', '請先選擇:')} {missingFromDeps.join(', ')}
@@ -293,14 +292,12 @@ export default function ErpToolInvokeModal({ tool, sessionId, onClose, onDone }:
                         {t('erpInvoke.missingDepsHint', '請先選擇:')} {lov.missing.join(', ')}
                       </div>
                     ) : p.lov_config?.type && lov?.items ? (
-                      <select value={inputs[p.name] ?? ''}
-                        onChange={e => onInputChange(p.name, e.target.value)}
-                        className="w-full border border-slate-300 rounded px-2 py-1 text-sm">
-                        <option value="">-- {t('erpInvoke.selectPlaceholder', '請選擇')} ({lov.items.length}) --</option>
-                        {lov.items.map((it, i) => (
-                          <option key={i} value={it.value}>{it.label || it.value}</option>
-                        ))}
-                      </select>
+                      <ErpLovCombobox
+                        items={lov.items.map(it => ({ value: String(it.value), label: it.label || String(it.value) }))}
+                        value={inputs[p.name] ?? ''}
+                        onChange={v => onInputChange(p.name, v)}
+                        placeholder={`-- ${t('erpInvoke.selectPlaceholder', '請選擇')} (${lov.items.length}) --`}
+                      />
                     ) : p.lov_config?.type ? (
                       <div className="flex gap-1">
                         <input value={inputs[p.name] ?? ''}
