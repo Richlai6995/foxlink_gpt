@@ -193,6 +193,34 @@ export default function ErpToolInvokeModal({ tool, sessionId, onClose, onDone }:
     onDone({ mode, tool, inputs, result, cache_key: cacheKey })
   }
 
+  /** 從 result 抽取所有可翻譯文字區塊(function_return + string 類 params) */
+  const extractTextBlocks = (res: any): { key: string; text: string }[] => {
+    const out: { key: string; text: string }[] = []
+    if (!res) return out
+    if (res.function_return !== undefined && res.function_return !== null) {
+      const t = String(res.function_return)
+      if (t.trim()) out.push({ key: 'ret', text: t })
+    }
+    if (res.params && typeof res.params === 'object') {
+      for (const [name, v] of Object.entries(res.params)) {
+        if (typeof v === 'string' && v.trim()) out.push({ key: `p:${name}`, text: v })
+      }
+    }
+    return out
+  }
+
+  // 結果到手 + UI 是 en/vi → 自動把所有文字區塊翻好(不用 user 按)
+  useEffect(() => {
+    if (!result || !targetLang) return
+    const blocks = extractTextBlocks(result)
+    for (const b of blocks) {
+      if (translatedMap[b.key]) continue
+      if (translating[b.key]) continue
+      translateBlock(b.key, b.text)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [result, targetLang])
+
   const translateBlock = async (key: string, text: string) => {
     if (!targetLang) return
     if (translatedMap[key]) {
