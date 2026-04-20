@@ -2874,6 +2874,8 @@
     "showTranslated": "Đã dịch",
     "copy": "Sao chép",
     "zoom": "Phóng to",
+    "requery": "Truy vấn lại",
+    "requeryTitle": "Sửa điều kiện ở trên rồi bấm để chạy lại",
     "aiTranslationNotice": "🌐 Bản dịch AI · mã/ID/số giữ nguyên"
   }
 }

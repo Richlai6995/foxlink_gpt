@@ -2874,6 +2874,8 @@
     "showTranslated": "譯文",
     "copy": "複製",
     "zoom": "放大",
+    "requery": "重新查詢",
+    "requeryTitle": "修改上方條件後按此重新查詢",
     "aiTranslationNotice": "🌐 AI 翻譯 · 代碼/ID/數字保留原樣"
   }
 }

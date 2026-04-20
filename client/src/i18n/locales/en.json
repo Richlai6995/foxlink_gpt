@@ -2874,6 +2874,8 @@
     "showTranslated": "Translated",
     "copy": "Copy",
     "zoom": "Zoom",
+    "requery": "Re-query",
+    "requeryTitle": "Modify inputs above and click to run again",
     "aiTranslationNotice": "🌐 AI translation · codes/IDs/numbers preserved verbatim"
   }
 }

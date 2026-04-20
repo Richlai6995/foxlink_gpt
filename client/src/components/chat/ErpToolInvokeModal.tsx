@@ -381,6 +381,11 @@ export default function ErpToolInvokeModal({ tool, sessionId, onClose, onDone }:
         <div className="px-5 py-3 border-t bg-slate-50 flex justify-end gap-2 flex-wrap">
           {result ? (
             <>
+              <button onClick={() => execute(false)} disabled={executing}
+                className="mr-auto px-3 py-1.5 text-xs bg-slate-700 text-white rounded hover:bg-slate-800 disabled:opacity-50 flex items-center gap-1.5"
+                title={t('erpInvoke.requeryTitle', '修改上方條件後按此重新查詢')}>
+                <Play size={12} /> {executing ? t('erpInvoke.executing', '執行中…') : t('erpInvoke.requery', '重新查詢')}
+              </button>
               <button onClick={() => sendBack('view')}
                 className="px-3 py-1.5 text-xs border border-slate-300 rounded hover:bg-white flex items-center gap-1.5">
                 <Eye size={12} /> {t('erpInvoke.viewOnly', '僅顯示結果')}
