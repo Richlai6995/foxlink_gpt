@@ -29,12 +29,15 @@ const PROVIDER = process.env.GEMINI_PROVIDER === 'vertex' ? 'vertex' : 'studio';
 const VERTEX_MODEL_DEFAULTS = {
   'gemini-3-flash-preview':       'gemini-2.5-flash',
   'gemini-3-pro-preview':         'gemini-2.5-pro',
+  'gemini-3.1-pro-preview':       'gemini-2.5-pro',
+  'gemini-3.1-flash-preview':     'gemini-2.5-flash',
   'gemini-2.0-flash':             'gemini-2.5-flash',
   'gemini-2.0-flash-001':         'gemini-2.5-flash',
   'gemini-2.0-pro':               'gemini-2.5-pro',
   // Image generation (Nano Banana) — AI Studio 命名 → Vertex AI 命名
   'gemini-3-pro-image-preview':   'gemini-2.5-flash-image-preview',
   'gemini-3-flash-image-preview': 'gemini-2.5-flash-image-preview',
+  'gemini-3.1-pro-image-preview': 'gemini-2.5-flash-image-preview',
   'gemini-2.5-flash-image':       'gemini-2.5-flash-image-preview',
 };
 function _resolveModelId(requested) {
