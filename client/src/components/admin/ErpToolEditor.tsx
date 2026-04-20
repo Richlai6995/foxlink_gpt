@@ -960,6 +960,26 @@ function ParamDetailEditor({
                 siblingParams={siblingParams}
               />
             )}
+
+            {/* LLM 傳值模式:當是 sql/system/erp_tool 動態 LOV 才顯示(static 已有 enum) */}
+            {(lovType === 'sql' || lovType === 'system' || lovType === 'erp_tool') && (
+              <div className="mt-3 pt-2 border-t border-slate-200">
+                <div className="text-xs font-medium text-slate-600 mb-1">LLM 傳值模式</div>
+                <select
+                  value={(param as any).llm_resolve_mode || 'value_only'}
+                  onChange={e => onChange({ llm_resolve_mode: e.target.value as any } as any)}
+                  className="w-full border border-slate-300 rounded px-2 py-1 text-xs">
+                  <option value="value_only">原始值 — LLM 必須傳內部值(最嚴格)</option>
+                  <option value="auto">自動 — value 或 label 都接受(推薦)</option>
+                  <option value="label_only">可讀名稱 — 強制 LLM 傳 CODE/NAME</option>
+                </select>
+                <div className="text-[10px] text-slate-500 mt-1">
+                  {((param as any).llm_resolve_mode || 'value_only') === 'auto' && '對話中 AI 可傳 "G0C" 或 "83",系統用 LOV 自動轉成內部 ID;找不到或多筆符合會 throw。'}
+                  {(param as any).llm_resolve_mode === 'label_only' && '強制 AI 以可讀名稱提問,tool_schema description 會明確要求不要傳 ID。'}
+                  {((param as any).llm_resolve_mode || 'value_only') === 'value_only' && '不轉換;LLM 必須精確傳出 value_col 對應的值,否則 FUNCTION 會失敗。'}
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="border-t pt-2">

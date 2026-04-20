@@ -39,6 +39,20 @@ function parseJson(s, fallback) {
   try { return JSON.parse(s); } catch (_) { return fallback; }
 }
 
+/**
+ * 正規化 params:有動態 LOV(sql/system/erp_tool)但沒設 llm_resolve_mode 的參數
+ * 預設 'auto',讓 LLM 對話能以 CODE/NAME 自然提問。
+ * Admin 顯式選 value_only / label_only 時尊重其設定。
+ */
+function normalizeParamsLlmMode(params) {
+  if (!Array.isArray(params)) return params;
+  return params.map(p => {
+    if (!p || !p.lov_config || !p.lov_config.type || p.lov_config.type === 'static') return p;
+    if (p.llm_resolve_mode) return p;
+    return { ...p, llm_resolve_mode: 'auto' };
+  });
+}
+
 function serializeTool(row, lang) {
   const get = (k) => row[k] ?? row[k.toUpperCase()];
   const t = {
@@ -356,7 +370,7 @@ router.post('/', async (req, res) => {
       objectName: b.object_name,
       overload: b.overload,
     });
-    const params = Array.isArray(b.params) ? b.params : [];
+    const params = normalizeParamsLlmMode(Array.isArray(b.params) ? b.params : []);
     const returns = b.returns || null;
     const toolSchema = b.tool_schema || schemaGen.generateToolSchema({
       code, name: b.name, description: b.description,
@@ -451,7 +465,7 @@ router.put('/:id', async (req, res) => {
     const cur = serializeTool(row);
     const b = req.body || {};
 
-    const params = Array.isArray(b.params) ? b.params : cur.params;
+    const params = normalizeParamsLlmMode(Array.isArray(b.params) ? b.params : cur.params);
     const returns = b.returns !== undefined ? b.returns : cur.returns;
     const code = (b.code && b.code.trim()) || cur.code;
     const toolSchema = b.tool_schema || schemaGen.generateToolSchema({

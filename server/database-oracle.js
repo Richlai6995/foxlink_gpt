@@ -2899,13 +2899,26 @@ async function runMigrations(db) {
   }
 
   // 重新生成所有 ERP tool 的 tool_schema_json（讓 default_config 生效）
+  // + Migration:把有動態 LOV 但沒設 llm_resolve_mode 的參數補上 'auto'
   try {
     const schemaGen = require('./services/erpToolSchemaGen');
     const allTools = await db.prepare(`SELECT id, code, name, description, access_mode, params_json, endpoint_mode, proxy_skill_id FROM erp_tools`).all();
+    let paramsMigrated = 0;
     for (const row of (allTools || [])) {
       try {
         const id = row.id || row.ID;
         const params = JSON.parse(row.params_json || row.PARAMS_JSON || '[]');
+        // Migration:補 llm_resolve_mode
+        let changed = false;
+        for (const p of params) {
+          if (p.lov_config && p.lov_config.type && p.lov_config.type !== 'static') {
+            if (!p.llm_resolve_mode) {
+              p.llm_resolve_mode = 'auto';
+              changed = true;
+              paramsMigrated++;
+            }
+          }
+        }
         const schema = schemaGen.generateToolSchema({
           code: row.code || row.CODE,
           name: row.name || row.NAME,
@@ -2914,14 +2927,19 @@ async function runMigrations(db) {
           params,
         });
         const schemaStr = JSON.stringify(schema);
-        await db.prepare(`UPDATE erp_tools SET tool_schema_json = ? WHERE id = ?`).run(schemaStr, id);
+        if (changed) {
+          await db.prepare(`UPDATE erp_tools SET params_json = ?, tool_schema_json = ? WHERE id = ?`)
+            .run(JSON.stringify(params), schemaStr, id);
+        } else {
+          await db.prepare(`UPDATE erp_tools SET tool_schema_json = ? WHERE id = ?`).run(schemaStr, id);
+        }
         const pid = row.proxy_skill_id || row.PROXY_SKILL_ID;
         if (pid) {
           await db.prepare(`UPDATE skills SET tool_schema = ? WHERE id = ?`).run(schemaStr, pid);
         }
       } catch (_) {}
     }
-    if (allTools?.length) console.log(`[Migration] Regenerated tool_schema for ${allTools.length} ERP tools`);
+    if (allTools?.length) console.log(`[Migration] Regenerated tool_schema for ${allTools.length} ERP tools (auto-set llm_resolve_mode=auto for ${paramsMigrated} params)`);
   } catch (e) {
     console.warn('[Migration] erp tool_schema regen:', e.message);
   }

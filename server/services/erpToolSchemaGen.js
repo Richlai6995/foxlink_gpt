@@ -64,6 +64,16 @@ function generateToolSchema(tool) {
       descParts.push('合法值:' + p.lov_config.items.map(i => i.value).join(', '));
     }
 
+    // LLM 傳值模式:當有動態 LOV(sql/system/erp_tool)時,可讓 LLM 傳 CODE/NAME
+    const resolveMode = p.llm_resolve_mode || 'value_only';
+    if (p.lov_config && p.lov_config.type !== 'static' && resolveMode !== 'value_only') {
+      if (resolveMode === 'label_only') {
+        descParts.push('請提供可讀名稱 / 代碼(例如 G0C、TNDS264009-C 這類使用者慣用的代碼或工單號),系統會自動透過 LOV 查表轉成內部 ID;不要傳數字 ID');
+      } else {
+        descParts.push('可直接提供可讀名稱或代碼(例如 G0C、TNDS264009-C),系統會自動透過 LOV 查表轉成內部 ID,也可直接傳內部 value');
+      }
+    }
+
     // 有預設值 → 告訴 LLM 不用問
     const cfg = p.default_config;
     const hasDefault = cfg && cfg.mode !== 'none';

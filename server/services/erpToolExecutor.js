@@ -16,9 +16,120 @@
 const crypto = require('crypto');
 const erpDb = require('./erpDb');
 const metaSvc = require('./erpToolMetadata');
-const { resolveExtendedSystemParam } = require('./erpToolLovResolver');
+const lovResolver = require('./erpToolLovResolver');
+const { resolveExtendedSystemParam } = lovResolver;
 const resultCache = require('./erpToolResultCache');
 const rateLimit = require('./erpToolRateLimit');
+
+// ── Label → Value 解析(LLM/使用者傳 CODE/NAME,後端透過 LOV 轉內部 ID) ─────
+/**
+ * 依 lov_config.binds/param_map 的 param:<NAME> 建立依賴圖,拓撲排序
+ * 確保上游 (P_ORG_ID) 先 resolve 好,下游 (P_WIP_ENTITY_ID) resolve 時能用上游值
+ */
+function topoSortParams(params) {
+  const byName = new Map(params.map(p => [p.name, p]));
+  const deps = {};
+  for (const p of params) {
+    const sources = [];
+    const lov = p.lov_config;
+    if (lov) {
+      if (Array.isArray(lov.binds)) sources.push(...lov.binds.map(b => b.source));
+      if (lov.param_map && typeof lov.param_map === 'object') {
+        for (const v of Object.values(lov.param_map)) {
+          if (v && typeof v === 'object' && v.source) sources.push(v.source);
+        }
+      }
+    }
+    deps[p.name] = sources
+      .filter(s => typeof s === 'string' && s.startsWith('param:'))
+      .map(s => s.slice(6).trim())
+      .filter(n => byName.has(n));
+  }
+
+  const visited = new Set();
+  const result = [];
+  const visit = (name, stack = new Set()) => {
+    if (visited.has(name) || stack.has(name)) return;
+    stack.add(name);
+    for (const d of (deps[name] || [])) visit(d, stack);
+    stack.delete(name);
+    visited.add(name);
+    const p = byName.get(name);
+    if (p) result.push(p);
+  };
+  for (const p of params) visit(p.name);
+  return result;
+}
+
+/**
+ * 預先把 inputs 中的 label/CODE/NAME 透過 LOV 轉成實際 value
+ * 僅對 llm_resolve_mode === 'auto' 或 'label_only' 的參數作用
+ * 衝突處理:若多筆符合 → throw 列候選
+ */
+async function resolveLabelsToValues(params, userInputs, userCtx) {
+  if (!userInputs || typeof userInputs !== 'object') return userInputs;
+  const ordered = topoSortParams(params || []);
+  const resolved = { ...userInputs };
+
+  for (const p of ordered) {
+    const mode = p.llm_resolve_mode || 'value_only';
+    if (mode === 'value_only') continue;
+    if (!p.lov_config || p.lov_config.type === 'static') continue;
+    // 只有當使用者/LLM 有傳值才處理
+    const hasInput = Object.prototype.hasOwnProperty.call(resolved, p.name);
+    if (!hasInput) continue;
+    const raw = resolved[p.name];
+    if (raw === null || raw === undefined || raw === '') continue;
+
+    // 執行 LOV(帶上已 resolve 的上游參數)
+    let lovOut;
+    try {
+      lovOut = await lovResolver.resolveLov(p.lov_config, userCtx, {
+        paramInputs: resolved,
+        limit: 2000,
+      });
+    } catch (e) {
+      throw new Error(`參數 ${p.name} LOV 解析失敗:${e.message}`);
+    }
+    const items = (lovOut && lovOut.items) || [];
+    if (items.length === 0) continue; // LOV 查不到東西就別動,讓 FUNCTION 自己驗證
+
+    const needle = String(raw).trim();
+    const needleLc = needle.toLowerCase();
+
+    // 1. value 精確
+    let matches = items.filter(i => String(i.value) === needle);
+    if (matches.length === 1) { resolved[p.name] = matches[0].value; continue; }
+
+    // 2. label 精確(不分大小寫)
+    matches = items.filter(i => String(i.label || '').toLowerCase() === needleLc);
+    if (matches.length === 1) { resolved[p.name] = matches[0].value; continue; }
+
+    // 3. label 子字串(不分大小寫)
+    matches = items.filter(i => String(i.label || '').toLowerCase().includes(needleLc));
+    if (matches.length === 1) { resolved[p.name] = matches[0].value; continue; }
+
+    // 4. value 子字串(不分大小寫)— 最後嘗試
+    if (matches.length === 0) {
+      matches = items.filter(i => String(i.value || '').toLowerCase().includes(needleLc));
+      if (matches.length === 1) { resolved[p.name] = matches[0].value; continue; }
+    }
+
+    if (matches.length >= 2) {
+      const cands = matches.slice(0, 5).map(i => i.label || i.value).join(', ');
+      const extra = matches.length > 5 ? ` 等 ${matches.length} 筆` : '';
+      throw new Error(`參數 ${p.name} 的值 "${needle}" 有多筆符合,請更精確:${cands}${extra}`);
+    }
+
+    // 0 筆符合
+    if (mode === 'label_only') {
+      const sample = items.slice(0, 5).map(i => i.label || i.value).join(', ');
+      throw new Error(`參數 ${p.name} 的值 "${needle}" 找不到對應項目(候選範例:${sample})`);
+    }
+    // auto mode:找不到就保留原值(可能 LOV 未涵蓋但 FUNCTION 認得)
+  }
+  return resolved;
+}
 
 // ── 型別轉換 ──────────────────────────────────────────────────────────────────
 function coerceInput(raw, param) {
@@ -246,6 +357,15 @@ async function execute(db, toolId, userInputs, userCtx, options = {}) {
       if (!consumed) throw new Error('確認 token 無效或已過期');
       userInputs = consumed.inputs;
     }
+  }
+
+  // 把 LLM/使用者傳的 label (CODE/NAME) 透過 LOV 轉成內部 value (ID)
+  // — 僅對 param.llm_resolve_mode = 'auto' | 'label_only' 且有 lov_config 生效
+  try {
+    userInputs = await resolveLabelsToValues(tool.params || [], userInputs, userCtx);
+  } catch (e) {
+    // 解析失敗(多筆符合 / 找不到)直接 throw,不進入實際執行
+    throw e;
   }
 
   // 建立 bind

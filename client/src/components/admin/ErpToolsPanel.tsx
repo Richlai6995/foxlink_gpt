@@ -55,6 +55,8 @@ export interface ErpParam {
   display_name?: string | null
   default_value: any
   lov_config: any
+  /** LLM 傳值模式:value_only(預設) / auto(value 或 label 都接受) / label_only */
+  llm_resolve_mode?: 'value_only' | 'auto' | 'label_only'
   inject_value: any
   inject_source: string | null
   visible?: boolean

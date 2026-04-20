@@ -8361,7 +8361,7 @@ const userSections = [
               {
                 "icon": "⚡",
                 "title": "讓 AI 自動呼叫（推薦）",
-                "desc": "用自然語言問問題，AI 會自己決定要不要呼叫 ERP 工具、要傳什麼參數。例：「幫我查品號 53015 在組織 83 的狀態」"
+                "desc": "用自然語言問問題，AI 會自己決定要不要呼叫 ERP 工具、要傳什麼參數。**可直接用代碼/名稱**（如「查組織 G0C 的工單 TNDS264009-C 狀況」），系統會自動透過 LOV 轉為內部 ID，不用背數字 ID"
               },
               {
                 "icon": "🛢",
@@ -8649,6 +8649,87 @@ const userSections = [
                 "text": "LLM function calling 路徑看不到 SQL LOV 的選項列表（只看得到靜態 LOV 的 enum）。建議有 cascading 的工具把「允許 LLM 自動呼叫」關掉，只留「使用者手動觸發」，避免 AI 亂猜值。"
               }
             ]
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "🔧 管理員：LLM 傳值模式（AI 對話可用 CODE/NAME 代替內部 ID）",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "當 PROCEDURE 參數是內部 ID（如 `ORGANIZATION_ID = 83`、`WIP_ENTITY_ID = 56789`）時，AI 無法憑空知道這些數字，只能跟使用者確認或亂猜。此設定讓 AI 像使用者一樣以 **可讀名稱**（`G0C`、`TNDS264009-C`）呼叫工具，伺服器在執行前透過該參數的 LOV 自動查表轉成內部 ID。"
+          },
+          {
+            "type": "table",
+            "headers": [
+              "模式",
+              "行為",
+              "使用時機"
+            ],
+            "rows": [
+              [
+                "原始值（value_only）",
+                "LLM 必須精確傳出內部值；不做任何轉換",
+                "LLM 不需要用到，或沒有 LOV；純數字 ID 且 AI 可從上下文取得"
+              ],
+              [
+                "自動（auto，推薦預設）",
+                "value 精確 → label 精確 → label 子字串 → value 子字串，依序嘗試",
+                "99% 動態 LOV 參數都適用。AI 傳 \"G0C\" 或 \"83\" 都能用"
+              ],
+              [
+                "可讀名稱（label_only）",
+                "強制 LLM 傳 CODE/NAME；tool_schema description 明確要求不要傳數字 ID",
+                "希望 AI 一律用自然語言，例如工單號始終以 WIP_NAME 呼叫"
+              ]
+            ]
+          },
+          {
+            "type": "subsection",
+            "title": "衝突處理",
+            "blocks": [
+              {
+                "type": "para",
+                "text": "若輸入的值在 LOV 中有多筆符合（例如 AI 傳 \"G0\" 但有 G0C、G0E、G06 三筆），伺服器會**拒絕執行並列出前 5 筆候選**，讓 AI 自行重試更精確的名稱。"
+              },
+              {
+                "type": "code",
+                "language": "json",
+                "text": "{\n  \"error\": \"參數 P_ORG_ID 的值 \\\"G0\\\" 有多筆符合，請更精確:G0C, G0E, G06\"\n}"
+              },
+              {
+                "type": "tip",
+                "text": "AI 收到錯誤訊息會自然地跟使用者確認（例:「您指的是 G0C、G0E 還是 G06?」），不需要 Admin 做額外處理。"
+              }
+            ]
+          },
+          {
+            "type": "subsection",
+            "title": "依賴鏈（cascading）",
+            "blocks": [
+              {
+                "type": "para",
+                "text": "伺服器會依 LOV binds 的 `param:<NAME>` 建立依賴圖，以**拓撲順序**處理:先解析上游參數的 label→value，下游參數的 LOV 就能拿到正確的上游 ID 值撈選項。"
+              },
+              {
+                "type": "code",
+                "language": "text",
+                "text": "AI 呼叫: { P_ORG_ID: \"G0C\", P_WIP_ENTITY_ID: \"TNDS264009-C\" }\n  ↓ P_ORG_ID: 查 LOV → 找到 value=83 → inputs.P_ORG_ID = \"83\"\n  ↓ P_WIP_ENTITY_ID: 查 LOV 帶 :org_id=83 → 找到 value=56789 → inputs.P_WIP_ENTITY_ID = \"56789\"\n  ↓ 呼叫 FUNCTION 用內部 ID"
+              }
+            ]
+          },
+          {
+            "type": "note",
+            "text": "本設定僅影響 **LLM function calling 路徑（⚡ API 連接器 topbar）**。🛢 手動執行一直都是 LOV 下拉，不受影響。"
+          },
+          {
+            "type": "note",
+            "text": "靜態 LOV（static type）會產生 enum，AI 本來就能精確選，所以不需此設定。"
+          },
+          {
+            "type": "tip",
+            "text": "系統 Migration 時會自動把「有動態 LOV 但沒設過模式」的參數預設為 `auto`。新建工具也一律預設 `auto`。Admin 僅在特定情境才需改回 value_only。"
           }
         ]
       },
