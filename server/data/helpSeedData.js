@@ -8650,15 +8650,65 @@ const userSections = [
       },
       {
         "type": "subsection",
-        "title": "🔧 管理員：參數／工具顯示名稱多語",
+        "title": "🔧 管理員：參數顯示名稱（覆蓋內部 P_XXX 名稱）",
         "blocks": [
           {
             "type": "para",
-            "text": "使用者看到的 `P_ORG_CODE` 這種 Oracle 原始參數名不友善。在工具編輯視窗右下角按「翻譯 (en / vi)」會自動透過 LLM 把 `ai_hint`（以及工具 name、description）翻成三語存入 `erp_tool_translations`。使用者切換 UI 語言時自動顯示對應翻譯的 display_name（括號小字仍保留原始 P_XXX 方便管理）。"
+            "text": "使用者看到的 `P_ORG_ID`、`P_WIP_ENTITY_ID` 這種 Oracle 原始參數名不友善。每個參數展開後的「**顯示名稱**」欄位可直接輸入使用者應該看到的 label（例如「組織代碼」、「工單號」），留空則沿用原始名稱。原始 P_XXX 會以小灰字顯示於下方方便管理員比對。"
+          },
+          {
+            "type": "steps",
+            "items": [
+              {
+                "title": "編輯工具 → 展開參數",
+                "desc": "找到「顯示名稱」輸入框（在 AI Hint 左邊）"
+              },
+              {
+                "title": "輸入使用者友善的中文 label",
+                "desc": "例如「組織代碼」「工單號」「員工工號」"
+              },
+              {
+                "title": "儲存",
+                "desc": "zh-TW 使用者立即看到新 label"
+              },
+              {
+                "title": "如需 en / vi，按右下「翻譯 (en / vi)」",
+                "desc": "LLM 會以「顯示名稱」為主要翻譯來源（若顯示名稱空白才 fallback ai_hint）批次翻成三語，存進 erp_tool_translations 表"
+              }
+            ]
+          },
+          {
+            "type": "table",
+            "headers": [
+              "來源優先順序",
+              "使用時機"
+            ],
+            "rows": [
+              [
+                "1. params_labels_json（翻譯表，指定語言）",
+                "UI 語言為 en / vi 且該參數已翻譯"
+              ],
+              [
+                "2. param.display_name（zh-TW 原始）",
+                "管理員直接輸入的顯示名稱"
+              ],
+              [
+                "3. param.ai_hint",
+                "顯示名稱未設時，退回 LLM 提示文字（較不理想，ai_hint 通常是說明而不是 label）"
+              ],
+              [
+                "4. param.name",
+                "以上皆無時，顯示內部 P_XXX"
+              ]
+            ]
           },
           {
             "type": "note",
-            "text": "翻譯結果寫進 DB，僅在按下翻譯鍵時才執行；日常呼叫不會額外耗 token。若事後改過 ai_hint 需要手動再按一次翻譯。"
+            "text": "翻譯結果寫進 DB，僅在按下翻譯鍵時才執行；日常呼叫不會額外耗 token。若事後改過顯示名稱或 ai_hint 需要手動再按一次翻譯以更新 en/vi 版本。"
+          },
+          {
+            "type": "tip",
+            "text": "重抓 metadata（PROCEDURE 簽章變更後）的智慧合併會保留您輸入的「顯示名稱」，不會被覆蓋。"
           }
         ]
       },

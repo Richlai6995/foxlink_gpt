@@ -594,6 +594,7 @@ router.post('/:id/refresh-metadata', async (req, res) => {
         if (!op) return np;  // 新參數,用 fresh defaults
         // 保留 user 設定的欄位
         const preserved = {
+          display_name:  op.display_name ?? null,
           ai_hint:       op.ai_hint ?? '',
           lov_config:    op.lov_config ?? null,
           default_value: op.default_value ?? null,
@@ -690,10 +691,10 @@ router.post('/:id/translate', async (req, res) => {
     const nameT = tool.name ? await translateText(tool.name) : { zh: '', en: '', vi: '' };
     const descT = tool.description ? await translateText(tool.description) : { zh: '', en: '', vi: '' };
 
-    // 翻譯每個 param 的 label(來源優先 ai_hint,否則 name)
+    // 翻譯每個 param 的 label(來源優先順序:display_name > ai_hint > name)
     const labels = {};
     for (const p of (tool.params || [])) {
-      const source = p.ai_hint?.trim() || p.name;
+      const source = (p.display_name?.trim()) || (p.ai_hint?.trim()) || p.name;
       if (!source) continue;
       try {
         labels[p.name] = await translateText(source);

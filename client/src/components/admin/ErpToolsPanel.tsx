@@ -52,6 +52,7 @@ export interface ErpParam {
   data_scale?: number
   required: boolean
   ai_hint: string
+  display_name?: string | null
   default_value: any
   lov_config: any
   inject_value: any

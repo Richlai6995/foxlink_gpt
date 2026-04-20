@@ -861,12 +861,22 @@ function ParamDetailEditor({
 
       <div className="grid grid-cols-2 gap-3">
         <div>
+          <label className="text-xs text-slate-500">
+            顯示名稱(使用者看到的欄位 label)
+            <span className="text-[10px] text-slate-400 ml-1">覆蓋 {param.name}</span>
+          </label>
+          <input value={(param as any).display_name || ''}
+            onChange={e => onChange({ display_name: e.target.value || null } as any)}
+            className="w-full border border-slate-300 rounded px-2 py-1 text-xs mt-0.5"
+            placeholder={`如:組織代碼(留空則顯示 ${param.name})`} />
+        </div>
+        <div>
           <label className="text-xs text-slate-500">AI Hint(給 LLM 的參數說明)</label>
           <input value={param.ai_hint || ''} onChange={e => onChange({ ai_hint: e.target.value })}
             className="w-full border border-slate-300 rounded px-2 py-1 text-xs mt-0.5"
-            placeholder="台灣員工工號,8 碼數字" />
+            placeholder="Oracle EBS 組織 ID,數字字串" />
         </div>
-        <div>
+        <div className="col-span-2">
           <label className="text-xs text-slate-500">預設值{!isEditable && <span className="text-amber-700 ml-1">(鎖定值)</span>}</label>
           <DefaultValueEditor param={param} onChange={onChange} />
         </div>
