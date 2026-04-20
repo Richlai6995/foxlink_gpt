@@ -2916,10 +2916,21 @@ async function listTemplates(db, user, { search, format, tag } = {}) {
       (${alias}.grantee_type='org_group'   AND ${alias}.grantee_id=?)
     )`;
 
-  // Admin 也走相同過濾邏輯（不再 bypass），需透過 /unauthorized 搭配前端測試模式存取未授權範本
+  // Admin 可見所有範本（方便 debug）
+  const isAdmin = user.role === 'admin';
   let sql, params;
 
-  {
+  if (isAdmin) {
+    sql = `
+      SELECT t.id, t.creator_id, t.name, t.description, t.format, t.strategy,
+             t.template_file, t.original_file, t.schema_json, t.preview_url,
+             t.is_public, t.is_fixed_format, t.tags, t.use_count, t.forked_from, t.created_at, t.updated_at,
+        CASE WHEN t.creator_id = ? THEN 'owner' ELSE 'edit' END AS access_level
+      FROM doc_templates t
+      WHERE 1=1
+    `;
+    params = [uid];
+  } else {
     sql = `
       SELECT t.id, t.creator_id, t.name, t.description, t.format, t.strategy,
              t.template_file, t.original_file, t.schema_json, t.preview_url,

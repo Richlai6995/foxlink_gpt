@@ -357,7 +357,18 @@ router.get('/', async (req, res) => {
         ).get(req.user.id);
         if (!userProfile) return res.status(403).json({ error: '使用者不存在' });
 
-        let sql = `
+        const isAdminUser = userProfile.role === 'admin';
+        // Admin 可見所有技能（方便 debug）
+        let sql, params;
+        if (isAdminUser) {
+            sql = `
+      SELECT s.*, u.name AS owner_name
+      FROM skills s LEFT JOIN users u ON u.id = s.owner_user_id
+      WHERE 1=1
+    `;
+            params = [];
+        } else {
+            sql = `
       SELECT s.*, u.name AS owner_name
       FROM skills s LEFT JOIN users u ON u.id = s.owner_user_id
       WHERE (
@@ -376,15 +387,16 @@ router.get('/', async (req, res) => {
         )
       )
     `;
-        const params = [
-            req.user.id,
-            req.user.id, userProfile.role,
-            userProfile.dept_code, userProfile.dept_code,
-            userProfile.profit_center, userProfile.profit_center,
-            userProfile.org_section, userProfile.org_section,
-            userProfile.factory_code, userProfile.factory_code,
-            userProfile.org_group_name, userProfile.org_group_name,
-        ];
+            params = [
+                req.user.id,
+                req.user.id, userProfile.role,
+                userProfile.dept_code, userProfile.dept_code,
+                userProfile.profit_center, userProfile.profit_center,
+                userProfile.org_section, userProfile.org_section,
+                userProfile.factory_code, userProfile.factory_code,
+                userProfile.org_group_name, userProfile.org_group_name,
+            ];
+        }
         if (type) { sql += ` AND s.type = ?`; params.push(type); }
         sql += ` ORDER BY s.is_admin_approved DESC, s.created_at DESC`;
         let rows = await db.prepare(sql).all(...params);
@@ -392,7 +404,7 @@ router.get('/', async (req, res) => {
         if (q) rows = rows.filter(s => s.name.includes(q) || (s.description || '').includes(q));
 
         // Compute my_share_type per skill
-        const isAdmin = userProfile.role === 'admin';
+        const isAdmin = isAdminUser;
         const sharedIds = rows.filter(s => s.owner_user_id !== req.user.id && !s.is_public).map(s => s.id);
         const developSet = new Set();
         if (sharedIds.length > 0) {

@@ -76,6 +76,9 @@ async function executeSkillByRow(db, skill, input, context = {}) {
         apiModel = await resolveDefaultModel(db, 'chat');
       } catch (_) { apiModel = null; }
     }
+    if (!apiModel) {
+      apiModel = process.env.GEMINI_MODEL_PRO || 'gemini-2.5-pro';
+    }
     const sysPrompt = skill.system_prompt || '';
     const history = sysPrompt ? [{ role: 'user', parts: [{ text: sysPrompt }] }, { role: 'model', parts: [{ text: '好的，我明白了。' }] }] : [];
     const { text } = await generateTextSync(apiModel, history, input || '請執行');

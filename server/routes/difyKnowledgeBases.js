@@ -82,6 +82,15 @@ router.get('/my', async (req, res) => {
             name_zh, name_en, name_vi, desc_zh, desc_en, desc_vi, tags,
             connector_type, input_params`;
 
+    // Admin 可見所有 active KB（方便 debug）
+    if (req.user.role === 'admin') {
+      const allKbs = await db.prepare(
+        `SELECT ${selectCols}, 0 AS is_readonly
+         FROM dify_knowledge_bases WHERE is_active=1 ORDER BY sort_order ASC`
+      ).all();
+      return res.json(allKbs);
+    }
+
     // 公開且已核准的項目（所有使用者可見）
     const publicKbs = await db.prepare(
       `SELECT ${selectCols}, 1 AS is_readonly

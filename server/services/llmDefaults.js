@@ -9,12 +9,14 @@ const ENV_FALLBACK = {
   embedding: () => process.env.KB_EMBEDDING_MODEL || 'gemini-embedding-001',
   rerank:    () => process.env.KB_RERANK_MODEL    || 'gemini-2.0-flash',
   ocr:       () => process.env.KB_OCR_MODEL       || process.env.GEMINI_MODEL_FLASH || 'gemini-2.0-flash',
+  chat:      () => process.env.GEMINI_MODEL_PRO   || 'gemini-2.5-pro',
 };
 
 const SETTING_KEY = {
   embedding: 'default_embedding_model_key',
   rerank:    'default_rerank_model_key',
   ocr:       'default_ocr_model_key',
+  chat:      'default_chat_model_key',
 };
 
 /**

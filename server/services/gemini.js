@@ -537,8 +537,10 @@ async function generateTitle(userMessage, aiResponse) {
  * @returns {Promise<{text, inputTokens, outputTokens}>}
  */
 async function generateTextSync(apiModel, history, prompt) {
+  const resolvedModel = apiModel || process.env.GEMINI_MODEL_PRO || MODEL_PRO;
+  if (!resolvedModel) throw new Error('generateTextSync: model parameter 為空（未設定 apiModel 也無 env fallback）');
   const model = getGenerativeModel({
-    model: apiModel,
+    model: resolvedModel,
     systemInstruction: getSystemInstruction(),
   });
   const contents = [
