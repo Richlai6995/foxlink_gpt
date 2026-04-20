@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { TFunction } from 'i18next'
-import { X, Play, ShieldAlert, AlertTriangle, CheckCircle, Eye, Sparkles, MessageSquare, Table2, FileJson, Languages, Copy } from 'lucide-react'
+import { X, Play, ShieldAlert, AlertTriangle, CheckCircle, Eye, Sparkles, MessageSquare, Table2, FileJson, Languages, Copy, Maximize2 } from 'lucide-react'
 import api from '../../lib/api'
 import type { ErpTool } from '../admin/ErpToolsPanel'
 import ErpLovCombobox from './ErpLovCombobox'
@@ -84,6 +84,7 @@ export default function ErpToolInvokeModal({ tool, sessionId, onClose, onDone }:
   const [translatedMap, setTranslatedMap] = useState<Record<string, string>>({})
   const [showTranslated, setShowTranslated] = useState<Record<string, boolean>>({})
   const [translating, setTranslating] = useState<Record<string, boolean>>({})
+  const [zoomed, setZoomed] = useState<{ key: string; title: string; original: string } | null>(null)
 
   const inParams = tool.params.filter(p => (p.in_out === 'IN' || p.in_out === 'IN/OUT') && (p as any).visible !== false)
   const depMap = useMemo(() => buildDependencyMap(tool.params), [tool])
@@ -370,6 +371,7 @@ export default function ErpToolInvokeModal({ tool, sessionId, onClose, onDone }:
                 translating={translating}
                 onTranslate={translateBlock}
                 onCopy={copyText}
+                onZoom={(key, title, original) => setZoomed({ key, title, original })}
                 t={t}
               />
             </section>
@@ -406,6 +408,99 @@ export default function ErpToolInvokeModal({ tool, sessionId, onClose, onDone }:
           )}
         </div>
       </div>
+
+      {/* Zoom Modal - 全螢幕檢視單一結果欄位 */}
+      {zoomed && (
+        <ZoomViewer
+          zoomed={zoomed}
+          targetLang={targetLang}
+          translatedMap={translatedMap}
+          showTranslated={showTranslated}
+          translating={translating}
+          onTranslate={translateBlock}
+          onCopy={copyText}
+          onClose={() => setZoomed(null)}
+          t={t}
+        />
+      )}
+    </div>
+  )
+}
+
+function ZoomViewer({
+  zoomed, targetLang, translatedMap, showTranslated, translating, onTranslate, onCopy, onClose, t,
+}: {
+  zoomed: { key: string; title: string; original: string }
+  targetLang: 'en' | 'vi' | null
+  translatedMap: Record<string, string>
+  showTranslated: Record<string, boolean>
+  translating: Record<string, boolean>
+  onTranslate: (key: string, text: string) => void
+  onCopy: (text: string) => void
+  onClose: () => void
+  t: TFunction
+}) {
+  const translated = translatedMap[zoomed.key]
+  const showing = showTranslated[zoomed.key]
+  const text = showing && translated ? translated : zoomed.original
+  const lineCount = (text.match(/\n/g) || []).length + 1
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [onClose])
+
+  return (
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[70] p-4"
+      onClick={onClose}>
+      <div className="bg-white rounded-xl shadow-2xl w-[95vw] h-[90vh] flex flex-col overflow-hidden"
+        onClick={e => e.stopPropagation()}>
+        <div className="px-5 py-3 border-b flex items-center justify-between bg-slate-50">
+          <div>
+            <h3 className="font-semibold text-slate-800 flex items-center gap-2 text-sm">
+              <Maximize2 size={14} className="text-sky-600" />
+              {zoomed.title}
+            </h3>
+            <div className="text-[10px] text-slate-400 mt-0.5">
+              {text.length.toLocaleString()} 字元 · {lineCount} 行
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            {targetLang && (
+              <button onClick={() => onTranslate(zoomed.key, zoomed.original)}
+                disabled={translating[zoomed.key]}
+                className="text-xs px-3 py-1.5 border border-slate-300 rounded hover:bg-white flex items-center gap-1.5 disabled:opacity-50">
+                <Languages size={12} />
+                {translating[zoomed.key]
+                  ? t('erpInvoke.translating', '翻譯中…')
+                  : translated
+                    ? (showing ? t('erpInvoke.showOriginal', '原文') : t('erpInvoke.showTranslated', '譯文'))
+                    : t('erpInvoke.translateTo', '翻譯') + ` (${targetLang.toUpperCase()})`}
+              </button>
+            )}
+            <button onClick={() => onCopy(text)}
+              className="text-xs px-3 py-1.5 border border-slate-300 rounded hover:bg-white flex items-center gap-1.5">
+              <Copy size={12} /> {t('erpInvoke.copy', '複製')}
+            </button>
+            <button onClick={onClose}
+              className="p-1.5 hover:bg-slate-200 rounded"
+              title={t('common.close', '關閉') + ' (Esc)'}>
+              <X size={16} />
+            </button>
+          </div>
+        </div>
+        <div className="flex-1 overflow-y-auto p-5 font-mono text-base whitespace-pre-wrap break-words leading-relaxed">
+          {text}
+        </div>
+        {showing && translated && (
+          <div className="px-5 py-2 text-xs text-slate-500 border-t bg-slate-50">
+            {t('erpInvoke.aiTranslationNotice', '🌐 AI 翻譯 · 代碼/ID/數字保留原樣')}
+          </div>
+        )}
+      </div>
     </div>
   )
 }
@@ -419,13 +514,15 @@ interface ResultViewProps {
   translating: Record<string, boolean>
   onTranslate: (key: string, text: string) => void
   onCopy: (text: string) => void
+  onZoom: (key: string, title: string, original: string) => void
   t: TFunction
 }
 
 function TranslatableText({
-  textKey, original, targetLang, translatedMap, showTranslated, translating, onTranslate, onCopy, t,
+  textKey, title, original, targetLang, translatedMap, showTranslated, translating, onTranslate, onCopy, onZoom, t,
 }: {
   textKey: string
+  title: string
   original: string
 } & Omit<ResultViewProps, 'data' | 'viewMode'>) {
   const translated = translatedMap[textKey]
@@ -433,7 +530,7 @@ function TranslatableText({
   const text = showing && translated ? translated : original
   return (
     <div className="bg-slate-50 border rounded">
-      <div className="flex items-center justify-end gap-1 px-2 py-1 border-b border-slate-200 bg-slate-100/50">
+      <div className="flex items-center justify-end gap-2 px-2 py-1 border-b border-slate-200 bg-slate-100/50">
         {targetLang && (
           <button onClick={() => onTranslate(textKey, original)}
             disabled={translating[textKey]}
@@ -449,8 +546,13 @@ function TranslatableText({
         <button onClick={() => onCopy(text)} className="text-[10px] text-slate-600 hover:text-sky-600 flex items-center gap-1">
           <Copy size={10} /> {t('erpInvoke.copy', '複製')}
         </button>
+        <button onClick={() => onZoom(textKey, title, original)}
+          className="text-[10px] text-slate-600 hover:text-sky-600 flex items-center gap-1"
+          title="放大檢視">
+          <Maximize2 size={10} /> {t('erpInvoke.zoom', '放大')}
+        </button>
       </div>
-      <div className="px-3 py-2 text-sm font-mono whitespace-pre-wrap break-words max-h-[360px] overflow-y-auto">
+      <div className="px-3 py-2 text-sm font-mono whitespace-pre-wrap break-words min-h-[240px] max-h-[480px] overflow-y-auto">
         {text}
       </div>
       {showing && translated && (
@@ -475,10 +577,11 @@ function ResultView(props: ResultViewProps) {
   const nodes: any[] = []
   if (data.function_return !== undefined) {
     const text = String(data.function_return ?? 'null')
+    const title = `Function ${props.t('erpInvoke.functionReturn', '回傳')}`
     nodes.push(
       <div key="ret" className="mb-3">
-        <div className="text-[10px] font-medium text-slate-500 mb-0.5">Function {props.t('erpInvoke.functionReturn', '回傳')}</div>
-        <TranslatableText textKey="ret" original={text} {...props} />
+        <div className="text-[10px] font-medium text-slate-500 mb-0.5">{title}</div>
+        <TranslatableText textKey="ret" title={title} original={text} {...props} />
       </div>
     )
   }
@@ -518,7 +621,7 @@ function ResultView(props: ResultViewProps) {
         nodes.push(
           <div key={name} className="mb-3">
             <div className="text-[10px] font-medium text-slate-500 mb-0.5 font-mono">{name}</div>
-            <TranslatableText textKey={`p:${name}`} original={v} {...props} />
+            <TranslatableText textKey={`p:${name}`} title={name} original={v} {...props} />
           </div>
         )
       } else {

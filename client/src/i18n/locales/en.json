@@ -2873,6 +2873,7 @@
     "showOriginal": "Original",
     "showTranslated": "Translated",
     "copy": "Copy",
+    "zoom": "Zoom",
     "aiTranslationNotice": "🌐 AI translation · codes/IDs/numbers preserved verbatim"
   }
 }
