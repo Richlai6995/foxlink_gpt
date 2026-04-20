@@ -696,7 +696,11 @@ export default function ChatPage() {
       try {
         const response = await fetch(`/api/chat/sessions/${sessionId}/messages`, {
           method: 'POST',
-          headers: { Authorization: `Bearer ${token}` },
+          headers: {
+            Authorization: `Bearer ${token}`,
+            // 帶 UI 語言讓 server 端 chat.js 據此決定 AI 回覆語言
+            'X-Lang': i18n.language || localStorage.getItem('preferred_language') || 'zh-TW',
+          },
           body: formData,
           signal: controller.signal,
         })
