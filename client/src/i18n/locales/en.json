@@ -2850,6 +2850,13 @@
       "disabled": "Voice input is disabled by admin"
     }
   },
+  "chatErp": {
+    "hintTitle": "Enabled ERP tools — input hints",
+    "pleaseProvide": "Please provide",
+    "autoFilled": "auto-filled",
+    "allAutoFilled": "✓ All parameters are auto-filled, just ask your question",
+    "canUseName": " (code/name accepted)"
+  },
   "erpInvoke": {
     "writeWarning": "This is a WRITE tool — execution will modify ERP data",
     "noParams": "No input parameters",

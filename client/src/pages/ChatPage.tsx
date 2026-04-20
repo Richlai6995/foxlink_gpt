@@ -1703,10 +1703,21 @@ export default function ChatPage() {
           const selected = allErpTools.filter(e => selectedErpIds.has(e.id))
           if (selected.length === 0) return null
 
+          /** 參數 label 優先序:display_name > ai_hint > name */
+          const paramLabel = (p: any) => String(p.display_name || p.ai_hint || p.name)
+          /** llm_resolve_mode 加註(可用 CODE/名稱) */
+          const modeHint = (p: any) => {
+            const mode = p.llm_resolve_mode
+            if (!p.lov_config || p.lov_config.type === 'static') return ''
+            if (mode === 'auto' || mode === 'label_only') {
+              return t('chatErp.canUseName', ' (可用代碼/名稱)')
+            }
+            return ''
+          }
           return (
             <div className="mx-3 -mb-1 px-3 py-1.5 bg-sky-50/80 border border-sky-200 rounded-t-lg text-[11px] text-sky-800 space-y-1">
               <div className="flex items-center gap-1 font-medium text-sky-700">
-                <Database size={11} /> 已啟用的 ERP 工具 — 輸入提示
+                <Database size={11} /> {t('chatErp.hintTitle', '已啟用的 ERP 工具 — 輸入提示')}
               </div>
               {selected.map(e => {
                 const inP = (e.params?.filter(p => (p.in_out === 'IN' || p.in_out === 'IN/OUT') && p.visible !== false) || [])
@@ -1742,16 +1753,16 @@ export default function ChatPage() {
                     <span className="font-medium">{e.name}</span>
                     {needInput.length > 0 && (
                       <span className="text-sky-700 ml-1">
-                        請提供：{needInput.map(p => `${p.ai_hint || p.name}${p.required ? '*' : ''}`).join('、')}
+                        {t('chatErp.pleaseProvide', '請提供')}：{needInput.map(p => `${paramLabel(p)}${modeHint(p)}${p.required ? '*' : ''}`).join('、')}
                       </span>
                     )}
                     {autoParams.length > 0 && (
                       <span className="text-slate-500 ml-1">
-                        （已自動帶入：{autoParams.map(p => `${p.ai_hint || p.name}${presetLabel(p)}`).join('、')}）
+                        （{t('chatErp.autoFilled', '已自動帶入')}：{autoParams.map(p => `${paramLabel(p)}${presetLabel(p)}`).join('、')}）
                       </span>
                     )}
                     {needInput.length === 0 && autoParams.length > 0 && (
-                      <span className="text-emerald-600 ml-1">✓ 所有參數已自動帶入,直接提問即可</span>
+                      <span className="text-emerald-600 ml-1">{t('chatErp.allAutoFilled', '✓ 所有參數已自動帶入,直接提問即可')}</span>
                     )}
                   </div>
                 )

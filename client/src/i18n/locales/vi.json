@@ -2850,6 +2850,13 @@
       "disabled": "Nhập bằng giọng nói đã bị quản trị viên tắt"
     }
   },
+  "chatErp": {
+    "hintTitle": "Công cụ ERP đang bật — gợi ý nhập",
+    "pleaseProvide": "Vui lòng cung cấp",
+    "autoFilled": "đã tự điền",
+    "allAutoFilled": "✓ Tất cả tham số đã được tự điền, bạn có thể hỏi trực tiếp",
+    "canUseName": " (chấp nhận mã/tên)"
+  },
   "erpInvoke": {
     "writeWarning": "Đây là công cụ WRITE — thực thi sẽ thay đổi dữ liệu ERP",
     "noParams": "Công cụ này không có tham số đầu vào",

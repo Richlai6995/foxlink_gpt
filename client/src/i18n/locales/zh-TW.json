@@ -2850,6 +2850,13 @@
       "disabled": "管理員已關閉語音輸入"
     }
   },
+  "chatErp": {
+    "hintTitle": "已啟用的 ERP 工具 — 輸入提示",
+    "pleaseProvide": "請提供",
+    "autoFilled": "已自動帶入",
+    "allAutoFilled": "✓ 所有參數已自動帶入，直接提問即可",
+    "canUseName": " (可用代碼/名稱)"
+  },
   "erpInvoke": {
     "writeWarning": "這是 WRITE 型工具,執行會實際修改 ERP 資料",
     "noParams": "此工具無輸入參數",
