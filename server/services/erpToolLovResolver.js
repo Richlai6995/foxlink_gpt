@@ -26,9 +26,18 @@ function validateLovSql(sql) {
 }
 
 /**
- * 擴充 system 參數(apiConnectorService 未支援者)
+ * 擴充 system 參數(apiConnectorService 未支援者),並支援 param:<NAME> 取當前 modal 另一個欄位的值
+ * @param {string} source
+ * @param {object} userCtx
+ * @param {object} [paramInputs]  當前所有 modal input 值,用於 param:<NAME> 依賴查詢
  */
-function resolveExtendedSystemParam(source, userCtx) {
+function resolveExtendedSystemParam(source, userCtx, paramInputs) {
+  if (typeof source === 'string' && source.startsWith('param:')) {
+    const key = source.slice(6).trim();
+    if (!key) return null;
+    const v = paramInputs?.[key];
+    return v === undefined ? null : v;
+  }
   const base = resolveSystemParam(source, userCtx || {});
   if (base !== null && base !== undefined && base !== '') return base;
   switch (source) {
@@ -42,11 +51,12 @@ function resolveExtendedSystemParam(source, userCtx) {
  * 解析 LOV 取得選項
  * @param {object} lovConfig - { type, items?, sql?, binds?, value_col?, label_col?, source? }
  * @param {object} userCtx
- * @param {object} options - { search?: string, limit?: number }
- * @returns {Promise<{ items: [{value,label}], type, system_value? }>}
+ * @param {object} options - { search?: string, limit?: number, paramInputs?: object }
+ * @returns {Promise<{ items: [{value,label}], type, system_value?, missing_deps? }>}
  */
 async function resolveLov(lovConfig, userCtx, options = {}) {
   if (!lovConfig || !lovConfig.type) return { items: [], type: 'none' };
+  const paramInputs = options.paramInputs || {};
 
   if (lovConfig.type === 'static') {
     const items = Array.isArray(lovConfig.items) ? lovConfig.items : [];
@@ -60,7 +70,7 @@ async function resolveLov(lovConfig, userCtx, options = {}) {
   }
 
   if (lovConfig.type === 'system') {
-    const v = resolveExtendedSystemParam(lovConfig.source, userCtx);
+    const v = resolveExtendedSystemParam(lovConfig.source, userCtx, paramInputs);
     return {
       items: v !== null && v !== undefined && v !== ''
         ? [{ value: String(v), label: String(v) }]
@@ -74,8 +84,17 @@ async function resolveLov(lovConfig, userCtx, options = {}) {
     validateLovSql(lovConfig.sql);
     let sql = lovConfig.sql.trim().replace(/;\s*$/, '');
     const binds = {};
+    const missingDeps = [];
     for (const b of (lovConfig.binds || [])) {
-      binds[b.name] = resolveExtendedSystemParam(b.source, userCtx) ?? null;
+      const v = resolveExtendedSystemParam(b.source, userCtx, paramInputs);
+      // param:<NAME> 來源且當前無值 → 回傳 missing_deps,前端會顯示 "請先選 X"
+      if (typeof b.source === 'string' && b.source.startsWith('param:') && (v === null || v === undefined || v === '')) {
+        missingDeps.push(b.source.slice(6).trim());
+      }
+      binds[b.name] = v ?? null;
+    }
+    if (missingDeps.length > 0) {
+      return { items: [], type: 'sql', missing_deps: missingDeps };
     }
     const limit = Math.min(options.limit || MAX_ROWS, MAX_ROWS);
     const wrapped = `SELECT * FROM (${sql}) LOV_SUB WHERE ROWNUM <= ${limit}`;
@@ -131,16 +150,25 @@ async function resolveChainedLov(lovConfig, userCtx, options = {}) {
   const executor = require('./erpToolExecutor');
   const db = require('../database-oracle').db;
 
-  // 組 inputs
+  // 組 inputs(支援 param:<NAME> 依賴另一個欄位)
+  const paramInputs = options.paramInputs || {};
   const inputs = {};
+  const missingDeps = [];
   for (const [k, v] of Object.entries(param_map || {})) {
     if (v && typeof v === 'object' && v.source) {
-      inputs[k] = resolveExtendedSystemParam(v.source, userCtx);
+      const resolved = resolveExtendedSystemParam(v.source, userCtx, paramInputs);
+      if (typeof v.source === 'string' && v.source.startsWith('param:') && (resolved === null || resolved === undefined || resolved === '')) {
+        missingDeps.push(v.source.slice(6).trim());
+      }
+      inputs[k] = resolved;
     } else if (v && typeof v === 'object' && 'value' in v) {
       inputs[k] = v.value;
     } else {
       inputs[k] = v;
     }
+  }
+  if (missingDeps.length > 0) {
+    return { items: [], type: 'erp_tool', missing_deps: missingDeps };
   }
 
   const execOut = await executor.execute(db, tool_id, inputs, userCtx, {

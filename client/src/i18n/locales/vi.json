@@ -2849,5 +2849,30 @@
       "unknown": "Đã xảy ra lỗi",
       "disabled": "Nhập bằng giọng nói đã bị quản trị viên tắt"
     }
+  },
+  "erpInvoke": {
+    "writeWarning": "Đây là công cụ WRITE — thực thi sẽ thay đổi dữ liệu ERP",
+    "noParams": "Công cụ này không có tham số đầu vào",
+    "autoFilled": "(hệ thống tự điền)",
+    "selectPlaceholder": "Vui lòng chọn",
+    "missingDepsHint": "Vui lòng chọn trước:",
+    "loadLov": "Tải",
+    "needConfirm": "Cần xác nhận",
+    "confirmExecute": "Xác nhận & thực thi",
+    "execute": "Thực thi",
+    "executing": "Đang thực thi…",
+    "resultTitle": "Kết quả",
+    "functionReturn": "trả về",
+    "empty": "trống",
+    "rows": "dòng",
+    "viewOnly": "Chỉ hiển thị",
+    "aiExplain": "Nhờ AI giải thích",
+    "askWith": "Hỏi với dữ liệu này",
+    "translateTo": "Dịch",
+    "translating": "Đang dịch…",
+    "showOriginal": "Gốc",
+    "showTranslated": "Đã dịch",
+    "copy": "Sao chép",
+    "aiTranslationNotice": "🌐 Bản dịch AI · mã/ID/số giữ nguyên"
   }
 }

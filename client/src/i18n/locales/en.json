@@ -2849,5 +2849,30 @@
       "unknown": "An error occurred",
       "disabled": "Voice input is disabled by admin"
     }
+  },
+  "erpInvoke": {
+    "writeWarning": "This is a WRITE tool — execution will modify ERP data",
+    "noParams": "No input parameters",
+    "autoFilled": "(auto-filled by system)",
+    "selectPlaceholder": "Please select",
+    "missingDepsHint": "Please select first:",
+    "loadLov": "Load",
+    "needConfirm": "Confirmation required",
+    "confirmExecute": "Confirm & execute",
+    "execute": "Execute",
+    "executing": "Executing…",
+    "resultTitle": "Result",
+    "functionReturn": "return",
+    "empty": "empty",
+    "rows": "rows",
+    "viewOnly": "Show only",
+    "aiExplain": "Let AI explain",
+    "askWith": "Ask with this",
+    "translateTo": "Translate",
+    "translating": "Translating…",
+    "showOriginal": "Original",
+    "showTranslated": "Translated",
+    "copy": "Copy",
+    "aiTranslationNotice": "🌐 AI translation · codes/IDs/numbers preserved verbatim"
   }
 }

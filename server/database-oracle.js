@@ -2827,6 +2827,19 @@ async function runMigrations(db) {
     CONSTRAINT uq_erp_tool_lang UNIQUE (tool_id, lang)
   )`);
 
+  // ERP 結果翻譯用專有名詞對照(給 Gemini Flash 當 glossary,降低亂翻機率)
+  await createTable('ERP_TRANSLATION_GLOSSARY', `CREATE TABLE erp_translation_glossary (
+    id           NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    source_text  VARCHAR2(200) NOT NULL,
+    en_text      VARCHAR2(300),
+    vi_text      VARCHAR2(300),
+    notes        VARCHAR2(500),
+    scope        VARCHAR2(30) DEFAULT 'global',
+    created_at   TIMESTAMP DEFAULT SYSTIMESTAMP,
+    updated_at   TIMESTAMP DEFAULT SYSTIMESTAMP,
+    CONSTRAINT uq_erp_gloss_src UNIQUE (source_text)
+  )`);
+
   await createTable('ERP_TOOL_AUDIT_LOG', `CREATE TABLE erp_tool_audit_log (
     id                NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     tool_id           NUMBER NOT NULL REFERENCES erp_tools(id) ON DELETE CASCADE,

@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react'
-import { Plus, Trash2, Edit2, Database, AlertTriangle, Play, ShieldAlert, Zap, Eye, History, Share2, Globe, ToggleLeft, ToggleRight } from 'lucide-react'
+import { Plus, Trash2, Edit2, Database, AlertTriangle, Play, ShieldAlert, Zap, Eye, History, Share2, Globe, ToggleLeft, ToggleRight, BookOpen } from 'lucide-react'
 import api from '../../lib/api'
 import { fmtTW } from '../../lib/fmtTW'
 import ErpToolEditor from './ErpToolEditor'
 import ErpToolTestRunner from './ErpToolTestRunner'
 import ErpToolAuditLogPanel from './ErpToolAuditLogPanel'
+import ErpGlossaryModal from './ErpGlossaryModal'
 import ShareModal from '../dashboard/ShareModal'
 
 export interface ErpTool {
@@ -75,6 +76,7 @@ export default function ErpToolsPanel() {
   const [auditToolId, setAuditToolId] = useState<number | 'all' | null>(null)
   const [sharing, setSharing] = useState<ErpTool | null>(null)
   const [config, setConfig] = useState<{ erp_configured: boolean; allowed_schemas: string[] } | null>(null)
+  const [glossaryOpen, setGlossaryOpen] = useState(false)
 
   const load = async () => {
     try {
@@ -127,6 +129,13 @@ export default function ErpToolsPanel() {
           </p>
         </div>
         <div className="flex gap-2">
+          <button
+            onClick={() => setGlossaryOpen(true)}
+            className="flex items-center gap-1.5 px-3 py-2 border border-slate-300 text-slate-700 text-sm rounded-lg hover:bg-slate-50 transition"
+            title="維護翻譯詞庫,提升 AI 翻譯 ERP 結果的準確度"
+          >
+            <BookOpen size={14} /> 翻譯詞庫
+          </button>
           <button
             onClick={() => setAuditToolId('all')}
             className="flex items-center gap-1.5 px-3 py-2 border border-slate-300 text-slate-700 text-sm rounded-lg hover:bg-slate-50 transition"
@@ -286,6 +295,10 @@ export default function ErpToolsPanel() {
           sharesUrl={`/erp-tools/${sharing.id}/access`}
           onClose={() => setSharing(null)}
         />
+      )}
+
+      {glossaryOpen && (
+        <ErpGlossaryModal onClose={() => setGlossaryOpen(false)} />
       )}
     </div>
   )

@@ -183,6 +183,42 @@ router.get('/my/list', async (req, res) => {
       seen.add(id);
       unique.push(serializeTool(r));
     }
+
+    // 合併翻譯:依 ?lang= 或 x-lang header
+    const lang = getLangFromReq(req);
+    if (lang && lang !== 'zh-TW' && unique.length > 0) {
+      const ids = unique.map(t => t.id);
+      try {
+        const placeholders = ids.map(() => '?').join(',');
+        const transRows = await db.prepare(`
+          SELECT tool_id, name, description, params_labels_json
+          FROM erp_tool_translations
+          WHERE lang = ? AND tool_id IN (${placeholders})
+        `).all(lang, ...ids);
+        const byId = new Map();
+        for (const r of (transRows || [])) {
+          byId.set(r.tool_id || r.TOOL_ID, {
+            name:        r.name || r.NAME,
+            description: r.description || r.DESCRIPTION,
+            params_labels: parseJson(r.params_labels_json || r.PARAMS_LABELS_JSON, {}),
+          });
+        }
+        for (const t of unique) {
+          const tr = byId.get(t.id);
+          if (!tr) continue;
+          if (tr.name) t.name = tr.name;
+          if (tr.description) t.description = tr.description;
+          if (tr.params_labels && t.params) {
+            t.params = t.params.map(p => {
+              const lbl = tr.params_labels[p.name];
+              return lbl ? { ...p, display_name: lbl } : p;
+            });
+          }
+        }
+      } catch (e) {
+        console.warn('[ErpTools] my/list translation merge failed:', e.message);
+      }
+    }
     res.json(unique);
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -202,6 +238,81 @@ router.get('/pending-approvals', async (req, res) => {
       ORDER BY pa.created_at DESC
     `).all();
     res.json(rows);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── POST /api/erp-tools/translate-result :翻譯 ERP 結果(Redis cache + glossary) ──
+router.post('/translate-result', async (req, res) => {
+  try {
+    const { text, target_lang } = req.body || {};
+    if (!text || !String(text).trim()) return res.json({ translated: '', cached: false });
+    const lang = String(target_lang || '').toLowerCase();
+    if (lang !== 'en' && lang !== 'vi') {
+      return res.json({ translated: text, cached: false, skipped: 'lang_not_supported' });
+    }
+    const translator = require('../services/erpResultTranslator');
+    const out = await translator.translateResult(String(text), lang);
+    res.json(out);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── Glossary CRUD(Admin 專用)────────────────────────────────────────────────
+router.get('/glossary/list', async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const db = getDb();
+  try {
+    const rows = await db.prepare(`SELECT * FROM erp_translation_glossary ORDER BY source_text`).all();
+    res.json((rows || []).map(r => ({
+      id:          r.id          || r.ID,
+      source_text: r.source_text || r.SOURCE_TEXT,
+      en_text:     r.en_text     || r.EN_TEXT,
+      vi_text:     r.vi_text     || r.VI_TEXT,
+      notes:       r.notes       || r.NOTES,
+      scope:       r.scope       || r.SCOPE,
+      updated_at:  r.updated_at  || r.UPDATED_AT,
+    })));
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.post('/glossary', async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const db = getDb();
+  try {
+    const { source_text, en_text, vi_text, notes, scope } = req.body || {};
+    if (!source_text) return res.status(400).json({ error: 'source_text 必填' });
+    const existing = await db.prepare(`SELECT id FROM erp_translation_glossary WHERE source_text = ?`).get(source_text);
+    if (existing) {
+      await db.prepare(`
+        UPDATE erp_translation_glossary
+        SET en_text=?, vi_text=?, notes=?, scope=?, updated_at=SYSTIMESTAMP
+        WHERE source_text=?
+      `).run(en_text || null, vi_text || null, notes || null, scope || 'global', source_text);
+    } else {
+      await db.prepare(`
+        INSERT INTO erp_translation_glossary (source_text, en_text, vi_text, notes, scope)
+        VALUES (?, ?, ?, ?, ?)
+      `).run(source_text, en_text || null, vi_text || null, notes || null, scope || 'global');
+    }
+    require('../services/erpResultTranslator').invalidateGlossaryCache();
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.delete('/glossary/:id', async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const db = getDb();
+  try {
+    await db.prepare(`DELETE FROM erp_translation_glossary WHERE id = ?`).run(req.params.id);
+    require('../services/erpResultTranslator').invalidateGlossaryCache();
+    res.json({ ok: true });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -432,6 +543,7 @@ router.delete('/:id', async (req, res) => {
 });
 
 // ── POST /api/erp-tools/:id/refresh-metadata ─────────────────────────────────
+// Body: { apply?: boolean } — apply=true 時智慧合併並寫回 params_json;否則只回 diff
 router.post('/:id/refresh-metadata', async (req, res) => {
   if (!requireAdmin(req, res)) return;
   const db = getDb();
@@ -448,20 +560,115 @@ router.post('/:id/refresh-metadata', async (req, res) => {
     if (!ov) return res.status(404).json({ error: '找不到對應 overload' });
     const newHash = metaSvc.computeMetadataHash(ov);
     const drifted = newHash !== cur.metadata_hash;
-    await db.prepare(`
-      UPDATE erp_tools SET metadata_hash = ?, metadata_checked_at = SYSTIMESTAMP,
-                           metadata_drifted = ?
-      WHERE id = ?
-    `).run(newHash, drifted ? 1 : 0, req.params.id);
     const { params: latestParams, returns: latestReturns } = metaSvc.overloadToParams(ov);
+
+    // ── Diff 計算 ────────────────────────────────────────────────────────
+    const oldByName = new Map((cur.params || []).map(p => [p.name, p]));
+    const newByName = new Map(latestParams.map(p => [p.name, p]));
+    const added = [];
+    const removed = [];
+    const changed = [];
+    for (const np of latestParams) {
+      const op = oldByName.get(np.name);
+      if (!op) { added.push(np); continue; }
+      const diffs = [];
+      if (op.in_out !== np.in_out) diffs.push(`in_out: ${op.in_out} → ${np.in_out}`);
+      if (op.data_type !== np.data_type) diffs.push(`data_type: ${op.data_type} → ${np.data_type}`);
+      if ((op.data_length || null) !== (np.data_length || null)) diffs.push(`data_length: ${op.data_length} → ${np.data_length}`);
+      if ((op.data_precision || null) !== (np.data_precision || null)) diffs.push(`precision: ${op.data_precision} → ${np.data_precision}`);
+      if ((op.data_scale || null) !== (np.data_scale || null)) diffs.push(`scale: ${op.data_scale} → ${np.data_scale}`);
+      if (!!op.required !== !!np.required) diffs.push(`required: ${op.required} → ${np.required}`);
+      if ((op.position || null) !== (np.position || null)) diffs.push(`position: ${op.position} → ${np.position}`);
+      if (diffs.length > 0) changed.push({ name: np.name, diffs });
+    }
+    for (const op of (cur.params || [])) {
+      if (!newByName.has(op.name)) removed.push(op);
+    }
+
+    let applied = false;
+    let mergedParams = null;
+    if (req.body?.apply === true) {
+      // ── 智慧合併:保留 user-config,更新 metadata 欄位 ──────────────────
+      mergedParams = latestParams.map(np => {
+        const op = oldByName.get(np.name);
+        if (!op) return np;  // 新參數,用 fresh defaults
+        // 保留 user 設定的欄位
+        const preserved = {
+          ai_hint:       op.ai_hint ?? '',
+          lov_config:    op.lov_config ?? null,
+          default_value: op.default_value ?? null,
+          default_config: op.default_config ?? undefined,
+          inject_value:  op.inject_value ?? null,
+          inject_source: op.inject_source ?? null,
+        };
+        if (op.visible !== undefined)   preserved.visible  = op.visible;
+        if (op.editable !== undefined)  preserved.editable = op.editable;
+        // 把 undefined 去掉(避免序列化出多餘 key)
+        Object.keys(preserved).forEach(k => preserved[k] === undefined && delete preserved[k]);
+        return { ...np, ...preserved };
+      });
+
+      // 重新生成 tool_schema
+      const newSchema = schemaGen.generateToolSchema({
+        code: cur.code,
+        name: cur.name,
+        description: cur.description,
+        access_mode: cur.access_mode,
+        params: mergedParams,
+      });
+
+      await db.prepare(`
+        UPDATE erp_tools SET
+          params_json      = ?,
+          returns_json     = ?,
+          tool_schema_json = ?,
+          metadata_hash    = ?,
+          metadata_checked_at = SYSTIMESTAMP,
+          metadata_drifted = 0,
+          updated_at       = SYSTIMESTAMP
+        WHERE id = ?
+      `).run(
+        JSON.stringify(mergedParams),
+        JSON.stringify(latestReturns),
+        JSON.stringify(newSchema),
+        newHash,
+        req.params.id,
+      );
+
+      // 同步代理 skill 的 tool_schema
+      try {
+        if (cur.proxy_skill_id) {
+          await db.prepare(`UPDATE skills SET tool_schema = ? WHERE id = ?`)
+            .run(JSON.stringify(newSchema), cur.proxy_skill_id);
+        }
+      } catch (e) {
+        console.warn('[ErpTools] proxy skill schema sync failed:', e.message);
+      }
+      applied = true;
+    } else {
+      // dry-run 只更新 hash/checked_at
+      await db.prepare(`
+        UPDATE erp_tools SET metadata_hash = ?, metadata_checked_at = SYSTIMESTAMP,
+                             metadata_drifted = ?
+        WHERE id = ?
+      `).run(newHash, drifted ? 1 : 0, req.params.id);
+    }
+
     res.json({
       drifted,
+      applied,
       old_hash: cur.metadata_hash,
       new_hash: newHash,
       latest_params: latestParams,
       latest_returns: latestReturns,
       current_params: cur.params,
       current_returns: cur.returns,
+      merged_params: mergedParams,  // apply=true 時才有
+      diff: {
+        added:   added.map(p => ({ name: p.name, in_out: p.in_out, data_type: p.data_type })),
+        removed: removed.map(p => ({ name: p.name, in_out: p.in_out, data_type: p.data_type })),
+        changed,
+      },
     });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -545,12 +752,14 @@ router.post('/:id/lov/:paramName', async (req, res) => {
     const result = await lovResolver.resolveLov(p.lov_config, req.user, {
       search: req.body?.search || req.query?.search,
       limit: Number(req.body?.limit || req.query?.limit) || undefined,
+      paramInputs: (req.body && typeof req.body.paramInputs === 'object') ? req.body.paramInputs : {},
     });
     res.json(result);
   } catch (e) {
     res.status(400).json({ error: e.message });
   }
 });
+
 
 // ── POST /api/erp-tools/:id/execute ──────────────────────────────────────────
 router.post('/:id/execute', async (req, res) => {

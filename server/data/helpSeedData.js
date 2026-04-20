@@ -1,7 +1,7 @@
 /**
  * Help page seed data — zh-TW (source of truth)
  * Auto-extracted from HelpPage.tsx
- * Generated: 2026-04-19
+ * Generated: 2026-04-20
  *
  * Block types: para, tip, note, table, steps, code, list, subsection, card_grid, comparison
  */
@@ -8339,7 +8339,7 @@ const userSections = [
     "sort_order": 32,
     "icon": "Database",
     "icon_color": "text-sky-600",
-    "last_modified": "2026-04-17",
+    "last_modified": "2026-04-20",
     "title": "ERP 工具呼叫",
     "sidebar_label": "ERP 工具",
     "blocks": [
@@ -8425,21 +8425,37 @@ const userSections = [
               },
               {
                 "title": "選定一個工具",
-                "desc": "畫面跳到參數填寫視窗，必填欄位以紅色星號標示"
+                "desc": "畫面跳到參數填寫視窗，必填欄位以紅色星號標示；參數名稱會依系統語言顯示中文／英文／越南文，括號下方的小字為 Oracle 原始參數名（如 P_WIP_NAME）"
               },
               {
                 "title": "填寫參數",
                 "desc": "有下拉選單的欄位由管理員設定的 LOV 提供選項（例：員工編號、部門）；自由輸入欄位請依說明填寫"
               },
               {
+                "title": "若某欄位顯示「請先選擇 XXX」",
+                "desc": "代表此欄的下拉選項需要上一欄（如組織代碼）先填才會撈對應資料。上一欄選完會自動重抓下一欄的可選項，清空舊值避免誤用。"
+              },
+              {
                 "title": "按「執行」",
-                "desc": "結果會顯示在視窗下方，可切換 Table 或 JSON 檢視"
+                "desc": "結果會顯示在視窗下方，可切換 Table 或 JSON 檢視；長段文字自動換行並可滾動"
+              },
+              {
+                "title": "每段文字右上角的「翻譯」按鈕",
+                "desc": "當系統語言為 English / Tiếng Việt 時顯示；按下會把 ERP 的中文回傳內容透過 AI 翻譯成對應語言，代碼、ID、數字、日期保持原樣。翻譯結果會快取 24 小時，同段內容任何使用者再查都不重複翻"
+              },
+              {
+                "title": "「複製」按鈕",
+                "desc": "一鍵複製當前顯示內容（會根據目前切換到原文或譯文切換複製對象）"
               },
               {
                 "title": "選擇結果處理方式",
                 "desc": "執行完成後畫面底部會出現三顆按鈕：【僅顯示結果】直接顯示在對話、【讓 AI 解釋】把結果交給 AI 用自然語言說明、【以此提問】把結果當成下一則訊息的參考資料"
               }
             ]
+          },
+          {
+            "type": "tip",
+            "text": "翻譯按鈕會依照您目前的 UI 語言自動判斷翻譯目標。切換語言到 English 後重新開啟執行面板，按鈕會變成「翻譯 (EN)」。"
           }
         ]
       },
@@ -8490,6 +8506,250 @@ const userSections = [
       },
       {
         "type": "subsection",
+        "title": "🔧 管理員：LOV（下拉選單來源）設定",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "在「Admin → API 連接器 → ERP Procedure → 新增／編輯 ERP 工具」展開任一 IN 參數，可設定該欄的下拉選項來源。共五種類型："
+          },
+          {
+            "type": "table",
+            "headers": [
+              "LOV 類型",
+              "適用場景",
+              "值如何決定"
+            ],
+            "rows": [
+              [
+                "無（自由輸入）",
+                "純文字欄，如備註",
+                "使用者手動輸入"
+              ],
+              [
+                "靜態清單（static）",
+                "固定選項少的欄位",
+                "管理員列舉 { value, label }，AI 也會收到 enum，可自動挑"
+              ],
+              [
+                "SQL 查詢（sql）",
+                "由 ERP DB 動態撈的選項（員工、工單、組織等）",
+                "執行 SELECT；value_col 塞給 procedure，label_col 顯示給使用者"
+              ],
+              [
+                "系統值（system）",
+                "當前使用者相關資訊",
+                "自動帶入 email / 工號 / 廠區等，不讓使用者改"
+              ],
+              [
+                "鏈式（erp_tool）",
+                "另一個 ERP tool 的 OUT cursor 當選項",
+                "呼叫指定 ERP tool，取回 rows 渲染下拉"
+              ]
+            ]
+          },
+          {
+            "type": "subsection",
+            "title": "SQL LOV 撰寫規則",
+            "blocks": [
+              {
+                "type": "code",
+                "language": "sql",
+                "text": "SELECT emp_no       AS V,\n       emp_name || ' (' || dept || ')' AS L\nFROM   fl_employee\nWHERE  factory = :factory\n  AND  status  = 'A'\nORDER BY emp_no"
+              },
+              {
+                "type": "list",
+                "items": [
+                  "**必須 SELECT 開頭**；禁 UPDATE / DELETE / INSERT / MERGE / DROP 等寫入關鍵字",
+                  "只能一個 statement（偵測到分號結尾以外的 `;` 會被擋）",
+                  "系統自動包 `SELECT * FROM (...) WHERE ROWNUM <= N`，**不要自己加 `ROWNUM` / `FETCH FIRST`**（預設 N=500，由 `ERP_TOOL_LOV_MAX_ROWS` 控制）",
+                  "`value_col` 預設 `V`、`label_col` 預設 `L`；比對不分大小寫，可寫 `AS v, AS l`"
+                ]
+              },
+              {
+                "type": "tip",
+                "text": "**value vs label 的關鍵**：value 是實際傳給 PROCEDURE 的值（使用者看不到），label 是下拉顯示給使用者看的文字。所以 `SELECT wip_entity_id AS V, wip_name || '（' || org_code || '）' AS L` 可以做到「使用者挑工單號+組織代碼、實際傳 ID」。前提是 PROCEDURE 的型別與 value 對應，若不對得改 PROCEDURE。"
+              }
+            ]
+          },
+          {
+            "type": "subsection",
+            "title": "SQL binds（:name 引用）支援的來源",
+            "blocks": [
+              {
+                "type": "para",
+                "text": "撰寫 SQL 時用 `:factory`、`:dept_code` 等佔位符，系統自動依每位使用者帶入對應值："
+              },
+              {
+                "type": "table",
+                "headers": [
+                  "來源",
+                  "帶入值"
+                ],
+                "rows": [
+                  [
+                    "system_user_email",
+                    "當前使用者 email"
+                  ],
+                  [
+                    "system_user_employee_id",
+                    "工號"
+                  ],
+                  [
+                    "system_user_name / title / dept",
+                    "姓名 / 職稱 / 部門代碼"
+                  ],
+                  [
+                    "system_user_factory",
+                    "廠區代碼（最常用，如 TCC / Z4E）"
+                  ],
+                  [
+                    "system_user_profit_center",
+                    "利潤中心"
+                  ],
+                  [
+                    "system_date / system_datetime",
+                    "今天 / 當下時間"
+                  ],
+                  [
+                    "param:P_ORG_CODE（新）",
+                    "**當前 Modal 中另一個參數的值**；可做「先選組織、再依組織撈工單」的依賴鏈"
+                  ]
+                ]
+              }
+            ]
+          },
+          {
+            "type": "subsection",
+            "title": "🔗 參數間依賴（cascading LOV）",
+            "blocks": [
+              {
+                "type": "para",
+                "text": "若某欄（如 P_WIP_NAME）的選項要依另一欄（如 P_ORG_CODE）過濾，在 SQL binds 用 `param:<NAME>` 來源："
+              },
+              {
+                "type": "code",
+                "language": "json",
+                "text": "{\n  \"type\": \"sql\",\n  \"sql\": \"SELECT w.wip_entity_id AS V, w.wip_name AS L FROM wip_entities w WHERE w.organization_id = :org_id\",\n  \"binds\": [\n    { \"name\": \"org_id\", \"source\": \"param:P_ORG_CODE\" }\n  ],\n  \"value_col\": \"V\",\n  \"label_col\": \"L\"\n}"
+              },
+              {
+                "type": "list",
+                "items": [
+                  "管理員 UI：bind 的 source 下拉會有 optgroup「其他參數（依賴另一欄）」自動列出同工具的其他 IN 參數，免手打 `param:` 前綴",
+                  "使用者端：若 P_ORG_CODE 尚未選，P_WIP_NAME 下拉會顯示「請先選擇：P_ORG_CODE」提示；P_ORG_CODE 一變，P_WIP_NAME 選項自動重撈並清空舊值",
+                  "支援多層依賴；系統會偵測迴圈（A→B→A）並以錯誤回應避免無限迴圈",
+                  "鏈式 LOV（type=erp_tool）的 param_map 也支援 `param:<NAME>`"
+                ]
+              },
+              {
+                "type": "tip",
+                "text": "LLM function calling 路徑看不到 SQL LOV 的選項列表（只看得到靜態 LOV 的 enum）。建議有 cascading 的工具把「允許 LLM 自動呼叫」關掉，只留「使用者手動觸發」，避免 AI 亂猜值。"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "🔧 管理員：參數／工具顯示名稱多語",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "使用者看到的 `P_ORG_CODE` 這種 Oracle 原始參數名不友善。在工具編輯視窗右下角按「翻譯 (en / vi)」會自動透過 LLM 把 `ai_hint`（以及工具 name、description）翻成三語存入 `erp_tool_translations`。使用者切換 UI 語言時自動顯示對應翻譯的 display_name（括號小字仍保留原始 P_XXX 方便管理）。"
+          },
+          {
+            "type": "note",
+            "text": "翻譯結果寫進 DB，僅在按下翻譯鍵時才執行；日常呼叫不會額外耗 token。若事後改過 ai_hint 需要手動再按一次翻譯。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "🔧 管理員：重抓 metadata（DBA 改過 PROCEDURE 簽章時）",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "當 DBA 改了 PROCEDURE 參數（新增欄位、改型別、改 IN/OUT、改 NUMBER/VARCHAR2），工具定義會與 Oracle 實際簽章不一致（drift）。在工具編輯視窗頂部「Metadata 同步」區按「重抓 metadata」："
+          },
+          {
+            "type": "steps",
+            "items": [
+              {
+                "title": "系統從 Oracle 撈最新簽章並比對",
+                "desc": "計算 hash 差異（顯示前 8 碼變化）"
+              },
+              {
+                "title": "出現 diff 確認視窗",
+                "desc": "🟢 新增參數 / 🔴 移除參數 / 🟡 型別變更（會列出每個欄位如 in_out、data_type、data_length 等具體差異）"
+              },
+              {
+                "title": "按「套用並合併」",
+                "desc": "系統智慧合併：**保留您原本的 `ai_hint` / `LOV 設定` / `預設值` / `inject 設定` / `可見/鎖定` 狀態**，覆蓋 metadata 型別欄位。Oracle 移除的欄位及其 LOV 會一併刪除"
+              },
+              {
+                "title": "自動重新生成 tool_schema",
+                "desc": "並同步到對應的 proxy skill（供 LLM function calling 使用）"
+              },
+              {
+                "title": "若該參數的型別變了（例如 VARCHAR → NUMBER）",
+                "desc": "請回到該參數，檢查 LOV SQL 的 value_col 是否仍回傳正確型別（舊 SQL 可能在傳字串，新的需要改成傳 ID）"
+              }
+            ]
+          },
+          {
+            "type": "note",
+            "text": "「套用並合併」會立即寫回 DB（含 params_json / tool_schema / metadata_hash），不需要再按「儲存」；但其他欄位（name / description / limits 等）若有編輯仍要按右下儲存。"
+          },
+          {
+            "type": "tip",
+            "text": "若顯示「✓ Metadata 無變動」代表本地與 Oracle 一致，不用動作。系統本身也會週期性偵測 drift（metadata_drifted 旗標），列表頁會以警示標記提醒。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "🔧 管理員：ERP 結果翻譯詞庫",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "PROCEDURE 回傳的中文文字（例如「發補單」「退料單」「審核中」）在使用者切到 English/Vietnamese 時會自動翻譯。為提升準確度，Admin 可維護專有名詞對照表。"
+          },
+          {
+            "type": "steps",
+            "items": [
+              {
+                "title": "在「Admin → API 連接器 → ERP Procedure」頁面右上按「翻譯詞庫」",
+                "desc": "開啟詞庫管理 Modal"
+              },
+              {
+                "title": "新增詞彙",
+                "desc": "填寫中文原文、English 譯文、Tiếng Việt 譯文（可選其一）、備註。例：「發補單」→「Reissue Note」/「Phiếu bổ sung」"
+              },
+              {
+                "title": "表格中每列可直接編輯",
+                "desc": "改 en / vi / 備註後列尾會出現儲存圖示，點下即更新"
+              },
+              {
+                "title": "刪除不再使用的詞彙",
+                "desc": "點 trash 圖示"
+              }
+            ]
+          },
+          {
+            "type": "list",
+            "items": [
+              "翻譯流程：使用者點「翻譯」→ Server 把詞庫當 glossary 注入 Gemini Flash prompt，AI 會優先使用您定義的譯文，並保留代碼/ID/數字/日期原樣",
+              "**快取策略**：翻譯結果以原文 SHA hash 為 key 存 Redis 24 小時。同段原文任何使用者再查都不重複翻（節省 token）",
+              "**詞庫改動約 10 分鐘內生效**（app-level cache TTL）；已快取的翻譯仍走舊詞庫 24 小時，新詞庫只對新內容生效"
+            ]
+          },
+          {
+            "type": "tip",
+            "text": "詞庫不需要收集所有字詞 — 只把「AI 會亂翻」或「想統一用語」的專有名詞寫進去即可，通常 100 個詞就覆蓋 95% 場景。代碼/ID/數字 AI 會自動保留原樣，不需要放進詞庫。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
         "title": "常見問題",
         "blocks": [
           {
@@ -8518,6 +8778,18 @@ const userSections = [
               [
                 "某個工具找不到了",
                 "可能被管理員停用或取消授權，請聯繫管理員"
+              ],
+              [
+                "某欄下拉顯示「請先選擇：XXX」",
+                "LOV 依賴另一欄（cascading），請先在上游欄位選好值，系統會自動重撈此欄的可選項"
+              ],
+              [
+                "翻譯按鈕沒出現",
+                "僅當 UI 語言為 English 或 Tiếng Việt 時顯示；切換至對應語言後重新開啟執行視窗即可"
+              ],
+              [
+                "（管理員）改過 PROCEDURE 後欄位還是舊的",
+                "到編輯視窗頂部按「重抓 metadata」→「套用並合併」，系統會保留你既有的 ai_hint / LOV 設定"
               ]
             ]
           }

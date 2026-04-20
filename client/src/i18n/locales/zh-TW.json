@@ -2849,5 +2849,30 @@
       "unknown": "發生錯誤",
       "disabled": "管理員已關閉語音輸入"
     }
+  },
+  "erpInvoke": {
+    "writeWarning": "這是 WRITE 型工具,執行會實際修改 ERP 資料",
+    "noParams": "此工具無輸入參數",
+    "autoFilled": "(系統自動帶入)",
+    "selectPlaceholder": "請選擇",
+    "missingDepsHint": "請先選擇:",
+    "loadLov": "載入",
+    "needConfirm": "需要確認",
+    "confirmExecute": "確認執行",
+    "execute": "執行",
+    "executing": "執行中…",
+    "resultTitle": "結果",
+    "functionReturn": "回傳",
+    "empty": "空",
+    "rows": "列",
+    "viewOnly": "僅顯示結果",
+    "aiExplain": "讓 AI 解釋",
+    "askWith": "以此提問",
+    "translateTo": "翻譯",
+    "translating": "翻譯中…",
+    "showOriginal": "原文",
+    "showTranslated": "譯文",
+    "copy": "複製",
+    "aiTranslationNotice": "🌐 AI 翻譯 · 代碼/ID/數字保留原樣"
   }
 }

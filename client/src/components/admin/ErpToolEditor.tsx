@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { X, Search, AlertTriangle, ChevronDown, ChevronRight, RefreshCw, Save, Languages } from 'lucide-react'
+import { X, Search, AlertTriangle, ChevronDown, ChevronRight, RefreshCw, Save, Languages, Plus, Minus, Edit3 } from 'lucide-react'
 import api from '../../lib/api'
 import type { ErpTool, ErpParam, ErpReturns } from './ErpToolsPanel'
 
@@ -80,6 +80,20 @@ export default function ErpToolEditor({ tool, allowedSchemas, onClose, onSaved }
   const [saving, setSaving] = useState(false)
   const [translating, setTranslating] = useState(false)
   const [translations, setTranslations] = useState<Record<string, any> | null>(null)
+  const [refreshing, setRefreshing] = useState(false)
+  const [reloadDiff, setReloadDiff] = useState<{
+    drifted: boolean
+    old_hash: string | null
+    new_hash: string
+    diff: {
+      added: { name: string; in_out: string; data_type: string }[]
+      removed: { name: string; in_out: string; data_type: string }[]
+      changed: { name: string; diffs: string[] }[]
+    }
+    latest_params: ErpParam[]
+    latest_returns: ErpReturns | null
+  } | null>(null)
+  const [applying, setApplying] = useState(false)
 
   const inspect = async () => {
     setError(null)
@@ -189,6 +203,42 @@ export default function ErpToolEditor({ tool, allowedSchemas, onClose, onSaved }
     }
   }, [isEdit, tool])
 
+  const refreshMetadata = async () => {
+    if (!isEdit || !tool) return
+    setError(null)
+    setRefreshing(true)
+    try {
+      const res = await api.post(`/erp-tools/${tool.id}/refresh-metadata`, {})
+      setReloadDiff(res.data)
+    } catch (e: any) {
+      setError(e.response?.data?.error || '重抓 metadata 失敗')
+    } finally {
+      setRefreshing(false)
+    }
+  }
+
+  const applyMetadata = async () => {
+    if (!isEdit || !tool || !reloadDiff) return
+    setApplying(true)
+    setError(null)
+    try {
+      const res = await api.post(`/erp-tools/${tool.id}/refresh-metadata`, { apply: true })
+      // 成功後把合併後的 params 套回本地 state(保留 user 在 editor 裡的未存改動會被蓋掉,這是合理的)
+      if (res.data.merged_params) {
+        setParams(res.data.merged_params)
+      }
+      if (res.data.latest_returns !== undefined) {
+        setReturns(res.data.latest_returns)
+      }
+      setMetadataHash(res.data.new_hash)
+      setReloadDiff(null)
+    } catch (e: any) {
+      setError(e.response?.data?.error || '套用失敗')
+    } finally {
+      setApplying(false)
+    }
+  }
+
   const translate = async () => {
     if (!isEdit || !tool) {
       setError('請先儲存後再翻譯')
@@ -288,6 +338,30 @@ export default function ErpToolEditor({ tool, allowedSchemas, onClose, onSaved }
                   ))}
                 </div>
               )}
+            </section>
+          )}
+
+          {/* Edit 模式:Metadata 同步 */}
+          {isEdit && (
+            <section className="border border-slate-200 rounded-lg p-3 bg-slate-50">
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-sm font-medium text-slate-700">Metadata 同步</div>
+                  <div className="text-[11px] text-slate-500 mt-0.5">
+                    若 PROCEDURE 簽章已變更,按下「重抓 metadata」會重新從 Oracle 撈取參數定義,合併時會保留你已設的 ai_hint / LOV / 預設值 / inject / 可見鎖定等配置
+                  </div>
+                  {metadataHash && (
+                    <div className="text-[10px] text-slate-400 font-mono mt-1">
+                      目前 hash: {metadataHash.slice(0, 12)}…
+                    </div>
+                  )}
+                </div>
+                <button onClick={refreshMetadata} disabled={refreshing}
+                  className="flex items-center gap-1.5 px-3 py-1.5 border border-slate-300 bg-white text-slate-700 text-xs rounded hover:bg-slate-50 disabled:opacity-50">
+                  <RefreshCw size={12} className={refreshing ? 'animate-spin' : ''} />
+                  {refreshing ? '查詢中…' : '重抓 metadata'}
+                </button>
+              </div>
             </section>
           )}
 
@@ -498,6 +572,7 @@ export default function ErpToolEditor({ tool, allowedSchemas, onClose, onSaved }
                           param={p}
                           onChange={patch => updateParam(idx, patch)}
                           onLovChange={patch => updateLov(idx, patch)}
+                          siblingParams={params.filter((_sp, i) => i !== idx && (_sp.in_out === 'IN' || _sp.in_out === 'IN/OUT')).map(sp => sp.name)}
                         />
                       )}
                     </div>
@@ -563,6 +638,105 @@ export default function ErpToolEditor({ tool, allowedSchemas, onClose, onSaved }
           </button>
         </div>
       </div>
+
+      {/* 重抓 metadata diff 確認 */}
+      {reloadDiff && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl max-h-[85vh] overflow-hidden flex flex-col">
+            <div className="px-5 py-3 border-b flex items-center justify-between">
+              <h4 className="font-semibold text-slate-800 flex items-center gap-2 text-sm">
+                <RefreshCw size={14} className="text-sky-600" />
+                Metadata 變更比對
+              </h4>
+              <button onClick={() => setReloadDiff(null)} className="p-1 hover:bg-slate-100 rounded">
+                <X size={14} />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3 text-xs">
+              {!reloadDiff.drifted ? (
+                <div className="text-center text-emerald-700 bg-emerald-50 border border-emerald-200 rounded p-4">
+                  ✓ Metadata 無變動,目前定義已是最新
+                </div>
+              ) : (
+                <>
+                  <div className="bg-amber-50 border border-amber-200 rounded p-3 text-amber-800">
+                    ⚠ 偵測到 PROCEDURE 簽章已變更(hash: {reloadDiff.old_hash?.slice(0, 8)}… → {reloadDiff.new_hash.slice(0, 8)}…)
+                  </div>
+
+                  {reloadDiff.diff.added.length > 0 && (
+                    <section>
+                      <div className="text-xs font-medium text-green-700 mb-1 flex items-center gap-1">
+                        <Plus size={11} /> 新增參數 ({reloadDiff.diff.added.length})
+                      </div>
+                      <div className="space-y-1">
+                        {reloadDiff.diff.added.map(p => (
+                          <div key={p.name} className="border border-green-200 bg-green-50 rounded px-2 py-1 font-mono">
+                            <span className="font-bold">{p.name}</span>
+                            <span className="text-slate-500 ml-2">{p.in_out} · {p.data_type}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </section>
+                  )}
+
+                  {reloadDiff.diff.removed.length > 0 && (
+                    <section>
+                      <div className="text-xs font-medium text-red-700 mb-1 flex items-center gap-1">
+                        <Minus size={11} /> 移除參數 ({reloadDiff.diff.removed.length})
+                      </div>
+                      <div className="space-y-1">
+                        {reloadDiff.diff.removed.map(p => (
+                          <div key={p.name} className="border border-red-200 bg-red-50 rounded px-2 py-1 font-mono">
+                            <span className="font-bold line-through">{p.name}</span>
+                            <span className="text-slate-500 ml-2">{p.in_out} · {p.data_type}</span>
+                            <span className="text-red-600 ml-2 not-italic">(含你原本設定的 ai_hint / LOV 會一併刪除)</span>
+                          </div>
+                        ))}
+                      </div>
+                    </section>
+                  )}
+
+                  {reloadDiff.diff.changed.length > 0 && (
+                    <section>
+                      <div className="text-xs font-medium text-amber-700 mb-1 flex items-center gap-1">
+                        <Edit3 size={11} /> 型別/屬性變更 ({reloadDiff.diff.changed.length})
+                      </div>
+                      <div className="space-y-1">
+                        {reloadDiff.diff.changed.map(c => (
+                          <div key={c.name} className="border border-amber-200 bg-amber-50 rounded px-2 py-1">
+                            <div className="font-mono font-bold">{c.name}</div>
+                            <ul className="ml-4 list-disc text-amber-800 text-[11px]">
+                              {c.diffs.map((d, i) => <li key={i}>{d}</li>)}
+                            </ul>
+                          </div>
+                        ))}
+                      </div>
+                    </section>
+                  )}
+
+                  <div className="text-[11px] text-slate-500 bg-slate-50 border border-slate-200 rounded p-2 mt-3">
+                    套用後會保留:<span className="font-medium">ai_hint、LOV 設定、預設值、inject 設定、可見/鎖定狀態</span>;
+                    並重新生成 tool_schema 同步給 proxy skill。套用後還需要在編輯視窗按「儲存」才會真正寫入關聯欄位(如 name/description)。
+                  </div>
+                </>
+              )}
+            </div>
+            <div className="px-5 py-3 border-t bg-slate-50 flex justify-end gap-2">
+              <button onClick={() => setReloadDiff(null)}
+                className="px-3 py-1.5 text-sm border border-slate-300 rounded hover:bg-white">
+                {reloadDiff.drifted ? '取消' : '關閉'}
+              </button>
+              {reloadDiff.drifted && (
+                <button onClick={applyMetadata} disabled={applying}
+                  className="px-3 py-1.5 text-sm bg-amber-600 text-white rounded hover:bg-amber-700 disabled:opacity-50 flex items-center gap-1.5">
+                  <RefreshCw size={12} />
+                  {applying ? '套用中…' : '套用並合併'}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -649,11 +823,12 @@ function DefaultValueEditor({ param, onChange }: { param: ErpParam; onChange: (p
 }
 
 function ParamDetailEditor({
-  param, onChange, onLovChange,
+  param, onChange, onLovChange, siblingParams = [],
 }: {
   param: ErpParam
   onChange: (p: Partial<ErpParam>) => void
   onLovChange: (p: any) => void
+  siblingParams?: string[]
 }) {
   const lovType = param.lov_config?.type || 'none'
   const canInput = param.in_out === 'IN' || param.in_out === 'IN/OUT'
@@ -755,6 +930,7 @@ function ParamDetailEditor({
                 <SqlBindsEditor
                   binds={param.lov_config?.binds || []}
                   onChange={binds => onLovChange({ binds })}
+                  siblingParams={siblingParams}
                 />
               </div>
             )}
@@ -771,6 +947,7 @@ function ParamDetailEditor({
               <ErpToolLovEditor
                 lovConfig={param.lov_config}
                 onChange={(patch) => onLovChange(patch)}
+                siblingParams={siblingParams}
               />
             )}
           </div>
@@ -822,7 +999,7 @@ function StaticLovEditor({ items, onChange }: { items: any[]; onChange: (items: 
   )
 }
 
-function ErpToolLovEditor({ lovConfig, onChange }: { lovConfig: any; onChange: (patch: any) => void }) {
+function ErpToolLovEditor({ lovConfig, onChange, siblingParams = [] }: { lovConfig: any; onChange: (patch: any) => void; siblingParams?: string[] }) {
   const [tools, setTools] = useState<any[]>([])
   const [selectedTool, setSelectedTool] = useState<any | null>(null)
   const paramMap = lovConfig?.param_map || {}
@@ -890,6 +1067,13 @@ function ErpToolLovEditor({ lovConfig, onChange }: { lovConfig: any; onChange: (
                   <select value={entry.source} onChange={e => updateParam(p.name, { mode: 'system', source: e.target.value })}
                     className="flex-1 border border-slate-300 rounded px-1 py-0.5 text-[11px]">
                     {SYSTEM_SOURCES.map(s => <option key={s.v} value={s.v}>{s.l}</option>)}
+                    {siblingParams.length > 0 && (
+                      <optgroup label="其他參數(依賴另一欄)">
+                        {siblingParams.map(pn => (
+                          <option key={pn} value={`param:${pn}`}>param: {pn}</option>
+                        ))}
+                      </optgroup>
+                    )}
                   </select>
                 )}
               </div>
@@ -920,7 +1104,7 @@ function ErpToolLovEditor({ lovConfig, onChange }: { lovConfig: any; onChange: (
   )
 }
 
-function SqlBindsEditor({ binds, onChange }: { binds: any[]; onChange: (b: any[]) => void }) {
+function SqlBindsEditor({ binds, onChange, siblingParams = [] }: { binds: any[]; onChange: (b: any[]) => void; siblingParams?: string[] }) {
   const add = () => onChange([...binds, { name: '', source: 'system_user_factory' }])
   const upd = (i: number, patch: any) => onChange(binds.map((b, idx) => idx === i ? { ...b, ...patch } : b))
   const del = (i: number) => onChange(binds.filter((_, idx) => idx !== i))
@@ -935,6 +1119,13 @@ function SqlBindsEditor({ binds, onChange }: { binds: any[]; onChange: (b: any[]
           <select value={b.source} onChange={e => upd(i, { source: e.target.value })}
             className="flex-1 border border-slate-300 rounded px-2 py-1 text-xs">
             {SYSTEM_SOURCES.map(s => <option key={s.v} value={s.v}>{s.l}</option>)}
+            {siblingParams.length > 0 && (
+              <optgroup label="其他參數(依賴另一欄)">
+                {siblingParams.map(pn => (
+                  <option key={pn} value={`param:${pn}`}>param: {pn}</option>
+                ))}
+              </optgroup>
+            )}
           </select>
           <button onClick={() => del(i)} className="text-xs text-red-500 px-2">x</button>
         </div>
