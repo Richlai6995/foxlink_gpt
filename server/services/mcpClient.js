@@ -18,6 +18,7 @@ const { spawn } = require('child_process');
 const { randomUUID } = require('crypto');
 const fs  = require('fs');
 const jwt = require('jsonwebtoken');
+const axios = require('axios');
 
 let _reqId = 1;
 
@@ -156,26 +157,62 @@ async function withHttpPost(url, authCtx, fn) {
 }
 
 // ── Transport: streamable-http ────────────────────────────────────────────────
+// MCP 2025 規範支援 Mcp-Session-Id:server 在 initialize 回應 header 夾帶 session id,
+// 後續所有 RPC 必須在 request header 帶上同一個 id,否則被判為未初始化連線。
+// 部分 MCP server(如 HRToolsMCP)會嚴格強制;寬鬆的 server 會忽略缺失 session。
 
-async function streamableHttpRpc(url, authCtx, method, params = {}) {
+/** Parse SSE stream from a Node.js Readable (axios responseType: 'stream') */
+async function* parseSseFromNodeStream(stream) {
+  const decoder = new TextDecoder();
+  let buf = '';
+  let eventType = '';
+  for await (const chunk of stream) {
+    buf += typeof chunk === 'string' ? chunk : decoder.decode(chunk, { stream: true });
+    const lines = buf.split('\n');
+    buf = lines.pop();
+    for (const line of lines) {
+      if (line.startsWith('event:')) eventType = line.slice(6).trim();
+      else if (line.startsWith('data:')) { yield { event: eventType || 'message', data: line.slice(5).trim() }; eventType = ''; }
+      else if (line === '') eventType = '';
+    }
+  }
+}
+
+// Note: 這裡用 axios 而非 fetch — Node fetch (undici) 依 WHATWG spec 封鎖 port
+// 5060/5061/6000 等「bad ports」,而有些企業 MCP server 會用這些 port。axios 不受限。
+async function streamableHttpRpc(url, authCtx, method, params = {}, sessionRef = null) {
   const body = makeRpcBody(method, params);
   const reqId = JSON.parse(body).id;
 
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Accept': 'application/json, text/event-stream',
-      ...makeAuthHeaders(authCtx),
-    },
-    body,
-    signal: AbortSignal.timeout(60000),
-  });
-  if (!res.ok) throw new Error(`MCP HTTP ${res.status}: ${res.statusText}`);
+  const headers = {
+    'Content-Type': 'application/json',
+    'Accept': 'application/json, text/event-stream',
+    ...makeAuthHeaders(authCtx),
+  };
+  if (sessionRef?.id) headers['Mcp-Session-Id'] = sessionRef.id;
 
-  const ct = res.headers.get('content-type') || '';
+  const res = await axios.post(url, body, {
+    headers,
+    timeout: 60000,
+    responseType: 'stream',
+    validateStatus: () => true,  // 自己處理非 2xx
+  });
+  if (res.status < 200 || res.status >= 300) {
+    // 為了印出錯誤訊息,從 stream 讀完 body
+    let errBody = '';
+    for await (const c of res.data) errBody += c.toString();
+    throw new Error(`MCP HTTP ${res.status}: ${errBody || res.statusText}`);
+  }
+
+  // 抓 server 回傳的 session id(通常只有 initialize 回應會帶)
+  if (sessionRef) {
+    const sid = res.headers['mcp-session-id'];
+    if (sid && !sessionRef.id) sessionRef.id = sid;
+  }
+
+  const ct = res.headers['content-type'] || '';
   if (ct.includes('text/event-stream')) {
-    for await (const { data } of parseSseStream(res.body.getReader())) {
+    for await (const { data } of parseSseFromNodeStream(res.data)) {
       try {
         const msg = JSON.parse(data);
         if (msg.id === reqId) {
@@ -186,15 +223,20 @@ async function streamableHttpRpc(url, authCtx, method, params = {}) {
     }
     throw new Error('Streamable HTTP: no matching response in SSE stream');
   } else {
-    const data = await res.json();
+    // 非 SSE,一次把 body 讀完再 parse
+    let buf = '';
+    for await (const c of res.data) buf += c.toString();
+    const data = JSON.parse(buf);
     if (data.error) throw new Error(`MCP error [${data.error.code}]: ${data.error.message}`);
     return data.result;
   }
 }
 
 async function withStreamableHttp(url, authCtx, fn) {
-  try { await streamableHttpRpc(url, authCtx, 'initialize', INIT_PARAMS); } catch (_) {}
-  return fn((method, params) => streamableHttpRpc(url, authCtx, method, params));
+  // sessionRef 是可變容器:initialize 會寫入 id,後續 RPC 讀它帶進 header
+  const sessionRef = { id: null };
+  try { await streamableHttpRpc(url, authCtx, 'initialize', INIT_PARAMS, sessionRef); } catch (_) {}
+  return fn((method, params) => streamableHttpRpc(url, authCtx, method, params, sessionRef));
 }
 
 // ── Transport: http-sse ───────────────────────────────────────────────────────
