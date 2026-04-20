@@ -94,9 +94,15 @@ function _initStudioGenAI(apiKey) {
  * @param {string} [opts.apiKey]         — AI Studio only，覆寫 env key
  */
 function getGenerativeModel(opts = {}) {
-  const { apiKey, ...modelOpts } = opts;
-  if (modelOpts.model) modelOpts.model = _resolveModelId(modelOpts.model);
-  if (PROVIDER === 'vertex') {
+  const { apiKey, provider: forceProvider, ...modelOpts } = opts;
+  const useProvider = forceProvider === 'studio' || forceProvider === 'vertex'
+    ? forceProvider
+    : PROVIDER;
+  // 只有走 vertex 時才需要 alias 轉換（studio 用原本的 model id）
+  if (modelOpts.model && useProvider === 'vertex') {
+    modelOpts.model = _resolveModelId(modelOpts.model);
+  }
+  if (useProvider === 'vertex') {
     return _initVertexAI().getGenerativeModel(modelOpts);
   }
   return _initStudioGenAI(apiKey).getGenerativeModel(modelOpts);

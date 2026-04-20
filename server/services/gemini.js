@@ -447,9 +447,14 @@ function getSystemInstruction() {
  * @returns {Promise<{text: string, images: Array<{data: string, mimeType: string}>, inputTokens: number, outputTokens: number}>}
  */
 async function generateWithImage(apiModel, history, userParts) {
-  console.log(`[Gemini] generateWithImage model=${apiModel}`);
+  // 圖片生成強制走 AI Studio (Gemini API key) — Vertex AI 上的 image model 名稱
+  // 與 AI Studio 不同且 region 限制較多,維持原本作法穩定。
+  // 如要改回 Vertex,設 IMAGE_PROVIDER=vertex。
+  const imgProvider = process.env.IMAGE_PROVIDER === 'vertex' ? 'vertex' : 'studio';
+  console.log(`[Gemini] generateWithImage model=${apiModel} provider=${imgProvider}`);
   const model = getGenerativeModel({
     model: apiModel,
+    provider: imgProvider,
     generationConfig: {
       responseModalities: ['TEXT', 'IMAGE'],
     },
