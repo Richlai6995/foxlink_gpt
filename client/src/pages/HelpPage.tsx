@@ -4922,12 +4922,113 @@ generate_txt:供應商週報_{{date}}.txt
           <Table
             headers={['欄位', '說明', '範例']}
             rows={[
-              ['API 模型 ID', 'Google Gemini API 的實際模型代號', 'gemini-2.0-flash、gemini-1.5-pro'],
-              ['API Key（選填）', '若留空則使用伺服器環境變數 GEMINI_API_KEY；填入後加密儲存於 DB，優先使用', 'AIza...'],
-              ['支援圖片輸出', '開啟後此模型支援 Imagen 圖片生成（需模型本身支援）', ''],
+              ['API 模型 ID', 'Google AI Studio 上的模型代號（會自動轉成 Vertex 對應 ID，見下方 alias 規則）', 'gemini-3-pro-preview、gemini-3-flash-preview'],
+              ['API Key（選填）', '若留空且 GEMINI_PROVIDER=vertex，使用 service account 認證，不需 key；GEMINI_PROVIDER 未設則 fallback 到環境變數 GEMINI_API_KEY', 'AIza...'],
+              ['支援圖片輸出', '開啟後此模型在 chat UI 標記為 image 類型；圖片生成永遠走 AI Studio（見下方）', ''],
             ]}
           />
-          <TipBox>多數情況下 API Key 留空即可，由伺服器統一管理 GEMINI_API_KEY 環境變數。若需區分不同部門使用不同計費帳號，才需個別填入。</TipBox>
+          <TipBox>
+            企業環境（K8s 部署）建議用 Vertex AI（<code className="bg-slate-100 px-1 rounded text-xs">GEMINI_PROVIDER=vertex</code>），認證走 GCP service account（<code className="bg-slate-100 px-1 rounded text-xs">GOOGLE_APPLICATION_CREDENTIALS</code>），完全不需在 LLM 模型表填 API Key。需區分不同部門計費才填個別 Key。
+          </TipBox>
+        </SubSection>
+
+        <SubSection title="Provider 切換：AI Studio vs Vertex AI">
+          <Para>
+            系統用環境變數 <code className="bg-slate-100 px-1 rounded text-xs">GEMINI_PROVIDER</code> 全域決定 Gemini 呼叫走哪個 backend：
+          </Para>
+          <Table
+            headers={['env 設定', 'Backend', '認證', '適用場景']}
+            rows={[
+              ['未設或非 vertex', 'Google AI Studio', 'GEMINI_API_KEY (env 或 DB)', '個人/開發環境，最新預覽 model 最快上線'],
+              ['vertex', 'Google Cloud Vertex AI', 'service account JSON (GOOGLE_APPLICATION_CREDENTIALS)', '企業/正式環境，符合資料治理、稽核、計費一致'],
+            ]}
+          />
+          <NoteBox>
+            切換 provider 後，所有 chat、技能、知識庫檢索、排程、embedding/rerank/OCR 都跟著切。<strong>例外：圖片生成永遠走 AI Studio</strong>（Vertex 上 image model 命名差異大且 region 限制多），如要強制改 Vertex 設 <code className="bg-slate-100 px-1 rounded text-xs">IMAGE_PROVIDER=vertex</code>。
+          </NoteBox>
+          <Para className="mt-3">啟動 server 後 console 第一行 log 確認當前 provider：</Para>
+          <pre className="bg-slate-900 text-slate-100 text-xs p-3 rounded overflow-x-auto">
+{`[GeminiClient] provider=vertex project=gen-lang-client-xxx location=us-central1 sa=...`}
+          </pre>
+        </SubSection>
+
+        <SubSection title="新增 Gemini 模型決策流程（GEMINI_PROVIDER=vertex 環境）">
+          <Para>新增一個 Gemini chat 模型時，依下列步驟判斷是否需要額外設定：</Para>
+          <div className="space-y-3">
+            <StepItem
+              num={1}
+              title="管理介面新增 — 填 AI Studio 命名"
+              desc={'供應商=gemini，API 模型 ID 填 AI Studio 命名（例 gemini-3-flash-preview），API Key 留空。'}
+            />
+            <StepItem
+              num={2}
+              title="判斷該 model 在 Vertex AI 上是否同名存在"
+              desc={'到 Google Cloud Console → Vertex AI → Model Garden 搜尋該 model id，或查 https://cloud.google.com/vertex-ai/generative-ai/docs/learn/models 列表。'}
+            />
+            <StepItem
+              num={3}
+              title="情境 A：Vertex 有同名 model"
+              desc={'例：gemini-2.5-pro、gemini-2.5-flash、gemini-2.0-flash → 不用做任何 alias 設定，直接儲存 + 測試連線。'}
+            />
+            <StepItem
+              num={4}
+              title="情境 B：Vertex 命名不同（AI Studio 獨家 preview）"
+              desc={'例：gemini-3-pro-preview、gemini-3-flash-preview、gemini-3-pro-image-preview → 必須加 alias，否則第一次呼叫會 404 NOT_FOUND。'}
+            />
+            <StepItem
+              num={5}
+              title="設 alias（兩種方法擇一）"
+              desc={'方法 A（推薦，零改 code）：env 加 VERTEX_MODEL_ALIAS_<NAME>=<vertex_id>；方法 B：改 server/services/geminiClient.js 的 VERTEX_MODEL_DEFAULTS（須重啟）。'}
+            />
+            <StepItem
+              num={6}
+              title="測試連線確認"
+              desc={'回到 LLM 管理介面點「測試連線」，看到 200 + 回應內容才算 OK。404 表示 alias 沒設或 vertex_id 拼錯。'}
+            />
+          </div>
+        </SubSection>
+
+        <SubSection title="Vertex Model Alias 設定法（env 變數）">
+          <Para>
+            在 server <code className="bg-slate-100 px-1 rounded text-xs">.env</code> 加（或 K8s 透過 ConfigMap/Secret 注入）：
+          </Para>
+          <pre className="bg-slate-900 text-slate-100 text-xs p-3 rounded overflow-x-auto">
+{`# 規則：VERTEX_MODEL_ALIAS_ + 把 AI Studio model id 全大寫、把 - 和 . 換成 _
+# 範例：
+VERTEX_MODEL_ALIAS_GEMINI_3_PRO_PREVIEW=gemini-2.5-pro
+VERTEX_MODEL_ALIAS_GEMINI_3_FLASH_PREVIEW=gemini-2.5-flash
+VERTEX_MODEL_ALIAS_GEMINI_3_PRO_IMAGE_PREVIEW=gemini-2.5-flash-image-preview`}
+          </pre>
+          <Para className="mt-3">
+            程式內建預設 alias（不需手動設，已經 work）：
+          </Para>
+          <Table
+            headers={['AI Studio (填在管理介面)', 'Vertex AI 對應 (自動轉換)']}
+            rows={[
+              ['gemini-3-pro-preview', 'gemini-2.5-pro'],
+              ['gemini-3-flash-preview', 'gemini-2.5-flash'],
+              ['gemini-2.0-flash / gemini-2.0-flash-001', 'gemini-2.5-flash'],
+              ['gemini-2.0-pro', 'gemini-2.5-pro'],
+              ['gemini-3-pro-image-preview', 'gemini-2.5-flash-image-preview（圖片走 AI Studio，alias 僅備援）'],
+              ['gemini-3-flash-image-preview', 'gemini-2.5-flash-image-preview'],
+              ['gemini-2.5-flash-image', 'gemini-2.5-flash-image-preview'],
+            ]}
+          />
+          <NoteBox>
+            env 變數的優先序高於程式內建 <code className="bg-slate-100 px-1 rounded text-xs">VERTEX_MODEL_DEFAULTS</code>，所以可用 env 覆寫預設行為（例如把 <code className="bg-slate-100 px-1 rounded text-xs">gemini-3-pro-preview</code> 強制指到 <code className="bg-slate-100 px-1 rounded text-xs">gemini-2.5-pro-preview-04-15</code> 之類的明確版本）。
+          </NoteBox>
+        </SubSection>
+
+        <SubSection title="常見錯誤排查">
+          <Table
+            headers={['錯誤訊息', '原因', '解法']}
+            rows={[
+              ['VertexAI.ClientError: model parameter must not be empty', '排程/技能/某 LLM 呼叫沒帶 model id（fallback chain 失效）', '檢查 system_settings.default_chat_model_key 是否設、env GEMINI_MODEL_PRO 是否有值'],
+              ['Publisher Model ... was not found (404 NOT_FOUND)', 'Vertex 上沒有該 model id', '加 VERTEX_MODEL_ALIAS_xxx env 把它指到 Vertex 上實際存在的 id'],
+              ['Permission denied / 403', 'Service account 缺 Vertex AI User role', 'GCP IAM 給該 SA 加 roles/aiplatform.user'],
+              ['Quota exceeded', '某 region 配額用完', '改 GCP_LOCATION 到其他 region (us-central1 / asia-east1 / global)；或申請增額'],
+            ]}
+          />
         </SubSection>
 
         <SubSection title="Azure OpenAI 模型設定">
