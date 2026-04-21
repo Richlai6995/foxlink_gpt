@@ -211,21 +211,77 @@ server/server.js                 — 啟動時 logStartupInfo
 - [ ] dashboard 向量檢索
 - [ ] help 多語言翻譯
 
-### Phase 4 — 清理
+### Phase 4 — 清理(詳細規劃,2026-04-21 更新)
 
-- [ ] 砍 alias map 裡的 `gemini-3.x` 條目(image gen 看新 SDK 命名決定)
-- [ ] 砍 `@google-cloud/vertexai` dependency
-- [ ] 評估是否可砍 `@google/generative-ai`(若新 SDK 完全涵蓋)
-- [ ] `.env` 加 `GCP_LOCATION=global` 註解變通用
-- [ ] 刪 feature flag `GEMINI_SDK`
-- [ ] 更新 [CLAUDE.md 第 11 條](CLAUDE.md)
-- [ ] 更新 [memory/feedback_gemini_provider_split.md](../memory/feedback_gemini_provider_split.md)
+**前提**:K8s prod 新 SDK 穩定運行 **至少一週**(2026-04-21 推上,建議 **2026-04-28 之後**動手)。沒穩定前若砍 old SDK path 就沒救命索。
+
+**已完成(打勾)**:
+- [x] 更新 [CLAUDE.md 第 11 條](../CLAUDE.md)(commit `87ccab0`)
+- [x] 更新 [memory/feedback_gemini_provider_split.md](../memory/feedback_gemini_provider_split.md)
+- [x] 更新 [memory/reference_gemini_sdk_migration.md](../memory/reference_gemini_sdk_migration.md)(Phase 1+2 標完成)
+
+**核心清理(必做)**:
+
+- [ ] **Commit 1**:砍 old SDK path + `GEMINI_SDK` feature flag
+  - [server/services/geminiClient.js](../server/services/geminiClient.js):刪 `_initVertexAI()`、`_initStudioGenAI()`、`VERTEX_MODEL_DEFAULTS_OLD_SDK` 整表、所有 `if (SDK_MODE === 'old')` 分支、`SDK_MODE` 判斷
+  - 預估減 ~150 行
+  - 砍完沒 rollback 機制(除 `git revert`)
+
+- [ ] **Commit 2**:砍 `@google-cloud/vertexai` dependency
+  - `cd server && npm uninstall @google-cloud/vertexai`
+  - 驗 `grep -r "@google-cloud/vertexai" server/` 沒殘留
+  - package.json / package-lock.json update
+
+- [ ] **Commit 3**:砍 new SDK alias `gemini-3-pro-preview → gemini-3.1-pro-preview`
+  - 你 `.env` 已改 `GEMINI_MODEL_PRO=gemini-3.1-pro-preview`、LLM 設定 DB 已 migrate
+  - 保留只是歷史安全網,砍掉讓填錯字串的人直接報 404 而非靜默替換(Open Q6 原本的推薦)
+  - 保留 Nano Banana 幾條(Vertex 命名未對齊)
+
+- [ ] **Commit 4**:`.env.example` 更新
+  - `GCP_LOCATION=global` 變預設(非 comment)
+  - 刪 `GEMINI_SDK` 說明 section
+  - 更新 Vertex section 描述
+  - 若決定砍 legacy `GEMINI_PROVIDER`(見下決策點 D),此 commit 一併
+
+- [ ] **Commit 5**:更新 CLAUDE.md 第 11 條 v2(砍掉 SDK feature flag / old SDK 相關段落)
+
+- [ ] **Commit 6**:更新 [memory/reference_gemini_sdk_migration.md](../memory/reference_gemini_sdk_migration.md) 標 Phase 4 完成
+
+**要先決策**(Phase 4 動手前 user 回):
+
+- [ ] **決策 A**:`@google/generative-ai`(Studio 路徑舊 SDK)能否也砍?
+  - 新 `@google/genai` 一個 SDK 吃兩 provider,Studio 模式 `new GoogleGenAI({ apiKey })` 已可替代
+  - streamChat 的 `hasInlineData` 動態降級仍要 Studio 路徑 — 改走新 SDK Studio(Phase 1 的 `_initNewStudioGenAI` 已寫)
+  - **Risk**:新 SDK Studio 模式下 wav / 大 screenshot(>4MB base64)沒特別測過,砍前要 user 實測 transcribeAudio 和 training.js screenshot 分析
+  - 若砍:server 只剩一個 Google SDK,乾淨
+  - 若不砍:保留作為大檔案 Studio 路徑的穩定選項
+
+- [ ] **決策 B**:散落 repo 的 hardcoded fallback 字串清理
+  - 全 repo `grep "|| 'gemini-2"` 約 30+ 處 `process.env.XXX || 'gemini-2.0-flash'` / `|| 'gemini-2.5-pro'`
+  - env 完整時永遠 bypass,但 env 某 key 被清空會 silently 走到舊字串
+  - 最危險 3 處 fallback 到**已過時的 dated preview**(以下若 env 失效會直接炸 404):
+    - [server/routes/monitor.js:1339-1340](../server/routes/monitor.js#L1339):`gemini-2.5-pro-preview-05-06` / `gemini-2.5-flash-preview-05-20`
+    - [server/routes/factoryTranslations.js:213](../server/routes/factoryTranslations.js#L213):`gemini-2.5-flash-preview-05-20`
+    - [server/services/helpTranslator.js:56](../server/services/helpTranslator.js#L56):`gemini-2.5-flash-preview-05-20`
+  - **選項 B1(最小,推薦)**:只改上面 3 處 dated preview → `'gemini-3-flash-preview'`,單 commit
+  - **選項 B2(徹底)**:所有 fallback 統一改走 [`llmDefaults.resolveDefaultModel(db, role)`](../server/services/llmDefaults.js)(DB → env → hardcoded 三層 fallback),改動 30+ 檔
+
+- [ ] **決策 C**:`researchService.js:19-20` 的 `MODEL_PRO` / `MODEL_FLASH` 常數(`|| 'gemini-2.5-pro'` fallback)
+  - Phase 2 commit `d4fefaa` 已讓 `runResearchJob` 改走 `resolveResearchConfig(db)` → 不 hit 常數 fallback
+  - 但常數本身還在,planner 路徑([line ~415](../server/services/researchService.js#L415)用 MODEL_FLASH)還走 env 直讀
+  - 改/不改看決策 B 一起處理
+
+- [ ] **決策 D**:Legacy `GEMINI_PROVIDER` 單一開關砍不砍?
+  - 你 `.env` 已明確設 `GEMINI_GENERATE_PROVIDER=vertex` + `GEMINI_EMBED_PROVIDER=vertex`,legacy 沒在用
+  - 砍掉 code 乾淨,但若 prod 環境 config 有人靠舊 key 會壞
+  - 建議砍(你 env 兩個都有,OK)
 
 ### Phase 5 — 部署
 
-- [ ] Dev 跑一週無事件
-- [ ] `./deploy.sh` 推 K8s
-- [ ] 確認 K8s 也跟進
+- [x] Dev 跑實戰驗證(2026-04-20 到 2026-04-21)
+- [x] `./deploy.sh` 推 K8s(2026-04-21 ship,GEMINI_SDK=new + GCP_LOCATION=global 上線)
+- [x] K8s 確認 `[GeminiClient] sdk=new` startup log + Gemini 3.1 Pro Preview 真跑
+- [ ] 觀察期一週,2026-04-28 後進 Phase 4
 
 ---
 
