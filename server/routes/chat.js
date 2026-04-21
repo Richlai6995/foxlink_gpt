@@ -835,6 +835,101 @@ router.delete('/sessions/:id', async (req, res) => {
   }
 });
 
+// ── Pre-upload staging (讓前端能先上傳、顯示進度，再送 message 時只帶 attachment_ids) ──
+// 檔案放在 UPLOAD_DIR/tmp，id 加 `att_<userId>_` 前綴做擁有權檢查。
+// 伴隨 .meta.json 儲存原始檔名與 mimetype (multer 的 req.file 只在 request scope 有)。
+// /messages 處理完會自動清掉檔案 (跟現有 multer 檔案同路徑)；24h TTL 兜底清理 orphan (server.js)。
+const ATT_TMP_DIR = path.join(UPLOAD_DIR, 'tmp');
+const ATT_PREFIX = 'att_';
+
+// POST /api/chat/attachments  單檔 staging，回 { id, name, size, mimetype }
+router.post('/attachments', (req, res) => {
+  upload.single('file')(req, res, async (err) => {
+    if (err) {
+      const status = err.code === 'LIMIT_FILE_SIZE' ? 413 : 400;
+      return res.status(status).json({ error: err.message || '檔案上傳失敗' });
+    }
+    if (!req.file) return res.status(400).json({ error: '未收到檔案' });
+
+    const f = req.file;
+    try {
+      const displayName = Buffer.from(f.originalname, 'latin1').toString('utf8');
+
+      // Normalize mime (同 /messages 路徑邏輯)
+      let mimeType = f.mimetype;
+      if (!mimeType || mimeType === 'application/octet-stream') {
+        const canonical = canonicalMimeForKind(classifyUpload(displayName, mimeType));
+        if (canonical) mimeType = canonical;
+      }
+
+      // Per-user upload permission + 大小檢查 (跟 /messages 一致)
+      const db = require('../database-oracle').db;
+      const userPerms = await db.prepare(
+        `SELECT allow_text_upload, text_max_mb, allow_audio_upload, audio_max_mb,
+                allow_image_upload, image_max_mb FROM users WHERE id = ?`
+      ).get(req.user.id) || { allow_text_upload: 1, text_max_mb: 10, allow_audio_upload: 0, audio_max_mb: 10, allow_image_upload: 1, image_max_mb: 10 };
+
+      const isAudio = mimeType.startsWith('audio/');
+      const isImage = mimeType.startsWith('image/');
+      const cleanupAndReject = (status, msg) => {
+        try { fs.unlinkSync(f.path); } catch {}
+        return res.status(status).json({ error: `${msg} (${displayName})` });
+      };
+
+      if (isAudio) {
+        if (!userPerms.allow_audio_upload) return cleanupAndReject(403, '無聲音檔上傳權限，請聯絡管理員開啟');
+        if (f.size > (userPerms.audio_max_mb || 10) * 1024 * 1024)
+          return cleanupAndReject(413, `聲音檔超過上限 ${userPerms.audio_max_mb || 10}MB`);
+      } else if (isImage) {
+        if (userPerms.allow_image_upload === 0) return cleanupAndReject(403, '無圖片上傳權限，請聯絡管理員開啟');
+        if (f.size > (userPerms.image_max_mb || 10) * 1024 * 1024)
+          return cleanupAndReject(413, `圖片檔超過上限 ${userPerms.image_max_mb || 10}MB`);
+      } else {
+        if (!userPerms.allow_text_upload) return cleanupAndReject(403, '無文字檔上傳權限，請聯絡管理員開啟');
+        const userMax = (userPerms.text_max_mb || 10) * 1024 * 1024;
+        const cls = classifyUpload(displayName, mimeType);
+        const applyHardCap = cls.ok && cls.kind === 'text' && cls.subtype && cls.subtype !== 'doc';
+        const maxBytes = applyHardCap ? Math.min(userMax, TEXT_HARD_CAP_BYTES) : userMax;
+        if (f.size > maxBytes) {
+          const capMb = (maxBytes / 1024 / 1024).toFixed(1);
+          return cleanupAndReject(413, `檔案超過上限 ${capMb}MB`);
+        }
+      }
+
+      // 改名加上 user prefix (擁有權)
+      const attId = `${ATT_PREFIX}${req.user.id}_${f.filename}`;
+      const newPath = path.join(ATT_TMP_DIR, attId);
+      fs.renameSync(f.path, newPath);
+
+      // Sidecar meta：保留 multer 的原始 latin1 bytes，/messages 會再 decode (同既有邏輯)
+      fs.writeFileSync(newPath + '.meta.json', JSON.stringify({
+        originalname_raw: f.originalname,
+        mimetype: mimeType,
+        size: f.size,
+        userId: req.user.id,
+        uploadedAt: Date.now(),
+      }));
+
+      res.json({ id: attId, name: displayName, size: f.size, mimetype: mimeType });
+    } catch (e) {
+      try { fs.unlinkSync(f.path); } catch {}
+      res.status(500).json({ error: e.message });
+    }
+  });
+});
+
+// DELETE /api/chat/attachments/:id  使用者中止/移除上傳
+router.delete('/attachments/:id', (req, res) => {
+  const id = String(req.params.id || '');
+  if (!id.startsWith(`${ATT_PREFIX}${req.user.id}_`)) {
+    return res.status(403).json({ error: '無權刪除' });
+  }
+  const filePath = path.join(ATT_TMP_DIR, id);
+  try { fs.unlinkSync(filePath); } catch {}
+  try { fs.unlinkSync(filePath + '.meta.json'); } catch {}
+  res.json({ success: true });
+});
+
 // POST /api/chat/sessions/:id/messages  (SSE streaming)
 const CHAT_MAX_FILES_PER_MESSAGE = parseInt(process.env.CHAT_MAX_FILES_PER_MESSAGE || '10', 10);
 // Wrap multer to return JSON on upload rejection (fileFilter errors, size limits, etc.).
@@ -887,7 +982,39 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
       ).run(ctx, sessionId);
     } catch (_) {}
   }
-  const uploadedFiles = req.files || [];
+  const uploadedFiles = [...(req.files || [])];
+
+  // 合併 pre-upload 的 attachment_ids（來自 POST /api/chat/attachments）
+  const rawAttIds = req.body.attachment_ids;
+  if (rawAttIds) {
+    let attIds = [];
+    try {
+      const parsed = JSON.parse(rawAttIds);
+      if (Array.isArray(parsed)) attIds = parsed.map(String);
+    } catch {}
+    for (const attId of attIds) {
+      if (!attId.startsWith(`${ATT_PREFIX}${req.user.id}_`)) {
+        console.warn('[chat] attachment_id 擁有權不符:', attId);
+        continue;
+      }
+      const attPath = path.join(ATT_TMP_DIR, attId);
+      const metaPath = attPath + '.meta.json';
+      try {
+        const meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+        const stat = fs.statSync(attPath);
+        uploadedFiles.push({
+          path: attPath,
+          originalname: meta.originalname_raw, // 留 latin1 raw，下方 Buffer.from(..., 'latin1') 會 decode
+          mimetype: meta.mimetype,
+          size: stat.size,
+          filename: attId,
+        });
+        try { fs.unlinkSync(metaPath); } catch {} // 主檔由後續 file.path cleanup 處理
+      } catch (e) {
+        console.warn('[chat] attachment_id 讀取失敗:', attId, e.message);
+      }
+    }
+  }
 
   // Load per-user upload permissions
   const userPerms = await db.prepare(

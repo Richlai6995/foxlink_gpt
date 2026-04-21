@@ -13,11 +13,12 @@ import {
 } from '../lib/uploadFileTypes'
 
 interface Props {
-  onSend: (message: string, files: File[]) => void
+  /** attachmentIds：已 pre-uploaded 的 server side id；有值時 ChatPage 應跳過 File[] 的 multipart 上傳 */
+  onSend: (message: string, files: File[], attachmentIds?: string[]) => void
   onResearch?: () => void
   onErpTool?: () => void
   disabled?: boolean
-  /** 檔案上傳進度 0..1；undefined 表非上傳中 */
+  /** message 發送時的整體進度（附檔走 pre-upload 後這裡幾乎瞬間；但沒附檔只有訊息時仍適用） */
   uploadProgress?: number
   canResearch?: boolean
 }
@@ -28,6 +29,15 @@ export interface MessageInputHandle {
   getFiles: () => File[]
 }
 
+interface FileEntry {
+  id: string          // local React key
+  file: File
+  progress: number    // 0..1；1 表示 server 已回 attachmentId
+  attachmentId?: string // server 回傳的 att_* id
+  error?: string
+  xhr?: XMLHttpRequest
+}
+
 const ACCEPT_ATTR = buildAcceptAttr()
 
 function getFileIcon(type: string) {
@@ -36,10 +46,35 @@ function getFileIcon(type: string) {
   return <FileText size={14} className="text-slate-400" />
 }
 
+function ProgressRing({ progress, size = 14 }: { progress: number; size?: number }) {
+  const stroke = 2
+  const radius = (size - stroke) / 2
+  const circumference = 2 * Math.PI * radius
+  const offset = circumference * (1 - Math.max(0, Math.min(1, progress)))
+  return (
+    <svg width={size} height={size} className="flex-shrink-0">
+      <circle cx={size / 2} cy={size / 2} r={radius} stroke="#e2e8f0" strokeWidth={stroke} fill="none" />
+      <circle
+        cx={size / 2} cy={size / 2} r={radius}
+        stroke="#3b82f6" strokeWidth={stroke} fill="none"
+        strokeDasharray={circumference}
+        strokeDashoffset={offset}
+        strokeLinecap="round"
+        transform={`rotate(-90 ${size / 2} ${size / 2})`}
+        style={{ transition: 'stroke-dashoffset 0.15s ease-out' }}
+      />
+    </svg>
+  )
+}
+
+function localEntryId() {
+  try { return crypto.randomUUID() } catch { return `e_${Date.now()}_${Math.random().toString(36).slice(2)}` }
+}
+
 const MessageInput = forwardRef<MessageInputHandle, Props>(function MessageInput({ onSend, onResearch, onErpTool, disabled, uploadProgress, canResearch }, ref) {
   const { user } = useAuth()
   const [message, setMessage] = useState('')
-  const [files, setFiles] = useState<File[]>([])
+  const [entries, setEntries] = useState<FileEntry[]>([])
   const [fileError, setFileError] = useState('')
   const [showTemplatePicker, setShowTemplatePicker] = useState(false)
   const [selectedTemplate, setSelectedTemplate] = useState<DocTemplate | null>(null)
@@ -89,6 +124,44 @@ const MessageInput = forwardRef<MessageInputHandle, Props>(function MessageInput
   const allowAudio = u?.allow_audio_upload === 1
   const audioMaxMb: number = u?.audio_max_mb || 50
 
+  // 啟動單檔 pre-upload 到 /api/chat/attachments；進度寫入 entry
+  const uploadEntry = useCallback((entry: FileEntry) => {
+    const fd = new FormData()
+    fd.append('file', entry.file)
+    const xhr = new XMLHttpRequest()
+    entry.xhr = xhr
+    xhr.open('POST', '/api/chat/attachments')
+    xhr.setRequestHeader('Authorization', `Bearer ${localStorage.getItem('token') || ''}`)
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) {
+        // 上傳 bytes 進度只到 99%，100% 等 server 回 id 才標記
+        const p = Math.min(0.99, e.loaded / e.total)
+        setEntries((prev) => prev.map((x) => (x.id === entry.id ? { ...x, progress: p } : x)))
+      }
+    }
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          const body = JSON.parse(xhr.responseText)
+          setEntries((prev) => prev.map((x) => (x.id === entry.id
+            ? { ...x, progress: 1, attachmentId: body.id, xhr: undefined }
+            : x)))
+        } catch {
+          setEntries((prev) => prev.map((x) => (x.id === entry.id
+            ? { ...x, error: '回應解析失敗', xhr: undefined } : x)))
+        }
+      } else {
+        let msg = `HTTP ${xhr.status}`
+        try { msg = JSON.parse(xhr.responseText).error || msg } catch {}
+        setEntries((prev) => prev.map((x) => (x.id === entry.id ? { ...x, error: msg, xhr: undefined } : x)))
+      }
+    }
+    xhr.onerror = () => setEntries((prev) => prev.map((x) => (x.id === entry.id
+      ? { ...x, error: '網路錯誤', xhr: undefined } : x)))
+    xhr.onabort = () => { /* removeEntry 會自己過濾掉此 entry */ }
+    xhr.send(fd)
+  }, [])
+
   const handleFiles = useCallback((newFiles: File[]) => {
     const valid: File[] = []
     const warnings: string[] = []
@@ -109,7 +182,6 @@ const MessageInput = forwardRef<MessageInputHandle, Props>(function MessageInput
       } else if (c.kind === 'text' || c.kind === 'pdf' || c.kind === 'office') {
         if (!allowText) { setErr(`無文字檔上傳權限，請聯絡管理員開啟`); continue }
         const userMax = textMaxMb * 1024 * 1024
-        // 5MB hard cap 只套用在新增的 code/config/log/special；PDF/Office/doc 沿用 text_max_mb
         const isNewTextType = c.kind === 'text' && !!c.subtype && c.subtype !== 'doc'
         const maxBytes = isNewTextType ? Math.min(userMax, TEXT_HARD_CAP_BYTES) : userMax
         if (f.size > maxBytes) {
@@ -131,24 +203,46 @@ const MessageInput = forwardRef<MessageInputHandle, Props>(function MessageInput
           warnings.push(`${f.name} 較大 (${(f.size / 1024).toFixed(0)}KB)，將增加 token 用量`)
         }
       }
-      // image：無額外前端檢查
       valid.push(f)
     }
-    setFiles((prev) => [...prev, ...valid])
-    if (errMsg) {
-      setFileError(errMsg)
-    } else if (warnings.length) {
-      setFileError(`提示：${warnings.join('；')}`)
-    } else {
-      setFileError('')
-    }
-  }, [allowText, textMaxMb, allowAudio, audioMaxMb])
+    // 建立 entry 並啟動上傳
+    const newEntries: FileEntry[] = valid.map((f) => ({ id: localEntryId(), file: f, progress: 0 }))
+    setEntries((prev) => [...prev, ...newEntries])
+    newEntries.forEach(uploadEntry)
+
+    if (errMsg) setFileError(errMsg)
+    else if (warnings.length) setFileError(`提示：${warnings.join('；')}`)
+    else setFileError('')
+  }, [allowText, textMaxMb, allowAudio, audioMaxMb, uploadEntry])
+
+  // 移除單筆 entry：上傳中 → abort XHR；已傳完 → DELETE server staging
+  const removeEntry = useCallback((entryId: string) => {
+    setEntries((prev) => {
+      const target = prev.find((e) => e.id === entryId)
+      if (target) {
+        if (target.xhr && !target.attachmentId) {
+          try { target.xhr.abort() } catch {}
+        }
+        if (target.attachmentId) {
+          const token = localStorage.getItem('token') || ''
+          fetch(`/api/chat/attachments/${target.attachmentId}`, {
+            method: 'DELETE',
+            headers: { Authorization: `Bearer ${token}` },
+          }).catch(() => {})
+        }
+      }
+      return prev.filter((e) => e.id !== entryId)
+    })
+  }, [])
+
+  const hasUploading = entries.some((e) => !e.attachmentId && !e.error)
 
   useImperativeHandle(ref, () => ({
     addFiles: (newFiles: File[]) => handleFiles(newFiles),
     getQuestion: () => message,
-    getFiles: () => files,
-  }), [handleFiles, message, files])
+    // 回原始 File[]（研究 modal 會自己做上傳，不依賴 chat 的 pre-upload）
+    getFiles: () => entries.map((e) => e.file),
+  }), [handleFiles, message, entries])
 
   const handleDrop = useCallback(
     (e: React.DragEvent) => {
@@ -179,16 +273,19 @@ const MessageInput = forwardRef<MessageInputHandle, Props>(function MessageInput
 
   const handleSubmit = () => {
     if (disabled) return
-    if (!message.trim() && files.length === 0) return
+    if (hasUploading) return // 任一檔案還沒傳完就擋住
+    if (!message.trim() && entries.length === 0) return
     const outFmt = selectedTemplate?.format === 'pdf' ? tplOutputFmt : selectedTemplate?.format
-    // Embed pptxMode + pptxTheme for PPTX templates with layout_template
     const pptxSuffix = (isPptxWithLayout && pptxMode === 'rich') ? `:rich:${pptxTheme}` : ''
     const finalMsg = selectedTemplate
       ? `[使用範本:${selectedTemplate.id}:${selectedTemplate.name}:${outFmt}${pptxSuffix}] ${message.trim()}`
       : message.trim()
-    onSend(finalMsg, files)
+    const successful = entries.filter((e) => e.attachmentId)
+    const files = successful.map((e) => e.file)
+    const attachmentIds = successful.map((e) => e.attachmentId!)
+    onSend(finalMsg, files, attachmentIds)
     setMessage('')
-    setFiles([])
+    setEntries([])
     setFileError('')
     setSelectedTemplate(null)
     setTplOutputFmt('pdf')
@@ -273,24 +370,42 @@ const MessageInput = forwardRef<MessageInputHandle, Props>(function MessageInput
         </div>
       )}
 
-      {/* File previews */}
-      {files.length > 0 && (
+      {/* File previews with per-file upload progress */}
+      {entries.length > 0 && (
         <div className="flex flex-wrap gap-2 mb-3">
-          {files.map((f, i) => (
-            <div
-              key={i}
-              className="flex items-center gap-1.5 bg-slate-100 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-700"
-            >
-              {getFileIcon(f.type)}
-              <span className="max-w-[150px] truncate">{f.name}</span>
-              <button
-                onClick={() => setFiles((prev) => prev.filter((_, j) => j !== i))}
-                className="text-slate-400 hover:text-red-500 transition ml-1"
+          {entries.map((e) => {
+            const uploading = !e.attachmentId && !e.error
+            const percent = Math.round(e.progress * 100)
+            return (
+              <div
+                key={e.id}
+                className={`flex items-center gap-1.5 border rounded-lg px-2.5 py-1.5 text-xs transition ${
+                  e.error
+                    ? 'bg-red-50 border-red-200 text-red-700'
+                    : uploading
+                      ? 'bg-blue-50 border-blue-200 text-slate-700'
+                      : 'bg-slate-100 border-slate-200 text-slate-700'
+                }`}
+                title={e.error ? `上傳失敗: ${e.error}` : uploading ? `上傳中 ${percent}%` : undefined}
               >
-                <X size={12} />
-              </button>
-            </div>
-          ))}
+                {e.error
+                  ? <AlertCircle size={14} className="text-red-500 flex-shrink-0" />
+                  : uploading
+                    ? <ProgressRing progress={e.progress} size={14} />
+                    : getFileIcon(e.file.type)}
+                <span className="max-w-[150px] truncate">{e.file.name}</span>
+                {uploading && <span className="text-[10px] text-blue-500 tabular-nums">{percent}%</span>}
+                {e.error && <span className="text-[10px] text-red-500">失敗</span>}
+                <button
+                  onClick={() => removeEntry(e.id)}
+                  className="text-slate-400 hover:text-red-500 transition ml-1"
+                  title={uploading ? '取消上傳' : '移除'}
+                >
+                  <X size={12} />
+                </button>
+              </div>
+            )
+          })}
         </div>
       )}
 
@@ -421,11 +536,15 @@ const MessageInput = forwardRef<MessageInputHandle, Props>(function MessageInput
         {/* Send */}
         <button
           onClick={handleSubmit}
-          disabled={disabled || (!message.trim() && files.length === 0)}
+          disabled={disabled || hasUploading || (!message.trim() && entries.length === 0)}
           className="bg-blue-600 hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl p-2 flex-shrink-0 mb-0.5 transition"
-          title={uploadProgress !== undefined && uploadProgress < 1 ? '上傳中，請稍候' : undefined}
+          title={
+            hasUploading ? '檔案上傳中，請稍候'
+              : uploadProgress !== undefined && uploadProgress < 1 ? '傳送中'
+                : undefined
+          }
         >
-          {uploadProgress !== undefined && uploadProgress < 1
+          {hasUploading || (uploadProgress !== undefined && uploadProgress < 1)
             ? <Loader2 size={16} className="animate-spin" />
             : <Send size={16} />}
         </button>

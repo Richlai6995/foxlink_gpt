@@ -363,12 +363,14 @@ app.get('/api/health', (req, res) => res.json({ status: 'ok', timestamp: new Dat
     });
 
     // Periodic cleanup: uploads/generated/ 和 uploads/webex_tmp/ 超過 24h 的暫存檔
+    // uploads/tmp/ 也一併處理（chat pre-upload / multer scratch；24h 內若沒被 /messages 消耗掉就是 orphan）
     const GENERATED_DIR = path.join(UPLOAD_DIR, 'generated');
     const WEBEX_TMP_DIR = path.join(UPLOAD_DIR, 'webex_tmp');
+    const MULTER_TMP_DIR = path.join(UPLOAD_DIR, 'tmp');
     const cleanupStaleTmpFiles = () => {
       const ttlMs = 24 * 60 * 60 * 1000; // 24 hours
       const now = Date.now();
-      for (const dir of [GENERATED_DIR, WEBEX_TMP_DIR]) {
+      for (const dir of [GENERATED_DIR, WEBEX_TMP_DIR, MULTER_TMP_DIR]) {
         if (!fs.existsSync(dir)) continue;
         try {
           let cleaned = 0;

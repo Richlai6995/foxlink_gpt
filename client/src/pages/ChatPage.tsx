@@ -620,7 +620,7 @@ export default function ChatPage() {
   }, [showSkillPanel])
 
   const handleSend = useCallback(
-    async (message: string, files: File[]) => {
+    async (message: string, files: File[], attachmentIds?: string[]) => {
       if (streaming) return
 
       // Create session if none
@@ -671,7 +671,12 @@ export default function ChatPage() {
       formData.append('message', message)
       formData.append('model', model)
       if (reasoningEffort) formData.append('reasoning_effort', reasoningEffort)
-      files.forEach((f) => formData.append('files', f))
+      // 有 attachmentIds 就只送 id (server 會從 tmp/ 讀)；無就走舊 multipart
+      if (attachmentIds && attachmentIds.length > 0) {
+        formData.append('attachment_ids', JSON.stringify(attachmentIds))
+      } else {
+        files.forEach((f) => formData.append('files', f))
+      }
       // Explicit tool selection — always send even if empty (tells backend to skip auto-discover)
       formData.append('mcp_server_ids', JSON.stringify([...selectedMcpIds]))
       formData.append('dify_kb_ids',    JSON.stringify([...selectedDifyIds]))
@@ -685,8 +690,9 @@ export default function ChatPage() {
       const stripGenerateBlocks = (t: string) =>
         t.replace(/```generate_[a-z]+:[^\n]+\n[\s\S]*?```/g, '').replace(/\n{3,}/g, '\n\n').trim()
 
-      // 有檔案才顯示進度條；沒檔案就不必分心
-      if (files.length > 0) setUploadProgress(0)
+      // 有要重新上傳的檔案才顯示進度條；pre-upload 已處理完的不必再顯示
+      const willUploadInline = (!attachmentIds || attachmentIds.length === 0) && files.length > 0
+      if (willUploadInline) setUploadProgress(0)
 
       console.log('[SSE-DEBUG] xhr start', { sessionId, hasToken: !!token, fileCount: files.length })
       const fetchT0 = Date.now()
@@ -707,8 +713,8 @@ export default function ChatPage() {
             try { xhr.abort() } catch {}
           }
 
-          // 上傳進度（僅當有檔案時才有意義）
-          if (files.length > 0) {
+          // 上傳進度（只有走 inline multipart 時才接，pre-upload 路徑 body 很小沒必要）
+          if (willUploadInline) {
             xhr.upload.onprogress = (e) => {
               if (e.lengthComputable) setUploadProgress(e.loaded / e.total)
             }
@@ -1796,12 +1802,12 @@ export default function ChatPage() {
 
         <MessageInput
           ref={messageInputRef}
-          onSend={async (message, files) => {
+          onSend={async (message, files, attachmentIds) => {
             const final = erpPendingContext
               ? `${erpPendingContext}\n\n${message}`
               : message
             if (erpPendingContext) setErpPendingContext(null)
-            await handleSend(final, files)
+            await handleSend(final, files, attachmentIds)
           }}
           disabled={streaming}
           uploadProgress={uploadProgress}
