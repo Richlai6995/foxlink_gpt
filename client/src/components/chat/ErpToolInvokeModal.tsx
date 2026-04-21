@@ -560,6 +560,8 @@ function TranslatableText({
 } & Omit<ResultViewProps, 'data' | 'viewMode'>) {
   const translated = translatedMap[textKey]
   const showing = showTranslated[textKey]
+  // 目標語言且尚未翻完 → 顯示 placeholder 避免閃中文
+  const hidePending = targetLang && translating[textKey] && !translated && !showing
   const text = showing && translated ? translated : original
   return (
     <div className="bg-slate-50 border rounded">
@@ -576,18 +578,30 @@ function TranslatableText({
                 : t('erpInvoke.translateTo', '翻譯') + ` (${targetLang.toUpperCase()})`}
           </button>
         )}
-        <button onClick={() => onCopy(text)} className="text-[10px] text-slate-600 hover:text-sky-600 flex items-center gap-1">
+        <button onClick={() => onCopy(text)}
+          disabled={!!hidePending}
+          className="text-[10px] text-slate-600 hover:text-sky-600 flex items-center gap-1 disabled:opacity-40">
           <Copy size={10} /> {t('erpInvoke.copy', '複製')}
         </button>
         <button onClick={() => onZoom(textKey, title, original)}
-          className="text-[10px] text-slate-600 hover:text-sky-600 flex items-center gap-1"
+          disabled={!!hidePending}
+          className="text-[10px] text-slate-600 hover:text-sky-600 flex items-center gap-1 disabled:opacity-40"
           title="放大檢視">
           <Maximize2 size={10} /> {t('erpInvoke.zoom', '放大')}
         </button>
       </div>
-      <div className="px-3 py-2 text-sm font-mono whitespace-pre-wrap break-words min-h-[240px] max-h-[480px] overflow-y-auto">
-        {text}
-      </div>
+      {hidePending ? (
+        <div className="px-3 py-2 text-sm font-mono min-h-[240px] flex items-center justify-center text-slate-400">
+          <div className="flex items-center gap-2">
+            <Languages size={14} className="animate-pulse text-sky-500" />
+            <span>{t('erpInvoke.translating', '翻譯中…')} ({targetLang?.toUpperCase()})</span>
+          </div>
+        </div>
+      ) : (
+        <div className="px-3 py-2 text-sm font-mono whitespace-pre-wrap break-words min-h-[240px] max-h-[480px] overflow-y-auto">
+          {text}
+        </div>
+      )}
       {showing && translated && (
         <div className="px-3 py-1 text-[10px] text-slate-400 border-t border-slate-200 bg-slate-100/30">
           {t('erpInvoke.aiTranslationNotice', '🌐 AI 翻譯 · 代碼/ID/數字保留原樣')}

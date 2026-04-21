@@ -11,10 +11,11 @@
 
 const crypto = require('crypto');
 const { getStore } = require('./redisClient');
-const { createClient } = require('./llmService');
+const { getGenerativeModel, extractText } = require('./geminiClient');
 const { db } = require('../database-oracle');
 
 const CACHE_TTL = parseInt(process.env.ERP_RESULT_TRANS_CACHE_TTL || '86400', 10);
+const FLASH_MODEL = process.env.GEMINI_MODEL_FLASH || 'gemini-3-flash-preview';
 
 let _glossaryCache = null;
 let _glossaryCacheAt = 0;
@@ -79,13 +80,17 @@ async function translateResult(text, targetLang, opts = {}) {
   const rawText = String(text);
   const cacheKey = `erp:trans:${hash16(rawText)}:${targetLang}`;
   const useCache = opts.useCache !== false;
+  const t0 = Date.now();
 
   // 1. Cache lookup
   if (useCache) {
     try {
       const store = getStore();
       const cached = await store.get(cacheKey);
-      if (cached) return { translated: cached, cached: true };
+      if (cached) {
+        console.log(`[ErpResultTranslator] ${targetLang} len=${rawText.length} cache=HIT ms=${Date.now() - t0}`);
+        return { translated: cached, cached: true };
+      }
     } catch (_) {}
   }
 
@@ -111,11 +116,21 @@ ${rawText}
 
 Translation:`;
 
-  // 3. Call Gemini Flash
+  // 3. Call Gemini Flash — 關閉 thinking 衝最快(翻譯是確定性任務,不需要推理)
+  //    預設 dynamic thinkingBudget 會拖 6~8 秒,關掉後約 2~3 秒完成
   let translated;
   try {
-    const client = await createClient(db, 'flash');
-    const raw = await client.generate([{ role: 'user', parts: [{ text: prompt }] }]);
+    const model = getGenerativeModel({
+      model: FLASH_MODEL,
+      generationConfig: {
+        temperature: 0,
+        thinkingConfig: { thinkingBudget: 0, includeThoughts: false },
+      },
+    });
+    const result = await model.generateContent({
+      contents: [{ role: 'user', parts: [{ text: prompt }] }],
+    });
+    const raw = extractText(result);
     translated = String(raw || '').trim();
     // 去除可能的 code fence
     translated = translated.replace(/^```[a-z]*\s*|\s*```$/gi, '').trim();
@@ -123,6 +138,9 @@ Translation:`;
     console.warn('[ErpResultTranslator] translate failed:', e.message);
     return { translated: rawText, cached: false };
   }
+
+  const ms = Date.now() - t0;
+  console.log(`[ErpResultTranslator] ${targetLang} len=${rawText.length} cache=MISS ms=${ms} gloss=${gLines.length}`);
 
   // 4. Store in cache
   if (useCache && translated) {
