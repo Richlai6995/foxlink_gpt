@@ -332,6 +332,24 @@ async function streamChat(apiModel, history, userParts, onChunk, extraSystemInst
         finishedEarly = true;
         break;
       }
+      if (fr === 'RECITATION') {
+        // Gemini safety filter:判定回應大量引述受保護/版權內容。常見於「最新法規 / 新聞 /
+        // 產品規格」query 且 googleSearch grounding 回來的來源被視為原文 verbatim 引用。
+        // 不是 bug — 是 Google 側 policy 攔截。容錯:接受已累積的 partial text,
+        // 否則提示使用者換個問法(如加「請用自己的話摘要」、縮小 query 範圍)。
+        console.warn(`[Gemini] RECITATION — acceptingPartial fullLen=${fullText.length}`);
+        if (!fullText) {
+          const msg = '抱歉,本次回應因引用內容過於接近原文被安全機制攔截。請嘗試:加註「用自己的話摘要」、縮小查詢範圍、或關閉網路搜尋再重問。';
+          fullText = msg;
+          onChunk(msg);
+        } else {
+          const notice = '\n\n[⚠️ 回應被引用保護機制攔截,以上為部分內容]';
+          fullText += notice;
+          onChunk(notice);
+        }
+        finishedEarly = true;
+        break;
+      }
       console.warn(`[Gemini] chunk 異常 finishReason=${fr}`);
       throw new Error(`Gemini 回應被攔截 (finishReason: ${fr})`);
     }
