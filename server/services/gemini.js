@@ -174,7 +174,10 @@ async function transcribeAudio(filePath, mimeType, langOrTimeout, timeoutMs = 25
   };
   const prompt = PROMPTS[lang] || '請完整轉錄這段音訊，只回傳轉錄文字，不要加任何說明。';
 
-  const model = getGenerativeModel({ model: MODEL_FLASH });
+  // 音訊轉錄強制走 AI Studio:Vertex gRPC 的 inline payload 上限 ~4MB,
+  // wav 等未壓縮檔 base64 後動輒數十 MB 會被 backend silently drop,
+  // 回 "contents field required" 誤導錯誤。AI Studio REST 對大 payload 寬鬆得多。
+  const model = getGenerativeModel({ model: MODEL_FLASH, provider: 'studio' });
   const audioPart = await fileToGeminiPart(filePath, mimeType);
 
   const transcribePromise = model.generateContent([
@@ -224,6 +227,41 @@ function buildSearchNotice(queries, sources) {
   return notice;
 }
 
+/**
+ * chat / tool-loop 路徑把 reasoning_effort("low"/"medium"/"high")+ apiModel 對應到
+ * Gemini 的 thinkingBudget。與 OpenAI GPT-5.x reasoning_effort 語意對齊。
+ *
+ *   level       Flash    Pro
+ *   low         512      2048
+ *   medium      2048     8192
+ *   high        8192     24576
+ *   (未設)       512     undefined(=dynamic)
+ *
+ * 優先序:explicit_budget > reasoning_effort > chat 專用 default。
+ * Flash default=512 是為避免 gemini-3-flash-preview 在 user-facing chat 中
+ * dynamic thinking 吃 90+ 秒(2026-04-21 實測)。
+ * Pro 沒 default 是因為選 Pro 的人本就要深度推理,讓 SDK 自己決定。
+ *
+ * **只在 chat 路徑用**(streamChat / generateWithToolsStream)。
+ * dashboardService / researchService / kbDocParser 等 batch 服務不套這個 default,
+ * 保留各自原有(dynamic)行為,避免意外限縮品質。
+ */
+function _resolveThinkingBudget(apiModel, reasoningEffort, explicitBudget) {
+  if (explicitBudget != null) return Number(explicitBudget);
+  const isFlash = /flash/i.test(apiModel || '');
+  if (reasoningEffort) {
+    const LEVELS = {
+      low:    isFlash ? 512  : 2048,
+      medium: isFlash ? 2048 : 8192,
+      high:   isFlash ? 8192 : 24576,
+    };
+    return LEVELS[reasoningEffort];
+  }
+  // chat 路徑 Flash default:避免 dynamic thinking 爆 ttft
+  if (/gemini-3/i.test(apiModel || '') && isFlash) return 512;
+  return undefined;
+}
+
 async function streamChat(apiModel, history, userParts, onChunk, extraSystemInstruction = '', disableSearch = false, genConfig = null) {
   // apiModel is the resolved API model string (e.g. 'gemini-3-pro-preview')
   console.log(`[Gemini] streamChat model=${apiModel} history=${history.length} userParts=${userParts.length} genConfig=${JSON.stringify(genConfig)}`);
@@ -241,18 +279,22 @@ async function streamChat(apiModel, history, userParts, onChunk, extraSystemInst
     : getSystemInstruction();
 
   // Build generationConfig from DB settings + defaults
+  const thinkingBudget = _resolveThinkingBudget(apiModel, genConfig?.reasoning_effort, genConfig?.thinking_budget);
   const generationConfig = {
     maxOutputTokens: genConfig?.max_output_tokens || 65536,
     ...(genConfig?.temperature != null ? { temperature: genConfig.temperature } : {}),
     ...(genConfig?.top_p != null ? { topP: genConfig.top_p } : {}),
-    ...(genConfig?.thinking_budget != null ? { thinkingConfig: { thinkBudget: genConfig.thinking_budget } } : {}),
+    ...(thinkingBudget != null ? { thinkingConfig: { thinkingBudget } } : {}),
   };
 
+  // 帶 inlineData(圖片/大檔)自動降級走 Studio,避 Vertex gRPC 4MB payload 上限。
+  // 純文字走 default(= GENERATE_PROVIDER,通常是 Vertex,速度快、有 googleSearch)。
   const model = getGenerativeModel({
     model: apiModel,
     systemInstruction: fullInstruction,
     generationConfig,
     tools: useSearch ? [{ googleSearch: {} }] : undefined,
+    ...(hasInlineData ? { provider: 'studio' } : {}),
   });
 
   const chat = model.startChat({ history });
@@ -272,12 +314,26 @@ async function streamChat(apiModel, history, userParts, onChunk, extraSystemInst
         console.warn(`[Gemini] 已達 maxOutputTokens 上限，輸出被截斷`);
         fullText += '\n\n[⚠️ 回應已達最大 Token 上限，內容可能不完整]';
         onChunk('\n\n[⚠️ 回應已達最大 Token 上限，內容可能不完整]');
-      } else {
-        console.warn(`[Gemini] chunk 異常 finishReason=${fr}`);
-        throw new Error(`Gemini 回應被攔截 (finishReason: ${fr})`);
+        finishedEarly = true;
+        break;
       }
-      finishedEarly = true;
-      break;
+      if (fr === 'UNEXPECTED_TOOL_CALL') {
+        // Gemini 3 新增的 finishReason:model 試圖 call tool 但 declared tools 不含它。
+        // 常見誘因:finalInstruction / history 裡暗示有 KB / function tool,但當輪 tools
+        // 只有 googleSearch。Gemini 2.5 不會 surface 此 signal(靜默 fallback 純文字),
+        // 3.x 變嚴格 → 整個 stream 被攔截。容錯處理:若已有 text 接受 partial,
+        // 否則回一句提示,不炸整個 request。
+        console.warn(`[Gemini] UNEXPECTED_TOOL_CALL — acceptingPartial fullLen=${fullText.length}`);
+        if (!fullText) {
+          const msg = '抱歉,模型嘗試呼叫未開放的工具,請換個問法或停用本次的知識庫 / 工具再試。';
+          fullText = msg;
+          onChunk(msg);
+        }
+        finishedEarly = true;
+        break;
+      }
+      console.warn(`[Gemini] chunk 異常 finishReason=${fr}`);
+      throw new Error(`Gemini 回應被攔截 (finishReason: ${fr})`);
     }
     if (chunkText) {
       fullText += chunkText;
@@ -683,11 +739,12 @@ async function generateWithToolsStream(
     ? getSystemInstruction() + '\n\n---\n' + extraSystemInstruction
     : getSystemInstruction();
 
+  const thinkingBudget = _resolveThinkingBudget(apiModel, genConfig?.reasoning_effort, genConfig?.thinking_budget);
   const generationConfig = {
     maxOutputTokens: genConfig?.max_output_tokens || 65536,
     ...(genConfig?.temperature != null ? { temperature: genConfig.temperature } : {}),
     ...(genConfig?.top_p != null ? { topP: genConfig.top_p } : {}),
-    ...(genConfig?.thinking_budget != null ? { thinkingConfig: { thinkBudget: genConfig.thinking_budget } } : {}),
+    ...(thinkingBudget != null ? { thinkingConfig: { thinkingBudget } } : {}),
   };
 
   const model = getGenerativeModel({

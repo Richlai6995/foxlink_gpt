@@ -488,8 +488,9 @@ async function generateSection(question, kbContext, difyContext, mcpDecls, useWe
     const fnCalls = parts.filter((p) => p.functionCall);
 
     if (!fnCalls.length) {
-      // No more function calls — extract final text
-      const answer = parts.map((p) => p.text || '').join('').trim()
+      // No more function calls — extract final text(剔除 thought parts,
+      // Gemini 3.x 在 wrapper 自動 includeThoughts=true 下會切出 {text,thought:true} parts)
+      const answer = parts.filter((p) => !p.thought).map((p) => p.text || '').join('').trim()
         || extractText(result).trim();
       return { answer, inputTokens: totalIn, outputTokens: totalOut };
     }

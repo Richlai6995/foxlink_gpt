@@ -69,6 +69,7 @@ cd client && npm run dev    # frontend → localhost:5173 (proxy → 3007)
 | `webex-webhook-firewall-setup.md` | Webex Webhook 防火牆與 Nginx 設定（網管操作文件） |
 | `erp-tools-design.md` | ERP FUNCTION/PROCEDURE 工具化設計（LLM tool-calling + 手動 + Inject） |
 | `kb-retrieval-architecture-v2.md` | **KB 檢索 v2 架構實作紀錄**（Phase 1/2/3a/3b/3c + 踩坑 + config 索引） |
+| `gemini-sdk-migration-plan.md` | **Gemini SDK 遷移計畫**：`@google-cloud/vertexai` → `@google/genai`（獨立 session 處理） |
 
 ---
 
@@ -203,9 +204,13 @@ docker-compose up -d --build
 | Key | 用途 |
 |-----|------|
 | `PORT` | Server port（預設 3007） |
-| `GEMINI_API_KEY` | Google Gemini API key |
+| `GEMINI_API_KEY` | Google Gemini API key（AI Studio） |
 | `GEMINI_MODEL_PRO` | 高品質模型（如 `gemini-3-pro-preview`） |
 | `GEMINI_MODEL_FLASH` | 快速模型（如 `gemini-3-flash-preview`） |
+| `GEMINI_GENERATE_PROVIDER` | `studio`（預設、chat/vision/audio）或 `vertex` |
+| `GEMINI_EMBED_PROVIDER` | `vertex`（預設、KB 向量化）或 `studio` |
+| `GEMINI_PROVIDER` | legacy 單一開關，兩個細項 env 未設時沿用 |
+| `GCP_PROJECT_ID` / `GCP_LOCATION` / `GOOGLE_APPLICATION_CREDENTIALS` | Vertex AI 必要 |
 | `DEFAULT_ADMIN_ACCOUNT` | 預設管理員帳號 |
 | `DEFAULT_ADMIN_PASSWORD` | 預設管理員密碼 |
 | `JWT_SECRET` | Token 簽名（名稱歷史遺留，實際是 UUID map） |
@@ -244,3 +249,11 @@ docker-compose up -d --build
     - Oracle Text 索引 `kb_chunks_ftx` 用 `SYNC (EVERY "SYSDATE+1/1440")`，查詢最多 1 分鐘 lag，**解決 bulk insert 慢問題**
     - 同義詞改用 app-level query-time OR 展開（`kbSynonyms.expandQuery`），不走 CTX_THES（權限缺）
     - chat 把同義詞 hint 塞進 LLM context：「X=Y 同一實體，請統合對應 chunks」
+11. **Gemini Provider 拆分（generate vs embed）**：實作於 [server/services/geminiClient.js](server/services/geminiClient.js)。
+    - **預設值**：`GEMINI_GENERATE_PROVIDER=vertex` + `GEMINI_EMBED_PROVIDER=vertex`，`GCP_LOCATION=us-central1`
+    - **動態降級**：[streamChat](server/services/gemini.js) 偵測到 `hasInlineData=true` 會自動 override `provider: 'studio'`，避開 Vertex gRPC 的 ~4MB inline payload 上限（超過會被 backend silently drop，回誤導錯誤 `Unable to submit request because at least one contents field is required`）
+    - **為什麼 Vertex 當 default**：Google Cloud 骨幹 endpoint 對正崴網路比 Studio 公開 API 快很多（實測 ttft 170s → 3s）；且 Studio 的 `@google/generative-ai` 0.24 還不支援 `googleSearch` tool（只有老 `googleSearchRetrieval`），走 Studio 搜尋 grounding 會 silently 失效
+    - **`GCP_LOCATION=global` 當前不可用**：Vertex global endpoint 要新 SDK `@google/genai`，目前用的 `@google-cloud/vertexai 1.12` 打 global 會回 HTML 炸成 `Unexpected token '<'`。所以留在 us-central1 + alias map 把 Gemini 3.x preview 降級到 2.5 stable。升級 SDK 後才能開 global 跑真 3.x preview
+    - **新增 vision / audio / 大檔 handler 的鐵則**：`getGenerativeModel()` 明確加 `provider: 'studio'` 當防呆（見 training.js 7 處、transcribeAudio），不要只靠動態降級；多一層保險，即使有人改成 `provider: 'vertex'` default 也不炸
+    - **LLM 管理介面新增 Gemini model**：`api_model` 填 **Vertex global 認得的名字**（如 `gemini-3-pro-preview`、`gemini-3.1-pro-preview`、`gemini-2.5-flash`）。將來回到 regional endpoint 而 model 不存在，在 [`VERTEX_MODEL_DEFAULTS`](server/services/geminiClient.js) 補 alias 或用 env `VERTEX_MODEL_ALIAS_XXX` 覆寫
+    - **Legacy 相容**：舊 `GEMINI_PROVIDER` 仍可作 fallback；兩個細項 env 未設時沿用它

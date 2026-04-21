@@ -332,8 +332,13 @@ export default function Sidebar({
           )}
         </div>
 
-        {/* Reasoning Effort selector — only for Azure OpenAI GPT-5.x / o-series models */}
-        {currentModelInfo?.provider_type === 'azure_openai' && onReasoningEffortChange && (
+        {/* Reasoning Effort selector — Azure OpenAI GPT-5.x/o-series + Gemini 3.x(排除 image gen) */}
+        {((currentModelInfo?.provider_type === 'azure_openai') ||
+          (currentModelInfo?.provider_type === 'gemini'
+            && /gemini-3/i.test(currentModelInfo?.api_model || '')
+            && !currentModelInfo?.image_output
+            && !/image/i.test(currentModelInfo?.api_model || ''))
+        ) && onReasoningEffortChange && (
           <div className="mt-1.5 flex items-center gap-1.5">
             <span className="text-[10px] text-slate-500 whitespace-nowrap">{t('sidebar.reasoning')}</span>
             <div className="flex gap-0.5 flex-1">

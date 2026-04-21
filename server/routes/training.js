@@ -4446,7 +4446,11 @@ router.post('/ai/analyze-screenshot', upload.single('screenshot'), async (req, r
     const flashRow = await db.prepare(
       `SELECT api_model FROM llm_models WHERE model_role='chat' AND is_active=1 AND provider_type='gemini' ORDER BY sort_order FETCH FIRST 1 ROWS ONLY`
     ).get();
-    const model = getGenerativeModel({ model: flashRow?.api_model || process.env.GEMINI_MODEL_FLASH || 'gemini-3-flash-preview' });
+    // 走 AI Studio:Vertex gRPC payload 上限 ~4MB,screenshot base64 常超限。
+    const model = getGenerativeModel({
+      model: flashRow?.api_model || process.env.GEMINI_MODEL_FLASH || 'gemini-3-flash-preview',
+      provider: 'studio',
+    });
 
     const clickInfo = clickCoords ? `使用者剛點擊了位於 (x:${clickCoords.x}px, y:${clickCoords.y}px) 的元素。` : '';
 
@@ -4660,7 +4664,8 @@ ${editor_context || '（無）'}
 }`;
 
     const { getGenerativeModel, extractText } = require('../services/geminiClient');
-    const model = getGenerativeModel({ model: flashModel });
+    // 走 AI Studio:Vertex gRPC payload 上限 ~4MB,screenshot base64 常超限。
+    const model = getGenerativeModel({ model: flashModel, provider: 'studio' });
 
     // Retry up to 3 times on JSON parse failure (Gemini occasionally returns malformed JSON)
     let parsed, lastRaw = '';
@@ -4835,7 +4840,11 @@ router.post('/ai/batch-analyze', upload.array('screenshots', 50), async (req, re
     const flashRow = await db.prepare(
       `SELECT api_model FROM llm_models WHERE model_role='chat' AND is_active=1 AND provider_type='gemini' ORDER BY sort_order FETCH FIRST 1 ROWS ONLY`
     ).get();
-    const model = getGenerativeModel({ model: flashRow?.api_model || process.env.GEMINI_MODEL_FLASH || 'gemini-3-flash-preview' });
+    // 走 AI Studio:Vertex gRPC payload 上限 ~4MB,screenshot base64 常超限。
+    const model = getGenerativeModel({
+      model: flashRow?.api_model || process.env.GEMINI_MODEL_FLASH || 'gemini-3-flash-preview',
+      provider: 'studio',
+    });
 
     // Parallel analysis in batches of 3
     const BATCH = 3;
@@ -5145,8 +5154,11 @@ router.post('/recording/:sessionId/analyze-step/:stepId', async (req, res) => {
       modelName = flashRow?.api_model || process.env.GEMINI_MODEL_FLASH || 'gemini-3-flash-preview';
     }
     // A: 強制 Gemini 回純 JSON，避免裸 escape / 多餘文字造成 JSON.parse 炸掉
+    // 走 AI Studio:Vertex gRPC payload 上限 ~4MB,screenshot base64 常超限,
+    // Vertex backend 會誤回 "contents field required"。
     const model = getGenerativeModel({
       model: modelName,
+      provider: 'studio',
       generationConfig: { responseMimeType: 'application/json' },
     });
 
@@ -5234,7 +5246,11 @@ router.post('/recording/:sessionId/analyze', async (req, res) => {
     const flashRow = await db.prepare(
       `SELECT api_model FROM llm_models WHERE model_role='chat' AND is_active=1 AND provider_type='gemini' ORDER BY sort_order FETCH FIRST 1 ROWS ONLY`
     ).get();
-    const model = getGenerativeModel({ model: flashRow?.api_model || process.env.GEMINI_MODEL_FLASH || 'gemini-3-flash-preview' });
+    // 走 AI Studio:Vertex gRPC payload 上限 ~4MB,screenshot base64 常超限。
+    const model = getGenerativeModel({
+      model: flashRow?.api_model || process.env.GEMINI_MODEL_FLASH || 'gemini-3-flash-preview',
+      provider: 'studio',
+    });
 
     // Parallel analysis in batches of 3
     const BATCH = 3;
@@ -6490,7 +6506,8 @@ router.post('/slides/:sid/ai-analyze', async (req, res) => {
       ).get();
       modelName = flashRow?.api_model || process.env.GEMINI_MODEL_FLASH || 'gemini-3-flash-preview';
     }
-    const model = getGenerativeModel({ model: modelName });
+    // 走 AI Studio:Vertex gRPC payload 上限 ~4MB,screenshot base64 常超限。
+    const model = getGenerativeModel({ model: modelName, provider: 'studio' });
 
     const prompt = `分析這張系統操作截圖。${annotationPrompt}
 識別所有可互動 UI 元素，回傳 JSON：
