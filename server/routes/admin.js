@@ -1031,6 +1031,47 @@ router.put('/settings/template-model', async (req, res) => {
 // KB Retrieval Settings（v2 Phase 3）
 // ─────────────────────────────────────────────────────────────────────────────
 
+// GET /api/admin/settings/research — 深度研究專用 model + reasoning_effort
+router.get('/settings/research', async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const rows = await db.prepare(
+      `SELECT key, value FROM system_settings WHERE key IN ('research_model_key','research_reasoning_effort')`
+    ).all();
+    const map = Object.fromEntries(rows.map((r) => [r.KEY ?? r.key, r.VALUE ?? r.value]));
+    res.json({
+      model_key:        map.research_model_key || null,             // null = 未設,fallback env GEMINI_MODEL_PRO
+      reasoning_effort: map.research_reasoning_effort || 'high',   // high 是合理 default(研究需深度思考)
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// PUT /api/admin/settings/research
+router.put('/settings/research', async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const { model_key, reasoning_effort } = req.body || {};
+    const upsert = async (key, value) => {
+      const ex = await db.prepare(`SELECT key FROM system_settings WHERE key=?`).get(key);
+      if (value === null || value === undefined || value === '') {
+        // 明確清空 = 刪除 row,讓 resolver fallback 到預設
+        if (ex) await db.prepare(`DELETE FROM system_settings WHERE key=?`).run(key);
+        return;
+      }
+      if (ex) await db.prepare(`UPDATE system_settings SET value=? WHERE key=?`).run(String(value), key);
+      else    await db.prepare(`INSERT INTO system_settings (key,value) VALUES (?,?)`).run(key, String(value));
+    };
+    if (model_key !== undefined) await upsert('research_model_key', model_key);
+    if (reasoning_effort !== undefined) {
+      if (reasoning_effort && !['low','medium','high'].includes(reasoning_effort)) {
+        return res.status(400).json({ error: 'reasoning_effort must be low|medium|high or empty' });
+      }
+      await upsert('research_reasoning_effort', reasoning_effort);
+    }
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // GET /api/admin/settings/kb-retrieval
 router.get('/settings/kb-retrieval', async (req, res) => {
   try {

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Search, ChevronLeft, ChevronRight, Download, CheckCircle, XCircle, Loader2, Clock } from 'lucide-react'
+import { Search, ChevronLeft, ChevronRight, Download, CheckCircle, XCircle, Loader2, Clock, Settings } from 'lucide-react'
 import api from '../../lib/api'
 import { fmtTW } from '../../lib/fmtTW'
 
@@ -63,6 +63,7 @@ export default function ResearchLogsPanel() {
 
   return (
     <div className="space-y-4">
+      <ResearchSettingsSection />
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-semibold text-slate-800">深度研究紀錄</h2>
         <span className="text-sm text-slate-500">共 {total} 筆</span>
@@ -208,5 +209,121 @@ export default function ResearchLogsPanel() {
         </div>
       )}
     </div>
+  )
+}
+
+// ─── Research 設定 Section ─────────────────────────────────────────────────
+interface LlmModelOpt {
+  key: string
+  name: string
+  api_model: string
+  provider_type?: string
+  image_output?: number
+  is_active?: number
+}
+
+function ResearchSettingsSection() {
+  const [models, setModels] = useState<LlmModelOpt[]>([])
+  const [modelKey, setModelKey] = useState<string>('')
+  const [effort, setEffort]     = useState<string>('high')
+  const [loading, setLoading]   = useState(true)
+  const [saving, setSaving]     = useState(false)
+  const [saved, setSaved]       = useState(false)
+  const [err, setErr]           = useState('')
+
+  useEffect(() => {
+    Promise.all([
+      api.get('/admin/llm-models').then((r) => r.data as LlmModelOpt[]),
+      api.get('/admin/settings/research').then((r) => r.data),
+    ]).then(([ms, cfg]) => {
+      const usable = ms.filter((m) => m.is_active && !m.image_output && m.provider_type === 'gemini')
+      setModels(usable)
+      setModelKey(cfg.model_key || '')
+      setEffort(cfg.reasoning_effort || 'high')
+    }).catch((e) => setErr(e.response?.data?.error || '載入設定失敗'))
+      .finally(() => setLoading(false))
+  }, [])
+
+  const save = async () => {
+    setSaving(true); setErr(''); setSaved(false)
+    try {
+      await api.put('/admin/settings/research', {
+        model_key: modelKey || null,
+        reasoning_effort: effort || '',
+      })
+      setSaved(true)
+      setTimeout(() => setSaved(false), 2000)
+    } catch (e: any) {
+      setErr(e.response?.data?.error || '儲存失敗')
+    } finally { setSaving(false) }
+  }
+
+  if (loading) return null
+
+  return (
+    <details className="bg-white rounded-xl border border-slate-200 p-4" open>
+      <summary className="cursor-pointer text-sm font-semibold text-slate-700 flex items-center gap-2">
+        <Settings size={14} className="text-teal-500" />
+        深度研究設定
+        <span className="text-[11px] font-normal text-slate-400 ml-2">
+          (model · 思考深度)
+        </span>
+      </summary>
+      <div className="mt-4 space-y-3">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div>
+            <label className="block text-xs font-medium text-slate-600 mb-1">使用模型</label>
+            <select
+              className="w-full border border-slate-300 rounded-lg px-3 py-1.5 text-sm"
+              value={modelKey}
+              onChange={(e) => setModelKey(e.target.value)}
+            >
+              <option value="">（使用預設 env GEMINI_MODEL_PRO）</option>
+              {models.map((m) => (
+                <option key={m.key} value={m.key}>{m.name} — {m.api_model}</option>
+              ))}
+            </select>
+            <p className="text-[11px] text-slate-500 mt-1">建議選高精度 model (e.g. Gemini 3.1 Pro)。</p>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-slate-600 mb-1">思考深度 (reasoning effort)</label>
+            <div className="grid grid-cols-4 gap-1">
+              {[
+                { v: '', label: 'Default' },
+                { v: 'low', label: 'Low' },
+                { v: 'medium', label: 'Medium' },
+                { v: 'high', label: 'High' },
+              ].map((opt) => (
+                <button
+                  key={opt.v}
+                  onClick={() => setEffort(opt.v)}
+                  className={`text-xs py-1.5 rounded border transition ${
+                    effort === opt.v
+                      ? 'bg-teal-600 text-white border-teal-600'
+                      : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+            <p className="text-[11px] text-slate-500 mt-1">
+              Low=2048 / Medium=8192 / High=24576 thinking tokens。深度研究建議 <b>High</b>。
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={save}
+            disabled={saving}
+            className="px-4 py-1.5 bg-teal-600 hover:bg-teal-700 disabled:opacity-50 text-white rounded-lg text-sm font-medium"
+          >
+            {saving ? '儲存中…' : '儲存設定'}
+          </button>
+          {saved && <span className="text-xs text-green-600">已儲存 ✓</span>}
+          {err && <span className="text-xs text-red-600">{err}</span>}
+        </div>
+      </div>
+    </details>
   )
 }

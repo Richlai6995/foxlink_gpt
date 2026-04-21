@@ -10,6 +10,7 @@ const ENV_FALLBACK = {
   rerank:    () => process.env.KB_RERANK_MODEL    || 'gemini-2.0-flash',
   ocr:       () => process.env.KB_OCR_MODEL       || process.env.GEMINI_MODEL_FLASH || 'gemini-2.0-flash',
   chat:      () => process.env.GEMINI_MODEL_PRO   || 'gemini-2.5-pro',
+  research:  () => process.env.GEMINI_MODEL_PRO   || 'gemini-2.5-pro',
 };
 
 const SETTING_KEY = {
@@ -17,7 +18,27 @@ const SETTING_KEY = {
   rerank:    'default_rerank_model_key',
   ocr:       'default_ocr_model_key',
   chat:      'default_chat_model_key',
+  research:  'research_model_key',
 };
+
+/**
+ * 取深度研究專用 config:model + reasoning_effort.
+ * 預設 reasoning_effort='high' — 深度研究本就需高精度思考;
+ * admin 可透過 /api/admin/settings/research 調整.
+ * @param {object} db
+ * @returns {Promise<{ apiModel: string, reasoningEffort: string }>}
+ */
+async function resolveResearchConfig(db) {
+  const apiModel = await resolveDefaultModel(db, 'research');
+  let reasoningEffort = 'high';
+  try {
+    const row = await db.prepare(
+      `SELECT value FROM system_settings WHERE key='research_reasoning_effort'`
+    ).get();
+    if (row?.value) reasoningEffort = row.value;
+  } catch {}
+  return { apiModel, reasoningEffort };
+}
 
 /**
  * Resolve a default model's api_model string.
@@ -68,4 +89,4 @@ async function resolveDefaultModelRow(db, role) {
   } catch { return null; }
 }
 
-module.exports = { resolveDefaultModel, resolveDefaultModelRow, SETTING_KEY, ENV_FALLBACK };
+module.exports = { resolveDefaultModel, resolveDefaultModelRow, resolveResearchConfig, SETTING_KEY, ENV_FALLBACK };

@@ -19,6 +19,31 @@ const { createClient } = require('./llmService');
 const MODEL_PRO   = process.env.GEMINI_MODEL_PRO   || 'gemini-2.5-pro';
 const MODEL_FLASH = process.env.GEMINI_MODEL_FLASH  || 'gemini-2.5-flash';
 
+// Research reasoning_effort → thinkingBudget 對應 (Pro scale;研究吃重思考,用最高預設)
+const RESEARCH_BUDGET_MAP = { low: 2048, medium: 8192, high: 24576 };
+
+/**
+ * Resolve research 專用 model + thinking budget (from system_settings).
+ * 每個 runResearchJob 開頭 call 一次,往下傳給 generateSection / synthesizeReport,
+ * 避免多次 DB 撈 settings.
+ * @returns {Promise<{ apiModel: string, thinkingBudget: number|undefined }>}
+ */
+async function _resolveResearchCfg(db) {
+  try {
+    const { resolveResearchConfig } = require('./llmDefaults');
+    const { apiModel, reasoningEffort } = await resolveResearchConfig(db);
+    const thinkingBudget = reasoningEffort ? RESEARCH_BUDGET_MAP[reasoningEffort] : undefined;
+    return { apiModel: apiModel || MODEL_PRO, thinkingBudget };
+  } catch {
+    return { apiModel: MODEL_PRO, thinkingBudget: RESEARCH_BUDGET_MAP.high };
+  }
+}
+
+function _buildResearchGenConfig(cfg) {
+  if (!cfg?.thinkingBudget) return undefined;
+  return { thinkingConfig: { thinkingBudget: cfg.thinkingBudget } };
+}
+
 // ─── KB Search ────────────────────────────────────────────────────────────────
 
 /**
@@ -432,7 +457,7 @@ async function generatePlan(question, depth, hasKb, llmClient = null) {
  */
 async function generateSection(question, kbContext, difyContext, mcpDecls, useWebSearch, language,
   globalFileContext = '', sqFileContext = '', hint = '', dashboardDecls = [],
-  db = null, userId = null, modelKey = null, llmClient = null) {
+  db = null, userId = null, modelKey = null, llmClient = null, researchCfg = null) {
   const isZh = language === 'zh-TW';
   const langHint = isZh ? '請以繁體中文詳細回答。' : 'Please answer in detail in English.';
 
@@ -469,7 +494,12 @@ async function generateSection(question, kbContext, difyContext, mcpDecls, useWe
     return { answer: answer.trim(), inputTokens: 0, outputTokens: 0 };
   }
 
-  const model = getGenerativeModel({ model: MODEL_PRO });
+  const effectiveCfg = researchCfg || (db ? await _resolveResearchCfg(db) : { apiModel: MODEL_PRO, thinkingBudget: RESEARCH_BUDGET_MAP.high });
+  const modelGenConfig = _buildResearchGenConfig(effectiveCfg);
+  const model = getGenerativeModel({
+    model: effectiveCfg.apiModel,
+    ...(modelGenConfig ? { generationConfig: modelGenConfig } : {}),
+  });
   let totalIn = 0, totalOut = 0;
 
   // ── Function calling loop (max 5 turns) ──────────────────────────────────
@@ -531,7 +561,7 @@ async function generateSection(question, kbContext, difyContext, mcpDecls, useWe
 /**
  * Synthesize all section answers into a final Markdown report.
  */
-async function synthesizeReport(title, sections, language, llmClient = null) {
+async function synthesizeReport(title, sections, language, llmClient = null, researchCfg = null) {
   const langHint = language === 'zh-TW'
     ? '請以繁體中文撰寫完整研究報告。'
     : 'Please write a complete research report in English.';
@@ -560,7 +590,12 @@ ${sectionsText}
     return { report: report.trim(), inputTokens: 0, outputTokens: 0 };
   }
 
-  const model  = getGenerativeModel({ model: MODEL_PRO });
+  const effectiveCfg = researchCfg || { apiModel: MODEL_PRO, thinkingBudget: RESEARCH_BUDGET_MAP.high };
+  const modelGenConfig = _buildResearchGenConfig(effectiveCfg);
+  const model = getGenerativeModel({
+    model: effectiveCfg.apiModel,
+    ...(modelGenConfig ? { generationConfig: modelGenConfig } : {}),
+  });
   const result = await model.generateContent(prompt);
   const usage  = extractUsage(result);
   return {
@@ -624,6 +659,8 @@ async function runResearchJob(db, jobId) {
 
     // Build LLM client from job's model_key (follows session's chosen model)
     const llmClient = await createClient(db, job.model_key || 'pro').catch(() => null);
+    // Resolve research-specific config (model + reasoning_effort → thinkingBudget)
+    const researchCfg = await _resolveResearchCfg(db);
 
     const plan          = JSON.parse(job.plan_json || '{}');
     const subQuestions  = plan.sub_questions || [];
@@ -778,10 +815,10 @@ async function runResearchJob(db, jobId) {
         try {
           const sec = await generateSection(
             sq.question, kbContext, difyContext, mcpDecls, shouldWeb, language,
-            globalFileContext, sqFileContext, hint, dashboardDecls, db, job.user_id, job.model_key, llmClient
+            globalFileContext, sqFileContext, hint, dashboardDecls, db, job.user_id, job.model_key, llmClient, researchCfg
           );
           answer = sec.answer;
-          addTokens(MODEL_PRO, sec.inputTokens, sec.outputTokens);
+          addTokens(researchCfg.apiModel, sec.inputTokens, sec.outputTokens);
           break;
         } catch (e) {
           if (attempt === 2) answer = isEn ? `(Error researching this topic: ${e.message})` : `（研究此問題時發生錯誤：${e.message}）`;
@@ -801,8 +838,8 @@ async function runResearchJob(db, jobId) {
     await db.prepare(
       'UPDATE research_jobs SET progress_label=?, updated_at=SYSTIMESTAMP WHERE id=?'
     ).run(isEn ? 'Synthesizing report...' : '正在整合報告...', jobId);
-    const { report, inputTokens: synIn, outputTokens: synOut } = await synthesizeReport(plan.title, sections, language, llmClient);
-    addTokens(MODEL_PRO, synIn, synOut);
+    const { report, inputTokens: synIn, outputTokens: synOut } = await synthesizeReport(plan.title, sections, language, llmClient, researchCfg);
+    addTokens(researchCfg.apiModel, synIn, synOut);
 
     // Generate files
     await db.prepare(
@@ -864,6 +901,7 @@ async function rerunSections(db, jobId, sectionIds, sqOverrides = []) {
     if (!job) throw new Error('Job not found');
 
     const llmClient = await createClient(db, job.model_key || 'pro').catch(() => null);
+    const researchCfg = await _resolveResearchCfg(db);
 
     const plan          = JSON.parse(job.plan_json || '{}');
     const subQuestions  = plan.sub_questions || [];
@@ -1015,9 +1053,9 @@ async function rerunSections(db, jobId, sectionIds, sqOverrides = []) {
       for (let attempt = 0; attempt < 3; attempt++) {
         try {
           const sec = await generateSection(question, kbContext, difyContext, mcpDecls, shouldWeb,
-            language, globalFileContext, sqFileContext, hint, dashboardDecls, db, job.user_id, job.model_key, llmClient);
+            language, globalFileContext, sqFileContext, hint, dashboardDecls, db, job.user_id, job.model_key, llmClient, researchCfg);
           answer = sec.answer;
-          addTokens(MODEL_PRO, sec.inputTokens, sec.outputTokens);
+          addTokens(researchCfg.apiModel, sec.inputTokens, sec.outputTokens);
           break;
         } catch (e) {
           if (attempt === 2) answer = isEn
@@ -1048,8 +1086,8 @@ async function rerunSections(db, jobId, sectionIds, sqOverrides = []) {
       .filter((s) => s.done)
       .map((s) => ({ question: s.question, answer: s.answer }));
 
-    const { report, inputTokens: synIn, outputTokens: synOut } = await synthesizeReport(plan.title, allSections, language, llmClient);
-    addTokens(MODEL_PRO, synIn, synOut);
+    const { report, inputTokens: synIn, outputTokens: synOut } = await synthesizeReport(plan.title, allSections, language, llmClient, researchCfg);
+    addTokens(researchCfg.apiModel, synIn, synOut);
 
     await db.prepare(
       'UPDATE research_jobs SET progress_label=?, updated_at=SYSTIMESTAMP WHERE id=?'
