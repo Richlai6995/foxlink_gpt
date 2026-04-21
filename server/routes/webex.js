@@ -75,6 +75,14 @@ const WEBEX_I18N = {
     'en':    (email) => `⚠️ Your account (${email}) does not have Webex Bot enabled. Please contact the system administrator to enable it.`,
     'vi':    (email) => `⚠️ Tài khoản của bạn (${email}) chưa được bật tính năng Webex Bot. Vui lòng liên hệ quản trị viên hệ thống để kích hoạt.`,
   },
+  // 帳號拒絕 — domain_blocked（email domain 不在白名單；三語全發）
+  domain_blocked: (email) => [
+    `⚠️ 您的 email（${email}）不在允許的 domain 清單內，無法使用 Cortex Webex Bot。請使用公司 email 帳號，或聯絡廠區資訊處理。`,
+    ``,
+    `⚠️ Your email (${email}) is not in the allowed domain list. Please use your company email account or contact your local IT department.`,
+    ``,
+    `⚠️ Email của bạn (${email}) không nằm trong danh sách domain được phép. Vui lòng sử dụng email công ty hoặc liên hệ bộ phận IT tại nhà máy.`,
+  ].join('\n'),
   // 影片拒絕
   video_reject: {
     'zh-TW': (f) => `❌ 不支援影片檔（${f}），請傳送音訊或文件。`,
@@ -324,6 +332,38 @@ function stripMention(text, botName) {
     clean = clean.replace(new RegExp(`^@?${botName}\\s*`, 'i'), '').trim();
   }
   return clean;
+}
+
+// ── Email domain 白名單（system_settings.webex_allowed_domains，空陣列=全拒）──
+// 快取 60 秒避免每則訊息都打 DB
+let _domainCache = { at: 0, list: [] };
+async function getAllowedDomains(db) {
+  const now = Date.now();
+  if (now - _domainCache.at < 60_000) return _domainCache.list;
+  try {
+    const row = await db.prepare(
+      `SELECT value FROM system_settings WHERE key='webex_allowed_domains'`
+    ).get();
+    let list = [];
+    if (row?.value) {
+      try { list = JSON.parse(row.value); } catch { list = []; }
+    }
+    if (!Array.isArray(list)) list = [];
+    // 規格化：lowercase + trim（domain 本身大小寫不敏感）
+    list = list.map(d => String(d || '').trim().toLowerCase()).filter(Boolean);
+    _domainCache = { at: now, list };
+    return list;
+  } catch (e) {
+    console.error('[Webex][Auth] getAllowedDomains error:', e.message);
+    // DB 故障保守做法：回空 → 拒絕全部（符合 fail-closed）
+    return [];
+  }
+}
+
+function extractDomain(email) {
+  const at = String(email || '').lastIndexOf('@');
+  if (at < 0) return '';
+  return email.slice(at + 1).trim().toLowerCase();
 }
 
 // ── DB 查用戶（email 正規化比對）────────────────────────────────────────────────
@@ -1163,10 +1203,24 @@ async function handleWebexMessage(message) {
 
   console.log(`[Webex] Incoming ${isDm ? 'DM' : 'GroupRoom'} from="${senderEmail}" roomId="${roomId}"`);
 
-  // 查 user
-  const user = await findUserByEmail(db, senderEmail);
   const roomType = isDm ? 'direct' : 'group';
   const msgPreview = (message.text || '').slice(0, 100);
+
+  // Domain 白名單檢查（先於 user lookup，擋私人 Webex 冒用公司 email 的情境）
+  const senderDomain = extractDomain(senderEmail);
+  const allowedDomains = await getAllowedDomains(db);
+  if (!senderDomain || !allowedDomains.includes(senderDomain)) {
+    console.warn(`[Webex][Auth] Domain blocked: email="${senderEmail}" domain="${senderDomain}" allowed=[${allowedDomains.join(',')}]`);
+    db.prepare(
+      `INSERT INTO webex_auth_logs (raw_email, norm_email, status, room_type, room_id, msg_text)
+       VALUES (?, ?, 'domain_blocked', ?, ?, ?)`
+    ).run(senderEmail, normalizeEmail(senderEmail), roomType, roomId, msgPreview).catch(() => {});
+    await webex.sendMessage(roomId, t('domain_blocked', null, senderEmail));
+    return;
+  }
+
+  // 查 user
+  const user = await findUserByEmail(db, senderEmail);
 
   if (!user) {
     console.warn(`[Webex][Auth] No user matched, sending rejection to roomId="${roomId}"`);
@@ -1354,5 +1408,69 @@ async function handleWebexMessage(message) {
   await processMessage(db, webex, user, sessionId, roomId, msgText, fileUrls, isDm, lang);
 }
 
+// ── Autoscan：掃描 users.email 的 domain，union 進白名單（啟動時呼叫）──────────
+// 策略：只新增、不刪除；admin 若想拒絕某 domain，要先把該 domain 的 users 停用或刪除
+// （重啟後會被再加回）。這是為了「部署後新員工自動被放行」。
+async function autoScanUserDomains(db) {
+  try {
+    const rows = await db.prepare(
+      `SELECT DISTINCT LOWER(TRIM(email)) AS email FROM users WHERE email IS NOT NULL AND email LIKE '%@%'`
+    ).all();
+
+    const DOMAIN_RE = /^[a-z0-9][a-z0-9.-]*\.[a-z]{2,}$/;
+    const scanned = new Set();
+    for (const r of rows) {
+      const d = extractDomain(r.email || r.EMAIL || '');
+      if (d && DOMAIN_RE.test(d)) scanned.add(d);
+    }
+
+    const row = await db.prepare(
+      `SELECT value FROM system_settings WHERE key='webex_allowed_domains'`
+    ).get();
+    let current = [];
+    if (row?.value) {
+      try { current = JSON.parse(row.value); } catch { current = []; }
+    }
+    if (!Array.isArray(current)) current = [];
+    current = current.map(d => String(d || '').trim().toLowerCase()).filter(Boolean);
+
+    const currentSet = new Set(current);
+    const added = [];
+    for (const d of scanned) {
+      if (!currentSet.has(d)) {
+        added.push(d);
+        currentSet.add(d);
+      }
+    }
+
+    if (added.length === 0) {
+      console.log(`[Webex][DomainAutoScan] No new domains (scanned=${scanned.size}, whitelist=${current.length})`);
+      return { added: [], total: current.length };
+    }
+
+    const merged = Array.from(currentSet).sort();
+    const value = JSON.stringify(merged);
+    if (row) {
+      await db.prepare(
+        `UPDATE system_settings SET value=? WHERE key='webex_allowed_domains'`
+      ).run(value);
+    } else {
+      await db.prepare(
+        `INSERT INTO system_settings (key, value) VALUES ('webex_allowed_domains', ?)`
+      ).run(value);
+    }
+
+    // 清本地快取，避免延遲 60 秒生效
+    _domainCache = { at: 0, list: [] };
+
+    console.log(`[Webex][DomainAutoScan] ✅ Added ${added.length} new domain(s): ${added.join(', ')}  (total=${merged.length})`);
+    return { added, total: merged.length };
+  } catch (e) {
+    console.error('[Webex][DomainAutoScan] error:', e.message);
+    return { added: [], total: 0, error: e.message };
+  }
+}
+
 module.exports = router;
 module.exports.handleWebexMessage = handleWebexMessage;
+module.exports.autoScanUserDomains = autoScanUserDomains;

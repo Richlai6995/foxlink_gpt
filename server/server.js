@@ -123,6 +123,16 @@ app.get('/api/health', (req, res) => res.json({ status: 'ok', timestamp: new Dat
     app.use('/api/transcribe', require('./routes/transcribe'));
     console.log('[Route] /api/transcribe OK');
 
+    // Autoscan user email domains → Webex allowed-domain whitelist
+    // 每次啟動時掃描 users.email，union 進白名單（只加不刪，admin 手動加的會保留）
+    try {
+      const { db } = require('./database-oracle');
+      const { autoScanUserDomains } = require('./routes/webex');
+      autoScanUserDomains(db).catch(e => console.error('[Webex][DomainAutoScan] unhandled:', e.message));
+    } catch (e) {
+      console.error('[Webex][DomainAutoScan] init error:', e.message);
+    }
+
     // Start Webex Bot listener (WebSocket primary, Polling fallback)
     try {
       const { startListener } = require('./services/webexListener');

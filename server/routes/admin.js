@@ -617,6 +617,69 @@ router.get('/webex-auth-logs', async (req, res) => {
   }
 });
 
+// GET /api/admin/webex-allowed-domains — 取得 email domain 白名單
+router.get('/webex-allowed-domains', async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const row = await db.prepare(
+      `SELECT value FROM system_settings WHERE key='webex_allowed_domains'`
+    ).get();
+    let domains = [];
+    if (row?.value) {
+      try { domains = JSON.parse(row.value); } catch { domains = []; }
+    }
+    if (!Array.isArray(domains)) domains = [];
+    res.json({ domains });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// PUT /api/admin/webex-allowed-domains — 覆寫 email domain 白名單
+router.put('/webex-allowed-domains', async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const { domains } = req.body || {};
+    if (!Array.isArray(domains)) {
+      return res.status(400).json({ error: 'domains 必須為陣列' });
+    }
+    // 清理：trim、去 @ 前綴、lowercase、去空、去重
+    const cleaned = [...new Set(
+      domains
+        .map(d => String(d || '').trim().toLowerCase().replace(/^@+/, ''))
+        .filter(d => /^[a-z0-9][a-z0-9.-]*\.[a-z]{2,}$/.test(d))
+    )];
+    const value = JSON.stringify(cleaned);
+    const existing = await db.prepare(
+      `SELECT key FROM system_settings WHERE key='webex_allowed_domains'`
+    ).get();
+    if (existing) {
+      await db.prepare(
+        `UPDATE system_settings SET value=? WHERE key='webex_allowed_domains'`
+      ).run(value);
+    } else {
+      await db.prepare(
+        `INSERT INTO system_settings (key, value) VALUES ('webex_allowed_domains', ?)`
+      ).run(value);
+    }
+    res.json({ domains: cleaned });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/admin/webex-allowed-domains/rescan — 立即掃描 users.email 加入白名單
+router.post('/webex-allowed-domains/rescan', async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const { autoScanUserDomains } = require('./webex');
+    const result = await autoScanUserDomains(db);
+    res.json(result);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // GET /api/admin/sensitive-keywords
 router.get('/sensitive-keywords', async (req, res) => {
   try {

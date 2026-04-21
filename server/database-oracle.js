@@ -1951,6 +1951,20 @@ async function runMigrations(db) {
     created_at   TIMESTAMP DEFAULT SYSTIMESTAMP
   )`);
 
+  // webex_allowed_domains: email domain 白名單（空=全拒，防私人 Webex 冒用）
+  try {
+    const existing = await db.prepare(
+      `SELECT value FROM system_settings WHERE key='webex_allowed_domains'`
+    ).get();
+    if (!existing) {
+      const defaults = JSON.stringify(['foxlink.com', 'foxlink.com.tw']);
+      await db.prepare(
+        `INSERT INTO system_settings (key, value) VALUES ('webex_allowed_domains', ?)`
+      ).run(defaults);
+      console.log('[Migration] Seeded system_settings.webex_allowed_domains with foxlink.com, foxlink.com.tw');
+    }
+  } catch (e) { console.warn('[Migration] webex_allowed_domains seed:', e.message); }
+
   // ── 資料政策 × 類別綁定（使用者/角色對特定類別指定政策）────────────────────
   await createTable('AI_USER_CAT_POLICIES', `CREATE TABLE ai_user_cat_policies (
     id          NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,

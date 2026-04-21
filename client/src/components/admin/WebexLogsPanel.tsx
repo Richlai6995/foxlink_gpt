@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { MessageSquare, RefreshCw, Download, Search, CheckCircle, XCircle, AlertTriangle, Shield } from 'lucide-react'
+import { MessageSquare, RefreshCw, Download, Search, CheckCircle, XCircle, AlertTriangle, Shield, Ban, Plus, Trash2, Save, Scan } from 'lucide-react'
 import api from '../../lib/api'
 import { fmtTW } from '../../lib/fmtTW'
 
@@ -12,7 +12,7 @@ interface AuthLog {
   user_id: number | null
   user_name: string | null
   username: string | null
-  status: 'ok' | 'not_found' | 'disabled' | 'bot_disabled'
+  status: 'ok' | 'not_found' | 'disabled' | 'bot_disabled' | 'domain_blocked'
   room_type: 'direct' | 'group'
   room_id: string
   msg_text: string | null
@@ -35,10 +35,11 @@ interface AuditLog {
 // ── Status badge ──────────────────────────────────────────────────────────────
 
 const STATUS_LABEL: Record<string, { label: string; cls: string; icon: React.ReactNode }> = {
-  ok:           { label: '✅ 認證成功', cls: 'bg-green-100 text-green-700',  icon: <CheckCircle size={12} /> },
-  not_found:    { label: '❌ 帳號不存在', cls: 'bg-red-100 text-red-700',    icon: <XCircle size={12} /> },
-  disabled:     { label: '⛔ 帳號已停用', cls: 'bg-orange-100 text-orange-700', icon: <AlertTriangle size={12} /> },
-  bot_disabled: { label: '🔕 Bot 功能停用', cls: 'bg-slate-100 text-slate-600', icon: <AlertTriangle size={12} /> },
+  ok:             { label: '✅ 認證成功', cls: 'bg-green-100 text-green-700',  icon: <CheckCircle size={12} /> },
+  not_found:      { label: '❌ 帳號不存在', cls: 'bg-red-100 text-red-700',    icon: <XCircle size={12} /> },
+  disabled:       { label: '⛔ 帳號已停用', cls: 'bg-orange-100 text-orange-700', icon: <AlertTriangle size={12} /> },
+  bot_disabled:   { label: '🔕 Bot 功能停用', cls: 'bg-slate-100 text-slate-600', icon: <AlertTriangle size={12} /> },
+  domain_blocked: { label: '🚫 Domain 未授權', cls: 'bg-rose-100 text-rose-700', icon: <Ban size={12} /> },
 }
 
 // ── Auth Logs Tab ─────────────────────────────────────────────────────────────
@@ -132,6 +133,7 @@ function AuthLogsTab() {
             <option value="not_found">❌ 帳號不存在</option>
             <option value="disabled">⛔ 帳號已停用</option>
             <option value="bot_disabled">🔕 Bot 功能停用</option>
+            <option value="domain_blocked">🚫 Domain 未授權</option>
           </select>
         </div>
         <div className="flex items-end gap-2">
@@ -347,10 +349,191 @@ function WebexAuditTab() {
   )
 }
 
+// ── Domain 白名單 Tab ─────────────────────────────────────────────────────────
+
+function DomainWhitelistTab() {
+  const [domains, setDomains] = useState<string[]>([])
+  const [newDomain, setNewDomain] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [scanning, setScanning] = useState(false)
+  const [dirty, setDirty] = useState(false)
+  const [msg, setMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null)
+
+  const DOMAIN_RE = /^[a-z0-9][a-z0-9.-]*\.[a-z]{2,}$/i
+
+  const load = async () => {
+    setLoading(true)
+    try {
+      const res = await api.get('/admin/webex-allowed-domains')
+      setDomains(res.data.domains || [])
+      setDirty(false)
+    } catch (e: any) {
+      setMsg({ type: 'err', text: '載入失敗：' + (e.response?.data?.error || e.message) })
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => { load() }, [])
+
+  const addDomain = () => {
+    const d = newDomain.trim().toLowerCase().replace(/^@+/, '')
+    if (!d) return
+    if (!DOMAIN_RE.test(d)) {
+      setMsg({ type: 'err', text: `格式錯誤：${d}（正確範例：foxlink.com.tw）` })
+      return
+    }
+    if (domains.includes(d)) {
+      setMsg({ type: 'err', text: `已存在：${d}` })
+      return
+    }
+    setDomains([...domains, d])
+    setNewDomain('')
+    setDirty(true)
+    setMsg(null)
+  }
+
+  const removeDomain = (d: string) => {
+    setDomains(domains.filter(x => x !== d))
+    setDirty(true)
+    setMsg(null)
+  }
+
+  const rescan = async () => {
+    if (dirty) {
+      if (!confirm('目前有未儲存的變更，重新掃描會先讀取 DB 最新白名單覆蓋本地變更，確定嗎？')) return
+    }
+    setScanning(true)
+    try {
+      const res = await api.post('/admin/webex-allowed-domains/rescan')
+      const { added = [], total = 0 } = res.data || {}
+      if (added.length === 0) {
+        setMsg({ type: 'ok', text: `掃描完成，沒有新 domain（白名單共 ${total} 筆）` })
+      } else {
+        setMsg({ type: 'ok', text: `掃描完成，新增 ${added.length} 筆：${added.join(', ')}（白名單共 ${total} 筆）` })
+      }
+      await load()
+    } catch (e: any) {
+      setMsg({ type: 'err', text: '掃描失敗：' + (e.response?.data?.error || e.message) })
+    } finally {
+      setScanning(false)
+    }
+  }
+
+  const save = async () => {
+    if (domains.length === 0) {
+      if (!confirm('白名單為空，將拒絕所有 Webex Bot 來源，確定嗎？')) return
+    }
+    setSaving(true)
+    try {
+      const res = await api.put('/admin/webex-allowed-domains', { domains })
+      setDomains(res.data.domains || [])
+      setDirty(false)
+      setMsg({ type: 'ok', text: '已儲存' })
+    } catch (e: any) {
+      setMsg({ type: 'err', text: '儲存失敗：' + (e.response?.data?.error || e.message) })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div>
+      <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 mb-4 text-sm text-amber-800">
+        <div className="flex items-start gap-2">
+          <AlertTriangle size={16} className="mt-0.5 flex-shrink-0" />
+          <div>
+            <p className="font-medium mb-1">Domain 白名單機制</p>
+            <ul className="list-disc pl-5 space-y-0.5 text-xs">
+              <li>只有白名單 domain 的 email 才能通過 Webex Bot 認證，防止私人 Webex 帳號冒用。</li>
+              <li><b>精確比對</b>：<code>foxlink.com.tw</code> 和 <code>foxlink.com</code> 需各自加入（不涵蓋子網域）。</li>
+              <li><b>空白名單 = 全部拒絕</b>。清空後所有 Webex 訊息都會被擋。</li>
+              <li>被擋的訊息會記錄在「認證紀錄」分頁，狀態為「🚫 Domain 未授權」。</li>
+              <li><b>重啟自動掃描</b>：每次 server 重啟會自動掃描 users.email 的 domain 併入白名單（只加不刪，admin 手動加的保留；但 admin 移除的下次重啟會被補回）。</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      {msg && (
+        <div className={`rounded-xl p-3 mb-4 text-sm ${msg.type === 'ok' ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-red-50 text-red-700 border border-red-200'}`}>
+          {msg.text}
+        </div>
+      )}
+
+      <div className="bg-slate-50 rounded-xl p-4 mb-4">
+        <label className="label">新增 Domain</label>
+        <div className="flex gap-2">
+          <input
+            type="text"
+            value={newDomain}
+            onChange={e => setNewDomain(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') addDomain() }}
+            placeholder="例如：foxlink.com.tw"
+            className="input flex-1"
+          />
+          <button onClick={addDomain} className="btn-primary flex items-center gap-1.5">
+            <Plus size={14} /> 加入
+          </button>
+        </div>
+        <p className="text-xs text-slate-400 mt-1.5">格式：<code>domain.tld</code>，可省略 <code>@</code> 前綴</p>
+      </div>
+
+      <div className="rounded-xl border border-slate-200 overflow-hidden mb-4">
+        <div className="bg-slate-100 px-4 py-2.5 flex items-center justify-between">
+          <span className="text-sm font-semibold text-slate-600">已授權 Domain（{domains.length}）</span>
+          <button onClick={load} disabled={loading} className="btn-ghost text-xs">
+            <RefreshCw size={12} className={loading ? 'animate-spin' : ''} />
+          </button>
+        </div>
+        {domains.length === 0 ? (
+          <p className="text-center text-slate-400 py-8 text-sm">尚無授權 domain（目前會拒絕所有 Webex 訊息）</p>
+        ) : (
+          <ul className="divide-y divide-slate-100">
+            {domains.map(d => (
+              <li key={d} className="px-4 py-2.5 flex items-center justify-between hover:bg-slate-50">
+                <span className="font-mono text-sm">@{d}</span>
+                <button
+                  onClick={() => removeDomain(d)}
+                  className="text-red-500 hover:text-red-700 text-xs flex items-center gap-1"
+                  title="移除"
+                >
+                  <Trash2 size={13} /> 移除
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      <div className="flex items-center gap-2 flex-wrap">
+        <button
+          onClick={save}
+          disabled={saving || !dirty}
+          className="btn-primary flex items-center gap-1.5"
+        >
+          <Save size={14} /> {saving ? '儲存中...' : '儲存變更'}
+        </button>
+        <button
+          onClick={rescan}
+          disabled={scanning}
+          className="btn-ghost flex items-center gap-1.5"
+          title="立即掃描 users.email 併入白名單（等同重啟時的行為）"
+        >
+          <Scan size={14} className={scanning ? 'animate-pulse' : ''} />
+          {scanning ? '掃描中...' : '立即重新掃描'}
+        </button>
+        {dirty && <span className="text-xs text-amber-600">有未儲存的變更</span>}
+      </div>
+    </div>
+  )
+}
+
 // ── Main Panel ─────────────────────────────────────────────────────────────────
 
 export default function WebexLogsPanel() {
-  const [tab, setTab] = useState<'auth' | 'audit'>('auth')
+  const [tab, setTab] = useState<'auth' | 'audit' | 'domains'>('auth')
 
   return (
     <div>
@@ -372,9 +555,17 @@ export default function WebexLogsPanel() {
         >
           對話稽核
         </button>
+        <button
+          onClick={() => setTab('domains')}
+          className={`px-4 py-2 rounded-lg text-sm font-medium transition ${tab === 'domains' ? 'bg-white text-green-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+        >
+          Domain 白名單
+        </button>
       </div>
 
-      {tab === 'auth' ? <AuthLogsTab /> : <WebexAuditTab />}
+      {tab === 'auth' && <AuthLogsTab />}
+      {tab === 'audit' && <WebexAuditTab />}
+      {tab === 'domains' && <DomainWhitelistTab />}
     </div>
   )
 }
