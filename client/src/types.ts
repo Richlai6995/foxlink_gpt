@@ -45,7 +45,7 @@ export interface GeneratedFile {
   publicUrl: string
 }
 
-export type InlineChartType = 'bar' | 'line' | 'pie' | 'scatter' | 'area' | 'heatmap'
+export type InlineChartType = 'bar' | 'line' | 'pie' | 'scatter' | 'area' | 'heatmap' | 'radar'
 
 export interface InlineChartYField {
   field: string

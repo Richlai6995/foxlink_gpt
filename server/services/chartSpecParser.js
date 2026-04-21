@@ -162,6 +162,10 @@ function validateSpec(spec) {
   for (const yf of spec.y_fields) {
     if (!yf || typeof yf.field !== 'string') return { ok: false, reason: 'y_fields 元素缺 field' };
   }
+  // heatmap 需要 2 個 y_fields:第一個是縱軸 group(category)、第二個是 value(數值)
+  if (spec.type === 'heatmap' && spec.y_fields.length < 2) {
+    return { ok: false, reason: 'heatmap 需要 2 個 y_fields(group + value)' };
+  }
   if (!Array.isArray(spec.data) || spec.data.length === 0) return { ok: false, reason: 'data 為空' };
   if (spec.data.length > DATA_ROW_HARDMAX) return { ok: false, reason: `data 超過 ${DATA_ROW_HARDMAX} rows` };
   return { ok: true };

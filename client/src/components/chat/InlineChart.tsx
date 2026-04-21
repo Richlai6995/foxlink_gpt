@@ -82,6 +82,16 @@ function buildOption(spec: InlineChartSpec): ChartState {
   const legend = { ...BASE_OPTION.legend, top: 24 + topOffset }
   const grid = { ...BASE_OPTION.grid, top: 56 + topOffset }
 
+  // Phase 4:超過 30 點自動掛 dataZoom(slider 在底,inside 支援滾輪/拖曳)
+  const needsZoom = rows.length > 30
+  const dataZoom = needsZoom
+    ? [
+        { type: 'inside', start: 0, end: Math.min(100, Math.round((30 / rows.length) * 100)) },
+        { type: 'slider', height: 18, bottom: 4, start: 0, end: Math.min(100, Math.round((30 / rows.length) * 100)) },
+      ]
+    : undefined
+  const gridWithZoom = needsZoom ? { ...grid, bottom: 36 } : grid
+
   switch (spec.type) {
     case 'bar':
     case 'line':
@@ -93,7 +103,8 @@ function buildOption(spec: InlineChartSpec): ChartState {
           ...title,
           color: colors,
           legend,
-          grid,
+          grid: gridWithZoom,
+          dataZoom,
           xAxis: {
             type: 'category',
             data: xs,
@@ -143,9 +154,109 @@ function buildOption(spec: InlineChartSpec): ChartState {
         },
       }
     }
-    case 'scatter':
-    case 'heatmap':
-      return { kind: 'unsupported', type: spec.type }
+    case 'scatter': {
+      // x_field 為 X(數值或類別),y_fields[0..n].field 為 Y 數值;每組 y 一個 series
+      // 若 x 是類別則 xAxis type=category,否則 type=value
+      const xIsNumeric = xs.every(v => typeof v === 'number' || (!isNaN(Number(v)) && v !== ''))
+      return {
+        kind: 'ok',
+        option: {
+          ...BASE_OPTION,
+          ...title,
+          color: colors,
+          legend,
+          grid,
+          xAxis: {
+            type: xIsNumeric ? 'value' : 'category',
+            data: xIsNumeric ? undefined : xs,
+            axisLabel: { color: '#6b7280', fontSize: 11 },
+            axisLine: { lineStyle: { color: '#e5e7eb' } },
+          },
+          yAxis: {
+            type: 'value',
+            axisLabel: { color: '#6b7280', fontSize: 11 },
+            splitLine: { lineStyle: { color: '#f3f4f6' } },
+          },
+          tooltip: { ...BASE_OPTION.tooltip, trigger: 'item' },
+          series: series.map(s => ({
+            name: s.name,
+            type: 'scatter',
+            symbolSize: 10,
+            data: xIsNumeric
+              ? rows.map(r => [Number(r[spec.x_field]), Number(r[spec.y_fields.find(yf => yf.field === s.name || yf.name === s.name)?.field || s.name])])
+              : s.values,
+            itemStyle: { color: s.color, opacity: 0.7 },
+          })),
+        },
+      }
+    }
+    case 'heatmap': {
+      // 需要 3 維資料:y_fields[0]=group(縱軸 category),y_fields[1]=value
+      if (spec.y_fields.length < 2) return { kind: 'error', reason: 'heatmap 需要 2 個 y_fields(group + value)' }
+      const groupField = spec.y_fields[0].field
+      const valueField = spec.y_fields[1].field
+      const ys = Array.from(new Set(rows.map(r => String(r[groupField] ?? ''))))
+      const data = rows.map(r => [
+        xs.indexOf(r[spec.x_field] as string | number),
+        ys.indexOf(String(r[groupField] ?? '')),
+        Number(r[valueField]) || 0,
+      ])
+      const values = data.map(d => d[2])
+      const vMin = Math.min(...values, 0)
+      const vMax = Math.max(...values, 1)
+      return {
+        kind: 'ok',
+        option: {
+          ...BASE_OPTION,
+          ...title,
+          tooltip: { ...BASE_OPTION.tooltip, position: 'top' },
+          grid: { ...grid, height: '60%', top: 56 + topOffset },
+          xAxis: { type: 'category', data: xs, axisLabel: { color: '#6b7280', fontSize: 11 }, splitArea: { show: true } },
+          yAxis: { type: 'category', data: ys, axisLabel: { color: '#6b7280', fontSize: 11 }, splitArea: { show: true } },
+          visualMap: {
+            min: vMin, max: vMax, calculable: true, orient: 'horizontal',
+            left: 'center', bottom: 4, textStyle: { fontSize: 10, color: '#6b7280' },
+            inRange: { color: ['#e0f2fe', '#3b82f6', '#1e3a8a'] },
+          },
+          series: [{ name: spec.y_fields[1].name || valueField, type: 'heatmap', data, label: { show: false } }],
+        },
+      }
+    }
+    case 'radar': {
+      // x_field 是 indicator name 欄,y_fields 各為一個 series
+      // 自動算 max:每個 indicator 取所有 series 中該 indicator 的最大值 * 1.1
+      const indicators = xs.map((label, i) => {
+        const max = Math.max(...series.map(s => s.values[i] || 0)) * 1.1 || 100
+        return { name: String(label), max }
+      })
+      return {
+        kind: 'ok',
+        option: {
+          ...BASE_OPTION,
+          ...title,
+          color: colors,
+          legend: { ...legend, top: 8 + topOffset },
+          tooltip: { ...BASE_OPTION.tooltip, trigger: 'item' },
+          radar: {
+            indicator: indicators,
+            center: ['50%', `${55 + (spec.title ? 5 : 0)}%`],
+            radius: '60%',
+            axisName: { color: '#6b7280', fontSize: 11 },
+            splitLine: { lineStyle: { color: '#e5e7eb' } },
+            splitArea: { areaStyle: { color: ['rgba(248,250,252,0.5)', 'rgba(241,245,249,0.5)'] } },
+          },
+          series: [{
+            type: 'radar',
+            data: series.map(s => ({
+              name: s.name,
+              value: s.values,
+              itemStyle: { color: s.color },
+              areaStyle: { color: s.color, opacity: 0.2 },
+            })),
+          }],
+        },
+      }
+    }
     default:
       return { kind: 'unsupported', type: String((spec as { type?: string }).type || 'unknown') }
   }
