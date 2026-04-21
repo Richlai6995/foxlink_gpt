@@ -16,6 +16,7 @@ import KnowledgeBaseDetailPage from './pages/KnowledgeBaseDetailPage'
 import AiDashboardPage from './pages/AiDashboardPage'
 import DashboardBoardPage from './pages/DashboardBoardPage'
 import TemplatesPage from './pages/TemplatesPage'
+import MyChartsPage from './pages/MyChartsPage'
 import FeedbackFAB from './components/feedback/FeedbackFAB'
 import FeedbackToast from './components/feedback/FeedbackToast'
 import GlobalVoiceInput from './components/GlobalVoiceInput'
@@ -92,6 +93,7 @@ function AppRoutes() {
       <Route path="/dashboard" element={<ProtectedRoute><AiDashboardPage /></ProtectedRoute>} />
       <Route path="/dashboard/boards" element={<ProtectedRoute><DashboardBoardPage /></ProtectedRoute>} />
       <Route path="/templates" element={<ProtectedRoute><TemplatesPage /></ProtectedRoute>} />
+      <Route path="/my-charts" element={<ProtectedRoute><MyChartsPage /></ProtectedRoute>} />
       <Route path="/feedback" element={<ProtectedRoute><FeedbackPage /></ProtectedRoute>} />
       <Route path="/feedback/new" element={<ProtectedRoute><FeedbackNewPage /></ProtectedRoute>} />
       <Route path="/feedback/:id" element={<ProtectedRoute><FeedbackDetailPage /></ProtectedRoute>} />

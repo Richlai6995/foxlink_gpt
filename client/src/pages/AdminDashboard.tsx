@@ -24,6 +24,7 @@ import KbAdminPanel from '../components/admin/KbAdminPanel'
 import ResearchLogsPanel from '../components/admin/ResearchLogsPanel'
 import ApiKeysPanel from '../components/admin/ApiKeysPanel'
 import AiDashboardAdmin from '../components/admin/AiDashboardAdmin'
+import ChartAdoptionPanel from '../components/admin/ChartAdoptionPanel'
 import DataPermissionsPanel from '../components/admin/DataPermissionsPanel'
 import MonitorPage from '../components/monitor/MonitorPage'
 import DbSourcesPanel from '../components/admin/DbSourcesPanel'
@@ -35,7 +36,7 @@ import FeedbackCategoryManager from '../components/feedback/admin/FeedbackCatego
 import FeedbackSLAConfig from '../components/feedback/admin/FeedbackSLAConfig'
 import FeedbackStatsPanel from '../components/feedback/FeedbackStatsPanel'
 import VoiceInputSettingsPanel from '../components/admin/VoiceInputSettings'
-type Tab = 'users' | 'roles' | 'tokens' | 'audit' | 'keywords' | 'db' | 'mail' | 'llm' | 'vector-defaults' | 'kb-retrieval' | 'kb-debug' | 'kb-synonyms' | 'cost' | 'scheduled' | 'mcp' | 'dify' | 'kb' | 'skills' | 'code-runners' | 'research' | 'api-keys' | 'ai-dashboard' | 'data-permissions' | 'monitor' | 'db-sources' | 'webex-logs' | 'help-translation' | 'factory-translations' | 'training' | 'feedback' | 'voice-input'
+type Tab = 'users' | 'roles' | 'tokens' | 'audit' | 'keywords' | 'db' | 'mail' | 'llm' | 'vector-defaults' | 'kb-retrieval' | 'kb-debug' | 'kb-synonyms' | 'cost' | 'scheduled' | 'mcp' | 'dify' | 'kb' | 'skills' | 'code-runners' | 'research' | 'api-keys' | 'ai-dashboard' | 'chart-adoption' | 'data-permissions' | 'monitor' | 'db-sources' | 'webex-logs' | 'help-translation' | 'factory-translations' | 'training' | 'feedback' | 'voice-input'
 
 export default function AdminDashboard() {
   const [activeTab, setActiveTab] = useState<Tab>('users')
@@ -58,6 +59,7 @@ export default function AdminDashboard() {
     { id: 'skills', label: t('admin.tabs.skills'), icon: <Sparkles size={16} className="text-pink-500" /> },
     { id: 'code-runners', label: t('admin.tabs.codeRunners'), icon: <Code2 size={16} className="text-rose-600" /> },
     { id: 'ai-dashboard', label: t('admin.tabs.aiDashboard'), icon: <MonitorPlay size={16} className="text-fuchsia-500" /> },
+    { id: 'chart-adoption', label: t('admin.tabs.chartAdoption', '使用者圖庫採納'), icon: <BarChart3 size={16} className="text-amber-500" /> },
     { id: 'research', label: t('admin.tabs.research'), icon: <Search size={16} className="text-teal-500" /> },
     // ─ 知識庫與資料 ─
     { id: 'kb', label: t('admin.tabs.kb'), icon: <Database size={16} className="text-violet-500" /> },
@@ -147,6 +149,7 @@ export default function AdminDashboard() {
           {activeTab === 'research' && <ResearchLogsPanel />}
           {activeTab === 'api-keys' && <ApiKeysPanel />}
           {activeTab === 'ai-dashboard' && <AiDashboardAdmin />}
+          {activeTab === 'chart-adoption' && <ChartAdoptionPanel />}
           {activeTab === 'data-permissions' && <DataPermissionsPanel />}
           {activeTab === 'db-sources' && <DbSourcesPanel />}
           {activeTab === 'help-translation' && <HelpTranslationPanel />}

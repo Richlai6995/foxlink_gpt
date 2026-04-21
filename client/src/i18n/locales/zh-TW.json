@@ -2918,6 +2918,38 @@
       "bar": "長條圖",
       "line": "折線圖",
       "pie": "圓餅圖"
+    },
+    "pin": {
+      "button": "釘選到圖庫",
+      "done": "已加入圖庫",
+      "askTitle": "為這張圖命名:",
+      "defaultTitle": "我的圖表",
+      "failed": "釘選失敗:"
+    },
+    "library": {
+      "sidebar": "我的圖庫",
+      "title": "我的圖庫",
+      "mine": "我的",
+      "shared": "別人分享給我的",
+      "open": "打開",
+      "collapse": "收合",
+      "owner": "由",
+      "used": "使用",
+      "times": "次",
+      "freeform": "自由格式",
+      "emptyMine": "尚無收藏的圖表。在 chat 對話中對 inline chart 點擊星號可加入圖庫。",
+      "emptyShared": "目前沒有他人分享的圖表"
+    },
+    "param": {
+      "run": "執行",
+      "running": "執行中...",
+      "required": "請填寫:"
+    },
+    "exec": {
+      "failed": "執行失敗:"
+    },
+    "delete": {
+      "confirm": "確定刪除「{{title}}」?"
     }
   }
 }

@@ -10,7 +10,8 @@ import { useMemo, useRef, useState } from 'react'
 import ReactECharts from 'echarts-for-react'
 import { Download, AlertTriangle, ChevronDown, ChevronUp, BarChart3, LineChart, PieChart, AreaChart } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
-import type { InlineChartSpec, InlineChartType } from '../../types'
+import type { InlineChartSpec, InlineChartType, UserChartParam } from '../../types'
+import PinChartButton from './PinChartButton'
 
 const CHART_FONT = "'Noto Sans TC', 'Microsoft JhengHei', 'PingFang TC', 'Segoe UI', Arial, sans-serif"
 
@@ -34,6 +35,19 @@ const BASE_OPTION = {
 interface Props {
   spec: InlineChartSpec
   height?: number
+  /** Phase 5:讓使用者把 chart 釘選到「我的圖庫」。預設開啟,setting=false 可關 */
+  enablePin?: boolean
+  /** Phase 5:tool 來源元資料,讓 user_charts.source_* 可填(由 ChatPage 注入) */
+  pinSource?: {
+    type?: 'mcp' | 'erp' | 'skill' | 'self_kb' | 'dify' | 'chat_freeform'
+    tool?: string
+    tool_version?: string
+    schema_hash?: string
+    prompt?: string
+    params?: UserChartParam[]
+    session_id?: string
+    message_id?: number
+  }
 }
 
 // 哪些 type 之間可以 local 切換(資料結構相容,不用 reprompt LLM)
@@ -262,7 +276,7 @@ function buildOption(spec: InlineChartSpec): ChartState {
   }
 }
 
-export default function InlineChart({ spec, height = 320 }: Props) {
+export default function InlineChart({ spec, height = 320, enablePin = true, pinSource }: Props) {
   const { t } = useTranslation()
   const chartRef = useRef<ReactECharts>(null)
   const [showRawSpec, setShowRawSpec] = useState(false)
@@ -353,6 +367,7 @@ export default function InlineChart({ spec, height = 320 }: Props) {
             })}
           </div>
         )}
+        {enablePin && <PinChartButton spec={spec} source={pinSource} />}
         <button
           onClick={handleDownload}
           title={t('chart.inline.downloadPng', '下載 PNG')}

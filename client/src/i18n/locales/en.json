@@ -2918,6 +2918,38 @@
       "bar": "Bar chart",
       "line": "Line chart",
       "pie": "Pie chart"
+    },
+    "pin": {
+      "button": "Pin to library",
+      "done": "Pinned",
+      "askTitle": "Name this chart:",
+      "defaultTitle": "My chart",
+      "failed": "Pin failed:"
+    },
+    "library": {
+      "sidebar": "My charts",
+      "title": "My chart library",
+      "mine": "Mine",
+      "shared": "Shared with me",
+      "open": "Open",
+      "collapse": "Collapse",
+      "owner": "by",
+      "used": "Used",
+      "times": "times",
+      "freeform": "Freeform",
+      "emptyMine": "No saved charts yet. Click the star on any inline chart in chat to pin.",
+      "emptyShared": "No charts shared with you yet"
+    },
+    "param": {
+      "run": "Run",
+      "running": "Running...",
+      "required": "Required:"
+    },
+    "exec": {
+      "failed": "Execution failed:"
+    },
+    "delete": {
+      "confirm": "Delete \"{{title}}\"?"
     }
   }
 }

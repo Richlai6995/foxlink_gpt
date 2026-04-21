@@ -63,6 +63,52 @@ export interface InlineChartSpec {
   data_ref?: { tool_call_id: string; path?: string }
 }
 
+// ── User Charts(Phase 5):使用者自建圖庫 ──────────────────────────────────────
+export type UserChartParamType = 'text' | 'number' | 'date' | 'select' | 'boolean'
+
+export interface UserChartParam {
+  key: string
+  label: string
+  type: UserChartParamType
+  options?: Array<{ value: string; label?: string }>
+  default?: string | number | boolean
+  required?: boolean
+}
+
+export interface UserChart {
+  id: number
+  owner_id: number
+  owner_name?: string
+  title: string
+  description?: string
+  chart_spec: InlineChartSpec | string
+  source_type?: string | null
+  source_tool?: string | null
+  source_tool_version?: string | null
+  source_schema_hash?: string | null
+  source_prompt?: string | null
+  source_params?: UserChartParam[] | string | null
+  source_session_id?: string | null
+  source_message_id?: number | null
+  is_public?: number
+  public_approved?: number
+  use_count?: number
+  share_via?: 'use' | 'manage' | null
+  created_at?: string
+  updated_at?: string
+}
+
+export interface UserChartShare {
+  id: number
+  chart_id: number
+  share_type: 'use' | 'manage'
+  grantee_type: 'user' | 'role' | 'factory' | 'department' | 'cost_center' | 'division' | 'org_group'
+  grantee_id: string
+  grantee_name?: string
+  granted_by?: number
+  created_at?: string
+}
+
 export interface ChatMessage {
   id: number
   session_id: string

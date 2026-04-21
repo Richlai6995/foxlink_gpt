@@ -2918,6 +2918,38 @@
       "bar": "Biểu đồ cột",
       "line": "Biểu đồ đường",
       "pie": "Biểu đồ tròn"
+    },
+    "pin": {
+      "button": "Ghim vào thư viện",
+      "done": "Đã ghim",
+      "askTitle": "Đặt tên cho biểu đồ:",
+      "defaultTitle": "Biểu đồ của tôi",
+      "failed": "Ghim thất bại:"
+    },
+    "library": {
+      "sidebar": "Biểu đồ của tôi",
+      "title": "Thư viện biểu đồ",
+      "mine": "Của tôi",
+      "shared": "Được chia sẻ",
+      "open": "Mở",
+      "collapse": "Thu gọn",
+      "owner": "bởi",
+      "used": "Đã dùng",
+      "times": "lần",
+      "freeform": "Tự do",
+      "emptyMine": "Chưa có biểu đồ. Bấm sao trên biểu đồ trong chat để ghim.",
+      "emptyShared": "Chưa có biểu đồ nào được chia sẻ"
+    },
+    "param": {
+      "run": "Chạy",
+      "running": "Đang chạy...",
+      "required": "Bắt buộc:"
+    },
+    "exec": {
+      "failed": "Thực thi thất bại:"
+    },
+    "delete": {
+      "confirm": "Xóa \"{{title}}\"?"
     }
   }
 }

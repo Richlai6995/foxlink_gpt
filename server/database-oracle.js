@@ -731,6 +731,44 @@ async function runMigrations(db) {
   // 詳見 docs/chat-inline-chart-plan.md
   await addCol('CHAT_MESSAGES', 'CHARTS_JSON', 'CLOB');
 
+  // ── User Charts (Phase 5):使用者自建圖庫 + 分享 ──────────────────────────
+  // Template Share 模型:分享 design + tool ref + params,絕不分享資料
+  // 被分享者用自己權限重跑 tool。詳見 docs/chat-inline-chart-plan.md §5
+  await createTable('USER_CHARTS', `CREATE TABLE user_charts (
+    id                   NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    owner_id             NUMBER NOT NULL,
+    title                VARCHAR2(255) NOT NULL,
+    description          CLOB,
+    chart_spec           CLOB NOT NULL,
+    source_type          VARCHAR2(32),
+    source_tool          VARCHAR2(255),
+    source_tool_version  VARCHAR2(64),
+    source_schema_hash   VARCHAR2(64),
+    source_prompt        CLOB,
+    source_params        CLOB,
+    source_session_id    VARCHAR2(64),
+    source_message_id    NUMBER,
+    is_public            NUMBER(1) DEFAULT 0,
+    public_approved      NUMBER(1) DEFAULT 0,
+    use_count            NUMBER DEFAULT 0,
+    created_at           TIMESTAMP DEFAULT SYSTIMESTAMP,
+    updated_at           TIMESTAMP DEFAULT SYSTIMESTAMP
+  )`);
+
+  // user_chart_shares:欄位簽名完全對齊 ai_dashboard_shares
+  await createTable('USER_CHART_SHARES', `CREATE TABLE user_chart_shares (
+    id           NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    chart_id     NUMBER NOT NULL REFERENCES user_charts(id) ON DELETE CASCADE,
+    share_type   VARCHAR2(20) DEFAULT 'use',
+    grantee_type VARCHAR2(20) NOT NULL,
+    grantee_id   VARCHAR2(100) NOT NULL,
+    granted_by   NUMBER,
+    created_at   TIMESTAMP DEFAULT SYSTIMESTAMP
+  )`);
+
+  // 採納紀錄:admin 把 user_chart 拉進 AI 戰情室時記錄來源
+  await addCol('AI_SELECT_DESIGNS', 'ADOPTED_FROM_USER_CHART_ID', 'NUMBER');
+
   // ── Deep Research ──────────────────────────────────────────────────────────
   await addCol('USERS',  'CAN_DEEP_RESEARCH', 'NUMBER(1)');
   await addCol('ROLES',  'CAN_DEEP_RESEARCH', 'NUMBER(1) DEFAULT 1');
