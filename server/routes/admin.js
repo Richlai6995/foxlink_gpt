@@ -2132,6 +2132,319 @@ router.get('/cost-stats/export/monthly', async (req, res) => {
   }
 });
 
+// ─── Cost Stats by Factory (利潤中心 × 廠區 明細) ─────────────────────────────
+
+/**
+ * 共用:按 pc × factory 聚合 rows,並補上帳號人數 / 間接員工數 / pc 名稱
+ * @param {Array} rows - getCostRows 結果
+ * @param {Array} accountRows - [{profit_center, factory_code, cnt}]
+ * @param {Map} indirectFactMap - Map<`${pc}|${factory}`, count>
+ * @param {Object} pcMeta - pc → {profit_center_name, org_section, org_section_name, org_group_name}
+ * @param {string|null} monthKey - null → summary,'usage_date' → 加入 month 維度
+ * @returns {Array} 每筆含 profit_center, factory_code, [month], cost, user_count, account_count, indirect_emp_count...
+ */
+function aggregateByPcFactory(rows, accountRows, indirectFactMap, pcMeta, withMonth = false) {
+  const UNASSIGNED = ''; // factory_code 為空 → 前端顯示「未歸屬」
+  const keyOf = (pc, fc, month) => withMonth ? `${pc || ''}|${fc || UNASSIGNED}|${month || ''}` : `${pc || ''}|${fc || UNASSIGNED}`;
+
+  const map = {};
+  const ensure = (pc, fc, month, currency) => {
+    const k = keyOf(pc, fc, month);
+    if (!map[k]) {
+      map[k] = {
+        profit_center: pc || '',
+        profit_center_name: '',
+        org_section: '',
+        org_section_name: '',
+        org_group_name: '',
+        factory_code: fc || '',
+        ...(withMonth ? { month: month || '' } : {}),
+        input_tokens: 0, output_tokens: 0, cost: 0,
+        currency: currency || 'USD',
+        _user_ids: new Set(),
+        account_count: 0,
+        indirect_emp_count: 0,
+      };
+    }
+    return map[k];
+  };
+
+  // 1. token_usage
+  for (const r of rows) {
+    const month = withMonth ? (r.usage_date ? r.usage_date.slice(0, 7) : '') : null;
+    const m = ensure(r.profit_center, r.factory_code, month, r.currency);
+    m.input_tokens += r.input_tokens || 0;
+    m.output_tokens += r.output_tokens || 0;
+    m.cost += r.cost || 0;
+    m._user_ids.add(r.user_id);
+  }
+
+  // 2. 帳號人數(by pc × factory) - 套到所有月份列(若 withMonth)
+  const accountKV = {};
+  for (const a of accountRows) {
+    accountKV[`${a.profit_center || ''}|${a.factory_code || UNASSIGNED}`] = a.cnt || 0;
+  }
+
+  // 3. 建「空 pc × factory」列(有帳號但整期間未使用 / 或只有間接員工)
+  if (!withMonth) {
+    for (const [pcFc, cnt] of Object.entries(accountKV)) {
+      const [pc, fc] = pcFc.split('|');
+      ensure(pc, fc, null, 'USD').account_count = cnt;
+    }
+    for (const [pcFc, cnt] of indirectFactMap) {
+      const [pc, fc] = pcFc.split('|');
+      ensure(pc, fc, null, 'USD').indirect_emp_count = cnt;
+    }
+  } else {
+    // month 版本:只把靜態數字(帳號 / 間接)貼到該 (pc, factory) 既有的每個月份列,不額外補空月
+    for (const m of Object.values(map)) {
+      m.account_count = accountKV[`${m.profit_center}|${m.factory_code}`] || 0;
+      m.indirect_emp_count = indirectFactMap.get(`${m.profit_center}|${m.factory_code}`) || 0;
+    }
+  }
+
+  // 4. 補 pc 名稱
+  for (const m of Object.values(map)) {
+    const meta = pcMeta[m.profit_center] || {};
+    m.profit_center_name = meta.profit_center_name || '(未設定)';
+    m.org_section = meta.org_section || '';
+    m.org_section_name = meta.org_section_name || '';
+    m.org_group_name = meta.org_group_name || '';
+  }
+
+  return Object.values(map).map((m) => {
+    const user_count = m._user_ids.size;
+    const { _user_ids, ...rest } = m;
+    return {
+      ...rest,
+      user_count,
+      avg_cost: user_count > 0 ? m.cost / user_count : 0,
+    };
+  });
+}
+
+async function buildPcMeta(db) {
+  const rows = await db.prepare(
+    `SELECT DISTINCT profit_center, profit_center_name, org_section, org_section_name, org_group_name
+     FROM users WHERE profit_center IS NOT NULL
+       AND (status IS NULL OR status != 'disabled')
+       AND org_end_date IS NULL`
+  ).all();
+  const map = {};
+  for (const r of rows) {
+    if (!map[r.profit_center] || (r.profit_center_name && !map[r.profit_center].profit_center_name)) {
+      map[r.profit_center] = {
+        profit_center_name: r.profit_center_name || '',
+        org_section: r.org_section || '',
+        org_section_name: r.org_section_name || '',
+        org_group_name: r.org_group_name || '',
+      };
+    }
+  }
+  return map;
+}
+
+async function resolveFactoryNamesOnto(result, lang, db) {
+  try {
+    const { batchResolveFactoryNames } = require('../services/factoryCache');
+    const codes = result.map((r) => r.factory_code).filter(Boolean);
+    const nameMap = await batchResolveFactoryNames(codes, lang, db);
+    for (const r of result) r.factory_name = r.factory_code ? (nameMap.get(r.factory_code) || '') : '';
+  } catch (e) {
+    console.warn('[CostStats] factory name resolve failed:', e.message);
+    for (const r of result) r.factory_name = '';
+  }
+}
+
+// GET /api/admin/cost-stats/summary-by-factory?startDate=&endDate=
+router.get('/cost-stats/summary-by-factory', async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const { startDate, endDate } = req.query;
+    if (!startDate || !endDate) return res.status(400).json({ error: '請提供日期區間' });
+
+    const { getIndirectEmpCountByPCFactory } = require('../services/erpDb');
+
+    const [rows, accountRows, indirectFactMap, pcMeta] = await Promise.all([
+      getCostRows(db, startDate, endDate),
+      db.prepare(
+        `SELECT profit_center, factory_code, COUNT(*) AS cnt FROM users
+         WHERE (status IS NULL OR status != 'disabled')
+           AND org_end_date IS NULL
+         GROUP BY profit_center, factory_code`
+      ).all(),
+      getIndirectEmpCountByPCFactory(),
+      buildPcMeta(db),
+    ]);
+
+    let result = aggregateByPcFactory(rows, accountRows, indirectFactMap, pcMeta, false);
+
+    // 過濾三項皆 0 的列
+    result = result.filter((r) => r.indirect_emp_count || r.account_count || r.user_count);
+
+    // 排序:費用高 → 低;未歸屬廠區(factory_code='')同 pc 時排最後
+    result.sort((a, b) => {
+      if (a.profit_center !== b.profit_center) return b.cost - a.cost;
+      if (!a.factory_code && b.factory_code) return 1;
+      if (a.factory_code && !b.factory_code) return -1;
+      return b.cost - a.cost;
+    });
+
+    const lang = req.query.lang || req.headers['accept-language']?.split(',')[0] || 'zh-TW';
+    await resolveFactoryNamesOnto(result, lang, db);
+
+    res.json(result);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/admin/cost-stats/monthly-by-factory?startDate=&endDate=
+router.get('/cost-stats/monthly-by-factory', async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const { startDate, endDate } = req.query;
+    if (!startDate || !endDate) return res.status(400).json({ error: '請提供日期區間' });
+
+    const { getIndirectEmpCountByPCFactory } = require('../services/erpDb');
+
+    const [rows, accountRows, indirectFactMap, pcMeta] = await Promise.all([
+      getCostRows(db, startDate, endDate),
+      db.prepare(
+        `SELECT profit_center, factory_code, COUNT(*) AS cnt FROM users
+         WHERE (status IS NULL OR status != 'disabled')
+           AND org_end_date IS NULL
+         GROUP BY profit_center, factory_code`
+      ).all(),
+      getIndirectEmpCountByPCFactory(),
+      buildPcMeta(db),
+    ]);
+
+    let result = aggregateByPcFactory(rows, accountRows, indirectFactMap, pcMeta, true);
+
+    // month 版本:整期沒使用的 (pc, factory) 會被 withMonth=true 忽略(不補空列)
+    // 但為了保留「有帳號 / 有間接員工但沒用」的資訊,這裡直接只過濾 cost + user_count 都 0 且其他都 0 的列
+    result = result.filter((r) => r.cost > 0 || r.user_count > 0);
+
+    // 排序:月份升序,同月費用高 → 低,未歸屬廠區最後
+    result.sort((a, b) => {
+      if (a.month !== b.month) return (a.month || '').localeCompare(b.month || '');
+      if (a.profit_center !== b.profit_center) return b.cost - a.cost;
+      if (!a.factory_code && b.factory_code) return 1;
+      if (a.factory_code && !b.factory_code) return -1;
+      return b.cost - a.cost;
+    });
+
+    const lang = req.query.lang || req.headers['accept-language']?.split(',')[0] || 'zh-TW';
+    await resolveFactoryNamesOnto(result, lang, db);
+
+    res.json(result);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/admin/cost-stats/export/summary-by-factory  → CSV
+router.get('/cost-stats/export/summary-by-factory', async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const { startDate, endDate } = req.query;
+    if (!startDate || !endDate) return res.status(400).json({ error: '請提供日期區間' });
+
+    const { getIndirectEmpCountByPCFactory } = require('../services/erpDb');
+
+    const [rows, accountRows, indirectFactMap, pcMeta] = await Promise.all([
+      getCostRows(db, startDate, endDate),
+      db.prepare(
+        `SELECT profit_center, factory_code, COUNT(*) AS cnt FROM users
+         WHERE (status IS NULL OR status != 'disabled')
+           AND org_end_date IS NULL
+         GROUP BY profit_center, factory_code`
+      ).all(),
+      getIndirectEmpCountByPCFactory(),
+      buildPcMeta(db),
+    ]);
+
+    let result = aggregateByPcFactory(rows, accountRows, indirectFactMap, pcMeta, false);
+    result = result.filter((r) => r.indirect_emp_count || r.account_count || r.user_count);
+    result.sort((a, b) => {
+      if (a.profit_center !== b.profit_center) return b.cost - a.cost;
+      if (!a.factory_code && b.factory_code) return 1;
+      if (a.factory_code && !b.factory_code) return -1;
+      return b.cost - a.cost;
+    });
+
+    const lang = req.query.lang || req.headers['accept-language']?.split(',')[0] || 'zh-TW';
+    await resolveFactoryNamesOnto(result, lang, db);
+
+    const headers = ['利潤中心代碼', '利潤中心名稱', '事業處代碼', '事業處名稱', '事業群名稱', '廠區代碼', '廠區名稱', '間接員工數', '帳號人數', '使用人數', '費用金額', '人均費用', '幣別'];
+    const csv = toCsv(headers, result, (r) => [
+      r.profit_center, r.profit_center_name, r.org_section, r.org_section_name,
+      r.org_group_name,
+      r.factory_code || '(未歸屬)', r.factory_name,
+      r.indirect_emp_count, r.account_count, r.user_count,
+      r.cost?.toFixed(6), r.avg_cost?.toFixed(6), r.currency,
+    ]);
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="summary_by_factory_${startDate}_${endDate}.csv"`);
+    res.send('\uFEFF' + csv);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/admin/cost-stats/export/monthly-by-factory  → CSV
+router.get('/cost-stats/export/monthly-by-factory', async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const { startDate, endDate } = req.query;
+    if (!startDate || !endDate) return res.status(400).json({ error: '請提供日期區間' });
+
+    const { getIndirectEmpCountByPCFactory } = require('../services/erpDb');
+
+    const [rows, accountRows, indirectFactMap, pcMeta] = await Promise.all([
+      getCostRows(db, startDate, endDate),
+      db.prepare(
+        `SELECT profit_center, factory_code, COUNT(*) AS cnt FROM users
+         WHERE (status IS NULL OR status != 'disabled')
+           AND org_end_date IS NULL
+         GROUP BY profit_center, factory_code`
+      ).all(),
+      getIndirectEmpCountByPCFactory(),
+      buildPcMeta(db),
+    ]);
+
+    let result = aggregateByPcFactory(rows, accountRows, indirectFactMap, pcMeta, true);
+    result = result.filter((r) => r.cost > 0 || r.user_count > 0);
+    result.sort((a, b) => {
+      if (a.month !== b.month) return (a.month || '').localeCompare(b.month || '');
+      if (a.profit_center !== b.profit_center) return b.cost - a.cost;
+      if (!a.factory_code && b.factory_code) return 1;
+      if (a.factory_code && !b.factory_code) return -1;
+      return b.cost - a.cost;
+    });
+
+    const lang = req.query.lang || req.headers['accept-language']?.split(',')[0] || 'zh-TW';
+    await resolveFactoryNamesOnto(result, lang, db);
+
+    const headers = ['利潤中心代碼', '利潤中心名稱', '事業處代碼', '事業處名稱', '事業群名稱', '月份', '廠區代碼', '廠區名稱', '間接員工數', '帳號人數', '使用人數', '費用金額', '人均費用', '幣別'];
+    const csv = toCsv(headers, result, (r) => [
+      r.profit_center, r.profit_center_name, r.org_section, r.org_section_name,
+      r.org_group_name, r.month,
+      r.factory_code || '(未歸屬)', r.factory_name,
+      r.indirect_emp_count, r.account_count, r.user_count,
+      r.cost?.toFixed(6), r.avg_cost?.toFixed(6), r.currency,
+    ]);
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="monthly_by_factory_${startDate}_${endDate}.csv"`);
+    res.send('\uFEFF' + csv);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ─── Org Sync Schedule ───────────────────────────────────────────────────────
 
 // GET /api/admin/org-sync-schedule

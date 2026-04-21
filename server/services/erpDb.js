@@ -180,6 +180,43 @@ async function getAllProfitCenters(onlyFoxlinkGroup = false) {
 }
 
 /**
+ * 間接員工人數 by 利潤中心 × 廠區
+ * FOXFL.FL_EMP_EXP_ALL 沒有 FACTORY_CODE,需透過 DEPT_CODE JOIN APPS.FL_ORG_EMP_DEPT_MV 取得。
+ * 同 DEPT_CODE 在 MV 裡可能因 ORG_ID / ORG_CODE 展開成多列,先用 MAX(FACTORY_CODE) GROUP BY DEPT_CODE 去重,避免計數放大。
+ * 回傳 Map<`${pc}|${factory}`, count>;factory 可能為空字串(DEPT_CODE 在 MV 裡 FACTORY_CODE 為 null 或 JOIN 不到)
+ */
+async function getIndirectEmpCountByPCFactory() {
+  if (!isConfigured()) return new Map();
+  initClient();
+  const sql = `
+    SELECT EE.PROFIT_CENTER, DMAP.FACTORY_CODE, COUNT(1) AS CNT
+    FROM foxfl.fl_emp_exp_all EE
+    LEFT JOIN (
+      SELECT DEPT_CODE, MAX(FACTORY_CODE) AS FACTORY_CODE
+      FROM APPS.FL_ORG_EMP_DEPT_MV
+      WHERE DEPT_CODE IS NOT NULL AND FACTORY_CODE IS NOT NULL
+      GROUP BY DEPT_CODE
+    ) DMAP ON EE.DEPT_CODE = DMAP.DEPT_CODE
+    WHERE EE.CURRENT_FLAG = 'Y'
+      AND EE.DIT_CODE = 'I'
+      AND EE.END_DATE IS NULL
+    GROUP BY EE.PROFIT_CENTER, DMAP.FACTORY_CODE
+  `;
+  try {
+    const result = await execute(sql);
+    const map = new Map();
+    for (const r of (result?.rows || [])) {
+      const key = `${r.PROFIT_CENTER || ''}|${r.FACTORY_CODE || ''}`;
+      map.set(key, r.CNT || 0);
+    }
+    return map;
+  } catch (e) {
+    console.error('[ERP] getIndirectEmpCountByPCFactory error:', e.message);
+    return new Map();
+  }
+}
+
+/**
  * 所有在職「間接員工」清單（CURRENT_FLAG='Y', DIT_CODE='I', END_DATE IS NULL）
  * 用於「顯示所有員工」分析：找出未建立帳號 / 未使用系統的人
  * 不限正崴集團（依需求）
@@ -238,4 +275,4 @@ async function getConnection() {
   return await oracledb.getConnection(getConfig());
 }
 
-module.exports = { isConfigured, execute, getConnection, getOracledb, getEmployeeOrgData, getIndirectEmpCountByPC, getAllProfitCenters, getAllIndirectEmployees };
+module.exports = { isConfigured, execute, getConnection, getOracledb, getEmployeeOrgData, getIndirectEmpCountByPC, getIndirectEmpCountByPCFactory, getAllProfitCenters, getAllIndirectEmployees };

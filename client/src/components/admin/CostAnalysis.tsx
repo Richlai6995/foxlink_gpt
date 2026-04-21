@@ -58,6 +58,28 @@ interface MonthlyRow {
   no_account?: boolean
 }
 
+interface FactoryRow {
+  profit_center: string
+  profit_center_name: string
+  org_section: string
+  org_section_name: string
+  org_group_name: string
+  factory_code: string
+  factory_name?: string
+  input_tokens: number
+  output_tokens: number
+  cost: number
+  account_count: number
+  user_count: number
+  indirect_emp_count: number
+  avg_cost: number
+  currency: string
+}
+
+interface FactoryMonthlyRow extends FactoryRow {
+  month: string
+}
+
 interface EmpRow {
   user_id: number | null
   employee_id: string
@@ -140,6 +162,8 @@ export default function CostAnalysis() {
   const [showAllEmployees, setShowAllEmployees] = useState(false)
   const [summary, setSummary] = useState<SummaryRow[]>([])
   const [monthly, setMonthly] = useState<MonthlyRow[]>([])
+  const [factoryRows, setFactoryRows] = useState<FactoryRow[]>([])
+  const [factoryMonthly, setFactoryMonthly] = useState<FactoryMonthlyRow[]>([])
   const [employees, setEmployees] = useState<EmpRow[]>([])
   const [totalAccounts, setTotalAccounts] = useState<number | null>(null)
   const [loading, setLoading] = useState(false)
@@ -159,14 +183,18 @@ export default function CostAnalysis() {
       const incParam = includeAllPC ? `&includeAllPC=1&onlyFoxlinkGroup=${onlyFoxlinkGroup ? '1' : '0'}` : ''
       const empParam = showAllEmployees ? `&showAllEmployees=1` : ''
       const langParam = `&lang=${encodeURIComponent(i18n.language || 'zh-TW')}`
-      const [s, m, e, t] = await Promise.all([
+      const [s, m, sf, mf, e, t] = await Promise.all([
         api.get(`/admin/cost-stats/summary?startDate=${startDate}&endDate=${endDate}${incParam}${langParam}`),
         api.get(`/admin/cost-stats/monthly?startDate=${startDate}&endDate=${endDate}${incParam}${langParam}`),
+        api.get(`/admin/cost-stats/summary-by-factory?startDate=${startDate}&endDate=${endDate}${langParam}`),
+        api.get(`/admin/cost-stats/monthly-by-factory?startDate=${startDate}&endDate=${endDate}${langParam}`),
         api.get(`/admin/cost-stats/employees?startDate=${startDate}&endDate=${endDate}${empParam}${langParam}`),
         api.get(`/admin/cost-stats/total-accounts`),
       ])
       setSummary(s.data)
       setMonthly(m.data)
+      setFactoryRows(sf.data)
+      setFactoryMonthly(mf.data)
       setEmployees(e.data)
       setTotalAccounts(t.data?.total ?? null)
       setSelectedPC(null)
@@ -258,6 +286,8 @@ export default function CostAnalysis() {
   const empExportUrl = `/api/admin/cost-stats/export/employees?${qs}${selectedPC ? `&profitCenter=${selectedPC}` : ''}${selectedDept ? `&deptCode=${selectedDept}` : ''}${showAllEmployees ? `&showAllEmployees=1` : ''}${langQs}`
   const summaryExportUrl = `/api/admin/cost-stats/export/summary?${qs}${incQs}${langQs}`
   const monthlyExportUrl = `/api/admin/cost-stats/export/monthly?${qs}${incQs}${langQs}`
+  const summaryFactoryExportUrl = `/api/admin/cost-stats/export/summary-by-factory?${qs}${langQs}`
+  const monthlyFactoryExportUrl = `/api/admin/cost-stats/export/monthly-by-factory?${qs}${langQs}`
 
   // ── Chart handlers ───────────────────────────────────────────────────────
   const handlePieClick = (data: { profit_center?: string } | null) => {
@@ -497,6 +527,63 @@ export default function CostAnalysis() {
         </div>
       </div>
 
+      {/* ── 利潤中心 × 廠區 明細表 ── */}
+      <div className="bg-white border rounded-lg p-4">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-sm font-semibold text-gray-700">
+            利潤中心 × 廠區 明細表{selectedPC ? ` — ${summary.find(r => r.profit_center === selectedPC)?.profit_center_name}` : ''}
+          </h3>
+          <ExportBtn href={summaryFactoryExportUrl} label="匯出 CSV" filename={`summary_by_factory_${startDate}_${endDate}.csv`} />
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs border-collapse">
+            <thead>
+              <tr className="bg-indigo-600 text-white">
+                <th className="px-3 py-2 text-left">利潤中心代碼</th>
+                <th className="px-3 py-2 text-left">利潤中心名稱</th>
+                <th className="px-3 py-2 text-left">事業處代碼</th>
+                <th className="px-3 py-2 text-left">事業處名稱</th>
+                <th className="px-3 py-2 text-left">事業群名稱</th>
+                <th className="px-3 py-2 text-left">廠區代碼</th>
+                <th className="px-3 py-2 text-left">廠區名稱</th>
+                <th className="px-3 py-2 text-right">間接員工數</th>
+                <th className="px-3 py-2 text-right">帳號人數</th>
+                <th className="px-3 py-2 text-right">使用人數</th>
+                <th className="px-3 py-2 text-right">費用金額</th>
+                <th className="px-3 py-2 text-right">人均費用</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(selectedPC ? factoryRows.filter((r) => r.profit_center === selectedPC) : factoryRows).map((r, i) => {
+                const unassigned = !r.factory_code
+                return (
+                  <tr key={i} className={`border-b ${
+                    unassigned ? 'bg-gray-100 text-gray-500' :
+                    i % 2 === 1 ? 'bg-indigo-50' : ''
+                  }`}>
+                    <td className="px-3 py-1.5">{r.profit_center}</td>
+                    <td className="px-3 py-1.5">{r.profit_center_name}</td>
+                    <td className="px-3 py-1.5">{r.org_section}</td>
+                    <td className="px-3 py-1.5">{r.org_section_name}</td>
+                    <td className="px-3 py-1.5">{r.org_group_name}</td>
+                    <td className="px-3 py-1.5 font-mono">{r.factory_code || <span className="text-gray-400">(未歸屬)</span>}</td>
+                    <td className="px-3 py-1.5">{r.factory_name || '-'}</td>
+                    <td className="px-3 py-1.5 text-right text-gray-600">{r.indirect_emp_count}</td>
+                    <td className="px-3 py-1.5 text-right text-gray-500">{r.account_count}</td>
+                    <td className="px-3 py-1.5 text-right">{r.user_count}</td>
+                    <td className="px-3 py-1.5 text-right font-medium text-indigo-700">{fmtCost(r.cost, r.currency)}</td>
+                    <td className="px-3 py-1.5 text-right text-gray-600">{fmtCost(r.avg_cost, r.currency)}</td>
+                  </tr>
+                )
+              })}
+              {factoryRows.length === 0 && (
+                <tr><td colSpan={12} className="px-3 py-4 text-center text-gray-400">無資料</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
       {/* ── 月分析表 ── */}
       <div className="bg-white border rounded-lg p-4">
         <div className="flex items-center justify-between mb-3">
@@ -550,6 +637,65 @@ export default function CostAnalysis() {
               ))}
               {monthly.length === 0 && (
                 <tr><td colSpan={12} className="px-3 py-4 text-center text-gray-400">無資料</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* ── 利潤中心 × 月份 × 廠區 明細表 ── */}
+      <div className="bg-white border rounded-lg p-4">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-sm font-semibold text-gray-700">
+            利潤中心 × 月份 × 廠區 明細表{selectedPC ? ` — ${summary.find(r => r.profit_center === selectedPC)?.profit_center_name}` : ''}
+          </h3>
+          <ExportBtn href={monthlyFactoryExportUrl} label="匯出 CSV" filename={`monthly_by_factory_${startDate}_${endDate}.csv`} />
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs border-collapse">
+            <thead>
+              <tr className="bg-indigo-600 text-white">
+                <th className="px-3 py-2 text-left">利潤中心代碼</th>
+                <th className="px-3 py-2 text-left">利潤中心名稱</th>
+                <th className="px-3 py-2 text-left">事業處代碼</th>
+                <th className="px-3 py-2 text-left">事業處名稱</th>
+                <th className="px-3 py-2 text-left">事業群名稱</th>
+                <th className="px-3 py-2 text-left">月份</th>
+                <th className="px-3 py-2 text-left">廠區代碼</th>
+                <th className="px-3 py-2 text-left">廠區名稱</th>
+                <th className="px-3 py-2 text-right">間接員工數</th>
+                <th className="px-3 py-2 text-right">帳號人數</th>
+                <th className="px-3 py-2 text-right">使用人數</th>
+                <th className="px-3 py-2 text-right">費用金額</th>
+                <th className="px-3 py-2 text-right">人均費用</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(selectedPC ? factoryMonthly.filter((r) => r.profit_center === selectedPC) : factoryMonthly).map((r, i) => {
+                const unassigned = !r.factory_code
+                return (
+                  <tr key={i} className={`border-b ${
+                    unassigned ? 'bg-gray-100 text-gray-500' :
+                    i % 2 === 1 ? 'bg-indigo-50' : ''
+                  }`}>
+                    <td className="px-3 py-1.5">{r.profit_center}</td>
+                    <td className="px-3 py-1.5">{r.profit_center_name}</td>
+                    <td className="px-3 py-1.5">{r.org_section}</td>
+                    <td className="px-3 py-1.5">{r.org_section_name}</td>
+                    <td className="px-3 py-1.5">{r.org_group_name}</td>
+                    <td className="px-3 py-1.5 font-medium">{r.month}</td>
+                    <td className="px-3 py-1.5 font-mono">{r.factory_code || <span className="text-gray-400">(未歸屬)</span>}</td>
+                    <td className="px-3 py-1.5">{r.factory_name || '-'}</td>
+                    <td className="px-3 py-1.5 text-right text-gray-600">{r.indirect_emp_count}</td>
+                    <td className="px-3 py-1.5 text-right text-gray-500">{r.account_count}</td>
+                    <td className="px-3 py-1.5 text-right">{r.user_count}</td>
+                    <td className="px-3 py-1.5 text-right font-medium text-indigo-700">{fmtCost(r.cost, r.currency)}</td>
+                    <td className="px-3 py-1.5 text-right text-gray-600">{fmtCost(r.avg_cost, r.currency)}</td>
+                  </tr>
+                )
+              })}
+              {factoryMonthly.length === 0 && (
+                <tr><td colSpan={13} className="px-3 py-4 text-center text-gray-400">無資料</td></tr>
               )}
             </tbody>
           </table>
