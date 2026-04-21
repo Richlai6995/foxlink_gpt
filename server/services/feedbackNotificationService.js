@@ -403,7 +403,19 @@ function _tplReassignedNew(ticket, oldAssigneeName) {
 
 // ─── 統一事件分派 ─────────────────────────────────────────────────────────────
 
+/** 是否為資訊內部紀錄工單(owner=admin,不走任何通知流程) */
+function _isInternalLog(ticket) {
+  if (!ticket) return false;
+  return Number(ticket.is_internal_log ?? ticket.IS_INTERNAL_LOG ?? 0) === 1;
+}
+
 async function onTicketCreated(db, ticket) {
+  if (_isInternalLog(ticket)) {
+    // 內部紀錄:不通知 admin、不寄 email、不推 Webex、不發站內通知
+    // 只 emit 給 socket 讓 list 即時更新(admin 自己看得到)
+    emitNewTicket(ticket);
+    return;
+  }
   const tasks = [
     notifyAdmins(db, ticket, 'new_ticket', `新問題反饋: ${ticket.ticket_no}`, `${ticket.applicant_name} 提交了問題: ${ticket.subject}`),
     sendTicketEmail(db, 'new_ticket', ticket),
@@ -418,6 +430,7 @@ async function onTicketCreated(db, ticket) {
  * 群組發 summary，DM 接單者起 thread 存 parent。
  */
 async function onTicketAssigned(db, ticket, assignerId, assignerName) {
+  if (_isInternalLog(ticket)) return;
   if (!ticket.assigned_to) return;
 
   // DM 接單者
@@ -436,6 +449,7 @@ async function onTicketAssigned(db, ticket, assignerId, assignerName) {
 }
 
 async function onTicketResolved(db, ticket, note, resolverName) {
+  if (_isInternalLog(ticket)) return;
   const assigneeEmail = await _getUserEmail(db, ticket.assigned_to);
 
   await Promise.allSettled([
@@ -456,6 +470,7 @@ async function onTicketResolved(db, ticket, note, resolverName) {
 }
 
 async function onTicketReopened(db, ticket) {
+  if (_isInternalLog(ticket)) return;
   const assigneeEmail = await _getUserEmail(db, ticket.assigned_to);
 
   await Promise.allSettled([
@@ -472,6 +487,7 @@ async function onTicketReopened(db, ticket) {
  * 轉單（assigned_to 從 A 變 B）。
  */
 async function onTicketReassigned(db, ticket, oldAssigneeId, newAssigneeId, actorName) {
+  if (_isInternalLog(ticket)) return;
   const [oldUser, newUser] = await Promise.all([
     _getUserInfo(db, oldAssigneeId),
     _getUserInfo(db, newAssigneeId),
@@ -500,6 +516,7 @@ async function onTicketReassigned(db, ticket, oldAssigneeId, newAssigneeId, acto
 
 async function onNewMessage(db, ticket, senderName, content, isInternal, senderRole) {
   if (isInternal) return;
+  if (_isInternalLog(ticket)) return;
 
   const tasks = [];
 

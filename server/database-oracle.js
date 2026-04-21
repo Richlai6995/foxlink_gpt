@@ -305,6 +305,8 @@ async function runMigrations(db) {
   // ERP 分流：分類 flag + 使用者 ERP 管理員 flag
   await addCol('FEEDBACK_CATEGORIES', 'IS_ERP', 'NUMBER(1) DEFAULT 0');
   await addCol('USERS', 'IS_ERP_ADMIN', 'NUMBER(1) DEFAULT 0');
+  // 資訊內部紀錄：admin 用工單紀錄電話/系統外 Q&A,不發通知、不進統計
+  await addCol('FEEDBACK_TICKETS', 'IS_INTERNAL_LOG', 'NUMBER(1) DEFAULT 0');
 
   // 重命名 feedback KB
   try {
@@ -2631,6 +2633,7 @@ async function runMigrations(db) {
     sla_due_resolution      TIMESTAMP,
     first_response_at       TIMESTAMP,
     sla_breached            NUMBER(1) DEFAULT 0,
+    is_internal_log         NUMBER(1) DEFAULT 0,
     source                  VARCHAR2(50) DEFAULT 'web',
     source_session_id       VARCHAR2(100),
     created_at              TIMESTAMP DEFAULT SYSTIMESTAMP,

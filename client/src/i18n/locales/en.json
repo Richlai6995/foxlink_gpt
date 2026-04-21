@@ -2814,13 +2814,26 @@
     "noReplyYet": "No replies yet",
     "senderAdmin": "Admin",
     "senderUser": "User",
+    "internalLogTitle": "IT Internal Log",
+    "internalLogHint": "Record phone/off-system Q&A handling. Does NOT send Webex/Email notifications, excluded from stats, admin-only visible.",
+    "internalLogBadge": "Internal Log",
+    "applicantName": "Applicant Name",
+    "applicantNamePlaceholder": "e.g. John Smith",
+    "applicantDept": "Department",
+    "applicantEmployeeId": "Employee ID",
+    "applicantEmail": "Email",
     "admin": {
       "categoryManagement": "Category Management",
       "slaConfig": "SLA Settings",
       "aiConfig": "AI Model Settings",
       "stats": "Statistics",
       "firstResponseHours": "First Response (hours)",
-      "resolutionHours": "Resolution (hours)"
+      "resolutionHours": "Resolution (hours)",
+      "slaEnabledOn": "SLA feature: Enabled",
+      "slaEnabledOff": "SLA feature: Disabled",
+      "slaEnabledHint": "When disabled: no SLA due calculation, no breach notifications, SLA panels hidden in UI (this config page stays editable).",
+      "enable": "Enable",
+      "disable": "Disable"
     }
   },
   "voice_input": {

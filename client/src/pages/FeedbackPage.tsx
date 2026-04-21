@@ -10,6 +10,8 @@ import {
 } from 'lucide-react'
 import FeedbackStatusBadge from '../components/feedback/FeedbackStatusBadge'
 import FeedbackPriorityBadge from '../components/feedback/FeedbackPriorityBadge'
+import { useFeedbackConfig } from '../hooks/useFeedbackConfig'
+import { Lock } from 'lucide-react'
 
 interface Ticket {
   id: number
@@ -26,6 +28,7 @@ interface Ticket {
   created_at: string
   updated_at: string
   sla_breached: number
+  is_internal_log: number
   last_message_content: string | null
   last_message_role: string | null
   last_message_is_internal: number | null
@@ -46,6 +49,7 @@ const PRIORITY_OPTIONS = ['urgent', 'high', 'medium', 'low']
 export default function FeedbackPage() {
   const { t, i18n } = useTranslation()
   const { isAdmin } = useAuth()
+  const { features } = useFeedbackConfig()
   const navigate = useNavigate()
 
   const [tickets, setTickets] = useState<Ticket[]>([])
@@ -257,7 +261,12 @@ export default function FeedbackPage() {
                       <span className="text-xs text-gray-400 font-mono">{ticket.ticket_no}</span>
                       <FeedbackStatusBadge status={ticket.status} />
                       <FeedbackPriorityBadge priority={ticket.priority} />
-                      {ticket.sla_breached === 1 && (
+                      {ticket.is_internal_log === 1 && (
+                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs bg-amber-100 text-amber-700 border border-amber-200">
+                          <Lock size={10} /> {t('feedback.internalLogBadge')}
+                        </span>
+                      )}
+                      {features.sla && ticket.sla_breached === 1 && (
                         <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs bg-red-500/20 text-red-400">
                           <AlertTriangle size={10} /> {t('feedback.breached')}
                         </span>

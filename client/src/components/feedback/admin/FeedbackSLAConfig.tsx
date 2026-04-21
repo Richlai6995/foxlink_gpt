@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import api from '../../../lib/api'
-import { Save, Loader2, Clock } from 'lucide-react'
+import { Save, Loader2, Clock, Power } from 'lucide-react'
+import { invalidateFeedbackConfig } from '../../../hooks/useFeedbackConfig'
 
 interface SLAConfig {
   id: number
@@ -22,16 +23,35 @@ export default function FeedbackSLAConfig() {
   const [loading, setLoading] = useState(true)
   const [edits, setEdits] = useState<Record<string, Partial<SLAConfig>>>({})
   const [saving, setSaving] = useState<string | null>(null)
+  const [slaEnabled, setSlaEnabled] = useState(false)
+  const [togglingEnabled, setTogglingEnabled] = useState(false)
 
   const load = async () => {
     try {
-      const { data } = await api.get('/feedback/admin/sla-configs')
+      const [{ data }, cfg] = await Promise.all([
+        api.get('/feedback/admin/sla-configs'),
+        api.get('/feedback/config'),
+      ])
       setConfigs(data)
+      setSlaEnabled(!!cfg.data?.features?.sla)
     } catch {}
     setLoading(false)
   }
 
   useEffect(() => { load() }, [])
+
+  const handleToggleEnabled = async () => {
+    setTogglingEnabled(true)
+    try {
+      const next = !slaEnabled
+      await api.put('/feedback/admin/config/sla-enabled', { enabled: next })
+      setSlaEnabled(next)
+      invalidateFeedbackConfig()
+    } catch (e: any) {
+      alert(e.response?.data?.error || 'Error')
+    }
+    setTogglingEnabled(false)
+  }
 
   const handleChange = (priority: string, field: string, value: number) => {
     setEdits(prev => ({
@@ -75,7 +95,28 @@ export default function FeedbackSLAConfig() {
         <Clock size={14} /> {t('feedback.admin.slaConfig')}
       </h3>
 
-      <div className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
+      {/* SLA 功能總開關 */}
+      <div className={`rounded-xl border p-3 flex items-center gap-3 ${slaEnabled ? 'bg-green-50 border-green-200' : 'bg-gray-50 border-gray-200'}`}>
+        <Power size={14} className={slaEnabled ? 'text-green-600' : 'text-gray-400'} />
+        <div className="flex-1">
+          <div className="text-sm font-medium text-gray-800">
+            {slaEnabled ? t('feedback.admin.slaEnabledOn') : t('feedback.admin.slaEnabledOff')}
+          </div>
+          <p className="text-xs text-gray-500 mt-0.5">{t('feedback.admin.slaEnabledHint')}</p>
+        </div>
+        <button
+          onClick={handleToggleEnabled}
+          disabled={togglingEnabled}
+          className={`px-3 py-1.5 rounded-lg text-xs font-medium transition ${
+            slaEnabled ? 'bg-red-600 hover:bg-red-700 text-white' : 'bg-green-600 hover:bg-green-700 text-white'
+          } disabled:opacity-50 flex items-center gap-1`}
+        >
+          {togglingEnabled && <Loader2 size={10} className="animate-spin" />}
+          {slaEnabled ? t('feedback.admin.disable') : t('feedback.admin.enable')}
+        </button>
+      </div>
+
+      <div className={`bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm ${slaEnabled ? '' : 'opacity-60'}`}>
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-gray-200">

@@ -2814,13 +2814,26 @@
     "noReplyYet": "Chưa có phản hồi",
     "senderAdmin": "Quản trị viên",
     "senderUser": "Người dùng",
+    "internalLogTitle": "Ghi chú nội bộ IT",
+    "internalLogHint": "Ghi lại quá trình xử lý Q&A qua điện thoại/ngoài hệ thống. KHÔNG gửi thông báo Webex/Email, không tính vào thống kê, chỉ admin xem được.",
+    "internalLogBadge": "Ghi chú nội bộ",
+    "applicantName": "Tên người yêu cầu",
+    "applicantNamePlaceholder": "VD: Nguyễn Văn A",
+    "applicantDept": "Phòng ban",
+    "applicantEmployeeId": "Mã nhân viên",
+    "applicantEmail": "Email",
     "admin": {
       "categoryManagement": "Quản lý danh mục",
       "slaConfig": "Cài đặt SLA",
       "aiConfig": "Cài đặt AI",
       "stats": "Thống kê",
       "firstResponseHours": "Phản hồi đầu (giờ)",
-      "resolutionHours": "Giải quyết (giờ)"
+      "resolutionHours": "Giải quyết (giờ)",
+      "slaEnabledOn": "Tính năng SLA: Đang bật",
+      "slaEnabledOff": "Tính năng SLA: Đã tắt",
+      "slaEnabledHint": "Khi tắt: không tính SLA, không thông báo quá hạn, ẩn khu vực SLA trên UI (trang cài đặt này vẫn chỉnh được).",
+      "enable": "Bật",
+      "disable": "Tắt"
     }
   },
   "voice_input": {

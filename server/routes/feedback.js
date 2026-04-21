@@ -58,6 +58,39 @@ function canViewTicket(user, ticket) {
   return canManageTicket(user, ticket) || ticket.user_id === user.id;
 }
 
+// ─── 前端 feature flag 讀取 ─────────────────────────────────────────────────
+// 所有已登入使用者都能讀,讓 UI 判斷是否顯示 SLA 區塊
+router.get('/config', async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const slaEnabled = await feedbackService.isSlaEnabled(db);
+    res.json({
+      features: { sla: slaEnabled },
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Admin toggle SLA feature
+router.put('/admin/config/sla-enabled', verifyAdmin, async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const enabled = req.body?.enabled === true || req.body?.enabled === 'true';
+    const value = enabled ? 'true' : 'false';
+    const existing = await db.prepare(`SELECT key FROM system_settings WHERE key = 'feedback.sla_enabled'`).get();
+    if (existing) {
+      await db.prepare(`UPDATE system_settings SET value = ? WHERE key = 'feedback.sla_enabled'`).run(value);
+    } else {
+      await db.prepare(`INSERT INTO system_settings (key, value) VALUES ('feedback.sla_enabled', ?)`).run(value);
+    }
+    feedbackService.invalidateSlaEnabledCache();
+    res.json({ success: true, enabled });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ─── 分類（公開）─────────────────────────────────────────────────────────────
 
 router.get('/categories', async (req, res) => {
@@ -106,16 +139,31 @@ const FEEDBACK_MAX_FILES = parseInt(process.env.FEEDBACK_MAX_FILES || '10', 10);
 router.post('/tickets', upload.array('files', FEEDBACK_MAX_FILES), async (req, res) => {
   try {
     const db = require('../database-oracle').db;
-    const { subject, description, share_link, category_id, priority, tags, source, source_session_id, is_draft } = req.body;
+    const {
+      subject, description, share_link, category_id, priority, tags,
+      source, source_session_id, is_draft,
+      is_internal_log, applicant_name, applicant_dept, applicant_employee_id, applicant_email,
+    } = req.body;
     if (!subject) return res.status(400).json({ error: '主旨為必填' });
 
     const isDraft = is_draft === 'true' || is_draft === true;
+    const isAdmin = req.user.role === 'admin';
+    // 只有 admin 可以標記內部紀錄 + 手填申請者資訊
+    const isInternalLog = isAdmin && (is_internal_log === 'true' || is_internal_log === true || is_internal_log === 1 || is_internal_log === '1');
+    const applicantOverride = (isAdmin && isInternalLog && applicant_name) ? {
+      name: applicant_name,
+      dept: applicant_dept || null,
+      employee_id: applicant_employee_id || null,
+      email: applicant_email || null,
+    } : null;
+
     const ticket = await feedbackService.createTicket(db, {
       user: req.user,
       subject, description, share_link,
       category_id: category_id ? Number(category_id) : null,
       priority, tags: tags ? (() => { try { return JSON.parse(tags); } catch { return null; } })() : null,
       source, source_session_id, isDraft,
+      isInternalLog, applicantOverride,
     });
 
     // 處理附件
@@ -817,6 +865,7 @@ router.get('/admin/export', verifyAdmin, async (req, res) => {
     const result = await feedbackService.listTickets(db, {
       userId: null,
       isAdmin: true,
+      isAdminUser: true,
       status: req.query.status,
       priority: req.query.priority,
       category_id: req.query.category_id,
@@ -827,6 +876,7 @@ router.get('/admin/export', verifyAdmin, async (req, res) => {
       order: req.query.order || 'desc',
       page: 1,
       limit: 10000,
+      includeInternalLog: req.query.include_internal_log === 'true',
     });
 
     const XLSX = require('xlsx');

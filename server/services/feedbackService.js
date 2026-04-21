@@ -35,7 +35,33 @@ async function generateTicketNo(db) {
 
 // ─── SLA 計算 ─────────────────────────────────────────────────────────────────
 
-async function calcSlaDue(db, priority) {
+/**
+ * SLA enabled flag (system_settings key: feedback.sla_enabled, default false)
+ * Cache 30s 避免每次建單/改 priority 都打 DB。
+ */
+let _slaEnabledCache = { value: null, at: 0 };
+async function isSlaEnabled(db) {
+  const now = Date.now();
+  if (_slaEnabledCache.value !== null && now - _slaEnabledCache.at < 30000) {
+    return _slaEnabledCache.value;
+  }
+  try {
+    const row = await db.prepare(`SELECT value FROM system_settings WHERE key = 'feedback.sla_enabled'`).get();
+    const raw = (row?.value ?? row?.VALUE ?? '').toString().trim().toLowerCase();
+    const enabled = raw === 'true' || raw === '1';
+    _slaEnabledCache = { value: enabled, at: now };
+    return enabled;
+  } catch {
+    return false;
+  }
+}
+function invalidateSlaEnabledCache() { _slaEnabledCache = { value: null, at: 0 }; }
+
+async function calcSlaDue(db, priority, { isInternalLog } = {}) {
+  // 內部紀錄 or SLA 功能關閉 → 一律不算
+  if (isInternalLog) return { sla_due_first_response: null, sla_due_resolution: null };
+  if (!(await isSlaEnabled(db))) return { sla_due_first_response: null, sla_due_resolution: null };
+
   const sla = await db.prepare(
     'SELECT first_response_hours, resolution_hours FROM feedback_sla_configs WHERE priority = ?'
   ).get(priority || 'medium');
@@ -53,27 +79,36 @@ async function calcSlaDue(db, priority) {
 
 // ─── 建立工單 ─────────────────────────────────────────────────────────────────
 
-async function createTicket(db, { user, subject, description, share_link, category_id, priority, tags, source, source_session_id, isDraft }) {
+async function createTicket(db, { user, subject, description, share_link, category_id, priority, tags, source, source_session_id, isDraft, isInternalLog, applicantOverride }) {
   const ticket_no = await generateTicketNo(db);
   const p = priority || 'medium';
   const status = isDraft ? 'draft' : 'open';
+  const internalLog = isInternalLog ? 1 : 0;
 
-  // 草稿不算 SLA，送出時才開始計
-  const sla = isDraft ? { sla_due_first_response: null, sla_due_resolution: null } : await calcSlaDue(db, p);
+  // 草稿 or 內部紀錄不算 SLA；送出時才開始計
+  const sla = (isDraft || internalLog)
+    ? { sla_due_first_response: null, sla_due_resolution: null }
+    : await calcSlaDue(db, p);
+
+  // 內部紀錄:owner 是操作 admin;applicant_* 改填手動輸入的那位電話/外部 user
+  const applicantName = applicantOverride?.name || user.name || user.username;
+  const applicantDept = applicantOverride?.dept ?? (user.dept_code || user.profit_center || null);
+  const applicantEmpId = applicantOverride?.employee_id ?? (user.employee_id || null);
+  const applicantEmail = applicantOverride?.email ?? (user.email || null);
 
   await db.prepare(`
     INSERT INTO feedback_tickets
       (ticket_no, user_id, applicant_name, applicant_dept, applicant_employee_id, applicant_email,
        subject, description, share_link, category_id, priority, tags, status,
-       sla_due_first_response, sla_due_resolution, source, source_session_id)
-    VALUES (?,?,?,?,?,?, ?,?,?,?,?,?,?, ?,?,?,?)
+       sla_due_first_response, sla_due_resolution, is_internal_log, source, source_session_id)
+    VALUES (?,?,?,?,?,?, ?,?,?,?,?,?,?, ?,?,?,?,?)
   `).run(
     ticket_no,
     user.id,
-    user.name || user.username,
-    user.dept_code || user.profit_center || null,
-    user.employee_id || null,
-    user.email || null,
+    applicantName,
+    applicantDept,
+    applicantEmpId,
+    applicantEmail,
     subject,
     description || null,
     share_link || null,
@@ -83,6 +118,7 @@ async function createTicket(db, { user, subject, description, share_link, catego
     status,
     sla.sla_due_first_response,
     sla.sla_due_resolution,
+    internalLog,
     source || 'web',
     source_session_id || null
   );
@@ -96,7 +132,8 @@ async function submitTicket(db, id) {
   if (!ticket) throw new Error('工單不存在');
   if (ticket.status !== 'draft') throw new Error('只有草稿可以送出');
 
-  const sla = await calcSlaDue(db, ticket.priority);
+  const isInternalLog = ticket.is_internal_log === 1 || ticket.IS_INTERNAL_LOG === 1;
+  const sla = await calcSlaDue(db, ticket.priority, { isInternalLog });
   await db.prepare(`
     UPDATE feedback_tickets
     SET status = 'open', sla_due_first_response = ?, sla_due_resolution = ?, updated_at = SYSTIMESTAMP
@@ -130,7 +167,7 @@ async function getTicketById(db, id) {
   `).get(id);
 }
 
-async function listTickets(db, { userId, isAdmin, isAdminUser, isErpAdmin, status, priority, category_id, search, assigned_to, date_from, date_to, sort, order, page, limit }) {
+async function listTickets(db, { userId, isAdmin, isAdminUser, isErpAdmin, status, priority, category_id, search, assigned_to, date_from, date_to, sort, order, page, limit, includeInternalLog }) {
   const conditions = [];
   const binds = [];
 
@@ -146,6 +183,13 @@ async function listTickets(db, { userId, isAdmin, isAdminUser, isErpAdmin, statu
       conditions.push('t.user_id = ?');
       binds.push(userId);
     }
+  }
+
+  // 非 admin 一律看不到內部紀錄;admin 預設看得到(可透過 includeInternalLog=false 強制排除,例如匯出)
+  if (!isAdminUser) {
+    conditions.push('NVL(t.is_internal_log, 0) = 0');
+  } else if (includeInternalLog === false) {
+    conditions.push('NVL(t.is_internal_log, 0) = 0');
   }
   if (status) {
     const statuses = status.split(',').map(s => s.trim());
@@ -245,7 +289,9 @@ async function updateTicket(db, id, fields) {
 
   // 如果 priority 變了，重算 SLA
   if (fields.priority) {
-    const sla = await calcSlaDue(db, fields.priority);
+    const cur = await db.prepare('SELECT is_internal_log FROM feedback_tickets WHERE id = ?').get(id);
+    const isInternalLog = (cur?.is_internal_log ?? cur?.IS_INTERNAL_LOG) === 1;
+    const sla = await calcSlaDue(db, fields.priority, { isInternalLog });
     await db.prepare(
       `UPDATE feedback_tickets SET sla_due_first_response = ?, sla_due_resolution = ? WHERE id = ?`
     ).run(sla.sla_due_first_response, sla.sla_due_resolution, id);
@@ -530,11 +576,12 @@ async function updateSlaConfig(db, priority, { first_response_hours, resolution_
 // ─── 統計 ─────────────────────────────────────────────────────────────────────
 
 async function getStats(db, { date_from, date_to }) {
-  const dateFilter = [];
+  // 統計一律排除內部紀錄(不是真實使用者反饋)
+  const dateFilter = ['NVL(t.is_internal_log, 0) = 0'];
   const binds = [];
   if (date_from) { dateFilter.push(`t.created_at >= TO_TIMESTAMP(?, 'YYYY-MM-DD')`); binds.push(date_from); }
   if (date_to) { dateFilter.push(`t.created_at < TO_TIMESTAMP(?, 'YYYY-MM-DD') + 1`); binds.push(date_to); }
-  const where = dateFilter.length > 0 ? 'WHERE ' + dateFilter.join(' AND ') : '';
+  const where = 'WHERE ' + dateFilter.join(' AND ');
 
   const [statusDist, priorityDist, categoryDist, summary] = await Promise.all([
     db.prepare(`SELECT status, COUNT(*) AS cnt FROM feedback_tickets t ${where} GROUP BY status`).all(...binds),
@@ -600,6 +647,8 @@ async function getUnreadCount(db, userId) {
 }
 
 module.exports = {
+  isSlaEnabled,
+  invalidateSlaEnabledCache,
   generateTicketNo,
   createTicket,
   submitTicket,

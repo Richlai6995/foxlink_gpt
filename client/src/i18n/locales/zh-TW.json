@@ -2814,13 +2814,26 @@
     "noReplyYet": "尚無對話回應",
     "senderAdmin": "管理員",
     "senderUser": "使用者",
+    "internalLogTitle": "資訊內部紀錄",
+    "internalLogHint": "用於紀錄電話/系統外的 Q&A 處理歷程。不會發送 Webex/Email 通知、不列入統計,僅管理員可見。",
+    "internalLogBadge": "內部紀錄",
+    "applicantName": "申請者姓名",
+    "applicantNamePlaceholder": "例:王小明",
+    "applicantDept": "部門",
+    "applicantEmployeeId": "工號",
+    "applicantEmail": "Email",
     "admin": {
       "categoryManagement": "分類管理",
       "slaConfig": "SLA 設定",
       "aiConfig": "AI 模型設定",
       "stats": "統計報表",
       "firstResponseHours": "首次回應 (小時)",
-      "resolutionHours": "解決時限 (小時)"
+      "resolutionHours": "解決時限 (小時)",
+      "slaEnabledOn": "SLA 功能:已啟用",
+      "slaEnabledOff": "SLA 功能:已停用",
+      "slaEnabledHint": "停用時不計算 SLA 到期時間、不發送逾期通知、前端隱藏 SLA 區塊(此設定頁仍可調整時數)。",
+      "enable": "啟用",
+      "disable": "停用"
     }
   },
   "voice_input": {

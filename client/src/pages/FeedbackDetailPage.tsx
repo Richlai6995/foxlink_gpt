@@ -14,6 +14,7 @@ import FeedbackPriorityBadge from '../components/feedback/FeedbackPriorityBadge'
 import FeedbackAIAnalysis from '../components/feedback/FeedbackAIAnalysis'
 import TicketArchiveModal from '../components/feedback/admin/TicketArchiveModal'
 import MicButton from '../components/MicButton'
+import { useFeedbackConfig } from '../hooks/useFeedbackConfig'
 
 interface Ticket {
   id: number
@@ -47,6 +48,7 @@ interface Ticket {
   resolved_at: string
   closed_at: string
   category_is_erp: number
+  is_internal_log: number
 }
 
 interface Message {
@@ -74,6 +76,7 @@ export default function FeedbackDetailPage() {
   const { id } = useParams<{ id: string }>()
   const { t, i18n } = useTranslation()
   const { isAdmin, user } = useAuth()
+  const { features } = useFeedbackConfig()
   const navigate = useNavigate()
   const chatEndRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -483,7 +486,12 @@ export default function FeedbackDetailPage() {
             <span className="text-xs text-gray-400 font-mono">{ticket.ticket_no}</span>
             <FeedbackStatusBadge status={ticket.status} />
             <FeedbackPriorityBadge priority={ticket.priority} />
-            {ticket.sla_breached === 1 && (
+            {ticket.is_internal_log === 1 && (
+              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs bg-amber-100 text-amber-700 border border-amber-200">
+                <Lock size={10} /> {t('feedback.internalLogBadge')}
+              </span>
+            )}
+            {features.sla && ticket.sla_breached === 1 && (
               <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs bg-red-500/20 text-red-400">
                 <AlertTriangle size={10} /> SLA
               </span>
@@ -905,38 +913,40 @@ export default function FeedbackDetailPage() {
               </div>
             </div>
 
-            {/* SLA */}
-            <div className="bg-white rounded-xl border border-gray-100 p-4 shadow-sm">
-              <h3 className="text-xs font-semibold text-gray-900 mb-3 flex items-center gap-1.5">
-                <span className="w-1.5 h-1.5 rounded-full bg-amber-500" /> {t('feedback.sla')}
-              </h3>
-              <div className="space-y-2 text-sm">
-                <div className="flex justify-between items-center">
-                  <span className="text-gray-400">{t('feedback.firstResponse')}</span>
-                  {ticket.first_response_at ? (
-                    <span className="text-green-600 text-xs font-medium flex items-center gap-1 bg-green-50 px-2 py-0.5 rounded">
-                      <CheckCircle size={10} /> {t('feedback.onTrack')}
-                    </span>
-                  ) : ticket.sla_due_first_response ? (
-                    <span className={`text-xs font-medium px-2 py-0.5 rounded ${ticket.sla_breached ? 'bg-red-50 text-red-600' : 'bg-blue-50 text-blue-600'}`}>
-                      {formatRelative(ticket.sla_due_first_response)}
-                    </span>
-                  ) : <span className="text-gray-300 text-xs">-</span>}
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-gray-400">{t('feedback.resolution')}</span>
-                  {ticket.resolved_at ? (
-                    <span className="text-green-600 text-xs font-medium flex items-center gap-1 bg-green-50 px-2 py-0.5 rounded">
-                      <CheckCircle size={10} /> {t('feedback.onTrack')}
-                    </span>
-                  ) : ticket.sla_due_resolution ? (
-                    <span className={`text-xs font-medium px-2 py-0.5 rounded ${ticket.sla_breached ? 'bg-red-50 text-red-600' : 'bg-blue-50 text-blue-600'}`}>
-                      {formatRelative(ticket.sla_due_resolution)}
-                    </span>
-                  ) : <span className="text-gray-300 text-xs">-</span>}
+            {/* SLA (feature flag) */}
+            {features.sla && ticket.is_internal_log !== 1 && (
+              <div className="bg-white rounded-xl border border-gray-100 p-4 shadow-sm">
+                <h3 className="text-xs font-semibold text-gray-900 mb-3 flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-500" /> {t('feedback.sla')}
+                </h3>
+                <div className="space-y-2 text-sm">
+                  <div className="flex justify-between items-center">
+                    <span className="text-gray-400">{t('feedback.firstResponse')}</span>
+                    {ticket.first_response_at ? (
+                      <span className="text-green-600 text-xs font-medium flex items-center gap-1 bg-green-50 px-2 py-0.5 rounded">
+                        <CheckCircle size={10} /> {t('feedback.onTrack')}
+                      </span>
+                    ) : ticket.sla_due_first_response ? (
+                      <span className={`text-xs font-medium px-2 py-0.5 rounded ${ticket.sla_breached ? 'bg-red-50 text-red-600' : 'bg-blue-50 text-blue-600'}`}>
+                        {formatRelative(ticket.sla_due_first_response)}
+                      </span>
+                    ) : <span className="text-gray-300 text-xs">-</span>}
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-gray-400">{t('feedback.resolution')}</span>
+                    {ticket.resolved_at ? (
+                      <span className="text-green-600 text-xs font-medium flex items-center gap-1 bg-green-50 px-2 py-0.5 rounded">
+                        <CheckCircle size={10} /> {t('feedback.onTrack')}
+                      </span>
+                    ) : ticket.sla_due_resolution ? (
+                      <span className={`text-xs font-medium px-2 py-0.5 rounded ${ticket.sla_breached ? 'bg-red-50 text-red-600' : 'bg-blue-50 text-blue-600'}`}>
+                        {formatRelative(ticket.sla_due_resolution)}
+                      </span>
+                    ) : <span className="text-gray-300 text-xs">-</span>}
+                  </div>
                 </div>
               </div>
-            </div>
+            )}
 
             {/* Attachments */}
             <div className="bg-white rounded-xl border border-gray-100 p-4 shadow-sm">

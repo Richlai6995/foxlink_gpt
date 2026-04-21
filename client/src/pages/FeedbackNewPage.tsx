@@ -2,8 +2,9 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import api from '../lib/api'
-import { ArrowLeft, Upload, X, Loader2 } from 'lucide-react'
+import { ArrowLeft, Upload, X, Loader2, Lock } from 'lucide-react'
 import MicButton from '../components/MicButton'
+import { useAuth } from '../context/AuthContext'
 
 interface Category {
   id: number
@@ -13,6 +14,7 @@ interface Category {
 
 export default function FeedbackNewPage() {
   const { t, i18n } = useTranslation()
+  const { isAdmin } = useAuth()
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -29,6 +31,13 @@ export default function FeedbackNewPage() {
   const [categories, setCategories] = useState<Category[]>([])
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
+
+  // 資訊內部紀錄(admin only):電話/系統外 Q&A 紀錄,不發通知、不算 SLA、不進統計
+  const [isInternalLog, setIsInternalLog] = useState(false)
+  const [applicantName, setApplicantName] = useState('')
+  const [applicantDept, setApplicantDept] = useState('')
+  const [applicantEmployeeId, setApplicantEmployeeId] = useState('')
+  const [applicantEmail, setApplicantEmail] = useState('')
 
   const source = searchParams.get('source') || 'web'
   const sourceSessionId = searchParams.get('source_session_id') || ''
@@ -124,6 +133,14 @@ export default function FeedbackNewPage() {
     if (source) formData.append('source', source)
     if (sourceSessionId) formData.append('source_session_id', sourceSessionId)
     files.forEach(f => formData.append('files', f))
+    // 資訊內部紀錄 (admin only)
+    if (isAdmin && isInternalLog) {
+      formData.append('is_internal_log', 'true')
+      if (applicantName.trim()) formData.append('applicant_name', applicantName.trim())
+      if (applicantDept.trim()) formData.append('applicant_dept', applicantDept.trim())
+      if (applicantEmployeeId.trim()) formData.append('applicant_employee_id', applicantEmployeeId.trim())
+      if (applicantEmail.trim()) formData.append('applicant_email', applicantEmail.trim())
+    }
     return formData
   }
 
@@ -165,6 +182,69 @@ export default function FeedbackNewPage() {
 
       <div className="max-w-3xl mx-auto px-6 py-8" onPaste={handlePaste}>
         <div className="space-y-5">
+          {/* Admin only: 資訊內部紀錄 */}
+          {isAdmin && (
+            <div className={`rounded-xl border p-3 transition ${isInternalLog ? 'bg-amber-50 border-amber-200' : 'bg-gray-50 border-gray-200'}`}>
+              <label className="flex items-start gap-2 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={isInternalLog}
+                  onChange={e => setIsInternalLog(e.target.checked)}
+                  className="mt-0.5"
+                />
+                <div className="flex-1">
+                  <div className="flex items-center gap-1.5 text-sm font-medium text-gray-800">
+                    <Lock size={12} className="text-amber-600" />
+                    {t('feedback.internalLogTitle')}
+                  </div>
+                  <p className="text-xs text-gray-500 mt-0.5">{t('feedback.internalLogHint')}</p>
+                </div>
+              </label>
+
+              {isInternalLog && (
+                <div className="mt-3 grid grid-cols-2 gap-3 pl-6">
+                  <div>
+                    <label className="block text-xs text-gray-600 mb-1">{t('feedback.applicantName')}</label>
+                    <input
+                      type="text"
+                      value={applicantName}
+                      onChange={e => setApplicantName(e.target.value)}
+                      placeholder={t('feedback.applicantNamePlaceholder')}
+                      className="w-full bg-white border border-gray-300 rounded-lg px-3 py-1.5 text-sm text-gray-900 focus:outline-none focus:border-amber-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-600 mb-1">{t('feedback.applicantDept')}</label>
+                    <input
+                      type="text"
+                      value={applicantDept}
+                      onChange={e => setApplicantDept(e.target.value)}
+                      className="w-full bg-white border border-gray-300 rounded-lg px-3 py-1.5 text-sm text-gray-900 focus:outline-none focus:border-amber-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-600 mb-1">{t('feedback.applicantEmployeeId')}</label>
+                    <input
+                      type="text"
+                      value={applicantEmployeeId}
+                      onChange={e => setApplicantEmployeeId(e.target.value)}
+                      className="w-full bg-white border border-gray-300 rounded-lg px-3 py-1.5 text-sm text-gray-900 focus:outline-none focus:border-amber-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-600 mb-1">{t('feedback.applicantEmail')}</label>
+                    <input
+                      type="email"
+                      value={applicantEmail}
+                      onChange={e => setApplicantEmail(e.target.value)}
+                      className="w-full bg-white border border-gray-300 rounded-lg px-3 py-1.5 text-sm text-gray-900 focus:outline-none focus:border-amber-500"
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Subject */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1.5">{t('feedback.subject')} *</label>

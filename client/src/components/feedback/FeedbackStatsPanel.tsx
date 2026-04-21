@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import api from '../../lib/api'
 import { BarChart3, Clock, CheckCircle, AlertTriangle, Star, Bot, Download, Loader2 } from 'lucide-react'
+import { useFeedbackConfig } from '../../hooks/useFeedbackConfig'
 
 interface Stats {
   statusDist: { status: string; cnt: number }[]
@@ -26,6 +27,7 @@ const PRIORITY_COLORS: Record<string, string> = {
 
 export default function FeedbackStatsPanel() {
   const { t } = useTranslation()
+  const { features } = useFeedbackConfig()
   const [stats, setStats] = useState<Stats | null>(null)
   const [loading, setLoading] = useState(true)
   const [dateFrom, setDateFrom] = useState('')
@@ -97,21 +99,25 @@ export default function FeedbackStatsPanel() {
       ) : stats ? (
         <>
           {/* Summary Cards */}
-          <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+          <div className={`grid grid-cols-2 gap-3 ${features.sla ? 'lg:grid-cols-5' : 'lg:grid-cols-3'}`}>
             <div className="bg-white border border-gray-200 rounded-xl shadow-sm p-4">
               <div className="text-2xl font-bold text-gray-900">{total}</div>
               <div className="text-xs text-gray-500 mt-1">{t('feedback.allTickets')}</div>
             </div>
-            <div className="bg-white border border-gray-200 rounded-xl shadow-sm p-4">
-              <div className="text-2xl font-bold text-green-400">
-                {total > 0 ? Math.round((1 - (stats.summary.sla_breached_count || 0) / total) * 100) : 0}%
-              </div>
-              <div className="text-xs text-gray-500 mt-1 flex items-center gap-1"><CheckCircle size={10} /> SLA {t('feedback.onTrack')}</div>
-            </div>
-            <div className="bg-white border border-gray-200 rounded-xl shadow-sm p-4">
-              <div className="text-2xl font-bold text-red-400">{stats.summary.sla_breached_count || 0}</div>
-              <div className="text-xs text-gray-500 mt-1 flex items-center gap-1"><AlertTriangle size={10} /> {t('feedback.breached')}</div>
-            </div>
+            {features.sla && (
+              <>
+                <div className="bg-white border border-gray-200 rounded-xl shadow-sm p-4">
+                  <div className="text-2xl font-bold text-green-400">
+                    {total > 0 ? Math.round((1 - (stats.summary.sla_breached_count || 0) / total) * 100) : 0}%
+                  </div>
+                  <div className="text-xs text-gray-500 mt-1 flex items-center gap-1"><CheckCircle size={10} /> SLA {t('feedback.onTrack')}</div>
+                </div>
+                <div className="bg-white border border-gray-200 rounded-xl shadow-sm p-4">
+                  <div className="text-2xl font-bold text-red-400">{stats.summary.sla_breached_count || 0}</div>
+                  <div className="text-xs text-gray-500 mt-1 flex items-center gap-1"><AlertTriangle size={10} /> {t('feedback.breached')}</div>
+                </div>
+              </>
+            )}
             <div className="bg-white border border-gray-200 rounded-xl shadow-sm p-4">
               <div className="text-2xl font-bold text-blue-400">{stats.summary.ai_resolved_count || 0}</div>
               <div className="text-xs text-gray-500 mt-1 flex items-center gap-1"><Bot size={10} /> AI {t('feedback.resolve')}</div>
