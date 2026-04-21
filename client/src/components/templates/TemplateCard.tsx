@@ -1,7 +1,8 @@
 import { useState } from 'react'
-import { FileText, FileSpreadsheet, File, Play, Edit2, Share2, Copy, Trash2, Download } from 'lucide-react'
+import { FileText, FileSpreadsheet, File, Play, Edit2, Share2, Copy, Trash2, Download, Clock } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import api from '../../lib/api'
+import { fmtDateTW } from '../../lib/fmtTW'
 import { DocTemplate } from '../../types'
 import TemplateGenerateModal from './TemplateGenerateModal'
 import TemplateShareModal from './TemplateShareModal'
@@ -96,7 +97,12 @@ export default function TemplateCard({ template, onRefresh, onEdit }: Props) {
         )}
 
         {/* Stats */}
-        <div className="text-xs text-slate-400">{t('tpl.card.useCount', { count: template.use_count })}</div>
+        <div className="flex items-center gap-2 text-xs text-slate-400">
+          <span>{t('tpl.card.useCount', { count: template.use_count })}</span>
+          {template.created_at && (
+            <span className="flex items-center gap-1"><Clock size={10} />{fmtDateTW(template.created_at)}</span>
+          )}
+        </div>
 
         {/* Actions */}
         <div className="flex flex-wrap gap-1 mt-auto pt-2 border-t">

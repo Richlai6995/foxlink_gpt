@@ -54,6 +54,8 @@ export default function ChatPage() {
   const [streaming, setStreaming] = useState(false)
   const [streamingContent, setStreamingContent] = useState('')
   const [streamingStatus, setStreamingStatus] = useState('')
+  // undefined = 非上傳狀態; 0..1 = 上傳中; 1 = 已送完、等伺服器
+  const [uploadProgress, setUploadProgress] = useState<number | undefined>(undefined)
   const [erpPendingConfirm, setErpPendingConfirm] = useState<PendingErpConfirm | null>(null)
   const [erpExecutedNotices, setErpExecutedNotices] = useState<Array<{ tool_code: string; rows: number; duration_ms: number; at: number }>>([])
   const [erpPickerOpen, setErpPickerOpen] = useState(false)
@@ -676,125 +678,128 @@ export default function ChatPage() {
       formData.append('self_kb_ids',    JSON.stringify([...selectedKbIds]))
       formData.append('erp_tool_ids',   JSON.stringify([...selectedErpIds]))
 
-      // ── AbortController 在 fetch 之前設好，停止按鈕可立即生效 ──
-      const controller = new AbortController()
-      abortRef.current = () => {
-        wasAbortedRef.current = true
-        controller.abort()
-      }
-
-      // SSE via fetch
+      // SSE via XHR（相較 fetch 多了 upload.onprogress，可顯示檔案上傳進度）
       const token = localStorage.getItem('token')
       let accText = ''
       const generatedFiles: GeneratedFile[] = []
       const stripGenerateBlocks = (t: string) =>
         t.replace(/```generate_[a-z]+:[^\n]+\n[\s\S]*?```/g, '').replace(/\n{3,}/g, '\n\n').trim()
 
-      console.log('[SSE-DEBUG] fetch start', { sessionId, hasToken: !!token, signalAborted: controller.signal.aborted })
+      // 有檔案才顯示進度條；沒檔案就不必分心
+      if (files.length > 0) setUploadProgress(0)
+
+      console.log('[SSE-DEBUG] xhr start', { sessionId, hasToken: !!token, fileCount: files.length })
       const fetchT0 = Date.now()
 
+      let streamDone = false
+      let streamError = ''
+
       try {
-        const response = await fetch(`/api/chat/sessions/${sessionId}/messages`, {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${token}`,
-            // 帶 UI 語言讓 server 端 chat.js 據此決定 AI 回覆語言
-            'X-Lang': i18n.language || localStorage.getItem('preferred_language') || 'zh-TW',
-          },
-          body: formData,
-          signal: controller.signal,
+        await new Promise<void>((resolve, reject) => {
+          const xhr = new XMLHttpRequest()
+          xhr.open('POST', `/api/chat/sessions/${sessionId}/messages`, true)
+          xhr.setRequestHeader('Authorization', `Bearer ${token}`)
+          xhr.setRequestHeader('X-Lang', i18n.language || localStorage.getItem('preferred_language') || 'zh-TW')
+
+          // 停止按鈕立即生效
+          abortRef.current = () => {
+            wasAbortedRef.current = true
+            try { xhr.abort() } catch {}
+          }
+
+          // 上傳進度（僅當有檔案時才有意義）
+          if (files.length > 0) {
+            xhr.upload.onprogress = (e) => {
+              if (e.lengthComputable) setUploadProgress(e.loaded / e.total)
+            }
+            xhr.upload.onload = () => setUploadProgress(1)
+          }
+
+          // 串流讀取：XHR 會持續 append 到 responseText，用 offset 處理增量
+          let lastIdx = 0
+          let buffer = ''
+          const processDelta = () => {
+            if (streamDone) return
+            const delta = xhr.responseText.slice(lastIdx)
+            lastIdx = xhr.responseText.length
+            buffer += delta
+            const lines = buffer.split('\n')
+            buffer = lines.pop() || ''
+            for (const line of lines) {
+              if (!line.startsWith('data: ')) continue
+              try {
+                const event = JSON.parse(line.slice(6))
+                if (event.type === 'chunk') {
+                  accText += event.content
+                  const genIdx = accText.indexOf('```generate_')
+                  setStreamingContent(genIdx >= 0 ? accText.slice(0, genIdx).trimEnd() : accText)
+                  setStreamingStatus(genIdx >= 0 ? '正在產生文件，請稍候...' : '')
+                } else if (event.type === 'status') {
+                  setStreamingStatus(event.message || '')
+                } else if (event.type === 'title') {
+                  setSessions((prev) => prev.map((s) => s.id === sessionId ? {
+                    ...s,
+                    title:    event.title    || s.title,
+                    title_zh: event.title_zh || s.title_zh,
+                    title_en: event.title_en || s.title_en,
+                    title_vi: event.title_vi || s.title_vi,
+                  } : s))
+                } else if (event.type === 'generated_files') {
+                  console.log('[SSE-DEBUG] generated_files:', event.files.map((f: any) => ({
+                    type: f.type, filename: f.filename,
+                    urlType: f.publicUrl?.startsWith('data:') ? 'dataURL' : 'fileURL',
+                    urlLen: f.publicUrl?.length,
+                    urlPreview: f.publicUrl?.slice(0, 60),
+                  })))
+                  generatedFiles.push(...event.files)
+                } else if (event.type === 'audio') {
+                  generatedFiles.push({
+                    type: 'audio',
+                    filename: event.filename || 'output.mp3',
+                    publicUrl: event.audio_url,
+                  })
+                } else if (event.type === 'erp_confirm') {
+                  setErpPendingConfirm({
+                    tool_id: event.tool_id,
+                    tool_code: event.tool_code,
+                    confirmation_token: event.confirmation_token,
+                    summary: event.summary,
+                    args: event.args || {},
+                  })
+                } else if (event.type === 'error') {
+                  streamError = event.message || '發生錯誤'
+                  streamDone = true
+                  return
+                } else if (event.type === 'done') {
+                  streamDone = true
+                  return
+                }
+              } catch (_) { }
+            }
+          }
+
+          xhr.onprogress = processDelta
+          xhr.onload = () => {
+            console.log('[SSE-DEBUG] xhr onload', { status: xhr.status, elapsed: Date.now() - fetchT0 })
+            if (xhr.status < 200 || xhr.status >= 300) {
+              let errMsg = `HTTP ${xhr.status}`
+              try {
+                const body = JSON.parse(xhr.responseText)
+                errMsg = body.error || errMsg
+              } catch {}
+              reject(new Error(errMsg))
+              return
+            }
+            processDelta()
+            resolve()
+          }
+          xhr.onerror = () => reject(new Error('Network error'))
+          xhr.onabort = () => {
+            // 被停止鈕打斷；外層 catch 透過 wasAbortedRef 判斷
+            resolve()
+          }
+          xhr.send(formData)
         })
-
-        console.log('[SSE-DEBUG] response received', { status: response.status, ok: response.ok, elapsed: Date.now() - fetchT0 })
-
-        if (!response.ok) {
-          let errMsg = `HTTP ${response.status}`
-          try {
-            const body = await response.json()
-            errMsg = body.error || errMsg
-          } catch { }
-          throw new Error(errMsg)
-        }
-
-        const reader = response.body!.getReader()
-        const decoder = new TextDecoder()
-        let buffer = ''
-        let streamDone = false
-        let streamError = ''
-
-        console.log('[SSE-DEBUG] reader created, starting read loop')
-
-        while (!streamDone) {
-          let readResult: { done: boolean; value?: Uint8Array }
-          try {
-            readResult = await reader.read()
-          } catch (readErr) {
-            console.log('[SSE-DEBUG] reader.read() threw:', readErr)
-            // AbortError：controller.abort() 在讀取中被呼叫
-            break
-          }
-          const { done, value } = readResult
-          if (done || wasAbortedRef.current) break
-
-          buffer += decoder.decode(value, { stream: true })
-          const lines = buffer.split('\n')
-          buffer = lines.pop() || ''
-
-          for (const line of lines) {
-            if (!line.startsWith('data: ')) continue
-            try {
-              const event = JSON.parse(line.slice(6))
-              if (event.type === 'chunk') {
-                accText += event.content
-                // 避免 O(n²): 串流中不跑完整 regex，只截去 generate block 起始點之後的內容
-                const genIdx = accText.indexOf('```generate_')
-                setStreamingContent(genIdx >= 0 ? accText.slice(0, genIdx).trimEnd() : accText)
-                // 偵測到 generate block 時立即顯示等待提示，不等 server status event
-                setStreamingStatus(genIdx >= 0 ? '正在產生文件，請稍候...' : '')
-              } else if (event.type === 'status') {
-                setStreamingStatus(event.message || '')
-              } else if (event.type === 'title') {
-                setSessions((prev) => prev.map((s) => s.id === sessionId ? {
-                  ...s,
-                  title:    event.title    || s.title,
-                  title_zh: event.title_zh || s.title_zh,
-                  title_en: event.title_en || s.title_en,
-                  title_vi: event.title_vi || s.title_vi,
-                } : s))
-              } else if (event.type === 'generated_files') {
-                console.log('[SSE-DEBUG] generated_files:', event.files.map((f: any) => ({
-                  type: f.type, filename: f.filename,
-                  urlType: f.publicUrl?.startsWith('data:') ? 'dataURL' : 'fileURL',
-                  urlLen: f.publicUrl?.length,
-                  urlPreview: f.publicUrl?.slice(0, 60),
-                })))
-                generatedFiles.push(...event.files)
-              } else if (event.type === 'audio') {
-                // post_answer skill returned audio
-                generatedFiles.push({
-                  type: 'audio',
-                  filename: event.filename || 'output.mp3',
-                  publicUrl: event.audio_url,
-                })
-              } else if (event.type === 'erp_confirm') {
-                setErpPendingConfirm({
-                  tool_id: event.tool_id,
-                  tool_code: event.tool_code,
-                  confirmation_token: event.confirmation_token,
-                  summary: event.summary,
-                  args: event.args || {},
-                })
-              } else if (event.type === 'error') {
-                streamError = event.message || '發生錯誤'
-                streamDone = true
-                break
-              } else if (event.type === 'done') {
-                streamDone = true
-                break
-              }
-            } catch (_) { }
-          }
-        }
 
         // Add AI message to UI
         const aiMsg: ChatMessage = {
@@ -845,6 +850,7 @@ export default function ChatPage() {
         setStreaming(false)
         setStreamingContent('')
         setStreamingStatus('')
+        setUploadProgress(undefined)
         abortRef.current = null
       }
     },
@@ -1798,6 +1804,7 @@ export default function ChatPage() {
             await handleSend(final, files)
           }}
           disabled={streaming}
+          uploadProgress={uploadProgress}
           canResearch={canResearch}
           onResearch={() => {
             const q = messageInputRef.current?.getQuestion() || ''

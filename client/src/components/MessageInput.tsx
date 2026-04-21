@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useImperativeHandle, forwardRef, useMemo } from 'react'
-import { Send, Paperclip, X, FileText, Image, Music, AlertCircle, Search, LayoutTemplate, Sparkles, Palette, Database } from 'lucide-react'
+import { Send, Paperclip, X, FileText, Image, Music, AlertCircle, Search, LayoutTemplate, Sparkles, Palette, Database, Loader2, Upload } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import TemplatePickerPopover from './templates/TemplatePickerPopover'
 import { DocTemplate, TemplateSchema } from '../types'
@@ -17,6 +17,8 @@ interface Props {
   onResearch?: () => void
   onErpTool?: () => void
   disabled?: boolean
+  /** 檔案上傳進度 0..1；undefined 表非上傳中 */
+  uploadProgress?: number
   canResearch?: boolean
 }
 
@@ -34,7 +36,7 @@ function getFileIcon(type: string) {
   return <FileText size={14} className="text-slate-400" />
 }
 
-const MessageInput = forwardRef<MessageInputHandle, Props>(function MessageInput({ onSend, onResearch, onErpTool, disabled, canResearch }, ref) {
+const MessageInput = forwardRef<MessageInputHandle, Props>(function MessageInput({ onSend, onResearch, onErpTool, disabled, uploadProgress, canResearch }, ref) {
   const { user } = useAuth()
   const [message, setMessage] = useState('')
   const [files, setFiles] = useState<File[]>([])
@@ -300,6 +302,27 @@ const MessageInput = forwardRef<MessageInputHandle, Props>(function MessageInput
         </div>
       )}
 
+      {/* Upload progress bar */}
+      {uploadProgress !== undefined && uploadProgress < 1 && (
+        <div className="mb-2">
+          <div className="flex items-center justify-between text-xs text-slate-500 mb-1">
+            <span className="flex items-center gap-1"><Upload size={11} />檔案上傳中...</span>
+            <span>{Math.round(uploadProgress * 100)}%</span>
+          </div>
+          <div className="w-full h-1 bg-slate-200 rounded-full overflow-hidden">
+            <div
+              className="h-full bg-blue-500 transition-all duration-150"
+              style={{ width: `${Math.round(uploadProgress * 100)}%` }}
+            />
+          </div>
+        </div>
+      )}
+      {uploadProgress === 1 && (
+        <div className="flex items-center gap-1.5 text-xs text-slate-500 mb-2">
+          <Loader2 size={11} className="animate-spin" />AI 處理中...
+        </div>
+      )}
+
       {/* Input area */}
       <div
         className="flex items-end gap-2 bg-slate-50 border border-slate-200 rounded-2xl px-3 py-2 focus-within:border-blue-400 focus-within:ring-1 focus-within:ring-blue-400 transition"
@@ -400,8 +423,11 @@ const MessageInput = forwardRef<MessageInputHandle, Props>(function MessageInput
           onClick={handleSubmit}
           disabled={disabled || (!message.trim() && files.length === 0)}
           className="bg-blue-600 hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl p-2 flex-shrink-0 mb-0.5 transition"
+          title={uploadProgress !== undefined && uploadProgress < 1 ? '上傳中，請稍候' : undefined}
         >
-          <Send size={16} />
+          {uploadProgress !== undefined && uploadProgress < 1
+            ? <Loader2 size={16} className="animate-spin" />
+            : <Send size={16} />}
         </button>
       </div>
 

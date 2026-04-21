@@ -4,7 +4,7 @@ import { useAuth } from '../context/AuthContext'
 import { useTranslation } from 'react-i18next'
 import { Plus, Search, Globe, Lock, GitFork, Send, Pencil, Trash2, Clock, X, ChevronDown, Zap, ArrowLeft, MessageSquare, Code2, Eye, Share2, History, CheckCircle, XCircle, LayoutTemplate } from 'lucide-react'
 import api from '../lib/api'
-import { fmtTW } from '../lib/fmtTW'
+import { fmtTW, fmtDateTW } from '../lib/fmtTW'
 import TranslationFields, { type TranslationData } from '../components/common/TranslationFields'
 import UserPicker from '../components/common/UserPicker'
 import ShareGranteePicker from '../components/common/ShareGranteePicker'
@@ -1195,6 +1195,14 @@ function SkillCard({ skill, onEdit, onDelete, onFork, onRequestPublic, onUse, on
             {skill.tags.length > 0 && (
                 <div className="flex flex-wrap gap-1 mb-3">
                     {skill.tags.slice(0, 4).map(t => <span key={t} className="text-xs px-1.5 py-0.5 bg-slate-100 rounded text-slate-500">{t}</span>)}
+                </div>
+            )}
+
+            {(skill.owner_name || skill.created_at) && (
+                <div className="flex items-center gap-2 text-xs text-slate-400 mb-2">
+                    {skill.owner_name && <span>{t('tpl.card.by', { name: skill.owner_name })}</span>}
+                    {skill.owner_name && skill.created_at && <span>·</span>}
+                    {skill.created_at && <span className="flex items-center gap-1"><Clock size={10} />{fmtDateTW(skill.created_at)}</span>}
                 </div>
             )}
 

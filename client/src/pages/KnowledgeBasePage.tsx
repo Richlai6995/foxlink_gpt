@@ -6,6 +6,7 @@ import {
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import api from '../lib/api'
+import { fmtDateTW } from '../lib/fmtTW'
 import { useAuth } from '../context/AuthContext'
 import TranslationFields, { type TranslationData } from '../components/common/TranslationFields'
 
@@ -387,6 +388,12 @@ function KbCard({
         <span>{formatBytes(kb.total_size_bytes)}</span>
         <span className="ml-auto bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded-full">{kb.embedding_dims}d</span>
       </div>
+
+      {kb.created_at && (
+        <div className="flex items-center gap-1 text-xs text-slate-400 mt-1.5">
+          <Clock size={10} />{fmtDateTW(kb.created_at)}
+        </div>
+      )}
     </div>
   )
 }
