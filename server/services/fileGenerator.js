@@ -74,7 +74,12 @@ async function processGenerateBlocks(responseText, sessionId) {
       const filePath = await generateFile(type, filename, content, sessionId);
       if (filePath) {
         const publicUrl = `/uploads/generated/${path.basename(filePath)}`;
-        blocks.push({ type, filename, filePath, publicUrl });
+        // 顯示用 filename 也對齊 type 的副檔名（UI/email 附件不會看到騙人的 .pdf）
+        const ext = EXT_BY_TYPE[type];
+        const displayFilename = ext
+          ? filename.replace(/\.[a-zA-Z0-9]{2,5}$/, '') + ext
+          : filename;
+        blocks.push({ type, filename: displayFilename, filePath, publicUrl });
         console.log(`[FileGen] Generated: ${publicUrl}`);
       }
     } catch (e) {
