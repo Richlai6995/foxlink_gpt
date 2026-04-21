@@ -72,6 +72,11 @@ const VERTEX_MODEL_DEFAULTS_OLD_SDK = {
 const VERTEX_MODEL_DEFAULTS_NEW_SDK = {
   // Google 2026 Q1 下架;3.x Pro 的正式 preview 名稱是 3.1
   'gemini-3-pro-preview':         'gemini-3.1-pro-preview',
+  // 防呆:admin 在 LLM 管理介面漏打 -preview 時,兜回正確字串
+  'gemini-3.1-pro':               'gemini-3.1-pro-preview',
+  'gemini-3.1-flash':             'gemini-3.1-flash-preview',
+  'gemini-3-pro':                 'gemini-3.1-pro-preview',
+  'gemini-3-flash':               'gemini-3-flash-preview',
   // Image generation — 新 SDK 在 Vertex global 的 image model 命名尚未完全對齊,先保持翻譯
   'gemini-3-pro-image-preview':   'gemini-2.5-flash-image-preview',
   'gemini-3-flash-image-preview': 'gemini-2.5-flash-image-preview',

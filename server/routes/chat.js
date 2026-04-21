@@ -560,31 +560,55 @@ const upload = multer({
 router.use(verifyToken);
 
 // Resolve API model info from DB (with env fallback)
-// Returns { apiModel, imageOutput, providerType, modelRow }
-async function resolveApiModel(db, modelKey) {
+// Returns { apiModel, imageOutput, providerType, modelRow, fallbackFromInactive? }
+async function resolveApiModel(db, modelKey, { allowFallback = true } = {}) {
+  const SELECT_SQL =
+    `SELECT api_model, image_output, provider_type, api_key_enc,
+            endpoint_url, api_version, deployment_name, base_model, key,
+            generation_config
+     FROM llm_models WHERE key=? AND is_active=1`;
+  const _rowToResult = (row) => {
+    let genConfig = null;
+    try { genConfig = row.generation_config ? JSON.parse(row.generation_config) : null; } catch (_) {}
+    row._genConfig = genConfig;
+    return {
+      apiModel:     row.api_model,
+      imageOutput:  !!row.image_output,
+      providerType: row.provider_type || 'gemini',
+      modelRow:     row,
+    };
+  };
   try {
-    const row = await db.prepare(
-      `SELECT api_model, image_output, provider_type, api_key_enc,
-              endpoint_url, api_version, deployment_name, base_model, key,
-              generation_config
-       FROM llm_models WHERE key=? AND is_active=1`
-    ).get(modelKey);
-    if (row?.api_model) {
-      // Parse generation_config CLOB → object
-      let genConfig = null;
-      try { genConfig = row.generation_config ? JSON.parse(row.generation_config) : null; } catch (_) {}
-      row._genConfig = genConfig;
-      return {
-        apiModel:     row.api_model,
-        imageOutput:  !!row.image_output,
-        providerType: row.provider_type || 'gemini',
-        modelRow:     row,
-      };
-    }
+    const row = await db.prepare(SELECT_SQL).get(modelKey);
+    if (row?.api_model) return _rowToResult(row);
   } catch (e) { }
-  if (modelKey === 'flash') return { apiModel: process.env.GEMINI_MODEL_FLASH || 'gemini-2.0-flash',   imageOutput: false, providerType: 'gemini', modelRow: null };
-  if (modelKey === 'pro')   return { apiModel: process.env.GEMINI_MODEL_PRO   || 'gemini-1.5-pro',     imageOutput: false, providerType: 'gemini', modelRow: null };
-  return { apiModel: modelKey, imageOutput: false, providerType: 'gemini', modelRow: null };
+  // 失效 / 不存在 → fallback 到 default_chat_model_key(admin 在系統設定可改)
+  if (allowFallback) {
+    try {
+      const { SETTING_KEY } = require('../services/llmDefaults');
+      const skey = SETTING_KEY.chat;
+      const setting = await db.prepare(`SELECT value FROM system_settings WHERE key=?`).get(skey);
+      if (setting?.value && setting.value !== modelKey) {
+        const row = await db.prepare(SELECT_SQL).get(setting.value);
+        if (row?.api_model) return { ..._rowToResult(row), fallbackFromInactive: modelKey };
+      }
+      // 再退一步:隨便抓一筆 active chat model
+      const anyRow = await db.prepare(
+        `SELECT api_model, image_output, provider_type, api_key_enc,
+                endpoint_url, api_version, deployment_name, base_model, key,
+                generation_config
+         FROM llm_models
+         WHERE is_active=1 AND (model_role IS NULL OR model_role='chat')
+         ORDER BY sort_order ASC, id ASC
+         FETCH FIRST 1 ROWS ONLY`
+      ).get();
+      if (anyRow?.api_model) return { ..._rowToResult(anyRow), fallbackFromInactive: modelKey };
+    } catch (e) { }
+  }
+  // 最末端 env fallback(llm_models 表整個空才會到這)
+  if (modelKey === 'flash') return { apiModel: process.env.GEMINI_MODEL_FLASH || 'gemini-3-flash-preview', imageOutput: false, providerType: 'gemini', modelRow: null };
+  if (modelKey === 'pro')   return { apiModel: process.env.GEMINI_MODEL_PRO   || 'gemini-3.1-pro-preview', imageOutput: false, providerType: 'gemini', modelRow: null };
+  return { apiModel: process.env.GEMINI_MODEL_PRO || 'gemini-3.1-pro-preview', imageOutput: false, providerType: 'gemini', modelRow: null, fallbackFromInactive: modelKey };
 }
 
 // GET /api/chat/models — active models for frontend selector

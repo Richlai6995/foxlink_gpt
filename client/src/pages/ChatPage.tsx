@@ -64,6 +64,7 @@ export default function ChatPage() {
   const [reasoningEffort, setReasoningEffort] = useState<string>(
     () => localStorage.getItem('reasoningEffort') || ''
   )
+  const [availableModels, setAvailableModels] = useState<LlmModel[]>([])
 
   // Sidebar collapse state
   const isMobile = typeof window !== 'undefined' && window.innerWidth < 768
@@ -126,14 +127,18 @@ export default function ChatPage() {
     api.get('/dashboard/topics').then((r) => setDashTopics(r.data || [])).catch(() => {})
   }, [canUseDashboard, isAdmin])
 
-  // 若 localStorage 無 model 或 model 不存在於可用清單，預設用第一個 chat model
+  // 載入可用 chat models,若目前 model 不在清單中(被 admin 失效 / localStorage 快取舊 key)
+  // 自動 fallback 到第一個可用 model,避免送 request 時 server resolve 失敗炸 404
   useEffect(() => {
-    if (model) return
     api.get('/chat/models').then((r) => {
       const models: LlmModel[] = r.data || []
       const chatModels = models.filter((m) => !m.model_role || m.model_role === 'chat')
-      if (chatModels.length > 0) setModel(chatModels[0].key as ModelType)
+      setAvailableModels(chatModels)
+      if (chatModels.length > 0 && (!model || !chatModels.some((m) => m.key === model))) {
+        setModel(chatModels[0].key as ModelType)
+      }
     }).catch(() => {})
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   useEffect(() => {
@@ -370,13 +375,17 @@ export default function ChatPage() {
       setSelectedKbIds(new Set(res.data.used_kb_ids || []))
       setSelectedErpIds(new Set((res.data.used_erp_tool_ids || []).map(Number)))
       // Sync model selector to the session's model (important for image-gen sessions)
+      // 但若 session 綁的 model 已被 admin 失效,保留目前 selector,避免送 request 炸 404
       if (res.data.session?.model) {
-        setModel(res.data.session.model as ModelType)
+        const sessionModel = res.data.session.model as ModelType
+        if (availableModels.length === 0 || availableModels.some((m) => m.key === sessionModel)) {
+          setModel(sessionModel)
+        }
       }
     } catch (e) {
       console.error('Load session error:', e)
     }
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [availableModels]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     loadSessions()
