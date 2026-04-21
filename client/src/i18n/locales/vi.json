@@ -2898,5 +2898,14 @@
     "requery": "Truy vấn lại",
     "requeryTitle": "Sửa điều kiện ở trên rồi bấm để chạy lại",
     "aiTranslationNotice": "🌐 Bản dịch AI · mã/ID/số giữ nguyên"
+  },
+  "chart": {
+    "inline": {
+      "empty": "Biểu đồ chưa có dữ liệu",
+      "unsupported": "Loại biểu đồ không hỗ trợ:",
+      "error": "Dữ liệu biểu đồ lỗi:",
+      "showRaw": "Hiển thị spec gốc",
+      "downloadPng": "Tải PNG"
+    }
   }
 }

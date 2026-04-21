@@ -726,6 +726,11 @@ async function runMigrations(db) {
   await addCol('CHAT_SESSIONS', 'TITLE_EN', 'VARCHAR2(200)');
   await addCol('CHAT_SESSIONS', 'TITLE_VI', 'VARCHAR2(200)');
 
+  // ── Chat Inline Chart (Phase 1) ─────────────────────────────────────────
+  // InlineChartSpec[] JSON;Phase 2 由 chartSpecParser 寫入、GET messages 讀回。
+  // 詳見 docs/chat-inline-chart-plan.md
+  await addCol('CHAT_MESSAGES', 'CHARTS_JSON', 'CLOB');
+
   // ── Deep Research ──────────────────────────────────────────────────────────
   await addCol('USERS',  'CAN_DEEP_RESEARCH', 'NUMBER(1)');
   await addCol('ROLES',  'CAN_DEEP_RESEARCH', 'NUMBER(1) DEFAULT 1');

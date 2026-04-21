@@ -70,6 +70,7 @@ cd client && npm run dev    # frontend → localhost:5173 (proxy → 3007)
 | `erp-tools-design.md` | ERP FUNCTION/PROCEDURE 工具化設計（LLM tool-calling + 手動 + Inject） |
 | `kb-retrieval-architecture-v2.md` | **KB 檢索 v2 架構實作紀錄**（Phase 1/2/3a/3b/3c + 踩坑 + config 索引） |
 | `gemini-sdk-migration-plan.md` | **Gemini SDK 遷移計畫**：`@google-cloud/vertexai` → `@google/genai`（獨立 session 處理） |
+| `chat-inline-chart-plan.md` | **Chat Inline Chart 規劃書**：MCP / LLM 輸出自動畫 ECharts（與戰情室解耦） |
 
 ---
 

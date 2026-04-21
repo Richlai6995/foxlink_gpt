@@ -45,6 +45,24 @@ export interface GeneratedFile {
   publicUrl: string
 }
 
+export type InlineChartType = 'bar' | 'line' | 'pie' | 'scatter' | 'area' | 'heatmap'
+
+export interface InlineChartYField {
+  field: string
+  name?: string
+  color?: string
+}
+
+export interface InlineChartSpec {
+  version?: number
+  type: InlineChartType
+  title?: string
+  x_field: string
+  y_fields: InlineChartYField[]
+  data?: Record<string, unknown>[]
+  data_ref?: { tool_call_id: string; path?: string }
+}
+
 export interface ChatMessage {
   id: number
   session_id: string
@@ -52,6 +70,7 @@ export interface ChatMessage {
   content: string
   files?: FileMeta[]
   generated_files?: GeneratedFile[]
+  charts?: InlineChartSpec[]
   input_tokens?: number
   output_tokens?: number
   created_at: string

@@ -3,6 +3,7 @@ import { Copy, Check, RefreshCw, Download, Cpu, User, MessageSquarePlus } from '
 import { useState } from 'react'
 import MarkdownRenderer from './MarkdownRenderer'
 import ResearchProgressCard from './ResearchProgressCard'
+import InlineChart from './chat/InlineChart'
 import type { ChatMessage, GeneratedFile } from '../types'
 import { useTranslation } from 'react-i18next'
 
@@ -179,7 +180,11 @@ function MessageBubble({
         <div data-chat-bubble="assistant" className="bg-white border border-slate-200 rounded-2xl rounded-tl-sm px-5 py-4 shadow-sm overflow-hidden break-words">
           {(msg.content ?? '').startsWith('__RESEARCH_JOB__:')
             ? <ResearchProgressCard jobId={(msg.content ?? '').slice('__RESEARCH_JOB__:'.length)} />
-            : <><MarkdownRenderer content={msg.content ?? ''} /><GeneratedFileLinks files={msg.generated_files || []} /></>
+            : <>
+                <MarkdownRenderer content={msg.content ?? ''} />
+                {msg.charts?.map((spec, i) => <InlineChart key={i} spec={spec} />)}
+                <GeneratedFileLinks files={msg.generated_files || []} />
+              </>
           }
         </div>
         {hover && (

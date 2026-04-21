@@ -2898,5 +2898,14 @@
     "requery": "重新查詢",
     "requeryTitle": "修改上方條件後按此重新查詢",
     "aiTranslationNotice": "🌐 AI 翻譯 · 代碼/ID/數字保留原樣"
+  },
+  "chart": {
+    "inline": {
+      "empty": "圖表暫無資料",
+      "unsupported": "不支援的圖表類型:",
+      "error": "圖表資料異常:",
+      "showRaw": "顯示原始 spec",
+      "downloadPng": "下載 PNG"
+    }
   }
 }

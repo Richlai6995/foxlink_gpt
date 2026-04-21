@@ -2898,5 +2898,14 @@
     "requery": "Re-query",
     "requeryTitle": "Modify inputs above and click to run again",
     "aiTranslationNotice": "🌐 AI translation · codes/IDs/numbers preserved verbatim"
+  },
+  "chart": {
+    "inline": {
+      "empty": "Chart has no data",
+      "unsupported": "Unsupported chart type:",
+      "error": "Chart data error:",
+      "showRaw": "Show raw spec",
+      "downloadPng": "Download PNG"
+    }
   }
 }
