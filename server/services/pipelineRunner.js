@@ -183,7 +183,8 @@ async function execAi(node, vars, db) {
 async function execGenerateFile(node, vars, db, context) {
   const { processGenerateBlocks } = require('./fileGenerator');
   const input = interpolate(node.input || '{{ai_output}}', vars);
-  const fileType = node.file_type || 'pdf';
+  // UI (PipelineTab.tsx) 存的欄位是 output_file；file_type 是舊欄位名保留向下相容
+  const fileType = node.output_file || node.file_type || 'pdf';
 
   // ── Template mode: fill a doc template with JSON data ──────────────────────
   if (node.template_id) {

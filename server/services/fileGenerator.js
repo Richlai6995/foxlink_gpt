@@ -90,6 +90,16 @@ async function processGenerateBlocks(responseText, sessionId) {
   return blocks;
 }
 
+const EXT_BY_TYPE = {
+  xlsx: '.xlsx',
+  docx: '.docx',
+  pdf: '.pdf',
+  pptx: '.pptx',
+  foxlink_pptx: '.pptx',
+  rich_pptx: '.pptx',
+  txt: '.txt',
+};
+
 async function generateFile(type, filename, content, sessionId) {
   // Offload CPU-intensive generation to worker thread (main thread only)
   if (isMainThread && WORKER_TYPES.has(type)) {
@@ -100,8 +110,11 @@ async function generateFile(type, filename, content, sessionId) {
   if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
 
   const timestamp = Date.now();
-  const safeFilename = filename.replace(/[^a-zA-Z0-9._\-\u4e00-\u9fff]/g, '_');
-  const outputPath = path.join(outputDir, `${timestamp}_${safeFilename}`);
+  // 強制副檔名對齊 type：避免 UI 檔名寫 .pdf 但 type=docx 時寫出騙人的副檔名
+  const baseFilename = filename.replace(/\.[a-zA-Z0-9]{2,5}$/, '');
+  const safeFilename = baseFilename.replace(/[^a-zA-Z0-9._\-\u4e00-\u9fff]/g, '_');
+  const ext = EXT_BY_TYPE[type] || '';
+  const outputPath = path.join(outputDir, `${timestamp}_${safeFilename}${ext}`);
 
   switch (type) {
     case 'xlsx':

@@ -222,11 +222,26 @@ async function runTask(db, taskId) {
   const { sendMail } = require('./mailService');
   const { resolveToolRefs, hasToolRefs } = require('./promptResolver');
   const { runPipeline } = require('./pipelineRunner');
+  const { tryLock } = require('./redisClient');
   const {
     getTemplateSchemaInstruction,
     parseJsonFromAiOutput,
     generateDocumentFromJson,
   } = require('./docTemplateService');
+
+  // 分散式鎖：K8s 多 pod 都跑 node-cron，若無鎖會每個 pod 都觸發一次。
+  // Key 帶「分鐘」時間戳 → 同一分鐘只有一個 pod 能拿到；TTL 90s 確保跨分鐘就自動釋放。
+  const lockMinute = Math.floor(Date.now() / 60000);
+  const lockKey = `sched_lock:${taskId}:${lockMinute}`;
+  try {
+    const acquired = await tryLock(lockKey, 90);
+    if (!acquired) {
+      console.log(`[Scheduled] Task ${taskId} lock held by another pod at minute ${lockMinute}, skip`);
+      return;
+    }
+  } catch (e) {
+    console.warn(`[Scheduled] Redis lock failed (${e.message}) — 降級繼續執行（可能會重複）`);
+  }
 
   const task = await db.prepare('SELECT * FROM scheduled_tasks WHERE id = ?').get(taskId);
   if (!task) { console.error(`[Scheduled] Task ${taskId} not found`); return; }

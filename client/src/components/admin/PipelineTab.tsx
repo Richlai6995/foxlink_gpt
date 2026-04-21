@@ -74,6 +74,18 @@ const NODE_TYPES = [
 ] as const
 
 const FILE_TYPES = ['pdf', 'docx', 'xlsx', 'pptx', 'txt', 'mp3']
+const FILE_TYPE_EXT: Record<string, string> = {
+  pdf: 'pdf', docx: 'docx', xlsx: 'xlsx', pptx: 'pptx', txt: 'txt', mp3: 'mp3',
+}
+// 切 output_file 時把 filename 的副檔名同步更新，避免 UI 選 DOCX 但檔名留 .pdf 的不一致
+function patchOutputFile(newType: string | undefined, currentName: string | undefined): { output_file: string | undefined; filename?: string } {
+  const base: { output_file: string | undefined; filename?: string } = { output_file: newType || undefined }
+  if (newType && currentName) {
+    const ext = FILE_TYPE_EXT[newType] || newType
+    base.filename = currentName.replace(/\.[a-zA-Z0-9]{2,5}$/, '') + '.' + ext
+  }
+  return base
+}
 const TEXT_OPS = [
   'contains', 'not_contains', 'equals', 'starts_with', 'ends_with',
   'regex', 'empty', 'length_gt', 'length_lt', 'number_gt', 'number_lt',
@@ -219,13 +231,13 @@ function GenerateFileForm({
         <div className="flex gap-2">
           <div>
             <label className="label text-xs">{t('scheduledTask.pipeline.generateFile.fileFormat')}</label>
-            <select className="input text-xs" value={node.output_file || 'pdf'} onChange={(e) => onChange({ output_file: e.target.value })}>
+            <select className="input text-xs" value={node.output_file || 'pdf'} onChange={(e) => onChange(patchOutputFile(e.target.value, node.filename))}>
               {FILE_TYPES.map((ft) => <option key={ft} value={ft}>{ft.toUpperCase()}</option>)}
             </select>
           </div>
           <div className="flex-1">
             <label className="label text-xs">{t('scheduledTask.pipeline.generateFile.filename')}</label>
-            <input className="input w-full text-xs" value={node.filename || ''} onChange={(e) => onChange({ filename: e.target.value })} placeholder={`report_{{date}}.${node.output_file || 'pdf'}`} />
+            <input className="input w-full text-xs" value={node.filename || ''} onChange={(e) => onChange({ filename: e.target.value })} placeholder={`report_{{date}}.${FILE_TYPE_EXT[node.output_file || 'pdf'] || 'pdf'}`} />
           </div>
         </div>
       )}
@@ -286,7 +298,7 @@ function NodeForm({
       <div className="flex gap-2">
         <div className="flex-1">
           <label className="label text-xs">{t('scheduledTask.pipeline.skill.outputAsFile')}</label>
-          <select className="input w-full text-xs" value={node.output_file || ''} onChange={(e) => onChange({ output_file: e.target.value || undefined })}>
+          <select className="input w-full text-xs" value={node.output_file || ''} onChange={(e) => onChange(patchOutputFile(e.target.value, node.filename))}>
             <option value="">{t('scheduledTask.pipeline.skill.passToNext')}</option>
             {FILE_TYPES.map((ft) => <option key={ft} value={ft}>{ft.toUpperCase()}</option>)}
           </select>
@@ -294,7 +306,7 @@ function NodeForm({
         {node.output_file && (
           <div className="flex-1">
             <label className="label text-xs">{t('scheduledTask.pipeline.skill.filename')}</label>
-            <input className="input w-full text-xs" value={node.filename || ''} onChange={(e) => onChange({ filename: e.target.value })} placeholder={`output_{{date}}.${node.output_file}`} />
+            <input className="input w-full text-xs" value={node.filename || ''} onChange={(e) => onChange({ filename: e.target.value })} placeholder={`output_{{date}}.${FILE_TYPE_EXT[node.output_file] || node.output_file}`} />
           </div>
         )}
       </div>
@@ -348,7 +360,7 @@ function NodeForm({
       <div className="flex gap-2">
         <div className="flex-1">
           <label className="label text-xs">{t('scheduledTask.pipeline.skill.outputAsFile')}</label>
-          <select className="input w-full text-xs" value={node.output_file || ''} onChange={(e) => onChange({ output_file: e.target.value || undefined })}>
+          <select className="input w-full text-xs" value={node.output_file || ''} onChange={(e) => onChange(patchOutputFile(e.target.value, node.filename))}>
             <option value="">{t('scheduledTask.pipeline.skill.passToNext')}</option>
             {FILE_TYPES.map((ft) => <option key={ft} value={ft}>{ft.toUpperCase()}</option>)}
           </select>
@@ -356,7 +368,7 @@ function NodeForm({
         {node.output_file && (
           <div className="flex-1">
             <label className="label text-xs">{t('scheduledTask.pipeline.skill.filename')}</label>
-            <input className="input w-full text-xs" value={node.filename || ''} onChange={(e) => onChange({ filename: e.target.value })} placeholder={`output.${node.output_file}`} />
+            <input className="input w-full text-xs" value={node.filename || ''} onChange={(e) => onChange({ filename: e.target.value })} placeholder={`output.${FILE_TYPE_EXT[node.output_file] || node.output_file}`} />
           </div>
         )}
       </div>
