@@ -2031,6 +2031,19 @@ async function runMigrations(db) {
     last_synced_at  TIMESTAMP      DEFAULT SYSTIMESTAMP
   )`);
 
+  // indirect_emp_by_pc_factory: 間接員工計數 by 利潤中心 × 廠區
+  // 來源 ERP foxfl.fl_emp_exp_all,條件 CURRENT_FLAG='Y' AND DIT_CODE='I' AND END_DATE IS NULL
+  // factory_code 透過 DEPT_CODE JOIN APPS.FL_ORG_EMP_DEPT_MV 取得;JOIN 不到則填 '__NONE__' 當「未歸屬」佔位符
+  // (Oracle 的 '' = NULL 導致 PK 欄位無法用空字串,用固定字串取代)
+  // 跨庫 JOIN 不可行,由 services/indirectEmpSync.js 定期同步到本地供 AI 戰情 JOIN
+  await createTable('INDIRECT_EMP_BY_PC_FACTORY', `CREATE TABLE indirect_emp_by_pc_factory (
+    profit_center   VARCHAR2(30)   NOT NULL,
+    factory_code    VARCHAR2(30)   NOT NULL,
+    emp_count       NUMBER         NOT NULL,
+    last_synced_at  TIMESTAMP      DEFAULT SYSTIMESTAMP,
+    CONSTRAINT indirect_emp_pcfc_pk PRIMARY KEY (profit_center, factory_code)
+  )`);
+
   // ── Training Platform: 權限欄位 ──────────────────────────────────────────────
   // training_permission: 'none' | 'publish' | 'publish_edit'  (NULL on users = inherit from role)
   await addCol('ROLES', 'TRAINING_PERMISSION', "VARCHAR2(20) DEFAULT 'none'");

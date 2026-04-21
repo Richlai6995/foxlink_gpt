@@ -315,14 +315,16 @@ app.get('/api/health', (req, res) => res.json({ status: 'ok', timestamp: new Dat
       console.warn('[CostAnalysisSeed] init error:', e.message);
     }
 
-    // Factory code lookup 同步(啟動後 5 秒跑,避免拖慢啟動)
-    setTimeout(() => {
+    // Factory code lookup + 間接員工計數同步(啟動後 5 秒跑,避免拖慢啟動)
+    setTimeout(async () => {
       try {
-        const { syncFactoryCodeLookup } = require('./services/factoryCodeLookupSync');
         const { db } = require('./database-oracle');
-        syncFactoryCodeLookup(db).catch(e => console.warn('[FactoryCodeLookupSync] unhandled:', e.message));
+        const { syncFactoryCodeLookup } = require('./services/factoryCodeLookupSync');
+        const { syncIndirectEmpByPcFactory } = require('./services/indirectEmpSync');
+        await syncFactoryCodeLookup(db).catch(e => console.warn('[FactoryCodeLookupSync] unhandled:', e.message));
+        await syncIndirectEmpByPcFactory(db).catch(e => console.warn('[IndirectEmpSync] unhandled:', e.message));
       } catch (e) {
-        console.warn('[FactoryCodeLookupSync] init error:', e.message);
+        console.warn('[ErpLookupSync] init error:', e.message);
       }
     }, 5000);
 

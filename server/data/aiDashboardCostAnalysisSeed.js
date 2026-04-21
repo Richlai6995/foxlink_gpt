@@ -163,6 +163,26 @@ const USERS_SCHEMA = {
   ],
 };
 
+const INDIRECT_EMP_BY_PC_FACTORY_SCHEMA = {
+  table_name:      'indirect_emp_by_pc_factory',
+  alias:           'ie',
+  display_name:    '間接員工計數 (by 利潤中心 × 廠區)',
+  display_name_en: 'Indirect Employee Count (by Profit Center × Factory)',
+  display_name_vi: 'Số lượng nhân viên gián tiếp (theo PC × Nhà máy)',
+  business_notes:
+    '間接員工 (DIT_CODE=I) 靜態人頭快照,由 services/indirectEmpSync.js 從 ERP foxfl.fl_emp_exp_all 同步過來。' +
+    '**代表「組織應有多少人」,跟 token_usage 無關**,不反映誰有用 AI — 要看實際使用,用 COUNT(DISTINCT tu.user_id)。' +
+    '常見用法:分析某利潤中心 × 廠區的 AI「滲透率 / 覆蓋率」— 即「使用人數 / 間接員工數」。' +
+    'JOIN 條件:`u.profit_center = ie.profit_center AND NVL(u.factory_code, \'__NONE__\') = ie.factory_code`。' +
+    'factory_code=\'__NONE__\' 代表 ERP 裡這個間接員工的 DEPT_CODE 沒對應到 FL_ORG_EMP_DEPT_MV 的 factory(「未歸屬」)。',
+  columns: [
+    { column_name: 'profit_center',  data_type: 'VARCHAR2',  description: '利潤中心代碼(PK 的一部分),與 users.profit_center 對應' },
+    { column_name: 'factory_code',   data_type: 'VARCHAR2',  description: "廠區代碼(PK 的一部分)。特殊值 '__NONE__' 代表未歸屬(ERP DEPT_CODE 無法 JOIN 到 factory)。查詢時若 users.factory_code 為 NULL,用 NVL(u.factory_code, '__NONE__') 才能 JOIN 到未歸屬 bucket。" },
+    { column_name: 'emp_count',      data_type: 'NUMBER',    description: '間接員工人數(CURRENT_FLAG=Y AND DIT_CODE=I AND END_DATE IS NULL)' },
+    { column_name: 'last_synced_at', data_type: 'TIMESTAMP', description: '最後同步時間' },
+  ],
+};
+
 const FACTORY_CODE_LOOKUP_SCHEMA = {
   table_name:      'factory_code_lookup',
   alias:           'fcl',
@@ -312,6 +332,78 @@ function buildFewShotExamples() {
         "FROM factory_code_lookup " +
         "ORDER BY code",
     },
+    {
+      q: '本月 X4 資訊工程處 按廠區的完整費用明細 (利潤中心/事業處/事業群/廠區代碼名稱/間接員工數/帳號人數/使用人數/費用/人均費用)',
+      sql:
+        "WITH use_agg AS ( " +
+        "  SELECT u.profit_center, u.factory_code, " +
+        "         COUNT(DISTINCT tu.user_id) AS user_count, " +
+        "         SUM(tu.cost) AS total_cost " +
+        "  FROM token_usage tu JOIN users u ON tu.user_id = u.id " +
+        "  WHERE tu.usage_date >= TRUNC(SYSDATE, 'MM') " +
+        "    AND u.profit_center = 'X4' " +
+        "    AND (u.status IS NULL OR u.status != 'disabled') AND u.org_end_date IS NULL " +
+        "  GROUP BY u.profit_center, u.factory_code " +
+        "), acc_agg AS ( " +
+        "  SELECT profit_center, factory_code, COUNT(*) AS account_count " +
+        "  FROM users " +
+        "  WHERE profit_center = 'X4' " +
+        "    AND (status IS NULL OR status != 'disabled') AND org_end_date IS NULL " +
+        "  GROUP BY profit_center, factory_code " +
+        ") " +
+        "SELECT a.profit_center, " +
+        "       (SELECT MAX(profit_center_name) FROM users WHERE profit_center=a.profit_center) AS profit_center_name, " +
+        "       (SELECT MAX(org_section)       FROM users WHERE profit_center=a.profit_center) AS org_section, " +
+        "       (SELECT MAX(org_section_name)  FROM users WHERE profit_center=a.profit_center) AS org_section_name, " +
+        "       (SELECT MAX(org_group_name)    FROM users WHERE profit_center=a.profit_center) AS org_group_name, " +
+        "       a.factory_code, fcl.name_zh AS factory_name, " +
+        "       NVL(ie.emp_count, 0) AS indirect_emp_count, " +
+        "       a.account_count, " +
+        "       NVL(us.user_count, 0) AS user_count, " +
+        "       NVL(us.total_cost, 0) AS total_cost, " +
+        "       NVL(us.total_cost, 0) / NULLIF(us.user_count, 0) AS avg_cost " +
+        "FROM acc_agg a " +
+        "LEFT JOIN use_agg us ON us.profit_center=a.profit_center AND NVL(us.factory_code,'__NONE__')=NVL(a.factory_code,'__NONE__') " +
+        "LEFT JOIN factory_code_lookup fcl ON fcl.code = a.factory_code " +
+        "LEFT JOIN indirect_emp_by_pc_factory ie " +
+        "       ON ie.profit_center = a.profit_center AND ie.factory_code = NVL(a.factory_code,'__NONE__') " +
+        "ORDER BY total_cost DESC",
+    },
+    {
+      q: '本月 X4 資訊工程處 按月份 × 廠區的完整費用明細 (同上欄位再加月份)',
+      sql:
+        "WITH use_agg AS ( " +
+        "  SELECT u.profit_center, TO_CHAR(tu.usage_date,'YYYY-MM') AS month, u.factory_code, " +
+        "         COUNT(DISTINCT tu.user_id) AS user_count, SUM(tu.cost) AS total_cost " +
+        "  FROM token_usage tu JOIN users u ON tu.user_id = u.id " +
+        "  WHERE tu.usage_date >= TRUNC(SYSDATE, 'MM') " +
+        "    AND u.profit_center = 'X4' " +
+        "    AND (u.status IS NULL OR u.status != 'disabled') AND u.org_end_date IS NULL " +
+        "  GROUP BY u.profit_center, TO_CHAR(tu.usage_date,'YYYY-MM'), u.factory_code " +
+        "), acc_agg AS ( " +
+        "  SELECT profit_center, factory_code, COUNT(*) AS account_count " +
+        "  FROM users " +
+        "  WHERE profit_center = 'X4' " +
+        "    AND (status IS NULL OR status != 'disabled') AND org_end_date IS NULL " +
+        "  GROUP BY profit_center, factory_code " +
+        ") " +
+        "SELECT us.profit_center, " +
+        "       (SELECT MAX(profit_center_name) FROM users WHERE profit_center=us.profit_center) AS profit_center_name, " +
+        "       (SELECT MAX(org_section)       FROM users WHERE profit_center=us.profit_center) AS org_section, " +
+        "       (SELECT MAX(org_section_name)  FROM users WHERE profit_center=us.profit_center) AS org_section_name, " +
+        "       (SELECT MAX(org_group_name)    FROM users WHERE profit_center=us.profit_center) AS org_group_name, " +
+        "       us.month, us.factory_code, fcl.name_zh AS factory_name, " +
+        "       NVL(ie.emp_count, 0) AS indirect_emp_count, " +
+        "       NVL(a.account_count, 0) AS account_count, " +
+        "       us.user_count, us.total_cost, " +
+        "       us.total_cost / NULLIF(us.user_count, 0) AS avg_cost " +
+        "FROM use_agg us " +
+        "LEFT JOIN acc_agg a ON a.profit_center=us.profit_center AND NVL(a.factory_code,'__NONE__')=NVL(us.factory_code,'__NONE__') " +
+        "LEFT JOIN factory_code_lookup fcl ON fcl.code = us.factory_code " +
+        "LEFT JOIN indirect_emp_by_pc_factory ie " +
+        "       ON ie.profit_center = us.profit_center AND ie.factory_code = NVL(us.factory_code,'__NONE__') " +
+        "ORDER BY us.month, us.total_cost DESC",
+    },
   ]);
 }
 
@@ -325,7 +417,9 @@ function buildSystemPrompt() {
     '5. **廠區名稱**:users.factory_code 只有代碼,中文/英文/越南文名稱在 factory_code_lookup 表。要呈現廠區中文名,必用 `LEFT JOIN factory_code_lookup fcl ON u.factory_code = fcl.code`,並 SELECT fcl.name_zh(使用者語言若 en 取 name_en,vi 取 name_vi)。使用者用中文問「徐州廠」「上海廠」等,請用 `fcl.name_zh LIKE \'%徐州%\'` 方式反查 code,不要自己猜代碼。\n' +
     '6. 數值結果用 SUM / COUNT(DISTINCT user_id) 等聚合,cost 是 NUMBER(預存已計費,單位 USD)。\n' +
     '7. 回傳 SQL 前請加適當 ORDER BY,讓結果可閱讀。\n' +
-    '8. 欄位命名:SELECT 出來的欄位盡量用有意義的 alias(例:total_cost / factory_name / user_count),避免讓前端只看到 f.name_zh 這類難解讀的欄位。\n'
+    '8. 欄位命名:SELECT 出來的欄位盡量用有意義的 alias(例:total_cost / factory_name / user_count),避免讓前端只看到 f.name_zh 這類難解讀的欄位。\n' +
+    '9. **間接員工數**在 indirect_emp_by_pc_factory(代表組織應有人數,與誰用 AI 無關)。要 JOIN 取值:`LEFT JOIN indirect_emp_by_pc_factory ie ON ie.profit_center = u.profit_center AND ie.factory_code = NVL(u.factory_code, \'__NONE__\')`。請用 NVL(..., \'__NONE__\') 處理未歸屬,不要直接 = u.factory_code(會因 NULL 對不上)。\n' +
+    '10. **帳號人數 vs 使用人數**:帳號人數是「登記在該 pc×factory 的 users 總數」,跟時間無關,需 FROM users GROUP BY;使用人數是「該時段實際用過 AI 的人」,用 COUNT(DISTINCT tu.user_id)。兩個不同語意,不要混用。需同時呈現兩個數字時,用 CTE 分別算再 OUTER JOIN。\n'
   );
 }
 
@@ -404,11 +498,12 @@ async function runSeed(db) {
     const projectId = await ensureProject(db, adminUserId);
     const topicId   = await ensureTopic(db, projectId, adminUserId);
 
-    const tokenUsageSchemaId    = await ensureSchema(db, TOKEN_USAGE_SCHEMA,         sourceDbId, projectId, adminUserId);
-    const usersSchemaId         = await ensureSchema(db, USERS_SCHEMA,               sourceDbId, projectId, adminUserId);
-    const factoryLookupSchemaId = await ensureSchema(db, FACTORY_CODE_LOOKUP_SCHEMA, sourceDbId, projectId, adminUserId);
+    const tokenUsageSchemaId    = await ensureSchema(db, TOKEN_USAGE_SCHEMA,                sourceDbId, projectId, adminUserId);
+    const usersSchemaId         = await ensureSchema(db, USERS_SCHEMA,                      sourceDbId, projectId, adminUserId);
+    const factoryLookupSchemaId = await ensureSchema(db, FACTORY_CODE_LOOKUP_SCHEMA,        sourceDbId, projectId, adminUserId);
+    const indirectEmpSchemaId   = await ensureSchema(db, INDIRECT_EMP_BY_PC_FACTORY_SCHEMA, sourceDbId, projectId, adminUserId);
 
-    await ensureDesign(db, topicId, [tokenUsageSchemaId, usersSchemaId, factoryLookupSchemaId], adminUserId);
+    await ensureDesign(db, topicId, [tokenUsageSchemaId, usersSchemaId, factoryLookupSchemaId, indirectEmpSchemaId], adminUserId);
     console.log('[CostAnalysisSeed] 完成');
   } catch (e) {
     console.error('[CostAnalysisSeed] error:', e.message);
