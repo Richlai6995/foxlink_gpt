@@ -1021,6 +1021,7 @@
       "topKFetchLabel": "Initial Fetch Top K",
       "topKReturnLabel": "Final Return Top K",
       "scoreThresholdLabel": "Score Threshold (0–1)",
+      "scoreThresholdHint": "Keep at 0. The post-fusion score scale is unstable (RRF stays < 0.1); setting > 0 often filters out all matches. To prune noise, use vec_cutoff / min_ft_score under \"Advanced retrieval settings\" — they pre-filter the pool before fusion.",
       "parseSection": "Parse Settings",
       "ocrModelLabel": "Image/PDF OCR Model",
       "ocrModelDefault": "Use system default",

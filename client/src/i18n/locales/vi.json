@@ -1021,6 +1021,7 @@
       "topKFetchLabel": "Top K lấy ban đầu",
       "topKReturnLabel": "Top K trả về cuối",
       "scoreThresholdLabel": "Ngưỡng điểm (0–1)",
+      "scoreThresholdHint": "Nên giữ là 0. Điểm sau khi hợp nhất (fusion) có thang đo không ổn định (RRF gần như luôn < 0.1); đặt > 0 thường khiến toàn bộ kết quả bị lọc bỏ. Muốn loại bớt nhiễu, hãy dùng vec_cutoff / min_ft_score trong \"Cài đặt truy xuất nâng cao\" — chúng tiền lọc ở pool trước khi fusion.",
       "parseSection": "Cài đặt phân tích",
       "ocrModelLabel": "Mô hình OCR ảnh/PDF",
       "ocrModelDefault": "Dùng mặc định hệ thống",

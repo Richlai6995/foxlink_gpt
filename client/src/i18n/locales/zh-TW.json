@@ -1021,6 +1021,7 @@
       "topKFetchLabel": "初始擷取 Top K",
       "topKReturnLabel": "最終返回 Top K",
       "scoreThresholdLabel": "Score 閾值（0–1）",
+      "scoreThresholdHint": "建議保持 0。hybrid 融合後的 score scale 不穩定（RRF 幾乎恆 < 0.1），設 > 0 常會讓命中全被過濾。若要刷掉雜訊，請用「進階檢索設定」裡的 vec_cutoff / min_ft_score 在 pool 預篩。",
       "parseSection": "解析設定",
       "ocrModelLabel": "圖片/PDF OCR 模型",
       "ocrModelDefault": "使用系統預設",

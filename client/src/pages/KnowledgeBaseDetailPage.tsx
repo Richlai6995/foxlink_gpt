@@ -934,6 +934,7 @@ function SettingsTab({ kb, onSaved, isOwner }: { kb: KnowledgeBase; onSaved: () 
                 className="w-full border border-slate-300 rounded-lg px-2.5 py-1.5 text-sm disabled:bg-slate-50" />
             </div>
           </div>
+          <p className="text-[11px] text-amber-600 mt-2 leading-relaxed">⚠️ {t('kb.settings.scoreThresholdHint')}</p>
         </div>
       </div>
 
