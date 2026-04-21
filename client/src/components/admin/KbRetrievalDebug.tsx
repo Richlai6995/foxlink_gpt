@@ -29,6 +29,8 @@ interface DebugStats {
   effective_query?: string
   vec_fetched: number
   ft_fetched: number
+  vec_filter?: { preFilter: number; postFilter: number; cutoff: number }
+  ft_filter?:  { preFilter: number; postFilter: number; minRatio: number }
   fused: number
   after_threshold: number
   rerank_applied: boolean
@@ -248,6 +250,35 @@ export default function KbRetrievalDebug() {
               <Stat label="Rerank" value={stats.rerank_applied ? (stats.rerank_model || 'yes') : 'no'} />
               <Stat label="Final" value={stats.final} />
             </div>
+            {/* 預篩詳情:fusion 前的 vec_cutoff / min_ft_score 刷掉幾筆 */}
+            {(stats.vec_filter || stats.ft_filter) && (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-[11px] text-slate-600 pt-1">
+                {stats.vec_filter && (
+                  <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded px-2.5 py-1.5">
+                    <span className="font-medium text-slate-700 whitespace-nowrap">Vector 預篩</span>
+                    <span className="font-mono text-slate-500">{stats.vec_filter.preFilter}→{stats.vec_filter.postFilter}</span>
+                    {stats.vec_filter.cutoff > 0 && (
+                      <span className={`px-1.5 py-0.5 rounded font-mono ${stats.vec_filter.postFilter === 0 ? 'bg-red-100 text-red-700' : 'bg-blue-100 text-blue-700'}`}>
+                        cutoff ≥ {stats.vec_filter.cutoff}
+                      </span>
+                    )}
+                    {stats.vec_filter.cutoff === 0 && <span className="text-slate-400">(未套 cutoff)</span>}
+                  </div>
+                )}
+                {stats.ft_filter && (
+                  <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded px-2.5 py-1.5">
+                    <span className="font-medium text-slate-700 whitespace-nowrap">Fulltext 預篩</span>
+                    <span className="font-mono text-slate-500">{stats.ft_filter.preFilter}→{stats.ft_filter.postFilter}</span>
+                    {stats.ft_filter.minRatio > 0 && (
+                      <span className={`px-1.5 py-0.5 rounded font-mono ${stats.ft_filter.postFilter === 0 ? 'bg-red-100 text-red-700' : 'bg-blue-100 text-blue-700'}`}>
+                        ≥ {Math.round(stats.ft_filter.minRatio * 100)}% of top hit
+                      </span>
+                    )}
+                    {stats.ft_filter.minRatio === 0 && <span className="text-slate-400">(未套 min_ratio)</span>}
+                  </div>
+                )}
+              </div>
+            )}
             {stats.tokens_extracted.length > 0 && (
               <div className="text-xs text-slate-500 pt-1">
                 Tokens: {stats.tokens_extracted.map((t, i) => (

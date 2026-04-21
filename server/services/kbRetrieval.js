@@ -137,11 +137,20 @@ function extractTokens(query, stopwords) {
 
 // ─── Backend: LIKE（Phase 1 主力）──────────────────────────────────────────────
 
+/**
+ * @returns {Promise<{ rows: Array, preFilter: number, postFilter: number, cutoff: number }>}
+ */
 async function _vectorSearch(db, kb, query, fetchK, cfg) {
   const qEmb = await embedText(query, { dims: kb.embedding_dims || 768 });
   const qVecStr = toVectorStr(qEmb);
   // cosine similarity 預篩閾值(0-1);0 或未設 = 不濾
   const vecCutoff = Number(cfg.vec_cutoff) || 0;
+
+  const applyCutoff = (mapped) => {
+    const preFilter = mapped.length;
+    const filtered = vecCutoff > 0 ? mapped.filter((r) => r.score >= vecCutoff) : mapped;
+    return { rows: filtered, preFilter, postFilter: filtered.length, cutoff: vecCutoff };
+  };
 
   // Multi-vector: 若 KB 啟用且 chunks 有 title_embedding,走加權 title+body 公式
   if (cfg.use_multi_vector) {
@@ -160,12 +169,11 @@ async function _vectorSearch(db, kb, query, fetchK, cfg) {
       ORDER BY vector_score ASC
       FETCH FIRST ? ROWS ONLY
     `).all(qVecStr, tW, qVecStr, bW, qVecStr, kb.id, fetchK);
-    const mapped = rows.map((r) => ({
+    return applyCutoff(rows.map((r) => ({
       ...r,
       score:       1 - (r.vector_score || 0),
       match_type:  'vector-mv',
-    }));
-    return vecCutoff > 0 ? mapped.filter((r) => r.score >= vecCutoff) : mapped;
+    })));
   }
 
   const rows = await db.prepare(`
@@ -177,12 +185,11 @@ async function _vectorSearch(db, kb, query, fetchK, cfg) {
     ORDER BY vector_score ASC
     FETCH FIRST ? ROWS ONLY
   `).all(qVecStr, kb.id, fetchK);
-  const mapped = rows.map((r) => ({
+  return applyCutoff(rows.map((r) => ({
     ...r,
     score:       1 - (r.vector_score || 0),
     match_type:  'vector',
-  }));
-  return vecCutoff > 0 ? mapped.filter((r) => r.score >= vecCutoff) : mapped;
+  })));
 }
 
 // ─── Backend: Oracle Text CONTAINS + SCORE (Phase 2 主力) ─────────────────────
@@ -246,7 +253,13 @@ async function _fulltextSearchOracleText(db, kb, query, topK, cfg) {
     const filtered = minRatio > 0
       ? allMapped.filter((r) => (r.hit_score / maxRaw) >= minRatio)
       : allMapped;
-    return { rows: filtered, tokens, ctxQuery, synonymsApplied, effectiveQuery };
+    return {
+      rows: filtered,
+      tokens, ctxQuery, synonymsApplied, effectiveQuery,
+      preFilter: allMapped.length,
+      postFilter: filtered.length,
+      minRatio,
+    };
   } catch (e) {
     // ORA-20000 (index not built), ORA-29800, ORA-29902 等 Oracle Text 錯誤 → 透傳給上層
     throw new Error(`oracle_text search failed: ${e.message}`);
@@ -280,7 +293,12 @@ async function _fulltextSearchLike(db, kb, query, topK, cfg) {
   const filtered = minRatio > 0
     ? mapped.filter((r) => (r.hit_score / maxRaw) >= minRatio)
     : mapped;
-  return { rows: filtered, tokens };
+  return {
+    rows: filtered, tokens,
+    preFilter: mapped.length,
+    postFilter: filtered.length,
+    minRatio,
+  };
 }
 
 // ─── Score fusion ─────────────────────────────────────────────────────────────
@@ -402,9 +420,16 @@ async function retrieveKbChunks(db, opts = {}) {
   let vectorRows = [];
   let ftRows = [];
   let tokens = [];
+  // 預篩統計 — 給 admin 調校介面(每階段「撈幾筆 / 過幾筆 / cutoff」)
+  let vecFilterStats = { preFilter: 0, postFilter: 0, cutoff: 0 };
+  let ftFilterStats  = { preFilter: 0, postFilter: 0, minRatio: 0 };
 
   if (mode === 'vector' || mode === 'hybrid') {
-    try { vectorRows = await _vectorSearch(db, kb, query, fetchK, cfg); }
+    try {
+      const vr = await _vectorSearch(db, kb, query, fetchK, cfg);
+      vectorRows = vr.rows;
+      vecFilterStats = { preFilter: vr.preFilter, postFilter: vr.postFilter, cutoff: vr.cutoff };
+    }
     catch (e) {
       console.error('[KbRetrieval] vector search error:', e.message);
     }
@@ -423,17 +448,20 @@ async function retrieveKbChunks(db, opts = {}) {
         ctxQueryUsed = ft.ctxQuery;
         synonymsAppliedUsed = ft.synonymsApplied || [];
         effectiveQueryUsed = ft.effectiveQuery || query;
+        ftFilterStats = { preFilter: ft.preFilter, postFilter: ft.postFilter, minRatio: ft.minRatio };
       } catch (e) {
         console.warn('[KbRetrieval] oracle_text failed, fallback to LIKE:', e.message);
         backendUsed = 'like (fallback)';
         const ft = await _fulltextSearchLike(db, kb, query, topK, cfg);
         ftRows = ft.rows;
         tokens = ft.tokens;
+        ftFilterStats = { preFilter: ft.preFilter, postFilter: ft.postFilter, minRatio: ft.minRatio };
       }
     } else {
       const ft = await _fulltextSearchLike(db, kb, query, topK, cfg);
       ftRows = ft.rows;
       tokens = ft.tokens;
+      ftFilterStats = { preFilter: ft.preFilter, postFilter: ft.postFilter, minRatio: ft.minRatio };
     }
   }
 
@@ -476,6 +504,8 @@ async function retrieveKbChunks(db, opts = {}) {
     fusion_method:   cfg.fusion_method,
     vec_fetched:     vectorRows.length,
     ft_fetched:      ftRows.length,
+    vec_filter:      vecFilterStats,  // { preFilter, postFilter, cutoff }
+    ft_filter:       ftFilterStats,   // { preFilter, postFilter, minRatio }
     fused:           fused.length,
     after_threshold: filtered.length,
     rerank_applied:  rerank.rerankApplied,
