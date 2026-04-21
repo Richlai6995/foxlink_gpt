@@ -307,6 +307,14 @@ app.get('/api/health', (req, res) => res.json({ status: 'ok', timestamp: new Dat
       console.error('[ETL Scheduler] Failed to init:', e.message);
     }
 
+    // AI 戰情「費用分析」seed(冪等,只在第一次啟動或表缺時建立)
+    try {
+      const { runSeed } = require('./data/aiDashboardCostAnalysisSeed');
+      runSeed(db).catch(e => console.warn('[CostAnalysisSeed] unhandled:', e.message));
+    } catch (e) {
+      console.warn('[CostAnalysisSeed] init error:', e.message);
+    }
+
     // Init System Monitor Metrics Collector
     try {
       const { startMetricsCollector } = require('./services/metricsCollector');
