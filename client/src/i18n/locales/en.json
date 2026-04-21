@@ -2905,7 +2905,19 @@
       "unsupported": "Unsupported chart type:",
       "error": "Chart data error:",
       "showRaw": "Show raw spec",
-      "downloadPng": "Download PNG"
+      "downloadPng": "Download PNG",
+      "switchTo": {
+        "bar": "Switch to bar chart",
+        "line": "Switch to line chart",
+        "area": "Switch to area chart",
+        "pie": "Switch to pie chart"
+      }
+    },
+    "draw": {
+      "button": "Draw chart",
+      "bar": "Bar chart",
+      "line": "Line chart",
+      "pie": "Pie chart"
     }
   }
 }

@@ -8,9 +8,9 @@
  */
 import { useMemo, useRef, useState } from 'react'
 import ReactECharts from 'echarts-for-react'
-import { Download, AlertTriangle, ChevronDown, ChevronUp } from 'lucide-react'
+import { Download, AlertTriangle, ChevronDown, ChevronUp, BarChart3, LineChart, PieChart, AreaChart } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
-import type { InlineChartSpec } from '../../types'
+import type { InlineChartSpec, InlineChartType } from '../../types'
 
 const CHART_FONT = "'Noto Sans TC', 'Microsoft JhengHei', 'PingFang TC', 'Segoe UI', Arial, sans-serif"
 
@@ -34,6 +34,17 @@ const BASE_OPTION = {
 interface Props {
   spec: InlineChartSpec
   height?: number
+}
+
+// 哪些 type 之間可以 local 切換(資料結構相容,不用 reprompt LLM)
+// pie/bar/line/area 都吃 (x_field, y_fields[0..n].field) 的 row 資料,可互換
+// scatter 需要兩個數值欄,heatmap 需要 3 維,排除
+const SWITCHABLE_TYPES: InlineChartType[] = ['bar', 'line', 'area', 'pie']
+const TYPE_ICONS: Record<string, React.ElementType> = {
+  bar: BarChart3,
+  line: LineChart,
+  area: AreaChart,
+  pie: PieChart,
 }
 
 type ChartState =
@@ -144,14 +155,25 @@ export default function InlineChart({ spec, height = 320 }: Props) {
   const { t } = useTranslation()
   const chartRef = useRef<ReactECharts>(null)
   const [showRawSpec, setShowRawSpec] = useState(false)
+  // 本地圖型切換:不影響後端存的 spec,純 client 視覺切換
+  const [overrideType, setOverrideType] = useState<InlineChartType | null>(null)
+
+  const effectiveSpec = useMemo<InlineChartSpec>(
+    () => (overrideType && overrideType !== spec.type ? { ...spec, type: overrideType } : spec),
+    [spec, overrideType]
+  )
 
   const state = useMemo(() => {
     try {
-      return buildOption(spec)
+      return buildOption(effectiveSpec)
     } catch (e) {
       return { kind: 'error' as const, reason: e instanceof Error ? e.message : 'unknown' }
     }
-  }, [spec])
+  }, [effectiveSpec])
+
+  // 切換選單只在 4 種互通 type 之間出現;原始 type 不在此清單就不顯示
+  const switchable = SWITCHABLE_TYPES.includes(spec.type as InlineChartType)
+  const currentType = (overrideType || spec.type) as InlineChartType
 
   const handleDownload = () => {
     const inst = chartRef.current?.getEchartsInstance()
@@ -197,13 +219,37 @@ export default function InlineChart({ spec, height = 320 }: Props) {
         notMerge
         lazyUpdate
       />
-      <button
-        onClick={handleDownload}
-        title={t('chart.inline.downloadPng', '下載 PNG')}
-        className="absolute top-1.5 right-1.5 opacity-0 group-hover/chart:opacity-100 transition p-1.5 rounded bg-white/90 border border-slate-200 text-slate-500 hover:text-slate-800 hover:bg-white"
-      >
-        <Download size={13} />
-      </button>
+      <div className="absolute top-1.5 right-1.5 opacity-0 group-hover/chart:opacity-100 transition flex items-center gap-1">
+        {switchable && (
+          <div className="flex items-center bg-white/90 border border-slate-200 rounded p-0.5 gap-0.5">
+            {SWITCHABLE_TYPES.map((tp) => {
+              const Icon = TYPE_ICONS[tp]
+              const active = currentType === tp
+              return (
+                <button
+                  key={tp}
+                  onClick={() => setOverrideType(tp === spec.type ? null : tp)}
+                  title={t(`chart.inline.switchTo.${tp}`, tp)}
+                  className={`p-1 rounded transition ${
+                    active
+                      ? 'bg-blue-50 text-blue-600'
+                      : 'text-slate-400 hover:text-slate-700 hover:bg-slate-50'
+                  }`}
+                >
+                  <Icon size={12} />
+                </button>
+              )
+            })}
+          </div>
+        )}
+        <button
+          onClick={handleDownload}
+          title={t('chart.inline.downloadPng', '下載 PNG')}
+          className="p-1.5 rounded bg-white/90 border border-slate-200 text-slate-500 hover:text-slate-800 hover:bg-white"
+        >
+          <Download size={13} />
+        </button>
+      </div>
     </div>
   )
 }

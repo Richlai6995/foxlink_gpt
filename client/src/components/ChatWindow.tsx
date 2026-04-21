@@ -1,10 +1,10 @@
 import { useEffect, useRef } from 'react'
-import { Copy, Check, RefreshCw, Download, Cpu, User, MessageSquarePlus } from 'lucide-react'
+import { Copy, Check, RefreshCw, Download, Cpu, User, MessageSquarePlus, BarChart3, LineChart, PieChart } from 'lucide-react'
 import { useState } from 'react'
 import MarkdownRenderer from './MarkdownRenderer'
 import ResearchProgressCard from './ResearchProgressCard'
 import InlineChart from './chat/InlineChart'
-import type { ChatMessage, GeneratedFile } from '../types'
+import type { ChatMessage, GeneratedFile, InlineChartType } from '../types'
 import { useTranslation } from 'react-i18next'
 
 interface Props {
@@ -15,6 +15,8 @@ interface Props {
   onCopy: (text: string) => void
   onRegenerate?: () => void
   onFeedback?: (messageContent: string) => void
+  /** Phase 3:hover「畫成圖表」按鈕 — 由父層 send 一個新 user message 重 prompt LLM */
+  onDrawChart?: (assistantContent: string, chartType: InlineChartType) => void
 }
 
 function GeneratedFileLinks({ files }: { files: GeneratedFile[] }) {
@@ -101,17 +103,55 @@ function markdownToPlainText(md: string): string {
     .trim()
 }
 
+/** Phase 3:畫成圖表 dropdown — 點 ▼ 展開 4 種圖型,選一即觸發 reprompt */
+function ChartDropdown({ onPick }: { onPick: (type: InlineChartType) => void }) {
+  const { t } = useTranslation()
+  const [open, setOpen] = useState(false)
+  const types: { type: InlineChartType; Icon: React.ElementType; label: string }[] = [
+    { type: 'bar', Icon: BarChart3, label: t('chart.draw.bar', '長條圖') },
+    { type: 'line', Icon: LineChart, label: t('chart.draw.line', '折線圖') },
+    { type: 'pie', Icon: PieChart, label: t('chart.draw.pie', '圓餅圖') },
+  ]
+  return (
+    <div className="relative">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="text-slate-400 hover:text-blue-500 transition text-xs flex items-center gap-1"
+      >
+        <BarChart3 size={12} />
+        {t('chart.draw.button', '畫成圖表')}
+      </button>
+      {open && (
+        <div className="absolute z-10 top-full mt-1 left-0 bg-white border border-slate-200 rounded-md shadow-lg py-1 min-w-[120px]">
+          {types.map(({ type, Icon, label }) => (
+            <button
+              key={type}
+              onClick={() => { setOpen(false); onPick(type) }}
+              className="w-full px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50 flex items-center gap-2"
+            >
+              <Icon size={12} />
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function MessageBubble({
   msg,
   onCopy,
   onRegenerate,
   onFeedback,
+  onDrawChart,
   isLast,
 }: {
   msg: ChatMessage
   onCopy: (text: string) => void
   onRegenerate?: () => void
   onFeedback?: (content: string) => void
+  onDrawChart?: (content: string, type: InlineChartType) => void
   isLast?: boolean
 }) {
   const { t } = useTranslation()
@@ -214,6 +254,12 @@ function MessageBubble({
                 {t('feedback.title')}
               </button>
             )}
+            {/* Phase 3:畫成圖表 — 只在 assistant 沒有現成 chart + 內容看似有結構化資料時出現 */}
+            {onDrawChart && (!msg.charts || msg.charts.length === 0) && /(\|.*\|.*\|)|(\d+[,.]\d+)|(\d{2,}\s*%)/.test(msg.content || '') && (
+              <ChartDropdown
+                onPick={(tp) => onDrawChart(msg.content || '', tp)}
+              />
+            )}
             {msg.input_tokens !== undefined && msg.output_tokens !== undefined && (
               <span className="text-slate-300 text-xs ml-auto">
                 ↑{msg.input_tokens} ↓{msg.output_tokens} tokens
@@ -255,7 +301,7 @@ function StreamingBubble({ content, status }: { content: string; status?: string
   )
 }
 
-export default function ChatWindow({ messages, streaming, streamingContent, streamingStatus, onCopy, onRegenerate, onFeedback }: Props) {
+export default function ChatWindow({ messages, streaming, streamingContent, streamingStatus, onCopy, onRegenerate, onFeedback, onDrawChart }: Props) {
   const { t } = useTranslation()
   const bottomRef = useRef<HTMLDivElement>(null)
   const lastUserMsgRef = useRef<HTMLDivElement>(null)
@@ -323,6 +369,7 @@ export default function ChatWindow({ messages, streaming, streamingContent, stre
               onCopy={onCopy}
               onRegenerate={onRegenerate}
               onFeedback={msg.role === 'assistant' ? onFeedback : undefined}
+              onDrawChart={msg.role === 'assistant' ? onDrawChart : undefined}
               isLast={i === messages.length - 1 && msg.role === 'assistant'}
             />
           </div>

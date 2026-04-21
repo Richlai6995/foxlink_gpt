@@ -2905,7 +2905,19 @@
       "unsupported": "不支援的圖表類型:",
       "error": "圖表資料異常:",
       "showRaw": "顯示原始 spec",
-      "downloadPng": "下載 PNG"
+      "downloadPng": "下載 PNG",
+      "switchTo": {
+        "bar": "切換為長條圖",
+        "line": "切換為折線圖",
+        "area": "切換為面積圖",
+        "pie": "切換為圓餅圖"
+      }
+    },
+    "draw": {
+      "button": "畫成圖表",
+      "bar": "長條圖",
+      "line": "折線圖",
+      "pie": "圓餅圖"
     }
   }
 }

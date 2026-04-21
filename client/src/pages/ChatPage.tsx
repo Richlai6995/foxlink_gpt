@@ -1729,6 +1729,12 @@ export default function ChatPage() {
             })
             navigate(`/feedback/new?${params.toString()}`)
           }}
+          onDrawChart={(content, chartType) => {
+            // Phase 3:把上一個 assistant 回覆的內容當資料源,reprompt 要 LLM 畫成圖
+            const typeLabel = { bar: '長條圖', line: '折線圖', pie: '圓餅圖', area: '面積圖', scatter: '散點圖', heatmap: '熱力圖', radar: '雷達圖' }[chartType] || chartType
+            const reprompt = `請把上一個回答中的數據畫成${typeLabel}(generate_chart:${chartType}),只輸出圖表代碼區塊,不需要其他文字解釋。資料參考內容:\n\n${content.slice(0, 2000)}`
+            handleSend(reprompt, [])
+          }}
         />
 
         {/* ERP 已啟用工具的參數提示 */}

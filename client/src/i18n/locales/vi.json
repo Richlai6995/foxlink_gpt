@@ -2905,7 +2905,19 @@
       "unsupported": "Loại biểu đồ không hỗ trợ:",
       "error": "Dữ liệu biểu đồ lỗi:",
       "showRaw": "Hiển thị spec gốc",
-      "downloadPng": "Tải PNG"
+      "downloadPng": "Tải PNG",
+      "switchTo": {
+        "bar": "Chuyển sang biểu đồ cột",
+        "line": "Chuyển sang biểu đồ đường",
+        "area": "Chuyển sang biểu đồ vùng",
+        "pie": "Chuyển sang biểu đồ tròn"
+      }
+    },
+    "draw": {
+      "button": "Vẽ biểu đồ",
+      "bar": "Biểu đồ cột",
+      "line": "Biểu đồ đường",
+      "pie": "Biểu đồ tròn"
     }
   }
 }
