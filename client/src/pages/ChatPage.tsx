@@ -696,6 +696,7 @@ export default function ChatPage() {
       const token = localStorage.getItem('token')
       let accText = ''
       const generatedFiles: GeneratedFile[] = []
+      let charts: import('../types').InlineChartSpec[] = []
       const stripGenerateBlocks = (t: string) =>
         t.replace(/```generate_[a-z]+:[^\n]+\n[\s\S]*?```/g, '').replace(/\n{3,}/g, '\n\n').trim()
 
@@ -767,6 +768,12 @@ export default function ChatPage() {
                     urlPreview: f.publicUrl?.slice(0, 60),
                   })))
                   generatedFiles.push(...event.files)
+                } else if (event.type === 'charts') {
+                  // Chat Inline Chart:LLM 吐的 chart spec 解析結果
+                  if (Array.isArray(event.charts)) {
+                    charts = event.charts
+                    console.log('[SSE-DEBUG] charts:', event.charts.length, 'inline chart(s)')
+                  }
                 } else if (event.type === 'audio') {
                   generatedFiles.push({
                     type: 'audio',
@@ -827,6 +834,7 @@ export default function ChatPage() {
               ? stripGenerateBlocks(accText) + (accText ? '\n\n*（已由使用者中止）*' : '（已中止）')
               : stripGenerateBlocks(accText),
           generated_files: generatedFiles.length > 0 ? generatedFiles : undefined,
+          charts: charts.length > 0 ? charts : undefined,
           created_at: new Date().toISOString(),
         }
         setMessages((prev) => [...prev, aiMsg])
