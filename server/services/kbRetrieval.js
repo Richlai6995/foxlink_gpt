@@ -60,8 +60,10 @@ const HARDCODED_DEFAULTS = {
   synonym_thesaurus:   null,
   use_proximity:       false,
   proximity_distance:  10,
-  min_ft_score:        0.2,
-  vec_cutoff:          0.7,
+  // 以下兩者於 _vectorSearch / _fulltextSearch* 以 app-level 預篩(fusion 前),
+  // 由各 KB 可透過 retrieval_config 覆寫。Phase 1-3c 架構原本就預留,但實作未 wire up。
+  min_ft_score:        0.1,   // fulltext:ratio vs top hit(0.1 = 至少是當下最高分的 10%)
+  vec_cutoff:          0.5,   // vector:cosine similarity 下限(0-1,0=不濾)
   fusion_method:       'weighted', // weighted | rrf
   rrf_k:               60,
   token_stopwords:     ['分機','地址','電話','傳真','資料','哪些','每個','我要','你要','所有','幫我','請問','告訴','是否','可以','什麼','怎麼'],
@@ -138,8 +140,10 @@ function extractTokens(query, stopwords) {
 async function _vectorSearch(db, kb, query, fetchK, cfg) {
   const qEmb = await embedText(query, { dims: kb.embedding_dims || 768 });
   const qVecStr = toVectorStr(qEmb);
+  // cosine similarity 預篩閾值(0-1);0 或未設 = 不濾
+  const vecCutoff = Number(cfg.vec_cutoff) || 0;
 
-  // Multi-vector: 若 KB 啟用且 chunks 有 title_embedding，走加權 title+body 公式
+  // Multi-vector: 若 KB 啟用且 chunks 有 title_embedding,走加權 title+body 公式
   if (cfg.use_multi_vector) {
     const tW = Number(cfg.title_weight) || 0.3;
     const bW = Number(cfg.body_weight)  || 0.7;
@@ -156,11 +160,12 @@ async function _vectorSearch(db, kb, query, fetchK, cfg) {
       ORDER BY vector_score ASC
       FETCH FIRST ? ROWS ONLY
     `).all(qVecStr, tW, qVecStr, bW, qVecStr, kb.id, fetchK);
-    return rows.map((r) => ({
+    const mapped = rows.map((r) => ({
       ...r,
       score:       1 - (r.vector_score || 0),
       match_type:  'vector-mv',
     }));
+    return vecCutoff > 0 ? mapped.filter((r) => r.score >= vecCutoff) : mapped;
   }
 
   const rows = await db.prepare(`
@@ -172,11 +177,12 @@ async function _vectorSearch(db, kb, query, fetchK, cfg) {
     ORDER BY vector_score ASC
     FETCH FIRST ? ROWS ONLY
   `).all(qVecStr, kb.id, fetchK);
-  return rows.map((r) => ({
+  const mapped = rows.map((r) => ({
     ...r,
     score:       1 - (r.vector_score || 0),
     match_type:  'vector',
   }));
+  return vecCutoff > 0 ? mapped.filter((r) => r.score >= vecCutoff) : mapped;
 }
 
 // ─── Backend: Oracle Text CONTAINS + SCORE (Phase 2 主力) ─────────────────────
@@ -233,17 +239,14 @@ async function _fulltextSearchOracleText(db, kb, query, topK, cfg) {
       ORDER BY SCORE(1) DESC
       FETCH FIRST ? ROWS ONLY
     `).all(kb.id, ctxQuery, topK * 2);
-    // SCORE() 範圍 0-100，轉成 hit_score 方便跟 LIKE backend 共用 fusion 邏輯
-    return {
-      rows: rows.map((r) => ({
-        ...r,
-        hit_score: Number(r.FT_RAW_SCORE || r.ft_raw_score || 0),
-      })),
-      tokens,
-      ctxQuery,
-      synonymsApplied,
-      effectiveQuery,
-    };
+    // SCORE() 範圍 0-100;hit_score 傳原始值給 fusion,同時套 min_ft_score 相對預篩
+    const allMapped = rows.map((r) => ({ ...r, hit_score: Number(r.FT_RAW_SCORE || r.ft_raw_score || 0) }));
+    const minRatio = Number(cfg.min_ft_score) || 0;
+    const maxRaw = Math.max(1, ...allMapped.map((r) => r.hit_score));
+    const filtered = minRatio > 0
+      ? allMapped.filter((r) => (r.hit_score / maxRaw) >= minRatio)
+      : allMapped;
+    return { rows: filtered, tokens, ctxQuery, synonymsApplied, effectiveQuery };
   } catch (e) {
     // ORA-20000 (index not built), ORA-29800, ORA-29902 等 Oracle Text 錯誤 → 透傳給上層
     throw new Error(`oracle_text search failed: ${e.message}`);
@@ -270,7 +273,14 @@ async function _fulltextSearchLike(db, kb, query, topK, cfg) {
     ORDER BY hit_score DESC
     FETCH FIRST ? ROWS ONLY
   `).all(...likeParams, kb.id, ...likeParams, topK * 2);
-  return { rows, tokens };
+  // min_ft_score 相對預篩:過濾掉「遠低於 top hit」的 chunk(與 oracle_text 同語意)
+  const mapped = rows.map((r) => ({ ...r, hit_score: Number(r.HIT_SCORE || r.hit_score || 0) }));
+  const minRatio = Number(cfg.min_ft_score) || 0;
+  const maxRaw = Math.max(1, ...mapped.map((r) => r.hit_score));
+  const filtered = minRatio > 0
+    ? mapped.filter((r) => (r.hit_score / maxRaw) >= minRatio)
+    : mapped;
+  return { rows: filtered, tokens };
 }
 
 // ─── Score fusion ─────────────────────────────────────────────────────────────
