@@ -14,8 +14,10 @@ interface Category {
 
 export default function FeedbackNewPage() {
   const { t, i18n } = useTranslation()
-  const { isAdmin } = useAuth()
+  const { isAdmin, user } = useAuth()
   const navigate = useNavigate()
+  // admin 或工單管理者 (is_erp_admin=1) 都能建立「資訊內部紀錄」工單
+  const canLogInternally = isAdmin || !!(user as any)?.is_erp_admin
   const [searchParams] = useSearchParams()
   const fileInputRef = useRef<HTMLInputElement>(null)
   const descriptionRef = useRef<HTMLTextAreaElement>(null)
@@ -134,7 +136,7 @@ export default function FeedbackNewPage() {
     if (sourceSessionId) formData.append('source_session_id', sourceSessionId)
     files.forEach(f => formData.append('files', f))
     // 資訊內部紀錄 (admin only)
-    if (isAdmin && isInternalLog) {
+    if (canLogInternally && isInternalLog) {
       formData.append('is_internal_log', 'true')
       if (applicantName.trim()) formData.append('applicant_name', applicantName.trim())
       if (applicantDept.trim()) formData.append('applicant_dept', applicantDept.trim())
@@ -182,8 +184,8 @@ export default function FeedbackNewPage() {
 
       <div className="max-w-3xl mx-auto px-6 py-8" onPaste={handlePaste}>
         <div className="space-y-5">
-          {/* Admin only: 資訊內部紀錄 */}
-          {isAdmin && (
+          {/* Admin / 工單管理者:資訊內部紀錄 */}
+          {canLogInternally && (
             <div className={`rounded-xl border p-3 transition ${isInternalLog ? 'bg-amber-50 border-amber-200' : 'bg-gray-50 border-gray-200'}`}>
               <label className="flex items-start gap-2 cursor-pointer select-none">
                 <input

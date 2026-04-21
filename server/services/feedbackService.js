@@ -185,8 +185,10 @@ async function listTickets(db, { userId, isAdmin, isAdminUser, isErpAdmin, statu
     }
   }
 
-  // 非 admin 一律看不到內部紀錄;admin 預設看得到(可透過 includeInternalLog=false 強制排除,例如匯出)
-  if (!isAdminUser) {
+  // admin / ERP admin 可看內部紀錄;一般使用者一律看不到
+  // (ERP admin 的可見範圍仍受上方 category/user 條件限制 → 自然只會看到自己建的 + ERP 分類的 internal log)
+  const canSeeInternalLog = isAdminUser || isErpAdmin;
+  if (!canSeeInternalLog) {
     conditions.push('NVL(t.is_internal_log, 0) = 0');
   } else if (includeInternalLog === false) {
     conditions.push('NVL(t.is_internal_log, 0) = 0');

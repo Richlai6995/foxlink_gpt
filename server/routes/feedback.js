@@ -148,9 +148,11 @@ router.post('/tickets', upload.array('files', FEEDBACK_MAX_FILES), async (req, r
 
     const isDraft = is_draft === 'true' || is_draft === true;
     const isAdmin = req.user.role === 'admin';
-    // 只有 admin 可以標記內部紀錄 + 手填申請者資訊
-    const isInternalLog = isAdmin && (is_internal_log === 'true' || is_internal_log === true || is_internal_log === 1 || is_internal_log === '1');
-    const applicantOverride = (isAdmin && isInternalLog && applicant_name) ? {
+    const isErpAdmin = !!req.user.is_erp_admin;
+    const canLogInternally = isAdmin || isErpAdmin;
+    // admin / 工單管理者 可以標記內部紀錄 + 手填申請者資訊
+    const isInternalLog = canLogInternally && (is_internal_log === 'true' || is_internal_log === true || is_internal_log === 1 || is_internal_log === '1');
+    const applicantOverride = (canLogInternally && isInternalLog && applicant_name) ? {
       name: applicant_name,
       dept: applicant_dept || null,
       employee_id: applicant_employee_id || null,
