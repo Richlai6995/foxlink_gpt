@@ -115,11 +115,20 @@ router.delete('/:code/:lang', async (req, res) => {
 });
 
 // ─── POST /api/admin/factory-translations/refresh-cache ──────────────────────
-// 強制重刷 ERP cache
+// 強制重刷 ERP cache,並同步 factory_code_lookup 本地表(給 AI 戰情 JOIN 用)
 router.post('/refresh-cache', async (req, res) => {
   try {
     const status = await factoryCache.forceReload();
-    res.json({ ok: true, ...status });
+    // 不阻塞主回應:sync 失敗只記 log,因為 forceReload 已經完成
+    let lookup_sync = null;
+    try {
+      const { syncFactoryCodeLookup } = require('../services/factoryCodeLookupSync');
+      const db = require('../database-oracle').db;
+      lookup_sync = await syncFactoryCodeLookup(db);
+    } catch (e) {
+      console.warn('[FactoryTranslations] lookup sync after refresh:', e.message);
+    }
+    res.json({ ok: true, ...status, lookup_sync });
   } catch (e) {
     console.error('[FactoryTranslations] refresh-cache error:', e);
     res.status(500).json({ error: e.message });

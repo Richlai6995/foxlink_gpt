@@ -25,19 +25,6 @@ const PROJECT_NAME         = '費用分析';
 const TOPIC_NAME           = 'Token 費用統計';
 const DESIGN_NAME          = '各維度費用分析';
 
-// ── factory_code LOV(常見廠區對照,給 LLM 做 WHERE / 回答用)────────────────
-// 注意:這是從 users.factory_code 常見值整理,非全量。若 user 問不在清單內,LLM 會照原樣回。
-const FACTORY_CODE_LOV = {
-  HQ: '總部',
-  FD: '富東(深圳)',
-  FQ: '富強(深圳)',
-  XZ: '徐州',
-  FE: '富億(昆山)',
-  FN: '南昌',
-  FV: '越南',
-  FH: '惠州',
-};
-
 async function ensureLocalDbSource(db) {
   const existing = await db.prepare(
     `SELECT id FROM ai_db_sources WHERE name=?`
@@ -166,14 +153,33 @@ const USERS_SCHEMA = {
     { column_name: 'org_section',         data_type: 'VARCHAR2', description: '事業處代碼(如 U / W / AE)' },
     { column_name: 'org_section_name',    data_type: 'VARCHAR2', description: '事業處名稱(如「中央單位」「通訊系統-系統產品研發處」「消費性電子產品事業處」)' },
     { column_name: 'org_group_name',      data_type: 'VARCHAR2', description: '事業群名稱(最高組織層級,如「中央及貿易」「消費電子事業群」「光電事業群」)' },
-    { column_name: 'factory_code',        data_type: 'VARCHAR2', description: '廠區代碼。若 NULL 代表未綁定廠區(「未歸屬」)。做廠區分析若要顯示中文名稱,請用 CASE WHEN 或透過 description 提供的對照表解讀(HQ=總部 / FD=富東深圳 / FQ=富強深圳 / XZ=徐州 / FE=富億昆山 / FN=南昌 / FV=越南 / FH=惠州)。',
-      value_mapping: JSON.stringify(FACTORY_CODE_LOV),
+    { column_name: 'factory_code',        data_type: 'VARCHAR2', description: '廠區代碼(如 HQ / FD / XZ)。NULL 代表未綁定廠區(「未歸屬」)。**要顯示中文/英文/越南文名稱,請 JOIN factory_code_lookup ON users.factory_code = factory_code_lookup.code**,取 name_zh / name_en / name_vi 欄位。代碼名稱的權威來源是 ERP KFF(FND_FLEX_VALUES_VL, FLEX_VALUE_SET_ID=1008041),已透過本地 factory_code_lookup 表同步。',
       sample_values: '["HQ", "FD", "FQ", "XZ", null]' },
     { column_name: 'org_end_date',        data_type: 'DATE',     description: '離職日期。NOT NULL 代表該員已離職,費用分析務必排除 (AND org_end_date IS NULL)。' },
     { column_name: 'org_synced_at',       data_type: 'TIMESTAMP', description: '組織資料最近同步時間' },
     { column_name: 'preferred_language',  data_type: 'VARCHAR2', description: '偏好語言(zh-TW / en / vi)' },
     { column_name: 'created_at',          data_type: 'TIMESTAMP', description: '建立時間' },
     { column_name: 'updated_at',          data_type: 'TIMESTAMP', description: '更新時間' },
+  ],
+};
+
+const FACTORY_CODE_LOOKUP_SCHEMA = {
+  table_name:      'factory_code_lookup',
+  alias:           'fcl',
+  display_name:    '廠區代碼對照表',
+  display_name_en: 'Factory Code Lookup',
+  display_name_vi: 'Bảng tra cứu mã nhà máy',
+  business_notes:
+    '廠區代碼 ↔ 中/英/越南文名稱的對照表。由 services/factoryCodeLookupSync.js 定期從 ERP KFF (FND_FLEX_VALUES_VL, FLEX_VALUE_SET_ID=1008041) 同步過來,' +
+    '本地 Oracle 表,可以直接 JOIN。常用:`LEFT JOIN factory_code_lookup fcl ON users.factory_code = fcl.code`,' +
+    '依使用者語言取 name_zh / name_en / name_vi。' +
+    '若 ERP 新增廠區代碼,本地同步延遲最長 1 小時(factoryCache TTL);若使用者問到的代碼查不到中文名,可回代碼原樣。',
+  columns: [
+    { column_name: 'code',           data_type: 'VARCHAR2',  description: '廠區代碼(PK),例如 HQ、FD、FQ、XZ' },
+    { column_name: 'name_zh',        data_type: 'NVARCHAR2', description: '中文名稱(ERP 原始),例如 總部、富東(深圳)、徐州。若 NULL 代表 ERP 未設定。' },
+    { column_name: 'name_en',        data_type: 'NVARCHAR2', description: '英文名稱(本地 LLM 翻譯),可能為 NULL' },
+    { column_name: 'name_vi',        data_type: 'NVARCHAR2', description: '越南文名稱(本地 LLM 翻譯),可能為 NULL' },
+    { column_name: 'last_synced_at', data_type: 'TIMESTAMP', description: '最後同步時間' },
   ],
 };
 
@@ -241,15 +247,17 @@ function buildFewShotExamples() {
         "ORDER BY total_cost DESC",
     },
     {
-      q: '上個月各廠區費用分布,含人均費用',
+      q: '上個月各廠區費用分布,含中文名稱與人均費用',
       sql:
-        "SELECT u.factory_code, SUM(tu.cost) AS total_cost, COUNT(DISTINCT tu.user_id) AS user_count, " +
+        "SELECT u.factory_code, fcl.name_zh AS factory_name, " +
+        "       SUM(tu.cost) AS total_cost, COUNT(DISTINCT tu.user_id) AS user_count, " +
         "       SUM(tu.cost) / NULLIF(COUNT(DISTINCT tu.user_id), 0) AS avg_cost_per_user " +
         "FROM token_usage tu JOIN users u ON tu.user_id = u.id " +
+        "LEFT JOIN factory_code_lookup fcl ON u.factory_code = fcl.code " +
         "WHERE tu.usage_date >= ADD_MONTHS(TRUNC(SYSDATE, 'MM'), -1) " +
         "  AND tu.usage_date <  TRUNC(SYSDATE, 'MM') " +
         "  AND (u.status IS NULL OR u.status != 'disabled') AND u.org_end_date IS NULL " +
-        "GROUP BY u.factory_code " +
+        "GROUP BY u.factory_code, fcl.name_zh " +
         "ORDER BY total_cost DESC",
     },
     {
@@ -290,11 +298,19 @@ function buildFewShotExamples() {
         "SELECT TO_CHAR(tu.usage_date, 'YYYY-MM') AS month, SUM(tu.cost) AS total_cost, " +
         "       COUNT(DISTINCT tu.user_id) AS user_count " +
         "FROM token_usage tu JOIN users u ON tu.user_id = u.id " +
+        "JOIN factory_code_lookup fcl ON u.factory_code = fcl.code " +
         "WHERE tu.usage_date >= ADD_MONTHS(TRUNC(SYSDATE, 'MM'), -6) " +
-        "  AND u.factory_code = 'XZ' " +
+        "  AND fcl.name_zh LIKE '%徐州%' " +
         "  AND (u.status IS NULL OR u.status != 'disabled') AND u.org_end_date IS NULL " +
         "GROUP BY TO_CHAR(tu.usage_date, 'YYYY-MM') " +
         "ORDER BY month",
+    },
+    {
+      q: '列出所有廠區代碼與中文名稱',
+      sql:
+        "SELECT code, name_zh, name_en, name_vi " +
+        "FROM factory_code_lookup " +
+        "ORDER BY code",
     },
   ]);
 }
@@ -306,9 +322,10 @@ function buildSystemPrompt() {
     '2. 預設排除已離職 / 已停用使用者:`(u.status IS NULL OR u.status != \'disabled\') AND u.org_end_date IS NULL`。使用者若明確要求「含離職」才可省略。\n' +
     '3. 費用分析務必 JOIN users 以取得組織維度,絕對不要查 users.password 欄位。\n' +
     '4. 日期處理用 Oracle 函式:TRUNC(SYSDATE,\'MM\') 取本月初、ADD_MONTHS / SYSDATE - N 取區間。\n' +
-    '5. 廠區代碼(users.factory_code)常見對照:HQ=總部、FD=富東(深圳)、FQ=富強(深圳)、XZ=徐州、FE=富億(昆山)、FN=南昌、FV=越南、FH=惠州。使用者可能用中文問「上海廠」「徐州廠」時,要解讀成對應 factory_code。\n' +
+    '5. **廠區名稱**:users.factory_code 只有代碼,中文/英文/越南文名稱在 factory_code_lookup 表。要呈現廠區中文名,必用 `LEFT JOIN factory_code_lookup fcl ON u.factory_code = fcl.code`,並 SELECT fcl.name_zh(使用者語言若 en 取 name_en,vi 取 name_vi)。使用者用中文問「徐州廠」「上海廠」等,請用 `fcl.name_zh LIKE \'%徐州%\'` 方式反查 code,不要自己猜代碼。\n' +
     '6. 數值結果用 SUM / COUNT(DISTINCT user_id) 等聚合,cost 是 NUMBER(預存已計費,單位 USD)。\n' +
-    '7. 回傳 SQL 前請加適當 ORDER BY,讓結果可閱讀。\n'
+    '7. 回傳 SQL 前請加適當 ORDER BY,讓結果可閱讀。\n' +
+    '8. 欄位命名:SELECT 出來的欄位盡量用有意義的 alias(例:total_cost / factory_name / user_count),避免讓前端只看到 f.name_zh 這類難解讀的欄位。\n'
   );
 }
 
@@ -321,9 +338,28 @@ function buildChartConfig() {
 
 async function ensureDesign(db, topicId, schemaIds, adminUserId) {
   const existing = await db.prepare(
-    `SELECT id FROM ai_select_designs WHERE topic_id=? AND name=?`
+    `SELECT id, target_schema_ids FROM ai_select_designs WHERE topic_id=? AND name=?`
   ).get(topicId, DESIGN_NAME);
-  if (existing?.id || existing?.ID) return existing.id || existing.ID;
+  if (existing?.id || existing?.ID) {
+    const designId = existing.id || existing.ID;
+    // 增量補 schema:若 target_schema_ids 缺新 schema,合併後寫回(不動 examples/prompt,保留 user 手改)
+    try {
+      const raw = existing.target_schema_ids ?? existing.TARGET_SCHEMA_IDS;
+      const rawStr = raw && typeof raw !== 'string' ? String(raw) : raw;
+      const current = rawStr ? JSON.parse(rawStr) : [];
+      const missing = schemaIds.filter(id => !current.includes(id));
+      if (missing.length > 0) {
+        const merged = [...current, ...missing];
+        await db.prepare(
+          `UPDATE ai_select_designs SET target_schema_ids=? WHERE id=?`
+        ).run(JSON.stringify(merged), designId);
+        console.log(`[CostAnalysisSeed] Design id=${designId} 補新 schemas: [${missing.join(', ')}]`);
+      }
+    } catch (e) {
+      console.warn('[CostAnalysisSeed] 檢查 target_schema_ids 失敗:', e.message);
+    }
+    return designId;
+  }
 
   await db.prepare(`
     INSERT INTO ai_select_designs
@@ -368,10 +404,11 @@ async function runSeed(db) {
     const projectId = await ensureProject(db, adminUserId);
     const topicId   = await ensureTopic(db, projectId, adminUserId);
 
-    const tokenUsageSchemaId = await ensureSchema(db, TOKEN_USAGE_SCHEMA, sourceDbId, projectId, adminUserId);
-    const usersSchemaId      = await ensureSchema(db, USERS_SCHEMA,      sourceDbId, projectId, adminUserId);
+    const tokenUsageSchemaId    = await ensureSchema(db, TOKEN_USAGE_SCHEMA,         sourceDbId, projectId, adminUserId);
+    const usersSchemaId         = await ensureSchema(db, USERS_SCHEMA,               sourceDbId, projectId, adminUserId);
+    const factoryLookupSchemaId = await ensureSchema(db, FACTORY_CODE_LOOKUP_SCHEMA, sourceDbId, projectId, adminUserId);
 
-    await ensureDesign(db, topicId, [tokenUsageSchemaId, usersSchemaId], adminUserId);
+    await ensureDesign(db, topicId, [tokenUsageSchemaId, usersSchemaId, factoryLookupSchemaId], adminUserId);
     console.log('[CostAnalysisSeed] 完成');
   } catch (e) {
     console.error('[CostAnalysisSeed] error:', e.message);

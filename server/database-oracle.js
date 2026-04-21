@@ -2021,6 +2021,16 @@ async function runMigrations(db) {
     CONSTRAINT factory_trans_uq UNIQUE (factory_code, lang)
   )`);
 
+  // factory_code_lookup: 本地平展表,給 AI 戰情 JOIN 用(zh 名稱來自 ERP KFF 1008041,en/vi 來自 factory_code_translations)
+  // 內容由 services/factoryCodeLookupSync.js 定期同步
+  await createTable('FACTORY_CODE_LOOKUP', `CREATE TABLE factory_code_lookup (
+    code            VARCHAR2(30)   PRIMARY KEY,
+    name_zh         NVARCHAR2(200),
+    name_en         NVARCHAR2(200),
+    name_vi         NVARCHAR2(200),
+    last_synced_at  TIMESTAMP      DEFAULT SYSTIMESTAMP
+  )`);
+
   // ── Training Platform: 權限欄位 ──────────────────────────────────────────────
   // training_permission: 'none' | 'publish' | 'publish_edit'  (NULL on users = inherit from role)
   await addCol('ROLES', 'TRAINING_PERMISSION', "VARCHAR2(20) DEFAULT 'none'");

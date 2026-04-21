@@ -315,6 +315,17 @@ app.get('/api/health', (req, res) => res.json({ status: 'ok', timestamp: new Dat
       console.warn('[CostAnalysisSeed] init error:', e.message);
     }
 
+    // Factory code lookup 同步(啟動後 5 秒跑,避免拖慢啟動)
+    setTimeout(() => {
+      try {
+        const { syncFactoryCodeLookup } = require('./services/factoryCodeLookupSync');
+        const { db } = require('./database-oracle');
+        syncFactoryCodeLookup(db).catch(e => console.warn('[FactoryCodeLookupSync] unhandled:', e.message));
+      } catch (e) {
+        console.warn('[FactoryCodeLookupSync] init error:', e.message);
+      }
+    }, 5000);
+
     // Init System Monitor Metrics Collector
     try {
       const { startMetricsCollector } = require('./services/metricsCollector');
