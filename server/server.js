@@ -330,6 +330,15 @@ app.get('/api/health', (req, res) => res.json({ status: 'ok', timestamp: new Dat
       }
     }, 5000);
 
+    // System sync cron 排程(daily / weekly / monthly,設定存於 system_settings,admin 在 ETL 排程頁維護)
+    try {
+      const { db } = require('./database-oracle');
+      const { loadAndStart } = require('./services/systemSyncScheduler');
+      loadAndStart(db).catch(e => console.warn('[SystemSyncScheduler] unhandled:', e.message));
+    } catch (e) {
+      console.warn('[SystemSyncScheduler] init error:', e.message);
+    }
+
     // Init System Monitor Metrics Collector
     try {
       const { startMetricsCollector } = require('./services/metricsCollector');

@@ -2820,6 +2820,13 @@ const EMPTY_FORM = {
 }
 
 // ── 系統內建同步(server-level service,不走 ai_etl_jobs cron 框架) ──────────
+type SyncSchedule = {
+  enabled: boolean
+  type: 'daily' | 'weekly' | 'monthly'
+  hour: number
+  weekday: number       // 0=Sun, 1=Mon, ... 6=Sat
+  day_of_month: number  // 1-28
+}
 type SystemSyncStatus = {
   name: string
   display_name: string
@@ -2827,11 +2834,26 @@ type SystemSyncStatus = {
   table_name: string
   last_synced_at: string | null
   record_count: number
+  schedule: SyncSchedule
+  cron_expression: string | null
+}
+
+const SYNC_WEEKDAY_LABELS = ['日', '一', '二', '三', '四', '五', '六']
+
+function describeSchedule(s: SyncSchedule, cron: string | null): string {
+  if (!s.enabled) return '未啟用'
+  const hh = String(s.hour).padStart(2, '0')
+  if (s.type === 'daily')   return `每天 ${hh}:00 (${cron})`
+  if (s.type === 'weekly')  return `每週${SYNC_WEEKDAY_LABELS[s.weekday] || '?'} ${hh}:00 (${cron})`
+  if (s.type === 'monthly') return `每月 ${s.day_of_month} 號 ${hh}:00 (${cron})`
+  return '?'
 }
 
 function SystemSyncSection() {
   const [items, setItems] = useState<SystemSyncStatus[]>([])
   const [running, setRunning] = useState<Record<string, boolean>>({})
+  const [editing, setEditing] = useState<string | null>(null)
+  const [editForm, setEditForm] = useState<SyncSchedule>({ enabled: false, type: 'daily', hour: 2, weekday: 1, day_of_month: 1 })
 
   const load = () => api.get('/admin/system-sync/status').then(r => setItems(r.data)).catch(() => {})
   useEffect(() => { load() }, [])
@@ -2859,6 +2881,22 @@ function SystemSyncSection() {
     }
   }
 
+  const openEdit = (it: SystemSyncStatus) => {
+    setEditing(it.name)
+    setEditForm({ ...it.schedule })
+  }
+
+  const saveSchedule = async () => {
+    if (!editing) return
+    try {
+      await api.put(`/admin/system-sync/schedule/${editing}`, editForm)
+      setEditing(null)
+      await load()
+    } catch (e: any) {
+      alert(`儲存失敗:${e?.response?.data?.error || e.message}`)
+    }
+  }
+
   if (items.length === 0) return null
 
   return (
@@ -2866,29 +2904,103 @@ function SystemSyncSection() {
       <div className="flex items-center gap-2">
         <RefreshCw size={14} className="text-amber-600" />
         <span className="text-sm font-semibold text-amber-900">系統內建同步</span>
-        <span className="text-[10px] text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded">不走 cron 框架,server 啟動後自動跑一次</span>
+        <span className="text-[10px] text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded">server 啟動自動跑一次 + 可設 cron 排程</span>
       </div>
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
         {items.map(it => (
-          <div key={it.name} className="bg-white rounded-lg p-3 border border-amber-100">
-            <div className="flex items-start justify-between gap-2 mb-1">
+          <div key={it.name} className="bg-white rounded-lg p-3 border border-amber-100 space-y-2">
+            <div className="flex items-start justify-between gap-2">
               <div className="flex-1 min-w-0">
                 <p className="text-xs font-semibold text-gray-800 truncate">{it.display_name}</p>
                 <p className="text-[10px] text-gray-500 break-all leading-tight mt-0.5">{it.description}</p>
               </div>
-              <button
-                onClick={() => trigger(it.name)}
-                disabled={running[it.name]}
-                className="text-xs bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-white px-2.5 py-1 rounded flex items-center gap-1 flex-shrink-0"
-              >
-                <Play size={11} /> {running[it.name] ? '同步中...' : '立即執行'}
-              </button>
+              <div className="flex gap-1 flex-shrink-0">
+                <button
+                  onClick={() => openEdit(it)}
+                  className="text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 px-2 py-1 rounded flex items-center gap-1"
+                  title="設定排程"
+                >
+                  <Edit3 size={11} /> 排程
+                </button>
+                <button
+                  onClick={() => trigger(it.name)}
+                  disabled={running[it.name]}
+                  className="text-xs bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-white px-2.5 py-1 rounded flex items-center gap-1"
+                >
+                  <Play size={11} /> {running[it.name] ? '同步中...' : '立即執行'}
+                </button>
+              </div>
             </div>
-            <div className="flex gap-3 text-[11px] text-gray-600 mt-2">
+            <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-gray-600">
               <span>本地表 <code className="bg-gray-100 px-1 rounded">{it.table_name}</code></span>
               <span>筆數 <strong>{it.record_count}</strong></span>
               <span>最後同步 <strong>{it.last_synced_at ? fmtTW(it.last_synced_at) : '從未'}</strong></span>
+              <span className={it.schedule.enabled ? 'text-green-700 font-medium' : 'text-gray-400'}>
+                排程 {describeSchedule(it.schedule, it.cron_expression)}
+              </span>
             </div>
+
+            {/* Inline 排程編輯 */}
+            {editing === it.name && (
+              <div className="bg-amber-50 border border-amber-200 rounded p-2 mt-2 space-y-2">
+                <label className="flex items-center gap-2 text-xs text-gray-700">
+                  <input type="checkbox" checked={editForm.enabled}
+                    onChange={e => setEditForm(p => ({ ...p, enabled: e.target.checked }))} />
+                  啟用 cron 排程
+                </label>
+                {editForm.enabled && (
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2 text-xs">
+                      <label className="text-gray-600">頻率</label>
+                      <select className="text-xs border rounded px-2 py-1"
+                        value={editForm.type}
+                        onChange={e => setEditForm(p => ({ ...p, type: e.target.value as SyncSchedule['type'] }))}
+                      >
+                        <option value="daily">每天</option>
+                        <option value="weekly">每週</option>
+                        <option value="monthly">每月</option>
+                      </select>
+                      {editForm.type === 'weekly' && (
+                        <>
+                          <label className="text-gray-600">星期</label>
+                          <select className="text-xs border rounded px-2 py-1"
+                            value={editForm.weekday}
+                            onChange={e => setEditForm(p => ({ ...p, weekday: Number(e.target.value) }))}
+                          >
+                            {SYNC_WEEKDAY_LABELS.map((lab, i) => <option key={i} value={i}>{lab}</option>)}
+                          </select>
+                        </>
+                      )}
+                      {editForm.type === 'monthly' && (
+                        <>
+                          <label className="text-gray-600">日期</label>
+                          <select className="text-xs border rounded px-2 py-1"
+                            value={editForm.day_of_month}
+                            onChange={e => setEditForm(p => ({ ...p, day_of_month: Number(e.target.value) }))}
+                          >
+                            {Array.from({ length: 28 }, (_, i) => i + 1).map(d => <option key={d} value={d}>{d}</option>)}
+                          </select>
+                          <span className="text-[10px] text-gray-500">(限 1~28 號避免月底邊界)</span>
+                        </>
+                      )}
+                      <label className="text-gray-600 ml-2">時間</label>
+                      <select className="text-xs border rounded px-2 py-1"
+                        value={editForm.hour}
+                        onChange={e => setEditForm(p => ({ ...p, hour: Number(e.target.value) }))}
+                      >
+                        {Array.from({ length: 24 }, (_, i) => i).map(h => (
+                          <option key={h} value={h}>{String(h).padStart(2, '0')}:00</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                )}
+                <div className="flex justify-end gap-2">
+                  <button onClick={() => setEditing(null)} className="text-xs text-gray-500 px-3 py-1">取消</button>
+                  <button onClick={saveSchedule} className="text-xs bg-amber-500 hover:bg-amber-600 text-white px-3 py-1 rounded">儲存</button>
+                </div>
+              </div>
+            )}
           </div>
         ))}
       </div>

@@ -2909,6 +2909,7 @@ const SYSTEM_SYNCS = {
 router.get('/system-sync/status', async (req, res) => {
   try {
     const db = require('../database-oracle').db;
+    const { loadSettings, buildCronExpr } = require('../services/systemSyncScheduler');
     const out = [];
     for (const [name, def] of Object.entries(SYSTEM_SYNCS)) {
       let last_synced_at = null;
@@ -2920,9 +2921,8 @@ router.get('/system-sync/status', async (req, res) => {
         last_synced_at = r?.LAST_SYNCED_AT ?? r?.last_synced_at ?? null;
         if (last_synced_at instanceof Date) last_synced_at = last_synced_at.toISOString();
         record_count = Number(r?.CNT ?? r?.cnt ?? 0);
-      } catch (e) {
-        // 表還沒建 / 沒權限,記 null
-      }
+      } catch (e) { /* 表沒建 */ }
+      const schedule = await loadSettings(db, name);
       out.push({
         name,
         display_name: def.display_name,
@@ -2930,6 +2930,8 @@ router.get('/system-sync/status', async (req, res) => {
         table_name:   def.table_name,
         last_synced_at,
         record_count,
+        schedule,
+        cron_expression: schedule.enabled ? buildCronExpr(schedule) : null,
       });
     }
     res.json(out);
@@ -2948,6 +2950,26 @@ router.post('/system-sync/run/:name', async (req, res) => {
     if (typeof runner !== 'function') return res.status(500).json({ error: 'Runner not found' });
     const result = await runner(db);
     res.json(result || { ok: true });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// PUT /api/admin/system-sync/schedule/:name
+// body: { enabled: bool, type: 'daily'|'weekly'|'monthly', hour: 0-23, weekday: 0-6, day_of_month: 1-28 }
+router.put('/system-sync/schedule/:name', async (req, res) => {
+  try {
+    if (!SYSTEM_SYNCS[req.params.name]) return res.status(404).json({ error: 'Unknown sync: ' + req.params.name });
+    const db = require('../database-oracle').db;
+    const { saveSettings, startOne, loadSettings, buildCronExpr } = require('../services/systemSyncScheduler');
+    await saveSettings(db, req.params.name, req.body || {});
+    const fresh = await loadSettings(db, req.params.name);
+    startOne(db, req.params.name, fresh); // 立即重啟 cron
+    res.json({
+      ok: true,
+      schedule: fresh,
+      cron_expression: fresh.enabled ? buildCronExpr(fresh) : null,
+    });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
   }
