@@ -31,6 +31,7 @@ export interface ErpTool {
   returns: ErpReturns | null
   tool_schema: any
   inject_config: any
+  answer_output_format?: AnswerOutputFormat | null
   max_rows_llm: number
   max_rows_ui: number
   timeout_sec: number
@@ -67,6 +68,22 @@ export interface ErpReturns {
   data_type: string
   pls_type?: string
   data_length?: number
+}
+
+/** Answer 模式輸出解析設定(全後端解析,無 LLM) */
+export interface AnswerOutputFormat {
+  col_separator?: string       // 欄位分隔符,預設 '/'
+  row_separator?: string       // 列分隔:'\n' / 'space' / 'tab' / 自訂
+  columns?: string[]           // 欄位名稱列表(依序對應 parse 結果)
+  numeric_columns?: string[]   // 標記為數字的欄位(千分位 + 右對齊)
+  skip_first_row?: boolean     // 若回傳第一列是 header 則跳過
+  max_rows?: number            // 最多渲染幾列
+  chart?: {
+    type?: 'bar' | 'line' | 'pie'
+    x_column?: string
+    y_column?: string
+    title?: string
+  } | null
 }
 
 export default function ErpToolsPanel() {

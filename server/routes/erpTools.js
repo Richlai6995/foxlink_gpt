@@ -78,6 +78,7 @@ function serializeTool(row, lang) {
     returns: parseJson(get('returns_json'), null),
     tool_schema: parseJson(get('tool_schema_json'), null),
     inject_config: parseJson(get('inject_config_json'), null),
+    answer_output_format: parseJson(get('answer_output_format_json'), null),
     max_rows_llm: Number(get('max_rows_llm') ?? 50),
     max_rows_ui: Number(get('max_rows_ui') ?? 1000),
     timeout_sec: Number(get('timeout_sec') ?? 30),
@@ -401,7 +402,7 @@ router.post('/', async (req, res) => {
          params_json, returns_json, tool_schema_json, inject_config_json,
          max_rows_llm, max_rows_ui, timeout_sec,
          rate_limit_per_user, rate_limit_global, rate_limit_window, allow_dry_run,
-         endpoint_mode, enabled, created_by)
+         endpoint_mode, answer_output_format_json, enabled, created_by)
       VALUES (?, ?, ?, ?,
               ?, ?, ?, ?, ?,
               ?, ?, SYSTIMESTAMP, 0,
@@ -409,7 +410,7 @@ router.post('/', async (req, res) => {
               ?, ?, ?, ?,
               ?, ?, ?,
               ?, ?, ?, ?,
-              ?, ?, ?)
+              ?, ?, ?, ?)
     `).run(
       code, b.name || code, b.description || null, JSON.stringify(b.tags || []),
       String(b.db_owner).toUpperCase(),
@@ -432,6 +433,7 @@ router.post('/', async (req, res) => {
       b.rate_limit_window   || 'minute',
       b.allow_dry_run === 0 ? 0 : 1,
       b.endpoint_mode || 'tool',
+      b.answer_output_format ? JSON.stringify(b.answer_output_format) : null,
       b.enabled === false ? 0 : 1,
       req.user.id
     );
@@ -496,7 +498,7 @@ router.put('/:id', async (req, res) => {
         tool_schema_json = ?, inject_config_json = ?,
         max_rows_llm = ?, max_rows_ui = ?, timeout_sec = ?,
         rate_limit_per_user = ?, rate_limit_global = ?, rate_limit_window = ?, allow_dry_run = ?,
-        endpoint_mode = ?, enabled = ?, updated_at = SYSTIMESTAMP
+        endpoint_mode = ?, answer_output_format_json = ?, enabled = ?, updated_at = SYSTIMESTAMP
       WHERE id = ?
     `).run(
       code, b.name ?? cur.name, b.description ?? cur.description,
@@ -519,6 +521,9 @@ router.put('/:id', async (req, res) => {
       b.rate_limit_window ?? cur.rate_limit_window ?? 'minute',
       (b.allow_dry_run ?? cur.allow_dry_run ?? 1) ? 1 : 0,
       b.endpoint_mode ?? cur.endpoint_mode ?? 'tool',
+      (b.answer_output_format !== undefined
+        ? (b.answer_output_format ? JSON.stringify(b.answer_output_format) : null)
+        : (cur.answer_output_format ? JSON.stringify(cur.answer_output_format) : null)),
       (b.enabled ?? cur.enabled) ? 1 : 0,
       req.params.id
     );

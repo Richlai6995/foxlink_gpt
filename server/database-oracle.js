@@ -2992,6 +2992,8 @@ async function runMigrations(db) {
   await safeAddColumn('erp_tools', 'rate_limit_window',   "VARCHAR2(20) DEFAULT 'minute'");
   await safeAddColumn('erp_tools', 'allow_dry_run',       'NUMBER(1) DEFAULT 1');
   await safeAddColumn('erp_tools', 'endpoint_mode',       "VARCHAR2(20) DEFAULT 'tool'");
+  // Answer 模式輸出解析設定(分隔符、欄位名、圖表規格),全後端解析免 LLM
+  await safeAddColumn('erp_tools', 'answer_output_format_json', 'CLOB');
 
   // Backfill:為舊 ERP tool 補建代理 skill row
   try {

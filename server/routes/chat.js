@@ -1908,7 +1908,7 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
 
         try {
           const toolRow = await db.prepare(
-            `SELECT name, endpoint_mode, inject_config_json, params_json FROM erp_tools WHERE id=? AND enabled=1`
+            `SELECT name, endpoint_mode, inject_config_json, params_json, answer_output_format_json FROM erp_tools WHERE id=? AND enabled=1`
           ).get(erpToolId);
           if (!toolRow) continue;
 
@@ -1971,7 +1971,20 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
                 trigger_source: 'answer',
                 session_id: sessionId,
               }));
-            const formatted = formatErpResultForUser(sk.name, ansResult?.result ?? ansResult, ansResult?.cache_key);
+            // 優先用 answer_output_format 解析 → Markdown 表格 + 圖表(全後端,無 LLM)
+            const ansRaw = toolRow.answer_output_format_json || toolRow.ANSWER_OUTPUT_FORMAT_JSON;
+            let answerFormat = null;
+            if (ansRaw) {
+              try { answerFormat = JSON.parse(ansRaw); } catch (_) {}
+            }
+            const resObj = ansResult?.result ?? ansResult;
+            let formatted;
+            if (answerFormat && resObj?.function_return !== undefined && resObj?.function_return !== null) {
+              const answerFormatter = require('../services/erpAnswerFormatter');
+              formatted = answerFormatter.formatAnswer(sk.name, resObj.function_return, answerFormat, ansResult?.cache_key);
+            } else {
+              formatted = formatErpResultForUser(sk.name, resObj, ansResult?.cache_key);
+            }
             sendEvent({ type: 'chunk', content: formatted });
             // 存 AI 訊息
             try {

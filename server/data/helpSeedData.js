@@ -1,7 +1,7 @@
 /**
  * Help page seed data — zh-TW (source of truth)
  * Auto-extracted from HelpPage.tsx
- * Generated: 2026-04-20
+ * Generated: 2026-04-22
  *
  * Block types: para, tip, note, table, steps, code, list, subsection, card_grid, comparison
  */
@@ -8649,6 +8649,159 @@ const userSections = [
                 "text": "LLM function calling 路徑看不到 SQL LOV 的選項列表（只看得到靜態 LOV 的 enum）。建議有 cascading 的工具把「允許 LLM 自動呼叫」關掉，只留「使用者手動觸發」，避免 AI 亂猜值。"
               }
             ]
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "🔧 管理員：Answer 模式輸出解析（直達 + 表格 + 圖表）",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "直達（Answer）模式原本只能把 FUNCTION 回傳的 VARCHAR2 整串原文顯示給使用者，像 `202604/ANDOR/A2/5807-5056-037500/RMB/740809` 這種工廠常見的 `/` 分隔格式，使用者根本看不懂。"
+          },
+          {
+            "type": "para",
+            "text": "啟用「**輸出解析**」後，後端會依管理員設定的分隔符、欄位名自動 parse，渲染成 **Markdown 表格**，並可附加 **ECharts 圖表**——全程後端處理、不經 LLM，2~3 秒即出結果（純 ERP 執行時間）。"
+          },
+          {
+            "type": "subsection",
+            "title": "設定位置",
+            "blocks": [
+              {
+                "type": "para",
+                "text": "Admin → ERP Procedure → 編輯工具 → 回應模式選「直達」後，下方會出現「**輸出解析（Answer 模式專用）**」區塊。"
+              },
+              {
+                "type": "steps",
+                "items": [
+                  {
+                    "title": "勾「啟用自動解析」",
+                    "desc": "展開詳細設定"
+                  },
+                  {
+                    "title": "欄位分隔符",
+                    "desc": "預設 `/`。若 FUNCTION 用 `,` 或 `|` 請對應修改"
+                  },
+                  {
+                    "title": "列分隔",
+                    "desc": "多筆記錄之間的分隔。通常是換行 `\\n`，也可選空白 / Tab / 逗號 / 分號"
+                  },
+                  {
+                    "title": "最多顯示列數",
+                    "desc": "預設 200。超過會顯示「僅顯示前 N 列」"
+                  },
+                  {
+                    "title": "跳過第一列（header）",
+                    "desc": "若 FUNCTION 回傳的第一列是欄位名稱（如 `年月,專案,金額\\n202604,...`），勾選此項"
+                  },
+                  {
+                    "title": "欄位名稱",
+                    "desc": "依序輸入對應 parse 結果的欄位名（如：年月、專案名稱、類別、料號、幣別、超額金額）。可勾「數字」讓該欄顯示千分位且靠右對齊"
+                  },
+                  {
+                    "title": "附加圖表（選填）",
+                    "desc": "啟用後選 type（bar/line/pie）、X 軸欄位、Y 軸欄位（需是數字欄）、標題。渲染 ECharts 圖表在表格下方"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "subsection",
+            "title": "完整範例",
+            "blocks": [
+              {
+                "type": "para",
+                "text": "PROCEDURE 回傳字串："
+              },
+              {
+                "type": "code",
+                "language": "text",
+                "text": "202604/ANDOR/A2/5807-5056-037500/RMB/740809\n202604/EXCALIBUR/A2/0628-0000-B070A2/RMB/387189\n202604/EXCALIBUR/A2/091B-2A08-647000/RMB/228590"
+              },
+              {
+                "type": "para",
+                "text": "輸出解析設定："
+              },
+              {
+                "type": "table",
+                "headers": [
+                  "設定項",
+                  "值"
+                ],
+                "rows": [
+                  [
+                    "欄位分隔符",
+                    "/"
+                  ],
+                  [
+                    "列分隔",
+                    "換行 (\\n)"
+                  ],
+                  [
+                    "欄位名稱",
+                    "年月, 專案名稱, 類別, 料號, 幣別, 超額金額"
+                  ],
+                  [
+                    "數字欄位",
+                    "超額金額"
+                  ],
+                  [
+                    "圖表 type / x / y",
+                    "bar / 料號 / 超額金額"
+                  ]
+                ]
+              },
+              {
+                "type": "para",
+                "text": "使用者看到的最終輸出：6 欄 Markdown 表格（超額金額千分位 + 靠右）+ 長條圖，總時間 2-3 秒。"
+              }
+            ]
+          },
+          {
+            "type": "subsection",
+            "title": "Answer 模式 vs Tool 模式抉擇",
+            "blocks": [
+              {
+                "type": "table",
+                "headers": [
+                  "情境",
+                  "建議模式",
+                  "理由"
+                ],
+                "rows": [
+                  [
+                    "結構化表格 + 圖表（排名、時間序列）",
+                    "**Answer + 輸出解析**",
+                    "快（2-3s）、確定性、不花 LLM token"
+                  ],
+                  [
+                    "需要 AI 分析、摘要、推論",
+                    "Tool",
+                    "LLM 能依 context 解讀並提出建議"
+                  ],
+                  [
+                    "純自由文字回應（狀態字串、警告訊息）",
+                    "Answer（不設輸出解析）",
+                    "原文顯示最保險"
+                  ],
+                  [
+                    "使用者可能問各種變化問題",
+                    "Tool",
+                    "LLM 能決定要不要 call、補參數"
+                  ]
+                ]
+              }
+            ]
+          },
+          {
+            "type": "tip",
+            "text": "若未設定輸出解析，Answer 模式退回顯示原始字串。「輸出解析」是額外的加值，不影響 FUNCTION / PROCEDURE 執行邏輯本身。"
+          },
+          {
+            "type": "note",
+            "text": "目前僅支援 FUNCTION 回傳值（function_return）的解析。PROCEDURE 的 OUT CURSOR 不走這條路（已有自動表格渲染）。"
           }
         ]
       },

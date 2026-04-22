@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { X, Search, AlertTriangle, ChevronDown, ChevronRight, RefreshCw, Save, Languages, Plus, Minus, Edit3 } from 'lucide-react'
 import api from '../../lib/api'
-import type { ErpTool, ErpParam, ErpReturns } from './ErpToolsPanel'
+import type { ErpTool, ErpParam, ErpReturns, AnswerOutputFormat } from './ErpToolsPanel'
 
 interface OverloadPreview {
   overload: string | null
@@ -72,6 +72,9 @@ export default function ErpToolEditor({ tool, allowedSchemas, onClose, onSaved }
 
   const [params, setParams] = useState<ErpParam[]>(tool?.params || [])
   const [returns, setReturns] = useState<ErpReturns | null>(tool?.returns || null)
+  const [answerOutputFormat, setAnswerOutputFormat] = useState<AnswerOutputFormat | null>(
+    (tool?.answer_output_format as AnswerOutputFormat) || null
+  )
   const [routineType, setRoutineType] = useState<'FUNCTION' | 'PROCEDURE'>(tool?.routine_type || 'PROCEDURE')
   const [metadataHash, setMetadataHash] = useState<string | null>(tool?.metadata_hash || null)
 
@@ -174,6 +177,7 @@ export default function ErpToolEditor({ tool, allowedSchemas, onClose, onSaved }
         rate_limit_global:   form.rate_limit_global   === '' ? null : Number(form.rate_limit_global),
         rate_limit_window:   form.rate_limit_window,
         allow_dry_run:       form.allow_dry_run ? 1 : 0,
+        answer_output_format: answerOutputFormat,
       }
       if (isEdit) {
         await api.put(`/erp-tools/${tool!.id}`, payload)
@@ -463,6 +467,14 @@ export default function ErpToolEditor({ tool, allowedSchemas, onClose, onSaved }
               )}
             </div>
           </section>
+
+          {/* Answer Output Format — 僅 endpoint_mode === 'answer' 顯示 */}
+          {form.endpoint_mode === 'answer' && (
+            <AnswerOutputFormatEditor
+              value={answerOutputFormat}
+              onChange={setAnswerOutputFormat}
+            />
+          )}
 
           {/* Limits */}
           <section>
@@ -1129,6 +1141,196 @@ function ErpToolLovEditor({ lovConfig, onChange, siblingParams = [] }: { lovConf
           <input value={lovConfig?.label_col || 'L'} onChange={e => onChange({ label_col: e.target.value })}
             className="w-full border border-slate-300 rounded px-2 py-1 text-[11px] font-mono" />
         </div>
+      </div>
+    </div>
+  )
+}
+
+/* ──────────────────────────────────────────────────────────
+ * AnswerOutputFormatEditor — Answer 模式輸出解析設定
+ * 讓 Admin 指定 FUNCTION 回傳 VARCHAR2 的分隔符、欄位名、圖表規格,
+ * Server 依此 parse 並渲染 Markdown 表格 + 圖表,全程無 LLM。
+ * ────────────────────────────────────────────────────────── */
+function AnswerOutputFormatEditor({
+  value, onChange,
+}: {
+  value: AnswerOutputFormat | null
+  onChange: (v: AnswerOutputFormat | null) => void
+}) {
+  const enabled = !!value
+  const cur: AnswerOutputFormat = value || {}
+  const upd = (patch: Partial<AnswerOutputFormat>) => onChange({ ...(cur || {}), ...patch })
+  const updChart = (patch: any) => onChange({ ...(cur || {}), chart: { ...(cur.chart || {}), ...patch } })
+
+  return (
+    <section className="border border-slate-200 rounded-lg p-3 bg-emerald-50/30">
+      <div className="flex items-center justify-between mb-2">
+        <div>
+          <div className="text-sm font-medium text-slate-700">輸出解析（Answer 模式專用）</div>
+          <div className="text-[11px] text-slate-500 mt-0.5">
+            設定後,後端會自動把 FUNCTION 的 VARCHAR2 回傳解析成 Markdown 表格 + 圖表,不需要 LLM 整理。
+          </div>
+        </div>
+        <label className="flex items-center gap-1.5 text-xs text-slate-700">
+          <input type="checkbox" checked={enabled}
+            onChange={e => onChange(e.target.checked ? { col_separator: '/', row_separator: '\\n', columns: [], numeric_columns: [] } : null)} />
+          啟用自動解析
+        </label>
+      </div>
+
+      {enabled && (
+        <div className="space-y-3">
+          <div className="grid grid-cols-4 gap-2">
+            <div>
+              <label className="text-[10px] text-slate-500">欄位分隔符</label>
+              <input value={cur.col_separator || '/'}
+                onChange={e => upd({ col_separator: e.target.value })}
+                className="w-full border border-slate-300 rounded px-2 py-1 text-xs font-mono"
+                placeholder="/" />
+            </div>
+            <div>
+              <label className="text-[10px] text-slate-500">列分隔</label>
+              <select value={cur.row_separator || '\\n'}
+                onChange={e => upd({ row_separator: e.target.value })}
+                className="w-full border border-slate-300 rounded px-2 py-1 text-xs">
+                <option value="\n">換行 (\n)</option>
+                <option value="space">空白</option>
+                <option value="\t">Tab</option>
+                <option value=",">逗號 (,)</option>
+                <option value=";">分號 (;)</option>
+              </select>
+            </div>
+            <div>
+              <label className="text-[10px] text-slate-500">最多顯示列數</label>
+              <input type="number" value={cur.max_rows ?? 200}
+                onChange={e => upd({ max_rows: Number(e.target.value) })}
+                className="w-full border border-slate-300 rounded px-2 py-1 text-xs" />
+            </div>
+            <label className="flex items-center gap-1 text-xs text-slate-700 pt-5">
+              <input type="checkbox" checked={!!cur.skip_first_row}
+                onChange={e => upd({ skip_first_row: e.target.checked })} />
+              跳過第一列 (header)
+            </label>
+          </div>
+
+          {/* 欄位名稱 */}
+          <AnswerOutputColumnsEditor
+            columns={cur.columns || []}
+            numericColumns={cur.numeric_columns || []}
+            onChange={(columns, numeric_columns) => upd({ columns, numeric_columns })}
+          />
+
+          {/* 圖表設定 */}
+          <div className="border border-slate-200 rounded p-2 bg-white">
+            <label className="flex items-center gap-1.5 text-xs text-slate-700 mb-2">
+              <input type="checkbox" checked={!!cur.chart}
+                onChange={e => onChange({ ...cur, chart: e.target.checked ? { type: 'bar' } : null })} />
+              <span className="font-medium">附加圖表</span>
+              <span className="text-slate-400 text-[10px]">(推薦:排名、時間序列類結果)</span>
+            </label>
+            {cur.chart && (
+              <div className="grid grid-cols-4 gap-2 mt-1">
+                <div>
+                  <label className="text-[10px] text-slate-500">類型</label>
+                  <select value={cur.chart.type || 'bar'}
+                    onChange={e => updChart({ type: e.target.value })}
+                    className="w-full border border-slate-300 rounded px-2 py-1 text-xs">
+                    <option value="bar">長條圖 bar</option>
+                    <option value="line">折線圖 line</option>
+                    <option value="pie">圓餅圖 pie</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-[10px] text-slate-500">X 軸欄位</label>
+                  <select value={cur.chart.x_column || ''}
+                    onChange={e => updChart({ x_column: e.target.value })}
+                    className="w-full border border-slate-300 rounded px-2 py-1 text-xs">
+                    <option value="">--</option>
+                    {(cur.columns || []).map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-[10px] text-slate-500">Y 軸欄位(數字)</label>
+                  <select value={cur.chart.y_column || ''}
+                    onChange={e => updChart({ y_column: e.target.value })}
+                    className="w-full border border-slate-300 rounded px-2 py-1 text-xs">
+                    <option value="">--</option>
+                    {(cur.columns || []).map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-[10px] text-slate-500">標題(選填)</label>
+                  <input value={cur.chart.title || ''}
+                    onChange={e => updChart({ title: e.target.value })}
+                    className="w-full border border-slate-300 rounded px-2 py-1 text-xs" />
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* 範例提示 */}
+          <div className="text-[10px] text-slate-500 bg-slate-50 border border-slate-200 rounded p-2">
+            <div className="font-medium text-slate-600 mb-0.5">範例:</div>
+            <div>PROCEDURE 回傳:<code className="bg-white px-1 rounded">202604/ANDOR/A2/5807-5056-037500/RMB/740809</code></div>
+            <div>設定:分隔符 <code className="bg-white px-1 rounded">/</code>,欄位 <code className="bg-white px-1 rounded">年月, 專案, 類別, 料號, 幣別, 金額</code></div>
+            <div>→ 自動渲染為 6 欄 Markdown 表格。若加圖表(X=料號, Y=金額) → 附長條圖。</div>
+          </div>
+        </div>
+      )}
+    </section>
+  )
+}
+
+function AnswerOutputColumnsEditor({
+  columns, numericColumns, onChange,
+}: {
+  columns: string[]
+  numericColumns: string[]
+  onChange: (cols: string[], numCols: string[]) => void
+}) {
+  const numSet = new Set(numericColumns)
+  const add = () => onChange([...columns, ''], numericColumns)
+  const del = (i: number) => {
+    const nextCols = columns.filter((_, idx) => idx !== i)
+    const dropped = columns[i]
+    onChange(nextCols, numericColumns.filter(n => n !== dropped))
+  }
+  const updName = (i: number, v: string) => {
+    const oldName = columns[i]
+    const next = [...columns]; next[i] = v
+    let nextNum = numericColumns
+    if (numSet.has(oldName)) nextNum = nextNum.map(n => n === oldName ? v : n)
+    onChange(next, nextNum)
+  }
+  const toggleNum = (col: string) => {
+    if (!col) return
+    if (numSet.has(col)) onChange(columns, numericColumns.filter(n => n !== col))
+    else onChange(columns, [...numericColumns, col])
+  }
+
+  return (
+    <div className="border border-slate-200 rounded p-2 bg-white">
+      <div className="text-[10px] text-slate-500 mb-1 flex items-center justify-between">
+        <span>欄位名稱(依序對應 parse 結果)</span>
+        <button onClick={add} className="text-sky-600 hover:text-sky-700 text-xs">+ 新增欄位</button>
+      </div>
+      {columns.length === 0 && (
+        <div className="text-[10px] text-slate-400 text-center py-2">尚未設定欄位,按「+ 新增欄位」開始</div>
+      )}
+      <div className="space-y-1">
+        {columns.map((c, i) => (
+          <div key={i} className="flex gap-1 items-center">
+            <span className="text-[10px] text-slate-400 w-6 text-right">{i + 1}.</span>
+            <input value={c} onChange={e => updName(i, e.target.value)}
+              placeholder={`第 ${i + 1} 欄名稱(如:料號)`}
+              className="flex-1 border border-slate-300 rounded px-2 py-1 text-xs" />
+            <label className="flex items-center gap-1 text-[11px] text-slate-700 px-2">
+              <input type="checkbox" checked={numSet.has(c)} onChange={() => toggleNum(c)} />
+              數字
+            </label>
+            <button onClick={() => del(i)} className="text-xs text-red-500 px-2">x</button>
+          </div>
+        ))}
       </div>
     </div>
   )
