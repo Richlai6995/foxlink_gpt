@@ -1283,6 +1283,33 @@ async function runDashboardQuery({ designId, question, userId, user, isDesigner,
         columnLabels[c] = descToLabel[c];
       }
     }
+    // 補通用「計算欄位 alias」對照(LLM CTE 慣用 alias,不在 schema columns 裡)
+    // 只在該 alias 沒被既有 schema column 占用時才填
+    const computedAliasI18n = {
+      total_cost:          { zh: '總費用',     en: 'Total Cost',       vi: 'Tổng chi phí' },
+      cost:                { zh: '費用',       en: 'Cost',             vi: 'Chi phí' },
+      avg_cost:            { zh: '人均費用',   en: 'Avg Cost / User',  vi: 'Chi phí TB' },
+      avg_cost_per_user:   { zh: '人均費用',   en: 'Avg Cost / User',  vi: 'Chi phí TB / Người' },
+      user_count:          { zh: '使用人數',   en: 'User Count',       vi: 'Số người dùng' },
+      account_count:       { zh: '帳號人數',   en: 'Account Count',    vi: 'Số tài khoản' },
+      indirect_emp_count:  { zh: '間接員工數', en: 'Indirect Emp',     vi: 'NV gián tiếp' },
+      emp_count:           { zh: '人數',       en: 'Count',            vi: 'Số người' },
+      factory_name:        { zh: '廠區名稱',   en: 'Factory Name',     vi: 'Tên nhà máy' },
+      factory_code:        { zh: '廠區代碼',   en: 'Factory Code',     vi: 'Mã nhà máy' },
+      month:               { zh: '月份',       en: 'Month',            vi: 'Tháng' },
+      year:                { zh: '年度',       en: 'Year',             vi: 'Năm' },
+      day:                 { zh: '日期',       en: 'Day',              vi: 'Ngày' },
+      input_tokens:        { zh: '輸入 Tokens', en: 'Input Tokens',    vi: 'Tokens vào' },
+      output_tokens:       { zh: '輸出 Tokens', en: 'Output Tokens',   vi: 'Tokens ra' },
+      total_tokens:        { zh: '總 Tokens',   en: 'Total Tokens',    vi: 'Tổng Tokens' },
+      pct:                 { zh: '占比 (%)',   en: 'Percent',          vi: 'Tỷ lệ' },
+      percentage:          { zh: '占比 (%)',   en: 'Percent',          vi: 'Tỷ lệ' },
+      penetration:         { zh: '滲透率',     en: 'Penetration',      vi: 'Độ thâm nhập' },
+    };
+    const langKey = l.startsWith('en') ? 'en' : l.startsWith('vi') ? 'vi' : 'zh';
+    for (const [alias, names] of Object.entries(computedAliasI18n)) {
+      if (!columnLabels[alias]) columnLabels[alias] = names[langKey] || names.zh;
+    }
   } catch (e) { console.error('[columnLabels] ERROR:', e.message, e.stack); }
 
   send('result', { rows, columns, column_labels: columnLabels, row_count: rows.length, chart_config: chartConfig });
