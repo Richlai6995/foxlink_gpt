@@ -1689,7 +1689,36 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
       console.warn('[Skill] TAG auto-routing for skills failed:', e.message);
     }
     const tagRoutedSkillIds = new Set(tagRoutedSkills.map(s => String(s.id)));
-    const allSkillsToProcess = [...sessionSkills, ...tagRoutedSkills];
+
+    // ── Topbar 強制啟用 Answer / Inject 模式的 ERP tool ─────────────────────
+    // 當使用者從 topbar ⚡ API 面板勾選 ERP tool,且該 tool 是 answer/inject 模式,
+    // 不受 TAG 匹配限制,強制注入到 allSkillsToProcess 直接觸發直達/注入行為。
+    // (tool 模式走後面的 Gemini function 註冊路徑,不需要在這邊處理)
+    let topbarErpAnswerInjectSkills = [];
+    if (Array.isArray(userErpToolIds) && userErpToolIds.length > 0) {
+      try {
+        const placeholders = userErpToolIds.map(() => '?').join(',');
+        const rows = await db.prepare(`
+          SELECT s.* FROM erp_tools t
+          JOIN skills s ON s.id = t.proxy_skill_id
+          WHERE t.id IN (${placeholders})
+            AND t.enabled = 1
+            AND UPPER(t.endpoint_mode) IN ('ANSWER','INJECT')
+        `).all(...userErpToolIds.map(Number));
+        const existingIds = new Set([
+          ...sessionSkills.map(s => String(s.id || s.ID)),
+          ...tagRoutedSkills.map(s => String(s.id || s.ID)),
+        ]);
+        topbarErpAnswerInjectSkills = (rows || []).filter(r => !existingIds.has(String(r.id || r.ID)));
+        if (topbarErpAnswerInjectSkills.length > 0) {
+          console.log(`[Skill] Topbar-forced ERP direct-exec: ${topbarErpAnswerInjectSkills.map(s => `${s.name || s.NAME}(${(s.endpoint_mode || s.ENDPOINT_MODE)})`).join(', ')}`);
+        }
+      } catch (e) {
+        console.warn('[Skill] Topbar ERP answer/inject load failed:', e.message);
+      }
+    }
+
+    const allSkillsToProcess = [...sessionSkills, ...tagRoutedSkills, ...topbarErpAnswerInjectSkills];
     // TAG-routed external/answer skills run AFTER Gemini (post_answer) so the AI search can still happen
     const postAnswerSkills = [];
     // Pre-inject system hint for TAG-routed post_answer skills so AI doesn't try to handle it itself
