@@ -273,6 +273,188 @@ async function streamChatAoai(modelRow, history, userParts, onChunk, extraSystem
   return { text: fullText, inputTokens, outputTokens };
 }
 
+// ── Azure OpenAI streamChat + tool-calling (mirrors gemini.generateWithToolsStream) ──
+/**
+ * AOAI streaming chat with function/tool calling loop.
+ *
+ * Converts Gemini-style functionDeclarations → OpenAI tools[], runs the
+ * tool-call loop: stream → if finish_reason='tool_calls' → execute → feed back
+ * as role:'tool' messages → stream again, up to MAX_TOOL_ROUNDS.
+ *
+ * @param {object}   modelRow              - Full llm_models row
+ * @param {Array}    history               - Gemini-format history
+ * @param {Array}    userParts             - [{text}] | [{inlineData}]
+ * @param {Array}    functionDeclarations  - [{name, description, parameters}] (Gemini-style)
+ * @param {Function} toolHandler           - async (name, args) => result
+ * @param {Function} onChunk               - (text) => void
+ * @param {Function} onToolStatus          - (msg) => void
+ * @param {string}   extraSystemInstruction
+ * @param {object}   opts                  - { directAnswerTools: Set<string> }
+ * @param {object}   genConfig
+ */
+async function streamChatAoaiWithTools(
+  modelRow, history, userParts, functionDeclarations, toolHandler,
+  onChunk, onToolStatus, extraSystemInstruction = '', opts = {}, genConfig = null
+) {
+  const { AzureOpenAI } = require('openai');
+  const apiKey = decryptKey(modelRow.api_key_enc);
+  if (!apiKey)                throw new Error(`AOAI model "${modelRow.key}" 的 API key 未設定`);
+  if (!modelRow.endpoint_url) throw new Error(`AOAI model "${modelRow.key}" 的 Endpoint URL 未設定`);
+
+  const client = new AzureOpenAI({
+    endpoint:   modelRow.endpoint_url,
+    apiKey,
+    apiVersion: modelRow.api_version || '2024-08-01-preview',
+    deployment: modelRow.deployment_name,
+  });
+
+  // ── Build initial messages ────────────────────────────────────────────────
+  const systemPrompt = [
+    '你是 Cortex，一個企業智能助手。請以清晰、專業的繁體中文回答問題，並使用 Markdown 格式化輸出。',
+    extraSystemInstruction,
+  ].filter(Boolean).join('\n\n---\n\n');
+
+  const messages = [{ role: 'system', content: systemPrompt }];
+  for (const h of history) {
+    const role = h.role === 'model' ? 'assistant' : 'user';
+    const content = geminiPartsToAoaiContent(h.parts);
+    if (content) messages.push({ role, content });
+  }
+  const userContent = geminiPartsToAoaiContent(userParts);
+  if (userContent) messages.push({ role: 'user', content: userContent });
+
+  // ── Convert Gemini functionDeclarations → OpenAI tools ───────────────────
+  // OpenAI tool names: ^[a-zA-Z0-9_-]{1,64}$ (Gemini 的 safeName 已符合)
+  const tools = functionDeclarations.map((d) => ({
+    type: 'function',
+    function: {
+      name: d.name,
+      description: d.description || '',
+      parameters: d.parameters || { type: 'object', properties: {} },
+    },
+  }));
+
+  const isGpt5 = /^gpt-5/i.test(modelRow.deployment_name || '');
+  const buildStreamOpts = () => ({
+    model:          modelRow.deployment_name,
+    messages,
+    stream:         true,
+    stream_options: { include_usage: true },
+    tools,
+    tool_choice:    'auto',
+    ...(genConfig?.temperature != null ? { temperature: genConfig.temperature } : {}),
+    ...(genConfig?.top_p != null ? { top_p: genConfig.top_p } : {}),
+    ...(isGpt5 ? {
+      max_completion_tokens: genConfig?.max_output_tokens || 16384,
+      reasoning_effort: genConfig?.reasoning_effort || 'low',
+    } : {
+      ...(genConfig?.max_output_tokens ? { max_tokens: genConfig.max_output_tokens } : {}),
+    }),
+  });
+
+  let fullText = '';
+  let inputTokens = 0, outputTokens = 0;
+  let toolCallCount = 0;
+  const MAX_TOOL_ROUNDS = 10;
+
+  for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+    const stream = await client.chat.completions.create(buildStreamOpts());
+
+    let roundText = '';
+    let finishReason = null;
+    // tool_calls accumulator indexed by `index` field from OpenAI deltas
+    const toolCallsAcc = {};
+
+    for await (const chunk of stream) {
+      const choice = chunk.choices?.[0];
+      if (!choice) {
+        if (chunk.usage) {
+          inputTokens  += chunk.usage.prompt_tokens     || 0;
+          outputTokens += chunk.usage.completion_tokens || 0;
+        }
+        continue;
+      }
+      const delta = choice.delta || {};
+
+      if (delta.content) {
+        roundText += delta.content;
+        fullText  += delta.content;
+        onChunk(delta.content);
+      }
+
+      if (Array.isArray(delta.tool_calls)) {
+        for (const tc of delta.tool_calls) {
+          const idx = tc.index ?? 0;
+          if (!toolCallsAcc[idx]) {
+            toolCallsAcc[idx] = { id: '', type: 'function', function: { name: '', arguments: '' } };
+          }
+          if (tc.id) toolCallsAcc[idx].id = tc.id;
+          if (tc.function?.name) toolCallsAcc[idx].function.name += tc.function.name;
+          if (tc.function?.arguments) toolCallsAcc[idx].function.arguments += tc.function.arguments;
+        }
+      }
+
+      if (choice.finish_reason) finishReason = choice.finish_reason;
+      if (chunk.usage) {
+        inputTokens  += chunk.usage.prompt_tokens     || 0;
+        outputTokens += chunk.usage.completion_tokens || 0;
+      }
+    }
+
+    const toolCalls = Object.keys(toolCallsAcc)
+      .sort((a, b) => Number(a) - Number(b))
+      .map((k) => toolCallsAcc[k])
+      .filter((c) => c.function.name);
+
+    console.log(`[AOAI][round=${round}] finish=${finishReason} text=${roundText.length} toolCalls=${toolCalls.length}${toolCalls.length ? ' (' + toolCalls.map(c => c.function.name).join(',') + ')' : ''}`);
+
+    if (toolCalls.length === 0) break;
+
+    // ── Append assistant turn (with tool_calls) to history ───────────────
+    messages.push({
+      role:       'assistant',
+      content:    roundText || null,
+      tool_calls: toolCalls,
+    });
+
+    // ── Execute tools ────────────────────────────────────────────────────
+    let directAnswerText = null;
+    for (const call of toolCalls) {
+      toolCallCount++;
+      const name = call.function.name;
+      let args = {};
+      try { args = call.function.arguments ? JSON.parse(call.function.arguments) : {}; }
+      catch (e) { console.warn(`[AOAI] Failed to parse tool args for ${name}: ${e.message}`); }
+
+      if (onToolStatus) onToolStatus(`呼叫工具：${name}`);
+      let toolResult;
+      try {
+        toolResult = await toolHandler(name, args);
+      } catch (e) {
+        toolResult = `[Tool error: ${e.message}]`;
+      }
+
+      if (opts.directAnswerTools?.has(name)) {
+        directAnswerText = String(toolResult);
+      }
+
+      messages.push({
+        role:         'tool',
+        tool_call_id: call.id,
+        content:      String(toolResult),
+      });
+    }
+
+    if (directAnswerText !== null) {
+      return { text: directAnswerText, inputTokens, outputTokens, toolCallCount, isDirectAnswer: true };
+    }
+
+    // Loop → next round will call the model with tool results appended
+  }
+
+  return { text: fullText, inputTokens, outputTokens, toolCallCount };
+}
+
 // ── Public API ────────────────────────────────────────────────────────────────
 async function createClient(db, modelKey) {
   const model = await resolveModel(db, modelKey);
@@ -281,4 +463,4 @@ async function createClient(db, modelKey) {
   return makeGeminiClient(model);
 }
 
-module.exports = { createClient, resolveModel, streamChatAoai };
+module.exports = { createClient, resolveModel, streamChatAoai, streamChatAoaiWithTools };

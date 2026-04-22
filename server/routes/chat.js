@@ -6,7 +6,7 @@ const fs = require('fs');
 const { v4: uuidv4 } = require('uuid');
 const { verifyToken } = require('./auth');
 const { streamChat, generateWithImage, generateWithTools, generateWithToolsStream, transcribeAudio, extractTextFromFile, fileToGeminiPart, generateTitle } = require('../services/gemini');
-const { streamChatAoai } = require('../services/llmService');
+const { streamChatAoai, streamChatAoaiWithTools } = require('../services/llmService');
 const { processGenerateBlocks } = require('../services/fileGenerator');
 const { parseChartBlocks } = require('../services/chartSpecParser');
 const { notifyAdminSensitiveKeyword } = require('../services/mailService');
@@ -2973,11 +2973,19 @@ ${hasPreserve ? '- 標記【★保留原文】的欄位：必須完整複製原�
           };
           // 把 langInstruction 一併塞進 system instruction,確保工具路徑也會依 UI 語言回
           const toolsInstruction = [skillExtraInstruction, langInstruction, chartInstruction].filter(Boolean).join('\n\n---\n\n');
-          ({ text, inputTokens, outputTokens, isDirectAnswer } = await generateWithToolsStream(
-            apiModel, history, userParts, allDeclarations, toolHandler,
-            _onToolChunk, _onToolStatus, toolsInstruction,
-            { directAnswerTools }, genConfig
-          ));
+          if (providerType === 'azure_openai' && modelRow) {
+            ({ text, inputTokens, outputTokens, isDirectAnswer } = await streamChatAoaiWithTools(
+              modelRow, history, userParts, allDeclarations, toolHandler,
+              _onToolChunk, _onToolStatus, toolsInstruction,
+              { directAnswerTools }, genConfig
+            ));
+          } else {
+            ({ text, inputTokens, outputTokens, isDirectAnswer } = await generateWithToolsStream(
+              apiModel, history, userParts, allDeclarations, toolHandler,
+              _onToolChunk, _onToolStatus, toolsInstruction,
+              { directAnswerTools }, genConfig
+            ));
+          }
           if (isDirectAnswer && text) {
             // Direct answer mode: wasn't streamed — send as one chunk
             const displayText = text.replace(/\n/g, '  \n');
@@ -2985,7 +2993,7 @@ ${hasPreserve ? '- 標記【★保留原文】的欄位：必須完整複製原�
             sendEvent({ type: 'chunk', content: displayText });
           }
           _timing.llmEnd = Date.now();
-          console.log(`[Chat] Tools+Gemini done in ${Date.now() - t0}ms, tools=${allDeclarations.length} api_called=${calledDifyKbs.size} mcp_called=${Object.keys(serverMap).length > 0 ? 'yes' : 'no'} in=${inputTokens} out=${outputTokens} tokens`);
+          console.log(`[Chat] Tools+${providerType === 'azure_openai' ? 'AOAI' : 'Gemini'} done in ${Date.now() - t0}ms, tools=${allDeclarations.length} api_called=${calledDifyKbs.size} mcp_called=${Object.keys(serverMap).length > 0 ? 'yes' : 'no'} in=${inputTokens} out=${outputTokens} tokens`);
         }
       } else {
         // ── Standard streaming chat (no tools) ───────────────────────────
