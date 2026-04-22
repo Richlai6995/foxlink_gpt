@@ -2,7 +2,16 @@
 
 > Chat 對話內(MCP / 深度研究 / 一般對話)LLM 輸出資料自動渲染為互動圖表
 > 作者:規劃於 2026-04-21
-> 狀態:**規劃中**(尚未進 implementation)
+> 狀態:**Phase 1–5 實作完成(未驗收)** @ 2026-04-22
+>
+> 實作進度快照:
+> - Phase 1 基礎渲染 → commit `488bb4a`
+> - Phase 2 LLM 自動畫 + chartSpecParser + SSE → commit `53bf9a3`
+> - Phase 3 使用者控制(local 切換 + reprompt) → commit `29293de`
+> - Phase 4 進階圖型 + dataZoom → commit `66fb118`
+> - Phase 5 使用者圖庫 + Template Share + admin 採納 → commit `216f395`
+>
+> **尚未做**:測試驗收(見 §9 測試劇本)、push to origin、Phase 4 的 Chart→PPT 匯出、Phase 5b 的 skill 來源重跑 + LLM 輔助採納
 
 ---
 
@@ -214,29 +223,31 @@ ALTER TABLE chat_messages ADD charts_json CLOB
 
 ## 5. 分階段實作計畫
 
-### Phase 1 — 基礎渲染(獨立可 ship)
-- [ ] `types.ts` 加 `InlineChartSpec` + `ChatMessage.charts`
-- [ ] `InlineChart.tsx` 元件(手動塞假資料可 render 三種圖)
-- [ ] `ChatWindow.tsx` 條件 render
-- [ ] DB migration: `chat_messages.charts_json`
-- [ ] 無後端、無 LLM 接線 — 純前端驗收
+### Phase 1 — 基礎渲染(獨立可 ship)✅
+- [x] `types.ts` 加 `InlineChartSpec` + `ChatMessage.charts`
+- [x] `InlineChart.tsx` 元件(bar/line/pie + DEMO_SPECS 可視覺驗證)
+- [x] `ChatWindow.tsx` 條件 render(MarkdownRenderer 後、GeneratedFileLinks 前)
+- [x] DB migration: `chat_messages.charts_json` CLOB
+- [x] 無後端、無 LLM 接線
 
-### Phase 2 — LLM 自動畫
-- [ ] `chartSpecParser.js`(含 tolerant JSON、rows cap、data_ref 解析)
-- [ ] Chat SSE 流程整合(parse → 存 DB → 推 event)
-- [ ] System prompt 教學 + few-shot 範例
-- [ ] 測試:MCP 查 ERP 庫存 → 自動吐 bar chart
+### Phase 2 — LLM 自動畫 ✅
+- [x] `chartSpecParser.js`:tolerant JSON、DATA_ROW_HARDMAX=2000、SOFTCAP=200 線性 downsample、data_ref + 簡化 JSONPath(`$`, `.a`, `[0]`, `[*]`)
+- [x] Chat SSE 流程:toolHandler wrap 收集 toolCallResults → `parseChartBlocks(text, toolCallResults)` → SSE `charts` event → 存 `charts_json` CLOB → GET messages 還原
+- [x] `chartInstruction` 注入 4 條路徑(dify / kb / tools / standard)的 systemInstruction
+- [x] 6 個 unit test 覆蓋 basic / tolerant / data_ref / invalid / downsample / strip
 
-### Phase 3 — 使用者控制(補救路徑)
-- [ ] ChatMessage hover 右側選單:「畫成圖表」/ 「改畫成折線圖」
-- [ ] 點擊 → 打一次 LLM 並把「以 chart_type=X 重畫」塞進 prompt
-- [ ] Inline chart 右鍵選單:「下載 PNG」/ 「切換圖型」(local state,不重打 LLM)
+### Phase 3 — 使用者控制(補救路徑)✅
+- [x] InlineChart hover 加 4 圖型切換 icon(bar/line/area/pie),local state,不重打 LLM
+- [x] ChatWindow assistant message hover 加「畫成圖表」dropdown(3 選)— 只在無現成 chart + 內容含結構化資料 pattern(table / 數字 / 百分比)時顯示
+- [x] `onDrawChart` callback → ChatPage 組 reprompt 打 LLM 重畫
 
-### Phase 4(可選) — 進階
-- [ ] Heatmap / sankey / radar 支援
-- [ ] Chart → PPT 匯出(跟 `generate_pptx` 整合)
-- [ ] 互動 filter(ECharts dataZoom)
-- [ ] a11y(ECharts aria 模式)
+### Phase 4 — 進階 ✅(除 PPT 匯出)
+- [x] scatter(自動偵測 xAxis 數值 / 類別)
+- [x] heatmap(3 維:x × y_fields[0]=group × y_fields[1]=value,漸層 visualMap)
+- [x] radar(indicator 從 x_field,多系列,max 自動算 × 1.1)
+- [x] dataZoom — rows > 30 自動掛 inside + slider(滾輪/拖曳)
+- [ ] **未做**:Chart → PPT 匯出(跟 `generate_pptx` 整合)— 留後續
+- [ ] **未做**:ECharts aria 模式 — 低優先,暫不做
 
 ### Phase 5 — 使用者自建圖表 + 分享
 
@@ -272,16 +283,21 @@ ALTER TABLE chat_messages ADD charts_json CLOB
 
 > 圖表最貴的成本是「設計」(怎麼選圖型、對哪個 tool、欄位怎麼 map),不是資料本身。分享 template + 被分享者用自己權限跑 tool 取資料,資安問題自動交給 tool 層 RBAC 處理,無需另建快照 / 代打機制。
 
-#### 核心功能
+#### 核心功能 ✅
 
-- [ ] **釘選 / 收藏**:chat inline chart 右上角加 ⭐ icon → 存到 `user_charts` 表
-- [ ] **Tool-bound 檢查**:只有來自 tool call 的 chart(有 `tool_call_id` 源)可分享;純對話 freeform 只能私人收藏
-- [ ] **圖庫頁**:`/my-charts` 新頁面,列出個人收藏 + 他人分享給自己的
-- [ ] **參數化**:chart spec 可標記「此處為參數」(如日期範圍、料號、廠區),用 `${param}` 佔位
-- [ ] **打開時執行**:用**被分享者自己的 tool 權限**重跑 → 無權 → 顯示「你沒有 X 工具的使用權,請聯絡 admin 申請」
-- [ ] **Schema 變動偵測**:tool 欄位名變了 → 對比 `source_schema_hash`,不符則提示擁有者重設計
-- [ ] **分享**:**直接複用既有 `ShareGranteePicker` 元件 + 標準 `*_shares` schema**,7 維度(user / role / factory / department / cost_center / division / org_group)
-- [ ] **Admin 採納**:admin 介面看到熱門分享圖可一鍵匯入 AI 戰情室
+- [x] **釘選 / 收藏**:`PinChartButton.tsx` → `POST /api/user-charts`;存 user_charts 表
+- [x] **Tool-bound 檢查**:`source_tool=NULL` 的 freeform chart 在 server + client 雙端禁止分享(`/:id/shares` POST 會 400)
+- [x] **圖庫頁**:`/my-charts` 上線,兩 tab(我的 / 別人分享給我的),expand 跑 param form + render
+- [x] **參數化**:`ChartParamForm.tsx` 支援 5 型(text/number/date/select/boolean),`source_params` CLOB 存 template
+- [x] **打開時執行**:`POST /api/user-charts/:id/execute` 走 `chartExecutor.runSourceTool` 用**被分享者自己的 user context** 呼叫 `erpToolExecutor.execute` / `mcpClient.callTool`
+- [x] **Schema 變動偵測**:`computeSchemaHash(rows[0].keys.sorted)` sha256 前 16 字,不符時 warning 推給 client
+- [x] **分享**:直接 import `dashboard/ShareModal.tsx`(原生支援 `sharesUrl` prop),zero 新輪子
+- [x] **Admin 採納**:`ChartAdoptionPanel.tsx` + `/api/user-charts/admin/popular` + `/api/user-charts/admin/:id/adopt`;**第一版需 admin 手填 SQL**(tool ↔ SQL 路徑差異 Phase 5b 才做 LLM 輔助)
+
+**Phase 5 留給 5b 的小尾巴**:
+- `PinChartButton.pinSource` prop 預留但 ChatPage 還沒注入元資料 → 目前存進去一律 `source_type=chat_freeform, source_tool=NULL`(不可分享);需要在 ChatPage 把 toolCallResults 對照到 spec 再 inject
+- `source_type=skill` 分支在 `chartExecutor.runSourceTool` 回「暫不支援」
+- `source_prompt` 目前未實際使用(原本設計是 fallback 用 LLM 重生 data,但現在走 tool 直接跑)
 
 #### 既有元件複用(關鍵:不發明新輪子)
 
@@ -460,3 +476,204 @@ CREATE TABLE user_chart_shares (
 - `server/services/mcpClient.js` ← MCP 層保持協議中立,不塞 chart hint
 - `client/src/components/common/ShareGranteePicker.tsx` ← **直接 import 複用**,零修改
 - 既有 `canAccessDesign` / `canAccessProject` 等 util ← 參考 pattern,但新 util 獨立檔不污染
+
+---
+
+## 9. 測試劇本(驗收用)
+
+> 驗收優先序:**P0 必跑**(核心路徑,壞了功能等於沒做)→ **P1 應跑**(邊界條件 / UX)→ **P2 可省**(進階 / 罕用)
+>
+> 跑完請在每項劃 ✅ / ❌,❌ 附上 console log 或截圖。
+
+### 環境準備
+```bash
+# 1. 啟 server + client
+cd server && npm run dev
+cd client && npm run dev
+
+# 2. 確認 migration 有跑(server 啟動 log 要看到)
+#    ALTER TABLE CHAT_MESSAGES ADD CHARTS_JSON CLOB
+#    CREATE TABLE USER_CHARTS ...
+#    CREATE TABLE USER_CHART_SHARES ...
+#    ALTER TABLE AI_SELECT_DESIGNS ADD ADOPTED_FROM_USER_CHART_ID NUMBER
+
+# 3. 登入 ADMIN,開新 chat 對話
+```
+
+---
+
+### P0 — Phase 2:LLM 自動畫(最核心,必通)
+
+**T0-1. 直接出圖(data inline)**
+- 在 chat 輸入:「請給我 2026 Q1 三個廠的產量對比,龜山 12500、林口 9800、平鎮 14200,畫成 bar chart」
+- **預期**:
+  - 流完後出現一張 bar chart
+  - server log:`[Chart] Parsed 1 inline chart(s)`
+  - DevTools Network → SSE stream → 有 `{type:"charts",charts:[...]}` event
+  - 回答文字中**不含**` ```generate_chart... ``` ` 區塊(已 strip)
+  - 重整頁面(reload session)→ chart 仍在(代表 `charts_json` 有存 + GET 有 hydrate)
+
+**T0-2. tool 結果自動畫**
+- 選一個會回表格的 ERP 或 MCP 工具(如 ERP 查過去 6 個月某料號走勢)
+- 輸入自然語言「幫我查 XX 的最近趨勢並畫線圖」
+- **預期**:
+  - LLM 吐 `generate_chart:line` 且 data 正確
+  - **若 LLM 用 data_ref**(token 少)也要通 — server log 會印解析成功
+  - chart 張數 ≥ 1
+
+**T0-3. Invalid spec 不炸 message**
+- 指示 LLM:「畫一張只有 x_field 沒 y_fields 的錯誤圖表」(或直接貼給它一個壞 JSON 示範)
+- **預期**:
+  - 整個 message 仍正常顯示(fallback 純文字)
+  - server log:`[Chart] parse error: 缺 y_fields | preview: ...`
+  - 沒有 chart 渲染,但也沒 UI crash
+
+**T0-4. 大資料降採樣**
+- 要 LLM 給 500 筆時間序列資料(「給我近 500 天的假訂單數」)
+- **預期**:
+  - chart 渲染正常(被 downsample 到 200 點)
+  - tooltip hover 仍可用
+  - 超過 30 點自動有 **底部 zoom slider**(Phase 4)
+
+---
+
+### P0 — Phase 3:切換圖型
+
+**T0-5. Local 切換(不重打)**
+- hover chart → 點右上 4 個圖型 icon 之一(bar ↔ line ↔ area ↔ pie)
+- **預期**:
+  - 圖瞬間切換(<100ms,不 loading)
+  - DevTools Network:**沒有**新的 `/api/chat/sessions/...` request
+  - 切回原圖型 → icon 取消高亮
+
+**T0-6. Reprompt 重畫(會打 LLM)**
+- 對**沒有現成 chart** 但**包含表格或百分比**的 assistant message hover → 出現「畫成圖表」dropdown
+- 選「折線圖」
+- **預期**:
+  - 自動送一個 user message(前綴「請把上一個回答中的數據畫成折線圖...」)
+  - LLM 回新訊息,包含 chart
+  - 原訊息沒被改
+
+---
+
+### P0 — Phase 5:我的圖庫 + 分享
+
+**T0-7. 釘選**
+- chat 中出一張 chart → hover 右上 ⭐ → prompt 輸入 title → 確認
+- **預期**:
+  - Star icon 變 ✓ + 橘色
+  - Network:`POST /api/user-charts` 回 200 + `{id:123}`
+  - 進 `/my-charts` → 「我的」tab 看到該筆
+
+**T0-8. Freeform 不可分享**
+- 在 `/my-charts`,目前所有 pin 進來的 chart 都是 freeform(因 ChatPage 還沒注入 source metadata — 詳見 §5「Phase 5 留給 5b 的小尾巴」)
+- **預期**:
+  - card 右側**沒有** Share 按鈕(灰掉)
+  - Card 上有「Freeform」tag
+  - 手動 curl `POST /api/user-charts/:id/shares` → 應回 400「無 tool 來源的 freeform chart 不可分享」
+
+**T0-9. 刪除**
+- 「我的」tab 上某 chart → 點 Trash icon → 確認
+- **預期**:Card 消失、DB `user_charts` 少一筆、對應 `user_chart_shares` 也被 CASCADE 刪
+
+---
+
+### P1 — Phase 4:進階圖型
+
+**T1-1. scatter**
+- 要 LLM:「畫一張 scatter,x 是員工年資(年),y 是月薪(k),給 10 筆假資料」
+- **預期**:點散佈圖、xAxis 自動偵測為 value type
+
+**T1-2. heatmap(3 維)**
+- 要 LLM:「畫 heatmap,x 是 5 個廠,y_fields=[{field:'month',...},{field:'output',...}],data 是 5 廠 × 6 個月的產量」
+- **預期**:渲染熱力圖、右下 visualMap 漸層藍、splitArea
+
+**T1-3. radar(雷達圖 — 多系列比較)**
+- 要 LLM:「畫 radar 比較三個廠在 5 個指標(品質/效率/成本/交期/安全)的表現」
+- **預期**:三個多邊形疊加、legend 可切換
+
+**T1-4. dataZoom**
+- T0-4 已含此檢查(rows > 30)
+
+---
+
+### P1 — Phase 5 邊界
+
+**T1-5. Schema hash 漂移**(難模擬,可跳過或手動)
+- 先 pin 一張 ERP 圖
+- 手動把該 ERP tool 的 output columns 改名(`DBA` 要配合 🤷)
+- 重開 chart 執行
+- **預期**:warnings 區塊出現「資料來源欄位已變更」提示,圖仍能渲染
+
+**T1-6. 被分享者權限不足**
+- admin 把一張用 ERP tool 的 chart 分享給 user B(user B 沒那支 ERP 的執行權)
+- user B 進 `/my-charts` → expand → 執行
+- **預期**:回 400,error 訊息包含 ERP 權限不足字樣(由 erpToolExecutor 層拋)
+
+**T1-7. 不同 grantee_type 7 維分享**
+- 測 `user` / `role` / `department` 三種(其他太難造資料可跳)
+- 對每種 type POST `/api/user-charts/:id/shares` → reload `/my-charts` (以目標帳號) 看「別人分享給我的」tab 有該 chart
+
+---
+
+### P1 — Admin 採納
+
+**T1-8. 熱門清單**
+- Admin → 「使用者圖庫採納」tab
+- **預期**:列表顯示所有有 `source_tool` 的 chart,按 `use_count` desc
+
+**T1-9. 採納流程**
+- 選一筆 → 點「採納」→ 填主題 / design name / 亂打一段 SQL → 確認
+- **預期**:
+  - `ai_select_designs` 新增一筆,`adopted_from_user_chart_id=<chart.id>`
+  - 列表該筆狀態變「已採納 (#N)」
+  - 進 AI 戰情室能看到該 design(但 SQL 要 admin 調對欄位才會跑對)
+
+---
+
+### P2 — 罕用邊界
+
+**T2-1. tolerant JSON**
+- 手動構造帶 trailing comma 的 chart block 給 LLM(例如「請這樣寫:`{...,}`」)
+- **預期**:parser 仍收下,server log 不報 error
+
+**T2-2. 多張 chart 在同一 message**
+- 要 LLM「一次給 3 張不同 chart 比較」
+- **預期**:全部 render,DB `charts_json` 是 array 長度 3
+
+**T2-3. 中文 title / axis label**
+- 前面測試自然有涵蓋,若字型錯亂重檢查 `client/src/components/chat/InlineChart.tsx` 的 `CHART_FONT`
+
+**T2-4. PNG 下載**
+- chart hover → 右上 Download icon → 取得 PNG
+- **預期**:檔名 `<title>.png`、pixelRatio=2(高解析)、背景白色
+
+**T2-5. 重整後 chart 還在 + 切換仍作用**
+- T0-1 已測還在;再 hover 試切換圖型是否仍 local
+- **預期**:切換正常(state 在元件內,不需 DB 往返)
+
+---
+
+### 已知限制(非 bug,實作取捨)
+
+| 現象 | 原因 | 規劃 |
+|------|------|------|
+| Pin 下來的 chart 都是 freeform | ChatPage 還沒把 toolCallResults → source metadata 注給 PinChartButton | Phase 5b |
+| skill 類來源不能重跑 | chartExecutor 只實作 erp / mcp;skill 要另外處理 user_token 簽 | Phase 5b |
+| admin 採納要手填 SQL | tool 路徑 ↔ SQL 路徑的橋接,第一版不做自動 | Phase 5b(LLM 輔助) |
+| 只有 LLM 回答時才偵測 chart | 不支援「把既有 message 貼一張 chart 進去」| 設計 by design |
+| dataZoom 在 pie / heatmap / radar 沒意義 | 只在 bar/line/area 開 | 設計 by design |
+
+---
+
+### 快速驗收路徑(10 分鐘跑完核心)
+
+只跑這 5 個就 ship:
+```
+T0-1  直接 inline data 畫 bar
+T0-3  壞 JSON 不炸 message
+T0-5  local 切換圖型
+T0-7  釘選到圖庫
+T1-9  admin 採納
+```
+這 5 個涵蓋 parser / render / persist / switch / pin / share schema / admin adoption 的主幹路徑。
