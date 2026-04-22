@@ -3060,6 +3060,10 @@ async function runMigrations(db) {
   // mcp_call_logs 追加欄位:事後審計用,可與 MCP 端 log 對齊單次呼叫
   await safeAddColumn('MCP_CALL_LOGS', 'USER_EMAIL',      'VARCHAR2(200)');
   await safeAddColumn('MCP_CALL_LOGS', 'JTI',             'VARCHAR2(64)');
+
+  // ── MCP ServerInstructions(initialize.result.instructions)────────────────
+  // 從 MCP server 的 initialize 回應保存下來,chat 組 systemInstruction 時注入
+  await safeAddColumn('MCP_SERVERS', 'SERVER_INSTRUCTIONS', 'CLOB');
 }
 
 // ─── Default DB Source migration ───────────────────────────────────────────────

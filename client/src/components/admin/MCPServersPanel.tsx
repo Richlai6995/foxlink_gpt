@@ -29,6 +29,7 @@ interface McpServer {
   args_json: string | null
   env_json: string | null
   tools_json: string | null
+  server_instructions: string | null
   last_synced_at: string | null
   created_at: string
   tags: string | null
@@ -446,6 +447,13 @@ export default function MCPServersPanel() {
                       </div>
                     )}
                     {(localDesc(s)) && <p className="text-xs text-slate-400 mt-2 border-t border-slate-200 pt-2">{localDesc(s)}</p>}
+                    {s.server_instructions && (
+                      <div className="mt-2 border-t border-slate-200 pt-2">
+                        <div className="text-xs font-medium text-slate-600 mb-0.5">{t('mcp.serverInstructionsTitle')}</div>
+                        <div className="text-[11px] text-slate-400 italic mb-1.5">{t('mcp.serverInstructionsHint')}</div>
+                        <pre className="text-xs text-slate-600 bg-white border border-slate-200 rounded p-2 whitespace-pre-wrap max-h-48 overflow-auto">{s.server_instructions}</pre>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

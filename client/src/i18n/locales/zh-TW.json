@@ -1443,6 +1443,8 @@
     "callLogs": "呼叫記錄",
     "lastSynced": "最後同步：",
     "noToolsSynced": "尚未同步工具，請點擊右方同步按鈕",
+    "serverInstructionsTitle": "伺服器指示（initialize.instructions）",
+    "serverInstructionsHint": "由 MCP 伺服器於 initialize 時提供，chat 時會自動注入到 LLM systemInstruction",
     "syncSuccess": "✓ 同步成功，{{count}} 個工具",
     "syncFailed": "✗ {{error}}",
     "deleteConfirm": "確定刪除「{{name}}」？",

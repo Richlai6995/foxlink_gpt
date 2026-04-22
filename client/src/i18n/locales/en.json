@@ -1443,6 +1443,8 @@
     "callLogs": "Call Logs",
     "lastSynced": "Last synced: ",
     "noToolsSynced": "No tools synced yet, click the sync button",
+    "serverInstructionsTitle": "Server Instructions (initialize.instructions)",
+    "serverInstructionsHint": "Provided by the MCP server at initialize; auto-injected into LLM systemInstruction during chat",
     "syncSuccess": "✓ Synced, {{count}} tools",
     "syncFailed": "✗ {{error}}",
     "deleteConfirm": "Delete \"{{name}}\"?",

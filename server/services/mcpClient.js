@@ -151,9 +151,10 @@ async function httpPostRpc(url, authCtx, method, params = {}) {
 }
 
 async function withHttpPost(url, authCtx, fn) {
-  // initialize is optional — ignore errors
-  try { await httpPostRpc(url, authCtx, 'initialize', INIT_PARAMS); } catch (_) {}
-  return fn((method, params) => httpPostRpc(url, authCtx, method, params));
+  // initialize is optional — ignore errors. 保留 result.instructions(MCP ServerInstructions)
+  let initResult = null;
+  try { initResult = await httpPostRpc(url, authCtx, 'initialize', INIT_PARAMS); } catch (_) {}
+  return fn((method, params) => httpPostRpc(url, authCtx, method, params), initResult);
 }
 
 // ── Transport: streamable-http ────────────────────────────────────────────────
@@ -235,8 +236,9 @@ async function streamableHttpRpc(url, authCtx, method, params = {}, sessionRef =
 async function withStreamableHttp(url, authCtx, fn) {
   // sessionRef 是可變容器:initialize 會寫入 id,後續 RPC 讀它帶進 header
   const sessionRef = { id: null };
-  try { await streamableHttpRpc(url, authCtx, 'initialize', INIT_PARAMS, sessionRef); } catch (_) {}
-  return fn((method, params) => streamableHttpRpc(url, authCtx, method, params, sessionRef));
+  let initResult = null;
+  try { initResult = await streamableHttpRpc(url, authCtx, 'initialize', INIT_PARAMS, sessionRef); } catch (_) {}
+  return fn((method, params) => streamableHttpRpc(url, authCtx, method, params, sessionRef), initResult);
 }
 
 // ── Transport: http-sse ───────────────────────────────────────────────────────
@@ -314,8 +316,9 @@ async function withHttpSse(sseUrl, authCtx, fn) {
   }
 
   try {
-    try { await sseRpc('initialize', INIT_PARAMS); } catch (_) {}
-    return await fn(sseRpc);
+    let initResult = null;
+    try { initResult = await sseRpc('initialize', INIT_PARAMS); } catch (_) {}
+    return await fn(sseRpc, initResult);
   } finally {
     controller.abort();
   }
@@ -433,8 +436,9 @@ async function withStdio(command, argsExtra = [], envExtra = {}, authCtx, fn) {
   }
 
   try {
-    try { await stdioRpc('initialize', INIT_PARAMS); } catch (_) {}
-    return await fn(stdioRpc);
+    let initResult = null;
+    try { initResult = await stdioRpc('initialize', INIT_PARAMS); } catch (_) {}
+    return await fn(stdioRpc, initResult);
   } finally {
     try { proc.kill(); } catch (_) {}
   }
@@ -513,14 +517,20 @@ async function withSession(db, server, fn, authCtx = null) {
 // ── Public API ────────────────────────────────────────────────────────────────
 
 async function listTools(db, server) {
-  const tools = await withSession(db, server, async (rpc) => {
+  // 同時抓 tools/list 與 initialize 回傳的 ServerInstructions(放在第 2 個 arg)
+  const { tools, instructions } = await withSession(db, server, async (rpc, initResult) => {
     const result = await rpc('tools/list', {});
-    return result.tools || [];
+    const instr = (initResult && typeof initResult.instructions === 'string')
+      ? initResult.instructions.trim()
+      : '';
+    return { tools: result.tools || [], instructions: instr };
   });
 
   await db.prepare(
-    `UPDATE mcp_servers SET tools_json=?, last_synced_at=SYSTIMESTAMP, updated_at=SYSTIMESTAMP WHERE id=?`
-  ).run(JSON.stringify(tools), server.id);
+    `UPDATE mcp_servers
+       SET tools_json=?, server_instructions=?, last_synced_at=SYSTIMESTAMP, updated_at=SYSTIMESTAMP
+     WHERE id=?`
+  ).run(JSON.stringify(tools), instructions || null, server.id);
 
   return tools;
 }
@@ -631,6 +641,9 @@ async function getActiveToolDeclarations(db, userCtx = null) {
 
   const functionDeclarations = [];
   const serverMap = {};
+  // serverId → { name, instructions } — 只收錄真的有 instructions 的 server,
+  // 呼叫端在 chat 組 systemInstruction 時會依哪些 tool 被納入 allDeclarations 篩選
+  const serverInstructionsMap = {};
 
   for (const server of servers) {
     if (!server.tools_json) continue;
@@ -647,9 +660,17 @@ async function getActiveToolDeclarations(db, userCtx = null) {
       });
       serverMap[safeName] = { server, originalName: tool.name };
     }
+
+    const instr = (server.server_instructions || '').toString().trim();
+    if (instr) {
+      serverInstructionsMap[server.id] = {
+        name: server.name_zh || server.name || `MCP#${server.id}`,
+        instructions: instr,
+      };
+    }
   }
 
-  const result = { functionDeclarations, serverMap };
+  const result = { functionDeclarations, serverMap, serverInstructionsMap };
   _mcpDeclCache.set(ck, { data: result, ts: Date.now() });
   return result;
 }
@@ -681,10 +702,40 @@ function verifyUserToken(token) {
   });
 }
 
+/**
+ * 依據實際被納入 LLM 的 tool,挑出對應 MCP server 的 instructions 段落拼成 systemInstruction。
+ * serverMap: { safeToolName → { server, originalName } } — 來自 getActiveToolDeclarations
+ * usedToolNames: Iterable<string> — 被加到 allDeclarations 的 safeToolName(chat.js 端的 final list)
+ * serverInstructionsMap: { serverId → { name, instructions } }
+ * @returns {string} 可能為空字串
+ */
+function buildMcpSystemInstructions(serverMap, usedToolNames, serverInstructionsMap) {
+  if (!serverInstructionsMap || Object.keys(serverInstructionsMap).length === 0) return '';
+  const usedServerIds = new Set();
+  for (const tn of usedToolNames) {
+    const entry = serverMap?.[tn];
+    if (entry?.server?.id != null) usedServerIds.add(entry.server.id);
+  }
+  if (usedServerIds.size === 0) return '';
+
+  const blocks = [];
+  for (const sid of usedServerIds) {
+    const entry = serverInstructionsMap[sid];
+    if (!entry) continue;
+    // 截長保護:單一 server 指示 > 4000 字顯然是配錯,截到 4000
+    const body = entry.instructions.length > 4000
+      ? entry.instructions.slice(0, 4000) + '…(truncated)'
+      : entry.instructions;
+    blocks.push(`【${entry.name} 使用規則】\n${body}`);
+  }
+  return blocks.join('\n\n---\n\n');
+}
+
 module.exports = {
   listTools,
   callTool,
   getActiveToolDeclarations,
+  buildMcpSystemInstructions,
   // exposed for Admin API (Phase 2) and CLI script (Phase 4):
   signUserToken,
   verifyUserToken,

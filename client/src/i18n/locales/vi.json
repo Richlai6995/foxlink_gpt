@@ -1443,6 +1443,8 @@
     "callLogs": "Nhật ký gọi",
     "lastSynced": "Đồng bộ lần cuối: ",
     "noToolsSynced": "Chưa đồng bộ công cụ, nhấp nút đồng bộ",
+    "serverInstructionsTitle": "Chỉ dẫn máy chủ (initialize.instructions)",
+    "serverInstructionsHint": "Do máy chủ MCP cung cấp khi initialize; tự động đưa vào systemInstruction của LLM khi chat",
     "syncSuccess": "✓ Đã đồng bộ, {{count}} công cụ",
     "syncFailed": "✗ {{error}}",
     "deleteConfirm": "Xóa \"{{name}}\"?",
