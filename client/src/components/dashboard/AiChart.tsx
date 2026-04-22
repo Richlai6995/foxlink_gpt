@@ -84,6 +84,45 @@ function mkGradient(color: string) {
   }
 }
 
+// 統一的陰影樣式(專業感 — 比原本 blur=8/offset=2 強)
+function mkShadow(color: string, on: boolean) {
+  if (!on) return {}
+  return {
+    shadowBlur: 14,
+    shadowColor: color + '50',
+    shadowOffsetX: 0,
+    shadowOffsetY: 4,
+  }
+}
+
+// 通用 hover emphasis(bar / line series 共用)
+const BAR_EMPHASIS = {
+  focus: 'series' as const,
+  itemStyle: {
+    shadowBlur: 18,
+    shadowColor: 'rgba(0, 0, 0, 0.28)',
+    shadowOffsetX: 0,
+    shadowOffsetY: 6,
+  },
+}
+const LINE_EMPHASIS = {
+  focus: 'series' as const,
+  scale: 1.3,
+  lineStyle: { width: 3.5 },
+}
+// pie 的「浮動 + 陰影」更強烈
+const PIE_EMPHASIS = {
+  scale: true,
+  scaleSize: 12,
+  itemStyle: {
+    shadowBlur: 24,
+    shadowColor: 'rgba(0, 0, 0, 0.35)',
+    shadowOffsetX: 0,
+    shadowOffsetY: 4,
+  },
+  label: { show: true, fontSize: 14, fontWeight: 'bold' as const },
+}
+
 const CHART_FONT = "'Noto Sans TC', 'Microsoft JhengHei', 'PingFang TC', 'Segoe UI', Arial, sans-serif"
 
 const BASE_OPTION = {
@@ -139,11 +178,11 @@ export default function AiChart({ chartDef, rows, columnLabels = {}, height = 32
 
   const {
     type, x_field, y_field, label_field, value_field,
-    horizontal, smooth, area, gradient, donut, show_label,
+    horizontal, smooth, area, donut, show_label,
     show_legend, show_grid,
     sort_by, sort_order, min_value, limit,
     series_field, stack_field, agg_fn,
-    y_axes, shadow, overlay_lines,
+    y_axes, overlay_lines,
     series_colors,
     axis_label_color, axis_label_size, axis_label_bold,
     axis_line_color, data_label_color, data_label_size, data_label_bold,
@@ -151,6 +190,10 @@ export default function AiChart({ chartDef, rows, columnLabels = {}, height = 32
     title_left, title_top, legend_left, legend_top, legend_orient,
     grid_line_color,
   } = chartDef
+
+  // shadow / gradient 預設 ON(opt-out 而非 opt-in,專業感預設值)
+  const shadow   = chartDef.shadow   ?? true
+  const gradient = chartDef.gradient ?? true
 
   // ── 樣式變數（有設定優先，否則用預設值）──────────────────────────────────────
   const sAxisLabel   = axis_label_color  || '#6b7280'
@@ -316,7 +359,7 @@ export default function AiChart({ chartDef, rows, columnLabels = {}, height = 32
           )
           return pivotAgg(matched)
         })
-        const shadowStyle = shadow ? { shadowBlur: 8, shadowColor: c + '80', shadowOffsetY: 2 } : {}
+        const shadowStyle = mkShadow(c, shadow)
         if (chartType === 'line') return {
           name: sv, type: 'line', data,
           smooth: smooth ?? true, symbol: 'circle', symbolSize: 5,
@@ -328,6 +371,7 @@ export default function AiChart({ chartDef, rows, columnLabels = {}, height = 32
         return {
           name: sv, type: 'bar', data,
           itemStyle: { color: itemColor, borderRadius: [3, 3, 0, 0], ...shadowStyle },
+          emphasis: BAR_EMPHASIS,
           label: dataLabelTop,
           barMaxWidth: 40,
         }
@@ -349,7 +393,7 @@ export default function AiChart({ chartDef, rows, columnLabels = {}, height = 32
           )
           return pivotAgg(matched)
         })
-        const shadowStyle = shadow ? { shadowBlur: 8, shadowColor: c + '80', shadowOffsetY: 2 } : {}
+        const shadowStyle = mkShadow(c, shadow)
         if (chartType === 'line') return {
           name: stv, type: 'line', stack: 'total', data,
           smooth: smooth ?? true, symbol: 'circle', symbolSize: 5,
@@ -361,6 +405,7 @@ export default function AiChart({ chartDef, rows, columnLabels = {}, height = 32
         return {
           name: stv, type: 'bar', stack: 'total', data,
           itemStyle: { color: itemColor, ...shadowStyle },
+          emphasis: BAR_EMPHASIS,
           label: show_label ? { show: true, position: 'inside', color: '#fff', fontSize: 10 } : { show: false },
           barMaxWidth: 60,
         }
@@ -391,7 +436,7 @@ export default function AiChart({ chartDef, rows, columnLabels = {}, height = 32
           )
           return pivotAgg(matched)
         })
-        const shadowStyle = shadow ? { shadowBlur: 8, shadowColor: c + '80', shadowOffsetY: 2 } : {}
+        const shadowStyle = mkShadow(c, shadow)
         if (chartType === 'line') {
           seriesList.push({
             name: `${sv}·${stv}`, type: 'line', stack: sv, data,
@@ -405,6 +450,7 @@ export default function AiChart({ chartDef, rows, columnLabels = {}, height = 32
           seriesList.push({
             name: `${sv}·${stv}`, type: 'bar', stack: sv, data,
             itemStyle: { color: itemColor, ...shadowStyle },
+          emphasis: BAR_EMPHASIS,
             label: show_label ? { show: true, position: 'inside', color: '#fff', fontSize: 10 } : { show: false },
             barMaxWidth: 60,
           })
@@ -482,7 +528,7 @@ export default function AiChart({ chartDef, rows, columnLabels = {}, height = 32
       // per-axis 優先，沒設定則 fallback 到全域 shadow/gradient
       const useShadow = ax.shadow ?? shadow
       const useGradient = ax.gradient ?? gradient
-      const shadowStyle = useShadow ? { shadowBlur: 8, shadowColor: c + '80', shadowOffsetY: 2 } : {}
+      const shadowStyle = mkShadow(c, useShadow)
       const seriesName = ax.label || ax.field
 
       if (ax.chart_type === 'line') {
@@ -506,6 +552,7 @@ export default function AiChart({ chartDef, rows, columnLabels = {}, height = 32
         barGap: ax.overlap ? '-100%' : undefined,
         z: ax.overlap ? (idx + 1) * 2 : undefined,
         itemStyle: { color: itemColor, borderRadius: stackGroup ? [0, 0, 0, 0] : [4, 4, 0, 0], ...shadowStyle },
+          emphasis: BAR_EMPHASIS,
         label: stackGroup
           ? { show: show_label, position: 'inside' as const, color: '#fff', fontSize: sDataLabelSz }
           : dataLabelTop,
@@ -562,7 +609,7 @@ export default function AiChart({ chartDef, rows, columnLabels = {}, height = 32
     } else {
       const { xData, yData } = buildSingleSeriesData()
       const color = gradient ? mkGradient(primaryColor) : primaryColor
-      const shadowStyle = shadow ? { shadowBlur: 8, shadowColor: primaryColor + '80', shadowOffsetY: 2 } : {}
+      const shadowStyle = mkShadow(primaryColor, shadow)
       option = {
         ...BASE_OPTION,
         backgroundColor: chartDef.chart_bg_color || 'transparent',
@@ -580,6 +627,7 @@ export default function AiChart({ chartDef, rows, columnLabels = {}, height = 32
           type: 'bar',
           data: yData,
           itemStyle: { color, borderRadius: [4, 4, 0, 0], ...shadowStyle },
+          emphasis: BAR_EMPHASIS,
           label: dataLabelTop,
           barMaxWidth: 48,
         }],
@@ -606,7 +654,7 @@ export default function AiChart({ chartDef, rows, columnLabels = {}, height = 32
       }
     } else {
       const { xData, yData } = buildSingleSeriesData()
-      const shadowStyle = shadow ? { shadowBlur: 8, shadowColor: primaryColor + '80', shadowOffsetY: 2 } : {}
+      const shadowStyle = mkShadow(primaryColor, shadow)
       option = {
         ...BASE_OPTION,
         backgroundColor: chartDef.chart_bg_color || 'transparent',
@@ -621,10 +669,11 @@ export default function AiChart({ chartDef, rows, columnLabels = {}, height = 32
           data: yData,
           smooth: smooth ?? true,
           symbol: 'circle',
-          symbolSize: 6,
-          lineStyle: { color: primaryColor, width: 2.5 },
-          itemStyle: { color: primaryColor, ...shadowStyle },
-          areaStyle: area ? { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: primaryColor + '60' }, { offset: 1, color: primaryColor + '00' }] } } : undefined,
+          symbolSize: 7,
+          lineStyle: { color: primaryColor, width: 2.5, ...shadowStyle },
+          itemStyle: { color: primaryColor, borderColor: '#fff', borderWidth: 1.5, ...shadowStyle },
+          areaStyle: area ? { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: primaryColor + '70' }, { offset: 1, color: primaryColor + '00' }] } } : undefined,
+          emphasis: LINE_EMPHASIS,
           label: dataLabelStyle,
         }],
       }
@@ -644,12 +693,24 @@ export default function AiChart({ chartDef, rows, columnLabels = {}, height = 32
       title: titleStyle(title),
       series: [{
         type: 'pie',
-        radius: donut ? ['40%', '70%'] : '65%',
+        radius: donut ? ['42%', '72%'] : '68%',
         center: ['50%', '55%'],
         data: pieData,
+        // 預設給每塊一點邊框 + 微陰影,讓扇片之間有層次
+        itemStyle: {
+          borderColor: '#ffffff',
+          borderWidth: 2,
+          shadowBlur: shadow ? 12 : 0,
+          shadowColor: shadow ? 'rgba(0, 0, 0, 0.18)' : 'transparent',
+          shadowOffsetY: 3,
+        },
         label: { color: sDataLabel, fontSize: sDataLabelSz },
         labelLine: { lineStyle: { color: sAxisLine } },
-        emphasis: { itemStyle: { shadowBlur: 10, shadowColor: 'rgba(0,0,0,0.5)' } },
+        emphasis: PIE_EMPHASIS,
+        // 進場動畫:由中心擴散
+        animationType: 'expansion',
+        animationEasing: 'cubicOut',
+        animationDuration: 600,
       }],
     }
   } else if (type === 'scatter') {

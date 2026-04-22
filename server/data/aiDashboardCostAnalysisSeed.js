@@ -365,7 +365,7 @@ const DESIGN_A = {
   },
 };
 
-// Design B: 利潤中心 × 廠區 明細表
+// Design B: 利潤中心 × 廠區 明細表 (table + bar by factory)
 const DESIGN_B = {
   name: DESIGN_B_NAME,
   description: '本期利潤中心 × 廠區的費用、間接員工、帳號、使用人數完整明細(對應 admin「利潤中心 × 廠區明細表」)',
@@ -407,7 +407,14 @@ const DESIGN_B = {
         "ORDER BY total_cost DESC",
     },
   ],
-  chart_config: { default_chart: 'table', allow_table: true, allow_export: true, charts: [] },
+  chart_config: {
+    default_chart: 'bar',
+    allow_table: true,
+    allow_export: true,
+    charts: [
+      { type: 'bar', title: '各廠區費用', x_field: 'factory_name', y_field: 'total_cost', show_label: false },
+    ],
+  },
 };
 
 // Design C: 月份費用分析表
@@ -440,7 +447,7 @@ const DESIGN_C = {
   },
 };
 
-// Design D: 利潤中心 × 月份 × 廠區 明細表
+// Design D: 利潤中心 × 月份 × 廠區 明細表 (table + bar by month + bar by factory)
 const DESIGN_D = {
   name: DESIGN_D_NAME,
   description: '按利潤中心 × 月份 × 廠區的完整費用明細(對應 admin「利潤中心 × 月份 × 廠區明細表」),純表格',
@@ -480,7 +487,15 @@ const DESIGN_D = {
         "ORDER BY us.month, us.total_cost DESC",
     },
   ],
-  chart_config: { default_chart: 'table', allow_table: true, allow_export: true, charts: [] },
+  chart_config: {
+    default_chart: 'bar',
+    allow_table: true,
+    allow_export: true,
+    charts: [
+      { type: 'bar', title: '月份費用趨勢',  x_field: 'month',        y_field: 'total_cost', show_label: false },
+      { type: 'bar', title: '各廠區費用',    x_field: 'factory_name', y_field: 'total_cost', show_label: false },
+    ],
+  },
 };
 
 // Design E: Token 使用清單
