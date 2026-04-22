@@ -1725,6 +1725,10 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
     }
 
     const allSkillsToProcess = [...sessionSkills, ...tagRoutedSkills, ...topbarErpAnswerInjectSkills];
+
+    // 提前宣告 — 供 answer fallback(line ~1937)與後面正式 register loop 共用,
+    // 避免 TDZ 導致 fallback 寫入被 catch 吞掉而悄悄失敗
+    const codeSkillToolMap = {};
     // TAG-routed external/answer skills run AFTER Gemini (post_answer) so the AI search can still happen
     const postAnswerSkills = [];
     // Pre-inject system hint for TAG-routed post_answer skills so AI doesn't try to handle it itself
@@ -1934,8 +1938,13 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
                 try {
                   const schema = JSON.parse(sk.tool_schema);
                   const fallbackName = schema.name || `erp_tool_${erpToolId}`;
+                  // 標記 fallback,讓後面正式 register loop 接受(繞過 erpMode !== 'tool' 檢查)
+                  sk.__fallback_to_tool = true;
                   codeSkillToolMap[fallbackName] = sk;
-                } catch (_) {}
+                  console.log(`[ErpAnswer] fallback registered "${fallbackName}" for LLM function calling`);
+                } catch (e) {
+                  console.warn(`[ErpAnswer] fallback register failed:`, e.message);
+                }
                 continue;
               }
             }
@@ -2016,7 +2025,7 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
 
     // ── Register code skills with tool_schema as Gemini function declarations ──
     // post_answer / answer skills run AFTER Gemini — do NOT register them as Gemini tools
-    const codeSkillToolMap = {};
+    // (codeSkillToolMap 已在 allSkillsToProcess 後宣告,供 answer fallback 共用)
     for (const sk of allSkillsToProcess) {
       if ((sk.type === 'code' || sk.type === 'external') && sk.tool_schema && sk.code_status === 'running' && sk.endpoint_url
           && sk.endpoint_mode !== 'post_answer' && sk.endpoint_mode !== 'answer') {
@@ -2032,8 +2041,9 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
       } else if (sk.type === 'erp_proc' && sk.tool_schema && (sk.erp_tool_id || sk.ERP_TOOL_ID)) {
         const erpId = Number(sk.erp_tool_id || sk.ERP_TOOL_ID);
         const erpMode = (sk.endpoint_mode || sk.ENDPOINT_MODE || 'tool').toLowerCase();
-        // 只有 tool 模式才註冊為 Gemini function;inject/answer 已在上面的 skill 迴圈處理
-        if (erpMode !== 'tool') continue;
+        // 只有 tool 模式(或 answer 降級成 tool)才註冊為 Gemini function;
+        // 純 inject/answer 已在上面的 skill 迴圈處理
+        if (erpMode !== 'tool' && !sk.__fallback_to_tool) continue;
         if (explicitMode) {
           if (!Array.isArray(userErpToolIds) || !userErpToolIds.map(Number).includes(erpId)) continue;
         }
@@ -2041,7 +2051,8 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
           const schema = JSON.parse(sk.tool_schema);
           const toolName = schema.name || `erp_tool_${erpId}`;
           codeSkillToolMap[toolName] = sk;
-          console.log(`[Skill] Registered ERP tool "${sk.name}" as Gemini tool: ${toolName}`);
+          const tag = sk.__fallback_to_tool ? ' (fallback from answer)' : '';
+          console.log(`[Skill] Registered ERP tool "${sk.name}" as Gemini tool: ${toolName}${tag}`);
         } catch (e) {
           console.warn(`[Skill] Failed to parse ERP tool_schema for "${sk.name}":`, e.message);
         }
