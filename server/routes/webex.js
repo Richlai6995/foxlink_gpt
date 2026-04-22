@@ -372,6 +372,14 @@ function extractDomain(email) {
   return email.slice(at + 1).trim().toLowerCase();
 }
 
+// ── 除錯 helper：把字串展開成 "c(U+XXXX)" 格式，可看出不可見字元 ──
+function toHexDump(s) {
+  return [...String(s || '')].map(c => {
+    const cp = c.codePointAt(0).toString(16).padStart(4, '0').toUpperCase();
+    return `${c}(U+${cp})`;
+  }).join(' ');
+}
+
 // ── DB 查用戶（email 正規化比對）────────────────────────────────────────────────
 async function findUserByEmail(db, rawEmail) {
   const normalized = normalizeEmail(rawEmail);
@@ -398,6 +406,36 @@ async function findUserByEmail(db, rawEmail) {
     console.log(`[Webex][Auth] ✅ user found: id=${row.id} username="${row.username}" name="${row.name}" email="${row.email}" role=${row.role} status=${row.status}`);
   } else {
     console.warn(`[Webex][Auth] ❌ user NOT found for normalized email="${normalized}"`);
+
+    // ── 深度 debug：miss 時 dump hex + 找相似 email ──
+    try {
+      // 1. dump 輸入的 raw / normalized hex
+      console.warn(`[Webex][Auth][DEBUG] raw hex:  ${toHexDump(rawEmail)}`);
+      console.warn(`[Webex][Auth][DEBUG] norm hex: ${toHexDump(normalized)}`);
+
+      // 2. 用 local-part（@ 前半）LIKE 搜尋候選者，dump DB 裡的字元
+      const localPart = normalized.split('@')[0] || '';
+      if (localPart) {
+        const candidates = await db.prepare(
+          `SELECT id, username, name, email, status
+           FROM users
+           WHERE LOWER(email) LIKE ?
+           FETCH FIRST 10 ROWS ONLY`
+        ).all(`%${localPart}%`);
+        console.warn(`[Webex][Auth][DEBUG] LIKE '%${localPart}%' candidates=${candidates.length}:`);
+        for (const c of candidates) {
+          console.warn(`[Webex][Auth][DEBUG]   id=${c.id} username="${c.username}" status=${c.status}`);
+          console.warn(`[Webex][Auth][DEBUG]   db.email literal: "${c.email}"`);
+          console.warn(`[Webex][Auth][DEBUG]   db.email hex:     ${toHexDump(c.email)}`);
+          console.warn(`[Webex][Auth][DEBUG]   db.email length=${[...String(c.email || '')].length}  input length=${[...normalized].length}`);
+        }
+        if (candidates.length === 0) {
+          console.warn(`[Webex][Auth][DEBUG] 沒有任何 email 包含 "${localPart}" — 使用者主檔可能沒建、email 欄位空、或 local-part 拼錯`);
+        }
+      }
+    } catch (e) {
+      console.warn(`[Webex][Auth][DEBUG] hex dump error: ${e.message}`);
+    }
   }
   return row;
 }
