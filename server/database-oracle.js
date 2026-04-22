@@ -2010,6 +2010,29 @@ async function runMigrations(db) {
     }
   } catch (e) { console.warn('[Migration] webex_allowed_domains seed:', e.message); }
 
+  // One-shot email 清理：TRIM + 移除零寬字元（只跑一次，用 system_settings key 記錄）
+  try {
+    const done = await db.prepare(
+      `SELECT value FROM system_settings WHERE key='users_email_cleanup_v1'`
+    ).get();
+    if (!done) {
+      // 用 CHR 組零寬字元，避免 source code 混入不可見字元
+      // U+200B ZWSP(8203), U+200C ZWNJ(8204), U+200D ZWJ(8205), U+FEFF BOM(65279)
+      const r = await db.prepare(
+        `UPDATE users
+         SET email = TRIM(REPLACE(REPLACE(REPLACE(REPLACE(email,
+                     CHR(8203), ''), CHR(8204), ''), CHR(8205), ''), CHR(65279), ''))
+         WHERE email IS NOT NULL
+           AND email != TRIM(REPLACE(REPLACE(REPLACE(REPLACE(email,
+                     CHR(8203), ''), CHR(8204), ''), CHR(8205), ''), CHR(65279), ''))`
+      ).run();
+      await db.prepare(
+        `INSERT INTO system_settings (key, value) VALUES ('users_email_cleanup_v1', ?)`
+      ).run(new Date().toISOString());
+      console.log(`[Migration] users.email cleanup (trim + zero-width) done, affected=${r.changes ?? 'n/a'}`);
+    }
+  } catch (e) { console.warn('[Migration] users_email_cleanup_v1:', e.message); }
+
   // ── 資料政策 × 類別綁定（使用者/角色對特定類別指定政策）────────────────────
   await createTable('AI_USER_CAT_POLICIES', `CREATE TABLE ai_user_cat_policies (
     id          NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,

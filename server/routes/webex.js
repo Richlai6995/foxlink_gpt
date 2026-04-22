@@ -309,9 +309,15 @@ function buildAccessFilter(accessAlias, fkCol, tableAlias, user) {
 }
 
 // ── Email 正規化 ───────────────────────────────────────────────────────────────
-// @foxlink.com.tw → @foxlink.com，不分大小寫
+// @foxlink.com.tw → @foxlink.com，不分大小寫，去前後空白 + 零寬字元
+// 零寬字元：U+200B ZWSP / U+200C ZWNJ / U+200D ZWJ / U+FEFF BOM（常見於貼上來源）
+const ZERO_WIDTH_RE = /[​‌‍﻿]/g;
 function normalizeEmail(email) {
-  return (email || '').toLowerCase().replace(/@foxlink\.com\.tw$/i, '@foxlink.com');
+  return (email || '')
+    .replace(ZERO_WIDTH_RE, '')
+    .trim()
+    .toLowerCase()
+    .replace(/@foxlink\.com\.tw$/i, '@foxlink.com');
 }
 
 // ── 取台北時區日期字串 YYYY-MM-DD ─────────────────────────────────────────────
@@ -381,7 +387,7 @@ async function findUserByEmail(db, rawEmail) {
               role_id, dept_code, profit_center, org_section, org_group_name,
               webex_bot_enabled, preferred_language
        FROM users
-       WHERE LOWER(REPLACE(email, '.com.tw', '.com')) = ?
+       WHERE LOWER(TRIM(REPLACE(email, '.com.tw', '.com'))) = ?
        FETCH FIRST 1 ROWS ONLY`
     ).get(normalized);
   } catch (e) {

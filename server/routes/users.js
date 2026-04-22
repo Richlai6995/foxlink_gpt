@@ -84,7 +84,7 @@ router.post('/', async (req, res) => {
       )
       .run(
         username, password, name,
-        employee_id || null, email || null,
+        employee_id || null, (email ? String(email).replace(/[​-‍﻿]/g, '').trim() : null) || null,
         role || 'user',
         start_date || null, end_date || null,
         status || 'inactive',
@@ -206,13 +206,14 @@ router.put('/:id', async (req, res) => {
       : '';
     const orgVals = hasOrgOverride ? orgParams.map(v => v === undefined ? null : v) : [];
 
+    const cleanedEmail = (email ? String(email).replace(/[​-‍﻿]/g, '').trim() : null) || null;
     if (password) {
       sql = `UPDATE users SET password=?, ${baseSet}${orgSet} WHERE id=?`;
-      params = [password, name, employee_id || null, email || null, role, start_date || null, end_date || null, status,
+      params = [password, name, employee_id || null, cleanedEmail, role, start_date || null, end_date || null, status,
         ...permParams, ...orgVals, id];
     } else {
       sql = `UPDATE users SET ${baseSet}${orgSet} WHERE id=?`;
-      params = [name, employee_id || null, email || null, role, start_date || null, end_date || null, status,
+      params = [name, employee_id || null, cleanedEmail, role, start_date || null, end_date || null, status,
         ...permParams, ...orgVals, id];
     }
     const result = await db.prepare(sql).run(...params);
