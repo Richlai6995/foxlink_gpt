@@ -92,6 +92,9 @@ const _memLocks = new Set();
 module.exports = {
   TOKEN_TTL,
   ADMIN_TOKEN_TTL,
+  // Expose low-level store getter for services that need direct access
+  // (erpToolResultCache, erpResultTranslator 都有用)
+  getStore,
 
   /**
    * Try to acquire a distributed lock.
