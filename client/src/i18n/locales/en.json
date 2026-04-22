@@ -2908,6 +2908,9 @@
       "error": "Chart data error:",
       "showRaw": "Show raw spec",
       "downloadPng": "Download PNG",
+      "exportPptx": "Export PPTX",
+      "pptxFailed": "PPTX export failed: ",
+      "defaultTitle": "Chart",
       "switchTo": {
         "bar": "Switch to bar chart",
         "line": "Switch to line chart",

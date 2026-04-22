@@ -8,10 +8,11 @@
  */
 import { useMemo, useRef, useState } from 'react'
 import ReactECharts from 'echarts-for-react'
-import { Download, AlertTriangle, ChevronDown, ChevronUp, BarChart3, LineChart, PieChart, AreaChart } from 'lucide-react'
+import { Download, AlertTriangle, ChevronDown, ChevronUp, BarChart3, LineChart, PieChart, AreaChart, FileText } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import type { InlineChartSpec, InlineChartType, UserChartParam } from '../../types'
 import PinChartButton from './PinChartButton'
+import { exportChartsToPptx, getChartPngFromEcharts } from '../../lib/chartExport'
 
 const CHART_FONT = "'Noto Sans TC', 'Microsoft JhengHei', 'PingFang TC', 'Segoe UI', Arial, sans-serif"
 
@@ -310,6 +311,22 @@ export default function InlineChart({ spec, height = 320, enablePin = true, pinS
     a.click()
   }
 
+  const handleExportPptx = async () => {
+    const inst = chartRef.current?.getEchartsInstance()
+    if (!inst) return
+    try {
+      const pngDataUrl = getChartPngFromEcharts(inst)
+      await exportChartsToPptx([{
+        title: spec.title || t('chart.inline.defaultTitle', '圖表'),
+        pngDataUrl,
+        spec,
+      }], (spec.title || 'chart') + '.pptx')
+    } catch (e) {
+      console.error('[InlineChart] pptx export failed:', e)
+      alert(t('chart.inline.pptxFailed', 'PPTX 匯出失敗:') + (e instanceof Error ? e.message : 'unknown'))
+    }
+  }
+
   if (state.kind !== 'ok') {
     return (
       <div className="my-3 border border-amber-200 bg-amber-50 rounded-lg p-3 text-xs text-amber-800">
@@ -368,6 +385,13 @@ export default function InlineChart({ spec, height = 320, enablePin = true, pinS
           </div>
         )}
         {enablePin && <PinChartButton spec={spec} source={pinSource} />}
+        <button
+          onClick={handleExportPptx}
+          title={t('chart.inline.exportPptx', '匯出 PPTX')}
+          className="p-1.5 rounded bg-white/90 border border-slate-200 text-slate-500 hover:text-orange-600 hover:bg-white"
+        >
+          <FileText size={13} />
+        </button>
         <button
           onClick={handleDownload}
           title={t('chart.inline.downloadPng', '下載 PNG')}

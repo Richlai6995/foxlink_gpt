@@ -2908,6 +2908,9 @@
       "error": "圖表資料異常:",
       "showRaw": "顯示原始 spec",
       "downloadPng": "下載 PNG",
+      "exportPptx": "匯出 PPTX",
+      "pptxFailed": "PPTX 匯出失敗:",
+      "defaultTitle": "圖表",
       "switchTo": {
         "bar": "切換為長條圖",
         "line": "切換為折線圖",

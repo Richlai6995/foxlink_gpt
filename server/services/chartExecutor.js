@@ -148,8 +148,37 @@ async function runSourceTool(db, chart, userInputs, user, ctx = {}) {
       };
       toolResult = await mcpClient.callTool(db, server, ctx.sessionId || null, user.id, ref.toolName, args, mcpUserCtx);
     } else if (ref.kind === 'skill') {
-      // Phase 5b 再做(需要呼叫 skill endpoint + 帶 user_token)
-      return { error: 'skill 來源圖表暫不支援重跑,Phase 5b 預定支援' };
+      // Skill 路徑:跟 chat.js 的 code skill 呼叫對齊 — POST endpoint_url,
+      // Authorization: Bearer endpoint_secret,body 帶 params + user meta
+      const skill = await db.prepare(
+        `SELECT id, name, endpoint_url, endpoint_secret FROM skills WHERE id=?`
+      ).get(ref.skillId);
+      if (!skill) return { error: `Skill ${ref.skillId} 不存在` };
+      if (!skill.endpoint_url) return { error: `Skill ${ref.skillId} 未設定 endpoint_url` };
+
+      const resp = await fetch(skill.endpoint_url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Source': 'foxlink-gpt',
+          ...(skill.endpoint_secret ? { Authorization: `Bearer ${skill.endpoint_secret}` } : {}),
+        },
+        body: JSON.stringify({
+          ...args,
+          user_id: user.id,
+          user_name: user.name || '',
+          employee_id: user.employee_id || '',
+          session_id: ctx.sessionId || null,
+          source: 'user_chart_render',
+        }),
+        signal: AbortSignal.timeout(120000),
+      });
+      if (!resp.ok) return { error: `Skill endpoint HTTP ${resp.status}` };
+      try {
+        toolResult = await resp.json();
+      } catch (_) {
+        toolResult = await resp.text(); // extractRows 能處理 string
+      }
     }
   } catch (e) {
     // 包成可讀錯誤(權限不足、ERP 連線斷、MCP server down)

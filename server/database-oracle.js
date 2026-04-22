@@ -955,6 +955,25 @@ async function runMigrations(db) {
     created_at   TIMESTAMP DEFAULT SYSTIMESTAMP
   )`);
 
+  // ── User Charts 使用率拆分(規劃書 §6):use_count 原本混著記
+  //    now 改成三個獨立計數:開啟 / 執行成功 / 執行失敗
+  //    use_count 保留意義為「執行次數總計」向下相容;新增兩個細項欄位
+  await addCol('USER_CHARTS', 'OPEN_COUNT', 'NUMBER DEFAULT 0');
+  await addCol('USER_CHARTS', 'FAIL_COUNT', 'NUMBER DEFAULT 0');
+
+  // ── Chart Parser / Executor 錯誤遙測(規劃書 §7.2 #3)
+  //    LLM 吐錯 JSON、schema drift、工具執行失敗 都記這裡,供 admin 回看調 prompt
+  await createTable('CHART_PARSE_ERRORS', `CREATE TABLE chart_parse_errors (
+    id           NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    user_id      NUMBER,
+    session_id   VARCHAR2(64),
+    chart_id     NUMBER,              -- 若執行既有 user_chart 失敗可 FK;parse 錯時為 NULL
+    source       VARCHAR2(32),        -- 'chat' | 'answer' | 'erp_tab' | 'execute' | 'schema_drift'
+    reason       VARCHAR2(500),
+    body_preview CLOB,                -- 原始 body(含錯誤的 spec JSON / 或 error stack)
+    created_at   TIMESTAMP DEFAULT SYSTIMESTAMP
+  )`);
+
   // ── v2 Phase 3b: 同義詞字典追蹤表（繞過 CTX view 版本相容問題）─────────────
   await createTable('kb_thesauri', `
     CREATE TABLE kb_thesauri (

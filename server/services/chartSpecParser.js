@@ -155,21 +155,48 @@ function downsample(rows, targetCount = DATA_ROW_SOFTCAP) {
 /**
  * 驗證 spec 結構 — 夠嚴會擋 LLM 亂吐,太嚴會 false negative。
  * 失敗時回傳 { ok:false, reason },成功回傳 { ok:true }。
+ *
+ * 與 Zod 相比的選擇:
+ *  - Zod 加 dep 但就是做這件事,且錯誤訊息散亂。
+ *  - 這裡手寫 validateSpec 但訊息可針對 LLM 常見錯誤(y_fields 是字串、x_field 是陣列、
+ *    title 是物件)給出具體提示,供 admin 在 chart_parse_errors 表回看調 system prompt。
  */
 function validateSpec(spec) {
   if (!spec || typeof spec !== 'object') return { ok: false, reason: 'spec 非物件' };
-  if (!VALID_TYPES.has(spec.type)) return { ok: false, reason: `未知 type: ${spec.type}` };
-  if (typeof spec.x_field !== 'string' || !spec.x_field) return { ok: false, reason: '缺 x_field' };
-  if (!Array.isArray(spec.y_fields) || spec.y_fields.length === 0) return { ok: false, reason: '缺 y_fields' };
-  for (const yf of spec.y_fields) {
-    if (!yf || typeof yf.field !== 'string') return { ok: false, reason: 'y_fields 元素缺 field' };
+  if (!VALID_TYPES.has(spec.type)) {
+    return { ok: false, reason: `未知 type: "${spec.type}"(合法值:${[...VALID_TYPES].join('/')})` };
+  }
+  if (typeof spec.x_field !== 'string' || !spec.x_field) {
+    return { ok: false, reason: `x_field 必須是非空字串,實際 ${Array.isArray(spec.x_field) ? 'array' : typeof spec.x_field}` };
+  }
+  if (!Array.isArray(spec.y_fields)) {
+    return { ok: false, reason: `y_fields 必須是陣列,實際 ${typeof spec.y_fields}(LLM 常吐字串 → 要教它用 [{"field": "..."}] 格式)` };
+  }
+  if (spec.y_fields.length === 0) return { ok: false, reason: 'y_fields 為空陣列' };
+  for (let i = 0; i < spec.y_fields.length; i++) {
+    const yf = spec.y_fields[i];
+    if (!yf || typeof yf !== 'object') return { ok: false, reason: `y_fields[${i}] 非物件(應為 {field: string})` };
+    if (typeof yf.field !== 'string' || !yf.field) {
+      return { ok: false, reason: `y_fields[${i}].field 必須是非空字串,實際 ${typeof yf.field}` };
+    }
   }
   // heatmap 需要 2 個 y_fields:第一個是縱軸 group(category)、第二個是 value(數值)
   if (spec.type === 'heatmap' && spec.y_fields.length < 2) {
     return { ok: false, reason: 'heatmap 需要 2 個 y_fields(group + value)' };
   }
-  if (!Array.isArray(spec.data) || spec.data.length === 0) return { ok: false, reason: 'data 為空' };
+  if (spec.title !== undefined && typeof spec.title !== 'string') {
+    return { ok: false, reason: `title 必須是字串或 undefined,實際 ${typeof spec.title}` };
+  }
+  if (!Array.isArray(spec.data) || spec.data.length === 0) return { ok: false, reason: 'data 為空(若用 data_ref,確認 tool_call_id 正確)' };
   if (spec.data.length > DATA_ROW_HARDMAX) return { ok: false, reason: `data 超過 ${DATA_ROW_HARDMAX} rows` };
+  // 抽樣檢查:data[0] 必須是物件,且含 x_field 這個 key
+  const sample = spec.data[0];
+  if (!sample || typeof sample !== 'object' || Array.isArray(sample)) {
+    return { ok: false, reason: 'data[0] 必須是 object(不是陣列、null 或 primitive)' };
+  }
+  if (!(spec.x_field in sample)) {
+    return { ok: false, reason: `data 第一列沒有 x_field "${spec.x_field}" 欄位(實際欄位:${Object.keys(sample).slice(0, 5).join(',')})` };
+  }
   return { ok: true };
 }
 

@@ -2033,6 +2033,16 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
               if (errors.length > 0) {
                 for (const err of errors) {
                   console.warn(`[Chart][Answer] parse error: ${err.reason} | preview: ${err.body_preview}`);
+                  try {
+                    await db.prepare(
+                      `INSERT INTO chart_parse_errors (user_id, session_id, source, reason, body_preview)
+                       VALUES (?,?,?,?,?)`
+                    ).run(
+                      req.user.id, sessionId, 'answer',
+                      String(err.reason || '').slice(0, 500),
+                      String(err.body_preview || '').slice(0, 4000)
+                    );
+                  } catch (_) {}
                 }
               }
             } catch (e) {
@@ -3416,6 +3426,17 @@ ${hasPreserve ? '- 標記【★保留原文】的欄位：必須完整複製原�
         if (errors.length > 0) {
           for (const err of errors) {
             console.warn(`[Chart] parse error: ${err.reason} | preview: ${err.body_preview}`);
+            // 寫遙測,供 admin 回看調 system prompt(不阻塞主流程)
+            try {
+              await db.prepare(
+                `INSERT INTO chart_parse_errors (user_id, session_id, source, reason, body_preview)
+                 VALUES (?,?,?,?,?)`
+              ).run(
+                req.user.id, sessionId, 'chat',
+                String(err.reason || '').slice(0, 500),
+                String(err.body_preview || '').slice(0, 4000)
+              );
+            } catch (_) {}
           }
         }
       } catch (e) {

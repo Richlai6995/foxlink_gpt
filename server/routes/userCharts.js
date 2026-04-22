@@ -92,7 +92,8 @@ router.get('/', async (req, res) => {
     if (scope === 'mine' || scope === 'all') {
       mine = await db.prepare(
         `SELECT id, owner_id, title, source_type, source_tool,
-                source_schema_hash, is_public, use_count, created_at, updated_at,
+                source_schema_hash, is_public, use_count, open_count, fail_count,
+                created_at, updated_at,
                 NULL AS share_via
          FROM user_charts WHERE owner_id=? ORDER BY updated_at DESC`
       ).all(u.id);
@@ -103,7 +104,8 @@ router.get('/', async (req, res) => {
     if (scope === 'shared' || scope === 'all') {
       shared = await db.prepare(
         `SELECT DISTINCT c.id, c.owner_id, c.title, c.source_type, c.source_tool,
-                c.source_schema_hash, c.is_public, c.use_count, c.created_at, c.updated_at,
+                c.source_schema_hash, c.is_public, c.use_count, c.open_count, c.fail_count,
+                c.created_at, c.updated_at,
                 s.share_type AS share_via,
                 (SELECT employee_id || ' ' || name FROM users WHERE id=c.owner_id) AS owner_name
          FROM user_charts c
@@ -256,7 +258,23 @@ router.post('/preview', async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// VIEW (open_count bump) — 使用者 expand chart 卡片時呼叫;失敗不影響主流程
+// ─────────────────────────────────────────────────────────────────────────────
+router.post('/:id/view', async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const chart = await db.prepare(`SELECT id, owner_id, is_public, public_approved FROM user_charts WHERE id=?`).get(req.params.id);
+    if (!chart) return res.status(404).json({ error: '圖表不存在' });
+    if (!(await canAccessUserChart(db, chart, req.user))) return res.status(403).json({ error: '無存取權限' });
+    await db.prepare(`UPDATE user_charts SET open_count=NVL(open_count,0)+1 WHERE id=?`).run(chart.id);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // EXECUTE — 重跑 source tool 取資料(被分享者用自己權限)
+//   成功 → bump use_count(exec_count 語意)
+//   失敗 → bump fail_count + 寫 chart_parse_errors
 // ─────────────────────────────────────────────────────────────────────────────
 router.post('/:id/execute', async (req, res) => {
   try {
@@ -274,13 +292,35 @@ router.post('/:id/execute', async (req, res) => {
       sessionId: req.body?.session_id || null,
     });
 
-    if (result.error) return res.status(400).json({ error: result.error, warnings: result.warnings });
+    if (result.error) {
+      // bump fail_count + 寫遙測,不 throw(避免 catch 吃掉)
+      try {
+        await db.prepare(`UPDATE user_charts SET fail_count=NVL(fail_count,0)+1 WHERE id=?`).run(chart.id);
+        await db.prepare(
+          `INSERT INTO chart_parse_errors (user_id, session_id, chart_id, source, reason, body_preview)
+           VALUES (?,?,?,?,?,?)`
+        ).run(
+          req.user.id, req.body?.session_id || null, chart.id, 'execute',
+          String(result.error).slice(0, 500),
+          JSON.stringify({ source_tool: chart.source_tool, userInputs }).slice(0, 4000)
+        );
+      } catch (_) {}
+      return res.status(400).json({ error: result.error, warnings: result.warnings });
+    }
 
-    // bump use_count + 更新 schema hash(若有變動)
+    // bump exec_count (use_count)
     try {
       await db.prepare(`UPDATE user_charts SET use_count=NVL(use_count,0)+1 WHERE id=?`).run(chart.id);
-      if (result.schemaHash && result.schemaHash !== chart.source_schema_hash) {
-        // 不主動覆蓋,只 warn(避免靜默 hide breaking change)
+      // schema drift 也寫進 chart_parse_errors(不阻塞使用者,只 warn)
+      if (result.schemaHash && chart.source_schema_hash && result.schemaHash !== chart.source_schema_hash) {
+        await db.prepare(
+          `INSERT INTO chart_parse_errors (user_id, session_id, chart_id, source, reason, body_preview)
+           VALUES (?,?,?,?,?,?)`
+        ).run(
+          req.user.id, req.body?.session_id || null, chart.id, 'schema_drift',
+          `schema hash ${chart.source_schema_hash} → ${result.schemaHash}`,
+          null
+        );
       }
     } catch (_) {}
 
@@ -375,13 +415,31 @@ router.get('/admin/popular', verifyAdmin, async (req, res) => {
     const limit = Math.min(Number(req.query.limit) || 50, 200);
     const rows = await db.prepare(
       `SELECT c.id, c.title, c.description, c.owner_id, c.source_type, c.source_tool,
-              c.use_count, c.created_at, c.updated_at, c.adopted_from_user_chart_id,
+              c.use_count, c.open_count, c.fail_count,
+              c.created_at, c.updated_at, c.adopted_from_user_chart_id,
               (SELECT employee_id || ' ' || name FROM users WHERE id=c.owner_id) AS owner_name,
               (SELECT COUNT(*) FROM user_chart_shares s WHERE s.chart_id=c.id) AS share_count,
               (SELECT MAX(d.id) FROM ai_select_designs d WHERE d.adopted_from_user_chart_id=c.id) AS adopted_design_id
        FROM user_charts c
        WHERE c.source_tool IS NOT NULL
        ORDER BY c.use_count DESC, c.updated_at DESC
+       FETCH FIRST ? ROWS ONLY`
+    ).all(limit);
+    res.json(rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Admin:最近 chart 解析 / 執行錯誤(供調 system prompt)
+router.get('/admin/parse-errors', verifyAdmin, async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const limit = Math.min(Number(req.query.limit) || 100, 500);
+    const rows = await db.prepare(
+      `SELECT e.id, e.user_id, e.session_id, e.chart_id, e.source, e.reason,
+              e.body_preview, e.created_at,
+              (SELECT employee_id || ' ' || name FROM users WHERE id=e.user_id) AS user_name
+       FROM chart_parse_errors e
+       ORDER BY e.id DESC
        FETCH FIRST ? ROWS ONLY`
     ).all(limit);
     res.json(rows);

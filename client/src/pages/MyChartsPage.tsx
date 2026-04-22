@@ -10,13 +10,14 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { Star, Trash2, Share2, Clock, AlertTriangle, BarChart3, ExternalLink, ArrowLeft, Cpu, Plus } from 'lucide-react'
+import { Star, Trash2, Share2, Clock, AlertTriangle, BarChart3, ExternalLink, ArrowLeft, Cpu, Plus, FileText } from 'lucide-react'
 import api from '../lib/api'
 import InlineChart from '../components/chat/InlineChart'
 import ChartParamForm from '../components/chart/ChartParamForm'
 import ChartEditorModal from '../components/chart/ChartEditorModal'
 import ShareModal from '../components/dashboard/ShareModal'
 import { fmtDateTW } from '../lib/fmtTW'
+import { exportChartsToPptx, type ChartExportItem } from '../lib/chartExport'
 import type { UserChart, InlineChartSpec, UserChartParam } from '../types'
 
 type Tab = 'mine' | 'shared'
@@ -60,8 +61,13 @@ export default function MyChartsPage() {
   }
 
   async function handleExpand(id: number) {
-    setExpandedId(prev => prev === id ? null : id)
-    if (!chartDetails[id]) await ensureDetail(id)
+    const nextExpanded = expandedId === id ? null : id
+    setExpandedId(nextExpanded)
+    if (nextExpanded === id) {
+      if (!chartDetails[id]) await ensureDetail(id)
+      // 使用率遙測:bump open_count(失敗不影響主流程)
+      try { await api.post(`/user-charts/${id}/view`, {}) } catch (_) {}
+    }
   }
 
   async function handleExecute(id: number, params: Record<string, unknown>) {

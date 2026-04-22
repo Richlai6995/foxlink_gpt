@@ -2908,6 +2908,9 @@
       "error": "Dữ liệu biểu đồ lỗi:",
       "showRaw": "Hiển thị spec gốc",
       "downloadPng": "Tải PNG",
+      "exportPptx": "Xuất PPTX",
+      "pptxFailed": "Xuất PPTX thất bại:",
+      "defaultTitle": "Biểu đồ",
       "switchTo": {
         "bar": "Chuyển sang biểu đồ cột",
         "line": "Chuyển sang biểu đồ đường",
