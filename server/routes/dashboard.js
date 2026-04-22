@@ -254,6 +254,20 @@ router.delete('/projects/:id', requireDesigner, async (req, res) => {
   try {
     const db = require('../database-oracle').db;
     if (!await canEditProject(db, req.params.id, req.user)) return res.status(403).json({ error: '無權限' });
+    // 防呆:底下還有 topic 不准刪(避免誤砍含資料的 project)
+    // 用 ?force=1 才強制刪(連帶 cascade 刪 topics + designs)
+    if (req.query.force !== '1') {
+      const topicRow = await db.prepare(
+        `SELECT COUNT(*) AS cnt FROM ai_select_topics WHERE project_id=?`
+      ).get(req.params.id);
+      const topicCount = Number(topicRow?.CNT ?? topicRow?.cnt ?? 0);
+      if (topicCount > 0) {
+        return res.status(400).json({
+          error: `此專案下還有 ${topicCount} 個主題,請先刪除主題或加 ?force=1 強制連帶刪除`,
+          topic_count: topicCount,
+        });
+      }
+    }
     await db.prepare(`DELETE FROM ai_select_projects WHERE id=?`).run(req.params.id);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }

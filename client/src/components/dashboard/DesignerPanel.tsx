@@ -17,6 +17,7 @@ function ProjectSelector({
   onChange,
   onCreateNew,
   onEditProject,
+  onDeleteProject,
   onManageShare,
   currentProject,
   refreshToken,
@@ -25,6 +26,7 @@ function ProjectSelector({
   onChange: (id: number | null, project: AiSelectProject | null, projects: AiSelectProject[]) => void
   onCreateNew: () => void
   onEditProject: () => void
+  onDeleteProject: () => void
   onManageShare: () => void
   currentProject: AiSelectProject | null
   refreshToken: number
@@ -65,6 +67,11 @@ function ProjectSelector({
       {currentProject && (
         <button onClick={onEditProject} className="text-xs text-blue-500 hover:text-blue-700 flex items-center gap-0.5 flex-shrink-0">
           <Edit3 size={12} />編輯
+        </button>
+      )}
+      {currentProject && (
+        <button onClick={onDeleteProject} className="text-xs text-red-500 hover:text-red-700 flex items-center gap-0.5 flex-shrink-0" title={(currentProject.topic_count || 0) > 0 ? '請先刪除主題' : '刪除專案'}>
+          <Trash2 size={12} />刪除
         </button>
       )}
       {currentProject && (
@@ -393,6 +400,24 @@ export default function DesignerPanel() {
     setShowProjectForm(true)
   }
 
+  const deleteProject = async () => {
+    if (!currentProject) return
+    const tc = currentProject.topic_count || 0
+    if (tc > 0) {
+      alert(`此專案下還有 ${tc} 個主題,請先刪除主題才能刪此專案`)
+      return
+    }
+    if (!confirm(`確定要刪除專案「${currentProject.name}」?`)) return
+    try {
+      await api.delete(`/dashboard/projects/${currentProject.id}`)
+      setProjectId(null)
+      setCurrentProject(null)
+      setProjectRefresh(n => n + 1)
+    } catch (e: any) {
+      alert(e?.response?.data?.error || '刪除失敗')
+    }
+  }
+
   const saveProject = async () => {
     if (!projectForm.name.trim()) return
     try {
@@ -428,6 +453,7 @@ export default function DesignerPanel() {
         onChange={(id, proj) => { setProjectId(id); setCurrentProject(proj) }}
         onCreateNew={openCreateProject}
         onEditProject={openEditProject}
+        onDeleteProject={deleteProject}
         onManageShare={() => setShareProject(currentProject)}
         currentProject={currentProject}
         refreshToken={projectRefresh}
