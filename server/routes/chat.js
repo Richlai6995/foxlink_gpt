@@ -1698,6 +1698,14 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
     if (Array.isArray(userErpToolIds) && userErpToolIds.length > 0) {
       try {
         const placeholders = userErpToolIds.map(() => '?').join(',');
+        // 先撈出這些 erp_tool 的狀態做診斷(即使 mode 不是 answer/inject 也印出)
+        const diagRows = await db.prepare(`
+          SELECT t.id, t.name, t.endpoint_mode, t.enabled, t.proxy_skill_id
+          FROM erp_tools t WHERE t.id IN (${placeholders})
+        `).all(...userErpToolIds.map(Number));
+        console.log(`[Skill] Topbar ERP diag for ids=[${userErpToolIds.join(',')}]: ` +
+          (diagRows || []).map(r => `#${r.id || r.ID}(mode=${r.endpoint_mode || r.ENDPOINT_MODE},enabled=${r.enabled ?? r.ENABLED},proxy=${r.proxy_skill_id ?? r.PROXY_SKILL_ID})`).join(' | '));
+
         const rows = await db.prepare(`
           SELECT s.* FROM erp_tools t
           JOIN skills s ON s.id = t.proxy_skill_id
@@ -1710,9 +1718,7 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
           ...tagRoutedSkills.map(s => String(s.id || s.ID)),
         ]);
         topbarErpAnswerInjectSkills = (rows || []).filter(r => !existingIds.has(String(r.id || r.ID)));
-        if (topbarErpAnswerInjectSkills.length > 0) {
-          console.log(`[Skill] Topbar-forced ERP direct-exec: ${topbarErpAnswerInjectSkills.map(s => `${s.name || s.NAME}(${(s.endpoint_mode || s.ENDPOINT_MODE)})`).join(', ')}`);
-        }
+        console.log(`[Skill] Topbar-forced ERP direct-exec: loaded=${(rows || []).length} after-dedup=${topbarErpAnswerInjectSkills.length} skills=[${topbarErpAnswerInjectSkills.map(s => `${s.name || s.NAME}(${(s.endpoint_mode || s.ENDPOINT_MODE)})`).join(', ')}]`);
       } catch (e) {
         console.warn('[Skill] Topbar ERP answer/inject load failed:', e.message);
       }
@@ -1879,6 +1885,7 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
         // ── ERP Inject / Answer:依 endpoint_mode 處理 ───────────────
         const erpToolId = sk.erp_tool_id || sk.ERP_TOOL_ID;
         const erpMode = (sk.endpoint_mode || sk.ENDPOINT_MODE || 'tool').toLowerCase();
+        console.log(`[ErpAnswerPath] sk="${sk.name || sk.NAME}" erpToolId=${erpToolId} mode=${erpMode}`);
         if (erpMode !== 'inject' && erpMode !== 'answer') continue;
 
         try {
