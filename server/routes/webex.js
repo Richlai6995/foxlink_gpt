@@ -309,15 +309,24 @@ function buildAccessFilter(accessAlias, fkCol, tableAlias, user) {
 }
 
 // ── Email 正規化 ───────────────────────────────────────────────────────────────
-// @foxlink.com.tw → @foxlink.com，不分大小寫，去前後空白 + 零寬字元
+// 僅做 lowercase + trim + 去零寬字元，不動 domain（保留原樣）
 // 零寬字元：U+200B ZWSP / U+200C ZWNJ / U+200D ZWJ / U+FEFF BOM（常見於貼上來源）
 const ZERO_WIDTH_RE = /[​‌‍﻿]/g;
 function normalizeEmail(email) {
   return (email || '')
     .replace(ZERO_WIDTH_RE, '')
     .trim()
-    .toLowerCase()
-    .replace(/@foxlink\.com\.tw$/i, '@foxlink.com');
+    .toLowerCase();
+}
+
+// 產生比對候選（foxlink.com ↔ foxlink.com.tw 互通，其他 domain 不動）
+// 歷史遺留：ldap / 人資可能同一人一邊是 .com 一邊是 .com.tw
+function emailVariants(email) {
+  const norm = normalizeEmail(email);
+  const set = new Set([norm]);
+  if (norm.endsWith('@foxlink.com'))        set.add(norm + '.tw');
+  else if (norm.endsWith('@foxlink.com.tw')) set.add(norm.slice(0, -3)); // 去 .tw
+  return [...set];
 }
 
 // ── 取台北時區日期字串 YYYY-MM-DD ─────────────────────────────────────────────
@@ -373,7 +382,7 @@ function extractDomain(email) {
 }
 
 // 啟動時印一行版本指示，確認這份 code 是否有被載入
-console.log('[Webex] routes/webex.js loaded — version: 2026-04-22-debug-hexdump');
+console.log('[Webex] routes/webex.js loaded — version: 2026-04-22-email-variants-fix');
 
 // ── 除錯 helper：把字串展開成 "c(U+XXXX)" 格式，可看出不可見字元 ──
 function toHexDump(s) {
@@ -386,7 +395,9 @@ function toHexDump(s) {
 // ── DB 查用戶（email 正規化比對）────────────────────────────────────────────────
 async function findUserByEmail(db, rawEmail) {
   const normalized = normalizeEmail(rawEmail);
-  console.log(`[Webex][Auth] email lookup: raw="${rawEmail}" → normalized="${normalized}"`);
+  const variants = emailVariants(rawEmail);
+  const placeholders = variants.map(() => '?').join(',');
+  console.log(`[Webex][Auth] email lookup: raw="${rawEmail}" → variants=[${variants.join(', ')}]`);
   let row;
   try {
     row = await db.prepare(
@@ -398,9 +409,9 @@ async function findUserByEmail(db, rawEmail) {
               role_id, dept_code, profit_center, org_section, org_group_name,
               webex_bot_enabled, preferred_language
        FROM users
-       WHERE LOWER(TRIM(REPLACE(email, '.com.tw', '.com'))) = ?
+       WHERE LOWER(TRIM(email)) IN (${placeholders})
        FETCH FIRST 1 ROWS ONLY`
-    ).get(normalized);
+    ).get(...variants);
   } catch (e) {
     console.error(`[Webex][Auth] DB query error: ${e.message}`);
     return null;
