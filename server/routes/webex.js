@@ -372,6 +372,9 @@ function extractDomain(email) {
   return email.slice(at + 1).trim().toLowerCase();
 }
 
+// 啟動時印一行版本指示，確認這份 code 是否有被載入
+console.log('[Webex] routes/webex.js loaded — version: 2026-04-22-debug-hexdump');
+
 // ── 除錯 helper：把字串展開成 "c(U+XXXX)" 格式，可看出不可見字元 ──
 function toHexDump(s) {
   return [...String(s || '')].map(c => {
