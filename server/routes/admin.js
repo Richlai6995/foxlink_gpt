@@ -2887,4 +2887,70 @@ router.get('/skill-runners/:id/logs', (req, res) => {
   });
 });
 
+// ─── System Sync (server 內建同步,不走 ai_etl_jobs cron 框架) ────────────────
+// 兩個輕量 service:啟動後 5 秒自動跑一次 (server.js setTimeout)。
+// 此區塊讓 admin 在 ETL 排程頁能看到狀態 + 手動觸發。
+const SYSTEM_SYNCS = {
+  factory_code_lookup: {
+    display_name: '廠區代碼對照同步',
+    description: 'ERP KFF (FND_FLEX_VALUES_VL flex_value_set_id=1008041) → factory_code_lookup',
+    table_name:   'factory_code_lookup',
+    runner: () => require('../services/factoryCodeLookupSync').syncFactoryCodeLookup,
+  },
+  indirect_emp_by_pc_factory: {
+    display_name: '間接員工計數同步 (利潤中心 × 廠區)',
+    description: 'ERP foxfl.fl_emp_exp_all (CURRENT_FLAG=Y, DIT_CODE=I) → indirect_emp_by_pc_factory',
+    table_name:   'indirect_emp_by_pc_factory',
+    runner: () => require('../services/indirectEmpSync').syncIndirectEmpByPcFactory,
+  },
+};
+
+// GET /api/admin/system-sync/status
+router.get('/system-sync/status', async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const out = [];
+    for (const [name, def] of Object.entries(SYSTEM_SYNCS)) {
+      let last_synced_at = null;
+      let record_count = 0;
+      try {
+        const r = await db.prepare(
+          `SELECT MAX(last_synced_at) AS last_synced_at, COUNT(*) AS cnt FROM ${def.table_name}`
+        ).get();
+        last_synced_at = r?.LAST_SYNCED_AT ?? r?.last_synced_at ?? null;
+        if (last_synced_at instanceof Date) last_synced_at = last_synced_at.toISOString();
+        record_count = Number(r?.CNT ?? r?.cnt ?? 0);
+      } catch (e) {
+        // 表還沒建 / 沒權限,記 null
+      }
+      out.push({
+        name,
+        display_name: def.display_name,
+        description:  def.description,
+        table_name:   def.table_name,
+        last_synced_at,
+        record_count,
+      });
+    }
+    res.json(out);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/admin/system-sync/run/:name
+router.post('/system-sync/run/:name', async (req, res) => {
+  try {
+    const def = SYSTEM_SYNCS[req.params.name];
+    if (!def) return res.status(404).json({ error: 'Unknown sync: ' + req.params.name });
+    const db = require('../database-oracle').db;
+    const runner = def.runner();
+    if (typeof runner !== 'function') return res.status(500).json({ error: 'Runner not found' });
+    const result = await runner(db);
+    res.json(result || { ok: true });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
 module.exports = router;

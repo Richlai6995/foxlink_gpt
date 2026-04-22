@@ -2819,6 +2819,83 @@ const EMPTY_FORM = {
   form_project_id: undefined as number | undefined,
 }
 
+// ── 系統內建同步(server-level service,不走 ai_etl_jobs cron 框架) ──────────
+type SystemSyncStatus = {
+  name: string
+  display_name: string
+  description: string
+  table_name: string
+  last_synced_at: string | null
+  record_count: number
+}
+
+function SystemSyncSection() {
+  const [items, setItems] = useState<SystemSyncStatus[]>([])
+  const [running, setRunning] = useState<Record<string, boolean>>({})
+
+  const load = () => api.get('/admin/system-sync/status').then(r => setItems(r.data)).catch(() => {})
+  useEffect(() => { load() }, [])
+
+  const trigger = async (name: string) => {
+    setRunning(s => ({ ...s, [name]: true }))
+    try {
+      const r = await api.post(`/admin/system-sync/run/${name}`)
+      const d = r.data || {}
+      if (d.ok === false) {
+        alert(`同步失敗:${d.reason || d.error || '未知錯誤'}`)
+      } else {
+        const detail = [
+          d.inserted != null ? `新增 ${d.inserted}` : null,
+          d.updated  != null ? `更新 ${d.updated}` : null,
+          d.total    != null ? `共 ${d.total} 筆` : null,
+        ].filter(Boolean).join(' / ')
+        alert(`同步完成${detail ? ' — ' + detail : ''}`)
+      }
+      await load()
+    } catch (e: any) {
+      alert(`同步失敗:${e?.response?.data?.error || e.message}`)
+    } finally {
+      setRunning(s => ({ ...s, [name]: false }))
+    }
+  }
+
+  if (items.length === 0) return null
+
+  return (
+    <div className="bg-amber-50/60 border border-amber-200 rounded-xl p-4 space-y-3">
+      <div className="flex items-center gap-2">
+        <RefreshCw size={14} className="text-amber-600" />
+        <span className="text-sm font-semibold text-amber-900">系統內建同步</span>
+        <span className="text-[10px] text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded">不走 cron 框架,server 啟動後自動跑一次</span>
+      </div>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+        {items.map(it => (
+          <div key={it.name} className="bg-white rounded-lg p-3 border border-amber-100">
+            <div className="flex items-start justify-between gap-2 mb-1">
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-semibold text-gray-800 truncate">{it.display_name}</p>
+                <p className="text-[10px] text-gray-500 break-all leading-tight mt-0.5">{it.description}</p>
+              </div>
+              <button
+                onClick={() => trigger(it.name)}
+                disabled={running[it.name]}
+                className="text-xs bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-white px-2.5 py-1 rounded flex items-center gap-1 flex-shrink-0"
+              >
+                <Play size={11} /> {running[it.name] ? '同步中...' : '立即執行'}
+              </button>
+            </div>
+            <div className="flex gap-3 text-[11px] text-gray-600 mt-2">
+              <span>本地表 <code className="bg-gray-100 px-1 rounded">{it.table_name}</code></span>
+              <span>筆數 <strong>{it.record_count}</strong></span>
+              <span>最後同步 <strong>{it.last_synced_at ? fmtTW(it.last_synced_at) : '從未'}</strong></span>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 // 把 DB 回傳的 JSON 字串 / 陣列 解回逗號分隔字串
 function parseFieldsToStr(f: any): string {
   if (!f) return ''
@@ -2986,6 +3063,8 @@ function EtlManager({ projectId }: { projectId: number | null }) {
 
   return (
     <div className="space-y-4">
+      <SystemSyncSection />
+
       <button onClick={openNew}
         className="btn-primary text-xs py-1.5 px-3 flex items-center gap-1">
         <Plus size={12} /> 新增 ETL Job
