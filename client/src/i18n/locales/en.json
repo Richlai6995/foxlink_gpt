@@ -2939,8 +2939,16 @@
       "used": "Used",
       "times": "times",
       "freeform": "Freeform",
-      "emptyMine": "No saved charts yet. Click the star on any inline chart in chat to pin.",
-      "emptyShared": "No charts shared with you yet"
+      "emptyMine": "No saved charts yet. Click the star on any inline chart in chat, or click 'New chart' to design from a tool.",
+      "emptyShared": "No charts shared with you yet",
+      "create": "New chart"
+    },
+    "editor": {
+      "title": "New chart",
+      "filterTools": "Search tools (name / code)...",
+      "emptyResult": "Tool returned 0 rows, please check parameters",
+      "titleRequired": "Title is required",
+      "saveFailed": "Save failed: "
     },
     "param": {
       "run": "Run",

@@ -2939,8 +2939,16 @@
       "used": "使用",
       "times": "次",
       "freeform": "自由格式",
-      "emptyMine": "尚無收藏的圖表。在 chat 對話中對 inline chart 點擊星號可加入圖庫。",
-      "emptyShared": "目前沒有他人分享的圖表"
+      "emptyMine": "尚無收藏的圖表。在 chat 對話中對 inline chart 點擊星號可加入圖庫,或按右上「新增圖表」從工具設計。",
+      "emptyShared": "目前沒有他人分享的圖表",
+      "create": "新增圖表"
+    },
+    "editor": {
+      "title": "新增圖表",
+      "filterTools": "搜尋工具(name / code)...",
+      "emptyResult": "工具回傳 0 筆資料,請檢查參數",
+      "titleRequired": "請輸入標題",
+      "saveFailed": "儲存失敗:"
     },
     "param": {
       "run": "執行",

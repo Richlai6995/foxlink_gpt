@@ -223,6 +223,37 @@ router.delete('/:id', async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// PREVIEW — Phase 5b:dry-run tool 用於 ChartEditor 設計時取欄位 + 預覽資料
+//   不需 chart 已存在(設計階段),body { source_tool, params } 即跑
+//   權限走 tool 自己的層(被使用者用自己 user 跑)
+// ─────────────────────────────────────────────────────────────────────────────
+router.post('/preview', async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const { source_tool, params } = req.body || {};
+    if (!source_tool) return res.status(400).json({ error: '缺 source_tool' });
+    if (!parseSourceTool(source_tool)) return res.status(400).json({ error: 'source_tool 格式錯誤(例:erp:42 / mcp:5:tool_name)' });
+
+    // 構造 stub chart 給 runSourceTool 用 — 不需 chart_spec
+    const stub = { id: 0, source_tool, source_params: null, source_schema_hash: null };
+    const result = await runSourceTool(db, stub, params || {}, req.user, {});
+    if (result.error) return res.status(400).json({ error: result.error, warnings: result.warnings });
+
+    // 從 rows[0] 抽欄位清單給 chart editor 用
+    const columns = (result.rows && result.rows.length > 0)
+      ? Object.keys(result.rows[0])
+      : [];
+
+    res.json({
+      rows: result.rows || [],
+      columns,
+      schema_hash: result.schemaHash,
+      warnings: result.warnings || [],
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // EXECUTE — 重跑 source tool 取資料(被分享者用自己權限)
 // ─────────────────────────────────────────────────────────────────────────────
 router.post('/:id/execute', async (req, res) => {

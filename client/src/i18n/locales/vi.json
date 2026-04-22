@@ -2939,8 +2939,16 @@
       "used": "Đã dùng",
       "times": "lần",
       "freeform": "Tự do",
-      "emptyMine": "Chưa có biểu đồ. Bấm sao trên biểu đồ trong chat để ghim.",
-      "emptyShared": "Chưa có biểu đồ nào được chia sẻ"
+      "emptyMine": "Chưa có biểu đồ. Bấm sao trên biểu đồ trong chat, hoặc bấm 'Tạo mới' để thiết kế từ tool.",
+      "emptyShared": "Chưa có biểu đồ nào được chia sẻ",
+      "create": "Tạo mới"
+    },
+    "editor": {
+      "title": "Tạo biểu đồ",
+      "filterTools": "Tìm tool (name / code)...",
+      "emptyResult": "Tool trả 0 dòng, kiểm tra tham số",
+      "titleRequired": "Vui lòng nhập tiêu đề",
+      "saveFailed": "Lưu thất bại: "
     },
     "param": {
       "run": "Chạy",

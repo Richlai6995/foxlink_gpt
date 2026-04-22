@@ -8,11 +8,13 @@
  * 分享 Modal 直接 reuse dashboard/ShareModal.tsx(同 sharesUrl pattern)
  */
 import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { Star, Trash2, Share2, Clock, AlertTriangle, BarChart3, ExternalLink } from 'lucide-react'
+import { Star, Trash2, Share2, Clock, AlertTriangle, BarChart3, ExternalLink, ArrowLeft, Cpu, Plus } from 'lucide-react'
 import api from '../lib/api'
 import InlineChart from '../components/chat/InlineChart'
 import ChartParamForm from '../components/chart/ChartParamForm'
+import ChartEditorModal from '../components/chart/ChartEditorModal'
 import ShareModal from '../components/dashboard/ShareModal'
 import { fmtDateTW } from '../lib/fmtTW'
 import type { UserChart, InlineChartSpec, UserChartParam } from '../types'
@@ -21,11 +23,13 @@ type Tab = 'mine' | 'shared'
 
 export default function MyChartsPage() {
   const { t } = useTranslation()
+  const navigate = useNavigate()
   const [tab, setTab] = useState<Tab>('mine')
   const [mine, setMine] = useState<UserChart[]>([])
   const [shared, setShared] = useState<UserChart[]>([])
   const [loading, setLoading] = useState(true)
   const [shareModal, setShareModal] = useState<UserChart | null>(null)
+  const [editorOpen, setEditorOpen] = useState(false)
   const [expandedId, setExpandedId] = useState<number | null>(null)
   const [chartData, setChartData] = useState<Record<number, { spec: InlineChartSpec; warnings?: string[] }>>({})
   const [chartBusy, setChartBusy] = useState<Record<number, boolean>>({})
@@ -85,12 +89,33 @@ export default function MyChartsPage() {
   const list = tab === 'mine' ? mine : shared
 
   return (
-    <div className="p-6 max-w-6xl mx-auto">
+    <div className="min-h-screen bg-slate-100">
+      {/* Header — 對齊 KnowledgeBasePage / SkillMarket pattern */}
+      <header className="bg-slate-900 text-white px-6 py-3 flex items-center justify-between shadow">
+        <div className="flex items-center gap-3">
+          <div className="w-7 h-7 bg-blue-600 rounded-lg flex items-center justify-center">
+            <Cpu size={14} className="text-white" />
+          </div>
+          <span className="font-bold">Cortex</span>
+          <span className="text-slate-500 text-sm">/ {t('chart.library.title', '我的圖庫')}</span>
+        </div>
+        <button onClick={() => navigate('/chat')} className="flex items-center gap-1.5 text-slate-400 hover:text-white text-sm transition">
+          <ArrowLeft size={15} /> {t('common.backToChat', '返回對話')}
+        </button>
+      </header>
+
+      <div className="p-6 max-w-6xl mx-auto">
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-2">
           <Star className="text-amber-500" size={24} />
           <h1 className="text-xl font-semibold">{t('chart.library.title', '我的圖庫')}</h1>
         </div>
+        <button
+          onClick={() => setEditorOpen(true)}
+          className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-500 text-white text-sm rounded hover:bg-blue-600"
+        >
+          <Plus size={14} /> {t('chart.library.create', '新增圖表')}
+        </button>
       </div>
 
       {/* Tabs */}
@@ -224,6 +249,14 @@ export default function MyChartsPage() {
           onClose={() => setShareModal(null)}
         />
       )}
+
+      {editorOpen && (
+        <ChartEditorModal
+          onClose={() => setEditorOpen(false)}
+          onSaved={async () => { setEditorOpen(false); await load() }}
+        />
+      )}
+      </div>
     </div>
   )
 }
