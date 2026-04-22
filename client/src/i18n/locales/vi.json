@@ -2960,6 +2960,21 @@
     },
     "delete": {
       "confirm": "Xóa \"{{title}}\"?"
+    },
+    "erpTab": {
+      "tab": "Biểu đồ",
+      "tabHint": "Thiết kế biểu đồ từ kết quả và lưu vào Thư viện",
+      "chartType": "Loại biểu đồ",
+      "title": "Tiêu đề",
+      "xField": "Trường trục X",
+      "yFields": "Trường trục Y",
+      "preview": "Xem trước",
+      "save": "Lưu vào Thư viện",
+      "saved": "Đã lưu vào thư viện",
+      "goLibrary": "Mở thư viện →",
+      "needFields": "Vui lòng chọn trường X và Y",
+      "noData": "Không có dữ liệu có cấu trúc để vẽ biểu đồ",
+      "noDataHint": "Kết quả của procedure này không có OUT ref cursor và không phải markdown table. Hãy cấu hình Answer Output Format trong quản lý tool, hoặc dùng procedure có OUT cursor."
     }
   }
 }

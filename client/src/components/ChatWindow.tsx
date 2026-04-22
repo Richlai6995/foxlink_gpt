@@ -17,6 +17,8 @@ interface Props {
   onFeedback?: (messageContent: string) => void
   /** Phase 3:hover「畫成圖表」按鈕 — 由父層 send 一個新 user message 重 prompt LLM */
   onDrawChart?: (assistantContent: string, chartType: InlineChartType) => void
+  /** Phase 5:inline chart 釘選時要帶的 sessionId(message_id 從 msg 本身取) */
+  sessionId?: string | null
 }
 
 function GeneratedFileLinks({ files }: { files: GeneratedFile[] }) {
@@ -145,6 +147,7 @@ function MessageBubble({
   onRegenerate,
   onFeedback,
   onDrawChart,
+  sessionId,
   isLast,
 }: {
   msg: ChatMessage
@@ -152,6 +155,7 @@ function MessageBubble({
   onRegenerate?: () => void
   onFeedback?: (content: string) => void
   onDrawChart?: (content: string, type: InlineChartType) => void
+  sessionId?: string | null
   isLast?: boolean
 }) {
   const { t } = useTranslation()
@@ -222,7 +226,22 @@ function MessageBubble({
             ? <ResearchProgressCard jobId={(msg.content ?? '').slice('__RESEARCH_JOB__:'.length)} />
             : <>
                 <MarkdownRenderer content={msg.content ?? ''} />
-                {msg.charts?.map((spec, i) => <InlineChart key={i} spec={spec} />)}
+                {msg.charts?.map((spec, i) => (
+                  <InlineChart
+                    key={i}
+                    spec={spec}
+                    pinSource={{
+                      type: (spec.meta?.source_type as
+                        | 'mcp' | 'erp' | 'skill' | 'self_kb' | 'dify' | 'chat_freeform'
+                        | undefined) ?? 'chat_freeform',
+                      tool: spec.meta?.source_tool ?? undefined,
+                      tool_version: spec.meta?.source_tool_version ?? undefined,
+                      schema_hash: spec.meta?.source_schema_hash ?? undefined,
+                      session_id: sessionId ?? undefined,
+                      message_id: msg.id,
+                    }}
+                  />
+                ))}
                 <GeneratedFileLinks files={msg.generated_files || []} />
               </>
           }
@@ -301,7 +320,7 @@ function StreamingBubble({ content, status }: { content: string; status?: string
   )
 }
 
-export default function ChatWindow({ messages, streaming, streamingContent, streamingStatus, onCopy, onRegenerate, onFeedback, onDrawChart }: Props) {
+export default function ChatWindow({ messages, streaming, streamingContent, streamingStatus, onCopy, onRegenerate, onFeedback, onDrawChart, sessionId }: Props) {
   const { t } = useTranslation()
   const bottomRef = useRef<HTMLDivElement>(null)
   const lastUserMsgRef = useRef<HTMLDivElement>(null)
@@ -370,6 +389,7 @@ export default function ChatWindow({ messages, streaming, streamingContent, stre
               onRegenerate={onRegenerate}
               onFeedback={msg.role === 'assistant' ? onFeedback : undefined}
               onDrawChart={msg.role === 'assistant' ? onDrawChart : undefined}
+              sessionId={sessionId}
               isLast={i === messages.length - 1 && msg.role === 'assistant'}
             />
           </div>

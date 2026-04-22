@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { TFunction } from 'i18next'
-import { X, Play, ShieldAlert, AlertTriangle, CheckCircle, Eye, Sparkles, MessageSquare, Table2, FileJson, Languages, Copy, Maximize2 } from 'lucide-react'
+import { X, Play, ShieldAlert, AlertTriangle, CheckCircle, Eye, Sparkles, MessageSquare, Table2, FileJson, Languages, Copy, Maximize2, BarChart3 } from 'lucide-react'
 import api from '../../lib/api'
 import type { ErpTool } from '../admin/ErpToolsPanel'
 import ErpLovCombobox from './ErpLovCombobox'
+import ErpToolChartTab from './ErpToolChartTab'
 
 function resolvePresetClient(preset: string): string {
   const now = new Date()
@@ -80,7 +81,7 @@ export default function ErpToolInvokeModal({ tool, sessionId, onClose, onDone }:
   const [error, setError] = useState<string | null>(null)
   const [confirmToken, setConfirmToken] = useState<string | null>(null)
   const [pendingSummary, setPendingSummary] = useState<string | null>(null)
-  const [viewMode, setViewMode] = useState<'table' | 'json'>('table')
+  const [viewMode, setViewMode] = useState<'table' | 'json' | 'chart'>('table')
   const [translatedMap, setTranslatedMap] = useState<Record<string, string>>({})
   const [showTranslated, setShowTranslated] = useState<Record<string, boolean>>({})
   const [translating, setTranslating] = useState<Record<string, boolean>>({})
@@ -390,18 +391,27 @@ export default function ErpToolInvokeModal({ tool, sessionId, onClose, onDone }:
                     className={`text-xs px-2 py-0.5 rounded flex items-center gap-1 ${viewMode === 'json' ? 'bg-sky-100 text-sky-700' : 'text-slate-500'}`}>
                     <FileJson size={10} /> JSON
                   </button>
+                  <button onClick={() => setViewMode('chart')}
+                    className={`text-xs px-2 py-0.5 rounded flex items-center gap-1 ${viewMode === 'chart' ? 'bg-sky-100 text-sky-700' : 'text-slate-500'}`}
+                    title={t('chart.erpTab.tabHint', '從結果設計圖表並存到我的圖庫')}>
+                    <BarChart3 size={10} /> {t('chart.erpTab.tab', '圖表')}
+                  </button>
                 </div>
               </div>
-              <ResultView data={result} viewMode={viewMode}
-                targetLang={targetLang}
-                translatedMap={translatedMap}
-                showTranslated={showTranslated}
-                translating={translating}
-                onTranslate={translateBlock}
-                onCopy={copyText}
-                onZoom={(key, title, original) => setZoomed({ key, title, original })}
-                t={t}
-              />
+              {viewMode === 'chart' ? (
+                <ErpToolChartTab tool={tool} inputs={inputs} result={result} />
+              ) : (
+                <ResultView data={result} viewMode={viewMode as 'table' | 'json'}
+                  targetLang={targetLang}
+                  translatedMap={translatedMap}
+                  showTranslated={showTranslated}
+                  translating={translating}
+                  onTranslate={translateBlock}
+                  onCopy={copyText}
+                  onZoom={(key, title, original) => setZoomed({ key, title, original })}
+                  t={t}
+                />
+              )}
             </section>
           )}
         </div>

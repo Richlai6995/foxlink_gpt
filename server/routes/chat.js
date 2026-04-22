@@ -1990,14 +1990,41 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
             // (和 Tool 路徑一致,這樣前端既有 chart renderer 能正確繪製 ECharts)
             let displayFormatted = formatted;
             let answerCharts = [];
+            const chartEnabledAns = await isInlineChartEnabled(db);
             try {
-              const { charts, errors } = parseChartBlocks(formatted, []);
+              // Answer 模式從 ERP tool 出資料,用該 tool 的 id 當 source,保證 tool-bound
+              const erpToolId = sk.erp_tool_id || sk.ERP_TOOL_ID;
+              const toolCallResultsForAnswer = erpToolId
+                ? [{
+                    id: `${sk.name}_answer_1`,
+                    name: sk.name,
+                    args: (typeof extractedArgs !== 'undefined' ? extractedArgs : null) || {},
+                    result: null,
+                    source_type: 'erp',
+                    source_tool: `erp:${erpToolId}`,
+                    source_tool_version: null,
+                  }]
+                : [];
+              const { charts, errors } = chartEnabledAns
+                ? parseChartBlocks(formatted, toolCallResultsForAnswer)
+                : { charts: [], errors: [] };
               if (charts.length > 0) {
-                answerCharts = charts;
-                sendEvent({ type: 'charts', charts });
-                console.log(`[Chart][Answer] Parsed ${charts.length} inline chart(s)` +
-                  (errors.length > 0 ? `, ${errors.length} error(s)` : ''));
-                // 從顯示文字剝除 chart block(圖表已另外用 charts event 送前端)
+                // 敏感資料遮蔽(規劃書 Q4)
+                const chartDataFlat = charts
+                  .flatMap(c => Array.isArray(c.data) ? c.data : [])
+                  .map(row => row && typeof row === 'object' ? Object.values(row).join(' ') : '')
+                  .join(' ');
+                const scan = await scanSensitiveKeywords(db, chartDataFlat);
+                if (scan.hasSensitive) {
+                  console.warn(`[Chart][Answer] Redacted ${charts.length} chart(s) — sensitive: ${scan.matched.join(', ')}`);
+                  sendEvent({ type: 'status', message: '⚠ 圖表含敏感資料,已遮蔽' });
+                } else {
+                  answerCharts = charts;
+                  sendEvent({ type: 'charts', charts });
+                  console.log(`[Chart][Answer] Parsed ${charts.length} inline chart(s)` +
+                    (errors.length > 0 ? `, ${errors.length} error(s)` : ''));
+                }
+                // 不論遮蔽或正常,都要從顯示文字剝除 chart block
                 displayFormatted = formatted
                   .replace(/```generate_chart:[^\n]+\n[\s\S]*?```/g, '')
                   .replace(/\n{3,}/g, '\n\n')
@@ -3078,20 +3105,51 @@ ${hasPreserve ? '- 標記【★保留原文】的欄位：必須完整複製原�
 
           // ── Wrap toolHandler:收集 { id, name, args, result } 供 chartSpecParser data_ref 解析 ──
           //   id 格式:`${name}_${seq}`(同名多次呼叫累加 seq);parser 支援用單純 name match 最後一次
+          //
+          //   source_type / source_tool 由下面 inferToolSource 推出 — 供 parseChartBlocks
+          //   掛 chart.meta,讓前端釘選時能正確帶 tool ref(Template Share 可分享/可重執行)
+          const inferToolSource = (toolName) => {
+            if (codeSkillToolMap[toolName]) {
+              const sk = codeSkillToolMap[toolName];
+              if (sk.type === 'erp_proc') {
+                const erpId = sk.erp_tool_id || sk.ERP_TOOL_ID;
+                return { source_type: 'erp', source_tool: erpId ? `erp:${erpId}` : null, source_tool_version: null };
+              }
+              return { source_type: 'skill', source_tool: sk.id ? `skill:${sk.id}` : null, source_tool_version: null };
+            }
+            if (selfKbMap[toolName]) {
+              const kb = selfKbMap[toolName];
+              return { source_type: 'self_kb', source_tool: kb.id ? `self_kb:${kb.id}` : null, source_tool_version: null };
+            }
+            if (kbMap[toolName]) {
+              const kb = kbMap[toolName];
+              const t = kb.connector_type || 'dify';
+              return { source_type: t === 'dify' ? 'dify' : 'api', source_tool: kb.id ? `${t}:${kb.id}` : null, source_tool_version: null };
+            }
+            if (serverMap[toolName]) {
+              const entry = serverMap[toolName];
+              const sid = entry?.server?.id;
+              const origName = entry?.originalName || toolName;
+              return { source_type: 'mcp', source_tool: sid ? `mcp:${sid}:${origName}` : null, source_tool_version: null };
+            }
+            return { source_type: 'chat_freeform', source_tool: null, source_tool_version: null };
+          };
+
           const toolHandler = async (toolName, args) => {
             const seq = ++toolCallCounter;
             const id = `${toolName}_${seq}`;
+            const src = inferToolSource(toolName);
             let result;
             try {
               result = await _rawToolHandler(toolName, args);
             } catch (e) {
               result = `[Tool error: ${e.message}]`;
-              toolCallResults.push({ id, name: toolName, args, result, error: true });
+              toolCallResults.push({ id, name: toolName, args, result, error: true, ...src });
               throw e;
             }
             // 存 string 結果,parser 再 JSON.parse;長度 cap 避免爆記憶體(只 log,原樣回 LLM)
             const truncated = typeof result === 'string' && result.length > 200000 ? result.slice(0, 200000) : result;
-            toolCallResults.push({ id, name: toolName, args, result: truncated });
+            toolCallResults.push({ id, name: toolName, args, result: truncated, ...src });
             return result;
           };
 
@@ -3329,13 +3387,31 @@ ${hasPreserve ? '- 標記【★保留原文】的欄位：必須完整複製原�
 
       // ── Chat Inline Chart:解析 ```generate_chart:type``` 區塊 ──
       // 注意:先 parse 再走 displayText strip(下面的 generate_[a-z]+ regex 會把 chart 也幹掉)
+      // Feature flag:system_settings.chat_inline_chart_enabled='0' 可即時關掉 parse + render
+      const chartEnabled = await isInlineChartEnabled(db);
       try {
-        const { charts, errors } = parseChartBlocks(text, toolCallResults);
+        const { charts, errors } = chartEnabled
+          ? parseChartBlocks(text, toolCallResults)
+          : { charts: [], errors: [] };
         if (charts.length > 0) {
-          parsedCharts = charts;
-          sendEvent({ type: 'charts', charts });
-          console.log(`[Chart] Parsed ${charts.length} inline chart(s)` +
-            (errors.length > 0 ? `, ${errors.length} error(s)` : ''));
+          // 敏感資料遮蔽(規劃書 Q4):chart.data rows 拼成大字串掃 sensitive_keywords,
+          // 命中 → 整批 charts 清空,前端收到空 charts 不 render。
+          // content 主檢查另有 notify / log,此處僅 scan 不重複寫 audit_logs。
+          const chartDataFlat = charts
+            .flatMap(c => Array.isArray(c.data) ? c.data : [])
+            .map(row => row && typeof row === 'object' ? Object.values(row).join(' ') : '')
+            .join(' ');
+          const scan = await scanSensitiveKeywords(db, chartDataFlat);
+          if (scan.hasSensitive) {
+            console.warn(`[Chart] Redacted ${charts.length} chart(s) — sensitive keywords: ${scan.matched.join(', ')}`);
+            parsedCharts = [];
+            sendEvent({ type: 'status', message: '⚠ 圖表含敏感資料,已遮蔽' });
+          } else {
+            parsedCharts = charts;
+            sendEvent({ type: 'charts', charts });
+            console.log(`[Chart] Parsed ${charts.length} inline chart(s)` +
+              (errors.length > 0 ? `, ${errors.length} error(s)` : ''));
+          }
         }
         if (errors.length > 0) {
           for (const err of errors) {
@@ -3579,6 +3655,40 @@ router.put('/messages/:id', async (req, res) => {
 // Helpers
 
 const { upsertTokenUsage } = require('../services/tokenService');
+
+/**
+ * 讀 system_settings 判斷 inline chart 功能是否開啟。
+ * 預設開(無設定值 → true);value 為 '0' / 'false' 才關。
+ * Admin 可在 system_settings 設 key=chat_inline_chart_enabled value=0 緊急關閉。
+ */
+async function isInlineChartEnabled(db) {
+  try {
+    const row = await db.prepare(`SELECT value FROM system_settings WHERE key=?`).get('chat_inline_chart_enabled');
+    if (!row) return true;
+    const v = String(row.value ?? '').trim().toLowerCase();
+    return v !== '0' && v !== 'false' && v !== 'off';
+  } catch (_) {
+    return true;
+  }
+}
+
+/**
+ * 純偵測敏感字(不寫 audit_logs / 不 notify),chart data 遮蔽用。
+ * 回傳 { hasSensitive: boolean, matched: string[] }
+ */
+async function scanSensitiveKeywords(db, content) {
+  if (!content) return { hasSensitive: false, matched: [] };
+  try {
+    const keywords = await db.prepare(`SELECT keyword FROM sensitive_keywords`).all();
+    const lower = String(content).toLowerCase();
+    const matched = keywords
+      .map(k => k.keyword)
+      .filter(kw => kw && lower.includes(String(kw).toLowerCase()));
+    return { hasSensitive: matched.length > 0, matched };
+  } catch (_) {
+    return { hasSensitive: false, matched: [] };
+  }
+}
 
 async function checkSensitiveKeywords(db, user, sessionId, content) {
   try {

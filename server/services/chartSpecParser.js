@@ -16,6 +16,8 @@
  *   }
  */
 
+const crypto = require('crypto');
+
 const CHART_BLOCK_RE = /```generate_chart:(\w+)\s*\n([\s\S]*?)```/g;
 const VALID_TYPES = new Set(['bar', 'line', 'pie', 'scatter', 'area', 'heatmap', 'radar']);
 
@@ -172,10 +174,57 @@ function validateSpec(spec) {
 }
 
 /**
+ * 從 rows[0] 的 keys 算 schema hash(排序後 sha256 前 16 字)。
+ * 未來 tool 欄位改名時,打開 chart 能偵測 schema 漂移並提示 owner。
+ */
+function computeSchemaHash(rows) {
+  if (!Array.isArray(rows) || rows.length === 0) return null;
+  const first = rows[0];
+  if (!first || typeof first !== 'object') return null;
+  const keys = Object.keys(first).sort().join('|');
+  return crypto.createHash('sha256').update(keys).digest('hex').slice(0, 16);
+}
+
+/**
+ * 根據 spec + toolCallResults 推斷 chart 的 source tool 來源。
+ * toolCallResults 每個元素應帶 source_type / source_tool / source_tool_version
+ * (由 chat.js 的 toolHandler push 時填入)。
+ *
+ * 規則:
+ * - 無 toolCall → chat_freeform
+ * - spec.data_ref.tool_call_id match → 用對應的 tool
+ * - 單一 toolCall → 用它
+ * - 多 toolCall 且無 data_ref → 保守回 chat_freeform(避免錯掛)
+ */
+function resolveChartSource(spec, toolCallResults) {
+  if (!Array.isArray(toolCallResults) || toolCallResults.length === 0) {
+    return { source_type: 'chat_freeform', source_tool: null, source_tool_version: null };
+  }
+
+  let target = null;
+  const refId = spec?.data_ref?.tool_call_id;
+  if (refId) {
+    target = toolCallResults.find(tc => tc.id === refId) || null;
+  }
+  if (!target && toolCallResults.length === 1) {
+    target = toolCallResults[0];
+  }
+  if (!target) {
+    return { source_type: 'chat_freeform', source_tool: null, source_tool_version: null };
+  }
+
+  return {
+    source_type: target.source_type || 'chat_freeform',
+    source_tool: target.source_tool || null,
+    source_tool_version: target.source_tool_version || null,
+  };
+}
+
+/**
  * 主入口:解析 LLM final text 中的 chart 區塊。
  *
  * @param {string} text          LLM 最終累積文字
- * @param {Array}  toolCallResults   [{ id, name, result }],用於 data_ref 解析。可空。
+ * @param {Array}  toolCallResults   [{ id, name, result, source_type, source_tool }],用於 data_ref + source 推斷。可空。
  * @returns {{ strippedText, charts, errors }}
  */
 function parseChartBlocks(text, toolCallResults = []) {
@@ -224,6 +273,10 @@ function parseChartBlocks(text, toolCallResults = []) {
     // rows softcap(驗證通過才 downsample,避免把壞 spec 也留下來)
     spec.data = downsample(spec.data);
 
+    // meta:source tool 推斷 + schema hash,供前端釘選 → 圖庫 Template Share
+    const sourceMeta = resolveChartSource(spec, toolCallResults);
+    const schemaHash = computeSchemaHash(spec.data);
+
     // 只保留白名單欄位,避免把 data_ref 多餘欄位 / 隨便欄位存進 DB
     charts.push({
       version: spec.version || 1,
@@ -236,6 +289,12 @@ function parseChartBlocks(text, toolCallResults = []) {
         color: typeof yf.color === 'string' ? yf.color : undefined,
       })),
       data: spec.data,
+      meta: {
+        source_type: sourceMeta.source_type,
+        source_tool: sourceMeta.source_tool,
+        source_tool_version: sourceMeta.source_tool_version,
+        source_schema_hash: schemaHash,
+      },
     });
     stripRanges.push([start, end]);
   }
@@ -253,6 +312,8 @@ function parseChartBlocks(text, toolCallResults = []) {
 
 module.exports = {
   parseChartBlocks,
+  computeSchemaHash,
+  resolveChartSource,
   // 下列 export 只供測試
   _internals: { tolerantJsonParse, jsonpathExtract, resolveDataRef, downsample, validateSpec },
 };

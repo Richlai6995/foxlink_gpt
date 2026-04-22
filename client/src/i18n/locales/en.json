@@ -2960,6 +2960,21 @@
     },
     "delete": {
       "confirm": "Delete \"{{title}}\"?"
+    },
+    "erpTab": {
+      "tab": "Chart",
+      "tabHint": "Design chart from result and save to My Library",
+      "chartType": "Chart type",
+      "title": "Title",
+      "xField": "X-axis field",
+      "yFields": "Y-axis fields",
+      "preview": "Preview",
+      "save": "Save to Library",
+      "saved": "Saved to library",
+      "goLibrary": "Open library →",
+      "needFields": "Please select X and Y fields",
+      "noData": "No structured data to chart",
+      "noDataHint": "This procedure's return has no OUT ref cursor and is not a markdown table. Configure Answer Output Format in tool admin, or switch to a procedure with OUT cursor."
     }
   }
 }

@@ -1735,6 +1735,7 @@ export default function ChatPage() {
             const reprompt = `請把上一個回答中的數據畫成${typeLabel}(generate_chart:${chartType}),只輸出圖表代碼區塊,不需要其他文字解釋。資料參考內容:\n\n${content.slice(0, 2000)}`
             handleSend(reprompt, [])
           }}
+          sessionId={currentSessionId}
         />
 
         {/* ERP 已啟用工具的參數提示 */}

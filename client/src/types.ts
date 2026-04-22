@@ -61,6 +61,13 @@ export interface InlineChartSpec {
   y_fields: InlineChartYField[]
   data?: Record<string, unknown>[]
   data_ref?: { tool_call_id: string; path?: string }
+  /** Server parser 回填的 source 元資料,供前端釘選到圖庫時組 pinSource */
+  meta?: {
+    source_type?: string
+    source_tool?: string | null
+    source_tool_version?: string | null
+    source_schema_hash?: string | null
+  }
 }
 
 // ── User Charts(Phase 5):使用者自建圖庫 ──────────────────────────────────────

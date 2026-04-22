@@ -295,10 +295,10 @@ ALTER TABLE chat_messages ADD charts_json CLOB
 - [x] **分享**:直接 import `dashboard/ShareModal.tsx`(原生支援 `sharesUrl` prop),zero 新輪子
 - [x] **Admin 採納**:`ChartAdoptionPanel.tsx` + `/api/user-charts/admin/popular` + `/api/user-charts/admin/:id/adopt`;**第一版需 admin 手填 SQL**(tool ↔ SQL 路徑差異 Phase 5b 才做 LLM 輔助)
 
-**Phase 5 留給 5b 的小尾巴**:
-- `PinChartButton.pinSource` prop 預留但 ChatPage 還沒注入元資料 → 目前存進去一律 `source_type=chat_freeform, source_tool=NULL`(不可分享);需要在 ChatPage 把 toolCallResults 對照到 spec 再 inject
-- `source_type=skill` 分支在 `chartExecutor.runSourceTool` 回「暫不支援」
-- `source_prompt` 目前未實際使用(原本設計是 fallback 用 LLM 重生 data,但現在走 tool 直接跑)
+**Phase 5 尾巴**:
+- [x] ~~`PinChartButton.pinSource` prop 預留但 ChatPage 還沒注入元資料~~ → **ChatPage 注入 toolCallResults → spec 的對應,source_tool 正確填入**(commit 待 ship)
+- [ ] `source_type=skill` 分支在 `chartExecutor.runSourceTool` 回「暫不支援」 — 低優先
+- [ ] `source_prompt` 目前未實際使用(原本設計是 fallback 用 LLM 重生 data,但現在走 tool 直接跑)— 可砍
 
 #### 既有元件複用(關鍵:不發明新輪子)
 
@@ -309,6 +309,98 @@ ALTER TABLE chat_messages ADD charts_json CLOB
 | Shares schema 標準 | 對齊 `ai_dashboard_shares` 欄位簽名 | [server/database-oracle.js:1133](../server/database-oracle.js#L1133) |
 | 權限檢查 pattern | 仿 `canAccessDesign` / `canAccessProject` | [server/routes/dashboard.js:33-95](../server/routes/dashboard.js#L33) |
 | share_type 值 | `'use'` / `'manage'`(不發明 'view'/'edit') | 既有標準 |
+
+---
+
+### Phase 5c — ERP 手動呼叫 Modal 加「圖表」Tab
+
+> **定位**:在 `ErpToolInvokeModal` 加第 3 個 viewMode(`chart`),讓使用者 **不用經過 chat** 就能從 procedure 結果直接設計圖表 + 存進圖庫。
+
+#### 為什麼要做這個
+
+目前釘選到圖庫的 chart 有兩條路徑:
+1. **chat 對話中 LLM 自動畫** → 點 ⭐ 釘選 — LLM 可能選錯圖型,品質參差
+2. **從圖庫 ChartEditorModal 從零設計** — 工作流長:選 tool → 填參 → preview → 存
+
+**加第 3 條路徑**:
+3. **ERP modal 執行完直接設計** — 零 LLM,參數已填,結果已拿,只差「用什麼圖型呈現」— **最直接 + 最精準**
+
+這同時回應了 `erp-tools-design.md` 的「手動呼叫」情境:使用者本來就會用 ErpToolInvokeModal 跑 procedure,加這個 tab 順手就能轉成可分享的圖表模板。
+
+#### UI 設計
+
+```
+既有 tabs: [ Table ] [ JSON ]  ← 加第 3 個
+新 tab:    [ 📊 圖表 ]
+
+點圖表 tab →
+┌──────────────────────────────────────────┐
+│ 圖型: [bar▾]  X: [機種▾]  Y: ☑ 超額金額   │
+│                              ☐ 料號       │
+│ Title: [合理庫存超額金額排名 TOP10]       │
+│                                           │
+│ ┌── Live Preview (InlineChart) ─────────┐ │
+│ │                                       │ │
+│ │   [即時渲染,欄位 / 圖型變更立刻更新] │ │
+│ │                                       │ │
+│ └───────────────────────────────────────┘ │
+│                                           │
+│ [💾 儲存到圖庫]  [⬇ 下載 PNG]           │
+└──────────────────────────────────────────┘
+```
+
+#### 儲存時的 source 元資料
+
+```ts
+POST /api/user-charts {
+  title:               "合理庫存超額金額排名 TOP10",
+  chart_spec: {        // data 剝除,只存設計
+    version: 1, type: 'bar', title: '...',
+    x_field: '機種', y_fields: [{ field: '超額金額' }]
+  },
+  source_type:         'erp',
+  source_tool:         'erp:42',              // tool.id,chartExecutor 認得
+  source_tool_version: tool.version || null,
+  source_schema_hash:  sha256(keys.sorted),   // 同 chat 路徑
+  source_params: [                            // 從 tool.parameters 轉換
+    { key: 'P_ORG_ID',    label: '組織代碼', type: 'select', default: 'GAD', options: [...] },
+    { key: 'P_PLAN_NAME', label: 'MRP計畫', type: 'select', default: 'MRP2617', options: [...] },
+    { key: 'P_RANK_NUM',  label: '顯示前幾名', type: 'number', default: 10 }
+  ],
+  source_session_id: null,    // 手動呼叫沒 session
+  source_message_id: null
+}
+```
+
+之後別人打開這張圖表 → `/execute` → chartExecutor.runSourceTool 用**被分享者自己的**權限重跑 `erp:42` → 畫圖。參數可在 `ChartParamForm` 改(e.g. 把組織代碼從 GAD 換成別的)。
+
+#### 與 chat 釘選流程的重疊與差異
+
+| 面向 | chat LLM 釘選 | ERP Modal 圖表 tab |
+|------|---------------|-------------------|
+| chart_spec 來源 | LLM 產,使用者選 or 拒 | 使用者從 UI 手動選 type/欄位 |
+| 參數 template | 來自 tool 呼叫記錄 | 來自 modal 當下 inputs + tool.parameters |
+| 作者意圖明確度 | 模糊(LLM 猜) | 明確(使用者自己設計) |
+| 進圖庫品質 | 參差 | 高 |
+| 開發成本 | 低(已做) | 中(加一個 designer UI) |
+
+**兩條路徑共存、互補**,不互相取代。
+
+#### 實作點
+
+- **新檔**:`client/src/components/chat/ErpToolChartTab.tsx` — 欄位選擇器 + Live Preview + 儲存
+- **改檔**:`client/src/components/chat/ErpToolInvokeModal.tsx` — `viewMode` 加 `'chart'`
+- **改檔**:`server/services/chartExecutor.js` — 確認 `erp:{tool_id}` 格式已支援
+- **新 util**:`client/src/lib/chartFieldInference.ts` — 從 rows[0] 自動推斷欄位型別(數值/文字/時間),供預設 X/Y 選擇
+- **i18n**:新增 `chart.erpTab.*` 三語 key
+
+#### Open question(Q13)
+
+**手動執行 ERP tool 時,UI 是否要主動跳「要不要畫圖?」提示?**
+- 推薦:**不跳**,只在 tab bar 加 📊 icon 提示可用即可 — 不強迫,使用者需要再點
+- 原因:多數情況使用者就是要看數字,跳 modal 會干擾流程
+
+**最終決策**:Tab bar 長 📊 icon,點了才進 designer,不主動彈 modal。
 
 **新增只有**:`user_charts` 表 + `user_chart_shares` 表(schema 對齊既有 `*_shares`)+ `canAccessUserChart` util(對齊既有 `canAccessX` pattern)。
 
