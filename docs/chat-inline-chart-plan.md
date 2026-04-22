@@ -10,8 +10,9 @@
 > - Phase 3 使用者控制(local 切換 + reprompt) → commit `29293de`
 > - Phase 4 進階圖型 + dataZoom → commit `66fb118`
 > - Phase 5 使用者圖庫 + Template Share + admin 採納 → commit `216f395`
+> - Phase 5b ChartEditor 4-step wizard(從零設計圖表)+ MyChartsPage 返回鍵 → commit `bf67467`
 >
-> **尚未做**:測試驗收(見 §9 測試劇本)、push to origin、Phase 4 的 Chart→PPT 匯出、Phase 5b 的 skill 來源重跑 + LLM 輔助採納
+> **尚未做**:測試驗收(見 §9 測試劇本)、push to origin、Phase 4 的 Chart→PPT 匯出、Phase 5c 的 MCP/skill 來源 ChartEditor 支援、PinChartButton source metadata 注入(目前 pin 進來都 freeform)
 
 ---
 
@@ -631,6 +632,48 @@ cd client && npm run dev
 
 ---
 
+### P1 — ChartEditor 從零設計(Phase 5b 新增)
+
+**T1-10. 進入點 + 返回鍵**
+- 從 sidebar 點「我的圖庫」→ 進 `/my-charts`
+- **預期**:左上 Cortex logo / 右上「← 返回對話」可點回 chat / 右側「+ 新增圖表」按鈕
+
+**T1-11. ChartEditor wizard — 完整路徑**
+- 點「+ 新增圖表」→ Modal 開啟,顯示 4 step bar
+- **Step 1**:filter 搜「廠」找 ERP tool → 點 card 高亮 → 「下一步」
+- **Step 2**:看到 tool params 自動帶 default → 不改參數 → 點「執行取欄位 →」
+  - **預期**:綠色 ✓ 提示「取得 N 筆,M 個欄位:foo, bar, ..."
+- **Step 3**:
+  - 7 個 type icon 預設 bar,可切到 line / pie / scatter
+  - x_field 自動猜為第一個 string 欄
+  - y_fields 自動猜為第一個數值欄(綠色色塊)
+  - 下方 InlineChart 即時預覽,改 type 即時刷新
+  - 點「+ 加一個系列」加 y_fields → 預覽多系列疊圖
+- **Step 4**:
+  - 標題必填(否則「下一步」灰)
+  - 「分享時可由被分享者改」勾選欄,未勾的會顯示「固定: <當下值>」
+  - 點「儲存到圖庫 ✓」→ Modal 關 + `/my-charts` 出現新 card
+
+**T1-12. 設計後的 chart 重執行**
+- 接 T1-11,在「我的」tab expand 剛存的 chart
+- 顯示 ChartParamForm(欄位來自 `source_params` template)
+- 改個參數 → 點「執行」→ 渲染圖
+- **預期**:
+  - 圖正常出
+  - DB `user_charts.use_count += 1`
+  - 若 schema_hash 跟存的不符,出 warning(此項通常 design 當下就用最新 hash,正常不會 warn)
+
+**T1-13. 設計時 0 筆 / 工具錯誤**
+- Step 2 故意填一個會回 0 筆的條件(如不存在的料號)
+- **預期**:紅色錯誤「工具回傳 0 筆資料,請檢查參數」,「下一步」灰
+- 故意填會 ERP error 的條件 → 紅色顯示 ERP 拋的錯,wizard 不前進
+
+**T1-14. heatmap 提示**
+- Step 3 選 heatmap type 但只有 1 個 y_field
+- **預期**:橘色提示「heatmap 需要 2 個 y_fields」
+
+---
+
 ### P2 — 罕用邊界
 
 **T2-1. tolerant JSON**
@@ -666,14 +709,15 @@ cd client && npm run dev
 
 ---
 
-### 快速驗收路徑(10 分鐘跑完核心)
+### 快速驗收路徑(15 分鐘跑完核心)
 
-只跑這 5 個就 ship:
+只跑這 6 個就 ship:
 ```
-T0-1  直接 inline data 畫 bar
-T0-3  壞 JSON 不炸 message
-T0-5  local 切換圖型
-T0-7  釘選到圖庫
-T1-9  admin 採納
+T0-1   直接 inline data 畫 bar
+T0-3   壞 JSON 不炸 message
+T0-5   local 切換圖型
+T0-7   釘選到圖庫
+T1-9   admin 採納
+T1-11  ChartEditor 從零設計(完整 4-step wizard)
 ```
-這 5 個涵蓋 parser / render / persist / switch / pin / share schema / admin adoption 的主幹路徑。
+這 6 個涵蓋 parser / render / persist / switch / pin / share schema / admin adoption / chart editor 的主幹路徑。
