@@ -2690,8 +2690,9 @@ router.delete('/saved-queries/:id/shares/:shareId', requireDashboard, async (req
 // GET /saved-queries/param-values — 取得某 schema 欄位的 distinct 值（供參數下拉使用）
 router.get('/saved-queries/param-values', requireDashboard, async (req, res) => {
   const { db } = require('../database-oracle');
-  const { getErpPool } = require('../services/dashboardService');
+  const { getPoolBySourceId } = require('../services/dashboardService');
   let sql = null; // 宣告在 try 外，catch block 才能引用
+  let sourceDbId = null; // LOV 要走 schema 的來源 DB,不可硬用 ERP
   try {
     const { schema_id, column_name, fetch_values_sql, search, filter_column, filter_value } = req.query;
     console.log('[param-values] req:', { schema_id, column_name, has_fetch_sql: !!fetch_values_sql, filter_column, filter_value });
@@ -2705,8 +2706,9 @@ router.get('/saved-queries/param-values', requireDashboard, async (req, res) => 
       ? ` AND ${filter_column.toUpperCase()} = '${String(filter_value).replace(/'/g, "''")}'`
       : '';
     if (!sql && schema_id) {
-      const schemaDef = await db.prepare('SELECT table_name, source_sql, source_type FROM ai_schema_definitions WHERE id=?').get(schema_id);
+      const schemaDef = await db.prepare('SELECT table_name, source_sql, source_type, source_db_id FROM ai_schema_definitions WHERE id=?').get(schema_id);
       if (!schemaDef) return res.status(404).json({ error: 'Schema 不存在' });
+      sourceDbId = schemaDef.source_db_id ?? schemaDef.SOURCE_DB_ID ?? null;
       const col = column_name.toUpperCase();
       const source = schemaDef.source_type === 'sql' ? `(${schemaDef.source_sql})` : schemaDef.table_name;
       const likeClause = searchFilter ? ` AND UPPER(${col}) LIKE UPPER('%${searchFilter.replace(/'/g, "''")}%')` : '';
@@ -2715,10 +2717,17 @@ router.get('/saved-queries/param-values', requireDashboard, async (req, res) => 
       // fetch_values_sql 模式：包成子查詢加 cascade filter
       sql = `SELECT * FROM (${sql}) WHERE 1=1${cascadeClause}`;
     }
+    // fetch_values_sql 模式若也帶 schema_id,用來指定跨庫(schema.source_db_id 為準)
+    if (sql && fetch_values_sql && !sourceDbId && schema_id) {
+      try {
+        const row = await db.prepare('SELECT source_db_id FROM ai_schema_definitions WHERE id=?').get(schema_id);
+        sourceDbId = row?.source_db_id ?? row?.SOURCE_DB_ID ?? null;
+      } catch (_) { /* fall through,走預設 ERP */ }
+    }
     if (!sql) return res.status(400).json({ error: '無法組建查詢' });
 
-    console.log('[param-values] SQL:', sql);
-    const erpPool = await getErpPool();
+    console.log('[param-values] SQL:', sql, 'sourceDbId:', sourceDbId);
+    const erpPool = await getPoolBySourceId(sourceDbId, db);
     const conn = await erpPool.getConnection();
     try {
       const result = await conn.execute(sql, [], { outFormat: require('oracledb').OUT_FORMAT_OBJECT });

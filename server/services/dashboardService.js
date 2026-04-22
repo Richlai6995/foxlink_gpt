@@ -55,9 +55,10 @@ function assertErpReadOnly(sql) {
     .replace(/\/\*[\s\S]*?\*\//g, ' ')  // 移除區塊注解
     .trim();
 
-  if (!/^\s*SELECT\b/i.test(stripped)) {
+  // 允許 SELECT 或 WITH (CTE) 開頭;CTE body 若含 DML 仍會被 ERP_FORBIDDEN 擋掉
+  if (!/^\s*(SELECT|WITH)\b/i.test(stripped)) {
     const preview = stripped.substring(0, 80).replace(/\s+/g, ' ');
-    throw new Error(`[ERP 唯讀保護] 僅允許 SELECT，已拒絕: ${preview}`);
+    throw new Error(`[ERP 唯讀保護] 僅允許 SELECT / WITH (CTE)，已拒絕: ${preview}`);
   }
   if (ERP_FORBIDDEN.test(stripped)) {
     throw new Error('[ERP 唯讀保護] SQL 含有禁止關鍵字（DML/DDL/系統 Package），已拒絕執行');

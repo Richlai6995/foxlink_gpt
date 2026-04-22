@@ -13,8 +13,9 @@ function assertOracleReadOnly(sql) {
     .replace(/--[^\r\n]*/g, ' ')
     .replace(/\/\*[\s\S]*?\*\//g, ' ')
     .trim();
-  if (!/^\s*SELECT\b/i.test(stripped)) {
-    throw new Error(`[Oracle 唯讀保護] 僅允許 SELECT，已拒絕: ${stripped.substring(0, 80).replace(/\s+/g, ' ')}`);
+  // 允許 SELECT 或 WITH (CTE) 開頭;CTE body 若含 DML 仍會被 ORACLE_FORBIDDEN 擋下
+  if (!/^\s*(SELECT|WITH)\b/i.test(stripped)) {
+    throw new Error(`[Oracle 唯讀保護] 僅允許 SELECT / WITH (CTE)，已拒絕: ${stripped.substring(0, 80).replace(/\s+/g, ' ')}`);
   }
   if (ORACLE_FORBIDDEN.test(stripped)) {
     throw new Error('[Oracle 唯讀保護] SQL 含有禁止關鍵字（DML/DDL/系統 Package），已拒絕執行');

@@ -1463,10 +1463,21 @@ router.get('/chat-sessions', async (req, res) => {
  * Build cost data for date range.
  * Returns array of { user_id, employee_id, user_name, usage_date, model, input_tokens, output_tokens, cost, currency }
  * merged with org_cache.
+ * @param {object} filters {factoryCode, deptCode, profitCenter, orgSection, orgGroup} 單選篩選(空字串/null=不篩)
  */
-async function getCostRows(db, startDate, endDate) {
-  // Read org fields directly from users table
-  // 排除：已離職（org_end_date IS NOT NULL）/ 手動停用（status = 'disabled'）
+async function getCostRows(db, startDate, endDate, filters = {}) {
+  const { factoryCode, deptCode, profitCenter, orgSection, orgGroup } = filters;
+  const wheres = [
+    `tu.usage_date BETWEEN TO_DATE(?, 'YYYY-MM-DD') AND TO_DATE(?, 'YYYY-MM-DD')`,
+    `u.org_end_date IS NULL`,
+    `(u.status IS NULL OR u.status != 'disabled')`,
+  ];
+  const binds = [startDate, endDate];
+  if (factoryCode)  { wheres.push(`u.factory_code = ?`);   binds.push(factoryCode); }
+  if (deptCode)     { wheres.push(`u.dept_code = ?`);      binds.push(deptCode); }
+  if (profitCenter) { wheres.push(`u.profit_center = ?`);  binds.push(profitCenter); }
+  if (orgSection)   { wheres.push(`u.org_section = ?`);    binds.push(orgSection); }
+  if (orgGroup)     { wheres.push(`u.org_group_name = ?`); binds.push(orgGroup); }
   try {
     return await db.prepare(`
       SELECT tu.user_id, u.employee_id, u.name AS user_name, u.email AS user_email,
@@ -1479,15 +1490,42 @@ async function getCostRows(db, startDate, endDate) {
              u.org_section, u.org_section_name, u.org_group_name, u.factory_code
       FROM token_usage tu
       JOIN users u ON tu.user_id = u.id
-      WHERE tu.usage_date BETWEEN TO_DATE(?, 'YYYY-MM-DD') AND TO_DATE(?, 'YYYY-MM-DD')
-        AND u.org_end_date IS NULL
-        AND (u.status IS NULL OR u.status != 'disabled')
+      WHERE ${wheres.join(' AND ')}
       ORDER BY tu.usage_date
-    `).all(startDate, endDate);
+    `).all(...binds);
   } catch (e) {
     console.error('[CostStats] token_usage query error:', e.message);
     return [];
   }
+}
+
+/**
+ * Helper: 從 req.query 抽出 5 個 filter
+ */
+function extractFilters(q) {
+  return {
+    factoryCode:  q.factoryCode || null,
+    deptCode:     q.deptCode || null,
+    profitCenter: q.profitCenter || null,
+    orgSection:   q.orgSection || null,
+    orgGroup:     q.orgGroup || null,
+  };
+}
+
+/**
+ * Helper: 帳號人數的 filter WHERE fragment(配合 getCostRows 語義,套用同樣篩選)
+ * 回傳 { sql, binds }:合適放在既有 users query 的 WHERE 後面(已 AND 連接)
+ */
+function buildAccountRowsFilter(filters) {
+  const { factoryCode, deptCode, profitCenter, orgSection, orgGroup } = filters;
+  const extras = [];
+  const binds = [];
+  if (factoryCode)  { extras.push(`factory_code = ?`);   binds.push(factoryCode); }
+  if (deptCode)     { extras.push(`dept_code = ?`);      binds.push(deptCode); }
+  if (profitCenter) { extras.push(`profit_center = ?`);  binds.push(profitCenter); }
+  if (orgSection)   { extras.push(`org_section = ?`);    binds.push(orgSection); }
+  if (orgGroup)     { extras.push(`org_group_name = ?`); binds.push(orgGroup); }
+  return { extraWhere: extras.length ? ' AND ' + extras.join(' AND ') : '', binds };
 }
 
 /**
@@ -1498,8 +1536,8 @@ async function getCostRows(db, startDate, endDate) {
  * @param {object} opts { showAll: boolean, lang: string }
  * @returns {Promise<Array>} 每筆含 has_account/has_usage/factory_name
  */
-async function aggregateEmployees(db, startDate, endDate, { showAll, lang } = {}) {
-  const rows = await getCostRows(db, startDate, endDate);
+async function aggregateEmployees(db, startDate, endDate, { showAll, lang, filters = {} } = {}) {
+  const rows = await getCostRows(db, startDate, endDate, filters);
 
   // 由用量資料聚合
   const empMap = {};
@@ -1535,6 +1573,13 @@ async function aggregateEmployees(db, startDate, endDate, { showAll, lang } = {}
     const userSet = new Set(allUsers.map((u) => String(u.employee_id)));
 
     for (const e of erpEmps) {
+      // 套用同樣的 filter(ERP 員工清單無法在 SQL 篩,在 JS 層面過濾)
+      if (filters.factoryCode  && (e.FACTORY_CODE || '')  !== filters.factoryCode)  continue;
+      if (filters.deptCode     && (e.DEPT_CODE || '')     !== filters.deptCode)     continue;
+      if (filters.profitCenter && (e.PROFIT_CENTER || '') !== filters.profitCenter) continue;
+      if (filters.orgSection   && (e.ORG_SECTION || '')   !== filters.orgSection)   continue;
+      if (filters.orgGroup     && (e.ORG_GROUP_NAME || '')!== filters.orgGroup)     continue;
+
       const empId = String(e.EMPLOYEE_NO);
       if (empMap[empId]) {
         // 已有用量，補 has_account 判定（理論上必為 true）
@@ -1650,19 +1695,16 @@ router.post('/cost-stats/refresh-org-cache', async (req, res) => {
   }
 });
 
-// GET /api/admin/cost-stats/employees?startDate=&endDate=&profitCenter=&orgSection=&showAllEmployees=1
+// GET /api/admin/cost-stats/employees?startDate=&endDate=&profitCenter=&orgSection=&deptCode=&factoryCode=&orgGroup=&showAllEmployees=1
 router.get('/cost-stats/employees', async (req, res) => {
   try {
     const db = require('../database-oracle').db;
-    const { startDate, endDate, profitCenter, orgSection, deptCode, showAllEmployees } = req.query;
+    const { startDate, endDate, showAllEmployees } = req.query;
     if (!startDate || !endDate) return res.status(400).json({ error: '請提供日期區間' });
 
     const lang = req.query.lang || req.headers['accept-language']?.split(',')[0] || 'zh-TW';
-    let result = await aggregateEmployees(db, startDate, endDate, { showAll: showAllEmployees === '1', lang });
-
-    if (profitCenter) result = result.filter((r) => r.profit_center === profitCenter);
-    if (orgSection) result = result.filter((r) => r.org_section === orgSection);
-    if (deptCode) result = result.filter((r) => r.dept_code === deptCode);
+    const filters = extractFilters(req.query);
+    let result = await aggregateEmployees(db, startDate, endDate, { showAll: showAllEmployees === '1', lang, filters });
 
     result.sort((a, b) => (b.cost || 0) - (a.cost || 0));
     res.json(result);
@@ -1671,7 +1713,7 @@ router.get('/cost-stats/employees', async (req, res) => {
   }
 });
 
-// GET /api/admin/cost-stats/summary?startDate=&endDate=&includeAllPC=1
+// GET /api/admin/cost-stats/summary?startDate=&endDate=&includeAllPC=1&factoryCode=&deptCode=&profitCenter=&orgSection=&orgGroup=
 router.get('/cost-stats/summary', async (req, res) => {
   try {
     const db = require('../database-oracle').db;
@@ -1679,12 +1721,20 @@ router.get('/cost-stats/summary', async (req, res) => {
     if (!startDate || !endDate) return res.status(400).json({ error: '請提供日期區間' });
 
     const { getIndirectEmpCountByPC, getAllProfitCenters } = require('../services/erpDb');
+    const filters = extractFilters(req.query);
+    const hasFilter = Object.values(filters).some(Boolean);
+    const accFilter = buildAccountRowsFilter(filters);
 
     const [rows, accountRows, indirectMap, allPCs] = await Promise.all([
-      getCostRows(db, startDate, endDate),
-      db.prepare(`SELECT profit_center, COUNT(*) AS cnt FROM users WHERE (status IS NULL OR status != 'disabled') AND org_end_date IS NULL GROUP BY profit_center`).all(),
+      getCostRows(db, startDate, endDate, filters),
+      db.prepare(
+        `SELECT profit_center, COUNT(*) AS cnt FROM users
+         WHERE (status IS NULL OR status != 'disabled') AND org_end_date IS NULL${accFilter.extraWhere}
+         GROUP BY profit_center`
+      ).all(...accFilter.binds),
       getIndirectEmpCountByPC(),
-      includeAllPC === '1' ? getAllProfitCenters(onlyFoxlinkGroup !== '0') : Promise.resolve([]),
+      // 套 filter 時不補「無帳號 PC」(filter 後的 PC 範圍本來就有限,補全量 PC 會破壞語義)
+      (includeAllPC === '1' && !hasFilter) ? getAllProfitCenters(onlyFoxlinkGroup !== '0') : Promise.resolve([]),
     ]);
 
     // Build account count map (all registered accounts per profit_center)
@@ -1798,7 +1848,7 @@ router.get('/cost-stats/summary', async (req, res) => {
   }
 });
 
-// GET /api/admin/cost-stats/monthly?startDate=&endDate=&includeAllPC=1
+// GET /api/admin/cost-stats/monthly?startDate=&endDate=&includeAllPC=1&factoryCode=&deptCode=&profitCenter=&orgSection=&orgGroup=
 router.get('/cost-stats/monthly', async (req, res) => {
   try {
     const db = require('../database-oracle').db;
@@ -1806,12 +1856,19 @@ router.get('/cost-stats/monthly', async (req, res) => {
     if (!startDate || !endDate) return res.status(400).json({ error: '請提供日期區間' });
 
     const { getIndirectEmpCountByPC, getAllProfitCenters } = require('../services/erpDb');
+    const filters = extractFilters(req.query);
+    const hasFilter = Object.values(filters).some(Boolean);
+    const accFilter = buildAccountRowsFilter(filters);
 
     const [rows, accountRows, indirectMap, allPCs] = await Promise.all([
-      getCostRows(db, startDate, endDate),
-      db.prepare(`SELECT profit_center, COUNT(*) AS cnt FROM users WHERE (status IS NULL OR status != 'disabled') AND org_end_date IS NULL GROUP BY profit_center`).all(),
+      getCostRows(db, startDate, endDate, filters),
+      db.prepare(
+        `SELECT profit_center, COUNT(*) AS cnt FROM users
+         WHERE (status IS NULL OR status != 'disabled') AND org_end_date IS NULL${accFilter.extraWhere}
+         GROUP BY profit_center`
+      ).all(...accFilter.binds),
       getIndirectEmpCountByPC(),
-      includeAllPC === '1' ? getAllProfitCenters(onlyFoxlinkGroup !== '0') : Promise.resolve([]),
+      (includeAllPC === '1' && !hasFilter) ? getAllProfitCenters(onlyFoxlinkGroup !== '0') : Promise.resolve([]),
     ]);
 
     const accountMap = {};
@@ -1911,17 +1968,16 @@ router.get('/cost-stats/monthly', async (req, res) => {
   }
 });
 
-// GET /api/admin/cost-stats/export/employees?startDate=&endDate=...&showAllEmployees=1  → CSV
+// GET /api/admin/cost-stats/export/employees?startDate=&endDate=...&showAllEmployees=1&filters...  → CSV
 router.get('/cost-stats/export/employees', async (req, res) => {
   try {
     const db = require('../database-oracle').db;
-    const { startDate, endDate, profitCenter, deptCode, showAllEmployees } = req.query;
+    const { startDate, endDate, showAllEmployees } = req.query;
     if (!startDate || !endDate) return res.status(400).json({ error: '請提供日期區間' });
 
     const lang = req.query.lang || req.headers['accept-language']?.split(',')[0] || 'zh-TW';
-    let result = await aggregateEmployees(db, startDate, endDate, { showAll: showAllEmployees === '1', lang });
-    if (profitCenter) result = result.filter((r) => r.profit_center === profitCenter);
-    if (deptCode) result = result.filter((r) => r.dept_code === deptCode);
+    const filters = extractFilters(req.query);
+    let result = await aggregateEmployees(db, startDate, endDate, { showAll: showAllEmployees === '1', lang, filters });
     result.sort((a, b) => (b.cost || 0) - (a.cost || 0));
 
     const headers = ['工號', '姓名', '有帳號', '部門代碼', '部門名稱', '利潤中心代碼', '利潤中心名稱', '事業處代碼', '事業處名稱', '事業群名稱', '廠區代碼', '廠區名稱', 'Input Tokens', 'Output Tokens', '費用金額', '幣別'];
@@ -1940,7 +1996,7 @@ router.get('/cost-stats/export/employees', async (req, res) => {
   }
 });
 
-// GET /api/admin/cost-stats/export/summary?startDate=&endDate=&includeAllPC=1  → CSV
+// GET /api/admin/cost-stats/export/summary?startDate=&endDate=&includeAllPC=1&filters...  → CSV
 router.get('/cost-stats/export/summary', async (req, res) => {
   try {
     const db = require('../database-oracle').db;
@@ -1948,12 +2004,19 @@ router.get('/cost-stats/export/summary', async (req, res) => {
     if (!startDate || !endDate) return res.status(400).json({ error: '請提供日期區間' });
 
     const { getIndirectEmpCountByPC, getAllProfitCenters } = require('../services/erpDb');
+    const filters = extractFilters(req.query);
+    const hasFilter = Object.values(filters).some(Boolean);
+    const accFilter = buildAccountRowsFilter(filters);
 
     const [rows, accountRows, indirectMap, allPCs] = await Promise.all([
-      getCostRows(db, startDate, endDate),
-      db.prepare(`SELECT profit_center, COUNT(*) AS cnt FROM users WHERE (status IS NULL OR status != 'disabled') AND org_end_date IS NULL GROUP BY profit_center`).all(),
+      getCostRows(db, startDate, endDate, filters),
+      db.prepare(
+        `SELECT profit_center, COUNT(*) AS cnt FROM users
+         WHERE (status IS NULL OR status != 'disabled') AND org_end_date IS NULL${accFilter.extraWhere}
+         GROUP BY profit_center`
+      ).all(...accFilter.binds),
       getIndirectEmpCountByPC(),
-      includeAllPC === '1' ? getAllProfitCenters(onlyFoxlinkGroup !== '0') : Promise.resolve([]),
+      (includeAllPC === '1' && !hasFilter) ? getAllProfitCenters(onlyFoxlinkGroup !== '0') : Promise.resolve([]),
     ]);
     const accountMap = {};
     for (const a of accountRows) { accountMap[a.profit_center || '__NONE__'] = a.cnt; }
@@ -2034,7 +2097,7 @@ router.get('/cost-stats/export/summary', async (req, res) => {
   }
 });
 
-// GET /api/admin/cost-stats/export/monthly?startDate=&endDate=&includeAllPC=1  → CSV
+// GET /api/admin/cost-stats/export/monthly?startDate=&endDate=&includeAllPC=1&filters...  → CSV
 router.get('/cost-stats/export/monthly', async (req, res) => {
   try {
     const db = require('../database-oracle').db;
@@ -2042,12 +2105,19 @@ router.get('/cost-stats/export/monthly', async (req, res) => {
     if (!startDate || !endDate) return res.status(400).json({ error: '請提供日期區間' });
 
     const { getIndirectEmpCountByPC, getAllProfitCenters } = require('../services/erpDb');
+    const filters = extractFilters(req.query);
+    const hasFilter = Object.values(filters).some(Boolean);
+    const accFilter = buildAccountRowsFilter(filters);
 
     const [rows, accountRows, indirectMap, allPCs] = await Promise.all([
-      getCostRows(db, startDate, endDate),
-      db.prepare(`SELECT profit_center, COUNT(*) AS cnt FROM users WHERE (status IS NULL OR status != 'disabled') AND org_end_date IS NULL GROUP BY profit_center`).all(),
+      getCostRows(db, startDate, endDate, filters),
+      db.prepare(
+        `SELECT profit_center, COUNT(*) AS cnt FROM users
+         WHERE (status IS NULL OR status != 'disabled') AND org_end_date IS NULL${accFilter.extraWhere}
+         GROUP BY profit_center`
+      ).all(...accFilter.binds),
       getIndirectEmpCountByPC(),
-      includeAllPC === '1' ? getAllProfitCenters(onlyFoxlinkGroup !== '0') : Promise.resolve([]),
+      (includeAllPC === '1' && !hasFilter) ? getAllProfitCenters(onlyFoxlinkGroup !== '0') : Promise.resolve([]),
     ]);
     const accountMap = {};
     for (const a of accountRows) { accountMap[a.profit_center || '__NONE__'] = a.cnt; }
@@ -2256,7 +2326,7 @@ async function resolveFactoryNamesOnto(result, lang, db) {
   }
 }
 
-// GET /api/admin/cost-stats/summary-by-factory?startDate=&endDate=
+// GET /api/admin/cost-stats/summary-by-factory?startDate=&endDate=&factoryCode=&deptCode=&profitCenter=&orgSection=&orgGroup=
 router.get('/cost-stats/summary-by-factory', async (req, res) => {
   try {
     const db = require('../database-oracle').db;
@@ -2264,20 +2334,31 @@ router.get('/cost-stats/summary-by-factory', async (req, res) => {
     if (!startDate || !endDate) return res.status(400).json({ error: '請提供日期區間' });
 
     const { getIndirectEmpCountByPCFactory } = require('../services/erpDb');
+    const filters = extractFilters(req.query);
+    const hasFilter = Object.values(filters).some(Boolean);
+    const accFilter = buildAccountRowsFilter(filters);
 
     const [rows, accountRows, indirectFactMap, pcMeta] = await Promise.all([
-      getCostRows(db, startDate, endDate),
+      getCostRows(db, startDate, endDate, filters),
       db.prepare(
         `SELECT profit_center, factory_code, COUNT(*) AS cnt FROM users
          WHERE (status IS NULL OR status != 'disabled')
-           AND org_end_date IS NULL
+           AND org_end_date IS NULL${accFilter.extraWhere}
          GROUP BY profit_center, factory_code`
-      ).all(),
+      ).all(...accFilter.binds),
       getIndirectEmpCountByPCFactory(),
       buildPcMeta(db),
     ]);
 
-    let result = aggregateByPcFactory(rows, accountRows, indirectFactMap, pcMeta, false);
+    // 有 filter 時,不讓 indirectFactMap 產生「無使用/無帳號」的 ensure 空列(否則 XZ filter 會吐全部 pc×factory);
+    // 保留 indirect 數字給已存在的列 inject
+    const effectiveIndirectMap = hasFilter ? new Map() : indirectFactMap;
+    let result = aggregateByPcFactory(rows, accountRows, effectiveIndirectMap, pcMeta, false);
+    if (hasFilter) {
+      for (const r of result) {
+        r.indirect_emp_count = indirectFactMap.get(`${r.profit_center}|${r.factory_code || ''}`) || 0;
+      }
+    }
 
     // 過濾三項皆 0 的列
     result = result.filter((r) => r.indirect_emp_count || r.account_count || r.user_count);
@@ -2299,7 +2380,7 @@ router.get('/cost-stats/summary-by-factory', async (req, res) => {
   }
 });
 
-// GET /api/admin/cost-stats/monthly-by-factory?startDate=&endDate=
+// GET /api/admin/cost-stats/monthly-by-factory?startDate=&endDate=&factoryCode=&deptCode=&profitCenter=&orgSection=&orgGroup=
 router.get('/cost-stats/monthly-by-factory', async (req, res) => {
   try {
     const db = require('../database-oracle').db;
@@ -2307,15 +2388,17 @@ router.get('/cost-stats/monthly-by-factory', async (req, res) => {
     if (!startDate || !endDate) return res.status(400).json({ error: '請提供日期區間' });
 
     const { getIndirectEmpCountByPCFactory } = require('../services/erpDb');
+    const filters = extractFilters(req.query);
+    const accFilter = buildAccountRowsFilter(filters);
 
     const [rows, accountRows, indirectFactMap, pcMeta] = await Promise.all([
-      getCostRows(db, startDate, endDate),
+      getCostRows(db, startDate, endDate, filters),
       db.prepare(
         `SELECT profit_center, factory_code, COUNT(*) AS cnt FROM users
          WHERE (status IS NULL OR status != 'disabled')
-           AND org_end_date IS NULL
+           AND org_end_date IS NULL${accFilter.extraWhere}
          GROUP BY profit_center, factory_code`
-      ).all(),
+      ).all(...accFilter.binds),
       getIndirectEmpCountByPCFactory(),
       buildPcMeta(db),
     ]);
@@ -2344,7 +2427,7 @@ router.get('/cost-stats/monthly-by-factory', async (req, res) => {
   }
 });
 
-// GET /api/admin/cost-stats/export/summary-by-factory  → CSV
+// GET /api/admin/cost-stats/export/summary-by-factory?filters...  → CSV
 router.get('/cost-stats/export/summary-by-factory', async (req, res) => {
   try {
     const db = require('../database-oracle').db;
@@ -2352,20 +2435,29 @@ router.get('/cost-stats/export/summary-by-factory', async (req, res) => {
     if (!startDate || !endDate) return res.status(400).json({ error: '請提供日期區間' });
 
     const { getIndirectEmpCountByPCFactory } = require('../services/erpDb');
+    const filters = extractFilters(req.query);
+    const hasFilter = Object.values(filters).some(Boolean);
+    const accFilter = buildAccountRowsFilter(filters);
 
     const [rows, accountRows, indirectFactMap, pcMeta] = await Promise.all([
-      getCostRows(db, startDate, endDate),
+      getCostRows(db, startDate, endDate, filters),
       db.prepare(
         `SELECT profit_center, factory_code, COUNT(*) AS cnt FROM users
          WHERE (status IS NULL OR status != 'disabled')
-           AND org_end_date IS NULL
+           AND org_end_date IS NULL${accFilter.extraWhere}
          GROUP BY profit_center, factory_code`
-      ).all(),
+      ).all(...accFilter.binds),
       getIndirectEmpCountByPCFactory(),
       buildPcMeta(db),
     ]);
 
-    let result = aggregateByPcFactory(rows, accountRows, indirectFactMap, pcMeta, false);
+    const effectiveIndirectMap = hasFilter ? new Map() : indirectFactMap;
+    let result = aggregateByPcFactory(rows, accountRows, effectiveIndirectMap, pcMeta, false);
+    if (hasFilter) {
+      for (const r of result) {
+        r.indirect_emp_count = indirectFactMap.get(`${r.profit_center}|${r.factory_code || ''}`) || 0;
+      }
+    }
     result = result.filter((r) => r.indirect_emp_count || r.account_count || r.user_count);
     result.sort((a, b) => {
       if (a.profit_center !== b.profit_center) return b.cost - a.cost;
@@ -2394,7 +2486,7 @@ router.get('/cost-stats/export/summary-by-factory', async (req, res) => {
   }
 });
 
-// GET /api/admin/cost-stats/export/monthly-by-factory  → CSV
+// GET /api/admin/cost-stats/export/monthly-by-factory?filters...  → CSV
 router.get('/cost-stats/export/monthly-by-factory', async (req, res) => {
   try {
     const db = require('../database-oracle').db;
@@ -2402,15 +2494,17 @@ router.get('/cost-stats/export/monthly-by-factory', async (req, res) => {
     if (!startDate || !endDate) return res.status(400).json({ error: '請提供日期區間' });
 
     const { getIndirectEmpCountByPCFactory } = require('../services/erpDb');
+    const filters = extractFilters(req.query);
+    const accFilter = buildAccountRowsFilter(filters);
 
     const [rows, accountRows, indirectFactMap, pcMeta] = await Promise.all([
-      getCostRows(db, startDate, endDate),
+      getCostRows(db, startDate, endDate, filters),
       db.prepare(
         `SELECT profit_center, factory_code, COUNT(*) AS cnt FROM users
          WHERE (status IS NULL OR status != 'disabled')
-           AND org_end_date IS NULL
+           AND org_end_date IS NULL${accFilter.extraWhere}
          GROUP BY profit_center, factory_code`
-      ).all(),
+      ).all(...accFilter.binds),
       getIndirectEmpCountByPCFactory(),
       buildPcMeta(db),
     ]);

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import {
   PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer,
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as BarTooltip,
@@ -169,10 +169,12 @@ export default function CostAnalysis() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
-  // Selected profit center (click chart to filter)
-  const [selectedPC, setSelectedPC] = useState<string | null>(null)
-  // Selected dept (click bar to filter)
-  const [selectedDept, setSelectedDept] = useState<string | null>(null)
+  // 篩選 state:下拉 + 圖表點擊共用,會傳到 API filter query params
+  const [selectedPC, setSelectedPC] = useState<string | null>(null)          // 利潤中心(點 pie / 下拉)
+  const [selectedDept, setSelectedDept] = useState<string | null>(null)      // 部門(點 bar / 下拉)
+  const [selectedFactory, setSelectedFactory] = useState<string | null>(null)       // 廠區(下拉)
+  const [selectedOrgSection, setSelectedOrgSection] = useState<string | null>(null) // 事業處(下拉)
+  const [selectedOrgGroup, setSelectedOrgGroup] = useState<string | null>(null)     // 事業群(下拉)
 
 
 
@@ -183,12 +185,20 @@ export default function CostAnalysis() {
       const incParam = includeAllPC ? `&includeAllPC=1&onlyFoxlinkGroup=${onlyFoxlinkGroup ? '1' : '0'}` : ''
       const empParam = showAllEmployees ? `&showAllEmployees=1` : ''
       const langParam = `&lang=${encodeURIComponent(i18n.language || 'zh-TW')}`
+      const filterParts = [
+        selectedFactory    ? `&factoryCode=${encodeURIComponent(selectedFactory)}`   : '',
+        selectedDept       ? `&deptCode=${encodeURIComponent(selectedDept)}`         : '',
+        selectedPC         ? `&profitCenter=${encodeURIComponent(selectedPC)}`       : '',
+        selectedOrgSection ? `&orgSection=${encodeURIComponent(selectedOrgSection)}` : '',
+        selectedOrgGroup   ? `&orgGroup=${encodeURIComponent(selectedOrgGroup)}`     : '',
+      ]
+      const filterParam = filterParts.join('')
       const [s, m, sf, mf, e, t] = await Promise.all([
-        api.get(`/admin/cost-stats/summary?startDate=${startDate}&endDate=${endDate}${incParam}${langParam}`),
-        api.get(`/admin/cost-stats/monthly?startDate=${startDate}&endDate=${endDate}${incParam}${langParam}`),
-        api.get(`/admin/cost-stats/summary-by-factory?startDate=${startDate}&endDate=${endDate}${langParam}`),
-        api.get(`/admin/cost-stats/monthly-by-factory?startDate=${startDate}&endDate=${endDate}${langParam}`),
-        api.get(`/admin/cost-stats/employees?startDate=${startDate}&endDate=${endDate}${empParam}${langParam}`),
+        api.get(`/admin/cost-stats/summary?startDate=${startDate}&endDate=${endDate}${incParam}${langParam}${filterParam}`),
+        api.get(`/admin/cost-stats/monthly?startDate=${startDate}&endDate=${endDate}${incParam}${langParam}${filterParam}`),
+        api.get(`/admin/cost-stats/summary-by-factory?startDate=${startDate}&endDate=${endDate}${langParam}${filterParam}`),
+        api.get(`/admin/cost-stats/monthly-by-factory?startDate=${startDate}&endDate=${endDate}${langParam}${filterParam}`),
+        api.get(`/admin/cost-stats/employees?startDate=${startDate}&endDate=${endDate}${empParam}${langParam}${filterParam}`),
         api.get(`/admin/cost-stats/total-accounts`),
       ])
       setSummary(s.data)
@@ -197,17 +207,18 @@ export default function CostAnalysis() {
       setFactoryMonthly(mf.data)
       setEmployees(e.data)
       setTotalAccounts(t.data?.total ?? null)
-      setSelectedPC(null)
-      setSelectedDept(null)
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e)
       setError(msg)
     } finally {
       setLoading(false)
     }
-  }, [startDate, endDate, includeAllPC, onlyFoxlinkGroup, showAllEmployees, i18n.language])
+  }, [startDate, endDate, includeAllPC, onlyFoxlinkGroup, showAllEmployees, i18n.language,
+      selectedFactory, selectedDept, selectedPC, selectedOrgSection, selectedOrgGroup])
 
-  useEffect(() => { load() }, [])
+  // filter state 變動自動 reload(取代原本 mount-only load);日期 / checkbox 仍需按「查詢」鈕
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { load() }, [selectedFactory, selectedDept, selectedPC, selectedOrgSection, selectedOrgGroup])
 
 
   // ── Derived data ────────────────────────────────────────────────────────
@@ -279,15 +290,53 @@ export default function CostAnalysis() {
   const totalCost = summary.reduce((s, r) => s + r.cost, 0)
   const currency = summary[0]?.currency || 'USD'
 
+  // ── 下拉選項(從當期資料 distinct) ──────────────────────────────────────
+  const factoryOptions = useMemo(() => {
+    const m = new Map<string, string>()
+    for (const e of employees) if (e.factory_code && !m.has(e.factory_code)) m.set(e.factory_code, e.factory_name || '')
+    return Array.from(m.entries()).sort(([a], [b]) => a.localeCompare(b)).map(([code, name]) => ({ code, name }))
+  }, [employees])
+
+  const deptOptions = useMemo(() => {
+    const m = new Map<string, string>()
+    for (const e of employees) if (e.dept_code && !m.has(e.dept_code)) m.set(e.dept_code, e.dept_name || '')
+    return Array.from(m.entries()).sort(([a], [b]) => a.localeCompare(b)).map(([code, name]) => ({ code, name }))
+  }, [employees])
+
+  const pcOptions = useMemo(() => {
+    const m = new Map<string, string>()
+    for (const s of summary) if (s.profit_center && !m.has(s.profit_center)) m.set(s.profit_center, s.profit_center_name || '')
+    return Array.from(m.entries()).sort(([a], [b]) => a.localeCompare(b)).map(([code, name]) => ({ code, name }))
+  }, [summary])
+
+  const orgSectionOptions = useMemo(() => {
+    const m = new Map<string, string>()
+    for (const s of summary) if (s.org_section && !m.has(s.org_section)) m.set(s.org_section, s.org_section_name || '')
+    return Array.from(m.entries()).sort(([a], [b]) => a.localeCompare(b)).map(([code, name]) => ({ code, name }))
+  }, [summary])
+
+  const orgGroupOptions = useMemo(() => {
+    const set = new Set<string>()
+    for (const s of summary) if (s.org_group_name) set.add(s.org_group_name)
+    return Array.from(set).sort().map((name) => ({ code: name, name }))
+  }, [summary])
+
   // ── CSV export URLs ──────────────────────────────────────────────────────
   const qs = `startDate=${startDate}&endDate=${endDate}`
   const incQs = includeAllPC ? `&includeAllPC=1&onlyFoxlinkGroup=${onlyFoxlinkGroup ? '1' : '0'}` : ''
   const langQs = `&lang=${encodeURIComponent(i18n.language || 'zh-TW')}`
-  const empExportUrl = `/api/admin/cost-stats/export/employees?${qs}${selectedPC ? `&profitCenter=${selectedPC}` : ''}${selectedDept ? `&deptCode=${selectedDept}` : ''}${showAllEmployees ? `&showAllEmployees=1` : ''}${langQs}`
-  const summaryExportUrl = `/api/admin/cost-stats/export/summary?${qs}${incQs}${langQs}`
-  const monthlyExportUrl = `/api/admin/cost-stats/export/monthly?${qs}${incQs}${langQs}`
-  const summaryFactoryExportUrl = `/api/admin/cost-stats/export/summary-by-factory?${qs}${langQs}`
-  const monthlyFactoryExportUrl = `/api/admin/cost-stats/export/monthly-by-factory?${qs}${langQs}`
+  const filterQs = [
+    selectedFactory    ? `&factoryCode=${encodeURIComponent(selectedFactory)}`   : '',
+    selectedDept       ? `&deptCode=${encodeURIComponent(selectedDept)}`         : '',
+    selectedPC         ? `&profitCenter=${encodeURIComponent(selectedPC)}`       : '',
+    selectedOrgSection ? `&orgSection=${encodeURIComponent(selectedOrgSection)}` : '',
+    selectedOrgGroup   ? `&orgGroup=${encodeURIComponent(selectedOrgGroup)}`     : '',
+  ].join('')
+  const empExportUrl            = `/api/admin/cost-stats/export/employees?${qs}${showAllEmployees ? `&showAllEmployees=1` : ''}${langQs}${filterQs}`
+  const summaryExportUrl        = `/api/admin/cost-stats/export/summary?${qs}${incQs}${langQs}${filterQs}`
+  const monthlyExportUrl        = `/api/admin/cost-stats/export/monthly?${qs}${incQs}${langQs}${filterQs}`
+  const summaryFactoryExportUrl = `/api/admin/cost-stats/export/summary-by-factory?${qs}${langQs}${filterQs}`
+  const monthlyFactoryExportUrl = `/api/admin/cost-stats/export/monthly-by-factory?${qs}${langQs}${filterQs}`
 
   // ── Chart handlers ───────────────────────────────────────────────────────
   const handlePieClick = (data: { profit_center?: string } | null) => {
@@ -348,12 +397,59 @@ export default function CostAnalysis() {
           顯示所有員工（含未使用/無帳號）
         </label>
         {error && <span className="text-xs text-red-600">{error}</span>}
-        {(selectedPC || selectedDept) && (
-          <button onClick={() => { setSelectedPC(null); setSelectedDept(null) }}
+        {(selectedPC || selectedDept || selectedFactory || selectedOrgSection || selectedOrgGroup) && (
+          <button onClick={() => {
+            setSelectedPC(null); setSelectedDept(null);
+            setSelectedFactory(null); setSelectedOrgSection(null); setSelectedOrgGroup(null);
+          }}
             className="px-3 py-1.5 text-sm bg-yellow-100 border border-yellow-400 text-yellow-800 rounded hover:bg-yellow-200">
             顯示全部
           </button>
         )}
+      </div>
+
+      {/* 第二行:篩選下拉(選完會在下次「查詢」生效 — 若要立即生效請按查詢按鈕) */}
+      <div className="flex flex-wrap items-end gap-3 -mt-2">
+        <div>
+          <label className="block text-xs text-gray-500 mb-1">廠區</label>
+          <select value={selectedFactory ?? ''} onChange={(e) => setSelectedFactory(e.target.value || null)}
+            className="border rounded px-2 py-1 text-sm min-w-[140px]">
+            <option value="">全部</option>
+            {factoryOptions.map(o => <option key={o.code} value={o.code}>{o.code}{o.name ? ` ${o.name}` : ''}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="block text-xs text-gray-500 mb-1">部門</label>
+          <select value={selectedDept ?? ''} onChange={(e) => setSelectedDept(e.target.value || null)}
+            className="border rounded px-2 py-1 text-sm min-w-[180px]">
+            <option value="">全部</option>
+            {deptOptions.map(o => <option key={o.code} value={o.code}>{o.code}{o.name ? ` ${o.name}` : ''}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="block text-xs text-gray-500 mb-1">利潤中心</label>
+          <select value={selectedPC ?? ''} onChange={(e) => setSelectedPC(e.target.value || null)}
+            className="border rounded px-2 py-1 text-sm min-w-[180px]">
+            <option value="">全部</option>
+            {pcOptions.map(o => <option key={o.code} value={o.code}>{o.code}{o.name ? ` ${o.name}` : ''}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="block text-xs text-gray-500 mb-1">事業處</label>
+          <select value={selectedOrgSection ?? ''} onChange={(e) => setSelectedOrgSection(e.target.value || null)}
+            className="border rounded px-2 py-1 text-sm min-w-[180px]">
+            <option value="">全部</option>
+            {orgSectionOptions.map(o => <option key={o.code} value={o.code}>{o.code}{o.name ? ` ${o.name}` : ''}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="block text-xs text-gray-500 mb-1">事業群</label>
+          <select value={selectedOrgGroup ?? ''} onChange={(e) => setSelectedOrgGroup(e.target.value || null)}
+            className="border rounded px-2 py-1 text-sm min-w-[160px]">
+            <option value="">全部</option>
+            {orgGroupOptions.map(o => <option key={o.code} value={o.code}>{o.name}</option>)}
+          </select>
+        </div>
       </div>
 
       {/* Summary total */}
