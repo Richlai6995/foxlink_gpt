@@ -16,6 +16,7 @@ function ProjectSelector({
   selectedId,
   onChange,
   onCreateNew,
+  onEditProject,
   onManageShare,
   currentProject,
   refreshToken,
@@ -23,6 +24,7 @@ function ProjectSelector({
   selectedId: number | null
   onChange: (id: number | null, project: AiSelectProject | null, projects: AiSelectProject[]) => void
   onCreateNew: () => void
+  onEditProject: () => void
   onManageShare: () => void
   currentProject: AiSelectProject | null
   refreshToken: number
@@ -60,6 +62,11 @@ function ProjectSelector({
       <button onClick={onCreateNew} className="text-xs text-blue-500 hover:text-blue-700 flex items-center gap-0.5 flex-shrink-0">
         <Plus size={12} />新專案
       </button>
+      {currentProject && (
+        <button onClick={onEditProject} className="text-xs text-blue-500 hover:text-blue-700 flex items-center gap-0.5 flex-shrink-0">
+          <Edit3 size={12} />編輯
+        </button>
+      )}
       {currentProject && (
         <button onClick={onManageShare} className="text-xs text-blue-500 hover:text-blue-700 flex items-center gap-0.5 flex-shrink-0">
           <Share2 size={12} />分享
@@ -364,21 +371,53 @@ export default function DesignerPanel() {
   const [projectId, setProjectId] = useState<number | null>(null)
   const [currentProject, setCurrentProject] = useState<AiSelectProject | null>(null)
   const [showProjectForm, setShowProjectForm] = useState(false)
+  const [editingProjectId, setEditingProjectId] = useState<number | null>(null)  // null=新建,number=編輯
   const [projectForm, setProjectForm] = useState({ name: '', description: '', is_public: false })
   const [shareProject, setShareProject] = useState<AiSelectProject | null>(null)
   const [projectRefresh, setProjectRefresh] = useState(0)
 
-  const createProject = async () => {
+  const openCreateProject = () => {
+    setEditingProjectId(null)
+    setProjectForm({ name: '', description: '', is_public: false })
+    setShowProjectForm(true)
+  }
+
+  const openEditProject = () => {
+    if (!currentProject) return
+    setEditingProjectId(currentProject.id)
+    setProjectForm({
+      name: currentProject.name,
+      description: currentProject.description || '',
+      is_public: !!currentProject.is_public,
+    })
+    setShowProjectForm(true)
+  }
+
+  const saveProject = async () => {
     if (!projectForm.name.trim()) return
     try {
-      const r = await api.post('/dashboard/projects', projectForm)
-      const newProj: AiSelectProject = { id: r.data.id, name: projectForm.name, description: projectForm.description, is_public: projectForm.is_public ? 1 : 0 }
-      setProjectId(r.data.id)
-      setCurrentProject(newProj)
+      if (editingProjectId) {
+        // 編輯
+        await api.put(`/dashboard/projects/${editingProjectId}`, projectForm)
+        const updated: AiSelectProject = {
+          ...(currentProject as AiSelectProject),
+          name: projectForm.name,
+          description: projectForm.description,
+          is_public: projectForm.is_public ? 1 : 0,
+        }
+        setCurrentProject(updated)
+      } else {
+        // 新建
+        const r = await api.post('/dashboard/projects', projectForm)
+        const newProj: AiSelectProject = { id: r.data.id, name: projectForm.name, description: projectForm.description, is_public: projectForm.is_public ? 1 : 0 }
+        setProjectId(r.data.id)
+        setCurrentProject(newProj)
+      }
       setShowProjectForm(false)
+      setEditingProjectId(null)
       setProjectForm({ name: '', description: '', is_public: false })
       setProjectRefresh(n => n + 1)  // trigger ProjectSelector reload
-    } catch (e: any) { alert(e?.response?.data?.error || '建立失敗') }
+    } catch (e: any) { alert(e?.response?.data?.error || (editingProjectId ? '更新失敗' : '建立失敗')) }
   }
 
   return (
@@ -387,7 +426,8 @@ export default function DesignerPanel() {
       <ProjectSelector
         selectedId={projectId}
         onChange={(id, proj) => { setProjectId(id); setCurrentProject(proj) }}
-        onCreateNew={() => setShowProjectForm(true)}
+        onCreateNew={openCreateProject}
+        onEditProject={openEditProject}
         onManageShare={() => setShareProject(currentProject)}
         currentProject={currentProject}
         refreshToken={projectRefresh}
@@ -419,7 +459,7 @@ export default function DesignerPanel() {
       {showProjectForm && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-5 space-y-3">
-            <p className="text-sm font-semibold text-gray-800">建立新專案</p>
+            <p className="text-sm font-semibold text-gray-800">{editingProjectId ? '編輯專案' : '建立新專案'}</p>
             <input className="input text-sm" placeholder="專案名稱 *" value={projectForm.name}
               onChange={e => setProjectForm(p => ({ ...p, name: e.target.value }))} />
             <textarea className="input text-sm resize-none" rows={2} placeholder="說明（選填）"
@@ -436,8 +476,8 @@ export default function DesignerPanel() {
               </p>
             )}
             <div className="flex gap-2 justify-end">
-              <button onClick={() => setShowProjectForm(false)} className="text-xs text-gray-500 px-3 py-1.5">取消</button>
-              <button onClick={createProject} disabled={!projectForm.name.trim()} className="btn-primary text-xs py-1.5 px-4">建立</button>
+              <button onClick={() => { setShowProjectForm(false); setEditingProjectId(null) }} className="text-xs text-gray-500 px-3 py-1.5">取消</button>
+              <button onClick={saveProject} disabled={!projectForm.name.trim()} className="btn-primary text-xs py-1.5 px-4">{editingProjectId ? '更新' : '建立'}</button>
             </div>
           </div>
         </div>
