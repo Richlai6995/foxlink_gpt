@@ -2,7 +2,7 @@
 
 > Chat 對話內(MCP / 深度研究 / 一般對話)LLM 輸出資料自動渲染為互動圖表
 > 作者:規劃於 2026-04-21
-> 狀態:**Phase 1–5 實作完成(未驗收)** @ 2026-04-22
+> 狀態:**Phase 1–5 + 5c + 尾巴全數完成,已 push origin** @ 2026-04-23
 >
 > 實作進度快照:
 > - Phase 1 基礎渲染 → commit `488bb4a`
@@ -11,8 +11,12 @@
 > - Phase 4 進階圖型 + dataZoom → commit `66fb118`
 > - Phase 5 使用者圖庫 + Template Share + admin 採納 → commit `216f395`
 > - Phase 5b ChartEditor 4-step wizard(從零設計圖表)+ MyChartsPage 返回鍵 → commit `bf67467`
+> - Bug 修:Answer 模式 charts_json 漏存 + 圖庫列表 CLOB DISTINCT 炸 → commit `d584ebd`
+> - **Phase 5 尾巴**:pinSource 注入 + 敏感資料遮蔽 + feature flag + Phase 5c ERP Modal 圖表 tab → commit `8d0180c`
+> - **所有延後項**:PPTX 匯出 + 使用率拆分(open/use/fail)+ 錯誤遙測 + skill source 支援 + validateSpec 強化 → commit `d0a223a`
+> - **使用者說明書**:Help section `u-chat-chart`(sort 33)+ 規劃書更新 → 本 commit
 >
-> **尚未做**:測試驗收(見 §9 測試劇本)、push to origin、Phase 4 的 Chart→PPT 匯出、Phase 5c 的 MCP/skill 來源 ChartEditor 支援、PinChartButton source metadata 注入(目前 pin 進來都 freeform)
+> **全數落地**,剩下長期優化(aria 模式、admin UI for parse-errors/popular、source_prompt 清理)等真有需求再動。
 
 ---
 
@@ -242,13 +246,13 @@ ALTER TABLE chat_messages ADD charts_json CLOB
 - [x] ChatWindow assistant message hover 加「畫成圖表」dropdown(3 選)— 只在無現成 chart + 內容含結構化資料 pattern(table / 數字 / 百分比)時顯示
 - [x] `onDrawChart` callback → ChatPage 組 reprompt 打 LLM 重畫
 
-### Phase 4 — 進階 ✅(除 PPT 匯出)
+### Phase 4 — 進階 ✅
 - [x] scatter(自動偵測 xAxis 數值 / 類別)
 - [x] heatmap(3 維:x × y_fields[0]=group × y_fields[1]=value,漸層 visualMap)
 - [x] radar(indicator 從 x_field,多系列,max 自動算 × 1.1)
 - [x] dataZoom — rows > 30 自動掛 inside + slider(滾輪/拖曳)
-- [ ] **未做**:Chart → PPT 匯出(跟 `generate_pptx` 整合)— 留後續
-- [ ] **未做**:ECharts aria 模式 — 低優先,暫不做
+- [x] **Chart → PPTX 匯出**:`client/src/lib/chartExport.ts` + InlineChart 工具列 FileText 按鈕;單張一 slide,含標題 / PNG / 資料表(前 30 列)/ 來源 footer(commit `d0a223a`)
+- [ ] ECharts aria 模式 — 低優先,暫不做
 
 ### Phase 5 — 使用者自建圖表 + 分享
 
@@ -296,9 +300,9 @@ ALTER TABLE chat_messages ADD charts_json CLOB
 - [x] **Admin 採納**:`ChartAdoptionPanel.tsx` + `/api/user-charts/admin/popular` + `/api/user-charts/admin/:id/adopt`;**第一版需 admin 手填 SQL**(tool ↔ SQL 路徑差異 Phase 5b 才做 LLM 輔助)
 
 **Phase 5 尾巴**:
-- [x] ~~`PinChartButton.pinSource` prop 預留但 ChatPage 還沒注入元資料~~ → **ChatPage 注入 toolCallResults → spec 的對應,source_tool 正確填入**(commit 待 ship)
-- [ ] `source_type=skill` 分支在 `chartExecutor.runSourceTool` 回「暫不支援」 — 低優先
-- [ ] `source_prompt` 目前未實際使用(原本設計是 fallback 用 LLM 重生 data,但現在走 tool 直接跑)— 可砍
+- [x] ~~`PinChartButton.pinSource` prop 預留但 ChatPage 還沒注入元資料~~ → **已注入**:parseChartBlocks 回 chart.meta(source_type/source_tool/tool_version/schema_hash),前端自動組 pinSource(commit `8d0180c`)
+- [x] ~~`source_type=skill` 分支~~ → **已實作**:POST skill endpoint_url + Bearer endpoint_secret(commit `d0a223a`)
+- [ ] `source_prompt` 目前未實際使用(原本設計是 fallback 用 LLM 重生 data,但現在走 tool 直接跑)— 可砍(長期清理)
 
 #### 既有元件複用(關鍵:不發明新輪子)
 
@@ -528,12 +532,37 @@ CREATE TABLE user_chart_shares (
 
 ### 7.2 其他補強
 
-1. **Chart spec 版本欄位** — `InlineChartSpec.version: 1`,未來改 schema 不破壞舊訊息。
-2. **Theme token** — 顏色用 CSS var(`--chart-primary` 等),讓 dark mode 自動跟。
-3. **Error 遙測** — JSON parse 失敗 / 資料異常要 log 到 audit_logs,之後可以回看 LLM 常吐什麼錯並調 system prompt。
-4. **類型安全 shim** — server 端用 Zod / Ajv 驗 chart spec,catch LLM 給錯型別(e.g. y_fields 是 string 而非 array)。
-5. **Feature flag** — 加 `system_settings` key `chat_inline_chart_enabled`,出問題可即時關掉不用 rollback。
+1. **Chart spec 版本欄位** — ✅ `InlineChartSpec.version: 1`
+2. **Theme token** — 顏色用 CSS var(`--chart-primary` 等)— 未做,等真要做 dark mode 再補
+3. **Error 遙測** — ✅ 新表 `CHART_PARSE_ERRORS`(user/session/chart_id/source/reason/body_preview),chat + answer + execute + schema_drift 四來源全寫入;admin endpoint `/user-charts/admin/parse-errors` 供查詢(commit `d0a223a`)
+4. **類型安全** — ✅ **選擇不加 Zod dep**,改強化 validateSpec 錯誤訊息(具體到欄位名、型別提示、LLM 常見錯誤)— 寫進 chart_parse_errors 後 admin 能直接看 LLM 常錯什麼再調 system prompt(commit `d0a223a`)
+5. **Feature flag** — ✅ `system_settings.chat_inline_chart_enabled`,值為 `0`/`false`/`off` 即時關閉 parseChartBlocks(commit `8d0180c`)
 6. **Chart 之於 K8s** — 純前端渲染,無 server SSR,K8s 部署零影響。唯一注意是 `chat_messages.charts_json` CLOB 大小,避免 LLM 吐 50 張圖塞爆 row。
+
+### 7.3 使用率遙測(Phase 5 後補)
+
+`user_charts.use_count` 原本混著記,拆成三欄獨立計數(commit `d0a223a`):
+
+| 欄位 | 語意 | 觸發點 |
+|------|------|-------|
+| `open_count` | 使用者 expand chart 卡片的次數 | `POST /:id/view`(MyChartsPage expand) |
+| `use_count` | 執行成功次數(Template Share 重跑) | `/execute` 成功回資料 |
+| `fail_count` | 執行失敗次數 | `/execute` 失敗 + 寫 chart_parse_errors |
+
+admin popular SQL 目前仍用 `use_count DESC`,未來要做「綜合熱度」可改用加權(如 `use_count * 1 + open_count * 0.3 - fail_count * 0.5`)。
+
+### 7.4 使用者說明書
+
+✅ `server/data/helpSeedData.js` 新增 `u-chat-chart` section(sort_order 33),涵蓋:
+- 對話自動畫圖 / 手動叫 AI 畫
+- 工具列圖型切換、釘選、PPTX、PNG 四按鈕
+- ERP Modal 圖表 tab(從 procedure 結果直接設計)
+- 我的圖庫兩 tab + 參數表單
+- 分享機制(7 維度 + Template Share 資安原則)
+- PPTX 匯出格式
+- Freeform 限制 / Schema 漂移 / 敏感資料遮蔽 / 常見問題
+
+`last_modified` bump 至 `2026-04-23`,server 啟動時會自動 reseed 到 DB,admin 可在 `HelpTranslationPanel` 觸發 en / vi 批次翻譯。
 
 ---
 
