@@ -1985,7 +1985,34 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
             } else {
               formatted = formatErpResultForUser(sk.name, resObj, ansResult?.cache_key);
             }
-            sendEvent({ type: 'chunk', content: formatted });
+
+            // 解析 ```generate_chart:type``` 區塊 → 推 charts event,並從顯示文字中 strip
+            // (和 Tool 路徑一致,這樣前端既有 chart renderer 能正確繪製 ECharts)
+            let displayFormatted = formatted;
+            try {
+              const { charts, errors } = parseChartBlocks(formatted, []);
+              if (charts.length > 0) {
+                sendEvent({ type: 'charts', charts });
+                console.log(`[Chart][Answer] Parsed ${charts.length} inline chart(s)` +
+                  (errors.length > 0 ? `, ${errors.length} error(s)` : ''));
+                // 從顯示文字剝除 chart block(圖表已另外用 charts event 送前端)
+                displayFormatted = formatted
+                  .replace(/```generate_chart:[^\n]+\n[\s\S]*?```/g, '')
+                  .replace(/\n{3,}/g, '\n\n')
+                  .trim();
+              }
+              if (errors.length > 0) {
+                for (const err of errors) {
+                  console.warn(`[Chart][Answer] parse error: ${err.reason} | preview: ${err.body_preview}`);
+                }
+              }
+            } catch (e) {
+              console.error('[Chart][Answer] parseChartBlocks failed:', e.message);
+            }
+
+            sendEvent({ type: 'chunk', content: displayFormatted });
+            // 覆蓋原本的 formatted 以便後面存 DB 時用剝除後的版本
+            formatted = displayFormatted;
             // 存 AI 訊息
             try {
               await db.prepare(

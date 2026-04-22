@@ -102,27 +102,26 @@ function buildMarkdownTable(rows, format) {
 }
 
 /**
- * 產生 ECharts 的 generate_chart 區塊(對應 chat-inline-chart 既有渲染)
+ * 產生 generate_chart 區塊(符合 chartSpecParser 的 validateSpec schema)
+ * 必要欄位:type, x_field(string), y_fields([{field}...]), data(array)
  */
 function buildChartBlock(rows, format) {
   const cfg = format.chart;
   if (!cfg || !cfg.x_column || !cfg.y_column) return '';
   const type = cfg.type || 'bar';
-  const xs = rows.map(r => String(r[cfg.x_column] ?? ''));
-  const ys = rows.map(r => Number(r[cfg.y_column]) || 0);
 
   const spec = {
+    version: 1,
     type,
     title: cfg.title || '',
+    x_field: cfg.x_column,
+    y_fields: [{ field: cfg.y_column }],
     data: rows.map(r => ({
       [cfg.x_column]: r[cfg.x_column],
       [cfg.y_column]: Number(r[cfg.y_column]) || 0,
     })),
-    x: cfg.x_column,
-    y: cfg.y_column,
   };
 
-  // 使用平台既有格式:```generate_chart:type
   return '\n\n```generate_chart:' + type + '\n' + JSON.stringify(spec, null, 2) + '\n```';
 }
 
