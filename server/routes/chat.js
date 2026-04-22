@@ -43,13 +43,25 @@ async function extractErpParamsWithFlash(db, userMessage, params) {
   const client = await createClient(db, 'flash');
 
   const paramDesc = params.map(p => {
-    const hint = p.ai_hint || p.name;
+    // 友善名稱優先(管理員 display_name 設定的 label),再 fallback ai_hint / name
+    const niceName = p.display_name || p.ai_hint || p.name;
     const type = p.data_type || 'VARCHAR2';
-    return `- ${p.name} (${type}): ${hint}`;
+    // 如果這個參數有動態 LOV(非 static)且 llm_resolve_mode=auto/label_only,
+    // 提示 Flash 接受 CODE / NAME / 部分字串,系統會在執行前透過 LOV 轉為內部值。
+    // 避免因 ai_hint 寫「數字 ID」Flash 看到英文 code 就判斷不符回 null。
+    const mode = p.llm_resolve_mode || 'value_only';
+    const hasDynamicLov = p.lov_config && p.lov_config.type && p.lov_config.type !== 'static';
+    const lovNote = (hasDynamicLov && (mode === 'auto' || mode === 'label_only'))
+      ? '(可填原始值或人類可讀的代碼/名稱,系統會自動透過 LOV 查表轉為內部 ID,**即使看起來不符型別也請直接填使用者提到的字串**)'
+      : '';
+    return `- ${p.name} (${type}): ${niceName}${lovNote}`;
   }).join('\n');
 
   const prompt = `從以下使用者訊息中提取參數值。只回傳 JSON 物件,不要多餘文字。
-如果訊息中找不到某個參數的值,該欄位設為 null。
+規則:
+1. 如果訊息中找不到某個參數的值,該欄位設為 null。
+2. 若參數標示可接受「代碼/名稱」,使用者訊息中任何看起來像該參數意義的字串都請直接填上,不要因為型別寫「數字 ID」就回 null — 轉換交給後端處理。
+3. 使用者可能用自然語言,如「G0C」「TNDS264009-C」「MRP2617」等,直接提取即可。
 
 需要提取的參數:
 ${paramDesc}
@@ -66,7 +78,9 @@ ${userMessage}
     .trim();
 
   try {
-    return JSON.parse(raw);
+    const parsed = JSON.parse(raw);
+    console.log(`[ErpAnswer] Flash prompt paramDesc=[${params.map(p => p.name + ':' + (p.llm_resolve_mode || 'value_only')).join(',')}]`);
+    return parsed;
   } catch (e) {
     console.warn(`[ErpAnswer] Flash returned non-JSON: ${raw.slice(0, 200)}`);
     return {};
