@@ -37,11 +37,52 @@ const DESIGN_C_NAME        = 'C. 月份費用分析表';
 const DESIGN_D_NAME        = 'D. 利潤中心 × 月份 × 廠區 明細表';
 const DESIGN_E_NAME        = 'E. Token 使用清單';
 
-async function ensureLocalDbSource(db) {
+// 用 system_settings 紀錄已 seed 的 row id,避免 user rename 後 seed 又建新一份。
+const SEEDED_IDS_KEY = 'cost_analysis_seeded_ids';
+
+async function loadSeededIds(db) {
+  try {
+    const r = await db.prepare(`SELECT value FROM system_settings WHERE key=?`).get(SEEDED_IDS_KEY);
+    if (!r) return {};
+    const v = r.value || r.VALUE || '{}';
+    return typeof v === 'string' ? JSON.parse(v) : (v || {});
+  } catch { return {}; }
+}
+
+async function saveSeededIds(db, ids) {
+  const json = JSON.stringify(ids || {});
+  try {
+    const ex = await db.prepare(`SELECT key FROM system_settings WHERE key=?`).get(SEEDED_IDS_KEY);
+    if (ex) {
+      await db.prepare(`UPDATE system_settings SET value=? WHERE key=?`).run(json, SEEDED_IDS_KEY);
+    } else {
+      await db.prepare(`INSERT INTO system_settings (key, value) VALUES (?, ?)`).run(SEEDED_IDS_KEY, json);
+    }
+  } catch (e) { console.warn('[CostAnalysisSeed] saveSeededIds failed:', e.message); }
+}
+
+// 確認 cached id 還在 DB(防範 user 從 DesignerPanel 刪掉)
+async function rowExists(db, table, id) {
+  if (!id) return false;
+  try {
+    const r = await db.prepare(`SELECT id FROM ${table} WHERE id=?`).get(id);
+    return !!(r?.id || r?.ID);
+  } catch { return false; }
+}
+
+async function ensureLocalDbSource(db, seededIds) {
+  // 優先用 cached id
+  if (seededIds?.db_source_id && await rowExists(db, 'ai_db_sources', seededIds.db_source_id)) {
+    return seededIds.db_source_id;
+  }
   const existing = await db.prepare(
     `SELECT id FROM ai_db_sources WHERE name=?`
   ).get(LOCAL_DB_SOURCE_NAME);
-  if (existing?.id || existing?.ID) return existing.id || existing.ID;
+  if (existing?.id || existing?.ID) {
+    const id = existing.id || existing.ID;
+    if (seededIds) seededIds.db_source_id = id;
+    return id;
+  }
 
   const host = process.env.SYSTEM_DB_HOST;
   const port = Number(process.env.SYSTEM_DB_PORT || 1521);
@@ -61,15 +102,25 @@ async function ensureLocalDbSource(db) {
 
   const row = await db.prepare(`SELECT id FROM ai_db_sources WHERE name=?`).get(LOCAL_DB_SOURCE_NAME);
   const id = row?.id || row?.ID;
+  if (seededIds) seededIds.db_source_id = id;
   console.log(`[CostAnalysisSeed] 已建立本地 DB source id=${id}`);
   return id;
 }
 
-async function ensureProject(db, adminUserId) {
+async function ensureProject(db, adminUserId, seededIds) {
+  // 優先用 cached id(user 改名也認得)
+  if (seededIds?.project_id && await rowExists(db, 'ai_select_projects', seededIds.project_id)) {
+    return seededIds.project_id;
+  }
+  // 找 name(向下相容沒 cache 的舊環境)— 若有重複,選 id 最小那筆
   const existing = await db.prepare(
-    `SELECT id FROM ai_select_projects WHERE name=?`
+    `SELECT id FROM ai_select_projects WHERE name=? ORDER BY id ASC FETCH FIRST 1 ROWS ONLY`
   ).get(PROJECT_NAME);
-  if (existing?.id || existing?.ID) return existing.id || existing.ID;
+  if (existing?.id || existing?.ID) {
+    const id = existing.id || existing.ID;
+    if (seededIds) seededIds.project_id = id;
+    return id;
+  }
 
   await db.prepare(`
     INSERT INTO ai_select_projects (name, description, is_public, is_suspended, created_by)
@@ -79,17 +130,27 @@ async function ensureProject(db, adminUserId) {
     '分析 FOXLINK GPT 各維度(利潤中心 / 事業處 / 事業群 / 廠區 / 月份 / 使用者 / 模型)Token 費用。預設僅 admin 可見,需透過 DesignerPanel 分享給其他角色。',
     adminUserId,
   );
-  const row = await db.prepare(`SELECT id FROM ai_select_projects WHERE name=?`).get(PROJECT_NAME);
+  const row = await db.prepare(`SELECT id FROM ai_select_projects WHERE name=? ORDER BY id DESC FETCH FIRST 1 ROWS ONLY`).get(PROJECT_NAME);
   const id = row?.id || row?.ID;
+  if (seededIds) seededIds.project_id = id;
   console.log(`[CostAnalysisSeed] 已建立 Project id=${id}`);
   return id;
 }
 
-async function ensureTopic(db, projectId, adminUserId) {
+async function ensureTopic(db, projectId, adminUserId, seededIds) {
+  // 優先用 cached id
+  if (seededIds?.topic_id && await rowExists(db, 'ai_select_topics', seededIds.topic_id)) {
+    return seededIds.topic_id;
+  }
+  // 找 name(向下相容)— 同 project 同名選 id 最小那筆
   const existing = await db.prepare(
-    `SELECT id FROM ai_select_topics WHERE name=? AND project_id=?`
+    `SELECT id FROM ai_select_topics WHERE name=? AND project_id=? ORDER BY id ASC FETCH FIRST 1 ROWS ONLY`
   ).get(TOPIC_NAME, projectId);
-  if (existing?.id || existing?.ID) return existing.id || existing.ID;
+  if (existing?.id || existing?.ID) {
+    const id = existing.id || existing.ID;
+    if (seededIds) seededIds.topic_id = id;
+    return id;
+  }
 
   await db.prepare(`
     INSERT INTO ai_select_topics (name, description, icon, sort_order, is_active, created_by, project_id)
@@ -101,10 +162,61 @@ async function ensureTopic(db, projectId, adminUserId) {
     adminUserId,
     projectId,
   );
-  const row = await db.prepare(`SELECT id FROM ai_select_topics WHERE name=? AND project_id=?`).get(TOPIC_NAME, projectId);
+  const row = await db.prepare(`SELECT id FROM ai_select_topics WHERE name=? AND project_id=? ORDER BY id DESC FETCH FIRST 1 ROWS ONLY`).get(TOPIC_NAME, projectId);
   const id = row?.id || row?.ID;
+  if (seededIds) seededIds.topic_id = id;
   console.log(`[CostAnalysisSeed] 已建立 Topic id=${id}`);
   return id;
+}
+
+// ── Dedup helpers (清理 user rename 之前殘留的重複) ──────────────────────────
+// 同 project 下同名 Topic 多筆 → 保留指定的 keepId,其他 cascade 刪除
+async function dedupTopics(db, projectId, topicName, keepId) {
+  if (!keepId) return 0;
+  try {
+    const rows = await db.prepare(
+      `SELECT id FROM ai_select_topics WHERE name=? AND project_id=? AND id!=?`
+    ).all(topicName, projectId, keepId);
+    let deleted = 0;
+    for (const r of (rows || [])) {
+      const dupId = r.id || r.ID;
+      // 注意:DDL 的 ai_select_designs.topic_id REFERENCES ... ON DELETE CASCADE,
+      // 所以刪 topic 會自動刪底下的 designs / shares
+      await db.prepare(`DELETE FROM ai_select_topics WHERE id=?`).run(dupId);
+      deleted++;
+    }
+    if (deleted > 0) console.log(`[CostAnalysisSeed] 清理重複 Topic「${topicName}」: 刪除 ${deleted} 筆 (保留 id=${keepId})`);
+    return deleted;
+  } catch (e) {
+    console.warn('[CostAnalysisSeed] dedupTopics 失敗:', e.message);
+    return 0;
+  }
+}
+
+// 同 project 下重複的 Project(同名),保留 keepId,其他刪除(連帶刪 topics + designs)
+async function dedupProjects(db, projectName, keepId) {
+  if (!keepId) return 0;
+  try {
+    const rows = await db.prepare(
+      `SELECT id FROM ai_select_projects WHERE name=? AND id!=?`
+    ).all(projectName, keepId);
+    let deleted = 0;
+    for (const r of (rows || [])) {
+      const dupId = r.id || r.ID;
+      // 先刪該 project 底下所有 topics(cascade designs)
+      const topicRows = await db.prepare(`SELECT id FROM ai_select_topics WHERE project_id=?`).all(dupId);
+      for (const t of (topicRows || [])) {
+        await db.prepare(`DELETE FROM ai_select_topics WHERE id=?`).run(t.id || t.ID);
+      }
+      await db.prepare(`DELETE FROM ai_select_projects WHERE id=?`).run(dupId);
+      deleted++;
+    }
+    if (deleted > 0) console.log(`[CostAnalysisSeed] 清理重複 Project「${projectName}」: 刪除 ${deleted} 筆 (保留 id=${keepId})`);
+    return deleted;
+  } catch (e) {
+    console.warn('[CostAnalysisSeed] dedupProjects 失敗:', e.message);
+    return 0;
+  }
 }
 
 // ── Schema 定義 ────────────────────────────────────────────────────────────
@@ -531,13 +643,26 @@ const DESIGN_E = {
 const ALL_DESIGNS = [DESIGN_A, DESIGN_B, DESIGN_C, DESIGN_D, DESIGN_E];
 
 // ── upsertDesign: 強制 force-update metadata(每次 seed 重設 5 designs) ──
-async function upsertDesign(db, topicId, schemaIds, spec, adminUserId) {
-  const existing = await db.prepare(
-    `SELECT id FROM ai_select_designs WHERE topic_id=? AND name=?`
-  ).get(topicId, spec.name);
+// 用 seededIds 中的 cached id 認領,避免 user rename design name 後再建一份
+async function upsertDesign(db, topicId, schemaIds, spec, adminUserId, seededIds, cacheKey) {
+  // 優先用 cached id(user 改名也認得)
+  let existingId = null;
+  if (seededIds && cacheKey && seededIds[cacheKey]) {
+    if (await rowExists(db, 'ai_select_designs', seededIds[cacheKey])) {
+      existingId = seededIds[cacheKey];
+    }
+  }
+  // fallback by name
+  if (!existingId) {
+    const existing = await db.prepare(
+      `SELECT id FROM ai_select_designs WHERE topic_id=? AND name=? ORDER BY id ASC FETCH FIRST 1 ROWS ONLY`
+    ).get(topicId, spec.name);
+    existingId = existing?.id || existing?.ID || null;
+  }
 
-  if (existing?.id || existing?.ID) {
-    const id = existing.id || existing.ID;
+  if (existingId) {
+    const id = existingId;
+    if (seededIds && cacheKey) seededIds[cacheKey] = id;
     await db.prepare(
       `UPDATE ai_select_designs
          SET description=?, target_schema_ids=?, system_prompt=?,
@@ -601,11 +726,19 @@ async function runSeed(db) {
       return;
     }
 
-    const sourceDbId = await ensureLocalDbSource(db);
+    // 載 cached id(避免 user rename 後 seed 又建一份)
+    const seededIds = await loadSeededIds(db);
+
+    const sourceDbId = await ensureLocalDbSource(db, seededIds);
     if (!sourceDbId) return;
 
-    const projectId = await ensureProject(db, adminUserId);
-    const topicId   = await ensureTopic(db, projectId, adminUserId);
+    const projectId = await ensureProject(db, adminUserId, seededIds);
+    // 清掉同 project name 的重複 project(舊 bug 殘留:user rename 後又被建一份)
+    await dedupProjects(db, PROJECT_NAME, projectId);
+
+    const topicId = await ensureTopic(db, projectId, adminUserId, seededIds);
+    // 清掉同 project + 同 topic name 的重複 topic(連帶 cascade 刪 designs)
+    await dedupTopics(db, projectId, TOPIC_NAME, topicId);
 
     const tokenUsageSchemaId    = await ensureSchema(db, TOKEN_USAGE_SCHEMA,                sourceDbId, projectId, adminUserId);
     const usersSchemaId         = await ensureSchema(db, USERS_SCHEMA,                      sourceDbId, projectId, adminUserId);
@@ -617,11 +750,15 @@ async function runSeed(db) {
     // One-time migration: 舊「各維度費用分析」rename 成 A(若還沒被 rename)
     await migrateOldSingleDesign(db, topicId);
 
-    // 強制 force-update 5 個 designs(A-E)
-    for (const spec of ALL_DESIGNS) {
-      await upsertDesign(db, topicId, schemaIds, spec, adminUserId);
+    // 強制 force-update 5 個 designs(A-E),用 cacheKey design_X 認領
+    const designCacheKeys = ['design_A', 'design_B', 'design_C', 'design_D', 'design_E'];
+    for (let i = 0; i < ALL_DESIGNS.length; i++) {
+      await upsertDesign(db, topicId, schemaIds, ALL_DESIGNS[i], adminUserId, seededIds, designCacheKeys[i]);
     }
-    console.log('[CostAnalysisSeed] 完成');
+
+    // 寫回 seededIds(下次 seed 認 id 不認 name,user 改名也安全)
+    await saveSeededIds(db, seededIds);
+    console.log('[CostAnalysisSeed] 完成 (cached ids:', JSON.stringify(seededIds), ')');
   } catch (e) {
     console.error('[CostAnalysisSeed] error:', e.message);
   }
