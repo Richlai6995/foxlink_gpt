@@ -39,6 +39,7 @@ interface ApiConnector {
   empty_message: string | null
   error_mapping: string | null
   email_domain_fallback: number
+  response_mode: 'inject' | 'answer' | null
   created_at: string
   updated_at: string
 }
@@ -133,6 +134,7 @@ export default function DifyKnowledgeBasesPanel() {
     response_type: 'json', response_extract: '', response_template: '',
     empty_message: '', error_mapping: '',
     email_domain_fallback: false,
+    response_mode: 'inject' as 'inject' | 'answer',
   })
   const [inputParams, setInputParams] = useState<InputParam[]>([])
   const [editingParamIdx, setEditingParamIdx] = useState<number | null>(null)
@@ -167,6 +169,7 @@ export default function DifyKnowledgeBasesPanel() {
       response_type: 'json', response_extract: '', response_template: '',
       empty_message: '', error_mapping: '',
       email_domain_fallback: false,
+      response_mode: 'inject',
     })
     setInputParams([])
     setTags([])
@@ -198,6 +201,7 @@ export default function DifyKnowledgeBasesPanel() {
       empty_message: kb.empty_message || '',
       error_mapping: typeof kb.error_mapping === 'object' ? JSON.stringify(kb.error_mapping, null, 2) : (kb.error_mapping || ''),
       email_domain_fallback: !!kb.email_domain_fallback,
+      response_mode: (kb.response_mode === 'answer' ? 'answer' : 'inject') as 'inject' | 'answer',
     })
     setInputParams(Array.isArray(ip) ? ip : [])
     setTags((() => {
@@ -245,6 +249,7 @@ export default function DifyKnowledgeBasesPanel() {
         empty_message: form.empty_message || null,
         error_mapping: form.error_mapping ? tryParseJson(form.error_mapping) : null,
         email_domain_fallback: form.email_domain_fallback,
+        response_mode: form.response_mode,
       }
       if (form.api_key.trim()) payload.api_key = form.api_key.trim()
       if (editing) {
@@ -887,6 +892,30 @@ export default function DifyKnowledgeBasesPanel() {
               {/* ── Tab: Response ── */}
               {activeTab === 'response' && (
                 <div className="space-y-3">
+                  <div>
+                    <label className="block text-xs font-medium text-slate-600 mb-1">回應模式</label>
+                    <div className="flex gap-2">
+                      {(['inject', 'answer'] as const).map(mode => (
+                        <button
+                          key={mode}
+                          type="button"
+                          onClick={() => setForm(p => ({ ...p, response_mode: mode }))}
+                          className={`px-3 py-1.5 rounded text-xs font-medium border transition-colors ${
+                            form.response_mode === mode
+                              ? 'bg-blue-600 text-white border-blue-600'
+                              : 'bg-white text-slate-600 border-slate-300 hover:border-blue-400'
+                          }`}
+                        >
+                          {mode === 'inject' ? 'Inject (補充 Prompt)' : 'Answer (直接回答)'}
+                        </button>
+                      ))}
+                    </div>
+                    <p className="text-xs text-slate-400 mt-1">
+                      {form.response_mode === 'answer'
+                        ? 'API 結果 (套用下方模板後) 直接輸出給使用者,不經 LLM 整理 — 避免 LLM 加註額外意見。'
+                        : 'API 結果餵回 LLM,由 LLM 整合後回答 (可能附加說明或建議)。'}
+                    </p>
+                  </div>
                   <div>
                     <label className="block text-xs font-medium text-slate-600 mb-1">回應類型</label>
                     <select value={form.response_type} onChange={e => setForm(p => ({ ...p, response_type: e.target.value }))}

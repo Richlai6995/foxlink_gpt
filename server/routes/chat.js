@@ -316,7 +316,7 @@ async function getDifyFunctionDeclarations(db, userCtx) {
       d.auth_type, d.auth_header_name, d.auth_query_param_name, d.auth_config,
       d.request_headers, d.request_body_template, d.input_params,
       d.response_type, d.response_extract, d.response_template, d.empty_message, d.error_mapping,
-      d.email_domain_fallback`;
+      d.email_domain_fallback, d.response_mode`;
 
     if (!userCtx) {
       kbs = await db.prepare(
@@ -2710,6 +2710,41 @@ ${hasPreserve ? '- 標記【★保留原文】的欄位：必須完整複製原�
             dept_code: req.user.dept_code || '',
             title: req.user.title || '',
           };
+
+          // ── Direct-answer fast-path: 所有 connector 都設 response_mode='answer' ──
+          // 不經 LLM 整理,直接把 executeConnector 組好的字串 stream 給使用者(含 template / empty_message / error_mapping 處理)。
+          const allAreAnswerMode = allDeclarations.every((decl) => {
+            const kb = kbMap[decl.name];
+            return kb && kb.response_mode === 'answer';
+          });
+          if (allAreAnswerMode) {
+            const answerParts = await Promise.all(
+              allDeclarations.map(async (decl) => {
+                const kb = kbMap[decl.name];
+                if (!kb) return null;
+                const t1 = Date.now();
+                try {
+                  const answer = await execConn(kb, { query: combinedUserText }, apiUserCtx, {
+                    sessionId, db, getDifyConvId, setDifyConvId,
+                  });
+                  console.log(`[API] Answer-mode "${kb.name}" ok in ${Date.now() - t1}ms`);
+                  return answer || '';
+                } catch (e) {
+                  console.warn(`[API] Answer-mode "${kb.name}" failed:`, e.message);
+                  return `[${kb.name}: 查詢失敗 — ${e.message}]`;
+                }
+              })
+            );
+            const joined = answerParts.filter(s => s && String(s).trim()).join('\n\n---\n\n');
+            const finalText = joined || '查無資料';
+            if (!_timing.ttft) _timing.ttft = Date.now();
+            aiText = finalText;
+            sendEvent({ type: 'chunk', content: finalText });
+            text = finalText;
+            inputTokens = 0; outputTokens = 0;
+            _timing.llmEnd = Date.now();
+            console.log(`[Chat] DIFY answer-mode done in ${Date.now() - t0}ms, kbs=${allDeclarations.length} (no LLM)`);
+          } else {
           const difyContextParts = await Promise.all(
             allDeclarations.map(async (decl) => {
               const kb = kbMap[decl.name];
@@ -2769,6 +2804,7 @@ ${hasPreserve ? '- 標記【★保留原文】的欄位：必須完整複製原�
           }
           _timing.llmEnd = Date.now();
           console.log(`[Chat] DIFY fast-path done in ${Date.now() - t0}ms, kbs=${allDeclarations.length} relevant=${difyIsRelevant} in=${inputTokens} out=${outputTokens} tokens`);
+          } // end else (非 answer-mode 的 LLM 整理分支)
 
         } else if (pureSelfKb) {
           sendEvent({ type: 'status', message: `查詢 ${kbTotal} 個知識庫...` });
@@ -2952,12 +2988,17 @@ ${hasPreserve ? '- 標記【★保留原文】的欄位：必須完整複製原�
             return result;
           };
 
-          // Build set of tool names that should bypass LLM and return raw result directly
-          const directAnswerTools = new Set(
-            Object.entries(serverMap)
+          // Build set of tool names that should bypass LLM and return raw result directly.
+          // Covers both MCP servers (entry.server.response_mode) and API connectors
+          // (kbMap[name].response_mode) — DIFY / REST API 都走同一條直出路徑。
+          const directAnswerTools = new Set([
+            ...Object.entries(serverMap)
               .filter(([, entry]) => entry.server?.response_mode === 'answer')
-              .map(([toolName]) => toolName)
-          );
+              .map(([toolName]) => toolName),
+            ...Object.entries(kbMap)
+              .filter(([, kb]) => kb?.response_mode === 'answer')
+              .map(([toolName]) => toolName),
+          ]);
 
           let isDirectAnswer = false;
           let firstToolChunk = false;

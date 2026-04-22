@@ -1604,6 +1604,8 @@ async function runMigrations(db) {
   await addCol('DIFY_KNOWLEDGE_BASES', 'ERROR_MAPPING',          'CLOB');
   // Email 域名自動重試 (foxlink.com ↔ foxlink.com.tw)
   await addCol('DIFY_KNOWLEDGE_BASES', 'EMAIL_DOMAIN_FALLBACK',  'NUMBER(1) DEFAULT 0');
+  // 回應模式：inject=結果餵回 LLM 整理 / answer=直接回答使用者 (與 mcp_servers.response_mode 對齊)
+  await addCol('DIFY_KNOWLEDGE_BASES', 'RESPONSE_MODE',          "VARCHAR2(16) DEFAULT 'inject'");
 
   // ── MCP / DIFY 共享存取表（取代 role_mcp_servers / role_dify_kbs）────────────
   await createTable('MCP_ACCESS', `CREATE TABLE mcp_access (
