@@ -86,21 +86,23 @@ router.get('/', async (req, res) => {
     const u = req.user;
 
     // 我的
+    // 注意:列表查詢刻意不含 description (CLOB) — detail 頁再抓。
+    // Oracle 對 CLOB 在 DISTINCT/JOIN 下會炸 ORA-00932,列表又用不到,一律排除。
     let mine = [];
     if (scope === 'mine' || scope === 'all') {
       mine = await db.prepare(
-        `SELECT id, owner_id, title, description, source_type, source_tool,
+        `SELECT id, owner_id, title, source_type, source_tool,
                 source_schema_hash, is_public, use_count, created_at, updated_at,
                 NULL AS share_via
          FROM user_charts WHERE owner_id=? ORDER BY updated_at DESC`
       ).all(u.id);
     }
 
-    // 別人分享給我的
+    // 別人分享給我的 — 同樣排除 description CLOB,DISTINCT 才不會爆
     let shared = [];
     if (scope === 'shared' || scope === 'all') {
       shared = await db.prepare(
-        `SELECT DISTINCT c.id, c.owner_id, c.title, c.description, c.source_type, c.source_tool,
+        `SELECT DISTINCT c.id, c.owner_id, c.title, c.source_type, c.source_tool,
                 c.source_schema_hash, c.is_public, c.use_count, c.created_at, c.updated_at,
                 s.share_type AS share_via,
                 (SELECT employee_id || ' ' || name FROM users WHERE id=c.owner_id) AS owner_name

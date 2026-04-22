@@ -1989,9 +1989,11 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
             // 解析 ```generate_chart:type``` 區塊 → 推 charts event,並從顯示文字中 strip
             // (和 Tool 路徑一致,這樣前端既有 chart renderer 能正確繪製 ECharts)
             let displayFormatted = formatted;
+            let answerCharts = [];
             try {
               const { charts, errors } = parseChartBlocks(formatted, []);
               if (charts.length > 0) {
+                answerCharts = charts;
                 sendEvent({ type: 'charts', charts });
                 console.log(`[Chart][Answer] Parsed ${charts.length} inline chart(s)` +
                   (errors.length > 0 ? `, ${errors.length} error(s)` : ''));
@@ -2013,11 +2015,12 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
             sendEvent({ type: 'chunk', content: displayFormatted });
             // 覆蓋原本的 formatted 以便後面存 DB 時用剝除後的版本
             formatted = displayFormatted;
-            // 存 AI 訊息
+            // 存 AI 訊息(含 charts_json 以便重開對話時還原圖表)
             try {
+              const chartsJsonToStore = answerCharts.length > 0 ? JSON.stringify(answerCharts) : null;
               await db.prepare(
-                `INSERT INTO chat_messages (session_id, role, content) VALUES (?, 'assistant', ?)`
-              ).run(sessionId, formatted);
+                `INSERT INTO chat_messages (session_id, role, content, charts_json) VALUES (?, 'assistant', ?, ?)`
+              ).run(sessionId, formatted, chartsJsonToStore);
             } catch (_) {}
             // 自動命名對話(跟一般 chat 一樣)
             try {
