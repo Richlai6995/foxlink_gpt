@@ -2977,7 +2977,11 @@
       "goLibrary": "前往圖庫 →",
       "needFields": "請先選擇 X 與 Y 欄位",
       "noData": "無結構化資料可繪圖",
-      "noDataHint": "此 procedure 的回傳無 OUT ref cursor,也不是 markdown table 格式。請在工具管理設定 Answer Output Format,或改用有 OUT cursor 的 procedure。"
+      "noDataHint": "此 procedure 的回傳無 OUT ref cursor,也不是 markdown table 格式。請在工具管理設定「輸出解析(Answer Output Format)」的欄位分隔符與欄位名稱,或改用有 OUT cursor 的 procedure。",
+      "parsedByFormat": "已套用「輸出解析」設定",
+      "chartPreset": "預設圖表",
+      "parsedByCursor": "從 OUT ref cursor 取得資料",
+      "parsedByMarkdown": "從 markdown table 解析"
     }
   }
 }

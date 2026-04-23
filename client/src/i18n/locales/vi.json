@@ -2977,7 +2977,11 @@
       "goLibrary": "Mở thư viện →",
       "needFields": "Vui lòng chọn trường X và Y",
       "noData": "Không có dữ liệu có cấu trúc để vẽ biểu đồ",
-      "noDataHint": "Kết quả của procedure này không có OUT ref cursor và không phải markdown table. Hãy cấu hình Answer Output Format trong quản lý tool, hoặc dùng procedure có OUT cursor."
+      "noDataHint": "Kết quả procedure này không có OUT ref cursor và không phải markdown table. Cấu hình 'Answer Output Format' (dấu phân cách + tên cột) trong quản lý tool, hoặc dùng procedure có OUT cursor.",
+      "parsedByFormat": "Đang dùng cấu hình Answer Output Format",
+      "chartPreset": "Biểu đồ mặc định",
+      "parsedByCursor": "Phân tích từ OUT ref cursor",
+      "parsedByMarkdown": "Phân tích từ markdown table"
     }
   }
 }

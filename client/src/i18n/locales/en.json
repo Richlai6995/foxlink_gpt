@@ -2977,7 +2977,11 @@
       "goLibrary": "Open library →",
       "needFields": "Please select X and Y fields",
       "noData": "No structured data to chart",
-      "noDataHint": "This procedure's return has no OUT ref cursor and is not a markdown table. Configure Answer Output Format in tool admin, or switch to a procedure with OUT cursor."
+      "noDataHint": "This procedure's return has no OUT ref cursor and is not a markdown table. Configure 'Answer Output Format' (separator + column names) in tool admin, or switch to a procedure with OUT cursor.",
+      "parsedByFormat": "Using Answer Output Format settings",
+      "chartPreset": "Default chart",
+      "parsedByCursor": "Parsed from OUT ref cursor",
+      "parsedByMarkdown": "Parsed from markdown table"
     }
   }
 }

@@ -12,7 +12,7 @@ import { Save, Download, AlertTriangle, BarChart3, LineChart, PieChart, AreaChar
 import api from '../../lib/api'
 import InlineChart from './InlineChart'
 import type { InlineChartSpec, InlineChartType, UserChartParam, UserChartParamType } from '../../types'
-import type { ErpTool, ErpParam } from '../admin/ErpToolsPanel'
+import type { ErpTool, ErpParam, AnswerOutputFormat } from '../admin/ErpToolsPanel'
 
 interface Props {
   tool: ErpTool
@@ -20,17 +20,70 @@ interface Props {
   result: any
 }
 
+// row_separator 的語意字串對應實際分隔符(跟 server erpAnswerFormatter 對齊)
+function normalizeRowSep(rs: string | undefined | null): string {
+  if (!rs || rs === '\\n' || rs === '\n' || rs === 'newline') return '\n'
+  if (rs === '\\t' || rs === '\t' || rs === 'tab') return '\t'
+  if (rs === 'space') return ' '
+  return rs
+}
+
+// 依 tool.answer_output_format 設定把 function_return(VARCHAR2)parse 成 rows
+function parseOutputByFormat(text: string, format: AnswerOutputFormat): { rows: Record<string, unknown>[]; columns: string[] } | null {
+  if (!text || typeof text !== 'string') return null
+  const colSep = format.col_separator || '/'
+  const rowSep = normalizeRowSep(format.row_separator)
+  const cols = Array.isArray(format.columns) ? format.columns : []
+  const numericSet = new Set(format.numeric_columns || [])
+
+  const lines = text.split(rowSep).map(l => l.trim()).filter(Boolean)
+  const startIdx = format.skip_first_row ? 1 : 0
+  const rows: Record<string, unknown>[] = []
+  for (let i = startIdx; i < lines.length; i++) {
+    const parts = lines[i].split(colSep).map(s => s.trim())
+    const row: Record<string, unknown> = {}
+    if (cols.length > 0) {
+      cols.forEach((name, j) => {
+        const raw = parts[j] ?? ''
+        if (numericSet.has(name)) {
+          // 千分位清除再轉 number
+          const cleaned = String(raw).replace(/,/g, '')
+          const n = Number(cleaned)
+          row[name] = Number.isFinite(n) && cleaned !== '' ? n : raw
+        } else {
+          row[name] = raw
+        }
+      })
+    } else {
+      parts.forEach((p, j) => { row[`col_${j}`] = p })
+    }
+    rows.push(row)
+  }
+  if (rows.length === 0) return null
+  const columns = cols.length > 0 ? cols : Object.keys(rows[0])
+  return { rows, columns }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // 從 ERP procedure 執行結果推斷可畫圖的 rows + columns。
 //   優先順序:
-//     1. result.params.*.rows(ref cursor OUT 參數,最結構化)
-//     2. result.function_return 的 markdown table
+//     1. tool.answer_output_format + function_return(管理員已設好格式,最準)
+//     2. result.params.*.rows(ref cursor OUT 參數)
+//     3. result.function_return 的 markdown table(fallback)
 //   都無 → null
 // ─────────────────────────────────────────────────────────────────────────────
-function inferChartableRows(result: any): { rows: Record<string, unknown>[]; columns: string[] } | null {
+function inferChartableRows(result: any, tool: ErpTool): { rows: Record<string, unknown>[]; columns: string[] } | null {
   if (!result) return null
 
-  // 1. params.*.rows(OUT ref cursor)
+  // 1. Answer Output Format(管理員在 ErpToolsPanel 設定的「輸出解析」區塊)
+  const fmt = tool.answer_output_format
+  const text = String(result.function_return ?? '').trim()
+  if (fmt && text && (fmt.col_separator || (Array.isArray(fmt.columns) && fmt.columns.length > 0))) {
+    const parsed = parseOutputByFormat(text, fmt)
+    if (parsed && parsed.rows.length > 0) return parsed
+  }
+
+  // 2. params.*.rows(OUT ref cursor)
   if (result.params && typeof result.params === 'object') {
     for (const v of Object.values(result.params) as any[]) {
       if (v && Array.isArray(v.rows) && v.rows.length > 0) {
@@ -39,8 +92,7 @@ function inferChartableRows(result: any): { rows: Record<string, unknown>[]; col
     }
   }
 
-  // 2. function_return 若是 markdown table,parse 之
-  const text = String(result.function_return ?? '').trim()
+  // 3. function_return 若是 markdown table,parse 之
   if (!text) return null
   return parseMarkdownTable(text)
 }
@@ -132,27 +184,34 @@ const CHART_TYPES: { value: InlineChartType; Icon: React.ElementType; label: str
 
 export default function ErpToolChartTab({ tool, inputs, result }: Props) {
   const { t } = useTranslation()
-  const extracted = useMemo(() => inferChartableRows(result), [result])
+  const extracted = useMemo(() => inferChartableRows(result, tool), [result, tool])
 
-  const [chartType, setChartType] = useState<InlineChartType>('bar')
-  const [xField, setXField] = useState<string>('')
-  const [yFields, setYFields] = useState<string[]>([])
-  const [title, setTitle] = useState<string>(tool.name)
+  // 管理員在 ErpToolsPanel 已設定「附加圖表」→ 直接拿當預設(使用者仍可改)
+  const fmtChart = tool.answer_output_format?.chart || null
+  const [chartType, setChartType] = useState<InlineChartType>(
+    (fmtChart?.type as InlineChartType) || 'bar'
+  )
+  const [xField, setXField] = useState<string>(fmtChart?.x_column || '')
+  const [yFields, setYFields] = useState<string[]>(fmtChart?.y_column ? [fmtChart.y_column] : [])
+  const [title, setTitle] = useState<string>(fmtChart?.title || tool.name)
   const [saving, setSaving] = useState(false)
   const [savedChartId, setSavedChartId] = useState<number | null>(null)
   const [saveError, setSaveError] = useState<string | null>(null)
 
-  // 初始化欄位選擇(從 rows[0] 推斷)
+  // 初始化欄位選擇 — 若 admin 已設 answer_output_format.chart 就用它;
+  // 否則從 rows[0] 型別推斷(文字欄當 X、數值欄當 Y)
   useEffect(() => {
     if (!extracted || extracted.columns.length === 0) return
     const cols = extracted.columns
-    if (!xField) {
-      // 優先選文字型欄位當 X
+
+    // X:若預設值不在 extracted columns 裡,重選第一個文字欄
+    if (!xField || !cols.includes(xField)) {
       const firstText = cols.find(c => typeof extracted.rows[0][c] !== 'number')
       setXField(firstText || cols[0])
     }
-    if (yFields.length === 0) {
-      // 找數值型欄位
+
+    // Y:若預設值不在 columns,重選第一個數值欄
+    if (yFields.length === 0 || !yFields.every(f => cols.includes(f))) {
       const numericCols = cols.filter(c => {
         const v = extracted.rows[0][c]
         return typeof v === 'number' && !isNaN(v)
@@ -221,7 +280,7 @@ export default function ErpToolChartTab({ tool, inputs, result }: Props) {
         <div>
           <div className="font-medium">{t('chart.erpTab.noData', '無結構化資料可繪圖')}</div>
           <div className="mt-1 text-amber-700">
-            {t('chart.erpTab.noDataHint', '此 procedure 的回傳無 OUT ref cursor,也不是 markdown table 格式。請在工具管理設定 Answer Output Format,或改用有 OUT cursor 的 procedure。')}
+            {t('chart.erpTab.noDataHint', '此 procedure 的回傳無 OUT ref cursor,也不是 markdown table 格式。請在工具管理設定「輸出解析(Answer Output Format)」的欄位分隔符與欄位名稱,或改用有 OUT cursor 的 procedure。')}
           </div>
         </div>
       </div>
@@ -229,9 +288,32 @@ export default function ErpToolChartTab({ tool, inputs, result }: Props) {
   }
 
   const { columns } = extracted
+  // 標示目前用哪條路徑 parse 出資料 — 讓 user 知道設定是否被讀到
+  const parsedBy: 'output_format' | 'ref_cursor' | 'markdown' = (() => {
+    const fmt = tool.answer_output_format
+    if (fmt && (fmt.col_separator || (Array.isArray(fmt.columns) && fmt.columns.length > 0))) {
+      return 'output_format'
+    }
+    if (result?.params && Object.values(result.params).some((v: any) => v?.rows?.length > 0)) {
+      return 'ref_cursor'
+    }
+    return 'markdown'
+  })()
 
   return (
     <div className="space-y-3">
+      {/* 資料來源 / parse 方式提示 */}
+      <div className="text-[10px] text-slate-400 flex items-center gap-1.5">
+        {parsedBy === 'output_format' && (
+          <span>
+            ✓ {t('chart.erpTab.parsedByFormat', '已套用「輸出解析」設定')}
+            {fmtChart && ` · ${t('chart.erpTab.chartPreset', '預設圖表')}: ${fmtChart.type || 'bar'}(${fmtChart.x_column}→${fmtChart.y_column})`}
+          </span>
+        )}
+        {parsedBy === 'ref_cursor' && <span>· {t('chart.erpTab.parsedByCursor', '從 OUT ref cursor 取得資料')}</span>}
+        {parsedBy === 'markdown' && <span>· {t('chart.erpTab.parsedByMarkdown', '從 markdown table 解析')}</span>}
+      </div>
+
       {/* 控制列 */}
       <div className="grid grid-cols-12 gap-2 items-start">
         {/* 圖型 */}
