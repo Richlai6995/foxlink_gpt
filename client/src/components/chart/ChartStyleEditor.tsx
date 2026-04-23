@@ -35,6 +35,36 @@ function patchPerType<K extends 'bar' | 'line' | 'area' | 'pie'>(
 
 const PALETTE_OPTIONS: ChartPaletteName[] = ['blue', 'green', 'warm', 'purple', 'teal', 'custom']
 
+// Per-type palette override 用的 select(「繼承 common」+ 5 組預設 + custom)
+type PerTypePalette = ChartPaletteName | 'inherit'
+const PER_TYPE_OPTIONS: PerTypePalette[] = ['inherit', 'blue', 'green', 'warm', 'purple', 'teal', 'custom']
+
+/** 共用:per-type palette 的緊湊 select;選「繼承」= 用 common.palette */
+function PerTypePaletteSelect({
+  currentValue, onPick, t,
+}: {
+  currentValue: PerTypePalette | undefined
+  onPick: (p: PerTypePalette) => void
+  t: (k: string, def: string) => string
+}) {
+  return (
+    <div>
+      <div className="text-[10px] text-slate-500">{t('chart.style.paletteOverride', '配色(此圖型)')}</div>
+      <select
+        value={currentValue ?? 'inherit'}
+        onChange={e => onPick(e.target.value as PerTypePalette)}
+        className="w-full border border-slate-300 rounded px-1.5 py-1 text-xs bg-white"
+      >
+        {PER_TYPE_OPTIONS.map(p => (
+          <option key={p} value={p}>
+            {p === 'inherit' ? t('chart.style.inherit', '繼承主配色') : p}
+          </option>
+        ))}
+      </select>
+    </div>
+  )
+}
+
 export default function ChartStyleEditor({ value, onChange, showPerTypes, compact }: Props) {
   const { t } = useTranslation()
   const c = value.common || {}
@@ -250,6 +280,15 @@ export default function ChartStyleEditor({ value, onChange, showPerTypes, compac
         <div className={fieldGap}>
           <div className={sectionTitle}>{t('chart.style.bar', '長條圖')}</div>
 
+          {/* Per-type palette */}
+          <div className="mt-1">
+            <PerTypePaletteSelect
+              currentValue={value.perType?.bar?.palette}
+              onPick={(p) => onChange(patchPerType(value, 'bar', { palette: p }))}
+              t={t as any}
+            />
+          </div>
+
           {/* 圓角 / 透明 */}
           <div className="grid grid-cols-2 gap-1.5 mt-1">
             <div>
@@ -375,6 +414,13 @@ export default function ChartStyleEditor({ value, onChange, showPerTypes, compac
       {has('line') && (
         <div className={fieldGap}>
           <div className={sectionTitle}>{t('chart.style.line', '折線圖')}</div>
+          <div className="mt-1">
+            <PerTypePaletteSelect
+              currentValue={value.perType?.line?.palette}
+              onPick={(p) => onChange(patchPerType(value, 'line', { palette: p }))}
+              t={t as any}
+            />
+          </div>
           <label className="flex items-center gap-1.5 mt-1 text-[11px] text-slate-600 cursor-pointer">
             <input
               type="checkbox"
@@ -385,9 +431,28 @@ export default function ChartStyleEditor({ value, onChange, showPerTypes, compac
           </label>
         </div>
       )}
+      {has('area') && (
+        <div className={fieldGap}>
+          <div className={sectionTitle}>{t('chart.style.area', '面積圖')}</div>
+          <div className="mt-1">
+            <PerTypePaletteSelect
+              currentValue={value.perType?.area?.palette}
+              onPick={(p) => onChange(patchPerType(value, 'area', { palette: p }))}
+              t={t as any}
+            />
+          </div>
+        </div>
+      )}
       {has('pie') && (
         <div className={fieldGap}>
           <div className={sectionTitle}>{t('chart.style.pie', '圓餅圖')}</div>
+          <div className="mt-1">
+            <PerTypePaletteSelect
+              currentValue={value.perType?.pie?.palette}
+              onPick={(p) => onChange(patchPerType(value, 'pie', { palette: p }))}
+              t={t as any}
+            />
+          </div>
           <label className="flex items-center gap-1.5 mt-1 text-[11px] text-slate-600 cursor-pointer">
             <input
               type="checkbox"

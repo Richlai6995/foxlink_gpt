@@ -2981,6 +2981,11 @@
       "newTemplate": "新增樣式模板",
       "nameRequired": "請輸入模板名稱",
       "saveFailed": "儲存模板失敗:",
+      "paletteOverride": "配色(此圖型)",
+      "inherit": "繼承主配色",
+      "resetHardcoded": "恢復內建預設",
+      "resetHardcodedHint": "回到程式內建樣式(FOXLINK 初始值)",
+      "confirmResetHardcoded": "確定把模板重設為系統內建預設樣式?此動作會覆蓋目前所有調整(儲存後才會真正生效)",
       "pos": {
         "top": "上",
         "bottom": "下",

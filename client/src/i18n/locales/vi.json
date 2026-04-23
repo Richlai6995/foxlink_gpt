@@ -3022,6 +3022,11 @@
       "newTemplate": "Mẫu kiểu mới",
       "nameRequired": "Vui lòng nhập tên mẫu",
       "saveFailed": "Lưu mẫu thất bại:",
+      "paletteOverride": "Bảng màu (loại này)",
+      "inherit": "Kế thừa bảng màu chính",
+      "resetHardcoded": "Khôi phục mặc định",
+      "resetHardcodedHint": "Quay về kiểu nội tại FOXLINK",
+      "confirmResetHardcoded": "Đặt lại mẫu về kiểu nội tại? Sẽ ghi đè mọi điều chỉnh hiện tại (có hiệu lực sau khi lưu).",
       "pos": {
         "top": "Trên",
         "bottom": "Dưới",

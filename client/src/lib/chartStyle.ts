@@ -36,6 +36,7 @@ export const HARDCODED_STYLE: Required<ChartStyle> = {
   },
   perType: {
     bar: {
+      palette: 'inherit',
       border_radius: 4,
       single_series_multi_color: false,
       custom_bar_colors: [],
@@ -44,10 +45,10 @@ export const HARDCODED_STYLE: Required<ChartStyle> = {
       animation_style: 'grow',
       animation_stagger: false,
     },
-    line: { smooth: false, line_width: 2 },
-    area: { opacity: 0.25, smooth: true },
-    pie: { doughnut: true, radius_inner: 40, radius_outer: 68 },
-    scatter: { symbol_size: 10 },
+    line: { palette: 'inherit', smooth: false, line_width: 2 },
+    area: { palette: 'inherit', opacity: 0.25, smooth: true },
+    pie: { palette: 'inherit', doughnut: true, radius_inner: 40, radius_outer: 68 },
+    scatter: { palette: 'inherit', symbol_size: 10 },
   },
 }
 
@@ -112,8 +113,27 @@ export function makeAxisLabelTruncator(maxChars: number): ((v: string) => string
   }
 }
 
-/** 取得 style 使用的色盤陣列 */
-export function getPaletteColors(style: ChartStyle): string[] {
+/**
+ * 取得 style 使用的色盤陣列。
+ * 優先序:perType[type].palette(若非 'inherit')→ common.palette → fallback blue
+ * type 參數可空,空時僅看 common。
+ */
+export function getPaletteColors(style: ChartStyle, type?: InlineChartType): string[] {
+  // 1. perType override
+  if (type && style.perType) {
+    const typed = (style.perType as Record<string, { palette?: ChartPaletteName | 'inherit' }>)[type]
+    const typePalette = typed?.palette
+    if (typePalette && typePalette !== 'inherit') {
+      if (typePalette === 'custom') {
+        // per-type 的 custom 目前復用 common.custom_colors(避免每型再塞一組)
+        const c = style.common?.custom_colors || []
+        if (c.length > 0) return c
+        return PALETTES.blue
+      }
+      return PALETTES[typePalette] || PALETTES.blue
+    }
+  }
+  // 2. common.palette
   const c = style.common || {}
   if (c.palette === 'custom' && Array.isArray(c.custom_colors) && c.custom_colors.length > 0) {
     return c.custom_colors

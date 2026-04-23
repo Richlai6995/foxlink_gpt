@@ -81,6 +81,8 @@ export interface ChartStyle {
   }
   perType?: {
     bar?: {
+      /** 此圖型獨立 palette;'inherit' = 用 common.palette(預設) */
+      palette?: ChartPaletteName | 'inherit'
       border_radius?: number
       /** 單系列(y_fields=1)時每支 bar 依 x 順序用不同色(排名圖特別實用) */
       single_series_multi_color?: boolean
@@ -95,10 +97,10 @@ export interface ChartStyle {
       /** 逐個 bar 依序動畫(交錯浮現效果) */
       animation_stagger?: boolean
     }
-    line?: { smooth?: boolean; line_width?: number }
-    area?: { opacity?: number; smooth?: boolean }
-    pie?: { doughnut?: boolean; radius_inner?: number; radius_outer?: number }
-    scatter?: { symbol_size?: number }
+    line?: { palette?: ChartPaletteName | 'inherit'; smooth?: boolean; line_width?: number }
+    area?: { palette?: ChartPaletteName | 'inherit'; opacity?: number; smooth?: boolean }
+    pie?: { palette?: ChartPaletteName | 'inherit'; doughnut?: boolean; radius_inner?: number; radius_outer?: number }
+    scatter?: { palette?: ChartPaletteName | 'inherit'; symbol_size?: number }
   }
 }
 

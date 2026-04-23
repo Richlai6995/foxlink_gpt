@@ -5,7 +5,7 @@
  */
 import { useState, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
-import { X, Save } from 'lucide-react'
+import { X, Save, RotateCcw } from 'lucide-react'
 import api from '../../lib/api'
 import ChartStyleEditor from './ChartStyleEditor'
 import InlineChart from '../chat/InlineChart'
@@ -141,8 +141,25 @@ export default function ChartStyleTemplateEditor({ template, onClose, onSaved }:
         </div>
 
         {/* Footer */}
-        <div className="px-5 py-3 border-t border-slate-200 flex items-center justify-end gap-2">
-          {err && <span className="text-xs text-red-600 mr-auto">{err}</span>}
+        <div className="px-5 py-3 border-t border-slate-200 flex items-center gap-2">
+          {/* 左側:恢復內建預設(保險絲,避免改壞了回不去) */}
+          <button
+            onClick={() => {
+              if (confirm(t('chart.style.confirmResetHardcoded', '確定把模板重設為系統內建預設樣式?此動作會覆蓋目前所有調整(儲存後才會真正生效)'))) {
+                setStyle(HARDCODED_STYLE)
+              }
+            }}
+            className="px-3 py-1.5 text-xs border border-slate-300 rounded hover:bg-slate-50 text-slate-600 flex items-center gap-1.5"
+            title={t('chart.style.resetHardcodedHint', '回到程式內建樣式(FOXLINK 初始值)')}
+          >
+            <RotateCcw size={12} />
+            {t('chart.style.resetHardcoded', '恢復內建預設')}
+          </button>
+
+          {err && <span className="text-xs text-red-600">{err}</span>}
+
+          <div className="flex-1" />
+
           <button
             onClick={onClose}
             className="px-3 py-1.5 text-sm border border-slate-300 rounded hover:bg-slate-50"

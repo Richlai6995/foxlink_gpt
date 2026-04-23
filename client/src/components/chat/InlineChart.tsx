@@ -73,7 +73,7 @@ function buildOption(spec: InlineChartSpec, style: ChartStyle): ChartState {
   }
 
   const theme = resolveThemeColors(style)
-  const colors = getPaletteColors(style)
+  const colors = getPaletteColors(style, spec.type)
   const fmtValue = makeValueFormatter(style)
 
   const xs = rows.map(r => r[spec.x_field] as string | number)

@@ -3022,6 +3022,11 @@
       "newTemplate": "New style template",
       "nameRequired": "Please enter template name",
       "saveFailed": "Failed to save template: ",
+      "paletteOverride": "Palette (this type)",
+      "inherit": "Inherit main palette",
+      "resetHardcoded": "Reset to built-in",
+      "resetHardcodedHint": "Restore the built-in (FOXLINK initial) style",
+      "confirmResetHardcoded": "Reset this template to built-in style? This overwrites all current changes (takes effect after you save).",
       "pos": {
         "top": "Top",
         "bottom": "Bottom",
