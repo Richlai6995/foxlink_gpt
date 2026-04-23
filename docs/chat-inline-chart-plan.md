@@ -2,7 +2,7 @@
 
 > Chat 對話內(MCP / 深度研究 / 一般對話)LLM 輸出資料自動渲染為互動圖表
 > 作者:規劃於 2026-04-21
-> 狀態:**Phase 1–5 + 5c + 尾巴全數完成,已 push origin** @ 2026-04-23
+> 狀態:**Phase 1–5 + 5c + 4c 樣式模板 + 尾巴全數完成,已 push origin** @ 2026-04-24
 >
 > 實作進度快照:
 > - Phase 1 基礎渲染 → commit `488bb4a`
@@ -14,7 +14,9 @@
 > - Bug 修:Answer 模式 charts_json 漏存 + 圖庫列表 CLOB DISTINCT 炸 → commit `d584ebd`
 > - **Phase 5 尾巴**:pinSource 注入 + 敏感資料遮蔽 + feature flag + Phase 5c ERP Modal 圖表 tab → commit `8d0180c`
 > - **所有延後項**:PPTX 匯出 + 使用率拆分(open/use/fail)+ 錯誤遙測 + skill source 支援 + validateSpec 強化 → commit `d0a223a`
-> - **使用者說明書**:Help section `u-chat-chart`(sort 33)+ 規劃書更新 → 本 commit
+> - **使用者說明書**:Help section `u-chat-chart`(sort 33) → commit `9d66629`
+> - **ERP 圖表 tab fix**:讀 answer_output_format + 套預設圖表 → commit `cb7ce07`
+> - **Phase 4c 樣式模板系統**:ChartStyle / chart_style_templates / 5 組 palette / dark mode / ⚙ panel / 圖庫「樣式模板」tab / 套用優先序 → 本 commit
 >
 > **全數落地**,剩下長期優化(aria 模式、admin UI for parse-errors/popular、source_prompt 清理)等真有需求再動。
 
@@ -253,6 +255,44 @@ ALTER TABLE chat_messages ADD charts_json CLOB
 - [x] dataZoom — rows > 30 自動掛 inside + slider(滾輪/拖曳)
 - [x] **Chart → PPTX 匯出**:`client/src/lib/chartExport.ts` + InlineChart 工具列 FileText 按鈕;單張一 slide,含標題 / PNG / 資料表(前 30 列)/ 來源 footer(commit `d0a223a`)
 - [ ] ECharts aria 模式 — 低優先,暫不做
+
+### Phase 4c — 圖表樣式設定 + 樣式模板系統 ✅
+
+> **動機**:使用者反映自動產生的圖都是固定樣式,無法調顏色 / 字級 / 圖例位置。
+> 加樣式編輯 UI + 模板管理,LLM 畫圖時自動套使用者的 active default 模板。
+
+**實作**:
+- [x] `ChartStyle` 型別(common + perType)與 `InlineChartSpec.style?` 欄位(optional,向下相容)
+- [x] `chart_style_templates` 表 + `chartStyleTemplates.js` route(CRUD + set-default)
+- [x] 系統預設「FOXLINK 預設」(is_system=1)自動 seed 進 DB
+- [x] `ChartStyleEditor` 共用元件(compact mode for inline panel,full mode for template editor)
+- [x] `useChartStyleTemplates` hook — 前端 in-memory cache,`activeDefault` 算好直接 render 用
+- [x] `InlineChart.tsx` 重寫 `buildOption` 接 style 參數(palette / 字級 / 圖例 / 格線 / 數字格式 / dark mode / perType)
+- [x] InlineChart 右上加 ⚙ 按鈕 → 右側彈出樣式 panel(套用模板 dropdown + 細項編輯 + 另存為模板)
+- [x] MyChartsPage 加第 3 個 tab「樣式模板」+ `ChartStyleTemplatesTab` + `ChartStyleTemplateEditor` modal
+- [x] Dark mode 背景支援(chart bubble 背景跟 chart 同步切色);PNG / PPTX 匯出套對應背景
+- [x] PinChartButton 釘選時 `spec.style` 帶入 user_charts(圖庫固化;owner 改模板不動歷史)
+- [x] i18n 三語(`chart.style.*` / `chart.library.templates.*`)
+
+**套用優先序(render time)**:
+```
+spec.style (LLM / 使用者 panel override)
+    ↓ 沒設定
+user default template (is_default=1 AND owner_id=me)
+    ↓ 沒設定
+system default (is_system=1, 目前為「FOXLINK 預設」)
+    ↓ 沒設定
+HARDCODED(lib/chartStyle.ts HARDCODED_STYLE)
+```
+
+**資料生命週期**:
+- **chat inline chart**(`chat_messages.charts_json`)— 不存 style,每次 render 動態套 active default(好處:換模板全站一致)
+- **pinned chart**(`user_charts.chart_spec.style`)— **存當下 style 固化**(owner 改模板不動既有圖,避免破壞已分享出去的版本)
+
+**未做(長期)**:
+- [ ] admin UI 編輯「FOXLINK 預設」(目前只能 SQL 直接改)
+- [ ] 按圖型獨立選 default 模板(現在是一包管所有圖型)
+- [ ] Template 匯入/匯出 JSON(使用者間直接交換)
 
 ### Phase 5 — 使用者自建圖表 + 分享
 

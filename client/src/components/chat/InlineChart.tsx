@@ -1,37 +1,33 @@
 /**
  * InlineChart — Chat 訊息內嵌的 ECharts 圖表
  *
- * Phase 1:純前端 render bar / line / pie,無資料 / spec 異常時 graceful fallback。
- * 刻意與 dashboard/AiChart.tsx 解耦(見 docs/chat-inline-chart-plan.md §2)
- *
- * 測試:import DEMO_SPECS 可視覺驗證三種圖型
+ * Phase 1:bar / line / pie + graceful fallback,解耦 dashboard/AiChart.tsx
+ * Phase 4 :scatter / heatmap / radar / dataZoom
+ * Phase 5 :PinChartButton(釘選至圖庫)+ PPTX 匯出
+ * Phase 4c:ChartStyle 套用(palette / 字級 / 圖例 / 格線 / 數字格式 / dark mode / perType)
+ *           側邊 Settings panel 即時調樣式,可「另存為模板」/「設為我的預設」
+ *           套用優先序:spec.style > user default template > hardcoded
  */
 import { useMemo, useRef, useState } from 'react'
 import ReactECharts from 'echarts-for-react'
-import { Download, AlertTriangle, ChevronDown, ChevronUp, BarChart3, LineChart, PieChart, AreaChart, FileText } from 'lucide-react'
+import {
+  Download, AlertTriangle, ChevronDown, ChevronUp,
+  BarChart3, LineChart, PieChart, AreaChart, FileText,
+  Settings, Save, X,
+} from 'lucide-react'
 import { useTranslation } from 'react-i18next'
-import type { InlineChartSpec, InlineChartType, UserChartParam } from '../../types'
+import type { InlineChartSpec, InlineChartType, ChartStyle, UserChartParam } from '../../types'
 import PinChartButton from './PinChartButton'
+import ChartStyleEditor from '../chart/ChartStyleEditor'
+import { useChartStyleTemplates } from '../../hooks/useChartStyleTemplates'
 import { exportChartsToPptx, getChartPngFromEcharts } from '../../lib/chartExport'
+import {
+  mergeChartStyle, getPaletteColors, resolveThemeColors,
+  resolveLegendPlacement, makeValueFormatter, getPerTypeStyle,
+  HARDCODED_STYLE, SWITCHABLE_TYPES,
+} from '../../lib/chartStyle'
 
 const CHART_FONT = "'Noto Sans TC', 'Microsoft JhengHei', 'PingFang TC', 'Segoe UI', Arial, sans-serif"
-
-const PALETTE = [
-  '#5470c6', '#91cc75', '#fac858', '#ee6666', '#73c0de',
-  '#3ba272', '#fc8452', '#9a60b4', '#ea7ccc', '#f0d062',
-]
-
-const BASE_OPTION = {
-  backgroundColor: 'transparent',
-  textStyle: { color: '#374151', fontFamily: CHART_FONT, fontSize: 12 },
-  tooltip: {
-    backgroundColor: '#ffffff',
-    borderColor: '#e5e7eb',
-    textStyle: { color: '#374151' },
-  },
-  legend: { textStyle: { color: '#6b7280', fontSize: 11 }, top: 0 },
-  grid: { left: 48, right: 16, top: 36, bottom: 32, containLabel: true },
-}
 
 interface Props {
   spec: InlineChartSpec
@@ -51,10 +47,6 @@ interface Props {
   }
 }
 
-// 哪些 type 之間可以 local 切換(資料結構相容,不用 reprompt LLM)
-// pie/bar/line/area 都吃 (x_field, y_fields[0..n].field) 的 row 資料,可互換
-// scatter 需要兩個數值欄,heatmap 需要 3 維,排除
-const SWITCHABLE_TYPES: InlineChartType[] = ['bar', 'line', 'area', 'pie']
 const TYPE_ICONS: Record<string, React.ElementType> = {
   bar: BarChart3,
   line: LineChart,
@@ -68,7 +60,10 @@ type ChartState =
   | { kind: 'unsupported'; type: string }
   | { kind: 'error'; reason: string }
 
-function buildOption(spec: InlineChartSpec): ChartState {
+// ─────────────────────────────────────────────────────────────────────────────
+// buildOption — spec + 最終 style → ECharts option
+// ─────────────────────────────────────────────────────────────────────────────
+function buildOption(spec: InlineChartSpec, style: ChartStyle): ChartState {
   const rows = spec.data
   if (!Array.isArray(rows) || rows.length === 0) return { kind: 'empty' }
 
@@ -76,9 +71,13 @@ function buildOption(spec: InlineChartSpec): ChartState {
     return { kind: 'error', reason: 'missing x_field or y_fields' }
   }
 
+  const theme = resolveThemeColors(style)
+  const colors = getPaletteColors(style)
+  const fmtValue = makeValueFormatter(style)
+
   const xs = rows.map(r => r[spec.x_field] as string | number)
   const series = spec.y_fields.map((yf, i) => {
-    const color = yf.color || PALETTE[i % PALETTE.length]
+    const color = yf.color || colors[i % colors.length]
     const values = rows.map(r => {
       const v = r[yf.field]
       return typeof v === 'number' ? v : Number(v)
@@ -86,18 +85,32 @@ function buildOption(spec: InlineChartSpec): ChartState {
     return { name: yf.name || yf.field, color, values }
   })
 
-  const colors = series.map(s => s.color)
+  const titleSize = style.common?.title_size ?? HARDCODED_STYLE.common.title_size!
+  const axisSize = style.common?.axis_label_size ?? HARDCODED_STYLE.common.axis_label_size!
+  const showGrid = style.common?.show_grid ?? true
 
-  const title = spec.title
-    ? { title: { text: spec.title, left: 'center', textStyle: { fontSize: 13, fontWeight: 600 } } }
+  const titleOpt = spec.title
+    ? { title: { text: spec.title, left: 'center', textStyle: { fontSize: titleSize, fontWeight: 600, color: theme.text } } }
     : {}
+  const titleHeight = spec.title ? Math.round(titleSize * 2) : 0
+  const legend = resolveLegendPlacement(style, theme, titleHeight)
+  const gridTop = titleHeight + ((style.common?.legend_position ?? 'top') === 'top' ? 28 : 8)
 
-  // 有 title 時下推 legend / grid
-  const topOffset = spec.title ? 28 : 0
-  const legend = { ...BASE_OPTION.legend, top: 24 + topOffset }
-  const grid = { ...BASE_OPTION.grid, top: 56 + topOffset }
+  const baseOption: Record<string, unknown> = {
+    backgroundColor: theme.bg,
+    textStyle: { color: theme.text, fontFamily: CHART_FONT, fontSize: 12 },
+    tooltip: {
+      backgroundColor: theme.tooltipBg,
+      borderColor: theme.tooltipBorder,
+      textStyle: { color: theme.text },
+    },
+  }
 
-  // Phase 4:超過 30 點自動掛 dataZoom(slider 在底,inside 支援滾輪/拖曳)
+  const axisLabelStyle = { color: theme.subtext, fontSize: axisSize }
+  const splitLineStyle = showGrid ? { lineStyle: { color: theme.grid } } : { show: false }
+  const xAxisLine = { lineStyle: { color: theme.axisLine } }
+
+  // dataZoom:rows > 30 自動掛(跟 Phase 4 一致)
   const needsZoom = rows.length > 30
   const dataZoom = needsZoom
     ? [
@@ -105,100 +118,105 @@ function buildOption(spec: InlineChartSpec): ChartState {
         { type: 'slider', height: 18, bottom: 4, start: 0, end: Math.min(100, Math.round((30 / rows.length) * 100)) },
       ]
     : undefined
-  const gridWithZoom = needsZoom ? { ...grid, bottom: 36 } : grid
+  const grid = { left: 48, right: 16, top: gridTop, bottom: needsZoom ? 36 : 32, containLabel: true }
 
   switch (spec.type) {
     case 'bar':
     case 'line':
     case 'area': {
+      const barStyle = getPerTypeStyle(style, 'bar')
+      const lineStyle = getPerTypeStyle(style, 'line')
+      const areaStyle = getPerTypeStyle(style, 'area')
       return {
         kind: 'ok',
         option: {
-          ...BASE_OPTION,
-          ...title,
+          ...baseOption,
+          ...titleOpt,
           color: colors,
           legend,
-          grid: gridWithZoom,
+          grid,
           dataZoom,
-          xAxis: {
-            type: 'category',
-            data: xs,
-            axisLabel: { color: '#6b7280', fontSize: 11 },
-            axisLine: { lineStyle: { color: '#e5e7eb' } },
-          },
-          yAxis: {
-            type: 'value',
-            axisLabel: { color: '#6b7280', fontSize: 11 },
-            splitLine: { lineStyle: { color: '#f3f4f6' } },
-          },
-          tooltip: { ...BASE_OPTION.tooltip, trigger: 'axis' },
+          xAxis: { type: 'category', data: xs, axisLabel: axisLabelStyle, axisLine: xAxisLine },
+          yAxis: { type: 'value', axisLabel: { ...axisLabelStyle, formatter: fmtValue }, splitLine: splitLineStyle },
+          tooltip: { ...(baseOption.tooltip as object), trigger: 'axis', valueFormatter: fmtValue },
           series: series.map(s => ({
             name: s.name,
             type: spec.type === 'bar' ? 'bar' : 'line',
             data: s.values,
-            smooth: spec.type === 'line',
-            areaStyle: spec.type === 'area' ? { opacity: 0.25 } : undefined,
-            itemStyle: { color: s.color, borderRadius: spec.type === 'bar' ? [4, 4, 0, 0] : undefined },
+            smooth: spec.type === 'line' ? lineStyle.smooth : (spec.type === 'area' ? areaStyle.smooth : false),
+            lineStyle: spec.type !== 'bar' ? { width: lineStyle.line_width ?? 2 } : undefined,
+            areaStyle: spec.type === 'area' ? { opacity: areaStyle.opacity ?? 0.25 } : undefined,
+            itemStyle: {
+              color: s.color,
+              borderRadius: spec.type === 'bar'
+                ? [barStyle.border_radius ?? 4, barStyle.border_radius ?? 4, 0, 0]
+                : undefined,
+            },
           })),
         },
       }
     }
     case 'pie': {
+      const pieStyle = getPerTypeStyle(style, 'pie')
+      const inner = pieStyle.doughnut ? (pieStyle.radius_inner ?? 40) : 0
+      const outer = pieStyle.radius_outer ?? 68
       const yf = spec.y_fields[0]
       const data = rows.map((r, i) => ({
         name: String(r[spec.x_field] ?? ''),
         value: Number(r[yf.field]) || 0,
-        itemStyle: { color: PALETTE[i % PALETTE.length] },
+        itemStyle: { color: colors[i % colors.length] },
       }))
       return {
         kind: 'ok',
         option: {
-          ...BASE_OPTION,
-          ...title,
-          tooltip: { ...BASE_OPTION.tooltip, trigger: 'item' },
-          legend: { ...legend, orient: 'vertical', left: 8, top: 'middle' },
+          ...baseOption,
+          ...titleOpt,
+          tooltip: { ...(baseOption.tooltip as object), trigger: 'item', valueFormatter: fmtValue },
+          legend: legend
+            ? (style.common?.legend_position === 'right' || style.common?.legend_position === 'left'
+              ? legend
+              : { ...legend, orient: 'vertical', left: 8, top: 'middle' })
+            : undefined,
           series: [{
             name: yf.name || yf.field,
             type: 'pie',
-            radius: ['40%', '68%'],
+            radius: [`${inner}%`, `${outer}%`],
             center: ['60%', '52%'],
             avoidLabelOverlap: true,
-            label: { fontSize: 11 },
+            label: { fontSize: axisSize, color: theme.text },
             data,
           }],
         },
       }
     }
     case 'scatter': {
-      // x_field 為 X(數值或類別),y_fields[0..n].field 為 Y 數值;每組 y 一個 series
-      // 若 x 是類別則 xAxis type=category,否則 type=value
+      const scatterStyle = getPerTypeStyle(style, 'scatter')
       const xIsNumeric = xs.every(v => typeof v === 'number' || (!isNaN(Number(v)) && v !== ''))
       return {
         kind: 'ok',
         option: {
-          ...BASE_OPTION,
-          ...title,
+          ...baseOption,
+          ...titleOpt,
           color: colors,
           legend,
           grid,
           xAxis: {
             type: xIsNumeric ? 'value' : 'category',
             data: xIsNumeric ? undefined : xs,
-            axisLabel: { color: '#6b7280', fontSize: 11 },
-            axisLine: { lineStyle: { color: '#e5e7eb' } },
+            axisLabel: axisLabelStyle,
+            axisLine: xAxisLine,
           },
-          yAxis: {
-            type: 'value',
-            axisLabel: { color: '#6b7280', fontSize: 11 },
-            splitLine: { lineStyle: { color: '#f3f4f6' } },
-          },
-          tooltip: { ...BASE_OPTION.tooltip, trigger: 'item' },
+          yAxis: { type: 'value', axisLabel: { ...axisLabelStyle, formatter: fmtValue }, splitLine: splitLineStyle },
+          tooltip: { ...(baseOption.tooltip as object), trigger: 'item', valueFormatter: fmtValue },
           series: series.map(s => ({
             name: s.name,
             type: 'scatter',
-            symbolSize: 10,
+            symbolSize: scatterStyle.symbol_size ?? 10,
             data: xIsNumeric
-              ? rows.map(r => [Number(r[spec.x_field]), Number(r[spec.y_fields.find(yf => yf.field === s.name || yf.name === s.name)?.field || s.name])])
+              ? rows.map(r => [
+                  Number(r[spec.x_field]),
+                  Number(r[spec.y_fields.find(yf => yf.field === s.name || yf.name === s.name)?.field || s.name]),
+                ])
               : s.values,
             itemStyle: { color: s.color, opacity: 0.7 },
           })),
@@ -206,7 +224,6 @@ function buildOption(spec: InlineChartSpec): ChartState {
       }
     }
     case 'heatmap': {
-      // 需要 3 維資料:y_fields[0]=group(縱軸 category),y_fields[1]=value
       if (spec.y_fields.length < 2) return { kind: 'error', reason: 'heatmap 需要 2 個 y_fields(group + value)' }
       const groupField = spec.y_fields[0].field
       const valueField = spec.y_fields[1].field
@@ -222,15 +239,15 @@ function buildOption(spec: InlineChartSpec): ChartState {
       return {
         kind: 'ok',
         option: {
-          ...BASE_OPTION,
-          ...title,
-          tooltip: { ...BASE_OPTION.tooltip, position: 'top' },
-          grid: { ...grid, height: '60%', top: 56 + topOffset },
-          xAxis: { type: 'category', data: xs, axisLabel: { color: '#6b7280', fontSize: 11 }, splitArea: { show: true } },
-          yAxis: { type: 'category', data: ys, axisLabel: { color: '#6b7280', fontSize: 11 }, splitArea: { show: true } },
+          ...baseOption,
+          ...titleOpt,
+          tooltip: { ...(baseOption.tooltip as object), position: 'top', valueFormatter: fmtValue },
+          grid: { ...grid, height: '60%', top: gridTop + 8 },
+          xAxis: { type: 'category', data: xs, axisLabel: axisLabelStyle, splitArea: { show: true } },
+          yAxis: { type: 'category', data: ys, axisLabel: axisLabelStyle, splitArea: { show: true } },
           visualMap: {
             min: vMin, max: vMax, calculable: true, orient: 'horizontal',
-            left: 'center', bottom: 4, textStyle: { fontSize: 10, color: '#6b7280' },
+            left: 'center', bottom: 4, textStyle: { fontSize: 10, color: theme.subtext },
             inRange: { color: ['#e0f2fe', '#3b82f6', '#1e3a8a'] },
           },
           series: [{ name: spec.y_fields[1].name || valueField, type: 'heatmap', data, label: { show: false } }],
@@ -238,8 +255,6 @@ function buildOption(spec: InlineChartSpec): ChartState {
       }
     }
     case 'radar': {
-      // x_field 是 indicator name 欄,y_fields 各為一個 series
-      // 自動算 max:每個 indicator 取所有 series 中該 indicator 的最大值 * 1.1
       const indicators = xs.map((label, i) => {
         const max = Math.max(...series.map(s => s.values[i] || 0)) * 1.1 || 100
         return { name: String(label), max }
@@ -247,17 +262,17 @@ function buildOption(spec: InlineChartSpec): ChartState {
       return {
         kind: 'ok',
         option: {
-          ...BASE_OPTION,
-          ...title,
+          ...baseOption,
+          ...titleOpt,
           color: colors,
-          legend: { ...legend, top: 8 + topOffset },
-          tooltip: { ...BASE_OPTION.tooltip, trigger: 'item' },
+          legend: legend ? { ...legend, top: 8 + titleHeight } : undefined,
+          tooltip: { ...(baseOption.tooltip as object), trigger: 'item', valueFormatter: fmtValue },
           radar: {
             indicator: indicators,
             center: ['50%', `${55 + (spec.title ? 5 : 0)}%`],
             radius: '60%',
-            axisName: { color: '#6b7280', fontSize: 11 },
-            splitLine: { lineStyle: { color: '#e5e7eb' } },
+            axisName: { color: theme.subtext, fontSize: axisSize },
+            splitLine: { lineStyle: { color: theme.axisLine } },
             splitArea: { areaStyle: { color: ['rgba(248,250,252,0.5)', 'rgba(241,245,249,0.5)'] } },
           },
           series: [{
@@ -281,8 +296,23 @@ export default function InlineChart({ spec, height = 320, enablePin = true, pinS
   const { t } = useTranslation()
   const chartRef = useRef<ReactECharts>(null)
   const [showRawSpec, setShowRawSpec] = useState(false)
-  // 本地圖型切換:不影響後端存的 spec,純 client 視覺切換
   const [overrideType, setOverrideType] = useState<InlineChartType | null>(null)
+  const [stylePanelOpen, setStylePanelOpen] = useState(false)
+  // style override:spec.style > 使用者在 panel 改的 > default
+  const [styleOverride, setStyleOverride] = useState<ChartStyle | null>(null)
+  const [saveTmplOpen, setSaveTmplOpen] = useState(false)
+  const [saveTmplName, setSaveTmplName] = useState('')
+  const [saveBusy, setSaveBusy] = useState(false)
+
+  const { activeDefault, mine, system, createTemplate, setDefault } = useChartStyleTemplates()
+
+  // 最終 style:activeDefault < spec.style < styleOverride
+  const finalStyle = useMemo<ChartStyle>(() => {
+    let s: ChartStyle = activeDefault
+    if (spec.style) s = mergeChartStyle(s, spec.style)
+    if (styleOverride) s = mergeChartStyle(s, styleOverride)
+    return s
+  }, [activeDefault, spec.style, styleOverride])
 
   const effectiveSpec = useMemo<InlineChartSpec>(
     () => (overrideType && overrideType !== spec.type ? { ...spec, type: overrideType } : spec),
@@ -291,20 +321,26 @@ export default function InlineChart({ spec, height = 320, enablePin = true, pinS
 
   const state = useMemo(() => {
     try {
-      return buildOption(effectiveSpec)
+      return buildOption(effectiveSpec, finalStyle)
     } catch (e) {
       return { kind: 'error' as const, reason: e instanceof Error ? e.message : 'unknown' }
     }
-  }, [effectiveSpec])
+  }, [effectiveSpec, finalStyle])
 
-  // 切換選單只在 4 種互通 type 之間出現;原始 type 不在此清單就不顯示
   const switchable = SWITCHABLE_TYPES.includes(spec.type as InlineChartType)
   const currentType = (overrideType || spec.type) as InlineChartType
+
+  // 把 styleOverride(僅在 panel 編過才非 null)拼回 spec,供釘選 / 匯出
+  const specWithStyle: InlineChartSpec = useMemo(
+    () => (styleOverride ? { ...spec, style: mergeChartStyle(spec.style, styleOverride) } : spec),
+    [spec, styleOverride]
+  )
 
   const handleDownload = () => {
     const inst = chartRef.current?.getEchartsInstance()
     if (!inst) return
-    const url = inst.getDataURL({ type: 'png', pixelRatio: 2, backgroundColor: '#ffffff' })
+    const bgColor = finalStyle.common?.background === 'dark' ? '#1e293b' : '#ffffff'
+    const url = inst.getDataURL({ type: 'png', pixelRatio: 2, backgroundColor: bgColor })
     const a = document.createElement('a')
     a.href = url
     a.download = (spec.title || 'chart') + '.png'
@@ -319,11 +355,33 @@ export default function InlineChart({ spec, height = 320, enablePin = true, pinS
       await exportChartsToPptx([{
         title: spec.title || t('chart.inline.defaultTitle', '圖表'),
         pngDataUrl,
-        spec,
+        spec: specWithStyle,
       }], (spec.title || 'chart') + '.pptx')
     } catch (e) {
       console.error('[InlineChart] pptx export failed:', e)
       alert(t('chart.inline.pptxFailed', 'PPTX 匯出失敗:') + (e instanceof Error ? e.message : 'unknown'))
+    }
+  }
+
+  const handleApplyTemplate = (tmplId: number) => {
+    const tmpl = [...mine, ...system].find(x => x.id === tmplId)
+    if (!tmpl) return
+    const s = typeof tmpl.style_json === 'string' ? JSON.parse(tmpl.style_json) : tmpl.style_json
+    setStyleOverride(s)
+  }
+
+  const handleSaveAsTemplate = async () => {
+    if (!saveTmplName.trim()) return
+    setSaveBusy(true)
+    try {
+      const currentStyle = mergeChartStyle(activeDefault, mergeChartStyle(spec.style, styleOverride || undefined))
+      await createTemplate(saveTmplName.trim(), currentStyle)
+      setSaveTmplOpen(false)
+      setSaveTmplName('')
+    } catch (e: any) {
+      alert(t('chart.style.saveFailed', '儲存模板失敗:') + (e?.message || 'unknown'))
+    } finally {
+      setSaveBusy(false)
     }
   }
 
@@ -352,54 +410,181 @@ export default function InlineChart({ spec, height = 320, enablePin = true, pinS
     )
   }
 
+  const isDark = finalStyle.common?.background === 'dark'
+
   return (
-    <div className="my-3 border border-slate-200 bg-white rounded-lg overflow-hidden group/chart relative">
-      <ReactECharts
-        ref={chartRef}
-        option={state.option}
-        style={{ width: '100%', height }}
-        notMerge
-        lazyUpdate
-      />
-      <div className="absolute top-1.5 right-1.5 opacity-0 group-hover/chart:opacity-100 transition flex items-center gap-1">
-        {switchable && (
-          <div className="flex items-center bg-white/90 border border-slate-200 rounded p-0.5 gap-0.5">
-            {SWITCHABLE_TYPES.map((tp) => {
-              const Icon = TYPE_ICONS[tp]
-              const active = currentType === tp
-              return (
-                <button
-                  key={tp}
-                  onClick={() => setOverrideType(tp === spec.type ? null : tp)}
-                  title={t(`chart.inline.switchTo.${tp}`, tp)}
-                  className={`p-1 rounded transition ${
-                    active
-                      ? 'bg-blue-50 text-blue-600'
-                      : 'text-slate-400 hover:text-slate-700 hover:bg-slate-50'
-                  }`}
-                >
-                  <Icon size={12} />
-                </button>
-              )
-            })}
-          </div>
-        )}
-        {enablePin && <PinChartButton spec={spec} source={pinSource} />}
-        <button
-          onClick={handleExportPptx}
-          title={t('chart.inline.exportPptx', '匯出 PPTX')}
-          className="p-1.5 rounded bg-white/90 border border-slate-200 text-slate-500 hover:text-orange-600 hover:bg-white"
-        >
-          <FileText size={13} />
-        </button>
-        <button
-          onClick={handleDownload}
-          title={t('chart.inline.downloadPng', '下載 PNG')}
-          className="p-1.5 rounded bg-white/90 border border-slate-200 text-slate-500 hover:text-slate-800 hover:bg-white"
-        >
-          <Download size={13} />
-        </button>
+    <div className="my-3 relative flex gap-2">
+      {/* Chart */}
+      <div
+        className={`flex-1 border rounded-lg overflow-hidden group/chart relative transition ${
+          isDark ? 'border-slate-700 bg-slate-900' : 'border-slate-200 bg-white'
+        }`}
+      >
+        <ReactECharts
+          ref={chartRef}
+          option={state.option}
+          style={{ width: '100%', height }}
+          notMerge
+          lazyUpdate
+        />
+        <div className="absolute top-1.5 right-1.5 opacity-0 group-hover/chart:opacity-100 transition flex items-center gap-1">
+          {switchable && (
+            <div className={`flex items-center border rounded p-0.5 gap-0.5 ${isDark ? 'bg-slate-800/90 border-slate-700' : 'bg-white/90 border-slate-200'}`}>
+              {SWITCHABLE_TYPES.map((tp) => {
+                const Icon = TYPE_ICONS[tp]
+                const active = currentType === tp
+                return (
+                  <button
+                    key={tp}
+                    onClick={() => setOverrideType(tp === spec.type ? null : tp)}
+                    title={t(`chart.inline.switchTo.${tp}`, tp)}
+                    className={`p-1 rounded transition ${
+                      active
+                        ? 'bg-blue-50 text-blue-600'
+                        : isDark ? 'text-slate-400 hover:text-slate-200 hover:bg-slate-700' : 'text-slate-400 hover:text-slate-700 hover:bg-slate-50'
+                    }`}
+                  >
+                    <Icon size={12} />
+                  </button>
+                )
+              })}
+            </div>
+          )}
+          <button
+            onClick={() => setStylePanelOpen(v => !v)}
+            title={t('chart.inline.styleEditor', '樣式設定')}
+            className={`p-1.5 rounded border transition ${
+              stylePanelOpen
+                ? 'bg-sky-50 border-sky-300 text-sky-700'
+                : isDark
+                  ? 'bg-slate-800/90 border-slate-700 text-slate-300 hover:text-sky-400'
+                  : 'bg-white/90 border-slate-200 text-slate-500 hover:text-sky-600 hover:bg-white'
+            }`}
+          >
+            <Settings size={13} />
+          </button>
+          {enablePin && <PinChartButton spec={specWithStyle} source={pinSource} />}
+          <button
+            onClick={handleExportPptx}
+            title={t('chart.inline.exportPptx', '匯出 PPTX')}
+            className={`p-1.5 rounded border transition ${
+              isDark ? 'bg-slate-800/90 border-slate-700 text-slate-300 hover:text-orange-400' : 'bg-white/90 border-slate-200 text-slate-500 hover:text-orange-600 hover:bg-white'
+            }`}
+          >
+            <FileText size={13} />
+          </button>
+          <button
+            onClick={handleDownload}
+            title={t('chart.inline.downloadPng', '下載 PNG')}
+            className={`p-1.5 rounded border transition ${
+              isDark ? 'bg-slate-800/90 border-slate-700 text-slate-300 hover:text-white' : 'bg-white/90 border-slate-200 text-slate-500 hover:text-slate-800 hover:bg-white'
+            }`}
+          >
+            <Download size={13} />
+          </button>
+        </div>
       </div>
+
+      {/* Style Panel(右側彈出) */}
+      {stylePanelOpen && (
+        <div className="w-72 border border-slate-200 bg-white rounded-lg p-3 shadow-lg flex-shrink-0 max-h-[480px] overflow-y-auto">
+          <div className="flex items-center justify-between mb-2 pb-2 border-b border-slate-100">
+            <div className="text-xs font-semibold text-slate-700">{t('chart.style.title', '樣式設定')}</div>
+            <button onClick={() => setStylePanelOpen(false)} className="text-slate-400 hover:text-slate-700">
+              <X size={14} />
+            </button>
+          </div>
+
+          {/* 套用模板 dropdown */}
+          {(mine.length > 0 || system.length > 0) && (
+            <div className="mb-3">
+              <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide mb-1">
+                {t('chart.style.applyTemplate', '套用模板')}
+              </div>
+              <select
+                onChange={e => {
+                  const id = Number(e.target.value)
+                  if (id > 0) handleApplyTemplate(id)
+                }}
+                defaultValue=""
+                className="w-full border border-slate-300 rounded px-2 py-1 text-xs bg-white"
+              >
+                <option value="">— {t('chart.style.chooseTemplate', '選一個模板')} —</option>
+                {mine.length > 0 && (
+                  <optgroup label={t('chart.style.mineGroup', '我的')}>
+                    {mine.map(tmpl => (
+                      <option key={tmpl.id} value={tmpl.id}>
+                        {tmpl.name}{tmpl.is_default === 1 ? ' ★' : ''}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+                {system.length > 0 && (
+                  <optgroup label={t('chart.style.systemGroup', '系統')}>
+                    {system.map(tmpl => (
+                      <option key={tmpl.id} value={tmpl.id}>{tmpl.name}</option>
+                    ))}
+                  </optgroup>
+                )}
+              </select>
+            </div>
+          )}
+
+          {/* 樣式編輯 */}
+          <ChartStyleEditor
+            value={finalStyle}
+            onChange={(next) => setStyleOverride(next)}
+            compact
+          />
+
+          {/* 底部:另存為模板 */}
+          <div className="mt-3 pt-3 border-t border-slate-100 space-y-1.5">
+            {!saveTmplOpen ? (
+              <>
+                <button
+                  onClick={() => setSaveTmplOpen(true)}
+                  className="w-full flex items-center justify-center gap-1.5 px-2 py-1.5 text-xs text-sky-700 bg-sky-50 hover:bg-sky-100 rounded border border-sky-200"
+                >
+                  <Save size={12} /> {t('chart.style.saveAsTemplate', '另存為模板')}
+                </button>
+                {styleOverride && (
+                  <button
+                    onClick={() => setStyleOverride(null)}
+                    className="w-full text-xs text-slate-500 hover:text-slate-700 py-1"
+                  >
+                    {t('chart.style.reset', '重設為預設')}
+                  </button>
+                )}
+              </>
+            ) : (
+              <div className="space-y-1.5">
+                <input
+                  value={saveTmplName}
+                  onChange={e => setSaveTmplName(e.target.value)}
+                  placeholder={t('chart.style.templateName', '模板名稱')}
+                  className="w-full border border-slate-300 rounded px-2 py-1 text-xs"
+                  autoFocus
+                />
+                <div className="flex gap-1">
+                  <button
+                    onClick={handleSaveAsTemplate}
+                    disabled={saveBusy || !saveTmplName.trim()}
+                    className="flex-1 text-xs bg-sky-600 text-white rounded px-2 py-1 hover:bg-sky-700 disabled:opacity-50"
+                  >
+                    {saveBusy ? t('common.saving', '儲存中...') : t('common.save', '儲存')}
+                  </button>
+                  <button
+                    onClick={() => { setSaveTmplOpen(false); setSaveTmplName('') }}
+                    className="text-xs border border-slate-300 rounded px-2 py-1 hover:bg-slate-50"
+                  >
+                    {t('common.cancel', '取消')}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

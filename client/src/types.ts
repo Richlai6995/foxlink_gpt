@@ -53,6 +53,47 @@ export interface InlineChartYField {
   color?: string
 }
 
+export type ChartPaletteName = 'blue' | 'green' | 'warm' | 'purple' | 'teal' | 'custom'
+export type LegendPosition = 'top' | 'bottom' | 'left' | 'right' | 'none'
+export type NumberFormat = 'plain' | 'thousand' | 'percent'
+export type BackgroundMode = 'light' | 'dark'
+
+/** ChartStyle — 圖表樣式設定;common 套所有圖型,perType override */
+export interface ChartStyle {
+  version?: number
+  common: {
+    palette?: ChartPaletteName
+    custom_colors?: string[]
+    title_size?: number
+    axis_label_size?: number
+    legend_position?: LegendPosition
+    legend_size?: number
+    show_grid?: boolean
+    number_format?: NumberFormat
+    decimal_places?: number
+    background?: BackgroundMode
+  }
+  perType?: {
+    bar?: { border_radius?: number }
+    line?: { smooth?: boolean; line_width?: number }
+    area?: { opacity?: number; smooth?: boolean }
+    pie?: { doughnut?: boolean; radius_inner?: number; radius_outer?: number }
+    scatter?: { symbol_size?: number }
+  }
+}
+
+export interface ChartStyleTemplate {
+  id: number
+  owner_id?: number | null
+  name: string
+  description?: string | null
+  is_system?: number
+  is_default?: number
+  style_json: ChartStyle | string
+  created_at?: string
+  updated_at?: string
+}
+
 export interface InlineChartSpec {
   version?: number
   type: InlineChartType
@@ -68,6 +109,8 @@ export interface InlineChartSpec {
     source_tool_version?: string | null
     source_schema_hash?: string | null
   }
+  /** 樣式設定 — 若缺,套使用者的 active default template 或系統預設 */
+  style?: ChartStyle
 }
 
 // ── User Charts(Phase 5):使用者自建圖庫 ──────────────────────────────────────

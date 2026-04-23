@@ -974,6 +974,60 @@ async function runMigrations(db) {
     created_at   TIMESTAMP DEFAULT SYSTIMESTAMP
   )`);
 
+  // ── Chart Style Templates(Phase 4c):使用者命名樣式 + 系統預設
+  //    套用優先序:spec.style > user default template > system default > hardcoded
+  //    owner_id=NULL + is_system=1 代表全站共用;一使用者至多一筆 is_default=1
+  await createTable('CHART_STYLE_TEMPLATES', `CREATE TABLE chart_style_templates (
+    id           NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    owner_id     NUMBER,              -- NULL = system-wide
+    name         VARCHAR2(100) NOT NULL,
+    description  CLOB,
+    is_system    NUMBER(1) DEFAULT 0, -- admin 維護的公司 branding
+    is_default   NUMBER(1) DEFAULT 0, -- 該 owner 的 active default
+    style_json   CLOB NOT NULL,       -- ChartStyle JSON
+    created_at   TIMESTAMP DEFAULT SYSTIMESTAMP,
+    updated_at   TIMESTAMP DEFAULT SYSTIMESTAMP
+  )`);
+
+  // 種一筆「FOXLINK 預設」系統模板(is_system=1, owner_id=NULL);
+  //   已存在就跳過,避免每次啟動覆蓋 admin 修改
+  try {
+    const exists = await db.prepare(
+      `SELECT id FROM chart_style_templates WHERE is_system=1 AND name='FOXLINK 預設'`
+    ).get();
+    if (!exists) {
+      const defaultStyle = JSON.stringify({
+        version: 1,
+        common: {
+          palette: 'blue',
+          title_size: 14,
+          axis_label_size: 12,
+          legend_position: 'top',
+          legend_size: 11,
+          show_grid: true,
+          number_format: 'thousand',
+          decimal_places: 0,
+          background: 'light',
+        },
+        perType: {
+          bar: { border_radius: 4 },
+          line: { smooth: true, line_width: 2 },
+          area: { opacity: 0.25, smooth: true },
+          pie: { doughnut: true, radius_inner: 40, radius_outer: 68 },
+          scatter: { symbol_size: 10 },
+        },
+      });
+      await db.prepare(
+        `INSERT INTO chart_style_templates
+           (owner_id, name, description, is_system, is_default, style_json)
+         VALUES (NULL, 'FOXLINK 預設', '系統預設樣式(藍色 palette + 千分位 + FOXLINK 企業風格)', 1, 0, ?)`
+      ).run(defaultStyle);
+      console.log('[Migration] Seeded FOXLINK 預設 chart style template');
+    }
+  } catch (e) {
+    console.warn('[Migration] seed FOXLINK chart style:', e.message);
+  }
+
   // ── v2 Phase 3b: 同義詞字典追蹤表（繞過 CTX view 版本相容問題）─────────────
   await createTable('kb_thesauri', `
     CREATE TABLE kb_thesauri (

@@ -10,17 +10,18 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { Star, Trash2, Share2, Clock, AlertTriangle, BarChart3, ExternalLink, ArrowLeft, Cpu, Plus, FileText } from 'lucide-react'
+import { Star, Trash2, Share2, Clock, AlertTriangle, BarChart3, ExternalLink, ArrowLeft, Cpu, Plus, FileText, Palette } from 'lucide-react'
 import api from '../lib/api'
 import InlineChart from '../components/chat/InlineChart'
 import ChartParamForm from '../components/chart/ChartParamForm'
 import ChartEditorModal from '../components/chart/ChartEditorModal'
+import ChartStyleTemplatesTab from '../components/chart/ChartStyleTemplatesTab'
 import ShareModal from '../components/dashboard/ShareModal'
 import { fmtDateTW } from '../lib/fmtTW'
 import { exportChartsToPptx, type ChartExportItem } from '../lib/chartExport'
 import type { UserChart, InlineChartSpec, UserChartParam } from '../types'
 
-type Tab = 'mine' | 'shared'
+type Tab = 'mine' | 'shared' | 'templates'
 
 export default function MyChartsPage() {
   const { t } = useTranslation()
@@ -126,24 +127,30 @@ export default function MyChartsPage() {
 
       {/* Tabs */}
       <div className="flex gap-1 border-b border-slate-200 mb-4">
-        {(['mine', 'shared'] as Tab[]).map(tp => (
+        {(['mine', 'shared', 'templates'] as Tab[]).map(tp => (
           <button
             key={tp}
             onClick={() => setTab(tp)}
-            className={`px-4 py-2 text-sm font-medium transition border-b-2 ${
+            className={`px-4 py-2 text-sm font-medium transition border-b-2 flex items-center gap-1.5 ${
               tab === tp
                 ? 'text-blue-600 border-blue-600'
                 : 'text-slate-500 border-transparent hover:text-slate-700'
             }`}
           >
-            {tp === 'mine'
-              ? t('chart.library.mine', '我的') + ` (${mine.length})`
-              : t('chart.library.shared', '別人分享給我的') + ` (${shared.length})`}
+            {tp === 'mine' && t('chart.library.mine', '我的') + ` (${mine.length})`}
+            {tp === 'shared' && t('chart.library.shared', '別人分享給我的') + ` (${shared.length})`}
+            {tp === 'templates' && (
+              <>
+                <Palette size={13} /> {t('chart.library.templates', '樣式模板')}
+              </>
+            )}
           </button>
         ))}
       </div>
 
-      {loading ? (
+      {tab === 'templates' ? (
+        <ChartStyleTemplatesTab />
+      ) : loading ? (
         <div className="text-center py-12 text-slate-400 text-sm">{t('common.loading', '載入中...')}</div>
       ) : list.length === 0 ? (
         <div className="text-center py-12 text-slate-400 text-sm">
