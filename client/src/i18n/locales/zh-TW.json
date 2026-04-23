@@ -3022,7 +3022,9 @@
       "templates.setDefault": "設為預設",
       "templates.unsetDefault": "取消預設",
       "templates.confirmDelete": "確定刪除模板「{{name}}」?",
-      "templates.emptyMine": "尚未建立模板,可在 chat 對話圖表的「樣式設定」→「另存為模板」,或按上方「新增模板」。"
+      "templates.emptyMine": "尚未建立模板,可在 chat 對話圖表的「樣式設定」→「另存為模板」,或按上方「新增模板」。",
+      "templates.adminCanEdit": "Admin 可編輯",
+      "templates.adminEditSystem": "編輯系統模板(全站可見)"
     },
     "editor": {
       "title": "新增圖表",

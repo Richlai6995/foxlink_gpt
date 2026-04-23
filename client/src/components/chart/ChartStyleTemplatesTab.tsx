@@ -9,6 +9,7 @@ import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Star, Trash2, Edit, Plus, Lock, Check } from 'lucide-react'
 import { useChartStyleTemplates } from '../../hooks/useChartStyleTemplates'
+import { useAuth } from '../../context/AuthContext'
 import ChartStyleTemplateEditor from './ChartStyleTemplateEditor'
 import type { ChartStyleTemplate, ChartStyle } from '../../types'
 import { getPaletteColors } from '../../lib/chartStyle'
@@ -16,6 +17,7 @@ import { fmtDateTW } from '../../lib/fmtTW'
 
 export default function ChartStyleTemplatesTab() {
   const { t } = useTranslation()
+  const { isAdmin } = useAuth()
   const { mine, system, loading, refresh, setDefault, deleteTemplate } = useChartStyleTemplates()
   const [editing, setEditing] = useState<ChartStyleTemplate | null>(null)
   const [creating, setCreating] = useState(false)
@@ -81,11 +83,16 @@ export default function ChartStyleTemplatesTab() {
             )}
           </div>
 
-          {/* 系統 */}
+          {/* 系統 — admin 可編輯內容(但不可刪、不可設為 user default) */}
           {system.length > 0 && (
             <div>
-              <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">
+              <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2 flex items-center gap-1.5">
                 {t('chart.library.templates.system', '系統預設')} ({system.length})
+                {isAdmin && (
+                  <span className="text-[9px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-normal">
+                    {t('chart.library.templates.adminCanEdit', 'Admin 可編輯')}
+                  </span>
+                )}
               </div>
               <div className="space-y-2">
                 {system.map(tmpl => (
@@ -93,7 +100,9 @@ export default function ChartStyleTemplatesTab() {
                     key={tmpl.id}
                     tmpl={tmpl}
                     owned={false}
+                    systemEditable={isAdmin}
                     parseStyle={parseStyle}
+                    onEdit={isAdmin ? () => setEditing(tmpl) : undefined}
                   />
                 ))}
               </div>
@@ -117,10 +126,12 @@ export default function ChartStyleTemplatesTab() {
 }
 
 function TemplateCard({
-  tmpl, owned, parseStyle, onEdit, onDelete, onSetDefault,
+  tmpl, owned, systemEditable, parseStyle, onEdit, onDelete, onSetDefault,
 }: {
   tmpl: ChartStyleTemplate
   owned: boolean
+  /** admin 可編輯系統模板(但仍不可刪 / 不可設 user default) */
+  systemEditable?: boolean
   parseStyle: (t: ChartStyleTemplate) => ChartStyle | null
   onEdit?: () => void
   onDelete?: () => void
@@ -188,6 +199,16 @@ function TemplateCard({
               <Trash2 size={14} />
             </button>
           </>
+        )}
+        {/* 系統模板:僅 admin 可「編輯內容」;刪除與設預設皆不適用 */}
+        {!owned && systemEditable && onEdit && (
+          <button
+            onClick={onEdit}
+            title={t('chart.library.templates.adminEditSystem', '編輯系統模板(全站可見)')}
+            className="p-1.5 text-blue-500 hover:text-blue-700 hover:bg-blue-50 rounded"
+          >
+            <Edit size={14} />
+          </button>
         )}
       </div>
     </div>
