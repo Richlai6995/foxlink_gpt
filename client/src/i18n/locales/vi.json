@@ -2958,7 +2958,13 @@
       "templates.confirmDelete": "Xóa mẫu \"{{name}}\"?",
       "templates.emptyMine": "Chưa có mẫu nào. Lưu từ 'Cài đặt kiểu' của biểu đồ, hoặc bấm 'Tạo mẫu' ở trên.",
       "templates.adminCanEdit": "Admin có thể sửa",
-      "templates.adminEditSystem": "Sửa mẫu hệ thống (hiển thị cho mọi người dùng)"
+      "templates.adminEditSystem": "Sửa mẫu hệ thống (hiển thị cho mọi người dùng)",
+      "templates.typeAll": "Tất cả loại biểu đồ",
+      "templates.defaultAll": "Mặc định cho mọi loại",
+      "templates.defaultFor": "Mặc định cho {{type}}",
+      "templates.setDefaultMenu": "Đặt mặc định ▾",
+      "templates.setAs": "Đặt mặc định cho…",
+      "templates.occupiedByOther": "(đã bị mẫu khác dùng)"
     },
     "style": {
       "title": "Cài đặt kiểu",

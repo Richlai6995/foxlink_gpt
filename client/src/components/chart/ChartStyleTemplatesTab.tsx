@@ -5,20 +5,22 @@
  * - 點「+ 新增」或「編輯」開 ChartStyleTemplateEditor modal
  * - 設為預設 = star icon,一人一筆 is_default=1(server 端 atomic 切換)
  */
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Star, Trash2, Edit, Plus, Lock, Check } from 'lucide-react'
+import { Star, Trash2, Edit, Plus, Lock, Check, ChevronDown } from 'lucide-react'
 import { useChartStyleTemplates } from '../../hooks/useChartStyleTemplates'
 import { useAuth } from '../../context/AuthContext'
 import ChartStyleTemplateEditor from './ChartStyleTemplateEditor'
-import type { ChartStyleTemplate, ChartStyle } from '../../types'
+import type { ChartStyleTemplate, ChartStyle, ChartDefaultType } from '../../types'
 import { getPaletteColors } from '../../lib/chartStyle'
 import { fmtDateTW } from '../../lib/fmtTW'
+
+const DEFAULT_TYPES: ChartDefaultType[] = ['all', 'bar', 'line', 'area', 'pie', 'scatter', 'heatmap', 'radar']
 
 export default function ChartStyleTemplatesTab() {
   const { t } = useTranslation()
   const { isAdmin } = useAuth()
-  const { mine, system, loading, refresh, setDefault, deleteTemplate } = useChartStyleTemplates()
+  const { mine, system, defaultsMap, loading, refresh, setDefault, deleteTemplate } = useChartStyleTemplates()
   const [editing, setEditing] = useState<ChartStyleTemplate | null>(null)
   const [creating, setCreating] = useState(false)
 
@@ -33,10 +35,12 @@ export default function ChartStyleTemplatesTab() {
     await deleteTemplate(tmpl.id)
   }
 
-  const handleSetDefault = async (tmpl: ChartStyleTemplate) => {
-    // 若已是 default,再點一次就取消(設為 0 = 清除)
-    const target = tmpl.is_default === 1 ? 0 : tmpl.id
-    await setDefault(target)
+  // 點 dropdown 某 type → 若該 type 目前 default 已是這張 → 取消(setDefault(0, type))
+  //                     否則設為該 type 的 default
+  const handleSetDefaultForType = async (tmpl: ChartStyleTemplate, type: ChartDefaultType) => {
+    const isAlreadyThisTypeDefault =
+      tmpl.is_default === 1 && tmpl.default_for_type === type
+    await setDefault(isAlreadyThisTypeDefault ? 0 : tmpl.id, type)
   }
 
   return (
@@ -73,10 +77,11 @@ export default function ChartStyleTemplatesTab() {
                     key={tmpl.id}
                     tmpl={tmpl}
                     owned
+                    defaultsMap={defaultsMap}
                     parseStyle={parseStyle}
                     onEdit={() => setEditing(tmpl)}
                     onDelete={() => handleDelete(tmpl)}
-                    onSetDefault={() => handleSetDefault(tmpl)}
+                    onSetDefaultForType={(type) => handleSetDefaultForType(tmpl, type)}
                   />
                 ))}
               </div>
@@ -126,22 +131,43 @@ export default function ChartStyleTemplatesTab() {
 }
 
 function TemplateCard({
-  tmpl, owned, systemEditable, parseStyle, onEdit, onDelete, onSetDefault,
+  tmpl, owned, systemEditable, defaultsMap, parseStyle, onEdit, onDelete, onSetDefaultForType,
 }: {
   tmpl: ChartStyleTemplate
   owned: boolean
   /** admin 可編輯系統模板(但仍不可刪 / 不可設 user default) */
   systemEditable?: boolean
+  defaultsMap?: Partial<Record<ChartDefaultType, number>>
   parseStyle: (t: ChartStyleTemplate) => ChartStyle | null
   onEdit?: () => void
   onDelete?: () => void
-  onSetDefault?: () => void
+  onSetDefaultForType?: (type: ChartDefaultType) => void
 }) {
   const { t } = useTranslation()
   const style = parseStyle(tmpl)
   const colors = style ? getPaletteColors(style) : ['#5470c6']
   const isDefault = tmpl.is_default === 1
+  const defaultType = tmpl.default_for_type as ChartDefaultType | undefined
   const c = style?.common
+
+  const [menuOpen, setMenuOpen] = useState(false)
+  const menuRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!menuOpen) return
+    const handler = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [menuOpen])
+
+  const typeLabel = (type: ChartDefaultType) =>
+    type === 'all' ? t('chart.library.templates.typeAll', '全圖型(all)')
+      : type === 'bar' ? t('chart.style.bar', '長條圖')
+      : type === 'line' ? t('chart.style.line', '折線圖')
+      : type === 'area' ? t('chart.style.area', '面積圖')
+      : type === 'pie' ? t('chart.style.pie', '圓餅圖')
+      : type
 
   return (
     <div className={`border rounded-lg bg-white p-3 flex items-center gap-3 ${isDefault ? 'border-amber-300 ring-1 ring-amber-100' : 'border-slate-200'}`}>
@@ -154,11 +180,14 @@ function TemplateCard({
 
       {/* Info */}
       <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <h3 className="font-medium text-sm truncate">{tmpl.name}</h3>
-          {isDefault && (
+          {isDefault && defaultType && (
             <span className="text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded flex items-center gap-0.5">
-              <Star size={10} fill="currentColor" /> {t('chart.library.templates.default', '預設')}
+              <Star size={10} fill="currentColor" />
+              {defaultType === 'all'
+                ? t('chart.library.templates.defaultAll', '全圖型預設')
+                : t('chart.library.templates.defaultFor', '{{type}} 預設', { type: typeLabel(defaultType) })}
             </span>
           )}
           {!owned && (
@@ -185,13 +214,46 @@ function TemplateCard({
       <div className="flex items-center gap-1 flex-shrink-0">
         {owned && (
           <>
-            <button
-              onClick={onSetDefault}
-              title={isDefault ? t('chart.library.templates.unsetDefault', '取消預設') : t('chart.library.templates.setDefault', '設為預設')}
-              className={`p-1.5 rounded ${isDefault ? 'text-amber-500 hover:bg-amber-50' : 'text-slate-400 hover:text-amber-500 hover:bg-slate-50'}`}
-            >
-              {isDefault ? <Check size={14} /> : <Star size={14} />}
-            </button>
+            {/* Star dropdown:選「設為 ___ 預設」 */}
+            <div className="relative" ref={menuRef}>
+              <button
+                onClick={() => setMenuOpen(v => !v)}
+                title={t('chart.library.templates.setDefaultMenu', '設為預設 ▾')}
+                className={`p-1.5 rounded flex items-center gap-0.5 ${isDefault ? 'text-amber-500 hover:bg-amber-50' : 'text-slate-400 hover:text-amber-500 hover:bg-slate-50'}`}
+              >
+                {isDefault ? <Check size={14} /> : <Star size={14} />}
+                <ChevronDown size={10} />
+              </button>
+              {menuOpen && (
+                <div className="absolute right-0 top-full mt-1 bg-white border border-slate-200 rounded-md shadow-lg py-1 min-w-[160px] z-20">
+                  <div className="px-3 py-1 text-[10px] text-slate-400 border-b border-slate-100">
+                    {t('chart.library.templates.setAs', '設為...的預設')}
+                  </div>
+                  {DEFAULT_TYPES.map(type => {
+                    const currentTmplIdForType = defaultsMap?.[type]
+                    const isCurrentDefaultForType = currentTmplIdForType === tmpl.id
+                    const otherTmplHasIt = !!currentTmplIdForType && currentTmplIdForType !== tmpl.id
+                    return (
+                      <button
+                        key={type}
+                        onClick={() => { setMenuOpen(false); onSetDefaultForType?.(type) }}
+                        className={`w-full px-3 py-1.5 text-xs text-left flex items-center justify-between gap-2 transition ${
+                          isCurrentDefaultForType ? 'bg-amber-50 text-amber-700' : 'text-slate-700 hover:bg-slate-50'
+                        }`}
+                      >
+                        <span className="flex items-center gap-1.5">
+                          {isCurrentDefaultForType && <Check size={11} />}
+                          {typeLabel(type)}
+                        </span>
+                        {otherTmplHasIt && (
+                          <span className="text-[9px] text-slate-400 italic">{t('chart.library.templates.occupiedByOther', '(已被其他模板佔用)')}</span>
+                        )}
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
             <button onClick={onEdit} title={t('common.edit', '編輯')} className="p-1.5 text-slate-400 hover:text-blue-500 rounded">
               <Edit size={14} />
             </button>

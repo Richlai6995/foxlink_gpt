@@ -104,6 +104,8 @@ export interface ChartStyle {
   }
 }
 
+export type ChartDefaultType = 'all' | 'bar' | 'line' | 'area' | 'pie' | 'scatter' | 'heatmap' | 'radar'
+
 export interface ChartStyleTemplate {
   id: number
   owner_id?: number | null
@@ -111,6 +113,8 @@ export interface ChartStyleTemplate {
   description?: string | null
   is_system?: number
   is_default?: number
+  /** 此模板是哪種圖型的 default;'all' = 全圖型 fallback */
+  default_for_type?: ChartDefaultType | null
   style_json: ChartStyle | string
   created_at?: string
   updated_at?: string

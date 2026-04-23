@@ -3038,7 +3038,13 @@
       "templates.confirmDelete": "確定刪除模板「{{name}}」?",
       "templates.emptyMine": "尚未建立模板,可在 chat 對話圖表的「樣式設定」→「另存為模板」,或按上方「新增模板」。",
       "templates.adminCanEdit": "Admin 可編輯",
-      "templates.adminEditSystem": "編輯系統模板(全站可見)"
+      "templates.adminEditSystem": "編輯系統模板(全站可見)",
+      "templates.typeAll": "全圖型(all)",
+      "templates.defaultAll": "全圖型預設",
+      "templates.defaultFor": "{{type}} 預設",
+      "templates.setDefaultMenu": "設為預設 ▾",
+      "templates.setAs": "設為...的預設",
+      "templates.occupiedByOther": "(已被其他模板佔用)"
     },
     "editor": {
       "title": "新增圖表",

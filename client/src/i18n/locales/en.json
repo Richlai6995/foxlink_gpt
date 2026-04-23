@@ -2958,7 +2958,13 @@
       "templates.confirmDelete": "Delete template \"{{name}}\"?",
       "templates.emptyMine": "No templates yet. Save one from any chart's 'Style settings' → 'Save as template', or click 'New template' above.",
       "templates.adminCanEdit": "Admin editable",
-      "templates.adminEditSystem": "Edit system template (visible to all users)"
+      "templates.adminEditSystem": "Edit system template (visible to all users)",
+      "templates.typeAll": "All chart types",
+      "templates.defaultAll": "Default for all types",
+      "templates.defaultFor": "Default for {{type}}",
+      "templates.setDefaultMenu": "Set as default ▾",
+      "templates.setAs": "Set as default for…",
+      "templates.occupiedByOther": "(taken by another template)"
     },
     "style": {
       "title": "Style settings",

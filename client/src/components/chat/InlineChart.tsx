@@ -396,20 +396,21 @@ export default function InlineChart({ spec, height = 320, enablePin = true, pinS
   const [saveTmplName, setSaveTmplName] = useState('')
   const [saveBusy, setSaveBusy] = useState(false)
 
-  const { activeDefault, mine, system, createTemplate, setDefault } = useChartStyleTemplates()
-
-  // 最終 style:activeDefault < spec.style < styleOverride
-  const finalStyle = useMemo<ChartStyle>(() => {
-    let s: ChartStyle = activeDefault
-    if (spec.style) s = mergeChartStyle(s, spec.style)
-    if (styleOverride) s = mergeChartStyle(s, styleOverride)
-    return s
-  }, [activeDefault, spec.style, styleOverride])
+  const { activeDefaultFor, mine, system, createTemplate, setDefault } = useChartStyleTemplates()
 
   const effectiveSpec = useMemo<InlineChartSpec>(
     () => (overrideType && overrideType !== spec.type ? { ...spec, type: overrideType } : spec),
     [spec, overrideType]
   )
+
+  // 最終 style:activeDefaultFor(effectiveSpec.type) < spec.style < styleOverride
+  // 切換圖型時 activeDefaultFor 會拿到該 type 的 default 模板 → 樣式自動跟著換
+  const finalStyle = useMemo<ChartStyle>(() => {
+    let s: ChartStyle = activeDefaultFor(effectiveSpec.type)
+    if (spec.style) s = mergeChartStyle(s, spec.style)
+    if (styleOverride) s = mergeChartStyle(s, styleOverride)
+    return s
+  }, [activeDefaultFor, effectiveSpec.type, spec.style, styleOverride])
 
   const state = useMemo(() => {
     try {
@@ -466,7 +467,7 @@ export default function InlineChart({ spec, height = 320, enablePin = true, pinS
     if (!saveTmplName.trim()) return
     setSaveBusy(true)
     try {
-      const currentStyle = mergeChartStyle(activeDefault, mergeChartStyle(spec.style, styleOverride || undefined))
+      const currentStyle = mergeChartStyle(activeDefaultFor(effectiveSpec.type), mergeChartStyle(spec.style, styleOverride || undefined))
       await createTemplate(saveTmplName.trim(), currentStyle)
       setSaveTmplOpen(false)
       setSaveTmplName('')

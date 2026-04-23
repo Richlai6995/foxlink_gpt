@@ -40,7 +40,7 @@ router.get('/', async (req, res) => {
 
     // my templates
     const mine = await db.prepare(
-      `SELECT id, owner_id, name, description, is_system, is_default, style_json,
+      `SELECT id, owner_id, name, description, is_system, is_default, default_for_type, style_json,
               created_at, updated_at
        FROM chart_style_templates
        WHERE owner_id=? ORDER BY updated_at DESC`
@@ -48,15 +48,24 @@ router.get('/', async (req, res) => {
 
     // system templates(全使用者都看得到,admin 可編)
     const system = await db.prepare(
-      `SELECT id, owner_id, name, description, is_system, is_default, style_json,
+      `SELECT id, owner_id, name, description, is_system, is_default, default_for_type, style_json,
               created_at, updated_at
        FROM chart_style_templates
        WHERE is_system=1 ORDER BY id ASC`
     ).all();
 
+    // defaultsMap:{ all: tid, bar: tid, pie: tid, ... } — 只包含有設定的
+    const defaultsMap = {};
+    for (const t of mine) {
+      if (t.is_default === 1 && t.default_for_type) {
+        defaultsMap[t.default_for_type] = t.id;
+      }
+    }
+
     res.json({
       mine: mine.map(hydrate),
       system: system.map(hydrate),
+      defaultsMap,
     });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -129,31 +138,44 @@ router.delete('/:id', async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SET DEFAULT — atomic 把 owner 其他 is_default 清掉,只留這張
-//   若 id=0 → 清除所有 default(等於回到系統預設)
+// SET DEFAULT — atomic 設「type」的 default。一 type 一筆 is_default=1。
+//   body: { type: 'all' | 'bar' | 'line' | 'area' | 'pie' | 'scatter' | 'heatmap' | 'radar' }
+//         未傳 type 視為 'all'(向下相容)
+//   id=0 → 清除該 type 的 default(fallback 到 all → system)
 // ─────────────────────────────────────────────────────────────────────────────
+const VALID_DEFAULT_TYPES = new Set(['all', 'bar', 'line', 'area', 'pie', 'scatter', 'heatmap', 'radar']);
+
 router.post('/:id/set-default', async (req, res) => {
   try {
     const db = require('../database-oracle').db;
     const targetId = Number(req.params.id);
-    // 先把該 owner 的 defaults 清掉(含系統以外的所有模板)
+    const rawType = (req.body?.type || 'all').toString();
+    if (!VALID_DEFAULT_TYPES.has(rawType)) {
+      return res.status(400).json({ error: `type 必須為 ${[...VALID_DEFAULT_TYPES].join(' / ')}` });
+    }
+
+    // 先把該 owner 該 type 的 default 清掉
     await db.prepare(
-      `UPDATE chart_style_templates SET is_default=0 WHERE owner_id=?`
-    ).run(req.user.id);
+      `UPDATE chart_style_templates SET is_default=0, default_for_type=NULL
+       WHERE owner_id=? AND default_for_type=?`
+    ).run(req.user.id, rawType);
 
     if (targetId > 0) {
-      // 檢查 target 是這個 user 的(system 不能設為 user default,因 system 是全站共用)
       const tmpl = await db.prepare(`SELECT * FROM chart_style_templates WHERE id=?`).get(targetId);
       if (!tmpl) return res.status(404).json({ error: '模板不存在' });
       if (tmpl.owner_id !== req.user.id) {
         return res.status(400).json({ error: '只能設自己的模板為預設' });
       }
+      // 若這個模板原本已是其他 type 的 default,先把那個 type 清掉(一模板只能當一 type default)
       await db.prepare(
-        `UPDATE chart_style_templates SET is_default=1 WHERE id=?`
+        `UPDATE chart_style_templates SET is_default=0, default_for_type=NULL WHERE id=?`
       ).run(targetId);
+      // 設為新 type default
+      await db.prepare(
+        `UPDATE chart_style_templates SET is_default=1, default_for_type=? WHERE id=?`
+      ).run(rawType, targetId);
     }
-    // id=0 意味回到「無 user default」,render 時會 fallback 到 system default
-    res.json({ ok: true });
+    res.json({ ok: true, type: rawType, templateId: targetId > 0 ? targetId : null });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

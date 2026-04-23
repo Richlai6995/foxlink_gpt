@@ -983,11 +983,24 @@ async function runMigrations(db) {
     name         VARCHAR2(100) NOT NULL,
     description  CLOB,
     is_system    NUMBER(1) DEFAULT 0, -- admin 維護的公司 branding
-    is_default   NUMBER(1) DEFAULT 0, -- 該 owner 的 active default
+    is_default   NUMBER(1) DEFAULT 0, -- 該 owner 的 active default(搭配 default_for_type)
     style_json   CLOB NOT NULL,       -- ChartStyle JSON
     created_at   TIMESTAMP DEFAULT SYSTIMESTAMP,
     updated_at   TIMESTAMP DEFAULT SYSTIMESTAMP
   )`);
+
+  // Phase 4c follow-up:per-type default — 一人最多 8 筆 is_default=1,用 default_for_type 區分
+  //   'all' = 全圖型 fallback;'bar'/'line'/'area'/'pie'/'scatter'/'heatmap'/'radar' = 指定型
+  await addCol('CHART_STYLE_TEMPLATES', 'DEFAULT_FOR_TYPE', "VARCHAR2(16) DEFAULT NULL");
+  // 一次性 migration:既有 is_default=1 且 default_for_type=NULL 的視為 'all'
+  try {
+    await db.prepare(
+      `UPDATE chart_style_templates SET default_for_type='all'
+       WHERE is_default=1 AND (default_for_type IS NULL OR default_for_type='')`
+    ).run();
+  } catch (e) {
+    console.warn('[Migration] chart_style_templates backfill default_for_type:', e.message);
+  }
 
   // 種一筆「FOXLINK 預設」系統模板(is_system=1, owner_id=NULL);
   //   已存在就跳過,避免每次啟動覆蓋 admin 修改

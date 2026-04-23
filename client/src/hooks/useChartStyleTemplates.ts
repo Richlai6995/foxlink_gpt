@@ -3,30 +3,32 @@
  *
  * Hook 回傳:
  *   templates: { mine, system }
- *   activeDefault: ChartStyle  ← 已 merge 好可直接 render 的預設樣式
+ *   defaultsMap: { [type]: templateId }  — per-type default 對應表
+ *   activeDefaultFor(type): ChartStyle   — 套用優先序後的最終 style
  *   refresh(): 重新載
- *   setDefault(templateId | 0): 原子切 default,0 = 清除
+ *   setDefault(templateId, type='all'): 設為指定 type 的 default(id=0 = 清除)
  *
- * 由 InlineChart 讀來當 fallback style(spec.style > activeDefault > hardcoded)。
+ * 套用優先序(activeDefaultFor 內):
+ *   spec.style (render 端 merge) > defaults[type] > defaults['all'] > system > HARDCODED
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import api from '../lib/api'
-import type { ChartStyleTemplate, ChartStyle } from '../types'
+import type { ChartStyleTemplate, ChartStyle, ChartDefaultType, InlineChartType } from '../types'
 import { HARDCODED_STYLE, mergeChartStyle } from '../lib/chartStyle'
 
 interface State {
   mine: ChartStyleTemplate[]
   system: ChartStyleTemplate[]
+  defaultsMap: Partial<Record<ChartDefaultType, number>>
   loading: boolean
   error: string | null
 }
 
-let _cache: { mine: ChartStyleTemplate[]; system: ChartStyleTemplate[] } | null = null
+let _cache: Omit<State, 'loading' | 'error'> | null = null
 const listeners = new Set<() => void>()
-
 function notify() { listeners.forEach(fn => fn()) }
 
-function parseStyle(tmpl: ChartStyleTemplate): ChartStyle | null {
+function parseStyle(tmpl?: ChartStyleTemplate | null): ChartStyle | null {
   if (!tmpl) return null
   const raw = tmpl.style_json
   if (!raw) return null
@@ -39,6 +41,7 @@ export function useChartStyleTemplates() {
   const [state, setState] = useState<State>({
     mine: _cache?.mine || [],
     system: _cache?.system || [],
+    defaultsMap: _cache?.defaultsMap || {},
     loading: !_cache,
     error: null,
   })
@@ -47,8 +50,12 @@ export function useChartStyleTemplates() {
     setState(s => ({ ...s, loading: true, error: null }))
     try {
       const r = await api.get('/chart-style-templates')
-      _cache = { mine: r.data.mine || [], system: r.data.system || [] }
-      setState({ mine: _cache.mine, system: _cache.system, loading: false, error: null })
+      _cache = {
+        mine: r.data.mine || [],
+        system: r.data.system || [],
+        defaultsMap: r.data.defaultsMap || {},
+      }
+      setState({ ..._cache, loading: false, error: null })
       notify()
     } catch (e: any) {
       setState(s => ({ ...s, loading: false, error: e?.message || 'load failed' }))
@@ -62,17 +69,34 @@ export function useChartStyleTemplates() {
     return () => { listeners.delete(l) }
   }, [load])
 
-  const activeDefault = useMemo<ChartStyle>(() => {
-    const userDef = state.mine.find(t => t.is_default === 1)
-    const sysDef = state.system.find(t => t.is_system === 1)
-    const userStyle = userDef ? parseStyle(userDef) : null
-    const sysStyle = sysDef ? parseStyle(sysDef) : null
-    // priority: user default > system default > HARDCODED
-    return mergeChartStyle(mergeChartStyle(HARDCODED_STYLE, sysStyle || undefined), userStyle || undefined)
+  /**
+   * 回傳該 type 的最終套用 style:
+   *   system default < 'all' user default < 該 type user default
+   * 多層 merge 後回傳。供 InlineChart 套在 spec.style 之前。
+   */
+  const activeDefaultFor = useCallback((type?: InlineChartType | ChartDefaultType): ChartStyle => {
+    const allTmpl = state.mine.find(t => t.is_default === 1 && t.default_for_type === 'all')
+    const typeTmpl = type && type !== 'all'
+      ? state.mine.find(t => t.is_default === 1 && t.default_for_type === type)
+      : null
+    const sysTmpl = state.system.find(t => t.is_system === 1)
+
+    const sysStyle = parseStyle(sysTmpl)
+    const allStyle = parseStyle(allTmpl)
+    const typeStyle = parseStyle(typeTmpl)
+
+    let s: ChartStyle = HARDCODED_STYLE
+    if (sysStyle) s = mergeChartStyle(s, sysStyle)
+    if (allStyle) s = mergeChartStyle(s, allStyle)
+    if (typeStyle) s = mergeChartStyle(s, typeStyle)
+    return s
   }, [state.mine, state.system])
 
-  const setDefault = useCallback(async (templateId: number) => {
-    await api.post(`/chart-style-templates/${templateId}/set-default`)
+  // 向下相容:舊 activeDefault 保留(= activeDefaultFor('all'))
+  const activeDefault = useMemo<ChartStyle>(() => activeDefaultFor('all'), [activeDefaultFor])
+
+  const setDefault = useCallback(async (templateId: number, type: ChartDefaultType = 'all') => {
+    await api.post(`/chart-style-templates/${templateId}/set-default`, { type })
     await load()
   }, [load])
 
@@ -93,8 +117,13 @@ export function useChartStyleTemplates() {
   }, [load])
 
   return {
-    ...state,
+    mine: state.mine,
+    system: state.system,
+    defaultsMap: state.defaultsMap,
+    loading: state.loading,
+    error: state.error,
     activeDefault,
+    activeDefaultFor,
     refresh: load,
     setDefault,
     createTemplate,
