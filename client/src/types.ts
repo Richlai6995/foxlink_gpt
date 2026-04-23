@@ -74,7 +74,21 @@ export interface ChartStyle {
     background?: BackgroundMode
   }
   perType?: {
-    bar?: { border_radius?: number }
+    bar?: {
+      border_radius?: number
+      /** 單系列(y_fields=1)時每支 bar 依 x 順序用不同色(排名圖特別實用) */
+      single_series_multi_color?: boolean
+      /** 覆寫 palette:按 bar 順序指定色(不夠時 fallback 回 palette 循環) */
+      custom_bar_colors?: string[]
+      /** 陰影效果(下投影) */
+      shadow?: boolean
+      /** bar 透明度 0.3 ~ 1.0 */
+      opacity?: number
+      /** 動畫:none=關 / grow=從底部長出 / fade=淡入 / bounce=彈跳 */
+      animation_style?: 'none' | 'grow' | 'fade' | 'bounce'
+      /** 逐個 bar 依序動畫(交錯浮現效果) */
+      animation_stagger?: boolean
+    }
     line?: { smooth?: boolean; line_width?: number }
     area?: { opacity?: number; smooth?: boolean }
     pie?: { doughnut?: boolean; radius_inner?: number; radius_outer?: number }

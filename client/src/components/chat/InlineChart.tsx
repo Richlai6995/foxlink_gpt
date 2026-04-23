@@ -127,32 +127,98 @@ function buildOption(spec: InlineChartSpec, style: ChartStyle): ChartState {
       const barStyle = getPerTypeStyle(style, 'bar')
       const lineStyle = getPerTypeStyle(style, 'line')
       const areaStyle = getPerTypeStyle(style, 'area')
+
+      // Bar 每支獨立色:單系列時可覆寫 series 整體 color,改用 data item 級
+      const barMultiColor = spec.type === 'bar'
+        && barStyle.single_series_multi_color === true
+        && series.length === 1
+
+      const customBarColors = Array.isArray(barStyle.custom_bar_colors) ? barStyle.custom_bar_colors.filter(Boolean) : []
+      const resolveBarColor = (idx: number): string => {
+        if (customBarColors.length > 0) return customBarColors[idx % customBarColors.length]
+        return colors[idx % colors.length]
+      }
+
+      // Bar 動畫設定 → ECharts series.animation*
+      const animStyle = barStyle.animation_style ?? 'grow'
+      const animStagger = barStyle.animation_stagger === true
+      const animMap: Record<string, { duration: number; easing: string }> = {
+        none:   { duration: 0,    easing: 'linear' },
+        grow:   { duration: 800,  easing: 'cubicOut' },
+        fade:   { duration: 600,  easing: 'linear' },
+        bounce: { duration: 1200, easing: 'elasticOut' },
+      }
+      const anim = animMap[animStyle] || animMap.grow
+
+      // Bar 陰影 / 透明
+      const barShadow = barStyle.shadow === true
+      const barOpacity = typeof barStyle.opacity === 'number' ? barStyle.opacity : 1
+      const borderRadius = barStyle.border_radius ?? 4
+
+      const barItemStyleBase = (seriesColor: string) => ({
+        color: seriesColor,
+        opacity: barOpacity,
+        borderRadius: [borderRadius, borderRadius, 0, 0] as [number, number, number, number],
+        ...(barShadow ? {
+          shadowBlur: 10,
+          shadowColor: 'rgba(0, 0, 0, 0.25)',
+          shadowOffsetX: 0,
+          shadowOffsetY: 3,
+        } : {}),
+      })
+
       return {
         kind: 'ok',
         option: {
           ...baseOption,
           ...titleOpt,
-          color: colors,
+          color: barMultiColor && customBarColors.length === 0 ? undefined : colors,
           legend,
           grid,
           dataZoom,
           xAxis: { type: 'category', data: xs, axisLabel: axisLabelStyle, axisLine: xAxisLine },
           yAxis: { type: 'value', axisLabel: { ...axisLabelStyle, formatter: fmtValue }, splitLine: splitLineStyle },
           tooltip: { ...(baseOption.tooltip as object), trigger: 'axis', valueFormatter: fmtValue },
-          series: series.map(s => ({
-            name: s.name,
-            type: spec.type === 'bar' ? 'bar' : 'line',
-            data: s.values,
-            smooth: spec.type === 'line' ? lineStyle.smooth : (spec.type === 'area' ? areaStyle.smooth : false),
-            lineStyle: spec.type !== 'bar' ? { width: lineStyle.line_width ?? 2 } : undefined,
-            areaStyle: spec.type === 'area' ? { opacity: areaStyle.opacity ?? 0.25 } : undefined,
-            itemStyle: {
-              color: s.color,
-              borderRadius: spec.type === 'bar'
-                ? [barStyle.border_radius ?? 4, barStyle.border_radius ?? 4, 0, 0]
-                : undefined,
-            },
-          })),
+          series: series.map((s, seriesIdx) => {
+            const baseSeries: Record<string, unknown> = {
+              name: s.name,
+              type: spec.type === 'bar' ? 'bar' : 'line',
+              smooth: spec.type === 'line' ? lineStyle.smooth : (spec.type === 'area' ? areaStyle.smooth : false),
+              lineStyle: spec.type !== 'bar' ? { width: lineStyle.line_width ?? 2 } : undefined,
+              areaStyle: spec.type === 'area' ? { opacity: areaStyle.opacity ?? 0.25 } : undefined,
+            }
+
+            if (spec.type === 'bar') {
+              Object.assign(baseSeries, {
+                animationDuration: anim.duration,
+                animationEasing: anim.easing,
+                ...(animStagger && anim.duration > 0
+                  ? { animationDelay: (idx: number) => idx * 60 }
+                  : {}),
+              })
+
+              // Bar:單系列 + multi-color → 每個 data item 帶自己的 color
+              if (barMultiColor || customBarColors.length > 0) {
+                baseSeries.data = s.values.map((v, i) => ({
+                  value: v,
+                  itemStyle: barItemStyleBase(resolveBarColor(i)),
+                }))
+              } else {
+                baseSeries.data = s.values
+                baseSeries.itemStyle = barItemStyleBase(s.color)
+              }
+              // Bar fade 動畫:另外補 opacity 0→1(透過 animation 自然帶)
+              if (animStyle === 'fade' && anim.duration > 0) {
+                baseSeries.animation = true
+              }
+            } else {
+              // line / area
+              baseSeries.data = s.values
+              baseSeries.itemStyle = { color: s.color }
+            }
+
+            return baseSeries
+          }),
         },
       }
     }

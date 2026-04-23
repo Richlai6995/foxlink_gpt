@@ -33,7 +33,15 @@ export const HARDCODED_STYLE: Required<ChartStyle> = {
     background: 'light',
   },
   perType: {
-    bar: { border_radius: 4 },
+    bar: {
+      border_radius: 4,
+      single_series_multi_color: false,
+      custom_bar_colors: [],
+      shadow: false,
+      opacity: 1,
+      animation_style: 'grow',
+      animation_stagger: false,
+    },
     line: { smooth: false, line_width: 2 },
     area: { opacity: 0.25, smooth: true },
     pie: { doughnut: true, radius_inner: 40, radius_outer: 68 },

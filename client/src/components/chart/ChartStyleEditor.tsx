@@ -204,18 +204,125 @@ export default function ChartStyleEditor({ value, onChange, showPerTypes, compac
       {has('bar') && (
         <div className={fieldGap}>
           <div className={sectionTitle}>{t('chart.style.bar', '長條圖')}</div>
-          <div className="grid grid-cols-2 gap-1.5 mt-1 items-center">
-            <div className={labelClass}>{t('chart.style.borderRadius', '圓角')}</div>
-            <select
-              value={value.perType?.bar?.border_radius ?? 4}
-              onChange={e => onChange(patchPerType(value, 'bar', { border_radius: Number(e.target.value) }))}
-              className={inputClass}
-            >
-              <option value={0}>0 {t('chart.style.px', 'px')}</option>
-              <option value={2}>2 px</option>
-              <option value={4}>4 px</option>
-              <option value={8}>8 px</option>
-            </select>
+
+          {/* 圓角 / 透明 */}
+          <div className="grid grid-cols-2 gap-1.5 mt-1">
+            <div>
+              <div className={labelClass}>{t('chart.style.borderRadius', '圓角')}</div>
+              <select
+                value={value.perType?.bar?.border_radius ?? 4}
+                onChange={e => onChange(patchPerType(value, 'bar', { border_radius: Number(e.target.value) }))}
+                className={inputClass}
+              >
+                <option value={0}>0 {t('chart.style.px', 'px')}</option>
+                <option value={2}>2 px</option>
+                <option value={4}>4 px</option>
+                <option value={8}>8 px</option>
+              </select>
+            </div>
+            <div>
+              <div className={labelClass}>{t('chart.style.opacity', '透明度')}</div>
+              <select
+                value={value.perType?.bar?.opacity ?? 1}
+                onChange={e => onChange(patchPerType(value, 'bar', { opacity: Number(e.target.value) }))}
+                className={inputClass}
+              >
+                <option value={1}>100%</option>
+                <option value={0.85}>85%</option>
+                <option value={0.7}>70%</option>
+                <option value={0.5}>50%</option>
+              </select>
+            </div>
+          </div>
+
+          {/* 陰影 + 單系列多色 */}
+          <div className="flex flex-col gap-1 mt-1.5">
+            <label className="flex items-center gap-1.5 text-[11px] text-slate-600 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={value.perType?.bar?.shadow ?? false}
+                onChange={e => onChange(patchPerType(value, 'bar', { shadow: e.target.checked }))}
+              />
+              {t('chart.style.shadow', '陰影效果(立體感)')}
+            </label>
+            <label className="flex items-center gap-1.5 text-[11px] text-slate-600 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={value.perType?.bar?.single_series_multi_color ?? false}
+                onChange={e => onChange(patchPerType(value, 'bar', { single_series_multi_color: e.target.checked }))}
+              />
+              {t('chart.style.multiColor', '每支 bar 不同色(單系列時)')}
+            </label>
+          </div>
+
+          {/* 動畫 */}
+          <div className="grid grid-cols-2 gap-1.5 mt-2">
+            <div>
+              <div className={labelClass}>{t('chart.style.animation', '動畫')}</div>
+              <select
+                value={value.perType?.bar?.animation_style ?? 'grow'}
+                onChange={e => onChange(patchPerType(value, 'bar', { animation_style: e.target.value }))}
+                className={inputClass}
+              >
+                <option value="none">{t('chart.style.anim.none', '關閉')}</option>
+                <option value="grow">{t('chart.style.anim.grow', '從底部長出')}</option>
+                <option value="fade">{t('chart.style.anim.fade', '淡入')}</option>
+                <option value="bounce">{t('chart.style.anim.bounce', '彈跳')}</option>
+              </select>
+            </div>
+            <label className="flex items-end pb-1 gap-1.5 text-[11px] text-slate-600 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={value.perType?.bar?.animation_stagger ?? false}
+                onChange={e => onChange(patchPerType(value, 'bar', { animation_stagger: e.target.checked }))}
+              />
+              {t('chart.style.stagger', '逐個浮現')}
+            </label>
+          </div>
+
+          {/* 自訂每根 bar 顏色(最多 8 組,不夠時循環) */}
+          <div className="mt-2">
+            <div className={labelClass}>
+              {t('chart.style.customBarColors', '自訂每根 bar 顏色(依序對應,留空用 palette)')}
+            </div>
+            <div className="flex gap-1 flex-wrap mt-1">
+              {Array.from({ length: 8 }).map((_, i) => {
+                const cur = value.perType?.bar?.custom_bar_colors || []
+                const hex = cur[i] || ''
+                return (
+                  <div key={i} className="relative">
+                    <input
+                      type="color"
+                      value={hex || '#94a3b8'}
+                      onChange={e => {
+                        const next = [...cur]
+                        while (next.length <= i) next.push('')
+                        next[i] = e.target.value
+                        onChange(patchPerType(value, 'bar', { custom_bar_colors: next }))
+                      }}
+                      className={`w-6 h-6 rounded cursor-pointer border ${hex ? 'border-slate-400' : 'border-dashed border-slate-300 opacity-40'}`}
+                      title={`Bar ${i + 1}`}
+                    />
+                    {hex && (
+                      <button
+                        onClick={() => {
+                          const next = [...cur]
+                          next[i] = ''
+                          onChange(patchPerType(value, 'bar', { custom_bar_colors: next.filter((_, j) => j < cur.length) }))
+                        }}
+                        className="absolute -top-1 -right-1 w-3 h-3 bg-red-500 text-white rounded-full text-[8px] leading-3 flex items-center justify-center"
+                        title={t('chart.style.clear', '清除')}
+                      >
+                        ×
+                      </button>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+            <div className="text-[9px] text-slate-400 mt-1">
+              {t('chart.style.customBarHint', '有設值就用自訂色,沒設的位置會 fallback 回 palette')}
+            </div>
           </div>
         </div>
       )}
