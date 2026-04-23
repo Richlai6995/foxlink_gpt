@@ -2977,6 +2977,7 @@
       "namePlaceholder": "例:公司正式、活潑彩色",
       "descPlaceholder": "簡述這個模板的用途",
       "preview": "即時預覽",
+      "previewTypeHint": "圖型:{{type}}",
       "editTemplate": "編輯樣式模板",
       "newTemplate": "新增樣式模板",
       "nameRequired": "請輸入模板名稱",

@@ -35,6 +35,8 @@ interface Props {
   height?: number
   /** Phase 5:讓使用者把 chart 釘選到「我的圖庫」。預設開啟,setting=false 可關 */
   enablePin?: boolean
+  /** Phase 4c:用於樣式模板編輯器預覽 — 隱藏整個工具列(⚙ / PPTX / PNG / 圖型切換),chart 純展示 */
+  hideToolbar?: boolean
   /** Phase 5:tool 來源元資料,讓 user_charts.source_* 可填(由 ChatPage 注入) */
   pinSource?: {
     type?: 'mcp' | 'erp' | 'skill' | 'self_kb' | 'dify' | 'chat_freeform'
@@ -384,7 +386,7 @@ function buildOption(spec: InlineChartSpec, style: ChartStyle): ChartState {
   }
 }
 
-export default function InlineChart({ spec, height = 320, enablePin = true, pinSource }: Props) {
+export default function InlineChart({ spec, height = 320, enablePin = true, hideToolbar = false, pinSource }: Props) {
   const { t } = useTranslation()
   const chartRef = useRef<ReactECharts>(null)
   const [showRawSpec, setShowRawSpec] = useState(false)
@@ -520,6 +522,7 @@ export default function InlineChart({ spec, height = 320, enablePin = true, pinS
           notMerge
           lazyUpdate
         />
+        {!hideToolbar && (
         <div className="absolute top-1.5 right-1.5 opacity-0 group-hover/chart:opacity-100 transition flex items-center gap-1">
           {switchable && (
             <div className={`flex items-center border rounded p-0.5 gap-0.5 ${isDark ? 'bg-slate-800/90 border-slate-700' : 'bg-white/90 border-slate-200'}`}>
@@ -576,10 +579,11 @@ export default function InlineChart({ spec, height = 320, enablePin = true, pinS
             <Download size={13} />
           </button>
         </div>
+        )}
       </div>
 
       {/* Style Panel(右側彈出) */}
-      {stylePanelOpen && (
+      {!hideToolbar && stylePanelOpen && (
         <div className="w-72 border border-slate-200 bg-white rounded-lg p-3 shadow-lg flex-shrink-0 max-h-[480px] overflow-y-auto">
           <div className="flex items-center justify-between mb-2 pb-2 border-b border-slate-100">
             <div className="text-xs font-semibold text-slate-700">{t('chart.style.title', '樣式設定')}</div>

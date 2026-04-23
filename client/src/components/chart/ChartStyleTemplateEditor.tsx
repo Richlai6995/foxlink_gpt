@@ -9,20 +9,71 @@ import { X, Save, RotateCcw } from 'lucide-react'
 import api from '../../lib/api'
 import ChartStyleEditor from './ChartStyleEditor'
 import InlineChart from '../chat/InlineChart'
-import type { ChartStyle, ChartStyleTemplate, InlineChartSpec } from '../../types'
+import type { ChartStyle, ChartStyleTemplate, InlineChartSpec, ChartDefaultType, InlineChartType } from '../../types'
 import { HARDCODED_STYLE } from '../../lib/chartStyle'
 
-const DEMO_SPEC: InlineChartSpec = {
-  type: 'bar',
-  title: '預覽圖表',
-  x_field: 'site',
-  y_fields: [{ field: 'output', name: '產量' }, { field: 'plan', name: '計劃' }],
-  data: [
-    { site: '龜山', output: 12500, plan: 10000 },
-    { site: '林口', output: 9800, plan: 11000 },
-    { site: '平鎮', output: 14200, plan: 13000 },
-    { site: '昆山', output: 18600, plan: 17000 },
-  ],
+// 每種圖型的 demo 資料;若模板的 default_for_type 有設,預覽用對應 type
+const DEMO_DATA_BAR_LINE_AREA = [
+  { site: '龜山', output: 12500, plan: 10000 },
+  { site: '林口', output: 9800, plan: 11000 },
+  { site: '平鎮', output: 14200, plan: 13000 },
+  { site: '昆山', output: 18600, plan: 17000 },
+]
+
+const DEMO_SPECS: Record<InlineChartType, InlineChartSpec> = {
+  bar: {
+    type: 'bar', title: '預覽圖表', x_field: 'site',
+    y_fields: [{ field: 'output', name: '產量' }, { field: 'plan', name: '計劃' }],
+    data: DEMO_DATA_BAR_LINE_AREA,
+  },
+  line: {
+    type: 'line', title: '預覽圖表', x_field: 'site',
+    y_fields: [{ field: 'output', name: '產量' }, { field: 'plan', name: '計劃' }],
+    data: DEMO_DATA_BAR_LINE_AREA,
+  },
+  area: {
+    type: 'area', title: '預覽圖表', x_field: 'site',
+    y_fields: [{ field: 'output', name: '產量' }, { field: 'plan', name: '計劃' }],
+    data: DEMO_DATA_BAR_LINE_AREA,
+  },
+  pie: {
+    type: 'pie', title: '預覽圖表', x_field: 'site',
+    y_fields: [{ field: 'output', name: '產量' }],
+    data: DEMO_DATA_BAR_LINE_AREA,
+  },
+  scatter: {
+    type: 'scatter', title: '預覽圖表', x_field: 'x',
+    y_fields: [{ field: 'y', name: '測量值' }],
+    data: Array.from({ length: 20 }, () => ({ x: Math.random() * 100, y: Math.random() * 100 })),
+  },
+  heatmap: {
+    type: 'heatmap', title: '預覽圖表', x_field: 'hour',
+    y_fields: [{ field: 'day', name: '週別' }, { field: 'value', name: '數量' }],
+    data: (() => {
+      const days = ['週一', '週二', '週三', '週四', '週五']
+      const hrs = ['9', '10', '11', '12', '13']
+      const d: any[] = []
+      days.forEach(day => hrs.forEach(hr => d.push({ hour: hr, day, value: Math.floor(Math.random() * 100) })))
+      return d
+    })(),
+  },
+  radar: {
+    type: 'radar', title: '預覽圖表', x_field: 'dimension',
+    y_fields: [{ field: 'a', name: 'A 團隊' }, { field: 'b', name: 'B 團隊' }],
+    data: [
+      { dimension: '品質', a: 85, b: 75 },
+      { dimension: '成本', a: 70, b: 88 },
+      { dimension: '交期', a: 92, b: 80 },
+      { dimension: '服務', a: 78, b: 85 },
+      { dimension: '創新', a: 65, b: 90 },
+    ],
+  },
+}
+
+function pickDemoType(defaultForType: ChartDefaultType | null | undefined): InlineChartType {
+  if (!defaultForType || defaultForType === 'all') return 'bar'
+  // default_for_type 範圍跟 InlineChartType 相同(7 型),直接當作 type
+  return defaultForType as InlineChartType
 }
 
 interface Props {
@@ -45,10 +96,11 @@ export default function ChartStyleTemplateEditor({ template, onClose, onSaved }:
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState<string | null>(null)
 
-  // 加 style 進 preview spec
+  // 預覽圖型:沿用模板的 default_for_type(新建 = bar)
+  const demoType = pickDemoType(template?.default_for_type as ChartDefaultType | undefined)
   const previewSpec = useMemo<InlineChartSpec>(
-    () => ({ ...DEMO_SPEC, style }),
-    [style]
+    () => ({ ...DEMO_SPECS[demoType], style }),
+    [style, demoType]
   )
 
   const handleSave = async () => {
@@ -123,11 +175,17 @@ export default function ChartStyleTemplateEditor({ template, onClose, onSaved }:
               />
             </div>
             <div>
-              <div className="text-xs font-medium text-slate-600 mb-1">
+              <div className="text-xs font-medium text-slate-600 mb-1 flex items-center gap-2">
                 {t('chart.style.preview', '即時預覽')}
+                {template?.default_for_type && template.default_for_type !== 'all' && (
+                  <span className="text-[10px] text-slate-400">
+                    ({t('chart.style.previewTypeHint', '圖型:{{type}}', { type: demoType })})
+                  </span>
+                )}
               </div>
               <div className="border border-slate-200 rounded">
-                <InlineChart spec={previewSpec} enablePin={false} height={280} />
+                {/* hideToolbar:避免左側預覽出現 ⚙ panel 跟右側 editor 衝突 */}
+                <InlineChart spec={previewSpec} enablePin={false} hideToolbar height={280} />
               </div>
             </div>
           </div>

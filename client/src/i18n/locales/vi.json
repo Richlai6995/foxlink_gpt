@@ -3024,6 +3024,7 @@
       "namePlaceholder": "VD: Doanh nghiệp, Sống động",
       "descPlaceholder": "Mô tả mục đích của mẫu này",
       "preview": "Xem trước trực tiếp",
+      "previewTypeHint": "Loại: {{type}}",
       "editTemplate": "Sửa mẫu kiểu",
       "newTemplate": "Mẫu kiểu mới",
       "nameRequired": "Vui lòng nhập tên mẫu",

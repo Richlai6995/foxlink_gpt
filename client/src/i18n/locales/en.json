@@ -3024,6 +3024,7 @@
       "namePlaceholder": "e.g. Corporate, Vibrant",
       "descPlaceholder": "Describe the purpose of this template",
       "preview": "Live preview",
+      "previewTypeHint": "Type: {{type}}",
       "editTemplate": "Edit style template",
       "newTemplate": "New style template",
       "nameRequired": "Please enter template name",
