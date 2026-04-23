@@ -3384,6 +3384,7 @@ const adminSections = [
   { id: 'a-webex-bot', label: 'Webex Bot 管理', icon: <MessageSquare size={18} /> },
   { id: 'a-feedback', label: '問題反饋管理', icon: <TicketCheck size={18} /> },
   { id: 'a-training', label: '教育訓練權限管理', icon: <BookOpen size={18} /> },
+  { id: 'a-chart-admin', label: '對話圖表管理', icon: <BarChart3 size={18} /> },
 ]
 
 function AdminManual() {
@@ -7236,6 +7237,180 @@ node server/scripts/backfillFeedbackKB.js --force`}</CodeBlock>
 
         <SubSection title="課程分類管理">
           <Para>管理員可在課程管理頁面管理課程分類（最多三層樹狀結構）。分類名稱支援三語言翻譯。</Para>
+        </SubSection>
+      </Section>
+
+      {/* ═══════════════════════════════ 對話圖表管理(Phase 4c / 5 / 5c) */}
+      <Section id="a-chart-admin" icon={<BarChart3 size={22} />} iconColor="text-amber-600" title="對話圖表管理">
+        <Para>
+          Chat 內自動畫圖 + 使用者自建圖庫 + Template Share 分享 + 樣式模板系統的 <b>admin 管理面</b>。
+          使用者端操作請參閱<a href="#u-chat-chart" className="text-blue-600 hover:underline">「對話圖表與我的圖庫」</a>,本節只講管理員操作。
+        </Para>
+
+        <SubSection title="架構速覽">
+          <Table
+            headers={['層', '表 / 元件', '誰維護']}
+            rows={[
+              ['Chat 解析', 'chartSpecParser.js', 'dev(系統)'],
+              ['使用者圖庫', 'user_charts / user_chart_shares', '使用者自建,admin 監看 /admin/popular'],
+              ['樣式模板', 'chart_style_templates', '使用者建「我的」;admin 編「系統」'],
+              ['錯誤遙測', 'chart_parse_errors', 'admin 透過 /admin/parse-errors 查詢調 prompt'],
+              ['全域開關', 'system_settings.chat_inline_chart_enabled', 'admin SQL 更新即時停用'],
+            ]}
+          />
+        </SubSection>
+
+        <SubSection title="編輯「FOXLINK 預設」系統樣式模板">
+          <Para>
+            系統自動 seed 一組 <code className="bg-slate-100 px-1 rounded text-xs">is_system=1</code> 的模板「FOXLINK 預設」
+            （Blue palette + 千分位 + 淺色背景 + bar 圓角 4 + line smooth + pie doughnut）。
+            Admin 可直接改該模板,<b>改完所有「沒設自己預設」的使用者會立即套用新版</b>(因 chat inline chart 每次 render 動態讀)。
+          </Para>
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm text-slate-700 space-y-1 my-2">
+            <div><b>入口</b>:我的圖庫 → 「樣式模板」tab</div>
+            <div>→ 「系統預設」區塊旁會顯示藍色「Admin 可編輯」badge</div>
+            <div>→ 「FOXLINK 預設」卡片右側出現藍色 Edit icon,點了開 ChartStyleTemplateEditor</div>
+          </div>
+          <TipBox>
+            改壞了怎麼辦?編輯 modal 左下角 <b>「恢復內建預設」</b> 按鈕(RotateCcw icon)→ confirm → setStyle(HARDCODED_STYLE),
+            按「儲存」才真正寫回 DB。僅 reset 當前 state,未點儲存前可 Cancel 放棄。
+          </TipBox>
+          <NoteBox>
+            系統模板<b>不可刪除、不可設為某 user 的 default</b>（邏輯上系統是全站共用,不屬於任何 owner)。
+            目前 UI 沒有「新增系統模板」入口,若需多組系統級模板,直接對 <code className="bg-amber-100 px-1 rounded text-xs">chart_style_templates</code> INSERT is_system=1 / owner_id=NULL。
+          </NoteBox>
+        </SubSection>
+
+        <SubSection title="套用優先序（render time）">
+          <Para>InlineChart / 圖庫執行時 ChartStyle 的 merge 順序:</Para>
+          <CodeBlock>{`spec.style  (LLM 吐的或使用者 panel 調的)
+    ↓ 沒設定
+user default template  (該 type 專屬,is_default=1 AND default_for_type=<type>)
+    ↓ 沒設定
+user default template  ('all' fallback,is_default=1 AND default_for_type='all')
+    ↓ 沒設定
+system default  (is_system=1,通常就是「FOXLINK 預設」)
+    ↓ 沒設定
+HARDCODED  (lib/chartStyle.ts 的 HARDCODED_STYLE)`}</CodeBlock>
+          <Para>
+            Per-type default(commit <code>615a65c</code>)讓一位使用者可同時設 bar 用 A 模板、pie 用 B 模板;
+            切換圖型(chat inline chart 右上 4 個 icon)時會即時重算套對應 type 的預設。
+          </Para>
+        </SubSection>
+
+        <SubSection title="熱門分享圖採納為戰情室 Official">
+          <Para>
+            使用者釘選到圖庫的圖(有 source_tool 且被多人分享 / 執行)可升級為 AI 戰情室的 official chart。
+          </Para>
+          <Table
+            headers={['Endpoint', '用途']}
+            rows={[
+              ['GET /api/user-charts/admin/popular?limit=50', '依 use_count DESC 列最熱門的 tool-bound 圖(含 owner / share_count / 是否已被採納)'],
+              ['POST /api/user-charts/admin/:id/adopt', '採納為戰情室 design(body: topic_id / design_name / sql_query),寫進 ai_select_designs 並標 adopted_from_user_chart_id'],
+            ]}
+          />
+          <NoteBox>
+            採納不是全自動 — admin 需要手動把 ERP tool call 翻成對應的 SQL（戰情室跑 SQL 而非 tool call)。
+            UI 目前為「列表 + 採納」初版,AI 輔助生成 SQL 的自動化留 Phase 5 後續。
+          </NoteBox>
+        </SubSection>
+
+        <SubSection title="錯誤遙測 chart_parse_errors">
+          <Para>
+            所有 chart 相關錯誤集中寫在這張表,供 admin 回看 LLM 常犯什麼錯再調 system prompt。
+          </Para>
+          <Table
+            headers={['source 值', '觸發時機', '典型 reason']}
+            rows={[
+              ['chat', 'chat.js Tool 路徑 parseChartBlocks 失敗', 'JSON parse 失敗 / y_fields 非 array / data[0] 缺 x_field'],
+              ['answer', 'Answer 模式(ERP 直達)parseChartBlocks 失敗', '同上'],
+              ['execute', '圖庫 /execute 跑 source tool 失敗', 'ERP procedure 錯、MCP server down、skill endpoint 5xx'],
+              ['schema_drift', 'tool 欄位 hash 跟 chart 存的不一致', 'DBA 改 procedure 欄位名 / 新增欄位'],
+            ]}
+          />
+          <CodeBlock>{`GET /api/user-charts/admin/parse-errors?limit=100
+→ [
+    { id, user_id, user_name, session_id, chart_id, source,
+      reason, body_preview, created_at },
+    ...
+  ]`}</CodeBlock>
+          <TipBox>
+            看到某個 reason 反覆出現(例 y_fields 非 array),代表 LLM 沒被教會正確格式 → 去
+            <code className="bg-blue-100 px-1 rounded text-xs">server/services/chartInstruction.js</code> 補 few-shot 範例。
+          </TipBox>
+        </SubSection>
+
+        <SubSection title="使用率遙測 open_count / use_count / fail_count">
+          <Para>user_charts 有三欄獨立計數:</Para>
+          <Table
+            headers={['欄位', '意義', '觸發點']}
+            rows={[
+              ['open_count', '使用者 expand chart 卡片的次數', 'MyChartsPage 展開時 POST /:id/view'],
+              ['use_count', '執行成功次數', '/execute 成功回 rows 時 +1'],
+              ['fail_count', '執行失敗次數', '/execute 回 error 時 +1 並寫 chart_parse_errors'],
+            ]}
+          />
+          <Para>
+            admin/popular 排序目前用 use_count DESC。若要看「高開啟低成功」的問題圖(使用者打開但每次都執行失敗),
+            SQL 自行組 open_count - use_count。
+          </Para>
+        </SubSection>
+
+        <SubSection title="Feature flag — 緊急關閉圖表功能">
+          <Para>
+            圖表 parse / render 出 bug 要緊急停用時,不用 rollback,直接設 system_settings:
+          </Para>
+          <CodeBlock>{`-- 關閉(chat.js parseChartBlocks 會跳過,SSE 不推 charts event)
+UPDATE system_settings SET value='0' WHERE key='chat_inline_chart_enabled';
+-- (若無此筆先 INSERT,預設視為 true)
+
+-- 恢復
+UPDATE system_settings SET value='1' WHERE key='chat_inline_chart_enabled';`}</CodeBlock>
+          <NoteBox>
+            關閉後:對話中 LLM 即使吐 ```generate_chart:bar``` 也不會 render(server 直接忽略);
+            但圖庫裡既有的 user_charts 仍可打開執行 — 因為圖庫走獨立路徑,不受此 flag 影響。
+          </NoteBox>
+        </SubSection>
+
+        <SubSection title="Schema 漂移處理(DBA 改 ERP procedure 時)">
+          <Para>
+            每張 tool-bound 圖儲存時會算 source_schema_hash(rows[0] keys sha256 前 16 字)。
+            DBA 改欄位名後,使用者打開該圖時會偵測到 hash 不符,自動寫入 chart_parse_errors source=schema_drift 並提示 owner 重新設計。
+          </Para>
+          <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-slate-700 space-y-1 my-2">
+            <div><b>admin 處理流程</b>:</div>
+            <ol className="list-decimal list-inside space-y-0.5">
+              <li>定期查 <code className="bg-amber-100 px-1 rounded text-xs">SELECT * FROM chart_parse_errors WHERE source='schema_drift' ORDER BY id DESC</code></li>
+              <li>依 chart_id 找到哪些圖受影響</li>
+              <li>通知 owner(查 user_charts.owner_id → users.email)重新打開該圖更新欄位 mapping</li>
+              <li>或直接刪除過時的模板 / 圖</li>
+            </ol>
+          </div>
+        </SubSection>
+
+        <SubSection title="敏感資料遮蔽">
+          <Para>
+            chart data 在 parse 後會跑一次 sensitive_keywords scan(跟 chat content 同一套字典)。
+            命中時 parsedCharts 清空 → 前端不 render 圖,推 SSE status「⚠ 圖表含敏感資料,已遮蔽」。
+            文字答案仍正常顯示(主 checkSensitiveKeywords 另外處理)。
+          </Para>
+          <TipBox>
+            使用者反映「合法圖表被誤判遮蔽」→ 去系統設定 → 敏感字管理,移除過於寬鬆的字。
+            Chart 的遮蔽<b>不寫獨立 audit_logs</b>(避免重複,主文字已寫一筆);只 console.warn 記錄命中字。
+          </TipBox>
+        </SubSection>
+
+        <SubSection title="DB Schema 速查">
+          <Table
+            headers={['表', '重點欄位', '用途']}
+            rows={[
+              ['chat_messages.charts_json', 'CLOB', 'InlineChartSpec[] 序列化,重開對話還原圖'],
+              ['user_charts', 'source_type / source_tool / source_schema_hash / source_params(CLOB) / is_public / use_count / open_count / fail_count / adopted_from_user_chart_id', '使用者釘選 / 從零設計的圖'],
+              ['user_chart_shares', 'share_type(use/manage) / grantee_type(7 種) / grantee_id / granted_by', '對齊 ai_dashboard_shares,Template Share 設計'],
+              ['chart_style_templates', 'owner_id(NULL=system) / is_system / is_default / default_for_type(all/bar/line/area/pie/scatter/heatmap/radar) / style_json(CLOB)', '每 user 最多 8 筆 is_default=1(each type 一筆)'],
+              ['chart_parse_errors', 'source(chat/answer/execute/schema_drift) / reason / body_preview / chart_id?', '遙測表,供 admin 回看'],
+            ]}
+          />
         </SubSection>
       </Section>
     </div>
