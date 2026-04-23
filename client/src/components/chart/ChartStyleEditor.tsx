@@ -8,6 +8,7 @@
 import { useTranslation } from 'react-i18next'
 import type { ChartStyle, ChartPaletteName, LegendPosition, NumberFormat } from '../../types'
 import { PALETTES } from '../../lib/chartStyle'
+import ColorPickerInput from '../common/ColorPickerInput'
 
 interface Props {
   value: ChartStyle
@@ -83,14 +84,13 @@ export default function ChartStyleEditor({ value, onChange, showPerTypes, compac
           })}
         </div>
         {c.palette === 'custom' && (
-          <div className="mt-2 flex gap-1 flex-wrap">
+          <div className="mt-2 flex gap-1.5 flex-wrap items-center">
             {[0, 1, 2, 3, 4].map(i => (
-              <input
+              <ColorPickerInput
                 key={i}
-                type="color"
                 value={customColors[i] || '#5470c6'}
-                onChange={e => setCustomColor(i, e.target.value)}
-                className="w-7 h-7 rounded cursor-pointer border border-slate-300"
+                onChange={(hex) => setCustomColor(i, hex)}
+                size="md"
                 title={`Color ${i + 1}`}
               />
             ))}
@@ -285,24 +285,25 @@ export default function ChartStyleEditor({ value, onChange, showPerTypes, compac
             <div className={labelClass}>
               {t('chart.style.customBarColors', '自訂每根 bar 顏色(依序對應,留空用 palette)')}
             </div>
-            <div className="flex gap-1 flex-wrap mt-1">
+            <div className="flex gap-1.5 flex-wrap mt-1 items-center">
               {Array.from({ length: 8 }).map((_, i) => {
                 const cur = value.perType?.bar?.custom_bar_colors || []
                 const hex = cur[i] || ''
                 return (
                   <div key={i} className="relative">
-                    <input
-                      type="color"
-                      value={hex || '#94a3b8'}
-                      onChange={e => {
-                        const next = [...cur]
-                        while (next.length <= i) next.push('')
-                        next[i] = e.target.value
-                        onChange(patchPerType(value, 'bar', { custom_bar_colors: next }))
-                      }}
-                      className={`w-6 h-6 rounded cursor-pointer border ${hex ? 'border-slate-400' : 'border-dashed border-slate-300 opacity-40'}`}
-                      title={`Bar ${i + 1}`}
-                    />
+                    <div className={hex ? '' : 'opacity-40'}>
+                      <ColorPickerInput
+                        value={hex || '#94a3b8'}
+                        onChange={(h) => {
+                          const next = [...cur]
+                          while (next.length <= i) next.push('')
+                          next[i] = h
+                          onChange(patchPerType(value, 'bar', { custom_bar_colors: next }))
+                        }}
+                        size="sm"
+                        title={`Bar ${i + 1}`}
+                      />
+                    </div>
                     {hex && (
                       <button
                         onClick={() => {
@@ -310,7 +311,7 @@ export default function ChartStyleEditor({ value, onChange, showPerTypes, compac
                           next[i] = ''
                           onChange(patchPerType(value, 'bar', { custom_bar_colors: next.filter((_, j) => j < cur.length) }))
                         }}
-                        className="absolute -top-1 -right-1 w-3 h-3 bg-red-500 text-white rounded-full text-[8px] leading-3 flex items-center justify-center"
+                        className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-red-500 text-white rounded-full text-[9px] leading-3 flex items-center justify-center shadow hover:bg-red-600"
                         title={t('chart.style.clear', '清除')}
                       >
                         ×
