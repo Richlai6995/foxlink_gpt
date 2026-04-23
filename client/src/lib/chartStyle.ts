@@ -31,6 +31,8 @@ export const HARDCODED_STYLE: Required<ChartStyle> = {
     number_format: 'plain',
     decimal_places: 0,
     background: 'light',
+    axis_label_rotate: 'auto',
+    axis_label_max_chars: 0,
   },
   perType: {
     bar: {
@@ -67,6 +69,46 @@ export function mergeChartStyle(base: ChartStyle | undefined, override: ChartSty
         ])
       ),
     },
+  }
+}
+
+/**
+ * 依 x labels 自動算 axis rotate / interval / gridBottom。
+ * 解決 ECharts 預設 interval='auto' 會吃掉擠不下的 label(例如長料號排名圖)。
+ *
+ * 規則:
+ *  - 短 label(≤6 字)+ 少量(≤12):不轉,interval=auto(保留系統判斷)
+ *  - 中 label(≤12 字):轉 30°,interval=0 全顯
+ *  - 長 label:轉 45°
+ *  - 超多(>30):轉 60°
+ * grid.bottom 依角度加大,避免文字被裁切。
+ */
+export function autoAxisLabel(labels: Array<string | number>): {
+  rotate: number
+  interval: 0 | 'auto'
+  extraGridBottom: number
+} {
+  const n = labels.length
+  let maxLen = 0
+  for (const l of labels) {
+    const s = String(l ?? '')
+    if (s.length > maxLen) maxLen = s.length
+  }
+  if (maxLen <= 6 && n <= 12) return { rotate: 0, interval: 'auto', extraGridBottom: 0 }
+  if (maxLen <= 12 && n <= 20) return { rotate: 30, interval: 0, extraGridBottom: 24 }
+  if (n > 30) return { rotate: 60, interval: 0, extraGridBottom: 48 }
+  return { rotate: 45, interval: 0, extraGridBottom: 36 }
+}
+
+/**
+ * 依 max_chars 截斷 label;保留 ECharts formatter 介面。
+ * 回傳 undefined 代表不需截斷(讓 ECharts 用原值);截斷後完整文字仍在 tooltip 可看。
+ */
+export function makeAxisLabelTruncator(maxChars: number): ((v: string) => string) | undefined {
+  if (!maxChars || maxChars <= 0) return undefined
+  return (v: string) => {
+    const s = String(v ?? '')
+    return s.length > maxChars ? s.slice(0, maxChars) + '…' : s
   }
 }
 

@@ -175,6 +175,51 @@ export default function ChartStyleEditor({ value, onChange, showPerTypes, compac
         </label>
       </div>
 
+      {/* ── X 軸標籤(旋轉 + 截斷)─────────────── */}
+      <div className={fieldGap}>
+        <div className={sectionTitle}>{t('chart.style.xAxisLabel', 'X 軸標籤')}</div>
+        <div className="grid grid-cols-2 gap-1.5 mt-1">
+          <div>
+            <div className={labelClass}>{t('chart.style.rotate', '旋轉')}</div>
+            <select
+              value={String(c.axis_label_rotate ?? 'auto')}
+              onChange={e => {
+                const v = e.target.value
+                onChange(patchCommon(value, {
+                  axis_label_rotate: v === 'auto' ? 'auto' : (Number(v) as 0 | 15 | 30 | 45 | 60 | 90),
+                }))
+              }}
+              className={inputClass}
+            >
+              <option value="auto">{t('chart.style.rotateAuto', '自動')}</option>
+              <option value="0">0° ({t('chart.style.horizontal', '水平')})</option>
+              <option value="15">15°</option>
+              <option value="30">30°</option>
+              <option value="45">45°</option>
+              <option value="60">60°</option>
+              <option value="90">90° ({t('chart.style.vertical', '垂直')})</option>
+            </select>
+          </div>
+          <div>
+            <div className={labelClass}>{t('chart.style.maxChars', '截斷字數')}</div>
+            <select
+              value={c.axis_label_max_chars ?? 0}
+              onChange={e => onChange(patchCommon(value, { axis_label_max_chars: Number(e.target.value) }))}
+              className={inputClass}
+            >
+              <option value={0}>{t('chart.style.noTruncate', '不截斷')}</option>
+              <option value={6}>6 {t('chart.style.chars', '字')}</option>
+              <option value={8}>8 {t('chart.style.chars', '字')}</option>
+              <option value={12}>12 {t('chart.style.chars', '字')}</option>
+              <option value={16}>16 {t('chart.style.chars', '字')}</option>
+            </select>
+          </div>
+        </div>
+        <div className="text-[9px] text-slate-400 mt-1">
+          {t('chart.style.xAxisHint', '自動會依 label 長度 / 數量決定 0 / 30 / 45 / 60 度;截斷後完整值仍在 tooltip 可看')}
+        </div>
+      </div>
+
       {/* ── 數字格式 ───────────────────────────── */}
       <div className={fieldGap}>
         <div className={sectionTitle}>{t('chart.style.numberFormat', '數字格式')}</div>

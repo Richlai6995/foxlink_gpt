@@ -24,6 +24,7 @@ import { exportChartsToPptx, getChartPngFromEcharts } from '../../lib/chartExpor
 import {
   mergeChartStyle, getPaletteColors, resolveThemeColors,
   resolveLegendPlacement, makeValueFormatter, getPerTypeStyle,
+  autoAxisLabel, makeAxisLabelTruncator,
   HARDCODED_STYLE, SWITCHABLE_TYPES,
 } from '../../lib/chartStyle'
 
@@ -106,7 +107,27 @@ function buildOption(spec: InlineChartSpec, style: ChartStyle): ChartState {
     },
   }
 
+  // X 軸標籤:auto 旋轉 + 全顯 + 截斷,解決長料號 / 多類別被 ECharts 吃掉的問題
+  const userRotate = style.common?.axis_label_rotate
+  const autoLabel = autoAxisLabel(xs)
+  const xAxisRotate = userRotate === undefined || userRotate === 'auto'
+    ? autoLabel.rotate
+    : userRotate
+  const xAxisInterval = (userRotate === undefined || userRotate === 'auto')
+    ? autoLabel.interval
+    : (userRotate === 0 ? 'auto' : 0)
+  const maxChars = style.common?.axis_label_max_chars ?? 0
+  const truncator = makeAxisLabelTruncator(maxChars)
+  const xLabelExtraBottom = xAxisRotate === 0 ? 0 : Math.max(autoLabel.extraGridBottom, xAxisRotate >= 45 ? 36 : 20)
+
   const axisLabelStyle = { color: theme.subtext, fontSize: axisSize }
+  const xAxisLabelStyle: Record<string, unknown> = {
+    ...axisLabelStyle,
+    rotate: xAxisRotate,
+    interval: xAxisInterval,
+    hideOverlap: true,
+    ...(truncator ? { formatter: truncator } : {}),
+  }
   const splitLineStyle = showGrid ? { lineStyle: { color: theme.grid } } : { show: false }
   const xAxisLine = { lineStyle: { color: theme.axisLine } }
 
@@ -118,7 +139,12 @@ function buildOption(spec: InlineChartSpec, style: ChartStyle): ChartState {
         { type: 'slider', height: 18, bottom: 4, start: 0, end: Math.min(100, Math.round((30 / rows.length) * 100)) },
       ]
     : undefined
-  const grid = { left: 48, right: 16, top: gridTop, bottom: needsZoom ? 36 : 32, containLabel: true }
+  const grid = {
+    left: 48, right: 16, top: gridTop,
+    // 32 是基底,needsZoom 再多 4 讓 slider 有空間,旋轉 label 再加 extraBottom
+    bottom: (needsZoom ? 36 : 32) + xLabelExtraBottom,
+    containLabel: true,
+  }
 
   switch (spec.type) {
     case 'bar':
@@ -176,7 +202,7 @@ function buildOption(spec: InlineChartSpec, style: ChartStyle): ChartState {
           legend,
           grid,
           dataZoom,
-          xAxis: { type: 'category', data: xs, axisLabel: axisLabelStyle, axisLine: xAxisLine },
+          xAxis: { type: 'category', data: xs, axisLabel: xAxisLabelStyle, axisLine: xAxisLine },
           yAxis: { type: 'value', axisLabel: { ...axisLabelStyle, formatter: fmtValue }, splitLine: splitLineStyle },
           tooltip: { ...(baseOption.tooltip as object), trigger: 'axis', valueFormatter: fmtValue },
           series: series.map((s, seriesIdx) => {
@@ -269,7 +295,7 @@ function buildOption(spec: InlineChartSpec, style: ChartStyle): ChartState {
           xAxis: {
             type: xIsNumeric ? 'value' : 'category',
             data: xIsNumeric ? undefined : xs,
-            axisLabel: axisLabelStyle,
+            axisLabel: xIsNumeric ? { ...axisLabelStyle, formatter: fmtValue } : xAxisLabelStyle,
             axisLine: xAxisLine,
           },
           yAxis: { type: 'value', axisLabel: { ...axisLabelStyle, formatter: fmtValue }, splitLine: splitLineStyle },
@@ -309,7 +335,7 @@ function buildOption(spec: InlineChartSpec, style: ChartStyle): ChartState {
           ...titleOpt,
           tooltip: { ...(baseOption.tooltip as object), position: 'top', valueFormatter: fmtValue },
           grid: { ...grid, height: '60%', top: gridTop + 8 },
-          xAxis: { type: 'category', data: xs, axisLabel: axisLabelStyle, splitArea: { show: true } },
+          xAxis: { type: 'category', data: xs, axisLabel: xAxisLabelStyle, splitArea: { show: true } },
           yAxis: { type: 'category', data: ys, axisLabel: axisLabelStyle, splitArea: { show: true } },
           visualMap: {
             min: vMin, max: vMax, calculable: true, orient: 'horizontal',

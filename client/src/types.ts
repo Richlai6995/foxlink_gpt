@@ -57,6 +57,8 @@ export type ChartPaletteName = 'blue' | 'green' | 'warm' | 'purple' | 'teal' | '
 export type LegendPosition = 'top' | 'bottom' | 'left' | 'right' | 'none'
 export type NumberFormat = 'plain' | 'thousand' | 'percent'
 export type BackgroundMode = 'light' | 'dark'
+/** X 軸標籤旋轉:'auto' 依 label 長度 / 數量自動判斷;數字 = 固定角度 */
+export type AxisLabelRotate = 'auto' | 0 | 15 | 30 | 45 | 60 | 90
 
 /** ChartStyle — 圖表樣式設定;common 套所有圖型,perType override */
 export interface ChartStyle {
@@ -72,6 +74,10 @@ export interface ChartStyle {
     number_format?: NumberFormat
     decimal_places?: number
     background?: BackgroundMode
+    /** X 軸標籤旋轉角度;'auto' 依 label 長度 / 數量自動判斷(預設) */
+    axis_label_rotate?: AxisLabelRotate
+    /** X 軸標籤超過此字元數用 ... 截斷(0 或未設 = 不截斷,完整值仍在 tooltip 可看) */
+    axis_label_max_chars?: number
   }
   perType?: {
     bar?: {
