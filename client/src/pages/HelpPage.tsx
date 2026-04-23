@@ -9,12 +9,13 @@ import {
   Wand2, ImageIcon, Clock, Share2, GitFork, Lock, Sparkles, Code2, Package, Play, Square,
   Paperclip, Search, Server, BookMarked, Wifi, WifiOff, CheckCircle, Loader2, Layers, Activity,
   Key, ShieldCheck, LayoutTemplate, FileSpreadsheet, File, FlaskConical, Languages,
-  TicketCheck, GripVertical, KeyRound,
+  TicketCheck, GripVertical, KeyRound, Printer,
 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import api from '../lib/api'
 import { RenderHelpSections, RenderHelpSection, getIcon, type HelpSectionData } from '../components/HelpBlockRenderer'
 import HelpTrainingPlayer from '../components/training/HelpTrainingPlayer'
+import './HelpPage.print.css'
 
 // ── Reusable layout helpers ───────────────────────────────────────────────────
 
@@ -7509,10 +7510,35 @@ export default function HelpPage() {
     if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }
 
+  function handleExportPdf() {
+    const roleLabel =
+      role === 'admin' ? t('help.roleAdmin')
+      : role === 'training-dev' ? t('help.roleTrainingDev')
+      : t('help.roleUser')
+    const today = new Date().toISOString().slice(0, 10)
+    const originalTitle = document.title
+    const safeLabel = roleLabel.replace(/[\\/:*?"<>|]/g, '')
+    document.title = `${t('help.pageTitle')}_${safeLabel}_${today}`
+    document.body.dataset.printRole = role
+
+    const restore = () => {
+      document.title = originalTitle
+      delete document.body.dataset.printRole
+      window.removeEventListener('afterprint', restore)
+    }
+    window.addEventListener('afterprint', restore)
+
+    // Defer one frame so the title change settles before the print dialog opens
+    requestAnimationFrame(() => window.print())
+  }
+
   return (
     <div className="flex flex-col h-screen bg-slate-50">
       {/* Top bar */}
-      <header className="bg-white border-b border-slate-200 px-6 py-4 flex items-center gap-4 flex-shrink-0 shadow-sm">
+      <header
+        data-region="top-bar"
+        className="bg-white border-b border-slate-200 px-6 py-4 flex items-center gap-4 flex-shrink-0 shadow-sm"
+      >
         <button
           onClick={() => navigate(-1)}
           className="flex items-center gap-2 text-slate-500 hover:text-slate-800 transition text-sm"
@@ -7526,7 +7552,7 @@ export default function HelpPage() {
         </div>
 
         {/* Role tabs */}
-        <div className="ml-auto flex bg-slate-100 rounded-xl p-1 gap-1">
+        <div data-region="role-tabs" className="ml-auto flex bg-slate-100 rounded-xl p-1 gap-1">
           <button
             onClick={() => setRole('user')}
             className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition ${role === 'user'
@@ -7562,6 +7588,16 @@ export default function HelpPage() {
             </button>
           )}
         </div>
+
+        {/* Export PDF (current tab) */}
+        <button
+          onClick={handleExportPdf}
+          title={t('help.exportPdfHint') as string}
+          className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium text-slate-600 hover:text-blue-700 hover:bg-blue-50 border border-slate-200 transition"
+        >
+          <Printer size={15} />
+          {t('help.exportPdf')}
+        </button>
       </header>
 
       <div className="flex flex-1 overflow-hidden">
@@ -7585,9 +7621,18 @@ export default function HelpPage() {
         {/* Main content */}
         <main
           ref={contentRef}
+          data-region="main"
           className="flex-1 overflow-y-auto"
         >
           <div className="max-w-3xl mx-auto px-8 py-8">
+            {/* Print-only cover header */}
+            <div className="help-print-header">
+              <h1>
+                {t('help.pageTitle')} — {role === 'admin' ? t('help.badgeAdmin') : role === 'training-dev' ? t('help.badgeTrainingDev') : t('help.badgeUser')}
+              </h1>
+              <p>{new Date().toISOString().slice(0, 10)}</p>
+            </div>
+
             {/* Role badge */}
             <div className={`inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium mb-8 ${
               role === 'admin'
@@ -7610,7 +7655,7 @@ export default function HelpPage() {
                   {trainingDevSections.map(section => (
                     <div key={section.id} className="relative">
                       {section.linkedCourseId && (
-                        <div className="float-right mt-2 mr-1 flex items-center gap-2">
+                        <div data-print-hide="true" className="float-right mt-2 mr-1 flex items-center gap-2">
                           {section.linkedLessonMandatory != null && (
                             <span className={`text-[10px] font-medium px-2 py-1 rounded-full border ${
                               section.linkedLessonMandatory === 1
@@ -7647,7 +7692,7 @@ export default function HelpPage() {
                   {apiSections.map(section => (
                     <div key={section.id} className="relative">
                       {section.linkedCourseId && (
-                        <div className="float-right mt-2 mr-1 flex items-center gap-2">
+                        <div data-print-hide="true" className="float-right mt-2 mr-1 flex items-center gap-2">
                           {section.linkedLessonMandatory != null && (
                             <span className={`text-[10px] font-medium px-2 py-1 rounded-full border ${
                               section.linkedLessonMandatory === 1

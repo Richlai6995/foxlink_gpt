@@ -1131,6 +1131,8 @@
     "session": "第 {{n}} 次",
     "fullscreen": "全螢幕",
     "shrink": "縮小",
+    "exportPdf": "匯出 PDF",
+    "exportPdfHint": "將開啟瀏覽器列印視窗，請於「目的地」選擇「另存為 PDF」後儲存。",
     "sections": {
       "intro": "系統介紹",
       "loginLogout": "登入與登出",

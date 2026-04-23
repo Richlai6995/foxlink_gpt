@@ -1,0 +1,153 @@
+/* HelpPage print stylesheet — activates during window.print() */
+
+@media print {
+  @page {
+    size: A4;
+    margin: 18mm 14mm 20mm 14mm;
+  }
+
+  html,
+  body {
+    background: #ffffff !important;
+    color: #0f172a !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    font-size: 10.5pt;
+  }
+
+  /* Hide chrome regions that shouldn't be in the manual */
+  [data-region='top-bar'],
+  [data-region='sidebar'],
+  [data-region='role-tabs'],
+  [data-print-hide='true'],
+  .no-print {
+    display: none !important;
+  }
+
+  /* Let main content take the full page */
+  main,
+  [data-region='main'] {
+    overflow: visible !important;
+    height: auto !important;
+    max-height: none !important;
+    flex: none !important;
+    display: block !important;
+  }
+
+  main > div {
+    max-width: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  /* Root layout containers — flatten flex/scroll so content flows */
+  body .flex.flex-col.h-screen,
+  body .flex.flex-1.overflow-hidden {
+    display: block !important;
+    height: auto !important;
+    overflow: visible !important;
+  }
+
+  /* Force expand any collapsed <details> */
+  details {
+    display: block !important;
+  }
+  details > summary {
+    display: block !important;
+    list-style: none !important;
+    pointer-events: none !important;
+  }
+  details > summary::-webkit-details-marker {
+    display: none !important;
+  }
+  details[open],
+  details:not([open]) > * {
+    display: block !important;
+  }
+
+  /* Section-level break hints */
+  section {
+    break-inside: avoid-page;
+    page-break-inside: avoid;
+  }
+  h1, h2, h3, h4 {
+    break-after: avoid-page;
+    page-break-after: avoid;
+  }
+
+  /* Tables & code blocks: keep together when possible */
+  table {
+    break-inside: auto;
+    page-break-inside: auto;
+    border-collapse: collapse !important;
+    width: 100% !important;
+  }
+  table thead {
+    display: table-header-group;
+  }
+  tr,
+  td,
+  th {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+  pre,
+  code {
+    white-space: pre-wrap !important;
+    word-break: break-word !important;
+  }
+  pre {
+    break-inside: avoid;
+    page-break-inside: avoid;
+    border: 1px solid #cbd5e1 !important;
+  }
+
+  /* Preserve callout backgrounds (tip / note / code dark bg) */
+  .bg-blue-50,
+  .bg-amber-50,
+  .bg-emerald-50,
+  .bg-rose-50,
+  .bg-slate-50,
+  .bg-slate-100,
+  .bg-slate-900 {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* Links: keep color but drop hover underline inherited from hover state */
+  a {
+    color: #1d4ed8 !important;
+    text-decoration: underline;
+  }
+
+  /* Hide interactive-only UI inside sections */
+  button[data-print-hide='true'],
+  .help-print-hide {
+    display: none !important;
+  }
+
+  /* Role badge ribbon — keep visible as section header */
+  .help-print-header {
+    display: block !important;
+    margin-bottom: 16pt;
+    padding-bottom: 8pt;
+    border-bottom: 2px solid #1e293b;
+  }
+  .help-print-header h1 {
+    font-size: 20pt;
+    margin: 0 0 4pt 0;
+    color: #0f172a;
+  }
+  .help-print-header p {
+    margin: 0;
+    font-size: 10pt;
+    color: #475569;
+  }
+}
+
+/* Screen: hide print-only header */
+@media screen {
+  .help-print-header {
+    display: none;
+  }
+}

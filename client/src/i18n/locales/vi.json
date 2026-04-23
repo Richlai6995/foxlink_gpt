@@ -1131,6 +1131,8 @@
     "session": "Lần #{{n}}",
     "fullscreen": "Toàn màn hình",
     "shrink": "Thu nhỏ",
+    "exportPdf": "Xuất PDF",
+    "exportPdfHint": "Hộp thoại in của trình duyệt sẽ mở — chọn \"Lưu dưới dạng PDF\" ở mục đích để lưu tệp.",
     "sections": {
       "intro": "Giới thiệu hệ thống",
       "loginLogout": "Đăng nhập & Đăng xuất",

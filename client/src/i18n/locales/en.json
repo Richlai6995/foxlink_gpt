@@ -1131,6 +1131,8 @@
     "session": "Attempt #{{n}}",
     "fullscreen": "Fullscreen",
     "shrink": "Shrink",
+    "exportPdf": "Export PDF",
+    "exportPdfHint": "A browser print dialog will open — choose \"Save as PDF\" as the destination to save the file.",
     "sections": {
       "intro": "System Introduction",
       "loginLogout": "Login & Logout",
