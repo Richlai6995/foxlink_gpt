@@ -25,6 +25,8 @@ interface Props {
     schema_hash?: string
     prompt?: string
     params?: UserChartParam[]
+    /** 工具呼叫當時的實際參數(ERP 含 P_ORG_ID 等);server 會據此自動產 params template */
+    source_args?: Record<string, unknown>
     session_id?: string
     message_id?: number
   }
@@ -52,6 +54,8 @@ export default function PinChartButton({ spec, source }: Props) {
         source_schema_hash: source?.schema_hash || null,
         source_prompt: source?.prompt || null,
         source_params: source?.params || null,
+        // 若有 source_args(ERP 路徑的原始呼叫參數),server 會自動對應 tool metadata 產出 params template
+        source_args: source?.source_args || null,
         source_session_id: source?.session_id || null,
         source_message_id: source?.message_id || null,
       })

@@ -134,7 +134,54 @@ router.get('/', async (req, res) => {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CREATE — 從 chat inline chart pin 進來
+//   若 ERP 路徑且 source_params 空但 source_args 有值 → 主動查 erp_tools.params_json
+//   產出含 label / type / default / options 的完整 params template
 // ─────────────────────────────────────────────────────────────────────────────
+function inferParamTypeFromErpMeta(p) {
+  if (p.lov_config?.type) return 'select';
+  const dt = String(p.data_type || '').toUpperCase();
+  if (dt === 'NUMBER') return 'number';
+  if (/DATE|TIMESTAMP/.test(dt)) return 'date';
+  return 'text';
+}
+
+async function autoGenParamsForErp(db, sourceTool, sourceArgs) {
+  if (!sourceTool || typeof sourceTool !== 'string' || !sourceTool.startsWith('erp:')) return null;
+  if (!sourceArgs || typeof sourceArgs !== 'object') return null;
+  const erpId = Number(sourceTool.slice(4));
+  if (!Number.isFinite(erpId) || erpId <= 0) return null;
+
+  const row = await db.prepare(`SELECT params_json FROM erp_tools WHERE id=?`).get(erpId);
+  if (!row || !row.params_json) return null;
+
+  let paramsMeta;
+  try {
+    paramsMeta = typeof row.params_json === 'string' ? JSON.parse(row.params_json) : row.params_json;
+  } catch (_) { return null; }
+  if (!Array.isArray(paramsMeta)) return null;
+
+  return paramsMeta
+    .filter(p => p && p.in_out !== 'OUT' && p.visible !== false)
+    .map(p => {
+      const actualValue = sourceArgs[p.name];
+      const type = inferParamTypeFromErpMeta(p);
+      const defVal = actualValue !== undefined && actualValue !== null && actualValue !== ''
+        ? (type === 'number' ? Number(actualValue) : type === 'boolean' ? Boolean(actualValue) : String(actualValue))
+        : (p.default_value ?? undefined);
+      const opts = p.lov_config?.type === 'static' && Array.isArray(p.lov_config.items)
+        ? p.lov_config.items.map(it => ({ value: String(it.value), label: it.label || String(it.value) }))
+        : undefined;
+      return {
+        key: p.name,
+        label: p.display_name || p.name,
+        type,
+        options: opts,
+        default: defVal,
+        required: !!p.required,
+      };
+    });
+}
+
 router.post('/', async (req, res) => {
   try {
     const db = require('../database-oracle').db;
@@ -142,6 +189,7 @@ router.post('/', async (req, res) => {
       title, description, chart_spec,
       source_type, source_tool, source_tool_version,
       source_schema_hash, source_prompt, source_params,
+      source_args,
       source_session_id, source_message_id,
     } = req.body;
 
@@ -151,7 +199,22 @@ router.post('/', async (req, res) => {
     }
 
     const specStr = typeof chart_spec === 'string' ? chart_spec : JSON.stringify(chart_spec);
-    const paramsStr = source_params == null ? null : (typeof source_params === 'string' ? source_params : JSON.stringify(source_params));
+
+    // 決定 params template:client 直接帶 > 從 source_args 自動產(ERP)> null
+    let paramsStr = null;
+    if (source_params != null) {
+      paramsStr = typeof source_params === 'string' ? source_params : JSON.stringify(source_params);
+    } else if (source_type === 'erp' && source_args && source_tool) {
+      try {
+        const auto = await autoGenParamsForErp(db, source_tool, source_args);
+        if (auto && auto.length > 0) {
+          paramsStr = JSON.stringify(auto);
+          console.log(`[userCharts] auto-generated ${auto.length} params template from source_args for ${source_tool}`);
+        }
+      } catch (e) {
+        console.warn('[userCharts] auto-gen params failed:', e.message);
+      }
+    }
 
     const r = await db.prepare(
       `INSERT INTO user_charts (
@@ -170,6 +233,9 @@ router.post('/', async (req, res) => {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // GET single
+//   Fallback:若是 ERP 圖但 source_params 為空(舊資料釘選時沒帶 args),
+//   即時從 erp_tools.params_json 產出 schema(預設值空,使用者自己填),
+//   render-only 不寫回 DB。修舊資料「P_ORG_ID 未提供」的問題。
 // ─────────────────────────────────────────────────────────────────────────────
 router.get('/:id', async (req, res) => {
   try {
@@ -177,7 +243,28 @@ router.get('/:id', async (req, res) => {
     const chart = await db.prepare(`SELECT * FROM user_charts WHERE id=?`).get(req.params.id);
     if (!chart) return res.status(404).json({ error: '圖表不存在' });
     if (!(await canAccessUserChart(db, chart, req.user))) return res.status(403).json({ error: '無權限存取' });
-    res.json(hydrateChart(chart));
+
+    const hydrated = hydrateChart(chart);
+
+    // 舊資料修復:source_params 空且是 ERP 來源 → 即時 fetch tool metadata 補 schema
+    const needsAutoFill =
+      hydrated.source_type === 'erp' &&
+      hydrated.source_tool &&
+      (hydrated.source_params == null ||
+       (Array.isArray(hydrated.source_params) && hydrated.source_params.length === 0));
+    if (needsAutoFill) {
+      try {
+        const auto = await autoGenParamsForErp(db, hydrated.source_tool, {});
+        if (auto && auto.length > 0) {
+          hydrated.source_params = auto;
+          hydrated._params_autofilled = true; // 供前端 UI 顯示「此參數由 tool metadata 自動產生」
+        }
+      } catch (e) {
+        console.warn('[userCharts] auto-fill params on GET failed:', e.message);
+      }
+    }
+
+    res.json(hydrated);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

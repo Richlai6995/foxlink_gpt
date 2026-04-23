@@ -237,6 +237,7 @@ function MessageBubble({
                       tool: spec.meta?.source_tool ?? undefined,
                       tool_version: spec.meta?.source_tool_version ?? undefined,
                       schema_hash: spec.meta?.source_schema_hash ?? undefined,
+                      source_args: (spec.meta?.source_args ?? undefined) as Record<string, unknown> | undefined,
                       session_id: sessionId ?? undefined,
                       message_id: msg.id,
                     }}

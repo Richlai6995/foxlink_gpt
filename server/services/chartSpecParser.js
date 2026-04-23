@@ -225,7 +225,7 @@ function computeSchemaHash(rows) {
  */
 function resolveChartSource(spec, toolCallResults) {
   if (!Array.isArray(toolCallResults) || toolCallResults.length === 0) {
-    return { source_type: 'chat_freeform', source_tool: null, source_tool_version: null };
+    return { source_type: 'chat_freeform', source_tool: null, source_tool_version: null, source_args: null };
   }
 
   let target = null;
@@ -237,13 +237,15 @@ function resolveChartSource(spec, toolCallResults) {
     target = toolCallResults[0];
   }
   if (!target) {
-    return { source_type: 'chat_freeform', source_tool: null, source_tool_version: null };
+    return { source_type: 'chat_freeform', source_tool: null, source_tool_version: null, source_args: null };
   }
 
   return {
     source_type: target.source_type || 'chat_freeform',
     source_tool: target.source_tool || null,
     source_tool_version: target.source_tool_version || null,
+    // 原始工具呼叫參數(ERP 含 P_ORG_ID 等);供釘選時 server 端 auto-gen params template
+    source_args: target.args && typeof target.args === 'object' ? target.args : null,
   };
 }
 
@@ -321,6 +323,7 @@ function parseChartBlocks(text, toolCallResults = []) {
         source_tool: sourceMeta.source_tool,
         source_tool_version: sourceMeta.source_tool_version,
         source_schema_hash: schemaHash,
+        source_args: sourceMeta.source_args,
       },
     });
     stripRanges.push([start, end]);

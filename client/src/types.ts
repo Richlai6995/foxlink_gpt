@@ -134,6 +134,8 @@ export interface InlineChartSpec {
     source_tool?: string | null
     source_tool_version?: string | null
     source_schema_hash?: string | null
+    /** 原始工具呼叫的參數 map(ERP 含 P_ORG_ID 等);釘選時 server 會自動轉成 params template */
+    source_args?: Record<string, unknown> | null
   }
   /** 樣式設定 — 若缺,套使用者的 active default template 或系統預設 */
   style?: ChartStyle
