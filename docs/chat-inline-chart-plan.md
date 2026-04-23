@@ -2,7 +2,7 @@
 
 > Chat 對話內(MCP / 深度研究 / 一般對話)LLM 輸出資料自動渲染為互動圖表
 > 作者:規劃於 2026-04-21
-> 狀態:**Phase 1–5 + 5c + 4c 樣式模板 + 尾巴全數完成,已 push origin** @ 2026-04-24
+> 狀態:**Phase 1–5 + 5c + 4c 樣式模板 + 全部後續擴充完成,已 push origin** @ 2026-04-25
 >
 > 實作進度快照:
 > - Phase 1 基礎渲染 → commit `488bb4a`
@@ -16,7 +16,8 @@
 > - **所有延後項**:PPTX 匯出 + 使用率拆分(open/use/fail)+ 錯誤遙測 + skill source 支援 + validateSpec 強化 → commit `d0a223a`
 > - **使用者說明書**:Help section `u-chat-chart`(sort 33) → commit `9d66629`
 > - **ERP 圖表 tab fix**:讀 answer_output_format + 套預設圖表 → commit `cb7ce07`
-> - **Phase 4c 樣式模板系統**:ChartStyle / chart_style_templates / 5 組 palette / dark mode / ⚙ panel / 圖庫「樣式模板」tab / 套用優先序 → 本 commit
+> - **Phase 4c 樣式模板系統**:ChartStyle / chart_style_templates / 5 組 palette / dark mode / ⚙ panel / 圖庫「樣式模板」tab / 套用優先序 → commit `39e1027`
+> - **4c 後續擴充**:X 軸自動旋轉 `ad014b2` / per-type palette + 恢復內建預設 `6945d7e` / admin 可編系統模板 `42c4f62` / 240 色 ColorPicker `3b48190` / 長條圖 per-bar 色/陰影/動畫 `7f561e5` / per-type default + 切圖型自動換樣式 `615a65c` / 預覽跟 default_for_type + 隱藏預覽工具列 `39536f8` / ERP 釘選自動帶原始 args `1dea951`
 >
 > **全數落地**,剩下長期優化(aria 模式、admin UI for parse-errors/popular、source_prompt 清理)等真有需求再動。
 
@@ -274,11 +275,26 @@ ALTER TABLE chat_messages ADD charts_json CLOB
 - [x] PinChartButton 釘選時 `spec.style` 帶入 user_charts(圖庫固化;owner 改模板不動歷史)
 - [x] i18n 三語(`chart.style.*` / `chart.library.templates.*`)
 
-**套用優先序(render time)**:
+**後續擴充(第二波,全數完成)**:
+- [x] **Admin 編輯系統模板 UI**(commit `42c4f62`):前端 TemplateCard systemEditable=isAdmin 時露出藍色 Edit icon;系統區塊標題旁加「Admin 可編輯」badge。server 端 PUT 本來就放行 admin,只是前端沒露出入口
+- [x] **ColorPickerInput 全面取代 native `<input type="color">`**(commit `3b48190`):改用戰情室同一元件,240 色光譜(24 色相 × 9 明度 + 24 灰階)+ 40 標準色 + Hex 直接輸入 + RGB 即時顯示 + Portal 不被父容器 overflow 裁切
+- [x] **長條圖樣式擴充**(commit `7f561e5`):per-bar 獨立色(single_series_multi_color 排名圖特別實用)/ custom_bar_colors(8 組依序覆寫)/ shadow 立體感 / opacity 透明度 / animation_style(none/grow/fade/bounce)+ animation_stagger 逐個浮現
+- [x] **X 軸長 label 自動旋轉**(commit `ad014b2`):`autoAxisLabel(labels)` 依 label 長度 + 數量自動決定 0/30/45/60 度 + `interval=0` 全顯 + gridBottom 動態加大;解決 ECharts 預設把中間 label 吃掉(料號排名圖原本看不到中間 6-8 個)。使用者可在模板手動指定角度或 'auto'
+- [x] **Per-type palette override**(commit `6945d7e`):`ChartStyle.perType.{bar,line,area,pie,scatter}.palette?: ChartPaletteName | 'inherit'`;getPaletteColors(style, type) 優先讀 perType,'inherit' 才 fallback common。bar 用 Blue、pie 用 Warm 可同一模板互不影響
+- [x] **恢復內建預設按鈕**(commit `6945d7e`):ChartStyleTemplateEditor footer 左下 RotateCcw icon,confirm 後 setStyle(HARDCODED_STYLE);按「儲存」才真正寫回,可取消避免誤傷
+- [x] **Per-type default 模板**(commit `615a65c`):DB 加 `default_for_type VARCHAR2(16)`('all'/'bar'/'line'/'area'/'pie'/'scatter'/'heatmap'/'radar');一人最多 8 筆 is_default=1(每 type 一筆);Star button 改 dropdown menu 列 8 個 type;既有 is_default=1 migration 自動標為 'all'(向下相容)
+- [x] **切換圖型自動換樣式模板**(commit `615a65c`):InlineChart 的 `finalStyle` 用 `activeDefaultFor(effectiveSpec.type)`,overrideType 變動時 useMemo 重算 → 切 pie icon 直接套 pie 的 default 模板(不只 palette,整個字級 / 圖例 / 透明度也換)
+- [x] **模板編輯器預覽跟 default_for_type**(commit `39536f8`):DEMO_SPECS 覆蓋 7 圖型,pickDemoType 依 template.default_for_type 選 — 圓餅圖預設的模板進去就看到 pie 預覽
+- [x] **預覽工具列隱藏**(commit `39536f8`):InlineChart 加 hideToolbar prop,TemplateEditor 預覽傳 true → 左側純預覽、右側 editor 為唯一編輯入口,避免雙入口混淆
+- [x] **ERP 釘選自動帶原始呼叫參數**(commit `1dea951`):chartSpecParser resolveChartSource 多回 source_args;PinChartButton POST 帶;userCharts POST 有 source_args 無 source_params 時 → fetch erp_tools.params_json 自動產出 UserChartParam[](label / type / default / options 都齊)。舊圖 fallback:`GET /:id` 偵測 ERP 且 source_params 空 → 即時產 schema 回給 client(空 default,user 自己填)
+
+**套用優先序(render time)— per-type 版**:
 ```
 spec.style (LLM / 使用者 panel override)
     ↓ 沒設定
-user default template (is_default=1 AND owner_id=me)
+user default template (type 專屬,is_default=1 AND default_for_type=<type>)
+    ↓ 沒設定
+user default template ('all' fallback,is_default=1 AND default_for_type='all')
     ↓ 沒設定
 system default (is_system=1, 目前為「FOXLINK 預設」)
     ↓ 沒設定
@@ -286,13 +302,13 @@ HARDCODED(lib/chartStyle.ts HARDCODED_STYLE)
 ```
 
 **資料生命週期**:
-- **chat inline chart**(`chat_messages.charts_json`)— 不存 style,每次 render 動態套 active default(好處:換模板全站一致)
+- **chat inline chart**(`chat_messages.charts_json`)— 不存 style,每次 render 動態套 active default(好處:換模板全站一致 + 切圖型自動換 type 專屬模板)
 - **pinned chart**(`user_charts.chart_spec.style`)— **存當下 style 固化**(owner 改模板不動既有圖,避免破壞已分享出去的版本)
 
-**未做(長期)**:
-- [ ] admin UI 編輯「FOXLINK 預設」(目前只能 SQL 直接改)
-- [ ] 按圖型獨立選 default 模板(現在是一包管所有圖型)
+**仍未做(長期)**:
+- [ ] Admin UI 編輯系統模板內容(已完成,唯一剩的是「新增系統模板」管理介面 — 目前只 seed 一組 FOXLINK 預設)
 - [ ] Template 匯入/匯出 JSON(使用者間直接交換)
+- [ ] 一個模板同時當多種 type default(目前一模板一 type;需要就複製一份)
 
 ### Phase 5 — 使用者自建圖表 + 分享
 
