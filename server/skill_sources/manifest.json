@@ -3,5 +3,10 @@
     "file": "tts.js",
     "match_name": "轉聲音|語音合成|TTS",
     "description": "文字轉語音 (Google Cloud TTS)"
+  },
+  {
+    "file": "metal_prices.js",
+    "match_name": "金屬報價|金屬價格|貴金屬|metal.?price",
+    "description": "金屬即時價格查詢 (gold-api + Yahoo Finance + Westmetall)"
   }
 ]
