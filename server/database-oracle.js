@@ -3174,46 +3174,97 @@ async function runMigrations(db) {
   )`);
 
   // metal_price_history: 第一個落地 target table — 排程金屬行情歷史
+  // 原始報價 + USD 換算 + 匯率全存,方便事後反推;UNIQUE 含 source 以支援多源交叉驗證
   await createTable('METAL_PRICE_HISTORY', `CREATE TABLE metal_price_history (
     id                NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    -- 時間
     as_of_date        DATE          NOT NULL,
+    scraped_at        TIMESTAMP     DEFAULT SYSTIMESTAMP,
+    -- 金屬識別
     metal_code        VARCHAR2(10)  NOT NULL,
     metal_name        VARCHAR2(30),
+    -- 原始報價(未換算,反推用)
+    original_price    NUMBER(18,6),
+    original_currency VARCHAR2(10),
+    original_unit     VARCHAR2(30),
+    -- 換算後 USD(戰情分析統一單位)
     price_usd         NUMBER(18,4),
     unit              VARCHAR2(20),
+    fx_rate_to_usd    NUMBER(12,6),
+    conversion_note   VARCHAR2(500),
+    is_estimated      NUMBER(1)     DEFAULT 0,
+    -- 市場分類
+    price_type        VARCHAR2(20),
+    market            VARCHAR2(20),
+    grade             VARCHAR2(50),
+    -- 變動 / 庫存(源有才填)
     day_change_pct    NUMBER(8,4),
     lme_stock         NUMBER(14),
     stock_change      NUMBER(14),
+    -- 來源追溯
     source            VARCHAR2(50),
+    source_url        VARCHAR2(500),
     raw_snippet       CLOB,
+    -- Pipeline 血緣
     meta_run_id       NUMBER,
     meta_pipeline     VARCHAR2(200),
     creation_date     TIMESTAMP     DEFAULT SYSTIMESTAMP,
     last_updated_date TIMESTAMP     DEFAULT SYSTIMESTAMP,
-    CONSTRAINT uq_metal_price_day UNIQUE (metal_code, as_of_date)
+    CONSTRAINT uq_metal_price_day_source UNIQUE (metal_code, as_of_date, source)
   )`);
+
+  // 既有環境(舊 schema)升級 — ALTER TABLE ADD 每個新欄位,idempotent
+  await safeAddColumn('METAL_PRICE_HISTORY', 'SCRAPED_AT',        'TIMESTAMP DEFAULT SYSTIMESTAMP');
+  await safeAddColumn('METAL_PRICE_HISTORY', 'ORIGINAL_PRICE',    'NUMBER(18,6)');
+  await safeAddColumn('METAL_PRICE_HISTORY', 'ORIGINAL_CURRENCY', 'VARCHAR2(10)');
+  await safeAddColumn('METAL_PRICE_HISTORY', 'ORIGINAL_UNIT',     'VARCHAR2(30)');
+  await safeAddColumn('METAL_PRICE_HISTORY', 'FX_RATE_TO_USD',    'NUMBER(12,6)');
+  await safeAddColumn('METAL_PRICE_HISTORY', 'CONVERSION_NOTE',   'VARCHAR2(500)');
+  await safeAddColumn('METAL_PRICE_HISTORY', 'IS_ESTIMATED',      'NUMBER(1) DEFAULT 0');
+  await safeAddColumn('METAL_PRICE_HISTORY', 'PRICE_TYPE',        'VARCHAR2(20)');
+  await safeAddColumn('METAL_PRICE_HISTORY', 'MARKET',            'VARCHAR2(20)');
+  await safeAddColumn('METAL_PRICE_HISTORY', 'GRADE',             'VARCHAR2(50)');
+  await safeAddColumn('METAL_PRICE_HISTORY', 'SOURCE_URL',        'VARCHAR2(500)');
+
+  // UNIQUE constraint 升級:舊 (metal_code, as_of_date) → 新 (metal_code, as_of_date, source)
+  // 支援同一天從多源抓同金屬做交叉驗證。try-catch 達成 idempotent。
+  try { await db.prepare(`ALTER TABLE metal_price_history DROP CONSTRAINT uq_metal_price_day`).run(); }
+  catch (e) { if (!/ORA-02443|ORA-00942/.test(e.message)) console.warn('[Migration] drop uq_metal_price_day:', e.message); }
+  try {
+    await db.prepare(`ALTER TABLE metal_price_history ADD CONSTRAINT uq_metal_price_day_source UNIQUE (metal_code, as_of_date, source)`).run();
+    console.log('[Migration] METAL_PRICE_HISTORY UNIQUE → (metal_code, as_of_date, source)');
+  } catch (e) { if (!/ORA-02261|ORA-00955/.test(e.message)) console.warn('[Migration] add uq_metal_price_day_source:', e.message); }
+
   try { await db.prepare(`CREATE INDEX idx_mph_date ON metal_price_history(as_of_date)`).run(); } catch (_) {}
   try { await db.prepare(`CREATE INDEX idx_mph_code ON metal_price_history(metal_code)`).run(); } catch (_) {}
+  try { await db.prepare(`CREATE INDEX idx_mph_source ON metal_price_history(source, as_of_date)`).run(); } catch (_) {}
 
-  // Seed metal_price_history 到白名單 — 若尚未存在
+  // Seed / refresh metal_price_history 到白名單
+  // 存在 → 重抓 column_metadata 確保新欄位列入;不存在 → 插入新 entry。
   try {
+    const cols = await db.prepare(
+      `SELECT column_name, data_type, nullable, data_length, data_precision, data_scale
+       FROM user_tab_columns WHERE table_name='METAL_PRICE_HISTORY' ORDER BY column_id`
+    ).all();
+    const columnMeta = (cols || []).map(c => ({
+      name: (c.column_name || c.COLUMN_NAME || '').toLowerCase(),
+      type: c.data_type || c.DATA_TYPE,
+      nullable: (c.nullable || c.NULLABLE) === 'Y',
+      length: c.data_length ?? c.DATA_LENGTH,
+      precision: c.data_precision ?? c.DATA_PRECISION,
+      scale: c.data_scale ?? c.DATA_SCALE,
+    }));
     const existing = await db.prepare(
       `SELECT id FROM pipeline_writable_tables WHERE table_name='metal_price_history'`
     ).get();
-    if (!existing) {
-      // 自動探測欄位 metadata
-      const cols = await db.prepare(
-        `SELECT column_name, data_type, nullable, data_length, data_precision, data_scale
-         FROM user_tab_columns WHERE table_name='METAL_PRICE_HISTORY' ORDER BY column_id`
-      ).all();
-      const columnMeta = (cols || []).map(c => ({
-        name: (c.column_name || c.COLUMN_NAME || '').toLowerCase(),
-        type: c.data_type || c.DATA_TYPE,
-        nullable: (c.nullable || c.NULLABLE) === 'Y',
-        length: c.data_length ?? c.DATA_LENGTH,
-        precision: c.data_precision ?? c.DATA_PRECISION,
-        scale: c.data_scale ?? c.DATA_SCALE,
-      }));
+    if (existing) {
+      await db.prepare(
+        `UPDATE pipeline_writable_tables
+         SET column_metadata=?, last_refreshed_at=SYSTIMESTAMP
+         WHERE table_name='metal_price_history'`
+      ).run(JSON.stringify(columnMeta));
+      console.log(`[Migration] Refreshed pipeline_writable_tables.column_metadata for metal_price_history (${columnMeta.length} cols)`);
+    } else {
       await db.prepare(
         `INSERT INTO pipeline_writable_tables
            (table_name, display_name, description, allowed_operations, max_rows_per_run, column_metadata, is_active, last_refreshed_at)
@@ -3221,14 +3272,14 @@ async function runMigrations(db) {
       ).run(
         'metal_price_history',
         '金屬價格歷史',
-        '每日全球主要金屬(基本 + 貴金屬)行情歷史,供 AI 戰情做趨勢分析',
+        '每日全球主要金屬(基本 + 貴金屬)行情歷史,含原始幣別/換算匯率/來源 URL,供 AI 戰情做趨勢分析與資料反推',
         'insert,upsert,replace_by_date',
         10000,
         JSON.stringify(columnMeta),
       );
       console.log('[Migration] Seeded pipeline_writable_tables entry for metal_price_history');
     }
-  } catch (e) { console.warn('[Migration] seed metal_price_history whitelist:', e.message); }
+  } catch (e) { console.warn('[Migration] seed/refresh metal_price_history whitelist:', e.message); }
 }
 
 // ─── Default DB Source migration ───────────────────────────────────────────────
