@@ -365,9 +365,14 @@ async function runNode(node, vars, db, context, log) {
         break;
       }
       case 'db_write': {
+        console.log(`[Pipeline db_write] Start — table=${node.table}, op=${node.operation}, input.len=${(interpolate(node.input || '{{ai_output}}', vars) || '').length}`);
         const r = await execDbWrite(node, vars, db, context);
         output = r.text;
         entry.db_write_summary = r.dbWriteSummary;
+        console.log(`[Pipeline db_write] OK — ${output}`);
+        if (r.dbWriteSummary?.errors?.length) {
+          console.log(`[Pipeline db_write] row errors (first 3):`, JSON.stringify(r.dbWriteSummary.errors.slice(0, 3)));
+        }
         break;
       }
       case 'condition': {

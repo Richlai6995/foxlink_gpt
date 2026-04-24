@@ -464,13 +464,14 @@ async function runTask(db, taskId) {
         );
         generatedFiles.push(...pFiles);
         pipelineLog = pLog;
+        console.log(`[Scheduled] Pipeline finished for task ${task.id}: log.length=${pipelineLog.length}, preview=${JSON.stringify(pipelineLog).slice(0, 500)}`);
         // Merge any node outputs into response for email body
         const extraText = Object.values(nodeOutputs)
           .filter(v => v && !v.startsWith('[') && v.length > 10)
           .join('\n\n---\n\n');
         if (extraText) responseText = `${responseText}\n\n---\n\n${extraText}`;
       } catch (e) {
-        console.error(`[Scheduled] Pipeline error for task ${task.id}:`, e.message);
+        console.error(`[Scheduled] Pipeline error for task ${task.id}:`, e.message, e.stack);
         pipelineLog = [{ status: 'error', error: e.message }];
       }
     }
