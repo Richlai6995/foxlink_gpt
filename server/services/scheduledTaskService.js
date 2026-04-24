@@ -453,11 +453,14 @@ async function runTask(db, taskId) {
     if (pipelineNodes.length > 0) {
       console.log(`[Scheduled] Running pipeline (${pipelineNodes.length} nodes) for task ${task.id}`);
       try {
+        // runId:pipeline 內節點(如 db_write)會把這個值寫進寫入 rows 的 meta_run_id,用於資料血緣
+        // 用 startMs(epoch ms)當作 runId,唯一且可近似對應 scheduled_task_runs.run_at
+        const runId = startMs;
         const { generatedFiles: pFiles, nodeOutputs, log: pLog } = await runPipeline(
           pipelineNodes,
           responseText,
           db,
-          { userId: task.user_id, sessionId, taskName: task.name, user }
+          { userId: task.user_id, sessionId, taskName: task.name, user, runId }
         );
         generatedFiles.push(...pFiles);
         pipelineLog = pLog;

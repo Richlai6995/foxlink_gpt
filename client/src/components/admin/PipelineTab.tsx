@@ -1,17 +1,29 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect, useMemo } from 'react'
 import {
   Plus, Trash2, ChevronDown, ChevronUp, GitBranch,
   Zap, Wrench, BookOpen, Bot, FileOutput, GitMerge, X,
   GripVertical, AlertCircle, CheckCircle2, LayoutTemplate,
+  Database, Shield, PlayCircle,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import TemplatePickerPopover from '../templates/TemplatePickerPopover'
 import type { DocTemplate } from '../../types'
+import api from '../../lib/api'
+import { useAuth } from '../../context/AuthContext'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
+export type DbWriteOperation = 'insert' | 'upsert' | 'replace_by_date' | 'append'
+export interface DbWriteColumnMap {
+  jsonpath: string
+  column: string
+  transform?: string
+  required?: boolean
+  default?: string
+}
+
 export interface PipelineNode {
   id: string
-  type: 'skill' | 'mcp' | 'kb' | 'ai' | 'generate_file' | 'condition' | 'parallel'
+  type: 'skill' | 'mcp' | 'kb' | 'ai' | 'generate_file' | 'condition' | 'parallel' | 'db_write'
   // skill
   name?: string
   input?: string
@@ -39,8 +51,30 @@ export interface PipelineNode {
   else_id?: string
   // parallel
   steps?: string[]
+  // db_write
+  table?: string
+  operation?: DbWriteOperation
+  key_columns?: string[]
+  date_column?: string
+  column_mapping?: DbWriteColumnMap[]
+  on_row_error?: 'skip' | 'stop'
+  max_rows?: number
   // label
   label?: string
+}
+
+// Whitelist entry returned by /api/pipeline-writable-tables
+interface WritableTable {
+  id: number
+  table_name: string
+  display_name?: string
+  description?: string
+  allowed_operations: string
+  max_rows_per_run?: number
+  is_active: number
+}
+interface WritableTableDetail extends WritableTable {
+  column_metadata: Array<{ name: string; type: string; nullable: boolean }>
 }
 
 interface ToolCatalog {
@@ -63,14 +97,16 @@ interface Props {
 }
 
 // ─── Node type config ─────────────────────────────────────────────────────────
+// adminOnly: true → 只有 role='admin' 或 is_pipeline_admin=1 的 user 才看得到
 const NODE_TYPES = [
-  { type: 'skill',         icon: Zap,        labelKey: 'scheduledTask.pipeline.nodeType.skill',          color: 'text-amber-500',  bg: 'bg-amber-50  border-amber-200' },
-  { type: 'mcp',           icon: Wrench,      labelKey: 'scheduledTask.pipeline.nodeType.mcp',            color: 'text-purple-500', bg: 'bg-purple-50 border-purple-200' },
-  { type: 'kb',            icon: BookOpen,    labelKey: 'scheduledTask.pipeline.nodeType.kb',             color: 'text-green-500',  bg: 'bg-green-50  border-green-200' },
-  { type: 'ai',            icon: Bot,         labelKey: 'scheduledTask.pipeline.nodeType.ai',             color: 'text-blue-500',   bg: 'bg-blue-50   border-blue-200' },
-  { type: 'generate_file', icon: FileOutput,  labelKey: 'scheduledTask.pipeline.nodeType.generate_file',  color: 'text-indigo-500', bg: 'bg-indigo-50 border-indigo-200' },
-  { type: 'condition',     icon: GitBranch,   labelKey: 'scheduledTask.pipeline.nodeType.condition',      color: 'text-rose-500',   bg: 'bg-rose-50   border-rose-200' },
-  { type: 'parallel',      icon: GitMerge,    labelKey: 'scheduledTask.pipeline.nodeType.parallel',       color: 'text-teal-500',   bg: 'bg-teal-50   border-teal-200' },
+  { type: 'skill',         icon: Zap,        labelKey: 'scheduledTask.pipeline.nodeType.skill',          color: 'text-amber-500',  bg: 'bg-amber-50  border-amber-200', adminOnly: false },
+  { type: 'mcp',           icon: Wrench,      labelKey: 'scheduledTask.pipeline.nodeType.mcp',            color: 'text-purple-500', bg: 'bg-purple-50 border-purple-200', adminOnly: false },
+  { type: 'kb',            icon: BookOpen,    labelKey: 'scheduledTask.pipeline.nodeType.kb',             color: 'text-green-500',  bg: 'bg-green-50  border-green-200',  adminOnly: false },
+  { type: 'ai',            icon: Bot,         labelKey: 'scheduledTask.pipeline.nodeType.ai',             color: 'text-blue-500',   bg: 'bg-blue-50   border-blue-200',   adminOnly: false },
+  { type: 'generate_file', icon: FileOutput,  labelKey: 'scheduledTask.pipeline.nodeType.generate_file',  color: 'text-indigo-500', bg: 'bg-indigo-50 border-indigo-200', adminOnly: false },
+  { type: 'condition',     icon: GitBranch,   labelKey: 'scheduledTask.pipeline.nodeType.condition',      color: 'text-rose-500',   bg: 'bg-rose-50   border-rose-200',   adminOnly: false },
+  { type: 'parallel',      icon: GitMerge,    labelKey: 'scheduledTask.pipeline.nodeType.parallel',       color: 'text-teal-500',   bg: 'bg-teal-50   border-teal-200',   adminOnly: false },
+  { type: 'db_write',      icon: Database,    labelKey: 'scheduledTask.pipeline.nodeType.db_write',       color: 'text-slate-600',  bg: 'bg-slate-50  border-slate-300',  adminOnly: true  },
 ] as const
 
 const FILE_TYPES = ['pdf', 'docx', 'xlsx', 'pptx', 'txt', 'mp3']
@@ -177,6 +213,320 @@ function VarInput({
           </button>
         ))}
       </div>
+    </div>
+  )
+}
+
+// ─── DbWriteForm — admin-only: 寫入白名單 table ────────────────────────────
+const DB_OPERATIONS: { value: DbWriteOperation; labelKey: string }[] = [
+  { value: 'upsert',           labelKey: 'scheduledTask.pipeline.dbWrite.opUpsert' },
+  { value: 'insert',           labelKey: 'scheduledTask.pipeline.dbWrite.opInsert' },
+  { value: 'replace_by_date',  labelKey: 'scheduledTask.pipeline.dbWrite.opReplaceByDate' },
+  { value: 'append',           labelKey: 'scheduledTask.pipeline.dbWrite.opAppend' },
+]
+
+const TRANSFORMS = ['', 'upper', 'lower', 'trim', 'number', 'date', 'strip_comma', 'null_if_dash']
+
+function DbWriteForm({
+  node, otherIds, onChange,
+}: {
+  node: PipelineNode
+  otherIds: string[]
+  onChange: (patch: Partial<PipelineNode>) => void
+}) {
+  const { t } = useTranslation()
+  const [tables, setTables]   = useState<WritableTable[]>([])
+  const [detail, setDetail]   = useState<WritableTableDetail | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [dryRunResult, setDryRunResult] = useState<any>(null)
+  const [dryRunning, setDryRunning] = useState(false)
+
+  // Load whitelist tables
+  useEffect(() => {
+    api.get('/pipeline-writable-tables')
+      .then(r => setTables((r.data || []).filter((x: WritableTable) => x.is_active === 1)))
+      .catch(() => setTables([]))
+  }, [])
+
+  // Load detail (columns) when table changes
+  useEffect(() => {
+    if (!node.table) { setDetail(null); return }
+    setLoading(true)
+    // Find id by table_name
+    const entry = tables.find(t => t.table_name === node.table)
+    if (!entry) { setLoading(false); return }
+    api.get(`/pipeline-writable-tables/${entry.id}`)
+      .then(r => setDetail(r.data))
+      .catch(() => setDetail(null))
+      .finally(() => setLoading(false))
+  }, [node.table, tables])
+
+  const allowedOps = useMemo(() => {
+    const entry = tables.find(t => t.table_name === node.table)
+    if (!entry) return DB_OPERATIONS.map(o => o.value)
+    return entry.allowed_operations.split(',').map(s => s.trim()) as DbWriteOperation[]
+  }, [node.table, tables])
+
+  // 過濾掉 meta 欄位(自動附加,不需要 admin mapping)
+  const META_COLS = new Set(['meta_run_id', 'meta_pipeline', 'creation_date', 'last_updated_date', 'id'])
+  const userColumns = useMemo(
+    () => (detail?.column_metadata || []).filter(c => !META_COLS.has(c.name)),
+    [detail],
+  )
+
+  const updateMapping = (i: number, patch: Partial<DbWriteColumnMap>) => {
+    const arr = [...(node.column_mapping || [])]
+    arr[i] = { ...arr[i], ...patch }
+    onChange({ column_mapping: arr })
+  }
+  const addMapping = () => onChange({ column_mapping: [...(node.column_mapping || []), { jsonpath: '$.', column: '', transform: '' }] })
+  const removeMapping = (i: number) => {
+    const arr = [...(node.column_mapping || [])]
+    arr.splice(i, 1)
+    onChange({ column_mapping: arr })
+  }
+
+  const autoMapAllColumns = () => {
+    // Convenience: 對每個 user column 產生一組 `$.{col}` → {col} 映射
+    const mapping: DbWriteColumnMap[] = userColumns.map(c => ({
+      jsonpath: `$.${c.name}`,
+      column: c.name,
+      transform: '',
+      required: !c.nullable,
+    }))
+    onChange({ column_mapping: mapping })
+  }
+
+  const runDryRun = async () => {
+    setDryRunning(true)
+    setDryRunResult(null)
+    try {
+      // 用 ai_output 當預覽來源?使用者還沒跑過 LLM,只能給個空字串,讓他手動貼入
+      // 這裡 fallback: 用 node.input 的字面(可能含 {{ai_output}} 未 interpolate)
+      const sourceText = (node as any)._dry_run_sample || ''
+      const r = await api.post('/pipeline-writable-tables/dry-run', {
+        node_config: {
+          table: node.table,
+          operation: node.operation,
+          key_columns: node.key_columns,
+          date_column: node.date_column,
+          column_mapping: node.column_mapping,
+          on_row_error: node.on_row_error,
+          max_rows: node.max_rows,
+        },
+        source_text: sourceText,
+      })
+      setDryRunResult(r.data)
+    } catch (e: any) {
+      setDryRunResult({ error: e?.response?.data?.error || e.message })
+    } finally {
+      setDryRunning(false)
+    }
+  }
+
+  return (
+    <div className="space-y-3">
+      {/* Admin-only 警告 */}
+      <div className="flex items-start gap-1.5 text-xs bg-amber-50 border border-amber-200 rounded px-2 py-1.5 text-amber-700">
+        <Shield size={12} className="shrink-0 mt-0.5" />
+        <span>{t('scheduledTask.pipeline.dbWrite.adminOnlyHint')}</span>
+      </div>
+
+      {/* Table 選擇 */}
+      <div>
+        <label className="label text-xs">{t('scheduledTask.pipeline.dbWrite.targetTable')}</label>
+        <select
+          className="input w-full text-xs"
+          value={node.table || ''}
+          onChange={(e) => onChange({ table: e.target.value, operation: undefined, key_columns: [], column_mapping: [] })}
+        >
+          <option value="">{t('scheduledTask.pipeline.dbWrite.selectTable')}</option>
+          {tables.map(tb => (
+            <option key={tb.id} value={tb.table_name}>
+              {tb.display_name || tb.table_name} ({tb.table_name})
+            </option>
+          ))}
+        </select>
+        {tables.length === 0 && (
+          <p className="text-[10px] text-slate-400 mt-1">{t('scheduledTask.pipeline.dbWrite.noTablesHint')}</p>
+        )}
+      </div>
+
+      {node.table && (
+        <>
+          {/* Operation */}
+          <div>
+            <label className="label text-xs">{t('scheduledTask.pipeline.dbWrite.operation')}</label>
+            <select
+              className="input w-full text-xs"
+              value={node.operation || ''}
+              onChange={(e) => onChange({ operation: e.target.value as DbWriteOperation })}
+            >
+              <option value="">{t('scheduledTask.pipeline.dbWrite.selectOp')}</option>
+              {DB_OPERATIONS.filter(o => allowedOps.includes(o.value)).map(o => (
+                <option key={o.value} value={o.value}>{t(o.labelKey)}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* UPSERT 的 key_columns */}
+          {node.operation === 'upsert' && detail && (
+            <div>
+              <label className="label text-xs">{t('scheduledTask.pipeline.dbWrite.keyColumns')}</label>
+              <div className="flex flex-wrap gap-1.5 bg-slate-50 border border-slate-200 rounded p-2">
+                {userColumns.map(c => {
+                  const checked = (node.key_columns || []).includes(c.name)
+                  return (
+                    <label key={c.name} className="flex items-center gap-1 text-xs cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => {
+                          const arr = checked
+                            ? (node.key_columns || []).filter(k => k !== c.name)
+                            : [...(node.key_columns || []), c.name]
+                          onChange({ key_columns: arr })
+                        }}
+                      />
+                      <span>{c.name}</span>
+                    </label>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* REPLACE_BY_DATE 的 date_column */}
+          {node.operation === 'replace_by_date' && detail && (
+            <div>
+              <label className="label text-xs">{t('scheduledTask.pipeline.dbWrite.dateColumn')}</label>
+              <select
+                className="input w-full text-xs"
+                value={node.date_column || ''}
+                onChange={(e) => onChange({ date_column: e.target.value })}
+              >
+                <option value="">{t('scheduledTask.pipeline.dbWrite.selectDateColumn')}</option>
+                {userColumns.filter(c => /^(DATE|TIMESTAMP)/i.test(c.type)).map(c => (
+                  <option key={c.name} value={c.name}>{c.name} ({c.type})</option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {/* Column mapping */}
+          {detail && (
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <label className="label text-xs m-0">{t('scheduledTask.pipeline.dbWrite.columnMapping')}</label>
+                <div className="flex gap-1">
+                  <button type="button" onClick={autoMapAllColumns}
+                    className="text-xs px-2 py-0.5 rounded border border-slate-300 text-slate-500 hover:border-blue-400 hover:text-blue-600">
+                    {t('scheduledTask.pipeline.dbWrite.autoMap')}
+                  </button>
+                </div>
+              </div>
+              <div className="space-y-1">
+                {(node.column_mapping || []).map((m, i) => (
+                  <div key={i} className="grid grid-cols-[2fr_2fr_1.2fr_auto_auto] gap-1 items-center">
+                    <input
+                      className="input text-xs font-mono"
+                      value={m.jsonpath}
+                      onChange={(e) => updateMapping(i, { jsonpath: e.target.value })}
+                      placeholder="$.price_usd"
+                    />
+                    <select
+                      className="input text-xs"
+                      value={m.column}
+                      onChange={(e) => updateMapping(i, { column: e.target.value })}
+                    >
+                      <option value="">{t('scheduledTask.pipeline.dbWrite.pickCol')}</option>
+                      {userColumns.map(c => (
+                        <option key={c.name} value={c.name}>{c.name} {c.nullable ? '' : '*'}</option>
+                      ))}
+                    </select>
+                    <select
+                      className="input text-xs"
+                      value={m.transform || ''}
+                      onChange={(e) => updateMapping(i, { transform: e.target.value })}
+                    >
+                      {TRANSFORMS.map(tr => <option key={tr} value={tr}>{tr || t('scheduledTask.pipeline.dbWrite.noTransform')}</option>)}
+                    </select>
+                    <label className="flex items-center gap-1 text-[10px]" title={t('scheduledTask.pipeline.dbWrite.required')}>
+                      <input type="checkbox" checked={!!m.required} onChange={(e) => updateMapping(i, { required: e.target.checked })} />
+                      *
+                    </label>
+                    <button type="button" onClick={() => removeMapping(i)} className="p-0.5 text-slate-300 hover:text-rose-500">
+                      <X size={12} />
+                    </button>
+                  </div>
+                ))}
+                <button type="button" onClick={addMapping}
+                  className="flex items-center gap-1 text-xs text-slate-500 hover:text-blue-600">
+                  <Plus size={11} /> {t('scheduledTask.pipeline.dbWrite.addMapping')}
+                </button>
+              </div>
+              <p className="text-[10px] text-slate-400 mt-1">{t('scheduledTask.pipeline.dbWrite.mappingHint')}</p>
+            </div>
+          )}
+
+          {/* 上游 input */}
+          <div>
+            <label className="label text-xs">{t('scheduledTask.pipeline.dbWrite.inputSource')}</label>
+            <VarInput
+              value={node.input || '{{ai_output}}'}
+              onChange={(v) => onChange({ input: v })}
+              placeholder="{{ai_output}}"
+              allNodeIds={otherIds}
+            />
+          </div>
+
+          {/* Error handling */}
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="label text-xs">{t('scheduledTask.pipeline.dbWrite.onRowError')}</label>
+              <select
+                className="input w-full text-xs"
+                value={node.on_row_error || 'skip'}
+                onChange={(e) => onChange({ on_row_error: e.target.value as 'skip' | 'stop' })}
+              >
+                <option value="skip">{t('scheduledTask.pipeline.dbWrite.skipBadRow')}</option>
+                <option value="stop">{t('scheduledTask.pipeline.dbWrite.stopOnError')}</option>
+              </select>
+            </div>
+            <div>
+              <label className="label text-xs">{t('scheduledTask.pipeline.dbWrite.maxRows')}</label>
+              <input
+                type="number"
+                className="input w-full text-xs"
+                value={node.max_rows ?? ''}
+                onChange={(e) => onChange({ max_rows: e.target.value ? Number(e.target.value) : undefined })}
+                placeholder={String(detail?.max_rows_per_run || 10000)}
+              />
+            </div>
+          </div>
+
+          {/* Dry-run */}
+          <div className="pt-2 border-t border-slate-200">
+            <label className="label text-xs">{t('scheduledTask.pipeline.dbWrite.dryRunSample')}</label>
+            <textarea
+              className="input w-full h-16 text-xs font-mono resize-none"
+              value={(node as any)._dry_run_sample || ''}
+              onChange={(e) => onChange({ _dry_run_sample: e.target.value } as any)}
+              placeholder='[{"metal_code":"CU","price_usd":13190,...}]'
+            />
+            <button type="button" onClick={runDryRun} disabled={dryRunning || !node.column_mapping?.length}
+              className="mt-2 flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-slate-300 text-slate-600 hover:border-blue-400 hover:text-blue-600 disabled:opacity-40">
+              <PlayCircle size={12} /> {dryRunning ? t('scheduledTask.pipeline.dbWrite.dryRunning') : t('scheduledTask.pipeline.dbWrite.runDryRun')}
+            </button>
+            {dryRunResult && (
+              <pre className="mt-2 text-[10px] font-mono bg-slate-50 border border-slate-200 rounded p-2 max-h-48 overflow-auto whitespace-pre-wrap">
+                {JSON.stringify(dryRunResult, null, 2)}
+              </pre>
+            )}
+          </div>
+        </>
+      )}
+      {loading && <p className="text-xs text-slate-400">{t('scheduledTask.pipeline.dbWrite.loading')}</p>}
     </div>
   )
 }
@@ -379,6 +729,10 @@ function NodeForm({
     <GenerateFileForm node={node} otherIds={otherIds} onChange={onChange} />
   )
 
+  if (node.type === 'db_write') return (
+    <DbWriteForm node={node} otherIds={otherIds} onChange={onChange} />
+  )
+
   if (node.type === 'condition') return (
     <div className="space-y-3">
       <div>
@@ -501,6 +855,9 @@ function NodeCard({
       ? t('scheduledTask.pipeline.summary.aiJudge')
       : `${t(`scheduledTask.pipeline.ops.${node.operator || 'contains'}`)} "${node.value || ''}"`
     if (node.type === 'parallel') return t('scheduledTask.pipeline.summary.parallelCount', { count: (node.steps || []).length })
+    if (node.type === 'db_write') return node.table
+      ? `${node.table} (${node.operation || '—'}, ${(node.column_mapping || []).length} cols)`
+      : t('scheduledTask.pipeline.summary.notSet')
     return ''
   })()
 
@@ -552,7 +909,10 @@ function NodeCard({
 // ─── AddNodeMenu ──────────────────────────────────────────────────────────────
 function AddNodeMenu({ onAdd }: { onAdd: (type: PipelineNode['type']) => void }) {
   const { t } = useTranslation()
+  const { user, isAdmin } = useAuth()
   const [open, setOpen] = useState(false)
+  const isPipelineAdmin = isAdmin || (user as any)?.is_pipeline_admin === 1
+  const visibleTypes = NODE_TYPES.filter(nt => !nt.adminOnly || isPipelineAdmin)
   return (
     <div className="relative">
       <button
@@ -566,7 +926,7 @@ function AddNodeMenu({ onAdd }: { onAdd: (type: PipelineNode['type']) => void })
         <>
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
           <div className="absolute z-50 bottom-full mb-1 left-0 right-0 bg-white border border-slate-200 rounded-xl shadow-lg p-2 grid grid-cols-2 gap-1">
-            {NODE_TYPES.map(({ type, icon: Icon, labelKey, color }) => (
+            {visibleTypes.map(({ type, icon: Icon, labelKey, color, adminOnly }) => (
               <button
                 key={type}
                 type="button"
@@ -575,6 +935,7 @@ function AddNodeMenu({ onAdd }: { onAdd: (type: PipelineNode['type']) => void })
               >
                 <Icon size={13} className={color} />
                 <span className="text-slate-700">{t(labelKey)}</span>
+                {adminOnly && <Shield size={10} className="text-amber-500 ml-auto" />}
               </button>
             ))}
           </div>
@@ -602,7 +963,14 @@ export default function PipelineTab({ nodes, onChange, catalog, mcpServers, task
   }
 
   const add = (type: PipelineNode['type']) => {
-    onChange([...nodes, { id: newId(), type, label: '' }])
+    const base: PipelineNode = { id: newId(), type, label: '' }
+    if (type === 'db_write') {
+      base.operation = 'upsert'
+      base.on_row_error = 'skip'
+      base.column_mapping = []
+      base.input = '{{ai_output}}'
+    }
+    onChange([...nodes, base])
   }
 
   return (

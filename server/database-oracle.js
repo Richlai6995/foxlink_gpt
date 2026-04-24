@@ -3152,6 +3152,83 @@ async function runMigrations(db) {
   // ── MCP ServerInstructions(initialize.result.instructions)────────────────
   // 從 MCP server 的 initialize 回應保存下來,chat 組 systemInstruction 時注入
   await safeAddColumn('MCP_SERVERS', 'SERVER_INSTRUCTIONS', 'CLOB');
+
+  // ── Pipeline DB Write(排程 pipeline 的 db_write 節點)─────────────────────
+  // users.is_pipeline_admin: 1 = 有權編輯 pipeline db_write 節點 / 管理白名單
+  await safeAddColumn('USERS', 'IS_PIPELINE_ADMIN', 'NUMBER(1) DEFAULT 0');
+
+  // pipeline_writable_tables: admin 預先核准哪些表可被 pipeline 寫入
+  await createTable('PIPELINE_WRITABLE_TABLES', `CREATE TABLE pipeline_writable_tables (
+    id                   NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    table_name           VARCHAR2(128) NOT NULL UNIQUE,
+    display_name         VARCHAR2(200),
+    description          VARCHAR2(2000),
+    allowed_operations   VARCHAR2(200) DEFAULT 'insert,upsert',
+    max_rows_per_run     NUMBER        DEFAULT 10000,
+    column_metadata      CLOB,
+    is_active            NUMBER(1)     DEFAULT 1,
+    approved_by          NUMBER,
+    approved_at          TIMESTAMP     DEFAULT SYSTIMESTAMP,
+    last_refreshed_at    TIMESTAMP,
+    notes                VARCHAR2(2000)
+  )`);
+
+  // metal_price_history: 第一個落地 target table — 排程金屬行情歷史
+  await createTable('METAL_PRICE_HISTORY', `CREATE TABLE metal_price_history (
+    id                NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    as_of_date        DATE          NOT NULL,
+    metal_code        VARCHAR2(10)  NOT NULL,
+    metal_name        VARCHAR2(30),
+    price_usd         NUMBER(18,4),
+    unit              VARCHAR2(20),
+    day_change_pct    NUMBER(8,4),
+    lme_stock         NUMBER(14),
+    stock_change      NUMBER(14),
+    source            VARCHAR2(50),
+    raw_snippet       CLOB,
+    meta_run_id       NUMBER,
+    meta_pipeline     VARCHAR2(200),
+    creation_date     TIMESTAMP     DEFAULT SYSTIMESTAMP,
+    last_updated_date TIMESTAMP     DEFAULT SYSTIMESTAMP,
+    CONSTRAINT uq_metal_price_day UNIQUE (metal_code, as_of_date)
+  )`);
+  try { await db.prepare(`CREATE INDEX idx_mph_date ON metal_price_history(as_of_date)`).run(); } catch (_) {}
+  try { await db.prepare(`CREATE INDEX idx_mph_code ON metal_price_history(metal_code)`).run(); } catch (_) {}
+
+  // Seed metal_price_history 到白名單 — 若尚未存在
+  try {
+    const existing = await db.prepare(
+      `SELECT id FROM pipeline_writable_tables WHERE table_name='metal_price_history'`
+    ).get();
+    if (!existing) {
+      // 自動探測欄位 metadata
+      const cols = await db.prepare(
+        `SELECT column_name, data_type, nullable, data_length, data_precision, data_scale
+         FROM user_tab_columns WHERE table_name='METAL_PRICE_HISTORY' ORDER BY column_id`
+      ).all();
+      const columnMeta = (cols || []).map(c => ({
+        name: (c.column_name || c.COLUMN_NAME || '').toLowerCase(),
+        type: c.data_type || c.DATA_TYPE,
+        nullable: (c.nullable || c.NULLABLE) === 'Y',
+        length: c.data_length ?? c.DATA_LENGTH,
+        precision: c.data_precision ?? c.DATA_PRECISION,
+        scale: c.data_scale ?? c.DATA_SCALE,
+      }));
+      await db.prepare(
+        `INSERT INTO pipeline_writable_tables
+           (table_name, display_name, description, allowed_operations, max_rows_per_run, column_metadata, is_active, last_refreshed_at)
+         VALUES (?,?,?,?,?,?,1,SYSTIMESTAMP)`
+      ).run(
+        'metal_price_history',
+        '金屬價格歷史',
+        '每日全球主要金屬(基本 + 貴金屬)行情歷史,供 AI 戰情做趨勢分析',
+        'insert,upsert,replace_by_date',
+        10000,
+        JSON.stringify(columnMeta),
+      );
+      console.log('[Migration] Seeded pipeline_writable_tables entry for metal_price_history');
+    }
+  } catch (e) { console.warn('[Migration] seed metal_price_history whitelist:', e.message); }
 }
 
 // ─── Default DB Source migration ───────────────────────────────────────────────

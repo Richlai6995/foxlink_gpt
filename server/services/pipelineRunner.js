@@ -12,6 +12,7 @@
  *   generate_file — generate pdf/xlsx/docx/mp3/etc from text
  *   condition    — if/else branching (text contains or ai_judge)
  *   parallel     — run multiple nodes concurrently
+ *   db_write     — write structured JSON to whitelisted DB table (admin / pipeline_admin only)
  *
  * Variable interpolation: {{ai_output}}, {{node_<id>_output}}, {{date}}, {{task_name}}
  */
@@ -269,6 +270,22 @@ async function execGenerateFile(node, vars, db, context) {
   throw new Error(`generate_${fileType} 無法生成檔案`);
 }
 
+async function execDbWrite(node, vars, db, context) {
+  const { executeDbWrite } = require('./pipelineDbWriter');
+  const input = interpolate(node.input || '{{ai_output}}', vars);
+  const result = await executeDbWrite(db, node, input, {
+    user: context.user || null,
+    userId: context.userId,
+    runId: context.runId || null,
+    taskName: context.taskName || '',
+    nodeId: node.id,
+    dryRun: false,
+  });
+  const errCount = result.errors?.length || 0;
+  const text = `[DB 寫入 ${node.table}: ${result.inserted} inserted / ${result.updated} updated / ${result.skipped} skipped${errCount ? ' / ' + errCount + ' errors' : ''}]`;
+  return { text, dbWriteSummary: { table: node.table, operation: node.operation, ...result } };
+}
+
 async function execCondition(node, vars, db) {
   const input = interpolate(node.input || '{{ai_output}}', vars);
 
@@ -345,6 +362,12 @@ async function runNode(node, vars, db, context, log) {
       case 'generate_file': {
         const r = await execGenerateFile(node, vars, db, context);
         output = r.text; file = r.file;
+        break;
+      }
+      case 'db_write': {
+        const r = await execDbWrite(node, vars, db, context);
+        output = r.text;
+        entry.db_write_summary = r.dbWriteSummary;
         break;
       }
       case 'condition': {

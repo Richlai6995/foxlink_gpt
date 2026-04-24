@@ -16,6 +16,7 @@ async function buildSessionPayload(db, userId) {
     can_use_ai_dashboard: u.can_use_ai_dashboard,
     training_permission:  u.training_permission,
     is_erp_admin:    u.is_erp_admin === 1 || u.is_erp_admin === '1',
+    is_pipeline_admin: (u.is_pipeline_admin === 1 || u.is_pipeline_admin === '1') ? 1 : 0,
     role_id:         u.role_id,
     dept_code:       u.dept_code,
     profit_center:   u.profit_center,
