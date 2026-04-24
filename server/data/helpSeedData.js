@@ -9106,7 +9106,7 @@ const userSections = [
     "sort_order": 33,
     "icon": "BarChart3",
     "icon_color": "text-amber-600",
-    "last_modified": "2026-04-26",
+    "last_modified": "2026-04-27",
     "title": "對話圖表與我的圖庫",
     "sidebar_label": "對話圖表",
     "blocks": [
@@ -9215,11 +9215,11 @@ const userSections = [
               {
                 "type": "steps",
                 "items": [
-                  "到「我的圖庫」點上方 tab「樣式模板」",
-                  "按右上「+ 新增模板」",
-                  "輸入名稱(如「部門報告用」)+ 選項 + 即時預覽",
-                  "儲存",
-                  "在列表點該模板的 ⭐ 按鈕設為預設(下拉選單選 all / bar / pie 等)"
+                  { "title": "到「我的圖庫」點上方 tab「樣式模板」" },
+                  { "title": "按右上「+ 新增模板」" },
+                  { "title": "輸入名稱(如「部門報告用」)", "desc": "右側調整選項,左側即時預覽" },
+                  { "title": "儲存" },
+                  { "title": "在列表點該模板的 ⭐ 按鈕設為預設", "desc": "下拉選單選 all / bar / line / area / pie / scatter / heatmap / radar" }
                 ]
               },
               {
@@ -9274,13 +9274,13 @@ const userSections = [
           {
             "type": "steps",
             "items": [
-              "側邊工具欄 → 選擇 ERP 工具",
-              "填入參數後按「執行」，等待結果",
-              "結果出現後切到右上角「📊 圖表」tab",
-              "選擇圖型(長條 / 折線 / 面積 / 圓餅)",
-              "選 X 軸欄位 + 勾選 Y 軸欄位(可多選)",
-              "調整標題，右下即時預覽",
-              "按「儲存到圖庫」把這張圖的**設計**存成可重用模板"
+              { "title": "側邊工具欄 → 選擇 ERP 工具" },
+              { "title": "填入參數後按「執行」", "desc": "等待 procedure 回傳結果" },
+              { "title": "結果出現後切到右上角「📊 圖表」tab" },
+              { "title": "選擇圖型", "desc": "長條 / 折線 / 面積 / 圓餅" },
+              { "title": "選 X 軸欄位 + 勾選 Y 軸欄位", "desc": "Y 軸可多選作疊加比較" },
+              { "title": "調整標題,右下即時預覽" },
+              { "title": "按「儲存到圖庫」", "desc": "把這張圖的「設計」存成可重用模板（不存資料）" }
             ]
           },
           {
