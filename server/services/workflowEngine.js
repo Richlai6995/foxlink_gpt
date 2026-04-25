@@ -86,19 +86,8 @@ async function executeSkillByRow(db, skill, input, context = {}) {
 
   if (skill.type === 'builtin') {
     const generateTextSync = getGenerateTextSync();
-    let apiModel = skill.model_key || null;
-    if (apiModel) {
-      try {
-        const row = await db.prepare('SELECT api_model FROM llm_models WHERE key=? AND is_active=1').get(apiModel);
-        if (row?.api_model) apiModel = row.api_model;
-      } catch (_) { /* ignore */ }
-    }
-    if (!apiModel) {
-      try {
-        const resolveDefaultModel = getResolveDefaultModel();
-        apiModel = await resolveDefaultModel(db, 'chat');
-      } catch (_) { apiModel = null; }
-    }
+    const { resolveTaskModel } = require('./llmDefaults');
+    const apiModel = await resolveTaskModel(db, skill.model_key, 'chat').catch(() => null);
     const sysPrompt = skill.system_prompt || '';
     const history = sysPrompt
       ? [{ role: 'user', parts: [{ text: sysPrompt }] }, { role: 'model', parts: [{ text: '好的，我明白了。' }] }]
@@ -397,20 +386,9 @@ class WorkflowEngine {
     const data = node.data || {};
     const generateTextSync = getGenerateTextSync();
 
-    // Resolve model_key to actual api_model
-    let apiModel = data.model_key || null;
-    if (apiModel) {
-      try {
-        const row = await this.db.prepare('SELECT api_model FROM llm_models WHERE key=? AND is_active=1').get(apiModel);
-        if (row?.api_model) apiModel = row.api_model;
-      } catch (_) { /* ignore */ }
-    }
-    if (!apiModel) {
-      try {
-        const resolveDefaultModel = getResolveDefaultModel();
-        apiModel = await resolveDefaultModel(this.db, 'chat');
-      } catch (_) { apiModel = null; }
-    }
+    // Resolve model_key to actual api_model(統一 helper,alias miss 自動 fallback)
+    const { resolveTaskModel } = require('./llmDefaults');
+    const apiModel = await resolveTaskModel(this.db, data.model_key, 'chat').catch(() => null);
 
     const systemPrompt = this.resolveTemplate(data.system_prompt || '');
     const userPrompt = this.resolveTemplate(data.user_prompt || '{{start.output}}');

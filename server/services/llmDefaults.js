@@ -89,4 +89,43 @@ async function resolveDefaultModelRow(db, role) {
   } catch { return null; }
 }
 
-module.exports = { resolveDefaultModel, resolveDefaultModelRow, resolveResearchConfig, SETTING_KEY, ENV_FALLBACK };
+/**
+ * Task / skill / pipeline 共用的 model resolver。
+ *
+ * 設計目標:解決「task.model='pro'(alias)但 llm_models 表沒有 key='pro' entry」這類
+ * 配置錯誤導致 LLM 收到字面 'pro' 名稱去 Vertex 查 → 404 的崩潰。
+ *
+ * 邏輯:
+ *   1. modelKey 空 → 走 resolveDefaultModel(db, role)(env / system_settings 回退)
+ *   2. lookup llm_models WHERE key=modelKey,有對到 → 回 api_model
+ *   3. lookup miss:
+ *      a. modelKey 看起來像真 api name(含 '-' 且 ≥10 字元)→ 直接回(可能是 user 直接寫 api 名)
+ *      b. 否則(短 alias 但表沒對到)→ warn + 回 resolveDefaultModel
+ *
+ * @param {object} db
+ * @param {string|null} modelKey  task.model / node.model / skill.model_key
+ * @param {string} role  'chat'(預設)/ 'research' / ...,給 fallback 用
+ * @returns {Promise<string>} api_model 字串(永不為空,失敗時拿 env fallback)
+ */
+async function resolveTaskModel(db, modelKey, role = 'chat') {
+  if (!modelKey || !String(modelKey).trim()) {
+    return await resolveDefaultModel(db, role);
+  }
+  const k = String(modelKey).trim();
+  try {
+    const row = await db.prepare(
+      `SELECT api_model FROM llm_models WHERE key=? AND is_active=1`
+    ).get(k);
+    if (row?.api_model) return row.api_model;
+  } catch (_) { /* fall through */ }
+  // lookup miss
+  if (k.includes('-') && k.length >= 10) {
+    // 看起來像 api name(gemini-3-flash-preview / gpt-5o-2025-04-25 等)→ 直接用
+    return k;
+  }
+  // alias-like(pro / flash / chat)但表沒對到 → fallback
+  console.warn(`[llmDefaults] modelKey "${k}" 在 llm_models 表無 active entry,且不像 API 名,fallback 到 default ${role} model`);
+  return await resolveDefaultModel(db, role);
+}
+
+module.exports = { resolveDefaultModel, resolveDefaultModelRow, resolveResearchConfig, resolveTaskModel, SETTING_KEY, ENV_FALLBACK };

@@ -85,15 +85,8 @@ async function execSkill(node, vars, db, context) {
 
   if (skill.type === 'builtin') {
     const { generateTextSync } = require('./gemini');
-    let apiModel = skill.model_key || null;
-    if (apiModel) {
-      const row = await db.prepare('SELECT api_model FROM llm_models WHERE key=? AND is_active=1').get(apiModel).catch(() => null);
-      if (row?.api_model) apiModel = row.api_model;
-    }
-    if (!apiModel) {
-      const { resolveDefaultModel } = require('./llmDefaults');
-      apiModel = await resolveDefaultModel(db, 'chat').catch(() => null);
-    }
+    const { resolveTaskModel } = require('./llmDefaults');
+    const apiModel = await resolveTaskModel(db, skill.model_key, 'chat').catch(() => null);
     const sysPrompt = skill.system_prompt || '';
     const history = sysPrompt ? [{ role: 'user', parts: [{ text: sysPrompt }] }, { role: 'model', parts: [{ text: '好的。' }] }] : [];
     const { text } = await generateTextSync(apiModel, history, input || '請執行');
@@ -170,15 +163,10 @@ async function execKb(node, vars, db) {
 
 async function execAi(node, vars, db) {
   const { generateTextSync } = require('./gemini');
-  const { resolveDefaultModel } = require('./llmDefaults');
+  const { resolveTaskModel } = require('./llmDefaults');
 
   const prompt = interpolate(node.prompt || '{{ai_output}}', vars);
-  let apiModel = node.model || null;
-  if (apiModel) {
-    const row = await db.prepare('SELECT api_model FROM llm_models WHERE key=? AND is_active=1').get(apiModel).catch(() => null);
-    if (row?.api_model) apiModel = row.api_model;
-  }
-  if (!apiModel) apiModel = await resolveDefaultModel(db, 'chat').catch(() => null);
+  const apiModel = await resolveTaskModel(db, node.model, 'chat').catch(() => null);
 
   const { text } = await generateTextSync(apiModel, [], prompt);
   return text;

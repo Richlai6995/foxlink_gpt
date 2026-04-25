@@ -62,23 +62,9 @@ async function executeSkillByRow(db, skill, input, context = {}) {
 
   if (skill.type === 'builtin') {
     const { generateTextSync } = require('./gemini');
-    let apiModel = skill.model_key || null;
-    if (apiModel) {
-      try {
-        const row = await db.prepare('SELECT api_model FROM llm_models WHERE key=? AND is_active=1').get(apiModel);
-        if (row?.api_model) apiModel = row.api_model;
-      } catch (_) {}
-    }
-    if (!apiModel) {
-      // Use default chat model
-      try {
-        const { resolveDefaultModel } = require('./llmDefaults');
-        apiModel = await resolveDefaultModel(db, 'chat');
-      } catch (_) { apiModel = null; }
-    }
-    if (!apiModel) {
-      apiModel = process.env.GEMINI_MODEL_PRO || 'gemini-2.5-pro';
-    }
+    const { resolveTaskModel } = require('./llmDefaults');
+    let apiModel = await resolveTaskModel(db, skill.model_key, 'chat').catch(() => null);
+    if (!apiModel) apiModel = process.env.GEMINI_MODEL_PRO || 'gemini-2.5-pro';
     const sysPrompt = skill.system_prompt || '';
     const history = sysPrompt ? [{ role: 'user', parts: [{ text: sysPrompt }] }, { role: 'model', parts: [{ text: '好的，我明白了。' }] }] : [];
     const { text } = await generateTextSync(apiModel, history, input || '請執行');

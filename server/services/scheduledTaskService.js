@@ -280,12 +280,10 @@ async function runTask(db, taskId) {
     const { result, attempt } = await withRetry(async (tryNum) => {
       attemptNum = tryNum;
 
-      // Resolve model API id
-      let apiModel = task.model;
-      try {
-        const row = await db.prepare('SELECT api_model FROM llm_models WHERE key=? AND is_active=1').get(task.model);
-        if (row?.api_model) apiModel = row.api_model;
-      } catch (_) {}
+      // Resolve model API id(用統一 helper,alias miss 自動 fallback 預設 chat model 而非
+      // 把 'pro' / 'flash' 字面傳給 Vertex 變 404)
+      const { resolveTaskModel } = require('./llmDefaults');
+      const apiModel = await resolveTaskModel(db, task.model, 'chat');
 
       // Render prompt variables (+ fetch any {{fetch:URL}} placeholders)
       let renderedPrompt = await substituteVarsAsync(task.prompt, task.name);
