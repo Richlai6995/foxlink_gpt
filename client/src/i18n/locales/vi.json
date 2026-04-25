@@ -285,6 +285,8 @@
       "allowedOps": "Chế độ ghi được phép",
       "maxRows": "Giới hạn mỗi lần",
       "notes": "Ghi chú",
+      "registerAiDashboard": "Tự động đăng ký vào AI Dashboard",
+      "registerAiDashboardHint": "Khi tích, tự động tạo Schema + Design mặc định trong AI Dashboard. Người dùng có thể truy vấn ngay bằng ngôn ngữ tự nhiên trong Project \"Pipeline Auto-Landing\".",
       "approve": "Phê duyệt",
       "approving": "Đang phê duyệt…",
       "empty": "Chưa có bảng nào được phê duyệt.",

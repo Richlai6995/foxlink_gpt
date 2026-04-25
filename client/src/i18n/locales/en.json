@@ -285,6 +285,8 @@
       "allowedOps": "Allowed Operations",
       "maxRows": "Max rows/run",
       "notes": "Notes",
+      "registerAiDashboard": "Auto-register to AI Dashboard",
+      "registerAiDashboardHint": "When checked, auto-create AI Dashboard Schema + default Designs, so users can query this table via natural language in the \"Pipeline Auto-Landing\" Project.",
       "approve": "Approve",
       "approving": "Approving…",
       "empty": "No approved tables yet. Click Approve New to add the first one.",

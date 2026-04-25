@@ -285,6 +285,8 @@
       "allowedOps": "允許的寫入模式",
       "maxRows": "單次上限",
       "notes": "備註",
+      "registerAiDashboard": "同步註冊到 AI 戰情",
+      "registerAiDashboardHint": "勾選後,核准的同時自動建立對應的 AI 戰情 Schema + 預設 Design,使用者立即可在「Pipeline 自動落地」Project 用自然語言查此表。",
       "approve": "核准",
       "approving": "核准中…",
       "empty": "尚無任何已核准的可寫表,請點「核准新表」建立第一筆。",

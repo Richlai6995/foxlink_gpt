@@ -44,6 +44,7 @@ export default function PipelineWritableTablesPanel() {
     allowed_operations: 'insert,upsert',
     max_rows_per_run: 10000,
     notes: '',
+    register_to_ai_dashboard: true,    // 預設勾,核准同時自動註冊到 AI 戰情
   })
   const [err, setErr] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
@@ -82,7 +83,7 @@ export default function PipelineWritableTablesPanel() {
     try {
       await api.post('/pipeline-writable-tables', addForm)
       setShowAdd(false)
-      setAddForm({ table_name: '', display_name: '', description: '', allowed_operations: 'insert,upsert', max_rows_per_run: 10000, notes: '' })
+      setAddForm({ table_name: '', display_name: '', description: '', allowed_operations: 'insert,upsert', max_rows_per_run: 10000, notes: '', register_to_ai_dashboard: true })
       await Promise.all([fetchRows(), fetchAvailable()])
     } catch (e: any) {
       setErr(e?.response?.data?.error || e.message)
@@ -201,6 +202,18 @@ export default function PipelineWritableTablesPanel() {
             <label className="label text-xs">{t('admin.pipelineWhitelist.notes')}</label>
             <input className="input w-full text-sm" value={addForm.notes}
               onChange={e => setAddForm(f => ({ ...f, notes: e.target.value }))} />
+          </div>
+          <div>
+            <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={addForm.register_to_ai_dashboard}
+                onChange={e => setAddForm(f => ({ ...f, register_to_ai_dashboard: e.target.checked }))}
+                className="w-4 h-4 accent-blue-600"
+              />
+              <span>{t('admin.pipelineWhitelist.registerAiDashboard')}</span>
+            </label>
+            <p className="text-[10px] text-slate-400 mt-1 ml-6">{t('admin.pipelineWhitelist.registerAiDashboardHint')}</p>
           </div>
           <div className="flex justify-end gap-2">
             <button className="btn-ghost" onClick={() => setShowAdd(false)}>

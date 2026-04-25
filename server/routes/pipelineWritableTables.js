@@ -83,6 +83,7 @@ router.post('/', async (req, res) => {
     const {
       table_name, display_name, description,
       allowed_operations, max_rows_per_run, notes,
+      register_to_ai_dashboard,   // 新:勾選同步註冊到 AI 戰情(預設 true)
     } = req.body;
 
     const tn = String(table_name || '').toLowerCase().trim();
@@ -130,7 +131,25 @@ router.post('/', async (req, res) => {
       req.user.id,
       notes || null,
     );
-    res.json({ ok: true, table_name: tn, columns: columnMeta.length });
+
+    // ── 同步註冊到 AI 戰情(可選,預設開啟)────────────────────────────────
+    let aiRegister = null;
+    if (register_to_ai_dashboard !== false) {
+      try {
+        const { autoRegisterTable } = require('../services/aiSchemaAutoRegister');
+        aiRegister = await autoRegisterTable(db(), {
+          tableName: tn,
+          displayName: display_name || tn,
+          description: description || `Pipeline 自動落地的 ${tn} 表`,
+          columnMetadata: columnMeta,
+          adminUserId: req.user.id,
+        });
+      } catch (e) {
+        console.warn('[pipelineWritableTables] AI 戰情自動註冊失敗:', e.message);
+      }
+    }
+
+    res.json({ ok: true, table_name: tn, columns: columnMeta.length, ai_register: aiRegister });
   } catch (e) {
     if (/ORA-00001/.test(e.message)) return res.status(400).json({ error: 'table 已經核准' });
     res.status(500).json({ error: e.message });
