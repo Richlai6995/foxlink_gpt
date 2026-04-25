@@ -53,14 +53,18 @@ router.get('/', async (req, res) => {
       rows = await db().prepare(
         `SELECT id, rule_name, owner_user_id, bound_to, task_id, node_id,
                 entity_type, entity_code, comparison, severity, is_active,
-                cooldown_minutes, creation_date, last_modified
+                cooldown_minutes, schedule_interval_minutes,
+                last_evaluated_at, next_evaluate_at, last_eval_result,
+                creation_date, last_modified
          FROM alert_rules ORDER BY is_active DESC, last_modified DESC`
       ).all();
     } else {
       rows = await db().prepare(
         `SELECT id, rule_name, owner_user_id, bound_to, task_id, node_id,
                 entity_type, entity_code, comparison, severity, is_active,
-                cooldown_minutes, creation_date, last_modified
+                cooldown_minutes, schedule_interval_minutes,
+                last_evaluated_at, next_evaluate_at, last_eval_result,
+                creation_date, last_modified
          FROM alert_rules WHERE owner_user_id=? ORDER BY is_active DESC, last_modified DESC`
       ).all(u.id);
     }
@@ -90,19 +94,25 @@ router.post('/', async (req, res) => {
     const validComp = ['threshold', 'historical_avg', 'rate_change', 'zscore'];
     if (!validComp.includes(b.comparison)) return res.status(400).json({ error: `comparison 必為 ${validComp.join('/')}` });
 
+    const boundTo = b.bound_to || 'standalone';
+    const scheduleMin = boundTo === 'standalone' && b.schedule_interval_minutes
+      ? Math.max(1, Number(b.schedule_interval_minutes))
+      : null;
+
     const ins = await db().prepare(`
       INSERT INTO alert_rules
         (rule_name, owner_user_id, bound_to, task_id, node_id,
          entity_type, entity_code, data_source, data_config,
          comparison, comparison_config, severity, actions,
-         message_template, use_llm_analysis, cooldown_minutes, dedup_key, is_active)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         message_template, use_llm_analysis, cooldown_minutes, dedup_key, is_active,
+         schedule_interval_minutes)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       b.rule_name, u.id,
-      b.bound_to || 'standalone',
+      boundTo,
       b.task_id || null, b.node_id || null,
       b.entity_type || null, b.entity_code || null,
-      b.data_source || 'upstream_json',
+      b.data_source || (boundTo === 'standalone' ? 'sql_query' : 'upstream_json'),
       typeof b.data_config === 'string' ? b.data_config : JSON.stringify(b.data_config || {}),
       b.comparison,
       typeof b.comparison_config === 'string' ? b.comparison_config : JSON.stringify(b.comparison_config || {}),
@@ -113,6 +123,7 @@ router.post('/', async (req, res) => {
       Number(b.cooldown_minutes) || 60,
       b.dedup_key || null,
       b.is_active === 0 ? 0 : 1,
+      scheduleMin,
     );
     const id = ins.lastInsertRowid;
     res.json(await fetchRule(id));
@@ -133,6 +144,13 @@ router.put('/:id', async (req, res) => {
       return res.status(403).json({ error: '無權修改' });
     }
     const b = req.body || {};
+    // schedule_interval_minutes:只有 standalone 規則才有意義;<= 0 視為 null(等於停止輪詢)
+    let nextSchedMin = r.schedule_interval_minutes;
+    if (b.schedule_interval_minutes !== undefined) {
+      const n = Number(b.schedule_interval_minutes);
+      nextSchedMin = (n > 0) ? Math.max(1, n) : null;
+    }
+
     await db().prepare(`
       UPDATE alert_rules SET
         rule_name=?, entity_type=?, entity_code=?,
@@ -140,6 +158,7 @@ router.put('/:id', async (req, res) => {
         comparison=?, comparison_config=?, severity=?,
         actions=?, message_template=?, use_llm_analysis=?,
         cooldown_minutes=?, dedup_key=?, is_active=?,
+        schedule_interval_minutes=?,
         last_modified=SYSTIMESTAMP
       WHERE id=?
     `).run(
@@ -157,6 +176,7 @@ router.put('/:id', async (req, res) => {
       b.cooldown_minutes !== undefined ? Number(b.cooldown_minutes) : r.cooldown_minutes,
       b.dedup_key ?? r.dedup_key,
       b.is_active !== undefined ? (b.is_active ? 1 : 0) : r.is_active,
+      nextSchedMin,
       Number(req.params.id),
     );
     res.json(await fetchRule(req.params.id));

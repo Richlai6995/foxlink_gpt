@@ -304,6 +304,11 @@ async function runMigrations(db) {
   await addCol('KB_DOCUMENTS', 'META_RUN_ID',    'NUMBER');
   await addCol('KB_DOCUMENTS', 'META_PIPELINE',  'VARCHAR2(200)');
   await addCol('KB_DOCUMENTS', 'PUBLISHED_AT',   'TIMESTAMP');
+  // Phase 3.1 獨立規則排程
+  await addCol('ALERT_RULES', 'SCHEDULE_INTERVAL_MINUTES', 'NUMBER');
+  await addCol('ALERT_RULES', 'LAST_EVALUATED_AT',          'TIMESTAMP');
+  await addCol('ALERT_RULES', 'NEXT_EVALUATE_AT',           'TIMESTAMP');
+  await addCol('ALERT_RULES', 'LAST_EVAL_RESULT',           'VARCHAR2(500)'); // 'triggered' / 'not_triggered (reason)' / 'error: ...'
   // Unique index (kb_id, source_hash) — 同一 KB 內 URL 不重複(NULL 不算 duplicate)
   try {
     await db.prepare(

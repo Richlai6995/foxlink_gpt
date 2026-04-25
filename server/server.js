@@ -309,6 +309,14 @@ app.get('/api/health', (req, res) => res.json({ status: 'ok', timestamp: new Dat
       console.error('[ScheduledTasks] Failed to init scheduler:', e.message);
     }
 
+    // Init Phase 3.1 standalone alert rule scheduler (1-min tick polling)
+    try {
+      const { initAlertRuleScheduler } = require('./services/alertRuleScheduler');
+      initAlertRuleScheduler(db);
+    } catch (e) {
+      console.error('[AlertRuleScheduler] Failed to init:', e.message);
+    }
+
     // Init AI 戰情 ETL Scheduler
     try {
       const { initEtlScheduler } = require('./services/dashboardService');
