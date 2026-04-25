@@ -321,6 +321,17 @@ app.get('/api/health', (req, res) => res.json({ status: 'ok', timestamp: new Dat
       console.warn('[CostAnalysisSeed] init error:', e.message);
     }
 
+    // AI 戰情「金屬行情分析」seed(冪等,沿用 cost analysis seed 的本地 DB source)
+    // 必須在 cost analysis seed 之後跑(因為要 lookup 已建好的 ai_db_sources entry)
+    setTimeout(() => {
+      try {
+        const { runSeed: runMetalSeed } = require('./data/aiDashboardMetalPriceSeed');
+        runMetalSeed(db).catch(e => console.warn('[MetalPriceSeed] unhandled:', e.message));
+      } catch (e) {
+        console.warn('[MetalPriceSeed] init error:', e.message);
+      }
+    }, 3000);
+
     // Factory code lookup + 間接員工計數同步(啟動後 5 秒跑,避免拖慢啟動)
     setTimeout(async () => {
       try {

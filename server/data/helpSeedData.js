@@ -5962,7 +5962,7 @@ const userSections = [
     "sort_order": 25,
     "icon": "Clock",
     "icon_color": "text-green-500",
-    "last_modified": "2026-04-01",
+    "last_modified": "2026-04-25",
     "title": "自動排程功能",
     "sidebar_label": "自動排程功能",
     "blocks": [
@@ -6211,6 +6211,12 @@ const userSections = [
                 "⑁ 青色",
                 "將多個子步驟同時執行，加速多路查詢",
                 "同時查多個知識庫、多個 API"
+              ],
+              [
+                "DB 寫入（管理員）",
+                "🛡 灰色",
+                "把上游 LLM 輸出的 JSON 陣列寫入已核准的白名單表（UPSERT/INSERT/REPLACE_BY_DATE/APPEND）",
+                "金屬價格歷史、匯率歷史、新聞情緒等時序資料落地，供 AI 戰情分析"
               ]
             ]
           },
@@ -6250,6 +6256,271 @@ const userSections = [
           {
             "type": "note",
             "text": "Pipeline 節點數量較多時執行時間會增加，建議使用並行節點加速獨立的查詢步驟。若無需多步驟，直接在 Prompt 中使用 `{{skill:}}` / `{{kb:}}` 語法即可，更簡潔。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "Pipeline DB 寫入節點（僅 Pipeline 管理員可用）",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "**DB 寫入** 節點可把每次排程跑出來的結構化資料（LLM 輸出的 JSON 陣列）自動 UPSERT 到管理員預先核准的資料表，做為時序歷史紀錄，後續可在 **AI 戰情** 用自然語言查詢趨勢。"
+          },
+          {
+            "type": "note",
+            "text": "此節點僅顯示給「Pipeline 管理員」（`is_pipeline_admin=1`）或系統管理員。一般使用者新增節點選單看不到此選項。如需此權限，請洽系統管理員開啟。"
+          },
+          {
+            "type": "para",
+            "text": "**典型使用場景**：每日金屬行情、匯率歷史、新聞情緒分析、競品價格追蹤等需要長期累積、後續做趨勢分析的資料。"
+          },
+          {
+            "type": "subsection",
+            "title": "建立流程",
+            "blocks": [
+              {
+                "type": "steps",
+                "items": [
+                  {
+                    "title": "Prompt 加入結構化 JSON 輸出指示",
+                    "desc": "在 Prompt 末尾加一段「請額外輸出以下 JSON 陣列，欄位嚴格對齊...」的說明，讓 LLM 在 markdown 報告之外另外吐一個 ```json ... ``` 區塊。每個欄位對應 DB 表的一欄。"
+                  },
+                  {
+                    "title": "Pipeline tab → 新增節點 → DB 寫入",
+                    "desc": "選擇有盾牌 🛡 圖示的「DB 寫入」節點。"
+                  },
+                  {
+                    "title": "選擇目標表（白名單下拉）",
+                    "desc": "下拉只會列出系統管理員已核准的表（如 `metal_price_history`）。若你需要的表不在清單，請洽管理員到「Pipeline 可寫表」介面核准。"
+                  },
+                  {
+                    "title": "選寫入模式",
+                    "desc": "UPSERT 最常用：以 key 欄位比對，有就更新、沒就新增。INSERT：純新增（UNIQUE 衝突跳過）。REPLACE BY DATE：依日期欄位先 DELETE 再 INSERT。APPEND：純累加。"
+                  },
+                  {
+                    "title": "選 Key 欄位（UPSERT 用）",
+                    "desc": "用來判斷「這筆 row 是更新還是新增」的唯一鍵組合。例如金屬行情用 `metal_code` + `as_of_date` + `source` 三欄。"
+                  },
+                  {
+                    "title": "Column mapping — JSONPath → DB 欄位",
+                    "desc": "點「自動對應」可一鍵生成所有可寫欄位的對應。每行可選 transform（upper / lower / number / date / strip_comma / null_if_dash）做型別轉換。* 表示必填欄位。"
+                  },
+                  {
+                    "title": "上游資料來源",
+                    "desc": "預設 `{{ai_output}}`，即整份 LLM 回應。系統會自動找其中的 ```json``` 區塊解析。"
+                  },
+                  {
+                    "title": "錯誤處理 + 上限",
+                    "desc": "skip：單筆失敗跳過繼續下一筆（推薦）。stop：立即中止整個節點。max_rows 預設 10000，可往下調但不可超過白名單設定的上限。"
+                  },
+                  {
+                    "title": "（建議）按「試跑預覽」",
+                    "desc": "貼一份樣本 JSON 進「試跑樣本」欄，按下後系統會模擬執行，顯示會 insert/update/skip 多少筆 + 前 5 筆 mapped row，但不真的寫 DB。確認無誤再儲存任務。"
+                  },
+                  {
+                    "title": "儲存任務",
+                    "desc": "點 Modal 右下角藍色「儲存」按鈕，pipeline_json 才會持久化。下一次排程觸發時，db_write 節點會自動執行。"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "subsection",
+            "title": "自動附加的系統欄位",
+            "blocks": [
+              {
+                "type": "para",
+                "text": "若目標表有以下欄位，pipeline 會自動寫入（不需 mapping），用於資料血緣追蹤；沒有對應欄位則自動跳過："
+              },
+              {
+                "type": "table",
+                "headers": [
+                  "欄位",
+                  "型別",
+                  "用途"
+                ],
+                "rows": [
+                  [
+                    "meta_run_id",
+                    "NUMBER",
+                    "排程執行批次 ID（= 該次 run 的 epoch ms），可 JOIN 回 scheduled_task_runs 看當次完整輸出"
+                  ],
+                  [
+                    "meta_pipeline",
+                    "VARCHAR2(200)",
+                    "寫入來源標識（task_name::node_id），追蹤是哪個排程的哪個節點寫的"
+                  ],
+                  [
+                    "creation_date",
+                    "TIMESTAMP",
+                    "本筆首次寫入時間（UPSERT 不會覆寫）"
+                  ],
+                  [
+                    "last_updated_date",
+                    "TIMESTAMP",
+                    "本筆最後更新時間（每次 UPSERT 都更新，可看資料新鮮度）"
+                  ]
+                ]
+              }
+            ]
+          },
+          {
+            "type": "subsection",
+            "title": "JSON 範例（金屬行情用）",
+            "blocks": [
+              {
+                "type": "code",
+                "text": "Prompt 末尾加這一段：\n\n```json\n[\n  {\n    \"metal_code\": \"CU\",\n    \"metal_name\": \"銅\",\n    \"original_price\": 13190.00,\n    \"original_currency\": \"USD\",\n    \"original_unit\": \"USD/ton\",\n    \"price_usd\": 13190.00,\n    \"unit\": \"USD/ton\",\n    \"fx_rate_to_usd\": 1.0,\n    \"conversion_note\": null,\n    \"is_estimated\": 0,\n    \"price_type\": \"spot\",\n    \"market\": \"LME\",\n    \"source\": \"Westmetall\",\n    \"source_url\": \"https://www.westmetall.com/en/markdaten.php\",\n    \"as_of_date\": \"{{date}}\"\n  }\n  // ...其他金屬...\n]\n```"
+              }
+            ]
+          },
+          {
+            "type": "subsection",
+            "title": "資料寫入後的查詢",
+            "blocks": [
+              {
+                "type": "para",
+                "text": "資料落地後，到 **AI 戰情** 找對應的 Project（如「金屬行情分析」），可用自然語言查詢："
+              },
+              {
+                "type": "list",
+                "items": [
+                  "「今天金屬價格？」 → 列出最新一日所有金屬報價",
+                  "「近 30 天銅鋁鎳的價格趨勢」 → 多線圖呈現",
+                  "「銀價的估算誤差」 → 看 is_estimated=1 的筆數與換算公式",
+                  "「近 7 天 LME 庫存變動」 → 看哪個金屬庫存進出最多",
+                  "「PGM 不同來源的報價差異」 → 多源交叉驗證"
+                ]
+              }
+            ]
+          },
+          {
+            "type": "subsection",
+            "title": "常見錯誤與排查",
+            "blocks": [
+              {
+                "type": "table",
+                "headers": [
+                  "症狀",
+                  "可能原因",
+                  "解法"
+                ],
+                "rows": [
+                  [
+                    "節點選單看不到「DB 寫入」",
+                    "你不是 Pipeline 管理員",
+                    "請系統管理員到「使用者管理」→ 編輯你 → 勾「Pipeline 管理員」 → 重新登入"
+                  ],
+                  [
+                    "目標表下拉沒有想要的表",
+                    "白名單還沒核准",
+                    "請系統管理員到「Pipeline 可寫表」核准目標表（核心系統表如 users / audit_logs 永遠禁止）"
+                  ],
+                  [
+                    "排程跑完但資料庫 0 筆",
+                    "LLM 沒輸出 JSON 區塊 / JSON 格式錯",
+                    "查 scheduled_task_runs.pipeline_log_json 的 db_write_summary，看 inserted/skipped/errors。先用「試跑預覽」確認 mapping 與 transform 正確"
+                  ],
+                  [
+                    "提示「需要 pipeline_admin 權限」",
+                    "你或排程任務的擁有者沒有此權限",
+                    "排程任務以擁有者身份執行，必須擁有者具備 is_pipeline_admin=1 才能跑 db_write 節點"
+                  ],
+                  [
+                    "提示「row 數超過上限」",
+                    "LLM 一次吐太多筆",
+                    "在節點設定下調 max_rows，或拆成多個排程分批寫入"
+                  ]
+                ]
+              }
+            ]
+          },
+          {
+            "type": "subsection",
+            "title": "管理員專用：核准新的可寫表（白名單管理）",
+            "blocks": [
+              {
+                "type": "para",
+                "text": "系統有兩層安全防護防止 pipeline 寫入錯誤的表："
+              },
+              {
+                "type": "list",
+                "items": [
+                  "**Code 黑名單**：核心系統表（users / audit_logs / scheduled_tasks 等）寫死禁止，任何方式都改不了",
+                  "**DB 白名單**：管理員逐張核准的表，pipeline 才能寫入"
+                ]
+              },
+              {
+                "type": "steps",
+                "items": [
+                  {
+                    "title": "管理後台 → 左側選單 → 「Pipeline 可寫表」",
+                    "desc": "若沒看到此選單，代表你不是系統管理員。"
+                  },
+                  {
+                    "title": "點右上角「核准新表」按鈕",
+                    "desc": "彈出新增表單。"
+                  },
+                  {
+                    "title": "從下拉選擇 DB 中的目標表",
+                    "desc": "下拉只列出尚未核准且不在系統黑名單的表。建議命名慣例：`*_history` / `data_*` / `snapshot_*` 等。"
+                  },
+                  {
+                    "title": "填顯示名稱、說明、核准的寫入模式",
+                    "desc": "說明會顯示給 Pipeline 管理員看，建議寫清楚這張表的用途、資料來源、預期 row 數。"
+                  },
+                  {
+                    "title": "設定單次寫入上限（max_rows_per_run）",
+                    "desc": "預設 10000，可往下調保護。新聞情緒分析等可能單批 500-1000 筆，金屬行情每天只 11 筆。"
+                  },
+                  {
+                    "title": "點「核准」",
+                    "desc": "系統會自動掃描該表的欄位 metadata（型別、是否 nullable）並快取，供 Pipeline 管理員配置 column mapping 時下拉用。"
+                  }
+                ]
+              },
+              {
+                "type": "para",
+                "text": "**白名單列表已有的表**可以："
+              },
+              {
+                "type": "list",
+                "items": [
+                  "🔄 **重新抓取欄位**：表 schema 改動（例：DBA 加新欄）後按一下，pipeline 才看得到新欄位",
+                  "⏸ **停用 / 啟用**：暫時禁止寫入但保留設定",
+                  "🗑 **刪除**：移出白名單（不會真的刪表）",
+                  "▼ **展開**：看快取的欄位清單（名稱 / 型別 / 是否 nullable）"
+                ]
+              },
+              {
+                "type": "subsection",
+                "title": "授予使用者 Pipeline 管理員權限",
+                "blocks": [
+                  {
+                    "type": "steps",
+                    "items": [
+                      {
+                        "title": "管理後台 → 使用者管理 → 找到目標使用者點編輯"
+                      },
+                      {
+                        "title": "「功能權限」區段勾選「**Pipeline 管理員**」",
+                        "desc": "（可在排程 Pipeline 設定 DB 寫入節點、管理可寫表白名單）"
+                      },
+                      {
+                        "title": "儲存使用者",
+                        "desc": "提醒使用者**登出再重登**，session 才會帶新權限。"
+                      }
+                    ]
+                  },
+                  {
+                    "type": "note",
+                    "text": "系統管理員（role=admin）自動具備 Pipeline 管理員權限，不需額外勾選。`is_pipeline_admin` 旗標主要用來給「非全域 admin 但需要 pipeline 寫入權限」的角色（如資料工程師、業務分析師）。"
+                  }
+                ]
+              }
+            ]
           }
         ]
       }
