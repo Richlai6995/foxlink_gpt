@@ -400,6 +400,16 @@ app.get('/api/health', (req, res) => res.json({ status: 'ok', timestamp: new Dat
       }
     });
 
+    // Auto-seed builtin forecast skill (forecast_timeseries_llm)
+    setImmediate(async () => {
+      try {
+        const { autoSeedForecastSkill } = require('./services/forecastSkillSeed');
+        await autoSeedForecastSkill(db);
+      } catch (e) {
+        console.error('[ForecastSkillSeed] Failed:', e.message);
+      }
+    });
+
     // Warm-up factory code cache from ERP (FND_FLEX_VALUES_VL)
     // 見 docs/factory-share-layer-plan.md §2.2
     setImmediate(async () => {

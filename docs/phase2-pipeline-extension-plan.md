@@ -31,7 +31,7 @@ Week 1(基礎建設) ✅
 
 Week 2(寫入機制 + 通用 Skill)
   D6-8 kb_write 節點(寫 KB,複用既有 KB 權限)✅ 2026-04-25
-  D9   forecast_timeseries_llm 通用 Skill
+  D9   forecast_timeseries_llm 通用 Skill ✅ 2026-04-25
   D10  新聞排程(scrape → LLM Flash 摘要+情緒 → db_write + kb_write)
 
 Week 3(資料管線完成)
@@ -362,7 +362,17 @@ executeKbWrite(db, nodeConfig, sourceText, context):
 
 ---
 
-## 7. Week 2 D9:`forecast_timeseries_llm` 通用 Skill
+## 7. Week 2 D9:`forecast_timeseries_llm` 通用 Skill ✅(2026-04-25 完成)
+
+> **實作狀態**:✅ 已上線。檔案:[server/services/forecastSkillSeed.js](../server/services/forecastSkillSeed.js)。
+> 透過 server 啟動時 `autoSeedForecastSkill(db)` 自動 INSERT/UPGRADE 一筆 builtin skill,完全 generic
+> (不寫死金屬語意),pipeline `skill` 節點直接 name='forecast_timeseries_llm' 即可呼叫。
+>
+> **與規劃差異**:
+> - 改用 builtin skill(LLM Prompt 型)而非 standalone tool — 沿用既有的 skill 權限 / tool-calling
+>   pipeline,免另外做 service registry。is_public=1 + is_admin_approved=1 所有 user 立即可用。
+> - 升級策略改成 prompt diff(描述/system_prompt 變了就 UPDATE),不用版號 hash 儲到 DB
+> - 加 `as_of_date` optional 欄位、加「容錯」prompt 要求(輸入非合法 JSON / series 為空時的回應規範)
 
 ### 7.1 Skill 規格
 
