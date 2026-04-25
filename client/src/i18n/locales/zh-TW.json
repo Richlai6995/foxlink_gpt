@@ -1389,7 +1389,8 @@
         "generate_file": "生成檔案",
         "condition": "條件判斷",
         "parallel": "並行執行",
-        "db_write": "DB 寫入"
+        "db_write": "DB 寫入",
+        "kb_write": "知識庫寫入"
       },
       "vars": {
         "aiOutput": "AI 主輸出",
@@ -1496,6 +1497,28 @@
         "runDryRun": "試跑預覽(不寫 DB)",
         "dryRunning": "試跑中…",
         "loading": "載入欄位中…"
+      },
+      "kbWrite": {
+        "hint": "把上游 LLM/技能輸出的 JSON 條目(新聞、報告等)切 chunk + embed 寫入指定知識庫。權限走知識庫既有共享,不需要管理員。",
+        "targetKb": "目標知識庫",
+        "selectKb": "選擇知識庫…",
+        "noKbsHint": "沒有可寫入的知識庫。請先建立或請他人分享給你。",
+        "fieldMapping": "欄位來源(JSONPath → 文章欄位)",
+        "fieldHint": "title 必填,其他空字串等於該欄位無內容。published_at 接受 ISO / YYYY-MM-DD。",
+        "chunkStrategy": "切片策略",
+        "cs": {
+          "mixed": "混合(標題+摘要 + 內文細切,推薦)",
+          "bodyOnly": "純內文切片",
+          "whole": "整篇一個 chunk"
+        },
+        "dedupeMode": "去重模式",
+        "dm": {
+          "url": "依 URL hash(預設)",
+          "title": "依標題完全相符",
+          "urlOrTitle": "URL 或 標題任一相符",
+          "none": "不去重"
+        },
+        "maxChunksPerRun": "單次 chunk 上限"
       },
       "summary": {
         "noSkill": "未選擇技能",

@@ -128,6 +128,8 @@ app.get('/api/health', (req, res) => res.json({ status: 'ok', timestamp: new Dat
     console.log('[Route] /api/transcribe OK');
     app.use('/api/pipeline-writable-tables', require('./routes/pipelineWritableTables'));
     console.log('[Route] /api/pipeline-writable-tables OK');
+    app.use('/api/pipeline-kb-write', require('./routes/pipelineKbWrite'));
+    console.log('[Route] /api/pipeline-kb-write OK');
 
     // Autoscan user email domains → Webex allowed-domain whitelist
     // 每次啟動時掃描 users.email，union 進白名單（只加不刪，admin 手動加的會保留）

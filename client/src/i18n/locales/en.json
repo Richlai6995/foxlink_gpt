@@ -1389,7 +1389,8 @@
         "generate_file": "Generate File",
         "condition": "Condition",
         "parallel": "Parallel",
-        "db_write": "DB Write"
+        "db_write": "DB Write",
+        "kb_write": "KB Write"
       },
       "vars": {
         "aiOutput": "Main AI Output",
@@ -1496,6 +1497,28 @@
         "runDryRun": "Dry-run (no DB write)",
         "dryRunning": "Running…",
         "loading": "Loading columns…"
+      },
+      "kbWrite": {
+        "hint": "Chunks + embeds JSON items (news, reports, etc.) from upstream into a knowledge base. Uses existing KB share permissions — no admin needed.",
+        "targetKb": "Target Knowledge Base",
+        "selectKb": "Select KB…",
+        "noKbsHint": "No writable KBs. Create one or get one shared with you.",
+        "fieldMapping": "Field source (JSONPath → article field)",
+        "fieldHint": "title is required. Empty string = field not present. published_at accepts ISO / YYYY-MM-DD.",
+        "chunkStrategy": "Chunking strategy",
+        "cs": {
+          "mixed": "Mixed (title+summary + body chunks, recommended)",
+          "bodyOnly": "Body only",
+          "whole": "Single chunk per item"
+        },
+        "dedupeMode": "Dedupe mode",
+        "dm": {
+          "url": "URL hash (default)",
+          "title": "Exact title match",
+          "urlOrTitle": "URL or title match",
+          "none": "No dedupe"
+        },
+        "maxChunksPerRun": "Max chunks per run"
       },
       "summary": {
         "noSkill": "No skill selected",

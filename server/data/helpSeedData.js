@@ -6523,6 +6523,93 @@ const userSections = [
             ]
           }
         ]
+      },
+      {
+        "type": "subsection",
+        "title": "Pipeline 知識庫寫入節點（kb_write）",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "**知識庫寫入** 節點可把每次排程跑出來的條目（新聞、報告、網頁摘要等）自動切片 + embedding 寫入指定知識庫，後續就能在 Chat / 戰情 / 深度研究中被檢索引用。"
+          },
+          {
+            "type": "note",
+            "text": "**權限完全沿用知識庫既有的共享機制**：你看得到的 KB 才能選；只能寫進你自建、被分享、或公開的 KB。不需要 Pipeline 管理員權限，也不需要表白名單。"
+          },
+          {
+            "type": "para",
+            "text": "**典型使用場景**：每日金屬新聞匯入、競品官網內容追蹤、研究報告自動歸檔、論壇貼文監控等。"
+          },
+          {
+            "type": "subsection",
+            "title": "建立流程",
+            "blocks": [
+              {
+                "type": "steps",
+                "items": [
+                  { "title": "Prompt 加入結構化 JSON 輸出指示", "desc": "讓 LLM 在排程 Prompt 末尾另外吐一段 ```json [{title, url, summary, content, source, published_at}, ...] ``` 陣列，每個物件代表一篇文章。" },
+                  { "title": "Pipeline tab → 新增節點 → 知識庫寫入", "desc": "選綠色的「知識庫寫入」節點。" },
+                  { "title": "選目標知識庫（下拉）", "desc": "下拉只列出你有寫入權的 KB（自建 / 被分享 / 公開）。若清單為空，請先到「知識庫」分頁建立或請別人分享給你。" },
+                  { "title": "確認欄位來源（JSONPath）", "desc": "預設是 `$.title / $.url / $.summary / $.content / $.source / $.published_at`。若 LLM 輸出的 key 名稱不同，可改 JSONPath 對應。**title 必填**。" },
+                  { "title": "選切片策略（chunk_strategy）", "desc": "**混合（推薦）**：第 1 chunk = title+summary（快速命中元資料）、後面把 content 用 KB 預設策略再分多 chunk。**純內文**：只切 content。**整篇一個 chunk**：不切。" },
+                  { "title": "選去重模式（dedupe_mode）", "desc": "**URL hash（預設）**：對 URL 正規化（剝 utm/fbclid/gclid、砍 fragment 與末尾斜線）後算 sha256，同 KB 已存在就 skip。**標題完全相符**、**URL 或標題任一相符**、**不去重** 視場景而定。" },
+                  { "title": "設單次 chunk 上限", "desc": "預設 100，避免單次塞太多耗 embedding 成本。一篇正常新聞約 3-5 chunks，100 上限約對應 20-30 篇。超過後續未寫入會記在 errors。" },
+                  { "title": "（建議）按「試跑預覽」", "desc": "貼樣本 JSON 進去，會顯示前 5 筆 insert / skip + 估算 chunks 數，但不真寫入也不消耗 embedding token。" },
+                  { "title": "儲存任務", "desc": "下次排程觸發時，kb_write 節點會跑 chunking → embedding → INSERT kb_documents + kb_chunks，並更新 KB 統計（doc_count / chunk_count）。" }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "subsection",
+            "title": "JSON 範例（金屬新聞用）",
+            "blocks": [
+              {
+                "type": "code",
+                "text": "Prompt 末尾加這一段：\n\n```json\n[\n  {\n    \"title\": \"美國通膨壓力推升金價,黃金週漲 2.1%\",\n    \"url\": \"https://www.example.com/news/2026-04-25-gold-cpi\",\n    \"summary\": \"美國 4 月 CPI 年增 3.5%,高於市場預期,金價週五收 2,580 USD/oz...\",\n    \"content\": \"完整文章內容...\",\n    \"source\": \"Reuters\",\n    \"published_at\": \"2026-04-25T14:30:00Z\"\n  }\n  // ...其他新聞...\n]\n```"
+              }
+            ]
+          },
+          {
+            "type": "subsection",
+            "title": "與 DB 寫入節點的差異",
+            "blocks": [
+              {
+                "type": "table",
+                "headers": ["面向", "DB 寫入", "知識庫寫入"],
+                "rows": [
+                  ["寫入目標", "結構化資料表（白名單）", "知識庫 chunks（embedding）"],
+                  ["權限要求", "Pipeline 管理員", "對該 KB 有讀寫權即可"],
+                  ["後續用途", "AI 戰情數值分析、趨勢圖表", "Chat / RAG 檢索引用、語意搜尋"],
+                  ["去重", "UPSERT key 欄位比對", "URL hash / title 軟比對"],
+                  ["上限", "max_rows（預設 10000）", "max_chunks_per_run（預設 100）"],
+                  ["適合資料", "數值、時序、表格", "新聞、文章、長文本"]
+                ]
+              },
+              {
+                "type": "para",
+                "text": "**兩者可同時用**：例如新聞排程一個節點寫 pm_news 表（價格 / 情緒分數等結構化欄位），另一個節點寫 KB（全文 + summary，給 RAG 用）。"
+              }
+            ]
+          },
+          {
+            "type": "subsection",
+            "title": "常見錯誤與排查",
+            "blocks": [
+              {
+                "type": "table",
+                "headers": ["症狀", "可能原因", "解法"],
+                "rows": [
+                  ["目標知識庫下拉是空的", "你沒有任何 KB 的寫入權", "到「知識庫」建立自己的 KB,或請有 KB 的人共享給你"],
+                  ["排程跑完但 KB 文件沒增加", "全部都被 dedupe 跳過（URL 已存在）", "查 scheduled_task_runs.pipeline_log_json 的 kb_write_summary,看 skipped_duplicates 是否 = input 筆數"],
+                  ["「找不到可解析的 JSON」", "LLM 沒吐 ```json ... ``` 或格式錯", "檢查 Prompt 是否明確要求 JSON 陣列輸出。先在「試跑預覽」貼樣本驗證解析"],
+                  ["embedding 失敗", "Vertex / Studio 配額用完或網路不通", "查 server log 找 [Pipeline kb_write] 錯誤訊息;系統會自動 retry 4 次再放棄"],
+                  ["「已達 max_chunks_per_run」", "本次內容 chunks 總和超過上限", "下調節點 max_chunks_per_run 或拆排程分批跑"]
+                ]
+              }
+            ]
+          }
+        ]
       }
     ]
   },

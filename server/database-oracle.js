@@ -298,6 +298,21 @@ async function runMigrations(db) {
   // kb_chunks missing parent_content
   await addCol('KB_CHUNKS', 'PARENT_CONTENT', 'CLOB');
   await addCol('KB_CHUNKS', 'METADATA', 'CLOB');
+  // Phase 2 kb_write: 來源 URL + hash(去重)+ pipeline meta
+  await addCol('KB_DOCUMENTS', 'SOURCE_URL',     'VARCHAR2(2000)');
+  await addCol('KB_DOCUMENTS', 'SOURCE_HASH',    'VARCHAR2(64)');
+  await addCol('KB_DOCUMENTS', 'META_RUN_ID',    'NUMBER');
+  await addCol('KB_DOCUMENTS', 'META_PIPELINE',  'VARCHAR2(200)');
+  await addCol('KB_DOCUMENTS', 'PUBLISHED_AT',   'TIMESTAMP');
+  // Unique index (kb_id, source_hash) — 同一 KB 內 URL 不重複(NULL 不算 duplicate)
+  try {
+    await db.prepare(
+      `CREATE UNIQUE INDEX kb_documents_uhash ON kb_documents (kb_id, source_hash)`
+    ).run();
+    console.log('[Migration] kb_documents_uhash unique index created ✓');
+  } catch (e) {
+    if (!/ORA-00955|ORA-01408/.test(e.message)) console.warn('[Migration] kb_documents_uhash:', e.message);
+  }
   // Feedback Webex B 方案：DM thread parent message id
   await addCol('FEEDBACK_TICKETS', 'WEBEX_PARENT_MESSAGE_ID', 'VARCHAR2(200)');
   // 欄位可能已存在但長度不夠（100→200），嘗試擴大

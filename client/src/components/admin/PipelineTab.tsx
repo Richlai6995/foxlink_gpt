@@ -23,7 +23,7 @@ export interface DbWriteColumnMap {
 
 export interface PipelineNode {
   id: string
-  type: 'skill' | 'mcp' | 'kb' | 'ai' | 'generate_file' | 'condition' | 'parallel' | 'db_write'
+  type: 'skill' | 'mcp' | 'kb' | 'ai' | 'generate_file' | 'condition' | 'parallel' | 'db_write' | 'kb_write'
   // skill
   name?: string
   input?: string
@@ -59,6 +59,18 @@ export interface PipelineNode {
   column_mapping?: DbWriteColumnMap[]
   on_row_error?: 'skip' | 'stop'
   max_rows?: number
+  // kb_write
+  kb_id?: string
+  kb_name?: string
+  title_field?: string
+  url_field?: string
+  summary_field?: string
+  content_field?: string
+  source_field?: string
+  published_at_field?: string
+  chunk_strategy?: 'mixed' | 'body_only' | 'whole'
+  dedupe_mode?: 'url' | 'title' | 'url_or_title' | 'none'
+  max_chunks_per_run?: number
   // label
   label?: string
 }
@@ -108,6 +120,7 @@ const NODE_TYPES = [
   { type: 'condition',     icon: GitBranch,   labelKey: 'scheduledTask.pipeline.nodeType.condition',      color: 'text-rose-500',   bg: 'bg-rose-50   border-rose-200',   adminOnly: false },
   { type: 'parallel',      icon: GitMerge,    labelKey: 'scheduledTask.pipeline.nodeType.parallel',       color: 'text-teal-500',   bg: 'bg-teal-50   border-teal-200',   adminOnly: false },
   { type: 'db_write',      icon: Database,    labelKey: 'scheduledTask.pipeline.nodeType.db_write',       color: 'text-slate-600',  bg: 'bg-slate-50  border-slate-300',  adminOnly: true  },
+  { type: 'kb_write',      icon: BookOpen,    labelKey: 'scheduledTask.pipeline.nodeType.kb_write',       color: 'text-emerald-600',bg: 'bg-emerald-50 border-emerald-200', adminOnly: false },
 ] as const
 
 const FILE_TYPES = ['pdf', 'docx', 'xlsx', 'pptx', 'txt', 'mp3']
@@ -556,6 +569,253 @@ function DbWriteForm({
   )
 }
 
+// ─── KbWriteForm — write JSON items into a KB (chunk + embed + dedupe) ────
+interface AccessibleKb {
+  id: string
+  name: string
+  description?: string
+  doc_count?: number
+  chunk_count?: number
+}
+
+const KB_CHUNK_STRATEGIES = [
+  { value: 'mixed',     labelKey: 'scheduledTask.pipeline.kbWrite.cs.mixed' },
+  { value: 'body_only', labelKey: 'scheduledTask.pipeline.kbWrite.cs.bodyOnly' },
+  { value: 'whole',     labelKey: 'scheduledTask.pipeline.kbWrite.cs.whole' },
+] as const
+
+const KB_DEDUPE_MODES = [
+  { value: 'url',          labelKey: 'scheduledTask.pipeline.kbWrite.dm.url' },
+  { value: 'title',        labelKey: 'scheduledTask.pipeline.kbWrite.dm.title' },
+  { value: 'url_or_title', labelKey: 'scheduledTask.pipeline.kbWrite.dm.urlOrTitle' },
+  { value: 'none',         labelKey: 'scheduledTask.pipeline.kbWrite.dm.none' },
+] as const
+
+function KbWriteForm({
+  node, otherIds, onChange, taskId,
+}: {
+  node: PipelineNode
+  otherIds: string[]
+  onChange: (patch: Partial<PipelineNode>) => void
+  taskId?: number
+}) {
+  const { t } = useTranslation()
+  const [kbs, setKbs] = useState<AccessibleKb[]>([])
+  const [loading, setLoading] = useState(false)
+  const [dryRunResult, setDryRunResult] = useState<any>(null)
+  const [dryRunning, setDryRunning] = useState(false)
+  const [loadingSample, setLoadingSample] = useState(false)
+
+  useEffect(() => {
+    setLoading(true)
+    api.get('/pipeline-kb-write/accessible-kbs')
+      .then(r => setKbs(r.data || []))
+      .catch(() => setKbs([]))
+      .finally(() => setLoading(false))
+  }, [])
+
+  const runDryRun = async () => {
+    setDryRunning(true)
+    setDryRunResult(null)
+    try {
+      const sourceText = (node as any)._dry_run_sample || ''
+      const r = await api.post('/pipeline-kb-write/dry-run', {
+        node_config: {
+          kb_id: node.kb_id,
+          kb_name: node.kb_name,
+          title_field: node.title_field,
+          url_field: node.url_field,
+          summary_field: node.summary_field,
+          content_field: node.content_field,
+          source_field: node.source_field,
+          published_at_field: node.published_at_field,
+          chunk_strategy: node.chunk_strategy,
+          dedupe_mode: node.dedupe_mode,
+          max_chunks_per_run: node.max_chunks_per_run,
+          on_row_error: node.on_row_error,
+        },
+        source_text: sourceText,
+      })
+      setDryRunResult(r.data)
+    } catch (e: any) {
+      setDryRunResult({ error: e?.response?.data?.error || e.message })
+    } finally {
+      setDryRunning(false)
+    }
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-start gap-1.5 text-xs bg-emerald-50 border border-emerald-200 rounded px-2 py-1.5 text-emerald-700">
+        <BookOpen size={12} className="shrink-0 mt-0.5" />
+        <span>{t('scheduledTask.pipeline.kbWrite.hint')}</span>
+      </div>
+
+      {/* KB 選擇 */}
+      <div>
+        <label className="label text-xs">{t('scheduledTask.pipeline.kbWrite.targetKb')}</label>
+        <select
+          className="input w-full text-xs"
+          value={node.kb_id || ''}
+          onChange={(e) => {
+            const kb = kbs.find(k => k.id === e.target.value)
+            onChange({ kb_id: e.target.value, kb_name: kb?.name || '' })
+          }}
+        >
+          <option value="">{t('scheduledTask.pipeline.kbWrite.selectKb')}</option>
+          {kbs.map(k => (
+            <option key={k.id} value={k.id}>
+              {k.name} {k.doc_count != null ? `(${k.doc_count} docs)` : ''}
+            </option>
+          ))}
+        </select>
+        {kbs.length === 0 && !loading && (
+          <p className="text-[10px] text-slate-400 mt-1">{t('scheduledTask.pipeline.kbWrite.noKbsHint')}</p>
+        )}
+      </div>
+
+      {node.kb_id && (
+        <>
+          {/* 欄位映射 */}
+          <div className="space-y-1.5">
+            <label className="label text-xs">{t('scheduledTask.pipeline.kbWrite.fieldMapping')}</label>
+            <div className="grid grid-cols-2 gap-1.5">
+              <FieldRow label="title*"        value={node.title_field        || '$.title'}        onChange={(v) => onChange({ title_field: v })} />
+              <FieldRow label="url"           value={node.url_field          || '$.url'}          onChange={(v) => onChange({ url_field: v })} />
+              <FieldRow label="summary"       value={node.summary_field      || '$.summary'}      onChange={(v) => onChange({ summary_field: v })} />
+              <FieldRow label="content"       value={node.content_field      || '$.content'}      onChange={(v) => onChange({ content_field: v })} />
+              <FieldRow label="source"        value={node.source_field       || '$.source'}       onChange={(v) => onChange({ source_field: v })} />
+              <FieldRow label="published_at"  value={node.published_at_field || '$.published_at'} onChange={(v) => onChange({ published_at_field: v })} />
+            </div>
+            <p className="text-[10px] text-slate-400">{t('scheduledTask.pipeline.kbWrite.fieldHint')}</p>
+          </div>
+
+          {/* Chunk strategy */}
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="label text-xs">{t('scheduledTask.pipeline.kbWrite.chunkStrategy')}</label>
+              <select
+                className="input w-full text-xs"
+                value={node.chunk_strategy || 'mixed'}
+                onChange={(e) => onChange({ chunk_strategy: e.target.value as PipelineNode['chunk_strategy'] })}
+              >
+                {KB_CHUNK_STRATEGIES.map(s => (
+                  <option key={s.value} value={s.value}>{t(s.labelKey)}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="label text-xs">{t('scheduledTask.pipeline.kbWrite.dedupeMode')}</label>
+              <select
+                className="input w-full text-xs"
+                value={node.dedupe_mode || 'url'}
+                onChange={(e) => onChange({ dedupe_mode: e.target.value as PipelineNode['dedupe_mode'] })}
+              >
+                {KB_DEDUPE_MODES.map(d => (
+                  <option key={d.value} value={d.value}>{t(d.labelKey)}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {/* 上限 + error mode */}
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="label text-xs">{t('scheduledTask.pipeline.kbWrite.maxChunksPerRun')}</label>
+              <input
+                type="number"
+                className="input w-full text-xs"
+                value={node.max_chunks_per_run ?? ''}
+                onChange={(e) => onChange({ max_chunks_per_run: e.target.value ? Number(e.target.value) : undefined })}
+                placeholder="100"
+              />
+            </div>
+            <div>
+              <label className="label text-xs">{t('scheduledTask.pipeline.dbWrite.onRowError')}</label>
+              <select
+                className="input w-full text-xs"
+                value={node.on_row_error || 'skip'}
+                onChange={(e) => onChange({ on_row_error: e.target.value as 'skip' | 'stop' })}
+              >
+                <option value="skip">{t('scheduledTask.pipeline.dbWrite.skipBadRow')}</option>
+                <option value="stop">{t('scheduledTask.pipeline.dbWrite.stopOnError')}</option>
+              </select>
+            </div>
+          </div>
+
+          {/* 上游 input */}
+          <div>
+            <label className="label text-xs">{t('scheduledTask.pipeline.dbWrite.inputSource')}</label>
+            <VarInput
+              value={node.input || '{{ai_output}}'}
+              onChange={(v) => onChange({ input: v })}
+              placeholder="{{ai_output}}"
+              allNodeIds={otherIds}
+            />
+          </div>
+
+          {/* Dry-run */}
+          <div className="pt-2 border-t border-slate-200">
+            <div className="flex items-center justify-between mb-1">
+              <label className="label text-xs m-0">{t('scheduledTask.pipeline.dbWrite.dryRunSample')}</label>
+              {taskId && (
+                <button type="button" disabled={loadingSample}
+                  onClick={async () => {
+                    setLoadingSample(true)
+                    try {
+                      const r = await api.get(`/scheduled-tasks/${taskId}/last-output`)
+                      const text = r.data?.response_preview || ''
+                      if (!text) {
+                        alert(t('scheduledTask.pipeline.dbWrite.noLastOutput'))
+                      } else {
+                        onChange({ _dry_run_sample: text } as any)
+                      }
+                    } catch (e: any) {
+                      alert(e?.response?.data?.error || e.message)
+                    } finally { setLoadingSample(false) }
+                  }}
+                  className="text-xs px-2 py-0.5 rounded border border-slate-300 text-slate-500 hover:border-blue-400 hover:text-blue-600 disabled:opacity-40">
+                  {loadingSample ? t('common.loading') : t('scheduledTask.pipeline.dbWrite.loadLastOutput')}
+                </button>
+              )}
+            </div>
+            <textarea
+              className="input w-full h-16 text-xs font-mono resize-none"
+              value={(node as any)._dry_run_sample || ''}
+              onChange={(e) => onChange({ _dry_run_sample: e.target.value } as any)}
+              placeholder='[{"title":"...","url":"https://...","summary":"...","content":"..."}]'
+            />
+            <button type="button" onClick={runDryRun} disabled={dryRunning}
+              className="mt-2 flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-slate-300 text-slate-600 hover:border-emerald-400 hover:text-emerald-600 disabled:opacity-40">
+              <PlayCircle size={12} /> {dryRunning ? t('scheduledTask.pipeline.dbWrite.dryRunning') : t('scheduledTask.pipeline.dbWrite.runDryRun')}
+            </button>
+            {dryRunResult && (
+              <pre className="mt-2 text-[10px] font-mono bg-slate-50 border border-slate-200 rounded p-2 max-h-48 overflow-auto whitespace-pre-wrap">
+                {JSON.stringify(dryRunResult, null, 2)}
+              </pre>
+            )}
+          </div>
+        </>
+      )}
+      {loading && <p className="text-xs text-slate-400">{t('scheduledTask.pipeline.dbWrite.loading')}</p>}
+    </div>
+  )
+}
+
+function FieldRow({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
+  return (
+    <div className="flex items-center gap-1.5">
+      <span className="text-[10px] text-slate-500 w-24 shrink-0">{label}</span>
+      <input
+        className="input flex-1 text-xs font-mono"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder="$.field"
+      />
+    </div>
+  )
+}
+
 // ─── GenerateFileForm (with template picker) ───────────────────────────────────
 function GenerateFileForm({
   node, otherIds, onChange,
@@ -759,6 +1019,10 @@ function NodeForm({
     <DbWriteForm node={node} otherIds={otherIds} onChange={onChange} taskId={taskId} />
   )
 
+  if (node.type === 'kb_write') return (
+    <KbWriteForm node={node} otherIds={otherIds} onChange={onChange} taskId={taskId} />
+  )
+
   if (node.type === 'condition') return (
     <div className="space-y-3">
       <div>
@@ -885,6 +1149,9 @@ function NodeCard({
     if (node.type === 'db_write') return node.table
       ? `${node.table} (${node.operation || '—'}, ${(node.column_mapping || []).length} cols)`
       : t('scheduledTask.pipeline.summary.notSet')
+    if (node.type === 'kb_write') return node.kb_id
+      ? `${node.kb_name || node.kb_id} (${node.chunk_strategy || 'mixed'}, ≤${node.max_chunks_per_run || 100})`
+      : t('scheduledTask.pipeline.summary.notSet')
     return ''
   })()
 
@@ -996,6 +1263,19 @@ export default function PipelineTab({ nodes, onChange, catalog, mcpServers, task
       base.operation = 'upsert'
       base.on_row_error = 'skip'
       base.column_mapping = []
+      base.input = '{{ai_output}}'
+    }
+    if (type === 'kb_write') {
+      base.chunk_strategy = 'mixed'
+      base.dedupe_mode = 'url'
+      base.max_chunks_per_run = 100
+      base.on_row_error = 'skip'
+      base.title_field = '$.title'
+      base.url_field = '$.url'
+      base.summary_field = '$.summary'
+      base.content_field = '$.content'
+      base.source_field = '$.source'
+      base.published_at_field = '$.published_at'
       base.input = '{{ai_output}}'
     }
     onChange([...nodes, base])

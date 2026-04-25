@@ -13,6 +13,7 @@
  *   condition    — if/else branching (text contains or ai_judge)
  *   parallel     — run multiple nodes concurrently
  *   db_write     — write structured JSON to whitelisted DB table (admin / pipeline_admin only)
+ *   kb_write     — chunk + embed JSON items into a KB (uses existing KB share permissions)
  *
  * Variable interpolation: {{ai_output}}, {{node_<id>_output}}, {{date}}, {{task_name}}
  */
@@ -270,6 +271,22 @@ async function execGenerateFile(node, vars, db, context) {
   throw new Error(`generate_${fileType} 無法生成檔案`);
 }
 
+async function execKbWrite(node, vars, db, context) {
+  const { executeKbWrite } = require('./pipelineKbWriter');
+  const input = interpolate(node.input || '{{ai_output}}', vars);
+  const result = await executeKbWrite(db, node, input, {
+    user: context.user || null,
+    userId: context.userId,
+    runId: context.runId || null,
+    taskName: context.taskName || '',
+    nodeId: node.id,
+    dryRun: false,
+  });
+  const errCount = result.errors?.length || 0;
+  const text = `[KB 寫入 ${node.kb_name || node.kb_id}: ${result.documents_created} docs / ${result.chunks_created} chunks / ${result.skipped_duplicates} skipped${errCount ? ' / ' + errCount + ' errors' : ''}]`;
+  return { text, kbWriteSummary: { kb_id: node.kb_id, kb_name: node.kb_name, ...result } };
+}
+
 async function execDbWrite(node, vars, db, context) {
   const { executeDbWrite } = require('./pipelineDbWriter');
   const input = interpolate(node.input || '{{ai_output}}', vars);
@@ -372,6 +389,17 @@ async function runNode(node, vars, db, context, log) {
         console.log(`[Pipeline db_write] OK — ${output}`);
         if (r.dbWriteSummary?.errors?.length) {
           console.log(`[Pipeline db_write] row errors (first 3):`, JSON.stringify(r.dbWriteSummary.errors.slice(0, 3)));
+        }
+        break;
+      }
+      case 'kb_write': {
+        console.log(`[Pipeline kb_write] Start — kb=${node.kb_name || node.kb_id}, chunk_strategy=${node.chunk_strategy || 'mixed'}, dedupe=${node.dedupe_mode || 'url'}, max_chunks=${node.max_chunks_per_run || 100}`);
+        const r = await execKbWrite(node, vars, db, context);
+        output = r.text;
+        entry.kb_write_summary = r.kbWriteSummary;
+        console.log(`[Pipeline kb_write] OK — ${output}`);
+        if (r.kbWriteSummary?.errors?.length) {
+          console.log(`[Pipeline kb_write] row errors (first 3):`, JSON.stringify(r.kbWriteSummary.errors.slice(0, 3)));
         }
         break;
       }

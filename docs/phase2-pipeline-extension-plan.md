@@ -23,14 +23,14 @@
 ## 1. Phase 2+3 範圍總覽
 
 ```
-Week 1(基礎建設)
-  D1   既有 4 痛點修 + rename metal_price_history → pm_price_history
-  D2-3 排程彈性化:interval + multi_time 模式 + UI
-  D4   AI 戰情自動註冊機制(白名單核准 → auto register)
-  D5   Schema 擴 5 張新表
+Week 1(基礎建設) ✅
+  D1   既有 4 痛點修 + rename metal_price_history → pm_price_history ✅
+  D2-3 排程彈性化:interval + multi_time 模式 + UI ✅
+  D4   AI 戰情自動註冊機制(白名單核准 → auto register)✅
+  D5   Schema 擴 5 張新表 ✅
 
 Week 2(寫入機制 + 通用 Skill)
-  D6-8 kb_write 節點(寫 KB,複用既有 KB 權限)
+  D6-8 kb_write 節點(寫 KB,複用既有 KB 權限)✅ 2026-04-25
   D9   forecast_timeseries_llm 通用 Skill
   D10  新聞排程(scrape → LLM Flash 摘要+情緒 → db_write + kb_write)
 
@@ -273,7 +273,18 @@ CREATE TABLE pm_analysis_report (
 
 ---
 
-## 6. Week 2 D6-8:`kb_write` 節點
+## 6. Week 2 D6-8:`kb_write` 節點 ✅(2026-04-25 完成)
+
+> **實作狀態**:✅ 已上線。檔案參考:
+> - Backend: [server/services/pipelineKbWriter.js](../server/services/pipelineKbWriter.js)、[server/routes/pipelineKbWrite.js](../server/routes/pipelineKbWrite.js)、[server/services/pipelineRunner.js#case kb_write](../server/services/pipelineRunner.js)
+> - Frontend: `KbWriteForm` in [client/src/components/admin/PipelineTab.tsx](../client/src/components/admin/PipelineTab.tsx)
+> - Schema: `kb_documents` 加 `source_url / source_hash / meta_run_id / meta_pipeline / published_at` 欄位 + `kb_documents_uhash` UNIQUE(kb_id, source_hash)。([database-oracle.js](../server/database-oracle.js))
+>
+> **與規劃差異**:
+> - dedupe 改成 `dedupe_mode` 四選一:`url`(預設)/ `title` / `url_or_title` / `none`,沒做「7 天 + 90% 相似」(那個成本高且 false positive 多;同 URL hash 就足夠了)
+> - URL 自動正規化(剝 utm/fbclid/gclid、砍 fragment、trailing slash)再算 sha256
+> - 沒有把 chunks metadata 細到 `sentiment_score / related_entities`(那是 Week 2 D10 新聞排程的事,kb_write 本身不關心 domain 語意;若要存這些,新聞 LLM 直接寫進 chunk content/summary 即可)
+> - 短內容(<600 字)只切 1 chunk,不再切 body
 
 ### 6.1 設計原則(跟 db_write 對稱但不複製)
 

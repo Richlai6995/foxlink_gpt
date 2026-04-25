@@ -1389,7 +1389,8 @@
         "generate_file": "Tạo tệp",
         "condition": "Điều kiện",
         "parallel": "Song song",
-        "db_write": "Ghi DB"
+        "db_write": "Ghi DB",
+        "kb_write": "Ghi KB"
       },
       "vars": {
         "aiOutput": "Đầu ra AI chính",
@@ -1496,6 +1497,28 @@
         "runDryRun": "Thử (không ghi DB)",
         "dryRunning": "Đang thử…",
         "loading": "Đang tải cột…"
+      },
+      "kbWrite": {
+        "hint": "Cắt chunk + embed các mục JSON (tin tức, báo cáo,…) từ nút trước vào KB chỉ định. Quyền dùng theo chia sẻ KB hiện có, không cần admin.",
+        "targetKb": "Kho tri thức đích",
+        "selectKb": "Chọn KB…",
+        "noKbsHint": "Không có KB ghi được. Hãy tạo mới hoặc nhờ chia sẻ.",
+        "fieldMapping": "Nguồn trường (JSONPath → trường bài viết)",
+        "fieldHint": "title bắt buộc; chuỗi rỗng = không có trường đó. published_at chấp nhận ISO / YYYY-MM-DD.",
+        "chunkStrategy": "Chiến lược chia chunk",
+        "cs": {
+          "mixed": "Hỗn hợp (tiêu đề+tóm tắt + chia thân bài, khuyên dùng)",
+          "bodyOnly": "Chỉ thân bài",
+          "whole": "Một chunk cho cả mục"
+        },
+        "dedupeMode": "Chế độ chống trùng",
+        "dm": {
+          "url": "Theo URL hash (mặc định)",
+          "title": "Khớp tiêu đề chính xác",
+          "urlOrTitle": "Khớp URL hoặc tiêu đề",
+          "none": "Không chống trùng"
+        },
+        "maxChunksPerRun": "Giới hạn chunk mỗi lần"
       },
       "summary": {
         "noSkill": "Chưa chọn kỹ năng",
