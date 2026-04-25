@@ -7422,6 +7422,16 @@ UPDATE system_settings SET value='1' WHERE key='chat_inline_chart_enabled';`}</C
 
 type Role = 'user' | 'admin' | 'training-dev'
 
+interface BookOption {
+  id: number
+  code: string
+  name: string
+  description?: string | null
+  icon?: string | null
+  isSpecial: boolean
+  sortOrder: number
+}
+
 export default function HelpPage() {
   const navigate = useNavigate()
   const { isAdmin, canAccessTrainingDev } = useAuth()
@@ -7433,13 +7443,43 @@ export default function HelpPage() {
   const [loadingApi, setLoadingApi] = useState(false)
   const [trainingTarget, setTrainingTarget] = useState<{ courseId: number; lessonId?: number | null } | null>(null)
 
+  // ── Multi-book support ────────────────────────────────────────────────────
+  const [books, setBooks] = useState<BookOption[]>([])
+  const [selectedBookCode, setSelectedBookCode] = useState<string>('cortex')
+
+  // Fetch accessible books on mount (and on lang change for translated names)
+  useEffect(() => {
+    let cancelled = false
+    api.get('/help/books').then(res => {
+      if (cancelled) return
+      const list = (res.data || []) as BookOption[]
+      setBooks(list)
+      // 若當前選的書不在列表(權限失效)→ fallback 到 cortex
+      if (!list.find(b => b.code === selectedBookCode)) {
+        setSelectedBookCode('cortex')
+      }
+    }).catch(err => {
+      console.warn('[HelpPage] /help/books failed:', err.message)
+      setBooks([])
+    })
+    return () => { cancelled = true }
+  }, [])
+
+  const isCortex = selectedBookCode === 'cortex'
+
+  // 切到 special book 時強制 user role(special book 不分 user/admin/training-dev)
+  useEffect(() => {
+    if (!isCortex && role !== 'user') setRole('user')
+  }, [isCortex, role])
+
   // Fetch user sections from API (multilingual) — shared between 'user' and 'training-dev' tabs
   useEffect(() => {
-    if (role === 'admin') return
+    // cortex book + admin role 不打 API(走 hardcoded AdminManual)
+    if (isCortex && role === 'admin') return
     let cancelled = false
     const lang = i18n.language || 'zh-TW'
     setLoadingApi(true)
-    api.get('/help/sections', { params: { lang } })
+    api.get('/help/sections', { params: { lang, book: selectedBookCode } })
       .then(res => {
         if (!cancelled) {
           const allSections = res.data as HelpSectionData[]
@@ -7470,17 +7510,26 @@ export default function HelpPage() {
               })
             }
           })
-          const userOnly = allSections.filter(
-            s => s.sectionType === 'user' && Array.isArray(s.blocks) && s.blocks.length > 0 &&
-              s.id !== 'u-training-dev'
-          )
-          console.log('[HelpPage] Filtered to', userOnly.length, 'user sections:', userOnly.map(s => s.id))
-          setApiSections(userOnly)
-          // Extract training-dev section(s) separately
-          const tdSections = allSections.filter(
-            s => s.id === 'u-training-dev' && Array.isArray(s.blocks) && s.blocks.length > 0
-          )
-          setTrainingDevSections(tdSections)
+          // Cortex book 維持原 user/admin/training-dev 分流;special book 全顯示(Q3 不分 tab)
+          if (isCortex) {
+            const userOnly = allSections.filter(
+              s => s.sectionType === 'user' && Array.isArray(s.blocks) && s.blocks.length > 0 &&
+                s.id !== 'u-training-dev'
+            )
+            console.log('[HelpPage] Filtered to', userOnly.length, 'user sections:', userOnly.map(s => s.id))
+            setApiSections(userOnly)
+            const tdSections = allSections.filter(
+              s => s.id === 'u-training-dev' && Array.isArray(s.blocks) && s.blocks.length > 0
+            )
+            setTrainingDevSections(tdSections)
+          } else {
+            // Special book: 全部 sections 直接灌 apiSections,training-dev 清空
+            const valid = allSections.filter(
+              s => Array.isArray(s.blocks) && s.blocks.length > 0
+            )
+            setApiSections(valid)
+            setTrainingDevSections([])
+          }
         }
       })
       .catch(err => {
@@ -7489,7 +7538,7 @@ export default function HelpPage() {
       })
       .finally(() => { if (!cancelled) setLoadingApi(false) })
     return () => { cancelled = true }
-  }, [role, i18n.language])
+  }, [role, i18n.language, selectedBookCode, isCortex])
 
   const useApi = role === 'user' && apiSections.length > 0
   const useApiTd = role === 'training-dev' && trainingDevSections.length > 0
@@ -7551,8 +7600,25 @@ export default function HelpPage() {
           <h1 className="text-lg font-bold text-slate-800">{t('help.pageTitle')}</h1>
         </div>
 
-        {/* Role tabs */}
-        <div data-region="role-tabs" className="ml-auto flex bg-slate-100 rounded-xl p-1 gap-1">
+        {/* Book selector(只有 >=2 本書時顯示)*/}
+        {books.length > 1 && (
+          <div data-region="book-selector" className="ml-auto flex items-center gap-2">
+            <span className="text-xs text-slate-400">{t('help.book', '說明書')}</span>
+            <select
+              value={selectedBookCode}
+              onChange={(e) => setSelectedBookCode(e.target.value)}
+              data-print-hide="true"
+              className="border border-slate-200 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:border-blue-400"
+            >
+              {books.map(b => (
+                <option key={b.code} value={b.code}>{b.name}</option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        {/* Role tabs(special book 不顯示 — Q3 不分 user/admin/training-dev)*/}
+        <div data-region="role-tabs" className={`${books.length > 1 ? '' : 'ml-auto'} flex bg-slate-100 rounded-xl p-1 gap-1 ${!isCortex ? 'opacity-0 pointer-events-none' : ''}`}>
           <button
             onClick={() => setRole('user')}
             className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition ${role === 'user'
@@ -7563,7 +7629,7 @@ export default function HelpPage() {
             <User size={15} />
             {t('help.roleUser')}
           </button>
-          {isAdmin && (
+          {isAdmin && isCortex && (
             <button
               onClick={() => setRole('admin')}
               className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition ${role === 'admin'
@@ -7575,7 +7641,7 @@ export default function HelpPage() {
               {t('help.roleAdmin')}
             </button>
           )}
-          {canAccessTrainingDev && (
+          {canAccessTrainingDev && isCortex && (
             <button
               onClick={() => setRole('training-dev')}
               className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition ${role === 'training-dev'
@@ -7628,22 +7694,31 @@ export default function HelpPage() {
             {/* Print-only cover header */}
             <div className="help-print-header">
               <h1>
-                {t('help.pageTitle')} — {role === 'admin' ? t('help.badgeAdmin') : role === 'training-dev' ? t('help.badgeTrainingDev') : t('help.badgeUser')}
+                {isCortex
+                  ? `${t('help.pageTitle')} — ${role === 'admin' ? t('help.badgeAdmin') : role === 'training-dev' ? t('help.badgeTrainingDev') : t('help.badgeUser')}`
+                  : (books.find(b => b.code === selectedBookCode)?.name || t('help.pageTitle'))}
               </h1>
               <p>{new Date().toISOString().slice(0, 10)}</p>
             </div>
 
-            {/* Role badge */}
-            <div className={`inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium mb-8 ${
-              role === 'admin'
-                ? 'bg-indigo-100 text-indigo-700 border border-indigo-200'
-                : role === 'training-dev'
-                  ? 'bg-violet-100 text-violet-700 border border-violet-200'
-                  : 'bg-blue-100 text-blue-700 border border-blue-200'
-              }`}>
-              {role === 'admin' ? <Settings size={15} /> : role === 'training-dev' ? <BookOpen size={15} /> : <User size={15} />}
-              {role === 'admin' ? t('help.badgeAdmin') : role === 'training-dev' ? t('help.badgeTrainingDev') : t('help.badgeUser')}
-            </div>
+            {/* Role badge / Book badge */}
+            {isCortex ? (
+              <div className={`inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium mb-8 ${
+                role === 'admin'
+                  ? 'bg-indigo-100 text-indigo-700 border border-indigo-200'
+                  : role === 'training-dev'
+                    ? 'bg-violet-100 text-violet-700 border border-violet-200'
+                    : 'bg-blue-100 text-blue-700 border border-blue-200'
+                }`}>
+                {role === 'admin' ? <Settings size={15} /> : role === 'training-dev' ? <BookOpen size={15} /> : <User size={15} />}
+                {role === 'admin' ? t('help.badgeAdmin') : role === 'training-dev' ? t('help.badgeTrainingDev') : t('help.badgeUser')}
+              </div>
+            ) : (
+              <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium mb-8 bg-amber-100 text-amber-700 border border-amber-200">
+                <BookOpen size={15} />
+                {books.find(b => b.code === selectedBookCode)?.name || ''}
+              </div>
+            )}
 
             {role === 'training-dev' ? (
               loadingApi ? (
@@ -7716,8 +7791,10 @@ export default function HelpPage() {
                     </div>
                   ))}
                 </>
-              ) : (
+              ) : isCortex ? (
                 <UserManual />
+              ) : (
+                <div className="text-slate-400 text-center py-16">{t('help.emptyBook', '此說明書尚無內容')}</div>
               )
             ) : (
               <AdminManual />

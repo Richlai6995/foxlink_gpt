@@ -269,7 +269,8 @@
       "vectorDefaults": "Vector Defaults",
       "factoryLanguages": "Factory Language Settings",
       "factoryTranslations": "Factory Translations",
-      "pipelineWhitelist": "Pipeline Writable Tables"
+      "pipelineWhitelist": "Pipeline Writable Tables",
+      "specialManuals": "Special Manuals"
     },
     "pipelineWhitelist": {
       "title": "Pipeline Writable Tables",
@@ -1183,6 +1184,47 @@
       "deepResearch": "Deep Research",
       "headerToggles": "Header Toggles",
       "costHint": "Usage Cost Hint"
+    },
+    "book": "Manual",
+    "emptyBook": "This manual has no content yet",
+    "share": {
+      "title": "Share Settings",
+      "addTarget": "Add Share Target",
+      "currentShares": "Current Shares",
+      "permView": "View",
+      "viewOnlyHint": "This manual currently supports view-only permission.",
+      "empty": "No shares configured — only admins can view this manual",
+      "removeConfirm": "Remove this share?"
+    },
+    "specialManuals": {
+      "title": "Special Manuals",
+      "desc": "Manage multiple manuals — Cortex main manual is open to all; special manuals (e.g. Precious Metals) require share-based authorization",
+      "newBook": "New Manual",
+      "defaultShare": "Default Share Template",
+      "defaultShareTitle": "Default Share Template (Global)",
+      "defaultShareHelp": "Targets configured here are auto-copied as shares when creating new special manuals. After creation, books are independent — modifying the template does not affect existing books.",
+      "defaultEntries": "Template Entries",
+      "defaultEmpty": "Template empty — new special manuals will not auto-receive any shares (admin-only)",
+      "removeDefaultConfirm": "Remove from default template?",
+      "code": "Code",
+      "name": "Name",
+      "type": "Type",
+      "sections": "Sections",
+      "shares": "Shares",
+      "lastModified": "Updated",
+      "typeSpecial": "Special (share-gated)",
+      "typeMain": "Main (open to all)",
+      "inactive": "Inactive",
+      "softDelete": "Deactivate",
+      "reactivate": "Activate",
+      "shareBtn": "Share Settings",
+      "deleteConfirm": "Confirm deactivation?",
+      "icon": "Icon (lucide name)",
+      "sortOrder": "Sort Order",
+      "descLabel": "Description",
+      "codeHint": "Cannot be changed after creation. Lowercase letters, digits, hyphens; length 2-60",
+      "createHint": "New special manuals will auto-apply all targets in the Default Share Template.",
+      "codeAndNameRequired": "code and name are required"
     }
   },
   "factoryLang": {

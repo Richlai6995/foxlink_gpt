@@ -269,7 +269,8 @@
       "vectorDefaults": "向量預設模型",
       "factoryLanguages": "廠區語言設定",
       "factoryTranslations": "廠區翻譯",
-      "pipelineWhitelist": "Pipeline 可寫表"
+      "pipelineWhitelist": "Pipeline 可寫表",
+      "specialManuals": "特殊說明書管理"
     },
     "pipelineWhitelist": {
       "title": "Pipeline 可寫表管理",
@@ -1183,6 +1184,47 @@
       "deepResearch": "深度研究",
       "headerToggles": "頂端列功能開關",
       "costHint": "使用金額提示"
+    },
+    "book": "說明書",
+    "emptyBook": "此說明書尚無內容",
+    "share": {
+      "title": "分享設定",
+      "addTarget": "新增分享對象",
+      "currentShares": "目前分享",
+      "permView": "可閱讀",
+      "viewOnlyHint": "此說明書目前只支援「閱讀」權限。",
+      "empty": "尚未設定任何分享 — 此說明書目前僅 admin 可閱讀",
+      "removeConfirm": "移除此分享?"
+    },
+    "specialManuals": {
+      "title": "特殊說明書管理",
+      "desc": "管理多本說明書 — Cortex 主說明書全員可讀,特殊說明書(如貴金屬平台)走分享授權",
+      "newBook": "新增說明書",
+      "defaultShare": "預設分享範本",
+      "defaultShareTitle": "預設分享範本(全域)",
+      "defaultShareHelp": "在這裡設定的對象,將在新建特殊說明書時被自動複製為該書的分享授權。建立後即獨立 — 之後改範本不影響已建的書。",
+      "defaultEntries": "範本內容",
+      "defaultEmpty": "範本為空 — 新建特殊說明書時不會自動套任何分享(僅 admin 可讀)",
+      "removeDefaultConfirm": "從預設範本移除?",
+      "code": "代碼",
+      "name": "名稱",
+      "type": "類型",
+      "sections": "章節數",
+      "shares": "分享數",
+      "lastModified": "更新日期",
+      "typeSpecial": "特殊(走分享)",
+      "typeMain": "主說明書(全員)",
+      "inactive": "已停用",
+      "softDelete": "停用",
+      "reactivate": "啟用",
+      "shareBtn": "分享設定",
+      "deleteConfirm": "確定停用?",
+      "icon": "Icon (lucide name)",
+      "sortOrder": "排序",
+      "descLabel": "說明",
+      "codeHint": "建立後不可改,僅 a-z 0-9 連字號,長度 2-60",
+      "createHint": "新建的特殊說明書會自動套用「預設分享範本」中的所有授權對象。",
+      "codeAndNameRequired": "code 與 name 必填"
     }
   },
   "factoryLang": {

@@ -2196,6 +2196,45 @@ async function runMigrations(db) {
     CONSTRAINT help_trans_uq UNIQUE (section_id, lang)
   )`);
 
+  // ── 多本說明書 (Help Books) ─────────────────────────────────────────────────
+  // book_id=1 = Cortex 主說明書 (is_special=0,全員可讀,沿用既有行為)
+  // is_special=1 = 特殊說明書 (e.g. 貴金屬),需走 help_book_shares 過濾
+  // 詳見 docs/special-manuals-plan.md
+  await createTable('HELP_BOOKS', `CREATE TABLE help_books (
+    id             NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    code           VARCHAR2(60)  NOT NULL UNIQUE,
+    name           NVARCHAR2(200) NOT NULL,
+    description    NVARCHAR2(500),
+    icon           VARCHAR2(60),
+    is_special     NUMBER(1)     DEFAULT 0,
+    is_active      NUMBER(1)     DEFAULT 1,
+    sort_order     NUMBER        DEFAULT 0,
+    created_at     TIMESTAMP     DEFAULT SYSTIMESTAMP,
+    last_modified  VARCHAR2(20)
+  )`);
+
+  // 特殊說明書的分享授權 (only special books need this; cortex book is open)
+  // 因 Q2 拍板 view-only,不需 share_type 欄位
+  await createTable('HELP_BOOK_SHARES', `CREATE TABLE help_book_shares (
+    id            NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    book_id       NUMBER NOT NULL REFERENCES help_books(id) ON DELETE CASCADE,
+    grantee_type  VARCHAR2(20) NOT NULL,
+    grantee_id    VARCHAR2(120) NOT NULL,
+    granted_by    NUMBER,
+    granted_at    TIMESTAMP DEFAULT SYSTIMESTAMP,
+    CONSTRAINT help_book_share_uq UNIQUE (book_id, grantee_type, grantee_id)
+  )`);
+
+  // 全域「新建特殊說明書時自動套用」的預設分享範本(只一份,is_special=1 才用)
+  // 建立 book 時複製到 help_book_shares,複製後即獨立(改範本不影響已建 book)
+  await createTable('HELP_DEFAULT_SHARE', `CREATE TABLE help_default_share (
+    id            NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    grantee_type  VARCHAR2(20) NOT NULL,
+    grantee_id    VARCHAR2(120) NOT NULL,
+    created_at    TIMESTAMP DEFAULT SYSTIMESTAMP,
+    CONSTRAINT help_default_share_uq UNIQUE (grantee_type, grantee_id)
+  )`);
+
   // ── Factory Code Translations (en / vi only — zh-TW 來自 ERP FND_FLEX_VALUES_VL) ──
   // 見 docs/factory-share-layer-plan.md §2.1
   await createTable('FACTORY_CODE_TRANSLATIONS', `CREATE TABLE factory_code_translations (
@@ -2287,6 +2326,35 @@ async function runMigrations(db) {
   await addCol('INTERACTION_RESULTS', 'SESSION_ID', 'VARCHAR2(36)');
   await addCol('HELP_SECTIONS', 'LINKED_COURSE_ID', 'NUMBER');
   await addCol('HELP_SECTIONS', 'LINKED_LESSON_ID', 'NUMBER');
+
+  // ── 多本說明書 (help_books) — help_sections 加 book_id + Cortex book seed ──
+  await addCol('HELP_SECTIONS', 'BOOK_ID', 'NUMBER');
+  // Seed Cortex 主說明書 (id=1)
+  try {
+    const cortexExists = await db.prepare(
+      `SELECT id FROM help_books WHERE code = 'cortex'`
+    ).get();
+    if (!cortexExists) {
+      await db.prepare(`
+        INSERT INTO help_books (code, name, description, icon, is_special, is_active, sort_order, last_modified)
+        VALUES ('cortex', 'Cortex 使用說明書', '主平台使用說明 — 全員可讀', 'book_open_text', 0, 1, 0, ?)
+      `).run(new Date().toISOString().slice(0, 10));
+      console.log('[Migration] Seeded cortex help book');
+    }
+    // Backfill: 既有 sections book_id 為空 → 全部歸 Cortex book
+    const cortexBookRow = await db.prepare(
+      `SELECT id FROM help_books WHERE code = 'cortex'`
+    ).get();
+    if (cortexBookRow && cortexBookRow.id) {
+      const r = await db.prepare(
+        `UPDATE help_sections SET book_id = ? WHERE book_id IS NULL`
+      ).run(cortexBookRow.id);
+      const cnt = r?.rowsAffected ?? r?.changes ?? 0;
+      if (cnt > 0) console.log(`[Migration] Backfilled ${cnt} help_sections to cortex book`);
+    }
+  } catch (e) {
+    console.warn('[Migration] help_books seed/backfill:', e.message);
+  }
 
   await addCol('INTERACTION_RESULTS', 'EXAM_TOPIC_ID', 'NUMBER');
   await addCol('INTERACTION_RESULTS', 'WEIGHTED_SCORE', 'NUMBER');

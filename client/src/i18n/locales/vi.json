@@ -269,7 +269,8 @@
       "vectorDefaults": "Mô hình vector mặc định",
       "factoryLanguages": "Cài đặt ngôn ngữ nhà máy",
       "factoryTranslations": "Bản dịch nhà máy",
-      "pipelineWhitelist": "Bảng được Pipeline ghi"
+      "pipelineWhitelist": "Bảng được Pipeline ghi",
+      "specialManuals": "Sổ tay đặc biệt"
     },
     "pipelineWhitelist": {
       "title": "Quản lý bảng được Pipeline ghi",
@@ -1183,6 +1184,47 @@
       "deepResearch": "Nghiên cứu sâu",
       "headerToggles": "Nút chuyển đổi trên đầu trang",
       "costHint": "Gợi ý chi phí sử dụng"
+    },
+    "book": "Sổ tay",
+    "emptyBook": "Sổ tay này chưa có nội dung",
+    "share": {
+      "title": "Cài đặt chia sẻ",
+      "addTarget": "Thêm đối tượng chia sẻ",
+      "currentShares": "Chia sẻ hiện tại",
+      "permView": "Xem",
+      "viewOnlyHint": "Sổ tay này hiện chỉ hỗ trợ quyền «xem».",
+      "empty": "Chưa cấu hình chia sẻ — chỉ admin có thể xem sổ tay này",
+      "removeConfirm": "Xóa chia sẻ này?"
+    },
+    "specialManuals": {
+      "title": "Quản lý sổ tay đặc biệt",
+      "desc": "Quản lý nhiều sổ tay — Cortex là sổ tay chính cho mọi người; sổ tay đặc biệt (như nền tảng kim loại quý) cần ủy quyền chia sẻ",
+      "newBook": "Sổ tay mới",
+      "defaultShare": "Mẫu chia sẻ mặc định",
+      "defaultShareTitle": "Mẫu chia sẻ mặc định (toàn cục)",
+      "defaultShareHelp": "Đối tượng cấu hình ở đây sẽ được tự động sao chép vào sổ tay đặc biệt mới khi tạo. Sau khi tạo, sổ tay là độc lập — sửa mẫu không ảnh hưởng đến sổ tay đã có.",
+      "defaultEntries": "Nội dung mẫu",
+      "defaultEmpty": "Mẫu trống — sổ tay đặc biệt mới sẽ không tự động nhận chia sẻ (chỉ admin)",
+      "removeDefaultConfirm": "Xóa khỏi mẫu mặc định?",
+      "code": "Mã",
+      "name": "Tên",
+      "type": "Loại",
+      "sections": "Số chương",
+      "shares": "Số chia sẻ",
+      "lastModified": "Cập nhật",
+      "typeSpecial": "Đặc biệt (cần chia sẻ)",
+      "typeMain": "Chính (mọi người)",
+      "inactive": "Đã tắt",
+      "softDelete": "Tắt",
+      "reactivate": "Bật",
+      "shareBtn": "Cài đặt chia sẻ",
+      "deleteConfirm": "Xác nhận tắt?",
+      "icon": "Icon (tên lucide)",
+      "sortOrder": "Thứ tự",
+      "descLabel": "Mô tả",
+      "codeHint": "Không thể đổi sau khi tạo. Chỉ chữ thường, số, gạch nối; độ dài 2-60",
+      "createHint": "Sổ tay đặc biệt mới sẽ tự động áp dụng tất cả đối tượng trong Mẫu chia sẻ mặc định.",
+      "codeAndNameRequired": "code và name là bắt buộc"
     }
   },
   "factoryLang": {

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Users, BarChart3, Shield, AlertTriangle, Database, Mail, ArrowLeft, Cpu, DollarSign, CalendarClock, Plug, Zap, UserCog, Sparkles, Code2, Search, KeyRound, MonitorPlay, Lock, Activity, MessageSquare, Languages, GraduationCap, TicketCheck, Mic, Factory } from 'lucide-react'
+import { Users, BarChart3, Shield, AlertTriangle, Database, Mail, ArrowLeft, Cpu, DollarSign, CalendarClock, Plug, Zap, UserCog, Sparkles, Code2, Search, KeyRound, MonitorPlay, Lock, Activity, MessageSquare, Languages, GraduationCap, TicketCheck, Mic, Factory, BookOpen } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import UserManagement from '../components/admin/UserManagement'
 import TokenUsagePanel from '../components/admin/TokenUsage'
@@ -34,13 +34,14 @@ import PmBomPanel from '../components/admin/PmBomPanel'
 import PmSettingsPanel from '../components/admin/PmSettingsPanel'
 import WebexLogsPanel from '../components/admin/WebexLogsPanel'
 import HelpTranslationPanel from '../components/admin/HelpTranslationPanel'
+import SpecialManualsPanel from '../components/admin/SpecialManualsPanel'
 import FactoryTranslationsPanel from '../components/admin/FactoryTranslationsPanel'
 import TrainingAdmin from '../components/admin/TrainingAdmin'
 import FeedbackCategoryManager from '../components/feedback/admin/FeedbackCategoryManager'
 import FeedbackSLAConfig from '../components/feedback/admin/FeedbackSLAConfig'
 import FeedbackStatsPanel from '../components/feedback/FeedbackStatsPanel'
 import VoiceInputSettingsPanel from '../components/admin/VoiceInputSettings'
-type Tab = 'users' | 'roles' | 'tokens' | 'audit' | 'keywords' | 'db' | 'mail' | 'llm' | 'vector-defaults' | 'kb-retrieval' | 'kb-debug' | 'kb-synonyms' | 'cost' | 'scheduled' | 'mcp' | 'dify' | 'kb' | 'skills' | 'code-runners' | 'research' | 'api-keys' | 'ai-dashboard' | 'chart-adoption' | 'data-permissions' | 'monitor' | 'db-sources' | 'pipeline-whitelist' | 'alert-rules' | 'pm-bom' | 'pm-settings' | 'webex-logs' | 'help-translation' | 'factory-translations' | 'training' | 'feedback' | 'voice-input'
+type Tab = 'users' | 'roles' | 'tokens' | 'audit' | 'keywords' | 'db' | 'mail' | 'llm' | 'vector-defaults' | 'kb-retrieval' | 'kb-debug' | 'kb-synonyms' | 'cost' | 'scheduled' | 'mcp' | 'dify' | 'kb' | 'skills' | 'code-runners' | 'research' | 'api-keys' | 'ai-dashboard' | 'chart-adoption' | 'data-permissions' | 'monitor' | 'db-sources' | 'pipeline-whitelist' | 'alert-rules' | 'pm-bom' | 'pm-settings' | 'webex-logs' | 'help-translation' | 'special-manuals' | 'factory-translations' | 'training' | 'feedback' | 'voice-input'
 
 export default function AdminDashboard() {
   const [activeTab, setActiveTab] = useState<Tab>('users')
@@ -78,6 +79,7 @@ export default function AdminDashboard() {
     { id: 'scheduled', label: t('admin.tabs.scheduled'), icon: <CalendarClock size={16} className="text-cyan-500" /> },
     { id: 'webex-logs', label: 'Webex Bot 日誌', icon: <MessageSquare size={16} className="text-purple-500" /> },
     { id: 'help-translation', label: '說明文件翻譯', icon: <Languages size={16} className="text-sky-500" /> },
+    { id: 'special-manuals', label: t('admin.tabs.specialManuals', '特殊說明書管理'), icon: <BookOpen size={16} className="text-amber-500" /> },
     { id: 'factory-translations', label: t('admin.tabs.factoryTranslations', '廠區翻譯'), icon: <Factory size={16} className="text-indigo-500" /> },
     // ─ 教育訓練 ─
     { id: 'training', label: '教育訓練報表', icon: <GraduationCap size={16} className="text-sky-400" /> },
@@ -165,6 +167,7 @@ export default function AdminDashboard() {
           {activeTab === 'pm-bom' && <PmBomPanel />}
           {activeTab === 'pm-settings' && <PmSettingsPanel />}
           {activeTab === 'help-translation' && <HelpTranslationPanel />}
+          {activeTab === 'special-manuals' && <SpecialManualsPanel />}
           {activeTab === 'factory-translations' && <FactoryTranslationsPanel />}
           {activeTab === 'training' && <TrainingAdmin />}
           {activeTab === 'feedback' && (
