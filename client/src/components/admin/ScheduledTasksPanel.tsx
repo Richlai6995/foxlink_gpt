@@ -295,6 +295,37 @@ function TaskFormModal({
       const res = isEdit
         ? await api.put(`/scheduled-tasks/${task!.id}`, payload)
         : await api.post('/scheduled-tasks', payload)
+      // Phase 3 alert 節點:儲存後 sync 對應 alert_rules(每個 alert node 一筆 by task_id+node_id)
+      const savedTaskId = res.data?.id || task?.id
+      if (savedTaskId) {
+        const alertNodes = pipelineNodes.filter((n: any) => n.type === 'alert' && n.rule_name)
+        for (const an of alertNodes) {
+          try {
+            await api.post('/alert-rules/sync-pipeline', {
+              task_id: savedTaskId,
+              node_id: an.id,
+              rule: {
+                rule_name: an.rule_name,
+                entity_type: an.entity_type,
+                entity_code: an.entity_code,
+                data_source: an.data_source,
+                data_config: an.data_config,
+                comparison: an.comparison,
+                comparison_config: an.comparison_config,
+                severity: an.severity,
+                actions: an.actions,
+                message_template: an.message_template,
+                use_llm_analysis: an.use_llm_analysis,
+                cooldown_minutes: an.cooldown_minutes,
+                dedup_key: an.dedup_key,
+                is_active: 1,
+              },
+            })
+          } catch (syncErr) {
+            console.warn(`[Alert sync] node ${an.id} failed`, syncErr)
+          }
+        }
+      }
       onSaved(res.data)
     } catch (e: unknown) {
       const err = e as { response?: { status?: number; data?: { error?: string } }; message?: string }

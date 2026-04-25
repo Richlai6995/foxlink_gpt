@@ -1390,7 +1390,8 @@
         "condition": "Condition",
         "parallel": "Parallel",
         "db_write": "DB Write",
-        "kb_write": "KB Write"
+        "kb_write": "KB Write",
+        "alert": "Alert"
       },
       "vars": {
         "aiOutput": "Main AI Output",
@@ -1519,6 +1520,35 @@
           "none": "No dedupe"
         },
         "maxChunksPerRun": "Max chunks per run"
+      },
+      "alert": {
+        "hint": "After the schedule runs, evaluate a rule (threshold / historical avg / rate change / z-score). On trigger, send Email / Webex / Webhook and write to alert history.",
+        "ruleName": "Rule name",
+        "ruleNamePh": "e.g. Copper price drops below 12000",
+        "severity": "Severity",
+        "entityType": "Entity type",
+        "entityCode": "Entity code",
+        "dataSource": "Data source",
+        "ds": {
+          "upstream": "Upstream JSON (default)",
+          "sql": "SQL query (SELECT only)",
+          "literal": "Literal value (testing)"
+        },
+        "comparison": "Comparison",
+        "cmp": {
+          "threshold": "Absolute threshold (operator + value)",
+          "historicalAvg": "Deviation from historical avg (period_days + deviation_pct)",
+          "rateChange": "Rate of change (threshold_pct)",
+          "zscore": "Z-score outlier (period_days + sigma)"
+        },
+        "thresholdPh": "Threshold",
+        "messageTemplate": "Message template (vars: {{rule_name}} {{trigger_value}} {{threshold_value}} {{reason}} {{entity_code}})",
+        "useLlmAnalysis": "Append LLM analysis (uses LLM to write a meaning / next-step on trigger)",
+        "actions": "Actions",
+        "actionsHint": "alert_history always runs (auto-added). Email / Webex / Webhook are optional.",
+        "alwaysOn": "(always)",
+        "cooldownMin": "Cooldown (minutes; same dedup_key within this window won't re-fire)",
+        "testTrigger": "Test (simulated trigger, no real notify)"
       },
       "summary": {
         "noSkill": "No skill selected",

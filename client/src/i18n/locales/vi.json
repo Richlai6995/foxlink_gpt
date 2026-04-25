@@ -1390,7 +1390,8 @@
         "condition": "Điều kiện",
         "parallel": "Song song",
         "db_write": "Ghi DB",
-        "kb_write": "Ghi KB"
+        "kb_write": "Ghi KB",
+        "alert": "Cảnh báo"
       },
       "vars": {
         "aiOutput": "Đầu ra AI chính",
@@ -1519,6 +1520,35 @@
           "none": "Không chống trùng"
         },
         "maxChunksPerRun": "Giới hạn chunk mỗi lần"
+      },
+      "alert": {
+        "hint": "Sau khi tác vụ chạy, đánh giá quy tắc (threshold / trung bình lịch sử / tỷ lệ biến động / Z-score). Khi trigger, gửi Email / Webex / Webhook và ghi vào lịch sử cảnh báo.",
+        "ruleName": "Tên quy tắc",
+        "ruleNamePh": "VD: Giá đồng dưới 12000",
+        "severity": "Mức độ",
+        "entityType": "Loại đối tượng",
+        "entityCode": "Mã đối tượng",
+        "dataSource": "Nguồn dữ liệu",
+        "ds": {
+          "upstream": "JSON từ nút trước (mặc định)",
+          "sql": "SQL query (chỉ SELECT)",
+          "literal": "Giá trị trực tiếp (thử nghiệm)"
+        },
+        "comparison": "Chế độ so sánh",
+        "cmp": {
+          "threshold": "Ngưỡng tuyệt đối (operator + value)",
+          "historicalAvg": "Lệch khỏi trung bình lịch sử (period_days + deviation_pct)",
+          "rateChange": "Tỷ lệ biến động (threshold_pct)",
+          "zscore": "Z-score bất thường (period_days + sigma)"
+        },
+        "thresholdPh": "Ngưỡng",
+        "messageTemplate": "Mẫu thông báo (vars: {{rule_name}} {{trigger_value}} {{threshold_value}} {{reason}} {{entity_code}})",
+        "useLlmAnalysis": "Thêm phân tích LLM (dùng LLM viết ý nghĩa / theo dõi tiếp khi trigger)",
+        "actions": "Hành động",
+        "actionsHint": "alert_history luôn chạy (tự động thêm). Email / Webex / Webhook tuỳ chọn.",
+        "alwaysOn": "(luôn chạy)",
+        "cooldownMin": "Thời gian cooldown (phút; cùng dedup_key trong khoảng này không re-trigger)",
+        "testTrigger": "Thử (mô phỏng trigger, không gửi thật)"
       },
       "summary": {
         "noSkill": "Chưa chọn kỹ năng",

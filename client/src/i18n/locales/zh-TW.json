@@ -1390,7 +1390,8 @@
         "condition": "條件判斷",
         "parallel": "並行執行",
         "db_write": "DB 寫入",
-        "kb_write": "知識庫寫入"
+        "kb_write": "知識庫寫入",
+        "alert": "警示"
       },
       "vars": {
         "aiOutput": "AI 主輸出",
@@ -1519,6 +1520,35 @@
           "none": "不去重"
         },
         "maxChunksPerRun": "單次 chunk 上限"
+      },
+      "alert": {
+        "hint": "排程跑完後,評估規則(threshold / 歷史平均 / 變化率 / Z-score),觸發時送 Email / Webex / Webhook 並寫入警示日誌。",
+        "ruleName": "規則名稱",
+        "ruleNamePh": "例:銅價跌破 12000",
+        "severity": "嚴重等級",
+        "entityType": "標的類型",
+        "entityCode": "標的代碼",
+        "dataSource": "資料來源",
+        "ds": {
+          "upstream": "上游 JSON(預設)",
+          "sql": "SQL 查詢(SELECT 才允許)",
+          "literal": "直接輸入數值(測試用)"
+        },
+        "comparison": "比較模式",
+        "cmp": {
+          "threshold": "絕對閾值(operator + value)",
+          "historicalAvg": "偏離歷史平均(period_days + deviation_pct)",
+          "rateChange": "變化率(threshold_pct)",
+          "zscore": "Z-score 異常(period_days + sigma)"
+        },
+        "thresholdPh": "閾值",
+        "messageTemplate": "訊息模板(支援 {{rule_name}} {{trigger_value}} {{threshold_value}} {{reason}} {{entity_code}} 等)",
+        "useLlmAnalysis": "附加 LLM 分析(觸發時用 LLM 寫一段意義 / 後續觀察)",
+        "actions": "動作",
+        "actionsHint": "alert_history 永遠執行(自動加)。Email / Webex / Webhook 視需要加。",
+        "alwaysOn": "(永遠執行)",
+        "cooldownMin": "冷卻時間(分鐘,同 dedup_key 在此期間不重複觸發)",
+        "testTrigger": "試跑(模擬觸發,不真寄信)"
       },
       "summary": {
         "noSkill": "未選擇技能",

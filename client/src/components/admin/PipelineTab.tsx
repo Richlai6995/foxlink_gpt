@@ -23,7 +23,7 @@ export interface DbWriteColumnMap {
 
 export interface PipelineNode {
   id: string
-  type: 'skill' | 'mcp' | 'kb' | 'ai' | 'generate_file' | 'condition' | 'parallel' | 'db_write' | 'kb_write'
+  type: 'skill' | 'mcp' | 'kb' | 'ai' | 'generate_file' | 'condition' | 'parallel' | 'db_write' | 'kb_write' | 'alert'
   // skill
   name?: string
   input?: string
@@ -71,6 +71,20 @@ export interface PipelineNode {
   chunk_strategy?: 'mixed' | 'body_only' | 'whole'
   dedupe_mode?: 'url' | 'title' | 'url_or_title' | 'none'
   max_chunks_per_run?: number
+  // alert
+  rule_name?: string
+  entity_type?: string
+  entity_code?: string
+  data_source?: 'upstream_json' | 'sql_query' | 'literal'
+  data_config?: Record<string, any>
+  comparison?: 'threshold' | 'historical_avg' | 'rate_change' | 'zscore'
+  comparison_config?: Record<string, any>
+  severity?: 'info' | 'warning' | 'critical'
+  actions?: Array<{ type: string; [k: string]: any }>
+  message_template?: string
+  use_llm_analysis?: boolean | number
+  cooldown_minutes?: number
+  dedup_key?: string
   // label
   label?: string
 }
@@ -121,6 +135,7 @@ const NODE_TYPES = [
   { type: 'parallel',      icon: GitMerge,    labelKey: 'scheduledTask.pipeline.nodeType.parallel',       color: 'text-teal-500',   bg: 'bg-teal-50   border-teal-200',   adminOnly: false },
   { type: 'db_write',      icon: Database,    labelKey: 'scheduledTask.pipeline.nodeType.db_write',       color: 'text-slate-600',  bg: 'bg-slate-50  border-slate-300',  adminOnly: true  },
   { type: 'kb_write',      icon: BookOpen,    labelKey: 'scheduledTask.pipeline.nodeType.kb_write',       color: 'text-emerald-600',bg: 'bg-emerald-50 border-emerald-200', adminOnly: false },
+  { type: 'alert',         icon: AlertCircle, labelKey: 'scheduledTask.pipeline.nodeType.alert',          color: 'text-rose-600',   bg: 'bg-rose-50   border-rose-300',     adminOnly: false },
 ] as const
 
 const FILE_TYPES = ['pdf', 'docx', 'xlsx', 'pptx', 'txt', 'mp3']
@@ -816,6 +831,319 @@ function FieldRow({ label, value, onChange }: { label: string; value: string; on
   )
 }
 
+// ─── AlertForm — Phase 3 警示節點 ─────────────────────────────────────────
+const ALERT_COMPARISONS = [
+  { value: 'threshold',      labelKey: 'scheduledTask.pipeline.alert.cmp.threshold' },
+  { value: 'historical_avg', labelKey: 'scheduledTask.pipeline.alert.cmp.historicalAvg' },
+  { value: 'rate_change',    labelKey: 'scheduledTask.pipeline.alert.cmp.rateChange' },
+  { value: 'zscore',         labelKey: 'scheduledTask.pipeline.alert.cmp.zscore' },
+] as const
+
+const ALERT_DATA_SOURCES = [
+  { value: 'upstream_json', labelKey: 'scheduledTask.pipeline.alert.ds.upstream' },
+  { value: 'sql_query',     labelKey: 'scheduledTask.pipeline.alert.ds.sql' },
+  { value: 'literal',       labelKey: 'scheduledTask.pipeline.alert.ds.literal' },
+] as const
+
+const ALERT_SEVERITIES = ['info', 'warning', 'critical'] as const
+
+function AlertForm({
+  node, otherIds, onChange, taskId,
+}: {
+  node: PipelineNode
+  otherIds: string[]
+  onChange: (patch: Partial<PipelineNode>) => void
+  taskId?: number
+}) {
+  const { t } = useTranslation()
+  const [testing, setTesting] = useState(false)
+  const [testResult, setTestResult] = useState<any>(null)
+  const [loadingSample, setLoadingSample] = useState(false)
+
+  const cmpCfg = (node.comparison_config || {}) as any
+  const dataCfg = (node.data_config || {}) as any
+  const actions = node.actions || []
+
+  const updateCmpCfg = (patch: Record<string, any>) => onChange({ comparison_config: { ...cmpCfg, ...patch } })
+  const updateDataCfg = (patch: Record<string, any>) => onChange({ data_config: { ...dataCfg, ...patch } })
+
+  const setAction = (i: number, patch: Record<string, any>) => {
+    const arr = [...actions]
+    arr[i] = { ...arr[i], ...patch }
+    onChange({ actions: arr })
+  }
+  const addAction = (type: string) => onChange({ actions: [...actions, { type }] })
+  const removeAction = (i: number) => onChange({ actions: actions.filter((_, idx) => idx !== i) })
+
+  const runTest = async () => {
+    setTesting(true)
+    setTestResult(null)
+    try {
+      const sourceText = (node as any)._dry_run_sample || ''
+      const r = await api.post('/alert-rules/0/test', { source_text: sourceText }).catch(async () => {
+        // 規則還沒儲存到 DB,改用 inline 模擬
+        const { executeAlert } = { executeAlert: null } as any
+        // fallback:呼 backend 用 inline rule 直接跑
+        return await api.post('/alert-rules', {
+          rule_name: node.rule_name || node.label || 'TEST_INLINE',
+          comparison: node.comparison || 'threshold',
+          comparison_config: cmpCfg,
+          data_source: node.data_source || 'upstream_json',
+          data_config: dataCfg,
+          severity: node.severity || 'warning',
+          actions: actions,
+          message_template: node.message_template,
+          cooldown_minutes: 0,
+          is_active: 1,
+        }).then(async (res: any) => {
+          const ruleId = res.data.id
+          const tr = await api.post(`/alert-rules/${ruleId}/test`, { source_text: sourceText })
+          // 清掉測試 rule
+          await api.delete(`/alert-rules/${ruleId}`).catch(() => {})
+          return tr
+        })
+      })
+      setTestResult(r.data)
+    } catch (e: any) {
+      setTestResult({ error: e?.response?.data?.error || e.message })
+    } finally {
+      setTesting(false)
+    }
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-start gap-1.5 text-xs bg-rose-50 border border-rose-200 rounded px-2 py-1.5 text-rose-700">
+        <AlertCircle size={12} className="shrink-0 mt-0.5" />
+        <span>{t('scheduledTask.pipeline.alert.hint')}</span>
+      </div>
+
+      {/* 規則名稱 + 嚴重等級 */}
+      <div className="grid grid-cols-[2fr_1fr] gap-2">
+        <div>
+          <label className="label text-xs">{t('scheduledTask.pipeline.alert.ruleName')}</label>
+          <input
+            className="input w-full text-xs"
+            value={node.rule_name || ''}
+            onChange={(e) => onChange({ rule_name: e.target.value })}
+            placeholder={t('scheduledTask.pipeline.alert.ruleNamePh')}
+          />
+        </div>
+        <div>
+          <label className="label text-xs">{t('scheduledTask.pipeline.alert.severity')}</label>
+          <select
+            className="input w-full text-xs"
+            value={node.severity || 'warning'}
+            onChange={(e) => onChange({ severity: e.target.value as any })}
+          >
+            {ALERT_SEVERITIES.map(s => (
+              <option key={s} value={s}>{s.toUpperCase()}</option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      {/* Entity */}
+      <div className="grid grid-cols-2 gap-2">
+        <div>
+          <label className="label text-xs">{t('scheduledTask.pipeline.alert.entityType')}</label>
+          <input className="input w-full text-xs" value={node.entity_type || ''} onChange={(e) => onChange({ entity_type: e.target.value })} placeholder="metal / fx / stock" />
+        </div>
+        <div>
+          <label className="label text-xs">{t('scheduledTask.pipeline.alert.entityCode')}</label>
+          <input className="input w-full text-xs" value={node.entity_code || ''} onChange={(e) => onChange({ entity_code: e.target.value })} placeholder="CU / EURUSD / AAPL" />
+        </div>
+      </div>
+
+      {/* Data source */}
+      <div>
+        <label className="label text-xs">{t('scheduledTask.pipeline.alert.dataSource')}</label>
+        <select
+          className="input w-full text-xs"
+          value={node.data_source || 'upstream_json'}
+          onChange={(e) => onChange({ data_source: e.target.value as any, data_config: {} })}
+        >
+          {ALERT_DATA_SOURCES.map(d => (
+            <option key={d.value} value={d.value}>{t(d.labelKey)}</option>
+          ))}
+        </select>
+        {(node.data_source || 'upstream_json') === 'upstream_json' && (
+          <input
+            className="input w-full text-xs mt-1 font-mono"
+            value={dataCfg.jsonpath || '$.value'}
+            onChange={(e) => updateDataCfg({ jsonpath: e.target.value })}
+            placeholder="$.price_usd"
+          />
+        )}
+        {(node.data_source) === 'sql_query' && (
+          <textarea
+            className="input w-full text-xs mt-1 font-mono h-16 resize-none"
+            value={dataCfg.sql || ''}
+            onChange={(e) => updateDataCfg({ sql: e.target.value })}
+            placeholder="SELECT price_usd FROM pm_price_history WHERE metal_code='CU' ORDER BY as_of_date DESC FETCH FIRST 8 ROWS ONLY"
+          />
+        )}
+        {(node.data_source) === 'literal' && (
+          <input
+            type="number"
+            step="any"
+            className="input w-full text-xs mt-1"
+            value={dataCfg.value ?? ''}
+            onChange={(e) => updateDataCfg({ value: e.target.value })}
+            placeholder="13190"
+          />
+        )}
+      </div>
+
+      {/* Comparison */}
+      <div>
+        <label className="label text-xs">{t('scheduledTask.pipeline.alert.comparison')}</label>
+        <select
+          className="input w-full text-xs"
+          value={node.comparison || 'threshold'}
+          onChange={(e) => onChange({ comparison: e.target.value as any, comparison_config: {} })}
+        >
+          {ALERT_COMPARISONS.map(c => (
+            <option key={c.value} value={c.value}>{t(c.labelKey)}</option>
+          ))}
+        </select>
+        {/* threshold */}
+        {(node.comparison || 'threshold') === 'threshold' && (
+          <div className="grid grid-cols-[1fr_2fr] gap-2 mt-1">
+            <select className="input text-xs" value={cmpCfg.operator || 'gt'} onChange={(e) => updateCmpCfg({ operator: e.target.value })}>
+              <option value="gt">{'>'}</option>
+              <option value="lt">{'<'}</option>
+              <option value="gte">{'≥'}</option>
+              <option value="lte">{'≤'}</option>
+              <option value="eq">{'='}</option>
+              <option value="ne">{'≠'}</option>
+            </select>
+            <input type="number" step="any" className="input text-xs" value={cmpCfg.value ?? ''} onChange={(e) => updateCmpCfg({ value: e.target.value })} placeholder={t('scheduledTask.pipeline.alert.thresholdPh')} />
+          </div>
+        )}
+        {node.comparison === 'historical_avg' && (
+          <div className="grid grid-cols-2 gap-2 mt-1">
+            <input type="number" className="input text-xs" value={cmpCfg.period_days ?? 7} onChange={(e) => updateCmpCfg({ period_days: Number(e.target.value) })} placeholder="period_days=7" />
+            <input type="number" step="any" className="input text-xs" value={cmpCfg.deviation_pct ?? 20} onChange={(e) => updateCmpCfg({ deviation_pct: Number(e.target.value) })} placeholder="deviation_pct=20" />
+          </div>
+        )}
+        {node.comparison === 'rate_change' && (
+          <div className="grid grid-cols-3 gap-2 mt-1">
+            <select className="input text-xs" value={cmpCfg.operator || 'abs'} onChange={(e) => updateCmpCfg({ operator: e.target.value })}>
+              <option value="abs">|△|</option>
+              <option value="up">↑</option>
+              <option value="down">↓</option>
+            </select>
+            <input type="number" className="input text-xs" value={cmpCfg.period_days ?? 1} onChange={(e) => updateCmpCfg({ period_days: Number(e.target.value) })} placeholder="period_days=1" />
+            <input type="number" step="any" className="input text-xs" value={cmpCfg.threshold_pct ?? 5} onChange={(e) => updateCmpCfg({ threshold_pct: Number(e.target.value) })} placeholder="threshold_pct=5" />
+          </div>
+        )}
+        {node.comparison === 'zscore' && (
+          <div className="grid grid-cols-2 gap-2 mt-1">
+            <input type="number" className="input text-xs" value={cmpCfg.period_days ?? 30} onChange={(e) => updateCmpCfg({ period_days: Number(e.target.value) })} placeholder="period_days=30" />
+            <input type="number" step="any" className="input text-xs" value={cmpCfg.sigma ?? 2} onChange={(e) => updateCmpCfg({ sigma: Number(e.target.value) })} placeholder="sigma=2" />
+          </div>
+        )}
+      </div>
+
+      {/* Message template + LLM */}
+      <div>
+        <label className="label text-xs">{t('scheduledTask.pipeline.alert.messageTemplate')}</label>
+        <textarea
+          className="input w-full text-xs h-14 resize-none"
+          value={node.message_template || ''}
+          onChange={(e) => onChange({ message_template: e.target.value })}
+          placeholder="{{rule_name}} 觸發:{{entity_code}} 當前 {{trigger_value}},基準 {{threshold_value}}({{reason}})"
+        />
+        <label className="flex items-center gap-1.5 text-xs mt-1 cursor-pointer">
+          <input type="checkbox" checked={!!node.use_llm_analysis} onChange={(e) => onChange({ use_llm_analysis: e.target.checked })} />
+          {t('scheduledTask.pipeline.alert.useLlmAnalysis')}
+        </label>
+      </div>
+
+      {/* Actions */}
+      <div>
+        <label className="label text-xs">{t('scheduledTask.pipeline.alert.actions')}</label>
+        <p className="text-[10px] text-slate-400 mb-1">{t('scheduledTask.pipeline.alert.actionsHint')}</p>
+        <div className="space-y-1.5">
+          {actions.map((a, i) => (
+            <div key={i} className="grid grid-cols-[80px_1fr_auto] gap-1.5 items-center">
+              <span className="text-xs px-2 py-1 bg-rose-100 text-rose-700 rounded">{a.type}</span>
+              {a.type === 'email' && (
+                <input className="input text-xs" value={Array.isArray(a.to) ? a.to.join(',') : (a.to || '')} onChange={(e) => setAction(i, { to: e.target.value.split(',').map(s => s.trim()).filter(Boolean) })} placeholder="user1@x.com,user2@y.com" />
+              )}
+              {a.type === 'webex' && (
+                <input className="input text-xs" value={a.room_id || ''} onChange={(e) => setAction(i, { room_id: e.target.value })} placeholder="Webex room ID" />
+              )}
+              {a.type === 'webhook' && (
+                <input className="input text-xs" value={a.url || ''} onChange={(e) => setAction(i, { url: e.target.value })} placeholder="https://hooks.example.com/..." />
+              )}
+              {a.type === 'alert_history' && (
+                <span className="text-[10px] text-slate-400">{t('scheduledTask.pipeline.alert.alwaysOn')}</span>
+              )}
+              <button type="button" onClick={() => removeAction(i)} className="p-0.5 text-slate-300 hover:text-rose-500"><X size={12} /></button>
+            </div>
+          ))}
+        </div>
+        <div className="flex gap-1.5 mt-1.5">
+          {['email', 'webex', 'webhook'].map(t => (
+            <button key={t} type="button" onClick={() => addAction(t)} className="text-[10px] px-2 py-0.5 rounded border border-slate-300 text-slate-500 hover:border-rose-400 hover:text-rose-600">+ {t}</button>
+          ))}
+        </div>
+      </div>
+
+      {/* Cooldown */}
+      <div>
+        <label className="label text-xs">{t('scheduledTask.pipeline.alert.cooldownMin')}</label>
+        <input type="number" className="input w-full text-xs" value={node.cooldown_minutes ?? 60} onChange={(e) => onChange({ cooldown_minutes: Number(e.target.value) })} placeholder="60" />
+      </div>
+
+      {/* 上游 input + 試跑 */}
+      <div>
+        <label className="label text-xs">{t('scheduledTask.pipeline.dbWrite.inputSource')}</label>
+        <VarInput value={node.input || '{{ai_output}}'} onChange={(v) => onChange({ input: v })} placeholder="{{ai_output}}" allNodeIds={otherIds} />
+      </div>
+
+      <div className="pt-2 border-t border-slate-200">
+        <div className="flex items-center justify-between mb-1">
+          <label className="label text-xs m-0">{t('scheduledTask.pipeline.dbWrite.dryRunSample')}</label>
+          {taskId && (
+            <button type="button" disabled={loadingSample}
+              onClick={async () => {
+                setLoadingSample(true)
+                try {
+                  const r = await api.get(`/scheduled-tasks/${taskId}/last-output`)
+                  const text = r.data?.response_preview || ''
+                  if (!text) alert(t('scheduledTask.pipeline.dbWrite.noLastOutput'))
+                  else onChange({ _dry_run_sample: text } as any)
+                } catch (e: any) { alert(e?.response?.data?.error || e.message) }
+                finally { setLoadingSample(false) }
+              }}
+              className="text-xs px-2 py-0.5 rounded border border-slate-300 text-slate-500 hover:border-blue-400 hover:text-blue-600 disabled:opacity-40">
+              {loadingSample ? t('common.loading') : t('scheduledTask.pipeline.dbWrite.loadLastOutput')}
+            </button>
+          )}
+        </div>
+        <textarea
+          className="input w-full h-14 text-xs font-mono resize-none"
+          value={(node as any)._dry_run_sample || ''}
+          onChange={(e) => onChange({ _dry_run_sample: e.target.value } as any)}
+          placeholder='{"price_usd": 13500}'
+        />
+        <button type="button" onClick={runTest} disabled={testing || !node.comparison}
+          className="mt-2 flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-slate-300 text-slate-600 hover:border-rose-400 hover:text-rose-600 disabled:opacity-40">
+          <PlayCircle size={12} /> {testing ? t('scheduledTask.pipeline.dbWrite.dryRunning') : t('scheduledTask.pipeline.alert.testTrigger')}
+        </button>
+        {testResult && (
+          <pre className="mt-2 text-[10px] font-mono bg-slate-50 border border-slate-200 rounded p-2 max-h-48 overflow-auto whitespace-pre-wrap">
+            {JSON.stringify(testResult, null, 2)}
+          </pre>
+        )}
+      </div>
+    </div>
+  )
+}
+
 // ─── GenerateFileForm (with template picker) ───────────────────────────────────
 function GenerateFileForm({
   node, otherIds, onChange,
@@ -1023,6 +1351,10 @@ function NodeForm({
     <KbWriteForm node={node} otherIds={otherIds} onChange={onChange} taskId={taskId} />
   )
 
+  if (node.type === 'alert') return (
+    <AlertForm node={node} otherIds={otherIds} onChange={onChange} taskId={taskId} />
+  )
+
   if (node.type === 'condition') return (
     <div className="space-y-3">
       <div>
@@ -1152,6 +1484,9 @@ function NodeCard({
     if (node.type === 'kb_write') return node.kb_id
       ? `${node.kb_name || node.kb_id} (${node.chunk_strategy || 'mixed'}, ≤${node.max_chunks_per_run || 100})`
       : t('scheduledTask.pipeline.summary.notSet')
+    if (node.type === 'alert') return node.rule_name
+      ? `${node.rule_name} [${(node.severity || 'warning').toUpperCase()}] ${node.comparison || '?'}`
+      : t('scheduledTask.pipeline.summary.notSet')
     return ''
   })()
 
@@ -1276,6 +1611,19 @@ export default function PipelineTab({ nodes, onChange, catalog, mcpServers, task
       base.content_field = '$.content'
       base.source_field = '$.source'
       base.published_at_field = '$.published_at'
+      base.input = '{{ai_output}}'
+    }
+    if (type === 'alert') {
+      base.rule_name = ''
+      base.severity = 'warning'
+      base.data_source = 'upstream_json'
+      base.data_config = { jsonpath: '$.value' }
+      base.comparison = 'threshold'
+      base.comparison_config = { operator: 'gt', value: 0 }
+      base.actions = [{ type: 'alert_history' }]
+      base.message_template = '{{rule_name}} 觸發:{{entity_code}} 當前值 {{trigger_value}}({{reason}})'
+      base.use_llm_analysis = false
+      base.cooldown_minutes = 60
       base.input = '{{ai_output}}'
     }
     onChange([...nodes, base])

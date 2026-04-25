@@ -29,6 +29,7 @@ import DataPermissionsPanel from '../components/admin/DataPermissionsPanel'
 import MonitorPage from '../components/monitor/MonitorPage'
 import DbSourcesPanel from '../components/admin/DbSourcesPanel'
 import PipelineWritableTablesPanel from '../components/admin/PipelineWritableTablesPanel'
+import AlertRulesPanel from '../components/admin/AlertRulesPanel'
 import WebexLogsPanel from '../components/admin/WebexLogsPanel'
 import HelpTranslationPanel from '../components/admin/HelpTranslationPanel'
 import FactoryTranslationsPanel from '../components/admin/FactoryTranslationsPanel'
@@ -37,7 +38,7 @@ import FeedbackCategoryManager from '../components/feedback/admin/FeedbackCatego
 import FeedbackSLAConfig from '../components/feedback/admin/FeedbackSLAConfig'
 import FeedbackStatsPanel from '../components/feedback/FeedbackStatsPanel'
 import VoiceInputSettingsPanel from '../components/admin/VoiceInputSettings'
-type Tab = 'users' | 'roles' | 'tokens' | 'audit' | 'keywords' | 'db' | 'mail' | 'llm' | 'vector-defaults' | 'kb-retrieval' | 'kb-debug' | 'kb-synonyms' | 'cost' | 'scheduled' | 'mcp' | 'dify' | 'kb' | 'skills' | 'code-runners' | 'research' | 'api-keys' | 'ai-dashboard' | 'chart-adoption' | 'data-permissions' | 'monitor' | 'db-sources' | 'pipeline-whitelist' | 'webex-logs' | 'help-translation' | 'factory-translations' | 'training' | 'feedback' | 'voice-input'
+type Tab = 'users' | 'roles' | 'tokens' | 'audit' | 'keywords' | 'db' | 'mail' | 'llm' | 'vector-defaults' | 'kb-retrieval' | 'kb-debug' | 'kb-synonyms' | 'cost' | 'scheduled' | 'mcp' | 'dify' | 'kb' | 'skills' | 'code-runners' | 'research' | 'api-keys' | 'ai-dashboard' | 'chart-adoption' | 'data-permissions' | 'monitor' | 'db-sources' | 'pipeline-whitelist' | 'alert-rules' | 'webex-logs' | 'help-translation' | 'factory-translations' | 'training' | 'feedback' | 'voice-input'
 
 export default function AdminDashboard() {
   const [activeTab, setActiveTab] = useState<Tab>('users')
@@ -85,6 +86,7 @@ export default function AdminDashboard() {
     { id: 'db', label: t('admin.tabs.db'), icon: <Database size={16} className="text-slate-500" /> },
     { id: 'db-sources', label: 'DB 來源管理', icon: <Database size={16} className="text-sky-500" /> },
     { id: 'pipeline-whitelist', label: t('admin.tabs.pipelineWhitelist', 'Pipeline 可寫表'), icon: <Database size={16} className="text-slate-600" /> },
+    { id: 'alert-rules', label: t('admin.tabs.alertRules', '警示規則'), icon: <AlertTriangle size={16} className="text-rose-500" /> },
     { id: 'mail', label: t('admin.tabs.mail'), icon: <Mail size={16} className="text-purple-600" /> },
     { id: 'voice-input', label: t('voice_input.settingsTitle', '語音輸入'), icon: <Mic size={16} className="text-blue-500" /> },
   ]
@@ -155,6 +157,7 @@ export default function AdminDashboard() {
           {activeTab === 'data-permissions' && <DataPermissionsPanel />}
           {activeTab === 'db-sources' && <DbSourcesPanel />}
           {activeTab === 'pipeline-whitelist' && <PipelineWritableTablesPanel />}
+          {activeTab === 'alert-rules' && <AlertRulesPanel />}
           {activeTab === 'help-translation' && <HelpTranslationPanel />}
           {activeTab === 'factory-translations' && <FactoryTranslationsPanel />}
           {activeTab === 'training' && <TrainingAdmin />}

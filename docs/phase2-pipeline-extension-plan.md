@@ -40,11 +40,11 @@ Week 3(資料管線完成)✅
   D13  AI 戰情 Designs + 採購/主管 Dashboard ✅ 2026-04-25
   D14  每週/月報排程 ✅ 2026-04-25(在同 seed 提前完成)
 
-Week 4(Phase 3 警示)
-  D15-16 alert 節點 backend(4 模式 + 4 動作 + 模板/LLM 雙模式)
-  D17-18 alert 節點 admin UI + 獨立規則表
-  D19    pm_alert_history + 告警查看頁
-  D20    端到端測試 + 文件補完
+Week 4(Phase 3 警示)✅
+  D15-16 alert 節點 backend(4 模式 + 4 動作 + 模板/LLM 雙模式)✅ 2026-04-25
+  D17-18 alert 節點 admin UI(AlertForm + AlertRulesPanel + sync-pipeline)✅ 2026-04-25
+  D19    pm_alert_history + 告警查看頁(內含於 AlertRulesPanel.history view)✅ 2026-04-25
+  D20    端到端測試 + 文件補完(留 user 實際操作驗證 + help docs 補)
 ```
 
 ---
@@ -726,7 +726,24 @@ context_text 用上述分析摘要。
 
 ---
 
-## 13. Week 4:Phase 3 警示節點
+## 13. Week 4:Phase 3 警示節點 ✅(2026-04-25 backend + UI 全部完成)
+
+> **實作狀態**:✅ 上線。檔案:
+> - Backend service:[server/services/pipelineAlerter.js](../server/services/pipelineAlerter.js) — executeAlert + 4 比較模式 + 4 動作 + cooldown
+> - Routes:[server/routes/alertRules.js](../server/routes/alertRules.js) — CRUD + /test + /history + /sync-pipeline
+> - Schema:`alert_rules` 表 + UNIQUE (task_id, node_id) + 加入 FORBIDDEN_TABLES
+> - Pipeline UI:`AlertForm` in [client/src/components/admin/PipelineTab.tsx](../client/src/components/admin/PipelineTab.tsx)
+> - Admin UI:[client/src/components/admin/AlertRulesPanel.tsx](../client/src/components/admin/AlertRulesPanel.tsx) — 列表 + 啟用/暫停 + 觸發歷史
+> - 排程儲存時自動 sync alert 節點對應 alert_rules(by task_id+node_id)
+>
+> **與規劃差異**:
+> - 沒做獨立規則(`bound_to='standalone'`)的 admin UI 編輯器 — API 已支援,但 UI 不做(留 Phase 3.1)
+> - Pipeline 節點儲存時 sync 是 best-effort(失敗只記 console.warn 不阻擋 task 儲存)
+> - LLM 分析在 dry-run mode 跳過(避免測試耗 token)
+> - threshold operator 加 eq / ne 比規格多 2 種(實用)
+> - rate_change operator 支援 abs / up / down 三種方向(規格只 abs)
+> - data_source='sql_query' 強制只允許 SELECT 開頭(防注入)
+> - dedup_key 支援(同 key 在 cooldown 期間不重複觸發,適合多 entity 同規則)
 
 ### 13.1 節點 type:`alert`
 
