@@ -3456,6 +3456,30 @@ async function runMigrations(db) {
     CONSTRAINT uq_analysis_type_date UNIQUE (report_type, as_of_date)
   )`);
 
+  // ── pm_bom_metal — Phase 4 14.1 What-if 模擬(產品 → 金屬含量 mapping)──
+  // 數據來源:admin CSV 上傳 / ERP 同步;由 pm_what_if_cost_impact skill 用來算成本衝擊。
+  // 同 product_code + metal_code + valid_from 唯一(版本化,可保留歷史)
+  await createTable('PM_BOM_METAL', `CREATE TABLE pm_bom_metal (
+    id              NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    product_code    VARCHAR2(100) NOT NULL,
+    product_name    VARCHAR2(300),
+    product_line    VARCHAR2(100),
+    metal_code      VARCHAR2(20) NOT NULL,
+    content_gram    NUMBER(18, 6) NOT NULL,
+    content_unit    VARCHAR2(20) DEFAULT 'g',
+    monthly_volume  NUMBER,
+    content_source  VARCHAR2(100),
+    valid_from      DATE DEFAULT TRUNC(SYSDATE) NOT NULL,
+    valid_to        DATE,
+    notes           VARCHAR2(500),
+    creator_id      NUMBER,
+    creation_date   TIMESTAMP DEFAULT SYSTIMESTAMP,
+    last_updated_date TIMESTAMP DEFAULT SYSTIMESTAMP,
+    CONSTRAINT uq_pm_bom_metal UNIQUE (product_code, metal_code, valid_from)
+  )`);
+  try { await db.prepare(`CREATE INDEX idx_pm_bom_product ON pm_bom_metal(product_code)`).run(); } catch (_) {}
+  try { await db.prepare(`CREATE INDEX idx_pm_bom_metal_code ON pm_bom_metal(metal_code)`).run(); } catch (_) {}
+
   // ── alert_rules — Phase 3 警示規則(D15-18)─────────────────────────────
   // bound_to:
   //   'pipeline_node'  — alert 節點儲存時自動 sync 一筆,task_id+node_id 對應

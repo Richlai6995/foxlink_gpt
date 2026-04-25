@@ -132,6 +132,8 @@ app.get('/api/health', (req, res) => res.json({ status: 'ok', timestamp: new Dat
     console.log('[Route] /api/pipeline-kb-write OK');
     app.use('/api/alert-rules', require('./routes/alertRules'));
     console.log('[Route] /api/alert-rules OK');
+    app.use('/api/pm-bom', require('./routes/pmBom'));
+    console.log('[Route] /api/pm-bom OK');
 
     // Autoscan user email domains → Webex allowed-domain whitelist
     // 每次啟動時掃描 users.email，union 進白名單（只加不刪，admin 手動加的會保留）
@@ -427,6 +429,16 @@ app.get('/api/health', (req, res) => res.json({ status: 'ok', timestamp: new Dat
         await autoSeedPmWorkflowSkill(db);
       } catch (e) {
         console.error('[PMWorkflowSeed] Failed:', e.message);
+      }
+    });
+
+    // Auto-seed PM BOM What-if skill (pm_what_if_cost_impact) — Phase 4 14.1
+    setImmediate(async () => {
+      try {
+        const { autoSeedPmBomSkill } = require('./services/pmBomSkillSeed');
+        await autoSeedPmBomSkill(db);
+      } catch (e) {
+        console.error('[PMBomSkillSeed] Failed:', e.message);
       }
     });
 
