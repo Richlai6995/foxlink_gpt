@@ -57,7 +57,7 @@ async function main() {
     const webhooks = await webex.listWebhooks();
     let deleted = 0;
     for (const wh of webhooks) {
-      if (wh.name === WEBHOOK_NAME) {
+      if (wh.name === WEBHOOK_NAME || wh.name === WEBHOOK_NAME + ' (Card Actions)') {
         await webex.deleteWebhook(wh.id);
         console.log(`  Deleted: ${wh.id} → ${wh.targetUrl}`);
         deleted++;
@@ -104,21 +104,22 @@ async function main() {
 
   const targetUrl = `${publicUrl}${webhookPath}`;
 
-  // 查詢並刪除同名舊 webhook
+  // 查詢並刪除同名舊 webhook(含 Card Actions 變體)
   console.log('Checking existing webhooks...');
   const existing = await webex.listWebhooks();
   for (const wh of existing) {
-    if (wh.name === WEBHOOK_NAME) {
+    if (wh.name === WEBHOOK_NAME || wh.name === WEBHOOK_NAME + ' (Card Actions)') {
       console.log(`  Removing old webhook: ${wh.id} → ${wh.targetUrl}`);
       await webex.deleteWebhook(wh.id);
     }
   }
 
-  // 建立新 webhook
-  console.log(`\nRegistering webhook:`);
+  // 建立新 webhook(messages + attachmentActions 兩個 — Phase 4 14.4 加 attachmentActions
+  // 給 Adaptive Card 按鈕 callback 用)
+  console.log(`\nRegistering webhooks:`);
   console.log(`  Name:   ${WEBHOOK_NAME}`);
   console.log(`  URL:    ${targetUrl}`);
-  console.log(`  Event:  messages:created`);
+  console.log(`  Events: messages:created + attachmentActions:created`);
   console.log(`  Secret: ${secret ? 'yes' : 'no'}`);
 
   const created = await webex.createWebhook({
@@ -128,10 +129,22 @@ async function main() {
     event: 'created',
     secret: secret || undefined,
   });
+  console.log(`  ✓ messages:created  → ${created.id}`);
 
-  console.log(`\nWebhook registered successfully!`);
-  console.log(`  ID:     ${created.id}`);
-  console.log(`  Status: ${created.status}`);
+  const cardWh = await webex.createWebhook({
+    name: WEBHOOK_NAME + ' (Card Actions)',
+    targetUrl,
+    resource: 'attachmentActions',
+    event: 'created',
+    secret: secret || undefined,
+  }).catch(e => {
+    console.warn(`  ⚠ attachmentActions:created 註冊失敗(可能 Bot Token scope 不夠 / Webex 端不支援):${e.response?.data?.message || e.message}`);
+    return null;
+  });
+  if (cardWh) {
+    console.log(`  ✓ attachmentActions:created → ${cardWh.id}`);
+    console.log(`     用於 Adaptive Card 按鈕 callback(警示 ACK 等)`);
+  }
 
   if (!secret) {
     console.warn('\n  WARNING: WEBEX_WEBHOOK_SECRET not set. HMAC signature verification disabled.');

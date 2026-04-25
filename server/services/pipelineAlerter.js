@@ -300,6 +300,67 @@ ${(sourceText || '').slice(0, 2000)}
   }
 }
 
+// ── Adaptive Card builder(Webex 互動)─────────────────────────────────────
+// 內含「✓ 已確認」按鈕,user 點按 Webex 會 POST attachmentActions:created
+// callback 帶 action_data.alert_id → server 端 update pm_alert_history.ack_*。
+function buildAlertAdaptiveCard({ rule, message, llmText, vars }) {
+  const severity = (rule.severity || 'warning').toUpperCase();
+  const sevColor = { CRITICAL: 'attention', WARNING: 'warning', INFO: 'good' }[severity] || 'default';
+  const body = [
+    {
+      type: 'TextBlock',
+      text: `🚨 ${severity} — ${rule.rule_name || '警示'}`,
+      weight: 'Bolder',
+      size: 'Medium',
+      color: sevColor,
+      wrap: true,
+    },
+    {
+      type: 'FactSet',
+      facts: [
+        ...(rule.entity_type ? [{ title: '標的', value: `${rule.entity_type}/${rule.entity_code || '?'}` }] : []),
+        ...(vars.trigger_value != null ? [{ title: '當前值', value: String(vars.trigger_value) }] : []),
+        ...(vars.threshold_value != null ? [{ title: '基準值', value: String(vars.threshold_value) }] : []),
+        ...(vars.reason ? [{ title: '觸發原因', value: vars.reason }] : []),
+      ],
+    },
+    {
+      type: 'TextBlock',
+      text: message || '(無訊息)',
+      wrap: true,
+      spacing: 'Medium',
+    },
+  ];
+  if (llmText) {
+    body.push({
+      type: 'TextBlock',
+      text: '── LLM 分析 ──',
+      weight: 'Bolder',
+      spacing: 'Medium',
+    });
+    body.push({ type: 'TextBlock', text: llmText, wrap: true });
+  }
+  return {
+    $schema: 'http://adaptivecards.io/schemas/adaptive-card.json',
+    type: 'AdaptiveCard',
+    version: '1.2',
+    body,
+    actions: [
+      {
+        type: 'Action.Submit',
+        title: '✓ 已確認',
+        data: {
+          alert_action: 'ack',
+          rule_id: rule.id || null,
+          rule_name: rule.rule_name || null,
+          // alert_history_id 在 INSERT 後才知,但 Card 是 INSERT 前送,只能靠 callback 端
+          // 用 (rule_id, triggered_at 最近) 對回最新一筆。
+        },
+      },
+    ],
+  };
+}
+
 // ── Action runners ────────────────────────────────────────────────────────
 async function runActions(db, rule, message, llmText, vars, dryRun) {
   const actions = safeJsonParse(rule.actions, []);
@@ -358,7 +419,19 @@ async function runActions(db, rule, message, llmText, vars, dryRun) {
           const svc = getWebexService();
           if (svc && a.room_id) {
             const md = `**[${(rule.severity || 'warning').toUpperCase()}] ${rule.rule_name}**\n\n${message}${llmText ? `\n\n---\n${llmText}` : ''}`;
-            await svc.sendMessage(a.room_id, md, { markdown: md });
+            // 預設送 Adaptive Card 含「✓ 已確認」按鈕(可關掉:action.no_card=true)
+            if (a.no_card === true) {
+              await svc.sendMessage(a.room_id, md, { markdown: md });
+            } else {
+              const card = buildAlertAdaptiveCard({ rule, message, llmText, vars });
+              try {
+                await svc.sendCard(a.room_id, md, card);
+              } catch (cardErr) {
+                // Card 失敗 fallback 純 markdown
+                console.warn(`[Alerter] sendCard failed (${cardErr.message}), fallback to markdown`);
+                await svc.sendMessage(a.room_id, md, { markdown: md });
+              }
+            }
           }
         }
         channelsSent.push('webex');

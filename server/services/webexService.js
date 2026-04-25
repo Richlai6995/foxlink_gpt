@@ -63,6 +63,43 @@ class WebexService {
   }
 
   /**
+   * 送 Adaptive Card(可帶按鈕的互動訊息)。
+   * @param {string} roomId
+   * @param {string} fallbackText  — 不支援 card 的客戶端會看這個
+   * @param {object} cardContent   — Adaptive Card 1.2 JSON
+   * @returns {string|null} message id
+   */
+  async sendCard(roomId, fallbackText, cardContent) {
+    const payload = {
+      roomId,
+      markdown: fallbackText,
+      attachments: [{
+        contentType: 'application/vnd.microsoft.card.adaptive',
+        content: cardContent,
+      }],
+    };
+    const res = await this.client.post('/messages', payload);
+    return res.data?.id || null;
+  }
+
+  /** 取得 attachment action 的完整資料(webhook 只傳 ID) */
+  async getAttachmentAction(actionId) {
+    const res = await this.client.get(`/attachment/actions/${actionId}`);
+    return res.data;
+  }
+
+  /** 取 person 資訊(用於識別點按鈕的人) */
+  async getPerson(personId) {
+    try {
+      const res = await this.client.get(`/people/${personId}`);
+      return res.data;
+    } catch (e) {
+      console.warn(`[Webex] getPerson ${personId}: ${e.response?.status || e.message}`);
+      return null;
+    }
+  }
+
+  /**
    * DM 給指定使用者（by email）。Webex 自動建立 1-on-1 direct room，
    * 不需預先 create。parentId 帶入可串 thread。
    * @returns {string|null} message id（可存為 thread parent）

@@ -1138,11 +1138,19 @@ router.post('/webhook', async (req, res) => {
     return;
   }
 
-  console.log(`[Webex] Event: resource=${event.resource} event=${event.event} actorId=${event.actorId} msgId=${event.data?.id}`);
+  console.log(`[Webex] Event: resource=${event.resource} event=${event.event} actorId=${event.actorId} dataId=${event.data?.id}`);
 
-  // 只處理 messages:created
+  // Phase 4 14.4:Adaptive Card 按鈕 callback(警示 ACK 等)
+  if (event.resource === 'attachmentActions' && event.event === 'created') {
+    setImmediate(() => handleAttachmentAction(event).catch(e => {
+      console.error('[Webex] handleAttachmentAction uncaught:', e.message, e.stack);
+    }));
+    return;
+  }
+
+  // 只處理 messages:created(其他像 messages:deleted / membership 等先忽略)
   if (event.resource !== 'messages' || event.event !== 'created') {
-    console.log(`[Webex] Ignored non-message event: ${event.resource}/${event.event}`);
+    console.log(`[Webex] Ignored event: ${event.resource}/${event.event}`);
     return;
   }
 
@@ -1151,6 +1159,107 @@ router.post('/webhook', async (req, res) => {
     console.error('[Webex] handleWebexEvent uncaught:', e.message, e.stack);
   }));
 });
+
+// ── attachmentActions:created callback ─────────────────────────────────────
+// Adaptive Card 按鈕被點時 Webex 會發此事件,我們撈 action data,依 action type 分流。
+async function handleAttachmentAction(event) {
+  let webex;
+  try {
+    webex = getWebexService();
+  } catch (e) {
+    console.error('[Webex] getWebexService error:', e.message);
+    return;
+  }
+
+  // 取 action 完整資料
+  let action;
+  try {
+    action = await webex.getAttachmentAction(event.data.id);
+  } catch (e) {
+    console.error(`[Webex] getAttachmentAction ${event.data.id} failed:`, e.message);
+    return;
+  }
+  console.log(`[Webex] AttachmentAction: roomId=${action.roomId} personId=${action.personId} type=${action.type} inputs=${JSON.stringify(action.inputs)}`);
+
+  // 取點按鈕的 person info
+  const person = await webex.getPerson(action.personId);
+  const personName = person?.displayName || 'Unknown';
+  const personEmail = person?.emails?.[0] || '';
+
+  const inputs = action.inputs || {};
+  const actionType = inputs.alert_action;
+
+  if (actionType === 'ack') {
+    await handleAlertAck(action, inputs, personName, personEmail);
+    return;
+  }
+
+  console.log(`[Webex] AttachmentAction: unknown alert_action="${actionType}", ignoring`);
+}
+
+// 警示 ACK 處理:更新 pm_alert_history.ack_user_id + ack_at + 回 Webex room confirm
+async function handleAlertAck(action, inputs, personName, personEmail) {
+  const ruleId = Number(inputs.rule_id) || null;
+  if (!ruleId) {
+    console.warn('[Webex] alert ACK missing rule_id, skip');
+    return;
+  }
+  const db = require('../database-oracle').db;
+  const { getWebexService } = require('../services/webexService');
+  const webex = getWebexService();
+
+  // 找對應 user(by email,沒對到也能 ACK,只是 ack_user_id null)
+  let userId = null;
+  if (personEmail) {
+    try {
+      const u = await db.prepare(`SELECT id FROM users WHERE LOWER(email)=LOWER(?) FETCH FIRST 1 ROWS ONLY`).get(personEmail);
+      userId = u?.id || null;
+    } catch (_) {}
+  }
+
+  // 找最近一筆 unacked rule_id 警示
+  let alertId = null;
+  try {
+    const r = await db.prepare(
+      `SELECT id FROM pm_alert_history
+       WHERE rule_id=? AND ack_at IS NULL
+       ORDER BY triggered_at DESC FETCH FIRST 1 ROWS ONLY`
+    ).get(ruleId);
+    alertId = r?.id || r?.ID || null;
+  } catch (e) {
+    console.warn('[Webex] alert ACK lookup failed:', e.message);
+  }
+
+  if (!alertId) {
+    // 沒未 ack 的記錄,可能已被別人 ack 過或紀錄不存在
+    try {
+      await webex.sendMessage(action.roomId, '', {
+        markdown: `ℹ️ **${personName}** 點了確認,但這條警示已被處理過或紀錄不存在(rule_id=${ruleId})。`,
+      });
+    } catch (_) {}
+    return;
+  }
+
+  // Update ack
+  try {
+    await db.prepare(
+      `UPDATE pm_alert_history SET ack_user_id=?, ack_at=SYSTIMESTAMP WHERE id=?`
+    ).run(userId, alertId);
+    console.log(`[Webex] alert #${alertId} ACK by ${personName} <${personEmail}> (userId=${userId || 'unknown'})`);
+  } catch (e) {
+    console.error('[Webex] alert ACK update failed:', e.message);
+    return;
+  }
+
+  // 回覆 Webex room
+  try {
+    await webex.sendMessage(action.roomId, '', {
+      markdown: `✅ **${personName}** 已確認警示 \`${inputs.rule_name || `rule#${ruleId}`}\` (alert#${alertId}) — ${new Date().toLocaleString('zh-TW')}`,
+    });
+  } catch (e) {
+    console.warn('[Webex] alert ACK confirm send failed:', e.message);
+  }
+}
 
 // Webhook 事件處理（取完整訊息後交給 handleWebexMessage）
 async function handleWebexEvent(event) {
