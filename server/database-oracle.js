@@ -3449,6 +3449,45 @@ async function runMigrations(db) {
     CONSTRAINT uq_analysis_type_date UNIQUE (report_type, as_of_date)
   )`);
 
+  // ── alert_rules — Phase 3 警示規則(D15-18)─────────────────────────────
+  // bound_to:
+  //   'pipeline_node'  — alert 節點儲存時自動 sync 一筆,task_id+node_id 對應
+  //   'standalone'     — 獨立規則,由獨立 cron 輪詢觸發
+  await createTable('ALERT_RULES', `CREATE TABLE alert_rules (
+    id                NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    rule_name         VARCHAR2(200) NOT NULL,
+    owner_user_id     NUMBER REFERENCES users(id) ON DELETE SET NULL,
+    bound_to          VARCHAR2(20) DEFAULT 'pipeline_node',
+    task_id           NUMBER,
+    node_id           VARCHAR2(50),
+    entity_type       VARCHAR2(20),
+    entity_code       VARCHAR2(50),
+    data_source       VARCHAR2(20) DEFAULT 'upstream_json',
+    data_config       CLOB,
+    comparison        VARCHAR2(30) DEFAULT 'threshold',
+    comparison_config CLOB,
+    severity          VARCHAR2(10) DEFAULT 'warning',
+    actions           CLOB,
+    message_template  VARCHAR2(2000),
+    use_llm_analysis  NUMBER(1) DEFAULT 0,
+    cooldown_minutes  NUMBER DEFAULT 60,
+    dedup_key         VARCHAR2(200),
+    is_active         NUMBER(1) DEFAULT 1,
+    creation_date     TIMESTAMP DEFAULT SYSTIMESTAMP,
+    last_modified     TIMESTAMP DEFAULT SYSTIMESTAMP
+  )`);
+  try { await db.prepare(`CREATE INDEX idx_alert_rules_task ON alert_rules(task_id, node_id)`).run(); } catch (_) {}
+  try { await db.prepare(`CREATE INDEX idx_alert_rules_active ON alert_rules(is_active)`).run(); } catch (_) {}
+
+  // 為 alert 節點自動 sync 規則:同 (task_id, node_id) 唯一
+  try {
+    await db.prepare(
+      `CREATE UNIQUE INDEX uq_alert_rules_pipeline_node ON alert_rules(task_id, node_id)`
+    ).run();
+  } catch (e) {
+    if (!/ORA-00955|ORA-01408/.test(e.message)) console.warn('[Migration] uq_alert_rules_pipeline_node:', e.message);
+  }
+
   // ── 自動將 5 張新表加進 pipeline_writable_tables 白名單 ─────────────────
   // 跟 pm_price_history 同樣 pattern:抓欄位 metadata + INSERT(若不存在)
   const newTablesToWhitelist = [

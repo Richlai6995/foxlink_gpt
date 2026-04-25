@@ -460,7 +460,7 @@ async function runTask(db, taskId) {
           pipelineNodes,
           responseText,
           db,
-          { userId: task.user_id, sessionId, taskName: task.name, user, runId }
+          { userId: task.user_id, sessionId, taskName: task.name, user, runId, taskId: task.id }
         );
         generatedFiles.push(...pFiles);
         pipelineLog = pLog;

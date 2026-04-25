@@ -30,8 +30,9 @@ const FORBIDDEN_TABLES = new Set([
   'ai_db_sources', 'ai_schema_definitions', 'ai_etl_jobs', 'ai_etl_run_logs',
   'ai_vector_store', 'ai_policy_categories', 'ai_data_policies',
   'ai_user_cat_policies', 'ai_role_cat_policies',
-  // Pipeline 白名單自己
+  // Pipeline 白名單自己 + alert rules
   'pipeline_writable_tables',
+  'alert_rules',
   // ERP 整合
   'erp_tools',
   // 其他 meta

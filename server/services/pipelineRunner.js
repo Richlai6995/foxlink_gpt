@@ -14,6 +14,8 @@
  *   parallel     — run multiple nodes concurrently
  *   db_write     — write structured JSON to whitelisted DB table (admin / pipeline_admin only)
  *   kb_write     — chunk + embed JSON items into a KB (uses existing KB share permissions)
+ *   alert        — evaluate a rule (threshold/historical_avg/rate_change/zscore) and dispatch
+ *                   alerts (alert_history / Email / Webex / Webhook) with cooldown
  *
  * Variable interpolation: {{ai_output}}, {{node_<id>_output}}, {{date}}, {{task_name}}
  */
@@ -271,6 +273,31 @@ async function execGenerateFile(node, vars, db, context) {
   throw new Error(`generate_${fileType} 無法生成檔案`);
 }
 
+async function execAlert(node, vars, db, context) {
+  const { executeAlert } = require('./pipelineAlerter');
+  const input = interpolate(node.input || '{{ai_output}}', vars);
+  const result = await executeAlert(db, node, input, {
+    user: context.user || null,
+    userId: context.userId,
+    runId: context.runId || null,
+    taskId: context.taskId || null,
+    taskName: context.taskName || '',
+    nodeId: node.id,
+    dryRun: false,
+  });
+  let label;
+  if (result.triggered) {
+    label = `[警示觸發 ${result.rule_name || ''} (${result.severity || 'warning'}): ${result.reason || ''} → ${(result.channels_sent || []).join(',') || 'no channel'}]`;
+  } else if (result.skipped) {
+    label = `[警示跳過 ${result.rule_name || node.label || ''}: ${result.reason || ''}]`;
+  } else if (result.error) {
+    label = `[警示錯誤 ${result.rule_name || node.label || ''}: ${result.error}]`;
+  } else {
+    label = `[警示未觸發 ${result.rule_name || ''}: ${result.reason || ''}]`;
+  }
+  return { text: label, alertSummary: result };
+}
+
 async function execKbWrite(node, vars, db, context) {
   const { executeKbWrite } = require('./pipelineKbWriter');
   const input = interpolate(node.input || '{{ai_output}}', vars);
@@ -400,6 +427,17 @@ async function runNode(node, vars, db, context, log) {
         console.log(`[Pipeline kb_write] OK — ${output}`);
         if (r.kbWriteSummary?.errors?.length) {
           console.log(`[Pipeline kb_write] row errors (first 3):`, JSON.stringify(r.kbWriteSummary.errors.slice(0, 3)));
+        }
+        break;
+      }
+      case 'alert': {
+        console.log(`[Pipeline alert] Start — node=${node.id}, comparison=${node.comparison || '(from db rule)'}`);
+        const r = await execAlert(node, vars, db, context);
+        output = r.text;
+        entry.alert_summary = r.alertSummary;
+        console.log(`[Pipeline alert] ${output}`);
+        if (r.alertSummary?.channel_errors?.length) {
+          console.log(`[Pipeline alert] channel errors:`, JSON.stringify(r.alertSummary.channel_errors));
         }
         break;
       }
