@@ -53,7 +53,12 @@ export default function PmSettingsPanel() {
         pm_pro_model_key: proKey,
         pm_flash_model_key: flashKey,
       })
-      setSavedMsg(`✓ 已儲存${r.data.patched_tasks ? `,並更新了 ${r.data.patched_tasks} 個既有 PM 任務的 model 欄位` : ''}`)
+      const patched = r.data.patched_tasks || 0
+      const skipped = r.data.skipped_custom_tasks || 0
+      let msg = '✓ 已儲存'
+      if (patched > 0) msg += `,更新了 ${patched} 個既有 PM 任務 model`
+      if (skipped > 0) msg += `(${skipped} 個 user 自訂的不動)`
+      setSavedMsg(msg)
       await load()
       setTimeout(() => setSavedMsg(''), 5000)
     } catch (e: any) {

@@ -1123,7 +1123,7 @@ router.get('/settings/pm-models', async (req, res) => {
 
 // PUT /api/admin/settings/pm-models
 // body: { pm_pro_model_key, pm_flash_model_key }
-// 同時 patch 既有 [PM]% 任務的 task.model 欄位(讓設定立即生效到 paused 任務)
+// 同時 patch 既有 [PM]% 任務的 task.model 欄位(讓設定立即生效到沒被 user 自訂過的任務)
 router.put('/settings/pm-models', async (req, res) => {
   try {
     const db = require('../database-oracle').db;
@@ -1138,6 +1138,14 @@ router.put('/settings/pm-models', async (req, res) => {
       }
     }
 
+    // 先讀 OLD 設定值(給 patch 邏輯判斷「哪些任務原本就跟著 PM 設定」用)
+    const oldRows = await db.prepare(
+      `SELECT key, value FROM system_settings WHERE key IN (?, ?)`
+    ).all(SETTING_KEY.pm_pro, SETTING_KEY.pm_flash);
+    const oldMap = Object.fromEntries(oldRows.map(r => [r.key, r.value]));
+    const currentPmPro   = oldMap[SETTING_KEY.pm_pro]   || '';
+    const currentPmFlash = oldMap[SETTING_KEY.pm_flash] || '';
+
     const updates = [
       [SETTING_KEY.pm_pro,   String(pm_pro_model_key   || '').trim()],
       [SETTING_KEY.pm_flash, String(pm_flash_model_key || '').trim()],
@@ -1148,8 +1156,17 @@ router.put('/settings/pm-models', async (req, res) => {
       else     await db.prepare(`INSERT INTO system_settings (key, value) VALUES (?,?)`).run(key, value);
     }
 
-    // Patch 既有 PM 任務的 model 欄位(根據任務名 hint 推斷該用 pro 還是 flash)
+    // Patch 既有 PM 任務的 model 欄位 — **只 patch 「值是舊 alias」 OR 「值=當前未變更前的 PM 設定」 的**
+    // 設計原則:user 在排程 UI 已手動改成其他 model 的不該被覆蓋,讓 admin 改 PM 設定不破壞個案 customization
+    //
+    // patch 條件:
+    //   1. cur === 'pro' / 'flash'(舊 seed 寫死的 alias)→ 補對
+    //   2. cur === 「PM 設定改之前的舊值」→ 跟著一起變(認定原本就是跟著 PM 設定的任務)
+    //   3. 其他(user 已自訂)→ 不動
     let patchedCount = 0;
+    let skippedCustom = 0;
+    const oldPmPro   = String(currentPmPro || '').trim();
+    const oldPmFlash = String(currentPmFlash || '').trim();
     if (pm_pro_model_key || pm_flash_model_key) {
       try {
         const tasks = await db.prepare(`SELECT id, name, model FROM scheduled_tasks WHERE name LIKE '[PM]%'`).all();
@@ -1157,17 +1174,29 @@ router.put('/settings/pm-models', async (req, res) => {
           // 既有規則:新聞 / 總體經濟 用 flash;日報 / 週報 / 月報 / 全網收集 用 pro
           const isFlashTask = /新聞|總體經濟/.test(t.name);
           const targetKey = isFlashTask ? (pm_flash_model_key || pm_pro_model_key) : pm_pro_model_key;
-          if (targetKey && t.model !== targetKey) {
-            await db.prepare(`UPDATE scheduled_tasks SET model=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(targetKey, t.id);
-            patchedCount++;
+          if (!targetKey) continue;
+          if (t.model === targetKey) continue;  // 已經是了,不用動
+
+          const cur = String(t.model || '').trim().toLowerCase();
+          const isOldAlias = cur === 'pro' || cur === 'flash';
+          const matchesOldPm =
+            (isFlashTask && oldPmFlash && t.model === oldPmFlash) ||
+            (!isFlashTask && oldPmPro   && t.model === oldPmPro);
+
+          if (!isOldAlias && !matchesOldPm) {
+            skippedCustom++;
+            continue;  // user 已自訂,不覆蓋
           }
+
+          await db.prepare(`UPDATE scheduled_tasks SET model=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(targetKey, t.id);
+          patchedCount++;
         }
       } catch (e) {
         console.warn('[PM Settings] patch existing tasks model failed:', e.message);
       }
     }
 
-    res.json({ ok: true, patched_tasks: patchedCount });
+    res.json({ ok: true, patched_tasks: patchedCount, skipped_custom_tasks: skippedCustom });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
