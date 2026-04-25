@@ -6819,6 +6819,26 @@ const userSections = [
                 ]
               }
             ]
+          },
+          {
+            "type": "subsection",
+            "title": "Webex 警示互動(Phase 4)— Adaptive Card 直接 ACK",
+            "blocks": [
+              {
+                "type": "para",
+                "text": "警示送 Webex 時,系統預設組成「Adaptive Card」附帶「✓ 已確認」按鈕。同事在 Webex 點按鈕,系統會自動把 pm_alert_history 該筆 ack_user_id + ack_at 寫好,並回 room 一句確認訊息,免回 Cortex web。"
+              },
+              {
+                "type": "list",
+                "items": [
+                  "Card 內容含:嚴重等級色塊、標的、當前值、基準值、訊息內文、LLM 分析(若啟用)",
+                  "點按鈕的 user 由 Webex personEmail 對應 users.email lookup → ack_user_id",
+                  "若 user 不在 Cortex(沒對到),仍可 ACK,只是 ack_user_id 會是 NULL",
+                  "若想改回純 markdown(不要 Card),動作 JSON 加 `\"no_card\": true`",
+                  "**部署提醒**:Webex Bot 必須額外註冊 attachmentActions:created webhook,跑 `node server/scripts/registerWebhook.js` 會自動註冊兩個"
+                ]
+              }
+            ]
           }
         ]
       }

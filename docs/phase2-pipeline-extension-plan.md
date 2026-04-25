@@ -870,32 +870,60 @@ UI [`AlertRuleEditor`](../client/src/components/admin/AlertRulesPanel.tsx) modal
 
 ---
 
-## 14. Phase 4 待辦(本次不做,寫進規劃)
+## 14. Phase 4 — ✅ 全部完成 2026-04-25
 
-### 14.1 PM_BOM_METAL — What-if 模擬
-**為何延後**:跟 ERP 整合複雜,需採購提供「產品代碼 → 金屬含量(克/kg)」mapping 資料,且要考慮替代料、合金成分變動等業務細節。
+> 原本標「不做,寫進規劃」的 5 項目,user 同日確認後依序落地。
+> 唯一**不實作**的是 14.3(Python ML),改用既有 forecast_timeseries_llm + pm_deep_analysis_workflow + pm_what_if_cost_impact 等純 LLM Skill 鏈替代。
 
-**未來實作**:
-- Schema:`pm_bom_metal(product_code, metal_code, content_gram, content_source, valid_from, valid_to)`
-- Skill:`pm_what_if_cost_impact` — 給定金屬漲跌幅 → 算各產品線毛利衝擊
-- Pipeline:整合 ERP BOM 表 → 算 → LLM 解讀 → 產出 DOCX 成本分析報告
-- 估工:5-8 天
+| 子項 | 狀態 | commit | 實作檔 |
+|------|------|--------|--------|
+| 14.1 PM_BOM_METAL | ✅ | `9be12f9` | [pmBomSkillSeed.js](../server/services/pmBomSkillSeed.js) + [pmBom.js](../server/routes/pmBom.js) + [PmBomPanel.tsx](../client/src/components/admin/PmBomPanel.tsx) |
+| 14.2 Multi-Agent Workflow | ✅ | `c51b843` | [pmWorkflowSeed.js](../server/services/pmWorkflowSeed.js) — 5-agent DAG via 既有 workflowEngine |
+| 14.3 Python ML | ⏭ skip | — | 用 LLM solution(forecast + workflow + bom)取代 |
+| 14.4 Webex Adaptive Card | ✅ | `7554179` | [webexService.sendCard](../server/services/webexService.js) + [pipelineAlerter.buildAlertAdaptiveCard](../server/services/pipelineAlerter.js) + webex.js attachmentActions handler |
+| 14.5 cron_raw | ✅ | `4a6615b` | [scheduledTaskService.buildCronExpr](../server/services/scheduledTaskService.js) + UI radio + predictNextRuns 解析 |
 
-### 14.2 Multi-Agent Workflow Skill
-**為何延後**:需要 code skill 子行程,corp firewall 對 subprocess egress 限制嚴(已踩過坑)。
+### 14.0(原)Phase 4 待辦(本次不做,寫進規劃)— 已 obsolete
 
-**未來實作**:用 Cortex Workflow Skill 設計 5 個 LLM 節點 DAG(News/Macro/Technical/Risk/Synthesizer)。先確認 firewall 後評估。
+### 14.1 PM_BOM_METAL — What-if 模擬 ✅
+**實作差異**:沒做 ERP 自動同步(留 admin 用 CSV 上傳 / 手動填),不要求 Python ML。
+- Schema:`pm_bom_metal` 已建,UNIQUE(product_code, metal_code, valid_from)版本化
+- Skill:`pm_what_if_cost_impact`(builtin LLM)— input JSON 含 scenarios + bom_data +
+  current_prices,LLM 自己算月度 / 年度成本 + per product_line 影響 + 採購建議
+- UI:Admin → BOM 金屬含量 分頁,含 KPI 卡 / CSV upload / inline edit / 篩選
+- Pipeline:可在 chat 直接呼叫 `/pm_what_if_cost_impact` 或在 pipeline `skill` 節點掛
+- 真實 BOM 資料 user 還沒上傳 — 上傳後 skill 即可用
 
-### 14.3 Python ML 預測模型
-**為何延後**:同上 firewall 限制 + 模型訓練 / MLOps 是大工程。LLM 預測先頂著。
+### 14.2 Multi-Agent Workflow Skill ✅
+**實作差異**:既有 workflowEngine 已支援 type='workflow' skill,所以無 code subprocess 困擾。
+- Skill:`pm_deep_analysis_workflow`(workflow type)
+- DAG:start → [News + Macro + Tech] 平行 → Risk → Synthesizer → output
+- 4 個 sub-agent 用 Flash(平行省成本),Synthesizer 用 Pro 寫整合報告
+- 完全純 LLM,可直接從 chat / pipeline skill 節點呼叫
 
-**未來實作**:Code Skill 包 Python 子服務(FastAPI + Darts/PyTorch Forecasting),搭配模型版本管理 + walk-forward 回測。
+### 14.3 Python ML 預測模型 ⏭ 跳過
+**原因**:user 確認改用 LLM solution。已上線的 forecast_timeseries_llm(時序預測)+
+pm_deep_analysis_workflow(深度分析)+ pm_what_if_cost_impact(成本)三個 LLM Skill
+覆蓋 80%+ 場景,Python ML / MLOps 投資產出比不划算。
 
-### 14.4 Webex Bot 行動端互動
-**為何延後**:現在 alert 已會推 Webex,進階互動(按鈕、卡片、Adaptive Card)留 Phase 4。
+**保留可能性**:若未來 firewall 解決且有特定模型需求(如 ARIMA 校驗 LLM 預測),
+可在 Phase 5 用 Code Skill subprocess 加 Python 子服務。
 
-### 14.5 cron_raw 自訂排程
-**為何延後**:interval + multi_time 涵蓋 95% 需求,真有特殊需求(月底跑、跳過週末)再做。
+### 14.4 Webex Bot 互動式 Adaptive Card ✅
+**實作差異**:聚焦在「警示 ACK」這個 highest-value 場景,沒做完整 chat-bot 互動。
+- webexService.sendCard:送 Adaptive Card 1.2(嚴重等級色 / FactSet / message)
+- pipelineAlerter buildAlertAdaptiveCard:警示自動帶「✓ 已確認」按鈕
+- routes/webex.js:加 `attachmentActions:created` handler → 找對應 alert →
+  update pm_alert_history.ack_user_id + ack_at + 回 Webex room confirm
+- registerWebhook 補註冊新的 attachmentActions webhook
+- Action 設 `no_card: true` 可關掉 Card,fallback 純 markdown(向後相容)
+
+### 14.5 cron_raw 自訂排程 ✅
+**實作差異**:無,完全照規劃。
+- scheduled_tasks +schedule_cron_expr VARCHAR2(100)
+- buildCronExpr 加 cron_raw case + cron.validate 防呆
+- UI radio 加第 6 個「進階 Cron 運算式」+ 5 個常用範例提示
+- predictNextRuns 加簡易 cron 解析(支援 * / */N / a,b,c / a-b),預估下 5 次執行
 
 ---
 
