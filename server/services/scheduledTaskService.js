@@ -595,6 +595,17 @@ function buildCronExpr(task) {
       // node-cron 不支援單獨多分鐘,所以多時段都用 :00 整點觸發(實務上夠用)
       return `0 ${hours.join(',')} * * *`;
     }
+    case 'cron_raw': {
+      // Phase 4 14.5: admin 直接寫 cron expression(min hour day month weekday)
+      // 例:'0 18 * * 1-5'(週一到週五 18:00)、'30 9 1 * *'(每月 1 號 09:30)
+      // 'L' 表示月底:Oracle / node-cron 不直接支援 'L',user 想要要用 '0 18 28-31 * *' 加 day-check
+      const expr = String(task.schedule_cron_expr || '').trim();
+      if (!expr || !cron.validate(expr)) {
+        console.warn(`[Scheduled] task ${task.id} cron_raw expression invalid: "${expr}", fallback to daily`);
+        return `${m} ${h} * * *`;
+      }
+      return expr;
+    }
     default:        return `${m} ${h} * * *`; // daily
   }
 }

@@ -1476,6 +1476,8 @@ async function runMigrations(db) {
   // schedule_type 既有:daily/weekly/monthly,Phase 2 加 interval / multi_time
   await addCol('SCHEDULED_TASKS',     'SCHEDULE_INTERVAL_HOURS', 'NUMBER');
   await addCol('SCHEDULED_TASKS',     'SCHEDULE_TIMES_JSON',     'VARCHAR2(500)');
+  // Phase 4 14.5: cron_raw 自訂排程(月底跑 / 跳過週末等 interval+multi_time 表達不了的)
+  await addCol('SCHEDULED_TASKS',     'SCHEDULE_CRON_EXPR',      'VARCHAR2(100)');
 
   // ── Skill Call Logs ──────────────────────────────────────────────────────────
   await createTable('SKILL_CALL_LOGS', `CREATE TABLE skill_call_logs (

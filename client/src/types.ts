@@ -296,13 +296,14 @@ export interface ScheduledTask {
   id: number
   user_id: number
   name: string
-  schedule_type: 'daily' | 'weekly' | 'monthly' | 'interval' | 'multi_time'
+  schedule_type: 'daily' | 'weekly' | 'monthly' | 'interval' | 'multi_time' | 'cron_raw'
   schedule_hour: number
   schedule_minute: number
   schedule_weekday: number
   schedule_monthday: number
   schedule_interval_hours?: number   // interval 模式
   schedule_times_json?: string       // multi_time 模式,JSON array of "HH:MM"
+  schedule_cron_expr?: string        // cron_raw 模式,5 欄位 cron 運算式
   model: string
   prompt: string
   output_type: 'text' | 'file'

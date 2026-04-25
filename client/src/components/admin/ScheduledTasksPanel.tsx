@@ -177,6 +177,44 @@ function predictNextRuns(form: Partial<ScheduledTask>, count: number): string[] 
       }
     }
     results.sort((a, b) => a.getTime() - b.getTime())
+  } else if (t === 'cron_raw') {
+    // 簡易 5 欄位 cron 解析:支援 * / */N / a,b,c / a-b。複雜的(L / # / step)不支援預估,直接顯示「需 server cron parser」
+    const expr = String((form as any).schedule_cron_expr || '').trim()
+    if (!expr) return []
+    const parts = expr.split(/\s+/)
+    if (parts.length !== 5) return []
+    const [pMin, pHour, pDay, pMon, pDow] = parts
+    const expand = (s: string, min: number, max: number): number[] | null => {
+      if (s === '*') { const r = []; for (let i = min; i <= max; i++) r.push(i); return r }
+      if (s.startsWith('*/')) {
+        const step = Number(s.slice(2)); if (!step) return null
+        const r = []; for (let i = min; i <= max; i += step) r.push(i); return r
+      }
+      const set = new Set<number>()
+      for (const part of s.split(',')) {
+        const m = part.match(/^(\d+)-(\d+)$/)
+        if (m) { for (let i = Number(m[1]); i <= Number(m[2]); i++) set.add(i) }
+        else if (/^\d+$/.test(part)) set.add(Number(part))
+        else return null
+      }
+      return [...set].sort((a, b) => a - b)
+    }
+    const mins = expand(pMin, 0, 59); const hours = expand(pHour, 0, 23)
+    const days = expand(pDay, 1, 31); const mons = expand(pMon, 1, 12)
+    const dows = expand(pDow, 0, 6)
+    if (!mins || !hours || !days || !mons || !dows) {
+      return ['(無法解析的 cron expr,請靠 server 實際執行驗證)']
+    }
+    // 從現在起往後找 30 天內,最多 count 個符合的時間點
+    let d = new Date(now); d.setSeconds(0, 0)
+    const limit = new Date(now.getTime() + 60 * 86400000)  // 60 天
+    while (results.length < count && d < limit) {
+      d.setMinutes(d.getMinutes() + 1)
+      if (mons.includes(d.getMonth() + 1) && days.includes(d.getDate()) &&
+          dows.includes(d.getDay()) && hours.includes(d.getHours()) && mins.includes(d.getMinutes())) {
+        results.push(new Date(d))
+      }
+    }
   }
 
   return results.slice(0, count).map(fmt)
@@ -485,7 +523,7 @@ function TaskFormModal({
               <div>
                 <label className="label">{t('scheduledTask.form.frequency')}</label>
                 <div className="flex gap-3 flex-wrap">
-                  {(['daily', 'weekly', 'monthly', 'interval', 'multi_time'] as const).map((v) => (
+                  {(['daily', 'weekly', 'monthly', 'interval', 'multi_time', 'cron_raw'] as const).map((v) => (
                     <label key={v} className="flex items-center gap-1.5 cursor-pointer text-sm">
                       <input type="radio" checked={form.schedule_type === v} onChange={() => set('schedule_type', v)} />
                       {{
@@ -494,6 +532,7 @@ function TaskFormModal({
                         monthly: t('scheduledTask.form.freqMonthly'),
                         interval: t('scheduledTask.form.freqInterval'),
                         multi_time: t('scheduledTask.form.freqMultiTime'),
+                        cron_raw: t('scheduledTask.form.freqCronRaw', '進階 Cron 運算式'),
                       }[v]}
                     </label>
                   ))}
@@ -555,6 +594,30 @@ function TaskFormModal({
                   value={(form as any).schedule_times_json}
                   onChange={(v) => set('schedule_times_json' as any, v)}
                 />
+              )}
+
+              {/* cron_raw:admin 直接寫 cron expression */}
+              {form.schedule_type === 'cron_raw' && (
+                <div>
+                  <label className="label">{t('scheduledTask.form.cronExpr', 'Cron 運算式(min hour day month weekday)')}</label>
+                  <input
+                    type="text"
+                    className="input w-full font-mono text-sm"
+                    value={(form as any).schedule_cron_expr || ''}
+                    onChange={(e) => set('schedule_cron_expr' as any, e.target.value)}
+                    placeholder="例:0 18 * * 1-5(週一到週五 18:00)"
+                  />
+                  <p className="text-xs text-slate-400 mt-1">
+                    {t('scheduledTask.form.cronHint', '5 個欄位:分(0-59) 時(0-23) 日(1-31) 月(1-12) 週幾(0-6,0=日)。常用範例:')}
+                  </p>
+                  <div className="text-[11px] text-slate-500 mt-1 font-mono space-y-0.5">
+                    <div><code className="bg-slate-100 px-1">0 18 * * 1-5</code> — 週一到週五 18:00</div>
+                    <div><code className="bg-slate-100 px-1">30 9 1 * *</code> — 每月 1 號 09:30</div>
+                    <div><code className="bg-slate-100 px-1">0 8,14,20 * * *</code> — 每天 8/14/20 點(等於 multi_time)</div>
+                    <div><code className="bg-slate-100 px-1">*/15 9-17 * * 1-5</code> — 工作日 9-17 點每 15 分</div>
+                    <div><code className="bg-slate-100 px-1">0 23 28-31 * *</code> — 月底前 4 天 23:00(LLM prompt 內判斷是否真月底)</div>
+                  </div>
+                </div>
               )}
 
               {/* 下次執行預估 */}
