@@ -6292,7 +6292,7 @@ const userSections = [
                   },
                   {
                     "title": "選擇目標表（白名單下拉）",
-                    "desc": "下拉只會列出系統管理員已核准的表（如 `metal_price_history`）。若你需要的表不在清單，請洽管理員到「Pipeline 可寫表」介面核准。"
+                    "desc": "下拉只會列出系統管理員已核准的表（如 `pm_price_history`）。若你需要的表不在清單，請洽管理員到「Pipeline 可寫表」介面核准。"
                   },
                   {
                     "title": "選寫入模式",

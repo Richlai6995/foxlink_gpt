@@ -465,11 +465,21 @@ async function runTask(db, taskId) {
         generatedFiles.push(...pFiles);
         pipelineLog = pLog;
         console.log(`[Scheduled] Pipeline finished for task ${task.id}: log.length=${pipelineLog.length}, preview=${JSON.stringify(pipelineLog).slice(0, 500)}`);
-        // Merge any node outputs into response for email body
-        const extraText = Object.values(nodeOutputs)
-          .filter(v => v && !v.startsWith('[') && v.length > 10)
-          .join('\n\n---\n\n');
-        if (extraText) responseText = `${responseText}\n\n---\n\n${extraText}`;
+        // Merge node outputs into response for email body
+        // - 一般 AI 輸出(超過 10 字、不以 [ 起首)→ 直接附加
+        // - db_write/kb_write 等系統節點輸出(以 [ 起首,如 [DB 寫入: 11 inserted...])→ 蒐集到「📥 資料落地摘要」段
+        const normalOutputs = [];
+        const systemSummaries = [];
+        for (const v of Object.values(nodeOutputs)) {
+          if (!v) continue;
+          if (typeof v !== 'string') continue;
+          if (v.startsWith('[') && v.length < 200) systemSummaries.push(v);
+          else if (v.length > 10) normalOutputs.push(v);
+        }
+        const extras = [];
+        if (normalOutputs.length) extras.push(normalOutputs.join('\n\n---\n\n'));
+        if (systemSummaries.length) extras.push(`📥 **資料落地摘要**\n${systemSummaries.map(s => '• ' + s).join('\n')}`);
+        if (extras.length) responseText = `${responseText}\n\n---\n\n${extras.join('\n\n')}`;
       } catch (e) {
         console.error(`[Scheduled] Pipeline error for task ${task.id}:`, e.message, e.stack);
         pipelineLog = [{ status: 'error', error: e.message }];

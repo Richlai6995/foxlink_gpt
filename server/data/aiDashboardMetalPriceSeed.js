@@ -4,7 +4,7 @@
  * 冪等建立:
  *   - ai_db_sources: 沿用 cost analysis seed 已建的「FOXLINK GPT 本地 Oracle」(本機 Oracle 系統 DB)
  *   - ai_select_projects / topics: 「金屬行情分析」→ 「每日金屬行情查詢」
- *   - ai_schema_definitions: 1 張 schema (metal_price_history)
+ *   - ai_schema_definitions: 1 張 schema (pm_price_history)
  *   - ai_select_designs: 5 張預設報表
  *       A. 今日金屬行情快照 (table)
  *       B. 近 30 天金屬價格趨勢 (line)
@@ -81,7 +81,7 @@ async function ensureProject(db, adminUserId, seededIds) {
     VALUES (?,?,0,0,?)
   `).run(
     PROJECT_NAME,
-    '分析 metal_price_history 表的全球主要金屬(銅/鋁/鎳/錫/鋅/鉛/金/銀/鉑/鈀/銠)歷史行情,支援趨勢分析、估算準確度追蹤、LME 庫存變動、多資料源交叉驗證。預設僅 admin 可見,需透過 DesignerPanel 分享給其他角色。',
+    '分析 pm_price_history 表的全球主要金屬(銅/鋁/鎳/錫/鋅/鉛/金/銀/鉑/鈀/銠)歷史行情,支援趨勢分析、估算準確度追蹤、LME 庫存變動、多資料源交叉驗證。預設僅 admin 可見,需透過 DesignerPanel 分享給其他角色。',
     adminUserId,
   );
   const row = await db.prepare(`SELECT id FROM ai_select_projects WHERE name=? ORDER BY id DESC FETCH FIRST 1 ROWS ONLY`).get(PROJECT_NAME);
@@ -122,8 +122,8 @@ async function ensureTopic(db, projectId, adminUserId, seededIds) {
 }
 
 // ── Schema 定義 ────────────────────────────────────────────────────────────
-const METAL_PRICE_HISTORY_SCHEMA = {
-  table_name:      'metal_price_history',
+const PM_PRICE_HISTORY_SCHEMA = {
+  table_name:      'pm_price_history',
   alias:           'mph',
   display_name:    '金屬價格歷史',
   display_name_en: 'Metal Price History',
@@ -183,7 +183,7 @@ function buildSystemPrompt() {
   return (
     '你是 FOXLINK GPT 金屬行情分析 SQL 產生器。規則:\n' +
     '1. 只能產出 SELECT 查詢,禁止 INSERT/UPDATE/DELETE/DDL。\n' +
-    '2. 表 metal_price_history 是每日歷史快照(UPSERT 模式),`as_of_date` 是來源標示的報價日,通常為前一交易日。如使用者問「今天」金屬價,通常該查 `as_of_date = TRUNC(SYSDATE)` 或 `as_of_date = TRUNC(SYSDATE)-1`。\n' +
+    '2. 表 pm_price_history 是每日歷史快照(UPSERT 模式),`as_of_date` 是來源標示的報價日,通常為前一交易日。如使用者問「今天」金屬價,通常該查 `as_of_date = TRUNC(SYSDATE)` 或 `as_of_date = TRUNC(SYSDATE)-1`。\n' +
     '3. **金屬代碼用大寫**:CU(銅)/AL(鋁)/NI(鎳)/SN(錫)/ZN(鋅)/PB(鉛)/AU(金)/AG(銀)/PT(鉑)/PD(鈀)/RH(銠)。使用者用中文「銅、銀」等,請對應 metal_code。\n' +
     '4. **單位差異**:基本金屬(CU/AL/NI/SN/ZN/PB)用 USD/ton;貴金屬(AU/AG/PT/PD/RH)用 USD/oz。比較不同金屬時,先用 unit 欄位判斷,別把 oz 當 ton 比。\n' +
     '5. **估算 vs 原始**:`is_estimated=1` 是經過幣別/單位換算的估算值(主要是銀的 EUR/kg → USD/oz),精準度比原始官方價(is_estimated=0)差。比較準確度時務必過濾 / 標示。\n' +
@@ -294,8 +294,8 @@ const DESIGN_A = {
         "       price_type, market, day_change_pct, " +
         "       lme_stock, stock_change, " +
         "       TO_CHAR(as_of_date, 'YYYY-MM-DD') AS as_of " +
-        "FROM metal_price_history " +
-        "WHERE as_of_date = (SELECT MAX(as_of_date) FROM metal_price_history) " +
+        "FROM pm_price_history " +
+        "WHERE as_of_date = (SELECT MAX(as_of_date) FROM pm_price_history) " +
         "ORDER BY metal_code, source",
     },
   ],
@@ -318,7 +318,7 @@ const DESIGN_B = {
       sql:
         "SELECT TO_CHAR(as_of_date, 'YYYY-MM-DD') AS d, " +
         "       metal_code, metal_name, price_usd " +
-        "FROM metal_price_history " +
+        "FROM pm_price_history " +
         "WHERE as_of_date >= SYSDATE - 30 " +
         "  AND metal_code IN ('CU', 'AL', 'NI') " +
         "  AND source = 'Westmetall' " +
@@ -331,7 +331,7 @@ const DESIGN_B = {
       sql:
         "SELECT TO_CHAR(as_of_date, 'YYYY-MM-DD') AS d, " +
         "       metal_code, metal_name, price_usd " +
-        "FROM metal_price_history " +
+        "FROM pm_price_history " +
         "WHERE as_of_date >= SYSDATE - 30 " +
         "  AND metal_code IN ('AU', 'AG', 'PT', 'PD', 'RH') " +
         "  AND (is_estimated = 0 OR metal_code = 'AG') " +
@@ -363,7 +363,7 @@ const DESIGN_C = {
         "       price_usd, " +
         "       conversion_note, " +
         "       source " +
-        "FROM metal_price_history " +
+        "FROM pm_price_history " +
         "WHERE metal_code = 'AG' " +
         "  AND is_estimated = 1 " +
         "  AND as_of_date >= SYSDATE - 30 " +
@@ -393,7 +393,7 @@ const DESIGN_D = {
         "       metal_code, metal_name, " +
         "       lme_stock, stock_change, " +
         "       ROUND(stock_change / NULLIF(lme_stock - stock_change, 0) * 100, 2) AS change_pct " +
-        "FROM metal_price_history " +
+        "FROM pm_price_history " +
         "WHERE as_of_date >= SYSDATE - 7 " +
         "  AND market = 'LME' " +
         "  AND lme_stock IS NOT NULL " +
@@ -425,8 +425,8 @@ const DESIGN_E = {
         "       MAX(CASE WHEN source = 'Westmetall' THEN price_usd END) AS westmetall_price, " +
         "       ROUND(ABS(MAX(CASE WHEN source = 'TradingEconomics' THEN price_usd END) - " +
         "                 MAX(CASE WHEN source = 'Kitco' THEN price_usd END)), 2) AS diff_te_kitco " +
-        "FROM metal_price_history " +
-        "WHERE as_of_date = (SELECT MAX(as_of_date) FROM metal_price_history) " +
+        "FROM pm_price_history " +
+        "WHERE as_of_date = (SELECT MAX(as_of_date) FROM pm_price_history) " +
         "  AND metal_code IN ('PT', 'PD', 'RH') " +
         "GROUP BY metal_code, metal_name " +
         "ORDER BY metal_code",
@@ -511,7 +511,7 @@ async function runSeed(db) {
 
     const projectId = await ensureProject(db, adminUserId, seededIds);
     const topicId   = await ensureTopic(db, projectId, adminUserId, seededIds);
-    const schemaId  = await ensureSchema(db, METAL_PRICE_HISTORY_SCHEMA, sourceDbId, projectId, adminUserId);
+    const schemaId  = await ensureSchema(db, PM_PRICE_HISTORY_SCHEMA, sourceDbId, projectId, adminUserId);
 
     const designCacheKeys = ['design_A', 'design_B', 'design_C', 'design_D', 'design_E'];
     for (let i = 0; i < ALL_DESIGNS.length; i++) {

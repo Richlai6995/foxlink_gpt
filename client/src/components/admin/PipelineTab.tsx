@@ -94,6 +94,7 @@ interface Props {
   catalog: ToolCatalog
   mcpServers: McpServer[]
   taskName?: string
+  taskId?: number   // 用於 db_write/kb_write 節點 dry-run 時載入最近一次 ai_output
 }
 
 // ─── Node type config ─────────────────────────────────────────────────────────
@@ -228,11 +229,12 @@ const DB_OPERATIONS: { value: DbWriteOperation; labelKey: string }[] = [
 const TRANSFORMS = ['', 'upper', 'lower', 'trim', 'number', 'date', 'strip_comma', 'null_if_dash']
 
 function DbWriteForm({
-  node, otherIds, onChange,
+  node, otherIds, onChange, taskId,
 }: {
   node: PipelineNode
   otherIds: string[]
   onChange: (patch: Partial<PipelineNode>) => void
+  taskId?: number
 }) {
   const { t } = useTranslation()
   const [tables, setTables]   = useState<WritableTable[]>([])
@@ -240,6 +242,7 @@ function DbWriteForm({
   const [loading, setLoading] = useState(false)
   const [dryRunResult, setDryRunResult] = useState<any>(null)
   const [dryRunning, setDryRunning] = useState(false)
+  const [loadingSample, setLoadingSample] = useState(false)
 
   // Load whitelist tables
   useEffect(() => {
@@ -507,7 +510,29 @@ function DbWriteForm({
 
           {/* Dry-run */}
           <div className="pt-2 border-t border-slate-200">
-            <label className="label text-xs">{t('scheduledTask.pipeline.dbWrite.dryRunSample')}</label>
+            <div className="flex items-center justify-between mb-1">
+              <label className="label text-xs m-0">{t('scheduledTask.pipeline.dbWrite.dryRunSample')}</label>
+              {taskId && (
+                <button type="button" disabled={loadingSample}
+                  onClick={async () => {
+                    setLoadingSample(true)
+                    try {
+                      const r = await api.get(`/scheduled-tasks/${taskId}/last-output`)
+                      const text = r.data?.response_preview || ''
+                      if (!text) {
+                        alert(t('scheduledTask.pipeline.dbWrite.noLastOutput'))
+                      } else {
+                        onChange({ _dry_run_sample: text } as any)
+                      }
+                    } catch (e: any) {
+                      alert(e?.response?.data?.error || e.message)
+                    } finally { setLoadingSample(false) }
+                  }}
+                  className="text-xs px-2 py-0.5 rounded border border-slate-300 text-slate-500 hover:border-blue-400 hover:text-blue-600 disabled:opacity-40">
+                  {loadingSample ? t('common.loading') : t('scheduledTask.pipeline.dbWrite.loadLastOutput')}
+                </button>
+              )}
+            </div>
             <textarea
               className="input w-full h-16 text-xs font-mono resize-none"
               value={(node as any)._dry_run_sample || ''}
@@ -612,13 +637,14 @@ function GenerateFileForm({
 
 // ─── NodeForm ─────────────────────────────────────────────────────────────────
 function NodeForm({
-  node, allNodes, catalog, mcpServers, onChange,
+  node, allNodes, catalog, mcpServers, onChange, taskId,
 }: {
   node: PipelineNode
   allNodes: PipelineNode[]
   catalog: ToolCatalog
   mcpServers: McpServer[]
   onChange: (patch: Partial<PipelineNode>) => void
+  taskId?: number
 }) {
   const { t } = useTranslation()
   const otherIds = allNodes.filter((n) => n.id !== node.id).map((n) => n.id)
@@ -730,7 +756,7 @@ function NodeForm({
   )
 
   if (node.type === 'db_write') return (
-    <DbWriteForm node={node} otherIds={otherIds} onChange={onChange} />
+    <DbWriteForm node={node} otherIds={otherIds} onChange={onChange} taskId={taskId} />
   )
 
   if (node.type === 'condition') return (
@@ -826,7 +852,7 @@ function NodeForm({
 // ─── NodeCard ─────────────────────────────────────────────────────────────────
 function NodeCard({
   node, allNodes, catalog, mcpServers, onUpdate, onDelete, onMove,
-  isFirst, isLast,
+  isFirst, isLast, taskId,
 }: {
   node: PipelineNode
   allNodes: PipelineNode[]
@@ -837,6 +863,7 @@ function NodeCard({
   onMove: (id: string, dir: -1 | 1) => void
   isFirst: boolean
   isLast: boolean
+  taskId?: number
 }) {
   const { t } = useTranslation()
   const [expanded, setExpanded] = useState(true)
@@ -899,6 +926,7 @@ function NodeCard({
             catalog={catalog}
             mcpServers={mcpServers}
             onChange={(patch) => onUpdate(node.id, patch)}
+            taskId={taskId}
           />
         </div>
       )}
@@ -946,7 +974,7 @@ function AddNodeMenu({ onAdd }: { onAdd: (type: PipelineNode['type']) => void })
 }
 
 // ─── PipelineTab (main export) ────────────────────────────────────────────────
-export default function PipelineTab({ nodes, onChange, catalog, mcpServers, taskName }: Props) {
+export default function PipelineTab({ nodes, onChange, catalog, mcpServers, taskName, taskId }: Props) {
   const { t } = useTranslation()
 
   const update = (id: string, patch: Partial<PipelineNode>) =>
@@ -1007,6 +1035,7 @@ export default function PipelineTab({ nodes, onChange, catalog, mcpServers, task
               onMove={move}
               isFirst={i === 0}
               isLast={i === nodes.length - 1}
+              taskId={taskId}
             />
             {i < nodes.length - 1 && (
               <div className="flex justify-center mt-2">

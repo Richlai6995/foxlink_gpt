@@ -1476,6 +1476,8 @@
         "stopOnError": "Dừng cả nút",
         "maxRows": "Giới hạn mỗi lần",
         "dryRunSample": "Mẫu thử (dán JSON mẫu)",
+        "loadLastOutput": "📥 Tải đầu ra lần chạy gần nhất",
+        "noLastOutput": "Tác vụ này chưa có lần chạy thành công — hãy chạy thử trước.",
         "runDryRun": "Thử (không ghi DB)",
         "dryRunning": "Đang thử…",
         "loading": "Đang tải cột…"

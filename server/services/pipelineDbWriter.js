@@ -226,6 +226,31 @@ async function execInsert(db, tableName, row, colMeta) {
   return 'inserted';
 }
 
+// ── 預先檢查 key 是否存在(用於區分 UPSERT 是 inserted 還是 updated)─────────
+// Oracle MERGE 沒有 OUTPUT/RETURNING 區分動作,只能 SELECT 預判
+async function keyExists(db, tableName, row, keyColumns, colMeta) {
+  const keys = keyColumns.map(k => k.toLowerCase());
+  const wherePieces = [];
+  const binds = [];
+  for (const k of keys) {
+    const meta = colMeta.get(k);
+    const isDateCol = meta && /^DATE$/i.test(meta.type || '');
+    const val = row[k];
+    if (val == null) return false; // null key 不存在
+    if (isDateCol && typeof val === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(val)) {
+      wherePieces.push(`${k} = TO_DATE(?, 'YYYY-MM-DD')`);
+    } else {
+      wherePieces.push(`${k} = ?`);
+    }
+    binds.push(val);
+  }
+  const sql = `SELECT 1 AS exists_flag FROM ${tableName} WHERE ${wherePieces.join(' AND ')} FETCH FIRST 1 ROWS ONLY`;
+  try {
+    const r = await db.prepare(sql).get(...binds);
+    return !!r;
+  } catch (_) { return false; }
+}
+
 // ── 單筆 MERGE(UPSERT)─────────────────────────────────────────────────────
 // Oracle MERGE INTO target USING (SELECT ? AS col... FROM dual) s ON (t.k=s.k)
 async function execUpsert(db, tableName, row, keyColumns, colMeta) {
@@ -235,6 +260,9 @@ async function execUpsert(db, tableName, row, keyColumns, colMeta) {
     if (!isValidIdentifier(k)) throw new Error(`非法 key column: ${k}`);
     if (!(k in row)) throw new Error(`UPSERT row 缺少 key column 值: ${k}`);
   }
+
+  // 先用 SELECT 判斷 row 是否已存在(MERGE 後就無法區分了)
+  const existedBefore = await keyExists(db, tableName, row, keys, colMeta);
 
   const { cols, placeholders, binds } = buildInsertParts(row, colMeta);
   // USING source — 用 dual 拼出虛擬 row
@@ -261,10 +289,9 @@ ON (${onParts.join(' AND ')})
 WHEN MATCHED THEN UPDATE SET ${updateSet}
 WHEN NOT MATCHED THEN INSERT (${insertCols}) VALUES (${insertVals})`;
   const r = await db.prepare(sql).run(...binds);
-  // Oracle MERGE 無法區分 insert vs update,用 rowsAffected 估(>0 表有動)
-  // 若有 matching key,當作 updated;否則 inserted。用一個額外 SELECT 判斷代價太高,
-  // 保守都算 inserted(呼叫端若需要精確,可 SELECT 檢查 EXISTS 再做)。
-  return r?.changes === 0 ? 'skipped' : 'inserted';
+  if (r?.changes === 0) return 'skipped';
+  // 依先前 SELECT 結果區分 inserted vs updated
+  return existedBefore ? 'updated' : 'inserted';
 }
 
 // ── 單批 DELETE + INSERT(replace_by_date)────────────────────────────────

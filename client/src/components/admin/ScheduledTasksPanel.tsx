@@ -616,6 +616,7 @@ function TaskFormModal({
               catalog={catalog}
               mcpServers={mcpServers}
               taskName={form.name}
+              taskId={isEdit && task ? task.id : undefined}
             />
           )}
 

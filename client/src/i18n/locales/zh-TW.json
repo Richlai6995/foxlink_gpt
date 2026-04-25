@@ -1476,6 +1476,8 @@
         "stopOnError": "立即中止整個節點",
         "maxRows": "單次上限",
         "dryRunSample": "試跑樣本(貼入實際 LLM 可能產出的 JSON)",
+        "loadLastOutput": "📥 載入最近執行輸出",
+        "noLastOutput": "此任務尚無成功執行紀錄,先讓任務跑一次再回來試跑",
         "runDryRun": "試跑預覽(不寫 DB)",
         "dryRunning": "試跑中…",
         "loading": "載入欄位中…"

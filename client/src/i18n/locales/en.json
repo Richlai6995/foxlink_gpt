@@ -1476,6 +1476,8 @@
         "stopOnError": "Abort the whole node",
         "maxRows": "Max rows per run",
         "dryRunSample": "Dry-run sample (paste a sample JSON output)",
+        "loadLastOutput": "📥 Load last run output",
+        "noLastOutput": "No successful run yet — run the task once first.",
         "runDryRun": "Dry-run (no DB write)",
         "dryRunning": "Running…",
         "loading": "Loading columns…"

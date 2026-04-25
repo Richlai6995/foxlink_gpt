@@ -312,6 +312,31 @@ router.get('/tools-catalog', async (req, res) => {
   }
 });
 
+// ── GET /api/scheduled-tasks/:id/last-output ─────────────────────────────────
+// 取最近一次成功 run 的 response_preview(供 db_write/kb_write 節點 dry-run 用)
+router.get('/:id/last-output', async (req, res) => {
+  if (!await checkPermission(req, res)) return;
+  const db = getDb();
+  try {
+    const task = await db.prepare('SELECT * FROM scheduled_tasks WHERE id=?').get(req.params.id);
+    if (!task) return res.status(404).json({ error: '找不到任務' });
+    if (task.user_id !== req.user.id && req.user.role !== 'admin')
+      return res.status(403).json({ error: '無權限' });
+
+    const row = await db.prepare(
+      `SELECT TO_CHAR(run_at,'YYYY-MM-DD"T"HH24:MI:SS') AS run_at,
+              status, response_preview
+       FROM scheduled_task_runs
+       WHERE task_id=? AND status='ok'
+       ORDER BY run_at DESC FETCH FIRST 1 ROWS ONLY`
+    ).get(req.params.id);
+    if (!row) return res.json({ run_at: null, response_preview: '', message: '尚無成功執行紀錄' });
+    res.json({ run_at: row.run_at, response_preview: row.response_preview || '' });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ── GET /api/scheduled-tasks/:id/history ─────────────────────────────────────
 router.get('/:id/history', async (req, res) => {
   if (!await checkPermission(req, res)) return;
