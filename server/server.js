@@ -420,6 +420,16 @@ app.get('/api/health', (req, res) => res.json({ status: 'ok', timestamp: new Dat
       }
     });
 
+    // Auto-seed PM Multi-Agent Workflow skill (pm_deep_analysis_workflow)
+    setImmediate(async () => {
+      try {
+        const { autoSeedPmWorkflowSkill } = require('./services/pmWorkflowSeed');
+        await autoSeedPmWorkflowSkill(db);
+      } catch (e) {
+        console.error('[PMWorkflowSeed] Failed:', e.message);
+      }
+    });
+
     // Auto-seed PM (precious metals platform) KBs + scheduled tasks
     // 順序:KBs 先建 → 拿 ID Map → 餵給 task seed,task 的 kb_write 節點直接綁好 kb_id。
     // 兩者都 idempotent;task 預設 status='paused',admin 改 prompt / 加收件人後再 enable。
