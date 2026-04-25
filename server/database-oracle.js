@@ -3319,6 +3319,190 @@ async function runMigrations(db) {
       console.log('[Migration] Seeded pipeline_writable_tables entry for pm_price_history');
     }
   } catch (e) { console.warn('[Migration] seed/refresh pm_price_history whitelist:', e.message); }
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // Phase 2 Week 1 D5: 5 張新表(pm_macro / pm_news / forecast / pm_alert / pm_analysis)
+  // ════════════════════════════════════════════════════════════════════════════
+
+  // pm_macro_history — 總體經濟指標歷史
+  await createTable('PM_MACRO_HISTORY', `CREATE TABLE pm_macro_history (
+    id              NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    as_of_date      DATE NOT NULL,
+    indicator_code  VARCHAR2(20) NOT NULL,
+    indicator_name  VARCHAR2(100),
+    value           NUMBER(18,6),
+    unit            VARCHAR2(30),
+    source          VARCHAR2(50),
+    source_url      VARCHAR2(500),
+    meta_run_id     NUMBER,
+    meta_pipeline   VARCHAR2(200),
+    creation_date   TIMESTAMP DEFAULT SYSTIMESTAMP,
+    last_updated_date TIMESTAMP DEFAULT SYSTIMESTAMP,
+    CONSTRAINT uq_macro_indicator_day UNIQUE (indicator_code, as_of_date, source)
+  )`);
+  try { await db.prepare(`CREATE INDEX idx_macro_date ON pm_macro_history(as_of_date)`).run(); } catch (_) {}
+  try { await db.prepare(`CREATE INDEX idx_macro_code ON pm_macro_history(indicator_code)`).run(); } catch (_) {}
+
+  // pm_news — 新聞 metadata
+  await createTable('PM_NEWS', `CREATE TABLE pm_news (
+    id              NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    url_hash        VARCHAR2(64) NOT NULL,
+    url             VARCHAR2(1000) NOT NULL,
+    title           VARCHAR2(500),
+    source          VARCHAR2(50),
+    language        VARCHAR2(10),
+    published_at    TIMESTAMP,
+    scraped_at      TIMESTAMP DEFAULT SYSTIMESTAMP,
+    summary         VARCHAR2(2000),
+    sentiment_score NUMBER(5,4),
+    sentiment_label VARCHAR2(20),
+    related_metals  VARCHAR2(100),
+    topics          VARCHAR2(200),
+    kb_chunk_id     NUMBER,
+    meta_run_id     NUMBER,
+    meta_pipeline   VARCHAR2(200),
+    creation_date   TIMESTAMP DEFAULT SYSTIMESTAMP,
+    CONSTRAINT uq_news_url_hash UNIQUE (url_hash)
+  )`);
+  try { await db.prepare(`CREATE INDEX idx_pmnews_published ON pm_news(published_at)`).run(); } catch (_) {}
+  try { await db.prepare(`CREATE INDEX idx_pmnews_metal ON pm_news(related_metals)`).run(); } catch (_) {}
+
+  // forecast_history — 通用預測表(不只金屬,任何 entity_type 都能用)
+  await createTable('FORECAST_HISTORY', `CREATE TABLE forecast_history (
+    id               NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    entity_type      VARCHAR2(20) NOT NULL,
+    entity_code      VARCHAR2(50) NOT NULL,
+    forecast_date    DATE NOT NULL,
+    target_date      DATE NOT NULL,
+    horizon_days     NUMBER,
+    predicted_mean   NUMBER(18,6),
+    predicted_lower  NUMBER(18,6),
+    predicted_upper  NUMBER(18,6),
+    confidence       VARCHAR2(20),
+    rationale        CLOB,
+    key_drivers      VARCHAR2(500),
+    model_used       VARCHAR2(50),
+    context_snapshot CLOB,
+    meta_run_id      NUMBER,
+    meta_pipeline    VARCHAR2(200),
+    creation_date    TIMESTAMP DEFAULT SYSTIMESTAMP,
+    CONSTRAINT uq_forecast_unique UNIQUE (entity_type, entity_code, forecast_date, target_date, model_used)
+  )`);
+  try { await db.prepare(`CREATE INDEX idx_fh_entity ON forecast_history(entity_type, entity_code)`).run(); } catch (_) {}
+  try { await db.prepare(`CREATE INDEX idx_fh_target ON forecast_history(target_date)`).run(); } catch (_) {}
+
+  // pm_alert_history — 警示日誌(append-only,無 UNIQUE)
+  await createTable('PM_ALERT_HISTORY', `CREATE TABLE pm_alert_history (
+    id              NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    triggered_at    TIMESTAMP DEFAULT SYSTIMESTAMP,
+    rule_id         NUMBER,
+    rule_code       VARCHAR2(50),
+    severity        VARCHAR2(10),
+    source_node_id  VARCHAR2(50),
+    source_task_id  NUMBER,
+    entity_type     VARCHAR2(20),
+    entity_code     VARCHAR2(50),
+    trigger_value   NUMBER(18,6),
+    threshold_value NUMBER(18,6),
+    message         VARCHAR2(2000),
+    llm_analysis    CLOB,
+    channels_sent   VARCHAR2(200),
+    ack_user_id     NUMBER,
+    ack_at          TIMESTAMP,
+    meta_run_id     NUMBER,
+    creation_date   TIMESTAMP DEFAULT SYSTIMESTAMP
+  )`);
+  try { await db.prepare(`CREATE INDEX idx_alert_triggered ON pm_alert_history(triggered_at)`).run(); } catch (_) {}
+  try { await db.prepare(`CREATE INDEX idx_alert_entity ON pm_alert_history(entity_type, entity_code)`).run(); } catch (_) {}
+
+  // pm_analysis_report — LLM 日報/週報/月報
+  await createTable('PM_ANALYSIS_REPORT', `CREATE TABLE pm_analysis_report (
+    id              NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    report_type     VARCHAR2(20),
+    as_of_date      DATE NOT NULL,
+    title           VARCHAR2(200),
+    summary         VARCHAR2(2000),
+    full_content    CLOB,
+    key_findings    CLOB,
+    sentiment_overall VARCHAR2(20),
+    related_files   VARCHAR2(500),
+    kb_chunk_ids    VARCHAR2(500),
+    model_used      VARCHAR2(50),
+    meta_run_id     NUMBER,
+    meta_pipeline   VARCHAR2(200),
+    creation_date   TIMESTAMP DEFAULT SYSTIMESTAMP,
+    CONSTRAINT uq_analysis_type_date UNIQUE (report_type, as_of_date)
+  )`);
+
+  // ── 自動將 5 張新表加進 pipeline_writable_tables 白名單 ─────────────────
+  // 跟 pm_price_history 同樣 pattern:抓欄位 metadata + INSERT(若不存在)
+  const newTablesToWhitelist = [
+    {
+      table: 'pm_macro_history',
+      display: '總體經濟指標歷史',
+      desc: '每日抓取的 DXY/VIX/UST10Y/原油等指標,供 AI 戰情關聯分析用。Phase 2 新增。',
+      ops: 'insert,upsert',
+    },
+    {
+      table: 'pm_news',
+      display: '金屬相關新聞',
+      desc: '每日從 RSS / API 抓的金屬相關新聞 metadata + LLM 摘要 + 情緒分數。全文存進 KB「PM-新聞庫」做 RAG。Phase 2 新增。',
+      ops: 'insert',
+    },
+    {
+      table: 'forecast_history',
+      display: '預測歷史(通用)',
+      desc: '由 forecast_timeseries_llm Skill 產生的預測結果。不限金屬,可用於匯率/股票/需求預測。Phase 2 新增。',
+      ops: 'insert,upsert',
+    },
+    {
+      table: 'pm_alert_history',
+      display: '警示日誌',
+      desc: 'Phase 3 alert 節點觸發時自動寫入,append-only。Phase 2 新增。',
+      ops: 'insert,append',
+    },
+    {
+      table: 'pm_analysis_report',
+      display: 'LLM 分析報告',
+      desc: '每日/每週/每月由 LLM 產生的金屬市場分析報告精華(完整版以 DOCX 寄信 + 寫進 KB「PM-分析庫」)。Phase 2 新增。',
+      ops: 'insert,upsert',
+    },
+  ];
+
+  for (const t of newTablesToWhitelist) {
+    try {
+      const cols = await db.prepare(
+        `SELECT column_name, data_type, nullable, data_length, data_precision, data_scale
+         FROM user_tab_columns WHERE UPPER(table_name)=UPPER(?) ORDER BY column_id`
+      ).all(t.table);
+      const columnMeta = (cols || []).map(c => ({
+        name: (c.column_name || c.COLUMN_NAME || '').toLowerCase(),
+        type: c.data_type || c.DATA_TYPE,
+        nullable: (c.nullable || c.NULLABLE) === 'Y',
+        length: c.data_length ?? c.DATA_LENGTH,
+        precision: c.data_precision ?? c.DATA_PRECISION,
+        scale: c.data_scale ?? c.DATA_SCALE,
+      }));
+      const existing = await db.prepare(
+        `SELECT id FROM pipeline_writable_tables WHERE table_name=?`
+      ).get(t.table);
+      if (existing) {
+        // refresh column_metadata only
+        await db.prepare(
+          `UPDATE pipeline_writable_tables
+           SET column_metadata=?, last_refreshed_at=SYSTIMESTAMP
+           WHERE table_name=?`
+        ).run(JSON.stringify(columnMeta), t.table);
+      } else {
+        await db.prepare(
+          `INSERT INTO pipeline_writable_tables
+             (table_name, display_name, description, allowed_operations, max_rows_per_run, column_metadata, is_active, last_refreshed_at)
+           VALUES (?,?,?,?,?,?,1,SYSTIMESTAMP)`
+        ).run(t.table, t.display, t.desc, t.ops, 10000, JSON.stringify(columnMeta));
+        console.log(`[Migration] Seeded pipeline_writable_tables entry for ${t.table}`);
+      }
+    } catch (e) { console.warn(`[Migration] whitelist ${t.table}:`, e.message); }
+  }
 }
 
 // ─── Default DB Source migration ───────────────────────────────────────────────
