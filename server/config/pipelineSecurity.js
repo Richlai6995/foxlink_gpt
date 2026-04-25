@@ -51,6 +51,8 @@ const OPERATIONS = Object.freeze([
   'append',           // 不管 UNIQUE,純 append
 ]);
 
+const crypto = require('crypto');
+
 // 支援的 transform(應用在單筆 row value 寫入前)
 const TRANSFORMS = Object.freeze({
   upper:        (v) => (v == null ? v : String(v).toUpperCase()),
@@ -72,6 +74,39 @@ const TRANSFORMS = Object.freeze({
   },
   strip_comma:  (v) => (v == null ? v : String(v).replace(/,/g, '')),
   null_if_dash: (v) => (v === '—' || v === '-' || v === '' || v == null ? null : v),
+  sha256:       (v) => {
+    // URL hash 之類用途。null/空 → null;非字串 → JSON 序列化後 hash。
+    if (v == null || v === '') return null;
+    const s = typeof v === 'string' ? v : JSON.stringify(v);
+    // 順手做 URL 正規化(剝 utm/fbclid/gclid、砍 fragment/末尾斜線),才會跟
+    // pipelineKbWriter 的 dedupe 算出一致的 hash。
+    let normalized = s.trim().toLowerCase();
+    try {
+      const u = new URL(s.trim());
+      const drop = [];
+      for (const k of u.searchParams.keys()) {
+        if (/^(utm_|fbclid|gclid|mc_|ref_|spm)/i.test(k)) drop.push(k);
+      }
+      drop.forEach(k => u.searchParams.delete(k));
+      u.hash = '';
+      let out = u.toString();
+      if (out.endsWith('/')) out = out.slice(0, -1);
+      normalized = out.toLowerCase();
+    } catch (_) { /* 不是合法 URL,fallback to lowercase */ }
+    return crypto.createHash('sha256').update(normalized, 'utf8').digest('hex');
+  },
+  json_stringify: (v) => {
+    // 對於 array / object 欄位想存進 VARCHAR,例 related_metals=["CU","AL"] → "[\"CU\",\"AL\"]"
+    if (v == null) return null;
+    if (typeof v === 'string') return v;
+    try { return JSON.stringify(v); } catch { return String(v); }
+  },
+  array_join_comma: (v) => {
+    // 對於 array 想存成 CSV 字串:["CU","AL"] → "CU,AL"
+    if (v == null) return null;
+    if (Array.isArray(v)) return v.join(',');
+    return String(v);
+  },
 });
 
 // 欄位名 / table 名的語法驗證 — 純 A-Z0-9_ 起首非數字,長度 1~128。

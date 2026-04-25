@@ -239,7 +239,7 @@ const DB_OPERATIONS: { value: DbWriteOperation; labelKey: string }[] = [
   { value: 'append',           labelKey: 'scheduledTask.pipeline.dbWrite.opAppend' },
 ]
 
-const TRANSFORMS = ['', 'upper', 'lower', 'trim', 'number', 'date', 'strip_comma', 'null_if_dash']
+const TRANSFORMS = ['', 'upper', 'lower', 'trim', 'number', 'date', 'strip_comma', 'null_if_dash', 'sha256', 'json_stringify', 'array_join_comma']
 
 function DbWriteForm({
   node, otherIds, onChange, taskId,

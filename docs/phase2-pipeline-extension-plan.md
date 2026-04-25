@@ -32,7 +32,7 @@ Week 1(基礎建設) ✅
 Week 2(寫入機制 + 通用 Skill)
   D6-8 kb_write 節點(寫 KB,複用既有 KB 權限)✅ 2026-04-25
   D9   forecast_timeseries_llm 通用 Skill ✅ 2026-04-25
-  D10  新聞排程(scrape → LLM Flash 摘要+情緒 → db_write + kb_write)
+  D10  新聞排程(scrape → LLM Flash 摘要+情緒 → db_write + kb_write)✅ 2026-04-25
 
 Week 3(資料管線完成)
   D11  總體經濟排程(FRED 或備援源)
@@ -455,7 +455,21 @@ executeKbWrite(db, nodeConfig, sourceText, context):
 
 ---
 
-## 8. Week 2 D10:新聞排程
+## 8. Week 2 D10:新聞排程 ✅(2026-04-25 完成)
+
+> **實作狀態**:✅ 已上線。檔案:
+> - 新 transform `sha256` / `json_stringify` / `array_join_comma`:[server/config/pipelineSecurity.js](../server/config/pipelineSecurity.js)
+> - 自動 seed:[server/services/pmScheduledTaskSeed.js](../server/services/pmScheduledTaskSeed.js)
+> - Server 啟動時自動 INSERT(若 task name 不存在),預設 `status='paused'`,
+>   admin 必須:(a) 檢查 prompt 來源 URL 是否在防火牆白名單;(b) 給 kb_write 節點補 kb_id;
+>   (c) 加 recipients;(d) 改 status='active'
+>
+> **與規劃差異**:
+> - 同時 seed 了 D10(新聞)+ D11(總體經濟)兩個任務(D11 提前在 same seeder 處理)
+> - sha256 transform 自動做 URL 正規化(剝 utm/fbclid 等),跟 pipelineKbWriter 的 dedupe 一致
+> - kb_write 節點留空 kb_id 防呆 — 確保 admin 真的看過再 enable
+
+
 
 ### 8.1 排程設定
 - 任務名:`[PM] 每日金屬新聞抓取`

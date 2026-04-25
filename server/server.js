@@ -410,6 +410,17 @@ app.get('/api/health', (req, res) => res.json({ status: 'ok', timestamp: new Dat
       }
     });
 
+    // Auto-seed PM (precious metals platform) scheduled tasks
+    // 預設 status='paused',admin 確認 prompt / 補 kb_id / 加收件人後再 enable
+    setImmediate(async () => {
+      try {
+        const { autoSeedPmScheduledTasks } = require('./services/pmScheduledTaskSeed');
+        await autoSeedPmScheduledTasks(db);
+      } catch (e) {
+        console.error('[PMScheduledTaskSeed] Failed:', e.message);
+      }
+    });
+
     // Warm-up factory code cache from ERP (FND_FLEX_VALUES_VL)
     // 見 docs/factory-share-layer-plan.md §2.2
     setImmediate(async () => {
