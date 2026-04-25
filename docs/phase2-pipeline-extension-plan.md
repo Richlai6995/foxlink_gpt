@@ -44,7 +44,8 @@ Week 4(Phase 3 警示)✅
   D15-16 alert 節點 backend(4 模式 + 4 動作 + 模板/LLM 雙模式)✅ 2026-04-25
   D17-18 alert 節點 admin UI(AlertForm + AlertRulesPanel + sync-pipeline)✅ 2026-04-25
   D19    pm_alert_history + 告警查看頁(內含於 AlertRulesPanel.history view)✅ 2026-04-25
-  D20    端到端測試 + 文件補完(留 user 實際操作驗證 + help docs 補)
+  D20    Help docs 補完 ✅ 2026-04-25(Pipeline 警示節點完整章節進 helpSeedData)
+         端到端測試 → 留 user 實際在 Cortex 操作驗證
 ```
 
 ---

@@ -6610,6 +6610,150 @@ const userSections = [
             ]
           }
         ]
+      },
+      {
+        "type": "subsection",
+        "title": "Pipeline 警示節點(alert)",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "**警示** 節點在排程跑完後評估規則,觸發時自動寄 Email / Webex / Webhook 並寫入警示日誌。適合金屬價格異常、宏觀指標突破、系統指標監控等場景。"
+          },
+          {
+            "type": "note",
+            "text": "Pipeline 內加 alert 節點 → 儲存任務時系統自動 sync 一筆 alert_rules(by task_id+node_id)。也可到「警示規則」管理頁查看歷史 / 啟用暫停。"
+          },
+          {
+            "type": "subsection",
+            "title": "4 種比較模式",
+            "blocks": [
+              {
+                "type": "table",
+                "headers": ["模式", "config 欄位", "適用場景"],
+                "rows": [
+                  ["threshold(絕對閾值)", "operator(>/</≥/≤/=/≠)+ value", "硬指標,如「銅價 < 12000 觸發」"],
+                  ["historical_avg(歷史平均偏離)", "period_days + deviation_pct", "「當前 vs 7 天均值偏離 > 20%」"],
+                  ["rate_change(變化率)", "operator(abs/up/down)+ threshold_pct", "「日漲跌 > 5%」"],
+                  ["zscore(統計異常)", "period_days + sigma", "「過去 30 天樣本中 > 2σ 的離群值」"]
+                ]
+              },
+              {
+                "type": "para",
+                "text": "**資料源(data_source)3 選 1**:`upstream_json`(從上游節點輸出的 JSON 用 jsonpath 抽)、`sql_query`(直接 SELECT 從 DB 撈,只允許 SELECT)、`literal`(直接給數值,測試用)。"
+              },
+              {
+                "type": "para",
+                "text": "**單一值 vs 序列**:threshold 只看當前值;historical_avg / rate_change / zscore 需要序列(sql_query 回傳多筆即可,系統把最後一筆當 current,前面當歷史)。"
+              }
+            ]
+          },
+          {
+            "type": "subsection",
+            "title": "4 種動作(可組合)",
+            "blocks": [
+              {
+                "type": "list",
+                "items": [
+                  "**alert_history**(永遠執行,自動加)— 寫入 pm_alert_history,在「警示規則」頁可查",
+                  "**email** — 給指定 email 收件人發信",
+                  "**webex** — 推到指定 Webex room(需先設好 Webex bot)",
+                  "**webhook** — POST JSON 到外部 URL,可串第三方告警系統(PagerDuty / Slack 等)"
+                ]
+              },
+              {
+                "type": "para",
+                "text": "**Cooldown(冷卻)**:預設 60 分鐘,同 dedup_key 在此期間不重複觸發,避免一直 spam。Redis SET NX EX 實作,Redis 失敗時 fail-open(寧可多發也不漏)。"
+              }
+            ]
+          },
+          {
+            "type": "subsection",
+            "title": "訊息模板 + LLM 分析",
+            "blocks": [
+              {
+                "type": "para",
+                "text": "**模板**支援以下變數(雙大括號包):"
+              },
+              {
+                "type": "list",
+                "items": [
+                  "`{{rule_name}}` 規則名",
+                  "`{{severity}}` 嚴重等級(info/warning/critical)",
+                  "`{{entity_type}}` / `{{entity_code}}` 標的",
+                  "`{{trigger_value}}` 當前觸發值",
+                  "`{{threshold_value}}` 比較基準值",
+                  "`{{reason}}` 系統解釋觸發原因(例:「100 gt 90」)",
+                  "`{{date}}` 當天日期"
+                ]
+              },
+              {
+                "type": "para",
+                "text": "勾選「附加 LLM 分析」會額外用 LLM 寫一段 2-3 句的「意義說明 + 後續觀察 + 建議」,放在訊息後面(僅在實際觸發時跑,dry-run 不耗 token)。"
+              }
+            ]
+          },
+          {
+            "type": "subsection",
+            "title": "建立流程",
+            "blocks": [
+              {
+                "type": "steps",
+                "items": [
+                  { "title": "排程任務 → Pipeline tab → 新增節點 → 警示", "desc": "選紅色「警示」節點。" },
+                  { "title": "填規則名 + 嚴重等級 + 標的", "desc": "規則名是給人看的識別,嚴重等級影響訊息排版。標的(entity_type/entity_code)寫進警示日誌方便追溯。" },
+                  { "title": "選資料源", "desc": "若上游節點(LLM 主回應 / db_write 後)輸出含 JSON,用 upstream_json + JSONPath。若要直接撈 DB,選 sql_query。" },
+                  { "title": "選比較模式 + 填 config", "desc": "見上方表格。建議從 threshold 開始(最直觀)。" },
+                  { "title": "寫訊息模板 + 勾選 LLM 分析(選填)", "desc": "模板可留空,系統會用預設「[severity] rule_name — reason」格式。" },
+                  { "title": "加動作(alert_history 自動加,Email/Webex/Webhook 可加)", "desc": "Email 填多個收件人用逗號分隔。Webex 需 room ID。Webhook 填 URL,系統 POST JSON 過去。" },
+                  { "title": "設 cooldown 分鐘", "desc": "預設 60。高頻排程(每 30 分鐘一次)可設 1440(一天最多一次)。" },
+                  { "title": "(建議)按「試跑」", "desc": "貼一份樣本資料,系統會模擬計算 + 顯示會不會觸發,不真寄通知。" },
+                  { "title": "儲存任務", "desc": "下次排程觸發時 alert 節點會評估規則。儲存時 alert_rules 會自動同步一筆。" }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "subsection",
+            "title": "管理頁:Admin → 警示規則",
+            "blocks": [
+              {
+                "type": "para",
+                "text": "Admin 後台「警示規則」分頁可:"
+              },
+              {
+                "type": "list",
+                "items": [
+                  "看所有規則(篩選 active/paused × severity)",
+                  "啟用 / 暫停某條規則(暫停 = 不觸發,但設定保留)",
+                  "刪除規則(同時砍掉對應 alert 節點,慎用)",
+                  "點規則展開看最近 20 筆觸發歷史(含當時的訊息 + LLM 分析)"
+                ]
+              },
+              {
+                "type": "note",
+                "text": "規則內容(資料源 / 比較條件 / 動作)需透過「排程任務」中對應 alert 節點編輯,不在這個管理頁直接改 — 因為規則 1:1 繫結 pipeline 節點,在 pipeline 編輯比較直觀。"
+              }
+            ]
+          },
+          {
+            "type": "subsection",
+            "title": "常見錯誤與排查",
+            "blocks": [
+              {
+                "type": "table",
+                "headers": ["症狀", "可能原因", "解法"],
+                "rows": [
+                  ["排程跑了但無警示觸發", "資料沒達閾值 OR 規則被暫停", "查 scheduled_task_runs.pipeline_log_json 的 alert_summary,看 reason 是 not triggered 或 cooldown skipped"],
+                  ["「無 alert_rules 設定」", "節點儲存時 sync-pipeline 失敗(沒帶 task_id 或 owner 不符)", "重新儲存任務,留意主控台是否有 [Alert sync] node X failed warning"],
+                  ["訊息一直重複觸發 spam", "cooldown_minutes 設太短或 = 0", "拉到 60 以上,或設 dedup_key 區分相同規則的不同 entity"],
+                  ["Email 沒收到", "SMTP 設定問題 OR 收件人地址錯", "查 server log 找 [Alerter] 訊息;先到「Mail」分頁試發測試信驗證 SMTP"],
+                  ["Webhook 失敗", "目標 URL 不通 / 回應 4xx 5xx", "查 alert_summary.channel_errors;系統 timeout 15 秒"],
+                  ["LLM 分析空白", "Vertex/Studio 配額或網路", "log 會印 [Alerter] LLM analysis failed,訊息照常發,只少了分析段"]
+                ]
+              }
+            ]
+          }
+        ]
       }
     ]
   },
