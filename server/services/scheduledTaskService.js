@@ -576,6 +576,25 @@ function buildCronExpr(task) {
   switch (task.schedule_type) {
     case 'weekly':  return `${m} ${h} * * ${task.schedule_weekday ?? 1}`;
     case 'monthly': return `${m} ${h} ${task.schedule_monthday ?? 1} * *`;
+    case 'interval': {
+      // 每 N 小時(N: 1-23)。N=24 等於 daily,引導 user 用 daily 取代。
+      const n = Math.max(1, Math.min(23, Number(task.schedule_interval_hours || 4)));
+      return `0 */${n} * * *`;
+    }
+    case 'multi_time': {
+      // 多時段。schedule_times_json: ["02:00","08:00","14:00","20:00"]
+      let times = [];
+      try { times = JSON.parse(task.schedule_times_json || '[]'); } catch (_) {}
+      if (!Array.isArray(times) || !times.length) return `0 8 * * *`; // fallback
+      const hours = times
+        .map(t => String(t).split(':')[0])
+        .filter(h => /^\d{1,2}$/.test(h))
+        .map(h => Number(h))
+        .filter(h => h >= 0 && h <= 23);
+      if (!hours.length) return `0 8 * * *`;
+      // node-cron 不支援單獨多分鐘,所以多時段都用 :00 整點觸發(實務上夠用)
+      return `0 ${hours.join(',')} * * *`;
+    }
     default:        return `${m} ${h} * * *`; // daily
   }
 }

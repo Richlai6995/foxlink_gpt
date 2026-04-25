@@ -30,6 +30,13 @@ function scheduleLabel(task: ScheduledTask, t: TFunction) {
   const weekdays = t('scheduledTask.weekdaysShort', { returnObjects: true }) as string[]
   if (task.schedule_type === 'daily') return t('scheduledTask.scheduleLabel.daily', { time })
   if (task.schedule_type === 'weekly') return t('scheduledTask.scheduleLabel.weekly', { day: weekdays[task.schedule_weekday ?? 1], time })
+  if (task.schedule_type === 'monthly') return t('scheduledTask.scheduleLabel.monthly', { day: task.schedule_monthday, time })
+  if (task.schedule_type === 'interval') return t('scheduledTask.scheduleLabel.interval', { hours: (task as any).schedule_interval_hours || 4 })
+  if (task.schedule_type === 'multi_time') {
+    let times: string[] = []
+    try { times = JSON.parse((task as any).schedule_times_json || '[]') } catch {}
+    return t('scheduledTask.scheduleLabel.multi_time', { times: times.join(', ') || '—' })
+  }
   return t('scheduledTask.scheduleLabel.monthly', { day: task.schedule_monthday, time })
 }
 
@@ -57,6 +64,123 @@ const emptyForm = (t: TFunction): Partial<ScheduledTask> => ({
   expire_at: '',
   max_runs: 0,
 })
+
+// ── MultiTimeEditor ─ 多時段編輯器(chip 式可加可刪)────────────────────────
+function MultiTimeEditor({ value, onChange }: { value?: string; onChange: (v: string) => void }) {
+  const { t } = useTranslation()
+  const times: string[] = (() => {
+    try { return JSON.parse(value || '[]') } catch { return [] }
+  })()
+  const [newTime, setNewTime] = useState('08:00')
+  const addTime = () => {
+    if (!/^\d{2}:\d{2}$/.test(newTime)) return
+    if (times.includes(newTime)) return
+    const sorted = [...times, newTime].sort()
+    onChange(JSON.stringify(sorted))
+  }
+  const removeTime = (tm: string) => {
+    onChange(JSON.stringify(times.filter(x => x !== tm)))
+  }
+  return (
+    <div>
+      <label className="label">{t('scheduledTask.form.multiTime')}</label>
+      <div className="flex gap-2 items-center mb-2">
+        <input type="time" className="input" value={newTime} onChange={(e) => setNewTime(e.target.value)} />
+        <button type="button" className="btn-secondary text-sm"
+          onClick={addTime}
+          disabled={times.length >= 12}>
+          {t('scheduledTask.form.addTime')}
+        </button>
+      </div>
+      <div className="flex gap-2 flex-wrap">
+        {times.length === 0 && <span className="text-sm text-slate-400">{t('scheduledTask.form.multiTimeEmpty')}</span>}
+        {times.map((tm) => (
+          <span key={tm} className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-cyan-50 border border-cyan-200 text-sm">
+            {tm}
+            <button type="button" className="text-cyan-500 hover:text-rose-500" onClick={() => removeTime(tm)}>×</button>
+          </span>
+        ))}
+      </div>
+      <p className="text-xs text-slate-400 mt-1">{t('scheduledTask.form.multiTimeHint')}</p>
+    </div>
+  )
+}
+
+// ── SchedulePreview ─ 顯示下 5 次執行時間預估 ─────────────────────────────────
+function SchedulePreview({ form }: { form: Partial<ScheduledTask> }) {
+  const { t } = useTranslation()
+  const next = predictNextRuns(form, 5)
+  if (!next.length) return null
+  return (
+    <div className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
+      <div className="text-xs text-slate-500 mb-1">{t('scheduledTask.form.nextRunsTitle')}</div>
+      <ul className="text-xs text-slate-700 space-y-0.5">
+        {next.map((d, i) => (
+          <li key={i}>{i + 1}. {d}</li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
+function predictNextRuns(form: Partial<ScheduledTask>, count: number): string[] {
+  // 簡單預估,純 JS 不依賴 cron-parser
+  const now = new Date()
+  const fmt = (d: Date) => {
+    const wd = ['日','一','二','三','四','五','六'][d.getDay()]
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0') +
+      ' (週' + wd + ') ' + String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0')
+  }
+
+  const results: Date[] = []
+  const t = form.schedule_type
+  const h = Number(form.schedule_hour ?? 8)
+  const m = Number(form.schedule_minute ?? 0)
+
+  if (t === 'daily') {
+    for (let i = 0; results.length < count && i < 30; i++) {
+      const d = new Date(now); d.setDate(now.getDate() + i); d.setHours(h, m, 0, 0)
+      if (d > now) results.push(d)
+    }
+  } else if (t === 'weekly') {
+    const wd = Number(form.schedule_weekday ?? 1)
+    for (let i = 0; results.length < count && i < 60; i++) {
+      const d = new Date(now); d.setDate(now.getDate() + i); d.setHours(h, m, 0, 0)
+      if (d.getDay() === wd && d > now) results.push(d)
+    }
+  } else if (t === 'monthly') {
+    const md = Number(form.schedule_monthday ?? 1)
+    for (let i = 0; results.length < count && i < 365; i++) {
+      const d = new Date(now); d.setDate(1); d.setMonth(now.getMonth() + Math.floor(i / 30)); d.setDate(md); d.setHours(h, m, 0, 0)
+      if (d > now && !results.find(r => r.getTime() === d.getTime())) results.push(d)
+    }
+  } else if (t === 'interval') {
+    const intervalH = Number((form as any).schedule_interval_hours || 4)
+    if (intervalH < 1 || intervalH > 23) return []
+    // 從 00:00 整點起算,每 intervalH 小時一次
+    let d = new Date(now); d.setMinutes(0, 0, 0)
+    while (d <= now) d.setHours(d.getHours() + 1)
+    while (results.length < count && d.getTime() < now.getTime() + 7 * 86400000) {
+      if (d.getHours() % intervalH === 0) results.push(new Date(d))
+      d.setHours(d.getHours() + 1)
+    }
+  } else if (t === 'multi_time') {
+    let times: string[] = []
+    try { times = JSON.parse((form as any).schedule_times_json || '[]') } catch { return [] }
+    if (!times.length) return []
+    for (let i = 0; results.length < count && i < 30; i++) {
+      for (const tm of times) {
+        if (results.length >= count) break
+        const [hh, mm] = tm.split(':').map(Number)
+        const d = new Date(now); d.setDate(now.getDate() + i); d.setHours(hh, mm, 0, 0)
+        if (d > now) results.push(d)
+      }
+    }
+    results.sort((a, b) => a.getTime() - b.getTime())
+  }
+
+  return results.slice(0, count).map(fmt)
+}
 
 // ── TaskFormModal ─────────────────────────────────────────────────────────────
 function TaskFormModal({
@@ -329,45 +453,81 @@ function TaskFormModal({
             <>
               <div>
                 <label className="label">{t('scheduledTask.form.frequency')}</label>
-                <div className="flex gap-3">
-                  {(['daily', 'weekly', 'monthly'] as const).map((v) => (
+                <div className="flex gap-3 flex-wrap">
+                  {(['daily', 'weekly', 'monthly', 'interval', 'multi_time'] as const).map((v) => (
                     <label key={v} className="flex items-center gap-1.5 cursor-pointer text-sm">
                       <input type="radio" checked={form.schedule_type === v} onChange={() => set('schedule_type', v)} />
-                      {{ daily: t('scheduledTask.form.freqDaily'), weekly: t('scheduledTask.form.freqWeekly'), monthly: t('scheduledTask.form.freqMonthly') }[v]}
+                      {{
+                        daily: t('scheduledTask.form.freqDaily'),
+                        weekly: t('scheduledTask.form.freqWeekly'),
+                        monthly: t('scheduledTask.form.freqMonthly'),
+                        interval: t('scheduledTask.form.freqInterval'),
+                        multi_time: t('scheduledTask.form.freqMultiTime'),
+                      }[v]}
                     </label>
                   ))}
                 </div>
               </div>
-              <div className="flex gap-3 flex-wrap">
-                <div>
-                  <label className="label">{t('scheduledTask.form.executeTime')}</label>
-                  <div className="flex gap-1 items-center">
-                    <select className="input" value={form.schedule_hour ?? 8} onChange={(e) => set('schedule_hour', Number(e.target.value))}>
-                      {HOURS.map((h) => <option key={h} value={h}>{String(h).padStart(2, '0')}</option>)}
-                    </select>
-                    <span className="text-slate-500">:</span>
-                    <select className="input" value={form.schedule_minute ?? 0} onChange={(e) => set('schedule_minute', Number(e.target.value))}>
-                      {MINUTES.map((m) => <option key={m} value={m}>{String(m).padStart(2, '0')}</option>)}
-                    </select>
+
+              {/* daily / weekly / monthly:單一時點 */}
+              {(form.schedule_type === 'daily' || form.schedule_type === 'weekly' || form.schedule_type === 'monthly') && (
+                <div className="flex gap-3 flex-wrap">
+                  <div>
+                    <label className="label">{t('scheduledTask.form.executeTime')}</label>
+                    <div className="flex gap-1 items-center">
+                      <select className="input" value={form.schedule_hour ?? 8} onChange={(e) => set('schedule_hour', Number(e.target.value))}>
+                        {HOURS.map((h) => <option key={h} value={h}>{String(h).padStart(2, '0')}</option>)}
+                      </select>
+                      <span className="text-slate-500">:</span>
+                      <select className="input" value={form.schedule_minute ?? 0} onChange={(e) => set('schedule_minute', Number(e.target.value))}>
+                        {MINUTES.map((m) => <option key={m} value={m}>{String(m).padStart(2, '0')}</option>)}
+                      </select>
+                    </div>
                   </div>
+                  {form.schedule_type === 'weekly' && (
+                    <div>
+                      <label className="label">{t('scheduledTask.form.weekday')}</label>
+                      <select className="input" value={form.schedule_weekday ?? 1} onChange={(e) => set('schedule_weekday', Number(e.target.value))}>
+                        {(t('scheduledTask.weekdaysShort', { returnObjects: true }) as string[]).map((d, i) => (
+                          <option key={i} value={i}>{t('scheduledTask.form.weekdayPrefix')}{d}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+                  {form.schedule_type === 'monthly' && (
+                    <div>
+                      <label className="label">{t('scheduledTask.form.monthDay')}</label>
+                      <input type="number" min={1} max={28} className="input w-20" value={form.schedule_monthday ?? 1} onChange={(e) => set('schedule_monthday', Number(e.target.value))} />
+                    </div>
+                  )}
                 </div>
-                {form.schedule_type === 'weekly' && (
-                  <div>
-                    <label className="label">{t('scheduledTask.form.weekday')}</label>
-                    <select className="input" value={form.schedule_weekday ?? 1} onChange={(e) => set('schedule_weekday', Number(e.target.value))}>
-                      {(t('scheduledTask.weekdaysShort', { returnObjects: true }) as string[]).map((d, i) => (
-                        <option key={i} value={i}>{t('scheduledTask.form.weekdayPrefix')}{d}</option>
-                      ))}
-                    </select>
+              )}
+
+              {/* interval:每 N 小時 */}
+              {form.schedule_type === 'interval' && (
+                <div>
+                  <label className="label">{t('scheduledTask.form.intervalHours')}</label>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-slate-500">{t('scheduledTask.form.intervalEvery')}</span>
+                    <input type="number" min={1} max={23} className="input w-20"
+                      value={(form as any).schedule_interval_hours ?? 4}
+                      onChange={(e) => set('schedule_interval_hours' as any, Number(e.target.value))} />
+                    <span className="text-sm text-slate-500">{t('scheduledTask.form.hour')}</span>
                   </div>
-                )}
-                {form.schedule_type === 'monthly' && (
-                  <div>
-                    <label className="label">{t('scheduledTask.form.monthDay')}</label>
-                    <input type="number" min={1} max={28} className="input w-20" value={form.schedule_monthday ?? 1} onChange={(e) => set('schedule_monthday', Number(e.target.value))} />
-                  </div>
-                )}
-              </div>
+                  <p className="text-xs text-slate-400 mt-1">{t('scheduledTask.form.intervalHint')}</p>
+                </div>
+              )}
+
+              {/* multi_time:多時段 */}
+              {form.schedule_type === 'multi_time' && (
+                <MultiTimeEditor
+                  value={(form as any).schedule_times_json}
+                  onChange={(v) => set('schedule_times_json' as any, v)}
+                />
+              )}
+
+              {/* 下次執行預估 */}
+              <SchedulePreview form={form} />
             </>
           )}
 

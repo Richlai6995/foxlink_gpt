@@ -1287,9 +1287,20 @@
       "freqDaily": "Daily",
       "freqWeekly": "Weekly",
       "freqMonthly": "Monthly",
+      "freqInterval": "Every N hours",
+      "freqMultiTime": "Multiple times/day",
       "executeTime": "Execution Time",
       "weekday": "Day of Week",
       "weekdayPrefix": "",
+      "intervalHours": "Interval",
+      "intervalEvery": "Every",
+      "hour": "hour(s)",
+      "intervalHint": "Triggers on hour boundaries. e.g. \"every 4 hours\" = 00:00, 04:00, 08:00, 12:00, 16:00, 20:00. Use this for cross-timezone data sources.",
+      "multiTime": "Execution times (add multiple)",
+      "addTime": "Add time",
+      "multiTimeEmpty": "No times yet, please add at least one",
+      "multiTimeHint": "Multiple fixed times per day (currently triggers on the hour, e.g. 08:30 fires at 08:00). Max 12.",
+      "nextRunsTitle": "📅 Next 5 runs (estimated)",
       "monthDay": "Day of Month",
       "model": "Model",
       "outputType": "Output Type",
@@ -1342,7 +1353,9 @@
     "scheduleLabel": {
       "daily": "Daily at {{time}}",
       "weekly": "Every {{day}} at {{time}}",
-      "monthly": "Day {{day}} of month at {{time}}"
+      "monthly": "Day {{day}} of month at {{time}}",
+      "interval": "Every {{hours}} hours",
+      "multi_time": "Daily at {{times}}"
     },
     "emailDefault": {
       "subject": "Scheduled task completed: {{tn}} ({{d}})",

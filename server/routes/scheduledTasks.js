@@ -54,6 +54,7 @@ router.post('/', async (req, res) => {
     const {
       name, schedule_type, schedule_hour, schedule_minute,
       schedule_weekday, schedule_monthday,
+      schedule_interval_hours, schedule_times_json,
       model, prompt, output_type, file_type, filename_template,
       recipients_json, email_subject, email_body,
       status, expire_at, max_runs, tools_config_json, pipeline_json,
@@ -65,15 +66,18 @@ router.post('/', async (req, res) => {
     const result = await db.prepare(
       `INSERT INTO scheduled_tasks
         (user_id, name, schedule_type, schedule_hour, schedule_minute, schedule_weekday, schedule_monthday,
+         schedule_interval_hours, schedule_times_json,
          model, prompt, output_type, file_type, filename_template,
          recipients_json, email_subject, email_body, status, expire_at, max_runs, tools_config_json, pipeline_json,
          output_template_id)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
     ).run(
       req.user.id, name,
       schedule_type || 'daily',
       schedule_hour ?? 8, schedule_minute ?? 0,
       schedule_weekday ?? 1, schedule_monthday ?? 1,
+      schedule_interval_hours ?? null,
+      schedule_times_json ? (typeof schedule_times_json === 'string' ? schedule_times_json : JSON.stringify(schedule_times_json)) : null,
       model || 'pro', prompt,
       output_type || 'text', file_type || null, filename_template || null,
       JSON.stringify(recipients_json || []),
@@ -107,6 +111,7 @@ router.put('/:id', async (req, res) => {
     const {
       name, schedule_type, schedule_hour, schedule_minute,
       schedule_weekday, schedule_monthday,
+      schedule_interval_hours, schedule_times_json,
       model, prompt, output_type, file_type, filename_template,
       recipients_json, email_subject, email_body,
       status, expire_at, max_runs, tools_config_json, pipeline_json,
@@ -117,6 +122,7 @@ router.put('/:id', async (req, res) => {
       `UPDATE scheduled_tasks SET
         name=?, schedule_type=?, schedule_hour=?, schedule_minute=?,
         schedule_weekday=?, schedule_monthday=?,
+        schedule_interval_hours=?, schedule_times_json=?,
         model=?, prompt=?, output_type=?, file_type=?, filename_template=?,
         recipients_json=?, email_subject=?, email_body=?,
         status=?, expire_at=?, max_runs=?, tools_config_json=?, pipeline_json=?,
@@ -127,6 +133,10 @@ router.put('/:id', async (req, res) => {
       schedule_type ?? task.schedule_type,
       schedule_hour ?? task.schedule_hour, schedule_minute ?? task.schedule_minute,
       schedule_weekday ?? task.schedule_weekday, schedule_monthday ?? task.schedule_monthday,
+      schedule_interval_hours !== undefined ? (schedule_interval_hours || null) : task.schedule_interval_hours,
+      schedule_times_json !== undefined
+        ? (schedule_times_json ? (typeof schedule_times_json === 'string' ? schedule_times_json : JSON.stringify(schedule_times_json)) : null)
+        : task.schedule_times_json,
       model ?? task.model, prompt ?? task.prompt,
       output_type ?? task.output_type, file_type ?? task.file_type,
       filename_template ?? task.filename_template,

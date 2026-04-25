@@ -296,11 +296,13 @@ export interface ScheduledTask {
   id: number
   user_id: number
   name: string
-  schedule_type: 'daily' | 'weekly' | 'monthly'
+  schedule_type: 'daily' | 'weekly' | 'monthly' | 'interval' | 'multi_time'
   schedule_hour: number
   schedule_minute: number
   schedule_weekday: number
   schedule_monthday: number
+  schedule_interval_hours?: number   // interval 模式
+  schedule_times_json?: string       // multi_time 模式,JSON array of "HH:MM"
   model: string
   prompt: string
   output_type: 'text' | 'file'

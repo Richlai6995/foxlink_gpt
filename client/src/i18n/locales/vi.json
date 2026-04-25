@@ -1287,9 +1287,20 @@
       "freqDaily": "Hàng ngày",
       "freqWeekly": "Hàng tuần",
       "freqMonthly": "Hàng tháng",
+      "freqInterval": "Mỗi N giờ",
+      "freqMultiTime": "Nhiều lần/ngày",
       "executeTime": "Thời gian thực hiện",
       "weekday": "Ngày trong tuần",
       "weekdayPrefix": "",
+      "intervalHours": "Khoảng cách",
+      "intervalEvery": "Mỗi",
+      "hour": "giờ",
+      "intervalHint": "Kích hoạt theo giờ chẵn. VD: \"mỗi 4 giờ\" = 00:00, 04:00, ..., 20:00. Dùng cho nguồn dữ liệu khác múi giờ.",
+      "multiTime": "Thời điểm thực hiện (có thể thêm nhiều)",
+      "addTime": "Thêm thời điểm",
+      "multiTimeEmpty": "Chưa có thời điểm, vui lòng thêm ít nhất một.",
+      "multiTimeHint": "Nhiều thời điểm cố định trong ngày (hiện kích hoạt vào giờ tròn). Tối đa 12.",
+      "nextRunsTitle": "📅 5 lần chạy kế tiếp (ước tính)",
       "monthDay": "Ngày trong tháng",
       "model": "Mô hình",
       "outputType": "Loại đầu ra",
@@ -1342,7 +1353,9 @@
     "scheduleLabel": {
       "daily": "Hàng ngày lúc {{time}}",
       "weekly": "Mỗi {{day}} lúc {{time}}",
-      "monthly": "Ngày {{day}} hàng tháng lúc {{time}}"
+      "monthly": "Ngày {{day}} hàng tháng lúc {{time}}",
+      "interval": "Mỗi {{hours}} giờ",
+      "multi_time": "Hàng ngày lúc {{times}}"
     },
     "emailDefault": {
       "subject": "Lịch tác vụ đã hoàn thành: {{tn}} ({{d}})",

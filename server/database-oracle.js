@@ -1452,6 +1452,11 @@ async function runMigrations(db) {
   // ── Scheduled Tasks 文件範本輸出支援 ─────────────────────────────────────────
   await addCol('SCHEDULED_TASKS',     'OUTPUT_TEMPLATE_ID',   'VARCHAR2(64)');
 
+  // ── Scheduled Tasks 排程模式擴充(Phase 2)─────────────────────────────────
+  // schedule_type 既有:daily/weekly/monthly,Phase 2 加 interval / multi_time
+  await addCol('SCHEDULED_TASKS',     'SCHEDULE_INTERVAL_HOURS', 'NUMBER');
+  await addCol('SCHEDULED_TASKS',     'SCHEDULE_TIMES_JSON',     'VARCHAR2(500)');
+
   // ── Skill Call Logs ──────────────────────────────────────────────────────────
   await createTable('SKILL_CALL_LOGS', `CREATE TABLE skill_call_logs (
     id               NUMBER GENERATED AS IDENTITY PRIMARY KEY,

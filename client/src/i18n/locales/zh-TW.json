@@ -1287,10 +1287,21 @@
       "freqDaily": "每天",
       "freqWeekly": "每週",
       "freqMonthly": "每月",
+      "freqInterval": "每 N 小時",
+      "freqMultiTime": "多時段(每天)",
       "executeTime": "執行時間",
       "weekday": "星期",
       "weekdayPrefix": "星期",
       "monthDay": "每月幾號",
+      "intervalHours": "間隔",
+      "intervalEvery": "每",
+      "hour": "小時",
+      "intervalHint": "整點觸發,例如「每 4 小時」= 00:00、04:00、08:00、12:00、16:00、20:00。跨時區資料源建議用此模式。",
+      "multiTime": "執行時段(可加多個)",
+      "addTime": "加入時段",
+      "multiTimeEmpty": "尚無時段,請加入至少一個",
+      "multiTimeHint": "支援多個固定時段(目前僅整點分,例如 08:00、14:30 會於整點觸發)。最多 12 個。",
+      "nextRunsTitle": "📅 下次執行預估(最近 5 次)",
       "model": "模型",
       "outputType": "輸出類型",
       "outputText": "純文字（不生成附件）",
@@ -1342,7 +1353,9 @@
     "scheduleLabel": {
       "daily": "每天 {{time}}",
       "weekly": "每週{{day}} {{time}}",
-      "monthly": "每月 {{day}} 日 {{time}}"
+      "monthly": "每月 {{day}} 日 {{time}}",
+      "interval": "每 {{hours}} 小時",
+      "multi_time": "每天 {{times}}"
     },
     "emailDefault": {
       "subject": "排程任務執行完成：{{tn}} ({{d}})",
