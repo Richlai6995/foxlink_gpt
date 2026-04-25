@@ -35,10 +35,10 @@ Week 2(寫入機制 + 通用 Skill)
   D10  新聞排程(scrape → LLM Flash 摘要+情緒 → db_write + kb_write)✅ 2026-04-25
 
 Week 3(資料管線完成)
-  D11  總體經濟排程(FRED 或備援源)
-  D12  每日金屬日報排程(LLM Pro 分析 → forecast + DOCX + KB)
+  D11  總體經濟排程(FRED 或備援源)✅ 提前在 D10 同 seed 完成
+  D12  每日金屬日報排程(LLM Pro 分析 → forecast + DOCX + KB)✅ 2026-04-25
   D13  AI 戰情 Designs 擴 7 個 + 採購視角 Dashboard
-  D14  每週/月報排程
+  D14  每週/月報排程 ✅ 2026-04-25(在同 seed 提前完成)
 
 Week 4(Phase 3 警示)
   D15-16 alert 節點 backend(4 模式 + 4 動作 + 模板/LLM 雙模式)
@@ -567,7 +567,21 @@ executeKbWrite(db, nodeConfig, sourceText, context):
 
 ---
 
-## 10. Week 3 D12:每日金屬日報排程
+## 10. Week 3 D12:每日金屬日報排程 ✅(2026-04-25 完成)
+
+> **實作狀態**:✅ 任務 seed 已在 [pmScheduledTaskSeed.js](../server/services/pmScheduledTaskSeed.js)。
+> 預設 status='paused',admin 必須:(a) 把 prompt 中的 `{{kb:PM-新聞庫}}` / `{{kb:PM-分析庫}}`
+> 改成實際存在的 KB 名;(b) 補 kb_write 節點的 kb_id;(c) 加 recipients。
+>
+> **已知設計取捨**:
+> - **forecast 落地節點是 placeholder** — pipelineDbWriter 預設只能解析頂層 JSON 陣列;`$.forecasts[*]`
+>   嵌套陣列需要 admin 額外加一個 `ai` 節點先抽出來,或 LLM 直接吐 forecasts 為頂層陣列(再用一個
+>   db_write 處理 pm_analysis_report)。已在節點加 `_note_for_admin` 欄位提示。
+> - DOCX 透過 generate_file 節點輸出,內容直接是 LLM 的 markdown 報告(經 Pandoc-style 轉換)。
+> - 不直接呼叫 forecast_timeseries_llm tool,改用 LLM Pro 直接 inline-推論 11 個金屬預測值,簡化 pipeline。
+>   (forecast_timeseries_llm tool 可給未來 ad-hoc / 單金屬深度 forecast 用)
+
+
 
 ### 10.1 排程設定
 - 任務名:`[PM] 每日金屬市場日報`
@@ -666,7 +680,15 @@ context_text 用上述分析摘要。
 
 ---
 
-## 12. Week 3 D14:週報 / 月報排程
+## 12. Week 3 D14:週報 / 月報排程 ✅(2026-04-25 完成)
+
+> **實作狀態**:✅ 兩任務 seed 已上線:
+> - `[PM] 金屬市場週報` — weekly Mon 08:30,Pro 模型,pipeline:db_write(report)→ DOCX → kb_write
+> - `[PM] 金屬市場月報` — monthly day 1 09:00,Pro 模型,同 pipeline 結構
+>
+> 都預設 status='paused' + 同樣需 admin 補 kb_id / 改 KB 名 / 加 recipients。
+
+
 
 ### 週報
 - schedule_type:`weekly` 週一 08:30
