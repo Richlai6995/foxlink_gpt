@@ -33,7 +33,8 @@ const SEED_VERSION = '1.0.0';
 function newNodeId(prefix) { return `${prefix}_${Math.random().toString(36).slice(2, 8)}`; }
 
 // ── [PM] 每日金屬新聞抓取(D10)──────────────────────────────────────────────
-function buildNewsTask(kbMap) {
+function buildNewsTask(kbMap, models = {}) {
+  const flashModel = models.flash || 'flash';
   const dbWriteId = newNodeId('dbw');
   const kbWriteId = newNodeId('kbw');
 
@@ -128,7 +129,7 @@ B. 在 markdown 末尾另外一段 \`\`\`json [...] \`\`\` 陣列(給 db_write /
     schedule_minute: 0,
     schedule_times_json: JSON.stringify(['09:00', '14:30']),
     schedule_interval_hours: null,
-    model: 'flash',
+    model: flashModel,
     prompt,
     output_type: 'text',
     file_type: null,
@@ -142,7 +143,8 @@ B. 在 markdown 末尾另外一段 \`\`\`json [...] \`\`\` 陣列(給 db_write /
 }
 
 // ── [PM] 總體經濟指標日抓(D11 — 設計留 placeholder,實作在 D11)──────────
-function buildMacroTask() {
+function buildMacroTask(models = {}) {
+  const flashModel = models.flash || 'flash';
   const dbWriteId = newNodeId('dbw');
   const prompt = `今天是 {{date}}。請取得以下總體經濟指標的「最新可得值」:
 
@@ -212,7 +214,7 @@ B. markdown 末尾另外輸出 \`\`\`json [...] \`\`\` 給 db_write 落地:
     schedule_minute: 0,
     schedule_times_json: null,
     schedule_interval_hours: null,
-    model: 'flash',
+    model: flashModel,
     prompt,
     output_type: 'text',
     file_type: null,
@@ -228,7 +230,8 @@ B. markdown 末尾另外輸出 \`\`\`json [...] \`\`\` 給 db_write 落地:
 // ── [PM] 每日金屬日報(D12)─────────────────────────────────────────────────
 // Pipeline:ai 主回應 → db_write(forecast_history)→ db_write(pm_analysis_report)
 //          → generate_file DOCX → kb_write(PM-分析庫)
-function buildDailyReportTask(kbMap) {
+function buildDailyReportTask(kbMap, models = {}) {
+  const proModel = models.pro || 'pro';
   const dbForecastId  = newNodeId('dbw');
   const dbReportId    = newNodeId('dbw');
   const generateId    = newNodeId('gen');
@@ -368,7 +371,7 @@ B. **JSON 落地段**(供 db_write 解析,放在 markdown 末尾的 \`\`\`json �
     schedule_minute: 0,
     schedule_times_json: null,
     schedule_interval_hours: null,
-    model: 'pro',
+    model: proModel,
     prompt,
     output_type: 'text',
     file_type: null,
@@ -382,7 +385,8 @@ B. **JSON 落地段**(供 db_write 解析,放在 markdown 末尾的 \`\`\`json �
 }
 
 // ── [PM] 週報(D14)─────────────────────────────────────────────────────────
-function buildWeeklyReportTask(kbMap) {
+function buildWeeklyReportTask(kbMap, models = {}) {
+  const proModel = models.pro || 'pro';
   const dbReportId = newNodeId('dbw');
   const generateId = newNodeId('gen');
   const kbWriteId  = newNodeId('kbw');
@@ -472,7 +476,7 @@ function buildWeeklyReportTask(kbMap) {
     schedule_weekday: 1,  // Monday
     schedule_times_json: null,
     schedule_interval_hours: null,
-    model: 'pro',
+    model: proModel,
     prompt,
     output_type: 'text',
     file_type: null,
@@ -486,7 +490,8 @@ function buildWeeklyReportTask(kbMap) {
 }
 
 // ── [PM] 月報(D14)─────────────────────────────────────────────────────────
-function buildMonthlyReportTask(kbMap) {
+function buildMonthlyReportTask(kbMap, models = {}) {
+  const proModel = models.pro || 'pro';
   const dbReportId = newNodeId('dbw');
   const generateId = newNodeId('gen');
   const kbWriteId  = newNodeId('kbw');
@@ -576,7 +581,7 @@ function buildMonthlyReportTask(kbMap) {
     schedule_monthday: 1,
     schedule_times_json: null,
     schedule_interval_hours: null,
-    model: 'pro',
+    model: proModel,
     prompt,
     output_type: 'text',
     file_type: null,
@@ -593,7 +598,8 @@ function buildMonthlyReportTask(kbMap) {
 // 每天凌晨 06:00 + 加 multi_time(若需要更頻繁)
 // 預設只 daily 一次,因為這是「全網總覽」性質,8 個 source × Pro 模型成本不低。
 // admin 想加密度可改 schedule_type='interval' + schedule_interval_hours=8
-function buildMasterScrapeTask(kbMap) {
+function buildMasterScrapeTask(kbMap, models = {}) {
+  const proModel = models.pro || 'pro';
   const dbWriteId = newNodeId('dbw');
   const kbWriteId = newNodeId('kbw');
   const generateId = newNodeId('gen');
@@ -724,7 +730,7 @@ B. **JSON 落地段**(供 db_write + kb_write 解析,放在 markdown 末尾的 \
     schedule_minute: 0,
     schedule_times_json: null,
     schedule_interval_hours: null,
-    model: 'pro',
+    model: proModel,
     prompt,
     output_type: 'text',
     file_type: null,
@@ -813,13 +819,29 @@ async function autoSeedPmScheduledTasks(db, kbMap) {
     }
   }
 
+  // 動態 pick model key — 優先 system_settings.pm_pro/pm_flash → default_chat → fuzzy match
+  // 解決:dev 寫 'pro'/'flash',prod 是 'Gemini 3 Pro' lookup miss 崩潰
+  const { pickModelKey } = require('./llmDefaults');
+  const [proKey, flashKey] = await Promise.all([
+    pickModelKey(db, 'pro').catch(() => ''),
+    pickModelKey(db, 'flash').catch(() => ''),
+  ]);
+  const models = {
+    pro: proKey || '',           // 空字串走 resolveTaskModel → default
+    flash: flashKey || proKey || '',
+  };
+  console.log(`[PMScheduledTaskSeed] resolved models: pro="${models.pro}" flash="${models.flash}"`);
+  if (!models.pro) {
+    console.warn(`[PMScheduledTaskSeed] 找不到任何 active LLM 可當 PM Pro 模型;PM 任務 model 欄會空,執行時走系統 default_chat fallback。請到「PM 平台設定」UI 指定。`);
+  }
+
   const tasks = [
-    buildNewsTask(kbMap),
-    buildMacroTask(),
-    buildDailyReportTask(kbMap),
-    buildWeeklyReportTask(kbMap),
-    buildMonthlyReportTask(kbMap),
-    buildMasterScrapeTask(kbMap),
+    buildNewsTask(kbMap, models),
+    buildMacroTask(models),
+    buildDailyReportTask(kbMap, models),
+    buildWeeklyReportTask(kbMap, models),
+    buildMonthlyReportTask(kbMap, models),
+    buildMasterScrapeTask(kbMap, models),
   ];
 
   let inserted = 0;
@@ -861,6 +883,41 @@ async function autoSeedPmScheduledTasks(db, kbMap) {
 
   // Patch 既有任務:fill in kb_id where empty
   await patchExistingTaskKbIds(db, kbMap);
+
+  // Patch 既有任務:把 model='pro'/'flash'(舊 seed 寫死的)替換成新 pickModelKey 結果
+  await patchExistingTaskModels(db, models);
+}
+
+// ── 把既有 PM 任務的 model 從舊 alias('pro'/'flash')patch 到 pickModelKey 的結果 ───
+async function patchExistingTaskModels(db, models) {
+  if (!models || (!models.pro && !models.flash)) return;
+  let rows;
+  try {
+    rows = await db.prepare(`SELECT id, name, model FROM scheduled_tasks WHERE name LIKE '[PM]%'`).all();
+  } catch (e) {
+    console.warn('[PMScheduledTaskSeed] patch model select failed:', e.message);
+    return;
+  }
+  let patched = 0;
+  for (const r of rows || []) {
+    const cur = String(r.model || '').toLowerCase();
+    // 只 patch 看起來像 alias 的(短字 / 完全等於 'pro'/'flash')— 不動 admin 已改成具體 api name 的
+    const isOldAlias = cur === 'pro' || cur === 'flash';
+    if (!isOldAlias) continue;
+
+    const isFlashTask = /新聞|總體經濟/.test(r.name);
+    const targetKey = isFlashTask ? (models.flash || models.pro) : models.pro;
+    if (!targetKey || targetKey === r.model) continue;
+
+    try {
+      await db.prepare(`UPDATE scheduled_tasks SET model=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(targetKey, r.id);
+      patched++;
+      console.log(`[PMScheduledTaskSeed] patched task #${r.id} "${r.name || r.NAME}" model: ${cur} → ${targetKey}`);
+    } catch (e) {
+      console.warn(`[PMScheduledTaskSeed] patch model task #${r.id} failed:`, e.message);
+    }
+  }
+  if (patched > 0) console.log(`[PMScheduledTaskSeed] patched ${patched} existing task(s) model alias → real key`);
 }
 
 module.exports = {

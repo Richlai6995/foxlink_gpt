@@ -1091,6 +1091,87 @@ router.put('/settings/template-model', async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// PM 平台預設模型 settings(Phase 4 14.X)
+// ─────────────────────────────────────────────────────────────────────────────
+
+// GET /api/admin/settings/pm-models
+router.get('/settings/pm-models', async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const { SETTING_KEY, pickModelKey } = require('../services/llmDefaults');
+    const rows = await db.prepare(
+      `SELECT key, value FROM system_settings WHERE key IN (?, ?)`
+    ).all(SETTING_KEY.pm_pro, SETTING_KEY.pm_flash);
+    const map = Object.fromEntries(rows.map(r => [r.key, r.value]));
+
+    // 同時回傳「若 admin 沒設,系統現在會選誰」(提示用)
+    const [autoPickPro, autoPickFlash] = await Promise.all([
+      pickModelKey(db, 'pro').catch(() => ''),
+      pickModelKey(db, 'flash').catch(() => ''),
+    ]);
+
+    res.json({
+      pm_pro_model_key: map[SETTING_KEY.pm_pro] || '',
+      pm_flash_model_key: map[SETTING_KEY.pm_flash] || '',
+      auto_pick_preview: {
+        pro: autoPickPro,
+        flash: autoPickFlash,
+      },
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// PUT /api/admin/settings/pm-models
+// body: { pm_pro_model_key, pm_flash_model_key }
+// 同時 patch 既有 [PM]% 任務的 task.model 欄位(讓設定立即生效到 paused 任務)
+router.put('/settings/pm-models', async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const { SETTING_KEY } = require('../services/llmDefaults');
+    const { pm_pro_model_key, pm_flash_model_key } = req.body || {};
+
+    // 驗證:若給了 key,必須在 llm_models 是 active
+    for (const [name, k] of [['pm_pro_model_key', pm_pro_model_key], ['pm_flash_model_key', pm_flash_model_key]]) {
+      if (k && String(k).trim()) {
+        const m = await db.prepare(`SELECT key FROM llm_models WHERE key=? AND is_active=1`).get(String(k).trim());
+        if (!m) return res.status(400).json({ error: `${name}: "${k}" 不存在於 llm_models 或非 active` });
+      }
+    }
+
+    const updates = [
+      [SETTING_KEY.pm_pro,   String(pm_pro_model_key   || '').trim()],
+      [SETTING_KEY.pm_flash, String(pm_flash_model_key || '').trim()],
+    ];
+    for (const [key, value] of updates) {
+      const ex = await db.prepare(`SELECT key FROM system_settings WHERE key=?`).get(key);
+      if (ex) await db.prepare(`UPDATE system_settings SET value=? WHERE key=?`).run(value, key);
+      else     await db.prepare(`INSERT INTO system_settings (key, value) VALUES (?,?)`).run(key, value);
+    }
+
+    // Patch 既有 PM 任務的 model 欄位(根據任務名 hint 推斷該用 pro 還是 flash)
+    let patchedCount = 0;
+    if (pm_pro_model_key || pm_flash_model_key) {
+      try {
+        const tasks = await db.prepare(`SELECT id, name, model FROM scheduled_tasks WHERE name LIKE '[PM]%'`).all();
+        for (const t of tasks) {
+          // 既有規則:新聞 / 總體經濟 用 flash;日報 / 週報 / 月報 / 全網收集 用 pro
+          const isFlashTask = /新聞|總體經濟/.test(t.name);
+          const targetKey = isFlashTask ? (pm_flash_model_key || pm_pro_model_key) : pm_pro_model_key;
+          if (targetKey && t.model !== targetKey) {
+            await db.prepare(`UPDATE scheduled_tasks SET model=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(targetKey, t.id);
+            patchedCount++;
+          }
+        }
+      } catch (e) {
+        console.warn('[PM Settings] patch existing tasks model failed:', e.message);
+      }
+    }
+
+    res.json({ ok: true, patched_tasks: patchedCount });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // KB Retrieval Settings（v2 Phase 3）
 // ─────────────────────────────────────────────────────────────────────────────
 

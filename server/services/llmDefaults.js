@@ -19,6 +19,9 @@ const SETTING_KEY = {
   ocr:       'default_ocr_model_key',
   chat:      'default_chat_model_key',
   research:  'research_model_key',
+  // Phase 4 PM 平台專用 — admin 在「PM 平台設定」UI 設好後,seed task / pickModelKey 都會用
+  pm_pro:    'pm_pro_model_key',
+  pm_flash:  'pm_flash_model_key',
 };
 
 /**
@@ -128,4 +131,78 @@ async function resolveTaskModel(db, modelKey, role = 'chat') {
   return await resolveDefaultModel(db, role);
 }
 
-module.exports = { resolveDefaultModel, resolveDefaultModelRow, resolveResearchConfig, resolveTaskModel, SETTING_KEY, ENV_FALLBACK };
+/**
+ * 給 seed task / 自動產生流程用:依 hint(pro / flash / embedding 等)從 llm_models 表
+ * 挑一個「最有可能對應該角色」的 active key,讓 seed 寫進 task.model 後 resolveTaskModel
+ * lookup 得到。
+ *
+ * 解決的 bug:dev 環境 seed 寫 task.model='pro',prod 環境的 llm_models key 是
+ * 'Gemini 3 Pro' / 'Gemini 3 Flash' → lookup miss → 跑去 fallback 或崩潰。
+ *
+ * 優先序:
+ *   1. PM 平台專用 setting (pm_pro_model_key / pm_flash_model_key) — admin 透過 PMSettingsPanel 設
+ *   2. (僅 'pro' hint) system_settings.default_chat_model_key
+ *   3. llm_models WHERE LOWER(key/name/api_model) LIKE '%hint%' AND is_active=1 ORDER BY sort_order ASC
+ *   4. (僅 'flash' hint) 找不到 flash 退回 'pro' 邏輯(別什麼都沒)
+ *   5. 空字串(讓 caller 走 resolveDefaultModel)
+ *
+ * @param {object} db
+ * @param {'pro'|'flash'|'embedding'|string} hint
+ * @returns {Promise<string>} llm_models.key 或 ''
+ */
+async function pickModelKey(db, hint) {
+  const h = String(hint || '').toLowerCase().trim();
+  if (!h) return '';
+
+  // 1. PM 平台專用 setting(pm_pro / pm_flash)— admin 在「PM 平台設定」UI 設的
+  const pmSettingKey = h === 'pro' ? SETTING_KEY.pm_pro
+                      : h === 'flash' ? SETTING_KEY.pm_flash
+                      : null;
+  if (pmSettingKey) {
+    try {
+      const setting = await db.prepare(`SELECT value FROM system_settings WHERE key=?`).get(pmSettingKey);
+      if (setting?.value) {
+        const m = await db.prepare(`SELECT key FROM llm_models WHERE key=? AND is_active=1`).get(setting.value);
+        if (m?.key) return m.key;
+      }
+    } catch (_) {}
+  }
+
+  // 2. system_settings.default_chat_model_key(僅 pro hint,給沒設 PM 專用的 fallback)
+  if (h === 'pro') {
+    try {
+      const setting = await db.prepare(`SELECT value FROM system_settings WHERE key='default_chat_model_key'`).get();
+      if (setting?.value) {
+        const m = await db.prepare(`SELECT key FROM llm_models WHERE key=? AND is_active=1`).get(setting.value);
+        if (m?.key) return m.key;
+      }
+    } catch (_) {}
+  }
+
+  // 3. fuzzy match by key/name/api_model contains hint
+  try {
+    const like = `%${h}%`;
+    const rows = await db.prepare(
+      `SELECT key FROM llm_models
+       WHERE is_active=1
+         AND (LOWER(key) LIKE ? OR LOWER(name) LIKE ? OR LOWER(api_model) LIKE ?)
+       ORDER BY sort_order ASC, id ASC`
+    ).all(like, like, like);
+    if (rows && rows.length) {
+      // 排除 image/tts/stt/embed/rerank 系列(它們名字也常含 'flash' / 'pro')
+      const excludeRe = /(image|tts|stt|speech|rerank|embed)/i;
+      const filtered = rows.filter(r => !excludeRe.test(r.key));
+      const pick = filtered.length ? filtered[0].key : rows[0].key;
+      return pick;
+    }
+  } catch (_) {}
+
+  // 4. flash 找不到 → 退回 pro
+  if (h === 'flash') {
+    return await pickModelKey(db, 'pro');
+  }
+
+  return '';
+}
+
+module.exports = { resolveDefaultModel, resolveDefaultModelRow, resolveResearchConfig, resolveTaskModel, pickModelKey, SETTING_KEY, ENV_FALLBACK };
