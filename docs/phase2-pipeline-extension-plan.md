@@ -34,10 +34,10 @@ Week 2(寫入機制 + 通用 Skill)
   D9   forecast_timeseries_llm 通用 Skill ✅ 2026-04-25
   D10  新聞排程(scrape → LLM Flash 摘要+情緒 → db_write + kb_write)✅ 2026-04-25
 
-Week 3(資料管線完成)
+Week 3(資料管線完成)✅
   D11  總體經濟排程(FRED 或備援源)✅ 提前在 D10 同 seed 完成
   D12  每日金屬日報排程(LLM Pro 分析 → forecast + DOCX + KB)✅ 2026-04-25
-  D13  AI 戰情 Designs 擴 7 個 + 採購視角 Dashboard
+  D13  AI 戰情 Designs + 採購/主管 Dashboard ✅ 2026-04-25
   D14  每週/月報排程 ✅ 2026-04-25(在同 seed 提前完成)
 
 Week 4(Phase 3 警示)
@@ -648,7 +648,26 @@ context_text 用上述分析摘要。
 
 ---
 
-## 11. Week 3 D13:AI 戰情擴充
+## 11. Week 3 D13:AI 戰情擴充 ✅(2026-04-25 完成)
+
+> **實作狀態**:✅ Server 啟動時自動 seed:
+> - Project「[PM] 貴金屬情報」+ 3 個 Topic(採購視角 / 主管視角 / 分析師視角)
+> - 12 個預設 Design(完整列表見 [pmDashboardSeed.js](../server/services/pmDashboardSeed.js))
+>
+> **採購視角(6 個)**:11 金屬今日報價 / 銅鋁鎳鋅 30 天 / 金銀鉑鈀 30 天 / 7 天預測走廊 /
+> 24h 新聞情緒分布 / 7 日宏觀指標
+>
+> **主管視角(4 個)**:11 金屬月變化 KPI / 最新報告摘要 / 30 天警示 / 模型預測 vs 實際
+>
+> **分析師視角(2 個)**:同金屬多源價差 / 估算誤差追蹤
+>
+> **與規劃差異**:
+> - 沒做專屬「Dashboard 拼盤」UI(系統現有 Project + Topic + Designs 三層架構就是 dashboard 的形態,每個 Design 是一張可獨立查的圖表)
+> - 「AI 採購建議 Tile」改用「最新報告摘要」Design,query pm_analysis_report 給最近一份
+> - 模型預測 vs 實際用 UNION ALL 拼 forecast_history + pm_price_history,不寫 dual-axis(Echarts 雙軸 / 多 series 由 chart_config 決定)
+> - 完全 idempotent;Design 一旦存在,admin 改了也不會被覆蓋
+
+
 
 ### 11.1 新增 Designs(現有 5 個 → 12 個)
 

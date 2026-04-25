@@ -421,6 +421,17 @@ app.get('/api/health', (req, res) => res.json({ status: 'ok', timestamp: new Dat
       }
     });
 
+    // Auto-seed PM AI 戰情 Dashboard(project + topics + designs)
+    // 依賴:LOCAL ai_db_sources + 5 張 PM 表的 ai_schema_definitions(由 D5 + aiSchemaAutoRegister 建)
+    setImmediate(async () => {
+      try {
+        const { autoSeedPmDashboard } = require('./services/pmDashboardSeed');
+        await autoSeedPmDashboard(db);
+      } catch (e) {
+        console.error('[PMDashboardSeed] Failed:', e.message);
+      }
+    });
+
     // Warm-up factory code cache from ERP (FND_FLEX_VALUES_VL)
     // 見 docs/factory-share-layer-plan.md §2.2
     setImmediate(async () => {
