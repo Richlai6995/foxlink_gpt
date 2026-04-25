@@ -412,14 +412,17 @@ app.get('/api/health', (req, res) => res.json({ status: 'ok', timestamp: new Dat
       }
     });
 
-    // Auto-seed PM (precious metals platform) scheduled tasks
-    // 預設 status='paused',admin 確認 prompt / 補 kb_id / 加收件人後再 enable
+    // Auto-seed PM (precious metals platform) KBs + scheduled tasks
+    // 順序:KBs 先建 → 拿 ID Map → 餵給 task seed,task 的 kb_write 節點直接綁好 kb_id。
+    // 兩者都 idempotent;task 預設 status='paused',admin 改 prompt / 加收件人後再 enable。
     setImmediate(async () => {
       try {
+        const { autoSeedPmKnowledgeBases } = require('./services/pmKnowledgeBaseSeed');
         const { autoSeedPmScheduledTasks } = require('./services/pmScheduledTaskSeed');
-        await autoSeedPmScheduledTasks(db);
+        const kbMap = await autoSeedPmKnowledgeBases(db);
+        await autoSeedPmScheduledTasks(db, kbMap);
       } catch (e) {
-        console.error('[PMScheduledTaskSeed] Failed:', e.message);
+        console.error('[PMSeed] Failed:', e.message);
       }
     });
 
