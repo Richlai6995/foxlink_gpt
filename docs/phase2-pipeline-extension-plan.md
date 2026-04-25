@@ -46,6 +46,18 @@ Week 4(Phase 3 警示)✅
   D19    pm_alert_history + 告警查看頁(內含於 AlertRulesPanel.history view)✅ 2026-04-25
   D20    Help docs 補完 ✅ 2026-04-25(Pipeline 警示節點完整章節進 helpSeedData)
          端到端測試 → 留 user 實際在 Cortex 操作驗證
+
+附加(Phase 3.1 / 全網收集)— 2026-04-25 同日完成
+  ✅ pmKnowledgeBaseSeed:自動建 PM-{新聞,分析,原始資料}庫 3 個 KB
+  ✅ pmScheduledTaskSeed 重構:kb_write.kb_id 直接帶入 + patchExistingTaskKbIds
+     掃既有 [PM]% 任務空 kb_id 自動補上(免 admin 重新拖拽)
+  ✅ 新任務「[PM] 全網金屬資料收集」(daily 06:00,Pro)
+     18 個 {{scrape:URL}} 整合 → pm_news + PM-原始資料庫 + DOCX 綜述
+  ✅ Phase 3.1 alert_rules.schedule_interval_minutes + alertRuleScheduler
+     node-cron 每分鐘 tick + Redis 多 pod 鎖
+  ✅ AlertRuleEditor modal:獨立規則 admin 端到端建立 / 編輯 / 試跑
+     + AlertRulesPanel 表格新增「輪詢」欄 + ✏ 編輯按鈕
+  ✅ Help docs 加「獨立規則(Phase 3.1)」subsection
 ```
 
 ---
@@ -791,6 +803,70 @@ CREATE TABLE alert_rules (
 - 4 動作:alert_history(必)+ Email + Webex + Webhook(都做)
 - 訊息:模板字串(必)+ LLM 分析(必,可關)
 - Cooldown / dedup:Redis 實作
+
+---
+
+## 13.X Phase 3.1 / 全網收集 — 2026-04-25 同日加碼完成
+
+### 13.X.1 自動建 KB:`pmKnowledgeBaseSeed.js`
+
+Server 啟動時 idempotent 建 3 個 KB(by name):
+- `PM-新聞庫` — chunk_size 600,給日常新聞 RAG
+- `PM-分析庫` — chunk_size 800,給日/週/月報沿革 RAG
+- `PM-原始資料庫` — chunk_size 1000,給全網 raw scrape 資料(較長)
+
+owner=admin、is_public=1、自動加 KB_CHUNKS partition。回傳 `Map<name,id>` 給 task seed。
+
+### 13.X.2 全網收集任務:`buildMasterScrapeTask`
+
+```
+名稱:  [PM] 全網金屬資料收集
+排程:  daily 06:00(早盤前)
+模型:  Pro
+prompt: 18 個 {{scrape:URL}}(11 金屬 commodity 頁 + Kitco / Westmetall /
+        TradingEconomics / Mining.com / OilPrice / LME / Investing.com)
+        LLM 整合 → 中文綜述 + JSON 落地段(每 source 一筆 ~10-18 items)
+pipeline:
+  [1] db_write → pm_news(URL hash unique,~10-18 筆)
+  [2] kb_write → PM-原始資料庫(max_chunks_per_run=200)
+  [3] generate_file → DOCX 全網綜述
+```
+
+防火牆未通的 source LLM 自動 skip,JSON 不放;summary 必繁中、content 可英中混。
+
+### 13.X.3 Patch 既有任務:`patchExistingTaskKbIds`
+
+掃 `[PM]%` 開頭任務,逐個 parse pipeline_json,kb_write 節點若 `kb_id` 空但 `kb_name` 對得到 kbMap → 自動填回。讓既有 paused 任務不用 admin 手動拖,KB 一建好就準備好。
+
+### 13.X.4 Phase 3.1 獨立規則 scheduler
+
+Schema:
+- `alert_rules.schedule_interval_minutes` — > 0 才會被 scheduler 撈
+- `alert_rules.last_evaluated_at` / `next_evaluate_at` / `last_eval_result`
+
+Service [`alertRuleScheduler.js`](../server/services/alertRuleScheduler.js):
+- node-cron `* * * * *` Asia/Taipei 每分鐘 tick
+- 撈 active + bound_to=standalone + interval 已到的規則(top 100)
+- 每條規則 Redis tryLock(`alert_rule_eval:{ruleId}:{minute}`,TTL 90s)避多 pod 重複
+- 透過 `_inline_rule` 餵給 `pipelineAlerter.executeAlert`(no upstream JSON,context 帶 owner_user_id)
+- 不論 triggered / skipped / error,都更新 next_evaluate_at = NOW + interval(避免 stuck)
+- Redis 失敗時 fail-open(可能多發,cooldown 還是會擋實際通知)
+
+UI [`AlertRuleEditor`](../client/src/components/admin/AlertRulesPanel.tsx) modal:
+- 獨立規則 admin CRUD 端到端介面
+- standalone 防呆:必填 schedule_interval_minutes;不允許 upstream_json
+- 試跑流程:POST 暫存 rule → /test → DELETE 暫存(乾淨)
+- AlertRulesPanel 表格加「輪詢」欄(每 N 分 + next_evaluate_at hover)+ ✏ 編輯按鈕
+
+### 13.X.5 與 pipeline_node 規則的角色切割
+
+| 面向 | pipeline_node 繫結 | standalone 獨立 |
+|------|-------------------|-----------------|
+| 觸發時機 | 排程任務跑完 LLM 主回應 + pipeline 後 | 背景 cron 每分鐘 tick |
+| 資料源 | upstream_json(常用)/ sql_query / literal | sql_query(常用)/ literal |
+| LLM 分析 | 適合(已在 LLM context 內) | 可用但不必,純 SQL 監控免燒 token |
+| 評估頻率 | 跟著任務(daily / weekly / multi_time) | 任意分鐘級(min 1 分) |
+| 適合場景 | 新聞情緒突變 / 日報關鍵發現 / 預測值偏離 | 高頻價格監控 / 資料新鮮度 / DB 健康度 |
 
 ---
 

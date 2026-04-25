@@ -6752,6 +6752,73 @@ const userSections = [
                 ]
               }
             ]
+          },
+          {
+            "type": "subsection",
+            "title": "獨立規則(Phase 3.1)— 不依附排程任務的常駐警示",
+            "blocks": [
+              {
+                "type": "para",
+                "text": "除了「跟著 pipeline 跑」的 alert 節點外,系統還有「獨立規則」(bound_to=standalone),由背景 scheduler 每分鐘輪詢評估,適合「不需要 LLM 分析、純粹定期檢查 DB 狀態」的場景。"
+              },
+              {
+                "type": "subsection",
+                "title": "適用場景",
+                "blocks": [
+                  {
+                    "type": "list",
+                    "items": [
+                      "高頻數值監控:每 5 分鐘檢查 LME 銅價是否破關鍵價位",
+                      "資料新鮮度監控:每 15 分鐘檢查 pm_price_history 最新一筆距今多久",
+                      "服務健康度:每分鐘檢查 user_sessions 數量、API 錯誤率",
+                      "ERP / DB 業務指標:每小時檢查未結訂單堆積數量"
+                    ]
+                  },
+                  {
+                    "type": "tip",
+                    "text": "如果你的告警邏輯需要 LLM 分析(例如綜合多源新聞判斷情緒),建議用 pipeline alert 節點掛在排程後面;單純的數值閾值監控用獨立規則最省成本。"
+                  }
+                ]
+              },
+              {
+                "type": "subsection",
+                "title": "建立獨立規則步驟",
+                "blocks": [
+                  {
+                    "type": "steps",
+                    "items": [
+                      { "title": "管理後台 → 警示規則 → 「+ 新增獨立規則」", "desc": "右上角紅色按鈕。彈出編輯 modal。" },
+                      { "title": "填規則名 + 嚴重等級 + 標的", "desc": "規則名是 unique 識別,標的(entity_type/entity_code)會寫進警示日誌方便追溯。" },
+                      { "title": "繫結方式:standalone(預設)", "desc": "獨立規則一定是 standalone;若要切回 pipeline_node,需到對應排程任務的 pipeline 節點編輯。" },
+                      { "title": "輪詢間隔分鐘 *", "desc": "預設 60。最小 1 分鐘(scheduler tick 頻率上限)。設 5 = 每 5 分鐘評估一次。" },
+                      { "title": "資料來源:sql_query(獨立規則最常用)", "desc": "貼一段 SELECT,系統把回傳第一個欄位當數值。**只允許 SELECT**(防注入)。建議 ORDER BY + FETCH FIRST 限筆數,如:SELECT price_usd FROM pm_price_history WHERE metal_code='CU' ORDER BY as_of_date DESC FETCH FIRST 8 ROWS ONLY" },
+                      { "title": "選比較模式 + 填 config", "desc": "threshold 最直覺。historical_avg / rate_change / zscore 需要 SQL 回多筆(系統把最後一筆當 current,前面當歷史 series)。" },
+                      { "title": "訊息模板 + 動作 + cooldown", "desc": "跟 pipeline alert 節點一樣的設定。" },
+                      { "title": "(建議)按「試跑」", "desc": "建一筆暫存規則 → 真實跑一次 evaluation(不發實際通知)→ 自動刪除暫存。看 trigger_value / threshold_value / channels_sent 是否符合預期。" },
+                      { "title": "勾「啟用」+ 點「建立」", "desc": "下次 scheduler tick 起算 schedule_interval_minutes 分鐘後第一次評估。可隨時回頭按 ⏸ 暫停。" }
+                    ]
+                  }
+                ]
+              },
+              {
+                "type": "subsection",
+                "title": "查看 scheduler 狀態",
+                "blocks": [
+                  {
+                    "type": "list",
+                    "items": [
+                      "「警示規則」表格的「輪詢」欄會顯示「每 N 分」+ hover 時看 next_evaluate_at",
+                      "Server log 每分鐘會印 [AlertRuleScheduler] rule #X \"name\" → triggered/skipped/error 狀態",
+                      "點規則的 📜 「歷史」可看最近 20 筆觸發紀錄"
+                    ]
+                  },
+                  {
+                    "type": "note",
+                    "text": "K8s 多 pod 部署時,scheduler 每個 pod 都跑,但每條規則用 Redis tryLock(rule_id+minute)避重,只有一個 pod 會真正評估。Redis 失敗時 fail-open(可能多發,但 cooldown_minutes 仍會擋實際通知)。"
+                  }
+                ]
+              }
+            ]
           }
         ]
       }
