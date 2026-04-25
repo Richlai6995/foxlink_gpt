@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, Fragment } from 'react'
 import { useTranslation } from 'react-i18next'
 import { AlertTriangle, Power, History, Trash2, RefreshCw, ChevronDown, ChevronUp, Plus, Edit3, X, PlayCircle, Clock } from 'lucide-react'
 import api from '../../lib/api'
@@ -190,8 +190,8 @@ export default function AlertRulesPanel() {
               <tr><td colSpan={10} className="px-3 py-6 text-center text-slate-400">{loading ? t('common.loading', '載入中…') : t('admin.alertRules.empty', '尚無警示規則。請到「排程任務」加 alert 節點,或點右上「+ 新增獨立規則」建獨立 cron 規則。')}</td></tr>
             )}
             {filtered.map(r => (
-              <>
-                <tr key={r.id} className="border-t border-slate-100 hover:bg-slate-50">
+              <Fragment key={r.id}>
+                <tr className="border-t border-slate-100 hover:bg-slate-50">
                   <td className="px-2 py-2 text-center">
                     <button onClick={() => toggleExpand(r.id)} className="text-slate-400 hover:text-slate-700">
                       {expanded === r.id ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
@@ -280,7 +280,7 @@ export default function AlertRulesPanel() {
                     </td>
                   </tr>
                 )}
-              </>
+              </Fragment>
             ))}
           </tbody>
         </table>

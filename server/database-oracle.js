@@ -305,6 +305,9 @@ async function runMigrations(db) {
   await addCol('KB_DOCUMENTS', 'META_PIPELINE',  'VARCHAR2(200)');
   await addCol('KB_DOCUMENTS', 'PUBLISHED_AT',   'TIMESTAMP');
   // Phase 3.1 獨立規則排程
+  // 注意:這些 addCol 是給「Phase 3 → Phase 3.1 升級的既有 deployment」用的。
+  // Fresh install 走下面 createTable('ALERT_RULES'),已含這 4 欄。addCol 在 table 不存在時
+  // 會 warn + skip,fresh install 不會有問題,但記得 CREATE TABLE 那邊欄位要 in sync。
   await addCol('ALERT_RULES', 'SCHEDULE_INTERVAL_MINUTES', 'NUMBER');
   await addCol('ALERT_RULES', 'LAST_EVALUATED_AT',          'TIMESTAMP');
   await addCol('ALERT_RULES', 'NEXT_EVALUATE_AT',           'TIMESTAMP');
@@ -3504,6 +3507,10 @@ async function runMigrations(db) {
     cooldown_minutes  NUMBER DEFAULT 60,
     dedup_key         VARCHAR2(200),
     is_active         NUMBER(1) DEFAULT 1,
+    schedule_interval_minutes NUMBER,
+    last_evaluated_at TIMESTAMP,
+    next_evaluate_at  TIMESTAMP,
+    last_eval_result  VARCHAR2(500),
     creation_date     TIMESTAMP DEFAULT SYSTIMESTAMP,
     last_modified     TIMESTAMP DEFAULT SYSTIMESTAMP
   )`);
