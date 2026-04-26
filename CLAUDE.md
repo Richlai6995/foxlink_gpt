@@ -71,6 +71,9 @@ cd client && npm run dev    # frontend → localhost:5173 (proxy → 3007)
 | `kb-retrieval-architecture-v2.md` | **KB 檢索 v2 架構實作紀錄**（Phase 1/2/3a/3b/3c + 踩坑 + config 索引） |
 | `gemini-sdk-migration-plan.md` | **Gemini SDK 遷移計畫**：`@google-cloud/vertexai` → `@google/genai`（獨立 session 處理） |
 | `chat-inline-chart-plan.md` | **Chat Inline Chart 規劃書**：MCP / LLM 輸出自動畫 ECharts（與戰情室解耦） |
+| `precious-metals-plan.md` | **貴金屬情報平台 — 內部實作規劃**：業務脈絡 / Phase 0-3 規劃 / **Phase 5 實施成果**(Track A/B/C/F 全 ship) |
+| `phase5-plan.md` | **Phase 5 規劃書**：6 候選 track(A/B/C/D/E/F);最終 ship A+B+C+F,D/E 暫緩 |
+| `phase6-plan.md` | **Phase 6 規劃書**：9 候選 track(G 體檢 / H token / I prompt edit / J card / K ERP schema 助手 / L retry / M i18n / N mobile / O 對話視圖),待拍板 |
 
 ---
 
