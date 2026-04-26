@@ -1736,13 +1736,31 @@ const userSections = [
     "sort_order": 14,
     "icon": "Sparkles",
     "icon_color": "text-purple-500",
-    "last_modified": "2026-04-15",
+    "last_modified": "2026-04-26",
     "title": "技能 Skill",
     "sidebar_label": "技能 Skill",
     "blocks": [
       {
         "type": "para",
         "text": "技能（Skill）是可以掌載到對話的自訂模組，能讓 AI 具備特定領域的專業知識、固定指令或對接外部服務的能力。例如，掛載「專業術語翻譯」技能後，每次對話 AI 會自動以該行業的標準用語進行翻譯。"
+      },
+      {
+        "type": "subsection",
+        "title": "Passthrough 模式（直出 MD / HTML）",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "若技能或 MCP 工具回傳的內容**本身就是成品**（例如完整的 markdown 表格、HTML 報表），管理員可在編輯介面勾選「啟用自動 Passthrough」。命中後的內容會**直接渲染給使用者**，跳過 LLM 整理 — token 大幅節省、回應更即時、原始格式不被 AI 改寫。"
+          },
+          {
+            "type": "tip",
+            "text": "Markdown artifact 提供「複製 Markdown」按鈕；HTML 走 sandboxed iframe 顯示，僅限下載。**若想讓 AI 進一步分析 artifact 內容,請下載後在新對話以附件上傳** — Passthrough 內容不會自動回流到 LLM context。"
+          },
+          {
+            "type": "note",
+            "text": "Passthrough 內容不經 LLM,**敏感詞掃描也會跳過**。管理員應只對受信任來源的工具開啟此功能。"
+          }
+        ]
       },
       {
         "type": "subsection",

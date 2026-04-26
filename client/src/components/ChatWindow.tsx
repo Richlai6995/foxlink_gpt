@@ -4,6 +4,7 @@ import { useState } from 'react'
 import MarkdownRenderer from './MarkdownRenderer'
 import ResearchProgressCard from './ResearchProgressCard'
 import InlineChart from './chat/InlineChart'
+import ArtifactCard from './ArtifactCard'
 import type { ChatMessage, GeneratedFile, InlineChartType } from '../types'
 import { useTranslation } from 'react-i18next'
 
@@ -244,6 +245,9 @@ function MessageBubble({
                   />
                 ))}
                 <GeneratedFileLinks files={msg.generated_files || []} />
+                {msg.artifacts?.map((a, i) => (
+                  <ArtifactCard key={a.id ?? a.client_id ?? i} artifact={a} />
+                ))}
               </>
           }
         </div>

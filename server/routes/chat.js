@@ -12,6 +12,7 @@ const { parseChartBlocks } = require('../services/chartSpecParser');
 const { notifyAdminSensitiveKeyword } = require('../services/mailService');
 const { budgetGuard } = require('../middleware/budgetGuard');
 const mcpClient = require('../services/mcpClient');
+const { detectPassthrough } = require('../services/toolResultPassthrough');
 const { classifyUpload, canonicalMimeForKind, TEXT_HARD_CAP_BYTES } = require('../utils/uploadFileTypes');
 
 /**
@@ -2464,6 +2465,60 @@ ${hasPreserve ? '- 標記【★保留原文】的欄位：必須完整複製原�
     const toolCallResults = [];
     let toolCallCounter = 0;
     let parsedCharts = [];  // InlineChartSpec[] 最終存 DB + SSE 推給前端
+    // ── Tool artifact passthrough(docs/tool-artifact-passthrough.md)──
+    //   暫存 tool 命中 passthrough 的 artifact,等 chat_messages INSERT 拿到 message_id 後 batch insert
+    //   SSE artifact event 已在偵測點立即發給 client(用 client_id),不需等 DB
+    const pendingArtifacts = [];
+
+    /**
+     * 偵測 tool 結果是否要 passthrough。命中:SSE → push pendingArtifacts → return summaryText 給 LLM。
+     * 未命中:return null,呼叫端照舊用原 result 給 LLM。
+     */
+    const tryPassthrough = ({ result, mimeHint, source, toolMeta }) => {
+      try {
+        const det = detectPassthrough({ result, mimeHint, source, toolMeta });
+        if (!det.passthrough) return null;
+
+        const clientId = `art_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
+        // SSE 直接送(client 用 client_id 暫存,session 復載走 DB id)
+        sendEvent({
+          type: 'artifact',
+          client_id: clientId,
+          mime_type: det.artifact.mime,
+          title: det.artifact.title,
+          content: det.artifact.content,
+          size: det.artifact.size,
+          tool_name: toolMeta?.name,
+          source_type: source.type,
+        });
+
+        pendingArtifacts.push({
+          client_id: clientId,
+          source_type: source.type,
+          source_id: source.id || null,
+          tool_name: toolMeta?.name || null,
+          tool_args: toolMeta?.args ? JSON.stringify(toolMeta.args) : null,
+          mime_type: det.artifact.mime,
+          title: det.artifact.title,
+          content: det.artifact.content,
+          content_size: det.artifact.size,
+          summary: JSON.stringify(det.summaryStruct),
+          detection_method: det.detectionMethod || null,
+        });
+
+        // Audit:event-only,不掃 sensitive_keywords
+        try {
+          db.prepare(
+            `INSERT INTO audit_logs (user_id, session_id, content, has_sensitive) VALUES (?,?,?,0)`
+          ).run(req.user.id, sessionId, `[passthrough] ${source.type}:${toolMeta?.name || ''} (${det.artifact.size}B, ${det.artifact.mime})`).catch(() => {});
+        } catch (_) {}
+
+        return det.summaryText;
+      } catch (e) {
+        console.warn('[Passthrough] detect/emit error:', e.message);
+        return null;
+      }
+    };
 
     if (imageOutput) {
       // ── Image-generation model (non-streaming) ──────────────────────────
@@ -3069,7 +3124,21 @@ ${hasPreserve ? '- 標記【★保留原文】的欄位：必須完整複製原�
                 });
                 if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
                 const data = await resp.json();
-                const result = data.content || data.result || JSON.stringify(data);
+                // ── Passthrough:skill 顯式回 { artifact } 且 admin 開總開關 ──
+                const ptResult = tryPassthrough({
+                  result: data,
+                  source: {
+                    type: 'skill',
+                    id: sk.id,
+                    config: {
+                      passthrough_enabled: sk.passthrough_enabled ?? sk.PASSTHROUGH_ENABLED,
+                      passthrough_max_bytes: sk.passthrough_max_bytes ?? sk.PASSTHROUGH_MAX_BYTES,
+                      passthrough_mime_whitelist: sk.passthrough_mime_whitelist ?? sk.PASSTHROUGH_MIME_WHITELIST,
+                    },
+                  },
+                  toolMeta: { name: toolName, args },
+                });
+                const result = ptResult ?? (data.content || data.result || JSON.stringify(data));
                 try { await db.prepare(`INSERT INTO skill_call_logs (skill_id, user_id, session_id, query_preview, response_preview, status, duration_ms) VALUES (?,?,?,?,?,?,?)`).run(sk.id, req.user.id, sessionId, JSON.stringify(args).slice(0, 200), String(result).slice(0, 200), 'ok', Date.now() - _t0); } catch (_) {}
                 return result;
               } catch (e) {
@@ -3110,7 +3179,28 @@ ${hasPreserve ? '- 標記【★保留原文】的欄位：必須完整複製原�
               employee_id: req.user.employee_id || '',
               dept_code: req.user.dept_code || '',
             };
-            return await mcpClient.callTool(db, entry.server, sessionId, req.user.id, entry.originalName, args, mcpUserCtx);
+            // ── Passthrough 路徑只在 server.passthrough_enabled=1 時走 returnRaw,避免拖累 99% 一般 server ──
+            const srv = entry.server || {};
+            const ptEnabled = Number(srv.passthrough_enabled ?? srv.PASSTHROUGH_ENABLED) === 1;
+            if (!ptEnabled) {
+              return await mcpClient.callTool(db, srv, sessionId, req.user.id, entry.originalName, args, mcpUserCtx);
+            }
+            const raw = await mcpClient.callTool(db, srv, sessionId, req.user.id, entry.originalName, args, mcpUserCtx, { returnRaw: true });
+            // raw = { text, parts, isError }
+            const ptResult = tryPassthrough({
+              result: raw,
+              source: {
+                type: 'mcp',
+                id: srv.id,
+                config: {
+                  passthrough_enabled: srv.passthrough_enabled ?? srv.PASSTHROUGH_ENABLED,
+                  passthrough_max_bytes: srv.passthrough_max_bytes ?? srv.PASSTHROUGH_MAX_BYTES,
+                  passthrough_mime_whitelist: srv.passthrough_mime_whitelist ?? srv.PASSTHROUGH_MIME_WHITELIST,
+                },
+              },
+              toolMeta: { name: entry.originalName, args },
+            });
+            return ptResult ?? raw.text;
           };
 
           // ── Wrap toolHandler:收集 { id, name, args, result } 供 chartSpecParser data_ref 解析 ──
@@ -3524,10 +3614,49 @@ ${hasPreserve ? '- 標記【★保留原文】的欄位：必須完整複製原�
       return JSON.stringify(allGeneratedFiles);
     })();
     const chartsJsonToStore = parsedCharts.length > 0 ? JSON.stringify(parsedCharts) : null;
-    await db.prepare(
+    const insertMsgRes = await db.prepare(
       `INSERT INTO chat_messages (session_id, role, content, input_tokens, output_tokens, files_json, charts_json)
        VALUES (?, 'assistant', ?, ?, ?, ?, ?)`
     ).run(sessionId, displayText, inputTokens, outputTokens, filesJsonToStore, chartsJsonToStore);
+
+    // ── Persist tool artifact passthrough (docs/tool-artifact-passthrough.md §6.4) ──
+    if (pendingArtifacts.length > 0) {
+      // CLOB INSERT 走 RETURNING fallback、lastInsertRowid 通常為 null。撈最新 assistant message id。
+      let assistantMsgId = insertMsgRes?.lastInsertRowid;
+      if (!assistantMsgId) {
+        try {
+          const r = await db.prepare(
+            `SELECT id FROM chat_messages WHERE session_id=? AND role='assistant' ORDER BY id DESC FETCH FIRST 1 ROWS ONLY`
+          ).get(sessionId);
+          assistantMsgId = r?.id;
+        } catch (e) { console.warn('[Artifact] lookup message_id failed:', e.message); }
+      }
+      if (assistantMsgId) {
+        for (const a of pendingArtifacts) {
+          try {
+            const ins = await db.prepare(
+              `INSERT INTO chat_artifacts
+                 (message_id, session_id, user_id, source_type, source_id, tool_name, tool_args,
+                  mime_type, title, content, content_size, summary, detection_method)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`
+            ).run(
+              assistantMsgId, sessionId, req.user.id,
+              a.source_type, a.source_id, a.tool_name, a.tool_args,
+              a.mime_type, a.title, a.content, a.content_size, a.summary, a.detection_method,
+            );
+            // 把 client_id ↔ DB id 對應送回前端,讓 client 把 SSE 暫存的 artifact reconcile
+            const dbId = ins?.lastInsertRowid;
+            if (dbId) {
+              try { sendEvent({ type: 'artifact_persisted', client_id: a.client_id, id: dbId, message_id: assistantMsgId }); } catch (_) {}
+            }
+          } catch (e) {
+            console.warn('[Artifact] INSERT failed:', e.message);
+          }
+        }
+      } else {
+        console.warn('[Artifact] No assistant message id, skip persisting', pendingArtifacts.length, 'artifacts');
+      }
+    }
 
     // Update session title (first message)
     if (historyMessages.length === 0 && combinedUserText.trim()) {

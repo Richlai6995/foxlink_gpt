@@ -808,6 +808,15 @@ async function runMigrations(db) {
   // MCP Server response mode (inject = feed tool result to LLM, answer = return raw result directly)
   await addCol('MCP_SERVERS', 'RESPONSE_MODE', "VARCHAR2(10) DEFAULT 'inject'");
 
+  // ── Tool artifact passthrough (docs/tool-artifact-passthrough.md) ──
+  // MD/HTML 直接渲染 artifact、跳過 LLM,inject/answer 共存
+  await addCol('MCP_SERVERS', 'PASSTHROUGH_ENABLED',         'NUMBER(1) DEFAULT 0');
+  await addCol('MCP_SERVERS', 'PASSTHROUGH_MAX_BYTES',       'NUMBER DEFAULT 512000');
+  await addCol('MCP_SERVERS', 'PASSTHROUGH_MIME_WHITELIST',  "VARCHAR2(200) DEFAULT 'text/html,text/markdown'");
+  await addCol('SKILLS',      'PASSTHROUGH_ENABLED',         'NUMBER(1) DEFAULT 0');
+  await addCol('SKILLS',      'PASSTHROUGH_MAX_BYTES',       'NUMBER DEFAULT 512000');
+  await addCol('SKILLS',      'PASSTHROUGH_MIME_WHITELIST',  "VARCHAR2(200) DEFAULT 'text/html,text/markdown'");
+
   // AI Report Dashboard auto-refresh interval (minutes, null = manual)
   await addCol('AI_REPORT_DASHBOARDS', 'AUTO_REFRESH_INTERVAL', 'NUMBER DEFAULT NULL');
   await addCol('AI_REPORT_DASHBOARDS', 'NAME_EN', 'VARCHAR2(200)');
@@ -1064,6 +1073,35 @@ async function runMigrations(db) {
     console.warn('[Migration] seed FOXLINK chart style:', e.message);
   }
 
+  // ── chat_artifacts: tool 回傳 MD/HTML 跳過 LLM 直出 ──
+  // docs/tool-artifact-passthrough.md §4.3
+  await createTable('CHAT_ARTIFACTS', `CREATE TABLE chat_artifacts (
+    id                NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    message_id        NUMBER NOT NULL,
+    session_id        VARCHAR2(64) NOT NULL,
+    user_id           NUMBER NOT NULL,
+    source_type       VARCHAR2(20) NOT NULL,
+    source_id         NUMBER,
+    tool_name         VARCHAR2(200),
+    tool_args         CLOB,
+    mime_type         VARCHAR2(50) NOT NULL,
+    title             VARCHAR2(500),
+    content           CLOB NOT NULL,
+    content_size      NUMBER NOT NULL,
+    summary           CLOB,
+    detection_method  VARCHAR2(30),
+    created_at        TIMESTAMP DEFAULT SYSTIMESTAMP
+  )`);
+  // Index 容錯:ORA-00955 (already exists) / ORA-01408 (already indexed) 跳過
+  for (const [name, ddl] of [
+    ['idx_artifacts_session', 'CREATE INDEX idx_artifacts_session ON chat_artifacts(session_id, created_at)'],
+    ['idx_artifacts_message', 'CREATE INDEX idx_artifacts_message ON chat_artifacts(message_id)'],
+    ['idx_artifacts_user',    'CREATE INDEX idx_artifacts_user    ON chat_artifacts(user_id, created_at)'],
+  ]) {
+    try { await db.prepare(ddl).run(); console.log(`[Migration] ${name} created ✓`); }
+    catch (e) { if (!/ORA-00955|ORA-01408/.test(e.message)) console.warn(`[Migration] ${name}:`, e.message); }
+  }
+
   // ── v2 Phase 3b: 同義詞字典追蹤表（繞過 CTX view 版本相容問題）─────────────
   await createTable('kb_thesauri', `
     CREATE TABLE kb_thesauri (
@@ -1134,6 +1172,15 @@ async function runMigrations(db) {
   await addCol('RESEARCH_JOBS', 'SECTIONS_JSON',       'CLOB');  // [{sq_id,question,answer,done}] streaming
   await addCol('RESEARCH_JOBS', 'REF_JOB_IDS_JSON',   'CLOB');  // [jobId, ...] previous research refs
   await addCol('RESEARCH_JOBS', 'MODEL_KEY',           'VARCHAR2(100)'); // llm_models.key to use
+  // ── Deep Research v2 (Tier 2/3 + Recovery + 預估) ─────────────────────────
+  await addCol('RESEARCH_JOBS', 'AGENT_STATE_JSON',    'CLOB');           // ReAct trace + sub-sub-q + 已完成 SQ ids
+  await addCol('RESEARCH_JOBS', 'CITATIONS_JSON',      'CLOB');           // [{id,sq_id,source,url,snippet}]
+  await addCol('RESEARCH_JOBS', 'HEARTBEAT_AT',        'TIMESTAMP');       // 主迴圈 60s 更新一次
+  await addCol('RESEARCH_JOBS', 'RECOVERY_COUNT',      'NUMBER DEFAULT 0');// 中斷後 resume 次數,>=3 標 failed
+  await addCol('RESEARCH_JOBS', 'LOCK_TOKEN',          'VARCHAR2(64)');    // pod 識別,防多 pod 搶 recover
+  await addCol('RESEARCH_JOBS', 'ESTIMATED_USD',       'NUMBER');          // 提交時的預估成本
+  await addCol('RESEARCH_JOBS', 'ACTUAL_USD',          'NUMBER DEFAULT 0');// 跑下來的累計成本(每 SQ 完成後 update)
+  await addCol('RESEARCH_JOBS', 'TOKENS_BY_MODEL_JSON','CLOB');             // {pro:{in,out}, flash:{in,out}} — 含 rerun 累計
 
   // ── Research Templates ────────────────────────────────────────────────────
   await createTable('RESEARCH_TEMPLATES', `CREATE TABLE research_templates (

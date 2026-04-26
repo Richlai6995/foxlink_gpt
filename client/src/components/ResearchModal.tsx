@@ -63,6 +63,21 @@ interface ResearchTemplate {
 }
 interface StreamingSection { id: number; question: string; answer: string; done: boolean }
 
+interface CostEstimate {
+  estimated_usd: number
+  base_usd: number
+  multiplier: number
+  budget: {
+    action: 'block' | 'warn'
+    limits:    { daily: number|null; weekly: number|null; monthly: number|null }
+    current:   { daily: number;      weekly: number;      monthly: number }
+    remaining: { daily: number|null; weekly: number|null; monthly: number|null }
+    would_exceed: { daily: boolean; weekly: boolean; monthly: boolean }
+  }
+  suggested_max_depth: number
+  blocked: boolean
+}
+
 interface Props {
   sessionId: string | null
   modelKey?: string           // current session's model key — passed to research job
@@ -243,6 +258,7 @@ export default function ResearchModal({ sessionId, modelKey, initialQuestion = '
   const [hasKb,        setHasKb]        = useState(false)
   const [starting,     setStarting]     = useState(false)
   const [startError,   setStartError]   = useState('')
+  const [costEstimate, setCostEstimate] = useState<CostEstimate | null>(null)
   const [topicBindings, setTopicBindings] = useState<Record<number, TopicBinding>>({})
   const [expandedTopics, setExpandedTopics] = useState<Set<number>>(new Set())
   // Per-SQ hint + files + web
@@ -255,6 +271,9 @@ export default function ResearchModal({ sessionId, modelKey, initialQuestion = '
   const [jobId,        setJobId]        = useState<string | null>(null)
   const [streamSections, setStreamSections] = useState<StreamingSection[]>([])
   const [jobStatus,    setJobStatus]    = useState<string>('pending')
+  const [jobUsage,     setJobUsage]     = useState<{ actual?: number; estimated?: number; tokens?: Record<string,{in:number;out:number}> } | null>(null)
+  const [agentTrace,   setAgentTrace]   = useState<Record<string, Array<{turn:number;name:string;args:string;result_preview:string;result_length:number}>>>({})
+  const [traceOpenIds, setTraceOpenIds] = useState<Set<number>>(new Set())
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   // ── Edit mode state ────────────────────────────────────────────────────────
@@ -389,6 +408,23 @@ export default function ResearchModal({ sessionId, modelKey, initialQuestion = '
         if (j.sections_json) {
           try { setStreamSections(JSON.parse(j.sections_json)) } catch (_) {}
         }
+        // token / cost stats
+        let tokens: Record<string, {in:number;out:number}> | undefined
+        if (j.tokens_by_model_json) {
+          try { tokens = JSON.parse(j.tokens_by_model_json) } catch (_) {}
+        }
+        setJobUsage({
+          actual:    typeof j.actual_usd    === 'number' ? j.actual_usd    : undefined,
+          estimated: typeof j.estimated_usd === 'number' ? j.estimated_usd : undefined,
+          tokens,
+        })
+        // agent scratchpad (tool calls per SQ)
+        if (j.agent_state_json) {
+          try {
+            const as = JSON.parse(j.agent_state_json)
+            if (as?.tool_calls_by_sq) setAgentTrace(as.tool_calls_by_sq)
+          } catch (_) {}
+        }
         if (j.status === 'done' || j.status === 'failed') {
           if (pollRef.current) clearInterval(pollRef.current)
         }
@@ -440,6 +476,7 @@ export default function ResearchModal({ sessionId, modelKey, initialQuestion = '
       const res = await api.post('/research/plan', { question: question.trim(), depth })
       setPlan(res.data.plan)
       setHasKb(res.data.has_kb)
+      setCostEstimate(res.data.cost_estimate || null)
       const init: Record<number, TopicBinding> = {}
       res.data.plan.sub_questions.forEach((sq: SubQuestion) => { init[sq.id] = emptyBinding() })
       setTopicBindings(init)
@@ -661,7 +698,7 @@ export default function ResearchModal({ sessionId, modelKey, initialQuestion = '
                 <label className="block text-sm font-medium text-slate-700 mb-2">
                   {t('research.depthLabel')}<span className="text-blue-600 font-semibold">{depth} {t('research.depthUnit')}</span>
                 </label>
-                <input type="range" min={2} max={12} value={depth}
+                <input type="range" min={2} max={8} value={depth}
                   onChange={(e) => setDepth(Number(e.target.value))}
                   className="w-full accent-blue-600" />
                 <div className="flex justify-between text-xs text-slate-400 mt-1">
@@ -781,6 +818,54 @@ export default function ResearchModal({ sessionId, modelKey, initialQuestion = '
           {/* ── Step 2 ───────────────────────────────────────────────────── */}
           {step === 2 && plan && !editJobLoading && (
             <div className="space-y-4">
+              {/* Cost Estimate banner — 預估 + 額度檢查 */}
+              {costEstimate && !editMode && (
+                <div className={`rounded-xl p-3 border text-sm ${
+                  costEstimate.blocked
+                    ? 'bg-red-50 border-red-200'
+                    : (Object.values(costEstimate.budget.would_exceed).some(Boolean)
+                        ? 'bg-amber-50 border-amber-200'
+                        : 'bg-blue-50 border-blue-200')
+                }`}>
+                  <div className="flex items-center justify-between gap-3 flex-wrap">
+                    <div className="flex items-center gap-2">
+                      <BarChart2 size={16} className={costEstimate.blocked ? 'text-red-500' : 'text-blue-500'} />
+                      <span className="font-medium text-slate-700">
+                        預估成本 ${costEstimate.estimated_usd.toFixed(2)}
+                      </span>
+                      <span className="text-xs text-slate-500">
+                        (含 ×{costEstimate.multiplier} buffer)
+                      </span>
+                    </div>
+                    {(['daily','weekly','monthly'] as const).map(p => {
+                      const lim = costEstimate.budget.limits[p]
+                      if (lim == null) return null
+                      const cur = costEstimate.budget.current[p]
+                      const exceed = costEstimate.budget.would_exceed[p]
+                      const periodLabel = p === 'daily' ? '日' : p === 'weekly' ? '週' : '月'
+                      return (
+                        <span key={p} className={`text-xs ${exceed ? 'text-red-600 font-semibold' : 'text-slate-600'}`}>
+                          本{periodLabel} ${cur.toFixed(2)}/${lim} {exceed ? '⚠️' : ''}
+                        </span>
+                      )
+                    })}
+                  </div>
+                  {costEstimate.blocked && (
+                    <div className="mt-2 text-xs text-red-700">
+                      預估將超過額度。
+                      {costEstimate.suggested_max_depth >= 2
+                        ? <> 建議將深度降至 <button className="underline font-medium" onClick={() => { setDepth(costEstimate.suggested_max_depth); setPlan(null); setCostEstimate(null) }}>{costEstimate.suggested_max_depth} 個子問題</button> 後重新生成計畫。</>
+                        : ' 目前額度不足以執行任何深度研究,請聯絡管理員。'}
+                    </div>
+                  )}
+                  {!costEstimate.blocked && Object.values(costEstimate.budget.would_exceed).some(Boolean) && costEstimate.budget.action === 'warn' && (
+                    <div className="mt-2 text-xs text-amber-700">
+                      預估將超過額度,但您的設定為「警告」模式,仍會執行。
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* Plan summary — edit mode 可直接編輯 title / objective */}
               <div className="bg-slate-50 rounded-xl p-4 space-y-1.5">
                 <p className="text-xs text-slate-500 uppercase tracking-wide">{t('research.planTitle')}</p>
@@ -1115,23 +1200,95 @@ export default function ResearchModal({ sessionId, modelKey, initialQuestion = '
               {/* Streaming sections */}
               {streamSections.length > 0 && (
                 <div className="space-y-2">
-                  {streamSections.map((sec, i) => (
-                    <div key={sec.id || i} className={`border rounded-xl transition ${sec.done ? 'border-green-200 bg-green-50' : 'border-slate-200 bg-slate-50'}`}>
-                      <div className="flex items-center gap-2 px-4 py-2">
-                        {sec.done
-                          ? <CheckCircle size={13} className="text-green-500 flex-shrink-0" />
-                          : <Loader2 size={13} className="animate-spin text-blue-400 flex-shrink-0" />}
-                        <span className="text-xs font-medium text-slate-700 truncate">{sec.question}</span>
-                      </div>
-                      {sec.done && sec.answer && (
-                        <div className="px-4 pb-3">
-                          <p className="text-xs text-slate-500 line-clamp-3 whitespace-pre-wrap">{sec.answer.slice(0, 300)}{sec.answer.length > 300 ? '…' : ''}</p>
+                  {streamSections.map((sec, i) => {
+                    const trace = agentTrace[String(sec.id)] || []
+                    const traceOpen = traceOpenIds.has(sec.id)
+                    return (
+                      <div key={sec.id || i} className={`border rounded-xl transition ${sec.done ? 'border-green-200 bg-green-50' : 'border-slate-200 bg-slate-50'}`}>
+                        <div className="flex items-center gap-2 px-4 py-2">
+                          {sec.done
+                            ? <CheckCircle size={13} className="text-green-500 flex-shrink-0" />
+                            : <Loader2 size={13} className="animate-spin text-blue-400 flex-shrink-0" />}
+                          <span className="text-xs font-medium text-slate-700 truncate flex-1">{sec.question}</span>
+                          {trace.length > 0 && (
+                            <button
+                              onClick={() => setTraceOpenIds((prev) => {
+                                const next = new Set(prev)
+                                if (next.has(sec.id)) next.delete(sec.id); else next.add(sec.id)
+                                return next
+                              })}
+                              className="flex-shrink-0 text-[10px] text-blue-500 hover:text-blue-700 flex items-center gap-0.5"
+                              title="工具呼叫"
+                            >
+                              {traceOpen ? <ChevronUp size={11}/> : <ChevronDown size={11}/>}
+                              {trace.length} 次工具呼叫
+                            </button>
+                          )}
                         </div>
-                      )}
-                    </div>
-                  ))}
+                        {sec.done && sec.answer && (
+                          <div className="px-4 pb-2">
+                            <p className="text-xs text-slate-500 line-clamp-3 whitespace-pre-wrap">{sec.answer.slice(0, 300)}{sec.answer.length > 300 ? '…' : ''}</p>
+                          </div>
+                        )}
+                        {traceOpen && trace.length > 0 && (
+                          <div className="px-4 pb-3 border-t border-slate-100 pt-2 space-y-1.5">
+                            {trace.map((tc, idx) => (
+                              <div key={idx} className="bg-white/70 rounded-md p-2 text-[11px] font-mono">
+                                <div className="flex items-center gap-2 text-slate-700 font-semibold">
+                                  <span className="text-blue-600">turn {tc.turn + 1}</span>
+                                  <span>·</span>
+                                  <span className="text-purple-600">{tc.name}</span>
+                                  {tc.result_length > 0 && <span className="text-slate-400 font-normal text-[10px]">({tc.result_length} chars)</span>}
+                                </div>
+                                {tc.args && tc.args !== '{}' && (
+                                  <div className="text-slate-500 mt-0.5 break-all">args: {tc.args}</div>
+                                )}
+                                {tc.result_preview && (
+                                  <div className="text-slate-600 mt-0.5 line-clamp-3 break-all whitespace-pre-wrap">{tc.result_preview}</div>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
                 </div>
               )}
+
+              {/* Token usage stats (進行中即時更新,完成時最終值) */}
+              {jobUsage && (jobUsage.actual !== undefined || jobUsage.tokens) && (() => {
+                const tbm = jobUsage.tokens || {}
+                const totalIn  = Object.values(tbm).reduce((s, t) => s + (t.in  || 0), 0)
+                const totalOut = Object.values(tbm).reduce((s, t) => s + (t.out || 0), 0)
+                return (
+                  <div className="bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-xs space-y-1">
+                    <div className="flex items-center justify-between">
+                      <span className="font-semibold text-slate-700 flex items-center gap-1.5">
+                        <BarChart2 size={12} /> Token / 成本統計
+                      </span>
+                      {jobUsage.actual !== undefined && (
+                        <span className="font-mono text-slate-700">
+                          ${jobUsage.actual.toFixed(4)}
+                          {jobUsage.estimated !== undefined && jobUsage.estimated > 0 && (
+                            <span className="text-slate-400"> / 預估 ${jobUsage.estimated.toFixed(2)}</span>
+                          )}
+                        </span>
+                      )}
+                    </div>
+                    {(totalIn + totalOut) > 0 && (
+                      <div className="text-slate-500 font-mono">
+                        in {totalIn.toLocaleString()} · out {totalOut.toLocaleString()} · total {(totalIn + totalOut).toLocaleString()}
+                      </div>
+                    )}
+                    {Object.entries(tbm).map(([m, t]) => (
+                      <div key={m} className="text-slate-400 font-mono pl-3">
+                        {m}: in {(t.in || 0).toLocaleString()} / out {(t.out || 0).toLocaleString()}
+                      </div>
+                    ))}
+                  </div>
+                )
+              })()}
 
               {jobStatus === 'done' && (
                 <p className="text-sm text-slate-500">{t('research.successMsg2')}</p>
@@ -1197,7 +1354,7 @@ export default function ResearchModal({ sessionId, modelKey, initialQuestion = '
                 )}
                 <button
                   onClick={handleStart}
-                  disabled={starting || !plan || (!editMode && plan.sub_questions.some((sq) => !sq.question.trim())) || (editMode && rerunIds.size === 0)}
+                  disabled={starting || !plan || (!editMode && plan.sub_questions.some((sq) => !sq.question.trim())) || (editMode && rerunIds.size === 0) || (!editMode && !!costEstimate?.blocked)}
                   className="flex items-center gap-2 px-5 py-2 bg-blue-600 text-white text-sm rounded-xl hover:bg-blue-700 disabled:opacity-50 transition">
                   {starting
                     ? <><Loader2 size={15} className="animate-spin" /> {t('research.starting')}</>

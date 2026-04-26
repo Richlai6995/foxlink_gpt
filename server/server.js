@@ -76,6 +76,9 @@ app.get('/api/health', (req, res) => res.json({ status: 'ok', timestamp: new Dat
     console.log('[Route] /api/users OK');
     app.use('/api/chat', require('./routes/chat'));
     console.log('[Route] /api/chat OK');
+    // chat artifacts(tool-artifact-passthrough.md):路徑 /api/chat/artifacts/:id, /api/chat/sessions/:sid/artifacts
+    app.use('/api/chat', require('./routes/chatArtifacts'));
+    console.log('[Route] /api/chat/artifacts OK');
     app.use('/api/admin', require('./routes/admin'));
 
     app.use('/api/admin/factory-translations', require('./routes/factoryTranslations'));
@@ -282,8 +285,16 @@ app.get('/api/health', (req, res) => res.json({ status: 'ok', timestamp: new Dat
     });
 
     // Graceful shutdown for K8s rolling update
-    process.on('SIGTERM', () => {
+    process.on('SIGTERM', async () => {
       console.log('[Shutdown] SIGTERM received, closing gracefully...');
+      // 把所有 in-flight research jobs 標回可恢復狀態,讓其他 pod 接手
+      try {
+        const { gracefullyPauseActiveJobs } = require('./services/researchService');
+        const { db } = require('./database-oracle');
+        await gracefullyPauseActiveJobs(db);
+      } catch (e) {
+        console.warn('[Shutdown] gracefullyPauseActiveJobs error:', e.message);
+      }
       server.close(async () => {
         try {
           const { getPool } = require('./database-oracle');
@@ -310,6 +321,19 @@ app.get('/api/health', (req, res) => res.json({ status: 'ok', timestamp: new Dat
       }
     } catch (e) {
       console.error('[Cleanup] Failed to start scheduler:', e.message);
+    }
+
+    // Research job recovery scheduler:啟動時跑一次 + 每 5 分鐘掃一次 stale jobs
+    try {
+      const { recoverStaleJobs } = require('./services/researchService');
+      // 啟動時跑一次(撿起前次 server crash 留下的 running jobs)
+      recoverStaleJobs(db).catch((e) => console.warn('[Research] startup recovery:', e.message));
+      // 每 5 分鐘掃一次
+      setInterval(() => {
+        recoverStaleJobs(db).catch((e) => console.warn('[Research] recovery tick:', e.message));
+      }, 5 * 60 * 1000);
+    } catch (e) {
+      console.error('[Research] Failed to start recovery scheduler:', e.message);
     }
 
     // KB maintenance scheduler（orphan chunks cleanup, Phase 1 of kb-retrieval v2）

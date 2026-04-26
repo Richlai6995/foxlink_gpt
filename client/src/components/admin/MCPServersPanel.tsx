@@ -34,6 +34,10 @@ interface McpServer {
   created_at: string
   tags: string | null
   updated_at: string
+  // tool-artifact-passthrough
+  passthrough_enabled?: number
+  passthrough_max_bytes?: number
+  passthrough_mime_whitelist?: string | null
 }
 
 interface McpTool {
@@ -63,6 +67,11 @@ const emptyForm = {
   response_mode: 'inject' as 'inject' | 'answer',
   transport_type: 'http-post' as TransportType,
   command: '', args_json: '', env_json: '',
+  // tool-artifact-passthrough
+  passthrough_enabled: false,
+  passthrough_max_kb: 500,        // UI 用 KB,送 server 時 *1024
+  passthrough_md: true,
+  passthrough_html: true,
 }
 
 export default function MCPServersPanel() {
@@ -185,6 +194,7 @@ export default function MCPServersPanel() {
 
   const openEdit = (s: McpServer) => {
     setEditing(s)
+    const mimeList = (s.passthrough_mime_whitelist || 'text/html,text/markdown').split(',').map(m => m.trim().toLowerCase())
     setForm({
       name: s.name, url: s.url || '', api_key: s.api_key || '', description: s.description || '',
       is_active: !!s.is_active, is_public: !!s.is_public,
@@ -192,6 +202,10 @@ export default function MCPServersPanel() {
       response_mode: (s.response_mode as 'inject' | 'answer') || 'inject',
       transport_type: (s.transport_type as TransportType) || 'http-post',
       command: s.command || '', args_json: s.args_json || '', env_json: s.env_json || '',
+      passthrough_enabled: !!s.passthrough_enabled,
+      passthrough_max_kb: s.passthrough_max_bytes ? Math.max(1, Math.round(s.passthrough_max_bytes / 1024)) : 500,
+      passthrough_md: mimeList.includes('text/markdown'),
+      passthrough_html: mimeList.includes('text/html'),
     })
     setTrans({
       name_zh: (s as any).name_zh || null, name_en: (s as any).name_en || null, name_vi: (s as any).name_vi || null,
@@ -210,6 +224,10 @@ export default function MCPServersPanel() {
     setTranslating(true)
     setError('')
     try {
+      const mimeList = [
+        form.passthrough_md  ? 'text/markdown' : null,
+        form.passthrough_html ? 'text/html'    : null,
+      ].filter(Boolean).join(',') || 'text/html,text/markdown'
       const payload = {
         ...form,
         api_key: form.api_key || null,
@@ -219,6 +237,9 @@ export default function MCPServersPanel() {
         args_json: form.args_json || null,
         env_json: form.env_json || null,
         tags: tags,
+        passthrough_enabled: form.passthrough_enabled,
+        passthrough_max_bytes: Math.max(1024, Number(form.passthrough_max_kb) * 1024),
+        passthrough_mime_whitelist: mimeList,
         ...trans,
       }
       let res: any
@@ -654,6 +675,48 @@ export default function MCPServersPanel() {
                     ? t('mcp.form.modeAnswerDesc')
                     : t('mcp.form.modeInjectDesc')}
                 </p>
+              </div>
+              {/* ── tool-artifact-passthrough ─────────────────────────────── */}
+              <div className="border border-amber-100 bg-amber-50/40 rounded-lg px-3 py-3 space-y-2">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={form.passthrough_enabled}
+                    onChange={e => setForm(p => ({ ...p, passthrough_enabled: e.target.checked }))}
+                    className="rounded"
+                  />
+                  <span className="text-sm text-slate-800 font-medium">{t('chat.passthrough.enable')}</span>
+                </label>
+                <p className="text-xs text-slate-600">{t('chat.passthrough.desc')}</p>
+                {form.passthrough_enabled && (
+                  <div className="grid grid-cols-2 gap-3 pt-1">
+                    <div>
+                      <label className="block text-xs text-slate-600 mb-1">{t('chat.passthrough.maxBytes')}</label>
+                      <input
+                        type="number"
+                        min={1}
+                        max={10240}
+                        value={form.passthrough_max_kb}
+                        onChange={e => setForm(p => ({ ...p, passthrough_max_kb: Number(e.target.value) || 500 }))}
+                        className="w-full border border-slate-300 rounded px-2 py-1 text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-slate-600 mb-1">{t('chat.passthrough.allowedMime')}</label>
+                      <div className="flex gap-3 mt-1">
+                        <label className="flex items-center gap-1 text-xs">
+                          <input type="checkbox" checked={form.passthrough_md}   onChange={e => setForm(p => ({ ...p, passthrough_md:   e.target.checked }))} /> {t('chat.passthrough.mimeMd')}
+                        </label>
+                        <label className="flex items-center gap-1 text-xs">
+                          <input type="checkbox" checked={form.passthrough_html} onChange={e => setForm(p => ({ ...p, passthrough_html: e.target.checked }))} /> {t('chat.passthrough.mimeHtml')}
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {form.passthrough_enabled && (
+                  <p className="text-xs text-amber-700 pt-1">⚠️ {t('chat.passthrough.noAuditWarn')}</p>
+                )}
               </div>
               {/* ── 使用者身份認證（RS256 JWT X-User-Token） ─────────────────── */}
               <div className="border border-indigo-100 bg-indigo-50/50 rounded-lg px-3 py-3 space-y-2">

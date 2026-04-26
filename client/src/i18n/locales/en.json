@@ -172,6 +172,28 @@
     "impersonateExitFailed": "Failed to exit impersonation"
   },
   "chat": {
+    "artifact": {
+      "download": "Download",
+      "fullscreen": "Fullscreen",
+      "closeFullscreen": "Close fullscreen",
+      "copyMd": "Copy Markdown",
+      "copySuccess": "Markdown copied",
+      "copyFailed": "Copy failed — please select manually",
+      "size": "Size",
+      "source": "Source",
+      "analyzeHint": "Need AI to analyse this? Download then upload as an attachment in a new chat.",
+      "untitled": "Untitled artifact"
+    },
+    "passthrough": {
+      "enable": "Enable auto-passthrough",
+      "desc": "Render Markdown / HTML responses directly, bypassing LLM rewrite",
+      "maxBytes": "Max size (KB)",
+      "allowedMime": "Allowed types",
+      "mimeMd": "Markdown",
+      "mimeHtml": "HTML",
+      "noAuditWarn": "Passthrough content bypasses the LLM and the sensitive-keyword scan",
+      "skillNote": "A skill must return an artifact field from its handler for this to take effect"
+    },
     "startPrompt": "Start a new conversation",
     "suggestion1": "Write a work report for me",
     "suggestion2": "Analyze the uploaded Excel data",
@@ -2078,9 +2100,9 @@
     "depthLabel": "Research depth: ",
     "depthUnit": "sub-questions",
     "depthFast": "Fast (2)",
-    "depthNormal": "Normal (5)",
-    "depthDeep": "Deep (8)",
-    "depthFull": "Full (12)",
+    "depthNormal": "Normal (4)",
+    "depthDeep": "Deep (6)",
+    "depthFull": "Full (8)",
     "outputFormat": "Output Format",
     "taskSourceTitle": "Task-level Data Sources (optional)",
     "taskSourceHint": "All sub-topics will use these sources by default; each topic can override individually",

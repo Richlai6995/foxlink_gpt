@@ -172,6 +172,28 @@
     "impersonateExitFailed": "Thoát mô phỏng thất bại"
   },
   "chat": {
+    "artifact": {
+      "download": "Tải xuống",
+      "fullscreen": "Toàn màn hình",
+      "closeFullscreen": "Đóng toàn màn hình",
+      "copyMd": "Sao chép Markdown",
+      "copySuccess": "Đã sao chép Markdown",
+      "copyFailed": "Sao chép thất bại, vui lòng chọn thủ công",
+      "size": "Kích thước",
+      "source": "Nguồn",
+      "analyzeHint": "Cần AI phân tích nội dung này? Hãy tải xuống rồi đính kèm trong cuộc trò chuyện mới.",
+      "untitled": "Artifact không có tiêu đề"
+    },
+    "passthrough": {
+      "enable": "Bật Passthrough tự động",
+      "desc": "Hiển thị trực tiếp khi phát hiện phản hồi Markdown / HTML, bỏ qua LLM xử lý",
+      "maxBytes": "Kích thước tối đa (KB)",
+      "allowedMime": "Định dạng cho phép",
+      "mimeMd": "Markdown",
+      "mimeHtml": "HTML",
+      "noAuditWarn": "Nội dung Passthrough không qua LLM, đồng thời bỏ qua quét từ khóa nhạy cảm",
+      "skillNote": "Skill phải trả về trường artifact trong handler thì mới có hiệu lực"
+    },
     "startPrompt": "Bắt đầu một cuộc trò chuyện mới",
     "suggestion1": "Viết cho tôi một báo cáo công việc",
     "suggestion2": "Phân tích dữ liệu Excel đã tải lên",
@@ -2078,9 +2100,9 @@
     "depthLabel": "Độ sâu nghiên cứu: ",
     "depthUnit": "câu hỏi phụ",
     "depthFast": "Nhanh (2)",
-    "depthNormal": "Tiêu chuẩn (5)",
-    "depthDeep": "Sâu (8)",
-    "depthFull": "Toàn diện (12)",
+    "depthNormal": "Tiêu chuẩn (4)",
+    "depthDeep": "Sâu (6)",
+    "depthFull": "Toàn diện (8)",
     "outputFormat": "Định dạng đầu ra",
     "taskSourceTitle": "Nguồn dữ liệu toàn bộ tác vụ (tùy chọn)",
     "taskSourceHint": "Sau khi chỉ định, tất cả chủ đề con sẽ dùng nguồn này; từng chủ đề có thể ghi đè riêng",

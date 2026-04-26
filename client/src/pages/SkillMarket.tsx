@@ -103,6 +103,11 @@ const EMPTY_FORM = {
     prompt_variables: '[]',
     workflow_json: '',
     output_template_id: '' as string,
+    // tool-artifact-passthrough
+    passthrough_enabled: false,
+    passthrough_max_kb: 500,
+    passthrough_md: true,
+    passthrough_html: true,
 }
 
 export default function SkillMarket() {
@@ -224,6 +229,10 @@ export default function SkillMarket() {
             prompt_variables: typeof sk.prompt_variables === 'object' ? JSON.stringify(sk.prompt_variables, null, 2) : (sk.prompt_variables || '[]'),
             workflow_json: typeof sk.workflow_json === 'object' ? JSON.stringify(sk.workflow_json, null, 2) : (sk.workflow_json || ''),
             output_template_id: sk.output_template_id || '',
+            passthrough_enabled: !!(sk as any).passthrough_enabled,
+            passthrough_max_kb: (sk as any).passthrough_max_bytes ? Math.max(1, Math.round((sk as any).passthrough_max_bytes / 1024)) : 500,
+            passthrough_md:   ((sk as any).passthrough_mime_whitelist || 'text/html,text/markdown').toLowerCase().includes('text/markdown'),
+            passthrough_html: ((sk as any).passthrough_mime_whitelist || 'text/html,text/markdown').toLowerCase().includes('text/html'),
         })
         // Load output template info if set
         if (sk.output_template_id) {
@@ -263,6 +272,13 @@ export default function SkillMarket() {
             prompt_variables: form.prompt_variables || '[]',
             workflow_json: form.workflow_json || null,
             output_template_id: form.output_template_id || null,
+            // tool-artifact-passthrough
+            passthrough_enabled: form.passthrough_enabled,
+            passthrough_max_bytes: Math.max(1024, Number(form.passthrough_max_kb) * 1024),
+            passthrough_mime_whitelist: [
+                form.passthrough_md   ? 'text/markdown' : null,
+                form.passthrough_html ? 'text/html'    : null,
+            ].filter(Boolean).join(',') || 'text/html,text/markdown',
         }
         setTranslating(true)
         try {
@@ -794,6 +810,50 @@ export default function SkillMarket() {
                                                 </select>
                                             </div>
                                         )}
+
+                                        {/* tool-artifact-passthrough */}
+                                        <div className="border border-amber-100 bg-amber-50/40 rounded-lg px-3 py-3 space-y-2">
+                                            <label className="flex items-center gap-2 cursor-pointer">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={form.passthrough_enabled}
+                                                    onChange={e => setField('passthrough_enabled', e.target.checked)}
+                                                    className="rounded"
+                                                />
+                                                <span className="text-sm text-slate-800 font-medium">{t('chat.passthrough.enable')}</span>
+                                            </label>
+                                            <p className="text-xs text-slate-600">{t('chat.passthrough.desc')}</p>
+                                            <p className="text-xs text-slate-500">{t('chat.passthrough.skillNote')}</p>
+                                            {form.passthrough_enabled && (
+                                                <div className="grid grid-cols-2 gap-3 pt-1">
+                                                    <div>
+                                                        <label className="block text-xs text-slate-600 mb-1">{t('chat.passthrough.maxBytes')}</label>
+                                                        <input
+                                                            type="number"
+                                                            min={1}
+                                                            max={10240}
+                                                            value={form.passthrough_max_kb}
+                                                            onChange={e => setField('passthrough_max_kb', Number(e.target.value) || 500)}
+                                                            className="w-full border border-slate-300 rounded px-2 py-1 text-sm"
+                                                        />
+                                                    </div>
+                                                    <div>
+                                                        <label className="block text-xs text-slate-600 mb-1">{t('chat.passthrough.allowedMime')}</label>
+                                                        <div className="flex gap-3 mt-1">
+                                                            <label className="flex items-center gap-1 text-xs">
+                                                                <input type="checkbox" checked={form.passthrough_md}   onChange={e => setField('passthrough_md',   e.target.checked)} /> {t('chat.passthrough.mimeMd')}
+                                                            </label>
+                                                            <label className="flex items-center gap-1 text-xs">
+                                                                <input type="checkbox" checked={form.passthrough_html} onChange={e => setField('passthrough_html', e.target.checked)} /> {t('chat.passthrough.mimeHtml')}
+                                                            </label>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            )}
+                                            {form.passthrough_enabled && (
+                                                <p className="text-xs text-amber-700 pt-1">⚠️ {t('chat.passthrough.noAuditWarn')}</p>
+                                            )}
+                                        </div>
 
                                         {/* Rate Limiting */}
                                         <div className="grid grid-cols-3 gap-3">

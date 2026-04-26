@@ -11,6 +11,7 @@ const { v4: uuid } = require('uuid');
 const { verifyToken } = require('./auth');
 const { runResearchJob, rerunSections, generatePlan, searchUserKbs, suggestKbs } = require('../services/researchService');
 const { upsertTokenUsage } = require('../services/tokenService');
+const { previewResearchCost } = require('../services/researchTokenEstimator');
 const { budgetGuard } = require('../middleware/budgetGuard');
 const { UPLOAD_DIR } = require('../config/paths');
 const MODEL_FLASH = process.env.GEMINI_MODEL_FLASH || 'gemini-2.0-flash';
@@ -98,9 +99,34 @@ router.post('/plan', budgetGuard, async (req, res) => {
     const today = new Date().toISOString().split('T')[0];
     upsertTokenUsage(db, req.user.id, today, MODEL_FLASH, inputTokens, outputTokens).catch(() => {});
 
-    res.json({ plan, has_kb: hasKb });
+    // 計算預估成本 + 額度狀態(用 plan 實際的 sub-question 數)
+    const realDepth = plan?.sub_questions?.length || depth;
+    let costEstimate = null;
+    try {
+      costEstimate = await previewResearchCost(db, req.user.id, realDepth);
+    } catch (e) {
+      console.warn('[Research] previewResearchCost error:', e.message);
+    }
+
+    res.json({ plan, has_kb: hasKb, cost_estimate: costEstimate });
   } catch (e) {
     console.error('[Research] /plan error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── POST /api/research/preview-cost  (re-estimate when depth/options change) ──
+router.post('/preview-cost', async (req, res) => {
+  const db = getDb();
+  try {
+    const { depth = 5, sub_sub_per_sq, react_turns } = req.body;
+    const result = await previewResearchCost(db, req.user.id, depth, {
+      subSubPerSq: sub_sub_per_sq,
+      reactTurns:  react_turns,
+    });
+    res.json(result);
+  } catch (e) {
+    console.error('[Research] /preview-cost error:', e.message);
     res.status(500).json({ error: e.message });
   }
 });
@@ -140,13 +166,30 @@ router.post('/jobs', budgetGuard, async (req, res) => {
 
     if (!plan?.sub_questions?.length) return res.status(400).json({ error: '研究計畫格式錯誤' });
 
+    // 提交前再次預估 + 額度檢查(防使用者從前端跳過 /plan 步驟直接 POST /jobs)
+    let estimatedUsd = null;
+    try {
+      const est = await previewResearchCost(db, req.user.id, plan.sub_questions.length);
+      estimatedUsd = est.estimated_usd;
+      if (est.blocked) {
+        const exceedKeys = Object.entries(est.budget.would_exceed)
+          .filter(([_, v]) => v).map(([k]) => k).join('/');
+        return res.status(402).json({
+          error: `預估成本 $${est.estimated_usd.toFixed(2)} 將超過您的 ${exceedKeys} 額度限制。建議降低研究深度至 ${est.suggested_max_depth || '無法執行'}。`,
+          cost_estimate: est,
+        });
+      }
+    } catch (e) {
+      console.warn('[Research] 提交前預估失敗,放行:', e.message);
+    }
+
     const jobId = uuid();
 
     await db.prepare(`
       INSERT INTO research_jobs
         (id, user_id, session_id, title, question, plan_json, status, use_web_search, output_formats,
-         kb_config_json, global_files_json, ref_job_ids_json, model_key)
-      VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?)
+         kb_config_json, global_files_json, ref_job_ids_json, model_key, estimated_usd)
+      VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?)
     `).run(
       jobId,
       req.user.id,
@@ -160,6 +203,7 @@ router.post('/jobs', budgetGuard, async (req, res) => {
       global_files.length ? JSON.stringify(global_files) : null,
       ref_job_ids.length  ? JSON.stringify(ref_job_ids)  : null,
       resolvedModelKey,
+      estimatedUsd,
     );
 
     if (session_id) {
@@ -422,7 +466,8 @@ router.get('/jobs/:id', async (req, res) => {
              progress_step, progress_total, progress_label,
              use_web_search, output_formats,
              result_summary, result_files_json, error_msg, is_notified,
-             sections_json,
+             sections_json, agent_state_json, citations_json,
+             estimated_usd, actual_usd, recovery_count, tokens_by_model_json,
              TO_CHAR(created_at,'YYYY-MM-DD HH24:MI:SS') AS created_at,
              TO_CHAR(completed_at,'YYYY-MM-DD HH24:MI:SS') AS completed_at
       FROM research_jobs WHERE id=? AND user_id=?

@@ -539,12 +539,14 @@ async function listTools(db, server) {
  * @param {object|null} userCtx { id, email, name, employee_id, dept_code }
  *   Required when server.send_user_token=1. Pass null only for service-level calls.
  */
-async function callTool(db, server, sessionId, userId, toolName, args, userCtx = null) {
+async function callTool(db, server, sessionId, userId, toolName, args, userCtx = null, opts = {}) {
   const startMs = Date.now();
   let status = 'ok';
   let errorMsg = null;
   let responsePreview = null;
   let resultContent = null;
+  let rawParts = null;
+  let isError = false;
   let authCtx = null;
 
   try {
@@ -556,14 +558,16 @@ async function callTool(db, server, sessionId, userId, toolName, args, userCtx =
     , authCtx);
 
     const content = result.content || [];
+    rawParts = content;
     const textParts = content.filter(c => c.type === 'text').map(c => c.text).join('\n');
     resultContent = textParts || JSON.stringify(result);
     responsePreview = resultContent.slice(0, 500);
-    if (result.isError) { status = 'error'; errorMsg = responsePreview; }
+    if (result.isError) { status = 'error'; errorMsg = responsePreview; isError = true; }
   } catch (e) {
     status = 'error';
     errorMsg = e.message;
     resultContent = `[MCP tool error: ${e.message}]`;
+    isError = true;
   }
 
   const durationMs = Date.now() - startMs;
@@ -583,6 +587,10 @@ async function callTool(db, server, sessionId, userId, toolName, args, userCtx =
     console.error('[MCP] callTool log error:', logErr.message);
   }
 
+  // returnRaw=true → 給 passthrough detector 用,保留 parts + mimeType
+  if (opts.returnRaw) {
+    return { text: resultContent, parts: rawParts || [], isError };
+  }
   return resultContent;
 }
 

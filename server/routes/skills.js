@@ -545,6 +545,18 @@ router.post('/', async (req, res) => {
             workflow_json ? JSON.stringify(workflow_json) : null
         );
         const newId = result.lastInsertRowid;
+        // ── tool-artifact-passthrough 欄位(獨立 UPDATE 避免動主 INSERT)──
+        if (newId) {
+          const { passthrough_enabled, passthrough_max_bytes, passthrough_mime_whitelist } = req.body;
+          if (passthrough_enabled !== undefined || passthrough_max_bytes !== undefined || passthrough_mime_whitelist !== undefined) {
+            const ptEnabled  = passthrough_enabled ? 1 : 0;
+            const ptMaxBytes = Number(passthrough_max_bytes) > 0 ? Number(passthrough_max_bytes) : 512000;
+            const ptMime     = (passthrough_mime_whitelist || 'text/html,text/markdown').toString().slice(0, 200);
+            await db.prepare(
+              `UPDATE skills SET passthrough_enabled=?, passthrough_max_bytes=?, passthrough_mime_whitelist=? WHERE id=?`
+            ).run(ptEnabled, ptMaxBytes, ptMime, newId);
+          }
+        }
         // Auto-translate (or use manually provided translations)
         const trans = (name_zh !== undefined)
           ? { name_zh: name_zh || null, name_en: name_en || null, name_vi: name_vi || null, desc_zh: desc_zh || null, desc_en: desc_en || null, desc_vi: desc_vi || null }
@@ -657,6 +669,22 @@ router.put('/:id', async (req, res) => {
             req.params.id
         );
         console.log(`[Skill PUT] UPDATE rowsAffected=${updateResult?.changes}`);
+        // ── tool-artifact-passthrough 欄位 ──
+        {
+          const { passthrough_enabled, passthrough_max_bytes, passthrough_mime_whitelist } = req.body;
+          if (passthrough_enabled !== undefined || passthrough_max_bytes !== undefined || passthrough_mime_whitelist !== undefined) {
+            const ptEnabled = passthrough_enabled !== undefined ? (passthrough_enabled ? 1 : 0) : (s.passthrough_enabled || 0);
+            const ptMaxBytes = passthrough_max_bytes !== undefined
+              ? (Number(passthrough_max_bytes) > 0 ? Number(passthrough_max_bytes) : 512000)
+              : (s.passthrough_max_bytes || 512000);
+            const ptMime = passthrough_mime_whitelist !== undefined
+              ? (passthrough_mime_whitelist || 'text/html,text/markdown').toString().slice(0, 200)
+              : (s.passthrough_mime_whitelist || 'text/html,text/markdown');
+            await db.prepare(
+              `UPDATE skills SET passthrough_enabled=?, passthrough_max_bytes=?, passthrough_mime_whitelist=? WHERE id=?`
+            ).run(ptEnabled, ptMaxBytes, ptMime, req.params.id);
+          }
+        }
         // Update translations (use provided values or auto-translate if name/desc changed)
         const nameChanged = name !== undefined && name !== s.name;
         const descChanged = description !== undefined && description !== s.description;

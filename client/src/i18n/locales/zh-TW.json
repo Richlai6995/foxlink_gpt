@@ -172,6 +172,28 @@
     "impersonateExitFailed": "退出模擬失敗"
   },
   "chat": {
+    "artifact": {
+      "download": "下載",
+      "fullscreen": "全螢幕",
+      "closeFullscreen": "關閉全螢幕",
+      "copyMd": "複製 Markdown",
+      "copySuccess": "已複製 Markdown",
+      "copyFailed": "複製失敗，請手動選取",
+      "size": "大小",
+      "source": "來源",
+      "analyzeHint": "要讓 AI 分析此內容？請下載後在新對話以附件上傳",
+      "untitled": "未命名 artifact"
+    },
+    "passthrough": {
+      "enable": "啟用自動 Passthrough",
+      "desc": "偵測到 Markdown / HTML 回應時直接呈現，跳過 LLM 整理",
+      "maxBytes": "最大內容（KB）",
+      "allowedMime": "允許格式",
+      "mimeMd": "Markdown",
+      "mimeHtml": "HTML",
+      "noAuditWarn": "Passthrough 內容不經 LLM，敏感詞掃描也會跳過",
+      "skillNote": "Skill 必須在 handler 回傳 artifact 欄位才會生效"
+    },
     "startPrompt": "開始一個新的對話吧",
     "suggestion1": "幫我撰寫一份工作報告",
     "suggestion2": "分析上傳的 Excel 數據",
@@ -2078,9 +2100,9 @@
     "depthLabel": "研究深度：",
     "depthUnit": "個子問題",
     "depthFast": "快速（2）",
-    "depthNormal": "標準（5）",
-    "depthDeep": "深入（8）",
-    "depthFull": "全面（12）",
+    "depthNormal": "標準（4）",
+    "depthDeep": "深入（6）",
+    "depthFull": "全面（8）",
     "outputFormat": "輸出格式",
     "taskSourceTitle": "整體任務資料來源（選填）",
     "taskSourceHint": "指定後，所有子議題預設使用這些來源；子議題可個別覆蓋",

@@ -365,7 +365,25 @@ export default function ChatPage() {
     try {
       const res = await api.get(`/chat/sessions/${id}`)
       setCurrentSessionId(id)
-      setMessages(res.data.messages || [])
+      const baseMessages = res.data.messages || []
+      // 復載 tool-artifact-passthrough 的 artifacts:依 message_id 分組塞回
+      try {
+        const ar = await api.get(`/chat/sessions/${id}/artifacts`)
+        const arts: import('../types').ChatArtifact[] = ar.data?.artifacts || []
+        if (arts.length) {
+          const byMsg = new Map<number, import('../types').ChatArtifact[]>()
+          for (const a of arts) {
+            const arr = byMsg.get(a.message_id!) ?? []
+            arr.push(a)
+            byMsg.set(a.message_id!, arr)
+          }
+          for (const m of baseMessages) {
+            const list = byMsg.get(m.id)
+            if (list?.length) (m as any).artifacts = list
+          }
+        }
+      } catch (e) { console.warn('[Artifact] session reload failed:', e) }
+      setMessages(baseMessages)
       const attached: Skill[] = res.data.skills || []
       setSessionSkills(attached)
       setPickedIds(new Set(attached.map((s: Skill) => s.id)))
@@ -697,6 +715,7 @@ export default function ChatPage() {
       let accText = ''
       const generatedFiles: GeneratedFile[] = []
       let charts: import('../types').InlineChartSpec[] = []
+      const artifacts: import('../types').ChatArtifact[] = []  // tool-artifact-passthrough
       const stripGenerateBlocks = (t: string) =>
         t.replace(/```generate_[a-z]+:[^\n]+\n[\s\S]*?```/g, '').replace(/\n{3,}/g, '\n\n').trim()
 
@@ -774,6 +793,23 @@ export default function ChatPage() {
                     charts = event.charts
                     console.log('[SSE-DEBUG] charts:', event.charts.length, 'inline chart(s)')
                   }
+                } else if (event.type === 'artifact') {
+                  // tool-artifact-passthrough:MCP / Skill 直出 MD/HTML
+                  artifacts.push({
+                    client_id: event.client_id,
+                    mime_type: event.mime_type,
+                    title: event.title,
+                    content: event.content,
+                    size: event.size,
+                    tool_name: event.tool_name,
+                    source_type: event.source_type,
+                  })
+                } else if (event.type === 'artifact_persisted') {
+                  // server INSERT chat_artifacts 完拿 DB id 後 reconcile
+                  const idx = artifacts.findIndex(a => a.client_id === event.client_id)
+                  if (idx >= 0) {
+                    artifacts[idx] = { ...artifacts[idx], id: event.id, message_id: event.message_id }
+                  }
                 } else if (event.type === 'audio') {
                   generatedFiles.push({
                     type: 'audio',
@@ -835,6 +871,7 @@ export default function ChatPage() {
               : stripGenerateBlocks(accText),
           generated_files: generatedFiles.length > 0 ? generatedFiles : undefined,
           charts: charts.length > 0 ? charts : undefined,
+          artifacts: artifacts.length > 0 ? artifacts : undefined,
           created_at: new Date().toISOString(),
         }
         setMessages((prev) => [...prev, aiMsg])

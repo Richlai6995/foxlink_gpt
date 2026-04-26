@@ -195,9 +195,24 @@ export interface ChatMessage {
   files?: FileMeta[]
   generated_files?: GeneratedFile[]
   charts?: InlineChartSpec[]
+  artifacts?: ChatArtifact[]
   input_tokens?: number
   output_tokens?: number
   created_at: string
+}
+
+// Tool artifact passthrough(docs/tool-artifact-passthrough.md):MCP/Skill 回傳的 MD/HTML 直出
+export interface ChatArtifact {
+  id?: number          // DB id;SSE 暫存階段先用 client_id,artifact_persisted 後 reconcile
+  client_id?: string   // streaming 中由 server 給的暫時 id
+  message_id?: number
+  mime_type: 'text/html' | 'text/markdown'
+  title: string
+  content: string
+  size: number
+  tool_name?: string
+  source_type: 'mcp' | 'skill' | 'dify'
+  created_at?: string
 }
 
 export interface TokenUsage {
@@ -344,6 +359,13 @@ export interface ResearchJob {
   is_notified: number
   created_at: string
   completed_at: string | null
+  estimated_usd?: number
+  actual_usd?: number
+  tokens_by_model_json?: string
+  recovery_count?: number
+  sections_json?: string
+  agent_state_json?: string
+  citations_json?: string
 }
 
 // ── AI 戰情 ──────────────────────────────────────────────────────────────────

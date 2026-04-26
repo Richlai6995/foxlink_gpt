@@ -46,6 +46,7 @@ router.post('/', async (req, res) => {
   try {
     const { name, url, api_key, description, is_active, response_mode,
             transport_type, command, args_json, env_json, tags, send_user_token,
+            passthrough_enabled, passthrough_max_bytes, passthrough_mime_whitelist,
             name_zh, name_en, name_vi, desc_zh, desc_en, desc_vi } = req.body;
     const tt = transport_type || 'http-post';
     if (!name) return res.status(400).json({ error: '名稱為必填' });
@@ -54,11 +55,17 @@ router.post('/', async (req, res) => {
     if (tags !== undefined && !Array.isArray(tags)) return res.status(400).json({ error: 'tags 必須為陣列' });
     const tagsStr = JSON.stringify(tags || []);
     const sendUserToken = send_user_token ? 1 : 0;
+    const ptEnabled  = passthrough_enabled ? 1 : 0;
+    const ptMaxBytes = Number(passthrough_max_bytes) > 0 ? Number(passthrough_max_bytes) : 512000;
+    const ptMime     = (passthrough_mime_whitelist || 'text/html,text/markdown').toString().slice(0, 200);
 
     const result = await db.prepare(
-      `INSERT INTO mcp_servers (name, url, api_key, description, is_active, response_mode, transport_type, command, args_json, env_json, tags, send_user_token) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO mcp_servers (name, url, api_key, description, is_active, response_mode, transport_type, command, args_json, env_json, tags, send_user_token,
+                                passthrough_enabled, passthrough_max_bytes, passthrough_mime_whitelist)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(name, url || null, api_key || null, description || null, is_active !== false ? 1 : 0, response_mode || 'inject',
-          tt, command || null, args_json || null, env_json || null, tagsStr, sendUserToken);
+          tt, command || null, args_json || null, env_json || null, tagsStr, sendUserToken,
+          ptEnabled, ptMaxBytes, ptMime);
 
     const newId = result.lastInsertRowid;
     const trans = (name_zh !== undefined)
@@ -85,6 +92,7 @@ router.put('/:id', async (req, res) => {
 
     const { name, url, api_key, description, is_active, response_mode,
             transport_type, command, args_json, env_json, tags, send_user_token,
+            passthrough_enabled, passthrough_max_bytes, passthrough_mime_whitelist,
             name_zh, name_en, name_vi, desc_zh, desc_en, desc_vi, is_public } = req.body;
     if (tags !== undefined && !Array.isArray(tags)) return res.status(400).json({ error: 'tags 必須為陣列' });
     const finalName = name ?? server.name;
@@ -95,8 +103,16 @@ router.put('/:id', async (req, res) => {
     // 若取消公開則同步重置核准狀態
     const newPublicApproved = newIsPublic ? (server.public_approved || 0) : 0;
     const finalSendUserToken = send_user_token !== undefined ? (send_user_token ? 1 : 0) : (server.send_user_token || 0);
+    const finalPtEnabled = passthrough_enabled !== undefined ? (passthrough_enabled ? 1 : 0) : (server.passthrough_enabled || 0);
+    const finalPtMaxBytes = passthrough_max_bytes !== undefined
+      ? (Number(passthrough_max_bytes) > 0 ? Number(passthrough_max_bytes) : 512000)
+      : (server.passthrough_max_bytes || 512000);
+    const finalPtMime = passthrough_mime_whitelist !== undefined
+      ? (passthrough_mime_whitelist || 'text/html,text/markdown').toString().slice(0, 200)
+      : (server.passthrough_mime_whitelist || 'text/html,text/markdown');
     await db.prepare(
-      `UPDATE mcp_servers SET name=?, url=?, api_key=?, description=?, is_active=?, response_mode=?, transport_type=?, command=?, args_json=?, env_json=?, tags=?, is_public=?, public_approved=?, send_user_token=?, updated_at=SYSTIMESTAMP WHERE id=?`
+      `UPDATE mcp_servers SET name=?, url=?, api_key=?, description=?, is_active=?, response_mode=?, transport_type=?, command=?, args_json=?, env_json=?, tags=?, is_public=?, public_approved=?, send_user_token=?,
+                              passthrough_enabled=?, passthrough_max_bytes=?, passthrough_mime_whitelist=?, updated_at=SYSTIMESTAMP WHERE id=?`
     ).run(
       finalName,
       url !== undefined ? (url || null) : server.url,
@@ -111,6 +127,7 @@ router.put('/:id', async (req, res) => {
       finalTags,
       newIsPublic, newPublicApproved,
       finalSendUserToken,
+      finalPtEnabled, finalPtMaxBytes, finalPtMime,
       req.params.id,
     );
 

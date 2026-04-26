@@ -3,5 +3,10 @@
     "file": "tts.js",
     "match_name": "轉聲音|語音合成|TTS",
     "description": "文字轉語音 (Google Cloud TTS)"
+  },
+  {
+    "file": "metal_prices.js",
+    "match_name": "金屬報價|metal.?price|貴金屬",
+    "description": "金屬報價 — passthrough artifact 範例 (docs/tool-artifact-passthrough.md §5.4)"
   }
 ]
