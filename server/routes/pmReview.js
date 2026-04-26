@@ -401,6 +401,175 @@ router.delete('/subscriptions/:id', verifyToken, verifyPmUser, async (req, res) 
   }
 });
 
+// ────────────────────────────────────────────────────────────────────────────
+// Phase 5 Track F: 健康儀表板 / Source / Token / KB 維護(admin only)
+// ────────────────────────────────────────────────────────────────────────────
+
+// GET /api/pm/admin/health/tasks?days=7 — F1 健康儀表板:每個 [PM] task 統計
+router.get('/admin/health/tasks', verifyToken, verifyAdmin, async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const days = Math.min(Math.max(Number(req.query.days || 7), 1), 90);
+    const rows = await db.prepare(`
+      SELECT t.id, t.name, t.status, t.daily_token_budget, t.token_budget_paused_at,
+             COUNT(r.id)                                                AS run_count,
+             SUM(CASE WHEN r.status='success' THEN 1 ELSE 0 END)        AS success_count,
+             SUM(CASE WHEN r.status<>'success' THEN 1 ELSE 0 END)       AS fail_count,
+             AVG(r.duration_ms)                                          AS avg_duration_ms,
+             MAX(r.run_at)                                               AS last_run_at,
+             MAX(r.status) KEEP (DENSE_RANK LAST ORDER BY r.run_at)      AS last_status,
+             (SELECT SUM(input_tokens + output_tokens)
+                FROM pm_task_token_usage u
+                WHERE u.task_id = t.id AND u.usage_date >= TO_CHAR(SYSDATE - ?, 'YYYY-MM-DD')) AS total_tokens,
+             (SELECT SUM(cost)
+                FROM pm_task_token_usage u
+                WHERE u.task_id = t.id AND u.usage_date >= TO_CHAR(SYSDATE - ?, 'YYYY-MM-DD')) AS total_cost
+      FROM scheduled_tasks t
+      LEFT JOIN scheduled_task_runs r ON r.task_id = t.id AND r.run_at >= SYSDATE - ?
+      WHERE t.name LIKE '[PM]%'
+      GROUP BY t.id, t.name, t.status, t.daily_token_budget, t.token_budget_paused_at
+      ORDER BY t.name
+    `).all(days, days, days);
+    res.json(rows);
+  } catch (err) {
+    console.error('[PmReview] /admin/health/tasks error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/pm/admin/health/run-errors?task_id=&limit=20 — 看最近 N 次 fail 詳情
+router.get('/admin/health/run-errors', verifyToken, verifyAdmin, async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const taskId = Number(req.query.task_id);
+    const limit = Math.min(Math.max(Number(req.query.limit || 20), 1), 100);
+    if (!taskId) return res.status(400).json({ error: 'task_id required' });
+    const rows = await db.prepare(`
+      SELECT id, run_at, status, duration_ms, error_msg, response_preview
+      FROM scheduled_task_runs
+      WHERE task_id = ? AND status <> 'success'
+      ORDER BY run_at DESC
+      FETCH FIRST ? ROWS ONLY
+    `).all(taskId, limit);
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PATCH /api/pm/admin/tasks/:id/budget body: { daily_token_budget }
+router.patch('/admin/tasks/:id/budget', verifyToken, verifyAdmin, async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const { daily_token_budget } = req.body || {};
+    const v = daily_token_budget == null ? null : Math.max(0, Number(daily_token_budget));
+    await db.prepare(`UPDATE scheduled_tasks SET daily_token_budget=? WHERE id=?`).run(v, req.params.id);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/pm/admin/tasks/:id/clear-budget-pause
+router.post('/admin/tasks/:id/clear-budget-pause', verifyToken, verifyAdmin, async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    await db.prepare(`UPDATE scheduled_tasks SET token_budget_paused_at=NULL WHERE id=?`).run(req.params.id);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/pm/admin/sources — F3 source 健康列表
+router.get('/admin/sources', verifyToken, verifyAdmin, async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const rows = await db.prepare(`
+      SELECT id, source_url, source_label,
+             TO_CHAR(last_check_at, 'YYYY-MM-DD HH24:MI') AS last_check_at,
+             last_status, last_http_status, last_error, last_response_ms,
+             consecutive_failures, is_disabled,
+             TO_CHAR(last_alerted_at, 'YYYY-MM-DD HH24:MI') AS last_alerted_at
+      FROM pm_source_health
+      ORDER BY is_disabled DESC, consecutive_failures DESC, source_label
+    `).all();
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/pm/admin/sources/check-now — F3 手動觸發
+router.post('/admin/sources/check-now', verifyToken, verifyAdmin, async (req, res) => {
+  try {
+    const { runOnce } = require('../services/pmSourceHealthService');
+    const r = await runOnce();
+    res.json(r);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/pm/admin/cost?days=30 — F5 cost dashboard:per-task 月度成本
+router.get('/admin/cost', verifyToken, verifyAdmin, async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const days = Math.min(Math.max(Number(req.query.days || 30), 1), 365);
+    const rows = await db.prepare(`
+      SELECT u.task_id, t.name AS task_name, u.usage_date, u.model,
+             SUM(u.input_tokens) AS input_tokens,
+             SUM(u.output_tokens) AS output_tokens,
+             SUM(u.cost) AS cost,
+             SUM(u.run_count) AS run_count
+      FROM pm_task_token_usage u
+      JOIN scheduled_tasks t ON t.id = u.task_id
+      WHERE u.usage_date >= TO_CHAR(SYSDATE - ?, 'YYYY-MM-DD')
+      GROUP BY u.task_id, t.name, u.usage_date, u.model
+      ORDER BY u.usage_date DESC, t.name
+    `).all(days);
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/pm/admin/token/aggregate-now — F5 手動觸發 aggregator
+router.post('/admin/token/aggregate-now', verifyToken, verifyAdmin, async (req, res) => {
+  try {
+    const { tick } = require('../services/pmTokenBudgetService');
+    await tick();
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/pm/admin/kb-maintenance/run-now body: { dry_run? } — F4 手動 / kb maintenance
+router.post('/admin/kb-maintenance/run-now', verifyToken, verifyAdmin, async (req, res) => {
+  try {
+    const { runOnce } = require('../services/pmKbMaintenanceService');
+    const dryRun = req.body?.dry_run !== false;  // 預設 dry_run
+    const r = await runOnce({ dryRun });
+    res.json(r);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/pm/admin/kb-maintenance/restore body: { kb_id }
+router.post('/admin/kb-maintenance/restore', verifyToken, verifyAdmin, async (req, res) => {
+  try {
+    const { restoreArchived } = require('../services/pmKbMaintenanceService');
+    const kbId = Number(req.body?.kb_id);
+    if (!kbId) return res.status(400).json({ error: 'kb_id required' });
+    const r = await restoreArchived({ kbId });
+    res.json(r);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // POST /api/pm/review/run-self-improve — admin 手動觸發 meta-job
 router.post('/review/run-self-improve', verifyToken, verifyAdmin, async (req, res) => {
   try {

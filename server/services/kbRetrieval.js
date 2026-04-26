@@ -165,7 +165,7 @@ async function _vectorSearch(db, kb, query, fetchK, cfg) {
                   + ? * VECTOR_DISTANCE(c.embedding,       TO_VECTOR(?), COSINE)
              END) AS vector_score
       FROM kb_chunks c JOIN kb_documents d ON d.id = c.doc_id
-      WHERE c.kb_id=? AND c.chunk_type != 'parent'
+      WHERE c.kb_id=? AND c.chunk_type != 'parent' AND c.archived_at IS NULL
       ORDER BY vector_score ASC
       FETCH FIRST ? ROWS ONLY
     `).all(qVecStr, tW, qVecStr, bW, qVecStr, kb.id, fetchK);
@@ -181,7 +181,7 @@ async function _vectorSearch(db, kb, query, fetchK, cfg) {
            d.filename,
            VECTOR_DISTANCE(c.embedding, TO_VECTOR(?), COSINE) AS vector_score
     FROM kb_chunks c JOIN kb_documents d ON d.id = c.doc_id
-    WHERE c.kb_id=? AND c.chunk_type != 'parent'
+    WHERE c.kb_id=? AND c.chunk_type != 'parent' AND c.archived_at IS NULL
     ORDER BY vector_score ASC
     FETCH FIRST ? ROWS ONLY
   `).all(qVecStr, kb.id, fetchK);
@@ -241,7 +241,7 @@ async function _fulltextSearchOracleText(db, kb, query, topK, cfg) {
              d.filename,
              SCORE(1) AS ft_raw_score
       FROM kb_chunks c JOIN kb_documents d ON d.id = c.doc_id
-      WHERE c.kb_id=? AND c.chunk_type != 'parent'
+      WHERE c.kb_id=? AND c.chunk_type != 'parent' AND c.archived_at IS NULL
         AND CONTAINS(c.content, ?, 1) > 0
       ORDER BY SCORE(1) DESC
       FETCH FIRST ? ROWS ONLY
@@ -282,7 +282,7 @@ async function _fulltextSearchLike(db, kb, query, topK, cfg) {
            d.filename,
            ${hitScoreExpr} AS hit_score
     FROM kb_chunks c JOIN kb_documents d ON d.id = c.doc_id
-    WHERE c.kb_id=? AND c.chunk_type != 'parent' AND (${likeClauses})
+    WHERE c.kb_id=? AND c.chunk_type != 'parent' AND c.archived_at IS NULL AND (${likeClauses})
     ORDER BY hit_score DESC
     FETCH FIRST ? ROWS ONLY
   `).all(...likeParams, kb.id, ...likeParams, topK * 2);

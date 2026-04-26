@@ -218,6 +218,24 @@ app.get('/api/health', (req, res) => res.json({ status: 'ok', timestamp: new Dat
       console.error('[PmWebexPush] Failed to start:', e.message);
     }
 
+    // Phase 5 Track F-3: PM Source 健康監控(每 6h 驗 18 sources)
+    try {
+      const { startSourceHealthCron } = require('./services/pmSourceHealthService');
+      startSourceHealthCron();
+    } catch (e) { console.error('[PmSourceHealth] Failed to start:', e.message); }
+
+    // Phase 5 Track F-2 + F-5: PM Token 預算 + cost aggregator(每 1h)
+    try {
+      const { startTokenBudgetCron } = require('./services/pmTokenBudgetService');
+      startTokenBudgetCron();
+    } catch (e) { console.error('[PmTokenBudget] Failed to start:', e.message); }
+
+    // Phase 5 Track F-4: PM KB 維護(每 7d archive 90 天前 PM-新聞庫 chunks,預設 dry_run)
+    try {
+      const { startKbMaintenanceCron } = require('./services/pmKbMaintenanceService');
+      startKbMaintenanceCron();
+    } catch (e) { console.error('[PmKbMaint] Failed to start:', e.message); }
+
     let _portRetried = false;
     server.on('error', (err) => {
       if (err.code === 'EADDRINUSE') {

@@ -258,6 +258,15 @@ async function runTask(db, taskId) {
     await db.prepare(`UPDATE scheduled_tasks SET status='paused' WHERE id=?`).run(task.id);
     return;
   }
+  // Phase 5 Track F-2: Token budget paused?(per-day,隔日 00:00 由 pmTokenBudgetService 解除)
+  if (task.token_budget_paused_at || task.TOKEN_BUDGET_PAUSED_AT) {
+    const pausedDate = new Date(task.token_budget_paused_at || task.TOKEN_BUDGET_PAUSED_AT).toISOString().slice(0, 10);
+    const today = new Date().toISOString().slice(0, 10);
+    if (pausedDate === today) {
+      console.log(`[Scheduled] Task ${task.id} "${task.name}" paused by token budget, skip until 00:00`);
+      return;
+    }
+  }
 
   const user = await db.prepare('SELECT * FROM users WHERE id = ?').get(task.user_id);
   if (!user) { console.error(`[Scheduled] User ${task.user_id} not found`); return; }

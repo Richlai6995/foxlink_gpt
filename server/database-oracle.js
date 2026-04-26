@@ -3633,6 +3633,48 @@ async function runMigrations(db) {
   )`);
   try { await db.prepare(`CREATE INDEX idx_pmfb_target ON pm_feedback_signal(target_type, target_ref)`).run(); } catch (_) {}
 
+  // ── Phase 5 Track F-3: PM Source 健康監控 ──────────────────────────────────
+  await createTable('PM_SOURCE_HEALTH', `CREATE TABLE pm_source_health (
+    id                     NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    source_url             VARCHAR2(500) NOT NULL UNIQUE,
+    source_label           VARCHAR2(200),
+    last_check_at          TIMESTAMP,
+    last_status            VARCHAR2(20),
+    last_http_status       NUMBER,
+    last_error             VARCHAR2(2000),
+    last_response_ms       NUMBER,
+    consecutive_failures   NUMBER DEFAULT 0,
+    is_disabled            NUMBER(1) DEFAULT 0,
+    last_alerted_at        TIMESTAMP,
+    created_at             TIMESTAMP DEFAULT SYSTIMESTAMP
+  )`);
+  try { await db.prepare(`CREATE INDEX idx_pmsh_status ON pm_source_health(last_status, is_disabled)`).run(); } catch (_) {}
+
+  // ── Phase 5 Track F-2: PM Task Token 預算(per-task daily limit)────────────
+  // 用 addCol 加進既有 scheduled_tasks 表(向下相容)
+  await addCol('SCHEDULED_TASKS', 'DAILY_TOKEN_BUDGET', 'NUMBER');
+  await addCol('SCHEDULED_TASKS', 'TOKEN_BUDGET_PAUSED_AT', 'TIMESTAMP');
+
+  // pm_task_token_usage:per-task 每日 token 用量(F2 budget 檢查 + F5 cost dashboard 共用)
+  await createTable('PM_TASK_TOKEN_USAGE', `CREATE TABLE pm_task_token_usage (
+    id              NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    task_id         NUMBER NOT NULL,
+    usage_date      VARCHAR2(10) NOT NULL,
+    model           VARCHAR2(100),
+    input_tokens    NUMBER DEFAULT 0,
+    output_tokens   NUMBER DEFAULT 0,
+    cost            NUMBER(14,6) DEFAULT 0,
+    run_count       NUMBER DEFAULT 0,
+    last_updated    TIMESTAMP DEFAULT SYSTIMESTAMP,
+    CONSTRAINT uq_pmttu UNIQUE (task_id, usage_date, model)
+  )`);
+  try { await db.prepare(`CREATE INDEX idx_pmttu_date ON pm_task_token_usage(usage_date)`).run(); } catch (_) {}
+
+  // ── Phase 5 Track F-4: KB chunks soft-archive 欄位 ──────────────────────────
+  // archived_at IS NULL 才參與檢索;archive job 只 SET 欄位,不刪資料
+  await addCol('KB_CHUNKS', 'ARCHIVED_AT', 'TIMESTAMP');
+  await addCol('KB_CHUNKS', 'ARCHIVE_REASON', 'VARCHAR2(100)');
+
   // pm_webex_subscription — Phase 5 Track C-3:user 訂閱 PM Webex 主動推送
   // kind: 'daily_snapshot'(每天 8:00 推 4 大金屬 + 預測)/ 其他預留
   // schedule_hhmm: 'HH:MM' 24hr 觸發時間(預設 '08:00')
