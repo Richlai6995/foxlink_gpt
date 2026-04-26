@@ -269,6 +269,7 @@ export default function ProgramEditor() {
     const newCourse: ProgramCourse = {
       course_id: course.id, course_title: course.title,
       sort_order: courses.length + 1, is_required: 1,
+      lesson_ids: null,
     }
     if (!isNew && id) {
       try {
@@ -666,10 +667,11 @@ export default function ProgramEditor() {
 // ─── Course card with expandable lesson checkboxes ────────────────────────────
 function ProgramCourseCard({ course, idx, isEditable, isNew, programId, onUpdate, onRemove, t }: {
   course: ProgramCourse; idx: number; isEditable: boolean; isNew: boolean; programId?: string
-  onUpdate: (c: ProgramCourse) => void; onRemove: () => void; t: (k: string) => string
+  onUpdate: (c: ProgramCourse) => void; onRemove: () => void
+  t: (k: string, opts?: Record<string, unknown>) => string
 }) {
   const [expanded, setExpanded] = useState(false)
-  const [lessons, setLessons] = useState<{ id: number; title: string }[]>(course.lessons || [])
+  const [lessons, setLessons] = useState<{ id: number; title: string; is_mandatory?: number; score_weight?: number }[]>(course.lessons || [])
   const [loadingLessons, setLoadingLessons] = useState(false)
   const ec = course.exam_config || {}
 

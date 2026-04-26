@@ -901,7 +901,7 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
                   </div>
                   {/* Manual pull button */}
                   {!recording && sessionIdRef.current && !pulling && (
-                    <button onClick={() => pullFromServer(undefined, { merge: false })}
+                    <button onClick={() => pullFromServer(undefined)}
                       className="w-full mt-1 py-1 rounded text-[10px] transition"
                       style={{ backgroundColor: 'var(--t-accent-subtle)', color: 'var(--t-accent)' }}>
                       📥 {steps.length > 0 ? '重新拉取截圖' : '手動拉取截圖'}
@@ -928,7 +928,7 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
                           const val = (e.target as HTMLInputElement).value.trim()
                           // Validate UUID format
                           if (val && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val)) {
-                            setSessionId(val); sessionIdRef.current = val; pullFromServer(val, { merge: false })
+                            setSessionId(val); sessionIdRef.current = val; pullFromServer(val)
                           } else { alert('請貼上正確的 Session ID（UUID 格式）') }
                         }
                       }}
@@ -937,7 +937,7 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
                       const input = document.getElementById('manual-session-input') as HTMLInputElement
                       const val = input?.value?.trim()
                       if (val && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val)) {
-                        setSessionId(val); sessionIdRef.current = val; pullFromServer(val, { merge: false })
+                        setSessionId(val); sessionIdRef.current = val; pullFromServer(val)
                       } else { alert('請貼上正確的 Session ID（UUID 格式）') }
                     }}
                       className="px-2 py-1 rounded text-white text-[10px]"
@@ -1033,7 +1033,7 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
                     }`}
                     style={{
                       borderColor: selectedStepId === step.id ? 'var(--t-accent)' : 'var(--t-border)',
-                      ringColor: 'var(--t-accent)'
+                      ['--tw-ring-color' as never]: 'var(--t-accent)'
                     }}>
                     {/* Thumbnail */}
                     <div className="relative w-full aspect-video flex items-center justify-center bg-black/40">

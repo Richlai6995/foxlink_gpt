@@ -63,12 +63,16 @@ export interface CardItem {
   title: string
   tag?: { color: string; text: string }
   desc: string
+  /** Legacy alias for `desc` — accepted by renderInlineText fallback */
+  text?: string
   borderColor: string
 }
 
 export interface ComparisonItem {
   title: string
   desc: string
+  /** Legacy alias for `desc` — accepted by renderInlineText fallback */
+  text?: string
   example?: string
   borderColor: string
 }
@@ -348,7 +352,7 @@ function renderBlock(block: HelpBlock, index: number): React.ReactNode {
                   <span className={`font-semibold ${cs.title} text-sm`}>{card.title}</span>
                   {card.tag && <Tag color={card.tag.color}>{card.tag.text}</Tag>}
                 </div>
-                <p className={`text-xs ${cs.desc} leading-5`}>{renderInlineText(card.desc || card.text)}</p>
+                <p className={`text-xs ${cs.desc} leading-5`}>{renderInlineText(card.desc || card.text || '')}</p>
               </div>
             )
           })}
@@ -364,7 +368,7 @@ function renderBlock(block: HelpBlock, index: number): React.ReactNode {
             return (
               <div key={i} className={`border-2 ${cs.border} rounded-xl p-4 ${cs.bg}`}>
                 <div className={`font-semibold ${cs.title} text-sm mb-2`}>{item.title}</div>
-                <p className={`text-xs ${cs.desc} leading-5`}>{renderInlineText(item.desc || item.text)}</p>
+                <p className={`text-xs ${cs.desc} leading-5`}>{renderInlineText(item.desc || item.text || '')}</p>
                 {item.example && (
                   <div className={`mt-2 text-xs ${cs.desc} opacity-80`}>{item.example}</div>
                 )}

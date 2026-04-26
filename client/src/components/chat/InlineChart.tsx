@@ -45,6 +45,8 @@ interface Props {
     schema_hash?: string
     prompt?: string
     params?: UserChartParam[]
+    /** ERP 路徑帶的原始呼叫參數;PinChartButton 會把它寫進 user_charts.source_args */
+    source_args?: Record<string, unknown>
     session_id?: string
     message_id?: number
   }

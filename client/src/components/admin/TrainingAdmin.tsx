@@ -150,7 +150,7 @@ export default function TrainingAdmin() {
           setHelpUsers(res.data.users || [])
           setHelpSummary(res.data.summary || { total: 0, all_passed: 0, some_tested: 0, not_tested: 0 })
           setHelpOrgOptions(res.data.org_options || { depts: [], profit_centers: [], org_sections: [], org_groups: [] })
-          const allIds = new Set((res.data.sections || []).map((s: HelpSection) => s.section_id))
+          const allIds = new Set<string>((res.data.sections || []).map((s: HelpSection) => s.section_id))
           setHelpSelectedSections(allIds)
           setHelpInitialized(true)
         }

@@ -341,7 +341,7 @@ export default function SlideEditor({ slideId, courseId, slideList = [], onSlide
 function BlockEditorSwitch({ block, onChange, courseId, slideId, blockIdx }: { block: Block; onChange: (b: Block) => void; courseId: number; slideId?: number; blockIdx?: number }) {
   switch (block.type) {
     case 'text': return <TextBlockEditor block={block} onChange={onChange} />
-    case 'image': return <ImageBlockEditor block={block} onChange={onChange} courseId={courseId} slideId={slideId} blockIdx={blockIdx} />
+    case 'image': return <ImageBlockEditor block={block} onChange={onChange} courseId={courseId} />
     case 'steps': return <StepsEditor block={block} onChange={onChange} />
     case 'callout': return <CalloutEditor block={block} onChange={onChange} />
     case 'video': return <VideoBlockEditor block={block} onChange={onChange} />

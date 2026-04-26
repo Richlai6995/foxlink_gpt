@@ -464,8 +464,6 @@ export function CoursePlayerInner({ courseId, lessonId, lang: langProp, sessionI
             finishExam()
           }
         }, 2000)
-      } else if (playerMode === 'learn') {
-        // Learn mode: no toast, just record
       }
     } catch (e) {
       console.error('[CoursePlayer] interaction-result submit:', e)

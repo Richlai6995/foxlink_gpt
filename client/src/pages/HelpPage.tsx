@@ -45,8 +45,8 @@ function SubSection({ title, children }: { title: string; children: React.ReactN
   )
 }
 
-function Para({ children }: { children: React.ReactNode }) {
-  return <p className="text-slate-600 text-sm leading-7">{children}</p>
+function Para({ children, className }: { children: React.ReactNode; className?: string }) {
+  return <p className={`text-slate-600 text-sm leading-7${className ? ` ${className}` : ''}`}>{children}</p>
 }
 
 function TipBox({ children }: { children: React.ReactNode }) {

@@ -158,7 +158,7 @@ export default function PDFFieldEditor({ templateId, variables, onChange, readon
     canvas.width   = viewport.width
     canvas.height  = viewport.height
     setPageSize({ w: viewport.width, h: viewport.height, ptW: viewport.width / sc, ptH: viewport.height / sc })
-    await page.render({ canvasContext: canvas.getContext('2d')!, viewport }).promise
+    await page.render({ canvasContext: canvas.getContext('2d')!, canvas, viewport }).promise
   }, [])
 
   useEffect(() => { if (pdfDoc) renderPage(pdfDoc, pageNum, scale) }, [pdfDoc, pageNum, scale, renderPage])

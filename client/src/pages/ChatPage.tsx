@@ -1047,7 +1047,11 @@ export default function ChatPage() {
                     <div className="flex-1 min-w-0 cursor-pointer" onClick={() => { if (!isHid) setSelectedMcpIds(prev => { const n = new Set(prev); picked ? n.delete(id) : n.add(id); return n }) }}>
                       <p className="text-xs font-medium text-slate-800 whitespace-nowrap flex items-center gap-1">
                         {localName(s)}
-                        {isOverrideTool('mcp', id) && <FlaskConical size={10} className="text-orange-400 flex-shrink-0" title={t('common.testMode')} />}
+                        {isOverrideTool('mcp', id) && (
+                          <span title={t('common.testMode')} className="flex-shrink-0">
+                            <FlaskConical size={10} className="text-orange-400" />
+                          </span>
+                        )}
                       </p>
                       {localDesc(s) && <p className="text-xs text-slate-400 whitespace-nowrap">{localDesc(s)}</p>}
                     </div>
@@ -1133,7 +1137,11 @@ export default function ChatPage() {
                     <div className="flex-1 min-w-0 cursor-pointer" onClick={() => { if (!isHid) setSelectedDifyIds(prev => { const n = new Set(prev); picked ? n.delete(id) : n.add(id); return n }) }}>
                       <p className="text-xs font-medium text-slate-800 whitespace-nowrap flex items-center gap-1">
                         {localName(s)}
-                        {isOverrideTool('dify', id) && <FlaskConical size={10} className="text-orange-400 flex-shrink-0" title={t('common.testMode')} />}
+                        {isOverrideTool('dify', id) && (
+                          <span title={t('common.testMode')} className="flex-shrink-0">
+                            <FlaskConical size={10} className="text-orange-400" />
+                          </span>
+                        )}
                       </p>
                       {localDesc(s) && <p className="text-xs text-slate-400 whitespace-nowrap">{localDesc(s)}</p>}
                     </div>
@@ -1348,7 +1356,11 @@ export default function ChatPage() {
                     <div className="flex-1 min-w-0 cursor-pointer" onClick={() => { if (!isHid) setSelectedKbIds(prev => { const n = new Set(prev); picked ? n.delete(sid) : n.add(sid); return n }) }}>
                       <p className="text-xs font-medium text-slate-800 whitespace-nowrap flex items-center gap-1">
                         {localName(s)}
-                        {isOverrideTool('kb', sid) && <FlaskConical size={10} className="text-orange-400 flex-shrink-0" title={t('common.testMode')} />}
+                        {isOverrideTool('kb', sid) && (
+                          <span title={t('common.testMode')} className="flex-shrink-0">
+                            <FlaskConical size={10} className="text-orange-400" />
+                          </span>
+                        )}
                       </p>
                       {localDesc(s) && <p className="text-xs text-slate-400 whitespace-nowrap">{localDesc(s)}</p>}
                     </div>

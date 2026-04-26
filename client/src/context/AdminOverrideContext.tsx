@@ -32,7 +32,7 @@ interface AdminOverrideContextType {
   removeTemplate: (id: string) => void
   clearAll: () => void
   isOverrideTool: (type: OverrideTool['type'], id: number | string) => boolean
-  isOverrideTemplate: (id: number) => boolean
+  isOverrideTemplate: (id: string) => boolean
   overrideCount: number
 }
 
