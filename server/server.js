@@ -134,6 +134,8 @@ app.get('/api/health', (req, res) => res.json({ status: 'ok', timestamp: new Dat
     console.log('[Route] /api/alert-rules OK');
     app.use('/api/pm-bom', require('./routes/pmBom'));
     console.log('[Route] /api/pm-bom OK');
+    app.use('/api/pm', require('./routes/pmReview'));
+    console.log('[Route] /api/pm (review/feedback/accuracy) OK');
 
     // Autoscan user email domains → Webex allowed-domain whitelist
     // 每次啟動時掃描 users.email，union 進白名單（只加不刪，admin 手動加的會保留）
@@ -190,6 +192,22 @@ app.get('/api/health', (req, res) => res.json({ status: 'ok', timestamp: new Dat
       startSLACron();
     } catch (e) {
       console.error('[FeedbackSLA] Failed to start:', e.message);
+    }
+
+    // Phase 5 Track B: PM Forecast 校驗每日 cron(每 24h 跑一次,server 啟動 60s 後首跑)
+    try {
+      const { startAccuracyCron } = require('./services/pmForecastAccuracyService');
+      startAccuracyCron();
+    } catch (e) {
+      console.error('[PmAccuracy] Failed to start:', e.message);
+    }
+
+    // Phase 5 Track B-4: PM Prompt Self-Improve cron(每天檢查,只在月初 1 號實際跑)
+    try {
+      const { startSelfImproveCron } = require('./services/pmPromptSelfImproveService');
+      startSelfImproveCron();
+    } catch (e) {
+      console.error('[PmSelfImprove] Failed to start:', e.message);
     }
 
     let _portRetried = false;

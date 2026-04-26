@@ -3594,6 +3594,63 @@ async function runMigrations(db) {
     if (!/ORA-00955|ORA-01408/.test(e.message)) console.warn('[Migration] uq_alert_rules_pipeline_node:', e.message);
   }
 
+  // ── Phase 5 Track B: Forecast 校驗 + Self-Improving Loop ─────────────────
+  // pm_forecast_accuracy — 每日校驗結果(7 天前 forecast vs 今日 actual)
+  await createTable('PM_FORECAST_ACCURACY', `CREATE TABLE pm_forecast_accuracy (
+    id              NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    forecast_id     NUMBER NOT NULL,
+    entity_type     VARCHAR2(20) NOT NULL,
+    entity_code     VARCHAR2(50) NOT NULL,
+    forecast_date   DATE NOT NULL,
+    target_date     DATE NOT NULL,
+    horizon_days    NUMBER,
+    predicted_mean  NUMBER(18,6),
+    predicted_lower NUMBER(18,6),
+    predicted_upper NUMBER(18,6),
+    actual_value    NUMBER(18,6) NOT NULL,
+    actual_source   VARCHAR2(50),
+    abs_error       NUMBER(18,6),
+    pct_error       NUMBER(10,4),
+    in_band         NUMBER(1) DEFAULT 0,
+    model_used      VARCHAR2(50),
+    computed_at     TIMESTAMP DEFAULT SYSTIMESTAMP,
+    CONSTRAINT uq_pm_acc UNIQUE (forecast_id, target_date)
+  )`);
+  try { await db.prepare(`CREATE INDEX idx_pmacc_entity ON pm_forecast_accuracy(entity_type, entity_code, target_date)`).run(); } catch (_) {}
+  try { await db.prepare(`CREATE INDEX idx_pmacc_target ON pm_forecast_accuracy(target_date)`).run(); } catch (_) {}
+
+  // pm_feedback_signal — 採購員對 forecast / report / alert 的 thumbs
+  await createTable('PM_FEEDBACK_SIGNAL', `CREATE TABLE pm_feedback_signal (
+    id            NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    target_type   VARCHAR2(20) NOT NULL,
+    target_ref    VARCHAR2(200) NOT NULL,
+    user_id       NUMBER REFERENCES users(id) ON DELETE SET NULL,
+    vote          NUMBER(2) NOT NULL,
+    comment       VARCHAR2(2000),
+    context_meta  CLOB,
+    created_at    TIMESTAMP DEFAULT SYSTIMESTAMP,
+    CONSTRAINT uq_pm_fb UNIQUE (target_type, target_ref, user_id)
+  )`);
+  try { await db.prepare(`CREATE INDEX idx_pmfb_target ON pm_feedback_signal(target_type, target_ref)`).run(); } catch (_) {}
+
+  // pm_prompt_review_queue — LLM 自動生成的 v2 prompt,等採購員 approve
+  await createTable('PM_PROMPT_REVIEW_QUEUE', `CREATE TABLE pm_prompt_review_queue (
+    id                NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    skill_name        VARCHAR2(100) NOT NULL,
+    skill_id          NUMBER,
+    original_prompt   CLOB,
+    proposed_prompt   CLOB NOT NULL,
+    rationale         CLOB,
+    eval_summary      CLOB,
+    status            VARCHAR2(20) DEFAULT 'pending',
+    submitted_by      VARCHAR2(50) DEFAULT 'meta_self_improve',
+    submitted_at      TIMESTAMP DEFAULT SYSTIMESTAMP,
+    reviewed_by       NUMBER REFERENCES users(id) ON DELETE SET NULL,
+    decided_at        TIMESTAMP,
+    review_comment    VARCHAR2(2000)
+  )`);
+  try { await db.prepare(`CREATE INDEX idx_pmprq_status ON pm_prompt_review_queue(status, submitted_at)`).run(); } catch (_) {}
+
   // ── 自動將 5 張新表加進 pipeline_writable_tables 白名單 ─────────────────
   // 跟 pm_price_history 同樣 pattern:抓欄位 metadata + INSERT(若不存在)
   const newTablesToWhitelist = [
@@ -3625,6 +3682,18 @@ async function runMigrations(db) {
       table: 'pm_analysis_report',
       display: 'LLM 分析報告',
       desc: '每日/每週/每月由 LLM 產生的金屬市場分析報告精華(完整版以 DOCX 寄信 + 寫進 KB「PM-分析庫」)。Phase 2 新增。',
+      ops: 'insert,upsert',
+    },
+    {
+      table: 'pm_forecast_accuracy',
+      display: 'Forecast 校驗結果',
+      desc: 'Phase 5 Track B:每日比對 forecast_history vs pm_price_history 算 MAPE / abs_error / in_band,給 AI 戰情「MAPE 滾動」「各金屬準確率排行」Design 用。由 pmForecastAccuracyService 自動寫入。',
+      ops: 'insert',
+    },
+    {
+      table: 'pm_feedback_signal',
+      display: '採購員 thumbs 反饋',
+      desc: 'Phase 5 Track B:採購員對 forecast / report / alert 按讚/倒讚 + comment,給 self-improve loop 找改進方向。',
       ops: 'insert,upsert',
     },
   ];

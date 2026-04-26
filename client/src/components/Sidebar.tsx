@@ -88,6 +88,20 @@ export default function Sidebar({
   const navigate = useNavigate()
   const { t, i18n } = useTranslation()
   const { unreadCount: feedbackUnread } = useFeedbackNotifications()
+  const [hasPmAccess, setHasPmAccess] = useState(false)
+  const [pmReviewPending, setPmReviewPending] = useState(0)
+  useEffect(() => {
+    api.get('/help/books').then(r => {
+      const list = r.data || []
+      const pm = list.find((b: any) => b.code === 'precious-metals')
+      setHasPmAccess(!!pm)
+      if (pm) {
+        api.get('/pm/review/queue', { params: { status: 'pending' } })
+          .then(rr => setPmReviewPending((rr.data || []).length))
+          .catch(() => setPmReviewPending(0))
+      }
+    }).catch(() => setHasPmAccess(false))
+  }, [])
   const [hoveredId, setHoveredId] = useState<string | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editingTitle, setEditingTitle] = useState('')
@@ -516,6 +530,18 @@ export default function Sidebar({
                   </span>
                 )}
               </button>
+              {hasPmAccess && (
+                <button onClick={() => { setShowMenu(false); navigate('/pm/review') }}
+                  className="w-full flex items-center gap-2 text-amber-400 hover:bg-slate-700 px-3 py-2.5 text-xs transition font-medium">
+                  <Sparkles size={13} />
+                  <span className="flex-1 text-left">{t('sidebar.pmReview', '貴金屬 — Prompt 審核')}</span>
+                  {pmReviewPending > 0 && (
+                    <span className="bg-amber-500 text-white text-[10px] font-bold rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1">
+                      {pmReviewPending > 99 ? '99+' : pmReviewPending}
+                    </span>
+                  )}
+                </button>
+              )}
               <button onClick={() => { setShowMenu(false); navigate('/help') }}
                 className="w-full flex items-center gap-2 text-emerald-400 hover:bg-slate-700 px-3 py-2.5 text-xs transition font-medium">
                 <HelpCircle size={13} /> {t('sidebar.helpDoc')}

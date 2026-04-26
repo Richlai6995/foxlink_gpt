@@ -281,6 +281,76 @@ const DESIGNS = [
               ORDER BY as_of_date DESC FETCH FIRST 100 ROWS ONLY` },
     ],
   },
+
+  // ─── Phase 5 Track B-2: Forecast 校驗 Designs ───────────────────────────────
+  {
+    topic: '主管視角',
+    name: '各金屬 30 天預測 MAPE 排行',
+    description: '近 30 天各金屬「平均絕對百分比誤差」(MAPE)排行 — 越低代表 LLM 預測越準。> 30% 列為不可信',
+    target_tables: ['pm_forecast_accuracy'],
+    chart: {
+      default_chart: 'bar', allow_table: true, allow_export: true,
+      charts: [{ type: 'bar', title: 'MAPE 排行 (lower = better)', x_field: 'metal', y_field: 'avg_mape' }],
+    },
+    examples: [
+      { q_zh: '近 30 天各金屬平均 MAPE 排行',
+        sql: `SELECT entity_code AS metal,
+                     ROUND(AVG(ABS(pct_error)), 2) AS avg_mape,
+                     COUNT(*) AS samples,
+                     ROUND(SUM(CASE WHEN in_band=1 THEN 1 ELSE 0 END) * 100 / COUNT(*), 1) AS in_band_pct
+              FROM pm_forecast_accuracy
+              WHERE entity_type='metal'
+                AND target_date >= TRUNC(SYSDATE) - 30
+                AND pct_error IS NOT NULL
+              GROUP BY entity_code
+              ORDER BY avg_mape ASC FETCH FIRST 20 ROWS ONLY` },
+    ],
+  },
+  {
+    topic: '分析師視角',
+    name: '預測 MAPE 滾動 60 天',
+    description: '所有金屬合計的每日 MAPE 走勢,觀察模型是否退化(線往上 = 變差)',
+    target_tables: ['pm_forecast_accuracy'],
+    chart: {
+      default_chart: 'line', allow_table: true, allow_export: true,
+      charts: [{ type: 'line', title: '每日 MAPE 滾動', x_field: 'target_date', y_field: 'mape_pct' }],
+    },
+    examples: [
+      { q_zh: '近 60 天每日 MAPE 走勢',
+        sql: `SELECT TO_CHAR(target_date, 'YYYY-MM-DD') AS target_date,
+                     ROUND(AVG(ABS(pct_error)), 2) AS mape_pct,
+                     COUNT(*) AS samples
+              FROM pm_forecast_accuracy
+              WHERE entity_type='metal'
+                AND target_date >= TRUNC(SYSDATE) - 60
+                AND pct_error IS NOT NULL
+              GROUP BY target_date
+              ORDER BY target_date FETCH FIRST 100 ROWS ONLY` },
+    ],
+  },
+  {
+    topic: '分析師視角',
+    name: '預測 vs 實際(個別金屬)',
+    description: '指定金屬的預測 mean / lower / upper 與實際對照,看哪段超出 80% 信心區間',
+    target_tables: ['pm_forecast_accuracy'],
+    chart: {
+      default_chart: 'line', allow_table: true, allow_export: true,
+      charts: [{ type: 'line', title: '預測 vs 實際 (in_band 區間)', x_field: 'target_date', y_field: 'value', series_field: 'series' }],
+    },
+    examples: [
+      { q_zh: '銅近 60 天預測 vs 實際',
+        sql: `SELECT TO_CHAR(target_date, 'YYYY-MM-DD') AS target_date, 'predicted' AS series, predicted_mean AS value
+              FROM pm_forecast_accuracy
+              WHERE entity_type='metal' AND entity_code='CU'
+                AND target_date >= TRUNC(SYSDATE) - 60
+              UNION ALL
+              SELECT TO_CHAR(target_date, 'YYYY-MM-DD'), 'actual', actual_value
+              FROM pm_forecast_accuracy
+              WHERE entity_type='metal' AND entity_code='CU'
+                AND target_date >= TRUNC(SYSDATE) - 60
+              ORDER BY 1 FETCH FIRST 200 ROWS ONLY` },
+    ],
+  },
 ];
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
