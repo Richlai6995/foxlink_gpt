@@ -33,6 +33,7 @@ import AlertRulesPanel from '../components/admin/AlertRulesPanel'
 import PmBomPanel from '../components/admin/PmBomPanel'
 import PmSettingsPanel from '../components/admin/PmSettingsPanel'
 import PmHealthPanel from '../components/admin/PmHealthPanel'
+import PmErpSyncPanel from '../components/admin/PmErpSyncPanel'
 import WebexLogsPanel from '../components/admin/WebexLogsPanel'
 import HelpTranslationPanel from '../components/admin/HelpTranslationPanel'
 import SpecialManualsPanel from '../components/admin/SpecialManualsPanel'
@@ -42,7 +43,7 @@ import FeedbackCategoryManager from '../components/feedback/admin/FeedbackCatego
 import FeedbackSLAConfig from '../components/feedback/admin/FeedbackSLAConfig'
 import FeedbackStatsPanel from '../components/feedback/FeedbackStatsPanel'
 import VoiceInputSettingsPanel from '../components/admin/VoiceInputSettings'
-type Tab = 'users' | 'roles' | 'tokens' | 'audit' | 'keywords' | 'db' | 'mail' | 'llm' | 'vector-defaults' | 'kb-retrieval' | 'kb-debug' | 'kb-synonyms' | 'cost' | 'scheduled' | 'mcp' | 'dify' | 'kb' | 'skills' | 'code-runners' | 'research' | 'api-keys' | 'ai-dashboard' | 'chart-adoption' | 'data-permissions' | 'monitor' | 'db-sources' | 'pipeline-whitelist' | 'alert-rules' | 'pm-bom' | 'pm-settings' | 'pm-health' | 'webex-logs' | 'help-translation' | 'special-manuals' | 'factory-translations' | 'training' | 'feedback' | 'voice-input'
+type Tab = 'users' | 'roles' | 'tokens' | 'audit' | 'keywords' | 'db' | 'mail' | 'llm' | 'vector-defaults' | 'kb-retrieval' | 'kb-debug' | 'kb-synonyms' | 'cost' | 'scheduled' | 'mcp' | 'dify' | 'kb' | 'skills' | 'code-runners' | 'research' | 'api-keys' | 'ai-dashboard' | 'chart-adoption' | 'data-permissions' | 'monitor' | 'db-sources' | 'pipeline-whitelist' | 'alert-rules' | 'pm-bom' | 'pm-settings' | 'pm-health' | 'pm-erp-sync' | 'webex-logs' | 'help-translation' | 'special-manuals' | 'factory-translations' | 'training' | 'feedback' | 'voice-input'
 
 export default function AdminDashboard() {
   const [activeTab, setActiveTab] = useState<Tab>('users')
@@ -95,6 +96,7 @@ export default function AdminDashboard() {
     { id: 'pm-bom', label: t('admin.tabs.pmBom', 'BOM 金屬含量'), icon: <Database size={16} className="text-amber-600" /> },
     { id: 'pm-settings', label: t('admin.tabs.pmSettings', 'PM 平台設定'), icon: <Cpu size={16} className="text-amber-700" /> },
     { id: 'pm-health', label: t('admin.tabs.pmHealth', 'PM 平台健康'), icon: <Activity size={16} className="text-amber-500" /> },
+    { id: 'pm-erp-sync', label: t('admin.tabs.pmErpSync', 'PM ERP 同步'), icon: <Database size={16} className="text-indigo-500" /> },
     { id: 'mail', label: t('admin.tabs.mail'), icon: <Mail size={16} className="text-purple-600" /> },
     { id: 'voice-input', label: t('voice_input.settingsTitle', '語音輸入'), icon: <Mic size={16} className="text-blue-500" /> },
   ]
@@ -169,6 +171,7 @@ export default function AdminDashboard() {
           {activeTab === 'pm-bom' && <PmBomPanel />}
           {activeTab === 'pm-settings' && <PmSettingsPanel />}
           {activeTab === 'pm-health' && <PmHealthPanel />}
+          {activeTab === 'pm-erp-sync' && <PmErpSyncPanel />}
           {activeTab === 'help-translation' && <HelpTranslationPanel />}
           {activeTab === 'special-manuals' && <SpecialManualsPanel />}
           {activeTab === 'factory-translations' && <FactoryTranslationsPanel />}

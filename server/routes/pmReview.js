@@ -570,6 +570,145 @@ router.post('/admin/kb-maintenance/restore', verifyToken, verifyAdmin, async (re
   }
 });
 
+// ────────────────────────────────────────────────────────────────────────────
+// Phase 5 Track A: ERP Sync framework — admin only
+// ────────────────────────────────────────────────────────────────────────────
+
+// GET /api/pm/admin/erp-sync/jobs
+router.get('/admin/erp-sync/jobs', verifyToken, verifyAdmin, async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const rows = await db.prepare(`
+      SELECT id, name, description, source_db_id, target_pm_table,
+             upsert_mode, upsert_keys, schedule_interval_minutes,
+             is_active, is_dry_run, last_status, last_rows_synced, last_error,
+             TO_CHAR(last_run_at, 'YYYY-MM-DD HH24:MI') AS last_run_at,
+             TO_CHAR(created_at,  'YYYY-MM-DD HH24:MI') AS created_at,
+             TO_CHAR(last_modified, 'YYYY-MM-DD HH24:MI') AS last_modified
+      FROM pm_erp_sync_job ORDER BY name
+    `).all();
+    res.json(rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// GET /api/pm/admin/erp-sync/jobs/:id  含完整 source_query / mapping_json
+router.get('/admin/erp-sync/jobs/:id', verifyToken, verifyAdmin, async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const r = await db.prepare(`SELECT * FROM pm_erp_sync_job WHERE id = ?`).get(req.params.id);
+    if (!r) return res.status(404).json({ error: 'Not found' });
+    res.json(r);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// POST /api/pm/admin/erp-sync/jobs — create new
+router.post('/admin/erp-sync/jobs', verifyToken, verifyAdmin, async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const f = req.body || {};
+    if (!f.name || !f.target_pm_table || !f.source_query) {
+      return res.status(400).json({ error: 'name / target_pm_table / source_query 必填' });
+    }
+    if (!/^pm_[a-z_]+$/.test(String(f.target_pm_table).toLowerCase())) {
+      return res.status(400).json({ error: 'target_pm_table 必須 pm_* 開頭' });
+    }
+    await db.prepare(`
+      INSERT INTO pm_erp_sync_job (
+        name, description, source_db_id, target_pm_table, source_query,
+        bind_params_json, mapping_json, upsert_mode, upsert_keys,
+        schedule_interval_minutes, is_active, is_dry_run
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      f.name, f.description || null, f.source_db_id || null, f.target_pm_table,
+      f.source_query, f.bind_params_json || '[]', f.mapping_json || '{}',
+      f.upsert_mode || 'upsert', f.upsert_keys || null,
+      Number(f.schedule_interval_minutes || 1440),
+      Number(f.is_active || 0), Number(f.is_dry_run != null ? f.is_dry_run : 1),
+    );
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// PATCH /api/pm/admin/erp-sync/jobs/:id
+router.patch('/admin/erp-sync/jobs/:id', verifyToken, verifyAdmin, async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const f = req.body || {};
+    const fields = [];
+    const values = [];
+    const allowed = ['name', 'description', 'source_db_id', 'target_pm_table', 'source_query',
+                     'bind_params_json', 'mapping_json', 'upsert_mode', 'upsert_keys',
+                     'schedule_interval_minutes', 'is_active', 'is_dry_run'];
+    for (const k of allowed) {
+      if (f[k] !== undefined) {
+        fields.push(`${k} = ?`);
+        values.push(f[k]);
+      }
+    }
+    if (fields.length === 0) return res.json({ ok: true, noop: true });
+    fields.push(`last_modified = SYSTIMESTAMP`);
+    values.push(req.params.id);
+    await db.prepare(`UPDATE pm_erp_sync_job SET ${fields.join(', ')} WHERE id = ?`).run(...values);
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// DELETE /api/pm/admin/erp-sync/jobs/:id
+router.delete('/admin/erp-sync/jobs/:id', verifyToken, verifyAdmin, async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    await db.prepare(`DELETE FROM pm_erp_sync_job WHERE id = ?`).run(req.params.id);
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// POST /api/pm/admin/erp-sync/jobs/:id/run-now  body: { force_dry_run? }
+router.post('/admin/erp-sync/jobs/:id/run-now', verifyToken, verifyAdmin, async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const job = await db.prepare(`SELECT * FROM pm_erp_sync_job WHERE id = ?`).get(req.params.id);
+    if (!job) return res.status(404).json({ error: 'Not found' });
+    const { runJob } = require('../services/pmErpSyncService');
+    const r = await runJob(db, job, { forceDryRun: !!req.body?.force_dry_run });
+    res.json(r);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/pm/admin/erp-sync/jobs/:id/preview — 跑 SELECT 不寫,回前 10 row
+router.post('/admin/erp-sync/jobs/:id/preview', verifyToken, verifyAdmin, async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const job = await db.prepare(`SELECT * FROM pm_erp_sync_job WHERE id = ?`).get(req.params.id);
+    if (!job) return res.status(404).json({ error: 'Not found' });
+    const { previewJob } = require('../services/pmErpSyncService');
+    const r = await previewJob(db, job, 10);
+    res.json(r);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/pm/admin/erp-sync/jobs/:id/logs?limit=20
+router.get('/admin/erp-sync/jobs/:id/logs', verifyToken, verifyAdmin, async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const limit = Math.min(Math.max(Number(req.query.limit || 20), 1), 100);
+    const rows = await db.prepare(`
+      SELECT id, status, rows_fetched, rows_synced, duration_ms, error_msg,
+             TO_CHAR(started_at,  'YYYY-MM-DD HH24:MI:SS') AS started_at,
+             TO_CHAR(finished_at, 'YYYY-MM-DD HH24:MI:SS') AS finished_at,
+             sample_row
+      FROM pm_erp_sync_log
+      WHERE job_id = ?
+      ORDER BY started_at DESC
+      FETCH FIRST ? ROWS ONLY
+    `).all(req.params.id, limit);
+    res.json(rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // POST /api/pm/review/run-self-improve — admin 手動觸發 meta-job
 router.post('/review/run-self-improve', verifyToken, verifyAdmin, async (req, res) => {
   try {

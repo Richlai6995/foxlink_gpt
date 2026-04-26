@@ -3633,6 +3633,80 @@ async function runMigrations(db) {
   )`);
   try { await db.prepare(`CREATE INDEX idx_pmfb_target ON pm_feedback_signal(target_type, target_ref)`).run(); } catch (_) {}
 
+  // ── Phase 5 Track A: ERP Sync Framework ──────────────────────────────────
+  // 通用「定期從 EBS 撈資料 → mapping → 寫進 PM 本地表」
+  // 一個 job = 一個資料表的同步邏輯;新加 job 是 admin UI config,不寫 code
+  await createTable('PM_ERP_SYNC_JOB', `CREATE TABLE pm_erp_sync_job (
+    id                       NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    name                     VARCHAR2(100) NOT NULL UNIQUE,
+    description              VARCHAR2(500),
+    source_db_id             NUMBER,                           -- NULL = 用 getErpPool (.env ERP_DB_*)
+    target_pm_table          VARCHAR2(100) NOT NULL,
+    source_query             CLOB NOT NULL,
+    bind_params_json         CLOB,                              -- JSON array of binds
+    mapping_json             CLOB NOT NULL,                     -- {erp_col: pm_col} 或進階 transformer
+    upsert_mode              VARCHAR2(20) DEFAULT 'upsert',     -- insert | upsert | truncate_insert
+    upsert_keys              VARCHAR2(500),                     -- csv,e.g. 'metal_code,product_id'
+    schedule_interval_minutes NUMBER DEFAULT 1440,
+    is_active                NUMBER(1) DEFAULT 0,
+    is_dry_run               NUMBER(1) DEFAULT 1,               -- 預設 dry_run,user 確認後關閉
+    last_run_at              TIMESTAMP,
+    last_status              VARCHAR2(20),
+    last_rows_synced         NUMBER,
+    last_error               VARCHAR2(2000),
+    created_at               TIMESTAMP DEFAULT SYSTIMESTAMP,
+    last_modified            TIMESTAMP DEFAULT SYSTIMESTAMP
+  )`);
+  try { await db.prepare(`CREATE INDEX idx_pmerpj_active ON pm_erp_sync_job(is_active, last_run_at)`).run(); } catch (_) {}
+
+  await createTable('PM_ERP_SYNC_LOG', `CREATE TABLE pm_erp_sync_log (
+    id            NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    job_id        NUMBER NOT NULL REFERENCES pm_erp_sync_job(id) ON DELETE CASCADE,
+    started_at    TIMESTAMP DEFAULT SYSTIMESTAMP,
+    finished_at   TIMESTAMP,
+    duration_ms   NUMBER,
+    status        VARCHAR2(20),                                  -- success | fail | dry_run
+    rows_fetched  NUMBER DEFAULT 0,
+    rows_synced   NUMBER DEFAULT 0,
+    error_msg     VARCHAR2(4000),
+    sample_row    CLOB
+  )`);
+  try { await db.prepare(`CREATE INDEX idx_pmerps_job ON pm_erp_sync_log(job_id, started_at)`).run(); } catch (_) {}
+
+  // ── Phase 5 Track A 對應的 PM 本地表 ──────────────────────────────────────
+  // pm_purchase_history:過去 12 個月採購單彙總(by metal × month)
+  await createTable('PM_PURCHASE_HISTORY', `CREATE TABLE pm_purchase_history (
+    id                NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    metal_code        VARCHAR2(20) NOT NULL,
+    purchase_month    VARCHAR2(7) NOT NULL,                     -- YYYY-MM
+    total_qty         NUMBER(18,4),
+    total_qty_unit    VARCHAR2(20),
+    total_amount      NUMBER(18,4),
+    currency          VARCHAR2(10) DEFAULT 'USD',
+    avg_unit_price    NUMBER(18,6),
+    po_count          NUMBER,
+    supplier_count    NUMBER,
+    factory_code      VARCHAR2(30),
+    last_synced_at    TIMESTAMP DEFAULT SYSTIMESTAMP,
+    CONSTRAINT uq_pmph UNIQUE (metal_code, purchase_month, factory_code)
+  )`);
+  try { await db.prepare(`CREATE INDEX idx_pmph_month ON pm_purchase_history(purchase_month)`).run(); } catch (_) {}
+
+  // pm_inventory:在途 + 安全庫存(by metal × factory)
+  await createTable('PM_INVENTORY', `CREATE TABLE pm_inventory (
+    id                NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    metal_code        VARCHAR2(20) NOT NULL,
+    factory_code      VARCHAR2(30),
+    onhand_qty        NUMBER(18,4),
+    in_transit_qty    NUMBER(18,4),
+    safety_stock_qty  NUMBER(18,4),
+    qty_unit          VARCHAR2(20),
+    days_of_supply    NUMBER(8,2),
+    last_synced_at    TIMESTAMP DEFAULT SYSTIMESTAMP,
+    CONSTRAINT uq_pmi UNIQUE (metal_code, factory_code)
+  )`);
+  try { await db.prepare(`CREATE INDEX idx_pmi_metal ON pm_inventory(metal_code)`).run(); } catch (_) {}
+
   // ── Phase 5 Track F-3: PM Source 健康監控 ──────────────────────────────────
   await createTable('PM_SOURCE_HEALTH', `CREATE TABLE pm_source_health (
     id                     NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -3754,6 +3828,18 @@ async function runMigrations(db) {
       table: 'pm_feedback_signal',
       display: '採購員 thumbs 反饋',
       desc: 'Phase 5 Track B:採購員對 forecast / report / alert 按讚/倒讚 + comment,給 self-improve loop 找改進方向。',
+      ops: 'insert,upsert',
+    },
+    {
+      table: 'pm_purchase_history',
+      display: '採購單歷史(by metal × month)',
+      desc: 'Phase 5 Track A:從 EBS PO 模組過去 12 月聚合,給 AI 戰情「採購均單價 vs 市場價」、「採購節奏」用。由 pmErpSyncService 自動寫入。',
+      ops: 'insert,upsert',
+    },
+    {
+      table: 'pm_inventory',
+      display: '在途 + 安全庫存(by metal × factory)',
+      desc: 'Phase 5 Track A:從 EBS INV 模組同步在庫 / 在途 / 安全庫存,給「庫存 vs 7 日預測缺口」Design 用。',
       ops: 'insert,upsert',
     },
   ];

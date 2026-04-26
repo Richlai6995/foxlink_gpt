@@ -236,6 +236,17 @@ app.get('/api/health', (req, res) => res.json({ status: 'ok', timestamp: new Dat
       startKbMaintenanceCron();
     } catch (e) { console.error('[PmKbMaint] Failed to start:', e.message); }
 
+    // Phase 5 Track A: PM ERP Sync framework + auto-seed 3 template jobs(預設 dry_run + inactive)
+    try {
+      const { autoSeedPmErpSyncJobs } = require('./services/pmErpSyncSeed');
+      const { db } = require('./database-oracle');
+      await autoSeedPmErpSyncJobs(db);
+    } catch (e) { console.error('[PmErpSyncSeed] Failed:', e.message); }
+    try {
+      const { startErpSyncCron } = require('./services/pmErpSyncService');
+      startErpSyncCron();
+    } catch (e) { console.error('[PmErpSync] Failed to start:', e.message); }
+
     let _portRetried = false;
     server.on('error', (err) => {
       if (err.code === 'EADDRINUSE') {

@@ -328,6 +328,94 @@ const DESIGNS = [
               ORDER BY target_date FETCH FIRST 100 ROWS ONLY` },
     ],
   },
+  // ─── Phase 5 Track A: ERP 真資料 Designs ────────────────────────────────────
+  {
+    topic: '主管視角',
+    name: '近 12 月各金屬月度採購量趨勢',
+    description: '從 EBS 同步來的真實採購量(by metal × month),用 line chart 看趨勢 — 可比對 AI 預測與真實採購節奏',
+    target_tables: ['pm_purchase_history'],
+    chart: {
+      default_chart: 'line', allow_table: true, allow_export: true,
+      charts: [{ type: 'line', title: '月度採購量 (by metal)', x_field: 'purchase_month', y_field: 'total_qty', series_field: 'metal_code' }],
+    },
+    examples: [
+      { q_zh: '近 12 月各金屬月度採購量',
+        sql: `SELECT purchase_month, metal_code,
+                     SUM(total_qty) AS total_qty,
+                     SUM(total_amount) AS total_amount
+              FROM pm_purchase_history
+              WHERE purchase_month >= TO_CHAR(ADD_MONTHS(SYSDATE, -12), 'YYYY-MM')
+              GROUP BY purchase_month, metal_code
+              ORDER BY purchase_month, metal_code FETCH FIRST 200 ROWS ONLY` },
+    ],
+  },
+  {
+    topic: '主管視角',
+    name: '採購均單價 vs 市場價',
+    description: '我們實際採購均價 vs 市場 LBMA / Westmetall 月均價 — 看採購擇時是否打到行情',
+    target_tables: ['pm_purchase_history', 'pm_price_history'],
+    chart: {
+      default_chart: 'line', allow_table: true, allow_export: true,
+      charts: [{ type: 'line', title: '採購均單價 vs 市場月均', x_field: 'm', y_field: 'price', series_field: 'series' }],
+    },
+    examples: [
+      { q_zh: '銅近 12 月採購均單價 vs 市場月均',
+        sql: `SELECT purchase_month AS m, 'purchase' AS series, AVG(avg_unit_price) AS price
+              FROM pm_purchase_history
+              WHERE metal_code='CU' AND purchase_month >= TO_CHAR(ADD_MONTHS(SYSDATE, -12), 'YYYY-MM')
+              GROUP BY purchase_month
+              UNION ALL
+              SELECT TO_CHAR(as_of_date, 'YYYY-MM') AS m, 'market' AS series, AVG(price_usd) AS price
+              FROM pm_price_history
+              WHERE metal_code='CU' AND as_of_date >= ADD_MONTHS(SYSDATE, -12)
+              GROUP BY TO_CHAR(as_of_date, 'YYYY-MM')
+              ORDER BY 1, 2 FETCH FIRST 200 ROWS ONLY` },
+    ],
+  },
+  {
+    topic: '採購視角',
+    name: '當前在途 + 在庫 vs 7 日預測缺口',
+    description: '各金屬「當前在庫 + 在途」與「未來 7 日預測需求」的缺口 — 缺口紅色 = 該補貨;充裕 = 可緩買',
+    target_tables: ['pm_inventory', 'forecast_history'],
+    chart: {
+      default_chart: 'bar', allow_table: true, allow_export: true,
+      charts: [{ type: 'bar', title: '在庫 + 在途 vs 預測需求', x_field: 'metal_code', y_field: 'value', series_field: 'series' }],
+    },
+    examples: [
+      { q_zh: '各金屬在庫 vs 7日預測',
+        sql: `SELECT i.metal_code,
+                     'onhand+transit' AS series,
+                     SUM(NVL(i.onhand_qty,0) + NVL(i.in_transit_qty,0)) AS value
+              FROM pm_inventory i GROUP BY i.metal_code
+              UNION ALL
+              SELECT entity_code AS metal_code, 'forecast_7d' AS series,
+                     AVG(predicted_mean) * 7 AS value
+              FROM forecast_history
+              WHERE entity_type='metal' AND target_date BETWEEN TRUNC(SYSDATE) AND TRUNC(SYSDATE) + 7
+              GROUP BY entity_code FETCH FIRST 100 ROWS ONLY` },
+    ],
+  },
+  {
+    topic: '主管視角',
+    name: '本月安全庫存達成率',
+    description: '在庫 / 安全庫存 比例 — < 1 = 低於警戒 (紅);1-1.5 = 警戒 (橘);> 1.5 = 充裕 (綠)',
+    target_tables: ['pm_inventory'],
+    chart: {
+      default_chart: 'bar', allow_table: true, allow_export: true,
+      charts: [{ type: 'bar', title: '安全庫存達成率', x_field: 'metal_code', y_field: 'safety_ratio' }],
+    },
+    examples: [
+      { q_zh: '各金屬安全庫存達成率',
+        sql: `SELECT metal_code,
+                     SUM(NVL(onhand_qty,0)) AS onhand,
+                     SUM(NVL(safety_stock_qty,0)) AS safety,
+                     CASE WHEN SUM(NVL(safety_stock_qty,0)) > 0
+                          THEN ROUND(SUM(NVL(onhand_qty,0)) / SUM(NVL(safety_stock_qty,0)), 2)
+                          ELSE NULL END AS safety_ratio
+              FROM pm_inventory
+              GROUP BY metal_code ORDER BY safety_ratio NULLS LAST FETCH FIRST 50 ROWS ONLY` },
+    ],
+  },
   {
     topic: '分析師視角',
     name: '預測 vs 實際(個別金屬)',
