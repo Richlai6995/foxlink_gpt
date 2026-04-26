@@ -1194,6 +1194,24 @@ async function handleAttachmentAction(event) {
     return;
   }
 
+  // Phase 5 Track C-1: PM intent buttons (forecast / whatif / snapshot)
+  try {
+    const { detectIntentFromInputs, tryPmIntent } = require('../services/webexPmHandler');
+    const intent = detectIntentFromInputs(inputs);
+    if (intent) {
+      // 取 user lang
+      const db = require('../database-oracle').db;
+      const u = personEmail ? await findUserByEmail(db, personEmail) : null;
+      const lang = u?.preferred_language || 'zh-TW';
+      const handled = await tryPmIntent({
+        msgText: '', lang, webex, roomId: action.roomId, intentOverride: intent,
+      });
+      if (handled) return;
+    }
+  } catch (e) {
+    console.warn('[Webex] PM intent (attachment) error:', e.message);
+  }
+
   console.log(`[Webex] AttachmentAction: unknown alert_action="${actionType}", ignoring`);
 }
 
@@ -1410,6 +1428,35 @@ async function handleWebexMessage(message) {
   // ── 指令分派 ──────────────────────────────────────────────────────────────
   const cmdText = msgText.toLowerCase();
   console.log(`[Webex] Dispatch: cmd="${cmdText.slice(0, 30)}"`);
+
+  // Phase 5 Track C-1: PM intent intercept(在 LLM chat 之前)
+  // 偵測「金價 / 銅 預測 / what if Cu +10%」等 → 直接回 Adaptive Card
+  // PM permission gate 已隱含於前置 user lookup;若未授權實際資料表會空 → handler 回 "無資料"
+  // C-4 sync:即使走 short-circuit 仍寫 chat_messages,讓 web chat session 看得到歷史
+  try {
+    const { detectIntent, tryPmIntent } = require('../services/webexPmHandler');
+    if (detectIntent(msgText)) {
+      // 寫 user msg 進 chat_messages,後面回 Card 後寫 assistant 摘要
+      try {
+        await db.prepare(
+          `INSERT INTO chat_messages (session_id, role, content, files_json) VALUES (?, 'user', ?, NULL)`
+        ).run(sessionId, msgText);
+      } catch (e2) { console.warn('[Webex] chat_messages user insert (PM intent):', e2.message); }
+
+      const handled = await tryPmIntent({ msgText, lang, webex, roomId });
+      if (handled) {
+        try {
+          await db.prepare(
+            `INSERT INTO chat_messages (session_id, role, content) VALUES (?, 'assistant', ?)`
+          ).run(sessionId, `[PM] 已回應 Adaptive Card — query: ${msgText.slice(0, 80)}`);
+        } catch (e2) { console.warn('[Webex] chat_messages assistant insert (PM intent):', e2.message); }
+        console.log('[Webex] PM intent handled → skipping LLM chat');
+        return;
+      }
+    }
+  } catch (e) {
+    console.warn('[Webex] PM intent handler error (fall through to LLM):', e.message);
+  }
 
   // ? → 工具清單（容許 "?" / "? :" / "？" 等變體）
   if (/^[?？]\s*[:：]?\s*$/.test(msgText)) {

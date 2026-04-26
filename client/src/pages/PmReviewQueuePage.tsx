@@ -12,7 +12,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   ArrowLeft, GitCompare, CheckCircle2, XCircle, RefreshCw,
-  AlertCircle, Loader2, FileText, Sparkles,
+  AlertCircle, Loader2, FileText, Sparkles, Bell, X, Trash2, Plus,
 } from 'lucide-react'
 import api from '../lib/api'
 import { useAuth } from '../context/AuthContext'
@@ -51,6 +51,7 @@ export default function PmReviewQueuePage() {
   const [decideComment, setDecideComment] = useState('')
   const [showCompare, setShowCompare] = useState<'diff' | 'side'>('side')
   const [runningSelfImprove, setRunningSelfImprove] = useState(false)
+  const [showSubsModal, setShowSubsModal] = useState(false)
 
   const fetchList = async () => {
     setLoading(true)
@@ -127,6 +128,14 @@ export default function PmReviewQueuePage() {
         <h1 className="text-lg font-bold text-slate-800">PM Prompt Review Queue</h1>
         <span className="text-xs text-slate-400">採購員審 LLM 自動產生的 v2 prompt</span>
         <div className="ml-auto flex items-center gap-2">
+          <button
+            onClick={() => setShowSubsModal(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-sm rounded border border-blue-300 text-blue-700 hover:bg-blue-50"
+            title="Webex 推送訂閱"
+          >
+            <Bell size={14} />
+            Webex 訂閱
+          </button>
           {isAdmin && (
             <button
               onClick={runSelfImprove} disabled={runningSelfImprove}
@@ -208,6 +217,139 @@ export default function PmReviewQueuePage() {
             />
           )}
         </main>
+      </div>
+
+      {showSubsModal && <WebexSubsModal onClose={() => setShowSubsModal(false)} />}
+    </div>
+  )
+}
+
+// ── Webex Subscription Modal ────────────────────────────────────────────────
+interface SubItem {
+  id: number
+  kind: string
+  schedule_hhmm: string
+  is_active: number
+  last_sent_at: string | null
+  last_sent_date: string | null
+  created_at: string
+}
+
+function WebexSubsModal({ onClose }: { onClose: () => void }) {
+  const [list, setList] = useState<SubItem[]>([])
+  const [loading, setLoading] = useState(false)
+  const [newHhmm, setNewHhmm] = useState('08:00')
+  const [busy, setBusy] = useState(false)
+
+  const fetch = async () => {
+    setLoading(true)
+    try {
+      const { data } = await api.get('/pm/subscriptions')
+      setList(Array.isArray(data) ? data : [])
+    } finally { setLoading(false) }
+  }
+  useEffect(() => { fetch() }, [])
+
+  const add = async () => {
+    if (!/^\d{2}:\d{2}$/.test(newHhmm)) return alert('時間需 HH:MM')
+    setBusy(true)
+    try {
+      await api.post('/pm/subscriptions', { kind: 'daily_snapshot', schedule_hhmm: newHhmm })
+      await fetch()
+    } catch (e: any) {
+      alert(e?.response?.data?.error || String(e))
+    } finally { setBusy(false) }
+  }
+
+  const toggle = async (s: SubItem) => {
+    await api.patch(`/pm/subscriptions/${s.id}`, { is_active: s.is_active ? 0 : 1 })
+    await fetch()
+  }
+
+  const remove = async (id: number) => {
+    if (!window.confirm('刪除此訂閱?')) return
+    await api.delete(`/pm/subscriptions/${id}`)
+    await fetch()
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+      <div className="bg-white rounded-lg w-[560px] max-h-[80vh] flex flex-col">
+        <div className="flex items-center justify-between px-5 py-3 border-b">
+          <span className="font-medium text-sm flex items-center gap-2">
+            <Bell size={16} className="text-blue-500" />
+            Webex 推送訂閱
+          </span>
+          <button onClick={onClose}><X size={16} /></button>
+        </div>
+        <div className="flex-1 overflow-auto p-5 space-y-4">
+          <p className="text-xs text-slate-500 bg-blue-50 border border-blue-200 rounded p-2">
+            訂閱後,系統會在你設定的時間將「貴金屬今日 snapshot」Adaptive Card 推送到你的 Webex DM。
+            前提:你曾跟 Cortex Bot 對過話(系統需要知道 DM roomId)。
+          </p>
+
+          {/* Add new */}
+          <div className="border border-slate-200 rounded p-3 space-y-2">
+            <div className="text-xs font-medium text-slate-700">新增 — 每日 snapshot</div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-slate-500">推送時間 (24hr):</span>
+              <input
+                type="time"
+                value={newHhmm}
+                onChange={(e) => setNewHhmm(e.target.value)}
+                className="border border-slate-200 rounded px-2 py-1 text-sm"
+              />
+              <button
+                onClick={add} disabled={busy}
+                className="ml-auto flex items-center gap-1 px-3 py-1 text-sm rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
+              >
+                <Plus size={12} /> 新增
+              </button>
+            </div>
+          </div>
+
+          {/* List existing */}
+          {loading ? (
+            <div className="text-center text-slate-400 text-sm py-4 flex items-center justify-center gap-2">
+              <Loader2 size={14} className="animate-spin" /> 載入中…
+            </div>
+          ) : list.length === 0 ? (
+            <div className="text-center text-slate-400 text-sm py-4 border border-dashed rounded">
+              尚無訂閱
+            </div>
+          ) : (
+            <div className="space-y-1">
+              {list.map(s => (
+                <div key={s.id} className={`flex items-center gap-2 text-xs border rounded px-3 py-2 ${
+                  s.is_active ? 'bg-white border-slate-200' : 'bg-slate-50 border-slate-100 opacity-60'
+                }`}>
+                  <Bell size={14} className="text-blue-400" />
+                  <div className="flex-1">
+                    <div className="font-medium text-slate-800">{s.kind}</div>
+                    <div className="text-slate-500 text-[11px]">
+                      每日 {s.schedule_hhmm}
+                      {s.last_sent_at && ` · 上次:${s.last_sent_at}`}
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => toggle(s)}
+                    className={`px-2 py-0.5 rounded text-[10px] ${
+                      s.is_active ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-600'
+                    }`}
+                  >
+                    {s.is_active ? '啟用中' : '已停用'}
+                  </button>
+                  <button onClick={() => remove(s.id)} className="text-red-400 hover:text-red-600">
+                    <Trash2 size={12} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+        <div className="flex justify-end px-5 py-3 border-t">
+          <button onClick={onClose} className="px-4 py-1.5 text-sm text-slate-600">關閉</button>
+        </div>
       </div>
     </div>
   )

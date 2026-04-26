@@ -210,6 +210,14 @@ app.get('/api/health', (req, res) => res.json({ status: 'ok', timestamp: new Dat
       console.error('[PmSelfImprove] Failed to start:', e.message);
     }
 
+    // Phase 5 Track C-3: PM Webex Push cron(每分鐘檢查訂閱觸發)
+    try {
+      const { startPmWebexPushCron } = require('./services/pmWebexPushService');
+      startPmWebexPushCron();
+    } catch (e) {
+      console.error('[PmWebexPush] Failed to start:', e.message);
+    }
+
     let _portRetried = false;
     server.on('error', (err) => {
       if (err.code === 'EADDRINUSE') {

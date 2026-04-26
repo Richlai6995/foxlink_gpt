@@ -3633,6 +3633,24 @@ async function runMigrations(db) {
   )`);
   try { await db.prepare(`CREATE INDEX idx_pmfb_target ON pm_feedback_signal(target_type, target_ref)`).run(); } catch (_) {}
 
+  // pm_webex_subscription — Phase 5 Track C-3:user 訂閱 PM Webex 主動推送
+  // kind: 'daily_snapshot'(每天 8:00 推 4 大金屬 + 預測)/ 其他預留
+  // schedule_hhmm: 'HH:MM' 24hr 觸發時間(預設 '08:00')
+  // target_room_id: 推送目標(預設用 user 的 DM room_id;留空表示自動找)
+  await createTable('PM_WEBEX_SUBSCRIPTION', `CREATE TABLE pm_webex_subscription (
+    id              NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    user_id         NUMBER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    kind            VARCHAR2(40) NOT NULL,
+    schedule_hhmm   VARCHAR2(5) DEFAULT '08:00',
+    target_room_id  VARCHAR2(200),
+    is_active       NUMBER(1) DEFAULT 1,
+    last_sent_at    TIMESTAMP,
+    last_sent_date  VARCHAR2(10),
+    created_at      TIMESTAMP DEFAULT SYSTIMESTAMP,
+    CONSTRAINT uq_pm_sub UNIQUE (user_id, kind)
+  )`);
+  try { await db.prepare(`CREATE INDEX idx_pmsub_active ON pm_webex_subscription(is_active, schedule_hhmm)`).run(); } catch (_) {}
+
   // pm_prompt_review_queue — LLM 自動生成的 v2 prompt,等採購員 approve
   await createTable('PM_PROMPT_REVIEW_QUEUE', `CREATE TABLE pm_prompt_review_queue (
     id                NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,

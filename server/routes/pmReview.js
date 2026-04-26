@@ -311,6 +311,96 @@ router.post('/review/queue/:id/decide', verifyToken, verifyPmUser, async (req, r
   }
 });
 
+// ────────────────────────────────────────────────────────────────────────────
+// Webex Push Subscription — user 訂閱「每天 8:00 推 PM snapshot」
+// ────────────────────────────────────────────────────────────────────────────
+
+// GET /api/pm/subscriptions — 自己的訂閱
+router.get('/subscriptions', verifyToken, verifyPmUser, async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const rows = await db.prepare(`
+      SELECT id, kind, schedule_hhmm, target_room_id, is_active,
+             TO_CHAR(last_sent_at, 'YYYY-MM-DD HH24:MI') AS last_sent_at, last_sent_date,
+             TO_CHAR(created_at, 'YYYY-MM-DD HH24:MI') AS created_at
+      FROM pm_webex_subscription WHERE user_id = ?
+      ORDER BY created_at DESC
+    `).all(req.user.id);
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/pm/subscriptions  body: { kind, schedule_hhmm? }
+// kind 目前只支援 'daily_snapshot'(預留之後 weekly_summary / forecast_changed)
+router.post('/subscriptions', verifyToken, verifyPmUser, async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const { kind, schedule_hhmm } = req.body || {};
+    if (kind !== 'daily_snapshot') return res.status(400).json({ error: '目前只支援 daily_snapshot' });
+    const hhmm = String(schedule_hhmm || '08:00').trim();
+    if (!/^\d{2}:\d{2}$/.test(hhmm)) return res.status(400).json({ error: 'schedule_hhmm 需為 HH:MM 格式' });
+
+    try {
+      await db.prepare(`
+        INSERT INTO pm_webex_subscription (user_id, kind, schedule_hhmm, is_active)
+        VALUES (?, ?, ?, 1)
+      `).run(req.user.id, kind, hhmm);
+    } catch (e) {
+      if (String(e.message || '').match(/ORA-00001|UNIQUE/)) {
+        // 已存在 → 改成 update(視為 enable + 改時間)
+        await db.prepare(`
+          UPDATE pm_webex_subscription SET schedule_hhmm=?, is_active=1
+          WHERE user_id=? AND kind=?
+        `).run(hhmm, req.user.id, kind);
+      } else throw e;
+    }
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PATCH /api/pm/subscriptions/:id  body: { is_active?, schedule_hhmm? }
+router.patch('/subscriptions/:id', verifyToken, verifyPmUser, async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const { is_active, schedule_hhmm } = req.body || {};
+    const own = await db.prepare(`SELECT user_id FROM pm_webex_subscription WHERE id=?`).get(req.params.id);
+    if (!own || own.user_id !== req.user.id) return res.status(404).json({ error: 'Not found' });
+    if (schedule_hhmm && !/^\d{2}:\d{2}$/.test(String(schedule_hhmm))) {
+      return res.status(400).json({ error: 'schedule_hhmm 格式錯誤' });
+    }
+    await db.prepare(`
+      UPDATE pm_webex_subscription
+      SET is_active = COALESCE(?, is_active),
+          schedule_hhmm = COALESCE(?, schedule_hhmm)
+      WHERE id = ?
+    `).run(
+      is_active != null ? Number(is_active) : null,
+      schedule_hhmm || null,
+      req.params.id,
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /api/pm/subscriptions/:id
+router.delete('/subscriptions/:id', verifyToken, verifyPmUser, async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const own = await db.prepare(`SELECT user_id FROM pm_webex_subscription WHERE id=?`).get(req.params.id);
+    if (!own || own.user_id !== req.user.id) return res.status(404).json({ error: 'Not found' });
+    await db.prepare(`DELETE FROM pm_webex_subscription WHERE id=?`).run(req.params.id);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // POST /api/pm/review/run-self-improve — admin 手動觸發 meta-job
 router.post('/review/run-self-improve', verifyToken, verifyAdmin, async (req, res) => {
   try {
