@@ -118,6 +118,10 @@ Foxlink 集團業務涵蓋連接器、FPC、MHA(Metal Housing Assembly)、金屬
 | 多模型路由(Gemini/AOAI/OCI) + reasoning_effort | ✅ 具備 | **完整** | [geminiClient.js](../server/services/geminiClient.js) |
 | AD/SSO | ✅ 具備 | **部分** | LDAP env 已配置,auth 層仍為 in-memory UUID map,K8s 已用 Redis session |
 | Data Policy Category 綁定 | ✅ 具備 | **待驗證** | schema 已建,查詢鏈路需實測 |
+| **Forecast 校驗 loop**(Phase 5 B) | — | **完整** | [pmForecastAccuracyService.js](../server/services/pmForecastAccuracyService.js)、[pmPromptSelfImproveService.js](../server/services/pmPromptSelfImproveService.js) — 每 24h 算 MAPE、月初自動產 v2 prompt 進採購員 review queue |
+| **ERP 真連線同步框架**(Phase 5 A) | — | **完整(範本 dry_run inactive)** | [pmErpSyncService.js](../server/services/pmErpSyncService.js)、[pmErpSyncSeed.js](../server/services/pmErpSyncSeed.js) — 通用 source_query → mapping → upsert,3 個 EBS 範本(BOM / 採購歷史 / 在途庫存) |
+| **PM 健康監控 + Token 預算 + Cost**(Phase 5 F) | — | **完整** | [pmSourceHealthService.js](../server/services/pmSourceHealthService.js)、[pmTokenBudgetService.js](../server/services/pmTokenBudgetService.js)、[pmKbMaintenanceService.js](../server/services/pmKbMaintenanceService.js) — 18 sources 6h 巡檢、per-task daily budget、token cost 平攤、KB soft-archive |
+| **Webex Bot 完整對話**(Phase 5 C) | — | **完整** | [webexPmHandler.js](../server/services/webexPmHandler.js)、[webexPmCards.js](../server/services/webexPmCards.js)、[pmWebexPushService.js](../server/services/pmWebexPushService.js) — NL intent + Adaptive Card + 每分鐘訂閱推送 |
 
 **結論**:外部規劃書關於 Cortex 平台能力的假設 **95% 成立**,僅 2 項邊界需實測。**規劃書 §15「新增開發清單 81 人日」的估算在本 codebase 上大致可信**,除了 Python 預測服務那 28 人日需要重新評估(見 §4)。
 
@@ -298,10 +302,10 @@ server/skill_runners/pm_forecast/
 
 | # | 議題 | 選項 | 目前傾向 | 影響 |
 |---|------|------|---------|------|
-| Q1 | ML 模組技術棧 | A. Python 子服務 / B. Node.js(tfjs) / C. 純 LLM / D. Python MCP | **C → B → 必要時 D** | 開發工時差 3-25 人日,長期維運成本差異大 |
-| Q2 | 預測 MAPE KPI | 硬目標(< 1.5%)/ 軟目標(< 3%)/ 無 | **軟目標 < 3%** | Q1 的決定取決於此 |
-| Q3 | 是否做 Python MLOps 管線 | 是 / 否 / Phase 3 再評估 | **Phase 3 再評估** | 是否引入新技術棧 |
-| Q4 | 時序特徵範圍 | 僅價格 / 價格+宏觀 / 價格+宏觀+新聞情緒 | **價格+宏觀+新聞情緒** | 資料源授權談判範圍 |
+| Q1 | ML 模組技術棧 | A. Python 子服務 / B. Node.js(tfjs) / C. 純 LLM / D. Python MCP | ✅ **C(純 LLM)拍板**(Phase 4 確認 forecast_timeseries_llm 已上線,Phase 5 B 加 MAPE 校驗 loop 持續驗證) | 開發工時差 3-25 人日,長期維運成本差異大 |
+| Q2 | 預測 MAPE KPI | 硬目標(< 1.5%)/ 軟目標(< 3%)/ 無 | ✅ **軟目標 < 3%**(採購決策級非投資級;Phase 5 B5 連 3 天 MAPE > 30% 自動 alert 採用此基準) | Q1 的決定取決於此 |
+| Q3 | 是否做 Python MLOps 管線 | 是 / 否 / Phase 3 再評估 | **Phase 3 再評估**(Phase 5 已用純 LLM 驗證 6 個月,目前無切換 Python 動力) | 是否引入新技術棧 |
+| Q4 | 時序特徵範圍 | 僅價格 / 價格+宏觀 / 價格+宏觀+新聞情緒 | ✅ **價格+宏觀+新聞情緒**(Phase 2-4 三類資料源排程都已上線:`[PM]` 全網收集 / 宏觀 / 新聞抓取) | 資料源授權談判範圍 |
 
 ### 7.2 資料源 / 授權
 
@@ -317,11 +321,11 @@ server/skill_runners/pm_forecast/
 
 | # | 議題 | 選項 | 目前傾向 |
 |---|------|------|---------|
-| Q10 | 第一版金屬 | 只做 Au / Au+Ag / 4 大金屬(Au/Ag/Pt/Pd)全上 | **4 大全上**(集團電鍍四種都採購,見 §2.1) |
-| Q11 | What-if 模擬優先級 | MVP 就做 / Phase 2 做 / Phase 3 做 | **Phase 3** |
-| Q12 | BOM 成本傳導功能 | 需求方是製造部?能否提供 BOM 金屬含量資料? | **Phase 3**,待製造部提出需求 |
-| Q13 | 警示通道 | Email+Webex MVP 夠用?Teams/Line/SMS 要不要做? | **MVP 僅 Email + Webex** |
-| Q14 | 使用者分群 | 採購/財務/主管各 Dashboard 是否都要?還是先聚焦一個 | **僅採購視角**(§2.5 確認財務未主動要求) |
+| Q10 | 第一版金屬 | 只做 Au / Au+Ag / 4 大金屬(Au/Ag/Pt/Pd)全上 | ✅ **4 大全上 + 11 關聯金屬**(Phase 2 已 ship,主管視角戰情看全貌) |
+| Q11 | What-if 模擬優先級 | MVP 就做 / Phase 2 做 / Phase 3 做 | ✅ **Phase 4 已 ship**(`pm_what_if_cost_impact` skill + Webex C 加 Adaptive Card 觸發) |
+| Q12 | BOM 成本傳導功能 | 需求方是製造部?能否提供 BOM 金屬含量資料? | ✅ **Phase 4 + Phase 5 A1 已通**:What-if 已可吃 `pm_bom_metal`;Phase 5 A1 加 ERP 自動同步範本(取代手動 CSV) |
+| Q13 | 警示通道 | Email+Webex MVP 夠用?Teams/Line/SMS 要不要做? | ✅ **Email + Webex 拍板**(Phase 5 C 完整對話 + 訂閱推送);Teams/Line/SMS **不做** |
+| Q14 | 使用者分群 | 採購/財務/主管各 Dashboard 是否都要?還是先聚焦一個 | ✅ **採購 + 主管 + 分析師三視角**(Phase 5 戰情共 ~20 個 Design;財務視角不做) |
 
 ### 7.4 組織 / 治理
 
@@ -414,5 +418,111 @@ server/skill_runners/pm_forecast/
 ---
 
 **本文作者**:Claude(基於 2026-04-23 codebase 盤點 + 2026-04-24 採購部業務脈絡)
-**最後更新**:2026-04-24
+**最後更新**:2026-04-26(加入 §12 Phase 5 實施成果)
 **對應外部規劃書版本**:v2.0 Cortex 整合版 / v2.0-deepresearch
+
+---
+
+## 12. Phase 5 實施成果(2026-04-26 全部 ship)
+
+Phase 5 把 PM 平台從「**功能完整**」推到「**業務真敢用**」— 補資料源、補品質追蹤、補互動深度、補運維可觀測性。完整規劃見 [phase5-plan.md](phase5-plan.md);本節用「**使用者怎麼用**」視角總結最終形態。下一步規劃見 [phase6-plan.md](phase6-plan.md)。
+
+### 12.1 Track A — ERP 真連線同步框架
+
+**解決什麼**:Phase 1-4 BOM / 採購歷史靠手動 CSV / 假資料,真上線採購不會買單。
+
+**使用者怎麼用**:
+- **admin** 在 AdminDashboard 開「**PM ERP 同步**」tab → 看到 3 個 auto-seed 範本 job(全部 `is_active=0` + `is_dry_run=1`,**升級不會誤撈 ERP 大量資料**):
+  1. `[PM-ERP] BOM 金屬含量同步` → `pm_bom_metal`(取代手動 CSV)
+  2. `[PM-ERP] 採購單歷史 12 月` → `pm_purchase_history`(by metal × month × factory)
+  3. `[PM-ERP] 在途 + 安全庫存` → `pm_inventory`(by metal × factory,每 6h 更新)
+- 編輯 job → 改 `source_query` SQL(EBS schema 為範本,實際 customization 一定要改) → 按 **Preview** 跑 SELECT 看前 10 row + 欄位名 → 對齊 `mapping_json` → 切 `is_active=1` → 排程每 5 分鐘 tick 自動跑
+- **Logs** 看最近 30 次執行(rows / duration / error / sample_row)
+- **AI 戰情新 4 個 Design**(主管 / 採購視角各兩個):月度採購量趨勢、採購均單價 vs 市場價、在庫+在途 vs 7 日預測缺口、本月安全庫存達成率
+
+**安全機制**:`target_pm_table` 強制 `pm_*` 開頭 + ERP pool 走 `ReadOnlyPoolProxy`(只能 SELECT 不可能改 ERP)+ `MAX_ROWS_PER_JOB=100k` 上限。
+
+### 12.2 Track B — Forecast 校驗 + Self-Improving Loop
+
+**解決什麼**:LLM 預測沒人知道準不準,信任會崩;沒回饋機制 prompt 永遠不會改進。
+
+**使用者(採購員)怎麼用**:
+- **Sidebar** 開「**PM 審核**」(只有授權看 `precious-metals` 特殊說明書的 user 才看得到入口,顯示 pending 數 badge)
+- `/pm/review` 頁:
+  - 看 **AI 自動產的 v2 prompt review queue**(每月 1 號跑 LLM meta-job 產;7 天 dedup)
+  - side-by-side / 行 diff 對照 v1 vs v2 + LLM 寫的 rationale + eval summary → **approve 才會 UPDATE skills.system_prompt**(LLM 永不直接改 prompt)
+  - reject 給 reason
+- **報告 / forecast 頁**有 `PmFeedbackThumbs` 通用 component(thumbs up/down + comment,UNIQUE per user × target,可重投覆蓋)
+- **AI 戰情新 3 個 Design**(主管 / 分析師視角):各金屬 30 天 MAPE 排行、預測 MAPE 滾動 60 天、預測 vs 實際 w/ in_band
+
+**系統內部 cron**:
+- 每 24h `pmForecastAccuracyService` 自動校驗 → 寫 `pm_forecast_accuracy`(abs_error / pct_error / in_band)
+- per-metal 連 3 天 `|pct_err| > 30%` → 寫 `pm_alert_history`(rule_code='pm_mape_streak',24h dedup)
+- 每月 1 號 `pmPromptSelfImproveService` 跑(撈最差 + thumbs-down 案例餵 Pro → 進 review queue)
+
+**權限 gate**:復用 `help_book_shares` for code='precious-metals' — admin 在「特殊說明書管理」設誰能讀,自動就是誰能審 review queue。
+
+### 12.3 Track C — Webex Bot 完整對話 + 訂閱推送
+
+**解決什麼**:Phase 4 Webex 只能收警示 ACK,user 想直接在 DM 問「銅最近怎樣」「銅 +10% 算成本」。
+
+**使用者怎麼用**:
+- **在 Webex DM 對 PM Bot 直接打**(NL intent 偵測 + 11 金屬代碼別名,中/英/縮寫都認):
+  - `top 5` / `快照` / `今日金價` → **Snapshot Card**(Top 5 metals 報價 + 漲跌% + Forecast 按鈕)
+  - `銅` / `Cu` / `Au` → **Latest 報價 Card**
+  - `銅 預測` / `Cu forecast` / `Au 7 day` → **Forecast Card**(7-day forecast + 信心區間 + Unicode sparkline ▁▂▃▄▅▆▇█ + What-if 按鈕)
+  - `銅 +10%` / `what if Cu -5%` / `銀 漲 10%` → **What-if Card**(當前 vs 模擬價 + JOIN `pm_bom_metal` 算 cost impact)
+  - `/pm help` → **Help Card**
+- intent 沒中(99% 一般對話)→ fall through 到既有 LLM 流程,**零行為改變**
+- **每分鐘 cron 比 schedule_hhmm 主動推送訂閱**(`pm_webex_subscription` 表):
+  - user 在 `/pm/review` 頁右上角開「**Webex 訂閱**」modal → 設 `kind=daily_snapshot` + `schedule_hhmm`(如 `09:00`)
+  - 每天指定時間自動 DM 推 4 大貴金屬 + 4 基本金屬 snapshot Card
+- **PM intent short-circuit 也寫 `chat_messages`** → web chat session 看得到完整歷史,不分裂兩處
+
+**設計重點**:PM intent 不打 LLM → **1 秒回應 + 零 token 成本**;權限 gate 同 B(復用 help_book_shares)。
+
+### 12.4 Track F — 可觀測性 + 自動運維
+
+**解決什麼**:6 個排程 + 18 個 source + 多模型 token 跑下去,出錯 / 配額爆 / source 掛掉 admin 不會立刻知道。
+
+**使用者(admin)怎麼用**:AdminDashboard 開「**PM 平台健康**」tab(4 sub-tab):
+
+| Sub-tab | 看什麼 | 怎麼動作 |
+|---------|-------|---------|
+| **F1 Tasks** | per-task 7/14/30 天 success / avg duration / 總 tokens / 成本 | 點「N 失敗」展開最近 20 次 error_msg + response_preview;**行內編輯 `daily_token_budget`** 即時生效 |
+| **F2 Token 預算** | per-task daily budget 與當日已用 / 是否被 paused | 手動 clear pause;隔日 00:00 自動解除 |
+| **F3 Source 監控** | 18 個 PM 全網收集 source 連通狀態(每 6h HEAD/GET cron) | 立即檢查按鈕;連 3 失敗 → `is_disabled=1` + email admin(24h cooldown) |
+| **F4 KB 維護** | PM-新聞庫 chunks,文件 created_date > 90d 候選 archive | dry-run / 真執行 / restore 三按鈕(`PM_KB_ARCHIVE_DRYRUN=false` 才真執行) |
+| **F5 Cost** | per-task 月度 token 成本 + per-day × per-model 明細 | 標註「估算」(token_usage 沒 task_id,以 owner_user_id 平攤) |
+
+**系統內部變化**:
+- `scheduledTaskService.runTask` 開頭檢查 token budget paused → 當天 skip
+- `kbRetrieval.js` 4 處 query 加 `archived_at IS NULL` filter(soft archive,不影響檢索效能)
+- email alert 都有 24h cooldown,不會 spam 運維信箱
+
+### 12.5 Phase 5 後的平台形態
+
+```
+[資料源]
+  ├─ 全網 18 sources(Phase 2)— Phase 5 F3 加 6h 巡檢 + 自動 disable
+  ├─ ERP 真連線同步(Phase 5 A)— BOM / 採購歷史 / 在途庫存,通用 framework
+  └─ 既有手動 CSV(可選降級)
+
+[LLM 處理層]
+  ├─ forecast_timeseries_llm + pm_deep_analysis_workflow + pm_what_if_cost_impact
+  └─ Phase 5 B 加每 24h MAPE 校驗 + 月初 self-improve prompt 進採購員 review queue
+
+[互動介面]
+  ├─ Web Chat / Dashboard(Phase 1-3)
+  ├─ Webex 警示 ACK Card(Phase 4)
+  └─ Phase 5 C: Webex DM NL 對話 + 4 種 Adaptive Card + 每日 snapshot 訂閱
+
+[運維 — Phase 5 F]
+  ├─ PM 平台健康 tab(4 sub-tab)
+  ├─ per-task daily_token_budget 自動 pause
+  ├─ source 健康監控 + 自動 disable
+  ├─ KB soft-archive(90d)
+  └─ Cost dashboard(per-task 平攤估算)
+```
+
+採購員早上開 Webex DM 打 `top 5` → 看 Top 5 金屬 snapshot → 點 Forecast 按鈕看 7 日預測 + sparkline → 點 What-if 按 `銅 +10%` 直接知對採購成本影響 → 進 web `/pm/review` 對 forecast 按 thumbs;主管打開 web 看戰情新 MAPE 排行 + 採購量 vs 市場價 + 安全庫存達成率;admin 進「PM 平台健康」確認 6 排程都綠 + token 沒爆 + 18 source 都通。**這就是 Phase 5 後的日常流。**

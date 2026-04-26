@@ -16,6 +16,9 @@ const bookIcon = 'gem';
 const bookIsSpecial = 1;
 const bookSortOrder = 10;
 const bookLastModified = '2026-04-26';
+// 2026-04-26 Phase 5 ship:更新 pm-architecture / pm-data-flow / pm-scheduled-tasks /
+// pm-dashboards / pm-ai-agent / pm-limits-faq 六個 sections
+const phase5LastModified = '2026-04-26';
 
 const sections = [
   // ── 1. 平台簡介與設計理念 ──────────────────────────────────────────────────
@@ -126,13 +129,13 @@ const sections = [
     sort_order: 20,
     icon: 'Network',
     icon_color: 'text-blue-500',
-    last_modified: bookLastModified,
+    last_modified: phase5LastModified,
     title: '系統邏輯與架構',
     sidebar_label: '系統架構',
     blocks: [
       {
         type: 'para',
-        text: '平台由 6 大組件組成,**全部跑在 Cortex 既有基礎設施上**,無新 runtime、無新 Pod。'
+        text: '平台由 **10 大組件**(Phase 1-4 六個 + Phase 5 新加四個)組成,**全部跑在 Cortex 既有基礎設施上**,無新 runtime、無新 Pod。'
       },
       {
         type: 'subsection',
@@ -166,7 +169,7 @@ const sections = [
       },
       {
         type: 'subsection',
-        title: '6 大組件',
+        title: '10 大組件(Phase 1-4 六個 + Phase 5 加四個)',
         blocks: [
           {
             type: 'card_grid',
@@ -174,10 +177,14 @@ const sections = [
             items: [
               { emoji: '⏰', title: '1. 排程任務(6 個)', desc: '每日抓資料 + 日/週/月報生成,全部標 [PM] 前綴' },
               { emoji: '📚', title: '2. 知識庫(3 個 KB)', desc: 'PM-原始資料庫 / PM-新聞庫 / PM-分析庫 — 分流原始 / 新聞 / 已分析' },
-              { emoji: '📊', title: '3. AI 戰情(3 個 Topic)', desc: '採購視角 / 主管視角 / 分析師視角,共 13 個 Design 圖表' },
+              { emoji: '📊', title: '3. AI 戰情(3 個 Topic)', desc: '採購視角 / 主管視角 / 分析師視角,Phase 5 後共 ~20 個 Design' },
               { emoji: '🤖', title: '4. Multi-Agent Workflow', desc: 'pm_deep_analysis_workflow:News + Macro + Tech → Risk → Synthesizer' },
               { emoji: '📄', title: '5. 文件模板', desc: '日報 / 週報 / 月報 docx,排程觸發後自動填入分析結果' },
-              { emoji: '🔔', title: '6. Webex Bot 推送', desc: '重大事件 / 警示主動推送到採購群組或個人' },
+              { emoji: '🔔', title: '6. Webex Bot 推送', desc: '警示 ACK Card + Phase 5 加完整 NL 對話 + 訂閱推送' },
+              { emoji: '🎯', title: '7. Forecast 校驗 loop(Phase 5 B)', desc: '每 24h 算 MAPE → MAPE 排行 / 滾動戰情 + 採購員 thumbs feedback;每月 1 號 LLM 自動產 v2 prompt 進採購員 review queue,**人類 approve 才套用**' },
+              { emoji: '💬', title: '8. Webex 完整對話(Phase 5 C)', desc: 'NL intent 偵測 11 金屬代碼 + 4 種 Adaptive Card(Snapshot / Forecast w/ sparkline / What-if / Help)+ 每分鐘訂閱推送' },
+              { emoji: '🩺', title: '9. 健康監控 + Token 預算(Phase 5 F)', desc: 'PM 平台健康 tab 4 sub-tab:per-task success / daily_token_budget 自動 pause / 18 sources 6h 巡檢 / KB soft-archive / cost 平攤' },
+              { emoji: '🔌', title: '10. ERP 真連線同步(Phase 5 A)', desc: '通用 framework:source_query + mapping_json + upsert_mode → 寫 pm_* 表;3 範本 job(BOM / 採購歷史 / 在途庫存)dry_run 預設' },
             ]
           },
         ]
@@ -318,7 +325,7 @@ const sections = [
     sort_order: 40,
     icon: 'Workflow',
     icon_color: 'text-cyan-500',
-    last_modified: bookLastModified,
+    last_modified: phase5LastModified,
     title: '資料流與每日週期',
     sidebar_label: '資料流與週期',
     blocks: [
@@ -338,6 +345,13 @@ const sections = [
           ['每月 1 號 09:30', '`[PM] 金屬市場月報` 跑',               'PM-分析庫 + Email + docx',         '主管轉寄事業單位'],
           ['全天', '對話 Agent / 戰情室 隨時可問',                    '即時回應',                         '隨需查詢'],
           ['事件觸發', 'Webex Bot 主動推送(如金價大跳)',            'Webex 群組 / 個人',                '收到 → 開戰情看細節'],
+          ['每分鐘(Phase 5 C)', '`pmWebexPushService` 比 schedule_hhmm', 'Webex DM(訂閱者)',           '訂閱用戶當天指定時間收 Snapshot Card'],
+          ['每 5 分鐘(Phase 5 A)', '`pmErpSyncService` 找到期 active jobs 跑', 'pm_bom_metal / pm_purchase_history / pm_inventory', '不用做(admin 設好就好)'],
+          ['每 1 小時(Phase 5 F5)', 'token_usage 平攤給 [PM] task', 'pm_task_token_usage',         '不用做(admin 看 PM 平台健康)'],
+          ['每 6 小時(Phase 5 F3)', '18 sources HEAD/GET 巡檢', 'pm_source_health',                  '不用做(連 3 失敗 admin 收 email)'],
+          ['每 24 小時(Phase 5 B1)', '`pmForecastAccuracyService` 比 7 天前 forecast vs 實際', 'pm_forecast_accuracy + 戰情 MAPE 圖', '採購員開戰情看 MAPE 排行'],
+          ['每 7 天(Phase 5 F4)', '`pmKbMaintenanceService` 掃 PM-新聞庫 > 90d chunks', 'kb_chunks.archived_at(soft archive)',  '不用做(預設 dry_run)'],
+          ['每月 1 號(Phase 5 B4)', '`pmPromptSelfImproveService` 跑 LLM meta-job', 'pm_prompt_review_queue',   '採購員開 `/pm/review` 審 v2 prompt'],
         ]
       },
       {
@@ -368,7 +382,7 @@ const sections = [
     sort_order: 50,
     icon: 'CalendarClock',
     icon_color: 'text-violet-500',
-    last_modified: bookLastModified,
+    last_modified: phase5LastModified,
     title: '6 個排程任務說明',
     sidebar_label: '排程任務',
     blocks: [
@@ -527,6 +541,69 @@ const sections = [
           },
         ]
       },
+
+      {
+        type: 'subsection',
+        title: 'Phase 5:每日預測校驗(系統 cron,非 user 配置)',
+        blocks: [
+          {
+            type: 'para',
+            text: '除了上面 6 個 user-facing 排程,Phase 5 起後台多了一組**內部 cron**(無法在「排程任務」頁編輯,在 server 啟動時 wire),負責 PM 平台運維 + 品質追蹤:'
+          },
+          {
+            type: 'table',
+            headers: ['cron', '頻率', '做什麼', '看哪'],
+            rows: [
+              ['`pmForecastAccuracyService`', '每 24h',  '比 7 天前 forecast vs 今日實際,寫 MAPE / in_band',          '戰情「各金屬 30 天 MAPE 排行」/「滾動 60 天」'],
+              ['`pmPromptSelfImproveService`', '每月 1 號', '撈 30 天最差 + thumbs-down 案例餵 Pro,產 v2 prompt',       '採購員 `/pm/review` 審 → approve 才套用'],
+              ['`pmSourceHealthService`',     '每 6h',   '18 個全網 source HEAD/GET 巡檢,連 3 失敗 → email admin',   'admin「PM 平台健康 → Sources」tab'],
+              ['`pmTokenBudgetService`',      '每 1h',   'token_usage by owner_user_id 平攤給該 owner 當日 [PM] 任務', 'admin「PM 平台健康 → Cost」tab'],
+              ['`pmKbMaintenanceService`',    '每 7d',   '掃 PM-新聞庫 > 90d chunks → soft archive(預設 dry_run)',    'admin「PM 平台健康 → KB 維護」tab'],
+              ['`pmWebexPushService`',        '每 1 分鐘', '比 schedule_hhmm 推送訂閱 Snapshot Card',                  'user 在 `/pm/review` 右上角設訂閱'],
+              ['`pmErpSyncService`',          '每 5 分鐘', '找到期 active jobs 跑(下節說明)',                       'admin「PM ERP 同步」tab'],
+            ]
+          },
+          {
+            type: 'note',
+            text: '🔧 這些 cron **無 UI 開關**(在 [server.js](../../server/server.js) 啟動 wire);若要暫停只能 admin 改程式碼或環境變數(如 `PM_KB_ARCHIVE_DRYRUN=false`)。'
+          },
+        ]
+      },
+
+      {
+        type: 'subsection',
+        title: 'PM ERP 同步 jobs(Phase 5 A,admin 操作)',
+        blocks: [
+          {
+            type: 'para',
+            text: 'Phase 5 加入**通用 ERP 同步 framework**,把 ERP 真實 BOM / 採購歷史 / 在途庫存自動拉到 PM 本地表(取代手動 CSV)。**全部 auto-seed 為 `is_active=0` + `is_dry_run=1`**,升級不會誤連 ERP 撈大量資料,需 admin 手動啟用。'
+          },
+          {
+            type: 'steps',
+            items: [
+              { title: '進 AdminDashboard → 「PM ERP 同步」tab',                desc: '看到 3 個 auto-seed 範本 job + 可新增' },
+              { title: '點任一 job「編輯」',                                       desc: '檢視 source_query SQL(EBS 範本)+ mapping_json + upsert_mode + interval' },
+              { title: '改 SQL(EBS customization 一定要改)',                  desc: '範本只是常見 EBS schema,實際 table 名 / 欄位需 ERP DBA 確認' },
+              { title: '按「Preview」跑 SELECT 不寫',                            desc: '看前 10 row + 欄位名,對齊 mapping_json(ERP 大寫 → PM 小寫)' },
+              { title: '切 `is_dry_run=0` + `is_active=1`',                      desc: '正式啟用;每 5 分鐘 tick 自動跑' },
+              { title: '看「Logs」tab',                                           desc: '最近 30 次執行 status / rows / duration / error / sample_row' },
+            ]
+          },
+          {
+            type: 'table',
+            headers: ['範本 job', '預設頻率', '寫到', '取代什麼'],
+            rows: [
+              ['`[PM-ERP] BOM 金屬含量同步`',     '每日',   '`pm_bom_metal`',         '採購單位手動上傳 CSV(Phase 1-4 做法)'],
+              ['`[PM-ERP] 採購單歷史 12 月`',     '每日',   '`pm_purchase_history`',  '無 — 純新增,給 LLM「採購節奏 vs 市場價」上下文'],
+              ['`[PM-ERP] 在途 + 安全庫存`',      '每 6h',  '`pm_inventory`',         '無 — 純新增,戰情「在庫 vs 7 日預測缺口」用'],
+            ]
+          },
+          {
+            type: 'note',
+            text: '🔒 **安全機制**:`target_pm_table` 強制 `pm_*` 開頭(防誤刪 ERP 資料);ERP 連線走 `ReadOnlyPoolProxy`(只能 SELECT 不可能誤改);單次最多 100k rows 防爆。'
+          },
+        ]
+      },
     ]
   },
 
@@ -607,7 +684,7 @@ const sections = [
     sort_order: 70,
     icon: 'BarChart3',
     icon_color: 'text-indigo-500',
-    last_modified: bookLastModified,
+    last_modified: phase5LastModified,
     title: 'AI 戰情(3 視角 Topic)',
     sidebar_label: 'AI 戰情視角',
     blocks: [
@@ -630,6 +707,7 @@ const sections = [
               ['未來 7 天預測走廊',       'mean + 80% 信心區間',                   'PM_FORECAST 表'],
               ['過去 24h 新聞情緒分布',   '哪些金屬被熱議 + 平均情緒',            'PM-新聞庫'],
               ['7 日宏觀指標趨勢',         'DXY / VIX / 10Y / WTI',                '宏觀指標表'],
+              ['**當前在庫+在途 vs 7 日預測缺口**(Phase 5 A)', '哪些金屬要急著補貨', 'pm_inventory + forecast_history'],
             ]
           },
           {
@@ -651,6 +729,10 @@ const sections = [
               ['最新報告摘要',             '最近一份月報 / 週報精要',              'PM-分析庫'],
               ['近 30 天警示記錄',         '系統觸發的所有警示時間軸',             '警示歷史表'],
               ['模型預測 vs 實際',         '預測 mean vs 實際成交價對比',          'PM_FORECAST + 實際'],
+              ['**各金屬 30 天 MAPE 排行**(Phase 5 B)', '哪個金屬 LLM 預測最準/最不準', 'pm_forecast_accuracy'],
+              ['**近 12 月各金屬月度採購量趨勢**(Phase 5 A)', '集團 monthly metal usage', 'pm_purchase_history'],
+              ['**採購均單價 vs 市場價**(Phase 5 A)', '採購擇時是否打中低點', 'pm_purchase_history JOIN pm_price_history'],
+              ['**本月安全庫存達成率**(Phase 5 A)', 'NVL(onhand) / safety_stock', 'pm_inventory'],
             ]
           },
         ]
@@ -666,6 +748,8 @@ const sections = [
             rows: [
               ['同金屬多源價差',           '台銀 vs LBMA vs Metals-API 差異',       'PM-原始資料庫'],
               ['估算誤差追蹤',             '預測值偏離實際的趨勢',                 'PM_FORECAST + 實際'],
+              ['**預測 MAPE 滾動 60 天**(Phase 5 B)', '模型品質是否退化',         'pm_forecast_accuracy'],
+              ['**預測 vs 實際(個別金屬)**(Phase 5 B)', 'line w/ in_band 帶 80% 區間命中標記', 'pm_forecast_accuracy'],
             ]
           },
           {
@@ -700,7 +784,7 @@ const sections = [
     sort_order: 80,
     icon: 'Bot',
     icon_color: 'text-orange-500',
-    last_modified: bookLastModified,
+    last_modified: phase5LastModified,
     title: 'AI 對話 Agent 與深度分析',
     sidebar_label: 'AI 對話 / pm_deep',
     blocks: [
@@ -803,6 +887,61 @@ const sections = [
           },
         ]
       },
+
+      {
+        type: 'subsection',
+        title: 'Webex Bot 直接對話(Phase 5 C)',
+        blocks: [
+          {
+            type: 'para',
+            text: '不想開瀏覽器、出差路上、會議空檔 — 直接在 **Webex DM** 對 PM Bot 打中文/英文,**1 秒回 Adaptive Card**(short-circuit 不打 LLM,**零 token 成本**)。'
+          },
+          {
+            type: 'table',
+            headers: ['打什麼', '回什麼', '備註'],
+            rows: [
+              ['`top 5` / `快照` / `今日金價`',         'Snapshot Card:Top 5 metals 報價 + 漲跌% + Forecast 按鈕',       '採購最常打,5 秒掌握全貌'],
+              ['`Au` / `銅` / `Cu` / `金`',            'Latest 報價 Card',                                              '11 金屬代碼別名,中/英/縮寫都認'],
+              ['`銅 預測` / `Cu forecast` / `Au 7 day`', 'Forecast Card:7-day forecast + 信心區間 + Unicode sparkline ▁▂▃▄▅▆▇█ + What-if 按鈕', 'sparkline 用 monospace,不需 server 渲染'],
+              ['`銅 +10%` / `what if Cu -5%` / `銀 漲 10%`', 'What-if Card:當前 vs 模擬價 + JOIN pm_bom_metal 算 cost impact', 'BOM 為空回「需 BOM 才能算」'],
+              ['`/pm help`',                            'Help Card:列所有可用指令',                                       '忘記指令時打'],
+            ]
+          },
+          {
+            type: 'tip',
+            text: 'Adaptive Card 上的「Forecast」/「What-if」按鈕也是 short-circuit,**直接觸發下一張 Card 不用打字**。'
+          },
+          {
+            type: 'subsection',
+            title: '訂閱每日 Snapshot 推送',
+            blocks: [
+              {
+                type: 'steps',
+                items: [
+                  { title: '進 web `/pm/review` 頁',                              desc: '需有 `precious-metals` 特殊說明書權限' },
+                  { title: '右上角「Webex 訂閱」按鈕 → 開 modal',               desc: '設 `kind=daily_snapshot` + `schedule_hhmm`(如 `09:00`)' },
+                  { title: '儲存後,每分鐘 cron 比 schedule_hhmm 自動推',       desc: 'last_sent_date 防一日多發,server 重啟 idempotent' },
+                  { title: '需先跟 PM Bot 對過話',                                desc: '系統自動找該 user 的 DM roomId(從 webex_sessions);沒對過話 → skip' },
+                ]
+              },
+              {
+                type: 'note',
+                text: '訂閱表 UNIQUE (user_id, kind),重複 POST 視為更新。停止訂閱:同 modal 按 DELETE。'
+              },
+            ]
+          },
+          {
+            type: 'subsection',
+            title: 'PM intent 沒中怎麼辦',
+            blocks: [
+              {
+                type: 'para',
+                text: 'NL intent 偵測沒中(99% 一般對話 / 開放問題)→ **fall through 到既有 LLM 流程**,行為跟 Phase 4 一模一樣,有 RAG 也有對話歷史。**所有 PM intent short-circuit 也會寫 `chat_messages`** → web chat session 看得到完整 Webex 對話歷史。'
+              },
+            ]
+          },
+        ]
+      },
     ]
   },
 
@@ -857,7 +996,7 @@ const sections = [
     sort_order: 100,
     icon: 'AlertCircle',
     icon_color: 'text-red-500',
-    last_modified: bookLastModified,
+    last_modified: phase5LastModified,
     title: '限制、免責與 FAQ',
     sidebar_label: '限制 / 免責 / FAQ',
     blocks: [
@@ -977,6 +1116,93 @@ const sections = [
                   '> 10 分鐘未完成 → 後台「立即取消」+ 看 logs',
                   '常見原因:LLM API 限流(切 Flash 試)/ 外部資料源 timeout',
                 ]
+              },
+            ]
+          },
+
+          {
+            type: 'subsection',
+            title: 'Q6: 預測準不準怎麼知道?(Phase 5 B)',
+            blocks: [
+              {
+                type: 'list',
+                items: [
+                  '進 AI 戰情「**主管視角**」→「**各金屬 30 天 MAPE 排行**」Design 一眼看哪個金屬模型準',
+                  '進「**分析師視角**」→「**預測 MAPE 滾動 60 天**」看模型品質是否退化',
+                  '看「**預測 vs 實際(個別金屬)**」line w/ in_band — 80% 信心區間命中率(灰色 band 包住實際線就算命中)',
+                  '對某次預測有意見 → 在報告 / forecast viewer 按 **thumbs up/down + comment**,系統會把 thumbs-down 收進每月 self-improve 案例池',
+                  '某金屬連 3 天 |MAPE| > 30% → 系統自動發 alert(`pm_mape_streak`)+ 進 `/pm/review` queue 等採購員審 v2 prompt',
+                ]
+              },
+              {
+                type: 'tip',
+                text: '**MAPE 目標 < 3%**(採購決策級);> 5% 就要警覺,> 10% 連續多日要找 IT 調 prompt 或考慮換模型。'
+              },
+            ]
+          },
+
+          {
+            type: 'subsection',
+            title: 'Q7: 如何設定每日 token 預算上限避免失控?(Phase 5 F2)',
+            blocks: [
+              {
+                type: 'list',
+                items: [
+                  '進 AdminDashboard →「**PM 平台健康**」tab →「**Tasks**」sub-tab',
+                  '找對應 [PM] 任務 → 「**daily_token_budget**」欄位**行內編輯**(填 token 數,如 `200000`)',
+                  '排程下次跑前會 check;當天用量 > budget → 自動 `token_budget_paused_at = now`,當天跳過',
+                  '隔日 00:00 自動解除(不用人工 reset);觸發瞬間 email admin(ADMIN_NOTIFY_EMAIL)',
+                  '想立刻解除 → 同 tab 按「Clear pause」按鈕',
+                ]
+              },
+              {
+                type: 'note',
+                text: '🔢 **預算估算**:Pro 模型一次完整月報約 80k-150k tokens;Flash 一次新聞抓取約 20k-40k tokens。日報 budget 建議 `300000`,週報 `500000`,月報 `1000000`。'
+              },
+            ]
+          },
+
+          {
+            type: 'subsection',
+            title: 'Q8: ERP 真採購歷史怎麼接?(Phase 5 A)',
+            blocks: [
+              {
+                type: 'list',
+                items: [
+                  '進 AdminDashboard →「**PM ERP 同步**」tab',
+                  '找 auto-seed 範本「`[PM-ERP] 採購單歷史 12 月`」→ 編輯',
+                  'EBS 標準範本 SQL(`PO_LINES_ALL JOIN PO_HEADERS_ALL`)**幾乎一定要改** — 各廠 customization 不同',
+                  '改完 SQL → 按「**Preview**」跑 SELECT 不寫,看前 10 row 確認欄位對',
+                  '對齊 `mapping_json`(ERP 大寫欄位 → PM 小寫欄位),沒 mapping 的欄位用全欄 lowercase',
+                  '切 `is_dry_run=0` + `is_active=1` → 每 5 分鐘 tick 自動跑',
+                  '看「Logs」看執行記錄;戰情「採購均單價 vs 市場價」會即時用新資料',
+                ]
+              },
+              {
+                type: 'note',
+                text: '🔒 ERP 連線走 `ReadOnlyPoolProxy`,**只能 SELECT 不可能誤改 ERP 資料**;target table 強制 `pm_*` 開頭防誤刪。'
+              },
+            ]
+          },
+
+          {
+            type: 'subsection',
+            title: 'Q9: Webex 訂閱每日 Snapshot 怎麼設?(Phase 5 C)',
+            blocks: [
+              {
+                type: 'list',
+                items: [
+                  '**先決條件**:你有 `precious-metals` 特殊說明書讀取權限(admin 在「特殊說明書管理」設)',
+                  '**先決條件**:你已經跟 PM Bot 對過至少一次話(系統才有你的 DM roomId)',
+                  '進 web `/pm/review` 頁(sidebar「PM 審核」入口) → 右上角「**Webex 訂閱**」按鈕',
+                  '開 modal → 設 `kind=daily_snapshot` + `schedule_hhmm`(格式 `HH:MM`,如 `09:00`)→ 儲存',
+                  '每分鐘 cron 比 schedule_hhmm,到時間自動 DM 推 Snapshot Card(4 大貴金屬 + 4 基本金屬)',
+                  '想停止 → 同 modal 按 DELETE',
+                ]
+              },
+              {
+                type: 'tip',
+                text: '訂閱表 UNIQUE per (user_id, kind),重複 POST 視為更新時間。`last_sent_date` 防一日多發,server 重啟 idempotent 不會重複推。'
               },
             ]
           },
