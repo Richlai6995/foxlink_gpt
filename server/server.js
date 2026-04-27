@@ -139,6 +139,8 @@ app.get('/api/health', (req, res) => res.json({ status: 'ok', timestamp: new Dat
     console.log('[Route] /api/pm-bom OK');
     app.use('/api/pm', require('./routes/pmReview'));
     console.log('[Route] /api/pm (review/feedback/accuracy) OK');
+    app.use('/api/pm/briefing', require('./routes/pmBriefing'));
+    console.log('[Route] /api/pm/briefing (news/prices/reports/preferences) OK');
 
     // Autoscan user email domains → Webex allowed-domain whitelist
     // 每次啟動時掃描 users.email，union 進白名單（只加不刪，admin 手動加的會保留）

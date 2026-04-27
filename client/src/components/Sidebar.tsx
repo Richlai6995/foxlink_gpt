@@ -531,10 +531,10 @@ export default function Sidebar({
                 )}
               </button>
               {hasPmAccess && (
-                <button onClick={() => { setShowMenu(false); navigate('/pm/review') }}
+                <button onClick={() => { setShowMenu(false); navigate('/pm/briefing') }}
                   className="w-full flex items-center gap-2 text-amber-400 hover:bg-slate-700 px-3 py-2.5 text-xs transition font-medium">
                   <Sparkles size={13} />
-                  <span className="flex-1 text-left">{t('sidebar.pmReview', '貴金屬 — Prompt 審核')}</span>
+                  <span className="flex-1 text-left">{t('sidebar.pmBriefing', '貴金屬情報')}</span>
                   {pmReviewPending > 0 && (
                     <span className="bg-amber-500 text-white text-[10px] font-bold rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1">
                       {pmReviewPending > 99 ? '99+' : pmReviewPending}

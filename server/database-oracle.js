@@ -3796,6 +3796,25 @@ async function runMigrations(db) {
   await addCol('KB_CHUNKS', 'ARCHIVED_AT', 'TIMESTAMP');
   await addCol('KB_CHUNKS', 'ARCHIVE_REASON', 'VARCHAR2(100)');
 
+  // ── PM Briefing (新聞獨立瀏覽頁) per-user 偏好 + 釘選 ─────────────────────
+  // user 的關注金屬 + 預設只看 24h
+  await createTable('PM_USER_PREFERENCES', `CREATE TABLE pm_user_preferences (
+    user_id           NUMBER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    focused_metals    VARCHAR2(200),
+    default_24h_only  NUMBER(1) DEFAULT 1,
+    updated_at        TIMESTAMP DEFAULT SYSTIMESTAMP
+  )`);
+
+  // user 釘選的新聞(個人收藏,跨裝置同步)
+  await createTable('PM_NEWS_PINS', `CREATE TABLE pm_news_pins (
+    id          NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    user_id     NUMBER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    news_id     NUMBER NOT NULL REFERENCES pm_news(id) ON DELETE CASCADE,
+    pinned_at   TIMESTAMP DEFAULT SYSTIMESTAMP,
+    CONSTRAINT uq_pmnp UNIQUE (user_id, news_id)
+  )`);
+  try { await db.prepare(`CREATE INDEX idx_pmnp_user ON pm_news_pins(user_id, pinned_at)`).run(); } catch (_) {}
+
   // pm_webex_subscription — Phase 5 Track C-3:user 訂閱 PM Webex 主動推送
   // kind: 'daily_snapshot'(每天 8:00 推 4 大金屬 + 預測)/ 其他預留
   // schedule_hhmm: 'HH:MM' 24hr 觸發時間(預設 '08:00')

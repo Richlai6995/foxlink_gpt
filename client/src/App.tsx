@@ -27,6 +27,7 @@ import FeedbackDetailPage from './pages/FeedbackDetailPage'
 import { lazy, Suspense } from 'react'
 const TrainingPage = lazy(() => import('./pages/TrainingPage'))
 const PmReviewQueuePage = lazy(() => import('./pages/PmReviewQueuePage'))
+const PmBriefingPage = lazy(() => import('./pages/PmBriefingPage'))
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated } = useAuth()
@@ -100,6 +101,7 @@ function AppRoutes() {
       <Route path="/feedback/:id" element={<ProtectedRoute><FeedbackDetailPage /></ProtectedRoute>} />
       <Route path="/training/*" element={<ProtectedRoute><Suspense fallback={<div className="flex items-center justify-center h-screen bg-slate-900 text-slate-400">Loading...</div>}><TrainingPage /></Suspense></ProtectedRoute>} />
       <Route path="/pm/review" element={<ProtectedRoute><Suspense fallback={<div className="flex items-center justify-center h-screen bg-slate-50 text-slate-400">Loading...</div>}><PmReviewQueuePage /></Suspense></ProtectedRoute>} />
+      <Route path="/pm/briefing" element={<ProtectedRoute><Suspense fallback={<div className="flex items-center justify-center h-screen bg-slate-50 text-slate-400">Loading...</div>}><PmBriefingPage /></Suspense></ProtectedRoute>} />
       <Route path="/reset-password" element={<ResetPasswordPage />} />
       <Route path="*" element={<Navigate to={isAuthenticated ? '/chat' : '/login'} replace />} />
     </Routes>

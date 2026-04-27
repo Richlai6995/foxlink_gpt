@@ -10,7 +10,7 @@
  *
  * 設計原則:
  *   - 完全 idempotent(by name)
- *   - 預設 is_public=1(全 user 都看得到,給 PM 平台共用)
+ *   - 預設 is_public=0(私人;admin 自行用知識庫分享機制手動開放給特定對象)
  *   - creator = 預設 admin user,所以 admin 自己編輯 / 刪除 / 改設定都可以
  *   - 新建後自動為 KB 加 KB_CHUNKS partition(避免後續 kb_write 堆爛)
  *
@@ -26,7 +26,7 @@ const KB_DEFINITIONS = [
     chunk_strategy: 'regular',
     chunk_config: { chunk_size: 600, chunk_overlap: 80 },
     tags: ['PM', 'news', '金屬', 'auto-seed'],
-    is_public: 1,
+    is_public: 0,
   },
   {
     name: 'PM-分析庫',
@@ -34,7 +34,7 @@ const KB_DEFINITIONS = [
     chunk_strategy: 'regular',
     chunk_config: { chunk_size: 800, chunk_overlap: 100 },
     tags: ['PM', 'analysis', 'report', 'auto-seed'],
-    is_public: 1,
+    is_public: 0,
   },
   {
     name: 'PM-原始資料庫',
@@ -42,7 +42,7 @@ const KB_DEFINITIONS = [
     chunk_strategy: 'regular',
     chunk_config: { chunk_size: 1000, chunk_overlap: 120 },
     tags: ['PM', 'raw', 'scrape', 'auto-seed'],
-    is_public: 1,
+    is_public: 0,
   },
 ];
 
@@ -146,6 +146,21 @@ async function autoSeedPmKnowledgeBases(db) {
   if (createdCount > 0) {
     console.log(`[PMKnowledgeBaseSeed] ${createdCount} created, ${existedCount} already existed (out of ${KB_DEFINITIONS.length})`);
   }
+
+  // 一次性 migration:把既存 PM-* KB 從 is_public=1 改回 0(2026-04-27 user 要求)
+  // 已私 + 已透過分享機制授權給特定 user 的不再動;此 migration 只動全公開的
+  try {
+    const names = KB_DEFINITIONS.map(d => d.name);
+    const placeholders = names.map(() => '?').join(',');
+    const r = await db.prepare(
+      `UPDATE knowledge_bases SET is_public = 0 WHERE is_public = 1 AND name IN (${placeholders})`
+    ).run(...names);
+    const cnt = r?.rowsAffected ?? r?.changes ?? 0;
+    if (cnt > 0) console.log(`[PMKnowledgeBaseSeed] Migrated ${cnt} PM-* KB(s) is_public 1 → 0(已私,需手動分享)`);
+  } catch (e) {
+    console.warn('[PMKnowledgeBaseSeed] is_public reset migration:', e.message);
+  }
+
   return idMap;
 }
 
