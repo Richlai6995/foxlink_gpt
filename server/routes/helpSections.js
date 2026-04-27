@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { verifyToken, verifyAdmin } = require('./auth');
+const { resolveGranteeNamesInRows, getLangFromReq } = require('../services/granteeNameResolver');
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -519,6 +520,8 @@ router.get('/admin/books/:id/shares', verifyToken, verifyAdmin, async (req, res)
       WHERE s.book_id = ?
       ORDER BY s.granted_at DESC, s.id DESC
     `).all(req.params.id);
+    // 統一補 grantee_name(跟 AI 戰情 / DesignerPanel / 其他分享元件同 pattern)
+    await resolveGranteeNamesInRows(rows, getLangFromReq(req), db);
     res.json(rows);
   } catch (err) {
     console.error('[HelpSections] GET /admin/books/:id/shares error:', err);
