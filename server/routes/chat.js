@@ -1773,6 +1773,10 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
     // ── TAG-based skill auto-routing (skills not manually attached but tags match) ──
     const sessionSkillIds = new Set(sessionSkills.map(s => String(s.id)));
     let tagRoutedSkills = [];
+    // Explicit mode 下使用者已明確選工具,不要再讓 TAG router 自動加塞 skill 的 code tool
+    if (explicitMode) {
+      console.log(`[Skill] TAG routing skipped (explicit tool selection mode)`);
+    } else {
     try {
       // Apply per-user hidden filter at TAG-routing entry — skips Checking-skill logs and tag matching for hidden ones
       const allAccessibleSkills = (hiddenSkillIds.size === 0 && hiddenErpIds.size === 0)
@@ -1818,6 +1822,7 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
       }
     } catch (e) {
       console.warn('[Skill] TAG auto-routing for skills failed:', e.message);
+    }
     }
     const tagRoutedSkillIds = new Set(tagRoutedSkills.map(s => String(s.id)));
 
