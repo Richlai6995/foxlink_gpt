@@ -1826,15 +1826,16 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
     }
     const tagRoutedSkillIds = new Set(tagRoutedSkills.map(s => String(s.id)));
 
-    // ── Topbar 強制啟用 Answer / Inject 模式的 ERP tool ─────────────────────
-    // 當使用者從 topbar ⚡ API 面板勾選 ERP tool,且該 tool 是 answer/inject 模式,
-    // 不受 TAG 匹配限制,強制注入到 allSkillsToProcess 直接觸發直達/注入行為。
-    // (tool 模式走後面的 Gemini function 註冊路徑,不需要在這邊處理)
-    let topbarErpAnswerInjectSkills = [];
+    // ── Topbar 強制啟用 ERP tool(三種模式都吃)─────────────────────
+    // 當使用者從 topbar ⚡ API 面板勾選 ERP tool,不受 TAG 匹配限制,
+    // 強制注入到 allSkillsToProcess。
+    //  - answer / inject 模式:走前面 erp_proc skill 迴圈直接 exec 或 inject
+    //  - tool 模式:走後面 register loop 註冊為 Gemini function declaration
+    let topbarErpSkills = [];
     if (Array.isArray(userErpToolIds) && userErpToolIds.length > 0) {
       try {
         const placeholders = userErpToolIds.map(() => '?').join(',');
-        // 先撈出這些 erp_tool 的狀態做診斷(即使 mode 不是 answer/inject 也印出)
+        // 先撈出這些 erp_tool 的狀態做診斷
         const diagRows = await db.prepare(`
           SELECT t.id, t.name, t.endpoint_mode, t.enabled, t.proxy_skill_id
           FROM erp_tools t WHERE t.id IN (${placeholders})
@@ -1847,20 +1848,19 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
           JOIN skills s ON s.id = t.proxy_skill_id
           WHERE t.id IN (${placeholders})
             AND t.enabled = 1
-            AND UPPER(t.endpoint_mode) IN ('ANSWER','INJECT')
         `).all(...userErpToolIds.map(Number));
         const existingIds = new Set([
           ...sessionSkills.map(s => String(s.id || s.ID)),
           ...tagRoutedSkills.map(s => String(s.id || s.ID)),
         ]);
-        topbarErpAnswerInjectSkills = (rows || []).filter(r => !existingIds.has(String(r.id || r.ID)));
-        console.log(`[Skill] Topbar-forced ERP direct-exec: loaded=${(rows || []).length} after-dedup=${topbarErpAnswerInjectSkills.length} skills=[${topbarErpAnswerInjectSkills.map(s => `${s.name || s.NAME}(${(s.endpoint_mode || s.ENDPOINT_MODE)})`).join(', ')}]`);
+        topbarErpSkills = (rows || []).filter(r => !existingIds.has(String(r.id || r.ID)));
+        console.log(`[Skill] Topbar-forced ERP: loaded=${(rows || []).length} after-dedup=${topbarErpSkills.length} skills=[${topbarErpSkills.map(s => `${s.name || s.NAME}(${(s.endpoint_mode || s.ENDPOINT_MODE)})`).join(', ')}]`);
       } catch (e) {
-        console.warn('[Skill] Topbar ERP answer/inject load failed:', e.message);
+        console.warn('[Skill] Topbar ERP load failed:', e.message);
       }
     }
 
-    let allSkillsToProcess = [...sessionSkills, ...tagRoutedSkills, ...topbarErpAnswerInjectSkills];
+    let allSkillsToProcess = [...sessionSkills, ...tagRoutedSkills, ...topbarErpSkills];
     // Skip hidden skills + skills whose underlying ERP tool is hidden(ERP 是包成 erp_proc skill 進來的)
     if (hiddenSkillIds.size > 0 || hiddenErpIds.size > 0) {
       const _before = allSkillsToProcess.length;
