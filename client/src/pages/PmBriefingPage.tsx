@@ -732,7 +732,10 @@ function PriceHistoryTab({ focusedMetals }: { focusedMetals: string[] }) {
   const today = new Date().toISOString().slice(0, 10)
   const monthAgo = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10)
 
-  const initMetals = focusedMetals.length > 0 ? focusedMetals.map(m => m.toUpperCase()) : ['AU']
+  // 沒設偏好 → 預設全選 11 個(看全貌);有偏好 → 只看偏好
+  const initMetals = focusedMetals.length > 0
+    ? focusedMetals.map(m => m.toUpperCase())
+    : ALL_METALS.map(m => m.code)
   const [metals, setMetals] = useState<string[]>(initMetals)
   const [from, setFrom] = useState(monthAgo)
   const [to, setTo] = useState(today)
@@ -1069,8 +1072,23 @@ function PriceChart({
     tooltip: { trigger: 'axis', axisPointer: { type: 'cross' } },
     legend: { data: legendData, type: 'scroll' },
     grid: { left: 50, right: 30, top: 40, bottom: 40 },
-    xAxis: { type: 'time' },
-    yAxis: { type: 'value', name: 'USD', scale: true },
+    xAxis: {
+      type: 'time',
+      // 強制按「天」切刻度,避免短期資料(< 1 週)時 ECharts auto 退化到「小時」格式
+      minInterval: 24 * 3600 * 1000,
+      axisLabel: {
+        formatter: (val: number) => {
+          const d = new Date(val)
+          const mm = String(d.getMonth() + 1).padStart(2, '0')
+          const dd = String(d.getDate()).padStart(2, '0')
+          return `${d.getFullYear()}-${mm}-${dd}`
+        },
+      },
+    },
+    // > 3 條線時用 log 軸 — 金屬價差 PB(1.9k) ~ SN(50k) 26 倍,linear 會把低價金屬壓成平線
+    yAxis: codes.length > 3
+      ? { type: 'log', name: 'USD (log)', logBase: 10, scale: true }
+      : { type: 'value', name: 'USD', scale: true },
     dataZoom: [{ type: 'inside' }, { type: 'slider', height: 20 }],
     series,
   }
