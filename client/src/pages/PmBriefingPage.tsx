@@ -436,7 +436,7 @@ function DailyInsight() {
   if (!report) {
     return (
       <div className="bg-amber-50 border-b border-amber-200 px-6 py-3 text-sm text-amber-800">
-        ℹ️ 今日報告 09:30 才生成,目前無資料可顯示
+        ℹ️ 尚未生成任何日報 — 請先到「排程任務」啟用 [PM] 每日金屬日報(預設每日 18:00 跑)
       </div>
     )
   }
@@ -448,7 +448,7 @@ function DailyInsight() {
     <div className="bg-blue-50 border-b border-blue-100 px-6 py-3 text-sm">
       {todayMissing && (
         <div className="text-amber-700 text-xs mb-2 bg-amber-50 border border-amber-200 rounded px-2 py-1 inline-block">
-          ⏳ 今日報告 09:30 才生成 — 以下為 {report.as_of_date} 報告
+          ⏳ 今日(尚未生成日報 — 預設每日 18:00 跑)— 以下為 {report.as_of_date} 報告
         </div>
       )}
       <div className="flex items-start gap-2">
@@ -1106,10 +1106,44 @@ function PriceChart({
     }
   }
 
+  // 把 ms timestamp 格成 YYYY-MM-DD,tooltip / cross axis label 都用
+  const fmtDate = (val: number) => {
+    const d = new Date(val)
+    const mm = String(d.getMonth() + 1).padStart(2, '0')
+    const dd = String(d.getDate()).padStart(2, '0')
+    return `${d.getFullYear()}-${mm}-${dd}`
+  }
+
   const option = {
-    tooltip: { trigger: 'axis', axisPointer: { type: 'cross' } },
-    legend: { data: legendData, type: 'scroll' },
-    grid: { left: 50, right: 30, top: 40, bottom: 40 },
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: {
+        type: 'cross',
+        // cross 軸下方 label(滑鼠跟著的小框)— 強制日期,不要 00:00:00 時間
+        label: { formatter: (params: any) => params.axisDimension === 'x' ? fmtDate(params.value) : Number(params.value).toLocaleString() },
+      },
+      // tooltip header(滑鼠 hover 跳出的整框)第一行也是日期
+      formatter: (items: any[]) => {
+        if (!items || !items.length) return ''
+        const dateStr = fmtDate(items[0].axisValue)
+        const lines = items.map(it => {
+          const v = Array.isArray(it.data) ? it.data[1] : it.value
+          const num = Number(v)
+          const fmt = Number.isFinite(num) ? num.toLocaleString(undefined, { maximumFractionDigits: 2 }) : '—'
+          return `${it.marker}${it.seriesName}<span style="float:right;margin-left:20px;font-weight:bold">${fmt}</span>`
+        }).join('<br/>')
+        return `<div style="font-weight:bold;margin-bottom:4px">${dateStr}</div>${lines}`
+      },
+    },
+    legend: {
+      data: legendData,
+      type: 'scroll',
+      top: 4,                    // 移到頂端,別擋 X 軸
+      left: 'center',
+      itemWidth: 14,
+      itemHeight: 8,
+    },
+    grid: { left: 60, right: 30, top: 40, bottom: 60 },  // bottom 大一點留 dataZoom slider 空間
     xAxis: {
       type: 'time',
       // 強制按「天」切刻度,避免短期資料(< 1 週)時 ECharts auto 退化到「小時」/「2 天」格式
