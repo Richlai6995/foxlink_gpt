@@ -246,6 +246,64 @@ function buildSearchNotice(queries, sources) {
  * dashboardService / researchService / kbDocParser 等 batch 服務不套這個 default,
  * 保留各自原有(dynamic)行為,避免意外限縮品質。
  */
+/**
+ * Gemini 只認 OpenAPI 3.0 子集,JSON Schema 2020-12 / OpenAPI 3.1 的部分 keyword
+ * (例如 contentMediaType / contentEncoding / $schema / patternProperties / dependencies)
+ * 會被 Vertex / AI Studio API 直接 400 INVALID_ARGUMENT 拒絕,且整批 tools[] 連帶炸掉。
+ *
+ * 這個函式遞迴清除這些不允許的欄位,讓任何 MCP server / Skill 作者上傳的 tool_schema
+ * 都能餵進 Gemini,不會因為一個工具的 schema 誤用就讓整個 chat 路徑掛掉。
+ *
+ * 採 denylist 而非 allowlist:保守處理,不誤砍合法欄位(items.example 等)。
+ * 若日後 Gemini 又改規則,新增名稱進 DISALLOWED_KEYS 即可。
+ */
+const DISALLOWED_SCHEMA_KEYS = new Set([
+  // JSON Schema content/encoding(2019-09+)
+  'contentMediaType', 'contentEncoding', 'contentSchema',
+  // JSON Schema metadata
+  '$schema', '$id', '$comment', '$anchor', '$dynamicAnchor', '$dynamicRef', '$vocabulary',
+  // 條件 / 依賴 (Gemini 不支援)
+  'if', 'then', 'else', 'dependentSchemas', 'dependentRequired', 'dependencies',
+  // 進階
+  'patternProperties', 'unevaluatedProperties', 'unevaluatedItems',
+  'prefixItems', 'contains', 'minContains', 'maxContains',
+  'definitions', '$defs',
+  // OpenAPI 3.1 specific 但 Gemini 不認
+  'readOnly', 'writeOnly', 'deprecated', 'externalDocs', 'xml',
+]);
+
+function sanitizeGeminiSchema(node, droppedRef) {
+  if (Array.isArray(node)) return node.map(n => sanitizeGeminiSchema(n, droppedRef));
+  if (!node || typeof node !== 'object') return node;
+  const out = {};
+  for (const [k, v] of Object.entries(node)) {
+    if (DISALLOWED_SCHEMA_KEYS.has(k)) {
+      if (droppedRef) droppedRef.add(k);
+      continue;
+    }
+    out[k] = sanitizeGeminiSchema(v, droppedRef);
+  }
+  return out;
+}
+
+function sanitizeFunctionDeclarations(decls) {
+  if (!Array.isArray(decls)) return decls;
+  return decls.map((d, idx) => {
+    const dropped = new Set();
+    const safe = {
+      ...d,
+      parameters: d.parameters ? sanitizeGeminiSchema(d.parameters, dropped) : d.parameters,
+      response:   d.response   ? sanitizeGeminiSchema(d.response,   dropped) : d.response,
+    };
+    if (dropped.size > 0) {
+      console.warn(
+        `[GeminiSchema] sanitized tool[${idx}] "${d.name || 'unknown'}" — dropped: ${[...dropped].join(', ')}`
+      );
+    }
+    return safe;
+  });
+}
+
 function _resolveThinkingBudget(apiModel, reasoningEffort, explicitBudget) {
   if (explicitBudget != null) return Number(explicitBudget);
   const isFlash = /flash/i.test(apiModel || '');
@@ -650,10 +708,11 @@ async function generateWithTools(apiModel, history, userParts, functionDeclarati
   const fullInstruction = extraSystemInstruction
     ? getSystemInstruction() + '\n\n---\n' + extraSystemInstruction
     : getSystemInstruction();
+  const safeDecls = sanitizeFunctionDeclarations(functionDeclarations);
   const model = getGenerativeModel({
     model: apiModel,
     systemInstruction: fullInstruction,
-    tools: functionDeclarations.length > 0 ? [{ functionDeclarations }] : [],
+    tools: safeDecls.length > 0 ? [{ functionDeclarations: safeDecls }] : [],
   });
 
   // ⭐ 自管 contents — 不用 chat.startChat()，因為舊 SDK 會洗掉 thoughtSignature
@@ -765,11 +824,12 @@ async function generateWithToolsStream(
     ...(thinkingBudget != null ? { thinkingConfig: { thinkingBudget } } : {}),
   };
 
+  const safeDecls = sanitizeFunctionDeclarations(functionDeclarations);
   const model = getGenerativeModel({
     model: apiModel,
     systemInstruction: fullInstruction,
     generationConfig,
-    tools: functionDeclarations.length > 0 ? [{ functionDeclarations }] : [],
+    tools: safeDecls.length > 0 ? [{ functionDeclarations: safeDecls }] : [],
   });
 
   // ⭐ 自管 contents — 不用 chat.startChat()，因為舊 SDK 會洗掉 thoughtSignature
