@@ -10,11 +10,15 @@
  * 之後若 source list 變動頻繁,可改成 DB-driven(寫進 system_settings)。
  */
 
+// 健康檢查 URL — 不一定要跟 LLM 排程實際抓的 URL 完全一致
+// 例 Mining/OilPrice 改用 RSS feed:RSS 是設計給 bot 的,不被 Cloudflare 擋,可靠驗證網站存活
+// LLM 排程仍用 HTML URL(LLM fetch 工具帶完整 browser headers,通常能繞 anti-bot)
 const PM_SOURCES = [
   { url: 'https://www.kitco.com/charts/livegold.html',                    label: 'Kitco Live Gold' },
   { url: 'https://www.kitco.com/charts/livesilver.html',                  label: 'Kitco Live Silver' },
   { url: 'https://www.kitco.com/news/',                                   label: 'Kitco News' },
   { url: 'https://www.westmetall.com/en/markdaten.php',                   label: 'Westmetall Market Data' },
+  // Westmetall 沒有公開 RSS,Cloudflare 擋 → 預期 anti_bot,不影響運作
   { url: 'https://www.westmetall.com/en/news.php',                        label: 'Westmetall News' },
   { url: 'https://tradingeconomics.com/commodity/copper',                 label: 'TE Copper' },
   { url: 'https://tradingeconomics.com/commodity/aluminum',               label: 'TE Aluminum' },
@@ -25,8 +29,11 @@ const PM_SOURCES = [
   { url: 'https://tradingeconomics.com/commodity/silver',                 label: 'TE Silver' },
   { url: 'https://tradingeconomics.com/commodity/platinum',               label: 'TE Platinum' },
   { url: 'https://tradingeconomics.com/commodity/palladium',              label: 'TE Palladium' },
-  { url: 'https://www.mining.com/news/',                                  label: 'Mining.com News' },
-  { url: 'https://oilprice.com/Latest-Energy-News/',                      label: 'OilPrice News' },
+  // Mining.com /feed/ 是 WordPress 標準 RSS,實測通(2026-04-27)
+  { url: 'https://www.mining.com/feed/',                                  label: 'Mining.com (RSS)' },
+  // OilPrice /rss/main 公開 RSS,實測通(2026-04-27)
+  { url: 'https://oilprice.com/rss/main',                                 label: 'OilPrice (RSS)' },
+  // LME 整站 Cloudflare 擋,連 RSS 都沒;預期持續 anti_bot
   { url: 'https://www.lme.com/Metals/Non-ferrous/LME-Copper',             label: 'LME Copper' },
   { url: 'https://www.investing.com/commodities/metals',                  label: 'Investing.com Metals' },
 ];
