@@ -223,9 +223,11 @@ function PriceBanner({ focusedSet, expanded, onToggleExpand }: { focusedSet: Set
               <span className="font-bold text-slate-800 text-sm">{p.code}</span>
               <span className="text-slate-500 text-[11px]">{p.name_zh}</span>
               <span className="text-slate-700 font-mono text-sm">
-                {Number.isFinite(price) ? price.toLocaleString(undefined, { maximumFractionDigits: 2 }) : '—'}
+                {p.hasData && p.price_usd != null && Number.isFinite(price)
+                  ? price.toLocaleString(undefined, { maximumFractionDigits: 2 })
+                  : '—'}
               </span>
-              {Number.isFinite(chg) && (
+              {p.hasData && p.day_change_pct != null && Number.isFinite(chg) && (
                 <span className={`text-xs font-medium ${isUp ? 'text-emerald-600' : chg < 0 ? 'text-red-600' : 'text-slate-400'}`}>
                   {isUp ? '+' : ''}{chg.toFixed(2)}%
                 </span>
