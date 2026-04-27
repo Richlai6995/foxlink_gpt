@@ -526,3 +526,55 @@ Phase 5 把 PM 平台從「**功能完整**」推到「**業務真敢用**」—
 ```
 
 採購員早上開 Webex DM 打 `top 5` → 看 Top 5 金屬 snapshot → 點 Forecast 按鈕看 7 日預測 + sparkline → 點 What-if 按 `銅 +10%` 直接知對採購成本影響 → 進 web `/pm/review` 對 forecast 按 thumbs;主管打開 web 看戰情新 MAPE 排行 + 採購量 vs 市場價 + 安全庫存達成率;admin 進「PM 平台健康」確認 6 排程都綠 + token 沒爆 + 18 source 都通。**這就是 Phase 5 後的日常流。**
+
+---
+
+## 13. Phase 5 ship 後 hotfix(2026-04-27)
+
+Phase 5 雖然 12 全部 ship,但接到第一批採購實際操作回饋 + admin 操作後集中爆出**多層資料一致性 bug**(同日 ~10 commits 全部修完 push)。下面按「user 看到什麼 → root cause → 怎麼修」分群整理,給未來 owner 看 hotfix 史用。
+
+### 13.1 資料 / Schema 層 bug
+
+| User 看到 | Root cause | 修法(commit) |
+|---|---|---|
+| `/pm/briefing` 歷史價格全空,SQL `SELECT FROM PM_PRICE_HISTORY` 卻 0 筆,但 `metal_price_history` 有 44 筆 | Phase 2 rename `metal_price_history → pm_price_history` migration 條件 `oldExists>0 && newExists===0` 永遠不為 true(`createTable('PM_PRICE_HISTORY')` 在 rename 前就創了空新表),資料卡舊表 | [database-oracle.js](../server/database-oracle.js) 加 fallback:兩表都在 + 新表空 → INSERT INTO new SELECT FROM old(共同欄位)→ 舊表 RENAME `_obsolete`(讓 user 驗證後手動 DROP)。Idempotent。 (`274483a`) |
+| AU/AG/PT/PD chart 全空,但 banner 有顯示 `0` | 1) **DB 存大寫 'AU'** 但 client `ALL_METALS` 寫小寫 `'Au'`,Oracle case-sensitive `metal_code IN ('Au')` 對 `'AU'` miss<br>2) Banner `Number(null)=0 + Number.isFinite(0)=true` 把「沒資料」假裝成「0」 | 1) `ALL_METALS` 改 UPPERCASE + 後端全 endpoint 加 `UPPER()` defensive layer + DB normalization migration 一次性把 7 張 PM 表的 `metal_code/entity_code` 全 UPPER<br>2) Banner display 改 `p.hasData && p.price_usd != null && Number.isFinite(...)`,沒資料顯示 `—` (`7a77634` `4d76438` `1b51954`) |
+| forecast_history 永遠空,「AI 預測線」toggle 沒線 | `buildDailyReportTask` 的 db_write 預期 input 是 forecasts 陣列,但 `pipelineDbWriter` 只認頂層 array,LLM 輸出 `{report:{...}, forecasts:[...]}` 取不到子陣列 | `pipelineDbWriter` 加 `array_path` 設定支援 JSONPath drilldown;buildDailyReportTask 補 `array_path: '$.forecasts'`;加 `patchExistingForecastArrayPath()` migration 自動修既有 task。**新增 [`scripts/pmBackfillForecasts.js`](../server/scripts/pmBackfillForecasts.js)** 讓 admin 直接 LLM 生成歷史預測(current / rolling 兩模式)+ [`scripts/diag-pm-forecast.js`](../server/scripts/diag-pm-forecast.js) 6 段診斷。 (`566b972`) |
+| Banner 顯示 `📅 2026-04-26` 但實際今天 04-27 | `/prices` SQL 沒包 `TO_CHAR(as_of_date, 'YYYY-MM-DD')`,oracledb 把 DATE 當 local TZ 創 JS Date,Taipei +8 反推到前一天 UTC,前端 slice 取錯日期 | 全 PM endpoint SELECT 加 `TO_CHAR(as_of_date, 'YYYY-MM-DD')` 強制回字串。 (`ea71bfa`) |
+
+### 13.2 UI / UX 層 bug
+
+| User 看到 | Root cause | 修法 |
+|---|---|---|
+| 歷史價格 chart X 軸顯示 `02:00 / 04:00` 小時刻度 | 4 天範圍太短,ECharts `type:'time'` auto 退化到「小時」格式 | 加 `minInterval` + `maxInterval` 都鎖 `24*3600*1000`;`axisLabel.formatter` 自訂 `MM-DD` 短格式。 (`9c5a5bf` `ea71bfa`) |
+| 預設只勾 1 個金屬 (AU) | `initMetals = ['AU']` fallback hardcoded | 改 `ALL_METALS.map(m => m.code)` 沒偏好預設全選 11 個。 |
+| Tooltip 顯示 `2026-04-25 00:00:00` 帶時間 | ECharts 預設 time axis tooltip 包時間 | 自訂 `tooltip.formatter` + `axisPointer.label.formatter` 過 `fmtDate` 強制 YYYY-MM-DD;每 series 數字加千分位。 (`bd6a46d`) |
+| Legend 擋住 X 軸 label | ECharts 預設 legend 在 bottom | `legend.top: 4` 移到頂端;`grid.bottom: 60` 留空給 dataZoom slider。 |
+| 11 金屬同 chart 看 PB 被壓成貼底平線 | Linear Y 軸 + 26 倍價差(PB 1.9k vs SN 50k) | `codes.length > 3` 自動切 `type: 'log'`。 |
+| 詳細表沒匯出按鈕 | 早期沒做 | 加「匯出此表 CSV」按鈕,client-side 直接從 rows[] 生 20 欄 CSV(零後端 round trip)。 |
+| 日報 fallback 寫「09:30 才生成」但實際 18:00 排程 | 抄錯舊文案 | 改成「**尚未生成日報 — 預設每日 18:00 跑**」誠實版。 |
+| PM 平台設定 → 閱讀權限分享 顯示純代碼(X4 / 7009)沒名稱 | `/help/admin/books/:id/shares` endpoint 沒回 `grantee_name`,frontend `s.grantee_name || s.grantee_id` 只能 fallback 純代碼 | 用既有共用 `granteeNameResolver.resolveGranteeNamesInRows()` — 跟 AI 戰情 / DesignerPanel / Templates 等地方同 pattern。3 行 patch。 (`9959ebe`) |
+
+### 13.3 排程 / 監控層 bug
+
+| User 看到 | Root cause | 修法 |
+|---|---|---|
+| Source 監控出現 `Mining.com News /news/ → 404` `OilPrice News /Latest-Energy-News/ → 404` | 之前把這兩個改成 RSS feed 後新 row INSERT 但**舊 row 沒刪**,監控表雙列;Westmetall `/en/news.php` 真的 404(改版了) | `pmSourceHealthService.runOnce` seed 完加 `DELETE WHERE source_url NOT IN (current PM_SOURCES)` 自動清 stale;移除 Westmetall `/en/news.php`(留 `markdaten.php` 撈報價)。 (`6442491`) |
+| 健康儀表板「總 tokens」永遠 `—` | 多層 bug 疊加:<br>1) `pmTokenBudgetService` 用 `t.owner_user_id`,但 column 是 `t.user_id` → ORA-00904 silent fail<br>2) aggregator 用 `Date().toISOString()` 取 UTC date,token_usage 寫入用 `twDateStr()` 取 Taiwan local,Taiwan 凌晨差一天<br>3) `usage_date` DATE column 直接 `= ?` bind string 靠 NLS implicit conversion 不可靠<br>4) 只 aggregate 今天,過去 29 天永遠空(dashboard 看 30 天區間)<br>5) `TRUNC(run_at)` 用 DB server TZ,DB 在 UTC 時 Taiwan 凌晨跑的 task 算進「昨天」 | 1) `owner_user_id` 全改 `user_id`<br>2) 全改 Taiwan local helpers (`twNow` / `twDateStr`)<br>3) Bind 改 `TO_DATE(?, 'YYYY-MM-DD')` explicit<br>4) Backfill 過去 30 天每天都 upsert(idempotent)<br>5) `TRUNC(CAST(run_at AS DATE) + 8/24)` 偏移成 Taiwan date 比對<br>6) `/admin/token/aggregate-now` endpoint 跑完回 4 個 diagnostic 數字(pm_tasks_with_user_id / pm_task_runs_30d / token_usage_rows_30d / pm_task_token_usage_after_aggregate)讓 admin 即時 debug。 (`6442491` `43f44fc`) |
+
+### 13.4 Privacy 收緊
+
+| 變更 | 動機 |
+|---|---|
+| 3 個 PM skill (`forecast_timeseries_llm` / `pm_what_if_cost_impact` / `pm_deep_analysis_workflow`) 從 `is_public=1` 改 `0` | 跟 PM-* KB 同樣 default-private,admin 自行用 skill_access 表分享給特定對象;每個 skill seed 加一次性 migration `UPDATE skills SET is_public=0 WHERE is_public=1 AND name=?`,UPDATE prompt 升級不再覆蓋 `is_public`(尊重 admin 後續手動 toggle)。 (`566b972`) |
+
+### 13.5 給未來 owner 的 takeaway
+
+- **PM 表家族 metal_code 一律 UPPERCASE**:client 端 ALL_METALS、後端 SQL UPPER() 雙保險;新加 endpoint 別忘了 wrapper。
+- **新加 PM endpoint SELECT 必包 `TO_CHAR(date_col, 'YYYY-MM-DD')`**:避 oracledb DATE → JS Date → TZ 偏移取錯日期。
+- **新加 PM table 進 `pm_*` 命名**:database-oracle.js 既有 normalization migration 自動掃 7 張表 UPPER metal_code;新表加進那個 list。
+- **新加 PM source 進 `PM_SOURCES`**:`pmSourceHealthService` 自動 seed + 清 stale,別忘了把 LLM 排程 prompt 也同步加。
+- **token aggregator 跑「過去 N 天 backfill」不是「今天 only」**:dashboard 區間是 30 天,aggregator 也要跑 30 天才填得滿。
+- **Phase 2 之後 schema rename 都要寫「兩表都在」case 的 fallback migration**:`createTable` 會搶先創新表讓 `oldExists && newExists` rename 條件失效。
+
+**對應 commits**:`566b972` `7a77634` `4d76438` `274483a` `1b51954` `9c5a5bf` `ea71bfa` `bd6a46d` `9959ebe` `6442491` `43f44fc` 共 11 個 hotfix(2026-04-27 一日 sprint)。

@@ -220,4 +220,17 @@ Track C / D / E 都建議**等 user 實際用了 1 個月之後**,根據真實 f
 
 ---
 
+## 7. Ship 後紀錄
+
+- **2026-04-26**:Track A/B/C/F 四套全部 ship,實作摘要寫進 [precious-metals-plan.md §12](precious-metals-plan.md#12-phase-5-實施成果2026-04-26-全部-ship)
+- **2026-04-27**:第一批採購實際操作 + admin 觸發出 11 個跨層 bug,同日全修完。完整 hotfix 史見 [precious-metals-plan.md §13](precious-metals-plan.md#13-phase-5-ship-後-hotfix2026-04-27) — 主要分四群:
+  - **資料 / Schema**:`metal_price_history` rename migration 沒搬到資料、`metal_code` 大小寫不一致、`forecast_history` pipeline 寫不進去、Banner 日期 TZ 偏移
+  - **UI / UX**:Chart X 軸退化小時刻度、預設只勾 1 金屬、Tooltip 帶時間、Legend 擋 X 軸、11 金屬 linear Y 軸 PB 被壓平、詳細表沒 CSV 匯出、日報 fallback 文案抄錯
+  - **排程 / 監控**:Source 監控 stale 404、Token aggregator 5 層 bug 疊加(column name typo / TZ / NLS bind / 不 backfill / SYSDATE TZ)
+  - **Privacy**:3 個 PM skill 從 public → private + 一次性 migration
+
+- **2026-04-27 後**:Phase 6 候選 9 track 規劃中(體檢 / token / prompt 編輯器 / KPI card / ERP schema 助手 / retry / i18n / mobile / 對話視圖),見 [phase6-plan.md](phase6-plan.md)
+
+---
+
 > **下一步**:你回覆挑哪條路線(A/B/C/D)後,我會把對應 Track 拆成 D1-DN 工作日 plan,跟 Phase 2-4 一樣 commit-by-commit 逐步 ship。
