@@ -84,7 +84,8 @@ router.get('/prices', verifyToken, verifyPmUser, async (req, res) => {
 
     const rows = await db.prepare(`
       SELECT * FROM (
-        SELECT UPPER(metal_code) AS metal_code, metal_name, price_usd, day_change_pct, as_of_date, source,
+        SELECT UPPER(metal_code) AS metal_code, metal_name, price_usd, day_change_pct,
+               TO_CHAR(as_of_date, 'YYYY-MM-DD') AS as_of_date, source,
                ROW_NUMBER() OVER (PARTITION BY UPPER(metal_code) ORDER BY as_of_date DESC) AS rn
         FROM pm_price_history
         WHERE as_of_date >= TRUNC(SYSDATE) - 30
@@ -182,16 +183,21 @@ router.get('/prices/export.csv', verifyToken, verifyPmUser, async (req, res) => 
 
     const rows = await db.prepare(`
       SELECT TO_CHAR(as_of_date, 'YYYY-MM-DD') AS as_of_date,
-             UPPER(metal_code) AS metal_code, metal_name, source, price_usd, day_change_pct,
-             original_price, original_currency, original_unit
+             TO_CHAR(scraped_at, 'YYYY-MM-DD HH24:MI') AS scraped_at,
+             UPPER(metal_code) AS metal_code, metal_name,
+             original_price, original_currency, original_unit,
+             price_usd, unit, fx_rate_to_usd, conversion_note, is_estimated,
+             price_type, market, grade,
+             day_change_pct, lme_stock, stock_change,
+             source, source_url
       FROM pm_price_history
       WHERE ${where.join(' AND ')}
       ORDER BY as_of_date DESC, metal_code
       FETCH FIRST 50000 ROWS ONLY
     `).all(...params);
 
-    // CSV with UTF-8 BOM(Excel 不亂碼)
-    const headers = ['as_of_date','metal_code','metal_name','source','price_usd','day_change_pct','original_price','original_currency','original_unit'];
+    // CSV with UTF-8 BOM(Excel 不亂碼)— 全欄位,跟「歷史價格」detail table 對齊
+    const headers = ['as_of_date','metal_code','metal_name','original_price','original_currency','original_unit','price_usd','unit','fx_rate_to_usd','day_change_pct','source','source_url','price_type','market','grade','lme_stock','stock_change','is_estimated','conversion_note','scraped_at'];
     const lines = [headers.join(',')];
     for (const r of rows) {
       lines.push(headers.map(h => csvEscape(r[h])).join(','));

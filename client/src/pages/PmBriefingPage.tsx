@@ -164,6 +164,37 @@ async function downloadPricesCSV(focusedMetals: string[]) {
   URL.revokeObjectURL(dl.href)
 }
 
+// Client-side CSV from rows in memory(完整資料表「匯出此表 CSV」按鈕用)
+// 跟 detail table thead 同 20 欄,讓使用者所見即所得
+const DETAIL_CSV_COLS = [
+  'as_of_date','metal_code','metal_name','original_price','original_currency','original_unit',
+  'price_usd','unit','fx_rate_to_usd','day_change_pct','source','source_url',
+  'price_type','market','grade','lme_stock','stock_change','is_estimated','conversion_note','scraped_at',
+] as const
+
+function csvEscape(v: any) {
+  if (v == null) return ''
+  const s = String(v)
+  return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s
+}
+
+function downloadDetailCSV(rows: any[], from: string, to: string) {
+  const lines = [DETAIL_CSV_COLS.join(',')]
+  for (const r of rows) {
+    lines.push(DETAIL_CSV_COLS.map(c => {
+      const v = r[c] ?? r[c.toUpperCase()]
+      return csvEscape(v)
+    }).join(','))
+  }
+  const csv = '﻿' + lines.join('\n')  // UTF-8 BOM,Excel 不亂碼
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
+  const dl = document.createElement('a')
+  dl.href = URL.createObjectURL(blob)
+  dl.download = `PM_價格詳細_${from}_${to}.csv`
+  dl.click()
+  URL.revokeObjectURL(dl.href)
+}
+
 // ── Price Banner ───────────────────────────────────────────────────────────
 function PriceBanner({ focusedSet, expanded, onToggleExpand }: { focusedSet: Set<string>; expanded: boolean; onToggleExpand: () => void }) {
   const [prices, setPrices] = useState<any[]>([])
@@ -915,9 +946,16 @@ function PriceHistoryTab({ focusedMetals }: { focusedMetals: string[] }) {
         {/* Detail table — 所有欄位 SHOW */}
         {!loading && rows.length > 0 && (
           <div className="bg-white border rounded">
-            <div className="px-4 py-2 border-b bg-slate-50 flex items-center">
+            <div className="px-4 py-2 border-b bg-slate-50 flex items-center gap-2">
               <span className="text-sm font-medium text-slate-700">完整資料表(共 {rows.length} 筆)</span>
-              <span className="ml-2 text-xs text-slate-400">所有 pm_price_history 欄位</span>
+              <span className="text-xs text-slate-400">所有 pm_price_history 欄位</span>
+              <button
+                onClick={() => downloadDetailCSV(rows, from, to)}
+                className="ml-auto flex items-center gap-1 px-3 py-1 text-xs rounded border border-blue-200 text-blue-700 hover:bg-blue-50"
+                title="把目前篩選條件下的所有 rows 匯出 CSV(20 欄全資料)"
+              >
+                <Download size={12} /> 匯出此表 CSV
+              </button>
             </div>
             <div className="overflow-auto max-h-[600px]">
               <table className="w-full text-xs">
@@ -1074,15 +1112,17 @@ function PriceChart({
     grid: { left: 50, right: 30, top: 40, bottom: 40 },
     xAxis: {
       type: 'time',
-      // 強制按「天」切刻度,避免短期資料(< 1 週)時 ECharts auto 退化到「小時」格式
+      // 強制按「天」切刻度,避免短期資料(< 1 週)時 ECharts auto 退化到「小時」/「2 天」格式
       minInterval: 24 * 3600 * 1000,
+      maxInterval: 24 * 3600 * 1000,
       axisLabel: {
         formatter: (val: number) => {
           const d = new Date(val)
           const mm = String(d.getMonth() + 1).padStart(2, '0')
           const dd = String(d.getDate()).padStart(2, '0')
-          return `${d.getFullYear()}-${mm}-${dd}`
+          return `${mm}-${dd}`  // 軸 label 簡短:MM-DD;tooltip 才顯示完整年份
         },
+        hideOverlap: true,
       },
     },
     // > 3 條線時用 log 軸 — 金屬價差 PB(1.9k) ~ SN(50k) 26 倍,linear 會把低價金屬壓成平線
