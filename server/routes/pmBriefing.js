@@ -76,15 +76,16 @@ router.get('/prices', verifyToken, verifyPmUser, async (req, res) => {
   try {
     const db = require('../database-oracle').db;
     const metalsCsv = req.query.metals;
+    // 統一 UPPER() 比對 — DB 跟 client 任一邊大小寫不一致都不會 miss
     const filter = metalsCsv
-      ? `AND metal_code IN (${metalsCsv.split(',').map(() => '?').join(',')})`
+      ? `AND UPPER(metal_code) IN (${metalsCsv.split(',').map(() => 'UPPER(?)').join(',')})`
       : '';
     const params = metalsCsv ? metalsCsv.split(',') : [];
 
     const rows = await db.prepare(`
       SELECT * FROM (
-        SELECT metal_code, metal_name, price_usd, day_change_pct, as_of_date, source,
-               ROW_NUMBER() OVER (PARTITION BY metal_code ORDER BY as_of_date DESC) AS rn
+        SELECT UPPER(metal_code) AS metal_code, metal_name, price_usd, day_change_pct, as_of_date, source,
+               ROW_NUMBER() OVER (PARTITION BY UPPER(metal_code) ORDER BY as_of_date DESC) AS rn
         FROM pm_price_history
         WHERE as_of_date >= TRUNC(SYSDATE) - 30
           AND price_usd IS NOT NULL
@@ -107,7 +108,7 @@ router.get('/prices/timeseries', verifyToken, verifyPmUser, async (req, res) => 
       SELECT TO_CHAR(as_of_date, 'YYYY-MM-DD') AS date,
              AVG(price_usd) AS price
       FROM pm_price_history
-      WHERE metal_code = ? AND as_of_date >= TRUNC(SYSDATE) - ?
+      WHERE UPPER(metal_code) = UPPER(?) AND as_of_date >= TRUNC(SYSDATE) - ?
         AND price_usd IS NOT NULL
       GROUP BY as_of_date
       ORDER BY as_of_date
@@ -132,7 +133,7 @@ router.get('/prices/history', verifyToken, verifyPmUser, async (req, res) => {
     if (metalsCsv) {
       const arr = String(metalsCsv).split(',').map(s => s.trim()).filter(Boolean);
       if (arr.length > 0) {
-        where.push(`metal_code IN (${arr.map(() => '?').join(',')})`);
+        where.push(`UPPER(metal_code) IN (${arr.map(() => 'UPPER(?)').join(',')})`);
         params.push(...arr);
       }
     }
@@ -140,7 +141,7 @@ router.get('/prices/history', verifyToken, verifyPmUser, async (req, res) => {
     const rows = await db.prepare(`
       SELECT TO_CHAR(as_of_date, 'YYYY-MM-DD') AS as_of_date,
              TO_CHAR(scraped_at, 'YYYY-MM-DD HH24:MI') AS scraped_at,
-             metal_code, metal_name,
+             UPPER(metal_code) AS metal_code, metal_name,
              original_price, original_currency, original_unit,
              price_usd, unit, fx_rate_to_usd, conversion_note, is_estimated,
              price_type, market, grade,
@@ -174,14 +175,14 @@ router.get('/prices/export.csv', verifyToken, verifyPmUser, async (req, res) => 
     if (metalsCsv) {
       const arr = metalsCsv.split(',').map(s => s.trim()).filter(Boolean);
       if (arr.length > 0) {
-        where.push(`metal_code IN (${arr.map(() => '?').join(',')})`);
+        where.push(`UPPER(metal_code) IN (${arr.map(() => 'UPPER(?)').join(',')})`);
         params.push(...arr);
       }
     }
 
     const rows = await db.prepare(`
       SELECT TO_CHAR(as_of_date, 'YYYY-MM-DD') AS as_of_date,
-             metal_code, metal_name, source, price_usd, day_change_pct,
+             UPPER(metal_code) AS metal_code, metal_name, source, price_usd, day_change_pct,
              original_price, original_currency, original_unit
       FROM pm_price_history
       WHERE ${where.join(' AND ')}
@@ -227,7 +228,7 @@ router.get('/forecast-overlay', verifyToken, verifyPmUser, async (req, res) => {
     const to = req.query.to || null;
     if (!metal) return res.status(400).json({ error: 'metal required' });
 
-    const where = [`f.entity_type = 'metal'`, `f.entity_code = ?`];
+    const where = [`f.entity_type = 'metal'`, `UPPER(f.entity_code) = UPPER(?)`];
     const params = [metal];
     if (from) { where.push(`f.target_date >= TO_DATE(?, 'YYYY-MM-DD')`); params.push(from); }
     if (to)   { where.push(`f.target_date <= TO_DATE(?, 'YYYY-MM-DD')`); params.push(to); }
@@ -262,7 +263,7 @@ router.get('/purchase-overlay', verifyToken, verifyPmUser, async (req, res) => {
     const to = req.query.to || null;
     if (!metal) return res.status(400).json({ error: 'metal required' });
 
-    const where = [`metal_code = ?`];
+    const where = [`UPPER(metal_code) = UPPER(?)`];
     const params = [metal];
     if (from) { where.push(`purchase_month >= ?`); params.push(String(from).slice(0, 7)); }
     if (to)   { where.push(`purchase_month <= ?`); params.push(String(to).slice(0, 7)); }
@@ -302,10 +303,10 @@ router.get('/metrics-summary', verifyToken, verifyPmUser, async (req, res) => {
       const r = await db.prepare(`
         SELECT
           (SELECT AVG(avg_unit_price) FROM pm_purchase_history
-           WHERE metal_code = ?
+           WHERE UPPER(metal_code) = UPPER(?)
              AND TO_DATE(purchase_month || '-01', 'YYYY-MM-DD') >= TRUNC(SYSDATE) - ?) AS our_avg,
           (SELECT AVG(price_usd) FROM pm_price_history
-           WHERE metal_code = ? AND as_of_date >= TRUNC(SYSDATE) - ? AND price_usd IS NOT NULL) AS market_avg
+           WHERE UPPER(metal_code) = UPPER(?) AND as_of_date >= TRUNC(SYSDATE) - ? AND price_usd IS NOT NULL) AS market_avg
         FROM dual
       `).get(metal, days, metal, days);
       const ours = Number(r?.our_avg ?? r?.OUR_AVG);
@@ -322,7 +323,7 @@ router.get('/metrics-summary', verifyToken, verifyPmUser, async (req, res) => {
       const r = await db.prepare(`
         SELECT AVG(ABS(pct_error)) AS mape, COUNT(*) AS n
         FROM pm_forecast_accuracy
-        WHERE entity_type = 'metal' AND entity_code = ?
+        WHERE entity_type = 'metal' AND UPPER(entity_code) = UPPER(?)
           AND target_date >= TRUNC(SYSDATE) - 30
           AND pct_error IS NOT NULL
       `).get(metal);
@@ -336,12 +337,12 @@ router.get('/metrics-summary', verifyToken, verifyPmUser, async (req, res) => {
     try {
       const inv = await db.prepare(`
         SELECT SUM(NVL(onhand_qty, 0) + NVL(in_transit_qty, 0)) AS total_inv
-        FROM pm_inventory WHERE metal_code = ?
+        FROM pm_inventory WHERE UPPER(metal_code) = UPPER(?)
       `).get(metal);
       const usage = await db.prepare(`
         SELECT AVG(total_qty) AS avg_monthly
         FROM pm_purchase_history
-        WHERE metal_code = ?
+        WHERE UPPER(metal_code) = UPPER(?)
           AND TO_DATE(purchase_month || '-01', 'YYYY-MM-DD') >= TRUNC(SYSDATE) - 90
       `).get(metal);
       const inventory = Number(inv?.total_inv ?? inv?.TOTAL_INV);

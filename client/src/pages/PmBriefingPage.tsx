@@ -21,10 +21,10 @@ import ReactECharts from 'echarts-for-react'
 
 // ── Constants ──────────────────────────────────────────────────────────────
 const ALL_METALS = [
-  { code: 'Au', name: '金',   group: '貴金屬' },
-  { code: 'Ag', name: '銀',   group: '貴金屬' },
-  { code: 'Pt', name: '鉑',   group: '貴金屬' },
-  { code: 'Pd', name: '鈀',   group: '貴金屬' },
+  { code: 'AU', name: '金',   group: '貴金屬' },
+  { code: 'AG', name: '銀',   group: '貴金屬' },
+  { code: 'PT', name: '鉑',   group: '貴金屬' },
+  { code: 'PD', name: '鈀',   group: '貴金屬' },
   { code: 'CU', name: '銅',   group: '基本金屬' },
   { code: 'AL', name: '鋁',   group: '基本金屬' },
   { code: 'NI', name: '鎳',   group: '基本金屬' },
@@ -186,10 +186,14 @@ function PriceBanner({ focusedSet, expanded, onToggleExpand }: { focusedSet: Set
 
   // 把 11 個 ALL_METALS 為基底,LEFT JOIN prices(沒資料的顯示「—」)
   // 排序:有資料的在前(per `as_of_date DESC`),沒資料的後排序按 ALL_METALS 順序
+  // 統一用 UPPERCASE 做 key,避免 DB 大小寫不一致(歷史資料可能有 'Au' / 'AU' 混存)
   const priceMap = new Map<string, any>()
-  for (const p of prices) priceMap.set(p.metal_code || p.METAL_CODE, p)
+  for (const p of prices) {
+    const code = String(p.metal_code || p.METAL_CODE || '').toUpperCase()
+    if (code) priceMap.set(code, p)
+  }
   const fullList = ALL_METALS.map(m => {
-    const p = priceMap.get(m.code)
+    const p = priceMap.get(m.code.toUpperCase())
     return {
       code: m.code,
       name_zh: m.name,
