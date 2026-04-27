@@ -82,7 +82,10 @@ async function runOnce() {
         okCount++;
       } else {
         const newFails = prevFails + 1;
-        const shouldDisable = newFails >= FAILURE_THRESHOLD ? 1 : 0;
+        // 只有 timeout / dns_fail / conn_fail / server_error 才算「真死」 → disable + alert
+        // anti_bot(403/429)/ client_error(404)只記錄,不 disable
+        const isReallyDown = isAlertWorthy(result.status);
+        const shouldDisable = (isReallyDown && newFails >= FAILURE_THRESHOLD) ? 1 : 0;
         await db.prepare(`
           UPDATE pm_source_health
           SET last_check_at=SYSTIMESTAMP, last_status=?, last_http_status=?,
@@ -99,7 +102,7 @@ async function runOnce() {
         );
         failCount++;
 
-        // alert(連續失敗 >= 閾值 + cooldown 過期)
+        // alert 條件:真死 + 連 N 次 + cooldown 過期
         if (shouldDisable) {
           const cooldownMs = ALERT_COOLDOWN_HOURS * 60 * 60 * 1000;
           const timeSinceLastAlert = lastAlertedAt
@@ -122,36 +125,47 @@ async function runOnce() {
   return { ok: true, okCount, failCount, alertedCount };
 }
 
+// 模擬真實 Chrome browser headers,降低被 anti-bot 阻擋機率
+// (Mining.com / OilPrice / Westmetall / LME 等都用 Cloudflare 擋簡易 User-Agent)
+const BROWSER_HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+  'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+  'Accept-Language': 'en-US,en;q=0.9,zh-TW;q=0.8',
+  'Accept-Encoding': 'gzip, deflate, br',
+  'Cache-Control': 'no-cache',
+};
+
 async function checkOne(url) {
   const start = Date.now();
   try {
-    // 先試 HEAD;若 405/501 改用 GET
+    // 直接走 GET(HEAD 經常被 Cloudflare 反爬擋,而真實 LLM 抓資料也是 GET)
+    // Range header 限 4KB 快速結束(只是要驗連通,不要真的下載完)
     let resp = await fetch(url, {
-      method: 'HEAD',
+      method: 'GET',
       redirect: 'follow',
       signal: AbortSignal.timeout(REQ_TIMEOUT_MS),
-      headers: { 'User-Agent': 'Cortex-PM-HealthCheck/1.0' },
+      headers: { ...BROWSER_HEADERS, 'Range': 'bytes=0-4095' },
     }).catch(e => ({ _err: e }));
 
-    if (resp?._err) {
-      return classifyError(resp._err, Date.now() - start);
-    }
-
-    // HEAD 不被支援 → 改 GET (range 1KB)
-    if (resp.status === 405 || resp.status === 501) {
-      resp = await fetch(url, {
-        method: 'GET',
-        redirect: 'follow',
-        signal: AbortSignal.timeout(REQ_TIMEOUT_MS),
-        headers: { 'User-Agent': 'Cortex-PM-HealthCheck/1.0', 'Range': 'bytes=0-1024' },
-      }).catch(e => ({ _err: e }));
-      if (resp?._err) return classifyError(resp._err, Date.now() - start);
-    }
+    if (resp?._err) return classifyError(resp._err, Date.now() - start);
 
     const responseMs = Date.now() - start;
+
+    // 2xx / 3xx → 通
     if (resp.status >= 200 && resp.status < 400) {
       return { ok: true, status: 'ok', httpStatus: resp.status, responseMs };
     }
+
+    // 403 / 429 = anti-bot 擋,但「網站本身活著」— 標 flagged 不觸發 disable + alert
+    // (LLM 排程實際抓時會帶完整 browser fingerprint + JS 執行,經常還是抓得到)
+    if (resp.status === 403 || resp.status === 429) {
+      return {
+        ok: false, status: 'anti_bot', httpStatus: resp.status, responseMs,
+        error: `HTTP ${resp.status} — 反爬蟲擋健康檢查(實際 LLM 抓資料可能仍 OK)`,
+      };
+    }
+
+    // 404 通常 = 網站重組 / URL 改;5xx = server 真壞
     return {
       ok: false,
       status: resp.status >= 500 ? 'server_error' : 'client_error',
@@ -163,6 +177,11 @@ async function checkOne(url) {
     return classifyError(e, Date.now() - start);
   }
 }
+
+// 哪些 status 才會觸發 disable + email alert(timeout / dns_fail / conn_fail / server_error)
+// 'anti_bot' / 'client_error' 不算真死,降為觀察
+const ALERT_WORTHY_STATUSES = new Set(['timeout', 'dns_fail', 'conn_fail', 'server_error']);
+function isAlertWorthy(status) { return ALERT_WORTHY_STATUSES.has(status); }
 
 function classifyError(err, responseMs) {
   const msg = err?.message || String(err);

@@ -413,8 +413,8 @@ router.get('/admin/health/tasks', verifyToken, verifyAdmin, async (req, res) => 
     const rows = await db.prepare(`
       SELECT t.id, t.name, t.status, t.daily_token_budget, t.token_budget_paused_at,
              COUNT(r.id)                                                AS run_count,
-             SUM(CASE WHEN r.status='success' THEN 1 ELSE 0 END)        AS success_count,
-             SUM(CASE WHEN r.status<>'success' THEN 1 ELSE 0 END)       AS fail_count,
+             SUM(CASE WHEN r.status='ok' THEN 1 ELSE 0 END)             AS success_count,
+             SUM(CASE WHEN r.status<>'ok' THEN 1 ELSE 0 END)            AS fail_count,
              AVG(r.duration_ms)                                          AS avg_duration_ms,
              MAX(r.run_at)                                               AS last_run_at,
              MAX(r.status) KEEP (DENSE_RANK LAST ORDER BY r.run_at)      AS last_status,
@@ -447,7 +447,7 @@ router.get('/admin/health/run-errors', verifyToken, verifyAdmin, async (req, res
     const rows = await db.prepare(`
       SELECT id, run_at, status, duration_ms, error_msg, response_preview
       FROM scheduled_task_runs
-      WHERE task_id = ? AND status <> 'success'
+      WHERE task_id = ? AND status <> 'ok'
       ORDER BY run_at DESC
       FETCH FIRST ? ROWS ONLY
     `).all(taskId, limit);

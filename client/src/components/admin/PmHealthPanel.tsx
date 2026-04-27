@@ -335,6 +335,10 @@ function SourcesHealth() {
                   <td className="px-3 py-2 text-center">
                     {r.last_status === 'ok' ? (
                       <span className="text-emerald-600 inline-flex items-center gap-1"><CheckCircle2 size={12} /> ok</span>
+                    ) : r.last_status === 'anti_bot' ? (
+                      <span className="text-amber-600 text-xs" title="反爬蟲擋健康檢查 — 實際 LLM 排程仍可能抓得到">⚠ anti-bot</span>
+                    ) : r.last_status === 'client_error' ? (
+                      <span className="text-orange-600 text-xs" title="404 — URL 可能改了,但網站本身活著">404</span>
                     ) : (
                       <span className="text-red-600 text-xs">{r.last_status || '—'}</span>
                     )}
