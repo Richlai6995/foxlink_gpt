@@ -17,6 +17,7 @@ import {
 import api from '../lib/api'
 import PmReviewQueueView from '../components/pm/PmReviewQueueView'
 import PmFeedbackThumbs from '../components/pm/PmFeedbackThumbs'
+import ReactECharts from 'echarts-for-react'
 
 // ── Constants ──────────────────────────────────────────────────────────────
 const ALL_METALS = [
@@ -33,7 +34,7 @@ const ALL_METALS = [
   { code: 'RH', name: '銠',   group: '貴金屬' },
 ]
 
-type Tab = 'news' | 'weekly' | 'monthly' | 'review'
+type Tab = 'news' | 'history' | 'weekly' | 'monthly' | 'review'
 
 interface Prefs {
   focused_metals: string[]
@@ -109,6 +110,7 @@ export default function PmBriefingPage() {
       <div className="bg-white border-b border-t flex items-center gap-1 px-4">
         {([
           { id: 'news',    label: '新聞列表', icon: <Newspaper size={14} /> },
+          { id: 'history', label: '歷史價格', icon: <BarChart3 size={14} /> },
           { id: 'weekly',  label: '週報',     icon: <BarChart3 size={14} /> },
           { id: 'monthly', label: '月報',     icon: <FileText size={14} /> },
           { id: 'review',  label: 'Prompt 審核', icon: <Sparkles size={14} />, badge: reviewPendingCount },
@@ -130,6 +132,7 @@ export default function PmBriefingPage() {
 
       <div className="flex-1 overflow-hidden">
         {tab === 'news'    && <NewsTab focusedSet={focusedSet} default24h={prefs.default_24h_only === 1} />}
+        {tab === 'history' && <PriceHistoryTab focusedMetals={Array.from(focusedSet)} />}
         {tab === 'weekly'  && <ReportsTab type="weekly" />}
         {tab === 'monthly' && <ReportsTab type="monthly" />}
         {tab === 'review'  && <PmReviewQueueView embedded onPendingCountChange={setReviewPendingCount} />}
@@ -171,44 +174,68 @@ function PriceBanner({ focusedSet, expanded, onToggleExpand }: { focusedSet: Set
     }).finally(() => setLoading(false))
   }, [])
 
-  const visible = expanded || focusedSet.size === 0 ? prices : prices.filter(p => focusedSet.has(p.metal_code || p.METAL_CODE))
-  const hidden = prices.length - visible.length
-
   if (loading) {
     return <div className="bg-white border-b px-6 py-3 text-sm text-slate-400 flex items-center gap-2"><Loader2 size={14} className="animate-spin" /> 報價載入中…</div>
   }
-  if (prices.length === 0) {
-    return <div className="bg-amber-50 border-b border-amber-200 px-6 py-3 text-sm text-amber-700">⚠️ 尚無報價資料(可能新環境或排程未跑)</div>
-  }
+
+  // 把 11 個 ALL_METALS 為基底,LEFT JOIN prices(沒資料的顯示「—」)
+  // 排序:有資料的在前(per `as_of_date DESC`),沒資料的後排序按 ALL_METALS 順序
+  const priceMap = new Map<string, any>()
+  for (const p of prices) priceMap.set(p.metal_code || p.METAL_CODE, p)
+  const fullList = ALL_METALS.map(m => {
+    const p = priceMap.get(m.code)
+    return {
+      code: m.code,
+      name_zh: m.name,
+      price_usd: p ? (p.price_usd ?? p.PRICE_USD) : null,
+      day_change_pct: p ? (p.day_change_pct ?? p.DAY_CHANGE_PCT) : null,
+      hasData: !!p,
+    }
+  })
+
+  const visible = expanded || focusedSet.size === 0 ? fullList : fullList.filter(p => focusedSet.has(p.code))
+  const hidden = fullList.length - visible.length
+  const noData = prices.length === 0
 
   return (
-    <div className="bg-white border-b px-6 py-2 flex items-center gap-3 overflow-x-auto">
-      <span className="text-xs text-slate-400 flex-shrink-0">📅 {asOfDate}</span>
-      {visible.map(p => {
-        const code = p.metal_code || p.METAL_CODE
-        const price = Number(p.price_usd ?? p.PRICE_USD)
-        const chg = Number(p.day_change_pct ?? p.DAY_CHANGE_PCT)
-        const isUp = chg > 0
-        return (
-          <div key={code} className="flex items-center gap-1 px-2 py-1 rounded border border-slate-200 bg-slate-50 flex-shrink-0">
-            <span className="font-bold text-slate-800 text-sm">{code}</span>
-            <span className="text-slate-700 font-mono text-sm">{Number.isFinite(price) ? price.toLocaleString(undefined, { maximumFractionDigits: 2 }) : '—'}</span>
-            {Number.isFinite(chg) && (
-              <span className={`text-xs font-medium ${isUp ? 'text-emerald-600' : chg < 0 ? 'text-red-600' : 'text-slate-400'}`}>
-                {isUp ? '+' : ''}{chg.toFixed(2)}%
+    <div>
+      {noData && (
+        <div className="bg-amber-50 border-b border-amber-200 px-6 py-1.5 text-xs text-amber-800">
+          ⚠️ 近 30 天無報價資料(可至「歷史價格」tab 放寬日期範圍查更早資料)
+        </div>
+      )}
+      <div className="bg-white border-b px-6 py-2 flex items-center gap-3 overflow-x-auto">
+        <span className="text-xs text-slate-400 flex-shrink-0">📅 {asOfDate || '—'}</span>
+        {visible.map(p => {
+          const price = Number(p.price_usd)
+          const chg = Number(p.day_change_pct)
+          const isUp = chg > 0
+          return (
+            <div key={p.code} className={`flex items-center gap-1 px-2 py-1 rounded border flex-shrink-0 ${
+              p.hasData ? 'border-slate-200 bg-slate-50' : 'border-slate-100 bg-slate-50/50 opacity-60'
+            }`}>
+              <span className="font-bold text-slate-800 text-sm">{p.code}</span>
+              <span className="text-slate-500 text-[11px]">{p.name_zh}</span>
+              <span className="text-slate-700 font-mono text-sm">
+                {Number.isFinite(price) ? price.toLocaleString(undefined, { maximumFractionDigits: 2 }) : '—'}
               </span>
-            )}
-          </div>
-        )
-      })}
-      {hidden > 0 && (
-        <button onClick={onToggleExpand} className="ml-auto text-xs text-blue-600 hover:underline flex-shrink-0">
-          {expanded ? '收合' : `展開全部 (+${hidden})`}
-        </button>
-      )}
-      {hidden === 0 && focusedSet.size > 0 && expanded && (
-        <button onClick={onToggleExpand} className="ml-auto text-xs text-slate-500 hover:underline flex-shrink-0">收合</button>
-      )}
+              {Number.isFinite(chg) && (
+                <span className={`text-xs font-medium ${isUp ? 'text-emerald-600' : chg < 0 ? 'text-red-600' : 'text-slate-400'}`}>
+                  {isUp ? '+' : ''}{chg.toFixed(2)}%
+                </span>
+              )}
+            </div>
+          )
+        })}
+        {hidden > 0 && (
+          <button onClick={onToggleExpand} className="ml-auto text-xs text-blue-600 hover:underline flex-shrink-0">
+            {expanded ? '收合' : `展開全部 (+${hidden})`}
+          </button>
+        )}
+        {hidden === 0 && focusedSet.size > 0 && expanded && (
+          <button onClick={onToggleExpand} className="ml-auto text-xs text-slate-500 hover:underline flex-shrink-0">收合</button>
+        )}
+      </div>
     </div>
   )
 }
@@ -561,6 +588,213 @@ function NewsCard({ item, onTogglePin }: { item: NewsItem; onTogglePin: () => vo
 }
 
 // ── 報告 Tab(週/月)─────────────────────────────────────────────────────
+// ── 歷史價格 Tab(完整欄位 + ECharts line chart)─────────────────────────
+function PriceHistoryTab({ focusedMetals }: { focusedMetals: string[] }) {
+  const today = new Date().toISOString().slice(0, 10)
+  const monthAgo = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10)
+
+  const initMetals = focusedMetals.length > 0 ? focusedMetals : ['Au']
+  const [metals, setMetals] = useState<string[]>(initMetals)
+  const [from, setFrom] = useState(monthAgo)
+  const [to, setTo] = useState(today)
+  const [rows, setRows] = useState<any[]>([])
+  const [loading, setLoading] = useState(false)
+  const [downloading, setDownloading] = useState(false)
+
+  useEffect(() => {
+    if (metals.length === 0) { setRows([]); return }
+    setLoading(true)
+    api.get('/pm/briefing/prices/history', {
+      params: { metals: metals.join(','), from, to, limit: 5000 },
+    }).then(r => setRows(r.data?.rows || []))
+      .finally(() => setLoading(false))
+  }, [metals.join(','), from, to])
+
+  // 為 ECharts 準備 series:每金屬一條 line(x=as_of_date, y=price_usd)
+  const seriesByMetal: Record<string, [string, number][]> = {}
+  for (const r of rows) {
+    const code = r.metal_code || r.METAL_CODE
+    if (!seriesByMetal[code]) seriesByMetal[code] = []
+    const date = r.as_of_date || r.AS_OF_DATE
+    const price = Number(r.price_usd ?? r.PRICE_USD)
+    if (Number.isFinite(price)) seriesByMetal[code].push([date, price])
+  }
+  // 同一金屬同一天可能有多 source,取平均
+  const aggregated: Record<string, [string, number][]> = {}
+  for (const code in seriesByMetal) {
+    const map = new Map<string, number[]>()
+    for (const [d, p] of seriesByMetal[code]) {
+      if (!map.has(d)) map.set(d, [])
+      map.get(d)!.push(p)
+    }
+    aggregated[code] = Array.from(map.entries())
+      .map(([d, arr]) => [d, arr.reduce((a, b) => a + b, 0) / arr.length] as [string, number])
+      .sort((a, b) => a[0].localeCompare(b[0]))
+  }
+
+  const downloadCSV = async () => {
+    setDownloading(true)
+    try {
+      const params: Record<string, string> = { from, to }
+      if (metals.length > 0) params.metals = metals.join(',')
+      const url = '/pm/briefing/prices/export.csv?' + new URLSearchParams(params).toString()
+      const resp = await api.get(url, { responseType: 'blob' })
+      const blob = new Blob([resp.data], { type: 'text/csv;charset=utf-8' })
+      const dl = document.createElement('a')
+      dl.href = URL.createObjectURL(blob)
+      dl.download = `PM_價格歷史_${from}_${to}.csv`
+      dl.click()
+      URL.revokeObjectURL(dl.href)
+    } finally { setDownloading(false) }
+  }
+
+  const toggleMetal = (code: string) =>
+    setMetals(metals.includes(code) ? metals.filter(m => m !== code) : [...metals, code])
+
+  return (
+    <div className="h-full overflow-y-auto p-6 bg-slate-50">
+      <div className="max-w-7xl mx-auto space-y-4">
+        {/* 篩選列 */}
+        <div className="bg-white border rounded p-4 space-y-3">
+          <div className="flex items-center gap-3 flex-wrap">
+            <span className="text-sm font-medium text-slate-700">📅 日期</span>
+            <input type="date" value={from} onChange={e => setFrom(e.target.value)} className="border rounded px-2 py-1 text-sm" />
+            <span className="text-slate-400">~</span>
+            <input type="date" value={to} onChange={e => setTo(e.target.value)} className="border rounded px-2 py-1 text-sm" />
+            <div className="flex gap-1 text-xs">
+              <button onClick={() => { setFrom(monthAgo); setTo(today) }} className="px-2 py-0.5 rounded bg-slate-100 hover:bg-slate-200">30d</button>
+              <button onClick={() => { setFrom(new Date(Date.now() - 60 * 86400000).toISOString().slice(0, 10)); setTo(today) }} className="px-2 py-0.5 rounded bg-slate-100 hover:bg-slate-200">60d</button>
+              <button onClick={() => { setFrom(new Date(Date.now() - 90 * 86400000).toISOString().slice(0, 10)); setTo(today) }} className="px-2 py-0.5 rounded bg-slate-100 hover:bg-slate-200">90d</button>
+              <button onClick={() => { setFrom(new Date(Date.now() - 365 * 86400000).toISOString().slice(0, 10)); setTo(today) }} className="px-2 py-0.5 rounded bg-slate-100 hover:bg-slate-200">1y</button>
+            </div>
+            <button
+              onClick={downloadCSV} disabled={downloading || rows.length === 0}
+              className="ml-auto flex items-center gap-1 px-3 py-1 text-xs rounded border border-blue-200 text-blue-700 hover:bg-blue-50 disabled:opacity-50"
+            >
+              {downloading ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />} 匯出 CSV
+            </button>
+          </div>
+          <div>
+            <div className="text-xs text-slate-500 mb-1">🪙 金屬(可多選 — 圖表會疊起來)</div>
+            <div className="flex gap-1 flex-wrap">
+              {ALL_METALS.map(m => (
+                <label key={m.code} className={`flex items-center gap-1 px-2 py-1 text-xs rounded cursor-pointer border ${
+                  metals.includes(m.code) ? 'border-blue-300 bg-blue-50 text-blue-700' : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                }`}>
+                  <input type="checkbox" checked={metals.includes(m.code)} onChange={() => toggleMetal(m.code)} className="hidden" />
+                  <span className="font-mono font-bold">{m.code}</span>
+                  <span>{m.name}</span>
+                </label>
+              ))}
+              {metals.length > 0 && (
+                <button onClick={() => setMetals([])} className="px-2 py-1 text-xs text-red-600 hover:underline">清除</button>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Chart */}
+        {loading ? (
+          <div className="text-center py-12 text-slate-400 flex items-center justify-center gap-2"><Loader2 size={14} className="animate-spin" /> 載入中…</div>
+        ) : Object.keys(aggregated).length === 0 ? (
+          <div className="bg-amber-50 border border-amber-200 rounded p-6 text-center text-amber-700 text-sm">
+            ⚠️ 無資料 — 篩選條件下找不到價格,請放寬日期或選其他金屬
+          </div>
+        ) : (
+          <PriceChart aggregated={aggregated} />
+        )}
+
+        {/* Detail table — 所有欄位 SHOW */}
+        {!loading && rows.length > 0 && (
+          <div className="bg-white border rounded">
+            <div className="px-4 py-2 border-b bg-slate-50 flex items-center">
+              <span className="text-sm font-medium text-slate-700">完整資料表(共 {rows.length} 筆)</span>
+              <span className="ml-2 text-xs text-slate-400">所有 pm_price_history 欄位</span>
+            </div>
+            <div className="overflow-auto max-h-[600px]">
+              <table className="w-full text-xs">
+                <thead className="bg-slate-50 text-slate-500 sticky top-0 z-10">
+                  <tr>
+                    {['as_of_date','metal_code','metal_name','original_price','original_currency','original_unit','price_usd','unit','fx_rate_to_usd','day_change_pct','source','source_url','price_type','market','grade','lme_stock','stock_change','is_estimated','conversion_note','scraped_at'].map(c => (
+                      <th key={c} className="px-2 py-1.5 text-left font-mono whitespace-nowrap">{c}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {rows.map((r, i) => (
+                    <tr key={i} className="hover:bg-blue-50/50">
+                      <td className="px-2 py-1 font-mono">{r.as_of_date || r.AS_OF_DATE}</td>
+                      <td className="px-2 py-1 font-mono font-bold">{r.metal_code || r.METAL_CODE}</td>
+                      <td className="px-2 py-1">{r.metal_name || r.METAL_NAME || '—'}</td>
+                      <td className="px-2 py-1 text-right font-mono">{numFmt(r.original_price ?? r.ORIGINAL_PRICE)}</td>
+                      <td className="px-2 py-1">{r.original_currency || r.ORIGINAL_CURRENCY || '—'}</td>
+                      <td className="px-2 py-1">{r.original_unit || r.ORIGINAL_UNIT || '—'}</td>
+                      <td className="px-2 py-1 text-right font-mono font-bold">{numFmt(r.price_usd ?? r.PRICE_USD)}</td>
+                      <td className="px-2 py-1">{r.unit || r.UNIT || '—'}</td>
+                      <td className="px-2 py-1 text-right font-mono">{numFmt(r.fx_rate_to_usd ?? r.FX_RATE_TO_USD)}</td>
+                      <td className={`px-2 py-1 text-right font-mono ${Number(r.day_change_pct ?? r.DAY_CHANGE_PCT) > 0 ? 'text-emerald-600' : Number(r.day_change_pct ?? r.DAY_CHANGE_PCT) < 0 ? 'text-red-600' : ''}`}>
+                        {numFmt(r.day_change_pct ?? r.DAY_CHANGE_PCT)}
+                      </td>
+                      <td className="px-2 py-1">{r.source || r.SOURCE || '—'}</td>
+                      <td className="px-2 py-1 max-w-[200px] truncate">
+                        {(r.source_url || r.SOURCE_URL) ? (
+                          <a href={r.source_url || r.SOURCE_URL} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline">{r.source_url || r.SOURCE_URL}</a>
+                        ) : '—'}
+                      </td>
+                      <td className="px-2 py-1">{r.price_type || r.PRICE_TYPE || '—'}</td>
+                      <td className="px-2 py-1">{r.market || r.MARKET || '—'}</td>
+                      <td className="px-2 py-1">{r.grade || r.GRADE || '—'}</td>
+                      <td className="px-2 py-1 text-right font-mono">{numFmt(r.lme_stock ?? r.LME_STOCK)}</td>
+                      <td className="px-2 py-1 text-right font-mono">{numFmt(r.stock_change ?? r.STOCK_CHANGE)}</td>
+                      <td className="px-2 py-1 text-center">{Number(r.is_estimated ?? r.IS_ESTIMATED) === 1 ? '✓' : ''}</td>
+                      <td className="px-2 py-1 max-w-[160px] truncate" title={r.conversion_note || r.CONVERSION_NOTE || ''}>{r.conversion_note || r.CONVERSION_NOTE || '—'}</td>
+                      <td className="px-2 py-1 text-slate-400 whitespace-nowrap">{r.scraped_at || r.SCRAPED_AT || '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function numFmt(v: any) {
+  if (v == null || v === '') return '—'
+  const n = Number(v)
+  if (!Number.isFinite(n)) return '—'
+  if (Math.abs(n) >= 1000) return n.toLocaleString(undefined, { maximumFractionDigits: 2 })
+  if (Math.abs(n) >= 10) return n.toFixed(2)
+  return n.toFixed(4)
+}
+
+function PriceChart({ aggregated }: { aggregated: Record<string, [string, number][]> }) {
+  const codes = Object.keys(aggregated).sort()
+  const option = {
+    tooltip: { trigger: 'axis' },
+    legend: { data: codes, type: 'scroll' },
+    grid: { left: 50, right: 30, top: 40, bottom: 40 },
+    xAxis: { type: 'time' },
+    yAxis: { type: 'value', name: 'USD', scale: true },
+    dataZoom: [{ type: 'inside' }, { type: 'slider', height: 20 }],
+    series: codes.map(code => ({
+      name: code,
+      type: 'line',
+      smooth: true,
+      symbol: 'circle',
+      symbolSize: 4,
+      data: aggregated[code],
+    })),
+  }
+  return (
+    <div className="bg-white border rounded p-4">
+      <ReactECharts option={option} style={{ height: 400 }} />
+    </div>
+  )
+}
+
 function ReportsTab({ type }: { type: 'weekly' | 'monthly' }) {
   const [reports, setReports] = useState<any[]>([])
   const [offset, setOffset] = useState(0)

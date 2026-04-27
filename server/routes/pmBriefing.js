@@ -96,7 +96,7 @@ router.get('/prices', verifyToken, verifyPmUser, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// 個別金屬 N 日趨勢(畫 mini chart 用)
+// 個別金屬 N 日趨勢(畫 mini chart 用)— 簡化版:date + AVG(price)
 router.get('/prices/timeseries', verifyToken, verifyPmUser, async (req, res) => {
   try {
     const db = require('../database-oracle').db;
@@ -114,6 +114,49 @@ router.get('/prices/timeseries', verifyToken, verifyPmUser, async (req, res) => 
     `).all(metal, days);
     res.json(rows);
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// 完整歷史(所有欄位)— 給「歷史價格」tab 的 detail table 用
+router.get('/prices/history', verifyToken, verifyPmUser, async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const metalsCsv = req.query.metals;
+    const from = req.query.from || null;
+    const to = req.query.to || null;
+    const limit = Math.min(Math.max(Number(req.query.limit || 500), 1), 5000);
+
+    const where = ['price_usd IS NOT NULL'];
+    const params = [];
+    if (from) { where.push(`as_of_date >= TO_DATE(?, 'YYYY-MM-DD')`); params.push(from); }
+    if (to)   { where.push(`as_of_date <= TO_DATE(?, 'YYYY-MM-DD')`); params.push(to); }
+    if (metalsCsv) {
+      const arr = String(metalsCsv).split(',').map(s => s.trim()).filter(Boolean);
+      if (arr.length > 0) {
+        where.push(`metal_code IN (${arr.map(() => '?').join(',')})`);
+        params.push(...arr);
+      }
+    }
+
+    const rows = await db.prepare(`
+      SELECT TO_CHAR(as_of_date, 'YYYY-MM-DD') AS as_of_date,
+             TO_CHAR(scraped_at, 'YYYY-MM-DD HH24:MI') AS scraped_at,
+             metal_code, metal_name,
+             original_price, original_currency, original_unit,
+             price_usd, unit, fx_rate_to_usd, conversion_note, is_estimated,
+             price_type, market, grade,
+             day_change_pct, lme_stock, stock_change,
+             source, source_url
+      FROM pm_price_history
+      WHERE ${where.join(' AND ')}
+      ORDER BY as_of_date DESC, metal_code
+      FETCH FIRST ? ROWS ONLY
+    `).all(...params, limit);
+
+    res.json({ rows, count: rows.length });
+  } catch (e) {
+    console.error('[PmBriefing] /prices/history error:', e);
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // CSV 匯出
