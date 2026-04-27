@@ -11,7 +11,7 @@
  *
  * 設計:
  *   - token_usage 沒 task_id → 用 audit_logs 把對話跟 task run 串起來;
- *     若太複雜,fallback 到「以 task owner_user_id 為 proxy」(取 PM 排程 owner 的 token_usage)
+ *     若太複雜,fallback 到「以 task user_id 為 proxy」(取 PM 排程 owner 的 token_usage)
  *   - 簡化版實作:本檔目前用 fallback(per-task owner aggregation)+
  *     scheduled_task_runs.duration_ms / 100 等估算機制(若 owner 跨多任務則退化為「該 owner 全部 PM 排程平均」)
  *
@@ -44,7 +44,7 @@ async function tick() {
 }
 
 /**
- * 從 scheduled_task_runs JOIN token_usage(by owner_user_id + run_at date)估算
+ * 從 scheduled_task_runs JOIN token_usage(by user_id + run_at date)估算
  * 每個 PM 排程當日 token 用量 → upsert pm_task_token_usage
  */
 async function aggregatePmTaskTokenUsage() {
@@ -57,9 +57,9 @@ async function aggregatePmTaskTokenUsage() {
   const today = new Date().toISOString().slice(0, 10);
 
   const taskOwners = await db.prepare(`
-    SELECT DISTINCT t.id AS task_id, t.owner_user_id, t.name
+    SELECT DISTINCT t.id AS task_id, t.user_id, t.name
     FROM scheduled_tasks t
-    WHERE t.name LIKE '[PM]%' AND t.owner_user_id IS NOT NULL
+    WHERE t.name LIKE '[PM]%' AND t.user_id IS NOT NULL
   `).all();
 
   for (const t of taskOwners) {
@@ -75,9 +75,9 @@ async function aggregatePmTaskTokenUsage() {
     const ownerTotalRuns = await db.prepare(`
       SELECT COUNT(*) AS cnt FROM scheduled_task_runs r
       JOIN scheduled_tasks tt ON tt.id = r.task_id
-      WHERE tt.owner_user_id = ? AND tt.name LIKE '[PM]%'
+      WHERE tt.user_id = ? AND tt.name LIKE '[PM]%'
         AND TRUNC(r.run_at) = TRUNC(SYSDATE)
-    `).get(t.owner_user_id);
+    `).get(t.user_id);
     const ownerRunsTotal = Number(ownerTotalRuns?.cnt || 0) || 1;
 
     // 該 owner 今天 token_usage(per model)
@@ -86,7 +86,7 @@ async function aggregatePmTaskTokenUsage() {
       FROM token_usage
       WHERE user_id = ? AND usage_date = ?
       GROUP BY model
-    `).all(t.owner_user_id, today);
+    `).all(t.user_id, today);
 
     for (const u of usages) {
       // 平攤 = 該 task run 占 owner 全 PM run 比例 × 該 owner 該 model 當日 token

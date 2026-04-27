@@ -58,6 +58,17 @@ async function runOnce() {
     } catch (e) { console.warn('[PmSourceHealth] seed row failed:', e.message); }
   }
 
+  // 清掉 stale rows(URL 已從 PM_SOURCES 移除,例如改 RSS 或 deprecated)
+  try {
+    const validUrls = PM_SOURCES.map(s => s.url);
+    const placeholders = validUrls.map(() => '?').join(',');
+    const r = await db.prepare(
+      `DELETE FROM pm_source_health WHERE source_url NOT IN (${placeholders})`
+    ).run(...validUrls);
+    const cnt = r?.rowsAffected ?? r?.changes ?? 0;
+    if (cnt > 0) console.log(`[PmSourceHealth] 清掉 ${cnt} 個 stale source(URL 已從監控 list 移除)`);
+  } catch (e) { console.warn('[PmSourceHealth] cleanup stale failed:', e.message); }
+
   let okCount = 0;
   let failCount = 0;
   let alertedCount = 0;

@@ -18,8 +18,8 @@ const PM_SOURCES = [
   { url: 'https://www.kitco.com/charts/livesilver.html',                  label: 'Kitco Live Silver' },
   { url: 'https://www.kitco.com/news/',                                   label: 'Kitco News' },
   { url: 'https://www.westmetall.com/en/markdaten.php',                   label: 'Westmetall Market Data' },
-  // Westmetall 沒有公開 RSS,Cloudflare 擋 → 預期 anti_bot,不影響運作
-  { url: 'https://www.westmetall.com/en/news.php',                        label: 'Westmetall News' },
+  // Westmetall /en/news.php 2026-04-27 起回 404(可能改版),先移除
+  // 若之後找到新 news URL 再補進來;現有 markdaten.php 仍能撈報價
   { url: 'https://tradingeconomics.com/commodity/copper',                 label: 'TE Copper' },
   { url: 'https://tradingeconomics.com/commodity/aluminum',               label: 'TE Aluminum' },
   { url: 'https://tradingeconomics.com/commodity/nickel',                 label: 'TE Nickel' },
