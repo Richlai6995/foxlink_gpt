@@ -8,5 +8,10 @@
     "file": "metal_prices.js",
     "match_name": "金屬報價|metal.?price|貴金屬",
     "description": "金屬報價 — passthrough artifact 範例 (docs/tool-artifact-passthrough.md §5.4)"
+  },
+  {
+    "file": "test_html_artifact.js",
+    "match_name": "測試 ?HTML|test.?html.?artifact",
+    "description": "HTML artifact passthrough 測試 skill — 抓內網 HTML 頁面測前端 iframe 渲染"
   }
 ]
