@@ -1774,8 +1774,17 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
     const sessionSkillIds = new Set(sessionSkills.map(s => String(s.id)));
     let tagRoutedSkills = [];
     try {
-      const allAccessibleSkills = _allAccessibleSkills;
-      console.log(`[Skill] TAG routing: found ${allAccessibleSkills.length} accessible skills for user ${req.user.id}`);
+      // Apply per-user hidden filter at TAG-routing entry — skips Checking-skill logs and tag matching for hidden ones
+      const allAccessibleSkills = (hiddenSkillIds.size === 0 && hiddenErpIds.size === 0)
+        ? _allAccessibleSkills
+        : _allAccessibleSkills.filter(sk => {
+            if (hiddenSkillIds.has(String(sk.id))) return false;
+            const erpId = sk.erp_tool_id || sk.ERP_TOOL_ID;
+            if (erpId && hiddenErpIds.has(String(erpId))) return false;
+            return true;
+          });
+      const _skillsHiddenCount = _allAccessibleSkills.length - allAccessibleSkills.length;
+      console.log(`[Skill] TAG routing: found ${allAccessibleSkills.length} accessible skills for user ${req.user.id}${_skillsHiddenCount > 0 ? ` (hidden=${_skillsHiddenCount})` : ''}`);
       const msgLower = combinedUserText.toLowerCase();
       for (const sk of allAccessibleSkills) {
         if (sessionSkillIds.has(String(sk.id))) continue;
