@@ -10,7 +10,8 @@
  *   - 完全 generic — 不寫死金屬 / 匯率 / 股票語意。caller 自己決定 series 跟 target_description。
  *   - 純 builtin(LLM Prompt 型),無 code subprocess、無外部 API。
  *   - 強制 strict JSON 輸出(LLM follow prompt + 後處理 fallback parse)。
- *   - is_public=1 + is_admin_approved=1 → 所有 user 立即可用。
+ *   - 預設 is_public=0(私人;admin 自行用 skill_access 分享給特定對象)
+ *   - is_admin_approved=1 → 公開審核已過,只是預設不對全員開放。
  *   - 升級策略:版號 SKILL_VERSION 對 system_prompt / description 做 hash,變了就 UPDATE。
  *
  * 使用方式:
@@ -133,9 +134,9 @@ async function autoSeedForecastSkill(db) {
         INSERT INTO skills
           (name, description, icon, type, system_prompt, tags, owner_user_id,
            is_public, is_admin_approved, endpoint_mode, tool_schema)
-        VALUES (?, ?, ?, 'builtin', ?, ?, ?, 1, 1, 'tool', ?)
+        VALUES (?, ?, ?, 'builtin', ?, ?, ?, 0, 1, 'tool', ?)
       `).run(SKILL_NAME, DESCRIPTION, ICON, SYSTEM_PROMPT, tagsJson, ownerId, toolSchemaJson);
-      console.log(`[ForecastSkillSeed] Created builtin skill ${SKILL_NAME} v${SKILL_VERSION}`);
+      console.log(`[ForecastSkillSeed] Created builtin skill ${SKILL_NAME} v${SKILL_VERSION}(私人,admin 自行分享)`);
     } catch (e) {
       console.error(`[ForecastSkillSeed] INSERT failed:`, e.message);
     }
@@ -150,15 +151,27 @@ async function autoSeedForecastSkill(db) {
   }
 
   try {
+    // 升級不動 is_public(尊重 admin 後續手動調整)
     await db.prepare(`
       UPDATE skills
       SET description=?, system_prompt=?, tags=?, tool_schema=?, icon=?, type='builtin',
-          is_public=1, is_admin_approved=1, endpoint_mode='tool'
+          is_admin_approved=1, endpoint_mode='tool'
       WHERE id=?
     `).run(DESCRIPTION, SYSTEM_PROMPT, tagsJson, toolSchemaJson, ICON, existing.id || existing.ID);
     console.log(`[ForecastSkillSeed] Upgraded ${SKILL_NAME} to v${SKILL_VERSION}`);
   } catch (e) {
     console.error(`[ForecastSkillSeed] UPDATE failed:`, e.message);
+  }
+
+  // 一次性 migration:把仍是公開的 forecast_timeseries_llm 改回私人(2026-04-27 user 要求)
+  try {
+    const r = await db.prepare(
+      `UPDATE skills SET is_public = 0 WHERE is_public = 1 AND UPPER(name) = UPPER(?)`
+    ).run(SKILL_NAME);
+    const cnt = r?.rowsAffected ?? r?.changes ?? 0;
+    if (cnt > 0) console.log(`[ForecastSkillSeed] Migrated ${SKILL_NAME} is_public 1 → 0(已私,需手動分享)`);
+  } catch (e) {
+    console.warn('[ForecastSkillSeed] is_public reset migration:', e.message);
   }
 }
 

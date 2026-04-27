@@ -5,7 +5,10 @@
   "scripts": {
     "start": "node server.js",
     "predev": "node scripts/kill-port.js",
-    "dev": "nodemon --delay 2 --watch server.js --watch database-oracle.js --watch routes --watch services --ext js server.js"
+    "dev": "nodemon --delay 2 --watch server.js --watch database-oracle.js --watch routes --watch services --ext js server.js",
+    "pm:diag-forecast": "node scripts/diag-pm-forecast.js",
+    "pm:backfill-forecasts": "node scripts/pmBackfillForecasts.js",
+    "pm:backfill-forecasts:rolling": "node scripts/pmBackfillForecasts.js --mode=rolling --days=30"
   },
   "dependencies": {
     "@google-cloud/vertexai": "^1.12.0",

@@ -382,10 +382,30 @@ async function executeDbWrite(db, nodeConfig, sourceText, context = {}) {
   }
 
   // ─── 2. 解析 rows ──────────────────────────────────────────────────────────
-  const rawRows = extractJsonRows(sourceText);
+  let rawRows = extractJsonRows(sourceText);
   if (!rawRows || !Array.isArray(rawRows)) {
     throw new Error('找不到可解析的 JSON 陣列 — 請確認上游節點輸出含 JSON(陣列或物件)');
   }
+
+  // ─── 2.5 array_path:從 root JSON drill 到子陣列當 rows ─────────────────────
+  // 用途:LLM 輸出 {report:{...}, forecasts:[...]},想 db_write forecasts 時
+  //       設 array_path: '$.forecasts'(或 'forecasts')。預設 = 不 drill。
+  const arrayPath = String(cfg.array_path || '').trim();
+  if (arrayPath) {
+    // extractJsonRows 把單 object 包成 [obj] — drill 前先解 root
+    const root = (rawRows.length === 1 && rawRows[0] && typeof rawRows[0] === 'object' && !Array.isArray(rawRows[0]))
+      ? rawRows[0]
+      : rawRows;
+    const drilled = getByJsonPath(root, arrayPath);
+    if (drilled == null) {
+      throw new Error(`array_path "${arrayPath}" 在上游 JSON 找不到對應值`);
+    }
+    if (!Array.isArray(drilled)) {
+      throw new Error(`array_path "${arrayPath}" 的值不是陣列(實際: ${typeof drilled})`);
+    }
+    rawRows = drilled;
+  }
+
   if (rawRows.length > maxRows) {
     throw new Error(`row 數 ${rawRows.length} 超過上限 ${maxRows}`);
   }

@@ -147,9 +147,9 @@ async function autoSeedPmWorkflowSkill(db) {
         INSERT INTO skills
           (name, description, icon, type, workflow_json, tags, owner_user_id,
            is_public, is_admin_approved, endpoint_mode)
-        VALUES (?, ?, ?, 'workflow', ?, ?, ?, 1, 1, 'inject')
+        VALUES (?, ?, ?, 'workflow', ?, ?, ?, 0, 1, 'inject')
       `).run(SKILL_NAME, DESCRIPTION, ICON, workflowJson, tagsJson, ownerId);
-      console.log(`[PMWorkflowSeed] Created workflow skill ${SKILL_NAME} v${SKILL_VERSION}`);
+      console.log(`[PMWorkflowSeed] Created workflow skill ${SKILL_NAME} v${SKILL_VERSION}(私人,admin 自行分享)`);
     } catch (e) {
       console.error('[PMWorkflowSeed] INSERT failed:', e.message);
     }
@@ -162,15 +162,27 @@ async function autoSeedPmWorkflowSkill(db) {
   if (existingWf === workflowJson && existingDesc === DESCRIPTION) return;
 
   try {
+    // 升級不動 is_public(尊重 admin 後續手動調整)
     await db.prepare(`
       UPDATE skills
       SET description=?, workflow_json=?, tags=?, icon=?, type='workflow',
-          is_public=1, is_admin_approved=1
+          is_admin_approved=1
       WHERE id=?
     `).run(DESCRIPTION, workflowJson, tagsJson, ICON, existing.id || existing.ID);
     console.log(`[PMWorkflowSeed] Upgraded ${SKILL_NAME} to v${SKILL_VERSION}`);
   } catch (e) {
     console.error('[PMWorkflowSeed] UPDATE failed:', e.message);
+  }
+
+  // 一次性 migration:把仍公開的改回私人(2026-04-27 user 要求)
+  try {
+    const r = await db.prepare(
+      `UPDATE skills SET is_public = 0 WHERE is_public = 1 AND UPPER(name) = UPPER(?)`
+    ).run(SKILL_NAME);
+    const cnt = r?.rowsAffected ?? r?.changes ?? 0;
+    if (cnt > 0) console.log(`[PMWorkflowSeed] Migrated ${SKILL_NAME} is_public 1 → 0(已私,需手動分享)`);
+  } catch (e) {
+    console.warn('[PMWorkflowSeed] is_public reset migration:', e.message);
   }
 }
 

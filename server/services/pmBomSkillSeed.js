@@ -149,9 +149,9 @@ async function autoSeedPmBomSkill(db) {
         INSERT INTO skills
           (name, description, icon, type, system_prompt, tags, owner_user_id,
            is_public, is_admin_approved, endpoint_mode, tool_schema)
-        VALUES (?, ?, ?, 'builtin', ?, ?, ?, 1, 1, 'tool', ?)
+        VALUES (?, ?, ?, 'builtin', ?, ?, ?, 0, 1, 'tool', ?)
       `).run(SKILL_NAME, DESCRIPTION, ICON, SYSTEM_PROMPT, tagsJson, ownerId, toolJson);
-      console.log(`[PMBomSkillSeed] Created builtin skill ${SKILL_NAME} v${SKILL_VERSION}`);
+      console.log(`[PMBomSkillSeed] Created builtin skill ${SKILL_NAME} v${SKILL_VERSION}(私人,admin 自行分享)`);
     } catch (e) {
       console.error('[PMBomSkillSeed] INSERT failed:', e.message);
     }
@@ -163,14 +163,26 @@ async function autoSeedPmBomSkill(db) {
   if (existingPrompt === SYSTEM_PROMPT && existingDesc === DESCRIPTION) return;
 
   try {
+    // 升級不動 is_public(尊重 admin 後續手動調整)
     await db.prepare(`
       UPDATE skills SET description=?, system_prompt=?, tags=?, tool_schema=?, icon=?, type='builtin',
-                        is_public=1, is_admin_approved=1, endpoint_mode='tool'
+                        is_admin_approved=1, endpoint_mode='tool'
       WHERE id=?
     `).run(DESCRIPTION, SYSTEM_PROMPT, tagsJson, toolJson, ICON, existing.id || existing.ID);
     console.log(`[PMBomSkillSeed] Upgraded ${SKILL_NAME} to v${SKILL_VERSION}`);
   } catch (e) {
     console.error('[PMBomSkillSeed] UPDATE failed:', e.message);
+  }
+
+  // 一次性 migration:把仍公開的改回私人(2026-04-27 user 要求)
+  try {
+    const r = await db.prepare(
+      `UPDATE skills SET is_public = 0 WHERE is_public = 1 AND UPPER(name) = UPPER(?)`
+    ).run(SKILL_NAME);
+    const cnt = r?.rowsAffected ?? r?.changes ?? 0;
+    if (cnt > 0) console.log(`[PMBomSkillSeed] Migrated ${SKILL_NAME} is_public 1 → 0(已私,需手動分享)`);
+  } catch (e) {
+    console.warn('[PMBomSkillSeed] is_public reset migration:', e.message);
   }
 }
 

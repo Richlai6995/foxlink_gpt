@@ -297,10 +297,10 @@ B. **JSON 落地段**(供 db_write 解析,放在 markdown 末尾的 \`\`\`json �
       operation: 'upsert',
       key_columns: ['entity_type', 'entity_code', 'forecast_date', 'target_date', 'model_used'],
       input: '{{ai_output}}',
+      array_path: '$.forecasts',  // drill 進 ai_output.forecasts 子陣列當 rows
       on_row_error: 'skip',
       max_rows: 50,
       column_mapping: [
-        { jsonpath: '$.forecasts[*]', column: '__expand__', transform: '' },  // marker — runtime 不認,但提示 admin 此 mapping 預期 array root
         { jsonpath: '$.entity_type',     column: 'entity_type',     transform: 'lower', required: true },
         { jsonpath: '$.entity_code',     column: 'entity_code',     transform: 'upper', required: true },
         { jsonpath: '$.forecast_date',   column: 'forecast_date',   transform: 'date',  required: true },
@@ -314,7 +314,6 @@ B. **JSON 落地段**(供 db_write 解析,放在 markdown 末尾的 \`\`\`json �
         { jsonpath: '$.key_drivers',     column: 'key_drivers',     transform: '' },
         { jsonpath: '$.model_used',      column: 'model_used',      transform: '' },
       ],
-      _note_for_admin: '⚠ 此節點 input 預期是 forecasts 陣列。需在「輸入來源」欄改成 {{ai_output}}.forecasts 或先用 ai 節點抽出 forecasts 子陣列。pipelineDbWriter 預設只支援頂層陣列,此 mapping 是 placeholder。',
     },
     {
       id: dbReportId,
@@ -841,6 +840,67 @@ async function patchExistingNewsPublishedAtMapping(db) {
   if (patched > 0) console.log(`[PMScheduledTaskSeed] patched ${patched} existing task(s) with published_at mapping`);
 }
 
+/**
+ * 補既有 [PM]% task 的 db_write(table='forecast_history')缺漏的 array_path
+ * (原 seed 的 column_mapping 第一筆是 placeholder marker '__expand__',實際 input
+ *  是 {report:..., forecasts:[...]} 但沒 drill,導致 forecast_history 寫不進去)
+ * Idempotent — 已有 array_path 的不動;順手把 placeholder marker mapping 拿掉
+ */
+async function patchExistingForecastArrayPath(db) {
+  let rows;
+  try {
+    rows = await db.prepare(`SELECT id, name, pipeline_json FROM scheduled_tasks WHERE name LIKE '[PM]%'`).all();
+  } catch (e) {
+    console.warn('[PMScheduledTaskSeed] patch forecast array_path: select failed:', e.message);
+    return;
+  }
+  let patched = 0;
+  for (const r of rows || []) {
+    const raw = r.pipeline_json || r.PIPELINE_JSON;
+    if (!raw) continue;
+    let nodes;
+    try { nodes = JSON.parse(typeof raw === 'string' ? raw : raw.toString()); }
+    catch { continue; }
+    if (!Array.isArray(nodes)) continue;
+
+    let dirty = false;
+    for (const n of nodes) {
+      if (n?.type !== 'db_write') continue;
+      if (String(n.table || '').toLowerCase() !== 'forecast_history') continue;
+
+      // 補 array_path
+      if (!n.array_path || !String(n.array_path).trim()) {
+        n.array_path = '$.forecasts';
+        dirty = true;
+      }
+
+      // 移除舊 placeholder mapping(column='__expand__')
+      if (Array.isArray(n.column_mapping)) {
+        const before = n.column_mapping.length;
+        n.column_mapping = n.column_mapping.filter(m => String(m?.column || '').toLowerCase() !== '__expand__');
+        if (n.column_mapping.length !== before) dirty = true;
+      }
+
+      // 移掉過時的 _note_for_admin
+      if (n._note_for_admin) {
+        delete n._note_for_admin;
+        dirty = true;
+      }
+    }
+    if (dirty) {
+      try {
+        await db.prepare(`UPDATE scheduled_tasks SET pipeline_json=?, updated_at=SYSTIMESTAMP WHERE id=?`)
+          .run(JSON.stringify(nodes), r.id || r.ID);
+        patched++;
+        console.log(`[PMScheduledTaskSeed] patched forecast array_path for task #${r.id || r.ID} "${r.name || r.NAME}"`);
+      } catch (e) {
+        console.warn(`[PMScheduledTaskSeed] patch forecast array_path task #${r.id || r.ID} failed:`, e.message);
+      }
+    }
+  }
+  if (patched > 0) console.log(`[PMScheduledTaskSeed] patched ${patched} existing task(s) with forecast_history array_path`);
+}
+
 // ── 主 seed 入口 ────────────────────────────────────────────────────────────
 async function autoSeedPmScheduledTasks(db, kbMap) {
   if (!db) {
@@ -942,6 +1002,9 @@ async function autoSeedPmScheduledTasks(db, kbMap) {
 
   // Patch 既有任務:db_write(pm_news)補 published_at mapping(Phase 5 後修正)
   await patchExistingNewsPublishedAtMapping(db);
+
+  // Patch 既有任務:db_write(forecast_history)補 array_path(原 seed 是 placeholder)
+  await patchExistingForecastArrayPath(db);
 }
 
 // ── 把既有 PM 任務的 model 從舊 alias('pro'/'flash')patch 到 pickModelKey 的結果 ───

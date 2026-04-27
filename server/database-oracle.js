@@ -3393,6 +3393,67 @@ async function runMigrations(db) {
     }
   } catch (e) { console.warn('[Migration] rename metal_price_history:', e.message); }
 
+  // ─── Idempotent cleanup:把仍指向 'metal_price_history' 的 stale row 清掉 ───
+  // (rename block 只在 oldExists>0 && newExists===0 才跑;若環境曾並存兩 table、
+  //  或先 seed 了 pm_price_history 再 rename,ai_schema_definitions /
+  //  pipeline_writable_tables 會留下舊 row,讓 UI 顯示 (metal_price_history)。)
+  try {
+    // 1) ai_schema_definitions:有同 source_db_id 的新 row → 刪舊;否則 rename 舊 → 新
+    const dupSchemas = await db.prepare(`
+      SELECT old.id AS old_id
+      FROM ai_schema_definitions old
+      WHERE old.table_name = 'metal_price_history'
+        AND EXISTS (
+          SELECT 1 FROM ai_schema_definitions n
+          WHERE n.table_name = 'pm_price_history'
+            AND n.source_db_id = old.source_db_id
+        )
+    `).all();
+    for (const r of (dupSchemas || [])) {
+      const oid = r.old_id || r.OLD_ID;
+      if (oid) {
+        await db.prepare(`DELETE FROM ai_schema_columns WHERE schema_id = ?`).run(oid);
+        await db.prepare(`DELETE FROM ai_schema_definitions WHERE id = ?`).run(oid);
+        console.log(`[Migration] 清掉重複 ai_schema_definitions id=${oid} (metal_price_history)`);
+      }
+    }
+    const renamedSchemas = await db.prepare(
+      `UPDATE ai_schema_definitions SET table_name = 'pm_price_history' WHERE table_name = 'metal_price_history'`
+    ).run();
+    if ((renamedSchemas?.rowsAffected || renamedSchemas?.changes || 0) > 0) {
+      console.log(`[Migration] ai_schema_definitions: 改名 ${renamedSchemas.rowsAffected || renamedSchemas.changes} row(s) metal_price_history → pm_price_history`);
+    }
+
+    // 2) pipeline_writable_tables:同上
+    const dupWl = await db.prepare(`
+      SELECT id FROM pipeline_writable_tables
+      WHERE table_name = 'metal_price_history'
+        AND EXISTS (SELECT 1 FROM pipeline_writable_tables WHERE table_name = 'pm_price_history')
+    `).all();
+    for (const r of (dupWl || [])) {
+      const wid = r.id || r.ID;
+      if (wid) {
+        await db.prepare(`DELETE FROM pipeline_writable_tables WHERE id = ?`).run(wid);
+        console.log(`[Migration] 清掉重複 pipeline_writable_tables id=${wid} (metal_price_history)`);
+      }
+    }
+    const renamedWl = await db.prepare(
+      `UPDATE pipeline_writable_tables SET table_name = 'pm_price_history' WHERE table_name = 'metal_price_history'`
+    ).run();
+    if ((renamedWl?.rowsAffected || renamedWl?.changes || 0) > 0) {
+      console.log(`[Migration] pipeline_writable_tables: 改名 ${renamedWl.rowsAffected || renamedWl.changes} row(s)`);
+    }
+
+    // 3) scheduled_tasks.pipeline_json 也順手 sweep 一次(REPLACE on CLOB,no-op if 沒命中)
+    try {
+      await db.prepare(
+        `UPDATE scheduled_tasks
+            SET pipeline_json = REPLACE(pipeline_json, '"table":"metal_price_history"', '"table":"pm_price_history"')
+          WHERE pipeline_json LIKE '%"table":"metal_price_history"%'`
+      ).run();
+    } catch (_) {}
+  } catch (e) { console.warn('[Migration] cleanup metal_price_history stale rows:', e.message); }
+
   // 既有環境(舊 schema)欄位升級 — 對 pm_price_history(rename 後)做 idempotent ADD COLUMN
   await safeAddColumn('PM_PRICE_HISTORY', 'SCRAPED_AT',        'TIMESTAMP DEFAULT SYSTIMESTAMP');
   await safeAddColumn('PM_PRICE_HISTORY', 'ORIGINAL_PRICE',    'NUMBER(18,6)');
