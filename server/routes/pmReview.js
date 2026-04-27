@@ -537,9 +537,37 @@ router.get('/admin/cost', verifyToken, verifyAdmin, async (req, res) => {
 // POST /api/pm/admin/token/aggregate-now — F5 手動觸發 aggregator
 router.post('/admin/token/aggregate-now', verifyToken, verifyAdmin, async (req, res) => {
   try {
+    const db = require('../database-oracle').db;
     const { tick } = require('../services/pmTokenBudgetService');
     await tick();
-    res.json({ ok: true });
+
+    // 跑完回診斷,讓 admin 知道為什麼空(若空)
+    const taskCount = await db.prepare(
+      `SELECT COUNT(*) AS n FROM scheduled_tasks WHERE name LIKE '[PM]%' AND user_id IS NOT NULL`
+    ).get();
+    const runCount = await db.prepare(
+      `SELECT COUNT(*) AS n FROM scheduled_task_runs r
+       JOIN scheduled_tasks t ON t.id = r.task_id
+       WHERE t.name LIKE '[PM]%' AND r.run_at >= SYSDATE - 30`
+    ).get();
+    const usagePresent = await db.prepare(
+      `SELECT COUNT(*) AS n FROM token_usage tu
+       WHERE tu.user_id IN (SELECT user_id FROM scheduled_tasks WHERE name LIKE '[PM]%' AND user_id IS NOT NULL)
+         AND tu.usage_date >= SYSDATE - 30`
+    ).get();
+    const aggregatedRows = await db.prepare(
+      `SELECT COUNT(*) AS n FROM pm_task_token_usage WHERE usage_date >= SYSDATE - 30`
+    ).get();
+
+    res.json({
+      ok: true,
+      diagnostics: {
+        pm_tasks_with_user_id: Number(taskCount?.n ?? taskCount?.N ?? 0),
+        pm_task_runs_30d:      Number(runCount?.n ?? runCount?.N ?? 0),
+        token_usage_rows_30d_for_pm_owners: Number(usagePresent?.n ?? usagePresent?.N ?? 0),
+        pm_task_token_usage_after_aggregate: Number(aggregatedRows?.n ?? aggregatedRows?.N ?? 0),
+      },
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

@@ -22,8 +22,25 @@
 
 const AGGREGATE_EVERY_HOURS = 1;
 const FIRST_RUN_DELAY_MS = 3 * 60 * 1000;
+const BACKFILL_DAYS = 30;  // 每次 aggregator 跑時 backfill 過去 N 天(才能對 dashboard '30 天' 區間)
 
 let _interval = null;
+
+// Taiwan local date helpers(跟 scheduledTaskService 寫 token_usage 用同 pattern)
+function twNow() {
+  return new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Taipei' }));
+}
+function twDateStr(d = twNow()) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${dd}`;
+}
+function twDateStrOffset(daysAgo) {
+  const base = twNow();
+  base.setDate(base.getDate() - daysAgo);
+  return twDateStr(base);
+}
 
 function startTokenBudgetCron() {
   console.log(`[PmTokenBudget] Starting cron — aggregate every ${AGGREGATE_EVERY_HOURS}h + budget check`);
@@ -44,78 +61,97 @@ async function tick() {
 }
 
 /**
- * 從 scheduled_task_runs JOIN token_usage(by user_id + run_at date)估算
- * 每個 PM 排程當日 token 用量 → upsert pm_task_token_usage
+ * 從 scheduled_task_runs JOIN token_usage(by user_id + 該日)估算
+ * 每個 PM 排程「過去 N 天 × per day」token 用量 → upsert pm_task_token_usage
+ *
+ * 過去版本只跑「今天」+ TZ 不一致(UTC vs Taiwan),在 Taiwan 凌晨會 miss;
+ * 現在 backfill 過去 30 天,且全部用 Taiwan local date + TO_DATE bind。
  */
 async function aggregatePmTaskTokenUsage() {
   const db = require('../database-oracle').db;
   if (!db) return 0;
 
-  // 找所有今天有跑過的 [PM]% 排程 + 對應 owner 的 token_usage
-  // 估算邏輯:把該 owner 當日所有 model 的 token_usage 平攤給該 owner 當日所有 [PM] 任務 run 數
-  // 這是 proxy(因 token_usage 無 task_id),F5 dashboard 顯示時要標註「估算」
-  const today = new Date().toISOString().slice(0, 10);
-
+  // 找所有 [PM]% 排程
   const taskOwners = await db.prepare(`
     SELECT DISTINCT t.id AS task_id, t.user_id, t.name
     FROM scheduled_tasks t
     WHERE t.name LIKE '[PM]%' AND t.user_id IS NOT NULL
   `).all();
 
-  for (const t of taskOwners) {
-    // 該 task 今天跑了幾次
-    const runs = await db.prepare(`
-      SELECT COUNT(*) AS cnt FROM scheduled_task_runs
-      WHERE task_id = ? AND TRUNC(run_at) = TRUNC(SYSDATE)
-    `).get(t.task_id);
-    const runCount = Number(runs?.cnt || 0);
-    if (runCount === 0) continue;
+  if (!taskOwners.length) {
+    console.log('[PmTokenBudget] no [PM]% tasks with user_id found');
+    return 0;
+  }
 
-    // 該 owner 今天所有 [PM] 任務的總 run 數
-    const ownerTotalRuns = await db.prepare(`
-      SELECT COUNT(*) AS cnt FROM scheduled_task_runs r
-      JOIN scheduled_tasks tt ON tt.id = r.task_id
-      WHERE tt.user_id = ? AND tt.name LIKE '[PM]%'
-        AND TRUNC(r.run_at) = TRUNC(SYSDATE)
-    `).get(t.user_id);
-    const ownerRunsTotal = Number(ownerTotalRuns?.cnt || 0) || 1;
+  let totalUpserts = 0;
 
-    // 該 owner 今天 token_usage(per model)
-    const usages = await db.prepare(`
-      SELECT model, SUM(input_tokens) AS in_t, SUM(output_tokens) AS out_t, SUM(cost) AS c
-      FROM token_usage
-      WHERE user_id = ? AND usage_date = ?
-      GROUP BY model
-    `).all(t.user_id, today);
+  // 過去 N 天每天都 aggregate(idempotent upsert,給 dashboard '30 天' 區間用)
+  for (let dayAgo = 0; dayAgo < BACKFILL_DAYS; dayAgo++) {
+    const dateStr = twDateStrOffset(dayAgo);
 
-    for (const u of usages) {
-      // 平攤 = 該 task run 占 owner 全 PM run 比例 × 該 owner 該 model 當日 token
-      const ratio = runCount / ownerRunsTotal;
-      const inT = Math.round(Number(u.in_t || 0) * ratio);
-      const outT = Math.round(Number(u.out_t || 0) * ratio);
-      const cost = Number(u.c || 0) * ratio;
+    for (const t of taskOwners) {
+      // 該 task 該日跑了幾次(用 TIMESTAMP +8h 偏移做 Taiwan-aware TRUNC)
+      const runs = await db.prepare(`
+        SELECT COUNT(*) AS cnt FROM scheduled_task_runs
+        WHERE task_id = ?
+          AND TRUNC(CAST(run_at AS DATE) + 8/24) = TO_DATE(?, 'YYYY-MM-DD')
+      `).get(t.task_id, dateStr);
+      const runCount = Number(runs?.cnt ?? runs?.CNT ?? 0);
+      if (runCount === 0) continue;
 
-      try {
-        const exists = await db.prepare(`
-          SELECT id FROM pm_task_token_usage
-          WHERE task_id=? AND usage_date=? AND model=?
-        `).get(t.task_id, today, u.model);
+      // 該 owner 該日所有 [PM] 任務的總 run 數(分母)
+      const ownerTotalRuns = await db.prepare(`
+        SELECT COUNT(*) AS cnt FROM scheduled_task_runs r
+        JOIN scheduled_tasks tt ON tt.id = r.task_id
+        WHERE tt.user_id = ? AND tt.name LIKE '[PM]%'
+          AND TRUNC(CAST(r.run_at AS DATE) + 8/24) = TO_DATE(?, 'YYYY-MM-DD')
+      `).get(t.user_id, dateStr);
+      const ownerRunsTotal = Number(ownerTotalRuns?.cnt ?? ownerTotalRuns?.CNT ?? 0) || 1;
 
-        if (exists) {
-          await db.prepare(`
-            UPDATE pm_task_token_usage
-            SET input_tokens=?, output_tokens=?, cost=?, run_count=?, last_updated=SYSTIMESTAMP
-            WHERE id=?
-          `).run(inT, outT, cost, runCount, exists.id);
-        } else {
-          await db.prepare(`
-            INSERT INTO pm_task_token_usage (task_id, usage_date, model, input_tokens, output_tokens, cost, run_count)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-          `).run(t.task_id, today, u.model, inT, outT, cost, runCount);
-        }
-      } catch (e) { console.warn('[PmTokenBudget] upsert failed:', e.message); }
+      // 該 owner 該日 token_usage(per model);usage_date 是 DATE,用 TO_DATE bind
+      const usages = await db.prepare(`
+        SELECT model, SUM(input_tokens) AS in_t, SUM(output_tokens) AS out_t, SUM(cost) AS c
+        FROM token_usage
+        WHERE user_id = ? AND usage_date = TO_DATE(?, 'YYYY-MM-DD')
+        GROUP BY model
+      `).all(t.user_id, dateStr);
+
+      if (usages.length === 0) continue;
+
+      for (const u of usages) {
+        const ratio = runCount / ownerRunsTotal;
+        const inT = Math.round(Number(u.in_t ?? u.IN_T ?? 0) * ratio);
+        const outT = Math.round(Number(u.out_t ?? u.OUT_T ?? 0) * ratio);
+        const cost = Number(u.c ?? u.C ?? 0) * ratio;
+        const modelName = u.model ?? u.MODEL;
+        if (!modelName) continue;
+
+        try {
+          const exists = await db.prepare(`
+            SELECT id FROM pm_task_token_usage
+            WHERE task_id=? AND usage_date=TO_DATE(?, 'YYYY-MM-DD') AND model=?
+          `).get(t.task_id, dateStr, modelName);
+
+          if (exists) {
+            await db.prepare(`
+              UPDATE pm_task_token_usage
+              SET input_tokens=?, output_tokens=?, cost=?, run_count=?, last_updated=SYSTIMESTAMP
+              WHERE id=?
+            `).run(inT, outT, cost, runCount, exists.id ?? exists.ID);
+          } else {
+            await db.prepare(`
+              INSERT INTO pm_task_token_usage (task_id, usage_date, model, input_tokens, output_tokens, cost, run_count)
+              VALUES (?, TO_DATE(?, 'YYYY-MM-DD'), ?, ?, ?, ?, ?)
+            `).run(t.task_id, dateStr, modelName, inT, outT, cost, runCount);
+          }
+          totalUpserts++;
+        } catch (e) { console.warn(`[PmTokenBudget] upsert failed task=${t.task_id} date=${dateStr}:`, e.message); }
+      }
     }
   }
+
+  console.log(`[PmTokenBudget] aggregator complete: ${totalUpserts} row(s) upserted across ${BACKFILL_DAYS} day(s) × ${taskOwners.length} task(s)`);
+  return totalUpserts;
 }
 
 /**
@@ -134,12 +170,12 @@ async function enforceBudget() {
     WHERE name LIKE '[PM]%' AND daily_token_budget IS NOT NULL
   `).all();
 
-  const today = new Date().toISOString().slice(0, 10);
+  const today = twDateStr();  // Taiwan local
 
   for (const t of tasks) {
     // reset:paused_at 若是昨天或更早,先解凍
     if (t.token_budget_paused_at) {
-      const pausedDate = new Date(t.token_budget_paused_at).toISOString().slice(0, 10);
+      const pausedDate = twDateStr(new Date(t.token_budget_paused_at));
       if (pausedDate < today) {
         await db.prepare(`UPDATE scheduled_tasks SET token_budget_paused_at=NULL WHERE id=?`).run(t.id);
       }
@@ -148,7 +184,7 @@ async function enforceBudget() {
     // 計今日已用
     const used = await db.prepare(`
       SELECT SUM(input_tokens) + SUM(output_tokens) AS total
-      FROM pm_task_token_usage WHERE task_id=? AND usage_date=?
+      FROM pm_task_token_usage WHERE task_id=? AND usage_date=TO_DATE(?, 'YYYY-MM-DD')
     `).get(t.id, today);
     const usedTotal = Number(used?.total || 0);
 
