@@ -27,7 +27,7 @@ const sections = [
     sort_order: 10,
     icon: 'Sparkles',
     icon_color: 'text-amber-500',
-    last_modified: bookLastModified,
+    last_modified: '2026-04-27',  // bump:加 note 指向新「採購每日工作中心」章節
     title: '平台簡介與設計理念',
     sidebar_label: '平台簡介',
     blocks: [
@@ -119,6 +119,194 @@ const sections = [
       {
         type: 'tip',
         text: '⭐ **關鍵價值不在省時間,而在預警**:金價大漲時若系統提前 24 小時預警 + 建議暫緩採購,光一次事件的節省可能就覆蓋一整年的維運成本。'
+      },
+      {
+        type: 'note',
+        text: '👉 **採購每日打開的主入口** = sidebar 左側「**貴金屬情報**」(`/pm/briefing`)。詳細操作見下一章「採購每日工作中心」。'
+      },
+    ]
+  },
+
+  // ── 1.5. 採購每日工作中心(Phase 5 後新增的主頁)──────────────────────────
+  {
+    id: 'pm-briefing-page',
+    sort_order: 15,
+    icon: 'LayoutDashboard',
+    icon_color: 'text-blue-500',
+    last_modified: '2026-04-27',
+    title: '採購每日工作中心(/pm/briefing)',
+    sidebar_label: '每日工作中心',
+    blocks: [
+      {
+        type: 'para',
+        text: '**`/pm/briefing` 是採購員每天打開的主入口**,把「報價 → AI 重點 → 新聞 → 報告 → Prompt 審核」整合在一頁,不用跨多個畫面。Sidebar 左側點「貴金屬情報」即可進入。'
+      },
+      {
+        type: 'tip',
+        text: '👨‍💼 **權限**:跟 PM Review 共用同一套(復用「特殊說明書」分享)。admin 在「特殊說明書管理」加你進貴金屬書名單,自動就能進這個頁面 + 用 Webex PM Bot + 看 KB(若 KB 也分享給你)。'
+      },
+
+      {
+        type: 'subsection',
+        title: '頁面結構(由上到下 4 層)',
+        blocks: [
+          {
+            type: 'card_grid',
+            cols: 2,
+            items: [
+              { emoji: '🏷️', title: '1. 報價 banner(置頂常駐)', desc: '依「我的偏好」顯示關注金屬,**捲動仍可見**;[展開全部] 看 11 金屬完整清單' },
+              { emoji: '⭐', title: '2. 今日 AI 綜述', desc: '從每日 09:30 排程產生的日報撈,前 250 字摘要 + [看完整日報] 展開全文 + 👍 thumbs feedback' },
+              { emoji: '📑', title: '3. 4 個 Tab(內容區)', desc: '[新聞列表(預設)] [週報] [月報] [Prompt 審核] — Prompt 審核從原獨立頁整合進來,sidebar 不再多入口' },
+              { emoji: '⚙️', title: '4. Top bar 操作', desc: '右上有 [⚙ 我的偏好] 設關注金屬 / 是否預設只看 24h、[⬇ 匯出 CSV] 下載 30 天價格' },
+            ]
+          },
+        ]
+      },
+
+      {
+        type: 'subsection',
+        title: '4 個 Tab 詳述',
+        blocks: [
+          {
+            type: 'subsection',
+            title: '📰 新聞列表(預設打開的 tab)',
+            blocks: [
+              {
+                type: 'para',
+                text: '左側篩選器 + 右側卡片列表;每張卡片顯示「情緒色標 + 金屬 tag + 標題 + 摘要 + 來源 + 發布日期 + 釘選按鈕 + thumbs」。點標題開原文。'
+              },
+              {
+                type: 'table',
+                headers: ['篩選器', '說明'],
+                rows: [
+                  ['📅 日期範圍',           '快捷:[今日][24h][7d][30d];也可手動輸入 from/to'],
+                  ['🪙 金屬(多選)',       '11 金屬 checkbox;預設套用「我的偏好」關注金屬'],
+                  ['🌐 來源網站(多選)',    '從 pm_news 表動態抓 distinct source(Kitco/Mining/TE...)'],
+                  ['😀 情緒',              '正面 / 中性 / 負面(對標的價格的影響)'],
+                  ['🔍 關鍵字',            '全文搜尋(title + summary,LIKE 模糊比對)'],
+                  ['⭐ 只看釘選',           '只顯示我釘選過的新聞(個人收藏)'],
+                ]
+              },
+              {
+                type: 'note',
+                text: '篩選條件會**自動記住**(localStorage),下次打開預設套用上次的設定。換裝置會重來(per-user DB sync 留 v2)。'
+              },
+            ]
+          },
+          {
+            type: 'subsection',
+            title: '📊 週報 / 📈 月報',
+            blocks: [
+              {
+                type: 'para',
+                text: 'AI 自動生成的週度 / 月度市場分析。完整 markdown 渲染 + docx 下載。可從 dropdown 選歷史(週報展示 8 週、月報展示 12 月),整段內容 in-place 切換。'
+              },
+            ]
+          },
+          {
+            type: 'subsection',
+            title: '✏️ Prompt 審核',
+            blocks: [
+              {
+                type: 'para',
+                text: '原 `/pm/review` 整合進這個 tab。Tab 標題顯示 pending count badge(例「Prompt 審核 (3)」),sidebar 入口同樣顯示 badge。'
+              },
+              {
+                type: 'note',
+                text: '`/pm/review` URL 仍保留(舊 deep link / Webex Bot 通知連結不爆)。'
+              },
+            ]
+          },
+        ]
+      },
+
+      {
+        type: 'subsection',
+        title: '釘選功能(個人收藏)',
+        blocks: [
+          {
+            type: 'para',
+            text: '看到重要新聞 → 點卡片左上角 [📌] 釘選。釘選後:'
+          },
+          {
+            type: 'list',
+            items: [
+              '寫進 DB(`pm_news_pins`),**跨裝置同步**(換手機 / 在家筆電 都看得到)',
+              '篩選器 [⭐ 只看釘選] toggle 一鍵看自己收藏列表',
+              '不設上限,個人 list 自己管',
+              'v1 不附「為什麼釘」筆記欄位(避免複雜)',
+            ]
+          },
+        ]
+      },
+
+      {
+        type: 'subsection',
+        title: '匯出功能',
+        blocks: [
+          {
+            type: 'comparison',
+            items: [
+              {
+                title: '📰 新聞 PDF',
+                desc: '套用「當前篩選條件」匯出 — 例如先 filter「銅 + 過去 7 天 + 負面情緒」→ 點 [⬇ 匯出 PDF] 下載該批新聞',
+                example: '上限 500 筆;超過會擋並提示縮小範圍。NotoSansTC 中文字型,情緒色標,含原文連結'
+              },
+              {
+                title: '💰 價格 CSV',
+                desc: 'Top bar 右上 [⬇ 匯出 CSV] 直接下載「關注金屬 30 天」價格',
+                example: 'UTF-8 BOM(Excel 開不亂碼)。欄位含 as_of_date / metal / source / price_usd / day_change_pct'
+              },
+            ]
+          },
+        ]
+      },
+
+      {
+        type: 'subsection',
+        title: '我的偏好(右上 [⚙ 我的偏好])',
+        blocks: [
+          {
+            type: 'para',
+            text: 'V1 只兩個設定(其他靠 sticky filter 自動記憶):'
+          },
+          {
+            type: 'list',
+            items: [
+              '🪙 **關注金屬**:勾選你常看的金屬(留空 = 全部都關注)。設後報價 banner + 新聞列表預設只顯示這些金屬。可隨時 [展開全部] 暫解',
+              '📅 **預設只看過去 24h**:打開新聞 tab 時自動套用 24h 過濾。早晨工作節奏 friendly',
+            ]
+          },
+          {
+            type: 'note',
+            text: '寫進 DB(`pm_user_preferences`),跨裝置同步。'
+          },
+        ]
+      },
+
+      {
+        type: 'subsection',
+        title: '採購典型每日流程(建議節奏)',
+        blocks: [
+          {
+            type: 'steps',
+            items: [
+              { title: '08:50 通勤抵達公司', desc: 'Webex 已收到「貴金屬今日 snapshot」Card(若有訂閱),手機滑一眼有沒有大事' },
+              { title: '09:00 打開電腦進 /pm/briefing', desc: '頂部報價 banner 一眼掃過自己關注金屬;若昨日報告還未滾掉先看「今日 AI 綜述」' },
+              { title: '09:30 之後 daily report 生成', desc: '頂部「今日 AI 綜述」自動更新,點 [看完整日報] 看 LLM 對「為什麼今日這樣動」的解讀' },
+              { title: '看新聞 tab', desc: '預設 24h + 關注金屬已自動 filter;掃 sentiment 紅色卡片優先看;有重要的 [📌] 釘選' },
+              { title: '事業單位來問「下週銅?」', desc: '對話走 Cortex chat 用 `/pm-deep 銅` workflow;或進戰情看走勢 / 預測' },
+              { title: '週一', desc: '進 /pm/briefing 第二 tab「週報」看上週總結 + 下週展望' },
+              { title: '月初', desc: '看「月報」+ 轉寄事業單位(從報告 tab 下載 docx)' },
+              { title: '月中(若有 pending)', desc: 'Prompt 審核 tab 有紅色 badge → 點進去看 LLM 想改的 prompt,approve / reject' },
+            ]
+          },
+        ]
+      },
+
+      {
+        type: 'tip',
+        text: '🎯 **目標體驗**:採購早晨**進這個頁面 5 分鐘**搞定盯盤 + 看新聞 + 看 AI 重點 → 取代舊流程「開 LBMA 網頁 → 開台銀網頁 → 開 Bloomberg → 開 Email 看通知 → Excel 彙整」(原 30 分鐘)。'
       },
     ]
   },
