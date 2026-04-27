@@ -1212,7 +1212,18 @@ async function runResearchJob(db, jobId) {
       if (Array.isArray(existingSec)) streamingSections = existingSec;
     } catch (_) {}
     // 確保 streamingSections 長度 == subQuestions.length(對齊 index)
-    while (streamingSections.length < subQuestions.length) streamingSections.push(null);
+    // 注意:必須塞 placeholder object 而不是 null — 前端 polling 會 JSON.parse 後 .map,
+    // null element 會讓 sec.id 讀 null 炸 ResearchModal 的 streamSections.map
+    while (streamingSections.length < subQuestions.length) {
+      const i = streamingSections.length;
+      const sq = subQuestions[i];
+      streamingSections.push({
+        id: sq?.id ?? i,
+        question: sq?.question || '',
+        answer: '',
+        done: false,
+      });
+    }
 
     const today         = new Date().toISOString().split('T')[0];
     // 從 DB 讀既有 tokensByModel(支援 resume / rerun 累計)

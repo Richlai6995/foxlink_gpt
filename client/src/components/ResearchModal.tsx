@@ -374,7 +374,10 @@ export default function ResearchModal({ sessionId, modelKey, initialQuestion = '
           setTopicBindings(init)
         } catch (_) {}
         if (j.sections_json) {
-          try { setExistingSections(JSON.parse(j.sections_json)) } catch (_) {}
+          try {
+            const parsed = JSON.parse(j.sections_json)
+            setExistingSections(Array.isArray(parsed) ? parsed.filter(Boolean) : [])
+          } catch (_) {}
         }
       })
       .catch(() => {})
@@ -406,7 +409,10 @@ export default function ResearchModal({ sessionId, modelKey, initialQuestion = '
         const j = res.data
         setJobStatus(j.status)
         if (j.sections_json) {
-          try { setStreamSections(JSON.parse(j.sections_json)) } catch (_) {}
+          try {
+            const parsed = JSON.parse(j.sections_json)
+            setStreamSections(Array.isArray(parsed) ? parsed.filter(Boolean) : [])
+          } catch (_) {}
         }
         // token / cost stats
         let tokens: Record<string, {in:number;out:number}> | undefined
@@ -1201,6 +1207,7 @@ export default function ResearchModal({ sessionId, modelKey, initialQuestion = '
               {streamSections.length > 0 && (
                 <div className="space-y-2">
                   {streamSections.map((sec, i) => {
+                    if (!sec) return null
                     const trace = agentTrace[String(sec.id)] || []
                     const traceOpen = traceOpenIds.has(sec.id)
                     return (
