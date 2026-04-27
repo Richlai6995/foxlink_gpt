@@ -411,11 +411,56 @@ function AlertsBanner() {
   )
 }
 
+interface PmDailyScheduleInfo {
+  schedule_type?: string | null
+  schedule_hour?: number | null
+  schedule_minute?: number | null
+  schedule_weekday?: number | null
+  schedule_monthday?: number | null
+  schedule_interval_hours?: number | null
+  schedule_times_json?: string | null
+  schedule_cron_expr?: string | null
+  status?: string | null
+}
+
+// 把排程設定組成「每日 XX:XX 跑」這類人話,paused 時直接說「目前暫停」
+function formatPmDailyScheduleHint(info: PmDailyScheduleInfo | null | undefined): string {
+  if (!info) return '尚未建立排程,請聯絡 admin'
+  const fmt = (h?: number | null, m?: number | null) =>
+    `${String(h ?? 0).padStart(2, '0')}:${String(m ?? 0).padStart(2, '0')}`
+  const status = String(info.status || '').toLowerCase()
+  let core = ''
+  switch (String(info.schedule_type || 'daily')) {
+    case 'daily':
+      core = `每日 ${fmt(info.schedule_hour, info.schedule_minute)} 跑`; break
+    case 'weekly': {
+      const wd = ['日', '一', '二', '三', '四', '五', '六'][Number(info.schedule_weekday ?? 1)] || '一'
+      core = `每週${wd} ${fmt(info.schedule_hour, info.schedule_minute)} 跑`; break
+    }
+    case 'monthly':
+      core = `每月 ${info.schedule_monthday ?? 1} 號 ${fmt(info.schedule_hour, info.schedule_minute)} 跑`; break
+    case 'interval':
+      core = `每 ${info.schedule_interval_hours ?? 4} 小時跑一次`; break
+    case 'multi_time': {
+      let times: string[] = []
+      try { times = JSON.parse(info.schedule_times_json || '[]') } catch {}
+      core = `每天 ${times.join('、') || '—'} 各跑一次`; break
+    }
+    case 'cron_raw':
+      core = `cron: ${info.schedule_cron_expr || '—'}`; break
+    default:
+      core = `每日 ${fmt(info.schedule_hour, info.schedule_minute)} 跑`
+  }
+  if (status && status !== 'active') return `${core},目前狀態:${status}`
+  return core
+}
+
 function DailyInsight() {
   const [report, setReport] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [expanded, setExpanded] = useState(false)
   const [todayMissing, setTodayMissing] = useState(false)
+  const [scheduleInfo, setScheduleInfo] = useState<PmDailyScheduleInfo | null>(null)
 
   useEffect(() => {
     api.get('/pm/briefing/reports', { params: { type: 'daily', limit: 1, offset: 0 } })
@@ -428,7 +473,12 @@ function DailyInsight() {
         }
       })
       .finally(() => setLoading(false))
+    api.get('/pm/briefing/schedule-info')
+      .then(r => setScheduleInfo(r.data?.daily_report || null))
+      .catch(() => {})
   }, [])
+
+  const scheduleHint = formatPmDailyScheduleHint(scheduleInfo)
 
   if (loading) {
     return <div className="bg-blue-50 border-b border-blue-100 px-6 py-3 text-sm text-slate-500"><Loader2 size={14} className="animate-spin inline mr-2" /> 載入今日 AI 綜述…</div>
@@ -436,7 +486,7 @@ function DailyInsight() {
   if (!report) {
     return (
       <div className="bg-amber-50 border-b border-amber-200 px-6 py-3 text-sm text-amber-800">
-        ℹ️ 尚未生成任何日報 — 請先到「排程任務」啟用 [PM] 每日金屬日報(預設每日 18:00 跑)
+        ℹ️ 尚未生成任何日報 — 請先到「排程任務」啟用 [PM] 每日金屬日報({scheduleHint})
       </div>
     )
   }
@@ -448,7 +498,7 @@ function DailyInsight() {
     <div className="bg-blue-50 border-b border-blue-100 px-6 py-3 text-sm">
       {todayMissing && (
         <div className="text-amber-700 text-xs mb-2 bg-amber-50 border border-amber-200 rounded px-2 py-1 inline-block">
-          ⏳ 今日(尚未生成日報 — 預設每日 18:00 跑)— 以下為 {report.as_of_date} 報告
+          ⏳ 今日(尚未生成日報 — {scheduleHint})— 以下為 {report.as_of_date} 報告
         </div>
       )}
       <div className="flex items-start gap-2">

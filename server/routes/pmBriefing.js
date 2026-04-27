@@ -621,6 +621,25 @@ router.get('/news/export.pdf', verifyToken, verifyPmUser, async (req, res) => {
 // REPORTS — daily / weekly / monthly,可翻歷史
 // ────────────────────────────────────────────────────────────────────────────
 
+// 取「[PM] 每日金屬日報」排程設定,讓前端 fallback 文字動態顯示時間(避免寫死 18:00)
+router.get('/schedule-info', verifyToken, verifyPmUser, async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const row = await db.prepare(`
+      SELECT schedule_type, schedule_hour, schedule_minute,
+             schedule_weekday, schedule_monthday,
+             schedule_interval_hours, schedule_times_json,
+             schedule_cron_expr, status
+      FROM scheduled_tasks
+      WHERE name = '[PM] 每日金屬日報'
+      FETCH FIRST 1 ROWS ONLY
+    `).get();
+    res.json({ daily_report: row || null });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 router.get('/reports', verifyToken, verifyPmUser, async (req, res) => {
   try {
     const db = require('../database-oracle').db;
