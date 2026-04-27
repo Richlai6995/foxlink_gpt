@@ -27,7 +27,9 @@ async function getSetting(key, fallback) {
 function runCmd(cmd, args = [], timeout = 15000) {
   return new Promise((resolve, reject) => {
     const chunks = [];
-    const proc = spawn(cmd, args, { shell: true, timeout });
+    // 不加 shell:true — Node 22+ DEP0190(args 不 escape,直接拼 shell)。
+    // 這裡所有 callsite 都是 kubectl / df / free 這類固定二進制 + 純參數,沒 shell feature。
+    const proc = spawn(cmd, args, { timeout });
     proc.stdout.on('data', d => chunks.push(d));
     proc.stderr.on('data', d => chunks.push(d));
     proc.on('close', code => {

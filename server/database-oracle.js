@@ -312,12 +312,18 @@ async function runMigrations(db) {
   await addCol('ALERT_RULES', 'LAST_EVALUATED_AT',          'TIMESTAMP');
   await addCol('ALERT_RULES', 'NEXT_EVALUATE_AT',           'TIMESTAMP');
   await addCol('ALERT_RULES', 'LAST_EVAL_RESULT',           'VARCHAR2(500)'); // 'triggered' / 'not_triggered (reason)' / 'error: ...'
-  // Unique index (kb_id, source_hash) — 同一 KB 內 URL 不重複(NULL 不算 duplicate)
+  // Unique index (kb_id, source_hash) — 同一 KB 內 URL 不重複
+  // 用 function-based partial unique index:source_hash IS NULL 的 row 整個 key 被 CASE 壓成 NULL
+  // → Oracle 不 index 也不 enforce uniqueness。早期沒 hash 欄位的舊 doc / admin 手匯入沒填 hash 的
+  // 不會卡 migration(原本 plain unique index 會踩 ORA-01452 起不來)。
   try {
-    await db.prepare(
-      `CREATE UNIQUE INDEX kb_documents_uhash ON kb_documents (kb_id, source_hash)`
-    ).run();
-    console.log('[Migration] kb_documents_uhash unique index created ✓');
+    await db.prepare(`
+      CREATE UNIQUE INDEX kb_documents_uhash ON kb_documents (
+        CASE WHEN source_hash IS NOT NULL THEN kb_id        END,
+        CASE WHEN source_hash IS NOT NULL THEN source_hash  END
+      )
+    `).run();
+    console.log('[Migration] kb_documents_uhash partial unique index created ✓');
   } catch (e) {
     if (!/ORA-00955|ORA-01408/.test(e.message)) console.warn('[Migration] kb_documents_uhash:', e.message);
   }
@@ -3820,13 +3826,14 @@ async function runMigrations(db) {
   try { await db.prepare(`CREATE INDEX idx_pmacc_target ON pm_forecast_accuracy(target_date)`).run(); } catch (_) {}
 
   // pm_feedback_signal — 採購員對 forecast / report / alert 的 thumbs
+  // ⚠ 不要把欄位叫 `comment` — 是 Oracle 23 AI reserved word,CREATE TABLE 直接 ORA-03050
   await createTable('PM_FEEDBACK_SIGNAL', `CREATE TABLE pm_feedback_signal (
     id            NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     target_type   VARCHAR2(20) NOT NULL,
     target_ref    VARCHAR2(200) NOT NULL,
     user_id       NUMBER REFERENCES users(id) ON DELETE SET NULL,
     vote          NUMBER(2) NOT NULL,
-    comment       VARCHAR2(2000),
+    comment_text  VARCHAR2(2000),
     context_meta  CLOB,
     created_at    TIMESTAMP DEFAULT SYSTIMESTAMP,
     CONSTRAINT uq_pm_fb UNIQUE (target_type, target_ref, user_id)

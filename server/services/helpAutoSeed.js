@@ -8,6 +8,13 @@
  *   { userSections: [...] }
  */
 
+const oracledb = require('oracledb');
+
+// help_books.name / description 欄位是 NVARCHAR2,中文 string bind 必須明指 NVARCHAR
+// 否則 ORA-12704 character set mismatch(cortex 走 inline literal SQL 沒踩到,
+// 貴金屬經 ensureBook 的 bind 路徑會炸,bookCode/bookDescription 含中文)
+const nvarchar = (s) => (s == null ? null : { val: String(s), type: oracledb.DB_TYPE_NVARCHAR });
+
 const SEED_MODULES = [
   // Cortex 主說明書(舊 helpSeedData.js,維持原 export shape)
   { path: '../data/helpSeedData', bookCode: 'cortex' },
@@ -30,7 +37,7 @@ async function ensureBook(db, { code, name, description, icon, isSpecial, sortOr
             is_special = COALESCE(?, is_special),
             sort_order = COALESCE(?, sort_order)
         WHERE id = ?
-      `).run(name ?? null, description ?? null, icon ?? null,
+      `).run(nvarchar(name), nvarchar(description), icon ?? null,
              isSpecial != null ? Number(isSpecial) : null,
              sortOrder != null ? Number(sortOrder) : null,
              existing.id);
@@ -40,7 +47,7 @@ async function ensureBook(db, { code, name, description, icon, isSpecial, sortOr
   await db.prepare(`
     INSERT INTO help_books (code, name, description, icon, is_special, is_active, sort_order, last_modified)
     VALUES (?, ?, ?, ?, ?, 1, ?, ?)
-  `).run(code, name || code, description || null, icon || 'book_open_text',
+  `).run(code, nvarchar(name || code), nvarchar(description), icon || 'book_open_text',
          Number(isSpecial || 0), Number(sortOrder || 0),
          lastModified || new Date().toISOString().slice(0, 10));
   const row = await db.prepare(`SELECT id FROM help_books WHERE code = ?`).get(code);

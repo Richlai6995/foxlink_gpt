@@ -12,7 +12,10 @@ router.use(verifyAdmin);
 function runCmd(cmd, args = [], timeout = 15000) {
   return new Promise((resolve, reject) => {
     const chunks = [];
-    const proc = spawn(cmd, args, { shell: true, timeout });
+    // 不加 shell:true — Node 22+ 會丟 DEP0190(shell+args 不 escape,等於把 args
+    // 直接拼進 shell command line,任何含空格/特殊字元的 arg 都會中標)。
+    // cmd 必須在 PATH(prod 容器是 Linux,kubectl/docker 都裝在 PATH)。
+    const proc = spawn(cmd, args, { timeout });
     proc.stdout.on('data', d => chunks.push(d));
     proc.stderr.on('data', d => chunks.push(d));
     proc.on('close', code => {
@@ -813,7 +816,7 @@ router.get('/logs/pod/:ns/:pod', (req, res) => {
     // 預設顯示最近 1 小時
     args.push('--since', '1h');
   }
-  const proc = spawn('kubectl', args, { shell: true });
+  const proc = spawn('kubectl', args);
 
   proc.stdout.on('data', d => {
     const lines = d.toString('utf8').split('\n');
@@ -852,7 +855,7 @@ router.get('/logs/container/:id', (req, res) => {
     args.push('--since', '1h');
   }
   args.push(req.params.id);
-  const proc = spawn('docker', args, { shell: true });
+  const proc = spawn('docker', args);
   let dockerFailed = false;
 
   proc.stdout.on('data', d => {
@@ -1168,7 +1171,8 @@ router.post('/deploy', (req, res) => {
   res.write(`data: ${JSON.stringify({ status: 'starting', gitBefore })}\n\n`);
 
   const deployDir = process.env.DEPLOY_DIR || process.cwd();
-  const proc = spawn('bash', ['-c', `cd ${deployDir} && git pull && ./deploy.sh`], { shell: true });
+  // bash -c 已經是 shell;再疊 shell:true 會觸 DEP0190 而且重複起一層 shell
+  const proc = spawn('bash', ['-c', `cd ${deployDir} && git pull && ./deploy.sh`]);
 
   proc.stdout.on('data', d => {
     const text = d.toString('utf8');

@@ -171,12 +171,12 @@ router.post('/feedback', verifyToken, verifyPmUser, async (req, res) => {
     if (existing) {
       await db.prepare(`
         UPDATE pm_feedback_signal
-        SET vote=?, comment=?, context_meta=?, created_at=SYSTIMESTAMP
+        SET vote=?, comment_text=?, context_meta=?, created_at=SYSTIMESTAMP
         WHERE id=?
       `).run(voteNum, comment || null, context_meta ? JSON.stringify(context_meta) : null, existing.id);
     } else {
       await db.prepare(`
-        INSERT INTO pm_feedback_signal (target_type, target_ref, user_id, vote, comment, context_meta)
+        INSERT INTO pm_feedback_signal (target_type, target_ref, user_id, vote, comment_text, context_meta)
         VALUES (?, ?, ?, ?, ?, ?)
       `).run(target_type, String(target_ref), req.user.id, voteNum,
              comment || null, context_meta ? JSON.stringify(context_meta) : null);
@@ -195,10 +195,10 @@ router.get('/feedback/my', verifyToken, verifyPmUser, async (req, res) => {
     const { target_type, target_ref } = req.query;
     if (!target_type || !target_ref) return res.status(400).json({ error: 'target_type 與 target_ref 必填' });
     const row = await db.prepare(`
-      SELECT vote, comment FROM pm_feedback_signal
+      SELECT vote, comment_text FROM pm_feedback_signal
       WHERE target_type=? AND target_ref=? AND user_id=?
     `).get(target_type, String(target_ref), req.user.id);
-    res.json({ vote: row?.vote || 0, comment: row?.comment || null });
+    res.json({ vote: row?.vote || 0, comment: row?.comment_text || null });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

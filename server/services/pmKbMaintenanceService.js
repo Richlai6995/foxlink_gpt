@@ -53,13 +53,13 @@ async function runOnce({ dryRun = DEFAULT_DRY_RUN } = {}) {
       continue;
     }
 
-    // 找候選 chunks(透過 kb_documents.created_date 判斷,因 kb_chunks 沒 created_at)
+    // 找候選 chunks(透過 kb_documents.created_at 判斷,因 kb_chunks 沒 created_at)
     const candidates = await db.prepare(`
       SELECT c.id
       FROM kb_chunks c
       JOIN kb_documents d ON d.id = c.doc_id
       WHERE c.kb_id = ? AND c.archived_at IS NULL
-        AND d.created_date < SYSDATE - ?
+        AND d.created_at < SYSDATE - ?
     `).all(kb.id, ARCHIVE_AFTER_DAYS);
 
     const ids = (candidates || []).map(r => r.id || r.ID);
