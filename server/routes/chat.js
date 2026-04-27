@@ -1162,6 +1162,100 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
     }
   };
 
+  // ── Tool artifact passthrough(docs/tool-artifact-passthrough.md)──
+  //   宣告位置在 sendEvent 之後、所有 path 共用之前(answer / inject / tool dispatch 都可用)。
+  //   暫存命中 passthrough 的 artifact,等 chat_messages INSERT 拿到 message_id 後 batch insert。
+  //   SSE artifact event 已在偵測點立即發給 client(用 client_id),不需等 DB。
+  const pendingArtifacts = [];
+
+  /**
+   * 偵測 tool 結果是否要 passthrough。命中:SSE → push pendingArtifacts → return summaryText 給 LLM。
+   * 未命中:return null,呼叫端照舊用原 result 給 LLM。
+   */
+  const tryPassthrough = ({ result, mimeHint, source, toolMeta }) => {
+    try {
+      const det = detectPassthrough({ result, mimeHint, source, toolMeta });
+      if (!det.passthrough) return null;
+
+      const clientId = `art_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
+      sendEvent({
+        type: 'artifact',
+        client_id: clientId,
+        mime_type: det.artifact.mime,
+        title: det.artifact.title,
+        content: det.artifact.content,
+        size: det.artifact.size,
+        tool_name: toolMeta?.name,
+        source_type: source.type,
+      });
+
+      pendingArtifacts.push({
+        client_id: clientId,
+        source_type: source.type,
+        source_id: source.id || null,
+        tool_name: toolMeta?.name || null,
+        tool_args: toolMeta?.args ? JSON.stringify(toolMeta.args) : null,
+        mime_type: det.artifact.mime,
+        title: det.artifact.title,
+        content: det.artifact.content,
+        content_size: det.artifact.size,
+        summary: JSON.stringify(det.summaryStruct),
+        detection_method: det.detectionMethod || null,
+      });
+
+      try {
+        db.prepare(
+          `INSERT INTO audit_logs (user_id, session_id, content, has_sensitive) VALUES (?,?,?,0)`
+        ).run(req.user.id, sessionId, `[passthrough] ${source.type}:${toolMeta?.name || ''} (${det.artifact.size}B, ${det.artifact.mime})`).catch(() => {});
+      } catch (_) {}
+
+      return det.summaryText;
+    } catch (e) {
+      console.warn('[Passthrough] detect/emit error:', e.message);
+      return null;
+    }
+  };
+
+  /**
+   * Batch INSERT chat_artifacts 共用 helper(answer / tool dispatch 兩處 INSERT chat_messages 後呼叫)。
+   * 用 ORDER BY id DESC 反查 message_id(因 CLOB INSERT 觸發 ORA-22848 fallback,lastInsertRowid=null)。
+   */
+  const flushPendingArtifacts = async () => {
+    if (pendingArtifacts.length === 0) return;
+    let assistantMsgId = null;
+    try {
+      const r = await db.prepare(
+        `SELECT id FROM chat_messages WHERE session_id=? AND role='assistant' ORDER BY id DESC FETCH FIRST 1 ROWS ONLY`
+      ).get(sessionId);
+      assistantMsgId = r?.id;
+    } catch (e) { console.warn('[Artifact] lookup message_id failed:', e.message); }
+    if (!assistantMsgId) {
+      console.warn('[Artifact] No assistant message id, skip persisting', pendingArtifacts.length, 'artifacts');
+      return;
+    }
+    for (const a of pendingArtifacts) {
+      try {
+        const ins = await db.prepare(
+          `INSERT INTO chat_artifacts
+             (message_id, session_id, user_id, source_type, source_id, tool_name, tool_args,
+              mime_type, title, content, content_size, summary, detection_method)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`
+        ).run(
+          assistantMsgId, sessionId, req.user.id,
+          a.source_type, a.source_id, a.tool_name, a.tool_args,
+          a.mime_type, a.title, a.content, a.content_size, a.summary, a.detection_method,
+        );
+        const dbId = ins?.lastInsertRowid;
+        if (dbId) {
+          try { sendEvent({ type: 'artifact_persisted', client_id: a.client_id, id: dbId, message_id: assistantMsgId }); } catch (_) {}
+        }
+      } catch (e) {
+        console.warn('[Artifact] INSERT failed:', e.message);
+      }
+    }
+    pendingArtifacts.length = 0;  // 清空,避免下一條 path 再 flush 一次
+  };
+
   // Global SSE keep-alive: send a comment periodically to keep the connection alive.
   // SSE comments (lines starting with ":") are ignored by the browser parser.
   const sseKeepAlive = setInterval(() => {
@@ -2226,7 +2320,27 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
         if (resp.ok) {
           const data = await resp.json();
           console.log(`[Skill] answer "${sk.name}" HTTP 200 keys=${Object.keys(data).join(',')} audio=${!!data.audio_url} ${Date.now()-_ansT0}ms`);
-          answerContent = data.content || data.system_prompt || answerContent;
+          // ── Passthrough(answer mode 也支援):skill 顯式回 { artifact } 且 admin 開總開關 ──
+          //   命中 → SSE artifact event 已發 + pendingArtifacts 已 push,文字部分給簡短提示就好
+          const ptSummary = tryPassthrough({
+            result: data,
+            source: {
+              type: 'skill',
+              id: sk.id,
+              config: {
+                passthrough_enabled: sk.passthrough_enabled ?? sk.PASSTHROUGH_ENABLED,
+                passthrough_max_bytes: sk.passthrough_max_bytes ?? sk.PASSTHROUGH_MAX_BYTES,
+                passthrough_mime_whitelist: sk.passthrough_mime_whitelist ?? sk.PASSTHROUGH_MIME_WHITELIST,
+              },
+            },
+            toolMeta: { name: sk.name, args: { user_message: combinedUserText } },
+          });
+          if (ptSummary) {
+            // passthrough 命中:用 system_prompt 當簡短人類提示(若有);否則用 artifact 標題
+            answerContent = (data.system_prompt || `已產出「${data.artifact?.title || 'artifact'}」,請見下方獨立顯示區塊`).slice(0, 1000);
+          } else {
+            answerContent = data.content || data.system_prompt || answerContent;
+          }
           if (data.audio_url) {
             skillAudioFileUrl = data.audio_url;
             skillAudioUrl = data.audio_url;
@@ -2262,6 +2376,8 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
         await upsertTokenUsage(db, req.user.id, today, 'external-skill', 0, 0, 0);
         await db.prepare(`INSERT INTO chat_messages (session_id, role, content) VALUES (?, 'assistant', ?)`)
           .run(sessionId, answerContent);
+        // ── Passthrough artifacts(answer mode):INSERT chat_messages 後 batch insert ──
+        await flushPendingArtifacts();
         // Auto-generate session title (same logic as normal chat path)
         try {
           const sessionRow = await db.prepare(`SELECT title FROM chat_sessions WHERE id=?`).get(sessionId);
@@ -2465,60 +2581,8 @@ ${hasPreserve ? '- 標記【★保留原文】的欄位：必須完整複製原�
     const toolCallResults = [];
     let toolCallCounter = 0;
     let parsedCharts = [];  // InlineChartSpec[] 最終存 DB + SSE 推給前端
-    // ── Tool artifact passthrough(docs/tool-artifact-passthrough.md)──
-    //   暫存 tool 命中 passthrough 的 artifact,等 chat_messages INSERT 拿到 message_id 後 batch insert
-    //   SSE artifact event 已在偵測點立即發給 client(用 client_id),不需等 DB
-    const pendingArtifacts = [];
-
-    /**
-     * 偵測 tool 結果是否要 passthrough。命中:SSE → push pendingArtifacts → return summaryText 給 LLM。
-     * 未命中:return null,呼叫端照舊用原 result 給 LLM。
-     */
-    const tryPassthrough = ({ result, mimeHint, source, toolMeta }) => {
-      try {
-        const det = detectPassthrough({ result, mimeHint, source, toolMeta });
-        if (!det.passthrough) return null;
-
-        const clientId = `art_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
-        // SSE 直接送(client 用 client_id 暫存,session 復載走 DB id)
-        sendEvent({
-          type: 'artifact',
-          client_id: clientId,
-          mime_type: det.artifact.mime,
-          title: det.artifact.title,
-          content: det.artifact.content,
-          size: det.artifact.size,
-          tool_name: toolMeta?.name,
-          source_type: source.type,
-        });
-
-        pendingArtifacts.push({
-          client_id: clientId,
-          source_type: source.type,
-          source_id: source.id || null,
-          tool_name: toolMeta?.name || null,
-          tool_args: toolMeta?.args ? JSON.stringify(toolMeta.args) : null,
-          mime_type: det.artifact.mime,
-          title: det.artifact.title,
-          content: det.artifact.content,
-          content_size: det.artifact.size,
-          summary: JSON.stringify(det.summaryStruct),
-          detection_method: det.detectionMethod || null,
-        });
-
-        // Audit:event-only,不掃 sensitive_keywords
-        try {
-          db.prepare(
-            `INSERT INTO audit_logs (user_id, session_id, content, has_sensitive) VALUES (?,?,?,0)`
-          ).run(req.user.id, sessionId, `[passthrough] ${source.type}:${toolMeta?.name || ''} (${det.artifact.size}B, ${det.artifact.mime})`).catch(() => {});
-        } catch (_) {}
-
-        return det.summaryText;
-      } catch (e) {
-        console.warn('[Passthrough] detect/emit error:', e.message);
-        return null;
-      }
-    };
+    // pendingArtifacts / tryPassthrough / flushPendingArtifacts 已在 handler 開頭宣告(line ~1170)
+    // 讓 answer / inject / tool dispatch 三條 path 都共用同一組 state
 
     if (imageOutput) {
       // ── Image-generation model (non-streaming) ──────────────────────────
@@ -3614,49 +3678,13 @@ ${hasPreserve ? '- 標記【★保留原文】的欄位：必須完整複製原�
       return JSON.stringify(allGeneratedFiles);
     })();
     const chartsJsonToStore = parsedCharts.length > 0 ? JSON.stringify(parsedCharts) : null;
-    const insertMsgRes = await db.prepare(
+    await db.prepare(
       `INSERT INTO chat_messages (session_id, role, content, input_tokens, output_tokens, files_json, charts_json)
        VALUES (?, 'assistant', ?, ?, ?, ?, ?)`
     ).run(sessionId, displayText, inputTokens, outputTokens, filesJsonToStore, chartsJsonToStore);
 
-    // ── Persist tool artifact passthrough (docs/tool-artifact-passthrough.md §6.4) ──
-    if (pendingArtifacts.length > 0) {
-      // CLOB INSERT 走 RETURNING fallback、lastInsertRowid 通常為 null。撈最新 assistant message id。
-      let assistantMsgId = insertMsgRes?.lastInsertRowid;
-      if (!assistantMsgId) {
-        try {
-          const r = await db.prepare(
-            `SELECT id FROM chat_messages WHERE session_id=? AND role='assistant' ORDER BY id DESC FETCH FIRST 1 ROWS ONLY`
-          ).get(sessionId);
-          assistantMsgId = r?.id;
-        } catch (e) { console.warn('[Artifact] lookup message_id failed:', e.message); }
-      }
-      if (assistantMsgId) {
-        for (const a of pendingArtifacts) {
-          try {
-            const ins = await db.prepare(
-              `INSERT INTO chat_artifacts
-                 (message_id, session_id, user_id, source_type, source_id, tool_name, tool_args,
-                  mime_type, title, content, content_size, summary, detection_method)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`
-            ).run(
-              assistantMsgId, sessionId, req.user.id,
-              a.source_type, a.source_id, a.tool_name, a.tool_args,
-              a.mime_type, a.title, a.content, a.content_size, a.summary, a.detection_method,
-            );
-            // 把 client_id ↔ DB id 對應送回前端,讓 client 把 SSE 暫存的 artifact reconcile
-            const dbId = ins?.lastInsertRowid;
-            if (dbId) {
-              try { sendEvent({ type: 'artifact_persisted', client_id: a.client_id, id: dbId, message_id: assistantMsgId }); } catch (_) {}
-            }
-          } catch (e) {
-            console.warn('[Artifact] INSERT failed:', e.message);
-          }
-        }
-      } else {
-        console.warn('[Artifact] No assistant message id, skip persisting', pendingArtifacts.length, 'artifacts');
-      }
-    }
+    // ── Passthrough artifacts(主 tool dispatch path):INSERT chat_messages 後 batch insert ──
+    await flushPendingArtifacts();
 
     // Update session title (first message)
     if (historyMessages.length === 0 && combinedUserText.trim()) {
