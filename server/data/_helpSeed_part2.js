@@ -2651,19 +2651,18 @@ module.exports = [
     sort_order: 32,
     icon: 'Database',
     icon_color: 'text-sky-600',
-    last_modified: '2026-04-20',
+    last_modified: '2026-04-27',
     title: 'ERP 工具呼叫',
     sidebar_label: 'ERP 工具',
     blocks: [
-      { type: 'para', text: '**ERP 工具**是平台包裝好的 Oracle ERP FUNCTION 與 PROCEDURE，透過自然語言就能直接查詢或執行 ERP 資料。管理員在後台註冊後，您可以透過三種方式使用。' },
+      { type: 'para', text: '**ERP 工具**是平台包裝好的 Oracle ERP FUNCTION 與 PROCEDURE，透過自然語言就能直接查詢或執行 ERP 資料。管理員在後台註冊後，您可以透過兩種方式使用。' },
       { type: 'note', text: '您看到的工具清單由管理員授權控管。若對話中找不到預期的 ERP 工具，請向管理員申請授權。' },
       {
-        type: 'subsection', title: '三種使用方式',
+        type: 'subsection', title: '兩種使用方式',
         blocks: [{
           type: 'card_grid', cards: [
             { icon: '⚡', title: '讓 AI 自動呼叫（推薦）', desc: '用自然語言問問題，AI 會自己決定要不要呼叫 ERP 工具、要傳什麼參數。**可直接用代碼/名稱**（如「查組織 G0C 的工單 TNDS264009-C 狀況」），系統會自動透過 LOV 轉為內部 ID，不用背數字 ID' },
             { icon: '🛢', title: '手動立即執行', desc: '對話輸入框左側的「🛢 ERP」按鈕可直接挑工具、填參數、馬上執行並看結果。適合精確查詢或 AI 判斷不準時。' },
-            { icon: '🔁', title: '每輪自動注入（Inject）', desc: '由管理員設定的 context 型工具，每次您發訊息前平台會自動跑一次把結果塞進對話。您不需做任何操作。' },
           ],
         }],
       },
