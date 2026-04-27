@@ -1663,6 +1663,20 @@ export default function ChatPage() {
                                 {j.status === 'done' && (
                                   <div className="mt-1 space-y-1">
                                     <p className="text-green-600">{t('chat.topbar.researchJobDone', { time: fmtTW(j.completed_at) })}</p>
+                                    {(typeof j.actual_usd === 'number' && j.actual_usd > 0) && (() => {
+                                      let tbm: Record<string, { in: number; out: number }> = {}
+                                      try { tbm = JSON.parse(j.tokens_by_model_json || '{}') } catch { /* ignore */ }
+                                      const totalIn  = Object.values(tbm).reduce((s: number, t: any) => s + (t?.in  || 0), 0)
+                                      const totalOut = Object.values(tbm).reduce((s: number, t: any) => s + (t?.out || 0), 0)
+                                      return (
+                                        <p className="text-slate-500 font-mono text-[10px]">
+                                          ${j.actual_usd.toFixed(4)}
+                                          {(totalIn + totalOut > 0) && (
+                                            <span className="text-slate-400"> · in {totalIn.toLocaleString()} / out {totalOut.toLocaleString()}</span>
+                                          )}
+                                        </p>
+                                      )
+                                    })()}
                                     {j.result_files_json && (() => {
                                       try {
                                         const files: { name: string; url: string; type: string }[] = JSON.parse(j.result_files_json)

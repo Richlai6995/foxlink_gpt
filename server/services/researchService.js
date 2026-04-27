@@ -1404,20 +1404,37 @@ async function runResearchJob(db, jobId) {
 
     console.log(`[Research] Job ${jobId} completed — ${files.length} files`);
   } catch (e) {
-    console.error(`[Research] Job ${jobId} failed:`, e.message);
+    const detailedMsg = _formatErrorWithCause(e);
+    console.error(`[Research] Job ${jobId} failed:`, detailedMsg, e.stack || '');
     await db.prepare(
       "UPDATE research_jobs SET status='failed', error_msg=?, updated_at=SYSTIMESTAMP WHERE id=?"
-    ).run((e.message || 'Unknown error').slice(0, 500), jobId);
+    ).run(detailedMsg.slice(0, 500), jobId);
     if (job?.session_id) {
       await db.prepare(
         `UPDATE chat_messages SET content=? WHERE session_id=? AND TO_CHAR(DBMS_LOB.SUBSTR(content,100,1))=?`
-      ).run(isEn ? `**❌ Deep Research Failed**\n\n${e.message}` : `**❌ 深度研究失敗**\n\n${e.message}`, job.session_id, `__RESEARCH_JOB__:${jobId}`)
+      ).run(isEn ? `**❌ Deep Research Failed**\n\n${detailedMsg}` : `**❌ 深度研究失敗**\n\n${detailedMsg}`, job.session_id, `__RESEARCH_JOB__:${jobId}`)
         .catch(() => {});
     }
   } finally {
     if (heartbeatTimer) clearInterval(heartbeatTimer);
     ACTIVE_JOBS.delete(jobId);
   }
+}
+
+// undici (Node native fetch) 失敗時 e.message 只有 "fetch failed",真因藏在 e.cause
+// (ECONNRESET / UND_ERR_SOCKET / ENOTFOUND 等)。把 cause 鏈一路展開,寫進 error_msg
+function _formatErrorWithCause(e) {
+  if (!e) return 'Unknown error';
+  const parts = [e.message || String(e)];
+  let cur = e.cause;
+  let depth = 0;
+  while (cur && depth < 3) {
+    const causeMsg = cur.message || cur.code || String(cur);
+    if (causeMsg && !parts.includes(causeMsg)) parts.push(`cause: ${causeMsg}`);
+    cur = cur.cause;
+    depth++;
+  }
+  return parts.join(' | ');
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1616,10 +1633,11 @@ async function rerunSections(db, jobId, sectionIds, sqOverrides = []) {
 
     console.log(`[Research] Job ${jobId} rerun completed — ${sectionIds.length} sections`);
   } catch (e) {
-    console.error(`[Research] Job ${jobId} rerun failed:`, e.message);
+    const detailedMsg = _formatErrorWithCause(e);
+    console.error(`[Research] Job ${jobId} rerun failed:`, detailedMsg, e.stack || '');
     await db.prepare(
       "UPDATE research_jobs SET status='failed', error_msg=?, updated_at=SYSTIMESTAMP WHERE id=?"
-    ).run((e.message || 'Unknown error').slice(0, 500), jobId);
+    ).run(detailedMsg.slice(0, 500), jobId);
   }
 }
 

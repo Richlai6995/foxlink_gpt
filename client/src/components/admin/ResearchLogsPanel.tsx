@@ -12,6 +12,9 @@ interface ResearchJob {
   use_web_search: number
   error_msg: string | null
   result_files_json: string | null
+  actual_usd: number | null
+  estimated_usd: number | null
+  tokens_by_model_json: string | null
   created_at: string
   completed_at: string | null
   user_id: number
@@ -152,10 +155,39 @@ export default function ResearchLogsPanel() {
                           {j.question || '(無)'}
                         </p>
                       </div>
-                      <div className="flex gap-4 text-xs text-slate-500">
+                      <div className="flex gap-4 text-xs text-slate-500 flex-wrap">
                         <span>格式：{j.output_formats || '—'}</span>
                         <span>網路搜尋：{j.use_web_search ? '是' : '否'}</span>
+                        {typeof j.actual_usd === 'number' && j.actual_usd > 0 && (
+                          <span className="font-mono text-slate-700">
+                            成本 ${j.actual_usd.toFixed(4)}
+                            {typeof j.estimated_usd === 'number' && j.estimated_usd > 0 && (
+                              <span className="text-slate-400"> / 預估 ${j.estimated_usd.toFixed(2)}</span>
+                            )}
+                          </span>
+                        )}
                       </div>
+                      {j.tokens_by_model_json && (() => {
+                        let tbm: Record<string, { in: number; out: number }> = {}
+                        try { tbm = JSON.parse(j.tokens_by_model_json) } catch { return null }
+                        const entries = Object.entries(tbm)
+                        if (entries.length === 0) return null
+                        const totalIn  = entries.reduce((s, [, t]) => s + (t?.in  || 0), 0)
+                        const totalOut = entries.reduce((s, [, t]) => s + (t?.out || 0), 0)
+                        return (
+                          <div className="bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs space-y-0.5">
+                            <p className="font-semibold text-slate-600 mb-1">Token 統計</p>
+                            <p className="font-mono text-slate-500">
+                              total: in {totalIn.toLocaleString()} · out {totalOut.toLocaleString()} · 共 {(totalIn + totalOut).toLocaleString()}
+                            </p>
+                            {entries.map(([m, t]) => (
+                              <p key={m} className="font-mono text-slate-400 pl-3">
+                                {m}: in {(t?.in || 0).toLocaleString()} / out {(t?.out || 0).toLocaleString()}
+                              </p>
+                            ))}
+                          </div>
+                        )
+                      })()}
                       {j.error_msg && (
                         <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg p-2">
                           錯誤：{j.error_msg}

@@ -421,6 +421,7 @@ router.get('/jobs', async (req, res) => {
       SELECT id, title, status, progress_step, progress_total, progress_label,
              use_web_search, output_formats, error_msg, is_notified,
              result_files_json,
+             actual_usd, estimated_usd, tokens_by_model_json,
              TO_CHAR(created_at,'YYYY-MM-DD HH24:MI:SS') AS created_at,
              TO_CHAR(completed_at,'YYYY-MM-DD HH24:MI:SS') AS completed_at
       FROM research_jobs
@@ -559,6 +560,7 @@ router.get('/admin/jobs', async (req, res) => {
              rj.progress_step, rj.progress_total, rj.progress_label,
              rj.output_formats, rj.use_web_search,
              rj.error_msg, rj.result_files_json,
+             rj.actual_usd, rj.estimated_usd, rj.tokens_by_model_json,
              TO_CHAR(rj.created_at,'YYYY-MM-DD HH24:MI:SS') AS created_at,
              TO_CHAR(rj.completed_at,'YYYY-MM-DD HH24:MI:SS') AS completed_at,
              u.id AS user_id, u.username, u.name AS user_name, u.employee_id
