@@ -109,7 +109,8 @@ export default function HelpTranslationPanel() {
     try {
       setLoading(true)
       const res = await api.get('/help/admin/status')
-      setSections(res.data)
+      const list = Array.isArray(res.data) ? res.data : (res.data?.sections ?? [])
+      setSections(list)
     } catch (err) {
       console.error('Failed to fetch help status:', err)
     } finally {
@@ -204,7 +205,9 @@ export default function HelpTranslationPanel() {
       try {
         // Primary: check DB status (reliable across all pods)
         const res = await api.get('/help/admin/status')
-        const allSections: SectionStatus[] = res.data
+        const allSections: SectionStatus[] = Array.isArray(res.data)
+          ? res.data
+          : (res.data?.sections ?? [])
         setSections(allSections)
 
         const newProgress: Record<string, TranslationProgress> = {}
