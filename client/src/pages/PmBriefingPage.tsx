@@ -425,11 +425,12 @@ function NewsTab({ focusedSet, default24h }: { focusedSet: Set<string>; default2
           <div className="text-xs font-semibold text-slate-600 mb-1">🪙 金屬</div>
           <div className="grid grid-cols-3 gap-1">
             {ALL_METALS.map(m => (
-              <label key={m.code} className={`flex items-center gap-1 px-1.5 py-1 text-xs rounded cursor-pointer ${
+              <label key={m.code} className={`flex items-center justify-center gap-1 px-1.5 py-1 text-xs rounded cursor-pointer ${
                 metals.includes(m.code) ? 'bg-blue-100 text-blue-700' : 'bg-slate-50 text-slate-600 hover:bg-slate-100'
               }`}>
                 <input type="checkbox" checked={metals.includes(m.code)} onChange={() => setMetalSel(m.code)} className="hidden" />
-                {m.code}
+                <span className="font-mono font-bold">{m.code}</span>
+                <span className="text-[11px]">{m.name}</span>
               </label>
             ))}
           </div>
