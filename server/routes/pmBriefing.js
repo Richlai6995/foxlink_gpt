@@ -214,6 +214,158 @@ function csvEscape(v) {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
+// FORECAST + PURCHASE overlay(D — 採購節奏 vs 預測 chart 疊加)
+// ────────────────────────────────────────────────────────────────────────────
+
+// GET /api/pm/briefing/forecast-overlay?metal=&from=&to=
+// 同 target_date 多筆 forecast(不同 forecast_date)→ 取最新 forecast_date 那筆
+router.get('/forecast-overlay', verifyToken, verifyPmUser, async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const metal = String(req.query.metal || '').trim();
+    const from = req.query.from || null;
+    const to = req.query.to || null;
+    if (!metal) return res.status(400).json({ error: 'metal required' });
+
+    const where = [`f.entity_type = 'metal'`, `f.entity_code = ?`];
+    const params = [metal];
+    if (from) { where.push(`f.target_date >= TO_DATE(?, 'YYYY-MM-DD')`); params.push(from); }
+    if (to)   { where.push(`f.target_date <= TO_DATE(?, 'YYYY-MM-DD')`); params.push(to); }
+
+    const rows = await db.prepare(`
+      SELECT * FROM (
+        SELECT TO_CHAR(f.target_date, 'YYYY-MM-DD')   AS target_date,
+               TO_CHAR(f.forecast_date, 'YYYY-MM-DD') AS forecast_date,
+               f.predicted_mean, f.predicted_lower, f.predicted_upper,
+               f.confidence, f.model_used,
+               ROW_NUMBER() OVER (PARTITION BY f.target_date ORDER BY f.forecast_date DESC) AS rn
+        FROM forecast_history f
+        WHERE ${where.join(' AND ')}
+      ) WHERE rn = 1
+      ORDER BY target_date
+      FETCH FIRST 1000 ROWS ONLY
+    `).all(...params);
+    res.json(rows);
+  } catch (e) {
+    console.error('[PmBriefing] /forecast-overlay error:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/pm/briefing/purchase-overlay?metal=&from=&to=
+// 回 by month aggregated;factory=ALL 表示跨廠加總
+router.get('/purchase-overlay', verifyToken, verifyPmUser, async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const metal = String(req.query.metal || '').trim();
+    const from = req.query.from || null;
+    const to = req.query.to || null;
+    if (!metal) return res.status(400).json({ error: 'metal required' });
+
+    const where = [`metal_code = ?`];
+    const params = [metal];
+    if (from) { where.push(`purchase_month >= ?`); params.push(String(from).slice(0, 7)); }
+    if (to)   { where.push(`purchase_month <= ?`); params.push(String(to).slice(0, 7)); }
+
+    const rows = await db.prepare(`
+      SELECT purchase_month,
+             SUM(total_qty)    AS total_qty,
+             SUM(total_amount) AS total_amount,
+             AVG(avg_unit_price) AS avg_unit_price,
+             SUM(po_count)     AS po_count,
+             SUM(supplier_count) AS supplier_count,
+             COUNT(DISTINCT factory_code) AS factory_count
+      FROM pm_purchase_history
+      WHERE ${where.join(' AND ')}
+      GROUP BY purchase_month
+      ORDER BY purchase_month
+    `).all(...params);
+    res.json(rows);
+  } catch (e) {
+    console.error('[PmBriefing] /purchase-overlay error:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/pm/briefing/metrics-summary?metal=&days=180
+// 三個 KPI:採購擇時 / AI MAPE / 庫存天數
+router.get('/metrics-summary', verifyToken, verifyPmUser, async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const metal = String(req.query.metal || '').trim();
+    const days = Math.min(Math.max(Number(req.query.days || 180), 1), 730);
+    if (!metal) return res.status(400).json({ error: 'metal required' });
+
+    // 1. 採購擇時:過去 N 天「採購均價 vs 市場月均」差異 %
+    let timingPct = null;
+    try {
+      const r = await db.prepare(`
+        SELECT
+          (SELECT AVG(avg_unit_price) FROM pm_purchase_history
+           WHERE metal_code = ?
+             AND TO_DATE(purchase_month || '-01', 'YYYY-MM-DD') >= TRUNC(SYSDATE) - ?) AS our_avg,
+          (SELECT AVG(price_usd) FROM pm_price_history
+           WHERE metal_code = ? AND as_of_date >= TRUNC(SYSDATE) - ? AND price_usd IS NOT NULL) AS market_avg
+        FROM dual
+      `).get(metal, days, metal, days);
+      const ours = Number(r?.our_avg ?? r?.OUR_AVG);
+      const mkt  = Number(r?.market_avg ?? r?.MARKET_AVG);
+      if (Number.isFinite(ours) && Number.isFinite(mkt) && mkt > 0) {
+        timingPct = ((ours - mkt) / mkt) * 100;
+      }
+    } catch (_) {}
+
+    // 2. AI 預測 MAPE(近 30 天)— 從 pm_forecast_accuracy 撈
+    let mape30 = null;
+    let mapeSamples = 0;
+    try {
+      const r = await db.prepare(`
+        SELECT AVG(ABS(pct_error)) AS mape, COUNT(*) AS n
+        FROM pm_forecast_accuracy
+        WHERE entity_type = 'metal' AND entity_code = ?
+          AND target_date >= TRUNC(SYSDATE) - 30
+          AND pct_error IS NOT NULL
+      `).get(metal);
+      const m = Number(r?.mape ?? r?.MAPE);
+      if (Number.isFinite(m)) { mape30 = m; mapeSamples = Number((r?.n ?? r?.N) || 0); }
+    } catch (_) {}
+
+    // 3. 庫存天數:總在庫 / (近 30 天月平均用量 / 30)
+    let daysOfSupply = null;
+    let onhandKg = null;
+    try {
+      const inv = await db.prepare(`
+        SELECT SUM(NVL(onhand_qty, 0) + NVL(in_transit_qty, 0)) AS total_inv
+        FROM pm_inventory WHERE metal_code = ?
+      `).get(metal);
+      const usage = await db.prepare(`
+        SELECT AVG(total_qty) AS avg_monthly
+        FROM pm_purchase_history
+        WHERE metal_code = ?
+          AND TO_DATE(purchase_month || '-01', 'YYYY-MM-DD') >= TRUNC(SYSDATE) - 90
+      `).get(metal);
+      const inventory = Number(inv?.total_inv ?? inv?.TOTAL_INV);
+      const monthly = Number(usage?.avg_monthly ?? usage?.AVG_MONTHLY);
+      if (Number.isFinite(inventory)) onhandKg = inventory;
+      if (Number.isFinite(inventory) && Number.isFinite(monthly) && monthly > 0) {
+        daysOfSupply = inventory / (monthly / 30);
+      }
+    } catch (_) {}
+
+    res.json({
+      timing_pct: timingPct,
+      mape_30d: mape30,
+      mape_samples: mapeSamples,
+      days_of_supply: daysOfSupply,
+      onhand_total: onhandKg,
+    });
+  } catch (e) {
+    console.error('[PmBriefing] /metrics-summary error:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ────────────────────────────────────────────────────────────────────────────
 // MACRO 宏觀指標(DXY / VIX / UST10Y / WTI 等 — 金價的關鍵 driver)
 // ────────────────────────────────────────────────────────────────────────────
 

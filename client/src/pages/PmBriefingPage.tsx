@@ -734,6 +734,14 @@ function PriceHistoryTab({ focusedMetals }: { focusedMetals: string[] }) {
   const [loading, setLoading] = useState(false)
   const [downloading, setDownloading] = useState(false)
 
+  // D — overlay 狀態
+  const [showForecast, setShowForecast] = useState(true)
+  const [showPurchase, setShowPurchase] = useState(true)
+  const [showBand, setShowBand] = useState(false)
+  const [forecastMap, setForecastMap] = useState<Record<string, Array<{ target_date: string; mean: number; lower: number | null; upper: number | null }>>>({})
+  const [purchaseMap, setPurchaseMap] = useState<Record<string, Array<{ purchase_month: string; avg_unit_price: number; total_qty: number }>>>({})
+  const [metricsMap, setMetricsMap] = useState<Record<string, any>>({})
+
   useEffect(() => {
     if (metals.length === 0) { setRows([]); return }
     setLoading(true)
@@ -741,6 +749,34 @@ function PriceHistoryTab({ focusedMetals }: { focusedMetals: string[] }) {
       params: { metals: metals.join(','), from, to, limit: 5000 },
     }).then(r => setRows(r.data?.rows || []))
       .finally(() => setLoading(false))
+  }, [metals.join(','), from, to])
+
+  // 載 forecast / purchase overlay + metrics(per-metal,平行)
+  useEffect(() => {
+    if (metals.length === 0) {
+      setForecastMap({}); setPurchaseMap({}); setMetricsMap({})
+      return
+    }
+    const fcAll: any = {}, puAll: any = {}, mtAll: any = {}
+    Promise.all(metals.map(metal => Promise.all([
+      api.get('/pm/briefing/forecast-overlay', { params: { metal, from, to } })
+        .then(r => fcAll[metal] = (r.data || []).map((x: any) => ({
+          target_date: x.target_date || x.TARGET_DATE,
+          mean:  Number(x.predicted_mean ?? x.PREDICTED_MEAN),
+          lower: x.predicted_lower != null ? Number(x.predicted_lower) : null,
+          upper: x.predicted_upper != null ? Number(x.predicted_upper) : null,
+        }))).catch(() => fcAll[metal] = []),
+      api.get('/pm/briefing/purchase-overlay', { params: { metal, from, to } })
+        .then(r => puAll[metal] = (r.data || []).map((x: any) => ({
+          purchase_month: x.purchase_month || x.PURCHASE_MONTH,
+          avg_unit_price: Number(x.avg_unit_price ?? x.AVG_UNIT_PRICE),
+          total_qty:      Number(x.total_qty ?? x.TOTAL_QTY),
+        }))).catch(() => puAll[metal] = []),
+      api.get('/pm/briefing/metrics-summary', { params: { metal, days: 180 } })
+        .then(r => mtAll[metal] = r.data).catch(() => mtAll[metal] = null),
+    ]))).then(() => {
+      setForecastMap(fcAll); setPurchaseMap(puAll); setMetricsMap(mtAll)
+    })
   }, [metals.join(','), from, to])
 
   // 為 ECharts 準備 series:每金屬一條 line(x=as_of_date, y=price_usd)
@@ -826,6 +862,31 @@ function PriceHistoryTab({ focusedMetals }: { focusedMetals: string[] }) {
           </div>
         </div>
 
+        {/* Metric cards + Overlay toggles(D — 採購節奏 vs 預測)*/}
+        {metals.length > 0 && (
+          <MetricsCards metals={metals} metricsMap={metricsMap} />
+        )}
+
+        <div className="bg-white border rounded px-4 py-2 flex items-center gap-3 flex-wrap text-xs">
+          <span className="text-slate-500 font-medium">📊 圖表疊加層:</span>
+          <label className={`inline-flex items-center gap-1 px-2 py-1 rounded cursor-pointer ${showForecast ? 'bg-blue-100 text-blue-700' : 'bg-slate-50 text-slate-500'}`}>
+            <input type="checkbox" checked={showForecast} onChange={e => setShowForecast(e.target.checked)} />
+            AI 預測線
+          </label>
+          <label className={`inline-flex items-center gap-1 px-2 py-1 rounded cursor-pointer ${showBand ? 'bg-blue-100 text-blue-700' : 'bg-slate-50 text-slate-500'}`}>
+            <input type="checkbox" checked={showBand} onChange={e => setShowBand(e.target.checked)} disabled={!showForecast} />
+            信心區間(80%)
+          </label>
+          <label className={`inline-flex items-center gap-1 px-2 py-1 rounded cursor-pointer ${showPurchase ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-50 text-slate-500'}`}>
+            <input type="checkbox" checked={showPurchase} onChange={e => setShowPurchase(e.target.checked)} />
+            實際採購點(by month)
+          </label>
+          <span className="ml-auto text-[10px] text-slate-400">
+            {showForecast && Object.values(forecastMap).every(arr => arr.length === 0) && '⚠️ forecast_history 無資料 '}
+            {showPurchase && Object.values(purchaseMap).every(arr => arr.length === 0) && '⚠️ pm_purchase_history 無資料(需 ERP sync 啟用)'}
+          </span>
+        </div>
+
         {/* Chart */}
         {loading ? (
           <div className="text-center py-12 text-slate-400 flex items-center justify-center gap-2"><Loader2 size={14} className="animate-spin" /> 載入中…</div>
@@ -834,7 +895,12 @@ function PriceHistoryTab({ focusedMetals }: { focusedMetals: string[] }) {
             ⚠️ 無資料 — 篩選條件下找不到價格,請放寬日期或選其他金屬
           </div>
         ) : (
-          <PriceChart aggregated={aggregated} />
+          <PriceChart
+            aggregated={aggregated}
+            forecastMap={showForecast ? forecastMap : {}}
+            purchaseMap={showPurchase ? purchaseMap : {}}
+            showBand={showForecast && showBand}
+          />
         )}
 
         {/* Detail table — 所有欄位 SHOW */}
@@ -903,27 +969,155 @@ function numFmt(v: any) {
   return n.toFixed(4)
 }
 
-function PriceChart({ aggregated }: { aggregated: Record<string, [string, number][]> }) {
+function PriceChart({
+  aggregated, forecastMap = {}, purchaseMap = {}, showBand = false,
+}: {
+  aggregated: Record<string, [string, number][]>
+  forecastMap?: Record<string, Array<{ target_date: string; mean: number; lower: number | null; upper: number | null }>>
+  purchaseMap?: Record<string, Array<{ purchase_month: string; avg_unit_price: number; total_qty: number }>>
+  showBand?: boolean
+}) {
   const codes = Object.keys(aggregated).sort()
-  const option = {
-    tooltip: { trigger: 'axis' },
-    legend: { data: codes, type: 'scroll' },
-    grid: { left: 50, right: 30, top: 40, bottom: 40 },
-    xAxis: { type: 'time' },
-    yAxis: { type: 'value', name: 'USD', scale: true },
-    dataZoom: [{ type: 'inside' }, { type: 'slider', height: 20 }],
-    series: codes.map(code => ({
+
+  // 採購點:size = 月用量 normalize 到 8-30 px 範圍
+  const allQtys = Object.values(purchaseMap).flat().map(p => Number(p.total_qty)).filter(Number.isFinite)
+  const maxQty = allQtys.length > 0 ? Math.max(...allQtys) : 1
+  const sizeFor = (q: number) => {
+    if (!Number.isFinite(q) || maxQty <= 0) return 12
+    return 8 + Math.round((q / maxQty) * 22)  // 8 ~ 30
+  }
+  // YYYY-MM → YYYY-MM-15(月中,跟 line chart 對齊)
+  const monthMid = (m: string) => `${m}-15`
+
+  const series: any[] = []
+  const legendData: string[] = []
+
+  for (const code of codes) {
+    legendData.push(code)
+    series.push({
       name: code,
       type: 'line',
       smooth: true,
       symbol: 'circle',
       symbolSize: 4,
       data: aggregated[code],
-    })),
+    })
+
+    // forecast line(虛線)
+    const fc = forecastMap[code] || []
+    if (fc.length > 0) {
+      const fcName = `${code}(預測)`
+      legendData.push(fcName)
+      series.push({
+        name: fcName,
+        type: 'line',
+        smooth: true,
+        symbol: 'none',
+        lineStyle: { type: 'dashed', width: 1.5 },
+        itemStyle: { opacity: 0.7 },
+        data: fc.map(p => [p.target_date, p.mean]),
+      })
+
+      // 信心區間 band(填色)— 用兩條 line + areaStyle 做
+      if (showBand && fc.some(p => p.lower != null && p.upper != null)) {
+        series.push({
+          name: `${code} lower`, type: 'line', stack: `${code}-band`,
+          symbol: 'none', lineStyle: { opacity: 0 }, showInLegend: false,
+          data: fc.map(p => [p.target_date, p.lower]),
+        })
+        series.push({
+          name: `${code} band`, type: 'line', stack: `${code}-band`,
+          symbol: 'none', lineStyle: { opacity: 0 },
+          areaStyle: { opacity: 0.15 },
+          data: fc.map(p => [p.target_date, p.upper != null && p.lower != null ? p.upper - p.lower : 0]),
+        })
+      }
+    }
+
+    // 採購點(scatter,size = 月用量)
+    const pu = purchaseMap[code] || []
+    if (pu.length > 0) {
+      const puName = `${code}(實際採購)`
+      legendData.push(puName)
+      series.push({
+        name: puName,
+        type: 'scatter',
+        symbolSize: (val: any) => {
+          const q = Array.isArray(val) ? Number(val[2]) : 0
+          return sizeFor(q)
+        },
+        itemStyle: { color: '#10b981', borderColor: '#047857', borderWidth: 1 },
+        encode: { x: 0, y: 1 },
+        tooltip: {
+          formatter: (params: any) => {
+            const [, price, qty] = params.data
+            return `${puName}<br/>${params.data[0]}<br/>均價: ${Number(price).toLocaleString(undefined, { maximumFractionDigits: 2 })}<br/>用量: ${Number(qty).toLocaleString()}`
+          },
+        },
+        data: pu.map(p => [monthMid(p.purchase_month), p.avg_unit_price, p.total_qty]),
+      })
+    }
+  }
+
+  const option = {
+    tooltip: { trigger: 'axis', axisPointer: { type: 'cross' } },
+    legend: { data: legendData, type: 'scroll' },
+    grid: { left: 50, right: 30, top: 40, bottom: 40 },
+    xAxis: { type: 'time' },
+    yAxis: { type: 'value', name: 'USD', scale: true },
+    dataZoom: [{ type: 'inside' }, { type: 'slider', height: 20 }],
+    series,
   }
   return (
     <div className="bg-white border rounded p-4">
-      <ReactECharts option={option} style={{ height: 400 }} />
+      <ReactECharts option={option} style={{ height: 480 }} notMerge />
+    </div>
+  )
+}
+
+// ── Metric Cards(D 三個 KPI)─────────────────────────────────────────────
+function MetricsCards({ metals, metricsMap }: { metals: string[]; metricsMap: Record<string, any> }) {
+  if (metals.length === 0) return null
+  // 多金屬時取第一個顯示主要 metric;副欄列其他金屬
+  const primary = metals[0]
+  const m = metricsMap[primary] || {}
+  const timing = m.timing_pct
+  const mape = m.mape_30d
+  const dos = m.days_of_supply
+
+  const fmtPct = (v: any) => {
+    if (v == null || !Number.isFinite(Number(v))) return '—'
+    const n = Number(v)
+    return `${n > 0 ? '+' : ''}${n.toFixed(2)}%`
+  }
+  const timingColor = timing == null ? 'text-slate-400' : timing < 0 ? 'text-emerald-600' : 'text-red-600'
+  const mapeColor = mape == null ? 'text-slate-400' : mape < 5 ? 'text-emerald-600' : mape < 15 ? 'text-amber-600' : 'text-red-600'
+
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+      <div className="bg-white border rounded p-4">
+        <div className="text-xs text-slate-500 mb-1">📊 採購擇時(180 天)</div>
+        <div className={`text-2xl font-mono font-bold ${timingColor}`}>{fmtPct(timing)}</div>
+        <div className="text-[11px] text-slate-400 mt-1">
+          {primary} 我們均價 vs 市場月均 — {timing == null ? '無資料' : timing < 0 ? '✓ 比市場便宜' : '⚠ 高於市場均'}
+        </div>
+      </div>
+      <div className="bg-white border rounded p-4">
+        <div className="text-xs text-slate-500 mb-1">🎯 AI 預測準度(30 天)</div>
+        <div className={`text-2xl font-mono font-bold ${mapeColor}`}>{mape == null ? '—' : `${Number(mape).toFixed(2)}%`}</div>
+        <div className="text-[11px] text-slate-400 mt-1">
+          {primary} MAPE · {Number(m.mape_samples || 0)} 樣本 · {mape == null ? '無資料' : mape < 5 ? '✓ 高準確' : mape < 15 ? '~ 可接受' : '⚠ 不可信'}
+        </div>
+      </div>
+      <div className="bg-white border rounded p-4">
+        <div className="text-xs text-slate-500 mb-1">📦 庫存週轉天數</div>
+        <div className={`text-2xl font-mono font-bold ${dos == null ? 'text-slate-400' : dos < 30 ? 'text-amber-600' : dos < 90 ? 'text-emerald-600' : 'text-blue-600'}`}>
+          {dos == null ? '—' : `${Number(dos).toFixed(0)} 天`}
+        </div>
+        <div className="text-[11px] text-slate-400 mt-1">
+          {primary} 在庫+在途 / 月平均用量 · {dos == null ? '需 pm_inventory + 採購歷史' : dos < 30 ? '⚠ 低於 30 天' : '✓ 充裕'}
+        </div>
+      </div>
     </div>
   )
 }
