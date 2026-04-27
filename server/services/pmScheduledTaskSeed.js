@@ -94,6 +94,7 @@ B. 在 markdown 末尾另外一段 \`\`\`json [...] \`\`\` 陣列(給 db_write /
         { jsonpath: '$.url',             column: 'url_hash',        transform: 'sha256',          required: true },
         { jsonpath: '$.title',           column: 'title',           transform: '' },
         { jsonpath: '$.source',          column: 'source',          transform: '' },
+        { jsonpath: '$.published_at',    column: 'published_at',    transform: 'date' },
         { jsonpath: '$.language',        column: 'language',        transform: '' },
         { jsonpath: '$.summary',         column: 'summary',         transform: '' },
         { jsonpath: '$.sentiment_score', column: 'sentiment_score', transform: 'number' },
@@ -687,6 +688,7 @@ B. **JSON 落地段**(供 db_write + kb_write 解析,放在 markdown 末尾的 \
         { jsonpath: '$.url',             column: 'url_hash',        transform: 'sha256',          required: true },
         { jsonpath: '$.title',           column: 'title',           transform: '' },
         { jsonpath: '$.source',          column: 'source',          transform: '' },
+        { jsonpath: '$.published_at',    column: 'published_at',    transform: 'date' },
         { jsonpath: '$.language',        column: 'language',        transform: '' },
         { jsonpath: '$.summary',         column: 'summary',         transform: '' },
         { jsonpath: '$.sentiment_score', column: 'sentiment_score', transform: 'number' },
@@ -788,6 +790,57 @@ async function patchExistingTaskKbIds(db, kbMap) {
   if (patched > 0) console.log(`[PMScheduledTaskSeed] patched ${patched} existing task(s) with seed kb_id`);
 }
 
+/**
+ * 補既有 [PM]% task 的 db_write(table='pm_news')mapping 缺漏的 published_at 欄位
+ * (Phase 5 後發現的 schema-mapping 漏洞:LLM 有輸出 $.published_at 但 mapping 沒撈)
+ * Idempotent — 已含 published_at mapping 的不動
+ */
+async function patchExistingNewsPublishedAtMapping(db) {
+  let rows;
+  try {
+    rows = await db.prepare(`SELECT id, name, pipeline_json FROM scheduled_tasks WHERE name LIKE '[PM]%'`).all();
+  } catch (e) {
+    console.warn('[PMScheduledTaskSeed] patch published_at: select failed:', e.message);
+    return;
+  }
+  let patched = 0;
+  for (const r of rows || []) {
+    const raw = r.pipeline_json || r.PIPELINE_JSON;
+    if (!raw) continue;
+    let nodes;
+    try { nodes = JSON.parse(typeof raw === 'string' ? raw : raw.toString()); }
+    catch { continue; }
+    if (!Array.isArray(nodes)) continue;
+
+    let dirty = false;
+    for (const n of nodes) {
+      if (n?.type !== 'db_write') continue;
+      if (String(n.table || '').toLowerCase() !== 'pm_news') continue;
+      if (!Array.isArray(n.column_mapping)) continue;
+      const hasPublishedAt = n.column_mapping.some(m => String(m?.column || '').toLowerCase() === 'published_at');
+      if (hasPublishedAt) continue;
+
+      // insert published_at mapping 接在 'source' 之後(若沒 source 就放最後)
+      const sourceIdx = n.column_mapping.findIndex(m => String(m?.column || '').toLowerCase() === 'source');
+      const newRow = { jsonpath: '$.published_at', column: 'published_at', transform: 'date' };
+      if (sourceIdx >= 0) n.column_mapping.splice(sourceIdx + 1, 0, newRow);
+      else n.column_mapping.push(newRow);
+      dirty = true;
+    }
+    if (dirty) {
+      try {
+        await db.prepare(`UPDATE scheduled_tasks SET pipeline_json=?, updated_at=SYSTIMESTAMP WHERE id=?`)
+          .run(JSON.stringify(nodes), r.id || r.ID);
+        patched++;
+        console.log(`[PMScheduledTaskSeed] patched published_at mapping for task #${r.id || r.ID} "${r.name || r.NAME}"`);
+      } catch (e) {
+        console.warn(`[PMScheduledTaskSeed] patch published_at task #${r.id || r.ID} failed:`, e.message);
+      }
+    }
+  }
+  if (patched > 0) console.log(`[PMScheduledTaskSeed] patched ${patched} existing task(s) with published_at mapping`);
+}
+
 // ── 主 seed 入口 ────────────────────────────────────────────────────────────
 async function autoSeedPmScheduledTasks(db, kbMap) {
   if (!db) {
@@ -886,6 +939,9 @@ async function autoSeedPmScheduledTasks(db, kbMap) {
 
   // Patch 既有任務:把 model='pro'/'flash'(舊 seed 寫死的)替換成新 pickModelKey 結果
   await patchExistingTaskModels(db, models);
+
+  // Patch 既有任務:db_write(pm_news)補 published_at mapping(Phase 5 後修正)
+  await patchExistingNewsPublishedAtMapping(db);
 }
 
 // ── 把既有 PM 任務的 model 從舊 alias('pro'/'flash')patch 到 pickModelKey 的結果 ───
