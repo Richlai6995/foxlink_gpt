@@ -3393,6 +3393,67 @@ async function runMigrations(db) {
     }
   } catch (e) { console.warn('[Migration] rename metal_price_history:', e.message); }
 
+  // ─── Phase 2 RENAME 補丁:兩表都在 + 新表空 → 搬資料(rename 失敗的 fallback)─
+  // 原 rename 只在 oldExists>0 且 newExists===0 才動。但 createTable('PM_PRICE_HISTORY')
+  // 在 rename block 之前就已經創了空的新表,所以若 user 環境同時有 metal_price_history
+  // (有資料)跟 pm_price_history(空)→ rename 一律 skip,資料卡在舊表 app 讀不到。
+  try {
+    const oldExists = await db.prepare(
+      `SELECT COUNT(*) AS cnt FROM user_tables WHERE table_name='METAL_PRICE_HISTORY'`
+    ).get();
+    if ((oldExists?.cnt || oldExists?.CNT || 0) > 0) {
+      const oldRows = await db.prepare(`SELECT COUNT(*) AS n FROM metal_price_history`).get();
+      const newRows = await db.prepare(`SELECT COUNT(*) AS n FROM pm_price_history`).get();
+      const oldCnt = Number(oldRows?.n ?? oldRows?.N ?? 0);
+      const newCnt = Number(newRows?.n ?? newRows?.N ?? 0);
+
+      if (oldCnt > 0 && newCnt === 0) {
+        // 安全 case:搬資料(取兩表共同欄位,排除 ID 讓 IDENTITY 自己 generate)
+        const cols = await db.prepare(`
+          SELECT column_name AS c FROM user_tab_columns
+          WHERE table_name='METAL_PRICE_HISTORY' AND column_name <> 'ID'
+            AND column_name IN (
+              SELECT column_name FROM user_tab_columns WHERE table_name='PM_PRICE_HISTORY'
+            )
+          ORDER BY column_id
+        `).all();
+        const colList = (cols || []).map(c => c.c || c.C).filter(Boolean).join(', ');
+        if (!colList) {
+          console.warn('[Migration] 找不到兩表共同欄位,放棄搬資料');
+        } else {
+          const r = await db.prepare(
+            `INSERT INTO pm_price_history (${colList}) SELECT ${colList} FROM metal_price_history`
+          ).run();
+          const moved = r?.rowsAffected ?? r?.changes ?? 0;
+          console.log(`[Migration] 搬 ${moved} 筆 metal_price_history → pm_price_history(共 ${cols.length} 欄)`);
+
+          // 把舊表改名 + _obsolete 後綴(不直接 DROP,讓 user 驗證後手動清)
+          try {
+            await db.prepare(`ALTER TABLE metal_price_history RENAME TO metal_price_history_obsolete`).run();
+            console.log('[Migration] metal_price_history → metal_price_history_obsolete(驗證後可手動 DROP TABLE)');
+          } catch (e) {
+            console.warn('[Migration] rename to _obsolete 失敗(可能名稱衝突):', e.message);
+          }
+
+          // 同步白名單 / schema definitions(再跑一次 idempotent UPDATE)
+          try { await db.prepare(`UPDATE pipeline_writable_tables SET table_name='pm_price_history' WHERE table_name='metal_price_history'`).run(); } catch (_) {}
+          try { await db.prepare(`UPDATE ai_schema_definitions SET table_name='pm_price_history' WHERE table_name='metal_price_history'`).run(); } catch (_) {}
+          try {
+            await db.prepare(`UPDATE scheduled_tasks SET pipeline_json = REPLACE(pipeline_json, '"table":"metal_price_history"', '"table":"pm_price_history"') WHERE pipeline_json LIKE '%metal_price_history%'`).run();
+          } catch (_) {}
+        }
+      } else if (oldCnt > 0 && newCnt > 0) {
+        console.warn(`[Migration] ⚠ metal_price_history(${oldCnt} 筆)+ pm_price_history(${newCnt} 筆)兩表都有資料 — 不自動 merge 避免重複,請 admin 手動處理`);
+      } else if (oldCnt === 0) {
+        // 舊表空殼,直接 DROP 沒風險
+        try {
+          await db.prepare(`DROP TABLE metal_price_history`).run();
+          console.log('[Migration] metal_price_history 是空表,已 DROP');
+        } catch (e) { console.warn('[Migration] DROP 空表失敗:', e.message); }
+      }
+    }
+  } catch (e) { console.warn('[Migration] both-exist case fallback:', e.message); }
+
   // ─── Idempotent cleanup:把仍指向 'metal_price_history' 的 stale row 清掉 ───
   // (rename block 只在 oldExists>0 && newExists===0 才跑;若環境曾並存兩 table、
   //  或先 seed 了 pm_price_history 再 rename,ai_schema_definitions /
