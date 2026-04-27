@@ -214,6 +214,69 @@ function csvEscape(v) {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
+// MACRO 宏觀指標(DXY / VIX / UST10Y / WTI 等 — 金價的關鍵 driver)
+// ────────────────────────────────────────────────────────────────────────────
+
+// GET /api/pm/briefing/macro — 每個 indicator 取最新一筆 + 與前一筆對比
+router.get('/macro', verifyToken, verifyPmUser, async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const rows = await db.prepare(`
+      SELECT * FROM (
+        SELECT indicator_code, indicator_name, value, unit, source,
+               TO_CHAR(as_of_date, 'YYYY-MM-DD') AS as_of_date,
+               LAG(value) OVER (PARTITION BY indicator_code ORDER BY as_of_date) AS prev_value,
+               ROW_NUMBER() OVER (PARTITION BY indicator_code ORDER BY as_of_date DESC) AS rn
+        FROM pm_macro_history
+        WHERE as_of_date >= TRUNC(SYSDATE) - 14
+          AND value IS NOT NULL
+      ) WHERE rn = 1
+      ORDER BY indicator_code
+    `).all();
+    res.json(rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// ALERTS 警示(近期)
+// ────────────────────────────────────────────────────────────────────────────
+
+// GET /api/pm/briefing/alerts?days=7&limit=10 — 近期警示記錄
+router.get('/alerts', verifyToken, verifyPmUser, async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const days = Math.min(Math.max(Number(req.query.days || 7), 1), 90);
+    const limit = Math.min(Math.max(Number(req.query.limit || 20), 1), 100);
+    const rows = await db.prepare(`
+      SELECT id,
+             TO_CHAR(triggered_at, 'YYYY-MM-DD HH24:MI') AS triggered_at,
+             rule_code, severity, entity_type, entity_code,
+             trigger_value, threshold_value, message,
+             ack_user_id,
+             TO_CHAR(ack_at, 'YYYY-MM-DD HH24:MI') AS ack_at,
+             channels_sent
+      FROM pm_alert_history
+      WHERE triggered_at >= SYSDATE - ?
+      ORDER BY triggered_at DESC
+      FETCH FIRST ? ROWS ONLY
+    `).all(days, limit);
+    res.json(rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/pm/briefing/alerts/:id/ack — user ack 一筆警示
+router.post('/alerts/:id/ack', verifyToken, verifyPmUser, async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    await db.prepare(`
+      UPDATE pm_alert_history SET ack_user_id = ?, ack_at = SYSTIMESTAMP
+      WHERE id = ? AND ack_user_id IS NULL
+    `).run(req.user.id, req.params.id);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ────────────────────────────────────────────────────────────────────────────
 // NEWS
 // ────────────────────────────────────────────────────────────────────────────
 

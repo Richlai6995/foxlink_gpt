@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
-import { Cpu, Save, RefreshCw, Info } from 'lucide-react'
+import { Cpu, Save, RefreshCw, Info, BookOpen } from 'lucide-react'
 import api from '../../lib/api'
+import HelpBookShareInline from './HelpBookShareInline'
 
 interface LlmModel {
   id: number
@@ -179,6 +180,23 @@ export default function PmSettingsPanel() {
         </table>
         <p className="text-[10px] text-slate-400 mt-2">
           注意:儲存後系統會把任務 model 從舊 alias('pro' / 'flash')替換成你選的真實 key。如果你已在排程編輯介面手動改過 task.model 為其他值(像直接寫 api_model 名),系統不會覆蓋(只 patch 仍是 'pro' / 'flash' 的)。
+        </p>
+      </div>
+
+      {/* ──── 閱讀權限分享(快捷入口,管理同一份 help_book_shares 資料)──── */}
+      <div className="border border-slate-200 rounded-lg p-4 bg-white">
+        <div className="flex items-center gap-2 mb-3">
+          <BookOpen size={16} className="text-amber-500" />
+          <h3 className="text-sm font-medium text-slate-800">閱讀權限分享</h3>
+          <span className="text-xs text-slate-400">— 誰能看「貴金屬情報」menu / 進 /pm/briefing / 用 PM Webex Bot</span>
+        </div>
+        <div className="text-xs text-slate-500 mb-3 bg-blue-50 border border-blue-100 rounded p-2">
+          💡 <strong>建議用 department(部門)或 role(角色)整批授權</strong>,人事異動會自動跟,不用 admin 手動改 user 清單。
+          典型做法:加一筆「<code>department = 採購部 dept_code</code>」全採購部立即可用。
+        </div>
+        <HelpBookShareInline bookCode="precious-metals" />
+        <p className="text-[10px] text-slate-400 mt-3 border-t pt-2">
+          這份設定也會在「特殊說明書管理 → 貴金屬書 [🔗 分享]」同步顯示(同一份資料,雙入口管理)。
         </p>
       </div>
     </div>

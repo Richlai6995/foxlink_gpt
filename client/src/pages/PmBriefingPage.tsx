@@ -103,6 +103,12 @@ export default function PmBriefingPage() {
       {/* Sticky 報價 banner */}
       <PriceBanner focusedSet={focusedSet} expanded={bannerExpanded} onToggleExpand={() => setBannerExpanded(v => !v)} />
 
+      {/* 宏觀指標 mini banner(DXY / VIX / UST10Y / WTI 等)*/}
+      <MacroBanner />
+
+      {/* 近期警示卡(若有未 ACK 的高優先警示)*/}
+      <AlertsBanner />
+
       {/* AI 綜述 */}
       <DailyInsight />
 
@@ -241,6 +247,133 @@ function PriceBanner({ focusedSet, expanded, onToggleExpand }: { focusedSet: Set
 }
 
 // ── 今日 AI 綜述 ───────────────────────────────────────────────────────────
+// ── 宏觀指標 mini banner ───────────────────────────────────────────────────
+function MacroBanner() {
+  const [rows, setRows] = useState<any[]>([])
+  const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    setLoading(true)
+    api.get('/pm/briefing/macro').then(r => setRows(r.data || [])).finally(() => setLoading(false))
+  }, [])
+
+  if (loading) return null  // 載入中不佔位
+  if (rows.length === 0) {
+    return (
+      <div className="bg-slate-50 border-b px-6 py-1.5 text-xs text-slate-400">
+        📈 宏觀指標(DXY / VIX / UST10Y / WTI 等)— <em>尚無資料,需 [PM] 總體經濟指標日抓 排程跑過</em>
+      </div>
+    )
+  }
+
+  return (
+    <div className="bg-indigo-50 border-b border-indigo-100 px-6 py-2 flex items-center gap-3 overflow-x-auto">
+      <span className="text-xs text-indigo-600 font-medium flex-shrink-0">📈 宏觀</span>
+      {rows.map(r => {
+        const cur = Number(r.value ?? r.VALUE)
+        const prev = Number(r.prev_value ?? r.PREV_VALUE)
+        const chgPct = Number.isFinite(prev) && prev !== 0 ? ((cur - prev) / prev) * 100 : null
+        const isUp = chgPct != null && chgPct > 0
+        return (
+          <div key={r.indicator_code || r.INDICATOR_CODE} className="flex items-center gap-1 px-2 py-1 rounded border border-indigo-200 bg-white flex-shrink-0">
+            <span className="font-bold text-slate-800 text-xs">{r.indicator_code || r.INDICATOR_CODE}</span>
+            {(r.indicator_name || r.INDICATOR_NAME) && (
+              <span className="text-[10px] text-slate-500">({r.indicator_name || r.INDICATOR_NAME})</span>
+            )}
+            <span className="font-mono text-xs text-slate-700">{Number.isFinite(cur) ? cur.toLocaleString(undefined, { maximumFractionDigits: 4 }) : '—'}</span>
+            {chgPct != null && Number.isFinite(chgPct) && (
+              <span className={`text-[10px] font-medium ${isUp ? 'text-emerald-600' : chgPct < 0 ? 'text-red-600' : 'text-slate-400'}`}>
+                {isUp ? '+' : ''}{chgPct.toFixed(2)}%
+              </span>
+            )}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+// ── 近期警示卡 ────────────────────────────────────────────────────────────
+function AlertsBanner() {
+  const [alerts, setAlerts] = useState<any[]>([])
+  const [loading, setLoading] = useState(false)
+  const [expanded, setExpanded] = useState(false)
+  const [acking, setAcking] = useState<number | null>(null)
+
+  const load = () => {
+    setLoading(true)
+    api.get('/pm/briefing/alerts', { params: { days: 7, limit: 20 } })
+      .then(r => setAlerts(r.data || []))
+      .finally(() => setLoading(false))
+  }
+  useEffect(() => { load() }, [])
+
+  const ack = async (id: number) => {
+    setAcking(id)
+    try {
+      await api.post(`/pm/briefing/alerts/${id}/ack`, {})
+      load()
+    } finally { setAcking(null) }
+  }
+
+  if (loading || alerts.length === 0) return null  // 沒警示不佔位
+
+  const unacked = alerts.filter(a => !a.ack_user_id && !a.ACK_USER_ID)
+  const visible = expanded ? alerts : unacked.slice(0, 3)
+  const hasUnacked = unacked.length > 0
+
+  if (!hasUnacked && !expanded) {
+    // 全 ACK 過 → 顯示縮小版
+    return (
+      <div className="bg-slate-50 border-b px-6 py-1.5 text-xs text-slate-500 flex items-center gap-2">
+        ✅ 近 7 天 {alerts.length} 個警示已全部處理
+        <button onClick={() => setExpanded(true)} className="text-blue-600 hover:underline">[看歷史]</button>
+      </div>
+    )
+  }
+
+  const sevColor = (sev: string) => {
+    if (/critical|error/i.test(sev || '')) return 'bg-red-50 border-red-300 text-red-800'
+    if (/warning/i.test(sev || '')) return 'bg-amber-50 border-amber-300 text-amber-800'
+    return 'bg-slate-50 border-slate-300 text-slate-700'
+  }
+
+  return (
+    <div className="bg-red-50/30 border-b border-red-200 px-6 py-2 space-y-1.5">
+      <div className="flex items-center gap-2 text-xs">
+        <span className="text-red-700 font-medium">🚨 近期警示</span>
+        {hasUnacked && <span className="px-1.5 py-0.5 rounded-full bg-red-500 text-white text-[10px] font-bold">{unacked.length} 未處理</span>}
+        <button onClick={() => setExpanded(v => !v)} className="ml-auto text-xs text-blue-600 hover:underline">
+          {expanded ? '收合' : `看全部 ${alerts.length} 筆`}
+        </button>
+      </div>
+      <div className="space-y-1">
+        {visible.map(a => {
+          const id = a.id || a.ID
+          const acked = !!(a.ack_user_id || a.ACK_USER_ID)
+          return (
+            <div key={id} className={`flex items-start gap-2 px-3 py-1.5 text-xs rounded border ${sevColor(a.severity || a.SEVERITY)} ${acked ? 'opacity-60' : ''}`}>
+              <span className="font-mono text-[10px] flex-shrink-0">{a.triggered_at || a.TRIGGERED_AT}</span>
+              <span className="font-medium flex-shrink-0">[{a.rule_code || a.RULE_CODE}]</span>
+              {(a.entity_code || a.ENTITY_CODE) && <span className="font-bold flex-shrink-0">{a.entity_code || a.ENTITY_CODE}</span>}
+              <span className="flex-1">{a.message || a.MESSAGE || '—'}</span>
+              {acked ? (
+                <span className="text-[10px] text-emerald-600 flex-shrink-0">✓ ACK</span>
+              ) : (
+                <button
+                  onClick={() => ack(id)}
+                  disabled={acking === id}
+                  className="text-[10px] px-2 py-0.5 rounded border border-current hover:bg-white/50 flex-shrink-0"
+                >{acking === id ? '...' : '我已知道'}</button>
+              )}
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 function DailyInsight() {
   const [report, setReport] = useState<any>(null)
   const [loading, setLoading] = useState(true)
