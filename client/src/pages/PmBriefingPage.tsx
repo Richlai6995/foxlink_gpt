@@ -732,7 +732,7 @@ function PriceHistoryTab({ focusedMetals }: { focusedMetals: string[] }) {
   const today = new Date().toISOString().slice(0, 10)
   const monthAgo = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10)
 
-  const initMetals = focusedMetals.length > 0 ? focusedMetals : ['Au']
+  const initMetals = focusedMetals.length > 0 ? focusedMetals.map(m => m.toUpperCase()) : ['AU']
   const [metals, setMetals] = useState<string[]>(initMetals)
   const [from, setFrom] = useState(monthAgo)
   const [to, setTo] = useState(today)

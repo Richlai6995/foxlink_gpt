@@ -92,13 +92,13 @@ async function fireOne(db, sub) {
         SELECT metal_code, price_usd, day_change_pct,
                TO_CHAR(MAX(as_of_date) OVER (), 'YYYY-MM-DD') AS latest_date
         FROM (
-          SELECT metal_code,
-                 FIRST_VALUE(price_usd) OVER (PARTITION BY metal_code ORDER BY as_of_date DESC) AS price_usd,
-                 FIRST_VALUE(day_change_pct) OVER (PARTITION BY metal_code ORDER BY as_of_date DESC) AS day_change_pct,
+          SELECT UPPER(metal_code) AS metal_code,
+                 FIRST_VALUE(price_usd) OVER (PARTITION BY UPPER(metal_code) ORDER BY as_of_date DESC) AS price_usd,
+                 FIRST_VALUE(day_change_pct) OVER (PARTITION BY UPPER(metal_code) ORDER BY as_of_date DESC) AS day_change_pct,
                  as_of_date,
-                 ROW_NUMBER() OVER (PARTITION BY metal_code ORDER BY as_of_date DESC) AS rn
+                 ROW_NUMBER() OVER (PARTITION BY UPPER(metal_code) ORDER BY as_of_date DESC) AS rn
           FROM pm_price_history
-          WHERE metal_code IN ('Au','Ag','Pt','Pd','CU','AL','NI','ZN')
+          WHERE UPPER(metal_code) IN ('AU','AG','PT','PD','CU','AL','NI','ZN')
             AND as_of_date >= TRUNC(SYSDATE) - 7
             AND price_usd IS NOT NULL
         ) WHERE rn = 1

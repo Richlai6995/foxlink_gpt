@@ -3454,6 +3454,37 @@ async function runMigrations(db) {
     }
   } catch (e) { console.warn('[Migration] both-exist case fallback:', e.message); }
 
+  // ─── Idempotent normalization:metal_code / entity_code 全部 UPPERCASE ────
+  // (歷史資料 Westmetall 用 'Au'/'Ag'/'Pt'/'Pd' mixed case,新 source 用 'AU'/'AG'/'PT'/'PD'
+  //  → 同一金屬被當兩個。後端 SQL 已加 UPPER() 防呆,但 DB 規範化也做一次
+  //  讓 GROUP BY / UNIQUE / 資料表外觀都乾淨)
+  try {
+    const tablesToNormalize = [
+      { table: 'pm_price_history',       col: 'metal_code' },
+      { table: 'pm_purchase_history',    col: 'metal_code' },
+      { table: 'pm_inventory',           col: 'metal_code' },
+      { table: 'pm_bom_metal',           col: 'metal_code' },
+      { table: 'forecast_history',       col: 'entity_code', extra: `entity_type = 'metal'` },
+      { table: 'pm_forecast_accuracy',   col: 'entity_code', extra: `entity_type = 'metal'` },
+      { table: 'pm_alert_history',       col: 'entity_code', extra: `entity_type = 'metal'` },
+    ];
+    for (const t of tablesToNormalize) {
+      // 先確認 table 存在(避免新環境某些表還沒建造成爛 log)
+      const exists = await db.prepare(
+        `SELECT COUNT(*) AS n FROM user_tables WHERE table_name = UPPER(?)`
+      ).get(t.table);
+      if ((exists?.n ?? exists?.N ?? 0) === 0) continue;
+
+      const where = [`${t.col} <> UPPER(${t.col})`];
+      if (t.extra) where.push(t.extra);
+      const r = await db.prepare(
+        `UPDATE ${t.table} SET ${t.col} = UPPER(${t.col}) WHERE ${where.join(' AND ')}`
+      ).run();
+      const cnt = r?.rowsAffected ?? r?.changes ?? 0;
+      if (cnt > 0) console.log(`[Migration] ${t.table}.${t.col} normalized ${cnt} row(s) to UPPERCASE`);
+    }
+  } catch (e) { console.warn('[Migration] metal_code UPPERCASE normalization:', e.message); }
+
   // ─── Idempotent cleanup:把仍指向 'metal_price_history' 的 stale row 清掉 ───
   // (rename block 只在 oldExists>0 && newExists===0 才跑;若環境曾並存兩 table、
   //  或先 seed 了 pm_price_history 再 rename,ai_schema_definitions /

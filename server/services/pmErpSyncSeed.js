@@ -28,7 +28,7 @@ const SEEDS = [
 -- 假設:item.attribute1 標金屬代碼(Au/Ag/Cu...),component.component_quantity 是含量(g)
 SELECT
   msi.segment1               AS product_id,
-  msi.attribute1             AS metal_code,
+  UPPER(msi.attribute1)      AS metal_code,
   bbc.component_quantity     AS metal_grams,
   msi.organization_id        AS org_id,
   bbc.creation_date          AS bom_created
@@ -36,7 +36,7 @@ FROM apps.bom_components_b bbc
 JOIN apps.bom_structures_b bbs ON bbs.bill_sequence_id = bbc.bill_sequence_id
 JOIN apps.mtl_system_items_b msi ON msi.inventory_item_id = bbs.assembly_item_id
 WHERE bbc.disable_date IS NULL
-  AND msi.attribute1 IN ('Au','Ag','Pt','Pd','CU','AL','NI','ZN','PB','SN')
+  AND UPPER(msi.attribute1) IN ('AU','AG','PT','PD','CU','AL','NI','ZN','PB','SN','RH')
   AND ROWNUM <= 5000`,
     bind_params_json: '[]',
     mapping_json: JSON.stringify({
@@ -55,7 +55,7 @@ WHERE bbc.disable_date IS NULL
     target_pm_table: 'pm_purchase_history',
     source_query: `-- EBS PO 範本,實際請依 metal_code 來源(item attribute / category 等)調整
 SELECT
-  msi.attribute1                                     AS metal_code,
+  UPPER(msi.attribute1)                              AS metal_code,
   TO_CHAR(pol.creation_date, 'YYYY-MM')              AS purchase_month,
   SUM(pol.quantity)                                  AS total_qty,
   MAX(pol.unit_meas_lookup_code)                     AS total_qty_unit,
@@ -69,9 +69,9 @@ JOIN apps.po_headers_all pha ON pha.po_header_id = pol.po_header_id
 JOIN apps.mtl_system_items_b msi ON msi.inventory_item_id = pol.item_id
 JOIN apps.hr_operating_units hou ON hou.organization_id = pha.org_id
 WHERE pol.creation_date >= ADD_MONTHS(SYSDATE, -12)
-  AND msi.attribute1 IN ('Au','Ag','Pt','Pd','CU','AL','NI','ZN','PB','SN')
+  AND UPPER(msi.attribute1) IN ('AU','AG','PT','PD','CU','AL','NI','ZN','PB','SN','RH')
   AND pha.authorization_status = 'APPROVED'
-GROUP BY msi.attribute1, TO_CHAR(pol.creation_date, 'YYYY-MM'), hou.short_code`,
+GROUP BY UPPER(msi.attribute1), TO_CHAR(pol.creation_date, 'YYYY-MM'), hou.short_code`,
     bind_params_json: '[]',
     mapping_json: JSON.stringify({
       METAL_CODE:      'metal_code',
@@ -95,7 +95,7 @@ GROUP BY msi.attribute1, TO_CHAR(pol.creation_date, 'YYYY-MM'), hou.short_code`,
     target_pm_table: 'pm_inventory',
     source_query: `-- EBS INV 範本
 SELECT
-  msi.attribute1                                                     AS metal_code,
+  UPPER(msi.attribute1)                                              AS metal_code,
   hou.short_code                                                     AS factory_code,
   SUM(NVL(moq.transaction_quantity, 0))                              AS onhand_qty,
   (SELECT NVL(SUM(rt.primary_quantity), 0)
@@ -114,7 +114,7 @@ LEFT JOIN apps.mtl_safety_stocks mss
  AND mss.organization_id = msi.organization_id
 LEFT JOIN apps.hr_organization_units hou ON hou.organization_id = msi.organization_id
 WHERE msi.attribute1 IN ('Au','Ag','Pt','Pd','CU','AL','NI','ZN','PB','SN')
-GROUP BY msi.attribute1, hou.short_code, msi.organization_id,
+GROUP BY UPPER(msi.attribute1), hou.short_code, msi.organization_id,
          msi.inventory_item_id, mss.min_minmax_quantity, msi.primary_uom_code`,
     bind_params_json: '[]',
     mapping_json: JSON.stringify({

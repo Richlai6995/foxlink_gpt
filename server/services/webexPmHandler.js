@@ -17,13 +17,13 @@
 
 const cards = require('./webexPmCards');
 
-// 4 大貴金屬 + 7 個關聯金屬(對應 pmDashboardSeed)
+// 4 大貴金屬 + 7 個關聯金屬(對應 pmDashboardSeed) — 統一 UPPERCASE
 const METAL_ALIASES = {
   // 貴金屬
-  'au': 'Au', 'gold': 'Au', '金': 'Au', '黃金': 'Au', '金價': 'Au',
-  'ag': 'Ag', 'silver': 'Ag', '銀': 'Ag', '銀價': 'Ag',
-  'pt': 'Pt', 'platinum': 'Pt', '鉑': 'Pt',
-  'pd': 'Pd', 'palladium': 'Pd', '鈀': 'Pd',
+  'au': 'AU', 'gold': 'AU', '金': 'AU', '黃金': 'AU', '金價': 'AU',
+  'ag': 'AG', 'silver': 'AG', '銀': 'AG', '銀價': 'AG',
+  'pt': 'PT', 'platinum': 'PT', '鉑': 'PT',
+  'pd': 'PD', 'palladium': 'PD', '鈀': 'PD',
   // 基本金屬
   'cu': 'CU', 'copper': 'CU', '銅': 'CU',
   'al': 'AL', 'aluminum': 'AL', 'aluminium': 'AL', '鋁': 'AL',
@@ -31,6 +31,7 @@ const METAL_ALIASES = {
   'zn': 'ZN', 'zinc': 'ZN', '鋅': 'ZN',
   'pb': 'PB', 'lead': 'PB', '鉛': 'PB',
   'sn': 'SN', 'tin': 'SN', '錫': 'SN',
+  'rh': 'RH', 'rhodium': 'RH', '銠': 'RH',
 };
 
 function normalizeMetal(token) {
@@ -176,7 +177,7 @@ async function handleSnapshot({ webex, roomId, lang }) {
              as_of_date,
              ROW_NUMBER() OVER (PARTITION BY metal_code ORDER BY as_of_date DESC) AS rn
       FROM pm_price_history
-      WHERE metal_code IN ('Au','Ag','Pt','Pd','CU','AL','NI','ZN')
+      WHERE UPPER(metal_code) IN ('AU','AG','PT','PD','CU','AL','NI','ZN')
         AND as_of_date >= TRUNC(SYSDATE) - 7
         AND price_usd IS NOT NULL
     )
@@ -203,9 +204,9 @@ async function handleSnapshot({ webex, roomId, lang }) {
 async function handleLatest({ webex, roomId, lang, metal }) {
   const db = require('../database-oracle').db;
   const row = await db.prepare(`
-    SELECT metal_code, price_usd, day_change_pct, as_of_date, source
+    SELECT UPPER(metal_code) AS metal_code, price_usd, day_change_pct, as_of_date, source
     FROM pm_price_history
-    WHERE metal_code = ?
+    WHERE UPPER(metal_code) = UPPER(?)
     ORDER BY as_of_date DESC
     FETCH FIRST 1 ROWS ONLY
   `).get(metal);
@@ -230,7 +231,7 @@ async function handleForecast({ webex, roomId, lang, metal }) {
   // 取最近一次 forecast(forecast_date 最大)的 7 筆 horizon
   const latestForecastDate = await db.prepare(`
     SELECT MAX(forecast_date) AS d FROM forecast_history
-    WHERE entity_type='metal' AND entity_code=?
+    WHERE entity_type='metal' AND UPPER(entity_code)=UPPER(?)
   `).get(metal);
   const fcDate = latestForecastDate?.d ?? latestForecastDate?.D;
   if (!fcDate) {
@@ -240,7 +241,7 @@ async function handleForecast({ webex, roomId, lang, metal }) {
   const rows = await db.prepare(`
     SELECT target_date, predicted_mean, predicted_lower, predicted_upper
     FROM forecast_history
-    WHERE entity_type='metal' AND entity_code=? AND forecast_date=?
+    WHERE entity_type='metal' AND UPPER(entity_code)=UPPER(?) AND forecast_date=?
     ORDER BY target_date
     FETCH FIRST 7 ROWS ONLY
   `).all(metal, fcDate);
@@ -248,7 +249,7 @@ async function handleForecast({ webex, roomId, lang, metal }) {
   // 取 current price
   const cur = await db.prepare(`
     SELECT price_usd FROM pm_price_history
-    WHERE metal_code=? ORDER BY as_of_date DESC FETCH FIRST 1 ROWS ONLY
+    WHERE UPPER(metal_code)=UPPER(?) ORDER BY as_of_date DESC FETCH FIRST 1 ROWS ONLY
   `).get(metal);
 
   const card = cards.buildForecastCard({
@@ -264,7 +265,7 @@ async function handleWhatIf({ webex, roomId, lang, metal, delta }) {
   const db = require('../database-oracle').db;
   const cur = await db.prepare(`
     SELECT price_usd FROM pm_price_history
-    WHERE metal_code=? ORDER BY as_of_date DESC FETCH FIRST 1 ROWS ONLY
+    WHERE UPPER(metal_code)=UPPER(?) ORDER BY as_of_date DESC FETCH FIRST 1 ROWS ONLY
   `).get(metal);
   if (!cur) {
     await webex.sendMessage(roomId, lang.startsWith('zh') ? `⚠️ ${metal} 無資料` : `⚠️ No data for ${metal}`);
