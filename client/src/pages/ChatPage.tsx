@@ -709,6 +709,12 @@ export default function ChatPage() {
       formData.append('dify_kb_ids',    JSON.stringify([...selectedDifyIds]))
       formData.append('self_kb_ids',    JSON.stringify([...selectedKbIds]))
       formData.append('erp_tool_ids',   JSON.stringify([...selectedErpIds]))
+      // Hidden tools — backend filters these out from auto/explicit mode and from session skills
+      formData.append('hidden_mcp_ids',     JSON.stringify([...mcpHidden]))
+      formData.append('hidden_dify_ids',    JSON.stringify([...difyHidden]))
+      formData.append('hidden_self_kb_ids', JSON.stringify([...kbHidden]))
+      formData.append('hidden_skill_ids',   JSON.stringify([...skillHidden]))
+      formData.append('hidden_erp_ids',     JSON.stringify([...erpHidden]))
 
       // SSE via XHR（相較 fetch 多了 upload.onprogress，可顯示檔案上傳進度）
       const token = localStorage.getItem('token')

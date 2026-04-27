@@ -1020,6 +1020,19 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
   const userSelfKbIds = parseIds(req.body.self_kb_ids);     // string[] | null
   const userErpToolIds = parseIds(req.body.erp_tool_ids);   // number[] | null
   const explicitMode = userMcpIds !== null || userDifyIds !== null || userSelfKbIds !== null || userErpToolIds !== null;
+  // Per-user hidden tools (UI 摺疊狀態) — 不論 auto/explicit 都會被剃除,LLM 看不到
+  const parseHiddenIds = (raw) => {
+    if (raw === undefined || raw === null) return new Set();
+    try {
+      const v = JSON.parse(raw);
+      return Array.isArray(v) ? new Set(v.map(String)) : new Set();
+    } catch { return new Set(); }
+  };
+  const hiddenMcpIds    = parseHiddenIds(req.body.hidden_mcp_ids);     // Set<string of server.id>
+  const hiddenDifyIds   = parseHiddenIds(req.body.hidden_dify_ids);    // Set<string of dify_kb.id>
+  const hiddenSelfKbIds = parseHiddenIds(req.body.hidden_self_kb_ids); // Set<string of kb.id>
+  const hiddenSkillIds  = parseHiddenIds(req.body.hidden_skill_ids);   // Set<string of skill.id>
+  const hiddenErpIds    = parseHiddenIds(req.body.hidden_erp_ids);     // Set<string of erp_tool.id>
   // 儲存工具選擇到 session（供歷史載入時恢復）
   if (explicitMode) {
     try {
@@ -1833,7 +1846,21 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
       }
     }
 
-    const allSkillsToProcess = [...sessionSkills, ...tagRoutedSkills, ...topbarErpAnswerInjectSkills];
+    let allSkillsToProcess = [...sessionSkills, ...tagRoutedSkills, ...topbarErpAnswerInjectSkills];
+    // Skip hidden skills + skills whose underlying ERP tool is hidden(ERP 是包成 erp_proc skill 進來的)
+    if (hiddenSkillIds.size > 0 || hiddenErpIds.size > 0) {
+      const _before = allSkillsToProcess.length;
+      allSkillsToProcess = allSkillsToProcess.filter(sk => {
+        const skId = String(sk.id || sk.ID);
+        if (hiddenSkillIds.has(skId)) return false;
+        const erpId = sk.erp_tool_id || sk.ERP_TOOL_ID;
+        if (erpId && hiddenErpIds.has(String(erpId))) return false;
+        return true;
+      });
+      if (_before !== allSkillsToProcess.length) {
+        console.log(`[Hidden] Skills filtered: ${_before} → ${allSkillsToProcess.length} (hiddenSkill=${hiddenSkillIds.size} hiddenErp=${hiddenErpIds.size})`);
+      }
+    }
 
     // 提前宣告 — 供 answer fallback(line ~1937)與後面正式 register loop 共用,
     // 避免 TDZ 導致 fallback 寫入被 catch 吞掉而悄悄失敗
@@ -2669,7 +2696,10 @@ ${hasPreserve ? '- 標記【★保留原文】的欄位：必須完整複製原�
             const selectedIds = userMcpIds.map(Number);
             const selected = allMcpDecls.filter(d => {
               const entry = sm[d.name];
-              return entry && selectedIds.includes(Number(entry.server.id));
+              if (!entry) return false;
+              const sid = Number(entry.server.id);
+              if (hiddenMcpIds.has(String(sid))) return false;
+              return selectedIds.includes(sid);
             });
             allDeclarations.push(...selected);
           }
@@ -2680,7 +2710,9 @@ ${hasPreserve ? '- 標記【★保留原文】的欄位：必須完整複製原�
           const selectedIds = userDifyIds.map(Number);
           const selected = declarations.filter(d => {
             const kb = km[d.name];
-            return kb && selectedIds.includes(Number(kb.id));
+            if (!kb) return false;
+            if (hiddenDifyIds.has(String(kb.id))) return false;
+            return selectedIds.includes(Number(kb.id));
           });
           allDeclarations.push(...selected);
         }
@@ -2689,7 +2721,9 @@ ${hasPreserve ? '- 標記【★保留原文】的欄位：必須完整複製原�
           selfKbMap = km;
           const selected = declarations.filter(d => {
             const kb = km[d.name];
-            return kb && userSelfKbIds.includes(String(kb.id));
+            if (!kb) return false;
+            if (hiddenSelfKbIds.has(String(kb.id))) return false;
+            return userSelfKbIds.includes(String(kb.id));
           });
           allDeclarations.push(...selected);
         }
@@ -2701,13 +2735,28 @@ ${hasPreserve ? '- 標記【★保留原文】的欄位：必須完整複製原�
           getDifyFunctionDeclarations(db, userCtx),
           getSelfKbDeclarations(db, req.user.id),
         ]);
-        const { functionDeclarations: allMcpDecls, serverMap: sm, serverInstructionsMap: sim } = _mcpResult;
+        const { functionDeclarations: _rawMcpDecls, serverMap: sm, serverInstructionsMap: sim } = _mcpResult;
         serverMap = sm;
         mcpServerInstructionsMap = sim || {};
-        const { declarations: difyDecls, kbMap: km } = _difyResult;
+        const { declarations: _rawDifyDecls, kbMap: km } = _difyResult;
         kbMap = km;
-        const { declarations: selfKbDecls, kbMap: skm } = _selfKbResult;
+        const { declarations: _rawSelfKbDecls, kbMap: skm } = _selfKbResult;
         selfKbMap = skm;
+
+        // ── Per-user hidden filter — apply BEFORE skill rules / TAG / intent so 隱藏的工具完全不參與後續路由
+        const allMcpDecls = hiddenMcpIds.size === 0
+          ? _rawMcpDecls
+          : _rawMcpDecls.filter(d => { const e = sm[d.name]; return e && !hiddenMcpIds.has(String(e.server.id)); });
+        const difyDecls = hiddenDifyIds.size === 0
+          ? _rawDifyDecls
+          : _rawDifyDecls.filter(d => { const kb = km[d.name]; return kb && !hiddenDifyIds.has(String(kb.id)); });
+        const selfKbDecls = hiddenSelfKbIds.size === 0
+          ? _rawSelfKbDecls
+          : _rawSelfKbDecls.filter(d => { const kb = skm[d.name]; return kb && !hiddenSelfKbIds.has(String(kb.id)); });
+        const _hiddenDropped = (_rawMcpDecls.length - allMcpDecls.length) + (_rawDifyDecls.length - difyDecls.length) + (_rawSelfKbDecls.length - selfKbDecls.length);
+        if (_hiddenDropped > 0) {
+          console.log(`[Hidden] Auto mode dropped ${_hiddenDropped} tools (mcp=${_rawMcpDecls.length - allMcpDecls.length} dify=${_rawDifyDecls.length - difyDecls.length} selfkb=${_rawSelfKbDecls.length - selfKbDecls.length})`);
+        }
 
         // ── Apply Skill MCP tool mode filtering ─────────────────────────────
         const skillMcpRules = sessionSkills
