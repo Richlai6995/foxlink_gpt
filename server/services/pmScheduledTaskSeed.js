@@ -73,12 +73,20 @@ MarketWatch 對非登入回 401)。Mining.com RSS 涵蓋同類新聞,可作 KITC
 ═══ 任務 ═══
 從以上 7 個資料源,**選 12-25 篇最相關的金屬新聞**(不是全部都抽 — 過多會浪費 token)。
 每篇相關新聞做以下處理:
-1. 抽出 title / url / source / published_at / 全文(content 限 500 字以內,別整篇拷貝)
-2. 寫 80-150 字繁體中文摘要(summary)
-3. 情緒打分 sentiment_score(-1.0 ~ +1.0,LLM 判斷對該金屬「未來 1-7 天」價格的影響面)
-4. 對應 sentiment_label("very_negative" / "negative" / "neutral" / "positive" / "very_positive")
-5. 標註 related_metals(代碼陣列,例 ["CU","AL"])
-6. 列出 topics(主題標籤,例 ["supply","policy","fed","inventory"])
+1. 抽出 title / url / source / published_at
+2. **content = 原文整段拷貝**(英文 / 中文 / 日文 等,LLM 看到的原始文章 body 直接放,
+   **不翻譯、不重寫、不濃縮**;單篇上限 3000 字,夠長就 OK,別只給一兩句)
+3. **summary = 繁體中文濃縮摘要 80-150 字**(這是 content 的中文濃縮,跟 content 不同)
+4. 情緒打分 sentiment_score(-1.0 ~ +1.0,LLM 判斷對該金屬「未來 1-7 天」價格的影響面)
+5. 對應 sentiment_label("very_negative" / "negative" / "neutral" / "positive" / "very_positive")
+6. 標註 related_metals(代碼陣列,例 ["CU","AL"])
+7. 列出 topics(主題標籤,例 ["supply","policy","fed","inventory"])
+
+⚠️ **content vs summary 必須是不同欄位不同內容**:
+   - content:**原文 raw text**(英文新聞給英文 / 中文新聞給中文,直接拷貝整段 1500-3000 字)
+   - summary:**LLM 用繁體中文寫的 80-150 字濃縮**
+   兩者**內容不同、語言可能不同、長度差距大**(content 是 summary 的 10-30 倍)。
+   採購會用 content 看完整原文做引用,用 summary 快速掃過 — 兩者都重要,不要混為一談。
 
 ═══ ⚠️ 輸出格式(務必嚴格遵守,違反會導致 0 筆寫入)═══
 
@@ -90,22 +98,22 @@ MarketWatch 對非登入回 401)。Mining.com RSS 涵蓋同類新聞,可作 KITC
    即使 A 段寫得再多,**B 段一定要有**,沒有 = pipeline 0 inserted = 等於沒跑。
    無新聞時輸出 \`\`\`json [] \`\`\`(空陣列也要包 fence),不可只寫文字「今日無新聞」。
 
-JSON 格式範例:
+JSON 格式範例(注意 content 是英文原文整段、summary 是中文濃縮):
 
 \`\`\`json
 [
   {
-    "url": "https://www.mining.com/...",
-    "title": "...",
+    "url": "https://www.mining.com/some-article",
+    "title": "China's silver imports surge 78% in March...",
     "source": "Mining.com",
     "published_at": "2026-04-28T08:00:00Z",
     "language": "en",
-    "content": "完整內文 500 字以內",
-    "summary": "繁體中文摘要 80-150 字",
-    "sentiment_score": -0.6,
-    "sentiment_label": "negative",
-    "related_metals": ["CU","AL"],
-    "topics": ["supply","policy"]
+    "content": "China's silver imports surged 78% in March as investors and manufacturers scrambled to secure physical metal. Customs data released Tuesday showed total inflows reached 480 metric tons, the highest March figure in a decade. The surge comes amid growing industrial demand from solar panel manufacturers and electronics producers, who together account for over 60% of China's industrial silver consumption. Analysts at the China Nonferrous Metals Industry Association noted that ... (整篇英文原文 1500-3000 字,直接從 source 拷貝過來,不翻譯不重寫)",
+    "summary": "中國 3 月白銀進口量大增 78%,主因投資者與太陽能 / 電子業者搶實體金屬。海關數據顯示總流入量達 480 公噸,創 10 年同期高。中國有色金屬工業協會分析師指出工業需求(太陽能 + 電子)佔白銀消費 60% 以上。",
+    "sentiment_score": 0.6,
+    "sentiment_label": "positive",
+    "related_metals": ["AG"],
+    "topics": ["demand","china","industrial"]
   }
 ]
 \`\`\`
@@ -113,7 +121,9 @@ JSON 格式範例:
 ═══ 自我檢查清單(輸出前最後一遍)═══
 - [ ] 我有寫 A 段中文簡報嗎?
 - [ ] **我有在末尾寫 \`\`\`json [...] \`\`\` 區塊嗎?**(這條失敗 = 0 inserted)
-- [ ] JSON 內每筆都有 url + title + source + published_at + summary?
+- [ ] JSON 內每筆都有 url + title + source + published_at + content + summary?
+- [ ] **content 是原文整段拷貝(1500-3000 字)而非縮減版?**(這條失敗 = KB 全文只剩 60 字無法引用)
+- [ ] **summary 跟 content 不一樣?**(summary 是 content 的中文濃縮,不該幾乎相同)
 - [ ] published_at 是 ISO 格式(YYYY-MM-DDTHH:MM:SSZ)?
 - [ ] 沒有把 A 段內容跟 JSON 段混在一起?(JSON 必須是獨立 \`\`\`json ... \`\`\` block)`;
 
@@ -1298,11 +1308,13 @@ async function patchExistingNewsAddPgmSources(db) {
   // marker:platinuminvestment.com(PGM 評論源,2026-04-28 加)
   //       + moneydj.com(中文新聞源,2026-04-28 後加)
   //       + 自我檢查清單(2026-04-28 加 JSON mandatory 提示)
-  // 三 marker 都有才視為已升級到最新版
+  //       + 「原文整段拷貝」(2026-04-28 修 content 太短 60 字 issue)
+  // 四 marker 都有才視為已升級到最新版
   const hasWpic = !!promptStr && /platinuminvestment\.com/.test(promptStr);
   const hasMoneydj = !!promptStr && /moneydj\.com/.test(promptStr);
   const hasSelfCheck = !!promptStr && /自我檢查清單/.test(promptStr);
-  if (hasWpic && hasMoneydj && hasSelfCheck) return;
+  const hasFullContent = !!promptStr && /原文整段拷貝/.test(promptStr);
+  if (hasWpic && hasMoneydj && hasSelfCheck && hasFullContent) return;
 
   try {
     await db.prepare(`UPDATE scheduled_tasks SET prompt=?, updated_at=SYSTIMESTAMP WHERE id=?`)
