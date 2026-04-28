@@ -976,18 +976,37 @@ interface PipelineNodeLog {
 function RunDetailModal({ run, onClose }: { run: TaskRun; onClose: () => void }) {
   const { t } = useTranslation()
   const [fullText, setFullText] = useState<string | null>(null)
+  const [textSource, setTextSource] = useState<'session' | 'preview' | 'preview_no_session' | 'preview_api_error'>('session')
+  const [textError, setTextError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
 
   useEffect(() => {
-    if (!run.session_id) { setFullText(run.response_preview || ''); return }
+    if (!run.session_id) {
+      setFullText(run.response_preview || '')
+      setTextSource('preview_no_session')
+      return
+    }
     setLoading(true)
+    setTextError(null)
     api.get(`/chat/sessions/${run.session_id}`)
       .then((r) => {
         const msgs: { role: string; content: string }[] = r.data.messages || []
         const aiMsg = msgs.filter(m => m.role === 'assistant').pop()
-        setFullText(aiMsg?.content || run.response_preview || '')
+        if (aiMsg?.content) {
+          setFullText(aiMsg.content)
+          setTextSource('session')
+        } else {
+          setFullText(run.response_preview || '')
+          setTextSource('preview')
+          setTextError(`session 找到但 assistant message 為空(messages.length=${msgs.length})`)
+        }
       })
-      .catch(() => setFullText(run.response_preview || ''))
+      .catch((e) => {
+        setFullText(run.response_preview || '')
+        setTextSource('preview_api_error')
+        setTextError(e?.response?.status === 404 ? 'session 已被砍 (404)'
+                   : e?.response?.data?.error || e.message)
+      })
       .finally(() => setLoading(false))
   }, [run.session_id, run.response_preview])
 
@@ -1200,6 +1219,19 @@ function RunDetailModal({ run, onClose }: { run: TaskRun; onClose: () => void })
             <div className="text-xs font-semibold text-slate-700 mb-1 flex items-center gap-2">
               <span>AI 完整回應</span>
               {fullText && <span className="text-[10px] text-slate-400 font-normal">({fullText.length} 字)</span>}
+              {textSource === 'session' && (
+                <span className="text-[10px] text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded">完整 session</span>
+              )}
+              {textSource !== 'session' && (
+                <span className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded" title={textError || ''}>
+                  ⚠ 僅 preview(500 字截斷)— {textSource === 'preview_no_session' ? 'session_id=null'
+                    : textSource === 'preview_api_error' ? `API 失敗: ${textError}`
+                    : 'session 沒 assistant message'}
+                </span>
+              )}
+              {run.session_id && (
+                <span className="text-[10px] text-slate-400 font-mono" title="session_id">{String(run.session_id).slice(0, 8)}…</span>
+              )}
               {fullText && (
                 <button
                   onClick={() => navigator.clipboard.writeText(fullText)}

@@ -713,8 +713,20 @@ function buildMasterScrapeTask(kbMap, models = {}) {
    - 主要驅動事件(政策 / 庫存 / 地緣 / 美元動態)
    - 跨資產關聯觀察(金 vs 美元 / 銅 vs 中國需求 / 銀 vs 太陽能)
    - **PGM 重點**:JM Base Price 變動 + WPIC / matthey 對 Pt/Pd/Rh 供需的觀察
-3. 每個 source 抽出一個「條目」做 KB 歸檔:title / url / source / 內容摘要 + 完整擷取的核心數據
-   **WPIC / matthey expert-insights 找到 PGM 相關文章也要抽一筆**(source="WPIC" 或 "JohnsonMatthey")
+
+3. **news 陣列(只放「真新聞 / 真評論文章」,絕對不要放純報價公告)**:
+   ✅ 算 news 的:
+      - Mining.com / 日經 / SMM / MoneyDJ 等的 article(供需事件 / 政策 / 公司動態 / 地緣)
+      - WPIC quarterly outlook / matthey expert-insights / pgm-markets 的 PGM 評論文章
+      - 各 source「news / 評論」分頁的 article(westmetall.com/en/news.php、kitco.com/news/、tradingeconomics 評論段)
+   ❌ **不要放進 news**(這些是報價來源,只進 prices):
+      - 台灣銀行黃金存摺牌價(rate.bot.com.tw/gold/obu)
+      - Johnson Matthey PGM Base Price RSS(matthey.com/pgm-prices/rss-feed.xml)
+      - Kitco live 報價頁(charts/livegold.html / livesilver.html / liveplatinum.html / livepalladium.html)
+      - Westmetall markdaten(報價表)
+      - TradingEconomics commodity/* 純圖表頁(只有報價數字 + 7 天 chart,沒文字評論)
+   ⚠️ 規則:條目本身要有 ≥ 200 字真實內文 / 分析 / 觀點才算 news;只抓到報價數字的 → 進 prices,不進 news
+
 4. **11 個金屬的當日報價快照**(USD 等價統一),寫進 pm_price_history
    - **AU 黃金的 price_usd 從台銀取**,source="台灣銀行", source_url=台銀 URL, price_type="fixing", market="BOT"
      (取「美金 / 1英兩 / 本行賣出」價;1英兩 = 1 troy oz)
@@ -731,19 +743,20 @@ B. **JSON 落地段**(放 markdown 末尾的單一 \`\`\`json 區塊;內含 news
 {
   "news": [
     {
-      "title": "Kitco 即時黃金 / 白銀報價快照 — {{date}}",
-      "url": "https://www.kitco.com/charts/livegold.html",
-      "source": "Kitco",
+      "title": "WPIC: Fourth consecutive platinum market deficit — 240 koz expected in 2026",
+      "url": "https://platinuminvestment.com/news/fourth-consecutive-platinum-market-deficit",
+      "source": "WPIC",
       "language": "en",
-      "published_at": "{{date}}T06:00:00Z",
-      "summary": "當下黃金 USD/oz、白銀 USD/oz、24小時漲跌 %、量能變化等繁體中文摘要 80-150 字",
-      "content": "完整擷取的價格表 + Kitco 編輯短評(原文 + 必要中譯)。1500-3000 字之間,給 KB 切片做 RAG 用。",
-      "sentiment_score": 0.1,
-      "sentiment_label": "neutral",
-      "related_metals": ["AU", "AG"],
-      "topics": ["spot_price", "live_quote"]
+      "published_at": "{{date}}T08:00:00Z",
+      "summary": "繁體中文摘要 80-150 字,濃縮這篇 article 的供需論點與對 PT 價格的影響。",
+      "content": "原文 article body 整段拷貝(英文/中文都接受),1500-3000 字。內容必須是真評論 / 分析 / 新聞事件,不能是純報價數字。",
+      "sentiment_score": 0.6,
+      "sentiment_label": "positive",
+      "related_metals": ["PT"],
+      "topics": ["supply", "demand", "forecast"]
     }
-    // 每個 source 一筆,共 ~10-18 個 items
+    // 每篇都要有 ≥ 200 字真實 article body。報價來源(JM RSS / 台銀 / Kitco live / Westmetall markdaten / TE commodity)不要放這裡!
+    // 共 ~8-15 篇真新聞。如果某天確實沒抓到任何 article,寧可給空陣列 [] 也別塞報價公告充數
   ],
   "prices": [
     {
@@ -813,7 +826,16 @@ B. **JSON 落地段**(放 markdown 末尾的單一 \`\`\`json 區塊;內含 news
 - summary 必繁體中文;content 可英文 + 部分中譯
 - sentiment_score -1 ~ +1 是「對該金屬未來 1-7 天價格的影響」
 - 任何 source scrape 失敗就 skip 該 news 條目,但 prices 永遠 11 筆
-- **只輸出一個 \`\`\`json\`\`\` 區塊**,內含 news 與 prices 兩個 key`;
+- **只輸出一個 \`\`\`json\`\`\` 區塊**,內含 news 與 prices 兩個 key
+
+═══ 自我檢查清單(輸出前最後一遍)═══
+- [ ] 我有寫 A 段中文綜述嗎?
+- [ ] news 陣列每筆都有 ≥ 200 字真實 article body 嗎?(只有報價數字 = 不該進 news)
+- [ ] **news 裡有沒有混進報價公告?**(JM RSS / 台銀牌價 / Kitco live / Westmetall markdaten / TE commodity 純圖表 → 一律刪掉,只留 prices)
+- [ ] prices 是 11 筆 + metal_code 全部到齊?
+- [ ] AU 用台銀價、PT/PD/RH 用 JM Base Price?
+- [ ] published_at 是 ISO 格式?
+- [ ] 整份輸出只有一個 \`\`\`json\`\`\` 區塊(不是兩個分開的 news / prices)?`;
 
   const pipeline = [
     {
@@ -1325,10 +1347,12 @@ async function patchExistingMasterScrapeAddPriceWrite(db, kbMap, models) {
     n => n?.type === 'db_write' && String(n.table || '').toLowerCase() === 'pm_price_history'
   );
   // marker:JohnsonMatthey(2026-04-28 加 PGM RSS)+ rate.bot.com.tw(2026-04-28 加台銀金)
-  const hasJmMarker = !!promptStr && /JohnsonMatthey/.test(promptStr);
-  const hasBotMarker = !!promptStr && /rate\.bot\.com\.tw/.test(promptStr);
+  //       + news vs prices 規則(2026-04-28 加,避 LLM 把 JM RSS / 台銀牌價當 news 抽出來)
+  const hasJmMarker        = !!promptStr && /JohnsonMatthey/.test(promptStr);
+  const hasBotMarker       = !!promptStr && /rate\.bot\.com\.tw/.test(promptStr);
+  const hasNewsRulesMarker = !!promptStr && /絕對不要放純報價公告/.test(promptStr);
 
-  if (hasPriceWrite && hasJmMarker && hasBotMarker) return; // 三條件都 ok 才 skip
+  if (hasPriceWrite && hasJmMarker && hasBotMarker && hasNewsRulesMarker) return; // 四條件都 ok 才 skip
 
   try {
     await db.prepare(`
@@ -1340,6 +1364,7 @@ async function patchExistingMasterScrapeAddPriceWrite(db, kbMap, models) {
       !hasPriceWrite && 'pm_price_history',
       !hasJmMarker && 'JM RSS',
       !hasBotMarker && '台銀金 fetch',
+      !hasNewsRulesMarker && 'news vs prices 規則',
     ].filter(Boolean).join(' + ');
     console.log(`[PMScheduledTaskSeed] Upgraded "${targetName}" #${id}: ${missing}`);
   } catch (e) {
