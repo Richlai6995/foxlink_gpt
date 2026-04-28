@@ -621,6 +621,134 @@ router.get('/news/export.pdf', verifyToken, verifyPmUser, async (req, res) => {
 // REPORTS — daily / weekly / monthly,可翻歷史
 // ────────────────────────────────────────────────────────────────────────────
 
+// 取所有 [PM]% 排程任務的執行狀態 + 對應目的地表的資料量,
+// 給前端「資料健康度面板」一頁看完六個任務跑得怎樣 / 哪個沒進資料。
+router.get('/data-health', verifyToken, verifyPmUser, async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+
+    // 1) 6 個 PM 排程任務的元資料
+    const tasks = await db.prepare(`
+      SELECT id, name, status, schedule_type, schedule_hour, schedule_minute,
+             schedule_interval_hours, schedule_times_json,
+             TO_CHAR(last_run_at, 'YYYY-MM-DD HH24:MI:SS') AS last_run_at,
+             last_run_status, run_count
+      FROM scheduled_tasks
+      WHERE name LIKE '[PM]%'
+      ORDER BY id
+    `).all();
+
+    // 2) 各目的地表的資料量摘要
+    const safeGet = async (sql) => {
+      try { return await db.prepare(sql).get(); } catch (_) { return null; }
+    };
+
+    const today = new Date().toISOString().slice(0, 10);
+
+    const newsRecent = await safeGet(`
+      SELECT COUNT(*) AS n,
+             TO_CHAR(MAX(scraped_at), 'YYYY-MM-DD HH24:MI') AS latest
+      FROM pm_news WHERE scraped_at >= SYSTIMESTAMP - INTERVAL '24' HOUR
+    `);
+    const newsTotal = await safeGet(`SELECT COUNT(*) AS n FROM pm_news`);
+
+    const priceLatest = await safeGet(`
+      SELECT TO_CHAR(MAX(as_of_date), 'YYYY-MM-DD') AS latest_date,
+             COUNT(*) AS today_rows
+      FROM pm_price_history
+      WHERE as_of_date >= TRUNC(SYSDATE)
+    `);
+    const priceMetalsToday = await safeGet(`
+      SELECT COUNT(DISTINCT metal_code) AS n
+      FROM pm_price_history WHERE as_of_date >= TRUNC(SYSDATE)
+    `);
+
+    const macroLatest = await safeGet(`
+      SELECT TO_CHAR(MAX(as_of_date), 'YYYY-MM-DD') AS latest_date,
+             COUNT(DISTINCT indicator_code) AS indicator_count
+      FROM pm_macro_history
+    `);
+    const macroToday = await safeGet(`
+      SELECT COUNT(*) AS n FROM pm_macro_history WHERE as_of_date >= TRUNC(SYSDATE)
+    `);
+
+    const dailyReport = await safeGet(`
+      SELECT TO_CHAR(MAX(as_of_date), 'YYYY-MM-DD') AS latest_date
+      FROM pm_analysis_report WHERE report_type = 'daily'
+    `);
+    const weeklyReport = await safeGet(`
+      SELECT TO_CHAR(MAX(as_of_date), 'YYYY-MM-DD') AS latest_date
+      FROM pm_analysis_report WHERE report_type = 'weekly'
+    `);
+    const monthlyReport = await safeGet(`
+      SELECT TO_CHAR(MAX(as_of_date), 'YYYY-MM-DD') AS latest_date
+      FROM pm_analysis_report WHERE report_type = 'monthly'
+    `);
+
+    const forecastTotal = await safeGet(`SELECT COUNT(*) AS n FROM forecast_history`);
+    const forecastToday = await safeGet(`
+      SELECT COUNT(*) AS n,
+             COUNT(DISTINCT entity_code) AS metals
+      FROM forecast_history
+      WHERE entity_type='metal' AND forecast_date >= TRUNC(SYSDATE)
+    `);
+    const forecastLatest = await safeGet(`
+      SELECT TO_CHAR(MAX(forecast_date), 'YYYY-MM-DD') AS latest_date FROM forecast_history
+    `);
+
+    const num = (r, k) => Number(r?.[k] ?? r?.[k.toUpperCase()] ?? 0);
+    const str = (r, k) => r?.[k] ?? r?.[k.toUpperCase()] ?? null;
+
+    res.json({
+      today,
+      tasks: tasks.map(t => ({
+        id: t.id || t.ID,
+        name: t.name || t.NAME,
+        status: t.status || t.STATUS,
+        schedule_type: t.schedule_type || t.SCHEDULE_TYPE,
+        schedule_hour: t.schedule_hour ?? t.SCHEDULE_HOUR,
+        schedule_minute: t.schedule_minute ?? t.SCHEDULE_MINUTE,
+        schedule_interval_hours: t.schedule_interval_hours ?? t.SCHEDULE_INTERVAL_HOURS,
+        schedule_times_json: t.schedule_times_json || t.SCHEDULE_TIMES_JSON,
+        last_run_at: t.last_run_at || t.LAST_RUN_AT,
+        last_run_status: t.last_run_status || t.LAST_RUN_STATUS,
+        run_count: t.run_count ?? t.RUN_COUNT ?? 0,
+      })),
+      data: {
+        news: {
+          total: num(newsTotal, 'n'),
+          last_24h: num(newsRecent, 'n'),
+          latest: str(newsRecent, 'latest'),
+        },
+        price: {
+          latest_date: str(priceLatest, 'latest_date'),
+          today_rows: num(priceLatest, 'today_rows'),
+          today_metals: num(priceMetalsToday, 'n'),
+          target_metals: 11,
+        },
+        macro: {
+          latest_date: str(macroLatest, 'latest_date'),
+          indicator_count: num(macroLatest, 'indicator_count'),
+          today_rows: num(macroToday, 'n'),
+        },
+        daily_report:   { latest_date: str(dailyReport, 'latest_date') },
+        weekly_report:  { latest_date: str(weeklyReport, 'latest_date') },
+        monthly_report: { latest_date: str(monthlyReport, 'latest_date') },
+        forecast: {
+          total: num(forecastTotal, 'n'),
+          today_rows: num(forecastToday, 'n'),
+          today_metals: num(forecastToday, 'metals'),
+          target_metals: 11,
+          latest_date: str(forecastLatest, 'latest_date'),
+        },
+      },
+    });
+  } catch (e) {
+    console.error('[PmBriefing] /data-health error:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // 取「[PM] 每日金屬日報」排程設定,讓前端 fallback 文字動態顯示時間(避免寫死 18:00)
 router.get('/schedule-info', verifyToken, verifyPmUser, async (req, res) => {
   try {

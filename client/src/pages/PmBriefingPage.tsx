@@ -12,7 +12,7 @@ import { useNavigate } from 'react-router-dom'
 import {
   ArrowLeft, Settings, Download, ChevronDown, ChevronUp, Loader2, RefreshCw,
   X, Filter, Pin, ExternalLink, Calendar, Search, FileText, BarChart3, Newspaper,
-  Sparkles, AlertCircle, Bookmark,
+  Sparkles, AlertCircle, Bookmark, Activity, CheckCircle2, XCircle, Clock,
 } from 'lucide-react'
 import api from '../lib/api'
 import PmReviewQueueView from '../components/pm/PmReviewQueueView'
@@ -111,6 +111,9 @@ export default function PmBriefingPage() {
 
       {/* AI 綜述 */}
       <DailyInsight />
+
+      {/* 排程資料健康度面板 */}
+      <DataHealthPanel />
 
       {/* Tabs */}
       <div className="bg-white border-b border-t flex items-center gap-1 px-4">
@@ -517,6 +520,182 @@ function DailyInsight() {
             <PmFeedbackThumbs targetType="report" targetRef={`daily-${report.as_of_date}`} compact />
           </div>
         </div>
+      </div>
+    </div>
+  )
+}
+
+// ── 排程資料健康度面板 ─────────────────────────────────────────────────────
+// 一頁看 6 個 [PM] 任務:跑沒跑 + 跑成功沒 + 對應目的地表收到多少資料
+// 預設展開,可摺疊。讓使用者快速判斷哪個排程沒生資料。
+interface PmTaskInfo {
+  id: number
+  name: string
+  status: string
+  schedule_type: string
+  schedule_hour: number | null
+  schedule_minute: number | null
+  schedule_interval_hours?: number | null
+  schedule_times_json?: string | null
+  last_run_at: string | null
+  last_run_status: string | null
+  run_count: number
+}
+interface PmDataHealth {
+  today: string
+  tasks: PmTaskInfo[]
+  data: {
+    news: { total: number; last_24h: number; latest: string | null }
+    price: { latest_date: string | null; today_rows: number; today_metals: number; target_metals: number }
+    macro: { latest_date: string | null; indicator_count: number; today_rows: number }
+    daily_report: { latest_date: string | null }
+    weekly_report: { latest_date: string | null }
+    monthly_report: { latest_date: string | null }
+    forecast: { total: number; today_rows: number; today_metals: number; target_metals: number; latest_date: string | null }
+  }
+}
+
+function fmtScheduleTime(t: PmTaskInfo): string {
+  const pad = (n: number | null | undefined) => String(n ?? 0).padStart(2, '0')
+  switch (t.schedule_type) {
+    case 'daily':   return `每天 ${pad(t.schedule_hour)}:${pad(t.schedule_minute)}`
+    case 'weekly':  return `每週 ${pad(t.schedule_hour)}:${pad(t.schedule_minute)}`
+    case 'monthly': return `每月 ${pad(t.schedule_hour)}:${pad(t.schedule_minute)}`
+    case 'interval': return `每 ${t.schedule_interval_hours || 4} 小時`
+    case 'multi_time': {
+      let times: string[] = []
+      try { times = JSON.parse(t.schedule_times_json || '[]') } catch {}
+      return `每天 ${times.join('、') || '—'}`
+    }
+    default: return t.schedule_type
+  }
+}
+
+function DataHealthPanel() {
+  const [data, setData] = useState<PmDataHealth | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [collapsed, setCollapsed] = useState(false)
+
+  const reload = () => {
+    setLoading(true)
+    api.get('/pm/briefing/data-health')
+      .then(r => setData(r.data))
+      .catch(() => setData(null))
+      .finally(() => setLoading(false))
+  }
+  useEffect(() => { reload() }, [])
+
+  if (loading && !data) {
+    return <div className="bg-slate-50 border-b px-6 py-2 text-xs text-slate-400"><Loader2 size={12} className="animate-spin inline mr-1" /> 載入排程狀態…</div>
+  }
+  if (!data) {
+    return <div className="bg-slate-50 border-b px-6 py-2 text-xs text-slate-400">— 無法載入排程狀態 —</div>
+  }
+
+  // 任務 → 對應的「資料展示」描述
+  const findTask = (kw: string) => data.tasks.find(t => t.name.includes(kw))
+  const taskRows = [
+    {
+      task: findTask('每日金屬日報'),
+      target: '日報 / 預測',
+      status: data.data.daily_report.latest_date
+        ? `最新日報: ${data.data.daily_report.latest_date}` + (data.data.forecast.today_rows > 0
+            ? `,今日預測 ${data.data.forecast.today_metals}/${data.data.forecast.target_metals} 金屬(${data.data.forecast.total} 筆累計)`
+            : ',今日尚未出 forecast')
+        : '尚無日報',
+      ok: !!data.data.daily_report.latest_date && data.data.daily_report.latest_date >= data.today,
+    },
+    {
+      task: findTask('總體經濟指標'),
+      target: 'pm_macro_history',
+      status: data.data.macro.latest_date
+        ? `最新: ${data.data.macro.latest_date},${data.data.macro.indicator_count} 個指標,今日新增 ${data.data.macro.today_rows} 筆`
+        : '尚無資料 — 需排程跑過',
+      ok: !!data.data.macro.latest_date && data.data.macro.latest_date >= data.today,
+    },
+    {
+      task: findTask('全網金屬資料收集'),
+      target: 'pm_price_history + pm_news + KB',
+      status: data.data.price.latest_date
+        ? `最新報價: ${data.data.price.latest_date},今日 ${data.data.price.today_metals}/${data.data.price.target_metals} 金屬(${data.data.price.today_rows} 筆)`
+        : '尚無報價資料',
+      ok: !!data.data.price.latest_date && data.data.price.latest_date >= data.today,
+    },
+    {
+      task: findTask('每日金屬新聞抓取'),
+      target: 'pm_news',
+      status: `近 24h ${data.data.news.last_24h} 筆 / 累計 ${data.data.news.total} 筆` + (data.data.news.latest ? ` (latest ${data.data.news.latest})` : ''),
+      ok: data.data.news.last_24h > 0,
+    },
+    {
+      task: findTask('週報'),
+      target: '週報',
+      status: data.data.weekly_report.latest_date ? `最新: ${data.data.weekly_report.latest_date}` : '尚無週報',
+      ok: !!data.data.weekly_report.latest_date,
+    },
+    {
+      task: findTask('月報'),
+      target: '月報',
+      status: data.data.monthly_report.latest_date ? `最新: ${data.data.monthly_report.latest_date}` : '尚無月報',
+      ok: !!data.data.monthly_report.latest_date,
+    },
+  ]
+
+  if (collapsed) {
+    const failed = taskRows.filter(r => !r.ok && r.task?.status === 'active').length
+    return (
+      <div className="bg-slate-50 border-b px-6 py-1.5 text-xs flex items-center gap-2">
+        <Activity size={12} className="text-slate-500" />
+        <span className="text-slate-600">排程資料健康度</span>
+        {failed > 0 && <span className="text-amber-700">⚠ {failed} 個任務無今日資料</span>}
+        <button onClick={() => setCollapsed(false)} className="ml-auto text-blue-600 hover:underline">展開</button>
+      </div>
+    )
+  }
+
+  return (
+    <div className="bg-slate-50 border-b px-6 py-3">
+      <div className="flex items-center gap-2 mb-2">
+        <Activity size={14} className="text-slate-600" />
+        <span className="text-sm font-medium text-slate-700">排程資料健康度</span>
+        <span className="text-xs text-slate-400">— {data.today} 各排程任務跑況 + 對應前端區塊</span>
+        <button onClick={reload} className="ml-auto text-xs text-slate-500 hover:text-slate-800 flex items-center gap-1" title="重新整理">
+          <RefreshCw size={12} /> 重新整理
+        </button>
+        <button onClick={() => setCollapsed(true)} className="text-xs text-blue-600 hover:underline">收合</button>
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
+        {taskRows.map((r, i) => {
+          const t = r.task
+          if (!t) {
+            return (
+              <div key={i} className="bg-white border border-dashed border-slate-200 rounded px-3 py-2 text-xs text-slate-400">
+                <div className="font-medium">{r.target}</div>
+                <div className="mt-1">⚠ 找不到對應排程任務</div>
+              </div>
+            )
+          }
+          const isPaused = t.status !== 'active'
+          const okIcon = isPaused
+            ? <XCircle size={14} className="text-slate-400" />
+            : (r.ok ? <CheckCircle2 size={14} className="text-emerald-500" /> : <AlertCircle size={14} className="text-amber-500" />)
+          return (
+            <div key={i} className={`bg-white border rounded px-3 py-2 text-xs ${isPaused ? 'border-slate-200 opacity-70' : (r.ok ? 'border-emerald-200' : 'border-amber-200')}`}>
+              <div className="flex items-center gap-1.5 mb-1">
+                {okIcon}
+                <span className="font-medium text-slate-800">{t.name}</span>
+                {isPaused && <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-500">暫停</span>}
+              </div>
+              <div className="text-slate-500 flex items-center gap-1">
+                <Clock size={10} /> {fmtScheduleTime(t)}
+                {t.last_run_at
+                  ? <span className="ml-1">| 上次 {t.last_run_at.slice(5, 16)} ({t.last_run_status || '-'})</span>
+                  : <span className="ml-1 text-amber-600">| 從未跑過</span>}
+              </div>
+              <div className="text-slate-700 mt-1 leading-relaxed">{r.status}</div>
+            </div>
+          )
+        })}
       </div>
     </div>
   )
