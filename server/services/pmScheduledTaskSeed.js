@@ -626,11 +626,22 @@ function buildMasterScrapeTask(kbMap, models = {}) {
 用 LLM 整合分析後寫進「PM-原始資料庫」KB + 報價落地到 pm_price_history,
 讓後續日報 / 週報 / 戰情室 / RAG 查詢都能引用最新一手資料。
 
-═══ PGM 業界基準價(主源,RSS,JohnsonMatthey Base Price)═══
+═══ AU 黃金主源:台灣銀行黃金存摺(USD/oz 牌價)═══
+{{fetch:https://rate.bot.com.tw/gold/obu?Lang=zh-TW}}
+↑ 台銀外幣計價黃金存摺牌價,**AU 的 price_usd 取「美金 / 1 英兩 / 本行賣出價」**
+  原因:正崴採購黃金多透過台銀做交易 / 避險,台銀牌價(含 spread)就是實際結算價,
+       不是 LBMA London Fixing。LBMA Gold/Silver 已將資料權獨家授權給 ICE/IBA,公開網頁無法爬。
+
+═══ PGM 業界基準價:Johnson Matthey Base Price(RSS)═══
 {{fetch:https://matthey.com/pgm-prices/rss-feed.xml}}
 ↑ Pt / Pd / Rh / Ir / Ru 五金屬的 USD/oz 基準價,JM 每天 08:30 HK 時間更新。
   正崴採購合約多以 JM Base Price 為準,**PGM 的 price_usd 一律以此為主源**。
   RSS 不帶日變動 %,所以下面再抓 TradingEconomics 補 day_change_pct。
+
+═══ AG 白銀(LBMA 抓不到,改用 Westmetall + Kitco 雙源)═══
+{{scrape:https://www.kitco.com/charts/livesilver.html}}
+↑ Westmetall 也含 Silver Fixing(EUR/kg 要換算),Kitco 即時 spot(USD/oz 直接用),
+  兩個都看;Westmetall 為主、Kitco 為備援/交叉驗證。
 
 ═══ PGM 機構級評論(WPIC + matthey 專家觀點)═══
 {{scrape:https://platinuminvestment.com/news}}
@@ -667,8 +678,11 @@ function buildMasterScrapeTask(kbMap, models = {}) {
 3. 每個 source 抽出一個「條目」做 KB 歸檔:title / url / source / 內容摘要 + 完整擷取的核心數據
    **WPIC / matthey expert-insights 找到 PGM 相關文章也要抽一筆**(source="WPIC" 或 "JohnsonMatthey")
 4. **11 個金屬的當日報價快照**(USD 等價統一),寫進 pm_price_history
+   - **AU 黃金的 price_usd 從台銀取**,source="台灣銀行", source_url=台銀 URL, price_type="fixing", market="BOT"
+     (取「美金 / 1英兩 / 本行賣出」價;1英兩 = 1 troy oz)
    - **PGM(Pt/Pd/Rh)的 price_usd 一律從 JM RSS 取**,source="JohnsonMatthey", price_type="fixing", market="JM"
-   - day_change_pct 從 TradingEconomics 補(JM RSS 沒帶 %)
+   - day_change_pct 從 TradingEconomics 補(JM RSS / 台銀都沒帶 %)
+   - **AG 白銀**:Westmetall(EUR/kg → USD/oz 換算)為主,Kitco 為備援
 
 ═══ 輸出格式(三段)═══
 A. **綜述全文**(markdown,給人看 + DOCX 報告用,放最前面)
@@ -698,18 +712,18 @@ B. **JSON 落地段**(放 markdown 末尾的單一 \`\`\`json 區塊;內含 news
       "as_of_date": "{{date}}",
       "metal_code": "AU",
       "metal_name": "金",
-      "price_usd": 4679.8,
+      "price_usd": 4689.20,
       "unit": "USD/oz",
-      "original_price": 4679.8,
+      "original_price": 4689.20,
       "original_currency": "USD",
-      "original_unit": "USD/oz",
+      "original_unit": "USD/oz (1英兩=1 troy oz)",
       "fx_rate_to_usd": 1.0,
       "day_change_pct": -0.39,
       "price_type": "fixing",
-      "market": "LBMA",
-      "source": "Westmetall",
-      "source_url": "https://www.westmetall.com/en/markdaten.php",
-      "raw_snippet": "原始抓回的價格欄位片段"
+      "market": "BOT",
+      "source": "台灣銀行",
+      "source_url": "https://rate.bot.com.tw/gold/obu?Lang=zh-TW",
+      "raw_snippet": "台銀黃金存摺 11:10 美金 / 1英兩 / 本行賣出 4689.20"
     },
     {
       "as_of_date": "{{date}}",
@@ -734,14 +748,25 @@ B. **JSON 落地段**(放 markdown 末尾的單一 \`\`\`json 區塊;內含 news
 }
 \`\`\`
 
-═══ PGM 寫入規則(2026-04-28 加 matthey 後新增)═══
-- **PT / PD / RH 的 price_usd 一律從 JM RSS 取**(資料源 1)
+═══ AU 寫入規則(2026-04-28 改台銀)═══
+- **price_usd 取台銀「美金 / 1英兩 / 本行賣出」價**(USD/oz)
+- source = "台灣銀行" / source_url = "https://rate.bot.com.tw/gold/obu?Lang=zh-TW"
+- price_type = "fixing" / market = "BOT"
+- 注意:台銀牌價含 spread,跟 LBMA London Fixing 略有差距,但這是正崴實際採購結算價
+
+═══ PGM 寫入規則 ═══
+- **PT / PD / RH 的 price_usd 一律從 JM RSS 取**(資料源:matthey RSS)
   - source = "JohnsonMatthey"
   - source_url = "https://matthey.com/pgm-prices/rss-feed.xml"
   - price_type = "fixing"(JM Base Price 是日 fixing,不是 spot)
   - market = "JM"
 - day_change_pct 從 TradingEconomics 的「down/up X.XX%」補
 - JM RSS 也含 Iridium / Ruthenium,但目前 metal_code 只有 11 個(沒 IR/RU),先不寫 row
+
+═══ AG 寫入規則 ═══
+- **Westmetall 為主**(EUR/kg → USD/oz 換算,is_estimated=1)
+- Kitco 為備援/交叉驗證(scrape https://www.kitco.com/charts/livesilver.html)
+- LBMA 不能爬(資料權獨家授權給 ICE/IBA)
 
 ═══ 寫入規則(務必遵守)═══
 - **prices 必 11 筆**(metal_code 全部到齊),即使部分金屬今天沒資料,給 null 也要列出
@@ -1202,10 +1227,11 @@ async function patchExistingMasterScrapeAddPriceWrite(db, kbMap, models) {
   const hasPriceWrite = Array.isArray(nodes) && nodes.some(
     n => n?.type === 'db_write' && String(n.table || '').toLowerCase() === 'pm_price_history'
   );
-  // 2026-04-28 新加:JohnsonMatthey marker — 沒 marker 也視為「需升級到新版 prompt」
+  // marker:JohnsonMatthey(2026-04-28 加 PGM RSS)+ rate.bot.com.tw(2026-04-28 加台銀金)
   const hasJmMarker = !!promptStr && /JohnsonMatthey/.test(promptStr);
+  const hasBotMarker = !!promptStr && /rate\.bot\.com\.tw/.test(promptStr);
 
-  if (hasPriceWrite && hasJmMarker) return; // 兩條件都 ok 才 skip
+  if (hasPriceWrite && hasJmMarker && hasBotMarker) return; // 三條件都 ok 才 skip
 
   try {
     await db.prepare(`
@@ -1213,10 +1239,12 @@ async function patchExistingMasterScrapeAddPriceWrite(db, kbMap, models) {
       SET pipeline_json = ?, prompt = ?, updated_at = SYSTIMESTAMP
       WHERE id = ?
     `).run(newSeed.pipeline_json, newSeed.prompt, id);
-    const reason = !hasPriceWrite && !hasJmMarker
-      ? 'add pm_price_history + JohnsonMatthey RSS'
-      : (!hasPriceWrite ? 'add pm_price_history' : 'add JohnsonMatthey RSS marker');
-    console.log(`[PMScheduledTaskSeed] Upgraded "${targetName}" #${id}: ${reason}`);
+    const missing = [
+      !hasPriceWrite && 'pm_price_history',
+      !hasJmMarker && 'JM RSS',
+      !hasBotMarker && '台銀金 fetch',
+    ].filter(Boolean).join(' + ');
+    console.log(`[PMScheduledTaskSeed] Upgraded "${targetName}" #${id}: ${missing}`);
   } catch (e) {
     console.warn(`[PMScheduledTaskSeed] patch master scrape update #${id} failed:`, e.message);
   }
@@ -1247,6 +1275,191 @@ async function patchExistingNewsAddPgmSources(db) {
     console.log(`[PMScheduledTaskSeed] Upgraded "[PM] 每日金屬新聞抓取" #${id}: prompt 加 WPIC + matthey 評論源`);
   } catch (e) {
     console.warn(`[PMScheduledTaskSeed] patch news pgm sources update #${id} failed:`, e.message);
+  }
+}
+
+// 升級 user 自建 task `[PM] 每日貴金屬行情`(prefix [PM] 但非內建 seed)
+// 採用 array-of-objects 頂層結構(跟 user 既有 prompt 同),保留 user pipeline_json 不動,
+// 只 force update prompt 加進新數據源:台銀金 / matthey RSS / Kitco silver
+// marker:rate.bot.com.tw(沒這字串才升級;有 = 已升級過或 user 自己加過)
+async function patchUserDailyMetalQuoteTask(db) {
+  let row;
+  try {
+    row = await db.prepare(`SELECT id, name, prompt FROM scheduled_tasks WHERE name='[PM] 每日貴金屬行情'`).get();
+  } catch (e) {
+    console.warn('[PMScheduledTaskSeed] patch user daily quote select failed:', e.message);
+    return;
+  }
+  if (!row) return; // user 沒建這個 task,跳過
+  const id = row.id || row.ID;
+  let promptStr = row.prompt || row.PROMPT;
+  if (promptStr && typeof promptStr !== 'string' && promptStr.toString) promptStr = promptStr.toString();
+  const hasBotMarker = !!promptStr && /rate\.bot\.com\.tw/.test(promptStr);
+  const hasJmMarker  = !!promptStr && /JohnsonMatthey/.test(promptStr);
+  if (hasBotMarker && hasJmMarker) return; // 已升級
+
+  // 對應 user 既有 array-of-objects 結構 prompt(跟 buildMasterScrapeTask 的物件結構不同)
+  // 採用 user 上次貼的版本作 base,加進台銀 / matthey / kitco silver
+  const newPrompt = `今天是 {{date}}({{weekday}}),請為「{{task_name}}」整理今日全球主要金屬行情,以繁體中文輸出。
+
+═══ 資料源 1 — Westmetall(LME 基本金屬 + Silver Fixing 二手轉發)═══
+{{scrape:https://www.westmetall.com/en/markdaten.php}}
+
+═══ 資料源 2 — 台灣銀行黃金存摺(Gold 主源,USD/oz)═══
+{{fetch:https://rate.bot.com.tw/gold/obu?Lang=zh-TW}}
+↑ 取「美金 / 1英兩 / 本行賣出」價作 AU 的 price_usd
+  原因:正崴採購黃金透過台銀,台銀牌價(含 spread)就是實際結算價。
+       LBMA Gold 已將資料權獨家授權給 ICE/IBA,公開網頁無法爬。
+
+═══ 資料源 3 — Johnson Matthey PGM Base Price(Pt/Pd/Rh 主源,RSS)═══
+{{fetch:https://matthey.com/pgm-prices/rss-feed.xml}}
+↑ Pt / Pd / Rh / Ir / Ru 五金屬 USD/oz 基準價,JM 每天 08:30 HK 更新。
+  正崴 PGM 採購多以 JM Base Price 為合約結算基準。
+
+═══ 資料源 4 — Trading Economics(PGM 日變動 % 補充)═══
+Platinum: {{scrape:https://tradingeconomics.com/commodity/platinum}}
+Palladium: {{scrape:https://tradingeconomics.com/commodity/palladium}}
+Rhodium: {{scrape:https://tradingeconomics.com/commodity/rhodium}}
+
+═══ 資料源 5 — Kitco(Silver / PGM 備援,僅在主源失敗時用)═══
+Silver 備援: {{scrape:https://www.kitco.com/charts/livesilver.html}}
+Platinum 備援: {{scrape:https://www.kitco.com/charts/liveplatinum.html}}
+Palladium 備援: {{scrape:https://www.kitco.com/charts/livepalladium.html}}
+Rhodium 備援: {{scrape:https://www.kitco.com/charts/liverhodium.html}}
+
+═══ 解析規則(請嚴格遵守)═══
+
+1. **基本金屬(Copper / Aluminium / Nickel / Tin / Zinc / Lead)** 來源:Westmetall
+   擷取:LME cash 結算價(USD/ton)+ 當日庫存(公噸)+ 庫存變動
+
+2. **Gold(AU)** 主源:**台灣銀行**(資料源 2)
+   - 取「美金 / 1英兩 / 本行賣出」(USD/oz,1英兩=1 troy oz)
+   - source="台灣銀行", price_type="fixing", market="BOT"
+   - 台銀失敗才 fallback 用 Westmetall 的 LBMA Gold Fixing 二手轉發
+
+3. **Silver(AG)** 主源:Westmetall(EUR/kg → USD/oz 換算)+ Kitco 備援
+   - Westmetall 給 EUR/kg → 保留 original_price 是 EUR/kg + 換算 USD/oz
+     (1 kg = 32.1507 oz,EUR/USD 匯率取 Westmetall 當日值,is_estimated=1)
+     必須附換算公式
+   - Westmetall 失敗才 fallback Kitco(USD/oz 直接用,is_estimated=0)
+   - **不可用 LBMA**:資料權已獨家授權 ICE/IBA 付費,公開網頁沒數字
+
+4. **Platinum / Palladium / Rhodium** 主源:**Johnson Matthey RSS**(資料源 3)
+   - **price_usd 一律以 JM RSS 為主**,source="JohnsonMatthey", price_type="fixing", market="JM"
+   - **day_change_pct 從 TradingEconomics 補**(JM RSS 沒帶日變動)
+   - JM RSS 抓不到該金屬才 fallback 用 TE 的價(source="TradingEconomics", price_type="spot")
+   - JM + TE 都失敗才用 Kitco Bid/Ask 平均(source="Kitco")
+   - **禁止用歷史數據當今日價**
+
+═══ 輸出第一部分:繁中 markdown 表格 ═══
+
+| 金屬 | 最新報價 (USD) | 計價單位 | 日變動 | LME 庫存(公噸) | 庫存變動 |
+| ---- | -------------: | :------: | -----: | -------------: | -------: |
+
+規則:
+- 基本金屬 USD/噸、貴金屬 USD/oz
+- 貴金屬庫存欄一律填「—」
+- 日變動欄:有「down 1.87%」填「-1.87%」;只有價格無比較填「—」
+- **絕對禁止編造數字**
+
+表格下方加:
+- 3 條重點觀察(漲最多 / 跌最多 / 庫存異動 >1%)
+- 資料時間戳記(各來源日期 — 台銀「11:10」/JM「08:30 HK」照實寫)
+- 資料來源清單(列出本次實際使用到的 URL)
+
+═══ 輸出第二部分:結構化 JSON 供 DB 落地 ═══
+
+**⚠️ 這段是給 Pipeline 自動抓去寫資料庫,欄位嚴格對齊,數字型別用 number 非 string,
+抓不到的欄位用 null,日期一律 YYYY-MM-DD 格式。**
+
+每一筆 = 一個金屬從一個資料源的報價。欄位規範:
+
+- \`metal_code\`:大寫縮寫 CU/AL/NI/SN/ZN/PB/AU/AG/PT/PD/RH
+- \`original_price\` / \`original_currency\` / \`original_unit\`:來源網頁實際看到的報價(不做換算)
+- \`price_usd\` / \`unit\`:換算後 USD 統一單位(基本金屬 \`USD/ton\`,貴金屬 \`USD/oz\`)
+- \`fx_rate_to_usd\`:1 原幣 = N USD(USD→1.0,EUR 用當日抓到的匯率)
+- \`conversion_note\`:有換算才填公式字串,無換算填 null
+- \`price_type\`:\`spot\`/\`futures\`/\`fixing\`(JM Base Price / 台銀 / LBMA / LME 定盤)/\`estimate\`
+- \`market\`:\`LME\`(基本金屬)/\`BOT\`(台銀金)/\`LBMA\`(Westmetall Silver)/\`JM\`(JM PGM)/\`COMEX\`
+- \`grade\`:抓不到填 null
+- \`source\` + \`source_url\`:**台銀 → "台灣銀行"**;**JM → "JohnsonMatthey"**;Westmetall / Kitco / TradingEconomics 用品牌名
+- \`as_of_date\`:{{date}}
+
+\`\`\`json
+[
+  {
+    "metal_code":"CU","metal_name":"銅",
+    "original_price":13190.00,"original_currency":"USD","original_unit":"USD/ton",
+    "price_usd":13190.00,"unit":"USD/ton","fx_rate_to_usd":1.0,
+    "conversion_note":null,
+    "price_type":"spot","market":"LME","grade":"Grade A",
+    "day_change_pct":null,"lme_stock":396000,"stock_change":425,
+    "source":"Westmetall","source_url":"https://www.westmetall.com/en/markdaten.php",
+    "as_of_date":"{{date}}"
+  },
+  {
+    "metal_code":"AU","metal_name":"金",
+    "original_price":4689.20,"original_currency":"USD","original_unit":"USD/oz (1英兩)",
+    "price_usd":4689.20,"unit":"USD/oz","fx_rate_to_usd":1.0,
+    "conversion_note":null,
+    "price_type":"fixing","market":"BOT","grade":null,
+    "day_change_pct":null,"lme_stock":null,"stock_change":null,
+    "source":"台灣銀行","source_url":"https://rate.bot.com.tw/gold/obu?Lang=zh-TW",
+    "as_of_date":"{{date}}"
+  },
+  {
+    "metal_code":"AG","metal_name":"銀",
+    "original_price":2119.35,"original_currency":"EUR","original_unit":"EUR/kg",
+    "price_usd":77.07,"unit":"USD/oz","fx_rate_to_usd":1.1691,
+    "conversion_note":"2,119.35 EUR/kg × 1.1691 ÷ 32.1507 oz/kg = 77.07 USD/oz",
+    "price_type":"estimate","market":"LBMA","grade":null,
+    "day_change_pct":null,"lme_stock":null,"stock_change":null,
+    "source":"Westmetall","source_url":"https://www.westmetall.com/en/markdaten.php",
+    "as_of_date":"{{date}}"
+  },
+  {
+    "metal_code":"PT","metal_name":"鉑",
+    "original_price":2019.00,"original_currency":"USD","original_unit":"USD/troy oz",
+    "price_usd":2019.00,"unit":"USD/oz","fx_rate_to_usd":1.0,
+    "conversion_note":null,
+    "price_type":"fixing","market":"JM","grade":null,
+    "day_change_pct":-1.87,"lme_stock":null,"stock_change":null,
+    "source":"JohnsonMatthey","source_url":"https://matthey.com/pgm-prices/rss-feed.xml",
+    "as_of_date":"{{date}}"
+  },
+  {
+    "metal_code":"PD","metal_name":"鈀",
+    "original_price":1500.00,"original_currency":"USD","original_unit":"USD/troy oz",
+    "price_usd":1500.00,"unit":"USD/oz","fx_rate_to_usd":1.0,
+    "conversion_note":null,
+    "price_type":"fixing","market":"JM","grade":null,
+    "day_change_pct":-0.57,"lme_stock":null,"stock_change":null,
+    "source":"JohnsonMatthey","source_url":"https://matthey.com/pgm-prices/rss-feed.xml",
+    "as_of_date":"{{date}}"
+  },
+  {
+    "metal_code":"RH","metal_name":"銠",
+    "original_price":10000.00,"original_currency":"USD","original_unit":"USD/troy oz",
+    "price_usd":10000.00,"unit":"USD/oz","fx_rate_to_usd":1.0,
+    "conversion_note":null,
+    "price_type":"fixing","market":"JM","grade":null,
+    "day_change_pct":0.00,"lme_stock":null,"stock_change":null,
+    "source":"JohnsonMatthey","source_url":"https://matthey.com/pgm-prices/rss-feed.xml",
+    "as_of_date":"{{date}}"
+  }
+]
+\`\`\``;
+
+  try {
+    await db.prepare(`UPDATE scheduled_tasks SET prompt=?, updated_at=SYSTIMESTAMP WHERE id=?`)
+      .run(newPrompt, id);
+    const missing = [
+      !hasBotMarker && '台銀金 fetch',
+      !hasJmMarker && 'JM RSS',
+    ].filter(Boolean).join(' + ');
+    console.log(`[PMScheduledTaskSeed] Force-updated user task "[PM] 每日貴金屬行情" #${id}: ${missing}`);
+  } catch (e) {
+    console.warn(`[PMScheduledTaskSeed] patch user daily quote update #${id} failed:`, e.message);
   }
 }
 
@@ -1362,6 +1575,9 @@ async function autoSeedPmScheduledTasks(db, kbMap) {
 
   // Patch 既有任務:[PM] 每日金屬新聞抓取 加 PGM 機構級評論源(WPIC + matthey)
   await patchExistingNewsAddPgmSources(db);
+
+  // Patch user 自建任務:[PM] 每日貴金屬行情(台銀金 + JM RSS + Kitco silver)
+  await patchUserDailyMetalQuoteTask(db);
 
   // Patch 既有任務:[PM] 每日金屬新聞抓取 改 upsert by url_hash(2026-04-28)
   // 解決重複 url 撞 UQ_NEWS_URL_HASH 全部 skipped
