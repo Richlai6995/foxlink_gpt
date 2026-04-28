@@ -38,12 +38,23 @@ function buildNewsTask(kbMap, models = {}) {
   const dbWriteId = newNodeId('dbw');
   const kbWriteId = newNodeId('kbw');
 
-  const prompt = `今天是 {{date}}。請抓取以下來源,過濾出與「銅(CU)/ 鋁(AL)/ 鎳(NI)/ 錫(SN)/ 鋅(ZN)/ 鉛(PB)/ 金(AU)/ 銀(AG)/ 鉑(PT)/ 鈀(PD)/ 銠(RH)」相關的近 24 小時新聞。
+  const prompt = `今天是 {{date}}。請抓取以下來源,過濾出與「銅(CU)/ 鋁(AL)/ 鎳(NI)/ 錫(SN)/ 鋅(ZN)/ 鉛(PB)/ 金(AU)/ 銀(AG)/ 鉑(PT)/ 鈀(PD)/ 銠(RH)」相關的近 24 小時新聞與專業評論。
 
-═══ 資料源(可調整,公司防火牆需放行)═══
+═══ 資料源:一般市場新聞(可調整,公司防火牆需放行)═══
 {{scrape:https://www.kitco.com/news/}}
 {{scrape:https://www.mining.com/}}
 {{scrape:https://www.westmetall.com/en/news.php}}
+
+═══ 資料源:PGM(Pt/Pd/Rh)機構級評論(權威性 > 一般新聞)═══
+{{scrape:https://platinuminvestment.com/news}}
+{{scrape:https://matthey.com/news/expert-insights}}
+{{scrape:https://matthey.com/products-and-markets/pgms-and-circularity/pgm-markets}}
+↑ WPIC 是 World Platinum Investment Council,提供 quarterly 鉑金供需報告;
+  matthey expert-insights 是 Johnson Matthey PGM 專家文章。兩者更新頻率不如每日新聞,
+  但每篇都是業界基準級分析,**找到 PGM 相關文章請務必抽出**:
+   - source = "WPIC" 或 "JohnsonMatthey"
+   - related_metals 一定要標 ["PT"] / ["PD"] / ["RH"] 對應金屬
+   - sentiment_label 多半是 "neutral"(機構分析較中性)
 
 ═══ 任務 ═══
 每篇相關新聞做以下處理:
@@ -615,7 +626,18 @@ function buildMasterScrapeTask(kbMap, models = {}) {
 用 LLM 整合分析後寫進「PM-原始資料庫」KB + 報價落地到 pm_price_history,
 讓後續日報 / 週報 / 戰情室 / RAG 查詢都能引用最新一手資料。
 
-═══ 全網資料源(若 URL 在公司防火牆未通,LLM 會自動 skip 該源)═══
+═══ PGM 業界基準價(主源,RSS,JohnsonMatthey Base Price)═══
+{{fetch:https://matthey.com/pgm-prices/rss-feed.xml}}
+↑ Pt / Pd / Rh / Ir / Ru 五金屬的 USD/oz 基準價,JM 每天 08:30 HK 時間更新。
+  正崴採購合約多以 JM Base Price 為準,**PGM 的 price_usd 一律以此為主源**。
+  RSS 不帶日變動 %,所以下面再抓 TradingEconomics 補 day_change_pct。
+
+═══ PGM 機構級評論(WPIC + matthey 專家觀點)═══
+{{scrape:https://platinuminvestment.com/news}}
+{{scrape:https://matthey.com/news/expert-insights}}
+{{scrape:https://matthey.com/products-and-markets/pgms-and-circularity/pgm-markets}}
+
+═══ 全網資料源(基本金屬 + 一般新聞;若 URL 在公司防火牆未通,LLM 會自動 skip)═══
 {{scrape:https://www.kitco.com/charts/livegold.html}}
 {{scrape:https://www.kitco.com/charts/livesilver.html}}
 {{scrape:https://www.kitco.com/news/}}
@@ -641,8 +663,12 @@ function buildMasterScrapeTask(kbMap, models = {}) {
    - 11 種金屬(銅/鋁/鎳/錫/鋅/鉛/金/銀/鉑/鈀/銠)的當日表現
    - 主要驅動事件(政策 / 庫存 / 地緣 / 美元動態)
    - 跨資產關聯觀察(金 vs 美元 / 銅 vs 中國需求 / 銀 vs 太陽能)
+   - **PGM 重點**:JM Base Price 變動 + WPIC / matthey 對 Pt/Pd/Rh 供需的觀察
 3. 每個 source 抽出一個「條目」做 KB 歸檔:title / url / source / 內容摘要 + 完整擷取的核心數據
+   **WPIC / matthey expert-insights 找到 PGM 相關文章也要抽一筆**(source="WPIC" 或 "JohnsonMatthey")
 4. **11 個金屬的當日報價快照**(USD 等價統一),寫進 pm_price_history
+   - **PGM(Pt/Pd/Rh)的 price_usd 一律從 JM RSS 取**,source="JohnsonMatthey", price_type="fixing", market="JM"
+   - day_change_pct 從 TradingEconomics 補(JM RSS 沒帶 %)
 
 ═══ 輸出格式(三段)═══
 A. **綜述全文**(markdown,給人看 + DOCX 報告用,放最前面)
@@ -679,17 +705,43 @@ B. **JSON 落地段**(放 markdown 末尾的單一 \`\`\`json 區塊;內含 news
       "original_unit": "USD/oz",
       "fx_rate_to_usd": 1.0,
       "day_change_pct": -0.39,
-      "price_type": "spot",
+      "price_type": "fixing",
       "market": "LBMA",
       "source": "Westmetall",
       "source_url": "https://www.westmetall.com/en/markdaten.php",
-      "raw_snippet": "原始抓回的價格欄位片段(便於後續查證)"
+      "raw_snippet": "原始抓回的價格欄位片段"
+    },
+    {
+      "as_of_date": "{{date}}",
+      "metal_code": "PT",
+      "metal_name": "鉑",
+      "price_usd": 2019.0,
+      "unit": "USD/oz",
+      "original_price": 2019.0,
+      "original_currency": "USD",
+      "original_unit": "USD/troy oz",
+      "fx_rate_to_usd": 1.0,
+      "day_change_pct": -1.87,
+      "price_type": "fixing",
+      "market": "JM",
+      "source": "JohnsonMatthey",
+      "source_url": "https://matthey.com/pgm-prices/rss-feed.xml",
+      "raw_snippet": "JM Base Price: US$ 2019 per troy oz (28 Apr 2026 08:30 HK);day_change 從 TradingEconomics 補"
     }
     // **必須 11 筆**,順序:AU AG PT PD CU AL NI ZN PB SN RH
     // 找不到資料的金屬 → 仍輸出該筆但 price_usd / day_change_pct 給 null,source 給 'unknown'
   ]
 }
 \`\`\`
+
+═══ PGM 寫入規則(2026-04-28 加 matthey 後新增)═══
+- **PT / PD / RH 的 price_usd 一律從 JM RSS 取**(資料源 1)
+  - source = "JohnsonMatthey"
+  - source_url = "https://matthey.com/pgm-prices/rss-feed.xml"
+  - price_type = "fixing"(JM Base Price 是日 fixing,不是 spot)
+  - market = "JM"
+- day_change_pct 從 TradingEconomics 的「down/up X.XX%」補
+- JM RSS 也含 Iridium / Ruthenium,但目前 metal_code 只有 11 個(沒 IR/RU),先不寫 row
 
 ═══ 寫入規則(務必遵守)═══
 - **prices 必 11 筆**(metal_code 全部到齊),即使部分金屬今天沒資料,給 null 也要列出
@@ -1130,7 +1182,7 @@ async function patchExistingMasterScrapeAddPriceWrite(db, kbMap, models) {
   const targetName = newSeed.name;
   let row;
   try {
-    row = await db.prepare(`SELECT id, name, pipeline_json FROM scheduled_tasks WHERE name=?`).get(targetName);
+    row = await db.prepare(`SELECT id, name, prompt, pipeline_json FROM scheduled_tasks WHERE name=?`).get(targetName);
   } catch (e) {
     console.warn('[PMScheduledTaskSeed] patch master scrape select failed:', e.message);
     return;
@@ -1144,10 +1196,16 @@ async function patchExistingMasterScrapeAddPriceWrite(db, kbMap, models) {
     try { nodes = JSON.parse(typeof raw === 'string' ? raw : raw.toString()); }
     catch { nodes = []; }
   }
+  let promptStr = row.prompt || row.PROMPT;
+  if (promptStr && typeof promptStr !== 'string' && promptStr.toString) promptStr = promptStr.toString();
+
   const hasPriceWrite = Array.isArray(nodes) && nodes.some(
     n => n?.type === 'db_write' && String(n.table || '').toLowerCase() === 'pm_price_history'
   );
-  if (hasPriceWrite) return;
+  // 2026-04-28 新加:JohnsonMatthey marker — 沒 marker 也視為「需升級到新版 prompt」
+  const hasJmMarker = !!promptStr && /JohnsonMatthey/.test(promptStr);
+
+  if (hasPriceWrite && hasJmMarker) return; // 兩條件都 ok 才 skip
 
   try {
     await db.prepare(`
@@ -1155,9 +1213,40 @@ async function patchExistingMasterScrapeAddPriceWrite(db, kbMap, models) {
       SET pipeline_json = ?, prompt = ?, updated_at = SYSTIMESTAMP
       WHERE id = ?
     `).run(newSeed.pipeline_json, newSeed.prompt, id);
-    console.log(`[PMScheduledTaskSeed] Upgraded "${targetName}" #${id}: prompt + pipeline rebuilt with pm_price_history db_write`);
+    const reason = !hasPriceWrite && !hasJmMarker
+      ? 'add pm_price_history + JohnsonMatthey RSS'
+      : (!hasPriceWrite ? 'add pm_price_history' : 'add JohnsonMatthey RSS marker');
+    console.log(`[PMScheduledTaskSeed] Upgraded "${targetName}" #${id}: ${reason}`);
   } catch (e) {
     console.warn(`[PMScheduledTaskSeed] patch master scrape update #${id} failed:`, e.message);
+  }
+}
+
+// 升級既有 [PM] 每日金屬新聞抓取 task:加 PGM 機構級評論源(WPIC + matthey)
+// 用 platinuminvestment.com marker 判斷,沒這 URL 就 force update prompt。
+// pipeline 不動(沿用之前 upsert by url_hash patch)。
+// Idempotent。
+async function patchExistingNewsAddPgmSources(db) {
+  const newSeed = buildNewsTask(undefined, {});
+  let row;
+  try {
+    row = await db.prepare(`SELECT id, name, prompt FROM scheduled_tasks WHERE name='[PM] 每日金屬新聞抓取'`).get();
+  } catch (e) {
+    console.warn('[PMScheduledTaskSeed] patch news pgm sources select failed:', e.message);
+    return;
+  }
+  if (!row) return;
+  const id = row.id || row.ID;
+  let promptStr = row.prompt || row.PROMPT;
+  if (promptStr && typeof promptStr !== 'string' && promptStr.toString) promptStr = promptStr.toString();
+  if (promptStr && /platinuminvestment\.com/.test(promptStr)) return; // 已有 marker
+
+  try {
+    await db.prepare(`UPDATE scheduled_tasks SET prompt=?, updated_at=SYSTIMESTAMP WHERE id=?`)
+      .run(newSeed.prompt, id);
+    console.log(`[PMScheduledTaskSeed] Upgraded "[PM] 每日金屬新聞抓取" #${id}: prompt 加 WPIC + matthey 評論源`);
+  } catch (e) {
+    console.warn(`[PMScheduledTaskSeed] patch news pgm sources update #${id} failed:`, e.message);
   }
 }
 
@@ -1268,7 +1357,11 @@ async function autoSeedPmScheduledTasks(db, kbMap) {
 
   // Patch 既有任務:[PM] 全網金屬資料收集 加 db_write→pm_price_history(2026-04-28)
   // 升級 prompt 為 { news, prices } object 格式 + 加新 db_write 節點
+  // 2026-04-28 進一步:沒 JohnsonMatthey marker 也升級到新版 prompt(JM RSS 為 PGM 主源)
   await patchExistingMasterScrapeAddPriceWrite(db, kbMap, models);
+
+  // Patch 既有任務:[PM] 每日金屬新聞抓取 加 PGM 機構級評論源(WPIC + matthey)
+  await patchExistingNewsAddPgmSources(db);
 
   // Patch 既有任務:[PM] 每日金屬新聞抓取 改 upsert by url_hash(2026-04-28)
   // 解決重複 url 撞 UQ_NEWS_URL_HASH 全部 skipped
