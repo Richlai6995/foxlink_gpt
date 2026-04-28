@@ -194,14 +194,36 @@ async function loadExistingTitles(db, kbId) {
  */
 async function executeKbWrite(db, nodeConfig, sourceText, context = {}) {
   const cfg = nodeConfig || {};
-  const kbId        = String(cfg.kb_id || '').trim();
+  let kbId          = String(cfg.kb_id || '').trim();
+  const kbNameHint  = String(cfg.kb_name || '').trim();
   const chunkMode   = ['mixed', 'body_only', 'whole'].includes(cfg.chunk_strategy) ? cfg.chunk_strategy : 'mixed';
   const dedupeMode  = ['url', 'title', 'url_or_title', 'none'].includes(cfg.dedupe_mode) ? cfg.dedupe_mode : 'url';
   const maxChunksPerRun = Math.max(1, Math.min(1000, Number(cfg.max_chunks_per_run) || 100));
   const onRowError  = cfg.on_row_error === 'stop' ? 'stop' : 'skip';
   const dryRun      = !!context.dryRun || !!cfg.dry_run;
 
-  if (!kbId) throw new Error('kb_write: kb_id 必填');
+  // kb_id 空但 kb_name 有值 → 用 name 自動 lookup(容錯既有 task pipeline_json 在 KB 還沒建好時 seed,
+  // 之後 patch 沒跑到 / KB 重建 id 變了的場景。比強制 patch logic 更可靠)
+  if (!kbId && kbNameHint) {
+    try {
+      const r = await db.prepare(
+        `SELECT id FROM knowledge_bases WHERE UPPER(name)=UPPER(?) FETCH FIRST 1 ROWS ONLY`
+      ).get(kbNameHint);
+      const found = r?.id || r?.ID;
+      if (found) {
+        kbId = String(found).trim();
+        console.log(`[Pipeline kb_write] kb_id 空 → 以 kb_name="${kbNameHint}" lookup 補回 → ${kbId}`);
+      }
+    } catch (e) {
+      console.warn(`[Pipeline kb_write] kb_name lookup 失敗 (${kbNameHint}):`, e.message);
+    }
+  }
+
+  if (!kbId) {
+    throw new Error(
+      `kb_write: kb_id 必填${kbNameHint ? ` (kb_name="${kbNameHint}" 也找不到對應 KB → 該 KB 是否已建立?)` : ''}`
+    );
+  }
 
   // ─── 1. 權限檢查 ─────────────────────────────────────────────────────────
   const user = context.user || {};
@@ -319,7 +341,16 @@ async function executeKbWrite(db, nodeConfig, sourceText, context = {}) {
   }
 
   // ─── 6. 實際寫入 ─────────────────────────────────────────────────────────
-  const result = { documents_created: 0, chunks_created: 0, skipped_duplicates: 0, errors };
+  // inserted_preview:給 admin Modal 看 KB 實際塞了什麼(content 截 800 字 + summary 全文)
+  // 在迴圈裡逐筆 push,只放 documents_created 真的成功的(不含 dup / chunk fail)
+  const insertedPreview = [];
+  // total_rows_in_input = LLM 解析出的 raw row 總數(在 array_path drill 後),
+  // 配合 documents_created / skipped_duplicates 看「LLM 給幾筆 → KB 真的收幾篇」
+  const result = {
+    total_rows_in_input: rawRows.length,
+    documents_created: 0, chunks_created: 0, skipped_duplicates: 0,
+    errors, inserted_preview: insertedPreview,
+  };
   const dims = kb.embedding_dims || 768;
   const chunkCfg = (() => { try { return JSON.parse(kb.chunk_config || '{}'); } catch { return {}; } })();
   const kbChunkStrategy = kb.chunk_strategy || 'regular';
@@ -375,7 +406,9 @@ async function executeKbWrite(db, nodeConfig, sourceText, context = {}) {
       const docId = uuid();
       const filename = it.title || (it.url ? it.url.slice(-100) : `pipeline_${it.sourceHash.slice(0, 12)}`);
       const fullText = [it.title, it.summary, it.content].filter(Boolean).join('\n\n');
-      const wordCount = fullText.split(/\s+/).filter(Boolean).length;
+      // word_count 改用「去空白後總字數」— 對中文有意義(原本 split(/\s+/) 把整段中文當 1 word,
+      // 中文新聞 200 字實際 word_count 算出來只剩 < 20,看起來像「LLM 偷懶」其實是算法問題)
+      const wordCount = fullText.replace(/\s+/g, '').length;
 
       try {
         await db.prepare(`
@@ -428,6 +461,20 @@ async function executeKbWrite(db, nodeConfig, sourceText, context = {}) {
       existingTitles.add(titleLc);
       result.documents_created++;
       result.chunks_created += chunksToWrite.length;
+      // 記前 5 筆 admin 預覽用 — title + url + summary 全文 + content 前 800 字
+      if (insertedPreview.length < 5) {
+        insertedPreview.push({
+          row_index: it.index,
+          title: it.title,
+          url: it.normUrl,
+          source: it.source,
+          published_at: it.publishedAt,
+          summary: it.summary,
+          content_excerpt: it.content ? it.content.slice(0, 800) + (it.content.length > 800 ? '…' : '') : null,
+          content_length: it.content ? it.content.length : 0,
+          chunks_written: chunksToWrite.length,
+        });
+      }
     } catch (e) {
       result.errors.push({ row_index: it.index, errors: [e.message], row_payload: previewRow(it._rawRow) });
       if (onRowError === 'stop') {

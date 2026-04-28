@@ -941,20 +941,34 @@ interface PipelineNodeLog {
   db_write_summary?: {
     table?: string
     operation?: string
+    total_rows_in_input?: number
     inserted?: number
     updated?: number
     skipped?: number
     errors?: { row_index: number; errors: string[]; row_payload?: string }[]
     dropped_cols?: Record<string, number> | null
+    inserted_preview?: { row_index: number; payload: string }[]
     _threw?: boolean
   }
   kb_write_summary?: {
     kb_id?: number
     kb_name?: string
+    total_rows_in_input?: number
     documents_created?: number
     chunks_created?: number
     skipped_duplicates?: number
     errors?: { row_index: number; errors: string[]; row_payload?: string }[]
+    inserted_preview?: {
+      row_index: number
+      title?: string
+      url?: string | null
+      source?: string | null
+      published_at?: string | null
+      summary?: string | null
+      content_excerpt?: string | null
+      content_length?: number
+      chunks_written?: number
+    }[]
     _threw?: boolean
   }
 }
@@ -1061,6 +1075,9 @@ function RunDetailModal({ run, onClose }: { run: TaskRun; onClose: () => void })
                       <div key={i} className={`border rounded p-2 text-xs ${dw._threw ? 'border-red-200 bg-red-50' : 'border-slate-200 bg-slate-50'}`}>
                         <div className="font-mono text-slate-700 mb-1">
                           {dw._threw ? '⚠️' : '📥'} db_write → <b>{dw.table}</b> ({dw.operation}) —
+                          {dw.total_rows_in_input != null && (
+                            <span className="ml-1 text-slate-500">{dw.total_rows_in_input} rows in →</span>
+                          )}
                           <span className="ml-1 text-emerald-600">{dw.inserted || 0} inserted</span>
                           <span className="ml-1 text-blue-600">{dw.updated || 0} updated</span>
                           <span className="ml-1 text-amber-600">{dw.skipped || 0} skipped</span>
@@ -1077,6 +1094,22 @@ function RunDetailModal({ run, onClose }: { run: TaskRun; onClose: () => void })
                               <span key={col} className="ml-1 px-1 rounded bg-slate-100">{col}×{n}</span>
                             ))}
                           </div>
+                        )}
+                        {/* 寫入預覽:LLM 原始 row 前 5 筆 — 確認塞進 DB 的內容是否合理 */}
+                        {(dw.inserted_preview?.length || 0) > 0 && (
+                          <details className="mt-1 border border-emerald-200 rounded bg-white">
+                            <summary className="px-2 py-1 text-[11px] text-emerald-700 cursor-pointer select-none">
+                              ✅ 寫入內容預覽(前 {dw.inserted_preview!.length} 筆 raw row,展開看 LLM 實際塞了什麼)
+                            </summary>
+                            <div className="p-2 space-y-1 max-h-72 overflow-y-auto">
+                              {dw.inserted_preview!.map((p, j) => (
+                                <div key={j} className="border-l-2 border-emerald-400 pl-2 py-0.5">
+                                  <div className="text-emerald-700 text-[10px]">row#{p.row_index}</div>
+                                  <div className="text-slate-700 font-mono text-[10px] whitespace-pre-wrap break-all">{p.payload}</div>
+                                </div>
+                              ))}
+                            </div>
+                          </details>
                         )}
                         {(dw.errors?.length || 0) > 0 && (
                           <div className="mt-1 space-y-1 max-h-60 overflow-y-auto">
@@ -1098,10 +1131,41 @@ function RunDetailModal({ run, onClose }: { run: TaskRun; onClose: () => void })
                       <div key={i} className="border border-slate-200 rounded p-2 text-xs bg-slate-50">
                         <div className="font-mono text-slate-700 mb-1">
                           📚 kb_write → <b>{kw.kb_name}</b> —
+                          {kw.total_rows_in_input != null && (
+                            <span className="ml-1 text-slate-500">{kw.total_rows_in_input} rows in →</span>
+                          )}
                           <span className="ml-1 text-emerald-600">{kw.documents_created || 0} docs / {kw.chunks_created || 0} chunks</span>
                           <span className="ml-1 text-amber-600">{kw.skipped_duplicates || 0} skipped</span>
                           {(kw.errors?.length || 0) > 0 && <span className="ml-1 text-red-600">{kw.errors!.length} errors</span>}
                         </div>
+                        {/* KB 寫入預覽:title / url / summary / content 前 800 字 — 確認 LLM 沒給出短到沒料的 content */}
+                        {(kw.inserted_preview?.length || 0) > 0 && (
+                          <details className="mt-1 border border-emerald-200 rounded bg-white">
+                            <summary className="px-2 py-1 text-[11px] text-emerald-700 cursor-pointer select-none">
+                              ✅ KB 寫入內容預覽(前 {kw.inserted_preview!.length} 筆,展開檢查 content 長度與摘要差異)
+                            </summary>
+                            <div className="p-2 space-y-2 max-h-96 overflow-y-auto">
+                              {kw.inserted_preview!.map((p, j) => (
+                                <div key={j} className="border border-emerald-100 rounded p-2 bg-emerald-50/30">
+                                  <div className="text-[10px] text-emerald-700 mb-0.5">row#{p.row_index} · {p.source || '?'} · {p.published_at || ''} · content {p.content_length}字 / {p.chunks_written} chunks</div>
+                                  <div className="font-semibold text-slate-800 text-xs mb-1">{p.title || '(no title)'}</div>
+                                  {p.url && <div className="text-blue-600 text-[10px] break-all mb-1">{p.url}</div>}
+                                  {p.summary && (
+                                    <div className="text-[10px] text-slate-600 mb-1 border-l-2 border-amber-300 pl-2">
+                                      <span className="text-amber-700">[summary]</span> {p.summary}
+                                    </div>
+                                  )}
+                                  {p.content_excerpt && (
+                                    <div className="text-[10px] text-slate-700 font-mono whitespace-pre-wrap border-l-2 border-blue-300 pl-2">
+                                      <span className="text-blue-700">[content {p.content_length}字, 截前 800]</span><br />
+                                      {p.content_excerpt}
+                                    </div>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          </details>
+                        )}
                         {(kw.errors?.length || 0) > 0 && (
                           <div className="mt-1 space-y-1 max-h-60 overflow-y-auto">
                             {kw.errors!.map((e, j) => (
@@ -1131,10 +1195,20 @@ function RunDetailModal({ run, onClose }: { run: TaskRun; onClose: () => void })
             </div>
           )}
 
-          {/* AI 完整回應 */}
+          {/* AI 完整回應 — 獨立卷軸 + monospace,避免被上面 pipeline 流程擠掉看不到尾端 */}
           <div>
-            <div className="text-xs font-semibold text-slate-700 mb-1">AI 完整回應</div>
-            <div className="border border-slate-200 rounded p-3 text-sm text-slate-700 whitespace-pre-wrap">
+            <div className="text-xs font-semibold text-slate-700 mb-1 flex items-center gap-2">
+              <span>AI 完整回應</span>
+              {fullText && <span className="text-[10px] text-slate-400 font-normal">({fullText.length} 字)</span>}
+              {fullText && (
+                <button
+                  onClick={() => navigator.clipboard.writeText(fullText)}
+                  className="ml-auto text-[10px] text-slate-500 hover:text-slate-700 px-1.5 py-0.5 border border-slate-200 rounded"
+                  title="複製完整內容到剪貼簿"
+                >複製全文</button>
+              )}
+            </div>
+            <div className="border border-slate-200 rounded p-3 text-[11px] text-slate-700 whitespace-pre-wrap font-mono max-h-[400px] overflow-y-auto bg-slate-50/50">
               {loading ? t('common.loading') : (fullText || t('scheduledTask.runDetail.noContent'))}
             </div>
           </div>

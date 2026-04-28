@@ -567,22 +567,70 @@ router.get('/news/:id/full', verifyToken, verifyPmUser, async (req, res) => {
     `).get(newsId);
     if (!news) return res.status(404).json({ error: 'news not found' });
 
-    // 2) 撈 PM-新聞庫的 kb_id(可能不存在)
-    const kbRow = await db.prepare(`SELECT id FROM knowledge_bases WHERE name = 'PM-新聞庫'`).get();
-    const kbId = kbRow?.id || kbRow?.ID;
+    // 2) 撈所有 PM-* KB 的 id(新聞抓取 / 全網金屬都會寫,各落不同 KB)
+    //    PM-新聞庫:[PM] 每日金屬新聞抓取
+    //    PM-原始資料庫:[PM] 全網金屬資料收集(Westmetall / Kitco / TradingEconomics 等 raw 全文)
+    //    PM-分析庫:LLM 生成的 daily/weekly/monthly,不對應 pm_news,排除
+    const kbRows = await db.prepare(
+      `SELECT id, name FROM knowledge_bases WHERE name IN ('PM-新聞庫','PM-原始資料庫')`
+    ).all();
+    const kbIdToName = new Map();
+    const kbIds = [];
+    for (const r of kbRows || []) {
+      const id = r.id || r.ID;
+      const name = r.name || r.NAME;
+      if (id) { kbIds.push(id); kbIdToName.set(id, name); }
+    }
 
     let kbDoc = null;
-    if (kbId) {
-      // 3) JOIN by hash 找全文 — 同 url_hash 可能對到多筆(LLM 偷懶把 url 都填首頁)
-      // 取 published_at 最接近 pm_news.published_at 的那筆,降低 mismatch
+    let matchedBy = null; // 'hash' | 'url' | 'title' — debug 用,前端可顯示
+    let matchedKbName = null;
+    if (kbIds.length) {
+      const newsUrlHash = news.url_hash || news.URL_HASH;
+      const newsUrl     = news.url || news.URL;
+      const newsTitle   = news.title || news.TITLE;
+      const placeholders = kbIds.map(() => '?').join(',');
+
+      // 3a) 先試 source_hash(理想路徑,兩端 normalize 邏輯一致時就靠這條)
       kbDoc = await db.prepare(`
-        SELECT id AS doc_id, content, word_count, source_url AS kb_source_url, filename,
+        SELECT id AS doc_id, kb_id, content, word_count, source_url AS kb_source_url, filename,
                TO_CHAR(published_at, 'YYYY-MM-DD HH24:MI') AS kb_published_at
         FROM kb_documents
-        WHERE kb_id = ? AND source_hash = ?
+        WHERE kb_id IN (${placeholders}) AND source_hash = ?
         ORDER BY ABS(EXTRACT(DAY FROM (published_at - (SELECT published_at FROM pm_news WHERE id = ?)))) NULLS LAST
         FETCH FIRST 1 ROWS ONLY
-      `).get(kbId, news.url_hash || news.URL_HASH, newsId);
+      `).get(...kbIds, newsUrlHash, newsId);
+      if (kbDoc) matchedBy = 'hash';
+
+      // 3b) Fallback:source_hash 對不上 → 用 source_url 直接比
+      if (!kbDoc && newsUrl) {
+        kbDoc = await db.prepare(`
+          SELECT id AS doc_id, kb_id, content, word_count, source_url AS kb_source_url, filename,
+                 TO_CHAR(published_at, 'YYYY-MM-DD HH24:MI') AS kb_published_at
+          FROM kb_documents
+          WHERE kb_id IN (${placeholders}) AND LOWER(source_url) = LOWER(?)
+          ORDER BY ABS(EXTRACT(DAY FROM (published_at - (SELECT published_at FROM pm_news WHERE id = ?)))) NULLS LAST
+          FETCH FIRST 1 ROWS ONLY
+        `).get(...kbIds, newsUrl, newsId);
+        if (kbDoc) matchedBy = 'url';
+      }
+
+      // 3c) Fallback 2:source_url 也對不上 → 用 filename = title 比
+      if (!kbDoc && newsTitle) {
+        kbDoc = await db.prepare(`
+          SELECT id AS doc_id, kb_id, content, word_count, source_url AS kb_source_url, filename,
+                 TO_CHAR(published_at, 'YYYY-MM-DD HH24:MI') AS kb_published_at
+          FROM kb_documents
+          WHERE kb_id IN (${placeholders}) AND LOWER(filename) = LOWER(?)
+          ORDER BY ABS(EXTRACT(DAY FROM (published_at - (SELECT published_at FROM pm_news WHERE id = ?)))) NULLS LAST
+          FETCH FIRST 1 ROWS ONLY
+        `).get(...kbIds, newsTitle, newsId);
+        if (kbDoc) matchedBy = 'title';
+      }
+
+      if (kbDoc) {
+        matchedKbName = kbIdToName.get(kbDoc.kb_id || kbDoc.KB_ID) || null;
+      }
     }
 
     res.json({
@@ -608,6 +656,8 @@ router.get('/news/:id/full', verifyToken, verifyPmUser, async (req, res) => {
         published_at: kbDoc.kb_published_at || kbDoc.KB_PUBLISHED_AT,
         source_url: kbDoc.kb_source_url || kbDoc.KB_SOURCE_URL,  // 給前端對照 pm_news.url 看是否同一篇
         filename: kbDoc.filename || kbDoc.FILENAME,
+        matched_by: matchedBy, // 'hash' | 'url' | 'title' — fallback 路徑顯示用
+        kb_name: matchedKbName, // 'PM-新聞庫' or 'PM-原始資料庫'
       } : null,
     });
   } catch (e) {

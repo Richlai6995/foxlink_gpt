@@ -1111,7 +1111,8 @@ async function processDocument(db, kb, docId, filePath, fileType, parseMode = nu
     const { text: rawText, ocrInputTokens, ocrOutputTokens } = await parseDocument(
       filePath, fileType, effectiveOcrModel, effectiveParseMode, effectivePdfOcrMode,
     );
-    const wordCount = rawText.split(/\s+/).filter(Boolean).length;
+    // 同 pipelineKbWriter:中文沒空白,用 split(/\s+/) 算 word 對 CJK 全部低估,改算去空白字數
+    const wordCount = rawText.replace(/\s+/g, '').length;
 
     // Update content in db
     await db.prepare('UPDATE kb_documents SET content=?, word_count=? WHERE id=?').run(rawText, wordCount, docId);

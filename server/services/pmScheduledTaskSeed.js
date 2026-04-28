@@ -922,6 +922,65 @@ B. **JSON 落地段**(放 markdown 末尾的單一 \`\`\`json 區塊;內含 news
   };
 }
 
+// ── Patch 早期 seed 進去的 [PM]% task,kb_write 節點 kb_id + kb_name 都空時 ──
+// task name → kb_name 的對應(直接從 buildXxxTask 寫死的對應表反推)。
+// 觸發場景:task 早期 seed 進去時 KB 還沒建,kb_name 也漏了 → patchExistingTaskKbIds
+// 因為 `if (!n.kb_name) continue` 整條 skip → 永遠救不回來。
+const TASK_NAME_TO_KB = {
+  '[PM] 每日金屬新聞抓取': 'PM-新聞庫',
+  '[PM] 每日金屬日報':     'PM-分析庫',
+  '[PM] 週度金屬報告':     'PM-分析庫',
+  '[PM] 月度金屬報告':     'PM-分析庫',
+  '[PM] 全網金屬資料收集': 'PM-原始資料庫',
+};
+
+async function patchKbWriteRestoreNamesByTask(db, kbMap) {
+  if (!kbMap || kbMap.size === 0) return;
+  let rows;
+  try {
+    rows = await db.prepare(`SELECT id, name, pipeline_json FROM scheduled_tasks WHERE name LIKE '[PM]%'`).all();
+  } catch (e) {
+    console.warn('[PMScheduledTaskSeed] restore kb_name select failed:', e.message);
+    return;
+  }
+  let patched = 0;
+  for (const r of rows || []) {
+    const taskName = r.name || r.NAME || '';
+    const expectedKbName = TASK_NAME_TO_KB[taskName];
+    if (!expectedKbName) continue;
+    const raw = r.pipeline_json || r.PIPELINE_JSON;
+    if (!raw) continue;
+    let nodes;
+    try { nodes = JSON.parse(typeof raw === 'string' ? raw : raw.toString()); }
+    catch { continue; }
+    if (!Array.isArray(nodes)) continue;
+
+    let dirty = false;
+    for (const n of nodes) {
+      if (n?.type !== 'kb_write') continue;
+      const hasName = !!(n.kb_name && String(n.kb_name).trim());
+      const hasId   = !!(n.kb_id   && String(n.kb_id).trim());
+      if (hasName && hasId) continue;
+      if (!hasName) { n.kb_name = expectedKbName; dirty = true; }
+      if (!hasId) {
+        const kbId = kbMap.get(n.kb_name || expectedKbName);
+        if (kbId) { n.kb_id = kbId; dirty = true; }
+      }
+    }
+    if (dirty) {
+      try {
+        await db.prepare(`UPDATE scheduled_tasks SET pipeline_json=?, updated_at=SYSTIMESTAMP WHERE id=?`)
+          .run(JSON.stringify(nodes), r.id || r.ID);
+        patched++;
+        console.log(`[PMScheduledTaskSeed] restored kb_name+kb_id for task #${r.id || r.ID} "${taskName}" → ${expectedKbName}`);
+      } catch (e) {
+        console.warn(`[PMScheduledTaskSeed] restore task #${r.id || r.ID} failed:`, e.message);
+      }
+    }
+  }
+  if (patched > 0) console.log(`[PMScheduledTaskSeed] restored kb_write names+ids on ${patched} task(s)`);
+}
+
 // ── Patch 既有任務:fill in kb_id where kb_name matches but kb_id is empty ───
 async function patchExistingTaskKbIds(db, kbMap) {
   if (!kbMap || kbMap.size === 0) return;
@@ -1609,6 +1668,10 @@ async function autoSeedPmScheduledTasks(db, kbMap) {
 
   // Patch 既有任務:fill in kb_id where empty
   await patchExistingTaskKbIds(db, kbMap);
+
+  // Patch 早期 seed 進去 kb_id + kb_name 都空的 task(早期 patchExistingTaskKbIds 因為
+  // `if (!n.kb_name) continue` skip 救不到)。從 task name 反推 KB,補 name + id。
+  await patchKbWriteRestoreNamesByTask(db, kbMap);
 
   // Patch 既有任務:把 model='pro'/'flash'(舊 seed 寫死的)替換成新 pickModelKey 結果
   await patchExistingTaskModels(db, models);

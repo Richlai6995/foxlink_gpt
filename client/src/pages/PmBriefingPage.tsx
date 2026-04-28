@@ -1064,7 +1064,7 @@ function NewsFullContentModal({ newsId, onClose }: { newsId: number; onClose: ()
       sentiment_score: number | null; sentiment_label: string | null
       related_metals: string | null; topics: string | null
     }
-    kb: { doc_id: string; content: string; word_count: number; published_at: string | null; source_url: string | null; filename: string | null } | null
+    kb: { doc_id: string; content: string; word_count: number; published_at: string | null; source_url: string | null; filename: string | null; matched_by?: 'hash' | 'url' | 'title' | null; kb_name?: string | null } | null
   } | null>(null)
   const [loading, setLoading] = useState(true)
   const [copied, setCopied] = useState(false)
@@ -1148,7 +1148,7 @@ function NewsFullContentModal({ newsId, onClose }: { newsId: number; onClose: ()
               {/* 右:KB 原文 */}
               <div className="flex-1 overflow-y-auto p-5">
                 <div className="text-xs font-semibold text-slate-500 mb-2 flex items-center gap-1">
-                  <FileText size={12} className="text-emerald-600" /> 原文(KB:PM-新聞庫)
+                  <FileText size={12} className="text-emerald-600" /> 原文(KB:{data?.kb?.kb_name || 'PM-新聞庫 / PM-原始資料庫'})
                 </div>
                 {data.found && data.kb ? (
                   <>
@@ -1163,6 +1163,11 @@ function NewsFullContentModal({ newsId, onClose }: { newsId: number; onClose: ()
                         ) : <span className="ml-1 text-slate-400">(空)</span>}
                       </div>
                       <div>📅 KB doc published_at: {data.kb.published_at || '—'} · {data.kb.word_count} 字</div>
+                      {data.kb.matched_by && data.kb.matched_by !== 'hash' && (
+                        <div className="mt-1 text-amber-700 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5">
+                          ⚠ source_hash 對不到,以 {data.kb.matched_by === 'url' ? 'source_url' : 'filename(title)'} fallback 找到 — 可能 hash 邏輯歷史不同,或 LLM 偷懶用首頁 url
+                        </div>
+                      )}
                       {data.kb.source_url && data.news.url &&
                         normalizeUrlForCompare(data.kb.source_url) !== normalizeUrlForCompare(data.news.url) && (
                         <div className="mt-1 text-amber-700 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5">

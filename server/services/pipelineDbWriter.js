@@ -529,7 +529,21 @@ async function executeDbWrite(db, nodeConfig, sourceText, context = {}) {
   if (dropped_cols) {
     console.warn(`[Pipeline db_write] dropped unknown columns from ${rawRows.length} rows:`, JSON.stringify(dropped_cols), '(LLM 出了 schema 沒有的欄位 — 可能 prompt/mapping drift,row 仍寫入)');
   }
-  const result = { inserted: 0, updated: 0, skipped: 0, errors, dropped_cols };
+  // inserted_preview:LLM 原始 row 前 5 筆,給 admin RunDetailModal 看「LLM 實際塞了什麼」
+  // 用 rawRows(LLM 原始)而非 mappedRows(已 mapping 後 col→val),因為原始更接近 user 的肉眼判讀
+  // 每筆 truncate 1500 字,避免 pipeline_log_json 爆大
+  const inserted_preview = rawRows.slice(0, 5).map((r, i) => {
+    let s; try { s = JSON.stringify(r); } catch { s = String(r); }
+    return { row_index: i, payload: s.length > 1500 ? s.slice(0, 1500) + '…' : s };
+  });
+  // total_rows_in_input:LLM 解析出的 raw row 總數(在 array_path drill 後)
+  // 配合 inserted/updated/skipped 可看出「LLM 給幾筆 → 實際落地幾筆」差距,
+  // 例如 LLM 只給 3 筆 vs prompt 要求 12-25 筆 = 偷懶;或 10 筆 → 0 inserted = key 全 dup
+  const result = {
+    total_rows_in_input: rawRows.length,
+    inserted: 0, updated: 0, skipped: 0,
+    errors, dropped_cols, inserted_preview,
+  };
 
   try {
     if (operation === 'replace_by_date') {
