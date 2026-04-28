@@ -222,26 +222,14 @@ async function runTask(db, taskId) {
   const { sendMail } = require('./mailService');
   const { resolveToolRefs, hasToolRefs } = require('./promptResolver');
   const { runPipeline } = require('./pipelineRunner');
-  const { tryLock } = require('./redisClient');
   const {
     getTemplateSchemaInstruction,
     parseJsonFromAiOutput,
     generateDocumentFromJson,
   } = require('./docTemplateService');
 
-  // 分散式鎖：K8s 多 pod 都跑 node-cron，若無鎖會每個 pod 都觸發一次。
-  // Key 帶「分鐘」時間戳 → 同一分鐘只有一個 pod 能拿到；TTL 90s 確保跨分鐘就自動釋放。
-  const lockMinute = Math.floor(Date.now() / 60000);
-  const lockKey = `sched_lock:${taskId}:${lockMinute}`;
-  try {
-    const acquired = await tryLock(lockKey, 90);
-    if (!acquired) {
-      console.log(`[Scheduled] Task ${taskId} lock held by another pod at minute ${lockMinute}, skip`);
-      return;
-    }
-  } catch (e) {
-    console.warn(`[Scheduled] Redis lock failed (${e.message}) — 降級繼續執行（可能會重複）`);
-  }
+  // 註:多 pod 排程鎖移到 scheduleTask 的 cron handler(slot-based key, TTL 600s)。
+  // runTask 故意不再 lock,讓 admin UI「立刻執行」/ retry / pipeline 內部呼叫都能直通。
 
   const task = await db.prepare('SELECT * FROM scheduled_tasks WHERE id = ?').get(taskId);
   if (!task) { console.error(`[Scheduled] Task ${taskId} not found`); return; }
@@ -577,6 +565,30 @@ async function runTask(db, taskId) {
 // ── Cron management ───────────────────────────────────────────────────────────
 const _cronJobs = new Map(); // taskId → cron.ScheduledTask
 
+// 用「排程設計時間 + 當天日期」當 lock key,跨 pod 時鐘漂移仍能阻擋重複觸發。
+// 不用 wall-clock minute(舊設計)是因為 enqueue 排隊延遲 + NTP drift 會讓不同 pod
+// 算出不同 minute key,等於 lock 失效。Slot-based 不論幾點幾秒進來算的都是同一個 key。
+function buildLockKey(task) {
+  const now = new Date();
+  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  const pad = (n) => String(n).padStart(2, '0');
+
+  if (['daily', 'weekly', 'monthly'].includes(task.schedule_type)) {
+    return `sched_lock:${task.id}:${today}T${pad(task.schedule_hour ?? 8)}${pad(task.schedule_minute ?? 0)}`;
+  }
+  if (task.schedule_type === 'multi_time') {
+    // multi_time 是整點觸發,當下 hour 就代表 slot
+    return `sched_lock:${task.id}:${today}T${pad(now.getHours())}00`;
+  }
+  if (task.schedule_type === 'interval') {
+    const n = Math.max(1, Math.min(23, Number(task.schedule_interval_hours || 4)));
+    const bucket = Math.floor(now.getHours() / n) * n;
+    return `sched_lock:${task.id}:${today}T${pad(bucket)}00`;
+  }
+  // cron_raw / 其他:fallback 到當下 hour:minute(精度跟 cron 觸發點對齊)
+  return `sched_lock:${task.id}:${today}T${pad(now.getHours())}${pad(now.getMinutes())}`;
+}
+
 function buildCronExpr(task) {
   const h = task.schedule_hour ?? 8;
   const m = task.schedule_minute ?? 0;
@@ -625,8 +637,33 @@ function scheduleTask(db, task) {
   if (task.status !== 'active') return;
 
   const expr = buildCronExpr(task);
-  const job = cron.schedule(expr, () => {
-    console.log(`[Scheduled] Triggering task ${task.id} "${task.name}"`);
+  const job = cron.schedule(expr, async () => {
+    // K8s 多 pod 都會跑這個 cron callback。在搶 lock 前先 fetch 最新 task,
+    // 若 admin 剛改成 paused 或刪掉就 skip,避免 race。
+    let latest;
+    try {
+      latest = await db.prepare('SELECT * FROM scheduled_tasks WHERE id=?').get(task.id);
+    } catch (e) {
+      console.warn(`[Scheduled] cron handler fetch task ${task.id} failed:`, e.message);
+      latest = task;
+    }
+    if (!latest || latest.status !== 'active') return;
+
+    // 分散式鎖(slot-based + TTL 600s):同一排程 slot 不論 pod 之間時鐘漂移多少,
+    // 都解析成同一個 key,只有第一個拿到 lock 的 pod 跑,其他 skip。
+    const lockKey = buildLockKey(latest);
+    try {
+      const { tryLock } = require('./redisClient');
+      const acquired = await tryLock(lockKey, 600);
+      if (!acquired) {
+        console.log(`[Scheduled] Task ${task.id} slot ${lockKey} held by another pod, skip`);
+        return;
+      }
+    } catch (e) {
+      console.warn(`[Scheduled] Redis lock failed (${e.message}) — 降級繼續執行(可能會重複)`);
+    }
+
+    console.log(`[Scheduled] Triggering task ${task.id} "${task.name}" (slot=${lockKey})`);
     enqueue(() => runTask(db, task.id));
   }, { timezone: 'Asia/Taipei' });
 
