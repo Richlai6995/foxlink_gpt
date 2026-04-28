@@ -600,13 +600,15 @@ function buildMonthlyReportTask(kbMap, models = {}) {
 // admin 想加密度可改 schedule_type='interval' + schedule_interval_hours=8
 function buildMasterScrapeTask(kbMap, models = {}) {
   const proModel = models.pro || 'pro';
-  const dbWriteId = newNodeId('dbw');
-  const kbWriteId = newNodeId('kbw');
+  const dbNewsId   = newNodeId('dbw');
+  const dbPriceId  = newNodeId('dbw');
+  const kbWriteId  = newNodeId('kbw');
   const generateId = newNodeId('gen');
 
   const prompt = `今天是 {{date}}({{weekday}})。
 這個任務是 PM 平台的「**全網金屬資料總覽收集**」,目的是把當日各官方 / 權威網站的金屬市場資料一次抓回來,
-用 LLM 整合分析後寫進「PM-原始資料庫」KB,讓後續日報 / 週報 / RAG 查詢都能引用最新一手資料。
+用 LLM 整合分析後寫進「PM-原始資料庫」KB + 報價落地到 pm_price_history,
+讓後續日報 / 週報 / 戰情室 / RAG 查詢都能引用最新一手資料。
 
 ═══ 全網資料源(若 URL 在公司防火牆未通,LLM 會自動 skip 該源)═══
 {{scrape:https://www.kitco.com/charts/livegold.html}}
@@ -635,51 +637,75 @@ function buildMasterScrapeTask(kbMap, models = {}) {
    - 主要驅動事件(政策 / 庫存 / 地緣 / 美元動態)
    - 跨資產關聯觀察(金 vs 美元 / 銅 vs 中國需求 / 銀 vs 太陽能)
 3. 每個 source 抽出一個「條目」做 KB 歸檔:title / url / source / 內容摘要 + 完整擷取的核心數據
+4. **11 個金屬的當日報價快照**(USD 等價統一),寫進 pm_price_history
 
-═══ 輸出格式(雙段)═══
+═══ 輸出格式(三段)═══
 A. **綜述全文**(markdown,給人看 + DOCX 報告用,放最前面)
 
-B. **JSON 落地段**(供 db_write + kb_write 解析,放在 markdown 末尾的 \`\`\`json 區塊)
+B. **JSON 落地段**(放 markdown 末尾的單一 \`\`\`json 區塊;內含 news 與 prices 兩個 key)
 
 \`\`\`json
-[
-  {
-    "title": "Kitco 即時黃金 / 白銀報價快照 — {{date}}",
-    "url": "https://www.kitco.com/charts/livegold.html",
-    "source": "Kitco",
-    "language": "en",
-    "published_at": "{{date}}T06:00:00Z",
-    "summary": "當下黃金 USD/oz、白銀 USD/oz、24小時漲跌 %、量能變化等繁體中文摘要 80-150 字",
-    "content": "完整擷取的價格表 + Kitco 編輯短評(原文 + 必要中譯)。1500-3000 字之間,給 KB 切片做 RAG 用。",
-    "sentiment_score": 0.1,
-    "sentiment_label": "neutral",
-    "related_metals": ["AU", "AG"],
-    "topics": ["spot_price", "live_quote"]
-  },
-  {
-    "title": "Westmetall 基本金屬日結報價 — {{date}}",
-    "url": "https://www.westmetall.com/en/markdaten.php",
-    "source": "Westmetall",
-    "...": "..."
-  }
-  // 每個 source 一筆,共 ~10-18 個 items
-]
+{
+  "news": [
+    {
+      "title": "Kitco 即時黃金 / 白銀報價快照 — {{date}}",
+      "url": "https://www.kitco.com/charts/livegold.html",
+      "source": "Kitco",
+      "language": "en",
+      "published_at": "{{date}}T06:00:00Z",
+      "summary": "當下黃金 USD/oz、白銀 USD/oz、24小時漲跌 %、量能變化等繁體中文摘要 80-150 字",
+      "content": "完整擷取的價格表 + Kitco 編輯短評(原文 + 必要中譯)。1500-3000 字之間,給 KB 切片做 RAG 用。",
+      "sentiment_score": 0.1,
+      "sentiment_label": "neutral",
+      "related_metals": ["AU", "AG"],
+      "topics": ["spot_price", "live_quote"]
+    }
+    // 每個 source 一筆,共 ~10-18 個 items
+  ],
+  "prices": [
+    {
+      "as_of_date": "{{date}}",
+      "metal_code": "AU",
+      "metal_name": "金",
+      "price_usd": 4679.8,
+      "unit": "USD/oz",
+      "original_price": 4679.8,
+      "original_currency": "USD",
+      "original_unit": "USD/oz",
+      "fx_rate_to_usd": 1.0,
+      "day_change_pct": -0.39,
+      "price_type": "spot",
+      "market": "LBMA",
+      "source": "Westmetall",
+      "source_url": "https://www.westmetall.com/en/markdaten.php",
+      "raw_snippet": "原始抓回的價格欄位片段(便於後續查證)"
+    }
+    // **必須 11 筆**,順序:AU AG PT PD CU AL NI ZN PB SN RH
+    // 找不到資料的金屬 → 仍輸出該筆但 price_usd / day_change_pct 給 null,source 給 'unknown'
+  ]
+}
 \`\`\`
 
-注意:
-- 任何 source scrape 失敗就 skip,JSON 內不要放沒抓到的條目
+═══ 寫入規則(務必遵守)═══
+- **prices 必 11 筆**(metal_code 全部到齊),即使部分金屬今天沒資料,給 null 也要列出
+- price_usd 一律換算成 **USD 等價**(EUR → USD 用 fx_rate_to_usd;ton ↔ kg 看 unit 欄位記錄原單位)
+- as_of_date 統一用今天 = {{date}}(YYYY-MM-DD)
 - summary 必繁體中文;content 可英文 + 部分中譯
-- sentiment_score -1 ~ +1 是「對該金屬未來 1-7 天價格的影響」`;
+- sentiment_score -1 ~ +1 是「對該金屬未來 1-7 天價格的影響」
+- 任何 source scrape 失敗就 skip 該 news 條目,但 prices 永遠 11 筆
+- **只輸出一個 \`\`\`json\`\`\` 區塊**,內含 news 與 prices 兩個 key`;
 
   const pipeline = [
     {
-      id: dbWriteId,
+      id: dbNewsId,
       type: 'db_write',
       label: '寫入 pm_news(各 source 條目)',
       table: 'pm_news',
       operation: 'insert',
       key_columns: [],
       input: '{{ai_output}}',
+      array_path: '$.news',
+      array_path_optional: true,  // 舊 prompt 還是頂層 array 時也能 silent fallback
       on_row_error: 'skip',
       max_rows: 50,
       column_mapping: [
@@ -694,6 +720,36 @@ B. **JSON 落地段**(供 db_write + kb_write 解析,放在 markdown 末尾的 \
         { jsonpath: '$.sentiment_label', column: 'sentiment_label', transform: '' },
         { jsonpath: '$.related_metals',  column: 'related_metals',  transform: 'array_join_comma' },
         { jsonpath: '$.topics',          column: 'topics',          transform: 'array_join_comma' },
+      ],
+    },
+    {
+      id: dbPriceId,
+      type: 'db_write',
+      label: '寫入 pm_price_history(11 個金屬報價快照)',
+      table: 'pm_price_history',
+      operation: 'upsert',
+      key_columns: ['metal_code', 'as_of_date'],
+      input: '{{ai_output}}',
+      array_path: '$.prices',
+      array_path_optional: true,  // LLM 沒輸出 prices key 時 silent skip,不擋 pipeline
+      on_row_error: 'skip',
+      max_rows: 20,
+      column_mapping: [
+        { jsonpath: '$.as_of_date',        column: 'as_of_date',        transform: 'date',   required: true },
+        { jsonpath: '$.metal_code',        column: 'metal_code',        transform: 'upper',  required: true },
+        { jsonpath: '$.metal_name',        column: 'metal_name',        transform: '' },
+        { jsonpath: '$.price_usd',         column: 'price_usd',         transform: 'number' },
+        { jsonpath: '$.unit',              column: 'unit',              transform: '' },
+        { jsonpath: '$.original_price',    column: 'original_price',    transform: 'number' },
+        { jsonpath: '$.original_currency', column: 'original_currency', transform: '' },
+        { jsonpath: '$.original_unit',     column: 'original_unit',     transform: '' },
+        { jsonpath: '$.fx_rate_to_usd',    column: 'fx_rate_to_usd',    transform: 'number' },
+        { jsonpath: '$.day_change_pct',    column: 'day_change_pct',    transform: 'number' },
+        { jsonpath: '$.price_type',        column: 'price_type',        transform: '' },
+        { jsonpath: '$.market',            column: 'market',            transform: '' },
+        { jsonpath: '$.source',            column: 'source',            transform: '' },
+        { jsonpath: '$.source_url',        column: 'source_url',        transform: '' },
+        { jsonpath: '$.raw_snippet',       column: 'raw_snippet',       transform: '' },
       ],
     },
     {
@@ -713,6 +769,8 @@ B. **JSON 落地段**(供 db_write + kb_write 解析,放在 markdown 末尾的 \
       max_chunks_per_run: 200,
       on_row_error: 'skip',
       input: '{{ai_output}}',
+      array_path: '$.news',
+      array_path_optional: true,  // 舊 prompt 還是頂層 array 時 fallback
     },
     {
       id: generateId,
@@ -901,6 +959,49 @@ async function patchExistingForecastArrayPath(db) {
   if (patched > 0) console.log(`[PMScheduledTaskSeed] patched ${patched} existing task(s) with forecast_history array_path`);
 }
 
+// 升級既有 [PM] 全網金屬資料收集 task:
+// - 若 pipeline 沒 db_write→pm_price_history,就整個 prompt + pipeline 重 build(用最新 seed)
+// - 保留 admin 已調過的 schedule / status / recipients 等執行面欄位
+// Idempotent — 已有 pm_price_history 節點就 skip
+//
+// 設計考量:LLM prompt 必須跟 pipeline 對齊(輸出 { news, prices } 物件 vs 頂層 array),
+// 所以無法只 surgical 加節點,必須一起 force-update prompt。
+async function patchExistingMasterScrapeAddPriceWrite(db, kbMap, models) {
+  const newSeed = buildMasterScrapeTask(kbMap, models);
+  const targetName = newSeed.name;
+  let row;
+  try {
+    row = await db.prepare(`SELECT id, name, pipeline_json FROM scheduled_tasks WHERE name=?`).get(targetName);
+  } catch (e) {
+    console.warn('[PMScheduledTaskSeed] patch master scrape select failed:', e.message);
+    return;
+  }
+  if (!row) return; // task 還沒被 seed,autoSeed 主流程會建
+
+  const id = row.id || row.ID;
+  const raw = row.pipeline_json || row.PIPELINE_JSON;
+  let nodes = [];
+  if (raw) {
+    try { nodes = JSON.parse(typeof raw === 'string' ? raw : raw.toString()); }
+    catch { nodes = []; }
+  }
+  const hasPriceWrite = Array.isArray(nodes) && nodes.some(
+    n => n?.type === 'db_write' && String(n.table || '').toLowerCase() === 'pm_price_history'
+  );
+  if (hasPriceWrite) return;
+
+  try {
+    await db.prepare(`
+      UPDATE scheduled_tasks
+      SET pipeline_json = ?, prompt = ?, updated_at = SYSTIMESTAMP
+      WHERE id = ?
+    `).run(newSeed.pipeline_json, newSeed.prompt, id);
+    console.log(`[PMScheduledTaskSeed] Upgraded "${targetName}" #${id}: prompt + pipeline rebuilt with pm_price_history db_write`);
+  } catch (e) {
+    console.warn(`[PMScheduledTaskSeed] patch master scrape update #${id} failed:`, e.message);
+  }
+}
+
 // ── 主 seed 入口 ────────────────────────────────────────────────────────────
 async function autoSeedPmScheduledTasks(db, kbMap) {
   if (!db) {
@@ -1005,6 +1106,10 @@ async function autoSeedPmScheduledTasks(db, kbMap) {
 
   // Patch 既有任務:db_write(forecast_history)補 array_path(原 seed 是 placeholder)
   await patchExistingForecastArrayPath(db);
+
+  // Patch 既有任務:[PM] 全網金屬資料收集 加 db_write→pm_price_history(2026-04-28)
+  // 升級 prompt 為 { news, prices } object 格式 + 加新 db_write 節點
+  await patchExistingMasterScrapeAddPriceWrite(db, kbMap, models);
 }
 
 // ── 把既有 PM 任務的 model 從舊 alias('pro'/'flash')patch 到 pickModelKey 的結果 ───

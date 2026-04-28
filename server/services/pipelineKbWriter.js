@@ -28,6 +28,7 @@ const { v4: uuid } = require('uuid');
 const { embedText, toVectorStr } = require('./kbEmbedding');
 const { chunkDocument } = require('./kbDocParser');
 const { extractJsonRows } = require('./pipelineDbWriter');
+// getByJsonPath 在本檔案下方有自己的版本,不 import 避免 redeclare
 
 // ── JSONPath 極簡版(同 pipelineDbWriter)──────────────────────────────────
 function getByJsonPath(obj, path) {
@@ -208,10 +209,31 @@ async function executeKbWrite(db, nodeConfig, sourceText, context = {}) {
   if (!kb) throw new Error(`無寫入此知識庫的權限或知識庫不存在(kb_id=${kbId})`);
 
   // ─── 2. 解析 rows ────────────────────────────────────────────────────────
-  const rawRows = extractJsonRows(sourceText);
+  let rawRows = extractJsonRows(sourceText);
   if (!rawRows || !Array.isArray(rawRows)) {
     throw new Error('找不到可解析的 JSON — 請確認上游節點輸出含 JSON(陣列或物件)');
   }
+
+  // 2.5 array_path:從 root JSON drill 到子陣列(同 db_write 機制)
+  // 用途:LLM 輸出 { news: [...], prices: [...] },kb_write 設 array_path: '$.news'
+  const arrayPath = String(cfg.array_path || '').trim();
+  if (arrayPath) {
+    const root = (rawRows.length === 1 && rawRows[0] && typeof rawRows[0] === 'object' && !Array.isArray(rawRows[0]))
+      ? rawRows[0]
+      : rawRows;
+    const drilled = getByJsonPath(root, arrayPath);
+    if (drilled == null) {
+      if (cfg.array_path_optional) {
+        return { documents_created: 0, chunks_created: 0, skipped_duplicates: 0, errors: [], dryRun };
+      }
+      throw new Error(`array_path "${arrayPath}" 在上游 JSON 找不到對應值`);
+    }
+    if (!Array.isArray(drilled)) {
+      throw new Error(`array_path "${arrayPath}" 的值不是陣列(實際: ${typeof drilled})`);
+    }
+    rawRows = drilled;
+  }
+
   if (!rawRows.length) {
     return { documents_created: 0, chunks_created: 0, skipped_duplicates: 0, errors: [], dryRun };
   }

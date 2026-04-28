@@ -14,10 +14,11 @@
 'use strict';
 require('dotenv').config();
 
-const { db, initDb } = require('../database-oracle');
+const oracleDb = require('../database-oracle');
 
 async function main() {
-  await initDb();
+  await oracleDb.init();
+  const db = oracleDb.db;
 
   console.log('\n══════════ 1. forecast_history 統計 ══════════');
   const fhTotal = await db.prepare(`SELECT COUNT(*) AS n FROM forecast_history`).get();
@@ -70,11 +71,11 @@ async function main() {
   })));
 
   console.log('\n══════════ 3. [PM]% scheduled_tasks 狀態 ══════════');
+  // schema 沒有 next_run_at / last_error 欄位,改用 last_run_at + last_run_status + 從 task_runs 撈最近 error_msg
   const tasks = await db.prepare(`
-    SELECT id, name, status, model,
-           TO_CHAR(last_run_at,    'YYYY-MM-DD HH24:MI') AS last_run,
-           TO_CHAR(next_run_at,    'YYYY-MM-DD HH24:MI') AS next_run,
-           last_error
+    SELECT id, name, status, model, schedule_type, schedule_hour, schedule_minute,
+           TO_CHAR(last_run_at, 'YYYY-MM-DD HH24:MI') AS last_run,
+           last_run_status, run_count
     FROM scheduled_tasks
     WHERE name LIKE '[PM]%'
     ORDER BY id
@@ -84,13 +85,35 @@ async function main() {
   } else {
     console.table(tasks.map(t => ({
       id: t.id || t.ID,
-      name: (t.name || t.NAME || '').slice(0, 45),
+      name: (t.name || t.NAME || '').slice(0, 30),
       status: t.status || t.STATUS,
-      model: (t.model || t.MODEL || '').slice(0, 30),
+      type: t.schedule_type || t.SCHEDULE_TYPE,
+      hh_mm: `${String(t.schedule_hour ?? t.SCHEDULE_HOUR ?? 0).padStart(2, '0')}:${String(t.schedule_minute ?? t.SCHEDULE_MINUTE ?? 0).padStart(2, '0')}`,
       last_run: t.last_run || t.LAST_RUN || '(never)',
-      next_run: t.next_run || t.NEXT_RUN || '-',
-      last_error: ((t.last_error || t.LAST_ERROR) || '').slice(0, 60) || '-',
+      last_status: t.last_run_status || t.LAST_RUN_STATUS || '-',
+      runs: t.run_count ?? t.RUN_COUNT ?? 0,
     })));
+
+    // 對「[PM] 每日金屬日報」+「[PM] 全網金屬資料收集」撈最近 5 次 run 的 error
+    for (const target of ['每日金屬日報', '全網金屬資料收集']) {
+      const t = tasks.find(x => String(x.name || x.NAME || '').includes(target));
+      if (!t) continue;
+      const id = t.id || t.ID;
+      const runs = await db.prepare(`
+        SELECT TO_CHAR(run_at, 'YYYY-MM-DD HH24:MI:SS') AS r, status, duration_ms,
+               SUBSTR(response_preview, 1, 120) AS prev,
+               SUBSTR(error_msg, 1, 400) AS err
+        FROM scheduled_task_runs WHERE task_id = ?
+        ORDER BY run_at DESC FETCH FIRST 5 ROWS ONLY
+      `).all(id);
+      console.log(`\n  ── [PM] ${target} 最近 5 次 run ──`);
+      if (!runs.length) { console.log('    (沒任何 run 紀錄 — task 從沒跑過)'); continue; }
+      for (const r of runs) {
+        console.log(`    ${r.r || r.R} | ${r.status || r.STATUS} | ${r.duration_ms || r.DURATION_MS || 0}ms`);
+        if (r.err || r.ERR) console.log(`      ERR: ${(r.err || r.ERR).slice(0, 350)}`);
+        else if (r.prev || r.PREV) console.log(`      preview: ${(r.prev || r.PREV).slice(0, 100)}`);
+      }
+    }
   }
 
   console.log('\n══════════ 4. db_write→forecast_history 節點檢查 ══════════');

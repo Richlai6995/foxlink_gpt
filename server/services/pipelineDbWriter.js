@@ -398,6 +398,11 @@ async function executeDbWrite(db, nodeConfig, sourceText, context = {}) {
       : rawRows;
     const drilled = getByJsonPath(root, arrayPath);
     if (drilled == null) {
+      // array_path_optional=true 時找不到 → 視為 0 row,不擋 pipeline
+      // (用於漸進式升級:LLM 還沒被 prompt 改造,新節點先 silent skip)
+      if (cfg.array_path_optional) {
+        return { inserted: 0, updated: 0, skipped: 0, errors: [], dryRun, preview: [] };
+      }
       throw new Error(`array_path "${arrayPath}" 在上游 JSON 找不到對應值`);
     }
     if (!Array.isArray(drilled)) {
@@ -512,4 +517,5 @@ module.exports = {
   executeDbWrite,
   extractJsonRows,   // 導出供 dry-run API 用
   loadColumnMeta,    // 導出供 admin UI 欄位下拉用
+  getByJsonPath,     // 導出讓 kb_write 也能用同套 array_path 解析
 };
