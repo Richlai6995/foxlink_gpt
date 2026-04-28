@@ -325,6 +325,14 @@ app.get('/api/health', (req, res) => res.json({ status: 'ok', timestamp: new Dat
       console.error('[Cleanup] Failed to start scheduler:', e.message);
     }
 
+    // PM retention cleanup scheduler — 預設凌晨清過期資料,時間在 PmSettingsPanel 可改
+    try {
+      const { startScheduler } = require('./services/pmRetentionCleanup');
+      await startScheduler(db);
+    } catch (e) {
+      console.error('[PmRetention] Failed to start scheduler:', e.message);
+    }
+
     // Research job recovery scheduler:啟動時跑一次 + 每 5 分鐘掃一次 stale jobs
     try {
       const { recoverStaleJobs } = require('./services/researchService');

@@ -1201,7 +1201,58 @@ router.put('/settings/pm-models', async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// KB Retrieval Settings（v2 Phase 3）
+// PM Retention(資料保留天數,分 KB / table 各自設定)
+// ─────────────────────────────────────────────────────────────────────────────
+
+// GET /api/admin/settings/pm-retention — 回 config + 每 entity 的「會清幾筆 / 共幾筆 / 最舊」+ 排程設定
+router.get('/settings/pm-retention', async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const { previewCleanup, getSchedule, getSchedulerStatus } = require('../services/pmRetentionCleanup');
+    const [r, sched] = await Promise.all([previewCleanup(db), getSchedule(db)]);
+    res.json({ ...r, schedule: { ...sched, ...getSchedulerStatus() } });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// PUT /api/admin/settings/pm-retention/schedule — 設定自動執行時間
+// body: { enabled: true, hour: 3, minute: 0 }
+router.put('/settings/pm-retention/schedule', async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const { setSchedule, startScheduler, getSchedulerStatus } = require('../services/pmRetentionCleanup');
+    const sched = await setSchedule(db, req.body || {});
+    await startScheduler(db); // restart with new schedule
+    res.json({ ok: true, schedule: { ...sched, ...getSchedulerStatus() } });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+// PUT /api/admin/settings/pm-retention — 寫回設定
+// body: { pm_news: 180, kb_raw: 14, kb_analysis: null, ... }(null/空 = 永久保留)
+router.put('/settings/pm-retention', async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const { setConfig, previewCleanup } = require('../services/pmRetentionCleanup');
+    const saved = await setConfig(db, req.body || {});
+    const r = await previewCleanup(db, saved); // 回傳新 preview 給前端 reload
+    res.json({ ok: true, ...r });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+// POST /api/admin/settings/pm-retention/run — 立即執行清理
+// body 可選:{ config: {...} } 用一次性 override(不寫進 settings)
+router.post('/settings/pm-retention/run', async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const { runCleanup, previewCleanup } = require('../services/pmRetentionCleanup');
+    const cfg = req.body?.config || null;
+    const result = await runCleanup(db, cfg);
+    const after = await previewCleanup(db);
+    res.json({ ok: true, result, after });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// KB Retrieval Settings（v2 Phase 3)
 // ─────────────────────────────────────────────────────────────────────────────
 
 // GET /api/admin/settings/research — 深度研究專用 model + reasoning_effort
