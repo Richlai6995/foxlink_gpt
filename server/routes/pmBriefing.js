@@ -463,12 +463,17 @@ function buildNewsWhere(query, userId) {
     else if (query.sentiment === 'negative') where.push(`(n.sentiment_label = 'negative' OR n.sentiment_label = 'very_negative')`);
     else if (query.sentiment === 'neutral') where.push(`n.sentiment_label = 'neutral'`);
   }
+  // date_field='published'(default,看文章發表日)/ 'scraped'(看抓進來那天)
+  // 採購想看「我這週抓回來什麼」用 scraped;想看「文章本身發表時間」用 published(預設)
+  const dateCol = query.date_field === 'scraped'
+    ? 'n.scraped_at'
+    : 'COALESCE(n.published_at, n.scraped_at)';
   if (query.from) {
-    where.push(`COALESCE(n.published_at, n.scraped_at) >= TO_TIMESTAMP(?, 'YYYY-MM-DD"T"HH24:MI:SS')`);
+    where.push(`${dateCol} >= TO_TIMESTAMP(?, 'YYYY-MM-DD"T"HH24:MI:SS')`);
     params.push(`${query.from}T00:00:00`);
   }
   if (query.to) {
-    where.push(`COALESCE(n.published_at, n.scraped_at) <= TO_TIMESTAMP(?, 'YYYY-MM-DD"T"HH24:MI:SS')`);
+    where.push(`${dateCol} <= TO_TIMESTAMP(?, 'YYYY-MM-DD"T"HH24:MI:SS')`);
     params.push(`${query.to}T23:59:59`);
   }
   if (query.q) {

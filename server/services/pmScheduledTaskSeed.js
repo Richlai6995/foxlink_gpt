@@ -40,6 +40,12 @@ function buildNewsTask(kbMap, models = {}) {
 
   const prompt = `今天是 {{date}}。請抓取以下來源,過濾出與「銅(CU)/ 鋁(AL)/ 鎳(NI)/ 錫(SN)/ 鋅(ZN)/ 鉛(PB)/ 金(AU)/ 銀(AG)/ 鉑(PT)/ 鈀(PD)/ 銠(RH)」相關的近 24 小時新聞與專業評論。
 
+⏰ **時間 cutoff(嚴格遵守)**:**published_at 必須 ≥ {{date}} 往前 7 天**。
+   超過 7 天的舊文章(例:WPIC quarterly outlook 上次發在 3 月、JM 早期 expert insight)**不要抽出來**,
+   即使該 source 頁面看到也跳過。理由:採購要的是「新聞快訊」,7 天前的東西沒時效性,佔列表位置。
+   特別注意:WPIC / JM expert-insights 的 article published_at 經常是 1-3 個月前,**這些舊 article 一律跳過**;
+   只抽他們「近 7 天」內新發的(若沒有就空過,不要塞舊的湊筆數)。
+
 ═══ 資料源 1:Mining.com 全球礦業新聞(RSS,主源)═══
 {{fetch:https://www.mining.com/feed/}}
 ↑ 36+ items 含完整內文,涵蓋全球金屬 / 礦業 / 採礦公司動態。**主新聞源**
@@ -125,6 +131,7 @@ JSON 格式範例(注意 content 是英文原文整段、summary 是中文濃縮
 - [ ] **content 是原文整段拷貝(1500-3000 字)而非縮減版?**(這條失敗 = KB 全文只剩 60 字無法引用)
 - [ ] **summary 跟 content 不一樣?**(summary 是 content 的中文濃縮,不該幾乎相同)
 - [ ] published_at 是 ISO 格式(YYYY-MM-DDTHH:MM:SSZ)?
+- [ ] **每筆 published_at 都在 {{date}} 往前 7 天內?**(超過 7 天的 WPIC / JM 舊評論一律刪掉,不要佔位)
 - [ ] 沒有把 A 段內容跟 JSON 段混在一起?(JSON 必須是獨立 \`\`\`json ... \`\`\` block)`;
 
   const pipeline = [
@@ -1393,12 +1400,14 @@ async function patchExistingNewsAddPgmSources(db) {
   //       + moneydj.com(中文新聞源,2026-04-28 後加)
   //       + 自我檢查清單(2026-04-28 加 JSON mandatory 提示)
   //       + 「原文整段拷貝」(2026-04-28 修 content 太短 60 字 issue)
-  // 四 marker 都有才視為已升級到最新版
-  const hasWpic = !!promptStr && /platinuminvestment\.com/.test(promptStr);
-  const hasMoneydj = !!promptStr && /moneydj\.com/.test(promptStr);
-  const hasSelfCheck = !!promptStr && /自我檢查清單/.test(promptStr);
+  //       + 「往前 7 天內」(2026-04-28 加 published_at cutoff,擋 WPIC / JM 舊 article)
+  // 五 marker 都有才視為已升級到最新版
+  const hasWpic        = !!promptStr && /platinuminvestment\.com/.test(promptStr);
+  const hasMoneydj     = !!promptStr && /moneydj\.com/.test(promptStr);
+  const hasSelfCheck   = !!promptStr && /自我檢查清單/.test(promptStr);
   const hasFullContent = !!promptStr && /原文整段拷貝/.test(promptStr);
-  if (hasWpic && hasMoneydj && hasSelfCheck && hasFullContent) return;
+  const has7DayCutoff  = !!promptStr && /往前 7 天/.test(promptStr);
+  if (hasWpic && hasMoneydj && hasSelfCheck && hasFullContent && has7DayCutoff) return;
 
   try {
     await db.prepare(`UPDATE scheduled_tasks SET prompt=?, updated_at=SYSTIMESTAMP WHERE id=?`)
@@ -1406,6 +1415,7 @@ async function patchExistingNewsAddPgmSources(db) {
     const missing = [
       !hasWpic && 'WPIC + matthey',
       !hasMoneydj && 'Mining RSS + MoneyDJ + SMM + 日經',
+      !has7DayCutoff && '7 天 cutoff',
     ].filter(Boolean).join(' + ');
     console.log(`[PMScheduledTaskSeed] Upgraded "[PM] 每日金屬新聞抓取" #${id}: ${missing}`);
   } catch (e) {

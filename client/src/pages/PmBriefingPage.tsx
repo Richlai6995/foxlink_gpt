@@ -812,6 +812,8 @@ function NewsTab({ focusedSet, default24h }: { focusedSet: Set<string>; default2
 
   const [from, setFrom] = useState(sticky.from || (default24h ? yesterday : ''))
   const [to, setTo] = useState(sticky.to || '')
+  // date_field='published' = 篩文章發表日;'scraped' = 篩抓回來的時間(看「我這週抓了什麼」)
+  const [dateField, setDateField] = useState<'published' | 'scraped'>(sticky.date_field || 'published')
   const [metals, setMetals] = useState<string[]>(sticky.metals || (focusedSet.size > 0 ? Array.from(focusedSet) : []))
   const [sources, setSources] = useState<string[]>(sticky.sources || [])
   const [sentiment, setSentiment] = useState(sticky.sentiment || '')
@@ -832,16 +834,17 @@ function NewsTab({ focusedSet, default24h }: { focusedSet: Set<string>; default2
     sentiment: sentiment || undefined,
     from: from || undefined,
     to: to || undefined,
+    date_field: dateField,
     q: q.trim() || undefined,
     pinned_only: pinnedOnly ? 1 : undefined,
-  }), [metals, sources, sentiment, from, to, q, pinnedOnly])
+  }), [metals, sources, sentiment, from, to, dateField, q, pinnedOnly])
 
   // sticky filter 寫回 localStorage(每次 filters 變動)
   useEffect(() => {
     localStorage.setItem(stickyKey, JSON.stringify({
-      from, to, metals, sources, sentiment, q,
+      from, to, date_field: dateField, metals, sources, sentiment, q,
     }))
-  }, [from, to, metals, sources, sentiment, q])
+  }, [from, to, dateField, metals, sources, sentiment, q])
 
   useEffect(() => {
     setLoading(true)
@@ -917,6 +920,19 @@ function NewsTab({ focusedSet, default24h }: { focusedSet: Set<string>; default2
         {/* 日期 */}
         <div>
           <div className="text-xs font-semibold text-slate-600 mb-1 flex items-center gap-1"><Calendar size={11} /> 日期範圍</div>
+          {/* 篩選欄位 toggle:依文章發表日 / 依我抓進來的日 */}
+          <div className="flex text-[10px] mb-1 border border-slate-200 rounded overflow-hidden">
+            <button
+              onClick={() => { setDateField('published'); setPage(1) }}
+              className={`flex-1 py-0.5 ${dateField === 'published' ? 'bg-blue-100 text-blue-700 font-medium' : 'bg-slate-50 text-slate-500'}`}
+              title="篩文章本身的發表日(published_at)"
+            >依發表日</button>
+            <button
+              onClick={() => { setDateField('scraped'); setPage(1) }}
+              className={`flex-1 py-0.5 ${dateField === 'scraped' ? 'bg-blue-100 text-blue-700 font-medium' : 'bg-slate-50 text-slate-500'}`}
+              title="篩排程抓進 DB 的時間(scraped_at)— 看「我這週抓了什麼」"
+            >依抓取日</button>
+          </div>
           <div className="flex gap-1">
             <input type="date" value={from} onChange={e => { setFrom(e.target.value); setPage(1) }} className="border rounded px-2 py-1 text-xs flex-1" />
             <span className="text-slate-400 self-center">~</span>
@@ -1223,7 +1239,9 @@ function NewsCard({ item, onTogglePin, onOpenFull }: { item: NewsItem; onToggleP
   const sentColor = /positive/i.test(sent) ? 'text-emerald-600 bg-emerald-50' :
                     /negative/i.test(sent) ? 'text-red-600 bg-red-50' :
                     'text-slate-600 bg-slate-100'
-  const date = item.published_at || item.scraped_at
+  // 兩個時間:published_at = 文章本身發表日(只到日);scraped_at = 排程抓回來時間(到分鐘,看時效感)
+  const pubDate = item.published_at ? String(item.published_at).slice(0, 10) : null
+  const scrapedDt = item.scraped_at ? String(item.scraped_at).slice(0, 16).replace('T', ' ') : null
   return (
     <div className="bg-white rounded border border-slate-200 p-3 hover:shadow-sm transition">
       <div className="flex items-start gap-2">
@@ -1235,10 +1253,17 @@ function NewsCard({ item, onTogglePin, onOpenFull }: { item: NewsItem; onToggleP
           <Pin size={14} fill={item.is_pinned ? 'currentColor' : 'none'} />
         </button>
         <div className="flex-1 min-w-0">
-          {/* 第一列:日期(左)+ source 來源連結(可點) */}
-          <div className="flex items-center gap-2 mb-1 text-[11px] text-slate-500">
-            <Calendar size={11} className="text-slate-400" />
-            <span className="font-medium text-slate-700">{date ? String(date).slice(0, 16).replace('T', ' ') : '—'}</span>
+          {/* 第一列:發表日 / 抓取日(時分)+ source 來源連結 */}
+          <div className="flex items-center gap-2 mb-1 text-[11px] text-slate-500 flex-wrap">
+            <span title="文章本身發表日(published_at)" className="flex items-center gap-1">
+              <Calendar size={11} className="text-slate-400" />
+              <span className="font-medium text-slate-700">{pubDate || '—'}</span>
+            </span>
+            {scrapedDt && (
+              <span title="排程抓進 DB 的時間(scraped_at)" className="text-slate-400">
+                · 抓取 <span className="font-mono text-slate-500">{scrapedDt}</span>
+              </span>
+            )}
             <span className="text-slate-300">·</span>
             {item.url ? (
               <a href={item.url} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline flex items-center gap-0.5">

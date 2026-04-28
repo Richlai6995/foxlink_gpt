@@ -744,9 +744,12 @@ router.post('/sessions', async (req, res) => {
 router.get('/sessions/:id', async (req, res) => {
   try {
     const db = require('../database-oracle').db;
-    const session = await db
-      .prepare(`SELECT * FROM chat_sessions WHERE id = ? AND user_id = ?`)
-      .get(req.params.id, req.user.id);
+    // admin 可看任何 session(read-only,給 RunDetailModal 看排程任務的 LLM 回應用)
+    // 一般 user 只能看自己的
+    const isAdmin = req.user.role === 'admin';
+    const session = isAdmin
+      ? await db.prepare(`SELECT * FROM chat_sessions WHERE id = ?`).get(req.params.id)
+      : await db.prepare(`SELECT * FROM chat_sessions WHERE id = ? AND user_id = ?`).get(req.params.id, req.user.id);
     if (!session) return res.status(404).json({ error: '找不到對話' });
 
     const messages = await db
