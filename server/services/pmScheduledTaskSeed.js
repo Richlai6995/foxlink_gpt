@@ -84,8 +84,11 @@ B. 在 markdown 末尾另外一段 \`\`\`json [...] \`\`\` 陣列(給 db_write /
       type: 'db_write',
       label: '寫入 pm_news 表',
       table: 'pm_news',
-      operation: 'insert',
-      key_columns: [],
+      // upsert by url_hash:重複 URL 改成更新 summary/sentiment 而非 silent skip
+      // 不然 LLM 抓回一樣的 source 會撞 UQ_NEWS_URL_HASH 全部 skipped,
+      // 跑 5 次都看不到新資料(這就是 user 觀察到的「跑成功但匯總沒更新」)
+      operation: 'upsert',
+      key_columns: ['url_hash'],
       input: '{{ai_output}}',
       on_row_error: 'skip',
       max_rows: 200,
@@ -191,7 +194,9 @@ B. markdown 末尾另外輸出 \`\`\`json [...] \`\`\` 給 db_write 落地:
       label: '寫入 pm_macro_history',
       table: 'pm_macro_history',
       operation: 'upsert',
-      key_columns: ['indicator_code', 'as_of_date', 'source'],
+      // 同一指標一天一筆。原本 key 包 source 但 LLM 偶爾漏 source 整列就 skip,
+      // 現在 (indicator_code, as_of_date) 就足夠唯一。source 改非必填,LLM 漏寫也照寫。
+      key_columns: ['indicator_code', 'as_of_date'],
       input: '{{ai_output}}',
       on_row_error: 'skip',
       max_rows: 50,
@@ -201,7 +206,7 @@ B. markdown 末尾另外輸出 \`\`\`json [...] \`\`\` 給 db_write 落地:
         { jsonpath: '$.as_of_date',     column: 'as_of_date',     transform: 'date',  required: true },
         { jsonpath: '$.value',          column: 'value',          transform: 'number' },
         { jsonpath: '$.unit',           column: 'unit',           transform: '' },
-        { jsonpath: '$.source',         column: 'source',         transform: '',      required: true },
+        { jsonpath: '$.source',         column: 'source',         transform: '' },
         { jsonpath: '$.source_url',     column: 'source_url',     transform: '' },
         { jsonpath: '$.is_estimated',   column: 'is_estimated',   transform: 'number' },
       ],
@@ -959,6 +964,100 @@ async function patchExistingForecastArrayPath(db) {
   if (patched > 0) console.log(`[PMScheduledTaskSeed] patched ${patched} existing task(s) with forecast_history array_path`);
 }
 
+// 升級既有 [PM] 每日金屬新聞抓取 task:db_write→pm_news 從 insert 改 upsert by url_hash
+// 為何:每天 9:00 / 14:30 跑兩次,LLM 通常抓回相同 url(news source 沒幾個),
+// insert 撞 UQ_NEWS_URL_HASH → ORA-00001 → 全部 skipped → 看起來「跑成功 0 inserted」。
+// upsert 後重複 url 改成 update,讓最新 summary / sentiment 蓋上去。
+// Idempotent — 已是 upsert + key 含 url_hash 就 skip。Prompt 不動。
+async function patchExistingNewsToUpsert(db) {
+  let row;
+  try {
+    row = await db.prepare(`SELECT id, name, pipeline_json FROM scheduled_tasks WHERE name='[PM] 每日金屬新聞抓取'`).get();
+  } catch (e) {
+    console.warn('[PMScheduledTaskSeed] patch news upsert select failed:', e.message);
+    return;
+  }
+  if (!row) return;
+  const id = row.id || row.ID;
+  let raw = row.pipeline_json || row.PIPELINE_JSON;
+  if (raw && typeof raw !== 'string' && raw.toString) raw = raw.toString();
+  if (!raw) return;
+  let nodes;
+  try { nodes = JSON.parse(raw); } catch { return; }
+  if (!Array.isArray(nodes)) return;
+
+  let dirty = false;
+  for (const n of nodes) {
+    if (n?.type !== 'db_write') continue;
+    if (String(n.table || '').toLowerCase() !== 'pm_news') continue;
+    if (n.operation === 'upsert' && Array.isArray(n.key_columns) && n.key_columns.includes('url_hash')) continue;
+    n.operation = 'upsert';
+    n.key_columns = ['url_hash'];
+    dirty = true;
+  }
+  if (dirty) {
+    try {
+      await db.prepare(`UPDATE scheduled_tasks SET pipeline_json=?, updated_at=SYSTIMESTAMP WHERE id=?`)
+        .run(JSON.stringify(nodes), id);
+      console.log(`[PMScheduledTaskSeed] Upgraded "[PM] 每日金屬新聞抓取" #${id}: db_write → upsert by url_hash`);
+    } catch (e) {
+      console.warn(`[PMScheduledTaskSeed] patch news upsert #${id} failed:`, e.message);
+    }
+  }
+}
+
+// 升級既有 [PM] 總體經濟指標日抓 task:db_write→pm_macro_history 把 source 從 key + required 拿掉
+// 為何:原 seed `key_columns: [indicator_code, as_of_date, source]` + source required,
+// LLM 偶爾漏 source 欄就整列 skip 不寫;source 從 key 拿掉後 (indicator_code, as_of_date)
+// 自然唯一,source 也不再強制必填,容錯度高。
+// Idempotent。Prompt 不動。
+async function patchExistingMacroLooserKeys(db) {
+  let row;
+  try {
+    row = await db.prepare(`SELECT id, name, pipeline_json FROM scheduled_tasks WHERE name='[PM] 總體經濟指標日抓'`).get();
+  } catch (e) {
+    console.warn('[PMScheduledTaskSeed] patch macro keys select failed:', e.message);
+    return;
+  }
+  if (!row) return;
+  const id = row.id || row.ID;
+  let raw = row.pipeline_json || row.PIPELINE_JSON;
+  if (raw && typeof raw !== 'string' && raw.toString) raw = raw.toString();
+  if (!raw) return;
+  let nodes;
+  try { nodes = JSON.parse(raw); } catch { return; }
+  if (!Array.isArray(nodes)) return;
+
+  let dirty = false;
+  for (const n of nodes) {
+    if (n?.type !== 'db_write') continue;
+    if (String(n.table || '').toLowerCase() !== 'pm_macro_history') continue;
+    // 1) key_columns 拿掉 source
+    if (Array.isArray(n.key_columns) && n.key_columns.includes('source')) {
+      n.key_columns = n.key_columns.filter(k => k !== 'source');
+      dirty = true;
+    }
+    // 2) source mapping 移除 required:true
+    if (Array.isArray(n.column_mapping)) {
+      for (const m of n.column_mapping) {
+        if (String(m?.column || '').toLowerCase() === 'source' && m.required === true) {
+          delete m.required;
+          dirty = true;
+        }
+      }
+    }
+  }
+  if (dirty) {
+    try {
+      await db.prepare(`UPDATE scheduled_tasks SET pipeline_json=?, updated_at=SYSTIMESTAMP WHERE id=?`)
+        .run(JSON.stringify(nodes), id);
+      console.log(`[PMScheduledTaskSeed] Upgraded "[PM] 總體經濟指標日抓" #${id}: source 從 key + required 拿掉`);
+    } catch (e) {
+      console.warn(`[PMScheduledTaskSeed] patch macro keys #${id} failed:`, e.message);
+    }
+  }
+}
+
 // 升級既有 [PM] 全網金屬資料收集 task:
 // - 若 pipeline 沒 db_write→pm_price_history,就整個 prompt + pipeline 重 build(用最新 seed)
 // - 保留 admin 已調過的 schedule / status / recipients 等執行面欄位
@@ -1110,6 +1209,14 @@ async function autoSeedPmScheduledTasks(db, kbMap) {
   // Patch 既有任務:[PM] 全網金屬資料收集 加 db_write→pm_price_history(2026-04-28)
   // 升級 prompt 為 { news, prices } object 格式 + 加新 db_write 節點
   await patchExistingMasterScrapeAddPriceWrite(db, kbMap, models);
+
+  // Patch 既有任務:[PM] 每日金屬新聞抓取 改 upsert by url_hash(2026-04-28)
+  // 解決重複 url 撞 UQ_NEWS_URL_HASH 全部 skipped
+  await patchExistingNewsToUpsert(db);
+
+  // Patch 既有任務:[PM] 總體經濟指標日抓 source 從 key + required 拿掉(2026-04-28)
+  // 解決 LLM 漏 source 欄就整列 skip
+  await patchExistingMacroLooserKeys(db);
 }
 
 // ── 把既有 PM 任務的 model 從舊 alias('pro'/'flash')patch 到 pickModelKey 的結果 ───
