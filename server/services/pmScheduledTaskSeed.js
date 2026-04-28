@@ -179,13 +179,12 @@ B. markdown 末尾另外輸出 \`\`\`json [...] \`\`\` 給 db_write 落地:
     "value": 104.23,
     "unit": "index",
     "source": "TradingEconomics",
-    "source_url": "https://tradingeconomics.com/...",
-    "is_estimated": 0
+    "source_url": "https://tradingeconomics.com/..."
   }
 ]
 \`\`\`
 
-若任何指標抓不到,該欄 value=null + is_estimated=1 + source_url 寫 "unavailable"。`;
+若任何指標抓不到,該欄 value=null + source_url 寫 "unavailable"(其他欄正常輸出)。`;
 
   const pipeline = [
     {
@@ -208,7 +207,8 @@ B. markdown 末尾另外輸出 \`\`\`json [...] \`\`\` 給 db_write 落地:
         { jsonpath: '$.unit',           column: 'unit',           transform: '' },
         { jsonpath: '$.source',         column: 'source',         transform: '' },
         { jsonpath: '$.source_url',     column: 'source_url',     transform: '' },
-        { jsonpath: '$.is_estimated',   column: 'is_estimated',   transform: 'number' },
+        // 註:不寫 is_estimated — pm_macro_history schema 沒這欄,
+        // 連同 prompt 也拿掉(2026-04-28 修)
       ],
     },
   ];
@@ -1058,6 +1058,66 @@ async function patchExistingMacroLooserKeys(db) {
   }
 }
 
+// 升級既有 [PM] 總體經濟指標日抓 task:把 is_estimated 從 column_mapping 拿掉
+// + 把 prompt 內的 is_estimated 範例 / 規則也清掉,LLM 不再浪費 token 出這欄
+// (pm_macro_history schema 沒這欄,LLM 出了會被 silent drop,但乾脆讓 LLM 不再出)
+// Idempotent。
+async function patchExistingMacroDropIsEstimated(db) {
+  let row;
+  try {
+    row = await db.prepare(`SELECT id, name, prompt, pipeline_json FROM scheduled_tasks WHERE name='[PM] 總體經濟指標日抓'`).get();
+  } catch (e) {
+    console.warn('[PMScheduledTaskSeed] patch macro is_estimated select failed:', e.message);
+    return;
+  }
+  if (!row) return;
+  const id = row.id || row.ID;
+
+  // 1) pipeline_json:從 column_mapping 拿掉 is_estimated
+  let raw = row.pipeline_json || row.PIPELINE_JSON;
+  if (raw && typeof raw !== 'string' && raw.toString) raw = raw.toString();
+  let nodes;
+  try { nodes = JSON.parse(raw || '[]'); } catch { nodes = []; }
+  let pipelineDirty = false;
+  for (const n of nodes) {
+    if (n?.type !== 'db_write') continue;
+    if (String(n.table || '').toLowerCase() !== 'pm_macro_history') continue;
+    if (!Array.isArray(n.column_mapping)) continue;
+    const before = n.column_mapping.length;
+    n.column_mapping = n.column_mapping.filter(m => String(m?.column || '').toLowerCase() !== 'is_estimated');
+    if (n.column_mapping.length !== before) pipelineDirty = true;
+  }
+
+  // 2) prompt:刪掉 is_estimated 字眼(JSON 範例那行 + 註腳)
+  let prompt = row.prompt || row.PROMPT;
+  if (prompt && typeof prompt !== 'string' && prompt.toString) prompt = prompt.toString();
+  let promptDirty = false;
+  if (prompt && /is_estimated/.test(prompt)) {
+    let p = prompt;
+    // 移除 JSON 物件範例內 "is_estimated": 0 那行(連前面的逗號 + 換行一起清)
+    p = p.replace(/,\s*\n?\s*"is_estimated"\s*:\s*\d+/g, '');
+    // 移除 prompt 結尾「value=null + is_estimated=1 + source_url 寫 "unavailable"」之類規則
+    p = p.replace(/\s*\+\s*is_estimated\s*=\s*\d+/g, '');
+    if (p !== prompt) {
+      prompt = p;
+      promptDirty = true;
+    }
+  }
+
+  if (!pipelineDirty && !promptDirty) return;
+
+  try {
+    await db.prepare(`
+      UPDATE scheduled_tasks
+      SET pipeline_json = ?, prompt = ?, updated_at = SYSTIMESTAMP
+      WHERE id = ?
+    `).run(JSON.stringify(nodes), prompt, id);
+    console.log(`[PMScheduledTaskSeed] Upgraded "[PM] 總體經濟指標日抓" #${id}: 拿掉 is_estimated mapping${promptDirty ? ' + prompt' : ''}`);
+  } catch (e) {
+    console.warn(`[PMScheduledTaskSeed] patch macro is_estimated #${id} failed:`, e.message);
+  }
+}
+
 // 升級既有 [PM] 全網金屬資料收集 task:
 // - 若 pipeline 沒 db_write→pm_price_history,就整個 prompt + pipeline 重 build(用最新 seed)
 // - 保留 admin 已調過的 schedule / status / recipients 等執行面欄位
@@ -1217,6 +1277,10 @@ async function autoSeedPmScheduledTasks(db, kbMap) {
   // Patch 既有任務:[PM] 總體經濟指標日抓 source 從 key + required 拿掉(2026-04-28)
   // 解決 LLM 漏 source 欄就整列 skip
   await patchExistingMacroLooserKeys(db);
+
+  // Patch 既有任務:[PM] 總體經濟指標日抓 拿掉 is_estimated(prompt + mapping)
+  // pm_macro_history schema 沒這欄,LLM 別再浪費 token 輸出(2026-04-28)
+  await patchExistingMacroDropIsEstimated(db);
 }
 
 // ── 把既有 PM 任務的 model 從舊 alias('pro'/'flash')patch 到 pickModelKey 的結果 ───
