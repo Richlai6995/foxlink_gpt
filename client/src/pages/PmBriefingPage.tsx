@@ -656,8 +656,12 @@ function DataHealthPanel() {
     {
       task: findTask('每日金屬新聞抓取'),
       target: 'pm_news',
-      status: `近 24h ${data.data.news.last_24h} 筆 / 累計 ${data.data.news.total} 筆` + (data.data.news.latest ? ` (latest ${data.data.news.latest})` : ''),
-      ok: data.data.news.last_24h > 0,
+      // 註:scraped_at 是第一次 insert 時的 SYSTIMESTAMP,upsert update 不會變,
+      //     所以「近 24h 數量」會誤導(看起來 0 但其實 upsert 有 update)。
+      //     改顯示「累計 X 筆」+「最新 scraped_at 日期」+ 上次跑統計(由 last_run_writes 顯示)
+      status: `累計 ${data.data.news.total} 筆` + (data.data.news.latest ? `(最新 scraped: ${data.data.news.latest})` : ''),
+      // ok 條件:今日(對應 task)有跑 + 上次跑 inserted+updated > 0(看 last_run_writes)
+      ok: !!findTask('每日金屬新聞抓取')?.last_run_at && (findTask('每日金屬新聞抓取')?.last_run_at || '').slice(0, 10) >= data.today,
     },
     {
       task: findTask('週報'),

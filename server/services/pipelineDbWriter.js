@@ -204,15 +204,38 @@ function buildInsertParts(row, colMeta) {
       continue;
     }
     const meta = colMeta.get(col);
-    const isDateCol = meta && /^DATE$/i.test(meta.type || '');
+    const isDateCol      = meta && /^DATE$/i.test(meta.type || '');
+    const isTimestampCol = meta && /^TIMESTAMP/i.test(meta.type || '');
     cols.push(col);
-    if (isDateCol && typeof val === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(val)) {
-      placeholders.push(`TO_DATE(?, 'YYYY-MM-DD')`);
-      binds.push(val);
-    } else {
+
+    // 對 DATE / TIMESTAMP 欄位的字串值,用 explicit TO_DATE / TO_TIMESTAMP,
+    // 不要靠 Oracle NLS_DATE_FORMAT 隱式轉(prod 可能設成 DD-MON-RR,
+    // 'YYYY-MM-DD' / ISO 8601 都會 ORA-01843 invalid month)
+    if ((isDateCol || isTimestampCol) && typeof val === 'string' && val.trim()) {
+      const s = val.trim();
+      // ISO 8601:2026-04-28T00:00:00Z 或 2026-04-28T00:00:00.000+0800
+      const tsM = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})[T ](\d{1,2}):(\d{1,2})(?::(\d{1,2}))?/);
+      // 純日期:2026-04-28 或 2026/04/28
+      const dM = s.replace(/\//g, '-').match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+      if (tsM) {
+        const norm = `${tsM[1]}-${tsM[2].padStart(2,'0')}-${tsM[3].padStart(2,'0')} ${tsM[4].padStart(2,'0')}:${tsM[5].padStart(2,'0')}:${(tsM[6]||'0').padStart(2,'0')}`;
+        placeholders.push(`TO_TIMESTAMP(?, 'YYYY-MM-DD HH24:MI:SS')`);
+        binds.push(norm);
+        continue;
+      }
+      if (dM) {
+        const norm = `${dM[1]}-${dM[2].padStart(2,'0')}-${dM[3].padStart(2,'0')}`;
+        placeholders.push(`TO_DATE(?, 'YYYY-MM-DD')`);
+        binds.push(norm);
+        continue;
+      }
+      // 字串但非 ISO/YYYY-MM-DD 格式 → 讓 Oracle 自己試,失敗會給 row error
       placeholders.push('?');
       binds.push(val);
+      continue;
     }
+    placeholders.push('?');
+    binds.push(val);
   }
   return { cols, placeholders, binds };
 }
@@ -234,14 +257,28 @@ async function keyExists(db, tableName, row, keyColumns, colMeta) {
   const binds = [];
   for (const k of keys) {
     const meta = colMeta.get(k);
-    const isDateCol = meta && /^DATE$/i.test(meta.type || '');
+    const isDateCol      = meta && /^DATE$/i.test(meta.type || '');
+    const isTimestampCol = meta && /^TIMESTAMP/i.test(meta.type || '');
     const val = row[k];
     if (val == null) return false; // null key 不存在
-    if (isDateCol && typeof val === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(val)) {
-      wherePieces.push(`${k} = TO_DATE(?, 'YYYY-MM-DD')`);
-    } else {
-      wherePieces.push(`${k} = ?`);
+    if ((isDateCol || isTimestampCol) && typeof val === 'string') {
+      const s = val.trim();
+      const tsM = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})[T ](\d{1,2}):(\d{1,2})(?::(\d{1,2}))?/);
+      const dM = s.replace(/\//g, '-').match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+      if (tsM) {
+        const norm = `${tsM[1]}-${tsM[2].padStart(2,'0')}-${tsM[3].padStart(2,'0')} ${tsM[4].padStart(2,'0')}:${tsM[5].padStart(2,'0')}:${(tsM[6]||'0').padStart(2,'0')}`;
+        wherePieces.push(`${k} = TO_TIMESTAMP(?, 'YYYY-MM-DD HH24:MI:SS')`);
+        binds.push(norm);
+        continue;
+      }
+      if (dM) {
+        const norm = `${dM[1]}-${dM[2].padStart(2,'0')}-${dM[3].padStart(2,'0')}`;
+        wherePieces.push(`${k} = TO_DATE(?, 'YYYY-MM-DD')`);
+        binds.push(norm);
+        continue;
+      }
     }
+    wherePieces.push(`${k} = ?`);
     binds.push(val);
   }
   const sql = `SELECT 1 AS exists_flag FROM ${tableName} WHERE ${wherePieces.join(' AND ')} FETCH FIRST 1 ROWS ONLY`;
@@ -439,6 +476,7 @@ async function executeDbWrite(db, nodeConfig, sourceText, context = {}) {
 
   const mappedRows = [];
   const errors = [];
+  const droppedColsCount = new Map(); // colName → drop 次數,給 admin 看 schema 跟 prompt drift
   for (let i = 0; i < rawRows.length; i++) {
     const { row, errors: rowErrs } = mapRow(rawRows[i], columnMapping);
     if (rowErrs.length) {
@@ -448,11 +486,13 @@ async function executeDbWrite(db, nodeConfig, sourceText, context = {}) {
       }
       continue;
     }
-    // 安全閘:確保每個 key 都是白名單表的已知 column(防 LLM 生出陌生欄位)
+    // 對 LLM 多輸出的未知欄位,silent drop。LLM 多寫無害是常態(prompt 教或它自由發揮),
+    // 不該整 row fail。Drop 列表收集起來放 db_write_summary.dropped_cols,
+    // 讓 admin 看到 schema 跟 prompt/mapping drift。
     for (const c of Object.keys(row)) {
       if (!colMeta.has(c)) {
-        errors.push({ row_index: i, errors: [`欄位 ${c} 不存在於 table`], row_payload: previewRow(rawRows[i]) });
-        continue;
+        droppedColsCount.set(c, (droppedColsCount.get(c) || 0) + 1);
+        delete row[c];
       }
     }
     const isInsert = operation !== 'upsert'; // upsert 時 MERGE 自己判斷;其他一律算 insert
@@ -483,7 +523,13 @@ async function executeDbWrite(db, nodeConfig, sourceText, context = {}) {
   }
 
   // ─── 6. 實際寫入 ──────────────────────────────────────────────────────────
-  const result = { inserted: 0, updated: 0, skipped: 0, errors };
+  const dropped_cols = droppedColsCount.size > 0
+    ? Object.fromEntries(droppedColsCount)
+    : null;
+  if (dropped_cols) {
+    console.warn(`[Pipeline db_write] dropped unknown columns from ${rawRows.length} rows:`, JSON.stringify(dropped_cols), '(LLM 出了 schema 沒有的欄位 — 可能 prompt/mapping drift,row 仍寫入)');
+  }
+  const result = { inserted: 0, updated: 0, skipped: 0, errors, dropped_cols };
 
   try {
     if (operation === 'replace_by_date') {

@@ -942,6 +942,7 @@ interface PipelineNodeLog {
     updated?: number
     skipped?: number
     errors?: { row_index: number; errors: string[]; row_payload?: string }[]
+    dropped_cols?: Record<string, number> | null
   }
   kb_write_summary?: {
     kb_id?: number
@@ -1004,6 +1005,14 @@ function RunDetailModal({ run, onClose }: { run: TaskRun; onClose: () => void })
                           <span className="ml-1 text-amber-600">{dw.skipped || 0} skipped</span>
                           {(dw.errors?.length || 0) > 0 && <span className="ml-1 text-red-600">{dw.errors!.length} errors</span>}
                         </div>
+                        {dw.dropped_cols && Object.keys(dw.dropped_cols).length > 0 && (
+                          <div className="text-[11px] text-slate-500 mb-1">
+                            ⚠ LLM 出了 schema 沒的欄位(已 silent drop,row 照常寫入):
+                            {Object.entries(dw.dropped_cols).map(([col, n]) => (
+                              <span key={col} className="ml-1 px-1 rounded bg-slate-100">{col}×{n}</span>
+                            ))}
+                          </div>
+                        )}
                         {(dw.errors?.length || 0) > 0 && (
                           <div className="mt-1 space-y-1 max-h-60 overflow-y-auto">
                             {dw.errors!.map((e, j) => (
