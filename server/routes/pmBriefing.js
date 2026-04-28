@@ -548,6 +548,70 @@ router.delete('/news/:id/pin', verifyToken, verifyPmUser, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// 取單篇新聞的「KB 全文」+ news metadata,給 NewsFullContentModal 用
+// JOIN 邏輯:pm_news.url_hash === kb_documents.source_hash(兩邊用同套 normalize+sha256)
+// found=false 時前端 fallback 引導使用者點原網頁
+router.get('/news/:id/full', verifyToken, verifyPmUser, async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const newsId = parseInt(req.params.id, 10);
+    if (!Number.isFinite(newsId)) return res.status(400).json({ error: 'invalid id' });
+
+    // 1) 撈 pm_news 本身
+    const news = await db.prepare(`
+      SELECT id, url, url_hash, title, source, language,
+             TO_CHAR(published_at, 'YYYY-MM-DD HH24:MI') AS published_at,
+             TO_CHAR(scraped_at, 'YYYY-MM-DD HH24:MI') AS scraped_at,
+             summary, sentiment_score, sentiment_label, related_metals, topics
+      FROM pm_news WHERE id = ?
+    `).get(newsId);
+    if (!news) return res.status(404).json({ error: 'news not found' });
+
+    // 2) 撈 PM-新聞庫的 kb_id(可能不存在)
+    const kbRow = await db.prepare(`SELECT id FROM knowledge_bases WHERE name = 'PM-新聞庫'`).get();
+    const kbId = kbRow?.id || kbRow?.ID;
+
+    let kbDoc = null;
+    if (kbId) {
+      // 3) JOIN by hash 找全文
+      kbDoc = await db.prepare(`
+        SELECT id AS doc_id, content, word_count,
+               TO_CHAR(published_at, 'YYYY-MM-DD HH24:MI') AS kb_published_at
+        FROM kb_documents
+        WHERE kb_id = ? AND source_hash = ?
+        FETCH FIRST 1 ROWS ONLY
+      `).get(kbId, news.url_hash || news.URL_HASH);
+    }
+
+    res.json({
+      found: !!kbDoc,
+      news: {
+        id: news.id || news.ID,
+        url: news.url || news.URL,
+        title: news.title || news.TITLE,
+        source: news.source || news.SOURCE,
+        language: news.language || news.LANGUAGE,
+        published_at: news.published_at || news.PUBLISHED_AT,
+        scraped_at: news.scraped_at || news.SCRAPED_AT,
+        summary: news.summary || news.SUMMARY,
+        sentiment_score: news.sentiment_score ?? news.SENTIMENT_SCORE,
+        sentiment_label: news.sentiment_label || news.SENTIMENT_LABEL,
+        related_metals: news.related_metals || news.RELATED_METALS,
+        topics: news.topics || news.TOPICS,
+      },
+      kb: kbDoc ? {
+        doc_id: kbDoc.doc_id || kbDoc.DOC_ID,
+        content: kbDoc.content || kbDoc.CONTENT,
+        word_count: kbDoc.word_count || kbDoc.WORD_COUNT,
+        published_at: kbDoc.kb_published_at || kbDoc.KB_PUBLISHED_AT,
+      } : null,
+    });
+  } catch (e) {
+    console.error('[PmBriefing] /news/:id/full error:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // PDF 匯出 — max 500 筆
 router.get('/news/export.pdf', verifyToken, verifyPmUser, async (req, res) => {
   try {

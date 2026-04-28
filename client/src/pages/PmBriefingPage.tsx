@@ -13,6 +13,7 @@ import {
   ArrowLeft, Settings, Download, ChevronDown, ChevronUp, Loader2, RefreshCw,
   X, Filter, Pin, ExternalLink, Calendar, Search, FileText, BarChart3, Newspaper,
   Sparkles, AlertCircle, Bookmark, Activity, CheckCircle2, XCircle, Clock,
+  BookOpen, Copy,
 } from 'lucide-react'
 import api from '../lib/api'
 import PmReviewQueueView from '../components/pm/PmReviewQueueView'
@@ -823,6 +824,7 @@ function NewsTab({ focusedSet, default24h }: { focusedSet: Set<string>; default2
   const [loading, setLoading] = useState(false)
   const [sourcesLov, setSourcesLov] = useState<{ source: string; cnt: number }[]>([])
   const [exporting, setExporting] = useState(false)
+  const [selectedNewsId, setSelectedNewsId] = useState<number | null>(null)  // 開 NewsFullContentModal
 
   const filters = useMemo(() => ({
     metal: metals.join(',') || undefined,
@@ -1010,7 +1012,7 @@ function NewsTab({ focusedSet, default24h }: { focusedSet: Set<string>; default2
           <div className="text-center text-slate-400 py-12 text-sm">無符合條件的新聞</div>
         ) : (
           <div className="space-y-2">
-            {rows.map(item => <NewsCard key={item.id} item={item} onTogglePin={() => togglePin(item)} />)}
+            {rows.map(item => <NewsCard key={item.id} item={item} onTogglePin={() => togglePin(item)} onOpenFull={() => setSelectedNewsId(item.id)} />)}
           </div>
         )}
 
@@ -1022,11 +1024,157 @@ function NewsTab({ focusedSet, default24h }: { focusedSet: Set<string>; default2
           </div>
         )}
       </main>
+
+      {selectedNewsId != null && (
+        <NewsFullContentModal newsId={selectedNewsId} onClose={() => setSelectedNewsId(null)} />
+      )}
     </div>
   )
 }
 
-function NewsCard({ item, onTogglePin }: { item: NewsItem; onTogglePin: () => void }) {
+// ── NewsFullContentModal ────────────────────────────────────────────────────
+// 顯示單篇新聞「LLM 摘要(繁中) + KB 原文(英/中/日 任意原文)」並排
+// 從 GET /api/pm/briefing/news/:id/full 撈,KB 沒此篇時 fallback 引導點原網頁
+function NewsFullContentModal({ newsId, onClose }: { newsId: number; onClose: () => void }) {
+  const [data, setData] = useState<{
+    found: boolean
+    news: {
+      id: number; url: string; title: string; source: string | null; language: string | null
+      published_at: string | null; scraped_at: string | null
+      summary: string | null
+      sentiment_score: number | null; sentiment_label: string | null
+      related_metals: string | null; topics: string | null
+    }
+    kb: { doc_id: string; content: string; word_count: number; published_at: string | null } | null
+  } | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [copied, setCopied] = useState(false)
+
+  useEffect(() => {
+    setLoading(true)
+    api.get(`/pm/briefing/news/${newsId}/full`)
+      .then(r => setData(r.data))
+      .catch(() => setData(null))
+      .finally(() => setLoading(false))
+  }, [newsId])
+
+  const handleCopy = async () => {
+    if (!data?.news.url) return
+    try {
+      await navigator.clipboard.writeText(data.news.url)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    } catch {}
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={onClose}>
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-5xl max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
+        {/* Header */}
+        <div className="flex items-start gap-3 px-5 py-3 border-b">
+          <BookOpen size={18} className="text-blue-500 flex-shrink-0 mt-0.5" />
+          <div className="flex-1 min-w-0">
+            <div className="font-semibold text-slate-800 text-base leading-snug">
+              {loading ? <span className="text-slate-400">載入中...</span> : (data?.news.title || '(無標題)')}
+            </div>
+            {data && (
+              <div className="text-xs text-slate-500 mt-1 flex items-center gap-2 flex-wrap">
+                <Calendar size={11} />
+                <span>{data.news.published_at || data.news.scraped_at || '—'}</span>
+                <span>·</span>
+                <span className="font-medium text-slate-700">{data.news.source || '—'}</span>
+                {data.news.language && <span className="text-slate-400">({data.news.language})</span>}
+                {data.news.related_metals && (
+                  <>
+                    <span>·</span>
+                    {data.news.related_metals.split(',').map(m => (
+                      <span key={m} className="px-1 py-0.5 rounded bg-blue-50 text-blue-700">{m.trim()}</span>
+                    ))}
+                  </>
+                )}
+                {data.kb && <span className="text-slate-400 ml-1">· KB 全文 {data.kb.word_count} 字</span>}
+              </div>
+            )}
+          </div>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 flex-shrink-0"><X size={18} /></button>
+        </div>
+
+        {/* Body — 並排兩欄;窄螢幕自動上下 */}
+        <div className="flex-1 overflow-hidden flex flex-col md:flex-row">
+          {loading ? (
+            <div className="flex-1 flex items-center justify-center text-slate-400 gap-2 text-sm py-12">
+              <Loader2 size={14} className="animate-spin" /> 載入完整內容…
+            </div>
+          ) : !data ? (
+            <div className="flex-1 flex items-center justify-center text-red-500 text-sm py-12">— 無法載入內容 —</div>
+          ) : (
+            <>
+              {/* 左:LLM 繁中摘要 */}
+              <div className="flex-1 overflow-y-auto p-5 md:border-r border-slate-200 bg-slate-50/50">
+                <div className="text-xs font-semibold text-slate-500 mb-2 flex items-center gap-1">
+                  <Sparkles size={12} className="text-blue-500" /> AI 繁體中文摘要
+                </div>
+                <div className="text-sm text-slate-800 leading-relaxed whitespace-pre-wrap">
+                  {data.news.summary || '(無摘要)'}
+                </div>
+                {data.news.topics && (
+                  <div className="mt-3 flex gap-1 flex-wrap">
+                    {data.news.topics.split(',').map(t => (
+                      <span key={t} className="px-1.5 py-0.5 rounded text-[10px] bg-slate-100 text-slate-600">#{t.trim()}</span>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* 右:KB 原文 */}
+              <div className="flex-1 overflow-y-auto p-5">
+                <div className="text-xs font-semibold text-slate-500 mb-2 flex items-center gap-1">
+                  <FileText size={12} className="text-emerald-600" /> 原文(KB:PM-新聞庫)
+                </div>
+                {data.found && data.kb ? (
+                  <div className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">
+                    {data.kb.content}
+                  </div>
+                ) : (
+                  <div className="bg-amber-50 border border-amber-200 rounded p-3 text-xs text-amber-800">
+                    <div className="font-medium mb-1">⚠ KB 沒這篇全文</div>
+                    <div>可能 LLM 寫進 KB 時 URL normalize 不一致,或這篇是舊 stale row。請點下方「開原網頁」直接看原始來源。</div>
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+
+        {/* Footer action bar */}
+        <div className="px-5 py-3 border-t flex items-center gap-2 bg-slate-50">
+          <button
+            onClick={handleCopy}
+            disabled={!data?.news.url}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded border border-slate-200 hover:bg-white text-slate-700 disabled:opacity-50"
+          >
+            <Copy size={12} /> {copied ? '已複製!' : '複製連結'}
+          </button>
+          {data?.news.url && (
+            <a
+              href={data.news.url} target="_blank" rel="noreferrer"
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded border border-blue-200 text-blue-700 hover:bg-blue-50"
+            >
+              <ExternalLink size={12} /> 開原網頁
+            </a>
+          )}
+          <div className="ml-auto">
+            <button onClick={onClose} className="px-3 py-1.5 text-xs rounded bg-slate-800 text-white hover:bg-slate-900">
+              關閉
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function NewsCard({ item, onTogglePin, onOpenFull }: { item: NewsItem; onTogglePin: () => void; onOpenFull: () => void }) {
   const sent = item.sentiment_label || ''
   const sentColor = /positive/i.test(sent) ? 'text-emerald-600 bg-emerald-50' :
                     /negative/i.test(sent) ? 'text-red-600 bg-red-50' :
@@ -1070,7 +1218,14 @@ function NewsCard({ item, onTogglePin }: { item: NewsItem; onTogglePin: () => vo
             <ExternalLink size={12} className="flex-shrink-0 mt-1 text-slate-400" />
           </a>
           {item.summary && <div className="text-xs text-slate-600 mt-1 leading-relaxed">{item.summary}</div>}
-          <div className="mt-1">
+          <div className="mt-1.5 flex items-center gap-3">
+            <button
+              onClick={onOpenFull}
+              className="text-[11px] text-blue-600 hover:underline flex items-center gap-1"
+              title="看 LLM 繁中摘要 + KB 原文並排"
+            >
+              <BookOpen size={11} /> 看完整內容
+            </button>
             <PmFeedbackThumbs targetType="forecast" targetRef={`news-${item.id}`} compact />
           </div>
         </div>
