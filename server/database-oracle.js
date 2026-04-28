@@ -4024,7 +4024,7 @@ async function runMigrations(db) {
       table: 'pm_news',
       display: '金屬相關新聞',
       desc: '每日從 RSS / API 抓的金屬相關新聞 metadata + LLM 摘要 + 情緒分數。全文存進 KB「PM-新聞庫」做 RAG。Phase 2 新增。',
-      ops: 'insert',
+      ops: 'insert,upsert',  // 2026-04-28:加 upsert,讓重複 url 走 update 而非撞 UQ_NEWS_URL_HASH
     },
     {
       table: 'forecast_history',
@@ -4094,6 +4094,20 @@ async function runMigrations(db) {
            SET column_metadata=?, last_refreshed_at=SYSTIMESTAMP
            WHERE table_name=?`
         ).run(JSON.stringify(columnMeta), t.table);
+        // 2026-04-28:既有 pm_news 白名單可能還是舊 'insert' only,
+        // 補開 upsert(idempotent — 已含 'upsert' 不變動)
+        if (t.ops && t.ops.includes('upsert')) {
+          const cur = await db.prepare(
+            `SELECT allowed_operations FROM pipeline_writable_tables WHERE table_name=?`
+          ).get(t.table);
+          const curOps = String(cur?.allowed_operations || cur?.ALLOWED_OPERATIONS || '');
+          if (!curOps.includes('upsert')) {
+            await db.prepare(
+              `UPDATE pipeline_writable_tables SET allowed_operations=? WHERE table_name=?`
+            ).run(t.ops, t.table);
+            console.log(`[Migration] Patched pipeline_writable_tables.allowed_operations for ${t.table}: ${curOps} → ${t.ops}`);
+          }
+        }
       } else {
         await db.prepare(
           `INSERT INTO pipeline_writable_tables
