@@ -503,7 +503,7 @@ router.get('/news', verifyToken, verifyPmUser, async (req, res) => {
              (SELECT 1 FROM pm_news_pins p WHERE p.news_id = n.id AND p.user_id = ? FETCH FIRST 1 ROWS ONLY) AS is_pinned
       FROM pm_news n
       ${where}
-      ORDER BY COALESCE(n.published_at, n.scraped_at) DESC
+      ORDER BY GREATEST(NVL(n.scraped_at, n.published_at), NVL(n.published_at, n.scraped_at)) DESC NULLS LAST
       OFFSET ? ROWS FETCH NEXT ? ROWS ONLY
     `).all(req.user.id, ...params, offset, size);
 
@@ -573,14 +573,16 @@ router.get('/news/:id/full', verifyToken, verifyPmUser, async (req, res) => {
 
     let kbDoc = null;
     if (kbId) {
-      // 3) JOIN by hash 找全文
+      // 3) JOIN by hash 找全文 — 同 url_hash 可能對到多筆(LLM 偷懶把 url 都填首頁)
+      // 取 published_at 最接近 pm_news.published_at 的那筆,降低 mismatch
       kbDoc = await db.prepare(`
-        SELECT id AS doc_id, content, word_count,
+        SELECT id AS doc_id, content, word_count, source_url AS kb_source_url, filename,
                TO_CHAR(published_at, 'YYYY-MM-DD HH24:MI') AS kb_published_at
         FROM kb_documents
         WHERE kb_id = ? AND source_hash = ?
+        ORDER BY ABS(EXTRACT(DAY FROM (published_at - (SELECT published_at FROM pm_news WHERE id = ?)))) NULLS LAST
         FETCH FIRST 1 ROWS ONLY
-      `).get(kbId, news.url_hash || news.URL_HASH);
+      `).get(kbId, news.url_hash || news.URL_HASH, newsId);
     }
 
     res.json({
@@ -604,6 +606,8 @@ router.get('/news/:id/full', verifyToken, verifyPmUser, async (req, res) => {
         content: kbDoc.content || kbDoc.CONTENT,
         word_count: kbDoc.word_count || kbDoc.WORD_COUNT,
         published_at: kbDoc.kb_published_at || kbDoc.KB_PUBLISHED_AT,
+        source_url: kbDoc.kb_source_url || kbDoc.KB_SOURCE_URL,  // 給前端對照 pm_news.url 看是否同一篇
+        filename: kbDoc.filename || kbDoc.FILENAME,
       } : null,
     });
   } catch (e) {

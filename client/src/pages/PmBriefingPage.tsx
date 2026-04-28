@@ -1035,6 +1035,25 @@ function NewsTab({ focusedSet, default24h }: { focusedSet: Set<string>; default2
 // ── NewsFullContentModal ────────────────────────────────────────────────────
 // 顯示單篇新聞「LLM 摘要(繁中) + KB 原文(英/中/日 任意原文)」並排
 // 從 GET /api/pm/briefing/news/:id/full 撈,KB 沒此篇時 fallback 引導點原網頁
+
+// URL normalize 比對:剝 utm_*/fbclid/砍 fragment/末尾斜線/lowercase
+// (跟 server pipelineSecurity.js sha256 transform 同邏輯,讓 client 端對照能對齊)
+function normalizeUrlForCompare(raw: string): string {
+  if (!raw) return ''
+  try {
+    const u = new URL(raw.trim())
+    const drop: string[] = []
+    for (const k of u.searchParams.keys()) {
+      if (/^(utm_|fbclid|gclid|mc_|ref_|spm)/i.test(k)) drop.push(k)
+    }
+    drop.forEach(k => u.searchParams.delete(k))
+    u.hash = ''
+    let s = u.toString()
+    if (s.endsWith('/')) s = s.slice(0, -1)
+    return s.toLowerCase()
+  } catch { return raw.trim().toLowerCase() }
+}
+
 function NewsFullContentModal({ newsId, onClose }: { newsId: number; onClose: () => void }) {
   const [data, setData] = useState<{
     found: boolean
@@ -1045,7 +1064,7 @@ function NewsFullContentModal({ newsId, onClose }: { newsId: number; onClose: ()
       sentiment_score: number | null; sentiment_label: string | null
       related_metals: string | null; topics: string | null
     }
-    kb: { doc_id: string; content: string; word_count: number; published_at: string | null } | null
+    kb: { doc_id: string; content: string; word_count: number; published_at: string | null; source_url: string | null; filename: string | null } | null
   } | null>(null)
   const [loading, setLoading] = useState(true)
   const [copied, setCopied] = useState(false)
@@ -1132,9 +1151,29 @@ function NewsFullContentModal({ newsId, onClose }: { newsId: number; onClose: ()
                   <FileText size={12} className="text-emerald-600" /> 原文(KB:PM-新聞庫)
                 </div>
                 {data.found && data.kb ? (
-                  <div className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">
-                    {data.kb.content}
-                  </div>
+                  <>
+                    {/* KB doc 自身的 metadata,讓 user 對照 pm_news.url 確認是否同一篇 */}
+                    <div className="text-[11px] text-slate-500 mb-2 border-b border-slate-200 pb-2">
+                      <div>📄 KB doc filename: <span className="font-mono">{data.kb.filename || '—'}</span></div>
+                      <div>🔗 KB doc 的 source_url:
+                        {data.kb.source_url ? (
+                          <a href={data.kb.source_url} target="_blank" rel="noreferrer" className="ml-1 text-blue-600 hover:underline break-all">
+                            {data.kb.source_url}
+                          </a>
+                        ) : <span className="ml-1 text-slate-400">(空)</span>}
+                      </div>
+                      <div>📅 KB doc published_at: {data.kb.published_at || '—'} · {data.kb.word_count} 字</div>
+                      {data.kb.source_url && data.news.url &&
+                        normalizeUrlForCompare(data.kb.source_url) !== normalizeUrlForCompare(data.news.url) && (
+                        <div className="mt-1 text-amber-700 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5">
+                          ⚠ KB 的 URL 跟此筆新聞的 URL 不同 — LLM 可能把不同篇 article 都 hash 到同一個 url(常見於 LLM 偷懶填首頁 URL)
+                        </div>
+                      )}
+                    </div>
+                    <div className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">
+                      {data.kb.content}
+                    </div>
+                  </>
                 ) : (
                   <div className="bg-amber-50 border border-amber-200 rounded p-3 text-xs text-amber-800">
                     <div className="font-medium mb-1">⚠ KB 沒這篇全文</div>

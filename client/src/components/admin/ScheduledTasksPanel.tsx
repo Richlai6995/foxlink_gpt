@@ -935,6 +935,9 @@ interface PipelineNodeLog {
   type?: string
   status?: string
   error?: string
+  duration_ms?: number
+  output_preview?: string
+  branch?: string
   db_write_summary?: {
     table?: string
     operation?: string
@@ -993,6 +996,46 @@ function RunDetailModal({ run, onClose }: { run: TaskRun; onClose: () => void })
           <button onClick={onClose} className="text-slate-400 hover:text-slate-600"><X size={16} /></button>
         </div>
         <div className="overflow-y-auto p-5 flex-1 space-y-4">
+          {/* Pipeline 完整流程 — 列出所有節點(2026-04-28 加,原本只 surface write 節點) */}
+          {pipelineNodes.length > 0 && (
+            <div>
+              <div className="text-xs font-semibold text-slate-700 mb-2">Pipeline 完整流程({pipelineNodes.length} 個節點)</div>
+              <div className="space-y-1">
+                {pipelineNodes.map((n, i) => {
+                  const status = n.status || '?'
+                  const statusColor = status === 'ok' ? 'text-emerald-600 bg-emerald-50'
+                    : status === 'error' ? 'text-red-600 bg-red-50'
+                    : status === 'skipped' ? 'text-slate-400 bg-slate-100'
+                    : 'text-slate-600 bg-slate-100'
+                  const typeIcon =
+                    n.type === 'db_write' ? '📥'
+                    : n.type === 'kb_write' ? '📚'
+                    : n.type === 'generate_file' ? '📄'
+                    : n.type === 'alert' ? '🚨'
+                    : n.type === 'condition' ? '🔀'
+                    : n.type === 'parallel' ? '⫽'
+                    : n.type === 'skill' ? '🛠'
+                    : n.type === 'mcp' ? '🔌'
+                    : n.type === 'kb' ? '📖'
+                    : n.type === 'ai' ? '🤖'
+                    : '•'
+                  return (
+                    <div key={i} className="flex items-center gap-2 text-xs border border-slate-100 rounded px-2 py-1 bg-white">
+                      <span className="text-slate-400 w-5 text-center">{i + 1}</span>
+                      <span>{typeIcon}</span>
+                      <span className="font-mono text-slate-700">{n.type || '?'}</span>
+                      <span className="text-slate-400">id={n.id || '?'}</span>
+                      {n.branch && <span className="text-purple-600">→ {n.branch}</span>}
+                      {n.duration_ms != null && <span className="text-slate-400">{(n.duration_ms / 1000).toFixed(1)}s</span>}
+                      <span className={`ml-auto px-1.5 py-0.5 rounded text-[10px] font-medium ${statusColor}`}>{status}</span>
+                      {n.error && <span className="text-red-600 truncate max-w-[200px]" title={n.error}>{n.error}</span>}
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+
           {/* Pipeline write summary + row errors */}
           {writeNodes.length > 0 && (
             <div>
