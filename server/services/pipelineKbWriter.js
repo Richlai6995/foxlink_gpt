@@ -405,7 +405,13 @@ async function executeKbWrite(db, nodeConfig, sourceText, context = {}) {
       // 6c. INSERT kb_documents
       const docId = uuid();
       const filename = it.title || (it.url ? it.url.slice(-100) : `pipeline_${it.sourceHash.slice(0, 12)}`);
-      const fullText = [it.title, it.summary, it.content].filter(Boolean).join('\n\n');
+      // kb_documents.content = title + content(不放 summary,避免 NewsFullContentModal
+      // 右側「原文」上半重複出現 AI 中文摘要,讓 user 搞混跟左側 AI 摘要區是同一段)
+      // content 為空時 fallback 用 summary(LLM 偷懶沒給 content body 的場景)
+      // 注意:chunk #0 (mixed mode) 還是切 title+summary 當 metadata-style 檢索 chunk,
+      //      跟 kb_documents.content 是兩件事,不影響 RAG 召回
+      const docBody = it.content || it.summary;
+      const fullText = [it.title, docBody].filter(Boolean).join('\n\n');
       // word_count 改用「去空白後總字數」— 對中文有意義(原本 split(/\s+/) 把整段中文當 1 word,
       // 中文新聞 200 字實際 word_count 算出來只剩 < 20,看起來像「LLM 偷懶」其實是算法問題)
       const wordCount = fullText.replace(/\s+/g, '').length;
