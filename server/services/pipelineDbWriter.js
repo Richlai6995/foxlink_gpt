@@ -428,12 +428,21 @@ async function executeDbWrite(db, nodeConfig, sourceText, context = {}) {
     pipeline: `${context.taskName || ''}${context.nodeId ? '::' + context.nodeId : ''}`.slice(0, 200) || null,
   };
 
+  // 對 row 序列化成 800 字以內字串(超過 truncate),用於 errors 內附帶 LLM
+  // 原始輸入。在 K8s log + admin run history 都看得到「LLM 給了什麼壞資料」。
+  const previewRow = (rawRow) => {
+    try {
+      const s = JSON.stringify(rawRow);
+      return s.length > 800 ? s.slice(0, 800) + '…' : s;
+    } catch { return String(rawRow).slice(0, 800); }
+  };
+
   const mappedRows = [];
   const errors = [];
   for (let i = 0; i < rawRows.length; i++) {
     const { row, errors: rowErrs } = mapRow(rawRows[i], columnMapping);
     if (rowErrs.length) {
-      errors.push({ row_index: i, errors: rowErrs });
+      errors.push({ row_index: i, errors: rowErrs, row_payload: previewRow(rawRows[i]) });
       if (onRowError === 'stop') {
         throw new Error(`row #${i} 映射失敗: ${rowErrs.join('; ')}`);
       }
@@ -442,12 +451,14 @@ async function executeDbWrite(db, nodeConfig, sourceText, context = {}) {
     // 安全閘:確保每個 key 都是白名單表的已知 column(防 LLM 生出陌生欄位)
     for (const c of Object.keys(row)) {
       if (!colMeta.has(c)) {
-        errors.push({ row_index: i, errors: [`欄位 ${c} 不存在於 table`] });
+        errors.push({ row_index: i, errors: [`欄位 ${c} 不存在於 table`], row_payload: previewRow(rawRows[i]) });
         continue;
       }
     }
     const isInsert = operation !== 'upsert'; // upsert 時 MERGE 自己判斷;其他一律算 insert
     const withMeta = attachMeta(row, colMeta, meta, isInsert);
+    // 把原始 LLM row 貼上,後面 execInsert/execUpsert 失敗時把 payload 帶進 errors
+    Object.defineProperty(withMeta, '__rawRow', { value: rawRows[i], enumerable: false });
     mappedRows.push(withMeta);
   }
 
@@ -499,7 +510,11 @@ async function executeDbWrite(db, nodeConfig, sourceText, context = {}) {
           else if (action === 'updated')  result.updated++;
           else                            result.skipped++;
         } catch (e) {
-          result.errors.push({ row_index: i, errors: [e.message] });
+          result.errors.push({
+            row_index: i,
+            errors: [e.message],
+            row_payload: previewRow(row.__rawRow ?? row),
+          });
           if (onRowError === 'stop') throw e;
         }
       }

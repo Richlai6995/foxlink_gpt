@@ -403,7 +403,15 @@ async function runNode(node, vars, db, context, log) {
         entry.db_write_summary = r.dbWriteSummary;
         console.log(`[Pipeline db_write] OK — ${output}`);
         if (r.dbWriteSummary?.errors?.length) {
-          console.log(`[Pipeline db_write] row errors (first 3):`, JSON.stringify(r.dbWriteSummary.errors.slice(0, 3)));
+          // 對 K8s log 友善:每個 error 一行,含 row_index + 訊息 + LLM 原始 row payload
+          // 印前 10 筆(原 3 太少 admin debug 不出資訊),全部 errors 都進 pipeline_log_json
+          console.log(`[Pipeline db_write] ${r.dbWriteSummary.errors.length} row errors:`);
+          for (const e of r.dbWriteSummary.errors.slice(0, 10)) {
+            console.log(`  row#${e.row_index} errs=${JSON.stringify(e.errors)} payload=${e.row_payload || '(none)'}`);
+          }
+          if (r.dbWriteSummary.errors.length > 10) {
+            console.log(`  ... and ${r.dbWriteSummary.errors.length - 10} more (見 pipeline_log_json)`);
+          }
         }
         break;
       }
@@ -414,7 +422,13 @@ async function runNode(node, vars, db, context, log) {
         entry.kb_write_summary = r.kbWriteSummary;
         console.log(`[Pipeline kb_write] OK — ${output}`);
         if (r.kbWriteSummary?.errors?.length) {
-          console.log(`[Pipeline kb_write] row errors (first 3):`, JSON.stringify(r.kbWriteSummary.errors.slice(0, 3)));
+          console.log(`[Pipeline kb_write] ${r.kbWriteSummary.errors.length} row errors:`);
+          for (const e of r.kbWriteSummary.errors.slice(0, 10)) {
+            console.log(`  row#${e.row_index} errs=${JSON.stringify(e.errors)} payload=${e.row_payload || '(none)'}`);
+          }
+          if (r.kbWriteSummary.errors.length > 10) {
+            console.log(`  ... and ${r.kbWriteSummary.errors.length - 10} more (見 pipeline_log_json)`);
+          }
         }
         break;
       }

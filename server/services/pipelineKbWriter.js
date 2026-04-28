@@ -238,6 +238,14 @@ async function executeKbWrite(db, nodeConfig, sourceText, context = {}) {
     return { documents_created: 0, chunks_created: 0, skipped_duplicates: 0, errors: [], dryRun };
   }
 
+  // 同 db_writer:errors 帶 row_payload(LLM 原始 row,truncate 800 字)
+  const previewRow = (rawRow) => {
+    try {
+      const s = JSON.stringify(rawRow);
+      return s.length > 800 ? s.slice(0, 800) + '…' : s;
+    } catch { return String(rawRow).slice(0, 800); }
+  };
+
   // ─── 3. 萃取 + 預先 dedupe ───────────────────────────────────────────────
   const items = [];
   const errors = [];
@@ -246,14 +254,14 @@ async function executeKbWrite(db, nodeConfig, sourceText, context = {}) {
     try {
       const it = extractItem(rawRows[i], cfg);
       if (!it.title && !it.summary && !it.content) {
-        errors.push({ row_index: i, errors: ['title / summary / content 全空,無法寫入'] });
+        errors.push({ row_index: i, errors: ['title / summary / content 全空,無法寫入'], row_payload: previewRow(rawRows[i]) });
         if (onRowError === 'stop') throw new Error(`row #${i}: 內容全空`);
         continue;
       }
       // 至少要有 url 或 title 之一可拿來做 hash key
       const dupKeyRaw = it.url || it.title;
       if (!dupKeyRaw) {
-        errors.push({ row_index: i, errors: ['缺 url 與 title,無法去重'] });
+        errors.push({ row_index: i, errors: ['缺 url 與 title,無法去重'], row_payload: previewRow(rawRows[i]) });
         if (onRowError === 'stop') throw new Error(`row #${i}: 缺 url/title`);
         continue;
       }
@@ -261,10 +269,11 @@ async function executeKbWrite(db, nodeConfig, sourceText, context = {}) {
       const sourceHash = sha256Hex(normUrl || it.title.toLowerCase());
       it.normUrl = normUrl;
       it.sourceHash = sourceHash;
+      it._rawRow = rawRows[i];  // 後面 chunk / embed 失敗時 payload 帶得回
       hashList.push(sourceHash);
       items.push({ index: i, ...it });
     } catch (e) {
-      errors.push({ row_index: i, errors: [e.message] });
+      errors.push({ row_index: i, errors: [e.message], row_payload: previewRow(rawRows[i]) });
       if (onRowError === 'stop') throw e;
     }
   }
@@ -324,7 +333,7 @@ async function executeKbWrite(db, nodeConfig, sourceText, context = {}) {
   let totalEmbedTokens = 0;
   for (const it of items) {
     if (result.chunks_created >= maxChunksPerRun) {
-      result.errors.push({ row_index: it.index, errors: [`已達 max_chunks_per_run=${maxChunksPerRun},剩餘 ${items.length - items.indexOf(it)} 筆未寫入`] });
+      result.errors.push({ row_index: it.index, errors: [`已達 max_chunks_per_run=${maxChunksPerRun},剩餘 ${items.length - items.indexOf(it)} 筆未寫入`], row_payload: previewRow(it._rawRow) });
       break;
     }
     const titleLc = it.title.toLowerCase();
@@ -339,7 +348,7 @@ async function executeKbWrite(db, nodeConfig, sourceText, context = {}) {
       // 6a. 組 chunks
       const chunks = buildChunks(it, chunkMode, kbChunkStrategy, chunkCfg);
       if (!chunks.length) {
-        result.errors.push({ row_index: it.index, errors: ['切完無 chunk(內容過短)'] });
+        result.errors.push({ row_index: it.index, errors: ['切完無 chunk(內容過短)'], row_payload: previewRow(it._rawRow) });
         continue;
       }
 
@@ -420,7 +429,7 @@ async function executeKbWrite(db, nodeConfig, sourceText, context = {}) {
       result.documents_created++;
       result.chunks_created += chunksToWrite.length;
     } catch (e) {
-      result.errors.push({ row_index: it.index, errors: [e.message] });
+      result.errors.push({ row_index: it.index, errors: [e.message], row_payload: previewRow(it._rawRow) });
       if (onRowError === 'stop') {
         e._partialResult = result;
         throw e;

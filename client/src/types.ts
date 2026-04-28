@@ -683,6 +683,8 @@ export interface TaskRun {
   email_sent_to?: string
   error_msg?: string
   duration_ms?: number
+  pipeline_log_json?: string
+  tools_used_json?: string
 }
 
 // ── AI 命名查詢（Saved Queries / Report Templates）────────────────────────────

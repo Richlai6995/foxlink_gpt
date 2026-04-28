@@ -930,6 +930,29 @@ function TaskFormModal({
 }
 
 // ── RunDetailModal ────────────────────────────────────────────────────────────
+interface PipelineNodeLog {
+  id?: string
+  type?: string
+  status?: string
+  error?: string
+  db_write_summary?: {
+    table?: string
+    operation?: string
+    inserted?: number
+    updated?: number
+    skipped?: number
+    errors?: { row_index: number; errors: string[]; row_payload?: string }[]
+  }
+  kb_write_summary?: {
+    kb_id?: number
+    kb_name?: string
+    documents_created?: number
+    chunks_created?: number
+    skipped_duplicates?: number
+    errors?: { row_index: number; errors: string[]; row_payload?: string }[]
+  }
+}
+
 function RunDetailModal({ run, onClose }: { run: TaskRun; onClose: () => void }) {
   const { t } = useTranslation()
   const [fullText, setFullText] = useState<string | null>(null)
@@ -948,15 +971,99 @@ function RunDetailModal({ run, onClose }: { run: TaskRun; onClose: () => void })
       .finally(() => setLoading(false))
   }, [run.session_id, run.response_preview])
 
+  // 解析 pipeline_log_json,抽出 db_write/kb_write 節點供顯示
+  const pipelineNodes: PipelineNodeLog[] = (() => {
+    if (!run.pipeline_log_json) return []
+    try { return JSON.parse(run.pipeline_log_json) } catch { return [] }
+  })()
+  const writeNodes = pipelineNodes.filter(n => n.db_write_summary || n.kb_write_summary)
+
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={onClose}>
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[80vh] flex flex-col" onClick={e => e.stopPropagation()}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[85vh] flex flex-col" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between px-5 py-3 border-b">
           <span className="font-semibold text-slate-800 text-sm">{t('scheduledTask.runDetail.title')} — {fmtTW(run.run_at)}</span>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-600"><X size={16} /></button>
         </div>
-        <div className="overflow-y-auto p-5 flex-1 text-sm text-slate-700 whitespace-pre-wrap">
-          {loading ? t('common.loading') : (fullText || t('scheduledTask.runDetail.noContent'))}
+        <div className="overflow-y-auto p-5 flex-1 space-y-4">
+          {/* Pipeline write summary + row errors */}
+          {writeNodes.length > 0 && (
+            <div>
+              <div className="text-xs font-semibold text-slate-700 mb-2">Pipeline 寫入摘要 + Row Errors</div>
+              <div className="space-y-2">
+                {writeNodes.map((n, i) => {
+                  const dw = n.db_write_summary
+                  const kw = n.kb_write_summary
+                  if (dw) {
+                    return (
+                      <div key={i} className="border border-slate-200 rounded p-2 text-xs bg-slate-50">
+                        <div className="font-mono text-slate-700 mb-1">
+                          📥 db_write → <b>{dw.table}</b> ({dw.operation}) —
+                          <span className="ml-1 text-emerald-600">{dw.inserted || 0} inserted</span>
+                          <span className="ml-1 text-blue-600">{dw.updated || 0} updated</span>
+                          <span className="ml-1 text-amber-600">{dw.skipped || 0} skipped</span>
+                          {(dw.errors?.length || 0) > 0 && <span className="ml-1 text-red-600">{dw.errors!.length} errors</span>}
+                        </div>
+                        {(dw.errors?.length || 0) > 0 && (
+                          <div className="mt-1 space-y-1 max-h-60 overflow-y-auto">
+                            {dw.errors!.map((e, j) => (
+                              <div key={j} className="border-l-2 border-red-400 pl-2 py-0.5">
+                                <div className="text-red-700">row#{e.row_index}: {e.errors.join('; ')}</div>
+                                {e.row_payload && (
+                                  <div className="text-slate-500 font-mono text-[10px] mt-0.5 break-all">payload: {e.row_payload}</div>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )
+                  }
+                  if (kw) {
+                    return (
+                      <div key={i} className="border border-slate-200 rounded p-2 text-xs bg-slate-50">
+                        <div className="font-mono text-slate-700 mb-1">
+                          📚 kb_write → <b>{kw.kb_name}</b> —
+                          <span className="ml-1 text-emerald-600">{kw.documents_created || 0} docs / {kw.chunks_created || 0} chunks</span>
+                          <span className="ml-1 text-amber-600">{kw.skipped_duplicates || 0} skipped</span>
+                          {(kw.errors?.length || 0) > 0 && <span className="ml-1 text-red-600">{kw.errors!.length} errors</span>}
+                        </div>
+                        {(kw.errors?.length || 0) > 0 && (
+                          <div className="mt-1 space-y-1 max-h-60 overflow-y-auto">
+                            {kw.errors!.map((e, j) => (
+                              <div key={j} className="border-l-2 border-red-400 pl-2 py-0.5">
+                                <div className="text-red-700">row#{e.row_index}: {e.errors.join('; ')}</div>
+                                {e.row_payload && (
+                                  <div className="text-slate-500 font-mono text-[10px] mt-0.5 break-all">payload: {e.row_payload}</div>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )
+                  }
+                  return null
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Top-level error_msg(若 status=fail)*/}
+          {run.error_msg && (
+            <div>
+              <div className="text-xs font-semibold text-slate-700 mb-1">執行錯誤</div>
+              <div className="border border-red-200 bg-red-50 rounded p-2 text-xs text-red-700 whitespace-pre-wrap font-mono">{run.error_msg}</div>
+            </div>
+          )}
+
+          {/* AI 完整回應 */}
+          <div>
+            <div className="text-xs font-semibold text-slate-700 mb-1">AI 完整回應</div>
+            <div className="border border-slate-200 rounded p-3 text-sm text-slate-700 whitespace-pre-wrap">
+              {loading ? t('common.loading') : (fullText || t('scheduledTask.runDetail.noContent'))}
+            </div>
+          </div>
         </div>
       </div>
     </div>
