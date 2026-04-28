@@ -462,6 +462,16 @@ async function runNode(node, vars, db, context, log) {
     entry.status = 'error';
     entry.error = e.message;
     entry.duration_ms = Date.now() - start;
+    // throw 的 e._partialResult 是 db_write / kb_write 跑到一半 throw 前累積的統計
+    // 抽出來放進對應 summary,讓 admin run history 看得到 row errors + payload
+    // (不抽的話 RunDetailModal filter 找不到 db_write_summary,等於 silent 失敗)
+    if (e._partialResult) {
+      if (node.type === 'db_write') {
+        entry.db_write_summary = { table: node.table, operation: node.operation, ...e._partialResult, _threw: true };
+      } else if (node.type === 'kb_write') {
+        entry.kb_write_summary = { kb_id: node.kb_id, kb_name: node.kb_name, ...e._partialResult, _threw: true };
+      }
+    }
     console.error(`[Pipeline] Node "${node.id}" error:`, e.message);
     throw e;
   }

@@ -943,6 +943,7 @@ interface PipelineNodeLog {
     skipped?: number
     errors?: { row_index: number; errors: string[]; row_payload?: string }[]
     dropped_cols?: Record<string, number> | null
+    _threw?: boolean
   }
   kb_write_summary?: {
     kb_id?: number
@@ -951,6 +952,7 @@ interface PipelineNodeLog {
     chunks_created?: number
     skipped_duplicates?: number
     errors?: { row_index: number; errors: string[]; row_payload?: string }[]
+    _threw?: boolean
   }
 }
 
@@ -977,7 +979,11 @@ function RunDetailModal({ run, onClose }: { run: TaskRun; onClose: () => void })
     if (!run.pipeline_log_json) return []
     try { return JSON.parse(run.pipeline_log_json) } catch { return [] }
   })()
-  const writeNodes = pipelineNodes.filter(n => n.db_write_summary || n.kb_write_summary)
+  // 寫入節點 = 有 summary 或者是 db_write/kb_write 但 throw 沒 summary(也要顯示 error)
+  const writeNodes = pipelineNodes.filter(n =>
+    n.db_write_summary || n.kb_write_summary ||
+    (n.status === 'error' && (n.type === 'db_write' || n.type === 'kb_write'))
+  )
 
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={onClose}>
@@ -995,16 +1001,32 @@ function RunDetailModal({ run, onClose }: { run: TaskRun; onClose: () => void })
                 {writeNodes.map((n, i) => {
                   const dw = n.db_write_summary
                   const kw = n.kb_write_summary
+                  // db_write/kb_write throw 但沒 summary(extractJsonRows 失敗等):顯示節點 error
+                  if (n.status === 'error' && !dw && !kw) {
+                    return (
+                      <div key={i} className="border border-red-200 bg-red-50 rounded p-2 text-xs">
+                        <div className="font-mono text-red-700 mb-1">
+                          ❌ {n.type} (id={n.id}) — <b>throw 整批失敗,無 summary</b>
+                        </div>
+                        <div className="text-red-700 whitespace-pre-wrap">{n.error || '(no error message)'}</div>
+                        <div className="text-[11px] text-slate-500 mt-1">常見原因:LLM 沒輸出 ```json [...] ``` 區塊 / JSON 格式不對</div>
+                      </div>
+                    )
+                  }
                   if (dw) {
                     return (
-                      <div key={i} className="border border-slate-200 rounded p-2 text-xs bg-slate-50">
+                      <div key={i} className={`border rounded p-2 text-xs ${dw._threw ? 'border-red-200 bg-red-50' : 'border-slate-200 bg-slate-50'}`}>
                         <div className="font-mono text-slate-700 mb-1">
-                          📥 db_write → <b>{dw.table}</b> ({dw.operation}) —
+                          {dw._threw ? '⚠️' : '📥'} db_write → <b>{dw.table}</b> ({dw.operation}) —
                           <span className="ml-1 text-emerald-600">{dw.inserted || 0} inserted</span>
                           <span className="ml-1 text-blue-600">{dw.updated || 0} updated</span>
                           <span className="ml-1 text-amber-600">{dw.skipped || 0} skipped</span>
                           {(dw.errors?.length || 0) > 0 && <span className="ml-1 text-red-600">{dw.errors!.length} errors</span>}
+                          {dw._threw && <span className="ml-1 text-red-700 font-bold">[節點中途 throw]</span>}
                         </div>
+                        {dw._threw && n.error && (
+                          <div className="text-red-700 mb-1 font-mono">throw: {n.error}</div>
+                        )}
                         {dw.dropped_cols && Object.keys(dw.dropped_cols).length > 0 && (
                           <div className="text-[11px] text-slate-500 mb-1">
                             ⚠ LLM 出了 schema 沒的欄位(已 silent drop,row 照常寫入):

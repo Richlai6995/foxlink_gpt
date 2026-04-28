@@ -71,27 +71,36 @@ MarketWatch 對非登入回 401)。Mining.com RSS 涵蓋同類新聞,可作 KITC
    - sentiment_label 多半是 "neutral"(機構分析較中性)
 
 ═══ 任務 ═══
+從以上 7 個資料源,**選 12-25 篇最相關的金屬新聞**(不是全部都抽 — 過多會浪費 token)。
 每篇相關新聞做以下處理:
-1. 抽出 title / url / source / published_at / 全文
+1. 抽出 title / url / source / published_at / 全文(content 限 500 字以內,別整篇拷貝)
 2. 寫 80-150 字繁體中文摘要(summary)
 3. 情緒打分 sentiment_score(-1.0 ~ +1.0,LLM 判斷對該金屬「未來 1-7 天」價格的影響面)
 4. 對應 sentiment_label("very_negative" / "negative" / "neutral" / "positive" / "very_positive")
 5. 標註 related_metals(代碼陣列,例 ["CU","AL"])
 6. 列出 topics(主題標籤,例 ["supply","policy","fed","inventory"])
 
-**輸出兩段內容**:
-A. 一段繁體中文簡報摘要(給人看的,放最前面)
-B. 在 markdown 末尾另外一段 \`\`\`json [...] \`\`\` 陣列(給 db_write / kb_write 節點落地用),格式如下:
+═══ ⚠️ 輸出格式(務必嚴格遵守,違反會導致 0 筆寫入)═══
+
+**必須輸出兩段**:
+
+**A. 繁體中文簡報摘要**(給人看,放最前面,200-400 字即可,不要太長)
+
+**B. JSON 落地段(MANDATORY,不可省略)**:在 markdown 末尾用 \`\`\`json ... \`\`\` 包起來。
+   即使 A 段寫得再多,**B 段一定要有**,沒有 = pipeline 0 inserted = 等於沒跑。
+   無新聞時輸出 \`\`\`json [] \`\`\`(空陣列也要包 fence),不可只寫文字「今日無新聞」。
+
+JSON 格式範例:
 
 \`\`\`json
 [
   {
-    "url": "https://...",
+    "url": "https://www.mining.com/...",
     "title": "...",
-    "source": "Kitco",
-    "published_at": "2026-04-25T08:00:00Z",
+    "source": "Mining.com",
+    "published_at": "2026-04-28T08:00:00Z",
     "language": "en",
-    "content": "完整內文(英文或原文均可,kb_write 會自動切片 + embedding)",
+    "content": "完整內文 500 字以內",
     "summary": "繁體中文摘要 80-150 字",
     "sentiment_score": -0.6,
     "sentiment_label": "negative",
@@ -101,7 +110,12 @@ B. 在 markdown 末尾另外一段 \`\`\`json [...] \`\`\` 陣列(給 db_write /
 ]
 \`\`\`
 
-若無任何相關新聞,JSON 陣列輸出 \`[]\`,簡報摘要寫「今日無金屬相關重要新聞」。`;
+═══ 自我檢查清單(輸出前最後一遍)═══
+- [ ] 我有寫 A 段中文簡報嗎?
+- [ ] **我有在末尾寫 \`\`\`json [...] \`\`\` 區塊嗎?**(這條失敗 = 0 inserted)
+- [ ] JSON 內每筆都有 url + title + source + published_at + summary?
+- [ ] published_at 是 ISO 格式(YYYY-MM-DDTHH:MM:SSZ)?
+- [ ] 沒有把 A 段內容跟 JSON 段混在一起?(JSON 必須是獨立 \`\`\`json ... \`\`\` block)`;
 
   const pipeline = [
     {
@@ -1283,10 +1297,12 @@ async function patchExistingNewsAddPgmSources(db) {
   if (promptStr && typeof promptStr !== 'string' && promptStr.toString) promptStr = promptStr.toString();
   // marker:platinuminvestment.com(PGM 評論源,2026-04-28 加)
   //       + moneydj.com(中文新聞源,2026-04-28 後加)
-  // 兩 marker 都有才視為已升級到最新版
+  //       + 自我檢查清單(2026-04-28 加 JSON mandatory 提示)
+  // 三 marker 都有才視為已升級到最新版
   const hasWpic = !!promptStr && /platinuminvestment\.com/.test(promptStr);
   const hasMoneydj = !!promptStr && /moneydj\.com/.test(promptStr);
-  if (hasWpic && hasMoneydj) return;
+  const hasSelfCheck = !!promptStr && /自我檢查清單/.test(promptStr);
+  if (hasWpic && hasMoneydj && hasSelfCheck) return;
 
   try {
     await db.prepare(`UPDATE scheduled_tasks SET prompt=?, updated_at=SYSTIMESTAMP WHERE id=?`)
