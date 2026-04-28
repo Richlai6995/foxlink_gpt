@@ -606,7 +606,7 @@ function fmtScheduleTime(t: PmTaskInfo): string {
 function DataHealthPanel() {
   const [data, setData] = useState<PmDataHealth | null>(null)
   const [loading, setLoading] = useState(true)
-  const [collapsed, setCollapsed] = useState(false)
+  const [collapsed, setCollapsed] = useState(true)  // 預設收合,有 alert 才會吸引使用者展開
 
   const reload = () => {
     setLoading(true)
@@ -624,58 +624,84 @@ function DataHealthPanel() {
     return <div className="bg-slate-50 border-b px-6 py-2 text-xs text-slate-400">— 無法載入排程狀態 —</div>
   }
 
-  // 任務 → 對應的「資料展示」描述
-  const findTask = (kw: string) => data.tasks.find(t => t.name.includes(kw))
-  const taskRows = [
+  // 已知的 6 個 admin seed task → 客製化「資料現況」描述(額外查表)
+  // user 自建的 [PM]% task(例如 [PM] 每日貴金屬行情)會 fallback 到 generic
+  // 描述,直接用 last_run 的 inserted/updated/skipped 統計。
+  const knownDescriptions: { match: string; describe: (data: PmDataHealth) => { status: string; ok: boolean } }[] = [
     {
-      task: findTask('每日金屬日報'),
-      target: '日報 / 預測',
-      status: data.data.daily_report.latest_date
-        ? `最新日報: ${data.data.daily_report.latest_date}` + (data.data.forecast.today_rows > 0
-            ? `,今日預測 ${data.data.forecast.today_metals}/${data.data.forecast.target_metals} 金屬(${data.data.forecast.total} 筆累計)`
-            : ',今日尚未出 forecast')
-        : '尚無日報',
-      ok: !!data.data.daily_report.latest_date && data.data.daily_report.latest_date >= data.today,
+      match: '每日金屬日報',
+      describe: d => ({
+        status: d.data.daily_report.latest_date
+          ? `最新日報: ${d.data.daily_report.latest_date}` + (d.data.forecast.today_rows > 0
+              ? `,今日預測 ${d.data.forecast.today_metals}/${d.data.forecast.target_metals} 金屬(${d.data.forecast.total} 筆累計)`
+              : ',今日尚未出 forecast')
+          : '尚無日報',
+        ok: !!d.data.daily_report.latest_date && d.data.daily_report.latest_date >= d.today,
+      }),
     },
     {
-      task: findTask('總體經濟指標'),
-      target: 'pm_macro_history',
-      status: data.data.macro.latest_date
-        ? `最新: ${data.data.macro.latest_date},${data.data.macro.indicator_count} 個指標,今日新增 ${data.data.macro.today_rows} 筆`
-        : '尚無資料 — 需排程跑過',
-      ok: !!data.data.macro.latest_date && data.data.macro.latest_date >= data.today,
+      match: '總體經濟指標',
+      describe: d => ({
+        status: d.data.macro.latest_date
+          ? `最新: ${d.data.macro.latest_date},${d.data.macro.indicator_count} 個指標,今日新增 ${d.data.macro.today_rows} 筆`
+          : '尚無資料 — 需排程跑過',
+        ok: !!d.data.macro.latest_date && d.data.macro.latest_date >= d.today,
+      }),
     },
     {
-      task: findTask('全網金屬資料收集'),
-      target: 'pm_price_history + pm_news + KB',
-      status: data.data.price.latest_date
-        ? `最新報價: ${data.data.price.latest_date},今日 ${data.data.price.today_metals}/${data.data.price.target_metals} 金屬(${data.data.price.today_rows} 筆)`
-        : '尚無報價資料',
-      ok: !!data.data.price.latest_date && data.data.price.latest_date >= data.today,
+      match: '全網金屬資料收集',
+      describe: d => ({
+        status: d.data.price.latest_date
+          ? `最新報價: ${d.data.price.latest_date},今日 ${d.data.price.today_metals}/${d.data.price.target_metals} 金屬(${d.data.price.today_rows} 筆)`
+          : '尚無報價資料',
+        ok: !!d.data.price.latest_date && d.data.price.latest_date >= d.today,
+      }),
     },
     {
-      task: findTask('每日金屬新聞抓取'),
-      target: 'pm_news',
-      // 註:scraped_at 是第一次 insert 時的 SYSTIMESTAMP,upsert update 不會變,
-      //     所以「近 24h 數量」會誤導(看起來 0 但其實 upsert 有 update)。
-      //     改顯示「累計 X 筆」+「最新 scraped_at 日期」+ 上次跑統計(由 last_run_writes 顯示)
-      status: `累計 ${data.data.news.total} 筆` + (data.data.news.latest ? `(最新 scraped: ${data.data.news.latest})` : ''),
-      // ok 條件:今日(對應 task)有跑 + 上次跑 inserted+updated > 0(看 last_run_writes)
-      ok: !!findTask('每日金屬新聞抓取')?.last_run_at && (findTask('每日金屬新聞抓取')?.last_run_at || '').slice(0, 10) >= data.today,
+      match: '每日金屬新聞抓取',
+      describe: d => ({
+        // scraped_at 在 upsert update 時不變,「近 24h」誤導,只顯示累計 + 最新
+        status: `累計 ${d.data.news.total} 筆` + (d.data.news.latest ? `(最新 scraped: ${d.data.news.latest})` : ''),
+        ok: false,  // 後面 generic 邏輯會用 last_run_writes inserted+updated 判斷
+      }),
     },
     {
-      task: findTask('週報'),
-      target: '週報',
-      status: data.data.weekly_report.latest_date ? `最新: ${data.data.weekly_report.latest_date}` : '尚無週報',
-      ok: !!data.data.weekly_report.latest_date,
+      match: '金屬市場週報',
+      describe: d => ({
+        status: d.data.weekly_report.latest_date ? `最新: ${d.data.weekly_report.latest_date}` : '尚無週報',
+        ok: !!d.data.weekly_report.latest_date,
+      }),
     },
     {
-      task: findTask('月報'),
-      target: '月報',
-      status: data.data.monthly_report.latest_date ? `最新: ${data.data.monthly_report.latest_date}` : '尚無月報',
-      ok: !!data.data.monthly_report.latest_date,
+      match: '金屬市場月報',
+      describe: d => ({
+        status: d.data.monthly_report.latest_date ? `最新: ${d.data.monthly_report.latest_date}` : '尚無月報',
+        ok: !!d.data.monthly_report.latest_date,
+      }),
     },
   ]
+
+  // generic:沒匹配 known → 直接顯示「上次跑寫入 N 筆 / X 表」,不額外查表。
+  // user 自建的 task(例如 [PM] 每日貴金屬行情)走這裡
+  function genericDesc(t: PmTaskInfo): { status: string; ok: boolean } {
+    const writes = t.last_run_writes
+    const dbInserted = writes?.db_writes.reduce((s, w) => s + w.inserted + w.updated, 0) || 0
+    const tables = (writes?.db_writes || []).map(w => w.table).filter(Boolean)
+    const isToday = t.last_run_at && t.last_run_at.slice(0, 10) === data!.today
+    const status = !t.last_run_at
+      ? '從未跑過'
+      : (tables.length > 0
+          ? `寫入: ${tables.join(', ')}`
+          : '上次跑成功(無 db_write 節點)')
+    return { status, ok: !!isToday && (writes ? dbInserted > 0 : true) }
+  }
+
+  // 全部 [PM]% task 都列(已知 + 自建)— 順序按 server 回傳的 id
+  const taskRows = data.tasks.map(t => {
+    const matched = knownDescriptions.find(k => t.name.includes(k.match))
+    const desc = matched ? matched.describe(data) : genericDesc(t)
+    return { task: t, ...desc }
+  })
 
   if (collapsed) {
     const failed = taskRows.filter(r => !r.ok && r.task?.status === 'active').length
@@ -703,14 +729,6 @@ function DataHealthPanel() {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
         {taskRows.map((r, i) => {
           const t = r.task
-          if (!t) {
-            return (
-              <div key={i} className="bg-white border border-dashed border-slate-200 rounded px-3 py-2 text-xs text-slate-400">
-                <div className="font-medium">{r.target}</div>
-                <div className="mt-1">⚠ 找不到對應排程任務</div>
-              </div>
-            )
-          }
           const isPaused = t.status !== 'active'
           // 跑了但 db_write 全都 skipped/0 inserted → 視為「silent failure」
           const writes = t.last_run_writes
@@ -1025,8 +1043,19 @@ function NewsCard({ item, onTogglePin }: { item: NewsItem; onTogglePin: () => vo
           <Pin size={14} fill={item.is_pinned ? 'currentColor' : 'none'} />
         </button>
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-1">
-            <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${sentColor}`}>{sent || '—'}</span>
+          {/* 第一列:日期(左)+ source 來源連結(可點) */}
+          <div className="flex items-center gap-2 mb-1 text-[11px] text-slate-500">
+            <Calendar size={11} className="text-slate-400" />
+            <span className="font-medium text-slate-700">{date ? String(date).slice(0, 16).replace('T', ' ') : '—'}</span>
+            <span className="text-slate-300">·</span>
+            {item.url ? (
+              <a href={item.url} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline flex items-center gap-0.5">
+                {item.source || '—'} <ExternalLink size={10} />
+              </a>
+            ) : (
+              <span>{item.source || '—'}</span>
+            )}
+            <span className={`ml-1 px-1.5 py-0.5 rounded text-[10px] font-medium ${sentColor}`}>{sent || '—'}</span>
             {item.related_metals && (
               <div className="flex gap-1 flex-wrap">
                 {item.related_metals.split(',').map(m => (
@@ -1034,15 +1063,14 @@ function NewsCard({ item, onTogglePin }: { item: NewsItem; onTogglePin: () => vo
                 ))}
               </div>
             )}
-            <span className="text-[10px] text-slate-400 ml-auto">{date ? String(date).slice(0, 16).replace('T', ' ') : '—'}</span>
           </div>
+          {/* 第二列:title */}
           <a href={item.url} target="_blank" rel="noreferrer" className="font-medium text-slate-800 hover:text-blue-600 text-sm flex items-start gap-1">
             <span className="flex-1">{item.title || '(無標題)'}</span>
             <ExternalLink size={12} className="flex-shrink-0 mt-1 text-slate-400" />
           </a>
           {item.summary && <div className="text-xs text-slate-600 mt-1 leading-relaxed">{item.summary}</div>}
-          <div className="text-[10px] text-slate-400 mt-1 flex items-center gap-2">
-            <span>{item.source || '—'}</span>
+          <div className="mt-1">
             <PmFeedbackThumbs targetType="forecast" targetRef={`news-${item.id}`} compact />
           </div>
         </div>
@@ -1201,43 +1229,7 @@ function PriceHistoryTab({ focusedMetals }: { focusedMetals: string[] }) {
           <MetricsCards metals={metals} metricsMap={metricsMap} />
         )}
 
-        <div className="bg-white border rounded px-4 py-2 flex items-center gap-3 flex-wrap text-xs">
-          <span className="text-slate-500 font-medium">📊 圖表疊加層:</span>
-          <label className={`inline-flex items-center gap-1 px-2 py-1 rounded cursor-pointer ${showForecast ? 'bg-blue-100 text-blue-700' : 'bg-slate-50 text-slate-500'}`}>
-            <input type="checkbox" checked={showForecast} onChange={e => setShowForecast(e.target.checked)} />
-            AI 預測線
-          </label>
-          <label className={`inline-flex items-center gap-1 px-2 py-1 rounded cursor-pointer ${showBand ? 'bg-blue-100 text-blue-700' : 'bg-slate-50 text-slate-500'}`}>
-            <input type="checkbox" checked={showBand} onChange={e => setShowBand(e.target.checked)} disabled={!showForecast} />
-            信心區間(80%)
-          </label>
-          <label className={`inline-flex items-center gap-1 px-2 py-1 rounded cursor-pointer ${showPurchase ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-50 text-slate-500'}`}>
-            <input type="checkbox" checked={showPurchase} onChange={e => setShowPurchase(e.target.checked)} />
-            實際採購點(by month)
-          </label>
-          <span className="ml-auto text-[10px] text-slate-400">
-            {showForecast && Object.values(forecastMap).every(arr => arr.length === 0) && '⚠️ forecast_history 無資料 '}
-            {showPurchase && Object.values(purchaseMap).every(arr => arr.length === 0) && '⚠️ pm_purchase_history 無資料(需 ERP sync 啟用)'}
-          </span>
-        </div>
-
-        {/* Chart */}
-        {loading ? (
-          <div className="text-center py-12 text-slate-400 flex items-center justify-center gap-2"><Loader2 size={14} className="animate-spin" /> 載入中…</div>
-        ) : Object.keys(aggregated).length === 0 ? (
-          <div className="bg-amber-50 border border-amber-200 rounded p-6 text-center text-amber-700 text-sm">
-            ⚠️ 無資料 — 篩選條件下找不到價格,請放寬日期或選其他金屬
-          </div>
-        ) : (
-          <PriceChart
-            aggregated={aggregated}
-            forecastMap={showForecast ? forecastMap : {}}
-            purchaseMap={showPurchase ? purchaseMap : {}}
-            showBand={showForecast && showBand}
-          />
-        )}
-
-        {/* Detail table — 所有欄位 SHOW */}
+        {/* Detail table — 所有欄位 SHOW(放在圖表上面,user 要求 2026-04-28)*/}
         {!loading && rows.length > 0 && (
           <div className="bg-white border rounded">
             <div className="px-4 py-2 border-b bg-slate-50 flex items-center gap-2">
@@ -1295,6 +1287,42 @@ function PriceHistoryTab({ focusedMetals }: { focusedMetals: string[] }) {
               </table>
             </div>
           </div>
+        )}
+
+        {/* 圖表疊加層 toggles + chart(資料表下方,2026-04-28 user 要求順序)*/}
+        <div className="bg-white border rounded px-4 py-2 flex items-center gap-3 flex-wrap text-xs">
+          <span className="text-slate-500 font-medium">📊 圖表疊加層:</span>
+          <label className={`inline-flex items-center gap-1 px-2 py-1 rounded cursor-pointer ${showForecast ? 'bg-blue-100 text-blue-700' : 'bg-slate-50 text-slate-500'}`}>
+            <input type="checkbox" checked={showForecast} onChange={e => setShowForecast(e.target.checked)} />
+            AI 預測線
+          </label>
+          <label className={`inline-flex items-center gap-1 px-2 py-1 rounded cursor-pointer ${showBand ? 'bg-blue-100 text-blue-700' : 'bg-slate-50 text-slate-500'}`}>
+            <input type="checkbox" checked={showBand} onChange={e => setShowBand(e.target.checked)} disabled={!showForecast} />
+            信心區間(80%)
+          </label>
+          <label className={`inline-flex items-center gap-1 px-2 py-1 rounded cursor-pointer ${showPurchase ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-50 text-slate-500'}`}>
+            <input type="checkbox" checked={showPurchase} onChange={e => setShowPurchase(e.target.checked)} />
+            實際採購點(by month)
+          </label>
+          <span className="ml-auto text-[10px] text-slate-400">
+            {showForecast && Object.values(forecastMap).every(arr => arr.length === 0) && '⚠️ forecast_history 無資料 '}
+            {showPurchase && Object.values(purchaseMap).every(arr => arr.length === 0) && '⚠️ pm_purchase_history 無資料(需 ERP sync 啟用)'}
+          </span>
+        </div>
+
+        {loading ? (
+          <div className="text-center py-12 text-slate-400 flex items-center justify-center gap-2"><Loader2 size={14} className="animate-spin" /> 載入中…</div>
+        ) : Object.keys(aggregated).length === 0 ? (
+          <div className="bg-amber-50 border border-amber-200 rounded p-6 text-center text-amber-700 text-sm">
+            ⚠️ 無資料 — 篩選條件下找不到價格,請放寬日期或選其他金屬
+          </div>
+        ) : (
+          <PriceChart
+            aggregated={aggregated}
+            forecastMap={showForecast ? forecastMap : {}}
+            purchaseMap={showPurchase ? purchaseMap : {}}
+            showBand={showForecast && showBand}
+          />
         )}
       </div>
     </div>
