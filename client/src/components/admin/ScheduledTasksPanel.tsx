@@ -3,7 +3,7 @@ import {
   CalendarClock, Plus, Play, Pause, Trash2, Edit2, History,
   RefreshCw, CheckCircle, XCircle, ChevronDown, ChevronUp,
   Clock, Mail, FileText, X, Save, TriangleAlert, Settings2,
-  Zap, BookOpen, Wrench, GitBranch, LayoutTemplate,
+  Zap, BookOpen, Wrench, GitBranch, LayoutTemplate, Search,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import type { TFunction } from 'i18next'
@@ -1157,6 +1157,32 @@ export default function ScheduledTasksPanel() {
   const [expanded, setExpanded] = useState<number | null>(null)
   const [msg, setMsg] = useState('')
   const [runningIds, setRunningIds] = useState<Set<number>>(new Set())
+  const [filterName, setFilterName] = useState('')
+  const [filterUserId, setFilterUserId] = useState<string>('')
+  const [filterStatus, setFilterStatus] = useState<string>('')
+
+  const executorOptions = useMemo(() => {
+    const seen = new Map<number, { id: number; name: string; username?: string }>()
+    for (const t of tasks) {
+      if (t.user_id && !seen.has(t.user_id)) {
+        seen.set(t.user_id, { id: t.user_id, name: t.user_name || t.username || `#${t.user_id}`, username: t.username })
+      }
+    }
+    return [...seen.values()].sort((a, b) => a.name.localeCompare(b.name, 'zh-Hant'))
+  }, [tasks])
+
+  const filteredTasks = useMemo(() => {
+    const kw = filterName.trim().toLowerCase()
+    return tasks.filter((task) => {
+      if (kw && !task.name.toLowerCase().includes(kw)) return false
+      if (filterUserId && String(task.user_id) !== filterUserId) return false
+      if (filterStatus && task.status !== filterStatus) return false
+      return true
+    })
+  }, [tasks, filterName, filterUserId, filterStatus])
+
+  const hasFilter = !!(filterName || filterUserId || filterStatus)
+  const clearFilters = () => { setFilterName(''); setFilterUserId(''); setFilterStatus('') }
 
   // Load models independently — don't let tasks 403 kill the model list
   useEffect(() => {
@@ -1283,9 +1309,62 @@ export default function ScheduledTasksPanel() {
         </div>
       </div>
 
+      {/* Filters */}
+      {tasks.length > 0 && (
+        <div className="bg-white rounded-xl border border-slate-200 p-3 mb-3 flex flex-wrap items-center gap-2">
+          <div className="relative flex-1 min-w-[220px]">
+            <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+            <input
+              type="text"
+              value={filterName}
+              onChange={(e) => setFilterName(e.target.value)}
+              placeholder={t('scheduledTask.filters.namePlaceholder')}
+              className="w-full pl-8 pr-3 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-400"
+            />
+          </div>
+          {isAdmin && executorOptions.length > 0 && (
+            <select
+              value={filterUserId}
+              onChange={(e) => setFilterUserId(e.target.value)}
+              className="px-3 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-400 bg-white"
+            >
+              <option value="">{t('scheduledTask.filters.executor')}: {t('scheduledTask.filters.all')}</option>
+              {executorOptions.map((u) => (
+                <option key={u.id} value={String(u.id)}>
+                  {u.name}{u.username && u.username !== u.name ? ` (${u.username})` : ''}
+                </option>
+              ))}
+            </select>
+          )}
+          <select
+            value={filterStatus}
+            onChange={(e) => setFilterStatus(e.target.value)}
+            className="px-3 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-400 bg-white"
+          >
+            <option value="">{t('scheduledTask.filters.status')}: {t('scheduledTask.filters.all')}</option>
+            <option value="active">{t('scheduledTask.enabled')}</option>
+            <option value="paused">{t('scheduledTask.paused')}</option>
+            <option value="draft">{t('scheduledTask.draft')}</option>
+          </select>
+          {hasFilter && (
+            <button
+              onClick={clearFilters}
+              className="flex items-center gap-1 px-2.5 py-1.5 text-xs text-slate-500 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition"
+            >
+              <X size={13} /> {t('scheduledTask.filters.clear')}
+            </button>
+          )}
+          <span className="text-xs text-slate-400 ml-auto">
+            {t('scheduledTask.filters.matchCount', { shown: filteredTasks.length, total: tasks.length })}
+          </span>
+        </div>
+      )}
+
       {/* Table */}
       {tasks.length === 0 && !loading ? (
         <p className="text-center text-slate-400 py-12 text-sm">{t('scheduledTask.noTasks')}</p>
+      ) : filteredTasks.length === 0 ? (
+        <p className="text-center text-slate-400 py-12 text-sm">{t('scheduledTask.noTasksMatch')}</p>
       ) : (
         <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
           <table className="w-full text-sm">
@@ -1303,7 +1382,7 @@ export default function ScheduledTasksPanel() {
               </tr>
             </thead>
             <tbody>
-              {tasks.map((task) => (
+              {filteredTasks.map((task) => (
                 <React.Fragment key={task.id}>
                   <tr className="border-b border-slate-100 hover:bg-slate-50">
                     <td className="px-4 py-3">

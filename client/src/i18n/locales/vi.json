@@ -1280,7 +1280,16 @@
     "editTask": "Chỉnh sửa lịch tác vụ",
     "newTask": "Lịch tác vụ mới",
     "noTasks": "Chưa có lịch tác vụ",
+    "noTasksMatch": "Không có tác vụ nào khớp bộ lọc",
     "loadFailed": "Tải thất bại",
+    "filters": {
+      "namePlaceholder": "Tìm tên tác vụ...",
+      "executor": "Người thực thi",
+      "status": "Trạng thái",
+      "all": "Tất cả",
+      "clear": "Xóa bộ lọc",
+      "matchCount": "Hiển thị {{shown}} / {{total}}"
+    },
     "deleteConfirm": "Xóa tác vụ \"{{name}}\" và toàn bộ lịch sử?",
     "deleted": "Đã xóa",
     "taskSaved": "Tác vụ \"{{name}}\" đã lưu",

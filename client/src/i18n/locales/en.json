@@ -1280,7 +1280,16 @@
     "editTask": "Edit Scheduled Task",
     "newTask": "New Scheduled Task",
     "noTasks": "No scheduled tasks",
+    "noTasksMatch": "No tasks match the filters",
     "loadFailed": "Load failed",
+    "filters": {
+      "namePlaceholder": "Search task name...",
+      "executor": "Executor",
+      "status": "Status",
+      "all": "All",
+      "clear": "Clear filters",
+      "matchCount": "Showing {{shown}} / {{total}}"
+    },
     "deleteConfirm": "Delete task \"{{name}}\" and all history?",
     "deleted": "Deleted",
     "taskSaved": "Task \"{{name}}\" saved",
