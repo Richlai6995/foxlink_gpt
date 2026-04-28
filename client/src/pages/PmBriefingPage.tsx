@@ -568,6 +568,10 @@ interface PmTaskInfo {
   last_run_at: string | null
   last_run_status: string | null
   run_count: number
+  last_run_writes?: {
+    db_writes: { table: string | null; inserted: number; updated: number; skipped: number; errors: number }[]
+    kb_writes: { kb_name: string | null; docs: number; chunks: number; skipped: number; errors: number }[]
+  } | null
 }
 interface PmDataHealth {
   today: string
@@ -704,11 +708,18 @@ function DataHealthPanel() {
             )
           }
           const isPaused = t.status !== 'active'
+          // 跑了但 db_write 全都 skipped/0 inserted → 視為「silent failure」
+          const writes = t.last_run_writes
+          const dbInserted = writes?.db_writes.reduce((s, w) => s + w.inserted + w.updated, 0) || 0
+          const dbSkipped  = writes?.db_writes.reduce((s, w) => s + w.skipped, 0) || 0
+          const dbErrors   = writes?.db_writes.reduce((s, w) => s + w.errors, 0) || 0
+          const ranButNoWrite = !!t.last_run_at && !!writes && writes.db_writes.length > 0 && dbInserted === 0
+          const effectiveOk = r.ok && !ranButNoWrite
           const okIcon = isPaused
             ? <XCircle size={14} className="text-slate-400" />
-            : (r.ok ? <CheckCircle2 size={14} className="text-emerald-500" /> : <AlertCircle size={14} className="text-amber-500" />)
+            : (effectiveOk ? <CheckCircle2 size={14} className="text-emerald-500" /> : <AlertCircle size={14} className="text-amber-500" />)
           return (
-            <div key={i} className={`bg-white border rounded px-3 py-2 text-xs ${isPaused ? 'border-slate-200 opacity-70' : (r.ok ? 'border-emerald-200' : 'border-amber-200')}`}>
+            <div key={i} className={`bg-white border rounded px-3 py-2 text-xs ${isPaused ? 'border-slate-200 opacity-70' : (effectiveOk ? 'border-emerald-200' : 'border-amber-200')}`}>
               <div className="flex items-center gap-1.5 mb-1">
                 {okIcon}
                 <span className="font-medium text-slate-800">{t.name}</span>
@@ -721,6 +732,28 @@ function DataHealthPanel() {
                   : <span className="ml-1 text-amber-600">| 從未跑過</span>}
               </div>
               <div className="text-slate-700 mt-1 leading-relaxed">{r.status}</div>
+              {writes && (writes.db_writes.length > 0 || writes.kb_writes.length > 0) && (
+                <div className={`mt-1 text-[11px] flex flex-wrap gap-x-2 gap-y-0.5 ${ranButNoWrite ? 'text-amber-700' : 'text-slate-500'}`}>
+                  {writes.db_writes.map((w, j) => (
+                    <span key={`d${j}`} title={`db_write → ${w.table}`}>
+                      📥 <b>{w.table}</b>: {w.inserted}+ / {w.updated}↻ / {w.skipped}⊘
+                      {w.errors > 0 && <span className="text-red-600"> / {w.errors}✗</span>}
+                    </span>
+                  ))}
+                  {writes.kb_writes.map((w, j) => (
+                    <span key={`k${j}`} title={`kb_write → ${w.kb_name}`}>
+                      📚 <b>{w.kb_name}</b>: {w.docs} docs / {w.chunks} chunks / {w.skipped}⊘
+                      {w.errors > 0 && <span className="text-red-600"> / {w.errors}✗</span>}
+                    </span>
+                  ))}
+                </div>
+              )}
+              {ranButNoWrite && (
+                <div className="mt-1 text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5">
+                  ⚠ 上次跑成功但 0 筆 inserted{dbSkipped > 0 ? `(${dbSkipped} 筆被 dedupe / unique 衝突 skip)` : ''}{dbErrors > 0 ? ` / ${dbErrors} 個 row error` : ''}
+                  {dbSkipped > 0 && dbInserted === 0 && '(LLM 抓的 url / key 都跟既有資料重複,沒新增)'}
+                </div>
+              )}
             </div>
           )
         })}

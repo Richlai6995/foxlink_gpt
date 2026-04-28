@@ -699,21 +699,75 @@ router.get('/data-health', verifyToken, verifyPmUser, async (req, res) => {
     const num = (r, k) => Number(r?.[k] ?? r?.[k.toUpperCase()] ?? 0);
     const str = (r, k) => r?.[k] ?? r?.[k.toUpperCase()] ?? null;
 
+    // 3) 對每個 task 撈最新一筆 task_run 的 pipeline_log_json,parse 出
+    //    db_write/kb_write summary。讓使用者區分「跑成功 + 真寫入」vs
+    //    「跑成功但 db_write 全 skipped(LLM 抓的 url 都重複 / mapping 失敗)」
+    const taskWritesById = new Map();
+    for (const t of tasks) {
+      const tid = t.id || t.ID;
+      try {
+        const lastRun = await db.prepare(`
+          SELECT pipeline_log_json
+          FROM scheduled_task_runs
+          WHERE task_id = ?
+          ORDER BY run_at DESC
+          FETCH FIRST 1 ROWS ONLY
+        `).get(tid);
+        let raw = lastRun?.pipeline_log_json || lastRun?.PIPELINE_LOG_JSON;
+        if (raw && typeof raw !== 'string' && raw.toString) raw = raw.toString();
+        if (!raw) continue;
+        const log = JSON.parse(raw);
+        if (!Array.isArray(log)) continue;
+        const dbWrites = [];
+        const kbWrites = [];
+        for (const node of log) {
+          if (node?.db_write_summary) {
+            const s = node.db_write_summary;
+            dbWrites.push({
+              table: s.table || node.table || null,
+              inserted: Number(s.inserted || 0),
+              updated:  Number(s.updated  || 0),
+              skipped:  Number(s.skipped  || 0),
+              errors:   Array.isArray(s.errors) ? s.errors.length : 0,
+            });
+          }
+          if (node?.kb_write_summary) {
+            const s = node.kb_write_summary;
+            kbWrites.push({
+              kb_name: s.kb_name || node.kb_name || null,
+              docs:    Number(s.documents_created || 0),
+              chunks:  Number(s.chunks_created    || 0),
+              skipped: Number(s.skipped_duplicates || 0),
+              errors:  Array.isArray(s.errors) ? s.errors.length : 0,
+            });
+          }
+        }
+        if (dbWrites.length || kbWrites.length) {
+          taskWritesById.set(tid, { db_writes: dbWrites, kb_writes: kbWrites });
+        }
+      } catch (_) { /* parse fail → 算沒摘要 */ }
+    }
+
     res.json({
       today,
-      tasks: tasks.map(t => ({
-        id: t.id || t.ID,
-        name: t.name || t.NAME,
-        status: t.status || t.STATUS,
-        schedule_type: t.schedule_type || t.SCHEDULE_TYPE,
-        schedule_hour: t.schedule_hour ?? t.SCHEDULE_HOUR,
-        schedule_minute: t.schedule_minute ?? t.SCHEDULE_MINUTE,
-        schedule_interval_hours: t.schedule_interval_hours ?? t.SCHEDULE_INTERVAL_HOURS,
-        schedule_times_json: t.schedule_times_json || t.SCHEDULE_TIMES_JSON,
-        last_run_at: t.last_run_at || t.LAST_RUN_AT,
-        last_run_status: t.last_run_status || t.LAST_RUN_STATUS,
-        run_count: t.run_count ?? t.RUN_COUNT ?? 0,
-      })),
+      tasks: tasks.map(t => {
+        const tid = t.id || t.ID;
+        const writes = taskWritesById.get(tid) || null;
+        return {
+          id: tid,
+          name: t.name || t.NAME,
+          status: t.status || t.STATUS,
+          schedule_type: t.schedule_type || t.SCHEDULE_TYPE,
+          schedule_hour: t.schedule_hour ?? t.SCHEDULE_HOUR,
+          schedule_minute: t.schedule_minute ?? t.SCHEDULE_MINUTE,
+          schedule_interval_hours: t.schedule_interval_hours ?? t.SCHEDULE_INTERVAL_HOURS,
+          schedule_times_json: t.schedule_times_json || t.SCHEDULE_TIMES_JSON,
+          last_run_at: t.last_run_at || t.LAST_RUN_AT,
+          last_run_status: t.last_run_status || t.LAST_RUN_STATUS,
+          run_count: t.run_count ?? t.RUN_COUNT ?? 0,
+          last_run_writes: writes,
+        };
+      }),
       data: {
         news: {
           total: num(newsTotal, 'n'),
