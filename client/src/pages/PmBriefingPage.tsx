@@ -226,20 +226,30 @@ function PriceBanner({ focusedSet, expanded, onToggleExpand }: { focusedSet: Set
     const code = String(p.metal_code || p.METAL_CODE || '').toUpperCase()
     if (code) priceMap.set(code, p)
   }
+  const todayStr = new Date().toISOString().slice(0, 10)
   const fullList = ALL_METALS.map(m => {
     const p = priceMap.get(m.code.toUpperCase())
+    const pAsOf = p ? String(p.as_of_date || p.AS_OF_DATE || '').slice(0, 10) : null
     return {
       code: m.code,
       name_zh: m.name,
       price_usd: p ? (p.price_usd ?? p.PRICE_USD) : null,
       day_change_pct: p ? (p.day_change_pct ?? p.DAY_CHANGE_PCT) : null,
+      as_of_date: pAsOf,
       hasData: !!p,
+      isStale: !!p && pAsOf !== todayStr,  // 有資料但不是今天的
     }
   })
 
   const visible = expanded || focusedSet.size === 0 ? fullList : fullList.filter(p => focusedSet.has(p.code))
   const hidden = fullList.length - visible.length
   const noData = prices.length === 0
+
+  // 完整度警示:今日有幾個金屬有報價(target=11)
+  const todayMetals = fullList.filter(p => p.as_of_date === todayStr)
+  const todayCount = todayMetals.length
+  const missingMetals = fullList.filter(p => p.as_of_date !== todayStr)
+  const isIncomplete = !noData && todayCount < ALL_METALS.length
 
   return (
     <div>
@@ -248,16 +258,31 @@ function PriceBanner({ focusedSet, expanded, onToggleExpand }: { focusedSet: Set
           ⚠️ 近 30 天無報價資料(可至「歷史價格」tab 放寬日期範圍查更早資料)
         </div>
       )}
+      {isIncomplete && (
+        <div className="bg-amber-50 border-b border-amber-200 px-6 py-1.5 text-xs text-amber-800 flex items-center gap-2 flex-wrap">
+          <AlertCircle size={12} className="flex-shrink-0" />
+          <span><b>{todayStr}</b> 報價不完整 — 今日只抓到 <b>{todayCount}/{ALL_METALS.length}</b> 個金屬</span>
+          <span className="text-amber-600">缺:</span>
+          {missingMetals.map(m => (
+            <span key={m.code} className="px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 text-[10px]">
+              {m.code} {m.as_of_date ? <span className="text-amber-500">({m.as_of_date.slice(5)})</span> : <span className="text-amber-500">(無)</span>}
+            </span>
+          ))}
+          <span className="ml-auto text-amber-500">→ 顯示其他金屬以最近一筆替代</span>
+        </div>
+      )}
       <div className="bg-white border-b px-6 py-2 flex items-center gap-3 overflow-x-auto">
         <span className="text-xs text-slate-400 flex-shrink-0">📅 {asOfDate || '—'}</span>
         {visible.map(p => {
           const price = Number(p.price_usd)
           const chg = Number(p.day_change_pct)
           const isUp = chg > 0
+          // stale = 有資料但不是今天的 → 黃框 + 顯示日期讓使用者知道是回退到最近一筆
+          const cardCls = !p.hasData
+            ? 'border-slate-100 bg-slate-50/50 opacity-60'
+            : (p.isStale ? 'border-amber-200 bg-amber-50' : 'border-slate-200 bg-slate-50')
           return (
-            <div key={p.code} className={`flex items-center gap-1 px-2 py-1 rounded border flex-shrink-0 ${
-              p.hasData ? 'border-slate-200 bg-slate-50' : 'border-slate-100 bg-slate-50/50 opacity-60'
-            }`}>
+            <div key={p.code} className={`flex items-center gap-1 px-2 py-1 rounded border flex-shrink-0 ${cardCls}`} title={p.isStale ? `資料日期 ${p.as_of_date}(非今日,今日該金屬無新報價)` : undefined}>
               <span className="font-bold text-slate-800 text-sm">{p.code}</span>
               <span className="text-slate-500 text-[11px]">{p.name_zh}</span>
               <span className="text-slate-700 font-mono text-sm">
@@ -269,6 +294,9 @@ function PriceBanner({ focusedSet, expanded, onToggleExpand }: { focusedSet: Set
                 <span className={`text-xs font-medium ${isUp ? 'text-emerald-600' : chg < 0 ? 'text-red-600' : 'text-slate-400'}`}>
                   {isUp ? '+' : ''}{chg.toFixed(2)}%
                 </span>
+              )}
+              {p.isStale && (
+                <span className="text-[10px] text-amber-600 ml-0.5">{p.as_of_date?.slice(5)}</span>
               )}
             </div>
           )
