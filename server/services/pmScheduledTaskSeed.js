@@ -40,12 +40,26 @@ function buildNewsTask(kbMap, models = {}) {
 
   const prompt = `今天是 {{date}}。請抓取以下來源,過濾出與「銅(CU)/ 鋁(AL)/ 鎳(NI)/ 錫(SN)/ 鋅(ZN)/ 鉛(PB)/ 金(AU)/ 銀(AG)/ 鉑(PT)/ 鈀(PD)/ 銠(RH)」相關的近 24 小時新聞與專業評論。
 
-═══ 資料源:一般市場新聞(可調整,公司防火牆需放行)═══
-{{scrape:https://www.kitco.com/news/}}
-{{scrape:https://www.mining.com/}}
-{{scrape:https://www.westmetall.com/en/news.php}}
+═══ 資料源 1:Mining.com 全球礦業新聞(RSS,主源)═══
+{{fetch:https://www.mining.com/feed/}}
+↑ 36+ items 含完整內文,涵蓋全球金屬 / 礦業 / 採礦公司動態。**主新聞源**
 
-═══ 資料源:PGM(Pt/Pd/Rh)機構級評論(權威性 > 一般新聞)═══
+═══ 資料源 2:MoneyDJ 商品原物料(中文,台灣財經角度)═══
+{{scrape:https://www.moneydj.com/KMDJ/News/NewsRealList.aspx?a=MB07}}
+↑ MoneyDJ 商品原物料分類,含時間 + 標題列表(中文台灣商品行情)
+
+═══ 資料源 3:SMM 上海有色網(中文,中國市場視角)═══
+{{scrape:https://news.smm.cn/}}
+↑ 上海有色網「金属要闻」首頁,含當日中國有色金屬要聞
+
+═══ 資料源 4:日經中文網 大宗商品(政經視角)═══
+{{fetch:https://zh.cn.nikkei.com/politicsaeconomy/commodity.html}}
+↑ 日經「政經觀察 > 大宗商品」,含日期 + 文章 URL + 摘要
+
+注意:**KITCO Latest News 與 MarketWatch 已驗證無法爬**(KITCO 列表頁 JS-rendered,
+MarketWatch 對非登入回 401)。Mining.com RSS 涵蓋同類新聞,可作 KITCO 替代。
+
+═══ 資料源 5:PGM(Pt/Pd/Rh)機構級評論(權威性 > 一般新聞)═══
 {{scrape:https://platinuminvestment.com/news}}
 {{scrape:https://matthey.com/news/expert-insights}}
 {{scrape:https://matthey.com/products-and-markets/pgms-and-circularity/pgm-markets}}
@@ -1267,12 +1281,21 @@ async function patchExistingNewsAddPgmSources(db) {
   const id = row.id || row.ID;
   let promptStr = row.prompt || row.PROMPT;
   if (promptStr && typeof promptStr !== 'string' && promptStr.toString) promptStr = promptStr.toString();
-  if (promptStr && /platinuminvestment\.com/.test(promptStr)) return; // 已有 marker
+  // marker:platinuminvestment.com(PGM 評論源,2026-04-28 加)
+  //       + moneydj.com(中文新聞源,2026-04-28 後加)
+  // 兩 marker 都有才視為已升級到最新版
+  const hasWpic = !!promptStr && /platinuminvestment\.com/.test(promptStr);
+  const hasMoneydj = !!promptStr && /moneydj\.com/.test(promptStr);
+  if (hasWpic && hasMoneydj) return;
 
   try {
     await db.prepare(`UPDATE scheduled_tasks SET prompt=?, updated_at=SYSTIMESTAMP WHERE id=?`)
       .run(newSeed.prompt, id);
-    console.log(`[PMScheduledTaskSeed] Upgraded "[PM] 每日金屬新聞抓取" #${id}: prompt 加 WPIC + matthey 評論源`);
+    const missing = [
+      !hasWpic && 'WPIC + matthey',
+      !hasMoneydj && 'Mining RSS + MoneyDJ + SMM + 日經',
+    ].filter(Boolean).join(' + ');
+    console.log(`[PMScheduledTaskSeed] Upgraded "[PM] 每日金屬新聞抓取" #${id}: ${missing}`);
   } catch (e) {
     console.warn(`[PMScheduledTaskSeed] patch news pgm sources update #${id} failed:`, e.message);
   }
