@@ -457,7 +457,7 @@ function buildNewsWhere(query, userId) {
     const arr = String(query.domain).split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
     if (arr.length > 0) {
       const ph = arr.map(() => '?').join(',');
-      where.push(`LOWER(REGEXP_SUBSTR(n.url, 'https?://([^/]+)', 1, 1, NULL, 1)) IN (${ph})`);
+      where.push(`LOWER(REGEXP_SUBSTR(n.url, 'https?://([^/]+)', 1, 1, 'c', 1)) IN (${ph})`);
       params.push(...arr);
     }
   } else if (query.source) {
@@ -469,8 +469,8 @@ function buildNewsWhere(query, userId) {
       // 故前端應改傳 ?domain=,這條保留只為相容
       const ph = arr.map(() => '?').join(',');
       where.push(`
-        LOWER(REGEXP_SUBSTR(n.url, 'https?://([^/]+)', 1, 1, NULL, 1)) IN (
-          SELECT DISTINCT LOWER(REGEXP_SUBSTR(url, 'https?://([^/]+)', 1, 1, NULL, 1))
+        LOWER(REGEXP_SUBSTR(n.url, 'https?://([^/]+)', 1, 1, 'c', 1)) IN (
+          SELECT DISTINCT LOWER(REGEXP_SUBSTR(url, 'https?://([^/]+)', 1, 1, 'c', 1))
           FROM pm_news WHERE source IN (${ph})
         )
       `);
@@ -530,8 +530,8 @@ router.get('/news', verifyToken, verifyPmUser, async (req, res) => {
     // 若 0 筆且有 domain 篩選 → 印 DB 內實際 url domain 對照(看是不是大小寫 / port / www 差)
     if (total === 0 && (req.query.domain || req.query.source)) {
       const domains = await db.prepare(`
-        SELECT DISTINCT LOWER(REGEXP_SUBSTR(url, 'https?://([^/]+)', 1, 1, NULL, 1)) AS d, COUNT(*) AS c
-          FROM pm_news GROUP BY LOWER(REGEXP_SUBSTR(url, 'https?://([^/]+)', 1, 1, NULL, 1))
+        SELECT DISTINCT LOWER(REGEXP_SUBSTR(url, 'https?://([^/]+)', 1, 1, 'c', 1)) AS d, COUNT(*) AS c
+          FROM pm_news GROUP BY LOWER(REGEXP_SUBSTR(url, 'https?://([^/]+)', 1, 1, 'c', 1))
       `).all();
       console.log('[PmBriefing /news] DB 實際 url domains:', JSON.stringify(domains));
     }
