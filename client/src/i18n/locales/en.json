@@ -42,6 +42,8 @@
     "no": "No",
     "enabled": "Enabled",
     "disabled": "Disabled",
+    "enable": "Enable",
+    "disable": "Disable",
     "unknown": "Unknown",
     "none": "-",
     "all": "All",

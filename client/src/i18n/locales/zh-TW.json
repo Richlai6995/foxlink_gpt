@@ -42,6 +42,8 @@
     "no": "否",
     "enabled": "啟用",
     "disabled": "停用",
+    "enable": "啟用",
+    "disable": "停用",
     "unknown": "未知",
     "none": "-",
     "all": "全部",

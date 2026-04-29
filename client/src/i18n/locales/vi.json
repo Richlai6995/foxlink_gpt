@@ -42,6 +42,8 @@
     "no": "Không",
     "enabled": "Đang hoạt động",
     "disabled": "Đã tắt",
+    "enable": "Bật",
+    "disable": "Tắt",
     "unknown": "Không rõ",
     "none": "-",
     "all": "Tất cả",
