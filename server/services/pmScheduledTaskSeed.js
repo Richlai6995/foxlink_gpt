@@ -544,16 +544,24 @@ function buildDailyReportTask(kbMap, models = {}) {
 
   const prompt = `今天是 {{date}}({{weekday}}),撰寫一份「金屬市場日報」。
 
-═══ 上下文(admin 啟用前請把以下 placeholder 改成實際存在的 KB 名)═══
-{{kb:PM-新聞庫}}    ← 近 24 小時新聞 RAG
-{{kb:PM-分析庫}}    ← 過去日報沿革 RAG(若有)
+**這是採購單位每天主要收到的 email。**5 個 by-source 新聞抓取 task + 全網報價收集 +
+總體經濟指標日抓 都在你之前跑完,你要綜合這些原始資料寫成日報並發 email。
+
+═══ 上下文(RAG)═══
+{{kb:PM-新聞庫}}    ← 過去 24 小時新聞(by-source task 抓進來的)
+{{kb:PM-分析庫}}    ← 過去日報沿革
+{{kb:PM-原始資料庫}}  ← 全網收集的當日報價快照(/api/pm/briefing/prices 就是看這份)
 
 ═══ 撰寫要求 ═══
 1. 開場 200 字市場概覽(整體情緒 + 主旋律事件)
-2. 11 種金屬(CU 銅 / AL 鋁 / NI 鎳 / SN 錫 / ZN 鋅 / PB 鉛 / AU 金 / AG 銀 / PT 鉑 / PD 鈀 / RH 銠)逐一講當日表現 + 主要驅動
-3. 連結最近新聞與宏觀指標(DXY / VIX / UST10Y / 原油)的影響
-4. 對未來 7 天的展望(每金屬 1-2 句)
-5. 給採購單位的具體建議
+2. **🔥 今日重要新聞精選 5-10 篇**(從 PM-新聞庫 RAG 結果中挑出對採購最有幫助的)
+   - 每篇格式:**標題**(來源,published_at)— 50-100 字繁中濃縮 + 對哪個金屬影響(代碼)
+   - 排序:供應重大事件 / 政策 > 產業趨勢 > 公司動態 > 市場評論
+   - 採購最在意「會不會缺貨」「會不會漲價」,選新聞時偏供應 / 政策面
+3. 11 種金屬(CU 銅 / AL 鋁 / NI 鎳 / SN 錫 / ZN 鋅 / PB 鉛 / AU 金 / AG 銀 / PT 鉑 / PD 鈀 / RH 銠)逐一講當日表現 + 主要驅動
+4. 連結最近新聞與宏觀指標(DXY / VIX / UST10Y / 原油)的影響
+5. 對未來 7 天的展望(每金屬 1-2 句)
+6. 給採購單位的具體建議(進貨節奏 / 避險策略)
 
 ═══ 輸出格式(雙段)═══
 A. **報告全文**(繁體中文 markdown,給人看 + 給 generate_file 寫 DOCX 用)
@@ -900,21 +908,18 @@ function buildMonthlyReportTask(kbMap, models = {}) {
   };
 }
 
-// ── [PM] 全網金屬資料收集(P3.1)───────────────────────────────────────────
-// 每天凌晨 06:00 + 加 multi_time(若需要更頻繁)
-// 預設只 daily 一次,因為這是「全網總覽」性質,8 個 source × Pro 模型成本不低。
-// admin 想加密度可改 schedule_type='interval' + schedule_interval_hours=8
+// ── [PM] 全網金屬資料收集(2026-04-29 重構:純報價,不抓新聞)──────────────
+// 職責分工後,此 task 專注「11 個金屬當日報價 + 報價快照寫 KB」。
+// 新聞抓取 → 5 個 by-source news task;新聞 / 預測 / Email → 每日金屬日報統一處理。
+// 不發 email、不產 DOCX(交給日報統一)。
 function buildMasterScrapeTask(kbMap, models = {}) {
   const proModel = models.pro || 'pro';
-  const dbNewsId   = newNodeId('dbw');
   const dbPriceId  = newNodeId('dbw');
   const kbWriteId  = newNodeId('kbw');
-  const generateId = newNodeId('gen');
 
   const prompt = `今天是 {{date}}({{weekday}})。
-這個任務是 PM 平台的「**全網金屬資料總覽收集**」,目的是把當日各官方 / 權威網站的金屬市場資料一次抓回來,
-用 LLM 整合分析後寫進「PM-原始資料庫」KB + 報價落地到 pm_price_history,
-讓後續日報 / 週報 / 戰情室 / RAG 查詢都能引用最新一手資料。
+這個任務是 PM 平台的「**全網金屬報價收集**」,專注抓「11 個金屬當日報價快照」(USD 等價統一)。
+**新聞分析、預測、Email 已交給「[PM] 每日金屬日報」task 統一處理,本 task 不抓新聞、不產 DOCX、不發 email。**
 
 ═══ AU 黃金主源:台灣銀行黃金存摺(USD/oz 牌價)═══
 {{fetch:https://rate.bot.com.tw/gold/obu?Lang=zh-TW}}
@@ -930,85 +935,44 @@ function buildMasterScrapeTask(kbMap, models = {}) {
 
 ═══ AG 白銀(LBMA 抓不到,改用 Westmetall + Kitco 雙源)═══
 {{scrape:https://www.kitco.com/charts/livesilver.html}}
-↑ Westmetall 也含 Silver Fixing(EUR/kg 要換算),Kitco 即時 spot(USD/oz 直接用),
-  兩個都看;Westmetall 為主、Kitco 為備援/交叉驗證。
-
-═══ PGM 機構級評論(WPIC + matthey 專家觀點)═══
-{{scrape:https://platinuminvestment.com/news}}
-{{scrape:https://matthey.com/news/expert-insights}}
-{{scrape:https://matthey.com/products-and-markets/pgms-and-circularity/pgm-markets}}
-
-═══ 全網資料源(基本金屬 + 一般新聞;若 URL 在公司防火牆未通,LLM 會自動 skip)═══
-{{scrape:https://www.kitco.com/charts/livegold.html}}
-{{scrape:https://www.kitco.com/charts/livesilver.html}}
-{{scrape:https://www.kitco.com/news/}}
 {{scrape:https://www.westmetall.com/en/markdaten.php}}
-{{scrape:https://www.westmetall.com/en/news.php}}
+↑ Westmetall 含 Silver Fixing(EUR/kg 要換算),Kitco 即時 spot(USD/oz 直接用)
+  Westmetall 為主、Kitco 為備援/交叉驗證。
+
+═══ 基本金屬 + 日變動 %(LME 報價 + TradingEconomics)═══
 {{scrape:https://tradingeconomics.com/commodity/copper}}
 {{scrape:https://tradingeconomics.com/commodity/aluminum}}
 {{scrape:https://tradingeconomics.com/commodity/nickel}}
 {{scrape:https://tradingeconomics.com/commodity/zinc}}
 {{scrape:https://tradingeconomics.com/commodity/lead}}
-{{scrape:https://tradingeconomics.com/commodity/gold}}
-{{scrape:https://tradingeconomics.com/commodity/silver}}
+{{scrape:https://tradingeconomics.com/commodity/tin}}
 {{scrape:https://tradingeconomics.com/commodity/platinum}}
 {{scrape:https://tradingeconomics.com/commodity/palladium}}
-{{scrape:https://www.mining.com/news/}}
-{{scrape:https://oilprice.com/Latest-Energy-News/}}
-{{scrape:https://www.lme.com/Metals/Non-ferrous/LME-Copper}}
-{{scrape:https://www.investing.com/commodities/metals}}
+{{scrape:https://tradingeconomics.com/commodity/rhodium}}
+↑ 提供基本金屬 LME 報價 + 日變動 %,作為 11 個金屬 day_change_pct 主源
 
 ═══ 任務 ═══
-1. 解析每個來源的「結構化資料」(報價 / 漲跌 / 庫存 / 圖表數值)+「市場敘事」(評論 / 新聞)
-2. 撰寫一段 500-800 字的「當日全市場綜述」(中文)— 涵蓋:
-   - 11 種金屬(銅/鋁/鎳/錫/鋅/鉛/金/銀/鉑/鈀/銠)的當日表現
-   - 主要驅動事件(政策 / 庫存 / 地緣 / 美元動態)
-   - 跨資產關聯觀察(金 vs 美元 / 銅 vs 中國需求 / 銀 vs 太陽能)
-   - **PGM 重點**:JM Base Price 變動 + WPIC / matthey 對 Pt/Pd/Rh 供需的觀察
+1. 從以上 source 抓出當日報價數字
+2. 撰寫一段 200-400 字的「當日報價綜述」(中文)— 涵蓋:
+   - 11 種金屬當日 USD 等價報價 + 漲跌 %
+   - 主要驅動(美元 / LME 庫存 / 政策)— 簡述就好,不要寫長分析(分析交給日報 task)
+3. **11 個金屬報價快照** prices 陣列(USD 等價統一),寫進 pm_price_history
 
-3. **news 陣列(只放「真新聞 / 真評論文章」,絕對不要放純報價公告)**:
-   ✅ 算 news 的:
-      - Mining.com / 日經 / SMM / MoneyDJ 等的 article(供需事件 / 政策 / 公司動態 / 地緣)
-      - WPIC quarterly outlook / matthey expert-insights / pgm-markets 的 PGM 評論文章
-      - 各 source「news / 評論」分頁的 article(westmetall.com/en/news.php、kitco.com/news/、tradingeconomics 評論段)
-   ❌ **不要放進 news**(這些是報價來源,只進 prices):
-      - 台灣銀行黃金存摺牌價(rate.bot.com.tw/gold/obu)
-      - Johnson Matthey PGM Base Price RSS(matthey.com/pgm-prices/rss-feed.xml)
-      - Kitco live 報價頁(charts/livegold.html / livesilver.html / liveplatinum.html / livepalladium.html)
-      - Westmetall markdaten(報價表)
-      - TradingEconomics commodity/* 純圖表頁(只有報價數字 + 7 天 chart,沒文字評論)
-   ⚠️ 規則:條目本身要有 ≥ 200 字真實內文 / 分析 / 觀點才算 news;只抓到報價數字的 → 進 prices,不進 news
+═══ 輸出格式(雙段)═══
+A. **報價綜述全文**(markdown,200-400 字,給人看)
 
-4. **11 個金屬的當日報價快照**(USD 等價統一),寫進 pm_price_history
-   - **AU 黃金的 price_usd 從台銀取**,source="台灣銀行", source_url=台銀 URL, price_type="fixing", market="BOT"
-     (取「美金 / 1英兩 / 本行賣出」價;1英兩 = 1 troy oz)
-   - **PGM(Pt/Pd/Rh)的 price_usd 一律從 JM RSS 取**,source="JohnsonMatthey", price_type="fixing", market="JM"
-   - day_change_pct 從 TradingEconomics 補(JM RSS / 台銀都沒帶 %)
-   - **AG 白銀**:Westmetall(EUR/kg → USD/oz 換算)為主,Kitco 為備援
-
-═══ 輸出格式(三段)═══
-A. **綜述全文**(markdown,給人看 + DOCX 報告用,放最前面)
-
-B. **JSON 落地段**(放 markdown 末尾的單一 \`\`\`json 區塊;內含 news 與 prices 兩個 key)
+B. **JSON 落地段**(放 markdown 末尾的單一 \`\`\`json 區塊;含 _kb_doc + prices 兩個 key)
 
 \`\`\`json
 {
-  "news": [
+  "_kb_doc": [
     {
-      "title": "WPIC: Fourth consecutive platinum market deficit — 240 koz expected in 2026",
-      "url": "https://platinuminvestment.com/news/fourth-consecutive-platinum-market-deficit",
-      "source": "WPIC",
-      "language": "en",
-      "published_at": "{{date}}T08:00:00Z",
-      "summary": "繁體中文摘要 80-150 字,濃縮這篇 article 的供需論點與對 PT 價格的影響。",
-      "content": "原文 article body 整段拷貝(英文/中文都接受),1500-3000 字。內容必須是真評論 / 分析 / 新聞事件,不能是純報價數字。",
-      "sentiment_score": 0.6,
-      "sentiment_label": "positive",
-      "related_metals": ["PT"],
-      "topics": ["supply", "demand", "forecast"]
+      "title": "全網金屬報價快照 — {{date}}",
+      "summary": "200-400 字當日報價綜述(就是 A 段內容濃縮一份)",
+      "content": "A 段完整 markdown 文字 + 11 個金屬逐一條列價格 + day_change% + 來源,給 KB 做 RAG 檢索用",
+      "source": "PM-master-scrape",
+      "as_of_date": "{{date}}"
     }
-    // 每篇都要有 ≥ 200 字真實 article body。報價來源(JM RSS / 台銀 / Kitco live / Westmetall markdaten / TE commodity)不要放這裡!
-    // 共 ~8-15 篇真新聞。如果某天確實沒抓到任何 article,寧可給空陣列 [] 也別塞報價公告充數
   ],
   "prices": [
     {
@@ -1034,88 +998,50 @@ B. **JSON 落地段**(放 markdown 末尾的單一 \`\`\`json 區塊;內含 news
       "metal_name": "鉑",
       "price_usd": 2019.0,
       "unit": "USD/oz",
-      "original_price": 2019.0,
-      "original_currency": "USD",
-      "original_unit": "USD/troy oz",
       "fx_rate_to_usd": 1.0,
       "day_change_pct": -1.87,
       "price_type": "fixing",
       "market": "JM",
       "source": "JohnsonMatthey",
       "source_url": "https://matthey.com/pgm-prices/rss-feed.xml",
-      "raw_snippet": "JM Base Price: US$ 2019 per troy oz (28 Apr 2026 08:30 HK);day_change 從 TradingEconomics 補"
+      "raw_snippet": "JM Base Price: US$ 2019 per troy oz (28 Apr 2026 08:30 HK)"
     }
-    // **必須 11 筆**,順序:AU AG PT PD CU AL NI ZN PB SN RH
+    // **必須 11 筆**,順序:AU AG PT PD RH CU AL NI ZN PB SN
     // 找不到資料的金屬 → 仍輸出該筆但 price_usd / day_change_pct 給 null,source 給 'unknown'
   ]
 }
 \`\`\`
 
-═══ AU 寫入規則(2026-04-28 改台銀)═══
+═══ AU 寫入規則 ═══
 - **price_usd 取台銀「美金 / 1英兩 / 本行賣出」價**(USD/oz)
 - source = "台灣銀行" / source_url = "https://rate.bot.com.tw/gold/obu?Lang=zh-TW"
 - price_type = "fixing" / market = "BOT"
-- 注意:台銀牌價含 spread,跟 LBMA London Fixing 略有差距,但這是正崴實際採購結算價
 
 ═══ PGM 寫入規則 ═══
-- **PT / PD / RH 的 price_usd 一律從 JM RSS 取**(資料源:matthey RSS)
-  - source = "JohnsonMatthey"
-  - source_url = "https://matthey.com/pgm-prices/rss-feed.xml"
-  - price_type = "fixing"(JM Base Price 是日 fixing,不是 spot)
-  - market = "JM"
-- day_change_pct 從 TradingEconomics 的「down/up X.XX%」補
-- JM RSS 也含 Iridium / Ruthenium,但目前 metal_code 只有 11 個(沒 IR/RU),先不寫 row
+- **PT / PD / RH 的 price_usd 一律從 JM RSS 取**
+  - source = "JohnsonMatthey", source_url = "https://matthey.com/pgm-prices/rss-feed.xml"
+  - price_type = "fixing", market = "JM"
+- day_change_pct 從 TradingEconomics 補
 
 ═══ AG 寫入規則 ═══
-- **Westmetall 為主**(EUR/kg → USD/oz 換算,is_estimated=1)
-- Kitco 為備援/交叉驗證(scrape https://www.kitco.com/charts/livesilver.html)
-- LBMA 不能爬(資料權獨家授權給 ICE/IBA)
+- **Westmetall 為主**(EUR/kg → USD/oz 換算)
+- Kitco 為備援/交叉驗證
 
 ═══ 寫入規則(務必遵守)═══
 - **prices 必 11 筆**(metal_code 全部到齊),即使部分金屬今天沒資料,給 null 也要列出
-- price_usd 一律換算成 **USD 等價**(EUR → USD 用 fx_rate_to_usd;ton ↔ kg 看 unit 欄位記錄原單位)
+- price_usd 一律換算成 **USD 等價**
 - as_of_date 統一用今天 = {{date}}(YYYY-MM-DD)
-- summary 必繁體中文;content 可英文 + 部分中譯
-- sentiment_score -1 ~ +1 是「對該金屬未來 1-7 天價格的影響」
-- 任何 source scrape 失敗就 skip 該 news 條目,但 prices 永遠 11 筆
-- **只輸出一個 \`\`\`json\`\`\` 區塊**,內含 news 與 prices 兩個 key
+- **只輸出一個 \`\`\`json\`\`\` 區塊,內含 prices 陣列(沒有 news!)**
 
-═══ 自我檢查清單(輸出前最後一遍)═══
-- [ ] 我有寫 A 段中文綜述嗎?
-- [ ] news 陣列每筆都有 ≥ 200 字真實 article body 嗎?(只有報價數字 = 不該進 news)
-- [ ] **news 裡有沒有混進報價公告?**(JM RSS / 台銀牌價 / Kitco live / Westmetall markdaten / TE commodity 純圖表 → 一律刪掉,只留 prices)
+═══ 自我檢查清單 ═══
+- [ ] A 段中文報價綜述 200-400 字?
+- [ ] **JSON 內只有 _kb_doc + prices,沒有 news?**(2026-04-29 起新聞已交給 by-source task)
+- [ ] _kb_doc 是 1 筆陣列,title/summary/content 都填好?
 - [ ] prices 是 11 筆 + metal_code 全部到齊?
 - [ ] AU 用台銀價、PT/PD/RH 用 JM Base Price?
-- [ ] published_at 是 ISO 格式?
-- [ ] 整份輸出只有一個 \`\`\`json\`\`\` 區塊(不是兩個分開的 news / prices)?`;
+- [ ] 整份輸出只有一個 \`\`\`json\`\`\` 區塊?`;
 
   const pipeline = [
-    {
-      id: dbNewsId,
-      type: 'db_write',
-      label: '寫入 pm_news(各 source 條目)',
-      table: 'pm_news',
-      operation: 'insert',
-      key_columns: [],
-      input: '{{ai_output}}',
-      array_path: '$.news',
-      array_path_optional: true,  // 舊 prompt 還是頂層 array 時也能 silent fallback
-      on_row_error: 'skip',
-      max_rows: 50,
-      column_mapping: [
-        { jsonpath: '$.url',             column: 'url',             transform: '',                required: true },
-        { jsonpath: '$.url',             column: 'url_hash',        transform: 'sha256',          required: true },
-        { jsonpath: '$.title',           column: 'title',           transform: '' },
-        { jsonpath: '$.source',          column: 'source',          transform: '' },
-        { jsonpath: '$.published_at',    column: 'published_at',    transform: 'date' },
-        { jsonpath: '$.language',        column: 'language',        transform: '' },
-        { jsonpath: '$.summary',         column: 'summary',         transform: '' },
-        { jsonpath: '$.sentiment_score', column: 'sentiment_score', transform: 'number' },
-        { jsonpath: '$.sentiment_label', column: 'sentiment_label', transform: '' },
-        { jsonpath: '$.related_metals',  column: 'related_metals',  transform: 'array_join_comma' },
-        { jsonpath: '$.topics',          column: 'topics',          transform: 'array_join_comma' },
-      ],
-    },
     {
       id: dbPriceId,
       type: 'db_write',
@@ -1125,7 +1051,7 @@ B. **JSON 落地段**(放 markdown 末尾的單一 \`\`\`json 區塊;內含 news
       key_columns: ['metal_code', 'as_of_date'],
       input: '{{ai_output}}',
       array_path: '$.prices',
-      array_path_optional: true,  // LLM 沒輸出 prices key 時 silent skip,不擋 pipeline
+      array_path_optional: true,
       on_row_error: 'skip',
       max_rows: 20,
       column_mapping: [
@@ -1149,30 +1075,34 @@ B. **JSON 落地段**(放 markdown 末尾的單一 \`\`\`json 區塊;內含 news
     {
       id: kbWriteId,
       type: 'kb_write',
-      label: '寫入 PM-原始資料庫(各 source 全文)',
+      // 報價快照寫進 KB-原始資料庫(每天一個 doc,RAG 查得到「4/29 那天台銀金多少」)
+      // content 用 ai_output 整段(含 A 段中文綜述 + B 段 JSON 報價)
+      label: '寫入 PM-原始資料庫(報價快照 + 綜述)',
       kb_id: (kbMap && kbMap.get('PM-原始資料庫')) || '',
       kb_name: 'PM-原始資料庫',
+      // 沒有 url(只有報價,沒對應 article URL),用 title 當 dedupe key
       title_field: '$.title',
-      url_field: '$.url',
+      url_field: '',  // 報價快照沒 url
       summary_field: '$.summary',
       content_field: '$.content',
       source_field: '$.source',
-      published_at_field: '$.published_at',
-      chunk_strategy: 'mixed',
-      dedupe_mode: 'url',
-      max_chunks_per_run: 200,
+      published_at_field: '$.as_of_date',
+      chunk_strategy: 'whole',  // 報價快照不大,整段成 1 chunk 即可
+      dedupe_mode: 'title',
+      max_chunks_per_run: 5,
       on_row_error: 'skip',
+      // 用 ai_output 直接當單筆 doc(LLM 出的 A 段中文綜述就是 content),不從 prices drill
       input: '{{ai_output}}',
-      array_path: '$.news',
-      array_path_optional: true,  // 舊 prompt 還是頂層 array 時 fallback
-    },
-    {
-      id: generateId,
-      type: 'generate_file',
-      label: '產出 DOCX 全網綜述',
-      output_file: 'docx',
-      filename: '貴金屬全網綜述_{{date}}.docx',
-      input: '{{ai_output}}',
+      // 沒 array_path → extractJsonRows 會把整 ai_output 當 1 row,LLM 拿到的 root 就是 doc
+      // 但實際上整段 ai_output 是 markdown + JSON,要轉成單筆 KB doc。
+      // 解法:title / summary / content 都從 ai_output 全文取(沒 jsonpath 可解時 LLM
+      //       輸出沒這 fields → 走 extractItem 預設邏輯,title/summary/content 全空時 row 被 skip)
+      // ⚠️ 為了確保 KB 寫得進去,prompt 末尾加一段「給 KB 寫入用的 doc metadata」JSON
+      // 在 prompt 改造時實際做法是:以 _kb_doc 為一個 wrapper,LLM 輸出時帶,例:
+      //   {"_kb_doc": {"title": "貴金屬全網報價快照 — {{date}}", ...}, "prices": [...]}
+      // mapping 用 $._kb_doc.title 等
+      array_path: '$._kb_doc',
+      array_path_optional: true,  // LLM 沒給 _kb_doc 也 ok(reference,別擋 pipeline)
     },
   ];
 
@@ -1188,9 +1118,10 @@ B. **JSON 落地段**(放 markdown 末尾的單一 \`\`\`json 區塊;內含 news
     output_type: 'text',
     file_type: null,
     filename_template: null,
+    // 不發 email(2026-04-29:全部 email 由日報統一發)
     recipients_json: '[]',
-    email_subject: '[PM] 貴金屬全網資料綜述 — {{date}}',
-    email_body: '今日全網金屬資料(Kitco / Westmetall / TradingEconomics 等)綜述已抓取整合,完整內文已寫入 PM-原始資料庫 KB。',
+    email_subject: '[PM] 全網金屬報價快照 — {{date}}',
+    email_body: '今日 11 個金屬報價已落地到 pm_price_history + PM-原始資料庫。新聞分析、預測、email 由「[PM] 每日金屬日報」task 統一處理。',
     status: 'paused',
     pipeline_json: JSON.stringify(pipeline),
   };
@@ -1618,25 +1549,31 @@ async function patchExistingMasterScrapeAddPriceWrite(db, kbMap, models) {
   const hasPriceWrite = Array.isArray(nodes) && nodes.some(
     n => n?.type === 'db_write' && String(n.table || '').toLowerCase() === 'pm_price_history'
   );
-  // marker:JohnsonMatthey(2026-04-28 加 PGM RSS)+ rate.bot.com.tw(2026-04-28 加台銀金)
-  //       + news vs prices 規則(2026-04-28 加,避 LLM 把 JM RSS / 台銀牌價當 news 抽出來)
-  const hasJmMarker        = !!promptStr && /JohnsonMatthey/.test(promptStr);
-  const hasBotMarker       = !!promptStr && /rate\.bot\.com\.tw/.test(promptStr);
-  const hasNewsRulesMarker = !!promptStr && /絕對不要放純報價公告/.test(promptStr);
+  // marker 列表(只要任一缺就 force update + 改 recipients):
+  //   JohnsonMatthey + rate.bot.com.tw + news vs prices 規則(2026-04-28)
+  //   + 「全網金屬報價收集」+ _kb_doc(2026-04-29 重構,砍新聞段、不發 email、不產 DOCX)
+  const hasJmMarker         = !!promptStr && /JohnsonMatthey/.test(promptStr);
+  const hasBotMarker        = !!promptStr && /rate\.bot\.com\.tw/.test(promptStr);
+  const hasNewsRulesMarker  = !!promptStr && /絕對不要放純報價公告/.test(promptStr);
+  const hasV2Marker         = !!promptStr && /全網金屬報價收集/.test(promptStr);
+  const hasKbDocMarker      = !!promptStr && /_kb_doc/.test(promptStr);
 
-  if (hasPriceWrite && hasJmMarker && hasBotMarker && hasNewsRulesMarker) return; // 四條件都 ok 才 skip
+  if (hasPriceWrite && hasJmMarker && hasBotMarker && hasNewsRulesMarker && hasV2Marker && hasKbDocMarker) return;
 
   try {
+    // 一併 update prompt + pipeline + email_subject/body(2026-04-29 重構不發 email)
     await db.prepare(`
       UPDATE scheduled_tasks
-      SET pipeline_json = ?, prompt = ?, updated_at = SYSTIMESTAMP
+      SET pipeline_json = ?, prompt = ?, email_subject = ?, email_body = ?, updated_at = SYSTIMESTAMP
       WHERE id = ?
-    `).run(newSeed.pipeline_json, newSeed.prompt, id);
+    `).run(newSeed.pipeline_json, newSeed.prompt, newSeed.email_subject, newSeed.email_body, id);
     const missing = [
       !hasPriceWrite && 'pm_price_history',
       !hasJmMarker && 'JM RSS',
       !hasBotMarker && '台銀金 fetch',
       !hasNewsRulesMarker && 'news vs prices 規則',
+      !hasV2Marker && '2026-04-29 純報價重構(砍新聞段)',
+      !hasKbDocMarker && '_kb_doc KB 寫入結構',
     ].filter(Boolean).join(' + ');
     console.log(`[PMScheduledTaskSeed] Upgraded "${targetName}" #${id}: ${missing}`);
   } catch (e) {
@@ -1719,6 +1656,32 @@ async function patchExistingPgmCommentaryCutoff60(db) {
 // 5 個 by-source task seed 過後,要把已 seed 進去的 prompt 補上 {{news_seen:...}} placeholder
 // 讓 LLM 看到「已抓過的 url 列表」跳過,省 token + 提升新鮮度
 // marker = `news_seen:`,沒這字串就 force update prompt(整段重寫)
+// ── Patch 既有 [PM] 每日金屬日報:加「今日重要新聞精選 5-10 篇」段(2026-04-29)──
+// marker = 「🔥 今日重要新聞精選」字串,沒這字串就 force update prompt
+async function patchExistingDailyReportNewsTopList(db) {
+  const newSeed = buildDailyReportTask(undefined, {});
+  let row;
+  try {
+    row = await db.prepare(`SELECT id, name, prompt FROM scheduled_tasks WHERE name='[PM] 每日金屬日報'`).get();
+  } catch (e) {
+    console.warn('[PMScheduledTaskSeed] patch daily news_top_list select failed:', e.message);
+    return;
+  }
+  if (!row) return;
+  const id = row.id || row.ID;
+  let promptStr = row.prompt || row.PROMPT;
+  if (promptStr && typeof promptStr !== 'string' && promptStr.toString) promptStr = promptStr.toString();
+  if (!!promptStr && /今日重要新聞精選/.test(promptStr)) return; // 已升級
+
+  try {
+    await db.prepare(`UPDATE scheduled_tasks SET prompt=?, updated_at=SYSTIMESTAMP WHERE id=?`)
+      .run(newSeed.prompt, id);
+    console.log(`[PMScheduledTaskSeed] Upgraded "[PM] 每日金屬日報" #${id}: 加「今日重要新聞精選」段`);
+  } catch (e) {
+    console.warn(`[PMScheduledTaskSeed] patch daily news_top_list update #${id} failed:`, e.message);
+  }
+}
+
 async function patchExistingNewsSeenPlaceholder(db) {
   const targets = [
     { name: '[PM] 新聞 Mining.com', builder: buildNewsMiningComTask },
@@ -2068,6 +2031,9 @@ async function autoSeedPmScheduledTasks(db, kbMap) {
 
   // 2026-04-29:patch 5 個 by-source news task 加 {{news_seen:...}} placeholder
   await patchExistingNewsSeenPlaceholder(db);
+
+  // 2026-04-29:patch 每日金屬日報 prompt 加「今日重要新聞精選 5-10 篇」段
+  await patchExistingDailyReportNewsTopList(db);
 
   // Patch user 自建任務:[PM] 每日貴金屬行情(台銀金 + JM RSS + Kitco silver)
   await patchUserDailyMetalQuoteTask(db);
