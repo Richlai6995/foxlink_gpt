@@ -562,7 +562,7 @@ const UPLOAD_DIR = process.env.UPLOAD_DIR
 
 const upload = multer({
   dest: path.join(UPLOAD_DIR, 'tmp'),
-  limits: { fileSize: 500 * 1024 * 1024 }, // 500MB ceiling; per-user limits enforced below
+  limits: { fileSize: 300 * 1024 * 1024 }, // 300MB ceiling (對齊 ingress proxy-body-size 310m); per-user limits enforced below
   fileFilter: (req, file, cb) => {
     const name = Buffer.from(file.originalname, 'latin1').toString('utf8');
     const c = classifyUpload(name, file.mimetype);
@@ -1353,8 +1353,16 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
       if (mimeType.startsWith('audio/')) {
         const audioSizeMB = +(file.size / 1024 / 1024).toFixed(2);
         console.log(`[Chat] Audio branch: "${originalName}" size=${audioSizeMB}MB mime=${mimeType} user=${req.user.id}`);
-        sendEvent({ type: 'status', message: `正在轉錄音訊: ${originalName} (${audioSizeMB}MB)...` });
+        // 經驗值:Flash 約 1.2 秒/MB(WAV),100MB 約 2 分鐘;最少 30 秒避免短檔顯示太樂觀
+        const etaSec = Math.max(30, Math.round(audioSizeMB * 1.2));
+        sendEvent({ type: 'status', message: `正在轉錄: ${originalName} (${audioSizeMB}MB),預計 ${etaSec}s,大檔請耐心等候勿刷新...` });
         const tAudio0 = Date.now();
+        // 心跳:每 10 秒送一次 status 給前端,避免使用者以為卡住而刷新;
+        // 同時防中間 proxy 把 idle SSE 連線砍掉(雖然 ingress 已設 3600s)
+        const heartbeat = setInterval(() => {
+          const elapsedSec = Math.round((Date.now() - tAudio0) / 1000);
+          sendEvent({ type: 'status', message: `轉錄中: ${originalName} — 已等 ${elapsedSec}s / 預計 ${etaSec}s` });
+        }, 10000);
         try {
           const transcribeResult = await transcribeAudio(filePath, mimeType);
           const transcription = transcribeResult.text;
@@ -1373,6 +1381,7 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
           sendEvent({ type: 'status', message: `音訊轉錄失敗 (${audioSizeMB}MB): ${e.message}` });
           combinedUserText += `\n\n[音訊轉錄失敗: ${originalName} — ${e.message}]`;
         } finally {
+          clearInterval(heartbeat);
           // 大檔不留:轉成功失敗都刪,避免硬碟堆積
           try { fs.unlinkSync(filePath); } catch (e) { console.warn(`[Chat] audio cleanup failed: ${filePath}`, e.message); }
         }

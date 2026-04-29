@@ -677,7 +677,7 @@ export default function UserManagement() {
                     <div className="flex items-center gap-2">
                       <span className="text-sm text-slate-500">{t('users.form.limitMb')}</span>
                       <input
-                        type="number" min={1} max={500}
+                        type="number" min={1} max={300}
                         value={form.audio_max_mb}
                         onChange={e => setForm(p => ({ ...p, audio_max_mb: Number(e.target.value) }))}
                         className="input w-20 py-1"

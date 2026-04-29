@@ -17,8 +17,9 @@ metadata:
     nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
     nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
     nginx.ingress.kubernetes.io/proxy-http-version: "1.1"
-    # 檔案上傳大小 (音訊/PDF 最大 60MB)
-    nginx.ingress.kubernetes.io/proxy-body-size: "160m"
+    # 檔案上傳大小:upper bound 對齊 multer ceiling + admin UI 上限。
+    # 300MB audio ≈ 4hr m4a stereo,夠日常會議錄音;再大會撞 pod 2Gi RAM(base64+JSON 各複一份 ~1.5x)。
+    nginx.ingress.kubernetes.io/proxy-body-size: "310m"
     # 併發連線優化
     nginx.ingress.kubernetes.io/upstream-keepalive-connections: "100"
     nginx.ingress.kubernetes.io/proxy-next-upstream-timeout: "5"

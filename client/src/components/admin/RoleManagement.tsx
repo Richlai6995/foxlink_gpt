@@ -441,7 +441,7 @@ export default function RoleManagement() {
                       {(form as any)[field] && (
                         <div className="flex items-center gap-1">
                           <input
-                            type="number" min={1} max={500}
+                            type="number" min={1} max={300}
                             value={(form as any)[mbField]}
                             onChange={e => setForm({ ...form, [mbField]: Number(e.target.value) })}
                             className="w-20 border border-slate-300 rounded-lg px-2 py-1 text-sm"
