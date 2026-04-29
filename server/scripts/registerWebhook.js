@@ -138,13 +138,15 @@ async function main() {
     event: 'created',
     secret: secret || undefined,
   }).catch(e => {
-    console.warn(`  ⚠ attachmentActions:created 註冊失敗(可能 Bot Token scope 不夠 / Webex 端不支援):${e.response?.data?.message || e.message}`);
-    return null;
+    // 不要 silent skip — 之前 swallow 過 error,K8s 部署完一切看似正常,
+    // 但所有 Adaptive Card 按鈕(Forecast / What-if / 警示 ACK)全失效,user 看不到 log 也找不到原因。
+    console.error(`  ✗ attachmentActions:created 註冊失敗: ${e.response?.data?.message || e.message}`);
+    console.error(`     Bot Token 必須是 Bot 類型且有 spark:webhooks_write scope。`);
+    console.error(`     缺這條 webhook → Adaptive Card 所有按鈕全部失效。`);
+    throw e;
   });
-  if (cardWh) {
-    console.log(`  ✓ attachmentActions:created → ${cardWh.id}`);
-    console.log(`     用於 Adaptive Card 按鈕 callback(警示 ACK 等)`);
-  }
+  console.log(`  ✓ attachmentActions:created → ${cardWh.id}`);
+  console.log(`     用於 Adaptive Card 按鈕 callback(警示 ACK 等)`);
 
   if (!secret) {
     console.warn('\n  WARNING: WEBEX_WEBHOOK_SECRET not set. HMAC signature verification disabled.');

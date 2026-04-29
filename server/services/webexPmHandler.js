@@ -229,8 +229,10 @@ async function handleLatest({ webex, roomId, lang, metal }) {
 async function handleForecast({ webex, roomId, lang, metal }) {
   const db = require('../database-oracle').db;
   // 取最近一次 forecast(forecast_date 最大)的 7 筆 horizon
+  // ⚠ 必走 string ↔ TO_DATE/TO_CHAR explicit conversion;直接 bind JS Date 物件給 DATE 欄位
+  // 會踩 ORA-01861(NLS_DATE_FORMAT 不一致時 oracledb 內部 toString 跟期望 format mismatch)。
   const latestForecastDate = await db.prepare(`
-    SELECT MAX(forecast_date) AS d FROM forecast_history
+    SELECT TO_CHAR(MAX(forecast_date), 'YYYY-MM-DD') AS d FROM forecast_history
     WHERE entity_type='metal' AND UPPER(entity_code)=UPPER(?)
   `).get(metal);
   const fcDate = latestForecastDate?.d ?? latestForecastDate?.D;
@@ -239,9 +241,11 @@ async function handleForecast({ webex, roomId, lang, metal }) {
     return;
   }
   const rows = await db.prepare(`
-    SELECT target_date, predicted_mean, predicted_lower, predicted_upper
+    SELECT TO_CHAR(target_date, 'YYYY-MM-DD') AS target_date,
+           predicted_mean, predicted_lower, predicted_upper
     FROM forecast_history
-    WHERE entity_type='metal' AND UPPER(entity_code)=UPPER(?) AND forecast_date=?
+    WHERE entity_type='metal' AND UPPER(entity_code)=UPPER(?)
+      AND TRUNC(forecast_date) = TO_DATE(?, 'YYYY-MM-DD')
     ORDER BY target_date
     FETCH FIRST 7 ROWS ONLY
   `).all(metal, fcDate);
