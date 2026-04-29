@@ -234,10 +234,14 @@ router.get('/forecast-overlay', verifyToken, verifyPmUser, async (req, res) => {
     const to = req.query.to || null;
     if (!metal) return res.status(400).json({ error: 'metal required' });
 
+    // 區間 filter 用「forecast_date <= to(在 to 之前做的預測)+ target_date >= from(預測目標不要太古老)」。
+    // 注意:不能對 target_date 加上界,因為 forecast 的 target_date 多半是未來(D+1 ~ D+7),
+    // 歷史 chart 的 to 是今天,target_date <= 今天 會把所有未來預測 filter 掉 → endpoint 永遠回 0 筆。
+    // 前端 ECharts time axis 沒設 min/max,會自動延伸到 target_date 最右邊,把未來預測線畫在 chart 右側。
     const where = [`f.entity_type = 'metal'`, `UPPER(f.entity_code) = UPPER(?)`];
     const params = [metal];
     if (from) { where.push(`f.target_date >= TO_DATE(?, 'YYYY-MM-DD')`); params.push(from); }
-    if (to)   { where.push(`f.target_date <= TO_DATE(?, 'YYYY-MM-DD')`); params.push(to); }
+    if (to)   { where.push(`f.forecast_date <= TO_DATE(?, 'YYYY-MM-DD')`); params.push(to); }
 
     const rows = await db.prepare(`
       SELECT * FROM (
