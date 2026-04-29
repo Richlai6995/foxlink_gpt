@@ -515,8 +515,26 @@ router.get('/news', verifyToken, verifyPmUser, async (req, res) => {
     const offset = (page - 1) * size;
     const { where, params } = buildNewsWhere(req.query, req.user.id);
 
+    // DEBUG:domain / source 篩選還是 0 筆 → 印 query + WHERE + params 看真因
+    console.log('[PmBriefing /news] query=', JSON.stringify({
+      domain: req.query.domain, source: req.query.source, metal: req.query.metal,
+      from: req.query.from, to: req.query.to, date_field: req.query.date_field,
+    }));
+    console.log('[PmBriefing /news] WHERE=', where.replace(/\s+/g, ' '));
+    console.log('[PmBriefing /news] params=', JSON.stringify(params));
+
     const totalRow = await db.prepare(`SELECT COUNT(*) AS cnt FROM pm_news n ${where}`).get(...params);
     const total = Number(totalRow?.cnt || 0);
+    console.log(`[PmBriefing /news] total=${total}`);
+
+    // 若 0 筆且有 domain 篩選 → 印 DB 內實際 url domain 對照(看是不是大小寫 / port / www 差)
+    if (total === 0 && (req.query.domain || req.query.source)) {
+      const domains = await db.prepare(`
+        SELECT DISTINCT LOWER(REGEXP_SUBSTR(url, 'https?://([^/]+)', 1, 1, NULL, 1)) AS d, COUNT(*) AS c
+          FROM pm_news GROUP BY LOWER(REGEXP_SUBSTR(url, 'https?://([^/]+)', 1, 1, NULL, 1))
+      `).all();
+      console.log('[PmBriefing /news] DB 實際 url domains:', JSON.stringify(domains));
+    }
 
     const rows = await db.prepare(`
       SELECT n.id, n.url, n.title, n.source, n.language,
