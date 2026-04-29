@@ -454,7 +454,17 @@ function buildNewsWhere(query, userId) {
   if (query.source) {
     const arr = String(query.source).split(',').map(s => s.trim()).filter(Boolean);
     if (arr.length > 0) {
-      where.push(`n.source IN (${arr.map(() => '?').join(',')})`);
+      // 篩選邏輯改用「url domain match」而非 source 字串完全相符
+      // 原因:LLM 對同一網站可能寫成不同 source 字串(SMM / SMM 上海有色网 / SMM上海有色網),
+      //      用 source 字串匹配會漏抓。改成「先找這些 source 字串對應的 domain,再以 domain 反查所有 row」,
+      //      同 domain 不同 source 字串的 row 都會被帶出。
+      const ph = arr.map(() => '?').join(',');
+      where.push(`
+        LOWER(REGEXP_SUBSTR(n.url, 'https?://([^/]+)', 1, 1, NULL, 1)) IN (
+          SELECT DISTINCT LOWER(REGEXP_SUBSTR(url, 'https?://([^/]+)', 1, 1, NULL, 1))
+          FROM pm_news WHERE source IN (${ph})
+        )
+      `);
       params.push(...arr);
     }
   }
@@ -520,15 +530,38 @@ router.get('/news', verifyToken, verifyPmUser, async (req, res) => {
 });
 
 // distinct sources for dropdown
+// 同 url domain 的 source 字串 variants 會合併成一筆(label 取最 popular 的 source 字串,cnt 是 domain 全部加總)
+// 原因:LLM 對同網站常寫成多個變體(SMM / SMM上海有色网 / SMM上海有色網),
+//      列表顯示一筆「SMM上海有色網 15」比看到三個分開的「... 1」「... 7」「... 7」直觀多
 router.get('/news/sources', verifyToken, verifyPmUser, async (req, res) => {
   try {
     const db = require('../database-oracle').db;
-    const rows = await db.prepare(`
-      SELECT source, COUNT(*) AS cnt
-      FROM pm_news
-      WHERE source IS NOT NULL AND scraped_at >= TRUNC(SYSDATE) - 60
-      GROUP BY source ORDER BY cnt DESC
+    // 先撈所有 source + url(60 天內),server-side group by domain
+    const raw = await db.prepare(`
+      SELECT source, url FROM pm_news
+       WHERE source IS NOT NULL AND scraped_at >= TRUNC(SYSDATE) - 60
     `).all();
+    const grouped = new Map(); // domain → { sources: Map<source, count>, total: number }
+    for (const r of raw || []) {
+      const url = r.url || r.URL;
+      const source = r.source || r.SOURCE;
+      const m = url && url.match(/^https?:\/\/([^/]+)/i);
+      const domain = m ? m[1].toLowerCase() : (source || 'unknown');
+      if (!grouped.has(domain)) grouped.set(domain, { sources: new Map(), total: 0 });
+      const g = grouped.get(domain);
+      g.sources.set(source, (g.sources.get(source) || 0) + 1);
+      g.total++;
+    }
+    // 每 domain 取最 popular 的 source 字串當 label
+    const rows = [];
+    for (const [domain, g] of grouped) {
+      let label = '', topCount = 0;
+      for (const [s, c] of g.sources) {
+        if (c > topCount) { label = s; topCount = c; }
+      }
+      rows.push({ source: label, cnt: g.total, domain });
+    }
+    rows.sort((a, b) => b.cnt - a.cnt);
     res.json(rows);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
