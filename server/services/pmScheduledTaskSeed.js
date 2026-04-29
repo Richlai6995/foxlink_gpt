@@ -240,7 +240,8 @@ function _buildBySourceNewsPipeline(kbMap) {
 }
 
 // 共用 prompt 後段(輸出格式 + 自我檢查清單)
-function _commonNewsPromptTail(targetMin, targetMax) {
+// cutoffDays 預設 7(daily 新聞);PGM 評論等更新頻率低的 source 可放寬到 60-90
+function _commonNewsPromptTail(targetMin, targetMax, cutoffDays = 7) {
   return `
 
 ═══ ⚠️ 輸出格式(務必嚴格遵守)═══
@@ -272,16 +273,16 @@ B. **JSON 落地段(MANDATORY)**:markdown 末尾用 \`\`\`json ... \`\`\` 包起
 
 ═══ 規則(嚴格遵守)═══
 - **目標 ${targetMin}-${targetMax} 篇**(這是 MUST,不是 nice-to-have;少於 ${targetMin} 篇就再讀一次 source 多挖)
-- **published_at 必須在 {{date}} 往前 7 天內**,超過 7 天的舊 article 一律跳過
+- **published_at 必須在 {{date}} 往前 ${cutoffDays} 天內**,超過 ${cutoffDays} 天的舊 article 一律跳過
 - **url 必須是具體 article URL**,不是首頁 / list 頁(如果上游給你的 source 只有 list 頁,**逐個 article URL 點進去抓**,不要把 list 頁 url 當 article 抽出來)
 - **content 必須是真 article body**,≥ 200 字真實文字 / 評論 / 分析。報價快照 / 牌價公告不算
 - **content 跟 summary 是不同欄位不同內容**(content 1500-3000 字原文,summary 80-150 字繁中濃縮)
 
 ═══ 自我檢查清單(輸出前最後一遍)═══
 - [ ] B 段 \`\`\`json [...] \`\`\` 區塊有寫?
-- [ ] 篇數達 ${targetMin}-${targetMax}?(LLM 偷懶問題:不要只給 5 篇就交差)
+- [ ] 篇數達 ${targetMin}-${targetMax}?(LLM 偷懶問題:不要只給 ${targetMin-2} 篇就交差)
 - [ ] 每筆 url 是具體 article 不是首頁?
-- [ ] 每筆 published_at 在 7 天內?
+- [ ] 每筆 published_at 在 ${cutoffDays} 天內?
 - [ ] 每筆 content 是 ≥ 200 字真 article body 不是報價快照?`;
 }
 
@@ -411,9 +412,11 @@ function buildNewsPgmCommentaryTask(kbMap, models = {}) {
   - source = "WPIC" 或 "JohnsonMatthey"
   - related_metals 必須含 ["PT"] / ["PD"] / ["RH"] 至少一個
   - sentiment 多半 neutral(機構分析較中性)
-  - **published_at 在 7 天內**(WPIC quarterly 經常是幾個月前發的舊文,跳過,只抓近 7 天的)${_commonNewsPromptTail(1, 5)}
+  - **published_at 在 60 天內**(WPIC quarterly 是季度發布,JM expert-insights 月度發,
+    60 天 cutoff 能涵蓋上一季 outlook + 過去兩個月專家觀點;7 天太嚴會常常空抓)${_commonNewsPromptTail(1, 5, 60)}
 
-⚠️ 機構級評論更新頻率不像每日新聞那麼高,**沒有近 7 天 article 就輸出 \`\`\`json [] \`\`\` 空陣列即可,不要硬塞舊文**。`;
+⚠️ 機構級評論更新頻率不像每日新聞那麼高,**真的沒有 60 天內 article 才輸出 \`\`\`json [] \`\`\`,不要硬塞超過 60 天的舊文**。
+   url_hash dedupe 會把已抓過的同篇自動 skip,所以不必擔心同篇 quarterly 每次都被重塞。`;
 
   return {
     name: '[PM] 新聞 PGM評論',
@@ -1675,6 +1678,33 @@ async function patchExistingNewsAddPgmSources(db) {
   }
 }
 
+// ── Patch 既有 [PM] 新聞 PGM評論:7 天 cutoff → 60 天 cutoff(2026-04-29)─────
+// PGM 機構級評論更新頻率低(WPIC quarterly / JM monthly),7 天常常空抓
+// 用 marker「往前 60 天」判斷,沒這字串就 force update prompt
+async function patchExistingPgmCommentaryCutoff60(db) {
+  const newSeed = buildNewsPgmCommentaryTask(undefined, {});
+  let row;
+  try {
+    row = await db.prepare(`SELECT id, name, prompt FROM scheduled_tasks WHERE name='[PM] 新聞 PGM評論'`).get();
+  } catch (e) {
+    console.warn('[PMScheduledTaskSeed] patch PGM cutoff 60 select failed:', e.message);
+    return;
+  }
+  if (!row) return;
+  const id = row.id || row.ID;
+  let promptStr = row.prompt || row.PROMPT;
+  if (promptStr && typeof promptStr !== 'string' && promptStr.toString) promptStr = promptStr.toString();
+  if (!!promptStr && /往前 60 天/.test(promptStr)) return; // 已升級
+
+  try {
+    await db.prepare(`UPDATE scheduled_tasks SET prompt=?, updated_at=SYSTIMESTAMP WHERE id=?`)
+      .run(newSeed.prompt, id);
+    console.log(`[PMScheduledTaskSeed] Upgraded "[PM] 新聞 PGM評論" #${id}: cutoff 7d → 60d`);
+  } catch (e) {
+    console.warn(`[PMScheduledTaskSeed] patch PGM cutoff 60 update #${id} failed:`, e.message);
+  }
+}
+
 // 升級 user 自建 task `[PM] 每日貴金屬行情`(prefix [PM] 但非內建 seed)
 // 採用 array-of-objects 頂層結構(跟 user 既有 prompt 同),保留 user pipeline_json 不動,
 // 只 force update prompt 加進新數據源:台銀金 / matthey RSS / Kitco silver
@@ -1982,6 +2012,9 @@ async function autoSeedPmScheduledTasks(db, kbMap) {
 
   // Patch 既有任務:[PM] 每日金屬新聞抓取 加 PGM 機構級評論源(WPIC + matthey)
   await patchExistingNewsAddPgmSources(db);
+
+  // 2026-04-29:patch [PM] 新聞 PGM評論 cutoff 7d → 60d(WPIC/JM 更新慢)
+  await patchExistingPgmCommentaryCutoff60(db);
 
   // Patch user 自建任務:[PM] 每日貴金屬行情(台銀金 + JM RSS + Kitco silver)
   await patchUserDailyMetalQuoteTask(db);
