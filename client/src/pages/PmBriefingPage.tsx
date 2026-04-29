@@ -804,7 +804,8 @@ interface NewsItem {
 
 function NewsTab({ focusedSet, default24h }: { focusedSet: Set<string>; default24h: boolean }) {
   // 從 localStorage 讀 sticky filter
-  const stickyKey = 'pm_news_filters_v1'
+  // v2: sources state 從 source 字串改存 url domain(2026-04-29);舊版 v1 自動失效
+  const stickyKey = 'pm_news_filters_v2'
   const sticky = (() => { try { return JSON.parse(localStorage.getItem(stickyKey) || '{}') } catch { return {} } })()
 
   const today = new Date().toISOString().slice(0, 10)
@@ -815,6 +816,9 @@ function NewsTab({ focusedSet, default24h }: { focusedSet: Set<string>; default2
   // date_field='published' = 篩文章發表日;'scraped' = 篩抓回來的時間(看「我這週抓了什麼」)
   const [dateField, setDateField] = useState<'published' | 'scraped'>(sticky.date_field || 'published')
   const [metals, setMetals] = useState<string[]>(sticky.metals || (focusedSet.size > 0 ? Array.from(focusedSet) : []))
+  // sources state 內容存 url domain(news.smm.cn / mining.com)而非 source 字串
+  // 原因:LLM 對同一網站常寫多個變體(SMM / SMM 上海有色网 / SMM上海有色網),
+  //      用 domain 篩選才能匹到所有變體
   const [sources, setSources] = useState<string[]>(sticky.sources || [])
   const [sentiment, setSentiment] = useState(sticky.sentiment || '')
   const [q, setQ] = useState(sticky.q || '')
@@ -824,13 +828,13 @@ function NewsTab({ focusedSet, default24h }: { focusedSet: Set<string>; default2
   const [rows, setRows] = useState<NewsItem[]>([])
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(false)
-  const [sourcesLov, setSourcesLov] = useState<{ source: string; cnt: number }[]>([])
+  const [sourcesLov, setSourcesLov] = useState<{ source: string; cnt: number; domain?: string }[]>([])
   const [exporting, setExporting] = useState(false)
   const [selectedNewsId, setSelectedNewsId] = useState<number | null>(null)  // 開 NewsFullContentModal
 
   const filters = useMemo(() => ({
     metal: metals.join(',') || undefined,
-    source: sources.join(',') || undefined,
+    domain: sources.join(',') || undefined,  // sources state 內容是 url domain
     sentiment: sentiment || undefined,
     from: from || undefined,
     to: to || undefined,
@@ -978,13 +982,17 @@ function NewsTab({ focusedSet, default24h }: { focusedSet: Set<string>; default2
         <div>
           <div className="text-xs font-semibold text-slate-600 mb-1">🌐 來源網站</div>
           <div className="space-y-1 max-h-32 overflow-y-auto pr-1">
-            {sourcesLov.map(s => (
-              <label key={s.source} className="flex items-center gap-2 text-xs cursor-pointer hover:bg-slate-50 px-1 py-0.5 rounded">
-                <input type="checkbox" checked={sources.includes(s.source)} onChange={() => setSourceSel(s.source)} />
-                <span className="flex-1 truncate">{s.source}</span>
-                <span className="text-slate-400">{s.cnt}</span>
-              </label>
-            ))}
+            {sourcesLov.map(s => {
+              // 篩選 key 用 domain(同網站不同 source 字串變體會合併,避免漏抓)
+              const key = s.domain || s.source
+              return (
+                <label key={key} className="flex items-center gap-2 text-xs cursor-pointer hover:bg-slate-50 px-1 py-0.5 rounded">
+                  <input type="checkbox" checked={sources.includes(key)} onChange={() => setSourceSel(key)} />
+                  <span className="flex-1 truncate">{s.source}</span>
+                  <span className="text-slate-400">{s.cnt}</span>
+                </label>
+              )
+            })}
             {sourcesLov.length === 0 && <div className="text-slate-400 text-xs">無來源</div>}
           </div>
         </div>

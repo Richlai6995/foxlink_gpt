@@ -451,13 +451,22 @@ function buildNewsWhere(query, userId) {
       params.push(...arr.map(m => `,${m},`));
     }
   }
-  if (query.source) {
+  // 篩選優先用 ?domain= 直接 match;沒給才退到 ?source= subquery 反查 domain
+  // (前端 LOV 已回 domain 欄,理應傳 domain;source 是 legacy 相容)
+  if (query.domain) {
+    const arr = String(query.domain).split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+    if (arr.length > 0) {
+      const ph = arr.map(() => '?').join(',');
+      where.push(`LOWER(REGEXP_SUBSTR(n.url, 'https?://([^/]+)', 1, 1, NULL, 1)) IN (${ph})`);
+      params.push(...arr);
+    }
+  } else if (query.source) {
     const arr = String(query.source).split(',').map(s => s.trim()).filter(Boolean);
     if (arr.length > 0) {
-      // 篩選邏輯改用「url domain match」而非 source 字串完全相符
-      // 原因:LLM 對同一網站可能寫成不同 source 字串(SMM / SMM 上海有色网 / SMM上海有色網),
-      //      用 source 字串匹配會漏抓。改成「先找這些 source 字串對應的 domain,再以 domain 反查所有 row」,
-      //      同 domain 不同 source 字串的 row 都會被帶出。
+      // legacy:LLM 對同網站常寫成不同 source 字串(SMM / SMM 上海有色网 / SMM上海有色網),
+      // 先找這些 source 對應的 domain,再以 domain 反查 — 但只有當 source 字串完全相符 DB 裡某筆
+      // 才會反查到 domain。若 LOV 給的 label 在 DB 沒對應 row,subquery 為空 → 0 筆(就是這個 bug)
+      // 故前端應改傳 ?domain=,這條保留只為相容
       const ph = arr.map(() => '?').join(',');
       where.push(`
         LOWER(REGEXP_SUBSTR(n.url, 'https?://([^/]+)', 1, 1, NULL, 1)) IN (
