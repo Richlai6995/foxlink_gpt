@@ -1351,13 +1351,16 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
 
       // Audio → transcribe
       if (mimeType.startsWith('audio/')) {
-        sendEvent({ type: 'status', message: `正在轉錄音訊: ${originalName}...` });
+        const audioSizeMB = +(file.size / 1024 / 1024).toFixed(2);
+        console.log(`[Chat] Audio branch: "${originalName}" size=${audioSizeMB}MB mime=${mimeType} user=${req.user.id}`);
+        sendEvent({ type: 'status', message: `正在轉錄音訊: ${originalName} (${audioSizeMB}MB)...` });
+        const tAudio0 = Date.now();
         try {
           const transcribeResult = await transcribeAudio(filePath, mimeType);
           const transcription = transcribeResult.text;
           combinedUserText += `\n\n[音訊轉錄: ${originalName}]\n${transcription}`;
           fileMetas.push({ name: originalName, type: 'audio', transcription });
-          console.log(`[Chat] Audio transcribed: ${transcription.length} chars, in=${transcribeResult.inputTokens} out=${transcribeResult.outputTokens}`);
+          console.log(`[Chat] Audio transcribed in ${Date.now() - tAudio0}ms: ${transcription.length} chars, in=${transcribeResult.inputTokens} out=${transcribeResult.outputTokens}`);
           // Plan B: record transcription tokens as a separate flash entry
           if (transcribeResult.inputTokens > 0 || transcribeResult.outputTokens > 0) {
             const today = new Date().toISOString().slice(0, 10);
@@ -1365,10 +1368,14 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
               transcribeResult.inputTokens, transcribeResult.outputTokens, 0);
           }
         } catch (e) {
-          console.error(`[Chat] Audio transcription failed for "${originalName}":`, e.message);
-          combinedUserText += `\n\n[音訊轉錄失敗: ${originalName}]`;
+          // 失敗也要送 SSE 給前端,不然只看到「Network error」很難 debug
+          console.error(`[Chat] Audio transcription FAILED for "${originalName}" (${audioSizeMB}MB) after ${Date.now() - tAudio0}ms:`, e.message);
+          sendEvent({ type: 'status', message: `音訊轉錄失敗 (${audioSizeMB}MB): ${e.message}` });
+          combinedUserText += `\n\n[音訊轉錄失敗: ${originalName} — ${e.message}]`;
+        } finally {
+          // 大檔不留:轉成功失敗都刪,避免硬碟堆積
+          try { fs.unlinkSync(filePath); } catch (e) { console.warn(`[Chat] audio cleanup failed: ${filePath}`, e.message); }
         }
-        fs.unlinkSync(filePath);
         continue;
       }
 

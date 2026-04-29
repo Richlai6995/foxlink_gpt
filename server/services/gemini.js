@@ -174,24 +174,59 @@ async function transcribeAudio(filePath, mimeType, langOrTimeout, timeoutMs = 25
   };
   const prompt = PROMPTS[lang] || '請完整轉錄這段音訊，只回傳轉錄文字，不要加任何說明。';
 
+  // 取檔案 size 給 log 用 (用來判斷是不是因為太大 inline 失敗)
+  let fileSizeMB = -1;
+  try { fileSizeMB = +(fs.statSync(filePath).size / 1024 / 1024).toFixed(2); } catch {}
+  const tagId = `${path.basename(filePath)}|${fileSizeMB}MB`;
+  console.log(`[Transcribe] start ${tagId} mime=${mimeType} lang=${lang || 'auto'} timeout=${timeoutMs}ms`);
+
   // 音訊轉錄強制走 AI Studio:Vertex gRPC 的 inline payload 上限 ~4MB,
   // wav 等未壓縮檔 base64 後動輒數十 MB 會被 backend silently drop,
   // 回 "contents field required" 誤導錯誤。AI Studio REST 對大 payload 寬鬆得多。
   const model = getGenerativeModel({ model: MODEL_FLASH, provider: 'studio' });
+
+  const tRead0 = Date.now();
   const audioPart = await fileToGeminiPart(filePath, mimeType);
+  const base64MB = +(audioPart.inlineData.data.length / 1024 / 1024).toFixed(2);
+  console.log(`[Transcribe] ${tagId} read+base64 done in ${Date.now() - tRead0}ms, base64=${base64MB}MB`);
+
+  const tCall0 = Date.now();
+  console.log(`[Transcribe] ${tagId} calling SDK (model=${MODEL_FLASH}, provider=studio)...`);
 
   const transcribePromise = model.generateContent([
     audioPart,
     { text: prompt },
   ]);
   const timeoutPromise = new Promise((_, reject) =>
-    setTimeout(() => reject(new Error('Audio transcription timeout (5 min)')), timeoutMs)
+    setTimeout(() => reject(new Error(`Audio transcription timeout (${(timeoutMs/60000).toFixed(1)} min)`)), timeoutMs)
   );
 
-  const result = await Promise.race([transcribePromise, timeoutPromise]);
+  let result;
+  try {
+    result = await Promise.race([transcribePromise, timeoutPromise]);
+    console.log(`[Transcribe] ${tagId} SDK responded in ${Date.now() - tCall0}ms`);
+  } catch (e) {
+    const elapsed = Date.now() - tCall0;
+    // 把 SDK / fetch 錯誤的所有可診斷欄位都印出來,避免只剩 e.message 看不出是 413 / 429 / network
+    console.error(
+      `[Transcribe] ${tagId} SDK FAILED after ${elapsed}ms\n` +
+      `  message: ${e.message}\n` +
+      `  name:    ${e.name}\n` +
+      `  code:    ${e.code || 'n/a'}\n` +
+      `  status:  ${e.status || e.statusCode || 'n/a'}\n` +
+      `  cause:   ${e.cause?.message || e.cause?.code || 'n/a'}\n` +
+      `  errorDetails: ${e.errorDetails ? JSON.stringify(e.errorDetails).slice(0, 500) : 'n/a'}\n` +
+      `  response.data: ${e.response?.data ? JSON.stringify(e.response.data).slice(0, 500) : 'n/a'}\n` +
+      `  stack: ${(e.stack || '').split('\n').slice(0, 6).join('\n         ')}`
+    );
+    throw e;
+  }
+
   const usage = extractUsage(result);
+  const text = extractText(result);
+  console.log(`[Transcribe] ${tagId} done text=${text.length}chars in=${usage.inputTokens} out=${usage.outputTokens}`);
   return {
-    text: extractText(result),
+    text,
     inputTokens: usage.inputTokens,
     outputTokens: usage.outputTokens,
   };
