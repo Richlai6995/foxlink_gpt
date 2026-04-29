@@ -238,6 +238,47 @@ async function substituteVarsAsync(template, taskName) {
     result = result.replace(m[0], listText);
   }
 
+  // {{pm_current_prices}} — 11 金屬當日 latest price + day_change_pct,當作 LLM
+  // 預測 anchor。沒這個 placeholder 時 LLM 會用訓練資料記憶的 2024 年金屬價亂飄,
+  // 7 天 forecast 直接偏離當下實際價 50%+(實測:現價 4598 USD/oz 的 AU 預測 2465)。
+  if (result.includes('{{pm_current_prices}}')) {
+    let priceText = '';
+    try {
+      const db = require('../database-oracle').db;
+      const rows = await db.prepare(`
+        SELECT UPPER(metal_code) AS metal_code, price_usd, day_change_pct,
+               TO_CHAR(as_of_date, 'YYYY-MM-DD') AS as_of_date, source
+        FROM pm_price_history p
+        WHERE as_of_date = (
+          SELECT MAX(as_of_date) FROM pm_price_history WHERE UPPER(metal_code) = UPPER(p.metal_code)
+        )
+        ORDER BY metal_code
+      `).all();
+      if (rows && rows.length) {
+        const lines = rows.map(r => {
+          const code = r.metal_code || r.METAL_CODE;
+          const price = Number(r.price_usd ?? r.PRICE_USD);
+          const chg = r.day_change_pct ?? r.DAY_CHANGE_PCT;
+          const date = r.as_of_date || r.AS_OF_DATE;
+          const src = r.source || r.SOURCE || '?';
+          const chgStr = (chg == null) ? '—' : `${Number(chg) >= 0 ? '+' : ''}${Number(chg).toFixed(2)}%`;
+          return `- ${code}: ${price.toLocaleString()} USD (${chgStr}, ${date}, ${src})`;
+        });
+        priceText = `\n═══ 當日 11 金屬實際報價(MUST be your forecast anchor)═══\n${lines.join('\n')}\n\n`
+          + `⚠️ **forecast 必須以上面 price 為 base**,不准用訓練資料記憶的歷史金屬價。\n`
+          + `   7 天 horizon 的 predicted_mean 通常落在 current_price ± 3-8%(極端事件 ±15%);\n`
+          + `   超出 ±20% 的預測幾乎一定是你誤把舊資料當 anchor,請重新校準。\n`;
+        console.log(`[Scheduled] pm_current_prices injected ${rows.length} metals`);
+      } else {
+        priceText = `\n═══ 當日金屬實際報價 ═══\n(pm_price_history 暫無資料,forecast 可填 null + confidence='low')\n`;
+      }
+    } catch (e) {
+      console.warn(`[Scheduled] pm_current_prices lookup failed:`, e.message);
+      priceText = `\n═══ 當日金屬實際報價 ═══\n(查詢失敗:${e.message})\n`;
+    }
+    result = result.replaceAll('{{pm_current_prices}}', priceText);
+  }
+
   return result;
 }
 
