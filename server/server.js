@@ -5,6 +5,24 @@ process.env.NLS_LANG = 'AMERICAN_AMERICA.AL32UTF8';
 
 require('dotenv').config();
 require('./services/logger'); // File-based logging + process lifecycle tracking
+
+// ── undici (global fetch) timeout 全域拉長 ──
+// Node 18+ 的 fetch 用 undici,預設 headersTimeout=300000ms (5分鐘)。
+// Gemini AI Studio 對大檔(>100MB inline audio)response headers 常 5-10 分鐘才回,
+// 5 分鐘踩 timeout 會回 "TypeError: fetch failed / cause: Headers Timeout Error",
+// 即使我們上層 Promise.race 設 25 分也救不回來(undici 已經 abort connection)。
+// 把 headers/body timeout 拉到 30 分鐘,connect timeout 仍短(30s)避免 DNS 卡死。
+// 影響範圍:全 process 的 fetch (LLM API / Webex / 任何 HTTP client),這些本來就該允許慢。
+{
+  const { Agent, setGlobalDispatcher } = require('undici');
+  setGlobalDispatcher(new Agent({
+    headersTimeout: 30 * 60 * 1000,
+    bodyTimeout:    30 * 60 * 1000,
+    connectTimeout: 30 * 1000,
+  }));
+  console.log('[undici] global dispatcher set: headersTimeout=30m, bodyTimeout=30m, connectTimeout=30s');
+}
+
 require('./services/geminiClient').logStartupInfo(); // [GeminiClient] provider=... line
 const express = require('express');
 const cors = require('cors');
