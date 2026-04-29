@@ -197,6 +197,47 @@ async function substituteVarsAsync(template, taskName) {
     result = result.replace(m[0], `\n${content}\n`);
   }
 
+  // {{news_seen:source[,source2]:lookback_days:limit}} — pm_news 過去 N 天該 source
+  // 已抓過的 url 列表,讓 LLM 跳過避免重抓 + 浪費 token。
+  // - source 可逗號分隔多個(WPIC,JohnsonMatthey)
+  // - lookback_days 對齊 task 自己的 cutoff(7 / 60)
+  // - limit 上限,避免 prompt 爆肥
+  const newsSeenPattern = /\{\{news_seen:([^:}]+):(\d+):(\d+)\}\}/g;
+  for (const m of [...result.matchAll(newsSeenPattern)]) {
+    const sources = m[1].split(',').map(s => s.trim()).filter(Boolean);
+    const days    = Math.max(1, Math.min(365, parseInt(m[2], 10) || 7));
+    const limit   = Math.max(10, Math.min(500, parseInt(m[3], 10) || 200));
+    if (!sources.length) {
+      result = result.replace(m[0], '');
+      continue;
+    }
+    let listText = '';
+    try {
+      const db = require('../database-oracle').db;
+      const placeholders = sources.map(() => '?').join(',');
+      const rows = await db.prepare(`
+        SELECT url FROM pm_news
+         WHERE source IN (${placeholders})
+           AND scraped_at > SYSDATE - ?
+         ORDER BY scraped_at DESC
+         FETCH FIRST ${limit} ROWS ONLY
+      `).all(...sources, days);
+      const urls = (rows || []).map(r => r.url || r.URL).filter(Boolean);
+      if (urls.length) {
+        listText = `\n═══ 已抓過的 URL(過去 ${days} 天,${urls.length} 筆,請跳過避免浪費 token)═══\n`
+          + urls.map(u => `- ${u}`).join('\n')
+          + `\n\n⚠️ 上面 RSS / list 頁的 article URL 如果出現在此清單,**直接跳過該篇**,只挑沒抓過的。\n`;
+      } else {
+        listText = `\n═══ 已抓過的 URL ═══\n(過去 ${days} 天 DB 尚無 ${sources.join('/')} 來源資料,所有抓到的都是新的)\n`;
+      }
+      console.log(`[Scheduled] news_seen sources=${sources.join(',')} days=${days} → ${urls.length} urls injected`);
+    } catch (e) {
+      console.warn(`[Scheduled] news_seen lookup failed (${sources.join(',')}):`, e.message);
+      listText = `\n═══ 已抓過的 URL ═══\n(查詢失敗:${e.message},無法去重)\n`;
+    }
+    result = result.replace(m[0], listText);
+  }
+
   return result;
 }
 

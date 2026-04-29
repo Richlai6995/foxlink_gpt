@@ -296,7 +296,9 @@ function buildNewsMiningComTask(kbMap, models = {}) {
 
 ↑ 這是結構化的 article list,**每個 <item> 已經是一篇完整 article**(含 title / link / pubDate / description / content)。
   不需要去推理「哪些是 article」,直接逐一處理 RSS items。
-  RSS feed 多數情況提供 36+ items,你應該至少處理 15-20 個跟金屬相關的(過濾掉純股市 / 非金屬礦業的)。${_commonNewsPromptTail(15, 20)}`;
+  RSS feed 多數情況提供 36+ items,你應該至少處理 15-20 個跟金屬相關的(過濾掉純股市 / 非金屬礦業的)。
+
+{{news_seen:Mining.com:7:200}}${_commonNewsPromptTail(15, 20)}`;
 
   return {
     name: '[PM] 新聞 Mining.com',
@@ -325,7 +327,9 @@ function buildNewsNikkeiTask(kbMap, models = {}) {
 {{fetch:https://zh.cn.nikkei.com/politicsaeconomy/commodity.html}}
 
 ↑ 列表頁,需從上面 list 抽出 article URL,**逐個點進去抓內文**(不要把 list 頁 url 當 article 抽出來)。
-  從列表挑出與「銅 / 鋁 / 鎳 / 錫 / 鋅 / 鉛 / 金 / 銀 / 鉑 / 鈀 / 銠」相關的 article(政經角度為主,有些是貿易戰 / 制裁 / 政策對金屬影響的)。${_commonNewsPromptTail(5, 10)}`;
+  從列表挑出與「銅 / 鋁 / 鎳 / 錫 / 鋅 / 鉛 / 金 / 銀 / 鉑 / 鈀 / 銠」相關的 article(政經角度為主,有些是貿易戰 / 制裁 / 政策對金屬影響的)。
+
+{{news_seen:Nikkei,日經中文網:7:100}}${_commonNewsPromptTail(5, 10)}`;
 
   return {
     name: '[PM] 新聞 Nikkei',
@@ -352,7 +356,9 @@ function buildNewsSmmTask(kbMap, models = {}) {
 
 ↑ SMM「金属要闻」首頁,這是 list 頁。**請從首頁挑出當日各 article 的具體 URL,逐個點進去抓內文**。
   ⚠️ **不要把 \`https://news.smm.cn/\`(首頁)當 article URL 抽出來**!每篇 article 都有自己的具體 URL(通常是 /news/<id> 之類)。
-  抓 5-10 篇跟 11 個金屬相關的中國市場動態(現貨價、政策、產能、進出口等)。${_commonNewsPromptTail(5, 10)}`;
+  抓 5-10 篇跟 11 個金屬相關的中國市場動態(現貨價、政策、產能、進出口等)。
+
+{{news_seen:SMM,SMM上海有色網:7:100}}${_commonNewsPromptTail(5, 10)}`;
 
   return {
     name: '[PM] 新聞 SMM',
@@ -379,7 +385,9 @@ function buildNewsMoneyDjTask(kbMap, models = {}) {
 
 ↑ MoneyDJ 商品原物料分類列表頁。**請從上面 list 抽出每篇 article 的具體 URL,逐個點進去抓內文**。
   ⚠️ **不要把 list 頁 URL 當 article 抽出來**(那是 list 不是 article)。
-  挑出與 11 個金屬相關的 5-10 篇(LME 行情、台灣供應鏈影響、台股相關公司動態等)。${_commonNewsPromptTail(5, 10)}`;
+  挑出與 11 個金屬相關的 5-10 篇(LME 行情、台灣供應鏈影響、台股相關公司動態等)。
+
+{{news_seen:MoneyDJ:7:100}}${_commonNewsPromptTail(5, 10)}`;
 
   return {
     name: '[PM] 新聞 MoneyDJ',
@@ -413,7 +421,9 @@ function buildNewsPgmCommentaryTask(kbMap, models = {}) {
   - related_metals 必須含 ["PT"] / ["PD"] / ["RH"] 至少一個
   - sentiment 多半 neutral(機構分析較中性)
   - **published_at 在 60 天內**(WPIC quarterly 是季度發布,JM expert-insights 月度發,
-    60 天 cutoff 能涵蓋上一季 outlook + 過去兩個月專家觀點;7 天太嚴會常常空抓)${_commonNewsPromptTail(1, 5, 60)}
+    60 天 cutoff 能涵蓋上一季 outlook + 過去兩個月專家觀點;7 天太嚴會常常空抓)
+
+{{news_seen:WPIC,JohnsonMatthey:60:100}}${_commonNewsPromptTail(1, 5, 60)}
 
 ⚠️ 機構級評論更新頻率不像每日新聞那麼高,**真的沒有 60 天內 article 才輸出 \`\`\`json [] \`\`\`,不要硬塞超過 60 天的舊文**。
    url_hash dedupe 會把已抓過的同篇自動 skip,所以不必擔心同篇 quarterly 每次都被重塞。`;
@@ -1705,6 +1715,46 @@ async function patchExistingPgmCommentaryCutoff60(db) {
   }
 }
 
+// ── Patch 既有 by-source news task:加 news_seen placeholder(2026-04-29)──
+// 5 個 by-source task seed 過後,要把已 seed 進去的 prompt 補上 {{news_seen:...}} placeholder
+// 讓 LLM 看到「已抓過的 url 列表」跳過,省 token + 提升新鮮度
+// marker = `news_seen:`,沒這字串就 force update prompt(整段重寫)
+async function patchExistingNewsSeenPlaceholder(db) {
+  const targets = [
+    { name: '[PM] 新聞 Mining.com', builder: buildNewsMiningComTask },
+    { name: '[PM] 新聞 Nikkei',      builder: buildNewsNikkeiTask },
+    { name: '[PM] 新聞 SMM',         builder: buildNewsSmmTask },
+    { name: '[PM] 新聞 MoneyDJ',     builder: buildNewsMoneyDjTask },
+    { name: '[PM] 新聞 PGM評論',     builder: buildNewsPgmCommentaryTask },
+  ];
+  let patched = 0;
+  for (const t of targets) {
+    let row;
+    try {
+      row = await db.prepare(`SELECT id, name, prompt FROM scheduled_tasks WHERE name=?`).get(t.name);
+    } catch (e) {
+      console.warn(`[PMScheduledTaskSeed] patch news_seen ${t.name} select failed:`, e.message);
+      continue;
+    }
+    if (!row) continue;
+    const id = row.id || row.ID;
+    let promptStr = row.prompt || row.PROMPT;
+    if (promptStr && typeof promptStr !== 'string' && promptStr.toString) promptStr = promptStr.toString();
+    if (!!promptStr && /\{\{news_seen:/.test(promptStr)) continue; // 已升級
+
+    try {
+      const newSeed = t.builder(undefined, {});
+      await db.prepare(`UPDATE scheduled_tasks SET prompt=?, updated_at=SYSTIMESTAMP WHERE id=?`)
+        .run(newSeed.prompt, id);
+      patched++;
+      console.log(`[PMScheduledTaskSeed] Upgraded "${t.name}" #${id}: 加 news_seen placeholder`);
+    } catch (e) {
+      console.warn(`[PMScheduledTaskSeed] patch news_seen ${t.name} #${id} failed:`, e.message);
+    }
+  }
+  if (patched > 0) console.log(`[PMScheduledTaskSeed] patched news_seen placeholder on ${patched} task(s)`);
+}
+
 // 升級 user 自建 task `[PM] 每日貴金屬行情`(prefix [PM] 但非內建 seed)
 // 採用 array-of-objects 頂層結構(跟 user 既有 prompt 同),保留 user pipeline_json 不動,
 // 只 force update prompt 加進新數據源:台銀金 / matthey RSS / Kitco silver
@@ -2015,6 +2065,9 @@ async function autoSeedPmScheduledTasks(db, kbMap) {
 
   // 2026-04-29:patch [PM] 新聞 PGM評論 cutoff 7d → 60d(WPIC/JM 更新慢)
   await patchExistingPgmCommentaryCutoff60(db);
+
+  // 2026-04-29:patch 5 個 by-source news task 加 {{news_seen:...}} placeholder
+  await patchExistingNewsSeenPlaceholder(db);
 
   // Patch user 自建任務:[PM] 每日貴金屬行情(台銀金 + JM RSS + Kitco silver)
   await patchUserDailyMetalQuoteTask(db);
