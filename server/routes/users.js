@@ -3,6 +3,21 @@ const router = express.Router();
 const { verifyToken, verifyAdmin } = require('./auth');
 
 router.use(verifyToken);
+
+// GET /api/users/lov — 任何登入者可用的最小欄位 LOV(供 UserPicker、分享對象選擇器)
+router.get('/lov', async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const rows = await db.prepare(
+      `SELECT id, username, name, employee_id
+         FROM users
+        WHERE status='active'
+        ORDER BY name`
+    ).all();
+    res.json(rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 router.use(verifyAdmin);
 
 const ORG_COLS = `u.dept_code, u.dept_name, u.profit_center, u.profit_center_name,

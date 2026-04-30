@@ -24,7 +24,7 @@ interface Props {
 
 let cachedUsers: Record<string, User[]> = {}
 
-export default function UserPicker({ value, display, onChange, placeholder = '搜尋姓名 / 帳號 / 工號', className = '', apiUrl = '/users' }: Props) {
+export default function UserPicker({ value, display, onChange, placeholder = '搜尋姓名 / 帳號 / 工號', className = '', apiUrl = '/users/lov' }: Props) {
   const [open, setOpen] = useState(false)
   const [filter, setFilter] = useState(display)
   const [users, setUsers] = useState<User[]>(cachedUsers[apiUrl] || [])
