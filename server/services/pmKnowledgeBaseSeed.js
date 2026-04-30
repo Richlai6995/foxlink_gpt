@@ -125,26 +125,61 @@ async function autoSeedPmKnowledgeBases(db) {
   }
 
   const idMap = new Map();
-  let createdCount = 0;
-  let existedCount = 0;
 
-  for (const def of KB_DEFINITIONS) {
-    try {
-      const { id, created } = await ensureKb(db, def, ownerId);
-      if (id) idMap.set(def.name, id);
-      if (created) {
-        createdCount++;
-        console.log(`[PMKnowledgeBaseSeed] Created KB "${def.name}" → ${id}`);
-      } else {
-        existedCount++;
+  // Seed-once gate:已 init 過就不再建新 KB(避免 admin 刪掉的 KB 復活)
+  // 但仍要回傳 idMap 給 task seed 綁 kb_write — 所以 fall through 走純 SELECT 路徑
+  // 解鎖:DELETE FROM system_settings WHERE key='pm_seed_kbs_initialized'
+  const SEED_FLAG_KEY = 'pm_seed_kbs_initialized';
+  let seedDone = false;
+  try {
+    const flagRow = await db.prepare(`SELECT value FROM system_settings WHERE key=?`).get(SEED_FLAG_KEY);
+    seedDone = (flagRow?.value ?? flagRow?.VALUE) === '1';
+  } catch (_) {}
+
+  if (seedDone) {
+    // 純查既有 KB 的 id 給 task seed 用,不建新 KB
+    for (const def of KB_DEFINITIONS) {
+      try {
+        const r = await db.prepare(`SELECT id FROM knowledge_bases WHERE name=?`).get(def.name);
+        const id = r?.id || r?.ID;
+        if (id) idMap.set(def.name, id);
+      } catch (e) {
+        console.warn(`[PMKnowledgeBaseSeed] lookup ${def.name} failed:`, e.message);
       }
-    } catch (e) {
-      console.error(`[PMKnowledgeBaseSeed] ${def.name} failed:`, e.message);
     }
-  }
+    console.log(`[PMKnowledgeBaseSeed] already initialized, skip create (mapped ${idMap.size}/${KB_DEFINITIONS.length} existing KBs)`);
+  } else {
+    let createdCount = 0;
+    let existedCount = 0;
 
-  if (createdCount > 0) {
-    console.log(`[PMKnowledgeBaseSeed] ${createdCount} created, ${existedCount} already existed (out of ${KB_DEFINITIONS.length})`);
+    for (const def of KB_DEFINITIONS) {
+      try {
+        const { id, created } = await ensureKb(db, def, ownerId);
+        if (id) idMap.set(def.name, id);
+        if (created) {
+          createdCount++;
+          console.log(`[PMKnowledgeBaseSeed] Created KB "${def.name}" → ${id}`);
+        } else {
+          existedCount++;
+        }
+      } catch (e) {
+        console.error(`[PMKnowledgeBaseSeed] ${def.name} failed:`, e.message);
+      }
+    }
+
+    if (createdCount > 0) {
+      console.log(`[PMKnowledgeBaseSeed] ${createdCount} created, ${existedCount} already existed (out of ${KB_DEFINITIONS.length})`);
+    }
+
+    // 寫 flag — 之後不再建新 KB
+    try {
+      const ex = await db.prepare(`SELECT key FROM system_settings WHERE key=?`).get(SEED_FLAG_KEY);
+      if (ex) await db.prepare(`UPDATE system_settings SET value='1' WHERE key=?`).run(SEED_FLAG_KEY);
+      else    await db.prepare(`INSERT INTO system_settings (key, value) VALUES (?, '1')`).run(SEED_FLAG_KEY);
+      console.log(`[PMKnowledgeBaseSeed] set ${SEED_FLAG_KEY}=1 — admin 之後刪掉的 KB 不會自動復活`);
+    } catch (e) {
+      console.warn('[PMKnowledgeBaseSeed] set initialized flag failed:', e.message);
+    }
   }
 
   // 一次性 migration:把既存 PM-* KB 從 is_public=1 改回 0(2026-04-27 user 要求)

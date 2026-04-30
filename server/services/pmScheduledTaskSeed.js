@@ -2005,38 +2005,61 @@ async function autoSeedPmScheduledTasks(db, kbMap) {
   let inserted = 0;
   let skippedExisting = 0;
 
-  for (const t of tasks) {
-    try {
-      const existing = await db.prepare(`SELECT id FROM scheduled_tasks WHERE name=?`).get(t.name);
-      if (existing) { skippedExisting++; continue; }
+  // Seed-once gate:已 init 過就不再 INSERT,避免 admin 刪掉的 task 復活
+  // 解鎖:DELETE FROM system_settings WHERE key='pm_seed_tasks_initialized'
+  const SEED_FLAG_KEY = 'pm_seed_tasks_initialized';
+  let seedDone = false;
+  try {
+    const flagRow = await db.prepare(`SELECT value FROM system_settings WHERE key=?`).get(SEED_FLAG_KEY);
+    seedDone = (flagRow?.value ?? flagRow?.VALUE) === '1';
+  } catch (_) {}
 
-      await db.prepare(`
-        INSERT INTO scheduled_tasks (
-          user_id, name, schedule_type, schedule_hour, schedule_minute,
-          schedule_weekday, schedule_monthday,
-          schedule_times_json, schedule_interval_hours, schedule_cron_expr,
-          model, prompt, output_type, file_type, filename_template,
-          recipients_json, email_subject, email_body, status, pipeline_json
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(
-        ownerId, t.name, t.schedule_type, t.schedule_hour, t.schedule_minute,
-        t.schedule_weekday ?? 1, t.schedule_monthday ?? 1,
-        t.schedule_times_json, t.schedule_interval_hours, t.schedule_cron_expr || null,
-        t.model, t.prompt, t.output_type, t.file_type, t.filename_template,
-        t.recipients_json, t.email_subject, t.email_body, t.status, t.pipeline_json
-      );
-      inserted++;
-      console.log(`[PMScheduledTaskSeed] Inserted (paused): ${t.name}`);
-    } catch (e) {
-      console.error(`[PMScheduledTaskSeed] INSERT ${t.name} failed:`, e.message);
+  if (seedDone) {
+    console.log('[PMScheduledTaskSeed] already initialized, skip INSERT loop (patch still runs)');
+  } else {
+    for (const t of tasks) {
+      try {
+        const existing = await db.prepare(`SELECT id FROM scheduled_tasks WHERE name=?`).get(t.name);
+        if (existing) { skippedExisting++; continue; }
+
+        await db.prepare(`
+          INSERT INTO scheduled_tasks (
+            user_id, name, schedule_type, schedule_hour, schedule_minute,
+            schedule_weekday, schedule_monthday,
+            schedule_times_json, schedule_interval_hours, schedule_cron_expr,
+            model, prompt, output_type, file_type, filename_template,
+            recipients_json, email_subject, email_body, status, pipeline_json
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(
+          ownerId, t.name, t.schedule_type, t.schedule_hour, t.schedule_minute,
+          t.schedule_weekday ?? 1, t.schedule_monthday ?? 1,
+          t.schedule_times_json, t.schedule_interval_hours, t.schedule_cron_expr || null,
+          t.model, t.prompt, t.output_type, t.file_type, t.filename_template,
+          t.recipients_json, t.email_subject, t.email_body, t.status, t.pipeline_json
+        );
+        inserted++;
+        console.log(`[PMScheduledTaskSeed] Inserted (paused): ${t.name}`);
+      } catch (e) {
+        console.error(`[PMScheduledTaskSeed] INSERT ${t.name} failed:`, e.message);
+      }
     }
-  }
 
-  if (inserted > 0) {
-    console.log(`[PMScheduledTaskSeed] v${SEED_VERSION} — ${inserted} inserted, ${skippedExisting} already existed`);
-    console.log(`[PMScheduledTaskSeed] 提醒:這些任務預設 status='paused',admin 需檢查 prompt / 加收件人後才能 enable(kb_id 已自動帶入)`);
-  } else if (skippedExisting > 0) {
-    console.log(`[PMScheduledTaskSeed] All ${skippedExisting} tasks already exist, no insert needed`);
+    if (inserted > 0) {
+      console.log(`[PMScheduledTaskSeed] v${SEED_VERSION} — ${inserted} inserted, ${skippedExisting} already existed`);
+      console.log(`[PMScheduledTaskSeed] 提醒:這些任務預設 status='paused',admin 需檢查 prompt / 加收件人後才能 enable(kb_id 已自動帶入)`);
+    } else if (skippedExisting > 0) {
+      console.log(`[PMScheduledTaskSeed] All ${skippedExisting} tasks already exist, no insert needed`);
+    }
+
+    // 寫 flag,以後 INSERT loop 不再執行(patch 仍跑)
+    try {
+      const ex = await db.prepare(`SELECT key FROM system_settings WHERE key=?`).get(SEED_FLAG_KEY);
+      if (ex) await db.prepare(`UPDATE system_settings SET value='1' WHERE key=?`).run(SEED_FLAG_KEY);
+      else    await db.prepare(`INSERT INTO system_settings (key, value) VALUES (?, '1')`).run(SEED_FLAG_KEY);
+      console.log(`[PMScheduledTaskSeed] set ${SEED_FLAG_KEY}=1 — admin 之後刪掉的 task 不會自動復活`);
+    } catch (e) {
+      console.warn('[PMScheduledTaskSeed] set initialized flag failed:', e.message);
+    }
   }
 
   // Patch 既有任務:fill in kb_id where empty

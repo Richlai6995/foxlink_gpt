@@ -512,6 +512,17 @@ async function ensureDesign(db, topicId, schemaIds, design, ownerId) {
 async function autoSeedPmDashboard(db) {
   if (!db) return;
 
+  // Seed-once gate:已 init 過就整段跳過(避免 admin 刪掉的 project / topic / design 復活)
+  // 解鎖:DELETE FROM system_settings WHERE key='pm_seed_dashboard_initialized'
+  const SEED_FLAG_KEY = 'pm_seed_dashboard_initialized';
+  try {
+    const flagRow = await db.prepare(`SELECT value FROM system_settings WHERE key=?`).get(SEED_FLAG_KEY);
+    if ((flagRow?.value ?? flagRow?.VALUE) === '1') {
+      console.log('[PMDashboardSeed] already initialized, skip');
+      return;
+    }
+  } catch (_) {}
+
   let ownerId = null;
   try {
     const adminRow = await db.prepare(
@@ -573,6 +584,21 @@ async function autoSeedPmDashboard(db) {
     console.log(`[PMDashboardSeed] project=${PROJECT_NAME} (id=${projectId}) — ${inserted} designs inserted, ${skipped} already existed, ${missingSchema} skipped (schema missing)`);
   } else {
     console.log(`[PMDashboardSeed] All ${skipped} designs already exist`);
+  }
+
+  // 寫 flag — 但只有「全部 design 都成功 INSERT(missingSchema=0)」才鎖
+  // 否則初次跑時 schema 還沒被 admin 核准,鎖了之後永遠補不上
+  if (missingSchema === 0) {
+    try {
+      const ex = await db.prepare(`SELECT key FROM system_settings WHERE key=?`).get(SEED_FLAG_KEY);
+      if (ex) await db.prepare(`UPDATE system_settings SET value='1' WHERE key=?`).run(SEED_FLAG_KEY);
+      else    await db.prepare(`INSERT INTO system_settings (key, value) VALUES (?, '1')`).run(SEED_FLAG_KEY);
+      console.log(`[PMDashboardSeed] set ${SEED_FLAG_KEY}=1 — admin 之後刪掉的 design 不會自動復活`);
+    } catch (e) {
+      console.warn('[PMDashboardSeed] set initialized flag failed:', e.message);
+    }
+  } else {
+    console.log(`[PMDashboardSeed] missingSchema=${missingSchema} > 0,暫不鎖 flag,下次重啟再嘗試補齊`);
   }
 }
 
