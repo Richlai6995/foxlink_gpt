@@ -1022,7 +1022,11 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
   const userDifyIds  = parseIds(req.body.dify_kb_ids);      // number[] | null
   const userSelfKbIds = parseIds(req.body.self_kb_ids);     // string[] | null
   const userErpToolIds = parseIds(req.body.erp_tool_ids);   // number[] | null
-  const explicitMode = userMcpIds !== null || userDifyIds !== null || userSelfKbIds !== null || userErpToolIds !== null;
+  // 純對話模式 — 使用者明確要求不引用任何 MCP/KB/技能/ERP 工具,直接走 LLM
+  const pureMode = req.body.pure_mode === 'true' || req.body.pure_mode === true;
+  // pureMode 也算 explicit:讓 TAG 自動路由 + auto-discovery 全部跳過
+  const explicitMode = pureMode || userMcpIds !== null || userDifyIds !== null || userSelfKbIds !== null || userErpToolIds !== null;
+  if (pureMode) console.log('[Chat] Pure mode enabled — skip MCP/DIFY/KB/Skill/ERP loading');
   // Per-user hidden tools (UI 摺疊狀態) — 不論 auto/explicit 都會被剃除,LLM 看不到
   const parseHiddenIds = (raw) => {
     if (raw === undefined || raw === null) return new Set();
@@ -1036,8 +1040,8 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
   const hiddenSelfKbIds = parseHiddenIds(req.body.hidden_self_kb_ids); // Set<string of kb.id>
   const hiddenSkillIds  = parseHiddenIds(req.body.hidden_skill_ids);   // Set<string of skill.id>
   const hiddenErpIds    = parseHiddenIds(req.body.hidden_erp_ids);     // Set<string of erp_tool.id>
-  // 儲存工具選擇到 session（供歷史載入時恢復）
-  if (explicitMode) {
+  // 儲存工具選擇到 session（供歷史載入時恢復）— pureMode 不寫,免得清掉使用者既有的工具設定
+  if (explicitMode && !pureMode) {
     try {
       const ctx = JSON.stringify({ mcp: userMcpIds || [], dify: userDifyIds || [], kb: userSelfKbIds || [], erp: userErpToolIds || [] });
       await require('../database-oracle').db.prepare(
@@ -1773,7 +1777,7 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
     await checkSensitiveKeywords(db, req.user, sessionId, combinedUserText);
 
     // ── Load session skills + accessible skills + user profile (all parallel) ──
-    const [sessionSkills, _allAccessibleSkills, _userProfile] = await Promise.all([
+    let [sessionSkills, _allAccessibleSkills, _userProfile] = await Promise.all([
       db.prepare(`
         SELECT s.* FROM session_skills ss
         JOIN skills s ON s.id = ss.skill_id
@@ -1788,6 +1792,11 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
         `SELECT preferred_language, role_id, dept_code, profit_center, org_section, org_group_name, factory_code FROM users WHERE id=?`
       ).get(req.user.id),
     ]);
+    // 純對話模式 — 清掉所有 session-attached / 可達技能,讓後續 TAG routing / register loop 完全 no-op
+    if (pureMode) {
+      sessionSkills = [];
+      _allAccessibleSkills = [];
+    }
 
     // ── TAG-based skill auto-routing (skills not manually attached but tags match) ──
     const sessionSkillIds = new Set(sessionSkills.map(s => String(s.id)));

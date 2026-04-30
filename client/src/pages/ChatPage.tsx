@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useSearchParams, useNavigate } from 'react-router-dom'
-import { Square, AlertTriangle, Share2, Copy, Check, X, Sparkles, Search, Plus, Plug, Zap, Database, CheckCircle, BarChart3, ChevronDown, RefreshCw, TrendingUp, GripVertical, Eye, EyeOff, FlaskConical, Settings, PanelLeft } from 'lucide-react'
+import { Square, AlertTriangle, Share2, Copy, Check, X, Sparkles, Search, Plus, Plug, Zap, Database, CheckCircle, BarChart3, ChevronDown, RefreshCw, TrendingUp, GripVertical, Eye, EyeOff, FlaskConical, Settings, PanelLeft, MessageCircle } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import Sidebar from '../components/Sidebar'
 import { fmtTW } from '../lib/fmtTW'
@@ -65,6 +65,18 @@ export default function ChatPage() {
     () => localStorage.getItem('reasoningEffort') || ''
   )
   const [availableModels, setAvailableModels] = useState<LlmModel[]>([])
+
+  // 純對話模式 — 不引用任何工具/知識庫/技能,直接走 LLM。永久保存於 localStorage
+  const [pureMode, setPureMode] = useState<boolean>(
+    () => localStorage.getItem('chat:pureMode') === '1'
+  )
+  const togglePureMode = useCallback(() => {
+    setPureMode(prev => {
+      const next = !prev
+      localStorage.setItem('chat:pureMode', next ? '1' : '0')
+      return next
+    })
+  }, [])
 
   // Sidebar collapse state
   const isMobile = typeof window !== 'undefined' && window.innerWidth < 768
@@ -715,6 +727,8 @@ export default function ChatPage() {
       formData.append('hidden_self_kb_ids', JSON.stringify([...kbHidden]))
       formData.append('hidden_skill_ids',   JSON.stringify([...skillHidden]))
       formData.append('hidden_erp_ids',     JSON.stringify([...erpHidden]))
+      // 純對話模式 — server 端會 skip 所有工具/KB/技能註冊
+      if (pureMode) formData.append('pure_mode', 'true')
 
       // SSE via XHR（相較 fetch 多了 upload.onprogress，可顯示檔案上傳進度）
       const token = localStorage.getItem('token')
@@ -1010,7 +1024,7 @@ export default function ChatPage() {
               : 'Cortex'}
           </span>
           {/* ── MCP button ── */}
-          <div className="relative" ref={mcpPanelRef}>
+          <div className={`relative ${pureMode ? 'opacity-40 pointer-events-none' : ''}`} ref={mcpPanelRef} aria-disabled={pureMode}>
             <button
               onClick={openMcpPanel}
               className={`inline-flex items-center gap-1.5 text-xs border rounded-lg px-2.5 py-1 transition ${selectedMcpIds.size > 0 ? 'text-cyan-600 border-cyan-300 bg-cyan-50 hover:bg-cyan-100' : 'text-slate-500 border-slate-200 hover:text-cyan-600 hover:border-cyan-300'}`}
@@ -1095,7 +1109,7 @@ export default function ChatPage() {
           </div>
 
           {/* ── API Connectors button (was DIFY KB) ── */}
-          <div className="relative" ref={difyPanelRef}>
+          <div className={`relative ${pureMode ? 'opacity-40 pointer-events-none' : ''}`} ref={difyPanelRef} aria-disabled={pureMode}>
             {(() => {
               const apiTotal = selectedDifyIds.size + selectedErpIds.size
               return (
@@ -1319,7 +1333,7 @@ export default function ChatPage() {
           </div>
 
           {/* ── Self-built KB button ── */}
-          <div className="relative" ref={kbPanelRef}>
+          <div className={`relative ${pureMode ? 'opacity-40 pointer-events-none' : ''}`} ref={kbPanelRef} aria-disabled={pureMode}>
             <button
               onClick={openKbPanel}
               className={`inline-flex items-center gap-1.5 text-xs border rounded-lg px-2.5 py-1 transition ${selectedKbIds.size > 0 ? 'text-emerald-600 border-emerald-300 bg-emerald-50 hover:bg-emerald-100' : 'text-slate-500 border-slate-200 hover:text-emerald-600 hover:border-emerald-300'}`}
@@ -1404,7 +1418,7 @@ export default function ChatPage() {
           </div>
 
           {/* Skills button + badges */}
-          <div className="flex items-center gap-1.5 relative" ref={skillPanelRef}>
+          <div className={`flex items-center gap-1.5 relative ${pureMode ? 'opacity-40 pointer-events-none' : ''}`} ref={skillPanelRef} aria-disabled={pureMode}>
               {/* Attached skill badges */}
               {sessionSkills.map(sk => (
                 <span key={sk.id} className="inline-flex items-center gap-1 text-xs px-2 py-0.5 bg-purple-100 text-purple-700 border border-purple-200 rounded-full font-medium">
@@ -1525,9 +1539,23 @@ export default function ChatPage() {
               })()}
             </div>
 
+          {/* ── 純對話模式 toggle ── */}
+          <button
+            onClick={togglePureMode}
+            className={`inline-flex items-center gap-1.5 text-xs border rounded-lg px-2.5 py-1 transition ${
+              pureMode
+                ? 'bg-amber-500 border-amber-500 text-white hover:bg-amber-600 shadow-sm'
+                : 'text-slate-500 border-slate-200 hover:text-amber-600 hover:border-amber-300'
+            }`}
+            title={t('chat.topbar.pureModeTooltip')}
+          >
+            {pureMode ? <Check size={13} /> : <MessageCircle size={13} />}
+            {t('chat.topbar.pureMode')}
+          </button>
+
           {/* ── AI 戰情快速入口 ── */}
           {(canUseDashboard || isAdmin) && (
-            <div className="relative" ref={dashPanelRef}>
+            <div className={`relative ${pureMode ? 'opacity-40 pointer-events-none' : ''}`} ref={dashPanelRef} aria-disabled={pureMode}>
               <button
                 onClick={() => setShowDashPanel((v) => !v)}
                 className="inline-flex items-center gap-1.5 text-xs border rounded-lg px-2.5 py-1 transition text-slate-500 border-slate-200 hover:text-orange-600 hover:border-orange-300"
@@ -1879,6 +1907,22 @@ export default function ChatPage() {
             </div>
           )
         })()}
+
+        {/* 純對話模式 banner — 醒目放在輸入框正上方,點關閉即恢復工具 */}
+        {pureMode && (
+          <div className="mx-3 -mb-2 px-3 py-2 bg-amber-50 border border-amber-200 rounded-t-lg text-xs text-amber-800 flex items-center justify-between">
+            <div className="flex items-center gap-1.5">
+              <MessageCircle size={13} className="text-amber-600" />
+              <span className="font-medium">{t('chat.topbar.pureModeBanner')}</span>
+            </div>
+            <button
+              onClick={togglePureMode}
+              className="text-amber-700 hover:text-amber-900 font-medium underline-offset-2 hover:underline"
+            >
+              {t('chat.topbar.pureModeExit')}
+            </button>
+          </div>
+        )}
 
         {/* ERP context chip(ask_with 模式) */}
         {erpPendingContext && (
