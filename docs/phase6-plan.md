@@ -19,7 +19,7 @@ Phase 6 主軸:**把 Phase 5 留下的設計妥協 + 觀測到的 1 個月實戰
 
 ---
 
-## 1. 9 個候選 Track(獨立可選,可組合)
+## 1. 9 個候選 Track(獨立可選,可組合)+ Track P 已事後 ship
 
 ### Track G:30 天上線體檢(最先做、最便宜)
 **為什麼做**:Phase 5 ship 多東西,不知道實際使用情況(訂閱有人用?ERP sync 有人啟用?MAPE 真的低嗎?)。沒體檢就規劃 Phase 6 是憑想像。
@@ -166,6 +166,31 @@ Phase 6 主軸:**把 Phase 5 留下的設計妥協 + 觀測到的 1 個月實戰
 
 ---
 
+### Track P:Chat 純對話模式 toggle(✅ 已 ship 2026-04-30,**不在 Phase 6 規劃路線內,事後補登**)
+**為什麼做**:工具庫越長越大(MCP / API / KB / 技能 / AI 戰情多到超過 toolbar 寬度),使用者問日常問題時 server 端要 auto-discover 跑過全部工具,ttft 被拖慢。原本只能逐一隱藏(很麻煩),也沒 session 級「全部停用」開關。
+
+**範圍**(已實作):
+- P1. 技能右邊新增「純對話」toggle 按鈕(off=灰 outline / on=橘色實心 + ✓)
+- P2. 永久 `localStorage('chat:pureMode')`,跨 session 跟著瀏覽器走
+- P3. ON 時 MCP / API / KB / 技能 / AI 戰情按鈕變灰 + `pointer-events-none`(視覺暗示「全停用」)
+- P4. MessageInput 上方加醒目橘色 banner + 「關閉純對話」一鍵還原按鈕(防止使用者忘記如何開回工具)
+- P5. server `req.body.pure_mode` → `explicitMode=true`(skip TAG routing + auto-discover)+ 清空 `sessionSkills` / `_allAccessibleSkills`
+- P6. 不寫 `tools_context_json`(避免污染使用者既有工具選擇)
+- P7. zh-TW / en / vi 三語齊
+
+**ttft 改善**:純對話 ON 時 server 不跑 KB embedding 預檢、不註冊 MCP / KB / 技能 schema 進 prompt → Gemini Flash chat 路徑可省下數百 ms ~ 數秒(視工具多寡)
+
+**檔案**:[client/src/pages/ChatPage.tsx](../client/src/pages/ChatPage.tsx) + [server/routes/chat.js](../server/routes/chat.js) + 三語 i18n
+
+**Commit**:`835613f feat(chat): 純對話模式 — 一鍵停用所有工具/KB/技能`
+
+**後續可能延伸**(視使用情況):
+- per-session pure mode override(目前是全局,可能某些 session 想保留工具)
+- 純對話模式下顯示「省下 N ms」實測指標(教育使用者價值)
+- 與 Track O 結合:PM session 自動 force pure mode = false(PM 一定要工具)
+
+---
+
 ## 2. 兩種推薦組合
 
 ### 「治理收尾」組合(2-3 週)— 把 Phase 5 妥協收乾淨
@@ -282,6 +307,6 @@ Phase 6 主軸:**把 Phase 5 留下的設計妥協 + 觀測到的 1 個月實戰
 ---
 
 **本文作者**:Claude(基於 Phase 5 4 個 commits ship 後的觀察 + Phase 5 規劃書留下的 D/E 重評估)
-**最後更新**:2026-04-26
+**最後更新**:2026-04-30(新增 Track P 純對話模式事後補登)
 **對應 Phase 5 規劃**:[phase5-plan.md](phase5-plan.md)
 **對應主規劃**:[precious-metals-plan.md](precious-metals-plan.md) §12 Phase 5 實施成果
