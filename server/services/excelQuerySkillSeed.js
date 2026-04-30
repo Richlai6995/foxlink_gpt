@@ -76,7 +76,7 @@ async function autoSeedExcelQuerySkill(db) {
   let existing;
   try {
     existing = await db.prepare(
-      `SELECT id, description, type, code_packages
+      `SELECT id, description, type, code_packages, mcp_tool_mode, kb_mode
        FROM skills
        WHERE UPPER(name) = UPPER(?) OR UPPER(name) = UPPER('excel_query')`
     ).get(SKILL_NAME);
@@ -91,12 +91,14 @@ async function autoSeedExcelQuerySkill(db) {
 
   if (!existing) {
     try {
+      // mcp_tool_mode=disable + kb_mode=disable:此 skill 純做 SQL,不需要任何
+      // MCP 工具 / 知識庫,使用者只勾此 skill 時不應該被塞 12 個 MCP + 29 個 KB。
       await db.prepare(`
         INSERT INTO skills
           (name, description, icon, type, tags, owner_user_id,
            is_public, is_admin_approved, endpoint_mode, tool_schema,
-           code_packages, code_status)
-        VALUES (?, ?, ?, 'code', ?, ?, 1, 1, 'tool', ?, ?, 'stopped')
+           code_packages, code_status, mcp_tool_mode, kb_mode)
+        VALUES (?, ?, ?, 'code', ?, ?, 1, 1, 'tool', ?, ?, 'stopped', 'disable', 'disable')
       `).run(
         SKILL_NAME, DESCRIPTION, ICON, tagsJson, ownerId,
         toolSchemaJson, packagesJson
@@ -127,6 +129,13 @@ async function autoSeedExcelQuerySkill(db) {
     }
   } catch (_) { needsUpdate = true; }
 
+  // 一次性 migration:既有 row 若 mcp_tool_mode/kb_mode 還是預設 append,
+  // 就改成 disable(此 skill 純做 SQL,沒這個會被塞一堆 MCP/KB,浪費 token + 嚇使用者)
+  const existingMcpMode = existing.mcp_tool_mode || existing.MCP_TOOL_MODE || 'append';
+  const existingKbMode = existing.kb_mode || existing.KB_MODE || 'append';
+  const needsModeFix = existingMcpMode !== 'disable' || existingKbMode !== 'disable';
+  if (needsModeFix) needsUpdate = true;
+
   if (!needsUpdate) return;
 
   try {
@@ -135,13 +144,17 @@ async function autoSeedExcelQuerySkill(db) {
     await db.prepare(`
       UPDATE skills
       SET description=?, tags=?, tool_schema=?, icon=?, type='code',
-          code_packages=?, is_admin_approved=1, endpoint_mode='tool'
+          code_packages=?, is_admin_approved=1, endpoint_mode='tool',
+          mcp_tool_mode='disable', kb_mode='disable'
       WHERE id=?
     `).run(
       DESCRIPTION, tagsJson, toolSchemaJson, ICON, packagesJson,
       existing.id || existing.ID
     );
-    console.log(`[ExcelQuerySkillSeed] Upgraded "${SKILL_NAME}" metadata to v${SKILL_VERSION}`);
+    console.log(
+      `[ExcelQuerySkillSeed] Upgraded "${SKILL_NAME}" metadata to v${SKILL_VERSION}` +
+      (needsModeFix ? ` (also forced mcp_tool_mode=kb_mode=disable, was mcp=${existingMcpMode} kb=${existingKbMode})` : '')
+    );
   } catch (e) {
     console.error('[ExcelQuerySkillSeed] UPDATE failed:', e.message);
   }
