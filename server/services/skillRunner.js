@@ -393,14 +393,30 @@ function startHealthMonitor(db) {
       }
     }
 
-    // 2. Hot-reload: detect DB code_snippet changes from other pods
-    //    If admin UI saved new code on pod A, pod B/C/D pick it up here
+    // 2. Hot-reload + missing-spawn: detect DB changes from other pods
+    //    (a) admin UI 在 pod A 改 code → pod B/C/D 30s 內 hot-reload
+    //    (b) admin UI 在 pod A 第一次啟動新 skill → pod B/C/D 沒這個 process,
+    //        autoRestoreRunners 又只在啟動時跑一次,所以這裡偵測缺漏並補 spawn
     try {
       const skills = await db.prepare(
-        `SELECT id, name, code_snippet FROM skills WHERE type='code' AND code_status='running'`
+        `SELECT * FROM skills WHERE type='code' AND code_status='running'`
       ).all();
       for (const skill of skills) {
-        if (!skill.code_snippet || !runningProcesses.has(skill.id)) continue;
+        if (!skill.code_snippet) continue;
+
+        // (b) 本 pod 沒這個 skill 的 process → 補 spawn(K8s 多 pod 必要)
+        if (!runningProcesses.has(skill.id)) {
+          console.log(`[skillRunner] Missing process for skill #${skill.id} (${skill.name}) on this pod, spawning locally...`);
+          try {
+            saveCode(skill.id, skill.code_snippet);
+            await spawnRunner(skill, db);
+          } catch (e) {
+            console.error(`[skillRunner] Auto-spawn failed for #${skill.id}: ${e.message}`);
+          }
+          continue;
+        }
+
+        // (a) hot-reload code change
         const dbHash = crypto.createHash('md5').update(skill.code_snippet).digest('hex');
         const localHash = codeHashes.get(skill.id);
         if (localHash && dbHash !== localHash) {
@@ -432,11 +448,24 @@ function getStatus(skillId) {
 function subscribeStatus(res) { statusSubscribers.add(res); }
 function unsubscribeStatus(res) { statusSubscribers.delete(res); }
 
+// ── Pod-local endpoint resolution(K8s 多 pod 必要)──────────────────────────
+// 每個 pod 自己 spawn skill,各跑各的 127.0.0.1:port。DB.endpoint_url 會被
+// 後啟動的 pod 互相覆寫,單純讀 DB 會打到別的 pod 的 port → ECONNREFUSED。
+// 此 helper 優先用本 pod 的 in-memory port,fallback DB(本 pod 還沒 spawn 才走)。
+function resolveLocalEndpoint(skillId, dbEndpointUrl) {
+  const entry =
+    runningProcesses.get(Number(skillId)) ||
+    runningProcesses.get(String(skillId)) ||
+    runningProcesses.get(skillId);
+  if (entry && entry.port) return `http://127.0.0.1:${entry.port}`;
+  return dbEndpointUrl || null;
+}
+
 module.exports = {
   saveCode, generatePackageJson, installPackages,
   spawnRunner, killRunner, restartRunner,
   autoRestoreRunners, startHealthMonitor,
   subscribeLog, unsubscribeLog, getLogs, getStatus,
   subscribeStatus, unsubscribeStatus, pushStatusUpdate,
-  ensureRunnerDir,
+  ensureRunnerDir, resolveLocalEndpoint,
 };

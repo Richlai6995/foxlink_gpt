@@ -9,6 +9,7 @@ const { streamChat, generateWithImage, generateWithTools, generateWithToolsStrea
 const { streamChatAoai, streamChatAoaiWithTools } = require('../services/llmService');
 const { processGenerateBlocks } = require('../services/fileGenerator');
 const { parseChartBlocks } = require('../services/chartSpecParser');
+const skillRunner = require('../services/skillRunner');
 const { notifyAdminSensitiveKeyword } = require('../services/mailService');
 const { budgetGuard } = require('../middleware/budgetGuard');
 const mcpClient = require('../services/mcpClient');
@@ -2143,11 +2144,13 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
           console.warn(`[Skill] "${sk.name}" skipped: no endpoint_url (code_status=${sk.code_status}, code_port=${sk.code_port})`);
           continue;
         }
-        // For code runners, do a quick health check first
+        // For code runners, do a quick health check first(用 pod-local port,
+        // 避免拿到別 pod 的 DB.endpoint_url 永遠 health fail)
         if (sk.type === 'code') {
-          const healthy = await checkCodeSkillHealth(sk.endpoint_url);
+          const _localUrl = skillRunner.resolveLocalEndpoint(sk.id || sk.ID, sk.endpoint_url);
+          const healthy = await checkCodeSkillHealth(_localUrl);
           if (!healthy) {
-            console.warn(`[Skill] "${sk.name}" health check failed (url=${sk.endpoint_url}), skipping`);
+            console.warn(`[Skill] "${sk.name}" health check failed (localUrl=${_localUrl} db=${sk.endpoint_url}), skipping`);
             sendEvent({ type: 'status', message: `⚠️ Skill "${sk.name}" 離線，請先在技能設定中啟動 Code Runner` });
             continue;
           }
@@ -2462,8 +2465,12 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
         const _t0 = Date.now();
         let _status = 'ok', _errMsg = null, _respPreview = null, added = '';
         try {
+          // Pod-local endpoint(K8s 多 pod 必須,DB.endpoint_url 會被互相覆寫)
+          const _localUrl = sk.type === 'code'
+            ? skillRunner.resolveLocalEndpoint(sk.id || sk.ID, sk.endpoint_url)
+            : sk.endpoint_url;
           const resp = await Promise.race([
-            fetch(sk.endpoint_url, {
+            fetch(_localUrl, {
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json',
@@ -2504,8 +2511,11 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
       const _ansT0 = Date.now();
       sendEvent({ type: 'status', message: `Skill: ${sk.name} 處理中...` });
       try {
+        const _localUrl = sk.type === 'code'
+          ? skillRunner.resolveLocalEndpoint(sk.id || sk.ID, sk.endpoint_url)
+          : sk.endpoint_url;
         const resp = await Promise.race([
-          fetch(sk.endpoint_url, {
+          fetch(_localUrl, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -3404,7 +3414,13 @@ ${hasPreserve ? '- 標記【★保留原文】的欄位：必須完整複製原�
               sendEvent({ type: 'status', message: `執行技能程式：${sk.name}` });
               const _t0 = Date.now();
               try {
-                const resp = await fetch(sk.endpoint_url, {
+                // Pod-local endpoint:DB.endpoint_url 在多 pod 下會被互相覆寫,
+                // 必須優先用本 pod 自己 spawn 的 process port,否則 ECONNREFUSED
+                const _localUrl = sk.type === 'code'
+                  ? skillRunner.resolveLocalEndpoint(sk.id || sk.ID, sk.endpoint_url)
+                  : sk.endpoint_url;
+                if (!_localUrl) throw new Error('skill endpoint not available on this pod');
+                const resp = await fetch(_localUrl, {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json', ...(sk.endpoint_secret ? { Authorization: `Bearer ${sk.endpoint_secret}` } : {}) },
                   body: JSON.stringify({ ...args, user_message: combinedUserText, user_id: req.user.id, session_id: sessionId, recent_messages: recentMessages, attached_files: sessionAttachedFiles }),
