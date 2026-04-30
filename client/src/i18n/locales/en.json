@@ -238,6 +238,7 @@
       "searchSkills": "Search skills...",
       "selectedCount": "{{count}} selected",
       "confirmMount": "Confirm",
+      "recommendedHint": "✦ Auto-checks {{count}} recommended tool(s)/KB(s)",
       "createSkill": "Create",
       "aiDashHome": "Go to AI Dashboard",
       "noDesigns": "No available tasks",

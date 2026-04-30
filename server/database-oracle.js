@@ -2001,6 +2001,22 @@ async function runMigrations(db) {
   // 文件範本輸出（skill 使用範本產出檔案）
   await safeAddColumn('SKILLS', 'OUTPUT_TEMPLATE_ID',   'VARCHAR2(64)');
 
+  // ── code skill 預設 mcp_tool_mode/kb_mode → disable(2026-05-01)──────────────
+  // 配合「skill 推薦 → UI 自動勾」設計:user 只看到、只給 LLM 自己/UI 勾的東西,
+  // append 全載已成 anti-pattern(token 浪費 + 隱藏=不執行的合約被打破)。
+  // 只動「兩者都還是 append」的 row,有人手調 exclusive/disable 的不碰。
+  try {
+    const r = await db.prepare(
+      `UPDATE skills
+       SET mcp_tool_mode='disable', kb_mode='disable'
+       WHERE type='code'
+         AND (mcp_tool_mode='append' OR mcp_tool_mode IS NULL)
+         AND (kb_mode='append' OR kb_mode IS NULL)`
+    ).run();
+    const cnt = r?.rowsAffected ?? r?.changes ?? 0;
+    if (cnt > 0) console.log(`[Migration] code skills mcp_tool_mode + kb_mode → disable for ${cnt} row(s)`);
+  } catch (e) { console.warn('[Migration] code skill mode reset:', e.message); }
+
   // session_skills 變數
   await safeAddColumn('SESSION_SKILLS', 'VARIABLES_JSON', "CLOB DEFAULT '{}'");
 

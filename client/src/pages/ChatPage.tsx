@@ -162,7 +162,13 @@ export default function ChatPage() {
   }, [showDashPanel])
 
   // ── Skill panel state ──────────────────────────────────────────────────────
-  interface Skill { id: number; name: string; icon: string; description: string; type: string; model_key?: string | null; prompt_variables?: string }
+  // 推薦欄位 mcp_tool_ids / dify_kb_ids / self_kb_ids:勾此 skill 時 UI 會
+  // 自動把這些 ID 加進對應的 popover selected,使用者可手動取消
+  interface Skill {
+    id: number; name: string; icon: string; description: string;
+    type: string; model_key?: string | null; prompt_variables?: string;
+    mcp_tool_ids?: number[]; dify_kb_ids?: number[]; self_kb_ids?: string[];
+  }
   const [sessionSkills, setSessionSkills] = useState<Skill[]>([])       // currently attached
   const [allSkills, setAllSkills] = useState<Skill[]>([])               // available to pick
   const [showSkillPanel, setShowSkillPanel] = useState(false)
@@ -641,11 +647,27 @@ export default function ChatPage() {
     await doSaveSkills()
   }, [allSkills, pickedIds, doSaveSkills])
 
-  const togglePick = (id: number) => setPickedIds(prev => {
-    const next = new Set(prev)
-    next.has(id) ? next.delete(id) : next.add(id)
-    return next
-  })
+  const togglePick = (id: number) => {
+    const willAdd = !pickedIds.has(id)
+    setPickedIds(prev => {
+      const next = new Set(prev)
+      next.has(id) ? next.delete(id) : next.add(id)
+      return next
+    })
+    // 加上 skill 時自動勾上其推薦的 MCP/API/KB(B 設計:explicit + visible + override-able)
+    // 取消勾 skill 時不自動移除已勾的 tool — 使用者可能還想用
+    if (willAdd) {
+      const sk = allSkills.find(s => s.id === id) as any
+      if (sk) {
+        const mcpIds: number[] = Array.isArray(sk.mcp_tool_ids) ? sk.mcp_tool_ids.map(Number).filter((x: number) => !isNaN(x)) : []
+        const difyIds: number[] = Array.isArray(sk.dify_kb_ids) ? sk.dify_kb_ids.map(Number).filter((x: number) => !isNaN(x)) : []
+        const kbIds: string[] = Array.isArray(sk.self_kb_ids) ? sk.self_kb_ids.map(String) : []
+        if (mcpIds.length) setSelectedMcpIds(prev => { const n = new Set(prev); mcpIds.forEach(x => n.add(x)); return n })
+        if (difyIds.length) setSelectedDifyIds(prev => { const n = new Set(prev); difyIds.forEach(x => n.add(x)); return n })
+        if (kbIds.length) setSelectedKbIds(prev => { const n = new Set(prev); kbIds.forEach(x => n.add(x)); return n })
+      }
+    }
+  }
 
   // Close panel on outside click
   useEffect(() => {
@@ -1495,6 +1517,14 @@ export default function ChatPage() {
                               <div className="flex-1 min-w-0 cursor-pointer" onClick={() => togglePick(sk.id)}>
                                 <p className="text-xs font-medium text-slate-800 whitespace-nowrap">{localName(sk)}</p>
                                 {localDesc(sk) && <p className="text-xs text-slate-400 whitespace-nowrap">{localDesc(sk)}</p>}
+                                {(() => {
+                                  const skAny = sk as any
+                                  const cnt = (skAny.mcp_tool_ids?.length || 0)
+                                            + (skAny.dify_kb_ids?.length || 0)
+                                            + (skAny.self_kb_ids?.length || 0)
+                                  if (cnt === 0) return null
+                                  return <p className="text-xs text-purple-500 whitespace-nowrap">{t('chat.topbar.recommendedHint', { count: cnt })}</p>
+                                })()}
                               </div>
                             </div>
                           )

@@ -238,6 +238,7 @@
       "searchSkills": "搜尋技能...",
       "selectedCount": "已選 {{count}} 項",
       "confirmMount": "確認掛載",
+      "recommendedHint": "✦ 推薦自動勾選 {{count}} 項工具/知識庫",
       "createSkill": "前往建立",
       "aiDashHome": "前往 AI 戰情主頁",
       "noDesigns": "尚無可用戰情任務",

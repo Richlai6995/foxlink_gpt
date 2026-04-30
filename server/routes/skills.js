@@ -524,7 +524,10 @@ router.post('/', async (req, res) => {
             type || 'builtin', system_prompt || null,
             endpoint_url || null, endpoint_secret || null,
             endpoint_mode || 'inject', model_key || null,
-            mcp_tool_mode || 'append',
+            // code skill 預設 disable:配合「skill 推薦 → UI 自動勾」設計,
+            // 不再走 append 全載(浪費 token + 嚇使用者)。建議勾哪幾個
+            // 由 frontend 讀 mcp_tool_ids / dify_kb_ids / self_kb_ids 決定。
+            mcp_tool_mode || (type === 'code' ? 'disable' : 'append'),
             JSON.stringify(mcp_tool_ids || []),
             JSON.stringify(dify_kb_ids || []),
             JSON.stringify(tags || []),
@@ -532,7 +535,7 @@ router.post('/', async (req, res) => {
             code_snippet || null,
             JSON.stringify(code_packages || []),
             JSON.stringify(self_kb_ids || []),
-            kb_mode || 'append',
+            kb_mode || (type === 'code' ? 'disable' : 'append'),
             tool_schema ? JSON.stringify(tool_schema) : null,
             output_schema ? JSON.stringify(output_schema) : null,
             output_template_id || null,

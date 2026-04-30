@@ -238,6 +238,7 @@
       "searchSkills": "Tìm kiếm kỹ năng...",
       "selectedCount": "Đã chọn {{count}} mục",
       "confirmMount": "Xác nhận",
+      "recommendedHint": "✦ Tự động chọn {{count}} công cụ/KB được đề xuất",
       "createSkill": "Tạo mới",
       "aiDashHome": "Đến trang AI Dashboard",
       "noDesigns": "Chưa có nhiệm vụ khả dụng",
