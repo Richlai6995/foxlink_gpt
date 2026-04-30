@@ -180,6 +180,38 @@ async function getAllProfitCenters(onlyFoxlinkGroup = false) {
 }
 
 /**
+ * 正崴集團利潤中心 whitelist (CO_GROUP='正崴集團')
+ * 來源: APPS.FL_ORG_EMP_DEPT_MV;cache 10 分鐘
+ * 用於「費用統計及分析」全域過濾(本地 users 表沒 co_group 欄位,只能靠 PC whitelist)
+ */
+let _foxlinkPCsCache = { set: null, expiresAt: 0 };
+
+async function getFoxlinkGroupProfitCenters() {
+  const now = Date.now();
+  if (_foxlinkPCsCache.set && _foxlinkPCsCache.expiresAt > now) {
+    return _foxlinkPCsCache.set;
+  }
+  if (!isConfigured()) return new Set();
+  initClient();
+  const sql = `
+    SELECT DISTINCT PROFIT_CENTER FROM APPS.FL_ORG_EMP_DEPT_MV
+    WHERE PROFIT_CENTER IS NOT NULL AND CO_GROUP = '正崴集團'
+  `;
+  try {
+    const result = await execute(sql);
+    const set = new Set();
+    for (const r of (result?.rows || [])) {
+      if (r.PROFIT_CENTER) set.add(r.PROFIT_CENTER);
+    }
+    _foxlinkPCsCache = { set, expiresAt: now + 10 * 60 * 1000 };
+    return set;
+  } catch (e) {
+    console.error('[ERP] getFoxlinkGroupProfitCenters error:', e.message);
+    return new Set();
+  }
+}
+
+/**
  * 間接員工人數 by 利潤中心 × 廠區
  * FOXFL.FL_EMP_EXP_ALL 沒有 FACTORY_CODE,需透過 DEPT_CODE JOIN APPS.FL_ORG_EMP_DEPT_MV 取得。
  * 同 DEPT_CODE 在 MV 裡可能因 ORG_ID / ORG_CODE 展開成多列,先用 MAX(FACTORY_CODE) GROUP BY DEPT_CODE 去重,避免計數放大。
@@ -275,4 +307,4 @@ async function getConnection() {
   return await oracledb.getConnection(getConfig());
 }
 
-module.exports = { isConfigured, execute, getConnection, getOracledb, getEmployeeOrgData, getIndirectEmpCountByPC, getIndirectEmpCountByPCFactory, getAllProfitCenters, getAllIndirectEmployees };
+module.exports = { isConfigured, execute, getConnection, getOracledb, getEmployeeOrgData, getIndirectEmpCountByPC, getIndirectEmpCountByPCFactory, getAllProfitCenters, getAllIndirectEmployees, getFoxlinkGroupProfitCenters };

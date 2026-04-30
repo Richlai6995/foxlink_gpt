@@ -1627,7 +1627,7 @@ router.get('/chat-sessions', async (req, res) => {
  * @param {object} filters {factoryCode, deptCode, profitCenter, orgSection, orgGroup} 單選篩選(空字串/null=不篩)
  */
 async function getCostRows(db, startDate, endDate, filters = {}) {
-  const { factoryCode, deptCode, profitCenter, orgSection, orgGroup } = filters;
+  const { factoryCode, deptCode, profitCenter, orgSection, orgGroup, requireEmployeeId } = filters;
   const wheres = [
     `tu.usage_date BETWEEN TO_DATE(?, 'YYYY-MM-DD') AND TO_DATE(?, 'YYYY-MM-DD')`,
     `u.org_end_date IS NULL`,
@@ -1639,6 +1639,14 @@ async function getCostRows(db, startDate, endDate, filters = {}) {
   if (profitCenter) { wheres.push(`u.profit_center = ?`);  binds.push(profitCenter); }
   if (orgSection)   { wheres.push(`u.org_section = ?`);    binds.push(orgSection); }
   if (orgGroup)     { wheres.push(`u.org_group_name = ?`); binds.push(orgGroup); }
+  if (requireEmployeeId) { wheres.push(`u.employee_id IS NOT NULL`); }
+
+  const pcWhitelist = await resolvePcWhitelist(filters);
+  if (pcWhitelist && pcWhitelist.size > 0) {
+    const arr = Array.from(pcWhitelist);
+    wheres.push(`u.profit_center IN (${arr.map(() => '?').join(',')})`);
+    binds.push(...arr);
+  }
   try {
     return await db.prepare(`
       SELECT tu.user_id, u.employee_id, u.name AS user_name, u.email AS user_email,
@@ -1661,7 +1669,8 @@ async function getCostRows(db, startDate, endDate, filters = {}) {
 }
 
 /**
- * Helper: 從 req.query 抽出 5 個 filter
+ * Helper: 從 req.query 抽出 filter(5 個下拉 + 2 個全域 checkbox)
+ * onlyFoxlinkGroup / requireEmployeeId 預設 true(query 傳 '0' 才關掉)
  */
 function extractFilters(q) {
   return {
@@ -1670,15 +1679,49 @@ function extractFilters(q) {
     profitCenter: q.profitCenter || null,
     orgSection:   q.orgSection || null,
     orgGroup:     q.orgGroup || null,
+    onlyFoxlinkGroup: q.onlyFoxlinkGroup !== '0',
+    requireEmployeeId: q.requireEmployeeId !== '0',
   };
 }
 
 /**
- * Helper: 帳號人數的 filter WHERE fragment(配合 getCostRows 語義,套用同樣篩選)
- * 回傳 { sql, binds }:合適放在既有 users query 的 WHERE 後面(已 AND 連接)
+ * 是否帶了「會把資料縮小到子集」的 filter — 用來決定是否要補 includeAllPC
+ * onlyFoxlinkGroup / requireEmployeeId 是全域過濾,不算
  */
-function buildAccountRowsFilter(filters) {
-  const { factoryCode, deptCode, profitCenter, orgSection, orgGroup } = filters;
+function hasNarrowFilter(f) {
+  return !!(f.factoryCode || f.deptCode || f.profitCenter || f.orgSection || f.orgGroup);
+}
+
+/**
+ * 解析正崴集團 PC whitelist。回傳 null = 不做 whitelist 過濾(關掉 onlyFoxlinkGroup 或 ERP 不可用)
+ */
+async function resolvePcWhitelist(filters) {
+  if (!filters.onlyFoxlinkGroup) return null;
+  const { getFoxlinkGroupProfitCenters } = require('../services/erpDb');
+  const set = await getFoxlinkGroupProfitCenters();
+  return set.size > 0 ? set : null;
+}
+
+/**
+ * 過濾 indirect emp Map 到 PC whitelist;傳 null 直接回原圖
+ * mapType: 'pc' (key=PC) or 'pcFactory' (key=`${pc}|${factory}`)
+ */
+function filterIndirectMap(map, pcWhitelist, mapType) {
+  if (!pcWhitelist) return map;
+  const filtered = new Map();
+  for (const [k, v] of map) {
+    const pc = mapType === 'pcFactory' ? k.split('|')[0] : k;
+    if (pcWhitelist.has(pc)) filtered.set(k, v);
+  }
+  return filtered;
+}
+
+/**
+ * Helper: 帳號人數的 filter WHERE fragment(配合 getCostRows 語義,套用同樣篩選)
+ * 回傳 { extraWhere, binds }:合適放在既有 users query 的 WHERE 後面(已 AND 連接)
+ */
+async function buildAccountRowsFilter(filters) {
+  const { factoryCode, deptCode, profitCenter, orgSection, orgGroup, requireEmployeeId } = filters;
   const extras = [];
   const binds = [];
   if (factoryCode)  { extras.push(`factory_code = ?`);   binds.push(factoryCode); }
@@ -1686,6 +1729,14 @@ function buildAccountRowsFilter(filters) {
   if (profitCenter) { extras.push(`profit_center = ?`);  binds.push(profitCenter); }
   if (orgSection)   { extras.push(`org_section = ?`);    binds.push(orgSection); }
   if (orgGroup)     { extras.push(`org_group_name = ?`); binds.push(orgGroup); }
+  if (requireEmployeeId) { extras.push(`employee_id IS NOT NULL`); }
+
+  const pcWhitelist = await resolvePcWhitelist(filters);
+  if (pcWhitelist && pcWhitelist.size > 0) {
+    const arr = Array.from(pcWhitelist);
+    extras.push(`profit_center IN (${arr.map(() => '?').join(',')})`);
+    binds.push(...arr);
+  }
   return { extraWhere: extras.length ? ' AND ' + extras.join(' AND ') : '', binds };
 }
 
@@ -1722,7 +1773,7 @@ async function aggregateEmployees(db, startDate, endDate, { showAll, lang, filte
 
   if (showAll) {
     const { getAllIndirectEmployees } = require('../services/erpDb');
-    const [erpEmps, allUsers] = await Promise.all([
+    const [erpEmps, allUsers, pcWhitelist] = await Promise.all([
       getAllIndirectEmployees(),
       db.prepare(
         `SELECT employee_id FROM users
@@ -1730,6 +1781,7 @@ async function aggregateEmployees(db, startDate, endDate, { showAll, lang, filte
            AND (status IS NULL OR status != 'disabled')
            AND org_end_date IS NULL`
       ).all(),
+      resolvePcWhitelist(filters),
     ]);
     const userSet = new Set(allUsers.map((u) => String(u.employee_id)));
 
@@ -1740,6 +1792,8 @@ async function aggregateEmployees(db, startDate, endDate, { showAll, lang, filte
       if (filters.profitCenter && (e.PROFIT_CENTER || '') !== filters.profitCenter) continue;
       if (filters.orgSection   && (e.ORG_SECTION || '')   !== filters.orgSection)   continue;
       if (filters.orgGroup     && (e.ORG_GROUP_NAME || '')!== filters.orgGroup)     continue;
+      if (pcWhitelist && !pcWhitelist.has(e.PROFIT_CENTER || '')) continue;
+      if (filters.requireEmployeeId && !e.EMPLOYEE_NO) continue;
 
       const empId = String(e.EMPLOYEE_NO);
       if (empMap[empId]) {
@@ -1874,19 +1928,20 @@ router.get('/cost-stats/employees', async (req, res) => {
   }
 });
 
-// GET /api/admin/cost-stats/summary?startDate=&endDate=&includeAllPC=1&factoryCode=&deptCode=&profitCenter=&orgSection=&orgGroup=
+// GET /api/admin/cost-stats/summary?startDate=&endDate=&includeAllPC=1&factoryCode=&deptCode=&profitCenter=&orgSection=&orgGroup=&onlyFoxlinkGroup=&requireEmployeeId=
 router.get('/cost-stats/summary', async (req, res) => {
   try {
     const db = require('../database-oracle').db;
-    const { startDate, endDate, includeAllPC, onlyFoxlinkGroup } = req.query;
+    const { startDate, endDate, includeAllPC } = req.query;
     if (!startDate || !endDate) return res.status(400).json({ error: '請提供日期區間' });
 
     const { getIndirectEmpCountByPC, getAllProfitCenters } = require('../services/erpDb');
     const filters = extractFilters(req.query);
-    const hasFilter = Object.values(filters).some(Boolean);
-    const accFilter = buildAccountRowsFilter(filters);
+    const hasFilter = hasNarrowFilter(filters);
+    const accFilter = await buildAccountRowsFilter(filters);
+    const pcWhitelist = await resolvePcWhitelist(filters);
 
-    const [rows, accountRows, indirectMap, allPCs] = await Promise.all([
+    const [rows, accountRows, indirectMapRaw, allPCs] = await Promise.all([
       getCostRows(db, startDate, endDate, filters),
       db.prepare(
         `SELECT profit_center, COUNT(*) AS cnt FROM users
@@ -1895,8 +1950,9 @@ router.get('/cost-stats/summary', async (req, res) => {
       ).all(...accFilter.binds),
       getIndirectEmpCountByPC(),
       // 套 filter 時不補「無帳號 PC」(filter 後的 PC 範圍本來就有限,補全量 PC 會破壞語義)
-      (includeAllPC === '1' && !hasFilter) ? getAllProfitCenters(onlyFoxlinkGroup !== '0') : Promise.resolve([]),
+      (includeAllPC === '1' && !hasFilter) ? getAllProfitCenters(filters.onlyFoxlinkGroup) : Promise.resolve([]),
     ]);
+    const indirectMap = filterIndirectMap(indirectMapRaw, pcWhitelist, 'pc');
 
     // Build account count map (all registered accounts per profit_center)
     const accountMap = {};
@@ -2009,19 +2065,20 @@ router.get('/cost-stats/summary', async (req, res) => {
   }
 });
 
-// GET /api/admin/cost-stats/monthly?startDate=&endDate=&includeAllPC=1&factoryCode=&deptCode=&profitCenter=&orgSection=&orgGroup=
+// GET /api/admin/cost-stats/monthly?startDate=&endDate=&includeAllPC=1&factoryCode=&deptCode=&profitCenter=&orgSection=&orgGroup=&onlyFoxlinkGroup=&requireEmployeeId=
 router.get('/cost-stats/monthly', async (req, res) => {
   try {
     const db = require('../database-oracle').db;
-    const { startDate, endDate, includeAllPC, onlyFoxlinkGroup } = req.query;
+    const { startDate, endDate, includeAllPC } = req.query;
     if (!startDate || !endDate) return res.status(400).json({ error: '請提供日期區間' });
 
     const { getIndirectEmpCountByPC, getAllProfitCenters } = require('../services/erpDb');
     const filters = extractFilters(req.query);
-    const hasFilter = Object.values(filters).some(Boolean);
-    const accFilter = buildAccountRowsFilter(filters);
+    const hasFilter = hasNarrowFilter(filters);
+    const accFilter = await buildAccountRowsFilter(filters);
+    const pcWhitelist = await resolvePcWhitelist(filters);
 
-    const [rows, accountRows, indirectMap, allPCs] = await Promise.all([
+    const [rows, accountRows, indirectMapRaw, allPCs] = await Promise.all([
       getCostRows(db, startDate, endDate, filters),
       db.prepare(
         `SELECT profit_center, COUNT(*) AS cnt FROM users
@@ -2029,8 +2086,9 @@ router.get('/cost-stats/monthly', async (req, res) => {
          GROUP BY profit_center`
       ).all(...accFilter.binds),
       getIndirectEmpCountByPC(),
-      (includeAllPC === '1' && !hasFilter) ? getAllProfitCenters(onlyFoxlinkGroup !== '0') : Promise.resolve([]),
+      (includeAllPC === '1' && !hasFilter) ? getAllProfitCenters(filters.onlyFoxlinkGroup) : Promise.resolve([]),
     ]);
+    const indirectMap = filterIndirectMap(indirectMapRaw, pcWhitelist, 'pc');
 
     const accountMap = {};
     for (const a of accountRows) {
@@ -2161,15 +2219,16 @@ router.get('/cost-stats/export/employees', async (req, res) => {
 router.get('/cost-stats/export/summary', async (req, res) => {
   try {
     const db = require('../database-oracle').db;
-    const { startDate, endDate, includeAllPC, onlyFoxlinkGroup } = req.query;
+    const { startDate, endDate, includeAllPC } = req.query;
     if (!startDate || !endDate) return res.status(400).json({ error: '請提供日期區間' });
 
     const { getIndirectEmpCountByPC, getAllProfitCenters } = require('../services/erpDb');
     const filters = extractFilters(req.query);
-    const hasFilter = Object.values(filters).some(Boolean);
-    const accFilter = buildAccountRowsFilter(filters);
+    const hasFilter = hasNarrowFilter(filters);
+    const accFilter = await buildAccountRowsFilter(filters);
+    const pcWhitelist = await resolvePcWhitelist(filters);
 
-    const [rows, accountRows, indirectMap, allPCs] = await Promise.all([
+    const [rows, accountRows, indirectMapRaw, allPCs] = await Promise.all([
       getCostRows(db, startDate, endDate, filters),
       db.prepare(
         `SELECT profit_center, COUNT(*) AS cnt FROM users
@@ -2177,8 +2236,9 @@ router.get('/cost-stats/export/summary', async (req, res) => {
          GROUP BY profit_center`
       ).all(...accFilter.binds),
       getIndirectEmpCountByPC(),
-      (includeAllPC === '1' && !hasFilter) ? getAllProfitCenters(onlyFoxlinkGroup !== '0') : Promise.resolve([]),
+      (includeAllPC === '1' && !hasFilter) ? getAllProfitCenters(filters.onlyFoxlinkGroup) : Promise.resolve([]),
     ]);
+    const indirectMap = filterIndirectMap(indirectMapRaw, pcWhitelist, 'pc');
     const accountMap = {};
     for (const a of accountRows) { accountMap[a.profit_center || '__NONE__'] = a.cnt; }
 
@@ -2262,15 +2322,16 @@ router.get('/cost-stats/export/summary', async (req, res) => {
 router.get('/cost-stats/export/monthly', async (req, res) => {
   try {
     const db = require('../database-oracle').db;
-    const { startDate, endDate, includeAllPC, onlyFoxlinkGroup } = req.query;
+    const { startDate, endDate, includeAllPC } = req.query;
     if (!startDate || !endDate) return res.status(400).json({ error: '請提供日期區間' });
 
     const { getIndirectEmpCountByPC, getAllProfitCenters } = require('../services/erpDb');
     const filters = extractFilters(req.query);
-    const hasFilter = Object.values(filters).some(Boolean);
-    const accFilter = buildAccountRowsFilter(filters);
+    const hasFilter = hasNarrowFilter(filters);
+    const accFilter = await buildAccountRowsFilter(filters);
+    const pcWhitelist = await resolvePcWhitelist(filters);
 
-    const [rows, accountRows, indirectMap, allPCs] = await Promise.all([
+    const [rows, accountRows, indirectMapRaw, allPCs] = await Promise.all([
       getCostRows(db, startDate, endDate, filters),
       db.prepare(
         `SELECT profit_center, COUNT(*) AS cnt FROM users
@@ -2278,8 +2339,9 @@ router.get('/cost-stats/export/monthly', async (req, res) => {
          GROUP BY profit_center`
       ).all(...accFilter.binds),
       getIndirectEmpCountByPC(),
-      (includeAllPC === '1' && !hasFilter) ? getAllProfitCenters(onlyFoxlinkGroup !== '0') : Promise.resolve([]),
+      (includeAllPC === '1' && !hasFilter) ? getAllProfitCenters(filters.onlyFoxlinkGroup) : Promise.resolve([]),
     ]);
+    const indirectMap = filterIndirectMap(indirectMapRaw, pcWhitelist, 'pc');
     const accountMap = {};
     for (const a of accountRows) { accountMap[a.profit_center || '__NONE__'] = a.cnt; }
 
@@ -2496,10 +2558,11 @@ router.get('/cost-stats/summary-by-factory', async (req, res) => {
 
     const { getIndirectEmpCountByPCFactory } = require('../services/erpDb');
     const filters = extractFilters(req.query);
-    const hasFilter = Object.values(filters).some(Boolean);
-    const accFilter = buildAccountRowsFilter(filters);
+    const hasFilter = hasNarrowFilter(filters);
+    const accFilter = await buildAccountRowsFilter(filters);
+    const pcWhitelist = await resolvePcWhitelist(filters);
 
-    const [rows, accountRows, indirectFactMap, pcMeta] = await Promise.all([
+    const [rows, accountRows, indirectFactMapRaw, pcMeta] = await Promise.all([
       getCostRows(db, startDate, endDate, filters),
       db.prepare(
         `SELECT profit_center, factory_code, COUNT(*) AS cnt FROM users
@@ -2510,6 +2573,7 @@ router.get('/cost-stats/summary-by-factory', async (req, res) => {
       getIndirectEmpCountByPCFactory(),
       buildPcMeta(db),
     ]);
+    const indirectFactMap = filterIndirectMap(indirectFactMapRaw, pcWhitelist, 'pcFactory');
 
     // 有 filter 時,不讓 indirectFactMap 產生「無使用/無帳號」的 ensure 空列(否則 XZ filter 會吐全部 pc×factory);
     // 保留 indirect 數字給已存在的列 inject
@@ -2550,9 +2614,10 @@ router.get('/cost-stats/monthly-by-factory', async (req, res) => {
 
     const { getIndirectEmpCountByPCFactory } = require('../services/erpDb');
     const filters = extractFilters(req.query);
-    const accFilter = buildAccountRowsFilter(filters);
+    const accFilter = await buildAccountRowsFilter(filters);
+    const pcWhitelist = await resolvePcWhitelist(filters);
 
-    const [rows, accountRows, indirectFactMap, pcMeta] = await Promise.all([
+    const [rows, accountRows, indirectFactMapRaw, pcMeta] = await Promise.all([
       getCostRows(db, startDate, endDate, filters),
       db.prepare(
         `SELECT profit_center, factory_code, COUNT(*) AS cnt FROM users
@@ -2563,6 +2628,7 @@ router.get('/cost-stats/monthly-by-factory', async (req, res) => {
       getIndirectEmpCountByPCFactory(),
       buildPcMeta(db),
     ]);
+    const indirectFactMap = filterIndirectMap(indirectFactMapRaw, pcWhitelist, 'pcFactory');
 
     let result = aggregateByPcFactory(rows, accountRows, indirectFactMap, pcMeta, true);
 
@@ -2597,10 +2663,11 @@ router.get('/cost-stats/export/summary-by-factory', async (req, res) => {
 
     const { getIndirectEmpCountByPCFactory } = require('../services/erpDb');
     const filters = extractFilters(req.query);
-    const hasFilter = Object.values(filters).some(Boolean);
-    const accFilter = buildAccountRowsFilter(filters);
+    const hasFilter = hasNarrowFilter(filters);
+    const accFilter = await buildAccountRowsFilter(filters);
+    const pcWhitelist = await resolvePcWhitelist(filters);
 
-    const [rows, accountRows, indirectFactMap, pcMeta] = await Promise.all([
+    const [rows, accountRows, indirectFactMapRaw, pcMeta] = await Promise.all([
       getCostRows(db, startDate, endDate, filters),
       db.prepare(
         `SELECT profit_center, factory_code, COUNT(*) AS cnt FROM users
@@ -2611,6 +2678,7 @@ router.get('/cost-stats/export/summary-by-factory', async (req, res) => {
       getIndirectEmpCountByPCFactory(),
       buildPcMeta(db),
     ]);
+    const indirectFactMap = filterIndirectMap(indirectFactMapRaw, pcWhitelist, 'pcFactory');
 
     const effectiveIndirectMap = hasFilter ? new Map() : indirectFactMap;
     let result = aggregateByPcFactory(rows, accountRows, effectiveIndirectMap, pcMeta, false);
@@ -2656,9 +2724,10 @@ router.get('/cost-stats/export/monthly-by-factory', async (req, res) => {
 
     const { getIndirectEmpCountByPCFactory } = require('../services/erpDb');
     const filters = extractFilters(req.query);
-    const accFilter = buildAccountRowsFilter(filters);
+    const accFilter = await buildAccountRowsFilter(filters);
+    const pcWhitelist = await resolvePcWhitelist(filters);
 
-    const [rows, accountRows, indirectFactMap, pcMeta] = await Promise.all([
+    const [rows, accountRows, indirectFactMapRaw, pcMeta] = await Promise.all([
       getCostRows(db, startDate, endDate, filters),
       db.prepare(
         `SELECT profit_center, factory_code, COUNT(*) AS cnt FROM users
@@ -2669,6 +2738,7 @@ router.get('/cost-stats/export/monthly-by-factory', async (req, res) => {
       getIndirectEmpCountByPCFactory(),
       buildPcMeta(db),
     ]);
+    const indirectFactMap = filterIndirectMap(indirectFactMapRaw, pcWhitelist, 'pcFactory');
 
     let result = aggregateByPcFactory(rows, accountRows, indirectFactMap, pcMeta, true);
     result = result.filter((r) => r.cost > 0 || r.user_count > 0);

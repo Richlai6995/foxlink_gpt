@@ -159,6 +159,7 @@ export default function CostAnalysis() {
   const [endDate, setEndDate] = useState(today)
   const [includeAllPC, setIncludeAllPC] = useState(false)
   const [onlyFoxlinkGroup, setOnlyFoxlinkGroup] = useState(true)
+  const [requireEmployeeId, setRequireEmployeeId] = useState(true)
   const [showAllEmployees, setShowAllEmployees] = useState(false)
   const [summary, setSummary] = useState<SummaryRow[]>([])
   const [monthly, setMonthly] = useState<MonthlyRow[]>([])
@@ -182,7 +183,9 @@ export default function CostAnalysis() {
     setLoading(true)
     setError('')
     try {
-      const incParam = includeAllPC ? `&includeAllPC=1&onlyFoxlinkGroup=${onlyFoxlinkGroup ? '1' : '0'}` : ''
+      // 全域過濾(套到所有 endpoint):正崴集團 + 有工號
+      const globalFilterParam = `&onlyFoxlinkGroup=${onlyFoxlinkGroup ? '1' : '0'}&requireEmployeeId=${requireEmployeeId ? '1' : '0'}`
+      const incParam = includeAllPC ? `&includeAllPC=1` : ''
       const empParam = showAllEmployees ? `&showAllEmployees=1` : ''
       const langParam = `&lang=${encodeURIComponent(i18n.language || 'zh-TW')}`
       const filterParts = [
@@ -192,7 +195,7 @@ export default function CostAnalysis() {
         selectedOrgSection ? `&orgSection=${encodeURIComponent(selectedOrgSection)}` : '',
         selectedOrgGroup   ? `&orgGroup=${encodeURIComponent(selectedOrgGroup)}`     : '',
       ]
-      const filterParam = filterParts.join('')
+      const filterParam = filterParts.join('') + globalFilterParam
       const [s, m, sf, mf, e, t] = await Promise.all([
         api.get(`/admin/cost-stats/summary?startDate=${startDate}&endDate=${endDate}${incParam}${langParam}${filterParam}`),
         api.get(`/admin/cost-stats/monthly?startDate=${startDate}&endDate=${endDate}${incParam}${langParam}${filterParam}`),
@@ -213,7 +216,7 @@ export default function CostAnalysis() {
     } finally {
       setLoading(false)
     }
-  }, [startDate, endDate, includeAllPC, onlyFoxlinkGroup, showAllEmployees, i18n.language,
+  }, [startDate, endDate, includeAllPC, onlyFoxlinkGroup, requireEmployeeId, showAllEmployees, i18n.language,
       selectedFactory, selectedDept, selectedPC, selectedOrgSection, selectedOrgGroup])
 
   // filter state 變動自動 reload(取代原本 mount-only load);日期 / checkbox 仍需按「查詢」鈕
@@ -323,15 +326,16 @@ export default function CostAnalysis() {
 
   // ── CSV export URLs ──────────────────────────────────────────────────────
   const qs = `startDate=${startDate}&endDate=${endDate}`
-  const incQs = includeAllPC ? `&includeAllPC=1&onlyFoxlinkGroup=${onlyFoxlinkGroup ? '1' : '0'}` : ''
+  const incQs = includeAllPC ? `&includeAllPC=1` : ''
   const langQs = `&lang=${encodeURIComponent(i18n.language || 'zh-TW')}`
+  const globalQs = `&onlyFoxlinkGroup=${onlyFoxlinkGroup ? '1' : '0'}&requireEmployeeId=${requireEmployeeId ? '1' : '0'}`
   const filterQs = [
     selectedFactory    ? `&factoryCode=${encodeURIComponent(selectedFactory)}`   : '',
     selectedDept       ? `&deptCode=${encodeURIComponent(selectedDept)}`         : '',
     selectedPC         ? `&profitCenter=${encodeURIComponent(selectedPC)}`       : '',
     selectedOrgSection ? `&orgSection=${encodeURIComponent(selectedOrgSection)}` : '',
     selectedOrgGroup   ? `&orgGroup=${encodeURIComponent(selectedOrgGroup)}`     : '',
-  ].join('')
+  ].join('') + globalQs
   const empExportUrl            = `/api/admin/cost-stats/export/employees?${qs}${showAllEmployees ? `&showAllEmployees=1` : ''}${langQs}${filterQs}`
   const summaryExportUrl        = `/api/admin/cost-stats/export/summary?${qs}${incQs}${langQs}${filterQs}`
   const monthlyExportUrl        = `/api/admin/cost-stats/export/monthly?${qs}${incQs}${langQs}${filterQs}`
@@ -383,12 +387,17 @@ export default function CostAnalysis() {
             className="rounded" />
           包含無帳號利潤中心
         </label>
-        <label className={`flex items-center gap-1.5 text-sm cursor-pointer select-none ${includeAllPC ? 'text-gray-700' : 'text-gray-400'}`}>
+        <label className="flex items-center gap-1.5 text-sm text-gray-700 cursor-pointer select-none">
           <input type="checkbox" checked={onlyFoxlinkGroup}
-            disabled={!includeAllPC}
             onChange={(e) => setOnlyFoxlinkGroup(e.target.checked)}
             className="rounded" />
           僅限正崴集團
+        </label>
+        <label className="flex items-center gap-1.5 text-sm text-gray-700 cursor-pointer select-none">
+          <input type="checkbox" checked={requireEmployeeId}
+            onChange={(e) => setRequireEmployeeId(e.target.checked)}
+            className="rounded" />
+          有工號
         </label>
         <label className="flex items-center gap-1.5 text-sm text-gray-700 cursor-pointer select-none">
           <input type="checkbox" checked={showAllEmployees}
