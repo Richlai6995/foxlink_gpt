@@ -60,7 +60,7 @@ export default function FeedbackPage() {
 
   // Filters
   const [search, setSearch] = useState('')
-  const [statusFilter, setStatusFilter] = useState('')
+  const [statusFilter, setStatusFilter] = useState('processing')
   const [priorityFilter, setPriorityFilter] = useState('')
   const [categoryFilter, setCategoryFilter] = useState('')
   const [showFilters, setShowFilters] = useState(false)
@@ -155,13 +155,13 @@ export default function FeedbackPage() {
         {/* Quick Status Tabs */}
         <div className="mt-4 flex items-center gap-1 overflow-x-auto pb-1">
           {[
-            { value: '', label: t('feedback.all') },
-            { value: 'draft', label: t('feedback.statusLabels.draft') },
-            { value: 'open', label: t('feedback.statusLabels.open') },
             { value: 'processing', label: t('feedback.statusLabels.processing') },
+            { value: 'open', label: t('feedback.statusLabels.open') },
+            { value: 'draft', label: t('feedback.statusLabels.draft') },
             { value: 'pending_user', label: t('feedback.statusLabels.pending_user') },
             { value: 'resolved', label: t('feedback.statusLabels.resolved') },
             { value: 'closed', label: t('feedback.statusLabels.closed') },
+            { value: '', label: t('feedback.all') },
           ].map(s => (
             <button
               key={s.value}
