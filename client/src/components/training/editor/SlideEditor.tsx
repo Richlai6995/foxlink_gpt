@@ -344,7 +344,7 @@ function BlockEditorSwitch({ block, onChange, courseId, slideId, blockIdx }: { b
     case 'image': return <ImageBlockEditor block={block} onChange={onChange} courseId={courseId} />
     case 'steps': return <StepsEditor block={block} onChange={onChange} />
     case 'callout': return <CalloutEditor block={block} onChange={onChange} />
-    case 'video': return <VideoBlockEditor block={block} onChange={onChange} />
+    case 'video': return <VideoBlockEditor block={block} onChange={onChange} courseId={courseId} />
     case 'hotspot': return <HotspotEditor block={block} onChange={onChange} courseId={courseId} slideId={slideId} blockIdx={blockIdx} />
     case 'dragdrop': return <DragDropEditor block={block} onChange={onChange} />
     case 'flipcard': return <FlipCardEditor block={block} onChange={onChange} />

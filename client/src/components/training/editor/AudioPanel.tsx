@@ -58,6 +58,9 @@ export default function AudioPanel({ slideId, courseId, audioUrl, notes, onAudio
     setRecording(false)
   }
 
+  const AUDIO_MAX_MB = 50  // server multer limit
+  const TRANSCRIBE_WARN_MB = 20  // Gemini Studio inline 大概上限
+
   const uploadAudio = async (blob: Blob) => {
     try {
       setUploading(true)
@@ -68,8 +71,13 @@ export default function AudioPanel({ slideId, courseId, audioUrl, notes, onAudio
       onAudioChange(res.data.audio_url)
       if (res.data.transcription && !notes.trim()) {
         onNotesChange(res.data.transcription)
+      } else if (res.data.transcribe_error) {
+        alert(`音訊已上傳,但轉錄失敗:${res.data.transcribe_error}`)
       }
-    } catch (e) { console.error(e) }
+    } catch (e: any) {
+      console.error(e)
+      alert(e.response?.data?.error || '音訊上傳失敗')
+    }
     finally { setUploading(false) }
   }
 
@@ -77,15 +85,34 @@ export default function AudioPanel({ slideId, courseId, audioUrl, notes, onAudio
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
+    e.target.value = ''  // 讓同一個檔案可重新選
+
+    const sizeMB = file.size / 1024 / 1024
+    if (sizeMB > AUDIO_MAX_MB) {
+      alert(`檔案 ${sizeMB.toFixed(1)}MB 超過 ${AUDIO_MAX_MB}MB 上限,請改傳壓縮後音訊`)
+      return
+    }
+    let willTranscribe = true
+    if (sizeMB > TRANSCRIBE_WARN_MB) {
+      willTranscribe = confirm(
+        `檔案 ${sizeMB.toFixed(1)}MB 較大,自動轉錄可能失敗。\n\n` +
+        `按「確定」仍嘗試轉錄,按「取消」只上傳音訊不轉錄。`
+      )
+    }
+
     const form = new FormData()
     form.append('audio', file)
-    form.append('transcribe', 'true')
+    form.append('transcribe', willTranscribe ? 'true' : 'false')
     try {
       setUploading(true)
       const res = await api.post(`/training/slides/${slideId}/audio`, form)
       onAudioChange(res.data.audio_url)
       if (res.data.transcription && !notes.trim()) onNotesChange(res.data.transcription)
-    } catch (e) { console.error(e) }
+      else if (res.data.transcribe_error) alert(`音訊已上傳,但轉錄失敗:${res.data.transcribe_error}`)
+    } catch (e: any) {
+      console.error(e)
+      alert(e.response?.data?.error || '音訊上傳失敗')
+    }
     finally { setUploading(false) }
   }
 

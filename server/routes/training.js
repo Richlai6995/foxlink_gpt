@@ -1358,11 +1358,22 @@ router.post('/slides/:sid/audio', upload.single('audio'), async (req, res) => {
     if (check.error) return res.status(check.status).json({ error: check.error });
 
     if (!req.file) return res.status(400).json({ error: 'No audio file' });
+
+    // Multer 落到 course_tmp/(因為 :sid 不匹配 destination 取的 :id/:courseId),搬到正確目錄
+    const correctDir = path.join(uploadDir, `course_${check.courseId}`);
+    if (!fs.existsSync(correctDir)) fs.mkdirSync(correctDir, { recursive: true });
+    const correctPath = path.join(correctDir, req.file.filename);
+    if (req.file.path !== correctPath && !fs.existsSync(correctPath)) {
+      fs.renameSync(req.file.path, correctPath);
+      req.file.path = correctPath;
+    }
+
     const relativePath = `/api/training/files/course_${check.courseId}/${req.file.filename}`;
     await db.prepare('UPDATE course_slides SET audio_url=?, updated_at=SYSTIMESTAMP WHERE id=?')
       .run(relativePath, req.params.sid);
 
     let transcription = null;
+    let transcribeError = null;
     if (req.body.transcribe === 'true') {
       try {
         const { transcribeAudio } = require('../services/gemini');
@@ -1370,10 +1381,11 @@ router.post('/slides/:sid/audio', upload.single('audio'), async (req, res) => {
         transcription = result.text;
       } catch (e) {
         console.warn('[Training] STT failed:', e.message);
+        transcribeError = e.message || '音訊轉錄失敗';
       }
     }
 
-    res.json({ audio_url: relativePath, transcription });
+    res.json({ audio_url: relativePath, transcription, transcribe_error: transcribeError });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
