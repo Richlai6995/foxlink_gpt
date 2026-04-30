@@ -161,7 +161,49 @@ async function execKb(node, vars, db) {
   return chunks.length > 0 ? chunks.join('\n---\n').slice(0, 6000) : '（知識庫無相關內容）';
 }
 
-async function execAi(node, vars, db) {
+// ── 共用落檔 helper：把一段文字寫成 pdf/docx/xlsx/pptx/txt(走 fileGenerator)或
+//    mp3(走 TTS skill)。不處理 docTemplate(那是 execGenerateFile 專屬)。
+//    供 execAi(AI 追加節點選了輸出為檔案)與 execGenerateFile 非範本路徑共用。
+async function materializeFile(fileType, filenameTemplate, input, vars, context) {
+  if (fileType === 'mp3') {
+    const FOXLINK_API = `http://127.0.0.1:${process.env.PORT || 3001}`;
+    const SERVICE_KEY = process.env.SKILL_SERVICE_KEY || '';
+    const ttsText = input
+      .replace(/```[\s\S]*?```/g, '')
+      .replace(/`[^`]+`/g, '')
+      .trim()
+      .slice(0, 4800);
+    const ttsRes = await fetch(`${FOXLINK_API}/api/skills/tts/synthesize`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-service-key': SERVICE_KEY },
+      body: JSON.stringify({ text: ttsText, user_id: context.userId }),
+      signal: AbortSignal.timeout(60000),
+    });
+    if (!ttsRes.ok) {
+      const err = await ttsRes.json().catch(() => ({}));
+      throw new Error(`TTS 失敗: ${err.error || ttsRes.status}`);
+    }
+    const ttsData = await ttsRes.json();
+    const UPLOAD_DIR = process.env.UPLOAD_DIR
+      ? path.resolve(process.env.UPLOAD_DIR)
+      : path.join(__dirname, '../uploads');
+    const fname = path.basename(ttsData.audio_url);
+    return {
+      filename: interpolate(filenameTemplate || fname, vars),
+      publicUrl: ttsData.audio_url,
+      filePath: path.join(UPLOAD_DIR, 'generated', fname),
+    };
+  }
+
+  const { processGenerateBlocks } = require('./fileGenerator');
+  const resolvedFilename = interpolate(filenameTemplate || `output.${fileType}`, vars);
+  const syntheticBlock = `\`\`\`generate_${fileType}:${resolvedFilename}\n${input}\n\`\`\``;
+  const blocks = await processGenerateBlocks(syntheticBlock, context.sessionId);
+  if (blocks.length > 0) return blocks[0];
+  throw new Error(`generate_${fileType} 無法生成檔案`);
+}
+
+async function execAi(node, vars, db, context) {
   const { generateTextSync } = require('./gemini');
   const { resolveTaskModel } = require('./llmDefaults');
 
@@ -169,11 +211,14 @@ async function execAi(node, vars, db) {
   const apiModel = await resolveTaskModel(db, node.model, 'chat').catch(() => null);
 
   const { text } = await generateTextSync(apiModel, [], prompt);
-  return text;
+
+  if (!node.output_file) return { text };
+
+  const file = await materializeFile(node.output_file, node.filename, text, vars, context);
+  return { text, file };
 }
 
 async function execGenerateFile(node, vars, db, context) {
-  const { processGenerateBlocks } = require('./fileGenerator');
   const input = interpolate(node.input || '{{ai_output}}', vars);
   // UI (PipelineTab.tsx) 存的欄位是 output_file；file_type 是舊欄位名保留向下相容
   const fileType = node.output_file || node.file_type || 'pdf';
@@ -218,47 +263,10 @@ async function execGenerateFile(node, vars, db, context) {
     };
   }
 
-  if (fileType === 'mp3') {
-    const FOXLINK_API = `http://127.0.0.1:${process.env.PORT || 3001}`;
-    const SERVICE_KEY = process.env.SKILL_SERVICE_KEY || '';
-    const ttsText = input
-      .replace(/```[\s\S]*?```/g, '')
-      .replace(/`[^`]+`/g, '')
-      .trim()
-      .slice(0, 4800);
-    const ttsRes = await fetch(`${FOXLINK_API}/api/skills/tts/synthesize`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-service-key': SERVICE_KEY },
-      body: JSON.stringify({ text: ttsText, user_id: context.userId }),
-      signal: AbortSignal.timeout(60000),
-    });
-    if (!ttsRes.ok) {
-      const err = await ttsRes.json().catch(() => ({}));
-      throw new Error(`TTS 失敗: ${err.error || ttsRes.status}`);
-    }
-    const ttsData = await ttsRes.json();
-    const UPLOAD_DIR = process.env.UPLOAD_DIR
-      ? path.resolve(process.env.UPLOAD_DIR)
-      : path.join(__dirname, '../uploads');
-    const fname = path.basename(ttsData.audio_url);
-    return {
-      text: `[語音已生成]`,
-      file: {
-        filename: interpolate(node.filename || fname, vars),
-        publicUrl: ttsData.audio_url,
-        filePath: path.join(UPLOAD_DIR, 'generated', fname),
-      },
-    };
-  }
-
-  // For pdf/docx/xlsx/pptx/txt — wrap in generate block and process
-  const resolvedFilename = interpolate(node.filename || `output.${fileType}`, vars);
-  const syntheticBlock = `\`\`\`generate_${fileType}:${resolvedFilename}\n${input}\n\`\`\``;
-  const blocks = await processGenerateBlocks(syntheticBlock, context.sessionId);
-  if (blocks.length > 0) {
-    return { text: `[已生成 ${fileType.toUpperCase()} 檔案]`, file: blocks[0] };
-  }
-  throw new Error(`generate_${fileType} 無法生成檔案`);
+  // 非範本模式：mp3 走 TTS，其餘走 fileGenerator(共用 materializeFile)
+  const file = await materializeFile(fileType, node.filename, input, vars, context);
+  const text = fileType === 'mp3' ? '[語音已生成]' : `[已生成 ${fileType.toUpperCase()} 檔案]`;
+  return { text, file };
 }
 
 async function execAlert(node, vars, db, context) {
@@ -390,7 +398,11 @@ async function runNode(node, vars, db, context, log) {
       }
       case 'mcp':           output = await execMcp(node, vars, db, context); break;
       case 'kb':            output = await execKb(node, vars, db); break;
-      case 'ai':            output = await execAi(node, vars, db); break;
+      case 'ai': {
+        const r = await execAi(node, vars, db, context);
+        output = r.text; file = r.file;
+        break;
+      }
       case 'generate_file': {
         const r = await execGenerateFile(node, vars, db, context);
         output = r.text; file = r.file;
