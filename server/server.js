@@ -529,6 +529,16 @@ app.get('/api/health', (req, res) => res.json({ status: 'ok', timestamp: new Dat
       }
     });
 
+    // Auto-seed Excel 精確查詢 code skill (DuckDB SQL on uploaded xlsx)
+    setImmediate(async () => {
+      try {
+        const { autoSeedExcelQuerySkill } = require('./services/excelQuerySkillSeed');
+        await autoSeedExcelQuerySkill(db);
+      } catch (e) {
+        console.error('[ExcelQuerySkillSeed] Failed:', e.message);
+      }
+    });
+
     // Auto-seed PM Multi-Agent Workflow skill (pm_deep_analysis_workflow)
     setImmediate(async () => {
       try {

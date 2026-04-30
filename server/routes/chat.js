@@ -1420,6 +1420,58 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
         continue;
       }
 
+      // Excel → persist for excel_query skill + LLM only sees schema preview
+      // (取代舊的 CSV 全展開 + 100k chars 截斷,真正運算交給 DuckDB)
+      const isXlsx = mimeType === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+                  || mimeType === 'application/vnd.ms-excel'
+                  || ext === '.xlsx' || ext === '.xls';
+      if (isXlsx) {
+        const sessionFilesDir = path.join(UPLOAD_DIR, 'session_files', sessionId);
+        if (!fs.existsSync(sessionFilesDir)) fs.mkdirSync(sessionFilesDir, { recursive: true });
+        const safeFname = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}_${path.basename(originalName).replace(/[\\/]/g, '_')}`;
+        const persistPath = path.join(sessionFilesDir, safeFname);
+        fs.copyFileSync(filePath, persistPath);
+
+        let preview = '';
+        const sheets = [];
+        try {
+          const XLSX = require('xlsx');
+          const wb = XLSX.readFile(persistPath, { sheetRows: 31, cellDates: true });
+          for (const sname of wb.SheetNames) {
+            const ws = wb.Sheets[sname];
+            if (!ws || !ws['!ref'] || ws['!ref'] === 'A1') continue;
+            const rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: null, blankrows: false });
+            if (!rows.length) continue;
+            const headers = (rows[0] || []).map(h => String(h ?? ''));
+            const sampleRows = rows.slice(1, 31);
+            sheets.push({ name: sname, columns: headers });
+            preview += `\nSheet "${sname}" — 欄位:${headers.map(h => `"${h}"`).join(', ')}\n`;
+            preview += `前 ${sampleRows.length} 列預覽:\n`;
+            const csvRows = [headers, ...sampleRows];
+            preview += csvRows.map(r => r.map(v => v === null || v === undefined ? '' : String(v)).join(',')).join('\n') + '\n';
+          }
+        } catch (e) {
+          console.warn(`[Chat] xlsx preview failed for "${originalName}": ${e.message}`);
+        }
+
+        combinedUserText += `\n\n[Excel: ${originalName}]\n` +
+          `(此檔案已完整保存,可用 excel_query 工具跑 SQL 取得精確結果。\n` +
+          ` 以下僅為前 30 列預覽,**完整資料須透過 excel_query 查詢**,\n` +
+          ` 任何彙總/排序/Top N/篩選都必須呼叫 excel_query,不要從預覽推估。)\n` +
+          preview;
+
+        fileMetas.push({
+          name: originalName,
+          type: 'xlsx',
+          localPath: persistPath,
+          sheets,
+          mimeType,
+        });
+        fs.unlinkSync(filePath);
+        console.log(`[Chat] Excel persisted: "${originalName}" → ${persistPath}, sheets=${sheets.length}, preview=${preview.length} chars`);
+        continue;
+      }
+
       // Other documents (or large PDFs) → extract text
       console.log(`[Chat] Extracting text from "${originalName}"...`);
       sendEvent({ type: 'status', message: `正在解析: ${originalName}...` });
@@ -1648,6 +1700,35 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
          WHERE session_id = ? ORDER BY created_at ASC`
       )
       .all(sessionId);
+
+    // ── Collect xlsx files from current upload + history (for excel_query skill) ──
+    // Skill 收到後可用 file_name 比對找路徑;目前回合 + 歷史回合的 xlsx 都包進去,
+    // 讓使用者可以對「上一輪上傳的檔」連續問 follow-up 問題。
+    const sessionAttachedFiles = (() => {
+      const out = [];
+      const seen = new Set();
+      const push = (f) => {
+        if (!f || !f.localPath || seen.has(f.localPath)) return;
+        try { if (!fs.existsSync(f.localPath)) return; } catch (_) { return; }
+        seen.add(f.localPath);
+        out.push({ name: f.name, path: f.localPath, sheets: f.sheets || [] });
+      };
+      // 當前 message 的 xlsx
+      for (const fm of fileMetas) if (fm.type === 'xlsx') push(fm);
+      // 歷史 message 的 xlsx (從 files_json 還原)
+      for (const m of historyMessages) {
+        if (!m.files_json) continue;
+        try {
+          const parsed = JSON.parse(m.files_json);
+          const arr = Array.isArray(parsed) ? parsed : (parsed?.generated || []);
+          for (const f of arr) if (f.type === 'xlsx') push(f);
+        } catch (_) {}
+      }
+      return out;
+    })();
+    if (sessionAttachedFiles.length > 0) {
+      console.log(`[Chat] Session has ${sessionAttachedFiles.length} xlsx file(s) → excel_query skill will be force-injected`);
+    }
 
     // Determine if we need image-aware history (resolved after resolveApiModel below)
     const buildHistory = (msgs, withImages) => {
@@ -1889,6 +1970,33 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
     }
 
     let allSkillsToProcess = [...sessionSkills, ...tagRoutedSkills, ...topbarErpSkills];
+
+    // ── Force-inject excel_query skill when session has xlsx attached ─────────
+    // 不靠 TAG 路由(命中率 0),只要 session 有 xlsx 附檔就強制掛上,
+    // 確保 LLM 能呼叫 excel_query 跑精確 SQL 而非自行估算數字。
+    if (sessionAttachedFiles.length > 0) {
+      try {
+        const existingIds = new Set(allSkillsToProcess.map(s => String(s.id || s.ID)));
+        const xlsxSkill = await db.prepare(
+          `SELECT * FROM skills
+           WHERE LOWER(name) IN ('excel 精確查詢', 'excel_query')
+             AND type = 'code' AND code_status = 'running'
+             AND endpoint_url IS NOT NULL`
+        ).get();
+        if (xlsxSkill) {
+          const skId = String(xlsxSkill.id || xlsxSkill.ID);
+          if (!existingIds.has(skId)) {
+            allSkillsToProcess.push(xlsxSkill);
+            console.log(`[Skill] Force-injected excel_query skill #${skId} (session has ${sessionAttachedFiles.length} xlsx)`);
+          }
+        } else {
+          console.warn('[Skill] sessionAttachedFiles has xlsx but excel_query skill not running — install/start it via Code Runners admin UI');
+        }
+      } catch (e) {
+        console.warn('[Skill] Failed to force-inject excel_query:', e.message);
+      }
+    }
+
     // Skip hidden skills + skills whose underlying ERP tool is hidden(ERP 是包成 erp_proc skill 進來的)
     if (hiddenSkillIds.size > 0 || hiddenErpIds.size > 0) {
       const _before = allSkillsToProcess.length;
@@ -1916,6 +2024,31 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
 
     // Collect system prompts from builtin skills
     const skillSystemPrompts = [];
+
+    // ── Excel attachment hint:強制 LLM 用 excel_query 而非估算 ─────────────
+    if (sessionAttachedFiles.length > 0) {
+      const fileList = sessionAttachedFiles.map(f => {
+        const sheetInfo = (f.sheets || []).map(s =>
+          `    - Sheet "${s.name}":${(s.columns || []).map(c => `"${c}"`).join(', ')}`
+        ).join('\n');
+        return `  - **${f.name}**\n${sheetInfo || '    (sheet 資訊不可用)'}`;
+      }).join('\n');
+
+      skillSystemPrompts.push(
+        `# Excel 附件處理規則(本對話有 ${sessionAttachedFiles.length} 個 Excel 檔案)\n\n` +
+        `## 可用檔案\n${fileList}\n\n` +
+        `## 強制規則\n` +
+        `1. **任何**涉及 Excel 數值的彙總、排序、Top N、篩選、groupby、加總、平均、計數,**必須呼叫 excel_query 工具**,絕對禁止自行從預覽資料估算或推測。\n` +
+        `2. 預覽中只有前 30 列,你看到的不是完整資料,**直接從預覽推斷的答案幾乎一定是錯的**。\n` +
+        `3. 呼叫 excel_query 時:\n` +
+        `   - file_name 從上方檔案清單中選一個(完全比對檔名最佳)\n` +
+        `   - 主工作表別名永遠是 t,可直接 \`FROM t\`\n` +
+        `   - 欄位名含中文/空格/特殊字元時用雙引號,例如 \`"客戶專案代碼"\`\n` +
+        `   - SQL 是 DuckDB 方言,支援 GROUP BY、ORDER BY、LIMIT、CASE WHEN、聚合函數、視窗函數\n` +
+        `4. 拿到 SQL 結果後,用結果數字寫敘述,不要再修改數字。\n` +
+        `5. 若使用者問題模糊(例如「分析這個檔」),先呼叫 excel_query 跑 \`SELECT * FROM t LIMIT 5\` 看資料樣貌,再決定後續查詢。\n`
+      );
+    }
     // Track skills that have output_template_id (for post-AI-output file generation)
     let skillOutputTemplateIds = null;
     // Track which skills need external-inject calls
@@ -3274,7 +3407,7 @@ ${hasPreserve ? '- 標記【★保留原文】的欄位：必須完整複製原�
                 const resp = await fetch(sk.endpoint_url, {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json', ...(sk.endpoint_secret ? { Authorization: `Bearer ${sk.endpoint_secret}` } : {}) },
-                  body: JSON.stringify({ ...args, user_message: combinedUserText, user_id: req.user.id, session_id: sessionId, recent_messages: recentMessages }),
+                  body: JSON.stringify({ ...args, user_message: combinedUserText, user_id: req.user.id, session_id: sessionId, recent_messages: recentMessages, attached_files: sessionAttachedFiles }),
                   signal: AbortSignal.timeout(120000),
                 });
                 if (!resp.ok) throw new Error(`HTTP ${resp.status}`);

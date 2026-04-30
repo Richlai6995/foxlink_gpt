@@ -13,5 +13,10 @@
     "file": "test_html_artifact.js",
     "match_name": "測試 ?HTML|test.?html.?artifact",
     "description": "HTML artifact passthrough 測試 skill — 抓內網 HTML 頁面測前端 iframe 渲染"
+  },
+  {
+    "file": "excel_query.js",
+    "match_name": "Excel ?精確查詢|excel_query",
+    "description": "Excel 精確查詢 — DuckDB SQL 跑使用者上傳的 xlsx,確保彙總/排序/Top N 數字 100% 正確"
   }
 ]

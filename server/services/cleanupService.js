@@ -45,6 +45,7 @@ async function runCleanup(db, settings) {
     skill_call_logs: 0,
     research_jobs: 0,
     token_usage: 0,
+    session_files_purged: 0,
   };
 
   // ── 1. Audit logs ────────────────────────────────────────────────────────────
@@ -84,11 +85,20 @@ async function runCleanup(db, settings) {
           try {
             const files = JSON.parse(m.files_json || '[]');
             for (const f of files) {
+              // path / localPath 兩種都認(image=localPath, xlsx=localPath)
               if (f.path) tryUnlink(f.path);
-              else if (f.name) tryUnlink(path.join(UPLOADS_DIR, 'chat', f.name));
+              if (f.localPath) tryUnlink(f.localPath);
+              if (!f.path && !f.localPath && f.name) tryUnlink(path.join(UPLOADS_DIR, 'chat', f.name));
             }
           } catch (_) {}
         }
+        // 同步刪掉 session_files/{sid}/ 目錄(xlsx 等持久化檔案)
+        try {
+          const sessionDir = path.join(UPLOADS_DIR, 'session_files', String(sid));
+          if (fs.existsSync(sessionDir)) {
+            fs.rmSync(sessionDir, { recursive: true, force: true });
+          }
+        } catch (_) {}
       }
       await db.prepare(`DELETE FROM chat_messages WHERE session_id IN (
         SELECT id FROM chat_sessions
@@ -195,6 +205,42 @@ async function runCleanup(db, settings) {
     stats.token_usage = r9.changes;
   }
 
+  // ── 9. session_files/(xlsx 等持久化上傳檔)— 比 session 短的 TTL ───────
+  //    files_json 仍指這個路徑,被刪後 excel_query skill 會回「檔案已過期」
+  //    給 LLM,LLM 可請使用者重新上傳。
+  const session_files_days = parseInt(settings.session_files_days || '7');
+  if (session_files_days > 0) {
+    const sessionFilesRoot = path.join(UPLOADS_DIR, 'session_files');
+    const cutoffMs = Date.now() - session_files_days * 86400000;
+    let purged = 0;
+    try {
+      if (fs.existsSync(sessionFilesRoot)) {
+        for (const sid of fs.readdirSync(sessionFilesRoot)) {
+          const dir = path.join(sessionFilesRoot, sid);
+          let st;
+          try { st = fs.statSync(dir); } catch (_) { continue; }
+          if (!st.isDirectory()) continue;
+          // 用目錄內最新檔的 mtime,而不是目錄本身
+          let newestMs = 0;
+          try {
+            for (const f of fs.readdirSync(dir)) {
+              try {
+                const fst = fs.statSync(path.join(dir, f));
+                if (fst.mtimeMs > newestMs) newestMs = fst.mtimeMs;
+              } catch (_) {}
+            }
+          } catch (_) {}
+          if (newestMs > 0 && newestMs < cutoffMs) {
+            try { fs.rmSync(dir, { recursive: true, force: true }); purged++; } catch (_) {}
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[Cleanup] session_files sweep failed:', e.message);
+    }
+    stats.session_files_purged = purged;
+  }
+
   return stats;
 }
 
@@ -214,6 +260,7 @@ async function loadSettings(db) {
     skill_days:          parseInt(map.cleanup_skill_days           || '90'),
     research_days:       parseInt(map.cleanup_research_days        || '90'),
     token_usage_days:    parseInt(map.cleanup_token_usage_days     || '365'),
+    session_files_days:  parseInt(map.cleanup_session_files_days   || '7'),
   };
 }
 
