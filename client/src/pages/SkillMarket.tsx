@@ -664,6 +664,11 @@ export default function SkillMarket() {
                                 {/* ─── Tools tab ─── */}
                                 {editorTab === 'tools' && (
                                     <div className="space-y-4">
+                                        {/* Hint banner explaining recommend-vs-force semantic */}
+                                        <div className="rounded-lg border border-purple-200 bg-purple-50 px-3 py-2 text-xs text-purple-700 whitespace-pre-line">
+                                            {t('skills.toolsTabHint')}
+                                        </div>
+
                                         {/* MCP Tool Mode */}
                                         <div>
                                             <label className="block text-xs text-slate-500 mb-1">{t('skills.labelMcpToolMode')}</label>
