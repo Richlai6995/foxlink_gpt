@@ -1349,6 +1349,98 @@ router.put('/lessons/:lid/slides/reorder', async (req, res) => {
 // Slide Audio
 // ═══════════════════════════════════════════════════════════════════════════════
 
+// GET /api/training/video-proxy — proxy 外部影片(NAS / Synology Drive 等)為可串流影片
+//
+// 目的:Synology Drive 公開分享連結加 /download 後 server 會回 Content-Disposition: attachment,
+// 瀏覽器只能下載而無法 inline 播放。此 proxy 抓 upstream 後改 header(去掉 attachment、
+// 強制 Content-Type: video/*)再 stream 出去,前端 <video src> 才能直接播。
+//
+// 安全:
+// - 走 verifyToken(line 60 router-level mount),需登入才能用
+// - URL host 白名單(VIDEO_PROXY_ALLOWED_HOSTS env,逗號分隔),擋 SSRF
+// - <video> 不會自動帶 Authorization header,所以 token 透過 ?token= query string
+//   (verifyToken 已支援 query fallback,見 routes/auth.js)
+//
+// Range:支援 HTTP Range 請求(影片拖時間軸需要),把 Range header 轉發給 upstream,
+// upstream 回的 206 + Content-Range / Content-Length 全部 forward
+router.get('/video-proxy', async (req, res) => {
+  const targetUrl = req.query.url;
+  if (!targetUrl) return res.status(400).json({ error: 'url query required' });
+
+  let parsed;
+  try { parsed = new URL(targetUrl); }
+  catch { return res.status(400).json({ error: 'Invalid url' }); }
+  if (!['http:', 'https:'].includes(parsed.protocol)) {
+    return res.status(400).json({ error: 'Only http(s) allowed' });
+  }
+
+  const allowedHosts = (process.env.VIDEO_PROXY_ALLOWED_HOSTS || 'hqcd.foxlink.com.tw')
+    .split(',').map(s => s.trim()).filter(Boolean);
+  if (!allowedHosts.includes(parsed.hostname)) {
+    return res.status(403).json({ error: `Host not allowed: ${parsed.hostname}. Set VIDEO_PROXY_ALLOWED_HOSTS to permit.` });
+  }
+
+  const fwdHeaders = { 'User-Agent': 'foxlink-gpt-video-proxy/1.0' };
+  if (req.headers.range) fwdHeaders.Range = req.headers.range;
+  if (req.headers['if-range']) fwdHeaders['If-Range'] = req.headers['if-range'];
+  if (req.headers['if-modified-since']) fwdHeaders['If-Modified-Since'] = req.headers['if-modified-since'];
+
+  try {
+    const upstream = await fetch(targetUrl, { headers: fwdHeaders, redirect: 'follow' });
+
+    // Status: 206 (partial content) / 200 / 304 都 forward
+    res.status(upstream.status);
+
+    // Content-Type:upstream 給 video/* 就用,否則從副檔名猜,fallback video/mp4
+    const upstreamCT = upstream.headers.get('content-type') || '';
+    let ct = 'video/mp4';
+    if (upstreamCT.startsWith('video/')) {
+      ct = upstreamCT;
+    } else {
+      const ext = path.extname(parsed.pathname).toLowerCase();
+      const extMap = {
+        '.mp4': 'video/mp4', '.m4v': 'video/x-m4v',
+        '.webm': 'video/webm', '.mov': 'video/quicktime',
+        '.mkv': 'video/x-matroska', '.ogv': 'video/ogg',
+      };
+      if (extMap[ext]) ct = extMap[ext];
+    }
+    res.setHeader('Content-Type', ct);
+
+    // 把 range / length / etag 等相關 header forward
+    const forwardable = ['content-length', 'content-range', 'accept-ranges', 'last-modified', 'etag'];
+    forwardable.forEach(h => {
+      const v = upstream.headers.get(h);
+      if (v) res.setHeader(h, v);
+    });
+    if (!upstream.headers.get('accept-ranges')) res.setHeader('Accept-Ranges', 'bytes');
+
+    // !! 故意不 forward Content-Disposition !! — 這是整個 proxy 存在的理由
+
+    if (!upstream.ok && upstream.status !== 206 && upstream.status !== 304) {
+      const errBody = await upstream.text().catch(() => '');
+      console.warn(`[video-proxy] upstream ${upstream.status} for ${targetUrl}: ${errBody.slice(0, 200)}`);
+      // 仍把 status forward 給 client(如 404 / 403)
+      return res.end();
+    }
+
+    if (!upstream.body) return res.end();
+
+    const { Readable } = require('stream');
+    const nodeStream = Readable.fromWeb(upstream.body);
+    nodeStream.on('error', (e) => {
+      console.warn('[video-proxy] stream error:', e.message);
+      if (!res.headersSent) res.status(502).end();
+      else res.destroy();
+    });
+    req.on('close', () => { try { nodeStream.destroy(); } catch {} });
+    nodeStream.pipe(res);
+  } catch (e) {
+    console.error('[video-proxy]', e.message);
+    if (!res.headersSent) res.status(502).json({ error: 'Upstream fetch failed: ' + e.message });
+  }
+});
+
 // POST /api/training/slides/:sid/audio — upload audio
 router.post('/slides/:sid/audio', upload.single('audio'), async (req, res) => {
   try {

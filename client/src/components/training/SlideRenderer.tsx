@@ -6,6 +6,7 @@ import DragDropBlock from './blocks/DragDropBlock'
 import FlipCardBlock from './blocks/FlipCardBlock'
 import BranchBlock from './blocks/BranchBlock'
 import QuizInlineBlock from './blocks/QuizInlineBlock'
+import { proxiedVideoUrl } from '../../lib/videoUrl'
 
 interface Slide {
   id: number
@@ -99,7 +100,7 @@ function BlockRenderer({ block, blockIndex = 0, isLastSlide = false, playerMode 
       return (
         <div className="bg-black rounded-lg overflow-hidden">
           {block.src ? (
-            <video src={block.src} controls className="w-full max-h-[60vh]" />
+            <video src={proxiedVideoUrl(block.src)} controls className="w-full max-h-[60vh]" />
           ) : (
             <div className="py-20 text-center text-slate-600">{t('training.videoNotSet')}</div>
           )}

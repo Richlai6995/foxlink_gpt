@@ -1,6 +1,7 @@
 import { useState, useRef } from 'react'
 import { Upload, X } from 'lucide-react'
 import api from '../../../../lib/api'
+import { proxiedVideoUrl } from '../../../../lib/videoUrl'
 import type { Block } from '../SlideEditor'
 
 interface Props {
@@ -65,7 +66,7 @@ export default function VideoBlockEditor({ block, onChange, courseId }: Props) {
         <div>
           {block.src ? (
             <div className="relative group">
-              <video src={block.src} controls className="w-full max-h-64 rounded-lg border" style={{ borderColor: 'var(--t-border)' }} />
+              <video src={proxiedVideoUrl(block.src)} controls className="w-full max-h-64 rounded-lg border" style={{ borderColor: 'var(--t-border)' }} />
               <button
                 onClick={() => onChange({ ...block, src: '' })}
                 className="absolute top-2 right-2 bg-red-600 text-white p-1 rounded-full opacity-0 group-hover:opacity-100 transition"
@@ -114,9 +115,12 @@ export default function VideoBlockEditor({ block, onChange, courseId }: Props) {
           />
           {block.src && (
             <div className="mt-2 bg-black rounded-lg overflow-hidden">
-              <video src={block.src} controls className="w-full max-h-64" />
+              <video src={proxiedVideoUrl(block.src)} controls className="w-full max-h-64" />
             </div>
           )}
+          <p className="text-[10px] mt-1" style={{ color: 'var(--t-text-dim)' }}>
+            支援:foxlink-NAS 分享連結(自動透過 server 中繼)、外部 mp4 直連、YouTube/影音平台 embed
+          </p>
         </div>
       )}
     </div>
