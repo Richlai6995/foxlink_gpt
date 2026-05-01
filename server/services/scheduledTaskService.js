@@ -116,7 +116,71 @@ async function fetchUrl(url) {
   }
 }
 
+// ── Article link extraction (host-aware) ────────────────────────────────────
+// 從 list 頁的原始 HTML 抽 article-like URL 出來,給 LLM 當白名單 + server enforce。
+//
+// 為什麼要做這個:Vertex 的 urlContext / googleSearch grounding 對 Gemini 3 系列實測無效
+// (silent ignore),Gemini 2.5 Pro 也只回 readable text 不給 URL list。LLM 只看純文字
+// 沒辦法準確產出真實 URL,只能在這層用 querySelectorAll('a[href]') 給它 ground truth。
+//
+// host-aware 規則:
+//   • news.smm.cn 的 article 路徑 = `/news/<digits>`
+//   • moneydj.com 的 article 路徑 = `*/newsviewer.aspx?a=<GUID>`
+//   • 其他 host:通用「path 非根、不是 # / mailto / tel / javascript」過濾
+//
+// 回傳 unique URL 陣列(de-dup + 限上限,避免 prompt 爆肥)
+function extractArticleLinks(document, baseUrl) {
+  const urls = new Set();
+  let host = '';
+  try { host = new URL(baseUrl).hostname.toLowerCase(); } catch (_) {}
+  const anchors = document.querySelectorAll('a[href]');
+  for (const a of anchors) {
+    const raw = a.getAttribute('href');
+    if (!raw) continue;
+    // 解析成絕對 URL(JSDOM 會自動以 baseUrl resolve)
+    let href;
+    try { href = new URL(raw, baseUrl).toString(); } catch (_) { continue; }
+    let parsed;
+    try { parsed = new URL(href); } catch (_) { continue; }
+    if (!/^https?:$/.test(parsed.protocol)) continue;
+    const lowHost = parsed.hostname.toLowerCase();
+
+    // host-aware:對已知 source 嚴格匹配 article URL pattern
+    if (host.endsWith('smm.cn') || host.endsWith('smm.com.cn')) {
+      // SMM list 頁外部 link 不要,只要 SMM 自家 article
+      if (!lowHost.endsWith('smm.cn') && !lowHost.endsWith('smm.com.cn')) continue;
+      if (!/^\/news\/\d{6,12}/i.test(parsed.pathname)) continue;
+    } else if (host.endsWith('moneydj.com')) {
+      if (!lowHost.endsWith('moneydj.com')) continue;
+      if (!/newsviewer\.aspx/i.test(parsed.pathname)) continue;
+      const a2 = parsed.searchParams.get('a');
+      if (!a2 || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(a2)) continue;
+    } else if (host.endsWith('platinuminvestment.com') || host.endsWith('matthey.com')) {
+      // 機構級評論 — 同 host 且 path 非根
+      if (!lowHost.endsWith(host) && !host.endsWith(lowHost)) continue;
+      if (!parsed.pathname || parsed.pathname === '/' || parsed.pathname === '') continue;
+      // 過濾常見 nav (下拉選單錨點)
+      if (/^(#|\/$)/.test(parsed.pathname)) continue;
+    } else {
+      // 通用:路徑非根、不是 javascript:/mailto:/tel:
+      if (!parsed.pathname || parsed.pathname === '/' || parsed.pathname === '') continue;
+    }
+    // 拿掉 hash + 共通追蹤 query param(utm_*),減少 dup
+    parsed.hash = '';
+    for (const k of [...parsed.searchParams.keys()]) {
+      if (/^utm_|^fbclid$|^gclid$/i.test(k)) parsed.searchParams.delete(k);
+    }
+    urls.add(parsed.toString());
+    if (urls.size >= 80) break; // 上限避免 prompt 爆 — 80 個 URL 足以涵蓋當日 article
+  }
+  return Array.from(urls);
+}
+
 // ── Web scrape helper (readability-based, for regular HTML pages) ─────────────
+// 回傳 { text, links }:
+//   • text  — Readability 抽出的純文字主體(原行為)
+//   • links — host-aware 抽出的 article URL 陣列(2026-05-01 加,給 LLM 白名單用)
+// 對 substituteVarsAsync 而言:把 text 塞進 prompt 取代 {{scrape:URL}},links 收進 outBag
 async function scrapeUrl(url) {
   try {
     const res = await fetch(url, {
@@ -130,8 +194,9 @@ async function scrapeUrl(url) {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const html = await res.text();
 
-    // Use Readability to extract main content
+    // Use Readability to extract main content + 同時抽 link list
     const dom = new JSDOM(html, { url });
+    const links = extractArticleLinks(dom.window.document, url);
     const reader = new Readability(dom.window.document, { charThreshold: 100 });
     const article = reader.parse();
 
@@ -144,7 +209,10 @@ async function scrapeUrl(url) {
         .replace(/<[^>]+>/g, '')
         .replace(/&nbsp;/g, ' ').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&')
         .replace(/[ \t]{2,}/g, ' ').replace(/\n{3,}/g, '\n\n').trim().slice(0, 30000);
-      return `以下是從 ${url} 抓取的網頁內容（可能含部分噪音）：\n---\n${fallback}\n---`;
+      return {
+        text: `以下是從 ${url} 抓取的網頁內容（可能含部分噪音）：\n---\n${fallback}\n---`,
+        links,
+      };
     }
 
     const title = article.title ? `標題：${article.title}\n\n` : '';
@@ -152,9 +220,12 @@ async function scrapeUrl(url) {
     const excerpt = article.excerpt ? `摘要：${article.excerpt}\n\n` : '';
     const body = article.textContent.trim().slice(0, 40000);
 
-    return `以下是從 ${url} 抓取的網頁主要內容：\n---\n${title}${byline}${excerpt}${body}\n---`;
+    return {
+      text: `以下是從 ${url} 抓取的網頁主要內容：\n---\n${title}${byline}${excerpt}${body}\n---`,
+      links,
+    };
   } catch (e) {
-    return `[無法爬取 ${url}: ${e.message}]`;
+    return { text: `[無法爬取 ${url}: ${e.message}]`, links: [] };
   }
 }
 
@@ -170,7 +241,7 @@ function substituteVars(template, taskName) {
     .replace(/\{\{task_name\}\}/g, taskName || '');
 }
 
-async function substituteVarsAsync(template, taskName) {
+async function substituteVarsAsync(template, taskName, outBag) {
   const now = twNow();
   const date = twDateStr(now);
   const weekday = '星期' + WEEKDAY_ZH[now.getDay()];
@@ -178,6 +249,11 @@ async function substituteVarsAsync(template, taskName) {
     .replace(/\{\{date\}\}/g, date)
     .replace(/\{\{weekday\}\}/g, weekday)
     .replace(/\{\{task_name\}\}/g, taskName || '');
+
+  // outBag(可選 mutable object)— 把跨階段的副資訊收集起來給 caller。目前只用於:
+  //   • urlWhitelist:scrape 過程 host-aware 抽到的 article URL 陣列(給 LLM 當白名單 + db_write enforce)
+  // caller 不傳 outBag 也沒關係,純 sync side effect 不影響主流程。
+  if (outBag && !outBag.urlWhitelist) outBag.urlWhitelist = [];
 
   // Process all {{fetch:URL}} placeholders (API / JSON / RSS — unchanged)
   const fetchPattern = /\{\{fetch:(https?:\/\/[^}]+)\}\}/g;
@@ -189,12 +265,32 @@ async function substituteVarsAsync(template, taskName) {
   }
 
   // Process all {{scrape:URL}} placeholders (regular HTML pages via Readability)
+  // 2026-05-01:scrapeUrl 同時回 link list,用 host-aware querySelectorAll('a[href]') 抽出
+  // article URL 給 LLM 當白名單,從根本擋 LLM 編 URL 幻覺(原本只回 readability 純文字,
+  // LLM 要從中推 URL → 100% 編)
   const scrapePattern = /\{\{scrape:(https?:\/\/[^}]+)\}\}/g;
   for (const m of [...result.matchAll(scrapePattern)]) {
     const url = m[1].trim();
     console.log(`[Scheduled] scrape: ${url}`);
-    const content = await scrapeUrl(url);
-    result = result.replace(m[0], `\n${content}\n`);
+    const { text: content, links } = await scrapeUrl(url);
+    let whitelistBlock = '';
+    if (links && links.length) {
+      console.log(`[Scheduled] scrape: ${url} extracted ${links.length} candidate article URLs`);
+      whitelistBlock =
+        `\n═══ 📋 從 ${url} 抽出的候選 article URL 白名單(server enforces — 只能挑這份)═══\n`
+        + links.map((u) => `- ${u}`).join('\n')
+        + `\n═══ /白名單 ═══\n`
+        + `\n⚠️ **JSON 輸出的 url 欄位必須是上方白名單裡的字串**(複製貼上,不可改任何字元)。\n`
+        + `   不在白名單裡的 URL → server 會直接 drop 該筆,不寫入 DB。\n`
+        + `   白名單若為空 = 該 source 沒抓到 article link → 直接輸出 \`\`\`json [] \`\`\` 跳過。\n`;
+      if (outBag) {
+        for (const u of links) outBag.urlWhitelist.push(u);
+      }
+    } else {
+      console.warn(`[Scheduled] scrape: ${url} extracted 0 candidate links — JS-rendered 或 host pattern 不匹配`);
+      whitelistBlock = `\n⚠️ 從 ${url} 抽不到 article link 白名單(可能 JS 渲染 / pattern 不匹配),**該 source 直接輸出 \`\`\`json [] \`\`\` 跳過,不要憑記憶或想像補 URL**。\n`;
+    }
+    result = result.replace(m[0], `\n${content}\n${whitelistBlock}`);
   }
 
   // {{news_seen:source[,source2]:lookback_days:limit}} — pm_news 過去 N 天該 source
@@ -365,24 +461,15 @@ async function runTask(db, taskId) {
       const apiModel = await resolveTaskModel(db, task.model, 'chat');
 
       // Render prompt variables (+ fetch any {{fetch:URL}} placeholders)
-      let renderedPrompt = await substituteVarsAsync(task.prompt, task.name);
+      // outBag 收集 substituteVarsAsync 階段的副資訊(目前只有 urlWhitelist),
+      // 用於 db_write 階段 strict enforce LLM 給的 url 必須在白名單內。
+      const subBag = {};
+      let renderedPrompt = await substituteVarsAsync(task.prompt, task.name, subBag);
 
-      // ── Grounding tool 自動掛載 ──────────────────────────────────────────
-      // 觸發條件:原始 prompt 含 {{scrape:URL}}(server 預先 scrape list 頁,但 LLM 還是要從
-      // list 挑 article URL — 不掛 grounding 就會憑空編 URL,實測連 GUID 都會幻覺出非 hex 字元)
-      // 需要 SDK_MODE=new(舊 SDK 命名不同,且 Vertex regional 不支援 urlContext)
-      //
-      // 2026-05-01:第一版同時掛 [urlContext, googleSearch],SMM task 跑 4 分鐘回空字串。
-      //            改成只掛 urlContext(LLM 從 prompt 給的 list 頁文字挑 URL,自己去 fetch 即可,
-      //            不需要 googleSearch);加 fallbackOnEmpty 保命(grounding 失敗 silent 重跑不掛 tool)
-      const { SDK_MODE } = require('./geminiClient');
-      const promptHasScrape = /\{\{scrape:/i.test(task.prompt || '');
-      const groundingTools = (promptHasScrape && SDK_MODE === 'new')
-        ? [{ urlContext: {} }]
-        : null;
-      if (groundingTools) {
-        console.log(`[Scheduled] task=${task.id} "${task.name}" 啟用 grounding tool (urlContext) — prompt 含 {{scrape:}}`);
-      }
+      // 2026-05-01:Vertex 對 Gemini 3 系列 silent ignore urlContext tool
+      // (Pro / Flash / 2.5 Pro 全部實測 groundingMetadata={},LLM 自己也說「沒給我內容」)
+      // 改走 server-side white-list 路線(scrapeUrl 抽 <a href> + db_write enforce),
+      // 不再嘗試掛 grounding tool。code 保留前一版 fallback 機制以防未來 Vertex 支援度上來。
 
       // ── {{template:id}} tag in prompt ─────────────────────────────────────
       // Extract template IDs from prompt, strip the tags, append JSON instruction
@@ -421,17 +508,8 @@ async function runTask(db, taskId) {
         `INSERT INTO chat_messages (session_id, role, content) VALUES (?, 'user', ?)`
       ).run(sid, renderedPrompt);
 
-      // Call Gemini (non-streaming)
-      const genResult = await generateTextSync(
-        apiModel, [], renderedPrompt,
-        groundingTools
-          ? { tools: groundingTools, logGrounding: true, fallbackOnEmpty: true }
-          : {}
-      );
-      const { text, inputTokens, outputTokens } = genResult;
-      if (genResult._fallbackUsed) {
-        console.warn(`[Scheduled] task=${task.id} "${task.name}" grounding 失敗,已 fallback 不掛 tool 重跑 — text.len=${text.length}`);
-      }
+      // Call Gemini (non-streaming) — 純 prompt,不掛 grounding tool(Vertex Gemini 3 不支援)
+      const { text, inputTokens, outputTokens } = await generateTextSync(apiModel, [], renderedPrompt);
 
       // Insert AI response
       await db.prepare(
@@ -559,11 +637,23 @@ async function runTask(db, taskId) {
         // runId:pipeline 內節點(如 db_write)會把這個值寫進寫入 rows 的 meta_run_id,用於資料血緣
         // 用 startMs(epoch ms)當作 runId,唯一且可近似對應 scheduled_task_runs.run_at
         const runId = startMs;
+        // urlWhitelist 從 substituteVarsAsync 帶過來給 db_write 做 strict enforce
+        // (LLM 給的 url 必須出現在這份白名單,不在 = drop)
+        // dedupe + JSON 字串化塞進 vars,給 pipelineDbWriter 用 url_whitelist_var: '__url_whitelist__' 引用
+        const dedupedWl = subBag.urlWhitelist
+          ? Array.from(new Set(subBag.urlWhitelist.filter(Boolean)))
+          : [];
+        const extraVars = dedupedWl.length
+          ? { __url_whitelist__: JSON.stringify(dedupedWl) }
+          : {};
+        if (dedupedWl.length) {
+          console.log(`[Scheduled] task=${task.id} "${task.name}" pipeline 啟用 url_whitelist enforcement (${dedupedWl.length} URLs)`);
+        }
         const { generatedFiles: pFiles, nodeOutputs, log: pLog } = await runPipeline(
           pipelineNodes,
           responseText,
           db,
-          { userId: task.user_id, sessionId, taskName: task.name, user, runId, taskId: task.id }
+          { userId: task.user_id, sessionId, taskName: task.name, user, runId, taskId: task.id, extraVars }
         );
         generatedFiles.push(...pFiles);
         pipelineLog = pLog;

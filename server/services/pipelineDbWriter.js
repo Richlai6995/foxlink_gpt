@@ -518,7 +518,25 @@ async function executeDbWrite(db, nodeConfig, sourceText, context = {}) {
   const urlCheckCols = Array.isArray(cfg.url_check_columns)
     ? cfg.url_check_columns.filter((c) => isValidIdentifier(c))
     : [];
-  let urlCheckFailedCount = 0; // grafana / log 看「LLM 編了多少幻覺 URL」
+  // ── URL whitelist enforcement(2026-05-01)──────────────────────────────
+  // 從 cfg.url_whitelist_var 指定的 vars key(typical: '__url_whitelist__')取 JSON-serialized
+  // 字串陣列,LLM 給的 url 必須在裡面才寫入 DB。配 url_check_columns 一起用 — column 同名。
+  // 這個白名單由 scheduledTaskService 在 substituteVarsAsync 階段從 scrape 結果 host-aware
+  // 抽 <a href> 抽到的 article URL,從根本擋 LLM 編 URL 幻覺。
+  let urlWhitelist = null;
+  if (cfg.url_whitelist_var && context.vars && typeof context.vars[cfg.url_whitelist_var] === 'string') {
+    try {
+      const parsed = JSON.parse(context.vars[cfg.url_whitelist_var]);
+      if (Array.isArray(parsed) && parsed.length) {
+        urlWhitelist = new Set(parsed.map((u) => String(u).trim()).filter(Boolean));
+        console.log(`[Pipeline db_write] url_whitelist enforce 啟用 — ${urlWhitelist.size} URLs from ${cfg.url_whitelist_var}`);
+      }
+    } catch (e) {
+      console.warn(`[Pipeline db_write] url_whitelist_var ${cfg.url_whitelist_var} 解析失敗:`, e.message);
+    }
+  }
+  let urlCheckFailedCount = 0;       // 格式驗證失敗
+  let urlWhitelistMissedCount = 0;   // 白名單沒中
   for (let i = 0; i < rawRows.length; i++) {
     const { row, errors: rowErrs } = mapRow(rawRows[i], columnMapping);
     if (rowErrs.length) {
@@ -529,13 +547,22 @@ async function executeDbWrite(db, nodeConfig, sourceText, context = {}) {
       continue;
     }
     // ── URL sanity check ────────────────────────────────────────────────────
-    // url_check_columns 設定的欄位逐個格式驗證,失敗 = LLM 編 URL 幻覺,直接 skip
+    // url_check_columns 設定的欄位先做格式驗證(快、便宜),格式 OK 再比對白名單
     if (urlCheckCols.length) {
       const urlErrs = [];
       for (const col of urlCheckCols) {
         if (row[col] == null || row[col] === '') continue;
-        const r = isValidArticleUrl(String(row[col]));
-        if (!r.ok) urlErrs.push(`${col}=${String(row[col]).slice(0, 120)} (${r.reason})`);
+        const valStr = String(row[col]);
+        const r = isValidArticleUrl(valStr);
+        if (!r.ok) {
+          urlErrs.push(`${col}=${valStr.slice(0, 120)} (${r.reason})`);
+          continue;
+        }
+        // 白名單比對(若啟用)— 嚴格 string-equals,LLM 改一個字元就 miss
+        if (urlWhitelist && !urlWhitelist.has(valStr.trim())) {
+          urlWhitelistMissedCount++;
+          urlErrs.push(`${col}=${valStr.slice(0, 120)} (not_in_whitelist:LLM 編造或改字)`);
+        }
       }
       if (urlErrs.length) {
         urlCheckFailedCount++;
@@ -609,9 +636,10 @@ async function executeDbWrite(db, nodeConfig, sourceText, context = {}) {
     errors, dropped_cols, inserted_preview,
     // 給 admin 在 RunDetailModal 看「LLM 編了幾條假 URL」— 0 = 健康,>0 = 該檢查 prompt
     ...(urlCheckCols.length ? { url_check_failed_count: urlCheckFailedCount } : {}),
+    ...(urlWhitelist ? { url_whitelist_missed_count: urlWhitelistMissedCount, url_whitelist_size: urlWhitelist.size } : {}),
   };
   if (urlCheckFailedCount > 0) {
-    console.warn(`[Pipeline db_write] ${urlCheckFailedCount}/${rawRows.length} rows 因 URL 驗證失敗被丟掉(LLM 幻覺 URL,table=${tableName})`);
+    console.warn(`[Pipeline db_write] ${urlCheckFailedCount}/${rawRows.length} rows 因 URL 驗證失敗被丟掉(table=${tableName}; whitelist_missed=${urlWhitelistMissedCount}, format_invalid=${urlCheckFailedCount - urlWhitelistMissedCount})`);
   }
 
   try {

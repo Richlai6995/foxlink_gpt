@@ -32,7 +32,7 @@ function interpolate(template, vars) {
   });
 }
 
-function buildVars(aiOutput, nodeOutputs, taskName) {
+function buildVars(aiOutput, nodeOutputs, taskName, extraVars) {
   const today = new Date().toLocaleDateString('zh-TW', {
     timeZone: 'Asia/Taipei', year: 'numeric', month: '2-digit', day: '2-digit',
   }).replace(/\//g, '-');
@@ -43,6 +43,13 @@ function buildVars(aiOutput, nodeOutputs, taskName) {
   };
   for (const [id, out] of Object.entries(nodeOutputs)) {
     vars[`node_${id}_output`] = out ?? '';
+  }
+  // extraVars(scheduledTaskService 帶下來的 cross-stage 資料,目前用於 __url_whitelist__)—
+  // node 不該蓋掉 ai_output / date / task_name,所以放在最後 merge,但 caller 也別亂設這 3 個 reserved key
+  if (extraVars && typeof extraVars === 'object') {
+    for (const [k, v] of Object.entries(extraVars)) {
+      if (vars[k] === undefined) vars[k] = v;
+    }
   }
   return vars;
 }
@@ -313,6 +320,7 @@ async function execKbWrite(node, vars, db, context) {
 async function execDbWrite(node, vars, db, context) {
   const { executeDbWrite } = require('./pipelineDbWriter');
   const input = interpolate(node.input || '{{ai_output}}', vars);
+  // 把 vars 整包傳下去,讓 db_write 內部需要查 url_whitelist_var 之類的 cross-stage 資料時能拿
   const result = await executeDbWrite(db, node, input, {
     user: context.user || null,
     userId: context.userId,
@@ -320,6 +328,7 @@ async function execDbWrite(node, vars, db, context) {
     taskName: context.taskName || '',
     nodeId: node.id,
     dryRun: false,
+    vars,
   });
   const errCount = result.errors?.length || 0;
   const text = `[DB 寫入 ${node.table}: ${result.inserted} inserted / ${result.updated} updated / ${result.skipped} skipped${errCount ? ' / ' + errCount + ' errors' : ''}]`;
@@ -502,7 +511,7 @@ async function runNode(node, vars, db, context, log) {
 async function runPipeline(nodes, aiOutput, db, context) {
   if (!nodes || nodes.length === 0) return { generatedFiles: [], nodeOutputs: {}, log: [] };
 
-  const { taskName = '' } = context;
+  const { taskName = '', extraVars = null } = context;
   const nodeOutputs = {};     // id → output text
   const generatedFiles = [];  // collected files from all nodes
   const log = [];             // execution log entries
@@ -518,7 +527,7 @@ async function runPipeline(nodes, aiOutput, db, context) {
       continue;
     }
 
-    const vars = buildVars(aiOutput, nodeOutputs, taskName);
+    const vars = buildVars(aiOutput, nodeOutputs, taskName, extraVars);
 
     // parallel node — run children concurrently
     if (node.type === 'parallel') {
