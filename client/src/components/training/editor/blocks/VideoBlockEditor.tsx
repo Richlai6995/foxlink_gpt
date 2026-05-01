@@ -10,7 +10,7 @@ interface Props {
   courseId: number
 }
 
-const VIDEO_MAX_MB = 50  // server multer limit
+const VIDEO_MAX_MB = 500  // 對齊 server multer limit + K8s ingress proxy-body-size
 
 export default function VideoBlockEditor({ block, onChange, courseId }: Props) {
   const [uploading, setUploading] = useState(false)
@@ -83,10 +83,10 @@ export default function VideoBlockEditor({ block, onChange, courseId }: Props) {
             >
               <Upload size={24} className="mb-2" style={{ color: 'var(--t-text-dim)' }} />
               <p className="text-xs" style={{ color: 'var(--t-text-dim)' }}>
-                {uploading ? '上傳中...' : '點擊上傳影片檔(最大 50MB)'}
+                {uploading ? '上傳中...' : '點擊上傳影片檔(最大 500MB)'}
               </p>
               <p className="text-[10px] mt-1" style={{ color: 'var(--t-text-dim)' }}>
-                支援 mp4、webm、mov;大檔請改用「影片網址」
+                支援 mp4、webm、mov;大檔上傳會花較久時間
               </p>
             </div>
           )}

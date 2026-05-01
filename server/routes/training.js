@@ -41,7 +41,9 @@ const storage = multer.diskStorage({
     cb(null, `${Date.now()}_${Math.random().toString(36).slice(2, 8)}${ext}`);
   }
 });
-const upload = multer({ storage, limits: { fileSize: 50 * 1024 * 1024 } });
+// 500MB 上限 — 訓練平台支援影片 block / 大檔教材匯入。
+// 用 diskStorage 直接寫 NFS,不吃 pod RAM。需配合 K8s ingress proxy-body-size。
+const upload = multer({ storage, limits: { fileSize: 500 * 1024 * 1024 } });
 
 // ─── Concurrency limiter (used by translate / TTS batch / etc.) ──────────────
 function pLimit(n) {
