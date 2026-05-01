@@ -450,6 +450,9 @@ async function runTask(db, taskId) {
   let attemptNum = 1;
   let toolsUsed = { skills: [], kbs: [], mcp_tools: [], dify_kbs: [] };
   let pipelineLog = [];
+  // outBag 在 retry callback 內 mutate,但 pipeline 在 callback 外面也要拿,所以宣告在外面共用
+  // (retry 重試時 substituteVarsAsync 會 reset outBag.urlWhitelist 為新 array,不會累積舊資料)
+  const subBag = {};
 
   try {
     const { result, attempt } = await withRetry(async (tryNum) => {
@@ -463,7 +466,8 @@ async function runTask(db, taskId) {
       // Render prompt variables (+ fetch any {{fetch:URL}} placeholders)
       // outBag 收集 substituteVarsAsync 階段的副資訊(目前只有 urlWhitelist),
       // 用於 db_write 階段 strict enforce LLM 給的 url 必須在白名單內。
-      const subBag = {};
+      // retry 時清掉舊的累積值再讓 substituteVarsAsync 重填
+      subBag.urlWhitelist = [];
       let renderedPrompt = await substituteVarsAsync(task.prompt, task.name, subBag);
 
       // 2026-05-01:Vertex 對 Gemini 3 系列 silent ignore urlContext tool
