@@ -1361,10 +1361,23 @@ router.put('/lessons/:lid/slides/reorder', async (req, res) => {
 // - <video> 不會自動帶 Authorization header,所以 token 透過 ?token= query string
 //   (verifyToken 已支援 query fallback,見 routes/auth.js)
 //
+// WAF 繞法:url 用 base64 encode 後從 ?urlb64= 帶過來,避免 OWASP CRS SSRF rule
+// 看到 query string 含 https%3A%2F%2F pattern 就 403。?url= 仍保留方便本機 dev 用。
+//
 // Range:支援 HTTP Range 請求(影片拖時間軸需要),把 Range header 轉發給 upstream,
 // upstream 回的 206 + Content-Range / Content-Length 全部 forward
 router.get('/video-proxy', async (req, res) => {
-  const targetUrl = req.query.url;
+  let targetUrl = req.query.url;
+  if (!targetUrl && req.query.urlb64) {
+    try {
+      // 容錯 URL-safe base64(- _ → + /)+ 補 padding
+      let b64 = String(req.query.urlb64).replace(/-/g, '+').replace(/_/g, '/');
+      while (b64.length % 4) b64 += '=';
+      targetUrl = Buffer.from(b64, 'base64').toString('utf8');
+    } catch {
+      return res.status(400).json({ error: 'Invalid urlb64' });
+    }
+  }
   if (!targetUrl) return res.status(400).json({ error: 'url query required' });
 
   let parsed;

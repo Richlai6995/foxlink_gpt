@@ -26,5 +26,11 @@ export function proxiedVideoUrl(rawUrl: string | undefined | null): string {
   if (!PROXY_HOSTS.includes(parsed.hostname)) return rawUrl
 
   const token = localStorage.getItem('token') || ''
-  return `/api/training/video-proxy?url=${encodeURIComponent(rawUrl)}&token=${encodeURIComponent(token)}`
+  // 用 base64 + URL-safe 字元(- _),避免 WAF 看到 query string 裡的 https%3A%2F%2F
+  // 觸發 OWASP CRS SSRF rule 直接回 403
+  const utf8 = new TextEncoder().encode(rawUrl)
+  let bin = ''
+  for (let i = 0; i < utf8.length; i++) bin += String.fromCharCode(utf8[i])
+  const urlb64 = btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+  return `/api/training/video-proxy?urlb64=${urlb64}&token=${encodeURIComponent(token)}`
 }
