@@ -14,9 +14,18 @@
  *   - 沒 → 換 server-side white-list 路線(改 scrapeUrl 抽 link 給 LLM 當白名單)
  */
 
-require('dotenv').config({ path: require('path').join(__dirname, '../.env') });
+// dotenv 只在 local 跑時需要,K8s 已由 secret 注入 env vars。
+// 兩種環境都要能跑 → 嘗試 require dotenv,失敗就跳過(K8s 沒這套件也沒關係)。
+try { require('dotenv').config({ path: require('path').join(__dirname, '../.env') }); }
+catch (_) { /* K8s pod 沒 dotenv,env 已注入,跳過 */ }
 
-const { getGenerativeModel, extractText, SDK_MODE } = require('../services/geminiClient');
+// require path 兼容 local 跟 K8s 兩種位置:
+//   - local:server/scripts/ → '../services/geminiClient'
+//   - K8s pod cp 到 /tmp/ → '/app/server/services/geminiClient'(absolute)
+let geminiClient;
+try { geminiClient = require('../services/geminiClient'); }
+catch (_) { geminiClient = require('/app/server/services/geminiClient'); }
+const { getGenerativeModel, extractText, SDK_MODE } = geminiClient;
 
 (async () => {
   const model = process.argv[2] || 'gemini-3.1-pro-preview';
