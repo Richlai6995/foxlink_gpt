@@ -709,19 +709,38 @@ async function generateTitle(userMessage, aiResponse) {
  * @param {string} prompt    - user prompt text (already variable-substituted)
  * @returns {Promise<{text, inputTokens, outputTokens}>}
  */
-async function generateTextSync(apiModel, history, prompt) {
+async function generateTextSync(apiModel, history, prompt, opts = {}) {
   const resolvedModel = apiModel || process.env.GEMINI_MODEL_PRO || MODEL_PRO;
   if (!resolvedModel) throw new Error('generateTextSync: model parameter 為空（未設定 apiModel 也無 env fallback）');
-  const model = getGenerativeModel({
+  // opts.tools — built-in grounding tools 透傳(urlContext / googleSearch),
+  // 用於 PM 抓新聞之類需要 LLM 真的 fetch URL 而非憑記憶幻覺的 task。
+  // 只在 SDK_MODE='new' 且 GENERATE_PROVIDER='vertex' / 'studio' 且 model 支援(2.5+/3.x)時生效;
+  // 舊 SDK 對 grounding tool 的命名不同,呼叫者請自己判斷別亂塞。
+  const modelOpts = {
     model: resolvedModel,
     systemInstruction: getSystemInstruction(),
-  });
+  };
+  if (Array.isArray(opts.tools) && opts.tools.length) modelOpts.tools = opts.tools;
+  const model = getGenerativeModel(modelOpts);
   const contents = [
     ...history,
     { role: 'user', parts: [{ text: prompt }] },
   ];
   const result = await model.generateContent({ contents });
   const usage = extractUsage(result);
+  // grounding metadata(urlContext fetch 結果)— debug 用,印 fetched URLs 看 LLM 真的有去抓哪些
+  if (opts.logGrounding) {
+    try {
+      const meta = result.candidates?.[0]?.groundingMetadata
+        || result.response?.candidates?.[0]?.groundingMetadata;
+      if (meta) {
+        const urls = (meta.groundingChunks || meta.groundingSupports || meta.urlContextMetadata?.urlMetadata || [])
+          .map((c) => c.web?.uri || c.uri || c.retrievedUrl || c.url)
+          .filter(Boolean);
+        if (urls.length) console.log(`[generateTextSync] grounding fetched ${urls.length} url(s):`, urls.slice(0, 20));
+      }
+    } catch (_) { /* metadata shape 跨 model/SDK 變動,失敗不擋主流程 */ }
+  }
   return {
     text: extractText(result),
     inputTokens: usage.inputTokens,

@@ -367,6 +367,19 @@ async function runTask(db, taskId) {
       // Render prompt variables (+ fetch any {{fetch:URL}} placeholders)
       let renderedPrompt = await substituteVarsAsync(task.prompt, task.name);
 
+      // ── Grounding tool 自動掛載 ──────────────────────────────────────────
+      // 觸發條件:原始 prompt 含 {{scrape:URL}}(server 預先 scrape list 頁,但 LLM 還是要從
+      // list 挑 article URL — 不掛 grounding 就會憑空編 URL,實測連 GUID 都會幻覺出非 hex 字元)
+      // 需要 SDK_MODE=new(舊 SDK 命名不同,且 Vertex regional 不支援 urlContext)
+      const { SDK_MODE } = require('./geminiClient');
+      const promptHasScrape = /\{\{scrape:/i.test(task.prompt || '');
+      const groundingTools = (promptHasScrape && SDK_MODE === 'new')
+        ? [{ urlContext: {} }, { googleSearch: {} }]
+        : null;
+      if (groundingTools) {
+        console.log(`[Scheduled] task=${task.id} "${task.name}" 啟用 grounding tools (urlContext + googleSearch) — prompt 含 {{scrape:}}`);
+      }
+
       // ── {{template:id}} tag in prompt ─────────────────────────────────────
       // Extract template IDs from prompt, strip the tags, append JSON instruction
       const tplTagRe = /\{\{template:([^}]+)\}\}/g;
@@ -405,7 +418,10 @@ async function runTask(db, taskId) {
       ).run(sid, renderedPrompt);
 
       // Call Gemini (non-streaming)
-      const { text, inputTokens, outputTokens } = await generateTextSync(apiModel, [], renderedPrompt);
+      const { text, inputTokens, outputTokens } = await generateTextSync(
+        apiModel, [], renderedPrompt,
+        groundingTools ? { tools: groundingTools, logGrounding: true } : {}
+      );
 
       // Insert AI response
       await db.prepare(

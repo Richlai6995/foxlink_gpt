@@ -22,6 +22,44 @@ const {
   isValidIdentifier, isForbidden,
 } = require('../config/pipelineSecurity');
 
+// ── URL sanity check ────────────────────────────────────────────────────────
+// 給 `cfg.url_check_columns: ['url']` 用。LLM 在 list 頁讀完後常憑記憶 / 想像生 URL
+// (實測 MoneyDJ GUID 含非 hex 字元如 `8h16`,SMM news ID 長度不對),這個函式做
+// 純格式檢查擋幻覺,**不發 HTTP**(K8s pod 對外網路有限制 + 太慢)。
+//
+// 檢查層次:
+//   1. 通用:URL.parse 合法 + host 非空 + path 非根("/")— 擋「拿首頁當 article」
+//   2. host-specific 已知 source 加嚴:
+//      - moneydj.com newsviewer.aspx?a=<GUID> → GUID 必須是合法 hex(8-4-4-4-12)
+//      - news.smm.cn /news/<id> → id 必須純數字(實測 ID 7-10 位)
+//      其他 host 過 (1) 即可
+function isValidArticleUrl(rawUrl) {
+  if (!rawUrl || typeof rawUrl !== 'string') return { ok: false, reason: 'empty' };
+  let u;
+  try { u = new URL(rawUrl); } catch (_) { return { ok: false, reason: 'parse' }; }
+  if (!u.hostname) return { ok: false, reason: 'no-host' };
+  if (!u.pathname || u.pathname === '/' || u.pathname === '') {
+    return { ok: false, reason: 'is-homepage' };
+  }
+  const host = u.hostname.toLowerCase();
+  // MoneyDJ GUID hex check
+  if (host.endsWith('moneydj.com') && /newsviewer\.aspx/i.test(u.pathname)) {
+    const a = u.searchParams.get('a');
+    if (!a) return { ok: false, reason: 'moneydj-no-guid' };
+    // 標準 GUID:8-4-4-4-12 hex
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(a)) {
+      return { ok: false, reason: `moneydj-bad-guid:${a}` };
+    }
+  }
+  // SMM news ID digit check
+  if (host.endsWith('smm.cn') && /^\/news\//i.test(u.pathname)) {
+    const m = u.pathname.match(/^\/news\/([^/?#]+)/i);
+    if (!m) return { ok: false, reason: 'smm-no-id' };
+    if (!/^\d{6,12}$/.test(m[1])) return { ok: false, reason: `smm-bad-id:${m[1]}` };
+  }
+  return { ok: true };
+}
+
 // ── JSON 解析 ────────────────────────────────────────────────────────────────
 // 上游節點/AI 輸出可能含:
 //   - ```json [...] ``` fenced block
@@ -477,6 +515,10 @@ async function executeDbWrite(db, nodeConfig, sourceText, context = {}) {
   const mappedRows = [];
   const errors = [];
   const droppedColsCount = new Map(); // colName → drop 次數,給 admin 看 schema 跟 prompt drift
+  const urlCheckCols = Array.isArray(cfg.url_check_columns)
+    ? cfg.url_check_columns.filter((c) => isValidIdentifier(c))
+    : [];
+  let urlCheckFailedCount = 0; // grafana / log 看「LLM 編了多少幻覺 URL」
   for (let i = 0; i < rawRows.length; i++) {
     const { row, errors: rowErrs } = mapRow(rawRows[i], columnMapping);
     if (rowErrs.length) {
@@ -485,6 +527,28 @@ async function executeDbWrite(db, nodeConfig, sourceText, context = {}) {
         throw new Error(`row #${i} 映射失敗: ${rowErrs.join('; ')}`);
       }
       continue;
+    }
+    // ── URL sanity check ────────────────────────────────────────────────────
+    // url_check_columns 設定的欄位逐個格式驗證,失敗 = LLM 編 URL 幻覺,直接 skip
+    if (urlCheckCols.length) {
+      const urlErrs = [];
+      for (const col of urlCheckCols) {
+        if (row[col] == null || row[col] === '') continue;
+        const r = isValidArticleUrl(String(row[col]));
+        if (!r.ok) urlErrs.push(`${col}=${String(row[col]).slice(0, 120)} (${r.reason})`);
+      }
+      if (urlErrs.length) {
+        urlCheckFailedCount++;
+        errors.push({
+          row_index: i,
+          errors: ['url_check_failed: ' + urlErrs.join('; ')],
+          row_payload: previewRow(rawRows[i]),
+        });
+        if (onRowError === 'stop') {
+          throw new Error(`row #${i} URL 驗證失敗: ${urlErrs.join('; ')}`);
+        }
+        continue;
+      }
     }
     // 對 LLM 多輸出的未知欄位,silent drop。LLM 多寫無害是常態(prompt 教或它自由發揮),
     // 不該整 row fail。Drop 列表收集起來放 db_write_summary.dropped_cols,
@@ -543,7 +607,12 @@ async function executeDbWrite(db, nodeConfig, sourceText, context = {}) {
     total_rows_in_input: rawRows.length,
     inserted: 0, updated: 0, skipped: 0,
     errors, dropped_cols, inserted_preview,
+    // 給 admin 在 RunDetailModal 看「LLM 編了幾條假 URL」— 0 = 健康,>0 = 該檢查 prompt
+    ...(urlCheckCols.length ? { url_check_failed_count: urlCheckFailedCount } : {}),
   };
+  if (urlCheckFailedCount > 0) {
+    console.warn(`[Pipeline db_write] ${urlCheckFailedCount}/${rawRows.length} rows 因 URL 驗證失敗被丟掉(LLM 幻覺 URL,table=${tableName})`);
+  }
 
   try {
     if (operation === 'replace_by_date') {

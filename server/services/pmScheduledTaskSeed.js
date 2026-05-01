@@ -213,6 +213,8 @@ function _buildBySourceNewsPipeline(kbMap) {
       id: dbWriteId, type: 'db_write', label: '寫入 pm_news 表',
       table: 'pm_news', operation: 'upsert', key_columns: ['url_hash'],
       input: '{{ai_output}}', on_row_error: 'skip', max_rows: 200,
+      // 2026-05-01:url_check_columns 啟用格式驗證,擋 LLM 幻覺 URL(MoneyDJ GUID 含非 hex / SMM news ID 長度不對)
+      url_check_columns: ['url'],
       column_mapping: [
         { jsonpath: '$.url',             column: 'url',             transform: '',                required: true },
         { jsonpath: '$.url',             column: 'url_hash',        transform: 'sha256',          required: true },
@@ -274,7 +276,10 @@ B. **JSON 落地段(MANDATORY)**:markdown 末尾用 \`\`\`json ... \`\`\` 包起
 ═══ 規則(嚴格遵守)═══
 - **目標 ${targetMin}-${targetMax} 篇**(這是 MUST,不是 nice-to-have;少於 ${targetMin} 篇就再讀一次 source 多挖)
 - **published_at 必須在 {{date}} 往前 ${cutoffDays} 天內**,超過 ${cutoffDays} 天的舊 article 一律跳過
-- **url 必須是具體 article URL**,不是首頁 / list 頁(如果上游給你的 source 只有 list 頁,**逐個 article URL 點進去抓**,不要把 list 頁 url 當 article 抽出來)
+- **url 必須是具體 article URL**,不是首頁 / list 頁(如果上游給你的 source 只有 list 頁,**用 urlContext tool 把該 article URL fetch 進來**,不要把 list 頁 url 當 article 抽出來)
+- **🚨 url 嚴禁憑記憶或猜測**:**只能輸出 list / RSS / urlContext fetch 結果中真實出現的 URL 字串**,複製貼上,**不可改一個字**。
+  你不知道網站的 URL 規則 → **看不到完整連結 = 該篇直接跳過**,不許「補一個合理的 ID 進去」。
+  常見幻覺特徵:GUID 含非 hex 字元(0-9 / a-f 以外)、ID 數字長度跟其他真 URL 不一致、結尾莫名加 query string。
 - **content 必須是真 article body**,≥ 200 字真實文字 / 評論 / 分析。報價快照 / 牌價公告不算
 - **content 跟 summary 是不同欄位不同內容**(content 1500-3000 字原文,summary 80-150 字繁中濃縮)
 
@@ -282,6 +287,7 @@ B. **JSON 落地段(MANDATORY)**:markdown 末尾用 \`\`\`json ... \`\`\` 包起
 - [ ] B 段 \`\`\`json [...] \`\`\` 區塊有寫?
 - [ ] 篇數達 ${targetMin}-${targetMax}?(LLM 偷懶問題:不要只給 ${targetMin-2} 篇就交差)
 - [ ] 每筆 url 是具體 article 不是首頁?
+- [ ] **每筆 url 都是從 list / RSS / urlContext fetch 結果裡複製出來的真實連結?(不是憑想像補的)**
 - [ ] 每筆 published_at 在 ${cutoffDays} 天內?
 - [ ] 每筆 content 是 ≥ 200 字真 article body 不是報價快照?`;
 }
@@ -354,9 +360,14 @@ function buildNewsSmmTask(kbMap, models = {}) {
 ═══ 唯一資料源 ═══
 {{scrape:https://news.smm.cn/}}
 
-↑ SMM「金属要闻」首頁,這是 list 頁。**請從首頁挑出當日各 article 的具體 URL,逐個點進去抓內文**。
-  ⚠️ **不要把 \`https://news.smm.cn/\`(首頁)當 article URL 抽出來**!每篇 article 都有自己的具體 URL(通常是 /news/<id> 之類)。
-  抓 5-10 篇跟 11 個金屬相關的中國市場動態(現貨價、政策、產能、進出口等)。
+↑ SMM「金属要闻」首頁,這是 list 頁。**請從首頁挑出當日各 article 的具體 URL,用 urlContext tool 逐個 fetch 進來抓內文**。
+
+🚨 **嚴禁憑記憶或猜測編 URL**:你**不知道** SMM 的 URL 規則,**只能輸出 list 頁 / urlContext 結果中真實出現的字串**。
+   - 看到 list 頁裡明確出現某篇連結 → 用 \`urlContext\` tool fetch 該 URL → 取真內文 → 寫入 source_url
+   - list 頁沒看到完整 URL,或 urlContext fetch 失敗 → **直接跳過該篇**,不要硬擠
+   - **不要把 \`https://news.smm.cn/\`(首頁)當 article URL 抽出來**
+
+抓 5-10 篇跟 11 個金屬相關的中國市場動態(現貨價、政策、產能、進出口等)。
 
 {{news_seen:SMM,SMM上海有色網:7:100}}${_commonNewsPromptTail(5, 10)}`;
 
@@ -383,9 +394,15 @@ function buildNewsMoneyDjTask(kbMap, models = {}) {
 ═══ 唯一資料源 ═══
 {{scrape:https://www.moneydj.com/KMDJ/News/NewsRealList.aspx?a=MB07}}
 
-↑ MoneyDJ 商品原物料分類列表頁。**請從上面 list 抽出每篇 article 的具體 URL,逐個點進去抓內文**。
-  ⚠️ **不要把 list 頁 URL 當 article 抽出來**(那是 list 不是 article)。
-  挑出與 11 個金屬相關的 5-10 篇(LME 行情、台灣供應鏈影響、台股相關公司動態等)。
+↑ MoneyDJ 商品原物料分類列表頁。**請從上面 list 抽出每篇 article 的具體 URL,用 urlContext tool 逐個 fetch 進來抓內文**。
+
+🚨 **嚴禁憑記憶或猜測編 URL**:MoneyDJ 的 article URL 是 \`newsviewer.aspx?a=<GUID>\` 格式,**GUID 只能含 0-9 / a-f**(hex 字元)。
+   - **只能輸出 list 頁 / urlContext 結果中真實出現的 GUID**,複製貼上,不准改任何字元
+   - 自己生 GUID 一定錯(實測 LLM 會編出含 \`h\` / \`i\` 等非 hex 字元的假 GUID)
+   - list 頁沒給完整 URL,或 urlContext fetch 失敗 → **直接跳過該篇**,寧可少 1 篇也不要編
+   - **不要把 list 頁 URL 當 article 抽出來**(那是 list 不是 article)
+
+挑出與 11 個金屬相關的 5-10 篇(LME 行情、台灣供應鏈影響、台股相關公司動態等)。
 
 {{news_seen:MoneyDJ:7:100}}${_commonNewsPromptTail(5, 10)}`;
 
@@ -414,7 +431,11 @@ function buildNewsPgmCommentaryTask(kbMap, models = {}) {
 {{scrape:https://matthey.com/news/expert-insights}}
 {{scrape:https://matthey.com/products-and-markets/pgms-and-circularity/pgm-markets}}
 
-↑ 從 list 頁抽出每篇 article 的具體 URL,**逐個點進去抓內文**(不要把 list 頁 URL 當 article)。
+↑ 從 list 頁抽出每篇 article 的具體 URL,**用 urlContext tool fetch 進來抓內文**(不要把 list 頁 URL 當 article)。
+
+🚨 **嚴禁憑記憶或猜測編 URL**:**只能輸出 list 頁 / urlContext fetch 結果中真實出現的 URL**,複製貼上不可改字元。
+   list 頁沒給完整 URL 或 urlContext fetch 失敗 → 直接跳過,不准補一個合理的 ID 進去。
+
   WPIC 是 World Platinum Investment Council 的官方 quarterly outlook;
   matthey expert-insights 是 Johnson Matthey PGM 專家分析。**機構級報告權威性 > 一般新聞**。
   - source = "WPIC" 或 "JohnsonMatthey"
@@ -1719,6 +1740,88 @@ async function patchExistingDailyReportPriceAnchor(db) {
   }
 }
 
+// ── Patch 既有 by-source news task:加 urlContext grounding 指示(2026-05-01)──
+// 對 SMM / MoneyDJ / PGM評論 三個走 {{scrape:}} 的 task 強化 prompt:加 urlContext tool 指示
+// + 「嚴禁憑記憶或猜測編 URL」嚴格規則。Mining.com / Nikkei 走 RSS({{fetch:}})不需要 grounding,
+// 但共用 tail 也加了 self-check「URL 來自真實 list/RSS/urlContext 結果」做防呆。
+// marker = `嚴禁憑記憶或猜測` 或 `urlContext fetch`,沒這字串就 force update prompt
+async function patchExistingNewsAddGrounding(db) {
+  const targets = [
+    { name: '[PM] 新聞 Mining.com', builder: buildNewsMiningComTask },
+    { name: '[PM] 新聞 Nikkei',      builder: buildNewsNikkeiTask },
+    { name: '[PM] 新聞 SMM',         builder: buildNewsSmmTask },
+    { name: '[PM] 新聞 MoneyDJ',     builder: buildNewsMoneyDjTask },
+    { name: '[PM] 新聞 PGM評論',     builder: buildNewsPgmCommentaryTask },
+  ];
+  let patched = 0;
+  for (const t of targets) {
+    let row;
+    try {
+      row = await db.prepare(`SELECT id, name, prompt FROM scheduled_tasks WHERE name=?`).get(t.name);
+    } catch (e) {
+      console.warn(`[PMScheduledTaskSeed] patch grounding ${t.name} select failed:`, e.message);
+      continue;
+    }
+    if (!row) continue;
+    const id = row.id || row.ID;
+    let promptStr = row.prompt || row.PROMPT;
+    if (promptStr && typeof promptStr !== 'string' && promptStr.toString) promptStr = promptStr.toString();
+    if (!!promptStr && /嚴禁憑記憶或猜測/.test(promptStr)) continue; // 已升級
+
+    try {
+      const newSeed = t.builder(undefined, {});
+      await db.prepare(`UPDATE scheduled_tasks SET prompt=?, updated_at=SYSTIMESTAMP WHERE id=?`)
+        .run(newSeed.prompt, id);
+      patched++;
+      console.log(`[PMScheduledTaskSeed] Upgraded "${t.name}" #${id}: 加 urlContext grounding 指示 + 禁編 URL`);
+    } catch (e) {
+      console.warn(`[PMScheduledTaskSeed] patch grounding ${t.name} #${id} failed:`, e.message);
+    }
+  }
+  if (patched > 0) console.log(`[PMScheduledTaskSeed] patched grounding hint on ${patched} task(s)`);
+}
+
+// ── Patch 既有 by-source news task:pipeline_json db_write 加 url_check_columns(2026-05-01)──
+// 5 個 by-source news task 的 pipeline_json 是 seed 時寫的,既有 task 不會自動拿到新的
+// `url_check_columns: ['url']` 設定。marker = `url_check_columns` 字串,沒有就 force 重寫 pipeline_json。
+// 注意:會踩掉 admin 對 pipeline_json 的客製,但這個 db_write 節點是技術細節,admin 通常不動。
+async function patchExistingNewsAddUrlCheck(db, kbMap) {
+  const targets = [
+    '[PM] 新聞 Mining.com', '[PM] 新聞 Nikkei',
+    '[PM] 新聞 SMM', '[PM] 新聞 MoneyDJ', '[PM] 新聞 PGM評論',
+  ];
+  let patched = 0;
+  // kbMap 沒給就用空 Map,_buildBySourceNewsPipeline 對 kb_id 會 fallback ''
+  // (既有 task 的 kb_id 從 seed 時就寫死了,patch pipeline_json 不太該重新查 kbMap,
+  //  萬一 KB 還沒 seed 起來會把 kb_id 蓋掉變空。caller 從 main flow 拿到正確 kbMap 傳進來)
+  const kb = kbMap instanceof Map ? kbMap : new Map();
+  for (const name of targets) {
+    let row;
+    try {
+      row = await db.prepare(`SELECT id, pipeline_json FROM scheduled_tasks WHERE name=?`).get(name);
+    } catch (e) {
+      console.warn(`[PMScheduledTaskSeed] patch url_check ${name} select failed:`, e.message);
+      continue;
+    }
+    if (!row) continue;
+    const id = row.id || row.ID;
+    let pjStr = row.pipeline_json || row.PIPELINE_JSON;
+    if (pjStr && typeof pjStr !== 'string' && pjStr.toString) pjStr = pjStr.toString();
+    if (!!pjStr && /url_check_columns/.test(pjStr)) continue; // 已升級
+
+    try {
+      const newPipeline = JSON.stringify(_buildBySourceNewsPipeline(kb));
+      await db.prepare(`UPDATE scheduled_tasks SET pipeline_json=?, updated_at=SYSTIMESTAMP WHERE id=?`)
+        .run(newPipeline, id);
+      patched++;
+      console.log(`[PMScheduledTaskSeed] Upgraded "${name}" #${id}: pipeline_json 加 url_check_columns`);
+    } catch (e) {
+      console.warn(`[PMScheduledTaskSeed] patch url_check ${name} #${id} failed:`, e.message);
+    }
+  }
+  if (patched > 0) console.log(`[PMScheduledTaskSeed] patched url_check_columns on ${patched} task(s)`);
+}
+
 async function patchExistingNewsSeenPlaceholder(db) {
   const targets = [
     { name: '[PM] 新聞 Mining.com', builder: buildNewsMiningComTask },
@@ -2091,6 +2194,14 @@ async function autoSeedPmScheduledTasks(db, kbMap) {
 
   // 2026-04-29:patch 5 個 by-source news task 加 {{news_seen:...}} placeholder
   await patchExistingNewsSeenPlaceholder(db);
+
+  // 2026-05-01:patch SMM / MoneyDJ / PGM評論 加 urlContext grounding tool 指示 + 嚴禁編 URL
+  // (修 LLM 在 list 頁讀完後自己生 GUID/ID 的幻覺問題,實測 GUID 含非 hex 字元)
+  await patchExistingNewsAddGrounding(db);
+
+  // 2026-05-01:patch 5 個 by-source news task pipeline_json 的 db_write 加 url_check_columns
+  // (server 端格式驗證 fallback,擋 LLM 即使有 grounding tool 還是編出來的假 URL)
+  await patchExistingNewsAddUrlCheck(db, kbMap);
 
   // 2026-04-29:patch 每日金屬日報 prompt 加「今日重要新聞精選 5-10 篇」段
   await patchExistingDailyReportNewsTopList(db);
