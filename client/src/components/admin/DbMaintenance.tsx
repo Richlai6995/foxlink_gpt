@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { History, Trash2, Clock, Save, Play, ShieldAlert, MessageSquare, CalendarClock, Database, Zap, Search, FlaskConical, BarChart2 } from 'lucide-react'
+import { History, Trash2, Clock, Save, Play, ShieldAlert, MessageSquare, CalendarClock, Database, Zap, Search, FlaskConical, BarChart2, GraduationCap } from 'lucide-react'
 import api from '../../lib/api'
 
 interface CleanupSettings {
@@ -12,6 +12,7 @@ interface CleanupSettings {
   skill_days: number
   research_days: number
   token_usage_days: number
+  training_orphan_grace_days: number  // 0 = 不啟用
   auto_enabled: boolean
   auto_hour: number
 }
@@ -26,6 +27,7 @@ interface CleanupStats {
   skill_call_logs: number
   research_jobs: number
   token_usage: number
+  training_orphans_purged?: number
 }
 
 const DEFAULT: CleanupSettings = {
@@ -34,6 +36,7 @@ const DEFAULT: CleanupSettings = {
   dify_days: 90, kb_query_days: 90,
   skill_days: 90, research_days: 90,
   token_usage_days: 365,
+  training_orphan_grace_days: 0,
   auto_enabled: false, auto_hour: 2,
 }
 
@@ -129,6 +132,7 @@ export default function DbMaintenance() {
     { label: '技能呼叫', value: cleanupStats.skill_call_logs, color: 'text-yellow-600' },
     { label: '研究任務', value: cleanupStats.research_jobs, color: 'text-red-600' },
     { label: 'Token 統計', value: cleanupStats.token_usage, color: 'text-cyan-600' },
+    { label: '訓練孤兒資料夾', value: cleanupStats.training_orphans_purged ?? 0, color: 'text-emerald-600' },
   ] : []
 
   return (
@@ -211,6 +215,28 @@ export default function DbMaintenance() {
         desc="清除早於此天數的 Token 使用量統計資料（token_usage 表）。"
       >
         <DaysInput label="Token 統計保留天數" value={settings.token_usage_days} onChange={(v) => set('token_usage_days', v)} />
+      </Section>
+
+      {/* 訓練平台孤兒檔 */}
+      <Section
+        icon={<GraduationCap size={16} className="text-emerald-500" />}
+        title="訓練平台孤兒檔清理"
+        desc="掃 NAS 上 training/course_*/ 資料夾,沒對應 DB 課程的整個資料夾刪除（影片、投影片、音訊等）。設 0 不執行。"
+      >
+        <div>
+          <label className="block text-xs text-slate-500 mb-1">保護期(天)</label>
+          <div className="flex items-center gap-1.5">
+            <input
+              type="number" min={0} max={3650} value={settings.training_orphan_grace_days}
+              onChange={(e) => set('training_orphan_grace_days', Math.max(0, Number(e.target.value)))}
+              className="input w-20 py-1 text-sm"
+            />
+            <span className="text-xs text-slate-400">天</span>
+            <span className="text-xs text-slate-400 ml-2">
+              0 = 不啟用 ｜ {'>'} 0 = 沒對應 course 且 N 天沒 touch 才清(避免剛建課程被誤殺)
+            </span>
+          </div>
+        </div>
       </Section>
 
       {/* Auto schedule + actions */}

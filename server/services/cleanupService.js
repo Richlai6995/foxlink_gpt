@@ -241,6 +241,76 @@ async function runCleanup(db, settings) {
     stats.session_files_purged = purged;
   }
 
+  // ── 10. 訓練平台孤兒檔清理 ─────────────────────────────────────────────
+  //   掃 ${UPLOAD_DIR}/training/course_*/,沒對應 DB courses.id 的整個資料夾刪掉。
+  //   也順便清 course_tmp/(audio 上傳路由的 multer 暫存殘留)。
+  //   保護:
+  //     - DB 查詢失敗 → return early,不刪任何檔(避免誤殺)
+  //     - 只刪 grace days 內沒 touch 的(看目錄內最新檔 mtime)
+  //     - 嚴格 regex 只匹配 course_${數字},不碰 recordings/exports/cached/tmp 等其他子目錄
+  const training_orphan_grace_days = parseInt(settings.training_orphan_grace_days || '0');
+  stats.training_orphans_purged = 0;
+  if (training_orphan_grace_days > 0) {
+    try {
+      const trainingRoot = path.join(UPLOADS_DIR, 'training');
+      if (fs.existsSync(trainingRoot)) {
+        // 一次性查所有 course id(防 N+1)
+        const rows = await db.prepare('SELECT id FROM courses').all();
+        const validIds = new Set(rows.map(r => Number(r.id)));
+
+        const cutoffMs = Date.now() - training_orphan_grace_days * 86400000;
+        let purged = 0;
+        for (const name of fs.readdirSync(trainingRoot)) {
+          // 嚴格 regex:只看 course_<digits>/ 跟 course_tmp/
+          const isCourseDir = /^course_(\d+)$/.exec(name);
+          const isTmpDir = name === 'course_tmp';
+          if (!isCourseDir && !isTmpDir) continue;
+
+          const dir = path.join(trainingRoot, name);
+          let st;
+          try { st = fs.statSync(dir); } catch { continue; }
+          if (!st.isDirectory()) continue;
+
+          // course_${id}:檢查是否還有對應 DB course
+          if (isCourseDir) {
+            const courseId = Number(isCourseDir[1]);
+            if (validIds.has(courseId)) continue;  // DB 還在,跳過
+          }
+
+          // course_tmp/ 走純 mtime 規則(裡面都是孤兒)
+
+          // 檢查目錄內最新檔的 mtime,grace 期內不刪
+          let newestMs = 0;
+          try {
+            for (const f of fs.readdirSync(dir)) {
+              try {
+                const fst = fs.statSync(path.join(dir, f));
+                if (fst.mtimeMs > newestMs) newestMs = fst.mtimeMs;
+              } catch {}
+            }
+          } catch {}
+          if (newestMs === 0) {
+            // 空資料夾,直接刪
+          } else if (newestMs >= cutoffMs) {
+            continue;  // 還在 grace 期,不刪
+          }
+
+          try {
+            fs.rmSync(dir, { recursive: true, force: true });
+            console.log(`[Cleanup] training orphan removed: ${name}`);
+            purged++;
+          } catch (e) {
+            console.warn(`[Cleanup] training orphan rm failed for ${name}:`, e.message);
+          }
+        }
+        stats.training_orphans_purged = purged;
+      }
+    } catch (e) {
+      // DB 查詢或目錄掃描失敗 → 整個跳過,不誤刪
+      console.warn('[Cleanup] training orphans skipped:', e.message);
+    }
+  }
+
   return stats;
 }
 
@@ -261,6 +331,9 @@ async function loadSettings(db) {
     research_days:       parseInt(map.cleanup_research_days        || '90'),
     token_usage_days:    parseInt(map.cleanup_token_usage_days     || '365'),
     session_files_days:  parseInt(map.cleanup_session_files_days   || '7'),
+    // 訓練平台孤兒檔保護期(沒對應 DB course 且 N 天沒 touch 才清)。
+    // 0 = 不啟用。預設 0 維持原本行為,使用者主動開才會清。
+    training_orphan_grace_days: parseInt(map.cleanup_training_orphan_grace_days || '0'),
   };
 }
 
