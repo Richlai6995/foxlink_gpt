@@ -283,9 +283,9 @@ B. **JSON 落地段(MANDATORY)**:markdown 末尾用 \`\`\`json ... \`\`\` 包起
   - 白名單是 server 從 list 頁 HTML 抽出的真實 \`<a href>\`,LLM 只能複製貼上,**不可改任何字元**
   - 白名單外的 URL 一律會被 server drop,LLM 編 URL = 白做工
   - 白名單為空 / 沒這區段 → 該 source 直接輸出 \`\`\`json [] \`\`\` 跳過,不要憑想像補 URL
-- **content 盡量是 article body**(≥ 200 字),拿不到完整原文時寫 "從 list 摘要:..." + list 頁能看到的描述。
-  報價快照 / 牌價公告不算
-- **content 跟 summary 是不同欄位不同內容**(content 寫該 article 能看到的所有資訊,summary 80-150 字繁中濃縮)
+- **content 必須是該 URL 對應 article 的真實內文**(從 prompt 上方「📰 article 完整內文」區段複製重點段落,1500-3000 字),
+  不可從 list 頁摘要腦補,也不可拿不同 article 的內容混在一篇。報價快照 / 牌價公告不算
+- **content 跟 summary 是不同欄位不同內容**(content 是真 article body,summary 80-150 字繁中濃縮)
 
 ═══ 自我檢查清單(輸出前最後一遍)═══
 - [ ] B 段 \`\`\`json [...] \`\`\` 區塊有寫?
@@ -361,15 +361,16 @@ function buildNewsSmmTask(kbMap, models = {}) {
   const prompt = `今天是 {{date}}。請從上海有色網(SMM)抓取近 7 天有色金屬相關新聞(中國市場視角,中文)。
 
 ═══ 唯一資料源 ═══
-{{scrape:https://news.smm.cn/}}
+{{scrape+:https://news.smm.cn/}}
 
-↑ SMM「金属要闻」首頁。server 已 scrape 純文字內容 + 抽出 article URL **白名單**(看上方「📋 候選 article URL 白名單」區段)。
-  你的工作:**從白名單挑跟金屬相關的 article URL,寫進 JSON 的 \`url\` 欄位** —
-  - title / summary / content 等其他欄位用上面 list 頁的純文字推斷(描述、摘要)
-  - **content 欄位拿不到完整原文沒關係,寫 "從 list 頁摘要:..." + list 頁能看到的描述即可**(總比編一篇假內文強)
-  - **絕對不要編 URL**(server 會用白名單比對,LLM 編的會被 drop,等於白做工)
+↑ SMM「金属要闻」首頁。server 已執行 deep scrape:
+  1. 抽出 article URL 白名單(看上方「📋 候選 article URL 白名單」區段)
+  2. 對白名單前 15 個 URL 各自 fetch 完整內文(看上方「📰 article 完整內文」區段)
 
-抓 5-10 篇跟 11 個金屬相關的中國市場動態(現貨價、政策、產能、進出口等)。
+你的工作:**從上面 15 個 article 中挑跟 11 個金屬相關的 5-10 篇,寫進 JSON** —
+  - url 欄位 = 該 article 對應的 URL(從白名單複製,不可改字元)
+  - title / content / summary / sentiment 用該 article **完整內文**寫(不要從 list 頁腦補)
+  - 同一篇 url 配同一篇 content,**不要混搭**
 
 {{news_seen:SMM,SMM上海有色網:7:100}}${_commonNewsPromptTail(5, 10)}`;
 
@@ -394,15 +395,16 @@ function buildNewsMoneyDjTask(kbMap, models = {}) {
   const prompt = `今天是 {{date}}。請從 MoneyDJ「商品原物料」分類抓取近 7 天金屬相關新聞(台灣財經角度,中文)。
 
 ═══ 唯一資料源 ═══
-{{scrape:https://www.moneydj.com/KMDJ/News/NewsRealList.aspx?a=MB07}}
+{{scrape+:https://www.moneydj.com/KMDJ/News/NewsRealList.aspx?a=MB07}}
 
-↑ MoneyDJ 商品原物料分類列表頁。server 已 scrape 純文字內容 + 抽出 article URL **白名單**(看上方「📋 候選 article URL 白名單」區段)。
-  你的工作:**從白名單挑跟金屬相關的 article URL,寫進 JSON 的 \`url\` 欄位** —
-  - MoneyDJ URL 格式 \`newsviewer.aspx?a=<GUID>\`,**白名單裡的 GUID 是 server 從 HTML 真實抽出的**,直接複製貼上
-  - title / summary / content 用 list 頁文字推斷;content 拿不到完整原文時寫 "從 list 摘要:..." + 看得到的內容
-  - **絕對不要編 URL / 改 GUID 任何字元**(server 比對白名單,改一個字 = drop)
+↑ MoneyDJ 商品原物料分類列表頁。server 已執行 deep scrape:
+  1. 抽出 article URL 白名單(看上方「📋 候選 article URL 白名單」區段)
+  2. 對白名單前 15 個 URL 各自 fetch 完整內文(看上方「📰 article 完整內文」區段)
 
-挑出與 11 個金屬相關的 5-10 篇(LME 行情、台灣供應鏈影響、台股相關公司動態等)。
+你的工作:**從上面 15 個 article 中挑跟 11 個金屬相關的 5-10 篇,寫進 JSON** —
+  - url 欄位 = 該 article 對應的 URL(從白名單複製,GUID 不可改任何字元)
+  - title / content / summary / sentiment 用該 article **完整內文**寫
+  - 同一篇 url 配同一篇 content,不要混搭不同 article
 
 {{news_seen:MoneyDJ:7:100}}${_commonNewsPromptTail(5, 10)}`;
 
@@ -427,13 +429,14 @@ function buildNewsPgmCommentaryTask(kbMap, models = {}) {
   const prompt = `今天是 {{date}}。請從 WPIC + Johnson Matthey 抓取近 7 天 PGM(鉑 PT / 鈀 PD / 銠 RH)機構級評論文章。
 
 ═══ 資料源 ═══
-{{scrape:https://platinuminvestment.com/news}}
-{{scrape:https://matthey.com/news/expert-insights}}
-{{scrape:https://matthey.com/products-and-markets/pgms-and-circularity/pgm-markets}}
+{{scrape+:https://platinuminvestment.com/news}}
+{{scrape+:https://matthey.com/news/expert-insights}}
+{{scrape+:https://matthey.com/products-and-markets/pgms-and-circularity/pgm-markets}}
 
-↑ server 已 scrape 純文字內容 + 抽出 article URL **白名單**(看上方「📋 候選 article URL 白名單」區段)。
-  從白名單挑 PGM 相關 article URL 寫進 JSON 的 \`url\` 欄位,複製貼上不可改任何字元。
-  content 拿不到完整原文時寫 "從 list 摘要:..." + 看得到的內容。
+↑ server 已執行 deep scrape:
+  1. 抽出 article URL 白名單(看「📋 候選 article URL 白名單」區段)
+  2. 對白名單前 15 個 URL 各自 fetch 完整內文(看「📰 article 完整內文」區段)
+  從 article 完整內文挑 PGM 相關的寫進 JSON,url 從白名單複製,content 用真實內文(不要腦補)。
 
   WPIC 是 World Platinum Investment Council 的官方 quarterly outlook;
   matthey expert-insights 是 Johnson Matthey PGM 專家分析。**機構級報告權威性 > 一般新聞**。
@@ -1764,14 +1767,21 @@ async function patchExistingNewsToWhitelist(db) {
     const id = row.id || row.ID;
     let promptStr = row.prompt || row.PROMPT;
     if (promptStr && typeof promptStr !== 'string' && promptStr.toString) promptStr = promptStr.toString();
-    if (!!promptStr && /候選 article URL/.test(promptStr)) continue; // 已升級
+    // marker 升級到 `scrape+`(2026-05-01 加 deep fetch 後),沒這 marker 就 force update
+    // 已升級判斷:有 `scrape+` 字串(SMM/MoneyDJ/PGM)或 mining/nikkei 用 fetch 不需 deep
+    const isDeepSource = /\[PM\] 新聞 (SMM|MoneyDJ|PGM評論)/.test(t.name);
+    if (isDeepSource) {
+      if (!!promptStr && /\{\{scrape\+:/.test(promptStr)) continue; // 已升級到 deep
+    } else {
+      if (!!promptStr && /候選 article URL/.test(promptStr)) continue; // RSS source 用一般 white-list 即可
+    }
 
     try {
       const newSeed = t.builder(undefined, {});
       await db.prepare(`UPDATE scheduled_tasks SET prompt=?, updated_at=SYSTIMESTAMP WHERE id=?`)
         .run(newSeed.prompt, id);
       patched++;
-      console.log(`[PMScheduledTaskSeed] Upgraded "${t.name}" #${id}: 改用 white-list URL enforce`);
+      console.log(`[PMScheduledTaskSeed] Upgraded "${t.name}" #${id}: ${isDeepSource ? 'deep scrape (scrape+)' : 'white-list'}`);
     } catch (e) {
       console.warn(`[PMScheduledTaskSeed] patch whitelist ${t.name} #${id} failed:`, e.message);
     }

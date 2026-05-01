@@ -229,6 +229,40 @@ async function scrapeUrl(url) {
   }
 }
 
+// ── Helpers for substitute pipeline ─────────────────────────────────────────
+// 把抽出的白名單 link list 包成 prompt 區段,並 push 到 outBag.urlWhitelist 給後續 db_write enforce
+function _buildWhitelistBlock(sourceUrl, links, outBag) {
+  if (!links || !links.length) {
+    console.warn(`[Scheduled] scrape: ${sourceUrl} extracted 0 candidate links — JS-rendered 或 host pattern 不匹配`);
+    return `\n⚠️ 從 ${sourceUrl} 抽不到 article link 白名單(可能 JS 渲染 / pattern 不匹配),**該 source 直接輸出 \`\`\`json [] \`\`\` 跳過,不要憑記憶或想像補 URL**。\n`;
+  }
+  console.log(`[Scheduled] scrape: ${sourceUrl} extracted ${links.length} candidate article URLs`);
+  if (outBag) {
+    for (const u of links) outBag.urlWhitelist.push(u);
+  }
+  return `\n═══ 📋 從 ${sourceUrl} 抽出的候選 article URL 白名單(server enforces — 只能挑這份)═══\n`
+    + links.map((u) => `- ${u}`).join('\n')
+    + `\n═══ /白名單 ═══\n`
+    + `\n⚠️ **JSON 輸出的 url 欄位必須是上方白名單裡的字串**(複製貼上,不可改任何字元)。\n`
+    + `   不在白名單裡的 URL → server 會直接 drop 該筆,不寫入 DB。\n`
+    + `   白名單若為空 = 該 source 沒抓到 article link → 直接輸出 \`\`\`json [] \`\`\` 跳過。\n`;
+}
+
+// 簡單的 concurrency-limited Promise.all,給 deep scrape 用(避免 N 個 URL 全並發打爆 site)
+async function _parallelMap(items, concurrency, fn) {
+  const results = new Array(items.length);
+  let idx = 0;
+  const workers = new Array(Math.min(concurrency, items.length)).fill(0).map(async () => {
+    while (true) {
+      const i = idx++;
+      if (i >= items.length) return;
+      results[i] = await fn(items[i], i);
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
+
 // ── Variable substitution (async — supports {{fetch:URL}} / {{scrape:URL}}) ───
 function substituteVars(template, taskName) {
   // sync-only version (kept for non-async callers)
@@ -273,24 +307,48 @@ async function substituteVarsAsync(template, taskName, outBag) {
     const url = m[1].trim();
     console.log(`[Scheduled] scrape: ${url}`);
     const { text: content, links } = await scrapeUrl(url);
-    let whitelistBlock = '';
-    if (links && links.length) {
-      console.log(`[Scheduled] scrape: ${url} extracted ${links.length} candidate article URLs`);
-      whitelistBlock =
-        `\n═══ 📋 從 ${url} 抽出的候選 article URL 白名單(server enforces — 只能挑這份)═══\n`
-        + links.map((u) => `- ${u}`).join('\n')
-        + `\n═══ /白名單 ═══\n`
-        + `\n⚠️ **JSON 輸出的 url 欄位必須是上方白名單裡的字串**(複製貼上,不可改任何字元)。\n`
-        + `   不在白名單裡的 URL → server 會直接 drop 該筆,不寫入 DB。\n`
-        + `   白名單若為空 = 該 source 沒抓到 article link → 直接輸出 \`\`\`json [] \`\`\` 跳過。\n`;
-      if (outBag) {
-        for (const u of links) outBag.urlWhitelist.push(u);
-      }
-    } else {
-      console.warn(`[Scheduled] scrape: ${url} extracted 0 candidate links — JS-rendered 或 host pattern 不匹配`);
-      whitelistBlock = `\n⚠️ 從 ${url} 抽不到 article link 白名單(可能 JS 渲染 / pattern 不匹配),**該 source 直接輸出 \`\`\`json [] \`\`\` 跳過,不要憑記憶或想像補 URL**。\n`;
-    }
+    const whitelistBlock = _buildWhitelistBlock(url, links, outBag);
     result = result.replace(m[0], `\n${content}\n${whitelistBlock}`);
+  }
+
+  // Process {{scrape+:URL}} placeholders (DEEP scrape):跟 {{scrape:}} 同流程,**額外**對
+  // 白名單前 N 個 URL 各自 fetch + Readability,把 N 個 article 真內文也塞進 prompt。
+  // 用途:SMM / MoneyDJ / PGM 評論這種「list 頁有 link 但無內文」的 source — 沒 deep fetch
+  // LLM 只能從 list 文字摘要腦補假 content(URL 對但內容跟真 article 不符)
+  // N 預設 15,可用 {{scrape+:URL:N=20}} 覆寫(future);現階段固定 15
+  const scrapePlusPattern = /\{\{scrape\+:(https?:\/\/[^}]+)\}\}/g;
+  for (const m of [...result.matchAll(scrapePlusPattern)]) {
+    const url = m[1].trim();
+    console.log(`[Scheduled] scrape+: ${url} (deep fetch articles)`);
+    const { text: content, links } = await scrapeUrl(url);
+    const N = 15;
+    const limited = (links || []).slice(0, N);
+    const whitelistBlock = _buildWhitelistBlock(url, limited, outBag);
+
+    let articlesBlock = '';
+    if (limited.length) {
+      console.log(`[Scheduled] scrape+: deep-fetching ${limited.length} articles in parallel (concurrency 5)`);
+      const t0 = Date.now();
+      const articles = await _parallelMap(limited, 5, async (articleUrl) => {
+        try {
+          const { text: body } = await scrapeUrl(articleUrl);
+          return { url: articleUrl, body };
+        } catch (e) {
+          return { url: articleUrl, body: `[fetch 失敗: ${e.message}]` };
+        }
+      });
+      const dt = Date.now() - t0;
+      console.log(`[Scheduled] scrape+: deep fetch done in ${dt}ms`);
+
+      articlesBlock = `\n═══ 📰 ${limited.length} 個 article 完整內文(server deep-fetched)═══\n\n`
+        + articles.map((a, i) =>
+            `--- [${i + 1}] URL: ${a.url} ---\n${(a.body || '').slice(0, 8000)}\n`
+          ).join('\n')
+        + `\n═══ /article 完整內文 ═══\n`
+        + `\n⚠️ **JSON 輸出的 content 欄位請從上方對應 URL 的 article 內文擷取**(同篇 URL 配同篇 content)。\n`
+        + `   不要從 list 頁摘要寫 content,也不要把不同 article 的內容混在一起。\n`;
+    }
+    result = result.replace(m[0], `\n${content}\n${whitelistBlock}${articlesBlock}`);
   }
 
   // {{news_seen:source[,source2]:lookback_days:limit}} — pm_news 過去 N 天該 source
