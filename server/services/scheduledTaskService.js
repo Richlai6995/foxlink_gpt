@@ -371,13 +371,17 @@ async function runTask(db, taskId) {
       // 觸發條件:原始 prompt 含 {{scrape:URL}}(server 預先 scrape list 頁,但 LLM 還是要從
       // list 挑 article URL — 不掛 grounding 就會憑空編 URL,實測連 GUID 都會幻覺出非 hex 字元)
       // 需要 SDK_MODE=new(舊 SDK 命名不同,且 Vertex regional 不支援 urlContext)
+      //
+      // 2026-05-01:第一版同時掛 [urlContext, googleSearch],SMM task 跑 4 分鐘回空字串。
+      //            改成只掛 urlContext(LLM 從 prompt 給的 list 頁文字挑 URL,自己去 fetch 即可,
+      //            不需要 googleSearch);加 fallbackOnEmpty 保命(grounding 失敗 silent 重跑不掛 tool)
       const { SDK_MODE } = require('./geminiClient');
       const promptHasScrape = /\{\{scrape:/i.test(task.prompt || '');
       const groundingTools = (promptHasScrape && SDK_MODE === 'new')
-        ? [{ urlContext: {} }, { googleSearch: {} }]
+        ? [{ urlContext: {} }]
         : null;
       if (groundingTools) {
-        console.log(`[Scheduled] task=${task.id} "${task.name}" 啟用 grounding tools (urlContext + googleSearch) — prompt 含 {{scrape:}}`);
+        console.log(`[Scheduled] task=${task.id} "${task.name}" 啟用 grounding tool (urlContext) — prompt 含 {{scrape:}}`);
       }
 
       // ── {{template:id}} tag in prompt ─────────────────────────────────────
@@ -418,10 +422,16 @@ async function runTask(db, taskId) {
       ).run(sid, renderedPrompt);
 
       // Call Gemini (non-streaming)
-      const { text, inputTokens, outputTokens } = await generateTextSync(
+      const genResult = await generateTextSync(
         apiModel, [], renderedPrompt,
-        groundingTools ? { tools: groundingTools, logGrounding: true } : {}
+        groundingTools
+          ? { tools: groundingTools, logGrounding: true, fallbackOnEmpty: true }
+          : {}
       );
+      const { text, inputTokens, outputTokens } = genResult;
+      if (genResult._fallbackUsed) {
+        console.warn(`[Scheduled] task=${task.id} "${task.name}" grounding 失敗,已 fallback 不掛 tool 重跑 — text.len=${text.length}`);
+      }
 
       // Insert AI response
       await db.prepare(

@@ -716,6 +716,19 @@ async function generateTextSync(apiModel, history, prompt, opts = {}) {
   // 用於 PM 抓新聞之類需要 LLM 真的 fetch URL 而非憑記憶幻覺的 task。
   // 只在 SDK_MODE='new' 且 GENERATE_PROVIDER='vertex' / 'studio' 且 model 支援(2.5+/3.x)時生效;
   // 舊 SDK 對 grounding tool 的命名不同,呼叫者請自己判斷別亂塞。
+  // opts.fallbackOnEmpty=true:回空時自動不掛 tools 重跑一次(2026-05-01 加,擋 Flash + grounding 回空 bug)
+  return _generateTextSyncOnce(resolvedModel, history, prompt, opts).then(async (r) => {
+    if (opts.fallbackOnEmpty && (!r.text || r.text.trim().length === 0) && Array.isArray(opts.tools) && opts.tools.length) {
+      console.warn(`[generateTextSync] grounding tools 回空 (${resolvedModel}, in=${r.inputTokens} out=${r.outputTokens}, finishReason=${r._finishReason || '?'}),fallback 不掛 tools 重跑`);
+      const fb = await _generateTextSyncOnce(resolvedModel, history, prompt, { ...opts, tools: undefined });
+      // 標記給 caller 知道用了 fallback
+      return { ...fb, _fallbackUsed: true, _originalEmpty: true };
+    }
+    return r;
+  });
+}
+
+async function _generateTextSyncOnce(resolvedModel, history, prompt, opts) {
   const modelOpts = {
     model: resolvedModel,
     systemInstruction: getSystemInstruction(),
@@ -728,23 +741,38 @@ async function generateTextSync(apiModel, history, prompt, opts = {}) {
   ];
   const result = await model.generateContent({ contents });
   const usage = extractUsage(result);
+  const text = extractText(result);
+  // 詳細診斷 log:tools 開了或回空時必印,debug grounding 行為
+  const target = result.response || result;
+  const cand = target.candidates?.[0];
+  const finishReason = cand?.finishReason;
+  const parts = cand?.content?.parts || [];
+  const textPartCount = parts.filter((p) => typeof p.text === 'string' && !p.thought).length;
+  const thoughtPartCount = parts.filter((p) => p.thought).length;
+  const hasTools = Array.isArray(opts.tools) && opts.tools.length;
+  if (hasTools || !text || text.trim().length === 0) {
+    console.log(`[generateTextSync] model=${resolvedModel} finishReason=${finishReason} parts=${parts.length}(text=${textPartCount}, thought=${thoughtPartCount}) text.len=${text.length} tokens.in=${usage.inputTokens} tokens.out=${usage.outputTokens} tools=${hasTools ? opts.tools.map(t => Object.keys(t)[0]).join(',') : 'none'}`);
+  }
   // grounding metadata(urlContext fetch 結果)— debug 用,印 fetched URLs 看 LLM 真的有去抓哪些
   if (opts.logGrounding) {
     try {
-      const meta = result.candidates?.[0]?.groundingMetadata
-        || result.response?.candidates?.[0]?.groundingMetadata;
+      const meta = cand?.groundingMetadata;
       if (meta) {
         const urls = (meta.groundingChunks || meta.groundingSupports || meta.urlContextMetadata?.urlMetadata || [])
           .map((c) => c.web?.uri || c.uri || c.retrievedUrl || c.url)
           .filter(Boolean);
         if (urls.length) console.log(`[generateTextSync] grounding fetched ${urls.length} url(s):`, urls.slice(0, 20));
+        else console.log(`[generateTextSync] groundingMetadata 存在但抽不到 URL,keys=${Object.keys(meta).join(',')}`);
+      } else {
+        console.log(`[generateTextSync] 沒有 groundingMetadata(LLM 沒呼叫 grounding tool 或 model 不支援)`);
       }
     } catch (_) { /* metadata shape 跨 model/SDK 變動,失敗不擋主流程 */ }
   }
   return {
-    text: extractText(result),
+    text,
     inputTokens: usage.inputTokens,
     outputTokens: usage.outputTokens,
+    _finishReason: finishReason,
   };
 }
 
