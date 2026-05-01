@@ -1393,7 +1393,13 @@ router.get('/video-proxy', async (req, res) => {
     return res.status(403).json({ error: `Host not allowed: ${parsed.hostname}. Set VIDEO_PROXY_ALLOWED_HOSTS to permit.` });
   }
 
-  const fwdHeaders = { 'User-Agent': 'foxlink-gpt-video-proxy/1.0' };
+  // 偽裝瀏覽器 — Synology Drive 等 NAS 對自家 UA / 沒 Referer 的 server fetch 常直接 403
+  const fwdHeaders = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36',
+    'Referer': `${parsed.protocol}//${parsed.host}/`,
+    'Accept': 'video/mp4,video/webm,video/*;q=0.9,*/*;q=0.8',
+    'Accept-Language': 'zh-TW,zh;q=0.9,en;q=0.8',
+  };
   if (req.headers.range) fwdHeaders.Range = req.headers.range;
   if (req.headers['if-range']) fwdHeaders['If-Range'] = req.headers['if-range'];
   if (req.headers['if-modified-since']) fwdHeaders['If-Modified-Since'] = req.headers['if-modified-since'];
