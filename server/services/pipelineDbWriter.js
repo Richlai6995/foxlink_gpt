@@ -22,6 +22,77 @@ const {
   isValidIdentifier, isForbidden,
 } = require('../config/pipelineSecurity');
 
+// ── Metal price unit normalization ──────────────────────────────────────────
+// 不同 source 報價單位混亂(USD/lb / USD/Lbs / USD/T / USD/MT / USD/ton 同時存在),
+// 直接看 price_usd 數字會被「同金屬不同單位差 2000x」嚇死(實測 CU 同日 5.98 與 12,890 同列)。
+// 統一規則:
+//   • 工業金屬(CU/AL/NI/SN/ZN/PB)→ USD/ton(公噸,大宗商品慣例)
+//   • 貴金屬(AU/AG/PT/PD/RH)→ USD/oz(troy ounce,貴金屬慣例)
+// LLM 給的 original_price / original_currency / original_unit 保留原樣做 audit,
+// price_usd / unit 強制 normalize 後寫入。
+const PRECIOUS_METALS = new Set(['AU', 'AG', 'PT', 'PD', 'RH']);
+// 1 troy oz = 31.1034768 g → 1 ton = 32150.7466 troy oz
+const OZ_PER_TON = 32150.7466;
+const LB_PER_TON = 2204.6226;
+const KG_PER_TON = 1000;
+
+function _detectUnitKind(unitStr) {
+  if (!unitStr) return null;
+  const s = String(unitStr).toLowerCase().replace(/\s+/g, '');
+  // 順序很重要:檢 troy oz / oz 在 ounce 後容易誤判,先處理長字
+  if (/troy|oz|ounce/.test(s)) return 'oz';
+  if (/lbs?$|\/pound|\/lb\b|\/lbs\b/.test(s)) return 'lb';
+  if (/\/kg\b|\/kilogram/.test(s)) return 'kg';
+  if (/\/(ton|t|mt|tonne)\b/.test(s)) return 'ton';
+  return null;
+}
+
+// 把任意單位的價格換算成 standard unit(per metal)
+// @returns { price, unit, converted: bool, reason?: string }
+function normalizeMetalPrice(metalCode, priceUsd, unitStr) {
+  const code = String(metalCode || '').toUpperCase();
+  const isPrecious = PRECIOUS_METALS.has(code);
+  const standardUnit = isPrecious ? 'USD/oz' : 'USD/ton';
+  const price = Number(priceUsd);
+  if (!Number.isFinite(price) || price <= 0) {
+    return { price: priceUsd, unit: standardUnit, converted: false, reason: 'price_not_number' };
+  }
+  const fromKind = _detectUnitKind(unitStr);
+  const toKind = isPrecious ? 'oz' : 'ton';
+  if (!fromKind) {
+    // 不認識的單位,假設已是 standard(常見:LLM 給 unit='USD' 沒寫尾巴)
+    return { price, unit: standardUnit, converted: false, reason: `unknown_unit:${unitStr}` };
+  }
+  if (fromKind === toKind) {
+    return { price, unit: standardUnit, converted: false };
+  }
+  // 雙向換算:fromKind → ton(中介)→ toKind
+  // 先換成 USD/ton
+  let perTon;
+  switch (fromKind) {
+    case 'ton': perTon = price; break;
+    case 'lb':  perTon = price * LB_PER_TON; break;
+    case 'kg':  perTon = price * KG_PER_TON; break;
+    case 'oz':  perTon = price * OZ_PER_TON; break;
+    default:    return { price, unit: standardUnit, converted: false, reason: `unhandled:${fromKind}` };
+  }
+  let normalized;
+  switch (toKind) {
+    case 'ton': normalized = perTon; break;
+    case 'oz':  normalized = perTon / OZ_PER_TON; break;
+    default:    return { price, unit: standardUnit, converted: false, reason: `unhandled_to:${toKind}` };
+  }
+  // 4 位小數(USD/oz 貴金屬尾數小)
+  return {
+    price: Math.round(normalized * 10000) / 10000,
+    unit: standardUnit,
+    converted: true,
+    from_unit: unitStr,
+    from_kind: fromKind,
+    to_kind: toKind,
+  };
+}
+
 // ── URL sanity check ────────────────────────────────────────────────────────
 // 給 `cfg.url_check_columns: ['url']` 用。LLM 在 list 頁讀完後常憑記憶 / 想像生 URL
 // (實測 MoneyDJ GUID 含非 hex 字元如 `8h16`,SMM news ID 長度不對),這個函式做
@@ -537,6 +608,21 @@ async function executeDbWrite(db, nodeConfig, sourceText, context = {}) {
   }
   let urlCheckFailedCount = 0;       // 格式驗證失敗
   let urlWhitelistMissedCount = 0;   // 白名單沒中
+  // ── Metal price unit normalization(2026-05-01)─────────────────────────
+  // cfg.metal_price_normalize: { metal_col, price_col, unit_col } 啟用後,寫入前對 row 自動
+  // 把 price + unit 換算成 standard(工業金屬 USD/ton / 貴金屬 USD/oz)。LLM 給什麼單位都
+  // 強制統一,UI / chart / 排序就不會被「同金屬不同單位差 2000x」混淆。
+  const metalNorm = cfg.metal_price_normalize && typeof cfg.metal_price_normalize === 'object'
+    ? cfg.metal_price_normalize
+    : null;
+  let metalNormConvertedCount = 0;
+  if (metalNorm) {
+    if (!isValidIdentifier(metalNorm.metal_col) ||
+        !isValidIdentifier(metalNorm.price_col) ||
+        !isValidIdentifier(metalNorm.unit_col)) {
+      throw new Error('metal_price_normalize 需要 metal_col / price_col / unit_col 三個合法 identifier');
+    }
+  }
   for (let i = 0; i < rawRows.length; i++) {
     const { row, errors: rowErrs } = mapRow(rawRows[i], columnMapping);
     if (rowErrs.length) {
@@ -545,6 +631,23 @@ async function executeDbWrite(db, nodeConfig, sourceText, context = {}) {
         throw new Error(`row #${i} 映射失敗: ${rowErrs.join('; ')}`);
       }
       continue;
+    }
+    // ── Metal price normalize(在 url_check 之前,因為 pm_price_history 沒 url 欄)──
+    if (metalNorm && row[metalNorm.metal_col]) {
+      const r = normalizeMetalPrice(
+        row[metalNorm.metal_col],
+        row[metalNorm.price_col],
+        row[metalNorm.unit_col]
+      );
+      if (r.converted) {
+        metalNormConvertedCount++;
+        // 覆寫 row 欄位 — original_* 不動(那是 audit fields,LLM 已寫進去)
+        row[metalNorm.price_col] = r.price;
+        row[metalNorm.unit_col] = r.unit;
+      } else if (row[metalNorm.unit_col] !== r.unit) {
+        // 雖未換算但 unit 不一致(常見:LLM 給 unit='USD' 不寫尾巴)→ 強制覆寫 standard label
+        row[metalNorm.unit_col] = r.unit;
+      }
     }
     // ── URL sanity check ────────────────────────────────────────────────────
     // url_check_columns 設定的欄位先做格式驗證(快、便宜),格式 OK 再比對白名單
@@ -637,7 +740,11 @@ async function executeDbWrite(db, nodeConfig, sourceText, context = {}) {
     // 給 admin 在 RunDetailModal 看「LLM 編了幾條假 URL」— 0 = 健康,>0 = 該檢查 prompt
     ...(urlCheckCols.length ? { url_check_failed_count: urlCheckFailedCount } : {}),
     ...(urlWhitelist ? { url_whitelist_missed_count: urlWhitelistMissedCount, url_whitelist_size: urlWhitelist.size } : {}),
+    ...(metalNorm ? { metal_price_converted_count: metalNormConvertedCount } : {}),
   };
+  if (metalNorm && metalNormConvertedCount > 0) {
+    console.log(`[Pipeline db_write] metal_price_normalize: ${metalNormConvertedCount}/${rawRows.length} rows 換算單位(table=${tableName})`);
+  }
   if (urlCheckFailedCount > 0) {
     console.warn(`[Pipeline db_write] ${urlCheckFailedCount}/${rawRows.length} rows 因 URL 驗證失敗被丟掉(table=${tableName}; whitelist_missed=${urlWhitelistMissedCount}, format_invalid=${urlCheckFailedCount - urlWhitelistMissedCount})`);
   }
@@ -690,4 +797,5 @@ module.exports = {
   extractJsonRows,   // 導出供 dry-run API 用
   loadColumnMeta,    // 導出供 admin UI 欄位下拉用
   getByJsonPath,     // 導出讓 kb_write 也能用同套 array_path 解析
+  normalizeMetalPrice, // 導出給 backfill script 用
 };

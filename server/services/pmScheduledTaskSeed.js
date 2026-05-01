@@ -1086,6 +1086,14 @@ B. **JSON 落地段**(放 markdown 末尾的單一 \`\`\`json 區塊;含 _kb_doc
       array_path_optional: true,
       on_row_error: 'skip',
       max_rows: 20,
+      // 2026-05-01:LLM 各 source 給的 unit 混亂(USD/lb / USD/Lbs / USD/T / USD/MT / USD/ton),
+      // 同金屬同日不同列數字差 2000x。寫入前 server 強制換算 standard:
+      // 工業金屬 → USD/ton,貴金屬 → USD/oz。original_* 欄位保留 LLM 原始輸入做 audit。
+      metal_price_normalize: {
+        metal_col: 'metal_code',
+        price_col: 'price_usd',
+        unit_col:  'unit',
+      },
       column_mapping: [
         { jsonpath: '$.as_of_date',        column: 'as_of_date',        transform: 'date',   required: true },
         { jsonpath: '$.metal_code',        column: 'metal_code',        transform: 'upper',  required: true },
@@ -1793,6 +1801,40 @@ async function patchExistingNewsToWhitelist(db) {
 // 5 個 by-source news task 的 pipeline_json 是 seed 時寫的,既有 task 不會自動拿到新的
 // `url_check_columns: ['url']` 設定。marker = `url_check_columns` 字串,沒有就 force 重寫 pipeline_json。
 // 注意:會踩掉 admin 對 pipeline_json 的客製,但這個 db_write 節點是技術細節,admin 通常不動。
+// ── Patch [PM] 全網金屬資料收集 加 metal_price_normalize(2026-05-01)──
+// 既有 task 的 pipeline_json 沒這個 config,LLM 給的單位混亂 unit/price 還是被原樣寫入。
+// marker = `metal_price_normalize` 字串,沒就 force update pipeline_json
+async function patchExistingPriceNormalize(db, kbMap, models) {
+  let row;
+  try {
+    row = await db.prepare(`SELECT id, pipeline_json FROM scheduled_tasks WHERE name='[PM] 全網金屬資料收集'`).get();
+  } catch (e) {
+    console.warn('[PMScheduledTaskSeed] patch price normalize select failed:', e.message);
+    return;
+  }
+  if (!row) return;
+  const id = row.id || row.ID;
+  let pjStr = row.pipeline_json || row.PIPELINE_JSON;
+  if (pjStr && typeof pjStr !== 'string' && pjStr.toString) pjStr = pjStr.toString();
+  if (!!pjStr && /metal_price_normalize/.test(pjStr)) return; // 已升級
+
+  // 重 build master scrape pipeline(buildMasterScrapeTask 會用最新 seed)
+  let newSeed;
+  try {
+    newSeed = buildMasterScrapeTask(kbMap, models || {});
+  } catch (e) {
+    console.warn('[PMScheduledTaskSeed] buildMasterScrapeTask failed for price normalize patch:', e.message);
+    return;
+  }
+  try {
+    await db.prepare(`UPDATE scheduled_tasks SET pipeline_json=?, updated_at=SYSTIMESTAMP WHERE id=?`)
+      .run(newSeed.pipeline_json, id);
+    console.log(`[PMScheduledTaskSeed] Upgraded "[PM] 全網金屬資料收集" #${id}: pipeline_json 加 metal_price_normalize`);
+  } catch (e) {
+    console.warn(`[PMScheduledTaskSeed] patch price normalize update #${id} failed:`, e.message);
+  }
+}
+
 async function patchExistingNewsAddUrlCheck(db, kbMap) {
   const targets = [
     '[PM] 新聞 Mining.com', '[PM] 新聞 Nikkei',
@@ -2207,6 +2249,10 @@ async function autoSeedPmScheduledTasks(db, kbMap) {
   // - pipeline_json db_write 加 url_check_columns + url_whitelist_var enforce
   await patchExistingNewsToWhitelist(db);
   await patchExistingNewsAddUrlCheck(db, kbMap);
+
+  // 2026-05-01:[PM] 全網金屬資料收集 pipeline_json 加 metal_price_normalize
+  // (修同金屬不同 source 不同單位 unit/price 數字差 2000x 的問題)
+  await patchExistingPriceNormalize(db, kbMap, models);
 
   // 2026-04-29:patch 每日金屬日報 prompt 加「今日重要新聞精選 5-10 篇」段
   await patchExistingDailyReportNewsTopList(db);
