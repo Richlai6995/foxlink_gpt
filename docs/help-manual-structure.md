@@ -1,7 +1,7 @@
 # 使用者手冊章節結構與審計紀錄
 
-> 最後審計日期：2026-04-17
-> 章節總數：一般使用者 31 個 + 管理員 31 個
+> 最後審計日期：2026-05-02
+> 章節總數：一般使用者 31 個 + 管理員 33 個（2026-05 新增 a-external-security / a-ip-blacklist）
 
 ---
 
@@ -58,6 +58,8 @@ s.id !== 'u-xxx' || somePermissionFlag
 | | a-example | 完整 Prompt 範例 |
 | **統計與稽核** | a-tokens | Token 與費用統計 |
 | | a-audit | 稽核與敏感詞 |
+| | a-external-security | 外網存取與 MFA(二階段驗證) |
+| | a-ip-blacklist | IP 黑名單管理 |
 | | a-cost-analysis | 費用分析 |
 | **整合服務** | a-mcp | MCP 伺服器管理 |
 | | a-dify | API 連接器整合 |

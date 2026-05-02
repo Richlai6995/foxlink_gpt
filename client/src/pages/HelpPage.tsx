@@ -9,7 +9,7 @@ import {
   Wand2, ImageIcon, Clock, Share2, GitFork, Lock, Sparkles, Code2, Package, Play, Square,
   Paperclip, Search, Server, BookMarked, Wifi, WifiOff, CheckCircle, Loader2, Layers, Activity,
   Key, ShieldCheck, LayoutTemplate, FileSpreadsheet, File, FlaskConical, Languages,
-  TicketCheck, GripVertical, KeyRound, Printer,
+  TicketCheck, GripVertical, KeyRound, Printer, Ban,
 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import api from '../lib/api'
@@ -3360,6 +3360,8 @@ const adminSections = [
   { id: 'a-example', label: '完整 Prompt 範例', icon: <BookOpen size={18} /> },
   { id: 'a-tokens', label: 'Token 與費用統計', icon: <BarChart3 size={18} /> },
   { id: 'a-audit', label: '稽核與敏感詞', icon: <Shield size={18} /> },
+  { id: 'a-external-security', label: '外網存取與 MFA', icon: <Lock size={18} /> },
+  { id: 'a-ip-blacklist', label: 'IP 黑名單', icon: <Ban size={18} /> },
   { id: 'a-mcp', label: 'MCP 伺服器', icon: <Globe size={18} /> },
   { id: 'a-dify', label: 'API 連接器', icon: <Zap size={18} /> },
   { id: 'a-erp-tools', label: 'ERP 工具管理', icon: <Database size={18} /> },
@@ -4441,6 +4443,290 @@ generate_txt:供應商週報_{{date}}.txt
           </div>
           <TipBox>建議定期檢視稽核日誌並更新敏感詞清單，以因應新興合規需求。</TipBox>
         </SubSection>
+      </Section>
+
+      <Section id="a-external-security" icon={<Lock size={22} />} iconColor="text-amber-600" title="外網存取與 MFA(二階段驗證)">
+        <Para>
+          當系統需要對公司外網開放(出差、家用、合作夥伴),除了 WAF / Firewall 之外,Cortex 在應用層加上多道防線。
+          內網使用者完全不受影響,所有外網限制 / 驗證都只對「IP 不在 INTERNAL_NETWORKS 範圍」的請求生效。
+        </Para>
+
+        <NoteBox>
+          目前預設配置 <code>EXTERNAL_ACCESS_MODE=webhook_only</code> + <code>MFA_ENABLED=false</code>,
+          表示外網全擋(只放 Webex webhook),內網照常運作。需要對外開放時請參考下方「啟用流程」。
+        </NoteBox>
+
+        <SubSection title="架構總覽">
+          <Para>外網請求進來會經過六道關卡(內網全部跳過):</Para>
+          <Table
+            headers={['關卡', '層級', '功能']}
+            rows={[
+              ['1. Ingress whitelist', 'K8s', '只放行特定 IP 段(目前只放內網)'],
+              ['2. Ingress limit-rps / limit-connections', 'nginx', 'L7 anti-flood 兜底,單 IP 30 rps × 5 burst'],
+              ['3. Express trust proxy', '應用層', '從 nginx 拿真實 client IP,擋 X-Forwarded-For 偽造'],
+              ['4. Access Control middleware', '應用層', 'IP 黑名單 / UA 黑名單 / EXTERNAL_ACCESS_MODE 模式判斷'],
+              ['5. External Rate Limit', '應用層', '跨 pod 共享 quota,單 IP 120 req/min'],
+              ['6. MFA gate (auth route)', '應用層', 'admin 限內網 / 沒 email 拒 / Webex DM OTP 驗證'],
+            ]}
+          />
+        </SubSection>
+
+        <SubSection title="MFA(Webex 二階段驗證)流程">
+          <Para>
+            外網使用者登入時,在帳密驗證通過後,系統會多走一道 Webex DM OTP 驗證:
+          </Para>
+          <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 text-sm text-slate-700 leading-7">
+            <ol className="list-decimal list-inside space-y-1">
+              <li>使用者輸入帳號密碼</li>
+              <li>系統判斷:外網 IP + 不在 user 的「信任 IP 名單」</li>
+              <li>產生 6 位數 OTP,Webex Bot DM 給使用者(三語訊息)</li>
+              <li>前端切換到 OTP 輸入畫面,5 分鐘倒數</li>
+              <li>使用者輸入正確 OTP → 建立 session + 寫入「信任 IP」(7 天 TTL)</li>
+              <li>同 IP 7 天內再登入跳過 OTP,IP 變了重新走完整流程</li>
+            </ol>
+          </div>
+          <TipBox>
+            7 天內同 IP 免重認的設計是 UX 與安全的平衡。如果使用者改密碼或 admin 停用帳號,
+            「信任 IP」會被自動清空,下次登入必須重新通過 MFA。
+          </TipBox>
+        </SubSection>
+
+        <SubSection title="政策硬規定">
+          <Table
+            headers={['規則', '行為']}
+            rows={[
+              ['admin 帳號禁止外網登入', '無條件拒絕,無 MFA 例外。降低 admin 帳號被釣後的爆炸半徑'],
+              ['沒 Email 的帳號禁止外網', '無 Email 無法收 Webex DM,直接拒絕(請從內網 / VPN 登入)'],
+              ['Webex 找不到該 Email 對應 person', '拒絕並提示「請聯絡資訊部檢查 Webex 帳號」(防 LDAP email ≠ Webex email)'],
+              ['改密碼 / reset-password 自動清空所有信任 IP + sessions', '密碼洩漏後第一道補救'],
+              ['MFA OTP 5 次錯誤刷掉 challenge', '不鎖帳號(防止惡意鎖人),要求重新走完整 login'],
+            ]}
+          />
+        </SubSection>
+
+        <SubSection title="認證稽核(Auth Audit Log)">
+          <Para>
+            系統記錄所有認證事件(成功 / 失敗、內外網),永久保留供稽核。
+            管理員可在「**認證稽核**」tab 看完整紀錄。
+          </Para>
+          <Table
+            headers={['事件類型', '說明']}
+            rows={[
+              ['login_success_internal', '內網登入成功'],
+              ['login_success_external_skip_mfa', '外網但 IP 已信任,跳過 MFA'],
+              ['login_success_external_mfa', '外網 + MFA 通過'],
+              ['login_failed_credentials', '帳密錯誤(會計入失敗告警 + 自動黑名單)'],
+              ['login_failed_no_email', '外網 + 無 Email 被拒'],
+              ['login_failed_admin_external', 'admin 從外網嘗試登入(高度可疑,會即時告警)'],
+              ['login_failed_account_disabled', '帳號停用 / 過期'],
+              ['mfa_challenge_created', 'OTP DM 已送出'],
+              ['mfa_dm_failed', 'Webex DM 失敗(系統故障,使用者會看到 incident_id)'],
+              ['mfa_webex_person_not_found', 'Email 找不到 Webex 帳號'],
+              ['mfa_verify_failed', 'OTP 輸入錯誤'],
+              ['mfa_verify_too_many', '5 次失敗刷掉 challenge'],
+              ['mfa_resend', '重發 OTP'],
+              ['mfa_trusted_ip_added', 'MFA 通過後寫入信任 IP'],
+              ['trusted_ip_revoked_password_change', '改密碼 / reset 自動清空信任 IP + sessions'],
+              ['forgot_password_rate_limited', 'forgot-password 限流(防 SMTP 濫用)'],
+            ]}
+          />
+          <Para>
+            可用 IP / 使用者 / 事件類型 / 範圍(僅外網/僅 MFA/僅失敗)過濾,並支援 CSV 匯出。
+            點擊任一筆紀錄展開可看 user-agent / challenge_id / metadata 細節。
+          </Para>
+        </SubSection>
+
+        <SubSection title="自動失敗告警 + 自動黑名單">
+          <Para>
+            同一個 IP 或 user 短時間內失敗達閾值時,系統會主動寄信通知 <code>ADMIN_NOTIFY_EMAIL</code>:
+          </Para>
+          <Table
+            headers={['觸發條件', '預設閾值', '額外動作']}
+            rows={[
+              ['同 user 1 小時失敗', 'AUTH_FAIL_ALERT_PER_USER (5 次)', '寄信告警'],
+              ['同 IP 1 小時失敗', 'AUTH_FAIL_ALERT_PER_IP (10 次)', '寄信告警 + **自動加入 IP 黑名單 24 小時**'],
+              ['同 user / IP 1 小時內', '不重複告警(防 mail bomb)', '同 key 旗標 1 小時'],
+            ]}
+          />
+          <NoteBox>
+            自動加入黑名單的 IP 會在「**IP 黑名單**」tab 顯示,來源 = <code>auto_failure</code>。
+            如果是自己人誤觸(例如反覆打錯密碼),admin 可手動移除。
+          </NoteBox>
+        </SubSection>
+
+        <SubSection title="異常登入通知(新 IP DM)">
+          <Para>
+            使用者從新 IP 完成 MFA 後,系統會主動 Webex DM 提醒(三語):
+          </Para>
+          <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 text-sm text-blue-800 leading-6">
+            🔔 <strong>Cortex 新位置登入提醒</strong><br />
+            您的帳號剛從新 IP 登入:時間 / IP / 裝置(瀏覽器 UA)<br />
+            若非本人操作,請立即:1) 變更密碼 &nbsp; 2) 聯絡資安通報
+          </div>
+          <Para>
+            「新 IP」定義:過去 30 天 <code>auth_audit_logs</code> 沒看過該 user + IP 的成功登入紀錄。
+            非阻塞,DM 失敗只 console.warn 不影響登入流程。
+          </Para>
+        </SubSection>
+
+        <SubSection title="Per-IP Rate Limit(L7 anti-flood)">
+          <Para>兩層,內網跳過。SSE 路徑(chat / research / training streaming)排除,避免長連線被誤殺。</Para>
+          <Table
+            headers={['層', '預設值', '說明']}
+            rows={[
+              ['App 層', 'EXTERNAL_RATE_LIMIT_PER_MIN=120 / IP', 'Redis INCR 跨 pod,主要防線'],
+              ['Ingress 層', 'limit-rps=30 / IP, burst=5x', '兜底防爆 K8s,前提是 nginx-ingress controller 設了 externalTrafficPolicy: Local'],
+            ]}
+          />
+        </SubSection>
+
+        <SubSection title="ENV 設定一覽">
+          <Para>所有設定都有合理 default,不設也能跑。生產環境通常只需要動 MFA_ENABLED 跟 EXTERNAL_ACCESS_MODE。</Para>
+          <div className="bg-slate-900 text-slate-100 rounded-xl p-4 text-xs font-mono leading-6 overflow-x-auto">
+            <pre>{`# 主開關
+EXTERNAL_ACCESS_MODE=webhook_only      # internal_only | webhook_only | full
+MFA_ENABLED=false                      # ⚠️ EXTERNAL_ACCESS_MODE=full 時必須 true
+INTERNAL_NETWORKS=10.0.0.0/8,...       # 內網 CIDR
+
+# Webex MFA
+MFA_TRUSTED_IP_TTL_DAYS=7
+MFA_OTP_TTL_SECONDS=300
+MFA_RESEND_COOLDOWN_SECONDS=60
+MFA_MAX_VERIFY_ATTEMPTS=5
+MFA_DM_TIMEOUT_MS=8000
+MFA_RATE_LIMIT_PER_USER_PER_HOUR=20
+
+# 失敗告警 + forgot rate
+AUTH_FAIL_ALERT_PER_USER=5
+AUTH_FAIL_ALERT_PER_IP=10
+FORGOT_PASSWORD_RATE_LIMIT=3
+
+# Anti-bot
+ANTI_BOT_FAIL_BLOCK_HOURS=24
+ANTI_BOT_UA_BLOCK_DAYS=7
+
+# Per-IP rate limit
+EXTERNAL_RATE_LIMIT_PER_MIN=120
+
+# Session
+SESSION_TTL_SECONDS=28800
+ADMIN_SESSION_TTL_SECONDS=28800        # 從 30 天縮到 8 小時`}</pre>
+          </div>
+        </SubSection>
+
+        <SubSection title="啟用 / 停用 流程">
+          <Para><strong>啟用 MFA(內網仍正常):</strong></Para>
+          <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 text-sm text-slate-700 leading-7">
+            <ol className="list-decimal list-inside space-y-1">
+              <li>.env: <code>MFA_ENABLED=true</code></li>
+              <li><code>./deploy.sh</code></li>
+              <li>server log 應有 <code>[Security] accessMode=webhook_only | mfaEnabled=true</code></li>
+              <li>內網無感(走 isInternal 跳過 MFA),只有外網才會走 OTP</li>
+            </ol>
+          </div>
+
+          <Para className="mt-3"><strong>正式對外開放(請務必同一次部署同時切兩個 env):</strong></Para>
+          <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 text-sm text-slate-700 leading-7">
+            <ol className="list-decimal list-inside space-y-1">
+              <li>WAF / Firewall 規則確認到位</li>
+              <li>確認 nginx-ingress controller 是 <code>externalTrafficPolicy: Local</code>(否則 limit-rps 會誤殺)</li>
+              <li>移除 / 修改 <code>k8s/ingress.yaml</code> 的 <code>whitelist-source-range</code></li>
+              <li>.env: <code>EXTERNAL_ACCESS_MODE=full</code></li>
+              <li><code>./deploy.sh</code> — 啟動會檢查兩個 env 必須一致,否則 process.exit(1)</li>
+              <li>第一週每天看「認證稽核」/「IP 黑名單」確認沒誤殺、沒被掃</li>
+            </ol>
+          </div>
+
+          <Para className="mt-3"><strong>緊急停用(Webex 整體故障時收回外網):</strong></Para>
+          <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm text-amber-800 leading-7">
+            <ol className="list-decimal list-inside space-y-1">
+              <li><code>kubectl edit deployment foxlink-gpt -n foxlink</code></li>
+              <li>改 <code>EXTERNAL_ACCESS_MODE=webhook_only</code>(收回外網,**不可只關 MFA 留外網開放,server.js 會拒啟動**)</li>
+              <li><code>kubectl rollout restart deployment foxlink-gpt -n foxlink</code></li>
+              <li>通知使用者「外網登入暫停服務,請從內網或 VPN」</li>
+              <li>Webex 復原後反向操作切回 full</li>
+            </ol>
+          </div>
+        </SubSection>
+
+        <TipBox>
+          技術細節 / 設計決策請參考 <code>docs/external-access-security.md</code>。
+        </TipBox>
+      </Section>
+
+      <Section id="a-ip-blacklist" icon={<Ban size={22} />} iconColor="text-red-500" title="IP 黑名單管理">
+        <Para>
+          外網 anti-bot 防線。內網 IP <strong>絕對不會</strong>被擋(middleware 的 <code>isInternal</code> 在黑名單檢查之前)。
+          黑名單檢查走 Redis cache,正常 case &lt;1ms,不會影響效能。
+        </Para>
+
+        <SubSection title="黑名單來源">
+          <Table
+            headers={['來源', '觸發條件', '預設有效期', '可在 admin UI 移除']}
+            rows={[
+              ['manual', 'admin 手動新增', '可永久 / 自訂時數', '可'],
+              ['auto_failure', '同 IP 1 小時失敗達 AUTH_FAIL_ALERT_PER_IP(預設 10 次)', 'ANTI_BOT_FAIL_BLOCK_HOURS(預設 24 小時)', '可'],
+              ['auto_ua', 'User-Agent 命中已知滲透工具', 'ANTI_BOT_UA_BLOCK_DAYS(預設 7 天)', '可'],
+            ]}
+          />
+        </SubSection>
+
+        <SubSection title="UA 黑名單規則">
+          <Para>系統會在 middleware 層偵測 User-Agent,命中以下任一模式即自動加入 IP 黑名單 7 天 + 拒絕:</Para>
+          <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-sm text-red-700 font-mono leading-6">
+            sqlmap、nikto、nmap、masscan、zmap、dirbuster、gobuster、wpscan、hydra、metasploit、burp、acunetix、nessus、openvas、w3af、skipfish
+          </div>
+          <NoteBox>
+            <strong>故意不擋</strong> curl / wget / python-requests / Go-http-client — 這些是
+            K8s probe / monitoring / 內部腳本也會用的合法 UA。如果有需要擋具體 IP,請手動加入黑名單。
+          </NoteBox>
+        </SubSection>
+
+        <SubSection title="管理介面操作">
+          <Para>
+            進入「**系統管理 → IP 黑名單**」tab,可看到所有黑名單紀錄。
+          </Para>
+          <Table
+            headers={['動作', '說明']}
+            rows={[
+              ['只顯示生效中', '預設勾選,過期紀錄不顯示;取消勾選可看歷史紀錄'],
+              ['依來源過濾', '手動 / 自動失敗 / 自動 UA 各自篩選'],
+              ['手動新增', '輸入 IP(/32 嚴格匹配)+ 原因 + 有效時數(留空=永久)'],
+              ['移除', '點該列「移除」按鈕,確認後立即生效(Redis cache 自動 invalidate)'],
+            ]}
+          />
+        </SubSection>
+
+        <SubSection title="自己人誤觸的處理">
+          <Para>
+            最常見場景:使用者反覆打錯密碼觸發 <code>auto_failure</code> 規則被自動黑名單。
+          </Para>
+          <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 text-sm text-slate-700 leading-7">
+            <ol className="list-decimal list-inside space-y-1">
+              <li>使用者連線 Cortex 看到 403 「Access denied」</li>
+              <li>使用者通知 admin 自己的 IP(讓他在 ipchicken.com 之類查)</li>
+              <li>admin 進「IP 黑名單」tab 找到該 IP 點「移除」</li>
+              <li>使用者立即可重連</li>
+              <li>如果常常發生,考慮提高 <code>AUTH_FAIL_ALERT_PER_IP</code> 閾值</li>
+            </ol>
+          </div>
+        </SubSection>
+
+        <SubSection title="API endpoint(整合用)">
+          <Table
+            headers={['Method', 'Path', '說明']}
+            rows={[
+              ['GET', '/api/admin/ip-blacklist', '列表(支援 ?activeOnly=1 / ?source=manual)'],
+              ['POST', '/api/admin/ip-blacklist', '手動新增 { ip, reason, ttlHours }'],
+              ['DELETE', '/api/admin/ip-blacklist/:ip', '移除指定 IP'],
+            ]}
+          />
+        </SubSection>
+
+        <TipBox>
+          黑名單是 anti-bot 的第二道防線,主要防線是 WAF + nginx-ingress 的 limit-rps + app 層 rate limit。
+          黑名單適合「累積證據確認對方是惡意」後的硬斷,不適合作為 rate limit 替代品。
+        </TipBox>
       </Section>
 
       <Section id="a-mcp" icon={<Globe size={22} />} iconColor="text-cyan-500" title="MCP 伺服器管理">
