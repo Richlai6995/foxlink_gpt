@@ -105,9 +105,57 @@ const DM_TEMPLATES = {
   ].join('\n'),
 };
 
+const NEW_LOGIN_TEMPLATES = {
+  'zh-TW': ({ ip, ua, when }) => [
+    '🔔 **Cortex 新位置登入提醒**',
+    '',
+    `您的帳號剛從新 IP 登入:`,
+    `- 時間:${when}`,
+    `- IP:\`${ip || 'unknown'}\``,
+    `- 裝置:${ua || 'unknown'}`,
+    '',
+    '若非本人操作,請立即:',
+    '1. 變更密碼',
+    '2. 聯絡資安通報',
+  ].join('\n'),
+
+  'en': ({ ip, ua, when }) => [
+    '🔔 **Cortex New Location Login**',
+    '',
+    'Your account just logged in from a new IP:',
+    `- Time: ${when}`,
+    `- IP: \`${ip || 'unknown'}\``,
+    `- Device: ${ua || 'unknown'}`,
+    '',
+    'If this was not you, immediately:',
+    '1. Change your password',
+    '2. Contact IT security',
+  ].join('\n'),
+
+  'vi': ({ ip, ua, when }) => [
+    '🔔 **Đăng nhập Cortex từ vị trí mới**',
+    '',
+    'Tài khoản của bạn vừa đăng nhập từ IP mới:',
+    `- Thời gian: ${when}`,
+    `- IP: \`${ip || 'unknown'}\``,
+    `- Thiết bị: ${ua || 'unknown'}`,
+    '',
+    'Nếu không phải bạn, vui lòng:',
+    '1. Đổi mật khẩu ngay',
+    '2. Liên hệ bộ phận bảo mật CNTT',
+  ].join('\n'),
+};
+
 function buildDmMarkdown({ otp, ip, lang }) {
   const tpl = DM_TEMPLATES[lang] || DM_TEMPLATES['zh-TW'];
   return tpl({ otp, ip });
+}
+
+function buildNewLoginAlertMarkdown({ ip, ua, lang, when }) {
+  const tpl = NEW_LOGIN_TEMPLATES[lang] || NEW_LOGIN_TEMPLATES['zh-TW'];
+  // UA 太長截斷
+  const uaShort = ua ? ua.slice(0, 100) + (ua.length > 100 ? '...' : '') : '';
+  return tpl({ ip, ua: uaShort, when });
 }
 
 // ── Rate limit per user per hour ───────────────────────────────────────
@@ -262,6 +310,22 @@ async function sendOtpDM({ email, otp, ip, lang }) {
   return msgId;
 }
 
+/**
+ * 異常登入通知:user 從新 IP 成功 MFA 後,DM 提醒使用者。
+ * 失敗只 console.warn,不影響 login 流程(non-critical)。
+ */
+async function sendNewLoginAlertDM({ email, ip, ua, lang }) {
+  if (!email) return;
+  const when = new Date().toLocaleString('zh-TW', { hour12: false });
+  const markdown = buildNewLoginAlertMarkdown({ ip, ua, lang, when });
+  const webex = getWebexService();
+  try {
+    await webex.sendDirectMessage(email, markdown, { timeout: cfg().dmTimeoutMs });
+  } catch (e) {
+    console.warn(`[MFA] new-login-alert DM failed for ${email}: ${e.message}`);
+  }
+}
+
 // ── Trusted IP CRUD ────────────────────────────────────────────────────
 
 /** /32 嚴格匹配 — IP 一變即重 MFA */
@@ -346,6 +410,7 @@ module.exports = {
   verifyChallenge,
   regenerateChallengeOtp,
   sendOtpDM,
+  sendNewLoginAlertDM,
 
   isTrustedIp,
   addTrustedIp,

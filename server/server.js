@@ -25,6 +25,7 @@ require('./services/logger'); // File-based logging + process lifecycle tracking
 
 require('./services/geminiClient').logStartupInfo(); // [GeminiClient] provider=... line
 const express = require('express');
+const helmet = require('helmet');
 const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
@@ -41,6 +42,20 @@ const PORT = process.env.PORT || 3001;
 const TRUST_PROXY = process.env.TRUST_PROXY || '1';
 app.set('trust proxy', /^\d+$/.test(TRUST_PROXY) ? Number(TRUST_PROXY) : TRUST_PROXY);
 console.log(`[Express] trust proxy = ${TRUST_PROXY}`);
+
+// ── Security Headers (helmet) ──
+// 開常用安全 headers:HSTS / X-Content-Type-Options / X-Frame-Options / Referrer-Policy 等。
+// CSP 暫時關閉(預設規則太嚴會破前端 inline style / eval),後續單獨評估上線。
+// crossOriginEmbedderPolicy 關掉 — Vite + module worker / 第三方 iframe 兼容
+app.use(helmet({
+  contentSecurityPolicy: false,
+  crossOriginEmbedderPolicy: false,
+  // HSTS:強制 HTTPS,內網 HTTP 跑時瀏覽器仍能連(僅對 https 請求生效)
+  strictTransportSecurity: {
+    maxAge: 60 * 60 * 24 * 180,  // 180 天
+    includeSubDomains: true,
+  },
+}));
 
 // ── CORS ──
 const allowedOrigins = (process.env.CORS_ALLOWED_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean);

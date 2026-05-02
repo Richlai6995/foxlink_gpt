@@ -46,6 +46,7 @@ const redis = require('../services/redisClient');
 const { buildSessionPayload } = require('../services/sessionBuilder');
 const mfa = require('../services/webexMfaService');
 const { logAuthEventAsync } = require('../services/authAuditLog');
+const throttle = require('../services/authThrottle');
 const { isRequestInternal, getClientIp } = require('../middleware/accessControl');
 
 // ── SSO / OIDC Config ──────────────────────────────────────────────
@@ -502,6 +503,10 @@ router.post('/login', async (req, res) => {
         username, event_type: 'login_failed_credentials',
         ...auditCtx, success: 0, error_msg: 'invalid credentials',
       });
+      throttle.countAuthFailureAsync({
+        username, ip: auditCtx.ip, ua: auditCtx.user_agent,
+        eventType: 'login_failed_credentials',
+      });
       return res.status(401).json({ error: '帳號或密碼錯誤' });
     }
     if (user.role !== 'admin' && user.status !== 'active') {
@@ -562,7 +567,24 @@ const proceedOrChallenge = async ({ req, res, user, source, mode }) => {
       : createSession(res, user);
   }
 
-  // 2. 外網 — 沒 email 拒絕(政策:外網必須有 email 走 Webex MFA)
+  // 2. 外網 — admin role 一律拒絕(政策:admin 只能從內網,降低帳號被釣後的影響面)
+  if (user.role === 'admin') {
+    logAuthEventAsync(db, {
+      user_id: user.id, username: user.username,
+      event_type: 'login_failed_admin_external',
+      ip, user_agent: ua, success: 0, error_msg: 'admin role rejected on external network',
+      metadata: { source },
+    });
+    // admin 帳號被嘗試外網登入 = 高度可疑,計入 alert(已用真 user_id,優先觸發告警)
+    throttle.countAuthFailureAsync({
+      userId: user.id, username: user.username, ip, ua,
+      eventType: 'login_failed_admin_external',
+    });
+    const msg = '管理員帳號不允許從外網登入,請使用公司內網或 VPN';
+    return mode === 'redirect' ? redirectError(msg) : res.status(403).json({ error: msg });
+  }
+
+  // 3. 外網 — 沒 email 拒絕(政策:外網必須有 email 走 Webex MFA)
   if (!user.email) {
     logAuthEventAsync(db, {
       user_id: user.id, username: user.username,
@@ -731,6 +753,7 @@ router.post('/2fa/verify', async (req, res) => {
         ip, user_agent: ua, challenge_id, success: 0,
         error_msg: 'max attempts reached',
       });
+      throttle.countAuthFailureAsync({ ip, ua, eventType: 'mfa_verify_too_many' });
       return res.status(429).json({ error: '錯誤次數過多,請重新登入', expired: true });
     }
     if (result.reason === 'not_found') {
@@ -746,6 +769,7 @@ router.post('/2fa/verify', async (req, res) => {
       error_msg: 'wrong code',
       metadata: { attempts_left: result.attemptsLeft },
     });
+    throttle.countAuthFailureAsync({ ip, ua, eventType: 'mfa_verify_failed' });
     return res.status(401).json({
       error: '驗證碼錯誤',
       attempts_left: result.attemptsLeft,
@@ -761,6 +785,8 @@ router.post('/2fa/verify', async (req, res) => {
     if (user.role !== 'admin' && user.status !== 'active') {
       return res.status(403).json({ error: '帳號失效' });
     }
+    // 新 IP 判斷必須在寫 trusted_ips 之前(寫了之後 audit log 會看到自己 → 永遠 false)
+    const isNewIp = await throttle.isNewLoginIp(db, user.id, ip);
     await mfa.addTrustedIp(db, user.id, ip, ua);
     logAuthEventAsync(db, {
       user_id: user.id, username: user.username,
@@ -771,7 +797,13 @@ router.post('/2fa/verify', async (req, res) => {
       user_id: user.id, username: user.username,
       event_type: 'login_success_external_mfa',
       ip, user_agent: ua, challenge_id, success: 1,
+      metadata: { new_ip: isNewIp },
     });
+    // 新 IP DM 通知使用者(non-blocking)
+    if (isNewIp && user.email) {
+      const lang = user.preferred_language || 'zh-TW';
+      mfa.sendNewLoginAlertDM({ email: user.email, ip, ua, lang }).catch(() => {});
+    }
     return await createSession(res, user);
   } catch (e) {
     console.error('[MFA] verify createSession error:', e);
@@ -838,6 +870,19 @@ router.post('/2fa/resend', async (req, res) => {
 router.post('/forgot-password', async (req, res) => {
   const { username } = req.body;
   if (!username) return res.status(400).json({ error: '請輸入帳號' });
+  // Rate limit 同 IP / 同 username 1 小時最多 N 次,防 SMTP 濫用 + 信箱垃圾
+  const ip = getClientIp(req);
+  const rate = await throttle.checkForgotPasswordRate(ip, username);
+  if (!rate.allowed) {
+    // 不洩漏細節,一律回標準訊息(同 user enumeration 防護),但 log 給 admin 看
+    const db = require('../database-oracle').db;
+    logAuthEventAsync(db, {
+      username, event_type: 'forgot_password_rate_limited',
+      ip, user_agent: (req.headers['user-agent'] || '').slice(0, 512),
+      success: 0, error_msg: rate.reason,
+    });
+    return res.json({ message: '若帳號存在且已設定 Email，重置連結已寄出' });
+  }
   try {
     const db = require('../database-oracle').db;
     const user = await db.prepare(
@@ -908,13 +953,15 @@ router.post('/reset-password', async (req, res) => {
     await db.prepare(`UPDATE password_reset_tokens SET used=1 WHERE id=?`).run(record.id);
 
     // 密碼變更必清 trusted IPs(防舊密碼洩漏 + IP 已被信任的情況)
-    const revoked = await mfa.revokeAllTrustedIps(db, record.user_id);
-    if (revoked > 0) {
+    const revokedIps = await mfa.revokeAllTrustedIps(db, record.user_id);
+    // 並把所有現有 session 踢掉(reset 走的人沒有當前 session,全踢)
+    const revokedSess = await redis.revokeAllUserSessions(record.user_id);
+    if (revokedIps > 0 || revokedSess > 0) {
       logAuthEventAsync(db, {
         user_id: record.user_id,
         event_type: 'trusted_ip_revoked_password_change',
         ip: getClientIp(req), user_agent: (req.headers['user-agent'] || '').slice(0, 512),
-        success: 1, metadata: { phase: 'reset', revoked_count: revoked },
+        success: 1, metadata: { phase: 'reset', revoked_ips: revokedIps, revoked_sessions: revokedSess },
       });
     }
 
@@ -947,13 +994,15 @@ router.post('/change-password', async (req, res) => {
     }
     await db.prepare(`UPDATE users SET password=? WHERE id=?`).run(new_password, user.id);
     // 密碼變更必清 trusted IPs(同 reset-password)
-    const revoked = await mfa.revokeAllTrustedIps(db, user.id);
-    if (revoked > 0) {
+    const revokedIps = await mfa.revokeAllTrustedIps(db, user.id);
+    // 踢掉所有現有 session,但保留當前 session(讓使用者改完密碼後不用重登)
+    const revokedSess = await redis.revokeAllUserSessions(user.id, token);
+    if (revokedIps > 0 || revokedSess > 0) {
       logAuthEventAsync(db, {
         user_id: user.id, username: user.username,
         event_type: 'trusted_ip_revoked_password_change',
         ip: getClientIp(req), user_agent: (req.headers['user-agent'] || '').slice(0, 512),
-        success: 1, metadata: { phase: 'change', revoked_count: revoked },
+        success: 1, metadata: { phase: 'change', revoked_ips: revokedIps, revoked_sessions: revokedSess },
       });
     }
     res.json({ message: '密碼已成功更新' });

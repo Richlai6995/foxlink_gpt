@@ -3,8 +3,10 @@
  * Set REDIS_URL in .env to enable Redis (e.g. redis://redis:6379).
  * If REDIS_URL is not set, falls back to a simple in-memory Map (single-process only).
  */
-const TOKEN_TTL       = parseInt(process.env.SESSION_TTL_SECONDS       || '28800',   10); // 8 hours (一般使用者)
-const ADMIN_TOKEN_TTL = parseInt(process.env.ADMIN_SESSION_TTL_SECONDS || '2592000', 10); // 30 days (管理員)
+const TOKEN_TTL       = parseInt(process.env.SESSION_TTL_SECONDS       || '28800', 10); // 8 hours (一般使用者)
+// admin TTL 跟一般使用者一樣 8 小時 — 過去設 30 天為 ops 方便,但 admin 帳號一旦
+// token 被竊就有最大爆炸半徑,8 小時 + 內網限制是合理上限。env 仍可調(緊急時 ops 拉長)。
+const ADMIN_TOKEN_TTL = parseInt(process.env.ADMIN_SESSION_TTL_SECONDS || '28800', 10); // 8 hours
 
 // ── In-memory fallback ────────────────────────────────────────────────────────
 class MemoryStore {
@@ -189,6 +191,60 @@ module.exports = {
   async delSession(token) {
     await getStore().del(`sess:${token}`);
   },
+  /**
+   * Revoke all sessions belonging to a user (sweep sess:* keys, JSON parse,
+   * compare data.id, DEL match). 用於改密碼 / reset / 帳號停用。
+   * @param {number} userId
+   * @param {string|null} exceptToken — 保留此 token(改密碼當下不踢自己)
+   * @returns {number} 刪掉的 session 數
+   */
+  async revokeAllUserSessions(userId, exceptToken = null) {
+    if (!userId) return 0;
+    const s = getStore();
+    const exceptKey = exceptToken ? `sess:${exceptToken}` : null;
+    let revoked = 0;
+
+    if (s instanceof MemoryStore) {
+      const now = Date.now();
+      for (const [key, entry] of [...s.store]) {
+        if (!key.startsWith('sess:')) continue;
+        if (entry.exp && now > entry.exp) { s.store.delete(key); continue; }
+        try {
+          const data = JSON.parse(entry.val);
+          if (data.id === userId && key !== exceptKey) {
+            s.store.delete(key);
+            revoked++;
+          }
+        } catch {}
+      }
+      return revoked;
+    }
+
+    // Redis: SCAN sess:* → 比對 user_id → DEL
+    if (s.client && typeof s.client.scanStream === 'function') {
+      const keys = [];
+      await new Promise((resolve, reject) => {
+        const stream = s.client.scanStream({ match: 'sess:*', count: 100 });
+        stream.on('data', k => keys.push(...k));
+        stream.on('end', resolve);
+        stream.on('error', reject);
+      });
+      for (const key of keys) {
+        if (key === exceptKey) continue;
+        const raw = await s.client.get(key);
+        if (!raw) continue;
+        try {
+          const data = JSON.parse(raw);
+          if (data.id === userId) {
+            await s.client.del(key);
+            revoked++;
+          }
+        } catch {}
+      }
+    }
+    return revoked;
+  },
+
   /**
    * Get all active sessions (for online user monitoring).
    * Only works with MemoryStore; Redis would need SCAN.
