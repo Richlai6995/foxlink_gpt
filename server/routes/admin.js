@@ -638,6 +638,64 @@ router.get('/auth-audit-logs', async (req, res) => {
   }
 });
 
+// ── IP Blacklist ──────────────────────────────────────────────────
+const ipBlacklist = require('../services/ipBlacklist');
+
+// 簡單 IPv4 / IPv6 格式驗證(不全完整,但夠擋 SQL 注入式輸入)
+function isValidIp(ip) {
+  if (typeof ip !== 'string') return false;
+  if (ip.length > 64) return false;
+  // IPv4
+  if (/^(\d{1,3}\.){3}\d{1,3}$/.test(ip)) {
+    return ip.split('.').every(p => Number(p) >= 0 && Number(p) <= 255);
+  }
+  // IPv6(寬鬆,完整驗證複雜)
+  return /^[0-9a-fA-F:]+$/.test(ip) && ip.includes(':');
+}
+
+router.get('/ip-blacklist', async (req, res) => {
+  try {
+    const { activeOnly, source } = req.query;
+    const rows = await ipBlacklist.list({
+      activeOnly: activeOnly === '1' || activeOnly === 'true',
+      source: source || undefined,
+    });
+    res.json(rows);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.post('/ip-blacklist', async (req, res) => {
+  try {
+    const { ip, reason, ttlHours } = req.body || {};
+    if (!ip || !isValidIp(String(ip).trim())) {
+      return res.status(400).json({ error: '請提供合法的 IP' });
+    }
+    const id = await ipBlacklist.add({
+      ip: String(ip).trim(),
+      reason: reason ? String(reason).slice(0, 500) : null,
+      source: 'manual',
+      createdBy: req.user.id,
+      ttlHours: ttlHours ? Number(ttlHours) : null,
+    });
+    res.json({ ok: true, id });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.delete('/ip-blacklist/:ip', async (req, res) => {
+  try {
+    const ip = req.params.ip;
+    if (!isValidIp(ip)) return res.status(400).json({ error: '不合法的 IP' });
+    const n = await ipBlacklist.remove(ip);
+    res.json({ ok: true, affected: n });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // GET /api/admin/auth-audit-logs/event-types — 抓近 90 天內出現過的 event_type(用於前端 filter dropdown)
 router.get('/auth-audit-logs/event-types', async (_req, res) => {
   try {

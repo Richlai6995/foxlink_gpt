@@ -299,6 +299,7 @@
       "cost": "費用統計及分析",
       "audit": "稽核日誌",
       "authAudit": "認證稽核",
+      "ipBlacklist": "IP 黑名單",
       "keywords": "敏感詞彙",
       "research": "深度研究紀錄",
       "apiKeys": "API 金鑰管理",

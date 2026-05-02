@@ -299,6 +299,7 @@
       "cost": "Cost Analysis",
       "audit": "Audit Logs",
       "authAudit": "Auth Audit",
+      "ipBlacklist": "IP Blacklist",
       "keywords": "Sensitive Keywords",
       "research": "Research Logs",
       "apiKeys": "API Key Management",

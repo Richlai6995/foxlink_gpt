@@ -299,6 +299,7 @@
       "cost": "Phân tích chi phí",
       "audit": "Nhật ký kiểm toán",
       "authAudit": "Kiểm toán xác thực",
+      "ipBlacklist": "Danh sách đen IP",
       "keywords": "Từ khóa nhạy cảm",
       "research": "Nhật ký nghiên cứu",
       "apiKeys": "Quản lý API Key",

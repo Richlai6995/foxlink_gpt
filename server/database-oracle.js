@@ -4160,6 +4160,25 @@ async function runMigrations(db) {
     catch (e) { if (!/ORA-00955|ORA-01408/.test(e.message)) console.warn(`[Migration] ${name}:`, e.message); }
   }
 
+  // ip_blacklist:外網 anti-bot 黑名單(自動寫入 + admin 手動)。
+  // 內網 IP 永遠不被擋(middleware 的 isInternal 在 blacklist 檢查之前)
+  await createTable('IP_BLACKLIST', `CREATE TABLE ip_blacklist (
+    id          NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    ip          VARCHAR2(64) NOT NULL,
+    reason      VARCHAR2(500),
+    source      VARCHAR2(20) DEFAULT 'manual',  -- manual / auto_failure / auto_ua
+    created_by  NUMBER,                          -- admin user_id, NULL = 自動
+    created_at  TIMESTAMP DEFAULT SYSTIMESTAMP,
+    expires_at  TIMESTAMP,                       -- NULL = 永久
+    CONSTRAINT ip_blacklist_uk UNIQUE (ip)
+  )`);
+  for (const [name, ddl] of [
+    ['ip_blacklist_exp_idx', 'CREATE INDEX ip_blacklist_exp_idx ON ip_blacklist(expires_at)'],
+  ]) {
+    try { await db.prepare(ddl).run(); console.log(`[Migration] ${name} created ✓`); }
+    catch (e) { if (!/ORA-00955|ORA-01408/.test(e.message)) console.warn(`[Migration] ${name}:`, e.message); }
+  }
+
   // auth_audit_logs:認證稽核;內外網全部 login / MFA 事件都寫一筆。永久保留
   // 不和現有 audit_logs(LLM 對話審計)混表。
   await createTable('AUTH_AUDIT_LOGS', `CREATE TABLE auth_audit_logs (

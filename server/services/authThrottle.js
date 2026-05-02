@@ -87,6 +87,21 @@ async function countAuthFailure({ userId, username, ip, ua, eventType }) {
         identifier: `IP=${ip}`,
         count: ipCount, window: '1 小時', ip, ua, eventType,
       }).catch(e => console.warn(`[AuthThrottle] alert mail failed: ${e.message}`));
+
+      // 同 IP 失敗達 alert 閾值 → 自動加入黑名單(預設 24hr)
+      // 跟 alert 共用旗標,1 hr 內不重複加;blacklist 本身有 UNIQUE,UPSERT 安全
+      try {
+        const ipBlacklist = require('./ipBlacklist');
+        const ttl = ipBlacklist.cfg().autoFailureBlockHours;
+        ipBlacklist.addAsync({
+          ip,
+          reason: `auto: ${ipCount} failed login attempts in 1h (event=${eventType})`,
+          source: 'auto_failure',
+          ttlHours: ttl,
+        });
+      } catch (e) {
+        console.warn(`[AuthThrottle] auto-blacklist failed: ${e.message}`);
+      }
     }
   }
 }

@@ -95,21 +95,51 @@ function createAccessControl() {
     console.log(`[AccessControl] ⚠️  FULL external access | loginRateLimit=${loginRateMax}/min`);
   }
 
-  return function accessControl(req, res, next) {
+  // Lazy require to avoid circular dependency on startup ordering
+  let _ipBlacklist = null;
+  const getBlacklist = () => _ipBlacklist || (_ipBlacklist = require('../services/ipBlacklist'));
+
+  return async function accessControl(req, res, next) {
     // 1. Always allowed (health probe etc.)
     if (ALWAYS_ALLOWED.has(req.path)) return next();
 
-    // 2. Internal IP → pass everything
+    // 2. Internal IP → pass everything(blacklist 不對內網生效,防誤殺)
     const ip = getClientIp(req);
     if (isInternal(ip, internalNets)) return next();
 
-    // 3. Internal-only paths → block external regardless of mode
+    // 3. 外網 IP — 黑名單檢查(走 Redis cache,正常 case <1ms)
+    try {
+      if (await getBlacklist().isBlacklisted(ip)) {
+        console.warn(`[AccessControl] blocked blacklisted ip | ip=${ip} ${req.method} ${req.path}`);
+        return res.status(403).json({ error: 'Access denied' });
+      }
+    } catch (e) {
+      // Redis / DB 異常時保守放行(避免 service 整個掛掉),只 log
+      console.warn(`[AccessControl] blacklist check failed (allow): ${e.message}`);
+    }
+
+    // 4. UA 黑名單檢查(明確的攻擊工具)— 命中即加入 IP 黑名單(7 天)+ 拒絕
+    const ua = req.headers['user-agent'] || '';
+    const uaHit = getBlacklist().matchUaBlacklist(ua);
+    if (uaHit) {
+      console.warn(`[AccessControl] UA blacklist hit | ip=${ip} ua="${ua.slice(0, 100)}" pattern=${uaHit}`);
+      const ttlHours = (getBlacklist().cfg().autoUaBlockDays) * 24;
+      getBlacklist().addAsync({
+        ip,
+        reason: `auto: UA matched ${uaHit} ("${ua.slice(0, 200)}")`,
+        source: 'auto_ua',
+        ttlHours,
+      });
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    // 5. Internal-only paths → block external regardless of mode
     if (internalOnlyPrefixes.some(prefix => req.path.startsWith(prefix))) {
       console.warn(`[AccessControl] blocked internal-only path from external | ip=${ip} ${req.method} ${req.path}`);
       return res.status(403).json({ error: 'Access denied' });
     }
 
-    // 4. Mode-specific logic
+    // 6. Mode-specific logic
     switch (mode) {
       case 'full':
         // Login brute-force protection
