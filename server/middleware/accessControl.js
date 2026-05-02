@@ -30,11 +30,9 @@ function isInCIDR(ip, cidr) {
 }
 
 function getClientIp(req) {
-  // X-Forwarded-For: client, proxy1, proxy2 — take first
-  const xff = req.headers['x-forwarded-for'];
-  if (xff) return xff.split(',')[0].trim();
-  // X-Real-IP (nginx)
-  if (req.headers['x-real-ip']) return req.headers['x-real-ip'];
+  // 直接取 Express 處理過 trust proxy 的 req.ip。攻擊者偽造的 X-Forwarded-For
+  // 不會被信任,Express 從鏈最右邊取受信 proxy 後一個 hop 當真實 client IP。
+  // 詳見 server.js 的 trust proxy 設定。
   return req.ip || req.connection?.remoteAddress || '';
 }
 

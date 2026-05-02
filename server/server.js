@@ -33,6 +33,15 @@ const { init } = require('./database-oracle');
 const app = express();
 const PORT = process.env.PORT || 3001;
 
+// ── Trust proxy ──
+// 架構:client → nginx-ingress(1 跳)→ pod。trust proxy=1 讓 Express 從 X-Forwarded-For
+// 鏈最右邊取 1 個 hop 當 client IP,攻擊者無法藉由偽造 XFF header 注入假 IP。
+// 修正前 accessControl.getClientIp 直接信 XFF 第 1 個值,可被偽造繞過 isInternal 判斷。
+// env TRUST_PROXY:數字 N 信任最右邊 N 個 hop,字串走 Express 白名單(loopback,linklocal,uniquelocal)
+const TRUST_PROXY = process.env.TRUST_PROXY || '1';
+app.set('trust proxy', /^\d+$/.test(TRUST_PROXY) ? Number(TRUST_PROXY) : TRUST_PROXY);
+console.log(`[Express] trust proxy = ${TRUST_PROXY}`);
+
 // ── CORS ──
 const allowedOrigins = (process.env.CORS_ALLOWED_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean);
 app.use(cors(
